@@ -89,6 +89,10 @@ func (s *Service) InterceptResponseText(raw string) string {
 
 // UserFacingErrorMessage 只投影用户可见错误，不修改上游响应或请求明细中的原始内容。
 func (s *Service) UserFacingErrorMessage(err error) string {
+	var upstream providerHTTPError
+	if errors.As(err, &upstream) {
+		return s.InterceptResponseText(providerUserFacingErrorMessage(err))
+	}
 	return s.InterceptResponseText(taskFailureMessage(err))
 }
 

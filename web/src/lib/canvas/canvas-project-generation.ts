@@ -96,6 +96,17 @@ export { logicalModelIDForConfig };
 
 const generationOperationLocks = new Map<string, Promise<unknown>>();
 
+function hydrateCompletedTextTask(task: GenerationTask, text: string): GenerationTask {
+    let existingResult: Record<string, unknown> = {};
+    try {
+        const parsed = JSON.parse(task.resultJson || "{}");
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) existingResult = parsed;
+    } catch {
+        // The parsed generation result below is the canonical fallback for a stale or malformed task snapshot.
+    }
+    return { ...task, resultJson: JSON.stringify({ ...existingResult, mode: "text", text }) };
+}
+
 export function runGenerationOperationOnce<T>(clientOperationId: string | undefined, operation: () => Promise<T>): Promise<T> {
     if (!clientOperationId) return operation();
     const existing = generationOperationLocks.get(clientOperationId) as Promise<T> | undefined;
@@ -126,7 +137,10 @@ export async function runCanvasGenerationTaskToConsumer(
             },
         });
         if (!completedTask) throw new Error("生成任务缺少成功终态");
-        await dependencies.consumeTask(completedTask);
+        const taskForConsumer = input.mode === "text" && completedTask.type === "canvas_text" && result.text
+            ? hydrateCompletedTextTask(completedTask, result.text)
+            : completedTask;
+        await dependencies.consumeTask(taskForConsumer);
         return result;
     });
 }
@@ -181,6 +195,7 @@ export function resetGenerationTaskMetadata(metadata: CanvasNodeMetadata | undef
         generationErrorCode: undefined,
         resourceReloadAvailable: undefined,
         failedPromptFingerprint: undefined,
+        failedInputFingerprint: undefined,
     };
     delete next.taskId;
     delete next.taskClientOperationId;

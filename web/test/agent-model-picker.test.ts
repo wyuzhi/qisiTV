@@ -22,8 +22,11 @@ test("Agent 对话和设置复用创作页模型选择器，并且只展示文�
 
     const twoPane = pickerCss.match(/\.creation-model-picker-menu\.is-model-list \.canvas-model-picker-two-pane \{[^}]+\}/)?.[0] || "";
     expect(twoPane).toContain("min-height: 0");
-    expect(twoPane).toContain("align-items: start");
+    expect(twoPane).toContain("align-items: stretch");
     expect(twoPane).not.toContain("min-height: 300px");
+
+    const brandRail = pickerCss.match(/\.creation-model-picker-menu\.is-model-list \.canvas-model-picker-brand-rail \{[^}]+\}/)?.[0] || "";
+    expect(brandRail).toContain("overflow-y: auto");
 });
 
 test("模型选择器无障碍名称跟随当前显示的模型，而不是占位文案", async () => {

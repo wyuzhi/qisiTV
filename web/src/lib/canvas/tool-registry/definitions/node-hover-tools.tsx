@@ -1,6 +1,6 @@
 import { AudioLines, Captions, Clapperboard, Download, FolderPlus, Images, Image as ImageIcon, Info, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Music2, Plus, RefreshCw, Scissors, Settings2, Trash2, Unlock, Upload, UserRound, Video, WandSparkles } from "lucide-react";
 
-import { CONTENT_MODERATION_ERROR_CODE, isContentModerationError } from "@/lib/generation-error";
+import { explainGenerationError } from "@/lib/generation-error";
 import { registerToolbarTools, type ToolContext, type ToolDefinition } from "@/lib/canvas/tool-registry";
 import { CanvasNodeType } from "@/types/canvas";
 import { canOpenCanvasNodePromptPanel } from "@/lib/canvas/canvas-node-semantics";
@@ -24,9 +24,10 @@ function simpleMode(ctx: ToolContext) { return ctx.workspaceMode === "simple"; }
 function isImageBatchRoot(ctx: ToolContext) { return isImage(ctx) && Boolean(ctx.nodeMetadata?.isBatchRoot && ctx.nodeMetadata.batchChildIds?.length); }
 function canRetry(ctx: ToolContext) {
     if (ctx.nodeMetadata?.fileUpload) return false;
-    const requiresPromptChange = ctx.nodeMetadata?.generationErrorCode === CONTENT_MODERATION_ERROR_CODE || isContentModerationError(ctx.nodeMetadata?.errorDetails);
+    const explanation = explainGenerationError(ctx.nodeMetadata?.errorDetails || ctx.nodeMetadata?.generationErrorCode, { stage: ctx.nodeMetadata?.taskStage });
+    const blocked = explanation.uncertain || explanation.category === "download_failed";
     const batchHasFailures = isImageBatchRoot(ctx) && (ctx.nodeMetadata?.batchFailedCount || (ctx.nodeMetadata?.status === "error" ? 1 : 0)) > 0;
-    return (ctx.nodeMetadata?.status === "error" || (batchHasFailures && ctx.nodeMetadata?.status !== "loading")) && !requiresPromptChange;
+    return (ctx.nodeMetadata?.status === "error" || (batchHasFailures && ctx.nodeMetadata?.status !== "loading")) && !blocked;
 }
 
 export const nodeHoverToolbarTools: ToolDefinition[] = [

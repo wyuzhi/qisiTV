@@ -9,11 +9,12 @@ import { canvasImageReferenceLimitError, buildImageGenerationMetadata, getGenera
 import { imageGenerationReferenceConnections } from "@/lib/canvas/canvas-resource-references";
 import { canvasGenerationPromptMetadata } from "@/lib/canvas/canvas-generation-submission";
 import { mediaResultMetadata } from "@/lib/canvas/canvas-node-semantics";
-import { CONTENT_MODERATION_ERROR_CODE, generationFailureMetadata, type GenerationFailureMetadata } from "@/lib/generation-error";
+import { CONTENT_MODERATION_ERROR_CODE, type GenerationFailureMetadata } from "@/lib/generation-error";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 
 import type { CanvasGenerationExecution } from "./canvas-generation-executor-types";
+import { canvasGenerationFailureMetadata } from "./canvas-generation-failure";
 
 const NODE_STATUS_LOADING = "loading" as const;
 const NODE_STATUS_SUCCESS = "success" as const;
@@ -113,6 +114,7 @@ export async function executeImageGeneration({
             generationErrorCode: undefined,
             resourceReloadAvailable: undefined,
             failedPromptFingerprint: undefined,
+            failedInputFingerprint: undefined,
             generatedFromNodeId: nodeId,
         }),
     };
@@ -134,6 +136,7 @@ export async function executeImageGeneration({
             generationErrorCode: undefined,
             resourceReloadAvailable: undefined,
             failedPromptFingerprint: undefined,
+            failedInputFingerprint: undefined,
             generatedFromNodeId: nodeId,
         }),
     }));
@@ -252,7 +255,7 @@ export async function executeImageGeneration({
                 return true;
             } catch (error) {
                 if (isGenerationCanceled(error)) return false;
-                const failure = generationFailureMetadata(error, prompt);
+                const failure = canvasGenerationFailureMetadata(error, { prompt: effectivePrompt, referenceImages });
                 if (!representativeFailure || failure.generationErrorCode === CONTENT_MODERATION_ERROR_CODE) representativeFailure = failure;
                 hasFailure = true;
                 failureCount += 1;
@@ -288,7 +291,7 @@ export async function executeImageGeneration({
                     metadata: {
                         ...node.metadata,
                         status: hasSuccess ? NODE_STATUS_SUCCESS : generationFailureNodeStatus(isExistingImageNode),
-                        ...(hasSuccess ? { errorDetails: undefined, generationErrorCode: undefined, failedPromptFingerprint: undefined } : representativeFailure || { errorDetails: "全部图片生成失败" }),
+                        ...(hasSuccess ? { errorDetails: undefined, generationErrorCode: undefined, failedPromptFingerprint: undefined, failedInputFingerprint: undefined } : representativeFailure || { errorDetails: "全部图片生成失败" }),
                     },
                 };
             }
@@ -299,7 +302,7 @@ export async function executeImageGeneration({
                         ...node.metadata,
                         status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR,
                         batchFailedCount: count > 1 ? failureCount : undefined,
-                        ...(hasSuccess ? { errorDetails: undefined, generationErrorCode: undefined, failedPromptFingerprint: undefined } : representativeFailure || { errorDetails: "全部图片生成失败" }),
+                        ...(hasSuccess ? { errorDetails: undefined, generationErrorCode: undefined, failedPromptFingerprint: undefined, failedInputFingerprint: undefined } : representativeFailure || { errorDetails: "全部图片生成失败" }),
                     },
                 };
             }

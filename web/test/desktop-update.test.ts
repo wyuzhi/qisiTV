@@ -429,7 +429,7 @@ describe("desktop update controller", () => {
         third.stop();
     });
 
-    test("startup check failures stay quiet and keep the installed version", async () => {
+    test("startup check failures keep the installed version and expose a working retry", async () => {
         const mock = mockBinding(state({ status: "idle", currentVersion: "v1.5.1" }));
         mock.binding.CheckForUpdate = async () => {
             mock.calls.check += 1;
@@ -444,10 +444,40 @@ describe("desktop update controller", () => {
         });
         const view = collect(controller);
         await controller.start();
-        expect(view.latest().state.status).toBe("idle");
-        expect(view.latest().state.error).toBe("");
+        expect(view.latest().state.status).toBe("error");
+        expect(userFacingDesktopUpdateError(view.latest().state.error)).toBe("更新没有完成，请再试一次。");
         expect(view.latest().state.currentVersion).toBe("v1.5.1");
-        expect(shouldShowDesktopUpdaterControls(view.latest()!)).toBe(false);
+        expect(shouldShowDesktopUpdaterControls(view.latest()!)).toBe(true);
+        mock.binding.CheckForUpdate = async () => {
+            mock.calls.check += 1;
+            return state({ status: "available", latestVersion: "v1.5.5" });
+        };
+        await controller.retry();
+        expect(mock.calls.check).toBe(2);
+        expect(view.latest().state.status).toBe("available");
         view.stop();
+    });
+
+    test("an up-to-date desktop can manually check again after a new release", async () => {
+        const mock = mockBinding(state({ status: "idle", currentVersion: "v1.5.4", latestVersion: "v1.5.4" }));
+        const controller = createDesktopUpdateController({ getBinding: () => mock.binding, isDesktopRuntime: () => true, scheduler: { interval: () => () => {} } });
+        await controller.start();
+        expect(shouldShowDesktopUpdaterControls(controller.getSnapshot())).toBe(true);
+        expect(desktopUpdateActionLabel("idle")).toBe("检查更新");
+        const successfulCheck = mock.binding.CheckForUpdate!;
+        mock.binding.CheckForUpdate = async () => {
+            mock.calls.check += 1;
+            throw new Error("无法检查更新");
+        };
+        await controller.retry();
+        expect(controller.getSnapshot().state.status).toBe("error");
+        expect(controller.getSnapshot().state.latestVersion).toBe("v1.5.4");
+        mock.binding.CheckForUpdate = successfulCheck;
+        mock.setState(state({ status: "available", latestVersion: "v1.5.5" }));
+        await controller.retry();
+        expect(mock.calls.check).toBe(3);
+        expect(mock.calls.download).toBe(0);
+        expect(controller.getSnapshot().state.status).toBe("available");
+        controller.dispose();
     });
 });

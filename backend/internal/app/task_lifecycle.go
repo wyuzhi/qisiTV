@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/repository"
 )
@@ -53,6 +54,16 @@ func (w *taskLifecycleCoordinator) retryTask(userID string, id string) (*model.T
 	}
 	if isContentModerationFailure(task.Error) {
 		return nil, BadAuthRequest(contentModerationRetryMessage)
+	}
+	if persistedFailureBlocksRetry(task.Error, task.Stage) {
+		failure := classifyTaskFailure(errors.New(task.Error))
+		if task.Stage == "submission_unknown" || failure.Category == generation.CategorySubmissionUncertain {
+			return nil, BadAuthRequest(submissionUncertainRetryMessage)
+		}
+		if failure.Category == generation.CategoryDownloadFailed {
+			return nil, BadAuthRequest(downloadFailureRetryMessage)
+		}
+		return nil, BadAuthRequest(failure.UserMessage())
 	}
 	decryptedInput, err := s.decryptTaskInputJSON(task.InputJSON)
 	if err != nil {

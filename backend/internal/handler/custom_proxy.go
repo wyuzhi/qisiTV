@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -207,11 +206,7 @@ func writeCustomRelayError(c *gin.Context, svc *app.Service, resp *http.Response
 		c.Data(resp.StatusCode, "application/json; charset=utf-8", body)
 		return
 	}
-	snippet := strings.TrimSpace(string(body))
-	if len(snippet) > 200 {
-		snippet = snippet[:200] + "..."
-	}
-	fail(c, resp.StatusCode, errors.New(userFacingRelayError(svc, fmt.Errorf("自定义渠道上游请求失败（%s）%s", resp.Status, snippet))))
+	fail(c, resp.StatusCode, errors.New(svc.UserFacingProviderHTTPError(resp.StatusCode, resp.Status, string(body))))
 }
 
 func userFacingRelayError(svc *app.Service, err error) string {

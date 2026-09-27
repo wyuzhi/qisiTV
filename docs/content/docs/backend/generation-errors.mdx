@@ -1,0 +1,67 @@
+---
+title: 生成失败归类
+description: 画布、任务中心和批量生成如何把上游失败变成可行动说明
+---
+
+# 生成失败归类
+
+生成失败要告诉使用者发生了什么、下一步做什么。不能把 HTTP 状态或原始 JSON 直接铺到画布上。
+
+错误处理参考 [OpenAI Python SDK](https://github.com/openai/openai-python/blob/main/src/openai/_exceptions.py) 对状态、错误码和请求编号的保留方式、[LiteLLM](https://docs.litellm.ai/docs/exception_mapping) 的供应商错误归类、[Vercel AI SDK](https://github.com/vercel/ai/blob/main/packages/provider/src/errors/api-call-error.ts) 对可重试性的独立表达，以及 Bufflow 对未确认提交和产物交付失败的区分。[TanStack Query](https://tanstack.com/query/latest/docs/framework/react/guides/mutations) 的查询与写入重试边界也适用：重新提交生成可能再次计费，不能照搬查询重试。
+
+## 责任边界
+
+| 位置 | 职责 |
+| --- | --- |
+| `backend/internal/generation` | 唯一后端归类器。`HTTPError.Error()` 和任务持久化走这里，正文先归类再变成用户文案。 |
+| `web/src/lib/generation-error.ts` | 前端唯一归类器。覆盖同步渠道错误、轮询、下载，以及已经落库的任务文案。 |
+| 画布 / 任务中心 / 批量生成 | 只展示归类后的原因、下一步，以及可复制的排查信息。 |
+
+两端类目表必须保持同名。`fixtures/generation-error-codes.json` 列出当前 BeefAPI 的 42 个错误码及预期分类，Go 和前端测试共同验证。新增错误码应同步更新这个覆盖合同；无法确认原因的内部错误明确归入 `unknown`。
+
+## 类目矩阵
+
+结构化 `code` / `type` / `status` 优先于 HTTP 状态。正文里的数字或请求 ID 不会被当成 HTTP 状态。451 单独出现不代表安全审核。402 单独出现只表示计费或额度请求被拒绝，不表示本站用户余额，也不承诺退款。
+
+| 类目 | 典型信号 | 使用者下一步 | 自动重试 |
+| --- | --- | --- | --- |
+| `auth` | 401、invalid_api_key | 检查 API Key | 否 |
+| `permission` | 403、permission_denied | 检查渠道权限或换模型 | 否 |
+| `quota_user` | insufficient_user_quota | 检查账号余额或联系管理员调整额度 | 否 |
+| `quota_unknown` | 402、insufficient_quota、余额/额度措辞 | 到渠道或供应商核对账单与额度 | 否 |
+| `quota_upstream` | arrearage、billing_hard_limit | 到供应商核对 | 否 |
+| `moderation_input` | content_policy、sensitive_words_detected、提示词被拒 | 修改提示词或参考图 | 原任务否；改输入后可新建 |
+| `moderation_reference` | 参考图/输入图安全、真人形象错误码 | 更换参考图或改提示词 | 原任务否；改参考图后可新建 |
+| `moderation_output` | 输出审核 | 调整输入后新建 | 原任务否 |
+| `invalid_params` | 400/422、invalid_request、尺寸/格式 | 检查模型与参数 | 否 |
+| `context_too_long` | context_length、长度超出 | 缩短输入 | 否 |
+| `input_inaccessible` | url error、素材无法读取 | 检查素材 | 否 |
+| `input_too_large` | 413、too large | 压缩或更换素材 | 否 |
+| `model_missing` | 404、model_not_found | 检查模型名和渠道 | 否 |
+| `throttled` | 429 且非额度码 | 稍后重试 | 可稍后 |
+| `concurrency` | 渠道并发槽位 | 等待已有任务 | 可稍后 |
+| `provider_unavailable` | 5xx、HTML 网关页 | 稍后重试 | 可稍后 |
+| `network` | 连接失败 | 检查网络并核对原任务 | 否 |
+| `timeout` | 408/504/524 | 先查原任务 | 否 |
+| `submission_uncertain` | `submission_unknown` | 查询原任务，不要重交 | 否 |
+| `async_failed` | 上游任务失败 | 查看详情后决定 | 否 |
+| `cancelled` | 用户取消 | 可按原输入再提交 | 可由用户重试 |
+| `partial_success` | 部分成功 | 查看已有结果 | 否 |
+| `download_failed` | 结果下载失败 | 重新加载，不要立刻重交 | 否 |
+| `results_missing` | 没有可用结果 | 查看详情 | 否 |
+| `malformed_response` | 非 JSON、HTML | 查看详情、核对原任务 | 否 |
+| `unknown` | 无法归类 | 查看详情后再决定 | 否 |
+
+仓库里已经出现过的码会映射到上表；未收录的码落到 `unknown`，不会把原文 JSON/HTML/密钥/签名 URL/提示词回显给使用者。
+
+## 排查信息
+
+复制排查信息只包含：原因、下一步、类目、经过脱敏的上游代码、任务 ID、请求 ID、模型、时间。这些字段必须真实存在，不能编造。复制边界再次检查上下文字段；剪贴板失败时显示“复制失败”。
+
+## 限制
+
+- 没有数据库新字段。类目在任务摘要的 `errorCode` 和用户文案里投影；旧任务只有泛化 HTTP 文案时，前端会按残留文本再归一次。
+- 自定义渠道若把 JSON 错误原样转给浏览器，由前端归类；非 JSON 由后端归类后再返回。
+- 响应拦截规则仍会改写最终用户文案。
+- 没有改路由、计费、调度重试间隔或表结构。
+- 无法从上游正文可靠区分“用户余额”和“供应商账单”时，一律使用 `quota_unknown`。

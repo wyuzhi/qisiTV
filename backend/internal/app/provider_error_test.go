@@ -1,6 +1,39 @@
 package app
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+func TestNumericProviderErrorRetainsSemanticStatus(t *testing.T) {
+	var response imageResponse
+	if err := json.Unmarshal([]byte(`{"error":{"code":400,"type":"invalid_request_error","message":"invalid size"}}`), &response); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(response.Error)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message := providerPayloadErrorMessage(string(encoded)); !strings.Contains(message, "参数") {
+		t.Fatalf("numeric code erased provider cause: %s", message)
+	}
+}
+
+func TestBusinessErrorEnvelopesDoNotBecomeSuccessfulMedia(t *testing.T) {
+	for _, payload := range []map[string]any{
+		{"error": "content safety policy blocked the request"},
+		{"success": false, "message": "generation failed"},
+		{"error": map[string]any{"code": "prompt_blocked"}},
+	} {
+		if _, _, failed := providerPayloadBusinessFailure(payload); !failed {
+			t.Fatalf("business error treated as success: %#v", payload)
+		}
+	}
+	if _, _, failed := providerPayloadBusinessFailure(map[string]any{"code": 200, "data": map[string]any{"task_id": "task-123"}}); failed {
+		t.Fatal("successful 200 envelope rejected")
+	}
+}
 
 func TestProviderFailureDetailsReadsTopLevelModerationError(t *testing.T) {
 	code, message := providerFailureDetails(map[string]any{

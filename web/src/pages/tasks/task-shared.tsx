@@ -1,4 +1,4 @@
-import { CONTENT_MODERATION_ERROR_CODE, generationErrorMessage, isContentModerationError } from "@/lib/generation-error";
+import { explainGenerationError, shouldBlockAutomaticRetry } from "@/lib/generation-error";
 import type { GenerationTask, TaskStatus } from "@/services/api/task-center";
 import { modelDisplayName, type AiConfig } from "@/stores/use-config-store";
 
@@ -16,9 +16,14 @@ export function isTaskFailed(task: GenerationTask) {
 
 export function taskAttentionReason(task: GenerationTask) {
     if (task.status === "cancelled") return providerCancelStatusLabel(task);
-    if (task.errorCode === CONTENT_MODERATION_ERROR_CODE || isContentModerationError(task.error)) return "内容审核未通过，请修改输入后新建任务";
-    if (task.error) return generationErrorMessage(task.error);
+    const explanation = explainGenerationError({ code: task.errorCode, message: task.error }, { taskId: task.id, providerRequestId: task.providerRequestId, model: task.model, createdAt: task.createdAt, stage: task.stage });
+    if (explanation.moderation) return explanation.message;
+    if (task.error || task.errorCode) return explanation.message;
     return task.stage || "生成失败，打开详情查看原因";
+}
+
+export function taskRetryBlocked(task: GenerationTask) {
+    return shouldBlockAutomaticRetry({ code: task.errorCode, message: task.error }, task.stage);
 }
 
 export function providerCancelStatusLabel(task: GenerationTask) {

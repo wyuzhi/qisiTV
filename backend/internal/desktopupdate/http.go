@@ -15,6 +15,7 @@ import (
 
 func newHTTPClient() *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = desktopProxy
 	transport.TLSHandshakeTimeout = 15 * time.Second
 	transport.ResponseHeaderTimeout = 30 * time.Second
 	return &http.Client{

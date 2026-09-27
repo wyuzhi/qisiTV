@@ -143,6 +143,8 @@ export function desktopUpdateActionLabel(status: DesktopUpdateStatus): string {
             return "再试一次";
         case "checking":
             return "正在检查";
+        case "idle":
+            return "检查更新";
         default:
             return "";
     }
@@ -158,7 +160,7 @@ export function userFacingDesktopUpdateError(error: string): string {
 
 export function shouldShowDesktopUpdaterControls(snapshot: DesktopUpdateSnapshot): boolean {
     if (snapshot.runtime !== "desktop") return false;
-    return snapshot.state.status === "available" || snapshot.state.status === "downloading" || snapshot.state.status === "ready" || snapshot.state.status === "installing" || snapshot.state.status === "error";
+    return snapshot.state.status !== "disabled";
 }
 
 function bindingErrorMessage(error: unknown): string {
@@ -292,14 +294,14 @@ export function createDesktopUpdateController(options: DesktopUpdateControllerOp
             try {
                 const next = parseDesktopUpdateState(await binding.CheckForUpdate(), quietInitial.currentVersion || fallbackVersion);
                 if (disposed) return;
-                apply(next.status === "error" ? { ...next, status: "idle", error: "" } : next);
-            } catch {
+                apply(next);
+            } catch (error) {
                 if (disposed) return;
-                apply({ ...quietInitial, status: "idle", error: "" });
+                apply({ ...quietInitial, status: "error", error: bindingErrorMessage(error) || "无法检查更新，请检查网络后重试。" });
             }
         } catch {
             if (disposed) return;
-            apply({ ...emptyDesktopUpdateState(fallbackVersion), status: "idle" });
+            apply({ ...emptyDesktopUpdateState(fallbackVersion), status: "error", error: "无法检查更新，请重试。" });
         } finally {
             lastAction = lastAction === "check" ? "none" : lastAction;
         }
@@ -378,7 +380,7 @@ export function createDesktopUpdateController(options: DesktopUpdateControllerOp
             await install();
             return;
         }
-        if (lastAction === "download" || state.latestVersion) {
+        if (lastAction === "download") {
             await download();
             return;
         }

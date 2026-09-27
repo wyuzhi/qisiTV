@@ -2,13 +2,16 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
 
 const contentModerationErrorCode = "sensitive_words_detected"
 
-const contentModerationRetryMessage = "内容审核未通过，请修改提示词后重新生成；原任务不能直接重试"
+const contentModerationRetryMessage = "内容未通过安全审核，请修改提示词或参考图后重新生成；原任务不能直接重试"
+const submissionUncertainRetryMessage = "提交结果尚未确认，请先查询原任务，不要立即重新提交"
+const downloadFailureRetryMessage = "生成结果下载失败，请先重新加载或查询原任务，不要立即重新提交"
 
 // 只提取供应商明确返回的错误码和短消息，避免把完整响应或用户输入复制到调用日志。
 func providerFailureDetails(payload map[string]any) (string, string) {
@@ -48,11 +51,18 @@ func providerResponseBusinessFailure(responseBody []byte) (string, string, bool)
 }
 
 func providerPayloadBusinessFailure(payload map[string]any) (string, string, bool) {
+	if message, ok := payload["error"].(string); ok && strings.TrimSpace(message) != "" {
+		return normalizedProviderErrorCode(payload["code"]), message, true
+	}
 	if errorValue, ok := payload["error"].(map[string]any); ok {
 		code, message := providerFailureDetails(map[string]any{"error": errorValue})
 		if code != "" || message != "" {
 			return code, message, true
 		}
+	}
+	if success, ok := payload["success"].(bool); ok && !success {
+		code, message := providerFailureDetails(payload)
+		return code, message, true
 	}
 	if !providerBusinessCodeFailed(payload["code"]) {
 		return "", "", false
@@ -64,7 +74,7 @@ func providerPayloadBusinessFailure(payload map[string]any) (string, string, boo
 func providerBusinessCodeFailed(value any) bool {
 	code := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
 	switch code {
-	case "", "0", "success", "succeeded", "ok", "<nil>":
+	case "", "0", "200", "success", "succeeded", "ok", "<nil>":
 		return false
 	default:
 		return true
@@ -99,5 +109,8 @@ func normalizedProviderErrorCode(value any) string {
 }
 
 func isContentModerationFailure(value string) bool {
-	return strings.Contains(strings.ToLower(value), contentModerationErrorCode)
+	if strings.Contains(strings.ToLower(value), contentModerationErrorCode) {
+		return true
+	}
+	return classifyTaskFailure(errors.New(value)).IsModeration()
 }

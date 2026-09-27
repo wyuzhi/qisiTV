@@ -3,10 +3,9 @@ import { Check, ChevronDown, ChevronLeft } from "lucide-react";
 import { Popover } from "antd";
 
 import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
-import { modelCapabilityConfigFor, videoDurationOptions } from "@/lib/model-capabilities";
 import { compatibleModelInGroup, configuredModelDisplayName, groupModelsByDisplayName, modelCompatibilityError, resolveCompatibleModel, type ModelRequirements } from "@/lib/model-selection";
 import { cn } from "@/lib/utils";
-import { modelDisplayName, modelIcon, modelOptionName, PUBLIC_MODEL_CATALOG_ID, resolveModelChannel, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { modelDisplayName, modelIcon, PUBLIC_MODEL_CATALOG_ID, resolveModelChannel, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { ModelLogo } from "@/components/model-logo";
 
@@ -173,7 +172,6 @@ export function ModelPicker({
                             const groupCurrent = group.models.find((item) => item.models.includes(current));
                             const firstModel = groupCurrent?.models[0] || group.models[0]?.models[0] || "";
                             return <button key={group.key} type="button" className="canvas-model-picker-brand" onClick={() => { setActiveGroupKey(group.key); setPreviewedModel(firstModel); }}>
-                                <span className="canvas-model-picker-brand-icon"><ModelIcon config={config} model={firstModel} /></span>
                                 <span className="canvas-model-picker-brand-copy"><strong>{group.label}</strong><small>{group.models.length} 个模型{group.scope ? ` · ${group.scope}` : ""}</small></span>
                                 <ChevronDown className="canvas-model-picker-brand-arrow" aria-hidden="true" />
                             </button>;
@@ -185,7 +183,6 @@ export function ModelPicker({
                             const groupCurrent = group.models.find((item) => item.models.includes(current));
                             const firstModel = groupCurrent?.models[0] || group.models[0]?.models[0] || "";
                             return <button key={group.key} type="button" className={cn("canvas-model-picker-brand", activeGroupKey === group.key && "is-active")} aria-pressed={activeGroupKey === group.key} onClick={() => { setActiveGroupKey(group.key); setPreviewedModel(firstModel); }}>
-                                <span className="canvas-model-picker-brand-icon"><ModelIcon config={config} model={firstModel} /></span>
                                 <span className="canvas-model-picker-brand-copy"><strong>{group.label}</strong><small>{group.models.length} 个模型{group.scope ? ` · ${group.scope}` : ""}</small></span>
                                 <ChevronDown className="canvas-model-picker-brand-arrow" aria-hidden="true" />
                             </button>;
@@ -196,7 +193,7 @@ export function ModelPicker({
                             <button type="button" className="canvas-model-picker-back" onClick={() => setActiveGroupKey(null)} aria-label="返回品牌列表"><ChevronLeft /></button>
                             <span><strong>{group.label}</strong>{group.scope ? <small>{group.scope}</small> : null}</span>
                         </div>
-                        <div className="grid min-w-0 gap-1">
+                        <div className="canvas-model-picker-options grid min-w-0 gap-1">
                             {group.models.map((modelGroup) => {
                                 const selected = modelGroup.models.includes(current);
                                 const model = compatibleModelInGroup(config, modelGroup.models, selectionRequirements, selected ? current : undefined);
@@ -225,12 +222,7 @@ export function ModelPicker({
                                         <ModelLabel
                                             config={config}
                                             model={displayModel}
-                                            capability={capability}
-                                            theme={theme}
-                                            creationVariant
                                             showConfiguredModelName={showConfiguredModelName}
-                                            disabledReason={disabledReason}
-                                            showDescription={selected || previewedModel === displayModel}
                                         />
                                         {selected ? <Check className="canvas-model-picker-option-check ml-1 shrink-0" style={{ color: theme.node.activeStroke }} /> : null}
                                     </button>
@@ -273,9 +265,6 @@ export function ModelPicker({
                     onKeyDown={handleTriggerKeyDown}
                 >
                     <span className="canvas-model-picker-label flex min-w-0 items-center gap-1.5">
-                        <span className="canvas-model-picker-trigger-icon" style={{ background: theme.toolbar.itemHover }}>
-                            <ModelIcon config={config} model={current} />
-                        </span>
                         <span className="min-w-0 flex-1 truncate">{triggerLabel}</span>
                     </span>
                     <ChevronDown className={cn("canvas-model-picker-chevron", open && "is-open")} aria-hidden="true" />
@@ -294,109 +283,19 @@ function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
 function ModelLabel({
     config,
     model,
-    capability,
-    theme,
-    creationVariant,
     showConfiguredModelName,
-    disabledReason,
-    showDescription,
 }: {
     config: AiConfig;
     model: string;
-    capability?: ModelCapability;
-    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
-    creationVariant: boolean;
     showConfiguredModelName: boolean;
-    disabledReason?: string;
-    showDescription: boolean;
 }) {
-    const meta = modelMenuMeta(model, capability);
-    const channel = resolveModelChannel(config, model);
-    const logicalCost = channel.modelProfiles?.find((item) => item.model === modelOptionName(model));
-    const logicalSpec = logicalCost?.logicalCapabilitySpec;
-    const videoProfile = capability === "video" ? modelCapabilityConfigFor(config, model).video : undefined;
-    const capabilitySummary =
-        disabledReason ||
-        logicalCost?.description?.trim() ||
-        (logicalSpec ? logicalCapabilitySummary(logicalSpec) : videoProfile ? `${formatDurationSummary(videoProfile)} · ${videoProfile.resolutions.map((item) => item.toUpperCase()).join("/")}` : meta.description);
     return (
-        <span className="flex w-full min-w-0 items-center gap-1.5 overflow-hidden py-0">
-            <span className="grid size-6 shrink-0 place-items-center rounded-md" style={{ background: theme.toolbar.itemHover }}>
-                <ModelIcon config={config} model={model} />
+        <span className="canvas-model-picker-option-content flex w-full min-w-0 items-center overflow-hidden">
+            <span className="canvas-model-picker-option-name block min-w-0 flex-1 truncate text-[var(--fs-label)] font-medium leading-none">
+                {pickerModelDisplayName(config, model, showConfiguredModelName)}
             </span>
-            <span className="min-w-44 flex-1 overflow-hidden">
-                <span className="block min-w-0 truncate text-[var(--fs-label)] font-medium leading-none">{pickerModelDisplayName(config, model, showConfiguredModelName)}</span>
-                <span className={cn("canvas-model-picker-description mt-1 block truncate text-[var(--fs-tiny)]", showDescription && "is-visible")} style={{ color: theme.node.muted }} title={capabilitySummary}>
-                    {capabilitySummary}
-                </span>
-            </span>
-            {!creationVariant && meta.time ? (
-                <span className="shrink-0 rounded-full px-1.5 py-0.5 text-[var(--fs-tiny)] tabular-nums" style={{ background: theme.toolbar.itemHover, color: theme.node.muted }}>
-                    {meta.time}
-                </span>
-            ) : null}
         </span>
     );
-}
-
-function logicalCapabilitySummary(spec: NonNullable<NonNullable<AiConfig["channels"][number]["modelProfiles"]>[number]["logicalCapabilitySpec"]>) {
-    const operationLabels: Record<string, string> = {
-        text_to_video: "文生视频",
-        image_to_video: "图生视频",
-        reference_to_video: "全模态参考",
-        audio_to_video: "音频生视频",
-        extend: "视频续写",
-        inpaint: "局部修改",
-        replace_element: "元素替换",
-        camera_motion: "运镜调整",
-        style_transfer: "风格迁移",
-    };
-    const inputLabels: Record<string, { label: string; unit: string }> = {
-        image: { label: spec.capability === "text" ? "图片理解" : "参考图片", unit: "张" },
-        video: { label: spec.capability === "text" ? "视频理解" : "参考视频", unit: "个" },
-        audio: { label: "参考音频", unit: "个" },
-        mask: { label: "蒙版", unit: "张" },
-    };
-    const optionLabels: Record<string, string> = {
-        size: "画面比例",
-        aspectRatio: "画面比例",
-        quality: "生成质量",
-        count: "输出数量",
-        videoSeconds: "视频时长",
-        duration: "视频时长",
-        vquality: "输出分辨率",
-        resolution: "输出分辨率",
-        audioVoice: "音色",
-        audioFormat: "音频格式",
-        audioSpeed: "语速",
-    };
-    const values: string[] = [];
-    values.push(...(spec.operations || []).map((operation) => operationLabels[operation] || operation));
-    for (const [name, constraint] of Object.entries(spec.inputs || {})) {
-        if (constraint.max <= 0) continue;
-        const definition = inputLabels[name];
-        if (!definition) continue;
-        values.push(spec.capability === "text" ? `支持${definition.label}` : `${definition.label}最多 ${constraint.max}${definition.unit}`);
-    }
-    for (const [name, constraint] of Object.entries(spec.options || {})) {
-        const label = optionLabels[name];
-        if (!label) continue;
-        if (constraint.values?.length) values.push(`${label} ${constraint.values.map(publicScalarLabel).join("/")}`);
-        else if (constraint.min !== undefined && constraint.max !== undefined) values.push(`${label} ${constraint.min}-${constraint.max}`);
-    }
-    return values.slice(0, 2).join(" · ") || "智能匹配当前输入";
-}
-
-function publicScalarLabel(value: unknown) {
-    if (value === true) return "支持";
-    if (value === false) return "关闭";
-    return String(value);
-}
-
-function formatDurationSummary(profile: NonNullable<ReturnType<typeof modelCapabilityConfigFor>["video"]>) {
-    const values = videoDurationOptions(profile);
-    if (profile.duration.selection === "enum") return values.map((item) => `${item}s`).join("/");
-    return `${profile.duration.min || values[0]}-${profile.duration.max || values[values.length - 1]}s`;
 }
 
 function pickerModelDisplayName(config: AiConfig, model: string, showConfiguredModelName: boolean) {
@@ -409,26 +308,6 @@ function pickerModelOptionLabel(config: AiConfig, model: string, showConfiguredM
     return channel.scope === "system" ? displayName : `${displayName}（${channel.name}）`;
 }
 
-function modelMenuMeta(model: string, capability?: ModelCapability): { description: string; time?: string } {
-    const name = modelOptionName(model).toLowerCase();
-    if (capability === "image") {
-        if (name.includes("nano banana") || name.includes("nanobanana") || name.includes("imagen")) return { description: "Gemini 高质量图片生成，适合角色和商业成片" };
-        if (name.includes("nano") || name.includes("pro")) return { description: "高质量图片生成，适合角色和商业成片" };
-        if (name.includes("seedream")) return { description: "快速出图，适合批量探索风格" };
-        if (name.includes("gpt") || name.includes("image")) return { description: "通用图片模型，提示词理解稳定" };
-        return { description: "图片生成模型" };
-    }
-    if (capability === "video") {
-        if (name.includes("veo") || name.includes("omni flash") || name.includes("omni-flash")) return { description: "Gemini 镜头生成与图生视频，适合成片流程", time: "3m" };
-        if (name.includes("seedance") || name.includes("sora")) return { description: "镜头生成与图生视频，适合成片流程", time: "3m" };
-        return { description: "视频生成模型", time: "3m" };
-    }
-    if (capability === "audio") return { description: "语音、音效或音乐生成", time: "20s" };
-    if (name.includes("claude")) return { description: "长文本、推理与创意写作", time: "10s" };
-    if (name.includes("gemini")) return { description: "多模态理解与快速文本生成", time: "10s" };
-    if (name.includes("deepseek")) return { description: "推理、代码和结构化文本", time: "10s" };
-    return { description: capability === "text" ? "文本生成模型" : "当前模型", time: "10s" };
-}
 
 export function ModelIcon({ config, model, icon }: { config?: AiConfig; model?: string; icon?: string }) {
     return <ModelLogo icon={icon || (config && model ? modelIcon(config, model) : "")} size={14} className="opacity-80" />;

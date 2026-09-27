@@ -11,6 +11,25 @@ Changes to qisiTV and its inherited release history are documented in this file.
 - Added reproducible local builds, automated quality checks, and multi-architecture container publishing.
 - Standardized the upstream public artifacts, runtime identifiers, documentation, and repository links.
 
+## v1.5.5
+
+- Desktop update checks and downloads now use the current user's static HTTP/HTTPS system proxy on macOS and Windows when no explicit environment proxy is configured.
+- Keep a manual update check in the sidebar and show a retry action when checking fails, instead of hiding connection failures.
+- Preserve proxy bypass rules, signed manifest verification and package integrity checks throughout redirected downloads.
+
+## v1.5.4
+
+- Generation failures now explain the cause and the next action across canvas nodes, task history and custom channels.
+- Distinguish content moderation, account quota, provider billing, invalid parameters, rate limits, uncertain submissions and failed result downloads without guessing refunds or the offending input.
+- Preserve safe error codes and request identifiers for support, including business errors returned with HTTP 200 and JSON errors inside media downloads.
+- Prevent unsafe unchanged batch retries; edited prompts and reference media can be submitted as new attempts after moderation failures.
+- Cover all 42 currently declared BeefAPI error codes with a shared frontend and backend regression contract.
+- Improved the shared model picker with a viewport-safe, internally scrollable layout and consistent single-line model options.
+- Removed redundant model icons, secondary descriptions, and stale option backgrounds from model selection UI.
+- Restored native right-click paste behavior in canvas prompt editors and added regression coverage.
+- Added regression coverage for generation output delivery, model picker overflow, and local generation error handling.
+- Added a canonical local app update script to keep one installed qisiTV application instead of accumulating duplicate builds.
+
 ## v1.5.3
 
 - Desktop builds show the installed version in the sidebar and check for published updates on startup.

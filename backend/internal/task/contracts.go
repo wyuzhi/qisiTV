@@ -47,6 +47,7 @@ type Summary struct {
 	ProviderCancelAttempts    int                        `json:"providerCancelAttempts,omitempty"`
 	ProviderCancelRequestedAt *time.Time                 `json:"providerCancelRequestedAt,omitempty"`
 	ProviderCancelledAt       *time.Time                 `json:"providerCancelledAt,omitempty"`
+	Error                     string                     `json:"error,omitempty"`
 	ErrorCode                 string                     `json:"errorCode,omitempty"`
 	PreviewURL                string                     `json:"previewUrl,omitempty"`
 	PreviewKind               string                     `json:"previewKind,omitempty"`

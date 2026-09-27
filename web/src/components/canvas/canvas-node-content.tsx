@@ -3,7 +3,8 @@ import { AlertCircle, BookOpenCheck, Clock3, Download, FileText, Image as ImageI
 
 import { VideoPlayer } from "@/components/video-player";
 import { CachedResourceImage } from "@/components/cached-resource-image";
-import { CONTENT_MODERATION_ERROR_CODE, generationErrorMessage, isContentModerationError } from "@/lib/generation-error";
+import { GenerationFailureNotice } from "@/components/generation/generation-failure-notice";
+import { explainGenerationError } from "@/lib/generation-error";
 import { generationTaskShowsProgress, generationTaskStageLabel, generationTaskStatusLabel, isGenerationTaskSubmissionUncertain } from "@/lib/generation-task-display";
 import { canvasRichTextHTML } from "@/lib/canvas/canvas-rich-text";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
@@ -80,7 +81,7 @@ export function CanvasNodeContent(props: CanvasNodeContentProps) {
     if (props.node.type === MEDIA_CONVERSION_NODE_TYPE) return <MediaConversionNodeContent node={props.node} theme={props.theme} />;
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading") return <LoadingContent node={props.node} theme={props.theme} onOpenTaskDetails={props.onOpenTaskDetails} onCancelTask={props.onCancelTask} />;
-    if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} onReloadResource={props.onReloadResource} />;
+    if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} onReloadResource={props.onReloadResource} onOpenTaskDetails={props.onOpenTaskDetails} />;
 
     const pluginDefinition = getNodeDefinition(props.node.type)?.plugin;
     if (pluginDefinition) return <PluginCanvasNodeContent {...props} renderer={pluginDefinition.renderer} schema={pluginDefinition.schema} />;
@@ -250,65 +251,40 @@ function shortTaskId(id: string) {
     return `${id.slice(0, 14)}...${id.slice(-4)}`;
 }
 
-function ErrorContent({ node, theme, onRetry, onReloadResource }: Pick<CanvasNodeContentProps, "node" | "theme" | "onRetry" | "onReloadResource">) {
-    const moderationFailure = node.metadata?.generationErrorCode === CONTENT_MODERATION_ERROR_CODE || isContentModerationError(node.metadata?.errorDetails);
+function ErrorContent({ node, theme, onRetry, onReloadResource, onOpenTaskDetails }: Pick<CanvasNodeContentProps, "node" | "theme" | "onRetry" | "onReloadResource" | "onOpenTaskDetails">) {
+    const explanation = explainGenerationError({ code: node.metadata?.generationErrorCode || node.metadata?.taskErrorCode, message: node.metadata?.errorDetails }, { taskId: node.metadata?.taskId, model: node.metadata?.model, createdAt: node.metadata?.taskCreatedAt, stage: node.metadata?.taskStage });
     const errorDisplayTask = {
         provider: node.metadata?.taskProvider,
         status: (node.metadata?.taskStatus || "failed") as GenerationTask["status"],
         stage: node.metadata?.taskStage,
         officialStatus: node.metadata?.taskOfficialStatus,
-        errorCode: node.metadata?.taskErrorCode,
+        errorCode: node.metadata?.taskErrorCode || node.metadata?.generationErrorCode,
     };
-    const submissionUncertain = isGenerationTaskSubmissionUncertain(errorDisplayTask);
+    const submissionUncertain = isGenerationTaskSubmissionUncertain(errorDisplayTask) || explanation.uncertain;
     return (
         <div className="flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
-            <div className="text-xs leading-5" style={{ color: submissionUncertain ? theme.node.text : theme.accent.danger }}>{submissionUncertain ? generationTaskStatusLabel(errorDisplayTask) : generationErrorMessage(node.metadata?.errorDetails)}</div>
-            {submissionUncertain ? (
-                <div className="rounded-[var(--r-sm)] px-3 py-2 text-[var(--fs-label)] leading-4" style={{ background: theme.toolbar.itemHover, color: theme.node.muted }}>
-                    {generationTaskStageLabel(errorDisplayTask)}
-                </div>
-            ) : moderationFailure ? (
-                <div className="rounded-[var(--r-sm)] px-3 py-2 text-[var(--fs-label)] leading-4" style={{ background: theme.toolbar.itemHover, color: theme.node.muted }}>
-                    修改节点提示词后，可重新点击生成。
-                </div>
-            ) : node.metadata?.resourceReloadAvailable ? (
-                <div className="flex flex-wrap justify-center gap-2">
-                    <button
-                        type="button"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-[var(--r-md)] px-3 text-xs font-medium transition-colors"
-                        style={{ background: theme.accent.primary, color: theme.accent.onPrimary }}
-                        onClick={(event) => { event.stopPropagation(); onReloadResource?.(node); }}
-                        onMouseDown={(event) => event.stopPropagation()}
-                    >
-                        <Download className="size-3.5" />
-                        重新加载资源
-                    </button>
-                    <button
-                        type="button"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-[var(--r-md)] px-3 text-xs font-medium transition-colors"
-                        style={{ background: theme.toolbar.itemHover, color: theme.node.text }}
-                        onClick={(event) => { event.stopPropagation(); onRetry?.(node); }}
-                        onMouseDown={(event) => event.stopPropagation()}
-                    >
-                        <RefreshCw className="size-3.5" />
-                        重新生成
-                    </button>
-                </div>
-            ) : (
+            <div className="w-full" style={{ color: submissionUncertain ? theme.node.text : theme.accent.danger }}>
+                <GenerationFailureNotice
+                    compact
+                    explanation={explanation}
+                    context={{ taskId: node.metadata?.taskId, model: node.metadata?.model, createdAt: node.metadata?.taskCreatedAt, stage: node.metadata?.taskStage }}
+                    onOpenDetails={node.metadata?.taskId ? () => onOpenTaskDetails?.(node) : undefined}
+                    onRetry={submissionUncertain || explanation.uncertain || explanation.category === "download_failed" ? undefined : onRetry ? () => onRetry(node) : undefined}
+                    retryLabel={node.metadata?.isBatchRoot ? "重新生成失败项" : "重新生成"}
+                />
+            </div>
+            {node.metadata?.resourceReloadAvailable ? (
                 <button
                     type="button"
                     className="inline-flex h-8 items-center gap-1.5 rounded-[var(--r-md)] px-3 text-xs font-medium transition-colors"
-                    style={{ background: theme.toolbar.itemHover, color: theme.node.text }}
-                    onClick={(event) => {
-                        event.stopPropagation();
-                        onRetry?.(node);
-                    }}
+                    style={{ background: theme.accent.primary, color: theme.accent.onPrimary }}
+                    onClick={(event) => { event.stopPropagation(); onReloadResource?.(node); }}
                     onMouseDown={(event) => event.stopPropagation()}
                 >
-                    <RefreshCw className="size-3.5" />
-                    {node.metadata?.isBatchRoot ? "重新生成失败项" : "重新生成"}
+                    <Download className="size-3.5" />
+                    重新加载资源
                 </button>
-            )}
+            ) : null}
         </div>
     );
 }

@@ -10,6 +10,7 @@
     "code-map",
     "backend-database",
     "task-runtime-stability",
+    "generation-errors",
     "system-update",
     "desktop-updater"
   ]

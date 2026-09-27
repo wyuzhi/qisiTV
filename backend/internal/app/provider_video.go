@@ -247,7 +247,11 @@ func runSeedanceVideosTask(ctx context.Context, input canvasGenerationInput, pol
 		if err != nil {
 			return nil, err
 		}
-		if err := postJSON(ctx, input.Config, "/videos", body, &created); err != nil {
+		post := postJSON
+		if isBeefAPIVideoConfig(input.Config) {
+			post = postJSONWithSubmissionKey
+		}
+		if err := post(ctx, input.Config, "/videos", body, &created); err != nil {
 			return nil, err
 		}
 		if data, ok := created["data"].(map[string]interface{}); ok {

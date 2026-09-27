@@ -1305,7 +1305,7 @@ func safeRouteRejection(err error) bool {
 	var upstream providerHTTPError
 	if errors.As(err, &upstream) {
 		switch upstream.StatusCode {
-		case 401, 403, 404, 429:
+		case 401, 402, 403, 404, 429:
 			return true
 		}
 	}

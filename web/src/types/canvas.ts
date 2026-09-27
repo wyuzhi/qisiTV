@@ -239,6 +239,7 @@ export type CanvasNodeMetadata = {
     generationErrorCode?: string;
     resourceReloadAvailable?: boolean;
     failedPromptFingerprint?: string;
+    failedInputFingerprint?: string;
     lastGenerationRequestFingerprint?: string;
     fontSize?: number;
     generationMode?: CanvasGenerationMode;

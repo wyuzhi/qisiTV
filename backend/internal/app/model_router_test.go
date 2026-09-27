@@ -2,10 +2,21 @@ package app
 
 import (
 	"fmt"
+	"net/http"
 	"testing"
 
 	"qisitv/backend/internal/model"
 )
+
+func TestPaymentRequiredIsSafeRouteRejection(t *testing.T) {
+	err := providerHTTPError{StatusCode: http.StatusPaymentRequired, Body: `{"error":{"message":"insufficient balance"}}`}
+	if !safeRouteRejection(err) {
+		t.Fatal("HTTP 402 should be rejected_no_job so a configured fallback route can be attempted")
+	}
+	if got := routeFailureCode(err); got != "upstream_402" {
+		t.Fatalf("routeFailureCode() = %q, want upstream_402", got)
+	}
+}
 
 func TestImageVariantsMatchResolutionAndActualReferences(t *testing.T) {
 	channelModel := model.ChannelModel{}

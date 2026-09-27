@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
 	localtask "qisitv/backend/internal/task"
@@ -24,8 +25,11 @@ func taskSummariesForOutput(tasks []model.Task) []TaskSummary {
 }
 
 func taskSummaryForOutput(task model.Task) TaskSummary {
-	errorCode := ""
-	if isContentModerationFailure(task.Error) {
+	errorCode := persistedFailureErrorCode(task.Error, task.Stage)
+	if errorCode == string(generation.CategoryUnknown) && !isContentModerationFailure(task.Error) {
+		errorCode = ""
+	}
+	if isContentModerationFailure(task.Error) && errorCode == "" {
 		errorCode = contentModerationErrorCode
 	}
 	previewURL, previewKind, previewPosterURL := taskMediaPreviewWithPoster(task.ResultJSON, task.Type)
@@ -46,6 +50,7 @@ func taskSummaryForOutput(task model.Task) TaskSummary {
 		ProviderCancelAttempts:    task.ProviderCancelAttempts,
 		ProviderCancelRequestedAt: task.ProviderCancelRequestedAt,
 		ProviderCancelledAt:       task.ProviderCancelledAt,
+		Error:                     safePersistedFailureMessage(task.Error),
 		ErrorCode:                 errorCode,
 		PreviewURL:                previewURL,
 		PreviewKind:               previewKind,
@@ -219,7 +224,19 @@ func taskForOutput(task model.Task) *model.Task {
 	task.LogicalModelRevisionID = ""
 	task.RouteID = ""
 	task.ChannelModelID = ""
+	task.ErrorCode = persistedFailureErrorCode(task.Error, task.Stage)
+	if task.ErrorCode == string(generation.CategoryUnknown) && !isContentModerationFailure(task.Error) {
+		task.ErrorCode = ""
+	}
+	task.Error = safePersistedFailureMessage(task.Error)
 	return &task
+}
+
+func safePersistedFailureMessage(message string) string {
+	if strings.TrimSpace(message) == "" {
+		return ""
+	}
+	return generation.ClassifyText(message).UserMessage()
 }
 
 func publicTaskInputJSON(raw string) string {

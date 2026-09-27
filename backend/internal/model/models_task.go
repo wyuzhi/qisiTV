@@ -38,6 +38,7 @@ type Task struct {
 	ResultJSON                string               `json:"resultJson" gorm:"type:text"`
 	TextDraft                 string               `json:"textDraft,omitempty" gorm:"type:text"`
 	Error                     string               `json:"error"`
+	ErrorCode                 string               `json:"errorCode,omitempty" gorm:"-"`
 	Attempts                  int                  `json:"attempts"`
 	StartedAt                 *time.Time           `json:"startedAt"`
 	CompletedAt               *time.Time           `json:"completedAt"`

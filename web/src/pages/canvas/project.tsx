@@ -97,6 +97,7 @@ import { CanvasLeaferGraphicsLayer } from "@/components/canvas/canvas-leafer-gra
 import { CanvasFreeformEmptyState, CanvasLinkedProjectEmptyState, CanvasShortDramaEmptyState, CanvasShortDramaGuide, CanvasStoryInputNodeContent, CanvasStylePlaceholderNodeContent } from "@/components/canvas/canvas-short-drama-entry";
 import { resolveCanvasEmptyStateKind } from "@/lib/canvas/canvas-starter";
 import { failedImageBatchChildren, markImageBatchRetrying, reconcileImageBatchRoot, restoreUnsubmittedImageBatchChild } from "@/lib/canvas/canvas-image-batch-retry";
+import { shouldBlockAutomaticRetry } from "@/lib/generation-error";
 import { createCanvasNode, getInputSummary, isHiddenBatchChild } from "@/lib/canvas/canvas-project-domain";
 import { canvasWorkspaceProjectId, listCanvasWorkspaceProjectCanvases } from "@/lib/canvas/canvas-workspace-project";
 import { deleteWorkspaceCanvasProjects } from "@/services/workspace-project-repository";
@@ -183,6 +184,10 @@ const CanvasDrawingEditorModal = lazy(() => import("@/components/canvas/canvas-d
 
 const NODE_STATUS_SUCCESS = "success" as const;
 const EMPTY_RESOURCE_REFERENCES: CanvasResourceReference[] = [];
+
+function isCanvasTextEditingTarget(target: EventTarget | null) {
+    return target instanceof Element && Boolean(target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])"));
+}
 
 async function copyImageToSystemClipboard(source: string, storageKey?: string) {
     if (typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) throw new Error("当前浏览器不支持复制图片");
@@ -2350,6 +2355,7 @@ function InfiniteCanvasPage() {
 
     const handleNodeContextMenu = useCallback(
         (event: ReactMouseEvent, id: string) => {
+            if (isCanvasTextEditingTarget(event.target)) return;
             event.preventDefault();
             event.stopPropagation();
             setSelectedNodeIds((current) => {
@@ -2481,16 +2487,19 @@ function InfiniteCanvasPage() {
     );
     const retryImageBatchChildren = useCallback(
         (rootId: string, children: CanvasNodeData[]) => {
-            const childIds = children.map((child) => child.id);
+            const retryableChildren = children.filter((child) => !shouldBlockAutomaticRetry({ code: child.metadata?.generationErrorCode || child.metadata?.taskErrorCode, message: child.metadata?.errorDetails }, child.metadata?.taskStage));
+            if (retryableChildren.length < children.length) message.warning("部分图片需要先处理失败原因，请打开对应节点查看");
+            if (!retryableChildren.length) return;
+            const childIds = retryableChildren.map((child) => child.id);
             setNodes((current) => markImageBatchRetrying(rootId, childIds, current));
             void Promise.allSettled(
-                children.map(async (child) => {
+                retryableChildren.map(async (child) => {
                     await handleRetryNode(child);
                     setNodes((current) => current.map((item) => (item.id === child.id ? restoreUnsubmittedImageBatchChild(item, child) : item)));
                 }),
             ).finally(() => reconcileImageBatchRootNode(rootId));
         },
-        [handleRetryNode, reconcileImageBatchRootNode, setNodes],
+        [handleRetryNode, message, reconcileImageBatchRootNode, setNodes],
     );
 
     const generateImageFromTextNode = useCallback(
@@ -2805,12 +2814,13 @@ function InfiniteCanvasPage() {
                 return;
             }
             if (node.type === CanvasNodeType.Image && node.metadata?.batchRootId) {
-                retryImageBatchChildren(node.metadata.batchRootId, [node]);
+                const rootId = node.metadata.batchRootId;
+                void handleRetryNode(node).finally(() => reconcileImageBatchRootNode(rootId));
                 return;
             }
             void handleRetryNode(node);
         },
-        [generateScriptRows, handleRetryNode, message, nodesRef, retryImageBatchChildren],
+        [generateScriptRows, handleRetryNode, message, nodesRef, reconcileImageBatchRootNode, retryImageBatchChildren],
     );
     const openCanvasNodeTaskDetails = useCallback(
         (node: CanvasNodeData) => {

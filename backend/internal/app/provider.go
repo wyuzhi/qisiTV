@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/kernel"
 	"regexp"
 	"strconv"
@@ -126,6 +127,9 @@ type imageResponse struct {
 
 type providerError struct {
 	Message string `json:"message"`
+	Code    any    `json:"code"`
+	Type    string `json:"type"`
+	Param   string `json:"param"`
 }
 
 // providerPayloadError 在进程内保留上游原始原因，供协议兼容分支做机器判断；
@@ -244,96 +248,28 @@ func withProviderRequestKind(ctx context.Context, requestKind string) context.Co
 }
 
 func (e providerHTTPError) Error() string {
-	switch e.StatusCode {
-	case 524:
-		return "上游网关超时（524）：模型请求可能仍在服务端执行，请勿立即重试，请先到供应商后台核对任务状态"
-	case http.StatusBadRequest, http.StatusUnprocessableEntity:
-		return "模型服务拒绝了请求，请检查模型和参数"
-	case http.StatusUnauthorized, http.StatusForbidden:
-		return "模型服务鉴权失败，请检查 API Key 和模型权限"
-	case http.StatusNotFound:
-		return "模型或模型接口不存在，请检查渠道配置"
-	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
-		return "模型服务响应超时，请稍后重试"
-	case http.StatusTooManyRequests:
-		return "模型服务请求过于频繁或额度不足，请稍后重试"
-	}
-	if e.StatusCode >= http.StatusInternalServerError {
-		return fmt.Sprintf("模型服务暂时不可用（HTTP %d）", e.StatusCode)
-	}
-	return fmt.Sprintf("模型服务请求失败（HTTP %d）", e.StatusCode)
+	return classifyProviderHTTP(e).UserMessage()
 }
 
 func providerUserFacingErrorMessage(err error) string {
 	if err == nil {
-		return "模型服务请求失败"
+		return generation.ClassifyError(nil).UserMessage()
 	}
-	if errors.Is(err, context.Canceled) {
-		return "模型请求已取消"
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return "模型服务响应超时，请稍后重试"
-	}
-	var appErr *AppError
-	if errors.As(err, &appErr) && strings.TrimSpace(appErr.Message) != "" {
-		return appErr.Message
-	}
-	var httpErr providerHTTPError
-	if errors.As(err, &httpErr) {
-		// 仅对上游参数校验类状态码解析正文。其他状态码的正文可能是网关 HTML、
-		// 鉴权诊断或含密钥的内部信息，归类价值低且更容易误判。
-		switch httpErr.StatusCode {
-		case http.StatusBadRequest, http.StatusUnprocessableEntity:
-			if message, ok := providerPayloadErrorCategory(httpErr.Body); ok {
-				return message
-			}
-		}
-		return httpErr.Error()
-	}
-	return "连接模型服务失败，请检查渠道地址和网络"
+	return classifyTaskFailure(err).UserMessage()
 }
 
-// providerPayloadErrorCategory 把上游失败正文归类为固定的用户可见原因。
-// 第二个返回值为 false 表示正文无法归类，调用方应退回到更通用的提示，
-// 不要因为归类失败就把正文本身当作错误信息。
-// 正文可能包含密钥或内部诊断信息，只能参与归类，不得回传用户或写入日志。
+// providerPayloadErrorCategory 把上游失败正文交给 generation 归类。
+// 第二个返回值为 false 表示正文没有稳定类目，调用方应退回 HTTP 兜底，不要回传原文。
 func providerPayloadErrorCategory(raw string) (string, bool) {
-	normalized := strings.ToLower(strings.TrimSpace(raw))
-	if normalized == "" {
+	failure := generation.ClassifyText(raw)
+	if failure.Category == generation.CategoryUnknown {
 		return "", false
 	}
-	switch {
-	// 真人肖像类目只匹配供应商错误码里的稳定标识，不扫描自然语言。
-	// 正文常常回显用户提示词，"likeness"、"肖像"这类词单独出现并不能证明
-	// 上游是因为真人形象拒绝，按词判断会把普通参数错误误报成肖像问题。
-	// 该类目排在安全审核之前：错误码已经足够具体，比通用审核提示更可行动。
-	case strings.Contains(normalized, "privacyinformation"), strings.Contains(normalized, "sensitivecontentdetected"):
-		return "输入素材疑似包含真人形象，该模型拒绝生成，请更换为非真人素材或改用其他模型", true
-	case strings.Contains(normalized, "safety"), strings.Contains(normalized, "moderation"), strings.Contains(normalized, "content policy"), strings.Contains(normalized, "blocked"):
-		return "请求内容未通过模型服务安全审核，请调整后重试", true
-	case strings.Contains(normalized, "quota"), strings.Contains(normalized, "insufficient"), strings.Contains(normalized, "balance"):
-		return "模型服务额度不足，请检查渠道余额或配额", true
-	case strings.Contains(normalized, "model") && (strings.Contains(normalized, "not found") || strings.Contains(normalized, "permission") || strings.Contains(normalized, "access")):
-		return "模型不存在或当前渠道未获得模型权限", true
-	// 推理/思考模式模型通常禁止强制指定工具调用：DeepSeek 思考模式返回
-	// "Thinking mode does not support this tool_choice"，其他 OpenAI 兼容
-	// 供应商措辞类似。归为固定可行动原因；显式思考模式会在出站前省略
-	// tool_choice，未声明但由上游隐式开启思考时再按兼容序列重试。排在
-	// 通用参数类目之前，避免稳定标识落回笼统的"请检查模型和参数"。
-	case (strings.Contains(normalized, "thinking") || strings.Contains(normalized, "reasoning")) && strings.Contains(normalized, "tool_choice"),
-		strings.Contains(normalized, "tool_choice") && (strings.Contains(normalized, "not support") || strings.Contains(normalized, "unsupported")):
-		return "当前模型为思考/推理模式，不支持强制工具调用（tool_choice=required），请改用自动工具选择或更换非思考模式模型", true
-	case strings.Contains(normalized, "invalid"), strings.Contains(normalized, "parameter"), strings.Contains(normalized, "argument"):
-		return "模型服务拒绝了请求，请检查模型和参数", true
-	}
-	return "", false
+	return failure.UserMessage(), true
 }
 
 func providerPayloadErrorMessage(raw string) string {
-	if message, ok := providerPayloadErrorCategory(raw); ok {
-		return message
-	}
-	return "模型服务返回失败，请检查请求内容或渠道配置"
+	return generation.ClassifyText(raw).UserMessage()
 }
 
 func (s *Service) processCanvasGenerationTask(ctx context.Context, userID string, taskProjectID string, taskType string, fallbackPrompt string, rawInput string) (map[string]interface{}, error) {

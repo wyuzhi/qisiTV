@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { consumeChatCompletionStreamText, consumeGeminiStreamText, consumeResponseStreamText, parseChatCompletionPayload, parseGeminiToolResponse, parseImagePayload, parseToolResponse } from "../src/services/api/image-response";
 import { normalizeQuality, resolveRequestSize, validateImageSize } from "../src/services/api/image-validation";
+import { ChannelResponseError } from "../src/services/api/channel-transport";
 
 describe("image api contracts", () => {
     test("规范化质量和尺寸，拒绝超出边界的图像", () => {
@@ -21,7 +22,15 @@ describe("image api contracts", () => {
             { id: expect.any(String), dataUrl: "https://example.com/image.png" },
         ]);
         expect(() => parseImagePayload({ data: [] })).toThrow("接口没有返回图片");
-        expect(() => parseImagePayload({ code: 1001, msg: "额度不足" })).toThrow("额度不足");
+        // A provider quota error does not identify whose balance is insufficient.
+        try {
+            parseImagePayload({ code: 1001, msg: "额度不足" });
+            throw new Error("accepted quota failure");
+        } catch (error) {
+            expect(error).toBeInstanceOf(ChannelResponseError);
+            expect((error as Error).message).toMatch(/额度|计费/);
+            expect((error as Error).message).not.toMatch(/请.{0,6}充值|你的余额不足|您的余额不足/);
+        }
     });
 
     test("统一解析 Responses、Chat Completions 和 Gemini 工具调用", () => {

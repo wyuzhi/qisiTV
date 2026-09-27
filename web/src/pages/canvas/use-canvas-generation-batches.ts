@@ -4,7 +4,7 @@ import { nanoid } from "nanoid";
 
 import { generationBatchStatus, isGenerationSubmissionUncertainError } from "@/lib/canvas/canvas-generation-batch";
 import { buildGenerationConfig, createGenerationRetryContext, generationTaskMetadata, resetGenerationTaskMetadata } from "@/lib/canvas/canvas-project-generation";
-import { unchangedModeratedPrompt } from "@/lib/generation-error";
+import { shouldBlockAutomaticRetry } from "@/lib/generation-error";
 import { listGenerationTasks } from "@/services/api/task-center";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -244,10 +244,10 @@ export function useCanvasGenerationBatches({ projectId, projectLoaded, nodes, no
             const nodeById = new Map(nodesRef.current.map((node) => [node.id, node]));
             const blockedItems = failedItems.filter((item) => {
                 const node = nodeById.get(item.nodeId);
-                return unchangedModeratedPrompt(node?.metadata, node?.metadata?.composerContent || node?.metadata?.prompt || "");
+                return item.submissionUncertain || shouldBlockAutomaticRetry({ code: node?.metadata?.generationErrorCode || node?.metadata?.taskErrorCode, message: item.errorDetails || node?.metadata?.errorDetails }, node?.metadata?.taskStage);
             });
             const retryableItems = failedItems.filter((item) => !blockedItems.includes(item));
-            if (blockedItems.length) message.warning(`${blockedItems.length} 个镜头未通过内容审核，请先修改提示词`);
+            if (blockedItems.length) message.warning(`${blockedItems.length} 个镜头需要先处理失败原因，请打开对应节点查看`);
             if (!retryableItems.length) return;
             const retry = async () => {
                 const retryContexts = new Map<string, Awaited<ReturnType<typeof createGenerationRetryContext>>>();
@@ -292,19 +292,9 @@ export function useCanvasGenerationBatches({ projectId, projectLoaded, nodes, no
                 );
                 message.success(`已将 ${retryableItems.length} 个失败项重新加入等待队列`);
             };
-            if (retryableItems.some((item) => item.submissionUncertain)) {
-                modal.confirm({
-                    title: "重试费用状态不确定的任务？",
-                    content: "部分上游请求返回 524，原任务可能已经产生费用。重试会再次提交外部模型任务。",
-                    okText: "仍然重试",
-                    cancelText: "暂不重试",
-                    onOk: retry,
-                });
-                return;
-            }
             retry();
         },
-        [message, modal, nodesRef, setNodes],
+        [message, nodesRef, setNodes],
     );
 
     const stopRemainingBatchItems = useCallback(

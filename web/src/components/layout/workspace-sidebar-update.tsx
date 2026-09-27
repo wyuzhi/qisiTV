@@ -19,7 +19,7 @@ export function WorkspaceSidebarUpdate({ collapsed }: { collapsed: boolean }) {
     const installed = formatDesktopVersionLabel(state.currentVersion || APP_VERSION);
     const latest = formatDesktopVersionLabel(state.latestVersion);
     const showControls = shouldShowDesktopUpdaterControls(updater.snapshot);
-    const busy = persistBusy || actionBusy || state.status === "downloading" || state.status === "installing";
+    const busy = persistBusy || actionBusy || state.status === "checking" || state.status === "downloading" || state.status === "installing";
     const percent = desktopUpdateProgressPercent(state);
     const actionLabel = persistBusy ? "正在保存" : desktopUpdateActionLabel(state.status);
     const errorText = state.status === "error" ? userFacingDesktopUpdateError(state.error) : "";
@@ -34,7 +34,7 @@ export function WorkspaceSidebarUpdate({ collapsed }: { collapsed: boolean }) {
             setConfirmOpen(true);
             return;
         }
-        if (state.status === "error") void updater.retry();
+        if (state.status === "error" || state.status === "idle") void updater.retry();
     };
 
     const confirmInstall = () => {

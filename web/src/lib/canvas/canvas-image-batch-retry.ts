@@ -61,6 +61,7 @@ export function cancelIncompleteImageBatch(rootId: string, childIds: string[], n
                 delete metadata.errorDetails;
                 delete metadata.generationErrorCode;
                 delete metadata.failedPromptFingerprint;
+                delete metadata.failedInputFingerprint;
             }
             if (remaining.length <= 1) {
                 delete metadata.batchFailedCount;
@@ -109,6 +110,7 @@ export function markImageBatchRetrying(rootId: string, childIds: string[], nodes
                 generationErrorCode: undefined,
                 resourceReloadAvailable: undefined,
                 failedPromptFingerprint: undefined,
+                failedInputFingerprint: undefined,
             },
         };
     });
@@ -125,6 +127,7 @@ export function restoreUnsubmittedImageBatchChild(current: CanvasNodeData, origi
             generationErrorCode: original.metadata?.generationErrorCode,
             resourceReloadAvailable: original.metadata?.resourceReloadAvailable,
             failedPromptFingerprint: original.metadata?.failedPromptFingerprint,
+            failedInputFingerprint: original.metadata?.failedInputFingerprint,
         },
     };
 }
@@ -155,6 +158,7 @@ export function reconcileImageBatchRoot(root: CanvasNodeData, nodes: CanvasNodeD
         delete metadata.errorDetails;
         delete metadata.generationErrorCode;
         delete metadata.failedPromptFingerprint;
+        delete metadata.failedInputFingerprint;
     } else {
         delete metadata.content;
         delete metadata.storageKey;
@@ -168,6 +172,7 @@ export function reconcileImageBatchRoot(root: CanvasNodeData, nodes: CanvasNodeD
         metadata.generationErrorCode = failed?.metadata?.generationErrorCode;
         metadata.resourceReloadAvailable = failed?.metadata?.resourceReloadAvailable;
         metadata.failedPromptFingerprint = failed?.metadata?.failedPromptFingerprint;
+        metadata.failedInputFingerprint = failed?.metadata?.failedInputFingerprint;
     }
 
     return { ...root, metadata };

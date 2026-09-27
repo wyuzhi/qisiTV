@@ -114,6 +114,7 @@ qisiTV 是基于上游 `glanderness/BeefTV` 二次开发的 AI 影视与短剧�
 - 宿主机开发：`backend/` 运行 `CANVAS_BACKEND_DATA_DIR=../.local/project-workbench-debug go run ./cmd/server`，`web/` 使用 Bun 和 Vite；不要用 pnpm/npm 覆盖同一套 `node_modules`，也不要提交 `pnpm-lock.yaml` 或 `package-lock.json`。Docker 热更新使用 `docker-compose.dev.yml`；本地构建运行使用 `docker-compose.local.yml`。
 - 生产 Compose 使用 `docker-compose.deploy.yml`（PostgreSQL、Redis、backend、web），源码构建可叠加 `docker-compose.build.yml`。公网只暴露 web 的 `3000`，backend `8080` 留在 Compose 网络内。
 - 默认不启动 dev server；只有用户明确要求浏览器预览或联调时才启动，并先确认端口、数据目录和现有进程。
+- macOS 桌面版的正式安装路径是 `/Applications/qisiTV.app`。需要更新已安装的桌面版时运行 `./scripts/update-local-qisitv-app.sh`；不将 `build/bin/qisiTV.app` 作为可使用版本保留，不复制、重命名或存档额外 `.app` 副本。Web 本地开发仍按前后端启动流程运行。
 - 健康检查只能证明入口可用，不能替代登录、SSE、任务生成和资源访问验证。
 
 ## 8. 验证纪律

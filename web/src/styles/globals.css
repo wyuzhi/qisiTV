@@ -3908,19 +3908,6 @@
         gap: 12px;
     }
 
-    .creation-model-picker-menu .canvas-model-picker-option > span:first-child > span:first-child {
-        width: 34px;
-        height: 34px;
-        border: 1px solid #e6e8eb;
-        border-radius: 8px;
-        background: rgba(255, 255, 255, .66) !important;
-    }
-
-    .dark .creation-model-picker-menu .canvas-model-picker-option > span:first-child > span:first-child {
-        border-color: #30343b;
-        background: rgba(35, 38, 44, .72) !important;
-    }
-
     .creation-model-picker-menu .canvas-model-picker-option > span:first-child > span:nth-child(2) > span:first-child {
         font-size: 13px;
     }
@@ -8049,13 +8036,14 @@ html:not(.dark) .creation-studio-control:hover,
         padding: 0 !important;
     }
 
-    .canvas-model-picker-menu {
+.canvas-model-picker-menu {
+        --canvas-model-picker-max-height: min(440px, calc(100vh - 48px));
         width: max-content !important;
         min-width: max(var(--canvas-model-picker-trigger-width, 0px), 260px);
         max-width: calc(100vw - 24px);
-        max-height: min(420px, calc(100vh - 32px));
+        max-height: var(--canvas-model-picker-max-height);
+        overflow: hidden;
         overflow-x: hidden;
-        overflow-y: auto;
         padding: 4px;
     }
 
@@ -11596,6 +11584,13 @@ html:not(.dark) .creation-studio-control:hover,
     .canvas-node-inspector-notice { margin-bottom: 8px; padding: 9px 12px; color: color-mix(in srgb, currentColor 55%, transparent); font-size: var(--fs-label); }
     .canvas-node-inspector-empty-label { padding: 4px; color: color-mix(in srgb, currentColor 40%, transparent); font-size: var(--fs-label); }
     .canvas-node-inspector-error { border-radius: var(--r-md); background: color-mix(in srgb, var(--destructive) 10%, transparent); padding: 12px 14px; color: var(--destructive); line-height: 1.6; }
+    .generation-failure-notice { display: flex; min-width: 0; flex-direction: column; gap: 8px; text-align: left; }
+    .generation-failure-notice.is-compact { gap: 6px; text-align: center; }
+    .generation-failure-reason, .generation-failure-action { margin: 0; overflow-wrap: anywhere; font-size: var(--fs-tiny); line-height: 1.55; }
+    .generation-failure-action { color: color-mix(in srgb, currentColor 72%, transparent); }
+    .generation-failure-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+    .generation-failure-button { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; border: 0; border-radius: var(--r-md); background: color-mix(in srgb, currentColor 8%, transparent); padding: 0 10px; color: inherit; font-size: var(--fs-label); line-height: 1.3; }
+    .generation-failure-button:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
     .canvas-node-inspector-json { box-sizing: border-box; margin: 0; padding: 14px; font-size: var(--fs-label); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 
     @media (max-width: 640px) {
@@ -12050,7 +12045,6 @@ html:not(.dark) .creation-chat-control[aria-pressed="true"] > svg { color: var(-
 .creation-model-picker-menu .canvas-model-picker-option { min-height: 43px; border-radius: 6px; padding: 5px 7px; }
 .creation-model-picker-menu .canvas-model-picker-option:hover { transform: none; }
 .creation-model-picker-menu .canvas-model-picker-option > span:first-child { gap: 8px; }
-.creation-model-picker-menu .canvas-model-picker-option > span:first-child > span:first-child { width: 26px; height: 26px; border: 0; border-radius: 5px; background: rgba(255, 255, 255, .07) !important; }
 .creation-model-picker-menu .canvas-model-picker-option > span:first-child > span:nth-child(2) > span:first-child { font-size: 11px; }
 .creation-model-picker-menu .canvas-model-picker-option > span:first-child > span:nth-child(2) > span:nth-child(2) { margin-top: 3px; font-size: 9px; }
 
@@ -12074,7 +12068,6 @@ html:not(.dark) .creation-choice-grid button { color: #737a82; }
 html:not(.dark) .creation-choice-grid button:hover { background: rgba(28, 32, 37, .06); color: #25292e; }
 html:not(.dark) .creation-duration-menu strong,
 html:not(.dark) .creation-model-picker-heading strong { color: #20242a; }
-html:not(.dark) .creation-model-picker-menu .canvas-model-picker-option > span:first-child > span:first-child { background: rgba(28, 32, 37, .06) !important; }
 
 @keyframes creation-composer-arrive {
     from { opacity: 0; transform: translateY(8px); }
@@ -18477,6 +18470,9 @@ html:not(.dark) .creation-home .creation-user-message-copy-wrap { box-shadow: 0 
     display: grid;
     gap: 4px;
     width: 100%;
+    max-height: calc(var(--canvas-model-picker-max-height) - 20px);
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 .canvas-model-picker-brand {
     display: flex;
@@ -18543,23 +18539,38 @@ html:not(.dark) .creation-home .creation-user-message-copy-wrap { box-shadow: 0 
 .canvas-model-picker-two-pane {
     display: grid;
     width: 100%;
+    max-height: calc(var(--canvas-model-picker-max-height) - 20px);
     grid-template-columns: 250px minmax(0, 1fr);
     gap: 14px;
     min-width: 0;
-    align-items: start;
+    min-height: 0;
+    align-items: stretch;
 }
 .canvas-model-picker-menu.is-model-list .canvas-model-picker-brand-rail {
     display: grid;
+    max-height: calc(var(--canvas-model-picker-max-height) - 20px);
+    min-height: 0;
     align-content: start;
     gap: 5px;
     border-right: 1px solid var(--workspace-border);
     padding-right: 14px;
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 .canvas-model-picker-menu.is-model-list .canvas-model-picker-brand {
     width: 100%;
 }
 .canvas-model-picker-model-pane {
+    display: grid;
     min-width: 0;
+    min-height: 0;
+    grid-template-rows: auto minmax(0, 1fr);
+}
+.canvas-model-picker-options {
+    max-height: calc(var(--canvas-model-picker-max-height) - 68px);
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 @media (max-width: 720px) {
     .canvas-model-picker-menu:is(.is-brand-list, .is-model-list) {
@@ -20198,8 +20209,8 @@ html:not(.dark) .creation-home .creation-user-message-copy-wrap { box-shadow: 0 
 
 /* 模型选择器：先选品牌，再选模型；品牌列表保持完整可见，不用内部滚动条。 */
 .app-user-workspace .creation-model-picker-menu {
-    max-height: none !important;
-    overflow: visible !important;
+    max-height: var(--canvas-model-picker-max-height) !important;
+    overflow: hidden !important;
     width: min(360px, calc(100vw - 24px)) !important;
     padding: 10px !important;
 }
@@ -20223,9 +20234,6 @@ html:not(.dark) .creation-home .creation-user-message-copy-wrap { box-shadow: 0 
 .app-user-workspace .creation-model-picker-menu .canvas-model-picker-secondary-head strong { color: var(--user-ink); font-size: 13px; }
 .app-user-workspace .creation-model-picker-menu .canvas-model-picker-secondary-head small { color: var(--user-ink-soft); font-size: 10px; }
 .app-user-workspace .creation-model-picker-menu .canvas-model-picker-option { min-height: 55px; border-radius: 12px; padding: 8px 9px; }
-.app-user-workspace .creation-model-picker-menu .canvas-model-picker-option > span:first-child > span:first-child { width: 32px; height: 32px; border-radius: 10px; background: var(--user-surface-muted) !important; color: var(--user-ink-muted); }
-.app-user-workspace .creation-model-picker-menu .canvas-model-picker-option:nth-child(3n) > span:first-child > span:first-child,
-.app-user-workspace .creation-model-picker-menu .canvas-model-picker-option:nth-child(4n) > span:first-child > span:first-child { color: var(--user-ink-muted); background: var(--user-surface-muted) !important; }
 .app-user-workspace .creation-model-picker-menu .canvas-model-picker-option .text-amber-600,
 .app-user-workspace .creation-model-picker-menu .canvas-model-picker-option .dark\:text-amber-300 { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; background: color-mix(in srgb, #e28a17 12%, var(--user-surface)); color: #c66d00 !important; padding: 5px 8px; font-size: 11px; font-weight: 700; }
 .app-user-workspace .creation-model-picker-menu .canvas-model-picker-option .text-amber-600 svg { width: 13px; height: 13px; }
@@ -20613,8 +20621,8 @@ html:not(.dark) .creation-home .creation-user-message-copy-wrap { box-shadow: 0 
 .app-user-workspace :where(.ant-input:hover, .ant-input-affix-wrapper:hover, .ant-select-selector:hover, .ant-picker:hover) { border-color: var(--user-border-strong) !important; }
 .app-user-workspace :where(.ant-input:focus, .ant-input-affix-wrapper-focused, .ant-select-focused .ant-select-selector, .ant-picker-focused) { border-color: var(--user-accent) !important; box-shadow: 0 0 0 2px color-mix(in srgb, var(--user-accent) 14%, transparent) !important; }
 .creation-model-picker-surface .creation-model-picker-menu {
-    max-height: none !important;
-    overflow: visible !important;
+    max-height: var(--canvas-model-picker-max-height) !important;
+    overflow: hidden !important;
     width: min(360px, calc(100vw - 24px)) !important;
     padding: 10px !important;
 }
@@ -20674,10 +20682,6 @@ html:not(.dark) .creation-home .creation-user-message-copy-wrap { box-shadow: 0 
 .creation-model-picker-surface .canvas-model-picker-secondary-head strong { color: var(--foreground); font-size: 13px; }
 .creation-model-picker-surface .canvas-model-picker-secondary-head small { color: color-mix(in srgb, var(--foreground) 52%, transparent); font-size: 10px; }
 .creation-model-picker-surface .canvas-model-picker-option { min-height: 55px; border-radius: 12px; padding: 8px 9px; }
-.creation-model-picker-surface .canvas-model-picker-option > span:first-child > span:first-child { width: 32px; height: 32px; border-radius: 10px; background: color-mix(in srgb, var(--workspace-accent) 10%, var(--workspace-surface-strong)) !important; color: var(--workspace-accent); }
-.creation-model-picker-surface .canvas-model-picker-option > span:first-child > span:first-child svg { color: currentColor !important; opacity: 1 !important; }
-.creation-model-picker-surface .canvas-model-picker-option:nth-child(3n) > span:first-child > span:first-child { color: #d57b16; }
-.creation-model-picker-surface .canvas-model-picker-option:nth-child(4n) > span:first-child > span:first-child { color: #25845d; }
 .creation-model-picker-surface .canvas-model-picker-option .text-amber-600 { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; background: color-mix(in srgb, #e28a17 12%, var(--workspace-surface-strong)); color: #c66d00 !important; padding: 5px 8px; font-size: 11px; font-weight: 700; }
 
 /* LibTV public/read-only canvas chrome: the original keeps a very quiet
@@ -20780,5 +20784,35 @@ main[data-libtv-readonly-dense="true"] .canvas-floating-dock {
 /* 全局反馈采用画布内状态与节点状态，不再渲染风格不一致的右上角 Toast。 */
 .ant-message,
 .ant-notification {
+    display: none !important;
+}
+
+/* Model choices are one quiet, aligned line. Legacy icon-slot selectors must
+   not style the name now that decorative model icons have been removed. */
+.creation-model-picker-surface .canvas-model-picker-option,
+.app-user-workspace .creation-model-picker-menu .canvas-model-picker-option {
+    height: 48px;
+    min-height: 48px !important;
+    align-items: center;
+    padding: 0 12px;
+}
+.creation-model-picker-surface .canvas-model-picker-option > .canvas-model-picker-option-content,
+.app-user-workspace .creation-model-picker-menu .canvas-model-picker-option > .canvas-model-picker-option-content {
+    width: 100% !important;
+    min-width: 0 !important;
+    height: auto !important;
+    gap: 0 !important;
+}
+.creation-model-picker-surface .creation-model-picker-menu .canvas-model-picker-option > .canvas-model-picker-option-content > .canvas-model-picker-option-name,
+.app-user-workspace .creation-model-picker-menu .canvas-model-picker-option > .canvas-model-picker-option-content > .canvas-model-picker-option-name {
+    width: auto !important;
+    min-width: 0 !important;
+    height: auto !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: inherit !important;
+}
+.canvas-model-picker-description {
     display: none !important;
 }

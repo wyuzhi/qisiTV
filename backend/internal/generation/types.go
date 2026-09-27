@@ -2,7 +2,6 @@ package generation
 
 import (
 	"fmt"
-	"net/http"
 	"time"
 
 	"qisitv/backend/internal/outbound"
@@ -257,6 +256,9 @@ type imageResponse struct {
 
 type UpstreamError struct {
 	Message string `json:"message"`
+	Code    string `json:"code"`
+	Type    string `json:"type"`
+	Param   string `json:"param"`
 }
 
 // PayloadError 在进程内保留上游原始原因；对调用方只暴露归类后的稳定文案。
@@ -265,36 +267,14 @@ type PayloadError struct {
 	message string
 }
 
-func (e PayloadError) Error() string { return e.message }
-func (e PayloadError) Raw() string   { return e.raw }
+func (e PayloadError) Raw() string { return e.raw }
 
-// HTTPError 是上游 HTTP 失败的结构化错误。
+// HTTPError 是上游 HTTP 失败的结构化错误。Error() 走 ClassifyHTTP，保留正文供归类。
 type HTTPError struct {
 	StatusCode int
 	Status     string
 	Body       string
 	RetryAfter time.Duration
-}
-
-func (e HTTPError) Error() string {
-	switch e.StatusCode {
-	case 524:
-		return "上游网关超时（524）：模型请求可能仍在服务端执行并产生费用，请勿立即重试，请先到供应商后台核对任务或账单"
-	case http.StatusBadRequest, http.StatusUnprocessableEntity:
-		return "模型服务拒绝了请求，请检查模型和参数"
-	case http.StatusUnauthorized, http.StatusForbidden:
-		return "模型服务鉴权失败，请检查 API Key 和模型权限"
-	case http.StatusNotFound:
-		return "模型或模型接口不存在，请检查渠道配置"
-	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
-		return "模型服务响应超时，请稍后重试"
-	case http.StatusTooManyRequests:
-		return "模型服务请求过于频繁或额度不足，请稍后重试"
-	}
-	if e.StatusCode >= http.StatusInternalServerError {
-		return fmt.Sprintf("模型服务暂时不可用（HTTP %d）", e.StatusCode)
-	}
-	return fmt.Sprintf("模型服务请求失败（HTTP %d）", e.StatusCode)
 }
 
 // StatePendingError 表示上游任务状态尚未同步，应继续查询原任务。

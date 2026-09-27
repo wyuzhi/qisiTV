@@ -1,5 +1,5 @@
 import { audioMimeType, buildAudioSpeechRequest, normalizeAudioFormatValue } from "@/lib/audio-generation";
-import { createChannelTransport } from "@/services/api/channel-transport";
+import { assertChannelBlob, ChannelResponseError, createChannelTransport, isChannelCancellation } from "@/services/api/channel-transport";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { buildApiUrl, channelHasGenerationCredential, isBuiltinBeefAPIChannel, resolveModelChannel, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 
@@ -29,6 +29,7 @@ export async function requestAudioGeneration(config: AiConfig, prompt: string, o
         await assertAudioBlob(blob);
         return blob.type.startsWith("audio/") ? blob : new Blob([blob], { type: audioMimeType(format) });
     } catch (error) {
+        if (error instanceof ChannelResponseError || isChannelCancellation(error)) throw error;
         throw new Error(readAxiosError(error, "音频生成失败"));
     }
 }
@@ -144,17 +145,9 @@ export function assertAudioConfig(config: AiConfig, selectedModel: string) {
 }
 
 async function assertAudioBlob(blob: Blob) {
+    await assertChannelBlob(blob);
     const mimeType = blob.type.toLowerCase();
     if (mimeType.startsWith("image/") || mimeType.startsWith("video/") || mimeType.startsWith("text/")) throw new Error(`上游返回了非音频内容：${mimeType}`);
-    if (!mimeType.includes("json")) return;
-    let payload: { code?: number; msg?: string; error?: { message?: string } };
-    try {
-        payload = JSON.parse(await blob.text()) as { code?: number; msg?: string; error?: { message?: string } };
-    } catch {
-        return;
-    }
-    if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || "音频生成失败");
-    if (payload.error?.message) throw new Error(payload.error.message);
 }
 
 function readAxiosError(error: unknown, fallback: string) {

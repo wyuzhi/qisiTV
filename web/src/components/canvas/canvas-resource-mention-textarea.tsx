@@ -310,6 +310,11 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
 
     const imageFilesFromTransfer = (event: DragEvent<HTMLDivElement>) => Array.from(event.dataTransfer.files).filter((file) => file.type.startsWith("image/"));
 
+    const preserveNativeTextContextMenu = (event: MouseEvent<HTMLElement>) => {
+        event.stopPropagation();
+        props.onContextMenu?.(event as unknown as MouseEvent<HTMLTextAreaElement>);
+    };
+
     const mergedStyle = {
         ...(style || {}),
         caretColor: style?.color || theme.node.text,
@@ -352,6 +357,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                     className={`${className || ""} relative z-10 cursor-text select-text whitespace-pre-wrap break-words`}
                     style={{ ...mergedStyle, color: style?.color || theme.node.text }}
                     onInput={syncEditableValue}
+                    onContextMenu={preserveNativeTextContextMenu}
                     onCompositionStart={(event) => {
                         composingRef.current = true;
                         props.onCompositionStart?.(event as unknown as React.CompositionEvent<HTMLTextAreaElement>);
@@ -490,6 +496,7 @@ if (event.key === "Enter" && (event.nativeEvent.isComposing || composingRef.curr
                 value={value}
                 className={`${className || ""} relative z-10`}
                 style={mergedStyle}
+                onContextMenu={preserveNativeTextContextMenu}
                 onChange={(event) => {
                     const next = event.target.value;
                     onChange(next);

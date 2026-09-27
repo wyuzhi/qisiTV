@@ -291,9 +291,9 @@ func taskUsesUpstreamReportedProgress(taskType string) bool {
 
 func taskFailureMessage(err error) string {
 	if err == nil {
-		return "任务处理失败"
+		return persistableTaskFailureMessage(err)
 	}
-	return truncateRunes(err.Error(), 2_000)
+	return truncateRunes(persistableTaskFailureMessage(err), 2_000)
 }
 
 func taskExecutionTimeoutWithPolicy(taskType string, policy RuntimeTaskPolicy) time.Duration {

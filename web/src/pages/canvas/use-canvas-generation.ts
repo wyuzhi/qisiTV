@@ -12,6 +12,7 @@ import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import { cinematicStoryboardColumns, storyboardRowsFromTask } from "@/lib/canvas/canvas-project-domain";
 import { generationTaskMetadata } from "@/lib/canvas/canvas-project-generation";
 import { generationFailureMetadata } from "@/lib/generation-error";
+import { canvasTaskFailureMetadata } from "./canvas-generation-failure";
 import { runGenerationConsumer } from "@/services/generation-consumer-lifecycle";
 import { consumeCanvasGenerationContinuation } from "./use-canvas-operation-history";
 
@@ -123,6 +124,7 @@ export async function recoverCanvasGenerationTaskNode(input: {
                                   generationErrorCode: undefined,
                                   resourceReloadAvailable: undefined,
                                   failedPromptFingerprint: undefined,
+                                  failedInputFingerprint: undefined,
                                   storyboard: { rows: result.rows, visibleColumns: cinematicStoryboardColumns(item.metadata?.storyboard?.visibleColumns), referenceNodeIds: item.metadata?.storyboard?.referenceNodeIds || [] },
                               },
                           }
@@ -170,7 +172,7 @@ export async function recoverCanvasGenerationTaskNode(input: {
     } catch (error) {
         if (!isCurrentProject() || (error instanceof Error && error.name === "AbortError")) return;
         if (isCanvasGenerationDurableAckError(error)) return;
-        const failure = generationFailureMetadata(error, input.node.metadata?.composerContent || input.node.metadata?.prompt || "");
+        const failure = canvasTaskFailureMetadata(input.completed, input.nodesRef.current.find((item) => item.id === input.node.id)?.metadata || input.node.metadata, error);
         input.setNodes((current) =>
             current.map((item) =>
                 item.id === input.node.id
@@ -261,14 +263,14 @@ export function useCanvasGeneration({ projectId, domainProjectId, projectLoaded,
                     if (node.id !== targetNodeId) return node;
                     const failed = task.status === "failed" || task.status === "cancelled";
                     const hasCompletedContent = task.status === "succeeded" && Boolean(node.metadata?.content);
-                    const failure = failed ? generationFailureMetadata(task.error || (task.status === "cancelled" ? "任务已取消" : "任务失败"), node.metadata?.composerContent || node.metadata?.prompt || task.prompt || "") : undefined;
+                    const failure = failed ? canvasTaskFailureMetadata(task, node.metadata) : undefined;
                     return {
                         ...node,
                         metadata: {
                             ...node.metadata,
                             ...generationTaskMetadata(task),
                             status: failed ? NODE_STATUS_ERROR : hasCompletedContent ? NODE_STATUS_SUCCESS : NODE_STATUS_LOADING,
-                            ...(failure || { errorDetails: undefined, generationErrorCode: undefined, resourceReloadAvailable: undefined, failedPromptFingerprint: undefined }),
+                            ...(failure || { errorDetails: undefined, generationErrorCode: undefined, resourceReloadAvailable: undefined, failedPromptFingerprint: undefined, failedInputFingerprint: undefined }),
                         },
                     };
                 }),
@@ -432,7 +434,12 @@ export function useCanvasGeneration({ projectId, domainProjectId, projectLoaded,
                         });
                     } catch (error) {
                         if (!isCurrentProject() || (error instanceof Error && error.name === "AbortError")) return;
-                        const failure = generationFailureMetadata(error, node.metadata?.composerContent || node.metadata?.prompt || "");
+                        const currentMetadata = nodesRef.current.find((item) => item.id === node.id)?.metadata || node.metadata;
+                        const failure = generationFailureMetadata(error, currentMetadata?.prompt || "", currentMetadata?.references || []);
+                        if (failure.failedInputFingerprint && currentMetadata?.failedInputFingerprint) {
+                            failure.failedInputFingerprint = currentMetadata.failedInputFingerprint;
+                            failure.failedPromptFingerprint = currentMetadata.failedPromptFingerprint;
+                        }
                         setNodes((current) =>
                             isCurrentProject()
                                 ? current.map((item) =>
