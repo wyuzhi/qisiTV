@@ -95,6 +95,7 @@ const CATEGORY_COPY: Record<GenerationErrorCategory, CategoryCopy> = {
 };
 
 const PROVIDER_CODE_CATEGORIES: Record<string, GenerationErrorCategory> = {
+    invalid_reference_audio: "invalid_params",
     insufficient_user_quota: "quota_user",
     no_available_channel: "provider_unavailable",
     "channel:invalid_key": "provider_unavailable",
@@ -167,6 +168,7 @@ const PROVIDER_CODE_CATEGORIES: Record<string, GenerationErrorCategory> = {
     invalid_image_url: "input_inaccessible",
     file_too_large: "input_too_large",
     payload_too_large: "input_too_large",
+    video_request_body_too_large: "input_too_large",
     model_not_found: "model_missing",
     model_not_exist: "model_missing",
     invalid_model: "model_missing",
@@ -185,6 +187,7 @@ const PROVIDER_CODE_CATEGORIES: Record<string, GenerationErrorCategory> = {
     deadline_exceeded: "timeout",
     request_cancelled: "cancelled",
     provider_submission_unknown: "submission_uncertain",
+    video_submission_unknown: "submission_uncertain",
     provider_reference_invalid: "input_inaccessible",
 };
 
@@ -389,6 +392,10 @@ function classifyHttp(status: number | undefined, body: unknown): Classified {
         classified.reason = "模型服务响应超时，请求可能仍在服务端执行";
         classified.action = "请先查询原任务或到供应商核对状态，不要立即重新提交";
     }
+    if (status === 413 && classified.category === "input_too_large" && !classified.reason) {
+        classified.reason = "整次请求的数据量超过接口上限";
+        classified.action = "请减少参考素材，或改用可公开访问的素材链接后再提交";
+    }
     classified.status = status;
     classified.retryable = retryableCategory(classified.category) && !classified.uncertain;
     return classified;
@@ -397,6 +404,28 @@ function classifyHttp(status: number | undefined, body: unknown): Classified {
 function classifyText(raw: string): Classified {
     const text = raw.trim();
     if (!text) return { category: "unknown", retryable: false };
+    const durationCopy = referenceDurationCopy(text);
+    if (durationCopy) {
+        const debug = text.match(/。排查编号：([^。]+)。?$/)?.[1] || "";
+        return {
+            category: "invalid_params",
+            ...durationCopy,
+            requestId: sanitizeDebugId(debug.match(/(?:^| · )请求 ([A-Za-z0-9._:-]{6,127})$/)?.[1]),
+            taskId: sanitizeDebugId(debug.match(/^任务 ([A-Za-z0-9._:-]{6,127})(?: · |$)/)?.[1]),
+            retryable: false,
+        };
+    }
+    const mediaCopy = referenceMediaConstraintCopy(text);
+    if (mediaCopy) {
+        const debug = text.match(/。排查编号：([^。]+)。?$/)?.[1] || "";
+        return {
+            category: mediaCopy.reason.includes("过大") ? "input_too_large" : "invalid_params",
+            ...mediaCopy,
+            requestId: sanitizeDebugId(debug.match(/(?:^| · )请求 ([A-Za-z0-9._:-]{6,127})$/)?.[1]),
+            taskId: sanitizeDebugId(debug.match(/^任务 ([A-Za-z0-9._:-]{6,127})(?: · |$)/)?.[1]),
+            retryable: false,
+        };
+    }
     const persisted = matchPersistedCategory(text);
     if (persisted) return { category: persisted, uncertain: ["timeout", "download_failed", "submission_uncertain"].includes(persisted), retryable: false };
     if (HTML_BODY.test(text)) {
@@ -429,6 +458,10 @@ function classifyText(raw: string): Classified {
 
 function specialize(classified: Classified, fields: ExtractedFields): Classified {
     fields = { ...fields, message: sanitizeProviderText(fields.message) };
+    const audioOrDuration = referenceAudioCopy(fields.message, normalizeCode(fields.code) === "invalid_reference_audio") || referenceDurationCopy(fields.message);
+    if (audioOrDuration) return { ...classified, category: "invalid_params", ...audioOrDuration, retryable: false };
+    const mediaCopy = referenceMediaConstraintCopy(fields.message);
+    if (mediaCopy) return { ...classified, category: mediaCopy.reason.includes("过大") ? "input_too_large" : "invalid_params", ...mediaCopy, retryable: false };
     if (classified.category === "invalid_params") {
         const refined = categoryFromProviderMessage(fields.message);
         if (refined === "context_too_long" || refined === "input_inaccessible" || refined === "input_too_large" || refined === "model_missing") classified.category = refined;
@@ -442,10 +475,44 @@ function specialize(classified: Classified, fields: ExtractedFields): Classified
     }
     const normalized = `${fields.message} ${fields.code}`.toLowerCase();
     if (classified.category === "invalid_params") {
-        const duration = fields.message.match(/duration\s+(?:must|should)\s+be\s+between\s+(\d+(?:\.\d+)?)\s+and\s+(\d+(?:\.\d+)?)\s*(?:seconds|s)\b/i);
+        const duration = fields.message.match(/duration\s+(?:must|should)\s+be\s+between\s+(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)?\s+and\s+(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b/i);
         if (duration && Number(duration[1]) <= Number(duration[2])) {
-            classified.reason = "视频时长不符合模型要求";
-            classified.action = `请将时长调整为 ${duration[1]}–${duration[2]} 秒后重试`;
+            const reference = fields.message.includes("素材") || /reference|audio/i.test(fields.message);
+            classified.reason = reference ? "参考素材时长不符合模型要求" : "视频时长不符合模型要求";
+            classified.action = reference ? `请检查每段参考音频和视频，将不符合要求的素材调整为 ${duration[1]}–${duration[2]} 秒后重新提交` : `请将时长调整为 ${duration[1]}–${duration[2]} 秒后重试`;
+        }
+        const height = fields.message.match(/height\s+(?:must|should)\s+be\s+between\s+(\d+)\s*(?:px|pixels?)?\s+and\s+(\d+)\s*(?:px|pixels?)/i);
+        if (height) {
+            classified.reason = "参考素材高度不符合模型要求";
+            classified.action = `请将高度调整为 ${height[1]}–${height[2]} 像素后重新提交`;
+        }
+        const width = fields.message.match(/width\s+(?:must|should)\s+be\s+between\s+(\d+)\s*(?:px|pixels?)?\s+and\s+(\d+)\s*(?:px|pixels?)/i);
+        if (width && !height) {
+            classified.reason = "参考素材宽度不符合模型要求";
+            classified.action = `请将宽度调整为 ${width[1]}–${width[2]} 像素后重新提交`;
+        }
+        const aspect = fields.message.match(/aspect(?:\s*ratio)?\s+(?:must|should)\s+be\s+between\s+(\d+(?:\.\d+)?)\s+and\s+(\d+(?:\.\d+)?)/i);
+        if (aspect) {
+            classified.reason = "参考素材宽高比不符合模型要求";
+            classified.action = `请将宽高比调整为 ${aspect[1]}–${aspect[2]} 后重新提交`;
+        }
+        const pixels = fields.message.match(/(?:pixel(?:s)?(?:\s+count)?|total\s+pixels)\s+(?:must|should)\s+be\s+between\s+(\d+)\s+and\s+(\d+)/i);
+        if (pixels) {
+            classified.reason = "参考素材像素总量不符合模型要求";
+            classified.action = "请调整尺寸或更换后再提交";
+        }
+    }
+    if (classified.category === "input_too_large") {
+        if (
+            normalizeCode(fields.code) === "video_request_body_too_large" ||
+            fields.message.startsWith("整次请求的数据量超过接口上限") ||
+            /(?:request\s+(?:body|entity|payload)|payload)\s+(?:is\s+)?too\s+large|(?:request|payload).{0,24}(?:exceeds?|larger than)/i.test(fields.message)
+        ) {
+            classified.reason = "整次请求的数据量超过接口上限";
+            classified.action = "请减少参考素材，或改用可公开访问的素材链接后再提交";
+        } else if (/(?:file|image|video|audio)\s+too\s+large/i.test(fields.message)) {
+            classified.reason = "单个参考文件过大";
+            classified.action = "请压缩或更换该素材后再提交";
         }
     }
     if (((normalized.includes("thinking") || normalized.includes("reasoning")) && normalized.includes("tool_choice")) || (normalized.includes("tool_choice") && (normalized.includes("not support") || normalized.includes("unsupported")))) {
@@ -457,18 +524,76 @@ function specialize(classified: Classified, fields: ExtractedFields): Classified
     return classified;
 }
 
+function referenceDurationCopy(text: string): CategoryCopy | undefined {
+    const audio = referenceAudioCopy(text);
+    if (audio) return audio;
+    const numbered = text.match(/^第 (\d+) 段参考(音频|视频)时长为 (\d+(?:\.\d+)?) 秒[，。]需要 (\d+(?:\.\d+)?)–(\d+(?:\.\d+)?) 秒/);
+    if (numbered) return { reason: `第 ${numbered[1]} 段参考${numbered[2]}时长为 ${numbered[3]} 秒`, action: `需要 ${numbered[4]}–${numbered[5]} 秒；请裁剪或更换这段素材后再提交` };
+    const missing = text.match(/^第 (\d+) 段参考(音频|视频)的时长无法读取/);
+    if (missing) return { reason: `第 ${missing[1]} 段参考${missing[2]}的时长无法读取`, action: "请重新导入素材后再提交" };
+    const persisted = text.match(/^参考素材时长不符合模型要求。请检查每段参考音频和视频，将不符合要求的素材调整为 (\d+(?:\.\d+)?)–(\d+(?:\.\d+)?) 秒/);
+    if (persisted) return { reason: "参考素材时长不符合模型要求", action: `请检查每段参考音频和视频，将不符合要求的素材调整为 ${persisted[1]}–${persisted[2]} 秒后重新提交` };
+}
+
+function referenceAudioCopy(text: string, invalidAudio = false): CategoryCopy | undefined {
+    const duration = text.match(/^reference audio (\d+) is (\d+(?:\.\d+)?) seconds; use audio between (\d+(?:\.\d+)?) and (\d+(?:\.\d+)?) seconds/i);
+    if (duration) return { reason: `第 ${duration[1]} 段参考音频时长为 ${duration[2]} 秒`, action: `需要 ${duration[3]}–${duration[4]} 秒；请裁剪或更换这段素材后再提交` };
+    const total =
+        text.match(/^reference audio is (\d+(?:\.\d+)?) seconds in total; this model accepts at most (\d+(?:\.\d+)?) seconds of reference audio/i) || text.match(/^参考音频总时长为 (\d+(?:\.\d+)?) 秒[。，](?:该|当前)模型最多支持 (\d+(?:\.\d+)?) 秒/);
+    if (total) return { reason: `参考音频总时长为 ${total[1]} 秒`, action: `该模型最多支持 ${total[2]} 秒参考音频；请裁剪或减少参考音频后再提交` };
+    const numbered = text.match(/^reference audio (\d+)(?::| requires| exceeds)/i);
+    const label = numbered ? `第 ${numbered[1]} 段参考音频` : "参考音频";
+    const persisted = text.match(/^(第 \d+ 段参考音频|参考音频)(无法下载|的格式或时长无法读取|文件过大|不符合模型要求)。/);
+    const issue =
+        persisted?.[2] ||
+        (invalidAudio || numbered
+            ? /15 MiB|byte limit|at most.*MiB/i.test(text)
+                ? "文件过大"
+                : /duration could not be measured|invalid.*audio|unsupported|readable audio track/i.test(text)
+                  ? "的格式或时长无法读取"
+                  : /download|HTTPS URL|URL.*(?:policy|allowed)|redirect|readable within/i.test(text)
+                    ? "无法下载"
+                    : "不符合模型要求"
+            : "");
+    if (!issue) return;
+    const actions: Record<string, string> = {
+        无法下载: "请重新上传音频，确认素材链接可公开访问后再提交",
+        的格式或时长无法读取: "请将音频重新导出为 MP3、WAV 或 M4A，确认文件完整且含有音轨后再上传",
+        文件过大: "请压缩或更换音频，确保文件不超过模型的大小限制后再提交",
+        不符合模型要求: "请检查参考音频的时长、格式和大小，调整后再提交",
+    };
+    return { reason: `${persisted?.[1] || label}${issue}`, action: actions[issue] };
+}
+
 function extractProviderFields(raw: string): ExtractedFields {
     const fields = emptyFields();
     if (raw.length > 16384) return fields;
+    const suffix = raw.match(/\s*\(request id:\s*([A-Za-z0-9._:-]{6,127})\)\s*$/i);
+    if (suffix) raw = raw.slice(0, suffix.index);
     const tryParse = (value: string) => {
         try {
             const parsed = JSON.parse(value) as unknown;
-            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) Object.assign(fields, walkProviderFields(parsed as Record<string, unknown>, 0));
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                Object.assign(fields, walkProviderFields(parsed as Record<string, unknown>, 0));
+                fields.requestId ||= sanitizeDebugId(suffix?.[1]);
+            }
         } catch {
             return;
         }
     };
     tryParse(raw.trim());
+    if (fields.message.startsWith("{") || fields.message.startsWith("[")) {
+        const nested = emptyFields();
+        try {
+            const parsed = JSON.parse(fields.message) as unknown;
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) Object.assign(nested, walkProviderFields(parsed as Record<string, unknown>, 0));
+        } catch {
+            /* keep outer fields */
+        }
+        if (nested.message) fields.message = nested.message;
+        if (nested.code) fields.code = nested.code;
+        if (nested.type) fields.type = nested.type;
+    }
     if (fields.message || fields.code) return fields;
     for (let index = raw.indexOf("{"); index >= 0; index = raw.indexOf("{", index + 1)) {
         tryParse(raw.slice(index).trim());
@@ -523,9 +648,32 @@ function categoryFromProviderCode(...values: string[]): GenerationErrorCategory 
     return "";
 }
 
+function referenceMediaConstraintCopy(text: string): CategoryCopy | undefined {
+    const persisted = text.match(/^参考素材(宽度|高度|宽高比)不符合模型要求。请将(?:宽度|高度|宽高比)调整为 (\d+(?:\.\d+)?)–(\d+(?:\.\d+)?)( 像素| )后重新提交/);
+    if (persisted) return { reason: `参考素材${persisted[1]}不符合模型要求`, action: `请将${persisted[1]}调整为 ${persisted[2]}–${persisted[3]}${persisted[4]}后重新提交` };
+    const single = text.match(/^(第 \d+ (?:张|个|段)参考(?:图|视频|音频)(?:宽度|高度|宽高比|时长)为 \d+(?:\.\d+)?(?: 像素| 秒)?)[，。]需要 ((?:至少|不超过) \d+(?:\.\d+)?(?: 像素| 秒)?)/);
+    if (single) return { reason: single[1], action: `需要 ${single[2]}；${single[1].includes("时长") ? "请裁剪或更换这段素材后再提交" : "请调整尺寸或更换后再提交"}` };
+    const size = text.match(/^第 (\d+) (张|个|段)参考(图|视频|音频)(宽度|高度)为 (\d+) 像素[，。]需要 (\d+)–(\d+) 像素/);
+    if (size) return { reason: `第 ${size[1]} ${size[2]}参考${size[3]}${size[4]}为 ${size[5]} 像素`, action: `需要 ${size[6]}–${size[7]} 像素；请调整尺寸或更换后再提交` };
+    const aspect = text.match(/^第 (\d+) (张|个|段)参考(图|视频|音频)宽高比为 (\d+(?:\.\d+)?)[，。]需要 (\d+(?:\.\d+)?)–(\d+(?:\.\d+)?)/);
+    if (aspect) return { reason: `第 ${aspect[1]} ${aspect[2]}参考${aspect[3]}宽高比为 ${aspect[4]}`, action: `需要 ${aspect[5]}–${aspect[6]}；请调整尺寸或更换后再提交` };
+    const pixels = text.match(/^第 (\d+) (张|个|段)参考(图|视频|音频)像素总量/);
+    if (pixels) return { reason: `第 ${pixels[1]} ${pixels[2]}参考${pixels[3]}像素总量不符合当前模型要求`, action: "请调整尺寸或更换后再提交" };
+    const file = text.match(/^第 (\d+) (张|个|段)参考(图|视频|音频)文件过大[，。]当前模型单文件上限为 ([^；;]+)/);
+    if (file) return { reason: `第 ${file[1]} ${file[2]}参考${file[3]}文件过大`, action: `当前模型单文件上限为 ${file[4]}；请压缩或更换后再提交` };
+    if (text.startsWith("整次请求的参考素材合计过大")) return { reason: "整次请求的参考素材合计过大", action: "请减少素材后再提交" };
+}
+
 function categoryFromProviderMessage(raw: string): GenerationErrorCategory | "" {
     const normalized = sanitizeProviderText(raw).toLowerCase();
     if (!normalized.trim()) return "";
+    if (/duration\s+(?:must|should)\s+be\s+between\s+\d/.test(normalized)) return "invalid_params";
+    if (
+        /(?:width|height)\s+(?:must|should)\s+be\s+between\s+\d/.test(normalized) ||
+        /aspect(?:\s*ratio)?\s+(?:must|should)\s+be\s+between/.test(normalized) ||
+        /(?:pixel(?:s)?(?:\s+count)?|total\s+pixels)\s+(?:must|should)\s+be\s+between/.test(normalized)
+    )
+        return "invalid_params";
     if (((normalized.includes("thinking") || normalized.includes("reasoning")) && normalized.includes("tool_choice")) || (normalized.includes("tool_choice") && (normalized.includes("not support") || normalized.includes("unsupported"))))
         return "invalid_params";
     if (containsContentSafety(normalized)) return moderationCategoryFromMessage(normalized);
@@ -537,7 +685,8 @@ function categoryFromProviderMessage(raw: string): GenerationErrorCategory | "" 
     if (normalized.includes("invalid api key") || normalized.includes("incorrect api key") || normalized.includes("authentication") || normalized.includes("unauthorized") || normalized.includes("鉴权失败")) return "auth";
     if (normalized.includes("permission") && (normalized.includes("denied") || normalized.includes("model") || normalized.includes("access"))) return "permission";
     if (normalized.includes("url error") || normalized.includes("failed to download") || normalized.includes("cannot fetch") || normalized.includes("invalid image url") || normalized.includes("无法读取")) return "input_inaccessible";
-    if (normalized.includes("too large") || normalized.includes("payload too large") || normalized.includes("过大")) return "input_too_large";
+    if (normalized.includes("too large") || normalized.includes("payload too large") || normalized.includes("过大") || normalized.startsWith("整次请求的数据量超过接口上限") || /(?:request|payload).{0,24}(?:exceeds?|larger than)/i.test(normalized))
+        return "input_too_large";
     if (normalized.includes("invalid") || normalized.includes("parameter") || normalized.includes("argument") || normalized.includes("请检查模型")) return "invalid_params";
     return "";
 }

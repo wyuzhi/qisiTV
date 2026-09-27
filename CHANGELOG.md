@@ -4,12 +4,38 @@ Changes to qisiTV and its inherited release history are documented in this file.
 
 ## Unreleased
 
+- Merged upstream v1.5.9 while preserving qisiTV branding, LikeAI, and local Agent integration; Cloudflare publishing is optional and requires the fork's own release configuration.
 - Renamed the product, icons, local Agent tools, packages, and runtime identifiers to qisiTV while preserving existing local data and upstream attribution.
 - Added LikeAI model support and a shared MCP / CLI interface for external local Agents.
 - Built-in BeefAPI can be connected from the desktop app without pasting a key.
 - Prepared the first audited public source snapshot.
 - Added reproducible local builds, automated quality checks, and multi-architecture container publishing.
 - Standardized the upstream public artifacts, runtime identifiers, documentation, and repository links.
+
+## v1.5.9
+
+- Validate reference image dimensions, aspect ratios, file sizes and audio/video duration using each model's configured capabilities before submitting.
+- Preserve supported reference counts, resolutions and durations instead of silently dropping media or downgrading requested settings.
+- Support local and inline reference audio for BeefAPI and native Ark channels, while retaining provider-specific audio-only rules.
+- Show actionable reference conversion and request-size errors in both canvas nodes and task history, with safe diagnostics and no unsafe unchanged retries.
+
+## v1.5.8
+
+- Add a persistent light/dark switch to the workspace sidebar, with matching home, asset library, menus and settings surfaces.
+- Restore canvas appearance controls with light, dark and custom modes; keep each canvas appearance independent from the workspace theme.
+- New canvases follow the workspace theme unless an explicit default appearance is saved.
+
+## v1.5.7
+
+- Desktop update checks and downloads now use Cloudflare-hosted files, preserving signed manifests and package integrity verification.
+- Publish immutable platform packages before switching the update feed, with verified downloads and protection against incomplete or older releases.
+- Check Seedance reference audio total duration and explain gateway media validation failures with the affected clip and actionable limits.
+
+## v1.5.6
+
+- Validate Seedance reference audio/video duration before submission and preserve duration metadata for character voice samples.
+- Explain material conversion failures with actionable duration limits and retain request identifiers for support.
+- Keep existing task polling available and prevent unsafe resubmission while provider acceptance is uncertain.
 
 ## v1.5.5
 

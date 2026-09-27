@@ -256,24 +256,26 @@ func normalizeSeedanceVideosRatio(value string) string {
 	return ratio
 }
 
-func normalizeSeedanceResolution(value string, model string) string {
-	resolution := strings.TrimSuffix(strings.TrimSpace(value), "p")
-	if strings.EqualFold(resolution, "4k") {
-		resolution = "2160"
+func normalizeSeedanceResolution(value string, _ string) string {
+	trimmed := strings.TrimSpace(value)
+	lower := strings.ToLower(trimmed)
+	if isAutomaticVideoResolution(trimmed) {
+		return "720p"
 	}
-	switch resolution {
-	case "480", "720", "1080", "2160":
-	default:
-		if value == "low" {
-			resolution = "480"
-		} else {
-			resolution = "720"
-		}
+	if lower == "low" {
+		return "480p"
 	}
-	if strings.Contains(strings.ToLower(model), "fast") && (resolution == "1080" || resolution == "2160") {
-		resolution = "720"
+	if lower == "4k" {
+		return "2160p"
 	}
-	return resolution + "p"
+	if lower == "2k" {
+		return "1440p"
+	}
+	resolution := strings.TrimSuffix(lower, "p")
+	if _, err := strconv.Atoi(resolution); err == nil {
+		return resolution + "p"
+	}
+	return trimmed
 }
 
 func parseBool(value string, fallback bool) bool {

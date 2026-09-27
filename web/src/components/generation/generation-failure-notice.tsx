@@ -48,7 +48,7 @@ export function GenerationFailureNotice({ explanation, context, compact, onRetry
                         onMouseDown={(event) => event.stopPropagation()}
                     >
                         <Eye className="size-3.5" />
-                        查看详情
+                        {explanation.uncertain ? "查看原任务" : "查看详情"}
                     </button>
                 ) : null}
                 {diagnostics ? (

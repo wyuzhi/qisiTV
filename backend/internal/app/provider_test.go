@@ -22,6 +22,33 @@ import (
 )
 
 const testReferenceImageDataURL = "data:image/png;base64,aGVsbG8="
+
+func TestNativeArkPluginPreservesInlineAssetsCountsAndAutomaticDuration(t *testing.T) {
+	for _, name := range []string{"volcengine-ark-video", "volcengine-ark-agent-plan-video"} {
+		input := canvasGenerationInput{Config: providerConfig{InterfaceType: name, Model: "doubao-seedance-2-5-260528", VideoSeconds: "-1"}, Prompt: "test"}
+		policy := providerMediaHydrationPolicyFor(context.Background(), input)
+		if policy.requireURL {
+			t.Fatalf("%s requires public URL", name)
+		}
+		input.ReferenceAudios = []providerMedia{{URL: "data:audio/wav;base64,AAAA", DurationMs: 2000}, {URL: "asset://voice", DurationMs: 2000}}
+		body := officialVideoCreateBody(t, input)
+		if body["duration"] != float64(-1) {
+			t.Fatalf("duration = %#v", body["duration"])
+		}
+		content := body["content"].([]any)
+		if len(content) != 3 || content[1].(map[string]any)["audio_url"].(map[string]any)["url"] != input.ReferenceAudios[0].URL || content[2].(map[string]any)["audio_url"].(map[string]any)["url"] != "asset://voice" {
+			t.Fatalf("audio payload = %#v", content)
+		}
+		for i := 0; i < 10; i++ {
+			input.ReferenceImages = append(input.ReferenceImages, providerMedia{URL: "asset://image"})
+		}
+		body = officialVideoCreateBody(t, input)
+		if len(body["content"].([]any)) != 13 {
+			t.Fatal("plugin truncated references")
+		}
+	}
+}
+
 const testGeminiReferenceImageDataURL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 
 func officialVideoCreateBody(t *testing.T, input canvasGenerationInput) map[string]any {
@@ -1708,6 +1735,94 @@ func TestTextReferenceImageRejectsInternalAssetURL(t *testing.T) {
 	}
 }
 
+func TestSeedance25AudioOnlyRequestBodyOmitsRequiredImage(t *testing.T) {
+	input := canvasGenerationInput{
+		Prompt:          "follow the soundtrack",
+		Config:          providerConfig{Model: "seedance-2.5", Size: "16:9", VideoSeconds: "5"},
+		ReferenceAudios: []providerMedia{{ID: "audio-1", URL: "https://example.com/a.mp3", DurationMs: 3000}},
+		VideoCapability: DefaultModelCapabilityConfigForModel("newapi-channel-2", "seedance-2.5").Video,
+		Metadata:        map[string]interface{}{"videoEditOperation": "audio_to_video"},
+	}
+	body, err := seedanceVideosRequestBody(input)
+	if err != nil {
+		t.Fatalf("seedanceVideosRequestBody() error = %v", err)
+	}
+	if len(body.ReferenceAudios) != 1 || body.ImageURL != "" {
+		t.Fatalf("audio-only body = %#v", body)
+	}
+	legacy := input
+	legacy.VideoCapability = DefaultModelCapabilityConfigForModel("newapi-channel-2", "seedance-2.0").Video
+	if _, err := seedanceVideosRequestBody(legacy); err == nil || !strings.Contains(err.Error(), "只用音频") {
+		t.Fatalf("2.0 audio-only error = %v", err)
+	}
+}
+
+func TestBeefAPIAudioURLAcceptsDataAssetAndHTTPS(t *testing.T) {
+	data, err := beefAPIAudioURL(providerMedia{DataURL: "data:audio/mpeg;base64,AAAA"})
+	if err != nil || data != "data:audio/mpeg;base64,AAAA" {
+		t.Fatalf("data audio = %q, %v", data, err)
+	}
+	asset, err := beefAPIAudioURL(providerMedia{URL: "asset://voice"})
+	if err != nil || asset != "asset://voice" {
+		t.Fatalf("asset audio = %q, %v", asset, err)
+	}
+	url, err := beefAPIAudioURL(providerMedia{URL: "https://cdn.example.com/a.mp3"})
+	if err != nil || url != "https://cdn.example.com/a.mp3" {
+		t.Fatalf("https audio = %q, %v", url, err)
+	}
+}
+
+func TestSeedancePayloadPreservesRequestedResolutionAndDuration(t *testing.T) {
+	capability := DefaultModelCapabilityConfigForModel("newapi-channel-2", "seedance-2.5").Video
+	input := canvasGenerationInput{
+		Prompt:          "make it move",
+		Config:          providerConfig{Model: "seedance-2.0-fast", Size: "16:9", VideoSeconds: "20", VQuality: "1080p"},
+		VideoCapability: capability,
+		ReferenceImages: []providerMedia{{ID: "image-1", DataURL: testReferenceImageDataURL}},
+	}
+	body, err := beefAPIVideoRequestBody(input)
+	if err != nil {
+		t.Fatalf("beefAPIVideoRequestBody() error = %v", err)
+	}
+	if fmt.Sprint(body["resolution"]) != "1080p" || fmt.Sprint(body["duration"]) != "20" {
+		t.Fatalf("fast 1080/20 payload = %#v", body)
+	}
+	input.Config.VQuality = "2k"
+	input.Config.VideoSeconds = "30"
+	body, err = beefAPIVideoRequestBody(input)
+	if err != nil {
+		t.Fatalf("2k/30 body error = %v", err)
+	}
+	if fmt.Sprint(body["resolution"]) != "1440p" || fmt.Sprint(body["duration"]) != "30" {
+		t.Fatalf("2k/30 payload = %#v", body)
+	}
+	videos, err := seedanceVideosRequestBody(canvasGenerationInput{
+		Prompt:          "make it move",
+		Config:          providerConfig{Model: "seedance-2.5", Size: "16:9", VideoSeconds: "-1"},
+		VideoCapability: capability,
+		ReferenceImages: []providerMedia{{ID: "image-1", DataURL: testReferenceImageDataURL}},
+	})
+	if err != nil {
+		t.Fatalf("adaptive duration body error = %v", err)
+	}
+	if videos.Duration != -1 {
+		t.Fatalf("adaptive duration = %d", videos.Duration)
+	}
+	if got := normalizeSeedanceResolution("1080p", "seedance-2.0-fast"); got != "1080p" {
+		t.Fatalf("fast 1080 normalized to %s", got)
+	}
+	if got := normalizeSeedanceResolution("4k", "seedance-2.0-fast"); got != "2160p" {
+		t.Fatalf("fast 4k normalized to %s", got)
+	}
+	plan := seedanceAgentPlanRequest{
+		Resolution: normalizeSeedanceResolution("2k", "seedance-2.5"),
+		Duration:   normalizeSeedanceDuration("-1"),
+	}
+	if plan.Resolution != "1440p" || plan.Duration != -1 {
+		t.Fatalf("agent plan payload = %#v", plan)
+	}
+}
+
 func TestSeedanceVideosBodyUsesVideosEndpointFields(t *testing.T) {
 	body, err := seedanceVideosRequestBody(canvasGenerationInput{
 		Prompt: "make it move",
@@ -2423,14 +2538,18 @@ func TestNewAPIVideoOmitsImagesForTextToVideoOperation(t *testing.T) {
 	}
 }
 
-func TestSeedanceVideosBodyRequiresImageForVideoOrAudioReferences(t *testing.T) {
-	_, err := seedanceVideosRequestBody(canvasGenerationInput{
+func TestSeedanceVideosBodyAllowsVideoOnlyWithoutImage(t *testing.T) {
+	body, err := seedanceVideosRequestBody(canvasGenerationInput{
 		Prompt:          "make it move",
-		Config:          providerConfig{Model: "seedance-2.0-mini-480p"},
+		Config:          providerConfig{Model: "seedance-2.5"},
+		VideoCapability: DefaultModelCapabilityConfigForModel("newapi-channel-2", "seedance-2.5").Video,
 		ReferenceVideos: []providerMedia{{ID: "video-1", URL: "https://example.com/ref.mp4"}},
 	})
-	if err == nil {
-		t.Fatal("seedanceVideosBody() error = nil, want error")
+	if err != nil {
+		t.Fatalf("video-only body error = %v", err)
+	}
+	if len(body.ReferenceVideos) != 1 || body.ImageURL != "" {
+		t.Fatalf("video-only body = %#v", body)
 	}
 }
 
@@ -2932,6 +3051,36 @@ func TestRunNewAPIChannel2VideoTaskReturnsTypedDeadlineWhenPollingWindowEnds(t *
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("runVideoTask() error = %v, want context deadline exceeded", err)
+	}
+}
+
+func TestProcessResumedSeedanceVideoDoesNotRevalidateDeletedReferences(t *testing.T) {
+	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "true")
+	var methods []string
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/video.mp4" {
+			w.Header().Set("Content-Type", "video/mp4")
+			_, _ = w.Write([]byte("video"))
+			return
+		}
+		if !strings.Contains(r.URL.Path, "existing-provider-task") {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"code":"success","data":{"task_id":"existing-provider-task","status":"SUCCESS","result_url":"` + server.URL + `/video.mp4"}}`))
+	}))
+	defer server.Close()
+	input := canvasGenerationInput{Mode: "video", Prompt: "test", Config: providerConfig{BaseURL: server.URL, APIKey: "key", Model: "seedance-2.5", InterfaceType: "newapi-channel-2"}, ReferenceAudios: []providerMedia{{StorageKey: "resource:deleted-voice"}}}
+	raw, _ := json.Marshal(input)
+	ctx := withProviderAnalytics(context.Background(), nil, model.Task{ID: "task-1", Type: "canvas_video", ProviderRequestID: "existing-provider-task"})
+	result, err := (&Service{}).processCanvasGenerationTask(ctx, "user-1", "", "canvas_video", "", string(raw))
+	if err != nil || result["video"] == nil {
+		t.Fatalf("resume failed: %v %#v", err, result)
+	}
+	if strings.Join(methods, ",") != "GET,GET" {
+		t.Fatalf("resume must only query/download original task: %#v", methods)
 	}
 }
 

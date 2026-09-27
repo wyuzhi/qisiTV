@@ -116,16 +116,36 @@ type VideoCapabilityConfig struct {
 }
 
 type VideoReferenceConfig struct {
-	PromptMaxChars   int   `json:"promptMaxChars"`
-	MinImages        int   `json:"minImages"`
-	MaxImages        int   `json:"maxImages"`
-	MaxImageBytes    int64 `json:"maxImageBytes"`
-	MaxVideos        int   `json:"maxVideos"`
-	MaxVideoBytes    int64 `json:"maxVideoBytes"`
-	MaxVideoDuration int   `json:"maxVideoDurationSeconds"`
-	MaxAudios        int   `json:"maxAudios"`
-	MaxAudioBytes    int64 `json:"maxAudioBytes"`
-	MaxAudioDuration int   `json:"maxAudioDurationSeconds"`
+	PromptMaxChars        int     `json:"promptMaxChars"`
+	MinImages             int     `json:"minImages"`
+	MaxImages             int     `json:"maxImages"`
+	MaxImageBytes         int64   `json:"maxImageBytes"`
+	MinImageWidth         int     `json:"minImageWidth,omitempty"`
+	MaxImageWidth         int     `json:"maxImageWidth,omitempty"`
+	MinImageHeight        int     `json:"minImageHeight,omitempty"`
+	MaxImageHeight        int     `json:"maxImageHeight,omitempty"`
+	MinImageAspect        float64 `json:"minImageAspect,omitempty"`
+	MaxImageAspect        float64 `json:"maxImageAspect,omitempty"`
+	MinImagePixels        int64   `json:"minImagePixels,omitempty"`
+	MaxImagePixels        int64   `json:"maxImagePixels,omitempty"`
+	MaxVideos             int     `json:"maxVideos"`
+	MaxVideoBytes         int64   `json:"maxVideoBytes"`
+	MaxVideoDuration      int     `json:"maxVideoDurationSeconds"`
+	MinVideoDuration      int     `json:"minVideoDurationSeconds,omitempty"`
+	MaxVideoTotalDuration int     `json:"maxVideoTotalDurationSeconds,omitempty"`
+	MinVideoWidth         int     `json:"minVideoWidth,omitempty"`
+	MaxVideoWidth         int     `json:"maxVideoWidth,omitempty"`
+	MinVideoHeight        int     `json:"minVideoHeight,omitempty"`
+	MaxVideoHeight        int     `json:"maxVideoHeight,omitempty"`
+	MinVideoAspect        float64 `json:"minVideoAspect,omitempty"`
+	MaxVideoAspect        float64 `json:"maxVideoAspect,omitempty"`
+	MinVideoPixels        int64   `json:"minVideoPixels,omitempty"`
+	MaxVideoPixels        int64   `json:"maxVideoPixels,omitempty"`
+	MaxAudios             int     `json:"maxAudios"`
+	MaxAudioBytes         int64   `json:"maxAudioBytes"`
+	MaxAudioDuration      int     `json:"maxAudioDurationSeconds"`
+	MinAudioDuration      float64 `json:"minAudioDurationSeconds,omitempty"`
+	MaxAudioTotalDuration int     `json:"maxAudioTotalDurationSeconds,omitempty"`
 }
 
 // DefaultVideoPromptMaxChars 是普通视频模型提示词字符数的默认上限。
@@ -268,10 +288,11 @@ func DefaultModelCapabilityConfigForModel(protocol string, modelName string) *Mo
 		video.Duration = VideoDurationConfig{Selection: "enum", Values: []int{4, 6, 8}, Default: 6}
 		video.Resolutions = []string{"720p", "1080p"}
 	case model.ChannelInterfaceVolcengineArkVideo, model.ChannelInterfaceVolcengineArkAgentPlanVideo:
-		video.Operations = append(video.Operations, "reference_to_video", "audio_to_video")
+		video.Operations = append(video.Operations, "reference_to_video")
 		video.References.MaxVideos, video.References.MaxAudios = 3, 3
 		video.References.MaxVideoBytes, video.References.MaxAudioBytes = 200*1024*1024, 15*1024*1024
 		video.References.MaxVideoDuration, video.References.MaxAudioDuration = 15, 15
+		video.References.MinVideoDuration, video.References.MinAudioDuration = 2, 2
 		video.GenerateAudio = VideoBooleanConfig{Supported: true, Default: true}
 		video.Watermark = VideoBooleanConfig{Supported: true, Default: false}
 		video.Resolutions = []string{"480p", "720p", "1080p"}
@@ -312,6 +333,19 @@ func DefaultModelCapabilityConfigForModel(protocol string, modelName string) *Mo
 	}
 	if protocol == "likeai-video" {
 		applyLikeAIVideoCapability(video, modelName)
+	}
+	if isSeedance2Family(protocol, modelName) {
+		video.References = overlayOfficialSeedance2References(video.References, isSeedance25Model(modelName))
+		if model.IsVolcengineArkVideoProtocol(model.ChannelInterfaceType(protocol)) {
+			video.References.MinAudioDuration = 2
+		}
+		video.Operations = appendUniqueString(video.Operations, "reference_to_video")
+		if isSeedance25Model(modelName) {
+			video.Operations = appendUniqueString(video.Operations, "audio_to_video")
+			if video.Duration.Selection == "range" && video.Duration.Max < 30 {
+				video.Duration.Max = 30
+			}
+		}
 	}
 	return &ModelCapabilityConfig{Version: 1, Text: text, Image: DefaultImageCapabilityConfig(protocol, modelName), Video: video}
 }
@@ -422,33 +456,8 @@ func applyModelSpecificVideoCapability(profile *VideoCapabilityConfig, protocol 
 	if profile == nil {
 		return profile
 	}
-	// APIMart/Seedance 2.x accepts multimodal references (up to 9 images and
-	// 3 videos). Older channel rows may still contain the generic maxVideos=0
-	// profile, so normalize it at the backend validation boundary as well.
 	normalizedProtocol := strings.TrimSpace(protocol)
 	normalizedModel := strings.ToLower(strings.TrimSpace(modelName))
-	if strings.Contains(normalizedModel, "seedance-2") && (normalizedProtocol == "newapi-channel-2" || normalizedProtocol == "newapi" || normalizedProtocol == "openai") {
-		value := *profile
-		value.References = profile.References
-		is25 := normalizedModel == "seedance-2.5"
-		value.References.MaxImages = 9
-		value.References.MaxVideos = 3
-		value.References.MaxVideoBytes = 200 * 1024 * 1024
-		value.References.MaxVideoDuration = 15
-		value.References.MaxAudios = 3
-		value.References.MaxAudioBytes = 15 * 1024 * 1024
-		value.References.MaxAudioDuration = 15
-		if is25 {
-			value.References.MaxImages = 30
-			value.References.MaxVideos = 10
-			value.References.MaxVideoDuration = 30
-			value.References.MaxAudios = 10
-			value.References.MaxAudioDuration = 30
-			value.Operations = appendUniqueString(value.Operations, "audio_to_video")
-		}
-		value.Operations = appendUniqueString(value.Operations, "reference_to_video")
-		return &value
-	}
 	if model.ChannelInterfaceType(normalizedProtocol) != model.ChannelInterfaceAgnesVideo {
 		return profile
 	}
@@ -748,8 +757,17 @@ func validateVideoCapabilityConfig(value *VideoCapabilityConfig) error {
 	if value.References.MinImages > value.References.MaxImages {
 		return BadAuthRequest("最少图片引用数不能超过最大图片引用数")
 	}
-	if value.References.MaxImageBytes < 0 || value.References.MaxVideoBytes < 0 || value.References.MaxAudioBytes < 0 || value.References.MaxVideoDuration < 0 || value.References.MaxAudioDuration < 0 {
+	if value.References.MaxImageBytes < 0 || value.References.MaxVideoBytes < 0 || value.References.MaxAudioBytes < 0 || value.References.MaxVideoDuration < 0 || value.References.MaxAudioDuration < 0 || value.References.MinVideoDuration < 0 || value.References.MinAudioDuration < 0 || value.References.MaxAudioTotalDuration < 0 || value.References.MaxVideoTotalDuration < 0 {
 		return BadAuthRequest("引用素材限制不能小于 0")
+	}
+	if value.References.MinImageWidth < 0 || value.References.MaxImageWidth < 0 || value.References.MinImageHeight < 0 || value.References.MaxImageHeight < 0 || value.References.MinVideoWidth < 0 || value.References.MaxVideoWidth < 0 || value.References.MinVideoHeight < 0 || value.References.MaxVideoHeight < 0 {
+		return BadAuthRequest("引用素材尺寸限制不能小于 0")
+	}
+	if value.References.MinImageAspect < 0 || value.References.MaxImageAspect < 0 || value.References.MinVideoAspect < 0 || value.References.MaxVideoAspect < 0 || value.References.MinImagePixels < 0 || value.References.MaxImagePixels < 0 || value.References.MinVideoPixels < 0 || value.References.MaxVideoPixels < 0 {
+		return BadAuthRequest("引用素材宽高比或像素限制不能小于 0")
+	}
+	if (value.References.MaxVideoDuration > 0 && value.References.MinVideoDuration > value.References.MaxVideoDuration) || (value.References.MaxAudioDuration > 0 && value.References.MinAudioDuration > float64(value.References.MaxAudioDuration)) {
+		return BadAuthRequest("引用素材最小时长不能超过最大时长")
 	}
 	if err := validateVideoDuration(value.Duration); err != nil {
 		return err
@@ -892,6 +910,19 @@ func applyFixedVideoResolution(input *canvasGenerationInput, profile *VideoCapab
 	}
 }
 
+func validateReferenceDuration(kind string, index int, durationMs int64, minimum, maximum float64) error {
+	if minimum <= 0 && maximum <= 0 {
+		return nil
+	}
+	if durationMs <= 0 {
+		return BadAuthRequest(fmt.Sprintf("第 %d 段参考%s的时长无法读取，请重新导入素材后再提交", index+1, kind))
+	}
+	if durationMs < durationLimitMs(minimum) || (maximum > 0 && durationMs > durationLimitMs(maximum)) {
+		return BadAuthRequest(fmt.Sprintf("第 %d 段参考%s时长为 %.2f 秒，需要 %s 秒；请裁剪或更换这段素材后再提交", index+1, kind, float64(durationMs)/1000, referenceBound(minimum, maximum)))
+	}
+	return nil
+}
+
 func validateVideoTask(profile *VideoCapabilityConfig, input canvasGenerationInput) error {
 	if profile == nil {
 		return BadAuthRequest("当前视频模型能力参数无效")
@@ -899,35 +930,8 @@ func validateVideoTask(profile *VideoCapabilityConfig, input canvasGenerationInp
 	if err := validateModelPromptLength("视频", input.Prompt, profile.References.PromptMaxChars); err != nil {
 		return err
 	}
-	if len(input.ReferenceImages) > profile.References.MaxImages || len(input.ReferenceVideos) > profile.References.MaxVideos || len(input.ReferenceAudios) > profile.References.MaxAudios {
-		return BadAuthRequest("参考素材数量超过当前模型限制")
-	}
-	if model.IsVolcengineArkVideoProtocol(model.ChannelInterfaceType(input.Config.InterfaceType)) && len(input.ReferenceAudios) > 0 && len(input.ReferenceImages) == 0 && len(input.ReferenceVideos) == 0 {
-		return BadAuthRequest("火山方舟全模态参考不支持纯音频或文本+音频，请同时添加参考图片或参考视频")
-	}
-	if len(input.ReferenceImages) < profile.References.MinImages {
-		return BadAuthRequest(fmt.Sprintf("当前视频模型至少需要 %d 张参考图", profile.References.MinImages))
-	}
-	for _, media := range input.ReferenceImages {
-		if profile.References.MaxImageBytes > 0 && media.Bytes > profile.References.MaxImageBytes {
-			return BadAuthRequest("参考图片文件超过当前模型大小限制")
-		}
-	}
-	for _, media := range input.ReferenceVideos {
-		if profile.References.MaxVideoBytes > 0 && media.Bytes > profile.References.MaxVideoBytes {
-			return BadAuthRequest("参考视频文件超过当前模型大小限制")
-		}
-		if profile.References.MaxVideoDuration > 0 && media.DurationMs > int64(profile.References.MaxVideoDuration)*1000 {
-			return BadAuthRequest("参考视频时长超过当前模型限制")
-		}
-	}
-	for _, media := range input.ReferenceAudios {
-		if profile.References.MaxAudioBytes > 0 && media.Bytes > profile.References.MaxAudioBytes {
-			return BadAuthRequest("参考音频文件超过当前模型大小限制")
-		}
-		if profile.References.MaxAudioDuration > 0 && media.DurationMs > int64(profile.References.MaxAudioDuration)*1000 {
-			return BadAuthRequest("参考音频时长超过当前模型限制")
-		}
+	if err := validateVideoReferenceMedia(profile, input); err != nil {
+		return err
 	}
 	seconds, err := strconv.Atoi(strings.TrimSpace(input.Config.VideoSeconds))
 	if err != nil || !videoDurationAllowed(profile.Duration, seconds) {
@@ -1084,6 +1088,9 @@ func validateGPTImage2CustomSize(value string) error {
 }
 
 func videoDurationAllowed(value VideoDurationConfig, seconds int) bool {
+	if seconds == -1 {
+		return containsInt(value.Values, -1)
+	}
 	if value.Selection == "enum" {
 		return containsInt(value.Values, seconds)
 	}

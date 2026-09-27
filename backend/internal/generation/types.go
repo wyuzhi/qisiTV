@@ -221,16 +221,36 @@ type VideoCapabilityConfig struct {
 }
 
 type VideoReferenceConfig struct {
-	PromptMaxChars   int   `json:"promptMaxChars"`
-	MinImages        int   `json:"minImages"`
-	MaxImages        int   `json:"maxImages"`
-	MaxImageBytes    int64 `json:"maxImageBytes"`
-	MaxVideos        int   `json:"maxVideos"`
-	MaxVideoBytes    int64 `json:"maxVideoBytes"`
-	MaxVideoDuration int   `json:"maxVideoDurationSeconds"`
-	MaxAudios        int   `json:"maxAudios"`
-	MaxAudioBytes    int64 `json:"maxAudioBytes"`
-	MaxAudioDuration int   `json:"maxAudioDurationSeconds"`
+	PromptMaxChars        int     `json:"promptMaxChars"`
+	MinImages             int     `json:"minImages"`
+	MaxImages             int     `json:"maxImages"`
+	MaxImageBytes         int64   `json:"maxImageBytes"`
+	MinImageWidth         int     `json:"minImageWidth,omitempty"`
+	MaxImageWidth         int     `json:"maxImageWidth,omitempty"`
+	MinImageHeight        int     `json:"minImageHeight,omitempty"`
+	MaxImageHeight        int     `json:"maxImageHeight,omitempty"`
+	MinImageAspect        float64 `json:"minImageAspect,omitempty"`
+	MaxImageAspect        float64 `json:"maxImageAspect,omitempty"`
+	MinImagePixels        int64   `json:"minImagePixels,omitempty"`
+	MaxImagePixels        int64   `json:"maxImagePixels,omitempty"`
+	MaxVideos             int     `json:"maxVideos"`
+	MaxVideoBytes         int64   `json:"maxVideoBytes"`
+	MaxVideoDuration      int     `json:"maxVideoDurationSeconds"`
+	MinVideoDuration      int     `json:"minVideoDurationSeconds,omitempty"`
+	MaxVideoTotalDuration int     `json:"maxVideoTotalDurationSeconds,omitempty"`
+	MinVideoWidth         int     `json:"minVideoWidth,omitempty"`
+	MaxVideoWidth         int     `json:"maxVideoWidth,omitempty"`
+	MinVideoHeight        int     `json:"minVideoHeight,omitempty"`
+	MaxVideoHeight        int     `json:"maxVideoHeight,omitempty"`
+	MinVideoAspect        float64 `json:"minVideoAspect,omitempty"`
+	MaxVideoAspect        float64 `json:"maxVideoAspect,omitempty"`
+	MinVideoPixels        int64   `json:"minVideoPixels,omitempty"`
+	MaxVideoPixels        int64   `json:"maxVideoPixels,omitempty"`
+	MaxAudios             int     `json:"maxAudios"`
+	MaxAudioBytes         int64   `json:"maxAudioBytes"`
+	MaxAudioDuration      int     `json:"maxAudioDurationSeconds"`
+	MinAudioDuration      float64 `json:"minAudioDurationSeconds,omitempty"`
+	MaxAudioTotalDuration int     `json:"maxAudioTotalDurationSeconds,omitempty"`
 }
 
 type VideoDurationConfig struct {

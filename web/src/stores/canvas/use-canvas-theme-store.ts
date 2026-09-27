@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ThemeName } from "@/stores/use-theme-store";
-import { useThemeStore } from "@/stores/use-theme-store";
+import { normalizeTheme, useThemeStore } from "@/stores/use-theme-store";
 import { useLayoutEffect } from "react";
 
 type CanvasThemeStore = { theme: ThemeName; active: boolean; setTheme: (theme?: string) => void };
@@ -9,14 +9,13 @@ type CanvasThemeStore = { theme: ThemeName; active: boolean; setTheme: (theme?: 
 /** 画布外观是编辑器状态，不能写入用户工作台的全局主题。 */
 export const useCanvasThemeStore = create<CanvasThemeStore>()(
     persist(
-        // qisiTV 只提供深色界面；任何旧调用也只能恢复到 dark。
-        (set) => ({ theme: "dark", active: false, setTheme: () => set({ theme: "dark" }) }),
+        (set) => ({ theme: "dark", active: false, setTheme: (theme) => set({ theme: normalizeTheme(theme) }) }),
         {
             // v2 intentionally drops the legacy key: older builds could persist
             // an incidental light fallback and later revive it while opening a canvas.
             name: "infinite-canvas:canvas-theme:v2",
             partialize: ({ theme }) => ({ theme }),
-            merge: (_persisted, current) => ({ ...current, theme: "dark" }),
+            merge: (persisted, current) => ({ ...current, theme: normalizeTheme((persisted as Partial<CanvasThemeStore> | null)?.theme) }),
         },
     ),
 );

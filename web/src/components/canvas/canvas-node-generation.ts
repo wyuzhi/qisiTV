@@ -1,5 +1,6 @@
 import type { AiTextMessage } from "@/services/api/image";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
+import { resolveReferenceMediaDuration } from "@/lib/reference-media-metadata";
 import { seedanceReferenceLabel } from "@/lib/seedance-video";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
@@ -482,6 +483,13 @@ export function buildNodeResponseMessages(context: NodeGenerationContext): AiTex
 }
 
 export async function hydrateNodeGenerationContext(context: NodeGenerationContext, projectId: string, domainProjectId?: string, mode?: CanvasGenerationMode, includeCharacterVoiceSamples = false, includeCharacterPrompt = true, referenceLimits?: ModelReferenceLimits) {
+    if (mode === "video") {
+        const [referenceVideos, referenceAudios] = await Promise.all([
+            Promise.all(context.referenceVideos.map(resolveReferenceMediaDuration)),
+            Promise.all(context.referenceAudios.map(resolveReferenceMediaDuration)),
+        ]);
+        context = { ...context, referenceVideos, referenceAudios };
+    }
     const { imageToDataUrl } = await import("@/services/image-storage");
     let referenceImages = await Promise.all(
         context.referenceImages.map(async (image) => {
@@ -554,13 +562,15 @@ export async function hydrateNodeGenerationContext(context: NodeGenerationContex
     const characterVoiceAudios = await Promise.all(voiceSamples.map(async (voice) => {
         const resource = await getResource(voice.sampleResourceId!);
         const extension = audioFileExtension(resource.mimeType, resource.objectKey);
-        return {
+        return resolveReferenceMediaDuration({
             id: `character-voice-${voice.assetId}`,
             name: `${voice.characterName}-声音样本.${extension}`,
             type: resource.mimeType || "audio/mpeg",
             url: resourceFileUrl(voice.sampleResourceId!),
             storageKey: resourceStorageKey(voice.sampleResourceId!),
-        } satisfies ReferenceAudio;
+            durationMs: resource.durationMs,
+            bytes: resource.size,
+        } satisfies ReferenceAudio);
     }));
     const referenceAudios = [...context.referenceAudios, ...characterVoiceAudios];
     const voiceBlocks = mode === "video" ? resolvedCharacterVoices.map(compileResolvedVoicePrompt) : [];

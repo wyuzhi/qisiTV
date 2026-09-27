@@ -106,18 +106,24 @@ var categoryCopies = map[FailureCategory]categoryCopy{
 }
 
 var (
-	htmlBodyPattern          = regexp.MustCompile(`(?is)^\s*(?:<!doctype|<html|<head|<body)`)
-	httpStatusPattern        = regexp.MustCompile(`(?i)(?:HTTP\s+|status(?:\s+code)?\s*[:：]?\s*)(\d{3})\b`)
-	wrappedHTTPStatusPattern = regexp.MustCompile(`(?i)Request failed with status code\s+(\d{3})`)
-	urlPattern               = regexp.MustCompile(`(?i)(?:https?://|data:[a-z0-9.+-]+/[^;]+;base64,)[^\s"'<>]+`)
-	secretPattern            = regexp.MustCompile(`(?i)(?:\b(?:api[_-]?key|secret[_-]?key|access[_-]?token|refresh[_-]?token|password)\b["']?\s*[=:：]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)|\bbearer\s+[^\s,;]+|\bsk-[A-Za-z0-9_-]+|\beyJ[A-Za-z0-9_.-]{20,})`)
-	credentialHeaderPattern  = regexp.MustCompile(`(?im)\b(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[=:：][^\r\n]*`)
-	promptEchoPattern        = regexp.MustCompile(`(?is)(?:\b(?:prompt|input|query)|提示词|输入内容)["']?\s*[=:：].*`)
-	signedQueryPattern       = regexp.MustCompile(`(?i)(?:[?&](?:signature|x-amz-signature|x-oss-signature|token|key)=)[^\s&]+`)
-	safeIDPattern            = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{5,127}$`)
-	providerCodePattern      = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._:-]*$`)
-	unsafeIDPattern          = regexp.MustCompile(`(?i)secret|token|password|apikey|api-key|bearer|sk-`)
-	durationRangePattern     = regexp.MustCompile(`(?i)\bduration\s+(?:must\s+be|should\s+be|is\s+required\s+to\s+be)\s+(?:between\s+([0-9]+(?:\.[0-9]+)?)\s+and\s+([0-9]+(?:\.[0-9]+)?)|in\s+(?:the\s+)?range\s*\[?([0-9]+(?:\.[0-9]+)?)\s*[,–-]\s*([0-9]+(?:\.[0-9]+)?)\]?)\s*(?:seconds?|secs?|s)\b`)
+	htmlBodyPattern           = regexp.MustCompile(`(?is)^\s*(?:<!doctype|<html|<head|<body)`)
+	httpStatusPattern         = regexp.MustCompile(`(?i)(?:HTTP\s+|status(?:\s+code)?\s*[:：]?\s*)(\d{3})\b`)
+	wrappedHTTPStatusPattern  = regexp.MustCompile(`(?i)Request failed with status code\s+(\d{3})`)
+	urlPattern                = regexp.MustCompile(`(?i)(?:https?://|data:[a-z0-9.+-]+/[^;]+;base64,)[^\s"'<>]+`)
+	secretPattern             = regexp.MustCompile(`(?i)(?:\b(?:api[_-]?key|secret[_-]?key|access[_-]?token|refresh[_-]?token|password)\b["']?\s*[=:：]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)|\bbearer\s+[^\s,;]+|\bsk-[A-Za-z0-9_-]+|\beyJ[A-Za-z0-9_.-]{20,})`)
+	credentialHeaderPattern   = regexp.MustCompile(`(?im)\b(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[=:：][^\r\n]*`)
+	promptEchoPattern         = regexp.MustCompile(`(?is)(?:\b(?:prompt|input|query)|提示词|输入内容)["']?\s*[=:：].*`)
+	signedQueryPattern        = regexp.MustCompile(`(?i)(?:[?&](?:signature|x-amz-signature|x-oss-signature|token|key)=)[^\s&]+`)
+	safeIDPattern             = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{5,127}$`)
+	providerCodePattern       = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._:-]*$`)
+	unsafeIDPattern           = regexp.MustCompile(`(?i)secret|token|password|apikey|api-key|bearer|sk-`)
+	durationRangePattern      = regexp.MustCompile(`(?i)\bduration\s+(?:must\s+be|should\s+be|is\s+required\s+to\s+be)\s+(?:between\s+([0-9]+(?:\.[0-9]+)?)\s*(?:seconds?|secs?|s)?\s+and\s+([0-9]+(?:\.[0-9]+)?)|in\s+(?:the\s+)?range\s*\[?([0-9]+(?:\.[0-9]+)?)\s*[,–-]\s*([0-9]+(?:\.[0-9]+)?)\]?)\s*(?:seconds?|secs?|s)\b`)
+	widthRangePattern         = regexp.MustCompile(`(?i)\bwidth\s+(?:must\s+be|should\s+be)\s+between\s+(\d+)\s*(?:px|pixels?)?\s+and\s+(\d+)\s*(?:px|pixels?)`)
+	heightRangePattern        = regexp.MustCompile(`(?i)\bheight\s+(?:must\s+be|should\s+be)\s+between\s+(\d+)\s*(?:px|pixels?)?\s+and\s+(\d+)\s*(?:px|pixels?)`)
+	aspectRangePattern        = regexp.MustCompile(`(?i)aspect(?:\s*ratio)?\s+(?:must\s+be|should\s+be)\s+between\s+(\d+(?:\.\d+)?)\s+and\s+(\d+(?:\.\d+)?)`)
+	pixelRangePattern         = regexp.MustCompile(`(?i)(?:pixel(?:s)?(?:\s+count)?|total\s+pixels)\s+(?:must\s+be|should\s+be)\s+between\s+(\d+)\s+and\s+(\d+)`)
+	requestTooLargePattern    = regexp.MustCompile(`(?i)(?:request\s+(?:body|entity|payload)|payload)\s+(?:is\s+)?too\s+large|(?:request|payload).{0,24}(?:exceeds?|larger than)`)
+	singleFileTooLargePattern = regexp.MustCompile(`(?i)(?:file|image|video|audio)\s+too\s+large|(?:file|image|video|audio).{0,24}(?:exceeds?|larger than)\s+\d+`)
 )
 
 var providerCodeCategories = map[string]FailureCategory{
@@ -167,6 +173,7 @@ var providerCodeCategories = map[string]FailureCategory{
 	"download_error":                   CategoryInputInaccessible,
 	"file_too_large":                   CategoryInputTooLarge,
 	"payload_too_large":                CategoryInputTooLarge,
+	"video_request_body_too_large":     CategoryInputTooLarge,
 	"model_not_found":                  CategoryModelMissing,
 	"model_not_exist":                  CategoryModelMissing,
 	"invalid_model":                    CategoryModelMissing,
@@ -193,6 +200,7 @@ var providerCodeCategories = map[string]FailureCategory{
 	"task_failed":                      CategoryAsyncFailed,
 	"provider_query_failed":            CategoryAsyncFailed,
 	"provider_submission_unknown":      CategorySubmissionUncertain,
+	"video_submission_unknown":         CategorySubmissionUncertain,
 	"provider_reference_invalid":       CategoryInputInaccessible,
 	"rate_limited":                     CategoryThrottled,
 	"bad_gateway":                      CategoryProviderUnavailable,
@@ -353,6 +361,10 @@ func ClassifyHTTP(status int, statusText string, body string) Failure {
 			failure.Action = ""
 		}
 	}
+	if status == 413 && failure.Category == CategoryInputTooLarge && !singleFileTooLargePattern.MatchString(body) && (failure.Reason == "" || failure.Reason == "参考素材过大") {
+		failure.Reason = "整次请求的数据量超过接口上限"
+		failure.Action = "请减少参考素材，或改用可公开访问的素材链接后再提交"
+	}
 	if status == 524 && (failure.Category == CategoryUnknown || failure.Category == CategoryTimeout || failure.Category == CategoryProviderUnavailable || failure.Category == CategoryMalformedResponse) {
 		failure.Category = CategoryTimeout
 		failure.Uncertain = true
@@ -416,6 +428,18 @@ func ClassifyText(raw string) Failure {
 	if text == "" {
 		return normalizeFailure(failure)
 	}
+	if copy, ok := referenceDurationCopy(text); ok {
+		requestID, taskID := persistedReferenceIDs(text)
+		return normalizeFailure(Failure{Category: CategoryInvalidParams, Reason: copy.Reason, Action: copy.Action, RequestID: requestID, TaskID: taskID})
+	}
+	if copy, ok := referenceMediaConstraintCopy(text); ok {
+		requestID, taskID := persistedReferenceIDs(text)
+		category := CategoryInvalidParams
+		if copy.Action != "" && (strings.Contains(copy.Reason, "过大") || strings.Contains(copy.Action, "压缩")) {
+			category = CategoryInputTooLarge
+		}
+		return normalizeFailure(Failure{Category: category, Reason: copy.Reason, Action: copy.Action, RequestID: requestID, TaskID: taskID})
+	}
 	if htmlBodyPattern.MatchString(text) {
 		if status := extractExplicitHTTPStatus(text); status != 0 {
 			return ClassifyHTTP(status, "", "")
@@ -424,6 +448,13 @@ func ClassifyText(raw string) Failure {
 	}
 	fields := extractProviderFields(text)
 	if fields.hasStructured() {
+		if strings.EqualFold(fields.Code, "invalid_reference_audio") {
+			copy, _ := referenceAudioCopy(fields.Message, true)
+			return normalizeFailure(Failure{Category: CategoryInvalidParams, Reason: copy.Reason, Action: copy.Action, RequestID: fields.RequestID, TaskID: fields.TaskID, ProviderCode: fields.Code, Structured: true, FromCode: true})
+		}
+		if copy, ok := referenceDurationCopy(fields.Message); ok {
+			return normalizeFailure(Failure{Category: CategoryInvalidParams, Reason: copy.Reason, Action: copy.Action, RequestID: fields.RequestID, TaskID: fields.TaskID})
+		}
 		failure.Structured = true
 		failure.ProviderCode = sanitizeProviderCode(fields.Code)
 		failure.ProviderMessage = sanitizeProviderText(fields.Message)
@@ -438,6 +469,7 @@ func ClassifyText(raw string) Failure {
 			specializeLikeness(&failure, fields)
 			specializeThinkingToolChoice(&failure, fields)
 			specializeDurationRange(&failure, fields)
+			specializeMediaConstraints(&failure, fields)
 			return normalizeFailure(failure)
 		}
 		if category, ok := categoryFromProviderMessage(fields.Message + " " + fields.Type + " " + fields.Status); ok {
@@ -445,6 +477,7 @@ func ClassifyText(raw string) Failure {
 			specializeModeration(&failure, fields)
 			specializeThinkingToolChoice(&failure, fields)
 			specializeDurationRange(&failure, fields)
+			specializeMediaConstraints(&failure, fields)
 			return normalizeFailure(failure)
 		}
 		// JSON request echoes and debug fields are never classification input.
@@ -472,6 +505,7 @@ func ClassifyText(raw string) Failure {
 		specializeModeration(&failure, extractedFields{Message: text})
 		specializeThinkingToolChoice(&failure, extractedFields{Message: text})
 		specializeDurationRange(&failure, extractedFields{Message: text})
+		specializeMediaConstraints(&failure, extractedFields{Message: text})
 		if status := extractExplicitHTTPStatus(text); status != 0 {
 			failure.HTTPStatus = status
 		}
@@ -574,7 +608,18 @@ func extractProviderFields(raw string) extractedFields {
 	if raw == "" || len(raw) > maxJSONExtractBytes {
 		return extractedFields{}
 	}
+	// The gateway appends a public request ID outside its JSON error envelope.
+	// Strip only that exact suffix; arbitrary trailing text is not trusted JSON.
+	suffix := regexp.MustCompile(`(?i)\s*\(request id:\s*([A-Za-z0-9._:-]{6,127})\)\s*$`).FindStringSubmatchIndex(raw)
+	requestID := ""
+	if suffix != nil {
+		requestID = raw[suffix[2]:suffix[3]]
+		raw = strings.TrimSpace(raw[:suffix[0]])
+	}
 	if fields, ok := fieldsFromJSON([]byte(raw)); ok {
+		if fields.RequestID == "" {
+			fields.RequestID = requestID
+		}
 		return fields
 	}
 	for start := 0; start < len(raw); {
@@ -584,6 +629,9 @@ func extractProviderFields(raw string) extractedFields {
 		}
 		absolute := start + index
 		if fields, ok := fieldsFromJSON([]byte(raw[absolute:])); ok {
+			if fields.RequestID == "" {
+				fields.RequestID = requestID
+			}
 			return fields
 		}
 		start = absolute + 1
@@ -738,8 +786,14 @@ func categoryFromProviderMessage(raw string) (FailureCategory, bool) {
 		return "", false
 	}
 	switch {
-	case durationRangePattern.MatchString(normalized):
+	case durationRangePattern.MatchString(normalized),
+		widthRangePattern.MatchString(normalized),
+		heightRangePattern.MatchString(normalized),
+		aspectRangePattern.MatchString(normalized),
+		pixelRangePattern.MatchString(normalized):
 		return CategoryInvalidParams, true
+	case requestTooLargePattern.MatchString(normalized) || singleFileTooLargePattern.MatchString(normalized) || strings.HasPrefix(normalized, "整次请求的数据量超过接口上限"):
+		return CategoryInputTooLarge, true
 	case strings.Contains(normalized, "thinking") && strings.Contains(normalized, "tool_choice"),
 		strings.Contains(normalized, "reasoning") && strings.Contains(normalized, "tool_choice"),
 		strings.Contains(normalized, "tool_choice") && (strings.Contains(normalized, "not support") || strings.Contains(normalized, "unsupported")):
@@ -850,6 +904,100 @@ func specializeThinkingToolChoice(failure *Failure, fields extractedFields) {
 	}
 }
 
+func referenceDurationCopy(text string) (categoryCopy, bool) {
+	if copy, ok := referenceAudioCopy(text, false); ok {
+		return copy, true
+	}
+	if m := regexp.MustCompile(`^第 (\d+) 段参考(音频|视频)时长为 (\d+(?:\.\d+)?) 秒[，。]需要 (\d+(?:\.\d+)?)–(\d+(?:\.\d+)?) 秒`).FindStringSubmatch(text); len(m) == 6 {
+		return categoryCopy{Reason: fmt.Sprintf("第 %s 段参考%s时长为 %s 秒", m[1], m[2], m[3]), Action: fmt.Sprintf("需要 %s–%s 秒；请裁剪或更换这段素材后再提交", m[4], m[5])}, true
+	}
+	if m := regexp.MustCompile(`^第 (\d+) 段参考(音频|视频)的时长无法读取`).FindStringSubmatch(text); len(m) == 3 {
+		return categoryCopy{Reason: fmt.Sprintf("第 %s 段参考%s的时长无法读取", m[1], m[2]), Action: "请重新导入素材后再提交"}, true
+	}
+	if m := regexp.MustCompile(`^参考素材时长不符合模型要求。请检查每段参考音频和视频，将不符合要求的素材调整为 (\d+(?:\.\d+)?)–(\d+(?:\.\d+)?) 秒`).FindStringSubmatch(text); len(m) == 3 {
+		return categoryCopy{Reason: "参考素材时长不符合模型要求", Action: fmt.Sprintf("请检查每段参考音频和视频，将不符合要求的素材调整为 %s–%s 秒后重新提交", m[1], m[2])}, true
+	}
+	return categoryCopy{}, false
+}
+
+func specializeMediaConstraints(failure *Failure, fields extractedFields) {
+	message := promptEchoPattern.ReplaceAllString(fields.Message, "")
+	if copy, ok := referenceMediaConstraintCopy(message); ok {
+		if strings.Contains(copy.Reason, "过大") {
+			failure.Category = CategoryInputTooLarge
+		} else {
+			failure.Category = CategoryInvalidParams
+		}
+		failure.Reason = copy.Reason
+		failure.Action = copy.Action
+		return
+	}
+	if match := heightRangePattern.FindStringSubmatch(message); len(match) == 3 {
+		failure.Category = CategoryInvalidParams
+		failure.Reason = "参考素材高度不符合模型要求"
+		failure.Action = fmt.Sprintf("请将高度调整为 %s–%s 像素后重新提交", match[1], match[2])
+		return
+	}
+	if match := widthRangePattern.FindStringSubmatch(message); len(match) == 3 {
+		failure.Category = CategoryInvalidParams
+		failure.Reason = "参考素材宽度不符合模型要求"
+		failure.Action = fmt.Sprintf("请将宽度调整为 %s–%s 像素后重新提交", match[1], match[2])
+		return
+	}
+	if match := aspectRangePattern.FindStringSubmatch(message); len(match) == 3 {
+		failure.Category = CategoryInvalidParams
+		failure.Reason = "参考素材宽高比不符合模型要求"
+		failure.Action = fmt.Sprintf("请将宽高比调整为 %s–%s 后重新提交", match[1], match[2])
+		return
+	}
+	if match := pixelRangePattern.FindStringSubmatch(message); len(match) == 3 {
+		failure.Category = CategoryInvalidParams
+		failure.Reason = "参考素材像素总量不符合模型要求"
+		failure.Action = "请调整尺寸或更换后再提交"
+		return
+	}
+	if requestTooLargePattern.MatchString(message) || strings.EqualFold(fields.Code, "video_request_body_too_large") || strings.HasPrefix(message, "整次请求的数据量超过接口上限") {
+		failure.Category = CategoryInputTooLarge
+		failure.Reason = "整次请求的数据量超过接口上限"
+		failure.Action = "请减少参考素材，或改用可公开访问的素材链接后再提交"
+		return
+	}
+	if singleFileTooLargePattern.MatchString(message) {
+		failure.Category = CategoryInputTooLarge
+		failure.Reason = "单个参考文件过大"
+		failure.Action = "请压缩或更换该素材后再提交"
+	}
+}
+
+func referenceMediaConstraintCopy(text string) (categoryCopy, bool) {
+	if m := regexp.MustCompile(`^参考素材(宽度|高度|宽高比)不符合模型要求。请将(?:宽度|高度|宽高比)调整为 (\d+(?:\.\d+)?)–(\d+(?:\.\d+)?)( 像素| )后重新提交`).FindStringSubmatch(text); len(m) == 5 {
+		return categoryCopy{Reason: "参考素材" + m[1] + "不符合模型要求", Action: "请将" + m[1] + "调整为 " + m[2] + "–" + m[3] + m[4] + "后重新提交"}, true
+	}
+	if m := regexp.MustCompile(`^(第 \d+ (?:张|个|段)参考(?:图|视频|音频)(?:宽度|高度|宽高比|时长)为 \d+(?:\.\d+)?(?: 像素| 秒)?)[，。]需要 ((?:至少|不超过) \d+(?:\.\d+)?(?: 像素| 秒)?)`).FindStringSubmatch(text); len(m) == 3 {
+		action := "请调整尺寸或更换后再提交"
+		if strings.Contains(m[1], "时长") {
+			action = "请裁剪或更换这段素材后再提交"
+		}
+		return categoryCopy{Reason: m[1], Action: "需要 " + m[2] + "；" + action}, true
+	}
+	if m := regexp.MustCompile(`^第 (\d+) (张|个|段)参考(图|视频|音频)(宽度|高度)为 (\d+) 像素[，。]需要 (\d+)–(\d+) 像素`).FindStringSubmatch(text); len(m) == 8 {
+		return categoryCopy{Reason: fmt.Sprintf("第 %s %s参考%s%s为 %s 像素", m[1], m[2], m[3], m[4], m[5]), Action: fmt.Sprintf("需要 %s–%s 像素；请调整尺寸或更换后再提交", m[6], m[7])}, true
+	}
+	if m := regexp.MustCompile(`^第 (\d+) (张|个|段)参考(图|视频|音频)宽高比为 (\d+(?:\.\d+)?)[，。]需要 (\d+(?:\.\d+)?)–(\d+(?:\.\d+)?)`).FindStringSubmatch(text); len(m) == 7 {
+		return categoryCopy{Reason: fmt.Sprintf("第 %s %s参考%s宽高比为 %s", m[1], m[2], m[3], m[4]), Action: fmt.Sprintf("需要 %s–%s；请调整尺寸或更换后再提交", m[5], m[6])}, true
+	}
+	if m := regexp.MustCompile(`^第 (\d+) (张|个|段)参考(图|视频|音频)像素总量`).FindStringSubmatch(text); len(m) == 4 {
+		return categoryCopy{Reason: fmt.Sprintf("第 %s %s参考%s像素总量不符合当前模型要求", m[1], m[2], m[3]), Action: "请调整尺寸或更换后再提交"}, true
+	}
+	if m := regexp.MustCompile(`^第 (\d+) (张|个|段)参考(图|视频|音频)文件过大[，。]当前模型单文件上限为 ([^；;]+)`).FindStringSubmatch(text); len(m) == 5 {
+		return categoryCopy{Reason: fmt.Sprintf("第 %s %s参考%s文件过大", m[1], m[2], m[3]), Action: fmt.Sprintf("当前模型单文件上限为 %s；请压缩或更换后再提交", m[4])}, true
+	}
+	if strings.HasPrefix(text, "整次请求的参考素材合计过大") {
+		return categoryCopy{Reason: "整次请求的参考素材合计过大", Action: "请减少素材后再提交"}, true
+	}
+	return categoryCopy{}, false
+}
+
 func specializeDurationRange(failure *Failure, fields extractedFields) {
 	if failure.Category != CategoryInvalidParams {
 		return
@@ -869,6 +1017,10 @@ func specializeDurationRange(failure *Failure, fields extractedFields) {
 	}
 	failure.Reason = "视频时长不符合模型要求"
 	failure.Action = fmt.Sprintf("请将时长调整为 %s–%s 秒后重试", minimum, maximum)
+	if strings.Contains(message, "素材") || strings.Contains(strings.ToLower(message), "reference") || strings.Contains(strings.ToLower(message), "audio") {
+		failure.Reason = "参考素材时长不符合模型要求"
+		failure.Action = fmt.Sprintf("请检查每段参考音频和视频，将不符合要求的素材调整为 %s–%s 秒后重新提交", minimum, maximum)
+	}
 }
 
 func trustProviderMessageStatus(status int) bool {

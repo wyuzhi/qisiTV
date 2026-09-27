@@ -36,7 +36,8 @@ describe("video generation resolution options", () => {
         expect(defaultModelCapabilityConfig("gemini-veo").video?.resolutions).toEqual(["720p", "1080p"]);
     });
 
-    test("火山方舟默认开启全模态参考模式", () => {
-        expect(defaultModelCapabilityConfig("volcengine-ark-video").video?.operations).toEqual(expect.arrayContaining(["reference_to_video", "audio_to_video"]));
+    test("火山方舟未知模型默认允许多模态参考但不推断纯音频能力", () => {
+        expect(defaultModelCapabilityConfig("volcengine-ark-video").video?.operations).toContain("reference_to_video");
+        expect(defaultModelCapabilityConfig("volcengine-ark-video").video?.operations).not.toContain("audio_to_video");
     });
 });

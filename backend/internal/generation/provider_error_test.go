@@ -13,6 +13,44 @@ import (
 	"qisitv/backend/internal/generation"
 )
 
+func TestGatewayReferenceGeometryAndRequestSize(t *testing.T) {
+	height := `{"error":{"code":"400","message":"Height must be between 300px and 6000px","type":"api_error"}} (request id: 202609270829245377912978268d9d6USz1NP3R)`
+	failure := generation.ClassifyText(height)
+	if failure.Category != generation.CategoryInvalidParams || !strings.Contains(failure.Action, "300–6000 像素") || failure.RequestID == "" {
+		t.Fatalf("height failure: %+v", failure)
+	}
+	if strings.Contains(failure.UserMessage(), "{") || strings.Contains(failure.UserMessage(), "api_error") {
+		t.Fatalf("raw json leaked: %q", failure.UserMessage())
+	}
+	aspect := generation.ClassifyText(`{"error":{"message":"aspect ratio must be between 0.4 and 2.5"}}`)
+	if aspect.Category != generation.CategoryInvalidParams || !strings.Contains(aspect.Action, "0.4–2.5") {
+		t.Fatalf("aspect failure: %+v", aspect)
+	}
+	request := generation.ClassifyText(`{"error":{"message":"Request entity too large"}}`)
+	if request.Category != generation.CategoryInputTooLarge || !strings.Contains(request.Reason, "整次请求") {
+		t.Fatalf("request size failure: %+v", request)
+	}
+	file := generation.ClassifyText(`{"error":{"message":"image file too large"}}`)
+	if file.Category != generation.CategoryInputTooLarge || !strings.Contains(file.Reason, "单个参考文件") {
+		t.Fatalf("file size failure: %+v", file)
+	}
+	persisted := generation.ClassifyText("第 1 张参考图高度为 200 像素，需要 300–6000 像素；请调整尺寸或更换后再提交")
+	if persisted.Category != generation.CategoryInvalidParams || !strings.Contains(persisted.Reason, "第 1 张") {
+		t.Fatalf("persisted height: %+v", persisted)
+	}
+}
+
+func TestGatewayReferenceDurationWithRequestSuffix(t *testing.T) {
+	raw := `{"error":{"code":"400","message":"素材转换失败: Duration must be between 1.8s and 30.2s.","type":"api_error"}} (request id: 202609270829245377912978268d9d6USz1NP3R)`
+	f := generation.ClassifyText(raw)
+	if f.Category != generation.CategoryInvalidParams || f.RequestID != "202609270829245377912978268d9d6USz1NP3R" || !strings.Contains(f.Action, "1.8–30.2 秒") || f.Reason != "参考素材时长不符合模型要求" {
+		t.Fatalf("unexpected failure: %+v", f)
+	}
+	if !f.BlocksAutomaticRetry() {
+		t.Fatal("unchanged invalid input must not retry")
+	}
+}
+
 func TestClassifyHTTPUsesStructuredCodeBeforeStatus(t *testing.T) {
 	failure := generation.ClassifyHTTP(http.StatusPaymentRequired, "402 Payment Required", `{"error":{"message":"Your prompt or reference image was blocked by the content safety policy. Please adjust your prompt or reference image and try again.","code":"content_policy_violation"}}`)
 	if failure.Category != generation.CategoryModerationInput && failure.Category != generation.CategoryModerationReference {
@@ -229,8 +267,8 @@ func TestBeefAPIErrorCodeInventory(t *testing.T) {
 	if err := json.Unmarshal(data, &inventory); err != nil {
 		t.Fatal(err)
 	}
-	if len(inventory) != 42 {
-		t.Fatalf("BeefAPI error code inventory has %d entries, want 42", len(inventory))
+	if len(inventory) != 43 {
+		t.Fatalf("BeefAPI error code inventory has %d entries, want 43", len(inventory))
 	}
 	for code, category := range inventory {
 		t.Run(code, func(t *testing.T) {
@@ -352,6 +390,43 @@ func TestDurationAdviceRequiresAnExplicitNumericRange(t *testing.T) {
 		failure := generation.ClassifyText(fmt.Sprintf(`{"error":{"code":"invalid_request","message":%q}}`, message))
 		if strings.Contains(failure.Action, "5–10") || strings.Contains(failure.Action, "10–5") {
 			t.Errorf("invented duration limit from %q", message)
+		}
+	}
+}
+
+func TestReferenceDurationAdviceSurvivesPersistence(t *testing.T) {
+	for _, text := range []string{
+		`{"error":{"code":"400","message":"素材转换失败: Height must be between 300px and 6000px."}}`,
+		`{"error":{"code":"400","message":"aspect ratio must be between 0.4 and 2.5"}}`,
+		"第 1 段参考音频时长为 16.00 秒，需要 不超过 15 秒；请裁剪或更换这段素材后再提交",
+		"第 1 张参考图高度为 216 像素，需要 至少 300 像素；请调整尺寸或更换后再提交",
+		"第 2 段参考音频时长为 0.90 秒，需要 2–30 秒；请裁剪或更换这段素材后再提交",
+		"参考素材时长不符合模型要求。请检查每段参考音频和视频，将不符合要求的素材调整为 1.8–30.2 秒后重新提交。",
+	} {
+		failure := generation.ClassifyText(text)
+		reloaded := generation.ClassifyText(failure.UserMessage())
+		if reloaded.Category != generation.CategoryInvalidParams || reloaded.Reason != failure.Reason || reloaded.Action != failure.Action {
+			t.Fatalf("reference duration lost on reload: %#v -> %#v", failure, reloaded)
+		}
+	}
+}
+
+func TestWholeRequestTooLargeIsNotASingleFileAdvice(t *testing.T) {
+	for _, body := range []string{"", "<html>413 Request Entity Too Large</html>"} {
+		if got := generation.ClassifyHTTP(413, "", body); got.Category != generation.CategoryInputTooLarge || !strings.Contains(got.Reason, "整次请求") {
+			t.Fatalf("empty/HTML 413 advice: %#v", got)
+		}
+	}
+	for _, raw := range []string{
+		"video request body is too large",
+		"video request body exceeds the 64 MiB request limit; use public media URLs instead of inline base64",
+		`{"error":{"code":"video_request_body_too_large","message":"","type":"api_error"}}`,
+	} {
+		failure := generation.ClassifyText(raw)
+		for _, got := range []generation.Failure{failure, generation.ClassifyText(failure.UserMessage())} {
+			if got.Category != generation.CategoryInputTooLarge || !strings.Contains(got.Reason, "整次请求") || !strings.Contains(got.Action, "素材链接") || got.Retryable {
+				t.Fatalf("request size explanation lost: %#v", got)
+			}
 		}
 	}
 }

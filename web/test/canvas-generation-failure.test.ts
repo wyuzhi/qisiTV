@@ -74,6 +74,14 @@ describe("canvas generation failure consumers", () => {
         expect(restored.failedInputFingerprint).toBe(failure.failedInputFingerprint);
     });
 
+    test("task cards never expose raw nested JSON in the visible reason or tooltip", () => {
+        const raw = { ...task, error: '{"error":{"code":"400","message":"Height must be between 300px and 6000px"}}', errorCode: "invalid_params" };
+        const reason = taskAttentionReason(raw);
+        expect(reason).not.toContain("{");
+        expect(reason).toContain("高度");
+        expect(reason).toContain("300–6000");
+    });
+
     test("task cards preserve a machine-readable failure code alongside an opaque message", () => {
         expect(taskAttentionReason({ ...task, errorCode: "moderation_reference" })).toContain("参考图");
         expect(taskRetryBlocked({ ...task, errorCode: "download_failed" })).toBe(true);

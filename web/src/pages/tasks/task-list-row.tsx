@@ -5,7 +5,6 @@ import { Eye, FileText, FolderKanban, Image as ImageIcon, Play, RotateCcw, Video
 import { useState } from "react";
 
 import { MediaPreview } from "@/components/media-preview";
-import { generationErrorMessage } from "@/lib/generation-error";
 import { formatTaskKind, statusLabel } from "@/lib/generation-task-display";
 import type { GenerationTask } from "@/services/api/task-center";
 import type { AiConfig } from "@/stores/use-config-store";
@@ -68,7 +67,7 @@ export function TaskListRow({
                     </div>
                 ) : null}
                 {isFailed ? (
-                    <p className="task-record-error" title={task.error ? generationErrorMessage(task.error) : undefined}>
+                    <p className="task-record-error" title={taskAttentionReason(task)}>
                         {taskAttentionReason(task)}
                     </p>
                 ) : null}

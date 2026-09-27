@@ -25,6 +25,7 @@ export function BrandLogo({ className, fallback, alt = "", theme = "auto" }: Bra
             src={source}
             alt={alt}
             className={cn("block object-contain", className)}
+            style={!appearance.logoConfigured && (theme === "auto" ? currentTheme : theme) === "light" ? { filter: "invert(1)" } : undefined}
             draggable={false}
             onError={(event) => {
                 event.currentTarget.style.visibility = "hidden";

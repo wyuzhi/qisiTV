@@ -61,7 +61,7 @@ describe("上传图片是输入素材", () => {
 test("底部菜单使用画布浮层管理并响应打开、鼠标和键盘交互", () => {
     const toolbar = read("components/canvas/canvas-toolbar.tsx");
     expect(toolbar).toContain('useCanvasOverlayLayer("main-toolbar", "calc(var(--z-modal-overlay) + 10)")');
-    expect(toolbar).toContain("if (addOpen || modeMenuOpen) bringToFront()");
+    expect(toolbar).toContain("if (addOpen || modeMenuOpen || appearanceOpen) bringToFront()");
     expect(toolbar).toContain('role="menuitemradio"');
     expect(toolbar).toContain('shortcut: "V"');
     expect(toolbar).toContain('shortcut: "H"');

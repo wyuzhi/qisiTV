@@ -1,7 +1,7 @@
 import { canvasThemes, type CanvasBackgroundMode, type CanvasColorTheme } from "@/lib/canvas-theme";
 import { scopedLocalStorage } from "@/lib/user-scope";
 
-export type CanvasAppearanceMode = "dark" | "custom";
+export type CanvasAppearanceMode = "light" | "dark" | "custom";
 
 export type CanvasCustomAppearance = {
     baseTheme: CanvasColorTheme;
@@ -38,17 +38,17 @@ const CUSTOM_GRID_COLOR: Record<CanvasColorTheme, string> = { light: "#000000", 
 const CUSTOM_GRID_OPACITY = 80;
 
 export function canvasAppearanceForTheme(theme: CanvasColorTheme, previous?: CanvasAppearance): CanvasAppearance {
-    return previous?.custom ? { mode: "dark", custom: { ...previous.custom, baseTheme: "dark" } } : { mode: "dark" };
+    return previous?.custom ? { mode: theme, custom: { ...previous.custom } } : { mode: theme };
 }
 
 export function customCanvasAppearanceFromTheme(theme: CanvasColorTheme): CanvasAppearance {
     return {
         mode: "custom",
         custom: {
-            baseTheme: "dark",
-            backgroundColor: canvasThemes.dark.canvas.background.toUpperCase(),
+            baseTheme: theme,
+            backgroundColor: canvasThemes[theme].canvas.background.toUpperCase(),
             backgroundBrightness: 0,
-            gridColor: CUSTOM_GRID_COLOR.dark,
+            gridColor: CUSTOM_GRID_COLOR[theme],
             gridOpacity: CUSTOM_GRID_OPACITY,
         },
     };
@@ -60,13 +60,14 @@ export function enterCustomCanvasAppearance(current: CanvasAppearance, currentTh
 }
 
 export function canvasAppearanceBaseTheme(appearance: CanvasAppearance | undefined, fallback: CanvasColorTheme): CanvasColorTheme {
-    return "dark";
+    if (appearance?.mode === "light" || appearance?.mode === "dark") return appearance.mode;
+    return appearance?.custom?.baseTheme === "light" ? "light" : appearance?.custom?.baseTheme === "dark" ? "dark" : fallback;
 }
 
 export function normalizeCanvasAppearance(value: unknown, fallback: CanvasColorTheme): CanvasAppearance {
     if (!value || typeof value !== "object") return canvasAppearanceForTheme(fallback);
     const candidate = value as Partial<CanvasAppearance>;
-    const mode = candidate.mode === "custom" ? "custom" : "dark";
+    const mode = candidate.mode === "custom" || candidate.mode === "light" || candidate.mode === "dark" ? candidate.mode : fallback;
     const custom = normalizeCustomAppearance(candidate.custom);
     if (mode === "custom" && !custom) return customCanvasAppearanceFromTheme(fallback);
     return custom ? { mode, custom } : { mode };
@@ -139,7 +140,7 @@ function normalizeCustomAppearance(value: unknown): CanvasCustomAppearance | und
     const gridColor = typeof candidate.gridColor === "string" ? normalizeHexColor(candidate.gridColor) : null;
     if (!backgroundColor || !gridColor) return undefined;
     return {
-        baseTheme: "dark",
+        baseTheme: candidate.baseTheme === "light" ? "light" : "dark",
         backgroundColor,
         backgroundBrightness: clampNumber(candidate.backgroundBrightness, -30, 30, 0),
         gridColor,

@@ -19,7 +19,8 @@ func (s *Service) validateResolvedVideoCapability(input *canvasGenerationInput) 
 	if channelID == "" {
 		profile := input.Config.CapabilityConfig
 		if profile == nil || profile.Video == nil {
-			if input.Config.InterfaceType != string(model.ChannelInterfaceAgnesVideo) {
+			seedance2 := isSeedance2Family(input.Config.InterfaceType, input.Config.Model)
+			if input.Config.InterfaceType != string(model.ChannelInterfaceAgnesVideo) && !seedance2 {
 				return nil
 			}
 			profile = DefaultModelCapabilityConfigForModel(input.Config.InterfaceType, input.Config.Model)
@@ -352,7 +353,7 @@ func beefAPIVideoRequestBody(input canvasGenerationInput) (map[string]interface{
 			})
 		}
 		for _, audio := range input.ReferenceAudios {
-			url, err := seedanceVideosMediaURL(audio)
+			url, err := beefAPIAudioURL(audio)
 			if err != nil {
 				return nil, err
 			}
@@ -539,8 +540,8 @@ func newAPIVideoPromptText(input canvasGenerationInput) string {
 }
 
 func seedanceVideosRequestBody(input canvasGenerationInput) (seedanceVideosRequest, error) {
-	if (len(input.ReferenceVideos) > 0 || len(input.ReferenceAudios) > 0) && len(input.ReferenceImages) == 0 {
-		return seedanceVideosRequest{}, errors.New("Seedance 参考视频或参考音频需要同时连接至少 1 张主参考图")
+	if len(input.ReferenceImages) == 0 && len(input.ReferenceVideos) == 0 && len(input.ReferenceAudios) > 0 && !videoCapabilityAllowsAudioOnly(input.VideoCapability) {
+		return seedanceVideosRequest{}, errors.New("当前视频模型不支持只用音频生成视频，请同时添加参考图片或参考视频")
 	}
 	body := seedanceVideosRequest{
 		Model:       input.Config.Model,
@@ -691,10 +692,25 @@ func seedanceVideosMediaURL(media providerMedia) (string, error) {
 		return value, nil
 	}
 	value = strings.TrimSpace(media.URL)
-	if strings.HasPrefix(value, "data:") || isPublicMediaURL(value) {
+	if strings.HasPrefix(value, "data:") || strings.HasPrefix(value, "asset://") || isPublicMediaURL(value) {
 		return value, nil
 	}
-	return "", errors.New("Seedance /videos 参考素材需要公网 URL 或 data URL")
+	return "", errors.New("Seedance /videos 参考素材需要公网 URL、asset:// 素材 ID 或 data URL")
+}
+
+func beefAPIAudioURL(media providerMedia) (string, error) {
+	value := strings.TrimSpace(media.URL)
+	if strings.HasPrefix(value, "asset://") || isPublicMediaURL(value) {
+		return value, nil
+	}
+	if strings.HasPrefix(strings.ToLower(value), "data:") {
+		return value, nil
+	}
+	data := strings.TrimSpace(media.DataURL)
+	if strings.HasPrefix(strings.ToLower(data), "data:") {
+		return data, nil
+	}
+	return "", errors.New("参考音频需要公网 URL、asset:// 素材 ID 或 data URL")
 }
 
 func seedanceErrorMessage(state map[string]interface{}) string {

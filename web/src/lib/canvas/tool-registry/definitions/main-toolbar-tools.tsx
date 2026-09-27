@@ -1,4 +1,4 @@
-import { Cable, Clock3, Eraser, Hand, Keyboard, MousePointer2, Plus, Redo2, ScanFace, Trash2, Undo2, Waypoints } from "lucide-react";
+import { Cable, Clock3, Eraser, Hand, Keyboard, MousePointer2, Palette, Plus, Redo2, ScanFace, Trash2, Undo2, Waypoints } from "lucide-react";
 
 import { registerToolbarTools, type ToolDefinition } from "@/lib/canvas/tool-registry";
 import type { CanvasToolMode } from "@/types/canvas";
@@ -9,6 +9,18 @@ const canvasModeOptions = [
 ];
 
 export const mainToolbarTools: ToolDefinition[] = [
+    {
+        id: "tool-appearance",
+        toolbar: "main",
+        category: "appearance",
+        label: "画布外观",
+        icon: <Palette />,
+        defaultVisible: true,
+        defaultOrder: 48,
+        expands: true,
+        active: (ctx) => ctx.appearancePanelOpen,
+        run: (ctx, event) => ctx.handlers.onToggleAppearancePanel(event!),
+    },
     {
         id: "tool-canvas-mode",
         toolbar: "main",

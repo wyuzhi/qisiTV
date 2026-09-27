@@ -38,7 +38,7 @@ test("APIMart NewAPI channel exposes Seedance multimodal reference operations", 
     const profile = defaultModelCapabilityConfig("newapi-channel-2", "seedance-2.0-fast").video!;
     assert.deepEqual(profile.references.maxVideos, 3);
     assert.ok(profile.operations.includes("reference_to_video"));
-    assert.ok(profile.operations.includes("audio_to_video"));
+    assert.ok(!profile.operations.includes("audio_to_video"));
 });
 
 test("BeefAPI generic newapi Seedance accepts mixed image and video references without a persisted capability profile", () => {

@@ -877,12 +877,22 @@ func resourceFileExtension(fileName string, mimeType string, kind string) string
 	}
 }
 
+const imageHeaderDecodeLimit = 2 << 20
+
 func imageDimensions(data []byte) (int, int) {
-	config, _, err := image.DecodeConfig(bytes.NewReader(data))
+	width, height, err := imageHeaderDimensions(bytes.NewReader(data))
 	if err != nil {
 		return 0, 0
 	}
-	return config.Width, config.Height
+	return width, height
+}
+
+func imageHeaderDimensions(r io.Reader) (int, int, error) {
+	config, _, err := image.DecodeConfig(io.LimitReader(r, imageHeaderDecodeLimit))
+	if err != nil {
+		return 0, 0, err
+	}
+	return config.Width, config.Height, nil
 }
 
 func normalizeResourceKind(kind string, mimeType string) string {

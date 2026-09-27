@@ -22,7 +22,7 @@ qisiTV 基于开源项目 [BeefTV](https://github.com/glanderness/BeefTV) 二次
 
 ![qisiTV 本地 Agent 画布](assets/readme/qisitv-workspace.png)
 
-[观看上游产品演示视频](https://github.com/glanderness/BeefTV/releases/download/v1.5.5/beeftv-demo.mp4)（展示上游界面，qisiTV 以本仓库截图为准）。
+[观看上游产品演示视频](https://github.com/user-attachments/assets/94fe6a39-6933-44b3-a9a9-dbc28b2d284c)（展示上游界面，qisiTV 以本仓库截图为准）。
 
 ## 一个画布，完整创作链路
 

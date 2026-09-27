@@ -208,7 +208,26 @@ zip 里的布局：
 https://github.com/OWNER/REPOSITORY/releases/latest/download/desktop-update.json
 ```
 
-流水线先建 draft，三个平台构建任务把包保存为 Actions 产物。发布任务收齐三个包后生成签名清单，把包和清单一起上传到 draft，最后发布并明确标记 latest。失败的构建不会切换客户端更新源。
+默认流水线先建 draft，收齐三个平台的构建产物并生成签名清单后发布到当前 GitHub 仓库。配置可选的 Cloudflare R2 后，先将版本包和版本清单写入 R2 不可变路径并读回校验，再发布 GitHub Release，最后通过条件写切换 R2 最新清单。失败或缺包不会激活更新源。
+
+更新源地址在构建时注入；迁移托管地址后，旧客户端需要先安装带新地址的版本。qisiTV 不使用上游项目的域名、bucket 或发布仓库。
+
+### Cloudflare 发布配置
+
+使用发布方自己控制的专用 R2 bucket 和 HTTPS 自定义域名，TLS 最低 1.2。只放公开发行文件，不混放用户素材。正式文件路径为 `qisitv/vX.Y.Z/<文件名>`，最新清单为 `qisitv/desktop-update.json`。版本对象长期缓存且不可变，最新清单使用禁止缓存的响应头。
+
+仓库 Actions 需要以下配置：
+
+- Secret `QISITV_R2_ACCESS_KEY_ID`、`QISITV_R2_SECRET_ACCESS_KEY`：仅对这个 bucket 拥有对象读写权限的 S3 凭据，不使用账户管理员令牌。
+- Variable `QISITV_R2_ENDPOINT`：该账户的官方 HTTPS R2 S3 endpoint。
+- Variable `QISITV_R2_BUCKET`：专用发行 bucket 名称。
+- Variable `QISITV_R2_PUBLIC_BASE`：公开前缀，例如 `https://releases.example.com/qisitv`（不要以 `/` 结尾）；留空时使用当前 GitHub 仓库托管。
+- 手工执行发布脚本时通过 `QISITV_RELEASE_REPOSITORY=OWNER/REPOSITORY` 指定仓库；Actions 自动读取 `GITHUB_REPOSITORY`。
+- 原有 `QISITV_UPDATER_PRIVATE_KEY` 和 `QISITV_UPDATER_PUBLIC_KEY` 保持不变。
+
+`scripts/publish-desktop-r2.py` 复用 `update-release verify` 验签，使用 AWS CLI v2 上传；发布机必须支持 `put-object` 的 `IfMatch`、`IfNoneMatch` 条件写。`stage` 只准备版本对象；`activate` 确认 GitHub 最新正式版本及公开清单与本次签名清单一致、全部公开对象可校验后，备份上一份清单，再通过 ETag 条件写切换。公网检查使用该版本客户端的请求标识。重复执行同一版本是幂等的，已有对象内容不同或试图降级会失败。
+
+如果 GitHub 发布成功而 CF 激活失败，保留正式版本及所有不可变对象。核对失败原因后，用同一版本的原始清单重跑 `activate`；不要删除正式 tag 或重建不同内容的同版本包。切换前失败不会改变旧 CF 清单；条件写成功但最终回读失败时，新清单可能已经生效，必须先核对存储与公开入口，不能把它当作未发布。已经安装新版本的客户端不自动降级。
 
 在发布方自己的 qisiTV 仓库 `main` 上手动运行 `.github/workflows/release-desktop.yml`。输入的 `confirm_version` 必须和 `VERSION` 一致。`CHANGELOG.md` 必须有对应的 `## vX.Y.Z` 段落，这段文字会同时成为 GitHub Release 说明和清单里的 `notes`。
 

@@ -6,6 +6,223 @@ import (
 	"testing"
 )
 
+func TestNativeArkModelDefaultsAndExplicitRestrictions(t *testing.T) {
+	for _, protocol := range []string{"volcengine-ark-video", "volcengine-ark-agent-plan-video"} {
+		for _, name := range []string{"seedance-2.5", "doubao-seedance-2-5-260528"} {
+			profile := DefaultModelCapabilityConfigForModel(protocol, name).Video
+			if profile.References.MaxImages != 30 || profile.References.MaxVideos != 10 || profile.References.MaxAudios != 10 || profile.References.MinAudioDuration != 2 || profile.Duration.Max != 30 {
+				t.Fatalf("%s %s defaults = %#v", protocol, name, profile)
+			}
+			input := canvasGenerationInput{Config: providerConfig{InterfaceType: protocol}, ReferenceAudios: []providerMedia{{URL: "asset://voice", DurationMs: 2000}}}
+			if err := validateVideoReferenceMedia(profile, input); err != nil {
+				t.Fatal(err)
+			}
+			input.ReferenceAudios[0].DurationMs = 1999
+			if err := validateVideoReferenceMedia(profile, input); err == nil {
+				t.Fatal("native audio below 2 seconds accepted")
+			}
+			input.ReferenceAudios[0].DurationMs = 0
+			if err := validateVideoReferenceMedia(profile, input); err != nil {
+				t.Fatalf("opaque asset rejected: %v", err)
+			}
+			input.ReferenceAudios[0].URL = "https://example.com/unknown.wav"
+			if err := validateVideoReferenceMedia(profile, input); err == nil {
+				t.Fatal("unknown URL duration accepted")
+			}
+			profile.References.MaxAudios = 0
+			profile.Operations = []string{"text_to_video"}
+			normalized, err := NormalizeModelCapabilityConfigForModel("video", protocol, name, &ModelCapabilityConfig{Version: 1, Video: profile})
+			if err != nil || normalized.Video.References.MaxAudios != 0 || videoCapabilityAllowsAudioOnly(normalized.Video) {
+				t.Fatalf("explicit restrictions expanded: %#v, %v", normalized, err)
+			}
+		}
+		for _, name := range []string{"seedance-2.0", "doubao-seedance-2-0-260128", "ep-custom-endpoint"} {
+			profile := DefaultModelCapabilityConfigForModel(protocol, name).Video
+			if videoCapabilityAllowsAudioOnly(profile) {
+				t.Fatalf("unknown or 2.0 model %s inferred audio-only", name)
+			}
+		}
+	}
+}
+
+func TestCatalogSeedanceLimitsAreNotOverwritten(t *testing.T) {
+	profile := DefaultModelCapabilityConfigForModel("newapi-channel-2", "seedance-2.5").Video
+	profile.References.MaxImages = 12
+	profile.References.MaxVideos = 4
+	profile.References.MaxAudios = 5
+	normalized, err := NormalizeModelCapabilityConfigForModel("video", "newapi-channel-2", "seedance-2.5", &ModelCapabilityConfig{Version: 1, Video: profile})
+	if err != nil {
+		t.Fatalf("NormalizeModelCapabilityConfigForModel() error = %v", err)
+	}
+	if normalized.Video.References.MaxImages != 12 || normalized.Video.References.MaxVideos != 4 || normalized.Video.References.MaxAudios != 5 {
+		t.Fatalf("catalog limits overwritten: %#v", normalized.Video.References)
+	}
+	if !containsCapabilityString(normalized.Video.Operations, "audio_to_video") {
+		t.Fatalf("operations = %v, want audio_to_video kept", normalized.Video.Operations)
+	}
+}
+
+func TestCatalogSeedanceExplicitZerosArePreserved(t *testing.T) {
+	profile := DefaultModelCapabilityConfigForModel("newapi", "other-video").Video
+	profile.References.MaxImages = 0
+	profile.References.MaxVideos = 0
+	profile.References.MaxAudios = 0
+	profile.Operations = []string{"text_to_video", "image_to_video"}
+	profile.DefaultOperation = "text_to_video"
+	normalized, err := NormalizeModelCapabilityConfigForModel("video", "newapi", "seedance-2.5", &ModelCapabilityConfig{Version: 1, Video: profile})
+	if err != nil {
+		t.Fatalf("NormalizeModelCapabilityConfigForModel() error = %v", err)
+	}
+	if normalized.Video.References.MaxImages != 0 || normalized.Video.References.MaxVideos != 0 || normalized.Video.References.MaxAudios != 0 {
+		t.Fatalf("explicit zeros overwritten: %#v", normalized.Video.References)
+	}
+	if containsCapabilityString(normalized.Video.Operations, "audio_to_video") || containsCapabilityString(normalized.Video.Operations, "reference_to_video") {
+		t.Fatalf("operations expanded: %v", normalized.Video.Operations)
+	}
+}
+
+func TestEnterpriseSeedanceMaxImagesNotExpandedToOfficial30(t *testing.T) {
+	profile := DefaultModelCapabilityConfigForModel("newapi-channel-2", "seedance-2.5").Video
+	profile.References.MaxImages = 9
+	normalized, err := NormalizeModelCapabilityConfigForModel("video", "newapi-channel-2", "seedance-2.5", &ModelCapabilityConfig{Version: 1, Video: profile})
+	if err != nil {
+		t.Fatalf("NormalizeModelCapabilityConfigForModel() error = %v", err)
+	}
+	if normalized.Video.References.MaxImages != 9 {
+		t.Fatalf("enterprise maxImages expanded: %d", normalized.Video.References.MaxImages)
+	}
+}
+
+func TestDefaultSeedance25UsesOfficialCounts(t *testing.T) {
+	profile := DefaultModelCapabilityConfigForModel("newapi-channel-2", "seedance-2.5").Video
+	if profile.References.MaxImages != 30 || profile.References.MaxVideos != 10 || profile.References.MaxAudios != 10 {
+		t.Fatalf("default 2.5 counts = %#v", profile.References)
+	}
+	if profile.References.MinAudioDuration != 1.8 {
+		t.Fatalf("default 2.5 min audio = %v", profile.References.MinAudioDuration)
+	}
+	if profile.Duration.Max < 30 {
+		t.Fatalf("default 2.5 output duration max = %d", profile.Duration.Max)
+	}
+	if !containsCapabilityString(profile.Operations, "audio_to_video") {
+		t.Fatalf("operations = %v", profile.Operations)
+	}
+}
+
+func TestValidateVideoTaskRejectsImageGeometryAndAllowsLargeLinkedVideo(t *testing.T) {
+	profile := DefaultModelCapabilityConfigForModel("newapi-channel-2", "seedance-2.5").Video
+	input := canvasGenerationInput{
+		Prompt:          "test",
+		Config:          providerConfig{Model: "seedance-2.5", VideoSeconds: "5", Size: "16:9", VQuality: "720p"},
+		ReferenceImages: []providerMedia{{Width: 200, Height: 400, Bytes: 1000}},
+	}
+	err := validateVideoTask(profile, input)
+	if err == nil || !strings.Contains(err.Error(), "宽度") || !strings.Contains(err.Error(), "200") || !strings.Contains(err.Error(), "调整尺寸或更换") {
+		t.Fatalf("narrow image error = %v", err)
+	}
+	input.ReferenceImages[0].Width = 800
+	input.ReferenceImages[0].Height = 800
+	input.ReferenceImages[0].Bytes = 31 * 1024 * 1024
+	err = validateVideoTask(profile, input)
+	if err == nil || !strings.Contains(err.Error(), "文件过大") || !strings.Contains(err.Error(), "单文件") {
+		t.Fatalf("single file error = %v", err)
+	}
+	input.ReferenceImages = nil
+	input.ReferenceVideos = []providerMedia{{
+		URL: "https://example.com/large.mp4", Bytes: 100 * 1024 * 1024, Width: 1280, Height: 720, DurationMs: 5000,
+	}}
+	if err := validateVideoTask(profile, input); err != nil {
+		t.Fatalf("linked 100MB video rejected: %v", err)
+	}
+}
+
+func TestValidateVideoTaskHonorsRequestedDurationAndResolution(t *testing.T) {
+	profile := DefaultModelCapabilityConfigForModel("newapi-channel-2", "seedance-2.5").Video
+	input := canvasGenerationInput{Prompt: "test", Config: providerConfig{Model: "seedance-2.5", VideoSeconds: "20", Size: "16:9", VQuality: "1080p"}}
+	if err := validateVideoTask(profile, input); err != nil {
+		t.Fatalf("20s 1080p rejected: %v", err)
+	}
+	input.Config.VideoSeconds = "30"
+	input.Config.VQuality = "2k"
+	if err := validateVideoTask(profile, input); err != nil {
+		t.Fatalf("30s 2k rejected: %v", err)
+	}
+	input.Config.VideoSeconds = "-1"
+	if err := validateVideoTask(profile, input); err == nil {
+		t.Fatal("adaptive -1 accepted without capability support")
+	}
+	profile.Duration = VideoDurationConfig{Selection: "enum", Values: []int{5, 10, -1}, Default: 5}
+	if err := validateVideoTask(profile, input); err != nil {
+		t.Fatalf("explicit -1 rejected: %v", err)
+	}
+	limited := DefaultModelCapabilityConfigForModel("volcengine-ark-video", "doubao-seedance-2-0-260128").Video
+	input.Config.VideoSeconds = "6"
+	input.Config.VQuality = "4k"
+	if err := validateVideoTask(limited, input); err == nil || !strings.Contains(err.Error(), "输出分辨率") {
+		t.Fatalf("unsupported 4k error = %v", err)
+	}
+}
+
+func TestValidateVideoTaskAllowsSeedance25AudioOnly(t *testing.T) {
+	profile := DefaultModelCapabilityConfigForModel("newapi-channel-2", "seedance-2.5").Video
+	input := canvasGenerationInput{
+		Prompt:          "follow the soundtrack",
+		Config:          providerConfig{Model: "seedance-2.5", VideoSeconds: "5", Size: "16:9", VQuality: "720p"},
+		ReferenceAudios: []providerMedia{{DurationMs: 3000, Bytes: 1000, URL: "https://example.com/a.mp3"}},
+		Metadata:        map[string]interface{}{"videoEditOperation": "audio_to_video"},
+	}
+	if err := validateVideoTask(profile, input); err != nil {
+		t.Fatalf("audio-only 2.5 rejected: %v", err)
+	}
+}
+
+func TestSeedanceReferenceDurationRejectsShortAndUnknownBeforeSubmit(t *testing.T) {
+	for _, name := range []string{"seedance-2.0-fast", "seedance-2.5"} {
+		profile := applyModelSpecificVideoCapability(DefaultModelCapabilityConfigForModel("newapi-channel-2", name).Video, "newapi-channel-2", name)
+		input := canvasGenerationInput{Prompt: "test", Config: providerConfig{Model: name, VideoSeconds: "5"}, ReferenceImages: []providerMedia{{Width: 512, Height: 512}}, ReferenceAudios: []providerMedia{{DurationMs: 2500}, {DurationMs: 900}}}
+		if err := validateVideoTask(profile, input); err == nil || !strings.Contains(err.Error(), "第 2 段参考音频") || !strings.Contains(err.Error(), "0.90") {
+			t.Fatalf("short audio: %v", err)
+		}
+		input.ReferenceAudios[1].DurationMs = 0
+		if err := validateVideoTask(profile, input); err == nil || !strings.Contains(err.Error(), "时长无法读取") {
+			t.Fatalf("unknown duration: %v", err)
+		}
+		input.ReferenceAudios[1].DurationMs = 1700
+		if err := validateVideoTask(profile, input); err == nil || !strings.Contains(err.Error(), "1.70") || !strings.Contains(err.Error(), "1.8") {
+			t.Fatalf("1.7s audio: %v", err)
+		}
+		input.ReferenceAudios[1].DurationMs = 1800
+		if err := validateVideoTask(profile, input); err != nil {
+			t.Fatalf("1.8s audio: %v", err)
+		}
+	}
+}
+
+func TestSeedanceTotalReferenceAudioDuration(t *testing.T) {
+	for name, maximum := range map[string]int64{"seedance-2.0": 15000, "seedance-2.5": 30000, "provider/seedance-2.5": 30000, "seedance-2.5-self-developed": 30000} {
+		profile := applyModelSpecificVideoCapability(DefaultModelCapabilityConfigForModel("newapi-channel-2", name).Video, "newapi-channel-2", name)
+		input := canvasGenerationInput{Prompt: "test", Config: providerConfig{Model: name, VideoSeconds: "5"}, ReferenceImages: []providerMedia{{Width: 512, Height: 512}}, ReferenceAudios: []providerMedia{{DurationMs: maximum / 2}, {DurationMs: maximum / 2}}}
+		if err := validateVideoTask(profile, input); err != nil {
+			t.Fatalf("%s exact total: %v", name, err)
+		}
+		input.ReferenceAudios[1].DurationMs += 1000
+		if err := validateVideoTask(profile, input); err == nil || !strings.Contains(err.Error(), "参考音频总时长") {
+			t.Fatalf("%s excessive total: %v", name, err)
+		}
+	}
+}
+
+func TestSeedanceReferenceDurationWithoutPersistedCapability(t *testing.T) {
+	for _, protocol := range []string{"openai", "newapi", "newapi-channel-2"} {
+		for _, name := range []string{"seedance-2.5", "provider/seedance-2.0-fast"} {
+			input := canvasGenerationInput{Prompt: "test", Config: providerConfig{InterfaceType: protocol, Model: name, VideoSeconds: "5"}, ReferenceImages: []providerMedia{{Width: 512, Height: 512}}, ReferenceAudios: []providerMedia{{DurationMs: 900}}}
+			if err := (&Service{}).validateResolvedVideoCapability(&input); err == nil || !strings.Contains(err.Error(), "第 1 段参考音频") {
+				t.Fatalf("%s %s bypassed short audio validation: %v", protocol, name, err)
+			}
+		}
+	}
+}
+
 func TestValidateImageTaskRejectsOversizedGrokPromptByUTF8Bytes(t *testing.T) {
 	prompt := strings.Repeat("中", 4001)
 	input := canvasGenerationInput{
@@ -191,10 +408,13 @@ func TestDefaultVolcengineArkVideoCapabilitySupportsFullModalReference(t *testin
 	if profile == nil || profile.Video == nil {
 		t.Fatal("Volcengine Ark video profile = nil")
 	}
-	for _, operation := range []string{"reference_to_video", "audio_to_video"} {
+	for _, operation := range []string{"reference_to_video"} {
 		if !containsCapabilityString(profile.Video.Operations, operation) {
 			t.Fatalf("operations = %v, want %s", profile.Video.Operations, operation)
 		}
+	}
+	if containsCapabilityString(profile.Video.Operations, "audio_to_video") {
+		t.Fatal("Seedance 2.0 must not advertise audio-only generation")
 	}
 	if profile.Video.References.MaxImages != 9 || profile.Video.References.MaxVideos != 3 || profile.Video.References.MaxAudios != 3 {
 		t.Fatalf("reference limits = %#v", profile.Video.References)
@@ -206,15 +426,16 @@ func TestValidateVolcengineArkFullModalReferenceRejectsTextAndAudioOnly(t *testi
 	input := canvasGenerationInput{
 		Prompt:          "follow the soundtrack",
 		Config:          providerConfig{InterfaceType: "volcengine-ark-video", VideoSeconds: "6", Size: "16:9", VQuality: "720p"},
-		ReferenceAudios: []providerMedia{{URL: "https://example.com/music.mp3"}},
+		ReferenceAudios: []providerMedia{{URL: "https://example.com/music.mp3", DurationMs: 3000}},
 		Metadata:        map[string]interface{}{"videoEditOperation": "audio_to_video"},
 	}
 	err := validateVideoTask(profile, input)
-	if err == nil || !strings.Contains(err.Error(), "文本+音频") {
+	if err == nil || !strings.Contains(err.Error(), "不支持只用音频") {
 		t.Fatalf("validateVideoTask() error = %v", err)
 	}
 
 	input.ReferenceImages = []providerMedia{{URL: "https://example.com/subject.png"}}
+	input.Metadata["videoEditOperation"] = "reference_to_video"
 	if err := validateVideoTask(profile, input); err != nil {
 		t.Fatalf("validateVideoTask(full modal) error = %v", err)
 	}

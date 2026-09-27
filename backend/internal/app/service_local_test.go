@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -109,5 +110,31 @@ func TestLocalServiceSkipsHostedActivityAnalytics(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("local activity analytics rows = %d, want 0", count)
+	}
+}
+
+func TestLocalTaskListReturnsSafeActionableFailure(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Task{}); err != nil {
+		t.Fatal(err)
+	}
+	raw := `{"error":{"code":"400","message":"素材转换失败: Height must be between 300px and 6000px. api_key=PRIVATE_LIST_TEST","type":"api_error"}}`
+	if err := db.Create(&model.Task{ID: "failed-video", UserID: "local", Type: "video", Status: model.TaskStatusFailed, Error: raw}).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := NewLocal(repository.New(db), t.TempDir())
+	tasks, err := svc.TasksWithOptions("local", TaskListOptions{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("task count = %d", len(tasks))
+	}
+	got := tasks[0]
+	if got.ErrorCode != "invalid_params" || !strings.Contains(got.Error, "300–6000") || strings.Contains(got.Error, "PRIVATE_LIST_TEST") || strings.Contains(got.Error, `{"error"`) {
+		t.Fatalf("unsafe or missing list error: %#v", got)
 	}
 }

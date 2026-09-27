@@ -13,6 +13,8 @@
 
 ## 配置字段
 
+素材支持公开 URL、Base64 data URL 与已授权的 `asset://` 素材 ID；本地素材由客户端读取后发送，无需配置公开素材服务器。素材数量、时长和生成模式以所选模型的能力配置为准，插件不使用固定的 9/3/3 限制。原生音频最短为 2 秒；Seedance 2.5 默认支持纯音频输入，2.0 需要同时提供图片或视频。明确配置的能力优先于默认值。时长 `-1` 仅在模型能力允许时使用，提交时保留原值。
+
 | 字段 | 类型 | 必填 | 含义 |
 | --- | --- | --- | --- |
 | `apiKey` | secret | 是 | API Key |
@@ -47,7 +49,7 @@
 | `create.body.content` | `{"$concatArrays":[[{"type":"text","text":{"$ref":"request.prompt"}}],{"$map":{"from":{"$sortByOrder":{"$ref":"request.images"}},"as":"media","in":{"type":"image_url","image_url":{"url":{"$ref":"media.value"}},"role":{"$coalesce":[{"$ref":"media.role"},"reference_image"]}}}},{"$map":{"from":{"$sortByOrder":{"$ref":"request.videos"}},"as":"media","in":{"type":"video_url","video_url":{"url":{"$ref":"media.value"}},"role":{"$coalesce":[{"$ref":"media.role"},"reference_video"]}}}},{"$map":{"from":{"$sortByOrder":{"$ref":"request.audios"}},"as":"media","in":{"type":"audio_url","audio_url":{"url":{"$ref":"media.value"}},"role":{"$coalesce":[{"$ref":"media.role"},"reference_audio"]}}}}]}` |
 | `create.body.ratio` | `{"$coalesce":[{"$ref":"request.aspectRatio"},"16:9"]}` |
 | `create.body.resolution` | `{"$coalesce":[{"$ref":"request.resolution"},"720p"]}` |
-| `create.body.duration` | `{"$if":{"condition":{"$gt":[{"$ref":"request.duration"},0]},"then":{"$ref":"request.duration"},"else":5}}` |
+| `create.body.duration` | `{"$if":{"condition":{"$or":[{"$gt":[{"$ref":"request.duration"},0]},{"$eq":[{"$ref":"request.duration"},-1]}]},"then":{"$ref":"request.duration"},"else":5}}` |
 | `create.body.generate_audio` | `{"$ref":"request.generateAudio"}` |
 | `create.body.watermark` | `{"$ref":"request.watermark"}` |
 | `create.body.seed` | `{"$omitEmpty":{"$ref":"request.providerOptions.volcengine-ark-agent-plan-video.seed"}}` |
@@ -96,7 +98,7 @@ Agent Plan 专属接入：创建/查询/取消走 /api/plan/v3/contents/generati
   "apiVersion": "qisitv.plugin/v2",
   "id": "volcengine-ark-agent-plan-seedance",
   "name": "Volcengine Ark Agent Plan Seedance",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": "BeefTV Contributors",
   "description": "Volcengine Ark Agent Plan Seedance 独立请求协议插件。",
   "documentation": "<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>",
@@ -130,7 +132,7 @@ Agent Plan 专属接入：创建/查询/取消走 /api/plan/v3/contents/generati
           "agent"
         ],
         "baseUrl": "https://ark.cn-beijing.volces.com",
-        "requiresPublicMediaUrls": true,
+        "requiresPublicMediaUrls": false,
         "auth": {
           "type": "bearer",
           "field": "apiKey"
@@ -221,83 +223,7 @@ Agent Plan 专属接入：创建/查询/取消走 /api/plan/v3/contents/generati
             "description": "providerOptions camera_fixed。"
           }
         ],
-        "validations": [
-          {
-            "assert": {
-              "$lte": [
-                {
-                  "$len": {
-                    "$ref": "request.images"
-                  }
-                },
-                9
-              ]
-            },
-            "message": "Seedance 最多支持 9 张参考图片"
-          },
-          {
-            "assert": {
-              "$lte": [
-                {
-                  "$len": {
-                    "$ref": "request.videos"
-                  }
-                },
-                3
-              ]
-            },
-            "message": "Seedance 最多支持 3 个参考视频"
-          },
-          {
-            "assert": {
-              "$lte": [
-                {
-                  "$len": {
-                    "$ref": "request.audios"
-                  }
-                },
-                3
-              ]
-            },
-            "message": "Seedance 最多支持 3 个参考音频"
-          },
-          {
-            "assert": {
-              "$or": [
-                {
-                  "$eq": [
-                    {
-                      "$len": {
-                        "$ref": "request.audios"
-                      }
-                    },
-                    0
-                  ]
-                },
-                {
-                  "$gt": [
-                    {
-                      "$add": [
-                        {
-                          "$len": {
-                            "$ref": "request.images"
-                          }
-                        },
-                        {
-                          "$len": {
-                            "$ref": "request.videos"
-                          }
-                        }
-                      ]
-                    },
-                    0
-                  ]
-                }
-              ]
-            },
-            "message": "Seedance 不支持纯音频或文本+音频，请同时添加参考图片或参考视频"
-          }
-        ],
+        "validations": [],
         "create": {
           "method": "POST",
           "path": "/api/plan/v3/contents/generations/tasks",
@@ -415,11 +341,23 @@ Agent Plan 专属接入：创建/查询/取消走 /api/plan/v3/contents/generati
             "duration": {
               "$if": {
                 "condition": {
-                  "$gt": [
+                  "$or": [
                     {
-                      "$ref": "request.duration"
+                      "$gt": [
+                        {
+                          "$ref": "request.duration"
+                        },
+                        0
+                      ]
                     },
-                    0
+                    {
+                      "$eq": [
+                        {
+                          "$ref": "request.duration"
+                        },
+                        -1
+                      ]
+                    }
                   ]
                 },
                 "then": {

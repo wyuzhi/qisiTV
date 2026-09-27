@@ -10,8 +10,10 @@
             html,
             body {
                 margin: 0;
-                background: #0f0f0f;
+                background: var(--background, #0f0f0f);
             }
+            :root { --bootstrap-ink: 24, 24, 27; }
+            :root.dark { --bootstrap-ink: 255, 255, 255; }
             #root:empty {
                 min-height: 100vh;
             }
@@ -23,9 +25,9 @@
                 width: 12px;
                 height: 12px;
                 margin: -6px 0 0 -6px;
-                background: rgba(255, 255, 255, 0.84);
+                background: rgba(var(--bootstrap-ink), 0.84);
                 border-radius: 999px;
-                box-shadow: 0 0 0 7px rgba(255, 255, 255, 0.08);
+                box-shadow: 0 0 0 7px rgba(var(--bootstrap-ink), 0.08);
                 animation: appearance-bootstrap-pulse 1.8s ease-in-out infinite;
             }
             #root:empty::after {
@@ -36,7 +38,7 @@
                 width: 82px;
                 height: 82px;
                 margin: -42px 0 0 -42px;
-                border: 1px solid rgba(255, 255, 255, 0.14);
+                border: 1px solid rgba(var(--bootstrap-ink), 0.14);
                 border-right-color: transparent;
                 border-radius: 999px;
                 animation: appearance-bootstrap-orbit 2.8s linear infinite;
@@ -51,13 +53,17 @@
             }
         </style>
         <script>
-            // qisiTV is dark-first. Apply the invariant before React mounts so a
-            // missing, stale or corrupted preference cannot produce a white flash.
-            document.documentElement.classList.add("dark");
-            document.documentElement.style.colorScheme = "dark";
+            // Match the saved preference before the first paint; invalid storage stays dark.
+            let theme = "dark";
+            try {
+                if (JSON.parse(localStorage.getItem("infinite-canvas:theme_store"))?.state?.theme === "light") theme = "light";
+            } catch {}
+            document.documentElement.classList.toggle("dark", theme === "dark");
+            document.documentElement.style.colorScheme = theme;
+            document.documentElement.style.setProperty("--background", theme === "dark" ? "#0f0f0f" : "#f5f5f5");
         </script>
     </head>
-    <body class="bg-background text-foreground antialiased" style="background:#0f0f0f">
+    <body class="bg-background text-foreground antialiased">
         <div id="root"></div>
         <script type="module" src="/src/main.tsx"></script>
     </body>

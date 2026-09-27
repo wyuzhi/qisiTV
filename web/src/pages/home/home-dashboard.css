@@ -2,21 +2,21 @@ body .app-user-workspace .app-workspace-sidebar {
     --workspace-reference-sidebar: 240px;
     width: 240px !important;
     flex-basis: 240px;
-    background: #101010;
-    border-right: 1px solid rgba(255,255,255,.08);
+    background: var(--user-page-bg);
+    border-right: 1px solid var(--user-border);
 }
-body .app-user-workspace .app-workspace-sidebar-nav { background: #101010; }
+body .app-user-workspace .app-workspace-sidebar-nav { background: var(--user-page-bg); }
 
 .qisitv-home {
-    --home-border: rgba(255,255,255,.09);
-    --home-card: #171717;
-    height: 100%; overflow: auto; color: #f5f5f5; background: #101010;
-    padding: 64px 40px 72px; scrollbar-color: #343434 transparent;
+    --home-border: var(--user-border);
+    --home-card: var(--user-surface);
+    height: 100%; overflow: auto; color: var(--user-ink); background: var(--user-page-bg);
+    padding: 64px 40px 72px; scrollbar-color: var(--user-border-strong) transparent;
 }
-.qisitv-home-hero { position: relative; min-height: 160px; display: grid; place-items: center; overflow: hidden; border: 1px solid rgba(255,255,255,.16); border-radius: 12px; background: rgba(255,255,255,.06); }
+.qisitv-home-hero { position: relative; min-height: 160px; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--user-border-strong); border-radius: 12px; background: var(--user-surface-muted); }
 .qisitv-home-dot-base,.qisitv-home-dot-flow { position: absolute; inset: 8px 2px; pointer-events: none; background-size: 18px 18px; }
-.qisitv-home-dot-base { background-image: radial-gradient(circle,rgba(255,255,255,.1) .3px,transparent 1.4px); }
-.qisitv-home-dot-flow { background-image: radial-gradient(circle,rgba(255,255,255,.7) .3px,transparent 1.4px); -webkit-mask-image: radial-gradient(circle,transparent 18%,rgba(0,0,0,.2) 32%,rgba(0,0,0,.85) 50%,rgba(0,0,0,.2) 68%,transparent 82%); mask-image: radial-gradient(circle,transparent 18%,rgba(0,0,0,.2) 32%,rgba(0,0,0,.85) 50%,rgba(0,0,0,.2) 68%,transparent 82%); -webkit-mask-position:center; mask-position:center; -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat; opacity:0; animation:qisitv-dot-ripple 4s cubic-bezier(.33,0,.2,1) infinite; }
+.qisitv-home-dot-base { background-image: radial-gradient(circle,color-mix(in srgb,var(--user-ink) 12%,transparent) .3px,transparent 1.4px); }
+.qisitv-home-dot-flow { background-image: radial-gradient(circle,color-mix(in srgb,var(--user-ink) 45%,transparent) .3px,transparent 1.4px); -webkit-mask-image: radial-gradient(circle,transparent 18%,rgba(0,0,0,.2) 32%,rgba(0,0,0,.85) 50%,rgba(0,0,0,.2) 68%,transparent 82%); mask-image: radial-gradient(circle,transparent 18%,rgba(0,0,0,.2) 32%,rgba(0,0,0,.85) 50%,rgba(0,0,0,.2) 68%,transparent 82%); -webkit-mask-position:center; mask-position:center; -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat; opacity:0; animation:qisitv-dot-ripple 4s cubic-bezier(.33,0,.2,1) infinite; }
 .qisitv-home-dot-flow-delay { animation-delay:-2s; }
 .qisitv-home-create { position: relative; z-index: 1; display: flex; align-items: center; flex-direction: column; border: 0; background: none; color: inherit; cursor: pointer; }
 .qisitv-home-create { gap:13px; }
@@ -27,36 +27,36 @@ body .app-user-workspace .app-workspace-sidebar-nav { background: #101010; }
 .qisitv-home-create:active .qisitv-home-create-icon { transform: scale(.97); }
 .qisitv-home-create:focus-visible { outline: 2px solid #67e8f9; outline-offset: 8px; border-radius: 18px; }
 .qisitv-capabilities { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:8px; margin:24px 0 0; padding:8px 0; }
-.qisitv-capability { display:flex; min-width:0; flex-direction:column; align-items:center; gap:8px; color:#ddd; text-align:center; text-decoration:none; }
-.qisitv-capability-icon { position:relative; display:grid; width:98px; height:56px; margin:0; place-items:center; border:0; border-radius:16px; background:rgba(255,255,255,.06); box-shadow:0 0 0 1px rgba(255,255,255,.035); transition:transform .18s ease,background .18s ease,box-shadow .18s ease; }
+.qisitv-capability { display:flex; min-width:0; flex-direction:column; align-items:center; gap:8px; color:var(--user-ink); text-align:center; text-decoration:none; }
+.qisitv-capability-icon { position:relative; display:grid; width:98px; height:56px; margin:0; place-items:center; border:0; border-radius:16px; background:var(--user-surface-muted); box-shadow:0 0 0 1px var(--user-surface-muted); transition:transform .18s ease,background .18s ease,box-shadow .18s ease; }
 .qisitv-capability-icon svg { width:24px; height:24px; stroke-width:1.7; }
 .qisitv-capability strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qisitv-capability strong { width:100%; font-size:14px; line-height:22px; font-weight:400; }
-.qisitv-capability:hover .qisitv-capability-icon { transform: translateY(-3px); border-color: rgba(34,211,238,.22); background: #292929; }
-.qisitv-capability.is-disabled { color: rgba(255,255,255,.36); cursor: not-allowed; }
-.qisitv-capability.is-disabled .qisitv-capability-icon { background: rgba(255,255,255,.035); box-shadow: 0 0 0 1px rgba(255,255,255,.02); }
-.qisitv-capability.is-disabled .qisitv-capability-icon svg { color: rgba(255,255,255,.3); }
-.qisitv-capability.is-disabled:hover .qisitv-capability-icon { transform: none; border-color: transparent; background: rgba(255,255,255,.035); }
+.qisitv-capability:hover .qisitv-capability-icon { transform: translateY(-3px); border-color: rgba(34,211,238,.22); background: var(--user-surface-hover); }
+.qisitv-capability.is-disabled { color: var(--user-ink-soft); cursor: not-allowed; }
+.qisitv-capability.is-disabled .qisitv-capability-icon { background: var(--user-surface-muted); box-shadow: 0 0 0 1px rgba(255,255,255,.02); }
+.qisitv-capability.is-disabled .qisitv-capability-icon svg { color: var(--user-ink-soft); }
+.qisitv-capability.is-disabled:hover .qisitv-capability-icon { transform: none; border-color: transparent; background: var(--user-surface-muted); }
 .qisitv-home-section { margin-top:28px; }
 .qisitv-section-heading { display:flex; height:32px; align-items:center; justify-content:space-between; margin-bottom:12px; padding-inline:8px 0; }
 .qisitv-section-heading h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; letter-spacing: -.01em; }
-.qisitv-section-heading a { display: inline-flex; align-items: center; gap: 8px; color: #aaa; font-size: 13px; line-height: 20px; text-decoration: none; }
+.qisitv-section-heading a { display: inline-flex; align-items: center; gap: 8px; color: var(--user-ink-muted); font-size: 13px; line-height: 20px; text-decoration: none; }
 .qisitv-section-heading svg { width: 16px; }
 .qisitv-recent-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
-.qisitv-recent-card { position:relative; display:flex; min-width:0; height:85px; align-items:center; gap:14px; overflow:hidden; border:1px solid var(--home-border); border-radius:24px; padding:4px 16px 4px 4px; background:#161616; color:inherit; text-align:left; text-decoration:none; transition:border-color .18s ease,background .18s ease,transform .18s ease; }
-.qisitv-recent-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,.17); background: #151515; }
-.qisitv-recent-preview { display:grid; width:100px; height:75px; flex:0 0 100px; margin:0; place-items:center; overflow:hidden; border-radius:20px; background:rgba(255,255,255,.06); color:#555; }
+.qisitv-recent-card { position:relative; display:flex; min-width:0; height:85px; align-items:center; gap:14px; overflow:hidden; border:1px solid var(--home-border); border-radius:24px; padding:4px 16px 4px 4px; background:var(--user-surface); color:inherit; text-align:left; text-decoration:none; transition:border-color .18s ease,background .18s ease,transform .18s ease; }
+.qisitv-recent-card:hover { transform: translateY(-2px); border-color: var(--user-border-strong); background: var(--user-surface); }
+.qisitv-recent-preview { display:grid; width:100px; height:75px; flex:0 0 100px; margin:0; place-items:center; overflow:hidden; border-radius:20px; background:var(--user-surface-muted); color:var(--user-ink-soft); }
 .qisitv-recent-preview img { width: 100%; height: 100%; object-fit: cover; }
 .qisitv-recent-preview svg { width: 28px; }
 .qisitv-recent-copy { display:flex; min-width:0; flex:1; flex-direction:column; gap:4px; padding:0; }
 .qisitv-recent-copy strong,.qisitv-recent-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qisitv-recent-copy strong { font-size:14px; line-height:22px; font-weight:500; }
-.qisitv-recent-copy small { margin:0; color:rgba(255,255,255,.6); font-size:12px; line-height:18px; }
-.qisitv-recent-arrow { position: absolute; right: 14px; width: 16px; color: #777; opacity: 0; transition: opacity .18s ease, transform .18s ease; }
+.qisitv-recent-copy small { margin:0; color:var(--user-ink-muted); font-size:12px; line-height:18px; }
+.qisitv-recent-arrow { position: absolute; right: 14px; width: 16px; color: var(--user-ink-muted); opacity: 0; transition: opacity .18s ease, transform .18s ease; }
 .qisitv-recent-card:hover .qisitv-recent-arrow { opacity: 1; transform: translateX(2px); }
-.qisitv-recent-card.is-loading { background: linear-gradient(100deg,#151515 30%,#222 50%,#151515 70%); background-size: 200% 100%; animation: qisitv-shimmer 1.4s linear infinite; }
+.qisitv-recent-card.is-loading { background: linear-gradient(100deg,var(--user-surface) 30%,var(--user-surface-hover) 50%,var(--user-surface) 70%); background-size: 200% 100%; animation: qisitv-shimmer 1.4s linear infinite; }
 .qisitv-recent-card.is-empty { color:inherit; cursor:pointer; }
-.qisitv-home-error { display: flex; width: 100%; height: 86px; align-items: center; justify-content: center; gap: 10px; border: 1px solid var(--home-border); border-radius: 18px; background: #151515; color: #aaa; cursor: pointer; }
+.qisitv-home-error { display: flex; width: 100%; height: 86px; align-items: center; justify-content: center; gap: 10px; border: 1px solid var(--home-border); border-radius: 18px; background: var(--user-surface); color: var(--user-ink-muted); cursor: pointer; }
 @keyframes qisitv-dot-ripple { 0% { opacity:0; -webkit-mask-size:72px 72px; mask-size:72px 72px; } 18% { opacity:.34; } 72% { opacity:.12; } 100% { opacity:0; -webkit-mask-size:1120px 1120px; mask-size:1120px 1120px; } }
 @keyframes qisitv-shimmer { to { background-position: -200% 0; } }
 @media (max-width: 1500px) { .qisitv-home{padding:64px 40px 60px}.qisitv-capabilities{gap:8px;margin-inline:0} }

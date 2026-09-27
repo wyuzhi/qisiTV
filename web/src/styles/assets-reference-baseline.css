@@ -1,4 +1,4 @@
-.assets-library-source-rail { position: absolute; z-index: 2; top: 0; right: 0; bottom: 0; width: 240px; border-left: 1px solid rgba(255,255,255,.07); background: #121212; }
+.assets-library-source-rail { position: absolute; z-index: 2; top: 0; right: 0; bottom: 0; width: 240px; border-left: 1px solid var(--user-border); background: var(--user-page-bg); }
 .assets-library-source-rail-inner { display: flex; flex-direction: column; gap: 4px; padding: 14px 12px; }
 .generation-history-page .assets-library-hero { min-height: 92px !important; }
 .generation-history-page .assets-library-hero .app-page-header { height: 64px !important; min-height: 64px !important; gap: 0; padding-bottom: 0 !important; }
@@ -56,7 +56,7 @@
 .generation-history-card-meta { display: none; }
 .generation-history-card-meta strong { overflow: hidden; color: var(--foreground); font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .generation-history-card-meta span { color: color-mix(in srgb, var(--foreground) 44%, transparent); font-size: 11px; }
-.generation-history-missing-preview { display: grid; width: 100%; height: 100%; min-height: 140px; place-items: center; align-content: center; gap: 6px; padding: 18px; box-sizing: border-box; background: radial-gradient(circle at 50% 35%, rgba(255,255,255,.08), transparent 58%), #202020; color: rgba(255,255,255,.82); text-align: center; }
+.generation-history-missing-preview { display: grid; width: 100%; height: 100%; min-height: 140px; place-items: center; align-content: center; gap: 6px; padding: 18px; box-sizing: border-box; background: radial-gradient(circle at 50% 35%, var(--user-surface-muted), transparent 58%), #202020; color: rgba(255,255,255,.82); text-align: center; }
 .generation-history-missing-preview strong { font-size: 13px; font-weight: 500; }
 .generation-history-missing-preview span, .generation-history-missing-preview small { max-width: 100%; overflow: hidden; color: rgba(255,255,255,.48); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .generation-history-missing-preview small { color: rgba(255,255,255,.34); }

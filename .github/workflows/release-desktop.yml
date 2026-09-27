@@ -17,8 +17,8 @@ permissions:
 
 env:
   GOTOOLCHAIN: local
-  QISITV_UPDATER_FEED_URL: https://github.com/${{ github.repository }}/releases/latest/download/desktop-update.json
-  UPDATER_DOWNLOAD_BASE: https://github.com/${{ github.repository }}/releases/download
+  QISITV_UPDATER_FEED_URL: ${{ vars.QISITV_R2_PUBLIC_BASE != '' && format('{0}/desktop-update.json', vars.QISITV_R2_PUBLIC_BASE) || format('https://github.com/{0}/releases/latest/download/desktop-update.json', github.repository) }}
+  UPDATER_DOWNLOAD_BASE: ${{ vars.QISITV_R2_PUBLIC_BASE || format('https://github.com/{0}/releases/download', github.repository) }}
 
 jobs:
   preflight:
@@ -57,8 +57,15 @@ jobs:
         env:
           QISITV_UPDATER_PRIVATE_KEY: ${{ secrets.QISITV_UPDATER_PRIVATE_KEY }}
           QISITV_UPDATER_PUBLIC_KEY: ${{ vars.QISITV_UPDATER_PUBLIC_KEY }}
+          R2_ENDPOINT: ${{ vars.QISITV_R2_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.QISITV_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.QISITV_R2_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
+          if [[ -n "${{ vars.QISITV_R2_PUBLIC_BASE }}" ]] && [[ -z "$R2_ENDPOINT" || -z "$R2_ACCESS_KEY_ID" || -z "$R2_SECRET_ACCESS_KEY" || -z "${{ vars.QISITV_R2_BUCKET }}" ]]; then
+            echo "Missing bucket-scoped R2 release credentials or endpoint."
+            exit 1
+          fi
           if [[ -z "${QISITV_UPDATER_PRIVATE_KEY:-}" ]]; then
             echo "Missing GitHub Actions secret QISITV_UPDATER_PRIVATE_KEY."
             echo "It must be standard base64 of a 64-byte Ed25519 private key."
@@ -258,6 +265,13 @@ jobs:
       COMMIT: ${{ needs.preflight.outputs.commit }}
       QISITV_UPDATER_PRIVATE_KEY: ${{ secrets.QISITV_UPDATER_PRIVATE_KEY }}
       QISITV_UPDATER_PUBLIC_KEY: ${{ vars.QISITV_UPDATER_PUBLIC_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.QISITV_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.QISITV_R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      AWS_EC2_METADATA_DISABLED: "true"
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+      R2_ENDPOINT: ${{ vars.QISITV_R2_ENDPOINT }}
     steps:
       - uses: actions/checkout@v4
 
@@ -273,6 +287,16 @@ jobs:
           pattern: desktop-*
           merge-multiple: true
           path: dist
+
+      - name: Check R2 publisher tooling
+        if: ${{ vars.QISITV_R2_PUBLIC_BASE != '' }}
+        run: |
+          command -v aws
+          aws s3api put-object --generate-cli-skeleton input > "$RUNNER_TEMP/put-object.json"
+          python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); assert "IfMatch" in p and "IfNoneMatch" in p' "$RUNNER_TEMP/put-object.json"
+          python3 -m unittest discover -s scripts -p 'test_publish_desktop_r2.py'
+          cd backend
+          go build -o "$RUNNER_TEMP/update-release" ./cmd/update-release
 
       - name: Check complete platform set
         run: |
@@ -303,9 +327,25 @@ jobs:
             --envelope "../dist/desktop-update.json" \
             --public-key-text "$QISITV_UPDATER_PUBLIC_KEY"
 
-      - name: Publish signed release
+      - name: Stage and verify immutable Cloudflare assets
+        if: ${{ vars.QISITV_R2_PUBLIC_BASE != '' }}
+        run: |
+          python3 scripts/publish-desktop-r2.py stage \
+            --manifest dist/desktop-update.json --assets-dir dist \
+            --verifier "$RUNNER_TEMP/update-release" --endpoint-url "$R2_ENDPOINT" \
+            --bucket "${{ vars.QISITV_R2_BUCKET }}" --public-base "$UPDATER_DOWNLOAD_BASE"
+
+      - name: Publish signed GitHub release
         run: |
           set -euo pipefail
           gh release upload "$VERSION" "dist/desktop-update.json" dist/qisiTV-"$VERSION"-*.zip
           gh release edit "$VERSION" --draft=false --latest
-          echo "Published $VERSION. Clients fetch $QISITV_UPDATER_FEED_URL only after this point."
+
+      - name: Activate verified Cloudflare update feed
+        if: ${{ vars.QISITV_R2_PUBLIC_BASE != '' }}
+        run: |
+          python3 scripts/publish-desktop-r2.py activate \
+            --manifest dist/desktop-update.json --assets-dir dist \
+            --verifier "$RUNNER_TEMP/update-release" --endpoint-url "$R2_ENDPOINT" \
+            --bucket "${{ vars.QISITV_R2_BUCKET }}" --public-base "$UPDATER_DOWNLOAD_BASE"
+          echo "Published $VERSION at $QISITV_UPDATER_FEED_URL."

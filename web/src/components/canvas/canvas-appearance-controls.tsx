@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Button, ColorPicker, Input, Segmented, Slider } from "antd";
 import { Switch } from "@/components/ui/base/switch";
-import { CircleDot, Grid2x2, Link2, Moon, Paintbrush, RotateCcw, Save, Square } from "lucide-react";
+import { CircleDot, Grid2x2, Link2, Moon, Sun, Paintbrush, RotateCcw, Save, Square } from "lucide-react";
 
 import {
     canvasAppearanceForTheme,
@@ -72,12 +72,13 @@ export function CanvasAppearanceControls({
         onAppearanceChange(draft);
         onSaveAppearanceDefault(draft);
     };
-    const presets = DARK_PRESETS;
+    const presets = draft.custom?.baseTheme === "light" ? ["#F0F0F0", "#F6EEEE", "#F5F1E8", "#EAF2EE"] : DARK_PRESETS;
 
     return (
         <>
             <div className="mt-3 text-[var(--fs-micro)] font-semibold uppercase opacity-45">主题模式</div>
-            <div className="mt-1 grid grid-cols-2 gap-1 rounded-[var(--dock-item-radius-labeled)] border p-1" style={{ background: theme.spatial.surface, borderColor: theme.toolbar.border }}>
+            <div className="mt-1 grid grid-cols-3 gap-1 rounded-[var(--dock-item-radius-labeled)] border p-1" style={{ background: theme.spatial.surface, borderColor: theme.toolbar.border }}>
+                <ThemeButton active={draft.mode === "light"} label="浅色" theme={theme} onClick={() => selectFixedTheme("light")}><Sun className="size-3.5" /></ThemeButton>
                 <ThemeButton active={draft.mode === "dark"} label="深色" theme={theme} onClick={() => selectFixedTheme("dark")}><Moon className="size-3.5" /></ThemeButton>
                 <ThemeButton active={draft.mode === "custom"} label="自定义" theme={theme} onClick={selectCustomTheme}><Paintbrush className="size-3.5" /></ThemeButton>
             </div>
@@ -86,7 +87,7 @@ export function CanvasAppearanceControls({
                 <div className="mt-2.5 space-y-2.5 rounded-[var(--dock-item-radius-labeled)] border p-2.5" style={{ background: theme.spatial.surface, borderColor: theme.toolbar.border }}>
                     <div className="flex items-center justify-between gap-2">
                         <span className="text-[var(--fs-tiny)] font-semibold">背景预设</span>
-                        <span className="text-[var(--fs-micro)] opacity-50">深色界面</span>
+                        <span className="text-[var(--fs-micro)] opacity-50">{draft.custom.baseTheme === "light" ? "浅色界面" : "深色界面"}</span>
                     </div>
                     <div className="grid grid-cols-4 gap-1.5">
                         {presets.map((color) => (

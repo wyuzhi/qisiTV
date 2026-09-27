@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import {
     DEFAULT_CANVAS_BACKGROUND_MODE,
@@ -14,8 +14,10 @@ import {
 } from "../src/lib/canvas/canvas-appearance";
 
 const values = new Map<string, string>();
+let originalWindow: PropertyDescriptor | undefined;
 
 beforeEach(() => {
+    originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
     values.clear();
     Object.defineProperty(globalThis, "window", {
         configurable: true,
@@ -29,20 +31,25 @@ beforeEach(() => {
     });
 });
 
+afterEach(() => {
+    if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+});
+
 describe("canvas custom appearance", () => {
     test("uses point grid as the default for new canvases", () => {
         expect(DEFAULT_CANVAS_BACKGROUND_MODE).toBe("dots");
     });
 
-    test("keeps the supported dark substrate when custom mode is selected", () => {
+    test("inherits the selected light or dark substrate in custom mode", () => {
         const light = enterCustomCanvasAppearance(canvasAppearanceForTheme("light"), "light");
         expect(light).toEqual({
             mode: "custom",
             custom: {
-                baseTheme: "dark",
-                backgroundColor: "#141414",
+                baseTheme: "light",
+                backgroundColor: "#F0F0F0",
                 backgroundBrightness: 0,
-                gridColor: "#AFAFAF",
+                gridColor: "#000000",
                 gridOpacity: 80,
             },
         });
@@ -51,16 +58,16 @@ describe("canvas custom appearance", () => {
         expect(dark.custom).toMatchObject({ baseTheme: "dark", backgroundColor: "#141414", backgroundBrightness: 0, gridColor: "#AFAFAF", gridOpacity: 80 });
     });
 
-    test("preserves a previous custom profile while normalizing its interface to dark", () => {
+    test("preserves custom colors and their substrate when trying fixed themes", () => {
         const previous = customCanvasAppearanceFromTheme("light");
         previous.custom = { ...previous.custom!, backgroundColor: "#F3DCE5" };
         const fixedLight = canvasAppearanceForTheme("light", previous);
-        expect(enterCustomCanvasAppearance(fixedLight, "light").custom).toEqual({ ...previous.custom, baseTheme: "dark" });
+        expect(enterCustomCanvasAppearance(fixedLight, "light").custom).toEqual(previous.custom);
 
         const fixedDark = canvasAppearanceForTheme("dark", previous);
-        expect(fixedDark.custom).toEqual({ ...previous.custom, baseTheme: "dark" });
+        expect(fixedDark.custom).toEqual(previous.custom);
         expect(enterCustomCanvasAppearance(fixedDark, "dark").custom).toMatchObject({
-            baseTheme: "dark",
+            baseTheme: "light",
             backgroundColor: "#F3DCE5",
         });
     });
@@ -105,7 +112,7 @@ describe("canvas custom appearance", () => {
         }, "dark");
 
         const resolved = resolveCanvasAppearance(appearance, "dark");
-        expect(resolved.baseTheme).toBe("dark");
+        expect(resolved.baseTheme).toBe("light");
         expect(resolved.background).toBe("#F3DCE5");
         expect(resolveCanvasGridColor(appearance, "dark", "lines")).toBe("rgba(157,113,130,0.22)");
 

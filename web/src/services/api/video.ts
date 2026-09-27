@@ -5,6 +5,7 @@ import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
 import { assertVideoCapability, assertVideoConfig } from "./video-validation";
+import { resolveReferenceMediaDuration } from "@/lib/reference-media-metadata";
 import type { RequestOptions, VideoGenerationResult, VideoGenerationTask, VideoGenerationTaskState } from "./video-contracts";
 import { videoResponseTools } from "./video-response";
 import type { VideoProviderDeps } from "./video-provider-deps";
@@ -37,6 +38,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     const selectedModel = (config.model || config.videoModel).trim();
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     assertVideoConfig(requestConfig, selectedModel);
+    [videoReferences, audioReferences] = await Promise.all([Promise.all(videoReferences.map(resolveReferenceMediaDuration)), Promise.all(audioReferences.map(resolveReferenceMediaDuration))]);
     assertVideoCapability(modelCapabilityConfigFor(config, selectedModel).video!, references, videoReferences, audioReferences, config.videoSeconds);
     const deps: VideoProviderDeps = { transport: createVideoTransport(requestConfig), response: videoResponseTools };
     if (requestConfig.interfaceType === "newapi-channel-2") return createVideoGenerationsTask(deps, requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);

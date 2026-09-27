@@ -66,7 +66,7 @@ export function TaskGridCard({ task, actingId, onOpen, onRetry }: { task: Genera
                         <i><b style={{ width: `${task.progress || 0}%` }} /></i>
                     </div>
                 ) : null}
-                {isFailed ? <p className="task-grid-error" title={task.error || undefined}>{taskAttentionReason(task)}</p> : null}
+                {isFailed ? <p className="task-grid-error" title={taskAttentionReason(task)}>{taskAttentionReason(task)}</p> : null}
             </div>
         </article>
     );

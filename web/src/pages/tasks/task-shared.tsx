@@ -17,6 +17,8 @@ export function isTaskFailed(task: GenerationTask) {
 export function taskAttentionReason(task: GenerationTask) {
     if (task.status === "cancelled") return providerCancelStatusLabel(task);
     const explanation = explainGenerationError({ code: task.errorCode, message: task.error }, { taskId: task.id, providerRequestId: task.providerRequestId, model: task.model, createdAt: task.createdAt, stage: task.stage });
+    const text = explanation.message.trim();
+    if (text.startsWith("{") || text.startsWith("[")) return explanation.reason || "生成失败，打开详情查看原因";
     if (explanation.moderation) return explanation.message;
     if (task.error || task.errorCode) return explanation.message;
     return task.stage || "生成失败，打开详情查看原因";

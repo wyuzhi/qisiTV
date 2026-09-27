@@ -1,4 +1,5 @@
 import { getMediaBlob } from "@/services/file-storage";
+import { resolveReferenceMediaDuration } from "@/lib/reference-media-metadata";
 import { getImageBlob } from "@/services/image-storage";
 import { resourceIdFromStorageKey, resourceStorageKey, uploadResourceFile } from "@/services/api/resources";
 import { createGenerationTask, waitForGenerationTask, type GenerationTask, type CreateTaskInput } from "@/services/api/task-center";
@@ -12,6 +13,7 @@ import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { buildBackendToolRequests, type ResponseFunctionTool, type ResponseInputMessage, type ToolChoice, type ToolResponseResult } from "@/services/api/image";
 import { assertAgentExchangeBudget } from "@/lib/canvas/agent-context-budget";
+import { assertVideoCapability } from "@/services/api/video-validation";
 
 export { logicalModelIDForConfig };
 
@@ -97,6 +99,7 @@ export async function runBackendGenerationTask(
     assertBackendRuntimeConfigured(config, mode);
     const prepared = await prepareGenerationReferences({ config, mode, referenceImages, referenceVideos, referenceAudios, mask });
     throwIfAborted(signal);
+    assertPreparedVideoCapability(mode, config, prepared);
     return createAndWaitGenerationTask(
         { projectId, mode, prompt, config, referenceImages, referenceVideos, referenceAudios, textHistory, signal, metadata, onTaskUpdate, onTextDelta, streamText, enableThinking, clientOperationId, retryOf, attemptGroupId },
         prepared,
@@ -112,6 +115,7 @@ export async function submitBackendGenerationTask(options: BackendGenerationTask
     assertBackendRuntimeConfigured(options.config, options.mode);
     const prepared = await prepareGenerationReferences(options);
     throwIfAborted(options.signal);
+    assertPreparedVideoCapability(options.mode, options.config, prepared);
     return createBackendGenerationTask(options, prepared, dependencies);
 }
 
@@ -280,7 +284,17 @@ export async function prepareBackendGenerationTask(options: BackendGenerationTas
     assertBackendRuntimeConfigured(options.config, options.mode);
     const prepared = await prepareGenerationReferences(options);
     throwIfAborted(options.signal);
+    assertPreparedVideoCapability(options.mode, options.config, prepared);
     return backendGenerationTaskInput(options, prepared);
+}
+
+function assertPreparedVideoCapability(mode: BackendGenerationMode, config: AiConfig, prepared: PreparedGenerationReferences) {
+    if (mode !== "video") return;
+    const profile = modelCapabilityConfigFor(config, config.model).video;
+    if (!profile) return;
+    // Owned workflow resources can carry only a key; the backend reads their
+    // authoritative metadata and validates it before contacting the provider.
+    assertVideoCapability(profile, prepared.referenceImages, prepared.referenceVideos, prepared.referenceAudios, config.videoSeconds, { deferResourceMetadataToBackend: true });
 }
 
 function backendGenerationTaskInput(options: BackendGenerationTaskOptions, prepared: PreparedGenerationReferences): CreateTaskInput {
@@ -331,6 +345,7 @@ function generationMetadata(config: AiConfig, metadata?: Record<string, unknown>
 }
 
 async function prepareBackendMediaReference(media: ReferenceVideo | ReferenceAudio) {
+    media = await resolveReferenceMediaDuration(media);
     if (resourceIdFromStorageKey(media.storageKey)) return backendMediaReference(media, { storageKey: media.storageKey });
     const url = media.url || "";
     if (/^https?:\/\//i.test(url)) return backendMediaReference(media, { url });

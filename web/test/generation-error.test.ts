@@ -1,4 +1,114 @@
 import { describe, expect, test } from "bun:test";
+import audioErrorContract from "../../fixtures/reference-audio-errors.json";
+
+test("whole request limits retain actionable copy after persistence", () => {
+    for (const body of ["", "<html>413 Request Entity Too Large</html>"]) expect(explainGenerationError({ status: 413, data: body }).reason).toContain("整次请求");
+    for (const raw of ["video request body is too large", "video request body exceeds the 64 MiB request limit; use public media URLs instead of inline base64", { error: { code: "video_request_body_too_large", message: "" } }]) {
+        const failure = explainGenerationError(raw);
+        for (const got of [failure, explainGenerationError(`${failure.reason}。${failure.action}。`)]) {
+            expect(got.category).toBe("input_too_large");
+            expect(got.reason).toContain("整次请求");
+            expect(got.action).toContain("素材链接");
+            expect(got.retryable).toBe(false);
+        }
+    }
+});
+
+test("actual persisted task output contract renders identically in the frontend", () => {
+    for (const fixture of audioErrorContract) {
+        // Backend app test writes the corresponding upstream failure through the
+        // real terminal coordinator and DB, then asserts this exact list payload.
+        const error = `${fixture.display}。排查编号：请求 req_reference_audio_123。`;
+        const result = explainGenerationError(error);
+        expect(result.message).toBe(error);
+        expect(result.category).toBe("invalid_params");
+        expect(result.requestId).toBe("req_reference_audio_123");
+        expect(result.blockAutomaticRetry).toBe(true);
+    }
+});
+
+describe("measured reference audio API errors", () => {
+    const requestId = "202609270829245377912978268d9d6USz1NP3R";
+    const cases = [
+        ["reference audio 2 is 0.900 seconds; use audio between 2 and 15 seconds", ["第 2 段", "0.900 秒", "2–15 秒", "裁剪"]],
+        ["reference audio 1 is 31.250 seconds; use audio between 2 and 30 seconds", ["第 1 段", "31.250 秒", "2–30 秒", "更换"]],
+        ["reference audio is 35.500 seconds in total; this model accepts at most 30 seconds of reference audio", ["总时长", "35.500 秒", "30 秒", "减少"]],
+        ["reference audio 3: could not download reference audio within the allowed time and URL policy", ["第 3 段", "无法下载", "重新上传", "公开访问"]],
+        ["reference audio 2: reference audio duration could not be measured: invalid WAV audio", ["第 2 段", "格式或时长无法读取", "MP3", "WAV", "M4A"]],
+        ["reference audio 1: reference audio duration could not be measured: the media contains no readable audio track", ["第 1 段", "音轨", "重新导出"]],
+        ["reference audio 1 exceeds the model's 15728640 byte limit", ["第 1 段", "文件过大", "压缩"]],
+        ["reference audio 1 requires a public HTTPS URL", ["第 1 段", "无法下载", "公开访问"]],
+        ["reference audio 2: reference audio download returned HTTP 403", ["第 2 段", "无法下载", "重新上传"]],
+        ["reference audio 2: reference audio could not be downloaded completely within the allowed time", ["第 2 段", "无法下载", "重新上传"]],
+        ["reference audio 2: reference audio must be at most 15 MiB", ["第 2 段", "文件过大", "压缩"]],
+        ["reference audio 2: reference audio URL is not allowed", ["第 2 段", "无法下载", "公开访问"]],
+    ] as const;
+    for (const [message, fragments] of cases) {
+        test(`HTTP, gateway wrapper and persisted details: ${message}`, () => {
+            const body = { error: { code: "invalid_reference_audio", type: "invalid_request_error", message }, request_id: requestId };
+            for (const input of [{ response: { status: 400, data: body } }, `接口请求失败：${JSON.stringify(body)} (request id: ${requestId})`]) {
+                const first = explainGenerationError(input);
+                const metadata = generationFailureMetadata(input, "test prompt");
+                const persisted = explainGenerationError(metadata.errorDetails);
+                for (const failure of [first, persisted]) {
+                    expect(failure.category).toBe("invalid_params");
+                    expect(failure.retryable).toBe(false);
+                    expect(failure.blockAutomaticRetry).toBe(true);
+                    expect(failure.requestId).toBe(requestId);
+                    for (const fragment of fragments) expect(failure.message).toContain(fragment);
+                }
+            }
+        });
+    }
+    test("unknown validation detail is actionable without reflecting secrets", () => {
+        const failure = explainGenerationError({ status: 400, data: { error: { code: "invalid_reference_audio", message: "private detail https://secret.test/audio?token=abc prompt=private_words" }, request_id: requestId } });
+        expect(failure.message).toContain("检查参考音频");
+        expect(failure.message).not.toMatch(/secret|private|token/);
+        expect(failure.requestId).toBe(requestId);
+        expect(failure.blockAutomaticRetry).toBe(true);
+    });
+    test("local total limit and combined diagnostic IDs survive persistence", () => {
+        const raw = "参考音频总时长为 16.00 秒，当前模型最多支持 15 秒；请裁剪或减少参考音频后再提交";
+        const first = explainGenerationError(raw, { taskId: "task_existing_123", providerRequestId: requestId });
+        const second = explainGenerationError(first.message);
+        expect(second.message).toBe(first.message);
+        expect(second.requestId).toBe(requestId);
+        expect(second.taskId).toBe("task_existing_123");
+        expect(second.message).toContain("16.00 秒");
+        expect(second.message).toContain("15 秒");
+        expect(second.category).toBe("invalid_params");
+        expect(second.blockAutomaticRetry).toBe(true);
+    });
+});
+
+test("height, aspect, pixel and request-size errors stay human and never leak JSON", () => {
+    const height = '{"error":{"code":"400","message":"Height must be between 300px and 6000px","type":"api_error"}} (request id: 202609270829245377912978268d9d6USz1NP3R)';
+    const failure = explainGenerationError(height);
+    expect(failure.category).toBe("invalid_params");
+    expect(failure.action).toContain("300–6000 像素");
+    expect(failure.requestId).toBe("202609270829245377912978268d9d6USz1NP3R");
+    expect(failure.message).not.toContain("{");
+    expect(explainGenerationError(failure.message).action).toContain("300–6000 像素");
+    expect(explainGenerationError(failure.message).category).toBe("invalid_params");
+    expect(explainGenerationError({ code: "invalid_parameter", message: "aspect ratio must be between 0.4 and 2.5" }).action).toContain("0.4–2.5");
+    expect(explainGenerationError({ code: "invalid_parameter", message: "pixel count must be between 409600 and 8295044" }).reason).toContain("像素总量");
+    expect(explainGenerationError({ status: 413, data: { error: { message: "Request entity too large" } } }).reason).toContain("整次请求");
+    expect(explainGenerationError({ status: 413, data: { error: { message: "image file too large" } } }).reason).toContain("单个参考文件");
+    const persisted = explainGenerationError("第 1 张参考图高度为 200 像素，需要 300–6000 像素；请调整尺寸或更换后再提交");
+    expect(persisted.reason).toContain("第 1 张");
+    expect(persisted.category).toBe("invalid_params");
+});
+
+test("gateway JSON suffix retains reference duration advice and request id", () => {
+    const raw = '{"error":{"code":"400","message":"素材转换失败: Duration must be between 1.8s and 30.2s.","type":"api_error"}} (request id: 202609270829245377912978268d9d6USz1NP3R)';
+    const failure = explainGenerationError(raw);
+    expect(failure.category).toBe("invalid_params");
+    expect(failure.reason).toBe("参考素材时长不符合模型要求");
+    expect(failure.action).toContain("1.8–30.2 秒");
+    expect(failure.requestId).toBe("202609270829245377912978268d9d6USz1NP3R");
+    expect(failure.blockAutomaticRetry).toBe(true);
+    expect(explainGenerationError({ code: "video_submission_unknown", task_id: "task-known-123" }).uncertain).toBe(true);
+});
 
 import {
     explainGenerationError,
@@ -15,7 +125,7 @@ import gatewayCodes from "../../fixtures/generation-error-codes.json";
 
 describe("generation error classification", () => {
     test("all declared gateway error codes match the shared backend contract", () => {
-        expect(Object.keys(gatewayCodes)).toHaveLength(42);
+        expect(Object.keys(gatewayCodes)).toHaveLength(43);
         for (const [code, category] of Object.entries(gatewayCodes)) {
             expect(explainGenerationError({ code, message: "opaque provider message" }).category).toBe(category);
             expect(explainGenerationError({ status: 400, data: { error: { code } } }).category).toBe(category);

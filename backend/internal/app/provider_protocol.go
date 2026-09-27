@@ -229,7 +229,7 @@ func protocolRequestFromInput(input canvasGenerationInput) protocol.GenerationRe
 		request.Extra["max_output_tokens"] = input.MaxOutputTokens
 		request.Extra["max_tokens"] = input.MaxOutputTokens
 	}
-	if duration, err := strconv.Atoi(strings.TrimSpace(input.Config.VideoSeconds)); err == nil && (duration > 0 || (isLikeAIProtocol(input.Config.InterfaceType) && duration == -1)) {
+	if duration, err := strconv.Atoi(strings.TrimSpace(input.Config.VideoSeconds)); err == nil && (duration > 0 || (duration == -1 && (isLikeAIProtocol(input.Config.InterfaceType) || model.IsVolcengineArkVideoProtocol(model.ChannelInterfaceType(input.Config.InterfaceType))))) {
 		request.Duration = duration
 	}
 	if count, err := strconv.Atoi(strings.TrimSpace(input.Config.Count)); err == nil && count > 0 {
@@ -390,6 +390,11 @@ func protocolRequestBody(ctx context.Context, config providerConfig, spec protoc
 		data, err := json.Marshal(spec.Body)
 		if err != nil {
 			return nil, "", err
+		}
+		// Ark documents a 64 MiB JSON request limit. Measure the actual wire
+		// representation, including base64; URL resource sizes are irrelevant.
+		if model.IsVolcengineArkVideoProtocol(model.ChannelInterfaceType(config.InterfaceType)) && len(data) > 64*1024*1024 {
+			return nil, "", errors.New("video request body exceeds the 64 MiB request limit; use public media URLs instead of inline base64")
 		}
 		return bytes.NewReader(data), "application/json", nil
 	case "application/x-www-form-urlencoded":

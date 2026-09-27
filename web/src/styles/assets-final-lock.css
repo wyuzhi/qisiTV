@@ -4,10 +4,10 @@
 .app-workspace-shell:has(.assets-library-page)::before { display: none !important; }
 .app-workspace-shell:has(.assets-library-page) .app-workspace-main-row { position: relative; z-index: 1; }
 .app-workspace-shell:has(.assets-library-page) .app-workspace-stage,
-.app-workspace-shell:has(.assets-library-page) .app-user-content { background: #161616 !important; }
-.app-workspace-shell:has(.assets-library-page) .assets-library-source-rail { background: #161616 !important; border-left-color: #282828 !important; }
-.app-workspace-shell:has(.assets-library-page) .assets-library-source-rail-item.is-active { background: rgba(255,255,255,.04) !important; }
-.app-workspace-shell:has(.assets-library-page) .assets-library-source-rail::after { position: absolute; right: 16px; bottom: 16px; display: grid; width: 40px; height: 40px; place-items: center; border-radius: 999px; background: #242424; color: #fff; content: "?"; font-size: 22px; line-height: 1; }
+.app-workspace-shell:has(.assets-library-page) .app-user-content { background: var(--user-page-bg) !important; }
+.app-workspace-shell:has(.assets-library-page) .assets-library-source-rail { background: var(--user-page-bg) !important; border-left-color: var(--user-border) !important; }
+.app-workspace-shell:has(.assets-library-page) .assets-library-source-rail-item.is-active { background: var(--user-surface-hover) !important; }
+.app-workspace-shell:has(.assets-library-page) .assets-library-source-rail::after { position: absolute; right: 16px; bottom: 16px; display: grid; width: 40px; height: 40px; place-items: center; border-radius: 999px; background: var(--user-surface-muted); color: var(--user-ink); content: "?"; font-size: 22px; line-height: 1; }
 .assets-header-compact-button[aria-label="筛选资产"] { width: 38px; margin-left: -2px; }
 @media (max-width: 720px) {
     .assets-library-source-rail { display: none; }

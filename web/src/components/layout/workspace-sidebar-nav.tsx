@@ -1,4 +1,4 @@
-import { Bot, ChevronRight, Home, PanelLeftClose, PanelLeftOpen, Plus, Settings2 } from "lucide-react";
+import { Bot, ChevronRight, Home, PanelLeftClose, PanelLeftOpen, Plus, Settings2, Sun, Moon } from "lucide-react";
 import { LayoutGroup, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
@@ -12,6 +12,8 @@ import { cn } from "@/lib/utils";
 import { preloadWorkspaceRoute } from "@/lib/workspace-route-modules";
 import { useUserStore, type FeatureAvailability } from "@/stores/use-user-store";
 import { useAppearanceStore } from "@/stores/use-appearance-store";
+import { useThemeStore } from "@/stores/use-theme-store";
+import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 
 export type WorkspaceNavItem = {
     id: string;
@@ -248,6 +250,8 @@ function NavGroup({ group, activeId, onNavigate, onOpenSearch, collapsed }: { gr
 }
 
 export function WorkspaceSidebarNav({ collapsed, onNavigate, onOpenSearch, onExpand, onCollapse }: { collapsed: boolean; onNavigate: () => void; onOpenSearch: () => void; onExpand: () => void; onCollapse: () => void }) {
+    const theme = useThemeStore((state) => state.theme);
+    const setTheme = useThemeStore((state) => state.setTheme);
     const { pathname } = useLocation();
     const [searchParams] = useSearchParams();
     const features = useUserStore((state) => state.features);
@@ -299,6 +303,10 @@ export function WorkspaceSidebarNav({ collapsed, onNavigate, onOpenSearch, onExp
                     </div>
                 ) : null}
                 <WorkspaceSidebarUpdate collapsed={collapsed} />
+                <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} aria-label={theme === "dark" ? "切换到浅色模式" : "切换到深色模式"} title={theme === "dark" ? "切换到浅色模式" : "切换到深色模式"} className="flex min-h-9 items-center justify-center gap-2 rounded-lg text-foreground/65 hover:bg-foreground/5 hover:text-foreground focus-visible:outline focus-visible:outline-2">
+                    {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+                    {!collapsed && <span className="text-sm">{theme === "dark" ? "浅色模式" : "深色模式"}</span>}
+                </AnimatedThemeToggler>
             </div>
         </div>
     );

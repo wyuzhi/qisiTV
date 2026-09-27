@@ -362,7 +362,10 @@ func (s *Service) processCanvasGenerationTask(ctx context.Context, userID string
 			return nil, err
 		}
 	}
-	if input.Mode == "video" {
+	if input.Mode == "video" && resumedProviderRequestID(ctx) == "" {
+		if err := s.hydrateVideoReferenceMetadata(userID, &input); err != nil {
+			return nil, err
+		}
 		if err := s.validateResolvedVideoCapability(&input); err != nil {
 			return nil, err
 		}
@@ -379,7 +382,7 @@ func (s *Service) processCanvasGenerationTask(ctx context.Context, userID string
 			return nil, err
 		}
 	}
-	if input.Mode == "video" && input.VideoCapability != nil {
+	if input.Mode == "video" && input.VideoCapability != nil && resumedProviderRequestID(ctx) == "" {
 		if err := validateVideoTask(input.VideoCapability, input); err != nil {
 			return nil, err
 		}
@@ -410,8 +413,9 @@ func (s *Service) processCanvasGenerationTask(ctx context.Context, userID string
 }
 
 type providerMediaHydrationPolicy struct {
-	requireURL bool
-	preferURL  bool
+	requireURL  bool
+	preferURL   bool
+	preferHTTPS bool
 }
 
 func providerMediaHydrationPolicyFor(ctx context.Context, input canvasGenerationInput) providerMediaHydrationPolicy {
@@ -419,13 +423,16 @@ func providerMediaHydrationPolicyFor(ctx context.Context, input canvasGeneration
 		return providerMediaHydrationPolicy{preferURL: true}
 	}
 	policy := providerMediaHydrationPolicy{preferURL: providerPrefersMediaURLs(input.Config.InterfaceType, input)}
-	// BeefAPI Enterprise's Seedance /videos contract accepts self-contained
-	// media values inside its provider-specific content items. Desktop resources
-	// therefore stay local until the request adapter serializes them and must not
-	// be forced through a public callback URL or object storage first.
+	if model.IsVolcengineArkVideoProtocol(model.ChannelInterfaceType(input.Config.InterfaceType)) {
+		return providerMediaHydrationPolicy{preferHTTPS: true}
+	}
+	// Prefer an existing HTTPS resource address when the workspace already has
+	// a public base. Local desktop without CANVAS_PUBLIC_BASE_URL still falls
+	// through to a bounded data URL; asset:// references are preserved.
 	if isBeefAPIVideoConfig(input.Config) && isSeedanceVideoConfig(input.Config) {
 		policy.requireURL = false
 		policy.preferURL = false
+		policy.preferHTTPS = true
 		return policy
 	}
 	// The channel-1 NewAPI profile also accepts data URLs in its media field.
@@ -701,6 +708,51 @@ func metadataStringValues(value any) map[string]string {
 	return values
 }
 
+// Read owned resource metadata before preflight, without downloading media.
+// Character/workflow references may carry only a resource storage key.
+func (s *Service) hydrateVideoReferenceMetadata(userID string, input *canvasGenerationInput) error {
+	for _, group := range [][]providerMedia{input.ReferenceImages, input.ReferenceVideos, input.ReferenceAudios} {
+		for index := range group {
+			media := &group[index]
+			if !strings.HasPrefix(media.StorageKey, "resource:") {
+				continue
+			}
+			resource, err := s.repo.ResourceForUser(userID, strings.TrimPrefix(media.StorageKey, "resource:"))
+			if err != nil {
+				return fmt.Errorf("读取任务参考资源失败：%w", err)
+			}
+			if resource.Status != "ready" {
+				return errors.New("任务参考资源尚未上传完成")
+			}
+			if resource.DurationMs > 0 {
+				media.DurationMs = resource.DurationMs
+			}
+			if resource.Width > 0 {
+				media.Width = resource.Width
+			}
+			if resource.Height > 0 {
+				media.Height = resource.Height
+			}
+			media.Bytes = resource.Size
+			if (media.Width <= 0 || media.Height <= 0) && resourceLooksLikeImage(resource, media) {
+				if _, body, openErr := s.OpenResource(userID, resource.ID); openErr == nil {
+					width, height, decodeErr := imageHeaderDimensions(body)
+					_ = body.Close()
+					if decodeErr == nil {
+						if media.Width <= 0 {
+							media.Width = width
+						}
+						if media.Height <= 0 {
+							media.Height = height
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (s *Service) hydrateGenerationMedia(userID string, input *canvasGenerationInput, policy providerMediaHydrationPolicy) error {
 	groups := [][]providerMedia{input.ReferenceImages, input.ReferenceVideos, input.ReferenceAudios}
 	for _, group := range groups {
@@ -737,6 +789,20 @@ func (s *Service) hydrateProviderMedia(userID string, media *providerMedia, poli
 	if s.IsLocalMode() && resourceUsesObjectStorage(resource) {
 		return errors.New("本地工作区检测到旧的远程素材记录，请重新导入到本地资源目录")
 	}
+	if policy.preferHTTPS {
+		if httpsURL, err := s.signedHTTPSPublicResourceURL(resource, time.Now().Add(providerResourceURLTTL)); err == nil {
+			media.URL = httpsURL
+			media.DataURL = ""
+			media.MimeType = firstNonEmpty(media.MimeType, resource.MimeType)
+			media.Bytes = resource.Size
+			media.Width = resource.Width
+			media.Height = resource.Height
+			if resource.DurationMs > 0 {
+				media.DurationMs = resource.DurationMs
+			}
+			return nil
+		}
+	}
 	useObjectURL := policy.requireURL || (policy.preferURL && resourceUsesObjectStorage(resource))
 	if useObjectURL {
 		if s.IsLocalMode() && policy.requireURL {
@@ -755,7 +821,9 @@ func (s *Service) hydrateProviderMedia(userID string, media *providerMedia, poli
 		media.Bytes = resource.Size
 		media.Width = resource.Width
 		media.Height = resource.Height
-		media.DurationMs = resource.DurationMs
+		if resource.DurationMs > 0 {
+			media.DurationMs = resource.DurationMs
+		}
 		return nil
 	}
 	if strings.HasPrefix(strings.TrimSpace(media.DataURL), "data:") {
@@ -784,8 +852,20 @@ func (s *Service) hydrateProviderMedia(userID string, media *providerMedia, poli
 	media.Bytes = int64(len(data))
 	media.Width = resource.Width
 	media.Height = resource.Height
-	media.DurationMs = resource.DurationMs
+	if resource.DurationMs > 0 {
+		media.DurationMs = resource.DurationMs
+	}
 	return nil
+}
+
+func resourceLooksLikeImage(resource *model.Resource, media *providerMedia) bool {
+	if resource != nil && (strings.EqualFold(resource.Kind, "image") || strings.HasPrefix(strings.ToLower(resource.MimeType), "image/")) {
+		return true
+	}
+	if media == nil {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(firstNonEmpty(media.MimeType, media.Type)), "image/")
 }
 
 func resourceUsesObjectStorage(resource *model.Resource) bool {

@@ -8,6 +8,7 @@ import { useCanvasOverlayLayer } from "@/components/canvas/canvas-overlay-layer"
 import { CanvasCreateMenu, type CanvasCreateCommand } from "@/components/canvas/canvas-create-menu";
 import { useCanvasCreateCommands } from "@/components/canvas/use-canvas-create-commands";
 import { ToolbarSettingsModal } from "@/components/canvas/toolbars/toolbar-settings-modal";
+import { CanvasAppearanceControls } from "@/components/canvas/canvas-appearance-controls";
 import { aceternityMotion } from "@/lib/aceternity-motion";
 import { canvasDockStyle } from "@/lib/canvas/canvas-aceternity-style";
 import type { CanvasAppearance } from "@/lib/canvas/canvas-appearance";
@@ -113,14 +114,15 @@ export function CanvasToolbar({
     const colorTheme = useActiveTheme();
     const theme = canvasThemes[colorTheme];
     const [addOpen, setAddOpen] = useState(false);
+    const [appearanceOpen, setAppearanceOpen] = useState(false);
     const [modeMenuOpen, setModeMenuOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [panelX, setPanelX] = useState(0);
     const [prefs, setPrefs] = useState<ToolbarPrefs | null>(() => readToolbarPrefs("main"));
 
     useEffect(() => {
-        if (addOpen || modeMenuOpen) bringToFront();
-    }, [addOpen, modeMenuOpen, bringToFront]);
+        if (addOpen || modeMenuOpen || appearanceOpen) bringToFront();
+    }, [addOpen, modeMenuOpen, appearanceOpen, bringToFront]);
 
     // 设置面板关闭后重新读取偏好（用户可能调整了排序/显隐）
     useEffect(() => {
@@ -135,7 +137,7 @@ export function CanvasToolbar({
 
     // 点击外部关闭浮层面板
     useEffect(() => {
-        if (!addOpen && !modeMenuOpen) return;
+        if (!addOpen && !modeMenuOpen && !appearanceOpen) return;
         const closeFloatingPanels = (event: PointerEvent) => {
             const target = event.target instanceof Node ? event.target : null;
             if (target && rootRef.current?.contains(target)) return;
@@ -143,10 +145,11 @@ export function CanvasToolbar({
             if (element?.closest(".ant-color-picker,.ant-popover")) return;
             setAddOpen(false);
             setModeMenuOpen(false);
+            setAppearanceOpen(false);
         };
         document.addEventListener("pointerdown", closeFloatingPanels, true);
         return () => document.removeEventListener("pointerdown", closeFloatingPanels, true);
-    }, [addOpen, modeMenuOpen]);
+    }, [addOpen, modeMenuOpen, appearanceOpen]);
 
     // Match LibTV's tool shortcuts. Ignore editable surfaces so typing a
     // prompt never changes the canvas interaction mode.
@@ -191,10 +194,9 @@ export function CanvasToolbar({
         onOpenShortcuts,
         onBackgroundModeChange,
         onShowImageInfoChange,
-        onToggleAddPanel: (event: ReactMouseEvent<HTMLElement>) => { placePanel(event); setModeMenuOpen(false); setSettingsOpen(false); setAddOpen((value) => !value); },
-        // 画布外观入口已按产品要求移除，保留类型契约避免影响其他工具栏上下文。
-        onToggleAppearancePanel: () => {},
-        onToggleSettingsPanel: () => { setAddOpen(false); setModeMenuOpen(false); setSettingsOpen((value) => !value); },
+        onToggleAddPanel: (event: ReactMouseEvent<HTMLElement>) => { placePanel(event); setAppearanceOpen(false); setModeMenuOpen(false); setSettingsOpen(false); setAddOpen((value) => !value); },
+        onToggleAppearancePanel: (event: ReactMouseEvent<HTMLElement>) => { placePanel(event); setAddOpen(false); setModeMenuOpen(false); setSettingsOpen(false); setAppearanceOpen((value) => !value); },
+        onToggleSettingsPanel: () => { setAddOpen(false); setAppearanceOpen(false); setModeMenuOpen(false); setSettingsOpen((value) => !value); },
         onDeleteSelected: onDelete,
         // 以下为多选/节点悬停工具栏回调，主工具栏不使用，用 no-op 占位
         onAlign: () => {}, onArrange: () => {}, onCreateStoryboard: () => {}, onCreateReferenceGroup: () => {}, onBatchConnect: () => {}, onMergeVideos: () => {}, onSendSelectionToAgent: () => {},
@@ -219,7 +221,7 @@ export function CanvasToolbar({
         trimmingVideo: false,
         mergingVideos: false,
         addPanelOpen: addOpen,
-        appearancePanelOpen: false,
+        appearancePanelOpen: appearanceOpen,
         settingsPanelOpen: settingsOpen,
         handlers,
     };
@@ -230,6 +232,7 @@ export function CanvasToolbar({
         ? createCanvasModeDockCommand(canvasTool, modeMenuOpen, (event) => {
             placePanel(event);
             setAddOpen(false);
+            setAppearanceOpen(false);
             setSettingsOpen(false);
             setModeMenuOpen((value) => !value);
         })
@@ -273,6 +276,13 @@ export function CanvasToolbar({
                     />
                 ) : null}
             </AnimatePresence>
+
+            {appearanceOpen ? (
+                <div role="dialog" aria-label="画布外观" className="pointer-events-auto absolute bottom-[var(--canvas-dock-popover-offset)] w-[288px] max-w-[calc(100vw-24px)] max-h-[70vh] overflow-y-auto rounded-[18px] border p-4 shadow-xl" style={{ left: "50%", transform: "translateX(-50%)", background: theme.node.fill, borderColor: theme.toolbar.border, color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
+                    <div className="text-sm font-semibold">画布外观</div>
+                    <CanvasAppearanceControls appearance={appearance} backgroundMode={backgroundMode} colorTheme={colorTheme} theme={theme} onAppearanceChange={onAppearanceChange} onSaveAppearanceDefault={onSaveAppearanceDefault} onBackgroundModeChange={onBackgroundModeChange} snapToGrid={snapToGrid} onSnapToGridChange={onSnapToGridChange} showConnections={showConnections} onShowConnectionsChange={onShowConnectionsChange} />
+                </div>
+            ) : null}
 
             <FloatingDock
                 ref={dockRef}

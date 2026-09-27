@@ -11,19 +11,89 @@ export function assertVideoCapability(
     videoReferences: ReferenceVideo[],
     audioReferences: ReferenceAudio[],
     seconds: string,
+    options: { deferResourceMetadataToBackend?: boolean } = {},
 ) {
-    if (references.length > profile.references.maxImages || videoReferences.length > profile.references.maxVideos || audioReferences.length > profile.references.maxAudios) throw new Error("参考素材数量超过当前模型限制");
-    if (references.length < profile.references.minImages) throw new Error(`当前视频模型至少需要 ${profile.references.minImages} 张参考图`);
+    const refs = profile.references;
+    if (references.length > refs.maxImages) throw new Error(`当前视频模型最多支持 ${refs.maxImages} 张参考图`);
+    if (videoReferences.length > refs.maxVideos) throw new Error(`当前视频模型最多支持 ${refs.maxVideos} 个参考视频`);
+    if (audioReferences.length > refs.maxAudios) throw new Error(`当前视频模型最多支持 ${refs.maxAudios} 段参考音频`);
+    if (audioReferences.length && !references.length && !videoReferences.length && !profile.operations.includes("audio_to_video")) throw new Error("当前视频模型不支持只用音频生成视频，请同时添加参考图片或参考视频");
+    if (references.length < refs.minImages) throw new Error(`当前视频模型至少需要 ${refs.minImages} 张参考图`);
     if (!videoDurationAllowed(profile, Number(seconds))) throw new Error("视频时长不在当前模型支持范围内");
-    if (profile.references.maxImageBytes > 0 && references.some((image) => (image.bytes || 0) > profile.references.maxImageBytes)) throw new Error("参考图片文件超过当前模型大小限制");
-    for (const video of videoReferences) {
-        if (profile.references.maxVideoBytes > 0 && (video.bytes || 0) > profile.references.maxVideoBytes) throw new Error("参考视频文件超过当前模型大小限制");
-        if (profile.references.maxVideoDurationSeconds > 0 && (video.durationMs || 0) > profile.references.maxVideoDurationSeconds * 1000) throw new Error("参考视频时长超过当前模型限制");
+    for (const [index, image] of references.entries()) {
+        assertReferenceFileBytes("图", index, image.bytes, refs.maxImageBytes);
+        assertReferenceGeometry("图", index, image.width, image.height, refs.minImageWidth, refs.maxImageWidth, refs.minImageHeight, refs.maxImageHeight, refs.minImageAspect, refs.maxImageAspect, refs.minImagePixels, refs.maxImagePixels);
     }
-    for (const audio of audioReferences) {
-        if (profile.references.maxAudioBytes > 0 && (audio.bytes || 0) > profile.references.maxAudioBytes) throw new Error("参考音频文件超过当前模型大小限制");
-        if (profile.references.maxAudioDurationSeconds > 0 && (audio.durationMs || 0) > profile.references.maxAudioDurationSeconds * 1000) throw new Error("参考音频时长超过当前模型限制");
+    let totalVideoMs = 0;
+    for (const [index, video] of videoReferences.entries()) {
+        totalVideoMs += video.durationMs || 0;
+        if (!referenceDurationIsOpaqueAsset(video) && !(options.deferResourceMetadataToBackend && video.storageKey?.startsWith("resource:") && !video.durationMs)) assertReferenceDuration("视频", index, video.durationMs, refs.minVideoDurationSeconds, refs.maxVideoDurationSeconds);
+        assertReferenceFileBytes("视频", index, video.bytes, refs.maxVideoBytes);
+        assertReferenceGeometry("视频", index, video.width, video.height, refs.minVideoWidth, refs.maxVideoWidth, refs.minVideoHeight, refs.maxVideoHeight, refs.minVideoAspect, refs.maxVideoAspect, refs.minVideoPixels, refs.maxVideoPixels);
     }
+    const maxVideoTotal = refs.maxVideoTotalDurationSeconds || 0;
+    if (maxVideoTotal > 0 && totalVideoMs / 1000 > maxVideoTotal) throw new Error(`参考视频总时长为 ${(totalVideoMs / 1000).toFixed(2)} 秒，当前模型最多支持 ${maxVideoTotal} 秒；请裁剪或减少参考视频后再提交`);
+    for (const [index, audio] of audioReferences.entries()) {
+        if (!referenceDurationIsOpaqueAsset(audio) && !(options.deferResourceMetadataToBackend && audio.storageKey?.startsWith("resource:") && !audio.durationMs)) assertReferenceDuration("音频", index, audio.durationMs, refs.minAudioDurationSeconds, refs.maxAudioDurationSeconds);
+        assertReferenceFileBytes("音频", index, audio.bytes, refs.maxAudioBytes);
+    }
+    const totalAudioSeconds = audioReferences.reduce((total, audio) => total + (audio.durationMs || 0), 0) / 1000;
+    const maxAudioTotal = refs.maxAudioTotalDurationSeconds || 0;
+    if (maxAudioTotal > 0 && totalAudioSeconds > maxAudioTotal) throw new Error(`参考音频总时长为 ${totalAudioSeconds.toFixed(2)} 秒，当前模型最多支持 ${maxAudioTotal} 秒；请裁剪或减少参考音频后再提交`);
+}
+
+function referenceDurationIsOpaqueAsset(media: ReferenceVideo | ReferenceAudio) {
+    return !media.durationMs && !media.storageKey?.startsWith("resource:") && /^asset:\/\/[A-Za-z0-9_-]+$/.test(media.url || "");
+}
+
+export function assertReferenceDuration(kind: string, index: number, durationMs: number | undefined, minimum = 0, maximum = 0) {
+    if (minimum <= 0 && maximum <= 0) return;
+    const name = `第 ${index + 1} 段参考${kind}`;
+    if (!Number.isFinite(durationMs) || !durationMs || durationMs <= 0) throw new Error(`${name}的时长无法读取，请重新导入素材后再提交`);
+    const minMs = Math.round(minimum * 1000);
+    const maxMs = maximum > 0 ? Math.round(maximum * 1000) : 0;
+    if (durationMs < minMs || (maxMs > 0 && durationMs > maxMs)) throw new Error(`${name}时长为 ${(durationMs / 1000).toFixed(2)} 秒，需要 ${referenceBound(minimum, maximum)} 秒；请裁剪或更换这段素材后再提交`);
+}
+
+function referenceBound(minimum: number, maximum: number) {
+    if (minimum <= 0) return `不超过 ${maximum}`;
+    if (maximum <= 0) return `至少 ${minimum}`;
+    return `${minimum}–${maximum}`;
+}
+
+function assertReferenceFileBytes(kind: string, index: number, bytes: number | undefined, maximum = 0) {
+    if (!maximum || !bytes || bytes <= maximum) return;
+    const unit = kind === "图" ? "张" : kind === "音频" ? "段" : "个";
+    throw new Error(`第 ${index + 1} ${unit}参考${kind}文件过大，当前模型单文件上限为 ${formatMediaByteLimit(maximum)}；请压缩或更换后再提交`);
+}
+
+function assertReferenceGeometry(
+    kind: string,
+    index: number,
+    width?: number,
+    height?: number,
+    minWidth = 0,
+    maxWidth = 0,
+    minHeight = 0,
+    maxHeight = 0,
+    minAspect = 0,
+    maxAspect = 0,
+    minPixels = 0,
+    maxPixels = 0,
+) {
+    if (!width || !height) return;
+    const unit = kind === "图" ? "张" : "个";
+    const label = `第 ${index + 1} ${unit}参考${kind}`;
+    if ((minWidth && width < minWidth) || (maxWidth && width > maxWidth)) throw new Error(`${label}宽度为 ${width} 像素，需要 ${referenceBound(minWidth, maxWidth)} 像素；请调整尺寸或更换后再提交`);
+    if ((minHeight && height < minHeight) || (maxHeight && height > maxHeight)) throw new Error(`${label}高度为 ${height} 像素，需要 ${referenceBound(minHeight, maxHeight)} 像素；请调整尺寸或更换后再提交`);
+    const aspect = width / height;
+    if ((minAspect && aspect < minAspect) || (maxAspect && aspect > maxAspect)) throw new Error(`${label}宽高比为 ${aspect.toFixed(2)}，需要 ${referenceBound(minAspect, maxAspect)}；请调整尺寸或更换后再提交`);
+    const pixels = width * height;
+    if ((minPixels && pixels < minPixels) || (maxPixels && pixels > maxPixels)) throw new Error(`${label}像素总量为 ${pixels}，不符合当前模型要求；请调整尺寸或更换后再提交`);
+}
+
+function formatMediaByteLimit(bytes: number) {
+    return bytes % (1024 * 1024) === 0 ? `${bytes / (1024 * 1024)}MB` : `${bytes} 字节`;
 }
 
 export function assertVideoConfig(config: ResolvedAiConfig, selectedModel: string) {
