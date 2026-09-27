@@ -40,7 +40,7 @@ func TestFileStoreWriteIsAtomicWhenReaderFails(t *testing.T) {
 	if string(body) != "original" {
 		t.Fatalf("stored body = %q, want original", body)
 	}
-	temporary, err := filepath.Glob(filepath.Join(dataDir, "resources", "workspaces", "local", "image", ".beeftv-resource-*"))
+	temporary, err := filepath.Glob(filepath.Join(dataDir, "resources", "workspaces", "local", "image", ".qisitv-resource-*"))
 	if err != nil {
 		t.Fatal(err)
 	}

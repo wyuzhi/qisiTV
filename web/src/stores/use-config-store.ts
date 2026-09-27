@@ -10,7 +10,7 @@ import { defaultModelCapabilityConfig, workflowFieldRole, workflowFieldSafeToOve
 import { useUserStore } from "@/stores/use-user-store";
 import type { CapabilitySpec } from "@/services/api/logical-models";
 
-export type ApiCallFormat = "openai" | "gemini" | "claude";
+export type ApiCallFormat = "openai" | "gemini" | "claude" | "likeai";
 export type ChannelInterfaceType = ModelProtocol;
 export type ChannelHeader = { name: string; value: string };
 export type RunningHubCapability = "image" | "video" | "audio";
@@ -1026,6 +1026,7 @@ function isEmptyDefaultChannel(channel: ModelChannel) {
 }
 
 export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {
+	if (apiFormat === "likeai") return "https://task.likeai.pro/task-api";
     return apiFormat === "gemini" ? GEMINI_BASE_URL : OPENAI_BASE_URL;
 }
 
@@ -1045,7 +1046,7 @@ function capabilityForChannelInterface(interfaceType?: ChannelInterfaceType): Mo
 }
 
 function normalizeApiFormat(apiFormat: unknown): ApiCallFormat {
-    return apiFormat === "gemini" || apiFormat === "claude" ? apiFormat : "openai";
+    return apiFormat === "gemini" || apiFormat === "claude" || apiFormat === "likeai" ? apiFormat : "openai";
 }
 
 function normalizeChannelInterfaceType(value: unknown): ChannelInterfaceType | undefined {

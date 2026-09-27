@@ -33,4 +33,58 @@ Wails 和浏览器开发模式共用同一套 `127.0.0.1` HTTP 合同。路由�
 
 Agent 的 `budget` 字段是本地运行上限（步数、生成次数、视频秒数），不代表积分、付费或扣费。
 
-内置 BeefAPI 连接成功后，同一份企业凭证用于渠道请求、模型目录和本机 MCP 工具。MCP 工具名为 `beeftv_list_models`、`beeftv_submit_media`、`beeftv_get_task`；媒体提交必须经过本机审批与预算，不能把 `approved=true` 当作授权。
+内置 BeefAPI 连接成功后，同一份企业凭证用于渠道请求、模型目录和本机 MCP 工具。MCP 工具名为 `qisitv_list_models`、`qisitv_submit_media`、`qisitv_get_task`；媒体提交必须经过本机审批与预算，不能把 `approved=true` 当作授权。
+
+## 外部 Agent 的画布操作
+
+`POST /canvas-projects/:id/operations` 接收 `{ baseRevision?, operations }`，返回信封中的 `data.project` 完整画布。一次 1–100 项操作，最大请求体 5 MiB；整批验证后通过同一画布历史和资源事务写入，revision 只加一次。传入 `baseRevision` 可以保证所读版本仍有效；省略时使用服务端读到的当前版本做 CAS，竞争写入仍返回 409，绝不强制覆盖。操作失败整批回滚。资源、素材、画布均校验当前工作区 owner。
+
+| op | 字段与语义 |
+| --- | --- |
+| `add` | `node`：已知内置 `type`、可选 `id/title/position/width/height/parentId/metadata`；缺少 ID 自动生成，默认位置 `{x:0,y:0}`、尺寸 360×240。 |
+| `update` | `nodeId` 与 `patch`：可更新 `title/position/width/height/parentId/metadata`；`position` 和 `metadata` 浅合并，metadata 子字段为 null 时移除。ID、类型、服务端时间戳不可改。 |
+| `delete` | `nodeId`：删除节点，同时清理相连连线、父背板绑定、节点引用及关联时间线片段。 |
+| `connect` | `connection`：`fromNodeId/toNodeId` 必填，`id` 可省略；可选 handle、anchorRatio、relation、storyboardRowId。拒绝不存在端点、自连及重复连接。 |
+| `disconnect` | `connectionId`。 |
+| `project` | `patch`：仅可修改 `title/canvasTitle`。 |
+
+metadata 修改使用服务端白名单，涵盖正文、提示词、媒体资源、生成状态与节点引用；不允许密钥或任意扩展字段。引用必须存在，首尾帧必须是图片，parentId 必须指向无环背板。现有插件节点可以移动或改名，新建节点类型限定为应用内置类型。删除节点不会直接删除媒体文件。
+
+媒体导入先通过 `/resources` 保存本地字节，再建立素材库 Asset；媒体节点使用 `metadata.storageKey="resource:<id>"` 与匹配的 `metadata.assetId`。仅添加一个 Resource 引用而没有 Asset 会被资源完整性校验拒绝。付费模型任务创建不属于画布 operations；连线不会自动发起生成。
+
+## 当前画布与选择状态
+
+`PUT /canvas-projects/:id/interaction` 接收 `{tabId, isActive, selectedNodeIds, viewport:{x,y,k}}`，返回 `data.interaction`。前端为每个标签页创建稳定 tabId，每 10 秒及选择、视口、焦点变化时更新。服务端设置 `canvasId/updatedAt/expiresAt`，记录只驻留内存、30 秒过期，不改变画布 revision，不落库。
+
+`GET /canvas-interaction` 优先返回 active 标签页，没有 active 时返回最近使用且未过期的标签页，以便用户切到 Codex 后仍能读取选择；`GET /canvas-projects/:id/interaction` 限定画布。两者可用 `?tabId=` 精确选择标签页。返回 `{interaction:null}` 表示没有符合条件的新鲜状态；Agent 不应把空状态猜成某张画布。状态带 `canvasId/tabId/isActive/selectedNodeIds/viewport/updatedAt/expiresAt/lastActiveAt`；inactive 心跳不会改变 lastActiveAt，已删除节点会从选择列表移除。不同标签页分别保存，切换到另一个画布会更新该 tabId 的记录。
+
+## 外部 Agent 生成与持久化回填
+
+`GET /agent/models` 仅列出本机已启用的渠道模型，返回 `models[]` 的 model、name、type、channelId、protocol、capabilityConfig 和 defaultOptions。不会向模型上游发送请求，不返回密钥或渠道地址。
+
+`POST /agent/tasks` 请求示例：
+
+```json
+{
+  "canvasId": "画布 ID",
+  "nodeId": "可选：已有同类型空白节点 ID",
+  "channelId": "本地渠道 ID",
+  "type": "video",
+  "model": "doubao_seedance_2_5",
+  "prompt": "镜头描述",
+  "idempotencyKey": "本次已授权请求的稳定唯一键",
+  "input": {
+    "referenceNodeIds": ["参考图片节点 ID"],
+    "options": {"videoSeconds":"5","vquality":"720p","size":"16:9"}
+  },
+  "consent": {"approved":true,"scope":"用户明确同意的模型、数量、总时长与费用范围"}
+}
+```
+
+这里的 consent 是调用方对用户已授权范围的明确记录；它不会查询余额、替用户获取授权或保证供应商价格。调用前必须已有用户费用授权。缺少 approved/scope 时拒绝入队。相同幂等键和完整请求返回同一任务，不会重复入队；同键异参返回 409。模型同名且存在于多个渠道时必须传 channelId。请求不能传 config、密钥、鉴权头或替换渠道地址，凭据只能由本机 provider config 解析，并在任务落库时保护。
+
+`input` 只接受 referenceNodeIds 和 options。options 支持画布公开配置，例如 size、quality、count、videoSeconds、vquality、videoGenerateAudio、audioVoice，以及按协议命名空间组织的 providerOptions（如 `{"likeai-video":{"kwargs":{"off_peak":true}}}`）。模型配置的 defaultOptions 自动放入对应协议的 providerOptions；显式协议参数覆盖同名键，与网页生成逻辑一致。省略 referenceNodeIds 时，从目标节点入边、referenceNodeIds 和首尾帧引用读取媒体；显式空数组表示不用参考。显式列表会清除不在列表内的旧首尾帧选择，保留的首尾帧必须是图片。服务端按当前画布校验节点，并只读取 owner 所有且 ready 的本地 Resource。
+
+返回 `data={task,canvasId,nodeId}`。task 与画布占位节点在同一事务入队，浏览器关闭不会中断执行。任务 summary 的 `clientContext.externalAgent=true`，节点 metadata 也带 externalAgent，前端不得再次创建结果节点。终态钩子及后台恢复循环把成功结果写成匹配的本地 Asset/Resource 引用、投影失败或取消状态；所有输出在一次事务中回填。额外输出节点 ID 按 taskId 与输出序号确定，重复恢复不会产生重复节点。
+
+`POST /agent/tasks/:taskId/apply` 接收 `{canvasId?,nodeId?,baseRevision?}`，用于显式恢复同一持久任务的回填；与自动回填共用实现。不能重定向到其他画布/节点。目标删除或被绑定到其他任务后停止回填，不重建已删除节点；结果仍留在任务中心。成功重复调用返回 alreadyApplied，不改画布 revision。服务端在任务 metadata 中记录 externalAgentWriteback 的 pending/complete/skipped 状态，重启后继续恢复 pending 终态任务。新授权重试应使用新的 `/agent/tasks` 请求和幂等键；普通 `/tasks/:id/retry` 不可重开外部 Agent 付费任务。

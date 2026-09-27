@@ -8,7 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"infinite-canvas/backend/internal/desktopupdate"
+	"qisitv/backend/internal/brand"
+	"qisitv/backend/internal/desktopupdate"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -38,7 +39,7 @@ func main() {
 	_ = os.Remove(startupErrorPath)
 
 	err = wails.Run(&options.App{
-		Title:  "BeefTV",
+		Title:  "qisiTV",
 		Width:  1440,
 		Height: 960,
 		AssetServer: &assetserver.Options{
@@ -66,5 +67,5 @@ func defaultDataDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("定位用户应用数据目录: %w", err)
 	}
-	return filepath.Join(root, "BeefTV"), nil
+	return brand.DesktopDataDir(root)
 }

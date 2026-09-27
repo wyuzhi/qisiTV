@@ -9,11 +9,13 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"qisitv/backend/internal/brand"
 )
 
 const (
-	privateKeyEnv = "BEEFTV_UPDATER_PRIVATE_KEY"
-	publicKeyEnv  = "BEEFTV_UPDATER_PUBLIC_KEY"
+	privateKeyEnv = "QISITV_UPDATER_PRIVATE_KEY"
+	publicKeyEnv  = "QISITV_UPDATER_PUBLIC_KEY"
 )
 
 func cmdGenKey(args []string, stdout, stderr io.Writer) error {
@@ -116,7 +118,7 @@ func readKeyMaterial(label, path, envName string) (string, error) {
 		}
 		return string(data), nil
 	}
-	value := strings.TrimSpace(os.Getenv(envName))
+	value := strings.TrimSpace(brand.Getenv(envName))
 	if value == "" {
 		return "", fmt.Errorf("%s is required via --private-key/--public-key or %s", label, envName)
 	}

@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/protocol"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/protocol"
 )
 
 // MediaResolver 水合参考媒体（资源 URL / data URL），由组合根注入，避免 generation → service 回环。

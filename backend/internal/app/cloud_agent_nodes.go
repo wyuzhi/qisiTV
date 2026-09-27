@@ -1,6 +1,6 @@
 package app
 
-import "infinite-canvas/backend/internal/canvas/capability"
+import "qisitv/backend/internal/canvas/capability"
 
 // Canvas capabilities are registered once at the canvas domain boundary. Agent
 // tools, creation, media and state projection all consume this registry; there

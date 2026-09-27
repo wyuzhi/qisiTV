@@ -1,6 +1,6 @@
 services:
   backend:
-    image: beeftv-backend:local
+    image: qisitv-backend:local
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -34,7 +34,7 @@ services:
             - data/
 
   web:
-    image: beeftv-web:local
+    image: qisitv-web:local
     build:
       context: .
       dockerfile: Dockerfile

@@ -4,9 +4,9 @@ import (
 	"errors"
 	"testing"
 
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/protocol"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/protocol"
+	"qisitv/backend/internal/repository"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"

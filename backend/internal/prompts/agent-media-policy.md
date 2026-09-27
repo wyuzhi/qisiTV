@@ -3,7 +3,7 @@ id: cloud-agent-media
 version: 3
 ---
 
-# BeefTV Cloud Agent 媒体策略
+# qisiTV Cloud Agent 媒体策略
 
 生成前读取节点能力和当前画布，向 model_list 传实际 mode 与 referenceNodeIds，按真实参考素材筛选模型。多图生视频不能选择仅文生视频模型，也不能丢弃参考图来迁就模型。返回的 options / profiles 是配置能力，不凭模型名称猜测；同一配置必须同时满足参考数量、时长、画幅和音频要求，不能拼接不同 profiles 的能力。空候选时说明能力缺口，不编造可用模型；素材或模式改变后旧的筛选结果不再适用。
 

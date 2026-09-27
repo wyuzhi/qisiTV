@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 func TestAgentMemoryCompactMergesAndRewritesOwnedLessons(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"infinite-canvas/backend/internal/prompts"
+	"qisitv/backend/internal/prompts"
 )
 
 const (

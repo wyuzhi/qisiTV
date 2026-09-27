@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"infinite-canvas/backend/internal/workspace"
+	"qisitv/backend/internal/workspace"
 )
 
 type fakeEnterprise struct {

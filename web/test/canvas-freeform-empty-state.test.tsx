@@ -16,7 +16,7 @@ const commands: CanvasCreateCommand[] = [
     { id: "audio", label: "音频", icon: null, section: "node", onClick: () => {} },
 ];
 
-describe("BeefTV freeform canvas empty state", () => {
+describe("qisiTV freeform canvas empty state", () => {
     test("exposes the double-click hint without obsolete quick starts", () => {
         const markup = renderToStaticMarkup(<CanvasFreeformEmptyState commands={commands} />);
         expect(markup).toContain("双击画布");

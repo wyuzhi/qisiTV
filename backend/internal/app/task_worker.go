@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/platform"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/platform"
 )
 
 const newAPIChannel2TaskSyncMaxAge = 5 * time.Minute
@@ -37,6 +37,7 @@ func (s *Service) taskWorker() *taskWorkerCoordinator {
 func (w *taskWorkerCoordinator) start(ctx context.Context) {
 	s := w.service
 	s.startTextReplayCleanup(ctx)
+	s.startExternalAgentWritebackRecovery()
 	s.startProviderCancellationReconciliation(ctx)
 	s.startAgentMemoryCompactScheduler()
 	if !s.IsLocalMode() {

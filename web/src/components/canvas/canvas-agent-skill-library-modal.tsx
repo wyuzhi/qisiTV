@@ -221,7 +221,7 @@ function SkillLibraryCard({ skill, theme, categories, selected, canSelect, onTog
     const [coverFailed, setCoverFailed] = useState(false);
     const coverUrl = skill.showcaseMedia?.find((item) => item.showcaseUrl)?.showcaseUrl;
     const categoryLabel = categories.find((item) => item.value === skill.tag)?.label || "其他";
-    const author = skill.effectiveUser?.name || "BeefTV 创作者";
+    const author = skill.effectiveUser?.name || "qisiTV 创作者";
     const addedCount = formatSkillCount(skill.addedCount || 0);
 
     useEffect(() => setCoverFailed(false), [coverUrl]);

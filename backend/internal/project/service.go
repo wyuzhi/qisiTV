@@ -3,7 +3,7 @@ package project
 import (
 	"fmt"
 
-	"infinite-canvas/backend/internal/app"
+	"qisitv/backend/internal/app"
 )
 
 type Backend interface {

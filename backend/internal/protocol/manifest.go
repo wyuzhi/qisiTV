@@ -243,7 +243,8 @@ func loadDeclarativeManifestProvider(manifest Manifest, index int) (Adapter, err
 }
 
 func ValidateManifest(manifest Manifest) error {
-	if version := strings.TrimSpace(manifest.APIVersion); version != "beeftv.plugin/v1" && version != "beeftv.plugin/v2" {
+	// Stored third-party packages keep their original manifest and signature.
+	if version := strings.TrimSpace(manifest.APIVersion); version != "qisitv.plugin/v1" && version != "qisitv.plugin/v2" && version != "beeftv.plugin/v1" && version != "beeftv.plugin/v2" {
 		return fmt.Errorf("unsupported protocol manifest apiVersion %q", manifest.APIVersion)
 	}
 	if strings.TrimSpace(manifest.Metadata.ID) == "" || strings.TrimSpace(manifest.Metadata.Version) == "" {
@@ -1085,6 +1086,9 @@ func manifestRequestValues(request GenerationRequest) map[string]any {
 	output.GenerateAudio = output.GenerateAudio || request.GenerateAudio
 	output.Watermark = output.Watermark || request.Watermark
 	outputValue, _ := requestAsManifestValue(output)
+	// Expression paths traverse map[string]any; preserve nested provider options
+	// instead of handing them an opaque map[string]map[string]any.
+	providerOptions, _ := requestAsManifestValue(request.ProviderOptions)
 
 	return map[string]any{
 		"capability":      request.Capability,
@@ -1105,7 +1109,7 @@ func manifestRequestValues(request GenerationRequest) map[string]any {
 		"watermark":       request.Watermark,
 		"operation":       request.Operation,
 		"output":          outputValue,
-		"providerOptions": request.ProviderOptions,
+		"providerOptions": providerOptions,
 		"extra":           request.Extra,
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"context"
 	"mime/multipart"
 
-	"infinite-canvas/backend/internal/skills"
+	"qisitv/backend/internal/skills"
 )
 
 const SkillPackageUploadMaxBytes = skills.SkillPackageUploadMaxBytes

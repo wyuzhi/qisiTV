@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 func TestSyncResourceToArkPrivateAssetRejectsLocalMode(t *testing.T) {

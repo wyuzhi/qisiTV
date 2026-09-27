@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/protocol"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/protocol"
 )
 
 type PluginProviderCatalogItem struct {

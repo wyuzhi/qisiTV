@@ -9,7 +9,7 @@ type CanvasThemeStore = { theme: ThemeName; active: boolean; setTheme: (theme?: 
 /** 画布外观是编辑器状态，不能写入用户工作台的全局主题。 */
 export const useCanvasThemeStore = create<CanvasThemeStore>()(
     persist(
-        // BeefTV 只提供深色界面；任何旧调用也只能恢复到 dark。
+        // qisiTV 只提供深色界面；任何旧调用也只能恢复到 dark。
         (set) => ({ theme: "dark", active: false, setTheme: () => set({ theme: "dark" }) }),
         {
             // v2 intentionally drops the legacy key: older builds could persist

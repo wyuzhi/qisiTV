@@ -14,7 +14,7 @@ func TestDesktopDependencyGraphDoesNotContainServiceAliasPackage(t *testing.T) {
 		t.Fatalf("list desktop dependencies: %v", err)
 	}
 	for _, dependency := range strings.Fields(string(output)) {
-		if dependency == "infinite-canvas/backend/internal/service" {
+		if dependency == "qisitv/backend/internal/service" {
 			t.Fatal("desktop dependency graph still contains the service alias package")
 		}
 	}
@@ -28,7 +28,7 @@ func TestTaskDomainDoesNotDependOnApplicationService(t *testing.T) {
 		t.Fatalf("list task dependencies: %v", err)
 	}
 	for _, dependency := range strings.Fields(string(output)) {
-		if dependency == "infinite-canvas/backend/internal/app" {
+		if dependency == "qisitv/backend/internal/app" {
 			t.Fatal("task domain still depends on the application service kernel")
 		}
 	}

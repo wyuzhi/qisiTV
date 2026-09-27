@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"log"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 func cloudAgentCallSnapshotHash(call cloudAgentCall) string {

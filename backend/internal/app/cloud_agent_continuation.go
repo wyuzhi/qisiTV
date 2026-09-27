@@ -3,7 +3,7 @@ package app
 import (
 	"strings"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 // cloudAgentContinuationReply 生成「上一轮接着聊」用的两段内容：

@@ -2,9 +2,9 @@
 
 set -Eeuo pipefail
 
-REPOSITORY_URL="${REPOSITORY_URL:-https://github.com/glanderness/BeefTV.git}"
+REPOSITORY_URL="${REPOSITORY_URL:-}"
 REPOSITORY_REF="${REPOSITORY_REF:-main}"
-INSTALL_DIR="${INSTALL_DIR:-/opt/beeftv}"
+INSTALL_DIR="${INSTALL_DIR:-/opt/qisitv}"
 CANVAS_HTTP_PORT="${CANVAS_HTTP_PORT:-3000}"
 COMPOSE_FILE="docker-compose.deploy.yml"
 BUILD_COMPOSE_FILE="docker-compose.build.yml"
@@ -19,6 +19,7 @@ fail() {
 }
 
 require_root() {
+    [[ -n "$REPOSITORY_URL" ]] || fail "请显式设置 qisiTV 的 REPOSITORY_URL；本脚本不会自动安装上游项目"
     if [[ "${EUID}" -ne 0 ]]; then
         fail "请使用 README 中带 sudo 的一键安装命令"
     fi
@@ -64,7 +65,7 @@ install_docker() {
 }
 
 sync_source() {
-    step "下载BeefTV源码"
+    step "下载qisiTV源码"
     if [[ -d "$INSTALL_DIR/.git" ]]; then
         cd "$INSTALL_DIR"
         [[ -z "$(git status --porcelain --untracked-files=no)" ]] || fail "$INSTALL_DIR 存在本地代码改动，请先处理后再更新"

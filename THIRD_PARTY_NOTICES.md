@@ -1,10 +1,10 @@
 # Third-party notices
 
 This file records direct dependencies and bundled third-party assets in the
-BeefTV public source snapshot. Transitive dependency notices remain available
+qisiTV source tree, including assets inherited from BeefTV. Transitive dependency notices remain available
 in the dependency packages installed from `bun.lock` and `backend/go.sum`.
 
-BeefTV's MIT license applies only to BeefTV-authored material. Each component
+The repository MIT license applies to project-authored material. Each component
 below remains subject to its own license.
 
 ## Frontend runtime dependencies
@@ -39,6 +39,8 @@ Versions are locked by `backend/go.sum`.
 | License | Direct modules |
 | --- | --- |
 | Apache-2.0 | `github.com/volcengine/volc-sdk-golang` |
+| Apache-2.0 and MIT (see module LICENSE) | `github.com/modelcontextprotocol/go-sdk` |
+| MIT | `github.com/google/jsonschema-go` |
 | BSD-3-Clause | `golang.org/x/net`, `golang.org/x/sync`, `golang.org/x/sys` |
 | MIT | `github.com/gin-gonic/gin`, `github.com/google/uuid`, `github.com/wailsapp/wails/v2`, `gorm.io/driver/sqlite`, `gorm.io/gorm` |
 
@@ -62,9 +64,9 @@ The files under `web/public/welcome/spring`, `welcome/charge`, and
 are used under CC BY 4.0. Exact creators, source pages, modifications, and
 license links are preserved in `web/public/welcome/credits.html`.
 
-BeefTV logos, workspace screenshots, folder covers, lighting thumbnails, and
-short-drama style thumbnails in `web/public` are project-maintained interface
-assets distributed with BeefTV under the repository MIT license. They are not
+qisiTV logos and workspace screenshots, together with inherited folder covers,
+lighting thumbnails and short-drama style thumbnails in `web/public`, are interface
+assets distributed under the repository MIT license. They are not
 representations of output quality from any model provider.
 
 `docs/public/images/canvas-version-history.png` is a BeefTV documentation
@@ -72,7 +74,7 @@ screenshot distributed under the repository MIT license.
 
 ## Protocol packages and trademarks
 
-Directories under `plugin-packages/` are BeefTV protocol descriptions and
-adapters. Generated `.beeftv-plugin` archives are build artifacts and are not
+Directories under `plugin-packages/` are qisiTV protocol descriptions and
+adapters, including inherited protocols. Generated `.qisitv-plugin` archives are build artifacts and are not
 committed to the public source snapshot. Provider names identify compatible
 APIs only. No affiliation or endorsement is implied.

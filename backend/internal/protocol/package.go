@@ -12,13 +12,19 @@ import (
 )
 
 const (
-	PluginPackageFormat    = "beeftv.plugin/package-v1"
-	PluginPackageExtension = ".beeftv-plugin"
+	PluginPackageFormat    = "qisitv.plugin/package-v1"
+	PluginPackageExtension = ".qisitv-plugin"
 	PluginPackageMaxBytes  = 48 << 20
 	PluginManifestMaxBytes = 512 << 10
 	pluginPackageMaxFiles  = 256
 	pluginPackageMaxEntry  = 16 << 20
 )
+
+// IsPluginPackageName also accepts archives installed before the qisiTV rename.
+func IsPluginPackageName(name string) bool {
+	name = strings.ToLower(name)
+	return strings.HasSuffix(name, PluginPackageExtension) || strings.HasSuffix(name, ".beeftv-plugin")
+}
 
 // PluginPackage is the transport envelope for every uploaded plugin. The
 // manifest remains the single capability contract; files are optional runtime

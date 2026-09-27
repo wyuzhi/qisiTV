@@ -531,7 +531,7 @@
     .app-user-workspace .product-collection-card:hover { transform: none; }
 }
 
-/* BeefTV workspace shell — desktop geometry follows the LibTV home reference. */
+/* qisiTV workspace shell — desktop geometry follows the LibTV home reference. */
 .app-user-workspace.app-product-workspace {
     --workspace-reference-sidebar: 334px;
     --workspace-reference-collapsed: 74px;
@@ -1232,7 +1232,7 @@
     .app-user-workspace .app-workspace-nav-icon svg { animation: none !important; transform: none !important; }
 }
 
-/* BeefTV final shell lock. Keep this last: shared product rules above support
+/* qisiTV final shell lock. Keep this last: shared product rules above support
    both themes, while the reference home chrome is intentionally always dark. */
 .app-user-workspace.app-product-workspace .app-workspace-shell,
 .app-user-workspace.app-product-workspace .app-workspace-stage,

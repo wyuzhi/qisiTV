@@ -1,6 +1,6 @@
 package app
 
-import "infinite-canvas/backend/internal/workspace"
+import "qisitv/backend/internal/workspace"
 
 // ReadLocalModelConfig reads the desktop-only provider snapshot. It is kept
 // outside the browser so frontend asset updates cannot clear API credentials

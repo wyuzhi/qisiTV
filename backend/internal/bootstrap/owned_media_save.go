@@ -11,8 +11,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	localasset "infinite-canvas/backend/internal/asset"
-	"infinite-canvas/backend/internal/model"
+	localasset "qisitv/backend/internal/asset"
+	"qisitv/backend/internal/model"
 )
 
 const maxSaveFileNameBytes = 180
@@ -76,7 +76,7 @@ func writeOwnedFileAtomically(dest string, body io.Reader, src *os.File) (return
 		return err
 	}
 	directory := filepath.Dir(dest)
-	temporary, err := os.CreateTemp(directory, ".beeftv-save-*")
+	temporary, err := os.CreateTemp(directory, ".qisitv-save-*")
 	if err != nil {
 		return errors.New("无法写入所选位置")
 	}

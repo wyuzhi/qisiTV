@@ -1,6 +1,6 @@
-# BeefTV 本地桌面版快速开始
+# qisiTV 本地桌面版快速开始
 
-BeefTV 桌面版是无需登录的本地优先工作区。项目、画布、素材、任务记录和模型配置默认保存在本机；只有执行生成时，才会按你配置的渠道请求外部模型服务。
+qisiTV 桌面版是无需登录的本地优先工作区。项目、画布、素材、任务记录和模型配置默认保存在本机；只有执行生成时，才会按你配置的渠道请求外部模型服务。
 
 ## 构建桌面版
 
@@ -9,18 +9,18 @@ BeefTV 桌面版是无需登录的本地优先工作区。项目、画布、素�
 在仓库根目录执行：
 
 ```bash
-BEEFTV_GO_DIR=/path/to/go ./scripts/build-beeftv-release.sh
+QISITV_GO_DIR=/path/to/go ./scripts/build-qisitv-release.sh
 ```
 
-macOS 应用输出到 `backend/cmd/desktop/build/bin/BeefTV.app`。
+macOS 应用输出到 `backend/cmd/desktop/build/bin/qisiTV.app`。
 
 Windows amd64 必须在 Windows 本机构建（需要 PATH 中的 Go、Bun，以及编译 go-sqlite3 的 GCC）：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-beeftv-windows-release.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-qisitv-windows-release.ps1
 ```
 
-输出为 `backend\cmd\desktop\build\bin\BeefTV.exe`，官方插件在旁边的 `plugin-packages\`。前提与数据目录见 `docs/desktop-release.md`。
+输出为 `backend\cmd\desktop\build\bin\qisiTV.exe`，官方插件在旁边的 `plugin-packages\`。前提与数据目录见 `docs/desktop-release.md`。
 
 首次打开后直接进入本地工作区，不需要注册或登录。
 
@@ -28,18 +28,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-beeftv-windo
 
 打开“模型配置”。内置 BeefAPI 使用「连接 BeefAPI」，在系统浏览器中完成授权后即可拉取模型。其他渠道仍填写 Base URL 和密钥。密钥保存在本地工作区，不会写入画布、素材或任务列表。
 
-模型请求可能访问外部供应商，但 BeefTV 不会把项目数据同步到 SaaS 存储。素材会先写入本地资源目录，再作为本地资源引用提交给模型渠道。
+模型请求可能访问外部供应商，但 qisiTV 不会把项目数据同步到 SaaS 存储。素材会先写入本地资源目录，再作为本地资源引用提交给模型渠道。
 
 ## 本地开发与验证
 
-需要同时调试前后端时，可参考 `scripts/beeftv-shared-dev.sh`。验证本地发行边界：
+需要同时调试前后端时，可参考 `scripts/qisitv-shared-dev.sh`。验证本地发行边界：
 
 ```bash
-BEEFTV_GO_DIR=/path/to/go ./scripts/verify-beeftv-local-release.sh
+QISITV_GO_DIR=/path/to/go ./scripts/verify-qisitv-local-release.sh
 ```
 
 ## 数据位置与备份
 
-桌面运行时会在本地工作区保存 SQLite 数据库、资源文件、模型配置和迁移备份。升级迁移前会自动创建数据库备份；如需迁移或恢复，请先退出 BeefTV 并完整复制工作区数据目录。
+桌面运行时会在本地工作区保存 SQLite 数据库、资源文件、模型配置和迁移备份。升级迁移前会自动创建数据库备份；如需迁移或恢复，请先退出 qisiTV 并完整复制工作区数据目录。
 
-登录、云存储、团队同步和计费不属于 BeefTV 本地版。以本地能力契约、精简 schema 和发行门禁为准，详见 `docs/local-first-architecture.md`。
+登录、云存储、团队同步和计费不属于 qisiTV 本地版。以本地能力契约、精简 schema 和发行门禁为准，详见 `docs/local-first-architecture.md`。

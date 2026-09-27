@@ -10,13 +10,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"qisitv/backend/internal/brand"
 )
 
 const (
-	payloadSchema       = 1
-	defaultFeedURL      = "https://github.com/glanderness/BeefTV/releases/latest/download/desktop-update.json"
-	defaultDownloadHost = "https://github.com/glanderness/BeefTV/releases/download"
-	updaterImportPath   = "infinite-canvas/backend/internal/desktopupdate"
+	payloadSchema = 1
+	// A renamed fork must never install the upstream application's releases.
+	defaultFeedURL      = ""
+	defaultDownloadHost = ""
+	updaterImportPath   = "qisitv/backend/internal/desktopupdate"
 )
 
 type payload struct {
@@ -48,10 +51,10 @@ func cmdSign(args []string, stdout, stderr io.Writer) error {
 	privatePath := fs.String("private-key", "", "path to the base64 private key file")
 	expectPublic := fs.String("expect-public-key", "", "base64 public key that must match the private key")
 	output := fs.String("output", "", "output path for desktop-update.json")
-	downloadBase := fs.String("download-base", defaultDownloadHost, "prefix for per-version asset URLs")
+	downloadBase := fs.String("download-base", brand.Getenv("QISITV_UPDATER_DOWNLOAD_BASE"), "required HTTPS prefix for this distribution's per-version asset URLs")
 	requirePlatforms := fs.String("require-platforms", "", "comma-separated platforms that must all be present")
 	var assets assetFlags
-	fs.Var(&assets, "asset", "platform=path, repeatable (example: darwin-arm64=/tmp/BeefTV-v1.6.0-darwin-arm64.zip)")
+	fs.Var(&assets, "asset", "platform=path, repeatable (example: darwin-arm64=/tmp/qisiTV-v1.6.0-darwin-arm64.zip)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -78,7 +81,7 @@ func cmdSign(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 		if !derivedPublicEquals(private, public) {
-			return fmt.Errorf("private key does not match --expect-public-key / BEEFTV_UPDATER_PUBLIC_KEY")
+			return fmt.Errorf("private key does not match --expect-public-key / QISITV_UPDATER_PUBLIC_KEY")
 		}
 	}
 
@@ -164,13 +167,13 @@ func cmdPrintLdflags(args []string, stdout, stderr io.Writer) error {
 	}
 	publicText := strings.TrimSpace(*publicInline)
 	if publicText == "" {
-		publicText = strings.TrimSpace(os.Getenv(publicKeyEnv))
+		publicText = strings.TrimSpace(brand.Getenv(publicKeyEnv))
 	}
 	if _, err := parsePublicKey(publicText); err != nil {
 		return fmt.Errorf("print-ldflags: %w; unsigned desktop builds cannot publish an updater feed", err)
 	}
 	feed := strings.TrimSpace(*feedURL)
-	if envFeed := strings.TrimSpace(os.Getenv("BEEFTV_UPDATER_FEED_URL")); envFeed != "" && feed == defaultFeedURL {
+	if envFeed := strings.TrimSpace(brand.Getenv("QISITV_UPDATER_FEED_URL")); envFeed != "" && feed == defaultFeedURL {
 		feed = envFeed
 	}
 	if !strings.HasPrefix(feed, "https://") {

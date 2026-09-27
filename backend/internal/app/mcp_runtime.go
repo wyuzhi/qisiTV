@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"strings"
 
-	"infinite-canvas/backend/internal/mcp"
+	"qisitv/backend/internal/mcp"
 )
 
 const (
-	mcpToolListModels  = "beeftv_list_models"
-	mcpToolSubmitMedia = "beeftv_submit_media"
-	mcpToolGetTask     = "beeftv_get_task"
+	mcpToolListModels  = "qisitv_list_models"
+	mcpToolSubmitMedia = "qisitv_submit_media"
+	mcpToolGetTask     = "qisitv_get_task"
 )
 
 func (s *Service) MCPSession() *mcp.Session {

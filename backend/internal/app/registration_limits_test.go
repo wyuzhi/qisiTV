@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"infinite-canvas/backend/internal/platform"
+	"qisitv/backend/internal/platform"
 	"testing"
 	"time"
 )

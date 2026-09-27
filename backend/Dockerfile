@@ -25,8 +25,8 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY backend ./
 RUN --mount=type=cache,target=/root/.cache/go-build set -eu; \
     version="${BUILD_VERSION:-$(tr -d '\r\n' </src/VERSION)}"; \
-    ldflags="-s -w -X infinite-canvas/backend/internal/buildinfo.Version=${version} -X infinite-canvas/backend/internal/buildinfo.Commit=${BUILD_COMMIT} -X infinite-canvas/backend/internal/buildinfo.BuildTime=${BUILD_TIME}"; \
-    CGO_ENABLED=1 GOOS=linux go build -trimpath -ldflags="$ldflags" -o /out/infinite-canvas-backend ./cmd/server
+    ldflags="-s -w -X qisitv/backend/internal/buildinfo.Version=${version} -X qisitv/backend/internal/buildinfo.Commit=${BUILD_COMMIT} -X qisitv/backend/internal/buildinfo.BuildTime=${BUILD_TIME}"; \
+    CGO_ENABLED=1 GOOS=linux go build -trimpath -ldflags="$ldflags" -o /out/qisitv-backend ./cmd/server
 
 FROM alpine:3.22
 
@@ -40,10 +40,10 @@ ENV CANVAS_BACKEND_ADDR=:8080
 ENV CANVAS_BACKEND_DATA_DIR=/data
 
 RUN mkdir -p /data && chown -R app:app /data
-COPY --from=backend-build /out/infinite-canvas-backend /usr/local/bin/infinite-canvas-backend
+COPY --from=backend-build /out/qisitv-backend /usr/local/bin/qisitv-backend
 COPY --from=protocol-package-build /src/plugin-packages /app/plugin-packages
 
 USER app
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD wget -qO- http://127.0.0.1:8080/api/health/ready >/dev/null || exit 1
-CMD ["infinite-canvas-backend"]
+CMD ["qisitv-backend"]

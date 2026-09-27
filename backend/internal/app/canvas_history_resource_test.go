@@ -2,9 +2,9 @@ package app
 
 import (
 	"errors"
-	"infinite-canvas/backend/internal/model"
 	"os"
 	"path/filepath"
+	"qisitv/backend/internal/model"
 	"strings"
 	"testing"
 	"time"

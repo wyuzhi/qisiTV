@@ -14,7 +14,7 @@ import (
 func TestMain(m *testing.M) {
 	// A copied test executable is a real PE launch target for the Windows
 	// replacement test, without recursively running this test suite.
-	if os.Getenv("BEEFTV_UPDATER_TEST_LAUNCH") == "1" && len(os.Args) == 1 {
+	if os.Getenv("QISITV_UPDATER_TEST_LAUNCH") == "1" && len(os.Args) == 1 {
 		os.Exit(0)
 	}
 	if done, err := HandleHelperCommand(os.Args); done {
@@ -28,14 +28,14 @@ func TestMain(m *testing.M) {
 }
 
 func TestHandleHelperCommandIgnoresNormalArgs(t *testing.T) {
-	done, err := HandleHelperCommand([]string{"BeefTV"})
+	done, err := HandleHelperCommand([]string{"qisiTV"})
 	if done || err != nil {
 		t.Fatalf("done=%v err=%v", done, err)
 	}
 }
 
 func TestHandleHelperCommandRequiresRequestPath(t *testing.T) {
-	done, err := HandleHelperCommand([]string{"BeefTV", helperFlag})
+	done, err := HandleHelperCommand([]string{"qisiTV", helperFlag})
 	if !done || err == nil {
 		t.Fatalf("done=%v err=%v", done, err)
 	}
@@ -90,7 +90,7 @@ func TestSpawnedHelperReplacesInstall(t *testing.T) {
 		req.Platform = "windows-amd64"
 		req.TargetPath = filepath.Join(oldDir, windowsExeName)
 		req.BackupPath = filepath.Join(root, "backup")
-		t.Setenv("BEEFTV_UPDATER_TEST_LAUNCH", "1")
+		t.Setenv("QISITV_UPDATER_TEST_LAUNCH", "1")
 	}
 	encoded, err := json.Marshal(req)
 	if err != nil {
@@ -104,7 +104,7 @@ func TestSpawnedHelperReplacesInstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	helperPath := filepath.Join(work, "BeefTV-update-helper")
+	helperPath := filepath.Join(work, "qisiTV-update-helper")
 	if runtime.GOOS == "windows" {
 		helperPath += ".exe"
 	}
@@ -120,9 +120,9 @@ func TestSpawnedHelperReplacesInstall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("helper: %v\n%s", err, out)
 	}
-	installed := filepath.Join(req.TargetPath, "Contents", "MacOS", "BeefTV")
+	installed := filepath.Join(req.TargetPath, "Contents", "MacOS", "qisiTV")
 	if runtime.GOOS == "windows" {
-		installed = filepath.Join(oldDir, pluginDirName, "official.beeftv-plugin")
+		installed = filepath.Join(oldDir, pluginDirName, "official.qisitv-plugin")
 	}
 	got, err := os.ReadFile(installed)
 	if err != nil {

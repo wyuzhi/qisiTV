@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/readme/beeftv-wordmark.svg" width="640" alt="BeefTV — 本地优先、轻量、AI Native 的视频创作工作台">
+  <img src="assets/readme/qisitv-wordmark.svg" width="640" alt="qisiTV — 本地优先、轻量、AI Native 的视频创作工作台">
 </p>
 
 <p align="center">Local-first, lightweight, AI-native video workspace.</p>
@@ -11,7 +11,7 @@
   <a href="SECURITY.md">安全策略</a>
 </p>
 
-BeefTV 是一个开源的 AI 视频创作工作台，专注三个方向：
+qisiTV 是一个开源的 AI 视频创作工作台，专注三个方向：
 
 - **本地优先**：项目、画布、素材和任务默认保存在本机。
 - **轻量**：单用户桌面应用优先，不依赖账号、团队 SaaS 或云存储。
@@ -19,7 +19,7 @@ BeefTV 是一个开源的 AI 视频创作工作台，专注三个方向：
 
 ## 产品演示
 
-<video src="https://github.com/user-attachments/assets/7acc2ad6-5312-4e22-bf1c-96d05c7cd1e3" controls muted></video>
+![qisiTV 本地 Agent 画布](assets/readme/qisitv-workspace.png)
 
 > 项目仍在快速开发。数据结构和外部接口可能变化，建议在个人本地或可信环境中使用，不要将本地 workspace API 直接暴露到公网。
 
@@ -30,7 +30,7 @@ BeefTV 是一个开源的 AI 视频创作工作台，专注三个方向：
 - 创作工作流：剧本、角色、场景、分镜、时间线和字幕。
 - 任务与素材：本地异步队列、取消、重试、日志、素材库和引用校验。
 - 模型渠道：用户在本地配置文本、图片、视频和音频 Provider。
-- 本地 Agent：在工作区中进行对话、任务编排和结果回写。
+- 本地 Agent：通过 MCP 或 `qisitv` CLI 在 Codex 等工具中对话、操作画布和回填结果。
 
 完整范围见[功能清单](docs/content/docs/overview/features.mdx)。
 
@@ -46,15 +46,15 @@ BeefTV 是一个开源的 AI 视频创作工作台，专注三个方向：
 ### 桌面应用
 
 ```bash
-git clone <repository-url> BeefTV
-cd BeefTV
-BEEFTV_GO_DIR=/path/to/go ./scripts/build-beeftv-release.sh
-open backend/cmd/desktop/build/bin/BeefTV.app
+git clone <repository-url> qisiTV
+cd qisiTV
+QISITV_GO_DIR=/path/to/go ./scripts/build-qisitv-release.sh
+open backend/cmd/desktop/build/bin/qisiTV.app
 ```
 
-Windows amd64 在 Windows 本机执行 `scripts/build-beeftv-windows-release.ps1`。产物是 `backend\cmd\desktop\build\bin\BeefTV.exe` 和旁边的 `plugin-packages\`。前提见 [`docs/desktop-release.md`](docs/desktop-release.md)。
+Windows amd64 在 Windows 本机执行 `scripts/build-qisitv-windows-release.ps1`。产物是 `backend\cmd\desktop\build\bin\qisiTV.exe` 和旁边的 `plugin-packages\`。前提见 [`docs/desktop-release.md`](docs/desktop-release.md)。
 
-首次启动后，在“模型配置”中添加自己的模型渠道。渠道可能连接外部供应商，但 BeefTV 本身不要求云端账号。
+首次启动后，在“模型配置”中添加自己的模型渠道。渠道可能连接外部供应商，但 qisiTV 本身不要求云端账号。
 
 ### Web 本地开发
 

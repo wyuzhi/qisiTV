@@ -4,12 +4,78 @@ import { http } from "@/services/api/request";
 import { resourceIdFromStorageKey } from "@/services/api/resources";
 import { useAssetStore, type Asset } from "@/stores/use-asset-store";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
+import { mergeAgentCanvasDocument } from "@/lib/canvas/agent-canvas-patch";
+import { sameCanvasContent } from "@/lib/canvas/canvas-content";
+import { publishCanvasRefresh } from "@/services/canvas-workspace-events";
+import { useSyncProgressStore } from "@/stores/use-sync-progress-store";
 
 type LocalCanvasContent = Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId">>;
 type CanvasSaveSummary = Pick<CanvasProject, "id" | "title" | "createdAt" | "updatedAt" | "revision">;
 
 const backendSaveTails = new Map<string, Promise<void>>();
 const backendSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const backendBaselines = new Map<string, CanvasProject>();
+
+function serializeCanvasOperation<T>(id: string, operation: () => Promise<T>): Promise<T> {
+    const next = (backendSaveTails.get(id) || Promise.resolve()).catch(() => undefined).then(operation);
+    const tail = next.then(() => undefined, () => undefined);
+    backendSaveTails.set(id, tail);
+    void tail.then(() => { if (backendSaveTails.get(id) === tail) backendSaveTails.delete(id); });
+    return next;
+}
+
+function rememberBackendProject(project: CanvasProject) {
+    backendBaselines.set(project.id, structuredClone(project));
+}
+
+async function applyBackendProject(remote: CanvasProject) {
+    const current = openLocalCanvasProject(remote.id);
+    const baseline = backendBaselines.get(remote.id);
+    if (baseline && (remote.revision ?? 0) < (baseline.revision ?? 0)) return current;
+    let merged: CanvasProject;
+    if (current && baseline && baseline.revision === current.revision) {
+        merged = mergeAgentCanvasDocument(baseline, remote, current);
+    } else {
+        merged = selectPreferredCanvasProject(current, remote);
+        // After a browser restart there is no common in-memory baseline. An
+        // updatedAt comparison cannot prove that the cached version is clean.
+        // Preserve it durably before accepting a different backend document.
+        if (current && !sameCanvasContent(current, remote) && merged === remote) {
+            const { preserveCanvasSyncDraft } = await import("@/services/canvas-sync-drafts");
+            const draftCount = await preserveCanvasSyncDraft(current);
+            // Do not overwrite edits made while IndexedDB was writing the copy.
+            if (!sameCanvasContent(current, openLocalCanvasProject(remote.id) || undefined)) {
+                throw new Error("保存副本期间画布又有编辑，本地内容已保留，请重试同步");
+            }
+            useSyncProgressStore.getState().setProjectProgress(remote.id, { phase: "done", draftCount, message: "已载入较新画布，之前的本地内容保留在版本记录中。" });
+        }
+        if (current && merged === current && (current.revision ?? 0) < (remote.revision ?? 0) && !sameCanvasContent(current, remote)) {
+            throw new Error("画布存在离线编辑和更新的服务端版本；本地内容已保留，请在版本记录中检查后再同步");
+        }
+    }
+    if (!current || !sameCanvasContent(current, merged) || JSON.stringify(current.viewport) !== JSON.stringify(merged.viewport)) {
+        // Notify the live editor before committing; a same-field conflict must
+        // leave both its in-flight edits and the last common baseline intact.
+        publishCanvasRefresh(merged, current || undefined);
+    }
+    useCanvasStore.setState((state) => ({ projects: current
+        ? state.projects.map((project) => project.id === remote.id ? merged : project)
+        : [...state.projects, merged] }));
+    rememberBackendProject(remote);
+    return merged;
+}
+
+async function reportCanvasSaveError(id: string, error: unknown) {
+    const detail = error instanceof Error ? error.message : "画布保存失败";
+    const conflict = /冲突|离线编辑/.test(detail) || (error as { status?: number })?.status === 409;
+    useSyncProgressStore.getState().setProjectProgress(id, { phase: conflict ? "conflict" : "error", message: detail });
+    const current = openLocalCanvasProject(id);
+    if (conflict && current) {
+        const { preserveCanvasSyncDraft } = await import("@/services/canvas-sync-drafts");
+        const draftCount = await preserveCanvasSyncDraft(current);
+        useSyncProgressStore.getState().setProjectProgress(id, { draftCount });
+    }
+}
 
 function resourceIdFromLocator(value?: string) {
     const storageID = resourceIdFromStorageKey(value);
@@ -75,9 +141,8 @@ export function selectPreferredCanvasProject(local: CanvasProject | null | undef
 /**
  * Local workspace persistence boundary.
  *
- * This module deliberately has no network, account, or hosted-service imports.
- * Keep local canvas CRUD here so desktop callers do not need to enter the
- * hosted synchronization service just to persist a project.
+ * The local Go runtime owns durable state. IndexedDB retains unsaved edits
+ * when that runtime is unavailable; no hosted account or cloud sync is used.
  */
 export async function createLocalCanvasProject(title: string, projectId?: string, initialContent?: LocalCanvasContent, workspaceProjectId?: string) {
     const id = useCanvasStore.getState().createProject(title, projectId, workspaceProjectId);
@@ -100,16 +165,29 @@ export async function createLocalCanvasProject(title: string, projectId?: string
 
 /** Serialize writes per canvas so optimistic revisions cannot race each other. */
 function syncLocalCanvasProject(id: string, includeGeneratedAssets: boolean): Promise<void> {
-    const previous = backendSaveTails.get(id) || Promise.resolve();
-    const next = previous.catch(() => undefined).then(async () => {
-        const project = openLocalCanvasProject(id);
+    return serializeCanvasOperation(id, async () => {
+      try {
+        let project = openLocalCanvasProject(id);
         if (!project) return;
         const assets = includeGeneratedAssets ? canvasGenerationCommitAssets(project, useAssetStore.getState().assets) : [];
-        const projectForSave = includeGeneratedAssets ? bindCanvasGenerationCommitAssets(project, assets) : project;
+        let projectForSave = includeGeneratedAssets ? bindCanvasGenerationCommitAssets(project, assets) : project;
         const endpoint = includeGeneratedAssets ? `/canvas-projects/${encodeURIComponent(id)}/generated-assets` : `/canvas-projects/${encodeURIComponent(id)}`;
-        const response = await http.put<{ project: CanvasSaveSummary }>(endpoint, includeGeneratedAssets ? { project: projectForSave, assets } : { project: projectForSave });
+        const save = () => http.put<{ project: CanvasSaveSummary }>(endpoint, includeGeneratedAssets ? { project: projectForSave, assets } : { project: projectForSave });
+        let response: { project: CanvasSaveSummary };
+        try { response = await save(); }
+        catch (error) {
+            if ((error as { status?: number })?.status !== 409 || !backendBaselines.has(id)) throw error;
+            const latest = await http.get<{ project: CanvasProject }>(`/canvas-projects/${encodeURIComponent(id)}`);
+            const rebased = await applyBackendProject(latest.project);
+            if (!rebased) throw error;
+            project = rebased;
+            projectForSave = includeGeneratedAssets ? bindCanvasGenerationCommitAssets(project, assets) : project;
+            // One bounded retry for disjoint edits. Another conflict is surfaced.
+            response = await save();
+        }
         const saved = response.project;
         if (!saved) return;
+        rememberBackendProject({ ...projectForSave, ...saved });
         useCanvasStore.setState((state) => ({
             projects: state.projects.map((current) => current.id === id
                 // Preserve edits made while the request was in flight; only the
@@ -124,12 +202,12 @@ function syncLocalCanvasProject(id: string, includeGeneratedAssets: boolean): Pr
         void flushCanvasStorePersistence().catch((error) => {
             console.error("画布本地缓存写入失败，已保存到桌面数据库", { id, error });
         });
+        useSyncProgressStore.getState().setProjectProgress(id, null);
+      } catch (error) {
+        await reportCanvasSaveError(id, error).catch(() => undefined);
+        throw error;
+      }
     });
-    const tail = next.finally(() => {
-        if (backendSaveTails.get(id) === tail) backendSaveTails.delete(id);
-    });
-    backendSaveTails.set(id, tail);
-    return tail;
 }
 
 export function syncLocalCanvasProjectToBackend(id: string): Promise<void> {
@@ -259,10 +337,10 @@ export async function hydrateLocalCanvasProjectsFromBackend() {
             }
         }))).filter((project): project is CanvasProject => Boolean(project));
         if (projects.length === 0) return false;
-        const current = useCanvasStore.getState().projects;
-        const byId = new Map(current.map((project) => [project.id, project]));
-        for (const project of projects) byId.set(project.id, selectPreferredCanvasProject(byId.get(project.id), project));
-        useCanvasStore.setState({ projects: [...byId.values()] });
+        for (const project of projects) {
+            try { await applyBackendProject(project); }
+            catch (error) { await reportCanvasSaveError(project.id, error).catch(() => undefined); }
+        }
         await flushCanvasStorePersistence();
         return true;
     } catch {
@@ -275,39 +353,66 @@ export async function openLocalCanvasProjectFromBackend(id: string) {
         const response = await http.get<{ project: CanvasProject }>(`/canvas-projects/${encodeURIComponent(id)}`);
         const backendProject = response.project;
         if (!backendProject) return openLocalCanvasProject(id);
-        const project = selectPreferredCanvasProject(openLocalCanvasProject(id), backendProject);
-        useCanvasStore.setState((state) => ({
-            projects: state.projects.some((item) => item.id === id)
-                ? state.projects.map((item) => item.id === id ? project : item)
-                : [...state.projects, project],
-        }));
+        const project = await applyBackendProject(backendProject);
         await flushCanvasStorePersistence();
         return project;
-    } catch {
+    } catch (error) {
+        await reportCanvasSaveError(id, error).catch(() => undefined);
         return openLocalCanvasProject(id);
     }
 }
 
 export async function refreshLocalCanvasProjectIfChanged(id: string) {
-    const current = openLocalCanvasProject(id);
-    try {
+    return serializeCanvasOperation(id, async () => {
+      try {
         const response = await http.get<{ project: CanvasProject }>(`/canvas-projects/${encodeURIComponent(id)}`);
         const remote = response.project;
-        if (!remote || selectPreferredCanvasProject(current, remote) !== remote) return false;
-        useCanvasStore.setState((state) => ({
-            projects: state.projects.some((item) => item.id === id)
-                ? state.projects.map((item) => item.id === id ? remote : item)
-                : [...state.projects, remote],
-        }));
-        await flushCanvasStorePersistence();
-        return remote;
-    } catch {
-        return undefined;
-    }
+        if (!remote || remote.revision === backendBaselines.get(id)?.revision) return false;
+        const project = await applyBackendProject(remote);
+        void flushCanvasStorePersistence().catch(() => undefined);
+        if (project && !sameCanvasContent(project, remote)) scheduleLocalCanvasBackendSync(id);
+        return project;
+      } catch (error) {
+        await reportCanvasSaveError(id, error).catch(() => undefined);
+        throw error;
+      }
+    });
 }
 
 export async function flushLocalWorkspace() {
     await flushCanvasStorePersistence();
+}
+
+/** Explicit user resolution: durably keep both versions before reloading. */
+export function keepLocalCanvasCopyAndLoadLatest(id: string) {
+    const timer = backendSaveTimers.get(id);
+    if (timer) clearTimeout(timer);
+    backendSaveTimers.delete(id);
+    return serializeCanvasOperation(id, async () => {
+        const current = openLocalCanvasProject(id);
+        if (!current) throw new Error("本地画布不存在");
+        const remote = await http.get<{ project: CanvasProject }>(`/canvas-projects/${encodeURIComponent(id)}`);
+        const copyId = crypto.randomUUID();
+        const copy: CanvasProject = {
+            ...current, id: copyId, revision: 0, workspaceProjectId: copyId,
+            title: `${current.title}（本地副本）`, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        };
+        const saved = await http.put<{ project: CanvasSaveSummary }>(`/canvas-projects/${copyId}`, { project: copy });
+        const durableCopy = { ...copy, ...saved.project };
+        if (!sameCanvasContent(current, openLocalCanvasProject(id) || undefined)) {
+            useCanvasStore.setState((state) => ({ projects: [...state.projects, durableCopy] }));
+            await flushCanvasStorePersistence();
+            throw new Error("副本已保存，但期间又有新的本地编辑；请停止编辑后重试，新增内容已保留");
+        }
+        useCanvasStore.setState((state) => ({ projects: [
+            ...state.projects.map((project) => project.id === id ? remote.project : project), durableCopy,
+        ] }));
+        rememberBackendProject(remote.project);
+        rememberBackendProject(durableCopy);
+        await flushCanvasStorePersistence();
+        useSyncProgressStore.getState().setProjectProgress(id, null);
+        return copyId;
+    });
 }
 
 export async function deleteLocalCanvasProjects(ids: readonly string[]) {

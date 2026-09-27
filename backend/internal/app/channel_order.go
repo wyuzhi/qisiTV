@@ -2,9 +2,9 @@ package app
 
 import (
 	"errors"
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
 	"net/http"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 )
 
 type ChannelOrderItem struct {

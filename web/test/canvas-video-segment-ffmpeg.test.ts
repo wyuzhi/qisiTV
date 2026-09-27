@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 
 import { assertUsableSegmentOutput, buildRemoveAudioArgs, MUTED_VIDEO_OUTPUT_NAME, SEGMENT_INPUT_NAME } from "../src/lib/canvas/canvas-video-segment-args";
 
-const QA_SOURCE = process.env.BEEFTV_SEGMENT_QA_MP4 || "";
+const QA_SOURCE = process.env.QISITV_SEGMENT_QA_MP4 || process.env.BEEFTV_SEGMENT_QA_MP4 || "";
 
 function commandExists(name: string) {
     const result = spawnSync(name, ["-version"], { encoding: "utf8" });
@@ -36,7 +36,7 @@ function makeLongGopFixture(dir: string) {
 
 describe.skipIf(!hasFfmpeg)("remove-audio ffmpeg args on real media", () => {
     test("full-source copy of a long-GOP video-only fixture keeps a decodable stream", () => {
-        const dir = mkdtempSync(join(tmpdir(), "beeftv-segment-"));
+        const dir = mkdtempSync(join(tmpdir(), "qisitv-segment-"));
         try {
             copyFileSync(makeLongGopFixture(dir), join(dir, SEGMENT_INPUT_NAME));
             runFfmpeg(dir, buildRemoveAudioArgs("0", "4", MUTED_VIDEO_OUTPUT_NAME, { fullSource: true }));
@@ -53,7 +53,7 @@ describe.skipIf(!hasFfmpeg)("remove-audio ffmpeg args on real media", () => {
     });
 
     test("partial range re-encodes instead of emitting an empty copy", () => {
-        const dir = mkdtempSync(join(tmpdir(), "beeftv-segment-"));
+        const dir = mkdtempSync(join(tmpdir(), "qisitv-segment-"));
         try {
             copyFileSync(makeLongGopFixture(dir), join(dir, SEGMENT_INPUT_NAME));
             runFfmpeg(dir, buildRemoveAudioArgs("1", "1.25"));
@@ -70,7 +70,7 @@ describe.skipIf(!hasFfmpeg)("remove-audio ffmpeg args on real media", () => {
     });
 
     test("tiny valid clip under 4KiB is accepted and still has a video sample", () => {
-        const dir = mkdtempSync(join(tmpdir(), "beeftv-segment-tiny-"));
+        const dir = mkdtempSync(join(tmpdir(), "qisitv-segment-tiny-"));
         try {
             const tiny = join(dir, "tiny.mp4");
             runFfmpeg(dir, ["-f", "lavfi", "-i", "testsrc=size=16x16:rate=25:duration=0.04", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", tiny]);
@@ -90,9 +90,9 @@ describe.skipIf(!hasFfmpeg)("remove-audio ffmpeg args on real media", () => {
         }
     });
 
-    test.skipIf(!QA_SOURCE)("optional BEEFTV_SEGMENT_QA_MP4 full-source mute keeps a video stream", () => {
-        if (!existsSync(QA_SOURCE)) throw new Error(`BEEFTV_SEGMENT_QA_MP4 指向的文件不存在`);
-        const dir = mkdtempSync(join(tmpdir(), "beeftv-segment-qa-"));
+    test.skipIf(!QA_SOURCE)("optional QISITV_SEGMENT_QA_MP4 full-source mute keeps a video stream", () => {
+        if (!existsSync(QA_SOURCE)) throw new Error(`QISITV_SEGMENT_QA_MP4 指向的文件不存在`);
+        const dir = mkdtempSync(join(tmpdir(), "qisitv-segment-qa-"));
         try {
             copyFileSync(QA_SOURCE, join(dir, SEGMENT_INPUT_NAME));
             runFfmpeg(dir, buildRemoveAudioArgs("0", "1", MUTED_VIDEO_OUTPUT_NAME, { fullSource: true }));

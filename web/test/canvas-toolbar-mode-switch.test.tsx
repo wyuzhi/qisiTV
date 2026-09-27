@@ -85,7 +85,7 @@ describe("canvas toolbar mode switch", () => {
         expect(defaultToolbarPrefs("main").hidden).toEqual(expect.arrayContaining(["tool-delete", "tool-clear"]));
     });
 
-    test("keeps the BeefTV command order in the default main dock", () => {
+    test("keeps the qisiTV command order in the default main dock", () => {
         const commandIds = resolveToolbarEntries("main", createMainContext(), null)
             .filter((entry) => entry.kind !== "separator")
             .map((entry) => entry.id);

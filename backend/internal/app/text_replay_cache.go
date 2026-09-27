@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/platform"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/platform"
 )
 
 type textReplayCacheKey struct {

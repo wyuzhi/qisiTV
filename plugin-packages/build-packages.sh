@@ -8,8 +8,8 @@ node "$root_dir/embed-documentation.mjs"
 package_plugin() {
   package_id=$1
   package_dir="$root_dir/$package_id"
-  output_file="$root_dir/$package_id.beeftv-plugin"
-  temporary_file="$root_dir/.$package_id.beeftv-plugin.tmp"
+  output_file="$root_dir/$package_id.qisitv-plugin"
+  temporary_file="$root_dir/.$package_id.qisitv-plugin.tmp"
   rm -f "$temporary_file"
   (
     cd "$package_dir"

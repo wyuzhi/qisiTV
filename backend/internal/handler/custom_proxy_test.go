@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"infinite-canvas/backend/internal/app"
+	"qisitv/backend/internal/app"
 
 	"github.com/gin-gonic/gin"
 )

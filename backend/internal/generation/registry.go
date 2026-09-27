@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/protocol"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/protocol"
 )
 
 type protocolRegistryContextKey struct{}
@@ -56,6 +56,8 @@ func EnsureOfficialProtocolAdapter(ctx context.Context, interfaceType string) co
 
 func OfficialDeclarativeVideoInterface(interfaceType string) (string, bool) {
 	switch strings.TrimSpace(interfaceType) {
+	case "likeai-video":
+		return "LikeAI", true
 	case string(model.ChannelInterfaceAgnesVideo):
 		return "Agnes", true
 	case string(model.ChannelInterfaceMiniMaxVideo):
@@ -83,6 +85,8 @@ func OfficialDeclarativeVideoInterface(interfaceType string) (string, bool) {
 
 func OfficialDeclarativeImageInterface(interfaceType string) (string, bool) {
 	switch strings.TrimSpace(interfaceType) {
+	case "likeai-image":
+		return "LikeAI", true
 	case string(model.ChannelInterfaceGeminiImage):
 		return "Gemini Images", true
 	case string(model.ChannelInterfaceOpenAIImage):
@@ -102,6 +106,8 @@ func OfficialDeclarativeImageInterface(interfaceType string) (string, bool) {
 
 func OfficialDeclarativeAudioInterface(interfaceType string) (string, bool) {
 	switch strings.TrimSpace(interfaceType) {
+	case "likeai-audio":
+		return "LikeAI", true
 	case string(model.ChannelInterfaceOpenAIAudio):
 		return "OpenAI Audio", true
 	case string(model.ChannelInterfaceAsyncAudio):
@@ -153,7 +159,7 @@ func LoadOfficialFallbackRegistry() *protocol.Registry {
 		}
 		adapters := make([]protocol.Adapter, 0, len(entries))
 		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), protocol.PluginPackageExtension) {
+			if entry.IsDir() || !protocol.IsPluginPackageName(entry.Name()) {
 				continue
 			}
 			data, err := os.ReadFile(filepath.Join(directory, entry.Name()))
@@ -200,7 +206,7 @@ func OfficialPluginPackageDir() (string, error) {
 }
 
 // OfficialPluginPackageCandidates lists locations that may contain shipped
-// *.beeftv-plugin archives. Production launches must not depend on the
+// *.qisitv-plugin archives. Production launches must not depend on the
 // caller's working directory: Windows/Linux Wails output keeps packages next
 // to the executable, and macOS .app bundles keep them in Contents/Resources.
 func OfficialPluginPackageCandidates(executablePath, workingDir string) []string {

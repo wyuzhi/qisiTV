@@ -68,7 +68,7 @@ func TestSuccessfulLaunchRetainsOldProgramForRecovery(t *testing.T) {
 	if err := RunHelperRequest(req); err != nil {
 		t.Fatal(err)
 	}
-	kept, err := os.ReadFile(filepath.Join(req.BackupPath, "Contents", "MacOS", "BeefTV"))
+	kept, err := os.ReadFile(filepath.Join(req.BackupPath, "Contents", "MacOS", "qisiTV"))
 	if err != nil || !strings.Contains(string(kept), "OLD") {
 		t.Fatalf("backup lost: %v", err)
 	}
@@ -93,14 +93,14 @@ func TestInstallRechecksArchiveAndRejectsEmbeddedData(t *testing.T) {
 	if err := e.prepareAndStartHelper(context.Background(), stage); err == nil || !strings.Contains(err.Error(), "数据目录") {
 		t.Fatalf("err=%v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(target.Path, "Contents", "MacOS", "BeefTV"))
+	data, err := os.ReadFile(filepath.Join(target.Path, "Contents", "MacOS", "qisiTV"))
 	if err != nil || !strings.Contains(string(data), "OLD") {
 		t.Fatal("old program changed")
 	}
 }
 
 func TestRejectWindowsAliasesAndOverflowVersions(t *testing.T) {
-	for _, name := range []string{"BeefTV.exe:payload", "plugin-packages/NUL.txt", "x/COM1", "x/name.", "x/name /file"} {
+	for _, name := range []string{"qisiTV.exe:payload", "plugin-packages/NUL.txt", "x/COM1", "x/name.", "x/name /file"} {
 		if _, _, err := sanitizeZipName(name); err == nil {
 			t.Errorf("accepted %q", name)
 		}
@@ -119,7 +119,7 @@ func TestWindowsInstallRejectsCollocatedUserData(t *testing.T) {
 	if err := WriteWindowsLayout(root, "OLD"); err != nil {
 		t.Fatal(err)
 	}
-	custom := filepath.Join(root, pluginDirName, "custom.beeftv-plugin")
+	custom := filepath.Join(root, pluginDirName, "custom.qisitv-plugin")
 	if err := os.WriteFile(custom, []byte("uploaded"), 0o600); err != nil {
 		t.Fatal(err)
 	}

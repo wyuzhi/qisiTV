@@ -27,9 +27,9 @@ func validateDarwinLayout(root string) error {
 	bundle := filepath.Join(root, appBundleName)
 	info, err := os.Lstat(bundle)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("更新包缺少 BeefTV.app")
+		return fmt.Errorf("更新包缺少 qisiTV.app")
 	}
-	exe := filepath.Join(bundle, "Contents", "MacOS", "BeefTV")
+	exe := filepath.Join(bundle, "Contents", "MacOS", "qisiTV")
 	if err := requireRegularFile(exe, true); err != nil {
 		return err
 	}
@@ -47,7 +47,7 @@ func validateDarwinLayout(root string) error {
 func validateWindowsLayout(root string) error {
 	exe := filepath.Join(root, windowsExeName)
 	if err := requireRegularFile(exe, false); err != nil {
-		return fmt.Errorf("更新包缺少 BeefTV.exe")
+		return fmt.Errorf("更新包缺少 qisiTV.exe")
 	}
 	plugins := filepath.Join(root, pluginDirName)
 	info, err := os.Lstat(plugins)

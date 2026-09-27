@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 func (r *Repository) Workspace(id string) (*model.Workspace, error) {

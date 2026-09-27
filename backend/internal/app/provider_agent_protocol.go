@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 // The browser sends one protocol-neutral conversation. Only the selected

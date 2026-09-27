@@ -13,7 +13,7 @@ func TestLoadAgentPoliciesUsesDocumentMetadata(t *testing.T) {
 	if system.ID != "cloud-agent-system" || system.Version != 6 || media.ID != "cloud-agent-media" || media.Version != 3 {
 		t.Fatalf("unexpected policy metadata: system=%+v media=%+v", system, media)
 	}
-	if strings.Contains(system.Text, "id: cloud-agent-system") || !strings.HasPrefix(system.Text, "# BeefTV Cloud Agent") {
+	if strings.Contains(system.Text, "id: cloud-agent-system") || !strings.HasPrefix(system.Text, "# qisiTV Cloud Agent") {
 		t.Fatalf("metadata leaked into compiled policy body: %q", system.Text)
 	}
 }

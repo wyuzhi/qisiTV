@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 )
 
 // timeline 转写任务输入，由画布提交，字段与前端契约一致。
@@ -131,7 +131,7 @@ func prepareWhisperWav(ctx context.Context, reader io.Reader, mime string) (stri
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		return "", nil, fmt.Errorf("音频预处理依赖未安装（需要 ffmpeg）")
 	}
-	tmpDir, err := os.MkdirTemp("", "beeftv-whisper-*")
+	tmpDir, err := os.MkdirTemp("", "qisitv-whisper-*")
 	if err != nil {
 		return "", nil, fmt.Errorf("创建临时目录失败: %w", err)
 	}

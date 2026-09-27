@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: BeefTV HTTP API
+  title: qisiTV HTTP API
   version: "1.0.0"
   description: |
     路径前缀是 `/api`。前后端一起发布，不按路径做 API 版本。
@@ -26,6 +26,77 @@ tags:
   - name: admin
   - name: beefapi
 paths:
+  /agent/models:
+    get:
+      tags: [agent]
+      summary: 列出本地已启用的生成模型，不含凭据
+      responses:
+        "200":
+          description: data.models 包含 model、name、type、channelId、protocol、capabilityConfig、defaultOptions
+  /agent/tasks:
+    post:
+      tags: [agent]
+      summary: 明确费用授权后原子创建生成任务与画布占位节点
+      description: input 仅接受 referenceNodeIds/options。凭据从本机配置读取。相同 idempotencyKey 和请求不会重复生成；异参同键返回 409。终态由服务端自动回填，不依赖浏览器。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [canvasId, type, model, prompt, consent]
+              properties:
+                canvasId: { type: string }
+                nodeId: { type: string }
+                channelId: { type: string }
+                type: { type: string, enum: [text, image, video, audio] }
+                model: { type: string }
+                prompt: { type: string }
+                idempotencyKey: { type: string, maxLength: 160 }
+                input:
+                  type: object
+                  properties:
+                    referenceNodeIds: { type: array, maxItems: 50, items: { type: string } }
+                    options: { type: object }
+                consent:
+                  type: object
+                  required: [approved, scope]
+                  properties:
+                    approved: { type: boolean, enum: [true] }
+                    scope: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "200":
+          description: data.task 为不含凭据的任务，另有 canvasId/nodeId
+        "400":
+          description: 缺少费用授权、无效模型、参数、引用或试图传入凭据
+        "404":
+          description: 画布不可访问
+        "409":
+          description: 画布或幂等键冲突
+  /agent/tasks/{taskId}/apply:
+    parameters:
+      - in: path
+        name: taskId
+        required: true
+        schema: { type: string }
+    post:
+      tags: [agent]
+      summary: 恢复已完成的外部 Agent 任务回填
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                canvasId: { type: string }
+                nodeId: { type: string }
+                baseRevision: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: data.project 包含回填画布；重复成功调用返回 alreadyApplied
+        "409":
+          description: 非终态任务、版本冲突或试图改变原画布/节点绑定
   /beefapi/connection:
     get:
       tags: [beefapi]
@@ -62,6 +133,103 @@ paths:
       responses:
         "200":
           description: 已打开
+  /canvas-projects/{id}/operations:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string }
+    post:
+      tags: [canvas]
+      summary: 外部 Agent 原子修改画布
+      description: 整批校验并保存一次历史/revision；baseRevision 不匹配或并发 CAS 失败均返回 409。最大请求体 5 MiB；不会触发付费生成。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [operations]
+              properties:
+                baseRevision: { type: integer, minimum: 0 }
+                operations:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [op]
+                    properties:
+                      op: { type: string, enum: [add, update, delete, connect, disconnect, project] }
+                      node: { type: object }
+                      nodeId: { type: string }
+                      patch: { type: object }
+                      connection: { type: object }
+                      connectionId: { type: string }
+      responses:
+        "200":
+          description: data.project 是持久化后的完整画布，含新的 revision
+        "400":
+          description: 操作、字段、节点类型或引用校验失败，整批未写入
+        "404":
+          description: 画布或操作对象不存在或不可访问
+        "409":
+          description: 版本冲突，整批未写入
+  /canvas-interaction:
+    get:
+      tags: [canvas]
+      summary: 读取当前活跃画布和选择
+      parameters:
+        - in: query
+          name: tabId
+          schema: { type: string }
+      responses:
+        "200":
+          description: data.interaction 优先为活跃标签页，无活跃时返回最近使用且未过期的标签页，没有新鲜状态时为 null。可显式 tabId。记录 30 秒过期。
+  /canvas-projects/{id}/interaction:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string }
+    get:
+      tags: [canvas]
+      summary: 读取指定画布的活跃标签页和选择
+      parameters:
+        - in: query
+          name: tabId
+          schema: { type: string }
+      responses:
+        "200":
+          description: data.interaction 为标签页状态或 null
+    put:
+      tags: [canvas]
+      summary: 更新临时选择和视口心跳，不改变画布 revision
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tabId, isActive, viewport, selectedNodeIds]
+              properties:
+                tabId: { type: string, maxLength: 160 }
+                isActive: { type: boolean }
+                selectedNodeIds: { type: array, maxItems: 1000, items: { type: string } }
+                viewport:
+                  type: object
+                  required: [x, y, k]
+                  properties:
+                    x: { type: number }
+                    y: { type: number }
+                    k: { type: number, minimum: 0.01, maximum: 100 }
+      responses:
+        "200":
+          description: data.interaction 含 canvasId、tabId、选择、视口、isActive、服务端 updatedAt 和 expiresAt
+        "400":
+          description: 无效标签页、坐标或选择了不存在的节点
+        "404":
+          description: 画布不可访问
   /canvas-projects/{id}:
     parameters:
       - in: path

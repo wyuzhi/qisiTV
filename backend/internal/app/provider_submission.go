@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 type providerSubmissionKeyContext struct{}

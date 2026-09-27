@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"infinite-canvas/backend/internal/kernel"
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/kernel"
+	"qisitv/backend/internal/model"
 
 	"gorm.io/gorm"
 )

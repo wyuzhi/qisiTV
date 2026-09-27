@@ -38,7 +38,7 @@ func (s *FileStore) Write(objectKey string, body io.Reader) (returnErr error) {
 	if err := s.ensureSafeParent(directory); err != nil {
 		return err
 	}
-	temporary, err := os.CreateTemp(directory, ".beeftv-resource-*")
+	temporary, err := os.CreateTemp(directory, ".qisitv-resource-*")
 	if err != nil {
 		return fmt.Errorf("create local resource temporary file: %w", err)
 	}

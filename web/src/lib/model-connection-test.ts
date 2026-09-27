@@ -50,6 +50,15 @@ export async function testChannelModelConnection(channel: ModelChannel, model: s
         videoGenerateAudio: "false",
     };
 
+    if (protocol.startsWith("likeai-")) {
+        const { runBackendGenerationTask } = await import("@/services/api/generation-task");
+        const { defaultModelCapabilityConfig } = await import("@/lib/model-capabilities");
+        const profile = modelProfile?.capabilityConfig || defaultModelCapabilityConfig(protocol, model);
+        const testConfig = { ...config, size: capability === "image" ? (profile.image?.size.default || "1:1") : (profile.video?.defaultRatio || "adaptive"), quality: profile.image?.quality.default || "1080p", videoSeconds: String(profile.video?.duration.default || 5), vquality: profile.video?.defaultResolution || "720p" };
+        await runBackendGenerationTask({ mode: capability, prompt: capability === "text" ? "Reply with OK." : "A simple gray circle on a white background.", config: testConfig, streamText: false });
+        return "LikeAI 任务已完成";
+    }
+
     switch (capability) {
         case "text":
             await requestImageQuestion(config, [{ role: "user", content: "Reply with OK." }], () => undefined);

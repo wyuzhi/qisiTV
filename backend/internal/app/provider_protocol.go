@@ -22,8 +22,8 @@ import (
 	"strings"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/protocol"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/protocol"
 
 	"github.com/google/uuid"
 	"github.com/volcengine/volc-sdk-golang/base"
@@ -229,7 +229,7 @@ func protocolRequestFromInput(input canvasGenerationInput) protocol.GenerationRe
 		request.Extra["max_output_tokens"] = input.MaxOutputTokens
 		request.Extra["max_tokens"] = input.MaxOutputTokens
 	}
-	if duration, err := strconv.Atoi(strings.TrimSpace(input.Config.VideoSeconds)); err == nil && duration > 0 {
+	if duration, err := strconv.Atoi(strings.TrimSpace(input.Config.VideoSeconds)); err == nil && (duration > 0 || (isLikeAIProtocol(input.Config.InterfaceType) && duration == -1)) {
 		request.Duration = duration
 	}
 	if count, err := strconv.Atoi(strings.TrimSpace(input.Config.Count)); err == nil && count > 0 {

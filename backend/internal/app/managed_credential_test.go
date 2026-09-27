@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"qisitv/backend/internal/beefapi"
 )
 
 func TestCustomRelayOnlyInjectsBeefAPIKeyForExactConfiguredOrigin(t *testing.T) {

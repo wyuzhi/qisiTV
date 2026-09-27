@@ -1,6 +1,6 @@
 package app
 
-import "infinite-canvas/backend/internal/kernel"
+import "qisitv/backend/internal/kernel"
 
 // 错误码和原因已迁到 kernel；此处保留兼容别名。
 const (

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"

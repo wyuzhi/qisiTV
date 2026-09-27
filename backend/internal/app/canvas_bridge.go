@@ -5,19 +5,21 @@ import (
 	"errors"
 	"time"
 
-	"infinite-canvas/backend/internal/assets"
-	"infinite-canvas/backend/internal/canvas"
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/assets"
+	"qisitv/backend/internal/canvas"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 )
 
 type (
-	AssetsSyncRequest    = canvas.AssetsSyncRequest
-	CanvasHistoryList    = canvas.CanvasHistoryList
-	UserDataSummary      = canvas.UserDataSummary
-	UserDataSnapshot     = canvas.UserDataSnapshot
-	CanvasLibrarySummary = canvas.CanvasLibrarySummary
-	CanvasLibraryPage    = canvas.CanvasLibraryPage
+	AssetsSyncRequest       = canvas.AssetsSyncRequest
+	CanvasHistoryList       = canvas.CanvasHistoryList
+	UserDataSummary         = canvas.UserDataSummary
+	UserDataSnapshot        = canvas.UserDataSnapshot
+	CanvasLibrarySummary    = canvas.CanvasLibrarySummary
+	CanvasLibraryPage       = canvas.CanvasLibraryPage
+	CanvasOperationsRequest = canvas.CanvasOperationsRequest
+	CanvasInteraction       = canvas.CanvasInteraction
 )
 
 type canvasHost struct {
@@ -196,6 +198,18 @@ func (s *Service) UserCanvasProjectSummaries(userID string) ([]UserDataSummary, 
 
 func (s *Service) UserCanvasProject(userID string, id string) (json.RawMessage, error) {
 	return s.canvasDomain().UserCanvasProject(userID, id)
+}
+
+func (s *Service) ApplyCanvasOperations(userID, canvasID string, req CanvasOperationsRequest) (json.RawMessage, error) {
+	return s.canvasDomain().ApplyCanvasOperations(userID, canvasID, req)
+}
+
+func (s *Service) PutCanvasInteraction(userID, canvasID string, value CanvasInteraction) (*CanvasInteraction, error) {
+	return s.canvasDomain().PutCanvasInteraction(userID, canvasID, value)
+}
+
+func (s *Service) GetCanvasInteraction(userID, canvasID, tabID string) (*CanvasInteraction, error) {
+	return s.canvasDomain().GetCanvasInteraction(userID, canvasID, tabID)
 }
 
 func (s *Service) UpsertUserCanvasProject(userID string, raw json.RawMessage) (UserDataSummary, error) {

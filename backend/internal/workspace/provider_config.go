@@ -13,8 +13,14 @@ import (
 
 const (
 	LocalProviderConfigFile = "local-model-config.json"
-	RedactedSecret          = "__BEEFTV_REDACTED__"
+	RedactedSecret          = "__QISITV_REDACTED__"
 )
+
+// IsRedactedSecret accepts snapshots from browser tabs opened before the rename.
+func IsRedactedSecret(value any) bool {
+	text, ok := value.(string)
+	return ok && (text == RedactedSecret || text == "__BEEFTV_REDACTED__")
+}
 
 // ProviderConfig owns the local provider snapshot. It has no database or
 // hosted-service dependency and can therefore be reused by CLI/desktop shells.
@@ -265,7 +271,7 @@ func preserveSecrets(incoming, existing any) {
 	case map[string]any:
 		previous, _ := existing.(map[string]any)
 		for key, value := range next {
-			if isSecretKey(key) && value == RedactedSecret {
+			if isSecretKey(key) && IsRedactedSecret(value) {
 				if old, ok := previous[key]; ok {
 					next[key] = old
 				}

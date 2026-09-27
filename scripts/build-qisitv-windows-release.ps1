@@ -1,15 +1,15 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Native Windows amd64 release entrypoint for the BeefTV Wails desktop app.
+    Native Windows amd64 release entrypoint for the qisiTV Wails desktop app.
 
 .DESCRIPTION
-    Builds the same desktop source as scripts/build-beeftv-release.sh, packages
-    official *.beeftv-plugin archives next to BeefTV.exe, and fails loudly when
+    Builds the same desktop source as scripts/build-qisitv-release.sh, packages
+    official *.qisitv-plugin archives next to qisiTV.exe, and fails loudly when
     CGO/go-sqlite3 compiler prerequisites are missing.
 
     This script does not install compilers, Bun, Go, Git, WebView2, or NSIS.
-    It does not run scripts/verify-beeftv-local-release.sh (that gate still owns
+    It does not run scripts/verify-qisitv-local-release.sh (that gate still owns
     local contract checks). Native compile and launch acceptance stay on Windows.
 
     Official docs used for tool assumptions:
@@ -21,8 +21,8 @@
     - Go 1.25+ Windows CGO DWARF 5 / binutils 2.37+: https://go.dev/wiki/MinimumRequirements#cgo
 
 .OUTPUTS
-    backend\cmd\desktop\build\bin\BeefTV.exe
-    backend\cmd\desktop\build\bin\plugin-packages\*.beeftv-plugin
+    backend\cmd\desktop\build\bin\qisiTV.exe
+    backend\cmd\desktop\build\bin\plugin-packages\*.qisitv-plugin
 #>
 [CmdletBinding()]
 param()
@@ -34,14 +34,14 @@ $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false
 
 if ($env:OS -ne "Windows_NT") {
-    throw "scripts/build-beeftv-windows-release.ps1 is the native Windows entrypoint. On macOS/Linux use scripts/build-beeftv-release.sh. Cross-compiling from another OS is not native acceptance."
+    throw "scripts/build-qisitv-windows-release.ps1 is the native Windows entrypoint. On macOS/Linux use scripts/build-qisitv-release.sh. Cross-compiling from another OS is not native acceptance."
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $desktopDir = Join-Path $repoRoot "backend\cmd\desktop"
 $pluginSourceDir = Join-Path $repoRoot "plugin-packages"
 $binDir = Join-Path $desktopDir "build\bin"
-$exePath = Join-Path $binDir "BeefTV.exe"
+$exePath = Join-Path $binDir "qisiTV.exe"
 $pluginResourceDir = Join-Path $binDir "plugin-packages"
 $versionFile = Join-Path $repoRoot "VERSION"
 $wailsModule = "github.com/wailsapp/wails/v2/cmd/wails@v2.16.0"
@@ -119,7 +119,7 @@ function Get-OfficialPluginPackages([string]$Directory) {
     if (-not (Test-Path -LiteralPath $Directory -PathType Container)) {
         return @()
     }
-    return @(Get-ChildItem -LiteralPath $Directory -File -Filter "*.beeftv-plugin")
+    return @(Get-ChildItem -LiteralPath $Directory -File -Filter "*.qisitv-plugin")
 }
 
 function Find-CgoCompiler {
@@ -165,7 +165,7 @@ function Test-PluginZipEntries([string]$ZipPath) {
         }
         foreach ($name in $names) {
             if ($name.Contains("\")) {
-                throw "Plugin package $ZipPath entry '$name' uses backslash paths. BeefTV rejects those archives; zip entries must use forward slashes."
+                throw "Plugin package $ZipPath entry '$name' uses backslash paths. qisiTV rejects those archives; zip entries must use forward slashes."
             }
         }
     }
@@ -259,7 +259,7 @@ function Invoke-PluginPackageBuild {
 
     Write-Step "zip/bash/node not all available; packaging official plugins with PowerShell ZipArchive (forward-slash entries)"
     foreach ($packageDir in Get-PluginSourceDirectories) {
-        $outputFile = Join-Path $pluginSourceDir ($packageDir.Name + ".beeftv-plugin")
+        $outputFile = Join-Path $pluginSourceDir ($packageDir.Name + ".qisitv-plugin")
         New-PluginZip -PackageDir $packageDir.FullName -OutputFile $outputFile
         Test-PluginZipEntries -ZipPath $outputFile
     }
@@ -276,15 +276,15 @@ if ($versionValue -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$') {
 $failures = New-Object System.Collections.Generic.List[string]
 
 $goPath = Get-CommandPath "go"
-if (-not $goPath -and $env:BEEFTV_GO_DIR) {
-    $bundledGo = Join-Path $env:BEEFTV_GO_DIR "bin\go.exe"
+if (-not $goPath -and $env:QISITV_GO_DIR) {
+    $bundledGo = Join-Path $env:QISITV_GO_DIR "bin\go.exe"
     if (Test-Path -LiteralPath $bundledGo -PathType Leaf) {
         $env:PATH = "$(Split-Path -Parent $bundledGo);$env:PATH"
         $goPath = $bundledGo
     }
 }
 if (-not $goPath) {
-    $failures.Add("Go is required on PATH, or set BEEFTV_GO_DIR to a toolchain directory that contains bin\go.exe")
+    $failures.Add("Go is required on PATH, or set QISITV_GO_DIR to a toolchain directory that contains bin\go.exe")
 }
 
 $bunPath = Get-CommandPath "bun"
@@ -336,12 +336,12 @@ if ($sourceDirs.Count -eq 0) {
 }
 $existingPackages = @(Get-OfficialPluginPackages $pluginSourceDir)
 if ($existingPackages.Count -eq 0) {
-    Write-Step "No plugin-packages/*.beeftv-plugin artifacts found; building them"
+    Write-Step "No plugin-packages/*.qisitv-plugin artifacts found; building them"
     Invoke-PluginPackageBuild
     $existingPackages = @(Get-OfficialPluginPackages $pluginSourceDir)
 }
 if ($existingPackages.Count -eq 0) {
-    throw "Official plugin packaging produced no *.beeftv-plugin files under plugin-packages/"
+    throw "Official plugin packaging produced no *.qisitv-plugin files under plugin-packages/"
 }
 foreach ($package in $existingPackages) {
     Test-PluginZipEntries -ZipPath $package.FullName
@@ -366,13 +366,13 @@ if ([string]::IsNullOrWhiteSpace($env:CANVAS_BUILD_TIME)) {
     $env:CANVAS_BUILD_TIME = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
 }
 $env:CANVAS_BUILD_VERSION = $versionValue
-$ldflags = "-X infinite-canvas/backend/internal/buildinfo.Version=$versionValue -X infinite-canvas/backend/internal/buildinfo.Commit=$commitValue -X infinite-canvas/backend/internal/buildinfo.BuildTime=$($env:CANVAS_BUILD_TIME)"
-if (-not [string]::IsNullOrWhiteSpace($env:BEEFTV_UPDATER_PUBLIC_KEY)) {
+$ldflags = "-X qisitv/backend/internal/buildinfo.Version=$versionValue -X qisitv/backend/internal/buildinfo.Commit=$commitValue -X qisitv/backend/internal/buildinfo.BuildTime=$($env:CANVAS_BUILD_TIME)"
+if (-not [string]::IsNullOrWhiteSpace($env:QISITV_UPDATER_PUBLIC_KEY)) {
     Write-Step "Injecting desktop updater FeedURL and PublicKey ldflags"
     $previousLocation = Get-Location
     Set-Location (Join-Path $repoRoot "backend")
     try {
-        $ldflagsResult = Invoke-NativeExecutable -FilePath "go" -ArgumentList @("run", "./cmd/update-release", "print-ldflags") -CaptureOutput -FailureMessage "update-release print-ldflags failed. Set BEEFTV_UPDATER_PUBLIC_KEY to the base64 32-byte Ed25519 public key that matches GitHub variable BEEFTV_UPDATER_PUBLIC_KEY."
+        $ldflagsResult = Invoke-NativeExecutable -FilePath "go" -ArgumentList @("run", "./cmd/update-release", "print-ldflags") -CaptureOutput -FailureMessage "update-release print-ldflags failed. Set QISITV_UPDATER_PUBLIC_KEY to the base64 32-byte Ed25519 public key that matches GitHub variable QISITV_UPDATER_PUBLIC_KEY."
         $updaterLdflags = ([string]$ldflagsResult.Output).Trim()
         if ([string]::IsNullOrWhiteSpace($updaterLdflags)) {
             throw "update-release print-ldflags produced no output"
@@ -383,11 +383,11 @@ if (-not [string]::IsNullOrWhiteSpace($env:BEEFTV_UPDATER_PUBLIC_KEY)) {
         Set-Location $previousLocation
     }
 }
-if (-not [string]::IsNullOrWhiteSpace($env:BEEFTV_EXTRA_LDFLAGS)) {
-    $ldflags = "$ldflags $($env:BEEFTV_EXTRA_LDFLAGS.Trim())"
+if (-not [string]::IsNullOrWhiteSpace($env:QISITV_EXTRA_LDFLAGS)) {
+    $ldflags = "$ldflags $($env:QISITV_EXTRA_LDFLAGS.Trim())"
 }
 
-Write-Step "Building BeefTV $versionValue ($commitValue) for windows/amd64"
+Write-Step "Building qisiTV $versionValue ($commitValue) for windows/amd64"
 Push-Location $desktopDir
 try {
     $wailsArgs = @(
@@ -426,7 +426,7 @@ if ($copied.Count -eq 0) {
 
 Write-Host "Release executable: $exePath"
 Write-Host "Official plugins: $pluginResourceDir ($($copied.Count) packages)"
-Write-Host "Launch data directory (unless CANVAS_DESKTOP_DATA_DIR is set): %AppData%\BeefTV"
+Write-Host "Launch data directory (unless CANVAS_DESKTOP_DATA_DIR is set): %AppData%\qisiTV"
 Write-Host "Official plugins are loaded from the executable directory, not from the process working directory."
 Write-Host "WebView2 is required at runtime; Windows 11 usually already has it. Missing runtimes use Wails -webview2 download. See https://wails.io/docs/guides/windows"
-Write-Host "This machine still has to launch BeefTV.exe before the Windows build is accepted. NSIS installer output is not produced."
+Write-Host "This machine still has to launch qisiTV.exe before the Windows build is accepted. NSIS installer output is not produced."

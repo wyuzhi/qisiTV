@@ -17,7 +17,7 @@ export function ModelSetupGuide({ hidden = false }: { hidden?: boolean }) {
     const storageMode = useUserStore((state) => state.storageMode);
     const localMode = isLocalWorkspaceMode() || storageMode === "local" || user?.username === "local";
     const models = useConfigStore((state) => state.config.models);
-    // BeefTV 本地工作区不显示阻塞式模型引导浮层；模型配置入口已经固定在侧边栏。
+    // qisiTV 本地工作区不显示阻塞式模型引导浮层；模型配置入口已经固定在侧边栏。
     if (hidden || dismissed || !hydrated || !user || localMode || user.role === "admin" || (!registrationGuide && models.length > 0)) return null;
 
     const close = () => {

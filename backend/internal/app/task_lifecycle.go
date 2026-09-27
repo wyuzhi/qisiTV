@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 )
 
 // taskLifecycleCoordinator 负责任务重试与取消这类会改变任务状态的写命令。
@@ -42,7 +42,7 @@ func (w *taskLifecycleCoordinator) retryTask(userID string, id string) (*model.T
 	if task.CreationSubmissionID != nil {
 		return nil, creationConflict("智能创作重做需要新的报价批准，请回到创作会话继续")
 	}
-	if strings.HasPrefix(task.Operation, "cloud_agent") {
+	if strings.HasPrefix(task.Operation, "cloud_agent") || task.Operation == "external_agent_generate" {
 		return nil, BadAuthRequest("Agent 重试需要新的幂等键和预算校验，请回到 Agent 对话重新发送")
 	}
 	if task.Status != model.TaskStatusFailed && task.Status != model.TaskStatusCancelled {
@@ -130,6 +130,7 @@ func (w *taskLifecycleCoordinator) cancelTask(_ context.Context, userID string, 
 	task.Error = "任务已取消"
 	task.CompletedAt = &now
 	s.cancelActiveTask(task.ID)
+	s.noteExternalAgentTask(*task)
 
 	// 这些收尾操作必须幂等；任何单项失败都记录日志，但不能让已经落库的
 	// cancelled 状态重新对用户表现为“取消失败”。

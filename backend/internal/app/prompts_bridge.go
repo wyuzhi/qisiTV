@@ -1,8 +1,8 @@
 package app
 
 import (
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/prompts"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/prompts"
 )
 
 type (

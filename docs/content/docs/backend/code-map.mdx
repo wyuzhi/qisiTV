@@ -4,7 +4,7 @@ title: 本地后端代码地图
 
 # 本地后端代码地图
 
-BeefTV 是单用户、本地优先的桌面应用。项目、画布、素材、任务和 Agent 状态落到本地 SQLite 与工作区目录；模型生成仍可通过 Provider/Protocol 适配器访问外部 API。
+qisiTV 是单用户、本地优先的桌面应用。项目、画布、素材、任务和 Agent 状态落到本地 SQLite 与工作区目录；模型生成仍可通过 Provider/Protocol 适配器访问外部 API。
 
 ## 运行链路
 
@@ -31,6 +31,7 @@ Wails / local dev
 | HTTP | `backend/internal/handler` | 本地 `/api` 合同、输入限制和响应封装 |
 | 企业连接 | `backend/internal/beefapi` | 设备授权、本机密钥和连接状态 |
 | 本机 MCP | `backend/internal/mcp` | 进程内 initialize / tools/list / tools/call |
+| 外部 Agent | `backend/internal/agentbridge`, `backend/cmd/mcp`, `backend/cmd/qisitv` | 官方 SDK MCP stdio 与 CLI，共享校验和现有工作区 HTTP 操作 |
 | 桌面更新发布 | `backend/cmd/update-release` | 生成更新密钥、打包 zip、签署 `desktop-update.json` |
 | 前端 | `web/src` | React 画布、项目、素材、模型配置与插件 UI |
 

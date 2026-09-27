@@ -20,9 +20,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: beeftv-web
+          - image: qisitv-web
             dockerfile: Dockerfile
-          - image: beeftv-backend
+          - image: qisitv-backend
             dockerfile: backend/Dockerfile
 
     steps:
@@ -106,7 +106,7 @@ jobs:
             found && /^## / { exit }
             found { print }
           ' CHANGELOG.md > dist/RELEASE_NOTES.md
-          test -s dist/RELEASE_NOTES.md || printf 'BeefTV %s\n' "$version" > dist/RELEASE_NOTES.md
+          test -s dist/RELEASE_NOTES.md || printf 'qisiTV %s\n' "$version" > dist/RELEASE_NOTES.md
 
       - name: Create GitHub Release
         env:

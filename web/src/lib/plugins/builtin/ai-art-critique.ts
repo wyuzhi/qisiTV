@@ -5,7 +5,7 @@ import { ART_CRITIQUE_NODE_TYPE, ART_CRITIQUE_PLUGIN_ID, artCritiqueSourceFinger
 import { prepareAnalysisNodeAction } from "../analysis-node-action";
 
 const manifest: PluginManifest = {
-    apiVersion: "beeftv.plugin/v1",
+    apiVersion: "qisitv.plugin/v1",
     id: ART_CRITIQUE_PLUGIN_ID,
     name: "AI 审美批改",
     version: "0.1.0",

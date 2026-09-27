@@ -16,7 +16,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 
 	"gorm.io/gorm"
 )
@@ -31,15 +31,15 @@ const (
 )
 
 const (
-	appearanceSchemaVersion        = 7
+	appearanceSchemaVersion        = 8
 	appearanceLogoMaxBytes   int64 = 5 << 20
 	appearancePosterMaxBytes int64 = 10 << 20
 	appearanceVideoMaxBytes  int64 = 256 << 20
 )
 
 const (
-	defaultAppearanceBrandName = "BeefTV"
-	defaultAppearanceBrandSlug = "beeftv"
+	defaultAppearanceBrandName = "qisiTV"
+	defaultAppearanceBrandSlug = "qisitv"
 	defaultAppearanceSkinID    = "classic"
 	defaultAppearanceLogoURL   = "/logo.svg"
 	defaultAppearanceVideoURL  = "https://boss-shjd.biliapi.net/updream/aniforge/video/video_bbcb00bd-650d-4249-9346-5cd21fd2484c_m1hc-u0-1pu13x-3v1s.mp4"
@@ -120,6 +120,20 @@ func defaultAppearanceSetting() AppearanceSetting {
 	}
 }
 
+func migrateLegacyAppearanceBrand(value AppearanceSetting) AppearanceSetting {
+	// Translate the old default identity without changing custom workspace brands.
+	if strings.TrimSpace(value.BrandName) == "BeefTV" {
+		value.BrandName = defaultAppearanceBrandName
+		value.SEOTitle = strings.ReplaceAll(value.SEOTitle, "BeefTV", defaultAppearanceBrandName)
+		value.SEODescription = strings.ReplaceAll(value.SEODescription, "BeefTV", defaultAppearanceBrandName)
+		value.FooterCopyright = strings.ReplaceAll(value.FooterCopyright, "BeefTV", defaultAppearanceBrandName)
+	}
+	if strings.EqualFold(strings.TrimSpace(value.BrandSlug), "beeftv") {
+		value.BrandSlug = defaultAppearanceBrandSlug
+	}
+	return value
+}
+
 func AppearanceAssetMaxBytes(slot string) (int64, error) {
 	switch strings.TrimSpace(slot) {
 	case AppearanceAssetLogo, AppearanceAssetDarkLogo:
@@ -168,6 +182,7 @@ func (s *Service) UpdateAppearance(actor *model.User, value AppearanceSetting) (
 	if err := s.RequireAdmin(actor); err != nil {
 		return nil, err
 	}
+	value = migrateLegacyAppearanceBrand(value)
 	value.SchemaVersion = appearanceSchemaVersion
 	value.BrandName = strings.TrimSpace(value.BrandName)
 	value.BrandSlug = strings.ToLower(strings.TrimSpace(value.BrandSlug))
@@ -243,7 +258,7 @@ func (s *Service) ResetAppearance(actor *model.User) (*AdminAppearanceSetting, e
 		return nil, err
 	}
 	after := defaultAppearanceSetting()
-	if err := s.appendAdminAudit(actor, "appearance.reset", "system_setting", appearanceSettingKey, "恢复 BeefTV 默认品牌标识", map[string]any{"before": before, "after": after}); err != nil {
+	if err := s.appendAdminAudit(actor, "appearance.reset", "system_setting", appearanceSettingKey, "恢复 qisiTV 默认品牌标识", map[string]any{"before": before, "after": after}); err != nil {
 		return nil, err
 	}
 	return s.AdminAppearance(actor)
@@ -345,6 +360,7 @@ func (s *Service) readAppearance() (*model.SystemSetting, AppearanceSetting, err
 	if strings.TrimSpace(setting.ValueJSON) == "" || json.Unmarshal([]byte(setting.ValueJSON), &value) != nil {
 		return nil, AppearanceSetting{}, errors.New("外观配置格式无效")
 	}
+	value = migrateLegacyAppearanceBrand(value)
 	value.SchemaVersion = appearanceSchemaVersion
 	value.BrandName = strings.TrimSpace(value.BrandName)
 	if value.BrandName == "" {

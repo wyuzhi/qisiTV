@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"qisitv/backend/internal/beefapi"
 )
 
 const managedBeefAPIRef = beefapi.CredentialRef

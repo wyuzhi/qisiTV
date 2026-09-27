@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"infinite-canvas/backend/internal/providerpreset"
+	"qisitv/backend/internal/providerpreset"
 )
 
 const providerStateSchemaVersion = 1

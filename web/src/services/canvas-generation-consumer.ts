@@ -113,6 +113,7 @@ export async function applyCanvasGenerationTaskNodeEffect(input: {
     nodesRef: { current: CanvasNodeData[] };
     setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
 }) {
+    if (input.task.clientContext?.externalAgent) return;
     throwIfAborted(input.signal);
     const previousNodes = input.nodesRef.current;
     const applied = await applyMaterializedGenerationTaskResultToNodes(previousNodes, input.task, input.output, input.effectKey, input.nodeId);

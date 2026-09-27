@@ -49,7 +49,7 @@ func (s *Session) dispatch(req Request) Response {
 		s.mu.Unlock()
 		resp.Result = map[string]any{
 			"protocolVersion": ProtocolVersion,
-			"serverInfo":      map[string]any{"name": "beeftv-enterprise", "version": "1"},
+			"serverInfo":      map[string]any{"name": "qisitv-enterprise", "version": "1"},
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 		}
 	case "notifications/initialized":
@@ -113,7 +113,7 @@ func (s *Session) requireInitialized() error {
 
 func (s *Session) Initialize() (map[string]any, error) {
 	var result map[string]any
-	if err := s.call("initialize", map[string]any{"protocolVersion": ProtocolVersion, "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "beeftv-agent", "version": "1"}}, &result); err != nil {
+	if err := s.call("initialize", map[string]any{"protocolVersion": ProtocolVersion, "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "qisitv-agent", "version": "1"}}, &result); err != nil {
 		return nil, err
 	}
 	_, _ = s.notify("notifications/initialized", map[string]any{})

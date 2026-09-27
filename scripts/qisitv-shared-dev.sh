@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GO_DIR="${GO_DIR:-/tmp/beeftv-go.rpIfVN}"
+GO_DIR="${QISITV_GO_DIR:-}"
 BACKEND_ADDR="${CANVAS_DESKTOP_BACKEND_ADDR:-127.0.0.1:8080}"
 LAUNCH_TOKEN="${CANVAS_DESKTOP_LAUNCH_TOKEN:-$(openssl rand -hex 32)}"
 
@@ -10,8 +10,8 @@ export CANVAS_DESKTOP_BACKEND_ADDR="$BACKEND_ADDR"
 export CANVAS_DESKTOP_LAUNCH_TOKEN="$LAUNCH_TOKEN"
 export VITE_API_PROXY_TARGET="http://${BACKEND_ADDR}"
 export VITE_DESKTOP_LAUNCH_TOKEN="$LAUNCH_TOKEN"
-if ! command -v go >/dev/null 2>&1 && [ -x "$GO_DIR/go/bin/go" ]; then
-  export PATH="$GO_DIR/go/bin:$PATH"
+if ! command -v go >/dev/null 2>&1 && [ -x "$GO_DIR/bin/go" ]; then
+  export PATH="$GO_DIR/bin:$PATH"
 fi
 export GOTOOLCHAIN=local
 

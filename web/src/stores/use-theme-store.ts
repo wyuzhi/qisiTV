@@ -12,7 +12,7 @@ export const useThemeStore = create<ThemeStore>()(
     persist(
         (set) => ({
             theme: "dark",
-            // BeefTV 工作台只提供暗色模式；旧版调用者传入 light 时也保持暗色。
+            // qisiTV 工作台只提供暗色模式；旧版调用者传入 light 时也保持暗色。
             setTheme: () => set({ theme: "dark" }),
         }),
         {

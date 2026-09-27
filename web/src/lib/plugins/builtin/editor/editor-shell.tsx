@@ -13,12 +13,12 @@ import { EditorAiAssistant } from "./editor-ai-assistant";
 export const EDITOR_SHELL_PLUGIN_ID = "editor-shell";
 
 const manifest: PluginManifestV2 = {
-    apiVersion: "beeftv.plugin/v2",
+    apiVersion: "qisitv.plugin/v2",
     id: EDITOR_SHELL_PLUGIN_ID,
     name: "剪辑工作台",
     version: "0.1.0",
     description: "注册时间线、预览、检查器、素材、字幕、转写、导出和 AI 编辑八个工作台插槽。",
-    author: "BeefTV 团队",
+    author: "qisiTV 团队",
     surfaces: ["fullscreen"],
     permissions: ["timeline.read", "timeline.command", "export.run"],
     trusted: true,

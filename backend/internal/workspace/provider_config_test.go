@@ -7,6 +7,17 @@ import (
 	"testing"
 )
 
+func TestPreRenameRedactedConfigPreservesConfiguredSecret(t *testing.T) {
+	old := map[string]any{"apiKey": "fixture-secret"}
+	for _, placeholder := range []string{"__BEEFTV_REDACTED__", RedactedSecret} {
+		incoming := map[string]any{"apiKey": placeholder}
+		preserveSecrets(incoming, old)
+		if incoming["apiKey"] != "fixture-secret" {
+			t.Fatal("rename overwrote configured secret")
+		}
+	}
+}
+
 func TestProviderConfigMigratesLegacyBeefAPIStateWithoutLosingLocalChoices(t *testing.T) {
 	dir := t.TempDir()
 	legacy := `{

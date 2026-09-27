@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 func normalizeCapability(value string) string {
@@ -166,6 +166,18 @@ func DefaultImageCapabilityConfig(protocol string, modelName string) *ImageCapab
 		MaxOutputs:            15,
 	}
 	switch model.ChannelInterfaceType(protocol) {
+	case "likeai-image":
+		image.References.MaskSupported = false
+		image.Size = ImageSizeConfig{Parameter: "aspect_ratio", Values: []string{"1:1", "16:9", "9:16", "4:3", "3:4", "21:9"}, Default: "1:1", AllowCustom: true}
+		image.Quality = ImageQualityConfig{Supported: true, Values: []string{"1080p", "1440p", "2160p"}, Default: "1080p"}
+		image.TransparentBackground.Supported, image.ResponseFormat.Supported, image.OutputFormat.Supported = false, false, false
+		image.MaxOutputs = 1
+		if modelName == "doubao_seedream_4_5" || modelName == "doubao_seedream_5_lite" || modelName == "doubao_seedream_5_pro" {
+			image.Quality.Default = "1440p"
+		}
+		if modelName == "doubao_seedream_5_pro" {
+			image.Quality.Values = []string{"720p", "1080p", "1440p"}
+		}
 	case model.ChannelInterfaceGrokImage:
 		image.References.MaxImages = 1
 		image.References.MaskSupported = false
@@ -232,6 +244,9 @@ func legacyImageSizeValues() []string {
 func DefaultModelCapabilityConfigForModel(protocol string, modelName string) *ModelCapabilityConfig {
 	// 文本模型是否支持视觉输入不能从协议或模型名可靠推断，默认关闭，由管理员按真实上游能力开启。
 	streaming := true
+	if protocol == "likeai-text" {
+		streaming = false
+	}
 	text := &TextCapabilityConfig{Streaming: &streaming, References: TextReferenceConfig{PromptMaxChars: 32000}}
 	video := &VideoCapabilityConfig{
 		References:        VideoReferenceConfig{PromptMaxChars: DefaultVideoPromptMaxChars, MinImages: 0, MaxImages: 9, MaxImageBytes: 30 * 1024 * 1024, MaxVideos: 0, MaxVideoBytes: 0, MaxVideoDuration: 0, MaxAudios: 0, MaxAudioBytes: 0, MaxAudioDuration: 0},
@@ -295,7 +310,34 @@ func DefaultModelCapabilityConfigForModel(protocol string, modelName string) *Mo
 	case model.ChannelInterfaceAgnesVideo:
 		video = applyModelSpecificVideoCapability(video, protocol, modelName)
 	}
+	if protocol == "likeai-video" {
+		applyLikeAIVideoCapability(video, modelName)
+	}
 	return &ModelCapabilityConfig{Version: 1, Text: text, Image: DefaultImageCapabilityConfig(protocol, modelName), Video: video}
+}
+
+func applyLikeAIVideoCapability(video *VideoCapabilityConfig, modelName string) {
+	video.Duration = VideoDurationConfig{Selection: "range", Min: 1, Max: 30, Step: 1, Default: 5}
+	video.Resolutions = []string{"480p", "540p", "720p", "1080p"}
+	video.GenerateAudio = VideoBooleanConfig{Supported: true, Default: true}
+	video.Ratios = append([]string{"adaptive"}, video.Ratios...)
+	video.Operations = append(video.Operations, "reference_to_video", "audio_to_video")
+	video.References.MaxVideos, video.References.MaxAudios = 10, 10
+	video.References.MaxVideoBytes, video.References.MaxAudioBytes = 200<<20, 15<<20
+	video.References.MaxVideoDuration, video.References.MaxAudioDuration = 30, 30
+	if modelName == "doubao_seedance_2_5" {
+		video.References.MaxImages = 30
+		video.Duration = VideoDurationConfig{Selection: "enum", Values: []int{-1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30}, Default: 5}
+		video.Resolutions = []string{"480p", "720p"}
+		video.DefaultRatio = "adaptive"
+	}
+	if modelName == "tongyi_wan_video_3_prime" || modelName == "wan_video_3_prime" {
+		video.References.MaxImages, video.References.MaxVideos, video.References.MaxAudios = 10, 5, 5
+		video.References.MaxVideoDuration, video.References.MaxAudioDuration = 15, 15
+		video.Duration = VideoDurationConfig{Selection: "enum", Values: []int{-1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30}, Default: 5}
+		video.Resolutions = []string{"480p", "720p", "1080p"}
+		video.DefaultRatio = "adaptive"
+	}
 }
 
 func DecodeModelCapabilityConfig(raw string) (*ModelCapabilityConfig, error) {
@@ -745,7 +787,8 @@ func validateVideoDuration(value VideoDurationConfig) error {
 		values := append([]int(nil), value.Values...)
 		sort.Ints(values)
 		for index, item := range values {
-			if item < 1 || item > 3600 || (index > 0 && values[index-1] == item) {
+			// -1 is an explicit automatic-duration choice, never a range default.
+			if (item < 1 && item != -1) || item > 3600 || (index > 0 && values[index-1] == item) {
 				return BadAuthRequest("视频固定时长选项无效或重复")
 			}
 		}

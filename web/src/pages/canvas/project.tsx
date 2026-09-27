@@ -1,4 +1,6 @@
 import { isCanvasNodeGenerating } from "@/lib/canvas/canvas-node-task-state";
+import { useCanvasAgentInteraction } from "./use-canvas-agent-interaction";
+import { CanvasLocalSaveStatus } from "@/components/canvas/canvas-local-save-status";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, MouseEvent as ReactMouseEvent, SetStateAction } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -313,27 +315,22 @@ function InfiniteCanvasPage() {
     useEffect(() => {
         if (!projectId || !isLocalWorkspaceMode()) return;
         let disposed = false;
+        let refreshing = false;
         const check = () => {
-            if (disposed) return;
-            void refreshLocalCanvasProjectIfChanged(projectId).then((project) => {
-                if (!disposed && project) {
-                    setNodes(project.nodes || []);
-                    setConnections(project.connections || []);
-                }
-            });
+            if (disposed || refreshing) return;
+            refreshing = true;
+            void refreshLocalCanvasProjectIfChanged(projectId)
+                .catch(() => undefined) // The repository exposes errors in the save status.
+                .finally(() => { refreshing = false; });
         };
         const timer = window.setInterval(check, 4000);
-        return () => { disposed = true; window.clearInterval(timer); };
-    }, [projectId, setNodes]);
-    useEffect(() => {
-        if (!projectId || !isLocalWorkspaceMode() || window.location.protocol !== "http:") return;
-        const source = new EventSource(`/api/canvas-projects/${encodeURIComponent(projectId)}/events`);
-        const sync = () => void refreshLocalCanvasProjectIfChanged(projectId).then((project) => {
-            if (project) { setNodes(project.nodes || []); setConnections(project.connections || []); }
-        });
-        source.addEventListener("canvas.updated", sync);
-        return () => { source.removeEventListener("canvas.updated", sync); source.close(); };
-    }, [projectId, setNodes]);
+        // Desktop requests use a launch token via http; keep polling there.
+        const source = ["http:", "https:"].includes(window.location.protocol)
+            ? new EventSource(`/api/canvas-projects/${encodeURIComponent(projectId)}/events`) : null;
+        source?.addEventListener("canvas.updated", check);
+        source?.addEventListener("ready", check);
+        return () => { disposed = true; window.clearInterval(timer); source?.close(); };
+    }, [projectId]);
     const [nodeStackOrder, setNodeStackOrder] = useState<CanvasNodeStackOrder>([]);
     const bringNodeToFront = useCallback((nodeId: string) => {
         setNodeStackOrder((current) => bringCanvasNodeToFront(current, nodeId));
@@ -357,6 +354,7 @@ function InfiniteCanvasPage() {
     const [canvasTool, setCanvasTool] = useState<CanvasToolMode>("box-select");
     const [mediaPerformanceMode, setMediaPerformanceMode] = useState<CanvasMediaPerformanceMode>(readCanvasMediaPerformanceMode);
     const [projectLoaded, setProjectLoaded] = useState(false);
+    useCanvasAgentInteraction(projectId || "", projectLoaded, selectedNodeIds, viewport);
     const workspaceMode: CanvasWorkspaceMode = "professional";
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [generationHistoryOpen, setGenerationHistoryOpen] = useState(false);
@@ -2918,6 +2916,7 @@ function InfiniteCanvasPage() {
                 ) : null}
                 <CanvasOverlayLayerProvider>
                     <div className="canvas-editor-shell relative flex min-w-0 flex-1" data-agent-open={assistantOpen ? "true" : "false"} data-canvas-editor-panel-open={dialogNode || textEditorNodeId ? "true" : "false"} data-canvas-toolbar-node={toolbarNode?.id || undefined}>
+                    <CanvasLocalSaveStatus canvasId={projectId} onShowVersions={versions.show} />
                     <section data-canvas-editor inert={Boolean(versions.preview)} style={{ visibility: versions.preview ? "hidden" : undefined, opacity: versions.preview ? 0 : undefined }} className="relative min-w-0 flex-1 flex flex-col min-h-0 overflow-hidden">
                         {!focusMode ? (
                             <CanvasTopBar

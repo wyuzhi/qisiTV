@@ -1,13 +1,15 @@
 # Changelog
 
-All notable public changes to BeefTV are documented in this file.
+Changes to qisiTV and its inherited release history are documented in this file.
 
 ## Unreleased
 
+- Renamed the product, icons, local Agent tools, packages, and runtime identifiers to qisiTV while preserving existing local data and upstream attribution.
+- Added LikeAI model support and a shared MCP / CLI interface for external local Agents.
 - Built-in BeefAPI can be connected from the desktop app without pasting a key.
 - Prepared the first audited public source snapshot.
 - Added reproducible local builds, automated quality checks, and multi-architecture container publishing.
-- Standardized public artifacts, runtime identifiers, documentation, and repository links on the BeefTV name.
+- Standardized the upstream public artifacts, runtime identifiers, documentation, and repository links.
 
 ## v1.5.3
 
@@ -25,6 +27,6 @@ All notable public changes to BeefTV are documented in this file.
 
 ## v1.5.1
 
-- Initial public BeefTV snapshot.
+- Initial public upstream snapshot.
 - Local-first AI video workspace with image, video, audio, text, asset, canvas, and model-channel workflows.
 - BeefAPI remains a built-in local channel while its model catalog is discovered dynamically.

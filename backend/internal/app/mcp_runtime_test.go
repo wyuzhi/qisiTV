@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"gorm.io/gorm"
-	"infinite-canvas/backend/internal/mcp"
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/mcp"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 )
 
 func TestLocalMCPSessionExposesBoundedTools(t *testing.T) {

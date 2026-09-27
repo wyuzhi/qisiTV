@@ -1,6 +1,6 @@
 services:
   backend:
-    image: beeftv-backend:server
+    image: qisitv-backend:server
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -8,7 +8,7 @@ services:
         GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
 
   web:
-    image: beeftv-web:server
+    image: qisitv-web:server
     build:
       context: .
       dockerfile: Dockerfile

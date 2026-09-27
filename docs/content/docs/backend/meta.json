@@ -4,6 +4,8 @@
   "defaultOpen": true,
   "pages": [
     "local-development",
+    "local-agent",
+    "likeai",
     "http-api",
     "code-map",
     "backend-database",

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 func agentTestRequest() CloudAgentRequest {

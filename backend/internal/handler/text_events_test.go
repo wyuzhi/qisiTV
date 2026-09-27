@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"infinite-canvas/backend/internal/app"
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/sqlite"

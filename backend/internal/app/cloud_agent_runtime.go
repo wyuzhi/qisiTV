@@ -11,10 +11,10 @@ import (
 	"unicode/utf8"
 
 	"gorm.io/gorm"
-	"infinite-canvas/backend/internal/kernel"
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/prompts"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/kernel"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/prompts"
+	"qisitv/backend/internal/repository"
 )
 
 // A deterministic checkpoint failure must not be retried forever like a transient DB error.

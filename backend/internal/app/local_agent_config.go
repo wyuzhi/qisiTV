@@ -8,7 +8,7 @@ import (
 // localAgentProviderConfig resolves Agent models from the desktop-owned
 // snapshot. It deliberately never accepts provider credentials from an Agent
 // HTTP request.
-func (s *Service) localAgentProviderConfig(modelName string) (map[string]any, bool) {
+func (s *Service) localAgentProviderConfig(modelName string, channelIDs ...string) (map[string]any, bool) {
 	if !s.IsLocalMode() || strings.TrimSpace(modelName) == "" {
 		return nil, false
 	}
@@ -25,7 +25,7 @@ func (s *Service) localAgentProviderConfig(modelName string) (map[string]any, bo
 			APIFormat     string   `json:"apiFormat"`
 			InterfaceType string   `json:"interfaceType"`
 			Headers       any      `json:"headers"`
-			Enabled       bool     `json:"enabled"`
+			Enabled       *bool    `json:"enabled"`
 			Models        []string `json:"models"`
 			ModelProfiles []struct {
 				Model            string          `json:"model"`
@@ -38,7 +38,7 @@ func (s *Service) localAgentProviderConfig(modelName string) (map[string]any, bo
 		return nil, false
 	}
 	for _, channel := range snapshot.Channels {
-		if !channel.Enabled {
+		if (channel.Enabled != nil && !*channel.Enabled) || (len(channelIDs) > 0 && channelIDs[0] != "" && channel.ID != channelIDs[0]) {
 			continue
 		}
 		found := false

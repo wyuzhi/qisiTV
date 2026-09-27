@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 
-const baseURL = process.env.BEEFTV_URL || "http://127.0.0.1:3000";
+const baseURL = process.env.QISITV_URL || process.env.BEEFTV_URL || "http://127.0.0.1:3000";
 const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const routes = ["/", "/projects", "/project", "/assets", "/canvas", "/tasks", "/settings?section=models", "/create"];
 const localApiPrefixes = [
@@ -136,4 +136,4 @@ try {
 
 console.log(JSON.stringify({ routes: report.length, failures, report }, null, 2));
 if (failures.length) process.exit(1);
-console.log(`BeefTV local network audit passed for ${report.length} routes.`);
+console.log(`qisiTV local network audit passed for ${report.length} routes.`);

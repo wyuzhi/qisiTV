@@ -4,19 +4,21 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"os"
 	"strings"
+
+	"qisitv/backend/internal/brand"
 )
 
 const (
 	ProductionOrigin = "https://enterprise.beefapi.com"
 	PreviewLocalHost = "enterprise.localhost"
-	ClientID         = "beeftv-enterprise-v1"
-	ClientScope      = "inference"
-	CredentialRef    = "beefapi-enterprise"
-	ChannelID        = "beefapi"
-	TestOriginEnv    = "BEEFTV_ENTERPRISE_TEST_ORIGIN"
-	WalletPath       = "/console/topup"
+	// This identifier belongs to the third-party BeefAPI OAuth contract.
+	ClientID      = "beeftv-enterprise-v1"
+	ClientScope   = "inference"
+	CredentialRef = "beefapi-enterprise"
+	ChannelID     = "beefapi"
+	TestOriginEnv = "QISITV_ENTERPRISE_TEST_ORIGIN"
+	WalletPath    = "/console/topup"
 )
 
 // CanonicalOrigin is the immutable production enterprise origin unless an
@@ -24,7 +26,7 @@ const (
 func CanonicalOrigin(explicit string) (string, error) {
 	candidate := strings.TrimRight(strings.TrimSpace(explicit), "/")
 	if candidate == "" {
-		candidate = strings.TrimRight(strings.TrimSpace(os.Getenv(TestOriginEnv)), "/")
+		candidate = strings.TrimRight(strings.TrimSpace(brand.Getenv(TestOriginEnv)), "/")
 	}
 	if candidate == "" || strings.EqualFold(candidate, ProductionOrigin) {
 		return ProductionOrigin, nil

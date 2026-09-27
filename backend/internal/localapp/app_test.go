@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"testing"
 
-	"infinite-canvas/backend/internal/app"
-	"infinite-canvas/backend/internal/model"
-	localtask "infinite-canvas/backend/internal/task"
+	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/model"
+	localtask "qisitv/backend/internal/task"
 )
 
 type fakePorts struct{}

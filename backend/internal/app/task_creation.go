@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 )
 
 // Internal admission constraints are not JSON fields. Callers cannot select a
@@ -22,6 +22,12 @@ type taskAdmission struct {
 // 这是常规模型生成任务的写入口：客户端只提交创作意图，模型、渠道和协议信息必须由本地目录重新解析，
 // 以保证“可展示的模型”与“实际执行的模型”来自同一份有效配置。
 func (s *Service) CreateTask(userID string, req CreateTaskRequest) (*model.Task, error) {
+	if req.admission == nil {
+		metadata, _ := req.Input["metadata"].(map[string]any)
+		if req.Operation == "external_agent_generate" || metadata["externalAgent"] == true {
+			return nil, BadAuthRequest("外部 Agent 生成必须通过带费用确认的 Agent 接口")
+		}
+	}
 	if req.admission == nil && (strings.HasPrefix(req.Operation, "cloud_agent") || req.Input["cloudAgent"] != nil) {
 		return nil, BadAuthRequest("Agent 任务必须通过 Agent 接口创建")
 	}

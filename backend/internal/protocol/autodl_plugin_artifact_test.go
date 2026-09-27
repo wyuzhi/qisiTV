@@ -9,7 +9,7 @@ import (
 )
 
 func TestAutoDLPluginArtifact(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "..", "plugin-packages", "autodl-comfyui.beeftv-plugin"))
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "plugin-packages", "autodl-comfyui.qisitv-plugin"))
 	if err != nil {
 		t.Fatal(err)
 	}

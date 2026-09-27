@@ -40,6 +40,10 @@ rsync -a \
     --exclude='.libtv-*' \
     --exclude='artifacts/' \
     --exclude='test-evidence/' \
+    --include='assets/readme/qisitv-workspace.png' \
+    --include='assets/readme/qisitv-wordmark.svg' \
+    --include='assets/upstream/demo.mp4' \
+    --include='assets/upstream/demo-poster.jpg' \
     --exclude='data/' \
     --exclude='backend/data/' \
     --exclude='backend/.local/' \
@@ -72,7 +76,7 @@ rsync -a \
     --exclude='web/.reference-*' \
     --exclude='web/.canvas-probe-*' \
     --exclude='web/test/.agent-reliability-*' \
-    --include='web/scripts/beeftv-local-network-audit.mjs' \
+    --include='web/scripts/qisitv-local-network-audit.mjs' \
     --exclude='web/scripts/*audit*' \
     --exclude='web/scripts/*probe*' \
     --exclude='web/scripts/*smoke*' \
@@ -82,7 +86,7 @@ rsync -a \
     --exclude='docs/audits/' \
     --exclude='docs/plans/' \
     --exclude='docs/visual-regression/' \
-    --exclude='plugin-packages/*.beeftv-plugin' \
+    --exclude='plugin-packages/*.qisitv-plugin' \
     --exclude='plugin-packages/official-payment-*' \
     --exclude='*.db' \
     --exclude='*.db-*' \
@@ -95,4 +99,4 @@ rsync -a \
     --exclude='*.bak' \
     "$source_directory/" "$destination_directory/"
 
-printf 'exported BeefTV public source to %s\n' "$destination_directory"
+printf 'exported qisiTV public source to %s\n' "$destination_directory"

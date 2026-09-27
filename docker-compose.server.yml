@@ -1,6 +1,6 @@
 services:
   postgres:
-    container_name: beeftv-postgres
+    container_name: qisitv-postgres
     image: postgres:17-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-open_ai_canvas}
@@ -16,7 +16,7 @@ services:
     restart: unless-stopped
 
   redis:
-    container_name: beeftv-redis
+    container_name: qisitv-redis
     image: redis:7.4-alpine
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     volumes:
@@ -29,8 +29,8 @@ services:
     restart: unless-stopped
 
   backend:
-    container_name: beeftv-backend
-    image: beeftv-backend:server
+    container_name: qisitv-backend
+    image: qisitv-backend:server
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -62,8 +62,8 @@ services:
     stop_grace_period: ${CANVAS_SHUTDOWN_TIMEOUT:-10m}
 
   web:
-    container_name: beeftv-web
-    image: beeftv-web:server
+    container_name: qisitv-web
+    image: qisitv-web:server
     build:
       context: .
       dockerfile: Dockerfile

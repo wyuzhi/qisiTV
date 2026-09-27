@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"infinite-canvas/backend/internal/app"
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/model"
 
 	"github.com/gin-gonic/gin"
 )
@@ -28,6 +28,7 @@ func RegisterDesktopUserDataRoutes(r *gin.RouterGroup, svc *app.Service) {
 }
 
 func registerUserDataRoutes(r *gin.RouterGroup, svc *app.Service) {
+	registerCanvasControlRoutes(r, svc)
 	r.POST("/assets/batch", func(c *gin.Context) {
 		user, err := currentUser(c, svc)
 		if err != nil {

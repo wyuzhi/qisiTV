@@ -3,7 +3,7 @@ package app
 import (
 	"reflect"
 
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/repository"
 )
 
 // Persist the delta in the same transaction as the canvas and run checkpoint.

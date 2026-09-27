@@ -81,4 +81,6 @@ web/.oneendpoint-*/
 web/.panfix-*/
 web/.reference-*/
 web/.canvas-probe-*/
+plugin-packages/*.qisitv-plugin
+# Legacy archives remain ignored during migration.
 plugin-packages/*.beeftv-plugin

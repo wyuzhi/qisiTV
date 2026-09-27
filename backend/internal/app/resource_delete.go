@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	localasset "infinite-canvas/backend/internal/asset"
-	"infinite-canvas/backend/internal/assets"
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	localasset "qisitv/backend/internal/asset"
+	"qisitv/backend/internal/assets"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 )
 
 func (s *Service) deleteUserAssetWithResources(userID string, assetID string) error {

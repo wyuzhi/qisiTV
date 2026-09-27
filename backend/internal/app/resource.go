@@ -13,7 +13,6 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
-	"infinite-canvas/backend/internal/kernel"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -22,13 +21,14 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"qisitv/backend/internal/kernel"
 	"strconv"
 	"strings"
 	"time"
 
-	localasset "infinite-canvas/backend/internal/asset"
-	"infinite-canvas/backend/internal/assets"
-	"infinite-canvas/backend/internal/model"
+	localasset "qisitv/backend/internal/asset"
+	"qisitv/backend/internal/assets"
+	"qisitv/backend/internal/model"
 
 	"gorm.io/gorm"
 )

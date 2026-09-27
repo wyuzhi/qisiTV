@@ -5,8 +5,8 @@ import (
 	"mime/multipart"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
-	localtask "infinite-canvas/backend/internal/task"
+	"qisitv/backend/internal/model"
+	localtask "qisitv/backend/internal/task"
 )
 
 // LocalKernel is the intentionally narrow desktop-facing surface of Service.

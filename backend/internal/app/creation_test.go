@@ -11,9 +11,9 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"infinite-canvas/backend/internal/database"
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/database"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 )
 
 func creationTestService(t *testing.T) (*Service, *gorm.DB, string, CreationGuard) {

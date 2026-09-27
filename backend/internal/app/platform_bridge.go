@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"time"
 
-	"infinite-canvas/backend/internal/kernel"
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/platform"
+	"qisitv/backend/internal/kernel"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/platform"
 )
 
 type (

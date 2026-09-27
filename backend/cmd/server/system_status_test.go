@@ -5,9 +5,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"infinite-canvas/backend/internal/app"
-	"infinite-canvas/backend/internal/database"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/database"
+	"qisitv/backend/internal/repository"
 
 	"github.com/gin-gonic/gin"
 )

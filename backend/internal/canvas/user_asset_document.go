@@ -3,8 +3,8 @@ package canvas
 import (
 	"bytes"
 	"encoding/json"
-	"infinite-canvas/backend/internal/kernel"
 	"math"
+	"qisitv/backend/internal/kernel"
 	"strings"
 )
 

@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"infinite-canvas/backend/internal/assets"
-	"infinite-canvas/backend/internal/kernel"
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/assets"
+	"qisitv/backend/internal/kernel"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 
 	"gorm.io/gorm"
 )

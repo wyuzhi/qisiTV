@@ -37,7 +37,7 @@ describe("desktop release build contract", () => {
     test("keeps published deployment aligned with binaries present in public source", () => {
         const workflow = readFileSync(resolve(root, ".github/workflows/publish-images.yml"), "utf8");
         expect(workflow).not.toContain("cmd/host-updater");
-        expect(workflow).not.toContain("beeftv-host-updater");
+        expect(workflow).not.toContain("qisitv-host-updater");
 
         for (const name of ["docker-compose.server.yml", "docker-compose.deploy.yml"]) {
             const compose = readFileSync(resolve(root, name), "utf8");
@@ -48,7 +48,7 @@ describe("desktop release build contract", () => {
     });
 
     test("locks the release version and injects Go build metadata", () => {
-        const script = readFileSync(resolve(root, "scripts/build-beeftv-release.sh"), "utf8");
+        const script = readFileSync(resolve(root, "scripts/build-qisitv-release.sh"), "utf8");
         const version = readFileSync(resolve(root, "VERSION"), "utf8").trim();
 
         expect(version).toMatch(/^v\d+\.\d+\.\d+/);
@@ -63,15 +63,15 @@ describe("desktop release build contract", () => {
         expect(script).toContain("-trimpath");
         expect(script).toContain("wails@v2.16.0 build");
         expect(script).toContain("Contents/Resources/plugin-packages");
-        expect(script).toContain('"$ROOT_DIR/plugin-packages/"*.beeftv-plugin');
+        expect(script).toContain('"$ROOT_DIR/plugin-packages/"*.qisitv-plugin');
     });
 
     test("keeps every source file required by the local release gate", () => {
-        const gate = readFileSync(resolve(root, "scripts/verify-beeftv-local-release.sh"), "utf8");
+        const gate = readFileSync(resolve(root, "scripts/verify-qisitv-local-release.sh"), "utf8");
         const exporter = readFileSync(resolve(root, "scripts/public-release-export.sh"), "utf8");
 
-        expect(gate).toContain("web/scripts/beeftv-local-network-audit.mjs");
-        expect(existsSync(resolve(root, "web/scripts/beeftv-local-network-audit.mjs"))).toBe(true);
-        expect(exporter).toContain("--include='web/scripts/beeftv-local-network-audit.mjs'");
+        expect(gate).toContain("web/scripts/qisitv-local-network-audit.mjs");
+        expect(existsSync(resolve(root, "web/scripts/qisitv-local-network-audit.mjs"))).toBe(true);
+        expect(exporter).toContain("--include='web/scripts/qisitv-local-network-audit.mjs'");
     });
 });

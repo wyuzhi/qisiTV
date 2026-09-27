@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/repository"
 )
 
 // 上传额度在写文件或 OSS 前原子预留，避免并发请求同时通过日限额检查。

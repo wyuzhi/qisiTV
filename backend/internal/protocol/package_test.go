@@ -7,14 +7,14 @@ import (
 )
 
 func TestParsePluginPackageRejectsBareManifest(t *testing.T) {
-	if _, err := ParsePluginPackage([]byte(`{"apiVersion":"beeftv.plugin/v1"}`)); err == nil {
+	if _, err := ParsePluginPackage([]byte(`{"apiVersion":"qisitv.plugin/v1"}`)); err == nil {
 		t.Fatal("bare JSON manifest was accepted as a plugin package")
 	}
 }
 
 func TestParsePluginPackageValidatesWebEntry(t *testing.T) {
 	manifest := []byte(`{
-		"apiVersion":"beeftv.plugin/v1",
+		"apiVersion":"qisitv.plugin/v1",
         "id":"ui-extension",
         "name":"UI Extension",
         "version":"1.0.0",
@@ -42,14 +42,14 @@ func TestParsePluginPackageValidatesWebEntry(t *testing.T) {
 	}
 }
 
-func TestPluginPackageUsesBeefTVFormat(t *testing.T) {
-	if PluginPackageFormat != "beeftv.plugin/package-v1" {
+func TestPluginPackageUsesqisiTVFormat(t *testing.T) {
+	if PluginPackageFormat != "qisitv.plugin/package-v1" {
 		t.Fatalf("package format = %q", PluginPackageFormat)
 	}
 }
 
-func TestPluginPackageUsesBeefTVFileExtension(t *testing.T) {
-	if PluginPackageExtension != ".beeftv-plugin" {
+func TestPluginPackageUsesqisiTVFileExtension(t *testing.T) {
+	if PluginPackageExtension != ".qisitv-plugin" {
 		t.Fatalf("package extension = %q", PluginPackageExtension)
 	}
 }
@@ -62,6 +62,21 @@ func TestValidateManifestRejectsLegacyNamespace(t *testing.T) {
 	manifest.Metadata.Version = "1.0.0"
 	if err := ValidateManifest(manifest); err == nil {
 		t.Fatal("legacy namespace was accepted")
+	}
+}
+
+func TestPreRenamePluginPackagesRemainReadable(t *testing.T) {
+	manifest := []byte(`{"apiVersion":"beeftv.plugin/v1","id":"legacy-ui","name":"Existing Plugin","version":"1.0.0","contributes":{"commands":[{"id":"legacy-ui/open","label":"Open"}]}}`)
+	if _, err := ParsePluginPackage(zipPluginPackage(t, map[string][]byte{"manifest.json": manifest})); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"existing.beeftv-plugin", "current.qisitv-plugin"} {
+		if !IsPluginPackageName(name) {
+			t.Fatalf("existing package ignored: %s", name)
+		}
+	}
+	if IsPluginPackageName("manifest.json") {
+		t.Fatal("accepted a bare manifest")
 	}
 }
 

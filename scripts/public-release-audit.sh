@@ -34,18 +34,18 @@ find "$root" -mindepth 1 \( -path "$root/.git" -o -path "$root/.git/*" \) -prune
             printf '%s\n' "$relative"
             ;;
     esac
-done > "${TMPDIR:-/tmp}/beeftv-public-audit-forbidden-$$"
+done > "${TMPDIR:-/tmp}/qisitv-public-audit-forbidden-$$"
 
 while IFS= read -r relative; do
     [ -n "$relative" ] && report_forbidden "$relative"
-done < "${TMPDIR:-/tmp}/beeftv-public-audit-forbidden-$$"
-rm -f "${TMPDIR:-/tmp}/beeftv-public-audit-forbidden-$$"
+done < "${TMPDIR:-/tmp}/qisitv-public-audit-forbidden-$$"
+rm -f "${TMPDIR:-/tmp}/qisitv-public-audit-forbidden-$$"
 
 find "$root" \( -path "$root/.git" -o -path "$root/.git/*" \) -prune -o -type f -print | while IFS= read -r path; do
     relative=${path#"$root"/}
     basename=${relative##*/}
     case "$relative" in
-        backend/server|backend/desktop|plugin-packages/*.beeftv-plugin)
+        backend/server|backend/desktop|plugin-packages/*.qisitv-plugin)
             printf '%s\n' "$relative"
             continue
             ;;
@@ -55,12 +55,12 @@ find "$root" \( -path "$root/.git" -o -path "$root/.git/*" \) -prune -o -type f 
             printf '%s\n' "$relative"
             ;;
     esac
-done > "${TMPDIR:-/tmp}/beeftv-public-audit-files-$$"
+done > "${TMPDIR:-/tmp}/qisitv-public-audit-files-$$"
 
 while IFS= read -r relative; do
     [ -n "$relative" ] && report_forbidden "$relative"
-done < "${TMPDIR:-/tmp}/beeftv-public-audit-files-$$"
-rm -f "${TMPDIR:-/tmp}/beeftv-public-audit-files-$$"
+done < "${TMPDIR:-/tmp}/qisitv-public-audit-files-$$"
+rm -f "${TMPDIR:-/tmp}/qisitv-public-audit-files-$$"
 
 if grep -RIEIl \
     --exclude='bun.lock' \
@@ -68,24 +68,24 @@ if grep -RIEIl \
     --exclude='*.png' --exclude='*.jpg' --exclude='*.jpeg' --exclude='*.gif' \
     --exclude='*.wasm' --exclude='*.mp4' \
     'BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY|(^|[^A-Za-z0-9])sk-[A-Za-z0-9_-]{32,}|AIza[0-9A-Za-z_-]{30,}|gh[pousr]_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}' \
-    "$root" > "${TMPDIR:-/tmp}/beeftv-public-audit-secrets-$$" 2>/dev/null; then
+    "$root" > "${TMPDIR:-/tmp}/qisitv-public-audit-secrets-$$" 2>/dev/null; then
     while IFS= read -r path; do
         report_forbidden "possible secret: ${path#"$root"/}"
-    done < "${TMPDIR:-/tmp}/beeftv-public-audit-secrets-$$"
+    done < "${TMPDIR:-/tmp}/qisitv-public-audit-secrets-$$"
 fi
-rm -f "${TMPDIR:-/tmp}/beeftv-public-audit-secrets-$$"
+rm -f "${TMPDIR:-/tmp}/qisitv-public-audit-secrets-$$"
 
 if grep -RIEIl \
     --exclude-dir='.git' \
     --exclude='*.png' --exclude='*.jpg' --exclude='*.jpeg' --exclude='*.gif' \
     --exclude='*.wasm' --exclude='*.mp4' \
     '/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z0-9._-]+/' \
-    "$root" > "${TMPDIR:-/tmp}/beeftv-public-audit-paths-$$" 2>/dev/null; then
+    "$root" > "${TMPDIR:-/tmp}/qisitv-public-audit-paths-$$" 2>/dev/null; then
     while IFS= read -r path; do
         report_forbidden "absolute developer path: ${path#"$root"/}"
-    done < "${TMPDIR:-/tmp}/beeftv-public-audit-paths-$$"
+    done < "${TMPDIR:-/tmp}/qisitv-public-audit-paths-$$"
 fi
-rm -f "${TMPDIR:-/tmp}/beeftv-public-audit-paths-$$"
+rm -f "${TMPDIR:-/tmp}/qisitv-public-audit-paths-$$"
 
 if [ "$failed" -ne 0 ]; then
     exit 1

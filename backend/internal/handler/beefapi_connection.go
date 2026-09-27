@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"infinite-canvas/backend/internal/app"
-	"infinite-canvas/backend/internal/beefapi"
+	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/beefapi"
 
 	"github.com/gin-gonic/gin"
 )

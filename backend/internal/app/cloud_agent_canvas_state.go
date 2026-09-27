@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"infinite-canvas/backend/internal/canvas/capability"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/canvas/capability"
+	"qisitv/backend/internal/repository"
 )
 
 type cloudAgentStructuredProjector func(value any, offset int, precise bool) (any, error)

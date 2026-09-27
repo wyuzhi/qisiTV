@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createDemoConversation } from "../src/pages/create/creation-demo-data";
 
-describe("BeefTV creation conversation demo", () => {
+describe("qisiTV creation conversation demo", () => {
     test("contains a complete mocked planning-to-generation flow", () => {
         const conversation = createDemoConversation();
         expect(conversation.id).toBe("demo-conversation");

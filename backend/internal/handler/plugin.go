@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"infinite-canvas/backend/internal/app"
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/protocol"
+	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/protocol"
 
 	"github.com/gin-gonic/gin"
 )

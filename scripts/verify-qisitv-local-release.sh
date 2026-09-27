@@ -3,14 +3,14 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GO_DIR="${BEEFTV_GO_DIR:-/tmp/beeftv-go.rpIfVN/go}"
+GO_DIR="${QISITV_GO_DIR:-}"
 
 if ! command -v go >/dev/null 2>&1 && [[ -x "$GO_DIR/bin/go" ]]; then
   export PATH="$GO_DIR/bin:$PATH"
 fi
 
 if ! command -v go >/dev/null 2>&1; then
-  echo "Go is required for the local release gate (set BEEFTV_GO_DIR when using a bundled toolchain)" >&2
+  echo "Go is required for the local release gate (set QISITV_GO_DIR when using a bundled toolchain)" >&2
   exit 1
 fi
 
@@ -20,7 +20,7 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 echo "Checking local network audit syntax"
-node --check "$ROOT_DIR/web/scripts/beeftv-local-network-audit.mjs"
+node --check "$ROOT_DIR/web/scripts/qisitv-local-network-audit.mjs"
 
 echo "Checking desktop route isolation"
 (
@@ -43,7 +43,7 @@ echo "Checking local frontend contracts"
 )
 
 echo "Checking default release size budget"
-node "$ROOT_DIR/scripts/report-beeftv-release-size.mjs" "$ROOT_DIR/web/dist"
+node "$ROOT_DIR/scripts/report-qisitv-release-size.mjs" "$ROOT_DIR/web/dist"
 
 echo "Checking repository diff"
 git -C "$ROOT_DIR" diff --check
@@ -52,4 +52,4 @@ dependency_count="$(cd "$ROOT_DIR/backend" && go list -deps ./cmd/desktop | sort
 source_kib="$(du -sk "$ROOT_DIR/backend/internal" "$ROOT_DIR/web/src" | awk '{total += $1} END {print total}')"
 echo "Local metrics: go_dependencies=$dependency_count source_kib=$source_kib"
 
-echo "BeefTV local release gate passed"
+echo "qisiTV local release gate passed"

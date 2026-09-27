@@ -2,8 +2,8 @@ package handler
 
 import (
 	"github.com/gin-gonic/gin"
-	"infinite-canvas/backend/internal/app"
 	"net/http"
+	"qisitv/backend/internal/app"
 )
 
 func RegisterCreationRoutes(r *gin.RouterGroup, svc *app.Service) {

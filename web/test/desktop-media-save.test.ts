@@ -95,7 +95,7 @@ describe("native media save", () => {
         expect(readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-timeline-dialog.tsx"), "utf8")).toContain("saveAs(blob");
         const saveGo = readFileSync(resolve(import.meta.dir, "../../backend/internal/bootstrap/owned_media_save.go"), "utf8");
         expect(saveGo).toContain("os.Rename(tmpPath, dest)");
-        expect(saveGo).not.toContain(".beeftv-old");
+        expect(saveGo).not.toContain(".qisitv-old");
         expect(saveGo).toContain("32 << 20");
     });
 

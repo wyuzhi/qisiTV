@@ -3,8 +3,8 @@ package app
 import (
 	"time"
 
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 )
 
 const cloudAgentMutationSnapshotLimit = 1 << 20

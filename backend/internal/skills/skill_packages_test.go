@@ -5,9 +5,9 @@ import (
 	"bytes"
 	"testing"
 
-	"infinite-canvas/backend/internal/kernel"
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/kernel"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -61,14 +61,14 @@ func TestArchiveFromZipRejectsTraversalAndMultipleSkills(t *testing.T) {
 }
 
 func TestParseGitHubSkillURL(t *testing.T) {
-	spec, err := parseGitHubSkillURL("https://github.com/example/beeftv-skills/tree/main/skills/canvas-context", "", "")
+	spec, err := parseGitHubSkillURL("https://github.com/example/qisitv-skills/tree/main/skills/canvas-context", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if spec.Owner != "example" || spec.Repo != "beeftv-skills" || spec.Ref != "main" || spec.Subdir != "skills/canvas-context" {
+	if spec.Owner != "example" || spec.Repo != "qisitv-skills" || spec.Ref != "main" || spec.Subdir != "skills/canvas-context" {
 		t.Fatalf("spec = %#v", spec)
 	}
-	if _, err := parseGitHubSkillURL("https://github.com/example/beeftv-skills/blob/main/SKILL.md", "", ""); err == nil {
+	if _, err := parseGitHubSkillURL("https://github.com/example/qisitv-skills/blob/main/SKILL.md", "", ""); err == nil {
 		t.Fatal("expected blob URL to be rejected")
 	}
 }

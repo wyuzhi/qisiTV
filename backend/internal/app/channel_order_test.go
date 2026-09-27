@@ -1,7 +1,7 @@
 package app
 
 import (
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 	"testing"
 )
 

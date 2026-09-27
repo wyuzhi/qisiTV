@@ -9,7 +9,7 @@ let ffmpegPromise: Promise<FFmpegInstance> | null = null;
 
 // ffmpeg 只在用户明确合并视频时加载，避免把 wasm 和 worker 放进画布首屏包体。
 export async function loadFFmpeg(onProgress?: (progress: MergeVideoProgress) => void) {
-    if (!__BEEFTV_HEAVY_MEDIA_ENABLED__) {
+    if (!__QISITV_HEAVY_MEDIA_ENABLED__) {
         throw new Error("精简版未包含 FFmpeg 本地媒体工具；请安装完整媒体包或使用模型生成与原素材编排");
     }
     if (!ffmpegPromise) {

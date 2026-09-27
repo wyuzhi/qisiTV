@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 // EnrichAPICallLog extracts provider recovery identifiers, usage and failure

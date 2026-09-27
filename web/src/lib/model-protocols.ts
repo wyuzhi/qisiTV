@@ -98,7 +98,7 @@ export function defaultProtocolForModel(model: string, availableProtocols: Model
 }
 
 export function usesOpenAICompatibleProtocolDefault(apiFormat?: string) {
-    return apiFormat !== "gemini" && apiFormat !== "claude";
+    return apiFormat !== "gemini" && apiFormat !== "claude" && apiFormat !== "likeai";
 }
 
 type ChannelModelProfile = NonNullable<ModelChannel["modelProfiles"]>[number];

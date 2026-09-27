@@ -10,7 +10,7 @@ import (
 // extra_body：顶层 response_format 是官方明确列出的错误写法，output_format 会被
 // 直接拒绝，n 也不在参数表内。因此这里逐字段固定线协议，防止退回 OpenAI 兼容字段。
 func TestAgnesImageSendsOnlyDocumentedFields(t *testing.T) {
-	adapter := officialPackageAdapter(t, "agnes-image.beeftv-plugin", "agnes-image")
+	adapter := officialPackageAdapter(t, "agnes-image.qisitv-plugin", "agnes-image")
 	if adapter.Metadata().RequiresPublicMediaURLs {
 		t.Fatal("Agnes 图像支持 Data URI 参考图，不应强制要求公共媒体 URL")
 	}
@@ -59,7 +59,7 @@ func TestAgnesImageSendsOnlyDocumentedFields(t *testing.T) {
 }
 
 func TestAgnesImagePutsReferencesInExtraBody(t *testing.T) {
-	adapter := officialPackageAdapter(t, "agnes-image.beeftv-plugin", "agnes-image")
+	adapter := officialPackageAdapter(t, "agnes-image.qisitv-plugin", "agnes-image")
 	create, err := adapter.BuildCreate(context.Background(), RequestContext{Request: GenerationRequest{
 		Model: "agnes-image-2.1-flash", Prompt: "换装并保留原始构图", AspectRatio: "3:4", Quality: "1k",
 		Images: []MediaReference{
@@ -93,7 +93,7 @@ func TestAgnesImagePutsReferencesInExtraBody(t *testing.T) {
 }
 
 func TestAgnesImageSizeFollowsPixelOrTier(t *testing.T) {
-	adapter := officialPackageAdapter(t, "agnes-image.beeftv-plugin", "agnes-image")
+	adapter := officialPackageAdapter(t, "agnes-image.qisitv-plugin", "agnes-image")
 	tests := []struct {
 		name        string
 		aspectRatio string
@@ -133,7 +133,7 @@ func TestAgnesImageSizeFollowsPixelOrTier(t *testing.T) {
 }
 
 func TestAgnesImageRejectsUnsupportedRatio(t *testing.T) {
-	adapter := officialPackageAdapter(t, "agnes-image.beeftv-plugin", "agnes-image")
+	adapter := officialPackageAdapter(t, "agnes-image.qisitv-plugin", "agnes-image")
 	// 9:21 / 4:5 等比例不在官方比例表内，静默回落到 1:1 会让用户拿到与选择不符的画幅。
 	if _, err := adapter.BuildCreate(context.Background(), RequestContext{Request: GenerationRequest{
 		Model: "agnes-image-2.1-flash", Prompt: "x", AspectRatio: "9:21",
@@ -143,7 +143,7 @@ func TestAgnesImageRejectsUnsupportedRatio(t *testing.T) {
 }
 
 func TestAgnesImageReadsUrlAndBase64Output(t *testing.T) {
-	adapter := officialPackageAdapter(t, "agnes-image.beeftv-plugin", "agnes-image")
+	adapter := officialPackageAdapter(t, "agnes-image.qisitv-plugin", "agnes-image")
 	result, err := adapter.ParseCreate(context.Background(), []byte(`{"created":1780000000,"data":[{"url":"https://storage.googleapis.com/agnes-aigc/x.png","b64_json":null}]}`))
 	if err != nil {
 		t.Fatal(err)

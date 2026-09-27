@@ -25,7 +25,7 @@ let requestSequence = 0;
 const pendingRequests = new Map<number, PendingRequest>();
 
 export async function detectCanvasFaces(dataUrl: string, signal?: AbortSignal): Promise<CanvasFaceDetectionResult> {
-    if (!__BEEFTV_HEAVY_MEDIA_ENABLED__) {
+    if (!__QISITV_HEAVY_MEDIA_ENABLED__) {
         throw new Error("精简版未包含自动人脸识别，请改用手动框选，或安装完整媒体包");
     }
     if (signal?.aborted) throw new DOMException("人脸识别已取消", "AbortError");

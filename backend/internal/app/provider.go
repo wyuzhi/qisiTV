@@ -9,16 +9,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"infinite-canvas/backend/internal/kernel"
 	"io"
 	"net/http"
+	"qisitv/backend/internal/kernel"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 
 	"gorm.io/gorm"
 )
@@ -439,6 +439,9 @@ func (s *Service) processCanvasGenerationTask(ctx context.Context, userID string
 		if err := s.prepareArkPrivateAssetReferences(ctx, userID, &input); err != nil {
 			return nil, err
 		}
+		if err := prepareLikeAIReferences(ctx, &input); err != nil {
+			return nil, err
+		}
 	}
 	if input.Mode == "video" && input.VideoCapability != nil {
 		if err := validateVideoTask(input.VideoCapability, input); err != nil {
@@ -476,6 +479,9 @@ type providerMediaHydrationPolicy struct {
 }
 
 func providerMediaHydrationPolicyFor(ctx context.Context, input canvasGenerationInput) providerMediaHydrationPolicy {
+	if isLikeAIProtocol(input.Config.InterfaceType) {
+		return providerMediaHydrationPolicy{preferURL: true}
+	}
 	policy := providerMediaHydrationPolicy{preferURL: providerPrefersMediaURLs(input.Config.InterfaceType, input)}
 	// BeefAPI Enterprise's Seedance /videos contract accepts self-contained
 	// media values inside its provider-specific content items. Desktop resources

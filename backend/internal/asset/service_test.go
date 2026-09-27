@@ -4,7 +4,7 @@ import (
 	"mime/multipart"
 	"testing"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 type fakeBackend struct{ resources []model.Resource }

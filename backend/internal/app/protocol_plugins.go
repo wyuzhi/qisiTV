@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"infinite-canvas/backend/internal/generation"
-	"infinite-canvas/backend/internal/protocol"
+	"qisitv/backend/internal/generation"
+	"qisitv/backend/internal/protocol"
 )
 
 const protocolPluginMaxBytes = protocol.PluginManifestMaxBytes
@@ -159,7 +159,7 @@ func (c *pluginRuntime) bootstrapBuiltInPlugins() error {
 	}
 	builtInIDs := make(map[string]struct{}, len(entries)+2)
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), protocol.PluginPackageExtension) {
+		if entry.IsDir() || !protocol.IsPluginPackageName(entry.Name()) {
 			continue
 		}
 		packageData, err := os.ReadFile(filepath.Join(officialDir, entry.Name()))
@@ -485,7 +485,7 @@ func pluginManifestView(raw []byte, metadata protocol.Metadata, source string) P
 		manifest.Metadata = metadata
 	}
 	return PluginManifestView{
-		ID: metadata.ID, Name: metadata.Name, Version: metadata.Version, APIVersion: "beeftv.plugin/v1", Entry: manifest.Entry, Surfaces: manifest.Surfaces,
+		ID: metadata.ID, Name: metadata.Name, Version: metadata.Version, APIVersion: "qisitv.plugin/v1", Entry: manifest.Entry, Surfaces: manifest.Surfaces,
 		Description: metadata.Description, Documentation: metadata.Documentation, Author: metadata.Vendor,
 		Permissions: manifest.Permissions, Trusted: isBuiltInPluginSource(source), Runtime: manifest.Runtime,
 		Configuration: manifest.Configuration, Contributes: manifest.Contributes,

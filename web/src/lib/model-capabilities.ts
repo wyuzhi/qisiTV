@@ -283,12 +283,20 @@ export function defaultImageCapabilityConfig(protocol?: ModelProtocol, model = "
         image.outputFormat = { supported: false };
         image.maxOutputs = 1;
     }
+    if (protocol === "likeai-image") {
+        image.references.maskSupported = false;
+        image.size = { parameter: "aspect_ratio", values: ["1:1", "16:9", "9:16", "4:3", "3:4", "21:9"], default: "1:1", allowCustom: true };
+        image.quality = { supported: true, values: ["1080p", "1440p", "2160p"], default: ["doubao_seedream_4_5", "doubao_seedream_5_lite", "doubao_seedream_5_pro"].includes(model) ? "1440p" : "1080p" };
+        if (model === "doubao_seedream_5_pro") image.quality.values = ["720p", "1080p", "1440p"];
+        image.transparentBackground.supported = image.responseFormat.supported = image.outputFormat.supported = false;
+        image.maxOutputs = 1;
+    }
     return image;
 }
 
 export function defaultModelCapabilityConfig(protocol?: ModelProtocol, model = ""): ModelCapabilityConfig {
     const text: TextCapabilityConfig = {
-        streaming: true,
+        streaming: protocol !== "likeai-text",
         // 文本模型的视觉能力必须由管理员明确开启，不能根据模型名猜测。
         references: { promptMaxChars: 32000, maxImages: 0, maxImageBytes: 0, maxVideos: 0, maxVideoBytes: 0 },
     };
@@ -318,6 +326,26 @@ export function defaultModelCapabilityConfig(protocol?: ModelProtocol, model = "
     if (protocol === "volcengine-jimeng-video") {
         video.duration = { selection: "enum", values: [5, 10], default: 5 };
         video.resolutions = ["720p"];
+    }
+    if (protocol === "likeai-video") {
+        video.duration = { selection: "range", min: 1, max: 30, step: 1, default: 5 };
+        video.resolutions = ["480p", "540p", "720p", "1080p"];
+        video.generateAudio = { supported: true, default: true };
+        video.ratios.unshift("adaptive");
+        video.operations.push("reference_to_video", "audio_to_video");
+        Object.assign(video.references, { maxVideos: 10, maxAudios: 10, maxVideoBytes: 200 * 1024 * 1024, maxAudioBytes: 15 * 1024 * 1024, maxVideoDurationSeconds: 30, maxAudioDurationSeconds: 30 });
+        if (model === "doubao_seedance_2_5") {
+            video.references.maxImages = 30;
+            video.duration = { selection: "enum", values: [-1, ...Array.from({ length: 27 }, (_, index) => index + 4)], default: 5 };
+            video.resolutions = ["480p", "720p"];
+            video.defaultRatio = "adaptive";
+        }
+        if (model === "tongyi_wan_video_3_prime" || model === "wan_video_3_prime") {
+            Object.assign(video.references, { maxImages: 10, maxVideos: 5, maxAudios: 5, maxVideoDurationSeconds: 15, maxAudioDurationSeconds: 15 });
+            video.duration = { selection: "enum", values: [-1, ...Array.from({ length: 29 }, (_, index) => index + 2)], default: 5 };
+            video.resolutions = ["480p", "720p", "1080p"];
+            video.defaultRatio = "adaptive";
+        }
     }
     if (protocol === "gemini-veo") {
         video.duration = { selection: "enum", values: [4, 6, 8], default: 6 };

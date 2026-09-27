@@ -3,13 +3,13 @@
 set -Eeuo pipefail
 
 REPOSITORY_REF="${REPOSITORY_REF:-main}"
-INSTALL_DIR="${INSTALL_DIR:-/opt/beeftv}"
+INSTALL_DIR="${INSTALL_DIR:-/opt/qisitv}"
 CANVAS_HTTP_PORT="${CANVAS_HTTP_PORT:-3000}"
 REQUESTED_IMAGE_TAG="${CANVAS_IMAGE_TAG:-}"
 CANVAS_IMAGE_TAG="${REQUESTED_IMAGE_TAG:-latest}"
 CANVAS_IMAGE_TAG="${CANVAS_IMAGE_TAG#v}"
 COMPOSE_FILE="docker-compose.deploy.yml"
-COMPOSE_URL="${COMPOSE_URL:-https://raw.githubusercontent.com/glanderness/BeefTV/${REPOSITORY_REF}/${COMPOSE_FILE}}"
+COMPOSE_URL="${COMPOSE_URL:-}"
 
 step() {
     printf '\n==> %s\n' "$1"
@@ -21,6 +21,7 @@ fail() {
 }
 
 require_root() {
+    [[ -n "$COMPOSE_URL" ]] || fail "请显式设置 qisiTV 发布方的 COMPOSE_URL；本项目尚未配置公共镜像部署源"
     if [[ "${EUID}" -ne 0 ]]; then
         fail "请使用 README 中带 sudo 的一键安装命令"
     fi

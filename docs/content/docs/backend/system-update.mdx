@@ -34,7 +34,7 @@ description: 容器镜像更新、数据库备份迁移、健康验证与异常�
 正式部署应把 `CANVAS_IMAGE_TAG` 固定到具体 Release，不使用 `latest`。更新前先备份，再拉取并重建服务：
 
 ```bash
-cd /opt/beeftv
+cd /opt/qisitv
 sudo docker compose --env-file .env -f docker-compose.deploy.yml pull
 sudo docker compose --env-file .env -f docker-compose.deploy.yml up -d --force-recreate backend web --wait
 ```
@@ -46,8 +46,8 @@ sudo docker compose --env-file .env -f docker-compose.deploy.yml up -d --force-r
 ```bash
 sudo docker compose --env-file .env -f docker-compose.deploy.yml ps
 sudo docker compose --env-file .env -f docker-compose.deploy.yml logs --tail=200 backend web
-sudo ls -lh /opt/beeftv/backups
-sudo sha256sum /opt/beeftv/backups/*.zip
+sudo ls -lh /opt/qisitv/backups
+sudo sha256sum /opt/qisitv/backups/*.zip
 ```
 
 备份文件包含业务数据，应限制为 root 访问并纳入异机备份策略。数据卷本身不是备份。

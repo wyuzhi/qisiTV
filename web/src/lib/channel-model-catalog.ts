@@ -74,6 +74,9 @@ export function catalogModelMapping(
         .trim()
         .toLowerCase();
     const endpoints = (item.supportedEndpointTypes || []).map((value) => value.trim().toLowerCase()).filter(Boolean);
+    if (["text", "image", "video", "audio"].includes(modelType) && endpoints.includes(`likeai-${modelType}`)) {
+        return { capability: modelType as ChannelModelProfile["capability"], protocol: `likeai-${modelType}` };
+    }
     if (endpoints.some((endpoint) => endpoint === "audio.transcriptions" || endpoint === "audio-transcriptions" || endpoint === "transcriptions")) {
         return { skipGeneration: true };
     }
@@ -180,6 +183,8 @@ function hasCatalogCapabilityConfig(item: ChannelModelCatalogItem) {
 
 function catalogCapabilityConfig(item: ChannelModelCatalogItem, protocol: ModelProtocol | undefined, capability: "image" | "video", existing: ModelCapabilityConfig | undefined, isNew: boolean): ModelCapabilityConfig {
     const fallback = defaultModelCapabilityConfig(protocol, item.id);
+    // LikeAI's directory declares model kind only; do not mistake generic defaults for an exhaustive schema.
+    if (protocol?.startsWith("likeai-")) return structuredClone(existing || fallback);
     const existingProfile = capability === "image" ? existing?.image : existing?.video;
     const config = structuredClone(existingProfile ? existing! : fallback);
     if (capability === "image") {

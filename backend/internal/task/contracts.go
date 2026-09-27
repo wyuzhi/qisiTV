@@ -3,7 +3,7 @@ package task
 import (
 	"time"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 // CreateRequest is the transport-neutral command accepted by the local task
@@ -60,6 +60,7 @@ type Summary struct {
 }
 
 type ClientContext struct {
+	ExternalAgent    bool   `json:"externalAgent,omitempty"`
 	NodeID           string `json:"nodeId,omitempty"`
 	ConversationID   string `json:"conversationId,omitempty"`
 	MessageID        string `json:"messageId,omitempty"`

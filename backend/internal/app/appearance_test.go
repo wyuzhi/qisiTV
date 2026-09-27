@@ -14,9 +14,9 @@ import (
 	"strings"
 	"testing"
 
-	"infinite-canvas/backend/internal/database"
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/database"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -47,6 +47,21 @@ func TestAppearanceDefaultsPreserveBuiltInBrand(t *testing.T) {
 	}
 	if len(adminAppearance.SkinThemes) != 4 || !adminAppearance.SkinThemes[0].Locked {
 		t.Fatalf("AdminAppearance() skin library = %#v", adminAppearance.SkinThemes)
+	}
+}
+
+func TestPreRenameDefaultAppearanceUsesQisiTV(t *testing.T) {
+	svc, db, _, _ := newAppearanceTestService(t)
+	legacy := model.SystemSetting{Key: appearanceSettingKey, ValueJSON: `{"schemaVersion":7,"brandName":"BeefTV","brandSlug":"beeftv","seoTitle":"BeefTV","footerCopyright":"© BeefTV"}`}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatal(err)
+	}
+	appearance, err := svc.Appearance()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if appearance.BrandName != "qisiTV" || appearance.BrandSlug != "qisitv" || appearance.SEOTitle != "qisiTV" || appearance.FooterCopyright != "© qisiTV" {
+		t.Fatalf("old default identity leaked: %#v", appearance)
 	}
 }
 

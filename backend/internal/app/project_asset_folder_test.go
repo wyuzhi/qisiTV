@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 func TestValidateProjectAssetFolderParentRejectsCycle(t *testing.T) {

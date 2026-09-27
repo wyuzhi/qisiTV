@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 // WorkflowField 是云端工作流字段描述。Value 与 FieldValue 兼容来源项目

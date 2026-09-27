@@ -57,7 +57,7 @@ describe("project card actions", () => {
         expect(canvasCard).toContain("<LibraryCardShell");
         expect(canvasCard).toContain('label: "创建副本"');
         expect(canvasCard).toContain('label: "修改封面"');
-        expect(canvasCard).toContain("beeftv-project-cover:");
+        expect(canvasCard).toContain("qisitv-project-cover:");
         expect(canvasCard).toContain('toDataURL("image/jpeg", 0.84)');
         expect(canvasCard).toContain("onDuplicate");
         expect(canvasCard).not.toContain("summarizePreviewNodeTypes");

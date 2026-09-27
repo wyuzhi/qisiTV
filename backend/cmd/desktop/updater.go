@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"infinite-canvas/backend/internal/buildinfo"
-	"infinite-canvas/backend/internal/desktopupdate"
+	"qisitv/backend/internal/buildinfo"
+	"qisitv/backend/internal/desktopupdate"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )

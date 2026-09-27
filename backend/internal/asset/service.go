@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 type Backend interface {

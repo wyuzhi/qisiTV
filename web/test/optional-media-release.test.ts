@@ -8,5 +8,5 @@ const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.me
 test("explicit slim release preserves clear optional-media degradation", () => {
     expect(videoMerge).toContain("精简版未包含 FFmpeg");
     expect(faceDetection).toContain("精简版未包含自动人脸识别");
-    expect(packageJson.scripts["build:slim"]).toContain("BEEFTV_FULL_MEDIA_RESOURCES=0");
+    expect(packageJson.scripts["build:slim"]).toContain("QISITV_FULL_MEDIA_RESOURCES=0");
 });

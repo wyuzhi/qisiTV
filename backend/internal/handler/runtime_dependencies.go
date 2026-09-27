@@ -5,12 +5,12 @@ import (
 	"mime/multipart"
 	"time"
 
-	"infinite-canvas/backend/internal/app"
-	"infinite-canvas/backend/internal/beefapi"
-	"infinite-canvas/backend/internal/localapp"
-	"infinite-canvas/backend/internal/model"
-	localtask "infinite-canvas/backend/internal/task"
-	"infinite-canvas/backend/internal/workspace"
+	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/localapp"
+	"qisitv/backend/internal/model"
+	localtask "qisitv/backend/internal/task"
+	"qisitv/backend/internal/workspace"
 
 	"github.com/gin-gonic/gin"
 )

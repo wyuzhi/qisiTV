@@ -1,0 +1,23 @@
+// Package canvascontract shares transport-neutral editable field definitions
+// between the canvas service and discoverable Agent tool schemas.
+package canvascontract
+
+// Models apply their own modality limits beneath this transport safety cap.
+const MaxGenerationReferenceNodes = 50
+
+const MetadataFields = `
+content storageKey assetId mimeType bytes naturalWidth naturalHeight durationMs hasAudio nodeRole resultOrigin generatedFromNodeId
+prompt composerContent negativePrompt status error errorDetails model provider modelId modelName mediaRole role resourceKind sourceType
+sourceNodeId sourceNodeIds referenceNodeIds referenceAssetNodeIds videoStartFrameNodeId videoEndFrameNodeId videoFrameSourceNodeId videoMergeSourceNodeIds videoSegmentSourceNodeId videoTrimSourceNodeId videoCropSourceNodeId videoRetakeSourceNodeId
+taskId taskStatus taskProgress taskStage taskProvider taskCreatedAt taskUpdatedAt taskCompletedAt taskStartedAt taskDurationMs taskErrorCode taskClientOperationId generationEffectKeys externalAgent
+thumbnail previewUrl aspectRatio resolution duration size count seed fontSize color backgroundColor label frame storyboard batchTable assetTags tags description workflowKind
+characterViewNodeIds characterName characterPrompt characterAssetId characterVersionId characterIds characterView imageRole mediaKind outputKind
+generationMode generationType quality transparentBackground seconds vquality generateAudio watermark audioVoice audioFormat audioSpeed audioPitch audioVolume audioInstructions
+freeResize locked isBatchRoot batchRootId batchChildIds batchFailedCount batchUsesReferenceImages primaryImageId imageBatchExpanded
+stylePresetId styleProfileJson workflowTitle workflowDescription assetCategory
+`
+
+const MetadataNumbers = "bytes naturalWidth naturalHeight durationMs taskProgress taskDurationMs duration count seed fontSize batchFailedCount"
+const MetadataBooleans = "hasAudio freeResize locked isBatchRoot batchUsesReferenceImages imageBatchExpanded externalAgent"
+const MetadataLists = "sourceNodeIds referenceNodeIds referenceAssetNodeIds videoMergeSourceNodeIds generationEffectKeys assetTags tags characterIds batchChildIds"
+const MetadataObjects = "frame storyboard batchTable characterViewNodeIds"

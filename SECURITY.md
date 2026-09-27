@@ -6,9 +6,9 @@
 
 ## 报告漏洞
 
-请不要通过公开 Issue 披露尚未修复的漏洞。优先使用 GitHub 仓库的
-[Private vulnerability reporting](https://github.com/glanderness/BeefTV/security/advisories/new)，
-或发送邮件至 `2667983673@qq.com`。
+请不要通过公开 Issue 披露尚未修复的漏洞。请联系当前 qisiTV 发行版维护者，或使用当前仓库启用的 Private vulnerability reporting。
+
+若问题能够在未修改的上游版本复现，可向 [BeefTV 上游提交私密安全报告](https://github.com/glanderness/BeefTV/security/advisories/new)。上游维护者不负责本分支新增的功能。
 
 报告中请包含受影响版本、复现步骤、影响范围和可行的缓解建议。请勿访问、下载或修改不属于你的数据，也不要对公开实例进行持续压测。
 

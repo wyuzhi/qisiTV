@@ -1,8 +1,8 @@
 package app
 
 import (
-	"infinite-canvas/backend/internal/model"
-	localtask "infinite-canvas/backend/internal/task"
+	"qisitv/backend/internal/model"
+	localtask "qisitv/backend/internal/task"
 )
 
 // CreateLocalTask adapts the stable local task command to the richer internal

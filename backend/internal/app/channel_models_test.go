@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 func mustEncodeModelCapabilityConfig(t *testing.T, config *ModelCapabilityConfig) string {

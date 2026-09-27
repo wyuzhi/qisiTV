@@ -9,7 +9,7 @@ func TestInProcessSessionInitializeListAndCall(t *testing.T) {
 	session := NewSession()
 	calls := 0
 	session.Register(Tool{
-		Name: "beeftv_list_models", Description: "list models",
+		Name: "qisitv_list_models", Description: "list models",
 		InputSchema: map[string]any{"type": "object"},
 		Handle: func(arguments json.RawMessage) (any, error) {
 			calls++
@@ -23,10 +23,10 @@ func TestInProcessSessionInitializeListAndCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools) != 1 || tools[0]["name"] != "beeftv_list_models" {
+	if len(tools) != 1 || tools[0]["name"] != "qisitv_list_models" {
 		t.Fatalf("tools = %#v", tools)
 	}
-	result, err := session.CallTool("beeftv_list_models", map[string]any{})
+	result, err := session.CallTool("qisitv_list_models", map[string]any{})
 	if err != nil || result.IsError || calls != 1 {
 		t.Fatalf("call = %#v err=%v calls=%d", result, err, calls)
 	}
@@ -37,8 +37,8 @@ func TestInProcessSessionInitializeListAndCall(t *testing.T) {
 
 func TestToolsCallRequiresInitialize(t *testing.T) {
 	session := NewSession()
-	session.Register(Tool{Name: "beeftv_get_task", InputSchema: map[string]any{"type": "object"}, Handle: func(json.RawMessage) (any, error) { return map[string]any{}, nil }})
-	if _, err := session.CallTool("beeftv_get_task", map[string]any{"taskId": "x"}); err == nil {
+	session.Register(Tool{Name: "qisitv_get_task", InputSchema: map[string]any{"type": "object"}, Handle: func(json.RawMessage) (any, error) { return map[string]any{}, nil }})
+	if _, err := session.CallTool("qisitv_get_task", map[string]any{"taskId": "x"}); err == nil {
 		t.Fatal("uninitialized session must fail")
 	}
 }

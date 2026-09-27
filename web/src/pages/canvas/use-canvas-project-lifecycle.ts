@@ -271,6 +271,10 @@ export function useCanvasProjectLifecycle({
         connectionsRef.current = merged.connections;
         setNodes(merged.nodes);
         setConnections(merged.connections);
+        if (previous && JSON.stringify(previous.viewport) !== JSON.stringify(project.viewport) && JSON.stringify(viewportRef.current) === JSON.stringify(previous.viewport)) {
+            viewportRef.current = project.viewport;
+            setViewport(project.viewport);
+        }
         const previousIds = new Set(previous?.nodes.map((node) => node.id));
         const created = project.nodes.filter((node) => !previousIds.has(node.id));
         if (created.length) setAgentCreatedNodes({ projectId: project.id, nodes: created });
@@ -295,6 +299,7 @@ export function useCanvasProjectLifecycle({
         viewportSaveTimerRef.current = setTimeout(() => {
             if (editorProjectIdRef.current !== projectId) return;
             updateProject(projectId, { viewport: viewportRef.current });
+            if (localMode) scheduleLocalCanvasBackendSync(projectId);
             viewportSaveTimerRef.current = null;
         }, 500);
         return () => {
@@ -348,7 +353,10 @@ export function useCanvasProjectLifecycle({
     const renameCurrentProject = useCallback((title: string) => {
         if (!currentProject) return;
         renameProject(canvasWorkspaceProjectId(currentProject), title);
-    }, [currentProject, renameProject]);
+        for (const canvas of listCanvasWorkspaceProjectCanvases(useCanvasStore.getState().projects, projectId)) {
+            scheduleLocalCanvasBackendSync(canvas.id);
+        }
+    }, [currentProject, projectId, renameProject]);
 
     const persistLocalEdits = useCallback(async () => {
         if (!projectLoaded || editorProjectIdRef.current !== projectId) return;

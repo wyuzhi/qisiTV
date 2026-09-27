@@ -1,6 +1,6 @@
 # 本地优先架构
 
-BeefTV 的桌面构建是一个单用户、本地优先工作区。桌面端只启动一个 Wails 进程：Wails 承载前端，Go runtime 提供 loopback API 和 SQLite/本地资源目录。
+qisiTV 的桌面构建是一个单用户、本地优先工作区。桌面端只启动一个 Wails 进程：Wails 承载前端，Go runtime 提供 loopback API 和 SQLite/本地资源目录。
 
 ## 运行边界
 
@@ -50,8 +50,8 @@ Wails
 ## 验证
 
 ```bash
-BEEFTV_GO_DIR=/path/to/go ./scripts/verify-beeftv-local-release.sh
-BEEFTV_GO_DIR=/path/to/go ./scripts/build-beeftv-release.sh
+QISITV_GO_DIR=/path/to/go ./scripts/verify-qisitv-local-release.sh
+QISITV_GO_DIR=/path/to/go ./scripts/build-qisitv-release.sh
 ```
 
-浏览器验收脚本位于 `web/scripts/beeftv-local-*-audit.mjs`，覆盖路由网络边界、素材上传、刷新/重启恢复、Agent 启动和模型配置。
+浏览器验收脚本位于 `web/scripts/qisitv-local-*-audit.mjs`，覆盖路由网络边界、素材上传、刷新/重启恢复、Agent 启动和模型配置。

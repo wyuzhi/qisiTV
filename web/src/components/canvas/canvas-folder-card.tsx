@@ -9,6 +9,7 @@ import type { CanvasLibrarySummary } from "@/services/api/workspace-data";
 import { hasRemoteUserDataSyncSession, loadCanvasProjectForEditing, saveRemoteUserDataNow } from "@/services/local-workspace-sync";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 import { cn } from "@/lib/utils";
+import { readProjectCover } from "@/lib/canvas/project-cover-storage";
 
 type CanvasFolderCardProps = {
     project: CanvasLibrarySummary;
@@ -40,7 +41,7 @@ export function CanvasFolderCard({ project, projectName, folders = [], onMoveToF
     const [coverUrl, setCoverUrl] = useState<string>();
 
     useEffect(() => {
-        try { setCoverUrl(localStorage.getItem(`beeftv-project-cover:${project.id}`) || undefined); } catch { /* private browsing */ }
+        try { setCoverUrl(readProjectCover(localStorage, project.id)); } catch { /* private browsing */ }
     }, [project.id]);
 
     const changeCover = (event: ChangeEvent<HTMLInputElement>) => {
@@ -60,7 +61,7 @@ export function CanvasFolderCard({ project, projectName, folders = [], onMoveToF
                 canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
                 const dataUrl = canvas.toDataURL("image/jpeg", 0.84);
                 setCoverUrl(dataUrl);
-                try { localStorage.setItem(`beeftv-project-cover:${project.id}`, dataUrl); } catch { /* quota */ }
+                try { localStorage.setItem(`qisitv-project-cover:${project.id}`, dataUrl); } catch { /* quota */ }
                 message.success("项目封面已更新");
             };
             image.src = String(reader.result);

@@ -1,16 +1,14 @@
 import { applyAgentCanvasPatch, type AgentCanvasPatch } from "@/lib/canvas/agent-canvas-patch";
 import { rebindInconsistentCanvasAssets, type CanvasAssetRebindResult } from "@/services/canvas-asset-repair";
-import { createLocalCanvasProject, deleteLocalCanvasProjects, openLocalCanvasProject, openLocalCanvasProjectFromBackend } from "@/services/local-workspace-repository";
+import { createLocalCanvasProject, deleteLocalCanvasProjects, openLocalCanvasProject, openLocalCanvasProjectFromBackend, refreshLocalCanvasProjectIfChanged, syncLocalCanvasProjectToBackend } from "@/services/local-workspace-repository";
 import { flushAssetStorePersistence, useAssetStore, type Asset } from "@/stores/use-asset-store";
 import { flushCanvasStorePersistence, useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
-import { http } from "@/services/api/request";
-
-type CanvasSaveSummary = Pick<CanvasProject, "id" | "title" | "createdAt" | "updatedAt" | "revision">;
+import { publishCanvasRefresh } from "@/services/canvas-workspace-events";
+export { subscribeAgentCanvasRefresh } from "@/services/canvas-workspace-events";
 
 export { isLocalWorkspaceMode } from "@/services/workspace-mode";
 
 let operationTail: Promise<void> = Promise.resolve();
-const agentCanvasListeners = new Set<(project: CanvasProject, previous: CanvasProject | undefined) => void>();
 
 /**
  * Backward-compatible local persistence facade.
@@ -38,12 +36,8 @@ export async function loadCanvasProjectForEditing(
     return project || undefined;
 }
 
-export function subscribeAgentCanvasRefresh(listener: (project: CanvasProject, previous: CanvasProject | undefined) => void) {
-    agentCanvasListeners.add(listener);
-    return () => { agentCanvasListeners.delete(listener); };
-}
-
 export async function refreshCanvasAfterAgent(id: string) {
+    await refreshLocalCanvasProjectIfChanged(id);
     const project = openLocalCanvasProject(id);
     if (!project) throw new Error("本地画布不存在");
     return project;
@@ -55,8 +49,8 @@ export async function refreshCanvasAfterAgent(id: string) {
 export async function syncLocalCanvasForAgent(id: string) {
     const project = openLocalCanvasProject(id);
     if (!project) throw new Error("本地画布不存在");
-    await http.put(`/canvas-projects/${encodeURIComponent(id)}`, { project });
-    return project;
+    await syncLocalCanvasProjectToBackend(id);
+    return openLocalCanvasProject(id)!;
 }
 
 /**
@@ -69,11 +63,9 @@ export async function syncLocalCanvasForAgent(id: string) {
 export async function syncLocalCanvasSnapshotForAgent(id: string, patch: Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "appearance" | "backgroundMode" | "showImageInfo" | "viewport">>) {
     const current = openLocalCanvasProject(id);
     if (!current) throw new Error("本地画布不存在");
-    const project = { ...current, ...patch };
-    const response = await http.put<{ project: CanvasSaveSummary }>(`/canvas-projects/${encodeURIComponent(id)}`, { project });
-    const saved = { ...project, revision: response.project?.revision ?? project.revision, updatedAt: response.project?.updatedAt ?? project.updatedAt };
-    useCanvasStore.setState((state) => ({ projects: state.projects.map((item) => item.id === id ? saved : item) }));
-    return saved;
+    useCanvasStore.getState().updateProject(id, patch);
+    await syncLocalCanvasProjectToBackend(id);
+    return openLocalCanvasProject(id)!;
 }
 
 export async function applyAgentCanvasPatches(id: string, patches: AgentCanvasPatch[]) {
@@ -83,7 +75,7 @@ export async function applyAgentCanvasPatches(id: string, patches: AgentCanvasPa
         let projected = current;
         for (const patch of patches) projected = applyAgentCanvasPatch(projected, patch);
         if (projected === current) return current;
-        for (const listener of agentCanvasListeners) listener(projected, current);
+        publishCanvasRefresh(projected, current);
         useCanvasStore.setState((state) => ({ projects: state.projects.map((project) => project.id === id ? projected : project) }));
         await flushCanvasStorePersistence();
         return projected;

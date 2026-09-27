@@ -17,7 +17,7 @@ export default function HomePage() {
     const localHydrated = useCanvasStore((state) => state.hydrated);
     const localMode = isLocalWorkspaceMode() || storageMode === "local";
     const query = useQuery({
-        queryKey: ["beeftv-home-canvases", userId],
+        queryKey: ["qisitv-home-canvases", userId],
         queryFn: () => listWorkspaceCanvasProjectsPage({ page: 1, pageSize: 4, sort: "updated" }),
         enabled: !localMode && Boolean(userId) && sessionHydrated,
     });

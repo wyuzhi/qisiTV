@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 type ChannelModelsRequest struct {
@@ -121,6 +121,9 @@ func (s *Service) FetchChannelModelCatalog(ctx context.Context, actor *model.Use
 	apiFormat := strings.ToLower(strings.TrimSpace(input.APIFormat))
 	if apiFormat == "" {
 		apiFormat = "openai"
+	}
+	if apiFormat == "likeai" {
+		return fetchLikeAIModelCatalog(ctx, input)
 	}
 	if apiFormat != "openai" && apiFormat != "gemini" {
 		return nil, BadAuthRequest("接口协议不支持拉取模型")

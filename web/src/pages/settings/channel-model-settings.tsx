@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { App, Button, Segmented, Tag } from "antd";
+import { App, Button, Input, Segmented, Tag } from "antd";
 import { ChevronRight, FlaskConical, Settings2 } from "lucide-react";
 
 import { ModelEditorModal } from "@/components/model-editor-modal";
@@ -178,12 +178,28 @@ export function ChannelModelSettings({ channel, onChange }: { channel: ModelChan
                                     onChange={(capabilityConfig) => updateProfile(activeModel, { capabilityConfig })}
                                 />
                             ) : <p className="text-xs text-foreground/50">当前模型类型无需额外配置引用与参数。</p>}
+                            {activeProtocol.startsWith("likeai-") && <LikeAIOptions key={activeModel} value={activeModelProfile?.defaultOptions} onChange={(defaultOptions) => updateProfile(activeModel, { defaultOptions })} />}
                         </div>,
                     },
                 ] : []}
             />
         </div>
     );
+}
+
+function LikeAIOptions({ value, onChange }: { value?: Record<string, unknown>; onChange: (value: Record<string, unknown>) => void }) {
+    const [draft, setDraft] = useState(JSON.stringify(value || {}, null, 2));
+    const [error, setError] = useState("");
+    return <section className="mt-4 space-y-2">
+        <div className="text-xs font-medium">LikeAI 模型扩展参数</div>
+        <p className="text-xs text-foreground/50">模型目录不含参数范围。请按该模型文档调整上方能力；额外参数填写 JSON，例如 {`{"kwargs":{"web_search":true}}`}。顶层特殊字段放在 body 对象中。</p>
+        <Input.TextArea aria-label="LikeAI 模型扩展参数 JSON" value={draft} rows={6} status={error ? "error" : undefined} onChange={(event) => setDraft(event.target.value)} onBlur={() => {
+            try { const parsed: unknown = JSON.parse(draft || "{}"); if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("请填写 JSON 对象"); onChange(parsed as Record<string, unknown>); setError(""); }
+            catch (error) { setError(error instanceof Error ? error.message : "JSON 无效"); }
+        }} />
+        {error && <p role="alert" className="text-xs text-red-500">{error}；当前修改尚未保存。</p>}
+        <a className="text-xs" href="https://task.likeai.pro/docs" target="_blank" rel="noreferrer">查看 LikeAI 模型文档</a>
+    </section>;
 }
 
 function capabilityLabel(value: ModelProfile["capability"]) {

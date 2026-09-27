@@ -8,7 +8,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 type failAfterReader struct {
@@ -154,8 +154,8 @@ func TestWriteOwnedArtifactRejectsOversizedPayload(t *testing.T) {
 func TestReplaceFileLeavesAdjacentOldFileAlone(t *testing.T) {
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "keep.bin")
-	adjacent := dest + ".beeftv-old"
-	tmp := filepath.Join(dir, ".beeftv-save-x")
+	adjacent := dest + ".qisitv-old"
+	tmp := filepath.Join(dir, ".qisitv-save-x")
 	if err := os.WriteFile(dest, []byte("ORIGINAL"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestReplaceFileLeavesAdjacentOldFileAlone(t *testing.T) {
 func TestReplaceFileFailurePreservesOriginalAndAdjacentOld(t *testing.T) {
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "keep.bin")
-	adjacent := dest + ".beeftv-old"
+	adjacent := dest + ".qisitv-old"
 	if err := os.Mkdir(dest, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func assertNoSaveTemps(t *testing.T, dir string) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".beeftv-save-") {
+		if strings.HasPrefix(entry.Name(), ".qisitv-save-") {
 			t.Fatalf("leftover temp %s", entry.Name())
 		}
 	}

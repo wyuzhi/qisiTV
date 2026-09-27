@@ -7,7 +7,7 @@
     Go 1.25 Windows CGO produces broken binaries with older MinGW/binutils.
     GitHub-hosted runners and Chocolatey mingw often ship that incompatible
     toolchain. This script selects C:\msys64\ucrt64\bin\gcc.exe (the compiler
-    scripts/build-beeftv-windows-release.ps1 already documents), verifies
+    scripts/build-qisitv-windows-release.ps1 already documents), verifies
     binutils >= 2.37, then exports CC and PATH for later steps.
 #>
 [CmdletBinding()]

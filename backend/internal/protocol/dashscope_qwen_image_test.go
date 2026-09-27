@@ -9,7 +9,7 @@ import (
 // multimodal-generation 端点；用 OpenAI 图片端点会被网关判为“模型与端点不匹配”，
 // 在官方错误码里表现为 url error。参考图只能放在 input.messages[].content[].image。
 func TestDashscopeQwenImageUsesMultimodalEndpoint(t *testing.T) {
-	adapter := officialPackageAdapter(t, "dashscope-qwen-image.beeftv-plugin", "dashscope-qwen-image")
+	adapter := officialPackageAdapter(t, "dashscope-qwen-image.qisitv-plugin", "dashscope-qwen-image")
 	create, err := adapter.BuildCreate(context.Background(), RequestContext{Request: GenerationRequest{
 		Model: "qwen-image-3.0-pro", Prompt: "灰色圆点", AspectRatio: "3:4", ImageCount: 1,
 	}})
@@ -54,7 +54,7 @@ func TestDashscopeQwenImageUsesMultimodalEndpoint(t *testing.T) {
 }
 
 func TestDashscopeQwenImagePutsReferencesInMessageContent(t *testing.T) {
-	adapter := officialPackageAdapter(t, "dashscope-qwen-image.beeftv-plugin", "dashscope-qwen-image")
+	adapter := officialPackageAdapter(t, "dashscope-qwen-image.qisitv-plugin", "dashscope-qwen-image")
 	create, err := adapter.BuildCreate(context.Background(), RequestContext{Request: GenerationRequest{
 		Model: "qwen-image-3.0-pro", Prompt: "换装", AspectRatio: "1:1", ImageCount: 2,
 		Images: []MediaReference{
@@ -94,7 +94,7 @@ func TestDashscopeQwenImagePutsReferencesInMessageContent(t *testing.T) {
 }
 
 func TestDashscopeQwenImageOmitsUnregisteredSize(t *testing.T) {
-	adapter := officialPackageAdapter(t, "dashscope-qwen-image.beeftv-plugin", "dashscope-qwen-image")
+	adapter := officialPackageAdapter(t, "dashscope-qwen-image.qisitv-plugin", "dashscope-qwen-image")
 	create, err := adapter.BuildCreate(context.Background(), RequestContext{Request: GenerationRequest{
 		Model: "qwen-image-3.0-pro", Prompt: "circle", AspectRatio: "2880x2880",
 	}})
@@ -108,7 +108,7 @@ func TestDashscopeQwenImageOmitsUnregisteredSize(t *testing.T) {
 }
 
 func TestDashscopeQwenImageLifecycleReadsMultimodalChoices(t *testing.T) {
-	adapter := officialPackageAdapter(t, "dashscope-qwen-image.beeftv-plugin", "dashscope-qwen-image")
+	adapter := officialPackageAdapter(t, "dashscope-qwen-image.qisitv-plugin", "dashscope-qwen-image")
 	created, err := adapter.ParseCreate(context.Background(), []byte(`{"output":{"task_id":"task-qwen-1","task_status":"PENDING"},"request_id":"req-1"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -145,7 +145,7 @@ func TestDashscopeQwenImageLifecycleReadsMultimodalChoices(t *testing.T) {
 }
 
 func TestDashscopeQwenImageSurfacesFailureMessage(t *testing.T) {
-	adapter := officialPackageAdapter(t, "dashscope-qwen-image.beeftv-plugin", "dashscope-qwen-image")
+	adapter := officialPackageAdapter(t, "dashscope-qwen-image.qisitv-plugin", "dashscope-qwen-image")
 	failed, err := adapter.ParsePoll(context.Background(), PollContext{TaskID: "task-qwen-1"}, []byte(`{"output":{"task_id":"task-qwen-1","task_status":"FAILED","code":"InvalidParameter","message":"url error, please check url！"},"request_id":"req-3"}`))
 	if err != nil {
 		t.Fatal(err)

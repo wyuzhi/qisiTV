@@ -91,7 +91,7 @@ export default function ProjectDetailPage() {
             const seed = unit && shots.length ? storyboard?.upsertProjectChapterStoryboard([], [], { unit, shots }) : undefined;
             const initialContent = seed ? { nodes: seed.nodes, connections: seed.connections } : undefined;
             const title = unit ? `${unit.title} · ${shots.length ? "分镜画布" : "画布"}` : `${detail?.project.name || "项目"} · 新画布`;
-            // 本地 BeefTV 项目库不建立云端项目关联；章节/项目 API 仍可供
+            // 本地 qisiTV 项目库不建立云端项目关联；章节/项目 API 仍可供
             // 显式 hosted build 使用，但默认创建路径只写入本地画布存储。
             // Use the central workspace capability boundary so a local
             // session remains local even when the build also supports hosted

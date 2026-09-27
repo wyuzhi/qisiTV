@@ -3,12 +3,12 @@ package handler
 import (
 	"net/http"
 
-	"infinite-canvas/backend/internal/app"
+	"qisitv/backend/internal/app"
 
 	"github.com/gin-gonic/gin"
 )
 
-// RegisterCanvasAPI is kept as the standalone-development entrypoint. BeefTV
+// RegisterCanvasAPI is kept as the standalone-development entrypoint. qisiTV
 // has one local-only HTTP surface, so development and Wails use the same route
 // graph instead of selecting between desktop and SaaS profiles at runtime.
 func RegisterCanvasAPI(api *gin.RouterGroup, svc *app.Service) {
@@ -32,7 +32,7 @@ func RegisterDesktopCanvasAPIWithDependencies(api *gin.RouterGroup, svc *app.Ser
 
 // registerDesktopCanvasAPI is deliberately a separate call graph. Keeping the
 // local composition root free of runtime profile branches lets the Go linker
-// discard hosted handlers and their SaaS-only service methods from BeefTV.
+// discard hosted handlers and their SaaS-only service methods from qisiTV.
 func registerDesktopCanvasAPI(api *gin.RouterGroup, svc *app.Service, dependencies RuntimeDependencies) {
 	api.Use(RuntimeDependenciesMiddleware(dependencies))
 	RegisterOpenAPIRoutes(api)

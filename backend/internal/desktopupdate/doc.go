@@ -1,4 +1,4 @@
-// Package desktopupdate implements BeefTV's signed desktop auto-update engine.
+// Package desktopupdate implements qisiTV's signed desktop auto-update engine.
 //
 // 更新只替换当前应用包或可执行文件，以及随包分发的官方 plugin-packages。
 // 用户数据目录（项目、素材、设置、BeefAPI 登录态、用户上传的插件）不在更新包内，

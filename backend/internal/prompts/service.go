@@ -1,8 +1,8 @@
 package prompts
 
 import (
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 )
 
 // AdminGate 由组合根注入，避免 prompts → service 回环。

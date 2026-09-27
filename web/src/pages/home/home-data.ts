@@ -1,7 +1,7 @@
 import { AudioLines, Bot, Clapperboard, Image, Layers3, Scissors, Video } from "lucide-react";
 
-export const beefTVCapabilityItems = [
-    { id: "agent", label: "BeefTV Agent", detail: "正在开发", to: "/create", icon: Bot, disabled: true },
+export const qisitvCapabilityItems = [
+    { id: "agent", label: "qisiTV Agent", detail: "正在开发", to: "/create", icon: Bot, disabled: true },
     { id: "canvas", label: "自由画布", detail: "组织镜头与素材", to: "/canvas?mode=new", icon: Layers3, disabled: false },
     { id: "video", label: "视频生成", detail: "在画布中创建视频节点", to: "/canvas?mode=new&add=video", icon: Video, disabled: false },
     { id: "image", label: "图片生成", detail: "在画布中创建图片节点", to: "/canvas?mode=new&add=image", icon: Image, disabled: false },

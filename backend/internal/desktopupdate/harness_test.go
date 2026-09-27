@@ -58,9 +58,9 @@ func WriteZip(path string, files map[string][]byte, executable map[string]bool) 
 }
 
 func WriteDarwinLayout(root, marker string) error {
-	exe := filepath.Join(root, appBundleName, "Contents", "MacOS", "BeefTV")
+	exe := filepath.Join(root, appBundleName, "Contents", "MacOS", "qisiTV")
 	plist := filepath.Join(root, appBundleName, "Contents", "Info.plist")
-	plugin := filepath.Join(root, appBundleName, "Contents", "Resources", pluginDirName, "official.beeftv-plugin")
+	plugin := filepath.Join(root, appBundleName, "Contents", "Resources", pluginDirName, "official.qisitv-plugin")
 	if err := os.MkdirAll(filepath.Dir(exe), 0o755); err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func WriteDarwinLayout(root, marker string) error {
 	if err := os.WriteFile(exe, []byte(script), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(plist, []byte(`<plist><dict><key>CFBundleIdentifier</key><string>app.beeftv.desktop</string></dict></plist>`), 0o644); err != nil {
+	if err := os.WriteFile(plist, []byte(`<plist><dict><key>CFBundleIdentifier</key><string>app.qisitv.desktop</string></dict></plist>`), 0o644); err != nil {
 		return err
 	}
 	return os.WriteFile(plugin, []byte("official-"+marker), 0o644)
@@ -79,7 +79,7 @@ func WriteDarwinLayout(root, marker string) error {
 
 func WriteWindowsLayout(root, marker string) error {
 	exe := filepath.Join(root, windowsExeName)
-	plugin := filepath.Join(root, pluginDirName, "official.beeftv-plugin")
+	plugin := filepath.Join(root, pluginDirName, "official.qisitv-plugin")
 	if err := os.MkdirAll(filepath.Dir(plugin), 0o755); err != nil {
 		return err
 	}
@@ -91,18 +91,18 @@ func WriteWindowsLayout(root, marker string) error {
 
 func DarwinZipFiles(marker string) (map[string][]byte, map[string]bool) {
 	files := map[string][]byte{
-		"BeefTV.app/Contents/MacOS/BeefTV":                                     []byte("#!/bin/sh\necho " + marker + "\n"),
-		"BeefTV.app/Contents/Info.plist":                                       []byte("<plist></plist>"),
-		"BeefTV.app/Contents/Resources/plugin-packages/official.beeftv-plugin": []byte("official-" + marker),
+		"qisiTV.app/Contents/MacOS/qisiTV":                                     []byte("#!/bin/sh\necho " + marker + "\n"),
+		"qisiTV.app/Contents/Info.plist":                                       []byte("<plist></plist>"),
+		"qisiTV.app/Contents/Resources/plugin-packages/official.qisitv-plugin": []byte("official-" + marker),
 	}
-	execFiles := map[string]bool{"BeefTV.app/Contents/MacOS/BeefTV": true}
+	execFiles := map[string]bool{"qisiTV.app/Contents/MacOS/qisiTV": true}
 	return files, execFiles
 }
 
 func WindowsZipFiles(marker string) (map[string][]byte, map[string]bool) {
 	files := map[string][]byte{
-		"BeefTV.exe":                             []byte("MZ-" + marker),
-		"plugin-packages/official.beeftv-plugin": []byte("official-" + marker),
+		"qisiTV.exe":                             []byte("MZ-" + marker),
+		"plugin-packages/official.qisitv-plugin": []byte("official-" + marker),
 	}
 	return files, map[string]bool{}
 }

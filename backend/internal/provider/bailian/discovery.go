@@ -4,7 +4,7 @@ import (
 	"net/url"
 	"strings"
 
-	"infinite-canvas/backend/internal/provider"
+	"qisitv/backend/internal/provider"
 )
 
 // Discovery 阿里云百炼插件
@@ -42,7 +42,7 @@ func (d *Discovery) GetMetadata() provider.ProviderMetadata {
 		Name:             "bailian",
 		Version:          "1.0.0",
 		Description:      "Alibaba Cloud Bailian (DashScope) extended model discovery",
-		Author:           "BeefTV",
+		Author:           "qisiTV",
 		SupportedRegions: []string{"cn-beijing", "ap-southeast-1", "us-east-1"},
 	}
 }

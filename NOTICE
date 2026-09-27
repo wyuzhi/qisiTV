@@ -1,13 +1,14 @@
-BeefTV
+qisiTV
+Copyright (C) 2026 qisiTV contributors
 Copyright (C) 2026 BeefTV contributors
 
-BeefTV is distributed under the MIT License. The complete license text is
+qisiTV is distributed under the MIT License. The complete license text is
 provided in LICENSE.
 
 Project scope
 -------------
 
-BeefTV is a local-first, single-user desktop workspace for AI-assisted video
+qisiTV is a local-first, single-user desktop workspace for AI-assisted video
 creation. The desktop application uses a React user interface embedded by
 Wails and a Go backend that listens on loopback. Projects, canvas state,
 generated assets, model-channel settings, and durable task state are stored in
@@ -18,6 +19,12 @@ Upstream source
 ---------------
 
 This repository contains code derived from:
+
+  BeefTV
+  https://github.com/glanderness/BeefTV
+  Base commit: 3a242628b2e2a3cd5f3d36b2bc1559b697a872b5
+
+  BeefTV includes code derived from:
 
   Infinite Canvas
   https://github.com/basketikun/infinite-canvas
@@ -49,3 +56,11 @@ services and do not imply affiliation or endorsement.
 
 See THIRD_PARTY_NOTICES.md for the audited dependency and bundled-asset
 inventory distributed with the public source snapshot.
+
+qisiTV changes
+--------------
+
+qisiTV adds LikeAI protocol support, a shared local MCP and CLI interface,
+external Agent task writeback, canvas synchronization and the qisiTV identity.
+Historical upstream demonstrations are retained under assets/upstream/ and
+are not presented as current qisiTV interface screenshots.

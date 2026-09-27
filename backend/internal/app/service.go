@@ -10,16 +10,16 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"infinite-canvas/backend/internal/beefapi"
-	"infinite-canvas/backend/internal/canvas"
-	"infinite-canvas/backend/internal/kernel"
-	"infinite-canvas/backend/internal/mcp"
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/platform"
-	"infinite-canvas/backend/internal/prompts"
-	"infinite-canvas/backend/internal/repository"
-	"infinite-canvas/backend/internal/skills"
-	localtask "infinite-canvas/backend/internal/task"
+	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/canvas"
+	"qisitv/backend/internal/kernel"
+	"qisitv/backend/internal/mcp"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/platform"
+	"qisitv/backend/internal/prompts"
+	"qisitv/backend/internal/repository"
+	"qisitv/backend/internal/skills"
+	localtask "qisitv/backend/internal/task"
 )
 
 type Service struct {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"

@@ -1,6 +1,6 @@
-# BeefTV 文档
+# qisiTV 文档
 
-BeefTV 是一个本地优先、轻量、AI Native 的视频工作台。本页只收录公开使用、开发和维护所需的文档。
+qisiTV 是一个本地优先、轻量、AI Native 的视频工作台。本页只收录公开使用、开发和维护所需的文档。
 
 ## 开始使用
 
@@ -19,6 +19,7 @@ BeefTV 是一个本地优先、轻量、AI Native 的视频工作台。本页只
 ## 开发参考
 
 - [后端本地开发](content/docs/backend/local-development.mdx)
+- [用 Codex 和本地 Agent 操作画布](content/docs/backend/local-agent.mdx)
 - [HTTP API](content/docs/backend/http-api.mdx)
 - [代码地图](content/docs/backend/code-map.mdx)
 - [后端数据库](content/docs/backend/backend-database.mdx)

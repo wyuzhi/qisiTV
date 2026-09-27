@@ -7,6 +7,8 @@ description: 签名清单、打包布局、密钥、发布工作流、回滚和�
 
 桌面自动更新只替换应用本身。项目、素材、设置、BeefAPI 登录和自定义插件留在用户数据目录。更新源是 GitHub Release 上的签名清单，不经过业务云接口。
 
+qisiTV 没有默认更新源，也不会从上游 BeefTV 下载替换程序。发布方必须显式配置自己的 `QISITV_UPDATER_FEED_URL` 和 `QISITV_UPDATER_PUBLIC_KEY`；未配置时更新器关闭。下文地址是占位示例，不代表已有公开发行仓库。
+
 `v1.5.2` 及以前的安装包没有更新器。给仓库补上清单，不会让已经装好的程序自己升级。用户需要先手动安装第一个带更新器的版本。
 
 ## 用户侧行为
@@ -19,8 +21,8 @@ description: 签名清单、打包布局、密钥、发布工作流、回滚和�
 
 | 系统 | 更新包内容 | 数据目录（不会进包、不会被替换） |
 | --- | --- | --- |
-| macOS | `BeefTV.app` | `~/Library/Application Support/BeefTV` |
-| Windows | `BeefTV.exe` 与 `plugin-packages/*.beeftv-plugin` | `%AppData%\BeefTV` |
+| macOS | `qisiTV.app` | `~/Library/Application Support/qisiTV` |
+| Windows | `qisiTV.exe` 与 `plugin-packages/*.qisitv-plugin` | `%AppData%\qisiTV` |
 
 应用包身份和可执行文件路径保持稳定，前端 IndexedDB 可以继续用。官方插件随应用包更新；装在数据目录里的自定义插件会留下来。打包时遇到 `.env`、数据库或用户数据目录会失败。
 
@@ -47,7 +49,7 @@ description: 签名清单、打包布局、密钥、发布工作流、回滚和�
   "notes": "发行说明",
   "platforms": {
     "darwin-arm64": {
-      "url": "https://github.com/glanderness/BeefTV/releases/download/vX.Y.Z/BeefTV-vX.Y.Z-darwin-arm64.zip",
+      "url": "https://releases.example.com/qisitv/qisiTV-vX.Y.Z-darwin-arm64.zip",
       "sha256": "hex",
       "size": 123
     }
@@ -66,14 +68,14 @@ Apple ad hoc / Developer ID / 公证只影响 Gatekeeper。现有 macOS 发布�
 ```bash
 cd backend
 go run ./cmd/update-release gen-key \
-  --private-key /path/to/beeftv-updater.private \
-  --public-key /path/to/beeftv-updater.public
+  --private-key /path/to/qisitv-updater.private \
+  --public-key /path/to/qisitv-updater.public
 ```
 
 | GitHub 位置 | 名称 | 内容 |
 | --- | --- | --- |
-| Actions secret | `BEEFTV_UPDATER_PRIVATE_KEY` | 64 字节私钥的标准 Base64 |
-| Actions variable | `BEEFTV_UPDATER_PUBLIC_KEY` | 32 字节公钥的标准 Base64 |
+| Actions secret | `QISITV_UPDATER_PRIVATE_KEY` | 64 字节私钥的标准 Base64 |
+| Actions variable | `QISITV_UPDATER_PUBLIC_KEY` | 32 字节公钥的标准 Base64 |
 
 发布前会核对私钥推导出的公钥与变量一致。缺密钥或对不上都会失败，不会发布未签名更新源。
 
@@ -83,7 +85,7 @@ go run ./cmd/update-release gen-key \
 
 ## 发布流水线
 
-在 `glanderness/BeefTV` 的 `main` 上手动运行 `Release desktop`。`confirm_version` 必须等于 `VERSION`。`CHANGELOG.md` 里对应的 `## vX.Y.Z` 会同时成为 GitHub Release 说明和清单 `notes`。
+在发布方自己的 qisiTV 仓库 `main` 上手动运行 `Release desktop`。`confirm_version` 必须等于 `VERSION`。`CHANGELOG.md` 里对应的 `## vX.Y.Z` 会同时成为 GitHub Release 说明和清单 `notes`。
 
 工作流默认只读；仅创建草稿和最终发布的任务申请 `contents: write`。构建任务不持有发布写权限或签名私钥。步骤：
 
@@ -97,9 +99,9 @@ go run ./cmd/update-release gen-key \
 固定文件名：
 
 ```text
-BeefTV-vX.Y.Z-darwin-arm64.zip
-BeefTV-vX.Y.Z-darwin-amd64.zip
-BeefTV-vX.Y.Z-windows-amd64.zip
+qisiTV-vX.Y.Z-darwin-arm64.zip
+qisiTV-vX.Y.Z-darwin-amd64.zip
+qisiTV-vX.Y.Z-windows-amd64.zip
 desktop-update.json
 ```
 
@@ -110,7 +112,7 @@ desktop-update.json
 ```bash
 cd backend
 go test ./cmd/update-release
-go run ./cmd/update-release package --platform windows-amd64 --input cmd/desktop/build/bin --output /tmp/BeefTV-vX.Y.Z-windows-amd64.zip
+go run ./cmd/update-release package --platform windows-amd64 --input cmd/desktop/build/bin --output /tmp/qisiTV-vX.Y.Z-windows-amd64.zip
 ```
 
 ## 回滚
@@ -119,6 +121,6 @@ go run ./cmd/update-release package --platform windows-amd64 --input cmd/desktop
 
 流水线显式标记 latest，且拒绝非递增稳定版本。不要手动把旧版本标记为 latest。
 
-客户端在退出前重新验包，并在程序所在磁盘准备安装文件。数据目录和程序目录重叠时会拒绝安装，避免覆盖自定义插件。替换只使用同磁盘重命名，安装锁防止多个实例同时替换。安装或进程启动失败时尝试恢复旧程序；若应用未退出、安装程序已经停止，界面会恢复可重试状态。成功启动后仍保留程序旁 `.beeftv-update-*` 目录中的备份和恢复记录；确认新版本正常后可清理该次目录。
+客户端在退出前重新验包，并在程序所在磁盘准备安装文件。数据目录和程序目录重叠时会拒绝安装，避免覆盖自定义插件。替换只使用同磁盘重命名，安装锁防止多个实例同时替换。安装或进程启动失败时尝试恢复旧程序；若应用未退出、安装程序已经停止，界面会恢复可重试状态。成功启动后仍保留程序旁 `.qisitv-update-*` 目录中的备份和恢复记录；确认新版本正常后可清理该次目录。
 
 启动了进程不等于 SQLite 迁移或界面正常，因此不会在新进程启动后自动降级。恢复旧程序前需确认数据库兼容，必要时使用匹配的数据备份。此更新器不会复制或还原全部用户素材。

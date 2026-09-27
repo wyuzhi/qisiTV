@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 func TestAuthorizeSystemProxyAllowsConfiguredGenerationModel(t *testing.T) {

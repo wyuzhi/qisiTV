@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	"infinite-canvas/backend/internal/kernel"
-	"infinite-canvas/backend/internal/model"
-	localtask "infinite-canvas/backend/internal/task"
+	"qisitv/backend/internal/kernel"
+	"qisitv/backend/internal/model"
+	localtask "qisitv/backend/internal/task"
 )
 
 // TaskSummary 是任务列表/会话详情的读模型，不直接复用数据库 Task，避免把
@@ -63,6 +63,7 @@ func taskSummaryForOutput(task model.Task) TaskSummary {
 func taskClientContext(raw string) *TaskClientContext {
 	var input struct {
 		Metadata struct {
+			ExternalAgent   bool   `json:"externalAgent"`
 			Source          string `json:"source"`
 			NodeID          string `json:"nodeId"`
 			ConversationID  string `json:"conversationId"`
@@ -81,7 +82,7 @@ func taskClientContext(raw string) *TaskClientContext {
 		return nil
 	}
 	metadata := input.Metadata
-	context := &TaskClientContext{NodeID: metadata.NodeID}
+	context := &TaskClientContext{NodeID: metadata.NodeID, ExternalAgent: metadata.ExternalAgent}
 	if metadata.Source == "create-page" && metadata.ConversationID != "" && metadata.MessageID != "" {
 		context.ConversationID = metadata.ConversationID
 		context.MessageID = metadata.MessageID

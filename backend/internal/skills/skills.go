@@ -10,9 +10,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"infinite-canvas/backend/internal/kernel"
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/kernel"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 
 	"gorm.io/gorm"
 )

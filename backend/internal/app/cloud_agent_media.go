@@ -9,9 +9,9 @@ import (
 	"unicode/utf8"
 
 	"gorm.io/gorm"
-	"infinite-canvas/backend/internal/beefapi"
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 )
 
 // The Agent uses the same public catalog as the composer, never a second routing policy.

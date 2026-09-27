@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/prompts"
-	"infinite-canvas/backend/internal/protocol"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/prompts"
+	"qisitv/backend/internal/protocol"
 )
 
 const testReferenceImageDataURL = "data:image/png;base64,aGVsbG8="
@@ -656,7 +656,7 @@ func TestRunDeclarativeAgentTaskOmitsToolChoiceBeforeThinkingRequest(t *testing.
 	defer server.Close()
 
 	adapter, err := protocol.LoadManifest([]byte(`{
-		"apiVersion":"beeftv.plugin/v1",
+		"apiVersion":"qisitv.plugin/v1",
 		"id":"chat-completion","version":"1.0.0","name":"Chat Completion Test","author":"Test","documentation":"# Test",
 		"contributes":{"providers":[{"id":"chat-completion","label":"Chat Completion Test","capabilities":["text"],"scopes":["agent"],
 		"create":{"method":"POST","path":"/create"},

@@ -16,11 +16,11 @@ var (
 )
 
 const (
-	helperFlag      = "--beeftv-update-helper"
-	appBundleName   = "BeefTV.app"
-	windowsExeName  = "BeefTV.exe"
+	helperFlag      = "--qisitv-update-helper"
+	appBundleName   = "qisiTV.app"
+	windowsExeName  = "qisiTV.exe"
 	pluginDirName   = "plugin-packages"
-	pluginExtension = ".beeftv-plugin"
+	pluginExtension = ".qisitv-plugin"
 	payloadSchema   = 1
 	maxFeedBytes    = 1 << 20
 	maxRedirects    = 8

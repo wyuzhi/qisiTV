@@ -3,11 +3,11 @@ package prompts
 import (
 	"encoding/json"
 	"errors"
-	"infinite-canvas/backend/internal/kernel"
+	"qisitv/backend/internal/kernel"
 	"strings"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 const maxUserStyleProfiles = 200

@@ -3,8 +3,8 @@ package app
 import (
 	"strings"
 
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/protocol"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/protocol"
 )
 
 const (
@@ -34,7 +34,7 @@ func workflowPluginManifest(id, name, description string) protocol.Manifest {
 		})
 	}
 	return protocol.Manifest{
-		APIVersion: "beeftv.plugin/v1",
+		APIVersion: "qisitv.plugin/v1",
 		Metadata: protocol.Metadata{
 			ID:            id,
 			Version:       "1.0.0",

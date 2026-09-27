@@ -1,7 +1,7 @@
 import type { Asset } from "@/stores/use-asset-store";
 
-export const PLUGIN_API_VERSION = "beeftv.plugin/v1" as const;
-export const PLUGIN_API_VERSION_V2 = "beeftv.plugin/v2" as const;
+export const PLUGIN_API_VERSION = "qisitv.plugin/v1" as const;
+export const PLUGIN_API_VERSION_V2 = "qisitv.plugin/v2" as const;
 
 export type EditorSlotKind =
     | "timeline-panel"

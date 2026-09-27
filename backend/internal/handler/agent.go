@@ -11,11 +11,12 @@ import (
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
-	"infinite-canvas/backend/internal/app"
+	"qisitv/backend/internal/app"
 )
 
 // Agent orchestration is durable; the browser stream never drives execution.
 func RegisterAgentRoutes(r *gin.RouterGroup, svc *app.Service) {
+	registerExternalAgentRoutes(r, svc)
 	r.GET("/agent/capabilities", func(c *gin.Context) {
 		if _, err := currentUser(c, svc); err != nil {
 			failService(c, err)

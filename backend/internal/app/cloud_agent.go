@@ -12,8 +12,8 @@ import (
 	"unicode/utf8"
 
 	"gorm.io/gorm"
-	"infinite-canvas/backend/internal/kernel"
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/kernel"
+	"qisitv/backend/internal/model"
 )
 
 const cloudAgentOperation = "cloud_agent"

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"infinite-canvas/backend/internal/buildinfo"
+	"qisitv/backend/internal/buildinfo"
 )
 
 const (
@@ -424,7 +424,7 @@ func (e *Engine) prepareStaging(version string) (string, error) {
 		if err != nil {
 			cache = os.TempDir()
 		}
-		root = filepath.Join(cache, "BeefTV", "updates")
+		root = filepath.Join(cache, "qisiTV", "updates")
 	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return "", err

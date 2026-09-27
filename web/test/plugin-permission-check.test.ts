@@ -25,7 +25,7 @@ const ALL_SLOTS = [
 function fakePlugin(id: string, permissions: string[], slots: string[]): RegisteredPlugin {
     return {
         manifest: {
-            apiVersion: "beeftv.plugin/v2",
+            apiVersion: "qisitv.plugin/v2",
             id,
             name: id,
             version: "0.0.1",

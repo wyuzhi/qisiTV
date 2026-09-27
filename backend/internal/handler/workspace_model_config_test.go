@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"infinite-canvas/backend/internal/app"
-	"infinite-canvas/backend/internal/workspace"
+	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/workspace"
 
 	"github.com/gin-gonic/gin"
 )

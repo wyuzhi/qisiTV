@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 // ModelCatalogSource 决定 ModelCatalogResponse 中哪一个集合具有语义。

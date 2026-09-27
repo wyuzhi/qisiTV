@@ -3,7 +3,7 @@ package app
 import (
 	"context"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 // taskRouteExecutor 负责一次任务执行中的路由提交与失败切换策略。

@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 const entry = readFileSync(resolve(import.meta.dir, "../src/pages/create/creation-agent-entry.tsx"), "utf8");
 const createPage = readFileSync(resolve(import.meta.dir, "../src/pages/create/index.tsx"), "utf8");
 
-describe("BeefTV Agent project-first entry", () => {
+describe("qisiTV Agent project-first entry", () => {
     test("auto-starts project creation when Agent mode is selected", () => {
         expect(entry).toContain("autoStart = false");
         expect(entry).toContain("if (!autoStart || !hydrated");

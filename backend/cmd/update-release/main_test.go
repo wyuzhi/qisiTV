@@ -21,7 +21,7 @@ func TestRunHelp(t *testing.T) {
 	if err := run([]string{"help"}, &stdout, ioDiscard{}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), "gen-key") || !strings.Contains(stdout.String(), "BEEFTV_UPDATER_PRIVATE_KEY") {
+	if !strings.Contains(stdout.String(), "gen-key") || !strings.Contains(stdout.String(), "QISITV_UPDATER_PRIVATE_KEY") {
 		t.Fatalf("help missing expected text: %s", stdout.String())
 	}
 }

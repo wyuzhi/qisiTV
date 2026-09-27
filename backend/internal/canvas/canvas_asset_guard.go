@@ -2,11 +2,11 @@ package canvas
 
 import (
 	"encoding/json"
-	"infinite-canvas/backend/internal/assets"
-	"infinite-canvas/backend/internal/kernel"
+	"qisitv/backend/internal/assets"
+	"qisitv/backend/internal/kernel"
 	"strings"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 type MediaAssetReference struct {

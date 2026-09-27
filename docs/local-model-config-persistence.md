@@ -1,6 +1,6 @@
 # 本地模型配置持久化
 
-本地桌面模式的模型渠道不再只依赖浏览器 `localStorage`。前端启动时通过 `/api/workspace/model-config` 读取本机快照，渠道发生变化后自动保存；后端将快照原子写入 BeefTV 应用数据目录的 `local-model-config.json`。
+本地桌面模式的模型渠道不再只依赖浏览器 `localStorage`。前端启动时通过 `/api/workspace/model-config` 读取本机快照，渠道发生变化后自动保存；后端将快照原子写入 qisiTV 应用数据目录的 `local-model-config.json`。
 
 - 配置文件位于应用数据目录，不进入 Git，也不随前端静态资源更新覆盖。
 - 写入采用临时文件 + `rename`，文件权限为 `0600`，目录权限为 `0700`。

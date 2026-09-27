@@ -3,8 +3,8 @@ package project
 import (
 	"testing"
 
-	"infinite-canvas/backend/internal/app"
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/model"
 )
 
 type fakeBackend struct{ projects []app.ProjectSummary }

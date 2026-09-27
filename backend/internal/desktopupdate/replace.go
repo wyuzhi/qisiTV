@@ -114,7 +114,7 @@ func RestoreBackup(req HelperRequest) error {
 			return fmt.Errorf("没有可还原的备份")
 		}
 		if pathExists(req.TargetPath) {
-			failed := req.TargetPath + ".beeftv-failed"
+			failed := req.TargetPath + ".qisitv-failed"
 			_ = os.RemoveAll(failed)
 			_ = renamePath(req.TargetPath, failed)
 		}
@@ -177,7 +177,7 @@ func retryIO(op func() error) error {
 func relaunchTarget(req HelperRequest) error {
 	switch {
 	case strings.HasPrefix(req.Platform, "darwin"):
-		cmd := exec.Command(filepath.Join(req.TargetPath, "Contents", "MacOS", "BeefTV"))
+		cmd := exec.Command(filepath.Join(req.TargetPath, "Contents", "MacOS", "qisiTV"))
 		cmd.Dir = filepath.Dir(req.TargetPath)
 		if err := cmd.Start(); err != nil {
 			return err

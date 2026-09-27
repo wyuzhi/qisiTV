@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"infinite-canvas/backend/internal/desktopupdate"
+	"qisitv/backend/internal/desktopupdate"
 )
 
 func TestUpdateStatusKeepsVersionWhenDisabled(t *testing.T) {

@@ -33,7 +33,7 @@ func TestSwapInstallRollbackWhenStagedMissing(t *testing.T) {
 	if err := SwapInstall(req); err == nil {
 		t.Fatal("expected swap failure")
 	}
-	got, err := os.ReadFile(filepath.Join(target, "Contents", "MacOS", "BeefTV"))
+	got, err := os.ReadFile(filepath.Join(target, "Contents", "MacOS", "qisiTV"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestLaunchFailureRestoresPreviousInstall(t *testing.T) {
 	if err := RunHelperRequest(req); err == nil {
 		t.Fatal("expected launch failure")
 	}
-	got, err := os.ReadFile(filepath.Join(req.TargetPath, "Contents", "MacOS", "BeefTV"))
+	got, err := os.ReadFile(filepath.Join(req.TargetPath, "Contents", "MacOS", "qisiTV"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestLaunchFailureRestoresPreviousInstall(t *testing.T) {
 
 func TestWindowsSwapPreservesNeighborFilesAndUserPlugins(t *testing.T) {
 	root := t.TempDir()
-	targetDir := filepath.Join(root, "Beef TV 安装 测试")
+	targetDir := filepath.Join(root, "qisiTV 安装 测试")
 	staged := filepath.Join(root, "staged")
 	if err := WriteWindowsLayout(targetDir, "OLD"); err != nil {
 		t.Fatal(err)
@@ -97,11 +97,11 @@ func TestWindowsSwapPreservesNeighborFilesAndUserPlugins(t *testing.T) {
 	if err := os.WriteFile(neighbor, []byte("keep-me"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	userData := filepath.Join(root, "AppData", "BeefTV", "plugin-packages")
+	userData := filepath.Join(root, "AppData", "qisiTV", "plugin-packages")
 	if err := os.MkdirAll(userData, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	custom := filepath.Join(userData, "custom.beeftv-plugin")
+	custom := filepath.Join(userData, "custom.qisitv-plugin")
 	if err := os.WriteFile(custom, []byte("uploaded"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestWindowsSwapPreservesNeighborFilesAndUserPlugins(t *testing.T) {
 	if !strings.Contains(string(got), "NEW") {
 		t.Fatalf("exe = %q", got)
 	}
-	plugin, err := os.ReadFile(filepath.Join(targetDir, pluginDirName, "official.beeftv-plugin"))
+	plugin, err := os.ReadFile(filepath.Join(targetDir, pluginDirName, "official.qisitv-plugin"))
 	if err != nil || !strings.Contains(string(plugin), "NEW") {
 		t.Fatalf("plugin = %q err=%v", plugin, err)
 	}
@@ -148,21 +148,21 @@ func TestWindowsRestoreRetriesPluginsAfterExecutableWasRestored(t *testing.T) {
 	if err := os.Remove(filepath.Join(backup, windowsExeName)); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(target, pluginDirName, "official.beeftv-plugin"), []byte("NEW"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(target, pluginDirName, "official.qisitv-plugin"), []byte("NEW"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	req := HelperRequest{Platform: "windows-amd64", TargetPath: filepath.Join(target, windowsExeName), BackupPath: backup}
 	if err := RestoreBackup(req); err != nil {
 		t.Fatal(err)
 	}
-	got, err := os.ReadFile(filepath.Join(target, pluginDirName, "official.beeftv-plugin"))
+	got, err := os.ReadFile(filepath.Join(target, pluginDirName, "official.qisitv-plugin"))
 	if err != nil || string(got) != "official-OLD" {
 		t.Fatalf("plugin not restored: %q, %v", got, err)
 	}
 }
 
 func TestUnicodeAndSpacesPathsRoundTrip(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "BeefTV 更新 测试")
+	root := filepath.Join(t.TempDir(), "qisiTV 更新 测试")
 	oldDir := filepath.Join(root, "current")
 	staged := filepath.Join(root, "staged")
 	if err := WriteDarwinLayout(oldDir, "OLD"); err != nil {
@@ -180,7 +180,7 @@ func TestUnicodeAndSpacesPathsRoundTrip(t *testing.T) {
 	if err := SwapInstall(req); err != nil {
 		t.Fatal(err)
 	}
-	got, err := os.ReadFile(filepath.Join(req.TargetPath, "Contents", "MacOS", "BeefTV"))
+	got, err := os.ReadFile(filepath.Join(req.TargetPath, "Contents", "MacOS", "qisiTV"))
 	if err != nil {
 		t.Fatal(err)
 	}

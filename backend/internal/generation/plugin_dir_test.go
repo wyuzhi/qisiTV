@@ -8,7 +8,7 @@ import (
 )
 
 func TestOfficialPluginPackageCandidatesPreferExecutableSibling(t *testing.T) {
-	exe := filepath.Join(string(filepath.Separator), "opt", "BeefTV", "BeefTV.exe")
+	exe := filepath.Join(string(filepath.Separator), "opt", "qisiTV", "qisiTV.exe")
 	cwd := filepath.Join(string(filepath.Separator), "Users", "someone", "Downloads")
 	candidates := OfficialPluginPackageCandidates(exe, cwd)
 	if candidates[0] != "/app/plugin-packages" {
@@ -40,7 +40,7 @@ func TestResolveOfficialPluginPackageDirUsesExecutableSiblingWithoutRepoCwd(t *t
 	mustMkdir(t, sibling)
 	mustMkdir(t, cwd)
 
-	got, err := resolveOfficialPluginPackageDir(OfficialPluginPackageCandidates(filepath.Join(exeDir, "BeefTV.exe"), cwd))
+	got, err := resolveOfficialPluginPackageDir(OfficialPluginPackageCandidates(filepath.Join(exeDir, "qisiTV.exe"), cwd))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,14 +51,14 @@ func TestResolveOfficialPluginPackageDirUsesExecutableSiblingWithoutRepoCwd(t *t
 
 func TestResolveOfficialPluginPackageDirUsesMacResourcesWhenSiblingMissing(t *testing.T) {
 	root := t.TempDir()
-	exeDir := filepath.Join(root, "BeefTV.app", "Contents", "MacOS")
+	exeDir := filepath.Join(root, "qisiTV.app", "Contents", "MacOS")
 	resources := filepath.Join(exeDir, "..", "Resources", "plugin-packages")
 	cwd := filepath.Join(root, "unrelated-cwd")
 	mustMkdir(t, exeDir)
 	mustMkdir(t, resources)
 	mustMkdir(t, cwd)
 
-	got, err := resolveOfficialPluginPackageDir(OfficialPluginPackageCandidates(filepath.Join(exeDir, "BeefTV"), cwd))
+	got, err := resolveOfficialPluginPackageDir(OfficialPluginPackageCandidates(filepath.Join(exeDir, "qisiTV"), cwd))
 	if err != nil {
 		t.Fatal(err)
 	}

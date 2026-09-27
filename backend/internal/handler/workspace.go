@@ -6,9 +6,9 @@ import (
 	"io"
 	"net/http"
 
-	"infinite-canvas/backend/internal/app"
-	"infinite-canvas/backend/internal/beefapi"
-	"infinite-canvas/backend/internal/workspace"
+	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/workspace"
 
 	"github.com/gin-gonic/gin"
 )

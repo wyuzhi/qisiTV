@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"infinite-canvas/backend/internal/workspace"
+	"qisitv/backend/internal/workspace"
 
 	"github.com/pkg/browser"
 )
@@ -83,7 +83,7 @@ func New(opts Options) (*Service, error) {
 		hostname, _ = os.Hostname()
 	}
 	if hostname == "" {
-		hostname = "BeefTV"
+		hostname = "qisiTV"
 	}
 	clientVersion := strings.TrimSpace(opts.ClientVersion)
 	if clientVersion == "" {

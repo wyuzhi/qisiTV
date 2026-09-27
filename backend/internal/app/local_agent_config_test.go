@@ -2,7 +2,7 @@ package app
 
 import (
 	"encoding/json"
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 	"testing"
 )
 

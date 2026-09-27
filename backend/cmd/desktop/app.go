@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"infinite-canvas/backend/internal/bootstrap"
+	"qisitv/backend/internal/bootstrap"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )

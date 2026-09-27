@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 func TestChannelPresentationAliasAndPublicOrder(t *testing.T) {

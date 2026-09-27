@@ -2,7 +2,7 @@
 
 该包贡献兼容旧渠道 ID `minimax-video` 的声明式 provider。画布、创作页和短剧生产只提交统一 `GenerationRequest`；插件将图片、视频和音频按显式 role 转成 MiniMax `content[]`。
 
-本插件由 BeefTV Contributors 维护，用于适配 MiniMax 相关服务接口；不表示 BeefTV 与该服务商存在隶属、授权或合作关系。
+本插件源自 BeefTV Contributors 的开源实现，由 qisiTV 分支维护，用于适配 MiniMax 相关服务接口；不表示 qisiTV 与该服务商存在隶属、授权或合作关系。
 
 重点修复：
 

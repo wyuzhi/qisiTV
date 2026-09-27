@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 func TestImageVariantsMatchResolutionAndActualReferences(t *testing.T) {

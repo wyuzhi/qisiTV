@@ -23,6 +23,7 @@ backend/cmd/desktop/build
 artifacts
 test-evidence
 web/.playwright
+plugin-packages/*.qisitv-plugin
 plugin-packages/*.beeftv-plugin
 web/.next
 web/dist

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"

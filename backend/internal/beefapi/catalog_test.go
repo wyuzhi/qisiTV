@@ -3,7 +3,7 @@ package beefapi
 import (
 	"testing"
 
-	"infinite-canvas/backend/internal/workspace"
+	"qisitv/backend/internal/workspace"
 )
 
 func TestCatalogCapabilityMapsBeefAPIEndpointTypes(t *testing.T) {

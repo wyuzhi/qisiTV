@@ -3,8 +3,8 @@ package app
 import (
 	"strings"
 
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 )
 
 const cloudAgentMaxEmptyOutputNudges = 2

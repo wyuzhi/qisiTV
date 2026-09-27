@@ -16,7 +16,7 @@ import { getLocalModelConfig } from "@/services/api/workspace";
 import { getModelConfigPersistenceState, subscribeModelConfigPersistence, type ModelConfigPersistenceState } from "@/services/model-config-repository";
 import { beefAPIConnectionLabel, cancelBeefAPIConnection, disconnectBeefAPIConnection, getBeefAPIConnection, openBeefAPIWallet, startBeefAPIConnection, type BeefAPIConnectionSummary } from "@/services/api/beefapi-connection";
 
-type UserChannelConnection = "openai" | "gemini";
+type UserChannelConnection = "openai" | "gemini" | "likeai";
 type ChannelSettingsPaneProps = {
     onOpenModels?: () => void;
     onOpenRunningHub?: () => void;
@@ -286,7 +286,7 @@ export function ChannelSettingsPane({ onOpenModels, onOpenRunningHub }: ChannelS
                                         </h3>
                                         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-foreground/55">
                                             {channelProtocolLabel(channel)} · 已保存 {channel.models.length} 个模型
-                                            {builtinBeefAPI ? <span>应用内置适配 · v{channel.presetVersion}</span> : null}
+                                            {builtinBeefAPI ? <span>第三方 BeefAPI · 内置适配 v{channel.presetVersion}</span> : null}
                                             <ChannelStatus channel={channel} persistence={persistence} connection={builtinBeefAPI ? beefConnection : null} />
                                         </div>
                                     </div>
@@ -384,6 +384,7 @@ export function ChannelSettingsPane({ onOpenModels, onOpenRunningHub }: ChannelS
                                                             options={[
                                                                 { label: "OpenAI", value: "openai" },
                                                                 { label: "Gemini", value: "gemini" },
+                                                                { label: "LikeAI", value: "likeai" },
                                                             ]}
                                                             onChange={(value) => updateChannelConnection(channel, value)}
                                                         />
@@ -698,6 +699,7 @@ function channelModelFetchErrorMessage(error: unknown) {
 }
 
 function channelConnectionMode(channel: ModelChannel): UserChannelConnection {
+    if (channel.apiFormat === "likeai") return "likeai";
     return channel.apiFormat === "gemini" ? "gemini" : "openai";
 }
 
@@ -724,13 +726,14 @@ function channelConnectionSignature(channel: ModelChannel) {
 }
 
 function channelProtocolLabel(channel: ModelChannel) {
-    return channelConnectionMode(channel) === "gemini" ? "Gemini 原生" : "OpenAI 兼容";
+    const labels: Record<UserChannelConnection, string> = { openai: "OpenAI 兼容", gemini: "Gemini 原生", likeai: "LikeAI" };
+    return labels[channelConnectionMode(channel)];
 }
 
 function isKnownDefaultBaseUrl(value: string) {
     const normalized = value.trim().replace(/\/+$/, "");
     if (!normalized) return true;
-    return [defaultBaseUrlForApiFormat("openai"), defaultBaseUrlForApiFormat("gemini")].some((candidate) => candidate.replace(/\/+$/, "") === normalized);
+    return [defaultBaseUrlForApiFormat("openai"), defaultBaseUrlForApiFormat("gemini"), defaultBaseUrlForApiFormat("likeai")].some((candidate) => candidate.replace(/\/+$/, "") === normalized);
 }
 
 function requiresSecretKey(channel: ModelChannel) {

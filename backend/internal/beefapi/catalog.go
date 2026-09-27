@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"infinite-canvas/backend/internal/workspace"
+	"qisitv/backend/internal/workspace"
 )
 
 func applyCatalog(store *workspace.ProviderConfig, models []CatalogModel, previousAccountID, nextAccountID string) error {
@@ -396,13 +396,13 @@ func PreserveManagedChannel(incoming, existing map[string]any, managed bool) {
 			channel["credentialRef"] = CredentialRef
 		} else if existingBeef != nil {
 			incomingKey, _ := channel["apiKey"].(string)
-			if incomingKey == "" || incomingKey == workspace.RedactedSecret {
+			if incomingKey == "" || workspace.IsRedactedSecret(incomingKey) {
 				if previous, ok := existingBeef["apiKey"]; ok {
 					channel["apiKey"] = previous
 				}
 			}
 			incomingSecret, _ := channel["secretKey"].(string)
-			if incomingSecret == "" || incomingSecret == workspace.RedactedSecret {
+			if incomingSecret == "" || workspace.IsRedactedSecret(incomingSecret) {
 				if previous, ok := existingBeef["secretKey"]; ok {
 					channel["secretKey"] = previous
 				}

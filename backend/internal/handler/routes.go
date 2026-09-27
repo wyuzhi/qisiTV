@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	"infinite-canvas/backend/internal/app"
-	localtask "infinite-canvas/backend/internal/task"
+	"qisitv/backend/internal/app"
+	localtask "qisitv/backend/internal/task"
 
 	"github.com/gin-gonic/gin"
 )

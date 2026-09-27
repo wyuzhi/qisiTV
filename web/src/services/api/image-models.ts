@@ -59,7 +59,7 @@ export type ChannelModelFetchResult = { models: string[]; catalog: ChannelModelC
 
 export async function fetchChannelModels(channel: ModelChannel, viaBackend = false): Promise<ChannelModelFetchResult> {
     const managed = channel.id === "beefapi" && (channel.pinned || Boolean(channel.credentialRef));
-    if (managed) {
+    if (managed || channel.apiFormat === "likeai") {
         viaBackend = true;
     }
     if (!viaBackend) {

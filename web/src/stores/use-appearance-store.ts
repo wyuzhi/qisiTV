@@ -5,22 +5,22 @@ import { applySkinTheme, DEFAULT_CLASSIC_SKIN, normalizeSkinDefinition } from "@
 
 export const DEFAULT_PUBLIC_APPEARANCE: PublicAppearance = {
     schemaVersion: 7,
-    brandName: "BeefTV",
-    brandSlug: "beeftv",
+    brandName: "qisiTV",
+    brandSlug: "qisitv",
     authHeroTitle: "让一个故事，\n从文字走向银幕。",
     authHeroDescription: "",
-    logoUrl: "/beef-logo.png",
-    darkLogoUrl: "/beef-logo.png",
+    logoUrl: "/qisitv-mark.svg",
+    darkLogoUrl: "/qisitv-mark.svg",
     logoFrameEnabled: false,
     authVideoUrl: "https://boss-shjd.biliapi.net/updream/aniforge/video/video_bbcb00bd-650d-4249-9346-5cd21fd2484c_m1hc-u0-1pu13x-3v1s.mp4",
     authVideoPosterUrl: "https://i0.hdslb.com/bfs/aitool/aniforge/image/02933f26-5f1b-49ff-a811-b7f95ee5e5b8_m1hc-u0-sau.jpg",
     authVideoAutoplay: true,
     skinId: "classic",
     activeSkin: DEFAULT_CLASSIC_SKIN,
-    seoTitle: "BeefTV",
-    seoDescription: "BeefTV，本地优先的开源 AI 视频创作工作台。",
+    seoTitle: "qisiTV",
+    seoDescription: "qisiTV，本地优先的开源 AI 视频创作工作台。",
     seoKeywords: "",
-    footerCopyright: `© ${new Date().getFullYear()} BeefTV. Open source video studio.`,
+    footerCopyright: `© ${new Date().getFullYear()} qisiTV. Open source video studio.`,
     icpFilingEnabled: false,
     icpFilingNumber: "",
     logoConfigured: false,
@@ -44,13 +44,14 @@ export const useAppearanceStore = create<AppearanceStore>((set) => ({
 }));
 
 export function normalizePublicAppearance(value?: Partial<PublicAppearance> | null): PublicAppearance {
-    const brandName = String(value?.brandName || "").trim();
+    const brandName = migrateBrandCopy(String(value?.brandName || "").trim());
     const brandSlug = normalizeBrandSlug(value?.brandSlug);
     const authHeroTitle = normalizeAppearanceCopy(value?.authHeroTitle, DEFAULT_PUBLIC_APPEARANCE.authHeroTitle);
     const authHeroDescription = normalizeAppearanceCopy(value?.authHeroDescription, DEFAULT_PUBLIC_APPEARANCE.authHeroDescription, true);
     const customVideo = Boolean(value?.authVideoConfigured);
-    const customLogo = Boolean(value?.logoConfigured);
-    const customDarkLogo = Boolean(value?.darkLogoConfigured);
+    const legacyLogo = (url?: string) => ["/beef-logo.png", "/beef-mark.png"].includes(url || "");
+    const customLogo = Boolean(value?.logoConfigured) && !legacyLogo(value?.logoUrl);
+    const customDarkLogo = Boolean(value?.darkLogoConfigured) && !legacyLogo(value?.darkLogoUrl);
     const logoUrl = customLogo ? safeAppearanceURL(value?.logoUrl, DEFAULT_PUBLIC_APPEARANCE.logoUrl) : DEFAULT_PUBLIC_APPEARANCE.logoUrl;
     const darkLogoUrl = customDarkLogo ? safeAppearanceURL(value?.darkLogoUrl, logoUrl) : customLogo ? logoUrl : DEFAULT_PUBLIC_APPEARANCE.darkLogoUrl;
     const resolvedBrandName = brandName || DEFAULT_PUBLIC_APPEARANCE.brandName;
@@ -81,8 +82,8 @@ export function normalizePublicAppearance(value?: Partial<PublicAppearance> | nu
         footerCopyright,
         icpFilingEnabled: Boolean(value?.icpFilingEnabled && icpFilingNumber),
         icpFilingNumber,
-        logoConfigured: Boolean(value?.logoConfigured),
-        darkLogoConfigured: Boolean(value?.darkLogoConfigured),
+        logoConfigured: customLogo,
+        darkLogoConfigured: customDarkLogo,
         authVideoConfigured: customVideo,
         authVideoPosterConfigured: Boolean(value?.authVideoPosterConfigured),
         configured: Boolean(value?.configured),
@@ -92,8 +93,12 @@ export function normalizePublicAppearance(value?: Partial<PublicAppearance> | nu
 
 function normalizeAppearanceCopy(value: unknown, fallback: string, allowEmpty = false) {
     if (typeof value !== "string") return fallback;
-    const normalized = value.replace(/\r\n?/g, "\n").trim();
+    const normalized = migrateBrandCopy(value.replace(/\r\n?/g, "\n").trim());
     return normalized || (allowEmpty ? "" : fallback);
+}
+
+function migrateBrandCopy(value: string) {
+    return value.replace(/\bBeefTV\b/g, "qisiTV");
 }
 
 export function commitPublicAppearance(value?: Partial<PublicAppearance> | null) {
@@ -157,7 +162,7 @@ export function appearanceLogoURL(appearance: PublicAppearance, theme: "light" |
 }
 
 export function brandStudioLabel(appearance: PublicAppearance) {
-    if (appearance.brandName === DEFAULT_PUBLIC_APPEARANCE.brandName && appearance.brandSlug === DEFAULT_PUBLIC_APPEARANCE.brandSlug) return "BEEF CREATIVE STUDIO";
+    if (appearance.brandName === DEFAULT_PUBLIC_APPEARANCE.brandName && appearance.brandSlug === DEFAULT_PUBLIC_APPEARANCE.brandSlug) return "qisiTV CREATIVE STUDIO";
     return appearance.brandSlug.replace(/-+/g, " ").toLocaleUpperCase();
 }
 
@@ -165,6 +170,7 @@ function normalizeBrandSlug(value: unknown) {
     const candidate = String(value || "")
         .trim()
         .toLocaleLowerCase();
+    if (candidate === "beeftv") return DEFAULT_PUBLIC_APPEARANCE.brandSlug;
     return /^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/.test(candidate) ? candidate : DEFAULT_PUBLIC_APPEARANCE.brandSlug;
 }
 

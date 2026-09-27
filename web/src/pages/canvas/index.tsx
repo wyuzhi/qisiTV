@@ -76,7 +76,7 @@ export default function CanvasPage() {
     // The sync layer is the source of truth: it also recognizes the synthetic
     // local identity, which protects the library from stale session state after
     // a desktop reload or HMR cycle.
-    // The default BeefTV build is local-only even when a stale/embedded browser
+    // The default qisiTV build is local-only even when a stale/embedded browser
     // session still contains a logged-in user. Cloud project APIs are opt-in via
     // the explicit hosted build flag, never inferred from login state.
     const remoteMode = import.meta.env.VITE_CANVAS_LOCAL_MODE === "false" && Boolean(userId) && !isLocalWorkspaceMode();

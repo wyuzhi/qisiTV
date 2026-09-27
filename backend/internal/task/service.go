@@ -3,7 +3,7 @@ package task
 import (
 	"context"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 type Backend interface {

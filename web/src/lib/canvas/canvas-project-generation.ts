@@ -152,6 +152,7 @@ export function generationTaskMetadata(task: GenerationTask): CanvasNodeMetadata
     const progress = normalizeTaskProgress(task.progress, task.status);
     return {
         taskId: task.id,
+        externalAgent: task.clientContext?.externalAgent ?? false,
         taskClientOperationId: task.clientOperationId,
         retryOf: task.retryOf,
         attemptGroupId: task.attemptGroupId,
@@ -174,6 +175,7 @@ export function generationTaskMetadata(task: GenerationTask): CanvasNodeMetadata
 export function resetGenerationTaskMetadata(metadata: CanvasNodeMetadata | undefined, status: CanvasNodeMetadata["status"] = "idle"): CanvasNodeMetadata {
     const next = {
         ...(metadata || {}),
+        externalAgent: false,
         status,
         errorDetails: undefined,
         generationErrorCode: undefined,
@@ -562,6 +564,7 @@ export function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
     const configHeight = NODE_DEFAULT_SIZE[CanvasNodeType.Config].height;
     let changed = false;
     const reset = nodes.map((node) => {
+        if (node.metadata?.externalAgent) return node;
         const mediaNode = ensureMediaNodeMinimumSize(interruptFileUpload(node));
         const resizedNode =
             mediaNode.type === CanvasNodeType.Config && (mediaNode.width < configWidth || mediaNode.height < configHeight)

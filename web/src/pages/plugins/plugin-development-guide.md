@@ -4,10 +4,10 @@
 
 ## 1. 包格式
 
-上传文件必须是 `.beeftv-plugin` ZIP 包，大小不超过 48 MiB。包内必须有根目录 `manifest.json`；不能上传裸 JSON。清单和可选的 Web 运行时代码、静态资源属于同一个版本、权限和生命周期：
+上传文件必须是 `.qisitv-plugin` ZIP 包，大小不超过 48 MiB。包内必须有根目录 `manifest.json`；不能上传裸 JSON。清单和可选的 Web 运行时代码、静态资源属于同一个版本、权限和生命周期：
 
 ```text
-my-plugin.beeftv-plugin
+my-plugin.qisitv-plugin
 ├── manifest.json
 ├── web/entry.js       # 可选；必须配合 runtime.web=sandbox 或 worker
 ├── web/assets/...     # 可选静态资源
@@ -22,7 +22,7 @@ my-plugin.beeftv-plugin
 
 ```json
 {
-  "apiVersion": "beeftv.plugin/v1",
+  "apiVersion": "qisitv.plugin/v1",
   "id": "acme-comfyui", "name": "Acme ComfyUI", "version": "1.0.0", "author": "Acme", "description": "通过工作流贡献提供视频生成能力",
   "permissions": ["generation.run", "media.read"],
   "configuration": { "fields": [{ "name": "apiKey", "type": "secret", "label": "API Token", "required": true }] },

@@ -26,7 +26,7 @@ export function FullScreenLoader({ label = "正在恢复工作区", detail = "�
                 <span className="full-screen-loader-script"><i /><i /><i /><b /></span>
                 <span className="full-screen-loader-timeline"><i /><i /><i /><i /><b /></span>
                 <span className="full-screen-loader-orbit" />
-                <BrandLogoFrame className="full-screen-loader-logo" logoClassName="full-screen-loader-logo-image" alt="" fallback={<span className="full-screen-loader-logo-fallback" />} />
+                <BrandLogoFrame className="full-screen-loader-logo" logoClassName="full-screen-loader-logo-image" alt="" fallback={<span className="full-screen-loader-logo-fallback" aria-hidden="true">Q</span>} />
             </div>
             <div className="full-screen-loader-copy"><strong>{label}</strong><span>{detail}</span><LoadingSignal /></div>
         </div>
@@ -44,7 +44,7 @@ export function WorkspaceRouteLoader({ label = "正在打开页面" }: { label?:
     return (
         <section data-workspace-route-loader className={cn("workspace-route-loader", visible && "is-visible")} role="status" aria-live="polite" aria-label={label}>
             <div className="workspace-route-loader-content">
-                <span className="workspace-route-loader-mark"><BrandLogoFrame className="workspace-route-loader-logo" logoClassName="size-4" alt="" fallback={<span className="full-screen-loader-logo-fallback" />} /></span>
+                <span className="workspace-route-loader-mark"><BrandLogoFrame className="workspace-route-loader-logo" logoClassName="size-4" alt="" fallback={<span className="full-screen-loader-logo-fallback" aria-hidden="true">Q</span>} /></span>
                 <LoadingSignal />
                 <span>{label}</span>
             </div>

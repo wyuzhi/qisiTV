@@ -58,7 +58,7 @@ func TestEvaluateManifestToFloatLeavesInvalidInputEmpty(t *testing.T) {
 
 func TestBinaryPayloadCreateResultAudio(t *testing.T) {
 	manifest := []byte(`{
-		"apiVersion":"beeftv.plugin/v1",
+		"apiVersion":"qisitv.plugin/v1",
 		"id":"audio-bin","version":"1.0.0","name":"Audio Bin","author":"Test","documentation":"# Audio",
 		"contributes":{"providers":[{
 			"id":"openai-audio","label":"OpenAI Audio","capabilities":["audio"],"scopes":["canvas"],

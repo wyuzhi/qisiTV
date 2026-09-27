@@ -1,6 +1,6 @@
 package repository
 
-import "infinite-canvas/backend/internal/model"
+import "qisitv/backend/internal/model"
 
 // AppendAdminAudit keeps an append-only record of local configuration changes.
 // It is intentionally independent from accounts, sessions, and SaaS operators.

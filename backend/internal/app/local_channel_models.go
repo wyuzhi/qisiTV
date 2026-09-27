@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"infinite-canvas/backend/internal/beefapi"
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/model"
 )
 
 type localChannelModel struct {

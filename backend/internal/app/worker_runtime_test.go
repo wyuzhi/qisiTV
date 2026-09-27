@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"infinite-canvas/backend/internal/platform"
+	"qisitv/backend/internal/platform"
 )
 
 func TestTaskWritesAreRejectedDuringDrain(t *testing.T) {

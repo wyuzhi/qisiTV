@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 const panel = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-cloud-agent-panel.tsx"), "utf8");
 
-describe("BeefTV Agent canvas panel contract", () => {
+describe("qisiTV Agent canvas panel contract", () => {
     test("exposes stable view and run state for project-first interaction", () => {
         expect(panel).toContain('data-agent-view={view}');
         expect(panel).toContain('data-agent-status={status}');

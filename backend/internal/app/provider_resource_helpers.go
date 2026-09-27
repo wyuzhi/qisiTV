@@ -4,7 +4,7 @@ import (
 	"errors"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 // ResourceForUser 是 Provider worker 读取资源时必须经过的 service 层归属校验。

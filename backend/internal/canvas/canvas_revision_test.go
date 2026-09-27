@@ -5,13 +5,13 @@ import (
 	"errors"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"infinite-canvas/backend/internal/repository"
 	"net/http"
 	"path/filepath"
+	"qisitv/backend/internal/repository"
 	"testing"
 
-	"infinite-canvas/backend/internal/kernel"
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/kernel"
+	"qisitv/backend/internal/model"
 )
 
 func TestCanvasSaveRevisionContract(t *testing.T) {

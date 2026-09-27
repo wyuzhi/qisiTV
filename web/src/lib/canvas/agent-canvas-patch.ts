@@ -2,6 +2,11 @@ import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import type { CanvasConnection, CanvasNodeData } from "@/types/canvas";
 
 type Change<T> = { before: T | null; after: T | null };
+function latestTimestamp(a?: string, b?: string) {
+    if (!a) return b;
+    if (!b) return a;
+    return Date.parse(b) > Date.parse(a) ? b : a;
+}
 export type AgentCanvasPatch = {
     canvasId: string;
     baseRevision?: number;
@@ -48,9 +53,20 @@ function mergeItems<T extends { id: string }>(items: T[], changes: Change<T>[]):
     for (const { before, after } of changes) {
         const id = after?.id || before?.id;
         if (!id || (before && after && before.id !== after.id)) throw new Error("无效的画布增量节点");
-        const merged = mergeValue(next.get(id) ?? null, before, after) as T | null;
+        const current = next.get(id) ?? null;
+        // Both editors stamp a node when different fields change. Timestamps
+        // are bookkeeping, not a conflicting edit to the node's content.
+        const withoutStamp = (value: T) => {
+            const { updatedAt: _stamp, ...rest } = value as T & { updatedAt?: string };
+            return rest;
+        };
+        const merged = current && before && after
+            ? { ...mergeValue(withoutStamp(current), withoutStamp(before), withoutStamp(after)) as T,
+                ...((current as T & { updatedAt?: string }).updatedAt || (after as T & { updatedAt?: string }).updatedAt
+                    ? { updatedAt: latestTimestamp((current as T & { updatedAt?: string }).updatedAt, (after as T & { updatedAt?: string }).updatedAt) } : {}) }
+            : mergeValue(current, before, after) as T | null;
         if (merged === null) next.delete(id);
-        else next.set(id, merged);
+        else next.set(id, current && equal(current, merged) ? current : merged);
     }
     const result = [...next.values()];
     return result.length === items.length && result.every((item, index) => item === items[index]) ? items : result;
@@ -58,6 +74,8 @@ function mergeItems<T extends { id: string }>(items: T[], changes: Change<T>[]):
 
 export function applyAgentCanvasPatch(project: CanvasProject, patch: AgentCanvasPatch): CanvasProject {
     if (patch.canvasId !== project.id || !Array.isArray(patch.nodes) || !Array.isArray(patch.connections)) throw new Error("画布增量不属于当前画布或格式无效");
+    if (patch.revision !== undefined && project.revision !== undefined && patch.revision <= project.revision) return project;
+    if (patch.baseRevision !== undefined && project.revision !== undefined && patch.baseRevision > project.revision) throw new Error("画布增量缺少中间版本，需要重新读取画布");
     const byId = new Map(project.nodes.map((node) => [node.id, node]));
     const nodeChanges = patch.nodes.map((change) => {
         if (!change.after) return change;
@@ -98,4 +116,21 @@ export function mergeAgentCanvasEditor(previous: CanvasProject, incoming: Canvas
         nodes: changes(previous.nodes, incoming.nodes),
         connections: changes(previous.connections, incoming.connections),
     });
+}
+
+/** Merge a server revision with unsaved local changes, field by field. */
+export function mergeAgentCanvasDocument(previous: CanvasProject, incoming: CanvasProject, current: CanvasProject): CanvasProject {
+    if (previous.id !== incoming.id || current.id !== incoming.id) throw new Error("画布版本不属于同一项目");
+    const graph = mergeAgentCanvasEditor(previous, incoming, current.nodes, current.connections);
+    const fields = (project: CanvasProject) => {
+        const { nodes: _nodes, connections: _connections, revision: _revision, updatedAt: _updated, remoteContentHash: _hash, ...rest } = project;
+        return rest;
+    };
+    return {
+        ...mergeValue(fields(current), fields(previous), fields(incoming)) as CanvasProject,
+        nodes: graph.nodes,
+        connections: graph.connections,
+        revision: incoming.revision,
+        updatedAt: latestTimestamp(current.updatedAt, incoming.updatedAt)!,
+    };
 }

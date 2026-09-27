@@ -3,14 +3,14 @@ package canvas
 import (
 	"encoding/json"
 	"errors"
-	"infinite-canvas/backend/internal/kernel"
 	"net/http"
+	"qisitv/backend/internal/kernel"
 	"strings"
 	"time"
 	"unicode/utf8"
 
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 
 	"gorm.io/gorm"
 )
@@ -240,45 +240,19 @@ func (s *Service) CommitUserCanvasProjectAssets(userID string, raw json.RawMessa
 // whole canvas document to the caller. It still uses the existing revision and
 // history machinery, so old clients and conflict semantics remain unchanged.
 func (s *Service) DeleteUserCanvasNode(userID, canvasID, nodeID string) (UserDataSummary, error) {
-	project, err := s.repo.CanvasProjectForUser(userID, canvasID)
+	// Legacy HTTP/MCP callers share the operation path, including incident
+	// edges, reference roles and timeline cleanup, revision CAS and history.
+	raw, err := s.ApplyCanvasOperations(userID, canvasID, CanvasOperationsRequest{Operations: []CanvasOperation{{Op: "delete", NodeID: nodeID}}})
 	if err != nil {
 		return UserDataSummary{}, err
 	}
-	raw, err := canvasProjectPayload(*project)
-	if err != nil {
+	var summary UserDataSummary
+	if err := json.Unmarshal(raw, &summary); err != nil {
 		return UserDataSummary{}, err
 	}
-	var document map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &document); err != nil {
-		return UserDataSummary{}, kernel.BadAuthRequest("画布数据格式错误")
-	}
-	var nodes []map[string]json.RawMessage
-	if err := json.Unmarshal(document["nodes"], &nodes); err != nil {
-		return UserDataSummary{}, kernel.BadAuthRequest("画布节点数据格式错误")
-	}
-	kept := nodes[:0]
-	removed := false
-	for _, node := range nodes {
-		var id string
-		_ = json.Unmarshal(node["id"], &id)
-		if id == nodeID {
-			removed = true
-			continue
-		}
-		kept = append(kept, node)
-	}
-	if !removed {
-		return UserDataSummary{}, kernel.NewAppError(http.StatusNotFound, "节点不存在")
-	}
-	document["nodes"], err = json.Marshal(kept)
-	if err != nil {
-		return UserDataSummary{}, err
-	}
-	updated, err := json.Marshal(document)
-	if err != nil {
-		return UserDataSummary{}, err
-	}
-	return s.upsertUserCanvasProjectWithHistory(userID, updated, "automatic")
+	count := canvasNodeCount(string(raw))
+	summary.SaveAudit = &CanvasSaveAudit{NodesBefore: count + 1, NodesAfter: count}
+	return summary, nil
 }
 
 func (s *Service) UpdateUserCanvasNode(userID, canvasID, nodeID string, patch map[string]json.RawMessage) (UserDataSummary, error) {

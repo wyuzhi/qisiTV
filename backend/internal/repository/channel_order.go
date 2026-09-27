@@ -2,7 +2,7 @@ package repository
 
 import (
 	"errors"
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 	"slices"
 	"time"
 

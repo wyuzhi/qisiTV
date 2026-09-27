@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 const renderFfmpegEnv = "CANVAS_FFMPEG_PATH"
@@ -139,7 +139,7 @@ func renderFfmpegBinary() (string, error) {
 // materializeRenderSources 把计划中每个媒体片段对应的资源下载到临时目录，
 // 同资源复用同一份本地文件；返回工作目录与清理函数。
 func materializeRenderSources(ctx context.Context, s *Service, userID string, plan *renderPlan) (string, func(), error) {
-	tmpDir, err := os.MkdirTemp("", "beeftv-render-*")
+	tmpDir, err := os.MkdirTemp("", "qisitv-render-*")
 	if err != nil {
 		return "", nil, fmt.Errorf("创建临时目录失败: %w", err)
 	}

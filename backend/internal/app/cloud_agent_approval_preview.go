@@ -9,9 +9,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"infinite-canvas/backend/internal/canvas/capability"
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/canvas/capability"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 )
 
 // cloudAgentApprovalPreview is server-authored explanatory data. It never

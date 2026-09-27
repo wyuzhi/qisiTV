@@ -1,6 +1,6 @@
 services:
   backend:
-    image: beeftv-backend:local
+    image: qisitv-backend:local
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -27,7 +27,7 @@ services:
     stop_grace_period: ${CANVAS_SHUTDOWN_TIMEOUT:-10m}
 
   web:
-    image: beeftv-web:local
+    image: qisitv-web:local
     build:
       context: .
       dockerfile: Dockerfile

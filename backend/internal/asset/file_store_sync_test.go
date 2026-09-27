@@ -33,7 +33,7 @@ func TestFileStoreWritePublishesFileAfterAtomicReplace(t *testing.T) {
 	if string(body) != "gpt-image-2-bytes" {
 		t.Fatalf("published body = %q", body)
 	}
-	temporary, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".beeftv-resource-*"))
+	temporary, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".qisitv-resource-*"))
 	if err != nil {
 		t.Fatal(err)
 	}

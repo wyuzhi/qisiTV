@@ -5,10 +5,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"infinite-canvas/backend/internal/app"
-	"infinite-canvas/backend/internal/database"
-	"infinite-canvas/backend/internal/repository"
-	"infinite-canvas/backend/internal/workspace"
+	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/database"
+	"qisitv/backend/internal/repository"
+	"qisitv/backend/internal/workspace"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/sqlite"

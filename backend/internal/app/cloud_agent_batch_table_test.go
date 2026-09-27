@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"infinite-canvas/backend/internal/model"
+	"qisitv/backend/internal/model"
 )
 
 func cloudAgentBatchTableCall(t *testing.T, name, callID string, args any) cloudAgentCall {

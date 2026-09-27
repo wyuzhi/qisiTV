@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/repository"
 )
 
 // taskTerminalCoordinator 收敛任务进入终态后的业务策略。
@@ -21,6 +21,7 @@ type taskTerminalCoordinator struct {
 	outputs           taskOutputLifecycle
 	userFacingMessage func(error) string
 	logFailedAttempt  func(model.Task, error)
+	canvasWriteback   func(model.Task)
 }
 
 type taskTerminalRepository interface {
@@ -71,6 +72,7 @@ func newTaskTerminalCoordinator(s *Service) *taskTerminalCoordinator {
 		outputs:           adapter,
 		userFacingMessage: s.UserFacingErrorMessage,
 		logFailedAttempt:  s.ensureFailedProviderAttemptLogged,
+		canvasWriteback:   s.noteExternalAgentTask,
 	}
 }
 
@@ -126,12 +128,18 @@ func (c *taskTerminalCoordinator) handleExecutionFailure(task *model.Task, err e
 }
 
 func (c *taskTerminalCoordinator) handleAlreadyCancelled(task model.Task) error {
+	if c.canvasWriteback != nil {
+		c.canvasWriteback(task)
+	}
 	c.finalizeReplay(&task, model.TaskStatusCancelled, "文本回放草稿归并失败")
 	_ = c.logger.log(task.UserID, task.ID, "warn", "任务已取消，worker 已停止执行", "")
 	return nil
 }
 
 func (c *taskTerminalCoordinator) handleCancelledResult(task model.Task) error {
+	if c.canvasWriteback != nil {
+		c.canvasWriteback(task)
+	}
 	c.finalizeReplay(&task, model.TaskStatusCancelled, "文本回放草稿归并失败")
 	_ = c.logger.log(task.UserID, task.ID, "warn", "任务已取消，丢弃生成结果", "")
 	return nil
@@ -176,6 +184,9 @@ func (c *taskTerminalCoordinator) handleSuccess(task *model.Task) error {
 		completionErr = fmt.Errorf("任务成功后读取任务产物失败：%w", fetchErr)
 		_ = c.logger.log(task.UserID, task.ID, "error", "任务成功但读取任务产物失败", fetchErr.Error())
 	} else {
+		if c.canvasWriteback != nil {
+			c.canvasWriteback(*completedTask)
+		}
 		if registerErr := c.outputs.RegisterTaskOutputFromTask(*completedTask); registerErr != nil {
 			// 任务成功与产物登记分开记账；登记失败保持步骤异常，允许项目页幂等补登记。
 			_ = c.logger.log(task.UserID, task.ID, "error", "任务成功但项目产物登记失败", registerErr.Error())
@@ -195,6 +206,9 @@ func (c *taskTerminalCoordinator) markTerminalState(task *model.Task) error {
 	}
 	if !updated {
 		return repository.ErrTaskStateConflict
+	}
+	if c.canvasWriteback != nil {
+		c.canvasWriteback(*task)
 	}
 	return nil
 }
