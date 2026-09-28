@@ -1928,7 +1928,7 @@
 
     .canvas-topbar-brand-mark { display: grid; width: 24px; height: 24px; flex: 0 0 24px; place-items: center; overflow: hidden; border-radius: 6px; background: #f4f4f4; }
     .canvas-topbar-brand-mark[data-logo-frame-enabled="false"] { background: #f4f4f4 !important; border-radius: 6px !important; }
-    .canvas-topbar-brand-mark-image { width: 18px; height: 18px; object-fit: contain; filter: invert(1); }
+    .canvas-topbar-brand-mark-image { width: 18px; height: 18px; object-fit: contain; }
     .canvas-topbar-brand-mark-fallback { color: #101010; font-size: 14px; font-weight: 700; line-height: 1; }
 
     /* LibTV's project menu is intentionally sparse: four text-only rows at

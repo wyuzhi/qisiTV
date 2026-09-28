@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <title>qisiTV</title>
-  <rect x="1" y="1" width="62" height="62" rx="18" fill="#10171E" stroke="#314149" stroke-width="2"/>
-  <circle cx="30" cy="30" r="16" stroke="#F2F7F5" stroke-width="7"/>
-  <path d="M35 35 48 48" stroke="#80E0CB" stroke-width="7" stroke-linecap="round"/>
-</svg>

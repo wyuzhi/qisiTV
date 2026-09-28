@@ -27,13 +27,27 @@ test("old built-in appearance resolves to qisiTV while custom branding remains c
     expect(migrated.brandName).toBe("qisiTV");
     expect(migrated.brandSlug).toBe("qisitv");
     expect(migrated.seoTitle).toBe("qisiTV");
-    expect(migrated.logoUrl).toBe("/qisitv-mark.svg");
-    expect(migrated.darkLogoUrl).toBe("/qisitv-mark.svg");
+    expect(migrated.logoUrl).toBe("/qisitv-logo.jpg");
+    expect(migrated.darkLogoUrl).toBe("/qisitv-logo.jpg");
     expect(migrated.logoConfigured).toBe(false);
     expect(DEFAULT_PUBLIC_APPEARANCE.brandName).toBe("qisiTV");
     const custom = normalizePublicAppearance({ brandName: "Custom Studio", brandSlug: "custom-studio", logoUrl: "/api/resources/logo/file", logoConfigured: true });
     expect(custom.brandName).toBe("Custom Studio");
     expect(custom.logoUrl).toBe("/api/resources/logo/file");
+    expect(custom.logoConfigured).toBe(true);
+});
+
+test("old built-in Q logos migrate while custom remote logos keep their original image", () => {
+    for (const path of ["/qisitv-mark.svg", "/qisitv-logo.svg", "/logo.svg", "/qisitv-mark.svg?v=1"]) {
+        const appearance = normalizePublicAppearance({ logoUrl: path, darkLogoUrl: path, logoConfigured: true, darkLogoConfigured: true });
+        expect(appearance.logoUrl).toBe("/qisitv-logo.jpg");
+        expect(appearance.darkLogoUrl).toBe("/qisitv-logo.jpg");
+        expect(appearance.logoConfigured).toBe(false);
+        expect(appearance.darkLogoConfigured).toBe(false);
+    }
+    const custom = normalizePublicAppearance({ logoUrl: "https://example.com/logo.svg", logoConfigured: true });
+    expect(custom.logoUrl).toBe("https://example.com/logo.svg");
+    expect(custom.darkLogoUrl).toBe("https://example.com/logo.svg");
     expect(custom.logoConfigured).toBe(true);
 });
 

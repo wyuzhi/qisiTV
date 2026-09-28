@@ -4,7 +4,7 @@
 
 ## 产品行为
 
-用户用桌面 Chrome / Edge 打开网站，在「本地文件与 Agent」选择项目根目录。每次新建项目产生一个真实子目录，导入素材与生成结果随画布保存到其中。普通网页创作只需要浏览器；使用 Codex 时安装一次 MCP，由 Codex 自动启动本机服务并提供配对码。没有注册、登录、积分、内置 Agent 聊天或云端项目数据库，模型服务保留 LikeAI。
+用户用桌面 Chrome / Edge 打开网站，在「本地文件与 Agent」选择项目根目录。每次新建项目产生一个真实子目录，导入素材与生成结果随画布保存到其中。普通网页创作只需要浏览器；需要 Codex 时复制网站的一段安装指令，由 Agent 检查环境并安装起司 TV 插件。安装一次后，在 Codex 新任务中获取配对码，再在网页确认连接。没有注册、登录、积分、内置 Agent 聊天或云端项目数据库，模型服务保留 LikeAI。
 
 浏览器始终是文件的唯一写入者。连接器不接管目录写入，也不建立另一份项目数据库；无论用户手工修改还是 Agent 发命令，最终都由同一网页状态与目录保存服务提交。
 
@@ -44,6 +44,14 @@ qisiTV 项目/
 
 ## 本地连接器与 MCP
 
+### 安装体验与 LibTV 的区别
+
+LibTV 的[插件页面](https://www.liblib.tv/plugin)采用「复制一段指令给 Agent 安装，再完成账户授权」的入口；起司 TV 沿用这种由 Agent 完成安装的操作方式。底层连接不同：LibTV 的[公开 MCP 配置](https://github.com/liblib-ai/marketplace/blob/main/plugins/libtv/.mcp.json)指向远程 HTTP 服务 `https://mcp.liblib.tv/mcp`，[marketplace 配置](https://github.com/liblib-ai/marketplace/blob/main/.agents/plugins/marketplace.json)要求安装时认证；该服务提供 [OAuth 受保护资源元数据](https://mcp.liblib.tv/.well-known/oauth-protected-resource/mcp)，对应其账户授权流程。
+
+起司 TV 插件使用本机 stdio MCP 与回环 WebSocket，用户授权的是当前电脑上的网页会话和项目目录。这里保留无账号、本地文件保存和一次性网页配对，不添加远程 HTTP MCP、OAuth 账号登录或云端项目同步。安装步骤相似不代表数据架构相同。
+
+### 命令路径
+
 ```text
 Codex / stdio MCP
         │ qisitv-web 工具
@@ -60,7 +68,9 @@ Codex 启动 `qisitv-connect mcp` 时，连接器自动启动或复用后台本�
 
 配对码十分钟有效、一次使用、错误五次失效，浏览器会话最长十二小时。只允许明确的网站来源，浏览器令牌与 Agent 令牌隔离，不以知道端口作为授权。网页刷新或断线后由 Codex 再次调用 `qisitv_pair`，用户重新确认连接，不自动重播命令。
 
-`install-codex.command` / `.cmd` / `.sh` 将连接器复制到用户固定安装位置，再调用可用的 Codex CLI 注册 `qisitv-web`，以安装后的绝对路径运行 `mcp`。安装成功后解压目录和安装终端不再是运行依赖。网页不能自行改 Codex 配置。旧的 `qisitv` MCP 继续指向本机 Go 工作区；它不自动与网站目录合并。多个网页会话由 `canvas_list_sessions` 明确选择，不猜测最近项目。
+推荐入口为公开 Codex 插件。网页提供可复制的自然语言安装指令，要求 Agent 检查 Git、Node.js 18+ 和 `codex plugin` 能力，从 `https://github.com/wyuzhi/qisiTV.git` 的 `main` 分支添加 `qisitv` marketplace，并安装 `qisitv@qisitv`。插件通过 Node 启动器准备对应系统的本机连接器并提供 `qisitv-web` MCP；当前对话尚未加载新工具时，用户在 Codex 新建任务。环境缺失或安装失败必须明确报告。安装过程不需要网页先配对，目录授权和配对仍保留独立用户确认。
+
+系统安装包和 `install-codex.command` / `.cmd` / `.sh` 收入「手动安装 / 其他 MCP 客户端」折叠备选。手动脚本将程序复制到用户固定位置后注册，因此成功后可删除解压目录。插件安装与手动 MCP 安装是替代路径，不要求两者都执行。网页不能自行改 Codex 配置。插件名称 `qisitv` 与旧 Go 工作区的 `qisitv` MCP 不表示同一数据源；画布命令明确使用 `qisitv-web`。多个网页会话由 `canvas_list_sessions` 明确选择，不猜测最近项目。
 
 命令协议为 `{id, operation, args}`，响应为 `{id, result}` 或 `{id, error: {code, message}}`。网页暴露画布读取、创建、节点和连线修改、参考设置、批量操作、素材导入、模型列表及生成任务操作。`canvas_current` 读取当前路由和编辑器选区；未打开任何画布时返回空交互。写入前校验项目已绑定所选目录，成功响应等待实际文件提交。
 

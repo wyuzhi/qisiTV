@@ -8,7 +8,7 @@ qisiTV 是基于上游 `glanderness/BeefTV` 二次开发的 AI 影视与短剧�
 
 当前用户确定的产品范围：无需注册、登录或积分；模型服务仅保留官方 LikeAI。网站模式由 `VITE_QISITV_BROWSER_ONLY=1` 启用，用户授权本机目录后，项目和素材写入真实独立文件夹，IndexedDB 仅作句柄、配置与恢复缓存；网站函数只临时转发 LikeAI 请求，不建立云端工作区。不要在合并上游时恢复 BeefAPI 钱包或其他服务商入口。
 
-每个项目必须对应本机真实独立文件夹，导入素材和生成结果自动写入；浏览器缓存不算最终项目持久化。普通网页直接使用，需要 Agent 时安装一次 `qisitv-web` MCP；MCP 自动后台启动 `qisitv-connect` 本机服务，用户让 Codex 调用 `qisitv_pair` 获取配对码，再在网页确认连接。不要把手动运行 `start` 或保留终端窗口作为正常使用步骤。安装脚本复制到用户固定位置后注册，安装成功可删除解压目录。命令经回环 WebSocket 交给已打开的网页执行，网页是唯一文件写入者；不要另建 Go 数据库或声称网页关闭后仍可执行。旧 `qisitv` MCP 继续连接桌面 Go 工作区，两者不自动合并。见 `docs/design/project-folders-and-agent.md`。
+每个项目必须对应本机真实独立文件夹，导入素材和生成结果自动写入；浏览器缓存不算最终项目持久化。Agent 上手主流程是「复制安装指令给 Codex → 新任务调用 qisitv_pair → 网页输入配对码」。安装指令检查 Git、Node.js 18+ 和 `codex plugin` 能力，从 `https://github.com/wyuzhi/qisiTV.git` 的 `main` 分支添加 `qisitv` marketplace，安装 `qisitv@qisitv` 插件；插件提供 `qisitv-web` MCP，自动后台启动本机服务。环境缺失或安装失败不得宣称成功。不要把选择系统下载、手动运行安装脚本、`start` 或保留终端窗口作为推荐主流程；手动包仅放「手动安装 / 其他 MCP 客户端」折叠备选。安装插件不会取代目录读写授权或网页配对。命令经回环 WebSocket 交给已打开的网页执行，网页是唯一文件写入者；不要另建 Go 数据库或声称网页关闭后仍可执行。旧 `qisitv` MCP 继续连接桌面 Go 工作区，两者不自动合并。见 `docs/design/project-folders-and-agent.md`。
 
 仓库由几个边界清晰但可独立运行的单元组成：
 

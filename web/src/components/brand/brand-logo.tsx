@@ -1,7 +1,7 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
-import { appearanceLogoURL, useAppearanceStore } from "@/stores/use-appearance-store";
+import { appearanceLogoURL, DEFAULT_PUBLIC_APPEARANCE, useAppearanceStore } from "@/stores/use-appearance-store";
 import type { ThemeName } from "@/stores/use-theme-store";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 
@@ -25,7 +25,7 @@ export function BrandLogo({ className, fallback, alt = "", theme = "auto" }: Bra
             src={source}
             alt={alt}
             className={cn("block object-contain", className)}
-            style={!appearance.logoConfigured && (theme === "auto" ? currentTheme : theme) === "light" ? { filter: "invert(1)" } : undefined}
+            style={source === DEFAULT_PUBLIC_APPEARANCE.logoUrl ? { borderRadius: "50%" } : undefined}
             draggable={false}
             onError={(event) => {
                 event.currentTarget.style.visibility = "hidden";

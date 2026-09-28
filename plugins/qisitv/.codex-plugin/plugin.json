@@ -1,0 +1,29 @@
+{
+  "name": "qisitv",
+  "version": "0.2.0",
+  "description": "通过本地 MCP 控制 qisiTV 网页画布，项目与素材保存在自己的电脑。",
+  "author": {
+    "name": "qisiTV",
+    "url": "https://github.com/wyuzhi"
+  },
+  "homepage": "https://cheeser.link/qisitv/#/local",
+  "repository": "https://github.com/wyuzhi/qisiTV",
+  "license": "MIT",
+  "keywords": ["qisitv", "canvas", "video", "local", "mcp"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "qisiTV",
+    "shortDescription": "用 Codex 操作本地视频创作画布",
+    "longDescription": "连接 cheeser.link 的 qisiTV 画布，读取选区、编排节点、导入素材。插件自动准备并管理本地 MCP；网页需保持打开，项目和素材写入用户选择的本机文件夹。无需 qisiTV 账号。生成须使用网页中配置的 LikeAI，并事先获得费用授权。需要 Node.js 18+。",
+    "developerName": "qisiTV",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://cheeser.link/qisitv/",
+    "defaultPrompt": ["连接我的 qisiTV 画布，给我配对码。", "读取当前画布和选区，先不要调用付费生成。"],
+    "brandColor": "#0B2035",
+    "composerIcon": "./assets/qisitv-logo.jpg",
+    "logo": "./assets/qisitv-logo.jpg",
+    "logoDark": "./assets/qisitv-logo.jpg"
+  },
+  "mcpServers": "./.mcp.json"
+}

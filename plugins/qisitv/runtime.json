@@ -1,0 +1,30 @@
+{
+  "version": "0.2.0",
+  "release": "mcp-v0.2.0",
+  "assets": {
+    "darwin-arm64": {
+      "file": "qisitv-connect-darwin-arm64",
+      "sha256": "a7d90aceab704f311d1a3cc078935f60e1afadcecd7889fea8338e0c5ef45f19"
+    },
+    "darwin-amd64": {
+      "file": "qisitv-connect-darwin-amd64",
+      "sha256": "682ff436c00f9f5996e0cd92b20ef878df5dcd02a63a4f9f40dcd0d575b426fc"
+    },
+    "linux-arm64": {
+      "file": "qisitv-connect-linux-arm64",
+      "sha256": "5b96c396b6825f874562d9c63a33aecbfe55f55403f38bf086c39eb042d6af2a"
+    },
+    "linux-amd64": {
+      "file": "qisitv-connect-linux-amd64",
+      "sha256": "5c99dba176662e411d3ba3a6607389dabb4cacac41fadc88978e069c031d69d9"
+    },
+    "windows-arm64": {
+      "file": "qisitv-connect-windows-arm64.exe",
+      "sha256": "822019e0b630ee8c35e7284e159bc76218c05b75542a844dc542330154c807fc"
+    },
+    "windows-amd64": {
+      "file": "qisitv-connect-windows-amd64.exe",
+      "sha256": "76fe14805df249dd1b897c5280d4cae2f4b83a842724512d2f7ebcfa992c3928"
+    }
+  }
+}

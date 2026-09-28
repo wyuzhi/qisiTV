@@ -10,8 +10,8 @@ export const DEFAULT_PUBLIC_APPEARANCE: PublicAppearance = {
     brandSlug: "qisitv",
     authHeroTitle: "让一个故事，\n从文字走向银幕。",
     authHeroDescription: "",
-    logoUrl: publicAssetUrl("qisitv-mark.svg"),
-    darkLogoUrl: publicAssetUrl("qisitv-mark.svg"),
+    logoUrl: publicAssetUrl("qisitv-logo.jpg"),
+    darkLogoUrl: publicAssetUrl("qisitv-logo.jpg"),
     logoFrameEnabled: false,
     authVideoUrl: "https://boss-shjd.biliapi.net/updream/aniforge/video/video_bbcb00bd-650d-4249-9346-5cd21fd2484c_m1hc-u0-1pu13x-3v1s.mp4",
     authVideoPosterUrl: "https://i0.hdslb.com/bfs/aitool/aniforge/image/02933f26-5f1b-49ff-a811-b7f95ee5e5b8_m1hc-u0-sau.jpg",
@@ -50,7 +50,11 @@ export function normalizePublicAppearance(value?: Partial<PublicAppearance> | nu
     const authHeroTitle = normalizeAppearanceCopy(value?.authHeroTitle, DEFAULT_PUBLIC_APPEARANCE.authHeroTitle);
     const authHeroDescription = normalizeAppearanceCopy(value?.authHeroDescription, DEFAULT_PUBLIC_APPEARANCE.authHeroDescription, true);
     const customVideo = Boolean(value?.authVideoConfigured);
-    const legacyLogo = (url?: string) => ["/beef-logo.png", "/beef-mark.png"].includes(url || "");
+    const legacyLogo = (url?: string) => {
+        const path = (url || "").split(/[?#]/, 1)[0];
+        return ["beef-logo.png", "beef-mark.png", "qisitv-mark.svg", "qisitv-logo.svg", "logo.svg"]
+            .some((file) => path === `/${file}` || path === publicAssetUrl(file));
+    };
     const customLogo = Boolean(value?.logoConfigured) && !legacyLogo(value?.logoUrl);
     const customDarkLogo = Boolean(value?.darkLogoConfigured) && !legacyLogo(value?.darkLogoUrl);
     const logoUrl = customLogo ? safeAppearanceURL(value?.logoUrl, DEFAULT_PUBLIC_APPEARANCE.logoUrl) : DEFAULT_PUBLIC_APPEARANCE.logoUrl;
@@ -131,6 +135,7 @@ export function applyAppearanceMetadata(appearance: PublicAppearance, targetDocu
         targetDocument.head.appendChild(favicon);
     }
     favicon.href = appearanceLogoURL(appearance, "dark");
+    favicon.removeAttribute("type");
 
     const location = targetDocument.defaultView?.location;
     if (location && (location.protocol === "http:" || location.protocol === "https:")) {

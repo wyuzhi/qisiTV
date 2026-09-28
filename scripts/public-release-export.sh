@@ -41,7 +41,6 @@ rsync -a \
     --exclude='artifacts/' \
     --exclude='test-evidence/' \
     --include='assets/readme/qisitv-workspace.png' \
-    --include='assets/readme/qisitv-wordmark.svg' \
     --include='assets/upstream/demo.mp4' \
     --include='assets/upstream/demo-poster.jpg' \
     --exclude='data/' \

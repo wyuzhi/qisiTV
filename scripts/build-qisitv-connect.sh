@@ -13,7 +13,7 @@ for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 wi
   extension=""
   if [[ "$target_os" == windows ]]; then extension=".exe"; fi
   file_name="qisitv-connect-${target_os}-${target_arch}${extension}"
-  CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" go build -trimpath -ldflags='-s -w' -o "$output_dir/$file_name" ./cmd/qisitv-connect
+  CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" go build -buildvcs=false -trimpath -ldflags='-s -w' -o "$output_dir/$file_name" ./cmd/qisitv-connect
   printf '%s\n' "$output_dir/$file_name"
   package_dir="$(mktemp -d)"
   package_name="qisitv-connect-${target_os}-${target_arch}"

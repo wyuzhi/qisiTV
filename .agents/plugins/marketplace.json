@@ -1,0 +1,20 @@
+{
+  "name": "qisitv",
+  "interface": {
+    "displayName": "qisiTV"
+  },
+  "plugins": [
+    {
+      "name": "qisitv",
+      "source": {
+        "source": "local",
+        "path": "./plugins/qisitv"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
