@@ -25,6 +25,12 @@ type Config struct {
 }
 
 func ConfigPath() (string, error) {
+	if root := os.Getenv("QISITV_CONNECT_CONFIG_DIR"); root != "" {
+		if !filepath.IsAbs(root) {
+			return "", errors.New("QISITV_CONNECT_CONFIG_DIR must be an absolute directory")
+		}
+		return filepath.Join(root, "connection.json"), nil
+	}
 	root, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
@@ -71,11 +77,11 @@ func LoadConfig() (Config, error) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return Config{}, errors.New("start qisitv-connect serve before connecting an Agent")
+		return Config{}, errors.New("qisiTV MCP has not started yet; enable qisitv-web in your Agent")
 	}
 	var config Config
 	if json.Unmarshal(data, &config) != nil || len(config.AgentToken) < 32 {
-		return Config{}, errors.New("invalid connector configuration; restart qisitv-connect serve")
+		return Config{}, errors.New("invalid qisiTV MCP configuration; restart qisitv-web")
 	}
 	parsed, err := url.Parse(config.Address)
 	if err != nil || parsed.Scheme != "http" || parsed.Hostname() != "127.0.0.1" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path != "" {
@@ -113,7 +119,7 @@ func (c *Client) Request(ctx context.Context, method, path string, body any) (ma
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, &RPCError{Code: "CONNECTOR_UNAVAILABLE", Message: "Local connector did not respond. Start qisitv-connect serve; do not retry uncertain writes automatically."}
+		return nil, &RPCError{Code: "CONNECTOR_UNAVAILABLE", Message: "Local qisiTV service did not respond. Restart qisitv-web in your Agent; do not retry uncertain writes automatically."}
 	}
 	defer resp.Body.Close()
 	var result map[string]any
@@ -136,6 +142,17 @@ func (c *Client) Call(ctx context.Context, operation string, args map[string]any
 	}
 	if err := validateArgs(operation, args, false); err != nil {
 		return nil, err
+	}
+	if operation == "qisitv_pair" {
+		result, err := c.Request(ctx, http.MethodPost, "/agent/pair-code", map[string]any{})
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"code": result["code"], "expiresAt": result["expiresAt"],
+			"website":      "https://cheeser.link/qisitv/#/local",
+			"instructions": "Open the website in desktop Chrome or Edge, choose your project folder, and enter this one-use pairing code. Allow local network access if your browser asks. Keep the website and this Agent open. You do not need a separate connector window. The code expires after 10 minutes; after refreshing the page, call qisitv_pair again. No paid generation is submitted by pairing.",
+		}, nil
 	}
 	if operation == "asset_import" {
 		copy := make(map[string]any, len(args)+3)

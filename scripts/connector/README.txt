@@ -1,24 +1,34 @@
-qisiTV 本地连接器
+qisiTV MCP
 
 用途：让 Codex 等本机 Agent 操作正在打开的 https://cheeser.link/qisitv/ 画布。
-网站负责将画布和素材保存到你选择的真实项目文件夹；连接器不建立第二份项目数据库。
+网站负责将画布和素材保存到你选择的真实项目文件夹；MCP 不建立第二份项目数据库。
 
-1. 将本文件夹移动到一个固定位置。之后不要单独移动可执行程序，否则需要重新配置 MCP。
-2. macOS 双击 start.command；Windows 双击 start.cmd；Linux 运行 ./start.sh。
-3. 保持终端窗口打开。网站点击“连接本地 Agent”，输入终端显示的一次性配对码。
-4. 首次使用 Codex，运行 install-codex.command / install-codex.cmd / install-codex.sh。
-   此操作执行 codex mcp add qisitv-web，添加新工具，不修改已有的 qisitv 配置。
-   完成后在 Codex 中重新加载 MCP 工具或开启新对话。
-5. 在 Codex 中说：“使用 qisitv-web 读取当前画布，新建一个文字节点。先不要生成图片或视频。”
+1. 首次安装：macOS 双击 install-codex.command，Windows 双击 install-codex.cmd，
+   Linux 运行 ./install-codex.sh。脚本将程序复制到用户安装目录，然后执行
+   codex mcp add qisitv-web；不会修改已有的 qisitv 配置。
+   安装成功后可关闭安装窗口、删除下载的解压目录。
+2. 重新打开 Codex，让 MCP 生效。之后由 Codex 自动启动本地服务，无需单独运行 start。
+3. 在 Codex 中说：“使用 qisitv-web，调用 qisitv_pair 获取配对码。不要生成素材。”
+4. 用电脑端 Chrome / Edge 打开 https://cheeser.link/qisitv/#/local，选择项目文件夹，
+   粘贴 Codex 给出的配对码并连接。浏览器询问本地网络访问时允许本地服务连接。
+5. 打开画布，在 Codex 中说：“使用 qisitv-web 读取当前画布，新建一个文字节点。
+   先不要生成图片或视频。”
 
-每次重新打开网页需重新配对。在本目录另一个终端运行 ./qisitv-connect pair-code 可获得新码
-（Windows 为 qisitv-connect.exe pair-code）。
-关闭终端会断开连接。无需使用 Agent 时，不必启动此程序。没有账号、注册或云数据库。
+使用期间保持网页和 Codex 打开。刷新网页后，在 Codex 中再次调用 qisitv_pair 获取新码。
+所有 MCP 客户端退出后，后台服务在短暂宽限期后自动停止。没有账号、注册或云数据库。
 多个网站窗口同时连接时，Agent 必须先用 canvas_list_sessions 选择目标窗口。
 
+安装位置：
+macOS：~/Library/Application Support/qisiTV/MCP
+Windows：%LOCALAPPDATA%\qisiTV\MCP
+Linux：${XDG_DATA_HOME:-~/.local/share}/qisiTV/MCP
+更新前请关闭所有使用 qisitv-web 的 Agent，等待约 30 秒，再运行新版安装脚本并重开 Agent。
+如果旧版仍有手动 start / serve 窗口，请先关闭那个窗口。
+
 手动 MCP 配置（适用于支持 stdio MCP 的客户端）：
-command: 本文件夹中 qisitv-connect 的绝对路径（Windows 为 qisitv-connect.exe）
+command: 固定位置中 qisitv-connect 的绝对路径（Windows 为 qisitv-connect.exe）
 args: ["mcp"]
+手动配置时不要移动程序。高级排查可手动运行 qisitv-connect serve，日常使用无需运行。
 
 本版 macOS 软件尚未签名和公证。若系统阻止运行，请在确认下载来源后按 macOS
 “隐私与安全性”中的“仍要打开”流程处理；不要关闭系统安全保护。

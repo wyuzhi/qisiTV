@@ -55,7 +55,7 @@ qisiTV 同时提供项目库、个人资产库、异步任务、模型渠道和�
 
 ## 开始使用
 
-网站版无需注册。使用桌面 Chrome / Edge，在「本地文件与 Agent」选择一个项目根目录；每个项目的画布与素材自动写入独立文件夹。需要 Codex 时下载本地连接器，安装 `qisitv-web` MCP 并输入配对码，保持网页打开即可控制同一画布。使用、安装和数据边界见[网站版说明](docs/content/docs/backend/browser-workspace.mdx)。下面的旧桌面 Go 工作区独立保留，不与网站项目自动合并。
+网站版无需注册。使用桌面 Chrome / Edge，在「本地文件与 Agent」选择一个项目根目录；每个项目的画布与素材自动写入独立文件夹。需要 Codex 时安装一次 `qisitv-web` MCP，让 Codex 调用 `qisitv_pair` 自动启动本机服务并获取配对码，在网页确认连接即可控制同一画布。使用时保持网页打开，无需手动启动连接器或保留终端窗口。使用、安装和数据边界见[网站版说明](docs/content/docs/backend/browser-workspace.mdx)。下面的旧桌面 Go 工作区独立保留，不与网站项目自动合并。
 
 本地开发需要 Bun 和 Go 1.25。在本仓库中打开两个终端：
 

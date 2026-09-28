@@ -29,11 +29,11 @@ export function disconnectBrowserAgent() {
     generation++;
     socket?.close(1000, "User disconnected");
     socket = undefined;
-    update({ status: "disconnected", message: "已断开。重新连接时输入新的配对码。" });
+    update({ status: "disconnected", message: "已断开。请让 Codex 获取新配对码后连接。" });
 }
 
 export async function connectBrowserAgent(code: string) {
-    if (!code.trim()) throw new Error("请输入本地连接器显示的配对码");
+    if (!code.trim()) throw new Error("请输入 Codex 调用 qisitv_pair 返回的配对码");
     disconnectBrowserAgent();
     const attempt = generation;
     update({ status: "connecting", message: "正在连接本机，请允许浏览器访问本地网络…" });
@@ -43,7 +43,7 @@ export async function connectBrowserAgent(code: string) {
             body: JSON.stringify({ code: code.trim() }), credentials: "omit", signal: AbortSignal.timeout(15_000),
         });
         const data = await response.json().catch(() => ({})) as { token?: string; error?: unknown };
-        if (!response.ok || !data.token) throw new Error("配对未成功。请检查连接器窗口中的配对码；过期时运行 pair-code 获取新码。");
+        if (!response.ok || !data.token) throw new Error("配对未成功。请让 Codex 再次调用 qisitv_pair 获取新配对码。");
         if (attempt !== generation) return;
         const ws = new WebSocket("ws://127.0.0.1:17372/ws", ["qisitv-v1", `qisitv-auth.${data.token}`]);
         socket = ws;
@@ -96,7 +96,7 @@ export async function connectBrowserAgent(code: string) {
             });
         };
         ws.onerror = () => {
-            if (attempt === generation) update({ status: "error", message: "无法连接本机。请启动连接器，并在 Chrome / Edge 中允许此网站访问本地网络。" });
+            if (attempt === generation) update({ status: "error", message: "无法连接本机。请让 Codex 调用 qisitv_pair，并在电脑上的 Chrome / Edge 中允许此网站访问本地网络。" });
             ws.close();
         };
         ws.onclose = () => {
@@ -107,11 +107,11 @@ export async function connectBrowserAgent(code: string) {
                 // already executing may have committed, so never replay it automatically.
                 generation++;
                 socket = undefined;
-                update({ status: "disconnected", message: "连接已断开，未自动重试操作。请检查画布后重新配对。" });
+                update({ status: "disconnected", message: "连接已断开，未自动重试操作。请先检查画布，再让 Codex 获取新配对码。" });
             }
         };
     } catch (error) {
-        if (attempt === generation) update({ status: "error", message: error instanceof TypeError ? "未找到本地连接器。请先启动它，并允许浏览器访问本地网络。" : error instanceof Error ? error.message : "连接失败" });
+        if (attempt === generation) update({ status: "error", message: error instanceof TypeError ? "未连接到本机服务。请在 Codex 调用 qisitv_pair 获取配对码，并允许浏览器访问本地网络。" : error instanceof Error ? error.message : "连接失败" });
         throw new Error(state.message);
     }
 }

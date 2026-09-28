@@ -18,7 +18,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"qisitv/backend/internal/browserbridge"
 )
 
@@ -38,12 +37,16 @@ func run(ctx context.Context, args []string) error {
 	}
 	switch command {
 	case "serve":
-		return serve(ctx, args)
+		return serve(ctx, args, false)
+	case "managed-serve":
+		return serve(ctx, args, true)
+	case "mcp":
+		return runMCP(ctx, args)
 	case "version", "--version":
 		fmt.Println("qisitv-connect", browserbridge.Version)
 		return nil
 	case "help", "--help", "-h":
-		fmt.Println("qisitv-connect serve        Start the local connector and show a pairing code\nqisitv-connect pair-code    Issue a new one-use browser pairing code\nqisitv-connect status       Show connected browser projects\nqisitv-connect install-codex Register qisitv-web MCP in Codex (only when you run this command)\nqisitv-connect mcp          Run MCP stdio for a client\nqisitv-connect call NAME JSON  Call an Agent tool from the terminal\nqisitv-connect version")
+		fmt.Println("qisitv-connect install-codex Register qisitv-web MCP in Codex (only when you run this command)\nqisitv-connect mcp          Run MCP stdio; the local bridge starts and stops automatically\nqisitv-connect pair-code    Issue a new one-use browser pairing code\nqisitv-connect status       Show connected browser projects\nqisitv-connect call NAME JSON  Call an Agent tool from the terminal\nqisitv-connect serve        Manually run the local bridge for debugging\nqisitv-connect version")
 		return nil
 	case "install-codex":
 		path, err := os.Executable()
@@ -59,7 +62,7 @@ func run(ctx context.Context, args []string) error {
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("could not register Codex MCP; install the Codex CLI first: %w", err)
 		}
-		fmt.Println("Registered qisitv-web. Keep serve running, pair the website, then reload Codex tools.")
+		fmt.Println("Registered qisitv-web. Reload Codex tools or open a new chat, then ask: Use qisitv_pair to connect my qisiTV canvas. Codex starts the local service automatically; no separate terminal window is needed.")
 		return nil
 	}
 	config, err := browserbridge.LoadConfig()
@@ -68,8 +71,6 @@ func run(ctx context.Context, args []string) error {
 	}
 	client := browserbridge.NewClient(config)
 	switch command {
-	case "mcp":
-		return browserbridge.NewMCPServer(client).Run(ctx, &mcp.StdioTransport{})
 	case "pair-code":
 		reply, err := client.Request(ctx, http.MethodPost, "/agent/pair-code", map[string]any{})
 		if err != nil {
@@ -123,7 +124,7 @@ func printJSON(value any) error {
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(value)
 }
-func serve(ctx context.Context, args []string) error {
+func serve(ctx context.Context, args []string, managed bool) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	port := flags.Int("port", browserbridge.DefaultPort, "Loopback port")
 	if err := flags.Parse(args); err != nil {
@@ -143,11 +144,19 @@ func serve(ctx context.Context, args []string) error {
 		return err
 	}
 	bridge := browserbridge.NewServer(config.AgentToken, *port)
-	code, expiry := bridge.NewPairCode()
-	fmt.Printf("qisiTV local connector %s\nOpen https://cheeser.link/qisitv/ and choose Connect local Agent.\nPairing code: %s\nValid until: %s (one use)\nKeep this window open. Ctrl+C disconnects all browsers.\n", browserbridge.Version, code, expiry.Format(time.RFC3339))
+	var idle <-chan struct{}
+	if managed {
+		idle = bridge.ManageIdle(ctx, browserbridge.ManagedIdleGrace, browserbridge.ManagedLeaseTTL)
+	} else {
+		code, expiry := bridge.NewPairCode()
+		fmt.Fprintf(os.Stderr, "qisiTV local bridge %s (manual debug mode)\nOpen https://cheeser.link/qisitv/#/local\nPairing code: %s\nValid until: %s (one use)\nKeep this debug window open. Normal Codex use starts this service automatically.\n", browserbridge.Version, code, expiry.Format(time.RFC3339))
+	}
 	server := &http.Server{Handler: bridge, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-idle:
+		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		_ = server.Shutdown(shutdownCtx)

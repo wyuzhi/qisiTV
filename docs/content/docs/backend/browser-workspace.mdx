@@ -6,7 +6,7 @@ title: 网站版、本地项目文件夹与 Agent
 
 同一个项目目录请只在一个浏览器中编辑。跨浏览器或不同网站来源的同时写入不受同一把浏览器锁保护；切换浏览器前先等待保存完成并关闭旧页面。
 
-打开 [qisiTV 起司 TV](https://cheeser.link/qisitv/)，使用桌面 Chrome 或 Edge，进入「本地文件与 Agent」。先选择电脑上的项目根目录；以后每个项目都会有自己的真实子文件夹，画布与素材自动写入。普通创作不需要注册、登录或启动本地程序。需要 Codex 操作画布时，再启动本地连接器。
+打开 [qisiTV 起司 TV](https://cheeser.link/qisitv/)，使用桌面 Chrome 或 Edge，进入「本地文件与 Agent」。先选择电脑上的项目根目录；以后每个项目都会有自己的真实子文件夹，画布与素材自动写入。普通创作不需要注册、登录或启动本地程序。需要 Codex 操作画布时，安装一次 `qisitv-web` MCP，之后由 Codex 自动启动本机服务。
 
 ## 先设置保存位置
 
@@ -46,7 +46,7 @@ qisiTV 项目/
 
 ## 让 Codex 操作同一个画布
 
-首次设置分为下载、安装 MCP、网页配对三步；以后日常使用只需启动连接器并配对。
+首次设置分为下载、安装 MCP、网页配对三步。以后直接让 Codex 获取配对码，在网页确认连接即可，无需手动启动连接器或保留终端窗口。
 
 ### 下载本地连接器
 
@@ -61,24 +61,30 @@ qisiTV 项目/
 | Linux · x64 | [linux-amd64.tar.gz](https://cheeser.link/qisitv/downloads/qisitv-connect-linux-amd64.tar.gz) |
 | Linux · ARM | [linux-arm64.tar.gz](https://cheeser.link/qisitv/downloads/qisitv-connect-linux-arm64.tar.gz) |
 
-解压后把整个连接器目录放到固定位置，避免配置 MCP 后又移动可执行文件。下载目录同时提供 [SHA256SUMS](https://cheeser.link/qisitv/downloads/SHA256SUMS)。这六种是构建目标，不代表每种系统都经过实机验证。
+解压后运行下面的安装脚本。脚本把连接器复制到用户的固定安装位置，再注册 MCP；安装完成后可以关闭安装窗口、删除解压目录。下载目录同时提供 [SHA256SUMS](https://cheeser.link/qisitv/downloads/SHA256SUMS)。这六种是构建目标，不代表每种系统都经过实机验证。
 
 Mac 包尚未签名、公证，Windows 包没有代码签名。系统提示未知发布者时，先核对下载来源；macOS 可按「系统设置 → 隐私与安全性」中的「仍要打开」流程操作，不需要关闭系统安全保护。
 
-### 启动、安装与配对
+升级前请关闭所有使用 `qisitv-web` 的 Agent，等待约 30 秒，再运行新版安装脚本并重开 Agent。如果旧版仍有手动 `start` / `serve` 窗口，请先关闭那个窗口。新版不会接管占用端口的未知旧服务。
 
-1. Mac 双击 `start.command`；Windows 双击 `start.cmd`；Linux 运行 `./start.sh`。保持打开的终端窗口运行。
-2. 首次使用，再运行同目录的 `install-codex.command` / `install-codex.cmd` / `install-codex.sh`。脚本执行 `codex mcp add qisitv-web`，只添加网站连接器；需要可用的 Codex CLI。完成后重新加载 Codex 工具或重新打开 Codex。
-3. 网站「本地文件与 Agent」输入终端显示的一次性配对码，点击「连接」。浏览器询问是否允许访问本地网络时选择允许。
-4. 回到项目列表，打开要操作的画布。在 Codex 中发送下面的指令。
+### 安装一次，由 Codex 获取配对码
+
+1. Mac 双击 `install-codex.command`；Windows 双击 `install-codex.cmd`；Linux 运行 `./install-codex.sh`。脚本通过可用的 Codex CLI 添加 `qisitv-web`，不修改原有 `qisitv` 配置。
+2. 安装完成后重新加载 Codex 工具或重新打开 Codex，然后发送以下连接指令。页面也提供「复制连接指令」按钮。
+
+> 使用 qisitv-web，调用 qisitv_pair 获取配对码，不要生成素材。
+
+MCP 会在后台自动启动或复用本机服务，`qisitv_pair` 返回临时配对码与网页入口，获取配对码不要求网页已连接。把 Codex 返回的配对码粘贴到网站「本地文件与 Agent」，点击「连接」。浏览器询问是否允许访问本地网络时选择允许。
+
+连接成功后回到项目列表，打开要操作的画布，再发送下面的免费试用指令。它与获取配对码的指令是两个独立步骤：
 
 > 使用 qisitv-web 连接的画布。先列出会话，读取我当前打开的项目和选区，然后在空白处添加一个文字节点，内容是「第一个镜头的创作思路」。先不要调用付费生成。
 
 节点应出现在当前网页，并自动保存到该项目文件夹。选中参考图后，可以继续说「使用我选中的两张图作为参考，连接到一个视频节点，先不要生成」。Agent 通过 `canvas_current` 和画布数据读取真实选区，不靠最近打开的项目猜测目标。
 
-使用期间保持网页和连接器打开。连接器只监听 `127.0.0.1:17372`，无需向公网开放端口。刷新或重新打开网页后需要重新配对；配对码有效十分钟且只能使用一次。需要新码时，在连接器目录另开终端运行 `./qisitv-connect pair-code`，Windows 使用 `qisitv-connect.exe pair-code`。连接器运行中也可使用 `status` 查看会话。多个网页已配对时，让 Agent 先执行 `canvas_list_sessions` 选择目标。
+使用期间保持网页打开。连接器由 MCP 在后台管理，只监听 `127.0.0.1:17372`，无需向公网开放端口。刷新或重新打开网页后需要重新配对；配对码有效十分钟且只能使用一次。需要新码时再让 Codex 调用 `qisitv_pair`。多个网页已配对时，让 Agent 先执行 `canvas_list_sessions` 选择目标。
 
-旧的 `qisitv` MCP 操作原本机 Go 工作区；这里安装的 **`qisitv-web`** 操作已配对的网站画布。它们是两个明确的入口，项目不会自动混合。已有旧工具时，请在指令中明确写 `qisitv-web`。其他支持 stdio MCP 的客户端可将命令设置为连接器可执行文件的绝对路径，参数为 `["mcp"]`。
+旧的 `qisitv` MCP 操作原本机 Go 工作区；这里安装的 **`qisitv-web`** 操作已配对的网站画布。它们是两个明确的入口，项目不会自动混合。已有旧工具时，请在指令中明确写 `qisitv-web`。其他支持 stdio MCP 的客户端可将命令设置为安装后连接器可执行文件的绝对路径，参数为 `["mcp"]`；同样由 MCP 自动启动本机服务。
 
 ### 生成授权与失败恢复
 

@@ -33,16 +33,17 @@ for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 wi
   done < <(CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" go list -deps -f '{{if .Module}}{{.Module.Path}}|{{.Module.Dir}}{{end}}' ./cmd/qisitv-connect | sort -u)
   case "$target_os" in
     darwin)
-      cp "$repo_dir/scripts/connector/start.command" "$repo_dir/scripts/connector/install-codex.command" "$package_dir/$package_name/"
+      cp "$repo_dir/scripts/connector/install-codex.command" "$package_dir/$package_name/"
       chmod +x "$package_dir/$package_name/"*.command
-      (cd "$package_dir" && zip -q -r "$output_dir/$package_name.zip" "$package_name")
+      (cd "$package_dir" && zip -q -r "$package_name.zip" "$package_name")
+      mv -f "$package_dir/$package_name.zip" "$output_dir/$package_name.zip"
       ;;
     windows)
-      cp "$repo_dir/scripts/connector/start.cmd" "$repo_dir/scripts/connector/install-codex.cmd" "$package_dir/$package_name/"
-      (cd "$package_dir" && zip -q -r "$output_dir/$package_name.zip" "$package_name")
+      awk '{ sub(/\r$/, ""); printf "%s\r\n", $0 }' "$repo_dir/scripts/connector/install-codex.cmd" > "$package_dir/$package_name/install-codex.cmd"
+      (cd "$package_dir" && zip -q -r "$package_name.zip" "$package_name")
+      mv -f "$package_dir/$package_name.zip" "$output_dir/$package_name.zip"
       ;;
     linux)
-      cp "$repo_dir/scripts/connector/start.command" "$package_dir/$package_name/start.sh"
       cp "$repo_dir/scripts/connector/install-codex.command" "$package_dir/$package_name/install-codex.sh"
       chmod +x "$package_dir/$package_name/"*.sh
       tar -czf "$output_dir/$package_name.tar.gz" -C "$package_dir" "$package_name"

@@ -22,7 +22,7 @@ import (
 )
 
 const DefaultPort = 17372
-const Version = "0.1.0"
+const Version = "0.2.0"
 const MaxAssetBytes = 32 << 20
 const maxMessageBytes = 46 << 20
 
@@ -67,6 +67,7 @@ type Server struct {
 	attempts    int
 	sessions    map[string]*session
 	CallTimeout time.Duration
+	lifecycle   *leaseRegistry
 }
 
 func randomToken(n int) string {
@@ -142,6 +143,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.URL.Path {
+	case "/identity":
+		s.identity(w, r)
 	case "/health":
 		if r.Method != http.MethodGet {
 			fail(w, 405, "METHOD_NOT_ALLOWED", "GET required")
@@ -152,7 +155,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.pair(w, r)
 	case "/ws":
 		s.websocket(w, r)
-	case "/agent/call", "/agent/pair-code", "/agent/sessions":
+	case "/agent/call", "/agent/pair-code", "/agent/sessions", "/agent/lease":
 		if origin != "" || !secureEqual(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), s.agentToken) {
 			fail(w, 401, "UNAUTHORIZED", "Local Agent authentication required")
 			return
@@ -163,6 +166,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if r.Method != http.MethodPost {
 			fail(w, 405, "METHOD_NOT_ALLOWED", "POST required")
+			return
+		}
+		if r.URL.Path == "/agent/lease" {
+			s.lease(w, r)
 			return
 		}
 		if r.URL.Path == "/agent/pair-code" {
@@ -234,8 +241,21 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(s.sessions) >= 8 {
-		fail(w, 409, "SESSION_LIMIT", "Restart the connector to revoke old browser sessions")
-		return
+		var oldestToken string
+		var oldestExpiry time.Time
+		for token, entry := range s.sessions {
+			if entry.Conn == nil && (oldestToken == "" || entry.Expires.Before(oldestExpiry)) {
+				oldestToken, oldestExpiry = token, entry.Expires
+			}
+		}
+		if oldestToken == "" {
+			fail(w, 409, "SESSION_LIMIT", "Close one of the eight connected qisiTV browser windows before pairing another")
+			return
+		}
+		// Abandoned pairings must not exhaust a long-running MCP service. Keep
+		// active browsers, and prefer a new explicitly requested pairing over the
+		// oldest token that has never completed its WebSocket connection.
+		delete(s.sessions, oldestToken)
 	}
 	token := randomToken(32)
 	entry := &session{ID: randomToken(12), Token: token, Origin: r.Header.Get("Origin"), Expires: time.Now().Add(12 * time.Hour), Pending: make(map[string]chan response)}
@@ -280,6 +300,7 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 			ch <- response{Error: &RPCError{Code: "BROWSER_DISCONNECTED", Message: "Browser disconnected; write outcome may be unknown. Read the project before any new edit; do not retry automatically."}}
 			delete(entry.Pending, id)
 		}
+		delete(s.sessions, token)
 		s.mu.Unlock()
 		_ = conn.Close()
 	}()

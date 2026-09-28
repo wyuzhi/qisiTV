@@ -8,7 +8,7 @@ qisiTV 是基于上游 `glanderness/BeefTV` 二次开发的 AI 影视与短剧�
 
 当前用户确定的产品范围：无需注册、登录或积分；模型服务仅保留官方 LikeAI。网站模式由 `VITE_QISITV_BROWSER_ONLY=1` 启用，用户授权本机目录后，项目和素材写入真实独立文件夹，IndexedDB 仅作句柄、配置与恢复缓存；网站函数只临时转发 LikeAI 请求，不建立云端工作区。不要在合并上游时恢复 BeefAPI 钱包或其他服务商入口。
 
-每个项目必须对应本机真实独立文件夹，导入素材和生成结果自动写入；浏览器缓存不算最终项目持久化。普通网页直接使用，需要 Agent 时才安装 `qisitv-connect` 并配对。新 MCP 名为 `qisitv-web`，经回环 WebSocket 将命令交给已打开的网页执行，网页是唯一文件写入者；不要另建 Go 数据库或声称网页关闭后仍可执行。旧 `qisitv` MCP 继续连接桌面 Go 工作区，两者不自动合并。见 `docs/design/project-folders-and-agent.md`。
+每个项目必须对应本机真实独立文件夹，导入素材和生成结果自动写入；浏览器缓存不算最终项目持久化。普通网页直接使用，需要 Agent 时安装一次 `qisitv-web` MCP；MCP 自动后台启动 `qisitv-connect` 本机服务，用户让 Codex 调用 `qisitv_pair` 获取配对码，再在网页确认连接。不要把手动运行 `start` 或保留终端窗口作为正常使用步骤。安装脚本复制到用户固定位置后注册，安装成功可删除解压目录。命令经回环 WebSocket 交给已打开的网页执行，网页是唯一文件写入者；不要另建 Go 数据库或声称网页关闭后仍可执行。旧 `qisitv` MCP 继续连接桌面 Go 工作区，两者不自动合并。见 `docs/design/project-folders-and-agent.md`。
 
 仓库由几个边界清晰但可独立运行的单元组成：
 
