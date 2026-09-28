@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { App, Button, Input } from "antd";
+import copy from "copy-to-clipboard";
 import { FolderOpen, Cable, CheckCircle2, ArrowRight, Download } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { WorkspacePage } from "@/components/layout/workspace-page";
@@ -35,6 +36,19 @@ export default function LocalSetupPage() {
         catch (error) { message.error(error instanceof Error ? error.message : "操作失败，请重试"); }
         finally { setBusy(false); }
     };
+    const copyInstruction = async (value: string, success: string) => {
+        let deadline: ReturnType<typeof setTimeout> | undefined;
+        const fallback = () => message.info("未能确认复制成功，请展开或选中页面中的指令手动复制。");
+        try {
+            const copied = await Promise.race([
+                copy(value, { format: "text/plain" }),
+                new Promise<boolean>((resolve) => { deadline = setTimeout(() => resolve(false), 3000); }),
+            ]);
+            if (copied) message.success(success);
+            else fallback();
+        } catch { fallback(); }
+        finally { clearTimeout(deadline); }
+    };
     if (!isBrowserWorkspace()) return <WorkspacePage><p>当前为本地桌面模式。网页版的项目文件夹与 Agent 连接设置在 <a href="https://cheeser.link/qisitv/#/local">cheeser.link/qisitv</a>。</p></WorkspacePage>;
     return (
         <WorkspacePage className="overflow-y-auto">
@@ -61,11 +75,11 @@ export default function LocalSetupPage() {
                     <div className="flex items-center gap-3"><Cable className="size-5" /><h2 className="text-lg font-medium">2. 让 Codex 控制画布</h2><span className="text-xs text-muted-foreground">可选</span></div>
                     <p className="text-sm leading-6 text-muted-foreground">把安装指令交给 Codex，安装一次，以后直接对话控制画布。</p>
                     <ol className="list-decimal space-y-4 pl-5 text-sm leading-6">
-                        <li><span className="font-medium">让 Codex 安装起司 TV 插件</span><p className="mt-1 text-muted-foreground">复制指令发给 Codex，它会检查环境并完成安装。</p><Button className="mt-3" onClick={() => void run(() => navigator.clipboard.writeText(installationPrompt), "安装指令已复制，请发送给 Codex")}>复制安装指令</Button></li>
-                        <li><span className="font-medium">在 Codex 新建一个任务，获取配对码</span><div className="mt-2 space-y-3 rounded-xl bg-muted/40 p-4"><p>{pairingPrompt}</p><Button size="small" onClick={() => void run(() => navigator.clipboard.writeText(pairingPrompt), "连接指令已复制，请发送给 Codex 的新任务")}>复制连接指令</Button></div></li>
+                        <li><span className="font-medium">让 Codex 安装起司 TV 插件</span><p className="mt-1 text-muted-foreground">复制指令发给 Codex，它会检查环境并完成安装。</p><Button className="mt-3" onClick={() => copyInstruction(installationPrompt, "安装指令已复制，请发送给 Codex")}>复制安装指令</Button><details className="mt-3 text-xs leading-6 text-muted-foreground"><summary className="cursor-pointer">查看完整安装指令</summary><pre className="mt-2 select-text whitespace-pre-wrap break-words rounded-xl bg-muted/40 p-3 font-sans">{installationPrompt}</pre></details></li>
+                        <li><span className="font-medium">在 Codex 新建一个任务，获取配对码</span><div className="mt-2 space-y-3 rounded-xl bg-muted/40 p-4"><p>{pairingPrompt}</p><Button size="small" onClick={() => copyInstruction(pairingPrompt, "连接指令已复制，请发送给 Codex 的新任务")}>复制连接指令</Button></div></li>
                         <li>将 Codex 返回的配对码填入下方。浏览器询问本地网络访问时，选择允许。<div className="mt-3 flex max-w-md flex-wrap gap-2"><Input aria-label="Codex 配对码" autoComplete="off" placeholder="粘贴 Codex 返回的配对码" value={code} onChange={(event) => setCode(event.target.value)} className="!w-56" disabled={connection.status === "connected"} /><Button type="primary" loading={connection.status === "connecting"} disabled={!folder.ready || !code.trim() || connection.status === "connected"} onClick={() => void run(async () => { await connectBrowserAgent(code); setCode(""); })}>连接</Button>{connection.status === "connected" ? <Button onClick={disconnectBrowserAgent}>断开</Button> : null}</div><p role="status" className="mt-2 text-muted-foreground">{connection.message}</p>{!folder.ready ? <p className="mt-1 text-muted-foreground">请先完成上面的项目文件夹设置。</p> : null}</li>
                     </ol>
-                    <div className="space-y-3 rounded-xl bg-muted/40 p-4"><p className="text-xs font-medium text-muted-foreground">连接成功后，打开<Link to="/project" className="underline">项目列表</Link>中的画布，试一次不收费的操作</p><p className="text-sm leading-6">{trialPrompt}</p><Button size="small" onClick={() => void run(() => navigator.clipboard.writeText(trialPrompt), "试用指令已复制，请发送给 Codex")}>复制试用指令</Button></div>
+                    <div className="space-y-3 rounded-xl bg-muted/40 p-4"><p className="text-xs font-medium text-muted-foreground">连接成功后，打开<Link to="/project" className="underline">项目列表</Link>中的画布，试一次不收费的操作</p><p className="text-sm leading-6">{trialPrompt}</p><Button size="small" onClick={() => copyInstruction(trialPrompt, "试用指令已复制，请发送给 Codex")}>复制试用指令</Button></div>
                     <p className="text-xs leading-5 text-muted-foreground">使用 Agent 时保持网页打开。刷新后再让 Codex 获取新配对码。生成前需在“模型配置”填入 LikeAI Key，并明确授权模型、数量和费用范围；断线不会自动重试收费任务。</p>
                     <details className="text-xs leading-6 text-muted-foreground"><summary className="cursor-pointer">手动安装 / 其他 MCP 客户端</summary><div className="mt-3 space-y-3"><p>使用不支持 Codex 插件的客户端时，可下载对应系统的连接器。</p><div className="flex flex-wrap gap-2">{downloads.map(([label, file]) => <a key={file} href={`${import.meta.env.BASE_URL}downloads/qisitv-connect-${file}`} download className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 hover:bg-muted"><Download className="size-3.5" />{label}</a>)}</div><p>手动配置 Codex：解压后运行 install-codex.command（Mac）、install-codex.cmd（Windows）或 ./install-codex.sh（Linux），再重开 Codex。安装成功后可删除解压目录。已安装插件时，不必重复配置。</p><p>其他客户端使用 stdio MCP：命令填写连接器的绝对路径，参数为 mcp。服务自动后台启动，无需另开终端。</p><p>升级前先关闭使用 qisitv-web 的 Agent，等待约 30 秒；旧版手动 start 窗口也请关闭。已有旧桌面 MCP qisitv 时，请明确使用 qisitv-web。</p><p>Mac 包尚未签名公证。如系统阻止，请核对下载来源，再在系统设置 → 隐私与安全性中允许打开。手动安装脚本需要可用的 Codex CLI。</p></div></details>
                 </section>
