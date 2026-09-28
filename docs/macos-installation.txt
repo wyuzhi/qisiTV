@@ -1,0 +1,23 @@
+qisiTV · macOS 安装说明
+
+1. 双击打开 qisiTV-版本号-darwin-arm64.dmg（Apple 芯片版）。
+   Intel 版文件名以 darwin-amd64.dmg 结尾，请按电脑芯片选择。
+2. 将 qisiTV 拖到旁边的 Applications 文件夹。
+3. 推出安装磁盘，再从“应用程序”打开 qisiTV。
+
+这是独立桌面应用，不需要先启动终端、Go、Bun 或 Vite。
+本版使用本地 ad hoc 签名，尚未经过 Apple Developer ID 签名和公证。
+如果 macOS 阻止打开，请先确认安装包来自自己的构建或官方仓库，
+再在“系统设置 → 隐私与安全性”中查看是否有“仍要打开”。
+不要关闭整个系统的安全保护。
+
+桌面数据保存在：~/Library/Application Support/qisiTV
+开发网页版的数据目录与这里独立；首次打开桌面版时可能是空工作区。
+安装包不包含个人画布、素材、账号凭据或 API Key。
+请在应用中配置自己的模型服务；生成图片和视频的费用由服务商收取。
+
+当前本地安装包没有配置自动更新源，升级时手动安装新版本即可。
+更新应用不会主动删除上述数据目录，重要项目仍建议自行备份。
+
+源代码与问题反馈：https://github.com/wyuzhi/qisiTV
+许可与上游声明随应用保存在 Contents/Resources 中。

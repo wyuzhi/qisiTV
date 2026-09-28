@@ -11,5 +11,10 @@
   "wailsjsdir": "frontend/wailsjs",
   "author": {
     "name": "qisiTV Contributors"
+  },
+  "info": {
+    "companyName": "qisiTV",
+    "productName": "qisiTV",
+    "comments": "Local-first AI video canvas. https://github.com/wyuzhi/qisiTV"
   }
 }

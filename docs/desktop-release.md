@@ -10,6 +10,26 @@
 
 ## macOS
 
+本机安装并制作可分发的 DMG：
+
+```bash
+./scripts/update-local-qisitv-app.sh
+./scripts/package-qisitv-macos.sh
+```
+
+第一个命令校验、编译并安装到 `/Applications/qisiTV.app`，随后清理临时构建的 `.app`。
+第二个命令从已安装应用制作 `dist/installers/qisiTV-vX.Y.Z-darwin-arm64.dmg`
+（Intel 应用为 `darwin-amd64`），并生成 SHA-256 校验文件和安装说明。
+DMG 内含应用、Applications 快捷方式和中文说明，不含本机工作区数据。
+脚本验证应用签名、版本、芯片架构和镜像完整性，拒绝覆盖已有同名安装包。
+可用 `QISITV_INSTALLER_DIR` 指定输出目录。
+
+安装包采用现有 qisiTV 图标，附带项目许可证、上游声明和第三方声明。
+本地默认构建没有自动更新源；当前采用 ad hoc 签名，未做 Apple 公证。
+具体安装步骤见 [macOS 安装说明](macos-installation.txt)。
+
+仅生成供 CI 后续打包的暂存应用：
+
 ```bash
 ./scripts/build-qisitv-release.sh
 ```

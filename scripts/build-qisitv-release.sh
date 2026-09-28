@@ -72,6 +72,9 @@ fi
 
 echo "Building qisiTV $VERSION_VALUE ($COMMIT_VALUE)"
 
+mkdir -p "$DESKTOP_DIR/build"
+cp "$ROOT_DIR/assets/desktop/appicon.png" "$DESKTOP_DIR/build/appicon.png"
+
 (
   cd "$DESKTOP_DIR"
   if [[ -n "${QISITV_WAILS_PLATFORM:-}" ]]; then
@@ -94,6 +97,7 @@ APP_BUNDLE="$DESKTOP_DIR/build/bin/qisiTV.app"
 PLUGIN_RESOURCE_DIR="$APP_BUNDLE/Contents/Resources/plugin-packages"
 mkdir -p "$PLUGIN_RESOURCE_DIR"
 cp "$ROOT_DIR/plugin-packages/"*.qisitv-plugin "$PLUGIN_RESOURCE_DIR/"
+cp "$ROOT_DIR/LICENSE" "$ROOT_DIR/NOTICE" "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$APP_BUNDLE/Contents/Resources/"
 
 # Keep the generated macOS bundle metadata aligned with the repository version.
 APP_PLIST="$APP_BUNDLE/Contents/Info.plist"
