@@ -3,8 +3,9 @@ import { useEffect, useRef } from "react";
 
 import { FullScreenLoader } from "@/components/ui/aceternity/full-screen-loader";
 import { preloadWorkspaceRoute } from "@/lib/workspace-route-modules";
+import { workspaceRouteLocation } from "@/lib/workspace-url";
 import { applyUserSession, localWorkspaceConfig } from "@/lib/user-session";
-import { getWorkspaceBootstrap, type WorkspaceBootstrapPayload } from "@/services/api/workspace";
+import { getWorkspaceBootstrap, createLocalWorkspacePayload } from "@/services/api/workspace";
 import { commitModelConfig, flushModelConfig, hydrateModelConfig } from "@/services/model-config-repository";
 import { normalizeConfigSnapshot, useConfigStore } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -28,7 +29,7 @@ export function WorkspaceBootstrapHydrator({ children }: { children: ReactNode }
         })
             .then(() => {
                 modelConfigReady.current = true;
-                if (!cancelled) preloadWorkspaceRoute(window.location.pathname);
+                if (!cancelled) preloadWorkspaceRoute(workspaceRouteLocation(window.location).pathname);
             })
             .catch(() => {
                 if (cancelled) return;
@@ -101,19 +102,4 @@ async function hydrateLocalModelConfig() {
 
 export function shouldPersistHydratedModelConfig(health: string) {
     return health === "migrated" || health === "recovered";
-}
-
-function createLocalWorkspacePayload(): WorkspaceBootstrapPayload {
-    return {
-        contractVersion: 1,
-        profile: "local",
-        capabilities: {
-            localAssets: true,
-            providerCalls: true,
-        },
-        user: { id: "local", username: "local", displayName: "本地工作区", role: "user", status: "active", createdAt: "", updatedAt: "" },
-        workspace: { id: "local", name: "本地工作区", owner: "local", storage: "sqlite" },
-        storageMode: "local",
-        features: { shortDramaEnabled: true, taskCenterEnabled: true, customChannelsEnabled: true, frontendModelsEnabled: false, pluginCenterEnabled: true, systemPluginsVisibleToUsers: true },
-    };
 }

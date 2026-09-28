@@ -1,3 +1,4 @@
+import { publicAssetUrl } from "@/lib/public-asset";
 import { Canvas, useLoader, useThree } from "@react-three/fiber";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Suspense, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
@@ -210,8 +211,8 @@ function EmotionHeadPreview({ preset }: { preset: CanvasEmotionPreset }) {
 
 function EmotionFaceModel({ preset }: { preset: CanvasEmotionPreset }) {
     const renderer = useThree((state) => state.gl);
-    const gltf = useLoader(GLTFLoader, "/canvas/models/facecap.glb", (loader) => {
-        loader.setKTX2Loader(new KTX2Loader().setTranscoderPath("/three/basis/").detectSupport(renderer));
+    const gltf = useLoader(GLTFLoader, publicAssetUrl("canvas/models/facecap.glb"), (loader) => {
+        loader.setKTX2Loader(new KTX2Loader().setTranscoderPath(publicAssetUrl("three/basis/")).detectSupport(renderer));
         loader.setMeshoptDecoder(MeshoptDecoder);
     });
     const invalidate = useThree((state) => state.invalidate);

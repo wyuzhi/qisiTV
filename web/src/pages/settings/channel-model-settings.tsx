@@ -68,7 +68,7 @@ export function ChannelModelSettings({ channel, onChange }: { channel: ModelChan
             <div className="mb-2 flex items-center justify-between gap-3">
                 <div>
                     <div className="text-xs font-medium">模型能力与请求协议</div>
-                    <div className="mt-0.5 text-[var(--fs-tiny)] text-foreground/42">与运营后台使用同一能力目录；测试会发起真实请求并可能产生供应商费用</div>
+                    <div className="mt-0.5 text-[var(--fs-tiny)] text-foreground/42">LikeAI 模型参数；测试会发起真实请求并可能产生供应商费用</div>
                 </div>
                 <span className="text-[var(--fs-tiny)] text-foreground/35">{channel.models.length} 个模型</span>
             </div>
@@ -198,7 +198,7 @@ function LikeAIOptions({ value, onChange }: { value?: Record<string, unknown>; o
             catch (error) { setError(error instanceof Error ? error.message : "JSON 无效"); }
         }} />
         {error && <p role="alert" className="text-xs text-red-500">{error}；当前修改尚未保存。</p>}
-        <a className="text-xs" href="https://task.likeai.pro/docs" target="_blank" rel="noreferrer">查看 LikeAI 模型文档</a>
+        <a className="text-xs" href="https://task.likeai.pro/api-doc" target="_blank" rel="noreferrer">查看 LikeAI 模型文档</a>
     </section>;
 }
 

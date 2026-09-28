@@ -107,6 +107,9 @@ func (s *Service) FetchChannelModelCatalog(ctx context.Context, actor *model.Use
 	if actor == nil || strings.TrimSpace(actor.ID) == "" {
 		return nil, Unauthorized("请先登录")
 	}
+	if err := s.requireActiveCatalogProvider(&input); err != nil {
+		return nil, err
+	}
 	if err := s.resolveChannelModelsRequest(&input); err != nil {
 		return nil, err
 	}

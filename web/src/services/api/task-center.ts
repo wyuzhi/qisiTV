@@ -2,6 +2,8 @@ import { generationErrorMessage } from "@/lib/generation-error";
 import { http, apiBaseURL, type BackendEnvelope } from "@/services/api/request";
 import { consumeTaskTextStream, createTaskTextStreamParser, type TaskTextStreamEvent } from "@/services/api/task-text-stream";
 import { recordDiagnosticEvent } from "@/services/diagnostics/client-diagnostics";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
+import { browserLikeAITasks } from "@/services/browser-likeai-tasks";
 
 export type { BackendEnvelope } from "@/services/api/request";
 
@@ -120,7 +122,7 @@ export type CreateTaskInput = {
     input?: Record<string, unknown>;
 };
 export function createGenerationTask(input: CreateTaskInput) {
-    return http.post<GenerationTask>("/tasks", input).then((task) => {
+    return (isBrowserWorkspace() ? browserLikeAITasks().create(input) : http.post<GenerationTask>("/tasks", input)).then((task) => {
         recordDiagnosticEvent({ level: "info", category: "task", message: "任务已创建", taskId: task.id, projectId: task.projectId });
         notifyCanvasTaskCreated(task);
         return task;
@@ -143,7 +145,7 @@ type GenerationTaskListDependencies = {
 
 const defaultGenerationTaskListDependencies: GenerationTaskListDependencies = {
     listBackendPage: async (page, signal) => ({
-        tasks: await http.get<GenerationTask[]>("/tasks", {
+        tasks: isBrowserWorkspace() ? await browserLikeAITasks().list(page.limit, page, signal) : await http.get<GenerationTask[]>("/tasks", {
                 params: { pageSize: Math.min(page.limit, 100), projectId: page.projectId, activeOnly: page.activeOnly || undefined },
                 signal,
             }),
@@ -197,6 +199,7 @@ async function collectGenerationTaskPages<T>(readPage: (request: GenerationTaskP
 }
 
 export function queryGenerationTask(id: string, options?: { signal?: AbortSignal }) {
+    if (isBrowserWorkspace()) return browserLikeAITasks().query(id, options?.signal);
     return http.get<GenerationTask>(`/tasks/${encodeURIComponent(id)}`, { signal: options?.signal });
 }
 
@@ -282,41 +285,52 @@ export function subscribeGenerationTasks(ids: readonly string[], listener: (task
 }
 
 export function appendTaskTextDelta(id: string, content: string) {
+    if (isBrowserWorkspace()) return Promise.reject(new Error("LikeAI 网页任务不支持文本事件写入"));
     return http.post<TaskTextDelta>(`/tasks/${encodeURIComponent(id)}/text-deltas`, { content });
 }
 
 export function completeTextReplayTask(id: string, text: string) {
+    if (isBrowserWorkspace()) return Promise.reject(new Error("LikeAI 网页任务不支持文本回放写入"));
     return http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/text-replay-complete`, { text });
 }
 
 export function queryTaskTextReplay(id: string, after = 0) {
+    if (isBrowserWorkspace()) return browserLikeAITasks().query(id).then((task): TaskTextReplay => ({ deltas: [], finalText: task.resultJson ? JSON.parse(task.resultJson).text : undefined, complete: ["succeeded", "failed", "cancelled"].includes(task.status), status: task.status, progress: task.progress || 0 }));
     return http.get<TaskTextReplay>(`/tasks/${encodeURIComponent(id)}/text-deltas`, { params: { after } });
 }
 
 export function retryGenerationTask(id: string) {
+    if (isBrowserWorkspace()) return Promise.reject(new Error("请在画布中明确重新生成；网页不会自动重新提交收费任务"));
     return http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/retry`);
 }
 
 export function cancelGenerationTask(id: string) {
-    return http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/cancel`).then((task) => {
+    return (isBrowserWorkspace() ? browserLikeAITasks().cancel(id) : http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/cancel`)).then((task) => {
         window.dispatchEvent(new CustomEvent("canvas:task-cancelled", { detail: { task } }));
         return task;
     });
 }
 
 export function queryFailedVideoProviderTask(id: string) {
+    if (isBrowserWorkspace()) return browserLikeAITasks().query(id, undefined, true).then((task): ProviderTaskQueryResult => ({ task, providerStatus: task.officialStatus || task.status, recovered: task.status === "succeeded" }));
     return http.post<ProviderTaskQueryResult>(`/tasks/${encodeURIComponent(id)}/query-provider`);
 }
 
 export function refreshGenerationTaskStatus(id: string, options?: { signal?: AbortSignal }) {
+    if (isBrowserWorkspace()) return browserLikeAITasks().query(id, options?.signal, true);
     return http.get<GenerationTask>(`/tasks/${encodeURIComponent(id)}`, { signal: options?.signal });
 }
 
 export function deleteGenerationTask(id: string) {
+    if (isBrowserWorkspace()) return browserLikeAITasks().remove(id);
     return http.delete<void>(`/tasks/${encodeURIComponent(id)}`);
 }
 
 export async function listTaskLogs(id: string) {
+    if (isBrowserWorkspace()) {
+        const task = await browserLikeAITasks().query(id);
+        return [{ id: `${id}:state`, taskId: id, level: task.status === "failed" ? "error" : "info", stage: task.stage || task.status, provenance: "task_state", createdAt: task.updatedAt }] as TaskLog[];
+    }
     const raw = await http.get<Array<{ level?: unknown; message?: unknown; payload?: unknown; createdAt?: unknown }>>(`/tasks/${encodeURIComponent(id)}/logs`);
     return raw.map((log, index) => projectBackendSafeTaskLog(id, log, index));
 }
@@ -374,7 +388,7 @@ export function shouldUseTaskTextEvents(options?: Pick<WaitForGenerationTaskOpti
 }
 
 export async function waitForGenerationTask(id: string, options?: WaitForGenerationTaskOptions) {
-    if (shouldUseTaskTextEvents(options)) return waitForGenerationTaskTextEvents(id, options || {});
+    if (!isBrowserWorkspace() && shouldUseTaskTextEvents(options)) return waitForGenerationTaskTextEvents(id, options || {});
     const startedAt = Date.now();
     const intervalMs = options?.intervalMs || 2000;
     let lastTask = options?.initialTask;
@@ -402,6 +416,10 @@ export async function waitForGenerationTask(id: string, options?: WaitForGenerat
                 continue;
             }
             if (task.status === "succeeded") {
+                if (isBrowserWorkspace() && options?.onTextDelta && task.resultJson) {
+                    const text = JSON.parse(task.resultJson).text;
+                    if (typeof text === "string") options.onTextDelta(text);
+                }
                 return task;
             }
             if (task.status === "failed" || task.status === "cancelled") {

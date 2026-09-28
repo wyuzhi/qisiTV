@@ -4,6 +4,7 @@
   "defaultOpen": true,
   "pages": [
     "local-development",
+    "browser-workspace",
     "local-agent",
     "likeai",
     "http-api",

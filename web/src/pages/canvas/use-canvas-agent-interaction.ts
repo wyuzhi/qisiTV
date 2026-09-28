@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { http } from "@/services/api/request";
 import type { ViewportTransform } from "@/types/canvas";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 
 /** Short-lived selection context lets a local Agent resolve "these images". */
 export function useCanvasAgentInteraction(canvasId: string, ready: boolean, selectedNodeIds: Set<string>, viewport: ViewportTransform) {
@@ -10,7 +11,7 @@ export function useCanvasAgentInteraction(canvasId: string, ready: boolean, sele
     const publish = useRef<() => void>(() => {});
 
     useEffect(() => {
-        if (!canvasId || !ready) return;
+        if (!canvasId || !ready || isBrowserWorkspace()) return;
         let closed = false;
         let pending = false;
         const send = () => {

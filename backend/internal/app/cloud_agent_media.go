@@ -16,6 +16,9 @@ import (
 
 // The Agent uses the same public catalog as the composer, never a second routing policy.
 func (s *Service) cloudAgentModelList(intent *ModelRequestIntent) (any, error) {
+	if s.likeAIOnly {
+		return map[string]any{"source": "local", "models": s.localChannelModelListItems(intent), "intent": intent}, nil
+	}
 	catalog, err := s.ModelCatalog(intent)
 	if err != nil {
 		return nil, err

@@ -26,6 +26,7 @@ type Service struct {
 	repo                     *repository.Repository
 	dataDir                  string
 	mode                     serviceMode
+	likeAIOnly               bool
 	cancelMu                 sync.Mutex
 	storageMu                sync.Mutex
 	workerRuntimeMu          sync.Mutex

@@ -5,6 +5,7 @@ import { useNavigate } from "react-router";
 import { navigationTools } from "@/constant/navigation-tools";
 import { Kbd } from "@/components/ui/base/kbd";
 import { cn } from "@/lib/utils";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 
 type PaletteEntry = {
     id: string;
@@ -31,7 +32,7 @@ export function WorkspaceCommandPalette({ open, onClose }: { open: boolean; onCl
             toolEntry("projects", "/project"),
             toolEntry("canvas", "/canvas"),
             toolEntry("assets", "/assets"),
-            toolEntry("skills", "/skills"),
+            ...(!isBrowserWorkspace() ? [toolEntry("skills", "/skills")] : []),
             toolEntry("settings", "/settings"),
         ];
     }, []);

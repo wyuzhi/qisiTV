@@ -1036,10 +1036,10 @@ function defaultMode(type: CanvasNodeData["type"]): CanvasNodeGenerationMode {
 }
 
 function localModelPlaceholder(mode: CanvasNodeGenerationMode) {
-    if (mode === "image") return "Lib Image 2.5 Pro";
-    if (mode === "video") return "2.0";
-    if (mode === "audio") return "Seed Audio 1.0";
-    return "GVLM 3.1";
+    if (mode === "image") return "选择图片模型";
+    if (mode === "video") return "选择视频模型";
+    if (mode === "audio") return "选择音频模型";
+    return "选择文本模型";
 }
 
 export function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: CanvasNodeGenerationMode, requirements: ModelRequirements): AiConfig {

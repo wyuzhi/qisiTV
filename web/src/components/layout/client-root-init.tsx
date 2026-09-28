@@ -4,6 +4,8 @@ import { App } from "antd";
 
 import { createModelChannel, useConfigStore } from "@/stores/use-config-store";
 import { navigateToSettings } from "@/lib/settings-navigation";
+import { workspaceRouteLocation, workspaceRouteUrl } from "@/lib/workspace-url";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { initializeClientDiagnostics, setDiagnosticUserScope } from "@/services/diagnostics/client-diagnostics";
 import { fetchPluginRuntimeState, setUserPluginEnabled } from "@/services/api/plugins";
 import { usePluginStore } from "@/stores/use-plugin-store";
@@ -108,16 +110,27 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         if (handledConfigParams.current) return;
-        const searchParams = new URLSearchParams(window.location.search);
-        const baseUrl = searchParams.get("baseUrl") || searchParams.get("baseurl");
-        const ignoredApiKey = searchParams.has("apiKey") || searchParams.has("apikey");
+        const route = workspaceRouteLocation(window.location);
+        const searchParams = new URLSearchParams(route.search);
+        const outerParams = new URLSearchParams(window.location.search);
+        const baseUrl = searchParams.get("baseUrl") || searchParams.get("baseurl") || outerParams.get("baseUrl") || outerParams.get("baseurl");
+        const ignoredApiKey = [searchParams, outerParams].some((params) => params.has("apiKey") || params.has("apikey"));
         if (!baseUrl && !ignoredApiKey) return;
         handledConfigParams.current = true;
-        searchParams.delete("baseUrl");
-        searchParams.delete("baseurl");
-        searchParams.delete("apiKey");
-        searchParams.delete("apikey");
-        window.history.replaceState(null, "", `${window.location.pathname}${searchParams.size ? `?${searchParams}` : ""}${window.location.hash}`);
+        for (const params of [searchParams, outerParams]) {
+            for (const key of ["baseUrl", "baseurl", "apiKey", "apikey"]) params.delete(key);
+        }
+        const cleanPath = `${route.pathname}${searchParams.size ? `?${searchParams}` : ""}`;
+        const cleanUrl = new URL(workspaceRouteUrl(cleanPath));
+        if (isBrowserWorkspace()) cleanUrl.search = outerParams.toString();
+        else cleanUrl.hash = window.location.hash;
+        window.history.replaceState(null, "", cleanUrl.href);
+        if (isBrowserWorkspace()) {
+            navigateToSettings({ section: "channels" });
+            if (ignoredApiKey) message.warning("出于安全考虑，链接中的 API Key 已忽略，请在配置中手动填写");
+            else message.info("当前使用 LikeAI 官方地址，请在配置中填写 API Key");
+            return;
+        }
         const firstChannel = config.channels[0];
         updateConfig(
             "channels",

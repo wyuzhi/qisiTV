@@ -112,6 +112,29 @@ func TestRuntimeOpenStartClose(t *testing.T) {
 	if cookie := bootstrapResponse.Header.Get("Set-Cookie"); cookie != "" {
 		t.Fatalf("workspace bootstrap must not set a session cookie: %q", cookie)
 	}
+	configRequest, err := http.NewRequest(http.MethodGet, runtime.BaseURL()+"/workspace/model-config", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configRequest.Header.Set("X-Desktop-Token", runtime.LaunchToken())
+	configResponse, err := http.DefaultClient.Do(configRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var configEnvelope struct {
+		Data struct {
+			Config struct {
+				Channels []struct {
+					ID string `json:"id"`
+				} `json:"channels"`
+			} `json:"config"`
+		} `json:"data"`
+	}
+	err = json.NewDecoder(configResponse.Body).Decode(&configEnvelope)
+	_ = configResponse.Body.Close()
+	if err != nil || configResponse.StatusCode != http.StatusOK || len(configEnvelope.Data.Config.Channels) != 1 || configEnvelope.Data.Config.Channels[0].ID != "likeai" {
+		t.Fatalf("runtime must expose only LikeAI: status=%d payload=%#v error=%v", configResponse.StatusCode, configEnvelope, err)
+	}
 
 	tasksRequest, err := http.NewRequest(http.MethodGet, runtime.BaseURL()+"/tasks?pageSize=1", nil)
 	if err != nil {
@@ -166,6 +189,9 @@ func TestRuntimeOpenStartClose(t *testing.T) {
 		"/finance/account",
 		"/resources/import",
 		"/resources/demo/oss-url",
+		"/beefapi/connection",
+		"/beefapi/connection/open-wallet",
+		"/ai/custom",
 	} {
 		hostedRequest, err := http.NewRequest(http.MethodGet, runtime.BaseURL()+hostedPath, nil)
 		if err != nil {

@@ -25,8 +25,9 @@ func IsRedactedSecret(value any) bool {
 // ProviderConfig owns the local provider snapshot. It has no database or
 // hosted-service dependency and can therefore be reused by CLI/desktop shells.
 type ProviderConfig struct {
-	dataDir string
-	mu      sync.Mutex
+	dataDir    string
+	mu         sync.Mutex
+	likeAIOnly bool
 }
 
 var ErrProviderConfigRevisionConflict = errors.New("本地模型配置已被其他写入更新")
@@ -94,6 +95,9 @@ func (s *ProviderConfig) saveLocalModelConfig(body []byte, existingDocument Prov
 	if existingDocument.Config != nil {
 		preserveSecrets(incoming, existingDocument.Config)
 	}
+	if s.likeAIOnly {
+		incoming = preserveInactiveProviderConfig(incoming, existingDocument.Config)
+	}
 	document := newProviderState(incoming, existingDocument.Revision+1)
 	canonical, err := json.Marshal(document)
 	if err != nil {
@@ -149,6 +153,10 @@ func (s *ProviderConfig) LoadEffectiveModelConfig() (EffectiveModelConfig, Confi
 	effective, err := effectiveProviderState(document)
 	if err != nil {
 		return EffectiveModelConfig{}, health, fmt.Errorf("合并内置模型配置失败: %w", err)
+	}
+	if s.likeAIOnly {
+		effective.Config = likeAIOnlyConfig(effective.Config)
+		effective.PresetVersions = map[string]int{"likeai": 1}
 	}
 	return effective, health, nil
 }

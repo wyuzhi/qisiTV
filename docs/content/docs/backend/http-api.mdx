@@ -18,22 +18,21 @@ Wails 和浏览器开发模式共用同一套 `127.0.0.1` HTTP 合同。路由�
 | 路由组 | 用途 |
 | --- | --- |
 | `/workspace/*` | 本地工作区启动和模型配置 |
-| `/beefapi/connection*` | 内置 BeefAPI 企业连接：开始、状态、取消、断开；页面只收到账号和状态，收不到密钥 |
 | `/canvas-projects/*`, `/projects/*` | 画布、项目、章节、分镜与快照 |
 | `/resources/*` | 本地素材、分片上传和媒体读取 |
 | `/tasks/*` | 生成任务创建、查询、取消、恢复与事件流 |
-| `/ai/*` | 外部模型目录和自定义协议转发 |
+| `/ai/models` | LikeAI 模型目录；固定使用 `https://task.likeai.pro/task-api` |
 | `/agent/*` | 本地持久化 Agent 运行、审批和记忆 |
 | `/plugins/*`, `/skills/*` | 本地扩展包与技能 |
 | `/health/*`, `/system/version` | 启动、就绪与版本诊断 |
 
 ## 明确不存在的端点
 
-`/auth/*`、`/admin/*`、`/payments/*`、`/wallet/*`、`/public/canvas-shares/*` 以及云存储配置端点不属于本地产品合同。
+`/auth/*`、`/admin/*`、`/payments/*`、`/wallet/*`、`/beefapi/*`、`/ai/custom`、`/runninghub/*`、`/public/canvas-shares/*` 以及云存储配置端点不属于本地产品合同。
 
 Agent 的 `budget` 字段是本地运行上限（步数、生成次数、视频秒数），不代表积分、付费或扣费。
 
-内置 BeefAPI 连接成功后，同一份企业凭证用于渠道请求、模型目录和本机 MCP 工具。MCP 工具名为 `qisitv_list_models`、`qisitv_submit_media`、`qisitv_get_task`；媒体提交必须经过本机审批与预算，不能把 `approved=true` 当作授权。
+当前产品只启用 LikeAI，API Key 由本机配置保存。旧服务商配置保留在本地文件中，但不出现在有效配置和 Agent 模型目录里，也不能创建或继续执行生成任务；已有画布、素材和任务记录仍可读取。MCP 工具名为 `qisitv_list_models`、`qisitv_submit_media`、`qisitv_get_task`；媒体提交必须经过本机审批与预算，不能把 `approved=true` 当作授权。
 
 ## 外部 Agent 的画布操作
 
@@ -60,7 +59,7 @@ metadata 修改使用服务端白名单，涵盖正文、提示词、媒体资�
 
 ## 外部 Agent 生成与持久化回填
 
-`GET /agent/models` 仅列出本机已启用的渠道模型，返回 `models[]` 的 model、name、type、channelId、protocol、capabilityConfig 和 defaultOptions。不会向模型上游发送请求，不返回密钥或渠道地址。
+`GET /agent/models` 仅列出本机已启用的 LikeAI 模型，返回 `models[]` 的 model、name、type、channelId、protocol、capabilityConfig 和 defaultOptions。不会向模型上游发送请求，不返回密钥或渠道地址。
 
 `POST /agent/tasks` 请求示例：
 

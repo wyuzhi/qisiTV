@@ -6,7 +6,7 @@ import "qisitv/backend/internal/workspace"
 // outside the browser so frontend asset updates cannot clear API credentials
 // or model capability metadata.
 func (s *Service) ReadLocalModelConfig() ([]byte, error) {
-	store, err := workspace.NewProviderConfig(s.dataDir)
+	store, err := s.localProviderConfigStore()
 	if err != nil {
 		return nil, err
 	}
@@ -17,9 +17,16 @@ func (s *Service) ReadLocalModelConfig() ([]byte, error) {
 // owner-only permissions. The file is deliberately local and never included
 // in API responses other than the same local workspace process.
 func (s *Service) SaveLocalModelConfig(body []byte) error {
-	store, err := workspace.NewProviderConfig(s.dataDir)
+	store, err := s.localProviderConfigStore()
 	if err != nil {
 		return err
 	}
 	return store.SaveLocalModelConfig(body)
+}
+
+func (s *Service) localProviderConfigStore() (*workspace.ProviderConfig, error) {
+	if s.likeAIOnly {
+		return workspace.NewLikeAIProviderConfig(s.dataDir)
+	}
+	return workspace.NewProviderConfig(s.dataDir)
 }

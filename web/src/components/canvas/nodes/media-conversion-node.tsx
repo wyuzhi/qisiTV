@@ -24,6 +24,7 @@ import { resolveImageUrl, setImageBlob } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { LocalRuntimeClientError } from "@/services/local-runtime-session";
 import { useLocalRuntimeStore } from "@/stores/use-local-runtime-store";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 import { useCanvasNodeActions } from "../canvas-node-action-context";
@@ -47,6 +48,7 @@ export function MediaConversionNodeContent({ node, theme }: MediaConversionNodeC
     const inputKind = input ? getNodeInputKind(input.type) : undefined;
     const storedState = node.metadata?.mediaConversion;
     const state = storedState || createDefaultMediaConversionState();
+    const needsLocalProgram = isBrowserWorkspace() && (state.operation === "depth" || state.operation === "lineart" || state.operation === "pose");
     const currentFingerprint = input ? mediaConversionSourceFingerprint(input) : "";
     const hasMultipleInputs = mediaInputs.length > 1;
     const isStale = Boolean(state.status === "completed" && (!currentFingerprint || state.sourceFingerprint !== currentFingerprint));
@@ -138,6 +140,7 @@ export function MediaConversionNodeContent({ node, theme }: MediaConversionNodeC
     };
 
     const run = async () => {
+        if (needsLocalProgram) return;
         setNotice("");
         if (!input || !currentFingerprint) {
             setNotice("请先连接一张图片或一个视频");
@@ -293,13 +296,14 @@ export function MediaConversionNodeContent({ node, theme }: MediaConversionNodeC
 
     const effectiveResult = Boolean(resultUrl && (status === "completed" || status === "stale"));
     const displayResult = showResult && effectiveResult;
-    const buttonDisabled = !input || hasMultipleInputs || status === "processing";
+    const buttonDisabled = needsLocalProgram || !input || hasMultipleInputs || status === "processing";
     const videoNeedsEditing = inputKind === "video" && !isLocalImageOperation(state.operation);
     const statusText = mediaConversionStatusLabel(status);
     const previewStatusText = state.operation === "pose" && status === "completed" && typeof state.detectedPeople === "number"
         ? `${statusText} · ${state.detectedPeople} 人`
         : statusText;
-    const showRuntimeRecovery = (state.operation === "depth" || state.operation === "lineart" || state.operation === "pose") && (localRuntimeConnection === "unreachable" || state.errorCode === "depth_runtime_unavailable" || state.errorCode === "lineart_runtime_unavailable" || state.errorCode === "pose_runtime_unavailable");
+    const showRuntimeRecovery = !isBrowserWorkspace() && (state.operation === "depth" || state.operation === "lineart" || state.operation === "pose") && (localRuntimeConnection === "unreachable" || state.errorCode === "depth_runtime_unavailable" || state.errorCode === "lineart_runtime_unavailable" || state.errorCode === "pose_runtime_unavailable");
+    const operationNotice = needsLocalProgram ? "此转换需要本地程序，网页版暂未连接" : notice || mediaConversionOperationDescription(state.operation);
     const retryLocalRuntime = async () => {
         setNotice("");
         await reconnectLocalRuntime();
@@ -385,7 +389,7 @@ export function MediaConversionNodeContent({ node, theme }: MediaConversionNodeC
             </div>
 
             <div className="flex min-h-4 items-center gap-2 text-[var(--fs-micro)]" style={{ color: status === "unavailable" || status === "skipped" ? "var(--status-warning)" : notice || status === "error" ? "var(--status-error)" : theme.node.muted }}>
-                <span className="min-w-0 flex-1 truncate" title={notice || mediaConversionOperationDescription(state.operation)}>{notice || mediaConversionOperationDescription(state.operation)}</span>
+                <span className="min-w-0 flex-1 truncate" title={operationNotice}>{operationNotice}</span>
                 {showRuntimeRecovery ? (
                     <button
                         type="button"

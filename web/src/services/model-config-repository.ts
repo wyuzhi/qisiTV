@@ -1,5 +1,7 @@
 import { getLocalModelConfig, saveLocalModelConfig, type LocalModelConfigPayload } from "@/services/api/workspace";
 import type { AiConfig } from "@/stores/use-config-store";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
+import { createBrowserModelConfigStorage } from "@/services/browser-model-config-storage";
 
 export type ModelConfigPersistenceState = {
     status: "idle" | "hydrating" | "saving" | "saved" | "error";
@@ -119,9 +121,12 @@ function omitManagedBeefAPISecrets(config: AiConfig): AiConfig {
     };
 }
 
+const browserStorage = createBrowserModelConfigStorage();
 const repository = createModelConfigRepository({
-    read: getLocalModelConfig,
-    write: (config, expectedRevision) => saveLocalModelConfig(omitManagedBeefAPISecrets(config), expectedRevision),
+    read: () => isBrowserWorkspace() ? browserStorage.read() : getLocalModelConfig(),
+    write: (config, expectedRevision) => isBrowserWorkspace()
+        ? browserStorage.write(config, expectedRevision)
+        : saveLocalModelConfig(omitManagedBeefAPISecrets(config), expectedRevision),
 });
 
 export const hydrateModelConfig = repository.hydrate;

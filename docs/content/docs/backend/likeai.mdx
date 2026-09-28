@@ -3,7 +3,7 @@ title: LikeAI 模型渠道
 description: 动态模型目录、本地素材和异步生成任务
 ---
 
-在设置的模型渠道中新建渠道，连接类型选择 **LikeAI**。Base URL 默认 `https://task.likeai.pro/task-api`，填写 API Key 后读取模型列表。目录读取免费；点击生成或模型测试将调用付费任务。
+在设置的 **LikeAI 模型服务** 中填写 API Key，然后点击「拉取模型」。当前只提供 LikeAI，Base URL 固定为 `https://task.likeai.pro/task-api`。目录读取免费；点击生成将调用付费任务。
 
 LikeAI 目录按 `type` 动态分为文本、图片、视频、音频，分别绑定 `likeai-text`、`likeai-image`、`likeai-video`、`likeai-audio` 协议。没有在代码内写死可选模型清单。目录仅返回类型、名称和平均时长，不含完整参数 schema；新模型需根据其官方文档调整能力与参数。音频协议已实现，但当前目录不一定提供音频模型。
 
@@ -17,7 +17,7 @@ LikeAI 目录按 `type` 动态分为文本、图片、视频、音频，分别�
 
 特殊顶层字段可通过 `body` 设置，例如文本模型的 `thinking`、`reasoning_effort` 或需要单个视频的 `video_url`。这些参数按具体模型官方文档使用；`api_name` 始终由当前模型选择决定。未通过 JSON 校验的编辑不会保存。
 
-参考素材保存在本机。发起生成时，选中的本地素材通过 LikeAI `POST /files` 上传为临时 URL，再提交任务；已有 HTTPS URL 或 asset:// 引用直接传递。结果 URL 由后端下载，进入本地资源库。恢复已有任务只查询上游任务 ID，不重新上传素材或重新计费创建任务。
+参考素材保存在本机。发起生成时，选中的本地素材通过 LikeAI `POST /files` 上传为临时 URL，再提交任务；已有 HTTPS URL 直接传递。本地版由后端下载结果并进入本地资源库；[网站版](/docs/backend/browser-workspace)经网站临时转发请求，将结果保存到当前浏览器。恢复已有任务只查询上游任务 ID，不重新上传素材或重新计费创建任务。
 
 本地取消只能说明停止等待，不能保证供应商停止计费。LikeAI 官方远端取消目前限定 Vidu 错峰任务，本插件没有将该限制错误地扩展成通用取消能力。
 

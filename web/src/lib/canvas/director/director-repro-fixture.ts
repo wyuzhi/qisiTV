@@ -1,3 +1,4 @@
+import { publicAssetUrl } from "@/lib/public-asset";
 import { resolveDirectorPlacement } from "@/lib/canvas/director/director-placement";
 import { createDirectorModel, touchDirectorScene } from "@/lib/canvas/director/director-scene";
 import type { DirectorObject, DirectorScene, DirectorVec3 } from "@/types/director";
@@ -140,7 +141,7 @@ export const DIRECTOR_REPRO_MODEL_IDS: Record<DirectorReproModelVariant, string>
 /** 同源本地资产，不依赖外网可达性。
  *  手写 glTF 2.0：内嵌 base64 buffer、无纹理、无压缩扩展，
  *  因此不需要 KTX2Loader / DRACOLoader 也能被 GLTFLoader 直接解析。 */
-export const DIRECTOR_REPRO_LOCAL_MODEL_URL = "/canvas/models/director-repro-triangle.gltf";
+export const DIRECTOR_REPRO_LOCAL_MODEL_URL = publicAssetUrl("canvas/models/director-repro-triangle.gltf");
 /** 同源但确定不存在：稳定触发加载失败路径，不依赖外网可达性。 */
 export const DIRECTOR_REPRO_MISSING_MODEL_URL = "/__director-repro-missing.glb";
 

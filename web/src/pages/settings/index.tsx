@@ -11,7 +11,7 @@ import { ModelDefaultGrid } from "./model-default-grid";
 type ConfigSectionKey = "channels" | "models";
 
 const configSections: Array<{ key: ConfigSectionKey; label: string; description: string; icon: ReactNode }> = [
-    { key: "channels", label: "个人渠道", description: "模型服务与个人工作流", icon: <RadioTower className="size-4" /> },
+    { key: "channels", label: "LikeAI", description: "本地模型服务配置", icon: <RadioTower className="size-4" /> },
 ];
 
 export function isConfigSection(value: string | null): value is ConfigSectionKey {
@@ -26,11 +26,10 @@ export default function SettingsPage() {
     const customChannelsEnabled = useUserStore((state) => state.features.customChannelsEnabled);
     const initialSection = isConfigSection(requestedSection) ? requestedSection : "channels";
     const [activeTab, setActiveTab] = useState<ConfigSectionKey>(initialSection === "models" ? "channels" : initialSection);
-    const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const shouldPromptContinue = searchParams.get("continue") === "1";
-    const userChannels = config.channels.filter((channel) => channel.scope !== "system");
+    const userChannels = effectiveConfig.channels;
     const visibleConfigSections = useMemo(() => customChannelsEnabled ? configSections : configSections.filter((section) => section.key !== "channels"), [customChannelsEnabled]);
 
     const isVisibleConfigSection = (value: string | null): value is ConfigSectionKey => isConfigSection(value) && visibleConfigSections.some((section) => section.key === value);

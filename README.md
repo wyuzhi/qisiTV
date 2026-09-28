@@ -48,12 +48,14 @@ qisiTV 同时提供项目库、个人资产库、异步任务、模型渠道和�
 
 ## 开放与本地优先
 
-- 自由配置文本、图片、视频与音频模型渠道，不绑定单一 Provider。
+- 当前版本统一使用 LikeAI，支持其目录中的文本、图片、视频与音频模型。
 - 项目、画布、素材与任务由统一工作区管理，数据可以本地保存和迁移。
 - 基于 React、Go 与 Wails，模型协议和工作台能力可继续扩展。
 - 本地 Agent 连接使用现有工作区，不另建数据库。见 [MCP 与 CLI 接入](docs/content/docs/backend/local-agent.mdx)及 [LikeAI 配置](docs/content/docs/backend/likeai.mdx)。
 
 ## 开始使用
+
+网站版无需安装或注册，画布与素材保存在当前浏览器。网站构建、API 临时转发和数据边界见[网站版说明](docs/content/docs/backend/browser-workspace.mdx)。本地 Agent 使用下面的本机工作区，网站画布与本机工作区暂不自动同步。
 
 本地开发需要 Bun 和 Go 1.25。在本仓库中打开两个终端：
 
@@ -77,7 +79,7 @@ bun install --frozen-lockfile
 bun run dev
 ```
 
-打开 <http://localhost:3000>。前端默认将 `/api` 代理到 `http://127.0.0.1:8080`。首次使用时添加自己的模型渠道；模型 API 的生成费用由供应商收取。
+打开 <http://localhost:3000>。前端默认将 `/api` 代理到 `http://127.0.0.1:8080`。首次使用时在设置中填写自己的 LikeAI API Key 并拉取模型；模型 API 的生成费用由供应商收取。
 
 详细环境要求、Windows 构建与桌面发布方式见 [`QUICKSTART.md`](QUICKSTART.md) 和[桌面发布文档](docs/desktop-release.md)。
 

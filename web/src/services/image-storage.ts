@@ -7,6 +7,7 @@ import { getActiveUserScope } from "@/lib/user-scope";
 import { importResourceFromUrl, isResourceUrl, resourceFileUrl, resourceIdFromStorageKey, resourceStorageKey, ResourceUploadError, uploadResourceFile } from "@/services/api/resources";
 import { cacheResourceObjectUrl, getCachedResourceBlob, getCachedResourceObjectUrl, primeResourceBlobCache } from "@/services/resource-blob-cache";
 import { usesBrowserLocalResourceStore } from "@/services/workspace-resource-storage";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 
 export type UploadedImage = {
     url: string;
@@ -33,7 +34,7 @@ export async function uploadImage(input: string | Blob, onProgress?: (uploadedBy
     // 提前生成稳定 key，确保恢复路径仍能定位同一份本地媒体。
     const storageKey = `image:${getActiveUserScope()}:${nanoid()}`;
     const localRuntime = isLocalRuntimeMode();
-    if (!localRuntime && typeof input === "string" && shouldImportRemoteImage(input)) {
+    if (!isBrowserWorkspace() && !localRuntime && typeof input === "string" && shouldImportRemoteImage(input)) {
         try {
             const resource = await importResourceFromUrl(input, "image", { idempotencyKey: storageKey });
             return {

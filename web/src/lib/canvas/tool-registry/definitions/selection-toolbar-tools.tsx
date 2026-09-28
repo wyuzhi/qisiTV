@@ -18,7 +18,7 @@ export const selectionToolbarTools: ToolDefinition[] = [
     { id: "selection-create-storyboard", toolbar: "selection", category: "selection", label: "创建分镜组", icon: <LayoutTemplate />, defaultVisible: true, defaultOrder: 130, disabled: (ctx) => ctx.selectedCount < 2, run: (ctx) => ctx.handlers.onCreateStoryboard() },
     { id: "selection-create-reference-group", toolbar: "selection", category: "selection", label: "创建引用组", icon: <FolderTree />, defaultVisible: false, defaultOrder: 140, disabled: (ctx) => ctx.selectedCount < 2, run: (ctx) => ctx.handlers.onCreateReferenceGroup() },
     { id: "selection-batch-connect", toolbar: "selection", category: "selection", label: "批量连接", icon: <Link2 />, defaultVisible: true, defaultOrder: 145, disabled: (ctx) => ctx.selectedCount < 2, run: (ctx) => ctx.handlers.onBatchConnect() },
-    { id: "selection-send-to-agent", toolbar: "selection", category: "selection", label: "发送到 Agent", icon: <AtSign />, defaultVisible: true, defaultOrder: 148, disabled: (ctx) => ctx.selectedCount < 1, run: (ctx) => ctx.handlers.onSendSelectionToAgent() },
+    { id: "selection-send-to-agent", toolbar: "selection", category: "selection", label: "发送到 Agent", icon: <AtSign />, defaultVisible: true, defaultOrder: 148, applicable: () => !isBrowserWorkspace(), disabled: (ctx) => ctx.selectedCount < 1, run: (ctx) => ctx.handlers.onSendSelectionToAgent() },
     {
         id: "selection-merge-videos",
         toolbar: "selection",
@@ -34,3 +34,4 @@ export const selectionToolbarTools: ToolDefinition[] = [
 ];
 
 registerToolbarTools(selectionToolbarTools);
+import { isBrowserWorkspace } from "@/services/browser-workspace";

@@ -9,6 +9,7 @@ import { FullScreenLoader } from "@/components/ui/aceternity/full-screen-loader"
 import { getAntThemeConfig } from "@/lib/app-theme";
 import { applySkinTheme } from "@/lib/skin-themes";
 import { appQueryClient } from "@/lib/query-client";
+import { workspaceRouteLocation } from "@/lib/workspace-url";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { applyAppearanceMetadata, useAppearanceStore } from "@/stores/use-appearance-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -36,7 +37,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
     // DEV 复现台必须是同源本地确定性场景：WorkspaceBootstrapHydrator 会打 /api/workspace/bootstrap，
     // ClientRootInit 会打 /api/model-catalog，没有后端时产生真实 502，与导演台无关却会污染判据。
     // 只精确匹配该路径；生产构建中 import.meta.env.DEV 为 false，本分支被摇树删除。
-    const isolateDevRepro = import.meta.env.DEV && typeof window !== "undefined" && window.location.pathname === "/dev/director-repro";
+    const isolateDevRepro = import.meta.env.DEV && typeof window !== "undefined" && workspaceRouteLocation(window.location).pathname === "/dev/director-repro";
 
     return (
         <ConfigProvider locale={zhCN} theme={getAntThemeConfig(dark, appearance.activeSkin)}>

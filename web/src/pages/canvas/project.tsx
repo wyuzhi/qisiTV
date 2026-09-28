@@ -1,5 +1,6 @@
 import { isCanvasNodeGenerating } from "@/lib/canvas/canvas-node-task-state";
 import { useCanvasAgentInteraction } from "./use-canvas-agent-interaction";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { CanvasLocalSaveStatus } from "@/components/canvas/canvas-local-save-status";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, MouseEvent as ReactMouseEvent, SetStateAction } from "react";
@@ -318,7 +319,7 @@ function InfiniteCanvasPage() {
         setNodesState(next);
     }, []);
     useEffect(() => {
-        if (!projectId || !isLocalWorkspaceMode()) return;
+        if (!projectId || !isLocalWorkspaceMode() || isBrowserWorkspace()) return;
         let disposed = false;
         let refreshing = false;
         const check = () => {
@@ -725,8 +726,7 @@ function InfiniteCanvasPage() {
     }, [currentProject, importCanvasProject, navigate]);
 
     const openCanvasInNewWindow = useCallback((canvasId: string) => {
-        const url = new URL(`/canvas/${canvasId}`, window.location.href);
-        window.open(url.href, "_blank", "noopener,noreferrer");
+        window.open(workspaceRouteUrl(`/canvas/${canvasId}`), "_blank", "noopener,noreferrer");
     }, []);
 
     const renameCanvasFromMenu = useCallback(async (canvasId: string, canvasTitle: string) => {
@@ -777,7 +777,7 @@ function InfiniteCanvasPage() {
 
     const versions = useCanvasVersionHistory(projectId, restoreCanvasProjectVersion, currentProject);
     const openVersions = () => { closeAgent(); setVersionCompareRootId(null); versions.show(); };
-    const openAgent = useCallback(() => { versions.close(); openAssistant(); }, [versions.close, openAssistant]);
+    const openAgent = useCallback(() => { if (isBrowserWorkspace()) return; versions.close(); openAssistant(); }, [versions.close, openAssistant]);
 
     const sendSelectionToAgent = useCallback((nodeId?: string) => {
         const ids = nodeId ? [nodeId] : Array.from(selectedNodeIdsRef.current);
@@ -2892,7 +2892,7 @@ function InfiniteCanvasPage() {
         ) : emptyStateKind === "guided" ? (
             <CanvasShortDramaEmptyState
                 onCreatePipeline={createShortDramaPipeline}
-                onOpenAgent={() => {
+                onOpenAgent={isBrowserWorkspace() ? undefined : () => {
                     setCinematicAgentEntry(true);
                     openAgent();
                 }}
@@ -2916,6 +2916,11 @@ function InfiniteCanvasPage() {
         <>
             <a
                 href="#canvas-main"
+                onClick={(event) => {
+                    if (!isBrowserWorkspace()) return;
+                    event.preventDefault();
+                    document.getElementById("canvas-main")?.focus();
+                }}
                 className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[var(--z-toast)] focus:rounded-md focus:border focus:bg-background focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:shadow-lg"
             >
                 跳转到画布主内容
@@ -3246,12 +3251,12 @@ function InfiniteCanvasPage() {
                                 ) : null}
                             </div>
 
-                            <div className={versions.open ? "hidden" : "contents"}>
+                            {!isBrowserWorkspace() ? <div className={versions.open ? "hidden" : "contents"}>
                             <CanvasCloudAgentPanel canvasId={projectId} domainProjectId={currentProject?.projectId} nodeCount={nodes.length} references={agentMentionReferences} prefillPrompt={agentPrefillPrompt} open={assistantOpen} onOpen={openAgent} onCollapse={closeAgent} onOpenPluginCenter={() => navigate("/plugins")} onFocusNode={(nodeId) => {
                                 if (!nodesRef.current.some((node) => node.id === nodeId)) { message.info("该节点已删除或尚未同步到画布"); return; }
                                 focusCanvasNode(nodeId);
                             }} />
-                            </div>
+                            </div> : null}
                         </div>
 
                         {angleNode?.metadata?.content ? (
@@ -3537,7 +3542,7 @@ function InfiniteCanvasPage() {
                             onSpreadSelection={spreadSelectedNodes}
                             onCopySelection={copySelectedNodes}
                             onDeleteSelection={() => deleteNodes(selectedNodeIds)}
-                            onSendToAgent={() => sendSelectionToAgent(contextMenu?.type === "node" && selectedNodeIds.size <= 1 ? contextMenu.nodeId : undefined)}
+                            onSendToAgent={isBrowserWorkspace() ? undefined : () => sendSelectionToAgent(contextMenu?.type === "node" && selectedNodeIds.size <= 1 ? contextMenu.nodeId : undefined)}
                         />
 
                         <input ref={imageInputRef} type="file" accept="image/*,video/*,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav,.txt,.md,.markdown" multiple className="hidden" onChange={handleImageInputChange} />
@@ -3773,3 +3778,4 @@ function InfiniteCanvasPage() {
         </>
     );
 }
+import { workspaceRouteUrl } from "@/lib/workspace-url";

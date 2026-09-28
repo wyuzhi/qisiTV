@@ -6,6 +6,8 @@ title: 本地后端代码地图
 
 qisiTV 是单用户、本地优先的桌面应用。项目、画布、素材、任务和 Agent 状态落到本地 SQLite 与工作区目录；模型生成仍可通过 Provider/Protocol 适配器访问外部 API。
 
+网站浏览器模式由 `web/src/services/browser-workspace.ts` 区分，`local-workspace-repository.ts` 和 `browser-model-config-storage.ts` 使用浏览器本地保存；`browser-likeai-client.ts` / `browser-likeai-tasks.ts` 负责 LikeAI 协议和持久任务。`deploy/website/api/qisitv/likeai.ts` 是无状态网站转发函数，与本地 Go 工作区分离。当前产品仅启用 LikeAI。
+
 ## 运行链路
 
 ```text

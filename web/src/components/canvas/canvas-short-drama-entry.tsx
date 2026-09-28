@@ -26,7 +26,7 @@ export function CanvasLinkedProjectEmptyState({ projectName, hasChapter, onAddFi
 
 export function CanvasShortDramaEmptyState({ onCreatePipeline, onOpenAgent, onStartFreeform, onUpload, onAddText, onAddScript }: {
     onCreatePipeline: () => void;
-    onOpenAgent: () => void;
+    onOpenAgent?: () => void;
     onStartFreeform: () => void;
     onUpload: () => void;
     onAddText: () => void;
@@ -41,7 +41,7 @@ export function CanvasShortDramaEmptyState({ onCreatePipeline, onOpenAgent, onSt
                     <h2 className="text-lg font-semibold">从哪里开始？</h2>
                     <p className="mt-1 text-sm" style={{ color: theme.node.muted }}>选择一条主路径，之后仍可随时切换。</p>
                 </div>
-                <div className="grid gap-3 md:grid-cols-3">
+                <div className={`grid gap-3 ${onOpenAgent ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
                     <PathCard
                         icon={<Clapperboard className="size-5" />}
                         title="自己创作"
@@ -52,7 +52,7 @@ export function CanvasShortDramaEmptyState({ onCreatePipeline, onOpenAgent, onSt
                         focusStyle={focusStyle}
                         onClick={onCreatePipeline}
                     />
-                    <PathCard
+                    {onOpenAgent ? <PathCard
                         icon={<Bot className="size-5" />}
                         title="交给 Agent"
                         description="用一句话描述题材、角色和核心冲突。"
@@ -61,7 +61,7 @@ export function CanvasShortDramaEmptyState({ onCreatePipeline, onOpenAgent, onSt
                         theme={theme}
                         focusStyle={focusStyle}
                         onClick={onOpenAgent}
-                    />
+                    /> : null}
                     <PathCard
                         icon={<Plus className="size-5" />}
                         title="自由空白画布"

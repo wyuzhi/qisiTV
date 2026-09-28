@@ -4,7 +4,7 @@ title: 用 Codex 和本地 Agent 操作画布
 
 # 用 Codex 和本地 Agent 操作画布
 
-qisiTV 提供 MCP stdio 和 `qisitv` CLI，两种入口使用相同的操作、参数校验和 HTTP 客户端。Agent 操作的就是浏览器当前连接的工作区：不启动第二个服务，不另建数据库，不要求在网页内使用聊天助手。
+qisiTV 提供 MCP stdio 和 `qisitv` CLI，两种入口使用相同的操作、参数校验和 HTTP 客户端。Agent 操作的是连接到本机 Go 服务的工作区：不启动第二个服务，不另建数据库，不要求在网页内使用聊天助手。独立的[网站浏览器模式](/docs/backend/browser-workspace)将数据保存在网站源下的 IndexedDB，当前没有与此 MCP 工作区自动配对或同步。
 
 ## 为什么提供这两种入口
 

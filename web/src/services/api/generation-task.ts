@@ -14,6 +14,7 @@ import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { buildBackendToolRequests, type ResponseFunctionTool, type ResponseInputMessage, type ToolChoice, type ToolResponseResult } from "@/services/api/image";
 import { assertAgentExchangeBudget } from "@/lib/canvas/agent-context-budget";
 import { assertVideoCapability } from "@/services/api/video-validation";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 
 export { logicalModelIDForConfig };
 
@@ -247,6 +248,10 @@ async function prepareGenerationReferences({
     referenceAudios = [],
     mask,
 }: Pick<BackendGenerationTaskOptions, "config" | "mode" | "referenceImages" | "referenceVideos" | "referenceAudios" | "mask">): Promise<PreparedGenerationReferences> {
+    if (isBrowserWorkspace()) {
+        if (mask) throw new Error("LikeAI 当前任务接口未声明蒙版编辑");
+        return { referenceImages, referenceVideos: await Promise.all(referenceVideos.map(resolveReferenceMediaDuration)), referenceAudios: await Promise.all(referenceAudios.map(resolveReferenceMediaDuration)), mask: undefined };
+    }
     // asset:// 仅视频生成可用；Agent Plan Seedream 与 Seedance 共用 /api/plan/v3，不能按 BaseURL 误判。
     const preferArkAssetUrl = mode === "video" && usesArkVideoAssetReference(config);
     const preparedImages = await Promise.all(referenceImages.map((image) => prepareBackendImageReference(image, preferArkAssetUrl)));
@@ -428,6 +433,23 @@ export function backendProviderConfig(config: AiConfig, mode: BackendGenerationM
         audioInstructions: config.audioInstructions,
         systemPrompt: config.systemPrompt,
     };
+    if (isBrowserWorkspace()) {
+        const channel = resolveModelChannel(config, config.model);
+        if (channel.apiFormat !== "likeai" || channel.scope === "system") throw new Error("网页任务仅支持本地配置的 LikeAI 服务");
+        // Go custom-channel requests intentionally omit channelId and describe
+        // plugin protocols as OpenAI-compatible. The browser needs the actual
+        // local channel identity to recover credentials after a page reload.
+        return {
+            ...generationOptions,
+            channelId: channel.id,
+            apiFormat: "likeai",
+            interfaceType: requestConfig.interfaceType,
+            baseUrl: channel.baseUrl,
+            apiKey: channel.apiKey,
+            model: requestConfig.model,
+            capabilityConfig: modelCapabilityConfigFor(config, requestConfig.model),
+        };
+    }
     if (logicalModelIDForConfig(config)) return generationOptions;
     return {
         channelId: requestConfig.channelId,

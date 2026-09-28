@@ -1,3 +1,4 @@
+import { publicAssetUrl } from "@/lib/public-asset";
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Slider } from "antd";
 
@@ -36,14 +37,14 @@ const LIGHTING_PREVIEW_COLUMN_WIDTH = 300;
 const LIGHTING_SPHERE_SIZE = 220;
 
 const STYLE_PRESETS = [
-    { id: "overexposed", name: "过曝胶片", color: "#d4b896", image: "/lighting-presets/overexposed.png", prompt: "overexposed film aesthetic, high-key lighting, washed out highlights, soft diffused light, vintage film look" },
-    { id: "blueBacklight", name: "蓝色逆光", color: "#1a3a5c", image: "/lighting-presets/blue-backlight.png", prompt: "dramatic backlighting, blue rim light, cool color temperature, silhouette with colored edges, ethereal atmosphere" },
-    { id: "rembrandt", name: "伦勃朗光", color: "#5a3a1a", image: "/lighting-presets/rembrandt.png", prompt: "Rembrandt lighting, 45-degree angle key light, dramatic chiaroscuro, painterly shadows, classical portraiture" },
-    { id: "cyberpunk", name: "赛博朋克", color: "#2a0a2a", image: "/lighting-presets/cyberpunk.png", prompt: "cyberpunk neon lighting, synthetic glow, futuristic atmosphere, vibrant cyan and magenta neon" },
-    { id: "sunset", name: "落日迷幻", color: "#7a3010", image: "/lighting-presets/sunset.png", prompt: "golden hour lighting, warm sunset tones, long shadow, romantic atmosphere, Kodachrome colors" },
-    { id: "mysterious", name: "神秘暗调", color: "#0a0a14", image: "/lighting-presets/mysterious.png", prompt: "low-key noir lighting, deep shadows, mysterious mood, film noir style, high contrast cinematic" },
-    { id: "goldenHour", name: "黄金时刻", color: "#7a5a00", image: "/lighting-presets/golden-hour.png", prompt: "golden hour photography, warm soft light, beautiful catchlights, lens flare, magical golden glow" },
-    { id: "nolanGrey", name: "诺兰冷灰", color: "#1a2a2a", image: "/lighting-presets/nolan-grey.png", prompt: "Christopher Nolan cinematography, IMAX quality, desaturated cold palette, teal and grey grading" },
+    { id: "overexposed", name: "过曝胶片", color: "#d4b896", image: publicAssetUrl("lighting-presets/overexposed.png"), prompt: "overexposed film aesthetic, high-key lighting, washed out highlights, soft diffused light, vintage film look" },
+    { id: "blueBacklight", name: "蓝色逆光", color: "#1a3a5c", image: publicAssetUrl("lighting-presets/blue-backlight.png"), prompt: "dramatic backlighting, blue rim light, cool color temperature, silhouette with colored edges, ethereal atmosphere" },
+    { id: "rembrandt", name: "伦勃朗光", color: "#5a3a1a", image: publicAssetUrl("lighting-presets/rembrandt.png"), prompt: "Rembrandt lighting, 45-degree angle key light, dramatic chiaroscuro, painterly shadows, classical portraiture" },
+    { id: "cyberpunk", name: "赛博朋克", color: "#2a0a2a", image: publicAssetUrl("lighting-presets/cyberpunk.png"), prompt: "cyberpunk neon lighting, synthetic glow, futuristic atmosphere, vibrant cyan and magenta neon" },
+    { id: "sunset", name: "落日迷幻", color: "#7a3010", image: publicAssetUrl("lighting-presets/sunset.png"), prompt: "golden hour lighting, warm sunset tones, long shadow, romantic atmosphere, Kodachrome colors" },
+    { id: "mysterious", name: "神秘暗调", color: "#0a0a14", image: publicAssetUrl("lighting-presets/mysterious.png"), prompt: "low-key noir lighting, deep shadows, mysterious mood, film noir style, high contrast cinematic" },
+    { id: "goldenHour", name: "黄金时刻", color: "#7a5a00", image: publicAssetUrl("lighting-presets/golden-hour.png"), prompt: "golden hour photography, warm soft light, beautiful catchlights, lens flare, magical golden glow" },
+    { id: "nolanGrey", name: "诺兰冷灰", color: "#1a2a2a", image: publicAssetUrl("lighting-presets/nolan-grey.png"), prompt: "Christopher Nolan cinematography, IMAX quality, desaturated cold palette, teal and grey grading" },
 ];
 
 const DEFAULT_LIGHTING_PROMPT_TEMPLATE = [

@@ -24,12 +24,11 @@ tags:
   - name: assets
   - name: agent
   - name: admin
-  - name: beefapi
 paths:
   /agent/models:
     get:
       tags: [agent]
-      summary: 列出本地已启用的生成模型，不含凭据
+      summary: 列出本地已启用的 LikeAI 生成模型，不含凭据
       responses:
         "200":
           description: data.models 包含 model、name、type、channelId、protocol、capabilityConfig、defaultOptions
@@ -97,42 +96,6 @@ paths:
           description: data.project 包含回填画布；重复成功调用返回 alreadyApplied
         "409":
           description: 非终态任务、版本冲突或试图改变原画布/节点绑定
-  /beefapi/connection:
-    get:
-      tags: [beefapi]
-      summary: 读取内置 BeefAPI 连接状态
-      description: 只返回账号和状态，不含密钥或 device_code。
-      responses:
-        "200":
-          description: 信封 data 为连接摘要
-  /beefapi/connection/start:
-    post:
-      tags: [beefapi]
-      summary: 开始企业授权并打开系统浏览器确认页
-      responses:
-        "200":
-          description: 进入 pending 或返回已连接状态
-  /beefapi/connection/cancel:
-    post:
-      tags: [beefapi]
-      summary: 取消尚未完成的授权
-      responses:
-        "200":
-          description: 当前连接摘要
-  /beefapi/connection/disconnect:
-    post:
-      tags: [beefapi]
-      summary: 断开当前连接并吊销本机这把密钥
-      responses:
-        "200":
-          description: 当前连接摘要
-  /beefapi/connection/open-wallet:
-    post:
-      tags: [beefapi]
-      summary: 在系统浏览器打开企业充值页 /console/topup
-      responses:
-        "200":
-          description: 已打开
   /canvas-projects/{id}/operations:
     parameters:
       - in: path

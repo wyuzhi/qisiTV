@@ -1,5 +1,7 @@
 import { http } from "@/services/api/request";
 import type { SkinDefinition } from "@/lib/skin-themes";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
+import { DEFAULT_PUBLIC_APPEARANCE } from "@/stores/use-appearance-store";
 
 export type PublicAppearance = {
     schemaVersion: number;
@@ -31,6 +33,7 @@ export type PublicAppearance = {
 };
 
 export async function getPublicAppearance(signal?: AbortSignal) {
+    if (isBrowserWorkspace()) return { ...DEFAULT_PUBLIC_APPEARANCE, authVideoUrl: "", authVideoPosterUrl: "", authVideoAutoplay: false };
     const result = await http.get<{ appearance: PublicAppearance }>("/public/appearance", { signal });
     return result.appearance;
 }

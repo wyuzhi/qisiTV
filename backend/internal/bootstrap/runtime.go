@@ -14,8 +14,6 @@ import (
 
 	"qisitv/backend/internal/app"
 	localasset "qisitv/backend/internal/asset"
-	"qisitv/backend/internal/beefapi"
-	"qisitv/backend/internal/buildinfo"
 	"qisitv/backend/internal/database"
 	canvasHandler "qisitv/backend/internal/handler"
 	"qisitv/backend/internal/localapp"
@@ -37,7 +35,6 @@ type Runtime struct {
 	handler     http.Handler
 	status      *systemStatus
 	launchToken string
-	beefAPI     *beefapi.Service
 	listener    net.Listener
 	httpServer  *http.Server
 	serveErr    chan error
@@ -86,6 +83,7 @@ func Open(_ context.Context, raw Config) (*Runtime, error) {
 	}
 
 	svc := app.NewLocal(repository.New(db), cfg.DataDir)
+	svc.UseLikeAIOnly()
 	cleanupService := func() {
 		_ = svc.Close()
 		cleanupDB()
@@ -94,38 +92,11 @@ func Open(_ context.Context, raw Config) (*Runtime, error) {
 		cleanupService()
 		return nil, err
 	}
-	providerConfig, configErr := workspace.NewProviderConfig(cfg.DataDir)
+	providerConfig, configErr := workspace.NewLikeAIProviderConfig(cfg.DataDir)
 	if configErr != nil {
 		cleanupService()
 		return nil, configErr
 	}
-	beefAPIConnection, beefAPIErr := beefapi.New(beefapi.Options{
-		DataDir: cfg.DataDir, Provider: providerConfig, ClientVersion: buildinfo.Current().Version,
-		FetchCatalog: func(apiKey, baseURL string) ([]beefapi.CatalogModel, error) {
-			owner, ownerErr := svc.LocalWorkspaceOwner()
-			if ownerErr != nil {
-				return nil, ownerErr
-			}
-			items, catalogErr := svc.FetchChannelModelCatalog(context.Background(), owner, app.ChannelModelsRequest{
-				BaseURL: baseURL, APIKey: apiKey, APIFormat: "openai", ChannelID: beefapi.ChannelID, CredentialRef: beefapi.CredentialRef,
-			})
-			if catalogErr != nil {
-				return nil, catalogErr
-			}
-			models := make([]beefapi.CatalogModel, 0, len(items))
-			for _, item := range items {
-				models = append(models, beefapi.CatalogModel{
-					ID: item.ID, DisplayName: item.DisplayName, ModelType: item.ModelType, SupportedEndpointTypes: item.SupportedEndpointTypes,
-				})
-			}
-			return models, nil
-		},
-	})
-	if beefAPIErr != nil {
-		cleanupService()
-		return nil, beefAPIErr
-	}
-	svc.SetBeefAPI(beefAPIConnection)
 	localKernel := app.NewLocalKernel(svc)
 	assetService := localasset.New(localKernel, cfg.DataDir)
 	projectService := localproject.New(localKernel)
@@ -168,7 +139,6 @@ func Open(_ context.Context, raw Config) (*Runtime, error) {
 		Projects:           localRoot.Projects,
 		Tasks:              localRoot.Tasks,
 		Generation:         localRoot.Generation,
-		BeefAPI:            beefAPIConnection,
 	})
 	router.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": http.StatusNotFound, "msg": "请求不存在"})
@@ -195,7 +165,6 @@ func Open(_ context.Context, raw Config) (*Runtime, error) {
 		handler:     rootHandler,
 		status:      status,
 		launchToken: launchToken,
-		beefAPI:     beefAPIConnection,
 		serveErr:    make(chan error, 1),
 	}, nil
 }
@@ -245,9 +214,6 @@ func (r *Runtime) Start() error {
 		r.service.BackfillPlaybackTranscodes()
 	}()
 	r.status.markStarted()
-	if r.beefAPI != nil {
-		_ = r.beefAPI.Recover(context.Background())
-	}
 	go func() {
 		err := r.httpServer.Serve(listener)
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -292,9 +258,6 @@ func (r *Runtime) Close(ctx context.Context) error {
 	r.closeOnce.Do(func() {
 		r.closed.Store(true)
 		r.status.beginDrain()
-		if r.beefAPI != nil {
-			r.beefAPI.Close()
-		}
 		var failures []error
 		if r.httpServer != nil {
 			httpCtx, cancel := context.WithTimeout(ctx, min(30*time.Second, r.cfg.ShutdownTimeout))

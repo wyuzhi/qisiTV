@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from "react";
-import { createBrowserRouter, Navigate, Outlet, useLocation, useParams } from "react-router";
+import { createBrowserRouter, createHashRouter, Navigate, Outlet, useLocation, useParams } from "react-router";
 
 import { FullScreenLoader, WorkspaceRouteLoader } from "@/components/ui/aceternity/full-screen-loader";
 import { loadAssetsPage, loadCanvasPage, loadCanvasProjectPage, loadCreatePage, loadHomePage, loadProjectDetailPage } from "@/lib/workspace-route-modules";
@@ -65,7 +65,9 @@ function devRoutes() {
     ];
 }
 
-export const router = createBrowserRouter([
+// Hash routing keeps the static website's own routes separate from the canvas.
+const createWorkspaceRouter = import.meta.env.VITE_QISITV_BROWSER_ONLY === "1" ? createHashRouter : createBrowserRouter;
+export const router = createWorkspaceRouter([
     ...(import.meta.env.DEV ? devRoutes() : []),
     {
         element: <WorkspaceLayout />,

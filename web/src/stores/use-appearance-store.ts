@@ -1,3 +1,4 @@
+import { publicAssetUrl } from "@/lib/public-asset";
 import { create } from "zustand";
 
 import type { PublicAppearance } from "@/services/api/appearance";
@@ -9,8 +10,8 @@ export const DEFAULT_PUBLIC_APPEARANCE: PublicAppearance = {
     brandSlug: "qisitv",
     authHeroTitle: "让一个故事，\n从文字走向银幕。",
     authHeroDescription: "",
-    logoUrl: "/qisitv-mark.svg",
-    darkLogoUrl: "/qisitv-mark.svg",
+    logoUrl: publicAssetUrl("qisitv-mark.svg"),
+    darkLogoUrl: publicAssetUrl("qisitv-mark.svg"),
     logoFrameEnabled: false,
     authVideoUrl: "https://boss-shjd.biliapi.net/updream/aniforge/video/video_bbcb00bd-650d-4249-9346-5cd21fd2484c_m1hc-u0-1pu13x-3v1s.mp4",
     authVideoPosterUrl: "https://i0.hdslb.com/bfs/aitool/aniforge/image/02933f26-5f1b-49ff-a811-b7f95ee5e5b8_m1hc-u0-sau.jpg",

@@ -4,10 +4,9 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
 import { scopedLocalStorage } from "@/lib/user-scope";
-import { defaultProtocolForCapability, defaultProtocolForModel, modelProtocolCapability, normalizeModelProtocol, usesOpenAICompatibleProtocolDefault, type ModelProtocol } from "@/lib/model-protocols";
+import { defaultProtocolForCapability, defaultProtocolForModel, inferProtocolCapabilityFromModel, modelProtocolCapability, normalizeModelProtocol, usesOpenAICompatibleProtocolDefault, type ModelProtocol } from "@/lib/model-protocols";
 import { normalizeVideoDuration, normalizeVideoResolution } from "@/lib/video-generation-options";
 import { defaultModelCapabilityConfig, workflowFieldRole, workflowFieldSafeToOverride, workflowVideoFieldsFromJson, type ModelCapabilityConfig } from "@/lib/model-capabilities";
-import { useUserStore } from "@/stores/use-user-store";
 import type { CapabilitySpec } from "@/services/api/logical-models";
 
 export type ApiCallFormat = "openai" | "gemini" | "claude" | "likeai";
@@ -423,13 +422,14 @@ export type ModelCapability = "image" | "video" | "text" | "audio";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
+export const LIKEAI_BASE_URL = "https://task.likeai.pro/task-api";
 const LEGACY_DEFAULT_MODEL_NAMES = new Set(["gpt-image-2", "grok-imagine-video", "gpt-5.5", "gpt-4o-mini-tts"]);
 
 export const defaultConfig: AiConfig = {
     channelMode: "remote",
-    baseUrl: OPENAI_BASE_URL,
+    baseUrl: LIKEAI_BASE_URL,
     apiKey: "",
-    apiFormat: "openai",
+    apiFormat: "likeai",
     // 创作端模型目录只能来自后台公开逻辑模型和用户自定义渠道，不能内置供应商模型。
     channels: [],
     runningHub: { enabled: false, baseUrl: "https://www.runninghub.cn", apiKey: "", walletApiKey: "", uploadApiKey: "", useWallet: false, capability: "image", selectedKind: "workflow", workflowId: "", workflows: [] },
@@ -839,8 +839,45 @@ function normalizeSelectedModel(value: string, channels: ModelChannel[], options
 
 export function useEffectiveConfig() {
     const config = useConfigStore((state) => state.config);
-    const customChannelsEnabled = useUserStore((state) => state.features.customChannelsEnabled);
-    return useMemo(() => effectiveConfigForCustomChannels(config, customChannelsEnabled), [config, customChannelsEnabled]);
+    return useMemo(() => likeAIWorkspaceConfig(config), [config]);
+}
+
+export function isLikeAIChannel(channel: Pick<ModelChannel, "scope" | "apiFormat">) {
+    return channel.scope !== "system" && channel.apiFormat === "likeai";
+}
+
+/** Product configuration is a view; legacy provider records stay in local storage. */
+export function likeAIWorkspaceConfig(config: AiConfig): AiConfig {
+    const channels = config.channels.filter(isLikeAIChannel).map((channel) => ({
+        ...channel,
+        baseUrl: LIKEAI_BASE_URL,
+        credentialRef: undefined,
+        interfaceType: undefined,
+        modelProfiles: channel.models.map((model) => {
+            const profile = channel.modelProfiles?.find((item) => item.model === model);
+            const capability = profile?.capability || inferProtocolCapabilityFromModel(model);
+            const protocol = `likeai-${capability}`;
+            return {
+                ...profile,
+                model,
+                capability,
+                protocol,
+                capabilityConfig: profile?.protocol === protocol ? profile.capabilityConfig : defaultModelCapabilityConfig(protocol, model),
+            };
+        }),
+    }));
+    if (!channels.length) {
+        const id = config.channels.some((channel) => channel.id === "likeai") ? "qisitv-likeai" : "likeai";
+        channels.push({ ...createModelChannel({ id, name: "LikeAI", apiFormat: "likeai", baseUrl: LIKEAI_BASE_URL }), credentialRef: undefined, interfaceType: undefined, modelProfiles: [] });
+    }
+    return normalizeConfigSnapshot({ config: {
+        ...config,
+        channels,
+        baseUrl: channels[0].baseUrl,
+        apiKey: channels[0].apiKey,
+        apiFormat: "likeai",
+        runningHub: { ...defaultConfig.runningHub, enabled: false },
+    } }).config;
 }
 
 export function effectiveConfigForCustomChannels(config: AiConfig, customChannelsEnabled: boolean): AiConfig {
@@ -1019,14 +1056,14 @@ function isEmptyDefaultChannel(channel: ModelChannel) {
     if (channel.id !== "default" || channel.name.trim() !== "默认渠道" || channel.apiKey.trim()) return false;
     const baseUrl = channel.baseUrl.trim().replace(/\/+$/, "");
     const defaultBaseUrl = defaultConfig.baseUrl.trim().replace(/\/+$/, "");
-    if (baseUrl && baseUrl !== defaultBaseUrl) return false;
+    if (baseUrl && baseUrl !== defaultBaseUrl && baseUrl !== OPENAI_BASE_URL) return false;
     // 只清理旧版本写入浏览器的无密钥“默认渠道”和内置模型；没有 API Key 但已填写自定义模型时仍保留，
     // 让用户可以先保存模型目录再补充密钥，而不是把真实自定义配置误判为空。
     return !channel.models.length || channel.models.every((model) => LEGACY_DEFAULT_MODEL_NAMES.has(modelOptionName(model)));
 }
 
 export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {
-	if (apiFormat === "likeai") return "https://task.likeai.pro/task-api";
+    if (apiFormat === "likeai") return LIKEAI_BASE_URL;
     return apiFormat === "gemini" ? GEMINI_BASE_URL : OPENAI_BASE_URL;
 }
 

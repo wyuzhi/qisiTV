@@ -8,6 +8,9 @@ import { mergeAgentCanvasDocument } from "@/lib/canvas/agent-canvas-patch";
 import { sameCanvasContent } from "@/lib/canvas/canvas-content";
 import { publishCanvasRefresh } from "@/services/canvas-workspace-events";
 import { useSyncProgressStore } from "@/stores/use-sync-progress-store";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
+import { localForageStorageForScope } from "@/lib/localforage-storage";
+import { CANVAS_HISTORY_STORE_KEY } from "@/stores/canvas/use-canvas-history-store";
 
 type LocalCanvasContent = Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId">>;
 type CanvasSaveSummary = Pick<CanvasProject, "id" | "title" | "createdAt" | "updatedAt" | "revision">;
@@ -147,6 +150,10 @@ export function selectPreferredCanvasProject(local: CanvasProject | null | undef
 export async function createLocalCanvasProject(title: string, projectId?: string, initialContent?: LocalCanvasContent, workspaceProjectId?: string) {
     const id = useCanvasStore.getState().createProject(title, projectId, workspaceProjectId);
     if (initialContent) useCanvasStore.getState().updateProject(id, initialContent);
+    if (isBrowserWorkspace()) {
+        await syncLocalCanvasProjectToBackend(id);
+        return { id };
+    }
     // The in-memory project is already usable. Do not make navigation depend
     // on an IndexedDB/localForage flush completing successfully; the store
     // keeps its pending write queue and will retry it on the next flush.
@@ -169,6 +176,19 @@ function syncLocalCanvasProject(id: string, includeGeneratedAssets: boolean): Pr
       try {
         let project = openLocalCanvasProject(id);
         if (!project) return;
+        if (isBrowserWorkspace()) {
+            const previousRevision = project.revision ?? 0;
+            const revision = previousRevision + 1;
+            useCanvasStore.setState((state) => ({ projects: state.projects.map((current) => current.id === id ? { ...current, revision } : current) }));
+            try {
+                await flushCanvasStorePersistence();
+            } catch (error) {
+                useCanvasStore.setState((state) => ({ projects: state.projects.map((current) => current.id === id && current.revision === revision ? { ...current, revision: previousRevision } : current) }));
+                throw error;
+            }
+            useSyncProgressStore.getState().setProjectProgress(id, null);
+            return;
+        }
         const assets = includeGeneratedAssets ? canvasGenerationCommitAssets(project, useAssetStore.getState().assets) : [];
         let projectForSave = includeGeneratedAssets ? bindCanvasGenerationCommitAssets(project, assets) : project;
         const endpoint = includeGeneratedAssets ? `/canvas-projects/${encodeURIComponent(id)}/generated-assets` : `/canvas-projects/${encodeURIComponent(id)}`;
@@ -322,6 +342,7 @@ export function openLocalCanvasProject(id: string) {
  * fallback so a stopped backend never prevents the UI from opening.
  */
 export async function hydrateLocalCanvasProjectsFromBackend() {
+    if (isBrowserWorkspace()) return useCanvasStore.getState().projects.length > 0;
     try {
         const response = await http.get<{ projects: Array<Pick<CanvasProject, "id">> }>("/canvas-projects", {
             params: { page: 1, pageSize: 500, sort: "updated" },
@@ -349,6 +370,7 @@ export async function hydrateLocalCanvasProjectsFromBackend() {
 }
 
 export async function openLocalCanvasProjectFromBackend(id: string) {
+    if (isBrowserWorkspace()) return openLocalCanvasProject(id);
     try {
         const response = await http.get<{ project: CanvasProject }>(`/canvas-projects/${encodeURIComponent(id)}`);
         const backendProject = response.project;
@@ -363,6 +385,7 @@ export async function openLocalCanvasProjectFromBackend(id: string) {
 }
 
 export async function refreshLocalCanvasProjectIfChanged(id: string) {
+    if (isBrowserWorkspace()) return false;
     return serializeCanvasOperation(id, async () => {
       try {
         const response = await http.get<{ project: CanvasProject }>(`/canvas-projects/${encodeURIComponent(id)}`);
@@ -385,6 +408,7 @@ export async function flushLocalWorkspace() {
 
 /** Explicit user resolution: durably keep both versions before reloading. */
 export function keepLocalCanvasCopyAndLoadLatest(id: string) {
+    if (isBrowserWorkspace()) return Promise.reject(new Error("当前使用浏览器本地画布，没有需要覆盖的服务器版本"));
     const timer = backendSaveTimers.get(id);
     if (timer) clearTimeout(timer);
     backendSaveTimers.delete(id);
@@ -420,6 +444,13 @@ export async function deleteLocalCanvasProjects(ids: readonly string[]) {
     const snapshots = useCanvasStore.getState().projects.filter((project) => selected.has(project.id));
     useCanvasStore.getState().deleteProjects([...ids]);
     if (snapshots.length) useCanvasHistoryStore.getState().recordDeletedProjects(snapshots);
+    if (isBrowserWorkspace()) {
+        // Preserve the recovery snapshot before acknowledging permanent removal
+        // from the active canvas collection.
+        await localForageStorageForScope().setItem(CANVAS_HISTORY_STORE_KEY, JSON.stringify({ state: { deletedProjects: useCanvasHistoryStore.getState().deletedProjects }, version: 0 }));
+        await flushCanvasStorePersistence();
+        return snapshots;
+    }
     await flushCanvasStorePersistence();
     await Promise.all(ids.map(async (id) => {
         try {

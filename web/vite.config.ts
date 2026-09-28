@@ -34,6 +34,7 @@ function pruneOptionalMediaPlugin() {
 }
 
 export default defineConfig({
+    base: process.env.QISITV_WEB_BASE || "/",
     plugins: [react(), pruneOptionalMediaPlugin()],
     define: {
         __APP_VERSION__: JSON.stringify(appVersion),

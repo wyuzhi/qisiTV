@@ -1,4 +1,4 @@
-import { Bot, ChevronRight, Home, PanelLeftClose, PanelLeftOpen, Plus, Settings2, Sun, Moon } from "lucide-react";
+import { ChevronRight, Home, PanelLeftClose, PanelLeftOpen, Plus, Settings2, Sun, Moon } from "lucide-react";
 import { LayoutGroup, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
@@ -14,6 +14,7 @@ import { useUserStore, type FeatureAvailability } from "@/stores/use-user-store"
 import { useAppearanceStore } from "@/stores/use-appearance-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 
 export type WorkspaceNavItem = {
     id: string;
@@ -42,7 +43,6 @@ function buildNav(features: FeatureAvailability): { groups: WorkspaceNavGroup[];
         {
             items: [
                 { id: "new", title: "新建项目", icon: Plus, to: "/canvas?mode=new" },
-                { id: "create", title: "qisiTV Agent", icon: Bot, to: "/create", disabled: true },
             ],
         },
         {
@@ -295,6 +295,12 @@ export function WorkspaceSidebarNav({ collapsed, onNavigate, onOpenSearch, onExp
             </LayoutGroup>
 
             <div className="app-workspace-sidebar-footer shrink-0 px-3 py-3">
+                {isBrowserWorkspace() && !collapsed ? (
+                    <div className="mb-3 text-xs leading-relaxed text-foreground/55">
+                        <p>项目保存在此浏览器，建议定期导出。</p>
+                        <a href="/" className="mt-2 inline-block text-foreground/75 hover:underline">← 起司主页</a>
+                    </div>
+                ) : null}
                 {footer.length ? (
                     <div className="flex flex-col gap-0.5">
                         {footer.map((item) => (

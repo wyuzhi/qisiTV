@@ -886,6 +886,9 @@ func normalizedMediaMimeType(declared string, data []byte) string {
 }
 
 func (s *Service) resolveProviderConfig(config providerConfig) (providerConfig, error) {
+	if err := s.requireActiveProvider(config.InterfaceType, config.BaseURL); err != nil {
+		return providerConfig{}, err
+	}
 	headers, err := NormalizeOutboundHeaders(config.Headers)
 	if err != nil {
 		return providerConfig{}, err

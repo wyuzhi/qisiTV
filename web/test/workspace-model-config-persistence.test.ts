@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import * as workspaceBootstrap from "../src/components/workspace/workspace-bootstrap-hydrator";
 import { localWorkspaceConfig } from "../src/lib/user-session";
-import { mergeManagedBeefAPICatalog } from "../src/pages/settings/channel-settings-pane";
+import { applyFetchedChannelModelCatalog, withUpdatedLikeAIChannel } from "../src/pages/settings/channel-settings-pane";
 import { createModelChannel, defaultConfig, type AiConfig } from "../src/stores/use-config-store";
 import { createModelConfigRepository } from "../src/services/model-config-repository";
 
@@ -164,9 +164,8 @@ test("catalog refresh keeps pending manual provider edits across delayed read an
         ...defaultConfig,
         channels: [
             createModelChannel({
-                id: "beefapi",
-                pinned: true,
-                credentialRef: "beefapi-enterprise",
+                id: "likeai",
+                apiFormat: "likeai",
                 models: ["enterprise-image"],
                 modelProfiles: [{ model: "enterprise-image", capability: "image", protocol: "openai-image" }],
             }),
@@ -186,14 +185,19 @@ test("catalog refresh keeps pending manual provider edits across delayed read an
         ...defaultConfig,
         imageModel: "manual::draft-image",
         channels: [
-            createModelChannel({ id: "beefapi", pinned: true, models: ["stale-image"] }),
+            createModelChannel({ id: "likeai", apiFormat: "likeai", models: ["stale-image"] }),
             createModelChannel({ id: "manual", name: "第一次改名", apiKey: "manual-key", models: ["draft-image"] }),
         ],
     };
     const first = repository.commit(current);
     const catalogRefresh = (async () => {
         await catalogRead;
-        return mergeManagedBeefAPICatalog(current, serverCatalog);
+        const channel = current.channels.find((item) => item.id === "likeai")!;
+        const serverChannel = serverCatalog.channels.find((item) => item.id === "likeai")!;
+        return withUpdatedLikeAIChannel(current, applyFetchedChannelModelCatalog(channel, {
+            models: serverChannel.models,
+            catalog: serverChannel.models.map((id) => ({ id, modelType: "image", supportedEndpointTypes: ["likeai-image"] })),
+        }));
     })();
     current = {
         ...current,
@@ -210,11 +214,11 @@ test("catalog refresh keeps pending manual provider edits across delayed read an
 
     expect(merged.channels.find((channel) => channel.id === "manual")?.name).toBe("连接过程中的改名");
     expect(merged.channels.find((channel) => channel.id === "manual")?.models).toEqual(["draft-image", "extra-image"]);
-    expect(merged.channels.find((channel) => channel.id === "beefapi")?.models).toEqual(["enterprise-image"]);
+    expect(merged.channels.find((channel) => channel.id === "likeai")?.models).toEqual(["enterprise-image"]);
     const lastWrite = writes[writes.length - 1];
     expect(lastWrite?.channels.find((channel) => channel.id === "manual")?.name).toBe("连接过程中的改名");
     expect(lastWrite?.channels.find((channel) => channel.id === "manual")?.models).toEqual(["draft-image", "extra-image"]);
-    expect(lastWrite?.channels.find((channel) => channel.id === "beefapi")?.models).toEqual(["enterprise-image"]);
+    expect(lastWrite?.channels.find((channel) => channel.id === "likeai")?.models).toEqual(["enterprise-image"]);
     expect(writes.some((config) => config.channels.find((channel) => channel.id === "manual")?.name === "第一次改名")).toBe(true);
     expect(repository.getState()).toMatchObject({ dirty: false });
 });

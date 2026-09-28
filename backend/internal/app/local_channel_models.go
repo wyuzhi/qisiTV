@@ -68,6 +68,9 @@ func (s *Service) localChannelModels() []localChannelModel {
 		}
 		for _, name := range channel.Models {
 			item := profiles[name]
+			if s.likeAIOnly && !isLikeAIProtocol(item.Protocol) {
+				continue
+			}
 			item.ChannelID = channel.ID
 			item.BaseURL = channel.BaseURL
 			item.Enabled = enabled

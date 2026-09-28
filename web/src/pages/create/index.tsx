@@ -11,6 +11,7 @@ import { creationResultAssetIds } from "@/lib/canvas/canvas-asset-handoff";
 import { getActiveUserScope } from "@/lib/user-scope";
 import { continueCreationConversationOnCanvas } from "@/services/creation-canvas-conversation";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { useExternalAssetSources } from "@/hooks/use-external-asset-sources";
 import { modelCapabilityConfigFor, normalizeImageValue, normalizeVideoValue, videoDurationAllowed, videoDurationOptions } from "@/lib/model-capabilities";
 import { inferVideoOperation, resolveCompatibleModel, mergedImageCapabilityConfig, type ModelRequirements } from "@/lib/model-selection";
@@ -65,8 +66,8 @@ export default function CreatePage() {
     const [searchParams] = useSearchParams();
     const requestedMode = requestedCreationMode(searchParams.get("mode"));
     const demoConversation = searchParams.get("demo") === "conversation";
-    const marketplaceSkill = (searchParams.get("skill") || (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("skill") : ""))?.trim() || "";
-    const [agentMode, setAgentMode] = useState(searchParams.get("mode") === "agent");
+    const marketplaceSkill = isBrowserWorkspace() ? "" : searchParams.get("skill")?.trim() || "";
+    const [agentMode, setAgentMode] = useState(!isBrowserWorkspace() && searchParams.get("mode") === "agent");
     const { message: toast, modal } = App.useApp();
     const navigate = useNavigate();
     const [openingCanvas, setOpeningCanvas] = useState(false);
@@ -337,6 +338,7 @@ export default function CreatePage() {
     }, [hydrated, recoveryTaskKey, toast]);
 
     const loadAddedSkills = useCallback(() => {
+        if (isBrowserWorkspace()) return;
         if (addedSkillsRequestedRef.current) return;
         addedSkillsRequestedRef.current = true;
         void import("@/services/api/skills")
@@ -1005,11 +1007,11 @@ export default function CreatePage() {
                 </AnimatePresence>
                 <main ref={threadScrollRef} onScroll={handleThreadScroll} className="creation-empty-workspace creation-scrollbar">
                 <div className="creation-home-heading">
-                    <h1>和 qisiTV Agent 一起创作</h1>
+                    <h1>{isBrowserWorkspace() ? "开始创作" : "和 qisiTV Agent 一起创作"}</h1>
                 </div>
                 <section ref={launchpadRef} className="creation-launchpad" aria-label="开始创作">
                     <div className={cn("creation-composer-stage is-home-mode", agentMode && "is-agent-mode")}>
-                        <CreationModeTabs mode={mode} agentActive={agentMode} onAgentSelect={() => setAgentMode(true)} onModeChange={(next) => { setAgentMode(false); selectMode(next); }} />
+                        <CreationModeTabs mode={mode} agentActive={agentMode} onAgentSelect={isBrowserWorkspace() ? undefined : () => setAgentMode(true)} onModeChange={(next) => { setAgentMode(false); selectMode(next); }} />
                         {agentMode ? <CreationAgentEntry autoStart /> : <div className="creation-empty-composer"><CreationComposer {...composerProps} variant="empty" /></div>}
                     </div>
                     <CreationEmptySuggest

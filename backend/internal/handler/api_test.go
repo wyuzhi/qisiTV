@@ -69,8 +69,6 @@ func TestRegisterDesktopCanvasAPIExcludesHostedOnlyRoutes(t *testing.T) {
 		"POST /api/resources":                           false,
 		"POST /api/tasks":                               false,
 		"POST /api/ai/models":                           false,
-		"GET /api/beefapi/connection":                   false,
-		"POST /api/beefapi/connection/start":            false,
 		"PUT /api/canvas-projects/:id/generated-assets": false,
 	}
 	for _, route := range router.Routes() {
@@ -122,7 +120,7 @@ func TestRegisterDesktopCanvasAPIExcludesHostedOnlyRoutes(t *testing.T) {
 		"/api/login", "/api/register", "/api/auth/", "/api/oauth/",
 		"/api/finance", "/api/payments", "/api/admin", "/api/announcements",
 		"/api/canvas-shares", "/api/model-catalog", "/api/models",
-		"/api/ai/system/", "/api/settings/oss", "/api/runninghub/",
+		"/api/ai/system/", "/api/settings/oss", "/api/runninghub/", "/api/beefapi/", "/api/ai/custom",
 		"/api/resources/import", "/api/resources/", // filtered below for local resource routes
 	}
 	for _, route := range router.Routes() {

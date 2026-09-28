@@ -4,6 +4,8 @@ import { readAxiosError, validateGeminiPayload } from "@/services/api/image-resp
 import { geminiApiUrl, geminiHeaders } from "@/services/api/image-transport";
 import { http } from "@/services/api/request";
 import { buildApiUrl, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
+import { fetchBrowserLikeAIModels } from "@/services/browser-likeai-client";
 
 const defaultGeminiConfig: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat" | "model" | "systemPrompt"> = {
     baseUrl: "https://generativelanguage.googleapis.com",
@@ -58,6 +60,10 @@ export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKe
 export type ChannelModelFetchResult = { models: string[]; catalog: ChannelModelCatalogItem[] };
 
 export async function fetchChannelModels(channel: ModelChannel, viaBackend = false): Promise<ChannelModelFetchResult> {
+    if (isBrowserWorkspace()) {
+        if (channel.apiFormat !== "likeai") throw new Error("网页仅支持 LikeAI 模型服务");
+        return fetchBrowserLikeAIModels(channel.apiKey);
+    }
     const managed = channel.id === "beefapi" && (channel.pinned || Boolean(channel.credentialRef));
     if (managed || channel.apiFormat === "likeai") {
         viaBackend = true;

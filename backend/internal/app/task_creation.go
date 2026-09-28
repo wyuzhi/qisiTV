@@ -46,6 +46,9 @@ func (s *Service) CreateTask(userID string, req CreateTaskRequest) (*model.Task,
 	if err != nil {
 		return nil, err
 	}
+	if err := s.requireActiveTaskProvider(normalizedInput); err != nil {
+		return nil, err
+	}
 	normalizedInput, err = s.resolveManagedBeefAPISecrets(normalizedInput)
 	if err != nil {
 		return nil, err

@@ -6,6 +6,8 @@
 
 qisiTV 是基于上游 `glanderness/BeefTV` 二次开发的 AI 影视与短剧创作工作台，当前仍在快速开发。公开接口、数据结构和部署配置可能直接调整；除非任务明确要求，不为旧字段、旧 API 或旧数据增加兼容层。
 
+当前用户确定的产品范围：无需注册、登录或积分；模型服务仅保留官方 LikeAI。网站模式由 `VITE_QISITV_BROWSER_ONLY=1` 启用，项目和素材存于当前浏览器；网站函数只临时转发 LikeAI 请求，不建立云端工作区。不要在合并上游时恢复 BeefAPI 钱包或其他服务商入口。现有 MCP 连接本机 Go 工作区，不能宣称它已连接到网站 IndexedDB。
+
 仓库由几个边界清晰但可独立运行的单元组成：
 
 | 单元 | 技术栈 | 入口 | 责任 |
@@ -77,6 +79,7 @@ qisiTV 是基于上游 `glanderness/BeefTV` 二次开发的 AI 影视与短剧�
 - 自定义渠道由本地后端 `/api/ai/custom` 中转；重建 headers 时清除 `x-goog-api-key` 和旧的 `X-Canvas-Upstream-Headers`，不得把第三方密钥放入浏览器 URL。
 - Provider 特有 payload、响应解包和状态机留在对应 `image.ts`、`video.ts`、`audio.ts`；不要塞进通用 `request.ts`。
 - 原始 `fetch` 仅用于媒体 blob/data URL、资源、Worker 或 SSE；必须检查 `response.ok`，传递正确的 `credentials` 和 `signal`。
+- 网站模式的 LikeAI 例外由 `browser-likeai-client.ts` 集中处理，固定同源 `/api/qisitv/likeai`；转发规范源在 `deploy/website/`，不允许任意上游或服务端长期保存密钥。不得在重试、刷新或重新下载时重新提交收费任务。
 - 文本任务 SSE 是 `GET /api/tasks/:id/text-events`，游标是递增事件 `id`；断线使用 `Last-Event-ID` 或 `?after=`，不能把任务 ID 当游标。
 - 代理只对文本任务和明确的系统模型事件流路径关闭缓冲/缓存/gzip；不要给所有 `/api/` 请求复制长超时和 `proxy_buffering off`。
 
