@@ -1904,6 +1904,16 @@
         display: none;
     }
 
+    .canvas-topbar .canvas-folder-save-status [aria-label^="画布保存状态"] {
+        width: auto;
+        padding-inline: 8px;
+        opacity: 1;
+    }
+
+    @media (max-width: 650px) {
+        .canvas-folder-save-label { display: none; }
+    }
+
     .canvas-topbar [aria-label^="画布保存状态"] {
         width: 28px;
         min-width: 28px;

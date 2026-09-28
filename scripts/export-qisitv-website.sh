@@ -4,12 +4,15 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SITE_DIR="${1:?Usage: export-qisitv-website.sh /path/to/personal-site}"
 [[ -f "$SITE_DIR/astro.config.mjs" && -d "$SITE_DIR/public" ]] || { echo "Expected the personal-site Astro project" >&2; exit 1; }
 SITE_DIR="$(cd "$SITE_DIR" && pwd)"
+bash "$ROOT_DIR/scripts/build-qisitv-connect.sh" "$ROOT_DIR/dist/connector"
 (
   cd "$ROOT_DIR/web"
   VITE_QISITV_BROWSER_ONLY=1 QISITV_WEB_BASE=/qisitv/ bun run build
 )
 mkdir -p "$SITE_DIR/public/qisitv"
 rsync -a --delete "$ROOT_DIR/web/dist/" "$SITE_DIR/public/qisitv/"
+mkdir -p "$SITE_DIR/public/qisitv/downloads"
+cp "$ROOT_DIR/dist/connector/"*.zip "$ROOT_DIR/dist/connector/"*.tar.gz "$ROOT_DIR/dist/connector/SHA256SUMS" "$SITE_DIR/public/qisitv/downloads/"
 cp "$ROOT_DIR/LICENSE" "$ROOT_DIR/NOTICE" "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$SITE_DIR/public/qisitv/"
 cp "$ROOT_DIR/assets/readme/qisitv-workspace.png" "$SITE_DIR/public/assets/qisitv-workspace.png"
 mkdir -p "$SITE_DIR/api/qisitv"

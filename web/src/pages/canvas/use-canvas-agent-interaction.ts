@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import { http } from "@/services/api/request";
 import type { ViewportTransform } from "@/types/canvas";
 import { isBrowserWorkspace } from "@/services/browser-workspace";
+import { setBrowserAgentInteraction } from "@/services/browser-agent-connection";
+import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 
 /** Short-lived selection context lets a local Agent resolve "these images". */
 export function useCanvasAgentInteraction(canvasId: string, ready: boolean, selectedNodeIds: Set<string>, viewport: ViewportTransform) {
@@ -9,6 +11,16 @@ export function useCanvasAgentInteraction(canvasId: string, ready: boolean, sele
     const snapshot = useRef({ selectedNodeIds: [] as string[], viewport });
     snapshot.current = { selectedNodeIds: [...selectedNodeIds], viewport };
     const publish = useRef<() => void>(() => {});
+
+    useEffect(() => {
+        if (!isBrowserWorkspace() || !canvasId || !ready) return;
+        setBrowserAgentInteraction({ canvasId, selectedNodeIds: [...selectedNodeIds], viewport }, useCanvasStore.getState().openProject(canvasId)?.title);
+    }, [canvasId, ready, selectedNodeIds, viewport]);
+
+    useEffect(() => {
+        if (!isBrowserWorkspace()) return;
+        return () => setBrowserAgentInteraction({ canvasId: null, selectedNodeIds: [] });
+    }, [canvasId, ready]);
 
     useEffect(() => {
         if (!canvasId || !ready || isBrowserWorkspace()) return;

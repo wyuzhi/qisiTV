@@ -11,6 +11,7 @@ import { useSyncProgressStore } from "@/stores/use-sync-progress-store";
 import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { localForageStorageForScope } from "@/lib/localforage-storage";
 import { CANVAS_HISTORY_STORE_KEY } from "@/stores/canvas/use-canvas-history-store";
+import { ensureFolderReady, getProjectFolderState, initializeProjectFolder, persistProjectToFolder, pickProjectRoot, restoreFolderProjects } from "@/services/browser-project-folder";
 
 type LocalCanvasContent = Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId">>;
 type CanvasSaveSummary = Pick<CanvasProject, "id" | "title" | "createdAt" | "updatedAt" | "revision">;
@@ -18,6 +19,7 @@ type CanvasSaveSummary = Pick<CanvasProject, "id" | "title" | "createdAt" | "upd
 const backendSaveTails = new Map<string, Promise<void>>();
 const backendSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const backendBaselines = new Map<string, CanvasProject>();
+let browserFolderHydration: Promise<boolean> | undefined;
 
 function serializeCanvasOperation<T>(id: string, operation: () => Promise<T>): Promise<T> {
     const next = (backendSaveTails.get(id) || Promise.resolve()).catch(() => undefined).then(operation);
@@ -148,6 +150,7 @@ export function selectPreferredCanvasProject(local: CanvasProject | null | undef
  * when that runtime is unavailable; no hosted account or cloud sync is used.
  */
 export async function createLocalCanvasProject(title: string, projectId?: string, initialContent?: LocalCanvasContent, workspaceProjectId?: string) {
+    if (isBrowserWorkspace()) await ensureFolderReady();
     const id = useCanvasStore.getState().createProject(title, projectId, workspaceProjectId);
     if (initialContent) useCanvasStore.getState().updateProject(id, initialContent);
     if (isBrowserWorkspace()) {
@@ -177,16 +180,16 @@ function syncLocalCanvasProject(id: string, includeGeneratedAssets: boolean): Pr
         let project = openLocalCanvasProject(id);
         if (!project) return;
         if (isBrowserWorkspace()) {
-            const previousRevision = project.revision ?? 0;
-            const revision = previousRevision + 1;
+            useSyncProgressStore.getState().setProjectProgress(id, { phase: "saving", message: "正在写入本地项目文件夹…" });
+            const { revision } = await persistProjectToFolder(project);
             useCanvasStore.setState((state) => ({ projects: state.projects.map((current) => current.id === id ? { ...current, revision } : current) }));
-            try {
-                await flushCanvasStorePersistence();
-            } catch (error) {
-                useCanvasStore.setState((state) => ({ projects: state.projects.map((current) => current.id === id && current.revision === revision ? { ...current, revision: previousRevision } : current) }));
-                throw error;
-            }
-            useSyncProgressStore.getState().setProjectProgress(id, null);
+            // Disk is durable even if refreshing its optional cache fails.
+            void flushCanvasStorePersistence().catch((error) => console.warn("项目已写入文件夹，浏览器缓存刷新失败", { id, error }));
+            const live = openLocalCanvasProject(id);
+            const pending = live && (!sameCanvasContent(live, project) || JSON.stringify(live.viewport) !== JSON.stringify(project.viewport));
+            useSyncProgressStore.getState().setProjectProgress(id, pending
+                ? { phase: "pending", message: "有新修改等待写入本地项目文件夹…" }
+                : { phase: "done", message: "已保存到本地项目文件夹" });
             return;
         }
         const assets = includeGeneratedAssets ? canvasGenerationCommitAssets(project, useAssetStore.getState().assets) : [];
@@ -300,6 +303,11 @@ export async function persistCanvasDocument(id: string, patch: CanvasDocumentPer
         }
         await flushCanvasStorePersistence();
     } catch (error) {
+        if (isBrowserWorkspace()) {
+            // Keep the pending edit available for a user-directed retry.
+            void flushCanvasStorePersistence().catch(() => undefined);
+            throw error;
+        }
         if (previous) {
             useCanvasStore.setState((state) => ({
                 projects: state.projects.map((item) => {
@@ -324,6 +332,7 @@ export function syncLocalCanvasGenerationProjectToBackend(id: string): Promise<v
 }
 
 export function scheduleLocalCanvasBackendSync(id: string) {
+    if (isBrowserWorkspace()) useSyncProgressStore.getState().setProjectProgress(id, { phase: "pending", message: "有修改等待写入本地项目文件夹…" });
     const existing = backendSaveTimers.get(id);
     if (existing) clearTimeout(existing);
     backendSaveTimers.set(id, setTimeout(() => {
@@ -342,7 +351,16 @@ export function openLocalCanvasProject(id: string) {
  * fallback so a stopped backend never prevents the UI from opening.
  */
 export async function hydrateLocalCanvasProjectsFromBackend() {
-    if (isBrowserWorkspace()) return useCanvasStore.getState().projects.length > 0;
+    if (isBrowserWorkspace()) {
+        if (!browserFolderHydration) {
+            browserFolderHydration = (async () => {
+                const folder = await initializeProjectFolder();
+                if (folder.ready) await mergeBrowserFolderProjects(await restoreFolderProjects(), false);
+                return useCanvasStore.getState().projects.length > 0;
+            })().catch((error) => { browserFolderHydration = undefined; throw error; });
+        }
+        return browserFolderHydration;
+    }
     try {
         const response = await http.get<{ projects: Array<Pick<CanvasProject, "id">> }>("/canvas-projects", {
             params: { page: 1, pageSize: 500, sort: "updated" },
@@ -441,7 +459,19 @@ export function keepLocalCanvasCopyAndLoadLatest(id: string) {
 
 export async function deleteLocalCanvasProjects(ids: readonly string[]) {
     const selected = new Set(ids);
-    const snapshots = useCanvasStore.getState().projects.filter((project) => selected.has(project.id));
+    const snapshots = structuredClone(useCanvasStore.getState().projects.filter((project) => selected.has(project.id)));
+    if (isBrowserWorkspace()) {
+        for (const project of snapshots) {
+            const timer = backendSaveTimers.get(project.id);
+            if (timer) clearTimeout(timer);
+            backendSaveTimers.delete(project.id);
+            await serializeCanvasOperation(project.id, async () => {
+                const current = openLocalCanvasProject(project.id) || project;
+                const saved = await persistProjectToFolder(current, { deleted: true });
+                project.revision = saved.revision;
+            });
+        }
+    }
     useCanvasStore.getState().deleteProjects([...ids]);
     if (snapshots.length) useCanvasHistoryStore.getState().recordDeletedProjects(snapshots);
     if (isBrowserWorkspace()) {
@@ -461,4 +491,34 @@ export async function deleteLocalCanvasProjects(ids: readonly string[]) {
         }
     }));
     return snapshots;
+}
+
+/** Merge an explicitly chosen directory; cache-only projects are migrated, never removed. */
+export async function mergeBrowserFolderProjects(projects: CanvasProject[], migrateCached = true) {
+    const cached = [...useCanvasStore.getState().projects];
+    for (const project of projects) {
+        const current = cached.find((item) => item.id === project.id);
+        // Object URLs are session-local presentation, not divergent user edits.
+        const comparable = (item: CanvasProject) => JSON.parse(JSON.stringify(item, (_key, value) => typeof value === "string" && value.startsWith("blob:") ? "local-media-preview" : value)) as CanvasProject;
+        if (current && !sameCanvasContent(comparable(current), comparable(project))) {
+            const { preserveCanvasSyncDraft } = await import("@/services/canvas-sync-drafts");
+            const draftCount = await preserveCanvasSyncDraft(current);
+            useSyncProgressStore.getState().setProjectProgress(project.id, { phase: "done", draftCount, message: "已从文件夹恢复；原浏览器内容保留在版本记录中。" });
+        }
+    }
+    const fromDisk = new Map(projects.map((project) => [project.id, project]));
+    const deleted = new Set(getProjectFolderState().deletedProjectIds || []);
+    const next = cached.filter((project) => !deleted.has(project.id)).map((project) => fromDisk.get(project.id) || project);
+    projects.forEach((project) => { if (!cached.some((item) => item.id === project.id)) next.push(project); });
+    useCanvasStore.setState({ projects: next });
+    await flushCanvasStorePersistence();
+    if (migrateCached) {
+        const bound = getProjectFolderState().projectDirectories;
+        for (const project of cached) if (!bound[project.id]) await syncLocalCanvasProjectToBackend(project.id);
+    }
+    return projects;
+}
+
+export async function selectBrowserProjectRoot() {
+    return mergeBrowserFolderProjects(await pickProjectRoot());
 }

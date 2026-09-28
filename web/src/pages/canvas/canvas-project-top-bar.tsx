@@ -11,6 +11,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useCanvasThemeStore } from "@/stores/canvas/use-canvas-theme-store";
 import type { CanvasMediaPerformanceMode } from "@/types/canvas";
 import { CanvasShortcutsModal } from "./canvas-shortcuts-modal";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 
 type CanvasTopBarProps = {
     workspaceView: "workflow" | "storyboard";
@@ -332,7 +333,7 @@ export function CanvasTopBar({
                             <span>{currentCanvasLabel}</span>{canvasMenuOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
                         </button>
                     </Dropdown>
-                    {!libtvChrome ? <span className="canvas-topbar-sync-status">{syncStatus}</span> : null}
+                    {!libtvChrome || isBrowserWorkspace() ? <span className={isBrowserWorkspace() ? "canvas-folder-save-status" : "canvas-topbar-sync-status"}>{syncStatus}</span> : null}
                 </div>
                 </div>
 

@@ -1,6 +1,14 @@
 import { saveAs } from "file-saver";
 
 import { sanitizeDownloadFileName } from "@/lib/canvas/canvas-media-download";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
+import { workspaceRouteLocation } from "@/lib/workspace-url";
+
+function currentBrowserProjectId() {
+    if (!isBrowserWorkspace() || typeof window === "undefined") return undefined;
+    const match = workspaceRouteLocation(window.location).pathname.match(/^\/canvas\/([^/]+)$/);
+    return match ? decodeURIComponent(match[1]) : undefined;
+}
 
 export type OwnedMediaSaveResult = "saved" | "cancelled";
 
@@ -23,12 +31,22 @@ export async function downloadOwnedOrBrowserMedia(options: { fileName: string; r
     }
     const browserUrl = options.browserUrl?.trim();
     if (!browserUrl) throw new Error("没有可导出的文件");
+    if (currentBrowserProjectId() && /^(blob:|data:)/.test(browserUrl)) {
+        const response = await fetch(browserUrl);
+        if (!response.ok) throw new Error("无法读取要导出的媒体");
+        return saveOwnedOrBrowserBlob(fileName, await response.blob());
+    }
     saveAs(browserUrl, fileName);
     return "saved";
 }
 
-export async function saveOwnedOrBrowserBlob(fileName: string, blob: Blob): Promise<OwnedMediaSaveResult> {
+export async function saveOwnedOrBrowserBlob(fileName: string, blob: Blob, projectId = currentBrowserProjectId()): Promise<OwnedMediaSaveResult> {
     const name = sanitizeDownloadFileName(fileName, "未命名导出");
+    if (isBrowserWorkspace() && projectId) {
+        const { saveProjectExport } = await import("@/services/browser-project-folder");
+        await saveProjectExport(projectId, name, blob);
+        return "saved";
+    }
     if (isWailsNativeShell()) {
         if (blob.size > MAX_OWNED_ARTIFACT_BYTES) throw new Error("导出包太大，请减少所选内容后再导出");
         const save = window.go?.main?.DesktopApp?.SaveOwnedArtifact;

@@ -54,7 +54,7 @@ export async function exportCanvasProjects(projects: CanvasProject[], fileName =
     const folders = options.folders?.filter((folder) => projectFolderIds.has(folder.id));
     const data: CanvasExportFile = { app: "infinite-canvas", version: 4, exportedAt: new Date().toISOString(), ...(folders?.length ? { folders } : {}), projects: exportedProjects };
     const zip = await createZip([{ name: "projects.json", data: JSON.stringify(data, null, 2) }, ...zipFiles]);
-    return saveOwnedOrBrowserBlob(`${safeFileName(fileName)}.zip`, zip);
+    return saveOwnedOrBrowserBlob(`${safeFileName(fileName)}.zip`, zip, projects.length === 1 ? projects[0].id : undefined);
 }
 
 function collectStorageKeys(value: unknown, keys = new Set<string>()) {

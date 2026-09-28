@@ -1,26 +1,104 @@
 ---
-title: 网站版与浏览器本地保存
+title: 网站版、本地项目文件夹与 Agent
 ---
 
-# 网站版与浏览器本地保存
+# 网站版、本地项目文件夹与 Agent
 
-网站版挂载在 `/qisitv/`，直接在浏览器里打开。不需要注册、登录或启动 Go 服务；画布、版本、素材、生成任务和 LikeAI 配置保存在当前浏览器的 IndexedDB 中。清除网站数据、使用无痕模式或换浏览器不会自动保留这些内容，请定期使用画布导出功能备份。
+打开 [qisiTV 起司 TV](https://cheeser.link/qisitv/)，使用桌面 Chrome 或 Edge，进入「本地文件与 Agent」。先选择电脑上的项目根目录；以后每个项目都会有自己的真实子文件夹，画布与素材自动写入。普通创作不需要注册、登录或启动本地程序。需要 Codex 操作画布时，再启动本地连接器。
 
-## 使用
+## 先设置保存位置
 
-1. 在网站进入「qisiTV 起司 TV」，创建画布并导入参考素材。
-2. 在设置中填写自己的 LikeAI API Key，拉取模型。
-3. 选择图片、视频等节点，连接参考素材，填写提示词后手动生成。
+1. 在电脑创建一个专门的目录，例如「qisiTV 项目」。
+2. 网站进入「本地文件与 Agent」，点击「选择项目文件夹」，选择这个根目录并允许读写。
+3. 打开项目列表，新建项目。导入参考素材、添加节点和连线后，等待画布顶部显示「已写入项目文件夹」再关闭网页。
+4. 需要生成时，在「模型配置」填写自己的 LikeAI API Key、拉取模型，再选择模型和参考素材。
 
-界面只提供 LikeAI。旧工作区中的其他服务商记录保留在原始本地数据中，避免破坏历史配置，但不作为当前可用渠道显示或执行。
+根目录中的项目结构如下。目录名称包含项目名称与 ID；在画布中改名不会移动已经创建的目录。
+
+```text
+qisiTV 项目/
+└── 我的广告片-项目ID/
+    ├── project.qisitv.json
+    ├── references/
+    ├── images/
+    ├── videos/
+    ├── audio/
+    ├── exports/
+    └── .qisitv/
+        └── revision-1.json
+```
+
+`project.qisitv.json` 保存画布、节点、连线、修订号和媒体索引；`references` 保存导入素材的副本，`images`、`videos`、`audio` 存放生成媒体，`exports` 保存通过应用导出的文件，`.qisitv` 保存之前的项目修订。媒体采用内容摘要作为文件名并保留扩展名，可以直接在 Finder 或文件管理器中查看。不要单独移动、改名或替换项目内的媒体文件；恢复时会检查文件大小与摘要。
+
+磁盘文件夹是正式保存位置。IndexedDB 仍用于目录授权句柄、媒体缓存、模型配置及生成任务状态，但它不再是已保存项目的唯一副本。API Key、连接令牌不写入项目文件；复制项目不会复制这些配置。
+
+浏览器需要用户点击按钮授权目录，网站不能直接指定电脑上的绝对路径。当前目录功能要求桌面 Chrome / Edge；Safari、Firefox 和不支持目录 API 的内嵌浏览器会提示更换浏览器，不会将仅存缓存显示成已写入文件夹。权限失效时点击「重新授权」。
+
+## 恢复项目与迁移旧数据
+
+重新打开网站后，应用会恢复已有目录授权；如浏览器要求再次授权，按界面提示操作即可。清理网站数据或换电脑后，把完整项目子文件夹放入一个根目录，再在网站选择该根目录，即可从项目文档与媒体文件恢复画布。选择的是包含多个项目子文件夹的根目录，不是单个项目内的 `images` 或 `videos` 目录。
+
+之前仅存在当前浏览器中的项目会保留。选择根目录后，页面若显示「还有若干个项目只在浏览器缓存中」，点击「保存这些项目到文件夹」完成迁移。程序先写媒体，再写项目文档；媒体缺失、远程结果尚未下载或磁盘写入失败会明确报错，不会删除旧缓存后声称迁移成功。
+
+生成中的任务状态与 LikeAI 配置仍有浏览器缓存依赖。搬动项目、清理网站数据或换浏览器前，先等任务结束并确认结果已写入文件夹；新浏览器需重新填写 Key。同一根目录内如果有两个相同项目 ID 的复制品，读取会被拒绝。
+
+## 让 Codex 操作同一个画布
+
+首次设置分为下载、安装 MCP、网页配对三步；以后日常使用只需启动连接器并配对。
+
+### 下载本地连接器
+
+网站「本地文件与 Agent」提供相同的下载入口：
+
+| 系统 | 下载 |
+| --- | --- |
+| Mac · Apple 芯片 | [darwin-arm64.zip](https://cheeser.link/qisitv/downloads/qisitv-connect-darwin-arm64.zip) |
+| Mac · Intel | [darwin-amd64.zip](https://cheeser.link/qisitv/downloads/qisitv-connect-darwin-amd64.zip) |
+| Windows · x64 | [windows-amd64.zip](https://cheeser.link/qisitv/downloads/qisitv-connect-windows-amd64.zip) |
+| Windows · ARM | [windows-arm64.zip](https://cheeser.link/qisitv/downloads/qisitv-connect-windows-arm64.zip) |
+| Linux · x64 | [linux-amd64.tar.gz](https://cheeser.link/qisitv/downloads/qisitv-connect-linux-amd64.tar.gz) |
+| Linux · ARM | [linux-arm64.tar.gz](https://cheeser.link/qisitv/downloads/qisitv-connect-linux-arm64.tar.gz) |
+
+解压后把整个连接器目录放到固定位置，避免配置 MCP 后又移动可执行文件。下载目录同时提供 [SHA256SUMS](https://cheeser.link/qisitv/downloads/SHA256SUMS)。这六种是构建目标，不代表每种系统都经过实机验证。
+
+Mac 包尚未签名、公证，Windows 包没有代码签名。系统提示未知发布者时，先核对下载来源；macOS 可按「系统设置 → 隐私与安全性」中的「仍要打开」流程操作，不需要关闭系统安全保护。
+
+### 启动、安装与配对
+
+1. Mac 双击 `start.command`；Windows 双击 `start.cmd`；Linux 运行 `./start.sh`。保持打开的终端窗口运行。
+2. 首次使用，再运行同目录的 `install-codex.command` / `install-codex.cmd` / `install-codex.sh`。脚本执行 `codex mcp add qisitv-web`，只添加网站连接器；需要可用的 Codex CLI。完成后重新加载 Codex 工具或重新打开 Codex。
+3. 网站「本地文件与 Agent」输入终端显示的一次性配对码，点击「连接」。浏览器询问是否允许访问本地网络时选择允许。
+4. 回到项目列表，打开要操作的画布。在 Codex 中发送下面的指令。
+
+> 使用 qisitv-web 连接的画布。先列出会话，读取我当前打开的项目和选区，然后在空白处添加一个文字节点，内容是「第一个镜头的创作思路」。先不要调用付费生成。
+
+节点应出现在当前网页，并自动保存到该项目文件夹。选中参考图后，可以继续说「使用我选中的两张图作为参考，连接到一个视频节点，先不要生成」。Agent 通过 `canvas_current` 和画布数据读取真实选区，不靠最近打开的项目猜测目标。
+
+使用期间保持网页和连接器打开。连接器只监听 `127.0.0.1:17372`，无需向公网开放端口。刷新或重新打开网页后需要重新配对；配对码有效十分钟且只能使用一次。需要新码时，在连接器目录另开终端运行 `./qisitv-connect pair-code`，Windows 使用 `qisitv-connect.exe pair-code`。连接器运行中也可使用 `status` 查看会话。多个网页已配对时，让 Agent 先执行 `canvas_list_sessions` 选择目标。
+
+旧的 `qisitv` MCP 操作原本机 Go 工作区；这里安装的 **`qisitv-web`** 操作已配对的网站画布。它们是两个明确的入口，项目不会自动混合。已有旧工具时，请在指令中明确写 `qisitv-web`。其他支持 stdio MCP 的客户端可将命令设置为连接器可执行文件的绝对路径，参数为 `["mcp"]`。
+
+### 生成授权与失败恢复
+
+画布编辑、连线、导入和模型查询本身不提交收费生成。让 Agent 生图或生视频时，明确指定模型、数量或时长及同意的费用范围。`task_submit` 要求 `consent.approved=true`、授权范围、目标节点、最新 `baseRevision` 和稳定的 `idempotencyKey`；每次只提交一个任务。
+
+提交前先把不含密钥的意图回执写入项目，再调用 LikeAI。相同请求使用相同幂等键会复用任务；同一键改成另一个请求会被拒绝。掉线、超时或刷新不会自动重新提交收费任务。没有供应商任务编号时，先在 LikeAI 核对；已有结果但画布保存失败时，恢复文件夹权限后让 Agent 执行 `task_apply_result`，无需重新生成。
+
+浏览器是项目文件的唯一写入者。连接器通过 WebSocket 转发 MCP 命令，网页复用手动画布的状态和保存逻辑处理，再等待文件写入成功后返回。修改包含修订检查；用户同时编辑造成冲突时会拒绝旧命令，Agent 应重新读取后再操作。
 
 ## 请求与保存
 
 LikeAI 接口没有开放浏览器跨域请求，因此网站提供固定目的地的 `/api/qisitv/likeai/` 转发。密钥、提示词与本次参考素材会经过网站函数，再发给 LikeAI；应用不在网站服务器建立账号、数据库或素材存储，不记录请求正文和密钥。LikeAI 自身的任务和临时素材保留规则由服务商决定。
 
-生成意图先写入浏览器，再提交一次。刷新后有供应商任务编号的任务只继续查询，不自动重新生成。提交中断且没有取得任务编号时，会提示到 LikeAI 核对，不自动重试或扣费。生成完成后尝试保存媒体到浏览器；下载失败会保留原结果链接并明确显示「本地保存未成功」。
+LikeAI Key 只在网页模型配置中填写，不放到 MCP 命令、提示词或项目文件。连接器本身不接收模型 Key；它的配对令牌只用于本机连接。
 
-网页上传的单个参考文件上限为 4,000,000 字节；较大的参考素材需使用服务商可访问的 HTTPS 地址。网站转发只接受明确列出的 LikeAI 路径，不接受任意上游地址。结果下载通过任务编号查询并验证来源，不会把 API Key 发给媒体 CDN。
+当前三处大小限制不同：
+
+- Agent 从本机导入画布的单个媒体文件最多 **32 MiB**；更大的本地素材可在网页手动导入。
+- 网页向 LikeAI 上传单个生成参考文件最多 **4,000,000 字节**。成功导入画布不代表它满足生成上传限制；超限时需缩小素材或使用服务商可访问的 HTTPS 素材地址。
+- 单个生成结果的自动下载最多 **128 MiB**。超限或下载不完整时，保留结果链接并提示，用户可从原链接下载后手动导入；不会再次生成。
+
+转发仅接受明确列出的 LikeAI 路径，不接受任意上游地址。结果下载通过任务编号查询并验证来源，不会把 API Key 发给媒体 CDN。媒体先保存、项目文档后提交；「已写入项目文件夹」只表示实际磁盘写入已完成。权限撤回、磁盘写入失败或外部修订冲突会保留明确错误，不能当作保存成功。
 
 ## 构建到网站
 
@@ -30,10 +108,6 @@ LikeAI 接口没有开放浏览器跨域请求，因此网站提供固定目的�
 ./scripts/export-qisitv-website.sh /absolute/path/to/personal-site
 ```
 
-脚本设置 `VITE_QISITV_BROWSER_ONLY=1` 和 `QISITV_WEB_BASE=/qisitv/`，构建前端并复制到 Astro 网站的 `public/qisitv/`，同时复制 `deploy/website/` 中的转发函数并合并对应 Vercel 路由。网站目录需要已有 `vercel.json`；部署前用 `vercel build` 验证函数与静态站点。网站版采用 hash 路由，画布地址形如 `/qisitv/#/canvas/ID`；静态资源也使用此子目录前缀。默认桌面构建仍使用原本地服务。
+脚本调用 `scripts/build-qisitv-connect.sh` 构建六个平台连接器，再设置 `VITE_QISITV_BROWSER_ONLY=1` 和 `QISITV_WEB_BASE=/qisitv/` 构建前端，复制到 Astro 网站的 `public/qisitv/`。下载包复制到 `public/qisitv/downloads/`，`deploy/website/` 中的转发函数与对应 Vercel 路由也一并更新。网站目录需要已有 `vercel.json`。
 
-## Codex 与本地程序
-
-现有 MCP/CLI 连接的是本机 Go 工作区，详见[本地 Agent](/docs/backend/local-agent)。它不能直接读取网站源下的浏览器 IndexedDB。网站中的画布与原桌面画布也不会自动合并。
-
-当前网站版关闭内置 Agent 对话及对 Go 的后台轮询。需要现有 Codex 控制能力时，使用本地程序的画布工作区。网站画布与本地程序之间的显式配对、同步尚未接通，不能将启动 MCP 视为已经连接了网站画布。
+网站采用 hash 路由：画布地址为 `/qisitv/#/canvas/ID`，本地设置页为 `/qisitv/#/local`。默认桌面构建仍使用原本地 Go 服务，见[本地 Agent](/docs/backend/local-agent)。部署与测试记录需以实际执行结果为准；构建通过本身不等于六个平台安装验证或付费模型生成验证。

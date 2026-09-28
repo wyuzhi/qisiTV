@@ -1,4 +1,4 @@
-import { ChevronRight, Home, PanelLeftClose, PanelLeftOpen, Plus, Settings2, Sun, Moon } from "lucide-react";
+import { ChevronRight, Home, PanelLeftClose, PanelLeftOpen, Plus, Settings2, Sun, Moon, FolderSync } from "lucide-react";
 import { LayoutGroup, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
@@ -51,6 +51,7 @@ function buildNav(features: FeatureAvailability): { groups: WorkspaceNavGroup[];
                 { ...toolItem("canvas", "/project"), title: "项目" },
                 { ...toolItem("assets", "/assets"), title: "资产" },
                 { id: "settings:channels", title: "模型配置", icon: Settings2, to: "/settings?section=channels" },
+                ...(isBrowserWorkspace() ? [{ id: "local", title: "本地文件与 Agent", icon: FolderSync, to: "/local" }] : []),
             ],
         },
     ];
@@ -297,7 +298,7 @@ export function WorkspaceSidebarNav({ collapsed, onNavigate, onOpenSearch, onExp
             <div className="app-workspace-sidebar-footer shrink-0 px-3 py-3">
                 {isBrowserWorkspace() && !collapsed ? (
                     <div className="mb-3 text-xs leading-relaxed text-foreground/55">
-                        <p>项目保存在此浏览器，建议定期导出。</p>
+                        <Link to="/local" className="hover:underline">选择本机文件夹，让项目与素材自动保存。</Link>
                         <a href="/" className="mt-2 inline-block text-foreground/75 hover:underline">← 起司主页</a>
                     </div>
                 ) : null}

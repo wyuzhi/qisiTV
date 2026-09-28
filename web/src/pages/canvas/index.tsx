@@ -24,6 +24,7 @@ import { normalizeLocalCanvasProject } from "@/lib/local-workspace-migration";
 import { saveCanvasDrawing, type CanvasDrawingRenderDraft } from "@/lib/canvas/canvas-drawing-storage";
 import { hasRemoteUserDataSyncSession, loadCanvasProjectForEditing, saveRemoteUserDataNow, scheduleRemoteUserDataSync } from "@/services/local-workspace-sync";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { createLocalCanvasProject, deleteLocalCanvasProjects, hydrateLocalCanvasProjectsFromBackend } from "@/services/local-workspace-repository";
 import { createWorkspaceCanvasProject } from "@/services/workspace-project-repository";
 import { listWorkspaceCanvasProjectsPage, type CanvasLibrarySummary } from "@/services/api/workspace-data";
@@ -140,6 +141,9 @@ export default function CanvasPage() {
         void createLocalCanvasProject("未命名项目").then(({ id }) => {
             // 允许浏览器验收脚本在项目库内保留新卡片，真实用户仍沿用 LibTV 的直接进入画布行为。
             if (searchParams.get("stay") !== "1") enterProject(id);
+        }).catch((error: unknown) => {
+            message.error(error instanceof Error ? error.message : "项目创建失败");
+            if (isBrowserWorkspace()) navigate("/local?next=new");
         });
     };
     const duplicateCanvasProject = useCallback(async (project: CanvasLibrarySummary) => {
@@ -496,6 +500,9 @@ export default function CanvasPage() {
         }
         void createLocalCanvasProject("未命名项目").then(({ id }) => {
             enterProject(id);
+        }).catch((error: unknown) => {
+            message.error(error instanceof Error ? error.message : "项目创建失败");
+            navigate(isBrowserWorkspace() ? "/local?next=new" : "/project", { replace: true });
         });
     }, [hydrated, message, mode, projects, remoteMode, sessionHydrated, libraryQuery.isSuccess]);
 

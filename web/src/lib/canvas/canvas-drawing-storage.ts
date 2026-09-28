@@ -48,6 +48,15 @@ export async function loadCanvasDrawing(projectId: string, drawingId: string) {
     return normalizeCanvasDrawingSnapshot(saved);
 }
 
+/** Restore an exact disk revision; opening a project is not a new drawing edit. */
+export async function restoreCanvasDrawing(projectId: string, drawingId: string, document: CanvasDrawingSnapshot, preview?: Blob | null, render?: CanvasDrawingRender | null) {
+    const normalized = normalizeCanvasDrawingSnapshot(document);
+    if (!normalized) throw new Error("绘图文档缺失");
+    await drawingStore.setItem(drawingKey(projectId, drawingId), normalized);
+    if (preview) await drawingPreviewStore.setItem(drawingKey(projectId, drawingId), preview);
+    if (render) await drawingRenderStore.setItem(drawingKey(projectId, drawingId), render);
+}
+
 export async function saveCanvasDrawing(
     projectId: string,
     drawingId: string,

@@ -13,6 +13,7 @@ const storePath = join(dir, "store.ts");
 const historyPath = join(dir, "history.ts");
 const requestPath = join(dir, "request.ts");
 const modePath = join(dir, "mode.ts");
+const folderPath = join(dir, "folder.ts");
 const url = (path: string) => JSON.stringify(pathToFileURL(path).href);
 
 writeFileSync(storagePath, `
@@ -32,6 +33,22 @@ const forbidden = async () => { requests++; throw new Error("Go backend must not
 export const http = { get: forbidden, put: forbidden, delete: forbidden };
 `);
 writeFileSync(modePath, "export const isBrowserWorkspace = () => true;\n");
+writeFileSync(folderPath, `
+const projects = new Map();
+let failWrites = false;
+export const rejectWrites = (value: boolean) => { failWrites = value; };
+export const ensureFolderReady = async () => undefined;
+export const initializeProjectFolder = async () => ({ ready: true });
+export const getProjectFolderState = () => ({ projectDirectories: Object.fromEntries([...projects.keys()].map(id => [id, id])) });
+export const restoreFolderProjects = async () => [...projects.values()].filter(item => !item.deleted).map(item => structuredClone(item.project));
+export const pickProjectRoot = restoreFolderProjects;
+export const persistProjectToFolder = async (project: any, options: any = {}) => {
+ if (failWrites) throw new Error("disk full");
+ const revision = (projects.get(project.id)?.project.revision || 0) + 1;
+ projects.set(project.id, { project: structuredClone({ ...project, revision }), deleted: options.deleted });
+ return { revision, directoryName: project.id };
+};
+`);
 const source = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 writeFileSync(storePath, source("../src/stores/canvas/use-canvas-store.ts").replaceAll('"@/lib/localforage-storage"', url(storagePath)));
 writeFileSync(historyPath, source("../src/stores/canvas/use-canvas-history-store.ts").replaceAll('"@/lib/localforage-storage"', url(storagePath)));
@@ -40,6 +57,7 @@ writeFileSync(join(dir, "repository.ts"), source("../src/services/local-workspac
     .replaceAll('"@/stores/canvas/use-canvas-history-store"', url(historyPath))
     .replaceAll('"@/services/api/request"', url(requestPath))
     .replaceAll('"@/services/browser-workspace"', url(modePath))
+    .replaceAll('"@/services/browser-project-folder"', url(folderPath))
     .replaceAll('"@/lib/localforage-storage"', url(storagePath)));
 for (const name of ["workspace", "appearance"]) {
     writeFileSync(join(dir, `${name}.ts`), source(`../src/services/api/${name}.ts`)
@@ -52,6 +70,7 @@ const store: typeof import("../src/stores/canvas/use-canvas-store") = await impo
 const history: typeof import("../src/stores/canvas/use-canvas-history-store") = await import(historyPath);
 const storage = await import(storagePath);
 const request = await import(requestPath);
+const folder = await import(folderPath);
 const workspace: typeof import("../src/services/api/workspace") = await import(join(dir, "workspace.ts"));
 const appearance: typeof import("../src/services/api/appearance") = await import(join(dir, "appearance.ts"));
 
@@ -68,15 +87,17 @@ test("browser startup resolves local workspace and branding without an API serve
     expect(request.requests).toBe(0);
 });
 
-test("browser canvas create, edit, reload and delete persist without any Go request", async () => {
+test("browser canvas create, edit, restore from project folder and soft delete need no Go request", async () => {
     await store.useCanvasStore.persist.rehydrate();
     const { id } = await repository.createLocalCanvasProject("网页画布");
     expect(repository.openLocalCanvasProject(id)?.revision).toBe(1);
     const nodes = [{ id: "text-1", type: "text", x: 12, y: 24, width: 300, height: 100, metadata: { content: "保存在本机" } }] as any;
     await repository.persistCanvasDocument(id, { nodes });
     expect(repository.openLocalCanvasProject(id)?.revision).toBe(2);
+    await store.flushCanvasStorePersistence();
     store.withCanvasStorePersistenceSuppressed(() => store.useCanvasStore.setState({ projects: [] }));
-    await store.useCanvasStore.persist.rehydrate();
+    storage.records.clear();
+    await repository.hydrateLocalCanvasProjectsFromBackend();
     expect((await repository.openLocalCanvasProjectFromBackend(id))?.nodes).toEqual(nodes);
     expect(await repository.hydrateLocalCanvasProjectsFromBackend()).toBe(true);
     expect(await repository.refreshLocalCanvasProjectIfChanged(id)).toBe(false);
@@ -89,13 +110,13 @@ test("browser canvas create, edit, reload and delete persist without any Go requ
     expect(request.requests).toBe(0);
 });
 
-test("browser persistence failure is surfaced and pending edits remain retryable", async () => {
+test("folder write failure is surfaced while pending canvas edits remain retryable", async () => {
     const { id } = await repository.createLocalCanvasProject("保存失败测试");
-    storage.rejectWrites(true);
-    await expect(repository.persistCanvasDocument(id, { nodes: [{ id: "failed-node", type: "text", metadata: { content: "待保存" } }] as any })).rejects.toThrow("quota exceeded");
+    folder.rejectWrites(true);
+    await expect(repository.persistCanvasDocument(id, { nodes: [{ id: "failed-node", type: "text", metadata: { content: "待保存" } }] as any })).rejects.toThrow("disk full");
     expect(repository.openLocalCanvasProject(id)?.revision).toBe(1);
-    expect(repository.openLocalCanvasProject(id)?.nodes).toEqual([]);
-    storage.rejectWrites(false);
+    expect(repository.openLocalCanvasProject(id)?.nodes[0].metadata?.content).toBe("待保存");
+    folder.rejectWrites(false);
     await repository.syncLocalCanvasProjectToBackend(id);
     await store.flushCanvasStorePersistence();
     expect(request.requests).toBe(0);

@@ -183,6 +183,9 @@ export type CanvasSkillSnapshot = {
 };
 
 export type CanvasNodeMetadata = {
+    /** Explicit references assigned by the local Agent, in addition to incoming connections. */
+    referenceNodeIds?: string[];
+    sourceNodeIds?: string[];
     /** External Agent tasks commit their canvas result on the local backend. */
     externalAgent?: boolean;
     /** Media interaction role. `generator` owns generation controls; `result` is an inspect/process object. */

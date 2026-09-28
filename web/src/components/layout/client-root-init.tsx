@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { App } from "antd";
 
 import { createModelChannel, useConfigStore } from "@/stores/use-config-store";
@@ -15,6 +15,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import { appQueryClient } from "@/lib/query-client";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import { getActiveUserScope } from "@/lib/user-scope";
+import { FullScreenLoader } from "@/components/ui/aceternity/full-screen-loader";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const config = useConfigStore((state) => state.config);
@@ -31,6 +32,27 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const setPluginStates = usePluginStore((state) => state.setPluginStates);
     const pluginStoreHydrated = usePluginStore((state) => state.hydrated);
     const localMediaCleanupScope = useRef("");
+    const [folderInitialized, setFolderInitialized] = useState(!isBrowserWorkspace());
+
+    useEffect(() => {
+        if (!isBrowserWorkspace()) return;
+        const onSaveError = (event: Event) => {
+            const detail = (event as CustomEvent<{ message?: string }>).detail;
+            message.error(detail?.message || "Agent 生成结果未能写入项目文件夹，请检查目录授权后重试保存", 8);
+        };
+        window.addEventListener("qisitv:agent-save-error", onSaveError);
+        return () => window.removeEventListener("qisitv:agent-save-error", onSaveError);
+    }, [message]);
+
+    useEffect(() => {
+        if (!isBrowserWorkspace() || !canvasHydrated) return;
+        let active = true;
+        void import("@/services/local-workspace-repository")
+            .then((module) => module.hydrateLocalCanvasProjectsFromBackend())
+            .catch((error: unknown) => { if (active) message.warning(error instanceof Error ? error.message : "请重新连接项目文件夹"); })
+            .finally(() => { if (active) setFolderInitialized(true); });
+        return () => { active = false; };
+    }, [canvasHydrated, message]);
 
     useEffect(() => () => {
         usePluginStore.getState().setRuntimeStatuses({});
@@ -79,7 +101,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     }, []);
 
     useEffect(() => {
-        if (!localMode || !assetsHydrated || !canvasHydrated) return;
+        if (isBrowserWorkspace() || !localMode || !assetsHydrated || !canvasHydrated) return;
         const scope = getActiveUserScope();
         if (localMediaCleanupScope.current === scope) return;
         localMediaCleanupScope.current = scope;
@@ -151,5 +173,5 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         else message.success("已导入本地直连地址");
     }, [config.channels, message, updateConfig]);
 
-    return <>{children}</>;
+    return folderInitialized ? <>{children}</> : <FullScreenLoader label="正在打开本机项目" detail="检查项目文件夹与浏览器缓存" />;
 }
