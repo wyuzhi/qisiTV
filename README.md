@@ -57,6 +57,13 @@ qisiTV 同时提供项目库、个人资产库、异步任务、模型渠道和�
 
 本地开发需要 Bun 和 Go 1.25。在本仓库中打开两个终端：
 
+先获取 qisiTV 源码：
+
+```bash
+git clone https://github.com/wyuzhi/qisiTV.git
+cd qisiTV
+```
+
 ```bash
 # 终端一：后端
 cd backend
