@@ -15,13 +15,15 @@ codex plugin add qisitv@qisitv
 
 ## 其他 Agent
 
-网页提供 Claude Desktop、Claude Code、OpenClaw、Hermes、CodeBuddy、Cursor、VS Code 和通用 MCP 的安装指令。由能在本机执行命令的 Agent 检查 Git、Node.js 18+，克隆官方仓库 `https://github.com/wyuzhi/qisiTV.git` 的 `main` 分支到临时目录，在仓库内运行：
+网页在 Codex 后依次提供 WorkBuddy、Claude Desktop、Claude Code、OpenClaw、Hermes、CodeBuddy、Cursor、VS Code 和通用 MCP 的安装指令。由能在本机执行命令的 Agent 检查 Git、Node.js 18+，克隆官方仓库 `https://github.com/wyuzhi/qisiTV.git` 的 `main` 分支到临时目录，在仓库内运行：
 
 ```sh
 node plugins/qisitv/scripts/prepare.mjs --json
 ```
 
 成功时 stdout 仅输出 `{ "command": "真实绝对路径", "args": ["mcp"] }`。程序和完整许可证保留在稳定用户目录；该命令不启动服务，也不修改客户端配置。Agent 再按所选客户端的官方 CLI 或 JSON / YAML 格式添加 `qisitv-web`，先备份已有配置，保留其他服务与字段。配置必须使用实际返回的 `command`，不能指向临时克隆目录；完成后可删除临时克隆。
+
+WorkBuddy 在「插件 → MCP 服务器 → 配置 MCP」（较新版为「连接器 → 自定义连接器」）中配置用户级 `~/.workbuddy/mcp.json`。先备份，再将准备结果合并到 `mcpServers["qisitv-web"]`，保留其他设置；确认绿色状态，并实际调用 `qisitv_pair`。[官方说明](https://www.workbuddy.ai/docs/zh/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/MCP-Guide)
 
 Claude Desktop 普通聊天若不能执行本机命令，由其他本机 Agent 帮助准备，再通过 Desktop 设置粘贴配置。CodeBuddy 的 CLI 和 IDE 分别配置，VS Code 使用本机用户配置；各客户端命令、字段与官方依据见[网站版文档](../../docs/content/docs/backend/browser-workspace.mdx#各客户端的配置入口)。不是所有客户端都能使用 Codex 的插件命令。
 

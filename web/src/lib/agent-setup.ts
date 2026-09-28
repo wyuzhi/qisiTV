@@ -1,4 +1,4 @@
-export type AgentClientId = "codex" | "claude-desktop" | "claude-code" | "openclaw" | "hermes" | "codebuddy" | "cursor" | "vscode" | "other";
+export type AgentClientId = "codex" | "workbuddy" | "claude-desktop" | "claude-code" | "openclaw" | "hermes" | "codebuddy" | "cursor" | "vscode" | "other";
 
 type AgentClient = {
     id: AgentClientId;
@@ -24,6 +24,17 @@ export const AGENT_CLIENTS: readonly AgentClient[] = [
         verify: "核对插件安装结果；不要重复添加同名独立 MCP。",
         nextStep: "在 Codex 新建一个任务，获取配对码",
         docs: "https://github.com/wyuzhi/qisiTV/tree/main/plugins/qisitv",
+    },
+    {
+        id: "workbuddy", label: "WorkBuddy", method: "MCP",
+        description: "通过 WorkBuddy 的自定义本地 MCP 连接画布。",
+        configure: [
+            '备份并合并本机用户级配置 ~/.workbuddy/mcp.json，将准备器返回的 command 和 args 写入根对象 mcpServers["qisitv-web"]，保留其他服务器、设置与注释。不要写入 CodeBuddy 的配置目录。',
+            "也可在 WorkBuddy 的插件 → MCP 服务器 → 配置 MCP 中编辑；新版界面可从连接器 → 自定义连接器进入，选择本地命令，填写准备器返回的程序绝对路径和参数 mcp。",
+        ],
+        verify: "保存后在 WorkBuddy 的 MCP 列表检查 qisitv-web 显示绿色连接状态，并确认 qisitv_pair 工具可用；未加载时重新加载 MCP 或重启 WorkBuddy。",
+        nextStep: "在 WorkBuddy 新开对话，获取配对码",
+        docs: "https://www.workbuddy.ai/docs/zh/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/MCP-Guide",
     },
     {
         id: "claude-desktop", label: "Claude 桌面版", method: "MCP",

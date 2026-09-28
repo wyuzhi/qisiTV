@@ -57,7 +57,7 @@ qisiTV 同时提供项目库、个人资产库、异步任务、模型渠道和�
 
 ## 开始使用
 
-网站版无需注册。使用桌面 Chrome / Edge，在「本地文件与 Agent」选择一个项目根目录；每个项目的画布与素材自动写入独立文件夹。需要 Agent 时，在页面选择 Codex、Claude Desktop / Code、OpenClaw、Hermes、CodeBuddy、Cursor、VS Code 或通用 MCP，把对应安装指令交给能在本机执行命令的 Agent。Codex 使用 [qisiTV 插件](plugins/qisitv/README.md)，其他客户端自动准备同一连接器后合并各自的 MCP 配置，无需手选系统包或另外保留服务终端。
+网站版无需注册。使用桌面 Chrome / Edge，在「本地文件与 Agent」选择一个项目根目录；每个项目的画布与素材自动写入独立文件夹。需要 Agent 时，在页面选择 Codex、WorkBuddy、Claude Desktop / Code、OpenClaw、Hermes、CodeBuddy、Cursor、VS Code 或通用 MCP，把对应安装指令交给能在本机执行命令的 Agent。Codex 使用 [qisiTV 插件](plugins/qisitv/README.md)，其他客户端自动准备同一连接器后合并各自的 MCP 配置，无需手选系统包或另外保留服务终端。
 
 安装后让 Agent 调用 `qisitv_pair` 获取配对码，在网页确认连接即可控制画布。Agent 进程与浏览器须运行在同一台电脑，使用时保持网页打开；Claude 网页版不支持此本机连接方式。Desktop 聊天若不能执行本机命令，可由本机 Agent 帮助准备，再在设置粘贴配置。详细步骤、客户端差异和数据边界见[网站版说明](docs/content/docs/backend/browser-workspace.mdx)。下面的旧桌面 Go 工作区独立保留，不与网站项目自动合并。
 

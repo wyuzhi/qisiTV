@@ -70,13 +70,13 @@ qisitv-connect · 127.0.0.1:17372
 
 ### 多客户端安装
 
-网页提供 Codex、Claude Desktop、Claude Code、OpenClaw、Hermes、CodeBuddy、Cursor、VS Code、通用 MCP 九种安装指令。它们使用同一个 stdio 服务端，配置格式和工具加载方式分别适配，不把 Codex 插件安装命令复制给其他客户端。
+网页提供 Codex、WorkBuddy、Claude Desktop、Claude Code、OpenClaw、Hermes、CodeBuddy、Cursor、VS Code、通用 MCP 十种安装指令，WorkBuddy 紧跟 Codex。它们使用同一个 stdio 服务端，配置格式和工具加载方式分别适配，不把 Codex 插件安装命令复制给其他客户端。
 
 Codex 保留公开插件入口：Agent 检查 Git、Node.js 18+ 和 `codex plugin`，从 `https://github.com/wyuzhi/qisiTV.git` 的 `main` 分支添加 `qisitv` marketplace，安装 `qisitv@qisitv`，在新任务加载 `qisitv-web`。其他入口让 Agent 克隆同一官方仓库到临时目录，执行 `node plugins/qisitv/scripts/prepare.mjs --json`。准备程序复用固定 Release 与 SHA-256 校验，把可执行文件和完整许可证保留在用户的稳定目录，只向 stdout 输出 `{command, args: ["mcp"]}`；不启动服务，不改客户端配置。
 
 Agent 使用返回的真实绝对路径，通过客户端原生命令或 JSON / YAML 合并 `qisitv-web`，备份已有配置并保留无关字段。同名项先核对，不盲目覆盖。配置不依赖临时克隆目录；完成后可删除该临时目录。网页按客户端提供安装指令和官方说明，程序路径以 `prepare` 的输出为准。环境缺失、下载失败、配置失败、工具未加载分别报告，只有真正调用 `qisitv_pair` 才能提供配对码。
 
-Claude Desktop 普通聊天若没有本机 shell，由可执行本机命令的 Agent 完成准备，再由用户在 Desktop 设置合并配置。客户端配置不意味着用户已经授予目录读写、网页配对或付费生成权限。各客户端的字段、CLI、配置位置和官方来源统一维护在[使用教程](../content/docs/backend/browser-workspace.mdx#各客户端的配置入口)，包括 CodeBuddy CLI / IDE 的区别，以及 VS Code 的本机用户配置。
+Claude Desktop 普通聊天若没有本机 shell，由可执行本机命令的 Agent 完成准备，再由用户在 Desktop 设置合并配置。客户端配置不意味着用户已经授予目录读写、网页配对或付费生成权限。各客户端的字段、CLI、配置位置和官方来源统一维护在[使用教程](../content/docs/backend/browser-workspace.mdx#各客户端的配置入口)，包括 WorkBuddy 用户级 `~/.workbuddy/mcp.json` 的 `mcpServers`、CodeBuddy CLI / IDE 的区别，以及 VS Code 的本机用户配置。WorkBuddy 配置后检查绿色状态，再实际调用 `qisitv_pair`，不能仅凭文件写入判定连接成功。
 
 所有入口要求 MCP 进程与浏览器同机。远程 OpenClaw / Hermes Gateway、云端或容器 Agent 的回环地址不能直接连接用户电脑；Claude 网页版不能加载本机 stdio MCP。这里不增加 HTTP 公网桥接，也不自动开放端口。
 
@@ -102,11 +102,11 @@ Claude Desktop 普通聊天若没有本机 shell，由可执行本机命令的 A
 
 共用启动器与准备程序的 20 项 Node 测试已通过。macOS ARM64 实测完成首次从 GitHub 下载、SHA-256 校验、MCP `initialize` 和 `tools/list`；使用已校验缓存调用 `qisitv_pair` 成功，stdout 保持纯 JSON-RPC，MCP 退出后桥接服务约 31.2 秒关闭。
 
-通用 `prepare` 在独立缓存中实测返回配置 JSON，原生程序摘要匹配，三份顶层许可声明与源文件逐字一致，另有 12 个许可证文件成功复制；准备过程没有启动服务或修改用户客户端配置。以上证明 macOS 的共用运行链，不代表九种客户端界面、其他操作系统或付费生成均已验收。
+通用 `prepare` 在独立缓存中实测返回配置 JSON，原生程序摘要匹配，三份顶层许可声明与源文件逐字一致，另有 12 个许可证文件成功复制；准备过程没有启动服务或修改用户客户端配置。以上证明 macOS 的共用运行链，不代表各客户端界面、其他操作系统或付费生成均已验收。
 
 ## 当前边界
 
-- 多客户端入口依据各客户端官方文档适配。共用 runtime 的验证不能替代九个客户端逐一实机验收；未执行的客户端或平台测试不写成已通过。
+- 多客户端入口依据各客户端官方文档适配。共用 runtime 的验证不能替代各客户端逐一实机验收；未执行的客户端或平台测试不写成已通过。
 - 文件夹直接读写要求支持目录 API 的桌面 Chrome / Edge。连接器不会让不支持该 API 的浏览器获得目录保存能力。
 - Agent 素材导入的 32 MiB 限制与 LikeAI 参考上传限制不同；网站向 LikeAI 上传单文件上限为 4,000,000 字节。
 - 单个生成结果自动下载上限为 128 MiB；超限或下载失败保留原结果链接，不能声称已落盘。

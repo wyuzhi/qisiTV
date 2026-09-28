@@ -46,7 +46,7 @@ qisiTV 项目/
 
 ## 让你的 Agent 操作同一个画布
 
-页面提供 Codex、Claude Desktop、Claude Code、OpenClaw、Hermes、CodeBuddy、Cursor、VS Code 和通用 MCP 九个入口。主流程都是安装一次、让 Agent 获取配对码、网页确认连接。无需手选系统包或另外保留服务终端。
+页面提供 Codex、WorkBuddy、Claude Desktop、Claude Code、OpenClaw、Hermes、CodeBuddy、Cursor、VS Code 和通用 MCP 十个入口。主流程都是安装一次、让 Agent 获取配对码、网页确认连接。无需手选系统包或另外保留服务终端。
 
 **Agent、连接器和浏览器必须运行在同一台电脑上。** 远程服务器上的 OpenClaw / Hermes、云端 Agent、SSH 或容器中的进程不能直接使用这台电脑的回环服务。Claude 网页版不支持本方案的本机 stdio MCP；请选择 Claude Desktop 或在本机运行的 Claude Code。VS Code 远程开发时须使用本机用户配置。
 
@@ -84,6 +84,7 @@ Claude Desktop 的普通聊天若没有本机命令执行能力，不能自行�
 | 客户端 | 配置方式 |
 | --- | --- |
 | Codex | 上述 marketplace 插件；安装后新建任务加载工具。 |
+| WorkBuddy | 插件 → MCP 服务器 → 配置 MCP（较新版为连接器 → 自定义连接器），先备份用户级 `~/.workbuddy/mcp.json`，向 `mcpServers["qisitv-web"]` 合并 `prepare` 返回的 `command`、`args`，保留其他设置。检查服务绿色状态，再调用 `qisitv_pair` 确认本机 stdio 连接。 |
 | Claude Desktop | 设置 → Developer → Edit Config，向打开的 `claude_desktop_config.json` 合并 `mcpServers.qisitv-web`，填写 `command`、`args`；完全退出并重新打开 Desktop。 |
 | Claude Code | `claude mcp add --transport stdio --scope user qisitv-web -- PREPARED_COMMAND mcp`；用 `claude mcp get qisitv-web` 核对。 |
 | OpenClaw | `openclaw mcp add qisitv-web --command PREPARED_COMMAND --arg mcp`；用 `openclaw mcp doctor qisitv-web --probe` 检查。配置为 `~/.openclaw/openclaw.json` 的 `mcp.servers.qisitv-web`。 |
@@ -95,7 +96,7 @@ Claude Desktop 的普通聊天若没有本机命令执行能力，不能自行�
 
 CodeBuddy CLI 当前推荐 `~/.codebuddy/.mcp.json`，兼容旧 `~/.codebuddy/mcp.json` 和 `~/.codebuddy.json`，按存在顺序选择读写文件，优先使用其 CLI 管理。Claude Desktop 常见路径为 macOS 的 `~/Library/Application Support/Claude/claude_desktop_config.json`、Windows 的 `%APPDATA%\Claude\claude_desktop_config.json`；以设置实际打开的文件为准。
 
-字段与命令来源：[Claude Desktop](https://modelcontextprotocol.io/docs/develop/connect-local-servers)、[Claude Code](https://code.claude.com/docs/en/mcp)、[OpenClaw](https://docs.openclaw.ai/tools/mcp)、[Hermes 配置](https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference/)与[CLI 源码](https://github.com/NousResearch/hermes-agent/blob/main/hermes_cli/subcommands/mcp.py)、[CodeBuddy CLI](https://www.codebuddy.ai/docs/cli/mcp)与[IDE](https://www.codebuddy.ai/docs/ide/User-guide/MCP)、[Cursor](https://cursor.com/docs/mcp)、[VS Code](https://code.visualstudio.com/docs/agent-customization/mcp-servers)。这些是配置指引，不表示所有客户端都经过实机验收。
+字段与命令来源：[WorkBuddy](https://www.workbuddy.ai/docs/zh/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/MCP-Guide)、[Claude Desktop](https://modelcontextprotocol.io/docs/develop/connect-local-servers)、[Claude Code](https://code.claude.com/docs/en/mcp)、[OpenClaw](https://docs.openclaw.ai/tools/mcp)、[Hermes 配置](https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference/)与[CLI 源码](https://github.com/NousResearch/hermes-agent/blob/main/hermes_cli/subcommands/mcp.py)、[CodeBuddy CLI](https://www.codebuddy.ai/docs/cli/mcp)与[IDE](https://www.codebuddy.ai/docs/ide/User-guide/MCP)、[Cursor](https://cursor.com/docs/mcp)、[VS Code](https://code.visualstudio.com/docs/agent-customization/mcp-servers)。这些是配置指引，不表示所有客户端都经过实机验收。
 
 ### 2. 加载工具，获取配对码
 
