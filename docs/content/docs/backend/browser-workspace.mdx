@@ -6,7 +6,7 @@ title: 网站版、本地项目文件夹与 Agent
 
 同一个项目目录请只在一个浏览器中编辑。跨浏览器或不同网站来源的同时写入不受同一把浏览器锁保护；切换浏览器前先等待保存完成并关闭旧页面。
 
-打开 [qisiTV 起司 TV](https://cheeser.link/qisitv/)，使用桌面 Chrome 或 Edge，进入「本地文件与 Agent」。先选择电脑上的项目根目录；以后每个项目都会有自己的真实子文件夹，画布与素材自动写入。普通创作不需要注册、登录或启动本地程序。需要 Codex 操作画布时，把网站提供的安装指令发给 Codex，让它安装起司 TV 插件，之后直接对话使用。
+打开 [qisiTV 起司 TV](https://cheeser.link/qisitv/)，使用桌面 Chrome 或 Edge，进入「本地文件与 Agent」。先选择电脑上的项目根目录；以后每个项目都会有自己的真实子文件夹，画布与素材自动写入。普通创作不需要注册、登录或启动本地程序。需要 Agent 操作画布时，在页面选择自己使用的客户端，把对应安装指令交给能在本机执行命令的 Agent。
 
 ## 先设置保存位置
 
@@ -44,30 +44,68 @@ qisiTV 项目/
 
 生成中的任务状态与 LikeAI 配置仍有浏览器缓存依赖。搬动项目、清理网站数据或换浏览器前，先等任务结束并确认结果已写入文件夹；新浏览器需重新填写 Key。同一根目录内如果有两个相同项目 ID 的复制品，读取会被拒绝。
 
-## 让 Codex 操作同一个画布
+## 让你的 Agent 操作同一个画布
 
-主流程只需三步：把安装指令发给 Codex、新任务获取配对码、网页确认连接。插件安装一次，以后直接获取配对码使用；系统下载和手动 MCP 配置保留在折叠的备选入口中。
+页面提供 Codex、Claude Desktop、Claude Code、OpenClaw、Hermes、CodeBuddy、Cursor、VS Code 和通用 MCP 九个入口。主流程都是安装一次、让 Agent 获取配对码、网页确认连接。无需手选系统包或另外保留服务终端。
 
-### 1. 复制安装指令给 Codex
+**Agent、连接器和浏览器必须运行在同一台电脑上。** 远程服务器上的 OpenClaw / Hermes、云端 Agent、SSH 或容器中的进程不能直接使用这台电脑的回环服务。Claude 网页版不支持本方案的本机 stdio MCP；请选择 Claude Desktop 或在本机运行的 Claude Code。VS Code 远程开发时须使用本机用户配置。
 
-点击「复制安装指令」，将复制的整段话发给 Codex。指令要求 Agent 检查 Git、Node.js 18+ 和 `codex plugin` 能力，再添加官方 marketplace 并安装插件。marketplace 名为 `qisitv`，插件完整名称为 **`qisitv@qisitv`**；指令内的安装命令为：
+### 1. 选择客户端，复制安装指令
+
+在页面选好客户端后，把完整指令发给 Agent。它先检查 Git、Node.js 18+ 和该客户端的 MCP 能力；缺少环境或安装失败时应明确说明，不能声称已经装好。
+
+Codex 使用公开插件 **`qisitv@qisitv`**，由 Agent 执行：
 
 ```bash
 codex plugin marketplace add https://github.com/wyuzhi/qisiTV.git --ref main
 codex plugin add qisitv@qisitv
 ```
 
-安装由 Codex 执行，网页不会静默修改电脑配置。缺少依赖或当前 Codex 不支持插件命令时，Agent 应说明所需环境，不能将未完成的安装描述为成功。安装完成后新建一个 Codex 任务，让新任务加载插件工具。主流程不需要用户选择系统安装包、运行安装脚本或保留终端窗口。
+其他客户端使用同一份本机 MCP 程序。安装指令让 Agent 把官方仓库 `https://github.com/wyuzhi/qisiTV.git` 的 `main` 分支克隆到临时目录，在仓库内执行：
 
-### 2. 在新任务中获取配对码
+```bash
+node plugins/qisitv/scripts/prepare.mjs --json
+```
+
+准备程序自动识别系统和架构、下载并校验程序，将程序和许可证保留在稳定的用户目录，然后只输出一个 JSON 对象：
+
+```json
+{"command":"/absolute/path/to/qisitv-connect","args":["mcp"]}
+```
+
+示例路径必须替换为本次输出的真实 `command`，Windows 输出指向 `.exe`。`prepare` 不修改任何客户端配置，也不启动 MCP；Agent 接着按所选客户端的格式添加 `qisitv-web`。修改已有文件前备份，只合并这一项，保留其他服务和字段；同名配置已存在时先核对，不能盲目覆盖。配置指向准备结果中的固定路径，完成后可删除临时克隆目录。
+
+Claude Desktop 的普通聊天若没有本机命令执行能力，不能自行完成准备。可以让另一个具有本机执行能力的 Agent 运行上述步骤，再将生成的配置粘贴到 Desktop 设置；不能把一段聊天回复当作安装完成。其他客户端受权限或运行环境限制时也采用同样方式。网页按所选客户端提供对应安装指令和官方说明，真实配置由 Agent 根据 `prepare` 的输出合并。
+
+### 各客户端的配置入口
+
+下表中 `PREPARED_COMMAND` 表示 `prepare` 返回的绝对路径，作为单个命令参数传入，不能把路径与 `mcp` 拼成一个字符串。客户端命令随版本变化时，先检查其 `--help`；不要擅自安装或切换 Agent。
+
+| 客户端 | 配置方式 |
+| --- | --- |
+| Codex | 上述 marketplace 插件；安装后新建任务加载工具。 |
+| Claude Desktop | 设置 → Developer → Edit Config，向打开的 `claude_desktop_config.json` 合并 `mcpServers.qisitv-web`，填写 `command`、`args`；完全退出并重新打开 Desktop。 |
+| Claude Code | `claude mcp add --transport stdio --scope user qisitv-web -- PREPARED_COMMAND mcp`；用 `claude mcp get qisitv-web` 核对。 |
+| OpenClaw | `openclaw mcp add qisitv-web --command PREPARED_COMMAND --arg mcp`；用 `openclaw mcp doctor qisitv-web --probe` 检查。配置为 `~/.openclaw/openclaw.json` 的 `mcp.servers.qisitv-web`。 |
+| Hermes Agent | `hermes mcp add qisitv-web --command PREPARED_COMMAND --args mcp`，`--args` 放最后；配置为 `~/.hermes/config.yaml` 的 `mcp_servers.qisitv-web`，新会话或 `/reload-mcp` 加载。 |
+| CodeBuddy | **CLI**：`codebuddy mcp add --scope user qisitv-web -- PREPARED_COMMAND mcp`，再 `codebuddy mcp get qisitv-web`。**IDE**：设置 → MCP → Add MCP，合并 `mcpServers.qisitv-web`，使用 `type: "stdio"`、`command`、`args`；不假设 IDE 与 CLI 共享配置。 |
+| Cursor | 在本机 `~/.cursor/mcp.json` 合并 `mcpServers.qisitv-web`，使用 `type: "stdio"`、`command`、`args`；在 MCP 设置确认启用。项目专用配置为 `.cursor/mcp.json`。 |
+| VS Code | 命令面板执行 `MCP: Open User Configuration`，在本机用户 `mcp.json` 合并 `servers.qisitv-web`，使用 `type: "stdio"`、`command`、`args`；通过 `MCP: List Servers` 启动并确认信任。其根键是 `servers`。 |
+| 通用 MCP | 客户端必须支持本机 stdio：启动命令为真实 `command`，参数为 `["mcp"]`。按该客户端官方格式配置；仅支持远程 HTTP 的入口不能使用。 |
+
+CodeBuddy CLI 当前推荐 `~/.codebuddy/.mcp.json`，兼容旧 `~/.codebuddy/mcp.json` 和 `~/.codebuddy.json`，按存在顺序选择读写文件，优先使用其 CLI 管理。Claude Desktop 常见路径为 macOS 的 `~/Library/Application Support/Claude/claude_desktop_config.json`、Windows 的 `%APPDATA%\Claude\claude_desktop_config.json`；以设置实际打开的文件为准。
+
+字段与命令来源：[Claude Desktop](https://modelcontextprotocol.io/docs/develop/connect-local-servers)、[Claude Code](https://code.claude.com/docs/en/mcp)、[OpenClaw](https://docs.openclaw.ai/tools/mcp)、[Hermes 配置](https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference/)与[CLI 源码](https://github.com/NousResearch/hermes-agent/blob/main/hermes_cli/subcommands/mcp.py)、[CodeBuddy CLI](https://www.codebuddy.ai/docs/cli/mcp)与[IDE](https://www.codebuddy.ai/docs/ide/User-guide/MCP)、[Cursor](https://cursor.com/docs/mcp)、[VS Code](https://code.visualstudio.com/docs/agent-customization/mcp-servers)。这些是配置指引，不表示所有客户端都经过实机验收。
+
+### 2. 加载工具，获取配对码
 
 > 使用 qisitv-web，调用 qisitv_pair 获取配对码，不要生成素材。
 
-插件提供的 `qisitv-web` MCP 自动启动或复用本机服务。`qisitv_pair` 返回临时配对码与网页入口，获取配对码不要求网页已连接，也不提交生成任务。页面提供单独的「复制连接指令」按钮。
+按客户端提示重新加载工具或开启新会话，Codex 使用新任务。`qisitv-web` MCP 自动启动或复用本机服务。`qisitv_pair` 返回临时配对码与网页入口，获取配对码不要求网页已连接，也不提交生成任务。页面提供单独的「复制连接指令」按钮；工具尚不可见时先解决加载问题，不能编造配对码。
 
 ### 3. 网页输入配对码
 
-把 Codex 返回的配对码粘贴到网站「本地文件与 Agent」，点击「连接」。浏览器询问是否允许访问本地网络时选择允许。目录选择和网页配对仍需本人确认，安装插件不会自动授权访问项目。
+把 Agent 返回的配对码粘贴到网站「本地文件与 Agent」，点击「连接」。浏览器询问是否允许访问本地网络时选择允许。目录选择和网页配对仍需本人确认，安装或配置 MCP 不会自动授权访问项目。
 
 连接成功后回到项目列表，打开要操作的画布，再发送下面的免费试用指令。它与获取配对码的指令是两个独立步骤：
 
@@ -75,14 +113,14 @@ codex plugin add qisitv@qisitv
 
 节点应出现在当前网页，并自动保存到该项目文件夹。选中参考图后，可以继续说「使用我选中的两张图作为参考，连接到一个视频节点，先不要生成」。Agent 通过 `canvas_current` 和画布数据读取真实选区，不靠最近打开的项目猜测目标。
 
-使用期间保持网页打开。连接器由 MCP 在后台管理，只监听 `127.0.0.1:17372`，无需向公网开放端口。刷新或重新打开网页后需要重新配对；配对码有效十分钟且只能使用一次。需要新码时再让 Codex 调用 `qisitv_pair`。多个网页已配对时，让 Agent 先执行 `canvas_list_sessions` 选择目标。
+使用期间保持网页打开。连接器由 MCP 在后台管理，只监听 `127.0.0.1:17372`，无需向公网开放端口。刷新或重新打开网页后需要重新配对；配对码有效十分钟且只能使用一次。需要新码时再让 Agent 调用 `qisitv_pair`。多个网页已配对时，让 Agent 先执行 `canvas_list_sessions` 选择目标。
 
 插件名称是 **`qisitv`**，它提供的 MCP 名称是 **`qisitv-web`**，操作已配对的网站画布。旧的同名 **`qisitv` MCP** 则操作原本机 Go 工作区；这是不同入口，项目不会自动混合。已有旧工具时，请在操作指令中明确写 `qisitv-web`。
 
 <details>
-<summary>手动安装 / 其他 MCP 客户端</summary>
+<summary>手动下载安装包（备选）</summary>
 
-使用不支持 Codex 插件的客户端，或需要手动安装时，可从网站的同名折叠入口下载连接器：
+无法使用自动准备程序或确需手动安装时，可从网站的折叠入口下载连接器。上述客户端通常不需要这一步：
 
 | 系统 | 下载 |
 | --- | --- |

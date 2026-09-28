@@ -8,7 +8,9 @@ qisiTV 是基于上游 `glanderness/BeefTV` 二次开发的 AI 影视与短剧�
 
 当前用户确定的产品范围：无需注册、登录或积分；模型服务仅保留官方 LikeAI。网站模式由 `VITE_QISITV_BROWSER_ONLY=1` 启用，用户授权本机目录后，项目和素材写入真实独立文件夹，IndexedDB 仅作句柄、配置与恢复缓存；网站函数只临时转发 LikeAI 请求，不建立云端工作区。不要在合并上游时恢复 BeefAPI 钱包或其他服务商入口。
 
-每个项目必须对应本机真实独立文件夹，导入素材和生成结果自动写入；浏览器缓存不算最终项目持久化。Agent 上手主流程是「复制安装指令给 Codex → 新任务调用 qisitv_pair → 网页输入配对码」。安装指令检查 Git、Node.js 18+ 和 `codex plugin` 能力，从 `https://github.com/wyuzhi/qisiTV.git` 的 `main` 分支添加 `qisitv` marketplace，安装 `qisitv@qisitv` 插件；插件提供 `qisitv-web` MCP，自动后台启动本机服务。环境缺失或安装失败不得宣称成功。不要把选择系统下载、手动运行安装脚本、`start` 或保留终端窗口作为推荐主流程；手动包仅放「手动安装 / 其他 MCP 客户端」折叠备选。安装插件不会取代目录读写授权或网页配对。命令经回环 WebSocket 交给已打开的网页执行，网页是唯一文件写入者；不要另建 Go 数据库或声称网页关闭后仍可执行。旧 `qisitv` MCP 继续连接桌面 Go 工作区，两者不自动合并。见 `docs/design/project-folders-and-agent.md`。
+每个项目必须对应本机真实独立文件夹，导入素材和生成结果自动写入；浏览器缓存不算最终项目持久化。Agent 上手主流程是「选择自己的客户端并复制安装指令 → 加载工具并调用 qisitv_pair → 网页输入配对码」，支持 Codex、Claude Desktop、Claude Code、OpenClaw、Hermes、CodeBuddy、Cursor、VS Code 和通用本机 stdio MCP，不能把主流程限定为 Codex。安装指令检查 Git、Node.js 18+ 与对应客户端能力；Codex 从 `https://github.com/wyuzhi/qisiTV.git` 的 `main` 分支添加 `qisitv` marketplace，安装 `qisitv@qisitv` 并新建任务。其他客户端克隆官方仓库到临时目录，运行 `node plugins/qisitv/scripts/prepare.mjs --json`，取得指向稳定程序目录的真实 `{command,args}`，再备份并合并原生配置、保留无关字段。准备程序不改客户端配置、不启动 MCP；许可证与程序必须一起保留。Desktop 聊天没有本机执行能力时，说明需要本机 Agent 帮助准备并通过设置粘贴配置，不假装可以自动安装。CodeBuddy 区分 CLI / IDE；VS Code 使用本机用户配置的 `servers` 根键。
+
+所有入口使用 `qisitv-web` MCP 自动管理本机服务，要求 Agent 进程与浏览器同机；Claude 网页版、远程 Gateway 或云端 Agent 不在本机直连范围。环境缺失、安装失败或未实测客户端不得宣称成功。不要把手选系统包、手动 `start` 或保留终端窗口作为推荐主流程；手动包留作折叠备选。安装不取代目录授权、网页配对或付费生成授权。命令经回环 WebSocket 交给已打开的网页执行，网页是唯一文件写入者；不要另建 Go 数据库或声称网页关闭后仍可执行。旧 `qisitv` MCP 继续连接桌面 Go 工作区，两者不自动合并。见 `docs/design/project-folders-and-agent.md`。
 
 仓库由几个边界清晰但可独立运行的单元组成：
 
