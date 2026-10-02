@@ -1,5 +1,6 @@
 import type { ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
 import type { BackendGenerationResult } from "@/services/api/generation-task";
+import { isQisiAPI, likeAIService, OFFICIAL_LIKEAI_BASE_URL, QISI_API_BASE_URL } from "@/lib/likeai-service";
 
 export const BROWSER_LIKEAI_PREFIX = "/api/qisitv/likeai";
 export type LikeAIMode = "image" | "video" | "audio" | "text";
@@ -20,12 +21,17 @@ export function objectRecord(value: unknown): Record<string, unknown> {
     return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function likeAIResolution(value: unknown, fallback: string) {
+    const raw = String(value || fallback);
+    return /^\d+$/.test(raw) ? `${raw}p` : raw;
+}
+
 export function likeAIInput(value: unknown): LikeAIInput {
     const raw = objectRecord(value);
     if (!["image", "video", "audio", "text"].includes(String(raw.mode))) throw new Error("网页任务仅支持 LikeAI 图片、视频、文本和音频生成");
     const config = objectRecord(raw.config);
     const mode = raw.mode as LikeAIMode;
-    if (config.apiFormat !== "likeai" || config.interfaceType !== `likeai-${mode}` || config.baseUrl !== "https://task.likeai.pro/task-api") {
+    if (config.apiFormat !== "likeai" || config.interfaceType !== `likeai-${mode}` || ![OFFICIAL_LIKEAI_BASE_URL, QISI_API_BASE_URL].includes(String(config.baseUrl))) {
         throw new Error("网页任务仅支持已配置的 LikeAI 服务");
     }
     if (!String(config.model || "").trim()) throw new Error("请先选择 LikeAI 模型");
@@ -34,7 +40,34 @@ export function likeAIInput(value: unknown): LikeAIInput {
     for (const key of ["referenceImages", "referenceVideos", "referenceAudios"] as const) {
         if (raw[key] !== undefined && (!Array.isArray(raw[key]) || raw[key].some((item) => !item || typeof item !== "object" || Array.isArray(item)))) throw new Error("参考素材格式无效");
     }
-    return { ...raw, config, mode, prompt: typeof raw.prompt === "string" ? raw.prompt : "" } as LikeAIInput;
+    const input = { ...raw, config, mode, prompt: typeof raw.prompt === "string" ? raw.prompt : "" } as LikeAIInput;
+    if (isQisiAPI(config.baseUrl)) validateQisiInput(input);
+    return input;
+}
+
+function validateQisiInput(input: LikeAIInput) {
+    const model = input.config.model;
+    if ((input.mode !== "image" || model !== "doubao_seedream_4_5") && (input.mode !== "video" || model !== "doubao_seedance_2_5")) throw new Error("qisi API 当前仅开放 Seedream 4.5 图片和 Seedance 2.5 视频，请重新拉取模型");
+    if (input.referenceVideos?.length || input.referenceAudios?.length) throw new Error("qisi API 当前不支持视频或音频参考素材");
+    if (input.config.systemPrompt) throw new Error("qisi API 当前不支持独立系统提示词，请放入创作提示词");
+    if (!input.prompt.trim() || input.prompt.length > 20000) throw new Error("qisi API 提示词须为 1 至 20000 个字符");
+    const options = objectRecord(objectRecord(input.metadata?.providerOptions)[`likeai-${input.mode}`]);
+    if (Object.keys(options).some((key) => !["resolution", "duration", "kwargs"].includes(key))) throw new Error("qisi API 不支持自定义请求字段，请使用画布提供的参数");
+    const kwargs = objectRecord(options.kwargs);
+    if (options.kwargs !== undefined && (!options.kwargs || typeof options.kwargs !== "object" || Array.isArray(options.kwargs))) throw new Error("扩展参数格式无效");
+    if (Object.keys(kwargs).some((key) => input.mode !== "video" || key !== "generate_audio")) throw new Error("qisi API 不支持这些扩展参数");
+    if (kwargs.generate_audio !== undefined && typeof kwargs.generate_audio !== "boolean") throw new Error("生成音频参数必须为布尔值");
+    if ((input.referenceImages?.length || 0) > (input.mode === "video" ? 30 : 10)) throw new Error("qisi API 参考图片数量超过模型限制");
+    const resolution = likeAIResolution(options.resolution || (input.mode === "video" ? input.config.vquality : input.config.quality), input.mode === "video" ? "720p" : "1080p");
+    if (!(input.mode === "video" ? ["480p", "720p"] : ["1080p", "1440p", "2160p"]).includes(String(resolution))) throw new Error("qisi API 不支持所选分辨率");
+    const ratio = String(input.config.size || (input.mode === "video" ? "adaptive" : "1:1"));
+    if (!(input.mode === "video" ? ["adaptive", "21:9", "16:9", "9:16", "4:3", "3:4", "1:1"] : ["adaptive", "21:9", "16:9", "9:16", "4:3", "3:4", "1:1", "3:2", "2:3"]).includes(ratio)) throw new Error("qisi API 不支持所选画幅");
+    if (input.mode === "video") {
+        const duration = options.duration ?? Number(input.config.videoSeconds || 5);
+        if (!Number.isInteger(duration) || Number(duration) < 4 || Number(duration) > 30) throw new Error("qisi API 视频时长须为 4 至 30 秒的整数，不支持自动时长");
+        const roles = (input.referenceImages || []).map((image) => likeAIImageRole(input, image));
+        if (roles.includes("first_frame") && roles.includes("reference_image")) throw new Error("qisi API 首尾帧模式不能与参考图模式混用");
+    } else if (options.duration !== undefined) throw new Error("图片生成不能设置视频时长");
 }
 
 /** Same explicit frame-role mapping as the Go LikeAI adapter; no inferred first frame. */
@@ -63,6 +96,7 @@ export function validateLikeAIReferences(input: LikeAIInput) {
 }
 
 export function buildLikeAICreateBody(input: LikeAIInput): Record<string, unknown> {
+    if (isQisiAPI(input.config.baseUrl)) validateQisiInput(input);
     validateLikeAIReferences(input);
     const config = input.config;
     const options = objectRecord(objectRecord(input.metadata?.providerOptions)[`likeai-${input.mode}`]);
@@ -84,7 +118,7 @@ export function buildLikeAICreateBody(input: LikeAIInput): Record<string, unknow
         ...(config.size ? { aspect_ratio: config.size } : {}),
         kwargs: objectRecord(options.kwargs),
     };
-    if (input.mode === "image") body.resolution = options.resolution || config.quality || "1080p";
+    if (input.mode === "image") body.resolution = likeAIResolution(options.resolution || config.quality, "1080p");
     if (input.mode === "video") {
         const audio = config.videoGenerateAudio === true || config.videoGenerateAudio === "true";
         const model = String(config.model);
@@ -92,7 +126,7 @@ export function buildLikeAICreateBody(input: LikeAIInput): Record<string, unknow
             : model === "like_lite_1" ? { bgm: audio }
                 : model === "baidu_vod_keling_v3_omni_video" ? { sound: audio ? "on" : "off" } : { generate_audio: audio };
         body.kwargs = { ...audioOptions, ...objectRecord(options.kwargs) };
-        body.resolution = options.resolution || config.vquality || "720p";
+        body.resolution = likeAIResolution(options.resolution || config.vquality, "720p");
         body.duration = options.duration ?? (Number(config.videoSeconds) || 5);
         if (model === "qianfan_vidu_q2_turbo_video_extend" && videos[0]) body.video_url = videos[0];
     }
@@ -106,21 +140,32 @@ function requiredMediaURL(image: LikeAIReference) {
     return value;
 }
 
-export async function browserLikeAIRequest(path: string, apiKey: string, init: RequestInit = {}, fetchImpl: typeof fetch = globalThis.fetch): Promise<Record<string, unknown>> {
+export class LikeAIRequestError extends Error {
+    constructor(message: string, public readonly rejected: boolean) { super(message); }
+}
+
+export async function browserLikeAIRequest(path: string, apiKey: string, init: RequestInit = {}, fetchImpl: typeof fetch = globalThis.fetch, baseUrl = OFFICIAL_LIKEAI_BASE_URL): Promise<Record<string, unknown>> {
     if (!/^\/(?:task\/models|task\/create_task|task\/query_task\/[A-Za-z0-9_-]+|files)$/.test(path)) throw new Error("无效的 LikeAI 请求路径");
-    if (!apiKey.trim()) throw new Error("请先填写 LikeAI API Key");
+    const service = likeAIService(baseUrl);
+    if (!apiKey.trim()) throw new Error(`请先填写 ${service.name} API Key`);
     const headers = new Headers(init.headers);
-    headers.set("X-API-Key", apiKey.trim());
-    const response = await fetchImpl(`${BROWSER_LIKEAI_PREFIX}${path}`, { ...init, headers, credentials: "omit", cache: "no-store", redirect: "error" });
-    if (!response.ok) throw new Error(`LikeAI 请求失败（HTTP ${response.status}）`);
+    headers.delete("Authorization");
+    headers.delete("X-API-Key");
+    headers.set(service.header, service.bearer ? `Bearer ${apiKey.trim()}` : apiKey.trim());
+    const response = await fetchImpl(`${service.prefix}${path}`, { ...init, headers, credentials: "omit", cache: "no-store", redirect: "error" });
+    if (!response.ok) {
+        await response.body?.cancel();
+        const message = response.status === 401 ? "API Key 无效或已过期，请在模型配置中检查" : response.status === 402 ? "qisi API 余额或密钥额度不足，请先充值或调整密钥额度" : response.status === 429 ? "请求过于频繁，请稍后再操作" : `${service.name} 请求失败（HTTP ${response.status}）`;
+        throw new LikeAIRequestError(message, service.bearer && [400, 401, 402, 403, 404, 413, 415, 422, 429].includes(response.status));
+    }
     const body = objectRecord(await response.json());
     if (path !== "/files" && body.code !== 200) throw new Error(`LikeAI 请求未成功（${typeof body.code === "number" ? body.code : "无效响应"}）`);
     if (path === "/files" && body.code !== undefined && body.code !== 200) throw new Error("LikeAI 素材上传失败");
     return body;
 }
 
-export async function fetchBrowserLikeAIModels(apiKey: string) {
-    const body = await browserLikeAIRequest("/task/models", apiKey);
+export async function fetchBrowserLikeAIModels(apiKey: string, baseUrl = OFFICIAL_LIKEAI_BASE_URL) {
+    const body = await browserLikeAIRequest("/task/models", apiKey, {}, globalThis.fetch, baseUrl);
     const models = objectRecord(body.data).models;
     if (!Array.isArray(models)) throw new Error("LikeAI 模型目录格式无效");
     const catalog = new Map<string, ChannelModelCatalogItem>();
@@ -129,6 +174,7 @@ export async function fetchBrowserLikeAIModels(apiKey: string) {
         const kind = item.type === "chat" ? "text" : String(item.type);
         const id = typeof item.api_name === "string" ? item.api_name.trim() : "";
         if (!id || !["image", "video", "text", "audio"].includes(kind)) continue;
+        if (isQisiAPI(baseUrl) && !((id === "doubao_seedance_2_5" && kind === "video") || (id === "doubao_seedream_4_5" && kind === "image"))) continue;
         catalog.set(id, { id, displayName: id, modelType: kind as LikeAIMode, supportedEndpointTypes: [`likeai-${kind}`], ...(kind === "video" ? { defaultParameters: { resolution: "720p", durationSeconds: "5" } } : kind === "image" ? { defaultParameters: { resolution: "1080p" } } : {}) });
     }
     const sorted = [...catalog.values()].sort((a, b) => a.id.localeCompare(b.id));

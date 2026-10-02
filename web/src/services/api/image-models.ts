@@ -62,7 +62,7 @@ export type ChannelModelFetchResult = { models: string[]; catalog: ChannelModelC
 export async function fetchChannelModels(channel: ModelChannel, viaBackend = false): Promise<ChannelModelFetchResult> {
     if (isBrowserWorkspace()) {
         if (channel.apiFormat !== "likeai") throw new Error("网页仅支持 LikeAI 模型服务");
-        return fetchBrowserLikeAIModels(channel.apiKey);
+        return fetchBrowserLikeAIModels(channel.apiKey, channel.baseUrl);
     }
     const managed = channel.id === "beefapi" && (channel.pinned || Boolean(channel.credentialRef));
     if (managed || channel.apiFormat === "likeai") {

@@ -2,9 +2,10 @@ import localforage from "localforage";
 import { getActiveUserScope } from "@/lib/user-scope";
 import type { BackendGenerationResult } from "@/services/api/generation-task";
 import type { CreateTaskInput, GenerationTask, GenerationTaskOutput } from "@/services/api/task-center";
-import { BROWSER_LIKEAI_PREFIX, browserLikeAIRequest, buildLikeAICreateBody, likeAIInput, objectRecord, parseLikeAIResponse, validateLikeAIReferences, type LikeAIMode, type LikeAIReference } from "@/services/browser-likeai-client";
+import { browserLikeAIRequest, buildLikeAICreateBody, likeAIInput, LikeAIRequestError, objectRecord, parseLikeAIResponse, validateLikeAIReferences, type LikeAIMode, type LikeAIReference } from "@/services/browser-likeai-client";
+import { isQisiAPI, likeAIService, OFFICIAL_LIKEAI_BASE_URL } from "@/lib/likeai-service";
 
-export type BrowserLikeAITaskRecord = { task: GenerationTask; channelId: string; mode: LikeAIMode; remoteResult?: BackendGenerationResult; downloaded: boolean };
+export type BrowserLikeAITaskRecord = { task: GenerationTask; channelId: string; serviceBaseUrl?: string; mode: LikeAIMode; remoteResult?: BackendGenerationResult; downloaded: boolean };
 export type BrowserLikeAITaskStore = {
     get(id: string): Promise<BrowserLikeAITaskRecord | null>;
     put(record: BrowserLikeAITaskRecord): Promise<void>;
@@ -15,9 +16,9 @@ type Dependencies = {
     store: BrowserLikeAITaskStore;
     lock<T>(name: string, action: () => Promise<T>): Promise<T>;
     request: typeof browserLikeAIRequest;
-    credential(channelId: string): Promise<string>;
-    reference(ref: LikeAIReference, kind: "image" | "video" | "audio", apiKey: string): Promise<LikeAIReference>;
-    download(result: BackendGenerationResult, taskId: string, providerId: string, apiKey: string, signal?: AbortSignal): Promise<BackendGenerationResult>;
+    credential(channelId: string, baseUrl?: string): Promise<string>;
+    reference(ref: LikeAIReference, kind: "image" | "video" | "audio", apiKey: string, baseUrl?: string): Promise<LikeAIReference>;
+    download(result: BackendGenerationResult, taskId: string, providerId: string, apiKey: string, signal?: AbortSignal, baseUrl?: string): Promise<BackendGenerationResult>;
     now?: () => string;
     id?: () => string;
 };
@@ -60,7 +61,7 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
             task.resultState = "PENDING_MATERIALIZATION";
         } else if (parsed.status === "failed" || parsed.status === "cancelled") {
             task.stage = parsed.status;
-            task.error = parsed.status === "failed" ? "LikeAI 任务失败，请在供应商后台查看原因" : "LikeAI 任务已取消";
+            task.error = parsed.status === "failed" ? isQisiAPI(record.serviceBaseUrl) ? "qisi API 任务失败，请在账户任务记录中查看或联系管理员" : "LikeAI 任务失败，请在供应商后台查看原因" : "生成任务已取消";
             task.completedAt = now();
         } else {
             task.stage = parsed.status;
@@ -71,7 +72,7 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
     const download = async (record: BrowserLikeAITaskRecord, apiKey: string, signal?: AbortSignal) => {
         if (record.downloaded || record.task.status !== "succeeded" || !record.remoteResult || !record.task.providerRequestId) return record.task;
         try {
-            const result = await deps.download(record.remoteResult, record.task.id, record.task.providerRequestId, apiKey, signal);
+            const result = await deps.download(record.remoteResult, record.task.id, record.task.providerRequestId, apiKey, signal, record.serviceBaseUrl);
             record.task.resultJson = JSON.stringify(result);
             record.task.outputs = resultOutputs(result);
             record.task.stage = "completed";
@@ -99,11 +100,12 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
             task.status = "failed";
             task.stage = "submission_uncertain";
             task.errorCode = "submission_uncertain";
-            task.error = "上次提交中断，尚未取得供应商任务编号；请先在 LikeAI 后台核对，系统不会自动重新提交。";
+            task.error = `上次提交中断，尚未取得任务编号；请先在 ${isQisiAPI(record.serviceBaseUrl) ? "qisi API 账户" : "LikeAI 后台"}核对，系统不会自动重新提交。`;
             return save(record);
         }
-        const apiKey = await deps.credential(record.channelId);
-        if (!record.remoteResult || force) await recordResponse(record, await deps.request(`/task/query_task/${task.providerRequestId}`, apiKey, { signal }));
+        const baseUrl = record.serviceBaseUrl || OFFICIAL_LIKEAI_BASE_URL;
+        const apiKey = await deps.credential(record.channelId, baseUrl);
+        if (!record.remoteResult || force) await recordResponse(record, await deps.request(`/task/query_task/${task.providerRequestId}`, apiKey, { signal }, undefined, baseUrl));
         return download(record, apiKey, signal);
     });
     return {
@@ -112,7 +114,8 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
             validateLikeAIReferences(input);
             const channelId = String(input.config.channelId || "");
             if (!channelId) throw new Error("LikeAI 渠道未配置");
-            const apiKey = String(input.config.apiKey || "").trim() || await deps.credential(channelId);
+            const baseUrl = String(input.config.baseUrl);
+            const apiKey = String(input.config.apiKey || "").trim() || await deps.credential(channelId, baseUrl);
             if (!apiKey) throw new Error("请先填写 LikeAI API Key");
             const metadata = objectRecord(input.metadata);
             const operationId = typeof metadata.clientOperationId === "string" && metadata.clientOperationId ? metadata.clientOperationId : id();
@@ -124,7 +127,7 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
                     const timestamp = now();
                     const context = publicTaskMetadata(metadata);
                     const record: BrowserLikeAITaskRecord = {
-                        channelId, mode: input.mode, downloaded: false,
+                        channelId, serviceBaseUrl: baseUrl, mode: input.mode, downloaded: false,
                         task: { id: taskId, clientOperationId: operationId, projectId: request.projectId, type: `canvas_${input.mode}`, operation: request.operation, provider: "likeai", model: String(input.config.model), prompt: request.prompt, status: "running", stage: "preparing_references", progress: 0, attempts: 1, createdAt: timestamp, updatedAt: timestamp, startedAt: timestamp,
                             retryOf: typeof metadata.retryOf === "string" ? metadata.retryOf : undefined,
                             attemptGroupId: typeof metadata.attemptGroupId === "string" ? metadata.attemptGroupId : undefined,
@@ -135,14 +138,14 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
                     await save(record);
                     let submitted = false;
                     try {
-                        const referenceImages = await Promise.all((input.referenceImages || []).map((ref) => deps.reference(ref, "image", apiKey)));
-                        const referenceVideos = await Promise.all((input.referenceVideos || []).map((ref) => deps.reference(ref, "video", apiKey)));
-                        const referenceAudios = await Promise.all((input.referenceAudios || []).map((ref) => deps.reference(ref, "audio", apiKey)));
+                        const referenceImages = await Promise.all((input.referenceImages || []).map((ref) => deps.reference(ref, "image", apiKey, baseUrl)));
+                        const referenceVideos = await Promise.all((input.referenceVideos || []).map((ref) => deps.reference(ref, "video", apiKey, baseUrl)));
+                        const referenceAudios = await Promise.all((input.referenceAudios || []).map((ref) => deps.reference(ref, "audio", apiKey, baseUrl)));
                         const body = buildLikeAICreateBody({ ...input, referenceImages, referenceVideos, referenceAudios });
                         record.task.stage = "submitting";
                         await save(record);
                         submitted = true;
-                        const response = await deps.request("/task/create_task", apiKey, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+                        const response = await deps.request("/task/create_task", apiKey, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, undefined, baseUrl);
                         // Save the receipt before parsing outputs or downloading anything.
                         const providerId = objectRecord(response.data).task_id;
                         if (typeof providerId !== "string" || !/^[A-Za-z0-9_-]+$/.test(providerId)) throw new Error("LikeAI 未返回任务编号");
@@ -152,10 +155,11 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
                         await recordResponse(record, response);
                         return download(record, apiKey);
                     } catch (error) {
+                        const rejected = submitted && error instanceof LikeAIRequestError && error.rejected && !record.task.providerRequestId;
                         record.task.status = record.task.providerRequestId ? "running" : "failed";
-                        record.task.stage = submitted ? "submission_uncertain" : "preparation_failed";
+                        record.task.stage = rejected ? "submission_rejected" : submitted ? "submission_uncertain" : "preparation_failed";
                         record.task.errorCode = record.task.stage;
-                        record.task.error = submitted ? "提交结果待核对；已取得的任务编号会继续查询，没有任务编号时不会自动重新提交。" : safePreparationError(error);
+                        record.task.error = rejected ? error.message : submitted ? "提交结果待核对；已取得的任务编号会继续查询，没有任务编号时不会自动重新提交。" : safePreparationError(error);
                         return save(record);
                     }
                 });
@@ -177,7 +181,7 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
             if (record.task.status === "succeeded" || record.task.status === "failed" || record.task.status === "cancelled") return record.task;
             record.task.status = "cancelled";
             record.task.providerCancelStatus = "uncertain";
-            record.task.providerCancelError = "仅停止本地等待，LikeAI 任务可能继续执行并计费。";
+            record.task.providerCancelError = "仅停止本地等待，生成任务可能继续执行并计费。";
             record.task.error = record.task.providerCancelError;
             record.task.stage = "locally_cancelled";
             record.task.updatedAt = now();
@@ -243,21 +247,22 @@ export function browserLikeAITasks() {
                 return navigator.locks.request(`qisitv:${scope}:${name}`, action);
             },
             request: browserLikeAIRequest,
-            credential: async (channelId) => {
+            credential: async (channelId, baseUrl = OFFICIAL_LIKEAI_BASE_URL) => {
                 const { useConfigStore } = await import("@/stores/use-config-store");
                 const channel = useConfigStore.getState().config.channels.find((candidate) => candidate.id === channelId && candidate.apiFormat === "likeai");
-                if (!channel?.apiKey.trim()) throw new Error("请在 LikeAI 设置中恢复该任务使用的 API Key");
+                if (channel?.baseUrl !== baseUrl) throw new Error("任务使用的模型服务已改变，请恢复原渠道配置后查询");
+                if (!channel?.apiKey.trim()) throw new Error("请在模型配置中恢复该任务使用的 API Key");
                 return channel.apiKey.trim();
             },
             reference: prepareBrowserLikeAIReference,
-            download: (result, taskId, providerId, apiKey, signal) => downloadBrowserLikeAIResult(result, scope, taskId, providerId, apiKey, signal),
+            download: (result, taskId, providerId, apiKey, signal, baseUrl) => downloadBrowserLikeAIResult(result, scope, taskId, providerId, apiKey, signal, baseUrl),
         });
         services.set(scope, service);
     }
     return service;
 }
 
-export async function prepareBrowserLikeAIReference(ref: LikeAIReference, kind: "image" | "video" | "audio", apiKey: string): Promise<LikeAIReference> {
+export async function prepareBrowserLikeAIReference(ref: LikeAIReference, kind: "image" | "video" | "audio", apiKey: string, baseUrl = OFFICIAL_LIKEAI_BASE_URL): Promise<LikeAIReference> {
     if (/^https:\/\//i.test(ref.url || ref.dataUrl || "")) return { ...ref, url: ref.url || ref.dataUrl };
     let blob: Blob | null = null;
     if (ref.storageKey) {
@@ -273,13 +278,13 @@ export async function prepareBrowserLikeAIReference(ref: LikeAIReference, kind: 
     if (blob.size > 4_000_000) throw new Error("网页参考素材暂限 4 MB；较大文件请使用公网素材地址，或在本地版中生成。");
     const form = new FormData();
     form.append("file", blob, ref.name || `${kind}.bin`);
-    const response = await browserLikeAIRequest("/files", apiKey, { method: "POST", body: form });
-    const url = response.url || objectRecord(response.data).url;
+    const response = await browserLikeAIRequest("/files", apiKey, { method: "POST", body: form }, undefined, baseUrl);
+    const url = response.url || response.file_url || objectRecord(response.data).url || objectRecord(response.data).file_url;
     if (typeof url !== "string" || !/^https:\/\//i.test(url)) throw new Error("LikeAI 参考素材上传未返回有效地址");
     return { ...ref, url, dataUrl: undefined };
 }
 
-async function downloadBrowserLikeAIResult(result: BackendGenerationResult, scope: string, taskId: string, providerId: string, apiKey: string, signal?: AbortSignal): Promise<BackendGenerationResult> {
+async function downloadBrowserLikeAIResult(result: BackendGenerationResult, scope: string, taskId: string, providerId: string, apiKey: string, signal?: AbortSignal, baseUrl = OFFICIAL_LIKEAI_BASE_URL): Promise<BackendGenerationResult> {
     const next = structuredClone(result);
     const save = async (item: { dataUrl: string; url?: string; storageKey?: string; bytes?: number; mimeType?: string }, kind: "image" | "video" | "audio", index: number) => {
         const storageKey = `${kind}:${scope}:likeai:${taskId}:${index}`;
@@ -287,7 +292,7 @@ async function downloadBrowserLikeAIResult(result: BackendGenerationResult, scop
         const mediaStore = kind !== "image" ? await import("@/services/file-storage") : null;
         let blob = imageStore ? await imageStore.getImageBlob(storageKey) : await mediaStore!.getMediaBlob(storageKey);
         if (!blob) {
-            blob = await fetchBrowserLikeAIArtifact({ url: item.url || item.dataUrl, providerId, kind, index, apiKey, signal });
+            blob = await fetchBrowserLikeAIArtifact({ url: item.url || item.dataUrl, providerId, kind, index, apiKey, signal, baseUrl });
             if (imageStore) await imageStore.setImageBlob(storageKey, blob);
             else await mediaStore!.setMediaBlob(storageKey, blob);
         }
@@ -302,7 +307,7 @@ async function downloadBrowserLikeAIResult(result: BackendGenerationResult, scop
     return next;
 }
 
-export async function fetchBrowserLikeAIArtifact({ url, providerId, kind, index, apiKey, signal, fetchImpl = globalThis.fetch }: {
+export async function fetchBrowserLikeAIArtifact({ url, providerId, kind, index, apiKey, signal, fetchImpl = globalThis.fetch, baseUrl = OFFICIAL_LIKEAI_BASE_URL }: {
     url: string;
     providerId: string;
     kind: "image" | "video" | "audio";
@@ -310,6 +315,7 @@ export async function fetchBrowserLikeAIArtifact({ url, providerId, kind, index,
     apiKey: string;
     signal?: AbortSignal;
     fetchImpl?: typeof fetch;
+    baseUrl?: string;
 }): Promise<Blob> {
     if (!/^https:\/\//i.test(url) || !/^[A-Za-z0-9_-]+$/.test(providerId) || !Number.isSafeInteger(index) || index < 0) throw new Error("生成结果标识无效");
     const boundedSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000);
@@ -319,7 +325,9 @@ export async function fetchBrowserLikeAIArtifact({ url, providerId, kind, index,
         if (direct.ok) return await checkedMediaBlob(direct, kind);
         await direct.body?.cancel();
     } catch (error) { if (boundedSignal.aborted) throw error; }
-    const response = await fetchImpl(`${BROWSER_LIKEAI_PREFIX}/task/artifact/${encodeURIComponent(providerId)}/${kind}/${index}`, { headers: { "X-API-Key": apiKey }, credentials: "omit", cache: "no-store", redirect: "error", signal: boundedSignal });
+    const service = likeAIService(baseUrl);
+    const artifactKind = isQisiAPI(baseUrl) ? `${kind}s` : kind;
+    const response = await fetchImpl(`${service.prefix}/task/artifact/${encodeURIComponent(providerId)}/${artifactKind}/${index}`, { headers: { [service.header]: service.bearer ? `Bearer ${apiKey}` : apiKey }, credentials: "omit", cache: "no-store", redirect: "error", signal: boundedSignal });
     if (!response.ok) {
         await response.body?.cancel();
         throw new Error(response.status === 413 ? "生成结果超出网站转发大小限制，可从原结果链接下载。" : "生成结果下载失败");

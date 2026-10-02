@@ -8,6 +8,8 @@ import { defaultProtocolForCapability, defaultProtocolForModel, inferProtocolCap
 import { normalizeVideoDuration, normalizeVideoResolution } from "@/lib/video-generation-options";
 import { defaultModelCapabilityConfig, workflowFieldRole, workflowFieldSafeToOverride, workflowVideoFieldsFromJson, type ModelCapabilityConfig } from "@/lib/model-capabilities";
 import type { CapabilitySpec } from "@/services/api/logical-models";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
+import { isQisiAPI, isQisiModel, QISI_API_BASE_URL, qisiModelCapabilities } from "@/lib/likeai-service";
 
 export type ApiCallFormat = "openai" | "gemini" | "claude" | "likeai";
 export type ChannelInterfaceType = ModelProtocol;
@@ -848,12 +850,13 @@ export function isLikeAIChannel(channel: Pick<ModelChannel, "scope" | "apiFormat
 
 /** Product configuration is a view; legacy provider records stay in local storage. */
 export function likeAIWorkspaceConfig(config: AiConfig): AiConfig {
-    const channels = config.channels.filter(isLikeAIChannel).map((channel) => ({
+    const channels = config.channels.filter((channel) => isLikeAIChannel(channel) && (isBrowserWorkspace() || !isQisiAPI(channel.baseUrl))).map((channel) => ({
         ...channel,
-        baseUrl: LIKEAI_BASE_URL,
+        baseUrl: isQisiAPI(channel.baseUrl) ? QISI_API_BASE_URL : LIKEAI_BASE_URL,
         credentialRef: undefined,
         interfaceType: undefined,
-        modelProfiles: channel.models.map((model) => {
+        models: channel.models.filter((model) => !isQisiAPI(channel.baseUrl) || isQisiModel(model)),
+        modelProfiles: channel.models.filter((model) => !isQisiAPI(channel.baseUrl) || isQisiModel(model)).map((model) => {
             const profile = channel.modelProfiles?.find((item) => item.model === model);
             const capability = profile?.capability || inferProtocolCapabilityFromModel(model);
             const protocol = `likeai-${capability}`;
@@ -862,13 +865,19 @@ export function likeAIWorkspaceConfig(config: AiConfig): AiConfig {
                 model,
                 capability,
                 protocol,
-                capabilityConfig: profile?.protocol === protocol ? profile.capabilityConfig : defaultModelCapabilityConfig(protocol, model),
+                capabilityConfig: isQisiAPI(channel.baseUrl) ? qisiModelCapabilities(model) : profile?.protocol === protocol ? profile.capabilityConfig : defaultModelCapabilityConfig(protocol, model),
+                ...(isQisiAPI(channel.baseUrl) ? { defaultOptions: undefined } : {}),
             };
         }),
     }));
     if (!channels.length) {
         const id = config.channels.some((channel) => channel.id === "likeai") ? "qisitv-likeai" : "likeai";
         channels.push({ ...createModelChannel({ id, name: "LikeAI", apiFormat: "likeai", baseUrl: LIKEAI_BASE_URL }), credentialRef: undefined, interfaceType: undefined, modelProfiles: [] });
+    }
+    if (isBrowserWorkspace() && !channels.some((channel) => isQisiAPI(channel.baseUrl))) {
+        let id = "qisi-api";
+        while (config.channels.some((channel) => channel.id === id)) id += "-gateway";
+        channels.unshift({ ...createModelChannel({ id, name: "qisi API", apiFormat: "likeai", baseUrl: QISI_API_BASE_URL }), credentialRef: undefined, interfaceType: undefined, modelProfiles: [] });
     }
     return normalizeConfigSnapshot({ config: {
         ...config,

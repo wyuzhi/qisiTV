@@ -8,6 +8,7 @@ import { channelConnectionSignature, channelHasGenerationCredential, isLikeAICha
 import { ChannelModelSettings } from "./channel-model-settings";
 import { getModelConfigPersistenceState, subscribeModelConfigPersistence, type ModelConfigPersistenceState } from "@/services/model-config-repository";
 import { isBrowserWorkspace } from "@/services/browser-workspace";
+import { isQisiAPI, QISI_API_CONSOLE_URL } from "@/lib/likeai-service";
 
 export function ChannelSettingsPane() {
     const { message } = App.useApp();
@@ -33,8 +34,8 @@ export function ChannelSettingsPane() {
         setLoadingChannelIds((items) => [...items, channel.id]);
         try {
             const result = await fetchChannelModels(channel, false);
-            if (!result.models.length) {
-                message.warning("LikeAI 未返回模型，已保留原有模型列表");
+            if (!result.models.length && !isQisiAPI(channel.baseUrl)) {
+                message.warning("当前渠道没有可用模型，已保留原有模型列表；请检查密钥权限或联系管理员");
                 return;
             }
             const latestConfig = useConfigStore.getState().config;
@@ -44,9 +45,10 @@ export function ChannelSettingsPane() {
                 return;
             }
             replaceConfig(withUpdatedLikeAIChannel(latestConfig, applyFetchedChannelModelCatalog(latestChannel, result)));
-            message.success(`已更新 ${result.models.length} 个 LikeAI 模型`);
+            if (!result.models.length) message.warning("qisi API 当前没有可用模型；请检查密钥权限或联系管理员");
+            else message.success(`已更新 ${result.models.length} 个${isQisiAPI(channel.baseUrl) ? " qisi API " : " LikeAI "}模型`);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "读取 LikeAI 模型失败");
+            message.error(error instanceof Error ? error.message : "读取模型失败");
         } finally {
             setLoadingChannelIds((items) => items.filter((id) => id !== channel.id));
         }
@@ -56,8 +58,8 @@ export function ChannelSettingsPane() {
         <Form layout="vertical" requiredMark={false}>
             <div className="settings-pane-header">
                 <div className="min-w-0">
-                    <h2>LikeAI 模型服务</h2>
-                    <p>{isBrowserWorkspace() ? "密钥保存在当前浏览器；生成请求经本站临时转发，不保存密钥或素材。" : "在本机配置 API Key，拉取模型后即可生图、生视频。"}</p>
+                    <h2>{isBrowserWorkspace() ? "模型服务" : "LikeAI 模型服务"}</h2>
+                    <p>{isBrowserWorkspace() ? "选择 qisi API 使用账户余额创作，或保留自己的 LikeAI 服务。密钥保存在当前浏览器，项目与成品仍保存到本机文件夹。" : "在本机配置 API Key，拉取模型后即可生图、生视频。"}</p>
                 </div>
             </div>
             <div className="settings-channel-list space-y-3">
@@ -65,26 +67,33 @@ export function ChannelSettingsPane() {
                     <section key={channel.id} aria-labelledby={`channel-${channel.id}-title`} className="settings-channel p-3 sm:p-4">
                         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                             <div className="min-w-0">
-                                <h3 id={`channel-${channel.id}-title`} className="text-sm font-semibold">{channel.name || "LikeAI"}</h3>
+                                <h3 id={`channel-${channel.id}-title`} className="text-sm font-semibold">{isQisiAPI(channel.baseUrl) ? "qisi API · 起司创作服务" : channel.name || "LikeAI"}</h3>
                                 <p className="mt-1 text-xs text-foreground/55">已保存 {channel.models.length} 个模型</p>
                                 <span className={`settings-channel-status mt-2 ${channelValidationError(channel) || persistence.status === "error" ? "is-warning" : "is-ready"}`}>
                                     <i aria-hidden="true" />
                                     {modelConfigChannelStatusLabel(channel, persistence)}
                                 </span>
                             </div>
-                            <Button icon={<RefreshCw className="size-4" />} loading={loadingChannelIds.includes(channel.id)} onClick={() => void refreshChannelModels(channel)}>拉取模型</Button>
+                            <div className="flex flex-wrap gap-2">
+                                {isQisiAPI(channel.baseUrl) && <Button href={QISI_API_CONSOLE_URL} target="_blank" rel="noreferrer">注册 / 充值 / 获取 Key</Button>}
+                                <Button icon={<RefreshCw className="size-4" />} loading={loadingChannelIds.includes(channel.id)} onClick={() => void refreshChannelModels(channel)}>拉取模型</Button>
+                            </div>
                         </div>
                         <div className="grid gap-3 sm:grid-cols-2">
                             <Form.Item label="Base URL" htmlFor={`channel-${channel.id}-base-url`} className="mb-0">
                                 <Input id={`channel-${channel.id}-base-url`} readOnly value={channel.baseUrl} />
                             </Form.Item>
-                            <Form.Item label="LikeAI API Key" htmlFor={`channel-${channel.id}-api-key`} className="mb-0" extra={isBrowserWorkspace() ? "请使用个人密钥；清除本站浏览器数据也会清除密钥。" : "密钥保存在本机，仅用于调用 LikeAI。"}>
-                                <Input.Password id={`channel-${channel.id}-api-key`} autoComplete="new-password" value={channel.apiKey} placeholder="填写 LikeAI API Key"
+                            <Form.Item label={isQisiAPI(channel.baseUrl) ? "qisi API Key" : "LikeAI API Key"} htmlFor={`channel-${channel.id}-api-key`} className="mb-0" extra={isQisiAPI(channel.baseUrl) ? "填写 qisi API 账户中创建的密钥；请求按账户余额扣费。不要填写 LikeAI 上游密钥。" : isBrowserWorkspace() ? "填写自己的 LikeAI 密钥；清除本站浏览器数据也会清除密钥。" : "密钥保存在本机，仅用于调用 LikeAI。"}>
+                                <Input.Password id={`channel-${channel.id}-api-key`} autoComplete="new-password" value={channel.apiKey} placeholder={isQisiAPI(channel.baseUrl) ? "填写 qisi API Key" : "填写 LikeAI API Key"}
                                     onChange={(event) => updateChannel(channel, { apiKey: event.target.value })}
                                     onBlur={(event) => updateChannel(channel, { apiKey: event.target.value.trim() })} />
                             </Form.Item>
                         </div>
-                        <ChannelModelSettings channel={channel} onChange={(modelProfiles) => updateChannel(channel, { modelProfiles })} />
+                        {isQisiAPI(channel.baseUrl) ? <div className="mt-4 space-y-2 text-xs text-foreground/60">
+                            <p>拉取模型后，在画布的模型选择中选择 qisi API 渠道。价格、余额和调用记录可在 qisi API 账户中查看。</p>
+                            {channel.models.map((model) => <p key={model}>{model === "doubao_seedance_2_5" ? "Seedance 2.5：4–30 秒，480p / 720p，支持图片参考或首尾帧。" : "Seedream 4.5：1080p / 1440p / 2160p，支持图片参考。"}</p>)}
+                            <p>本地参考文件限 4 MB；暂不支持视频 / 音频参考和自动时长。生成任务停止等待后仍可能继续计费。</p>
+                        </div> : <ChannelModelSettings channel={channel} onChange={(modelProfiles) => updateChannel(channel, { modelProfiles })} />}
                     </section>
                 ))}
             </div>
@@ -122,7 +131,7 @@ export function applyFetchedChannelModelCatalog(channel: ModelChannel, result: C
 }
 
 export function channelValidationError(channel: ModelChannel) {
-    return channelConnectionError(channel) || (!channel.models.length ? "请先拉取 LikeAI 模型" : "");
+    return channelConnectionError(channel) || (!channel.models.length ? "请先拉取模型" : "");
 }
 
 export function isChannelReady(channel: ModelChannel) {
@@ -151,6 +160,9 @@ function channelConnectionError(channel: ModelChannel) {
     if (!isLikeAIChannel(channel)) return "当前仅支持 LikeAI 模型服务";
     const baseUrl = channel.baseUrl.trim();
     if (!baseUrl) return "请填写 Base URL";
+    if (isBrowserWorkspace() && isQisiAPI(baseUrl)) {
+        return channel.apiKey.trim() ? "" : "请填写 qisi API Key";
+    }
     try {
         const parsed = new URL(baseUrl);
         if (parsed.protocol !== "https:" || parsed.hostname !== "task.likeai.pro" || parsed.port || parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname.replace(/\/+$/, "") !== "/task-api") return "请使用 https://task.likeai.pro/task-api";
