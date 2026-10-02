@@ -4,10 +4,19 @@ Changes to qisiTV and its inherited release history are documented in this file.
 
 ## Unreleased
 
+## v1.5.10 (qisiTV)
+
+- Selectively adapted upstream media-copy persistence, backup import, project toolbar layout, live task details, and original-result recovery improvements for the browser workspace.
+- Imported backups create independent project/media copies and report success only after writing to the authorized project folder. Partial failures keep completed imports and report the remaining work.
+- Task details refresh while work is running. Result recovery reuses the original LikeAI task, checks the current canvas and node, and never submits another paid generation.
+- Keep the local-folder browser workspace, LikeAI configuration, branding, and external MCP clients, including WorkBuddy immediately after Codex. This is a qisiTV release based on v1.5.9 with selected later patches; it is not a full upstream v1.6.23 merge.
+- Integrate the separately developed qisi API channel with its own Key and task transport, preserving existing direct LikeAI keys and selected models.
+
+## qisiTV initial customization
+
 - Merged upstream v1.5.9 while preserving qisiTV branding, LikeAI, and local Agent integration; Cloudflare publishing is optional and requires the fork's own release configuration.
 - Renamed the product, icons, local Agent tools, packages, and runtime identifiers to qisiTV while preserving existing local data and upstream attribution.
 - Added LikeAI model support and a shared MCP / CLI interface for external local Agents.
-- Built-in BeefAPI can be connected from the desktop app without pasting a key.
 - Prepared the first audited public source snapshot.
 - Added reproducible local builds, automated quality checks, and multi-architecture container publishing.
 - Standardized the upstream public artifacts, runtime identifiers, documentation, and repository links.

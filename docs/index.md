@@ -33,6 +33,7 @@ qisiTV 是一个本地优先、轻量、AI Native 的视频工作台。本页只
 
 ## 项目治理
 
+- [上游更新与验证记录](upstream-maintenance.md)
 - [贡献指南](../CONTRIBUTING.md)
 - [安全策略](../SECURITY.md)
 - [项目许可](../LICENSE)

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-type Scenario = "image-cleanup" | "scope-cleanup-switch" | "scope-cleanup-late-canvas-reference" | "video-commit-race" | "audio-commit-race";
+type Scenario = "image-cleanup" | "scope-cleanup-switch" | "scope-cleanup-late-canvas-reference" | "video-commit-race" | "audio-commit-race" | "copied-video-save";
 type ScenarioResponse<T> = { ok: true; result: T } | { ok: false; error: string };
 
 function runScenario<T>(scenario: Scenario): Promise<T> {
@@ -21,6 +21,15 @@ function runScenario<T>(scenario: Scenario): Promise<T> {
         worker.postMessage(scenario);
     });
 }
+
+test("a copied successful video survives ordinary persistence and a subsequent generation commit", async () => {
+    const result = await runScenario<{ copiedIds: string[]; completedIds: string[]; content: string; sourceKeys: string[]; copyKeys: string[] }>("copied-video-save");
+    expect(result.copiedIds).toEqual(["source", "copy"]);
+    expect(result.completedIds).toEqual(["source", "copy"]);
+    expect(result.content).toBe("video-720p");
+    expect(result.sourceKeys).toEqual(["attach-node:old-task:source:0"]);
+    expect(result.copyKeys).toEqual(["attach-node:new-task:copy:0"]);
+});
 
 test("generation image cleanup removes unused generation-image blobs and preserves referenced ones", async () => {
     const result = await runScenario<{ usedPresent: boolean; unusedPresent: boolean }>("image-cleanup");

@@ -120,14 +120,13 @@ import { CanvasFocusModeBar } from "@/components/canvas/canvas-focus-mode-bar";
 import { CanvasProjectContextMenu } from "./canvas-project-context-menu";
 import { CanvasProjectMediaDialogs } from "./canvas-project-media-dialogs";
 import { CanvasProjectSelectionToolbar } from "./canvas-project-selection-toolbar";
-import { CanvasProjectStatusDialogs } from "./canvas-project-status-dialogs";
+import { CanvasProjectStatusDialogs, CanvasResourceReloadStatus } from "./canvas-project-status-dialogs";
 import { CanvasProjectWorldLayers } from "./canvas-project-world-layers";
 import { CanvasNodeActionContext, type CanvasNodeActionContextValue } from "@/components/canvas/canvas-node-action-context";
 import { bringCanvasNodeToFront, type CanvasNodeStackOrder } from "@/lib/canvas/canvas-node-stack-order";
 import { AiArtCritiqueModal } from "@/components/canvas/art-critique/ai-art-critique-modal";
 import { CanvasNodeGraphContext, type CanvasNodeGraphContextValue } from "@/components/canvas/canvas-node-graph-context";
 import { CanvasRefreshShell } from "./canvas-refresh-shell";
-import { queryGenerationTask } from "@/services/api/task-center";
 import type { CanvasImageEmotionPayload } from "@/components/canvas/canvas-node-emotion-panel";
 import { CanvasEmotionWorkspace } from "@/components/canvas/canvas-emotion-workspace";
 import { removeCanvasDrawing } from "@/lib/canvas/canvas-drawing-storage";
@@ -886,7 +885,7 @@ function InfiniteCanvasPage() {
     // 每帧新对象会让所有节点跟着重渲染，错题本里多条崩溃都出在画布高频更新。
     const nodeGraphContext = useMemo<CanvasNodeGraphContextValue>(() => ({ getUpstreamNodes: (nodeId: string) => getContextResourceNodes(nodeId, nodes, connections) }), [connections, nodes]);
 
-    const { applyGenerationTaskResult, bindGenerationTask, finishGenerationRequest, openNodeTaskDetails, runningNodeId, setRunningNodeId, setTaskDetail, startGenerationRequest, taskDetail, taskDetailLoading, taskDetailLogs } = useCanvasGeneration({
+    const { applyGenerationTaskResult, bindGenerationTask, dismissResourceReloadFeedback, finishGenerationRequest, openNodeTaskDetails, reloadCanvasNodeResource, resourceReloadFeedback, runningNodeId, setRunningNodeId, setTaskDetail, startGenerationRequest, taskDetail, taskDetailLoading, taskDetailLogs, taskDetailError } = useCanvasGeneration({
         projectId,
         domainProjectId: linkedProjectId,
         projectLoaded,
@@ -2453,27 +2452,6 @@ function InfiniteCanvasPage() {
         bindGenerationTask,
         applyGenerationTaskResult,
     });
-    const reloadCanvasNodeResource = useCallback(
-        async (node: CanvasNodeData) => {
-            const taskId = node.metadata?.taskId;
-            if (!taskId || !node.metadata?.resourceReloadAvailable) return;
-            if (isLocalWorkspaceMode() || import.meta.env.VITE_CANVAS_LOCAL_MODE !== "false") {
-                message.info("本地工作区不会从云端重新加载任务资源，请直接在画布中重新生成");
-                return;
-            }
-            setNodes((current) => current.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: "loading", taskStage: "正在重新加载资源", errorDetails: undefined } } : item)));
-            try {
-                const task = await queryGenerationTask(taskId);
-                if (task.status !== "succeeded") throw new Error("原生成任务尚未成功，无法重新加载资源");
-                await applyGenerationTaskResult(node.id, task);
-            } catch (error) {
-                setNodes((current) =>
-                    current.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: "error", errorDetails: error instanceof Error ? error.message : "资源重新加载失败", resourceReloadAvailable: true } } : item)),
-                );
-            }
-        },
-        [applyGenerationTaskResult, setNodes],
-    );
     const reconcileImageBatchRootNode = useCallback(
         (rootId: string) => {
             setNodes((current) => {
@@ -3005,6 +2983,8 @@ function InfiniteCanvasPage() {
                                 shortDramaGuide={shortDramaGuide}
                             />
                         ) : null}
+
+                        <CanvasResourceReloadStatus feedback={resourceReloadFeedback} onDismiss={dismissResourceReloadFeedback} />
 
                         <CanvasNodeSearchModal
                             open={nodeSearchOpen}
@@ -3744,6 +3724,7 @@ function InfiniteCanvasPage() {
                             task={taskDetail}
                             taskLogs={taskDetailLogs}
                             taskLoading={taskDetailLoading}
+                            taskError={taskDetailError}
                             onCloseTask={() => setTaskDetail(null)}
                             onCancelTask={cancelCanvasTask}
                             superResolveNode={superResolveNode}

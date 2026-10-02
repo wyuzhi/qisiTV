@@ -49,6 +49,8 @@ function copyStoryboardRow(row: StoryboardRow, idMap: ReadonlyMap<string, string
 // 副本只能继承内容和用户引用，运行中任务、批次及指向源生成结果的关系必须隔离。
 export function isolateCopiedNodeMetadata(node: CanvasNodeData, idMap: ReadonlyMap<string, string>): CanvasNodeMetadata {
     const metadata = resetGenerationTaskMetadata(node.metadata, node.metadata?.content ? "success" : "idle");
+    // 提交标记绑定原任务和节点；副本携带它会被普通保存当作未确认生成结果过滤。
+    delete metadata.generationEffectKeys;
     delete metadata.generationBatches;
     delete metadata.batchRootId;
     delete metadata.batchChildIds;

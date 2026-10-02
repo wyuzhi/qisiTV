@@ -1,5 +1,5 @@
 import { Button, Modal } from "antd";
-import { ImagePlus, XCircle } from "lucide-react";
+import { ImagePlus, X, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { CanvasImagePreview } from "@/components/canvas/canvas-image-preview";
@@ -13,12 +13,27 @@ import { modelDisplayName, useEffectiveConfig } from "@/stores/use-config-store"
 import { resolveImageUrl } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { buildLibTVVideoSourceUrl } from "@/lib/canvas/libtv-import";
+import type { CanvasResourceReloadFeedback } from "./use-canvas-generation";
+
+export function CanvasResourceReloadStatus({ feedback, onDismiss }: { feedback: CanvasResourceReloadFeedback[]; onDismiss: (id: string) => void }) {
+    if (!feedback.length) return null;
+    return <div data-canvas-no-zoom className="flex max-h-40 shrink-0 flex-col gap-2 overflow-y-auto p-2" onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+        {feedback.map((item) => <div key={item.id} role={item.phase === "error" ? "alert" : "status"} className="flex items-start gap-3 rounded-lg border bg-background px-3 py-2 text-sm text-foreground">
+            <div className="min-w-0 flex-1 break-words">
+                <div className="font-medium">{item.nodeTitle} · {item.phase === "loading" ? "正在取回" : item.phase === "success" ? "已保存" : "取回未完成"}</div>
+                <p className="mt-1 text-xs leading-5">{item.content}</p>
+            </div>
+            <Button type="text" size="small" aria-label={`关闭${item.nodeTitle}的取回提示`} icon={<X className="size-4" aria-hidden />} onClick={() => onDismiss(item.id)} />
+        </div>)}
+    </div>;
+}
 
 type CanvasProjectStatusDialogsProps = {
     theme: { node: { stroke: string; panel: string; muted: string; fill: string } };
     task: GenerationTask | null;
     taskLogs: TaskLog[];
     taskLoading: boolean;
+    taskError?: boolean;
     onCloseTask: () => void;
     onCancelTask?: (task: GenerationTask) => void;
     superResolveNode: CanvasNodeData | null;
@@ -31,7 +46,7 @@ type CanvasProjectStatusDialogsProps = {
     onConfirmClear: () => void;
 };
 
-export function CanvasProjectStatusDialogs({ theme, task, taskLogs, taskLoading, superResolveNode, previewNode, clearConfirmOpen, onCloseTask, onCancelTask, onCloseSuperResolve, onUseLocalUpscale, onClosePreview, onCancelClear, onConfirmClear }: CanvasProjectStatusDialogsProps) {
+export function CanvasProjectStatusDialogs({ theme, task, taskLogs, taskLoading, taskError, superResolveNode, previewNode, clearConfirmOpen, onCloseTask, onCancelTask, onCloseSuperResolve, onUseLocalUpscale, onClosePreview, onCancelClear, onConfirmClear }: CanvasProjectStatusDialogsProps) {
     const config = useEffectiveConfig();
     const previewSource = useResolvedPreviewSource(previewNode);
     return (
@@ -39,6 +54,7 @@ export function CanvasProjectStatusDialogs({ theme, task, taskLogs, taskLoading,
             <Modal title="任务详情" open={Boolean(task)} footer={null} width="min(920px, calc(100vw - 32px))" onCancel={onCloseTask}>
                 {task ? (
                     <div className="space-y-4 text-sm">
+                        {taskError ? <p role="status">任务详情暂时无法刷新，正在重试。</p> : null}
                         <div className="grid grid-cols-2 gap-3 rounded-lg border p-3" style={{ borderColor: theme.node.stroke, background: theme.node.panel }}>
                             <TaskDetailItem label="当前阶段" value={generationTaskStageLabel(task)} />
                             {generationTaskShowsProgress(task) ? <TaskDetailItem label="进度" value={`${task.progress ?? 0}%`} /> : null}

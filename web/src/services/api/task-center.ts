@@ -326,12 +326,28 @@ export function deleteGenerationTask(id: string) {
     return http.delete<void>(`/tasks/${encodeURIComponent(id)}`);
 }
 
-export async function listTaskLogs(id: string) {
+function browserTaskLogs(task: GenerationTask): TaskLog[] {
+    return [{ id: `${task.id}:state`, taskId: task.id, level: task.status === "failed" ? "error" : "info", stage: task.stage || task.status, provenance: "task_state", createdAt: task.updatedAt }];
+}
+
+export async function queryGenerationTaskDetails(id: string, options?: { signal?: AbortSignal }) {
     if (isBrowserWorkspace()) {
-        const task = await browserLikeAITasks().query(id);
-        return [{ id: `${id}:state`, taskId: id, level: task.status === "failed" ? "error" : "info", stage: task.stage || task.status, provenance: "task_state", createdAt: task.updatedAt }] as TaskLog[];
+        // Browser logs are a task projection, so a second read would repeat provider queries/downloads.
+        const task = await queryGenerationTask(id, options);
+        options?.signal?.throwIfAborted();
+        return { task, logs: browserTaskLogs(task) };
     }
-    const raw = await http.get<Array<{ level?: unknown; message?: unknown; payload?: unknown; createdAt?: unknown }>>(`/tasks/${encodeURIComponent(id)}/logs`);
+    const [task, logs] = await Promise.all([queryGenerationTask(id, options), listTaskLogs(id, options)]);
+    return { task, logs };
+}
+
+export async function listTaskLogs(id: string, options?: { signal?: AbortSignal }) {
+    if (isBrowserWorkspace()) {
+        const task = await browserLikeAITasks().query(id, options?.signal);
+        options?.signal?.throwIfAborted();
+        return browserTaskLogs(task);
+    }
+    const raw = await http.get<Array<{ level?: unknown; message?: unknown; payload?: unknown; createdAt?: unknown }>>(`/tasks/${encodeURIComponent(id)}/logs`, { signal: options?.signal });
     return raw.map((log, index) => projectBackendSafeTaskLog(id, log, index));
 }
 

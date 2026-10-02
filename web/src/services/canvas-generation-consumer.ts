@@ -41,6 +41,8 @@ export function isCanvasGenerationDurableAckError(error: unknown): error is Canv
     return error instanceof CanvasGenerationDurableAckError;
 }
 
+export type CanvasGenerationCurrentGuard = (committed?: { nodes: CanvasNodeData[] }) => void;
+
 type CanvasGenerationLiveProjectState = Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId">;
 type CanvasGenerationLiveProjectAdapter = {
     read: () => CanvasGenerationLiveProjectState;
@@ -110,13 +112,16 @@ export async function applyCanvasGenerationTaskNodeEffect(input: {
     output: GenerationTaskOutput;
     effectKey: string;
     signal?: AbortSignal;
+    assertCurrent?: CanvasGenerationCurrentGuard;
     nodesRef: { current: CanvasNodeData[] };
     setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
 }) {
     if (input.task.clientContext?.externalAgent) return;
     throwIfAborted(input.signal);
+    input.assertCurrent?.();
     const previousNodes = input.nodesRef.current;
     const applied = await applyMaterializedGenerationTaskResultToNodes(previousNodes, input.task, input.output, input.effectKey, input.nodeId);
+    input.assertCurrent?.();
     if (!applied.updated || !applied.node) throw new Error("画布中找不到对应任务节点");
     const persistedProject = await persistCanvasGenerationEffect({
         projectId: input.projectId,
@@ -124,7 +129,10 @@ export async function applyCanvasGenerationTaskNodeEffect(input: {
         previousNodes,
         nodes: applied.nodes,
         signal: input.signal,
+        assertCurrent: input.assertCurrent,
     });
+    if (input.signal?.aborted) return;
+    input.assertCurrent?.({ nodes: persistedProject.nodes });
     input.nodesRef.current = persistedProject.nodes;
     input.setNodes(persistedProject.nodes);
 }
@@ -386,6 +394,7 @@ export type CanvasGenerationEffectInput = {
     previousActiveChatId?: string | null;
     activeChatId?: string | null;
     signal?: AbortSignal;
+    assertCurrent?: CanvasGenerationCurrentGuard;
 };
 
 function generationProjectDelta(input: CanvasGenerationEffectInput, memoryProject: CanvasProject) {
@@ -438,6 +447,7 @@ function rebaseCommittedCanvasGenerationOntoLiveProject(scope: string, projectId
 
 export async function persistCanvasGenerationEffect(input: CanvasGenerationEffectInput) {
     throwIfAborted(input.signal);
+    input.assertCurrent?.();
     const scope = getActiveUserScope();
     if (!useCanvasStore.getState().projects.some((project) => project.id === input.projectId)) {
         const { loadCanvasProjectForEditing } = await import("@/services/local-workspace-sync");
@@ -476,6 +486,7 @@ export async function persistCanvasGenerationEffect(input: CanvasGenerationEffec
                 const durable = parseCanvasStorageDocument(await storage.getItem(CANVAS_STORE_KEY), memoryProjects);
                 latestDurable = durable;
                 throwIfAborted(input.signal);
+                input.assertCurrent?.();
                 const rebased = rebaseCanvasProjects({
                     document: durable,
                     baseProjects: [delta.baseProject],
@@ -492,6 +503,7 @@ export async function persistCanvasGenerationEffect(input: CanvasGenerationEffec
                 }
 
                 throwIfAborted(input.signal);
+                input.assertCurrent?.();
                 await storage.setItem(CANVAS_STORE_KEY, serializeCanvasStorageDocument(rebased.document));
                 // Dedicated generation setItem resolving is the commit point. From here, abort or ordinary persistence failures cannot negate the committed effect.
                 latestDurable = rebased.document;
@@ -543,7 +555,31 @@ export async function persistCanvasGenerationEffect(input: CanvasGenerationEffec
         // the Go repository that will hydrate the next app launch.
         if (getActiveUserScope() === scope) {
             const { syncLocalCanvasGenerationProjectToBackend } = await import("@/services/local-workspace-repository");
-            await syncLocalCanvasGenerationProjectToBackend(input.projectId);
+            try {
+                await syncLocalCanvasGenerationProjectToBackend(input.projectId);
+            } catch (error) {
+                if (input.assertCurrent && !input.signal?.aborted) {
+                    // Cache commit is not a folder acknowledgement. Keep the recovery action
+                    // available without overwriting a node the user changed while saving.
+                    try {
+                        input.assertCurrent({ nodes: persisted.nodes });
+                        const taskIds = new Map((input.nodes ?? []).filter((node) => generationEffectApplied(node.metadata ?? {}, input.effectKey)).map((node) => [node.id, node.metadata?.taskId]));
+                        const retainRecovery = (nodes: CanvasNodeData[]) => nodes.map((node) => taskIds.has(node.id) && taskIds.get(node.id) === node.metadata?.taskId ? {
+                            ...node, metadata: { ...node.metadata, status: "error" as const, resourceReloadAvailable: true, errorDetails: "原结果已缓存，但尚未写入项目文件夹；可重新附加，不会重新生成。" },
+                        } : node);
+                        useCanvasStore.setState((state) => ({ projects: state.projects.map((project) => project.id === input.projectId ? { ...project, nodes: retainRecovery(project.nodes) } : project) }));
+                        const adapter = canvasGenerationLiveAdapters.get(canvasGenerationLiveAdapterKey(scope, input.projectId));
+                        if (adapter) {
+                            const live = adapter.read();
+                            adapter.write({ ...live, nodes: retainRecovery(live.nodes) });
+                        }
+                        await flushCanvasStorePersistence();
+                    } catch {
+                        // Preserve the original folder failure; stale or aborted views are left alone.
+                    }
+                }
+                throw error;
+            }
         }
         return persisted;
     } finally {
