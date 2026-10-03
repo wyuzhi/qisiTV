@@ -57,7 +57,8 @@ test("LikeAI credentials can only be submitted to its documented API host", () =
 test("LikeAI status reflects local model readiness and failed persistence", () => {
     const channel = createModelChannel({ apiFormat: "likeai", apiKey: "key" });
     expect(modelConfigChannelStatusLabel(channel, idle)).toBe("待拉取模型");
-    expect(modelConfigChannelStatusLabel({ ...channel, models: ["model"] }, { ...idle, status: "saved" })).toBe("已保存");
+    expect(modelConfigChannelStatusLabel({ ...channel, models: ["model"] }, { ...idle, status: "saved" })).toBe("配置已保存在本机");
+    expect(modelConfigChannelStatusLabel({ ...channel, models: ["model"] }, idle)).toBe("待验证连接");
     expect(modelConfigChannelStatusLabel(channel, { ...idle, status: "error" })).toBe("保存失败");
 });
 

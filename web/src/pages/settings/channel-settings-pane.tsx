@@ -1,4 +1,4 @@
-import { App, Button, Form, Input } from "antd";
+import { Button, Form, Input } from "antd";
 import { RefreshCw } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 
@@ -11,44 +11,53 @@ import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { isQisiAPI, QISI_API_CONSOLE_URL } from "@/lib/likeai-service";
 
 export function ChannelSettingsPane() {
-    const { message } = App.useApp();
     const config = useConfigStore((state) => state.config);
     const replaceConfig = useConfigStore((state) => state.replaceConfig);
     const persistence = useSyncExternalStore(subscribeModelConfigPersistence, getModelConfigPersistenceState, getModelConfigPersistenceState);
     const [loadingChannelIds, setLoadingChannelIds] = useState<string[]>([]);
+    const [feedback, setFeedback] = useState<Record<string, { role: "alert" | "status"; text: string } | undefined>>({});
     const channels = likeAIWorkspaceConfig(config).channels;
 
     const updateChannel = (channel: ModelChannel, patch: Partial<ModelChannel>) => {
         const current = useConfigStore.getState().config;
         const next = { ...channel, ...patch, apiFormat: "likeai" as const, credentialRef: undefined, interfaceType: undefined };
+        if (channelConnectionSignature(channel) !== channelConnectionSignature(next)) {
+            setFeedback((items) => ({ ...items, [channel.id]: undefined }));
+        }
         replaceConfig(withUpdatedLikeAIChannel(current, next));
     };
 
     const refreshChannelModels = async (channel: ModelChannel) => {
         const connectionError = channelConnectionError(channel);
         if (connectionError) {
-            message.error(connectionError);
+            setFeedback((items) => ({ ...items, [channel.id]: { role: "alert", text: connectionError } }));
             return;
         }
         updateChannel(channel, {});
         setLoadingChannelIds((items) => [...items, channel.id]);
+        setFeedback((items) => ({ ...items, [channel.id]: { role: "status", text: "正在读取模型…" } }));
         try {
             const result = await fetchChannelModels(channel, false);
-            if (!result.models.length && !isQisiAPI(channel.baseUrl)) {
-                message.warning("当前渠道没有可用模型，已保留原有模型列表；请检查密钥权限或联系管理员");
-                return;
-            }
             const latestConfig = useConfigStore.getState().config;
             const latestChannel = latestConfig.channels.find((item) => item.id === channel.id);
             if (!latestChannel || channelConnectionSignature(latestChannel) !== channelConnectionSignature(channel)) {
-                message.warning("连接配置已改变，已忽略旧的模型列表");
+                setFeedback((items) => ({ ...items, [channel.id]: { role: "alert", text: "连接配置已改变，请重新拉取模型" } }));
+                return;
+            }
+            if (!result.models.length && !isQisiAPI(channel.baseUrl)) {
+                setFeedback((items) => ({ ...items, [channel.id]: { role: "alert", text: "当前渠道没有可用模型，已保留原有模型列表；请检查密钥权限或联系管理员" } }));
                 return;
             }
             replaceConfig(withUpdatedLikeAIChannel(latestConfig, applyFetchedChannelModelCatalog(latestChannel, result)));
-            if (!result.models.length) message.warning("qisi API 当前没有可用模型；请检查密钥权限或联系管理员");
-            else message.success(`已更新 ${result.models.length} 个${isQisiAPI(channel.baseUrl) ? " qisi API " : " LikeAI "}模型`);
+            setFeedback((items) => ({ ...items, [channel.id]: result.models.length
+                ? { role: "status", text: `已更新 ${result.models.length} 个${isQisiAPI(channel.baseUrl) ? " qisi API " : " LikeAI "}模型` }
+                : { role: "alert", text: "qisi API 当前没有可用模型；请检查密钥权限或联系管理员" } }));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "读取模型失败");
+            const latestChannel = useConfigStore.getState().config.channels.find((item) => item.id === channel.id);
+            const text = !latestChannel || channelConnectionSignature(latestChannel) !== channelConnectionSignature(channel)
+                ? "连接配置已改变，请重新拉取模型"
+                : error instanceof Error ? error.message : "读取模型失败";
+            setFeedback((items) => ({ ...items, [channel.id]: { role: "alert", text } }));
         } finally {
             setLoadingChannelIds((items) => items.filter((id) => id !== channel.id));
         }
@@ -62,6 +71,7 @@ export function ChannelSettingsPane() {
                     <p>{isBrowserWorkspace() ? "选择 qisi API 使用账户余额创作，或保留自己的 LikeAI 服务。密钥保存在当前浏览器，项目与成品仍保存到本机文件夹。" : "在本机配置 API Key，拉取模型后即可生图、生视频。"}</p>
                 </div>
             </div>
+            {persistence.status === "error" && <p role="alert" className="mb-3 text-xs text-red-500">{persistence.error || "模型配置保存失败，请重试"}</p>}
             <div className="settings-channel-list space-y-3">
                 {channels.map((channel) => (
                     <section key={channel.id} aria-labelledby={`channel-${channel.id}-title`} className="settings-channel p-3 sm:p-4">
@@ -79,6 +89,7 @@ export function ChannelSettingsPane() {
                                 <Button icon={<RefreshCw className="size-4" />} loading={loadingChannelIds.includes(channel.id)} onClick={() => void refreshChannelModels(channel)}>拉取模型</Button>
                             </div>
                         </div>
+                        {feedback[channel.id] && <p role={feedback[channel.id]!.role} aria-live="polite" className={`mt-3 text-xs ${feedback[channel.id]!.role === "alert" ? "text-red-500" : "text-foreground/70"}`}>{feedback[channel.id]!.text}</p>}
                         <div className="grid gap-3 sm:grid-cols-2">
                             <Form.Item label="Base URL" htmlFor={`channel-${channel.id}-base-url`} className="mb-0">
                                 <Input id={`channel-${channel.id}-base-url`} readOnly value={channel.baseUrl} />
@@ -153,7 +164,7 @@ export function modelConfigChannelStatusLabel(channel: ModelChannel, persistence
     if (persistence.status === "error") return "保存失败";
     if (!channelHasGenerationCredential(channel)) return "待填写 API Key";
     if (!channel.models.length) return "待拉取模型";
-    return persistence.status === "saved" ? "已保存" : "可用";
+    return persistence.status === "saved" ? "配置已保存在本机" : "待验证连接";
 }
 
 function channelConnectionError(channel: ModelChannel) {
