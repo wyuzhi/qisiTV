@@ -234,7 +234,15 @@ function syncLocalCanvasProject(id: string, includeGeneratedAssets: boolean): Pr
 }
 
 export function syncLocalCanvasProjectToBackend(id: string): Promise<void> {
+    const pending = backendSaveTimers.get(id);
+    if (pending) clearTimeout(pending);
+    backendSaveTimers.delete(id);
     return syncLocalCanvasProject(id, false);
+}
+
+export function hasPendingLocalCanvasBackendSync(id: string): boolean {
+    const phase = useSyncProgressStore.getState().syncingProjects[id]?.phase;
+    return backendSaveTimers.has(id) || phase === "pending" || phase === "error";
 }
 
 type CanvasDocumentPersistPatch = Partial<Pick<CanvasProject, "nodes" | "connections" | "timeline">>;

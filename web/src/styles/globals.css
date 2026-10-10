@@ -11500,6 +11500,24 @@ html:not(.dark) .creation-studio-control:hover,
         animation: canvas-task-progress-shimmer 1.4s linear infinite;
     }
 
+    /* 节点内进度：上游百分比久未变化时改为循环扫描，不再显示停住的进度条。
+       减少动效时不动，只铺一层浅色满条，表示仍在进行。 */
+    @keyframes canvas-node-progress-indeterminate {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(350%); }
+    }
+    .canvas-node-progress-indeterminate {
+        width: 28%;
+        animation: canvas-node-progress-indeterminate 1.6s ease-in-out infinite;
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .canvas-node-progress-indeterminate {
+            width: 100%;
+            opacity: 0.45;
+            animation: none;
+        }
+    }
+
     .canvas-connection-flow {
         animation: canvas-connection-flow 1.25s var(--motion-ease-linear) infinite;
     }

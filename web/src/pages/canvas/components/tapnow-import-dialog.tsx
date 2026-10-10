@@ -3,6 +3,7 @@ import { CircleAlert, ExternalLink, Import, LoaderCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { formatTapNowBatchTime, parseTapNowShareID } from "@/lib/canvas/tapnow-import";
+import { normalizeVideoBoolean } from "@/lib/video-generation-options";
 import { importTapNowCanvas, type TapNowImportResult } from "@/services/api/tapnow";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type ViewportTransform } from "@/types/canvas";
 
@@ -37,7 +38,7 @@ function buildCanvasNodes(result: TapNowImportResult, viewport: ViewportTransfor
             quality: node.quality,
             seconds: node.seconds,
             vquality: node.vquality,
-            generateAudio: node.generateAudio,
+            generateAudio: normalizeVideoBoolean(node.generateAudio),
             status: node.status || "idle",
             errorDetails: node.errorDetails,
             naturalWidth: node.naturalWidth,

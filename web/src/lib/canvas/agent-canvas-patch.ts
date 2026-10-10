@@ -47,7 +47,7 @@ function mergeValue(current: unknown, before: unknown, after: unknown): unknown 
     throw new Error("Agent 画布增量与本地内容冲突，需要校准；已保留本地编辑");
 }
 
-function mergeItems<T extends { id: string }>(items: T[], changes: Change<T>[]): T[] {
+function mergeItems<T extends { id: string }>(items: T[], changes: Change<T>[], timestampKeys: readonly string[] = ["updatedAt"]): T[] {
     if (!changes.length) return items;
     const next = new Map(items.map((item) => [item.id, item]));
     for (const { before, after } of changes) {
@@ -56,15 +56,28 @@ function mergeItems<T extends { id: string }>(items: T[], changes: Change<T>[]):
         const current = next.get(id) ?? null;
         // Both editors stamp a node when different fields change. Timestamps
         // are bookkeeping, not a conflicting edit to the node's content.
-        const withoutStamp = (value: T) => {
-            const { updatedAt: _stamp, ...rest } = value as T & { updatedAt?: string };
+        const withoutStamp = (value: T | null) => {
+            if (!value) return value;
+            const rest = { ...value } as Record<string, unknown>;
+            for (const key of timestampKeys) delete rest[key];
             return rest;
         };
-        const merged = current && before && after
-            ? { ...mergeValue(withoutStamp(current), withoutStamp(before), withoutStamp(after)) as T,
-                ...((current as T & { updatedAt?: string }).updatedAt || (after as T & { updatedAt?: string }).updatedAt
-                    ? { updatedAt: latestTimestamp((current as T & { updatedAt?: string }).updatedAt, (after as T & { updatedAt?: string }).updatedAt) } : {}) }
-            : mergeValue(current, before, after) as T | null;
+        // Editor-added timestamps must not turn an otherwise unchanged node
+        // into a conflict when an Agent deletes it.
+        let merged = mergeValue(withoutStamp(current), withoutStamp(before), withoutStamp(after)) as T | null;
+        if (merged) {
+            const stamps: Record<string, unknown> = {};
+            for (const key of timestampKeys) {
+                const local = (current as Record<string, unknown> | null)?.[key];
+                const remote = (after as Record<string, unknown> | null)?.[key];
+                const base = (before as Record<string, unknown> | null)?.[key];
+                const value = key === "updatedAt"
+                    ? latestTimestamp(local as string | undefined, remote as string | undefined)
+                    : remote !== undefined && !equal(remote, base) ? remote : local ?? remote;
+                if (value !== undefined) stamps[key] = value;
+            }
+            merged = { ...merged, ...stamps };
+        }
         if (merged === null) next.delete(id);
         else next.set(id, current && equal(current, merged) ? current : merged);
     }
@@ -95,7 +108,7 @@ export function applyAgentCanvasPatch(project: CanvasProject, patch: AgentCanvas
         }
         return { ...change, before: { ...change.before!, metadata } };
     });
-    const nodes = mergeItems(project.nodes, nodeChanges);
+    const nodes = mergeItems(project.nodes, nodeChanges, ["createdAt", "updatedAt"]);
     const connections = mergeItems(project.connections, patch.connections);
     if (nodes === project.nodes && connections === project.connections) return project;
     return { ...project, nodes, connections, updatedAt: patch.updatedAt || project.updatedAt };

@@ -1,5 +1,11 @@
 import { buildLibTVVideoPreviewUrl } from "@/lib/canvas/libtv-import";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { parseVideoBoolean } from "@/lib/video-generation-options";
+
+export function inferVideoHasAudio(metadata: CanvasNodeData["metadata"]): boolean | undefined {
+    if (typeof metadata?.hasAudio === "boolean") return metadata.hasAudio;
+    return parseVideoBoolean(metadata?.generateAudio);
+}
 
 /**
  * Returns an image source that is safe to mount for a passive video preview.

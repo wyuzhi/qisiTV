@@ -3,6 +3,22 @@ export const VIDEO_RESOLUTION_OPTIONS = [480, 720, 1080, 1440, 2160] as const;
 export const VIDEO_RESOLUTION_CAPABILITY_OPTIONS = VIDEO_RESOLUTION_OPTIONS.map((value) => `${value}p`);
 export const VIDEO_DURATION_MIN = 1;
 
+/** JSON from saved canvases and tools is not guaranteed to match TypeScript types. */
+export function parseVideoBoolean(value: unknown): boolean | undefined {
+    if (typeof value === "boolean") return value;
+    if (value === 0 || value === 1) return value === 1;
+    if (typeof value !== "string") return undefined;
+    const token = value.trim().toLowerCase();
+    if (["false", "0", "off", "no", "disabled"].includes(token)) return false;
+    if (["true", "1", "on", "yes", "enabled"].includes(token)) return true;
+    return undefined;
+}
+
+export function normalizeVideoBoolean(value: unknown): "true" | "false" | undefined {
+    const parsed = parseVideoBoolean(value);
+    return parsed === undefined ? undefined : parsed ? "true" : "false";
+}
+
 export function normalizeVideoDuration(value: string | number | undefined) {
     const seconds = Math.floor(Number(value) || VIDEO_DURATION_OPTIONS[0]);
     return String(Math.max(VIDEO_DURATION_MIN, seconds));

@@ -5,11 +5,11 @@ import { VideoPlayer } from "@/components/video-player";
 import { CachedResourceImage } from "@/components/cached-resource-image";
 import { GenerationFailureNotice } from "@/components/generation/generation-failure-notice";
 import { explainGenerationError } from "@/lib/generation-error";
-import { generationTaskShowsProgress, generationTaskStageLabel, generationTaskStatusLabel, isGenerationTaskSubmissionUncertain } from "@/lib/generation-task-display";
+import { formatGenerationElapsed, generationProgressDisplay, generationTaskShowsProgress, generationTaskStageLabel, generationTaskStatusLabel, isGenerationTaskSubmissionUncertain, trackGenerationProgressChange, type GenerationProgressRecord } from "@/lib/generation-task-display";
 import { canvasRichTextHTML } from "@/lib/canvas/canvas-rich-text";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { loadCanvasDrawingPreview } from "@/lib/canvas/canvas-drawing-storage";
-import { canvasNodeVideoPreviewUrl } from "@/lib/canvas/canvas-media-preview";
+import { canvasNodeVideoPreviewUrl, inferVideoHasAudio } from "@/lib/canvas/canvas-media-preview";
 import { bindCanvasVideoHoverPreview } from "@/lib/canvas/canvas-video-hover-preview";
 import { buildLibTVImagePreviewUrl, buildLibTVVideoSourceUrl } from "@/lib/canvas/libtv-import";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
@@ -199,24 +199,49 @@ function LoadingContent({ node, theme, onOpenTaskDetails, onCancelTask }: Pick<C
     const progress = showsProgress && typeof node.metadata?.taskProgress === "number" ? Math.max(0, Math.min(100, Math.round(node.metadata.taskProgress))) : null;
     const statusLabel = hasTaskIdentity ? generationTaskStatusLabel(displayTask) : "等待任务状态";
     const stageLabel = hasTaskIdentity ? generationTaskStageLabel(displayTask) : node.metadata?.processingLabel || "正在创建任务";
-    const elapsed = useTaskElapsed(node.metadata?.taskCreatedAt);
+    const now = useSecondTick(hasTaskIdentity);
+    const createdAt = node.metadata?.taskCreatedAt;
+    const createdAtMs = createdAt ? new Date(createdAt).getTime() : Number.NaN;
+    const elapsed = Number.isFinite(createdAtMs) ? `已用 ${formatGenerationElapsed(now - createdAtMs)}` : "刚刚开始";
+    const progressKey = taskId || node.id;
+    const progressRecord = progress !== null ? rememberProgressChange(progressKey, progress, now) : undefined;
+    const progressView = generationProgressDisplay({
+        status: displayTask.status,
+        progress,
+        progressChangedAt: progressRecord?.changedAt,
+        now,
+        isVideo: node.type === CanvasNodeType.Video,
+    });
     return (
         <div className="flex h-full w-full flex-col items-center justify-center gap-2.5 px-5 text-center" style={{ color: theme.node.activeStroke }}>
             {submissionUncertain ? <AlertCircle className="size-10" /> : <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />}
             <span className="text-[var(--fs-tiny)] font-semibold">{stageLabel}</span>
             {hasTaskIdentity ? (
                 <div className="flex w-full max-w-[210px] flex-col items-center gap-1.5">
+                    <div className="max-w-full truncate text-sm font-semibold tabular-nums" style={{ color: theme.node.text }}>
+                        <Clock3 className="mr-1 inline size-3.5 align-[-2px]" />{elapsed}
+                    </div>
                     <div className="max-w-full truncate text-[var(--fs-label)] font-medium" style={{ color: theme.node.text }}>
                         {statusLabel}
-                        {progress !== null ? ` · ${progress}%` : ""}
+                        {progressView.percent !== null ? ` · ${progressView.percent}%` : ""}
                     </div>
-                    {progress !== null ? (
+                    {progressView.bar === "determinate" && progressView.percent !== null ? (
                         <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: theme.node.stroke }}>
-                            <div className="h-full rounded-full transition-[width]" style={{ width: `${progress}%`, background: theme.node.activeStroke }} />
+                            <div className="h-full rounded-full transition-[width]" style={{ width: `${progressView.percent}%`, background: theme.node.activeStroke }} />
+                        </div>
+                    ) : null}
+                    {progressView.bar === "indeterminate" ? (
+                        <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: theme.node.stroke }} role="progressbar" aria-label="仍在生成">
+                            <div className="canvas-node-progress-indeterminate h-full rounded-full" style={{ background: theme.node.activeStroke }} />
+                        </div>
+                    ) : null}
+                    {progressView.expectation ? (
+                        <div className="max-w-full text-balance text-[var(--fs-tiny)] leading-snug" style={{ color: theme.node.muted }}>
+                            {progressView.expectation}
                         </div>
                     ) : null}
                     <div className="max-w-full truncate text-[var(--fs-tiny)] tabular-nums" style={{ color: theme.node.muted }}>
-                        <Clock3 className="mr-1 inline size-3" />{elapsed} · {shortTaskId(taskId || "libtv-fixture-task-42")}
+                        {shortTaskId(taskId || "libtv-fixture-task-42")}
                     </div>
                     <div className="mt-0.5 flex items-center gap-1.5">
                         <button type="button" className="inline-flex h-7 items-center gap-1 rounded-[var(--r-sm)] px-2 text-[var(--fs-tiny)] font-medium transition-colors" style={{ background: theme.toolbar.itemHover, color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onOpenTaskDetails?.(node); }}><FileText className="size-3" />详情</button>
@@ -232,18 +257,33 @@ function LoadingContent({ node, theme, onOpenTaskDetails, onCancelTask }: Pick<C
     );
 }
 
-function useTaskElapsed(createdAt?: string) {
+function useSecondTick(active: boolean) {
     const [, setTick] = useState(0);
     useEffect(() => {
-        if (!createdAt) return;
+        if (!active) return;
         const timer = window.setInterval(() => setTick((value) => value + 1), 1000);
         return () => window.clearInterval(timer);
-    }, [createdAt]);
-    if (!createdAt) return "刚刚";
-    const seconds = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 1000));
-    if (seconds < 60) return `${seconds}秒`;
-    const minutes = Math.floor(seconds / 60);
-    return minutes < 60 ? `${minutes}分${seconds % 60}秒` : `${Math.floor(minutes / 60)}时${minutes % 60}分`;
+    }, [active]);
+    return Date.now();
+}
+
+// 上游百分比最后一次变化的时间，按任务记在内存里。节点滚出视口再回来
+// 重新挂载时不会把「久未变化」清零；上限防止长会话里无限增长。
+const progressChangeByTask = new Map<string, GenerationProgressRecord>();
+const PROGRESS_CHANGE_LIMIT = 200;
+
+function rememberProgressChange(key: string, progress: number, now: number) {
+    const previous = progressChangeByTask.get(key);
+    const next = trackGenerationProgressChange(previous, progress, now);
+    if (next !== previous) {
+        progressChangeByTask.delete(key);
+        progressChangeByTask.set(key, next);
+        if (progressChangeByTask.size > PROGRESS_CHANGE_LIMIT) {
+            const oldest = progressChangeByTask.keys().next().value;
+            if (oldest !== undefined) progressChangeByTask.delete(oldest);
+        }
+    }
+    return next;
 }
 
 function shortTaskId(id: string) {
@@ -524,17 +564,6 @@ function ToggleLine({ label, value, onChange }: { label: string; value: boolean;
     return <label className="flex items-center justify-between text-white/65"><span>{label}</span><button type="button" role="switch" aria-checked={value} className={`relative h-4 w-7 rounded-full ${value ? "bg-white/70" : "bg-white/20"}`} onClick={() => onChange(!value)}><span className={`absolute top-0.5 size-3 rounded-full bg-black transition-transform ${value ? "translate-x-3.5" : "translate-x-0.5"}`} /></button></label>;
 }
 
-function inferVideoHasAudio(metadata: CanvasNodeData["metadata"]): boolean | undefined {
-    if (typeof metadata?.hasAudio === "boolean") return metadata.hasAudio;
-    // Generated nodes from older saves may not have `hasAudio` yet. In that
-    // case an explicit generation setting is the only persisted signal we
-    // have; leave all other videos in the unknown state.
-    const value = metadata?.generateAudio?.trim().toLowerCase();
-    if (["false", "0", "off", "no", "disabled"].includes(value || "")) return false;
-    if (["true", "1", "on", "yes", "enabled"].includes(value || "")) return true;
-    return undefined;
-}
-
 function AudioNodeContent({ node, theme }: CanvasNodeContentProps) {
     if (!node.metadata?.content && !node.metadata?.storageKey) return <EmptyAudioContent theme={theme} />;
     return <CanvasAudioPlayer node={node} theme={theme} />;
@@ -642,7 +671,7 @@ function EmptyAudioContent({ theme }: { theme: CanvasTheme }) {
 function ImageContent({ node, theme, isBatchRoot, batchCount, batchPreviewNodes, batchExpanded, batchOpening, batchRecovering, onToggleBatch }: Pick<CanvasNodeContentProps, "node" | "theme" | "isBatchRoot" | "batchCount" | "batchPreviewNodes" | "batchExpanded" | "batchOpening" | "batchRecovering" | "onToggleBatch">) {
     const imageContainerRef = useRef<HTMLDivElement>(null);
     const nearViewport = useNearViewport(imageContainerRef);
-    const { url, loading } = useNodeResourceUrl(node, nearViewport);
+    const { url, loading, error, retry, fail } = useNodeResourceUrl(node, nearViewport);
     const importedFromLibTV = node.metadata?.importSource?.provider === "libtv";
     const { updateMediaNode } = useCanvasNodeActions();
     const measuredSizeRef = useRef<{ width: number; height: number } | null>(null);
@@ -685,7 +714,7 @@ function ImageContent({ node, theme, isBatchRoot, batchCount, batchPreviewNodes,
     return (
         <BatchFrame batchPreviewNodes={batchPreviewNodes} batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} theme={theme} onToggleBatch={onToggleBatch}>
             <div ref={imageContainerRef} className="h-full w-full overflow-hidden rounded-[var(--node-radius)]">
-                {url ? <img src={url} alt={node.title} loading="lazy" decoding="async" draggable={false} onDragStart={(event) => event.preventDefault()} onLoad={(event) => fitToImage(event.currentTarget)} className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`} /> : <div className="grid size-full place-items-center" style={{ color: theme.node.muted }}>{loading ? <LoaderCircle className="size-5 animate-spin" /> : <ImageIcon className="size-5 opacity-45" />}</div>}
+                {error ? <div role="status" className="flex size-full flex-col items-center justify-center gap-2 px-3 text-center text-xs" style={{ color: theme.node.muted }}><span>图片加载失败</span><button type="button" data-canvas-no-zoom className="rounded border px-3 py-1" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); retry(); }}>重新加载</button></div> : url ? <img src={url} alt={node.title} loading="lazy" decoding="async" draggable={false} onDragStart={(event) => event.preventDefault()} onError={fail} onLoad={(event) => fitToImage(event.currentTarget)} className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`} /> : <div className="grid size-full place-items-center" style={{ color: theme.node.muted }}>{loading ? <LoaderCircle className="size-5 animate-spin" /> : <ImageIcon className="size-5 opacity-45" />}</div>}
             </div>
         </BatchFrame>
     );
@@ -716,9 +745,15 @@ function useNodeResourceUrl(node: CanvasNodeData, eager: boolean) {
     const initialUrl = synchronousUrl || (isRemoteResource || isLazyVisual ? "" : fallback);
     const [url, setUrl] = useState(() => initialUrl);
     const [loading, setLoading] = useState(() => !initialUrl && isRemoteResource && eager);
+    const [error, setError] = useState(false);
+    const [attempt, setAttempt] = useState(0);
+    const reloadRequested = useRef(false);
+    const fail = useCallback(() => setError(true), []);
+    const retry = useCallback(() => { reloadRequested.current = true; setError(false); setAttempt((current) => current + 1); }, []);
 
     useEffect(() => {
         let cancelled = false;
+        setError(false);
         if (!isRemoteResource && isLazyVisual && storageKey) {
             if (!eager) {
                 setUrl("");
@@ -731,7 +766,7 @@ function useNodeResourceUrl(node: CanvasNodeData, eager: boolean) {
                     if (!cancelled) setUrl(resolved);
                 })
                 .catch(() => {
-                    if (!cancelled) setUrl("");
+                    if (!cancelled) { setUrl(""); setError(true); }
                 })
                 .finally(() => {
                     if (!cancelled) setLoading(false);
@@ -743,31 +778,33 @@ function useNodeResourceUrl(node: CanvasNodeData, eager: boolean) {
             setLoading(false);
             return;
         }
-        const cachedSync = peekCachedResourceObjectUrl(storageKey);
+        const reload = reloadRequested.current;
+        reloadRequested.current = false;
+        const cachedSync = reload ? "" : peekCachedResourceObjectUrl(storageKey);
         if (cachedSync) {
             setUrl(cachedSync);
             setLoading(false);
             return;
         }
-        if (!url) {
-            setLoading(eager);
-        }
+        setUrl("");
+        setLoading(eager);
         // 只有进入视口或被激活的节点才下载远程媒体；缓存层会复用已有 Blob URL 和 in-flight 请求。
-        const resolve = eager ? cacheResourceObjectUrl(storageKey) : getCachedResourceObjectUrl(storageKey);
+        const resolve = eager ? cacheResourceObjectUrl(storageKey, reload) : getCachedResourceObjectUrl(storageKey);
         void resolve.then((cached) => {
             if (!cancelled && cached) setUrl(cached);
+            if (!cancelled && eager && !cached) setError(true);
             // Never hand a protected resource URL to a native <img> after a
             // cache miss. It cannot attach the auth header and would render
             // as a broken image after relogin.
         }).catch(() => {
-            if (!cancelled && eager) setUrl(synchronousUrl);
+            if (!cancelled && eager) { setUrl(synchronousUrl); setError(true); }
         }).finally(() => {
             if (!cancelled) setLoading(false);
         });
         return () => { cancelled = true; };
-    }, [eager, fallback, isLazyVisual, isRemoteResource, storageKey]);
+    }, [eager, fallback, isLazyVisual, isRemoteResource, storageKey, attempt]);
 
-    return { url, loading };
+    return { url, loading, error, retry, fail };
 }
 
 function useNearViewport(ref: RefObject<Element | null>) {

@@ -4,6 +4,16 @@ Changes to qisiTV and its inherited release history are documented in this file.
 
 ## Unreleased
 
+## v1.5.11 (qisiTV)
+
+- 选择适配上游截至 v1.7.15 的画布修复，保留本机项目文件夹、外部 MCP、qisiTV 品牌及独立的 qisi API / LikeAI 配置。
+- 修复素材引用菜单切换分类时关闭、点击穿透、键盘选择和删除引用后的焦点问题。
+- 防止在画布控件上按退格键退出页面；Agent 删除节点时不再因编辑器时间戳差异误报冲突，真正的内容冲突仍会保护本地修改。
+- 兼容旧视频的音频开关数据，避免预览崩溃；长视频任务显示已用时间与等待提示。
+- 图片加载失败可重试，远程资源可绕过损坏缓存重新下载；修复连续滚轮缩放时的倍率跳变。
+- 离开画布或切到后台时及时保存待落盘修改，优先写本机文件夹；未编辑时不反复创建新版本。
+- 本次为选择性适配，不是上游 v1.7.15 全量合并；未引入上游内置 Agent、账户、桌面更新器和服务端转码体系。
+
 ## v1.5.10 (qisiTV)
 
 - Selectively adapted upstream media-copy persistence, backup import, project toolbar layout, live task details, and original-result recovery improvements for the browser workspace.

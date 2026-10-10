@@ -1,5 +1,5 @@
 import { defaultImageCapabilityConfig, modelCapabilityConfigFor, normalizeImageValue, normalizeVideoValue, STANDARD_IMAGE_SIZE_VALUES, videoDurationAllowed, type ImageCapabilityConfig } from "@/lib/model-capabilities";
-import { videoResolutionComparisonKey } from "@/lib/video-generation-options";
+import { normalizeVideoBoolean, videoResolutionComparisonKey } from "@/lib/video-generation-options";
 import { imageSizePresets } from "@/lib/image-size-presets";
 import { modelOptionName, resolveModelChannel, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 
@@ -287,7 +287,7 @@ export function resolveModelGenerationDefaults(
             videoSeconds: normalized.seconds,
             size: normalized.ratio,
             vquality: normalized.resolution.replace(/p$/i, ""),
-            videoGenerateAudio: source("videoGenerateAudio") ?? String(capabilityProfile.video.generateAudio.default),
+            videoGenerateAudio: normalizeVideoBoolean(source("videoGenerateAudio")) ?? String(capabilityProfile.video.generateAudio.default),
             videoWatermark: source("videoWatermark") ?? String(capabilityProfile.video.watermark.default),
         };
     }

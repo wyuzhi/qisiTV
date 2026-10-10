@@ -77,3 +77,22 @@ test("full Agent refresh removes unchanged nodes but preserves conflicting local
     expect(() => mergeAgentCanvasEditor(previous, incoming, [local, remaining], [])).toThrow("冲突");
     expect(local.title).toBe("Unsaved local title");
 });
+
+test("Agent deletions ignore editor-only node timestamps but protect actual edits", () => {
+    const stamped = { ...node, createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T01:00:00Z" };
+    const incoming = { ...project, nodes: [] };
+    expect(mergeAgentCanvasEditor(project, incoming, [stamped], []).nodes).toEqual([]);
+    const edited = { ...stamped, title: "未保存的标题" };
+    expect(() => mergeAgentCanvasEditor(project, incoming, [edited], [])).toThrow("冲突");
+    expect(edited.title).toBe("未保存的标题");
+});
+
+test("Agent content updates preserve local timestamp normalization and dragging", () => {
+    const stamped = { ...node, createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T01:00:00Z", position: { x: 55, y: 66 } };
+    const result = applyAgentCanvasPatch({ ...project, nodes: [stamped] }, patch);
+    expect(result.nodes[0].createdAt).toBe(stamped.createdAt);
+    expect(result.nodes[0].updatedAt).toBe(stamped.updatedAt);
+    expect(result.nodes[0].position).toEqual(stamped.position);
+    expect(result.nodes[0].metadata?.taskStatus).toBe("failed");
+    expect(applyAgentCanvasPatch(result, patch)).toBe(result);
+});

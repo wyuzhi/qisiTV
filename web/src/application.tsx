@@ -9,7 +9,10 @@ import "@/lib/plugins/builtin";
 import { RouterProvider } from "react-router";
 
 import { AppProviders } from "@/components/layout/app-providers";
+import { installBackspaceNavigationGuard } from "@/lib/backspace-navigation-guard";
 import { router } from "@/router";
+
+installBackspaceNavigationGuard();
 
 document.body.style.fontFamily = '"SF Pro Display","SF Pro Text","PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif';
 

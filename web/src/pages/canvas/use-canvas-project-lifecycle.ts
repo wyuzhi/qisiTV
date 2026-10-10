@@ -1,5 +1,5 @@
 import { mergeAgentCanvasEditor } from "@/lib/canvas/agent-canvas-patch";
-import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { App } from "antd";
 import { useNavigate } from "react-router";
 
@@ -14,7 +14,7 @@ import { listAddedSkills, type Skill } from "@/services/api/skills";
 import { forceOverwriteRemoteCanvasSync, hasRemoteUserDataSyncSession, loadCanvasProjectForEditing, saveRemoteUserDataNow, subscribeAgentCanvasRefresh } from "@/services/local-workspace-sync";
 import { createWorkspaceCanvasProject, deleteWorkspaceCanvasProjects } from "@/services/workspace-project-repository";
 import { flushCanvasStorePersistence, useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
-import { scheduleLocalCanvasBackendSync, syncLocalCanvasProjectToBackend } from "@/services/local-workspace-repository";
+import { hasPendingLocalCanvasBackendSync, scheduleLocalCanvasBackendSync, syncLocalCanvasProjectToBackend } from "@/services/local-workspace-repository";
 import { useCanvasHistoryStore } from "@/stores/canvas/use-canvas-history-store";
 import { useCanvasThemeStore } from "@/stores/canvas/use-canvas-theme-store";
 import { useSyncProgressStore } from "@/stores/use-sync-progress-store";
@@ -307,11 +307,61 @@ export function useCanvasProjectLifecycle({
         };
     }, [projectId, projectLoaded, updateProject, viewport, viewportRef]);
 
-    useEffect(() => () => {
-        if (!projectLoaded || editorProjectIdRef.current !== projectId) return;
-        if (viewportSaveTimerRef.current) clearTimeout(viewportSaveTimerRef.current);
-        updateProject(projectId, { viewport: viewportRef.current });
-    }, [projectId, projectLoaded, updateProject, viewportRef]);
+    const leaveFlushStateRef = useRef({ chatSessions, activeChatId, canvasAppearance, backgroundMode, showImageInfo });
+    useLayoutEffect(() => {
+        leaveFlushStateRef.current = { chatSessions, activeChatId, canvasAppearance, backgroundMode, showImageInfo };
+    }, [activeChatId, backgroundMode, canvasAppearance, chatSessions, showImageInfo]);
+
+    // Layout cleanup runs before the next route's load effect replaces the live
+    // editor refs. Page exit is best effort; browsers may stop async disk writes.
+    useLayoutEffect(() => {
+        if (!projectLoaded) return;
+        const flushOnLeave = (reason: string) => {
+            if (editorProjectIdRef.current !== projectId) return;
+            const stored = useCanvasStore.getState().openProject(projectId);
+            if (!stored) return;
+            if (viewportSaveTimerRef.current) clearTimeout(viewportSaveTimerRef.current);
+            const live = leaveFlushStateRef.current;
+            const snapshot = { nodes: nodesRef.current, connections: connectionsRef.current, ...live };
+            let changed = false;
+            if (observedContentRef.current && JSON.stringify(observedContentRef.current) !== JSON.stringify(snapshot)) {
+                const patch = {
+                    nodes: snapshot.nodes,
+                    connections: snapshot.connections,
+                    chatSessions: live.chatSessions,
+                    activeChatId: live.activeChatId,
+                    appearance: live.canvasAppearance,
+                    backgroundMode: live.backgroundMode,
+                    showImageInfo: live.showImageInfo,
+                };
+                if (!Object.entries(patch).every(([key, value]) => JSON.stringify(stored[key as keyof CanvasProject]) === JSON.stringify(value))) {
+                    updateProject(projectId, patch);
+                    changed = true;
+                }
+                observedContentRef.current = snapshot;
+            }
+            if (JSON.stringify(stored.viewport) !== JSON.stringify(viewportRef.current)) {
+                updateProject(projectId, { viewport: viewportRef.current });
+                changed = true;
+            }
+            if (!changed && (!localMode || !hasPendingLocalCanvasBackendSync(projectId))) return;
+            // The repository writes the folder first and refreshes IndexedDB in
+            // the background. A stalled optional cache must not delay the disk.
+            const saving = localMode ? syncLocalCanvasProjectToBackend(projectId) : flushCanvasStorePersistence();
+            void saving.catch((error) => console.error("离开画布时保存失败", { projectId, reason, error }));
+        };
+        const handlePageHide = () => flushOnLeave("pagehide");
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === "hidden") flushOnLeave("hidden");
+        };
+        window.addEventListener("pagehide", handlePageHide);
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+        return () => {
+            window.removeEventListener("pagehide", handlePageHide);
+            document.removeEventListener("visibilitychange", handleVisibilityChange);
+            flushOnLeave("leave");
+        };
+    }, [connectionsRef, localMode, nodesRef, projectId, projectLoaded, updateProject, viewportRef]);
 
     const createAndOpenCanvas = useCallback(() => {
         const workspaceProjectId = currentProject ? canvasWorkspaceProjectId(currentProject) : undefined;
@@ -375,8 +425,8 @@ export function useCanvasProjectLifecycle({
             observedContentRef.current = snapshot;
         }
         updateProject(projectId, { viewport: viewportRef.current });
-        await flushCanvasStorePersistence();
         if (localMode) await syncLocalCanvasProjectToBackend(projectId);
+        else await flushCanvasStorePersistence();
     }, [activeChatId, backgroundMode, canvasAppearance, chatSessions, connectionsRef, localMode, nodesRef, projectId, projectLoaded, showImageInfo, updateProject, viewportRef]);
 
     const reloadLatestCanvasProject = useCallback(async () => {

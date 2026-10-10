@@ -5,6 +5,12 @@ import {
     type CanvasNodeData,
     type CanvasNodeMetadata,
 } from "@/types/canvas";
+import { normalizeVideoBoolean } from "@/lib/video-generation-options";
+
+function normalizeAudioSetting(metadata: CanvasNodeMetadata): CanvasNodeMetadata {
+    const generateAudio = normalizeVideoBoolean(metadata.generateAudio);
+    return metadata.generateAudio === generateAudio ? metadata : { ...metadata, generateAudio };
+}
 
 export function isCanvasMediaNode(node: CanvasNodeData | null | undefined): boolean {
     return node?.type === CanvasNodeType.Image || node?.type === CanvasNodeType.Video || node?.type === CanvasNodeType.Audio;
@@ -25,11 +31,11 @@ export function isCanvasMediaResultNode(node: CanvasNodeData | null | undefined)
 }
 
 export function mediaGeneratorMetadata(metadata: CanvasNodeMetadata = {}): CanvasNodeMetadata {
-    return { ...metadata, nodeRole: "generator", resultOrigin: undefined };
+    return { ...normalizeAudioSetting(metadata), nodeRole: "generator", resultOrigin: undefined };
 }
 
 export function mediaResultMetadata(origin: CanvasMediaResultOrigin, metadata: CanvasNodeMetadata = {}): CanvasNodeMetadata {
-    return { ...metadata, nodeRole: "result", resultOrigin: origin };
+    return { ...normalizeAudioSetting(metadata), nodeRole: "result", resultOrigin: origin };
 }
 
 function isDerivedMediaResult(node: CanvasNodeData): boolean {
@@ -86,13 +92,14 @@ export function canOpenCanvasNodePromptPanel(node: CanvasNodeData | null | undef
 /** Adds durable semantics to legacy media nodes without mutating the loaded snapshot. */
 export function normalizeCanvasMediaNodeSemantics(node: CanvasNodeData): CanvasNodeData {
     if (!isCanvasMediaNode(node)) return node;
+    const metadata = normalizeAudioSetting(node.metadata || {});
     const nodeRole = canvasMediaNodeRole(node);
     const resultOrigin = canvasMediaNodeOrigin(node);
-    if (node.metadata?.nodeRole === nodeRole && node.metadata?.resultOrigin === resultOrigin) return node;
+    if (metadata === node.metadata && metadata.nodeRole === nodeRole && metadata.resultOrigin === resultOrigin) return node;
     return {
         ...node,
         metadata: {
-            ...node.metadata,
+            ...metadata,
             nodeRole: nodeRole || undefined,
             resultOrigin: resultOrigin || undefined,
         },

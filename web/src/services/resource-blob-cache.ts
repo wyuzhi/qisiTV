@@ -18,6 +18,7 @@ const metaStore = localforage.createInstance({ name: "infinite-canvas", storeNam
 const objectUrls = new Map<string, string>();
 const sessionBlobs = new Map<string, Blob>();
 const inFlight = new Map<string, Promise<string>>();
+const reloadInFlight = new Map<string, Promise<string>>();
 const scheduled = new Set<string>();
 const cacheMetaTouchWarnings = new Set<string>();
 const metaTouchedAt = new Map<string, number>();
@@ -47,9 +48,28 @@ export function peekCachedResourceObjectUrl(storageKey: string) {
     return objectUrls.get(`${userScope}:${resourceId}:file`) || "";
 }
 
-export async function cacheResourceObjectUrl(storageKey: string) {
+export async function cacheResourceObjectUrl(storageKey: string, reload = false) {
     const target = await cacheTarget(storageKey);
     if (!target) return "";
+    const reloading = reloadInFlight.get(target.key);
+    if (reloading) return reloading;
+    if (reload) {
+        // Explicit image decode recovery must bypass both memory and IndexedDB.
+        // Shared nodes must share the reload too, otherwise one completion
+        // can revoke the fresh URL just returned to another node.
+        const task = (async () => {
+            await inFlight.get(target.key)?.catch(() => undefined);
+            const blob = await withDownloadSlot(() => downloadResourceBlob(storageKey, target));
+            if (!blob) return "";
+            const oldUrl = objectUrls.get(target.key);
+            objectUrls.delete(target.key);
+            const url = objectUrl(target.key, blob);
+            if (oldUrl) URL.revokeObjectURL(oldUrl);
+            return url;
+        })().finally(() => reloadInFlight.delete(target.key));
+        reloadInFlight.set(target.key, task);
+        return task;
+    }
     const cached = await readCachedObjectUrl(target);
     if (cached) return cached;
     const pending = inFlight.get(target.key);
@@ -112,20 +132,20 @@ export async function primeResourceBlobCache(storageKey: string, blob: Blob) {
 export async function getCachedResourceBlob(storageKey: string) {
     const target = await cacheTarget(storageKey);
     if (!target) return null;
-    const cached = await blobStore.getItem<Blob>(target.key);
+    const sessionBlob = sessionBlobs.get(target.key);
+    if (sessionBlob) return sessionBlob;
+    const cached = await readPersistedBlob(target);
     if (cached) {
         touchCacheMetaSafely(target);
         return cached;
     }
-    const sessionBlob = sessionBlobs.get(target.key);
-    if (sessionBlob) return sessionBlob;
     const pending = inFlight.get(target.key);
     if (pending) {
         await pending;
-        return sessionBlobs.get(target.key) || blobStore.getItem<Blob>(target.key);
+        return sessionBlobs.get(target.key) || readPersistedBlob(target);
     }
     await cacheResourceObjectUrl(storageKey);
-    return sessionBlobs.get(target.key) || blobStore.getItem<Blob>(target.key);
+    return sessionBlobs.get(target.key) || readPersistedBlob(target);
 }
 
 async function downloadAndCacheResource(storageKey: string, target: ResourceCacheMeta) {
@@ -203,10 +223,19 @@ async function readCachedObjectUrl(target: ResourceCacheMeta) {
         touchCacheMetaSafely(target);
         return existing;
     }
-    const blob = await blobStore.getItem<Blob>(target.key);
+    const blob = sessionBlobs.get(target.key) || await readPersistedBlob(target);
     if (!blob) return "";
     touchCacheMetaSafely(target);
     return objectUrl(target.key, blob);
+}
+
+async function readPersistedBlob(target: ResourceCacheMeta) {
+    try {
+        return await blobStore.getItem<Blob>(target.key);
+    } catch (error) {
+        console.warn("媒体缓存读取失败，重新下载资源", { resourceId: target.resourceId, error });
+        return null;
+    }
 }
 
 async function cacheTarget(storageKey: string): Promise<ResourceCacheMeta | null> {

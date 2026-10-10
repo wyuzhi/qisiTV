@@ -5,7 +5,7 @@ import { nanoid } from "nanoid";
 
 import { scopedLocalStorage } from "@/lib/user-scope";
 import { defaultProtocolForCapability, defaultProtocolForModel, inferProtocolCapabilityFromModel, modelProtocolCapability, normalizeModelProtocol, usesOpenAICompatibleProtocolDefault, type ModelProtocol } from "@/lib/model-protocols";
-import { normalizeVideoDuration, normalizeVideoResolution } from "@/lib/video-generation-options";
+import { normalizeVideoBoolean, normalizeVideoDuration, normalizeVideoResolution } from "@/lib/video-generation-options";
 import { defaultModelCapabilityConfig, workflowFieldRole, workflowFieldSafeToOverride, workflowVideoFieldsFromJson, type ModelCapabilityConfig } from "@/lib/model-capabilities";
 import type { CapabilitySpec } from "@/services/api/logical-models";
 import { isBrowserWorkspace } from "@/services/browser-workspace";
@@ -732,9 +732,9 @@ export function normalizeConfigSnapshot(snapshot: ConfigStoreSnapshot | undefine
             systemPrompt: "",
             videoSeconds: normalizeVideoDuration(config.videoSeconds),
             vquality: normalizeVideoResolution(config.vquality),
-            videoGenerateAudio: config.videoGenerateAudio || "true",
-            videoWatermark: config.videoWatermark || "false",
-            videoArkPrivateAssetUpload: config.videoArkPrivateAssetUpload || "true",
+            videoGenerateAudio: normalizeVideoBoolean(config.videoGenerateAudio) ?? "true",
+            videoWatermark: normalizeVideoBoolean(config.videoWatermark) ?? "false",
+            videoArkPrivateAssetUpload: normalizeVideoBoolean(config.videoArkPrivateAssetUpload) ?? "true",
             transparentBackground: config.transparentBackground === "true" ? "true" : "false",
             canvasImageCount: config.canvasImageCount || defaultConfig.canvasImageCount,
             imageModels,

@@ -34,6 +34,56 @@ export function generationTaskShowsProgress(task: GenerationTaskDisplayTarget) {
     return true;
 }
 
+/** 上游百分比多久没动，就不再把它画成一根停住的进度条。 */
+export const GENERATION_PROGRESS_STALL_MS = 60_000;
+
+export const GENERATION_VIDEO_EXPECTATION = "视频通常要几分钟，可以先做别的。";
+
+export type GenerationProgressRecord = { progress: number; changedAt: number };
+
+/**
+ * 记录上游百分比最后一次变化的时间（只在客户端记，不改任务数据）。
+ * 百分比没变就原样返回旧记录，变了或第一次看到就以 now 作为变化时间。
+ */
+export function trackGenerationProgressChange(previous: GenerationProgressRecord | undefined, progress: number, now: number): GenerationProgressRecord {
+    if (previous && previous.progress === progress) return previous;
+    return { progress, changedAt: now };
+}
+
+export type GenerationProgressDisplay = {
+    /** none：不画进度条；determinate：按真实百分比画；indeterminate：百分比久未变化，改为循环扫描。 */
+    bar: "none" | "determinate" | "indeterminate";
+    /** 只在 determinate 时给出，永远是上游返回的真实值。 */
+    percent: number | null;
+    /** 视频任务进行中给出的一句预期说明。 */
+    expectation: string | null;
+};
+
+export function generationProgressDisplay(input: {
+    status: GenerationTask["status"];
+    progress: number | null;
+    progressChangedAt?: number;
+    now: number;
+    isVideo: boolean;
+}): GenerationProgressDisplay {
+    const active = input.status === "queued" || input.status === "running";
+    const expectation = active && input.isVideo ? GENERATION_VIDEO_EXPECTATION : null;
+    if (input.progress === null) return { bar: "none", percent: null, expectation };
+    const stalled = input.status === "running"
+        && input.progressChangedAt !== undefined
+        && input.now - input.progressChangedAt >= GENERATION_PROGRESS_STALL_MS;
+    if (stalled) return { bar: "indeterminate", percent: null, expectation };
+    return { bar: "determinate", percent: input.progress, expectation };
+}
+
+/** 已用时间，例如「3分12秒」「1时05分」。 */
+export function formatGenerationElapsed(elapsedMs: number) {
+    const seconds = Math.max(0, Math.floor(elapsedMs / 1000));
+    if (seconds < 60) return `${seconds}秒`;
+    const minutes = Math.floor(seconds / 60);
+    return minutes < 60 ? `${minutes}分${seconds % 60}秒` : `${Math.floor(minutes / 60)}时${minutes % 60}分`;
+}
+
 export const operationOptions = [
     { label: "文生视频", value: "text_to_video" },
     { label: "图生视频", value: "image_to_video" },
