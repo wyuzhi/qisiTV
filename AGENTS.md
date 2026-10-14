@@ -6,7 +6,7 @@
 
 qisiTV 是基于上游 `glanderness/BeefTV` 二次开发的 AI 影视与短剧创作工作台，当前仍在快速开发。公开接口、数据结构和部署配置可能直接调整；除非任务明确要求，不为旧字段、旧 API 或旧数据增加兼容层。
 
-当前用户确定的产品范围：无需注册、登录或积分；模型服务仅保留官方 LikeAI。网站模式由 `VITE_QISITV_BROWSER_ONLY=1` 启用，用户授权本机目录后，项目和素材写入真实独立文件夹，IndexedDB 仅作句柄、配置与恢复缓存；网站函数只临时转发 LikeAI 请求，不建立云端工作区。不要在合并上游时恢复 BeefAPI 钱包或其他服务商入口。
+当前用户确定的产品范围：画布无需注册、登录或积分；模型服务保留独立的 qisi API 和官方 LikeAI 配置与密钥。qisi API 的账号和余额属于模型服务，不改变画布的本机存储方式。网站模式由 `VITE_QISITV_BROWSER_ONLY=1` 启用，用户授权本机目录后，项目和素材写入真实独立文件夹，IndexedDB 仅作句柄、配置与恢复缓存；网站函数只临时转发 LikeAI 请求，不建立云端工作区。不要在合并上游时恢复 BeefAPI 钱包或其他服务商入口。
 
 每个项目必须对应本机真实独立文件夹，导入素材和生成结果自动写入；浏览器缓存不算最终项目持久化。Agent 上手主流程是「选择自己的客户端并复制安装指令 → 加载工具并调用 qisitv_pair → 网页输入配对码」，支持 Codex、WorkBuddy、Claude Desktop、Claude Code、OpenClaw、Hermes、CodeBuddy、Cursor、VS Code 和通用本机 stdio MCP，WorkBuddy 紧跟 Codex，不能把主流程限定为 Codex。安装指令检查 Git、Node.js 18+ 与对应客户端能力；Codex 从 `https://github.com/wyuzhi/qisiTV.git` 的 `main` 分支添加 `qisitv` marketplace，安装 `qisitv@qisitv` 并新建任务。其他客户端克隆官方仓库到临时目录，运行 `node plugins/qisitv/scripts/prepare.mjs --json`，取得指向稳定程序目录的真实 `{command,args}`，再备份并合并原生配置、保留无关字段。准备程序不改客户端配置、不启动 MCP；许可证与程序必须一起保留。Desktop 聊天没有本机执行能力时，说明需要本机 Agent 帮助准备并通过设置粘贴配置，不假装可以自动安装。WorkBuddy 使用用户级 `~/.workbuddy/mcp.json` 的 `mcpServers`；CodeBuddy 区分 CLI / IDE；VS Code 使用本机用户配置的 `servers` 根键。
 

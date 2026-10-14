@@ -1,5 +1,5 @@
 import { getMediaBlob } from "@/services/file-storage";
-import { AUDIO_COPY_OUTPUT_NAME, AUDIO_OUTPUT_NAME, assertUsableSegmentOutput, buildCopyAudioArgs, buildExtractAudioArgs, buildRemoveAudioArgs, buildSegmentTrimArgs, buildVideoCropArgs, CROP_OUTPUT_NAME, isFullSourceRange, MUTED_VIDEO_OUTPUT_NAME, SEGMENT_INPUT_NAME, SEGMENT_OUTPUT_NAME, WAV_OUTPUT_NAME } from "./canvas-video-segment-args";
+import { AUDIO_COPY_OUTPUT_NAME, AUDIO_OUTPUT_NAME, assertUsableSegmentOutput, assertVideoAudioProbe, buildCopyAudioArgs, buildExtractAudioArgs, buildRemoveAudioArgs, buildSegmentTrimArgs, buildVideoCropArgs, CROP_OUTPUT_NAME, isFullSourceRange, MUTED_VIDEO_OUTPUT_NAME, SEGMENT_INPUT_NAME, SEGMENT_OUTPUT_NAME, WAV_OUTPUT_NAME } from "./canvas-video-segment-args";
 import { loadFFmpeg } from "./canvas-video-merge";
 
 export type VideoSegmentRange = {
@@ -19,6 +19,7 @@ export type VideoSegmentProgress = {
 
 const INPUT_NAME = SEGMENT_INPUT_NAME;
 const OUTPUT_NAME = SEGMENT_OUTPUT_NAME;
+const AUDIO_PROBE_NAME = "segment-audio-probe.json";
 
 function assertValidRange(range: VideoSegmentRange, durationMs?: number) {
     const startMs = Math.max(0, Math.round(range.startMs));
@@ -94,6 +95,11 @@ export async function extractVideoAudio(source: VideoSegmentSource, range: Video
     onProgress?.({ phase: "encoding", progress: 55 });
     try {
         const args = (audioCodec: string, outputName = AUDIO_OUTPUT_NAME) => buildExtractAudioArgs(audioCodec, startSec, durationSec, outputName);
+        const probeCode = await ffmpeg.ffprobe(["-v", "error", "-select_streams", "a:0", "-show_entries", "stream=index:format=duration", "-of", "json", INPUT_NAME, "-o", AUDIO_PROBE_NAME]);
+        // The bundled probe can return -1 with valid JSON; validate the payload.
+        if (probeCode !== 0 && probeCode !== -1) throw new Error("无法读取视频音轨信息，请检查素材是否完整");
+        const probe = await ffmpeg.readFile(AUDIO_PROBE_NAME);
+        assertVideoAudioProbe(typeof probe === "string" ? probe : new TextDecoder().decode(probe));
         let outputName = AUDIO_OUTPUT_NAME;
         let outputType = "audio/mpeg";
         // 大多数 MP4 音轨本身就是 AAC；优先直接复制，避免无谓的整段重编码。
@@ -124,7 +130,7 @@ export async function extractVideoAudio(source: VideoSegmentSource, range: Video
         onProgress?.({ phase: "encoding", progress: 100 });
         return new Blob([output as BlobPart], { type: outputType });
     } finally {
-        await Promise.all([INPUT_NAME, OUTPUT_NAME, AUDIO_OUTPUT_NAME, WAV_OUTPUT_NAME, AUDIO_COPY_OUTPUT_NAME].map((file) => ffmpeg.deleteFile(file).catch(() => undefined)));
+        await Promise.all([INPUT_NAME, OUTPUT_NAME, AUDIO_OUTPUT_NAME, WAV_OUTPUT_NAME, AUDIO_COPY_OUTPUT_NAME, AUDIO_PROBE_NAME].map((file) => ffmpeg.deleteFile(file).catch(() => undefined)));
     }
 }
 

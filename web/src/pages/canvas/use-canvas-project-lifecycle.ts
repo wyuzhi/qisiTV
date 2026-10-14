@@ -379,19 +379,17 @@ export function useCanvasProjectLifecycle({
         }).catch((error) => message.error(error instanceof Error ? `新建画布失败：${error.message}` : "新建画布失败，请稍后重试"));
     }, [currentProject, localMode, message, navigate]);
 
-    const deleteCurrentProject = useCallback(async () => {
+    const deleteCurrentProject = useCallback(async (assertCurrent: () => void = () => undefined) => {
+        assertCurrent();
         const siblingCanvases = listCanvasWorkspaceProjectCanvases(useCanvasStore.getState().projects, projectId);
         const nextCanvas = siblingCanvases.find((canvas) => canvas.id !== projectId);
         let drawingIds = nodesRef.current.flatMap((node) => node.type === "drawing" && node.metadata?.drawingId ? [node.metadata.drawingId] : []);
-        try {
-            const drafts = await readCanvasSyncDrafts(projectId);
-            const preserved = new Set(drafts.flatMap((draft) => draft.project.nodes.flatMap((node) => node.metadata?.drawingId ? [node.metadata.drawingId] : [])));
-            drawingIds = drawingIds.filter((id) => !preserved.has(id));
-            await deleteWorkspaceCanvasProjects([projectId]);
-        } catch (error) {
-            message.error(error instanceof Error ? `删除画布失败：${error.message}` : "删除画布失败，请稍后重试");
-            return;
-        }
+        const drafts = await readCanvasSyncDrafts(projectId);
+        assertCurrent();
+        const preserved = new Set(drafts.flatMap((draft) => draft.project.nodes.flatMap((node) => node.metadata?.drawingId ? [node.metadata.drawingId] : [])));
+        drawingIds = drawingIds.filter((id) => !preserved.has(id));
+        await deleteWorkspaceCanvasProjects([projectId]);
+        assertCurrent();
         if (drawingIds.length) {
             void Promise.all(drawingIds.map((drawingId) => removeCanvasDrawing(projectId, drawingId)))
                 .catch(() => message.warning("项目已删除，但部分本地绘图缓存清理失败"));

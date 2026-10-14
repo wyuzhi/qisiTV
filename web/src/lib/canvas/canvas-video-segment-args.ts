@@ -155,3 +155,13 @@ function isMpegAudio(bytes: Uint8Array) {
     if (bytes.byteLength >= 3 && bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33) return true;
     return bytes.byteLength >= 2 && bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0;
 }
+
+export function assertVideoAudioProbe(raw: string) {
+    let payload: { streams?: Array<{ index?: number }>; format?: { duration?: string } };
+    try { payload = JSON.parse(raw); } catch { throw new Error("无法读取视频音轨信息，请检查素材是否完整"); }
+    const duration = Number(payload?.format?.duration);
+    if (!Number.isFinite(duration) || duration <= 0 || !Array.isArray(payload?.streams) || payload.streams.some((stream) => !Number.isInteger(stream?.index))) {
+        throw new Error("无法读取视频音轨信息，请检查素材是否完整");
+    }
+    if (!payload.streams.length) throw new Error("原视频没有音轨，无法分离音频。画面中的人物或动作不代表文件包含声音；请换用带声音的视频。");
+}

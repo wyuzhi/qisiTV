@@ -1,5 +1,10 @@
 const ACTIVE_USER_SCOPE_KEY = "infinite-canvas:active-user-scope";
 const GUEST_SCOPE = "guest";
+let activeUserScopeEpoch = 0;
+
+export function getActiveUserScopeEpoch() {
+    return activeUserScopeEpoch;
+}
 
 export function getActiveUserScope() {
     if (typeof window === "undefined") return GUEST_SCOPE;
@@ -14,6 +19,7 @@ export function getActiveUserScope() {
 }
 
 export function setActiveUserScope(userId?: string | null) {
+    activeUserScopeEpoch += 1;
     if (typeof window === "undefined") return;
     try {
         window.localStorage?.setItem(ACTIVE_USER_SCOPE_KEY, userId || GUEST_SCOPE);

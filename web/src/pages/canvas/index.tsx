@@ -12,6 +12,8 @@ import { readZip } from "@/lib/zip";
 import { setMediaBlob } from "@/services/file-storage";
 import { setImageBlob } from "@/services/image-storage";
 import { CanvasFolderCard } from "@/components/canvas/canvas-folder-card";
+import { CanvasDeleteConfirmation } from "@/components/canvas/canvas-delete-confirmation";
+import { captureUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { RecycleBinDialog } from "@/components/canvas/recycle-bin-dialog";
 import { LibraryCardShell } from "@/components/canvas/library-card-shell";
 import type { CanvasExportFile } from "@/types/canvas-export";
@@ -66,6 +68,7 @@ export default function CanvasPage() {
     const [folderDialogOpen, setFolderDialogOpen] = useState(false);
     const [folderName, setFolderName] = useState("");
     const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+    const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string; scope: CapturedUserScope } | null>(null);
     const loadMoreRef = useRef<HTMLDivElement>(null);
     const [loadedProjectCount, setLoadedProjectCount] = useState(50);
     const [openingProjectId, setOpeningProjectId] = useState("");
@@ -112,12 +115,7 @@ export default function CanvasPage() {
     const deleteDialogOpen = useCanvasUiStore((state) => state.deleteProjectIds.length > 0);
     const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
     const deleteSelectedProjects = () => {
-        if (remoteMode) {
-            setDeleteIds(selectedCanvasIds);
-            return;
-        }
-        void deleteLocalCanvasProjects(selectedCanvasIds);
-        setDeleteIds([]);
+        setDeleteIds(selectedCanvasIds);
     };
     const updateProject = useCanvasStore((state) => state.updateProject);
     const [historyOpen, setHistoryOpen] = useState(() => searchParams.get("history") === "all" || searchParams.get("history") === "deleted");
@@ -624,14 +622,7 @@ export default function CanvasPage() {
                             </article>
                             <p className="libtv-create-project-subtitle">创建新的视频项目</p>
                         </div>
-                        {visibleFolders.map((folder) => <CanvasLibraryFolderTile key={folder.id} folder={folder} onOpen={() => setFolderFilter(folder.id)} onRename={() => { setFolderName(folder.name); setEditingFolderId(folder.id); setFolderDialogOpen(true); }} onDelete={() => {
-                            // 删除文件夹时，先将其中项目送入统一回收站，再移除文件夹。
-                            // 这样不会绕过 deleteProjects 的软删除快照和恢复能力。
-                            const folderProjectIds = localProjects.filter((project) => project.folderId === folder.id).map((project) => project.id);
-                            if (folderProjectIds.length) void deleteLocalCanvasProjects(folderProjectIds);
-                            deleteFolder(folder.id);
-                            message.success(folderProjectIds.length ? `文件夹及其中 ${folderProjectIds.length} 个项目已移入回收站` : "文件夹已删除");
-                        }} onCoverChange={(dataUrl) => { setFolderCover(folder.id, dataUrl); message.success("文件夹封面已更新"); }} />)}
+                        {visibleFolders.map((folder) => <CanvasLibraryFolderTile key={folder.id} folder={folder} onOpen={() => setFolderFilter(folder.id)} onRename={() => { setFolderName(folder.name); setEditingFolderId(folder.id); setFolderDialogOpen(true); }} onDelete={() => setDeletingFolder({ id: folder.id, name: folder.name, scope: captureUserScope() })} onCoverChange={(dataUrl) => { setFolderCover(folder.id, dataUrl); message.success("文件夹封面已更新"); }} />)}
                         {visibleProjects.map((project) => (
                             <CanvasFolderCard
                                 key={project.id}
@@ -661,11 +652,7 @@ export default function CanvasPage() {
                                 }}
                                 onDuplicate={() => duplicateCanvasProject(project)}
                                 onDelete={() => {
-                                    if (remoteMode) {
-                                        setDeleteIds([project.id]);
-                                        return;
-                                    }
-                                    void deleteLocalCanvasProjects([project.id]);
+                                    setDeleteIds([project.id]);
                                 }}
                                 onClick={() => enterProject(project.id)}
                                 onPrefetch={preloadProject}
@@ -716,6 +703,18 @@ export default function CanvasPage() {
                 />
             </Modal>
             <RecycleBinDialog open={historyOpen} onClose={() => setHistoryOpen(false)} />
+            {deletingFolder ? <CanvasDeleteConfirmation scope={deletingFolder.scope} title={`删除文件夹「${deletingFolder.name}」？`}
+                description={`将删除文件夹；其中 ${localProjects.filter((project) => project.folderId === deletingFolder.id).length} 个画布将移入回收站。`}
+                onCancel={() => setDeletingFolder(null)} onConfirm={async (assertCurrent) => {
+                    const folderId = deletingFolder.id;
+                    const ids = useCanvasStore.getState().projects.filter((project) => project.folderId === folderId).map((project) => project.id);
+                    if (ids.length) await deleteLocalCanvasProjects(ids);
+                    assertCurrent();
+                    deleteFolder(folderId);
+                    await flushCanvasStorePersistence();
+                    assertCurrent();
+                    message.success(ids.length ? `已删除文件夹，${ids.length} 个画布已移入回收站` : "文件夹已删除");
+                }} /> : null}
             {deleteDialogOpen ? <Suspense fallback={null}><CanvasDeleteProjectsDialog /></Suspense> : null}
         </WorkspacePage>
     );

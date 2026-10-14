@@ -12,7 +12,7 @@ export type AppModalProps = ModalProps & {
     flush?: boolean;
 };
 
-export function AppModal({ flush = false, destroyOnHidden = true, styles, ...props }: AppModalProps) {
+export function AppModal({ flush = false, destroyOnHidden = true, centered = true, styles, ...props }: AppModalProps) {
     const mergeResolvedStyles = (resolved: unknown) => {
         const base = resolved && typeof resolved === "object" ? (resolved as Record<string, unknown>) : {};
         if (!flush) return base;
@@ -29,5 +29,5 @@ export function AppModal({ flush = false, destroyOnHidden = true, styles, ...pro
             ? (info: { props: ModalProps }) => mergeResolvedStyles(styles(info))
             : mergeResolvedStyles(styles);
 
-    return <Modal destroyOnHidden={destroyOnHidden} {...props} styles={mergedStyles as ModalProps["styles"]} />;
+    return <Modal destroyOnHidden={destroyOnHidden} centered={centered} {...props} styles={mergedStyles as ModalProps["styles"]} />;
 }

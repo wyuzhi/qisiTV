@@ -143,3 +143,12 @@ function concat(parts: Uint8Array[]) {
 function writeAscii(bytes: Uint8Array, offset: number, value: string) {
     for (let index = 0; index < value.length; index += 1) bytes[offset + index] = value.charCodeAt(index);
 }
+import { assertVideoAudioProbe } from "../src/lib/canvas/canvas-video-segment-args";
+
+test("audio extraction distinguishes a silent source from encoder failure", () => {
+    expect(() => assertVideoAudioProbe('{"streams":[],"format":{"duration":"15.042"}}')).toThrow("没有音轨");
+    expect(() => assertVideoAudioProbe('{"streams":[{"index":1}],"format":{"duration":"3"}}')).not.toThrow();
+    expect(() => assertVideoAudioProbe('{"streams":[]}')).toThrow("无法读取");
+    expect(() => assertVideoAudioProbe('not-json')).toThrow("无法读取");
+    expect(() => assertVideoAudioProbe('{}')).toThrow("无法读取");
+});

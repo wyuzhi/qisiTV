@@ -13,6 +13,8 @@ import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { uploadMediaFile } from "@/services/file-storage";
 import { createCanvasGenerationLiveProjectAdapter, registerCanvasGenerationLiveProject } from "@/services/canvas-generation-consumer";
 import { getActiveUserScope, scopedLocalStorage } from "@/lib/user-scope";
+import { captureUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
+import { CanvasDeleteConfirmation } from "@/components/canvas/canvas-delete-confirmation";
 import { resourceFileUrl, resourceIdFromStorageKey, syncResourceToArkPrivateAsset } from "@/services/api/resources";
 import { uploadImage } from "@/services/image-storage";
 import { applyGenerationTaskResultToNodes, generationTaskMode, imageMetadata } from "@/lib/canvas/canvas-generation-task-sync";
@@ -762,17 +764,11 @@ function InfiniteCanvasPage() {
         message.success("画布副本已创建");
     }, [canvasProjects, importCanvasProject, message, projectId]);
 
-    const deleteCanvasFromMenu = useCallback((canvasId: string) => {
-        const canvasTitle = canvasProjects.find((canvas) => canvas.id === canvasId)?.title || "该画布";
-        void (async () => {
-            if (canvasId === projectId) {
-                await deleteCurrentProject();
-                return;
-            }
-            await deleteWorkspaceCanvasProjects([canvasId]);
-            message.success(`「${canvasTitle}」已移入回收站`);
-        })().catch((error) => message.error(error instanceof Error ? `删除画布失败：${error.message}` : "删除画布失败"));
-    }, [canvasProjects, deleteCurrentProject, message, modal, projectId]);
+    const [deletingCanvas, setDeletingCanvas] = useState<{ id: string; openedFrom: string; scope: CapturedUserScope } | null>(null);
+    const deletionProjectRef = useRef(projectId);
+    deletionProjectRef.current = projectId;
+    useEffect(() => setDeletingCanvas(null), [projectId]);
+    const deleteCanvasFromMenu = useCallback((id: string) => setDeletingCanvas({ id, openedFrom: projectId, scope: captureUserScope() }), [projectId]);
 
     const versions = useCanvasVersionHistory(projectId, restoreCanvasProjectVersion, currentProject);
     const openVersions = () => { closeAgent(); setVersionCompareRootId(null); versions.show(); };
@@ -2892,6 +2888,15 @@ function InfiniteCanvasPage() {
 
     return (
         <>
+            {deletingCanvas ? <CanvasDeleteConfirmation scope={deletingCanvas.scope} title="删除画布？"
+                description={`「${canvasProjects.find((canvas) => canvas.id === deletingCanvas.id)?.title || "该画布"}」及其节点和连线将移入回收站。`}
+                validate={() => { if (deletionProjectRef.current !== deletingCanvas.openedFrom) throw new Error("画布已切换，请重新确认删除"); }}
+                onCancel={() => setDeletingCanvas(null)} onConfirm={async (assertCurrent) => {
+                    if (deletingCanvas.id === projectId) await deleteCurrentProject(assertCurrent);
+                    else await deleteWorkspaceCanvasProjects([deletingCanvas.id]);
+                    assertCurrent();
+                    message.success("画布已移入回收站");
+                }} /> : null}
             <a
                 href="#canvas-main"
                 onClick={(event) => {
@@ -2953,7 +2958,7 @@ function InfiniteCanvasPage() {
                                 onRenameCanvas={renameCanvasFromMenu}
                                 onDuplicateCanvas={duplicateCanvasFromMenu}
                                 onDeleteCanvas={deleteCanvasFromMenu}
-                                onDeleteProject={deleteCurrentProject}
+                                onDeleteProject={() => deleteCanvasFromMenu(projectId)}
                                 onSave={() => void saveCanvasProject()}
                                 onForceSave={confirmForceSaveCanvas}
                                 localOnly={localOnly}

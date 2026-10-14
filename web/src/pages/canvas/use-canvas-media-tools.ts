@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { App } from "antd";
 import { nanoid } from "nanoid";
 
@@ -52,6 +52,9 @@ import { getMediaBlob, uploadMediaFile } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { ensureCanvasNodeAsset } from "@/services/project-asset-sync";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
+import { getProjectFolderLocation } from "@/services/browser-project-folder";
+import { assertUserScope, captureUserScope } from "@/lib/user-scope-guard";
 import { syncLocalCanvasSnapshotForAgent } from "@/services/local-workspace-sync";
 import { openLocalCanvasProjectFromBackend } from "@/services/local-workspace-repository";
 import { http } from "@/services/api/request";
@@ -116,8 +119,15 @@ export function useCanvasMediaTools({
     finishGenerationRequest,
     bindGenerationTask,
 }: UseCanvasMediaToolsOptions) {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const effectiveConfig = useEffectiveConfig();
+    const audioContextRef = useRef({ projectId, active: true });
+    if (audioContextRef.current.projectId !== projectId) audioContextRef.current = { projectId, active: true };
+    useEffect(() => {
+        const context = audioContextRef.current;
+        context.active = true;
+        return () => { context.active = false; };
+    }, [projectId]);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const extractingVideoFramesNodeIdRef = useRef<string | null>(null);
     const mergeVideoRunningRef = useRef(false);
@@ -152,13 +162,16 @@ export function useCanvasMediaTools({
         }
     }, [message, nodesRef]);
 
-    const persistMediaNodes = useCallback(async (mediaNodes: CanvasNodeData[], mediaConnections: CanvasConnection[] = []) => {
+    const persistMediaNodes = useCallback(async (mediaNodes: CanvasNodeData[], mediaConnections: CanvasConnection[] = [], assertCurrent: () => void = () => undefined) => {
+        assertCurrent();
         const assetIds = new Map<string, string>();
         for (const mediaNode of mediaNodes) {
             try {
                 const result = await ensureCanvasNodeAsset({ canvasId: projectId, domainProjectId, node: mediaNode, source: "canvas-manual" });
+                assertCurrent();
                 assetIds.set(mediaNode.id, result.assetId);
             } catch (error) {
+                assertCurrent();
                 message.warning(`媒体节点已创建，但素材库写入失败：${error instanceof Error ? error.message : "未知错误"}`);
             }
         }
@@ -180,6 +193,7 @@ export function useCanvasMediaTools({
         for (const node of canvasNodesMissingResourceAssetBinding([...latestNodes.values()])) {
             try {
                 const result = await ensureCanvasNodeAsset({ canvasId: projectId, domainProjectId, node, source: "canvas-manual" });
+                assertCurrent();
                 assetIds.set(node.id, result.assetId);
                 latestNodes.set(node.id, { ...node, metadata: { ...node.metadata, assetId: result.assetId } });
             } catch (error) {
@@ -195,6 +209,7 @@ export function useCanvasMediaTools({
         }
         if (!useCanvasStore.getState().projects.some((project) => project.id === projectId) && isLocalWorkspaceMode()) {
             await openLocalCanvasProjectFromBackend(projectId);
+            assertCurrent();
         }
         const projectStore = useCanvasStore.getState();
         storedProject = projectStore.projects.find((project) => project.id === projectId);
@@ -207,14 +222,19 @@ export function useCanvasMediaTools({
             for (const connection of mediaConnections) latestConnections.set(connection.id, connection);
             projectStore.updateProject(projectId, { nodes: [...latestNodes.values()], connections: [...latestConnections.values()] });
             try {
-                await flushCanvasStorePersistence();
+                if (!isBrowserWorkspace()) await flushCanvasStorePersistence();
+                assertCurrent();
                 if (isLocalWorkspaceMode()) {
-                    await syncLocalCanvasSnapshotForAgent(projectId, { nodes: [...latestNodes.values()], connections: [...latestConnections.values()] });
-                    const { project: saved } = await http.get<{ project: { nodes: CanvasNodeData[] } }>(`/canvas-projects/${encodeURIComponent(projectId)}`);
+                    const committed = await syncLocalCanvasSnapshotForAgent(projectId, { nodes: [...latestNodes.values()], connections: [...latestConnections.values()] });
+                    assertCurrent();
+                    const saved = isBrowserWorkspace()
+                        ? (getProjectFolderLocation(projectId) ? committed : null)
+                        : (await http.get<{ project: { nodes: CanvasNodeData[] } }>(`/canvas-projects/${encodeURIComponent(projectId)}`)).project;
                     if (!saved || mediaNodes.some((node) => !saved.nodes.some((savedNode) => savedNode.id === node.id))) {
                         throw new Error("本地项目库回读校验未包含刚生成的媒体节点");
                     }
                 }
+                if (isBrowserWorkspace()) void flushCanvasStorePersistence().catch(() => undefined);
             } catch (error) {
                 message.error(`媒体结果已生成，但本地画布保存失败：${error instanceof Error ? error.message : "未知错误"}`);
                 throw error;
@@ -525,19 +545,30 @@ export function useCanvasMediaTools({
 
     // 音视频分离同时产出独立音轨和无声视频，原视频始终保留。
     const runExtractVideoAudio = useCallback(async (node: CanvasNodeData, params: { startMs: number; endMs: number }) => {
+        const context = audioContextRef.current;
+        const scope = captureUserScope();
+        const assertCurrent = () => {
+            assertUserScope(scope);
+            if (!context.active || audioContextRef.current !== context) throw new Error("画布已切换，已停止写入分离结果");
+            if (!nodesRef.current.some((item) => item.id === node.id)) throw new Error("原视频已移除，已停止写入分离结果");
+        };
         const progress = startUploadStatus("音视频分离", "生成无声视频与音轨", 6);
         try {
+            assertCurrent();
             const source = { url: node.metadata?.content, storageKey: node.metadata?.storageKey };
             const range = { startMs: params.startMs, endMs: params.endMs };
-            const mutedVideo = await removeAudioFromVideo(source, range, node.metadata?.durationMs, (status) => {
-                progress.update(status.phase === "loading" ? "加载 FFmpeg" : status.phase === "reading" ? "读取视频资源" : "正在生成无声视频", status.phase === "encoding" ? 2 : 1);
-            });
-            progress.update("正在提取音轨", 3);
             const audio = await extractVideoAudio(source, range, node.metadata?.durationMs, (status) => {
-                progress.update(status.phase === "loading" ? "加载 FFmpeg" : status.phase === "reading" ? "读取视频资源" : "正在提取音轨", status.phase === "encoding" ? 4 : 3);
+                progress.update(status.phase === "loading" ? "加载 FFmpeg" : status.phase === "reading" ? "检查视频音轨" : "正在提取音轨", status.phase === "encoding" ? 2 : 1);
             });
+            assertCurrent();
+            progress.update("正在生成无声视频", 3);
+            const mutedVideo = await removeAudioFromVideo(source, range, node.metadata?.durationMs, (status) => {
+                progress.update(status.phase === "reading" ? "读取视频资源" : "正在生成无声视频", status.phase === "encoding" ? 4 : 3);
+            });
+            assertCurrent();
             progress.update("保存两个独立结果", 5);
             const [uploadedVideo, uploadedAudio] = await Promise.all([uploadMediaFile(mutedVideo, "video"), uploadMediaFile(audio, "audio")]);
+            assertCurrent();
             const videoSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Video];
             const audioSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
             const outputX = node.position.x + node.width + 96;
@@ -553,27 +584,27 @@ export function useCanvasMediaTools({
             audioNode.title = `${node.title || "视频"} · 音轨`;
             const outputs = [silentVideo, audioNode];
             const outputIds = new Set(outputs.map((item) => item.id));
-            setNodes((current) => [...current, ...outputs]);
-            setConnections((current) => [...current, ...outputs.map((item) => ({ id: nanoid(), fromNodeId: node.id, toNodeId: item.id }))]);
+            const links = outputs.map((item) => ({ id: nanoid(), fromNodeId: node.id, toNodeId: item.id }));
+            nodesRef.current = [...nodesRef.current, ...outputs];
+            connectionsRef.current = [...connectionsRef.current, ...links];
+            setNodes(nodesRef.current);
+            setConnections(connectionsRef.current);
             setSelectedNodeIds(outputIds);
             setSelectedConnectionId(null);
-            try {
-                const results = await Promise.all(outputs.map((item) => ensureCanvasNodeAsset({ canvasId: projectId, domainProjectId, node: item, source: "canvas-manual" })));
-                setNodes((current) => current.map((item) => {
-                    const index = outputs.findIndex((output) => output.id === item.id);
-                    return index >= 0 ? { ...item, metadata: { ...item.metadata, assetId: results[index].assetId } } : item;
-                }));
-                progress.done("已生成无声视频和独立音轨");
-            } catch (assetError) {
-                progress.done(`已生成无声视频和独立音轨，素材库写入失败：${assetError instanceof Error ? assetError.message : "未知错误"}`);
-            }
+            const savedAssets = await persistMediaNodes(outputs, links, assertCurrent);
+            assertCurrent();
+            if (outputs.some((output) => !savedAssets.get(output.id))) throw new Error("分离结果尚未完成素材库保存，请先处理保存错误");
+            progress.done("已生成并保存无声视频和独立音轨");
+            message.success("已生成并保存无声视频和独立音轨，原视频已保留");
         } catch (error) {
+            if (!context.active || audioContextRef.current !== context) return;
+            try { assertUserScope(scope); } catch { return; }
             const details = error instanceof Error ? error.message : "音频提取失败";
             setNodes((current) => current.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, mediaOperationError: details } } : item));
             progress.fail(details);
-            message.error(details);
+            modal.error({ title: "音视频分离未完成", content: details, okText: "知道了" });
         }
-    }, [domainProjectId, message, projectId, setConnections, setSelectedConnectionId, setSelectedNodeIds, setNodes, startUploadStatus]);
+    }, [connectionsRef, message, modal, nodesRef, persistMediaNodes, setConnections, setSelectedConnectionId, setSelectedNodeIds, setNodes, startUploadStatus]);
 
     // 音视频分离始终处理整段视频，直接生成独立音轨节点，不再打开范围选择弹窗。
     const extractAudioFromVideo = useCallback((node: CanvasNodeData) => {
