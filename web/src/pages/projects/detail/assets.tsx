@@ -382,6 +382,7 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
             void reportOwnedMediaSave(message, downloadOwnedOrBrowserMedia({
                 fileName: sanitizeDownloadFileName(`${asset.title || "素材"}.${extension}`),
                 resourceId: ownedResourceIdFromMediaRef(personal.data.storageKey, url) || undefined,
+                storageKey: personal.data.storageKey,
                 browserUrl: url,
             }));
             return;
@@ -401,6 +402,7 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
             void reportOwnedMediaSave(message, downloadOwnedOrBrowserMedia({
                 fileName: sanitizeDownloadFileName(`${asset.title || "素材"}.${projectAssetFileExtension(asset.mediaType)}`),
                 resourceId: projectResourceId || undefined,
+                storageKey: asset.storageKey,
                 browserUrl: remoteUrl,
             }));
             return;

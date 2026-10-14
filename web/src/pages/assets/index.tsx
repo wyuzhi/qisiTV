@@ -523,6 +523,7 @@ export default function AssetsPage() {
         void reportOwnedMediaSave(message, downloadOwnedOrBrowserMedia({
             fileName: sanitizeDownloadFileName(`${asset.title || "素材"}.${extension}`),
             resourceId: ownedResourceIdFromMediaRef(asset.data.storageKey, url) || undefined,
+            storageKey: asset.data.storageKey,
             browserUrl: url,
         }));
     };

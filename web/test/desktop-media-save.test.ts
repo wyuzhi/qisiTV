@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import { ownedResourceIdFromMediaRef } from "@/services/api/resources";
 import { configureApiRuntime } from "@/services/api/request";
-import { downloadOwnedOrBrowserMedia, isWailsNativeShell, saveOwnedOrBrowserBlob } from "@/services/desktop-media-save";
+import { downloadOwnedOrBrowserMedia, isWailsNativeShell, reportOwnedMediaSave, saveOwnedOrBrowserBlob } from "@/services/desktop-media-save";
 import { sanitizeDownloadFileName } from "@/lib/canvas/canvas-media-download";
 
 const originalWindow = globalThis.window;
@@ -18,6 +18,21 @@ afterEach(() => {
 });
 
 describe("native media save", () => {
+    test("download feedback closes preparation on success, cancellation, and error", async () => {
+        const events: string[] = [];
+        const message = {
+            loading: () => { events.push("loading"); return () => { events.push("closed"); }; },
+            success: (text: string) => { events.push(text); },
+            error: (text: string) => { events.push(text); },
+        };
+        await reportOwnedMediaSave(message, Promise.resolve("download-started"));
+        expect(events.splice(0)).toEqual(["loading", "已发起下载，请在浏览器下载列表查看", "closed"]);
+        await reportOwnedMediaSave(message, Promise.resolve("cancelled"));
+        expect(events.splice(0)).toEqual(["loading", "closed"]);
+        await reportOwnedMediaSave(message, Promise.reject(new Error("下载失败")));
+        expect(events).toEqual(["loading", "下载失败", "closed"]);
+    });
+
     test("extracts owned resource IDs and rejects arbitrary remote URLs", () => {
         configureApiRuntime("http://127.0.0.1:43123/api", "token");
         expect(ownedResourceIdFromMediaRef("resource:abc123")).toBe("abc123");

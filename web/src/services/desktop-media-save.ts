@@ -10,7 +10,7 @@ function currentBrowserProjectId() {
     return match ? decodeURIComponent(match[1]) : undefined;
 }
 
-export type OwnedMediaSaveResult = "saved" | "cancelled";
+export type OwnedMediaSaveResult = "saved" | "cancelled" | "download-started";
 
 export const MAX_OWNED_ARTIFACT_BYTES = 32 * 1024 * 1024;
 
@@ -19,7 +19,7 @@ export function isWailsNativeShell() {
     return window.location?.protocol === "wails:" || typeof window.go?.main?.DesktopApp?.SaveOwnedMedia === "function" || typeof window.go?.main?.DesktopApp?.SaveOwnedArtifact === "function";
 }
 
-export async function downloadOwnedOrBrowserMedia(options: { fileName: string; resourceId?: string; browserUrl?: string }): Promise<OwnedMediaSaveResult> {
+export async function downloadOwnedOrBrowserMedia(options: { fileName: string; resourceId?: string; storageKey?: string; browserUrl?: string }): Promise<OwnedMediaSaveResult> {
     const fileName = sanitizeDownloadFileName(options.fileName);
     if (isWailsNativeShell()) {
         const resourceId = options.resourceId?.trim();
@@ -30,14 +30,33 @@ export async function downloadOwnedOrBrowserMedia(options: { fileName: string; r
         return saved ? "saved" : "cancelled";
     }
     const browserUrl = options.browserUrl?.trim();
-    if (!browserUrl) throw new Error("没有可导出的文件");
-    if (currentBrowserProjectId() && /^(blob:|data:)/.test(browserUrl)) {
-        const response = await fetch(browserUrl);
-        if (!response.ok) throw new Error("无法读取要导出的媒体");
-        return saveOwnedOrBrowserBlob(fileName, await response.blob());
+    if (isBrowserWorkspace()) {
+        // 下载原文件优先读取稳定存储键；节点里的临时预览 URL 可能已随刷新失效。
+        let blob: Blob | null = null;
+        if (options.storageKey) {
+            const { getImageBlob } = await import("@/services/image-storage");
+            blob = await getImageBlob(options.storageKey);
+            if (!blob) blob = await (await import("@/services/local-media-repository")).getLocalMediaBlob(options.storageKey);
+        }
+        if (!blob) {
+            if (!browserUrl) throw new Error("没有可导出的文件");
+            let response: Response;
+            try {
+                response = await fetch(browserUrl, { credentials: "omit" });
+            } catch {
+                throw new Error("无法读取下载文件，请重新加载素材后再试");
+            }
+            if (!response.ok) throw new Error(`文件下载失败（${response.status}），请重新加载素材后再试`);
+            blob = await response.blob();
+        }
+        if (!blob.size) throw new Error("下载文件为空，请重新加载素材后再试");
+        // 单个媒体的“下载”交给浏览器；项目备份导出仍由 saveOwnedOrBrowserBlob 写入 exports。
+        saveAs(blob, fileName);
+        return "download-started";
     }
+    if (!browserUrl) throw new Error("没有可导出的文件");
     saveAs(browserUrl, fileName);
-    return "saved";
+    return "download-started";
 }
 
 export async function saveOwnedOrBrowserBlob(fileName: string, blob: Blob, projectId = currentBrowserProjectId()): Promise<OwnedMediaSaveResult> {
@@ -70,12 +89,17 @@ function bytesToBase64(bytes: Uint8Array) {
     return btoa(binary);
 }
 
-export function reportOwnedMediaSave(message: { success: (text: string) => void; error: (text: string) => void }, result: Promise<OwnedMediaSaveResult>) {
+export function reportOwnedMediaSave(message: { success: (text: string) => void; error: (text: string) => void; loading?: (text: string, duration: number) => void | (() => void) }, result: Promise<OwnedMediaSaveResult>) {
+    const dismiss = message.loading?.("正在准备文件…", 0);
     return result
         .then((status) => {
+            if (status === "download-started") message.success("已发起下载，请在浏览器下载列表查看");
             if (status === "saved" && isWailsNativeShell()) message.success("已保存到所选位置");
         })
         .catch((error) => {
             message.error(error instanceof Error && error.message.trim() ? error.message : "保存没有完成，请再试一次");
+        })
+        .finally(() => {
+            if (typeof dismiss === "function") dismiss();
         });
 }

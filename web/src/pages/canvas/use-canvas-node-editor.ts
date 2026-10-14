@@ -198,11 +198,13 @@ export function useCanvasNodeEditor({
     }, [canvasId, domainProjectId, message, nodesRef, queryClient, setNodes]);
 
     const downloadNodeImage = useCallback((node: CanvasNodeData) => {
-        if ((node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content) return;
+        if (node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) return;
+        if (!node.metadata?.content && !node.metadata?.storageKey) return void message.error("当前节点没有可下载的媒体");
         void reportOwnedMediaSave(message, downloadOwnedOrBrowserMedia({
             fileName: buildCanvasMediaDownloadFileName(canvasTitle, node),
             resourceId: ownedResourceIdFromMediaRef(node.metadata?.storageKey, node.metadata?.content),
-            browserUrl: node.metadata.content,
+            storageKey: node.metadata?.storageKey,
+            browserUrl: node.metadata?.content,
         }));
     }, [canvasTitle, message]);
 
