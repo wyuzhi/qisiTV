@@ -4,6 +4,11 @@ Changes to qisiTV and its inherited release history are documented in this file.
 
 ## Unreleased
 
+## v1.5.13 (qisiTV)
+
+- 修复 Vidu 等未配置 1K/2K/4K 预设的图片模型点击自定义比例“应用”无反应的问题；点击和回车均可应用比例，也可将像素尺寸换算为比例。
+- 修改比例时保留模型独立的质量选项（如 2160p），不额外开放模型未声明的分辨率档位；非法比例仍显示校验提示。
+
 ## v1.5.12 (qisiTV)
 
 - 选择适配上游截至 v1.7.21 的画布修复，继续使用本机项目文件夹、外部 MCP 和独立的 qisi API / LikeAI 配置。

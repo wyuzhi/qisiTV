@@ -57,6 +57,12 @@ export function ImageSizePicker({ profile, size, quality, onChange }: { profile:
         "1k";
     const choices = presets.filter((preset) => preset.tier === tier);
     const select = (preset: ImageResolutionOption) => {
+        // 比例接口可能只有 1080p 等独立质量选项；自定义比例不依赖 1K/2K/4K 档位，也不改写质量。
+        if (profile.size.parameter === "aspect_ratio" && profile.size.allowCustom && visibleTiers.length === 0) {
+            setError("");
+            onChange(preset.ratio);
+            return;
+        }
         if (!available(preset.tier)) return;
         setChosenTier(preset.tier);
         setCustomPreset(preset);
