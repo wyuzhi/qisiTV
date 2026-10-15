@@ -11,7 +11,7 @@ codex plugin marketplace add https://github.com/wyuzhi/qisiTV.git --ref main
 codex plugin add qisitv@qisitv
 ```
 
-然后在新的 Codex 任务中说：“连接 qisiTV，调用 qisitv_pair 给我配对码，先不要付费生成。”
+然后在新的 Codex 任务中说：“连接 qisiTV，先检查已有连接；需要配对时调用 qisitv_pair，给我可点击的 pairingUrl，先不要付费生成。”
 
 ## 其他 Agent
 
@@ -29,7 +29,7 @@ Claude Desktop 普通聊天若不能执行本机命令，由其他本机 Agent �
 
 ## 配对与使用
 
-加载 MCP 工具后，让 Agent 调用 `qisitv_pair`，先不要生成素材。打开网页的「本地文件与 Agent」，选择本机项目根文件夹并输入返回的配对码。之后打开项目，保持网页运行，即可读取选区、创建节点、组织连线、导入素材。刷新网页后重新获取配对码。
+加载 MCP 工具后，先检查 `canvas_list_sessions` 复用已有连接；需要配对时调用 `qisitv_pair`，先不要生成素材。点击返回的 `pairingUrl`，选择本机项目根文件夹并点击「确认连接」，无需复制配对码。然后在同一标签页打开项目，即可读取选区、创建节点、组织连线、导入素材。授权最长 12 小时，同一标签页刷新或短暂断线自动恢复；断开连接会取消授权。新标签页、授权到期或本机服务重启后需新链接，目录权限仍需用户授权。旧版 MCP 可继续手动输入配对码；升级到 0.3.0 后支持链接与恢复。
 
 Agent 进程、连接器与浏览器必须运行在同一台电脑。Claude 网页版、远程 Gateway、SSH / 容器或云端 Agent 不能直接使用用户电脑的回环连接。工具未加载或配对失败时应说明实际状态，不编造配对码或完成结果。
 

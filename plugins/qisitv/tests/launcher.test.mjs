@@ -12,7 +12,7 @@ async function fixture(t, executable) {
   const scripts = path.join(directory, 'scripts');
   const cache = path.join(directory, 'cache');
   await mkdir(scripts);
-  await mkdir(path.join(cache, '0.2.0'), { recursive: true });
+  await mkdir(path.join(cache, '0.3.0'), { recursive: true });
   for (const name of ['run.mjs', 'runtime.mjs']) {
     await copyFile(new URL(`../scripts/${name}`, import.meta.url), path.join(scripts, name));
   }
@@ -21,10 +21,10 @@ async function fixture(t, executable) {
   const key = `${platform}-${arch}`;
   const file = `qisitv-connect-${key}${process.platform === 'win32' ? '.exe' : ''}`;
   await writeFile(path.join(directory, 'runtime.json'), JSON.stringify({
-    version: '0.2.0', release: 'mcp-v0.2.0',
+    version: '0.3.0', release: 'mcp-v0.3.0',
     assets: { [key]: { file, sha256: createHash('sha256').update(executable).digest('hex') } },
   }));
-  await writeFile(path.join(cache, '0.2.0', file), executable, { mode: 0o755 });
+  await writeFile(path.join(cache, '0.3.0', file), executable, { mode: 0o755 });
   return { directory, cache, script: path.join(scripts, 'run.mjs') };
 }
 

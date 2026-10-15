@@ -103,6 +103,9 @@ func TestMCPPairWorksWithoutBrowserAndDoesNotLeakAgentSecret(t *testing.T) {
 	if pair["code"] != bridge.code || pair["website"] != "https://cheeser.link/qisitv/#/local" || pair["expiresAt"] == nil {
 		t.Fatalf("incomplete pairing reply: %s", text)
 	}
+	if pair["pairingUrl"] != "https://cheeser.link/qisitv/#/local?pair="+bridge.code {
+		t.Fatal("pairing link must carry only the one-use code in its fragment")
+	}
 	status, _ := requestTest(t, httpServer, "POST", "/pair", testOrigin, "", map[string]any{"code": pair["code"]})
 	if status != 200 {
 		t.Fatal("MCP-provided code was not accepted by browser pairing")
@@ -154,13 +157,14 @@ func TestRepeatedBrowserPairingDoesNotExhaustManagedService(t *testing.T) {
 		deadline := time.Now().Add(time.Second)
 		for {
 			bridge.mu.Lock()
-			_, retained := bridge.sessions[token]
+			entry := bridge.sessions[token]
+			inactive := entry != nil && entry.Conn == nil
 			bridge.mu.Unlock()
-			if !retained {
+			if inactive {
 				break
 			}
 			if time.Now().After(deadline) {
-				t.Fatal("disconnected browser retained its pairing token")
+				t.Fatal("disconnected browser did not become resumable")
 			}
 			time.Sleep(time.Millisecond)
 		}

@@ -22,7 +22,7 @@ import (
 )
 
 const DefaultPort = 17372
-const Version = "0.2.0"
+const Version = "0.3.0"
 const MaxAssetBytes = 32 << 20
 const maxMessageBytes = 46 << 20
 
@@ -153,6 +153,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"name": "qisitv-connect", "version": Version, "connected": len(s.Sessions())})
 	case "/pair":
 		s.pair(w, r)
+	case "/resume", "/unpair":
+		s.browserSession(w, r)
 	case "/ws":
 		s.websocket(w, r)
 	case "/agent/call", "/agent/pair-code", "/agent/sessions", "/agent/lease":
@@ -254,14 +256,61 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 		}
 		// Abandoned pairings must not exhaust a long-running MCP service. Keep
 		// active browsers, and prefer a new explicitly requested pairing over the
-		// oldest token that has never completed its WebSocket connection.
+		// oldest inactive browser authorization.
 		delete(s.sessions, oldestToken)
 	}
 	token := randomToken(32)
 	entry := &session{ID: randomToken(12), Token: token, Origin: r.Header.Get("Origin"), Expires: time.Now().Add(12 * time.Hour), Pending: make(map[string]chan response)}
 	s.sessions[token] = entry
-	writeJSON(w, 200, map[string]any{"token": token, "sessionId": entry.ID, "expiresAt": entry.Expires})
+	writeJSON(w, 200, map[string]any{"token": token, "sessionId": entry.ID, "expiresAt": entry.Expires, "resumable": true})
 }
+
+// A refresh can reuse the same tab's authorization, but cannot extend its TTL,
+// take over an active browser, or recover any commands from the old connection.
+func (s *Server) browserSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || r.Header.Get("Origin") == "" {
+		fail(w, 403, "ORIGIN_REQUIRED", "Use the qisiTV website")
+		return
+	}
+	var input struct {
+		Token string `json:"token"`
+	}
+	if decodeBody(w, r, 1024, &input) != nil {
+		fail(w, 400, "INVALID_REQUEST", "Browser session required")
+		return
+	}
+	s.mu.Lock()
+	entry := s.sessions[input.Token]
+	if entry == nil || entry.Origin != r.Header.Get("Origin") {
+		s.mu.Unlock()
+		fail(w, 401, "UNAUTHORIZED", "Pair this browser again")
+		return
+	}
+	if r.URL.Path == "/unpair" || !time.Now().Before(entry.Expires) {
+		delete(s.sessions, input.Token)
+		conn := entry.Conn
+		s.mu.Unlock()
+		if conn != nil {
+			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "Authorization ended"), time.Now().Add(time.Second))
+			_ = conn.Close()
+		}
+		if r.URL.Path == "/unpair" {
+			writeJSON(w, 200, map[string]any{"disconnected": true})
+		} else {
+			fail(w, 401, "SESSION_EXPIRED", "Pair this browser again")
+		}
+		return
+	}
+	if entry.Conn != nil {
+		s.mu.Unlock()
+		fail(w, 409, "ALREADY_CONNECTED", "This authorization is in use by another open browser tab")
+		return
+	}
+	expiry := entry.Expires
+	s.mu.Unlock()
+	writeJSON(w, 200, map[string]any{"expiresAt": expiry})
+}
+
 func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet || r.URL.RawQuery != "" {
 		fail(w, 400, "INVALID_REQUEST", "WebSocket credentials must use the subprotocol, never the URL")
@@ -293,14 +342,23 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 	}
 	entry.Conn = conn
 	s.mu.Unlock()
+	expiryTimer := time.AfterFunc(time.Until(entry.Expires), func() {
+		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "Authorization expired"), time.Now().Add(time.Second))
+		_ = conn.Close()
+	})
+	var revoked bool
 	defer func() {
+		expiryTimer.Stop()
 		s.mu.Lock()
 		entry.Conn = nil
+		entry.ProjectID, entry.ProjectName = "", ""
 		for id, ch := range entry.Pending {
 			ch <- response{Error: &RPCError{Code: "BROWSER_DISCONNECTED", Message: "Browser disconnected; write outcome may be unknown. Read the project before any new edit; do not retry automatically."}}
 			delete(entry.Pending, id)
 		}
-		delete(s.sessions, token)
+		if revoked || !time.Now().Before(entry.Expires) {
+			delete(s.sessions, token)
+		}
 		s.mu.Unlock()
 		_ = conn.Close()
 	}()
@@ -309,6 +367,7 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Minute))
 		var reply response
 		if err := conn.ReadJSON(&reply); err != nil {
+			revoked = websocket.IsCloseError(err, 4000)
 			return
 		}
 		s.mu.Lock()
@@ -337,7 +396,7 @@ func (s *Server) Sessions() []SessionInfo {
 	defer s.mu.Unlock()
 	list := []SessionInfo{}
 	for _, entry := range s.sessions {
-		if entry.Conn != nil {
+		if entry.Conn != nil && time.Now().Before(entry.Expires) {
 			list = append(list, SessionInfo{SessionID: entry.ID, ProjectID: entry.ProjectID, ProjectName: entry.ProjectName})
 		}
 	}

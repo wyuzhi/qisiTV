@@ -18,11 +18,11 @@ export const AGENT_CLIENTS: readonly AgentClient[] = [
         description: "安装 qisiTV 插件，由 Codex 自动管理本地 MCP。",
         configure: [
             "检查 Git、Node.js 18+ 和 codex plugin 命令是否可用；缺失时说明需要补充的环境，不要声称已安装。",
-            "执行 codex plugin marketplace add https://github.com/wyuzhi/qisiTV.git --ref main",
+            "若 qisitv marketplace 已存在，执行 codex plugin marketplace upgrade qisitv 获取新版；否则执行 codex plugin marketplace add https://github.com/wyuzhi/qisiTV.git --ref main。",
             "执行 codex plugin add qisitv@qisitv",
         ],
         verify: "核对插件安装结果；不要重复添加同名独立 MCP。",
-        nextStep: "在 Codex 新建一个任务，获取配对码",
+        nextStep: "在 Codex 新建一个任务，获取连接链接",
         docs: "https://github.com/wyuzhi/qisiTV/tree/main/plugins/qisitv",
     },
     {
@@ -33,7 +33,7 @@ export const AGENT_CLIENTS: readonly AgentClient[] = [
             "也可在 WorkBuddy 的插件 → MCP 服务器 → 配置 MCP 中编辑；新版界面可从连接器 → 自定义连接器进入，选择本地命令，填写准备器返回的程序绝对路径和参数 mcp。",
         ],
         verify: "保存后在 WorkBuddy 的 MCP 列表检查 qisitv-web 显示绿色连接状态，并确认 qisitv_pair 工具可用；未加载时重新加载 MCP 或重启 WorkBuddy。",
-        nextStep: "在 WorkBuddy 新开对话，获取配对码",
+        nextStep: "在 WorkBuddy 新开对话，获取连接链接",
         docs: "https://www.workbuddy.ai/docs/zh/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/MCP-Guide",
     },
     {
@@ -45,7 +45,7 @@ export const AGENT_CLIENTS: readonly AgentClient[] = [
             "如果当前聊天没有本机终端或文件权限，请明确说明；把准备和配置工作交给具有本机执行能力的 Agent，或引导用户在桌面版设置粘贴已准备好的配置，不要声称聊天已替用户安装。",
         ],
         verify: "检查 JSON 有效并确认 qisitv-web 出现在桌面版的本地 MCP 列表。",
-        nextStep: "完全退出并重启 Claude 桌面版，获取配对码",
+        nextStep: "完全退出并重启 Claude 桌面版，获取连接链接",
         note: "适用于 Mac / Windows 的 Claude 桌面版本地 MCP。claude.ai 网页版和云端连接器不能直接连接这台电脑；没有本机执行能力时，可让其他本地 Agent 帮你完成安装。",
         docs: "https://modelcontextprotocol.io/docs/develop/connect-local-servers",
     },
@@ -56,7 +56,7 @@ export const AGENT_CLIENTS: readonly AgentClient[] = [
             '执行 claude mcp add --transport stdio --scope user qisitv-web -- "PROGRAM" mcp；PROGRAM 必须替换为准备器返回的 command 实际路径，并按当前系统正确传参。',
         ],
         verify: "先用 claude mcp get qisitv-web 检查是否已存在；已正确配置则复用，存在不同配置则说明差异后更新。配置后再次检查，在会话内用 /mcp 查看状态。",
-        nextStep: "重新加载 Claude Code 的 MCP 或新开会话，获取配对码",
+        nextStep: "重新加载 Claude Code 的 MCP 或新开会话，获取连接链接",
         docs: "https://code.claude.com/docs/en/mcp",
     },
     {
@@ -68,7 +68,7 @@ export const AGENT_CLIENTS: readonly AgentClient[] = [
             '需要手动配置时，使用 ~/.openclaw/openclaw.json 的 mcp.servers["qisitv-web"]，值为 { transport: "stdio", command: 准备器返回的路径, args: ["mcp"] }。先备份并保留其他配置。',
         ],
         verify: "先检查现有同名配置，避免覆盖其他用途；执行 openclaw mcp doctor qisitv-web --probe 检查工具发现。",
-        nextStep: "在本机 OpenClaw 重新加载 MCP，获取配对码",
+        nextStep: "在本机 OpenClaw 重新加载 MCP，获取连接链接",
         note: "OpenClaw 网关须运行在当前电脑。部署在服务器或另一台设备上的网关不能直接连接这里的本地画布。",
         docs: "https://docs.openclaw.ai/tools/mcp",
     },
@@ -81,7 +81,7 @@ export const AGENT_CLIENTS: readonly AgentClient[] = [
             '如需手动配置，在 ~/.hermes/config.yaml 的 mcp_servers.qisitv-web 下写入 command 和 args: ["mcp"]；先备份，保留其他 YAML 字段。',
         ],
         verify: "检查同名配置；通过 /reload-mcp 或新会话确认 qisitv_pair 等工具可用。",
-        nextStep: "在 Hermes 使用 /reload-mcp 或新开会话，获取配对码",
+        nextStep: "在 Hermes 使用 /reload-mcp 或新开会话，获取连接链接",
         note: "Hermes Agent 须在当前电脑运行；云服务器中的 Hermes 不能直接访问这里的本机服务。",
         docs: "https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp/",
     },
@@ -93,7 +93,7 @@ export const AGENT_CLIENTS: readonly AgentClient[] = [
             '使用 CodeBuddy IDE 时，在设置 → MCP → Add MCP / 自定义 MCP 中合并 { mcpServers: { "qisitv-web": { type: "stdio", command: 准备器返回的路径, args: ["mcp"] } } }；不要假设 IDE 与 CLI 共用配置。',
         ],
         verify: "CLI 用 codebuddy mcp get qisitv-web 检查已有及安装后配置；IDE 在 MCP 列表中确认服务可用。已有同名不同配置先说明，不覆盖无关设置。",
-        nextStep: "重新加载 CodeBuddy 的 MCP 或重启客户端，获取配对码",
+        nextStep: "重新加载 CodeBuddy 的 MCP 或重启客户端，获取连接链接",
         docs: "https://www.codebuddy.ai/docs/cli/mcp",
     },
     {
@@ -104,7 +104,7 @@ export const AGENT_CLIENTS: readonly AgentClient[] = [
             "若现有配置包含 JSONC 注释或其他扩展语法，保留原格式编辑，不用 JSON.stringify 重写整个文件；同名配置不同先说明。",
         ],
         verify: "在 Cursor Settings → Tools & MCP 检查 qisitv-web 已启用，并确认工具列表包含 qisitv_pair。",
-        nextStep: "在 Cursor 重新加载 MCP，打开 Agent 对话获取配对码",
+        nextStep: "在 Cursor 重新加载 MCP，打开 Agent 对话获取连接链接",
         docs: "https://cursor.com/docs/mcp",
     },
     {
@@ -116,7 +116,7 @@ export const AGENT_CLIENTS: readonly AgentClient[] = [
             "使用本机用户配置，不把服务安装到 SSH、容器或远程工作区。保留 VS Code 的服务信任确认，由用户确认自己添加的服务。",
         ],
         verify: "通过 MCP: List Servers 检查 qisitv-web，并在 Copilot Agent 模式确认工具可用。",
-        nextStep: "在 VS Code 启用 MCP，打开 Copilot Agent 获取配对码",
+        nextStep: "在 VS Code 启用 MCP，打开 Copilot Agent 获取连接链接",
         docs: "https://code.visualstudio.com/docs/agent-customization/mcp-servers",
     },
     {
@@ -127,7 +127,7 @@ export const AGENT_CLIENTS: readonly AgentClient[] = [
             "先检查、备份并合并当前客户端配置，保留其他 MCP 服务和设置；若客户端只支持云端远程 MCP，明确说明当前本地版本不适用，不宣称已连接。",
         ],
         verify: "重新加载客户端，列出工具并确认 qisitv_pair 可用；无法检查时明确说明待用户验证。",
-        nextStep: "重新加载客户端的 MCP 工具，获取配对码",
+        nextStep: "重新加载客户端的 MCP 工具，获取连接链接",
         note: "客户端需要支持本机 stdio MCP，并与网页运行在同一台电脑上。",
         docs: "https://modelcontextprotocol.io/docs/develop/connect-local-servers",
     },
@@ -149,10 +149,10 @@ export function buildAgentInstallationPrompt(id: AgentClientId): string {
         `请帮我在本机 ${agent.label} 接入 qisiTV，服务名为 qisitv-web。`,
         "本次只安装和连接，不要调用任何收费生成接口，不要读取或发送我的 LikeAI API Key。",
         ...[...preparation, ...agent.configure, agent.verify].map((line, i) => `${i + 1}. ${line}`),
-        `完成后：${agent.nextStep}。调用 qisitv_pair，展示真实返回的配对码和网页 https://cheeser.link/qisitv/#/local；安装成功不等于已经配对。`,
+        `完成后：${agent.nextStep}。调用 qisitv_pair，将真实返回的 pairingUrl 作为可点击的连接链接展示，配对码保留为备用；安装成功不等于已经配对。`,
         "使用期间保持网页打开。本机服务随 MCP 自动管理，不需要另开 start 窗口。保留系统权限确认，不关闭安全保护。",
     ].join("\n\n");
 }
 
-export const AGENT_PAIRING_PROMPT = "使用 qisitv-web，调用 qisitv_pair 获取配对码，不要生成素材。";
+export const AGENT_PAIRING_PROMPT = "使用 qisitv-web 连接 qisiTV。先检查 canvas_list_sessions；已有连接就读取当前画布，否则调用 qisitv_pair，把 pairingUrl 作为可点击的连接链接发给我，配对码作为备用。先不要生成素材。";
 export const AGENT_TRIAL_PROMPT = "使用 qisitv-web 连接的画布。先列出会话，读取我当前打开的项目和选区，然后在空白处添加一个文字节点，内容是「第一个镜头的创作思路」。先不要调用付费生成。";

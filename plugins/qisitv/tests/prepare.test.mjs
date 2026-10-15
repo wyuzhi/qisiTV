@@ -23,7 +23,7 @@ async function fixture(t) {
   const arch = process.arch === 'x64' ? 'amd64' : process.arch;
   const key = `${platform}-${arch}`;
   const file = `qisitv-connect-${key}${process.platform === 'win32' ? '.exe' : ''}`;
-  await writeFile(path.join(sourceRoot, 'runtime.json'), JSON.stringify({ version: '0.2.0', release: 'mcp-v0.2.0', assets: { [key]: { file, sha256: hash } } }));
+  await writeFile(path.join(sourceRoot, 'runtime.json'), JSON.stringify({ version: '0.3.0', release: 'mcp-v0.3.0', assets: { [key]: { file, sha256: hash } } }));
   return { root, sourceRoot, cache, file, runtimeOptions: { env: { QISITV_MCP_CACHE_DIR: cache }, fetchImpl: async () => new Response(sample) } };
 }
 
@@ -43,7 +43,7 @@ function launch(setup, args = []) {
 test('prepares only command/args and retains all notices after the clone is deleted', async t => {
   const setup = await fixture(t);
   const config = await prepareMCP(setup);
-  assert.deepEqual(config, { command: path.join(setup.cache, '0.2.0', setup.file), args: ['mcp'] });
+  assert.deepEqual(config, { command: path.join(setup.cache, '0.3.0', setup.file), args: ['mcp'] });
   assert.ok(config.command.includes(' '));
   await rm(setup.sourceRoot, { recursive: true });
   assert.deepEqual(await readFile(config.command), sample);
@@ -109,7 +109,7 @@ test('aborted download leaves no partial runtime, config output or license scrat
   await started;
   controller.abort(new Error('test cancellation'));
   await assert.rejects(result, /test cancellation/);
-  assert.deepEqual(await readdir(path.join(setup.cache, '0.2.0')), []);
+  assert.deepEqual(await readdir(path.join(setup.cache, '0.3.0')), []);
 });
 
 test('CLI termination aborts its pending download without emitting configuration', { skip: process.platform === 'win32', timeout: 10000 }, async t => {
@@ -140,7 +140,7 @@ test('CLI termination aborts its pending download without emitting configuration
   assert.deepEqual(await closed, { code: 143, signal: null });
   assert.equal(stdout, '');
   assert.match(stderr, /qisiTV MCP preparation cancelled/);
-  assert.deepEqual(await readdir(path.join(setup.cache, '0.2.0')), []);
+  assert.deepEqual(await readdir(path.join(setup.cache, '0.3.0')), []);
 });
 
 test('concurrent preparers keep complete licenses and no temporary files', async t => {
@@ -155,8 +155,8 @@ test('license destination symlinks cannot redirect writes outside the runtime di
   const setup = await fixture(t);
   const outside = path.join(setup.root, 'outside');
   await mkdir(outside);
-  await mkdir(path.join(setup.cache, '0.2.0'), { recursive: true });
-  await symlink(outside, path.join(setup.cache, '0.2.0', 'licenses'));
+  await mkdir(path.join(setup.cache, '0.3.0'), { recursive: true });
+  await symlink(outside, path.join(setup.cache, '0.3.0', 'licenses'));
   await assert.rejects(prepareMCP(setup), /real directory/);
   assert.deepEqual(await readdir(outside), []);
 });

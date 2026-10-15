@@ -5,8 +5,8 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 
 export const MAX_BINARY_BYTES = 64 * 1024 * 1024;
-const RELEASE = 'mcp-v0.2.0';
-const VERSION = '0.2.0';
+const RELEASE = 'mcp-v0.3.0';
+const VERSION = '0.3.0';
 const RELEASE_BASE = `https://github.com/wyuzhi/qisiTV/releases/download/${RELEASE}/`;
 const REDIRECT_HOSTS = new Set(['github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com']);
 

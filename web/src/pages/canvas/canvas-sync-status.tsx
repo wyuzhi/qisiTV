@@ -93,7 +93,7 @@ export function CanvasSyncStatus({ projectId, onLoadLatest, onOpenVersions }: { 
                     aria-label={`画布保存状态：${label}`}
                     icon={saving ? <LoaderCircle className="size-3.5 animate-spin motion-reduce:animate-none" /> : diskProblem ? <CloudOff className="size-3.5" /> : localOnly ? <CheckCircle2 className="size-3.5 text-emerald-500" /> : failed ? <CloudOff className="size-3.5" /> : <CloudCheck className="size-3.5" />}
                 >
-                    <span className={browserOnly ? "canvas-folder-save-label text-xs" : "canvas-sync-status-label text-xs"}>{label}{browserOnly && agent.status === "connected" ? " · Agent 已连接" : ""}</span>
+                    <span className={browserOnly ? "canvas-folder-save-label text-xs" : "canvas-sync-status-label text-xs"}>{label}{browserOnly && agent.status === "connected" ? " · Agent 已连接" : browserOnly && agent.status === "reconnecting" ? " · Agent 重连中" : ""}</span>
                 </Button>
             </Popover>
         </>

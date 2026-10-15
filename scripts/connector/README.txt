@@ -8,13 +8,14 @@ qisiTV MCP
    codex mcp add qisitv-web；不会修改已有的 qisitv 配置。
    安装成功后可关闭安装窗口、删除下载的解压目录。
 2. 重新打开 Codex，让 MCP 生效。之后由 Codex 自动启动本地服务，无需单独运行 start。
-3. 在 Codex 中说：“使用 qisitv-web，调用 qisitv_pair 获取配对码。不要生成素材。”
-4. 用电脑端 Chrome / Edge 打开 https://cheeser.link/qisitv/#/local，选择项目文件夹，
-   粘贴 Codex 给出的配对码并连接。浏览器询问本地网络访问时允许本地服务连接。
+3. 在 Codex 中说：“使用 qisitv-web，调用 qisitv_pair 给我可点击的连接链接。不要生成素材。”
+4. 用电脑端 Chrome / Edge 打开 Agent 返回的连接链接，选择项目文件夹，
+   点击“确认连接”，无需复制配对码。手动输入配对码仍可用。浏览器询问本地网络访问时允许本地服务连接。
 5. 打开画布，在 Codex 中说：“使用 qisitv-web 读取当前画布，新建一个文字节点。
    先不要生成图片或视频。”
 
-使用期间保持网页和 Codex 打开。刷新网页后，在 Codex 中再次调用 qisitv_pair 获取新码。
+使用期间保持网页和 Agent 打开。同一标签页刷新或短暂断线自动恢复，授权最长 12 小时。
+点击断开会取消授权。新标签页、授权到期或本机服务重启后，让 Agent 提供新链接。
 所有 MCP 客户端退出后，后台服务在短暂宽限期后自动停止。没有账号、注册或云数据库。
 多个网站窗口同时连接时，Agent 必须先用 canvas_list_sessions 选择目标窗口。
 

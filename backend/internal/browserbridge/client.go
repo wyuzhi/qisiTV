@@ -148,10 +148,15 @@ func (c *Client) Call(ctx context.Context, operation string, args map[string]any
 		if err != nil {
 			return nil, err
 		}
+		code, ok := result["code"].(string)
+		if !ok || code == "" {
+			return nil, errors.New("local service returned no pairing code")
+		}
 		return map[string]any{
 			"code": result["code"], "expiresAt": result["expiresAt"],
 			"website":      "https://cheeser.link/qisitv/#/local",
-			"instructions": "Open the website in desktop Chrome or Edge, choose your project folder, and enter this one-use pairing code. Allow local network access if your browser asks. Keep the website and this Agent open. You do not need a separate connector window. The code expires after 10 minutes; after refreshing the page, call qisitv_pair again. No paid generation is submitted by pairing.",
+			"pairingUrl":   "https://cheeser.link/qisitv/#/local?pair=" + url.QueryEscape(code),
+			"instructions": "Show pairingUrl as a clickable link. The user opens it in desktop Chrome or Edge on this computer, chooses their project folder, and clicks Confirm connection. The code is filled automatically; manual code entry is a fallback. Allow local network access if asked. Keep the website and Agent open. The one-use link expires in 10 minutes. The same browser tab reconnects after refresh or brief disconnection for up to 12 hours, while the local service is still running. Disconnect revokes authorization. New tabs, expired authorization or a restarted service need a new link. Never replay interrupted commands; read the canvas and tasks first. Pairing does not submit paid generation.",
 		}, nil
 	}
 	if operation == "asset_import" {

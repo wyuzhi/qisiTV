@@ -54,7 +54,7 @@ qisiTV 项目/
 
 ## 让你的 Agent 操作同一个画布
 
-页面提供 Codex、WorkBuddy、Claude Desktop、Claude Code、OpenClaw、Hermes、CodeBuddy、Cursor、VS Code 和通用 MCP 十个入口。主流程都是安装一次、让 Agent 获取配对码、网页确认连接。无需手选系统包或另外保留服务终端。
+页面提供 Codex、WorkBuddy、Claude Desktop、Claude Code、OpenClaw、Hermes、CodeBuddy、Cursor、VS Code 和通用 MCP 十个入口。主流程都是安装一次、让 Agent 提供连接链接、网页确认连接。无需手选系统包或另外保留服务终端。
 
 **Agent、连接器和浏览器必须运行在同一台电脑上。** 远程服务器上的 OpenClaw / Hermes、云端 Agent、SSH 或容器中的进程不能直接使用这台电脑的回环服务。Claude 网页版不支持本方案的本机 stdio MCP；请选择 Claude Desktop 或在本机运行的 Claude Code。VS Code 远程开发时须使用本机用户配置。
 
@@ -106,15 +106,15 @@ CodeBuddy CLI 当前推荐 `~/.codebuddy/.mcp.json`，兼容旧 `~/.codebuddy/mc
 
 字段与命令来源：[WorkBuddy](https://www.workbuddy.ai/docs/zh/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/MCP-Guide)、[Claude Desktop](https://modelcontextprotocol.io/docs/develop/connect-local-servers)、[Claude Code](https://code.claude.com/docs/en/mcp)、[OpenClaw](https://docs.openclaw.ai/tools/mcp)、[Hermes 配置](https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference/)与[CLI 源码](https://github.com/NousResearch/hermes-agent/blob/main/hermes_cli/subcommands/mcp.py)、[CodeBuddy CLI](https://www.codebuddy.ai/docs/cli/mcp)与[IDE](https://www.codebuddy.ai/docs/ide/User-guide/MCP)、[Cursor](https://cursor.com/docs/mcp)、[VS Code](https://code.visualstudio.com/docs/agent-customization/mcp-servers)。这些是配置指引，不表示所有客户端都经过实机验收。
 
-### 2. 加载工具，获取配对码
+### 2. 加载工具，获取连接链接
 
-> 使用 qisitv-web，调用 qisitv_pair 获取配对码，不要生成素材。
+> 使用 qisitv-web。先检查 canvas_list_sessions；已有连接就读取当前画布，否则调用 qisitv_pair，把 pairingUrl 作为可点击的连接链接发给我。先不要生成素材。
 
-按客户端提示重新加载工具或开启新会话，Codex 使用新任务。`qisitv-web` MCP 自动启动或复用本机服务。`qisitv_pair` 返回临时配对码与网页入口，获取配对码不要求网页已连接，也不提交生成任务。页面提供单独的「复制连接指令」按钮；工具尚不可见时先解决加载问题，不能编造配对码。
+按客户端提示重新加载工具或开启新会话，Codex 使用新任务。`qisitv-web` MCP 自动启动或复用本机服务。`qisitv_pair` 返回临时连接链接 `pairingUrl`、备用配对码与有效期，不要求网页已连接，也不提交生成任务。页面提供单独的「复制连接指令」按钮；工具尚不可见时先解决加载问题，不能编造配对码。
 
-### 3. 网页输入配对码
+### 3. 点击链接，在网页确认
 
-把 Agent 返回的配对码粘贴到网站「本地文件与 Agent」，点击「连接」。浏览器询问是否允许访问本地网络时选择允许。目录选择和网页配对仍需本人确认，安装或配置 MCP 不会自动授权访问项目。
+点击 Agent 返回的连接链接，在「本地文件与 Agent」点击「确认连接」，配对码自动填入。也可手动粘贴配对码。浏览器询问是否允许访问本地网络时选择允许。目录选择和网页配对仍需本人确认，安装或配置 MCP 不会自动授权访问项目。
 
 连接成功后回到项目列表，打开要操作的画布，再发送下面的免费试用指令。它与获取配对码的指令是两个独立步骤：
 
@@ -122,7 +122,7 @@ CodeBuddy CLI 当前推荐 `~/.codebuddy/.mcp.json`，兼容旧 `~/.codebuddy/mc
 
 节点应出现在当前网页，并自动保存到该项目文件夹。选中参考图后，可以继续说「使用我选中的两张图作为参考，连接到一个视频节点，先不要生成」。Agent 通过 `canvas_current` 和画布数据读取真实选区，不靠最近打开的项目猜测目标。
 
-使用期间保持网页打开。连接器由 MCP 在后台管理，只监听 `127.0.0.1:17372`，无需向公网开放端口。刷新或重新打开网页后需要重新配对；配对码有效十分钟且只能使用一次。需要新码时再让 Agent 调用 `qisitv_pair`。多个网页已配对时，让 Agent 先执行 `canvas_list_sessions` 选择目标。
+使用期间保持网页打开。连接器由 MCP 在后台管理，只监听 `127.0.0.1:17372`，无需向公网开放端口。同一标签页刷新或短暂断线会自动恢复，授权最长十二小时且重连不续期。浏览器令牌只保存在本标签页的 sessionStorage；首次连接仍需本人确认。点击断开会取消授权。新标签页、授权过期或本机服务重启后需新链接；链接和配对码有效十分钟且只能使用一次。自动恢复失败时可点击「重新连接」，不会重做旧操作。MCP 0.3.0 支持此流程，旧版仍可手动配对，按对应客户端的安装指令更新后重新加载 MCP。多个网页已配对时，让 Agent 先执行 `canvas_list_sessions` 选择目标。
 
 插件名称是 **`qisitv`**，它提供的 MCP 名称是 **`qisitv-web`**，操作已配对的网站画布。旧的同名 **`qisitv` MCP** 则操作原本机 Go 工作区；这是不同入口，项目不会自动混合。已有旧工具时，请在操作指令中明确写 `qisitv-web`。
 

@@ -1,6 +1,6 @@
 {
   "name": "qisitv",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "通过本地 MCP 控制 qisiTV 网页画布，项目与素材保存在自己的电脑。",
   "author": {
     "name": "qisiTV",
@@ -19,7 +19,7 @@
     "category": "Productivity",
     "capabilities": ["Read", "Write"],
     "websiteURL": "https://cheeser.link/qisitv/",
-    "defaultPrompt": ["连接我的 qisiTV 画布，给我配对码。", "读取当前画布和选区，先不要调用付费生成。"],
+    "defaultPrompt": ["连接我的 qisiTV 画布，给我可点击的连接链接。", "读取当前画布和选区，先不要调用付费生成。"],
     "brandColor": "#0B2035",
     "composerIcon": "./assets/qisitv-logo.jpg",
     "logo": "./assets/qisitv-logo.jpg",

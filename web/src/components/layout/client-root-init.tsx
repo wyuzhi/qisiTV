@@ -6,6 +6,7 @@ import { createModelChannel, useConfigStore } from "@/stores/use-config-store";
 import { navigateToSettings } from "@/lib/settings-navigation";
 import { workspaceRouteLocation, workspaceRouteUrl } from "@/lib/workspace-url";
 import { isBrowserWorkspace } from "@/services/browser-workspace";
+import { initializeBrowserAgentConnection } from "@/services/browser-agent-connection";
 import { initializeClientDiagnostics, setDiagnosticUserScope } from "@/services/diagnostics/client-diagnostics";
 import { fetchPluginRuntimeState, setUserPluginEnabled } from "@/services/api/plugins";
 import { usePluginStore } from "@/stores/use-plugin-store";
@@ -50,7 +51,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         void import("@/services/local-workspace-repository")
             .then((module) => module.hydrateLocalCanvasProjectsFromBackend())
             .catch((error: unknown) => { if (active) message.warning(error instanceof Error ? error.message : "请重新连接项目文件夹"); })
-            .finally(() => { if (active) setFolderInitialized(true); });
+            .finally(() => { if (active) { initializeBrowserAgentConnection(); setFolderInitialized(true); } });
         return () => { active = false; };
     }, [canvasHydrated, message]);
 

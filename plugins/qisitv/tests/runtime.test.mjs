@@ -9,7 +9,7 @@ import { cacheRoot, ensureRuntime, MAX_BINARY_BYTES, selectAsset } from '../scri
 const sample = Buffer.from('a verified test runtime, never executed');
 const digest = data => createHash('sha256').update(data).digest('hex');
 const manifest = () => ({
-  version: '0.2.0', release: 'mcp-v0.2.0',
+  version: '0.3.0', release: 'mcp-v0.3.0',
   assets: Object.fromEntries(['darwin', 'linux', 'windows'].flatMap(os => ['amd64', 'arm64'].map(cpu => [
     `${os}-${cpu}`, { file: `qisitv-connect-${os}-${cpu}${os === 'windows' ? '.exe' : ''}`, sha256: digest(sample) },
   ]))),
@@ -29,7 +29,7 @@ test('only the six supported platform assets and immutable release are accepted'
   const changed = manifest();
   changed.release = 'latest';
   assert.throws(() => selectAsset(changed, 'linux', 'x64'), /manifest does not match/);
-  changed.release = 'mcp-v0.2.0';
+  changed.release = 'mcp-v0.3.0';
   changed.assets['linux-amd64'].file = '../../arbitrary-program';
   assert.throws(() => selectAsset(changed, 'linux', 'x64'), /invalid runtime checksum or filename/);
   changed.assets['linux-amd64'].file = 'qisitv-connect-linux-amd64';
@@ -48,7 +48,7 @@ test('downloads once, verifies cached bytes every time, and repairs a corrupted 
   let requests = 0;
   const options = await isolated(t, async (url, request) => {
     requests++;
-    assert.equal(url, 'https://github.com/wyuzhi/qisiTV/releases/download/mcp-v0.2.0/qisitv-connect-linux-amd64');
+    assert.equal(url, 'https://github.com/wyuzhi/qisiTV/releases/download/mcp-v0.3.0/qisitv-connect-linux-amd64');
     assert.equal(request.redirect, 'manual');
     assert.equal(request.headers.Authorization, undefined);
     return new Response(sample);
@@ -68,7 +68,7 @@ test('downloads once, verifies cached bytes every time, and repairs a corrupted 
 test('a checksum failure discards the download before creating an executable', async t => {
   const options = await isolated(t, async () => new Response('tampered executable'));
   await assert.rejects(ensureRuntime(manifest(), options), /checksum verification failed/);
-  assert.deepEqual(await readdir(path.join(options.env.QISITV_MCP_CACHE_DIR, '0.2.0')), []);
+  assert.deepEqual(await readdir(path.join(options.env.QISITV_MCP_CACHE_DIR, '0.3.0')), []);
 });
 
 test('HTTP failure and excessive declared size never populate the cache', async t => {
@@ -76,7 +76,7 @@ test('HTTP failure and excessive declared size never populate the cache', async 
   await assert.rejects(ensureRuntime(manifest(), options), /HTTP 404/);
   options.fetchImpl = async () => new Response('too large', { headers: { 'content-length': String(MAX_BINARY_BYTES + 1) } });
   await assert.rejects(ensureRuntime(manifest(), options), /size limit/);
-  assert.deepEqual(await readdir(path.join(options.env.QISITV_MCP_CACHE_DIR, '0.2.0')), []);
+  assert.deepEqual(await readdir(path.join(options.env.QISITV_MCP_CACHE_DIR, '0.3.0')), []);
 });
 
 test('an oversized stream without Content-Length is stopped and its partial file removed', async t => {
@@ -89,7 +89,7 @@ test('an oversized stream without Content-Length is stopped and its partial file
     },
   })));
   await assert.rejects(ensureRuntime(manifest(), options), /size limit/);
-  assert.deepEqual(await readdir(path.join(options.env.QISITV_MCP_CACHE_DIR, '0.2.0')), []);
+  assert.deepEqual(await readdir(path.join(options.env.QISITV_MCP_CACHE_DIR, '0.3.0')), []);
 });
 
 test('only HTTPS redirects to GitHub release hosts are followed', async t => {
@@ -112,7 +112,7 @@ test('download deadline aborts the request and leaves no partial file', async t 
   const options = await isolated(t, async (_url, { signal }) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })));
   options.timeoutMs = 10;
   await assert.rejects(ensureRuntime(manifest(), options), /timed out/);
-  assert.deepEqual(await readdir(path.join(options.env.QISITV_MCP_CACHE_DIR, '0.2.0')), []);
+  assert.deepEqual(await readdir(path.join(options.env.QISITV_MCP_CACHE_DIR, '0.3.0')), []);
 });
 
 test('two chats can populate the same cache without exposing partial bytes', async t => {
