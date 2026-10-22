@@ -37,6 +37,12 @@ The upstream project was relicensed to MIT in commit
 890ba95858bbb13496d23978003716656109abb2. Its copyright and permission notice
 are preserved in LICENSE.
 
+Selected later BeefTV fixes are tracked in docs/upstream-maintenance.md.
+The 2026-10-22 adaptation uses MIT-published changes from e126cf93,
+f6735161 and 5e74aaa3, all present in the MIT snapshot
+2327ee2d80282b10dd8bef0f26b48990d46f5c3b. It does not incorporate the new
+material covered by BeefTV's subsequent Source Available License.
+
 BeefTV changes
 --------------
 

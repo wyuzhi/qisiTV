@@ -146,3 +146,24 @@ test("legacy MCP still connects but never promises or attempts resumption", asyn
     expect(getBrowserAgentConnection().status).toBe("disconnected");
     expect(getBrowserAgentConnection().canResume).toBe(false);
 });
+
+test("a duplicate tab can pair independently without revoking the original tab's copied credential", async () => {
+    storage.set(SESSION_KEY, JSON.stringify(session()));
+    await connectBrowserAgent("new-tab-code");
+    expect(requests.map((item) => item.url.split("/").pop())).toEqual(["pair"]);
+    sockets[0].open();
+    disconnectBrowserAgent();
+    expect(requests.at(-1)?.url).toEndWith("/unpair");
+});
+
+test("cancelling a rejected duplicate-tab resume never revokes the active tab", async () => {
+    storage.set(SESSION_KEY, JSON.stringify(session()));
+    globalThis.fetch = (async (url, init) => {
+        requests.push({ url: String(url), init });
+        return new Response("{}", { status: 409 });
+    }) as unknown as typeof fetch;
+    resumeBrowserAgent(); await tick();
+    disconnectBrowserAgent();
+    expect(requests.map((item) => item.url.split("/").pop())).toEqual(["resume"]);
+    expect(storage.size).toBe(0);
+});

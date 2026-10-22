@@ -359,7 +359,7 @@ function ordinaryCanvasProjectSnapshot(scope: string, project: CanvasProject, du
         nodes.push({ ...node, metadata });
     }
     const chatSessions: CanvasAssistantSession[] = [];
-    for (const session of project.chatSessions) {
+    for (const session of project.chatSessions || []) {
         const durableSession = durableSessions.get(session.id);
         const durableKeys = durableSession?.generationEffectKeys;
         if (durableProject && hasUnconfirmedGenerationKey(session.generationEffectKeys, durableKeys)) {

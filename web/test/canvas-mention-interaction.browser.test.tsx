@@ -170,6 +170,17 @@ test("Scenario 1: Asset library multi-level folder navigation, back button, sele
     expect(underlyingText).toContain("UnderlyingClicks: 0");
 }, 30000);
 
+test("source names are visible while the serialized prompt keeps its stable reference label", async () => {
+    const input = page.locator('[role="textbox"]');
+    await clearRichEditor(page, input);
+    await input.pressSequentially("Reference: @");
+    const item = page.locator(".canvas-resource-mention-item", { hasText: "角色正面参考" });
+    await item.click();
+    expect(await input.locator(".canvas-resource-inline-label").innerText()).toBe("角色正面参考");
+    expect(await page.locator("#rich-prompt-display").innerText()).toContain("@图片1");
+    expect(await page.locator("#rich-prompt-display").innerText()).not.toContain("角色正面参考");
+}, 30_000);
+
 test("Scenario 2: Primary menu nodes and skill buttons direct selection", async () => {
     const input = page.locator('[role="textbox"]');
     await clearRichEditor(page, input);
@@ -241,7 +252,7 @@ test("Scenario 4: Search input Tab key completion", async () => {
     await menu.waitFor({ state: "visible", timeout: 5000 });
 
     const searchInput = menu.locator(".canvas-resource-mention-search input");
-    await searchInput.fill("角色");
+    await searchInput.fill("角色主角");
 
     const charItem = menu.locator(".canvas-resource-mention-item", { hasText: "角色主角" });
     await charItem.waitFor({ state: "visible", timeout: 5000 });

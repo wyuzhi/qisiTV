@@ -11,6 +11,9 @@ let interaction: Interaction = { canvasId: null, selectedNodeIds: [] };
 let projectName = "";
 let socket: WebSocket | undefined;
 let authorization: BrowserSession | undefined;
+// Browsers can clone sessionStorage when duplicating a tab. A copied token
+// alone does not give this tab ownership of the original tab's connection.
+let authorizationOwned = false;
 let generation = 0;
 let retries = 0;
 let initialized = false;
@@ -44,6 +47,7 @@ function readSession(): BrowserSession | undefined {
 
 function remember(session?: BrowserSession) {
     authorization = session;
+    if (!session) authorizationOwned = false;
     clearTimeout(expiryTimer);
     try {
         if (session?.resumable) sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
@@ -89,7 +93,7 @@ export function setBrowserAgentInteraction(next: Interaction, title = "") {
 
 export function disconnectBrowserAgent() {
     invitationPending = false;
-    const previous = authorization || readSession();
+    const previous = authorizationOwned ? authorization : undefined;
     stopTransport(4000);
     remember();
     revoke(previous);
@@ -119,6 +123,7 @@ function openSocket(attempt: number, session: BrowserSession) {
     ws.onopen = () => {
         clearTimeout(opening);
         if (attempt !== generation) { ws.close(); return; }
+        authorizationOwned = true;
         retries = 0;
         update({ status: "connected", message: session.resumable ? "Agent 已连接。此标签页刷新或短暂断线后会自动恢复，授权最长 12 小时。" : "Agent 已连接。当前 MCP 版本较旧，更新后可使用连接链接与自动恢复。" });
         hello();
@@ -185,6 +190,7 @@ async function resumeTransport() {
         if ([401, 403, 404].includes(response.status)) {
             endAuthorization("原来的连接授权已失效或本机服务已重启，请让 Agent 获取新的连接链接。");
         } else if (response.status === 409) {
+            authorizationOwned = false;
             scheduleReconnect("另一个标签页正在使用此连接。请回到原标签页，或为此网页获取新链接。");
         } else if (response.ok) openSocket(attempt, session);
         else scheduleReconnect();
@@ -230,6 +236,7 @@ export async function connectBrowserAgent(code: string) {
         if (!response.ok || !isValidSession(data)) throw new Error("配对未成功。请让 Agent 再次调用 qisitv_pair 获取新链接。");
         if (attempt !== generation) { revoke(data); return; }
         remember({ ...data, resumable: data.resumable === true });
+        authorizationOwned = true;
         retries = 0;
         openSocket(attempt, authorization!);
     } catch (error) {

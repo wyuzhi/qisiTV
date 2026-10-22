@@ -75,6 +75,17 @@ export function formatVideoResolutionLabel(value: string | number | undefined) {
     return normalized.replace(/^(\d+)p/i, "$1P");
 }
 
+/** Sort display tiers without changing request values or moving opaque provider options. */
+export function sortVideoResolutionOptions(values: readonly string[]): string[] {
+    const ranked = values.map((value) => ({
+        value,
+        tier: /^(?:\d+p?|[24]k)$/i.test(value.trim()) ? Number(normalizeVideoResolution(value)) : undefined,
+    }));
+    const ordered = ranked.filter((item) => item.tier !== undefined).sort((a, b) => a.tier! - b.tier!);
+    let index = 0;
+    return ranked.map((item) => item.tier === undefined ? item.value : ordered[index++].value);
+}
+
 export function videoDimensionsForRatioAndResolution(ratio: string | undefined, resolution: string | number | undefined) {
     const ratioMatch = String(ratio || "")
         .trim()

@@ -24,7 +24,7 @@ import { CanvasPresetPicker, type CanvasPromptPreset } from "./canvas-preset-pic
 import { CanvasPortraitTexturePopover } from "./canvas-portrait-texture-popover";
 import { CanvasPromptOptimizerDrawer } from "./canvas-prompt-optimizer-drawer";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata, type CanvasWorkspaceMode } from "@/types/canvas";
-import { autoMentionCanvasResourceReferences, canvasResourceMentionToken, normalizeCanvasNodeMentionTokens, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { autoMentionCanvasResourceReferences, canvasResourceDisplayName, canvasResourceMentionToken, normalizeCanvasNodeMentionTokens, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { promptOptimizerPlugin, PROMPT_OPTIMIZER_PLUGIN_ID } from "@/lib/plugins/builtin/prompt-optimizer";
 import { createPluginHostContext } from "@/services/plugin-host";
 import { usePluginStore } from "@/stores/use-plugin-store";
@@ -779,8 +779,8 @@ function ConnectedReferenceShelf({
                                         type="button"
                                         className="canvas-node-reference-drag-handle"
                                         draggable
-                                        title={`拖动调整 ${reference.label} 的顺序`}
-                                        aria-label={`调整 ${reference.label} 的顺序；使用左右方向键也可移动`}
+                                        title={`拖动调整 ${canvasResourceDisplayName(reference)} 的顺序`}
+                                        aria-label={`调整 ${canvasResourceDisplayName(reference)} 的顺序；使用左右方向键也可移动`}
                                         onDragStart={(event) => {
                                             setDraggedReferenceId(reference.nodeId);
                                             event.dataTransfer.effectAllowed = "move";
@@ -823,7 +823,7 @@ function ConnectedReferenceShelf({
                                     onClick={() => onInsert(reference)}
                                 >
                                     <span className="opacity-55">@</span>
-                                    <span className="truncate">{reference.label}</span>
+                                    <span className="truncate">{canvasResourceDisplayName(reference)}</span>
                                 </button>
                                 {onRemove ? (
                                     <button

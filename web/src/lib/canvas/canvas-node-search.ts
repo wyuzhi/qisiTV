@@ -14,7 +14,7 @@ export function searchCanvasNodes(nodes: CanvasNodeData[], query: string, limit 
     const keyword = query.trim().toLocaleLowerCase();
     return nodes
         .filter((node) => !keyword || canvasNodeSearchTerms(node).some((value) => value.toLocaleLowerCase().includes(keyword)))
-        .toSorted((left, right) => timestampValue(canvasNodeUpdatedAt(right)) - timestampValue(canvasNodeUpdatedAt(left)))
+        .sort((left, right) => timestampValue(canvasNodeUpdatedAt(right)) - timestampValue(canvasNodeUpdatedAt(left)))
         .slice(0, keyword ? limit : Math.min(limit, 40));
 }
 

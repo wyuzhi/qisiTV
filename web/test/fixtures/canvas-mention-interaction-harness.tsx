@@ -102,6 +102,7 @@ const mockReferences: CanvasResourceReference[] = [
             fileCount: 4,
         },
     },
+    { id: "ref-image-named", nodeId: "named-image", kind: "image", label: "图片1", title: "角色正面参考", previewUrl: pixelDataUrl, active: true },
 ];
 
 function TestApp() {

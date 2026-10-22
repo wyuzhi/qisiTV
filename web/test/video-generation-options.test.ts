@@ -1,9 +1,14 @@
 import { describe, expect, test } from "bun:test";
 
 import { defaultModelCapabilityConfig } from "../src/lib/model-capabilities";
-import { formatVideoResolutionLabel, normalizeVideoResolution, videoDimensionsForRatioAndResolution, videoResolutionComparisonKey, VIDEO_RESOLUTION_CAPABILITY_OPTIONS, VIDEO_RESOLUTION_OPTIONS } from "../src/lib/video-generation-options";
+import { formatVideoResolutionLabel, normalizeVideoResolution, sortVideoResolutionOptions, videoDimensionsForRatioAndResolution, videoResolutionComparisonKey, VIDEO_RESOLUTION_CAPABILITY_OPTIONS, VIDEO_RESOLUTION_OPTIONS } from "../src/lib/video-generation-options";
 
 describe("video generation resolution options", () => {
+    test("分辨率按数值排序，保留特殊枚举的位置和原始请求值", () => {
+        const input = ["1080p", "auto", "4K", "480p", "2k", "768p竖", "720P"];
+        expect(sortVideoResolutionOptions(input)).toEqual(["480p", "auto", "720P", "1080p", "2k", "768p竖", "4K"]);
+        expect(input).toEqual(["1080p", "auto", "4K", "480p", "2k", "768p竖", "720P"]);
+    });
     test("统一档位包含 1440P 与 4K，并识别常见别名", () => {
         expect(VIDEO_RESOLUTION_OPTIONS).toEqual([480, 720, 1080, 1440, 2160]);
         expect(VIDEO_RESOLUTION_CAPABILITY_OPTIONS).toEqual(["480p", "720p", "1080p", "1440p", "2160p"]);

@@ -9,6 +9,11 @@ import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type Canvas
 
 export type CanvasResourceKind = "image" | "video" | "audio" | "text" | "skill" | "character";
 
+/** Display the source name while keeping numbered labels stable for model prompts. */
+export function canvasResourceDisplayName(reference: CanvasResourceReference) {
+    return reference.title.trim() || reference.label;
+}
+
 export type CanvasResourceReference = {
     id: string;
     nodeId: string;

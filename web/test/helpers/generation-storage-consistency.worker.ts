@@ -5,7 +5,7 @@ import { getActiveUserScope, setActiveUserScope } from "../../src/lib/user-scope
 
 type InstanceHook = (storeName: string, key: string, value: unknown) => Promise<void> | void;
 
-type Scenario = "image-cleanup" | "scope-cleanup-switch" | "scope-cleanup-late-canvas-reference" | "video-commit-race" | "audio-commit-race" | "copied-video-save" | "reload-edit-during-folder-save" | "reload-folder-failure-retry" | "reload-folder-revision";
+type Scenario = "image-cleanup" | "scope-cleanup-switch" | "scope-cleanup-late-canvas-reference" | "video-commit-race" | "audio-commit-race" | "copied-video-save" | "missing-chat-sessions-save" | "reload-edit-during-folder-save" | "reload-folder-failure-retry" | "reload-folder-revision";
 
 function installStorageHarness() {
     const originalCreateInstance = localforage.createInstance.bind(localforage);
@@ -393,7 +393,7 @@ async function runMediaCommitRace(mediaType: "video" | "audio") {
     }
 }
 
-async function runCopiedVideoSave() {
+async function runCopiedVideoSave(omitChatSessions = false) {
     const previousScope = getActiveUserScope();
     const harness = installStorageHarness();
     const { http } = await import("../../src/services/api/request");
@@ -417,6 +417,7 @@ async function runCopiedVideoSave() {
         const document = parseCanvasStorageDocument(null, [project]);
         await storage.setItem(CANVAS_STORE_KEY, serializeCanvasStorageDocument(document));
         recordCanvasStorageDocument(scope, document);
+        if (omitChatSessions) Reflect.deleteProperty(project, "chatSessions");
         withCanvasStorePersistenceSuppressed(() => useCanvasStore.setState({ projects: [project] }));
         const copy = { ...source, id: "copy", metadata: isolateCopiedNodeMetadata(source, new Map([[source.id, "copy"]])) };
         const previousNodes = [source, copy];
@@ -539,8 +540,8 @@ self.onmessage = async (event: MessageEvent<Scenario>) => {
         const result =
             event.data === "reload-edit-during-folder-save" || event.data === "reload-folder-failure-retry" || event.data === "reload-folder-revision"
                 ? await runResourceReloadPersistence(event.data)
-                : event.data === "copied-video-save"
-                ? await runCopiedVideoSave()
+                : event.data === "copied-video-save" || event.data === "missing-chat-sessions-save"
+                ? await runCopiedVideoSave(event.data === "missing-chat-sessions-save")
                 : event.data === "image-cleanup"
                   ? await runImageCleanup()
                 : event.data === "scope-cleanup-switch"

@@ -29,12 +29,13 @@ test("网页画布下载真实文件，过期预览与仅有存储键的媒体�
         page.on("pageerror", (error) => errors.push(error.message));
         await page.goto(`${server.url}#/canvas/download-test`);
         for (const [label, extension, bytes] of [["本地图片", "png", png], ["恢复的图片", "png", png], ["视频", "mp4", Buffer.from("original-video-bytes")], ["音频", "wav", Buffer.from("original-audio-bytes")], ["原始图片", "png", png]] as const) {
-            const pending = page.waitForEvent("download", { timeout: 5000 }).catch(async (error) => {
-                throw new Error(`${label}: ${error.message}\n${await page.locator("body").innerText()}\n${errors.join("\n")}`);
-            });
+            const pending = page.waitForEvent("download", { timeout: 5000 }).then((download) => ({ download }), (error: Error) => ({ error }));
             await page.getByRole("button", { name: `下载${label}`, exact: true }).click();
-            if (label === "原始图片") await page.getByText("正在准备文件…", { exact: true }).waitFor();
-            const download = await pending;
+            // AntD keeps the preceding notice mounted during its exit animation.
+            if (label === "原始图片") await page.getByText("正在准备文件…", { exact: true }).last().waitFor();
+            const result = await pending;
+            if ("error" in result) throw new Error(`${label}: ${result.error.message}\n${await page.locator("body").innerText()}\n${errors.join("\n")}`);
+            const download = result.download;
             expect(download.suggestedFilename()).toMatch(new RegExp(`^下载验证_${label}_\\d{8}\\.${extension}$`));
             expect(await download.failure()).toBeNull();
             expect(Buffer.from(await Bun.file((await download.path())!).arrayBuffer())).toEqual(bytes);

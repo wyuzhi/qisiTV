@@ -18,5 +18,6 @@ test("local canvas import restores drawings locally and skips remote sync", () =
     expect(librarySource).toContain("saveCanvasDrawing(");
     expect(librarySource).toContain("const remoteSyncEnabled = hasRemoteUserDataSyncSession();");
     expect(librarySource).toContain('message: remoteSyncEnabled ? "正在上传媒体至云端" : "正在保存本地媒体"');
-    expect(librarySource).toContain('message.success(remoteSyncEnabled ? `已导入 ${data.projects.length} 个画布并完成云端同步` : `已导入 ${data.projects.length} 个画布并保存到本地`)');
+    expect(librarySource).toContain('setImportFeedback({ type: "success", title: "导入完成"');
+    expect(librarySource).toContain('browserWorkspace ? "并写入本机项目文件夹"');
 });

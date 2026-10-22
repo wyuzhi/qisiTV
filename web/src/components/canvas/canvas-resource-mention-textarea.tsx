@@ -6,7 +6,7 @@ import { ArrowLeft, ChevronRight, FileText, Folder, Image as ImageIcon, Music2, 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { ASSET_CATEGORY_LABELS } from "@/lib/asset-category";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
-import { buildAssetMentionReferences, canvasResourceMentionToken, findCanvasResourceAutoLinkMatch, type CanvasResourceAutoLinkMatch, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { buildAssetMentionReferences, canvasResourceDisplayName, canvasResourceMentionToken, findCanvasResourceAutoLinkMatch, type CanvasResourceAutoLinkMatch, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { useAssetStore, type AssetCategory } from "@/stores/use-asset-store";
 import { CanvasNodeType } from "@/types/canvas";
 import { useResolvedCanvasResourceReferences } from "./use-resolved-canvas-resource-references";
@@ -682,7 +682,7 @@ function createInlineMentionChip(reference: CanvasResourceReference, token: stri
     chip.dataset.mentionToken = token;
     chip.dataset.mentionReferenceId = reference.id;
     chip.className = `canvas-resource-inline-mention ${reference.kind === "skill" ? "is-skill" : reference.kind === "text" ? "is-node" : ""}`;
-    chip.title = "双击放大预览";
+    chip.title = `${canvasResourceDisplayName(reference)} · 双击放大预览`;
     if (reference.kind === "skill") chip.style.setProperty("--canvas-skill-mention-color", skillMentionColor(reference));
 
     const prefix = document.createElement("span");
@@ -698,7 +698,7 @@ function createInlineMentionChip(reference: CanvasResourceReference, token: stri
 
     const label = document.createElement("span");
     label.className = "canvas-resource-inline-label";
-    label.textContent = reference.label;
+    label.textContent = canvasResourceDisplayName(reference);
     chip.appendChild(label);
 
     return chip;
@@ -772,7 +772,9 @@ function syncInlineMentionPreviews(editor: HTMLElement, references: CanvasResour
             preview.replaceWith(createInlinePreview(reference));
         }
         const label = chip.querySelector(".canvas-resource-inline-label");
-        if (label && label.textContent !== reference.label) label.textContent = reference.label;
+        const displayName = canvasResourceDisplayName(reference);
+        if (label && label.textContent !== displayName) label.textContent = displayName;
+        chip.title = `${displayName} · 双击放大预览`;
     });
 }
 
@@ -998,7 +1000,7 @@ function MentionReferenceList({ references, activeReferenceId, onSelect }: { ref
         >
             <ReferencePreview reference={reference} />
             <span className="canvas-resource-mention-copy">
-                <span className="canvas-resource-mention-title-row"><strong title={reference.label}>{reference.label}</strong>{reference.kind === "skill" ? <em>技能</em> : null}</span>
+                <span className="canvas-resource-mention-title-row"><strong title={canvasResourceDisplayName(reference)}>{canvasResourceDisplayName(reference)}</strong>{reference.kind === "skill" ? <em>技能</em> : null}</span>
                 {reference.kind === "skill" ? (
                     <span className="canvas-resource-mention-meta"><span>{reference.skill?.description || reference.text || "工作流技能"}</span><small>{reference.skill?.version ? `v${reference.skill.version}` : ""}{reference.skill?.fileCount ? ` · ${reference.skill.fileCount} 文件` : ""}</small></span>
                 ) : reference.text && reference.text !== reference.title ? <span className="canvas-resource-mention-meta"><span>{reference.text}</span></span> : null}

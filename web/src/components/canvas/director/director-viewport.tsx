@@ -463,7 +463,7 @@ function DirectorSceneContent({ scene, selectedObjectId, selectedBone, transform
 
 /** 起点、终点、路径点、方向与当前进度共用一条 Transform 关键帧路径。 */
 function DirectorTransformPath({ keyframes, playhead, color }: { keyframes: DirectorObject["keyframes"]; playhead: number; color: string }) {
-    const sorted = useMemo(() => finiteDirectorTransformKeyframes(keyframes).toSorted((left, right) => left.time - right.time), [keyframes]);
+    const sorted = useMemo(() => finiteDirectorTransformKeyframes(keyframes).sort((left, right) => left.time - right.time), [keyframes]);
     const points = useMemo(() => sorted.map((keyframe) => keyframe.transform.position), [sorted]);
     const current = interpolateDirectorTransform(sorted[0].transform, sorted, playhead).position;
     const previous = points[points.length - 2];

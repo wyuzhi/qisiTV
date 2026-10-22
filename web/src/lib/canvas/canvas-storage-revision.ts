@@ -92,6 +92,9 @@ function normalizeProjectAssetCategories(projects: CanvasProject[]) {
         // later canvas save fail while normalizing asset categories.
         const sourceNodes = Array.isArray(project.nodes) ? project.nodes : [];
         if (sourceNodes !== project.nodes) changed = true;
+        const connections = Array.isArray(project.connections) ? project.connections : [];
+        const chatSessions = Array.isArray(project.chatSessions) ? project.chatSessions : [];
+        if (connections !== project.connections || chatSessions !== project.chatSessions) changed = true;
         const nodes = sourceNodes.map((node) => {
             const category = node.metadata?.assetCategory;
             if (!category) return node;
@@ -100,7 +103,7 @@ function normalizeProjectAssetCategories(projects: CanvasProject[]) {
             changed = true;
             return { ...node, metadata: { ...node.metadata, assetCategory: normalized } };
         });
-        return changed ? { ...project, nodes } : project;
+        return changed ? { ...project, nodes, connections, chatSessions } : project;
     });
 }
 
@@ -331,8 +334,8 @@ function mergeProject(base: CanvasProject | undefined, local: CanvasProject, dur
     merged.nodes = mergeEntities<CanvasNodeData>({
         ...common,
         base: base?.nodes || [],
-        local: local.nodes,
-        durable: durable.nodes,
+        local: local.nodes || [],
+        durable: durable.nodes || [],
         tombstones: nestedTombstones(document.tombstones.nodes, local.id),
         merge: (baseNode, localNode, durableNode) => {
             let conflictRecorded = false;
@@ -347,8 +350,8 @@ function mergeProject(base: CanvasProject | undefined, local: CanvasProject, dur
     merged.connections = mergeEntities<CanvasConnection>({
         ...common,
         base: base?.connections || [],
-        local: local.connections,
-        durable: durable.connections,
+        local: local.connections || [],
+        durable: durable.connections || [],
         tombstones: nestedTombstones(document.tombstones.connections, local.id),
         merge: (baseConnection, localConnection, durableConnection) =>
             mergeRecord(
@@ -363,8 +366,8 @@ function mergeProject(base: CanvasProject | undefined, local: CanvasProject, dur
     merged.chatSessions = mergeSessions({
         ...common,
         base: base?.chatSessions || [],
-        local: local.chatSessions,
-        durable: durable.chatSessions,
+        local: local.chatSessions || [],
+        durable: durable.chatSessions || [],
     });
     return merged;
 }
