@@ -89,7 +89,6 @@ import {
     buildCanvasNodeMentionReferenceMap,
     buildCanvasResourceReferences,
     getContextResourceNodes,
-    normalizeCanvasNodeMentionTokens,
     reorderCanvasResourceConnections,
     replaceCanvasReferenceMentions,
     type CanvasResourceReference,
@@ -1919,24 +1918,6 @@ function InfiniteCanvasPage() {
         dialogNodeId,
     });
     const renderedConnections = showConnections ? displayConnections : [];
-    useEffect(() => {
-        setNodes((current) => {
-            let changed = false;
-            const next = current.map((node) => {
-                const references = mentionReferencesByNodeId.get(node.id);
-                const savedPrompt = node.metadata?.composerContent ?? node.metadata?.prompt;
-                if (!references?.length || !savedPrompt?.includes("@[node:")) return node;
-                const normalizedPrompt = normalizeCanvasNodeMentionTokens(savedPrompt, references);
-                if (normalizedPrompt === savedPrompt) return node;
-                changed = true;
-                return {
-                    ...node,
-                    metadata: node.metadata?.composerContent !== undefined ? { ...node.metadata, composerContent: normalizedPrompt } : { ...node.metadata, prompt: normalizedPrompt },
-                };
-            });
-            return changed ? next : current;
-        });
-    }, [mentionReferencesByNodeId, setNodes]);
     const dialogNodeCandidate = dialogNodeId ? nodeById.get(dialogNodeId) || null : null;
     const dialogNode = canOpenCanvasNodePromptPanel(dialogNodeCandidate) ? dialogNodeCandidate : null;
     // dragPreview is published on the same pointer-down frame as isNodeDragging.

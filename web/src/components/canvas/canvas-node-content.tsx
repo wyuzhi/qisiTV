@@ -305,6 +305,11 @@ function ErrorContent({ node, theme, onRetry, onReloadResource, onOpenTaskDetail
     return (
         <div className="flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
             <div className="w-full" style={{ color: submissionUncertain ? theme.node.text : theme.accent.danger }}>
+                {node.metadata?.taskRecoveryError ? (
+                    <p role="alert" className="mb-2 max-h-28 overflow-y-auto text-xs leading-relaxed">
+                        {node.metadata.taskRecoveryError}
+                    </p>
+                ) : null}
                 <GenerationFailureNotice
                     compact
                     explanation={explanation}

@@ -29,6 +29,48 @@ describe("canvas node copy title", () => {
 });
 
 describe("canvas generation copy metadata", () => {
+    test("copying connected nodes remaps identity prompts to the copied image", () => {
+        const image: CanvasNodeData = { id: "A", type: CanvasNodeType.Image, title: "参考", position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { content: "data:image/png;base64,a" } };
+        const video: CanvasNodeData = { ...image, id: "V", type: CanvasNodeType.Video, metadata: { prompt: "@[node:A]人物移动", composerContent: "@[node:A]人物移动" } };
+        const idMap = new Map([["A", "A-copy"], ["V", "V-copy"]]);
+        const graph = [image, video].map((source) => ({ ...source, id: idMap.get(source.id)!, metadata: isolateCopiedNodeMetadata(source, idMap) }));
+        const copied = graph[1];
+        expect(copied.metadata.prompt).toBe("@[node:A-copy]人物移动");
+        expect(copied.metadata.composerContent).toBe("@[node:A-copy]人物移动");
+        const context = buildNodeGenerationContext(copied.id, graph, [{ id: "edge-copy", fromNodeId: "A-copy", toNodeId: copied.id }], copied.metadata.composerContent!, [], true, { preserveMediaBindings: true });
+        expect(context.referenceImages.map((item) => item.id)).toEqual(["A-copy"]);
+        expect(context.boundMediaMentions).toEqual([{ token: "@[node:A-copy]", kind: "image", referenceId: "A-copy" }]);
+        expect(video.metadata?.composerContent).toBe("@[node:A]人物移动");
+    });
+
+    test("copy remaps exact identity tokens in text and self references while preserving external IDs", () => {
+        const original = "A @[node:A] @[node:A-long] @[node:external] @[asset:A] @图片1 @[node:A]";
+        const source: CanvasNodeData = { id: "A", type: CanvasNodeType.Text, title: "文本", position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { content: original, prompt: original, composerContent: original } };
+        const idMap = new Map([["A", "A-copy"]]);
+        const expected = "A @[node:A-copy] @[node:A-long] @[node:external] @[asset:A] @图片1 @[node:A-copy]";
+        const copied = isolateCopiedNodeMetadata(source, idMap);
+        expect(copied.content).toBe(expected);
+        expect(copied.prompt).toBe(expected);
+        expect(copied.composerContent).toBe(expected);
+        expect(isolateCopiedNodeMetadata({ ...source, type: CanvasNodeType.Image }, idMap).content).toBe(original);
+        expect(source.metadata?.content).toBe(original);
+
+        const image: CanvasNodeData = { ...source, type: CanvasNodeType.Image, metadata: { content: "data:image/png;base64,a", composerContent: "@[node:A]变清晰" } };
+        const imageCopy = { ...image, id: "A-copy", metadata: isolateCopiedNodeMetadata(image, idMap) };
+        expect(buildNodeGenerationContext(imageCopy.id, [imageCopy], [], imageCopy.metadata.composerContent!, []).referenceImages.map((item) => item.id)).toEqual(["A-copy"]);
+    });
+
+    test("copied text content keeps nested references bound to copied media", () => {
+        const image: CanvasNodeData = { id: "A", type: CanvasNodeType.Image, title: "参考", position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { content: "data:image/png;base64,a" } };
+        const text = { ...image, id: "text", type: CanvasNodeType.Text, metadata: { content: "@[node:A]保持服装" } };
+        const video = { ...image, id: "video", type: CanvasNodeType.Video, metadata: { composerContent: "@[node:text]动起来" } };
+        const idMap = new Map([["A", "A-copy"], ["text", "text-copy"], ["video", "video-copy"]]);
+        const graph = [image, text, video].map((source) => ({ ...source, id: idMap.get(source.id)!, metadata: isolateCopiedNodeMetadata(source, idMap) }));
+        const context = buildNodeGenerationContext("video-copy", graph, ["A-copy", "text-copy"].map((id) => ({ id: `edge-${id}`, fromNodeId: id, toNodeId: "video-copy" })), graph[2].metadata.composerContent!, [], true, { preserveMediaBindings: true });
+        expect(context.prompt).toContain("@[node:A-copy]保持服装");
+        expect(context.boundMediaMentions).toEqual([{ token: "@[node:A-copy]", kind: "image", referenceId: "A-copy" }]);
+    });
+
     test.each([CanvasNodeType.Image, CanvasNodeType.Video, CanvasNodeType.Audio])("%s 副本不继承原节点的生成提交标记", (type) => {
         const source: CanvasNodeData = {
             id: "source", type, title: "结果", position: { x: 0, y: 0 }, width: 340, height: 240,

@@ -117,6 +117,7 @@ type VideoCapabilityConfig struct {
 
 type VideoReferenceConfig struct {
 	PromptMaxChars        int     `json:"promptMaxChars"`
+	PromptMaxUTF16Units   int     `json:"promptMaxUtf16Units"`
 	MinImages             int     `json:"minImages"`
 	MaxImages             int     `json:"maxImages"`
 	MaxImageBytes         int64   `json:"maxImageBytes"`
@@ -148,10 +149,9 @@ type VideoReferenceConfig struct {
 	MaxAudioTotalDuration int     `json:"maxAudioTotalDurationSeconds,omitempty"`
 }
 
-// DefaultVideoPromptMaxChars 是普通视频模型提示词字符数的默认上限。
-// 视频提示词由输入框文本、连线内容和技能上下文合成，远长于用户手输内容；
-// 默认值过小会把画布工作流正常可用的提示词拦在本地。管理员仍可按模型覆盖。
-const DefaultVideoPromptMaxChars = 8000
+// DefaultVideoPromptMaxChars 为 0 时交由服务商校验未公开的字符限制。
+// 已公开的接口合同与用户保存的明确限制仍然生效。
+const DefaultVideoPromptMaxChars = 0
 
 type VideoDurationConfig struct {
 	Selection string `json:"selection"`
@@ -268,8 +268,9 @@ func DefaultModelCapabilityConfigForModel(protocol string, modelName string) *Mo
 		streaming = false
 	}
 	text := &TextCapabilityConfig{Streaming: &streaming, References: TextReferenceConfig{PromptMaxChars: 32000}}
+	promptMaxChars, promptMaxUTF16Units := videoPromptLimits(protocol, modelName)
 	video := &VideoCapabilityConfig{
-		References:        VideoReferenceConfig{PromptMaxChars: DefaultVideoPromptMaxChars, MinImages: 0, MaxImages: 9, MaxImageBytes: 30 * 1024 * 1024, MaxVideos: 0, MaxVideoBytes: 0, MaxVideoDuration: 0, MaxAudios: 0, MaxAudioBytes: 0, MaxAudioDuration: 0},
+		References:        VideoReferenceConfig{PromptMaxChars: promptMaxChars, PromptMaxUTF16Units: promptMaxUTF16Units, MinImages: 0, MaxImages: 9, MaxImageBytes: 30 * 1024 * 1024, MaxVideos: 0, MaxVideoBytes: 0, MaxVideoDuration: 0, MaxAudios: 0, MaxAudioBytes: 0, MaxAudioDuration: 0},
 		Duration:          VideoDurationConfig{Selection: "range", Min: 1, Max: 15, Step: 1, Default: 6},
 		Ratios:            []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"},
 		DefaultRatio:      "16:9",
@@ -746,8 +747,11 @@ func validateImageCapabilityConfig(value *ImageCapabilityConfig) error {
 }
 
 func validateVideoCapabilityConfig(value *VideoCapabilityConfig) error {
-	if value.References.PromptMaxChars < 1 || value.References.PromptMaxChars > 1000000 {
-		return BadAuthRequest("提示词最大字符数必须在 1-1000000 之间")
+	if value.References.PromptMaxChars < 0 || value.References.PromptMaxChars > 1000000 {
+		return BadAuthRequest("提示词最大字符数必须在 0-1000000 之间，0 表示交由服务商校验")
+	}
+	if value.References.PromptMaxUTF16Units < 0 || value.References.PromptMaxUTF16Units > 1000000 {
+		return BadAuthRequest("提示词最大 UTF-16 单位数必须在 0-1000000 之间，0 表示交由服务商校验")
 	}
 	for name, number := range map[string]int{"最少图片引用数": value.References.MinImages, "最大图片引用数": value.References.MaxImages, "最大视频引用数": value.References.MaxVideos, "最大音频引用数": value.References.MaxAudios} {
 		if number < 0 || number > 100 {
@@ -853,7 +857,8 @@ func (s *Service) ValidateTaskCapability(input map[string]any) error {
 		profile := taskInput.Config.CapabilityConfig
 		if profile == nil || profile.Video == nil {
 			if taskInput.Config.InterfaceType != string(model.ChannelInterfaceAgnesVideo) {
-				return nil
+				defaults := DefaultModelCapabilityConfigForModel(taskInput.Config.InterfaceType, taskInput.Config.Model)
+				return validateVideoPromptLength(taskInput.Prompt, defaults.Video.References)
 			}
 			profile = DefaultModelCapabilityConfigForModel(taskInput.Config.InterfaceType, taskInput.Config.Model)
 		}
@@ -927,7 +932,7 @@ func validateVideoTask(profile *VideoCapabilityConfig, input canvasGenerationInp
 	if profile == nil {
 		return BadAuthRequest("当前视频模型能力参数无效")
 	}
-	if err := validateModelPromptLength("视频", input.Prompt, profile.References.PromptMaxChars); err != nil {
+	if err := validateVideoPromptLength(input.Prompt, profile.References); err != nil {
 		return err
 	}
 	if err := validateVideoReferenceMedia(profile, input); err != nil {
@@ -1043,7 +1048,7 @@ func validateWorkflowProviderPromptLength(input canvasGenerationInput) error {
 	if input.Mode != "video" || profile == nil || profile.Video == nil {
 		return nil
 	}
-	return validateModelPromptLength("视频", input.Prompt, profile.Video.References.PromptMaxChars)
+	return validateVideoPromptLength(input.Prompt, profile.Video.References)
 }
 
 func validateModelPromptLength(label string, prompt string, maxChars int) error {

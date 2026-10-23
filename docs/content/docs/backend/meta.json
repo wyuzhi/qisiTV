@@ -12,6 +12,7 @@
     "backend-database",
     "task-runtime-stability",
     "generation-errors",
+    "video-prompt-limits",
     "system-update",
     "desktop-updater"
   ]

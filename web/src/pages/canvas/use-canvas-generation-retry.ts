@@ -1,7 +1,8 @@
-import { useCallback, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useRef, type Dispatch, type SetStateAction } from "react";
 import { App } from "antd";
 
-import { buildNodeGenerationContext, hydrateNodeGenerationContext } from "@/components/canvas/canvas-node-generation";
+import { buildNodeGenerationContext, compileNodeGenerationReferences, hydrateNodeGenerationContext } from "@/components/canvas/canvas-node-generation";
+import { captureUserScope } from "@/lib/user-scope-guard";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import { buildEmotionImageArtifacts, emotionGenerationSize, emotionProviderMask, normalizeEmotionPromptForProvider, resolveEmotionEditPlan } from "@/lib/canvas/canvas-emotion";
 import {
@@ -30,6 +31,7 @@ import { navigateToSettings } from "@/lib/settings-navigation";
 import type { Skill } from "@/services/api/skills";
 import { skillRuntime, type SkillRuntimeMetadata } from "@/services/skill-runtime";
 import type { GenerationTask } from "@/services/api/task-center";
+import { retryStoredCanvasVideo, updateCanvasVideoRecoveryFeedback } from "@/services/canvas-video-retry";
 import { resolveImageUrl } from "@/services/image-storage";
 import { resolveModelRequestConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import type { Asset } from "@/stores/use-asset-store";
@@ -48,7 +50,7 @@ type UseCanvasGenerationRetryOptions = {
     startGenerationRequest: (targetNodeId: string, originNodeId: string, runningId?: string, controller?: AbortController) => AbortController;
     finishGenerationRequest: (targetNodeId: string, controller: AbortController) => void;
     bindGenerationTask: (targetNodeId: string, task: GenerationTask) => void;
-    applyGenerationTaskResult: (targetNodeId: string, task: GenerationTask) => Promise<void>;
+    applyGenerationTaskResult: (targetNodeId: string, task: GenerationTask, options?: { signal?: AbortSignal; assertCurrent?: () => void }) => Promise<void>;
 };
 
 const NODE_STATUS_LOADING = "loading" as const;
@@ -72,12 +74,52 @@ export function useCanvasGenerationRetry({
     const { message } = App.useApp();
     const effectiveConfig = useEffectiveConfig();
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
+    const projectIdRef = useRef(projectId);
+    projectIdRef.current = projectId;
+    const retryingVideos = useRef(new Set<string>());
 
     return useCallback(
         async (node: CanvasNodeData) => {
             const retryMode = retryModeForNode(node.type);
             if (!retryMode) {
                 message.warning("当前节点不能使用通用生成重试");
+                return;
+            }
+            if (retryMode === "video" && node.metadata?.taskId && node.metadata.status === "error") {
+                const taskId = node.metadata.taskId;
+                if (retryingVideos.current.has(taskId)) return;
+                retryingVideos.current.add(taskId);
+                const scope = captureUserScope();
+                const isCurrentRequest = () => {
+                    const currentScope = captureUserScope();
+                    return projectIdRef.current === projectId && currentScope.userScope === scope.userScope && currentScope.epoch === scope.epoch;
+                };
+                const controller = startGenerationRequest(node.id, node.id);
+                setRunningNodeId(node.id);
+                let recoveredTaskId = taskId;
+                setNodes((current) => isCurrentRequest() ? updateCanvasVideoRecoveryFeedback(current, node.id, taskId) : current);
+                try {
+                    const task = await retryStoredCanvasVideo(taskId, controller.signal, (update) => {
+                        if (isCurrentRequest()) {
+                            recoveredTaskId = update.id;
+                            bindGenerationTask(node.id, update);
+                            setNodes((current) => isCurrentRequest() ? updateCanvasVideoRecoveryFeedback(current, node.id, update.id) : current);
+                        }
+                    });
+                    if (isCurrentRequest() && !controller.signal.aborted) await applyGenerationTaskResult(node.id, task, {
+                        signal: controller.signal,
+                        assertCurrent: () => { if (!isCurrentRequest()) throw new DOMException("画布已切换", "AbortError"); },
+                    });
+                } catch (error) {
+                    if (!isGenerationCanceled(error) && isCurrentRequest()) {
+                        const feedback = error instanceof Error ? error.message : "原视频任务恢复失败，请稍后重新查询原任务";
+                        setNodes((current) => isCurrentRequest() ? updateCanvasVideoRecoveryFeedback(current, node.id, recoveredTaskId, feedback) : current);
+                    }
+                } finally {
+                    retryingVideos.current.delete(taskId);
+                    finishGenerationRequest(node.id, controller);
+                    if (isCurrentRequest()) setRunningNodeId(null);
+                }
                 return;
             }
             const batchRoot = node.metadata?.batchRootId ? nodesRef.current.find((item) => item.id === node.metadata?.batchRootId) : null;
@@ -112,7 +154,7 @@ export function useCanvasGenerationRetry({
                 const promptOnly = retryMode === "video";
                 if (useStoredSource) rawContext = null;
                 else {
-                    const baseContext = buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, retryContextPrompt, assets, promptOnly);
+                    const baseContext = buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, retryContextPrompt, assets, promptOnly, { preserveMediaBindings: retryMode === "video" });
                     rawContext = await hydrateNodeGenerationContext(baseContext, projectId, domainProjectId, retryMode, retryMode === "video" && supportsVideoReferenceAudio(generationConfig), !promptOnly);
                 }
             } catch (error) {
@@ -131,6 +173,7 @@ export function useCanvasGenerationRetry({
                 try {
                     const skillExecution = await skillRuntime.prepare({ profile: "canvas", prompt: rawContext.prompt, skills: addedSkills });
                     context = { ...rawContext, prompt: skillExecution.prompt };
+                    if (retryMode === "video") context = compileNodeGenerationReferences(context, generationConfig, buildVideoGenerationMetadata(node, context, generationConfig).videoEditOperation);
                     skillMetadata = skillExecution.metadata;
                 } catch (error) {
                     message.error(error instanceof Error ? error.message : "技能上下文加载失败");

@@ -171,6 +171,7 @@ export function ChannelModelSettings({ channel, onChange }: { channel: ModelChan
                         children: <div inert={Boolean(testingModel)}>
                             {activeCapability === "image" || activeCapability === "video" ? (
                                 <ModelCapabilityEditor
+                                    baseUrl={channel.baseUrl}
                                     capability={activeCapability}
                                     model={activeModel}
                                     value={activeModelProfile?.capabilityConfig || defaultModelCapabilityConfig(activeProtocol, activeModel)}

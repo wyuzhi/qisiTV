@@ -222,6 +222,7 @@ type VideoCapabilityConfig struct {
 
 type VideoReferenceConfig struct {
 	PromptMaxChars        int     `json:"promptMaxChars"`
+	PromptMaxUTF16Units   int     `json:"promptMaxUtf16Units"`
 	MinImages             int     `json:"minImages"`
 	MaxImages             int     `json:"maxImages"`
 	MaxImageBytes         int64   `json:"maxImageBytes"`

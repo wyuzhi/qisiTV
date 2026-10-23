@@ -2,8 +2,11 @@ qisiTV
 Copyright (C) 2026 qisiTV contributors
 Copyright (C) 2026 BeefTV contributors
 
-qisiTV is distributed under the MIT License. The complete license text is
-provided in LICENSE.
+qisiTV includes historical MIT material and independent qisiTV contributions,
+plus selected later BeefTV additions under its Source Available License 1.0.
+LICENSE describes the boundary; the complete upstream terms are retained in
+licenses/BeefTV-Source-Available-1.0.txt. Do not treat the new covered portions
+as MIT or assume that deployment permissions transfer to downstream users.
 
 Project scope
 -------------
@@ -42,6 +45,13 @@ The 2026-10-22 adaptation uses MIT-published changes from e126cf93,
 f6735161 and 5e74aaa3, all present in the MIT snapshot
 2327ee2d80282b10dd8bef0f26b48990d46f5c3b. It does not incorporate the new
 material covered by BeefTV's subsequent Source Available License.
+
+Starting with qisiTV v1.5.17, the video prompt-limit, stable media-reference
+and video task-recovery adaptations incorporate selected changes from
+8a14a160afa4e248eddaf966857b920038a15e64 under Part A of that license.
+Affected components and verification are recorded in
+docs/upstream-sync-20261024.md. This is a modified qisiTV release and does not
+imply endorsement by BeefTV or change the licenses of historical material.
 
 BeefTV changes
 --------------

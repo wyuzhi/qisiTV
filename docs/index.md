@@ -26,6 +26,7 @@ qisiTV 是一个本地优先、轻量、AI Native 的视频工作台。本页只
 - [后端数据库](content/docs/backend/backend-database.mdx)
 - [任务运行时稳定性](content/docs/backend/task-runtime-stability.mdx)
 - [生成失败归类](content/docs/backend/generation-errors.mdx)
+- [视频提示词限制](content/docs/backend/video-prompt-limits.mdx)
 - [系统更新](content/docs/backend/system-update.mdx)
 - [插件系统](content/docs/plugins/plugin-system.mdx)
 - [插件界面扩展](content/docs/plugins/plugin-surfaces.mdx)

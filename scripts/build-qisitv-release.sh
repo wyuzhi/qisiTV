@@ -98,6 +98,8 @@ PLUGIN_RESOURCE_DIR="$APP_BUNDLE/Contents/Resources/plugin-packages"
 mkdir -p "$PLUGIN_RESOURCE_DIR"
 cp "$ROOT_DIR/plugin-packages/"*.qisitv-plugin "$PLUGIN_RESOURCE_DIR/"
 cp "$ROOT_DIR/LICENSE" "$ROOT_DIR/NOTICE" "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$APP_BUNDLE/Contents/Resources/"
+mkdir -p "$APP_BUNDLE/Contents/Resources/licenses"
+cp "$ROOT_DIR/licenses/BeefTV-Source-Available-1.0.txt" "$APP_BUNDLE/Contents/Resources/licenses/"
 
 # Keep the generated macOS bundle metadata aligned with the repository version.
 APP_PLIST="$APP_BUNDLE/Contents/Info.plist"

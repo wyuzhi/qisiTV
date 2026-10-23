@@ -1048,7 +1048,7 @@ function splitMentionText(value: string, references: CanvasResourceReference[]) 
     references.forEach((reference) => {
         const serializedToken = canvasResourceMentionToken(reference);
         referenceByToken.set(serializedToken, { reference, serializedToken });
-        referenceByToken.set(`@${reference.label}`, { reference, serializedToken });
+        referenceByToken.set(`@${reference.label}`, { reference, serializedToken: `@${reference.label}` });
         if (reference.nodeId && !reference.assetId) referenceByToken.set(`@[node:${reference.nodeId}]`, { reference, serializedToken });
     });
     const tokens = [...referenceByToken.keys()].sort((a, b) => b.length - a.length);

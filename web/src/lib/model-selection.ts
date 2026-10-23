@@ -105,14 +105,15 @@ export function modelCompatibilityError(config: AiConfig, model: string, require
 export function modelPromptLengthError(config: AiConfig, model: string, capability: ModelCapability, prompt: string) {
     const channel = resolveModelChannel(config, model);
     const configuredProfile = channel.modelProfiles?.find((item) => item.model === modelOptionName(model))?.capabilityConfig;
-    if (!configuredProfile) return "";
+    if (!configuredProfile && capability !== "video") return "";
     const profile = modelCapabilityConfigFor(config, model);
     const maxChars = capability === "text" ? profile.text?.references.promptMaxChars : capability === "image" ? profile.image?.references.promptMaxChars : capability === "video" ? profile.video?.references.promptMaxChars : undefined;
-    if (!maxChars || maxChars <= 0) return "";
     const actualChars = Array.from(prompt).length;
-    if (actualChars <= maxChars) return "";
     const label = capability === "text" ? "文本" : capability === "image" ? "图片" : "视频";
-    return `当前${label}模型提示词最多 ${maxChars} 个字符，完整提示词为 ${actualChars} 个字符。系统不会自动截断，请精简当前输入、连线内容或技能上下文后重试`;
+    if (maxChars && maxChars > 0 && actualChars > maxChars) return `当前${label}模型提示词最多 ${maxChars} 个字符，完整提示词为 ${actualChars} 个字符。系统不会自动截断，请精简当前输入、连线内容或技能上下文后重试`;
+    const maxUnits = capability === "video" ? profile.video?.references.promptMaxUtf16Units : 0;
+    if (maxUnits && maxUnits > 0 && prompt.length > maxUnits) return `当前视频模型提示词最多 ${maxUnits} 个长度单位，完整提示词为 ${prompt.length} 个单位（此通道按 UTF-16 计数，常见表情占 2 个单位）。系统不会自动截断，请精简后重试`;
+    return "";
 }
 
 export function modelRequestOptions(config: AiConfig, capability: ModelCapability) {

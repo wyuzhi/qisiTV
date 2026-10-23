@@ -1,4 +1,5 @@
 import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
+import type { ModelProtocol } from "@/lib/model-protocols";
 
 export const OFFICIAL_LIKEAI_BASE_URL = "https://task.likeai.pro/task-api";
 export const QISI_API_BASE_URL = "https://cheeser.link/api-service/likeai";
@@ -10,6 +11,13 @@ export function isQisiAPI(baseUrl: unknown) {
 
 export function isQisiModel(model: string) {
     return model === "doubao_seedream_4_5" || model === "doubao_seedance_2_5";
+}
+
+/** qisi API shares LikeAI's wire protocol, but has its own endpoint limits. */
+export function modelCapabilityDefaultsForService(protocol: ModelProtocol | undefined, model: string, baseUrl?: string) {
+    return isQisiAPI(baseUrl) && isQisiModel(model) && protocol?.startsWith("likeai-")
+        ? qisiModelCapabilities(model)
+        : defaultModelCapabilityConfig(protocol, model);
 }
 
 /** Only these two fixed services may receive generation credentials. */

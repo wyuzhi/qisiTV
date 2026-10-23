@@ -16,11 +16,8 @@ test("switching to MiniMax H3 replaces an unsupported 720p value with 768P", () 
     });
 });
 
-// 视频提示词由「输入框文本 + 连线内容 + 技能上下文」合成，技能上下文预算为 32000，
-// 合成结果远长于用户手输内容。默认上限过小会把正常可用的画布工作流拦在本地预检。
-// 这里锁定默认值本身，避免被改回偏小值（前端放行/后端拒绝的判定必须同源）。
-test("video prompt default allows a composed canvas prompt", () => {
-    assert.equal(DEFAULT_VIDEO_PROMPT_MAX_CHARS, 8000);
+test("undocumented video prompt defaults defer to the supplier", () => {
+    assert.equal(DEFAULT_VIDEO_PROMPT_MAX_CHARS, 0);
     for (const protocol of [undefined, "seedance-videos-compatible", "agnes-video", "volcengine-ark-video"]) {
         const profile = defaultModelCapabilityConfig(protocol, "test-model");
         assert.equal(profile.video!.references.promptMaxChars, DEFAULT_VIDEO_PROMPT_MAX_CHARS);

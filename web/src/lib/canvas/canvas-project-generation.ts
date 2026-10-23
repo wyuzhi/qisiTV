@@ -192,6 +192,7 @@ export function resetGenerationTaskMetadata(metadata: CanvasNodeMetadata | undef
         externalAgent: false,
         status,
         errorDetails: undefined,
+        taskRecoveryError: undefined,
         generationErrorCode: undefined,
         resourceReloadAvailable: undefined,
         failedPromptFingerprint: undefined,

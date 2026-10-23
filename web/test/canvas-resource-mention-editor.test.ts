@@ -7,6 +7,16 @@ function source(path: string) {
 }
 
 describe("canvas resource mention editor", () => {
+    test("reference preflight errors remain visible when transient notifications are hidden", () => {
+        const executor = source("../src/pages/canvas/use-canvas-generation-executor.ts");
+        const compileStart = executor.indexOf("rawGenerationContext = compileNodeGenerationReferences(");
+        const rejection = executor.slice(compileStart, executor.indexOf("let styleMetadata", compileStart));
+        expect(rejection).toContain('modal.error({ title: "参考素材需要调整", content: generationErrorMessage(error) })');
+        expect(rejection).toMatch(/modal\.error\([^;]+;\s*return;/);
+        expect(rejection).not.toContain("message.error");
+        expect(compileStart).toBeLessThan(executor.indexOf("const controller = startGenerationRequest("));
+    });
+
     test("refreshes async reference previews even when prompt text has not changed", () => {
         const component = source("../src/components/canvas/canvas-resource-mention-textarea.tsx");
         const unchangedTextBranch = component.match(/if \(currentValue === value && lastRenderedValueRef.current === value\) \{([^}]+)\}/)?.[1] || "";

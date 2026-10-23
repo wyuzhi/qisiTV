@@ -170,14 +170,14 @@ test("Scenario 1: Asset library multi-level folder navigation, back button, sele
     expect(underlyingText).toContain("UnderlyingClicks: 0");
 }, 30000);
 
-test("source names are visible while the serialized prompt keeps its stable reference label", async () => {
+test("source names are visible while the serialized prompt keeps the selected node identity", async () => {
     const input = page.locator('[role="textbox"]');
     await clearRichEditor(page, input);
     await input.pressSequentially("Reference: @");
     const item = page.locator(".canvas-resource-mention-item", { hasText: "角色正面参考" });
     await item.click();
     expect(await input.locator(".canvas-resource-inline-label").innerText()).toBe("角色正面参考");
-    expect(await page.locator("#rich-prompt-display").innerText()).toContain("@图片1");
+    expect(await page.locator("#rich-prompt-display").innerText()).toContain("@[node:named-image]");
     expect(await page.locator("#rich-prompt-display").innerText()).not.toContain("角色正面参考");
 }, 30_000);
 
@@ -196,7 +196,8 @@ test("Scenario 2: Primary menu nodes and skill buttons direct selection", async 
 
     await menu.waitFor({ state: "hidden", timeout: 5000 });
     let promptText = await page.locator("#rich-prompt-display").innerText();
-    expect(promptText).toContain("@音频节点 1");
+    expect(promptText).toContain("@[node:node-1]");
+    expect(await input.locator(".canvas-resource-inline-mention").innerText()).toContain("音频节点 1");
 
     // 2. 选择技能库（智能分镜技能）
     await input.focus();
@@ -280,7 +281,7 @@ test("Scenario 5: Plain textarea mode keyboard navigation and Tab selection", as
 
     await menu.waitFor({ state: "hidden", timeout: 5000 });
     const plainText = await page.locator("#plain-prompt-display").innerText();
-    expect(plainText).toContain("@音频节点 1");
+    expect(plainText).toContain("@[node:node-1]");
 }, 30000);
 
 test("Scenario 6: Click internal menu space does not close; outside click closes", async () => {
@@ -354,7 +355,7 @@ test("a held pointer leaves the menu mounted until click completion", async () =
         await page.mouse.up();
     }
     await menu.waitFor({ state: "hidden" });
-    expect(await page.locator("#rich-prompt-display").innerText()).toContain("@音频节点 1");
+    expect(await page.locator("#rich-prompt-display").innerText()).toContain("@[node:node-1]");
 });
 
 test("search ArrowUp and ArrowDown select the highlighted result instead of the first match", async () => {
@@ -371,7 +372,7 @@ test("search ArrowUp and ArrowDown select the highlighted result instead of the 
     await search.press("ArrowDown");
     await search.press("Tab");
     await menu.waitFor({ state: "hidden" });
-    expect(await page.locator("#rich-prompt-display").innerText()).toContain("@提示词节点 2");
+    expect(await page.locator("#rich-prompt-display").innerText()).toContain("@[node:node-2]");
 });
 
 test("Backspace removes an entire mention and separator without triggering canvas deletion", async () => {

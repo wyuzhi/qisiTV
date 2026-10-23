@@ -22,6 +22,7 @@ for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 wi
   cp "$repo_dir/scripts/connector/README.txt" "$package_dir/$package_name/README.txt"
   cp "$repo_dir/LICENSE" "$repo_dir/NOTICE" "$repo_dir/THIRD_PARTY_NOTICES.md" "$package_dir/$package_name/"
   mkdir "$package_dir/$package_name/licenses"
+  cp "$repo_dir/licenses/BeefTV-Source-Available-1.0.txt" "$package_dir/$package_name/licenses/"
   cp "$(go env GOROOT)/LICENSE" "$package_dir/$package_name/licenses/Go-LICENSE"
   while IFS='|' read -r module_name module_dir; do
     [[ -n "$module_name" && "$module_name" != qisitv/backend ]] || continue

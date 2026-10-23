@@ -32,6 +32,26 @@ function connection(fromNodeId: string): CanvasConnection {
 }
 
 describe("canvas node generation position mentions", () => {
+    test("identity references touching prose still include the selected image", () => {
+        const source = node("image-self", CanvasNodeType.Image, "data:image/png;base64,a");
+        for (const suffix of [" 人物变清晰", "人物变清晰", "高清", "sharp", "。", "@[node:image-self]"]) {
+            const context = buildNodeGenerationContext(source.id, [source], [], `@[node:image-self]${suffix}`, []);
+            expect(context.referenceImages.map((image) => image.id)).toEqual([source.id]);
+            expect(context.prompt).not.toContain("@[node:");
+            expect(context.prompt).toContain("@图片1");
+        }
+        expect(() => buildNodeGenerationContext(source.id, [source], [], "@[node:deleted]人物变清晰", [])).toThrow("没有对应的画布资源");
+    });
+
+    test("identity text references next to prose expand without requiring whitespace", () => {
+        const target = targetNode();
+        const text = node("note", CanvasNodeType.Text, "保持角色服装");
+        const context = buildNodeGenerationContext(target.id, [text, target], [connection(text.id)], "@[node:note]并开始", []);
+        expect(context.prompt).toContain("【文本1】并开始");
+        expect(context.prompt).toContain("保持角色服装");
+        expect(context.prompt).not.toContain("@[node:");
+    });
+
     test("已有图片节点显式引用自身时作为图生图参考图提交", () => {
         const source = node("image-self", CanvasNodeType.Image, "data:image/png;base64,a");
         source.metadata.composerContent = "将 @图片1 图片变清晰";
@@ -84,6 +104,17 @@ describe("canvas node generation position mentions", () => {
         expect(context.prompt).toBe("让 @图片1 配合 @音频1");
     });
 
+    test("Markdown and quoted references select the same resource as plain mentions", () => {
+        const target = targetNode();
+        const image = node("image-a", CanvasNodeType.Image, "data:image/png;base64,a");
+        for (const prompt of ["`@图片1`", '"@图片1"', "'@图片1'", "|@图片1|"]) {
+            const context = buildNodeGenerationContext(target.id, [image, target], [connection(image.id)], prompt, []);
+            expect(context.referenceImages.map((item) => item.id)).toEqual([image.id]);
+            expect(context.prompt).toBe(prompt);
+        }
+        expect(() => buildNodeGenerationContext(target.id, [target], [], "`@图片1`", [])).toThrow("@图片1 没有对应的画布资源");
+    });
+
     test("旧节点 token 只做读取迁移，不再进入生成提示词", () => {
         const target = targetNode();
         const image = node("image-a", CanvasNodeType.Image, "data:image/png;base64,a");
@@ -108,6 +139,47 @@ describe("canvas node generation position mentions", () => {
 });
 
 describe("canvas node generation video text references", () => {
+    test("rejects a conflicting IMAGE table before video generation", () => {
+        const target = targetNode();
+        const first = node("first", CanvasNodeType.Image, "data:image/png;base64,a");
+        const second = node("second", CanvasNodeType.Image, "data:image/png;base64,b");
+        const nodes = [first, second, target];
+        const connections = [connection(first.id), connection(second.id)];
+        const prompt = "@图片2 是乙，@图片1 是甲。\n| IMAGE 1 | `@second` | 乙 |";
+        expect(() => buildNodeGenerationContext(target.id, nodes, connections, prompt, [], true)).toThrow("IMAGE 1 对应图片2");
+        const corrected = prompt.replace("IMAGE 1", "IMAGE 2");
+        const context = buildNodeGenerationContext(target.id, nodes, connections, corrected, [], true);
+        expect(context.prompt).toBe(corrected);
+        expect(context.referenceImages.map((image) => image.id)).toEqual([first.id, second.id]);
+    });
+
+    test("checks the final selected image numbering and leaves text tasks alone", () => {
+        const first = node("first", CanvasNodeType.Image, "data:image/png;base64,a");
+        const second = node("second", CanvasNodeType.Image, "data:image/png;base64,b");
+        const target = targetNode();
+        const nodes = [first, second, target];
+        const connections = [connection(first.id), connection(second.id)];
+        const context = buildNodeGenerationContext(target.id, nodes, connections, "| IMAGE 1 | `@图片2` |", [], false);
+        expect(context.prompt).toBe("| IMAGE 1 | `@图片1` |");
+        expect(context.referenceImages.map((image) => image.id)).toEqual([second.id]);
+        target.type = CanvasNodeType.Text;
+        expect(() => buildNodeGenerationContext(target.id, nodes, connections, "| IMAGE 1 | `@图片2` |", [], true)).not.toThrow();
+    });
+
+    test("checks drawing and image labels against their shared upload order", () => {
+        const target = targetNode();
+        const drawing = node("sketch", CanvasNodeType.Drawing, "");
+        drawing.metadata.drawingId = "drawing-id";
+        const photo = node("photo", CanvasNodeType.Image, "data:image/png;base64,a");
+        const nodes = [drawing, photo, target];
+        const connections = [connection(drawing.id), connection(photo.id)];
+        expect(() => buildNodeGenerationContext(target.id, nodes, connections, "| IMAGE 1 | @图片1 |", [], true)).toThrow("IMAGE 1 对应图片2");
+        const prompt = "| IMAGE 1 | @绘图1 |\n| IMAGE 2 | @图片1 |";
+        const context = buildNodeGenerationContext(target.id, nodes, connections, prompt, [], true);
+        expect(context.prompt).toBe(prompt);
+        expect(context.referenceImages.map((image) => image.id)).toEqual([drawing.id, photo.id]);
+    });
+
     test("视频 promptOnly 下显式 @文本 引用仍内联真实内容，图片保持结构化引用", () => {
         const target = targetNode();
         const image = node("image-a", CanvasNodeType.Image, "data:image/png;base64,a");

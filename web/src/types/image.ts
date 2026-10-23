@@ -2,6 +2,8 @@ import type { CanvasColorGrade } from "@/lib/canvas/canvas-color-grade";
 
 export type ReferenceImage = {
     id: string;
+    /** Retain the source character card when several cards contribute images. */
+    sourceNodeId?: string;
     name: string;
     type: string;
     dataUrl: string;

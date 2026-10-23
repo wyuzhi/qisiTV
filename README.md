@@ -100,3 +100,5 @@ qisiTV 正在快速迭代，数据结构和外部接口仍可能变化。建议�
 欢迎提交 Issue 和 Pull Request。开发流程与测试要求见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
 项目按照 [`LICENSE`](LICENSE) 发布；上游来源、保留声明与第三方归属见 [`NOTICE`](NOTICE)。
+
+历史 MIT 内容及独立 qisiTV 贡献继续采用 MIT。v1.5.17 起选择适配的上游新增内容保留 [BeefTV Source Available License 1.0](licenses/BeefTV-Source-Available-1.0.txt)，不能把整个新版本视作 MIT；使用这些内容对外提供网站服务需要相应授权。具体来源见 [同步记录](docs/upstream-sync-20261024.md)。

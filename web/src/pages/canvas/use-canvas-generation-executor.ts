@@ -2,9 +2,9 @@ import { isCanvasNodeGenerating } from "@/lib/canvas/canvas-node-task-state";
 import { useCallback, useRef, type Dispatch, type SetStateAction } from "react";
 import { App } from "antd";
 
-import { buildNodeGenerationContext, hydrateNodeGenerationContext } from "@/components/canvas/canvas-node-generation";
+import { compileNodeGenerationReferences, buildNodeGenerationContext, hydrateNodeGenerationContext } from "@/components/canvas/canvas-node-generation";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
-import { buildGenerationConfig, isGenerationCanceled } from "@/lib/canvas/canvas-project-generation";
+import { buildGenerationConfig, buildVideoGenerationMetadata, isGenerationCanceled } from "@/lib/canvas/canvas-project-generation";
 import { canvasGenerationPromptMetadata, canvasGenerationRequestFingerprint, runCanvasGenerationSubmissionOnce } from "@/lib/canvas/canvas-generation-submission";
 import { isGenerationTaskCapacityError } from "@/lib/canvas/canvas-generation-batch";
 import { buildPortraitTexturePrompt } from "@/lib/canvas/canvas-portrait-texture";
@@ -160,6 +160,7 @@ export function useCanvasGenerationExecutor({
                             editingTextNode ? buildTextRewritePrompt(sourceTextContent, prompt) : generationPrompt,
                             assets,
                             promptOnly,
+                            { preserveMediaBindings: mode === "video" },
                         );
                         const requirements = generationModelRequirements(mode, baseContext, sourceNode, generationConfig, true);
                         generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode, requirements);
@@ -185,6 +186,15 @@ export function useCanvasGenerationExecutor({
                         return;
                     }
                     let effectivePrompt = skillExecution.prompt.trim();
+                    if (mode === "video") {
+                        try {
+                            rawGenerationContext = compileNodeGenerationReferences({ ...rawGenerationContext, prompt: effectivePrompt }, generationConfig, buildVideoGenerationMetadata(sourceNode, rawGenerationContext, generationConfig).videoEditOperation);
+                            effectivePrompt = rawGenerationContext.prompt;
+                        } catch (error) {
+                            modal.error({ title: "参考素材需要调整", content: generationErrorMessage(error) });
+                            return;
+                        }
+                    }
                     let styleMetadata = {};
                     if (mode === "image") {
                         try {
@@ -393,6 +403,7 @@ export function useCanvasGenerationExecutor({
             finishGenerationRequest,
             isAiConfigReady,
             message,
+            modal,
             nodesRef,
             connectionsRef,
             projectId,

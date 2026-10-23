@@ -239,6 +239,8 @@ export type CanvasNodeMetadata = {
     fileUploadProgress?: number;
     locked?: boolean;
     errorDetails?: string;
+    /** 原任务恢复的反馈，不参与生成失败分类或重试资格判断。 */
+    taskRecoveryError?: string;
     generationErrorCode?: string;
     resourceReloadAvailable?: boolean;
     failedPromptFingerprint?: string;

@@ -4,8 +4,10 @@ This file records direct dependencies and bundled third-party assets in the
 qisiTV source tree, including assets inherited from BeefTV. Transitive dependency notices remain available
 in the dependency packages installed from `bun.lock` and `backend/go.sum`.
 
-The repository MIT license applies to project-authored material. Each component
-below remains subject to its own license.
+The repository MIT license applies to historical MIT material and independent
+qisiTV contributions. Selected later BeefTV additions have separate Source
+Available terms; see LICENSE, NOTICE and licenses/BeefTV-Source-Available-1.0.txt.
+Each component below remains subject to its own license.
 
 ## Frontend runtime dependencies
 

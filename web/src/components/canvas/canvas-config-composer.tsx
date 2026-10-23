@@ -7,7 +7,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { isCanvasWorkflowProvider } from "@/lib/canvas/canvas-workflow";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
-import { generationInputMentionLabel, normalizeGenerationNodeMentionTokens, type NodeGenerationInput } from "./canvas-node-generation";
+import { generationInputMentionLabel, type NodeGenerationInput } from "./canvas-node-generation";
 import { CanvasVideoPromptTools } from "./canvas-video-prompt-tools";
 import { CanvasPresetPicker, type CanvasPromptPreset } from "./canvas-preset-picker";
 import type { CanvasGenerationMode, CanvasNodeMetadata, CanvasWorkspaceMode } from "@/types/canvas";
@@ -26,7 +26,7 @@ type CanvasConfigComposerProps = {
 
 type Token =
     | { type: "text"; value: string }
-    | { type: "reference"; nodeId: string };
+    | { type: "reference"; nodeId: string; token: string };
 
 type MentionState = {
     query: string;
@@ -54,8 +54,7 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
     const [presetOpen, setPresetOpen] = useState(false);
     const simpleMode = workspaceMode === "simple";
     const workflowVideoReferenceMode = generationMode === "video" && isCanvasWorkflowProvider(metadata);
-    const normalizedValue = useMemo(() => normalizeGenerationNodeMentionTokens(value, inputs), [inputs, value]);
-    const tokens = useMemo(() => parseComposerTokens(normalizedValue, inputs), [inputs, normalizedValue]);
+    const tokens = useMemo(() => parseComposerTokens(value, inputs), [inputs, value]);
     const referenceById = useMemo(() => new Map(inputs.map((input) => [input.nodeId, input])), [inputs]);
     const videoFrameOptions = useMemo(
         () =>
@@ -73,10 +72,6 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
     }, [inputs, mention, skillReferences]);
 
     useEffect(() => {
-        if (normalizedValue !== value) {
-            onChange(normalizedValue);
-            return;
-        }
         if (document.activeElement === editorRef.current) return;
         const editor = editorRef.current;
         if (!editor) return;
@@ -87,9 +82,9 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
                 return;
             }
             const input = referenceById.get(token.nodeId);
-            if (input) editor.append(createReferenceChip(input, inputs, theme, setImagePreview));
+            if (input) editor.append(createReferenceChip(input, inputs, theme, setImagePreview, token.token));
         });
-    }, [inputs, normalizedValue, onChange, referenceById, theme, tokens, value]);
+    }, [inputs, referenceById, theme, tokens]);
 
     const syncFromEditor = () => {
         const editor = editorRef.current;
@@ -344,11 +339,11 @@ function candidateSearchText(candidate: ComposerCandidate, inputs: NodeGeneratio
     return `${resourceLabel(candidate.input, inputs)} ${candidate.input.title} ${candidate.input.text || ""}`;
 }
 
-function createReferenceChip(input: NodeGenerationInput, inputs: NodeGenerationInput[], theme: (typeof canvasThemes)[keyof typeof canvasThemes], onImagePreview: (url: string) => void) {
+function createReferenceChip(input: NodeGenerationInput, inputs: NodeGenerationInput[], theme: (typeof canvasThemes)[keyof typeof canvasThemes], onImagePreview: (url: string) => void, token = `@[node:${input.nodeId}]`) {
     const wrapper = document.createElement("span");
     wrapper.contentEditable = "false";
     wrapper.dataset.referenceNodeId = input.nodeId;
-    wrapper.dataset.referenceToken = `@${generationInputMentionLabel(input, inputs)}`;
+    wrapper.dataset.referenceToken = token;
     wrapper.className = "mx-px inline-flex h-7 max-w-40 items-center justify-center overflow-hidden rounded-md border px-1 text-xs leading-none align-middle";
     Object.assign(wrapper.style, chipStyle(theme));
     const previewUrl = input.type === "image" && input.image && input.sourceKind !== "drawing" ? input.image.dataUrl : input.type === "video" ? input.previewUrl : "";
@@ -471,7 +466,7 @@ function parseComposerTokens(value: string, inputs: NodeGenerationInput[]): Toke
         const end = match.index + match[0].length;
         if (!input || (!match[1] && !hasMentionBoundary(value, end))) continue;
         if (match.index > lastIndex) tokens.push({ type: "text", value: value.slice(lastIndex, match.index) });
-        tokens.push({ type: "reference", nodeId: input.nodeId });
+        tokens.push({ type: "reference", nodeId: input.nodeId, token: match[0] });
         lastIndex = end;
     }
     if (lastIndex < value.length) tokens.push({ type: "text", value: value.slice(lastIndex) });

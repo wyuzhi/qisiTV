@@ -1,4 +1,5 @@
 import { generationErrorMessage } from "@/lib/generation-error";
+import { assertUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { http, apiBaseURL, type BackendEnvelope } from "@/services/api/request";
 import { consumeTaskTextStream, createTaskTextStreamParser, type TaskTextStreamEvent } from "@/services/api/task-text-stream";
 import { recordDiagnosticEvent } from "@/services/diagnostics/client-diagnostics";
@@ -198,9 +199,20 @@ async function collectGenerationTaskPages<T>(readPage: (request: GenerationTaskP
     return items.slice(0, limit);
 }
 
-export function queryGenerationTask(id: string, options?: { signal?: AbortSignal }) {
-    if (isBrowserWorkspace()) return browserLikeAITasks().query(id, options?.signal);
-    return http.get<GenerationTask>(`/tasks/${encodeURIComponent(id)}`, { signal: options?.signal });
+export type GenerationTaskRequestOptions = { signal?: AbortSignal; expectedScope?: CapturedUserScope };
+
+function checkTaskRequest(options?: GenerationTaskRequestOptions) {
+    options?.signal?.throwIfAborted();
+    if (options?.expectedScope) assertUserScope(options.expectedScope);
+}
+
+export async function queryGenerationTask(id: string, options?: GenerationTaskRequestOptions & { refreshProvider?: boolean }) {
+    checkTaskRequest(options);
+    const task = isBrowserWorkspace()
+        ? await browserLikeAITasks().query(id, options?.signal, options?.refreshProvider)
+        : await http.get<GenerationTask>(`/tasks/${encodeURIComponent(id)}`, { signal: options?.signal });
+    checkTaskRequest(options);
+    return task;
 }
 
 type GenerationTaskSubscriptionDependencies = {
@@ -299,9 +311,12 @@ export function queryTaskTextReplay(id: string, after = 0) {
     return http.get<TaskTextReplay>(`/tasks/${encodeURIComponent(id)}/text-deltas`, { params: { after } });
 }
 
-export function retryGenerationTask(id: string) {
+export async function retryGenerationTask(id: string, options?: GenerationTaskRequestOptions) {
+    checkTaskRequest(options);
     if (isBrowserWorkspace()) return Promise.reject(new Error("请在画布中明确重新生成；网页不会自动重新提交收费任务"));
-    return http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/retry`);
+    const task = await http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/retry`, undefined, { signal: options?.signal });
+    checkTaskRequest(options);
+    return task;
 }
 
 export function cancelGenerationTask(id: string) {
@@ -391,6 +406,7 @@ function safeTaskLogErrorCode(value: unknown) {
 export type WaitForGenerationTaskOptions = {
 	textEventsSource?: "task" | "agent";
     signal?: AbortSignal;
+    expectedScope?: CapturedUserScope;
     intervalMs?: number;
     timeoutMs?: number;
     initialTask?: GenerationTask;
@@ -404,6 +420,7 @@ export function shouldUseTaskTextEvents(options?: Pick<WaitForGenerationTaskOpti
 }
 
 export async function waitForGenerationTask(id: string, options?: WaitForGenerationTaskOptions) {
+    checkTaskRequest(options);
     if (!isBrowserWorkspace() && shouldUseTaskTextEvents(options)) return waitForGenerationTaskTextEvents(id, options || {});
     const startedAt = Date.now();
     const intervalMs = options?.intervalMs || 2000;
@@ -412,15 +429,16 @@ export async function waitForGenerationTask(id: string, options?: WaitForGenerat
     let consecutiveFailures = 0;
     try {
         while (Date.now() - startedAt < (options?.timeoutMs || taskWaitTimeoutMs(lastTask))) {
-            if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+            checkTaskRequest(options);
             let task: GenerationTask;
             try {
-                task = await queryGenerationTask(id, { signal: options?.signal });
+                task = await queryGenerationTask(id, { signal: options?.signal, expectedScope: options?.expectedScope });
                 lastTask = task;
                 lastQueryError = undefined;
                 consecutiveFailures = 0;
                 options?.onTaskUpdate?.(task);
             } catch (error) {
+                checkTaskRequest(options);
                 lastQueryError = error;
                 consecutiveFailures += 1;
                 // 连续失败说明查询通道已不可用，继续轮询只会空转到整体超时；

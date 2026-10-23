@@ -1,0 +1,38 @@
+---
+title: 视频提示词长度
+description: 按实际服务接口校验完整提示词，保留自定义限制
+---
+
+## 校验规则
+
+视频提示词没有统一的 8000 字符上限。新模型默认值按接入协议和确切模型 ID 选取，已经保存的能力配置优先。未知接口默认 `promptMaxChars: 0`，表示本地不假设字符上限，继续由服务商校验。
+
+普通字符限制按 Unicode 码点统计；明确采用 UTF-16 的接口另存 `promptMaxUtf16Units`，前端 JavaScript 与 Go 后端一致计数，常见表情占两个单位。超长时明确报错，系统不自动截断用户输入、连线内容或技能上下文。Token 限制不换算成字符限制。
+
+已有配置里的 8000 可能是历史默认，也可能是用户主动指定，升级时保留。模型能力设置可以修改限制或选择“恢复默认限制”。图片与文本的既有限制不随本次视频调整改变。
+
+## qisi API 与 LikeAI
+
+两个服务共享 `likeai-video` 协议，不代表接口限制相同：
+
+- qisi API 的 `doubao_seedance_2_5` 保留既有 20000 字符合同；在其配置中恢复默认也回到 20000。
+- 官方 LikeAI 使用目录或用户明确配置的能力；没有明确值时交由服务商校验。不能把 BeefAPI、Runway、Ark 的同名模型限制移植到这里。
+- 用户保存的自定义限制不自动覆盖。调整本地字符限制不保证服务商接受更长输入，也不代表生成内容必然遵循全部指令。
+
+## 接口默认值的来源
+
+映射适配自已获授权的 BeefTV `8a14a160`，前端位于 `web/src/lib/video-prompt-limits.ts`，当前后端位于 `backend/internal/app/video_prompt_limits.go`。这次验证使用本地参数与边界测试，没有提交收费生成任务。
+
+| 接口及模型 | 默认限制 | 来源 |
+| --- | --- | --- |
+| OpenAI Videos Sora 2 / Pro | 32000 字符 | [Videos API](https://developers.openai.com/api/reference/resources/videos/methods/create) |
+| MiniMax H3 / H3 Max 原生 V2 | 7000 字符 | [V2 合同](https://platform.minimax.io/docs/api-reference/video/generation/api/v2-video-generation.json) |
+| DashScope Wan 2.1/2.2、2.5/2.6、2.7、3.0 | 800、1500、5000、20000 字符 | [文生视频接口](https://www.alibabacloud.com/help/en/model-studio/text-to-video-api-reference) |
+| 即梦 `jimeng_t2v_v30` | 800 字符 | [3.0 文生视频](https://docs.volcengine.com/docs/JimengAI/JimengAI-VideoGeneration30720P-Text-to-Video-InterfaceDocumentation?lang=zh) |
+| Luma Ray 2 / Ray Flash 2 | 5000 字符 | [创建接口](https://docs.lumalabs.ai/reference/creategeneration) |
+| PixVerse 已列出的 v3.5 至 v6、c1 | 5000 字符 | [官方合同](https://docs.platform.pixverse.ai/text-to-video-13016634e0) |
+| 智谱已列出的 CogVideoX / Vidu | 512 字符 | [官方合同](https://docs.bigmodel.cn/api-reference/模型-api/视频生成异步.md) |
+| Runway | 按模型 ID 区分；Gen4.5、Gen4 Turbo、Veo3.1 为 1000 UTF-16 单位 | [官方接口](https://docs.dev.runwayml.com/api.md) |
+| FullVideo | 保留接口既有 4000 字符 | 接入协议合同，不外推至 Seedance 原生接口 |
+
+Ark 未公开字符硬限、Gemini Veo 使用 token 限制，二者默认本地字符上限为 0。未知模型、新增 ID 和自定义工作流不从展示名称猜测硬限。实际接口变更时，应更新前后端映射及边界测试；表格不代表所有模型线路已经完成真实付费生成验收。

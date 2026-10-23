@@ -13,18 +13,40 @@ const smartReferences: CanvasResourceReference[] = [
 describe("canvas smart references", () => {
     test("converts repeated names and aliases without rewriting existing mentions", () => {
         expect(autoMentionCanvasResourceReferences("图片6在前景，图6退后；宫门全景可见。唐妙菱看向图片60。", smartReferences))
-            .toBe("@图片6 在前景，@图片6 退后；@图片6 可见。@角色1 看向图片60。");
+            .toBe("@[node:image-6] 在前景，@[node:image-6] 退后；@[node:image-6] 可见。@[node:character] 看向图片60。");
         const existing = "已有 @图片6 和 @[node:image-6]、@[asset:宫门全景]。";
         expect(autoMentionCanvasResourceReferences(existing, smartReferences)).toBe(existing);
-        expect(autoMentionCanvasResourceReferences("请使用 2。不要改约2秒。", smartReferences)).toBe("请使用 @角色1。不要改约2秒。");
+        expect(autoMentionCanvasResourceReferences("请使用 2。不要改约2秒。", smartReferences)).toBe("请使用 2。不要改约2秒。");
     });
 
     test("returns exact replacement offsets for names and shelf orders", () => {
-        for (const alias of ["唐妙菱", "角色1", "2", "image2", "image 2"]) {
+        for (const alias of ["唐妙菱", "角色1", "2"]) {
             const prompt = `请使用 ${alias}，然后继续`;
             expect(findCanvasResourceAutoLinkMatch(prompt, 4 + alias.length, smartReferences))
                 .toEqual({ reference: smartReferences[1], start: 4, end: 4 + alias.length, query: alias });
         }
+    });
+
+    test("bulk linking preserves counts, timings, table indexes and numeric resource titles", () => {
+        const references = [
+            { ...smartReferences[0], label: "图片1", title: "走廊" },
+            { ...smartReferences[0], id: "image-2", label: "图片2", title: "2" },
+        ];
+        const prompt = "固定 2 人，只有 1 句对白。\n| IMAGE 1 | 走廊 |\n| IMAGE 2 | 服装 |\n0-2.4 秒，6.0-7.0 秒，机位 30 度，@图片2 保持一致。";
+        expect(autoMentionCanvasResourceReferences(prompt, references)).toBe(prompt.replace("走廊", "@[node:image-6]"));
+    });
+
+    test("image aliases use the image label instead of the mixed resource shelf position", () => {
+        const references: CanvasResourceReference[] = [
+            { id: "audio", nodeId: "audio", kind: "audio", label: "音频1", title: "声音", active: true },
+            { ...smartReferences[0], label: "图片1", title: "走廊" },
+            { id: "image-2", nodeId: "image-2", kind: "image", label: "图片2", title: "人物", active: true },
+            smartReferences[1],
+        ];
+        expect(autoMentionCanvasResourceReferences("image1、image 2、图1、图片2、声音、唐妙菱", references))
+            .toBe("@[node:image-6]、@[node:image-2]、@[node:image-6]、@[node:image-2]、@[node:audio]、@[node:character]");
+        expect(findCanvasResourceAutoLinkMatch("image1", 6, references)?.reference.nodeId).toBe("image-6");
+        expect(findCanvasResourceAutoLinkMatch("image2", 6, smartReferences)).toBeNull();
     });
 
     test("skips inactive, library and skill references and ambiguous names", () => {
@@ -304,14 +326,13 @@ describe("canvas resource mention slots", () => {
         expect(reference).toMatchObject({ kind: "image", label: "绘图1", drawingId: "drawing-document-a", drawingRevision: 3 });
     });
 
-    test("画布节点引用只保存类型位置，不保存节点 ID", () => {
+    test("画布节点显示类型编号，引用保存具体节点 ID", () => {
         const target = videoNode("target");
         const image = imageNode("image-a");
         const [reference] = buildNodeMentionReferences(target, [image, target], [connection(image.id, target.id)]);
 
         expect(reference.label).toBe("图片1");
-        expect(canvasResourceMentionToken(reference)).toBe("@图片1");
-        expect(canvasResourceMentionToken(reference)).not.toContain(image.id);
+        expect(canvasResourceMentionToken(reference)).toBe("@[node:image-a]");
     });
 
     test("图片、音频和文本分别按各自类型顺序编号", () => {
@@ -361,7 +382,7 @@ describe("remove canvas resource mention tokens", () => {
         const connections = images.map((image) => connection(image.id, target.id));
         const result = applyCanvasConnectionPromptSync(nodes, connections, nodes, connections.slice(1));
         expect(result.find((node) => node.id === target.id)?.metadata?.composerContent)
-            .toBe("@图片1的人物参考@图片9，@图片1保持一致");
+            .toBe("@图片1的人物参考@图片9，@[node:image-1]保持一致");
     });
 
     test("取消引用后会清掉对应的 @图片N", () => {
