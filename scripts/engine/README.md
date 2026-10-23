@@ -4,22 +4,19 @@ The current bundled Node 24 distribution requires macOS **13.5**. Compile every
 native entry with an explicit deployment target; the packager rejects a Mach-O
 that requires a newer system. An Xcode SDK version is not the deployment target.
 
-Build the three Go programs into the prepared runtime staging directory:
+With Python 3.12 and Go on PATH, build the three Go programs into a new runtime
+staging directory from the repository root:
 
 ```sh
-cd backend
-export CGO_ENABLED=1 GOOS=darwin GOARCH=arm64
-export MACOSX_DEPLOYMENT_TARGET=13.5
-export CGO_CFLAGS='-O2 -g -mmacosx-version-min=13.5'
-export CGO_LDFLAGS='-O2 -g -mmacosx-version-min=13.5'
-go build -trimpath -o ../.local/engine-package/qisitv-engine ./cmd/qisitv-engine
-go build -trimpath -o ../.local/engine-package/qisitv-connect ./cmd/qisitv-connect
-go build -trimpath -o ../.local/engine-package/qisitv ./cmd/beeftv
+python3 scripts/build-engine-runtime.py --target darwin/arm64 \
+  --output .local/engine-package
 ```
 
-Production version metadata can be supplied with Go `-ldflags` variables
-`qisitv/backend/internal/buildinfo.Version`, `Commit`, and `BuildTime`. A dirty
-checkout must be labelled as a development/beta build, not a tagged release.
+The builder embeds VERSION, the Git revision (including a dirty marker), and
+build time. Its receipt records each binary's SHA-256 and source package. The
+native `qisitv` CLI is built from `cmd/beeftv`; `cmd/qisitv` is a retired legacy
+entry and cannot control the engine. A dirty checkout must be labelled as a
+development/beta build, not a tagged release.
 
 The staging directory also needs the matching production `agent-host` modules
 and dependencies, its pinned Node distribution, and the output of
@@ -33,10 +30,10 @@ From the repository root:
 python3 scripts/package-engine-macos.py \
   --runtime .local/engine-package \
   --node-source .local/engine-runtime/node-v24.22.1-darwin-arm64 \
-  --output .local/engine-release-beta \
-  --version 2.0.3-web-beta.1 --dmg
+  --output .local/engine-release-beta2 \
+  --version 2.0.3-web-beta.2 --dmg
 python3 scripts/smoke-engine-macos.py \
-  --app '.local/engine-release-beta/qisiTV Engine.app'
+  --app '.local/engine-release-beta2/qisiTV Engine.app'
 ```
 
 The Node source directory must contain the exact staged `bin/node` and its full
@@ -72,6 +69,14 @@ For an isolated preview, a verified package may be copied into the ignored
 `web/public/downloads/engine/` directory. Do not commit the DMG. The current beta
 installer supports Apple Silicon Macs on macOS 13.5 or later and uses ad-hoc
 signing without Apple notarization; other platform installers are not supplied.
+
+The `Local engine builds` GitHub workflow runs native engine/CLI builds and
+authority, persistence, and bundled Agent tests on Mac ARM/Intel, Windows x64,
+and Linux x64. These source checks do not claim that an installer exists for
+each platform. Only the Mac ARM job builds the pinned-source FFmpeg runtime,
+packages an App/DMG, and runs the complete package outside the checkout before
+uploading a beta installer artifact. This replaces the retired Wails installer
+and duplicate Linux desktop workflows; it does not publish a release.
 
 Launcher argument parser tests:
 

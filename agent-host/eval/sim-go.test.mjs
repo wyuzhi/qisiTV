@@ -344,18 +344,20 @@ describe('预算门禁、密钥脱敏与评测配置校验测试', () => {
   });
 
   test('redactSecrets 彻底脱敏环境变量密钥、sk-* 与 Bearer Token', () => {
+    const bearerToken = crypto.randomBytes(24).toString('hex');
+    const inlineToken = crypto.randomBytes(18).toString('hex');
     const raw = {
       apiKey: 'sk-live-9876543210abcdef',
       nested: {
-        Authorization: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9',
-        note: '调用失败: Bearer secret_token_xyz123 及 key=sk-abcdef1234567890 和 custom-sec-9999',
+        Authorization: `Bearer ${bearerToken}`,
+        note: `调用失败: Bearer ${inlineToken} 及 key=sk-abcdef1234567890 和 custom-sec-9999`,
       },
     };
     const cleaned = redactSecrets(raw, ['custom-sec-9999']);
     const serialized = JSON.stringify(cleaned);
     expect(serialized).not.toContain('sk-live-9876543210abcdef');
     expect(serialized).not.toContain('sk-abcdef1234567890');
-    expect(serialized).not.toContain('secret_token_xyz123');
+    expect(serialized).not.toContain(inlineToken);
     expect(serialized).not.toContain('custom-sec-9999');
     expect(cleaned.apiKey).toBe('[REDACTED]');
     expect(cleaned.nested.Authorization).toBe('[REDACTED]');

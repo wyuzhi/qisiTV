@@ -6,29 +6,30 @@ import net from 'node:net';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {spawn} from 'node:child_process';
+import {spawn, execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 import {serveEmptySkillContext} from './test-support/skill-context-fixture.mjs';
 
-// Synthetic TLS identity, only trusted by these child processes; never a real credential.
-const key=`-----BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgw+nIcWJVVPeeZ7B9
-9paSdDMc/rDVPILJd5ZmY9mqpMShRANCAATJ8Bk9sQKLzRsaXe5zKWGLcjxU+l+2
-4dPjOWBo/Urf6sq1cbR3nXHIElOKEQB9lOMlwIPn5gCI6TWtUjy79hl3
------END PRIVATE KEY-----`;
-const cert=`-----BEGIN CERTIFICATE-----
-MIIBuTCCAV+gAwIBAgIUXqDUvy5i90z66TiCwcZOcHJ0d2owCgYIKoZIzj0EAwIw
-IDEeMBwGA1UEAwwVcHJveHktZml4dHVyZS5pbnZhbGlkMCAXDTI2MTAxODA4NTU0
-OVoYDzIxMjYwOTI0MDg1NTQ5WjAgMR4wHAYDVQQDDBVwcm94eS1maXh0dXJlLmlu
-dmFsaWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATJ8Bk9sQKLzRsaXe5zKWGL
-cjxU+l+24dPjOWBo/Urf6sq1cbR3nXHIElOKEQB9lOMlwIPn5gCI6TWtUjy79hl3
-o3UwczAdBgNVHQ4EFgQUuhTd0LMkNx7IzzPKkMbirv+/egAwHwYDVR0jBBgwFoAU
-uhTd0LMkNx7IzzPKkMbirv+/egAwDwYDVR0TAQH/BAUwAwEB/zAgBgNVHREEGTAX
-ghVwcm94eS1maXh0dXJlLmludmFsaWQwCgYIKoZIzj0EAwIDSAAwRQIgZB2oTmYT
-r5vfpYSbOFJSart5WkVoGH1CTpgtVvO2gCgCIQCyVd20LcPddlQDuYBuL8CX05ha
-FG1/yTuS0fKE2xdu9Q==
------END CERTIFICATE-----`;
+// Generate a fresh loopback-only TLS fixture; never check a private key into Git.
+function createTLSIdentity(scratch) {
+  const keyPath=path.join(scratch,'fixture-key.pem');
+  const certPath=path.join(scratch,'fixture-cert.pem');
+  const configPath=path.join(scratch,'fixture-openssl.cnf');
+  fs.writeFileSync(configPath,`[req]
+distinguished_name=dn
+x509_extensions=extensions
+prompt=no
+[dn]
+CN=proxy-fixture.invalid
+[extensions]
+subjectAltName=DNS:proxy-fixture.invalid,DNS:localhost,IP:127.0.0.1
+basicConstraints=critical,CA:TRUE
+`);
+  execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-days','1','-keyout',keyPath,'-out',certPath,'-config',configPath],{stdio:'ignore',timeout:15000});
+  fs.chmodSync(keyPath,0o600);
+  return {key:fs.readFileSync(keyPath),cert:fs.readFileSync(certPath)};
+}
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const hostToken='synthetic-loopback-host-token';
 const listen=server=>new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',()=>resolve(server.address().port));});
@@ -59,6 +60,7 @@ async function fixture(t,{secure=false,disabled=false,bypassAll=false,rejectProx
     frame(hasResult?{role:'assistant',content:'local proxy and operation complete'}:{role:'assistant',tool_calls:[{index:0,id:'local-read',type:'function',function:{name:'canvas_get',arguments:'{}'}}]});
     frame({},hasResult?'stop':'tool_calls');res.end('data: [DONE]\n\n');
   };
+  const {key,cert}=createTLSIdentity(scratch);
   const model=secure?https.createServer({key,cert},modelHandler):http.createServer(modelHandler);servers.push(model);
   const modelPort=await listen(model);
   const modelHost=disabled||bypassAll||rejectProxy?'127.0.0.1':'proxy-fixture.invalid';

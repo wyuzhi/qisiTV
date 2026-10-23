@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -54,9 +54,35 @@ test('direct list and deb822 sources switch only the exact Azure host', t => {
   assert.equal(f.read('sources.list.d/other.list'), unrelated);
 });
 
-test('every Ubuntu dependency workflow applies the same mirror configuration', () => {
-  for (const name of ['quality.yml', 'linux-desktop-check.yml', 'desktop-installers.yml', 'release-desktop.yml']) {
-    const workflow = readFileSync(new URL('../.github/workflows/' + name, import.meta.url), 'utf8');
-    assert.match(workflow, /bash (?:\.\.\/)?scripts\/configure-ubuntu-apt\.sh/);
+function checkHostedAptJobs(workflow, name) {
+  let checked = 0;
+  // A setup in another job cannot configure this runner. Container-only apt
+  // commands have their own image repositories, not the hosted Azure mirrors.
+  for (const job of workflow.split(/^  [\w-]+:\s*$/m).slice(1)) {
+    const commands = [...job.matchAll(/\bsudo\s+apt(?:-get)?\s+(?:update|install)\b/g)];
+    if (!commands.length) continue;
+    const setup = job.search(/bash (?:\.\.\/)?scripts\/configure-ubuntu-apt\.sh/);
+    assert.ok(setup >= 0 && commands.every(command => setup < command.index), `${name}: configure mirrors in the same job before hosted apt commands`);
+    checked++;
   }
+  return checked;
+}
+
+test('every job installing hosted Ubuntu dependencies configures mirrors before apt', () => {
+  const directory = new URL('../.github/workflows/', import.meta.url);
+  let checked = 0;
+  for (const name of readdirSync(directory).filter(name => /\.ya?ml$/.test(name))) {
+    checked += checkHostedAptJobs(readFileSync(new URL(name, directory), 'utf8'), name);
+  }
+  assert.ok(checked > 0, 'expected to check actual hosted Ubuntu dependency jobs');
+});
+
+test('mirror gate rejects missing, late and other-job setup without requiring apt on macOS or Windows', () => {
+  const setup = '      - run: bash scripts/configure-ubuntu-apt.sh\n';
+  const install = '      - run: sudo apt-get install -y ffmpeg\n';
+  assert.throws(() => checkHostedAptJobs('jobs:\n  linux:\n' + install, 'missing'));
+  assert.throws(() => checkHostedAptJobs('jobs:\n  linux:\n' + install + setup, 'late'));
+  assert.throws(() => checkHostedAptJobs('jobs:\n  first:\n' + setup + '  second:\n' + install, 'other job'));
+  assert.equal(checkHostedAptJobs('jobs:\n  linux:\n' + setup + install, 'configured'), 1);
+  assert.equal(checkHostedAptJobs('jobs:\n  desktop:\n    runs-on: macos-latest\n      - run: ./scripts/build-qisitv-release.sh\n', 'macOS'), 0);
 });

@@ -102,6 +102,10 @@ LikeAI [官方公开文档](https://task.likeai.pro/api-doc) 的图片 `huoshan_
 
 2026-10-24 前端完整套件已运行到结束：4,276 通过、1 失败、15 跳过。唯一失败为发布合同仍匹配修改前的 `import.meta.env` 字串，已同步断言并定向通过该文件全部 5 项；完整运行日志保留原结果。随后显式启用 14 项真实媒体验收，全部通过：原生 FFmpeg 的混音/中文字幕/空隙与淡入淡出 3 项、时间线浏览器 WASM Worker 8 项、画布合并 Worker 2 项、视频兼容预览 1 项。剩余 1 项仅为未提供 `QISITV_SEGMENT_QA_MP4` 的额外外部样片检查，同文件自动生成的真实媒体编码检查已通过。日志分别为 `.local/parity-web-suite-complete.log`、`parity-release-contract-retest.log` 与 `parity-optional-*.log`，最终 TypeScript 检查通过。以上不包含收费生成验证。
 
+PR #10 首轮云端 Linux Backend 全 Go 检查、Windows 存储迁移及 Director Chrome 83/83 断言通过。Web 两个夹具在 CI 的 Bun 1.3.9 中路径解析失败，已用相同版本复现并修正，1.3.9 与 1.4.2 的真实 Chrome 复验均通过。旧安装 CI 调用已删除的 Wails 构建脚本，现改为四平台本机引擎源码检查，Mac ARM 另行打包并做完整离仓库验收；发布检查中 Ubuntu 镜像的断言改为检查真正运行 apt 的任务，完整 233 项本机通过。修正后的云端结果须在对应提交重新运行后确认。
+
+GitGuardian 扫描合入的上游历史时标记两处测试样例：`agent-host/model-proxy-cases.mjs` 的仅供本机子进程信任的自签测试证书，以及 `agent-host/eval/sim-go.test.mjs` 的脱敏断言输入。已核对两者均为合成 fixture，不含用户密钥；当前源码改为测试运行时生成证书和随机 token，相关 11 项通过。没有删除上游提交历史、关闭扫描或跳过安全检查；历史告警的分类由 GitGuardian 工作区处理。
+
 ### 旧合同测试替代
 
 - `local-agent-sync.test.ts` 复制已移除的 Agent patch/repository 私有实现，已退场。当前统一提交与并发保护由 `canvas-refresh-editor-conflict.test.ts`、`canvas-external-document-merge.test.ts`、`canvas-external-revision.test.ts`、`canvas-external-revision-store.test.ts`、`canvas-patch-merge.test.ts` 和 Go operations 修订/幂等测试覆盖。

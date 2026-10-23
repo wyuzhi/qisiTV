@@ -1,34 +1,29 @@
-name: Desktop installer checks
+name: Local engine builds
 
 on:
   pull_request:
     paths:
-      - 'scripts/*installer*'
-      - 'scripts/smoke-webview-cache.mjs'
-      - 'scripts/webview-cache-probe_windows.go'
-      - 'scripts/installers/**'
-      - 'scripts/build-beeftv*'
-      - 'scripts/package-media-runtime-*'
-      - 'scripts/test-media-runtime-*'
-      - 'scripts/assert-media-runtime-*'
-      - 'licenses/ffmpeg-windows.json'
-      - 'licenses/ffmpeg-windows-README.txt'
-      - 'backend/internal/mediatools/**'
-      - 'backend/internal/asset/media_metadata*'
-      - 'backend/internal/desktopupdate/**'
+      - 'backend/**'
+      - 'agent-host/**'
+      - 'plugin-packages/**'
+      - 'scripts/*engine*'
+      - 'scripts/*agent-host*'
+      - 'scripts/engine/**'
+      - 'scripts/assert-windows-dwarf5-cgo.ps1'
+      - 'licenses/**'
+      - 'VERSION'
       - '.github/workflows/desktop-installers.yml'
-      - '.github/workflows/release-desktop.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 concurrency:
-  group: installers-${{ github.event.pull_request.number || github.ref }}
+  group: engine-builds-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
   native:
-    name: Installer (${{ matrix.platform }})
+    name: Engine source (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
@@ -47,6 +42,9 @@ jobs:
           - os: ubuntu-24.04
             platform: linux-amd64
             target: linux/amd64
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -63,18 +61,8 @@ jobs:
         with:
           python-version: '3.12'
       - name: Select bundled Node runtime
-        shell: bash
         run: |
-          node -e 'const fs=require("fs"),p=require("path"); const bin=p.dirname(process.execPath); fs.appendFileSync(process.env.GITHUB_ENV, `BEEFTV_NODE_RUNTIME=${process.platform==="win32"?bin:p.dirname(bin)}\n`);'
-      - name: Verify bundled Agent runtime
-        shell: bash
-        run: bun test scripts/package-agent-host.test.mjs
-      - name: Linux desktop dependencies
-        if: runner.os == 'Linux'
-        run: |
-          bash scripts/configure-ubuntu-apt.sh
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev ffmpeg fonts-noto-cjk xvfb xdotool dbus-x11
+          node -e 'const fs=require("fs"),p=require("path"); const bin=p.dirname(process.execPath); fs.appendFileSync(process.env.GITHUB_ENV, `BEEFTV_NODE_RUNTIME=${process.platform==="win32"?bin:p.dirname(bin)}\nQISITV_TEST_NODE=${process.execPath}\n`);'
       - name: Windows compiler
         id: msys2
         if: runner.os == 'Windows'
@@ -85,7 +73,7 @@ jobs:
           release: true
           path-type: inherit
           install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-binutils
-      - name: Select Windows compiler and NSIS
+      - name: Select supported Windows compiler
         if: runner.os == 'Windows'
         env:
           MSYSTEM_PREFIX: ${{ steps.msys2.outputs.msys2-location }}\ucrt64
@@ -93,66 +81,64 @@ jobs:
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\assert-windows-dwarf5-cgo.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (!(Test-Path 'C:\Program Files (x86)\NSIS\makensis.exe')) { choco install nsis --no-progress -y; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
-      - name: Verify Windows cache probe before full desktop build
-        if: runner.os == 'Windows'
-        shell: bash
-        run: python scripts/smoke-desktop-installer.py --probe-only
-      - name: Build Unix desktop
-        if: runner.os != 'Windows'
-        env:
-          BEEFTV_SKIP_LOCAL_VERIFY: '1'
-          BEEFTV_WAILS_PLATFORM: ${{ matrix.target }}
-          BEEFTV_UPDATER_PUBLIC_KEY: ${{ vars.BEEFTV_UPDATER_PUBLIC_KEY }}
-        run: |
-          sh plugin-packages/build-packages.sh
-          ./scripts/build-beeftv-release.sh
-      - name: Build Windows desktop
-        if: runner.os == 'Windows'
+      - name: Install locked Agent host dependencies
+        working-directory: agent-host
+        run: bun install --frozen-lockfile
+      - name: Verify bundled Agent runtime
+        run: bun test scripts/package-agent-host.test.mjs
+      - name: Test native authority, folder persistence, and CLI
+        working-directory: backend
         env:
           CGO_ENABLED: '1'
-          BEEFTV_UPDATER_PUBLIC_KEY: ${{ vars.BEEFTV_UPDATER_PUBLIC_KEY }}
-        shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-beeftv-windows-release.ps1
-      - name: Package native installer
-        shell: bash
-        run: python scripts/package-desktop-installer.py --platform '${{ matrix.platform }}'
-      - name: Validate Windows updater archive
-        if: runner.os == 'Windows'
-        working-directory: backend
-        shell: pwsh
-        run: |
-          go run ./cmd/update-release package --platform windows-amd64 --input cmd/desktop/build/bin --output "$env:RUNNER_TEMP/BeefTV-windows-updater-check.zip"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Test actual installation and preserved user data
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="$(tr -d '[:space:]' < VERSION)"
-          platform='${{ matrix.platform }}'
-          payload='backend/cmd/desktop/build/bin'
-          suffix='-setup.exe'
-          if [[ "$platform" == darwin-* ]]; then payload="$payload/BeefTV.app"; suffix='.dmg'; fi
-          if [[ "$platform" == linux-* ]]; then payload="$payload/BeefTV-linux"; suffix='.deb'; fi
-          command=(python scripts/smoke-desktop-installer.py --platform "$platform" --installer "dist/BeefTV-${version}-${platform}${suffix}" --payload "$payload")
-          if [[ "$platform" == linux-* ]]; then xvfb-run -a dbus-run-session -- "${command[@]}"; else "${command[@]}"; fi
-      - name: Verify DEB dependencies on clean Ubuntu
-        if: runner.os == 'Linux'
-        run: |
-          docker run --rm -v "${PWD}/dist:/packages:ro" ubuntu:24.04 sh -ec '
-            apt-get update
-            apt-get install -y /packages/BeefTV-*.deb
-            dpkg --audit
-            dpkg --verify beeftv
-            ldd /opt/beeftv/BeefTV-linux/BeefTV > /tmp/links
-            cat /tmp/links
-            ! grep -q "not found" /tmp/links
-          '
-      - name: Preserve installer artifacts
-        if: always()
+          GIN_MODE: release
+        run: go test ./cmd/qisitv-engine ./cmd/qisitv-connect ./cmd/beeftv ./internal/projectfolder ./internal/browserbridge ./internal/assistantruntime -count=1
+      - name: Build native engine programs
+        run: python scripts/build-engine-runtime.py --target '${{ matrix.target }}' --output "$RUNNER_TEMP/engine-runtime"
+      - name: Preserve native build receipt
         uses: actions/upload-artifact@v4
         with:
-          name: installer-check-${{ matrix.platform }}
-          path: dist/BeefTV-*
+          name: engine-source-check-${{ matrix.platform }}
+          path: ${{ runner.temp }}/engine-runtime/build-receipt.json
           retention-days: 7
           if-no-files-found: error
+      # A successful source build is not an installer support claim. The only
+      # presently supported web-engine package is Apple Silicon macOS 13.5+.
+      - name: Package Mac Apple Silicon Agent host
+        if: matrix.platform == 'darwin-arm64'
+        run: bun scripts/package-agent-host.mjs darwin/arm64 "$RUNNER_TEMP/engine-runtime/agent-host"
+      - name: Install pinned media build tools
+        if: matrix.platform == 'darwin-arm64'
+        run: python -m pip install --target "$RUNNER_TEMP/media-tools" cmake==3.31.10 meson==1.7.2 ninja==1.11.1.4
+      - name: Build redistributable media runtime from pinned sources
+        if: matrix.platform == 'darwin-arm64'
+        run: python scripts/package-engine-media-runtime-macos.py --output "$RUNNER_TEMP/engine-runtime/agent-host/media-runtime" --source-dir "$RUNNER_TEMP/media-sources" --tools-dir "$RUNNER_TEMP/media-tools" --build-dir "$RUNNER_TEMP/media-build"
+      - name: Package and verify Mac Apple Silicon beta installer
+        if: matrix.platform == 'darwin-arm64'
+        run: |
+          set -euo pipefail
+          xcrun swiftc -parse-as-library scripts/engine/EngineLaunchRequest.swift scripts/engine/EngineLaunchRequestTests.swift -o "$RUNNER_TEMP/launcher-tests"
+          "$RUNNER_TEMP/launcher-tests"
+          sh plugin-packages/build-packages.sh
+          version="$(tr -d '[:space:]' < VERSION)"
+          python scripts/package-engine-macos.py --runtime "$RUNNER_TEMP/engine-runtime" --node-source "$BEEFTV_NODE_RUNTIME" --output dist/engine-ci --version "${version#v}" --dmg
+          TMPDIR="$RUNNER_TEMP" python scripts/smoke-engine-macos.py --app 'dist/engine-ci/qisiTV Engine.app' | tee "$RUNNER_TEMP/engine-package-smoke.log"
+      - name: Preserve verified Mac beta installer
+        if: success() && matrix.platform == 'darwin-arm64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-installer-beta-darwin-arm64
+          path: |
+            dist/engine-ci/*.dmg
+            dist/engine-ci/*.sha256
+            ${{ runner.temp }}/engine-package-smoke.log
+            ${{ runner.temp }}/qisitv-packaged-engine-smoke-*/smoke-report.json
+          retention-days: 7
+          if-no-files-found: error
+      - name: Preserve media build diagnostics
+        if: always() && matrix.platform == 'darwin-arm64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-media-build-log-darwin-arm64
+          path: ${{ runner.temp }}/media-build/logs
+          retention-days: 7
+          if-no-files-found: ignore
