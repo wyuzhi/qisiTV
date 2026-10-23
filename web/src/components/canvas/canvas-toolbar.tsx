@@ -9,6 +9,7 @@ import { CanvasCreateMenu, type CanvasCreateCommand } from "@/components/canvas/
 import { useCanvasCreateCommands } from "@/components/canvas/use-canvas-create-commands";
 import { ToolbarSettingsModal } from "@/components/canvas/toolbars/toolbar-settings-modal";
 import { CanvasAppearanceControls } from "@/components/canvas/canvas-appearance-controls";
+import { CanvasShortcutsPopover } from "@/components/canvas/canvas-shortcuts-popover";
 import { aceternityMotion } from "@/lib/aceternity-motion";
 import { canvasDockStyle } from "@/lib/canvas/canvas-aceternity-style";
 import type { CanvasAppearance } from "@/lib/canvas/canvas-appearance";
@@ -19,7 +20,6 @@ import type { CanvasNodeTypeId, CanvasToolMode, CanvasWorkspaceMode } from "@/ty
 
 export function CanvasToolbar({
     selectedCount,
-    agentOpen = false,
     libtvChrome = false,
     workspaceMode,
     canvasTool,
@@ -59,10 +59,9 @@ export function CanvasToolbar({
     onOpenMyAssets,
     onOpenProjectCharacters,
     onOpenGenerationHistory,
-    onOpenShortcuts,
+    shortcutRequestNonce,
 }: {
     selectedCount: number;
-    agentOpen?: boolean;
     /** 兼容 LibTV 视觉基线时，仅显示原版底部 Dock 的核心入口。 */
     libtvChrome?: boolean;
     workspaceMode: CanvasWorkspaceMode;
@@ -103,7 +102,7 @@ export function CanvasToolbar({
     onOpenMyAssets: () => void;
     onOpenProjectCharacters: () => void;
     onOpenGenerationHistory: () => void;
-    onOpenShortcuts: () => void;
+    shortcutRequestNonce: number;
 }) {
     const rootRef = useRef<HTMLDivElement>(null);
     // Keep the overlay-layer contract for focus ordering; the dedicated CSS
@@ -117,12 +116,26 @@ export function CanvasToolbar({
     const [appearanceOpen, setAppearanceOpen] = useState(false);
     const [modeMenuOpen, setModeMenuOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [shortcutsOpen, setShortcutsOpen] = useState(false);
+    const lastShortcutRequest = useRef(shortcutRequestNonce);
     const [panelX, setPanelX] = useState(0);
     const [prefs, setPrefs] = useState<ToolbarPrefs | null>(() => readToolbarPrefs("main"));
 
     useEffect(() => {
-        if (addOpen || modeMenuOpen || appearanceOpen) bringToFront();
-    }, [addOpen, modeMenuOpen, appearanceOpen, bringToFront]);
+        if (addOpen || modeMenuOpen || appearanceOpen || shortcutsOpen) bringToFront();
+    }, [addOpen, modeMenuOpen, appearanceOpen, shortcutsOpen, bringToFront]);
+
+    useEffect(() => {
+        if (lastShortcutRequest.current === shortcutRequestNonce) return;
+        lastShortcutRequest.current = shortcutRequestNonce;
+        const button = dockRef.current?.querySelector<HTMLElement>('[aria-label="画布快捷键"]');
+        if (button) setPanelX(getPanelX(dockRef.current, button));
+        setAddOpen(false);
+        setAppearanceOpen(false);
+        setModeMenuOpen(false);
+        setSettingsOpen(false);
+        setShortcutsOpen(true);
+    }, [shortcutRequestNonce]);
 
     // 设置面板关闭后重新读取偏好（用户可能调整了排序/显隐）
     useEffect(() => {
@@ -137,7 +150,7 @@ export function CanvasToolbar({
 
     // 点击外部关闭浮层面板
     useEffect(() => {
-        if (!addOpen && !modeMenuOpen && !appearanceOpen) return;
+        if (!addOpen && !modeMenuOpen && !appearanceOpen && !shortcutsOpen) return;
         const closeFloatingPanels = (event: PointerEvent) => {
             const target = event.target instanceof Node ? event.target : null;
             if (target && rootRef.current?.contains(target)) return;
@@ -146,10 +159,24 @@ export function CanvasToolbar({
             setAddOpen(false);
             setModeMenuOpen(false);
             setAppearanceOpen(false);
+            setShortcutsOpen(false);
         };
         document.addEventListener("pointerdown", closeFloatingPanels, true);
         return () => document.removeEventListener("pointerdown", closeFloatingPanels, true);
-    }, [addOpen, modeMenuOpen, appearanceOpen]);
+    }, [addOpen, modeMenuOpen, appearanceOpen, shortcutsOpen]);
+
+    useEffect(() => {
+        if (!shortcutsOpen) return;
+        const closeOnEscape = (event: KeyboardEvent) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopPropagation();
+            setShortcutsOpen(false);
+            dockRef.current?.querySelector<HTMLButtonElement>('[aria-label="画布快捷键"]')?.focus();
+        };
+        window.addEventListener("keydown", closeOnEscape, true);
+        return () => window.removeEventListener("keydown", closeOnEscape, true);
+    }, [shortcutsOpen]);
 
     // Match LibTV's tool shortcuts. Ignore editable surfaces so typing a
     // prompt never changes the canvas interaction mode.
@@ -191,19 +218,19 @@ export function CanvasToolbar({
         onOpenMyAssets,
         onOpenProjectCharacters,
         onOpenGenerationHistory,
-        onOpenShortcuts,
+        onOpenShortcuts: () => setShortcutsOpen((value) => !value),
         onBackgroundModeChange,
         onShowImageInfoChange,
-        onToggleAddPanel: (event: ReactMouseEvent<HTMLElement>) => { placePanel(event); setAppearanceOpen(false); setModeMenuOpen(false); setSettingsOpen(false); setAddOpen((value) => !value); },
-        onToggleAppearancePanel: (event: ReactMouseEvent<HTMLElement>) => { placePanel(event); setAddOpen(false); setModeMenuOpen(false); setSettingsOpen(false); setAppearanceOpen((value) => !value); },
-        onToggleSettingsPanel: () => { setAddOpen(false); setAppearanceOpen(false); setModeMenuOpen(false); setSettingsOpen((value) => !value); },
+        onToggleAddPanel: (event: ReactMouseEvent<HTMLElement>) => { placePanel(event); setShortcutsOpen(false); setAppearanceOpen(false); setModeMenuOpen(false); setSettingsOpen(false); setAddOpen((value) => !value); },
+        onToggleAppearancePanel: (event: ReactMouseEvent<HTMLElement>) => { placePanel(event); setShortcutsOpen(false); setAddOpen(false); setModeMenuOpen(false); setSettingsOpen(false); setAppearanceOpen((value) => !value); },
+        onToggleSettingsPanel: () => { setShortcutsOpen(false); setAddOpen(false); setAppearanceOpen(false); setModeMenuOpen(false); setSettingsOpen((value) => !value); },
         onDeleteSelected: onDelete,
         // 以下为多选/节点悬停工具栏回调，主工具栏不使用，用 no-op 占位
-        onAlign: () => {}, onArrange: () => {}, onCreateStoryboard: () => {}, onCreateReferenceGroup: () => {}, onBatchConnect: () => {}, onMergeVideos: () => {}, onSendSelectionToAgent: () => {},
+        onAlign: () => {}, onArrange: () => {}, onCreateStoryboard: () => {}, onCreateReferenceGroup: () => {}, onBatchConnect: () => {}, onMergeVideos: () => {},
         onNodeInfo: () => {}, onNodeDelete: () => {}, onNodeRetry: () => {}, onNodeEditText: () => {}, onNodeDecreaseFont: () => {}, onNodeIncreaseFont: () => {},
         onNodeToggleDialog: () => {}, onNodeAnnotate: () => {}, onNodeGenerateImage: () => {}, onNodeUpload: () => {}, onNodeDownload: () => {}, onNodeSaveAsset: () => {},
         onNodeMaskEdit: () => {}, onNodeEmotion: () => {}, onNodePortraitTexture: () => {}, onNodeCrop: () => {}, onNodeSplit: () => {}, onNodeUpscale: () => {},
-        onNodeSuperResolve: () => {}, onNodeAngle: () => {}, onNodeViewImage: () => {}, onNodeExtractVideoFrames: () => {}, onNodeExtractAudioFromVideo: () => {}, onNodeTrimVideoSegments: () => {}, onNodeCropVideo: () => {}, onNodeSubtitles: () => {}, onNodeTimeline: () => {}, onNodeReversePrompt: () => {},
+        onNodeSuperResolve: () => {}, onNodeAngle: () => {}, onNodeViewImage: () => {}, onNodeExtractVideoFrames: () => {}, onNodeExtractAudioFromVideo: () => {}, onNodeTrimVideoSegments: () => {}, onNodeCropVideo: () => {}, onNodeDepthCapture: () => {}, onNodeSubtitles: () => {}, onNodeTimeline: () => {}, onNodeReversePrompt: () => {},
         onNodeToggleFreeResize: () => {}, onNodeToggleLocked: () => {}, onNodeCopyPrompt: () => {},
     } as ToolbarHandlers;
 
@@ -231,12 +258,25 @@ export function CanvasToolbar({
     const mainItemsWithCanvasMode = libtvMainItems.map((item) => item.id === "tool-canvas-mode"
         ? createCanvasModeDockCommand(canvasTool, modeMenuOpen, (event) => {
             placePanel(event);
+            setShortcutsOpen(false);
             setAddOpen(false);
             setAppearanceOpen(false);
             setSettingsOpen(false);
             setModeMenuOpen((value) => !value);
         })
-        : item);
+        : item.id === "tool-shortcuts" ? {
+            ...item,
+            active: shortcutsOpen,
+            expands: true,
+            onClick: (event: ReactMouseEvent<HTMLButtonElement>) => {
+                placePanel(event);
+                setAddOpen(false);
+                setAppearanceOpen(false);
+                setModeMenuOpen(false);
+                setSettingsOpen(false);
+                setShortcutsOpen((value) => !value);
+            },
+        } : item);
     const items = [
         ...mainItemsWithCanvasMode,
         ...(libtvChrome ? [
@@ -253,7 +293,8 @@ export function CanvasToolbar({
     const createCommands = useCanvasCreateCommands(ctx, runAddAction);
 
     return (
-        <div ref={rootRef} data-canvas-no-zoom className={`canvas-main-toolbar pointer-events-none absolute inset-x-[var(--canvas-inset-x)] bottom-[var(--canvas-inset-y)] flex justify-center${libtvChrome ? " canvas-libtv-compat-toolbar" : ""}`} style={{ zIndex, paddingRight: agentOpen ? 340 : undefined }} onPointerDownCapture={bringToFront} onFocusCapture={bringToFront}>
+        <div ref={rootRef} data-onboarding="canvas-tools" data-canvas-no-zoom className={`canvas-main-toolbar pointer-events-none absolute inset-x-[var(--canvas-inset-x)] bottom-[var(--canvas-inset-y)] flex justify-center${libtvChrome ? " canvas-libtv-compat-toolbar" : ""}`} style={{ zIndex }} onPointerDownCapture={bringToFront} onFocusCapture={bringToFront}>
+            {shortcutsOpen ? <CanvasShortcutsPopover x={panelX} theme={theme} /> : null}
             <AnimatePresence>
                 {modeMenuOpen ? (
                     <CanvasModeMenu

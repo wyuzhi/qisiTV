@@ -163,25 +163,26 @@ type Parameter struct {
 }
 
 type Metadata struct {
-	ID                      string       `json:"id"`
-	Version                 string       `json:"version"`
-	Name                    string       `json:"name"`
-	Vendor                  string       `json:"vendor"`
-	Description             string       `json:"description,omitempty"`
-	Categories              []Capability `json:"categories"`
-	Scopes                  []Surface    `json:"scopes"`
-	Parameters              []Parameter  `json:"parameters,omitempty"`
-	Create                  string       `json:"-"`
-	Poll                    string       `json:"-"`
-	Cancel                  string       `json:"-"`
-	ContentType             string       `json:"-"`
-	Documentation           string       `json:"documentation,omitempty"`
-	LegacyAliases           []string     `json:"-"`
-	Enabled                 bool         `json:"enabled"`
-	Installable             bool         `json:"installable"`
-	Execution               string       `json:"-"`
-	RequiresPublicMediaURLs bool         `json:"-"`
-	UnavailableReason       string       `json:"-"`
+	ID                      string            `json:"id"`
+	Version                 string            `json:"version"`
+	Name                    string            `json:"name"`
+	Vendor                  string            `json:"vendor"`
+	Description             string            `json:"description,omitempty"`
+	Categories              []Capability      `json:"categories"`
+	Scopes                  []Surface         `json:"scopes"`
+	Parameters              []Parameter       `json:"parameters,omitempty"`
+	Create                  string            `json:"-"`
+	Poll                    string            `json:"-"`
+	Cancel                  string            `json:"-"`
+	ContentType             string            `json:"-"`
+	Documentation           string            `json:"documentation,omitempty"`
+	LegacyAliases           []string          `json:"-"`
+	Enabled                 bool              `json:"enabled"`
+	Installable             bool              `json:"installable"`
+	Execution               string            `json:"-"`
+	RequiresPublicMediaURLs bool              `json:"-"`
+	MediaTransport          map[string]string `json:"-"`
+	UnavailableReason       string            `json:"-"`
 }
 
 // Manifest is the single plugin contract. A plugin may contribute providers,
@@ -306,6 +307,7 @@ type ManifestProvider struct {
 	Scopes                  []Surface              `json:"scopes"`
 	BaseURL                 string                 `json:"baseUrl,omitempty"`
 	RequiresPublicMediaURLs bool                   `json:"requiresPublicMediaUrls,omitempty"`
+	MediaTransport          map[string]string      `json:"mediaTransport,omitempty"`
 	Auth                    ManifestAuth           `json:"auth,omitempty"`
 	Parameters              []Parameter            `json:"parameters,omitempty"`
 	Validations             []ManifestValidation   `json:"validations,omitempty"`

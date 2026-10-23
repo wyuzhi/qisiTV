@@ -5,7 +5,7 @@ export type CanvasExportFile = {
     app: "infinite-canvas";
     version: 3 | 4;
     exportedAt: string;
-    folders?: CanvasFolder[];
+    folders?: (CanvasFolder & { coverPath?: string; coverMimeType?: string })[];
     projects: CanvasProjectExportItem[];
 };
 

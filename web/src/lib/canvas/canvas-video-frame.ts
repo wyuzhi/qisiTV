@@ -120,10 +120,40 @@ export async function captureVideoFrames(source: Blob | string, timesMs: number[
     }
 }
 
+export function resolveVideoFramePresetTimeMs(
+    preset: "current" | "first" | "last",
+    durationMs: number,
+    currentMs: number,
+) {
+    if (preset === "first") return 0;
+    if (preset === "last") {
+        return Number.isFinite(durationMs) && durationMs > 0
+            ? Math.max(0, Math.round(durationMs) - 1)
+            : Number.MAX_SAFE_INTEGER;
+    }
+    return Number.isFinite(currentMs) && currentMs > 0 ? Math.round(currentMs) : 0;
+}
+
+export function videoFrameFetchCredentials(source: string): RequestCredentials {
+    if (/^https?:\/\//i.test(source)) {
+        try {
+            const parsed = new URL(source);
+            if (/\/(?:api\/)?resources\/[^/]+\/file$/u.test(parsed.pathname)) return "include";
+            if (typeof window !== "undefined" && parsed.origin && parsed.origin !== window.location?.origin) {
+                return "omit";
+            }
+        } catch {
+            return "omit";
+        }
+    }
+    if (/^\/(?:api\/)?resources\/[^/]+\/file(?:[?#].*)?$/u.test(source)) return "include";
+    return "same-origin";
+}
+
 async function readVideoBlob(source: Blob | string) {
     if (source instanceof Blob) return source;
     try {
-        const response = await fetch(source, { credentials: "same-origin" });
+        const response = await fetch(source, { credentials: videoFrameFetchCredentials(source) });
         if (!response.ok) throw new Error(String(response.status));
         return await response.blob();
     } catch {

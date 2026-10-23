@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"qisitv/backend/internal/model"
@@ -10,6 +11,41 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestSaveTaskCompletionDiskFullPreservesOriginalTask(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.SystemSetting{}, &model.Asset{}, &model.CanvasProject{}, &model.Task{}, &model.TaskLog{}, &model.Result{}, &model.ApiCallLog{}, &model.TaskTextDelta{}); err != nil {
+		t.Fatal(err)
+	}
+	task := model.Task{ID: "task-full", UserID: "user-1", Status: model.TaskStatusFailed, InputJSON: `{"mode":"video"}`}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	cause := errors.New("database or disk is full")
+	if err := db.Callback().Update().Before("gorm:update").Register("test:task-disk-full", func(tx *gorm.DB) {
+		if tx.Statement.Table == "tasks" {
+			tx.AddError(cause)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{repo: repository.New(db)}
+	err = svc.saveTaskCompletionWithinStorageQuota(&task, []byte(`{"ok":true}`), nil, false)
+	var appErr *AppError
+	if !errors.As(err, &appErr) || appErr.Reason != "local_disk_full" || !errors.Is(err, cause) || strings.Contains(appErr.Message, "尚未提交") {
+		t.Fatalf("completion failure = %v", err)
+	}
+	var saved model.Task
+	if err := db.First(&saved, "id = ?", task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != model.TaskStatusFailed || saved.Status != model.TaskStatusFailed || saved.ResultJSON != "" {
+		t.Fatalf("failed recovery changed task: memory=%s saved=%#v", task.Status, saved)
+	}
+}
 
 func TestValidateStructuredStorageQuotaRejectsBytesAndCounts(t *testing.T) {
 	policy := defaultRuntimePolicy().Resource
@@ -21,6 +57,20 @@ func TestValidateStructuredStorageQuotaRejectsBytesAndCounts(t *testing.T) {
 	var quota *AppError
 	if err == nil || !errors.As(err, &quota) || quota.Code != CodeQuotaExceeded || quota.Status != CodeForbidden {
 		t.Fatalf("validateStructuredStorageQuota() count error = %v", err)
+	}
+}
+
+func TestValidateStructuredCountQuotaRejectsBatchOverAssetLimit(t *testing.T) {
+	policy := defaultRuntimePolicy().Resource
+	policy.AssetCount = 2
+	usage := repository.UserStorageUsage{AssetCount: 1}
+	if err := validateStructuredCountQuotaWithPolicy(usage, "asset", 1, 0, policy); err != nil {
+		t.Fatalf("single create within limit = %v", err)
+	}
+	err := validateStructuredCountQuotaWithPolicy(usage, "asset", 2, 0, policy)
+	var quota *AppError
+	if err == nil || !errors.As(err, &quota) || quota.Code != CodeQuotaExceeded {
+		t.Fatalf("batch create error = %v", err)
 	}
 }
 

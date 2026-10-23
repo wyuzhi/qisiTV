@@ -3,6 +3,7 @@ import { Brush, Camera, Copy, FileText, Globe2, Grid2x2, Lock, LockOpen, Maximiz
 
 import type { CanvasNodeData } from "@/types/canvas";
 import type { NodeToolbarGroup } from "@/lib/canvas/tool-registry";
+import type { CanvasWorkflowContribution } from "@/lib/canvas/workflow-capability";
 
 type ImageNodeActionToolId = "copyPrompt" | "reversePrompt" | "replace" | "resize" | "annotation" | "maskEdit" | "emotion" | "portraitTexture" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "lighting" | "panorama" | "view";
 
@@ -25,6 +26,7 @@ type ImageToolHandlers = {
 };
 
 type ImageToolDefinition = {
+    workflow?: CanvasWorkflowContribution;
     id: ImageNodeActionToolId;
     label: string | ((node: CanvasNodeData) => string);
     icon: (node: CanvasNodeData) => ReactNode;
@@ -48,6 +50,7 @@ const imageToolDefinitions: ImageToolDefinition[] = [
     },
     {
         id: "reversePrompt",
+        workflow: { mode: "recipe", outputType: "text" },
         section: "生成信息",
         label: "反推提示词",
         icon: () => <FileText className="size-3.5" />,
@@ -76,6 +79,7 @@ const imageToolDefinitions: ImageToolDefinition[] = [
     },
     {
         id: "annotation",
+        workflow: { mode: "manual", reason: "标注需要手绘，请在画布完成后作为固定参考输入" },
         section: "拆分与标记",
         description: "添加标记，另存为新图片",
         label: "标注",
@@ -86,6 +90,7 @@ const imageToolDefinitions: ImageToolDefinition[] = [
     },
     {
         id: "maskEdit",
+        workflow: { mode: "recipe", outputType: "image" },
         label: "局部重绘",
         description: "涂抹要修改的区域，生成新图片",
         icon: () => <Brush className="size-3.5" />,
@@ -95,6 +100,7 @@ const imageToolDefinitions: ImageToolDefinition[] = [
     },
     {
         id: "emotion",
+        workflow: { mode: "recipe", outputType: "image" },
         label: "表情调整",
         section: "人像调整",
         description: "调整人物表情，生成新图片",
@@ -105,6 +111,7 @@ const imageToolDefinitions: ImageToolDefinition[] = [
     },
     {
         id: "portraitTexture",
+        workflow: { mode: "recipe", outputType: "image" },
         label: "质感调整",
         section: "人像调整",
         description: "设置肤质、光影与融合，再执行生成",
@@ -115,6 +122,7 @@ const imageToolDefinitions: ImageToolDefinition[] = [
     },
     {
         id: "crop",
+        workflow: { operationId: "image.crop", outputType: "image" },
         label: "裁切",
         section: "构图与尺寸",
         description: "保留所选区域，生成新图片",
@@ -125,6 +133,7 @@ const imageToolDefinitions: ImageToolDefinition[] = [
     },
     {
         id: "split",
+        workflow: { operationId: "image.split", outputType: "image" },
         label: "宫格切分",
         section: "拆分与标记",
         description: "按行列拆成多个图片节点",
@@ -135,6 +144,7 @@ const imageToolDefinitions: ImageToolDefinition[] = [
     },
     {
         id: "upscale",
+        workflow: { operationId: "image.resize", outputType: "image" },
         label: "调整尺寸",
         section: "构图与尺寸",
         description: "插值放大像素尺寸，不是 AI 超分",
@@ -145,6 +155,7 @@ const imageToolDefinitions: ImageToolDefinition[] = [
     },
     {
         id: "angle",
+        workflow: { mode: "recipe", outputType: "image" },
         label: "多角度",
         section: "视角",
         description: "调整摄影机角度，生成新视角",
@@ -155,6 +166,7 @@ const imageToolDefinitions: ImageToolDefinition[] = [
     },
     {
         id: "lighting",
+        workflow: { mode: "recipe", outputType: "image" },
         label: "打光",
         section: "视角",
         description: "调整光线方向、亮度与光效，生成新图片",
@@ -173,6 +185,7 @@ const imageToolDefinitions: ImageToolDefinition[] = [
     },
     {
         id: "panorama",
+        workflow: { mode: "recipe", outputType: "image" },
         label: "全景图",
         section: "视角",
         description: "基于该图片创建 360° 全景查看节点",
@@ -194,6 +207,13 @@ export function buildImageToolbarTools(node: CanvasNodeData, handlers: ImageTool
         description: tool.description,
         active: tool.active?.(node),
         onClick: () => tool.run(node, handlers),
+    }));
+}
+
+export function listImageWorkflowTools(node: CanvasNodeData) {
+    return imageToolDefinitions.filter(tool => tool.workflow || ["process", "portrait", "viewpoint", "lighting", "panorama"].includes(tool.group)).map(tool => ({
+        id: `image.${tool.id}`, label: resolveToolText(tool.label, node), icon: tool.icon(node),
+        workflow: tool.workflow || { mode: "manual" as const }, description: tool.description,
     }));
 }
 

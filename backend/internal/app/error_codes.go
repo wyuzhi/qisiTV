@@ -23,18 +23,20 @@ const (
 type ErrorReason = kernel.ErrorReason
 
 const (
-	ReasonInvalidArgument    = kernel.ReasonInvalidArgument
-	ReasonUnauthorized       = kernel.ReasonUnauthorized
-	ReasonForbidden          = kernel.ReasonForbidden
-	ReasonNotFound           = kernel.ReasonNotFound
-	ReasonConflict           = kernel.ReasonConflict
-	ReasonFailedPrecondition = kernel.ReasonFailedPrecondition
-	ReasonQuotaExceeded      = kernel.ReasonQuotaExceeded
-	ReasonRateLimited        = kernel.ReasonRateLimited
-	ReasonUnavailable        = kernel.ReasonUnavailable
-	ReasonTimeout            = kernel.ReasonTimeout
-	ReasonInternal           = kernel.ReasonInternal
-	ReasonBadGateway         = kernel.ReasonBadGateway
+	ReasonInvalidArgument         = kernel.ReasonInvalidArgument
+	ReasonUnauthorized            = kernel.ReasonUnauthorized
+	ReasonForbidden               = kernel.ReasonForbidden
+	ReasonNotFound                = kernel.ReasonNotFound
+	ReasonConflict                = kernel.ReasonConflict
+	ReasonProjectRevisionConflict = kernel.ReasonProjectRevisionConflict
+	ReasonProjectUnitShotsChanged = kernel.ReasonProjectUnitShotsChanged
+	ReasonFailedPrecondition      = kernel.ReasonFailedPrecondition
+	ReasonQuotaExceeded           = kernel.ReasonQuotaExceeded
+	ReasonRateLimited             = kernel.ReasonRateLimited
+	ReasonUnavailable             = kernel.ReasonUnavailable
+	ReasonTimeout                 = kernel.ReasonTimeout
+	ReasonInternal                = kernel.ReasonInternal
+	ReasonBadGateway              = kernel.ReasonBadGateway
 )
 
 func ReasonForStatus(status int) ErrorReason {

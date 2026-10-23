@@ -89,7 +89,7 @@ describe("图片上传占位", () => {
         expect(create).toContain("if (!currentNode)");
         expect(create).toContain("fileUpload: undefined");
         const replace = hook.slice(hook.indexOf('const replaceNodeMedia'), hook.indexOf("const pasteSystemClipboard"));
-        expect(replace).toContain("await createFileNode(file, currentNode.position, nodeId)");
+        expect(replace).toContain("await createFileNode(file, currentNode.position, nodeId, expectedScope)");
         expect(create).toContain("original?.metadata?.content");
         expect(read("components/canvas/canvas-upload-modal.tsx")).toContain("onClose();\n            await pendingUpload;");
         expect(read("styles/globals.css")).toContain("prefers-reduced-motion: reduce");
@@ -123,6 +123,17 @@ test("音频与文本在传输前就有独立占位，可重试且不带模型�
         expect(node.metadata?.content).toBeUndefined();
         expect(node.metadata?.status).toBeUndefined();
         expect(interruptFileUpload(node).metadata?.fileUpload).toBe("error");
+    }
+});
+
+test("H.265 视频不需要浏览器解码即可创建上传节点，空 MIME 的 MOV 也可导入", async () => {
+    for (const [name, type] of [["hevc.mp4", "video/mp4"], ["hevc.mov", ""], ["hevc.mkv", "application/octet-stream"]]) {
+        const node = await createFileUploadPlaceholder("hevc", new File(["undecodable video"], name, { type }), { x: 100, y: 200 });
+        expect(node.type).toBe(CanvasNodeType.Video);
+        expect(node.title).toBe(name);
+        expect(node.metadata?.fileUpload).toBe("uploading");
+        expect(node.position.x + node.width / 2).toBe(100);
+        expect(node.metadata?.naturalWidth).toBeUndefined();
     }
 });
 

@@ -50,6 +50,7 @@ export type EditorStore = {
     cancelGesture: () => void;
     /** 立即保存（离开编辑器/卸载前调用）。 */
     flushSave: () => Promise<void>;
+    hasActiveSave: () => boolean;
 };
 
 export type EditorStoreOptions = {
@@ -74,6 +75,7 @@ export function createEditorStore(options: EditorStoreOptions = {}): UseBoundSto
         let saveTimer: ReturnType<typeof setTimeout> | null = null;
         // 保存串行链：避免并行保存导致旧快照后落地覆盖新状态
         let saveChain: Promise<void> = Promise.resolve();
+        let pendingSaves = 0;
 
         const setSaveError = (err: unknown) =>
             set({ saveError: err instanceof Error ? err.message : String(err) });
@@ -82,12 +84,13 @@ export function createEditorStore(options: EditorStoreOptions = {}): UseBoundSto
             const { project } = get();
             if (!project) return Promise.resolve();
             set({ saving: true });
+            pendingSaves += 1;
             const chain = saveChain
                 .then(() => saveTimeline!(project))
                 .then(
                     () => set({ saving: false, isDirty: false, saveError: null, lastSavedAt: Date.now() }),
                     (err: unknown) => set({ saving: false, saveError: err instanceof Error ? err.message : String(err), isDirty: true }),
-                );
+                ).finally(() => { pendingSaves -= 1; });
             saveChain = chain;
             return chain;
         };
@@ -195,6 +198,7 @@ export function createEditorStore(options: EditorStoreOptions = {}): UseBoundSto
                 }
                 if (get().isDirty && saveTimeline) await performSave();
             },
+            hasActiveSave: () => pendingSaves > 0 || saveTimer !== null,
         };
     });
 }

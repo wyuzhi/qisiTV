@@ -25,18 +25,25 @@ const (
 type ErrorReason string
 
 const (
-	ReasonInvalidArgument    ErrorReason = "invalid_argument"
-	ReasonUnauthorized       ErrorReason = "unauthorized"
-	ReasonForbidden          ErrorReason = "forbidden"
-	ReasonNotFound           ErrorReason = "not_found"
-	ReasonConflict           ErrorReason = "conflict"
-	ReasonFailedPrecondition ErrorReason = "failed_precondition"
-	ReasonQuotaExceeded      ErrorReason = "quota_exceeded"
-	ReasonRateLimited        ErrorReason = "rate_limited"
-	ReasonUnavailable        ErrorReason = "unavailable"
-	ReasonTimeout            ErrorReason = "timeout"
-	ReasonInternal           ErrorReason = "internal"
-	ReasonBadGateway         ErrorReason = "bad_gateway"
+	ReasonInvalidArgument ErrorReason = "invalid_argument"
+	ReasonUnauthorized    ErrorReason = "unauthorized"
+	ReasonForbidden       ErrorReason = "forbidden"
+	ReasonNotFound        ErrorReason = "not_found"
+	ReasonConflict        ErrorReason = "conflict"
+	// ReasonProjectRevisionConflict 表示项目 revision CAS 未命中，调用方应重新加载后再写。
+	ReasonProjectRevisionConflict ErrorReason = "project_revision_conflict"
+	// ReasonProjectUnitShotsChanged 表示本章镜头集合或镜头内容已变，不能按过期快照整章替换。
+	ReasonProjectUnitShotsChanged ErrorReason = "project_unit_shots_changed"
+	ReasonFailedPrecondition      ErrorReason = "failed_precondition"
+	ReasonQuotaExceeded           ErrorReason = "quota_exceeded"
+	ReasonRateLimited             ErrorReason = "rate_limited"
+	ReasonUnavailable             ErrorReason = "unavailable"
+	// ReasonUnsupportedField 表示目标节点类型没有声明这个可编辑字段：
+	// 调用方必须换字段或换节点，而不是重试。
+	ReasonUnsupportedField ErrorReason = "unsupported_field"
+	ReasonTimeout          ErrorReason = "timeout"
+	ReasonInternal         ErrorReason = "internal"
+	ReasonBadGateway       ErrorReason = "bad_gateway"
 )
 
 func ReasonForStatus(status int) ErrorReason {

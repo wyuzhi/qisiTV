@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import * as placement from "../src/lib/canvas/director/director-placement";
 
 import {
     DIRECTOR_PLACEMENT_MARGIN,
@@ -247,6 +248,23 @@ describe("放置来源优先级", () => {
                 fallback: [0, Number.NaN, 0],
             }),
         ).toEqual([2, 0, 2]);
+    });
+});
+
+describe("网格吸附", () => {
+    test("开启后 XZ 贴到半单位格，保留 Y；关闭时位置不变", () => {
+        expect(placement.snapDirectorGroundPosition([1.26, 0.7, -0.74], true)).toEqual([1.5, 0.7, -0.5]);
+        expect(placement.snapDirectorGroundPosition([1.26, 0.7, -0.74], false)).toEqual([1.26, 0.7, -0.74]);
+    });
+
+    test("碰撞避让后的新增对象仍在网格上，且不与占位重叠", () => {
+        const existing = [createDirectorObject("box", "已有", [1.5, 0.5, -0.5])];
+        const object = createDirectorObject("box", "新", [1.26, 0.5, -0.74]);
+        const position = resolveDirectorPlacement({ object, existing, gridSnap: true });
+        expect(position[0] * 2).toBeInteger();
+        expect(position[2] * 2).toBeInteger();
+        expect(position[1]).toBe(0.5);
+        expect(overlapsXZ({ ...object, transform: { ...object.transform, position } }, existing[0])).toBe(false);
     });
 });
 

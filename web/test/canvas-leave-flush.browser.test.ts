@@ -1,99 +1,150 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
-import { chromium, type Browser, type Page } from "playwright";
+import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
+import { existsSync, readFileSync } from "node:fs";
+import { chromium, type Browser } from "playwright";
 
-// Run the real lifecycle hook with mocked repository/optional cache contracts.
-// Real filesystem behavior is separately covered by browser-project-folder.
+// Renders the real useCanvasProjectLifecycle through the shared restart harness
+// and proves a deletion reaches the backend right after the page is hidden,
+// ahead of the 500 ms debounced backend sync.
+
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
+let commits: Array<{ at: number; canvasId: string; nodes: Array<{ id: string; title: string }>; connections: unknown[] }> = [];
+const remote = { id: "c1", revision: 111, title: "Restart", createdAt: "2026-10-02", updatedAt: "2026-10-02", nodes: Array.from({ length: 10 }, (_, i) => ({ id: `n${i}`, type: "image", title: `Node ${i}`, width: 320, height: 200, position: { x: i * 400, y: 0 }, metadata: {} })), connections: Array.from({ length: 6 }, (_, i) => ({ id: `e${i}`, fromNodeId: `n${i}`, toNodeId: `n${i + 1}` })), chatSessions: [], activeChatId: null, backgroundMode: "grid", showImageInfo: false, viewport: { x: 0, y: 0, k: 1 }, directorScenes: [] };
+let backend = structuredClone(remote);
+let secondBackend = { ...structuredClone(remote), id: "c2", title: "Second canvas", nodes: remote.nodes.slice(0, 2), connections: remote.connections.slice(0, 1) };
+
 beforeAll(async () => {
-    const mocked = new Set([
-        "antd", "react-router", "@/lib/canvas/canvas-drawing-storage", "@/lib/canvas/canvas-project-generation",
-        "@/services/api/skills", "@/services/local-workspace-sync", "@/services/workspace-project-repository",
-        "@/stores/canvas/use-canvas-store", "@/services/local-workspace-repository", "@/stores/canvas/use-canvas-history-store",
-        "@/stores/canvas/use-canvas-theme-store", "@/stores/use-sync-progress-store", "@/services/canvas-sync-drafts", "@/stores/use-user-store",
-    ]);
-    const build = await Bun.build({ entrypoints: [import.meta.dir + "/fixtures/canvas-leave-harness.tsx"], target: "browser", define: { "import.meta.env": '{"VITE_QISITV_BROWSER_ONLY":"1"}', "process.env.NODE_ENV": '"development"' }, plugins: [{ name: "lifecycle-dependencies", setup(builder) {
-        builder.onResolve({ filter: /^(?:@\/|antd$|react-router$)/ }, (args) => mocked.has(args.path)
-            ? { path: import.meta.dir + "/fixtures/canvas-leave-dependencies.ts" }
-            : { path: Bun.resolveSync("../src/" + args.path.slice(2), import.meta.dir) });
+    const build = await Bun.build({ entrypoints: [import.meta.dir + "/fixtures/canvas-lifecycle-restart-harness.tsx"], target: "browser", define: { "import.meta.env.DEV": "false", "import.meta.env.PROD": "true", "import.meta.env.MODE": '"production"', "import.meta.env.VITE_CANVAS_LOCAL_MODE": '"true"', "import.meta.env.VITE_CANVAS_BACKEND_URL": '"/api"', "process.env.NODE_ENV": '"production"' }, plugins: [{ name: "source", setup(builder) {
+        builder.onResolve({ filter: /^@\// }, args => ({ path: Bun.resolveSync("../src/" + args.path.slice(2), import.meta.dir) }));
+        // Delay only test persistence, keeping the actual store flush implementation.
+        // This exposes the real hook's await boundary without replacing its save API.
+        builder.onLoad({ filter: /stores\/canvas\/use-canvas-store\.ts$/ }, args => ({
+            loader: "ts",
+            contents: readFileSync(args.path, "utf8").replace("export async function flushCanvasStorePersistence()", "async function originalFlushCanvasStorePersistence()") + `
+                export async function flushCanvasStorePersistence() {
+                    const gate = (window as any).__leavePersistenceGate;
+                    if (gate) { (window as any).__leavePersistenceEntered = true; await gate; }
+                    return originalFlushCanvasStorePersistence();
+                }
+            `,
+        }));
+        builder.onLoad({ filter: /\.(css|svg|png|jpe?g|gif|webp|woff2?)$/ }, () => ({ contents: "export default ''", loader: "js" }));
     } }] });
     if (!build.success) throw new Error(build.logs.join("\n"));
     const script = await build.outputs[0]!.text();
-    server = Bun.serve({ port: 0, fetch: (request) => new URL(request.url).pathname === "/harness.js"
-        ? new Response(script, { headers: { "Content-Type": "application/javascript" } })
-        : new Response('<div id="root"></div><script type="module" src="/harness.js"></script>', { headers: { "Content-Type": "text/html" } }) });
+    const json = (data: unknown) => Response.json({ code: 0, data, msg: "ok" });
+    server = Bun.serve({ port: 0, async fetch(request) {
+        const path = new URL(request.url).pathname;
+        if (path === "/harness.js") return new Response(script, { headers: { "Content-Type": "application/javascript" } });
+        if (path === "/api/canvas-projects/c1") return json({ project: backend });
+        if (path === "/api/canvas-projects/c2") return json({ project: secondBackend });
+        if (path === "/api/ops/canvas.document.commit") {
+            const body = await request.json();
+            const current = body.params.canvasId === "c2" ? secondBackend : backend;
+            if (body.params.expectedRevision !== current.revision) return Response.json({ code: 409, data: null, msg: "Revision conflict", reason: "canvas_revision_conflict" }, { status: 409 });
+            commits.push({ at: Date.now(), canvasId: body.params.canvasId, nodes: body.params.document.nodes, connections: body.params.document.connections });
+            const saved = { ...body.params.document, revision: current.revision + 1 };
+            if (body.params.canvasId === "c2") secondBackend = saved; else backend = saved;
+            return json({ revision: saved.revision, result: { canvasId: saved.id, revision: saved.revision, title: saved.title, updatedAt: saved.updatedAt } });
+        }
+        if (path.startsWith("/api/")) return json([]);
+        return new Response('<div id="root"></div><script type="module" src="/harness.js"></script>', { headers: { "Content-Type": "text/html" } });
+    } });
     const executablePath = [process.env.CHROME_PATH, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((path): path is string => Boolean(path && existsSync(path)));
     browser = await chromium.launch({ executablePath, headless: true });
-}, 30_000);
+}, 60000);
 afterAll(async () => { await browser?.close(); server?.stop(true); });
+beforeEach(() => {
+    backend = structuredClone(remote);
+    secondBackend = { ...structuredClone(remote), id: "c2", title: "Second canvas", nodes: remote.nodes.slice(0, 2), connections: remote.connections.slice(0, 1) };
+    commits = [];
+});
 
-async function open() {
+for (const trigger of ["pagehide", "visibilitychange"] as const) test(`a deletion is committed right after ${trigger}, before the debounced sync`, async () => {
     const page = await browser.newPage();
+    const errors: string[] = [];
+    page.on("pageerror", e => errors.push(e.message));
     await page.goto(server.url.toString());
-    await page.getByTestId("state").filter({ hasText: "a:true:1" }).waitFor();
-    return page;
-}
-async function inspect(page: Page) {
-    await page.getByRole("button", { name: "inspect", exact: true }).click();
-    return JSON.parse(await page.locator("#snapshot").innerText());
-}
-for (const trigger of ["pagehide", "hidden", "unmount", "manual"]) test(`${trigger} saves live deletion and viewport without waiting for cache or debounce`, async () => {
-    const page = await open();
-    try {
-        await page.getByRole("button", { name: trigger, exact: true }).click();
-        if (trigger === "manual") await page.locator("#save-result").filter({ hasText: "true" }).waitFor();
-        const saved = await inspect(page);
-        expect(saved.writes.some((item: any) => item.id === "a" && item.nodes.length === 0 && item.viewport.x === 42)).toBe(true);
-        expect(saved.cacheFlushes).toBeGreaterThan(0);
-    } finally { await page.close(); }
-}, 15_000);
+    await page.waitForFunction(() => document.querySelector('[data-testid="graph"]')?.textContent === "true:10:6");
+    await page.evaluate(() => (window as any).__lifecycle.deleteEdges());
+    await page.waitForFunction(() => document.querySelector('[data-testid="graph"]')?.textContent === "true:10:0");
+    const hiddenAt = Date.now();
+    await page.evaluate((kind) => {
+        if (kind === "pagehide") {
+            window.dispatchEvent(new Event("pagehide"));
+            return;
+        }
+        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+        document.dispatchEvent(new Event("visibilitychange"));
+    }, trigger);
+    const deadline = Date.now() + 2000;
+    while (!commits.some(c => c.connections.length === 0) && Date.now() < deadline) await Bun.sleep(10);
+    const commit = commits.find(c => c.connections.length === 0);
+    expect(commit).toBeDefined();
+    // The debounced backend sync waits 500 ms after the edit; the leave flush must not.
+    expect(commit!.at - hiddenAt).toBeLessThan(400);
+    expect(backend.connections).toEqual([]);
+    expect(errors).toEqual([]);
+    await page.close();
+}, 30000);
 
-test("route change flushes A before loading B and never copies A's state into B", async () => {
-    const page = await open();
+test("leave flush awaiting persistence cannot submit after A→B→A", async () => {
+    const page = await browser.newPage();
     try {
-        await page.getByRole("button", { name: "appearance", exact: true }).click();
-        await page.getByRole("button", { name: "switch", exact: true }).click();
-        await page.getByTestId("state").filter({ hasText: "b:true:1" }).waitFor();
-        const saved = await inspect(page);
-        expect(saved.writes.find((item: any) => item.id === "a")).toMatchObject({ nodes: [], showImageInfo: true, viewport: { x: 42, y: 24, k: 2 } });
-        expect(saved.projects.find((item: any) => item.id === "b")).toMatchObject({ nodes: [{ id: "b-node" }], showImageInfo: false, viewport: { x: 0, y: 0, k: 1 } });
-        expect(saved.writes.every((item: any) => item.id === "a")).toBe(true);
+        await page.goto(server.url.toString());
+        await page.waitForFunction(() => document.querySelector('[data-testid="graph"]')?.textContent === "true:10:6");
+        const before = commits.length;
+        await page.evaluate(() => {
+            (window as any).__leavePersistenceGate = new Promise(resolve => { (window as any).__releaseLeavePersistence = resolve; });
+            (window as any).__lifecycle.deleteEdges();
+        });
+        await page.waitForFunction(() => document.querySelector('[data-testid="graph"]')?.textContent === "true:10:0");
+        await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+        await page.waitForFunction(() => (window as any).__leavePersistenceEntered === true);
+        await page.evaluate(() => {
+            (window as any).__lifecycle.scopeCycle();
+            delete (window as any).__leavePersistenceGate;
+            (window as any).__releaseLeavePersistence();
+        });
+        await page.waitForTimeout(1100);
+        expect(commits.slice(before)).toEqual([]);
+        expect(backend.connections).toHaveLength(6);
     } finally { await page.close(); }
-}, 15_000);
+}, 30000);
 
-test("folder write failure preserves the unsaved deletion and reports a project error", async () => {
-    const page = await open();
+for (const leave of ["unmount", "switchCanvas"] as const) test(`${leave} flushes the old canvas deletion without adopting the next graph`, async () => {
+    const page = await browser.newPage();
     try {
-        await page.getByRole("button", { name: "disk failure", exact: true }).click();
-        const saved = await inspect(page);
-        expect(saved.writes).toEqual([]);
-        expect(saved.projects.find((item: any) => item.id === "a").nodes).toEqual([]);
-        expect(saved.progress.a).toEqual({ phase: "error", message: "disk full" });
+        await page.goto(server.url.toString());
+        await page.waitForFunction(() => document.querySelector('[data-testid="graph"]')?.textContent === "true:10:6");
+        await page.evaluate(() => (window as any).__lifecycle.deleteEdges());
+        await page.waitForFunction(() => document.querySelector('[data-testid="graph"]')?.textContent === "true:10:0");
+        await page.evaluate(kind => (window as any).__lifecycle[kind]("c2"), leave);
+        const deadline = Date.now() + 2000;
+        while (backend.connections.length && Date.now() < deadline) await Bun.sleep(10);
+        expect(backend.connections).toHaveLength(0);
+        expect(backend.nodes).toHaveLength(10);
+        expect(secondBackend.nodes).toHaveLength(2);
+        expect(secondBackend.connections).toHaveLength(1);
+        expect(commits.filter(commit => commit.canvasId === "c1").every(commit => commit.nodes.length === 10)).toBe(true);
+        if (leave === "switchCanvas") await page.waitForFunction(() => document.querySelector('[data-testid="graph"]')?.textContent === "true:2:1");
     } finally { await page.close(); }
-}, 15_000);
+}, 30000);
 
-test("unchanged StrictMode mount, repeated pagehide, and deleted project do not create writes", async () => {
-    const page = await open();
+test("external deletion conflicting with genuine local text is retained and cannot autosave over remote", async () => {
+    const page = await browser.newPage();
     try {
-        await page.getByRole("button", { name: "unchanged pagehide", exact: true }).click();
-        await page.getByRole("button", { name: "unchanged pagehide", exact: true }).click();
-        expect((await inspect(page)).writes).toEqual([]);
-        await page.getByRole("button", { name: "delete project", exact: true }).click();
-        const saved = await inspect(page);
-        expect(saved.writes).toEqual([]);
-        expect(saved.projects.map((item: any) => item.id)).toEqual(["b"]);
+        await page.goto(server.url.toString());
+        await page.waitForFunction(() => document.querySelector('[data-testid="graph"]')?.textContent === "true:10:6");
+        await page.evaluate(() => (window as any).__lifecycle.editTitle());
+        await page.waitForFunction(() => (window as any).__lifecycle.title() === "Local unsaved text");
+        const before = commits.length;
+        backend = { ...backend, revision: backend.revision + 1, nodes: backend.nodes.filter(node => node.id !== "n0"), connections: backend.connections.filter(edge => edge.fromNodeId !== "n0" && edge.toNodeId !== "n0") };
+        await page.evaluate(() => (window as any).__lifecycle.refresh());
+        await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+        await page.waitForTimeout(1100);
+        expect(await page.evaluate(() => (window as any).__lifecycle.title())).toBe("Local unsaved text");
+        expect(commits.slice(before)).toEqual([]);
+        expect(backend.nodes.some(node => node.id === "n0")).toBe(false);
     } finally { await page.close(); }
-}, 15_000);
-
-test("already stored edits flush the pending debounce once, without rewriting unchanged state", async () => {
-    const page = await open();
-    try {
-        await page.getByRole("button", { name: "appearance", exact: true }).click();
-        await page.getByRole("button", { name: "unchanged pagehide", exact: true }).click();
-        await page.getByRole("button", { name: "unchanged pagehide", exact: true }).click();
-        const saved = await inspect(page);
-        expect(saved.writes).toHaveLength(1);
-        expect(saved.writes[0].showImageInfo).toBe(true);
-    } finally { await page.close(); }
-}, 15_000);
+}, 30000);

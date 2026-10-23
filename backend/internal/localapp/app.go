@@ -12,7 +12,6 @@ type Options struct {
 	Tasks          TaskPort
 	Generation     GenerationPort
 	ProviderConfig ProviderConfigPort
-	Agent          AgentPort
 	Lifecycle      Lifecycle
 }
 
@@ -25,7 +24,6 @@ type App struct {
 	Tasks          TaskPort
 	Generation     GenerationPort
 	ProviderConfig ProviderConfigPort
-	Agent          AgentPort
 
 	lifecycle Lifecycle
 }
@@ -45,8 +43,6 @@ func New(options Options) (*App, error) {
 		missing = "generation"
 	case options.ProviderConfig == nil:
 		missing = "provider config"
-	case options.Agent == nil:
-		missing = "agent"
 	case options.Lifecycle == nil:
 		missing = "lifecycle"
 	}
@@ -56,7 +52,7 @@ func New(options Options) (*App, error) {
 	return &App{
 		Workspace: options.Workspace, Projects: options.Projects, Assets: options.Assets,
 		Tasks: options.Tasks, Generation: options.Generation, ProviderConfig: options.ProviderConfig,
-		Agent: options.Agent, lifecycle: options.Lifecycle,
+		lifecycle: options.Lifecycle,
 	}, nil
 }
 

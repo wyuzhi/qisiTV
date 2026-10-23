@@ -95,6 +95,7 @@ export function getNodeResourceKind(node: CanvasNodeData) {
 
 /** 该节点作为生成节点时的生成模式，不产生生成行为返回 null */
 export function getNodeGenerationMode(node: CanvasNodeData) {
+    if (node.metadata?.reusableWorkflow || node.metadata?.workflowSlot) return null;
     return definitions.get(node.type)?.generationMode?.(node) ?? null;
 }
 

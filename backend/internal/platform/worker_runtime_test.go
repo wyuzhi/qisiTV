@@ -52,3 +52,28 @@ func TestWorkerRuntimeStopsLoopsAndWaitsForTasks(t *testing.T) {
 		t.Fatal("drained runtime should reject new tasks")
 	}
 }
+
+func TestWorkerContextCancelsOnDrain(t *testing.T) {
+	runtime := &Worker{}
+	if runtime.Context() != nil {
+		t.Fatal("unstarted worker must not expose a context")
+	}
+	ctx, started := runtime.Start()
+	if !started || runtime.Context() != ctx {
+		t.Fatal("started worker should expose its context")
+	}
+	runtime.BeginDrain()
+	select {
+	case <-runtime.Context().Done():
+	case <-time.After(time.Second):
+		t.Fatal("worker context did not cancel on drain")
+	}
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+	defer stopCancel()
+	if err := runtime.Stop(stopCtx); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.Context() != nil {
+		t.Fatal("stopped worker must not expose a context")
+	}
+}

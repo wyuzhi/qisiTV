@@ -1,14 +1,9 @@
 import { saveAs } from "file-saver";
+import { nanoid } from "nanoid";
 
 import { sanitizeDownloadFileName } from "@/lib/canvas/canvas-media-download";
-import { isBrowserWorkspace } from "@/services/browser-workspace";
-import { workspaceRouteLocation } from "@/lib/workspace-url";
-
-function currentBrowserProjectId() {
-    if (!isBrowserWorkspace() || typeof window === "undefined") return undefined;
-    const match = workspaceRouteLocation(window.location).pathname.match(/^\/canvas\/([^/]+)$/);
-    return match ? decodeURIComponent(match[1]) : undefined;
-}
+import { assertUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
+import { getResourceBlob, uploadResourceFile } from "@/services/api/resources";
 
 export type OwnedMediaSaveResult = "saved" | "cancelled" | "download-started";
 
@@ -29,43 +24,31 @@ export async function downloadOwnedOrBrowserMedia(options: { fileName: string; r
         const saved = await save(fileName, resourceId);
         return saved ? "saved" : "cancelled";
     }
-    const browserUrl = options.browserUrl?.trim();
-    if (isBrowserWorkspace()) {
-        // 下载原文件优先读取稳定存储键；节点里的临时预览 URL 可能已随刷新失效。
-        let blob: Blob | null = null;
-        if (options.storageKey) {
-            const { getImageBlob } = await import("@/services/image-storage");
-            blob = await getImageBlob(options.storageKey);
-            if (!blob) blob = await (await import("@/services/local-media-repository")).getLocalMediaBlob(options.storageKey);
-        }
-        if (!blob) {
-            if (!browserUrl) throw new Error("没有可导出的文件");
-            let response: Response;
-            try {
-                response = await fetch(browserUrl, { credentials: "omit" });
-            } catch {
-                throw new Error("无法读取下载文件，请重新加载素材后再试");
-            }
-            if (!response.ok) throw new Error(`文件下载失败（${response.status}），请重新加载素材后再试`);
-            blob = await response.blob();
-        }
-        if (!blob.size) throw new Error("下载文件为空，请重新加载素材后再试");
-        // 单个媒体的“下载”交给浏览器；项目备份导出仍由 saveOwnedOrBrowserBlob 写入 exports。
+    if (options.resourceId) {
+        const blob = await getResourceBlob(`resource:${options.resourceId}`);
+        if (!blob) throw new Error("原文件暂时无法读取，请重新连接本机后再下载");
         saveAs(blob, fileName);
         return "download-started";
     }
+    if (options.storageKey) {
+        const [{ getImageBlob }, { getMediaBlob }] = await Promise.all([import("@/services/image-storage"), import("@/services/file-storage")]);
+        const blob = await getImageBlob(options.storageKey) || await getMediaBlob(options.storageKey);
+        if (blob) { saveAs(blob, fileName); return "download-started"; }
+    }
+    const browserUrl = options.browserUrl?.trim();
     if (!browserUrl) throw new Error("没有可导出的文件");
-    saveAs(browserUrl, fileName);
+    let response: Response;
+    try { response = await fetch(browserUrl, { credentials: "omit", redirect: "error" }); }
+    catch { throw new Error("无法读取下载文件，请重新加载素材后再试"); }
+    if (!response.ok) throw new Error(`文件下载失败（${response.status}），请重新加载素材后再试`);
+    const blob = await response.blob();
+    if (!blob.size) throw new Error("下载文件为空，请重新加载素材后再试");
+    saveAs(blob, fileName);
     return "download-started";
 }
 
-export async function saveOwnedOrBrowserBlob(fileName: string, blob: Blob, projectId = currentBrowserProjectId()): Promise<OwnedMediaSaveResult> {
+export async function saveOwnedOrBrowserBlob(fileName: string, blob: Blob): Promise<OwnedMediaSaveResult> {
     const name = sanitizeDownloadFileName(fileName, "未命名导出");
-    if (isBrowserWorkspace() && projectId) {
-        const { saveProjectExport } = await import("@/services/browser-project-folder");
-        await saveProjectExport(projectId, name, blob);
-        return "saved";
-    }
     if (isWailsNativeShell()) {
         if (blob.size > MAX_OWNED_ARTIFACT_BYTES) throw new Error("导出包太大，请减少所选内容后再导出");
         const save = window.go?.main?.DesktopApp?.SaveOwnedArtifact;
@@ -76,6 +59,49 @@ export async function saveOwnedOrBrowserBlob(fileName: string, blob: Blob, proje
     }
     saveAs(blob, name);
     return "saved";
+}
+
+/** Video exports use the resource upload path so large files never cross Wails as base64. */
+export async function saveOwnedOrBrowserVideoBlob(fileName: string, blob: Blob, expectedScope: CapturedUserScope): Promise<OwnedMediaSaveResult> {
+    assertUserScope(expectedScope);
+    if (!isWailsNativeShell()) return saveOwnedOrBrowserBlob(fileName, blob);
+    if (!window.go?.main?.DesktopApp?.SaveOwnedMedia) throw new Error("当前应用还不能把文件存到所选位置");
+    const name = sanitizeDownloadFileName(fileName, "未命名导出.mp4");
+    const resource = await uploadResourceFile(blob, "video", {
+        fileName: name,
+        expectedScope,
+        idempotencyKey: `video-export:${nanoid()}`,
+    });
+    assertUserScope(expectedScope);
+    return downloadOwnedOrBrowserMedia({ fileName: name, resourceId: resource.id });
+}
+
+export async function saveOwnedNativeArchiveFiles(
+    fileName: string,
+    files: Array<{ name: string; data: BlobPart; resourceId?: string }>,
+    expected: CapturedUserScope,
+    options: { signal?: AbortSignal; onSaving?: () => void } = {},
+): Promise<OwnedMediaSaveResult | undefined> {
+    const save = typeof window === "undefined" ? undefined : window.go?.main?.DesktopApp?.SaveOwnedArchive;
+    if (!save) return undefined;
+    const entries: Array<{ name: string; resourceId?: string; data?: string }> = [];
+    let inlineBytes = 0;
+    for (const file of files) {
+        options.signal?.throwIfAborted();
+        assertUserScope(expected);
+        if (file.resourceId) {
+            entries.push({ name: file.name, resourceId: file.resourceId });
+        } else {
+            const blob = new Blob([file.data]);
+            inlineBytes += blob.size;
+            if (inlineBytes > MAX_OWNED_ARTIFACT_BYTES) throw new Error("本地附加文件过大，请先保存素材后再导出");
+            entries.push({ name: file.name, data: bytesToBase64(new Uint8Array(await blob.arrayBuffer())) });
+        }
+    }
+    options.signal?.throwIfAborted();
+    assertUserScope(expected);
+    options.onSaving?.();
+    return await save(sanitizeDownloadFileName(fileName, "画布.zip"), entries) ? "saved" : "cancelled";
 }
 
 function bytesToBase64(bytes: Uint8Array) {
@@ -98,8 +124,5 @@ export function reportOwnedMediaSave(message: { success: (text: string) => void;
         })
         .catch((error) => {
             message.error(error instanceof Error && error.message.trim() ? error.message : "保存没有完成，请再试一次");
-        })
-        .finally(() => {
-            if (typeof dismiss === "function") dismiss();
-        });
+        }).finally(() => { if (typeof dismiss === "function") dismiss(); });
 }

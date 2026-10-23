@@ -29,8 +29,6 @@ type TargetLike = {
     tagName?: unknown;
     type?: unknown;
     isContentEditable?: unknown;
-    readOnly?: unknown;
-    disabled?: unknown;
     getAttribute?: (name: string) => string | null;
     closest?: (selector: string) => unknown;
 };
@@ -43,7 +41,6 @@ export function isTextEditableTarget(target: unknown): boolean {
     if (!target || typeof target !== "object") return false;
     const node = target as TargetLike;
     const tagName = typeof node.tagName === "string" ? node.tagName.toUpperCase() : "";
-    if (["INPUT", "TEXTAREA", "SELECT"].includes(tagName) && (node.readOnly === true || node.disabled === true)) return false;
     if (tagName === "TEXTAREA" || tagName === "SELECT") return true;
     if (tagName === "INPUT") {
         const rawType = typeof node.type === "string" ? node.type : typeof node.getAttribute === "function" ? node.getAttribute("type") : "";

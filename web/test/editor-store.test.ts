@@ -22,6 +22,25 @@ function makeProject(): TimelineProject {
 }
 
 describe("editor store (command dispatch)", () => {
+    test("active save query tracks queued IO after an earlier save completes", async () => {
+        let releaseFirst!: () => void;
+        let releaseSecond!: () => void;
+        const first = new Promise<void>(resolve => { releaseFirst = resolve; });
+        const second = new Promise<void>(resolve => { releaseSecond = resolve; });
+        let calls = 0;
+        const store = createEditorStore({ saveTimeline: () => ++calls === 1 ? first : second, debounceMs: 10_000 });
+        store.getState().load(makeProject());
+        store.getState().dispatch({ op: "moveClip", payload: { id: "clip-a", startMs: 1000 } });
+        expect(store.getState().hasActiveSave()).toBe(true);
+        const savingFirst = store.getState().flushSave();
+        const savingSecond = store.getState().flushSave();
+        releaseFirst();
+        await savingFirst;
+        expect(store.getState().hasActiveSave()).toBe(true);
+        releaseSecond();
+        await savingSecond;
+        expect(store.getState().hasActiveSave()).toBe(false);
+    });
     test("load initializes project and history without saving", async () => {
         const saves: TimelineProject[] = [];
         const store = createEditorStore({ saveTimeline: async (p) => void saves.push(p) });
@@ -119,6 +138,7 @@ describe("editor store (command dispatch)", () => {
         await sleep(10);
         expect(store.getState().saveError).toBe("backend unreachable");
         expect(store.getState().isDirty).toBe(true);
+        expect(store.getState().hasActiveSave()).toBe(false);
 
         fail = false;
         store.getState().dispatch({ op: "moveClip", payload: { id: "clip-a", startMs: 2000 } });

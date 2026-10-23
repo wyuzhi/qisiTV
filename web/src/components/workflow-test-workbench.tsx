@@ -1,6 +1,8 @@
+import { createClientId } from "@/lib/client-id";
 import { App, Button, Input, InputNumber, Progress, Select } from "antd";
 import { Switch } from "@/components/ui/base/switch";
 import { EmptyState } from "@/components/ui/product/empty-state";
+import { AuthenticatedAudio, AuthenticatedImage, AuthenticatedVideo } from "@/components/assets/authenticated-media";
 import { FileAudio, FileImage, Film, Grip, Play, RotateCcw, Square, Upload, WandSparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
@@ -111,7 +113,7 @@ export function WorkflowTestWorkbench({ provider, workflowId, workflowKind = "wo
         const limit = Math.max(1, slots[kind]);
         const next = Array.from(selected)
             .slice(0, limit)
-            .map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file) }));
+            .map((file) => ({ id: createClientId(), file, url: URL.createObjectURL(file) }));
         setFiles((current) => {
             current[kind].forEach((item) => URL.revokeObjectURL(item.url));
             return { ...current, [kind]: next };
@@ -384,12 +386,12 @@ function WorkflowParameter({ field, value, onChange }: { field: WorkflowFieldMap
 }
 
 function ResultPreview({ capability, urls }: { capability: RunningHubCapability; urls: string[] }) {
-    if (capability === "video") return <video src={urls[0]} controls playsInline />;
-    if (capability === "audio") return <audio src={urls[0]} controls />;
+    if (capability === "video") return <AuthenticatedVideo src={urls[0]} controls playsInline />;
+    if (capability === "audio") return <AuthenticatedAudio src={urls[0]} controls />;
     return (
         <div className="workflow-test-image-results">
             {urls.map((url) => (
-                <img key={url} src={url} alt="工作流测试输出" />
+                <AuthenticatedImage key={url} src={url} alt="工作流测试输出" />
             ))}
         </div>
     );

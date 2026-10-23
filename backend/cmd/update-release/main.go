@@ -19,6 +19,8 @@ Commands:
   changelog          Extract ## VERSION notes from CHANGELOG.md
   validate-version   Check a stable vMAJOR.MINOR.PATCH release version
   print-ldflags      Print Wails/Go ldflags that inject feed URL and public key
+  sign-depth         Sign a Windows depth runtime manifest
+  verify-depth       Verify a signed Windows depth runtime manifest
 
 The private key is never written to stdout or stderr. Generate it only to an
 explicit file with mode 0600. Production publishing uses GitHub secret
@@ -54,6 +56,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return cmdValidateVersion(args[1:], stdout, stderr)
 	case "print-ldflags":
 		return cmdPrintLdflags(args[1:], stdout, stderr)
+	case "sign-depth", "verify-depth":
+		return cmdDepthManifest(args[0], args[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], usageText)
 	}

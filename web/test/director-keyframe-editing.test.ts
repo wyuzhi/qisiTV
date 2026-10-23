@@ -76,6 +76,31 @@ describe("关键帧缓动", () => {
     });
 });
 
+describe("对象属性组关键帧", () => {
+    test("只记录位置时，播放插值不改变未记录的旋转和缩放", () => {
+        const base: DirectorTransform = { position: [1, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] };
+        const keys: DirectorKeyframe[] = [
+            { id: "start", time: 0, transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [2, 2, 2] }, positionKeyed: true, rotationKeyed: false, scaleKeyed: false },
+            { id: "end", time: 2, transform: { position: [10, 0, 0], rotation: [0, 1, 0], scale: [3, 3, 3] }, positionKeyed: true, rotationKeyed: false, scaleKeyed: false },
+        ];
+        const rendered = interpolateDirectorTransform(base, keys, 1);
+        expect(rendered.position).toEqual([5, 0, 0]);
+        expect(rendered.rotation).toEqual([0, 0, 0]);
+        expect(rendered.scale).toEqual([1, 1, 1]);
+    });
+
+    test("取消位置帧仅移除位置属性，保留同一时刻的旋转帧", () => {
+        const scene = createDirectorScene("属性组轨道");
+        const actor = createDirectorActor("角色A");
+        const key: DirectorKeyframe = { id: "at-1", time: 1, transform: transformAt(4), positionKeyed: true, rotationKeyed: true, scaleKeyed: false };
+        const seeded: DirectorScene = { ...scene, objects: [{ ...actor, keyframes: [key] }] };
+        const next = removeDirectorSceneKeyframe(seeded, { track: "object-transform", objectId: actor.id, keyframeId: key.id, channel: "position" });
+        expect(next.objects[0].keyframes).toHaveLength(1);
+        expect(next.objects[0].keyframes[0]).toMatchObject({ positionKeyed: false, rotationKeyed: true, scaleKeyed: false });
+        expect(seeded.objects[0].keyframes[0]).toEqual(key);
+    });
+});
+
 describe("删除骨骼关键帧", () => {
     const rotation: DirectorQuat = [0, 0, 0, 1];
 
@@ -152,6 +177,36 @@ describe("removeDirectorSceneKeyframe：时间轴删除的唯一分派入口", (
 
         expect(next.cameras[0].keyframes).toEqual([]);
         expect(next.objects).toBe(scene.objects);
+    });
+
+    test("删除焦点或视角子轨不会删除同一时刻的位置及另一条光学轨", () => {
+        const { scene, camera } = seededScene();
+        const key = { ...camera.keyframes[0], rotationKeyed: false, target: [1, 1.2, 0] as [number, number, number], fov: 35 };
+        const withOptics: DirectorScene = { ...scene, cameras: [{ ...camera, keyframes: [key] }] };
+        const noFocus = removeDirectorSceneKeyframe(withOptics, { track: "camera", cameraId: camera.id, keyframeId: key.id, channel: "focus" });
+        expect(noFocus.cameras[0].keyframes).toHaveLength(1);
+        expect(noFocus.cameras[0].keyframes[0].target).toBeUndefined();
+        expect(noFocus.cameras[0].keyframes[0].fov).toBe(35);
+        expect(noFocus.cameras[0].keyframes[0].transform).toEqual(key.transform);
+
+        const noFov = removeDirectorSceneKeyframe(withOptics, { track: "camera", cameraId: camera.id, keyframeId: key.id, channel: "fov" });
+        expect(noFov.cameras[0].keyframes[0].target).toEqual([1, 1.2, 0]);
+        expect(noFov.cameras[0].keyframes[0].fov).toBeUndefined();
+        const noPosition = removeDirectorSceneKeyframe(withOptics, { track: "camera", cameraId: camera.id, keyframeId: key.id, channel: "position" });
+        expect(noPosition.cameras[0].keyframes).toHaveLength(1);
+        expect(noPosition.cameras[0].keyframes[0].positionKeyed).toBe(false);
+        expect(noPosition.cameras[0].keyframes[0].target).toEqual([1, 1.2, 0]);
+        expect(noPosition.cameras[0].keyframes[0].fov).toBe(35);
+        const withRotation: DirectorScene = { ...scene, cameras: [{ ...camera, keyframes: [{ ...key, rotationKeyed: true }] }] };
+        const noRotation = removeDirectorSceneKeyframe(withRotation, { track: "camera", cameraId: camera.id, keyframeId: key.id, channel: "rotation" });
+        expect(noRotation.cameras[0].keyframes[0].rotationKeyed).toBe(false);
+        expect(noRotation.cameras[0].keyframes[0].positionKeyed).not.toBe(false);
+        expect(noRotation.cameras[0].keyframes[0].target).toEqual([1, 1.2, 0]);
+        const opticalOnly = removeDirectorSceneKeyframe(noPosition, { track: "camera", cameraId: camera.id, keyframeId: key.id, channel: "focus" });
+        const empty = removeDirectorSceneKeyframe(opticalOnly, { track: "camera", cameraId: camera.id, keyframeId: key.id, channel: "fov" });
+        expect(empty.cameras[0].keyframes).toEqual([]);
+        expect(withOptics.cameras[0].keyframes[0]).toEqual(key);
+        expect(removeDirectorSceneKeyframe(noFocus, { track: "camera", cameraId: camera.id, keyframeId: key.id, channel: "focus" })).toBe(noFocus);
     });
 
     test("未命中一律返回同一 scene 引用：调用方据此跳过历史与保存", () => {

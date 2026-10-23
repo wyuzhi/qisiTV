@@ -145,7 +145,7 @@ test("imported generated nodes cannot resolve to the source task's asset", () =>
     } as CanvasNodeData;
     const oldAsset = { id: "old-asset", kind: "image", data: { storageKey: "image:old", dataUrl: "blob:old" }, metadata: { taskId: "old-task", nodeId: original.id, canvasId: "original" } } as unknown as Asset;
     const remapped = remapImportedCanvasMedia(original, new Map([["image:old", { storageKey: "image:import:copy:0", url: "blob:copy" }]]));
-    expect(findCanvasNodeAsset([oldAsset], remapped, "copy")).toBe(oldAsset);
+    expect(findCanvasNodeAsset([oldAsset], remapped, "copy")).toBeUndefined();
     const independent = { ...remapped, metadata: importedCanvasNodeMetadata(remapped) };
     expect(findCanvasNodeAsset([oldAsset], independent, "copy")).toBeUndefined();
     expect(independent.metadata.taskId).toBeUndefined();

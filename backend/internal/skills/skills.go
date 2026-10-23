@@ -13,6 +13,7 @@ import (
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/repository"
+	"qisitv/backend/internal/skillhub"
 
 	"gorm.io/gorm"
 )
@@ -81,6 +82,7 @@ type SkillItem struct {
 	ExtraInfo       string               `json:"extraInfo"`
 	IsAdded         bool                 `json:"isAdded"`
 	IsOwner         bool                 `json:"isOwner"`
+	MarketRelease   *skillhub.Release    `json:"marketRelease,omitempty"`
 }
 
 type SkillCategory struct {
@@ -156,7 +158,17 @@ func (s *Service) AddedSkills(userID string) ([]SkillItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.skillItems(userID, rows, false)
+	items, err := s.skillItems(userID, rows, false)
+	if err != nil {
+		return nil, err
+	}
+	active := make([]SkillItem, 0, len(items))
+	for _, item := range items {
+		if item.IsAdded {
+			active = append(active, item)
+		}
+	}
+	return active, nil
 }
 
 func (s *Service) SkillDetail(userID string, id string) (*SkillItem, error) {
@@ -235,12 +247,6 @@ func (s *Service) SetSkillAdded(userID string, id string, added bool) (*SkillIte
 	if err != nil {
 		return nil, err
 	}
-	if skill.OwnerID == userID {
-		if !added {
-			return nil, kernel.BadAuthRequest("自己创建的技能始终保留在我的技能中")
-		}
-		return s.SkillDetail(userID, id)
-	}
 	state, err := s.skillState(userID, id)
 	if err != nil {
 		return nil, err
@@ -271,8 +277,24 @@ func (s *Service) SetSkillLiked(userID string, id string, liked bool) (*SkillIte
 
 func (s *Service) skillItems(userID string, skills []model.Skill, includeInstruction bool) ([]SkillItem, error) {
 	ids := make([]string, 0, len(skills))
+	versionIDs := make([]string, 0, len(skills))
 	for _, skill := range skills {
 		ids = append(ids, skill.ID)
+		if skill.CurrentVersionID != "" {
+			versionIDs = append(versionIDs, skill.CurrentVersionID)
+		}
+	}
+	versions, err := s.repo.SkillVersionsByIDs(versionIDs)
+	if err != nil {
+		return nil, err
+	}
+	releases := make(map[string]*skillhub.Release, len(versions))
+	for _, version := range versions {
+		release, err := marketReleaseMetadata(version.MarketReleaseJSON)
+		if err != nil {
+			return nil, err
+		}
+		releases[version.ID] = release
 	}
 	states, err := s.repo.UserSkillStatesBySkillIDs(userID, ids)
 	if err != nil {
@@ -293,6 +315,10 @@ func (s *Service) skillItems(userID string, skills []model.Skill, includeInstruc
 			return nil, err
 		}
 		ownerName := strings.TrimSpace(skill.AuthorName)
+		release := releases[skill.CurrentVersionID]
+		if release != nil && skill.SourceType == "market" {
+			ownerName = release.Author
+		}
 		ownerAvatarURL := strings.TrimSpace(skill.AuthorAvatarURL)
 		state := stateBySkillID[skill.ID]
 		metric := metrics[skill.ID]
@@ -311,7 +337,8 @@ func (s *Service) skillItems(userID string, skills []model.Skill, includeInstruc
 			Source: skill.Source, Tag: skill.Tag, SortWeight: skill.SortWeight, IsPrivate: skill.IsPrivate,
 			LikeCount: metric.LikeCount, IsLike: state.Liked, OwnerUID: skill.OwnerID,
 			EffectiveUser: SkillEffectiveUser{Name: ownerName, AvatarURL: ownerAvatarURL, UID: skill.OwnerID}, ShowcaseMedia: showcaseMedia,
-			AddedCount: metric.AddedCount, ExtraInfo: skill.ExtraInfo, IsAdded: state.Added || skill.OwnerID == userID, IsOwner: skill.OwnerID == userID,
+			AddedCount: metric.AddedCount, ExtraInfo: skill.ExtraInfo, IsAdded: state.Added, IsOwner: skill.OwnerID == userID,
+			MarketRelease: release,
 		})
 	}
 	return items, nil

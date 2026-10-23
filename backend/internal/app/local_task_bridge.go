@@ -5,19 +5,9 @@ import (
 	localtask "qisitv/backend/internal/task"
 )
 
-// CreateLocalTask adapts the stable local task command to the richer internal
-// admission request. Private admission state remains unavailable to transports.
+// CreateLocalTask is the domain-typed admission entry used by standalone HTTP
+// registration. Trusted AdmissionID and PrepareOnly stay on the domain command;
+// public JSON cannot set them.
 func (s *Service) CreateLocalTask(userID string, request localtask.CreateRequest) (*model.Task, error) {
-	return s.CreateTask(userID, CreateTaskRequest{
-		ProjectID:      request.ProjectID,
-		Type:           request.Type,
-		Operation:      request.Operation,
-		Prompt:         request.Prompt,
-		Provider:       request.Provider,
-		Model:          request.Model,
-		LogicalModelID: request.LogicalModelID,
-		Input:          request.Input,
-		TraceID:        request.TraceID,
-		RequestID:      request.RequestID,
-	})
+	return s.taskDomain().CreateTask(userID, request)
 }

@@ -1,12 +1,15 @@
 package canvas
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
+	assetlib "qisitv/backend/internal/asset"
 	"qisitv/backend/internal/model"
 
 	"gorm.io/gorm"
@@ -53,7 +56,7 @@ func RepairAssetBytes(db *gorm.DB, apply bool) (AssetBytesRepairReport, error) {
 					issue("素材 JSON 或 data 无效，需人工核查")
 					continue
 				}
-				if _, err := requiredJSONNumberField(data, "bytes"); err == nil {
+				if assetHasNonNegativeBytes(data) {
 					continue
 				}
 				var kind, key string
@@ -90,7 +93,7 @@ func RepairAssetBytes(db *gorm.DB, apply bool) (AssetBytesRepairReport, error) {
 				if err != nil {
 					return err
 				}
-				if err := validateUserAssetDocument(encoded); err != nil {
+				if err := assetlib.ValidateDocument(encoded); err != nil {
 					issue("素材仍有其他合同错误，未修改，请另行核查")
 					continue
 				}
@@ -113,4 +116,16 @@ func RepairAssetBytes(db *gorm.DB, apply bool) (AssetBytesRepairReport, error) {
 		report.Repaired = 0
 	}
 	return report, err
+}
+
+func assetHasNonNegativeBytes(data map[string]json.RawMessage) bool {
+	raw, ok := data["bytes"]
+	if !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return false
+	}
+	var value float64
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false
+	}
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0
 }

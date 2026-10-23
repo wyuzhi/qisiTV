@@ -5,10 +5,11 @@ import { getActiveUserScope, setActiveUserScope } from "../../src/lib/user-scope
 
 type InstanceHook = (storeName: string, key: string, value: unknown) => Promise<void> | void;
 
-type Scenario = "image-cleanup" | "scope-cleanup-switch" | "scope-cleanup-late-canvas-reference" | "video-commit-race" | "audio-commit-race" | "copied-video-save" | "missing-chat-sessions-save" | "reload-edit-during-folder-save" | "reload-folder-failure-retry" | "reload-folder-revision";
+type Scenario = "image-cleanup" | "scope-cleanup-switch" | "scope-cleanup-late-canvas-reference" | "video-commit-race" | "audio-commit-race" | "copied-video-save";
 
 function installStorageHarness() {
     const originalCreateInstance = localforage.createInstance.bind(localforage);
+    const originalReady = localforage.ready.bind(localforage);
     const originalGetItem = localforage.getItem.bind(localforage);
     const originalSetItem = localforage.setItem.bind(localforage);
     const originalRemoveItem = localforage.removeItem.bind(localforage);
@@ -33,6 +34,7 @@ function installStorageHarness() {
         return values;
     };
 
+    localforage.ready = (async () => undefined) as typeof localforage.ready;
     localforage.getItem = (async (key: string) => defaultValues.get(key) ?? null) as typeof localforage.getItem;
     localforage.setItem = (async (key: string, value: unknown) => {
         defaultValues.set(key, value);
@@ -45,6 +47,7 @@ function installStorageHarness() {
         const storeName = options.storeName || "default";
         const values = storeValues(storeName);
         return {
+            ready: async () => undefined,
             getItem: async (key: string) => values.get(key) ?? null,
             setItem: async (key: string, value: unknown) => {
                 values.set(key, value);
@@ -124,6 +127,7 @@ function installStorageHarness() {
         realSetTimeout,
         restore() {
             localforage.createInstance = originalCreateInstance as typeof localforage.createInstance;
+            localforage.ready = originalReady;
             localforage.getItem = originalGetItem;
             localforage.setItem = originalSetItem;
             localforage.removeItem = originalRemoveItem;
@@ -393,8 +397,7 @@ async function runMediaCommitRace(mediaType: "video" | "audio") {
     }
 }
 
-async function runCopiedVideoSave(omitChatSessions = false) {
-    const previousScope = getActiveUserScope();
+async function runCopiedVideoSave() {
     const harness = installStorageHarness();
     const { http } = await import("../../src/services/api/request");
     const put = spyOn(http, "put").mockImplementation(async (_url, body) => {
@@ -408,7 +411,7 @@ async function runCopiedVideoSave(omitChatSessions = false) {
         const { parseCanvasStorageDocument, serializeCanvasStorageDocument } = await import("../../src/lib/canvas/canvas-storage-revision");
         const { localForageStorageForScope } = await import("../../src/lib/localforage-storage");
         const { isolateCopiedNodeMetadata } = await import("../../src/lib/canvas/canvas-node-copy");
-        const { persistCanvasGenerationEffect } = await import("../../src/services/canvas-generation-consumer");
+        const { persistCanvasDocument } = await import("../../src/services/local-workspace-repository");
         const { CanvasNodeType } = await import("../../src/types/canvas");
         await useCanvasStore.persist.rehydrate();
         const source = { id: "source", type: CanvasNodeType.Video, title: "480P", position: { x: 0, y: 0 }, width: 340, height: 240, metadata: { content: "video-480p", taskId: "old-task", generationEffectKeys: ["attach-node:old-task:source:0"] } };
@@ -417,7 +420,6 @@ async function runCopiedVideoSave(omitChatSessions = false) {
         const document = parseCanvasStorageDocument(null, [project]);
         await storage.setItem(CANVAS_STORE_KEY, serializeCanvasStorageDocument(document));
         recordCanvasStorageDocument(scope, document);
-        if (omitChatSessions) Reflect.deleteProperty(project, "chatSessions");
         withCanvasStorePersistenceSuppressed(() => useCanvasStore.setState({ projects: [project] }));
         const copy = { ...source, id: "copy", metadata: isolateCopiedNodeMetadata(source, new Map([[source.id, "copy"]])) };
         const previousNodes = [source, copy];
@@ -427,110 +429,12 @@ async function runCopiedVideoSave(omitChatSessions = false) {
         const copiedIds = saved.state.projects[0].nodes.map((node) => node.id);
         const effectKey = "attach-node:new-task:copy:0";
         const completed = { ...copy, metadata: { ...copy.metadata, content: "video-720p", taskId: "new-task", generationEffectKeys: [effectKey] } };
-        // Only the backend transport is stubbed; storage and generation reconciliation are real.
-        const persisted = await persistCanvasGenerationEffect({ projectId: project.id, previousNodes, nodes: [source, completed], effectKey });
+        // Only the backend transport is stubbed; storage and the ordinary canvas commit are real.
+        await persistCanvasDocument(project.id, { nodes: [source, completed] });
+        const persisted = useCanvasStore.getState().openProject(project.id)!;
         return { copiedIds, completedIds: persisted.nodes.map((node) => node.id), content: persisted.nodes.find((node) => node.id === "copy")?.metadata?.content, sourceKeys: persisted.nodes[0].metadata?.generationEffectKeys, copyKeys: persisted.nodes.find((node) => node.id === "copy")?.metadata?.generationEffectKeys };
     } finally {
         put.mockRestore();
-        setActiveUserScope(previousScope);
-        harness.restore();
-    }
-}
-
-async function runResourceReloadPersistence(scenario: "reload-edit-during-folder-save" | "reload-folder-failure-retry" | "reload-folder-revision") {
-    const previousScope = getActiveUserScope();
-    const harness = installStorageHarness();
-    const scope = scenario;
-    setActiveUserScope(scope);
-    const repository = await import("../../src/services/local-workspace-repository");
-    let release!: () => void;
-    let entered!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const started = new Promise<void>((resolve) => { entered = resolve; });
-    let folderWrites = 0;
-    let unregisterLive = () => {};
-    // Real canvas storage and consumer code run below; only the external folder acknowledgement is controlled.
-    const persistFolder = spyOn(repository, "syncLocalCanvasGenerationProjectToBackend").mockImplementation(async (projectId) => {
-        folderWrites++;
-        entered();
-        if (scenario === "reload-edit-during-folder-save") await gate;
-        else if (scenario === "reload-folder-failure-retry" && folderWrites === 1) throw new Error("folder permission denied");
-        const { useCanvasStore } = await import("../../src/stores/canvas/use-canvas-store");
-        useCanvasStore.setState((state) => ({ projects: state.projects.map((project) => project.id === projectId ? { ...project, revision: (project.revision || 0) + 1 } : project) }));
-    });
-    try {
-        const { useCanvasStore, CANVAS_STORE_KEY, recordCanvasStorageDocument, withCanvasStorePersistenceSuppressed } = await import("../../src/stores/canvas/use-canvas-store");
-        const { parseCanvasStorageDocument, serializeCanvasStorageDocument } = await import("../../src/lib/canvas/canvas-storage-revision");
-        const { localForageStorageForScope } = await import("../../src/lib/localforage-storage");
-        const { useAssetStore } = await import("../../src/stores/use-asset-store");
-        const { setMediaBlob } = await import("../../src/services/file-storage");
-        const { applyCanvasGenerationTaskNodeEffect, persistCanvasGenerationEffect, registerCanvasGenerationLiveProject } = await import("../../src/services/canvas-generation-consumer");
-        const { applyRecoveredGenerationTaskResultToNodes } = await import("../../src/lib/canvas/canvas-generation-task-sync");
-        const { reloadCanvasGenerationResource } = await import("../../src/pages/canvas/use-canvas-generation");
-        const { CanvasNodeType } = await import("../../src/types/canvas");
-        await useCanvasStore.persist.rehydrate();
-        const node = { id: "reload-node", type: CanvasNodeType.Video, title: "before reload", position: { x: 0, y: 0 }, width: 320, height: 180, metadata: { taskId: "reload-original-task", status: "error" as const, resourceReloadAvailable: true } };
-        const project = { id: "reload-project", title: "reload", revision: 1, nodes: [node], connections: [], chatSessions: [], activeChatId: null, backgroundMode: "dots" as const, showImageInfo: false, viewport: { x: 0, y: 0, k: 1 }, directorScenes: [], createdAt: "2026-10-03", updatedAt: "2026-10-03" };
-        const storage = localForageStorageForScope(scope);
-        const document = parseCanvasStorageDocument(null, [project]);
-        await storage.setItem(CANVAS_STORE_KEY, serializeCanvasStorageDocument(document));
-        recordCanvasStorageDocument(scope, document);
-        withCanvasStorePersistenceSuppressed(() => useCanvasStore.setState({ projects: [project] }));
-        const storageKey = `video:${scope}:cached-result`;
-        const url = await setMediaBlob(storageKey, new Blob(["cached result bytes"], { type: "video/mp4" }));
-        useAssetStore.setState({ assets: [{ id: "reload-asset", kind: "video", title: "cached video", category: "material", tags: [], status: "confirmed", coverUrl: "", createdAt: "2026-10-03", updatedAt: "2026-10-03", data: { url, storageKey, width: 320, height: 180, bytes: 19, mimeType: "video/mp4" } }] });
-        const task = { id: "reload-original-task", projectId: project.id, type: "canvas_video", status: "succeeded" as const, prompt: "saved prompt", attempts: 1, createdAt: "2026-10-03", updatedAt: "2026-10-03", resultJson: JSON.stringify({ mode: "video", video: { dataUrl: url, storageKey, width: 320, height: 180, mimeType: "video/mp4" } }), clientContext: { nodeId: node.id } };
-        const nodesRef: { current: import("../../src/types/canvas").CanvasNodeData[] } = { current: [node] };
-        unregisterLive = registerCanvasGenerationLiveProject({ scope, projectId: project.id, adapter: {
-            read: () => ({ nodes: nodesRef.current, connections: [], chatSessions: [], activeChatId: null }),
-            write: (state) => { nodesRef.current = state.nodes; },
-        } });
-        const apply = () => reloadCanvasGenerationResource({
-            projectId: project.id, nodeId: node.id, taskId: task.id, signal: new AbortController().signal,
-            readTarget: () => ({ projectId: project.id, revision: useCanvasStore.getState().openProject(project.id)!.revision ?? 0, node: nodesRef.current[0], nodes: nodesRef.current }),
-            queryTask: async () => task,
-            applyResult: async (_id, original, options) => {
-                await applyCanvasGenerationTaskNodeEffect({ projectId: project.id, nodeId: node.id, task: original, output: { outputIndex: 0, mediaType: "video", materializedAssetId: "reload-asset" }, effectKey: "attach-node:reload-original-task:reload-node:0", nodesRef, setNodes: (next) => { nodesRef.current = typeof next === "function" ? next(nodesRef.current) : next; }, ...options });
-                // The canvas hook repairs an acknowledged attach whose old editor snapshot still lacks the result.
-                const current = nodesRef.current.find((candidate) => candidate.id === node.id);
-                if (!current?.metadata?.content || current.metadata.status !== "success") {
-                    options.assertCurrent?.();
-                    const previousNodes = nodesRef.current;
-                    const applied = await applyRecoveredGenerationTaskResultToNodes(previousNodes, original, node.id);
-                    options.assertCurrent?.();
-                    const persisted = await persistCanvasGenerationEffect({ projectId: project.id, previousNodes, nodes: applied.nodes, effectKey: applied.effectKey, ...options });
-                    options.assertCurrent?.({ nodes: persisted.nodes });
-                    nodesRef.current = persisted.nodes;
-                }
-            },
-        });
-        if (scenario === "reload-folder-revision") {
-            await apply();
-            return { content: nodesRef.current[0].metadata?.content, status: nodesRef.current[0].metadata?.status, revision: useCanvasStore.getState().openProject(project.id)!.revision, folderWrites };
-        }
-        if (scenario === "reload-edit-during-folder-save") {
-            const recovery = apply();
-            await started;
-            nodesRef.current = nodesRef.current.map((current) => ({ ...current, title: "edited while saving", position: { ...current.position, x: 900 } }));
-            useCanvasStore.getState().updateProject(project.id, { nodes: nodesRef.current });
-            release();
-            let error = "";
-            try { await recovery; } catch (failure) { error = failure instanceof Error ? failure.message : String(failure); }
-            const stored = useCanvasStore.getState().openProject(project.id)!.nodes[0];
-            return { error, editorTitle: nodesRef.current[0].title, editorX: nodesRef.current[0].position.x, storedTitle: stored.title, storedX: stored.position.x, folderWrites };
-        }
-        let error = "";
-        try { await apply(); } catch (failure) { error = failure instanceof Error ? failure.message : String(failure); }
-        const recoverableAfterFailure = Boolean(useCanvasStore.getState().openProject(project.id)!.nodes[0].metadata?.resourceReloadAvailable);
-        const editorRecoverableAfterFailure = Boolean(nodesRef.current[0].metadata?.resourceReloadAvailable);
-        await apply();
-        const completed = nodesRef.current[0];
-        return { error, recoverableAfterFailure, editorRecoverableAfterFailure, content: completed.metadata?.content, status: completed.metadata?.status, finalRecoverable: Boolean(completed.metadata?.resourceReloadAvailable), taskId: completed.metadata?.taskId, folderWrites };
-    } finally {
-        release();
-        unregisterLive();
-        persistFolder.mockRestore();
-        setActiveUserScope(previousScope);
         harness.restore();
     }
 }
@@ -538,12 +442,10 @@ async function runResourceReloadPersistence(scenario: "reload-edit-during-folder
 self.onmessage = async (event: MessageEvent<Scenario>) => {
     try {
         const result =
-            event.data === "reload-edit-during-folder-save" || event.data === "reload-folder-failure-retry" || event.data === "reload-folder-revision"
-                ? await runResourceReloadPersistence(event.data)
-                : event.data === "copied-video-save" || event.data === "missing-chat-sessions-save"
-                ? await runCopiedVideoSave(event.data === "missing-chat-sessions-save")
+            event.data === "copied-video-save"
+                ? await runCopiedVideoSave()
                 : event.data === "image-cleanup"
-                  ? await runImageCleanup()
+                ? await runImageCleanup()
                 : event.data === "scope-cleanup-switch"
                   ? await runScopeCleanupAfterSwitch()
                   : event.data === "scope-cleanup-late-canvas-reference"

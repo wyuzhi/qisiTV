@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ImageSizePicker } from "../src/components/image-size-picker";
-import { applyImageSizeSelection } from "../src/components/image-settings-panel";
+import { applyImageSizeSelection, imageSizeLabel } from "../src/components/image-settings-panel";
 import { ImageSizePresetsEditor } from "../src/components/image-size-presets-editor";
 import { ModelCapabilityEditor } from "../src/components/model-capability-editor";
 import { defaultImageCapabilityConfig, normalizeImageValue, normalizeModelCapabilityConfig } from "../src/lib/model-capabilities";
@@ -101,13 +101,17 @@ describe("统一图片分辨率与宽高比", () => {
 
     test("三档预设与任意合理比例都满足像素范围", () => {
         for (const tier of IMAGE_RESOLUTIONS)
-            for (const ratio of [...IMAGE_RATIOS, "17:11", "3:1", "1:3", "99999:99998"]) {
+            for (const ratio of [...IMAGE_RATIOS, "17:11", "21:8", "42:18", "3:1", "1:3", "99999:99998"]) {
                 const preset = imagePresetForRatio(tier, ratio);
-                expect(() => validateImageSize(preset.width, preset.height, false)).not.toThrow();
+                expect(() => validateImageSize(preset.width, preset.height, true)).not.toThrow();
             }
         for (const ratio of ["0:9", "4:1", "1:4", "NaN:1", "1.5:1", "999999999:1"]) {
             expect(() => imagePresetForRatio("1k", ratio)).toThrow();
         }
+    });
+
+    test("21:9 的 1K 预设满足上游的 16 像素对齐要求", () => {
+        expect(imagePresetForRatio("1k", "21:9").size).toBe("2048x880");
     });
 
     test("固定比例编辑器包含 4:5 和 5:4 三档尺寸", () => {
@@ -237,4 +241,10 @@ describe("统一图片分辨率与宽高比", () => {
         const video = renderToStaticMarkup(<ModelCapabilityEditor capability="video" section="protocol" />);
         expect(video).not.toContain("admin-image-protocol-grid");
     });
+});
+
+test("Midjourney exposes only priced native tiers and preserves declared aspect ratio", () => {
+ const profile = defaultImageCapabilityConfig("openai-image","midjourney-v8.2");
+ expect(imageSizeLabel("1456x816",profile)).toBe("16:9 · 1K");
+ expect(profile.size.presets?.some((preset) => preset.tier === "2k")).toBe(false);
 });

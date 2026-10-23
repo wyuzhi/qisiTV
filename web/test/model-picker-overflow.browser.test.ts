@@ -100,7 +100,8 @@ test("model options keep one aligned name row without secondary copy", async () 
         }),
     );
 
-    expect(layout[0]?.height).toBe(layout[1]?.height);
+    // Browser transforms can differ by a few millionths of a CSS pixel.
+    expect(layout[0]?.height).toBeCloseTo(layout[1]?.height, 2);
     expect(layout[0]?.leftInset).toBe(12);
     expect(layout[1]?.leftInset).toBe(12);
     expect(Math.abs(layout[0]?.verticalOffset || 0)).toBeLessThanOrEqual(1);

@@ -16,16 +16,18 @@ const (
 	platformDarwinARM64  = "darwin-arm64"
 	platformDarwinAMD64  = "darwin-amd64"
 	platformWindowsAMD64 = "windows-amd64"
-	macExecutableRel     = "Contents/MacOS/qisiTV"
-	windowsExecutable    = "qisiTV.exe"
+	platformLinuxAMD64   = "linux-amd64"
+	linuxBundleName      = "BeefTV-linux"
+	macExecutableRel     = "Contents/MacOS/BeefTV"
+	windowsExecutable    = "BeefTV.exe"
 	pluginDirName        = "plugin-packages"
-	pluginSuffix         = ".qisitv-plugin"
+	pluginSuffix         = ".beeftv-plugin"
 )
 
 func cmdPackage(args []string, stdout, stderr io.Writer) error {
 	fs := newFlagSet("package", stderr)
-	platform := fs.String("platform", "", "darwin-arm64, darwin-amd64, or windows-amd64")
-	input := fs.String("input", "", "qisiTV.app, a directory containing it, or a Windows bin directory with qisiTV.exe")
+	platform := fs.String("platform", "", "darwin-arm64, darwin-amd64, windows-amd64, or linux-amd64")
+	input := fs.String("input", "", "BeefTV.app, BeefTV-linux, or a Windows bin directory with BeefTV.exe")
 	output := fs.String("output", "", "output zip path")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -61,7 +63,7 @@ func packageBundle(platform, input, output string) error {
 	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(output), ".qisitv-update-*.zip")
+	tmp, err := os.CreateTemp(filepath.Dir(output), ".beeftv-update-*.zip")
 	if err != nil {
 		return err
 	}
@@ -79,6 +81,11 @@ func packageBundle(platform, input, output string) error {
 			_ = zw.Close()
 			return err
 		}
+	case platformLinuxAMD64:
+		if err := addTree(zw, root, root, linuxBundleName, visited); err != nil {
+			_ = zw.Close()
+			return err
+		}
 	case platformWindowsAMD64:
 		if err := addWindowsLayout(zw, root, visited); err != nil {
 			_ = zw.Close()
@@ -91,10 +98,13 @@ func packageBundle(platform, input, output string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	if err := validateArchive(platform, tmpName); err != nil {
+		return err
+	}
 	if err := os.Rename(tmpName, output); err != nil {
 		return err
 	}
-	return validateArchive(platform, output)
+	return nil
 }
 
 func resolveBundleRoot(platform, input string) (string, error) {
@@ -107,18 +117,23 @@ func resolveBundleRoot(platform, input string) (string, error) {
 		return "", fmt.Errorf("package input: %w", err)
 	}
 	switch platform {
+	case platformLinuxAMD64:
+		if info.IsDir() && info.Mode()&os.ModeSymlink == 0 && filepath.Base(abs) == linuxBundleName {
+			return abs, nil
+		}
+		return "", fmt.Errorf("Linux package input must be a real %s directory", linuxBundleName)
 	case platformDarwinARM64, platformDarwinAMD64:
 		if info.Mode()&os.ModeSymlink != 0 {
 			return "", fmt.Errorf("package input must be a real directory, not a symlink")
 		}
-		if info.IsDir() && filepath.Base(abs) == "qisiTV.app" {
+		if info.IsDir() && filepath.Base(abs) == "BeefTV.app" {
 			return abs, nil
 		}
-		candidate := filepath.Join(abs, "qisiTV.app")
+		candidate := filepath.Join(abs, "BeefTV.app")
 		if st, err := os.Stat(candidate); err == nil && st.IsDir() {
 			return candidate, nil
 		}
-		return "", fmt.Errorf("macOS package input must be qisiTV.app or a directory containing qisiTV.app")
+		return "", fmt.Errorf("macOS package input must be BeefTV.app or a directory containing BeefTV.app")
 	case platformWindowsAMD64:
 		if info.Mode().IsRegular() && strings.EqualFold(filepath.Base(abs), windowsExecutable) {
 			return filepath.Dir(abs), nil
@@ -129,7 +144,7 @@ func resolveBundleRoot(platform, input string) (string, error) {
 				return abs, nil
 			}
 		}
-		return "", fmt.Errorf("Windows package input must contain qisiTV.exe")
+		return "", fmt.Errorf("Windows package input must contain BeefTV.exe")
 	default:
 		return "", fmt.Errorf("unsupported platform %q", platform)
 	}
@@ -148,7 +163,22 @@ func addWindowsLayout(zw *zip.Writer, root string, visited map[string]struct{}) 
 	if !st.IsDir() {
 		return fmt.Errorf("Windows bundle %s is not a directory", pluginDirName)
 	}
-	return addTree(zw, root, pluginDir, pluginDirName, visited)
+	if err := addTree(zw, root, pluginDir, pluginDirName, visited); err != nil {
+		return err
+	}
+	if err := addTree(zw, root, filepath.Join(root, "cli"), "cli", visited); err != nil {
+		return err
+	}
+	if err := addTree(zw, root, filepath.Join(root, "agent-host"), "agent-host", visited); err != nil {
+		return err
+	}
+	media := filepath.Join(root, "media-runtime")
+	if _, err := os.Lstat(media); os.IsNotExist(err) {
+		return nil // Historical bundles did not carry a media runtime.
+	} else if err != nil {
+		return err
+	}
+	return addTree(zw, root, media, "media-runtime", visited)
 }
 
 func addTree(zw *zip.Writer, bundleParent, absPath, zipName string, visited map[string]struct{}) error {
@@ -271,9 +301,59 @@ func validateArchive(platform, zipPath string) error {
 	}
 	hasMacExec := false
 	hasWinExec := false
+	hasLinuxExec := false
+	hasCLI := false
+	requiredMedia := map[string]map[string]bool{}
+	cliPath := "cli/beeftv.exe"
+	if strings.HasPrefix(platform, "darwin-") {
+		cliPath = "BeefTV.app/Contents/MacOS/cli/beeftv"
+	}
+	if platform == platformLinuxAMD64 {
+		cliPath = linuxBundleName + "/cli/beeftv"
+	}
 	pluginCount := 0
+	agentPrefix := "agent-host/"
+	nodeRelative := "runtime/node.exe"
+	if strings.HasPrefix(platform, "darwin-") {
+		agentPrefix = "BeefTV.app/Contents/Resources/agent-host/"
+		nodeRelative = "runtime/bin/node"
+	}
+	if platform == platformLinuxAMD64 {
+		agentPrefix = linuxBundleName + "/agent-host/"
+		nodeRelative = "runtime/bin/node"
+	}
+	requiredAgent := map[string]bool{"server.mjs": false, "session-identity.mjs": false, "package.json": false, nodeRelative: false, "node_modules/@earendil-works/pi-coding-agent/package.json": false}
 	for _, file := range reader.File {
 		name := filepath.ToSlash(file.Name)
+		if platform == platformWindowsAMD64 {
+			for _, prefix := range []string{"agent-host/media-runtime/", "media-runtime/"} {
+				if rel, found := strings.CutPrefix(name, prefix); found {
+					if requiredMedia[prefix] == nil {
+						requiredMedia[prefix] = map[string]bool{"ffmpeg.exe": false, "LICENSE": false, "README.txt": false, "manifest.json": false}
+					}
+					if _, required := requiredMedia[prefix][rel]; required && file.Mode().IsRegular() && file.UncompressedSize64 > 0 {
+						requiredMedia[prefix][rel] = true
+					}
+				}
+			}
+		}
+		if name == cliPath {
+			if !file.Mode().IsRegular() || file.UncompressedSize64 == 0 {
+				return fmt.Errorf("bundled CLI must be a nonempty regular file: %s", cliPath)
+			}
+			if platform != platformWindowsAMD64 && file.Mode()&0o111 == 0 {
+				return fmt.Errorf("bundled CLI must retain executable mode: %s", cliPath)
+			}
+			hasCLI = true
+		}
+		if rel, ok := strings.CutPrefix(name, agentPrefix); ok {
+			if _, required := requiredAgent[rel]; required && file.Mode().IsRegular() && file.UncompressedSize64 > 0 {
+				requiredAgent[rel] = true
+				if rel == nodeRelative && platform != platformWindowsAMD64 && file.Mode()&0o111 == 0 {
+					return fmt.Errorf("bundled Node must retain executable mode")
+				}
+			}
+		}
 		if err := rejectUnsafeZipName(strings.TrimSuffix(name, "/")); err != nil {
 			return err
 		}
@@ -288,33 +368,61 @@ func validateArchive(platform, zipPath string) error {
 			return fmt.Errorf("zip entry %s is user database data and cannot ship in an updater archive", name)
 		}
 		switch {
-		case name == "qisiTV.app/"+macExecutableRel || name == "qisiTV.app/"+macExecutableRel+"/":
+		case name == linuxBundleName+"/BeefTV":
+			hasLinuxExec = file.Mode().IsRegular() && file.UncompressedSize64 > 0 && file.Mode()&0o111 != 0
+		case strings.HasPrefix(name, linuxBundleName+"/"+pluginDirName+"/") && strings.HasSuffix(name, pluginSuffix) && file.Mode().IsRegular():
+			pluginCount++
+		case name == "BeefTV.app/"+macExecutableRel || name == "BeefTV.app/"+macExecutableRel+"/":
 			hasMacExec = true
 			if file.Mode()&0o111 == 0 {
-				return fmt.Errorf("qisiTV.app/%s must retain executable mode", macExecutableRel)
+				return fmt.Errorf("BeefTV.app/%s must retain executable mode", macExecutableRel)
 			}
 		case name == windowsExecutable:
 			hasWinExec = true
 		case strings.HasPrefix(name, pluginDirName+"/") && strings.HasSuffix(name, pluginSuffix) && file.Mode().IsRegular():
 			pluginCount++
-		case strings.HasPrefix(name, "qisiTV.app/Contents/Resources/"+pluginDirName+"/") && strings.HasSuffix(name, pluginSuffix) && file.Mode().IsRegular():
+		case strings.HasPrefix(name, "BeefTV.app/Contents/Resources/"+pluginDirName+"/") && strings.HasSuffix(name, pluginSuffix) && file.Mode().IsRegular():
 			pluginCount++
 		}
 	}
+	if !hasCLI {
+		return fmt.Errorf("archive missing bundled CLI: %s", cliPath)
+	}
+	for prefix, resources := range requiredMedia {
+		for name, found := range resources {
+			if !found {
+				return fmt.Errorf("archive missing media-runtime resource: %s%s", prefix, name)
+			}
+		}
+	}
+	for name, found := range requiredAgent {
+		if !found {
+			return fmt.Errorf("archive missing agent-host resource: %s%s", agentPrefix, name)
+		}
+	}
 	switch platform {
+	case platformLinuxAMD64:
+		if !hasLinuxExec || hasWinExec || hasMacExec || pluginCount == 0 {
+			return fmt.Errorf("Linux archive must contain executable %s/BeefTV and official plugins only for Linux", linuxBundleName)
+		}
+		for _, file := range reader.File {
+			if file.Name != linuxBundleName+"/" && !strings.HasPrefix(file.Name, linuxBundleName+"/") {
+				return fmt.Errorf("Linux archive contains files outside %s", linuxBundleName)
+			}
+		}
 	case platformDarwinARM64, platformDarwinAMD64:
 		if hasWinExec {
 			return fmt.Errorf("macOS archive must not contain %s", windowsExecutable)
 		}
 		if !hasMacExec {
-			return fmt.Errorf("macOS archive must contain qisiTV.app/%s", macExecutableRel)
+			return fmt.Errorf("macOS archive must contain BeefTV.app/%s", macExecutableRel)
 		}
 		if pluginCount == 0 {
 			return fmt.Errorf("macOS archive must contain Contents/Resources/%s/*%s", pluginDirName, pluginSuffix)
 		}
 	case platformWindowsAMD64:
 		if hasMacExec {
-			return fmt.Errorf("Windows archive must not contain qisiTV.app")
+			return fmt.Errorf("Windows archive must not contain BeefTV.app")
 		}
 		if !hasWinExec {
 			return fmt.Errorf("Windows archive must contain %s at the zip root", windowsExecutable)
@@ -357,10 +465,10 @@ func rejectUserDataDir(root string) error {
 		return err
 	}
 	slash := filepath.ToSlash(abs)
-	if (strings.Contains(slash, "/Application Support/qisiTV") && !strings.Contains(slash, "qisiTV.app")) || (strings.Contains(slash, "/Application Support/BeefTV") && !strings.Contains(slash, "BeefTV.app")) {
+	if strings.Contains(slash, "/Application Support/BeefTV") && !strings.Contains(slash, "BeefTV.app") {
 		return fmt.Errorf("refusing to package the macOS user data directory")
 	}
-	if runtime.GOOS == "windows" && (strings.Contains(strings.ToLower(slash), "/appdata/roaming/qisitv") || strings.Contains(strings.ToLower(slash), "/appdata/roaming/beeftv")) {
+	if runtime.GOOS == "windows" && strings.Contains(strings.ToLower(slash), "/appdata/roaming/beeftv") {
 		return fmt.Errorf("refusing to package the Windows user data directory")
 	}
 	return nil
@@ -399,12 +507,12 @@ func isExcludedName(pathName string) bool {
 
 func validatePlatform(platform string) error {
 	switch platform {
-	case platformDarwinARM64, platformDarwinAMD64, platformWindowsAMD64:
+	case platformDarwinARM64, platformDarwinAMD64, platformWindowsAMD64, platformLinuxAMD64:
 		return nil
 	case "":
 		return fmt.Errorf("platform is required")
 	default:
-		return fmt.Errorf("unsupported platform %q (want darwin-arm64, darwin-amd64, or windows-amd64)", platform)
+		return fmt.Errorf("unsupported platform %q (want darwin-arm64, darwin-amd64, windows-amd64, or linux-amd64)", platform)
 	}
 }
 
@@ -429,5 +537,5 @@ func fileSHA256AndSize(path string) (string, int64, error) {
 }
 
 func artifactFileName(version, platform string) string {
-	return fmt.Sprintf("qisiTV-%s-%s.zip", version, platform)
+	return fmt.Sprintf("BeefTV-%s-%s.zip", version, platform)
 }

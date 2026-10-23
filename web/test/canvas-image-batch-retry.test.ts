@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { cancelIncompleteImageBatch, failedImageBatchChildren, markImageBatchRetrying, reconcileImageBatchRoot, restoreUnsubmittedImageBatchChild, retireImageBatchChildren } from "../src/lib/canvas/canvas-image-batch-retry";
+import { applyBatchPrimaryImage } from "../src/lib/canvas/canvas-project-domain";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeStatus } from "../src/types/canvas";
 
 function imageNode(id: string, status: CanvasNodeStatus, metadata: Partial<NonNullable<CanvasNodeData["metadata"]>> = {}): CanvasNodeData {
@@ -35,6 +36,7 @@ describe("canvas image batch retry", () => {
         const failed = imageNode("failed", "error", { batchRootId: root.id, errorDetails: "上游失败" });
         const success = imageNode("success", "success", {
             batchRootId: root.id,
+            assetId: "asset-success",
             content: "image:success",
             storageKey: "resource:success",
             mimeType: "image/png",
@@ -44,7 +46,7 @@ describe("canvas image batch retry", () => {
 
         const next = reconcileImageBatchRoot(root, [root, failed, success]);
 
-        expect(next.metadata).toMatchObject({ status: "success", content: "image:success", storageKey: "resource:success", primaryImageId: "success", batchFailedCount: 1 });
+        expect(next.metadata).toMatchObject({ status: "success", assetId: "asset-success", content: "image:success", storageKey: "resource:success", primaryImageId: "success", batchFailedCount: 1 });
         expect(next.metadata.errorDetails).toBeUndefined();
         expect(failed.metadata.status).toBe("error");
     });
@@ -107,5 +109,51 @@ describe("canvas image batch retry", () => {
         expect(cancelled.nodes.map((node) => node.id)).toEqual(["root", "done"]);
         expect(cancelled.nodes.find((node) => node.id === "root")?.metadata?.batchChildIds).toBeUndefined();
         expect(cancelled.nodes.find((node) => node.id === "done")?.metadata?.batchRootId).toBeUndefined();
+    });
+
+    test("主图尚未绑定 assetId 时根节点清除旧的 assetId", () => {
+        const root = imageNode("root", "success", {
+            isBatchRoot: true,
+            batchChildIds: ["child-1"],
+            primaryImageId: "child-1",
+            assetId: "stale-asset-id",
+            content: "image:old",
+            storageKey: "resource:old",
+        });
+        const child = imageNode("child-1", "success", {
+            batchRootId: root.id,
+            content: "/api/resources/new/file",
+            storageKey: "resource:new",
+        });
+        const reconciled = reconcileImageBatchRoot(root, [root, child]);
+        expect(reconciled.metadata?.assetId).toBeUndefined();
+        expect("assetId" in (reconciled.metadata || {})).toBe(false);
+        expect(reconciled.metadata?.storageKey).toBe("resource:new");
+
+        const applied = applyBatchPrimaryImage(root, child);
+        expect(applied.metadata?.assetId).toBeUndefined();
+        expect("assetId" in (applied.metadata || {})).toBe(false);
+        expect(applied.metadata?.storageKey).toBe("resource:new");
+
+        const boundChild = imageNode("child-1", "success", {
+            batchRootId: root.id,
+            assetId: "asset-new",
+            content: "/api/resources/new/file",
+            storageKey: "resource:new",
+        });
+        const appliedBound = applyBatchPrimaryImage(root, boundChild);
+        expect(appliedBound.metadata?.assetId).toBe("asset-new");
+
+        const dataUrlChild = imageNode("child-data", "success", {
+            batchRootId: root.id,
+            assetId: "asset-new",
+            content: "data:image/png;base64,AAAA",
+        });
+        const reconciledDataUrl = reconcileImageBatchRoot(
+            { ...root, metadata: { ...root.metadata, batchChildIds: ["child-data"], primaryImageId: "child-data" } },
+            [root, dataUrlChild],
+        );
+        expect(reconciledDataUrl.metadata?.assetId).toBeUndefined();
+        expect(applyBatchPrimaryImage(root, dataUrlChild).metadata?.assetId).toBeUndefined();
     });
 });

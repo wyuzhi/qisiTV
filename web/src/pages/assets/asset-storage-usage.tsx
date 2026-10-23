@@ -16,7 +16,7 @@ export function AssetStorageUsage() {
     const meter = accountStorageMeter(usage);
 
     return (
-        <section className={`assets-storage-usage${meter.full ? " is-full" : ""}${usage?.usedBytes ? " has-usage" : ""}`} aria-label={localMode ? "本地文件容量" : "账号文件容量"} aria-busy={query.isPending} title={localMode ? "统计浏览器本地保存的素材文件" : "包含素材文件和 Agent 会话附件"}>
+        <section className={`assets-storage-usage${meter.full ? " is-full" : ""}${usage?.usedBytes ? " has-usage" : ""}`} aria-label={localMode ? "本地文件容量" : "账号文件容量"} aria-busy={query.isPending} title={localMode ? "统计浏览器本地保存的素材文件" : "包含素材文件和创作会话附件"}>
             <span className="assets-storage-usage-icon" aria-hidden="true">
                 <HardDrive />
             </span>

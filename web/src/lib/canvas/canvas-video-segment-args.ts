@@ -13,18 +13,18 @@ export const MUTED_VIDEO_OUTPUT_NAME = "segment-muted-output.mp4";
 export const CROP_OUTPUT_NAME = "segment-crop-output.mp4";
 
 /** 视频片段裁切参数：输出统一编码 MP4。 */
-export function buildSegmentTrimArgs(startSec: string, durationSec: string): string[] {
-    return ["-i", SEGMENT_INPUT_NAME, "-ss", startSec, "-t", durationSec, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-movflags", "+faststart", SEGMENT_OUTPUT_NAME];
+export function buildSegmentTrimArgs(startSec: string, durationSec: string, inputName = SEGMENT_INPUT_NAME, outputName = SEGMENT_OUTPUT_NAME): string[] {
+    return ["-i", inputName, "-ss", startSec, "-t", durationSec, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-movflags", "+faststart", outputName];
 }
 
 /** 从视频片段提取声音：同样使用输出 seek，保证起点与裁切路径一致。 */
-export function buildExtractAudioArgs(audioCodec: string, startSec: string, durationSec: string, outputName = SEGMENT_OUTPUT_NAME): string[] {
-    return ["-i", SEGMENT_INPUT_NAME, "-ss", startSec, "-t", durationSec, "-vn", "-c:a", audioCodec, "-q:a", "2", outputName];
+export function buildExtractAudioArgs(audioCodec: string, startSec: string, durationSec: string, outputName = SEGMENT_OUTPUT_NAME, inputName = SEGMENT_INPUT_NAME): string[] {
+    return ["-i", inputName, "-ss", startSec, "-t", durationSec, "-vn", "-c:a", audioCodec, "-q:a", "2", outputName];
 }
 
 /** 直接复制原音轨，绕过精简内核缺少 MP3/AAC 编码器的问题。 */
-export function buildCopyAudioArgs(startSec: string, durationSec: string, outputName = AUDIO_COPY_OUTPUT_NAME): string[] {
-    return ["-i", SEGMENT_INPUT_NAME, "-ss", startSec, "-t", durationSec, "-map", "0:a:0?", "-vn", "-c:a", "copy", "-movflags", "+faststart", outputName];
+export function buildCopyAudioArgs(startSec: string, durationSec: string, outputName = AUDIO_COPY_OUTPUT_NAME, inputName = SEGMENT_INPUT_NAME): string[] {
+    return ["-i", inputName, "-ss", startSec, "-t", durationSec, "-map", "0:a:0?", "-vn", "-c:a", "copy", "-movflags", "+faststart", outputName];
 }
 
 export function isFullSourceRange(startMs: number, endMs: number, durationMs?: number) {
@@ -49,16 +49,17 @@ export function assertUsableSegmentOutput(output: Uint8Array | string, kind: "vi
 }
 
 /** 去掉原视频音轨。整段可复制画面；部分区间必须重编码，不能 stream copy。 */
-export function buildRemoveAudioArgs(startSec: string, durationSec: string, outputName = MUTED_VIDEO_OUTPUT_NAME, options?: { fullSource?: boolean }): string[] {
+export function buildRemoveAudioArgs(startSec: string, durationSec: string, outputName = MUTED_VIDEO_OUTPUT_NAME, options?: { fullSource?: boolean; inputName?: string }): string[] {
+    const inputName = options?.inputName ?? SEGMENT_INPUT_NAME;
     if (options?.fullSource) {
-        return ["-i", SEGMENT_INPUT_NAME, "-map", "0:V:0", "-an", "-c:v", "copy", "-movflags", "+faststart", outputName];
+        return ["-i", inputName, "-map", "0:V:0", "-an", "-c:v", "copy", "-movflags", "+faststart", outputName];
     }
-    return ["-i", SEGMENT_INPUT_NAME, "-ss", startSec, "-t", durationSec, "-map", "0:V:0", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-movflags", "+faststart", outputName];
+    return ["-i", inputName, "-ss", startSec, "-t", durationSec, "-map", "0:V:0", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-movflags", "+faststart", outputName];
 }
 
 /** 空间裁切视频，坐标和尺寸使用源视频像素值。 */
-export function buildVideoCropArgs(x: number, y: number, width: number, height: number): string[] {
-    return ["-i", SEGMENT_INPUT_NAME, "-vf", `crop=${Math.round(width)}:${Math.round(height)}:${Math.round(x)}:${Math.round(y)}`, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-movflags", "+faststart", CROP_OUTPUT_NAME];
+export function buildVideoCropArgs(x: number, y: number, width: number, height: number, inputName = SEGMENT_INPUT_NAME, outputName = CROP_OUTPUT_NAME): string[] {
+    return ["-i", inputName, "-vf", `crop=${Math.round(width)}:${Math.round(height)}:${Math.round(x)}:${Math.round(y)}`, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-movflags", "+faststart", outputName];
 }
 
 // 可用性看容器结构：ftyp、mdat 载荷、trak 内 vide/soun 且 sample_count>0。

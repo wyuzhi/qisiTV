@@ -2,6 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
+	"qisitv/backend/internal/generation"
+	"time"
 
 	"qisitv/backend/internal/model"
 )
@@ -79,6 +82,8 @@ func (s *Service) routeExecutor() *taskRouteExecutor {
 
 func (e *taskRouteExecutor) execute(ctx context.Context, task *model.Task, attempt *model.RouteAttempt) (taskRouteExecutionResult, error) {
 	var execution taskRouteExecutionResult
+	ctx, recorder := withTaskRequestEvidence(ctx, task.FailureDiagnostics)
+	defer func() { task.FailureDiagnostics = recorder.snapshot(execution.providerSucceeded) }()
 	for {
 		if dispatchErr := e.port.markRouteAttemptDispatching(attempt); dispatchErr != nil {
 			execution.err = dispatchErr
@@ -91,6 +96,19 @@ func (e *taskRouteExecutor) execute(ctx context.Context, task *model.Task, attem
 		e.port.finishTaskRouteAttempt(attempt, task, execution.err)
 		if execution.err == nil {
 			break
+		}
+		if task.Type == "canvas_image" && generation.UpscaleMediaType(task.Model) == "" && attempt != nil && attempt.DispatchState == "submission_unknown" && !isImageRecoveryError(execution.err) && !definiteVODImageParameterFailure(execution.err) {
+			execution.err = imageRecoveryError{execution.err}
+		}
+		var upstream providerHTTPError
+		if task.Type == "canvas_image" && attempt != nil && attempt.AttemptNumber < 3 && definiteImageThrottle(execution.err) && errors.As(execution.err, &upstream) {
+			delay := time.Duration(1<<attempt.AttemptNumber) * time.Second
+			if upstream.RetryAfter > delay {
+				delay = upstream.RetryAfter
+			}
+			if waitErr := sleepContext(ctx, delay); waitErr != nil {
+				break
+			}
 		}
 		nextAttempt, routeErr := e.port.nextRouteAttemptAfterFailure(task, attempt, execution.err)
 		if routeErr != nil {
@@ -105,7 +123,11 @@ func (e *taskRouteExecutor) execute(ctx context.Context, task *model.Task, attem
 		// its route from this object before it reaches the repository again.
 		task.RouteID = nextAttempt.RouteID
 		attempt = nextAttempt
-		_ = e.port.log(task.UserID, task.ID, "warn", "上游未创建任务，切换备用能力路由", nextAttempt.RouteID)
+		if task.Type == "canvas_image" {
+			_ = e.port.log(task.UserID, task.ID, "warn", "上游限流，正在重试原图片请求", nextAttempt.ID)
+		} else {
+			_ = e.port.log(task.UserID, task.ID, "warn", "上游未创建任务，切换备用能力路由", nextAttempt.RouteID)
+		}
 	}
 	execution.providerSucceeded = execution.err == nil
 	return execution, nil

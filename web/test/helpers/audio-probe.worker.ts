@@ -10,19 +10,19 @@ const ffmpeg = {
     exec: async (args: string[]) => { encodes.push(args); return 0; },
     deleteFile: async (name: string) => { removed.push(name); },
 };
-mock.module("../../src/lib/canvas/canvas-video-merge", () => ({ loadFFmpeg: async () => ffmpeg }));
+mock.module("../../src/lib/canvas/canvas-ffmpeg-session", () => ({ withFFmpegLease: async (work: (lease: unknown) => unknown) => work({ ffmpeg, filePrefix: "fixture-" }) }));
 mock.module("../../src/services/file-storage", () => ({ getMediaBlob: async () => new Blob(["fixture"], { type: "video/mp4" }) }));
 mock.module("@ffmpeg/util", () => ({ fetchFile: async (blob: Blob) => new Uint8Array(await blob.arrayBuffer()) }));
 const { extractVideoAudio } = await import("../../src/lib/canvas/canvas-video-segment");
 await extractVideoAudio({ storageKey: "video:fixture" }, { startMs: 0, endMs: 2000 }, 2000);
 expect(encodes).toHaveLength(1);
-expect(removed).toContain("segment-audio-probe.json");
+expect(removed).toContain("fixture-audio-probe.json");
 encodes.length = 0;
 removed.length = 0;
 probe = '{"streams":[],"format":{"duration":"2"}}';
 await expect(extractVideoAudio({ storageKey: "video:fixture" }, { startMs: 0, endMs: 2000 }, 2000)).rejects.toThrow("没有音轨");
 expect(encodes).toHaveLength(0);
-expect(removed).toContain("segment-audio-probe.json");
+expect(removed).toContain("fixture-audio-probe.json");
 probeCode = 1;
 await expect(extractVideoAudio({ storageKey: "video:fixture" }, { startMs: 0, endMs: 2000 }, 2000)).rejects.toThrow("无法读取");
 expect(encodes).toHaveLength(0);

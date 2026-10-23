@@ -18,6 +18,6 @@
 
 - 生产环境必须使用 HTTPS，并将 `CANVAS_CORS_ORIGINS` 设置为明确的前端 Origin。
 - 首个管理员应在服务暴露公网前完成注册，公开注册默认保持关闭。
-- 数据目录、PostgreSQL/SQLite、备份和 `.settings-key` 必须限制为服务账号可读。
+- 数据目录、SQLite 数据库、备份和 `.settings-key` 必须限制为服务账号可读。
 - 系统模型渠道和 OSS 使用最小权限密钥，并设置供应商侧预算与告警。
 - 不要将 `.env`、数据库、日志、备份或真实密钥提交到 Git。

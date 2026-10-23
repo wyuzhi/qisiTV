@@ -32,7 +32,19 @@ export type CreationMessage = {
     generationStage?: string;
     generationEffectKeys?: string[];
 };
-export type CreationConversation = { id: string; title: string; updatedAt: string; canvasId?: string; messages: CreationMessage[] };
+export type CreationConversationConflict = {
+    revision: number;
+    document: CreationConversation;
+};
+
+export type CreationConversation = {
+    id: string;
+    title: string;
+    updatedAt: string;
+    canvasId?: string;
+    messages: CreationMessage[];
+    conflictRemote?: CreationConversationConflict;
+};
 
 export const modeLabels: Record<CreationMode, string> = { text: "文本", image: "图片", video: "视频" };
 // LibTV 的创作入口以“镜头/视频”作为首次进入的主路径；用户切换后的模式
@@ -52,6 +64,8 @@ export const qualityOptions = [
     { value: "low", label: "低", description: "更快生成" },
     { value: "medium", label: "中", description: "均衡模式" },
     { value: "high", label: "高", description: "优先细节" },
+    { value: "xhigh", label: "超高", description: "更多细节，生成更慢" },
+    { value: "max", label: "最高", description: "最高质量，生成更慢" },
     // grok2api / xAI Imagine：quality 映射 resolution
     { value: "1k", label: "1K", description: "标准清晰度" },
     { value: "2k", label: "2K", description: "更高清晰度" },

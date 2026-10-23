@@ -103,7 +103,7 @@ describe("Volcengine Ark full-modal references", () => {
             model,
             "保持主体一致",
             [{ id: "image-1", name: "image.png", type: "image/png", dataUrl: "", url: "https://cdn.example.com/image.png" }],
-            [{ id: "video-1", name: "video.mp4", type: "video/mp4", url: "https://cdn.example.com/video.mp4", durationMs: 3000 }],
+            [{ id: "video-1", name: "video.mp4", type: "video/mp4", url: "https://cdn.example.com/video.mp4", durationMs: 3000, width: 720, height: 1280 }],
             [{ id: "audio-1", name: "audio.mp3", type: "audio/mpeg", url: "https://cdn.example.com/audio.mp3", durationMs: 3000 }],
         );
 
@@ -282,9 +282,9 @@ describe("Seedance /videos does not silently truncate references", () => {
             videoSeconds: "5",
             channels: [{ id: "default", models: ["seedance-2.5"], interfaceType: "openai", enabled: true, name: "t", apiKey: "k", secretKey: "", headers: [], apiFormat: "openai", baseUrl: "https://video.example.com/v1", scope: "user" }],
         };
-        await createSeedanceTask(deps, config as never, "seedance-2.5", "跟随节奏", [], [], [{ id: "audio-1", name: "a.mp3", type: "audio/mpeg", url: "data:audio/mpeg;base64,AAAA", durationMs: 3000 }]);
+        await createSeedanceTask(deps, config as never, "seedance-2.5", "跟随节奏", [], [], [{ id: "audio-1", name: "a.mp3", type: "audio/mpeg", url: "data:audio/mpeg;base64,AAAA", durationMs: 3000, width: 720, height: 1280 }]);
         expect(requestBody.reference_audios).toEqual(["data:audio/mpeg;base64,AAAA"]);
-        await createSeedanceTask(deps, config as never, "seedance-2.5", "跟随节奏", [], [], [{ id: "audio-2", name: "a.mp3", type: "audio/mpeg", url: "asset://voice", durationMs: 3000 }]);
+        await createSeedanceTask(deps, config as never, "seedance-2.5", "跟随节奏", [], [], [{ id: "audio-2", name: "a.mp3", type: "audio/mpeg", url: "asset://voice", durationMs: 3000, width: 720, height: 1280 }]);
         expect(requestBody.reference_audios).toEqual(["asset://voice"]);
     });
 });

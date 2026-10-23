@@ -15,6 +15,34 @@ function reader(nodes: Record<string, string | undefined>): DirectorNodeContentR
 }
 
 describe("预览来源优先级", () => {
+    test("持久化导演封面优先于旧项目的独立图片节点预览", () => {
+        const current = scene();
+        expect(resolveDirectorPreviewSource({
+            scene: current,
+            shot: current.shots[0],
+            coverUrl: " https://assets.example/new-cover.png ",
+            previewNodeId: "legacy",
+            readNodeContent: reader({ legacy: "https://assets.example/legacy.png" }),
+        })).toEqual({ kind: "image", url: "https://assets.example/new-cover.png" });
+    });
+
+    test("封面尚未解析或只有空白时回落到旧预览", () => {
+        const current = scene();
+        expect(resolveDirectorPreviewSource({
+            scene: current, shot: current.shots[0], coverUrl: "  ", previewNodeId: "legacy",
+            readNodeContent: reader({ legacy: "https://assets.example/legacy.png" }),
+        })).toEqual({ kind: "image", url: "https://assets.example/legacy.png" });
+    });
+
+    test("新封面地址失败后回落到仍有效的旧预览", () => {
+        const current = scene();
+        expect(resolveDirectorPreviewSource({
+            scene: current, shot: current.shots[0], coverUrl: "https://assets.example/broken.png",
+            failedUrl: "https://assets.example/broken.png", previewNodeId: "legacy",
+            readNodeContent: reader({ legacy: "https://assets.example/legacy.png" }),
+        })).toEqual({ kind: "image", url: "https://assets.example/legacy.png" });
+    });
+
     test("metadata preview 优先于 shot fallback", () => {
         const current = scene();
         const shot = { ...current.shots[0], previewNodeId: "from-shot" };

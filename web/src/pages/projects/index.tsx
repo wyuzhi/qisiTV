@@ -1,3 +1,4 @@
+import { AuthenticatedImage } from "@/components/assets/authenticated-media";
 import { CollectionToolbar } from "@/components/layout/collection-toolbar";
 import { CachedResourceImage } from "@/components/cached-resource-image";
 import { MediaPlaceholder } from "@/components/ui/product/media-placeholder";
@@ -203,7 +204,7 @@ export default function ProjectsPage() {
     const hasInitialError = query.isError && !query.data;
     return (
         <WorkspacePage className="library-page project-library-page" grid>
-            <PageHeader title="短剧 Agent" description="你的故事、章节与镜头，都在这里。" meta={<span className="app-projects-header-meta">{totalProjectCount} 个项目</span>} />
+            <PageHeader title="短剧工作台" description="你的故事、章节与镜头，都在这里。" meta={<span className="app-projects-header-meta">{totalProjectCount} 个项目</span>} />
             <details className="story-launcher-panel" aria-label="开始一部新短剧">
                 <summary className="story-launcher-head">
                     <div className="story-launcher-title">
@@ -225,7 +226,7 @@ export default function ProjectsPage() {
                         aria-label="一句话故事"
                     />
                     {selectedStyle ? <button type="button" className="story-launcher-style-chip" onClick={() => setStylePickerOpen(true)} title={selectedStyle.title}>
-                        <img src={selectedStyle.imageUrl} alt="" />
+                        <AuthenticatedImage src={selectedStyle.imageUrl} alt="" />
                         <span>{selectedStyle.title}</span>
                     </button> : null}
                 </div>
@@ -297,7 +298,7 @@ export default function ProjectsPage() {
                         <Form.Item name="aspectRatio" label="默认画幅"><Select options={[{ label: "9:16 竖屏", value: "9:16" }, { label: "16:9 横屏", value: "16:9" }, { label: "1:1 方形", value: "1:1" }]} /></Form.Item>
                         <Form.Item name="sourceType" label="内容来源"><Select options={[{ label: "空白开始", value: "blank" }, { label: "导入小说", value: "novel" }, { label: "粘贴文本", value: "text" }]} /></Form.Item>
                     </div>
-                    <Form.Item label="项目画风"><button type="button" className="app-story-modal-style" onClick={() => setStylePickerOpen(true)}>{selectedStyle ? <><img src={selectedStyle.imageUrl} alt="" /><span>{selectedStyle.title}</span><em>更换</em></> : <><Palette className="size-4" /><span>选择项目画风（可选）</span></>}</button></Form.Item>
+                    <Form.Item label="项目画风"><button type="button" className="app-story-modal-style" onClick={() => setStylePickerOpen(true)}>{selectedStyle ? <><AuthenticatedImage src={selectedStyle.imageUrl} alt="" /><span>{selectedStyle.title}</span><em>更换</em></> : <><Palette className="size-4" /><span>选择项目画风（可选）</span></>}</button></Form.Item>
                     <p className="-mt-1 mb-5 text-xs leading-5 text-foreground/48">创建后先进入项目概览。章节、画风和参考资产可以逐步补充。</p>
                     <div className="flex justify-end gap-2"><Button onClick={() => setCreateOpen(false)}>取消</Button><Button type="primary" htmlType="submit" loading={mutation.isPending}>创建项目</Button></div>
                 </Form>
@@ -327,7 +328,7 @@ export default function ProjectsPage() {
                             <span className="app-story-generating-caption">故事起点</span>
                             <p>{storyDraft.trim() || "等待故事输入"}</p>
                             <span className="app-story-generating-meta">{generateChapterCount} 章 · 每章约 {generateWordCount} 字 · {generateStructure} · {generatePerspective}</span>
-                            {selectedStyle ? <span className="app-story-generating-style"><img src={selectedStyle.imageUrl} alt="" /><span>{selectedStyle.title}</span></span> : null}
+                            {selectedStyle ? <span className="app-story-generating-style"><AuthenticatedImage src={selectedStyle.imageUrl} alt="" /><span>{selectedStyle.title}</span></span> : null}
                         </div>
                         <ol className="app-story-generating-steps">
                             {generationSteps.map((step) => {

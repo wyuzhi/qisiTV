@@ -5,12 +5,14 @@ import { FolderOpen, Cable, CheckCircle2, ArrowRight, Download } from "lucide-re
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { WorkspacePage } from "@/components/layout/workspace-page";
 import { getProjectFolderState, initializeProjectFolder, reauthorizeProjectRoot, subscribeProjectFolderState } from "@/services/browser-project-folder";
-import { mergeBrowserFolderProjects, selectBrowserProjectRoot, syncLocalCanvasProjectToBackend } from "@/services/local-workspace-repository";
+import { syncLocalCanvasProjectToBackend } from "@/services/local-workspace-repository";
+import { mergeBrowserFolderProjects, selectBrowserProjectRoot } from "@/services/browser-folder-workspace";
 import { getBrowserAgentConnection, subscribeBrowserAgentConnection } from "@/services/browser-agent-connection";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { AGENT_CLIENTS, AGENT_PAIRING_PROMPT, AGENT_TRIAL_PROMPT, buildAgentInstallationPrompt, getAgentClient, type AgentClientId } from "@/lib/agent-setup";
 import { AgentPairingPanel } from "./agent-pairing-panel";
+import { publicAssetUrl } from "@/lib/public-asset";
 
 const downloads = [
     ["Mac · Apple 芯片", "darwin-arm64.zip"], ["Mac · Intel", "darwin-amd64.zip"],
@@ -91,7 +93,7 @@ export default function LocalSetupPage() {
                     </ol>
                     <div className="space-y-3 rounded-xl bg-muted/40 p-4"><p className="text-xs font-medium text-muted-foreground">连接成功后，打开<Link to="/project" className="underline">项目列表</Link>中的画布，试一次不收费的操作</p><p className="text-sm leading-6">{AGENT_TRIAL_PROMPT}</p><Button size="small" onClick={() => copyInstruction(AGENT_TRIAL_PROMPT, "试用指令已复制，请发送给 Agent")}>复制试用指令</Button></div>
                     <p className="text-xs leading-5 text-muted-foreground">保持网页和 Agent 打开。同一标签页刷新、短暂断线会在最长 12 小时的授权期内自动恢复；新标签页、授权到期或本机服务重启后需新链接。点击断开会取消授权。生成前配置模型服务并明确授权模型、数量和费用范围；断线不会自动重做操作。</p>
-                    <details className="text-xs leading-6 text-muted-foreground"><summary className="cursor-pointer">手动下载与配置</summary><div className="mt-3 space-y-3"><p>无法让 Agent 自动安装时，可手动下载对应系统的本机程序。上方选择的 Agent 安装指令包含其配置方式。</p><div className="flex flex-wrap gap-2">{downloads.map(([label, file]) => <a key={file} href={`${import.meta.env.BASE_URL}downloads/qisitv-connect-${file}`} download className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 hover:bg-muted"><Download className="size-3.5" />{label}</a>)}</div><p>客户端使用本地 stdio MCP：命令填写程序的绝对路径，参数为 mcp。请将程序和许可证保存在固定目录，再配置客户端；服务自动后台启动，无需另开终端。</p><p>下载包里的 install-codex.command / install-codex.cmd / install-codex.sh 仅用于手动配置 Codex。其他 Agent 使用上方各自的安装说明，不运行 Codex 安装脚本。</p><p>升级前先关闭使用 qisitv-web 的 Agent，等待约 30 秒；旧版手动 start 窗口也请关闭。已有旧桌面 MCP qisitv 时，请明确使用 qisitv-web。</p><p>Mac 包尚未签名公证。如系统阻止，请核对下载来源，再在系统设置 → 隐私与安全性中允许打开。</p></div></details>
+                    <details className="text-xs leading-6 text-muted-foreground"><summary className="cursor-pointer">手动下载与配置</summary><div className="mt-3 space-y-3"><p>无法让 Agent 自动安装时，可手动下载对应系统的本机程序。上方选择的 Agent 安装指令包含其配置方式。</p><div className="flex flex-wrap gap-2">{downloads.map(([label, file]) => <a key={file} href={publicAssetUrl(`downloads/qisitv-connect-${file}`)} download className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 hover:bg-muted"><Download className="size-3.5" />{label}</a>)}</div><p>客户端使用本地 stdio MCP：命令填写程序的绝对路径，参数为 mcp。请将程序和许可证保存在固定目录，再配置客户端；服务自动后台启动，无需另开终端。</p><p>下载包里的 install-codex.command / install-codex.cmd / install-codex.sh 仅用于手动配置 Codex。其他 Agent 使用上方各自的安装说明，不运行 Codex 安装脚本。</p><p>升级前先关闭使用 qisitv-web 的 Agent，等待约 30 秒；旧版手动 start 窗口也请关闭。已有旧桌面 MCP qisitv 时，请明确使用 qisitv-web。</p><p>Mac 包尚未签名公证。如系统阻止，请核对下载来源，再在系统设置 → 隐私与安全性中允许打开。</p></div></details>
                 </section>
             </div>
         </WorkspacePage>

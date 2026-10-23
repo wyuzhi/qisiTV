@@ -13,7 +13,7 @@ export function applyClaySceneMaterials(scene: Scene) {
     const originals: Array<{ mesh: Mesh; material: Material | Material[] }> = [];
     scene.traverse((child) => {
         const mesh = child as Mesh;
-        if (!mesh.isMesh || mesh.userData.directorActor) return;
+        if (!mesh.isMesh || mesh.userData.directorActor || mesh.userData.directorStageGround) return;
         const material = mesh.material;
         const shaderBacked = Array.isArray(material) ? material.some((item) => "uniforms" in item) : "uniforms" in material;
         if (shaderBacked) return;

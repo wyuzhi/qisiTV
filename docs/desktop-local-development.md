@@ -70,6 +70,10 @@ backend/cmd/desktop/build/bin/qisiTV.app
 
 桌面 profile 还会对共享画布和 Agent 入口做本地模式适配：共享画布返回本地工作区，Agent 不把登录 Cookie 当作本地工作区的启动条件。
 
+## 原生窗口路由
+
+Wails 2.16 生产包只把 `/` 和 `index.html` 交给前端运行时；深路径（例如 `/canvas/:id`）会落到资源 handler 并返回 404。原生窗口因此使用 hash 路由：刷新仍请求 `/`，画布地址形如 `/#/canvas/<id>`。浏览器部署继续使用 History 路径，`/api` 与媒体地址不进入 hash。
+
 ## 最近一次验收
 
 - 统一开发脚本已验证：Wails 日志显示 `Frontend DevServer URL: http://127.0.0.1:3000`；浏览器代理和后端直连的 `/api/health/live` 返回相同 `dev` 构建信息；`/api/workspace/bootstrap` 经浏览器代理返回 HTTP 200。

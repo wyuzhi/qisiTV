@@ -73,6 +73,12 @@ func (r *Registry) Resolve(id string) (Adapter, bool) {
 	if adapter, ok := r.Get(id); ok {
 		return adapter, true
 	}
+	// Older BeefAPI catalogs stored the package name instead of its provider ID.
+	if strings.TrimSpace(id) == "google-gemini-generate-content" {
+		if adapter, ok := r.Get("gemini-generate-content"); ok {
+			return adapter, true
+		}
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, adapter := range r.adapters {

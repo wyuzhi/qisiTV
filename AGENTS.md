@@ -14,6 +14,8 @@ qisiTV 是基于上游 `glanderness/BeefTV` 二次开发的 AI 影视与短剧�
 
 所有入口使用 `qisitv-web` MCP 自动管理本机服务，要求 Agent 进程与浏览器同机；Claude 网页版、远程 Gateway 或云端 Agent 不在本机直连范围。环境缺失、安装失败或未实测客户端不得宣称成功。不要把手选系统包、手动 `start` 或保留终端窗口作为推荐主流程；手动包留作折叠备选。安装不取代目录授权、网页配对或付费生成授权。MCP 0.3.0 的 qisitv_pair 返回 pairingUrl，短码只放在 URL fragment，页面读取后立即移除；浏览器令牌仅保留在当前标签页 sessionStorage，不放 URL / localStorage / 项目文件。首次连接由用户确认。同一标签页在原最长十二小时授权内可恢复连接，重连不续期、不抢占其他在线标签页、不重播旧命令；显式断开撤销授权。本机服务重启后重新配对。命令经回环 WebSocket 交给已打开的网页执行，网页是唯一文件写入者；不要另建 Go 数据库或声称网页关闭后仍可执行。旧 `qisitv` MCP 继续连接桌面 Go 工作区，两者不自动合并。见 `docs/design/project-folders-and-agent.md`。
 
+上述 `qisitv-web` 与浏览器唯一写入说明仅约束 v1.5.x 遗留模式。2.0 引擎模式由已配对的 `qisitv-engine` 统一管理本机 SQLite 与真实项目目录，复用上游助手、工作流和 agentops 事务。v1 清单经显式迁移为 v2 后，浏览器必须拒绝写入，断线不可回退双写。完整外部 MCP 在网页 `/agents` 签发独立客户端授权并调用 `qisitv` CLI；旧 `qisitv-web` 可启动/配对，但不能以 UI 身份代理其旧写命令。用户可关闭 Codex，独立引擎继续持有本机任务。全工作区备份需同时包括项目根目录和引擎数据目录，不能将单项目投影视为完整助手备份。
+
 仓库由几个边界清晰但可独立运行的单元组成：
 
 | 单元 | 技术栈 | 入口 | 责任 |
@@ -61,7 +63,7 @@ qisiTV 是基于上游 `glanderness/BeefTV` 二次开发的 AI 影视与短剧�
 
 调用链应保持为：`HTTP -> handler -> localapp/domain port -> app/domain implementation -> repository/model`；需要模型上游时进入 `generation` / `provider` / `protocol` / `outbound`。
 
-### Agent、插件和文档
+### 插件和文档
 
 - 修改 `docs/` 前确认内容属于专题文档，而不是把长篇说明重新复制到根 README。目录索引见 `docs/index.md`。
 
@@ -103,7 +105,7 @@ qisiTV 是基于上游 `glanderness/BeefTV` 二次开发的 AI 影视与短剧�
 
 - Gin 接口统一返回 `{ code, data, msg, reason }`；失败时 HTTP status 和业务 `code` 都应表达真实失败，不把所有错误包装成 200。机器可读原因放在 `reason`，见 `docs/content/docs/backend/http-api.mdx`。
 - 所有对象读取、更新、删除都在 service 校验当前用户和资源归属；管理员权限在 service 校验，不依赖前端隐藏按钮。
-- 默认拒绝本机、私网和链路本地上游。可信开发主机只能通过 `CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS` 精确放行；不要设置“允许全部私网”来绕过 SSRF 防护。
+- 默认开放本机回环（`localhost` / `127.0.0.1` / `::1`）和局域网私网模型上游，仅拦截链路本地（`169.254.0.0/16` 等）、未指定与多播地址；需要严格公网隔离的部署可显式设置 `CANVAS_ALLOW_PRIVATE_UPSTREAMS=false` 并通过 `CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS` 精确放行。
 - 用户 API Key 保存在浏览器本地，任务创建时可能提交给自部署后端；只在可信部署和 HTTPS 下使用真实密钥。日志、错误上报、URL、localStorage 和持久任务正文不得写入敏感 URL、Cookie 或 API Key。
 - 生产必须配置明确的 `CANVAS_CORS_ORIGINS`，保持 HTTPS，限制数据库、备份、数据目录和 `.settings-key` 权限；默认关闭公开注册。
 - 数据库字段或表变化时同步更新 `docs/content/docs/backend/backend-database.mdx`，不能只改 GORM model。
@@ -123,7 +125,7 @@ qisiTV 是基于上游 `glanderness/BeefTV` 二次开发的 AI 影视与短剧�
 - 先阅读 `.env.example` 和对应 Compose 文件。宿主机后端开发必须使用 Git 忽略的 `.local/project-workbench-debug`，通过 `CANVAS_BACKEND_DATA_DIR` 显式指定；不要把 `backend/data` 当作开发账号数据库。
 - 本地缓存放 `.local/cache`；不要提交数据库、上传文件、`.env`、真实密钥、构建产物或编辑器配置。
 - 宿主机开发：`backend/` 运行 `CANVAS_BACKEND_DATA_DIR=../.local/project-workbench-debug go run ./cmd/server`，`web/` 使用 Bun 和 Vite；不要用 pnpm/npm 覆盖同一套 `node_modules`，也不要提交 `pnpm-lock.yaml` 或 `package-lock.json`。Docker 热更新使用 `docker-compose.dev.yml`；本地构建运行使用 `docker-compose.local.yml`。
-- 生产 Compose 使用 `docker-compose.deploy.yml`（PostgreSQL、Redis、backend、web），源码构建可叠加 `docker-compose.build.yml`。公网只暴露 web 的 `3000`，backend `8080` 留在 Compose 网络内。
+- 单机 Compose 使用 `docker-compose.yml`（SQLite 数据卷，backend、web），源码构建可叠加 `docker-compose.build.yml`。公网只暴露 web 的 `3000`，backend `8080` 留在 Compose 网络内。
 - 默认不启动 dev server；只有用户明确要求浏览器预览或联调时才启动，并先确认端口、数据目录和现有进程。
 - macOS 桌面版的正式安装路径是 `/Applications/qisiTV.app`。需要更新已安装的桌面版时运行 `./scripts/update-local-qisitv-app.sh`；不将 `build/bin/qisiTV.app` 作为可使用版本保留，不复制、重命名或存档额外 `.app` 副本。Web 本地开发仍按前后端启动流程运行。
 - 健康检查只能证明入口可用，不能替代登录、SSE、任务生成和资源访问验证。
@@ -133,8 +135,8 @@ qisiTV 是基于上游 `glanderness/BeefTV` 二次开发的 AI 影视与短剧�
 项目当前默认不自动运行语法检查、类型检查、测试或构建。用户明确要求验证，或改动风险需要验证时，按范围选择最小充分命令，并在交付中如实记录：
 
 - 前端：`cd web && bun run build`；专项测试用 `bun test ...`。UI 退场规则用 `bun run lint`（只禁 antd Empty 和静态 `Modal.confirm`，不是风格检查）。
-- 后端：`cd backend && go test ./...`；涉及 PostgreSQL、资源、任务或权限时补对应集成/冒烟路径。
-- 云端 Agent：前端事件流和审批路径依赖后端 `/api/agent` 接口；在该接口实现后补充后端冒烟、Worker 运行和 SSE 断线重连验证。
+- 后端：`cd backend && go test ./...`；涉及资源、任务或权限时补对应集成/冒烟路径。
+- 旧内置 Agent 已从产品运行面退场：`/agent/*` 路由不再注册，通用任务创建、任务重试和任务 Worker 拒绝 `cloud_agent`、`cloud_agent_step`、`agent_memory_compact`，旧轮次与记忆压缩调度保持停用，历史数据保留。当前分支的替换内核采用 `agent-host/` 中钉选的官方 pi SDK，Go 管理运行时、业务轮次及操作授权；React 使用 `/api/assistant/*`。宿主只有 Durable 一套执行运行时：旧 JSONL 会话只读历史，在旧会话里发新消息会以交接说明开一条新的 Durable 会话，不恢复旧 SDK 的 create/prompt/replace/abort 执行路径。按 `docs/refactor/pi-official-reuse.md` 核对官方 API 与实际接入路径，不能恢复旧入口或另建模型会话循环。零模型宿主验证、真实业务操作、付费模型验收与正式发布分别记证据。
 - 文档站：`cd docs && bun run types:check` 或 `bun run build`。
 - UI 变更能浏览器验证时，检查关键路由、明暗主题、滚动、弹窗、空态和核心交互；不能验证时说明替代依据，不把静态阅读或 `git diff` 写成运行验证。
 
@@ -143,9 +145,11 @@ qisiTV 是基于上游 `glanderness/BeefTV` 二次开发的 AI 影视与短剧�
 ## 9. 文档与交付
 
 - 根 `README.md` 只保留项目定位、能力概览、快速开始、部署、安全和文档入口；详细专题写入 `docs/content/docs/`。
+- `README.md` 是根 README 的中文准稿；每次修改 `README.md` 时，同步更新 `README.en.md`，并在两个文件顶部保留语言切换链接。
 - 功能与代码地图分别维护在 `docs/content/docs/overview/features.mdx`、`docs/content/docs/backend/code-map.mdx`。尚未确认的实现状态保留在任务或拉取请求中，不写入公开产品文档。
 - API、数据表、SSE、资源存储、部署或安全边界变化时同步对应专题文档；不要只改代码和根 README。
 - 文档默认中文，不写过期日期，不公开密码、Token、Cookie、真实账号或机器敏感路径。命令、端口、环境变量必须以当前脚本和 Compose 为准。
 - Git 提交说明使用 `<type>(<scope>): <业务模块> - <变更摘要>`，`type` 为 `feat|fix|refactor|perf|docs|test|build|ci|chore|revert`。
+- 交叉 review：改动涉及前端 UI、交互或用户可见功能（含文案、设置项、安装与更新体验）的 PR，开出后由发起人在飞书团队群通知另一位协作者 review，附 PR 链接、改动要点和截图或录屏；对方在 PR 上 approve 或在飞书明确回复可以合并后再合并。纯后端或内部改动在 PR 描述里写明影响范围即可。AI 代理默认不合并 PR、不发版；项目负责人对某个 PR 明确授权时才可合并该 PR，授权不延伸到其他 PR 或发版，用户可见功能的 PR 仍须先完成交叉 review。通知内容只写已验证的事实，不附密钥、诊断包原文或本机路径。
 
 交付前至少检查：改动是否聚焦、调用方和类型是否同步、错误/权限/数据归属是否完整、必要文档是否同步、验证是否如实说明、是否留下密钥或本地数据。

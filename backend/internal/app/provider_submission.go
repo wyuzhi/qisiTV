@@ -5,10 +5,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/model"
 )
 
 type providerSubmissionKeyContext struct{}
+
+func uncertainVideoSubmission(ctx context.Context, err error) error {
+	return generation.UncertainVideoSubmission(ctx, err)
+}
 
 func withProviderSubmissionKey(ctx context.Context, attempt *model.RouteAttempt) context.Context {
 	if attempt == nil {
@@ -17,7 +22,9 @@ func withProviderSubmissionKey(ctx context.Context, attempt *model.RouteAttempt)
 	// Stable for this persisted attempt across worker/process recovery; an
 	// explicitly new user retry or a safely rejected route gets a new attempt.
 	key := uuid.NewSHA1(uuid.NameSpaceOID, []byte(attempt.TaskID+":"+attempt.ID)).String()
-	return context.WithValue(ctx, providerSubmissionKeyContext{}, key)
+	ctx = context.WithValue(ctx, imageAttemptContext{}, attempt.ID)
+	ctx = context.WithValue(ctx, providerSubmissionKeyContext{}, key)
+	return generation.WithSubmissionKey(ctx, key)
 }
 
 func (s *Service) createDirectTaskAttempt(task *model.Task) (*model.RouteAttempt, error) {

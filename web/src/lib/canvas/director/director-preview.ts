@@ -24,17 +24,20 @@ export function resolveDirectorActiveShot(scene: DirectorScene | null, shotId: s
 
 /**
  * 预览来源优先级（严格自上而下）：
- * 1. node.metadata.directorPreviewNodeId 指向的画布节点正文
- * 2. 当前 DirectorShot.previewNodeId 指向的画布节点正文（补 metadata 丢失）
- * 3. scene 为 null：场景尚在准备（loading）
- * 4. 其余：诚实空态
+ * 1. 本节点持久化封面
+ * 2. node.metadata.directorPreviewNodeId 指向的画布节点正文
+ * 3. 当前 DirectorShot.previewNodeId 指向的画布节点正文（补 metadata 丢失）
+ * 4. scene 为 null：场景尚在准备（loading）
+ * 5. 其余：诚实空态
  * 不改动任何 scene/node 状态，只做读取判定。
  */
-export function resolveDirectorPreviewSource(input: { scene: DirectorScene | null; shot: DirectorShot | undefined; previewNodeId: string | undefined; readNodeContent: DirectorNodeContentReader }): DirectorPreviewSource {
+export function resolveDirectorPreviewSource(input: { scene: DirectorScene | null; shot: DirectorShot | undefined; coverUrl?: string; failedUrl?: string | null; previewNodeId: string | undefined; readNodeContent: DirectorNodeContentReader }): DirectorPreviewSource {
+    const coverUrl = input.coverUrl?.trim();
+    if (coverUrl && coverUrl !== input.failedUrl) return { kind: "image", url: coverUrl };
     const fromMetadata = usableContent(input.readNodeContent, input.previewNodeId);
-    if (fromMetadata) return { kind: "image", url: fromMetadata };
+    if (fromMetadata && fromMetadata !== input.failedUrl) return { kind: "image", url: fromMetadata };
     const fromShot = usableContent(input.readNodeContent, input.shot?.previewNodeId);
-    if (fromShot) return { kind: "image", url: fromShot };
+    if (fromShot && fromShot !== input.failedUrl) return { kind: "image", url: fromShot };
     if (!input.scene) return { kind: "loading" };
     return { kind: "empty" };
 }

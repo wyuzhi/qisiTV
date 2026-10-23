@@ -20,6 +20,7 @@ export function normalizeVideoBoolean(value: unknown): "true" | "false" | undefi
 }
 
 export function normalizeVideoDuration(value: string | number | undefined) {
+    if (Number(value) === -1) return "-1";
     const seconds = Math.floor(Number(value) || VIDEO_DURATION_OPTIONS[0]);
     return String(Math.max(VIDEO_DURATION_MIN, seconds));
 }
@@ -65,16 +66,6 @@ export function videoResolutionComparisonKey(value: string | number | undefined)
     return /^\d+$/.test(normalized) ? `${normalized}p` : normalized.toLowerCase();
 }
 
-export function formatVideoResolutionLabel(value: string | number | undefined) {
-    const raw = String(value || "").trim();
-    if (!raw) return "";
-    const normalized = normalizeVideoResolution(raw);
-    if (normalized === "1440" || normalized.toLowerCase() === "2k") return "2K";
-    if (normalized === "2160" || normalized.toLowerCase() === "4k") return "4K";
-    if (/^\d+$/.test(normalized)) return `${normalized}P`;
-    return normalized.replace(/^(\d+)p/i, "$1P");
-}
-
 /** Sort display tiers without changing request values or moving opaque provider options. */
 export function sortVideoResolutionOptions(values: readonly string[]): string[] {
     const ranked = values.map((value) => ({
@@ -84,6 +75,16 @@ export function sortVideoResolutionOptions(values: readonly string[]): string[] 
     const ordered = ranked.filter((item) => item.tier !== undefined).sort((a, b) => a.tier! - b.tier!);
     let index = 0;
     return ranked.map((item) => item.tier === undefined ? item.value : ordered[index++].value);
+}
+
+export function formatVideoResolutionLabel(value: string | number | undefined) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const normalized = normalizeVideoResolution(raw);
+    if (normalized === "1440" || normalized.toLowerCase() === "2k") return "2K";
+    if (normalized === "2160" || normalized.toLowerCase() === "4k") return "4K";
+    if (/^\d+$/.test(normalized)) return `${normalized}P`;
+    return normalized.replace(/^(\d+)p/i, "$1P");
 }
 
 export function videoDimensionsForRatioAndResolution(ratio: string | undefined, resolution: string | number | undefined) {

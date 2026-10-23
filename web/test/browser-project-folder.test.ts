@@ -77,6 +77,47 @@ async function manifest(root: MemoryDirectory, name: string) {
     return JSON.parse(await (await (await root.getDirectoryHandle(name)).getFileHandle("project.qisitv.json")).blob.text()) as ProjectFolderManifest;
 }
 
+test("an engine-adopted folder refuses browser saving, export, and restored cache writes", async () => {
+    const f = fixture();
+    const storage = f.create();
+    await storage.pick();
+    const p = project();
+    const saved = await storage.persist(p);
+    const directory = await f.root.getDirectoryHandle(saved.directoryName);
+    const file = await directory.getFileHandle("project.qisitv.json");
+    const adopted = { ...JSON.parse(await file.blob.text()), formatVersion: 2, engineAuthority: { kind: "local-engine", canvasId: p.id, workspaceId: "engine-one" } };
+    file.blob = new Blob([JSON.stringify(adopted)]);
+    const before = await file.blob.text();
+    await expect(storage.persist({ ...p, revision: saved.revision, title: "stale browser edit" })).rejects.toThrow("引擎接管");
+    await expect(storage.exportFile(p.id, "export.png", new Blob(["bytes"]))).rejects.toThrow("引擎接管");
+    await expect(storage.assertWritable(p.id)).rejects.toThrow("引擎接管");
+    await expect(storage.restore()).rejects.toThrow("引擎接管");
+    expect(await file.blob.text()).toBe(before);
+});
+
+test("a migration fence blocks the legacy writer even when the original v1 manifest remains", async () => {
+    const f = fixture();
+    const storage = f.create();
+    await storage.pick();
+    const p = project();
+    const saved = await storage.persist(p);
+    const directory = await f.root.getDirectoryHandle(saved.directoryName);
+    const file = await directory.getFileHandle("project.qisitv.json");
+    const original = await file.blob.text();
+    const metadata = await directory.getDirectoryHandle(".qisitv", { create: true });
+    const fence = await metadata.getFileHandle("migration-pending.json", { create: true });
+    fence.blob = new Blob([JSON.stringify({ workspaceId: "engine-one", canvasId: p.id, sourceSha256: "original" })]);
+    expect(JSON.parse(original).formatVersion).toBe(1);
+    await expect(storage.persist({ ...p, revision: saved.revision, title: "stale edit" })).rejects.toThrow("开始迁移");
+    await expect(storage.assertWritable(p.id)).rejects.toThrow("开始迁移");
+    await expect(storage.exportFile(p.id, "result.png", new Blob(["bytes"]))).rejects.toThrow("开始迁移");
+    await expect(storage.restore()).rejects.toThrow("开始迁移");
+    const restarted = f.create();
+    await restarted.initialize();
+    await expect(restarted.restore()).rejects.toThrow("开始迁移");
+    expect(await file.blob.text()).toBe(original);
+});
+
 test("creates real per-project directories, commits media before manifest, and restores without browser cache", async () => {
     const f = fixture();
     const storage = f.create();

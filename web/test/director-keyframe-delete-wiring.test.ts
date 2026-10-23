@@ -63,10 +63,11 @@ describe("workbench 快捷键接线", () => {
         expect(workbench).not.toContain("isDirectorTextEntryTarget");
     });
 
-    test("只有动作真的执行了才 preventDefault", () => {
-        expect(effect).toContain("if (runShortcutRef.current(action)) event.preventDefault();");
-        // 不得无条件吞掉按键。
-        expect(effect).not.toContain("event.preventDefault();\n            if (!action)");
+    test("删除键始终由导演台消费，其他快捷键仍按执行结果处理", () => {
+        expect(effect).toContain('if (action.kind === "delete-selected")');
+        expect(effect).toContain("event.preventDefault();");
+        expect(effect).toContain("event.stopImmediatePropagation();");
+        expect(effect).toContain("if (handled) event.preventDefault();");
     });
 
     test("每个动作都落到已存在的真实执行路径", () => {
@@ -88,19 +89,18 @@ describe("workbench 快捷键接线", () => {
         expect(runner).toContain("if (!selectedObjectId && !selectedLightId && !selectedBone) return false;");
     });
 
-    test("dock 与场景列表点选后释放焦点：否则点完就再按不动 W/E/R/Delete", () => {
-        // 全局快捷键是本轮新增的，交互控件守卫会吃掉聚焦按钮上的按键。
-        // dock 承载 W/E/R 变换工具；场景列表承载「点选对象 -> 按 Delete」主流程。
-        const dockButton = slice(dock, "function DockButton(", "function DockDivider(");
-        expect(dockButton).toContain("releaseDirectorFocusAfterPointer(event)");
-        const sceneRow = slice(workbench, "function SceneRow(", "function AddMenuButton(");
+    test("扩展菜单各操作与场景列表点选后释放焦点，保留 W/E/R/Delete 快捷键", () => {
+        // 场景对象添加统一从场景面板进入；dock 菜单承载视图与工作台操作。
+        const toolMenu = slice(dock, "const toolMenuItems:", "return (");
+        expect((toolMenu.match(/releaseMenuFocus\(domEvent\.detail\)/g) || []).length).toBe(10);
+        const sceneRow = slice(workbench, "function SceneRow(", "function QuickAdd(");
         expect(sceneRow).toContain("releaseDirectorFocusAfterPointer(event)");
     });
 
     test("焦点释放规则集中在共享 helper，各按钮不自写 blur", () => {
         // 判据（keyboard detail === 0 保留焦点）必须只有一处，否则迟早走偏。
-        const dockButton = slice(dock, "function DockButton(", "function DockDivider(");
-        expect(dockButton).not.toContain("event.currentTarget.blur()");
+        expect(dock).toContain("releaseDirectorFocusAfterPointer({ detail, currentTarget: document.activeElement as HTMLElement })");
+        expect(dock).not.toContain("event.currentTarget.blur()");
         expect(workbench).not.toContain("if (event.detail !== 0) event.currentTarget.blur();");
     });
 
@@ -158,13 +158,11 @@ describe("时间轴关键帧入口可见、可选择、可键盘删除", () => {
 });
 
 describe("三类轨道都有删除入口，概览轨保持只读", () => {
-    test("摄影机行可删除，Camera Cut 概览轨只读", () => {
-        const cameraCut = slice(sequencer, 'label="Camera Cut"', "</SequencerRow>");
-        expect(cameraCut).toContain("<TrackKeys duration={duration} keys={cameraKeys} />");
-        expect(cameraCut).not.toContain("onDeleteKey");
-
-        const cameraRow = slice(sequencer, "{camera ? <SequencerRow label={camera.name}", "</SequencerRow> : null}");
+    test("主机位一级轨可删除关键帧，时间轴不重复渲染 Camera Cut 概览轨", () => {
+        const cameraRow = slice(sequencer, '<MainTrackLabel name="主机位"', "{cameraKeys.length &&");
+        expect(cameraRow).toContain("<TrackKeys duration={duration} keys={cameraKeys}");
         expect(cameraRow).toContain("onDeleteKey={deleteTrackKey}");
+        expect(sequencer).not.toContain('label="Camera Cut"');
     });
 
     test("摄影机关键帧带 camera 删除目标", () => {

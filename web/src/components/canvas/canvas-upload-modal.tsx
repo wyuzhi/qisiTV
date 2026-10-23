@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { App, Button, Upload, type UploadFile } from "antd";
+import { App, Button, Input, Upload, type UploadFile } from "antd";
+import { Select } from "@/components/ui/base/select";
+import { isReferenceHTTPSLink } from "@/services/api/reference-link-replacement";
 import { AppModal } from "@/components/ui/product/app-modal";
 import { FileImage, FileText, Film, Music2, UploadCloud, X } from "lucide-react";
 
@@ -11,17 +13,29 @@ type CanvasUploadModalProps = {
     open: boolean;
     onClose: () => void;
     onUpload: (files: File[]) => Promise<boolean>;
+    onImportUrl: (url: string,kind: "image" | "video" | "audio") => Promise<boolean>;
 };
 
-export function CanvasUploadModal({ open, onClose, onUpload }: CanvasUploadModalProps) {
+export function CanvasUploadModal({ open, onClose, onUpload, onImportUrl }: CanvasUploadModalProps) {
     const { message } = App.useApp();
     const [fileList, setFileList] = useState<UploadFile[]>([]);
     const [uploading, setUploading] = useState(false);
+    const [url,setUrl] = useState("");
+    const [kind,setKind] = useState<"image" | "video" | "audio">("image");
+    const submitUrl = async () => {
+        if(!isReferenceHTTPSLink(url)) return;
+        setUploading(true);
+        try { if(await onImportUrl(url.trim(),kind)) { setUrl(""); onClose(); } }
+        catch(error) { message.error(error instanceof Error ? error.message : "链接添加失败"); }
+        finally { setUploading(false); }
+    };
 
     useEffect(() => {
         if (!open) {
             setFileList([]);
             setUploading(false);
+            setUrl("");
+            setKind("image");
         }
     }, [open]);
 
@@ -56,8 +70,8 @@ export function CanvasUploadModal({ open, onClose, onUpload }: CanvasUploadModal
             <div className="flex min-h-96 flex-col overflow-hidden">
                 <header className="flex h-14 shrink-0 items-center justify-between border-b border-border py-0 pl-5 pr-12">
                     <div className="min-w-0">
-                        <div role="heading" aria-level={2} className="text-sm font-semibold leading-5">上传文件</div>
-                        <div className="mt-0.5 text-[var(--fs-label)] leading-4 text-foreground/45">批量导入图片、视频、音频和文本到当前画布</div>
+                        <div role="heading" aria-level={2} className="text-sm font-semibold leading-5">添加素材</div>
+                        <div className="mt-0.5 text-[var(--fs-label)] leading-4 text-foreground/60">导入本地文件或在线素材</div>
                     </div>
                     <span className="shrink-0 text-[var(--fs-label)] text-foreground/45">已选 {fileList.length} 项</span>
                 </header>
@@ -119,6 +133,15 @@ export function CanvasUploadModal({ open, onClose, onUpload }: CanvasUploadModal
                     ) : null}
                 </section>
 
+                <section className="space-y-3 border-t border-border p-4" data-canvas-no-zoom>
+                    <label className="block text-sm" htmlFor="canvas-media-url">在线素材地址</label>
+                    <div className="flex min-w-0 flex-wrap gap-2">
+                        <Select ariaLabel="素材类型" value={kind} options={[{value:"image",label:"图片"},{value:"video",label:"视频"},{value:"audio",label:"音频"}]} onChange={value=>setKind(value === "video" ? "video" : value === "audio" ? "audio" : "image")} />
+                        <Input id="canvas-media-url" className="min-w-0 flex-1" value={url} onChange={event=>setUrl(event.target.value)} placeholder="https://…" disabled={uploading} autoComplete="off"/>
+                        <Button onClick={()=>void submitUrl()} disabled={!isReferenceHTTPSLink(url)} loading={uploading}>添加链接</Button>
+                    </div>
+                    <p className="text-xs leading-5 text-foreground/60">保留原始网址用于生成，请使用服务商可直接读取的 HTTPS 素材链接。</p>
+                </section>
                 <footer className="flex h-14 shrink-0 items-center justify-between border-t border-border px-4">
                     <span className="hidden text-[var(--fs-label)] text-foreground/45 sm:inline">文件将在确认后按顺序添加到画布</span>
                     <div className="ml-auto flex gap-2">

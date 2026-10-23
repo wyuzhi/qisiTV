@@ -61,5 +61,8 @@ func lockInstall(path string) (func(), error) {
 		_ = file.Close()
 		return nil, err
 	}
+	// Keep this stable inode: older helpers can already have opened it before
+	// flock. Unlinking would let them lock an orphan while a new helper locks
+	// its replacement. The empty lock is shared coordination, not update data.
 	return func() { _ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN); _ = file.Close() }, nil
 }

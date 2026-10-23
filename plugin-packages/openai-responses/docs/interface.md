@@ -86,12 +86,16 @@
 | --- | --- |
 | `response.status` | `"succeeded"` |
 | `response.textPaths[0]` | `"output_text"` |
+| `response.textPaths[1]` | `"output.*.content.*.text"` |
 | `response.reasoningPaths[0]` | `"reasoning.summary.0.text"` |
+| `response.reasoningPaths[1]` | `"output.*.summary.*.text"` |
 | `response.usage` | `{"$ref":"response.usage"}` |
 | `response.errorPaths[0]` | `"error.code"` |
 | `response.messagePaths[0]` | `"error.message"` |
 | `agentResponse.textPaths[0]` | `"output_text"` |
+| `agentResponse.textPaths[1]` | `"output.*.content.*.text"` |
 | `agentResponse.reasoningPaths[0]` | `"reasoning.summary.0.text"` |
+| `agentResponse.reasoningPaths[1]` | `"output.*.summary.*.text"` |
 | `agentResponse.toolCallsPath` | `"output"` |
 | `agentResponse.toolCallIdPaths[0]` | `"call_id"` |
 | `agentResponse.toolCallIdPaths[1]` | `"id"` |
@@ -99,6 +103,8 @@
 | `agentResponse.toolCallArgumentsPaths[0]` | `"arguments"` |
 
 ## 响应与错误
+
+标准 Responses 文本位于 `output` 数组中的 message content；顶层 `output_text` 在官方 SDK 中是便利属性，不能假设所有 HTTP 响应都有该字段。插件保留顶层兼容读取，并按数组顺序收集文本与推理摘要，不依赖第一个 output item 的类型。参见 [OpenAI 官方文本生成文档](https://developers.openai.com/api/docs/guides/text)。
 
 插件把上游 task/status/text/media/usage 映射为统一结果。临时媒体 URL 标记为 ephemeral，由宿主立即下载持久化。HTTP 错误、业务 code 和 error object 保持失败语义，不包装成成功。
 
@@ -113,7 +119,7 @@
 
 ```json
 {
-  "apiVersion": "qisitv.plugin/v2",
+  "apiVersion": "beeftv.plugin/v2",
   "id": "openai-responses",
   "name": "OpenAI Responses",
   "version": "2.0.0",
@@ -350,10 +356,12 @@
         "response": {
           "status": "succeeded",
           "textPaths": [
-            "output_text"
+            "output_text",
+            "output.*.content.*.text"
           ],
           "reasoningPaths": [
-            "reasoning.summary.0.text"
+            "reasoning.summary.0.text",
+            "output.*.summary.*.text"
           ],
           "usage": {
             "$ref": "response.usage"
@@ -367,10 +375,12 @@
         },
         "agentResponse": {
           "textPaths": [
-            "output_text"
+            "output_text",
+            "output.*.content.*.text"
           ],
           "reasoningPaths": [
-            "reasoning.summary.0.text"
+            "reasoning.summary.0.text",
+            "output.*.summary.*.text"
           ],
           "toolCallsPath": "output",
           "toolCallIdPaths": [

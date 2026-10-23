@@ -15,10 +15,14 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"qisitv/backend/internal/bootstrap"
+
+	"github.com/wailsapp/wails/v2/pkg/options/windows"
 )
 
-// This catches desktop-shell regressions where Wails opens before the local
-// backend has a usable loopback URL and ephemeral launch token.
+// The local backend must expose a usable loopback URL and ephemeral launch
+// token before the frontend can make its first authenticated API request.
 func TestDesktopAppStartsRuntimeOnLoopback(t *testing.T) {
 	app := newDesktopApp(t.TempDir())
 	if err := app.start(context.Background()); err != nil {
@@ -119,6 +123,24 @@ func TestDefaultDataDirHonorsExplicitDesktopOverride(t *testing.T) {
 	}
 }
 
+func TestDefaultDataDirLaunchArgumentUsesIsolatedProfile(t *testing.T) {
+	original := os.Args
+	t.Cleanup(func() { os.Args = original })
+	want := filepath.Join(t.TempDir(), "isolated profile")
+	t.Setenv("CANVAS_DESKTOP_DATA_DIR", filepath.Join(t.TempDir(), "other-profile"))
+	os.Args = []string{"BeefTV", "--data-dir=" + want}
+	got, err := defaultDataDir()
+	if err != nil || got != want {
+		t.Fatalf("isolated profile: got %q, err %v", got, err)
+	}
+	for _, invalid := range []string{"", "relative", string(filepath.Separator)} {
+		os.Args = []string{"BeefTV", "--data-dir=" + invalid}
+		if _, err := defaultDataDir(); err == nil {
+			t.Fatalf("accepted unsafe profile %q", invalid)
+		}
+	}
+}
+
 func TestDesktopStartupHookStartsRuntimeBeforeFrontendBootstrap(t *testing.T) {
 	app := newDesktopApp(t.TempDir())
 	app.startup(context.Background())
@@ -129,15 +151,22 @@ func TestDesktopStartupHookStartsRuntimeBeforeFrontendBootstrap(t *testing.T) {
 	app.shutdown(context.Background())
 }
 
-func TestPrepareDesktopAppStartsRuntimeBeforeWailsMainLoop(t *testing.T) {
+func TestPrepareDesktopAppStartsRuntimeAndClearsPreviousStartupError(t *testing.T) {
 	app := newDesktopApp(t.TempDir())
+	startupErrorPath := filepath.Join(app.dataDir, "startup-error.log")
+	if err := os.WriteFile(startupErrorPath, []byte("previous startup error\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := prepareDesktopApp(app); err != nil {
 		t.Fatal(err)
 	}
 	defer app.stop(context.Background())
 	config := app.RuntimeConfig()
 	if config.BaseURL == "" || config.LaunchToken == "" {
-		t.Fatalf("desktop app was not ready before Wails main loop: %#v", config)
+		t.Fatalf("desktop app did not prepare the runtime: %#v", config)
+	}
+	if _, err := os.Stat(startupErrorPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("successful startup retained previous error: %v", err)
 	}
 }
 
@@ -148,8 +177,22 @@ func TestDesktopAppBoundMethodsStayTiny(t *testing.T) {
 		names = append(names, typ.Method(i).Name)
 	}
 	sort.Strings(names)
-	if !reflect.DeepEqual(names, []string{"CheckForUpdate", "DownloadUpdate", "InstallUpdate", "RuntimeConfig", "SaveOwnedArtifact", "SaveOwnedMedia", "UpdateStatus"}) {
+	if !reflect.DeepEqual(names, []string{"CheckForUpdate", "ChooseStorageDirectory", "CleanupPreviousStorage", "ConfirmUpdateStartup", "ConsumeSkillLink", "DepthComponentStatus", "DownloadDepthComponents", "DownloadUpdate", "InstallUpdate", "MigrateStorage", "OpenBeefTVGitHub", "OpenBeefTVWebsite", "OpenBeefTVX", "OpenSkillMarketURL", "OpenUpdateLogDirectory", "PauseDepthComponentDownload", "ReferenceStorageSettings", "ReferenceUploadStatus", "RuntimeConfig", "SaveOwnedArchive", "SaveOwnedArtifact", "SaveOwnedMedia", "SaveReferenceStorage", "StorageMigrationStatus", "StorageSettings", "TestReferenceStorage", "UpdateStatus", "UploadReferenceMedia"}) {
 		t.Fatalf("bound methods = %v", names)
+	}
+}
+
+func TestDesktopAppOptionsUseDarkNativeChrome(t *testing.T) {
+	app := newDesktopApp(t.TempDir())
+	opts := desktopAppOptions(app)
+	if opts.BackgroundColour == nil || opts.BackgroundColour.R != 13 || opts.BackgroundColour.G != 15 || opts.BackgroundColour.B != 18 || opts.BackgroundColour.A != 255 {
+		t.Fatalf("background colour = %#v, want dark workspace surface", opts.BackgroundColour)
+	}
+	if opts.Windows == nil || opts.Windows.Theme != windows.Dark || opts.Windows.CustomTheme == nil {
+		t.Fatalf("windows options = %#v, want dark native titlebar theme", opts.Windows)
+	}
+	if opts.Windows.CustomTheme.DarkModeTitleBar != windows.RGB(13, 15, 18) || opts.Windows.CustomTheme.DarkModeTitleBarInactive != windows.RGB(13, 15, 18) {
+		t.Fatalf("windows custom titlebar = %#v, want #0d0f12", opts.Windows.CustomTheme)
 	}
 }
 
@@ -165,6 +208,40 @@ func TestSaveOwnedMediaCancelReturnsNoError(t *testing.T) {
 	saved, err := app.SaveOwnedMedia("clip.mp4", "owned-id")
 	if err != nil || saved || copied {
 		t.Fatalf("cancelled save = saved:%v err:%v copied:%v", saved, err, copied)
+	}
+}
+
+func TestMediaSaveDialogSuppliesDefaultFileType(t *testing.T) {
+	for _, ext := range []string{"mp4", "png", "jpg", "webp", "mov", "wav", "m4a", "zip", "glb"} {
+		for _, platform := range []string{"windows", "darwin"} {
+			t.Run(platform+"/"+ext, func(t *testing.T) {
+				name := "中文素材_20261001." + ext
+				options := mediaSaveDialogOptions(name, platform)
+				if options.DefaultFilename != name || options.Title != "保存文件" || len(options.Filters) != 1 || options.Filters[0].Pattern != "*."+ext || options.Filters[0].DisplayName == "" {
+					t.Fatalf("save dialog must supply the actual format as its default filter: %+v", options)
+				}
+			})
+		}
+	}
+	for _, tc := range []struct{ input, name, pattern string }{
+		{`../clip:name.MP4`, "clip_name.MP4", "*.MP4"},
+		{"a.b.mp4", "a.b.mp4", "*.mp4"},
+		{strings.Repeat("好", 100) + ".mp4", strings.Repeat("好", 58) + ".mp4", "*.mp4"},
+	} {
+		options := mediaSaveDialogOptions(bootstrap.SanitizeSaveFileName(tc.input), "windows")
+		if options.DefaultFilename != tc.name || len(options.Filters) != 1 || options.Filters[0].Pattern != tc.pattern {
+			t.Fatalf("sanitized %q: %+v", tc.input, options)
+		}
+	}
+	options := mediaSaveDialogOptions("未命名文件", "windows")
+	if len(options.Filters) != 0 {
+		t.Fatalf("must not invent a format for an extensionless artifact: %+v", options)
+	}
+	for _, platform := range []string{"linux"} {
+		options := mediaSaveDialogOptions("clip.mp4", platform)
+		if options.DefaultFilename != "clip.mp4" || len(options.Filters) != 0 {
+			t.Fatalf("must preserve the existing %s dialog options: %+v", platform, options)
+		}
 	}
 }
 

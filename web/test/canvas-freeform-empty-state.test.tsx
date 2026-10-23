@@ -36,13 +36,6 @@ describe("qisiTV freeform canvas empty state", () => {
         expect(markup).not.toContain("音频生视频");
     });
 
-    test("constrains the empty-state hint when the Agent dock is open", () => {
-        const markup = renderToStaticMarkup(<CanvasFreeformEmptyState commands={commands} agentOpen />);
-        expect(markup).toContain('width:calc(100% - 340px)');
-        expect(markup).not.toContain("SD 2.5");
-        expect(markup).not.toContain("全能参考生视频");
-    });
-
     test("renders the minimal empty text node state", () => {
         const node: CanvasNodeData = { id: "text-1", type: CanvasNodeType.Text, title: "文本节点 1", position: { x: 0, y: 0 }, width: 350, height: 350, metadata: { content: "", status: "idle" } };
         const markup = renderToStaticMarkup(<CanvasNodeContent node={node} theme={canvasThemes.dark} isEditingContent={false} textareaRef={createRef<HTMLTextAreaElement>()} isBatchRoot={false} batchCount={0} batchExpanded={false} batchOpening={false} batchRecovering={false} onContentChange={() => {}} onStopEditing={() => {}} mentionReferences={[]} />);
@@ -73,10 +66,31 @@ describe("qisiTV freeform canvas empty state", () => {
             },
         };
         const labels = resolveAddNodeMenuCommands(context).filter((command) => command.section === "node").slice(0, 8).map((command) => command.label);
-        expect(labels).toEqual(["文本", "图片", "视频", "音频", "智能剪辑", "导演台", "逐帧拉片", "脚本"]);
+        expect(labels).toEqual(["文本", "图片", "视频", "AI超分", "音频", "导演台", "智能剪辑", "逐帧拉片"]);
         const commandsByLabel = new Map(resolveAddNodeMenuCommands(context).map((command) => [command.label, command]));
-        for (const label of ["智能剪辑", "导演台", "逐帧拉片", "脚本"]) {
+        for (const label of ["智能剪辑", "逐帧拉片", "脚本"]) {
             expect(commandsByLabel.get(label)?.disabledReason).toBe("正在开发");
         }
+    });
+
+    test("opens the existing director templates from the professional add-node menu", () => {
+        let opened = false;
+        const noop = () => {};
+        const context: AddNodeMenuContext = {
+            workspaceMode: "professional",
+            isProjectLinked: false,
+            handlers: {
+                onAddText: noop, onAddImage: noop, onAddVideo: noop, onAddAudio: noop, onAddScript: noop,
+                onAddFrame: noop, onAddFolder: noop, onAddDrawing: noop, onAddWorkflow: noop, onAddExtensionNode: noop,
+                onChooseStyle: noop, onOpenDirector: () => { opened = true; }, onUpload: noop, onOpenMyAssets: noop, onOpenProjectCharacters: noop,
+            },
+        };
+        const director = resolveAddNodeMenuCommands(context).find((command) => command.id === "director");
+        expect(director).toBeDefined();
+        expect(director?.disabledReason).toBeUndefined();
+        expect(director?.badge).toBeUndefined();
+        director?.run(context);
+        expect(opened).toBe(true);
+        expect(resolveAddNodeMenuCommands({ ...context, workspaceMode: "simple" }).some((command) => command.id === "director")).toBe(false);
     });
 });

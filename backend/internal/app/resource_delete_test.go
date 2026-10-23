@@ -197,7 +197,7 @@ func TestDeleteAssetKeepsResourceSharedByIndependentAsset(t *testing.T) {
 	}
 }
 
-func TestDeleteAssetStillRejectsLiveCanvasResourceReference(t *testing.T) {
+func TestDeleteAssetKeepsLiveCanvasResourceReference(t *testing.T) {
 	svc, db, _ := newResourceDeletionTestService(t)
 	resource := model.Resource{ID: "resource-canvas", UserID: "user-1", Provider: "local", ObjectKey: "users/user-1/image/canvas.png", Status: model.ResourceStatusReady}
 	asset := model.Asset{ID: "asset-canvas", UserID: "user-1", Title: "画布素材", PayloadJSON: `{"data":{"storageKey":"resource:resource-canvas"}}`}
@@ -208,9 +208,8 @@ func TestDeleteAssetStillRejectsLiveCanvasResourceReference(t *testing.T) {
 		}
 	}
 
-	err := svc.DeleteUserAsset("user-1", asset.ID)
-	if err == nil || !strings.Contains(err.Error(), "画布「仍在使用的画布」") {
-		t.Fatalf("DeleteUserAsset() error = %v, want live canvas reference", err)
+	if err := svc.DeleteUserAsset("user-1", asset.ID); err != nil {
+		t.Fatalf("DeleteUserAsset() error = %v", err)
 	}
 
 	var assetCount, resourceCount int64
@@ -220,8 +219,8 @@ func TestDeleteAssetStillRejectsLiveCanvasResourceReference(t *testing.T) {
 	if err := db.Model(&model.Resource{}).Where("id = ?", resource.ID).Count(&resourceCount).Error; err != nil {
 		t.Fatal(err)
 	}
-	if assetCount != 1 || resourceCount != 1 {
-		t.Fatalf("blocked delete changed data: asset=%d resource=%d", assetCount, resourceCount)
+	if assetCount != 0 || resourceCount != 1 {
+		t.Fatalf("delete must retain referenced resource: asset=%d resource=%d", assetCount, resourceCount)
 	}
 }
 
@@ -271,19 +270,18 @@ func TestDeleteGeneratedAssetTaskReferences(t *testing.T) {
 			if err != nil || len(remaining) != 1 {
 				t.Fatalf("automatic cleanup must keep task output: resources=%v, error=%v", remaining, err)
 			}
-			err = svc.DeleteUserAsset("user-1", asset.ID)
-			if (err != nil) != tc.block {
-				t.Fatalf("DeleteUserAsset() = %v, want blocked=%v", err, tc.block)
+			if err := svc.DeleteUserAsset("user-1", asset.ID); err != nil {
+				t.Fatalf("DeleteUserAsset() = %v", err)
 			}
-			wantRemaining, wantJobs := int64(0), int64(1)
+			wantResource, wantJobs := int64(0), int64(1)
 			if tc.block {
-				wantRemaining, wantJobs = 1, 0
+				wantResource, wantJobs = 1, 0
 			}
 			for _, check := range []struct {
 				model any
 				want  int64
 			}{
-				{&model.Asset{}, wantRemaining}, {&model.Resource{}, wantRemaining},
+				{&model.Asset{}, 0}, {&model.Resource{}, wantResource},
 				{&model.ResourceDeletionJob{}, wantJobs},
 				{&model.Task{}, 1}, {&model.TaskLog{}, 1}, {&model.Result{}, 1},
 			} {
@@ -331,7 +329,7 @@ func TestResourceDeletionWorkerRemovesObjectAndCompletesOutbox(t *testing.T) {
 	}
 }
 
-func TestExpiredArchivedAssetCleanupRespectsCanvasReferencesAndUsesDeletionOutbox(t *testing.T) {
+func TestExpiredArchivedAssetCleanupRetainsCanvasMedia(t *testing.T) {
 	svc, db, _ := newResourceDeletionTestService(t)
 	old := time.Now().Add(-45 * 24 * time.Hour)
 	resource := model.Resource{
@@ -364,14 +362,16 @@ func TestExpiredArchivedAssetCleanupRespectsCanvasReferencesAndUsesDeletionOutbo
 	if err := db.Model(&model.ResourceDeletionJob{}).Where("resource_id = ?", resource.ID).Count(&jobCount).Error; err != nil {
 		t.Fatal(err)
 	}
-	if assetCount != 1 || resourceCount != 1 || jobCount != 0 {
-		t.Fatalf("referenced archived asset cleanup changed data: asset=%d resource=%d jobs=%d", assetCount, resourceCount, jobCount)
+	if assetCount != 0 || resourceCount != 1 || jobCount != 0 {
+		t.Fatalf("archived asset cleanup must retain referenced media: asset=%d resource=%d jobs=%d", assetCount, resourceCount, jobCount)
 	}
 
 	if err := db.Delete(&model.CanvasProject{}, "id = ? AND user_id = ?", canvas.ID, canvas.UserID).Error; err != nil {
 		t.Fatal(err)
 	}
-	svc.cleanupExpiredArchivedAssets()
+	if err := svc.cleanupDetachedUserResources("user-1", []model.Resource{resource}); err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Model(&model.Asset{}).Where("id = ?", asset.ID).Count(&assetCount).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +382,7 @@ func TestExpiredArchivedAssetCleanupRespectsCanvasReferencesAndUsesDeletionOutbo
 		t.Fatal(err)
 	}
 	if assetCount != 0 || resourceCount != 0 || jobCount != 1 {
-		t.Fatalf("unreferenced archived asset did not use deletion outbox: asset=%d resource=%d jobs=%d", assetCount, resourceCount, jobCount)
+		t.Fatalf("unreferenced media did not use deletion outbox: asset=%d resource=%d jobs=%d", assetCount, resourceCount, jobCount)
 	}
 }
 

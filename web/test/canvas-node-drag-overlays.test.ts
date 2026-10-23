@@ -23,7 +23,7 @@ describe("canvas node drag overlays", () => {
         expect(projectSource).toContain("emotionNode?.metadata?.content && !isCanvasNodeMoving");
         expect(projectSource).toContain("selectedNodeBounds && !selectionBox && !isCanvasNodeMoving");
         expect(projectSource).toContain(
-            "node={assistantOpen || isCanvasNodeMoving || nodeImageSettingsOpen || annotationNodeId || maskEditNodeId || emotionNodeId || angleNodeId || (dialogNode && !isCanvasMediaResultNode(dialogNode)) || textEditorNodeId ? null : toolbarNode}",
+            "node={isCanvasNodeMoving || nodeImageSettingsOpen || annotationNodeId || maskEditNodeId || emotionNodeId || angleNodeId || (dialogNode && !isCanvasMediaResultNode(dialogNode)) || textEditorNodeId ? null : toolbarNode}",
         );
         expect(projectSource).toContain("onNodeDragEnd: handleNodeDragEnd");
         expect(projectSource).toContain("setDialogNodeId(node.id);");

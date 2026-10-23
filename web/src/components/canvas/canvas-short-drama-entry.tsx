@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Dropdown } from "antd";
-import { AlignLeft, ArrowRight, AudioLines, Bot, Check, ChevronDown, ChevronUp, CircleUserRound, Clapperboard, FolderKanban, ImagePlus, Images, MoreHorizontal, MousePointer2, Palette, Pencil, Plus, PlusCircle, ScanLine, Sparkles, Type, Upload, Video, X } from "lucide-react";
+import { AlignLeft, ArrowRight, AudioLines, Check, ChevronDown, ChevronUp, CircleUserRound, Clapperboard, FolderKanban, ImagePlus, Images, MoreHorizontal, MousePointer2, Palette, Pencil, Plus, PlusCircle, ScanLine, Sparkles, Type, Upload, Video, X } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import type { CanvasCreateCommand } from "@/components/canvas/canvas-create-menu";
@@ -24,9 +24,8 @@ export function CanvasLinkedProjectEmptyState({ projectName, hasChapter, onAddFi
     );
 }
 
-export function CanvasShortDramaEmptyState({ onCreatePipeline, onOpenAgent, onStartFreeform, onUpload, onAddText, onAddScript }: {
+export function CanvasShortDramaEmptyState({ onCreatePipeline, onStartFreeform, onUpload, onAddText, onAddScript }: {
     onCreatePipeline: () => void;
-    onOpenAgent?: () => void;
     onStartFreeform: () => void;
     onUpload: () => void;
     onAddText: () => void;
@@ -41,7 +40,7 @@ export function CanvasShortDramaEmptyState({ onCreatePipeline, onOpenAgent, onSt
                     <h2 className="text-lg font-semibold">从哪里开始？</h2>
                     <p className="mt-1 text-sm" style={{ color: theme.node.muted }}>选择一条主路径，之后仍可随时切换。</p>
                 </div>
-                <div className={`grid gap-3 ${onOpenAgent ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
+                <div className="grid gap-3 md:grid-cols-2">
                     <PathCard
                         icon={<Clapperboard className="size-5" />}
                         title="自己创作"
@@ -52,16 +51,6 @@ export function CanvasShortDramaEmptyState({ onCreatePipeline, onOpenAgent, onSt
                         focusStyle={focusStyle}
                         onClick={onCreatePipeline}
                     />
-                    {onOpenAgent ? <PathCard
-                        icon={<Bot className="size-5" />}
-                        title="交给 Agent"
-                        description="用一句话描述题材、角色和核心冲突。"
-                        action="一句话生成影视项目"
-                        accent={theme.node.activeStroke}
-                        theme={theme}
-                        focusStyle={focusStyle}
-                        onClick={onOpenAgent}
-                    /> : null}
                     <PathCard
                         icon={<Plus className="size-5" />}
                         title="自由空白画布"
@@ -94,7 +83,7 @@ export function CanvasShortDramaEmptyState({ onCreatePipeline, onOpenAgent, onSt
     );
 }
 
-export function CanvasFreeformEmptyState({ commands, agentOpen = false }: { commands: CanvasCreateCommand[]; agentOpen?: boolean }) {
+export function CanvasFreeformEmptyState({ commands, onOpenAssistant }: { commands: CanvasCreateCommand[]; onOpenAssistant?: () => void }) {
     const theme = canvasThemes[useActiveTheme()];
     const [connectionsHintOpen, setConnectionsHintOpen] = useState(true);
     useEffect(() => {
@@ -120,7 +109,7 @@ export function CanvasFreeformEmptyState({ commands, agentOpen = false }: { comm
     const showQuickStarts = false;
     return (
         <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center px-4 pb-20 pt-24">
-            <div className="pointer-events-auto flex w-full max-w-[984px] flex-col items-center justify-center text-center" style={{ color: theme.node.text, width: agentOpen ? "calc(100% - 340px)" : undefined }}>
+            <div className="pointer-events-none select-none flex w-full max-w-[984px] flex-col items-center justify-center text-center" style={{ color: theme.node.text }}>
                 <div className="relative -top-2 flex items-center justify-center gap-1.5 text-sm font-medium tracking-tight">
                     <span className="relative inline-grid size-5 place-items-center" aria-hidden="true">
                         <PlusCircle className="size-[18px] opacity-80" />
@@ -128,6 +117,17 @@ export function CanvasFreeformEmptyState({ commands, agentOpen = false }: { comm
                     </span>
                     <span>双击画布 <span className="mx-1 opacity-45">·</span> 自由生成节点</span>
                 </div>
+                {onOpenAssistant ? (
+                    <button
+                        type="button"
+                        className="mt-1.5 rounded-md px-2.5 py-1 text-xs opacity-70 transition-opacity hover:opacity-100"
+                        style={{ color: theme.node.muted }}
+                        onDoubleClick={(event) => event.stopPropagation()}
+                        onClick={onOpenAssistant}
+                    >
+                        或让助手搭个草案 <span className="ml-1 opacity-70">⌘J</span>
+                    </button>
+                ) : null}
                 {showQuickStarts ? <div className="mt-6 grid w-full max-w-[984px] grid-cols-2 gap-2 sm:grid-cols-4">
                     {quickStarts.map((item) => {
                         const command = commandById.get(item.commandId);
@@ -148,7 +148,7 @@ export function CanvasFreeformEmptyState({ commands, agentOpen = false }: { comm
                                 <span className="grid size-9 shrink-0 place-items-center rounded-md" style={{ color: "#fff", background: item.accent, boxShadow: `0 6px 16px ${item.accent}33` }}>{item.icon}</span>
                                 <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
                                     <span className="min-w-0 text-xs font-medium leading-4 sm:truncate">{item.label}</span>
-                                    {(command.disabledReason ? "正在开发" : item.badge) && !agentOpen ? <span className="shrink-0 rounded bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-medium max-[480px]:hidden" style={{ color: theme.node.muted }}>{command.disabledReason ? "正在开发" : item.badge}</span> : null}
+                                    {(command.disabledReason ? "正在开发" : item.badge) ? <span className="shrink-0 rounded bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-medium max-[480px]:hidden" style={{ color: theme.node.muted }}>{command.disabledReason ? "正在开发" : item.badge}</span> : null}
                                 </span>
                             </button>
                         );

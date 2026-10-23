@@ -7,9 +7,9 @@ import (
 	"qisitv/backend/internal/workspace"
 )
 
-// UseLikeAIOnly is applied by the local application composition root before
-// workers start. Historical protocol adapters remain available to data tooling.
-func (s *Service) UseLikeAIOnly() { s.likeAIOnly = true }
+// Kept for older composition roots. qisiTV supports independent assistant and
+// media channels; selecting a preferred service must not disable other tools.
+func (s *Service) UseLikeAIOnly() {}
 
 func validLikeAIBaseURL(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
@@ -19,11 +19,11 @@ func validLikeAIBaseURL(raw string) bool {
 }
 
 func (s *Service) requireActiveProvider(protocol, baseURL string) error {
-	if !s.likeAIOnly {
+	if !isLikeAIProtocol(protocol) {
 		return nil
 	}
-	if !isLikeAIProtocol(protocol) || !validLikeAIBaseURL(baseURL) {
-		return BadAuthRequest("当前 qisiTV 仅支持 LikeAI，请在模型设置中选择 LikeAI 模型")
+	if !validLikeAIBaseURL(baseURL) && baseURL != "https://cheeser.link/api-service/likeai" {
+		return BadAuthRequest("LikeAI 协议仅允许官方 LikeAI 或 qisi API 地址")
 	}
 	return nil
 }
@@ -34,12 +34,11 @@ func (s *Service) requireActiveTaskProvider(input map[string]any) error {
 }
 
 func (s *Service) requireActiveCatalogProvider(input *ChannelModelsRequest) error {
-	if !s.likeAIOnly {
+	if input.APIFormat != "likeai" {
 		return nil
 	}
-	if input.APIFormat != "likeai" || (input.ChannelID != "" && input.ChannelID != "likeai") ||
-		(input.BaseURL != "" && !validLikeAIBaseURL(input.BaseURL)) {
-		return BadAuthRequest("当前 qisiTV 仅支持 LikeAI 模型目录")
+	if input.BaseURL != "" {
+		return s.requireActiveProvider("likeai-image", input.BaseURL)
 	}
 	input.BaseURL = workspace.LikeAIBaseURL
 	return nil

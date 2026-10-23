@@ -1,3 +1,4 @@
+import { isBeefAPIEndpoint } from "@/lib/beefapi-video-contracts";
 import { apiBaseURL } from "@/services/api/request";
 import { isSystemProxyBaseUrl, MANAGED_BEEFAPI_CREDENTIAL_REF, type AiConfig, type ChannelHeader } from "@/stores/use-config-store";
 
@@ -12,7 +13,7 @@ export type ChannelRequest = {
 function isManagedEnterpriseRelay(config: Pick<RelayConfig, "baseUrl" | "credentialRef">) {
     if (config.credentialRef === MANAGED_BEEFAPI_CREDENTIAL_REF) return true;
     try {
-        return new URL((config.baseUrl || "").trim()).hostname.toLowerCase() === "enterprise.beefapi.com";
+        return isBeefAPIEndpoint(config.baseUrl || "");
     } catch {
         return false;
     }

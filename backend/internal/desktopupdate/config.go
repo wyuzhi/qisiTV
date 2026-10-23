@@ -18,8 +18,15 @@ var (
 const (
 	helperFlag      = "--qisitv-update-helper"
 	appBundleName   = "qisiTV.app"
+	linuxBundleName = "qisiTV-linux"
 	windowsExeName  = "qisiTV.exe"
 	pluginDirName   = "plugin-packages"
+	// 随包 CLI：外部 Agent 的接入入口，升级包里必须带上，否则升级一次就断了接入。
+	// 它必须待在自己的 cli 目录里：macOS 与 Windows 的文件名都不分大小写，
+	// qisitv 直接放在主程序旁边会和 qisiTV / qisiTV.exe 撞成同一个文件。
+	cliDirName      = "cli"
+	darwinCLIName   = "qisitv"
+	windowsCLIName  = "qisitv.exe"
 	pluginExtension = ".qisitv-plugin"
 	payloadSchema   = 1
 	maxFeedBytes    = 1 << 20
@@ -52,6 +59,8 @@ func CurrentPlatform() (string, error) {
 		return "darwin-amd64", nil
 	case "windows-amd64":
 		return "windows-amd64", nil
+	case "linux-amd64":
+		return "linux-amd64", nil
 	default:
 		return "", ErrUnsupported
 	}

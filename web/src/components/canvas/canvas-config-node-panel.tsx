@@ -4,13 +4,40 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { ChevronDown, Dice5, Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Sparkles, Video, Workflow as WorkflowIcon } from "lucide-react";
 
 import { Switch } from "@/components/ui/base/switch";
+import { isSeedance25Model } from "@/lib/model-capabilities";
+import { isH3Model, h3VideoOperation } from "@/lib/h3-video";
+import { CanvasH3Controls, CanvasH3UnsupportedFrames } from "./canvas-h3-controls";
+import { resolveVideoOperation } from "@/lib/model-selection";
 
-import { configuredModelMatchesCapability, defaultConfig, modelOptionName, normalizeRunningHubCapability, resolveModelChannel, useEffectiveConfig, type AiConfig, type RunningHubCapability, type RunningHubWorkflow, type RunningHubWorkflowKind } from "@/stores/use-config-store";
-import { resolveAudioSpeechSettings } from "@/lib/audio-generation";
+import {
+    modelOptionName,
+    normalizeRunningHubCapability,
+    resolveModelChannel,
+    useEffectiveConfig,
+    type AiConfig,
+    type RunningHubCapability,
+    type RunningHubWorkflow,
+    type RunningHubWorkflowKind,
+} from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { normalizeVideoDuration, normalizeVideoResolution } from "@/lib/video-generation-options";
-import { defaultModelCapabilityConfig, modelCapabilityConfigFor, normalizeImageValue, normalizeVideoValue, workflowFieldChoiceValues, workflowFieldCurrentValue, workflowFieldKey, workflowFieldNumberBounds, workflowFieldRandomKey, workflowFieldSubmissionValue, workflowFieldValueError, workflowImageCapabilityConfig, workflowOutputSizeValue, workflowParameterFields, workflowVideoCapabilityConfig, workflowVideoFieldsFromJson, type WorkflowVideoFieldLike } from "@/lib/model-capabilities";
-import { defaultImageParamsForModel, modelCompatibilityError, modelRequestOptions, resolveCompatibleModel, resolveModelGenerationDefaults, type ModelRequirements } from "@/lib/model-selection";
+import {
+    defaultModelCapabilityConfig,
+    modelCapabilityConfigFor,
+    workflowFieldChoiceValues,
+    workflowFieldCurrentValue,
+    workflowFieldKey,
+    workflowFieldNumberBounds,
+    workflowFieldRandomKey,
+    workflowFieldSubmissionValue,
+    workflowFieldValueError,
+    workflowImageCapabilityConfig,
+    workflowParameterFields,
+    workflowVideoCapabilityConfig,
+    workflowVideoFieldsFromJson,
+    type WorkflowVideoFieldLike,
+} from "@/lib/model-capabilities";
+import { defaultImageParamsForModel, modelCompatibilityError } from "@/lib/model-selection";
+import { buildGenerationConfig as buildNodeConfig, buildCanvasGenerationRequirements } from "@/lib/canvas/canvas-generation-config";
 import { resolveCanvasWorkflowProvider } from "@/lib/canvas/canvas-workflow";
 import type { CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
@@ -71,63 +98,51 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
     const resolvedProvider = resolveCanvasWorkflowProvider(node.metadata);
     const workflowProvider = resolvedProvider;
     const workflowCapability: RunningHubCapability = mode === "video" ? "video" : mode === "audio" ? "audio" : "image";
-    const requirements: ModelRequirements = {
-        capability: mode,
-        input: inputSummary,
-        videoOperation: node.metadata?.videoEditOperation,
-        videoSeconds: mode === "video" ? node.metadata?.seconds || globalConfig.videoSeconds : undefined,
-        options: modelRequestOptions({
-            ...globalConfig,
-            size: node.metadata?.size || globalConfig.size,
-            quality: node.metadata?.quality || globalConfig.quality,
-            count: String(node.metadata?.count || globalConfig.count),
-            videoSeconds: node.metadata?.seconds || globalConfig.videoSeconds,
-            vquality: node.metadata?.vquality || globalConfig.vquality,
-            videoGenerateAudio: node.metadata?.generateAudio || globalConfig.videoGenerateAudio,
-            videoWatermark: node.metadata?.watermark || globalConfig.videoWatermark,
-            audioVoice: node.metadata?.audioVoice || globalConfig.audioVoice,
-            audioFormat: node.metadata?.audioFormat || globalConfig.audioFormat,
-            audioSpeed: node.metadata?.audioSpeed || globalConfig.audioSpeed,
-            audioPitch: node.metadata?.audioPitch || globalConfig.audioPitch,
-            audioVolume: node.metadata?.audioVolume || globalConfig.audioVolume,
-        }, mode),
-    };
+    const requirements = buildCanvasGenerationRequirements(globalConfig, node, mode, inputSummary);
     const config = buildNodeConfig(globalConfig, node, mode, requirements);
     const defaultWorkflowCapability = normalizeRunningHubCapability(globalConfig.runningHub.capability);
-    const selectedRunningHubWorkflow = globalConfig.runningHub.workflows.find((item) => (
-        item.workflowId.trim() === node.metadata?.runningHubWorkflowId?.trim()
-        && (!node.metadata?.runningHubWorkflowKind || runningHubWorkflowKind(item) === node.metadata.runningHubWorkflowKind)
-    ));
+    const selectedRunningHubWorkflow = globalConfig.runningHub.workflows.find(
+        (item) => item.workflowId.trim() === node.metadata?.runningHubWorkflowId?.trim() && (!node.metadata?.runningHubWorkflowKind || runningHubWorkflowKind(item) === node.metadata.runningHubWorkflowKind),
+    );
     const selectedRunningHubCapability = selectedRunningHubWorkflow ? normalizeRunningHubCapability(selectedRunningHubWorkflow.capability, defaultWorkflowCapability) : undefined;
-    const selectedWorkflowFields: WorkflowVideoFieldLike[] = workflowProvider === "runninghub"
-        ? selectedRunningHubWorkflow?.fields?.length ? selectedRunningHubWorkflow.fields : workflowVideoFieldsFromJson(selectedRunningHubWorkflow?.workflowJson)
-        : [];
+    const selectedWorkflowFields: WorkflowVideoFieldLike[] = workflowProvider === "runninghub" ? (selectedRunningHubWorkflow?.fields?.length ? selectedRunningHubWorkflow.fields : workflowVideoFieldsFromJson(selectedRunningHubWorkflow?.workflowJson)) : [];
     const dynamicWorkflowFields = workflowParameterFields(selectedWorkflowFields);
     useEffect(() => {
         if (workflowProvider === "runninghub" && !node.metadata?.runningHubWorkflowId?.trim()) {
             const capability = normalizeRunningHubCapability(globalConfig.runningHub.capability);
             // 模式切换后优先按当前能力选择工作流，不能沿用全局默认的视频工作流，
             // 否则点击“生图”会在下一次渲染时被自动改回“视频”。
-            const workflow = globalConfig.runningHub.workflows.find((item) => (
-                normalizeRunningHubCapability(item.capability, capability) === workflowCapability
-                && item.workflowId.trim() === globalConfig.runningHub.workflowId.trim()
-                && runningHubWorkflowKind(item) === globalConfig.runningHub.selectedKind
-            ))
-                || globalConfig.runningHub.workflows.find((item) => normalizeRunningHubCapability(item.capability, capability) === workflowCapability);
+            const workflow =
+                globalConfig.runningHub.workflows.find(
+                    (item) =>
+                        normalizeRunningHubCapability(item.capability, capability) === workflowCapability && item.workflowId.trim() === globalConfig.runningHub.workflowId.trim() && runningHubWorkflowKind(item) === globalConfig.runningHub.selectedKind,
+                ) || globalConfig.runningHub.workflows.find((item) => normalizeRunningHubCapability(item.capability, capability) === workflowCapability);
             if (workflow) {
                 const workflowMode = normalizeRunningHubCapability(workflow.capability, capability);
                 onConfigChange(node.id, { generationMode: workflowMode, runningHubWorkflowId: workflow.workflowId, runningHubWorkflowKind: runningHubWorkflowKind(workflow), workflowParameters: {} });
             }
             return;
         }
-    }, [globalConfig.runningHub.capability, globalConfig.runningHub.selectedKind, globalConfig.runningHub.workflowId, globalConfig.runningHub.workflows, mode, node.id, node.metadata?.runningHubWorkflowId, onConfigChange, workflowCapability, workflowProvider]);
+    }, [
+        globalConfig.runningHub.capability,
+        globalConfig.runningHub.selectedKind,
+        globalConfig.runningHub.workflowId,
+        globalConfig.runningHub.workflows,
+        mode,
+        node.id,
+        node.metadata?.runningHubWorkflowId,
+        onConfigChange,
+        workflowCapability,
+        workflowProvider,
+    ]);
     const runningHubEntries = globalConfig.runningHub.workflows
         // 正常情况下只显示当前模式的条目；旧画布已引用的错配条目保留在列表中，
         // 这样用户可以看到并重新选择，而不是出现“选项消失”的死路。
-        .filter((item) => normalizeRunningHubCapability(item.capability, defaultWorkflowCapability) === workflowCapability || (
-            item.workflowId.trim() === node.metadata?.runningHubWorkflowId?.trim()
-            && (!node.metadata?.runningHubWorkflowKind || runningHubWorkflowKind(item) === node.metadata.runningHubWorkflowKind)
-        ))
+        .filter(
+            (item) =>
+                normalizeRunningHubCapability(item.capability, defaultWorkflowCapability) === workflowCapability ||
+                (item.workflowId.trim() === node.metadata?.runningHubWorkflowId?.trim() && (!node.metadata?.runningHubWorkflowKind || runningHubWorkflowKind(item) === node.metadata.runningHubWorkflowKind)),
+        )
         .map((item) => ({
             label: item.title || item.workflowId,
             value: runningHubWorkflowEntryKey(item),
@@ -145,52 +160,70 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
     const hasAnyInput = Boolean(inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount || inputSummary.characterCount);
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
     const workflowParameterError = firstWorkflowParameterError(dynamicWorkflowFields, node.metadata?.workflowParameters || {});
-    const capabilityError = workflowParameterError || (workflowProvider === "runninghub"
-        ? (!workflowProviderPluginEnabled(runtimeStatuses, "runninghub") ? "RunningHub 工作流插件未启用" : !globalConfig.runningHub.enabled ? "请先在设置中启用 RunningHub" : !node.metadata?.runningHubWorkflowId ? `请选择${capabilityLabel(workflowCapability)}工作流或 App` : !selectedRunningHubWorkflow ? "当前画布引用的 RunningHub 条目已不存在，请重新选择" : selectedRunningHubCapability !== workflowCapability ? `当前条目用途为${capabilityLabel(selectedRunningHubCapability || "image")}，请切换画布模式或重新选择条目` : undefined)
-        : undefined);
+    const capabilityError =
+        workflowParameterError ||
+        (workflowProvider === "runninghub"
+            ? !workflowProviderPluginEnabled(runtimeStatuses, "runninghub")
+                ? "RunningHub 工作流插件未启用"
+                : !globalConfig.runningHub.enabled
+                  ? "请先在设置中启用 RunningHub"
+                  : !node.metadata?.runningHubWorkflowId
+                    ? `请选择${capabilityLabel(workflowCapability)}工作流或 App`
+                    : !selectedRunningHubWorkflow
+                      ? "当前画布引用的 RunningHub 条目已不存在，请重新选择"
+                      : selectedRunningHubCapability !== workflowCapability
+                        ? `当前条目用途为${capabilityLabel(selectedRunningHubCapability || "image")}，请切换画布模式或重新选择条目`
+                        : undefined
+            : undefined);
     const canGenerate = (hasComposerContent || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput)) && !capabilityError;
 
     return (
         <div className="canvas-config-node-panel thin-scrollbar flex h-full w-full cursor-move flex-col gap-3.5 overflow-y-auto px-4 pb-4 pt-8 text-sm" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
             <div className="flex min-h-9 items-center justify-between gap-3">
                 <div className="shrink-0 text-sm font-semibold">{simpleMode ? "快速生成" : workflowProvider === "model" ? "生成配置" : "工作流生成"}</div>
-                {simpleMode ? <span className="rounded-md px-2 py-1 text-[var(--fs-tiny)]" style={{ background: theme.node.fill, color: theme.node.muted }}>自动配置</span> : <div className="cursor-default" data-canvas-no-zoom onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-                    <Segmented
-                        size="small"
-                        className="canvas-config-mode !rounded-md !p-0.5"
-                        value={mode}
-                        onChange={(value) => onConfigChange(node.id, { generationMode: value as CanvasGenerationMode, runningHubWorkflowId: undefined, runningHubWorkflowKind: undefined, workflowParameters: {} })}
-                        options={[
-                            {
-                                value: "image",
-                                label: (
-                                    <span className="inline-flex items-center gap-1">
-                                        <ImageIcon className="size-3.5" />
-                                        生图
-                                    </span>
-                                ),
-                            },
-                            {
-                                value: "video",
-                                label: (
-                                    <span className="inline-flex items-center gap-1">
-                                        <Video className="size-3.5" />
-                                        视频
-                                    </span>
-                                ),
-                            },
-                            {
-                                value: "audio",
-                                label: (
-                                    <span className="inline-flex items-center gap-1">
-                                        <Music2 className="size-3.5" />
-                                        音频
-                                    </span>
-                                ),
-                            },
-                        ]}
-                    />
-                </div>}
+                {simpleMode ? (
+                    <span className="rounded-md px-2 py-1 text-[var(--fs-tiny)]" style={{ background: theme.node.fill, color: theme.node.muted }}>
+                        自动配置
+                    </span>
+                ) : (
+                    <div className="cursor-default" data-canvas-no-zoom onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+                        <Segmented
+                            size="small"
+                            className="canvas-config-mode !rounded-md !p-0.5"
+                            value={mode}
+                            onChange={(value) => onConfigChange(node.id, { generationMode: value as CanvasGenerationMode, runningHubWorkflowId: undefined, runningHubWorkflowKind: undefined, workflowParameters: {} })}
+                            options={[
+                                {
+                                    value: "image",
+                                    label: (
+                                        <span className="inline-flex items-center gap-1">
+                                            <ImageIcon className="size-3.5" />
+                                            生图
+                                        </span>
+                                    ),
+                                },
+                                {
+                                    value: "video",
+                                    label: (
+                                        <span className="inline-flex items-center gap-1">
+                                            <Video className="size-3.5" />
+                                            视频
+                                        </span>
+                                    ),
+                                },
+                                {
+                                    value: "audio",
+                                    label: (
+                                        <span className="inline-flex items-center gap-1">
+                                            <Music2 className="size-3.5" />
+                                            音频
+                                        </span>
+                                    ),
+                                },
+                            ]}
+                        />
+                    </div>
+                )}
             </div>
 
             <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -201,42 +234,97 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                 {inputSummary.characterCount ? <InputChip label="角色卡" value={`${inputSummary.characterCount} 个`} style={chipStyle} /> : null}
             </div>
 
-            <button type="button" className="canvas-config-prompt-button group flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 text-left" style={{ background: theme.node.fill, color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={onComposerToggle}>
+            <button
+                type="button"
+                className="canvas-config-prompt-button group flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 text-left"
+                style={{ background: theme.node.fill, color: theme.node.text }}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={onComposerToggle}
+            >
                 <span className="grid size-7 shrink-0 place-items-center rounded-md" style={{ background: theme.node.panel }}>
                     {simpleMode ? <MessageSquare className="size-3.5" /> : <Sparkles className="size-3.5" />}
                 </span>
                 <span className="min-w-0 flex-1">
                     <span className="block text-[var(--fs-label)] font-semibold">{simpleMode ? "编辑生成内容" : "组装提示词"}</span>
-                    <span className="block truncate text-[var(--fs-tiny)]" style={{ color: theme.node.muted }}>{hasComposerContent ? "已填写，可继续编辑或引用素材" : "输入提示词，或用 @ 引用连接素材"}</span>
+                    <span className="block truncate text-[var(--fs-tiny)]" style={{ color: theme.node.muted }}>
+                        {hasComposerContent ? "已填写，可继续编辑或引用素材" : "输入提示词，或用 @ 引用连接素材"}
+                    </span>
                 </span>
                 <ChevronDown className="size-3.5 -rotate-90 opacity-45 transition-transform group-hover:translate-x-0.5" />
             </button>
 
             {mode === "video" && !simpleMode ? (
                 <div className="cursor-default" data-canvas-no-zoom onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-                    <div className="flex h-9 min-w-0 items-center gap-2 rounded-lg border px-2 text-[var(--fs-label)]" style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }} title="已连接的图片、视频和音频会按当前工作流字段映射自动传入">
-                        <ImageIcon className="size-3.5 shrink-0 opacity-75" />
-                        <span className="shrink-0 font-medium">全能参考</span>
-                        <span className="min-w-0 truncate opacity-60">已连接媒体自动映射</span>
-                    </div>
+                    {workflowProvider === "model" && (isSeedance25Model(modelOptionName(config.model)) || isH3Model(config.model)) ? (
+                        <Select
+                            aria-label="视频生成模式"
+                            className="w-full"
+                            value={isH3Model(config.model) ? h3VideoOperation(config.model, inputSummary, node.metadata?.videoEditOperation) : resolveVideoOperation(inputSummary, node.metadata?.videoEditOperation)}
+                            options={videoOperationOptions
+                                .filter(
+                                    (option) =>
+                                        ["text_to_video", "image_to_video", "reference_to_video", "inpaint", "extend", "audio_to_video"].includes(option.value) && modelCapabilityConfigFor(config, config.model).video?.operations.includes(option.value),
+                                )
+                                .map((option) => ({
+                                    ...option,
+                                    label: option.value === "image_to_video" ? "首帧 / 首尾帧" : option.value === "reference_to_video" ? "参考生成" : option.label,
+                                    disabled:
+                                        option.value === "image_to_video"
+                                            ? inputSummary.imageCount + inputSummary.characterCount < 1 ||
+                                              inputSummary.imageCount + inputSummary.characterCount > 2 ||
+                                              inputSummary.videoCount > 0 ||
+                                              (!isH3Model(config.model) && inputSummary.audioCount > 0)
+                                            : ["inpaint", "extend"].includes(option.value)
+                                              ? inputSummary.videoCount < 1
+                                              : option.value === "text_to_video"
+                                                ? inputSummary.imageCount + inputSummary.characterCount + inputSummary.videoCount + inputSummary.audioCount > 0
+                                                : option.value === "audio_to_video"
+                                                  ? inputSummary.audioCount < 1 || inputSummary.imageCount + inputSummary.characterCount + inputSummary.videoCount > 0
+                                                  : inputSummary.imageCount + inputSummary.characterCount + inputSummary.videoCount + inputSummary.audioCount < 1,
+                                }))}
+                            onChange={(value) => onConfigChange(node.id, { videoEditOperation: value as CanvasVideoEditOperation })}
+                        />
+                    ) : (
+                        <div
+                            className="flex h-9 min-w-0 items-center gap-2 rounded-lg border px-2 text-[var(--fs-label)]"
+                            style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
+                            title="已连接的图片、视频和音频会按当前工作流字段映射自动传入"
+                        >
+                            <ImageIcon className="size-3.5 shrink-0 opacity-75" />
+                            <span className="shrink-0 font-medium">{modelCapabilityConfigFor(config, config.model).video?.operations.includes("reference_to_video") ? "参考生成" : "图片生成"}</span>
+                            <span className="min-w-0 truncate opacity-60">已连接媒体自动映射</span>
+                        </div>
+                    )}
                 </div>
             ) : null}
 
+            {mode === "video" && workflowProvider === "model" && !simpleMode && isH3Model(config.model) ? (
+                <CanvasH3Controls
+                    model={config.model}
+                    value={node.metadata?.videoH3Options}
+                    duration={config.videoSeconds}
+                    onDurationChange={(seconds) => onConfigChange(node.id, { seconds })}
+                    onChange={(videoH3Options) => onConfigChange(node.id, { videoH3Options })}
+                />
+            ) : null}
+            {mode === "video" && isH3Model(config.model) ? <CanvasH3UnsupportedFrames model={config.model} metadata={node.metadata} onChange={(patch) => onConfigChange(node.id, patch)} /> : null}
+
             {simpleMode ? (
-                <div className="rounded-lg px-3 py-2.5 text-[var(--fs-label)]" style={{ background: theme.node.fill, color: theme.node.muted }}>将使用当前默认模型与生成参数</div>
+                <div className="rounded-lg px-3 py-2.5 text-[var(--fs-label)]" style={{ background: theme.node.fill, color: theme.node.muted }}>
+                    将使用当前默认模型与生成参数
+                </div>
             ) : (
                 <div className="flex min-w-0 flex-col gap-3">
                     <div className="flex items-center gap-3" data-canvas-no-zoom onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-                        <span className="shrink-0 text-[var(--fs-tiny)] font-medium" style={{ color: theme.node.muted }}>生成来源</span>
+                        <span className="shrink-0 text-[var(--fs-tiny)] font-medium" style={{ color: theme.node.muted }}>
+                            生成来源
+                        </span>
                         <Segmented
                             block
                             size="small"
                             className="canvas-config-provider min-w-0 flex-1"
                             value={workflowProvider}
-                            options={[
-                                { label: "模型", value: "model" },
-                                ...(workflowProviderPluginEnabled(runtimeStatuses, "runninghub") ? [{ label: "RunningHub", value: "runninghub" }] : []),
-                            ]}
+                            options={[{ label: "模型", value: "model" }, ...(workflowProviderPluginEnabled(runtimeStatuses, "runninghub") ? [{ label: "RunningHub", value: "runninghub" }] : [])]}
                             onChange={(value) => {
                                 const nextProvider = value as "model" | "runninghub";
                                 if (nextProvider === "model") {
@@ -250,55 +338,53 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                         />
                     </div>
                     <div data-canvas-no-zoom className="grid min-w-0 cursor-default items-center gap-3" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-                    {workflowProvider === "runninghub" ? (
-                        <Select<string, WorkflowSelectOption>
-                            className="canvas-compact-control !h-9 w-full"
-                            value={selectedRunningHubWorkflow ? runningHubWorkflowEntryKey(selectedRunningHubWorkflow) : undefined}
-                            title={selectedRunningHubWorkflow ? `${selectedRunningHubWorkflow.kind === "app" ? "App" : "工作流"} · ${selectedRunningHubWorkflow.title || selectedRunningHubWorkflow.workflowId}` : undefined}
-                            placeholder={`选择${capabilityLabel(workflowCapability)}工作流或 App`}
-                            showSearch
-                            options={runningHubOptions}
-                            optionFilterProp="label"
-                            optionLabelProp="label"
-                            labelRender={(selected) => {
-                                const workflow = runningHubEntries.find((item) => item.value === selected.value);
-                                return <WorkflowSelectedLabel kind={workflow?.kind || "workflow"} label={workflow?.label || String(selected.label || "")} />;
-                            }}
-                            notFoundContent={`暂无${capabilityLabel(workflowCapability)}工作流`}
-                            popupMatchSelectWidth={false}
-                            virtual={false}
-                            listHeight={320}
-                            styles={{ popup: { root: { minWidth: 320, maxWidth: "min(420px, calc(100vw - 32px))" } } }}
-                            optionRender={(option) => {
-                                if (option.data.options) return option.label;
-                                return <WorkflowOptionLabel kind={option.data.kind === "app" ? "app" : "workflow"} label={String(option.data.label || "")} title={String(option.data.title || option.data.label || "")} />;
-                            }}
-                            onChange={(value) => {
-                                const workflow = runningHubEntries.find((item) => item.value === value);
-                                onConfigChange(node.id, { runningHubWorkflowId: workflow?.workflowId, runningHubWorkflowKind: workflow?.kind, workflowParameters: {} });
-                            }}
-                        />
-                    ) : null}
+                        {workflowProvider === "runninghub" ? (
+                            <Select<string, WorkflowSelectOption>
+                                className="canvas-compact-control !h-9 w-full"
+                                value={selectedRunningHubWorkflow ? runningHubWorkflowEntryKey(selectedRunningHubWorkflow) : undefined}
+                                title={selectedRunningHubWorkflow ? `${selectedRunningHubWorkflow.kind === "app" ? "App" : "工作流"} · ${selectedRunningHubWorkflow.title || selectedRunningHubWorkflow.workflowId}` : undefined}
+                                placeholder={`选择${capabilityLabel(workflowCapability)}工作流或 App`}
+                                showSearch
+                                options={runningHubOptions}
+                                optionFilterProp="label"
+                                optionLabelProp="label"
+                                labelRender={(selected) => {
+                                    const workflow = runningHubEntries.find((item) => item.value === selected.value);
+                                    return <WorkflowSelectedLabel kind={workflow?.kind || "workflow"} label={workflow?.label || String(selected.label || "")} />;
+                                }}
+                                notFoundContent={`暂无${capabilityLabel(workflowCapability)}工作流`}
+                                popupMatchSelectWidth={false}
+                                virtual={false}
+                                listHeight={320}
+                                styles={{ popup: { root: { minWidth: 320, maxWidth: "min(420px, calc(100vw - 32px))" } } }}
+                                optionRender={(option) => {
+                                    if (option.data.options) return option.label;
+                                    return <WorkflowOptionLabel kind={option.data.kind === "app" ? "app" : "workflow"} label={String(option.data.label || "")} title={String(option.data.title || option.data.label || "")} />;
+                                }}
+                                onChange={(value) => {
+                                    const workflow = runningHubEntries.find((item) => item.value === value);
+                                    onConfigChange(node.id, { runningHubWorkflowId: workflow?.workflowId, runningHubWorkflowKind: workflow?.kind, workflowParameters: {} });
+                                }}
+                            />
+                        ) : null}
                     </div>
                 </div>
             )}
 
             {dynamicWorkflowFields.length ? <WorkflowParameterControls fields={dynamicWorkflowFields} node={node} theme={theme} onConfigChange={onConfigChange} /> : null}
 
-            {capabilityError ? <div className="rounded-lg px-3 py-2 text-[var(--fs-tiny)]" style={{ background: theme.accent.danger + "18", color: theme.accent.danger }}>{capabilityError}</div> : null}
+            {capabilityError ? (
+                <div className="rounded-lg px-3 py-2 text-[var(--fs-tiny)]" style={{ background: theme.accent.danger + "18", color: theme.accent.danger }}>
+                    {capabilityError}
+                </div>
+            ) : null}
 
-            <Button
-                type="primary"
-                className="mt-auto !h-9 !w-full !cursor-pointer !rounded-lg"
-                disabled={isRunning || !canGenerate}
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={() => onGenerate(node.id)}
-            >
+            <Button type="primary" className="mt-auto !h-9 !w-full !cursor-pointer !rounded-lg" disabled={isRunning || !canGenerate} onMouseDown={(event) => event.stopPropagation()} onClick={() => onGenerate(node.id)}>
                 <span className="inline-flex items-center gap-1.5">
-                        {isRunning ? (
-                            <>
-                                <LoaderCircle className="size-4 animate-spin" />
-                                <span>生成中</span>
+                    {isRunning ? (
+                        <>
+                            <LoaderCircle className="size-4 animate-spin" />
+                            <span>生成中</span>
                         </>
                     ) : (
                         <>
@@ -321,7 +407,19 @@ function defaultVideoOperation(inputSummary: CanvasConfigNodePanelProps["inputSu
     return "text_to_video";
 }
 
-export function WorkflowParameterControls({ fields, node, theme, onConfigChange, defaultExpanded = true }: { fields: WorkflowVideoFieldLike[]; node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void; defaultExpanded?: boolean }) {
+export function WorkflowParameterControls({
+    fields,
+    node,
+    theme,
+    onConfigChange,
+    defaultExpanded = true,
+}: {
+    fields: WorkflowVideoFieldLike[];
+    node: CanvasNodeData;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void;
+    defaultExpanded?: boolean;
+}) {
     const [expanded, setExpanded] = useState(defaultExpanded);
     const values = node.metadata?.workflowParameters || {};
     const update = (field: WorkflowVideoFieldLike, value: unknown) => {
@@ -352,47 +450,94 @@ export function WorkflowParameterControls({ fields, node, theme, onConfigChange,
                     />
                 </Tooltip>
             </div>
-            {expanded ? fields.map((field) => {
-                const key = workflowFieldKey(field);
-                const randomKey = workflowFieldRandomKey(field);
-                const value = workflowFieldSubmissionValue(field, workflowFieldCurrentValue(field, values) ?? "");
-                const randomEnabled = typeof values[randomKey] === "boolean" ? values[randomKey] === true : field.randomEnabled === true;
-                const rawFieldType = String(field.fieldType || "").toUpperCase();
-                const fieldType = ["FLOAT", "INT", "INTEGER"].includes(rawFieldType) ? "NUMBER" : rawFieldType;
-                const options = workflowFieldChoiceValues(field);
-                const selectOptions = options.length ? options : fieldType === "SELECT" && value !== "" ? [value] : [];
-                const bounds = workflowFieldNumberBounds(field);
-                const numeric = fieldType === "NUMBER" || fieldType === "SLIDER" || typeof value === "number" || bounds.min !== undefined || bounds.max !== undefined || bounds.step !== undefined;
-                const numericValue = value === "" || !Number.isFinite(Number(value)) ? undefined : Number(value);
-                const valueError = randomEnabled ? "" : workflowFieldValueError(field, value);
-                const control = fieldType === "SELECT" || selectOptions.length ? (
-                    <Select status={valueError ? "error" : undefined} size="small" className="w-full" value={value === "" ? undefined : value as string | number} options={selectOptions.map((option) => ({ label: workflowParameterOptionLabel(option), value: workflowParameterOptionValue(option) }))} onChange={(next) => update(field, next)} />
-                ) : fieldType === "BOOLEAN" || typeof value === "boolean" ? (
-                    <Switch size="sm" checked={value === true || value === "true"} onChange={(checked) => update(field, checked)} />
-                ) : fieldType === "SLIDER" && bounds.min !== undefined && bounds.max !== undefined ? (
-                    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_64px] items-center gap-2">
-                        <Slider disabled={randomEnabled} className="m-0" min={bounds.min} max={bounds.max} step={bounds.step || 0.01} value={numericValue ?? bounds.min} tooltip={{ open: false }} onChange={(next) => update(field, next)} />
-                        <InputNumber disabled={randomEnabled} status={valueError ? "error" : undefined} size="small" className="w-full" value={numericValue} min={bounds.min} max={bounds.max} step={bounds.step} onChange={(next) => update(field, next)} />
-                    </div>
-                ) : numeric ? (
-                    <InputNumber disabled={randomEnabled} status={valueError ? "error" : undefined} size="small" className="w-full" value={numericValue} min={bounds.min} max={bounds.max} step={bounds.step} onChange={(next) => update(field, next)} />
-                ) : (
-                    <Input status={valueError ? "error" : undefined} size="small" value={String(value ?? "")} onChange={(event) => update(field, event.target.value)} />
-                );
-                return (
-                    <label key={key} className="grid min-w-0 grid-cols-[minmax(72px,0.8fr)_minmax(0,1.2fr)] items-center gap-2 text-[var(--fs-label)]" title={valueError || `${field.nodeId}.${field.fieldName}${bounds.min !== undefined || bounds.max !== undefined ? ` · ${bounds.min ?? ""}-${bounds.max ?? ""}${bounds.step !== undefined ? ` / step ${bounds.step}` : ""}` : ""}`}>
-                        <span className="min-w-0 truncate" style={{ color: theme.node.muted }}>{field.label || field.fieldName}</span>
-                        <div className={field.randomEnabled ? "grid min-w-0 grid-cols-[minmax(0,1fr)_28px] items-center gap-1" : "min-w-0"}>
-                            {control}
-                            {field.randomEnabled ? (
-                                <Tooltip title={randomEnabled ? "每次生成使用随机值，点击改为固定值" : "当前使用固定值，点击恢复随机"}>
-                                    <Button type="text" size="small" className="!size-7 !p-0" style={{ background: randomEnabled ? theme.accent.primarySoft : "transparent", color: randomEnabled ? theme.accent.primary : theme.node.muted }} icon={<Dice5 className="size-3.5" />} aria-pressed={randomEnabled} onClick={(event) => { event.preventDefault(); updateRandom(field, !randomEnabled); }} />
-                                </Tooltip>
-                            ) : null}
-                        </div>
-                    </label>
-                );
-            }) : null}
+            {expanded
+                ? fields.map((field) => {
+                      const key = workflowFieldKey(field);
+                      const randomKey = workflowFieldRandomKey(field);
+                      const value = workflowFieldSubmissionValue(field, workflowFieldCurrentValue(field, values) ?? "");
+                      const randomEnabled = typeof values[randomKey] === "boolean" ? values[randomKey] === true : field.randomEnabled === true;
+                      const rawFieldType = String(field.fieldType || "").toUpperCase();
+                      const fieldType = ["FLOAT", "INT", "INTEGER"].includes(rawFieldType) ? "NUMBER" : rawFieldType;
+                      const options = workflowFieldChoiceValues(field);
+                      const selectOptions = options.length ? options : fieldType === "SELECT" && value !== "" ? [value] : [];
+                      const bounds = workflowFieldNumberBounds(field);
+                      const numeric = fieldType === "NUMBER" || fieldType === "SLIDER" || typeof value === "number" || bounds.min !== undefined || bounds.max !== undefined || bounds.step !== undefined;
+                      const numericValue = value === "" || !Number.isFinite(Number(value)) ? undefined : Number(value);
+                      const valueError = randomEnabled ? "" : workflowFieldValueError(field, value);
+                      const control =
+                          fieldType === "SELECT" || selectOptions.length ? (
+                              <Select
+                                  status={valueError ? "error" : undefined}
+                                  size="small"
+                                  className="w-full"
+                                  value={value === "" ? undefined : (value as string | number)}
+                                  options={selectOptions.map((option) => ({ label: workflowParameterOptionLabel(option), value: workflowParameterOptionValue(option) }))}
+                                  onChange={(next) => update(field, next)}
+                              />
+                          ) : fieldType === "BOOLEAN" || typeof value === "boolean" ? (
+                              <Switch size="sm" checked={value === true || value === "true"} onChange={(checked) => update(field, checked)} />
+                          ) : fieldType === "SLIDER" && bounds.min !== undefined && bounds.max !== undefined ? (
+                              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_64px] items-center gap-2">
+                                  <Slider disabled={randomEnabled} className="m-0" min={bounds.min} max={bounds.max} step={bounds.step || 0.01} value={numericValue ?? bounds.min} tooltip={{ open: false }} onChange={(next) => update(field, next)} />
+                                  <InputNumber
+                                      disabled={randomEnabled}
+                                      status={valueError ? "error" : undefined}
+                                      size="small"
+                                      className="w-full"
+                                      value={numericValue}
+                                      min={bounds.min}
+                                      max={bounds.max}
+                                      step={bounds.step}
+                                      onChange={(next) => update(field, next)}
+                                  />
+                              </div>
+                          ) : numeric ? (
+                              <InputNumber
+                                  disabled={randomEnabled}
+                                  status={valueError ? "error" : undefined}
+                                  size="small"
+                                  className="w-full"
+                                  value={numericValue}
+                                  min={bounds.min}
+                                  max={bounds.max}
+                                  step={bounds.step}
+                                  onChange={(next) => update(field, next)}
+                              />
+                          ) : (
+                              <Input status={valueError ? "error" : undefined} size="small" value={String(value ?? "")} onChange={(event) => update(field, event.target.value)} />
+                          );
+                      return (
+                          <label
+                              key={key}
+                              className="grid min-w-0 grid-cols-[minmax(72px,0.8fr)_minmax(0,1.2fr)] items-center gap-2 text-[var(--fs-label)]"
+                              title={valueError || `${field.nodeId}.${field.fieldName}${bounds.min !== undefined || bounds.max !== undefined ? ` · ${bounds.min ?? ""}-${bounds.max ?? ""}${bounds.step !== undefined ? ` / step ${bounds.step}` : ""}` : ""}`}
+                          >
+                              <span className="min-w-0 truncate" style={{ color: theme.node.muted }}>
+                                  {field.label || field.fieldName}
+                              </span>
+                              <div className={field.randomEnabled ? "grid min-w-0 grid-cols-[minmax(0,1fr)_28px] items-center gap-1" : "min-w-0"}>
+                                  {control}
+                                  {field.randomEnabled ? (
+                                      <Tooltip title={randomEnabled ? "每次生成使用随机值，点击改为固定值" : "当前使用固定值，点击恢复随机"}>
+                                          <Button
+                                              type="text"
+                                              size="small"
+                                              className="!size-7 !p-0"
+                                              style={{ background: randomEnabled ? theme.accent.primarySoft : "transparent", color: randomEnabled ? theme.accent.primary : theme.node.muted }}
+                                              icon={<Dice5 className="size-3.5" />}
+                                              aria-pressed={randomEnabled}
+                                              onClick={(event) => {
+                                                  event.preventDefault();
+                                                  updateRandom(field, !randomEnabled);
+                                              }}
+                                          />
+                                      </Tooltip>
+                                  ) : null}
+                              </div>
+                          </label>
+                      );
+                  })
+                : null}
         </div>
     );
 }
@@ -434,137 +579,31 @@ function InputChip({ label, value, style }: { label: string; value: string; styl
 }
 
 function WorkflowOptionGroupLabel({ label, count }: { label: string; count: number }) {
-    return <span className="canvas-workflow-group-label"><span>{label}</span><b>{count}</b></span>;
+    return (
+        <span className="canvas-workflow-group-label">
+            <span>{label}</span>
+            <b>{count}</b>
+        </span>
+    );
 }
 
 function WorkflowOptionLabel({ kind, label, title }: { kind: "app" | "workflow"; label: string; title: string }) {
-    return <div className="canvas-workflow-option" title={title}>
-        {kind === "app" ? <Sparkles /> : <WorkflowIcon />}
-        <span>{label}</span>
-        <i aria-hidden="true" />
-    </div>;
+    return (
+        <div className="canvas-workflow-option" title={title}>
+            {kind === "app" ? <Sparkles /> : <WorkflowIcon />}
+            <span>{label}</span>
+            <i aria-hidden="true" />
+        </div>
+    );
 }
 
 function WorkflowSelectedLabel({ kind, label }: { kind: "app" | "workflow"; label: string }) {
-    return <span className="canvas-workflow-selected-label">
-        {kind === "app" ? <Sparkles /> : <WorkflowIcon />}
-        <span>{label}</span>
-    </span>;
-}
-
-function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: CanvasGenerationMode, requirements: ModelRequirements): AiConfig {
-    const workflowProvider = mode === "text" ? "model" : resolveCanvasWorkflowProvider(node.metadata);
-    if (workflowProvider === "model") return buildModelNodeConfig(globalConfig, node, mode, requirements);
-    const defaultModel = mode === "image" ? globalConfig.imageModel : mode === "video" ? globalConfig.videoModel : mode === "audio" ? globalConfig.audioModel : globalConfig.textModel;
-    const fallbackModel = mode === "image" ? defaultConfig.imageModel : mode === "video" ? defaultConfig.videoModel : mode === "audio" ? defaultConfig.audioModel : defaultConfig.textModel;
-    const storedModel = node.metadata?.model;
-    const preferredModel = storedModel && configuredModelMatchesCapability(globalConfig, storedModel, mode) ? storedModel : defaultModel && configuredModelMatchesCapability(globalConfig, defaultModel, mode) ? defaultModel : fallbackModel;
-    const model = preferredModel;
-    const selectedRunningHubWorkflowId = node.metadata?.runningHubWorkflowId?.trim();
-    const modeCapability = mode === "video" || mode === "audio" ? mode : "image";
-    const selectedRunningHubWorkflow = selectedRunningHubWorkflowId
-        ? globalConfig.runningHub.workflows.find((item) => item.workflowId.trim() === selectedRunningHubWorkflowId && (!node.metadata?.runningHubWorkflowKind || runningHubWorkflowKind(item) === node.metadata.runningHubWorkflowKind))
-        : undefined;
-    const selectedWorkflowFields = workflowProvider === "runninghub"
-        ? selectedRunningHubWorkflow?.fields?.length ? selectedRunningHubWorkflow.fields : workflowVideoFieldsFromJson(selectedRunningHubWorkflow?.workflowJson)
-        : [];
-    const capabilityProfile = {
-        ...defaultModelCapabilityConfig(),
-        image: workflowImageCapabilityConfig(selectedWorkflowFields, defaultModelCapabilityConfig().image!),
-        video: workflowVideoCapabilityConfig(selectedWorkflowFields, defaultModelCapabilityConfig().video!),
-    };
-    const imageProfile = mode === "image" ? capabilityProfile.image! : undefined;
-    const workflowParameters = node.metadata?.workflowParameters || {};
-    const workflowOutputSize = workflowOutputSizeValue(selectedWorkflowFields, workflowParameters);
-    const workflowParameter = (source: string) => workflowParameters[`source:${source}`] === undefined ? "" : String(workflowParameters[`source:${source}`]);
-    const normalizedImage = imageProfile ? normalizeImageValue(imageProfile, { size: workflowOutputSize || node.metadata?.size || globalConfig.size || defaultConfig.size, quality: node.metadata?.quality || workflowParameter("quality") || globalConfig.quality || defaultConfig.quality, transparentBackground: node.metadata?.transparentBackground || globalConfig.transparentBackground, count: String(node.metadata?.count || globalConfig.canvasImageCount || globalConfig.count || defaultConfig.count) }) : undefined;
-    const videoProfile = mode === "video" ? capabilityProfile.video! : undefined;
-    const rawVideoSettings = { seconds: node.metadata?.seconds || workflowParameter("videoSeconds") || globalConfig.videoSeconds || defaultConfig.videoSeconds, ratio: workflowOutputSize || node.metadata?.size || globalConfig.size || defaultConfig.size, resolution: node.metadata?.vquality || workflowParameter("vquality") || globalConfig.vquality || defaultConfig.vquality };
-    const normalizedVideo = videoProfile
-        ? { seconds: String(rawVideoSettings.seconds), ratio: rawVideoSettings.ratio, resolution: rawVideoSettings.resolution }
-        : undefined;
-    const runningHub = { ...globalConfig.runningHub, enabled: mode !== "text" && workflowProvider === "runninghub" && globalConfig.runningHub.enabled, selectedKind: selectedRunningHubWorkflow ? runningHubWorkflowKind(selectedRunningHubWorkflow) : globalConfig.runningHub.selectedKind, workflowId: selectedRunningHubWorkflowId || "", capability: normalizeRunningHubCapability(selectedRunningHubWorkflow?.capability, normalizeRunningHubCapability(globalConfig.runningHub.capability)) };
-    return {
-        ...globalConfig,
-        taskWorkflowProvider: workflowProvider,
-        runningHub,
-        model,
-        quality: workflowParameter("quality") || normalizedImage?.quality || node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
-        size: normalizedImage?.size || normalizedVideo?.ratio || node.metadata?.size || globalConfig.size || defaultConfig.size,
-        transparentBackground: normalizedImage?.transparentBackground || ((node.metadata?.transparentBackground || globalConfig.transparentBackground) === "true" ? "true" : "false"),
-        videoSeconds: normalizedVideo?.seconds || normalizeVideoDuration(node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds),
-        vquality: String(node.metadata?.vquality || globalConfig.vquality || defaultConfig.vquality),
-        videoGenerateAudio: videoProfile?.generateAudio.supported ? node.metadata?.generateAudio || globalConfig.videoGenerateAudio || String(videoProfile.generateAudio.default) : "false",
-        videoWatermark: videoProfile?.watermark.supported ? node.metadata?.watermark || globalConfig.videoWatermark || String(videoProfile.watermark.default) : "false",
-        ...resolveAudioSpeechSettings(model, {
-            audioVoice: node.metadata?.audioVoice || globalConfig.audioVoice,
-            audioFormat: node.metadata?.audioFormat || globalConfig.audioFormat,
-            audioSpeed: node.metadata?.audioSpeed || globalConfig.audioSpeed,
-            audioPitch: node.metadata?.audioPitch || globalConfig.audioPitch,
-            audioVolume: node.metadata?.audioVolume || globalConfig.audioVolume,
-            audioInstructions: node.metadata?.audioInstructions || globalConfig.audioInstructions,
-        }),
-        count: normalizedImage?.count || String(node.metadata?.count || (mode === "image" ? globalConfig.canvasImageCount || globalConfig.count : globalConfig.count) || defaultConfig.count),
-    };
-}
-
-function buildModelNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: CanvasGenerationMode, requirements: ModelRequirements): AiConfig {
-    const defaultModel = mode === "image" ? globalConfig.imageModel : mode === "video" ? globalConfig.videoModel : mode === "audio" ? globalConfig.audioModel : globalConfig.textModel;
-    const fallbackModel = mode === "image" ? defaultConfig.imageModel : mode === "video" ? defaultConfig.videoModel : mode === "audio" ? defaultConfig.audioModel : defaultConfig.textModel;
-    const storedModel = node.metadata?.model;
-    const preferredModel = storedModel && configuredModelMatchesCapability(globalConfig, storedModel, mode) ? storedModel : defaultModel && configuredModelMatchesCapability(globalConfig, defaultModel, mode) ? defaultModel : fallbackModel;
-    const model = resolveCompatibleModel(globalConfig, preferredModel, mode === "image" ? { ...requirements, imageSize: node.metadata?.size || globalConfig.size || defaultConfig.size } : requirements) || preferredModel;
-    const generationDefaults = resolveModelGenerationDefaults(
-        globalConfig,
-        model,
-        mode === "image" ? "image" : mode === "video" ? "video" : undefined,
-        mode === "image"
-            ? {
-                  size: node.metadata?.size,
-                  quality: node.metadata?.quality,
-                  transparentBackground: node.metadata?.transparentBackground,
-                  count: String(node.metadata?.count || globalConfig.canvasImageCount || globalConfig.count || defaultConfig.count),
-              }
-            : {
-                  size: node.metadata?.size,
-                  videoSeconds: node.metadata?.seconds,
-                  vquality: node.metadata?.vquality,
-                  videoGenerateAudio: node.metadata?.generateAudio,
-                  videoWatermark: node.metadata?.watermark,
-              },
-        {
-            size: globalConfig.size || defaultConfig.size,
-            quality: globalConfig.quality || defaultConfig.quality,
-            transparentBackground: globalConfig.transparentBackground || defaultConfig.transparentBackground,
-            count: String(globalConfig.canvasImageCount || globalConfig.count || defaultConfig.count),
-            videoSeconds: globalConfig.videoSeconds || defaultConfig.videoSeconds,
-            vquality: globalConfig.vquality || defaultConfig.vquality,
-            videoGenerateAudio: globalConfig.videoGenerateAudio || defaultConfig.videoGenerateAudio,
-            videoWatermark: globalConfig.videoWatermark || defaultConfig.videoWatermark,
-        },
+    return (
+        <span className="canvas-workflow-selected-label">
+            {kind === "app" ? <Sparkles /> : <WorkflowIcon />}
+            <span>{label}</span>
+        </span>
     );
-    const videoProfile = mode === "video" ? modelCapabilityConfigFor(globalConfig, model).video! : undefined;
-    return {
-        ...globalConfig,
-        taskWorkflowProvider: "model",
-        model,
-        quality: generationDefaults.quality || globalConfig.quality || defaultConfig.quality,
-        size: generationDefaults.size ?? globalConfig.size ?? defaultConfig.size,
-        transparentBackground: generationDefaults.transparentBackground || "false",
-        videoSeconds: generationDefaults.videoSeconds || normalizeVideoDuration(globalConfig.videoSeconds || defaultConfig.videoSeconds),
-        vquality: generationDefaults.vquality ?? normalizeVideoResolution(globalConfig.vquality || defaultConfig.vquality),
-        videoGenerateAudio: videoProfile?.generateAudio.supported ? generationDefaults.videoGenerateAudio || String(videoProfile.generateAudio.default) : "false",
-        videoWatermark: videoProfile?.watermark.supported ? generationDefaults.videoWatermark || String(videoProfile.watermark.default) : "false",
-        ...resolveAudioSpeechSettings(model, {
-            audioVoice: node.metadata?.audioVoice || globalConfig.audioVoice,
-            audioFormat: node.metadata?.audioFormat || globalConfig.audioFormat,
-            audioSpeed: node.metadata?.audioSpeed || globalConfig.audioSpeed,
-            audioPitch: node.metadata?.audioPitch || globalConfig.audioPitch,
-            audioVolume: node.metadata?.audioVolume || globalConfig.audioVolume,
-            audioInstructions: node.metadata?.audioInstructions || globalConfig.audioInstructions,
-        }),
-        count: generationDefaults.count || String(node.metadata?.count || (mode === "image" ? globalConfig.canvasImageCount || globalConfig.count : globalConfig.count) || defaultConfig.count),
-    };
 }
 
 function videoConfigPatch(key: keyof AiConfig, value: string) {

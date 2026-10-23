@@ -1,4 +1,8 @@
-# 网站 LikeAI 临时转发
+# qisiTV 网站构建与 LikeAI 临时转发
+
+新版默认通过 `scripts/export-qisitv-website.sh /path/to/personal-site` 导出完整引擎前端（`VITE_QISITV_ENGINE=1`、`/qisitv/` base、完整媒体资源）。脚本只构建和复制文件，不发布网站。旧的浏览器独立模式须显式设置 `QISITV_WEBSITE_MODE=legacy`，不与已迁移的引擎项目双写。
+
+发布完整前端前，先交付匹配版本的本机引擎安装包及源代码/许可；旧连接器包不包含助手和原生媒体运行时，不能代替完整引擎。网站保留历史 downloads 路径供旧用户安装，新的完整引擎由 qisiTV GitHub Releases 分发。网页无需账户，模型密钥与素材直接通过配对的本机引擎发送到所选服务；以下临时转发合同保留用于旧浏览器模式。
 
 此目录是网站转发函数及测试的规范源。发布前把 `api/` 和 `test/` 复制到 Astro 静态网站根目录，并把 `vercel.fragment.json` 的 rewrite 合并到网站 `vercel.json`（不要覆盖网站其他配置）。函数采用 Vercel Node.js Web Handler，不需要数据库、账户、平台密钥或新运行时依赖；开发类型检查使用 `@types/node`。
 

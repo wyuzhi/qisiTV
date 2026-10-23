@@ -27,6 +27,7 @@ import (
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/outbound"
+	"qisitv/backend/internal/skillhub"
 
 	"gorm.io/gorm"
 )
@@ -76,13 +77,14 @@ type SkillPackageBundleFile struct {
 }
 
 type SkillPackageBundle struct {
-	SkillID     string                   `json:"skillId"`
-	Name        string                   `json:"name"`
-	Description string                   `json:"description"`
-	VersionID   string                   `json:"versionId"`
-	Version     string                   `json:"version"`
-	ContentHash string                   `json:"contentHash"`
-	Files       []SkillPackageBundleFile `json:"files"`
+	SkillID       string                   `json:"skillId"`
+	Name          string                   `json:"name"`
+	Description   string                   `json:"description"`
+	VersionID     string                   `json:"versionId"`
+	Version       string                   `json:"version"`
+	ContentHash   string                   `json:"contentHash"`
+	Files         []SkillPackageBundleFile `json:"files"`
+	MarketRelease *skillhub.Release        `json:"marketRelease,omitempty"`
 }
 
 type SkillFileSearchResult struct {
@@ -92,9 +94,10 @@ type SkillFileSearchResult struct {
 }
 
 type skillPackageMetadata struct {
-	Name        string
-	Description string
-	Version     string
+	Name          string
+	Description   string
+	Version       string
+	MarketRelease *skillhub.Release
 }
 
 type skillPackageArchive struct {
@@ -286,6 +289,28 @@ func (s *Service) updateSingleMarkdownSkill(skill *model.Skill, req SkillMutatio
 	if err != nil {
 		return err
 	}
+	// Editing a private fork keeps its references and license alongside SKILL.md.
+	if skill.CurrentVersionID != "" {
+		bundle, e := s.SkillPackageBundle(skill.OwnerID, skill.ID)
+		if e != nil {
+			return e
+		}
+		for _, f := range bundle.Files {
+			if f.Path == "SKILL.md" {
+				continue
+			}
+			b, e := base64.StdEncoding.DecodeString(f.ContentBase64)
+			if e != nil {
+				return e
+			}
+			archive.Files[f.Path] = b
+		}
+		archive.Metadata.MarketRelease = bundle.MarketRelease
+		archive, err = finalizeSkillArchive(archive.Files, archive.Metadata)
+		if err != nil {
+			return err
+		}
+	}
 	skill.Instruction = req.Instruction
 	return s.addSkillArchiveVersion(skill, archive, "markdown", req.MarkdownURL, "", "", "", false)
 }
@@ -371,7 +396,13 @@ func (s *Service) addSkillArchiveVersion(skill *model.Skill, archive skillPackag
 	skill.AutoUpdate = autoUpdate
 	skill.LastCheckedAt = &now
 	skill.LastSyncedAt = &now
-	if err := s.repo.AddSkillVersion(skill, version, files); err != nil {
+	var saveErr error
+	if sourceType == "market" {
+		saveErr = s.repo.AddMarketSkillVersion(skill, version, files)
+	} else {
+		saveErr = s.repo.AddSkillVersion(skill, version, files)
+	}
+	if err := saveErr; err != nil {
 		_ = os.Remove(filepath.Join(s.dataDir, "skill-packages", filepath.FromSlash(packageKey)))
 		return err
 	}
@@ -379,6 +410,14 @@ func (s *Service) addSkillArchiveVersion(skill *model.Skill, archive skillPackag
 }
 
 func (s *Service) persistSkillArchive(skillID string, versionID string, archive skillPackageArchive, sourceCommit string) (string, *model.SkillVersion, []model.SkillFile, error) {
+	marketReleaseJSON := ""
+	if archive.Metadata.MarketRelease != nil {
+		data, err := json.Marshal(archive.Metadata.MarketRelease)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		marketReleaseJSON = string(data)
+	}
 	packageKey := path.Join(skillID, versionID+".zip")
 	absolute := filepath.Join(s.dataDir, "skill-packages", filepath.FromSlash(packageKey))
 	if err := os.MkdirAll(filepath.Dir(absolute), 0o750); err != nil {
@@ -408,7 +447,7 @@ func (s *Service) persistSkillArchive(skillID string, versionID string, archive 
 	if err := os.Rename(temporaryPath, absolute); err != nil {
 		return "", nil, nil, err
 	}
-	version := &model.SkillVersion{ID: versionID, SkillID: skillID, ContentHash: archive.ContentHash, EntryPath: "SKILL.md", PackageKey: packageKey, FileCount: len(archive.Files), TotalBytes: archive.TotalBytes, SourceCommit: sourceCommit}
+	version := &model.SkillVersion{ID: versionID, SkillID: skillID, ContentHash: archive.ContentHash, EntryPath: "SKILL.md", PackageKey: packageKey, FileCount: len(archive.Files), TotalBytes: archive.TotalBytes, SourceCommit: sourceCommit, MarketReleaseJSON: marketReleaseJSON}
 	paths := sortedSkillPaths(archive.Files)
 	files := make([]model.SkillFile, 0, len(paths))
 	for _, filePath := range paths {
@@ -474,6 +513,10 @@ func (s *Service) SkillPackageBundle(userID string, skillID string) (*SkillPacka
 		return nil, err
 	}
 	bundle := &SkillPackageBundle{SkillID: skill.ID, Name: skill.Name, Description: skill.Description, VersionID: version.ID, Version: version.VersionLabel, ContentHash: version.ContentHash, Files: make([]SkillPackageBundleFile, 0, len(files))}
+	bundle.MarketRelease, err = marketReleaseMetadata(version.MarketReleaseJSON)
+	if err != nil {
+		return nil, err
+	}
 	for _, file := range files {
 		content, err := s.readSkillArchiveEntry(version, file.Path)
 		if err != nil {

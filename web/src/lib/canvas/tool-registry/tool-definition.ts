@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { CanvasWorkflowContribution } from "@/lib/canvas/workflow-capability";
 import type { MouseEvent } from "react";
 
 import type { CanvasAlignmentMode } from "@/lib/canvas/canvas-layout";
@@ -70,7 +71,9 @@ export type ToolbarHandlers = {
     onCreateReferenceGroup: () => void;
     onBatchConnect: () => void;
     onMergeVideos: () => void;
-    onSendSelectionToAgent: () => void;
+    /** 只有画布页的多选工具栏提供这个入口；主工具栏不装配它。 */
+    onAskAssistant?: () => void;
+    onSaveWorkflow?: () => void;
     // 节点悬停工具栏——节点操作（均接收当前节点）
     onNodeInfo: (node: CanvasNodeData) => void;
     onNodeDelete: (node: CanvasNodeData) => void;
@@ -97,6 +100,7 @@ export type ToolbarHandlers = {
     onNodeExtractAudioFromVideo: (node: CanvasNodeData) => void;
     onNodeTrimVideoSegments: (node: CanvasNodeData) => void;
     onNodeCropVideo: (node: CanvasNodeData) => void;
+    onNodeDepthCapture: (node: CanvasNodeData) => void;
     onNodeSubtitles: (node: CanvasNodeData) => void;
     onNodeTimeline: (node: CanvasNodeData) => void;
     onNodeReversePrompt: (node: CanvasNodeData) => void;
@@ -161,6 +165,7 @@ export type AddNodeMenuContext = {
 
 /** 工具定义——注册表的基本单元 */
 export type ToolDefinition = {
+    workflow?: CanvasWorkflowContribution;
     id: string;
     toolbar: ToolbarId;
     category: ToolCategory;

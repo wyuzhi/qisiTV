@@ -13,17 +13,18 @@ export type DirectorTransactionHooks<TSnapshot> = {
     terminateDrag?: () => void;
 };
 
-export type DirectorTransaction = {
+export type DirectorTransaction<TSnapshot = unknown> = {
     begin: () => void;
     end: (outcome: "commit" | "cancel") => void;
     active: () => boolean;
+    snapshot: () => TSnapshot | null;
 };
 
 /**
  * 一次手势一个事务：begin 抓快照，end 恰好产生一个终态。
  * 幂等——非活跃时的 end 是空操作，终态后可以重新 begin。
  */
-export function createDirectorTransaction<TSnapshot>(hooks: DirectorTransactionHooks<TSnapshot>): DirectorTransaction {
+export function createDirectorTransaction<TSnapshot>(hooks: DirectorTransactionHooks<TSnapshot>): DirectorTransaction<TSnapshot> {
     let state = directorGestureIdle;
     // 快照可能是任何值（含 0 / ""），所以用独立标记表示「有快照」，不能用真值判断。
     let snapshot: TSnapshot | null = null;
@@ -63,6 +64,7 @@ export function createDirectorTransaction<TSnapshot>(hooks: DirectorTransactionH
             hooks.setActive(false);
         },
         active: () => state.active,
+        snapshot: () => hasSnapshot ? snapshot : null,
     };
 }
 

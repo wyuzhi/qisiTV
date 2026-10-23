@@ -17,10 +17,11 @@ import { WorkingDots, WorkingGlow } from "@/components/ai/working-indicator";
 import { MessageReasoning } from "@/components/ai/message-reasoning";
 import { creationResultAssetIds } from "@/lib/canvas/canvas-asset-handoff";
 import { GenerationFailureNotice } from "@/components/generation/generation-failure-notice";
-import { explainGenerationError, shouldBlockAutomaticRetry } from "@/lib/generation-error";
+import { explainGenerationError, shouldBlockManualRetry } from "@/lib/generation-error";
 import { formatVideoResolutionLabel as videoResolutionLabel } from "@/lib/video-generation-options";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { CachedResourceImage } from "@/components/cached-resource-image";
+import { AuthenticatedDownload, AuthenticatedImage, AuthenticatedVideo } from "@/components/assets/authenticated-media";
 import { CanvasImagePreview } from "@/components/canvas/canvas-image-preview";
 import { CanvasResourceMentionTextarea } from "@/components/canvas/canvas-resource-mention-textarea";
 import { VoiceRecordingButton } from "@/components/conversation/voice-recording-button";
@@ -220,7 +221,7 @@ export function CreationMessageView({ item, shotNumber, onRetryFailure, onCreate
     const toolStatus: GenerationToolStatus = item.status === "pending" ? "running" : item.status === "error" ? "error" : item.status === "cancelled" ? "cancelled" : "completed";
     return <article className={`creation-assistant-message is-${mode}`}>
         {mode === "text" ? <><div className="creation-message-heading">{heading}</div>{item.reasoning ? <div className="creation-message-reasoning-wrap"><MessageReasoning reasoning={item.reasoning} isStreaming={item.status === "streaming"} /></div> : null}<div className="creation-message-content">{item.content ? <AIMessageMarkdown isStreaming={item.status === "streaming"}>{item.content}</AIMessageMarkdown> : <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><WorkingDots dotSize={5} gap={2} /><span>正在生成…</span></span>}</div></> : <GenerationToolCard status={toolStatus} heading={heading}><MediaResult item={item} onRetryFailure={onRetryFailure} onCreateVariant={onCreateVariant} onContinueCanvas={onContinueCanvas} openingCanvas={openingCanvas} /></GenerationToolCard>}
-        {item.error && mode === "text" ? <div className="creation-message-error"><GenerationFailureNotice explanation={explainGenerationError(item.error)} onRetry={shouldBlockAutomaticRetry(item.error) ? undefined : onRetryFailure} /></div> : null}
+        {item.error && mode === "text" ? <div className="creation-message-error"><GenerationFailureNotice explanation={explainGenerationError(item.error, { stage: item.generationStage })} onRetry={shouldBlockManualRetry(item.error, item.generationStage) ? undefined : onRetryFailure} /></div> : null}
     </article>;
 }
 
@@ -241,7 +242,7 @@ function CreationUserMessage({ item, shotNumber, onEditUserMessage }: { item: Cr
             const url = attachment.previewUrl || ("dataUrl" in attachment ? attachment.dataUrl : attachment.url) || "";
             const imageUrl = kind === "image" ? resolveResourceUrl(attachment.storageKey, url) : "";
             const previewUrl = kind === "image" ? imageUrl : url;
-            return <button key={attachment.id} type="button" className={!previewable ? "is-file" : undefined} onClick={() => { if (!previewable) return; setPreviewType(kind === "video" ? "video" : "image"); setPreviewUrl(kind === "video" ? attachment.url || "" : previewUrl); }} aria-label={previewable ? `预览 ${attachment.name || "附件"}` : attachment.name || "附件"} disabled={previewable && !previewUrl}>{kind === "video" ? <video src={attachment.url || ""} poster={url !== attachment.url ? url : undefined} muted playsInline preload="metadata" /> : kind === "image" ? <CachedResourceImage storageKey={attachment.storageKey} src={imageUrl} alt={attachment.name || "附件"} width={44} height={44} loading="lazy" decoding="async" /> : kind === "audio" ? <Music2 /> : <FileText />}{previewable ? <span aria-hidden="true"><Maximize2 /></span> : null}</button>;
+            return <button key={attachment.id} type="button" className={!previewable ? "is-file" : undefined} onClick={() => { if (!previewable) return; setPreviewType(kind === "video" ? "video" : "image"); setPreviewUrl(kind === "video" ? attachment.url || "" : previewUrl); }} aria-label={previewable ? `预览 ${attachment.name || "附件"}` : attachment.name || "附件"} disabled={previewable && !previewUrl}>{kind === "video" ? <AuthenticatedVideo src={attachment.url || ""} poster={url !== attachment.url ? url : undefined} muted playsInline preload="metadata" /> : kind === "image" ? <CachedResourceImage storageKey={attachment.storageKey} src={imageUrl} alt={attachment.name || "附件"} width={44} height={44} loading="lazy" decoding="async" /> : kind === "audio" ? <Music2 /> : <FileText />}{previewable ? <span aria-hidden="true"><Maximize2 /></span> : null}</button>;
         })}</div> : null}
         <div className="creation-user-message-actions"><Tooltip title="复制提示词"><button type="button" className="creation-user-message-copy" aria-label="复制提示词" onClick={() => copyText(visiblePrompt, "提示词已复制")}><Copy /></button></Tooltip><Tooltip title="编辑并重新发送"><button type="button" className="creation-user-message-edit" aria-label="编辑提示词" onClick={() => onEditUserMessage(visiblePrompt)}><Pencil /></button></Tooltip></div>
         <CreationMediaPreviewModal url={previewUrl} type={previewType} onClose={() => setPreviewUrl("")} />
@@ -280,14 +281,14 @@ function MediaResult({ item, onRetryFailure, onCreateVariant, onContinueCanvas, 
     if (item.status === "pending") return <CreationMediaPending mode={item.mode || "image"} ratio={item.settings?.ratio} />;
     if ((item.status === "error" || item.status === "cancelled") && !resultUrls.length) {
         if (item.status === "cancelled") return <div className="creation-media-error"><span>{item.content || "已停止"}</span></div>;
-        const explanation = explainGenerationError(item.error || "生成失败");
-        return <div className="creation-media-error"><GenerationFailureNotice explanation={explanation} onRetry={explanation.blockAutomaticRetry ? undefined : onRetryFailure} /></div>;
+        const explanation = explainGenerationError(item.error || "生成失败", { stage: item.generationStage });
+        return <div className="creation-media-error"><GenerationFailureNotice explanation={explanation} onRetry={explanation.blockManualRetry ? undefined : onRetryFailure} /></div>;
     }
     if (!resultUrls.length) return <div className="creation-media-empty">没有返回可预览结果 <button type="button" onClick={onRetryFailure}>重试</button></div>;
     const isVideo = item.mode === "video";
     return <div className="creation-media-result">
-        {isVideo ? <button type="button" className="creation-video-result" onClick={() => { setPreviewType("video"); setPreviewUrl(displayUrls[0]); }} aria-label="预览生成视频"><video muted preload="metadata" src={displayUrls[0]} /><span><Maximize2 />预览视频</span></button> : <div className="creation-image-result-grid">{displayUrls.map((url) => <button key={url} type="button" className="creation-image-result" onClick={() => { setPreviewType("image"); setPreviewUrl(url); }} aria-label="预览生成图片"><img src={url} alt="生成结果" /><span><Maximize2 /></span></button>)}</div>}
-        <div className="creation-media-actions"><span>{isVideo ? "视频结果" : `${resultUrls.length} 张图片`}</span><Button type="link" size="small" loading={openingCanvas} disabled={!canContinueWithResults} title={canContinueWithResults ? undefined : "素材保存完成后才能转入画布"} onClick={() => onContinueCanvas(resultAssetIds)}>添加到画布</Button>{displayUrls.map((url, index) => <a key={`${url}-download`} href={url} download>{displayUrls.length > 1 ? `下载 ${index + 1}` : <><Download />下载</>}</a>)}</div>
+        {isVideo ? <button type="button" className="creation-video-result" onClick={() => { setPreviewType("video"); setPreviewUrl(displayUrls[0]); }} aria-label="预览生成视频"><AuthenticatedVideo muted preload="metadata" src={displayUrls[0]} /><span><Maximize2 />预览视频</span></button> : <div className="creation-image-result-grid">{displayUrls.map((url) => <button key={url} type="button" className="creation-image-result" onClick={() => { setPreviewType("image"); setPreviewUrl(url); }} aria-label="预览生成图片"><AuthenticatedImage src={url} alt="生成结果" /><span><Maximize2 /></span></button>)}</div>}
+        <div className="creation-media-actions"><span>{isVideo ? "视频结果" : `${resultUrls.length} 张图片`}</span><Button type="link" size="small" loading={openingCanvas} disabled={!canContinueWithResults} title={canContinueWithResults ? undefined : "素材保存完成后才能转入画布"} onClick={() => onContinueCanvas(resultAssetIds)}>添加到画布</Button>{displayUrls.map((url, index) => <AuthenticatedDownload key={`${url}-download`} url={url} name={`qisitv-${item.id}-${index + 1}`} label={`下载${isVideo ? "视频" : "图片"} ${index + 1}`}>{displayUrls.length > 1 ? `下载 ${index + 1}` : <><Download />下载</>}</AuthenticatedDownload>)}</div>
         <CreationMediaPreviewModal url={previewUrl} type={previewType} onClose={() => setPreviewUrl("")} />
     </div>;
 }
@@ -306,7 +307,7 @@ function CreationMessageReferences({ references }: { references: CreationReferen
     return <div className="creation-user-message-references" aria-label="本次引用">{references.map((reference) => {
         const Icon = reference.kind === "skill" ? Sparkles : reference.kind === "image" ? ImageIcon : reference.kind === "video" ? Film : reference.kind === "audio" ? Music2 : FileText;
         const imageUrl = reference.kind === "image" ? resolveResourceUrl(reference.storageKey, reference.previewUrl) : reference.previewUrl;
-        return <span key={reference.id} className="creation-user-message-reference">{imageUrl && reference.kind === "video" ? <video src={imageUrl} muted playsInline preload="metadata" aria-label={reference.label} /> : imageUrl && reference.kind === "image" ? <CachedResourceImage storageKey={reference.storageKey} src={imageUrl} alt="" loading="lazy" decoding="async" /> : <Icon />}<span>{reference.label}</span></span>;
+        return <span key={reference.id} className="creation-user-message-reference">{imageUrl && reference.kind === "video" ? <AuthenticatedVideo src={imageUrl} muted playsInline preload="metadata" aria-label={reference.label} /> : imageUrl && reference.kind === "image" ? <CachedResourceImage storageKey={reference.storageKey} src={imageUrl} alt="" loading="lazy" decoding="async" /> : <Icon />}<span>{reference.label}</span></span>;
     })}</div>;
 }
 
@@ -314,7 +315,7 @@ function CreationMediaPreviewModal({ url, type, onClose }: { url: string; type: 
     if (type === "image") return <CanvasImagePreview src={url} alt="媒体预览" onClose={onClose} />;
 
     return <AppModal flush open={Boolean(url)} title={null} footer={null} centered destroyOnHidden width="min(1160px, calc(100vw - 32px))" onCancel={onClose} className="creation-media-preview-modal">
-        {url ? <video controls autoPlay className="creation-media-preview-video" src={url} /> : null}
+        {url ? <AuthenticatedVideo controls autoPlay className="creation-media-preview-video" src={url} /> : null}
     </AppModal>;
 }
 
@@ -328,7 +329,7 @@ function CreationAttachmentThumbnail({ item, onPreview, onRemove }: {
     const url = (kind === "video" ? item.url : item.previewUrl) || "";
     const imageUrl = kind === "image" ? resolveResourceUrl(item.storageKey, item.previewUrl) : "";
     const previewUrl = kind === "image" ? imageUrl : url;
-    const content = kind === "video" ? <video src={item.url} poster={item.previewUrl !== item.url ? item.previewUrl : undefined} muted playsInline preload="metadata" aria-label={item.name} /> : kind === "image" ? <CachedResourceImage storageKey={item.storageKey} src={imageUrl} alt={item.name} loading="lazy" decoding="async" fallback={<span className="creation-chat-file-icon"><ImageIcon /></span>} /> : <span className="creation-chat-file-icon">{kind === "audio" ? <Music2 /> : <FileText />}<em>{item.name}</em></span>;
+    const content = kind === "video" ? <AuthenticatedVideo src={item.url} poster={item.previewUrl !== item.url ? item.previewUrl : undefined} muted playsInline preload="metadata" aria-label={item.name} /> : kind === "image" ? <CachedResourceImage storageKey={item.storageKey} src={imageUrl} alt={item.name} loading="lazy" decoding="async" fallback={<span className="creation-chat-file-icon"><ImageIcon /></span>} /> : <span className="creation-chat-file-icon">{kind === "audio" ? <Music2 /> : <FileText />}<em>{item.name}</em></span>;
     return <div className="creation-reference-card-content">
         {previewable ? <button type="button" className="creation-reference-card-preview" onClick={() => onPreview(kind === "video" ? "video" : "image", previewUrl)} aria-label={`放大预览 ${item.name}`} disabled={!previewUrl}>{content}<span aria-hidden="true"><Maximize2 /></span></button> : <div className="creation-reference-card-preview is-file" aria-label={item.name}>{content}</div>}
         <button type="button" className="creation-reference-card-remove" onPointerDownCapture={(event) => event.stopPropagation()} onMouseDownCapture={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove(item.id); }} aria-label={`移除 ${item.name}`}><X /></button>
@@ -661,7 +662,7 @@ export function CreationComposer(props: ComposerProps) {
     );
 }
 
-export function CreationModeTabs({ mode, onModeChange, agentActive = false, onAgentSelect, orientation = "horizontal" }: { mode: CreationMode; onModeChange: (mode: CreationMode) => void; agentActive?: boolean; onAgentSelect?: () => void; orientation?: "horizontal" | "vertical" }) {
+export function CreationModeTabs({ mode, onModeChange, orientation = "horizontal" }: { mode: CreationMode; onModeChange: (mode: CreationMode) => void; orientation?: "horizontal" | "vertical" }) {
     const reducedMotion = useReducedMotion();
     const items: { mode: CreationMode; icon: ReactNode; label: string }[] = [
         { mode: "video", icon: <Film />, label: "视频" },
@@ -677,15 +678,14 @@ export function CreationModeTabs({ mode, onModeChange, agentActive = false, onAg
         />
     ) : null;
     return <LayoutGroup id={`creation-mode-tabs-${orientation}`}>
-        <div className="creation-mode-tabs" role="group" aria-label="创作模式" data-active-mode={agentActive ? "agent" : mode} data-orientation={orientation} style={{ gridTemplateColumns: orientation === "vertical" ? "minmax(0, 1fr)" : `repeat(${onAgentSelect ? 4 : 3}, minmax(0, 1fr))` }}>
+        <div className="creation-mode-tabs" role="group" aria-label="创作模式" data-active-mode={mode} data-orientation={orientation} style={{ gridTemplateColumns: orientation === "vertical" ? "minmax(0, 1fr)" : `repeat(3, minmax(0, 1fr))` }}>
         {items.map((item) => (
-            <button key={item.mode} type="button" className="creation-mode-button" data-mode={item.mode} aria-pressed={!agentActive && item.mode === mode} aria-label={`${item.label}生成`} onClick={() => onModeChange(item.mode)}>
-                {indicator(!agentActive && item.mode === mode)}
+            <button key={item.mode} type="button" className="creation-mode-button" data-mode={item.mode} aria-pressed={item.mode === mode} aria-label={`${item.label}生成`} onClick={() => onModeChange(item.mode)}>
+                {indicator(item.mode === mode)}
                 {item.icon}
                 <span>{item.label}</span>
             </button>
         ))}
-        {onAgentSelect ? <button type="button" className="creation-mode-button" data-mode="agent" aria-pressed={agentActive} onClick={onAgentSelect}>{indicator(agentActive)}<Brain /><span>Agent</span><i className="creation-mode-spark" aria-hidden /></button> : null}
         </div>
     </LayoutGroup>;
 }
@@ -750,9 +750,9 @@ function DurationMenu({ profile, seconds, onChange }: { profile: VideoCapability
         <input className="h-8 w-full" style={{ accentColor: "var(--creation-text)" }} type="range" min={min} max={max} step={step} value={value} aria-label="视频时长（秒）" onChange={(event) => onChange(event.target.value)} />
         <div className="flex justify-between px-0.5 text-[var(--fs-tiny)] text-[var(--creation-muted)]"><span>{min}s</span><span>{max}s</span></div>
         <label className="creation-custom-value is-duration"><span>自定义时长</span><span className="creation-duration-custom-field"><input type="number" min={min} max={max} step={step} inputMode="numeric" value={seconds} onFocus={(event) => event.currentTarget.select()} onBlur={() => onChange(String(value))} onChange={(event) => onChange(event.target.value)} aria-label="自定义视频时长，单位秒" /><em>秒</em></span></label>
-    </> : <div className="creation-duration-choices">{presets.map((item) => <button key={item} type="button" className={item === value ? "is-selected" : ""} onClick={() => onChange(String(item))}>{item}s</button>)}</div>;
-    return <Popover open={open} onOpenChange={setOpen} trigger="click" placement="bottom" arrow={false} classNames={{ root: "creation-control-popover", container: "creation-control-popover-surface", content: "creation-control-popover-content" }} content={<div className="creation-duration-menu"><div className="creation-duration-heading"><span>时长</span><strong>{value} 秒</strong></div>{durationControl}</div>}>
-        <button type="button" className="creation-chat-control is-duration" aria-label={`视频时长：${value}秒`}><Clock3 /><span>{value}s</span><ChevronDown className={open ? "is-open" : ""} /></button>
+    </> : <div className="creation-duration-choices">{presets.map((item) => <button key={item} type="button" className={item === value ? "is-selected" : ""} onClick={() => onChange(String(item))}>{item === -1 ? "自动" : `${item}s`}</button>)}</div>;
+    return <Popover open={open} onOpenChange={setOpen} trigger="click" placement="bottom" arrow={false} classNames={{ root: "creation-control-popover", container: "creation-control-popover-surface", content: "creation-control-popover-content" }} content={<div className="creation-duration-menu"><div className="creation-duration-heading"><span>时长</span><strong>{value === -1 ? "自动" : `${value} 秒`}</strong></div>{durationControl}</div>}>
+        <button type="button" className="creation-chat-control is-duration" aria-label={`视频时长：${value === -1 ? "自动" : `${value}秒`}`}><Clock3 /><span>{value === -1 ? "自动" : `${value}s`}</span><ChevronDown className={open ? "is-open" : ""} /></button>
     </Popover>;
 }
 

@@ -292,7 +292,7 @@ async function connectCdp(cdpPort) {
      * 真实鼠标点击：等待目标中心稳定且位于最上层，再派发 Input.dispatchMouseEvent。
      * 不用 el.click()，因为那是 untrusted 合成事件，拿不到真实 user gesture。
      */
-    const clickPoint = async (locatorExpression, label) => {
+    const clickPoint = async (locatorExpression, label, button = "left") => {
         const readInteractiveBox = () =>
             evaluate(`(() => {
             const el = ${locatorExpression};
@@ -336,14 +336,15 @@ async function connectCdp(cdpPort) {
             console.log(`      (click target not interactable: ${label})`);
             return false;
         }
-        const point = { x: box.x, y: box.y, button: "left" };
+        const point = { x: box.x, y: box.y, button };
         await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point, buttons: 0 });
-        await send("Input.dispatchMouseEvent", { type: "mousePressed", ...point, buttons: 1, clickCount: 1 });
+        await send("Input.dispatchMouseEvent", { type: "mousePressed", ...point, buttons: button === "right" ? 2 : 1, clickCount: 1 });
         await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, buttons: 0, clickCount: 1 });
         return true;
     };
 
     const click = (selector) => clickPoint(`document.querySelector(${JSON.stringify(selector)})`, selector);
+    const contextClick = (selector) => clickPoint(`document.querySelector(${JSON.stringify(selector)})`, selector, "right");
 
     const clickText = (text, tag = "button") =>
         clickPoint(`[...document.querySelectorAll(${JSON.stringify(tag)})].find((element) => (element.textContent || "").trim() === ${JSON.stringify(text)} && element.getClientRects().length > 0)`, `${tag}:text-is(${text})`);
@@ -358,7 +359,7 @@ async function connectCdp(cdpPort) {
         return true;
     };
 
-    return { send, evaluate, poll, click, clickText, navigateFresh, problems, close: () => ws.close() };
+    return { send, evaluate, poll, click, contextClick, clickText, navigateFresh, problems, close: () => ws.close() };
 }
 
 /**
@@ -423,30 +424,30 @@ async function smokeWorkbench(cdp, baseUrl) {
 
     // P1-A 起 AutoKey/时间轴归属动画模式：默认摆场模式下它们必须不存在。
     const layoutGating = await cdp.evaluate(`(() => ({
-        mode: document.querySelector('button[data-mode="layout"]')?.getAttribute('aria-pressed') ?? null,
+        mode: document.querySelector('[data-director-mode]')?.getAttribute('data-director-mode') ?? null,
         sequencer: document.querySelectorAll('.director-sequencer').length,
-        autoKey: document.querySelectorAll('button[title="自动关键帧"]').length,
+        autoKey: document.querySelectorAll('button[aria-label="自动帧"]').length,
     }))()`);
-    assert(layoutGating.mode === "true", "A6 默认进入摆场模式", `got ${JSON.stringify(layoutGating.mode)}`);
+    assert(layoutGating.mode === "layout", "A6 默认进入摆场模式", `got ${JSON.stringify(layoutGating.mode)}`);
     assert(layoutGating.sequencer === 0 && layoutGating.autoKey === 0, "A7 摆场模式不显示时间轴与 AutoKey", JSON.stringify(layoutGating));
 
     // 原 A6 的断言意图（AutoKey 默认不开启）在它真正存在的模式里继续守住。
-    const switched = await cdp.click('button[data-mode="animate"]');
-    if (!switched) throw new Error("A: 动画模式按钮 not clickable");
+    const switched = await cdp.click('[aria-label="动画时间轴"]');
+    if (!switched) throw new Error("A: 动画时间轴按钮 not clickable");
     const sequencerShown = await cdp.poll(`document.querySelectorAll('.director-sequencer').length === 1`, "sequencer in animate mode", 20000);
     assert(sequencerShown, "A8 动画模式显示时间轴");
 
-    const autoKey = await cdp.evaluate(`document.querySelector('button[title="自动关键帧"]')?.getAttribute('aria-pressed') ?? null`);
+    const autoKey = await cdp.evaluate(`document.querySelector('button[aria-label="自动帧"]')?.getAttribute('aria-pressed') ?? null`);
     assert(autoKey === "false", "A9 AutoKey defaults to aria-pressed=false", `got ${JSON.stringify(autoKey)}`);
 
-    const addedCube = await cdp.click('[aria-label="添加立方体"]');
+    const addedCube = await addCube(cdp);
     if (!addedCube) throw new Error("A: 添加立方体 button not clickable");
-    const cubeAppeared = await cdp.poll(`!!document.querySelector('[aria-label="删除立方体"]')`, "cube row", 20000);
+    const cubeAppeared = await cdp.poll(`!!document.querySelector('[data-director-row-label="立方体"]')`, "cube row", 20000);
     assert(cubeAppeared, "A10 added cube appears in object list");
 
-    const undone = await cdp.click('[aria-label="撤销"]');
+    const undone = await undo(cdp);
     if (!undone) throw new Error("A: 撤销 button not clickable");
-    const cubeGone = await cdp.poll(`!document.querySelector('[aria-label="删除立方体"]')`, "cube removed by undo", 20000);
+    const cubeGone = await cdp.poll(`!document.querySelector('[data-director-row-label="立方体"]')`, "cube removed by undo", 20000);
     assert(cubeGone, "A11 Undo removes the added cube");
 
     // 场景结束前必须真实关闭：下一个场景要重新导航，不能靠忽略 beforeunload 绕过未保存态。
@@ -475,7 +476,8 @@ async function localModel(cdp, baseUrl) {
     const opened = await cdp.click('[data-testid="toggle-workbench"]');
     if (!opened) throw new Error("B: toggle-workbench not clickable");
 
-    const rowReady = await cdp.poll(`!!document.querySelector('[aria-label="删除本地模型 repro triangle"]')`, "model row", 30000);
+    await cdp.click('[aria-label="场景"]');
+    const rowReady = await cdp.poll(`!!document.querySelector('[data-director-row-label="本地模型 repro triangle"]')`, "model row", 30000);
     assert(rowReady, "B2 local model row present in object list");
     const hasCanvas = await cdp.poll(`(() => { const c = document.querySelector('.director-viewport-shell canvas'); return !!c && c.clientWidth > 0; })()`, "canvas", 40000);
     assert(hasCanvas, "B3 real canvas present");
@@ -571,10 +573,11 @@ async function deleteWhileLoading(cdp, baseUrl) {
         const opened = await cdp.click('[data-testid="toggle-workbench"]');
         if (!opened) throw new Error("D: toggle-workbench not clickable");
 
-        const rowReady = await cdp.poll(`!!document.querySelector('[aria-label="删除本地模型 repro triangle"]')`, "model row", 30000);
+        await cdp.click('[aria-label="场景"]');
+        const rowReady = await cdp.poll(`!!document.querySelector('[data-director-row-label="本地模型 repro triangle"]')`, "model row", 30000);
         assert(rowReady, "D1 model row present while load still in flight");
 
-        const deleted = await cdp.click('[aria-label="删除本地模型 repro triangle"]');
+        const deleted = await deleteSceneRow(cdp, "本地模型 repro triangle");
         if (!deleted) throw new Error("D: delete button not clickable");
         const gone = await cdp.poll(`!(document.body.innerText || "").includes('本地模型 repro triangle')`, "name removed", 20000);
         assert(gone, "D2 object removed while its load was in flight");
@@ -698,13 +701,16 @@ async function saveFailureCloseGuard(cdp, baseUrl) {
     assert(hasCanvas, "F2 workbench open with real canvas");
 
     // canonical 改动：dock 新增立方体会走 commit → coordinator.edit → flush（被强制失败）。
-    const addedCube = await cdp.click('[aria-label="添加立方体"]');
+    const addedCube = await addCube(cdp);
     if (!addedCube) throw new Error("F: 添加立方体 button not clickable");
 
     const errorState = await cdp.poll(`(document.body.innerText || "").includes('保存失败')`, "save failure header", 40000);
     assert(errorState, "F3 header surfaces 保存失败 after forced flush failure");
-    const retryVisible = await cdp.poll(`[...document.querySelectorAll('button')].some((b) => (b.textContent || "").includes('重试保存'))`, "retry save affordance", 20000);
+    await cdp.contextClick('.director-viewport-dock button[aria-haspopup="menu"]');
+    const retryVisible = await cdp.poll(`[...document.querySelectorAll('[role="menuitem"]')].some((b) => b.getClientRects().length > 0 && (b.textContent || "").includes('重试保存') && b.getAttribute('aria-disabled') !== 'true')`, "retry save affordance", 20000);
     assert(retryVisible, "F4 actionable 重试保存 affordance present");
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
 
     const closeClicked = await cdp.click('[aria-label="关闭导演台"]');
     if (!closeClicked) throw new Error("F: 关闭导演台 button not clickable");
@@ -751,6 +757,146 @@ async function saveFailureCloseGuard(cdp, baseUrl) {
     assert(cdp.problems.length === 0, "F8 no browser problems in scenario F", JSON.stringify(cdp.problems));
 }
 
+/** A delayed image decode exercises the real upload and screenshot callbacks after unmount. */
+async function delayedMediaAfterClose(cdp, baseUrl) {
+    console.log("\n=== G. delayed media must not overwrite a reopened scene ===");
+    for (const kind of ["panorama", "screenshot", "reference"]) {
+        await cdp.navigateFresh(`${baseUrl}/dev/director-repro`);
+        await cdp.click('[data-testid="toggle-workbench"]');
+        await cdp.poll(`document.querySelector('.director-viewport-shell')?.dataset.rendererReady === 'true'`, "renderer ready", 40000);
+        await cdp.evaluate(`(() => {
+            const Original = window.Image;
+            const descriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+            window.__delayedMedia = [];
+            window.__restoreMedia = () => { window.Image = Original; };
+            window.Image = function(...args) {
+                const image = new Original(...args);
+                Object.defineProperty(image, 'src', {
+                    get() { return descriptor.get.call(image); },
+                    set(url) { window.__delayedMedia.push(() => descriptor.set.call(image, url)); }
+                });
+                return image;
+            };
+        })()`);
+        if (kind === "screenshot") await cdp.click('[aria-label="截图"]');
+        else await cdp.evaluate(`(() => {
+            const canvas = document.createElement('canvas'); canvas.width = canvas.height = 8;
+            canvas.toBlob((blob) => {
+                const transfer = new DataTransfer(); transfer.items.add(new File([blob], 'delayed.png', {type:'image/png'}));
+                const input = document.querySelector(${JSON.stringify(kind === "reference" ? '[data-testid="director-reference-input"]' : 'input[accept="image/*"]')});
+                input.files = transfer.files; input.dispatchEvent(new Event('change', {bubbles:true}));
+            });
+        })()`);
+        assert(await cdp.poll(`window.__delayedMedia.length === 1`, "upload waiting", 10000), `G ${kind}: upload is in flight`);
+        await cdp.click('[aria-label="关闭导演台"]');
+        await cdp.poll(`!document.querySelector('.director-viewport-shell')`, "closed", 15000);
+        await cdp.click('[data-testid="toggle-workbench"]');
+        await cdp.poll(`document.querySelector('.director-viewport-shell')?.dataset.rendererReady === 'true'`, "reopened", 40000);
+        await addCube(cdp);
+        const count = `document.querySelector('[data-testid="object-count"]')?.textContent.replace(/\\s/g,'')`;
+        assert(await cdp.poll(`${count} === '对象数4'`, "new edit", 10000), `G ${kind}: reopened scene has new edit`);
+        await cdp.evaluate(`window.__restoreMedia(); window.__delayedMedia.forEach(release => release());`);
+        await sleep(1500);
+        assert(await cdp.evaluate(`${count} === '对象数4'`), `G ${kind}: late completion preserves canonical scene`);
+        assert(cdp.problems.length === 0, `G ${kind}: no browser problems`, JSON.stringify(cdp.problems));
+    }
+}
+
+async function addCube(cdp) {
+    if (!await cdp.click('[aria-label="场景"]')) return false;
+    if (!await cdp.click('[aria-label="添加场景对象"]')) return false;
+    return cdp.clickText("立方体", '[role="menuitem"]');
+}
+
+async function multiScaleGesture(cdp, baseUrl) {
+    console.log("\n=== H. multi-scale gesture uses one baseline ===");
+    await cdp.navigateFresh(`${baseUrl}/dev/director-repro`);
+    await cdp.click('[data-testid="toggle-workbench"]');
+    await cdp.click('[aria-label="场景"]');
+    await cdp.click('[data-director-row-label="立方体 A"] > button');
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Shift", code: "ShiftLeft", modifiers: 8 });
+    // Multi-selection belongs to the row's click handler; pass the held modifier to the pointer events.
+    const box = await cdp.evaluate(`(() => { const r = document.querySelector('[data-director-row-label="球体 B"] > button').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
+    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...box, button: "left", buttons: 1, clickCount: 1, modifiers: 8 });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...box, button: "left", buttons: 0, clickCount: 1, modifiers: 8 });
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Shift", code: "ShiftLeft" });
+    assert(await cdp.poll(`!!document.querySelector('[aria-label="多选统一缩放滑杆"]')`, "multi inspector"), "H1 two objects selected");
+    const setScale = (value) => cdp.evaluate(`(() => { const input = document.querySelector('[aria-label="多选统一缩放滑杆"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input, ${value}); input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+    await setScale(1.1);
+    await setScale(1.2);
+    assert(await cdp.evaluate(`Number(document.querySelector('[aria-label="多选统一缩放滑杆"]').value) === 1.2`), "H2 consecutive input 1.1 -> 1.2 does not compound");
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+    await cdp.click('[data-director-row-label="球体 B"] > button');
+    assert(await cdp.poll(`Number(document.querySelector('[aria-label="统一缩放滑杆"]')?.value) === 1`, "cancelled scale"), "H3 Escape cancels entire scale gesture");
+    assert(cdp.problems.length === 0, "H4 no browser problems", JSON.stringify(cdp.problems));
+}
+
+async function legacyCoverRecovery(cdp, baseUrl) {
+    console.log("\n=== I. legacy preview storage survives reload ===");
+    await cdp.navigateFresh(`${baseUrl}/dev/director-repro`);
+    await cdp.evaluate(`(async () => {
+        const {setImageBlob} = await import('/src/services/image-storage.ts');
+        const canvas = document.createElement('canvas'); canvas.width = canvas.height = 8;
+        const blob = await new Promise(resolve => canvas.toBlob(resolve));
+        await setImageBlob('image:director-e2e-legacy-cover', blob);
+    })()`);
+    await cdp.navigateFresh(`${baseUrl}/dev/director-repro`);
+    await cdp.evaluate(`(async () => {
+        const {default: React} = await import('/node_modules/.vite/deps/react.js');
+        const {default: {createRoot}} = await import('/node_modules/.vite/deps/react-dom_client.js');
+        const {CanvasDirectorNodePanel} = await import('/src/components/canvas/director/canvas-director-node-panel.tsx');
+        const {createDirectorReproScene} = await import('/src/lib/canvas/director/director-repro-fixture.ts');
+        const host = document.createElement('div'); host.id = 'legacy-cover-fixture'; document.body.append(host);
+        const scene = createDirectorReproScene(); scene.shots[0].previewNodeId = 'legacy-image';
+        createRoot(host).render(React.createElement(CanvasDirectorNodePanel, {
+            node: {id:'legacy-director',type:'director',title:'旧导演台',position:{x:0,y:0},width:640,height:640,metadata:{directorSceneId:scene.id}},
+            scene, readNodeContent:()=>undefined, readNodeStorageKey:(id)=>id==='legacy-image'?'image:director-e2e-legacy-cover':undefined, onOpen:()=>{}
+        }));
+    })()`);
+    assert(await cdp.poll(`document.querySelector('#legacy-cover-fixture img')?.naturalWidth === 8`, "durable legacy cover"), "I1 legacy shot preview resolves durable blob after reload");
+    assert(cdp.problems.length === 0, "I2 no browser problems", JSON.stringify(cdp.problems));
+}
+
+async function recordingSessionCleanup(cdp, baseUrl) {
+    console.log("\n=== J. closing an export returns playback ownership ===");
+    await cdp.navigateFresh(`${baseUrl}/dev/director-repro`);
+    await cdp.click('[data-testid="toggle-workbench"]');
+    await cdp.poll(`document.querySelector('.director-viewport-shell')?.dataset.rendererReady === 'true'`, "renderer ready", 40000);
+    await cdp.evaluate(`(async () => {
+        window.__playback = (await import('/src/stores/canvas/use-director-workbench-store.ts')).useDirectorWorkbenchStore;
+        window.__playback.getState().setPlayhead(1.5);
+        window.__playback.getState().setPlaying(false);
+        window.__playback.getState().setViewMode('free');
+    })()`);
+    await cdp.contextClick('.director-viewport-dock button[aria-haspopup="menu"]');
+    assert(await cdp.clickText("导出白膜视频", '[role="menuitem"]'), "J1 starts export from real menu");
+    assert(await cdp.poll(`window.__playback.getState().playing === true`, "recording started", 20000), "J2 recording takes playback control");
+    await cdp.click('[aria-label="关闭导演台"]');
+    assert(await cdp.poll(`!document.querySelector('.director-viewport-shell')`, "closed export"), "J3 closes while recording");
+    assert(await cdp.evaluate(`(() => { const s = window.__playback.getState(); return !s.playing && s.playhead === 1.5 && s.viewMode === 'free'; })()`), "J4 abort immediately restores pre-export playback");
+    await cdp.click('[data-testid="toggle-workbench"]');
+    await cdp.poll(`document.querySelector('.director-viewport-shell')?.dataset.rendererReady === 'true'`, "reopened", 40000);
+    await cdp.evaluate(`window.__playback.getState().setPlayhead(2.5)`);
+    await sleep(6500);
+    assert(await cdp.evaluate(`window.__playback.getState().playhead === 2.5 && !window.__playback.getState().playing`), "J5 late export completion preserves the new session playhead");
+    assert(cdp.problems.length === 0, "J6 no browser problems", JSON.stringify(cdp.problems));
+}
+
+async function undo(cdp) {
+    const modifiers = await cdp.evaluate('navigator.platform.includes("Mac") ? 4 : 2');
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "z", code: "KeyZ", modifiers });
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "z", code: "KeyZ", modifiers });
+    return true;
+}
+
+async function deleteSceneRow(cdp, label) {
+    if (!await cdp.click(`[data-director-row-label="${label}"] > button`)) return false;
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Delete", code: "Delete", windowsVirtualKeyCode: 46 });
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Delete", code: "Delete", windowsVirtualKeyCode: 46 });
+    return true;
+}
+
 async function main() {
     const chromePath = resolveChrome();
     console.log(`Chrome binary: ${chromePath}`);
@@ -779,7 +925,10 @@ async function main() {
         cdp = await connectCdp(cdpPort);
         console.log("      CDP connected (Runtime, Page, Log, Network enabled)");
 
-        for (const scenario of [smokeWorkbench, localModel, missingRetry, deleteWhileLoading, webglLossRestore, saveFailureCloseGuard]) {
+        const scenarios = [smokeWorkbench, localModel, missingRetry, deleteWhileLoading, webglLossRestore, delayedMediaAfterClose, multiScaleGesture, legacyCoverRecovery, recordingSessionCleanup, saveFailureCloseGuard];
+        const selected = process.env.DIRECTOR_E2E_SCENARIO;
+        if (selected && !scenarios.some((scenario) => scenario.name === selected)) throw new Error(`Unknown scenario: ${selected}`);
+        for (const scenario of scenarios.filter((scenario) => !selected || scenario.name === selected)) {
             try {
                 await scenario(cdp, baseUrl);
             } catch (error) {

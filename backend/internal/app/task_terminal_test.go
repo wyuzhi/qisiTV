@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,7 +30,7 @@ func (r *taskTerminalRepositoryStub) Task(string) (*model.Task, error) {
 	return &copy, nil
 }
 
-func (r *taskTerminalRepositoryStub) UpdateTaskTerminalState(_ string, _ string, _ model.TaskStatus, status model.TaskStatus, stage string, errorText string, completedAt time.Time) (bool, error) {
+func (r *taskTerminalRepositoryStub) UpdateTaskTerminalState(_ string, _ string, _ model.TaskStatus, status model.TaskStatus, stage string, errorText string, completedAt time.Time, diagnostics ...*model.TaskFailureDiagnostics) (bool, error) {
 	r.terminalCalls++
 	if r.terminalConflict {
 		return false, nil
@@ -38,6 +39,9 @@ func (r *taskTerminalRepositoryStub) UpdateTaskTerminalState(_ string, _ string,
 		return false, r.terminalError
 	}
 	if r.task != nil {
+		if len(diagnostics) > 0 {
+			r.task.FailureDiagnostics = diagnostics[0]
+		}
 		r.task.Status, r.task.Stage, r.task.Error, r.task.CompletedAt = status, stage, errorText, &completedAt
 	}
 	return true, nil
@@ -58,12 +62,22 @@ func (l *taskTerminalLoggerStub) log(_ string, _ string, _ string, message strin
 }
 
 type taskTerminalOutputStub struct {
-	calls int
-	err   error
+	deliverCalls int
+	calls        int
+	order        []string
+	deliverErr   error
+	err          error
+}
+
+func (o *taskTerminalOutputStub) DeliverSucceededTask(model.Task) error {
+	o.deliverCalls++
+	o.order = append(o.order, "deliver")
+	return o.deliverErr
 }
 
 func (o *taskTerminalOutputStub) RegisterTaskOutputFromTask(model.Task) error {
 	o.calls++
+	o.order = append(o.order, "register")
 	return o.err
 }
 
@@ -81,6 +95,28 @@ func TestTaskTerminalConflictDoesNotFinalize(t *testing.T) {
 	}
 	if len(replay.statuses) != 0 {
 		t.Fatal("stale worker performed terminal side effects")
+	}
+}
+
+func TestTaskTerminalPreservesImageAndVideoSubmissionUncertainty(t *testing.T) {
+	for name, cause := range map[string]error{
+		"image": imageRecoveryError{errors.New("receipt lost")},
+		"video": providerSubmissionUnknownError{Cause: errors.New("receipt lost")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			task := &model.Task{ID: "task", Status: model.TaskStatusRunning}
+			repo := &taskTerminalRepositoryStub{task: task}
+			coordinator := newTaskTerminalCoordinatorForTest(repo, &taskTerminalReplayStub{}, &taskTerminalLoggerStub{}, &taskTerminalOutputStub{})
+			if err := coordinator.handleExecutionFailure(task, cause, false, false); !errors.Is(err, cause) {
+				t.Fatalf("original failure lost: %v", err)
+			}
+			if task.Stage != "submission_unknown" || !persistedFailureBlocksRetry(persistableTaskFailureMessage(cause), task.Stage) {
+				t.Fatalf("ambiguous paid request became retryable: %+v", task)
+			}
+			if !classifyTaskFailure(cause).Uncertain {
+				t.Fatal("submission uncertainty was lost")
+			}
+		})
 	}
 }
 
@@ -150,8 +186,27 @@ func TestTaskTerminalCoordinatorReturnsOutputRegistrationErrorAfterSuccess(t *te
 	if err := coordinator.handleSuccess(task); !errors.Is(err, outputError) {
 		t.Fatalf("handleSuccess() error = %v, want %v", err, outputError)
 	}
-	if outputs.calls != 1 {
-		t.Fatalf("expected output registration, calls=%d", outputs.calls)
+	if outputs.deliverCalls != 2 || outputs.calls != 1 {
+		t.Fatalf("expected delivery, registration, then delivery bind, deliver=%d register=%d", outputs.deliverCalls, outputs.calls)
+	}
+	if got := strings.Join(outputs.order, ","); got != "deliver,register,deliver" {
+		t.Fatalf("output order = %s", got)
+	}
+}
+
+func TestTaskTerminalCoordinatorDeliversBeforeWorkflowRegistration(t *testing.T) {
+	task := &model.Task{ID: "task-1", UserID: "user-1"}
+	deliverError := errors.New("delivery unavailable")
+	outputs := &taskTerminalOutputStub{deliverErr: deliverError}
+	coordinator := newTaskTerminalCoordinatorForTest(&taskTerminalRepositoryStub{task: task}, &taskTerminalReplayStub{}, &taskTerminalLoggerStub{}, outputs)
+	if err := coordinator.handleSuccess(task); !errors.Is(err, deliverError) {
+		t.Fatalf("handleSuccess() error = %v, want %v", err, deliverError)
+	}
+	if outputs.deliverCalls != 2 || outputs.calls != 1 {
+		t.Fatalf("delivery failure still registers workflow output, deliver=%d register=%d", outputs.deliverCalls, outputs.calls)
+	}
+	if got := strings.Join(outputs.order, ","); got != "deliver,register,deliver" {
+		t.Fatalf("output order = %s", got)
 	}
 }
 

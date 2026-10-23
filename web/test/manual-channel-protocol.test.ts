@@ -4,6 +4,28 @@ import { defaultProtocolForModel, ensureModelProfilesWithUiDefaults, inferProtoc
 import { createModelChannel, defaultConfig, resolveModelRequestConfig } from "@/stores/use-config-store";
 
 describe("manual channel protocol defaults", () => {
+    test("video models without an explicit protocol stay unconfigured through both list editing and submission", () => {
+        for (const profiles of [undefined, [{ model: "seedance-2.5", capability: "video" as const }]]) {
+            const next = ensureModelProfilesWithUiDefaults(["seedance-2.5"], profiles);
+            expect(next[0]?.protocol).toBeUndefined();
+            const channel = createModelChannel({ id: "external", baseUrl: "https://third-party.example/v1", models: ["seedance-2.5"], modelProfiles: profiles });
+            expect(resolveModelRequestConfig({ ...defaultConfig, channels: [channel] }, "external::seedance-2.5").interfaceType).toBeUndefined();
+        }
+        const selected = createModelChannel({ id: "external", interfaceType: "video-generations-json", models: ["seedance-2.5"], modelProfiles: ensureModelProfilesWithUiDefaults(["seedance-2.5"], undefined) });
+        expect(resolveModelRequestConfig({ ...defaultConfig, channels: [selected] }, "external::seedance-2.5").interfaceType).toBe("video-generations-json");
+    });
+    test.each(["gemini-generate-content", "google-gemini-generate-content"])("managed Gemini protocol %s preserves credentials and selects native transport", (protocol) => {
+        const channel = createModelChannel({
+            id: "beefapi", pinned: true, credentialRef: "beefapi-enterprise", hasApiKey: true,
+            baseUrl: "https://example.invalid", apiKey: "must-not-forward", apiFormat: "openai",
+            models: ["gemini-test"], modelProfiles: [{ model: "gemini-test", capability: "text", protocol }],
+        });
+        const resolved = resolveModelRequestConfig({ ...defaultConfig, channels: [channel] }, "beefapi::gemini-test");
+        expect(resolved.interfaceType).toBe("gemini-generate-content");
+        expect(resolved.apiFormat).toBe("gemini");
+        expect(resolved.apiKey).toBe("");
+        expect(resolved.credentialRef).toBe("beefapi-enterprise");
+    });
     test("typed gpt-4.1-mini uses the same Chat Completions default the settings radio shows", () => {
         expect(inferProtocolCapabilityFromModel("gpt-4.1-mini")).toBe("text");
         expect(defaultProtocolForModel("gpt-4.1-mini")).toBe("chat-completion");

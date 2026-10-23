@@ -8,8 +8,8 @@ export const FRAME_COLLAPSED_HEIGHT = 144;
 export const FOLDER_COLLAPSED_WIDTH = 360;
 export const FOLDER_COLLAPSED_HEIGHT = 280;
 
-export function isFrameNode(node?: CanvasNodeData | null): node is CanvasNodeData & { type: CanvasNodeType.Frame } {
-    return node?.type === CanvasNodeType.Frame;
+export function isFrameNode(node?: CanvasNodeData | null): node is CanvasNodeData & { type: CanvasNodeType.Frame | CanvasNodeType.Workflow } {
+    return node?.type === CanvasNodeType.Frame || node?.type === CanvasNodeType.Workflow;
 }
 
 export function isCanvasFolderNode(node?: CanvasNodeData | null) {
@@ -17,11 +17,12 @@ export function isCanvasFolderNode(node?: CanvasNodeData | null) {
 }
 
 export function canFrameContain(node: CanvasNodeData) {
+    if (node.metadata?.workflowSlot || node.metadata?.reusableWorkflow) return true;
     return node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Text || node.type === CanvasNodeType.Drawing || node.type === CanvasNodeType.Script || node.type === CanvasNodeType.Video;
 }
 
 export function canFolderContain(node: CanvasNodeData) {
-    return node.type !== CanvasNodeType.Frame;
+    return !isFrameNode(node);
 }
 
 export function canLinkedFolderArchive(node: CanvasNodeData) {
@@ -77,6 +78,7 @@ export function findFrameDropTargetFromIndex(index: CanvasFrameDropIndex, dragge
 }
 
 function isValidFrameDropTarget(frame: CanvasNodeData, dragged: CanvasNodeData[], draggedNodeIds: Set<string>, offset: Position = { x: 0, y: 0 }) {
+    if (frame.type === CanvasNodeType.Workflow) return false;
     if (!isFrameNode(frame) || (frame.metadata?.frame?.collapsed && !isCanvasFolderNode(frame)) || draggedNodeIds.has(frame.id)) return false;
     const canContain = frame.metadata?.folder?.assetFolderId ? canLinkedFolderArchive : isCanvasFolderNode(frame) ? canFolderContain : canFrameContain;
     if (!dragged.every(canContain)) return false;

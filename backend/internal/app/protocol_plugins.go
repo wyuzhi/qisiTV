@@ -1,587 +1,106 @@
 package app
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-	"sync"
-	"time"
 
-	"qisitv/backend/internal/generation"
+	"qisitv/backend/internal/plugins"
 	"qisitv/backend/internal/protocol"
 )
 
-const protocolPluginMaxBytes = protocol.PluginManifestMaxBytes
-
-// Official packages are immutable inputs shipped with the application. Cache
-// their validated envelopes so multiple service instances do not repeatedly
-// parse the same archives during startup. Uploaded packages are intentionally
-// parsed through the uncached path below.
-var officialPluginPackageCache = struct {
-	sync.RWMutex
-	items map[string]protocol.PluginPackage
-}{items: make(map[string]protocol.PluginPackage)}
-
-func parseOfficialPluginPackage(data []byte) (protocol.PluginPackage, error) {
-	key := pluginHash(data)
-	officialPluginPackageCache.RLock()
-	if pkg, ok := officialPluginPackageCache.items[key]; ok {
-		officialPluginPackageCache.RUnlock()
-		return pkg, nil
-	}
-	officialPluginPackageCache.RUnlock()
-	pkg, err := protocol.ParsePluginPackage(data)
-	if err != nil {
-		return protocol.PluginPackage{}, err
-	}
-	officialPluginPackageCache.Lock()
-	officialPluginPackageCache.items[key] = pkg
-	officialPluginPackageCache.Unlock()
-	return pkg, nil
-}
-
-// PluginView is the backend representation consumed by the single frontend
-// plugin center. Protocol-specific runtime data is nested under Protocol so
-// the public plugin contract can grow without adding another center API.
-type PluginView struct {
-	Manifest    PluginManifestView   `json:"manifest"`
-	Source      string               `json:"source"`
-	FileName    string               `json:"fileName"`
-	Package     string               `json:"package"`
-	SHA256      string               `json:"sha256"`
-	InstalledAt time.Time            `json:"installedAt"`
-	UpdatedAt   time.Time            `json:"updatedAt"`
-	Status      string               `json:"status"`
-	Error       string               `json:"error,omitempty"`
-	Management  PluginManagementView `json:"management"`
-}
-
-type PluginManifestView struct {
-	APIVersion    string                         `json:"apiVersion"`
-	ID            string                         `json:"id"`
-	Name          string                         `json:"name"`
-	Version       string                         `json:"version"`
-	Entry         string                         `json:"entry,omitempty"`
-	Surfaces      []string                       `json:"surfaces,omitempty"`
-	Description   string                         `json:"description,omitempty"`
-	Documentation string                         `json:"documentation,omitempty"`
-	Author        string                         `json:"author,omitempty"`
-	Permissions   []string                       `json:"permissions"`
-	Trusted       bool                           `json:"trusted"`
-	Runtime       protocol.ManifestRuntime       `json:"runtime,omitempty"`
-	Configuration protocol.ManifestConfiguration `json:"configuration,omitempty"`
-	Contributes   protocol.ManifestContributions `json:"contributes"`
-}
-
-type pluginRecord struct {
-	Raw           []byte
-	Metadata      protocol.Metadata
-	Source        string
-	FileName      string
-	PackagePath   string
-	PackageSHA256 string
-	SHA256        string
-	InstalledAt   time.Time
-	UpdatedAt     time.Time
-	Status        string
-	Error         string
-}
+// Plugin types remain exported from app as aliases while callers migrate to
+// internal/plugins. The domain owns registry state and mutation; these aliases
+// must not grow a second implementation.
+type PluginView = plugins.View
+type PluginManifestView = plugins.ManifestView
+type pluginRecord = plugins.Record
+type pluginRegistryRecord = plugins.RegistryRecord
 
 type pluginRuntime struct {
-	mu           sync.RWMutex
-	mutationMu   sync.Mutex
-	registryPath string
-	packageDir   string
-	plugins      map[string]pluginRecord
-	registry     *protocol.Registry
-}
-
-type pluginRegistryRecord struct {
-	ID            string          `json:"id"`
-	Raw           json.RawMessage `json:"manifest"`
-	Source        string          `json:"source"`
-	FileName      string          `json:"fileName,omitempty"`
-	PackagePath   string          `json:"packagePath,omitempty"`
-	PackageSHA256 string          `json:"packageSha256,omitempty"`
-	InstalledAt   time.Time       `json:"installedAt"`
-	UpdatedAt     time.Time       `json:"updatedAt"`
+	*plugins.Runtime
 }
 
 func newPluginRuntime(dataDir string) (*pluginRuntime, error) {
-	dataDir = strings.TrimSpace(dataDir)
-	if dataDir == "" {
-		return nil, errors.New("plugin data directory is empty")
-	}
-	var err error
-	dataDir, err = filepath.Abs(dataDir)
+	runtime, err := plugins.NewRuntime(dataDir)
 	if err != nil {
-		return nil, fmt.Errorf("plugin data directory is invalid: %w", err)
-	}
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create plugin registry directory: %w", err)
-	}
-	packageDir := filepath.Join(dataDir, "plugin-packages")
-	if err := os.MkdirAll(packageDir, 0o700); err != nil {
-		return nil, fmt.Errorf("create plugin package directory: %w", err)
-	}
-	center := &pluginRuntime{registryPath: filepath.Join(dataDir, "plugin_registry.json"), packageDir: packageDir, plugins: make(map[string]pluginRecord)}
-	if err := center.bootstrapBuiltInPlugins(); err != nil {
 		return nil, err
 	}
-	if err := center.reload(); err != nil {
+	return &pluginRuntime{Runtime: runtime}, nil
+}
+
+func newPluginRuntimeWithStore(dataDir string, store plugins.Store) (*pluginRuntime, error) {
+	if store == nil {
+		return nil, fmt.Errorf("插件状态存储未初始化")
+	}
+	runtime, err := plugins.NewRuntimeWithStore(dataDir, store)
+	if err != nil {
 		return nil, err
 	}
-	return center, nil
+	return &pluginRuntime{Runtime: runtime}, nil
 }
 
-func (c *pluginRuntime) bootstrapBuiltInPlugins() error {
-	stored, err := c.readRegistry()
-	if err != nil {
-		return err
-	}
-	byID := make(map[string]pluginRegistryRecord, len(stored))
-	for _, record := range stored {
-		byID[record.ID] = record
-	}
-	officialDir, err := officialPluginPackageDir()
-	if err != nil {
-		return err
-	}
-	entries, err := os.ReadDir(officialDir)
-	if err != nil {
-		return fmt.Errorf("读取官方插件目录失败：%w", err)
-	}
-	builtInIDs := make(map[string]struct{}, len(entries)+2)
-	for _, entry := range entries {
-		if entry.IsDir() || !protocol.IsPluginPackageName(entry.Name()) {
-			continue
-		}
-		packageData, err := os.ReadFile(filepath.Join(officialDir, entry.Name()))
-		if err != nil {
-			return fmt.Errorf("读取官方插件包 %s：%w", entry.Name(), err)
-		}
-		pkg, err := parseOfficialPluginPackage(packageData)
-		if err != nil {
-			return fmt.Errorf("校验官方插件包 %s：%w", entry.Name(), err)
-		}
-		if strings.HasPrefix(strings.TrimSpace(pkg.Manifest.Runtime.Backend), "host:") {
-			return fmt.Errorf("官方插件 %q 不能依赖 host 执行器", pkg.Manifest.Metadata.ID)
-		}
-		if _, err := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil); err != nil {
-			return fmt.Errorf("加载官方插件 %q：%w", pkg.Manifest.Metadata.ID, err)
-		}
-		id := pkg.Manifest.Metadata.ID
-		if _, duplicate := builtInIDs[id]; duplicate {
-			return fmt.Errorf("官方插件 ID %q 重复", id)
-		}
-		builtInIDs[id] = struct{}{}
-		manifest := pkg.Manifest
-		record := byID[id]
-		if len(record.Raw) > 0 {
-			var previous protocol.Manifest
-			if err := json.Unmarshal(record.Raw, &previous); err == nil {
-				manifest.Metadata.Enabled = previous.Metadata.Enabled
-			}
-		}
-		manifestData, err := json.Marshal(manifest)
-		if err != nil {
-			return fmt.Errorf("编码官方插件 %q：%w", id, err)
-		}
-		hash := pluginHash(packageData)
-		packageName := hash + protocol.PluginPackageExtension
-		if err := writePluginFile(filepath.Join(c.packageDir, packageName), packageData); err != nil {
-			return fmt.Errorf("缓存官方插件 %q：%w", id, err)
-		}
-		now := time.Now().UTC()
-		if record.InstalledAt.IsZero() {
-			record.InstalledAt = now
-		}
-		source := PluginOriginOfficial
-		record.ID, record.Raw, record.Source, record.FileName = id, manifestData, source, entry.Name()
-		record.PackagePath, record.PackageSHA256, record.UpdatedAt = packageName, hash, now
-		byID[id] = record
-	}
-	bundledManifests := bundledWorkflowPluginManifests()
-	for _, bundled := range bundledManifests {
-		builtInIDs[bundled.Metadata.ID] = struct{}{}
-		data, err := json.Marshal(bundled)
-		if err != nil {
-			return fmt.Errorf("encode built-in plugin %s: %w", bundled.Metadata.ID, err)
-		}
-		record := byID[bundled.Metadata.ID]
-		if len(record.Raw) > 0 {
-			var installed protocol.Manifest
-			if err := json.Unmarshal(record.Raw, &installed); err != nil {
-				return fmt.Errorf("decode built-in plugin %s: %w", bundled.Metadata.ID, err)
-			}
-			bundled.Metadata.Enabled = installed.Metadata.Enabled
-			data, err = json.Marshal(bundled)
-			if err != nil {
-				return fmt.Errorf("encode built-in plugin %s: %w", bundled.Metadata.ID, err)
-			}
-		}
-		now := time.Now().UTC()
-		if record.InstalledAt.IsZero() {
-			record.InstalledAt = now
-		}
-		source := PluginOriginOfficial
-		record.UpdatedAt = now
-		record.ID, record.Raw, record.Source, record.PackagePath = bundled.Metadata.ID, data, source, ""
-		byID[bundled.Metadata.ID] = record
-	}
-	result := make([]pluginRegistryRecord, 0, len(byID))
-	for _, record := range byID {
-		if isBuiltInPluginSource(record.Source) {
-			if _, exists := builtInIDs[record.ID]; !exists {
-				// Built-in records are reconciled from repository packages and host
-				// manifests on every startup, so removed plugins cannot survive stale.
-				continue
-			}
-		}
-		result = append(result, record)
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
-	return c.writeRegistry(result)
-}
-
-func isBuiltInPluginSource(source string) bool {
-	switch strings.TrimSpace(source) {
-	case "bundled", PluginOriginOfficial, PluginOriginSystem:
-		return true
-	default:
-		return false
-	}
-}
-
-func officialPluginPackageDir() (string, error) {
-	return generation.OfficialPluginPackageDir()
-}
-
-func (c *pluginRuntime) reload() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	stored, err := c.readRegistry()
-	if err != nil {
-		return err
-	}
-	plugins := make(map[string]pluginRecord)
-	for _, storedRecord := range stored {
-		data := storedRecord.Raw
-		if len(data) > protocolPluginMaxBytes {
-			return fmt.Errorf("plugin %s exceeds %d bytes", storedRecord.ID, protocolPluginMaxBytes)
-		}
-		var manifest protocol.Manifest
-		if err := json.Unmarshal(data, &manifest); err != nil {
-			return fmt.Errorf("decode plugin %s: %w", storedRecord.ID, err)
-		}
-		metadata := manifest.Metadata
-		if strings.TrimSpace(metadata.ID) == "" {
-			return fmt.Errorf("plugin %s has no metadata id", storedRecord.ID)
-		}
-		if _, exists := plugins[metadata.ID]; exists {
-			return fmt.Errorf("duplicate installed protocol %q", metadata.ID)
-		}
-		packageSHA256 := storedRecord.PackageSHA256
-		if packageSHA256 == "" && strings.TrimSpace(storedRecord.PackagePath) == "" {
-			packageSHA256 = pluginHash(data)
-		}
-		plugins[metadata.ID] = pluginRecord{Raw: data, Metadata: metadata, Source: storedRecord.Source, FileName: storedRecord.FileName, PackagePath: storedRecord.PackagePath, PackageSHA256: packageSHA256, SHA256: packageSHA256, InstalledAt: storedRecord.InstalledAt, UpdatedAt: storedRecord.UpdatedAt, Status: "invalid"}
-	}
-	registry, err := protocol.NewRegistry()
-	if err != nil {
-		return err
-	}
-	for id, record := range plugins {
-		var manifest protocol.Manifest
-		if err := json.Unmarshal(record.Raw, &manifest); err != nil {
-			record.Error = err.Error()
-			plugins[id] = record
-			continue
-		}
-		adapters, loadErr := protocol.LoadInstalledProviders(record.Raw, nil)
-		if loadErr != nil {
-			record.Metadata.Enabled = false
-			record.Metadata.UnavailableReason = loadErr.Error()
-			record.Error = loadErr.Error()
-			_ = registry.Register(protocol.UnavailableAdapter{Info: record.Metadata})
-			plugins[id] = record
-			continue
-		}
-		if !record.Metadata.Enabled {
-			record.Status = "disabled"
-			for _, adapter := range adapters {
-				info := adapter.Metadata()
-				info.Enabled = false
-				_ = registry.Register(protocol.UnavailableAdapter{Info: info})
-			}
-			plugins[id] = record
-			continue
-		}
-		registrationFailed := false
-		for _, adapter := range adapters {
-			if err := registry.Register(adapter); err != nil {
-				record.Error = err.Error()
-				registrationFailed = true
-			}
-		}
-		if registrationFailed {
-			plugins[id] = record
-			continue
-		}
-		record.Status = "enabled"
-		plugins[id] = record
-	}
-	c.plugins = plugins
-	c.registry = registry
-	return nil
+func pluginRuntimeFromRecords(records map[string]pluginRecord) *pluginRuntime {
+	return &pluginRuntime{Runtime: plugins.RuntimeForTest(records)}
 }
 
 func (c *pluginRuntime) list() []PluginView {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	items := make([]PluginView, 0, len(c.plugins))
-	for _, item := range c.plugins {
-		items = append(items, PluginView{Manifest: pluginManifestView(item.Raw, item.Metadata, item.Source), Source: item.Source, FileName: item.FileName, Package: protocol.PluginPackageFormat, SHA256: item.SHA256, InstalledAt: item.InstalledAt, UpdatedAt: item.UpdatedAt, Status: item.Status, Error: item.Error})
+	if c == nil || c.Runtime == nil {
+		return []PluginView{}
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].Manifest.ID < items[j].Manifest.ID })
-	return items
+	return c.Runtime.List()
 }
 
 func (c *pluginRuntime) registrySnapshot() *protocol.Registry {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.registry
+	if c == nil || c.Runtime == nil {
+		return nil
+	}
+	return c.Runtime.Registry()
 }
 
 func (c *pluginRuntime) install(data []byte, fileName string) (PluginView, error) {
-	c.mutationMu.Lock()
-	defer c.mutationMu.Unlock()
-	if len(data) == 0 || len(data) > protocol.PluginPackageMaxBytes {
-		return PluginView{}, fmt.Errorf("plugin package must be between 1 and %d bytes", protocol.PluginPackageMaxBytes)
+	if c == nil || c.Runtime == nil {
+		return PluginView{}, fmt.Errorf("插件运行时未初始化")
 	}
-	pkg, err := protocol.ParsePluginPackage(data)
-	if err != nil {
-		return PluginView{}, err
-	}
-	manifest := pkg.Manifest
-	if strings.HasPrefix(strings.TrimSpace(manifest.Runtime.Backend), "host:") {
-		return PluginView{}, errors.New("上传插件不能使用宿主内置执行器")
-	}
-	if _, err := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil); err != nil {
-		return PluginView{}, err
-	}
-	c.mu.RLock()
-	existing, exists := c.plugins[manifest.Metadata.ID]
-	c.mu.RUnlock()
-	if exists && isBuiltInPluginSource(existing.Source) {
-		return PluginView{}, fmt.Errorf("内置插件 %q 不能通过上传覆盖", manifest.Metadata.ID)
-	}
-	manifest.Metadata.Enabled = !exists || existing.Metadata.Enabled
-	manifestData, err := json.Marshal(manifest)
-	if err != nil {
-		return PluginView{}, err
-	}
-	hash := pluginHash(data)
-	packageName := filepath.Base(strings.TrimSpace(fileName))
-	if packageName == "." || packageName == "" || packageName == string(filepath.Separator) {
-		packageName = manifest.Metadata.ID + protocol.PluginPackageExtension
-	}
-	packagePath := filepath.Join(c.packageDir, hash+protocol.PluginPackageExtension)
-	if err := writePluginFile(packagePath, data); err != nil {
-		return PluginView{}, fmt.Errorf("保存插件包失败：%w", err)
-	}
-	stored, err := c.readRegistry()
-	if err != nil {
-		_ = os.Remove(packagePath)
-		return PluginView{}, err
-	}
-	previousStored := append([]pluginRegistryRecord(nil), stored...)
-	now := time.Now().UTC()
-	newRecord := pluginRegistryRecord{ID: manifest.Metadata.ID, Raw: manifestData, Source: "uploaded", FileName: packageName, PackagePath: filepath.Base(packagePath), PackageSHA256: hash, InstalledAt: now, UpdatedAt: now}
-	if exists {
-		newRecord.InstalledAt = existing.InstalledAt
-		for index := range stored {
-			if stored[index].ID == manifest.Metadata.ID {
-				stored[index] = newRecord
-				break
-			}
-		}
-	} else {
-		stored = append(stored, newRecord)
-	}
-	if err := c.writeRegistry(stored); err != nil {
-		_ = os.Remove(packagePath)
-		return PluginView{}, fmt.Errorf("保存插件失败：%w", err)
-	}
-	if err := c.reload(); err != nil {
-		_ = c.writeRegistry(previousStored)
-		_ = c.reload()
-		_ = os.Remove(packagePath)
-		return PluginView{}, err
-	}
-	if exists && existing.PackagePath != "" && existing.PackagePath != filepath.Base(packagePath) {
-		_ = os.Remove(filepath.Join(c.packageDir, filepath.Base(existing.PackagePath)))
-	}
-	for _, item := range c.list() {
-		if item.Manifest.ID == manifest.Metadata.ID {
-			return item, nil
-		}
-	}
-	return PluginView{}, errors.New("插件保存后未加载")
+	return c.Runtime.Install(data, fileName)
 }
 
 func (c *pluginRuntime) setEnabled(id string, enabled bool) (PluginView, error) {
-	c.mutationMu.Lock()
-	defer c.mutationMu.Unlock()
-	c.mu.RLock()
-	record, ok := c.plugins[strings.TrimSpace(id)]
-	c.mu.RUnlock()
-	if !ok {
-		return PluginView{}, fmt.Errorf("插件 %q 不存在", id)
+	if c == nil || c.Runtime == nil {
+		return PluginView{}, fmt.Errorf("插件运行时未初始化")
 	}
-	var manifest protocol.Manifest
-	if err := json.Unmarshal(record.Raw, &manifest); err != nil {
-		return PluginView{}, err
-	}
-	manifest.Metadata.Enabled = enabled
-	data, err := json.Marshal(manifest)
-	if err != nil {
-		return PluginView{}, err
-	}
-	stored, err := c.readRegistry()
-	if err != nil {
-		return PluginView{}, err
-	}
-	for index := range stored {
-		if stored[index].ID == record.Metadata.ID {
-			stored[index].Raw = data
-			stored[index].UpdatedAt = time.Now().UTC()
-		}
-	}
-	if err := c.writeRegistry(stored); err != nil {
-		return PluginView{}, err
-	}
-	if err := c.reload(); err != nil {
-		return PluginView{}, err
-	}
-	for _, item := range c.list() {
-		if item.Manifest.ID == manifest.Metadata.ID {
-			return item, nil
-		}
-	}
-	return PluginView{}, errors.New("插件状态更新后未加载")
-}
-
-func pluginManifestView(raw []byte, metadata protocol.Metadata, source string) PluginManifestView {
-	var manifest protocol.Manifest
-	_ = json.Unmarshal(raw, &manifest)
-	if manifest.Metadata.ID == "" {
-		manifest.Metadata = metadata
-	}
-	return PluginManifestView{
-		ID: metadata.ID, Name: metadata.Name, Version: metadata.Version, APIVersion: "qisitv.plugin/v1", Entry: manifest.Entry, Surfaces: manifest.Surfaces,
-		Description: metadata.Description, Documentation: metadata.Documentation, Author: metadata.Vendor,
-		Permissions: manifest.Permissions, Trusted: isBuiltInPluginSource(source), Runtime: manifest.Runtime,
-		Configuration: manifest.Configuration, Contributes: manifest.Contributes,
-	}
+	return c.Runtime.SetEnabled(id, enabled)
 }
 
 func (c *pluginRuntime) uninstall(id string) error {
-	c.mutationMu.Lock()
-	defer c.mutationMu.Unlock()
-	c.mu.RLock()
-	record, ok := c.plugins[strings.TrimSpace(id)]
-	c.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("插件 %q 不存在", id)
+	if c == nil || c.Runtime == nil {
+		return fmt.Errorf("插件运行时未初始化")
 	}
-	if isBuiltInPluginSource(record.Source) {
-		return fmt.Errorf("内置插件 %q 不能卸载，可停用该插件", id)
-	}
-	stored, err := c.readRegistry()
-	if err != nil {
-		return err
-	}
-	filtered := stored[:0]
-	for _, item := range stored {
-		if item.ID != record.Metadata.ID {
-			filtered = append(filtered, item)
-		}
-	}
-	if err := c.writeRegistry(filtered); err != nil {
-		return err
-	}
-	if err := c.reload(); err != nil {
-		return err
-	}
-	if record.PackagePath != "" {
-		_ = os.Remove(filepath.Join(c.packageDir, filepath.Base(record.PackagePath)))
-	}
-	return nil
+	return c.Runtime.Uninstall(id)
 }
 
-func (c *pluginRuntime) readRegistry() ([]pluginRegistryRecord, error) {
-	data, err := os.ReadFile(c.registryPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return []pluginRegistryRecord{}, nil
+func (s *Service) pluginDomain() *plugins.Service {
+	var runtime *plugins.Runtime
+	if s != nil && s.pluginRuntime != nil {
+		runtime = s.pluginRuntime.Runtime
 	}
-	if err != nil {
-		return nil, err
+	var store plugins.Store
+	if s != nil && s.repo != nil {
+		store = plugins.NewRepositoryStore(s.repo)
 	}
-	if len(data) > protocolPluginMaxBytes*64 {
-		return nil, fmt.Errorf("插件 registry 超过大小限制")
-	}
-	var records []pluginRegistryRecord
-	if err := json.Unmarshal(data, &records); err != nil {
-		return nil, fmt.Errorf("读取插件 registry 失败：%w", err)
-	}
-	return records, nil
+	return plugins.New(runtime, store)
 }
 
-func (c *pluginRuntime) writeRegistry(records []pluginRegistryRecord) error {
-	data, err := json.MarshalIndent(records, "", "  ")
-	if err != nil {
-		return err
+func mapPluginAccessError(err error) error {
+	if err == nil {
+		return nil
 	}
-	return writePluginFile(c.registryPath, data)
+	var access *plugins.AccessError
+	if errors.As(err, &access) {
+		return Forbidden(access.Error())
+	}
+	return err
 }
 
-func writePluginFile(path string, data []byte) error {
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".plugin-*.tmp")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := temporary.Chmod(0o600); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if _, err := temporary.Write(data); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporaryPath, path)
-}
-
-func pluginSource(metadata protocol.Metadata) string {
-	return "uploaded"
-}
-
-func pluginHash(data []byte) string {
-	digest := sha256.Sum256(data)
-	return hex.EncodeToString(digest[:])
+func bundledWorkflowPluginManifests() []protocol.Manifest {
+	return plugins.BundledWorkflowManifests()
 }

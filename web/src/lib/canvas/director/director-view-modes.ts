@@ -1,7 +1,8 @@
-import { Euler, Vector3 } from "three";
+import { Euler, Matrix4, Vector3 } from "three";
 
-import { interpolateDirectorTransform } from "@/lib/canvas/director/director-scene";
-import type { DirectorCamera, DirectorScene, DirectorShot, DirectorTransform, DirectorVec3 } from "@/types/director";
+import { interpolateDirectorTransform, resolveDirectorKeyframeProgress } from "@/lib/canvas/director/director-scene";
+import { directorStageDirection, directorStageMatrix, directorStagePoint, directorStageTransform } from "@/lib/canvas/director/director-stage-transform";
+import type { DirectorCamera, DirectorKeyframe, DirectorScene, DirectorShot, DirectorTransform, DirectorVec3 } from "@/types/director";
 
 /**
  * 视口取景模式（3D / CAM / 五个正交轴向：俯视、正视、背视、左视、右视）。
@@ -158,17 +159,85 @@ export function resolveDirectorViewFraming(input: { scene: DirectorScene; mode: 
     if (!directorViewModeCapabilities(input.mode).framed) return null;
     const camera = resolveDirectorActiveCamera(input.scene);
     if (!camera) return null;
-    const time = Number.isFinite(input.playhead) ? input.playhead : 0;
-    const transform: DirectorTransform = interpolateDirectorTransform(camera.transform, camera.keyframes, time);
-    if (![...transform.position, ...transform.rotation, ...camera.target].every(Number.isFinite)) return null;
-    if (!directorUsablePerspectiveProjection({ fov: camera.fov, near: camera.near, far: camera.far })) return null;
-    const position = transform.position;
-    const raw = new Vector3(camera.target[0] - position[0], camera.target[1] - position[1], camera.target[2] - position[2]);
+    const local = resolveDirectorCameraLocalFraming(input.scene, camera, input.playhead);
+    if (!local) return null;
+    const stage = directorStageTransform(input.scene);
+    return { ...local, position: directorStagePoint(stage, local.position), target: directorStagePoint(stage, local.target), up: directorStageDirection(stage, local.up), near: local.near * stage.scale, far: local.far * stage.scale };
+}
+
+/** CAM 画面与自由视角机位辅助图形共用的场景局部取景；也支持非活动机位。 */
+export function resolveDirectorCameraLocalFraming(scene: DirectorScene, camera: DirectorCamera, playhead: number): DirectorViewFraming | null {
+    const time = Number.isFinite(playhead) ? playhead : 0;
+    const transform: DirectorTransform = resolveDirectorCameraTransform(camera, time);
+    if (![...transform.position, ...transform.rotation].every(Number.isFinite)) return null;
+    const optical = resolveDirectorCameraTrackValues(camera, time);
+    const fov = optical.fov;
+    if (!directorUsablePerspectiveProjection({ fov, near: camera.near, far: camera.far })) return null;
+    const followed = scene.objects.find((item) => item.id === camera.followObjectId);
+    const followedPosition = followed ? interpolateDirectorTransform(followed.transform, followed.keyframes, time).position : null;
+    const followAnchor = camera.followAnchor;
+    const followDelta = followedPosition && followAnchor && [...followedPosition, ...followAnchor].every(Number.isFinite)
+        ? followedPosition.map((value, index) => value - followAnchor[index]) as DirectorVec3 : null;
+    const position: DirectorVec3 = followDelta ? transform.position.map((value, index) => value + followDelta[index]) as DirectorVec3 : transform.position;
+    let requestedTarget = optical.target;
+    if (camera.lookAtMode === "rotation") {
+        const forward = new Vector3(0, 0, -1).applyEuler(new Euler(...transform.rotation));
+        requestedTarget = [position[0] + forward.x, position[1] + forward.y, position[2] + forward.z];
+    } else if (camera.lookAtMode !== "coordinates" && camera.lookAtObjectId) {
+        const object = scene.objects.find((item) => item.id === camera.lookAtObjectId);
+        if (object) {
+            const objectPosition = interpolateDirectorTransform(object.transform, object.keyframes, time).position;
+            if (objectPosition.every(Number.isFinite)) requestedTarget = [objectPosition[0], objectPosition[1] + (object.kind === "actor" || object.primitive === "character" ? 1.2 : 0), objectPosition[2]];
+        }
+    }
+    if (![...position, ...requestedTarget].every(Number.isFinite)) return null;
+    const raw = new Vector3(requestedTarget[0] - position[0], requestedTarget[1] - position[1], requestedTarget[2] - position[2]);
     const degenerate = raw.lengthSq() <= DIRECTOR_VIEW_COLLINEAR_EPSILON;
     // 位置与焦点重合时视线为零向量，lookAt 无解：沿摄影机自身 -Z 造一个 1m 外的焦点。
     const view = degenerate ? new Vector3(0, 0, -1).applyEuler(new Euler(...transform.rotation)) : raw;
-    const target: DirectorVec3 = degenerate ? [position[0] + view.x, position[1] + view.y, position[2] + view.z] : camera.target;
-    return { cameraId: camera.id, position, target, up: resolveDirectorViewUp(transform.rotation, view.toArray() as DirectorVec3), fov: camera.fov, near: camera.near, far: camera.far };
+    const target: DirectorVec3 = degenerate ? [position[0] + view.x, position[1] + view.y, position[2] + view.z] : requestedTarget;
+    return { cameraId: camera.id, position, target, up: resolveDirectorViewUp(transform.rotation, view.toArray() as DirectorVec3), fov, near: camera.near, far: camera.far };
+}
+
+export function resolveDirectorCameraTrackValues(camera: DirectorCamera, time: number): { target: DirectorVec3; fov: number } {
+    return {
+        target: interpolateDirectorCameraTrack(camera.keyframes, time, "target", camera.target),
+        fov: interpolateDirectorCameraTrack(camera.keyframes, time, "fov", camera.fov),
+    };
+}
+
+export function resolveDirectorCameraTransform(camera: DirectorCamera, time: number): DirectorTransform {
+    const position = interpolateDirectorTransform(camera.transform, camera.keyframes.filter((key) => key.positionKeyed !== false), time);
+    const rotation = interpolateDirectorTransform(camera.transform, camera.keyframes.filter((key) => key.rotationKeyed !== false), time);
+    return { ...position, rotation: rotation.rotation };
+}
+
+/** Convert the visible camera aim into a rotation that preserves the frame when changing look-at modes. */
+export function resolveDirectorCameraAimRotation(scene: DirectorScene, camera: DirectorCamera, time: number): DirectorVec3 | null {
+    const framing = resolveDirectorCameraLocalFraming(scene, camera, time);
+    if (!framing) return null;
+    const euler = new Euler().setFromRotationMatrix(new Matrix4().lookAt(
+        new Vector3(...framing.position), new Vector3(...framing.target), new Vector3(...framing.up),
+    ));
+    return [euler.x, euler.y, euler.z];
+}
+
+/** LibTV's inspector shows the effective aim even while coordinates/object tracking owns the camera view. */
+export function resolveDirectorCameraInspectorRotation(scene: DirectorScene, camera: DirectorCamera, time: number): DirectorVec3 {
+    const rotation = resolveDirectorCameraAimRotation(scene, camera, time) ?? resolveDirectorCameraTransform(camera, time).rotation;
+    const degrees = 180 / Math.PI;
+    return [-rotation[0] * degrees, ((rotation[1] * degrees + 180) % 360 + 360) % 360, rotation[2] * degrees];
+}
+
+function interpolateDirectorCameraTrack<K extends "target" | "fov">(keyframes: DirectorKeyframe[], time: number, track: K, fallback: NonNullable<DirectorKeyframe[K]>): NonNullable<DirectorKeyframe[K]> {
+    const keys = keyframes.filter((key) => key[track] !== undefined).sort((a, b) => a.time - b.time);
+    if (!keys.length) return fallback;
+    const previous = [...keys].reverse().find((key) => key.time <= time) || keys[0];
+    const next = keys.find((key) => key.time >= time) || keys.at(-1)!;
+    if (previous === next || next.time <= previous.time) return previous[track]! as NonNullable<DirectorKeyframe[K]>;
+    const progress = resolveDirectorKeyframeProgress((time - previous.time) / (next.time - previous.time), previous.easing);
+    if (track === "fov") return (Number(previous.fov) + (Number(next.fov) - Number(previous.fov)) * progress) as NonNullable<DirectorKeyframe[K]>;
+    return previous.target!.map((value, axis) => value + (next.target![axis] - value) * progress) as NonNullable<DirectorKeyframe[K]>;
 }
 
 /**
@@ -345,7 +414,9 @@ export function resolveDirectorOrthographicFrustum(input: { horizontalSpan: numb
 export function resolveDirectorOrthographicFraming(input: { scene: DirectorScene; mode: DirectorViewMode }): DirectorOrthographicFraming | null {
     if (!isDirectorOrthographicAxis(input.mode)) return null;
     const axis = DIRECTOR_ORTHOGRAPHIC_AXES[input.mode];
-    const bounds = resolveDirectorFramingBounds(collectDirectorFramingPoints(input.scene));
+    const stage = directorStageTransform(input.scene);
+    const stageMatrix = directorStageMatrix(stage);
+    const bounds = resolveDirectorFramingBounds(collectDirectorFramingPoints(input.scene).map((point) => new Vector3(...point).applyMatrix4(stageMatrix).toArray() as DirectorVec3));
     const radius = Math.max(...bounds.extent) / 2;
     const distance = Math.max(radius * DIRECTOR_ORTHOGRAPHIC_DISTANCE_FACTOR, DIRECTOR_ORTHOGRAPHIC_MIN_EXTENT);
     const target = bounds.center;

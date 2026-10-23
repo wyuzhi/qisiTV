@@ -7,12 +7,13 @@ let server: ReturnType<typeof Bun.serve>;
 
 beforeAll(async () => {
     const build = await Bun.build({
-        entrypoints: [import.meta.dir + "/fixtures/reference-preview-harness.tsx"], target: "browser",
+        entrypoints: [import.meta.dir + "/fixtures/reference-image-preview-harness.tsx"], target: "browser",
         define: { "process.env.NODE_ENV": '"production"' },
         plugins: [{ name: "preview-dependencies", setup(builder) {
             builder.onResolve({ filter: /^@\/services\/image-storage$/ }, () => ({ path: "images", namespace: "preview-test" }));
             builder.onResolve({ filter: /^@\/lib\/canvas\/canvas-drawing-storage$/ }, () => ({ path: "drawings", namespace: "preview-test" }));
-            builder.onLoad({ filter: /.*/, namespace: "preview-test" }, ({ path }) => ({ loader: "js", contents: path === "drawings" ? "export const loadCanvasDrawingPreview = async () => null;" : `
+            builder.onResolve({ filter: /^@\/services\/canvas-video-preview$/ }, () => ({ path: "videos", namespace: "preview-test" }));
+            builder.onLoad({ filter: /.*/, namespace: "preview-test" }, ({ path }) => ({ loader: "js", contents: path === "drawings" ? "export const loadCanvasDrawingPreview = async () => null;" : path === "videos" ? "export const acquireCanvasVideoPreview = () => { throw Error('unexpected video preview'); }; export const canvasDerivedPreviewSourceKey = () => '';" : `
                 window.previewCalls = [];
                 window.finishSlow = () => {};
                 window.retryAvailable = false;

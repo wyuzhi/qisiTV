@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
 
 let browser: Browser;
@@ -9,31 +10,18 @@ let phase = "running";
 let delayA = false;
 let fail = false;
 let reads: string[] = [];
-let abortedReads = 0;
 
 beforeAll(async () => {
-    const scripts: Record<string, string> = {};
-    for (const [name, env] of [["harness", "{}"], ["browser", '{"VITE_QISITV_BROWSER_ONLY":"1"}']]) {
-        const build = await Bun.build({ entrypoints: [import.meta.dir + "/fixtures/task-details-harness.tsx"], target: "browser", define: { "import.meta.env": env!, "process.env.NODE_ENV": '"production"' } });
-        if (!build.success) throw new Error(build.logs.join("\n"));
-        scripts[`/${name}.js`] = await build.outputs[0].text();
-    }
+    const build = await Bun.build({ entrypoints: [import.meta.dir + "/fixtures/task-details-harness.tsx"], target: "browser", define: { "import.meta.env": "{}", "process.env.NODE_ENV": '"production"' }, plugins: [{ name: "source-alias", setup(builder) {
+        builder.onResolve({ filter: /^@\// }, args => ({ path: Bun.resolveSync(resolve(import.meta.dir, "../src", args.path.slice(2)), import.meta.dir) }));
+    } }] });
+    if (!build.success) throw new Error(build.logs.join("\n"));
+    const script = await build.outputs[0].text();
     server = Bun.serve({ port: 0, async fetch(request) {
         const path = new URL(request.url).pathname;
-        if (scripts[path]) return new Response(scripts[path], { headers: { "Content-Type": "text/javascript" } });
-        if (path.startsWith("/api/qisitv/likeai/")) {
-            reads.push(path);
-            request.signal.addEventListener("abort", () => { abortedReads++; }, { once: true });
-            if (path.includes("create_task")) return Response.json({ code: 500 }, { status: 500 });
-            const providerId = path.split("/").at(-1);
-            const capturedPhase = phase;
-            if (providerId === "provider-a" && delayA) await Bun.sleep(800);
-            if (fail) return Response.json({ code: 500 }, { status: 503 });
-            return Response.json({ code: 200, data: { task_id: providerId, status: capturedPhase === "succeeded" ? "completed" : capturedPhase, result: { text: "original result" } } });
-        }
+        if (path === "/harness.js") return new Response(script, { headers: { "Content-Type": "text/javascript" } });
         if (path.startsWith("/api/tasks/")) {
             reads.push(path);
-            request.signal.addEventListener("abort", () => { abortedReads++; }, { once: true });
             const id = path.split("/")[3];
             const capturedPhase = phase;
             if (id === "a" && delayA) await Bun.sleep(800);
@@ -44,7 +32,7 @@ beforeAll(async () => {
                 : { id, type: "video", status: capturedPhase, stage: terminal ? capturedPhase : "分析视频", progress: terminal ? 100 : 35, prompt: "test", attempts: 1, createdAt: "2026-09-29T15:00:00Z", startedAt: "2026-09-29T15:00:01Z", updatedAt: "2026-09-29T15:00:02Z", ...(terminal ? { completedAt: "2026-09-29T15:00:03Z" } : {}) };
             return Response.json({ code: 0, data });
         }
-        return new Response(`<div id="root"></div><script type="module" src="/${path === "/browser" ? "browser" : "harness"}.js"></script>`, { headers: { "Content-Type": "text/html" } });
+        return new Response('<div id="root"></div><script type="module" src="/harness.js"></script>', { headers: { "Content-Type": "text/html" } });
     } });
     const executablePath = [process.env.CHROME_PATH, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((path): path is string => Boolean(path && existsSync(path)));
     browser = await chromium.launch({ executablePath, headless: true });
@@ -52,7 +40,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
     await page?.close();
-    phase = "running"; delayA = false; fail = false; reads = []; abortedReads = 0;
+    phase = "running"; delayA = false; fail = false; reads = [];
     page = await browser.newPage();
     await page.goto(server.url.toString());
 });
@@ -140,34 +128,3 @@ test("legacy metadata-only history never requests a nonexistent backend task", a
     await page.waitForTimeout(2_200);
     expect(reads).toEqual([]);
 });
-
-test("LikeAI detail uses one query for state and logs and follows the original task to completion", async () => {
-    await page.goto(new URL("/browser", server.url).toString());
-    await page.getByRole("button", { name: "a", exact: true }).click();
-    await waitStatus("running");
-    expect(reads).toEqual(["/api/qisitv/likeai/task/query_task/provider-a"]);
-    expect(JSON.parse(await page.locator("#snapshot").innerText()).data.logs).toHaveLength(1);
-    phase = "succeeded";
-    await waitStatus("succeeded");
-    expect(reads).toHaveLength(2);
-    const count = reads.length;
-    await page.waitForTimeout(2_200);
-    expect(reads.length).toBe(count);
-    expect(reads.some((path) => path.includes("create_task"))).toBe(false);
-}, 12_000);
-
-test("closing a LikeAI detail aborts its in-flight request and leaves generation untouched", async () => {
-    await page.goto(new URL("/browser", server.url).toString());
-    delayA = true;
-    await page.getByRole("button", { name: "a", exact: true }).click();
-    const deadline = Date.now() + 3_000;
-    while (!reads.length && Date.now() < deadline) await Bun.sleep(20);
-    expect(reads).toHaveLength(1);
-    await page.getByRole("button", { name: "close", exact: true }).click();
-    await page.waitForTimeout(1_000);
-    expect(abortedReads).toBeGreaterThan(0);
-    expect(JSON.parse(await page.locator("#snapshot").innerText()).data).toBeUndefined();
-    await page.waitForTimeout(2_200);
-    expect(reads).toHaveLength(1);
-    expect(reads.some((path) => path.includes("cancel") || path.includes("create_task"))).toBe(false);
-}, 10_000);

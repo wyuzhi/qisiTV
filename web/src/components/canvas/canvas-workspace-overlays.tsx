@@ -191,7 +191,7 @@ export function CanvasConnectionCreateMenu({ pending, viewport, viewportSize, co
         if (!container || !menu) return;
         const update = (nextViewport: ViewportTransform) => {
             const containerBounds = container.getBoundingClientRect();
-            const safeWidth = getCanvasOverlaySafeWidth(container, containerBounds.width);
+            const safeWidth = containerBounds.width;
             const position = getConnectionMenuPosition(pending.position, nextViewport, { width: safeWidth, height: containerBounds.height }, menu.offsetWidth || menuWidth, menu.offsetHeight || menuHeight, gap);
             menu.style.left = `${position.left}px`;
             menu.style.top = `${position.top}px`;
@@ -233,16 +233,6 @@ function getConnectionMenuPosition(position: Position, viewport: ViewportTransfo
         left: clamp(screenX, gap, Math.max(gap, viewportSize.width - menuWidth - gap)),
         top: clamp(screenY, 72, Math.max(72, viewportSize.height - menuHeight - gap)),
     };
-}
-
-/** Keep connection menus in the canvas work area when the right Agent dock is open. */
-function getCanvasOverlaySafeWidth(container: HTMLElement, width: number) {
-    const agentPanel = document.querySelector<HTMLElement>(".canvas-agent-panel");
-    if (!agentPanel) return width;
-    const containerRect = container.getBoundingClientRect();
-    const agentRect = agentPanel.getBoundingClientRect();
-    if (agentRect.left <= containerRect.left || agentRect.left >= containerRect.right) return width;
-    return Math.max(0, Math.min(width, agentRect.left - containerRect.left));
 }
 
 function constrainNodePanelPosition(left: number, top: number, viewportSize: { width: number; height: number }, panelWidth: number, panelHeight: number, preferredTop: number, keepBelowNode = false, avoidBottomDock = false) {

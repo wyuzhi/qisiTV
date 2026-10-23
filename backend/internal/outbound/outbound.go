@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/net/http/httpproxy"
+	"qisitv/backend/internal/desktopnet"
 )
 
 const (
@@ -48,6 +48,15 @@ var (
 )
 
 func ValidateOutboundURL(rawURL string) (*url.URL, error) {
+	return ValidateOutboundURLContext(context.Background(), rawURL)
+}
+
+// ValidateOutboundURLContext keeps DNS safety checks inside the caller's
+// cancellation/deadline, including reference-upload recovery budgets.
+func ValidateOutboundURLContext(ctx context.Context, rawURL string) (*url.URL, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || parsed.Hostname() == "" {
 		return nil, BadAuthRequest("外部服务地址无效")
@@ -58,14 +67,17 @@ func ValidateOutboundURL(rawURL string) (*url.URL, error) {
 	if parsed.User != nil {
 		return nil, BadAuthRequest("外部服务地址不允许包含认证信息")
 	}
-	if err := ValidateOutboundHost(parsed.Hostname()); err != nil {
+	if _, err := resolveOutboundHost(ctx, parsed.Hostname()); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, err
 	}
 	return parsed, nil
 }
 
-// 用户自定义渠道必须使用更严格的出口策略：不接受 URL 凭据，且仅部署者精确配置的
-// 主机可以路由到私网或使用会明文传输 API Key 的 HTTP。
+// 用户自定义渠道不接受 URL 凭据；默认允许本机与局域网 HTTP/HTTPS 模型服务，
+// 当部署显式关闭私网出站（CANVAS_ALLOW_PRIVATE_UPSTREAMS=false）时仅允许白名单主机使用 HTTP。
 func ValidateCustomRelayURL(rawURL string) (*url.URL, error) {
 	if len(strings.TrimSpace(rawURL)) > 4096 {
 		return nil, BadAuthRequest("自定义渠道地址过长")
@@ -78,7 +90,7 @@ func ValidateCustomRelayURL(rawURL string) (*url.URL, error) {
 	if scheme != "https" && scheme != "http" {
 		return nil, BadAuthRequest("自定义渠道地址只支持 http/https")
 	}
-	if scheme == "http" && !AllowedPrivateUpstreamHost(parsed.Hostname()) {
+	if scheme == "http" && !(allowPrivateUpstreams() || AllowedPrivateUpstreamHost(parsed.Hostname())) {
 		return nil, BadAuthRequest("自定义渠道 HTTP 仅允许访问已配置的可信上游主机")
 	}
 	if parsed.User != nil {
@@ -101,7 +113,7 @@ func OutboundHTTPClient(timeout time.Duration) *http.Client {
 			if len(via) >= maxOutboundRedirects {
 				return errors.New("外部服务重定向次数过多")
 			}
-			_, err := ValidateOutboundURL(req.URL.String())
+			_, err := ValidateOutboundURLContext(req.Context(), req.URL.String())
 			return err
 		},
 	}
@@ -250,21 +262,22 @@ func blockedOutboundHeader(name string) bool {
 func newOutboundTransport(resolveHost func(context.Context, string) ([]net.IP, error)) *http.Transport {
 	dialer := &net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
 	return &http.Transport{
-		Proxy: outboundProxyFromEnvironment,
+		Proxy: desktopnet.Proxy,
 		DialContext: func(ctx context.Context, network string, address string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(address)
 			if err != nil {
 				return nil, err
 			}
-			// 代理地址由部署者通过环境变量配置；目标 URL 仍在请求前经过 SSRF 校验。
-			if configuredProxyHost(host) {
+			// Only configured proxy hosts bypass target DNS validation. Target URLs
+			// still pass the outbound policy before transport dispatch.
+			if configuredProxyAddress(address) {
 				return dialer.DialContext(ctx, network, address)
 			}
 			addresses, err := resolveHost(ctx, host)
 			if err != nil {
 				return nil, err
 			}
-			return dialer.DialContext(ctx, network, net.JoinHostPort(addresses[0].String(), port))
+			return dialValidatedAddresses(ctx, network, port, addresses, dialer.DialContext)
 		},
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
@@ -275,29 +288,71 @@ func newOutboundTransport(resolveHost func(context.Context, string) ([]net.IP, e
 	}
 }
 
-func outboundProxyFromEnvironment(req *http.Request) (*url.URL, error) {
-	if req == nil || req.URL == nil {
-		return nil, nil
+// Race only the addresses already checked by the outbound policy. Resolving the
+// hostname again in net.Dialer would reopen the DNS-rebinding boundary. Stagger
+// attempts so a broken IPv6 route cannot hide a working IPv4 route.
+func dialValidatedAddresses(ctx context.Context, network, port string, addresses []net.IP, dial func(context.Context, string, string) (net.Conn, error)) (net.Conn, error) {
+	if len(addresses) == 0 {
+		return nil, errors.New("outbound host has no validated addresses")
 	}
-	return httpproxy.FromEnvironment().ProxyFunc()(req.URL)
+	ordered := []net.IP{addresses[0]}
+	// Put the other address family second, preserving order within each family.
+	firstV4 := addresses[0].To4() != nil
+	for _, opposite := range []bool{true, false} {
+		for _, ip := range addresses[1:] {
+			otherFamily := (ip.To4() != nil) != firstV4
+			if otherFamily == opposite {
+				ordered = append(ordered, ip)
+			}
+		}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type result struct {
+		conn net.Conn
+		err  error
+	}
+	results := make(chan result)
+	for i, ip := range ordered {
+		go func(delay time.Duration, ip net.IP) {
+			if delay > 0 {
+				timer := time.NewTimer(delay)
+				defer timer.Stop()
+				select {
+				case <-timer.C:
+				case <-ctx.Done():
+					return
+				}
+			}
+			conn, err := dial(ctx, network, net.JoinHostPort(ip.String(), port))
+			select {
+			case results <- result{conn, err}:
+			case <-ctx.Done():
+				if conn != nil {
+					_ = conn.Close()
+				}
+			}
+		}(time.Duration(i)*250*time.Millisecond, ip)
+	}
+	var firstErr error
+	for range ordered {
+		select {
+		case r := <-results:
+			if r.err == nil {
+				return r.conn, nil
+			}
+			if firstErr == nil {
+				firstErr = r.err
+			}
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return nil, firstErr
 }
 
-func configuredProxyHost(host string) bool {
-	host = normalizeOutboundHost(host)
-	for _, name := range []string{"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"} {
-		raw := strings.TrimSpace(os.Getenv(name))
-		if raw == "" {
-			continue
-		}
-		if !strings.Contains(raw, "://") {
-			raw = "http://" + raw
-		}
-		parsed, err := url.Parse(raw)
-		if err == nil && normalizeOutboundHost(parsed.Hostname()) == host {
-			return true
-		}
-	}
-	return false
+func configuredProxyAddress(address string) bool {
+	return desktopnet.ConfiguredProxyAddress(address)
 }
 
 func ValidateOutboundHost(host string) error {
@@ -317,7 +372,7 @@ func resolveOutboundHost(ctx context.Context, host string) ([]net.IP, error) {
 
 func resolveCustomRelayHost(ctx context.Context, host string) ([]net.IP, error) {
 	host = normalizeOutboundHost(host)
-	allowPrivateHost := AllowedPrivateUpstreamHost(host)
+	allowPrivateHost := allowPrivateUpstreams() || AllowedPrivateUpstreamHost(host)
 	addresses, err := resolveOutboundHostWithPolicy(ctx, host, allowPrivateHost)
 	if err != nil {
 		return nil, err
@@ -341,23 +396,39 @@ func resolveOutboundHostWithPolicy(ctx context.Context, host string, allowPrivat
 	}
 	addresses, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
 	if err != nil {
-		return nil, BadAuthRequest("外部服务域名解析失败")
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if allowPrivateHost && (host == "localhost" || strings.HasSuffix(host, ".localhost")) {
+			return []net.IP{net.IPv4(127, 0, 0, 1)}, nil
+		}
+		return nil, &DNSResolutionError{Cause: err}
 	}
 	if len(addresses) == 0 {
+		if allowPrivateHost && (host == "localhost" || strings.HasSuffix(host, ".localhost")) {
+			return []net.IP{net.IPv4(127, 0, 0, 1)}, nil
+		}
 		return nil, BadAuthRequest("外部服务域名没有可用地址")
 	}
-	if !allowPrivateHost {
-		for _, ip := range addresses {
-			if blockedOutboundIP(ip) {
-				return nil, BadAuthRequest("不允许访问本机、内网或链路本地地址")
-			}
+	for _, ip := range addresses {
+		// Link-local includes cloud metadata (169.254.169.254). An operator
+		// allowlist may pin a LAN host, but it must not reopen that range.
+		if blockedLinkLocalOrSpecialIP(ip) {
+			return nil, BadAuthRequest("不允许访问链路本地、未指定或组播地址")
+		}
+		if !allowPrivateHost && blockedOutboundIP(ip) {
+			return nil, BadAuthRequest("不允许访问本机、内网或链路本地地址")
 		}
 	}
 	return addresses, nil
 }
 
+func blockedLinkLocalOrSpecialIP(ip net.IP) bool {
+	return ip == nil || ip.IsLinkLocalMulticast() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsMulticast()
+}
+
 func blockedOutboundIP(ip net.IP) bool {
-	return ip == nil || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalMulticast() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsMulticast()
+	return blockedLinkLocalOrSpecialIP(ip) || ip.IsLoopback() || ip.IsPrivate()
 }
 
 func blockedCustomRelayIP(ip net.IP) bool {
@@ -377,9 +448,58 @@ func blockedCustomRelayIP(ip net.IP) bool {
 	return false
 }
 
+var cgnatPrefix = netip.MustParsePrefix("100.64.0.0/10")
+
+// localUpstreamIP is loopback, RFC1918/ULA, or CGNAT. Link-local (including
+// cloud metadata), unspecified, multicast, and public addresses are not local.
+func localUpstreamIP(ip net.IP) bool {
+	if blockedLinkLocalOrSpecialIP(ip) {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsPrivate() {
+		return true
+	}
+	address, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return false
+	}
+	return cgnatPrefix.Contains(address.Unmap())
+}
+
+func addressesAllowLocalHTTP(addresses []net.IP, allowPrivate bool) bool {
+	if !allowPrivate || len(addresses) == 0 {
+		return false
+	}
+	for _, ip := range addresses {
+		if !localUpstreamIP(ip) {
+			return false
+		}
+	}
+	return true
+}
+
+// HostAllowsLocalHTTP reports whether every resolved address is loopback,
+// RFC1918/ULA, or CGNAT, and private upstreams are enabled. An operator
+// allowlist does not make this true while CANVAS_ALLOW_PRIVATE_UPSTREAMS=false.
+// Link-local and metadata addresses stay false.
+func HostAllowsLocalHTTP(ctx context.Context, host string) bool {
+	if !allowPrivateUpstreams() {
+		return false
+	}
+	addresses, err := resolveOutboundHost(ctx, host)
+	if err != nil {
+		return false
+	}
+	return addressesAllowLocalHTTP(addresses, true)
+}
+
 func allowPrivateUpstreams() bool {
-	value := strings.ToLower(strings.TrimSpace(os.Getenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS")))
-	return value == "1" || value == "true" || value == "yes"
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS"))) {
+	case "0", "false", "no":
+		return false
+	default:
+		return true
+	}
 }
 
 // allowedPrivateUpstreamHost lets operators pin only explicitly trusted upstream

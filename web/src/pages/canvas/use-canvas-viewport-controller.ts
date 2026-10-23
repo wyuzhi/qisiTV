@@ -8,10 +8,8 @@ import { getCanvasNodesBounds, viewportAtScale, viewportForBounds, type CanvasVi
 import { shouldRefreshCanvasVirtualization } from "@/lib/canvas/canvas-viewport-render-sync";
 import { CanvasNodeType, type CanvasNodeData, type ContextMenuState, type Position, type ViewportTransform } from "@/types/canvas";
 import { useCanvasViewportTransition } from "./use-canvas-viewport-transition";
-import { unobscuredCanvasArea, viewportForAgentNodes } from "@/lib/canvas/canvas-viewport";
 
 type UseCanvasViewportControllerOptions = {
-    agentCreatedNodes: CanvasNodeData[] | null;
     containerRef: { current: HTMLDivElement | null };
     size: CanvasViewportSize;
     viewportRef: { current: ViewportTransform };
@@ -26,7 +24,6 @@ type UseCanvasViewportControllerOptions = {
 };
 
 export function useCanvasViewportController({
-    agentCreatedNodes,
     containerRef,
     size,
     viewportRef,
@@ -67,24 +64,6 @@ export function useCanvasViewportController({
     }, [containerRef]);
 
     const { cancelViewportTransition, transitionViewportTo } = useCanvasViewportTransition(viewportRef, previewViewport, commitViewport);
-    const focusedAgentBatch = useRef<CanvasNodeData[] | null>(null);
-    useEffect(() => {
-        if (!agentCreatedNodes || focusedAgentBatch.current === agentCreatedNodes || size.width <= 0 || size.height <= 0) return;
-        focusedAgentBatch.current = agentCreatedNodes;
-        const targets = agentCreatedNodes.filter((node) => !isHiddenBatchChild(node, nodesRef.current) && !isNodeHiddenByCollapsedFrame(node, nodesRef.current));
-        const rect = containerRef.current?.getBoundingClientRect();
-        const panel = containerRef.current?.ownerDocument.querySelector(".canvas-agent-panel")?.getBoundingClientRect();
-        const area = unobscuredCanvasArea(size, rect && panel ? { left: panel.left - rect.left, top: panel.top - rect.top, right: panel.right - rect.left, bottom: panel.bottom - rect.top } : undefined);
-        const target = viewportForAgentNodes(targets, viewportRef.current, area);
-        if (!target) return;
-        setSelectedNodeIds(new Set(targets.map((node) => node.id)));
-        setSelectedConnectionId(null);
-        setContextMenu(null);
-        setDialogNodeId(null);
-        setToolbarNodeId(null);
-        transitionViewportTo(target);
-    }, [agentCreatedNodes, containerRef, nodesRef, size, viewportRef, setSelectedNodeIds, setSelectedConnectionId, setContextMenu, setDialogNodeId, setToolbarNodeId, transitionViewportTo]);
-
     const screenToCanvas = useCallback((clientX: number, clientY: number): Position => {
         const rect = containerRef.current?.getBoundingClientRect();
         const viewport = viewportRef.current;

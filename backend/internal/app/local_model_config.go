@@ -25,8 +25,5 @@ func (s *Service) SaveLocalModelConfig(body []byte) error {
 }
 
 func (s *Service) localProviderConfigStore() (*workspace.ProviderConfig, error) {
-	if s.likeAIOnly {
-		return workspace.NewLikeAIProviderConfig(s.dataDir)
-	}
 	return workspace.NewProviderConfig(s.dataDir)
 }

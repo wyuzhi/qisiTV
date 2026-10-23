@@ -22,7 +22,7 @@ test("upload boundaries use the shared runtime decision", () => {
     expect(imageStorage).toContain("usesBrowserLocalResourceStore");
     expect(fileStorage).toContain("usesBrowserLocalResourceStore");
     expect(imageStorage).toContain("const localRuntime = isLocalRuntimeMode();");
-    expect(fileStorage).toContain("const localRuntime = isLocalRuntimeMode();");
+    expect(fileStorage).toContain("if (usesBrowserLocalResourceStore())");
     expect(imageStorage).toContain("The desktop Go resource service is local storage");
     expect(fileStorage).toContain("The native desktop Go resource service is the canonical local store");
     expect(imageStorage).not.toContain("if (!localOnly) try");

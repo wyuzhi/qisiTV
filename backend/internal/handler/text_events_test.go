@@ -1,19 +1,27 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/database"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/repository"
+	"qisitv/backend/internal/textreplay"
+	"qisitv/backend/internal/workspace"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func TestTaskTextEventCursorPrefersQueryAndSupportsLastEventID(t *testing.T) {
@@ -70,7 +78,8 @@ func TestStreamTaskTextEventsCachedReplayReachesTerminalWithoutDuplicateDelta(t 
 	t.Cleanup(func() { _ = svc.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
-	initial, err := svc.CachedTaskTextReplay(ctx, "user", "task", 7)
+	replayAPI := appTextReplayAPI{svc}
+	initial, err := replayAPI.CachedRead(ctx, "user", "task", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +89,7 @@ func TestStreamTaskTextEventsCachedReplayReachesTerminalWithoutDuplicateDelta(t 
 	response := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(response)
 	c.Request = httptest.NewRequest("GET", "/api/tasks/task/text-events", nil).WithContext(ctx)
-	streamTaskTextEvents(c, svc, "user", "task", 7, initial)
+	streamTaskTextEvents(c, replayAPI, "user", "task", 7, initial)
 	body := response.Body.String()
 	if strings.Count(body, "id: 8\nevent: delta") != 1 || !strings.Contains(body, "event: terminal") || !strings.Contains(body, `"progress":100`) {
 		t.Fatalf("unexpected cached SSE stream: %q", body)
@@ -92,7 +101,7 @@ func TestStreamTaskTextEventsWritesSequenceAndTerminalEvent(t *testing.T) {
 	response := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(response)
 	context.Request = httptest.NewRequest("GET", "/api/tasks/task-1/text-events", nil)
-	replay := &app.TextReplayResult{
+	replay := &textreplay.Result{
 		Deltas:    []model.TaskTextDelta{{Sequence: 8, Content: "增量"}},
 		Complete:  true,
 		FinalText: "增量",
@@ -107,5 +116,85 @@ func TestStreamTaskTextEventsWritesSequenceAndTerminalEvent(t *testing.T) {
 	body := response.Body.String()
 	if !strings.Contains(body, "event: progress") || !strings.Contains(body, `"progress":100`) || !strings.Contains(body, "id: 8\nevent: delta") || !strings.Contains(body, "event: terminal") {
 		t.Fatalf("unexpected SSE body: %q", body)
+	}
+}
+
+func textReplayRouter(t *testing.T) (*gin.Engine, *app.Service, string) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "workspace.db")+"?_busy_timeout=5000&_journal_mode=WAL"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.MigrateLocalSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	svc := app.New(repository.New(db), t.TempDir())
+	t.Cleanup(func() { _ = svc.Close() })
+	owner, err := svc.LocalWorkspaceOwner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.Task{ID: "replay-1", UserID: owner.ID, Type: "canvas_text", Status: model.TaskStatusTextReplay, Stage: "文本持久化（前端自管）"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	router.Use(WorkspaceMiddleware(workspace.Context{ID: owner.ID, DataDir: t.TempDir()}))
+	api := router.Group("/api")
+	RegisterTaskRoutes(api, svc)
+	return router, svc, owner.ID
+}
+
+func TestTextReplayHTTPOwnerCursorAndClose(t *testing.T) {
+	router, _, ownerID := textReplayRouter(t)
+	postDelta := func(content string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]string{"content": content})
+		req := httptest.NewRequest(http.MethodPost, "/api/tasks/replay-1/text-deltas", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := postDelta("one"); rec.Code != http.StatusOK {
+		t.Fatalf("append one: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := postDelta("two"); rec.Code != http.StatusOK {
+		t.Fatalf("append two: %d %s", rec.Code, rec.Body.String())
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/replay-1/text-deltas?after=1", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cursor read: %d %s", rec.Code, rec.Body.String())
+	}
+	var envelope struct {
+		Data textreplay.Result `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Data.Deltas) != 1 || envelope.Data.Deltas[0].Content != "two" || envelope.Data.Complete {
+		t.Fatalf("cursor payload: %#v", envelope.Data)
+	}
+
+	completeBody, _ := json.Marshal(map[string]string{"text": "onetwo"})
+	completeReq := httptest.NewRequest(http.MethodPost, "/api/tasks/replay-1/text-replay-complete", bytes.NewReader(completeBody))
+	completeReq.Header.Set("Content-Type", "application/json")
+	completeRec := httptest.NewRecorder()
+	router.ServeHTTP(completeRec, completeReq)
+	if completeRec.Code != http.StatusOK {
+		t.Fatalf("complete: %d %s", completeRec.Code, completeRec.Body.String())
+	}
+	closed := postDelta("late")
+	if closed.Code == http.StatusOK {
+		t.Fatalf("closed append succeeded: %s", closed.Body.String())
+	}
+
+	eventsReq := httptest.NewRequest(http.MethodGet, "/api/tasks/replay-1/text-events?after=0", nil)
+	eventsRec := httptest.NewRecorder()
+	router.ServeHTTP(eventsRec, eventsReq)
+	body := eventsRec.Body.String()
+	if !strings.Contains(body, "event: terminal") || !strings.Contains(body, `"finalText":"onetwo"`) {
+		t.Fatalf("terminal SSE: %q owner=%s", body, ownerID)
 	}
 }

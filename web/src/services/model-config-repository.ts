@@ -50,19 +50,26 @@ export function createModelConfigRepository(dependencies: ModelConfigRepositoryD
     };
 
     const runDrain = async () => {
+        const write = async (config: AiConfig, revision: number) => {
+            const result = await dependencies.write(config, revision);
+            if (!result.saved || !Number.isSafeInteger(result.revision) || result.revision < revision) {
+                throw new Error("模型配置保存未得到确认，请重试");
+            }
+            return result;
+        };
         while (hydrated && latestConfig && state.dirty) {
             const config = latestConfig;
             const savingGeneration = generation;
             publish({ status: "saving", error: "" });
             try {
-                const result = await dependencies.write(config, state.revision);
+                const result = await write(config, state.revision);
                 state = { status: "saved", revision: result.revision, dirty: generation !== savingGeneration, error: "" };
             } catch (error) {
                 if (isRevisionConflict(error)) {
                     try {
                         const current = await dependencies.read();
                         state = { ...state, revision: current.revision, status: "saving", dirty: true, error: "" };
-                        const retried = await dependencies.write(config, state.revision);
+                        const retried = await write(config, state.revision);
                         state = { status: "saved", revision: retried.revision, dirty: generation !== savingGeneration, error: "" };
                         continue;
                     } catch (retryError) {

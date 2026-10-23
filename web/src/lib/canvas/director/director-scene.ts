@@ -1,10 +1,15 @@
 import { nanoid } from "nanoid";
 import { Color, Euler, Quaternion } from "three";
 
-import type { DirectorBoneKeyframe, DirectorBoneTrack, DirectorCamera, DirectorHumanoidBone, DirectorKeyframe, DirectorKeyframeDeleteTarget, DirectorKeyframeEasing, DirectorLight, DirectorObject, DirectorPose, DirectorQuat, DirectorScene, DirectorTransform, DirectorVec3 } from "@/types/director";
+import type { DirectorBoneKeyframe, DirectorBoneTrack, DirectorCamera, DirectorGroup, DirectorHumanoidBone, DirectorKeyframe, DirectorKeyframeDeleteTarget, DirectorKeyframeEasing, DirectorLight, DirectorObject, DirectorPose, DirectorQuat, DirectorScene, DirectorTransform, DirectorVec3 } from "@/types/director";
+import { DIRECTOR_DEFAULT_GROUND } from "@/lib/canvas/director/director-ground";
+import { DIRECTOR_QUATERNIUS_MALE_URL } from "@/lib/canvas/director/director-actor-assets";
+import { DIRECTOR_DEFAULT_STAGE_TRANSFORM } from "@/lib/canvas/director/director-stage-transform";
 
-export const DIRECTOR_DEFAULT_ACTOR_URL = "https://cdn.jsdelivr.net/gh/mrdoob/three.js@r185/examples/models/gltf/Xbot.glb";
-export const DIRECTOR_ACTOR_COLORS = ["#f1f3f5", "#202329", "#2f7de1", "#d84949", "#dfae3f", "#34a276"] as const;
+export { directorPoseChainBones, resolveDirectorPoseTargets, resolveDirectorTwoBoneJoint } from "@/lib/canvas/director/director-pose-solving";
+
+export const DIRECTOR_DEFAULT_ACTOR_URL = DIRECTOR_QUATERNIUS_MALE_URL;
+export const DIRECTOR_ACTOR_COLORS = ["#4f8ef7", "#202329", "#2f7de1", "#d84949", "#dfae3f", "#34a276"] as const;
 
 export const directorIdentityTransform = (position: DirectorVec3 = [0, 0, 0]): DirectorTransform => ({ position, rotation: [0, 0, 0], scale: [1, 1, 1] });
 
@@ -16,9 +21,16 @@ export function createDirectorScene(title = "未命名场景"): DirectorScene {
         id: nanoid(),
         version: 1,
         title,
-        background: "#d8dde3",
+        background: "#060608",
         environmentIntensity: 0.7,
         gridVisible: true,
+        gridSnap: false,
+        panoramaRotation: 0,
+        panoramaRadius: 60,
+        ground: { ...DIRECTOR_DEFAULT_GROUND },
+        stageTransform: { ...DIRECTOR_DEFAULT_STAGE_TRANSFORM, position: [...DIRECTOR_DEFAULT_STAGE_TRANSFORM.position], rotation: [...DIRECTOR_DEFAULT_STAGE_TRANSFORM.rotation] },
+        labelsVisible: true,
+        aspectRatio: "adaptive",
         objects: [createDirectorActor("演员 1", [0, 0, 0])],
         cameras: [camera],
         lights: [createDirectorLight("directional", "主光", [4, 6, 4], 2.4), createDirectorLight("directional", "轮廓光", [-4, 3, -2], 1.1), createDirectorLight("ambient", "环境光", [0, 0, 0], 0.65)],
@@ -27,6 +39,98 @@ export function createDirectorScene(title = "未命名场景"): DirectorScene {
         createdAt: now,
         updatedAt: now,
     };
+}
+
+export function toggleDirectorObjectVisibility(scene: DirectorScene, id: string): DirectorScene {
+    if (!scene.objects.some((object) => object.id === id)) return scene;
+    return { ...scene, objects: scene.objects.map((object) => object.id === id ? { ...object, visible: !object.visible } : object) };
+}
+
+export function toggleDirectorObjectLock(scene: DirectorScene, id: string): DirectorScene {
+    if (!scene.objects.some((object) => object.id === id)) return scene;
+    return { ...scene, objects: scene.objects.map((object) => object.id === id ? { ...object, locked: !object.locked } : object) };
+}
+
+export function visibleDirectorCameras(scene: DirectorScene): DirectorCamera[] {
+    return scene.cameras.filter((camera) => camera.visible !== false);
+}
+
+export function toggleDirectorCameraVisibility(scene: DirectorScene, id: string): DirectorScene {
+    if (!scene.cameras.some((camera) => camera.id === id)) return scene;
+    return { ...scene, cameras: scene.cameras.map((camera) => camera.id === id ? { ...camera, visible: camera.visible === false } : camera) };
+}
+
+export function toggleDirectorCameraLock(scene: DirectorScene, id: string): DirectorScene {
+    if (!scene.cameras.some((camera) => camera.id === id)) return scene;
+    return { ...scene, cameras: scene.cameras.map((camera) => camera.id === id ? { ...camera, locked: !camera.locked } : camera) };
+}
+
+/** 副本保留媒体与动画内容，但所有可编辑记录均有独立标识与引用。 */
+export function duplicateDirectorObject(source: DirectorObject): DirectorObject {
+    const copy = structuredClone(source);
+    const ids = new Map(copy.keyframes.map((frame) => [frame.id, nanoid()]));
+    return {
+        ...copy,
+        id: nanoid(),
+        name: `${source.name}副本`,
+        keyframes: copy.keyframes.map((frame) => ({ ...frame, id: ids.get(frame.id)! })),
+        motionPath: copy.motionPath && { ...copy.motionPath, controlKeyframeIds: copy.motionPath.controlKeyframeIds?.flatMap((id) => ids.has(id) ? [ids.get(id)!] : []), originalKeyframes: copy.motionPath.originalKeyframes.map((frame) => ({ ...frame, id: nanoid() })) },
+        boneTracks: copy.boneTracks?.map((track) => ({ ...track, keyframes: track.keyframes.map((frame) => ({ ...frame, id: nanoid() })) })),
+    };
+}
+
+export function duplicateDirectorCamera(source: DirectorCamera): DirectorCamera {
+    const copy = structuredClone(source);
+    const ids = new Map(copy.keyframes.map((frame) => [frame.id, nanoid()]));
+    return { ...copy, id: nanoid(), name: `${source.name}副本`, keyframes: copy.keyframes.map((frame) => ({ ...frame, id: ids.get(frame.id)! })), drawnPath: copy.drawnPath && { ...copy.drawnPath, sampleKeyframeIds: copy.drawnPath.sampleKeyframeIds.flatMap((id) => ids.has(id) ? [ids.get(id)!] : []), originalKeyframes: copy.drawnPath.originalKeyframes?.map((frame) => ({ ...frame, id: nanoid() })) } };
+}
+
+export function groupDirectorObjects(scene: DirectorScene, ids: string[]): DirectorScene {
+    const selected = new Set(ids);
+    const members = scene.objects.filter((object) => selected.has(object.id));
+    if (members.length < 2) return scene;
+    const groups = scene.groups || [];
+    let index = 1;
+    while (groups.some((group) => group.name === `分组${index}`)) index += 1;
+    const group: DirectorGroup = { id: nanoid(), name: `分组${index}`, collapsed: false };
+    const objects = scene.objects.map((object) => selected.has(object.id) ? { ...object, groupId: group.id } : object);
+    const remainingGroups = groups.filter((entry) => objects.some((object) => object.groupId === entry.id));
+    return { ...scene, groups: [...remainingGroups, group], objects };
+}
+
+export function toggleDirectorGroupVisibility(scene: DirectorScene, id: string): DirectorScene {
+    const members = scene.objects.filter((object) => object.groupId === id);
+    if (!members.length) return scene;
+    const visible = members.some((object) => !object.visible);
+    return { ...scene, objects: scene.objects.map((object) => object.groupId === id ? { ...object, visible } : object) };
+}
+
+export function toggleDirectorGroupLock(scene: DirectorScene, id: string): DirectorScene {
+    const members = scene.objects.filter((object) => object.groupId === id);
+    if (!members.length) return scene;
+    const locked = members.some((object) => !object.locked);
+    return { ...scene, objects: scene.objects.map((object) => object.groupId === id ? { ...object, locked } : object) };
+}
+
+export function duplicateDirectorGroup(scene: DirectorScene, id: string): DirectorScene {
+    const group = scene.groups?.find((entry) => entry.id === id);
+    const members = scene.objects.filter((object) => object.groupId === id);
+    if (!group || members.length === 0) return scene;
+    const copyId = nanoid();
+    const duplicate: DirectorGroup = { id: copyId, name: `${group.name}副本`, collapsed: false };
+    const objects = members.map((object) => ({ ...duplicateDirectorObject(object), groupId: copyId }));
+    return { ...scene, groups: [...(scene.groups || []), duplicate], objects: [...scene.objects, ...objects] };
+}
+
+export function toggleDirectorGroupCollapsed(scene: DirectorScene, id: string): DirectorScene {
+    if (!scene.groups?.some((group) => group.id === id)) return scene;
+    return { ...scene, groups: scene.groups.map((group) => group.id === id ? { ...group, collapsed: !group.collapsed } : group) };
+}
+
+export function ungroupDirectorObjects(scene: DirectorScene, id: string): DirectorScene {
+    if (!scene.groups?.some((group) => group.id === id)) return scene;
+    const groups = scene.groups.filter((group) => group.id !== id);
+    return { ...scene, groups: groups.length ? groups : undefined, objects: scene.objects.map((object) => object.groupId === id ? { ...object, groupId: undefined } : object) };
 }
 
 export function createDirectorObject(primitive: DirectorObject["primitive"] = "box", name = "新对象", position: DirectorVec3 = [0, 0.5, 0], color = "#8795a5"): DirectorObject {
@@ -45,12 +149,29 @@ export function createDirectorObject(primitive: DirectorObject["primitive"] = "b
     };
 }
 
+/** 统一倍率按比例作用于基础值和所有关键帧；轴向不等比缩放仍保留。 */
+export function applyDirectorUniformScale(object: DirectorObject, input: number): DirectorObject {
+    if (!Number.isFinite(input)) return object;
+    const next = Math.max(0.1, Math.min(10, input));
+    const previous = object.uniformScale && Number.isFinite(object.uniformScale) && object.uniformScale > 0 ? object.uniformScale : 1;
+    if (next === previous) return object;
+    const ratio = next / previous;
+    const scale = (values: DirectorVec3): DirectorVec3 => values.map((value) => value * ratio) as DirectorVec3;
+    return {
+        ...object,
+        uniformScale: next,
+        transform: { ...object.transform, scale: scale(object.transform.scale) },
+        keyframes: object.keyframes.map((frame) => ({ ...frame, transform: { ...frame.transform, scale: scale(frame.transform.scale) } })),
+    };
+}
+
 export function createDirectorActor(name = "演员", position: DirectorVec3 = [0, 0, 0], color: string = DIRECTOR_ACTOR_COLORS[0]): DirectorObject {
     return {
         ...createDirectorObject("box", name, position, color),
         kind: "actor",
         primitive: undefined,
-        url: DIRECTOR_DEFAULT_ACTOR_URL,
+        actorPreset: "standard_male",
+        url: DIRECTOR_QUATERNIUS_MALE_URL,
         mimeType: "model/gltf-binary",
         pose: "stand",
         rig: { status: "unmapped", boneMap: {}, animationNames: [] },
@@ -68,13 +189,18 @@ export function createDirectorBillboard(name: string, url: string, storageKey?: 
     return { ...createDirectorObject("plane", name, [0, 1.1, 0], "#ffffff"), kind: "billboard", url, storageKey, sourceNodeId, transform: { position: [0, 1.1, 0], rotation: [0, 0, 0], scale: [1.6, 0.9, 1] } };
 }
 
-export function createDirectorCamera(name = "主摄影机"): DirectorCamera {
-    return { id: nanoid(), name, transform: directorIdentityTransform([4.8, 2.7, 6.8]), target: [0, 1, 0], focalLength: 35, fov: 50, aperture: 2.8, focusDistance: 5, near: 0.05, far: 500, keyframes: [] };
+export function createDirectorCamera(name = "机位1"): DirectorCamera {
+    return { id: nanoid(), name, transform: directorIdentityTransform([0, 2.2, 10]), target: [0, 1.2, 0], focalLength: 35, fov: 50, aperture: 2.8, focusDistance: 5, near: 0.05, far: 500, keyframes: [] };
 }
 
 /** 35mm 全画幅水平视角换算。摄影机检查器与场景模板共用，避免两处各写一份光学。 */
 export function directorFocalLengthToFov(focalLength: number) {
     return (2 * Math.atan(36 / (2 * Math.max(1, focalLength))) * 180) / Math.PI;
+}
+
+/** 与焦距编辑使用同一 35mm 全画幅模型，FOV 调整后两项保持同步。 */
+export function directorFovToFocalLength(fov: number) {
+    return 18 / Math.tan((Math.max(1, Math.min(179, fov)) * Math.PI) / 360);
 }
 
 export function createDirectorLight(type: DirectorLight["type"], name: string, position: DirectorVec3, intensity = 1): DirectorLight {
@@ -135,7 +261,25 @@ export function removeDirectorSceneKeyframe(scene: DirectorScene, target: Direct
     if (target.track === "camera") {
         const camera = scene.cameras.find((item) => item.id === target.cameraId);
         if (!camera) return scene;
-        const keyframes = removeDirectorKeyframe(camera.keyframes, target.keyframeId);
+        const frame = camera.keyframes.find((item) => item.id === target.keyframeId);
+        if (!frame) return scene;
+        if (target.channel === "position" && (!frame || frame.positionKeyed === false)) return scene;
+        if (target.channel === "rotation" && frame.rotationKeyed === false) return scene;
+        if (target.channel === "focus" && frame?.target === undefined) return scene;
+        if (target.channel === "fov" && frame?.fov === undefined) return scene;
+        if (!target.channel) return { ...scene, cameras: scene.cameras.map((item) => item.id === camera.id ? {
+            ...item,
+            keyframes: removeDirectorKeyframe(item.keyframes, target.keyframeId),
+            ...(item.drawnPath ? { drawnPath: { ...item.drawnPath, sampleKeyframeIds: item.drawnPath.sampleKeyframeIds.filter((id) => id !== target.keyframeId) } } : {}),
+        } : item) };
+        const nextFrame = target.channel === "position" ? { ...frame, positionKeyed: false }
+            : target.channel === "rotation" ? { ...frame, rotationKeyed: false }
+                : target.channel === "focus" ? { ...frame, target: undefined }
+                    : { ...frame, fov: undefined };
+        const hasOtherTrack = nextFrame.positionKeyed !== false || nextFrame.rotationKeyed !== false || nextFrame.target !== undefined || nextFrame.fov !== undefined;
+        const keyframes = hasOtherTrack
+            ? camera.keyframes.map((item) => item.id === target.keyframeId ? nextFrame : item)
+            : removeDirectorKeyframe(camera.keyframes, target.keyframeId);
         if (keyframes === camera.keyframes) return scene;
         return { ...scene, cameras: scene.cameras.map((item) => (item.id === camera.id ? { ...item, keyframes } : item)) };
     }
@@ -144,9 +288,18 @@ export function removeDirectorSceneKeyframe(scene: DirectorScene, target: Direct
     if (!object) return scene;
 
     if (target.track === "object-transform") {
-        const keyframes = removeDirectorKeyframe(object.keyframes, target.keyframeId);
+        const frame = object.keyframes.find((item) => item.id === target.keyframeId);
+        if (!frame || (target.channel && frame[`${target.channel}Keyed`] === false)) return scene;
+        const nextFrame = target.channel ? { ...frame, [`${target.channel}Keyed`]: false } : null;
+        const keyframes = nextFrame && (nextFrame.positionKeyed !== false || nextFrame.rotationKeyed !== false || nextFrame.scaleKeyed !== false)
+            ? object.keyframes.map((item) => item.id === frame.id ? nextFrame : item)
+            : removeDirectorKeyframe(object.keyframes, target.keyframeId);
         if (keyframes === object.keyframes) return scene;
-        return { ...scene, objects: scene.objects.map((item) => (item.id === object.id ? { ...item, keyframes } : item)) };
+        return { ...scene, objects: scene.objects.map((item) => (item.id === object.id ? {
+            ...item,
+            keyframes,
+            ...(item.motionPath?.controlKeyframeIds ? { motionPath: { ...item.motionPath, controlKeyframeIds: item.motionPath.controlKeyframeIds.filter((id) => id !== target.keyframeId) } } : {}),
+        } : item)) };
     }
 
     const tracks = object.boneTracks || [];
@@ -199,12 +352,12 @@ export function resolveDirectorKeyframeProgress(progress: number, easing: Direct
 
 /** 轨迹渲染只接受有限时间与位置；坏数据不得进入 Three 几何体。 */
 export function finiteDirectorTransformKeyframes(keyframes: DirectorKeyframe[]) {
-    return keyframes.filter((keyframe) => [keyframe.time, ...keyframe.transform.position].every(Number.isFinite));
+    return keyframes.filter((keyframe) => keyframe.positionKeyed !== false && [keyframe.time, ...keyframe.transform.position].every(Number.isFinite));
 }
 
 /** 按时间顺序累计 Transform 关键帧路径长度；非法时间或坐标段忽略，不污染界面统计。 */
 export function directorTransformPathLength(keyframes: DirectorKeyframe[]) {
-    const sorted = [...keyframes].sort((left, right) => left.time - right.time);
+    const sorted = keyframes.filter((keyframe) => keyframe.positionKeyed !== false).sort((left, right) => left.time - right.time);
     let length = 0;
     for (let index = 1; index < sorted.length; index += 1) {
         const previousTime = sorted[index - 1].time;
@@ -218,6 +371,17 @@ export function directorTransformPathLength(keyframes: DirectorKeyframe[]) {
 }
 
 export function interpolateDirectorTransform(base: DirectorTransform, keyframes: DirectorKeyframe[], time: number): DirectorTransform {
+    if (keyframes.some((frame) => frame.positionKeyed === false || frame.rotationKeyed === false || frame.scaleKeyed === false)) {
+        return {
+            position: interpolateDirectorTransformUnfiltered(base, keyframes.filter((frame) => frame.positionKeyed !== false), time).position,
+            rotation: interpolateDirectorTransformUnfiltered(base, keyframes.filter((frame) => frame.rotationKeyed !== false), time).rotation,
+            scale: interpolateDirectorTransformUnfiltered(base, keyframes.filter((frame) => frame.scaleKeyed !== false), time).scale,
+        };
+    }
+    return interpolateDirectorTransformUnfiltered(base, keyframes, time);
+}
+
+function interpolateDirectorTransformUnfiltered(base: DirectorTransform, keyframes: DirectorKeyframe[], time: number): DirectorTransform {
     if (!keyframes.length) return base;
     const previous = [...keyframes].reverse().find((item) => item.time <= time) || keyframes[0];
     const next = keyframes.find((item) => item.time >= time) || keyframes[keyframes.length - 1];

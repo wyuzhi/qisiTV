@@ -1,50 +1,16 @@
 package app
 
 import (
+	"context"
 	"encoding/binary"
+	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
-	"time"
-
-	"errors"
 
 	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/playback"
 )
-
-// stsdBox 构造仅含 first-sample-entry fourcc 的最小 stsd box（置于 moov 切片内）。
-func stsdBoxWithFourcc(fourcc string) []byte {
-	b := make([]byte, 24)
-	binary.BigEndian.PutUint32(b[0:4], 24)
-	copy(b[4:8], "stsd")
-	// body: version/flags(4) + entry_count(4)=1 + entry_size(4) + fourcc(4)
-	binary.BigEndian.PutUint32(b[12:16], 1)
-	binary.BigEndian.PutUint32(b[16:20], 8)
-	copy(b[20:24], fourcc)
-	return b
-}
-
-func TestCodecFromMoov(t *testing.T) {
-	cases := []struct {
-		fourcc string
-		want   string
-	}{
-		{"hvc1", videoCodecH265},
-		{"hev1", videoCodecH265},
-		{"avc1", videoCodecH264},
-		{"av01", videoCodecAV1},
-		{"vp09", videoCodecVP9},
-	}
-	for _, c := range cases {
-		if got := codecFromMoov(stsdBoxWithFourcc(c.fourcc)); got != c.want {
-			t.Errorf("codecFromMoov(%s) = %q, want %q", c.fourcc, got, c.want)
-		}
-	}
-	if got := codecFromMoov([]byte{0, 1, 2, 3}); got != "" {
-		t.Errorf("garbage moov codec = %q, want empty", got)
-	}
-}
 
 func mp4Box(typ string, payload []byte) []byte {
 	size := 8 + len(payload)
@@ -79,88 +45,42 @@ func syntheticVideoMP4(width, height int, durationMs int64) []byte {
 	return append(mp4Box("ftyp", ftypPayload), mp4Box("moov", syntheticTrack("vide", width, height, durationMs))...)
 }
 
-func TestVideoMdhdDurationMsBoundedArithmetic(t *testing.T) {
-	v0 := make([]byte, 20)
-	binary.BigEndian.PutUint32(v0[12:16], 12288)
-	binary.BigEndian.PutUint32(v0[16:20], 74240)
-	if got := videoMdhdDurationMs(v0); got != 6041 {
-		t.Fatalf("v0 durationMs = %d, want 6041", got)
-	}
+func stsdBoxWithFourcc(fourcc string) []byte {
+	b := make([]byte, 24)
+	binary.BigEndian.PutUint32(b[0:4], 24)
+	copy(b[4:8], "stsd")
+	binary.BigEndian.PutUint32(b[12:16], 1)
+	binary.BigEndian.PutUint32(b[16:20], 8)
+	copy(b[20:24], fourcc)
+	return b
+}
 
-	unknown := make([]byte, 20)
-	unknown[0] = 2
-	binary.BigEndian.PutUint32(unknown[12:16], 1000)
-	binary.BigEndian.PutUint32(unknown[16:20], 5000)
-	if got := videoMdhdDurationMs(unknown); got != 0 {
-		t.Fatalf("unsupported mdhd version = %d, want 0", got)
+func writeAppCodecMP4(t *testing.T, path, fourcc string) {
+	t.Helper()
+	stsd := stsdBoxWithFourcc(fourcc)
+	moov := make([]byte, 8+len(stsd))
+	binary.BigEndian.PutUint32(moov[0:4], uint32(len(moov)))
+	copy(moov[4:8], "moov")
+	copy(moov[8:], stsd)
+	ftyp := make([]byte, 16)
+	binary.BigEndian.PutUint32(ftyp[0:4], 16)
+	copy(ftyp[4:8], "ftyp")
+	copy(ftyp[8:12], "isom")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
 	}
-
-	overflow := make([]byte, 32)
-	overflow[0] = 1
-	binary.BigEndian.PutUint32(overflow[20:24], 1)
-	binary.BigEndian.PutUint64(overflow[24:32], ^uint64(0))
-	if got := videoMdhdDurationMs(overflow); got != 0 {
-		t.Fatalf("overflowing mdhd durationMs = %d, want 0", got)
-	}
-
-	zeroTimescale := make([]byte, 20)
-	binary.BigEndian.PutUint32(zeroTimescale[16:20], 1000)
-	if got := videoMdhdDurationMs(zeroTimescale); got != 0 {
-		t.Fatalf("zero timescale = %d, want 0", got)
+	if err := os.WriteFile(path, append(append([]byte{}, ftyp...), moov...), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestProbeGeneratedVideoMediaReadsTkhdAndMdhd(t *testing.T) {
-	clip := syntheticVideoMP4(1280, 720, 5042)
-	width, height, durationMs := probeGeneratedVideoMedia(clip)
-	if width != 1280 || height != 720 || durationMs != 5042 {
-		t.Fatalf("probeGeneratedVideoMedia = %d x %d @ %dms, want 1280x720 @ 5042ms", width, height, durationMs)
+func loadQAGrokImagineVideo(t *testing.T) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", "qa-grok-imagine-720square.mp4"))
+	if err != nil || len(data) == 0 {
+		t.Fatalf("QA Grok Imagine MP4 fixture is missing: %v", err)
 	}
-	if w, h, d := probeGeneratedVideoMedia([]byte("not an mp4")); w != 0 || h != 0 || d != 0 {
-		t.Fatalf("garbage probe = %d x %d @ %dms", w, h, d)
-	}
-}
-
-func TestProbeGeneratedVideoMediaUsesVideTrackNotAudio(t *testing.T) {
-	ftypPayload := make([]byte, 8)
-	copy(ftypPayload[:4], "isom")
-	cover := syntheticTrack("auxv", 64, 64, 40)
-	audio := syntheticTrack("soun", 0, 0, 1111)
-	video := syntheticTrack("vide", 1280, 720, 5042)
-	moovPayload := append(append(cover, audio...), video...)
-	clip := append(mp4Box("ftyp", ftypPayload), mp4Box("moov", moovPayload)...)
-	width, height, durationMs := probeGeneratedVideoMedia(clip)
-	if width != 1280 || height != 720 || durationMs != 5042 {
-		t.Fatalf("probeGeneratedVideoMedia = %d x %d @ %dms, want video track 1280x720 @ 5042ms", width, height, durationMs)
-	}
-}
-
-func TestParseMP4BoxRejectsMalformedSizes(t *testing.T) {
-	extendedHuge := make([]byte, 24)
-	binary.BigEndian.PutUint32(extendedHuge[0:4], 1)
-	copy(extendedHuge[4:8], "moov")
-	binary.BigEndian.PutUint64(extendedHuge[8:16], 1<<60)
-	if _, ok := parseMP4Box(extendedHuge, 0, len(extendedHuge)); ok {
-		t.Fatal("extended size larger than remaining must be rejected")
-	}
-
-	extendedTiny := make([]byte, 16)
-	binary.BigEndian.PutUint32(extendedTiny[0:4], 1)
-	copy(extendedTiny[4:8], "moov")
-	binary.BigEndian.PutUint64(extendedTiny[8:16], 10)
-	if _, ok := parseMP4Box(extendedTiny, 0, len(extendedTiny)); ok {
-		t.Fatal("extended size smaller than the 16-byte header must be rejected")
-	}
-
-	oversize := []byte{0, 0, 1, 0, 'm', 'o', 'o', 'v', 1, 2, 3, 4}
-	if _, ok := parseMP4Box(oversize, 0, len(oversize)); ok {
-		t.Fatal("32-bit size larger than remaining must be rejected")
-	}
-
-	truncated := []byte{0, 0, 0, 32, 'm', 'o', 'o'}
-	if _, ok := parseMP4Box(truncated, 0, len(truncated)); ok {
-		t.Fatal("truncated header must be rejected")
-	}
+	return data
 }
 
 func TestProbeGeneratedVideoMediaReadsQAGrokImagineFile(t *testing.T) {
@@ -174,88 +94,15 @@ func TestProbeGeneratedVideoMediaReadsQAGrokImagineFile(t *testing.T) {
 	}
 }
 
-func TestProbeGeneratedVideoMediaRejectsMalformedBoxes(t *testing.T) {
-	extendedHuge := make([]byte, 24)
-	binary.BigEndian.PutUint32(extendedHuge[0:4], 1)
-	copy(extendedHuge[4:8], "moov")
-	binary.BigEndian.PutUint64(extendedHuge[8:16], 1<<60)
-
-	extendedTiny := make([]byte, 16)
-	binary.BigEndian.PutUint32(extendedTiny[0:4], 1)
-	copy(extendedTiny[4:8], "moov")
-	binary.BigEndian.PutUint64(extendedTiny[8:16], 10)
-
-	truncatedHeader := []byte{0, 0, 0, 32, 'm', 'o', 'o'}
-	oversize := []byte{0, 0, 1, 0, 'm', 'o', 'o', 'v', 1, 2, 3, 4}
-
-	for i, data := range [][]byte{extendedHuge, extendedTiny, truncatedHeader, oversize, nil} {
-		if w, h, d := probeGeneratedVideoMedia(data); w != 0 || h != 0 || d != 0 {
-			t.Fatalf("malformed case %d = %d x %d @ %dms", i, w, h, d)
-		}
-	}
-}
-
-func loadQAGrokImagineVideo(t *testing.T) []byte {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", "qa-grok-imagine-720square.mp4"))
-	if err != nil || len(data) == 0 {
-		t.Fatalf("QA Grok Imagine MP4 fixture is missing: %v", err)
-	}
-	return data
-}
-
-func TestProbeVideoCodecReadsRealFile(t *testing.T) {
-	// 构造 ftyp + moov(含 hvc1 stsd) 的最小 mp4 文件，验证 probeVideoCodec 走文件读取路径。
-	stsd := stsdBoxWithFourcc("hvc1")
-	moov := make([]byte, 8+len(stsd))
-	binary.BigEndian.PutUint32(moov[0:4], uint32(len(moov)))
-	copy(moov[4:8], "moov")
-	copy(moov[8:], stsd)
-	full := make([]byte, 0, 16+len(moov))
-	ftyp := make([]byte, 16)
-	binary.BigEndian.PutUint32(ftyp[0:4], 16)
-	copy(ftyp[4:8], "ftyp")
-	copy(ftyp[8:12], "isom")
-	full = append(full, ftyp...)
-	full = append(full, moov...)
-
-	path := filepath.Join(t.TempDir(), "clip.mp4")
-	if err := os.WriteFile(path, full, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if got := probeVideoCodec(path); got != videoCodecH265 {
-		t.Errorf("probeVideoCodec = %q, want h265", got)
-	}
-}
-
-// TestBackfillRejudgesLegacyNoneVideos 覆盖修复：判定规则变更前（H.265/MPEG-4 Part 2
-// 曾被误判可播）落 none 的存量本地视频，启动回填必须重新按 codec 判定——
-// H.264 保持 none（幂等），MPEG-4 触发转码并最终落到 failed/ready 终态。
-func TestBackfillRejudgesLegacyNoneVideos(t *testing.T) {
+func TestStartupDoesNotPrepareLegacyVideos(t *testing.T) {
 	service, db := newProjectAssetLinkTestService(t)
 	dataDir := t.TempDir()
 	service.dataDir = dataDir
 
 	seedLegacy := func(id, fourcc string) {
 		t.Helper()
-		stsd := stsdBoxWithFourcc(fourcc)
-		moov := make([]byte, 8+len(stsd))
-		binary.BigEndian.PutUint32(moov[0:4], uint32(len(moov)))
-		copy(moov[4:8], "moov")
-		copy(moov[8:], stsd)
-		ftyp := make([]byte, 16)
-		binary.BigEndian.PutUint32(ftyp[0:4], 16)
-		copy(ftyp[4:8], "ftyp")
-		copy(ftyp[8:12], "isom")
-		full := append(append([]byte{}, ftyp...), moov...)
 		rel := filepath.Join("clips", id+".mp4")
-		p := filepath.Join(dataDir, "resources", filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, full, 0o644); err != nil {
-			t.Fatal(err)
-		}
+		writeAppCodecMP4(t, filepath.Join(dataDir, "resources", filepath.FromSlash(rel)), fourcc)
 		res := model.Resource{
 			ID: id, UserID: "user-1", Kind: "video", Status: model.ResourceStatusReady,
 			Provider: "local", ObjectKey: rel, PlaybackStatus: model.PlaybackStatusNone,
@@ -267,7 +114,7 @@ func TestBackfillRejudgesLegacyNoneVideos(t *testing.T) {
 	seedLegacy("legacy-h264", "avc1")
 	seedLegacy("legacy-mpeg4", "mp4v")
 
-	service.BackfillPlaybackTranscodes()
+	service.RecoverPlaybackTranscodes()
 
 	var h264 model.Resource
 	if err := db.First(&h264, "id = ?", "legacy-h264").Error; err != nil {
@@ -277,60 +124,83 @@ func TestBackfillRejudgesLegacyNoneVideos(t *testing.T) {
 		t.Fatalf("H.264 存量 none 行被错误改判为 %q", h264.PlaybackStatus)
 	}
 
-	// MPEG-4 行应被抢占转码。fake mp4 不含真实视频流，ffmpeg 解码必败 → failed；
-	// 若某环境恰有同名 ready 副本则也接受。轮询直到终态，避免 goroutine 竞态。
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		t.Log("无 ffmpeg，跳过 MPEG-4 终态断言")
-		return
-	}
 	var mp4v model.Resource
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if err := db.First(&mp4v, "id = ?", "legacy-mpeg4").Error; err != nil {
-			t.Fatal(err)
-		}
-		if mp4v.PlaybackStatus == model.PlaybackStatusFailed || mp4v.PlaybackStatus == model.PlaybackStatusReady {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("MPEG-4 存量行未达终态，停在 %q（error=%q）", mp4v.PlaybackStatus, mp4v.PlaybackError)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	if mp4v.PlaybackStatus != model.PlaybackStatusFailed {
-		t.Fatalf("fake mp4v 应转码失败落 failed，实际 %q", mp4v.PlaybackStatus)
-	}
-}
-
-type failingResourceSaver struct {
-	failTimes int
-	calls     int
-}
-
-func (s *failingResourceSaver) SaveResource(*model.Resource) error {
-	s.calls++
-	if s.calls <= s.failTimes {
-		return errors.New("db busy")
-	}
-	return nil
-}
-
-func TestPersistPlaybackResourceRetriesThenSucceeds(t *testing.T) {
-	saver := &failingResourceSaver{failTimes: 2}
-	if err := persistPlaybackResource(saver, &model.Resource{ID: "r1"}, "test"); err != nil {
+	if err := db.First(&mp4v, "id = ?", "legacy-mpeg4").Error; err != nil {
 		t.Fatal(err)
 	}
-	if saver.calls != playbackPersistAttempts {
-		t.Fatalf("calls = %d, want %d", saver.calls, playbackPersistAttempts)
+	if mp4v.PlaybackStatus == model.PlaybackStatusProcessing {
+		t.Fatal("runner 拒绝后 claim 仍停在 processing，重启无法恢复")
+	}
+	if mp4v.PlaybackStatus == model.PlaybackStatusReady {
+		t.Fatal("无 runtime worker 时不应写出 READY")
 	}
 }
 
-func TestPersistPlaybackResourceReturnsAfterExhaustedRetries(t *testing.T) {
-	saver := &failingResourceSaver{failTimes: 10}
-	if err := persistPlaybackResource(saver, &model.Resource{ID: "r1"}, "test"); err == nil {
-		t.Fatal("expected persist error")
+func TestOpenResourcePlaybackRangeUsesPlaybackDomain(t *testing.T) {
+	service, db := newProjectAssetLinkTestService(t)
+	dataDir := t.TempDir()
+	service.dataDir = dataDir
+	payload := []byte("app-playback-range")
+	path := filepath.Join(dataDir, playback.DirName, "range-1.mp4")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if saver.calls != playbackPersistAttempts {
-		t.Fatalf("calls = %d, want %d", saver.calls, playbackPersistAttempts)
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := model.Resource{
+		ID: "range-1", UserID: "user-1", Kind: "video", Status: model.ResourceStatusReady,
+		Provider: "local", PlaybackStatus: model.PlaybackStatusReady, PlaybackObjectKey: "range-1.mp4",
+	}
+	if err := db.Create(&res).Error; err != nil {
+		t.Fatal(err)
+	}
+	stream, err := service.OpenResourcePlaybackRange("user-1", "range-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Body.Close()
+	got, err := io.ReadAll(stream.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("body = %q", got)
+	}
+}
+
+func TestMediaDomainsAreRuntimeOwned(t *testing.T) {
+	service, _ := newProjectAssetLinkTestService(t)
+	if service.playbackRuntime() != service.playbackRuntime() {
+		t.Fatal("playback instance replaced")
+	}
+	if service.depthCaptureRuntime() != service.depthCaptureRuntime() {
+		t.Fatal("depth instance replaced")
+	}
+}
+
+func TestRecoverResetsStuckProcessingThroughService(t *testing.T) {
+	service, db := newProjectAssetLinkTestService(t)
+	service.backgroundWorkers().Start()
+	t.Cleanup(func() { _ = service.StopWorker(context.Background()) })
+	dataDir := t.TempDir()
+	service.dataDir = dataDir
+	rel := filepath.Join("clips", "stuck.mp4")
+	writeAppCodecMP4(t, filepath.Join(dataDir, "resources", filepath.FromSlash(rel)), "avc1")
+	res := model.Resource{
+		ID: "stuck-claim", UserID: "user-1", Kind: "video", Status: model.ResourceStatusReady,
+		Provider: "local", ObjectKey: rel, PlaybackStatus: model.PlaybackStatusProcessing,
+		PlaybackError: "interrupted",
+	}
+	if err := db.Create(&res).Error; err != nil {
+		t.Fatal(err)
+	}
+	service.RecoverPlaybackTranscodes()
+	var got model.Resource
+	if err := db.First(&got, "id = ?", "stuck-claim").Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.PlaybackStatus != "" {
+		t.Fatalf("stuck claim after recovery = %q, want pending until playback requested", got.PlaybackStatus)
 	}
 }

@@ -1,65 +1,51 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ChangeEvent } from "react";
+import { getCanvasHydrationHealth,subscribeCanvasHydrationHealth } from "@/services/canvas-hydration-health";
 import { useNavigate, useSearchParams } from "react-router";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { Alert, App, Button, Dropdown, Input, Modal } from "antd";
+import { App, Button, Dropdown, Input, Modal } from "antd";
 import { Select } from "@/components/ui/base/select";
-import { ArrowLeft, Download, FolderPlus, Image as ImageIcon, MoreHorizontal, Pencil, Plus, Search, Trash2, Upload } from "lucide-react";
+import { Download, FolderPlus, Image as ImageIcon, MoreHorizontal, Pencil, Plus, Trash2, Upload } from "lucide-react";
 
-import { CollectionGrid, WorkspacePage } from "@/components/layout/workspace-page";
+import { CollectionGrid, PageHeader, WorkspacePage } from "@/components/layout/workspace-page";
+import { ExpandableSearch } from "@/components/layout/expandable-search";
 import { WorkspaceLoadingState, WorkspaceState } from "@/components/layout/workspace-state";
 
-import { readZip } from "@/lib/zip";
-import { setMediaBlob } from "@/services/file-storage";
-import { setImageBlob } from "@/services/image-storage";
 import { CanvasFolderCard } from "@/components/canvas/canvas-folder-card";
+import { AuthenticatedBackgroundImage } from "@/components/assets/authenticated-media";
 import { CanvasDeleteConfirmation } from "@/components/canvas/canvas-delete-confirmation";
-import { captureUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { RecycleBinDialog } from "@/components/canvas/recycle-bin-dialog";
 import { LibraryCardShell } from "@/components/canvas/library-card-shell";
-import type { CanvasExportFile } from "@/types/canvas-export";
-import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { flushCanvasStorePersistence, useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
-import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
-import { reportOwnedMediaSave } from "@/services/desktop-media-save";
-import { normalizeLocalCanvasProject } from "@/lib/local-workspace-migration";
-import { saveCanvasDrawing, type CanvasDrawingRenderDraft } from "@/lib/canvas/canvas-drawing-storage";
-import { hasRemoteUserDataSyncSession, loadCanvasProjectForEditing, saveRemoteUserDataNow, scheduleRemoteUserDataSync } from "@/services/local-workspace-sync";
+import { awaitCanvasExportStep, canvasExportProgressLabel, exportCanvasProjects, type CanvasExportProgress } from "@/lib/canvas/canvas-export";
+import { restoreCanvasArchive } from "@/lib/canvas/canvas-archive-restore";
+import { createCanvasLibraryFolder, deleteCanvasLibraryFolder, hydrateCanvasLibraryFolders, persistCanvasFolderCover, renameCanvasLibraryFolder } from "@/lib/canvas/canvas-folder-storage";
+import { isWailsNativeShell } from "@/services/desktop-media-save";
+import { loadCanvasProjectForEditing, saveRemoteUserDataNow } from "@/services/local-workspace-sync";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
-import { isBrowserWorkspace } from "@/services/browser-workspace";
-import { createLocalCanvasProject, deleteLocalCanvasProjects, hydrateLocalCanvasProjectsFromBackend, syncLocalCanvasProjectToBackend } from "@/services/local-workspace-repository";
-import { ensureFolderReady, getProjectFolderLocation, getProjectFolderState } from "@/services/browser-project-folder";
-import { importCanvasBackupProjects, importedCanvasMediaKey, importedCanvasNodeMetadata, remapImportedCanvasMedia } from "@/services/canvas-backup-import";
+import { usesBrowserLocalResourceStore } from "@/services/workspace-resource-storage";
+import { beginLocalCanvasProject, deleteLocalCanvasProjects, hydrateLocalCanvasProjectsFromBackend, syncLocalCanvasProjectToBackend } from "@/services/local-workspace-repository";
 import { createWorkspaceCanvasProject } from "@/services/workspace-project-repository";
 import { listWorkspaceCanvasProjectsPage, type CanvasLibrarySummary } from "@/services/api/workspace-data";
 import { useUserStore } from "@/stores/use-user-store";
 import { listProjects } from "@/services/api/projects";
 import { loadCanvasProjectPage } from "@/lib/workspace-route-modules";
-import { resourceFileUrl, resourceStorageKey, uploadResourceFile } from "@/services/api/resources";
-import { primeResourceBlobCache } from "@/services/resource-blob-cache";
 import { useSyncProgressStore } from "@/stores/use-sync-progress-store";
-import { ensureCanvasNodeAsset } from "@/services/project-asset-sync";
 import { useAppearanceStore } from "@/stores/use-appearance-store";
 import { cn } from "@/lib/utils";
+import { assertUserScope, captureUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
+import { recordDiagnosticEvent } from "@/services/diagnostics/client-diagnostics";
 import { canvasIdsForWorkspaceProjects, canvasWorkspaceProjectId, listCanvasWorkspaceProjectCanvases, listCanvasWorkspaceProjectRoots, previewNodesForWorkspaceProject } from "@/lib/canvas/canvas-workspace-project";
 
-function isExpectedLocalOnlySyncError(error: unknown) {
-    const message = error instanceof Error ? error.message : String(error || "");
-    return /尚未建立云端同步会话|未登录|guest/i.test(message);
-}
-
 const CanvasDeleteProjectsDialog = lazy(() => import("@/components/canvas/canvas-delete-projects-dialog").then((module) => ({ default: module.CanvasDeleteProjectsDialog })));
-type CanvasImportFeedback = { type: "info" | "success" | "warning" | "error"; title: string; detail: string; needsFolderSetup?: boolean };
 
 export default function CanvasPage() {
+    const canvasHealth = useSyncExternalStore(subscribeCanvasHydrationHealth,getCanvasHydrationHealth);
     const { message } = App.useApp();
     const brandName = useAppearanceStore((state) => state.appearance.brandName);
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const inputRef = useRef<HTMLInputElement>(null);
-    const importingRef = useRef(false);
-    const [importing, setImporting] = useState(false);
-    const [importFeedback, setImportFeedback] = useState<CanvasImportFeedback | null>(null);
     const autoOpenRef = useRef(false);
     const [keyword, setKeyword] = useState("");
     const [sort, setSort] = useState<"updated" | "name" | "nodes">("updated");
@@ -71,29 +57,31 @@ export default function CanvasPage() {
     const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string; scope: CapturedUserScope } | null>(null);
     const loadMoreRef = useRef<HTMLDivElement>(null);
     const [loadedProjectCount, setLoadedProjectCount] = useState(50);
-    const [openingProjectId, setOpeningProjectId] = useState("");
-    const openingProjectIdRef = useRef("");
+    const [creationError, setCreationError] = useState(false);
+    const exportController = useRef<AbortController | null>(null);
+    const [exportProgress, setExportProgress] = useState<CanvasExportProgress | null>(null);
+    const [exportError, setExportError] = useState("");
+    useEffect(() => () => exportController.current?.abort(), []);
     const hydrated = useCanvasStore((state) => state.hydrated);
     const localProjects = useCanvasStore((state) => state.projects);
     const folders = useCanvasStore((state) => state.folders);
-    const createFolder = useCanvasStore((state) => state.createFolder);
-    const renameFolder = useCanvasStore((state) => state.renameFolder);
-    const deleteFolder = useCanvasStore((state) => state.deleteFolder);
-    const setFolderCover = useCanvasStore((state) => state.setFolderCover);
     const moveProjectsToFolder = useCanvasStore((state) => state.moveProjectsToFolder);
     const userId = useUserStore((state) => state.user?.id);
     const sessionHydrated = useUserStore((state) => state.hydrated);
     // The sync layer is the source of truth: it also recognizes the synthetic
     // local identity, which protects the library from stale session state after
     // a desktop reload or HMR cycle.
-    // The default qisiTV build is local-only even when a stale/embedded browser
+    // The default BeefTV build is local-only even when a stale/embedded browser
     // session still contains a logged-in user. Cloud project APIs are opt-in via
     // the explicit hosted build flag, never inferred from login state.
     const remoteMode = import.meta.env.VITE_CANVAS_LOCAL_MODE === "false" && Boolean(userId) && !isLocalWorkspaceMode();
     useEffect(() => {
         if (!hydrated || !isLocalWorkspaceMode()) return;
         void hydrateLocalCanvasProjectsFromBackend();
-    }, [hydrated]);
+        void hydrateCanvasLibraryFolders().catch((error) => {
+            message.error(error instanceof Error ? error.message : "文件夹列表读取失败");
+        });
+    }, [hydrated, message]);
     const [debouncedKeyword, setDebouncedKeyword] = useState("");
     useEffect(() => {
         const timer = window.setTimeout(() => setDebouncedKeyword(keyword.trim()), 250);
@@ -110,7 +98,6 @@ export default function CanvasPage() {
         ? libraryQuery.data?.pages.flatMap((page) => page.projects) || []
         : listCanvasWorkspaceProjectRoots(localProjects).map((project) => ({ ...project, nodeCount: project.nodes.length, previewNodes: previewNodesForWorkspaceProject(localProjects, canvasWorkspaceProjectId(project)) })), [libraryQuery.data, localProjects, remoteMode]);
     const totalProjects = remoteMode ? libraryQuery.data?.pages[0]?.total || 0 : projects.length;
-    const importProject = useCanvasStore((state) => state.importProject);
     const selectedIds = useCanvasUiStore((state) => state.selectedProjectIds);
     const deleteDialogOpen = useCanvasUiStore((state) => state.deleteProjectIds.length > 0);
     const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
@@ -133,21 +120,20 @@ export default function CanvasPage() {
     }, []);
     const enterProject = useCallback(
         (id: string) => {
-            if (openingProjectIdRef.current) return;
-            openingProjectIdRef.current = id;
-            setOpeningProjectId(id);
             preloadProject();
-            window.requestAnimationFrame(() => navigate(`/canvas/${id}${forwardedQuery}`));
+            navigate(`/canvas/${id}${forwardedQuery}`);
         },
         [forwardedQuery, navigate, preloadProject],
     );
     const createAndEnter = () => {
-        void createLocalCanvasProject("未命名项目").then(({ id }) => {
-            // 允许浏览器验收脚本在项目库内保留新卡片，真实用户仍沿用 LibTV 的直接进入画布行为。
+        setCreationError(false);
+        const { id, saved } = beginLocalCanvasProject("未命名项目");
+        void saved.then(() => {
+            // Only enter after the desktop repository has accepted the new canvas.
             if (searchParams.get("stay") !== "1") enterProject(id);
-        }).catch((error: unknown) => {
-            message.error(error instanceof Error ? error.message : "项目创建失败");
-            if (isBrowserWorkspace()) navigate("/local?next=new");
+        }).catch((error) => {
+            setCreationError(true);
+            message.error(error instanceof Error ? error.message : "创建项目失败，请重试");
         });
     };
     const duplicateCanvasProject = useCallback(async (project: CanvasLibrarySummary) => {
@@ -203,10 +189,14 @@ export default function CanvasPage() {
     const projectFilterItems = useMemo(() => [{ key: "all", label: "全部画布" }, { key: "independent", label: "自由画布" }, ...(projectQuery.data?.projects || []).map(({ project }) => ({ key: project.id, label: project.name }))], [projectQuery.data]);
     const saveFolderRename = () => {
         const nextName = folderName.trim() || "未命名文件夹";
-        if (editingFolderId) renameFolder(editingFolderId, nextName);
+        const id = editingFolderId;
         setFolderName("");
         setEditingFolderId(null);
         setFolderDialogOpen(false);
+        if (!id) return;
+        void renameCanvasLibraryFolder(id, nextName).catch((error) => {
+            message.error(error instanceof Error ? error.message : "文件夹没有保存成功");
+        });
     };
     useEffect(() => {
         setLoadedProjectCount(50);
@@ -239,279 +229,53 @@ export default function CanvasPage() {
         }
     };
     const exportSelected = async () => {
+        if (exportController.current) return;
+        const controller = new AbortController();
+        exportController.current = controller;
+        const scope = captureUserScope();
+        setExportError("");
+        setExportProgress({ phase: "loading" });
         try {
             const selected = [];
             for (const id of selectedCanvasIds) {
-                const project = await loadCanvasProjectForEditing(id);
+                const project = await awaitCanvasExportStep(loadCanvasProjectForEditing(id), controller.signal);
+                controller.signal.throwIfAborted();
+                assertUserScope(scope);
                 if (!project) throw new Error("画布不存在，无法导出");
                 selected.push(project);
             }
-            await reportOwnedMediaSave(message, exportCanvasProjects(selected, `${brandName}画布-${selected.length}个画布`, { folders }));
-        } catch (error) { message.error(error instanceof Error ? error.message : "导出失败"); }
+            const saved = await exportCanvasProjects(selected, `${brandName}画布-${selected.length}个画布`, { folders, signal: controller.signal, onProgress: setExportProgress });
+            if (saved === "saved" && isWailsNativeShell()) message.success("已保存到所选位置");
+        } catch (error) {
+            if (controller.signal.aborted) {
+                recordDiagnosticEvent({ category: "action", level: "info", code: "canvas_export_cancelled", message: "已取消画布导出" });
+            } else {
+                setExportError(error instanceof Error ? error.message : "导出失败，请重试");
+                recordDiagnosticEvent({ category: "action", level: "error", code: "canvas_export_failed", message: "画布导出失败" });
+            }
+        } finally {
+            exportController.current = null;
+            setExportProgress(null);
+        }
     };
     const importCanvas = async (file?: File) => {
-        if (!file || importingRef.current) return;
-        importingRef.current = true;
-        setImporting(true);
-        setImportFeedback({ type: "info", title: "正在导入画布", detail: `正在检查保存位置并解压「${file.name}」…` });
-        const browserWorkspace = isBrowserWorkspace();
+        if (!file) return;
+        const hideLoading = message.loading({ content: "正在解压并准备导入画布...", duration: 0 });
         try {
-            if (browserWorkspace) await ensureFolderReady();
-            const zip = await readZip(file);
-            const projectFile = zip.get("projects.json");
-            if (!projectFile) throw new Error("缺少 projects.json 元数据文件");
-            const data = JSON.parse(await projectFile.text()) as CanvasExportFile;
-            if (!Array.isArray(data.projects) || !data.projects.length) throw new Error("projects.json 中缺少画布列表");
-            for (const item of data.projects) {
-                if (!item?.project || !Array.isArray(item.project.nodes) || !Array.isArray(item.project.connections)) throw new Error("压缩包中的画布结构无效");
-                if (!Array.isArray(item.files) || item.files.some((entry) => !entry || typeof entry.storageKey !== "string" || !entry.storageKey || typeof entry.path !== "string")) throw new Error(`画布「${item.project.title || "未命名画布"}」的媒体清单无效`);
-                if (new Set(item.files.map((entry) => entry.storageKey)).size !== item.files.length) throw new Error(`画布「${item.project.title || "未命名画布"}」的媒体清单包含重复标识`);
-                const missing = item.files.find((entry) => !zip.get(entry.path));
-                if (missing) throw new Error(`压缩包缺少媒体文件：${missing.path}`);
-                for (const drawing of item.drawingDocuments || []) {
-                    for (const path of [drawing.previewPath, drawing.generationRender?.path]) {
-                        if (path && !zip.has(path)) throw new Error(`压缩包缺少绘图文件：${path}`);
-                    }
-                }
-            }
-            const folderIdMap = new Map<string, string>();
-            for (const folder of data.folders || []) {
-                if (!folder || typeof folder.id !== "string" || typeof folder.name !== "string") continue;
-                folderIdMap.set(folder.id, createFolder(folder.name));
-            }
-            const remoteSyncEnabled = hasRemoteUserDataSyncSession();
-            let remoteSyncWarning: unknown;
-            const importedWorkspaceProjectIds = new Map<string, string>();
-            let importIndex = 0;
-
-            const result = await importCanvasBackupProjects(data.projects, {
-                ensureReady: async () => { if (browserWorkspace) await ensureFolderReady(); },
-                create: (item) => {
-                    importIndex += 1;
-                    setImportFeedback({ type: "info", title: `正在导入画布（${importIndex}/${data.projects.length}）`, detail: `正在恢复「${item.project.title || "未命名画布"}」的素材…` });
-                    const sourceWorkspaceProjectId = canvasWorkspaceProjectId(item.project);
-                    const importedProjectId = importProject({
-                        ...(!remoteMode ? normalizeLocalCanvasProject(item.project) : item.project),
-                        folderId: item.project.folderId ? folderIdMap.get(item.project.folderId) : undefined,
-                        title: item.project.title || "导入画布",
-                        nodes: item.project.nodes || [],
-                    }, importedWorkspaceProjectIds.get(sourceWorkspaceProjectId));
-                    if (!importedWorkspaceProjectIds.has(sourceWorkspaceProjectId)) importedWorkspaceProjectIds.set(sourceWorkspaceProjectId, importedProjectId);
-                    return importedProjectId;
-                },
-                restore: async (importedProjectId, item) => {
-                    const totalFiles = item.files.length;
-
-                    if (totalFiles > 0) {
-                        useSyncProgressStore.getState().setProjectProgress(importedProjectId, {
-                            projectId: importedProjectId,
-                            total: totalFiles,
-                            completed: 0,
-                            phase: remoteSyncEnabled ? "uploading" : "saving",
-                            message: remoteSyncEnabled ? "正在上传媒体至云端" : "正在保存本地媒体",
-                        });
-                    }
-
-                    try {
-                        const storageKeyMap = new Map<string, { storageKey: string; url: string }>();
-                        const concurrency = 4;
-                        let fileIndex = 0;
-                        const workers = new Array(Math.min(item.files.length, concurrency)).fill(null).map(async () => {
-                            while (fileIndex < item.files.length) {
-                                const current = fileIndex++;
-                                const fileItem = item.files[current];
-                                const blob = zip.get(fileItem.path)!;
-                                const mime = fileItem.mimeType || blob.type || "image/png";
-                                const typedBlob = blob.type ? blob : blob.slice(0, blob.size, mime);
-                                const kind: "image" | "video" | "audio" | "file" = mime.startsWith("image/") ? "image" : mime.startsWith("video/") ? "video" : mime.startsWith("audio/") ? "audio" : "file";
-
-                                try {
-                                    if (!remoteMode) throw new Error("local-storage-mode");
-                                    const resource = await uploadResourceFile(typedBlob, kind, { fileName: fileItem.path.split("/").pop() });
-                                    const newStorageKey = resourceStorageKey(resource.id);
-                                    const newUrl = resourceFileUrl(resource.id);
-                                    await primeResourceBlobCache(newStorageKey, typedBlob).catch(() => "");
-                                    storageKeyMap.set(fileItem.storageKey, { storageKey: newStorageKey, url: newUrl });
-                                } catch (uploadErr) {
-                                    if (remoteMode && !(uploadErr instanceof Error && uploadErr.message === "local-storage-mode")) console.warn("上传资源到后端失败，降级保存本地", uploadErr);
-                                    const storageKey = importedCanvasMediaKey(importedProjectId, current, mime);
-                                    const localUrl = await (kind === "image" ? setImageBlob(storageKey, typedBlob) : setMediaBlob(storageKey, typedBlob));
-                                    if (!localUrl) throw new Error(`媒体保存失败：${fileItem.path}`);
-                                    storageKeyMap.set(fileItem.storageKey, { storageKey, url: localUrl });
-                                } finally {
-                                    useSyncProgressStore.getState().incrementProjectCompleted(importedProjectId);
-                                }
-                            }
-                        });
-                        // Finish all writes before discarding a failed import; no worker may mutate it later.
-                        const outcomes = await Promise.allSettled(workers);
-                        const failed = outcomes.find((outcome) => outcome.status === "rejected");
-                        if (failed?.status === "rejected") throw failed.reason;
-
-                        const drawingEngineById = new Map((item.drawingDocuments || []).filter((document) => !document.engine || document.engine === "excalidraw").map((document) => [document.drawingId, "excalidraw" as const]));
-                        const importedContent = remapImportedCanvasMedia(item.project, storageKeyMap);
-                        const restoredStorageKeys = new Set(Array.from(storageKeyMap.values(), (entry) => entry.storageKey));
-                        const remapNodeMedia = (node: CanvasNodeData): CanvasNodeData => {
-                            const isDeadBlob = (val?: string) => typeof val === "string" && val.startsWith("blob:");
-                            const restored = restoredStorageKeys.has(node.metadata?.storageKey || "");
-                            const content = !restored && isDeadBlob(node.metadata?.content) ? "" : node.metadata?.content;
-                            const previewContent = !restored && isDeadBlob(node.metadata?.previewContent) ? "" : node.metadata?.previewContent;
-                            const metadata = importedCanvasNodeMetadata(node, content);
-                            return {
-                                ...node,
-                                metadata: {
-                                    ...metadata,
-                                    ...(content !== undefined ? { content } : {}),
-                                    ...(previewContent !== undefined ? { previewContent } : {}),
-                                    drawingEngine: node.type === "drawing" && node.metadata?.drawingId ? drawingEngineById.get(node.metadata.drawingId) || "excalidraw" : node.metadata?.drawingEngine,
-                                },
-                            };
-                        };
-
-                        const remappedNodes = importedContent.nodes.map(remapNodeMedia);
-                        let remappedTimeline = importedContent.timeline ? {
-                            ...importedContent.timeline,
-                            clips: importedContent.timeline.clips.map((clip) => clip.directMedia ? { ...clip, directMedia: { ...clip.directMedia, assetId: undefined } } : clip),
-                        } : undefined;
-                        updateProject(importedProjectId, { nodes: remappedNodes, timeline: remappedTimeline, directorScenes: importedContent.directorScenes, chatSessions: importedContent.chatSessions });
-
-                        const assetIdByStorageKey = new Map<string, string>();
-                        for (let index = 0; index < remappedNodes.length; index += 1) {
-                            const node = remappedNodes[index];
-                            const isMedia = node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio;
-                            if (!isMedia || !node.metadata?.content) continue;
-                            const storageKey = node.metadata.storageKey || "";
-                            let assetId = storageKey ? assetIdByStorageKey.get(storageKey) : undefined;
-                            if (!assetId) {
-                                const result = await ensureCanvasNodeAsset({ canvasId: importedProjectId, domainProjectId: browserWorkspace ? undefined : item.project.projectId, node, source: "canvas-upload" });
-                                assetId = result.assetId;
-                                if (storageKey) assetIdByStorageKey.set(storageKey, assetId);
-                            }
-                            remappedNodes[index] = { ...node, metadata: { ...node.metadata, assetId } };
-                        }
-                        if (remappedTimeline) {
-                            const clips: typeof remappedTimeline.clips = [];
-                            for (const clip of remappedTimeline.clips) {
-                                const media = clip.directMedia;
-                                const content = media?.url || media?.dataUrl || media?.content || "";
-                                if (!media || media.assetId || !media.storageKey || !content || media.kind === "text") {
-                                    clips.push(clip);
-                                    continue;
-                                }
-                                let assetId = assetIdByStorageKey.get(media.storageKey);
-                                if (!assetId) {
-                                    const type = media.kind === "audio" ? CanvasNodeType.Audio : media.kind === "video" ? CanvasNodeType.Video : CanvasNodeType.Image;
-                                    const node: CanvasNodeData = {
-                                        id: media.id,
-                                        type,
-                                        title: media.title,
-                                        position: { x: 0, y: 0 },
-                                        width: media.width || 320,
-                                        height: media.height || (type === CanvasNodeType.Audio ? 120 : 240),
-                                        metadata: { content, storageKey: media.storageKey, naturalWidth: media.width, naturalHeight: media.height, durationMs: media.durationMs, bytes: media.bytes, mimeType: media.mimeType },
-                                    };
-                                    const result = await ensureCanvasNodeAsset({ canvasId: importedProjectId, domainProjectId: browserWorkspace ? undefined : item.project.projectId, node, source: "canvas-upload" });
-                                    assetId = result.assetId;
-                                    assetIdByStorageKey.set(media.storageKey, assetId);
-                                }
-                                clips.push({ ...clip, directMedia: { ...media, assetId } });
-                            }
-                            remappedTimeline = { ...remappedTimeline, clips };
-                        }
-                        updateProject(importedProjectId, { nodes: remappedNodes, timeline: remappedTimeline });
-
-                        await Promise.all(
-                            (item.drawingDocuments || []).filter((document) => !document.engine || document.engine === "excalidraw").map((document) => {
-                                const previewFile = document.previewPath ? zip.get(document.previewPath) : undefined;
-                                const preview = previewFile && !previewFile.type ? previewFile.slice(0, previewFile.size, "image/png") : previewFile;
-                                const renderFile = document.generationRender?.path ? zip.get(document.generationRender.path) : undefined;
-                                const renderBlob = renderFile && !renderFile.type ? renderFile.slice(0, renderFile.size, document.generationRender?.mimeType || "image/png") : renderFile;
-                                const render =
-                                    renderBlob && document.generationRender
-                                        ? ({
-                                              blob: renderBlob,
-                                              pageId: document.generationRender.pageId,
-                                              width: document.generationRender.width,
-                                              height: document.generationRender.height,
-                                              mimeType: document.generationRender.mimeType,
-                                              background: document.generationRender.background,
-                                          } satisfies CanvasDrawingRenderDraft)
-                                        : undefined;
-                                const engine = "excalidraw" as const;
-                                return saveCanvasDrawing(
-                                    importedProjectId,
-                                    document.drawingId,
-                                    engine,
-                                    document.snapshot,
-                                    {
-                                        version: 2,
-                                        engine,
-                                        snapshot: document.snapshot,
-                                        revision: Math.max(0, document.revision - 1),
-                                        updatedAt: document.updatedAt,
-                                        shapeCount: document.shapeCount,
-                                        pageCount: document.pageCount,
-                                    },
-                                    preview,
-                                    render,
-                                );
-                            }),
-                        );
-
-                        useSyncProgressStore.getState().setProjectProgress(importedProjectId, {
-                            phase: "saving",
-                            message: remoteSyncEnabled ? "正在保存画布结构" : "正在保存本地画布",
-                        });
-                    } catch (error) {
-                        useSyncProgressStore.getState().setProjectProgress(importedProjectId, {
-                            phase: "error",
-                            message: error instanceof Error ? error.message : "画布导入未完成",
-                        });
-                        throw error;
-                    } finally {
-                        if (!remoteSyncEnabled) useSyncProgressStore.getState().setProjectProgress(importedProjectId, null);
-                    }
-                },
-                persist: async (importedProjectId) => {
-                    setImportFeedback((current) => current ? { ...current, detail: browserWorkspace ? "正在将画布和素材写入本机项目文件夹…" : "正在保存导入的画布和素材…" } : current);
-                    await flushCanvasStorePersistence();
-                    if (browserWorkspace) {
-                        if (!useCanvasStore.getState().projects.some((project) => project.id === importedProjectId)) throw new Error("导入中的画布已被删除，请重新导入");
-                        await syncLocalCanvasProjectToBackend(importedProjectId);
-                        if (!getProjectFolderLocation(importedProjectId)) throw new Error("导入画布尚未写入项目文件夹，请重试");
-                    }
-                    else if (remoteSyncEnabled) {
-                        try { await saveRemoteUserDataNow(importedProjectId); }
-                        catch (syncError) {
-                            remoteSyncWarning ||= syncError;
-                            scheduleRemoteUserDataSync();
-                            if (remoteMode && syncError && !isExpectedLocalOnlySyncError(syncError)) console.warn("导入画布云端同步失败，等待自动重试", syncError);
-                        }
-                    }
-                },
-                discard: async (importedProjectId) => {
-                    useCanvasStore.getState().deleteProjects([importedProjectId]);
-                    useSyncProgressStore.getState().setProjectProgress(importedProjectId, null);
-                    await flushCanvasStorePersistence();
+            const result = await restoreCanvasArchive(file, {
+                onProjectProgress: (projectId, progress) => {
+                    useSyncProgressStore.getState().setProjectProgress(projectId, progress);
                 },
             });
-            if (result.failed) {
-                const reason = result.failed.error instanceof Error ? result.failed.error.message : "画布或媒体保存失败";
-                const saved = browserWorkspace ? "已写入项目文件夹" : "已导入";
-                const cleanup = result.failed.cleanupError ? "；失败项目的缓存未能清理，请刷新后检查" : "";
-                const detail = `${saved} ${result.completed.length} 个画布；「${result.failed.title}」导入失败：${reason}；另有 ${result.remaining} 个未开始${cleanup}`;
-                setImportFeedback({ type: result.completed.length ? "warning" : "error", title: result.completed.length ? "部分画布导入完成" : "导入失败", detail, needsFolderSetup: browserWorkspace && !getProjectFolderState().ready });
-            } else if (remoteSyncWarning) {
-                setImportFeedback({ type: "warning", title: "画布已导入，云端同步未完成", detail: `已导入 ${result.completed.length} 个画布，云端同步将自动重试。` });
-            } else {
-                setImportFeedback({ type: "success", title: "导入完成", detail: `已导入 ${result.completed.length} 个画布${browserWorkspace ? "并写入本机项目文件夹" : remoteSyncEnabled ? "并完成云端同步" : "并保存到本地"}。` });
-            }
+            hideLoading();
+            message.success(result.storage === "backend"
+                ? `已导入 ${result.count} 个画布`
+                : `已导入 ${result.count} 个画布并保存到本地`);
         } catch (error) {
+            hideLoading();
             console.error("导入画布失败", error);
-            setImportFeedback({ type: "error", title: "导入失败", detail: error instanceof Error ? error.message : "请选择有效的画布压缩包。", needsFolderSetup: browserWorkspace && !getProjectFolderState().ready });
+            message.error(error instanceof Error ? `导入失败：${error.message}` : "导入失败，请选择有效的画布压缩包");
         } finally {
-            importingRef.current = false;
-            setImporting(false);
             if (inputRef.current) inputRef.current.value = "";
         }
     };
@@ -522,60 +286,47 @@ export default function CanvasPage() {
         // screen forever after an app restart, even though the local store is
         // already ready. Hosted mode still waits for both session and library.
         if (!hydrated || (remoteMode && (!sessionHydrated || !libraryQuery.isSuccess)) || autoOpenRef.current || (mode !== "new" && mode !== "recent" && mode !== "handoff")) return;
+        // A new local canvas can be created while older projects are still
+        // hydrating. Waiting for every historical canvas leaves this route on
+        // the loading screen when one large project or cache write is slow.
+        if (!remoteMode && mode !== "new" && (canvasHealth.loading || canvasHealth.error)) return;
         autoOpenRef.current = true;
         if (mode === "recent" && projects[0]?.id) {
             enterProject(projects[0].id);
             return;
         }
-        void createLocalCanvasProject("未命名项目").then(({ id }) => {
-            enterProject(id);
-        }).catch((error: unknown) => {
-            message.error(error instanceof Error ? error.message : "项目创建失败");
-            navigate(isBrowserWorkspace() ? "/local?next=new" : "/project", { replace: true });
+        const { id, saved } = beginLocalCanvasProject("未命名项目");
+        void saved.then(() => enterProject(id)).catch((error) => {
+            setCreationError(true);
+            message.error(error instanceof Error ? error.message : "创建项目失败，请重试");
         });
-    }, [hydrated, message, mode, projects, remoteMode, sessionHydrated, libraryQuery.isSuccess]);
+    }, [hydrated, message, mode, projects, remoteMode, sessionHydrated, libraryQuery.isSuccess,canvasHealth]);
 
-    if (!libraryQuery.isError && (mode === "new" || mode === "recent" || mode === "handoff")) return <main className="flex h-full items-center justify-center bg-background text-sm text-stone-500">正在打开画布...</main>;
+    if (!creationError && !libraryQuery.isError && !(canvasHealth.error && !remoteMode) && (mode === "new" || mode === "recent" || mode === "handoff")) return <main className="flex h-full items-center justify-center bg-background text-sm text-stone-500">正在打开画布...</main>;
 
     return (
         <WorkspacePage className="studio-collection-page lib-tv-project-page">
-            <header className="libtv-project-header">
-                <div className="libtv-project-heading">
-                    <button type="button" className="libtv-project-back" onClick={() => navigate("/")}><ArrowLeft aria-hidden="true" />返回首页</button>
-                    <span className="libtv-project-divider" aria-hidden="true" />
-                    {activeFolder ? <>
-                        <button type="button" className="libtv-project-breadcrumb-button" onClick={() => setFolderFilter("all")}>全部项目</button>
-                        <span className="libtv-project-breadcrumb-separator" aria-hidden="true">/</span>
-                        <h1 title={activeFolder.name}>{activeFolder.name}</h1>
-                    </> : <h1>全部项目</h1>}
-                </div>
-                <div className="libtv-project-actions">
-                    <Input prefix={<Search />} value={keyword} allowClear placeholder="搜索项目" aria-label="搜索项目" onChange={(event) => setKeyword(event.target.value)} />
-                    <Button icon={<Upload />} disabled={!hydrated || importing} loading={importing} onClick={() => inputRef.current?.click()}>导入画布</Button>
+            <PageHeader
+                title={activeFolder?.name || "全部项目"}
+                leading={activeFolder ? <button type="button" className="libtv-project-breadcrumb-button" onClick={() => setFolderFilter("all")}>全部项目 /</button> : undefined}
+                actions={(
+                    <div className="libtv-project-actions">
+                    <ExpandableSearch value={keyword} placeholder="搜索项目" onChange={setKeyword} />
+                    <Button icon={<Upload />} disabled={!hydrated} onClick={() => inputRef.current?.click()}>导入画布</Button>
                     <Button icon={<Trash2 />} onClick={() => setHistoryOpen(true)}>回收站</Button>
-                    <Button icon={<FolderPlus />} disabled={!hydrated} onClick={() => createFolder("未命名文件夹")}>新建文件夹</Button>
-                </div>
-            </header>
-
-            {importFeedback ? (
-                <Alert
-                    className="mb-4"
-                    role={importFeedback.type === "error" || importFeedback.type === "warning" ? "alert" : "status"}
-                    aria-live="polite"
-                    type={importFeedback.type}
-                    showIcon
-                    message={importFeedback.title}
-                    description={importFeedback.detail}
-                    closable={!importing}
-                    onClose={() => setImportFeedback(null)}
-                    action={importFeedback.needsFolderSetup ? <Button size="small" onClick={() => navigate("/local")}>本地文件与 Agent</Button> : undefined}
-                />
-            ) : null}
+                    <Button icon={<FolderPlus />} disabled={!hydrated} onClick={() => {
+                        void createCanvasLibraryFolder("未命名文件夹").catch((error) => {
+                            message.error(error instanceof Error ? error.message : "文件夹没有保存成功");
+                        });
+                    }}>新建文件夹</Button>
+                    </div>
+                )}
+            />
 
             <div className="collection-content">
-                {selectedIds.length ? (
+                {selectedIds.length || exportProgress ? (
                     <div className="collection-selection-bar">
-                        <strong className="mr-auto font-medium">已选 {selectedIds.length} 个项目</strong>
+                        <strong className="mr-auto font-medium">{exportProgress ? "正在导出画布" : `已选 ${selectedIds.length} 个项目`}</strong>
                         {remoteMode ? <>
                             <Button
                                 size="small"
@@ -600,15 +351,22 @@ export default function CanvasPage() {
                                 </Button>
                             ) : null}
                         </> : null}
-                        <Button size="small" disabled={!hydrated} icon={<Download className="size-3.5" />} onClick={() => void exportSelected()}>
+                        <Button size="small" aria-label="导出" disabled={!hydrated} loading={Boolean(exportProgress)} icon={<Download className="size-3.5" />} onClick={() => void exportSelected()}>
                             导出
                         </Button>
-                        <Button size="small" danger disabled={!hydrated} onClick={deleteSelectedProjects}>
+                        {exportProgress ? <>
+                            <span className="text-sm text-foreground/65" role="status" aria-live="polite">{canvasExportProgressLabel(exportProgress)}</span>
+                            <Button size="small" disabled={exportProgress.phase === "saving"} onClick={() => exportController.current?.abort()}>取消导出</Button>
+                        </> : null}
+                        <Button size="small" danger disabled={!hydrated || Boolean(exportProgress)} onClick={deleteSelectedProjects}>
                             删除
                         </Button>
                     </div>
                 ) : null}
 
+                {exportError ? <p role="alert" className="mb-4 whitespace-pre-wrap break-words text-sm text-destructive">{exportError}</p> : null}
+
+                {!remoteMode && canvasHealth.error ? <div role="alert" className="mb-4 flex flex-wrap items-center gap-3 text-sm"><span>{canvasHealth.error}</span><Button loading={canvasHealth.loading} onClick={()=>void hydrateLocalCanvasProjectsFromBackend()}>重试加载</Button></div> : null}
                 {remoteMode && libraryQuery.isError ? (
                     <div role="alert">画布列表读取失败<Button onClick={() => void libraryQuery.refetch()}>重试</Button></div>
                 ) : !hydrated || (remoteMode && libraryQuery.isPending) ? (
@@ -622,7 +380,13 @@ export default function CanvasPage() {
                             </article>
                             <p className="libtv-create-project-subtitle">创建新的视频项目</p>
                         </div>
-                        {visibleFolders.map((folder) => <CanvasLibraryFolderTile key={folder.id} folder={folder} onOpen={() => setFolderFilter(folder.id)} onRename={() => { setFolderName(folder.name); setEditingFolderId(folder.id); setFolderDialogOpen(true); }} onDelete={() => setDeletingFolder({ id: folder.id, name: folder.name, scope: captureUserScope() })} onCoverChange={(dataUrl) => { setFolderCover(folder.id, dataUrl); message.success("文件夹封面已更新"); }} />)}
+                        {visibleFolders.map((folder) => <CanvasLibraryFolderTile key={folder.id} folder={folder} onOpen={() => setFolderFilter(folder.id)} onRename={() => { setFolderName(folder.name); setEditingFolderId(folder.id); setFolderDialogOpen(true); }} onDelete={() => setDeletingFolder({ id: folder.id, name: folder.name, scope: captureUserScope() })} onCoverChange={(dataUrl) => {
+                            void persistCanvasFolderCover(folder.id, dataUrl).then(() => {
+                                message.success("文件夹封面已更新");
+                            }).catch((error) => {
+                                message.error(error instanceof Error ? error.message : "封面没有保存成功");
+                            });
+                        }} />)}
                         {visibleProjects.map((project) => (
                             <CanvasFolderCard
                                 key={project.id}
@@ -645,6 +409,9 @@ export default function CanvasPage() {
                                         if (!movedProject || (movedProject.folderId || undefined) !== (folderId || undefined)) {
                                             throw new Error("项目移动未完成，请重试");
                                         }
+                                        if (!usesBrowserLocalResourceStore()) {
+                                            await Promise.all(projectCanvasIds.map((id) => syncLocalCanvasProjectToBackend(id)));
+                                        }
                                         message.success(folderId ? "已移动到文件夹" : "已移出文件夹");
                                     } catch (error) {
                                         message.error(error instanceof Error ? error.message : "移动项目失败");
@@ -656,12 +423,11 @@ export default function CanvasPage() {
                                 }}
                                 onClick={() => enterProject(project.id)}
                                 onPrefetch={preloadProject}
-                                opening={openingProjectId === project.id}
                             />
                         ))}
                     </CollectionGrid>
                 ) : (
-                    <WorkspaceState icon="canvas" title={keyword || projectFilter !== "all" || folderFilter !== "all" ? "没有匹配的项目" : "让第一个想法落在画布上"} description={keyword || projectFilter !== "all" || folderFilter !== "all" ? "换一个名称或重置筛选条件。" : "图片、分镜和灵感，都可以在这里自由组织。"} action={!keyword && projectFilter === "all" && folderFilter === "all" ? <Button type="primary" icon={<Plus />} disabled={!hydrated} onClick={createAndEnter}>新建项目</Button> : undefined} />
+                    <WorkspaceState icon="canvas" title={canvasHealth.error ? "项目暂时无法加载" : keyword || projectFilter !== "all" || folderFilter !== "all" ? "没有匹配的项目" : "让第一个想法落在画布上"} description={canvasHealth.error || (keyword || projectFilter !== "all" || folderFilter !== "all" ? "换一个名称或重置筛选条件。" : "图片、分镜和灵感，都可以在这里自由组织。")} action={canvasHealth.error ? <Button loading={canvasHealth.loading} onClick={()=>void hydrateLocalCanvasProjectsFromBackend()}>重试加载</Button> : !keyword && projectFilter === "all" && folderFilter === "all" ? <Button type="primary" icon={<Plus />} disabled={!hydrated} onClick={createAndEnter}>新建项目</Button> : undefined} />
                 )}
                 {hydrated && visibleProjects.length && (hasMore || libraryQuery.isFetchNextPageError) ? (
                     <div ref={loadMoreRef} className="library-load-more" aria-live="polite">
@@ -704,23 +470,22 @@ export default function CanvasPage() {
             </Modal>
             <RecycleBinDialog open={historyOpen} onClose={() => setHistoryOpen(false)} />
             {deletingFolder ? <CanvasDeleteConfirmation scope={deletingFolder.scope} title={`删除文件夹「${deletingFolder.name}」？`}
-                description={`将删除文件夹；其中 ${localProjects.filter((project) => project.folderId === deletingFolder.id).length} 个画布将移入回收站。`}
+                description={`将删除此文件夹及其中 ${localProjects.filter((project) => project.folderId === deletingFolder.id).length} 个画布，画布里的节点和连线也会一起移除。`}
                 onCancel={() => setDeletingFolder(null)} onConfirm={async (assertCurrent) => {
                     const folderId = deletingFolder.id;
                     const ids = useCanvasStore.getState().projects.filter((project) => project.folderId === folderId).map((project) => project.id);
                     if (ids.length) await deleteLocalCanvasProjects(ids);
                     assertCurrent();
-                    deleteFolder(folderId);
-                    await flushCanvasStorePersistence();
+                    await deleteCanvasLibraryFolder(folderId);
                     assertCurrent();
-                    message.success(ids.length ? `已删除文件夹，${ids.length} 个画布已移入回收站` : "文件夹已删除");
+                    message.success(ids.length ? `已删除文件夹及其中 ${ids.length} 个画布` : "文件夹已删除");
                 }} /> : null}
             {deleteDialogOpen ? <Suspense fallback={null}><CanvasDeleteProjectsDialog /></Suspense> : null}
         </WorkspacePage>
     );
 }
 
-function CanvasLibraryFolderTile({ folder, onOpen, onRename, onDelete, onCoverChange }: { folder: { id: string; name: string; updatedAt: string; coverDataUrl?: string }; onOpen: () => void; onRename: () => void; onDelete: () => void; onCoverChange: (dataUrl: string) => void }) {
+function CanvasLibraryFolderTile({ folder, onOpen, onRename, onDelete, onCoverChange }: { folder: { id: string; name: string; updatedAt: string; coverDataUrl?: string; unsaved?: boolean; saveError?: string }; onOpen: () => void; onRename: () => void; onDelete: () => void; onCoverChange: (dataUrl: string) => void }) {
     const { message } = App.useApp();
     const coverInputRef = useRef<HTMLInputElement>(null);
     const chooseCover = (event: ChangeEvent<HTMLInputElement>) => {
@@ -752,8 +517,8 @@ function CanvasLibraryFolderTile({ folder, onOpen, onRename, onDelete, onCoverCh
             className="libtv-folder-card"
             updatedAt={folder.updatedAt}
             onOpen={onOpen}
-            title={folder.name}
-            cover={<div className={cn("libtv-folder-cover-art", folder.coverDataUrl && "has-custom-cover")} style={folder.coverDataUrl ? { backgroundImage: `url(${folder.coverDataUrl})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined} />}
+            title={folder.saveError ? `${folder.name} · 保存失败` : folder.unsaved ? `${folder.name} · 未保存` : folder.name}
+            cover={<AuthenticatedBackgroundImage src={folder.coverDataUrl} className={cn("libtv-folder-cover-art", folder.coverDataUrl && "has-custom-cover")} style={folder.coverDataUrl ? { backgroundSize: "cover", backgroundPosition: "center" } : undefined} />}
             actions={<>
                 <Dropdown
                 trigger={["click"]}

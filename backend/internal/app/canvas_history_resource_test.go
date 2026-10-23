@@ -2,10 +2,9 @@ package app
 
 import (
 	"errors"
+	"qisitv/backend/internal/model"
 	"os"
 	"path/filepath"
-	"qisitv/backend/internal/model"
-	"strings"
 	"testing"
 	"time"
 )
@@ -29,8 +28,18 @@ func TestCanvasHistoryProtectsMediaAndDeletionWorker(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := svc.DeleteUserAsset("user-1", asset.ID); err == nil || !strings.Contains(err.Error(), "画布历史版本") {
-		t.Fatalf("history reference ignored: %v", err)
+	if err := svc.DeleteUserAsset("user-1", asset.ID); err != nil {
+		t.Fatalf("asset delete should retain history media: %v", err)
+	}
+	var assetCount, resourceCount int64
+	if err := db.Model(&model.Asset{}).Where("id = ?", asset.ID).Count(&assetCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.Resource{}).Where("id = ?", resource.ID).Count(&resourceCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if assetCount != 0 || resourceCount != 1 {
+		t.Fatalf("history media must survive asset delete: asset=%d resource=%d", assetCount, resourceCount)
 	}
 	// A previously queued physical deletion must also honor a later history reference.
 	job := resourceDeletionJobs("user-1", map[string]*model.Resource{key: &resource})[0]

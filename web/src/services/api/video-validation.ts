@@ -1,3 +1,4 @@
+import { normalizeVideoDuration } from "@/lib/video-generation-options";
 import { modelCapabilityConfigFor, videoDurationAllowed } from "@/lib/model-capabilities";
 import { channelHasGenerationCredential, isBuiltinBeefAPIChannel, resolveModelChannel } from "@/stores/use-config-store";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
@@ -29,6 +30,7 @@ export function assertVideoCapability(
         totalVideoMs += video.durationMs || 0;
         if (!referenceDurationIsOpaqueAsset(video) && !(options.deferResourceMetadataToBackend && video.storageKey?.startsWith("resource:") && !video.durationMs)) assertReferenceDuration("视频", index, video.durationMs, refs.minVideoDurationSeconds, refs.maxVideoDurationSeconds);
         assertReferenceFileBytes("视频", index, video.bytes, refs.maxVideoBytes);
+        if (refs.minVideoPixels && (!video.width || !video.height) && !/^asset:\/\/[A-Za-z0-9_-]+$/.test(video.url || "") && !(options.deferResourceMetadataToBackend && video.storageKey?.startsWith("resource:"))) throw new Error(`第 ${index + 1} 个参考视频尺寸无法读取，请重新导入素材后再提交`);
         assertReferenceGeometry("视频", index, video.width, video.height, refs.minVideoWidth, refs.maxVideoWidth, refs.minVideoHeight, refs.maxVideoHeight, refs.minVideoAspect, refs.maxVideoAspect, refs.minVideoPixels, refs.maxVideoPixels);
     }
     const maxVideoTotal = refs.maxVideoTotalDurationSeconds || 0;
@@ -89,7 +91,7 @@ function assertReferenceGeometry(
     const aspect = width / height;
     if ((minAspect && aspect < minAspect) || (maxAspect && aspect > maxAspect)) throw new Error(`${label}宽高比为 ${aspect.toFixed(2)}，需要 ${referenceBound(minAspect, maxAspect)}；请调整尺寸或更换后再提交`);
     const pixels = width * height;
-    if ((minPixels && pixels < minPixels) || (maxPixels && pixels > maxPixels)) throw new Error(`${label}像素总量为 ${pixels}，不符合当前模型要求；请调整尺寸或更换后再提交`);
+    if ((minPixels && pixels < minPixels) || (maxPixels && pixels > maxPixels)) throw new Error(`${label}像素总量为 ${pixels}（${width}×${height}），需要 ${referenceBound(minPixels, maxPixels)} 像素；请调整这份素材的尺寸或更换原文件，修改生成分辨率不会改变参考素材`);
 }
 
 function formatMediaByteLimit(bytes: number) {
@@ -100,15 +102,14 @@ export function assertVideoConfig(config: ResolvedAiConfig, selectedModel: strin
     if (!selectedModel.trim() && !config.model.trim()) throw new Error("请先配置视频模型");
     if (!config.baseUrl.trim()) throw new Error("请先配置 Base URL");
     const channel = resolveModelChannel(config, selectedModel || config.model);
-    if (!channelHasGenerationCredential(channel)) {
-        throw new Error(isBuiltinBeefAPIChannel(channel) ? "请先连接 BeefAPI" : "请先配置 API Key");
+    if (!channelHasGenerationCredential(channel, selectedModel || config.model)) {
+        throw new Error(isBuiltinBeefAPIChannel(channel) ? "请先连接 BeefTV" : "请先配置 API Key");
     }
     if (config.apiFormat === "gemini" && config.interfaceType !== "gemini-veo") throw new Error("当前 Gemini 文本协议不支持视频生成，请为该模型选择 Gemini Veo 协议");
 }
 
 export function normalizeVideoSeconds(value: string) {
-    const seconds = Math.floor(Number(value) || 6);
-    return String(Math.max(1, seconds));
+    return normalizeVideoDuration(value);
 }
 
 export function normalizeVideoSize(value: string) {

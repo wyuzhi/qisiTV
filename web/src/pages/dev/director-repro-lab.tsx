@@ -3,12 +3,47 @@ import { Button, Table } from "antd";
 import { Switch } from "@/components/ui/base/switch";
 
 import { CanvasDirectorWorkbench } from "@/components/canvas/director/canvas-director-workbench";
+import { generateDirectorPanorama } from "@/lib/canvas/director/director-panorama-generation";
 import { DIRECTOR_REPRO_MATRIX, createDirectorReproScene, directorReproSceneIsOffline, injectDirectorReproModel, type DirectorReproModelVariant } from "@/lib/canvas/director/director-repro-fixture";
 import { readDirectorReproSnapshot, type DirectorReproSnapshot } from "@/lib/canvas/director/director-repro-runtime";
 import { resetDirectorDiagnosticDedupe } from "@/lib/canvas/director/director-diagnostics-recorder";
 import { getClientDiagnosticEvents } from "@/services/diagnostics/client-diagnostics";
 import { StatusBadge } from "@/components/ui/base/badges";
-import type { DirectorScene } from "@/types/director";
+import { useAssetStore } from "@/stores/use-asset-store";
+import type { DirectorScene, DirectorSceneOutput } from "@/types/director";
+
+type DirectorOutputSummary = { beauty: string; clayVideo: string };
+const panoramaFixtureSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="400"><rect width="800" height="400" fill="#e33"/><rect x="400" width="400" height="400" fill="#38f"/></svg>';
+const panoramaFixtureUrl = `data:image/svg+xml;base64,${btoa(panoramaFixtureSvg)}`;
+
+/** The repro page must never submit a paid model task; production keeps the real task service. */
+const generatePanoramaFixture: typeof generateDirectorPanorama = async ({ file, sceneId, onTaskUpdate }) => {
+    onTaskUpdate?.({ id: "director-repro-panorama", status: "running", progress: 50 } as never);
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
+    const svg = panoramaFixtureSvg;
+    const url = panoramaFixtureUrl;
+    const name = `AI 全景图 · ${file.name}`;
+    const id = useAssetStore.getState().addAsset({ kind: "image", title: name, coverUrl: url, tags: ["全景图", "AI生成"], source: "导演台复现台", data: { dataUrl: url, width: 800, height: 400, bytes: svg.length, mimeType: "image/svg+xml" }, metadata: { source: "director-panorama-fixture", sceneId } });
+    return { id, name, url, storageKey: "", width: 800, height: 400 };
+};
+
+async function readDirectorVideoSize(blob: Blob): Promise<string> {
+    const url = URL.createObjectURL(blob);
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    try {
+        video.src = url;
+        return await new Promise<string>((resolve, reject) => {
+            const timeout = window.setTimeout(() => reject(new Error("白膜视频元数据读取超时")), 4000);
+            video.onloadedmetadata = () => { window.clearTimeout(timeout); resolve(`${video.videoWidth}×${video.videoHeight} · ${blob.size} B`); };
+            video.onerror = () => { window.clearTimeout(timeout); reject(new Error("白膜视频无法解码")); };
+        });
+    } finally {
+        video.removeAttribute("src");
+        video.load();
+        URL.revokeObjectURL(url);
+    }
+}
 
 /**
  * P0 手工复现入口（仅 DEV 注册）。
@@ -29,6 +64,7 @@ export default function DirectorReproLab() {
     const [workbenchOpen, setWorkbenchOpen] = useState(false);
     const [forceSaveFailure, setForceSaveFailure] = useState(false);
     const [appliedCount, setAppliedCount] = useState(0);
+    const [lastOutput, setLastOutput] = useState<DirectorOutputSummary | null>(null);
     const [flushCount, setFlushCount] = useState(0);
     const [events, setEvents] = useState(() => readDirectorEvents());
     const snapshot = useMemo(() => readDirectorReproSnapshot(), []);
@@ -44,7 +80,12 @@ export default function DirectorReproLab() {
         if (forceSaveFailure) throw new Error("repro forced flush failure");
     }, [forceSaveFailure]);
 
-    const onApply = useCallback(async () => {
+    const onApply = useCallback(async (output: DirectorSceneOutput) => {
+        const bitmap = await createImageBitmap(output.beauty);
+        const beauty = `${bitmap.width}×${bitmap.height} · ${output.beauty.size} B`;
+        bitmap.close();
+        const clayVideo = output.clayVideo ? await readDirectorVideoSize(output.clayVideo) : "无";
+        setLastOutput({ beauty, clayVideo });
         setAppliedCount((count) => count + 1);
     }, []);
 
@@ -53,6 +94,7 @@ export default function DirectorReproLab() {
         setScene(createDirectorReproScene());
         setForceSaveFailure(false);
         setAppliedCount(0);
+        setLastOutput(null);
         setFlushCount(0);
         setWorkbenchOpen(false);
         refreshEvents();
@@ -78,6 +120,9 @@ export default function DirectorReproLab() {
                     <Button size="small" data-testid="inject-missing-model" onClick={() => injectModel("missing")}>
                         注入缺失模型
                     </Button>
+                    <Button size="small" data-testid="inject-panorama" onClick={() => setScene((current) => ({ ...current, panorama: { url: panoramaFixtureUrl, name: "本地双色全景", rotation: current.panoramaRotation ?? 0 } }))}>
+                        注入本地全景
+                    </Button>
                     <span className="text-[var(--fs-tiny)] opacity-70">强制保存失败</span>
                     <Switch checked={forceSaveFailure} onChange={setForceSaveFailure} data-testid="force-save-failure" />
                     <Button size="small" data-testid="toggle-workbench" onClick={() => setWorkbenchOpen((open) => !open)}>
@@ -92,12 +137,12 @@ export default function DirectorReproLab() {
                 </span>
             </header>
 
-            <EnvironmentSnapshot snapshot={snapshot} appliedCount={appliedCount} flushCount={flushCount} sceneRevisionHint={scene.updatedAt} />
+            <EnvironmentSnapshot snapshot={snapshot} appliedCount={appliedCount} lastOutput={lastOutput} flushCount={flushCount} sceneRevisionHint={scene.updatedAt} />
             <DiagnosticEventList events={events} />
             <ReproMatrix />
 
             {workbenchOpen ? (
-                <CanvasDirectorWorkbench open scene={scene} imageNodes={[]} onboardingScope="director-repro-lab" onClose={() => setWorkbenchOpen(false)} onChange={onChange} onApply={onApply} onDeleteImageNode={() => undefined} onFlush={onFlush} />
+                <CanvasDirectorWorkbench open scene={scene} imageNodes={[]} onboardingScope="director-repro-lab" onClose={() => setWorkbenchOpen(false)} onChange={onChange} onApply={onApply} onDeleteImageNode={() => undefined} onFlush={onFlush} generatePanorama={generatePanoramaFixture} />
             ) : null}
         </div>
     );
@@ -113,7 +158,7 @@ function readDirectorEvents(): DirectorEventRow[] {
         .reverse();
 }
 
-function EnvironmentSnapshot({ snapshot, appliedCount, flushCount, sceneRevisionHint }: { snapshot: DirectorReproSnapshot; appliedCount: number; flushCount: number; sceneRevisionHint: string }) {
+function EnvironmentSnapshot({ snapshot, appliedCount, lastOutput, flushCount, sceneRevisionHint }: { snapshot: DirectorReproSnapshot; appliedCount: number; lastOutput: DirectorOutputSummary | null; flushCount: number; sceneRevisionHint: string }) {
     const { runtime, webgl } = snapshot;
     const rows: Array<[string, string]> = [
         ["应用版本", runtime.appVersion],
@@ -123,6 +168,8 @@ function EnvironmentSnapshot({ snapshot, appliedCount, flushCount, sceneRevision
         ["时区", runtime.timezone || "(不可用)"],
         ["DPR", String(runtime.devicePixelRatio)],
         ["本地 onApply 次数", String(appliedCount)],
+        ["最近构图 PNG", lastOutput?.beauty || "无"],
+        ["最近白膜视频", lastOutput?.clayVideo || "无"],
         ["本地 onFlush 次数", String(flushCount)],
         ["场景 updatedAt", sceneRevisionHint],
     ];

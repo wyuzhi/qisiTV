@@ -16,18 +16,21 @@ export function isGenerationTaskSubmissionUncertain(task: GenerationTaskDisplayT
 
 export function generationTaskStatusLabel(task: GenerationTaskDisplayTarget) {
     if (isGenerationTaskSubmissionUncertain(task)) return "提交结果待确认";
+    if (task.stage === "delivery_paused" || task.stage === "delivery_timed_out") return "待取回结果";
     return statusLabel[task.status];
 }
 
 export function generationTaskStageLabel(task: GenerationTaskDisplayTarget) {
     if (isGenerationTaskSubmissionUncertain(task)) return "为避免重复创建上游任务，未自动重试";
+    if (task.stage === "delivery_paused") return "已暂停取回结果";
+    if (task.stage === "delivery_timed_out") return "下载超时，可继续取回原结果";
     if (task.stage === "generating") return "生成中";
     if (task.stage === "queued") return "排队中";
     return task.stage || generationTaskStatusLabel(task);
 }
 
 export function generationTaskShowsProgress(task: GenerationTaskDisplayTarget) {
-    if (isGenerationTaskSubmissionUncertain(task)) return false;
+    if (isGenerationTaskSubmissionUncertain(task) || task.stage === "delivery_paused" || task.stage === "delivery_timed_out") return false;
     // 排队、后端接管和连接供应商都没有真实百分比。只有上游状态响应
     // 已经写回任务后才显示进度，避免所有图片/视频长期停在同一个假数值。
     if (["等待队列调度", "后端接管任务", "正在连接上游", "调用生成模型"].includes(task.stage || "")) return false;

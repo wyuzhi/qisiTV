@@ -89,22 +89,6 @@ func TestCanvasOperationsMergeAndDeleteReferences(t *testing.T) {
 	}
 }
 
-func TestLegacyCanvasNodeDeleteUsesReferenceCleanup(t *testing.T) {
-	svc := controlTestCanvas(t)
-	_, err := svc.ApplyCanvasOperations("owner", "canvas", controlRequest(t, `{"operations":[{"op":"add","node":{"id":"ref","type":"image"}},{"op":"add","node":{"id":"target","type":"video","metadata":{"referenceNodeIds":["ref"],"videoStartFrameNodeId":"ref"}}},{"op":"connect","connection":{"id":"edge","fromNodeId":"ref","toNodeId":"target"}}]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	summary, err := svc.DeleteUserCanvasNode("owner", "canvas", "ref")
-	if err != nil || summary.Revision != 3 || summary.SaveAudit == nil || summary.SaveAudit.NodesAfter != 1 {
-		t.Fatalf("legacy delete summary: %+v %v", summary, err)
-	}
-	raw, err := svc.UserCanvasProject("owner", "canvas")
-	if err != nil || strings.Contains(string(raw), `"ref"`) || strings.Contains(string(raw), `"videoStartFrameNodeId"`) || strings.Contains(string(raw), `"edge"`) {
-		t.Fatalf("legacy delete left references: %s %v", raw, err)
-	}
-}
-
 func TestCanvasOperationsRejectInvalidInput(t *testing.T) {
 	for _, input := range []string{
 		`{"operations":[]}`,

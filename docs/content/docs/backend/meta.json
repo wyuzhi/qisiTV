@@ -4,16 +4,17 @@
   "defaultOpen": true,
   "pages": [
     "local-development",
-    "browser-workspace",
-    "local-agent",
-    "likeai",
     "http-api",
+    "storyboard-operations",
     "code-map",
     "backend-database",
     "task-runtime-stability",
     "generation-errors",
+    "seedance-task-constraints",
+    "video-model-contracts",
     "video-prompt-limits",
-    "system-update",
-    "desktop-updater"
+    "desktop-updater",
+    "desktop-account",
+    "depth-video-runtime"
   ]
 }

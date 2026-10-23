@@ -13,10 +13,13 @@ describe("text node selection (#429)", () => {
     });
 
     test("dragging a populated media node cannot reopen its generation panel", () => {
-        const project = readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8");
-        const dragHandler = project.slice(project.indexOf("const handleNodeDragEnd ="), project.indexOf("const handleCanvasDeselect ="));
-        expect(dragHandler).toContain("canOpenCanvasNodePromptPanel(node)");
-        expect(dragHandler).toContain("setDialogNodeId(null)");
+        const chrome = readFileSync(new URL("../src/pages/canvas/canvas-pointer-chrome.ts", import.meta.url), "utf8");
+        expect(chrome).toContain("export function canvasNodeDragEndChrome");
+        expect(chrome).toContain("canOpenCanvasNodePromptPanel(node)");
+        expect(chrome).toContain("dialogNodeId: null");
+        const hook = readFileSync(new URL("../src/pages/canvas/use-canvas-pointer-chrome.ts", import.meta.url), "utf8");
+        expect(hook).toContain("setDialogNodeId(chrome.dialogNodeId)");
+        expect(hook).toContain("if (chrome.toolbarNodeId) setToolbarNodeId(chrome.toolbarNodeId)");
     });
 
     test("the render boundary rejects stale dialog state for result media", () => {

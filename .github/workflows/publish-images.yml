@@ -68,6 +68,8 @@ jobs:
 
       - name: Build and push image
         uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_RECORD_RETENTION_DAYS: 7
         with:
           context: .
           file: ${{ matrix.dockerfile }}
@@ -113,7 +115,6 @@ jobs:
             prerelease_args+=(--prerelease)
           fi
           gh release create "$GITHUB_REF_NAME" \
-            docker-compose.deploy.yml \
             --verify-tag \
             --title "$GITHUB_REF_NAME" \
             --notes-file dist/RELEASE_NOTES.md \

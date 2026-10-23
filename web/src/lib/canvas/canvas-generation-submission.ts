@@ -3,6 +3,8 @@ import { canonicalize } from "json-canonicalize";
 import type { NodeGenerationContext } from "@/components/canvas/canvas-node-generation";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import { generationPromptFingerprint } from "@/lib/generation-error";
+import { generationTaskFetchingResult } from "@/lib/generation-delivery-progress";
+import type { GenerationTask } from "@/services/api/task-center";
 
 type GenerationReference = NodeGenerationContext["referenceImages"][number] | NodeGenerationContext["referenceVideos"][number] | NodeGenerationContext["referenceAudios"][number];
 
@@ -71,17 +73,21 @@ function referenceIdentity(reference: GenerationReference) {
     };
 }
 
-export function runCanvasGenerationSubmissionOnce<T>(locks: Map<string, Promise<unknown>>, nodeId: string, operation: () => Promise<T>, onDuplicate?: () => void): Promise<T> {
+/** Delivery belongs to the result node; an in-place result keeps its own lock. */
+export function canReleaseCanvasGenerationSource(sourceNodeId: string, targetNodeId: string, task: GenerationTask) {
+    return sourceNodeId !== targetNodeId && task.type === "canvas_video" && (task.status === "succeeded" || (task.status === "running" && generationTaskFetchingResult(task, Boolean(task.delivery))));
+}
+
+export function runCanvasGenerationSubmissionOnce<T>(locks: Map<string, Promise<unknown>>, nodeId: string, operation: (release: () => void) => Promise<T>, onDuplicate?: () => void): Promise<T> {
     const existing = locks.get(nodeId) as Promise<T> | undefined;
     if (existing) {
         onDuplicate?.();
         return existing;
     }
-    const running = Promise.resolve()
-        .then(operation)
-        .finally(() => {
-            if (locks.get(nodeId) === running) locks.delete(nodeId);
-        });
+    const release = () => {
+        if (locks.get(nodeId) === running) locks.delete(nodeId);
+    };
+    const running = Promise.resolve().then(() => operation(release)).finally(release);
     locks.set(nodeId, running);
     return running;
 }

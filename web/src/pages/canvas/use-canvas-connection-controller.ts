@@ -316,15 +316,12 @@ export function useCanvasConnectionController({
             : nodeType === CanvasNodeType.Video && storyboardRow
               ? { prompt: videoPrompt, composerContent: videoPrompt, ...storyboardPromptTemplateMetadata(storyboardRow, "video"), generationMode: "video" as const, videoEditOperation: "text_to_video" as const, workflowKind: "shot" as const, workflowTitle: `镜头 ${storyboardRow.shotNumber} 视频`, shotIndex: storyboardRow.shotNumber, seconds: String(storyboardRow.durationSeconds), status: NODE_STATUS_IDLE }
               : undefined;
-        // The create menu can be opened either by the quick pin click or by
-        // releasing a dragged connection in empty space. In both cases the
-        // pending connection already carries the real source/target node id;
-        // anchoring to that node keeps repeated output connections on the
-        // correct side instead of depending on the pointer-up world position.
+        // A pin click has no dragged endpoint, so place its new node beside
+        // the source. A dragged connection must use its recorded drop point.
         const sourceNodeForQuickCreate = nodesRef.current.find((node) => node.id === pending.connection.nodeId);
         const spec = getNodeSpec(nodeType);
         const anchorY = sourceNodeForQuickCreate ? sourceNodeForQuickCreate.position.y + sourceNodeForQuickCreate.height * (pending.connection.anchorRatio ?? 0.5) : pending.position.y;
-        const position = sourceNodeForQuickCreate
+        const position = pending.quick && sourceNodeForQuickCreate
             ? placeConnectedNodeWithoutOverlap(
                 nodesRef.current,
                 sourceNodeForQuickCreate,

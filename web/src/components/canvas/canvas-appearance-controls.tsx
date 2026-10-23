@@ -77,7 +77,8 @@ export function CanvasAppearanceControls({
     return (
         <>
             <div className="mt-3 text-[var(--fs-micro)] font-semibold uppercase opacity-45">主题模式</div>
-            <div className="mt-1 grid grid-cols-3 gap-1 rounded-[var(--dock-item-radius-labeled)] border p-1" style={{ background: theme.spatial.surface, borderColor: theme.toolbar.border }}>
+            <div className="mt-1 grid grid-cols-2 gap-1 rounded-[var(--dock-item-radius-labeled)] border p-1" style={{ background: theme.spatial.surface, borderColor: theme.toolbar.border }}>
+                <ThemeButton active={draft.mode === "follow"} label="跟随全局" theme={theme} onClick={() => { const next: CanvasAppearance = { ...draft, mode: "follow" }; setDraft(next); onAppearanceChange(next); }}><Link2 className="size-3.5" /></ThemeButton>
                 <ThemeButton active={draft.mode === "light"} label="浅色" theme={theme} onClick={() => selectFixedTheme("light")}><Sun className="size-3.5" /></ThemeButton>
                 <ThemeButton active={draft.mode === "dark"} label="深色" theme={theme} onClick={() => selectFixedTheme("dark")}><Moon className="size-3.5" /></ThemeButton>
                 <ThemeButton active={draft.mode === "custom"} label="自定义" theme={theme} onClick={selectCustomTheme}><Paintbrush className="size-3.5" /></ThemeButton>
@@ -99,9 +100,9 @@ export function CanvasAppearanceControls({
                     <ColorField label="网格颜色" value={draft.custom.gridColor} theme={theme} onChange={(gridColor) => updateCustom({ gridColor })} />
                     <SliderField label="网格强度" value={draft.custom.gridOpacity} min={0} max={100} suffix="%" onChange={(gridOpacity) => updateCustom({ gridOpacity })} />
                     <Button block size="small" type="text" icon={<RotateCcw className="size-3.5" />} onClick={resetCustom}>从继承主题重新开始</Button>
-                    <Button block size="small" type="primary" icon={<Save className="size-3.5" />} onClick={saveAsDefault}>保存为默认</Button>
                 </div>
             ) : null}
+            <Button block size="small" type="text" className="mt-2" icon={<Save className="size-3.5" />} onClick={saveAsDefault}>保存为默认</Button>
 
             <div className="mt-3 text-[var(--fs-micro)] font-semibold uppercase opacity-45">空间网格</div>
             <Segmented

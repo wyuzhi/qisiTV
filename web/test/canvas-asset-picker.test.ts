@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { describe, expect, test } from "bun:test";
 
 import { assetPickerItemsToInsertPayloads } from "@/components/canvas/asset-picker-modal";
-import { pickerItemMediaKind, type AssetLibraryPickerItem } from "@/components/assets/asset-library-picker-modal";
+import { pickerItemMediaKind, workspaceAssetPickerDisabledReason, type AssetLibraryPickerItem } from "@/components/assets/asset-library-picker-modal";
 import type { ImageAsset, TextAsset } from "@/stores/use-asset-store";
 
 const timestamp = "2026-08-28T00:00:00.000Z";
@@ -86,6 +86,37 @@ describe("asset picker media kind", () => {
         expect(pickerItemMediaKind(external)).toBe("audio");
         // 角色卡、3D 模型这类条目没有媒体类型，媒体筛选生效时不应被当成图片留在列表里。
         expect(pickerItemMediaKind(base)).toBeUndefined();
+    });
+
+    test("empty parent items do not disable a matching SQLite media asset", () => {
+        expect(workspaceAssetPickerDisabledReason(image, [], ["image", "video", "audio"])).toBeUndefined();
+        expect(workspaceAssetPickerDisabledReason(image, [], ["image", "video", "audio"], "image")).toBeUndefined();
+        expect(workspaceAssetPickerDisabledReason(image, [], ["image", "video", "audio"], "video")).toBe("此素材不适用于当前操作");
+        expect(workspaceAssetPickerDisabledReason(image, [], ["video", "audio"])).toBe("此素材不适用于当前操作");
+    });
+
+    test("parent disabledReason still wins when the asset is already in the caller list", () => {
+        const items: AssetLibraryPickerItem[] = [{ ...base, id: image.id, disabledReason: "图片创作仅支持参考图" }];
+        expect(workspaceAssetPickerDisabledReason(image, items, ["image"])).toBe("图片创作仅支持参考图");
+    });
+});
+
+describe("asset picker canonical read gate", () => {
+    test("uses the workspace library API instead of local workspace mode", () => {
+        const source = readFileSync(resolve(import.meta.dir, "../src/components/assets/asset-library-picker-modal.tsx"), "utf8");
+        expect(source).toContain("usesWorkspaceAssetLibraryApi()");
+        expect(source).not.toContain("isLocalWorkspaceMode");
+        expect(source).not.toContain("preferLocalUnsynced");
+        expect(source).toContain("workspaceAssetPickerDisabledReason");
+    });
+
+    test("canvas project asset modal uses the workspace library API for free-canvas fallback", () => {
+        const source = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-project-asset-modal.tsx"), "utf8");
+        expect(source).toContain("usesWorkspaceAssetLibraryApi()");
+        expect(source).toContain("remoteLibrary={!detail && usesWorkspaceAssetLibraryApi()}");
+        expect(source).toContain("getWorkspaceAsset(item.project.id, undefined, { expectedScope })");
+        expect(source).not.toContain("isLocalWorkspaceMode");
+        expect(source).not.toContain("preferLocalUnsynced");
     });
 });
 

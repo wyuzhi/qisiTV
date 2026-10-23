@@ -21,7 +21,7 @@ describe("local workspace migration", () => {
     });
 
     test("canvas and asset imports apply the local normalizer", () => {
-        const canvasSource = readFileSync(resolve(root, "src/pages/canvas/index.tsx"), "utf8");
+        const canvasSource = readFileSync(resolve(root, "src/lib/canvas/canvas-archive-restore.ts"), "utf8");
         const assetSource = readFileSync(resolve(root, "src/pages/assets/index.tsx"), "utf8");
         expect(canvasSource).toContain("normalizeLocalCanvasProject(item.project)");
         expect(assetSource).toContain("normalizeLocalAsset(payload)");

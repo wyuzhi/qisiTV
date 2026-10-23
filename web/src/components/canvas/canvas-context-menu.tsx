@@ -32,7 +32,7 @@ import { aceternityMotion } from "@/lib/aceternity-motion";
 import { SpotlightSurface } from "@/components/ui/aceternity/spotlight-surface";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { canvasNodeAssetCategory } from "@/lib/canvas/canvas-node-asset";
-import { isCanvasFolderNode } from "@/lib/canvas/canvas-frame";
+import { isCanvasFolderNode, isFrameNode } from "@/lib/canvas/canvas-frame";
 import { resolveAddNodeMenuCommands, type AddNodeMenuContext } from "@/lib/canvas/tool-registry";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { usePluginStore } from "@/stores/use-plugin-store";
@@ -81,7 +81,6 @@ type CanvasNodeContextMenuProps = {
     onSpreadSelection?: () => void;
     onCopySelection?: () => void;
     onDeleteSelection?: () => void;
-    onSendToAgent?: () => void;
 };
 
 export function CanvasNodeContextMenu({
@@ -122,7 +121,6 @@ export function CanvasNodeContextMenu({
     onSpreadSelection,
     onCopySelection,
     onDeleteSelection,
-    onSendToAgent,
 }: CanvasNodeContextMenuProps) {
     const theme = canvasThemes[useActiveTheme()];
     const [addOpen, setAddOpen] = useState(false);
@@ -164,7 +162,7 @@ export function CanvasNodeContextMenu({
     const isVideo = node?.type === CanvasNodeType.Video;
     const isMedia = isImage || isVideo;
     const isAudio = node?.type === CanvasNodeType.Audio;
-    const isFrame = node?.type === CanvasNodeType.Frame;
+    const isFrame = isFrameNode(node);
     const isFolder = isCanvasFolderNode(node);
     const hasNodeContent = isText ? Boolean(nodeContent.trim()) : Boolean(nodeContent);
     const canSaveAsset = Boolean(node && !isCharacterReference && (isText ? hasNodeContent : hasNodeContent && (isImage || isVideo || isAudio)));
@@ -226,7 +224,6 @@ export function CanvasNodeContextMenu({
                             <MenuButton icon={<LayoutTemplate />} label="自适应整理画布" detail="保持相对布局并加大边距" disabled={!onSpreadSelection} onClick={() => onSpreadSelection && runAction(onSpreadSelection)} />
                             <MenuDivider />
                             <MenuButton icon={<Copy />} label={`复制 ${selectedCount} 个节点`} shortcut="⌘C" disabled={!onCopySelection} onClick={() => onCopySelection && runAction(onCopySelection)} />
-                            {onSendToAgent ? <MenuButton icon={<AtSign />} label="发送到 Agent" onClick={() => runAction(onSendToAgent)} /> : null}
                             <MenuButton icon={<Trash2 />} label={`删除 ${selectedCount} 个节点`} danger disabled={!onDeleteSelection} onClick={() => onDeleteSelection && runAction(onDeleteSelection)} />
                         </>
                     ) : menu.type === "node" ? (
@@ -238,8 +235,7 @@ export function CanvasNodeContextMenu({
                                     <MenuButton icon={<UserRound />} label="查看角色详情" onClick={() => runAction(onEditText)} />
                                     <MenuDivider />
                                     <MenuSection label="节点" />
-                                    {onSendToAgent ? <MenuButton icon={<AtSign />} label="发送到 Agent" onClick={() => runAction(onSendToAgent)} /> : null}
-                                    <MenuButton icon={<Copy />} label="复制角色引用" shortcut="⌘C" onClick={() => runAction(onCopyNode)} />
+                                            <MenuButton icon={<Copy />} label="复制角色引用" shortcut="⌘C" onClick={() => runAction(onCopyNode)} />
                                     <MenuButton icon={<Layers3 />} label="创建引用副本" shortcut="⌘D" onClick={() => runAction(onDuplicate)} />
                                     <MenuButton icon={<Trash2 />} label="删除节点" danger onClick={() => runAction(onDelete)} />
                                 </>
@@ -258,6 +254,7 @@ export function CanvasNodeContextMenu({
                                             <MenuButton icon={<Copy />} label="复制节点" shortcut="⌘C" onClick={() => runAction(onCopyNode)} />
                                         </>
                                     )}
+                                    <MenuButton icon={<Trash2 />} label="删除节点" danger onClick={() => runAction(onDelete)} />
                                 </>
                             ) : (
                                 <>
@@ -277,8 +274,7 @@ export function CanvasNodeContextMenu({
                                     {isText ? <MenuButton icon={<ImageIcon />} label="用文本生图" disabled={!canGenerateFromText} onClick={() => runAction(onGenerateImage)} /> : null}
                                     <MenuDivider />
                                     <MenuSection label="副本与内容" />
-                                    {onSendToAgent ? <MenuButton icon={<AtSign />} label="发送到 Agent" onClick={() => runAction(onSendToAgent)} /> : null}
-                                    <MenuButton icon={<Copy />} label={isFrame ? `复制${isFolder ? "文件夹" : "背板"}及内容` : "复制节点"} shortcut="⌘C" onClick={() => runAction(onCopyNode)} />
+                                            <MenuButton icon={<Copy />} label={isFrame ? `复制${isFolder ? "文件夹" : "背板"}及内容` : "复制节点"} shortcut="⌘C" onClick={() => runAction(onCopyNode)} />
                                     {isText ? <MenuButton icon={<Clipboard />} label="复制文本" disabled={!hasNodeContent} onClick={() => runAction(onCopyContent)} /> : null}
                                     <MenuButton icon={<Copy />} label={isFrame ? `创建${isFolder ? "文件夹" : "背板"}副本` : "创建参数变体"} shortcut="⌘D" onClick={() => runAction(onDuplicate)} />
                                     <MenuButton icon={<Clipboard />} label="粘贴" shortcut="⌘V" disabled={!canPaste} onClick={() => runAction(onPaste)} />
@@ -537,6 +533,6 @@ function nodeTypeLabel(node?: CanvasNodeData | null) {
     if (node.type === CanvasNodeType.Video) return "视频节点";
     if (node.type === CanvasNodeType.Audio) return "音频节点";
     if (node.type === CanvasNodeType.Drawing) return "绘图节点";
-    if (node.type === CanvasNodeType.Frame) return isCanvasFolderNode(node) ? "文件夹" : "背板";
+    if (isFrameNode(node)) return node.type === CanvasNodeType.Workflow ? "工作流" : isCanvasFolderNode(node) ? "文件夹" : "背板";
     return "生成配置节点";
 }

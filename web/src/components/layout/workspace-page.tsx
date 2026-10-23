@@ -5,18 +5,19 @@ import { useEffect, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
-export function WorkspacePage({ children, className, grid = false, fluid = false, scroll = true }: { children: ReactNode; className?: string; grid?: boolean; fluid?: boolean; scroll?: boolean }) {
+export function WorkspacePage({ children, className, grid = false, fluid = false, scroll = true, sectionPage = true }: { children: ReactNode; className?: string; grid?: boolean; fluid?: boolean; scroll?: boolean; sectionPage?: boolean }) {
     return (
-        <main className={cn("app-user-content h-full text-foreground", scroll && "app-workspace-scroll overflow-y-auto", grid && "app-workspace-grid", className)}>
-            <div className={fluid ? "h-full w-full" : "w-full px-3 py-3 sm:px-4 sm:py-4 xl:px-5"}>{children}</div>
+        <main className={cn("app-user-content h-full text-foreground", sectionPage && "app-section-page", scroll && "app-workspace-scroll overflow-y-auto", grid && "app-workspace-grid", className)}>
+            <div className={cn(fluid ? "h-full w-full" : "w-full px-3 py-3 sm:px-4 sm:py-4 xl:px-5", sectionPage && !fluid && "app-section-page-content")}>{children}</div>
         </main>
     );
 }
 
-export function PageHeader({ title, description, meta, actions }: { title: string; description?: string; meta?: ReactNode; actions?: ReactNode }) {
+export function PageHeader({ title, description, meta, actions, leading }: { title: string; description?: string; meta?: ReactNode; actions?: ReactNode; leading?: ReactNode }) {
     return (
-        <header className="app-page-header flex min-h-14 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-center gap-3">
+        <header className="app-page-header app-section-page-header flex min-h-14 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="app-page-header-main flex min-w-0 items-center gap-3">
+                {leading ? <div className="app-page-header-leading flex shrink-0 items-center">{leading}</div> : null}
                 <div className="min-w-0">
                     <div className="flex min-w-0 flex-wrap items-center gap-2.5">
                         <h1 className="app-page-header-title truncate font-semibold leading-7">{title}</h1>

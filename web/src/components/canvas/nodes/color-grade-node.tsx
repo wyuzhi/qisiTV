@@ -1,4 +1,5 @@
 import { Palette, RotateCcw } from "lucide-react";
+import { AuthenticatedImage } from "@/components/assets/authenticated-media";
 
 import { useUpstreamNodes } from "@/components/canvas/canvas-node-graph-context";
 import { useCanvasNodeActions } from "@/components/canvas/canvas-node-action-context";
@@ -50,7 +51,7 @@ export function ColorGradeNodeContent({ node, theme }: ColorGradeNodeContentProp
     return (
         <div className="flex h-full w-full flex-col overflow-hidden" style={{ background: theme.node.fill }}>
             <div className="relative min-h-0 flex-1">
-                <img src={url} alt={node.title || "调色"} className="h-full w-full object-contain" draggable={false} style={{ filter: colorGradeCssFilter(grade) }} />
+                <AuthenticatedImage src={url} alt={node.title || "调色"} className="h-full w-full object-contain" draggable={false} style={{ filter: colorGradeCssFilter(grade) }} />
                 {isNeutralColorGrade(grade) ? (
                     <span className="pointer-events-none absolute left-2 top-2 rounded bg-black/55 px-1.5 py-0.5 text-white" style={{ fontSize: "var(--fs-tiny)" }}>未调色</span>
                 ) : null}

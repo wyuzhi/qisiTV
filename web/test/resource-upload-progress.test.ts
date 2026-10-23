@@ -62,3 +62,39 @@ test("传输结束不吞掉服务端保存错误", async () => {
         apiClient.defaults.adapter = adapter;
     }
 });
+
+test("分片断连后用相同幂等身份查询进度，只补未收到的片", async () => {
+    const adapter = apiClient.defaults.adapter;
+    const size = 51 * 1024 * 1024;
+    const chunkSize = 32 * 1024 * 1024;
+    const sent: number[] = [];
+    const keys: string[] = [];
+    const progress: number[][] = [];
+    let sessions = 0;
+    try {
+        apiClient.defaults.adapter = async (config) => {
+            let data: unknown;
+            if (config.url === "/resources/uploads") {
+                keys.push(String(config.headers.get("X-Idempotency-Key")));
+                data = { uploadId: "resume", chunkSize, chunkCount: 2, received: ++sessions === 1 ? [] : [0] };
+            } else if (config.url?.endsWith("/complete")) {
+                data = { resource: { id: "resumed" } };
+            } else {
+                const index = Number(config.url?.split("/").at(-1));
+                sent.push(index);
+                if (sent.length === 2) throw new Error("connection interrupted");
+                data = { index };
+            }
+            return { config, status: 200, statusText: "OK", headers: {}, data: { code: 0, data } };
+        };
+        const result = await uploadResourceFile(new Blob([new Uint8Array(size)]), "video", undefined, (loaded, total) => progress.push([loaded, total]));
+        expect(result.id).toBe("resumed");
+        expect(sent).toEqual([0, 1, 1]);
+        expect(keys.length).toBe(2);
+        expect(keys[0]).not.toBe("undefined");
+        expect(keys[0]).toBe(keys[1]);
+        expect(progress).toEqual([[chunkSize, size], [chunkSize, size], [size, size]]);
+    } finally {
+        apiClient.defaults.adapter = adapter;
+    }
+});

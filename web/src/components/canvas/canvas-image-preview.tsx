@@ -1,4 +1,4 @@
-import { Image } from "antd";
+import { AuthenticatedPreviewImage } from "@/components/assets/authenticated-media";
 
 type CanvasImagePreviewProps = {
     src: string;
@@ -10,7 +10,7 @@ export function CanvasImagePreview({ src, alt = "图片", onClose }: CanvasImage
     if (!src) return null;
 
     return (
-        <Image
+        <AuthenticatedPreviewImage
             src={src}
             alt={alt}
             style={{ display: "none" }}

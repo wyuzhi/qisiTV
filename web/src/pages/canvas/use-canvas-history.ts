@@ -129,6 +129,37 @@ export function useCanvasHistory({
         });
     }, [applyCanvasAppearance, clearCommitTimer, setActiveChatId, setBackgroundMode, setChatSessions, setConnections, setContextMenu, setNodes, setSelectedConnectionId, setSelectedNodeIds, setShowImageInfo]);
 
+    /**
+     * 外部写入（内置助手回合、CLI/MCP 操作）投影到编辑器时，把结果当成新的历史基线。
+     *
+     * 三件事必须一起做，否则用户按 Ctrl+Z 会倒退外部刚写入的内容：
+     * 1. 仍在防抖窗口内的本地编辑先按原样落成历史（只用合并前的编辑器状态，
+     *    绝不把外部内容算成用户这次编辑）；
+     * 2. 基线推进到合并后的快照；
+     * 3. 用既有的 applyingHistoryRef 机制跳过这次由外部内容引起的状态变化，
+     *    否则防抖提交会把「外部变化」再记成一条可撤销的用户编辑。
+     */
+    const adoptExternalSnapshot = useCallback((overrides: Pick<CanvasHistorySnapshot, "nodes" | "connections">) => {
+        if (historyCommitTimerRef.current) {
+            clearTimeout(historyCommitTimerRef.current);
+            historyCommitTimerRef.current = null;
+            const last = lastHistoryRef.current;
+            if (last) {
+                const pendingPatch = createCanvasHistoryPatch(last, createHistorySnapshot());
+                if (pendingPatch) historyRef.current.past = [...historyRef.current.past.slice(-49), pendingPatch];
+            }
+        }
+        applyingHistoryRef.current = true;
+        if (applyTimerRef.current) clearTimeout(applyTimerRef.current);
+        applyTimerRef.current = setTimeout(() => {
+            applyingHistoryRef.current = false;
+            applyTimerRef.current = null;
+        }, 300);
+        lastHistoryRef.current = { ...createHistorySnapshot(), nodes: overrides.nodes, connections: overrides.connections };
+        historyRef.current.future = [];
+        setHistoryState({ canUndo: historyRef.current.past.length > 0, canRedo: false });
+    }, [createHistorySnapshot]);
+
     const undoCanvas = useCallback(() => {
         const patch = historyRef.current.past.pop();
         const current = lastHistoryRef.current;
@@ -175,7 +206,7 @@ export function useCanvasHistory({
         if (applyTimerRef.current) clearTimeout(applyTimerRef.current);
     }, [clearCommitTimer]);
 
-    return { getHistoryCleanupContext, historyPausedRef, historyState, redoCanvas, resetHistory, undoCanvas };
+    return { adoptExternalSnapshot, getHistoryCleanupContext, historyPausedRef, historyState, redoCanvas, resetHistory, undoCanvas };
 }
 
 function snapshotsShareReferences(before: CanvasHistorySnapshot, after: CanvasHistorySnapshot) {

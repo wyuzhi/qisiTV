@@ -6,10 +6,10 @@ import zhCN from "antd/locale/zh_CN";
 
 import { WorkspaceBootstrapHydrator } from "@/components/workspace/workspace-bootstrap-hydrator";
 import { FullScreenLoader } from "@/components/ui/aceternity/full-screen-loader";
+import { appPathname } from "@/lib/app-routing";
 import { getAntThemeConfig } from "@/lib/app-theme";
 import { applySkinTheme } from "@/lib/skin-themes";
 import { appQueryClient } from "@/lib/query-client";
-import { workspaceRouteLocation } from "@/lib/workspace-url";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { applyAppearanceMetadata, useAppearanceStore } from "@/stores/use-appearance-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -37,10 +37,10 @@ export function AppProviders({ children }: { children: ReactNode }) {
     // DEV 复现台必须是同源本地确定性场景：WorkspaceBootstrapHydrator 会打 /api/workspace/bootstrap，
     // ClientRootInit 会打 /api/model-catalog，没有后端时产生真实 502，与导演台无关却会污染判据。
     // 只精确匹配该路径；生产构建中 import.meta.env.DEV 为 false，本分支被摇树删除。
-    const isolateDevRepro = import.meta.env.DEV && typeof window !== "undefined" && workspaceRouteLocation(window.location).pathname === "/dev/director-repro";
+    const isolateDevRepro = import.meta.env.DEV && typeof window !== "undefined" && ["/dev/director-repro", "/dev/assistant-panel"].includes(appPathname());
 
     return (
-        <ConfigProvider locale={zhCN} theme={getAntThemeConfig(dark, appearance.activeSkin)}>
+        <ConfigProvider locale={zhCN} theme={getAntThemeConfig(dark, appearance.activeSkin)} modal={{ centered: true }}>
             <App message={{ duration: 3, maxCount: 3 }} notification={{ duration: 4.5, maxCount: 3, placement: "topRight" }}>
                 <QueryClientProvider client={appQueryClient}>
                     {isolateDevRepro ? (

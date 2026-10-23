@@ -34,7 +34,7 @@ func (a *DesktopApp) updater() *desktopupdate.Engine {
 				return errors.New("应用尚未就绪，无法安装更新")
 			}
 			go func() {
-				time.Sleep(50 * time.Millisecond)
+				time.Sleep(500 * time.Millisecond)
 				wailsruntime.Quit(ctx)
 			}()
 			return nil
@@ -67,4 +67,14 @@ func (a *DesktopApp) InstallUpdate() error {
 		return errors.New("应用尚未就绪，无法安装更新")
 	}
 	return a.updater().InstallUpdate(context.Background())
+}
+
+func (a *DesktopApp) ConfirmUpdateStartup() error {
+	ctx, err := a.dialogContext()
+	if err != nil || a.runtime() == nil {
+		return errors.New("本地工作区尚未就绪")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return a.updater().CleanupAfterStartup(ctx)
 }

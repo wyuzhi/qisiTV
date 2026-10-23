@@ -1,5 +1,5 @@
 // Provider endpoint contracts, not limits inferred from a model's display name.
-// Adapted from BeefTV 8a14a160. LikeAI/qisi API use their own configured contracts.
+// Sources and unverified providers: docs/backend/video-prompt-limits.
 export function videoPromptLimits(protocol = "", model = "") {
     const name = model.trim().toLowerCase().split("/").pop() || "";
     let promptMaxChars = 0;

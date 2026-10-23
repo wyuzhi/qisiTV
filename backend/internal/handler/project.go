@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"qisitv/backend/internal/app"
 
@@ -12,6 +13,7 @@ import (
 
 func RegisterProjectRoutes(r *gin.RouterGroup, svc *app.Service) {
 	RegisterStyleProfileRoutes(r, svc)
+	registerCanvasProductionRoutes(r, svc)
 	r.GET("/project-folders", func(c *gin.Context) {
 		user, err := currentUser(c, svc)
 		if err != nil {
@@ -975,6 +977,20 @@ func RegisterProjectRoutes(r *gin.RouterGroup, svc *app.Service) {
 			return
 		}
 		ok(c, gin.H{"asset": asset})
+	})
+	r.GET("/projects/:id/chapter-apply-receipts", func(c *gin.Context) {
+		user, err := currentUser(c, svc)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		taskIDs := strings.Split(c.Query("taskIds"), ",")
+		receipts, err := svc.ChapterApplyReceipts(user.ID, c.Param("id"), taskIDs)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"receipts": receipts})
 	})
 }
 

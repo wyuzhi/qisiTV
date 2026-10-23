@@ -97,6 +97,9 @@ func (r *Repository) VoiceProfileBySampleResource(userID string, resourceID stri
 // CreateProjectCharacter 将角色身份、首版本和项目关联放入同一事务。
 func (r *Repository) CreateProjectCharacter(projectID string, asset *model.Asset, version *model.AssetVersion, link *model.ProjectAssetLink) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := requireUnarchivedProjectTx(tx, projectID); err != nil {
+			return err
+		}
 		if err := tx.Create(asset).Error; err != nil {
 			return err
 		}
@@ -114,6 +117,9 @@ func (r *Repository) CreateProjectCharacter(projectID string, asset *model.Asset
 // SaveCharacterVersion 通过不可变版本替换角色当前状态，旧镜头仍可继续引用历史版本。
 func (r *Repository) SaveCharacterVersion(projectID string, asset *model.Asset, version *model.AssetVersion, representations []model.AssetRepresentation, voice *model.CharacterVoiceBinding) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := requireUnarchivedProjectTx(tx, projectID); err != nil {
+			return err
+		}
 		if err := saveCharacterVersion(tx, asset, version, representations, voice); err != nil {
 			return err
 		}
@@ -125,6 +131,9 @@ func (r *Repository) SaveCharacterVersion(projectID string, asset *model.Asset, 
 // ConfirmProjectCharacterCandidate 保证角色归并版本与候选确认同时生效，失败时不会留下孤立版本。
 func (r *Repository) ConfirmProjectCharacterCandidate(candidate *model.ProjectAssetCandidate, asset *model.Asset, version *model.AssetVersion, representations []model.AssetRepresentation, voice *model.CharacterVoiceBinding) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := requireUnarchivedProjectTx(tx, candidate.ProjectID); err != nil {
+			return err
+		}
 		if err := saveCharacterVersion(tx, asset, version, representations, voice); err != nil {
 			return err
 		}

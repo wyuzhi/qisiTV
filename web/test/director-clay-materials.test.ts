@@ -43,6 +43,23 @@ describe("导演台白膜材质切换", () => {
         expect(actor.material).toBe(actorMaterial);
     });
 
+    test("白膜输出保留导演台地板材质，不把环境地面染成白色", () => {
+        const scene = new Scene();
+        const groundMaterial = new MeshStandardMaterial({ color: "#151820" });
+        const ground = new Mesh(geometry, groundMaterial);
+        ground.userData.directorStageGround = true;
+        const propMaterial = new MeshStandardMaterial({ color: "#cc3344" });
+        const prop = new Mesh(geometry, propMaterial);
+        scene.add(ground, prop);
+
+        const restore = applyClaySceneMaterials(scene);
+
+        expect(ground.material).toBe(groundMaterial);
+        expect(prop.material).not.toBe(propMaterial);
+        restore();
+        expect(ground.material).toBe(groundMaterial);
+    });
+
     test("材质数组混入 uniforms 材质时整组跳过", () => {
         const scene = new Scene();
         const materials: Material[] = [new MeshStandardMaterial(), new ShaderMaterial({ uniforms: {} })];

@@ -11,6 +11,9 @@ import {
     directorViewModeCapabilities,
     resolveDirectorActiveCamera,
     resolveDirectorActiveShot,
+    resolveDirectorCameraAimRotation,
+    resolveDirectorCameraInspectorRotation,
+    resolveDirectorCameraTransform,
     resolveDirectorEffectiveViewport,
     resolveDirectorOrthographicFraming,
     resolveDirectorOrthographicFrustum,
@@ -53,6 +56,40 @@ describe("取景模式骨架", () => {
             expect(item.hint.length).toBeGreaterThan(0);
             expect(item.label.length).toBeGreaterThan(0);
         });
+    });
+});
+
+describe("摄影机属性旋转与真实注视方向", () => {
+    test("手动坐标朝向由位置与焦点解算，切换手动旋转应保持画面", () => {
+        const scene = createDirectorScene();
+        const camera = { ...scene.cameras[0],
+            transform: { ...scene.cameras[0].transform, position: [0, 1.91, 7.6] as DirectorVec3, rotation: [0, 0, 0] as DirectorVec3 },
+            target: [0, 1.2, 0] as DirectorVec3, lookAtMode: "coordinates" as const,
+        };
+        const rotation = resolveDirectorCameraAimRotation({ ...scene, cameras: [camera] }, camera, 0);
+        expect(rotation).not.toBeNull();
+        const forward = new Vector3(0, 0, -1).applyEuler(new Euler(...rotation!));
+        const expected = new Vector3(...camera.target).sub(new Vector3(...camera.transform.position)).normalize();
+        expect(forward.distanceTo(expected)).toBeLessThan(1e-5);
+        const display = resolveDirectorCameraInspectorRotation({ ...scene, cameras: [camera] }, camera, 0);
+        expect(display[0]).toBeCloseTo(5.34, 2);
+        expect(display[1]).toBeCloseTo(180, 2);
+        expect(display[2]).toBeCloseTo(0, 2);
+    });
+
+    test("旋转帧不打断位置插值；删除旋转标记后只回退旋转", () => {
+        const scene = createDirectorScene();
+        const base = scene.cameras[0].transform;
+        const camera = { ...scene.cameras[0], transform: { ...base, position: [0, 0, 0] as DirectorVec3, rotation: [0, 0, 0] as DirectorVec3 }, keyframes: [
+            { id: "start", time: 0, transform: { ...base, position: [0, 0, 0] as DirectorVec3, rotation: [0, 0, 0] as DirectorVec3 } },
+            { id: "rotate", time: 1, positionKeyed: false, rotationKeyed: true, transform: { ...base, position: [100, 0, 0] as DirectorVec3, rotation: [0, Math.PI / 2, 0] as DirectorVec3 } },
+            { id: "end", time: 2, transform: { ...base, position: [10, 0, 0] as DirectorVec3, rotation: [0, 0, 0] as DirectorVec3 } },
+        ] };
+        expect(resolveDirectorCameraTransform(camera, 1).position[0]).toBeCloseTo(5);
+        expect(resolveDirectorCameraTransform(camera, 1).rotation[1]).toBeCloseTo(Math.PI / 2);
+        const withoutRotation = { ...camera, keyframes: camera.keyframes.map((key) => key.id === "rotate" ? { ...key, rotationKeyed: false } : key) };
+        expect(resolveDirectorCameraTransform(withoutRotation, 1).position[0]).toBeCloseTo(5);
+        expect(resolveDirectorCameraTransform(withoutRotation, 1).rotation[1]).toBeCloseTo(0);
     });
 });
 
@@ -102,6 +139,15 @@ describe("shot/camera 解析回落", () => {
 });
 
 describe("CAM 取景解算", () => {
+    test("新导演台的默认机位正对演员并采用参考页的取景参数", () => {
+        const scene = createDirectorScene();
+        const framing = resolveDirectorViewFraming({ scene, mode: "camera", playhead: 0 });
+        expect(scene.cameras[0].name).toBe("机位1");
+        expect(framing?.position).toEqual([0, 2.2, 10]);
+        expect(framing?.target).toEqual([0, 1.2, 0]);
+        expect(framing?.fov).toBe(50);
+    });
+
     test("3D 模式不产生取景：自由视角完全不被写入", () => {
         expect(resolveDirectorViewFraming({ scene: createDirectorScene(), mode: "free", playhead: 0 })).toBeNull();
     });
@@ -137,6 +183,39 @@ describe("CAM 取景解算", () => {
         const scene: DirectorScene = { ...base, cameras: [camera] };
         expect(resolveDirectorViewFraming({ scene, mode: "camera", playhead: 1 })?.position[0]).toBeCloseTo(5, 5);
         expect(resolveDirectorViewFraming({ scene, mode: "camera", playhead: 0 })?.position[0]).toBeCloseTo(0, 5);
+    });
+
+    test("相机焦点与视角轨道随播放头插值，旧位置帧仍沿用机位静态参数", () => {
+        const base = createDirectorScene();
+        const camera = base.cameras[0];
+        const animated: DirectorScene = { ...base, cameras: [{
+            ...camera,
+            keyframes: [
+                { id: "camera-0", time: 0, transform: camera.transform, target: [0, 1, 0], fov: 50 },
+                { id: "camera-2", time: 2, transform: camera.transform, target: [2, 1, 0], fov: 30 },
+            ],
+        }] };
+        const middle = resolveDirectorViewFraming({ scene: animated, mode: "camera", playhead: 1 });
+        expect(middle?.target).toEqual([1, 1, 0]);
+        expect(middle?.fov).toBe(40);
+        const legacy: DirectorScene = { ...base, cameras: [{ ...camera, keyframes: animated.cameras[0].keyframes.map(({ id, time, transform }) => ({ id, time, transform })) }] };
+        const legacyMiddle = resolveDirectorViewFraming({ scene: legacy, mode: "camera", playhead: 1 });
+        expect(legacyMiddle?.target).toEqual(camera.target);
+        expect(legacyMiddle?.fov).toBe(camera.fov);
+    });
+
+    test("焦点专用帧不截断位置插值，位置轨独立关闭后仍可保持光学变化", () => {
+        const base = createDirectorScene();
+        const camera = base.cameras[0];
+        const scene: DirectorScene = { ...base, cameras: [{ ...camera, keyframes: [
+            { id: "p0", time: 0, transform: { ...camera.transform, position: [0, 2, 10] }, target: [0, 1, 0], fov: 50 },
+            { id: "focus", time: 1, transform: { ...camera.transform, position: [100, 2, 10] }, target: [1, 1, 0], positionKeyed: false },
+            { id: "p2", time: 2, transform: { ...camera.transform, position: [10, 2, 10] }, target: [2, 1, 0], fov: 40 },
+        ] }] };
+        const middle = resolveDirectorViewFraming({ scene, mode: "camera", playhead: 1 });
+        expect(middle?.position).toEqual([5, 2, 10]);
+        expect(middle?.target).toEqual([1, 1, 0]);
+        expect(middle?.fov).toBe(45);
     });
 
     test("空场景在 CAM 模式下返回 null，视口保持自由视角而不是黑屏", () => {
@@ -684,8 +763,11 @@ describe("切换器可发现、可键盘、无新增全局样式", () => {
         expect(toolbar).toContain('aria-label="导演台取景模式"');
     });
 
-    test("每个按钮都有 aria-label 与 title，图标化文字也能被读出", () => {
-        expect(toolbar).toContain("aria-label={`${item.label} ${item.hint}`}");
+    test("主视角与方向球轴向都有可读名称", () => {
+        expect(toolbar).toContain("aria-label={label}");
+        expect(toolbar).toContain('aria-label="方向球"');
+        expect(toolbar).toContain('aria-label={head.label}');
+        expect(toolbar).toContain('aria-label="重置视角"');
         expect(toolbar).toContain("title={item.hint}");
     });
 
@@ -711,10 +793,10 @@ describe("切换器可发现、可键盘、无新增全局样式", () => {
         expect(classNames).not.toContain("director-viewport-dock");
     });
 
-    test("对 DIRECTOR_VIEW_MODES 做整体 map，不写死具体模式或数量：新增/删减模式无需改这个文件", () => {
-        expect(toolbar).toContain("DIRECTOR_VIEW_MODES.map((item) => {");
-        expect(toolbar).not.toMatch(/item\.mode\s*===\s*"/);
-        expect(toolbar).not.toMatch(/DIRECTOR_VIEW_MODES\[\d/);
+    test("主视角从能力列表渲染，正交五轴由方向球提供", () => {
+        expect(toolbar).toContain("DIRECTOR_VIEW_MODES.filter((item) => primaryModes.has(item.mode))");
+        expect(toolbar).toContain("primary.map((item) => {");
+        expect(toolbar).toContain("heads.map((head) => {");
     });
 
     test("七个模式全部渲染：DIRECTOR_VIEW_MODES 有几项，toolbar 就自动出几个按钮", () => {

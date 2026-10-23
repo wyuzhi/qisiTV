@@ -552,11 +552,14 @@ describe("引导浮层契约", () => {
 
 describe("引导产品接线", () => {
     const projectCode = stripComments(readFileSync(resolve(import.meta.dir, "../src/pages/canvas/project.tsx"), "utf8"));
+    const editorDialogs = stripComments(readFileSync(resolve(import.meta.dir, "../src/pages/canvas/canvas-project-editor-dialogs.tsx"), "utf8"));
     const workbenchCode = stripComments(readFileSync(resolve(import.meta.dir, "../src/components/canvas/director/canvas-director-workbench.tsx"), "utf8"));
+    const workbenchStyles = readFileSync(resolve(import.meta.dir, "../src/styles/globals.css"), "utf8");
 
     test("页面只把已认证用户 id 传给引导，不使用 guest fallback 或未定义变量", () => {
         expect(projectCode).toContain('const directorOnboardingScope = useUserStore((state) => state.user?.id?.trim() || "")');
-        expect(projectCode).toContain("onboardingScope={directorOnboardingScope}");
+        expect(projectCode).toContain("onboardingScope: directorOnboardingScope");
+        expect(editorDialogs).toContain("onboardingScope={director.onboardingScope}");
         expect(projectCode).not.toContain("trimmedUserId");
         expect(projectCode).not.toContain("onboardingScope={canvasStorageScope}");
     });
@@ -564,13 +567,14 @@ describe("引导产品接线", () => {
     test("工作台渲染非模态引导，并提供可发现的重新开始入口", () => {
         expect(workbenchCode).toContain('import { CanvasDirectorOnboarding } from "@/components/canvas/director/canvas-director-onboarding"');
         expect(workbenchCode).toContain("onboardingScope: string");
-        expect(workbenchCode).toContain('label="重新开始引导"');
-        expect(workbenchCode).toContain("setOnboardingRestartSignal((value) => value + 1)");
-        expect(workbenchCode).toContain("<CanvasDirectorOnboarding");
-        expect(workbenchCode).toContain("scope={onboardingScope}");
-        expect(workbenchCode).toContain("restartSignal={onboardingRestartSignal}");
-        expect(workbenchCode).toContain("overflow-x-auto");
-        expect(workbenchCode).toContain("overflow-y-hidden");
+        expect(workbenchCode).toContain('onHelp={() => setOnboardingRestartSignal((value) => value + 1)}');
+        expect(readFileSync(resolve(import.meta.dir, "../src/components/canvas/director/canvas-director-workbench.tsx"), "utf8")).toContain("<CanvasDirectorOnboarding");
+        expect(readFileSync(resolve(import.meta.dir, "../src/components/canvas/director/canvas-director-workbench.tsx"), "utf8")).toContain("scope={onboardingScope}");
+        expect(readFileSync(resolve(import.meta.dir, "../src/components/canvas/director/canvas-director-workbench.tsx"), "utf8")).toContain("restartSignal={onboardingRestartSignal}");
+        expect(workbenchCode).toContain('data-director-topbar="true"');
+        const responsiveTopbarStyles = workbenchStyles.match(/@media \(max-width: 1023px\) \{\s*\.director-workbench-topbar \{([^}]*)\}/)?.[1] || "";
+        expect(responsiveTopbarStyles).toContain("overflow-x: auto");
+        expect(responsiveTopbarStyles).toContain("overflow-y: hidden");
     });
 
     test("开发复现页启用独立 scope，可实际检查首次引导与重启", () => {

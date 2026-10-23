@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 
+	"qisitv/backend/internal/supporttrace"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,8 +24,12 @@ var correlationIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,96}$`)
 // requestId 不能被客户端覆盖；traceId 只接受有限字符集，避免把任意请求头内容写入日志和诊断包。
 func RequestCorrelationMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		c.Request = c.Request.WithContext(supporttrace.Extract(c.Request.Context(), c.Request.Header))
 		requestID := newCorrelationID("req")
-		traceID := normalizeCorrelationID(c.GetHeader(traceIDHeader))
+		traceID := supporttrace.TraceID(c.Request.Context())
+		if traceID == "" {
+			traceID = normalizeCorrelationID(c.GetHeader(traceIDHeader))
+		}
 		if traceID == "" {
 			traceID = newCorrelationID("trace")
 		}

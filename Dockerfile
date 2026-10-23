@@ -7,11 +7,17 @@ WORKDIR /app/web
 ARG BUILD_VERSION
 ENV CANVAS_BUILD_VERSION=${BUILD_VERSION}
 COPY web/package.json web/bun.lock ./
+COPY web/patches ./patches
 RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile --cache-dir=/root/.bun/install/cache
 COPY VERSION /app/VERSION
 COPY CHANGELOG.md /app/CHANGELOG.md
 COPY README.md /app/README.md
+COPY LICENSE NOTICE THIRD_PARTY_NOTICES.md /app/
+COPY licenses /app/licenses
+COPY scripts/distribution-notices.mjs /app/scripts/distribution-notices.mjs
 COPY assets /app/assets
+COPY backend/internal/providerpreset/image_contracts.json /app/backend/internal/providerpreset/image_contracts.json
+COPY backend/internal/providerpreset/video_contracts.json /app/backend/internal/providerpreset/video_contracts.json
 COPY web ./
 # 生产镜像只构建云端工作台前端；Agent Runtime 在后端 Worker 中运行。
 RUN bun --bun ./node_modules/vite/bin/vite.js build

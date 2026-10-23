@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/model"
 
 	"gorm.io/gorm"
@@ -32,14 +33,7 @@ type PublicArkPrivateAssetSetting struct {
 	UpdatedAt          time.Time `json:"updatedAt"`
 }
 
-type arkPrivateAssetSettingValue struct {
-	Enabled         bool   `json:"enabled"`
-	Region          string `json:"region"`
-	ProjectName     string `json:"projectName"`
-	AccessKeyID     string `json:"accessKeyId"`
-	AccessKeySecret string `json:"accessKeySecret"`
-	DefaultGroupID  string `json:"defaultGroupId"`
-}
+type arkPrivateAssetSettingValue = generation.ArkPrivateAssetSettingValue
 
 func (s *Service) AdminArkPrivateAssetSetting(actor *model.User) (*PublicArkPrivateAssetSetting, error) {
 	if err := s.RequireAdmin(actor); err != nil {

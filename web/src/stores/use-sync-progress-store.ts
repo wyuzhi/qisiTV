@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
+import { getActiveUserScope } from "@/lib/user-scope";
 
 export type SyncProjectProgress = {
     projectId: string;
@@ -10,10 +11,14 @@ export type SyncProjectProgress = {
     draftCount?: number;
 };
 
+export function canvasSyncProgressKey(projectId: string, scope = getActiveUserScope()) {
+    return `${scope}\0${projectId}`;
+}
+
 type SyncProgressStore = {
     syncingProjects: Record<string, SyncProjectProgress>;
-    setProjectProgress: (projectId: string, patch: Partial<SyncProjectProgress> | null) => void;
-    incrementProjectCompleted: (projectId: string) => void;
+    setProjectProgress: (projectId: string, patch: Partial<SyncProjectProgress> | null, scope?: string) => void;
+    incrementProjectCompleted: (projectId: string, scope?: string) => void;
     clearAll: () => void;
     isAnySyncing: () => boolean;
 };
@@ -32,16 +37,21 @@ export function syncBeforeUnloadMessage(progress: SyncProjectProgress[], localMo
         : "画布正在同步至云端，请勿关闭页面。";
 }
 
+export function projectSyncProgress(projectId: string, scope = getActiveUserScope()) {
+    return useSyncProgressStore.getState().syncingProjects[canvasSyncProgressKey(projectId, scope)];
+}
+
 export const useSyncProgressStore = create<SyncProgressStore>((set, get) => ({
     syncingProjects: {},
-    setProjectProgress: (projectId, patch) =>
+    setProjectProgress: (projectId, patch, scope = getActiveUserScope()) =>
         set((state) => {
+            const key = canvasSyncProgressKey(projectId, scope);
             if (!patch) {
                 const next = { ...state.syncingProjects };
-                delete next[projectId];
+                delete next[key];
                 return { syncingProjects: next };
             }
-            const current = state.syncingProjects[projectId] || {
+            const current = state.syncingProjects[key] || {
                 projectId,
                 total: 0,
                 completed: 0,
@@ -50,18 +60,19 @@ export const useSyncProgressStore = create<SyncProgressStore>((set, get) => ({
             return {
                 syncingProjects: {
                     ...state.syncingProjects,
-                    [projectId]: { ...current, ...patch },
+                    [key]: { ...current, ...patch },
                 },
             };
         }),
-    incrementProjectCompleted: (projectId) =>
+    incrementProjectCompleted: (projectId, scope = getActiveUserScope()) =>
         set((state) => {
-            const current = state.syncingProjects[projectId];
+            const key = canvasSyncProgressKey(projectId, scope);
+            const current = state.syncingProjects[key];
             if (!current) return state;
             return {
                 syncingProjects: {
                     ...state.syncingProjects,
-                    [projectId]: {
+                    [key]: {
                         ...current,
                         completed: Math.min(current.total, current.completed + 1),
                     },

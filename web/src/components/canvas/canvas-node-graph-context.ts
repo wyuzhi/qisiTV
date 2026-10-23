@@ -8,6 +8,7 @@ import type { CanvasNodeData } from "@/types/canvas";
 // 无 Provider 时静默降级为「没有上游」，节点自行显示空状态而不是崩。
 export type CanvasNodeGraphContextValue = {
     getUpstreamNodes?: (nodeId: string) => CanvasNodeData[];
+    getNode?: (nodeId: string) => CanvasNodeData | undefined;
 };
 
 export const CanvasNodeGraphContext = createContext<CanvasNodeGraphContextValue>({});

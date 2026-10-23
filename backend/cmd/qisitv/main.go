@@ -1,4 +1,5 @@
-// Command qisitv shares the exact MCP operation/validation layer for terminal agents.
+// Command qisitv retains legacy schema inspection only. Build cmd/beeftv as
+// qisitv for the native, independently authorized engine CLI and MCP server.
 package main
 
 import (
@@ -26,17 +27,12 @@ func main() {
 
 func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
-		_, err := fmt.Fprintln(out, `qisiTV local canvas CLI
+		_, err := fmt.Fprintln(out, `qisiTV legacy schema inspector
 
   qisitv tools                         List operations and JSON schemas
-  qisitv call TOOL '{"key":"value"}'     Call an operation
-  qisitv call TOOL --file args.json     Read arguments from a JSON file
-  qisitv call TOOL -                    Read arguments from stdin
-
-Environment: QISITV_URL (default http://127.0.0.1:8080/api),
-QISITV_TOKEN or QISITV_TOKEN_FILE (only when required by the local runtime).
-The workspace must already be running. All output is JSON except this help.
-task_submit requires explicit cost consent; no operation automatically retries.`)
+Legacy direct HTTP operations have been retired. Build ./cmd/beeftv as qisitv
+and configure your Agent at https://cheeser.link/qisitv/#/agents.
+This entry point never reads launch-token files or sends workspace requests.`)
 		return err
 	}
 	encoder := json.NewEncoder(out)
@@ -75,13 +71,5 @@ task_submit requires explicit cost consent; no operation automatically retries.`
 	if decoder.Decode(&extra) != io.EOF {
 		return errors.New("only one JSON object is allowed")
 	}
-	client, err := agentbridge.FromEnvironment()
-	if err != nil {
-		return err
-	}
-	result, err := client.Call(ctx, args[1], values)
-	if err != nil {
-		return err
-	}
-	return encoder.Encode(result)
+	return errors.New("LEGACY_NATIVE_PROTOCOL_RETIRED: build ./cmd/beeftv as qisitv and configure an authorized client at https://cheeser.link/qisitv/#/agents")
 }

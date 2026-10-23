@@ -3,19 +3,27 @@ import { normalizeLocalAsset, normalizeLocalCanvasProject } from "@/lib/local-wo
 import { scopedLocalStorage, setActiveUserScope } from "@/lib/user-scope";
 import { CANVAS_HISTORY_STORE_KEY, useCanvasHistoryStore } from "@/stores/canvas/use-canvas-history-store";
 import { CANVAS_STORE_KEY, flushCanvasStorePersistence, useCanvasStore } from "@/stores/canvas/use-canvas-store";
+import { captureUserScope } from "@/lib/user-scope-guard";
 import { ASSET_STORE_KEY, flushAssetStorePersistence, useAssetStore } from "@/stores/use-asset-store";
+import { preserveLegacyCacheOnlyAssetDrafts, usesWorkspaceAssetLibraryApi } from "@/services/workspace-asset-read";
 import { CONFIG_STORE_KEY, defaultConfig, isSystemProxyBaseUrl, normalizeConfigSnapshot, useConfigStore, type AiConfig } from "@/stores/use-config-store";
 import { CREATION_PREFERENCES_STORE_KEY, useCreationPreferencesStore } from "@/stores/use-creation-preferences-store";
 import { PLUGIN_STORE_KEY, usePluginStore } from "@/stores/use-plugin-store";
 import { defaultFeatureAvailability, useUserStore } from "@/stores/use-user-store";
 import type { WorkspaceBootstrapPayload } from "@/services/api/workspace";
 import { setWorkspaceCapabilitySnapshot } from "@/services/workspace-mode";
+import { withGenerationConsumersPaused } from "@/services/generation-consumer-lifecycle";
 
 /**
  * Hydrate the one implicit local workspace. This is deliberately not an auth
  * session: it only selects the persistence namespace and restores local stores.
  */
 export async function applyUserSession(payload: WorkspaceBootstrapPayload) {
+    // Drain old result writers before changing the persistence namespace or stores.
+    return withGenerationConsumersPaused(() => hydrateLocalWorkspace(payload));
+}
+
+async function hydrateLocalWorkspace(payload: WorkspaceBootstrapPayload) {
     useUserStore.getState().setHydrated(false);
     setWorkspaceCapabilitySnapshot({
         contractVersion: payload.contractVersion,
@@ -60,6 +68,13 @@ export async function applyUserSession(payload: WorkspaceBootstrapPayload) {
         if (!persistedCanvas) useCanvasStore.setState({ projects: [] });
         if (!persistedCanvasHistory) useCanvasHistoryStore.setState({ deletedProjects: [] });
         if (!persistedAssets) useAssetStore.setState({ assets: [] });
+        if (usesWorkspaceAssetLibraryApi()) {
+            try {
+                await preserveLegacyCacheOnlyAssetDrafts(captureUserScope());
+            } catch {
+                // 查询失败不能当成「库是空的」。素材页会单独展示读取失败。
+            }
+        }
         if (!persistedPlugins) usePluginStore.setState({ installations: [], runtimeStatuses: {}, pluginStates: {} });
         if (!persistedCreationPreferences) useCreationPreferencesStore.setState({ preferences: {} });
         if (!persistedConfig) useConfigStore.getState().replaceConfig(localWorkspaceConfig(defaultConfig));

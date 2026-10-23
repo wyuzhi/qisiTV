@@ -6,7 +6,6 @@ const hydrator = readFileSync(new URL("../src/components/workspace/workspace-boo
 const workspaceApi = readFileSync(new URL("../src/services/api/workspace.ts", import.meta.url), "utf8");
 const router = readFileSync(new URL("../src/router.tsx", import.meta.url), "utf8");
 const userSession = readFileSync(new URL("../src/lib/user-session.ts", import.meta.url), "utf8");
-const creationAgent = readFileSync(new URL("../src/pages/create/creation-agent-entry.tsx", import.meta.url), "utf8");
 const sidebarNav = readFileSync(new URL("../src/components/layout/workspace-sidebar-nav.tsx", import.meta.url), "utf8");
 const imageStorage = readFileSync(new URL("../src/services/image-storage.ts", import.meta.url), "utf8");
 const fileStorage = readFileSync(new URL("../src/services/file-storage.ts", import.meta.url), "utf8");
@@ -26,6 +25,7 @@ test("local workspace bootstrap is the product startup contract", () => {
     expect(router).not.toContain('path: "/login"');
     expect(router).not.toContain('path: "/register"');
     expect(router).not.toContain("AuthScene");
+    expect(router).toContain("createWorkspaceRouter");
     expect(router).toContain('path: "/tasks"');
     expect(router).toContain('path: "/projects"');
     expect(router).toContain('path: "/project"');
@@ -42,15 +42,12 @@ test("local workspace bootstrap is the product startup contract", () => {
     expect(userSession).not.toContain("installRemoteUserDataAutoSync");
     expect(userSession).not.toContain("syncRemoteUserData");
     expect(userSession).not.toContain("getModelCatalogForSession");
-    expect(creationAgent).toContain("const localMode");
-    expect(creationAgent).toContain("!localMode && !hasRemoteUserDataSyncSession()");
-    expect(creationAgent).not.toContain("登录或同步会话尚未就绪");
     expect(sidebarNav).toContain("footer: []");
     expect(sidebarNav).not.toContain('title: "退出登录"');
     expect(imageStorage).toContain("const localRuntime = isLocalRuntimeMode();");
     expect(imageStorage).toContain("The desktop Go resource service is local storage");
     expect(imageStorage).not.toContain("if (!localOnly) try");
-    expect(fileStorage).toContain("const localRuntime = isLocalRuntimeMode();");
+    expect(fileStorage).toContain("if (usesBrowserLocalResourceStore())");
     expect(fileStorage).toContain("The native desktop Go resource service is the canonical local store");
     expect(fileStorage).not.toContain("if (!localOnly) try");
 });

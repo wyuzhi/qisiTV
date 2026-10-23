@@ -12,6 +12,26 @@ import (
 )
 
 func RegisterBeefAPIConnectionRoutes(r *gin.RouterGroup, svc *app.Service) {
+	r.POST("/beefapi/connection/models", func(c *gin.Context) {
+		if _, err := workspaceForLocalRequest(c, svc); err != nil {
+			fail(c, http.StatusUnauthorized, err)
+			return
+		}
+		if !enforceRateLimit(c, "beefapi-models", 30, time.Minute) {
+			return
+		}
+		connection, err := requestBeefAPI(c, svc)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		models, err := connection.RefreshCatalog(c.Request.Context())
+		if err != nil {
+			failService(c, app.BadAuthRequest(err.Error()))
+			return
+		}
+		ok(c, gin.H{"models": models})
+	})
 	r.GET("/beefapi/connection", func(c *gin.Context) {
 		if _, err := workspaceForLocalRequest(c, svc); err != nil {
 			fail(c, http.StatusUnauthorized, err)

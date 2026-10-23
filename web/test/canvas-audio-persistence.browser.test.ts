@@ -9,7 +9,7 @@ beforeAll(async () => {
         "@/services/workspace-mode", "@/services/browser-project-folder", "@/services/project-asset-sync", "@/services/local-workspace-sync",
         "@/services/local-workspace-repository", "@/services/api/request", "@/lib/canvas/canvas-video-segment"]);
     const build = await Bun.build({ entrypoints: [import.meta.dir + "/fixtures/canvas-audio-harness.tsx"], target: "browser",
-        define: { "import.meta.env": '{"VITE_QISITV_BROWSER_ONLY":"1"}', "process.env.NODE_ENV": '"development"' },
+        define: { "import.meta.env": '{}', "process.env.NODE_ENV": '"development"' },
         plugins: [{ name: "media-contracts", setup(builder) {
             builder.onResolve({ filter: /\?url$/ }, args => ({ path: args.path, namespace: "unused-media-url" }));
             builder.onLoad({ filter: /.*/, namespace: "unused-media-url" }, () => ({ contents: 'export default "unused-test-media";', loader: "js" }));
@@ -28,7 +28,7 @@ beforeAll(async () => {
 }, 60000);
 afterAll(async () => { await browser?.close(); server?.stop(true); });
 
-for (const scenario of ["success", "disk failure", "silent", "route switch"]) test(`audio separation: ${scenario}`, async () => {
+for (const scenario of ["success", "disk failure", "silent", "route switch", "route ABA", "source replacement"]) test(`audio separation: ${scenario}`, async () => {
     const page = await browser.newPage();
     try {
         await page.goto(server.url.toString());
@@ -37,18 +37,27 @@ for (const scenario of ["success", "disk failure", "silent", "route switch"]) te
             const state = (window as any).audioTest.state;
             state.failDisk = scenario === "disk failure";
             state.silent = scenario === "silent";
-            state.pause = scenario === "route switch";
+            state.pause = ["route switch", "route ABA", "source replacement"].includes(scenario);
         }, scenario);
         await page.getByRole("button", { name: "extract", exact: true }).click();
-        if (scenario === "route switch") {
+        if (["route switch", "route ABA", "source replacement"].includes(scenario)) {
             await page.waitForFunction(() => (window as any).audioTest.state.extracting);
-            await page.evaluate(() => (window as any).audioTest.switchProject());
-            await page.locator("#project").filter({ hasText: "b" }).waitFor();
+            if (scenario === "source replacement") {
+                await page.evaluate(() => (window as any).audioTest.replaceSource());
+                await page.waitForFunction(() => (window as any).audioTest.nodes[0].metadata.storageKey === "resource:replacement");
+            } else {
+                await page.evaluate(() => (window as any).audioTest.switchProject());
+                await page.locator("#project").filter({ hasText: "b" }).waitFor();
+                if (scenario === "route ABA") {
+                    await page.evaluate(() => (window as any).audioTest.switchProject("a"));
+                    await page.locator("#project").filter({ hasText: "a" }).waitFor();
+                }
+            }
             await page.evaluate(() => (window as any).audioTest.state.release());
         } else await page.locator("#status").filter({ hasText: scenario === "success" ? "done" : "failed" }).waitFor();
         await page.locator("#running").filter({ hasText: "idle" }).waitFor();
         const result = await page.evaluate(() => JSON.parse(JSON.stringify((window as any).audioTest)));
-        expect(result.state.httpReads).toBe(0);
+        expect(result.state.httpReads).toBe(scenario === "success" ? 1 : 0);
         if (scenario === "success") {
             expect(result.state.writes).toHaveLength(1);
             expect(result.state.writes[0].id).toBe("a");
@@ -64,6 +73,8 @@ for (const scenario of ["success", "disk failure", "silent", "route switch"]) te
             if (scenario === "silent") expect(result.state.errors[0]).toContain("没有可提取的音轨");
             if (scenario !== "disk failure") { expect(result.state.muted).toBe(0); expect(result.state.uploads).toBe(0); }
             if (scenario === "route switch") expect(result.nodes).toEqual([]);
+            if (scenario === "route ABA" || scenario === "source replacement") expect(result.nodes).toHaveLength(2);
+            if (scenario === "source replacement") expect(result.nodes[0].metadata.storageKey).toBe("resource:replacement");
         }
     } finally { await page.close(); }
 }, 30000);

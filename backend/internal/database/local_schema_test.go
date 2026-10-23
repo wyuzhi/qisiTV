@@ -54,13 +54,61 @@ func TestLocalSchemaRecordsVersionAndIsIdempotent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	var versions []int64
-	if err := db.Table("local_schema_migrations").Order("version").Pluck("version", &versions).Error; err != nil {
+	var rows []localSchemaMigration
+	if err := db.Order("version").Find(&rows).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != int(CurrentSchemaVersion) || versions[len(versions)-1] != CurrentSchemaVersion {
-		t.Fatalf("recorded versions = %v, current = %d", versions, CurrentSchemaVersion)
+	want := canonicalLocalMigrations()
+	if len(rows) != len(want) || rows[len(rows)-1].Version != CurrentSchemaVersion {
+		t.Fatalf("recorded versions = %+v, current = %d", rows, CurrentSchemaVersion)
 	}
+	for i, row := range rows {
+		if row.Version != want[i].version || row.Name != want[i].name {
+			t.Fatalf("canonical identity mismatch at %d: %+v want v%d %s", i, row, want[i].version, want[i].name)
+		}
+	}
+	if rows[2].Name != "task-failure-diagnostics" {
+		t.Fatalf("fresh database used preview v3 identity: %s", rows[2].Name)
+	}
+}
+
+func TestTaskDiagnosticsMigrationPreservesExistingTasks(t *testing.T) {
+	db := openHistorical(t, "product-v2")
+	if err := db.Exec("UPDATE tasks SET id = 'existing-task', error = '历史错误' WHERE id = 'task'").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateLocalSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	var task model.Task
+	if err := db.First(&task, "id = ?", "existing-task").Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.Error != "历史错误" || task.FailureDiagnostics != nil {
+		t.Fatalf("task changed: %+v", task)
+	}
+	mustColumn(t, db, "tasks", "preview_marker", "keep")
+}
+
+func TestImageRecoveryMigrationUpgradesExistingWorkspace(t *testing.T) {
+	db := openHistorical(t, "product-v2")
+	if err := db.Exec("UPDATE tasks SET id = 'existing-image', user_id = 'user', type = 'canvas_image', status = 'failed', input_json = '{\"original\":true}' WHERE id = 'task'").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateLocalSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if !db.Migrator().HasTable(&model.ImageSubmission{}) {
+		t.Fatal("image submission table missing")
+	}
+	var task model.Task
+	if err := db.First(&task, "id = ?", "existing-image").Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.InputJSON != `{"original":true}` || task.Status != model.TaskStatusFailed {
+		t.Fatal("migration rewrote old task")
+	}
+	mustColumn(t, db, "tasks", "legacy_branch_payload", "branch-payload")
 }
 
 func TestHostedCleanupCreatesRecoverableSQLiteBackup(t *testing.T) {
@@ -70,6 +118,11 @@ func TestHostedCleanupCreatesRecoverableSQLiteBackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	connection, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
 	if err := db.Exec("CREATE TABLE billing_orders (id TEXT PRIMARY KEY)").Error; err != nil {
 		t.Fatal(err)
 	}
@@ -87,6 +140,11 @@ func TestHostedCleanupCreatesRecoverableSQLiteBackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	backupConnection, err := backup.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backupConnection.Close()
 	var count int64
 	if err := backup.Table("billing_orders").Where("id = ?", "legacy-order").Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("backup legacy order count = %d, err = %v", count, err)
@@ -296,5 +354,172 @@ func TestLocalSchemaUpgradeDropsHostedTablesAndKeepsCoreData(t *testing.T) {
 	var count int64
 	if err := db.Model(&model.Project{}).Where("id = ?", "project-keep").Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("core project was not preserved: count=%d err=%v", count, err)
+	}
+}
+
+func TestTaskDiagnosticsRepairWithOccupiedMigrationVersions(t *testing.T) {
+	for _, history := range []string{"agent-v3", "agent-v6"} {
+		t.Run(history, func(t *testing.T) {
+			db := openHistorical(t, history)
+			if err := db.Exec("UPDATE tasks SET id = 'old', error = '历史错误' WHERE id = 'task'").Error; err != nil {
+				t.Fatal(err)
+			}
+			if RequireLocalSchema(db) == nil {
+				t.Fatal("missing column reported ready")
+			}
+			var before localSchemaMigration
+			if err := db.First(&before, "version = 3").Error; err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < 2; i++ {
+				if err := MigrateLocalSchema(db); err != nil {
+					t.Fatal(err)
+				}
+			}
+			status, err := ReadSchemaStatus(db)
+			if err != nil || !status.Ready || status.Current != CurrentSchemaVersion {
+				t.Fatalf("status=%+v error=%v", status, err)
+			}
+			var migration localSchemaMigration
+			if err = db.First(&migration, "version = 3").Error; err != nil || migration.Name != "agent-operation-records" || !migration.AppliedAt.Equal(before.AppliedAt) {
+				t.Fatalf("migration overwritten: %+v %v", migration, err)
+			}
+			var old struct{ Error, PreviewMarker string }
+			if err = db.Table("tasks").Where("id = 'old'").Scan(&old).Error; err != nil || old.Error != "历史错误" || old.PreviewMarker != "keep" {
+				t.Fatalf("old data lost: %+v %v", old, err)
+			}
+			mustColumn(t, db, "agent_op_records", "preview_receipt", "keep-receipt")
+			for _, kind := range []string{"canvas_text", "image_generate", "video_generate"} {
+				if err = db.Create(&model.Task{ID: kind, Type: kind, Prompt: "真实升级回归"}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func TestAssistantTurnsMigrationFromPreviewV9(t *testing.T) {
+	db := openHistorical(t, "preview-v9")
+	var before []localSchemaMigration
+	if err := db.Order("version").Find(&before).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateLocalSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := RequireLocalSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if !db.Migrator().HasTable(&model.AssistantTurn{}) {
+		t.Fatal("v10 did not create assistant_turns")
+	}
+	if !db.Migrator().HasTable(&model.CreationConversation{}) {
+		t.Fatal("v11 did not create creation_conversations")
+	}
+	mustColumn(t, db, "tasks", "preview_marker", "keep")
+	var ledger []localSchemaMigration
+	if err := db.Order("version").Find(&ledger).Error; err != nil {
+		t.Fatal(err)
+	}
+	if ledger[len(ledger)-1].Version != CurrentSchemaVersion || ledger[len(ledger)-1].Name != "reconcile-preview-assistant-schema" {
+		t.Fatalf("current identity: %+v", ledger[len(ledger)-1])
+	}
+	foundV10 := false
+	for _, row := range ledger {
+		if row.Version == 10 {
+			foundV10 = true
+			if row.Name != "assistant-business-turns" {
+				t.Fatalf("v10 identity rewritten: %+v", row)
+			}
+		}
+	}
+	if !foundV10 {
+		t.Fatal("v10 assistant-business-turns missing after v11")
+	}
+	if !db.Migrator().HasTable(&model.CanvasLibraryFolder{}) || !db.Migrator().HasTable(&model.CanvasDrawing{}) {
+		t.Fatal("v12 did not create canvas library tables")
+	}
+	for i, row := range before {
+		if ledger[i].Name != row.Name || !ledger[i].AppliedAt.Equal(row.AppliedAt) {
+			t.Fatalf("historical ledger overwritten: %+v", ledger)
+		}
+	}
+	if err := MigrateLocalSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	var again []localSchemaMigration
+	if err := db.Order("version").Find(&again).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(again) != len(ledger) {
+		t.Fatalf("idempotent v11 rewrote ledger: %d -> %d", len(ledger), len(again))
+	}
+}
+
+func TestCreationConversationsMigrationPreservesUnknownColumns(t *testing.T) {
+	db := openHistorical(t, "preview-v9")
+	if err := MigrateLocalSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("ALTER TABLE creation_conversations ADD COLUMN preview_marker TEXT").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO creation_conversations (user_id, conversation_id, revision, document, deleted, preview_marker, created_at, updated_at)
+		VALUES ('local', 'conversation-keep', 1, '{"id":"conversation-keep","title":"历史","messages":[]}', 0, 'keep', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateLocalSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	mustColumn(t, db, "creation_conversations", "preview_marker", "keep")
+	var row model.CreationConversation
+	if err := db.Where("user_id = ? AND conversation_id = ?", "local", "conversation-keep").First(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	if row.Revision != 1 || !strings.Contains(row.Document, "conversation-keep") {
+		t.Fatalf("v11 rewrote conversation row: %+v", row)
+	}
+	valid, err := matchesSQLiteIndex(db, sqliteIndexContract{
+		table: "creation_conversations", name: "idx_creation_conversations_user_import",
+		columns: []string{"user_id", "import_operation_id"}, unique: true, partial: true,
+		whereSQL: "import_operation_id IS NOT NULL",
+	})
+	if err != nil || !valid {
+		t.Fatalf("v11 import unique index missing: valid=%v err=%v", valid, err)
+	}
+}
+
+func TestCreationConversationsImportIndexRepairedWithoutNewMigration(t *testing.T) {
+	db := openHistorical(t, "preview-v9")
+	if err := MigrateLocalSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("DROP INDEX IF EXISTS idx_creation_conversations_user_import").Error; err != nil {
+		t.Fatal(err)
+	}
+	var ledgerBefore []localSchemaMigration
+	if err := db.Order("version").Find(&ledgerBefore).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateLocalSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := RequireLocalSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	valid, err := matchesSQLiteIndex(db, sqliteIndexContract{
+		table: "creation_conversations", name: "idx_creation_conversations_user_import",
+		columns: []string{"user_id", "import_operation_id"}, unique: true, partial: true,
+		whereSQL: "import_operation_id IS NOT NULL",
+	})
+	if err != nil || !valid {
+		t.Fatalf("import unique index not repaired: valid=%v err=%v", valid, err)
+	}
+	var ledgerAfter []localSchemaMigration
+	if err := db.Order("version").Find(&ledgerAfter).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(ledgerAfter) != len(ledgerBefore) {
+		t.Fatalf("repair added a migration: %d -> %d", len(ledgerBefore), len(ledgerAfter))
 	}
 }

@@ -28,6 +28,18 @@ function createNodeContext(node: CanvasNodeData): ToolContext {
 }
 
 describe("canvas node toolbar model", () => {
+    test("opens the same subtitles action for uploaded audio and video", () => {
+        for (const type of [CanvasNodeType.Audio, CanvasNodeType.Video]) {
+            const node: CanvasNodeData = { id: "media", type, title: "素材", position: { x: 0, y: 0 }, width: 320, height: 180, metadata: { storageKey: "resource:media-fixture" } };
+            const ctx = createNodeContext(node);
+            const received: CanvasNodeData[] = [];
+            ctx.handlers = { onNodeSubtitles: target => received.push(target) } as ToolbarHandlers;
+            const action = resolveToolbarTools("node-hover", ctx, null).find(tool => tool.id === "subtitles");
+            expect(action).toBeDefined();
+            action?.run(ctx);
+            expect(received).toEqual([node]);
+        }
+    });
     test("preserves empty, simple and busy video states", () => {
         const ctx = createNodeContext({ id: "video", type: CanvasNodeType.Video, title: "视频", position: { x: 0, y: 0 }, width: 320, height: 180, metadata: {} });
         const emptyTools = resolveToolbarTools("node-hover", ctx, null);
@@ -67,6 +79,22 @@ describe("canvas node toolbar model", () => {
         expect(groups.get("node-lock")).toBe("more");
     });
 
+    test("offers depth capture as a video processing action and dispatches the source node", () => {
+        const node: CanvasNodeData = { id: "video", type: CanvasNodeType.Video, title: "视频", position: { x: 0, y: 0 }, width: 320, height: 180, metadata: { content: "video.mp4" } };
+        const received: CanvasNodeData[] = [];
+        const ctx = createNodeContext(node);
+        ctx.handlers = { onNodeDepthCapture: (target) => received.push(target) } as ToolbarHandlers;
+
+        const tool = resolveToolbarTools("node-hover", ctx, null).find((item) => item.id === "depthCapture");
+
+        expect(tool).toBeDefined();
+        expect(tool?.displayLabel).toBe("深度动作捕捉");
+        expect(resolveNodeToolbarPlacement(tool!, ctx).group).toBe("more");
+        expect(tool?.nodeToolbar?.section).toBe("视频处理");
+        tool?.run(ctx);
+        expect(received).toEqual([node]);
+    });
+
     test("uses the redesigned video terminology from the registry", () => {
         const ctx = createNodeContext({ id: "video", type: CanvasNodeType.Video, title: "视频", position: { x: 0, y: 0 }, width: 320, height: 180, metadata: { content: "video.mp4" } });
         const tools = new Map(resolveToolbarTools("node-hover", ctx, null).map((tool) => [tool.id, tool]));
@@ -79,6 +107,18 @@ describe("canvas node toolbar model", () => {
         expect(displayLabel("timeline")).toBe("进入剪辑");
         expect(displayLabel("extractFrames")).toBe("关键帧截取");
         expect(displayLabel("extractAudio")).toBe("音视频分离");
+    });
+
+    test.each([CanvasNodeType.Audio, CanvasNodeType.Video])("opens the project timeline from a %s node", (type) => {
+        const node: CanvasNodeData = { id: "media", type, title: "素材", position: { x: 0, y: 0 }, width: 320, height: 180, metadata: { storageKey: "resource:media-fixture" } };
+        const ctx = createNodeContext(node);
+        const received: CanvasNodeData[] = [];
+        ctx.handlers = { onNodeTimeline: (target) => received.push(target) } as ToolbarHandlers;
+        const timeline = resolveToolbarTools("node-hover", ctx, null).find((tool) => tool.id === "timeline");
+        expect(timeline?.displayLabel).toBe("进入剪辑");
+        expect(resolveNodeToolbarPlacement(timeline!, ctx).group).toBe("workspace");
+        timeline?.run(ctx);
+        expect(received).toEqual([node]);
     });
 
     test("image-only tools carry presentation metadata instead of relying on component ID lists", () => {

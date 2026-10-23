@@ -8,7 +8,8 @@ import { ASSET_CATEGORY_LABELS, normalizeAssetCategory } from "@/lib/asset-categ
 import { resourceFileUrl, resourceIdFromStorageKey } from "@/services/api/resources";
 import type { ProjectAsset, ProjectDetail } from "@/services/api/projects";
 import { getWorkspaceAsset } from "@/services/api/workspace-data";
-import { isLocalWorkspaceMode } from "@/services/workspace-mode";
+import { usesWorkspaceAssetLibraryApi } from "@/services/workspace-asset-read";
+import { assertUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { useAssetStore, type Asset } from "@/stores/use-asset-store";
 
 const categoryLabels: Record<string, string> = { all: "全部资产", ...ASSET_CATEGORY_LABELS };
@@ -28,8 +29,8 @@ export function CanvasProjectAssetModal({
     initialCategory?: string;
     initialFolderId?: string;
     onClose: () => void;
-    onInsert: (payloads: InsertAssetPayload[]) => Promise<void> | void;
-    onInsertFolder?: (folderId: string) => Promise<void> | void;
+    onInsert: (payloads: InsertAssetPayload[], expectedScope: CapturedUserScope) => Promise<void> | void;
+    onInsertFolder?: (folderId: string, expectedScope: CapturedUserScope) => Promise<void> | void;
 }) {
     const mediaAssets = useAssetStore((state) => state.assets);
     const externalAssetSources = useExternalAssetSources(open);
@@ -79,7 +80,7 @@ export function CanvasProjectAssetModal({
 
     return (
         <AssetLibraryPickerModal
-            remoteLibrary={!detail && !isLocalWorkspaceMode()}
+            remoteLibrary={!detail && usesWorkspaceAssetLibraryApi()}
             open={open}
             mediaKinds={["image", "video", "audio", "text"]}
             items={pickerItems}
@@ -95,14 +96,15 @@ export function CanvasProjectAssetModal({
             footerNote={externalAssetSources.error || "角色引用会在生成时解析当前角色版本"}
             onFolderAction={
                 onInsertFolder
-                    ? async (folderId) => {
-                          await onInsertFolder(folderId);
+                    ? async (folderId, expectedScope) => {
+                          await onInsertFolder(folderId, expectedScope);
+                          assertUserScope(expectedScope);
                           onClose();
                       }
                     : undefined
             }
             onClose={onClose}
-            onConfirm={async (ids) => {
+            onConfirm={async (ids, expectedScope) => {
                 const payloads = await Promise.all(
                     ids.map(async (id) => {
                         const external = externalAssetSources.items.find((item) => item.id === id)?.external;
@@ -110,12 +112,13 @@ export function CanvasProjectAssetModal({
                         const item = items.find((candidate) => candidate.id === id);
                         if (!item) throw new Error("所选资产已不存在，请重新选择");
                         if (item.media || item.character || !item.project) return toInsertPayload(item);
-                        const { asset } = await getWorkspaceAsset(item.project.id);
+                        const { asset } = await getWorkspaceAsset(item.project.id, undefined, { expectedScope });
                         return toInsertPayload({ ...item, media: asset });
                     }),
                 );
                 if (!payloads.length) return;
-                await onInsert(payloads);
+                await onInsert(payloads, expectedScope);
+                assertUserScope(expectedScope);
                 onClose();
             }}
         />

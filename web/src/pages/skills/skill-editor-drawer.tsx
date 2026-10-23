@@ -1,7 +1,6 @@
 import { App, Button, Form, Input } from "antd";
 import { AppDrawer } from "@/components/ui/product/app-drawer";
 import { Select } from "@/components/ui/base/select";
-import { Switch } from "@/components/ui/base/switch";
 import { Minus, Plus, Save, Wand2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -30,7 +29,7 @@ export function SkillEditorDrawer({ open, skill, onClose, onSaved }: { open: boo
             description: skill?.description || "",
             instruction: skill?.instruction || "",
             tag: skill?.tag || "creative",
-            is_public: skill ? !skill.isPrivate : true,
+            is_public: false,
             markdownUrl: skill?.markdownUrl || skill?.sourceUrl || "",
             showcaseMedia: skill?.showcaseMedia || [],
             extraInfo: skill?.extraInfo || "",
@@ -54,7 +53,7 @@ export function SkillEditorDrawer({ open, skill, onClose, onSaved }: { open: boo
                 description: values.description,
                 instruction: values.instruction || "",
                 tag: values.tag,
-                isPrivate: !values.is_public,
+                isPrivate: true,
                 markdownUrl: values.markdownUrl || "",
                 showcaseMedia: (values.showcaseMedia || []).map((item) => ({ ...item, showcaseUri: item.showcaseUri || "" })),
                 extraInfo: values.extraInfo || "",
@@ -143,9 +142,7 @@ export function SkillEditorDrawer({ open, skill, onClose, onSaved }: { open: boo
                     <Form.Item name="markdownUrl" label={isPackageSkill ? "来源地址" : "Markdown 地址"} rules={[{ type: "url", message: "请输入有效的 HTTP(S) 链接" }]}>
                         <Input type="url" inputMode="url" spellCheck={false} placeholder="https://example.com/SKILL.md" />
                     </Form.Item>
-                    <Form.Item name="is_public" label="公开状态" valuePropName="checked" extra="公开后其他用户可以加入使用。">
-                        <Switch checkedChildren="公开" unCheckedChildren="私有" />
-                    </Form.Item>
+                    <p className="text-sm text-foreground/60">保存到本机，仅自己使用。公开分享请到“我的投稿”确认送审。</p>
                 </div>
 
                 <Form.List name="showcaseMedia">

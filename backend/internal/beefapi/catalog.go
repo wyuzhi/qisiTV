@@ -5,10 +5,15 @@ import (
 	"strings"
 	"unicode"
 
+	"qisitv/backend/internal/providerpreset"
 	"qisitv/backend/internal/workspace"
 )
 
-func applyCatalog(store *workspace.ProviderConfig, models []CatalogModel, previousAccountID, nextAccountID string) error {
+// The managed-model allowlist retains this provider model ID; catalog connection
+// does not select it as the user's assistant.
+const DefaultManagedAssistantModel = "gpt-6-astra"
+
+func applyCatalog(store *workspace.ProviderConfig, models []CatalogModel, previousAccountID, nextAccountID string, authorizationID string) error {
 	if store == nil {
 		return nil
 	}
@@ -28,6 +33,12 @@ func applyCatalog(store *workspace.ProviderConfig, models []CatalogModel, previo
 	for _, model := range models {
 		nextModels = append(nextModels, model.ID)
 		profile := map[string]any{"model": model.ID}
+		// A refreshed catalog owns this quote. Clear a stale quote when the
+		// current account/model no longer supplies one.
+		profile["videoPricing"] = nil
+		if pricing, ok := NormalizeCatalogVideoPricing(model.VideoPricing); ok {
+			profile["videoPricing"] = pricing
+		}
 		if model.DisplayName != "" {
 			profile["displayName"] = model.DisplayName
 		}
@@ -42,6 +53,12 @@ func applyCatalog(store *workspace.ProviderConfig, models []CatalogModel, previo
 			if protocol != "" {
 				profile["protocol"] = protocol
 			}
+			if capability == "video" {
+				if video, ok := NormalizeCatalogVideoCapability(model.VideoCapabilities); ok {
+					profile["capabilityConfig"] = map[string]any{"version": 1, "video": video}
+					profile["videoCapabilitiesVersion"] = model.VideoCapabilitiesVersion
+				}
+			}
 		}
 		nextProfiles = append(nextProfiles, profile)
 	}
@@ -54,8 +71,23 @@ func applyCatalog(store *workspace.ProviderConfig, models []CatalogModel, previo
 			channel["models"] = nextModels
 			channel["modelProfiles"] = nextProfiles
 		} else {
-			channel["models"] = mergeModelIDs(channel["models"], nextModels)
-			channel["modelProfiles"] = mergeProfiles(channel["modelProfiles"], nextProfiles)
+			// Availability belongs to the current account's catalog. Preserve
+			// overrides only for models that are still present in that catalog.
+			channel["models"], channel["modelProfiles"] = withoutPortraitCatalogEntries(channel["models"], channel["modelProfiles"])
+			channel["models"] = nextModels
+			available := make(map[string]bool, len(models))
+			for _, model := range models {
+				available[model.ID] = true
+			}
+			profiles := make([]any, 0, len(models))
+			for _, raw := range mergeProfiles(channel["modelProfiles"], nextProfiles) {
+				profile, _ := raw.(map[string]any)
+				id, _ := profile["model"].(string)
+				if available[id] {
+					profiles = append(profiles, raw)
+				}
+			}
+			channel["modelProfiles"] = profiles
 		}
 		channel["apiKey"] = ""
 		channel["credentialRef"] = CredentialRef
@@ -74,7 +106,7 @@ func applyCatalog(store *workspace.ProviderConfig, models []CatalogModel, previo
 	if err != nil {
 		return err
 	}
-	return store.SaveLocalModelConfig(body)
+	return store.SaveCatalogPreservingAssistant(body, authorizationID)
 }
 
 func clearBeefAPIModels(store *workspace.ProviderConfig) error {
@@ -120,6 +152,12 @@ func catalogProtocol(model CatalogModel) string {
 }
 
 func catalogCapabilityAndProtocol(model CatalogModel) (capability, protocol string) {
+	if contract, ok := providerpreset.BeefAPIImageContract(model.ID); ok {
+		return "image", contract.Protocol
+	}
+	if contract, ok := providerpreset.BeefAPIVideoContract(model.ID); ok {
+		return "video", contract.Protocol
+	}
 	id := strings.ToLower(strings.TrimSpace(model.ID))
 	modelType := strings.ToLower(strings.TrimSpace(model.ModelType))
 	endpoints := catalogEndpoints(model)
@@ -141,7 +179,7 @@ func catalogCapabilityAndProtocol(model CatalogModel) (capability, protocol stri
 		{capability: "audio", protocol: "openai-audio", endpoints: []string{"audio.speech", "audio-speech"}},
 		{capability: "text", protocol: "openai-response", endpoints: []string{"openai-response", "openai-response-compact", "responses"}},
 		{capability: "text", protocol: "claude-api", endpoints: []string{"anthropic", "messages"}},
-		{capability: "text", protocol: "google-gemini-generate-content", endpoints: []string{"gemini"}},
+		{capability: "text", protocol: "gemini-generate-content", endpoints: []string{"gemini"}},
 	} {
 		if !containsAnyString(endpoints, item.endpoints) {
 			continue
@@ -396,13 +434,13 @@ func PreserveManagedChannel(incoming, existing map[string]any, managed bool) {
 			channel["credentialRef"] = CredentialRef
 		} else if existingBeef != nil {
 			incomingKey, _ := channel["apiKey"].(string)
-			if incomingKey == "" || workspace.IsRedactedSecret(incomingKey) {
+			if incomingKey == "" || incomingKey == workspace.RedactedSecret {
 				if previous, ok := existingBeef["apiKey"]; ok {
 					channel["apiKey"] = previous
 				}
 			}
 			incomingSecret, _ := channel["secretKey"].(string)
-			if incomingSecret == "" || workspace.IsRedactedSecret(incomingSecret) {
+			if incomingSecret == "" || incomingSecret == workspace.RedactedSecret {
 				if previous, ok := existingBeef["secretKey"]; ok {
 					channel["secretKey"] = previous
 				}
@@ -435,4 +473,26 @@ func findChannel(channels []any, id string) map[string]any {
 		}
 	}
 	return nil
+}
+
+func withoutPortraitCatalogEntries(models, profiles any) ([]any, []any) {
+	isPortrait := func(id string) bool { return id == "seedance-2.0-portrait" || id == "seedance-2.5-portrait" }
+	keptModels := make([]any, 0)
+	for _, raw := range mergeModelIDs(models, nil) {
+		id, _ := raw.(string)
+		if !isPortrait(id) {
+			keptModels = append(keptModels, raw)
+		}
+	}
+	keptProfiles := make([]any, 0)
+	if items, ok := profiles.([]any); ok {
+		for _, raw := range items {
+			profile, _ := raw.(map[string]any)
+			id, _ := profile["model"].(string)
+			if !isPortrait(id) {
+				keptProfiles = append(keptProfiles, raw)
+			}
+		}
+	}
+	return keptModels, keptProfiles
 }

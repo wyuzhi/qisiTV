@@ -1,27 +1,42 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { useResolvedCanvasResourceReferences } from "@/components/canvas/use-resolved-canvas-resource-references";
+import { acquireCanvasVideoPreview } from "@/services/canvas-video-preview";
+import { setActiveUserScope } from "@/lib/user-scope";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { CanvasResourceMentionTextarea } from "@/components/canvas/canvas-resource-mention-textarea";
 
-function reference(id: string, url = ""): CanvasResourceReference {
-    return { id, nodeId: id, kind: "image", label: id, title: id, storageKey: `image:${id}`, previewUrl: url, active: true };
-}
-
-function Previews({ projectId, changed }: { projectId: string; changed: boolean }) {
-    const references = useResolvedCanvasResourceReferences([reference("slow"), reference("ready", changed ? "new" : "old"), reference("retry")], { projectId });
-    return <div>{references.map((item) => <output key={item.id} data-preview={item.id}>{item.previewUrl || "pending"}</output>)}</div>;
-}
+const harness = window as any;
+harness.captures = [];
+harness.pending = new Map();
+harness.revoked = [];
+const revoke = URL.revokeObjectURL.bind(URL);
+URL.revokeObjectURL = (url) => { harness.revoked.push(url); revoke(url); };
+harness.switchScope = setActiveUserScope;
+const held: ReturnType<typeof acquireCanvasVideoPreview>[] = [];
+harness.holdVideo = async (id: string) => {
+    const lease = acquireCanvasVideoPreview({ metadata: { content: id } });
+    held.push(lease);
+    await lease.promise;
+};
+harness.releaseHeld = () => held.splice(0).forEach(lease => lease.release());
+harness.probePool = async () => {
+    const lease = acquireCanvasVideoPreview({ metadata: { content: "probe" } });
+    const result = await lease.promise;
+    lease.release();
+    return Boolean(result?.content);
+};
 
 function Harness() {
-    const [projectId, setProjectId] = useState("a");
-    const [changed, setChanged] = useState(false);
-    const [mounted, setMounted] = useState(true);
-    return <main>
-        <button onClick={() => setProjectId((current) => current === "a" ? "b" : "a")}>Switch project</button>
-        <button onClick={() => setChanged(true)}>Replace preview</button>
-        <button onClick={() => setMounted((value) => !value)}>Toggle previews</button>
-        {mounted ? <Previews projectId={projectId} changed={changed} /> : null}
-    </main>;
+    const [references, setReferences] = useState<CanvasResourceReference[]>([]);
+    const [showMenu, setShowMenu] = useState(false);
+    const [value, setValue] = useState("");
+    const resolved = useResolvedCanvasResourceReferences(references);
+    harness.setReferences = setReferences;
+    harness.showMenu = () => setShowMenu(true);
+    return <><pre id="result">{JSON.stringify(resolved.map(({ id, previewUrl }) => ({ id, previewUrl })))}</pre>
+        <div id="resolved-previews">{resolved.map(reference => reference.previewUrl && <img key={reference.id} data-reference-id={reference.id} src={reference.previewUrl} />)}</div>
+        {showMenu && <CanvasResourceMentionTextarea value={value} onChange={setValue} references={references} onSelectReference={(reference) => reference} aria-label="引用编辑" />}</>;
 }
 
 createRoot(document.getElementById("root")!).render(<Harness />);

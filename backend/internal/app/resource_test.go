@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"testing/iotest"
 	"time"
@@ -45,7 +46,7 @@ func TestVideoReferenceMetadataPreflightUsesOwnedResource(t *testing.T) {
 		t.Fatal(err)
 	}
 	input := canvasGenerationInput{Prompt: "test", Config: providerConfig{InterfaceType: "newapi-channel-2", Model: "seedance-2.5", VideoSeconds: "5"}, ReferenceAudios: []providerMedia{{StorageKey: "resource:voice-preflight"}}}
-	if err := svc.hydrateVideoReferenceMetadata("user-1", &input); err != nil {
+	if err := svc.hydrateVideoReferenceMetadata(context.Background(), "user-1", &input); err != nil {
 		t.Fatal(err)
 	}
 	if input.ReferenceAudios[0].DurationMs != 2500 || input.ReferenceAudios[0].Bytes != 1200 {
@@ -54,7 +55,7 @@ func TestVideoReferenceMetadataPreflightUsesOwnedResource(t *testing.T) {
 	if err := svc.validateResolvedVideoCapability(&input); err != nil {
 		t.Fatalf("valid stored voice rejected: %v", err)
 	}
-	if err := svc.hydrateVideoReferenceMetadata("another-user", &input); err == nil {
+	if err := svc.hydrateVideoReferenceMetadata(context.Background(), "another-user", &input); err == nil {
 		t.Fatal("foreign resource accepted")
 	}
 }
@@ -67,7 +68,7 @@ func TestLocalHydrateRequiredURLRejectsLoopbackResourceURL(t *testing.T) {
 	if err := svc.repo.CreateResource(&resource); err != nil {
 		t.Fatal(err)
 	}
-	err := svc.hydrateProviderMedia("user-1", &providerMedia{StorageKey: "resource:resource-local-url-only"}, providerMediaHydrationPolicy{requireURL: true})
+	err := svc.hydrateProviderMedia("user-1", &providerMedia{StorageKey: "resource:resource-local-url-only"}, providerMediaHydrationPolicy{RequireURL: true})
 	if err == nil || !strings.Contains(err.Error(), "支持内嵌素材") || strings.Contains(err.Error(), "127.0.0.1") {
 		t.Fatalf("local URL-only media error = %v, want a clear local capability error", err)
 	}
@@ -84,7 +85,7 @@ func TestLocalHydrateRejectsLegacyRemoteResourceMetadata(t *testing.T) {
 	if err := svc.repo.CreateResource(&resource); err != nil {
 		t.Fatal(err)
 	}
-	err := svc.hydrateProviderMedia("user-1", &providerMedia{StorageKey: "resource:resource-legacy-oss"}, providerMediaHydrationPolicy{preferURL: true})
+	err := svc.hydrateProviderMedia("user-1", &providerMedia{StorageKey: "resource:resource-legacy-oss"}, providerMediaHydrationPolicy{PreferURL: true})
 	if err == nil || !strings.Contains(err.Error(), "本地工作区") || strings.Contains(err.Error(), "对象存储") {
 		t.Fatalf("legacy remote resource error = %v, want local-only guidance", err)
 	}
@@ -113,14 +114,17 @@ func TestBeefAPIPrefersHTTPSResourceURLWhenPublicBaseConfigured(t *testing.T) {
 		Config: providerConfig{
 			BaseURL: "https://enterprise.beefapi.com", InterfaceType: string(model.ChannelInterfaceNewAPIVideo), Model: "seedance-2.5",
 		},
-		ReferenceAudios: []providerMedia{{ID: "audio-1", StorageKey: "resource:beefapi-https-audio", MimeType: "audio/mpeg", DurationMs: 3000}},
+		ReferenceAudios: []providerMedia{{ID: "audio-1", StorageKey: "resource:beefapi-https-audio", URL: "https://example.com/stale-reference.mp3", DataURL: "data:audio/mpeg;base64,c3RhbGU=", MimeType: "audio/mpeg", DurationMs: 3000}},
 		Metadata:        map[string]interface{}{"videoEditOperation": "audio_to_video"},
 	}
 	if err := svc.hydrateGenerationMedia("user-1", &input, providerMediaHydrationPolicyFor(context.Background(), input)); err != nil {
 		t.Fatalf("hydrateGenerationMedia() error = %v", err)
 	}
-	if !strings.HasPrefix(input.ReferenceAudios[0].URL, "https://example.com/") || strings.HasPrefix(input.ReferenceAudios[0].DataURL, "data:") {
-		t.Fatalf("audio = %#v, want HTTPS public URL", input.ReferenceAudios[0])
+	if input.ReferenceAudios[0].StorageKey != "resource:beefapi-https-audio" || input.ReferenceAudios[0].URL != "" || strings.HasPrefix(input.ReferenceAudios[0].DataURL, "data:") {
+		t.Fatalf("audio = %#v, want owned local key until preupload", input.ReferenceAudios[0])
+	}
+	if input.ReferenceAudios[0].MimeType != "audio/mpeg" || input.ReferenceAudios[0].Bytes != 9 || input.ReferenceAudios[0].DurationMs != 3000 {
+		t.Fatalf("keepLocal metadata lost: %#v", input.ReferenceAudios[0])
 	}
 }
 
@@ -141,7 +145,7 @@ func TestBeefAPILocalAudioWithoutPublicHTTPSUsesDataURL(t *testing.T) {
 		t.Fatal(err)
 	}
 	media := &providerMedia{StorageKey: "resource:beefapi-local-audio", MimeType: "audio/mpeg"}
-	if err := svc.hydrateProviderMedia("user-1", media, providerMediaHydrationPolicy{preferHTTPS: true}); err != nil {
+	if err := svc.hydrateProviderMedia("user-1", media, providerMediaHydrationPolicy{PreferHTTPS: true}); err != nil {
 		t.Fatalf("local audio hydrate error = %v", err)
 	}
 	if !strings.HasPrefix(media.DataURL, "data:audio/mpeg;base64,") {
@@ -179,7 +183,7 @@ func TestMissingImageMetadataHydratesHeaderAndRejectsTooSmallBeforeProvider(t *t
 			{StorageKey: "resource:large-image", MimeType: "image/png"},
 		},
 	}
-	if err := svc.hydrateVideoReferenceMetadata("user-1", &input); err != nil {
+	if err := svc.hydrateVideoReferenceMetadata(context.Background(), "user-1", &input); err != nil {
 		t.Fatal(err)
 	}
 	if input.ReferenceImages[0].Width != 384 || input.ReferenceImages[0].Height != 216 {
@@ -231,13 +235,24 @@ func TestBeefAPILocalVideoReferenceHydratesInlineForFlatRequest(t *testing.T) {
 	if err := svc.hydrateGenerationMedia("user-1", &input, providerMediaHydrationPolicyFor(context.Background(), input)); err != nil {
 		t.Fatalf("hydrateGenerationMedia() error = %v", err)
 	}
+	if input.ReferenceImages[0].DataURL != "" || input.ReferenceImages[0].StorageKey != "resource:beefapi-local-reference" {
+		t.Fatalf("keepLocal inlined local Seedance media: %#v", input.ReferenceImages[0])
+	}
+	if input.ReferenceImages[0].MimeType != "image/png" {
+		t.Fatalf("resource mime lost: %#v", input.ReferenceImages[0])
+	}
+	input.ReferenceImages[0].URL = "https://example.com/reference.png"
 	body, err := beefAPIVideoRequestBody(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	image, _ := body["image"].(map[string]interface{})
-	if !strings.HasPrefix(fmt.Sprint(image["url"]), "data:image/png;base64,") {
-		t.Fatalf("image = %#v, want inline image data URL", body["image"])
+	content := body["content"].([]map[string]interface{})
+	image, _ := content[0]["image_url"].(map[string]interface{})
+	if fmt.Sprint(image["url"]) != "https://example.com/reference.png" {
+		t.Fatalf("image = %#v, want URL-only reference", image)
+	}
+	if content[0]["role"] != "first_frame" || body["metadata"].(map[string]interface{})["ratio"] != "adaptive" {
+		t.Fatal("hydration lost frame constraints")
 	}
 }
 
@@ -247,10 +262,50 @@ func newResourceTestService(t *testing.T) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.SystemSetting{}, &model.UserDailyUploadUsage{}, &model.Resource{}); err != nil {
+	if err := db.AutoMigrate(&model.SystemSetting{}, &model.UserDailyUploadUsage{}, &model.UserUploadReservation{}, &model.Resource{}); err != nil {
 		t.Fatal(err)
 	}
-	return &Service{repo: repository.New(db), dataDir: t.TempDir()}
+	svc := &Service{repo: repository.New(db), dataDir: t.TempDir()}
+	_ = svc.resourceDomain()
+	return svc
+}
+
+func TestResourceDomainMemoizesConcurrentFirstCallers(t *testing.T) {
+	svc := newResourceTestService(t)
+	const workers = 32
+	got := make([]any, workers)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func(index int) {
+			defer wg.Done()
+			got[index] = svc.resourceDomain()
+		}(i)
+	}
+	wg.Wait()
+	first := svc.resourceDomain()
+	if first == nil {
+		t.Fatal("resourceDomain returned nil")
+	}
+	for index, value := range got {
+		if value != first {
+			t.Fatalf("caller %d got a different asset.Service", index)
+		}
+	}
+}
+
+func TestNewServiceResourceDomainKeepsWiredPointer(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := newService(repository.New(db), t.TempDir(), serviceOptions{mode: serviceModeLocal})
+	if svc.assets == nil {
+		t.Fatal("newService did not wire assets")
+	}
+	if svc.resourceDomain() != svc.assets {
+		t.Fatal("resourceDomain diverged from constructor pointer")
+	}
 }
 
 func TestStoreResourceReusesReadyUploadIdentity(t *testing.T) {
@@ -358,11 +413,13 @@ func TestLegacyMediaMigrationSkipsInvalidDataURL(t *testing.T) {
 	}
 }
 
-func TestLocalProviderMediaUsesLocalStorageGuidance(t *testing.T) {
+func TestLocalProviderMediaUsesReachableReferenceGuidance(t *testing.T) {
 	svc := &Service{mode: serviceModeLocal, localResourceStorage: true}
-	err := svc.hydrateProviderMedia("user-1", &providerMedia{DataURL: "data:video/mp4;base64,AAAA"}, providerMediaHydrationPolicy{requireURL: true})
-	if err == nil || !strings.Contains(err.Error(), "本地资源目录") || strings.Contains(err.Error(), "对象存储") {
-		t.Fatalf("local inline reference error = %v", err)
+	for _, media := range []providerMedia{{DataURL: "data:video/mp4;base64,AAAA"}, {URL: "data:video/mp4;base64,AAAA"}} {
+		err := svc.hydrateProviderMedia("user-1", &media, providerMediaHydrationPolicy{RequireURL: true})
+		if err == nil || !strings.Contains(err.Error(), "HTTPS") || strings.Contains(err.Error(), "本地资源目录") {
+			t.Fatalf("local inline reference error = %v", err)
+		}
 	}
 }
 

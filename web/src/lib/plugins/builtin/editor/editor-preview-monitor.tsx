@@ -1,6 +1,5 @@
 // 浏览器内近似预览：真实媒体帧（storageKey → resolveMediaUrl）+ 播放头 + 时间码。
-// 预览与 buildTimelineRenderPlan 共享“片段→媒体”解析规则，但浏览器预览只保证时序一致；
-// 最终画面、编码和滤镜结果以后端导出任务为准。
+// 预览只保证时序一致；最终画面、编码和滤镜结果以语义计划导出为准。
 //
 // 播放模型：时间线 transport（store.transportMs）与监视器共享。
 // - 本地 playbackRef 以 rAF 逐帧推进（60fps 时间码），节流回写 store（~80ms），
@@ -33,7 +32,8 @@ import {
 import { useEditorStoreContext } from "@/components/editor/editor-context";
 import { formatTimelineTime } from "@/lib/timeline/timeline-view";
 import { resolveMediaUrl } from "@/services/file-storage";
-import { playbackVariantUrl, refreshResource, resourceFileUrl, resourceIdFromStorageKey } from "@/services/api/resources";
+import { useResourceVideoPlayback } from "@/hooks/use-resource-video-playback";
+import { resourceFileUrl, resourceIdFromStorageKey } from "@/services/api/resources";
 import type { TimelineClip, TimelineProject } from "@/types/timeline";
 
 // 本地播放时钟 → store.transportMs 的回写节流（毫秒）。太密会让时间线面板每帧重渲染。
@@ -59,7 +59,7 @@ function useClipMediaUrl(clip: TimelineClip | null): string | null {
     useEffect(() => {
         let cancelled = false;
         setUrl(null);
-        if (!clip) return;
+        if (!clip || clip.kind === "video") return;
         const direct = clip.directMedia;
         const source = direct?.dataUrl ?? direct?.url ?? direct?.storageKey;
         if (direct?.storageKey) {
@@ -75,7 +75,7 @@ function useClipMediaUrl(clip: TimelineClip | null): string | null {
             cancelled = true;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [clip?.id, clip?.nodeId, clip?.directMedia?.storageKey, clip?.directMedia?.url, clip?.directMedia?.dataUrl]);
+    }, [clip?.id, clip?.kind, clip?.nodeId, clip?.directMedia?.storageKey, clip?.directMedia?.url, clip?.directMedia?.dataUrl]);
     return url;
 }
 
@@ -130,95 +130,18 @@ export function EditorPreviewMonitor() {
     const activeMediaUrl = useClipMediaUrl(activeClip);
     const activeTrack = project?.tracks.find((t) => t.id === activeClip?.trackId) ?? null;
 
-    // 播放回退：H.264 原件直接播放；H.265/HEVC 原件多数浏览器无法解码（黑屏），
-    // <video> onError 后切换后端 playback 转码副本（variant=playback），副本就绪前轮询。
-    const storageKey = activeClip?.directMedia?.storageKey;
-    const mediaResourceId = storageKey ? resourceIdFromStorageKey(storageKey) : null;
-    const [mediaTier, setMediaTier] = useState<"primary" | "variant">("primary");
-    const [variantReadyTick, setVariantReadyTick] = useState(0);
-    const [mediaErrorHint, setMediaErrorHint] = useState<string | null>(null);
-    // 终态护栏：none/failed/超时/不可达后禁止再回退 primary 重试或覆盖终态文案。
-    // 否则原件不可解码且后端无副本可生成时会 primary→variant→primary 无限循环。
-    const mediaTerminalRef = useRef(false);
-
-    useEffect(() => {
-        setMediaTier("primary");
-        setVariantReadyTick(0);
-        setMediaErrorHint(null);
-        mediaTerminalRef.current = false;
-    }, [activeClip?.id, storageKey, activeMediaUrl]);
-
-    useEffect(() => {
-        if (mediaTier !== "variant" || !mediaResourceId) return;
-        let cancelled = false;
-        let failures = 0;
-        let polls = 0;
-        const timer = window.setInterval(async () => {
-            try {
-                const res = await refreshResource(mediaResourceId);
-                if (cancelled) return;
-                if (res.playbackStatus === "ready") {
-                    setMediaErrorHint(null);
-                    setVariantReadyTick((n) => n + 1);
-                    window.clearInterval(timer);
-                } else if (res.playbackStatus === "failed") {
-                    mediaTerminalRef.current = true;
-                    setMediaErrorHint("兼容副本生成失败，可下载原片后用本地播放器观看。");
-                    window.clearInterval(timer);
-                } else if (res.playbackStatus === "none") {
-                    // 后端判定无播放副本可生成（远端存储/无 ffmpeg/编码不可处理）。
-                    // 原件此刻必然已 onError 失败才进入 variant 轮询，回退 primary 只会
-                    // 再次失败并切回 variant，形成无限循环 —— 直接进入终态提示并停轮询。
-                    mediaTerminalRef.current = true;
-                    setMediaErrorHint("视频编码此浏览器暂不支持，且无可生成的兼容副本；可下载原片转换格式后重新导入。");
-                    window.clearInterval(timer);
-                } else if ((polls += 1) >= 120) {
-                    // processing 上限保护（约 5 分钟）：转码异常卡死时不再无限轮询。
-                    mediaTerminalRef.current = true;
-                    setMediaErrorHint("兼容版本生成超时，可下载原片后用本地播放器观看。");
-                    window.clearInterval(timer);
-                } else {
-                    setMediaErrorHint("视频编码此浏览器暂不支持，正在生成兼容版本（H.264）…");
-                }
-                failures = 0;
-            } catch {
-                if (cancelled) return;
-                failures += 1;
-                if (failures >= 4) {
-                    mediaTerminalRef.current = true;
-                    window.clearInterval(timer);
-                    setMediaErrorHint("兼容版本生成服务暂不可达，请稍后重新打开预览重试。");
-                }
-            }
-        }, 2500);
-        return () => {
-            cancelled = true;
-            window.clearInterval(timer);
-        };
-    }, [mediaTier, mediaResourceId]);
-
-    const handleMediaError = () => {
-        // 已进入终态（副本生成失败/无副本可生成/超时/服务不可达）：保持终态文案，
-        // 不再改写为"正在生成"或回退重试 —— 副本 URL 在 failed/none 时会回退原件，
-        // 反复 onError 会把失败提示覆盖成误导性的"正在生成兼容版本"。
-        if (mediaTerminalRef.current) return;
-        // 图片/无资源：无播放副本可切，仅提示。
-        if (activeClip?.kind !== "video" || !mediaResourceId) {
-            return;
-        }
-        if (mediaTier === "primary") {
-            // 原件解码失败（大概率 H.265）：切后端 playback 副本。
-            setMediaTier("variant");
-            setMediaErrorHint("视频编码此浏览器暂不支持，正在生成兼容版本（H.264）…");
-        } else {
-            // 副本尚未就绪时后端回退原件仍会失败；轮询 effect 会在就绪后重载。
-            setMediaErrorHint("视频编码此浏览器暂不支持，正在生成兼容版本（H.264）…");
-        }
-    };
-
+    const storageKey = activeClip?.directMedia?.storageKey || "";
+    const mediaResourceId = resourceIdFromStorageKey(storageKey);
     const isVideoClip = activeClip?.kind === "video";
-    const videoSrc = isVideoClip && mediaResourceId && mediaTier === "variant" ? playbackVariantUrl(mediaResourceId) : isVideoClip ? activeMediaUrl : null;
+    const videoPlayback = useResourceVideoPlayback(storageKey,
+        activeClip?.directMedia?.dataUrl || activeClip?.directMedia?.url || "", isVideoClip);
+    const handleMediaError = () => {
+        if (isVideoClip && !videoPlayback.requestCompatible()) videoPlayback.fail();
+    };
+    const videoSrc = isVideoClip ? videoPlayback.url : null;
     const imageSrc = activeClip?.kind === "image" ? activeMediaUrl : null;
+    const mediaErrorHint = videoPlayback.error || (videoPlayback.loading ? "正在准备视频预览…" : null);
+
     const videoMuted = activeTrack?.muted === true;
 
     const syncPlayback = useCallback(
@@ -336,7 +259,7 @@ export function EditorPreviewMonitor() {
         if (v.readyState < HTMLMediaElement.HAVE_METADATA) return;
         applyVideoPosition(v);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [playbackMs, mediaTier, variantReadyTick, activeClip?.id]);
+    }, [playbackMs, videoSrc, activeClip?.id]);
 
     // 播放/暂停：真实驱动浏览器管线（画面 + 声音）。
     useEffect(() => {
@@ -351,14 +274,14 @@ export function EditorPreviewMonitor() {
             v.pause();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [playing, mediaTier, variantReadyTick, activeClip?.id, videoSrc]);
+    }, [playing, activeClip?.id, videoSrc]);
 
     // 变速：同步视频播放速率，保持音画与时钟一致。
     useEffect(() => {
         const v = videoRef.current;
         if (v && isVideoClip) v.playbackRate = speed;
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [speed, mediaTier, variantReadyTick, activeClip?.id]);
+    }, [speed, videoSrc, activeClip?.id]);
 
     const handleLoadedMetadata = () => {
         const v = videoRef.current;
@@ -431,21 +354,22 @@ export function EditorPreviewMonitor() {
                         title={mediaErrorHint}
                         className="flex min-w-0 max-w-[42%] items-center gap-1.5 rounded-md bg-[var(--director-danger)]/10 px-2 py-1 text-[11px] text-[var(--director-danger)]"
                     >
-                        {mediaErrorHint.includes("正在生成") ? (
+                        {videoPlayback.loading ? (
                             <LoaderCircle className="size-3 shrink-0 animate-spin" />
                         ) : (
                             <AlertTriangle className="size-3 shrink-0" />
                         )}
                         <span className="truncate">{mediaErrorHint}</span>
+                        {videoPlayback.error && <button type="button" onClick={videoPlayback.retry}>重新加载</button>}
                         {mediaResourceId && (
-                            <a
-                                href={resourceFileUrl(mediaResourceId)}
-                                download
-                                title="下载原片，用本地播放器观看"
+                            <AuthenticatedDownload
+                                url={resourceFileUrl(mediaResourceId)}
+                                name="原始视频"
+                                label="下载原片，用本地播放器观看"
                                 className="grid size-4 shrink-0 place-items-center rounded hover:bg-[var(--director-danger)]/15"
                             >
                                 <Download className="size-3" />
-                            </a>
+                            </AuthenticatedDownload>
                         )}
                     </span>
                 )}
@@ -467,7 +391,7 @@ export function EditorPreviewMonitor() {
                     </div>
                 ) : isVideoClip && videoSrc ? (
                     <video
-                        key={`v:${activeClip!.id}:${mediaTier}:${variantReadyTick}`}
+                        key={`v:${activeClip!.id}:${videoSrc}`}
                         ref={videoRef}
                         src={videoSrc}
                         muted={videoMuted}
@@ -479,7 +403,7 @@ export function EditorPreviewMonitor() {
                         onEnded={handleVideoEnded}
                     />
                 ) : imageSrc ? (
-                    <img
+                    <AuthenticatedImage
                         key={`i:${activeClip!.id}`}
                         src={imageSrc}
                         alt=""
@@ -601,3 +525,4 @@ export function EditorPreviewMonitor() {
         </div>
     );
 }
+import { AuthenticatedDownload, AuthenticatedImage } from "@/components/assets/authenticated-media";

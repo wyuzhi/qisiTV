@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { appChangelogZh } from "../src/components/layout/app-changelog.zh";
 
 const root = resolve(import.meta.dir, "..");
 
@@ -8,7 +9,13 @@ function read(path: string) {
     return readFileSync(resolve(root, path), "utf8");
 }
 
-describe("desktop update UI contract", () => {
+describe("qisiTV website and desktop update UI contract", () => {
+    test("installed release has published notes in both the release and in-app changelogs", () => {
+        const version = read("../VERSION").trim();
+        expect(read("../CHANGELOG.md")).toContain(`## ${version}\n`);
+        expect(appChangelogZh.find((entry) => entry.version === version)?.changes.length).toBeGreaterThan(0);
+        expect(new Set(appChangelogZh.map((entry) => entry.version)).size).toBe(appChangelogZh.length);
+    });
     test("sidebar version area is desktop-gated and keeps changelog access", () => {
         const sidebar = read("src/components/layout/workspace-sidebar-nav.tsx");
         const update = read("src/components/layout/workspace-sidebar-update.tsx");
@@ -22,18 +29,42 @@ describe("desktop update UI contract", () => {
         expect(account).toContain("showVersion");
         expect(changelog).toContain("查看更新日志");
         expect(shell).toContain("useDesktopUpdateBootstrap");
+        expect(update).toContain("AppChangelogButton");
+        expect(update).toContain("showVersion");
+        expect(update).toContain("updater.downloadAndInstall()");
         expect(update).toContain("AppModal");
-        expect(update).toContain("保存并安装");
-        expect(update).toContain("安装后应用会关闭再打开。");
-        expect(update).toContain("请先把画布保存到本机，避免未完成的内容丢失。");
+        expect(update).toContain("仍然更新");
+        expect(update).toContain("尚未保存的修改可能丢失");
+        expect(update).toContain("updater.check()");
         expect(update).toContain('aria-live="polite"');
+        expect(update).toContain("desktopUpdateDetailLabel");
+        expect(update).toContain("hasResumableDesktopUpdate");
+        expect(update).toContain('role="progressbar"');
         expect(update).toContain("useReducedMotion");
         expect(update).not.toContain("Modal.confirm");
         expect(update).not.toContain("所有修改已保存");
+        expect(update).toContain("href={engineInstallerUrl()}");
         expect(update).not.toContain("github.com");
+        expect(update).toContain("if (isEngineWebsite()) return");
+        expect(update).toContain("下载本机引擎安装包");
+        expect(update).not.toContain("glanderness/BeefTV");
         expect(update).not.toContain("desktop-update.json");
         expect(update).not.toContain("Wails");
         expect(update).not.toContain("BeefAPI");
+    });
+
+    test("headless engine never configures the upstream desktop updater", () => {
+        const config = read("../backend/internal/desktopupdate/config.go");
+        const engine = read("../backend/cmd/qisitv-engine/main.go");
+        const packaging = read("../scripts/package-engine-macos.py");
+        expect(config).toMatch(/\bFeedURL\s*=\s*""/);
+        expect(config).toMatch(/\bPublicKey\s*=\s*""/);
+        for (const source of [engine, packaging]) {
+            expect(source).not.toContain("desktopupdate.New");
+            expect(source).not.toContain("desktopupdate.FeedURL=");
+            expect(source).not.toContain("desktopupdate.PublicKey=");
+            expect(source).not.toContain("glanderness/BeefTV/releases");
+        }
     });
 
     test("frontend update client never fetches a release origin", () => {
@@ -49,6 +80,8 @@ describe("desktop update UI contract", () => {
         expect(service).toContain("CheckForUpdate");
         expect(service).toContain("DownloadUpdate");
         expect(service).toContain("InstallUpdate");
+        expect(hook).toContain("DESKTOP_UPDATE_CHECK_INTERVAL_MS");
+        expect(hook).toContain("controller.check()");
         expect(service).toContain("flushCanvasStorePersistence");
         expect(runtime).toContain("UpdateStatus");
         expect(runtime).toContain("currentVersion");

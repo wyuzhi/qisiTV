@@ -28,7 +28,32 @@ describe("CanvasVideoInlineTrim", () => {
         expect(html).toContain('aria-label="调整片段终点"');
         expect(html).toContain('aria-label="取消剪辑"');
         expect(html).toContain('aria-label="确认剪辑"');
+        expect(html).toContain('aria-label="播放片段预览"');
+        expect(html).not.toContain('aria-label="静音预览"');
+        expect(html).not.toContain('aria-label="关闭循环预览"');
         expect(html).toContain("12.00 s");
+    });
+
+    test("never mounts the video source as a thumbnail while frames are loading", () => {
+        const html = renderToStaticMarkup(
+            <CanvasVideoInlineTrim node={videoNode} busy={false} onCancel={() => {}} onConfirm={() => {}} />,
+        );
+        const filmstrip = html.split('class="canvas-video-trim-frames"')[1]?.split("</div>")[0] || "";
+
+        expect(filmstrip).not.toContain("<img");
+        expect(filmstrip).not.toContain("blob:video");
+        expect(filmstrip.match(/<span/g)).toHaveLength(14);
+    });
+
+    test("anchors selected duration to the timeline instead of the toolbar edge", () => {
+        const html = renderToStaticMarkup(
+            <CanvasVideoInlineTrim node={videoNode} busy={false} onCancel={() => {}} onConfirm={() => {}} />,
+        );
+        const timelineGroup = html.split('class="canvas-video-trim-track"')[1]?.split('aria-label="确认剪辑"')[0] || "";
+
+        expect(timelineGroup).toContain('aria-label="所选片段时长"');
+        expect(timelineGroup).toContain("12.00 s");
+        expect(html.indexOf('aria-label="所选片段时长"')).toBeLessThan(html.indexOf('aria-label="确认剪辑"'));
     });
 
     test("renders inside the target node panel and sizes from the rendered video width", () => {

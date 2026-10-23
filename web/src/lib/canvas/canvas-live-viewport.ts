@@ -1,4 +1,4 @@
-import type { SelectionBox, ViewportTransform } from "@/types/canvas";
+import type { CanvasNodeData, SelectionBox, ViewportTransform } from "@/types/canvas";
 
 export const CANVAS_VIEWPORT_PREVIEW_EVENT = "canvas:viewport-preview";
 export const CANVAS_GRAPHICS_VIEWPORT_PREVIEW_EVENT = "canvas:graphics-viewport-preview";
@@ -9,11 +9,23 @@ export type CanvasNodeDragPreview = {
     x: number;
     y: number;
     nodeIds: ReadonlySet<string>;
+    compact?: { nodeId: string; x: number; y: number; scale: number };
 };
+
+/** The geometry actually displayed by the transient DOM drag transform. */
+export function canvasNodeDragGeometry(node: CanvasNodeData, preview: CanvasNodeDragPreview | null): CanvasNodeData {
+    if (!preview?.nodeIds.has(node.id)) return node;
+    if (preview.compact?.nodeId === node.id) {
+        const { x, y, scale } = preview.compact;
+        return { ...node, position: { x, y }, width: node.width * scale, height: node.height * scale };
+    }
+    return { ...node, position: { x: node.position.x + preview.x, y: node.position.y + preview.y } };
+}
 
 type NodeDragPreviewDomState = {
     elementsById: Map<string, HTMLElement>;
     previousIds: Set<string>;
+    compactTransform?: { element: HTMLElement; transform: string; origin: string };
     selectionBounds: HTMLElement | null;
 };
 
@@ -92,10 +104,18 @@ export function applyCanvasNodeDragPreview(container: HTMLDivElement | null, pre
         nodeDragPreviewDomStates.set(container, state);
     }
 
+    if (state.compactTransform) {
+        const { element, transform, origin } = state.compactTransform;
+        element.style.transform = transform;
+        element.style.transformOrigin = origin;
+        delete element.dataset.canvasCompactDrag;
+        state.compactTransform = undefined;
+    }
     for (const nodeId of state.previousIds) {
         state.elementsById.get(nodeId)?.style.removeProperty("translate");
     }
     state.selectionBounds?.style.removeProperty("translate");
+    state.selectionBounds?.style.removeProperty("visibility");
 
     state.previousIds.clear();
     if (preview) {
@@ -111,13 +131,19 @@ export function applyCanvasNodeDragPreview(container: HTMLDivElement | null, pre
         for (const nodeId of preview.nodeIds) {
             const element = state.elementsById.get(nodeId);
             if (!element || !element.isConnected) continue;
-            element.style.setProperty("translate", `${preview.x}px ${preview.y}px`);
+            if (preview.compact?.nodeId === nodeId) {
+                state.compactTransform = { element, transform: element.style.transform, origin: element.style.transformOrigin };
+                element.style.transformOrigin = "left top";
+                element.style.transform = `translate(${preview.compact.x}px, ${preview.compact.y}px) scale(${preview.compact.scale})`;
+                element.dataset.canvasCompactDrag = "true";
+            } else element.style.setProperty("translate", `${preview.x}px ${preview.y}px`);
             state.previousIds.add(nodeId);
         }
         if (!state.selectionBounds?.isConnected) {
             state.selectionBounds = container.querySelector<HTMLElement>("[data-canvas-selection-bounds]");
         }
         state.selectionBounds?.style.setProperty("translate", `${preview.x}px ${preview.y}px`);
+        if (preview.compact) state.selectionBounds?.style.setProperty("visibility", "hidden");
     } else {
         state.elementsById.clear();
         state.selectionBounds = null;

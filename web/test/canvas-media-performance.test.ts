@@ -43,8 +43,9 @@ describe("canvas media activation", () => {
 
 describe("canvas dimension header rendering", () => {
     test("tracks live viewport scale without React width commits", () => {
-        expect(canvasNodeSource).toContain("calc(var(--canvas-node-width) * var(--canvas-live-scale, 1))");
-        expect(canvasNodeSource).toContain('"--canvas-node-width": `${node.width}px`');
+        expect(canvasNodeSource).toContain("var(--canvas-live-scale,");
+        expect(globalStylesSource).toContain("width: var(--canvas-node-header-width)");
+        expect(globalStylesSource).toContain("calc(var(--canvas-node-width) * var(--canvas-live-scale, 1))");
     });
 });
 
@@ -80,7 +81,11 @@ describe("large canvas media rendering", () => {
 
     test("keeps inactive video nodes on a viewport-gated static first frame", () => {
         const inactivePreviewSource = canvasNodeContentSource.match(/function InactiveVideoPreview[\s\S]*?\n}\n\nfunction VideoPreviewPlayButton/)?.[0] || "";
-        expect(canvasNodeContentSource).toContain("if (previewUrl || !nearViewport || (!node.metadata?.content && !node.metadata?.storageKey) || !updateMetadataRef.current)");
+        expect(inactivePreviewSource).toContain("!previewNeedsHydration || !nearViewport");
+        expect(inactivePreviewSource).toContain("!node.metadata?.storageKey && !node.metadata?.content");
+        expect(inactivePreviewSource).not.toContain("updateMetadata");
+        expect(canvasVideoPreviewSource).not.toContain("uploadImage");
+        expect(canvasNodeContentSource).toContain("canvasVideoPreviewNeedsHydration(node)");
         expect(canvasNodeContentSource).not.toContain("hydrateMediaPreview");
         expect(inactivePreviewSource).not.toContain("<video");
         expect(inactivePreviewSource).toContain("<VideoPreviewPlayButton");
@@ -91,8 +96,9 @@ describe("large canvas media rendering", () => {
     });
 
     test("allows failed or empty first-frame requests to retry", () => {
-        expect(canvasVideoPreviewSource).toContain("if (!preview) previewRequests.delete(requestKey)");
-        expect(canvasVideoPreviewSource).toContain("previewRequests.delete(requestKey);");
+        expect(canvasVideoPreviewSource).toContain("if (!preview) { forgetFailedRequest(); return null; }");
+        expect(canvasVideoPreviewSource).toContain("if (previewRequests.get(requestKey) === created) previewRequests.delete(requestKey)");
+        expect(canvasVideoPreviewSource).toContain(".catch(() => { forgetFailedRequest(); return null; })");
     });
 });
 
@@ -293,10 +299,10 @@ function writeFourcc(bytes: Uint8Array, offset: number, value: string) {
 }
 
 describe("passive video previews", () => {
-    test("素材引用菜单使用被动视频首帧回退，而不是视频图标", () => {
-        expect(canvasMentionSource).toContain('muted playsInline preload="metadata"');
+    test("素材引用菜单共享可见首帧，点击预览仍可读取视频元数据", () => {
+        expect(canvasMentionSource).toContain("videoPreviewEnabled: visible");
+        expect(canvasMentionSource).not.toContain('<video src={reference.mediaUrl}');
         expect(canvasMentionSource).toContain("onloadedmetadata = () => primeVideoPreviewFrame(media)");
-        expect(canvasMentionSource).toContain("onLoadedMetadata={(event) => primeVideoPreviewFrame(event.currentTarget)}");
         expect(canvasMentionSource).toContain("video.currentTime = Math.min(0.001, video.duration)");
         expect(canvasMentionSource).toContain("reference.kind === \"video\" && reference.previewUrl");
     });

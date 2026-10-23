@@ -25,11 +25,20 @@ const cameraMoveLabels: Record<DirectorShot["cameraMove"], string> = {
 
 export function compileDirectorPrompt(scene: DirectorScene, shot: DirectorShot) {
     const camera = scene.cameras.find((item) => item.id === shot.cameraId) || scene.cameras[0];
+    const cameraKeys = camera?.keyframes.filter((key) => Number.isFinite(key.time) && key.transform.position.every(Number.isFinite)).sort((a, b) => a.time - b.time) || [];
+    const hasKeyframedMotion = cameraKeys.slice(1).some((key, index) => {
+        const previous = cameraKeys[index].transform;
+        return key.transform.position.some((value, axis) => Math.abs(value - previous.position[axis]) > 1e-4)
+            || key.transform.rotation.some((value, axis) => Math.abs(value - previous.rotation[axis]) > 1e-4);
+    });
+    const cameraMove = hasKeyframedMotion
+        ? `按 ${cameraKeys.length} 个关键帧执行机位轨迹，${formatNumber(cameraKeys[0].time)} 秒位于 ${formatPosition(cameraKeys[0].transform.position)}，${formatNumber(cameraKeys.at(-1)!.time)} 秒位于 ${formatPosition(cameraKeys.at(-1)!.transform.position)}`
+        : cameraMoveLabels[shot.cameraMove];
     const visibleObjects = scene.objects.filter((item) => item.visible);
     const actors = visibleObjects.filter((item) => item.kind === "actor" || item.primitive === "character");
     return [
         shot.prompt.trim(),
-        `镜头设计：${shotSizeLabels[shot.shotSize]}，${cameraMoveLabels[shot.cameraMove]}，时长 ${formatNumber(shot.duration)} 秒。`,
+        `镜头设计：${shotSizeLabels[shot.shotSize]}，${cameraMove}，时长 ${formatNumber(shot.duration)} 秒。`,
         camera ? cameraPrompt(camera) : "",
         actors.length ? `角色颜色映射：${actors.map((actor) => `${directorColorLabel(actor.color)}人偶（${actor.color}）代表${actor.name}`).join("；")}。生成视频时严格按颜色识别角色，不交换人物身份。` : "",
         visibleObjects.length ? `空间调度：${visibleObjects.map(objectPrompt).join("；")}。` : "",
@@ -58,4 +67,8 @@ function objectPrompt(object: DirectorObject) {
 
 function formatNumber(value: number) {
     return Number(value.toFixed(2));
+}
+
+function formatPosition(position: [number, number, number]) {
+    return `(${position.map(formatNumber).join(", ")})`;
 }

@@ -127,8 +127,8 @@ func TestDeleteProjectUnlinksCanvasAndKeepsIndependentRecords(t *testing.T) {
 	if err := db.First(&storedTask, "id = ?", task.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if storedTask.ProjectID != "" {
-		t.Fatalf("direct project task id = %q, want empty", storedTask.ProjectID)
+	if storedTask.ProjectID != project.ID {
+		t.Fatalf("direct project task id = %q, want historical scope %q", storedTask.ProjectID, project.ID)
 	}
 	var storedCanvasTask model.Task
 	if err := db.First(&storedCanvasTask, "id = ?", canvasTask.ID).Error; err != nil {
@@ -139,7 +139,7 @@ func TestDeleteProjectUnlinksCanvasAndKeepsIndependentRecords(t *testing.T) {
 	}
 }
 
-func TestDeleteUserCanvasProjectDetachesTaskScope(t *testing.T) {
+func TestDeleteUserCanvasProjectPreservesHistoricalTaskScope(t *testing.T) {
 	service, db := newProjectDeleteTestService(t)
 	canvas := model.CanvasProject{ID: "canvas-delete-1", UserID: "user-1", Title: "待删除画布", PayloadJSON: `{"id":"canvas-delete-1"}`}
 	task := model.Task{ID: "task-canvas-delete-1", UserID: "user-1", ProjectID: canvas.ID, Status: model.TaskStatusSucceeded, Prompt: "已完成"}
@@ -161,8 +161,8 @@ func TestDeleteUserCanvasProjectDetachesTaskScope(t *testing.T) {
 	if err := db.First(&storedTask, "id = ?", task.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if storedTask.ProjectID != "" {
-		t.Fatalf("task project id = %q, want empty", storedTask.ProjectID)
+	if storedTask.ProjectID != canvas.ID {
+		t.Fatalf("task project id = %q, want historical scope %q", storedTask.ProjectID, canvas.ID)
 	}
 	var linkCount int64
 	if err := db.Model(&model.CanvasUnitLink{}).Where("canvas_id = ?", canvas.ID).Count(&linkCount).Error; err != nil {

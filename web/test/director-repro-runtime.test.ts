@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 
 import { projectDirectorWebgl, readDirectorReproRuntime, releaseProbeContext, safeReproText } from "../src/lib/canvas/director/director-repro-runtime";
-import { DIRECTOR_REPRO_LOCAL_MODEL_URL, DIRECTOR_REPRO_MATRIX, DIRECTOR_REPRO_MISSING_MODEL_URL, createDirectorReproScene, directorReproSceneIsOffline, injectDirectorReproModel } from "../src/lib/canvas/director/director-repro-fixture";
+import { DIRECTOR_REPRO_ANIMATED_PERSON_URL, DIRECTOR_REPRO_LOCAL_MODEL_URL, DIRECTOR_REPRO_MATRIX, DIRECTOR_REPRO_MISSING_MODEL_URL, createDirectorReproActorScene, createDirectorReproQuaterniusCompareScene, createDirectorReproScene, directorReproSceneIsOffline, injectDirectorReproAnimatedPerson, injectDirectorReproModel } from "../src/lib/canvas/director/director-repro-fixture";
 import { DIRECTOR_PLACEMENT_MARGIN, directorObjectFootprint } from "../src/lib/canvas/director/director-placement";
+import { DIRECTOR_QUATERNIUS_FEMALE_URL, DIRECTOR_QUATERNIUS_MALE_URL } from "../src/lib/canvas/director/director-actor-assets";
 import type { DirectorObject } from "../src/types/director";
 
 const LEAK_PROBES = [
@@ -274,6 +276,7 @@ describe("fixture 确定性与离线性", () => {
         const second = createDirectorReproScene();
         expect(second.objects[0].transform.position[0]).toBe(0);
         expect(second.title).toBe("P0 复现场景");
+        expect(second.background).toBe("#060608");
     });
 
     test("不含任何远端资产：无 url / storageKey / assetId", () => {
@@ -294,6 +297,56 @@ describe("fixture 确定性与离线性", () => {
         expect(scene.shots.some((shot) => shot.id === scene.activeShotId)).toBe(true);
         expect(scene.shots.every((shot) => scene.cameras.some((camera) => camera.id === shot.cameraId))).toBe(true);
         expect(scene.objects.every((object) => object.transform.position.every((value) => Number.isFinite(value)))).toBe(true);
+    });
+
+    test("人物视觉对照场景以离线人偶为主视觉且不引入网络模型", () => {
+        const scene = createDirectorReproActorScene();
+        expect(scene.cameras[0].name).toBe("机位1");
+        expect(scene.cameras[0].transform.position).toEqual([0, 2.2, 10]);
+        expect(scene.cameras[0].target).toEqual([0, 1.2, 0]);
+        expect(scene).toEqual(createDirectorReproActorScene());
+        expect(directorReproSceneIsOffline(scene)).toBe(true);
+        expect(scene.objects).toHaveLength(1);
+        expect(scene.objects[0]).toMatchObject({ id: "repro-actor-1", kind: "actor", name: "演员 1", visible: true, pose: "stand" });
+        expect(scene.objects[0].url).toBeUndefined();
+        expect(scene.objects[0].rig).toEqual({ status: "unmapped", boneMap: {}, animationNames: [] });
+        expect(scene.shots.some((shot) => shot.id === scene.activeShotId)).toBe(true);
+    });
+
+    test("Quaternius 对照场景并排展示免费男女模型", () => {
+        const original = createDirectorReproActorScene();
+        const comparison = createDirectorReproQuaterniusCompareScene();
+        expect(comparison.objects).toHaveLength(2);
+        expect(comparison.objects[0]).toMatchObject({ id: "repro-actor-1", kind: "actor", name: "Quaternius 免费女性", url: DIRECTOR_QUATERNIUS_FEMALE_URL });
+        expect(comparison.objects[1]).toMatchObject({ id: "repro-quaternius-male", kind: "actor", name: "Quaternius 免费男性", url: DIRECTOR_QUATERNIUS_MALE_URL });
+        expect(comparison.objects.map((object) => object.transform.position[0])).toEqual([-1.1, 1.1]);
+        expect(original.objects).toHaveLength(1);
+        expect(original.objects[0].url).toBeUndefined();
+        expect(directorReproSceneIsOffline(comparison)).toBe(false);
+    });
+
+    test("对照资源是可离线加载的精简 GLB，并保留人物骨骼", () => {
+        for (const body of ["male", "female"]) {
+            const model = readFileSync(new URL(`../public/canvas/models/quaternius-standard-${body}.glb`, import.meta.url));
+            expect(model.toString("ascii", 0, 4)).toBe("glTF");
+            expect(model.length).toBeLessThan(2_000_000);
+            const jsonLength = model.readUInt32LE(12);
+            const gltf = JSON.parse(model.toString("utf8", 20, 20 + jsonLength));
+            expect(gltf.skins[0].joints.length).toBeGreaterThanOrEqual(50);
+            expect(gltf.meshes.length).toBeGreaterThan(0);
+            expect(gltf.nodes.some((node: { name?: string }) => node.name === "Head")).toBe(true);
+            expect(gltf.images).toBeUndefined();
+        }
+    });
+
+    test("动画人物复现夹具使用可重复注入的同源 GLTF 资源", () => {
+        const base = createDirectorReproScene();
+        const scene = injectDirectorReproAnimatedPerson(base);
+        const actor = scene.objects.find((object) => object.id === "repro-animated-person");
+        expect(actor).toMatchObject({ name: "离线动画人物", kind: "model", url: DIRECTOR_REPRO_ANIMATED_PERSON_URL, mimeType: "model/gltf+json" });
+        expect(DIRECTOR_REPRO_ANIMATED_PERSON_URL.startsWith("/")).toBe(true);
+        expect(injectDirectorReproAnimatedPerson(scene).objects.filter((object) => object.id === "repro-animated-person")).toHaveLength(1);
+        expect(base.objects.some((object) => object.id === "repro-animated-person")).toBe(false);
     });
 
     test("对象初始不重叠，便于复现连续新增语义", () => {

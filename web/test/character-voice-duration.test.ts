@@ -6,6 +6,7 @@ import * as resources from "../src/services/api/resources";
 import { modelCapabilityConfigFor } from "../src/lib/model-capabilities";
 import { assertVideoCapability } from "../src/services/api/video-validation";
 import * as imageStorage from "../src/services/image-storage";
+import { h3ResolvedReferenceOrder } from "../src/lib/h3-video";
 
 const seedanceConfig = { model: "native::seedance-2.0", videoEditOperation: "reference_to_video", channels: [{ id: "native", models: ["seedance-2.0"], modelProfiles: [{ model: "seedance-2.0", protocol: "volcengine-ark-video" }] }] } as AiConfig;
 
@@ -41,8 +42,27 @@ test("stored character voice keeps duration through canvas hydration and preflig
     }
 });
 
+test("character images and voice retain the source card for H3 ordering", async () => {
+    const character = spyOn(projects, "getProjectCharacter").mockResolvedValue({
+        asset: { id: "character-1", title: "爸爸" },
+        character: { versionId: "version-1", definition: {}, representations: [{ resourceId: "front", role: "front" }, { resourceId: "side", role: "side" }], voice: { profile: { sampleResourceId: "voice-1" }, instructions: "" } },
+    } as Awaited<ReturnType<typeof projects.getProjectCharacter>>);
+    const resource = spyOn(resources, "getResource").mockResolvedValue({ id: "voice-1", mimeType: "audio/mpeg", objectKey: "voice.mp3", durationMs: 2500, size: 1234 } as resources.RemoteResource);
+    const images = spyOn(imageStorage, "imageToDataUrl").mockResolvedValue("data:image/png;base64,fixture");
+    try {
+        const hydrated = await hydrateNodeGenerationContext({ prompt: "test", referenceImages: [], referenceVideos: [], referenceAudios: [], characterReferences: [{ nodeId: "character-node", assetId: "character-1" }], resolvedCharacterVersions: [], resolvedCharacterVoices: [], textCount: 1, imageCount: 0, videoCount: 0, audioCount: 0 }, "canvas-1", "project-1", "video", true);
+        expect(hydrated.referenceImages).toHaveLength(2);
+        expect(hydrated.referenceImages.every((image) => image.sourceNodeId === "character-node")).toBe(true);
+        expect(hydrated.referenceAudios[0]?.sourceNodeId).toBe("character-node");
+        expect(h3ResolvedReferenceOrder(["character-node"], [...hydrated.referenceImages, ...hydrated.referenceAudios])).toEqual(["character-reference-1", "character-reference-2", "character-voice-character-1"]);
+    } finally {
+        character.mockRestore();
+        resource.mockRestore();
+        images.mockRestore();
+    }
+});
+
 test("video promptOnly keeps character identity bound to actual non-contiguous image slots", async () => {
-    const images = spyOn(imageStorage, "imageToDataUrl").mockImplementation(async (image) => `data:image/png;base64,${image.storageKey}`);
     const character = spyOn(projects, "getProjectCharacter").mockImplementation(async (_projectId, assetId) => ({
         asset: { id: assetId, title: assetId === "b" ? "小乙" : "小甲" },
         character: { versionId: "v1", definition: { personality: "不应自动注入的性格设定" }, representations: [
@@ -67,7 +87,6 @@ test("video promptOnly keeps character identity bound to actual non-contiguous i
         expect(hydrated.prompt).not.toContain("@音频");
     } finally {
         character.mockRestore();
-        images.mockRestore();
     }
 });
 

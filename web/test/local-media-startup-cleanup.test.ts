@@ -11,8 +11,3 @@ test("local startup cleans only after both workspace stores hydrate", () => {
     expect(source).toContain("if (!localMode || !assetsHydrated || !canvasHydrated) return;");
     expect(source).toContain("本地媒体缓存清理失败");
 });
-
-test("local Agent entry does not expose a retry-sync action", () => {
-    const entry = readFileSync(resolve(import.meta.dir, "../src/pages/create/creation-agent-entry.tsx"), "utf8");
-    expect(entry).toContain('localWorkspace ? "重新进入画布" : "重试同步并进入"');
-});

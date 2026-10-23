@@ -97,6 +97,7 @@ export function isNodeInTimeline(nodeId: string, timeline: TimelineProject | nul
  * 条目为空数组时移除该节点全部字幕片段，保证字幕弹窗与时间线互通。
  */
 export function syncNodeSubtitlesToTimeline(timeline: TimelineProject, nodeId: string, entries: SrtEntry[]): TimelineProject {
+    const subtitleTrackId = timeline.tracks.find((track) => track.kind === "subtitle")?.id ?? DEFAULT_SUBTITLE_TRACK_ID;
     const videoClip = timeline.clips.find((clip) => clip.nodeId === nodeId && clip.kind === "video");
     const hasSubtitleClips = timeline.clips.some((clip) => clip.nodeId === nodeId && clip.kind === "subtitle");
     if (!videoClip && !hasSubtitleClips) return timeline;
@@ -112,7 +113,7 @@ export function syncNodeSubtitlesToTimeline(timeline: TimelineProject, nodeId: s
             id: `clip-${nodeId}-sub-${entry.index}`,
             kind: "subtitle",
             nodeId,
-            trackId: DEFAULT_SUBTITLE_TRACK_ID,
+            trackId: subtitleTrackId,
             startMs,
             durationMs: Math.max(100, endMs - startMs),
             title: text,
@@ -136,6 +137,7 @@ export function syncNodeSubtitlesToTimeline(timeline: TimelineProject, nodeId: s
  * 仅处理已入轨的节点，避免把未入轨节点的字幕凭空加进时间线。
  */
 export function syncTimelineSubtitleClips(timeline: TimelineProject, nodes: CanvasNodeData[]): TimelineProject {
+    const subtitleTrackId = timeline.tracks.find((track) => track.kind === "subtitle")?.id ?? DEFAULT_SUBTITLE_TRACK_ID;
     let changed = false;
     const clips = [...timeline.clips];
     for (const videoClip of timeline.clips) {
@@ -162,7 +164,7 @@ export function syncTimelineSubtitleClips(timeline: TimelineProject, nodes: Canv
                 id: `clip-${videoClip.nodeId}-sub-${entry.index}`,
                 kind: "subtitle",
                 nodeId: videoClip.nodeId,
-                trackId: DEFAULT_SUBTITLE_TRACK_ID,
+                trackId: subtitleTrackId,
                 startMs,
                 durationMs: Math.max(100, endMs - startMs),
                 title: text,

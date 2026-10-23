@@ -13,7 +13,7 @@ function request(overrides: Record<string, unknown> = {}): CreateTaskInput {
     } };
 }
 
-function fixture(options: { request?: (path: string) => Promise<Record<string, unknown>>; downloadFails?: boolean; storeFails?: boolean } = {}) {
+function fixture(options: { request?: (path: string) => Promise<Record<string, unknown>>; downloadFails?: boolean; storeFails?: boolean; withProjectWriteLock?: Parameters<typeof createBrowserLikeAITaskService>[0]["withProjectWriteLock"] } = {}) {
     const records = new Map<string, BrowserLikeAITaskRecord>();
     const calls: string[] = [];
     const requests: Array<{ path: string; method?: string; body?: Record<string, unknown> }> = [];
@@ -32,7 +32,7 @@ function fixture(options: { request?: (path: string) => Promise<Record<string, u
         try { return await operation; } finally { if (tails.get(name) === operation) tails.delete(name); }
     };
     const dependencies = {
-        store, lock,
+        store, lock, withProjectWriteLock: options.withProjectWriteLock,
         id: () => `id-${++sequence}`,
         now: () => "2026-09-28T00:00:00.000Z",
         credential: async () => "current-api-key",
@@ -100,7 +100,15 @@ describe("LikeAI browser protocol", () => {
 });
 
 describe("browser persisted LikeAI lifecycle", () => {
-    test("prepares a real configured UI model and submits it through the browser service", async () => {
+    test("a migrated project cannot submit or persist another browser task", async () => {
+        let project = "";
+        const f = fixture({ withProjectWriteLock: async (id) => { project = id; throw new Error("project is owned by engine"); } });
+        await expect(f.service.create(request())).rejects.toThrow("owned by engine");
+        expect(project).toBe("canvas-1");
+        expect(f.calls).toEqual([]);
+        expect(f.records.size).toBe(0);
+    });
+    test("legacy receipts retain their own channel identity independently of engine provider config", async () => {
         const previousFlag = process.env.VITE_QISITV_BROWSER_ONLY;
         process.env.VITE_QISITV_BROWSER_ONLY = "1";
         try {
@@ -112,12 +120,16 @@ describe("browser persisted LikeAI lifecycle", () => {
                 });
                 const config = { ...defaultConfig, channels: [channel], model: encodeChannelModel(channel.id, model), quality: "1080p", vquality: "720p", videoSeconds: "5", size: mode === "video" ? "adaptive" : "16:9", videoGenerateAudio: "true" };
                 const taskOptions = { mode, prompt: "actual UI configuration", config, projectId: "canvas-real", metadata: { nodeId: "node-real", ...(mode === "video" ? { videoStartFrameNodeId: "ref-1" } : {}) }, clientOperationId: `real-${mode}`,
-                    referenceImages: mode === "image" || mode === "video" ? [{ id: "ref-1", name: "ref.png", type: "image/png", dataUrl: "", storageKey: "image:local:ref-1", width: 1024, height: 1024, bytes: 128 }] : [],
+                    referenceImages: mode === "image" || mode === "video" ? [{ id: "ref-1", name: "ref.png", type: "image/png", dataUrl: "", storageKey: "resource:ref-1", width: 1024, height: 1024, bytes: 128 }] : [],
                 };
                 const prepared = await prepareBackendGenerationTask(taskOptions);
-                expect(prepared.input?.config).toMatchObject({ channelId: "my-likeai", apiFormat: "likeai", interfaceType: `likeai-${mode}`, model, apiKey: "test-api-key" });
+                expect(prepared.input?.config).toMatchObject({ channelId: "", apiFormat: "likeai", interfaceType: `likeai-${mode}`, model, apiKey: "test-api-key" });
+                // The retired v1 writer stored the user channel ID in its receipt.
+                // Construct that legacy shape explicitly; the engine UI must not
+                // gain a browser-only submission bypass to satisfy this fixture.
+                const legacyRequest = (value: typeof prepared) => ({ ...value, input: { ...value.input, config: { ...value.input!.config, channelId: channel.id } } });
                 const f = fixture();
-                const accepted = await f.service.create(prepared);
+                const accepted = await f.service.create(legacyRequest(prepared));
                 expect(accepted.status).toBe("queued");
                 expect(accepted.providerRequestId).toBe("provider-1");
                 expect(accepted.clientContext?.nodeId).toBe("node-real");
@@ -128,13 +140,13 @@ describe("browser persisted LikeAI lifecycle", () => {
                 if (mode === "video") {
                     expect(f.requests[0].body).toMatchObject({ first_image_url: "https://media.example/reference.png", duration: 5, resolution: "720p", aspect_ratio: "adaptive", kwargs: { generate_audio: true } });
                     const invalid = await prepareBackendGenerationTask({ ...taskOptions, config: { ...config, size: "16:9" }, clientOperationId: "bad-first-frame" });
-                    await expect(f.service.create(invalid)).rejects.toThrow("adaptive");
+                    await expect(f.service.create(legacyRequest(invalid))).rejects.toThrow("adaptive");
                     expect(f.calls).toEqual(["/task/create_task"]);
                 }
                 expect(JSON.stringify([...f.records.values()])).not.toContain("test-api-key");
 
                 delete process.env.VITE_QISITV_BROWSER_ONLY;
-                expect(backendProviderConfig(config, mode)).toMatchObject({ channelId: "", apiFormat: "openai", interfaceType: `likeai-${mode}` });
+                expect(backendProviderConfig(config, mode)).toMatchObject({ channelId: "", apiFormat: "likeai", interfaceType: `likeai-${mode}` });
                 process.env.VITE_QISITV_BROWSER_ONLY = "1";
             }
         } finally {

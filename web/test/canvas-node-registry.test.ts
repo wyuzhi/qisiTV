@@ -16,9 +16,9 @@ describe("节点注册表——覆盖完整性", () => {
         for (const type of ALL_TYPES) expect(getNodeMinSize(type)).toBeDefined();
     });
 
-    test("仅技能与生成配置不进创建菜单", () => {
+    test("技能、生成配置和工作流容器节点不进创建菜单", () => {
         const hidden = ALL_TYPES.filter((type) => !listCreatableNodeDefinitions().some((def) => def.type === type));
-        expect(hidden.sort()).toEqual([CanvasNodeType.Config, CanvasNodeType.Skill].sort());
+        expect(hidden.sort()).toEqual([CanvasNodeType.Config, CanvasNodeType.Skill, CanvasNodeType.Workflow, CanvasNodeType.WorkflowControl].sort());
     });
 });
 

@@ -109,6 +109,10 @@ func RegisterWorkspaceRoutes(r *gin.RouterGroup, svc *app.Service) {
 			fail(c, http.StatusBadRequest, errors.New("本地模型配置格式错误"))
 			return
 		}
+		if _, external := externalBusiness(c); external && envelope.ExpectedRevision == nil {
+			fail(c, http.StatusBadRequest, errors.New("修改模型配置需要 expectedRevision"))
+			return
+		}
 		envelope.Config = preserveManagedModelConfig(c, svc, envelope.Config)
 		providerConfig := requestProviderConfig(c, svc)
 		if versioned, supportsVersioning := providerConfig.(VersionedProviderConfig); supportsVersioning && envelope.ExpectedRevision != nil {
@@ -133,6 +137,9 @@ func RegisterWorkspaceRoutes(r *gin.RouterGroup, svc *app.Service) {
 }
 
 func redactModelConfig(c *gin.Context, svc *app.Service, config map[string]any) map[string]any {
+	if _, external := externalBusiness(c); external {
+		config = redactExternalConfig(config)
+	}
 	managed := false
 	if connection, err := requestBeefAPI(c, svc); err == nil && connection != nil {
 		managed = connection.HasManagedCredential()
@@ -154,6 +161,9 @@ func preserveManagedModelConfig(c *gin.Context, svc *app.Service, raw json.RawMe
 		}
 	}
 	managed := false
+	if _, external := externalBusiness(c); external {
+		preserveExternalConfigSecrets(incoming, existing)
+	}
 	if connection, err := requestBeefAPI(c, svc); err == nil && connection != nil {
 		managed = connection.HasManagedCredential()
 		connection.PreserveWrite(incoming, existing)

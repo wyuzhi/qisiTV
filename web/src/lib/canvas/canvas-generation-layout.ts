@@ -8,6 +8,7 @@ type Size = {
 
 const BATCH_CHILD_OFFSET_X = 120;
 const BATCH_CHILD_GAP = 36;
+const BATCH_ROW_GAP = 84;
 const NODE_CLEARANCE = 36;
 
 export function canGenerateImageInPlace(sourceNode: CanvasNodeData | undefined) {
@@ -54,15 +55,54 @@ export function imageGenerationGroupSize(rootSize: Size, imageSize: Size, childC
     const rows = Math.ceil(childCount / 2);
     return {
         width: rootSize.width + BATCH_CHILD_OFFSET_X + columns * imageSize.width + (columns - 1) * BATCH_CHILD_GAP,
-        height: Math.max(rootSize.height, rows * imageSize.height + (rows - 1) * BATCH_CHILD_GAP),
+        height: Math.max(rootSize.height, rows * imageSize.height + (rows - 1) * BATCH_ROW_GAP),
     };
 }
 
 export function imageGenerationChildPosition(rootPosition: Position, rootWidth: number, imageSize: Size, index: number): Position {
     return {
         x: rootPosition.x + rootWidth + BATCH_CHILD_OFFSET_X + (index % 2) * (imageSize.width + BATCH_CHILD_GAP),
-        y: rootPosition.y + Math.floor(index / 2) * (imageSize.height + BATCH_CHILD_GAP),
+        y: rootPosition.y + Math.floor(index / 2) * (imageSize.height + BATCH_ROW_GAP),
     };
+}
+
+export function repairOverlappingImageBatches(nodes: CanvasNodeData[]): CanvasNodeData[] {
+    let result = nodes;
+    const nodeById = new Map(nodes.map(node => [node.id, node]));
+    for (const root of nodes) {
+        if (!root.metadata?.isBatchRoot) continue;
+        const children = (root.metadata.batchChildIds || []).map(id => nodeById.get(id)).filter((node): node is CanvasNodeData => Boolean(node && node.metadata?.batchRootId === root.id));
+        const group = [root, ...children];
+        if (!children.length || group.some(node => node.metadata?.locked || node.metadata?.workflowSlot)) continue;
+        const overlaps = group.some((node, i) => group.slice(i + 1).some(other => (
+            node.position.x < other.position.x + other.width - 1 && node.position.x + node.width > other.position.x + 1
+            && node.position.y < other.position.y + other.height - 1 && node.position.y + node.height > other.position.y + 1
+        )));
+        if (!overlaps) continue;
+
+        const columnWidth = Math.max(...children.filter((_, i) => i % 2 === 0).map(node => node.width));
+        const positions = new Map<string, Position>();
+        let rowY = 0;
+        for (let i = 0; i < children.length; i += 2) {
+            const row = children.slice(i, i + 2);
+            row.forEach((node, col) => positions.set(node.id, { x: root.width + BATCH_CHILD_OFFSET_X + col * (columnWidth + BATCH_CHILD_GAP), y: rowY }));
+            rowY += Math.max(...row.map(node => node.height)) + BATCH_ROW_GAP;
+        }
+        const groupIds = new Set(group.map(node => node.id));
+        const groupSize = {
+            width: Math.max(root.width, ...children.map(node => positions.get(node.id)!.x + node.width)),
+            height: Math.max(root.height, rowY - BATCH_ROW_GAP),
+        };
+        const origin = root.metadata.imageBatchExpanded
+            ? findAvailableGenerationGroupPosition(result.filter(node => !groupIds.has(node.id) && (!node.metadata?.batchRootId || nodeById.get(node.metadata.batchRootId)?.metadata?.imageBatchExpanded)), root.position, groupSize)
+            : root.position;
+        result = result.map(node => {
+            const offset = positions.get(node.id);
+            if (node.id === root.id) return origin.x === node.position.x && origin.y === node.position.y ? node : { ...node, position: origin };
+            return offset ? { ...node, position: { x: origin.x + offset.x, y: origin.y + offset.y } } : node;
+        });
+    }
+    return result;
 }
 
 export function findAvailableGenerationGroupPosition(nodes: CanvasNodeData[], preferred: Position, groupSize: Size): Position {

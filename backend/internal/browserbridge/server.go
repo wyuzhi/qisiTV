@@ -1,5 +1,5 @@
-// Package browserbridge forwards local Agent commands to an explicitly paired browser.
-// The browser owns the project files; the connector never opens a project database.
+// Package browserbridge pairs a local Agent with an explicitly authorized website.
+// An optional engine gateway reuses that same authorization for native workspace APIs.
 package browserbridge
 
 import (
@@ -42,15 +42,16 @@ type response struct {
 	ProjectName string    `json:"projectName,omitempty"`
 }
 type session struct {
-	ID          string
-	Token       string
-	Origin      string
-	Expires     time.Time
-	Conn        *websocket.Conn
-	WriteMu     sync.Mutex
-	ProjectID   string
-	ProjectName string
-	Pending     map[string]chan response
+	ID             string
+	Token          string
+	Origin         string
+	Expires        time.Time
+	Conn           *websocket.Conn
+	WriteMu        sync.Mutex
+	ProjectID      string
+	ProjectName    string
+	Pending        map[string]chan response
+	EngineRequests map[string]context.CancelFunc
 }
 type SessionInfo struct {
 	SessionID   string `json:"sessionId"`
@@ -68,6 +69,7 @@ type Server struct {
 	sessions    map[string]*session
 	CallTimeout time.Duration
 	lifecycle   *leaseRegistry
+	engine      *EngineGateway
 }
 
 func randomToken(n int) string {
@@ -128,8 +130,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-QisiTV-Session, X-Beeftv-Ui-Session, X-Canvas-Trace-ID, X-Idempotency-Key, X-Canvas-Scene, X-Canvas-Upstream-URL, X-Canvas-Upstream-Format, X-Canvas-Upstream-Base-URL, X-Canvas-Upstream-Headers, Range, If-Range, If-None-Match, Last-Event-ID, Traceparent")
+		w.Header().Set("Access-Control-Expose-Headers", "Content-Disposition, Content-Length, Content-Range, Accept-Ranges, ETag, X-Request-ID, X-Canvas-Trace-ID, X-Diagnostic-Bundle-ID, X-Diagnostic-Schema-Version, X-Beeftv-Turn-Admission")
 		w.Header().Set("Access-Control-Allow-Private-Network", "true")
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -140,6 +143,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/engine/") {
+		s.serveEngine(w, r)
 		return
 	}
 	switch r.URL.Path {
@@ -176,7 +183,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if r.URL.Path == "/agent/pair-code" {
 			code, expiry := s.NewPairCode()
-			writeJSON(w, 200, map[string]any{"code": code, "expiresAt": expiry})
+			writeJSON(w, 200, map[string]any{"code": code, "expiresAt": expiry, "engine": s.engine != nil})
 			return
 		}
 		var input struct {
@@ -239,6 +246,9 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 	s.code = ""
 	for token, session := range s.sessions {
 		if time.Now().After(session.Expires) && session.Conn == nil {
+			for _, cancel := range session.EngineRequests {
+				cancel()
+			}
 			delete(s.sessions, token)
 		}
 	}
@@ -246,7 +256,7 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 		var oldestToken string
 		var oldestExpiry time.Time
 		for token, entry := range s.sessions {
-			if entry.Conn == nil && (oldestToken == "" || entry.Expires.Before(oldestExpiry)) {
+			if entry.Conn == nil && len(entry.EngineRequests) == 0 && (oldestToken == "" || entry.Expires.Before(oldestExpiry)) {
 				oldestToken, oldestExpiry = token, entry.Expires
 			}
 		}
@@ -288,6 +298,9 @@ func (s *Server) browserSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/unpair" || !time.Now().Before(entry.Expires) {
 		delete(s.sessions, input.Token)
+		for _, cancel := range entry.EngineRequests {
+			cancel()
+		}
 		conn := entry.Conn
 		s.mu.Unlock()
 		if conn != nil {
@@ -357,6 +370,9 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 			delete(entry.Pending, id)
 		}
 		if revoked || !time.Now().Before(entry.Expires) {
+			for _, cancel := range entry.EngineRequests {
+				cancel()
+			}
 			delete(s.sessions, token)
 		}
 		s.mu.Unlock()
@@ -408,6 +424,9 @@ func (s *Server) Call(ctx context.Context, operation string, args map[string]any
 	}
 	if operation == "canvas_list_sessions" {
 		return map[string]any{"sessions": s.Sessions()}, nil
+	}
+	if s.engine != nil {
+		return nil, &RPCError{Code: "NATIVE_AGENT_SETUP_REQUIRED", Message: "This workspace now uses the qisiTV native engine. Open https://cheeser.link/qisitv/#/agents and add the qisitv MCP configuration for your Agent. qisitv-web remains the startup/pairing helper; its legacy canvas tools cannot write the engine workspace. Read the current canvas with the newly configured qisitv tools before editing."}
 	}
 	if err := validateWireArgs(operation, args); err != nil {
 		return nil, &RPCError{Code: "INVALID_ARGUMENTS", Message: err.Error()}

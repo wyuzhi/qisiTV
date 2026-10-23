@@ -18,6 +18,7 @@ export type CreationVideoPreferences = {
 };
 
 export type CreationComposerPreferences = {
+    promptFontSize?: number;
     mode?: CreationModePreference;
     image?: CreationImagePreferences;
     video?: CreationVideoPreferences;
@@ -27,11 +28,19 @@ type CreationPreferencesStore = {
     hydrated: boolean;
     preferences: CreationComposerPreferences;
     rememberMode: (mode: CreationModePreference) => void;
+    rememberPromptFontSize: (fontSize: number) => void;
     rememberImageSettings: (settings: CreationImagePreferences) => void;
     rememberVideoSettings: (settings: CreationVideoPreferences) => void;
 };
 
 export const CREATION_PREFERENCES_STORE_KEY = "open_ai_canvas:creation_preferences";
+export const DEFAULT_PROMPT_FONT_SIZE = 14;
+export const MIN_PROMPT_FONT_SIZE = 12;
+export const MAX_PROMPT_FONT_SIZE = 28;
+
+function normalizePromptFontSize(value: number) {
+    return Math.min(MAX_PROMPT_FONT_SIZE, Math.max(MIN_PROMPT_FONT_SIZE, Math.round(value)));
+}
 
 function nonEmptyString(value: unknown): value is string {
     return typeof value === "string" && Boolean(value.trim());
@@ -65,6 +74,7 @@ export function normalizeCreationComposerPreferences(value: unknown): CreationCo
     const image = normalizeImagePreferences(raw.image);
     const video = normalizeVideoPreferences(raw.video);
     return {
+        ...(typeof raw.promptFontSize === "number" && Number.isFinite(raw.promptFontSize) ? { promptFontSize: normalizePromptFontSize(raw.promptFontSize) } : {}),
         ...(raw.mode === "text" || raw.mode === "image" || raw.mode === "video" ? { mode: raw.mode } : {}),
         ...(image ? { image } : {}),
         ...(video ? { video } : {}),
@@ -77,6 +87,9 @@ export const useCreationPreferencesStore = create<CreationPreferencesStore>()(
             hydrated: false,
             preferences: {},
             rememberMode: (mode) => set((state) => ({ preferences: { ...state.preferences, mode } })),
+            rememberPromptFontSize: (fontSize) => {
+                if (Number.isFinite(fontSize)) set((state) => ({ preferences: { ...state.preferences, promptFontSize: normalizePromptFontSize(fontSize) } }));
+            },
             rememberImageSettings: (settings) => set((state) => ({ preferences: { ...state.preferences, image: { ...state.preferences.image, ...settings } } })),
             rememberVideoSettings: (settings) => set((state) => ({ preferences: { ...state.preferences, video: { ...state.preferences.video, ...settings } } })),
         }),

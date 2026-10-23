@@ -1,5 +1,5 @@
 import { App, Button, Input, Skeleton, Tabs } from "antd";
-import { registerDesktopUpdatePreparation } from "@/services/desktop-update-preparation";
+import { DesktopUpdateSaveInProgressError, registerDesktopUpdatePreparation } from "@/services/desktop-update-preparation";
 import { Select } from "@/components/ui/base/select";
 import { SegmentedControl } from "@/components/ui/base/segmented-control";
 import { StatusBadge } from "@/components/ui/base/badges";
@@ -34,6 +34,8 @@ export function PromptPreferencesPane() {
     const [rewriteContent, setRewriteContent] = useState("");
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const pendingWrites = useRef(0);
+    const dirtyRef = useRef(false);
     const [loadError, setLoadError] = useState("");
     const requestIdRef = useRef(0);
 
@@ -67,6 +69,12 @@ export function PromptPreferencesPane() {
     const activeContent = mode === "append" ? appendContent : mode === "rewrite" ? rewriteContent : "";
     const savedActiveContent = savedMode === "append" ? savedAppendContent : savedMode === "rewrite" ? savedRewriteContent : "";
     const dirty = mode !== savedMode || activeContent !== savedActiveContent;
+    dirtyRef.current = dirty;
+
+    useEffect(() => registerDesktopUpdatePreparation(() => {
+        if (pendingWrites.current > 0) throw new DesktopUpdateSaveInProgressError();
+        if (dirtyRef.current) throw new Error("请先保存或放弃提示词设置中的改动。");
+    }, () => pendingWrites.current > 0), []);
 
     const restoreDraft = (preference = selected) => {
         const customization = preference?.customization;
@@ -81,11 +89,7 @@ export function PromptPreferencesPane() {
         if (!dirty) return undefined;
         const preventUnload = (event: BeforeUnloadEvent) => event.preventDefault();
         window.addEventListener("beforeunload", preventUnload);
-        const unregisterUpdate = registerDesktopUpdatePreparation(() => {
-            throw new Error("请先保存或放弃提示词设置中的改动。");
-        });
         return () => {
-            unregisterUpdate();
             window.removeEventListener("beforeunload", preventUnload);
         };
     }, [dirty]);
@@ -113,6 +117,7 @@ export function PromptPreferencesPane() {
             message.warning("请填写个人提示词内容");
             return;
         }
+        pendingWrites.current += 1;
         setSaving(true);
         try {
             await updateUserPromptCustomization(selected.definition.operation, { mode, content });
@@ -121,7 +126,8 @@ export function PromptPreferencesPane() {
         } catch (error) {
             message.error(error instanceof Error ? error.message : "保存提示词偏好失败");
         } finally {
-            setSaving(false);
+            pendingWrites.current -= 1;
+            setSaving(pendingWrites.current > 0);
         }
     };
 
@@ -133,12 +139,17 @@ export function PromptPreferencesPane() {
             okText: "恢复平台模板",
             cancelText: "取消",
             onOk: async () => {
+                pendingWrites.current += 1;
+                setSaving(true);
                 try {
                     await resetUserPromptCustomization(selected.definition.operation);
                     await reload(selected.definition.operation);
                     message.success("已恢复平台模板");
                 } catch (error) {
                     message.error(error instanceof Error ? error.message : "恢复平台模板失败");
+                } finally {
+                    pendingWrites.current -= 1;
+                    setSaving(pendingWrites.current > 0);
                 }
             },
         });

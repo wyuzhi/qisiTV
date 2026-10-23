@@ -27,3 +27,19 @@ export function mountNodeDragHarness(host: HTMLElement, options: { locked?: bool
     root.render(<Harness />);
     return () => root.unmount();
 }
+
+export function mountNodeTitleHarness(host: HTMLElement) {
+    function Harness() {
+        const [node, setNode] = useState<CanvasNodeData>({ id: 'title-test', type: CanvasNodeType.Text, title: '原名称', position: { x: 100, y: 100 }, width: 320, height: 240 });
+        const [commits, setCommits] = useState(0);
+        return <>
+            <div data-testid="canvas-background" onMouseDown={(event) => event.preventDefault()} style={{ position: 'absolute', inset: 0 }} />
+            <output data-testid="saved-title">{node.title}</output>
+            <output data-testid="commits">{commits}</output>
+            <CanvasNode data={node} scale={1} showImageInfo={false} isSelected={false} isRelated={false} isFocusRelated={false} isConnectionTarget={false} onMouseDown={noop} onHoverStart={noop} onHoverEnd={noop} onConnectStart={noop} onResize={noop} onTitleChange={(_id, title) => { setNode((current) => ({ ...current, title })); setCommits((count) => count + 1); }} onContentChange={noop} onContextMenu={noop} />
+        </>;
+    }
+    const root = createRoot(host);
+    root.render(<Harness />);
+    return () => root.unmount();
+}

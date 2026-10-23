@@ -3,7 +3,7 @@ let stopCurrentPreview: (() => void) | undefined;
 export const VIDEO_HOVER_DELAY_MS = 350;
 export const VIDEO_HOVER_PREVIEW_MS = 3000;
 
-export function bindCanvasVideoHoverPreview(element: HTMLElement, resolveSource: () => Promise<string>) {
+export function bindCanvasVideoHoverPreview(element: HTMLElement, resolveSource: (signal: AbortSignal) => Promise<{ url: string; release: () => void }>) {
     let stop: (() => void) | undefined;
     const enter = (event: PointerEvent) => {
         if (event.pointerType !== "mouse" || event.buttons || document.hidden
@@ -12,6 +12,7 @@ export function bindCanvasVideoHoverPreview(element: HTMLElement, resolveSource:
         stopCurrentPreview?.();
         let disposed = false;
         let video: HTMLVideoElement | undefined;
+        let releaseSource: (() => void) | undefined;
         let playbackTimer: ReturnType<typeof setTimeout> | undefined;
         const listeners = new AbortController();
         const viewport = element.closest("[data-canvas-viewport]");
@@ -31,11 +32,14 @@ export function bindCanvasVideoHoverPreview(element: HTMLElement, resolveSource:
             observer.disconnect();
             visibility.disconnect();
             if (video) {
+                video.style.opacity = "0";
+                video.remove();
                 video.pause();
                 video.removeAttribute("src");
                 video.load();
-                video.remove();
             }
+            releaseSource?.();
+            releaseSource = undefined;
             if (stopCurrentPreview === cancel) stopCurrentPreview = undefined;
             if (stop === cancel) stop = undefined;
         };
@@ -45,13 +49,15 @@ export function bindCanvasVideoHoverPreview(element: HTMLElement, resolveSource:
                 cancel();
                 return;
             }
-            void resolveSource().then((src) => {
-                if (disposed) return;
-                if (!src || !element.isConnected || document.hidden) { cancel(); return; }
+            void resolveSource(listeners.signal).then((source) => {
+                if (disposed) { source.release(); return; }
+                releaseSource = source.release;
+                if (!source.url || !element.isConnected || document.hidden) { cancel(); return; }
                 video = document.createElement("video");
                 video.muted = true;
                 video.playsInline = true;
                 video.preload = "metadata";
+                video.style.opacity = "0";
                 video.className = "pointer-events-none absolute inset-0 size-full rounded-[var(--node-radius)] bg-black object-contain";
                 video.setAttribute("aria-hidden", "true");
                 video.dataset.canvasHoverPreview = "true";
@@ -63,7 +69,18 @@ export function bindCanvasVideoHoverPreview(element: HTMLElement, resolveSource:
                 video.addEventListener("playing", () => {
                     if (!playbackTimer) playbackTimer = setTimeout(cancel, VIDEO_HOVER_PREVIEW_MS);
                 }, { signal: listeners.signal });
-                video.src = src;
+                if (typeof video.requestVideoFrameCallback === "function") {
+                    video.requestVideoFrameCallback(() => {
+                        if (!disposed && video) video.style.opacity = "1";
+                    });
+                } else {
+                    video.addEventListener("playing", () => {
+                        requestAnimationFrame(() => requestAnimationFrame(() => {
+                            if (!disposed && video) video.style.opacity = "1";
+                        }));
+                    }, { once: true, signal: listeners.signal });
+                }
+                video.src = source.url;
                 element.appendChild(video);
                 void video.play().catch(cancel);
             }).catch(cancel);

@@ -16,7 +16,9 @@ var relaunchInstall = relaunchTarget
 func SwapInstall(req HelperRequest) error {
 	switch {
 	case strings.HasPrefix(req.Platform, "darwin"):
-		return swapDarwin(req)
+		return swapBundle(req, appBundleName)
+	case req.Platform == "linux-amd64":
+		return swapBundle(req, linuxBundleName)
 	case strings.HasPrefix(req.Platform, "windows"):
 		return swapWindows(req)
 	default:
@@ -28,8 +30,8 @@ func backupRoot(req HelperRequest) string {
 	return req.BackupPath
 }
 
-func swapDarwin(req HelperRequest) error {
-	stagedApp := filepath.Join(req.StagedPath, appBundleName)
+func swapBundle(req HelperRequest, name string) error {
+	stagedApp := filepath.Join(req.StagedPath, name)
 	if err := os.MkdirAll(filepath.Dir(req.BackupPath), 0o755); err != nil {
 		return err
 	}
@@ -46,7 +48,9 @@ func swapDarwin(req HelperRequest) error {
 func swapWindows(req HelperRequest) error {
 	targetDir := filepath.Dir(req.TargetPath)
 	stagedExe := filepath.Join(req.StagedPath, windowsExeName)
-	stagedPlugins := filepath.Join(req.StagedPath, pluginDirName)
+	if err := validateWindowsLayout(req.StagedPath); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(req.BackupPath, 0o755); err != nil {
 		return err
 	}
@@ -54,28 +58,40 @@ func swapWindows(req HelperRequest) error {
 	if err := retryIO(func() error { return renamePath(req.TargetPath, backupExe) }); err != nil {
 		return err
 	}
-	targetPlugins := filepath.Join(targetDir, pluginDirName)
-	backedUpPlugins := false
-	if pathExists(targetPlugins) {
-		backupPlugins := filepath.Join(req.BackupPath, pluginDirName)
-		if err := retryIO(func() error { return renamePath(targetPlugins, backupPlugins) }); err != nil {
-			_ = retryIO(func() error { return renamePath(backupExe, req.TargetPath) })
-			return err
+	for _, name := range windowsSidecarEntries {
+		if name == "media-runtime" && !pathExists(filepath.Join(req.StagedPath, name)) {
+			continue
 		}
-		backedUpPlugins = true
+		target := filepath.Join(targetDir, name)
+		if pathExists(target) {
+			if err := retryIO(func() error { return renamePath(target, filepath.Join(req.BackupPath, name)) }); err != nil {
+				return errors.Join(err, restoreWindows(req))
+			}
+		} else {
+			// Persist absence so rollback of a pre-agent install removes the newly installed host.
+			if err := os.WriteFile(filepath.Join(req.BackupPath, "."+name+"-absent"), nil, 0o600); err != nil {
+				return errors.Join(err, restoreWindows(req))
+			}
+		}
 	}
 	if err := retryIO(func() error { return renamePath(stagedExe, req.TargetPath) }); err != nil {
-		return errors.Join(err, restoreWindows(req, backedUpPlugins))
+		return errors.Join(err, restoreWindows(req))
 	}
-	if pathExists(stagedPlugins) {
-		if err := retryIO(func() error { return renamePath(stagedPlugins, targetPlugins) }); err != nil {
-			return errors.Join(err, restoreWindows(req, backedUpPlugins))
+	for _, name := range windowsSidecarEntries {
+		if name == "media-runtime" && !pathExists(filepath.Join(req.StagedPath, name)) {
+			continue
+		}
+		if err := retryIO(func() error { return renamePath(filepath.Join(req.StagedPath, name), filepath.Join(targetDir, name)) }); err != nil {
+			return errors.Join(err, restoreWindows(req))
 		}
 	}
 	return nil
 }
 
-func restoreWindows(req HelperRequest, pluginsBackedUp bool) error {
+// windowsSidecarEntries 是 qisiTV.exe 旁边随包发行的资源：升级要整组换，回滚要整组还原。
+var windowsSidecarEntries = []string{pluginDirName, "agent-host", cliDirName, "media-runtime"}
+
+func restoreWindows(req HelperRequest) error {
 	targetDir := filepath.Dir(req.TargetPath)
 	backupExe := filepath.Join(req.BackupPath, windowsExeName)
 	var failures []error
@@ -91,14 +107,22 @@ func restoreWindows(req HelperRequest, pluginsBackedUp bool) error {
 	} else if !pathExists(req.TargetPath) {
 		failures = append(failures, fmt.Errorf("没有可还原的程序备份"))
 	}
-	if pluginsBackedUp {
+	for _, name := range windowsSidecarEntries {
+		backup := filepath.Join(req.BackupPath, name)
+		absent := filepath.Join(req.BackupPath, "."+name+"-absent")
+		if !pathExists(backup) && !pathExists(absent) {
+			continue
+		}
 		if err := retryIO(func() error {
-			if err := os.RemoveAll(filepath.Join(targetDir, pluginDirName)); err != nil {
+			if err := os.RemoveAll(filepath.Join(targetDir, name)); err != nil {
 				return err
 			}
-			return renamePath(filepath.Join(req.BackupPath, pluginDirName), filepath.Join(targetDir, pluginDirName))
+			if pathExists(backup) {
+				return renamePath(backup, filepath.Join(targetDir, name))
+			}
+			return os.Remove(absent)
 		}); err != nil {
-			failures = append(failures, fmt.Errorf("还原官方插件失败: %w", err))
+			failures = append(failures, fmt.Errorf("还原随包资源 %s 失败: %w", name, err))
 		}
 	}
 	return errors.Join(failures...)
@@ -106,7 +130,7 @@ func restoreWindows(req HelperRequest, pluginsBackedUp bool) error {
 
 func RestoreBackup(req HelperRequest) error {
 	switch {
-	case strings.HasPrefix(req.Platform, "darwin"):
+	case strings.HasPrefix(req.Platform, "darwin") || req.Platform == "linux-amd64":
 		if !pathExists(req.BackupPath) {
 			if pathExists(req.TargetPath) {
 				return nil
@@ -120,7 +144,7 @@ func RestoreBackup(req HelperRequest) error {
 		}
 		return retryIO(func() error { return renamePath(req.BackupPath, req.TargetPath) })
 	case strings.HasPrefix(req.Platform, "windows"):
-		return restoreWindows(req, pathExists(filepath.Join(req.BackupPath, pluginDirName)))
+		return restoreWindows(req)
 	default:
 		return ErrUnsupported
 	}
@@ -175,16 +199,27 @@ func retryIO(op func() error) error {
 }
 
 func relaunchTarget(req HelperRequest) error {
+	args := []string{}
+	if req.DataDir != "" {
+		args = append(args, "--data-dir="+req.DataDir)
+	}
 	switch {
+	case req.Platform == "linux-amd64":
+		cmd := exec.Command(filepath.Join(req.TargetPath, "qisiTV"), args...)
+		cmd.Dir = req.TargetPath
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		return cmd.Process.Release()
 	case strings.HasPrefix(req.Platform, "darwin"):
-		cmd := exec.Command(filepath.Join(req.TargetPath, "Contents", "MacOS", "qisiTV"))
+		cmd := exec.Command(filepath.Join(req.TargetPath, "Contents", "MacOS", "qisiTV"), args...)
 		cmd.Dir = filepath.Dir(req.TargetPath)
 		if err := cmd.Start(); err != nil {
 			return err
 		}
 		return cmd.Process.Release()
 	case strings.HasPrefix(req.Platform, "windows"):
-		cmd := exec.Command(req.TargetPath)
+		cmd := exec.Command(req.TargetPath, args...)
 		cmd.Dir = filepath.Dir(req.TargetPath)
 		if err := cmd.Start(); err != nil {
 			return err

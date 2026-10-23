@@ -19,7 +19,7 @@ export function CanvasDeleteProjectsDialog() {
         if (!selected.length) return;
         await deleteWorkspaceCanvasProjects(selected);
         assertCurrent();
-        void cleanupImages().catch(() => message.warning("画布已删除，部分素材缓存尚未清理"));
+        void cleanupImages();
         removeSelectedIds(selected);
         message.success(`已删除 ${selected.length} 个${deletionLabel}`);
     };

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,7 +29,8 @@ func RegisterDesktopUserDataRoutes(r *gin.RouterGroup, svc *app.Service) {
 }
 
 func registerUserDataRoutes(r *gin.RouterGroup, svc *app.Service) {
-	registerCanvasControlRoutes(r, svc)
+	registerCanvasLibraryRoutes(r, svc)
+	registerCanvasWorkflowRoutes(r, svc)
 	r.POST("/assets/batch", func(c *gin.Context) {
 		user, err := currentUser(c, svc)
 		if err != nil {
@@ -125,6 +127,19 @@ func registerUserDataRoutes(r *gin.RouterGroup, svc *app.Service) {
 		}
 		ok(c, gin.H{"usage": usage})
 	})
+	r.DELETE("/resources/playback-cache", func(c *gin.Context) {
+		user, err := currentUser(c, svc)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		cleared, err := svc.ClearVideoPreviewCache(user.ID)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"cleared": cleared})
+	})
 	r.POST("/resources", func(c *gin.Context) {
 		user, err := currentUser(c, svc)
 		if err != nil {
@@ -164,8 +179,36 @@ func registerUserDataRoutes(r *gin.RouterGroup, svc *app.Service) {
 			return
 		}
 		resource, err := svc.Resource(user.ID, c.Param("id"))
+		if err == nil && c.Query("metadata") == "ensure" {
+			resource, err = svc.EnsureResourceMediaMetadata(c.Request.Context(), user.ID, c.Param("id"))
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					writeFailure(c, 499, 499, "request_cancelled", "检查素材已取消")
+					return
+				}
+				if errors.Is(err, context.DeadlineExceeded) {
+					writeFailure(c, http.StatusRequestTimeout, http.StatusRequestTimeout, app.ReasonTimeout, "检查素材超时，请重试")
+					return
+				}
+				failService(c, err)
+				return
+			}
+		}
 		if err != nil {
 			fail(c, http.StatusNotFound, err)
+			return
+		}
+		ok(c, gin.H{"resource": resource})
+	})
+	r.POST("/resources/:id/playback", func(c *gin.Context) {
+		user, err := currentUser(c, svc)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		resource, err := svc.PrepareResourcePlayback(user.ID, c.Param("id"))
+		if err != nil {
+			failService(c, err)
 			return
 		}
 		ok(c, gin.H{"resource": resource})
@@ -198,9 +241,22 @@ func registerUserDataRoutes(r *gin.RouterGroup, svc *app.Service) {
 		// 副本就绪时用独立 ETag 后缀，避免浏览器拿原件缓存命中 304 而继续黑屏。
 		usePlayback := c.Query("variant") == "playback" && resource.Provider == "local" &&
 			resource.PlaybackStatus == model.PlaybackStatusReady && resource.PlaybackObjectKey != ""
+		var stream *app.ResourceStream
+		if usePlayback {
+			stream, err = svc.OpenResourcePlaybackRange(user.ID, resource.ID)
+			if errors.Is(err, app.ErrPlaybackNotReady) {
+				usePlayback = false
+			} else if err != nil {
+				failService(c, err)
+				return
+			} else {
+				defer stream.Body.Close()
+				resource = stream.Resource
+			}
+		}
 		serveETag := etag
 		if usePlayback {
-			serveETag = etag + ":pb"
+			serveETag = playbackResponseETag(etag)
 		}
 		// 资源 ID 内容不可变（上传永远生成新 ID，不会原地覆盖）：图片可以放心交给浏览器
 		// 磁盘强缓存 30 天，大画布二次打开零请求直读磁盘缓存。视频/音频涉及转码副本
@@ -225,36 +281,14 @@ func registerUserDataRoutes(r *gin.RouterGroup, svc *app.Service) {
 		if ifRange := strings.TrimSpace(c.GetHeader("If-Range")); ifRange != "" && ifRange != serveETag {
 			rangeHeader = ""
 		}
-		var stream *app.ResourceStream
-		if usePlayback {
-			stream, err = svc.OpenResourcePlaybackRange(user.ID, resource.ID)
-			if err == nil {
-				resource = stream.Resource // MimeType 已置 video/mp4
-			} else if errors.Is(err, app.ErrPlaybackNotReady) {
-				// 副本尚未就绪：回退原件，并撤销 :pb 后缀，保证副本就绪后
-				// 浏览器不会拿原件缓存命中 304 而继续黑屏。
-				c.Header("ETag", etag)
-				stream, err = svc.OpenResourceRange(user.ID, resource.ID, rangeHeader)
-				if err != nil {
-					failService(c, err)
-					return
-				}
-			} else {
-				failService(c, err)
-				return
-			}
-		} else {
+		if stream == nil {
 			stream, err = svc.OpenResourceRange(user.ID, resource.ID, rangeHeader)
 			if err != nil {
 				failService(c, err)
 				return
 			}
+			defer stream.Body.Close()
 		}
-		if err != nil {
-			failService(c, err)
-			return
-		}
-		defer stream.Body.Close()
 		if resource.MimeType == "" {
 			resource.MimeType = "application/octet-stream"
 		}
@@ -291,7 +325,9 @@ func registerUserDataRoutes(r *gin.RouterGroup, svc *app.Service) {
 			}
 			assets, pageErr := svc.UserAssetsPage(user.ID, page, pageSize, app.UserAssetPageFilter{
 				Kind: c.Query("kind"), Category: c.Query("category"), FolderID: folderID,
-				Uncategorized: c.Query("uncategorized") == "1", Status: c.Query("status"), Query: c.Query("q"),
+				Uncategorized: queryFlag(c, "uncategorized"), Status: c.Query("status"), Query: c.Query("q"),
+				Favorite: queryFlag(c, "favorite"), Recent: queryFlag(c, "recent"), Project: c.Query("project"),
+				Generated: queryFlag(c, "generated"),
 			})
 			if pageErr != nil {
 				failService(c, pageErr)
@@ -449,7 +485,7 @@ func registerUserDataRoutes(r *gin.RouterGroup, svc *app.Service) {
 			failService(c, err)
 			return
 		}
-		if err := svc.DeleteUserAsset(user.ID, c.Param("id")); err != nil {
+		if err := svc.DeleteUserAsset(user.ID, c.Param("id"), strings.TrimSpace(c.Query("expectedStatus"))); err != nil {
 			failService(c, err)
 			return
 		}
@@ -596,39 +632,6 @@ func registerUserDataRoutes(r *gin.RouterGroup, svc *app.Service) {
 		log.Printf("canvas_restore request_id=%q trace_id=%q actor=%q canvas=%q snapshot=%q base_revision=%d revision=%d", RequestID(c), TraceID(c), user.ID, c.Param("id"), c.Param("snapshotId"), *req.Revision, project.Revision)
 		ok(c, gin.H{"project": project})
 	})
-	r.PUT("/canvas-projects/:id/generated-assets", func(c *gin.Context) {
-		user, err := currentUser(c, svc)
-		if err != nil {
-			failService(c, err)
-			return
-		}
-		policy, available := loadRuntimePolicy(c, svc)
-		if !available || !enforceRateLimit(c, "canvas-write:"+user.ID, policy.Request.CanvasWritePerMinute, time.Minute) {
-			return
-		}
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
-		var req struct {
-			Project json.RawMessage   `json:"project"`
-			Assets  []json.RawMessage `json:"assets"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			fail(c, http.StatusBadRequest, err)
-			return
-		}
-		var identity struct {
-			ID string `json:"id"`
-		}
-		if json.Unmarshal(req.Project, &identity) != nil || identity.ID != c.Param("id") {
-			fail(c, http.StatusBadRequest, app.BadAuthRequest("画布 ID 与请求路径不一致"))
-			return
-		}
-		project, err := svc.CommitUserCanvasProjectAssets(user.ID, req.Project, req.Assets)
-		if err != nil {
-			failService(c, err)
-			return
-		}
-		ok(c, gin.H{"project": project})
-	})
 	r.PUT("/canvas-projects/:id", func(c *gin.Context) {
 		user, err := currentUser(c, svc)
 		if err != nil {
@@ -679,61 +682,6 @@ func registerUserDataRoutes(r *gin.RouterGroup, svc *app.Service) {
 		}
 		ok(c, gin.H{"project": project})
 	})
-	r.DELETE("/canvas-projects/:id/nodes/:nodeId", func(c *gin.Context) {
-		user, err := currentUser(c, svc)
-		if err != nil {
-			failService(c, err)
-			return
-		}
-		project, err := svc.DeleteUserCanvasNode(user.ID, c.Param("id"), c.Param("nodeId"))
-		if err != nil {
-			failService(c, err)
-			return
-		}
-		ok(c, gin.H{"project": project})
-	})
-	r.PATCH("/canvas-projects/:id/nodes/:nodeId", func(c *gin.Context) {
-		user, err := currentUser(c, svc)
-		if err != nil {
-			failService(c, err)
-			return
-		}
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 64<<10)
-		var patch map[string]json.RawMessage
-		if err := c.ShouldBindJSON(&patch); err != nil {
-			fail(c, http.StatusBadRequest, err)
-			return
-		}
-		project, err := svc.UpdateUserCanvasNode(user.ID, c.Param("id"), c.Param("nodeId"), patch)
-		if err != nil {
-			failService(c, err)
-			return
-		}
-		ok(c, gin.H{"project": project})
-	})
-	r.POST("/canvas-projects/:id/connections", func(c *gin.Context) {
-		user, err := currentUser(c, svc)
-		if err != nil {
-			failService(c, err)
-			return
-		}
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 32<<10)
-		var req struct {
-			FromNodeID string                     `json:"fromNodeId"`
-			ToNodeID   string                     `json:"toNodeId"`
-			Connection map[string]json.RawMessage `json:"connection"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			fail(c, http.StatusBadRequest, err)
-			return
-		}
-		project, err := svc.ConnectUserCanvasNodes(user.ID, c.Param("id"), req.FromNodeID, req.ToNodeID, req.Connection)
-		if err != nil {
-			failService(c, err)
-			return
-		}
-		ok(c, gin.H{"project": project})
-	})
 	r.DELETE("/canvas-projects/:id", func(c *gin.Context) {
 		user, err := currentUser(c, svc)
 		if err != nil {
@@ -749,12 +697,17 @@ func registerUserDataRoutes(r *gin.RouterGroup, svc *app.Service) {
 }
 
 func hasUserAssetPageFilters(c *gin.Context) bool {
-	for _, key := range []string{"pageSize", "kind", "category", "folderId", "uncategorized", "status", "q"} {
+	for _, key := range []string{"pageSize", "kind", "category", "folderId", "uncategorized", "status", "q", "favorite", "recent", "project", "generated"} {
 		if _, present := c.GetQuery(key); present {
 			return true
 		}
 	}
 	return false
+}
+
+func queryFlag(c *gin.Context, key string) bool {
+	value := strings.TrimSpace(c.Query(key))
+	return value == "1" || strings.EqualFold(value, "true")
 }
 
 func resourceResponseETag(resource *model.Resource) string {
@@ -773,4 +726,8 @@ func ifNoneMatch(header string, etag string) bool {
 		}
 	}
 	return false
+}
+
+func playbackResponseETag(original string) string {
+	return strings.TrimSuffix(original, `"`) + `:pb"`
 }

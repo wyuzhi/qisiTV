@@ -1,35 +1,15 @@
-import { describe, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
+import { CANVAS_SHORTCUTS } from "../src/lib/canvas/canvas-shortcuts";
 
-import { CANVAS_SHORTCUTS, filterCanvasShortcuts } from "../src/lib/canvas/canvas-shortcuts";
+test("canvas shortcuts keeps the twelve approved actions in display order", () => {
+    expect(CANVAS_SHORTCUTS.map((item) => item.id)).toEqual([
+        "search", "assistant", "focus", "move-tool", "hand-tool", "select-all",
+        "zoom-in", "zoom-out", "actual-size", "fit-canvas", "fit-selection", "escape",
+    ]);
+});
 
-describe("canvas shortcuts", () => {
-    test("uses Ctrl/Cmd + F for search and Shift + Ctrl/Cmd + F for focus mode", () => {
-        expect(CANVAS_SHORTCUTS.find((shortcut) => shortcut.id === "search")?.keys).toEqual([["Ctrl / Cmd", "F"]]);
-        expect(CANVAS_SHORTCUTS.find((shortcut) => shortcut.id === "focus")?.keys).toEqual([["Shift", "Ctrl / Cmd", "F"]]);
-    });
-
-    test("documents LibTV's Option + Shift + F canvas arrange shortcut", () => {
-        expect(CANVAS_SHORTCUTS.find((shortcut) => shortcut.id === "auto-arrange")?.keys).toEqual([["Option", "Shift", "F"]]);
-        expect(filterCanvasShortcuts("自动布局").map((shortcut) => shortcut.id)).toContain("auto-arrange");
-    });
-
-    test("documents default region selection and trackpad-friendly panning", () => {
-        expect(CANVAS_SHORTCUTS.find((shortcut) => shortcut.id === "box-select")?.keys[0]).toEqual(["空白处左键拖动"]);
-        expect(CANVAS_SHORTCUTS.find((shortcut) => shortcut.id === "pan")?.keys).toEqual([
-            ["触控板双指"],
-            ["Space", "左键拖动"],
-            ["中键拖动"],
-        ]);
-    });
-
-    test("searches titles, descriptions, keys and keywords", () => {
-        expect(filterCanvasShortcuts("粘贴").map((shortcut) => shortcut.id)).toContain("paste");
-        expect(filterCanvasShortcuts("缩放").map((shortcut) => shortcut.id)).toEqual(expect.arrayContaining(["zoom-wheel", "zoom-controls", "zoom-presets"]));
-        expect(filterCanvasShortcuts("Alt L").map((shortcut) => shortcut.id)).toContain("batch-connect");
-    });
-
-    test("filters by category without losing the full catalog", () => {
-        expect(filterCanvasShortcuts("", "common").every((shortcut) => shortcut.category === "common")).toBe(true);
-        expect(filterCanvasShortcuts("", "all")).toHaveLength(CANVAS_SHORTCUTS.length);
-    });
+test("canvas shortcuts only documents the approved key combinations", () => {
+    expect(CANVAS_SHORTCUTS.find((item) => item.id === "search")?.keys).toEqual([["⌘", "F"]]);
+    expect(CANVAS_SHORTCUTS.find((item) => item.id === "fit-canvas")?.keys).toEqual([["⌘", "0"], ["⌘", "2"]]);
+    expect(CANVAS_SHORTCUTS.find((item) => item.id === "escape")?.title).toBe("关闭节点搜索");
 });

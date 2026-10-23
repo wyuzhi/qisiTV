@@ -13,6 +13,7 @@ import type { ImageSplitParams } from "@/lib/canvas/canvas-image-data";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
 import { GenerationFailureNotice } from "@/components/generation/generation-failure-notice";
 import { explainGenerationError } from "@/lib/generation-error";
+import { canvasNodeDiagnosticContext } from "@/services/diagnostics/canvas-media-diagnostics";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata, type CanvasWorkspaceMode, type ViewportTransform } from "@/types/canvas";
@@ -49,6 +50,7 @@ type CanvasNodeToolbarProps = {
     onExtractVideoFrames: (node: CanvasNodeData, preset?: "current" | "first" | "last") => void;
     onExtractAudioFromVideo: (node: CanvasNodeData) => void;
     onTrimVideoSegments: (node: CanvasNodeData) => void;
+    onDepthCapture: (node: CanvasNodeData) => void;
     onSubtitles: (node: CanvasNodeData) => void;
     onTimeline: (node: CanvasNodeData) => void;
     extractingVideoFrames: boolean;
@@ -110,6 +112,7 @@ export function CanvasNodeToolbar({
     onExtractVideoFrames,
     onExtractAudioFromVideo,
     onTrimVideoSegments,
+    onDepthCapture,
     onSubtitles,
     onTimeline,
     extractingVideoFrames,
@@ -212,7 +215,7 @@ export function CanvasNodeToolbar({
         };
     }, [anchor === null, containerRef, node, viewport.k, viewport.x, viewport.y]);
 
-    if (!node || !anchor) return null;
+    if (!node || !anchor || node.type === CanvasNodeType.Director || node.metadata?.directorSceneId) return null;
 
     const isImage = node.type === CanvasNodeType.Image;
     const isVideo = node.type === CanvasNodeType.Video;
@@ -271,6 +274,7 @@ export function CanvasNodeToolbar({
         onNodeExtractAudioFromVideo: onExtractAudioFromVideo,
         onNodeTrimVideoSegments: onTrimVideoSegments,
         onNodeCropVideo: onCrop,
+        onNodeDepthCapture: onDepthCapture,
         onNodeReversePrompt: onReversePrompt,
         onNodeToggleFreeResize: onToggleFreeResize,
         onNodeSubtitles: onSubtitles,
@@ -340,8 +344,12 @@ export function CanvasNodeToolbar({
     const utilityTools = inGroup("utility");
     const imageSettingsTools = isImage ? allTools.filter((tool) => tool.id === "replace" || tool.id === "resize" || tool.id === "node-lock") : [];
     const processMenuLabel = compact ? "工具" : isVideo ? "提取素材" : isImage ? "图片工具" : isAudio ? "音频处理" : "文本调整";
-    const videoProcessingTools = registryToolbarTools.filter((tool) => tool.id === "trimRegenerate" || tool.id === "cropVideo");
+    const videoProcessingTools = [
+        ...registryToolbarTools.filter((tool) => tool.id === "trimRegenerate" || tool.id === "cropVideo" || tool.id === "depthCapture"),
+        ...(narrow ? inGroup("workspace") : []),
+    ];
     const videoAudioTool = registryToolbarTools.find((tool) => tool.id === "extractAudio");
+    const videoSubtitleTool = registryToolbarTools.find((tool) => tool.id === "subtitles");
     const videoKeyframeTool = registryToolbarTools.find((tool) => tool.id === "extractFrames");
     const videoKeyframeTools: ToolbarTool[] = videoKeyframeTool
         ? [
@@ -392,11 +400,16 @@ export function CanvasNodeToolbar({
             <div role="toolbar" aria-label="节点快捷工具" className="flex h-10 max-w-full items-center gap-0.5 overflow-visible rounded-[var(--dock-radius-tight)] px-1.5 backdrop-blur-2xl" style={{ ...dockStyle, border: 0 }}>
                 {isVideo ? (
                     <>
+                        <NodeDockToolButton tool={{ id: "ai-upscale", label: "AI超分", icon: <UpscaleToolbarIcon />, group: "process", order: 1, onClick: () => onSuperResolve(node) }} showTooltip={false} />
                         {videoProcessingTools.length ? <NodeDockMenuButton menuId="video-processing" label="视频处理" icon={null} tools={videoProcessingTools} openMenuId={openMenuId} onOpenChange={handleMenuOpenChange} placement="bottomLeft" /> : null}
                         {videoAudioTool ? <NodeDockToolButton tool={videoAudioTool} showTooltip={false} /> : null}
+                        {videoSubtitleTool ? <NodeDockToolButton tool={videoSubtitleTool} showTooltip={false} /> : null}
                         {videoKeyframeTools.length ? (
                             <NodeDockMenuButton menuId="video-keyframes" label="关键帧截取" icon={<Images className="size-3.5" />} tools={videoKeyframeTools} openMenuId={openMenuId} onOpenChange={handleMenuOpenChange} placement="bottomLeft" />
                         ) : null}
+                        {workspaceTools.map((tool) => (
+                            <NodeDockToolButton key={tool.id} tool={tool} />
+                        ))}
                         {videoGlobalTools.length ? <span aria-hidden className="aceternity-dock-separator mx-1 h-5 w-px shrink-0" /> : null}
                         {videoGlobalTools.map((tool) => (
                             <NodeDockToolButton key={tool.id} tool={tool} iconOnly />
@@ -404,6 +417,7 @@ export function CanvasNodeToolbar({
                     </>
                 ) : (
                     <>
+                        {isImage ? <NodeDockToolButton tool={{ id: "ai-upscale", label: "AI超分", icon: <UpscaleToolbarIcon />, group: "process", order: 1, onClick: () => onSuperResolve(node) }} showTooltip={false} /> : null}
                         {(isImage ? imagePrimaryTools : primaryTools).map((tool) => (
                             <NodeDockToolButton key={tool.id} tool={tool} showTooltip={tool.id !== "maskEdit"} />
                         ))}
@@ -439,6 +453,13 @@ export function CanvasNodeToolbar({
             </div>
         </div>
     );
+}
+
+function UpscaleToolbarIcon() {
+    return <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-3" />
+        <path d="M9 2h5v5M14 2 7 9" />
+    </svg>;
 }
 
 function NodeDockToolButton({ tool, iconOnly = false, showTooltip = true }: { tool: ToolbarTool; iconOnly?: boolean; showTooltip?: boolean }) {
@@ -812,7 +833,7 @@ export function CanvasNodeInfoModal({
                                         { code: node.metadata.generationErrorCode || node.metadata.taskErrorCode, message: node.metadata.errorDetails },
                                         { taskId: node.metadata.taskId, model: node.metadata.model, createdAt: node.metadata.taskCreatedAt, stage: node.metadata.taskStage },
                                     )}
-                                    context={{ taskId: node.metadata.taskId, model: node.metadata.model, createdAt: node.metadata.taskCreatedAt, stage: node.metadata.taskStage }}
+                                    context={{ ...canvasNodeDiagnosticContext(node), model: node.metadata.model, createdAt: node.metadata.taskCreatedAt, stage: node.metadata.taskStage, providerRequestId: node.metadata.taskProviderRequestId, failureDiagnostics: node.metadata.taskFailureDiagnostics, errorSummary: node.metadata.generationErrorSummary, completedAt: node.metadata.taskCompletedAt, updatedAt: node.metadata.taskUpdatedAt }}
                                 />
                             </section>
                         ) : null}

@@ -13,7 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func TestWorkspaceModelConfigReturnsBuiltinBeefAPIAndPersistenceMetadata(t *testing.T) {
+func TestWorkspaceModelConfigReturnsPreferredMediaServicesAndPersistenceMetadata(t *testing.T) {
 	router, _ := newModelConfigTestRouter(t)
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/workspace/model-config", nil))
@@ -26,8 +26,8 @@ func TestWorkspaceModelConfigReturnsBuiltinBeefAPIAndPersistenceMetadata(t *test
 	}
 	config, _ := data["config"].(map[string]any)
 	channels, _ := config["channels"].([]any)
-	if len(channels) != 1 || channels[0].(map[string]any)["id"] != "beefapi" {
-		t.Fatalf("builtin BeefAPI missing: %#v", channels)
+	if len(channels) != 2 || channels[0].(map[string]any)["id"] != "qisi-api" || channels[1].(map[string]any)["id"] != "likeai" {
+		t.Fatalf("preferred independent media services missing: %#v", channels)
 	}
 	if models, _ := channels[0].(map[string]any)["models"].([]any); len(models) != 0 {
 		t.Fatalf("model catalog must remain dynamic: %#v", models)

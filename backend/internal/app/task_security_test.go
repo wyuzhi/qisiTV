@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -23,6 +24,25 @@ func TestNormalizeTaskInputStillAllowsSecretProtection(t *testing.T) {
 	protected, _ := config["apiKey"].(string)
 	if protected == "private-key" || !strings.HasPrefix(protected, encryptedSettingPrefix) {
 		t.Fatalf("protected apiKey = %q", protected)
+	}
+}
+
+func TestTaskCustomHeadersAreEncryptedAndRestored(t *testing.T) {
+	svc := &Service{dataDir: t.TempDir()}
+	input := map[string]any{"config": map[string]any{"apiKey": "private-api", "headers": []any{map[string]any{"name": "X-Key", "value": "private-header"}}}}
+	if err := svc.protectTaskSecrets(input); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(input)
+	if strings.Contains(string(body), "private-") {
+		t.Fatal("task secret leaked")
+	}
+	if err := svc.decryptTaskSecrets(input); err != nil {
+		t.Fatal(err)
+	}
+	body, _ = json.Marshal(input)
+	if !strings.Contains(string(body), "private-header") || !strings.Contains(string(body), "private-api") {
+		t.Fatal("task secrets not restored")
 	}
 }
 

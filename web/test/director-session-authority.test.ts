@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { createDirectorTransaction } from "../src/lib/canvas/director/director-gesture-transaction";
-import { isDirectorOutputSnapshotCurrent, mergeDirectorOutputPreview, shouldReinitializeDirectorSession, upsertDirectorSceneById } from "../src/lib/canvas/director/director-session";
+import { isDirectorOutputSnapshotCurrent, isDirectorOutputTargetCurrent, mergeDirectorOutputPreview, shouldReinitializeDirectorSession, upsertDirectorSceneById } from "../src/lib/canvas/director/director-session";
 import { createDirectorScene } from "../src/lib/canvas/director/director-scene";
 import type { DirectorScene } from "../src/types/director";
 
@@ -77,6 +77,26 @@ describe("upsertDirectorSceneById：连续保存不丢 scene（A6 回归）", ()
 });
 
 describe("异步输出只合并预览引用，不覆盖最新场景", () => {
+    test("资源登记完成前后均须确认项目、节点和镜头仍是同一输出目标", () => {
+        const latest = scene("s1");
+        const target = {
+            currentProjectId: "project-1",
+            outputProjectId: "project-1",
+            projectExists: true,
+            sourceNode: { id: "node-1", metadata: { directorSceneId: "s1" } },
+            sourceNodeId: "node-1",
+            latestScene: latest,
+            sceneId: "s1",
+            shotId: latest.shots[0].id,
+        };
+        expect(isDirectorOutputTargetCurrent(target)).toBe(true);
+        expect(isDirectorOutputTargetCurrent({ ...target, currentProjectId: "project-2" })).toBe(false);
+        expect(isDirectorOutputTargetCurrent({ ...target, projectExists: false })).toBe(false);
+        expect(isDirectorOutputTargetCurrent({ ...target, sourceNode: undefined })).toBe(false);
+        expect(isDirectorOutputTargetCurrent({ ...target, sourceNode: { id: "node-1", metadata: { directorSceneId: "s2" } } })).toBe(false);
+        expect(isDirectorOutputTargetCurrent({ ...target, latestScene: undefined })).toBe(false);
+        expect(isDirectorOutputTargetCurrent({ ...target, shotId: "deleted-shot" })).toBe(false);
+    });
     test("保留上传期间发生的场景与镜头编辑", () => {
         const latest = scene("s1", "上传期间改过的标题");
         const shotId = latest.shots[0].id;

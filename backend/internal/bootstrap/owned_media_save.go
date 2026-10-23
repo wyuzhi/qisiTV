@@ -72,6 +72,13 @@ func openLocalOwnedResourceFile(resource *model.Resource, dataDir string) (*os.F
 }
 
 func writeOwnedFileAtomically(dest string, body io.Reader, src *os.File) (returnErr error) {
+	return writeOwnedFileWith(dest, src, func(writer io.Writer) error {
+		_, err := io.Copy(writer, body)
+		return err
+	})
+}
+
+func writeOwnedFileWith(dest string, src *os.File, write func(io.Writer) error) (returnErr error) {
 	if err := rejectSameFile(src, dest); err != nil {
 		return err
 	}
@@ -90,7 +97,7 @@ func writeOwnedFileAtomically(dest string, body io.Reader, src *os.File) (return
 	if err := temporary.Chmod(0o600); err != nil && runtime.GOOS != "windows" {
 		return errors.New("无法写入所选位置")
 	}
-	if _, err := io.Copy(temporary, body); err != nil {
+	if err := write(temporary); err != nil {
 		return errors.New("无法写出文件")
 	}
 	if err := temporary.Sync(); err != nil {

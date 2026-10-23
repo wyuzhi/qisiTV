@@ -30,7 +30,6 @@ type verifiedUpdate struct {
 type stagedUpdate struct {
 	version  string
 	notes    string
-	root     string
 	archive  string
 	platform string
 	artifact PlatformArtifact
@@ -43,52 +42,61 @@ type Host struct {
 }
 
 type Options struct {
-	CurrentVersion  string
-	DataDir         string
-	FeedURL         string
-	PublicKey       string
-	Platform        string
-	Client          *http.Client
-	StagingRoot     string
-	FeedTimeout     time.Duration
-	DownloadTimeout time.Duration
-	Locate          func() (Target, error)
-	Helper          func(HelperRequest) error
-	Quit            func() error
-	ParentPID       int
+	PackageManaged bool
+	CurrentVersion string
+	DataDir        string
+	FeedURL        string
+	PublicKey      string
+	Platform       string
+	Client         *http.Client
+	StagingRoot    string
+	FeedTimeout    time.Duration
+	IdleTimeout    time.Duration
+	RetryBackoff   func(stall int) time.Duration
+	Locate         func() (Target, error)
+	Helper         func(HelperRequest) error
+	Quit           func() error
+	ParentPID      int
 }
 
 type Engine struct {
-	mu              sync.Mutex
-	action          string
-	state           UpdateState
-	enabled         bool
-	currentVersion  string
-	feedURL         string
-	publicKey       ed25519.PublicKey
-	platform        string
-	client          *http.Client
-	stagingRoot     string
-	feedTimeout     time.Duration
-	downloadTimeout time.Duration
-	locate          func() (Target, error)
-	helper          func(HelperRequest) error
-	quit            func() error
-	parentPID       int
-	verified        *verifiedUpdate
-	staged          *stagedUpdate
-	helperProc      *os.Process
-	helperDone      <-chan error
-	dataDir         string
+	mu             sync.Mutex
+	action         string
+	state          UpdateState
+	enabled        bool
+	currentVersion string
+	feedURL        string
+	publicKey      ed25519.PublicKey
+	platform       string
+	client         *http.Client
+	stagingRoot    string
+	feedTimeout    time.Duration
+	idleTimeout    time.Duration
+	retryBackoff   func(stall int) time.Duration
+	systemClient   bool
+	meter          rateMeter
+	logMu          sync.Mutex
+	logPath        string
+	locate         func() (Target, error)
+	helper         func(HelperRequest) error
+	quit           func() error
+	parentPID      int
+	verified       *verifiedUpdate
+	staged         *stagedUpdate
+	helperProc     *os.Process
+	helperDone     <-chan error
+	dataDir        string
 }
 
 func New(host Host) *Engine {
 	opts := Options{
 		CurrentVersion: host.CurrentVersion,
 		DataDir:        host.DataDir,
+		StagingRoot:    filepath.Join(host.DataDir, "cache", "updates"),
 		Quit:           host.Quit,
 		FeedURL:        FeedURL,
 		PublicKey:      PublicKey,
+		PackageManaged: packageManagedExecutable(),
 	}
 	return NewWithOptions(opts)
 }
@@ -96,25 +104,31 @@ func New(host Host) *Engine {
 func NewWithOptions(opts Options) *Engine {
 	current := stringsOr(opts.CurrentVersion, buildinfo.Current().Version)
 	engine := &Engine{
-		currentVersion:  current,
-		client:          opts.Client,
-		stagingRoot:     opts.StagingRoot,
-		feedTimeout:     opts.FeedTimeout,
-		downloadTimeout: opts.DownloadTimeout,
-		locate:          opts.Locate,
-		helper:          opts.Helper,
-		quit:            opts.Quit,
-		parentPID:       opts.ParentPID,
-		dataDir:         opts.DataDir,
+		currentVersion: current,
+		client:         opts.Client,
+		stagingRoot:    opts.StagingRoot,
+		feedTimeout:    opts.FeedTimeout,
+		idleTimeout:    opts.IdleTimeout,
+		retryBackoff:   opts.RetryBackoff,
+		locate:         opts.Locate,
+		helper:         opts.Helper,
+		quit:           opts.Quit,
+		parentPID:      opts.ParentPID,
+		dataDir:        opts.DataDir,
+		logPath:        updateLogPath(opts.DataDir),
 	}
 	if engine.client == nil {
 		engine.client = newHTTPClient()
+		engine.systemClient = true
+	}
+	if engine.retryBackoff == nil {
+		engine.retryBackoff = defaultRetryBackoff
 	}
 	if engine.feedTimeout <= 0 {
 		engine.feedTimeout = 30 * time.Second
 	}
-	if engine.downloadTimeout <= 0 {
-		engine.downloadTimeout = 10 * time.Minute
+	if engine.idleTimeout <= 0 {
+		engine.idleTimeout = 60 * time.Second
 	}
 	if engine.locate == nil {
 		engine.locate = func() (Target, error) {
@@ -149,6 +163,10 @@ func NewWithOptions(opts Options) *Engine {
 	} else if platform, err := CurrentPlatform(); err == nil {
 		engine.platform = platform
 	}
+	if opts.PackageManaged {
+		engine.enabled = false
+		engine.state.Error = "请下载新版 DEB 安装包更新。"
+	}
 	status := StatusIdle
 	if !engine.enabled {
 		status = StatusDisabled
@@ -162,9 +180,7 @@ func NewWithOptions(opts Options) *Engine {
 }
 
 func (e *Engine) Status() UpdateState {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.state.clone()
+	return e.snapshot()
 }
 
 func (e *Engine) CheckForUpdate(ctx context.Context) (UpdateState, error) {
@@ -191,6 +207,7 @@ func (e *Engine) CheckForUpdate(ctx context.Context) (UpdateState, error) {
 	})
 	payload, err := e.fetchFeed(ctx)
 	if err != nil {
+		e.logf("check failed route=%s: %v", e.route(e.feedURL), rawCause(err))
 		e.fail(publicError(err))
 		return e.snapshot(), wrapPublic(err)
 	}
@@ -253,6 +270,7 @@ func (e *Engine) DownloadUpdate(ctx context.Context) (UpdateState, error) {
 		return e.snapshot(), ErrNotAvailable
 	}
 	e.set(func(state *UpdateState) {
+		state.InstallPrepared = false
 		state.Status = StatusDownloading
 		state.LatestVersion = verified.payload.Version
 		state.ReleaseNotes = verified.payload.Notes
@@ -266,41 +284,48 @@ func (e *Engine) DownloadUpdate(ctx context.Context) (UpdateState, error) {
 		return e.snapshot(), err
 	}
 	archivePath := filepath.Join(stageRoot, "update.zip")
+	stagingAccepted := false
+	defer func() {
+		// Only remove this invocation's incomplete download, never recovery data.
+		if !stagingAccepted {
+			_ = os.RemoveAll(stageRoot)
+		}
+	}()
 	if err := e.downloadArchive(ctx, verified.artifact, archivePath); err != nil {
+		// The staging directory is still empty here; resumable bytes live in
+		// the shared downloads directory.
+		_ = os.RemoveAll(stageRoot)
+		e.logf("download failed: %v", rawCause(err))
 		e.fail(publicError(err))
 		return e.snapshot(), wrapPublic(err)
 	}
-	extracted := filepath.Join(stageRoot, "extracted")
-	if err := extractSecureZip(archivePath, extracted, defaultExtractLimits()); err != nil {
-		e.fail(publicError(ErrInvalidArchive))
-		return e.snapshot(), ErrInvalidArchive
-	}
-	if err := validateExtractedLayout(extracted, verified.platform); err != nil {
-		e.fail(publicError(ErrInvalidArchive))
-		return e.snapshot(), ErrInvalidArchive
-	}
+	// Keep the signed archive only. Extract once on the installation volume,
+	// and validate the entire layout before the running application can exit.
 	e.mu.Lock()
 	e.staged = &stagedUpdate{
 		version:  verified.payload.Version,
 		notes:    verified.payload.Notes,
-		root:     extracted,
 		archive:  archivePath,
 		platform: verified.platform,
 		artifact: verified.artifact,
 	}
 	e.mu.Unlock()
+	stagingAccepted = true
 	e.set(func(state *UpdateState) {
 		state.Status = StatusReady
 		state.LatestVersion = verified.payload.Version
 		state.ReleaseNotes = verified.payload.Notes
 		state.DownloadedBytes = verified.artifact.Size
 		state.TotalBytes = verified.artifact.Size
+		state.Reconnecting = false
 		state.Error = ""
 	})
 	return e.snapshot(), nil
 }
 
 func (e *Engine) InstallUpdate(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
 	if err := e.begin(actionInstall); err != nil {
 		return err
 	}
@@ -316,16 +341,29 @@ func (e *Engine) InstallUpdate(ctx context.Context) error {
 		return ErrNotReady
 	}
 	e.set(func(state *UpdateState) {
+		state.InstallPrepared = false
 		state.Status = StatusInstalling
 		state.Error = ""
 	})
 	if err := e.prepareAndStartHelper(ctx, staged); err != nil {
-		e.fail(publicError(err))
-		return wrapPublic(err)
+		state := e.snapshot()
+		e.logf("install failure phase=%s completedFiles=%d totalFiles=%d timeout=%t", state.Phase, state.CompletedFiles, state.TotalFiles, errors.Is(err, ErrPreparationTimeout))
+		e.logf("install preparation failed: %v", err)
+		message := publicInstallError(err)
+		if errors.Is(err, ErrPreparationTimeout) {
+			message = preparationTimeoutMessage(state.Phase)
+		}
+		e.fail(message)
+		return fmt.Errorf("%s", message)
 	}
+	e.set(func(state *UpdateState) { state.InstallPrepared = true })
+	e.setPhase("restarting")
+	e.logf("install prepared version=%s; requesting exit", staged.version)
 	if e.quit != nil {
 		if err := e.quit(); err != nil {
 			e.killHelper()
+			e.logf("install quit failed: %v", err)
+			e.set(func(state *UpdateState) { state.InstallPrepared = false })
 			e.fail("应用无法退出，已取消安装。")
 			return err
 		}
@@ -355,7 +393,8 @@ func (e *Engine) monitorHelper() {
 	e.mu.Unlock()
 	if done != nil {
 		go func() {
-			<-done
+			helperErr := <-done
+			e.logf("install helper stopped: %v", helperErr)
 			// Normally this UI process has exited before the helper completes.
 			// If still alive, quit was vetoed or the helper failed: permit retry.
 			e.mu.Lock()
@@ -365,6 +404,7 @@ func (e *Engine) monitorHelper() {
 				e.helperDone = nil
 				if e.state.Status == StatusInstalling {
 					e.state.Status = StatusError
+					e.state.InstallPrepared = false
 					e.state.Error = "应用未能退出或安装程序已停止，请重试更新。"
 				}
 			}
@@ -391,33 +431,44 @@ func (e *Engine) end() {
 func (e *Engine) snapshot() UpdateState {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.state.clone()
+	state := e.state.clone()
+	if state.Status == StatusDownloading {
+		state.BytesPerSecond = e.meter.current(time.Now())
+	}
+	return state
 }
 
 func (e *Engine) set(fn func(*UpdateState)) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	previous := e.state.Status
 	fn(&e.state)
+	if previous != e.state.Status && e.state.Status != StatusError {
+		e.state.Phase = ""
+		e.state.CompletedFiles = 0
+		e.state.TotalFiles = 0
+	}
 	e.state.CurrentVersion = e.currentVersion
+}
+
+func (e *Engine) setPhase(phase string) {
+	e.set(func(state *UpdateState) {
+		state.Phase = phase
+		state.CompletedFiles = 0
+		state.TotalFiles = 0
+	})
+	e.logf("update phase=%s", phase)
 }
 
 func (e *Engine) fail(message string) {
 	e.set(func(state *UpdateState) {
 		state.Status = StatusError
 		state.Error = message
+		state.Reconnecting = false
 	})
 }
 
-func (e *Engine) addDownloaded(n int64) {
-	e.mu.Lock()
-	e.state.DownloadedBytes += n
-	if e.state.TotalBytes > 0 && e.state.DownloadedBytes > e.state.TotalBytes {
-		e.state.DownloadedBytes = e.state.TotalBytes
-	}
-	e.mu.Unlock()
-}
-
-func (e *Engine) prepareStaging(version string) (string, error) {
+func (e *Engine) updatesRoot() (string, error) {
 	root := e.stagingRoot
 	if root == "" {
 		cache, err := os.UserCacheDir()
@@ -427,6 +478,14 @@ func (e *Engine) prepareStaging(version string) (string, error) {
 		root = filepath.Join(cache, "qisiTV", "updates")
 	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", err
+	}
+	return root, nil
+}
+
+func (e *Engine) prepareStaging(version string) (string, error) {
+	root, err := e.updatesRoot()
+	if err != nil {
 		return "", err
 	}
 	return os.MkdirTemp(root, version+"-")
@@ -454,6 +513,8 @@ func publicError(err error) string {
 		return ErrUnsupported.Error()
 	case isError(err, ErrDisabled):
 		return ErrDisabled.Error()
+	case networkSentinel(err) != nil:
+		return networkSentinel(err).Error()
 	default:
 		if err != nil {
 			msg := err.Error()
@@ -487,6 +548,8 @@ func wrapPublic(err error) error {
 		return ErrNotReady
 	case isError(err, ErrUnsupported):
 		return ErrUnsupported
+	case networkSentinel(err) != nil:
+		return networkSentinel(err)
 	default:
 		return fmt.Errorf("%s", publicError(err))
 	}

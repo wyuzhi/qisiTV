@@ -1,12 +1,9 @@
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { App } from "antd";
 
 import { createModelChannel, useConfigStore } from "@/stores/use-config-store";
 import { navigateToSettings } from "@/lib/settings-navigation";
-import { workspaceRouteLocation, workspaceRouteUrl } from "@/lib/workspace-url";
-import { isBrowserWorkspace } from "@/services/browser-workspace";
-import { initializeBrowserAgentConnection } from "@/services/browser-agent-connection";
 import { initializeClientDiagnostics, setDiagnosticUserScope } from "@/services/diagnostics/client-diagnostics";
 import { fetchPluginRuntimeState, setUserPluginEnabled } from "@/services/api/plugins";
 import { usePluginStore } from "@/stores/use-plugin-store";
@@ -16,7 +13,10 @@ import { useUserStore } from "@/stores/use-user-store";
 import { appQueryClient } from "@/lib/query-client";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import { getActiveUserScope } from "@/lib/user-scope";
-import { FullScreenLoader } from "@/components/ui/aceternity/full-screen-loader";
+import { confirmDesktopUpdateStartup } from "@/services/desktop-update-startup";
+import { runStartupEnvironmentCheck } from "@/services/diagnostics/environment-startup";
+import { getDesktopAppBinding } from "@/services/desktop-runtime";
+import { appHref } from "@/lib/app-routing";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const config = useConfigStore((state) => state.config);
@@ -33,27 +33,52 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const setPluginStates = usePluginStore((state) => state.setPluginStates);
     const pluginStoreHydrated = usePluginStore((state) => state.hydrated);
     const localMediaCleanupScope = useRef("");
-    const [folderInitialized, setFolderInitialized] = useState(!isBrowserWorkspace());
+    const updateStartupConfirmed = useRef(false);
+    const environmentScope = useRef("");
 
     useEffect(() => {
-        if (!isBrowserWorkspace()) return;
-        const onSaveError = (event: Event) => {
-            const detail = (event as CustomEvent<{ message?: string }>).detail;
-            message.error(detail?.message || "Agent 生成结果未能写入项目文件夹，请检查目录授权后重试保存", 8);
+        let stopped = false, pending = false;
+        const read = async () => {
+            const consume = getDesktopAppBinding()?.ConsumeSkillLink;
+            if (!consume || pending || !userId) return;
+            pending = true;
+            try {
+                const route = await consume();
+                if (!stopped && route.startsWith("/skills?")) window.location.assign(appHref(route));
+            } finally { pending = false; }
         };
-        window.addEventListener("qisitv:agent-save-error", onSaveError);
-        return () => window.removeEventListener("qisitv:agent-save-error", onSaveError);
-    }, [message]);
+        const timer = window.setInterval(() => void read().catch(() => {}), 1000);
+        void read().catch(() => {});
+        return () => { stopped = true; clearInterval(timer); };
+    }, [userId]);
 
     useEffect(() => {
-        if (!isBrowserWorkspace() || !canvasHydrated) return;
-        let active = true;
-        void import("@/services/local-workspace-repository")
-            .then((module) => module.hydrateLocalCanvasProjectsFromBackend())
-            .catch((error: unknown) => { if (active) message.warning(error instanceof Error ? error.message : "请重新连接项目文件夹"); })
-            .finally(() => { if (active) { initializeBrowserAgentConnection(); setFolderInitialized(true); } });
-        return () => { active = false; };
-    }, [canvasHydrated, message]);
+        if (!userId || !localMode || environmentScope.current === userId) return;
+        environmentScope.current = userId;
+        const controller = new AbortController();
+        void runStartupEnvironmentCheck(controller.signal).then((report) => {
+            if (useUserStore.getState().user?.id === userId && report?.checks.some((check) => check.status === "error" || check.status === "warning")) {
+                message.warning("环境检查发现可能影响创作的问题，可在设置的问题诊断中查看。", 8);
+            }
+        });
+        return () => {
+            controller.abort();
+            if (environmentScope.current === userId) environmentScope.current = "";
+        };
+    }, [localMode, userId, message]);
+
+    useEffect(() => {
+        if (!localMode) return;
+        const confirm = () => {
+            if (updateStartupConfirmed.current || !useAssetStore.persist.hasHydrated() || !useCanvasStore.persist.hasHydrated()) return;
+            updateStartupConfirmed.current = true;
+            void confirmDesktopUpdateStartup().catch((error) => console.warn("升级文件清理将在下次启动时重试", error));
+        };
+        const stopAssets = useAssetStore.persist.onFinishHydration(confirm);
+        const stopCanvases = useCanvasStore.persist.onFinishHydration(confirm);
+        confirm();
+        return () => { stopAssets(); stopCanvases(); };
+    }, [localMode]);
 
     useEffect(() => () => {
         usePluginStore.getState().setRuntimeStatuses({});
@@ -102,7 +127,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     }, []);
 
     useEffect(() => {
-        if (isBrowserWorkspace() || !localMode || !assetsHydrated || !canvasHydrated) return;
+        if (!localMode || !assetsHydrated || !canvasHydrated) return;
         const scope = getActiveUserScope();
         if (localMediaCleanupScope.current === scope) return;
         localMediaCleanupScope.current = scope;
@@ -133,27 +158,16 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         if (handledConfigParams.current) return;
-        const route = workspaceRouteLocation(window.location);
-        const searchParams = new URLSearchParams(route.search);
-        const outerParams = new URLSearchParams(window.location.search);
-        const baseUrl = searchParams.get("baseUrl") || searchParams.get("baseurl") || outerParams.get("baseUrl") || outerParams.get("baseurl");
-        const ignoredApiKey = [searchParams, outerParams].some((params) => params.has("apiKey") || params.has("apikey"));
+        const searchParams = new URLSearchParams(window.location.search);
+        const baseUrl = searchParams.get("baseUrl") || searchParams.get("baseurl");
+        const ignoredApiKey = searchParams.has("apiKey") || searchParams.has("apikey");
         if (!baseUrl && !ignoredApiKey) return;
         handledConfigParams.current = true;
-        for (const params of [searchParams, outerParams]) {
-            for (const key of ["baseUrl", "baseurl", "apiKey", "apikey"]) params.delete(key);
-        }
-        const cleanPath = `${route.pathname}${searchParams.size ? `?${searchParams}` : ""}`;
-        const cleanUrl = new URL(workspaceRouteUrl(cleanPath));
-        if (isBrowserWorkspace()) cleanUrl.search = outerParams.toString();
-        else cleanUrl.hash = window.location.hash;
-        window.history.replaceState(null, "", cleanUrl.href);
-        if (isBrowserWorkspace()) {
-            navigateToSettings({ section: "channels" });
-            if (ignoredApiKey) message.warning("出于安全考虑，链接中的 API Key 已忽略，请在配置中手动填写");
-            else message.info("当前使用 LikeAI 官方地址，请在配置中填写 API Key");
-            return;
-        }
+        searchParams.delete("baseUrl");
+        searchParams.delete("baseurl");
+        searchParams.delete("apiKey");
+        searchParams.delete("apikey");
+        window.history.replaceState(null, "", `${window.location.pathname}${searchParams.size ? `?${searchParams}` : ""}${window.location.hash}`);
         const firstChannel = config.channels[0];
         updateConfig(
             "channels",
@@ -174,5 +188,5 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         else message.success("已导入本地直连地址");
     }, [config.channels, message, updateConfig]);
 
-    return folderInitialized ? <>{children}</> : <FullScreenLoader label="正在打开本机项目" detail="检查项目文件夹与浏览器缓存" />;
+    return <>{children}</>;
 }

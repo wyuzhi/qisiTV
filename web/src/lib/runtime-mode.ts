@@ -25,5 +25,5 @@ export function isLocalRuntimeMode() {
 /** True only after Wails has configured the loopback Go API. */
 export function isNativeDesktopRuntime() {
     return (typeof window !== "undefined" && window.location?.protocol === "wails:")
-        || /^http:\/\/127\.0\.0\.1:\d+\/api$/u.test(String(apiBaseURL));
+        || /^http:\/\/127\.0\.0\.1:\d+\/(?:engine\/)?api$/u.test(String(apiBaseURL));
 }

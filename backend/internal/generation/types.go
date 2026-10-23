@@ -4,27 +4,47 @@ import (
 	"fmt"
 	"time"
 
+	"qisitv/backend/internal/modelcatalog"
 	"qisitv/backend/internal/outbound"
+	"qisitv/backend/internal/provider/workflow"
 )
+
+// Capability JSON is owned by modelcatalog. generation aliases the same types
+// so request contracts keep identical field names without a second schema.
+type ModelCapabilityConfig = modelcatalog.ModelCapabilityConfig
+type TextCapabilityConfig = modelcatalog.TextCapabilityConfig
+type TextReferenceConfig = modelcatalog.TextReferenceConfig
+type ImageCapabilityConfig = modelcatalog.ImageCapabilityConfig
+type ImageReferenceConfig = modelcatalog.ImageReferenceConfig
+type ImageSizeConfig = modelcatalog.ImageSizeConfig
+type ImageSizePreset = modelcatalog.ImageSizePreset
+type ImageQualityConfig = modelcatalog.ImageQualityConfig
+type ParameterSupport = modelcatalog.ParameterSupport
+type VideoCapabilityConfig = modelcatalog.VideoCapabilityConfig
+type VideoReferenceConfig = modelcatalog.VideoReferenceConfig
+type VideoDurationConfig = modelcatalog.VideoDurationConfig
+type VideoBooleanConfig = modelcatalog.VideoBooleanConfig
 
 // Input 是画布生成任务的统一输入合同。
 type Input struct {
-	Mode            string                 `json:"mode"`
-	Prompt          string                 `json:"prompt"`
-	Config          Config                 `json:"config"`
-	ReferenceImages []Media                `json:"referenceImages"`
-	ReferenceVideos []Media                `json:"referenceVideos"`
-	ReferenceAudios []Media                `json:"referenceAudios"`
-	TextHistory     []TextMessage          `json:"textHistory"`
-	Mask            *Media                 `json:"mask"`
-	Metadata        map[string]interface{} `json:"metadata"`
-	AgentRequests   *AgentToolRequests     `json:"agentRequests"`
-	TextOptions     TextOptions            `json:"textOptions"`
-	ImageCapability *ImageCapabilityConfig `json:"-"`
-	StreamText      bool                   `json:"-"`
-	MaxOutputTokens int                    `json:"-"`
-	OnTextDelta     func(string)           `json:"-"`
-	VideoCapability *VideoCapabilityConfig `json:"-"`
+	Upscale          *UpscaleOptions        `json:"upscale,omitempty"`
+	Mode             string                 `json:"mode"`
+	Prompt           string                 `json:"prompt"`
+	Config           Config                 `json:"config"`
+	ReferenceImages  []Media                `json:"referenceImages"`
+	ReferenceVideos  []Media                `json:"referenceVideos"`
+	ReferenceAudios  []Media                `json:"referenceAudios"`
+	TextHistory      []TextMessage          `json:"textHistory"`
+	Mask             *Media                 `json:"mask"`
+	Metadata         map[string]interface{} `json:"metadata"`
+	AgentRequests    *AgentToolRequests     `json:"agentRequests"`
+	TextOptions      TextOptions            `json:"textOptions"`
+	ImageCapability  *ImageCapabilityConfig `json:"-"`
+	StreamText       bool                   `json:"-"`
+	MaxOutputTokens  int                    `json:"-"`
+	OnTextDelta      func(string)           `json:"-"`
+	OnReasoningDelta func(string)           `json:"-"`
+	VideoCapability  *VideoCapabilityConfig `json:"-"`
 }
 
 type TextOptions struct {
@@ -42,10 +62,11 @@ type AgentToolRequests struct {
 
 // CanonicalAgentRequest 是协议无关的画布 Agent 会话合同（域类型；service 侧仍有同结构实现期间兼容）。
 type CanonicalAgentRequest struct {
-	Messages     []map[string]interface{} `json:"messages"`
-	Tools        []map[string]interface{} `json:"tools"`
-	ToolChoice   interface{}              `json:"toolChoice"`
-	SystemPrompt string                   `json:"systemPrompt"`
+	Messages       []map[string]interface{} `json:"messages"`
+	Tools          []map[string]interface{} `json:"tools"`
+	ToolChoice     interface{}              `json:"toolChoice"`
+	SystemPrompt   string                   `json:"systemPrompt"`
+	PromptCacheKey string                   `json:"promptCacheKey,omitempty"`
 }
 
 type TextMessage struct {
@@ -54,39 +75,47 @@ type TextMessage struct {
 }
 
 type Config struct {
-	ChannelID             string                    `json:"channelId"`
-	ChannelModelKey       string                    `json:"channelModelKey,omitempty"`
-	VariantID             string                    `json:"variantId,omitempty"`
-	ProviderModelKey      string                    `json:"providerModelKey,omitempty"`
-	APIFormat             string                    `json:"apiFormat"`
-	InterfaceType         string                    `json:"interfaceType"`
-	BaseURL               string                    `json:"baseUrl"`
-	APIKey                string                    `json:"apiKey"`
-	SecretKey             string                    `json:"secretKey"`
-	Headers               []outbound.OutboundHeader `json:"headers"`
-	Model                 string                    `json:"model"`
-	Size                  string                    `json:"size"`
-	Quality               string                    `json:"quality"`
-	TransparentBackground string                    `json:"transparentBackground"`
-	Count                 string                    `json:"count"`
-	VideoSeconds          string                    `json:"videoSeconds"`
-	VQuality              string                    `json:"vquality"`
-	VideoGenerateAudio    string                    `json:"videoGenerateAudio"`
-	VideoWatermark        string                    `json:"videoWatermark"`
-	ArkPrivateAssetUpload string                    `json:"videoArkPrivateAssetUpload"`
-	AudioVoice            string                    `json:"audioVoice"`
-	AudioFormat           string                    `json:"audioFormat"`
-	AudioSpeed            string                    `json:"audioSpeed"`
-	AudioInstructions     string                    `json:"audioInstructions"`
-	SystemPrompt          string                    `json:"systemPrompt"`
-	CapabilityConfig      *ModelCapabilityConfig    `json:"capabilityConfig"`
-	WorkflowID            string                    `json:"workflowId"`
-	WebappID              string                    `json:"webappId"`
-	WorkflowJSON          map[string]interface{}    `json:"workflowJson"`
-	WorkflowFields        []WorkflowField           `json:"workflowFields"`
-	RunningHubUseWallet   bool                      `json:"runningHubUseWallet"`
-	RunningHubWalletKey   string                    `json:"runningHubWalletApiKey"`
-	RunningHubUploadKey   string                    `json:"runningHubUploadApiKey"`
+	ChannelID                string                    `json:"channelId"`
+	ChannelModelKey          string                    `json:"channelModelKey,omitempty"`
+	VariantID                string                    `json:"variantId,omitempty"`
+	ProviderModelKey         string                    `json:"providerModelKey,omitempty"`
+	APIFormat                string                    `json:"apiFormat"`
+	InterfaceType            string                    `json:"interfaceType"`
+	BaseURL                  string                    `json:"baseUrl"`
+	ReferenceAssetOrigin     string                    `json:"referenceAssetOrigin,omitempty"`
+	ReferenceMediaTransport  map[string]string         `json:"referenceMediaTransport,omitempty"`
+	APIKey                   string                    `json:"apiKey"`
+	SecretKey                string                    `json:"secretKey"`
+	Headers                  []outbound.OutboundHeader `json:"headers"`
+	Model                    string                    `json:"model"`
+	Size                     string                    `json:"size"`
+	Quality                  string                    `json:"quality"`
+	TransparentBackground    string                    `json:"transparentBackground"`
+	SeedreamMode             string                    `json:"seedreamMode,omitempty"`
+	SeedreamMaxImages        string                    `json:"seedreamMaxImages,omitempty"`
+	SeedreamOutputFormat     string                    `json:"seedreamOutputFormat,omitempty"`
+	SeedreamOptimize         string                    `json:"seedreamOptimize,omitempty"`
+	SeedreamWatermark        string                    `json:"seedreamWatermark,omitempty"`
+	Count                    string                    `json:"count"`
+	VideoSeconds             string                    `json:"videoSeconds"`
+	VQuality                 string                    `json:"vquality"`
+	VideoGenerateAudio       string                    `json:"videoGenerateAudio"`
+	VideoWatermark           string                    `json:"videoWatermark"`
+	ArkPrivateAssetUpload    string                    `json:"videoArkPrivateAssetUpload"`
+	AudioVoice               string                    `json:"audioVoice"`
+	AudioFormat              string                    `json:"audioFormat"`
+	AudioSpeed               string                    `json:"audioSpeed"`
+	AudioInstructions        string                    `json:"audioInstructions"`
+	SystemPrompt             string                    `json:"systemPrompt"`
+	CapabilityConfig         *ModelCapabilityConfig    `json:"capabilityConfig"`
+	VideoCapabilitiesVersion *string                   `json:"videoCapabilitiesVersion,omitempty"`
+	WorkflowID               string                    `json:"workflowId"`
+	WebappID                 string                    `json:"webappId"`
+	WorkflowJSON             map[string]interface{}    `json:"workflowJson"`
+	WorkflowFields           []WorkflowField           `json:"workflowFields"`
+	RunningHubUseWallet      bool                      `json:"runningHubUseWallet"`
+	RunningHubWalletKey      string                    `json:"runningHubWalletApiKey"`
+	RunningHubUploadKey      string                    `json:"runningHubUploadApiKey"`
 }
 
 type Media struct {
@@ -103,172 +132,18 @@ type Media struct {
 	DurationMs int64  `json:"durationMs"`
 }
 
-// WorkflowField 是云端工作流字段描述。完整工作流执行仍在 service。
-type WorkflowField struct {
-	ID                 string        `json:"id"`
-	NodeID             string        `json:"nodeId"`
-	ClassType          string        `json:"classType,omitempty"`
-	FieldName          string        `json:"fieldName"`
-	Value              interface{}   `json:"value,omitempty"`
-	FieldValue         interface{}   `json:"fieldValue,omitempty"`
-	FieldType          string        `json:"fieldType,omitempty"`
-	Label              string        `json:"label,omitempty"`
-	Role               string        `json:"role,omitempty"`
-	SafeToOverride     *bool         `json:"safeToOverride,omitempty"`
-	OptionsSource      string        `json:"optionsSource,omitempty"`
-	Options            []interface{} `json:"options,omitempty"`
-	Min                interface{}   `json:"min,omitempty"`
-	Max                interface{}   `json:"max,omitempty"`
-	Step               interface{}   `json:"step,omitempty"`
-	RandomEnabled      bool          `json:"randomEnabled,omitempty"`
-	BindPrompt         bool          `json:"bindPrompt,omitempty"`
-	Enabled            *bool         `json:"enabled,omitempty"`
-	Source             string        `json:"source,omitempty"`
-	SourceIndex        int           `json:"sourceIndex,omitempty"`
-	ImageOrder         int           `json:"imageOrder,omitempty"`
-	SourceFromUpstream bool          `json:"sourceFromUpstream,omitempty"`
-	Required           bool          `json:"required,omitempty"`
-	SourceAutomatic    *bool         `json:"sourceAutomatic,omitempty"`
-	sourceConfigured   bool
-}
-
-// SourceConfigured 暴露反序列化期间的来源配置标记，供 service 工作流逻辑使用。
-func (f WorkflowField) SourceConfigured() bool { return f.sourceConfigured }
-
-// SetSourceConfigured 供 service 在归一化路径写入来源配置标记。
-func (f *WorkflowField) SetSourceConfigured(v bool) { f.sourceConfigured = v }
+// WorkflowField 是云端工作流字段描述。实现位于 provider/workflow。
+type WorkflowField = workflow.Field
 
 type MediaHydrationPolicy struct {
-	RequireURL bool
-	PreferURL  bool
+	ManualURL   bool
+	RequireURL  bool
+	PreferURL   bool
+	PreferHTTPS bool
+	KeepLocal   bool
 }
 
-// ModelCapabilityConfig 是模型能力声明，不包含供应商字段名。
-type ModelCapabilityConfig struct {
-	Version int                    `json:"version"`
-	Text    *TextCapabilityConfig  `json:"text,omitempty"`
-	Image   *ImageCapabilityConfig `json:"image,omitempty"`
-	Video   *VideoCapabilityConfig `json:"video,omitempty"`
-}
-
-type TextCapabilityConfig struct {
-	References TextReferenceConfig `json:"references"`
-}
-
-type TextReferenceConfig struct {
-	PromptMaxChars int   `json:"promptMaxChars"`
-	MaxImages      int   `json:"maxImages"`
-	MaxImageBytes  int64 `json:"maxImageBytes"`
-	MaxVideos      int   `json:"maxVideos"`
-	MaxVideoBytes  int64 `json:"maxVideoBytes"`
-}
-
-type ImageCapabilityConfig struct {
-	References            ImageReferenceConfig `json:"references"`
-	Size                  ImageSizeConfig      `json:"size"`
-	Quality               ImageQualityConfig   `json:"quality"`
-	TransparentBackground VideoBooleanConfig   `json:"transparentBackground"`
-	ResponseFormat        ParameterSupport     `json:"responseFormat"`
-	OutputFormat          ParameterSupport     `json:"outputFormat"`
-	MaxOutputs            int                  `json:"maxOutputs"`
-}
-
-type ImageReferenceConfig struct {
-	PromptMaxChars int   `json:"promptMaxChars"`
-	MaxImages      int   `json:"maxImages"`
-	MaxImageBytes  int64 `json:"maxImageBytes"`
-	MaskSupported  bool  `json:"maskSupported"`
-}
-
-type ImageSizeConfig struct {
-	Parameter   string            `json:"parameter"`
-	Values      []string          `json:"values"`
-	Default     string            `json:"default"`
-	AllowCustom bool              `json:"allowCustom"`
-	Presets     []ImageSizePreset `json:"presets,omitempty"`
-}
-
-type ImageSizePreset struct {
-	Tier   string `json:"tier"`
-	Ratio  string `json:"ratio"`
-	Size   string `json:"size"`
-	Width  int    `json:"width"`
-	Height int    `json:"height"`
-}
-
-type ImageQualityConfig struct {
-	Supported bool     `json:"supported"`
-	Values    []string `json:"values"`
-	Default   string   `json:"default"`
-}
-
-type ParameterSupport struct {
-	Supported bool `json:"supported"`
-}
-
-type VideoCapabilityConfig struct {
-	References        VideoReferenceConfig `json:"references"`
-	Duration          VideoDurationConfig  `json:"duration"`
-	DurationSupported *bool                `json:"durationSupported,omitempty"`
-	Ratios            []string             `json:"ratios"`
-	DefaultRatio      string               `json:"defaultRatio"`
-	Resolutions       []string             `json:"resolutions"`
-	DefaultResolution string               `json:"defaultResolution"`
-	GenerateAudio     VideoBooleanConfig   `json:"generateAudio"`
-	Watermark         VideoBooleanConfig   `json:"watermark"`
-	Operations        []string             `json:"operations"`
-	DefaultOperation  string               `json:"defaultOperation"`
-}
-
-type VideoReferenceConfig struct {
-	PromptMaxChars        int     `json:"promptMaxChars"`
-	PromptMaxUTF16Units   int     `json:"promptMaxUtf16Units"`
-	MinImages             int     `json:"minImages"`
-	MaxImages             int     `json:"maxImages"`
-	MaxImageBytes         int64   `json:"maxImageBytes"`
-	MinImageWidth         int     `json:"minImageWidth,omitempty"`
-	MaxImageWidth         int     `json:"maxImageWidth,omitempty"`
-	MinImageHeight        int     `json:"minImageHeight,omitempty"`
-	MaxImageHeight        int     `json:"maxImageHeight,omitempty"`
-	MinImageAspect        float64 `json:"minImageAspect,omitempty"`
-	MaxImageAspect        float64 `json:"maxImageAspect,omitempty"`
-	MinImagePixels        int64   `json:"minImagePixels,omitempty"`
-	MaxImagePixels        int64   `json:"maxImagePixels,omitempty"`
-	MaxVideos             int     `json:"maxVideos"`
-	MaxVideoBytes         int64   `json:"maxVideoBytes"`
-	MaxVideoDuration      int     `json:"maxVideoDurationSeconds"`
-	MinVideoDuration      int     `json:"minVideoDurationSeconds,omitempty"`
-	MaxVideoTotalDuration int     `json:"maxVideoTotalDurationSeconds,omitempty"`
-	MinVideoWidth         int     `json:"minVideoWidth,omitempty"`
-	MaxVideoWidth         int     `json:"maxVideoWidth,omitempty"`
-	MinVideoHeight        int     `json:"minVideoHeight,omitempty"`
-	MaxVideoHeight        int     `json:"maxVideoHeight,omitempty"`
-	MinVideoAspect        float64 `json:"minVideoAspect,omitempty"`
-	MaxVideoAspect        float64 `json:"maxVideoAspect,omitempty"`
-	MinVideoPixels        int64   `json:"minVideoPixels,omitempty"`
-	MaxVideoPixels        int64   `json:"maxVideoPixels,omitempty"`
-	MaxAudios             int     `json:"maxAudios"`
-	MaxAudioBytes         int64   `json:"maxAudioBytes"`
-	MaxAudioDuration      int     `json:"maxAudioDurationSeconds"`
-	MinAudioDuration      float64 `json:"minAudioDurationSeconds,omitempty"`
-	MaxAudioTotalDuration int     `json:"maxAudioTotalDurationSeconds,omitempty"`
-}
-
-type VideoDurationConfig struct {
-	Selection string `json:"selection"`
-	Min       int    `json:"min,omitempty"`
-	Max       int    `json:"max,omitempty"`
-	Step      int    `json:"step,omitempty"`
-	Values    []int  `json:"values,omitempty"`
-	Default   int    `json:"default"`
-}
-
-type VideoBooleanConfig struct {
-	Supported bool `json:"supported"`
-	Default   bool `json:"default"`
-}
-
-type imageResponse struct {
+type ImageResponse struct {
 	Data  []map[string]interface{} `json:"data"`
 	Error *UpstreamError           `json:"error"`
 	Code  *int                     `json:"code"`
@@ -277,7 +152,7 @@ type imageResponse struct {
 
 type UpstreamError struct {
 	Message string `json:"message"`
-	Code    string `json:"code"`
+	Code    any    `json:"code"`
 	Type    string `json:"type"`
 	Param   string `json:"param"`
 }
@@ -288,14 +163,39 @@ type PayloadError struct {
 	message string
 }
 
+func NewPayloadError(raw string, message string) PayloadError {
+	return PayloadError{raw: raw, message: message}
+}
+
+func NewRawPayloadError(raw string) PayloadError {
+	return NewPayloadError(raw, ClassifyText(raw).UserMessage())
+}
+
 func (e PayloadError) Raw() string { return e.raw }
+
+func (e PayloadError) Message() string { return e.message }
 
 // HTTPError 是上游 HTTP 失败的结构化错误。Error() 走 ClassifyHTTP，保留正文供归类。
 type HTTPError struct {
-	StatusCode int
-	Status     string
-	Body       string
-	RetryAfter time.Duration
+	RequestID           string
+	StatusCode          int
+	Status              string
+	Body                string
+	RetryAfter          time.Duration
+	IdempotencyReplayed bool
+}
+
+type ResponseDecodeError struct {
+	Err error
+}
+
+func (e ResponseDecodeError) Error() string { return e.Err.Error() }
+func (e ResponseDecodeError) Unwrap() error { return e.Err }
+
+type CircuitOpenError struct{}
+
+func (CircuitOpenError) Error() string {
+	return "当前渠道连续失败，已暂时熔断，请稍后重试"
 }
 
 // StatePendingError 表示上游任务状态尚未同步，应继续查询原任务。

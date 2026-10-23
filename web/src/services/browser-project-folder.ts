@@ -1,4 +1,5 @@
 import localforage from "localforage";
+import { assertBrowserManifestWritable } from "@/services/browser-engine-migration";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import type { CanvasDrawingSnapshot, CanvasDrawingRender } from "@/lib/canvas/canvas-drawing-storage";
 
@@ -97,6 +98,13 @@ async function writeFile(directory: ProjectDirectoryHandle, name: string, data: 
     catch (error) { await writable.abort().catch(() => undefined); throw error; }
 }
 async function readManifest(directory: ProjectDirectoryHandle): Promise<ProjectFolderManifest | null> {
+    // The engine reserves the original directory before committing its import.
+    // Even an interrupted import can therefore never reopen a second writer.
+    try {
+        const metadata = await directory.getDirectoryHandle(".qisitv");
+        await metadata.getFileHandle("migration-pending.json");
+        conflict("此项目已开始迁移到本机引擎，请在引擎中完成或重试迁移；浏览器不能覆盖原项目。");
+    } catch (error) { if (!notFound(error)) throw error; }
     let file: File;
     try { file = await (await directory.getFileHandle(MANIFEST)).getFile(); }
     catch (error) { if (notFound(error)) return null; throw error; }
@@ -105,6 +113,7 @@ async function readManifest(directory: ProjectDirectoryHandle): Promise<ProjectF
     if (file.size === 0) return null;
     if (file.size > 64 * 1024 * 1024) throw new Error("项目文档过大，已停止读取");
     const data = JSON.parse(await file.text()) as ProjectFolderManifest;
+    assertBrowserManifestWritable(data);
     if (data.format !== "qisitv-project" || data.formatVersion !== 1 || !Number.isSafeInteger(data.revision) || data.revision < 1 || !data.project || typeof data.project.id !== "string" || !data.project.id || !Array.isArray(data.project.nodes) || !Array.isArray(data.project.connections) || !data.media || typeof data.media !== "object") throw new Error(`无法识别 ${directory.name} 中的项目文档`);
     for (const media of Object.values(data.media)) {
         safeMediaPath(media.path);
@@ -305,12 +314,20 @@ export function createProjectFolderStorage(deps: FolderDependencies) {
         await ensureReady();
         const binding = bindings.get(id);
         if (!binding) throw new Error("项目尚未保存到所选文件夹");
+        await readManifest(binding.directory);
         safeSegment(fileName);
         const name = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}-${fileName}`;
         await writeFile(await binding.directory.getDirectoryHandle("exports", { create: true }), name, blob);
         return `${root?.name}/${binding.directory.name}/exports/${name}`;
     };
-    return { getState: () => state, subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, initialize, pick, reauthorize, restore, ensureReady, persist, exportFile, location: (id: string) => bindings.has(id) ? `${root?.name}/${bindings.get(id)!.directory.name}` : undefined };
+    const assertWritable = async (id: string) => {
+        await ensureReady();
+        const binding = bindings.get(id);
+        if (!binding) throw new Error("当前项目尚未保存到所选文件夹，请先迁移项目");
+        const latest = await readManifest(binding.directory);
+        if (!latest || latest.deletedAt) throw new Error("当前项目已删除或原文件丢失，请先恢复项目");
+    };
+    return { getState: () => state, subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, initialize, pick, reauthorize, restore, ensureReady, persist, exportFile, assertWritable, location: (id: string) => bindings.has(id) ? `${root?.name}/${bindings.get(id)!.directory.name}` : undefined };
 }
 
 const handles = localforage.createInstance({ name: "qisitv-folder-handles", storeName: "handles", driver: localforage.INDEXEDDB });
@@ -345,7 +362,5 @@ export const persistProjectToFolder = folderStorage.persist;
 export const getProjectFolderLocation = folderStorage.location;
 export const saveProjectExport = folderStorage.exportFile;
 export async function assertBrowserProjectWritable(id: string) {
-    await ensureFolderReady();
-    if (!getProjectFolderLocation(id)) throw new Error("当前项目尚未保存到所选文件夹，请先迁移项目");
-    if (getProjectFolderState().deletedProjectIds.includes(id)) throw new Error("当前项目已移到回收站，请先恢复项目");
+    await folderStorage.assertWritable(id);
 }

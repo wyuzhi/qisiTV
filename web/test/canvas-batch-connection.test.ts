@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 
 import { buildBatchConnectionCreateRequest, hasBatchConnectionCandidate, planBatchConnections } from "@/lib/canvas/canvas-batch-connection";
 import { canvasConnectionError } from "@/lib/canvas/canvas-connection-policy";
-import { canvasConnectionPath } from "@/components/canvas/canvas-connections";
+import { canvasConnectionPath, shouldShowConnectionVisual } from "@/components/canvas/canvas-connections";
 import { defaultConfig } from "@/stores/use-config-store";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 
@@ -130,6 +130,10 @@ describe("planBatchConnections", () => {
 });
 
 describe("canvas connection anchors", () => {
+    it("keeps idle wire visuals available in the node world layer", () => {
+        expect(shouldShowConnectionVisual({ visualMode: "full", hovered: false, hideVisual: false })).toBe(true);
+    });
+
     it("keeps ordinary node edges centered even when legacy ratios exist", () => {
         const connection: CanvasConnection = {
             id: "ratio-test",

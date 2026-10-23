@@ -1,10 +1,11 @@
-import { ChevronRight, Home, PanelLeftClose, PanelLeftOpen, Plus, Settings2, Sun, Moon, FolderSync } from "lucide-react";
+import { ChevronLeft, ChevronRight, Home, Plug, Plus, Settings2, HardDrive, Sun, Moon, ListChecks, Puzzle } from "lucide-react";
 import { LayoutGroup, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 
 import { BrandLogoFrame } from "@/components/brand/brand-logo";
 import { WorkspaceSidebarUpdate } from "@/components/layout/workspace-sidebar-update";
+import { WorkspaceSidebarSocialLinks } from "@/components/layout/workspace-sidebar-social-links";
 import { Kbd } from "@/components/ui/base/kbd";
 import { navigationTools, type NavigationToolSlug } from "@/constant/navigation-tools";
 import { aceternityMotion } from "@/lib/aceternity-motion";
@@ -13,8 +14,10 @@ import { preloadWorkspaceRoute } from "@/lib/workspace-route-modules";
 import { useUserStore, type FeatureAvailability } from "@/stores/use-user-store";
 import { useAppearanceStore } from "@/stores/use-appearance-store";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { getDesktopAppBinding } from "@/services/desktop-runtime";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
-import { isBrowserWorkspace } from "@/services/browser-workspace";
+import { OnboardingEntry } from "@/components/onboarding/first-creation-guide";
+import { isEngineWebsite } from "@/services/browser-workspace";
 
 export type WorkspaceNavItem = {
     id: string;
@@ -50,8 +53,13 @@ function buildNav(features: FeatureAvailability): { groups: WorkspaceNavGroup[];
                 { id: "home", title: "首页", icon: Home, to: "/" },
                 { ...toolItem("canvas", "/project"), title: "项目" },
                 { ...toolItem("assets", "/assets"), title: "资产" },
+                { ...toolItem("skills", "/skills"), title: "技能" },
+                ...(features.taskCenterEnabled ? [{ id: "tasks", title: "任务中心", icon: ListChecks, to: "/tasks" }] : []),
+                ...(features.pluginCenterEnabled ? [{ id: "plugins", title: "插件", icon: Puzzle, to: "/plugins" }] : []),
                 { id: "settings:channels", title: "模型配置", icon: Settings2, to: "/settings?section=channels" },
-                ...(isBrowserWorkspace() ? [{ id: "local", title: "本地文件与 Agent", icon: FolderSync, to: "/local" }] : []),
+                ...(isEngineWebsite() ? [{ id: "engine", title: "本机项目与引擎", icon: HardDrive, to: "/engine" }] : []),
+                ...(getDesktopAppBinding()?.StorageSettings ? [{ id: "settings:storage", title: "存储设置", icon: HardDrive, to: "/settings?section=storage" }] : []),
+                { id: "agents", title: "qisiTV MCP", icon: Plug, to: "/agents" },
             ],
         },
     ];
@@ -68,7 +76,7 @@ function WorkspaceSwitcher({ collapsed, onNavigate, onExpand, onCollapse }: { co
         return (
             <div className="app-workspace-sidebar-rail-header shrink-0">
                 <button type="button" className="app-workspace-sidebar-rail-button" aria-label="展开侧栏菜单" title="展开侧栏菜单" onClick={onExpand}>
-                    <PanelLeftOpen className="size-4" strokeWidth={1.7} />
+                    <ChevronRight className="size-4" strokeWidth={1.7} />
                 </button>
             </div>
         );
@@ -78,14 +86,14 @@ function WorkspaceSwitcher({ collapsed, onNavigate, onExpand, onCollapse }: { co
         <div className="app-workspace-sidebar-brand-row relative shrink-0 px-3 pt-3">
             <Link to="/" onClick={onNavigate} className="app-workspace-sidebar-brand-button group" aria-label={`${appearance.brandName}首页`}>
                 <span className="flex min-w-0 items-center gap-2">
-                    <BrandLogoFrame className="app-workspace-brand-mark grid size-8 shrink-0 place-items-center rounded-[var(--r-sm)] shadow-sm" logoClassName="size-5 object-contain" alt="" fallback={<span className="app-workspace-brand-placeholder" aria-hidden />} />
+                    <BrandLogoFrame className="app-workspace-brand-mark grid size-8 shrink-0 place-items-center rounded-[var(--r-sm)] shadow-sm" logoClassName="size-5 object-contain" alt="" fallback={<span className="app-workspace-brand-placeholder" aria-hidden>B</span>} />
                     <span className="flex min-w-0">
                         <span className="app-workspace-brand-wordmark truncate text-[var(--fs-body)] leading-none font-semibold">{appearance.brandName}</span>
                     </span>
                 </span>
             </Link>
             <button type="button" className="app-workspace-sidebar-collapse-button" aria-label="收起侧栏" title="收起侧栏" onClick={onCollapse}>
-                <PanelLeftClose className="size-4" strokeWidth={1.7} />
+                <ChevronLeft className="size-4" strokeWidth={1.7} />
             </button>
         </div>
     );
@@ -296,12 +304,7 @@ export function WorkspaceSidebarNav({ collapsed, onNavigate, onOpenSearch, onExp
             </LayoutGroup>
 
             <div className="app-workspace-sidebar-footer shrink-0 px-3 py-3">
-                {isBrowserWorkspace() && !collapsed ? (
-                    <div className="mb-3 text-xs leading-relaxed text-foreground/55">
-                        <Link to="/local" className="hover:underline">选择本机文件夹，让项目与素材自动保存。</Link>
-                        <a href="/" className="mt-2 inline-block text-foreground/75 hover:underline">← 起司主页</a>
-                    </div>
-                ) : null}
+                <OnboardingEntry compact={collapsed} />
                 {footer.length ? (
                     <div className="flex flex-col gap-0.5">
                         {footer.map((item) => (
@@ -309,11 +312,15 @@ export function WorkspaceSidebarNav({ collapsed, onNavigate, onOpenSearch, onExp
                         ))}
                     </div>
                 ) : null}
-                <WorkspaceSidebarUpdate collapsed={collapsed} />
-                <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} aria-label={theme === "dark" ? "切换到浅色模式" : "切换到深色模式"} title={theme === "dark" ? "切换到浅色模式" : "切换到深色模式"} className="flex min-h-9 items-center justify-center gap-2 rounded-lg text-foreground/65 hover:bg-foreground/5 hover:text-foreground focus-visible:outline focus-visible:outline-2">
-                    {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
-                    {!collapsed && <span className="text-sm">{theme === "dark" ? "浅色模式" : "深色模式"}</span>}
-                </AnimatedThemeToggler>
+                <div className={cn("app-workspace-sidebar-contact-row", collapsed && "is-collapsed")}>
+                    <WorkspaceSidebarSocialLinks />
+                </div>
+                <div className={cn("app-workspace-sidebar-utility-row", collapsed && "is-collapsed")}>
+                    <WorkspaceSidebarUpdate collapsed={collapsed} />
+                    <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} aria-label={theme === "dark" ? "切换到浅色模式" : "切换到深色模式"} title={theme === "dark" ? "切换到浅色模式" : "切换到深色模式"} className="app-workspace-theme-action">
+                        {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+                    </AnimatedThemeToggler>
+                </div>
             </div>
         </div>
     );

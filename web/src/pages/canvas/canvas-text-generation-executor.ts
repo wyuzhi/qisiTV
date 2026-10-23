@@ -3,8 +3,10 @@ import { nanoid } from "nanoid";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { getGenerationCount, runCanvasGenerationTaskToConsumer } from "@/lib/canvas/canvas-project-generation";
 import { canvasGenerationPromptMetadata } from "@/lib/canvas/canvas-generation-submission";
+import { projectCanvasGenerationSubmission } from "@/lib/canvas/canvas-generation-live-target";
 import { planTextGenerationTargets } from "@/lib/canvas/canvas-generation-layout";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 
 import type { CanvasGenerationExecution } from "./canvas-generation-executor-types";
 
@@ -31,6 +33,10 @@ export async function executeTextGeneration({
     taskContext,
     skillMetadata,
     retryContext,
+    clientOperationId,
+    nodesRef,
+    canvasNodes,
+    canvasConnections,
 }: CanvasGenerationExecution) {
     const isConfigNode = sourceNode?.type === CanvasNodeType.Config;
     const isDirectTextTarget = sourceNode?.type === CanvasNodeType.Text && !sourceNode.metadata?.content?.trim() && !editingTextNode;
@@ -52,10 +58,16 @@ export async function executeTextGeneration({
             },
             width: textConfig.width,
             height: textConfig.height,
-            metadata: { ...canvasGenerationPromptMetadata(prompt, effectivePrompt), status: NODE_STATUS_LOADING, fontSize: 14, ...skillMetadata },
+            metadata: { ...canvasGenerationPromptMetadata(prompt, effectivePrompt), status: NODE_STATUS_LOADING, generatedFromNodeId: nodeId, fontSize: 14, ...skillMetadata },
         }));
-        setNodes((current) => [...current.map((node) => (node.id === nodeId && (isConfigNode || generateInPlace) ? { ...node, metadata: { ...node.metadata, ...canvasGenerationPromptMetadata(prompt, effectivePrompt), status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)), ...childNodes]);
-        setConnections((current) => [...current, ...childIds.map((childId) => ({ id: nanoid(), fromNodeId: nodeId, toNodeId: childId }))]);
+        const project = useCanvasStore.getState().openProject(projectId);
+        const currentNodes = nodesRef.current.length ? nodesRef.current : project?.nodes || canvasNodes;
+        const nextNodes = [...currentNodes.map((node) => (node.id === nodeId && (isConfigNode || generateInPlace) ? { ...node, metadata: { ...node.metadata, ...canvasGenerationPromptMetadata(prompt, effectivePrompt), status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)), ...childNodes];
+        const nextConnections = [...(project?.connections || canvasConnections), ...childIds.map((childId) => ({ id: nanoid(), fromNodeId: nodeId, toNodeId: childId }))];
+        if (project) useCanvasStore.getState().updateProject(projectId, { nodes: nextNodes, connections: nextConnections });
+        nodesRef.current = nextNodes;
+        setNodes(nextNodes);
+        setConnections(nextConnections);
     }
 
     textTargetIds.forEach((targetNodeId) => startGenerationRequest(targetNodeId, nodeId, nodeId, controller));
@@ -66,6 +78,7 @@ export async function executeTextGeneration({
                     projectId,
                     nodeId: targetNodeId,
                     ...retryContext,
+                    clientOperationId: retryContext?.clientOperationId || (clientOperationId ? `${clientOperationId}:${targetNodeId}` : undefined),
                     mode: "text",
                     prompt: effectivePrompt,
                     config: generationConfig,
@@ -75,6 +88,7 @@ export async function executeTextGeneration({
                     metadata: { sourceNodeId: nodeId, ...taskContext, resolvedCharacterVersions: generationContext.resolvedCharacterVersions, ...skillMetadata },
                 },
                 {
+                    onSubmission: (metadata) => projectCanvasGenerationSubmission(nodesRef, setNodes, [targetNodeId], metadata),
                     bindTask: (task) => bindGenerationTask(targetNodeId, task),
                     consumeTask: (task) => applyGenerationTaskResult(targetNodeId, task),
                 },

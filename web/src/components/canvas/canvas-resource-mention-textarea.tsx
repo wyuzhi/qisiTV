@@ -1,13 +1,13 @@
-import { forwardRef, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent, PointerEvent, TextareaHTMLAttributes } from "react";
 import { createPortal } from "react-dom";
 import { ArrowLeft, ChevronRight, FileText, Folder, Image as ImageIcon, Music2, Pencil, Search, UserRound, Video, Workflow } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
-import { ASSET_CATEGORY_LABELS } from "@/lib/asset-category";
+import { usePersonalAssetLibrary } from "@/hooks/use-personal-asset-library";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { buildAssetMentionReferences, canvasResourceDisplayName, canvasResourceMentionToken, findCanvasResourceAutoLinkMatch, type CanvasResourceAutoLinkMatch, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
-import { useAssetStore, type AssetCategory } from "@/stores/use-asset-store";
+import type { AssetCategory } from "@/stores/use-asset-store";
 import { CanvasNodeType } from "@/types/canvas";
 import { useResolvedCanvasResourceReferences } from "./use-resolved-canvas-resource-references";
 
@@ -48,14 +48,15 @@ type Props = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "onChange" | "val
     activeDropReferenceId?: string | null;
     onReferenceFilesDrop?: (reference: CanvasResourceReference, files: File[]) => void;
     autoLinkEnabled?: boolean;
+    nodeSectionLabel?: string;
 };
 
 export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Props>(function CanvasResourceMentionTextarea(
-    { value, references, onSelectReference, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, mentionMenuWidth = 320, sendOnEnter = true, onContentSizeChange, includeAssetLibrary = false, activeDropReferenceId, onReferenceFilesDrop, autoLinkEnabled = false, ...props },
+    { value, references, onSelectReference, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, mentionMenuWidth = 320, sendOnEnter = true, onContentSizeChange, includeAssetLibrary = false, activeDropReferenceId, onReferenceFilesDrop, autoLinkEnabled = false, nodeSectionLabel = "画布节点", ...props },
     forwardedRef,
 ) {
     const rawTheme = useActiveTheme();
-    const assets = useAssetStore((state) => state.assets);
+    const assets = usePersonalAssetLibrary();
     const theme = canvasThemes[rawTheme as keyof typeof canvasThemes] ?? canvasThemes.dark;
     const containerRef = useRef<HTMLDivElement | null>(null);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -112,7 +113,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
         };
     }, []);
     const canvasReferences = useResolvedCanvasResourceReferences(references);
-    const rawAssetReferences = useMemo(() => includeAssetLibrary ? buildAssetMentionReferences(assets) : [], [assets, includeAssetLibrary]);
+    const rawAssetReferences = useMemo(() => includeAssetLibrary ? buildAssetMentionReferences(assets).map((item) => ({ ...item, active: highlightLabels && value.includes(canvasResourceMentionToken(item)) })) : [], [assets, includeAssetLibrary, highlightLabels, value]);
     const assetReferences = useResolvedCanvasResourceReferences(rawAssetReferences);
     const activeCanvasReferences = useMemo(() => canvasReferences.filter((item) => item.active), [canvasReferences]);
     const availableReferences = useMemo(() => [...(onSelectReference ? canvasReferences : activeCanvasReferences), ...assetReferences], [onSelectReference, canvasReferences, activeCanvasReferences, assetReferences]);
@@ -126,7 +127,8 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
         if (!highlightLabels) return [];
         return [...activeCanvasReferences, ...assetReferences.filter((item) => value.includes(canvasResourceMentionToken(item)))];
     }, [activeCanvasReferences, assetReferences, highlightLabels, value]);
-    // Keep focus and canvas shortcuts isolated when the first/last mention changes.
+    // Keep the same editing surface when the first/last mention changes.
+    // Replacing textarea/contenteditable loses focus and leaks subsequent keys to the canvas.
     const useRichEditor = highlightLabels;
     const autoLinkMatch = useMemo<CanvasResourceAutoLinkMatch | null>(() => autoLinkEnabled && autoLinkCursor !== null ? findCanvasResourceAutoLinkMatch(value, autoLinkCursor, activeCanvasReferences) : null, [activeCanvasReferences, autoLinkCursor, autoLinkEnabled, value]);
     const reportContentSize = useCallback((element: HTMLElement | null) => {
@@ -221,7 +223,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
         });
         observer.observe(container);
         return () => observer.disconnect();
-    }, [onContentSizeChange, reportContentSize, useRichEditor, value]);
+    }, [onContentSizeChange, reportContentSize, style?.fontSize, style?.lineHeight, useRichEditor, value]);
 
     const focusEditor = (selectionStart?: number) => {
         requestAnimationFrame(() => {
@@ -247,9 +249,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
         const editor = editorRef.current ?? textareaRef.current;
         pendingScrollTopRef.current = editor?.scrollTop ?? null;
         onChange(next);
-        // The layout effect restores a focused rich editor synchronously. A queued
-        // focus could otherwise move the caret back after the next keystroke.
-        if (typeof selectionStart === "number" && document.activeElement !== editorRef.current) focusEditor(selectionStart);
+        if (typeof selectionStart === "number") focusEditor(selectionStart);
     };
 
     const closeMention = () => {
@@ -313,9 +313,9 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
             onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
             onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
             onClick={(event) => { event.stopPropagation(); insertAutoLink(autoLinkMatch); }}
-            aria-label={`引用${autoLinkMatch.reference.label}`}
+            aria-label={`引用${canvasResourceDisplayName(autoLinkMatch.reference)}`}
         >
-            <span className="truncate">引用「{autoLinkMatch.query}」→ @{autoLinkMatch.reference.label}</span>
+            <span className="truncate">引用「{autoLinkMatch.query}」→ @{canvasResourceDisplayName(autoLinkMatch.reference)}</span>
             <kbd className="shrink-0 rounded border border-current/20 px-1 font-mono text-[var(--fs-micro)]">Tab</kbd>
         </button>,
         document.body,
@@ -372,6 +372,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
     };
     const menu = mention && availableReferences.length && menuAnchor ? (
         <MentionMenu
+            nodeSectionLabel={nodeSectionLabel}
             anchor={menuAnchor}
             connectedReferences={activeCanvasReferences}
             assetReferences={assetReferences}
@@ -468,7 +469,8 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                                 for (const part of splitMentionText(current, activeReferences)) {
                                     const length = part.type === "mention" ? part.token.length : part.text.length;
                                     const next = offset + length;
-                                    // Insertion appends one separator; remove it with the chip.
+                                    // Mention insertion appends one separator space. Delete
+                                    // it together with the chip on the first Backspace.
                                     const afterMentionSpace = event.key === "Backspace" && start === end && start === next + 1 && current[next] === " ";
                                     const touches = start === end
                                         ? event.key === "Backspace" ? (start > offset && start <= next) || afterMentionSpace : start >= offset && start < next
@@ -488,7 +490,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                                 }
                             }
                         }
-                        if (event.key === "Enter" && (event.nativeEvent.isComposing || composingRef.current || event.keyCode === 229)) return;
+if (event.key === "Enter" && (event.nativeEvent.isComposing || composingRef.current || event.keyCode === 229)) return;
                         if (autoLinkMatch && event.key === "Tab" && !event.shiftKey && !event.nativeEvent.isComposing && !composingRef.current) {
                             event.preventDefault();
                             insertAutoLink(autoLinkMatch);
@@ -529,7 +531,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                         onKeyDown?.(event as unknown as React.KeyboardEvent<HTMLTextAreaElement>);
                     }}
                     onKeyUp={(event) => {
-                        syncEditableMentionFromSelection();
+                        if (event.key !== "Escape") syncEditableMentionFromSelection();
                         props.onKeyUp?.(event as unknown as React.KeyboardEvent<HTMLTextAreaElement>);
                     }}
                     onMouseDown={(event) => props.onMouseDown?.(event as unknown as React.MouseEvent<HTMLTextAreaElement>)}
@@ -778,7 +780,8 @@ function syncInlineMentionPreviews(editor: HTMLElement, references: CanvasResour
     });
 }
 
-function MentionMenu({ anchor, connectedReferences, assetReferences, filteredReferences, query, cursorOffset, activeReferenceId, preferredWidth, onQueryChange, onClose, onSelect, onNavigate }: {
+function MentionMenu({ anchor, connectedReferences, assetReferences, filteredReferences, query, cursorOffset, activeReferenceId, preferredWidth, onQueryChange, onClose, onSelect, onNavigate, nodeSectionLabel }: {
+    nodeSectionLabel: string;
     anchor: HTMLElement;
     connectedReferences: CanvasResourceReference[];
     assetReferences: CanvasResourceReference[];
@@ -828,15 +831,12 @@ function MentionMenu({ anchor, connectedReferences, assetReferences, filteredRef
         selectedRef.current = true;
         onSelect(reference);
     };
-    const categoryItems = Object.entries(ASSET_CATEGORY_LABELS)
-        .map(([value, label]) => ({ value: value as AssetCategory, label, count: assetReferences.filter((item) => item.category === value).length }))
-        .filter((item) => item.count > 0);
     const connectedNodes = connectedReferences.filter((item) => item.kind !== "skill");
     const skillReferences = connectedReferences.filter((item) => item.kind === "skill");
     const visibleReferences = query
         ? filteredReferences
         : category
-          ? assetReferences.filter((item) => item.category === category)
+          ? assetReferences
           : [];
 
     useLayoutEffect(() => {
@@ -869,7 +869,8 @@ function MentionMenu({ anchor, connectedReferences, assetReferences, filteredRef
             onPointerDown={stopCanvasInteraction}
             onMouseDown={(event) => {
                 stopCanvasInteraction(event);
-                // Navigation replaces buttons; keep focus on the editor/search.
+                // Category buttons are replaced when navigating. Keep focus in
+                // the editor/search so its blur timer cannot dismiss the menu.
                 if (event.target instanceof Element && event.target.closest("button")) event.preventDefault();
             }}
             onClick={(event) => event.stopPropagation()}
@@ -878,7 +879,7 @@ function MentionMenu({ anchor, connectedReferences, assetReferences, filteredRef
                 <Search aria-hidden />
                 <input
                     value={query}
-                    placeholder="搜索节点、素材或技能"
+                    placeholder={nodeSectionLabel === "工作流节点" ? "搜索工作流节点" : "搜索节点、素材或技能"}
                     aria-label="搜索引用素材"
                     onChange={(event) => onQueryChange(event.target.value)}
                     onPointerDown={(event) => event.stopPropagation()}
@@ -927,7 +928,7 @@ function MentionMenu({ anchor, connectedReferences, assetReferences, filteredRef
                             }}
                         >
                             <ArrowLeft aria-hidden />
-                            <span>{ASSET_CATEGORY_LABELS[category]}</span>
+                            <span>个人资产库</span>
                             <small>{visibleReferences.length}</small>
                         </button>
                         <MentionReferenceList references={visibleReferences} activeReferenceId={activeReferenceId} onSelect={selectReference} />
@@ -936,7 +937,7 @@ function MentionMenu({ anchor, connectedReferences, assetReferences, filteredRef
                     <>
                         {connectedNodes.length ? (
                             <section className="canvas-resource-mention-section">
-                                <h4><span>画布节点</span><small>{connectedNodes.length}</small></h4>
+                                <h4><span>{nodeSectionLabel}</span><small>{connectedNodes.length}</small></h4>
                                 <MentionReferenceList references={connectedNodes} activeReferenceId={activeReferenceId} onSelect={selectReference} />
                             </section>
                         ) : null}
@@ -946,12 +947,9 @@ function MentionMenu({ anchor, connectedReferences, assetReferences, filteredRef
                                 <MentionReferenceList references={skillReferences} activeReferenceId={activeReferenceId} onSelect={selectReference} />
                             </section>
                         ) : null}
-                        {categoryItems.length ? (
+                        {assetReferences.length ? (
                             <section className="canvas-resource-mention-section">
-                                <h4><span>素材库</span><small>{assetReferences.length}</small></h4>
-                                {categoryItems.map((item) => (
                                     <button
-                                        key={item.value}
                                         type="button"
                                         className="canvas-resource-mention-folder"
                                         onPointerDown={(event) => {
@@ -961,15 +959,14 @@ function MentionMenu({ anchor, connectedReferences, assetReferences, filteredRef
                                         onClick={(event) => {
                                             event.preventDefault();
                                             event.stopPropagation();
-                                            setCategory(item.value);
+                                            setCategory("other");
                                         }}
                                     >
                                         <Folder aria-hidden />
-                                        <span>{item.label}</span>
-                                        <small>{item.count}</small>
+                                        <span>个人资产库</span>
+                                        <small>{assetReferences.length}</small>
                                         <ChevronRight aria-hidden />
                                     </button>
-                                ))}
                             </section>
                         ) : null}
                     </>
@@ -1010,11 +1007,23 @@ function MentionReferenceList({ references, activeReferenceId, onSelect }: { ref
 }
 
 function ReferencePreview({ reference }: { reference: CanvasResourceReference }) {
+    const [visible, setVisible] = useState(false);
+    const previewRef = useRef<HTMLSpanElement>(null);
+    const references = useMemo(() => [reference], [reference]);
+    const [resolved] = useResolvedCanvasResourceReferences(references, { videoPreviewEnabled: visible });
+    useEffect(() => {
+        const element = previewRef.current;
+        if (!element || reference.kind !== "video") return;
+        const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting));
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, [reference.kind]);
+    return <span ref={previewRef} className="inline-flex shrink-0"><ResolvedReferencePreview reference={resolved} /></span>;
+}
+
+function ResolvedReferencePreview({ reference }: { reference: CanvasResourceReference }) {
     if (reference.kind === "image" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className="canvas-resource-mention-preview is-image" />;
     if (reference.kind === "video" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className="canvas-resource-mention-preview is-video" loading="lazy" decoding="async" />;
-    if (reference.kind === "video" && reference.mediaUrl) {
-        return <video src={reference.mediaUrl} aria-hidden="true" muted playsInline preload="metadata" className="canvas-resource-mention-preview is-video" onLoadedMetadata={(event) => primeVideoPreviewFrame(event.currentTarget)} />;
-    }
     if (reference.kind === "character" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className="canvas-resource-mention-preview is-character" />;
     if (reference.kind === "skill") {
         return (

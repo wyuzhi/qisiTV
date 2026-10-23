@@ -3,7 +3,7 @@ Copyright (C) 2026 qisiTV contributors
 Copyright (C) 2026 BeefTV contributors
 
 qisiTV includes historical MIT material and independent qisiTV contributions,
-plus selected later BeefTV additions under its Source Available License 1.0.
+plus later BeefTV additions under its Source Available License 1.0.
 LICENSE describes the boundary; the complete upstream terms are retained in
 licenses/BeefTV-Source-Available-1.0.txt. Do not treat the new covered portions
 as MIT or assume that deployment permissions transfer to downstream users.
@@ -11,9 +11,9 @@ as MIT or assume that deployment permissions transfer to downstream users.
 Project scope
 -------------
 
-qisiTV is a local-first, single-user desktop workspace for AI-assisted video
-creation. The desktop application uses a React user interface embedded by
-Wails and a Go backend that listens on loopback. Projects, canvas state,
+qisiTV is a local-first, single-user workspace for AI-assisted video
+creation. The web-engine edition uses a browser React interface and a paired
+Go backend listening on loopback; the desktop edition uses Wails. Projects, canvas state,
 generated assets, model-channel settings, and durable task state are stored in
 the user's local workspace. Requests leave the device only when a user invokes
 an externally configured model provider or another explicitly networked tool.
@@ -52,6 +52,11 @@ and video task-recovery adaptations incorporate selected changes from
 Affected components and verification are recorded in
 docs/upstream-sync-20261024.md. This is a modified qisiTV release and does not
 imply endorsement by BeefTV or change the licenses of historical material.
+
+The 2.0 web-engine integration incorporates BeefTV v2.0.3 at
+e13263c948fbbada3724442fc2c9ee6aaea6cfa2, including its assistant, workflows,
+skills client, media processing, director and provider infrastructure.
+Later upstream additions retain the complete Source Available terms.
 
 BeefTV changes
 --------------

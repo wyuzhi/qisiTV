@@ -8,6 +8,7 @@ import (
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/platform"
+	"qisitv/backend/internal/repository"
 )
 
 type (
@@ -101,6 +102,15 @@ func (s *Service) RuntimePolicy() (RuntimePolicySetting, error) {
 	return s.platformDomain().RuntimePolicy()
 }
 
+// Transactional quota checks must read policy through the same connection as
+// usage and mutation; the desktop database deliberately has one connection.
+func (s *Service) runtimePolicyWithRepo(repo *repository.Repository) (RuntimePolicySetting, error) {
+	if s.IsLocalMode() {
+		return platform.SelfUseRuntimePolicy(), nil
+	}
+	return platform.New(repo, nil, nil).RuntimePolicy()
+}
+
 func (s *Service) runtimeConcurrencySetting() (RuntimeTaskPolicy, error) {
 	return s.platformDomain().RuntimeConcurrencySetting()
 }
@@ -159,6 +169,16 @@ func (s *Service) FeatureEnabled(feature string) (bool, error) {
 }
 
 func (s *Service) RequireFeature(feature string) error {
+	if s.IsLocalMode() {
+		enabled, err := s.FeatureEnabled(feature)
+		if err != nil {
+			return err
+		}
+		if enabled {
+			return nil
+		}
+		return Forbidden("当前工作区未开放此功能")
+	}
 	return s.platformDomain().RequireFeature(feature)
 }
 
@@ -183,11 +203,8 @@ func (s *Service) RecordChannelResult(ctx context.Context, channelID string, fai
 }
 
 func (s *Service) Close() error {
-	if s != nil && s.workerID != "" {
-		providerAnalyticsServices.Lock()
-		delete(providerAnalyticsServices.services, s.workerID)
-		providerAnalyticsServices.Unlock()
-	}
+	s.stopGenerationDownloads()
+	s.closeSupportTrace()
 	return nil
 }
 

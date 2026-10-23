@@ -26,7 +26,8 @@ func TestDeferredProviderPollKeepsOriginalTaskIdentityWithoutImmediateReclaim(t 
 		t.Fatal(err)
 	}
 	repo := New(db)
-	if err := repo.DeferRunningTaskForProviderPoll(task.ID, task.LeaseOwner, "后台仍在生成", time.Minute); err != nil {
+	diagnostic := &model.TaskFailureDiagnostics{ExecutionResult: "pending", Requests: []model.TaskRequestEvidence{{Operation: "submit", RequestID: "req-original-submit"}}}
+	if err := repo.DeferRunningTaskForProviderPoll(task.ID, task.LeaseOwner, "后台仍在生成", time.Minute, diagnostic); err != nil {
 		t.Fatal(err)
 	}
 	claimed, err := repo.ClaimNextTask("worker-2", 45*time.Second)
@@ -45,6 +46,9 @@ func TestDeferredProviderPollKeepsOriginalTaskIdentityWithoutImmediateReclaim(t 
 	}
 	if claimed == nil || claimed.ID != task.ID || claimed.ProviderRequestID != task.ProviderRequestID {
 		t.Fatalf("reclaimed task = %#v", claimed)
+	}
+	if claimed.FailureDiagnostics == nil || claimed.FailureDiagnostics.ExecutionResult != "pending" || claimed.FailureDiagnostics.Requests[0].RequestID != "req-original-submit" {
+		t.Fatalf("reclaimed diagnostics = %+v", claimed.FailureDiagnostics)
 	}
 }
 

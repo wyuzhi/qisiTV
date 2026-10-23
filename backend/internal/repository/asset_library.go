@@ -11,6 +11,15 @@ import (
 	"gorm.io/gorm"
 )
 
+var ErrAssetFolderAssignmentConflict = errors.New("asset folder assignment conflict")
+
+const (
+	assetFolderAssignmentAttempts = 3
+	userAssetRecentDuration       = 30 * 24 * time.Hour
+	userAssetLinkedProjectLabel   = "已关联项目"
+	userAssetUnlinkedProjectLabel = "未关联项目"
+)
+
 type UserAssetPageFilter struct {
 	Kind          string
 	Category      string
@@ -18,6 +27,11 @@ type UserAssetPageFilter struct {
 	Uncategorized bool
 	Status        string
 	Query         string
+	Favorite      bool
+	Recent        bool
+	Project       string
+	ProjectID     string // Verified domain-project relation; distinct from display-label Project.
+	Generated     bool
 }
 
 type UserAssetFacetRow struct {
@@ -57,6 +71,47 @@ func (r *Repository) UserAssetFacets(userID string, status string) ([]UserAssetF
 	return kindRows, categoryRows, folderRows, nil
 }
 
+func (r *Repository) UserAssetQuickFilterCounts(userID string) (favorite int64, recent int64, err error) {
+	base := func() *gorm.DB {
+		return r.db.Model(&model.Asset{}).Where("user_id = ? AND kind <> ?", userID, "entity")
+	}
+	if err := userAssetFilteredQuery(base(), UserAssetPageFilter{Status: "active", Favorite: true}, false).Count(&favorite).Error; err != nil {
+		return 0, 0, err
+	}
+	if err := userAssetFilteredQuery(base(), UserAssetPageFilter{Status: "active", Recent: true}, false).Count(&recent).Error; err != nil {
+		return 0, 0, err
+	}
+	return favorite, recent, nil
+}
+
+func (r *Repository) UserAssetProjectCounts(userID string) ([]UserAssetFacetRow, error) {
+	expr := userAssetProjectLabelSQL()
+	var rows []UserAssetFacetRow
+	err := userAssetFilteredQuery(
+		r.db.Model(&model.Asset{}).Where("user_id = ? AND kind <> ?", userID, "entity"),
+		UserAssetPageFilter{Status: "active"},
+		false,
+	).Select(expr + " AS key, COUNT(*) AS count").Group(expr).Scan(&rows).Error
+	return rows, err
+}
+
+func (r *Repository) UserAssetGeneratedCounts(userID string) (total int64, kindRows []UserAssetFacetRow, err error) {
+	base := func() *gorm.DB {
+		return userAssetFilteredQuery(
+			r.db.Model(&model.Asset{}).Where("user_id = ? AND kind <> ?", userID, "entity"),
+			UserAssetPageFilter{Status: "active", Generated: true},
+			false,
+		)
+	}
+	if err := base().Count(&total).Error; err != nil {
+		return 0, nil, err
+	}
+	if err := base().Select("kind AS key, COUNT(*) AS count").Group("kind").Scan(&kindRows).Error; err != nil {
+		return 0, nil, err
+	}
+	return total, kindRows, nil
+}
+
 func userAssetFilteredQuery(query *gorm.DB, filter UserAssetPageFilter, includeSearch bool) *gorm.DB {
 	if value := strings.TrimSpace(filter.Kind); value != "" {
 		query = query.Where("kind = ?", value)
@@ -84,7 +139,39 @@ func userAssetFilteredQuery(query *gorm.DB, filter UserAssetPageFilter, includeS
 			query = query.Where("LOWER(title) LIKE ? OR LOWER(payload_json) LIKE ?", pattern, pattern)
 		}
 	}
+	if filter.Favorite {
+		query = query.Where("json_extract(payload_json, '$.metadata.favorite') IN (1, 'true', '1')")
+	}
+	if filter.Recent {
+		query = query.Where("updated_at >= ?", time.Now().UTC().Add(-userAssetRecentDuration))
+	}
+	if value := strings.TrimSpace(filter.Project); value != "" {
+		query = query.Where(userAssetProjectLabelSQL()+" = ?", value)
+	}
+	if value := strings.TrimSpace(filter.ProjectID); value != "" {
+		query = query.Where("EXISTS (SELECT 1 FROM project_asset_links WHERE project_asset_links.asset_id = assets.id AND project_asset_links.project_id = ?)", value)
+	}
+	if filter.Generated {
+		query = query.Where(userAssetGeneratedSQL())
+	}
 	return query
+}
+
+func userAssetGeneratedSQL() string {
+	return `(kind IN ('image','video','audio') AND (
+		json_extract(payload_json, '$.source') = '生成任务'
+		OR json_type(payload_json, '$.metadata.generationEffectKey') = 'text'
+	))`
+}
+
+func userAssetProjectLabelSQL() string {
+	return `CASE
+		WHEN TRIM(COALESCE(CAST(json_extract(payload_json, '$.metadata.projectName') AS TEXT), '')) != ''
+			THEN TRIM(CAST(json_extract(payload_json, '$.metadata.projectName') AS TEXT))
+		WHEN COALESCE(json_array_length(payload_json, '$.metadata.projectIds'), 0) > 0
+			THEN '` + userAssetLinkedProjectLabel + `'
+		ELSE '` + userAssetUnlinkedProjectLabel + `'
+	END`
 }
 
 func (r *Repository) AssetFolders(userID string) ([]model.AssetFolder, error) {
@@ -136,8 +223,24 @@ func (r *Repository) UpdateAssetFolder(folder *model.AssetFolder) error {
 
 func (r *Repository) MoveUserAssetsToFolder(userID string, assetIDs []string, folderID string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		if strings.TrimSpace(folderID) != "" {
+			var folder model.AssetFolder
+			if err := tx.First(&folder, "id = ? AND user_id = ?", folderID, userID).Error; err != nil {
+				return err
+			}
+		}
 		return moveUserAssetsToFolder(tx, userID, assetIDs, folderID)
 	})
+}
+
+func (r *Repository) AssignUserAssetFolder(userID, assetID, folderID, payloadJSON string, expectedPayloadJSON string, now time.Time) (bool, error) {
+	result := r.db.Model(&model.Asset{}).Where("id = ? AND user_id = ? AND payload_json = ?", assetID, userID, expectedPayloadJSON).Updates(map[string]any{
+		"folder_id": folderID, "payload_json": payloadJSON, "updated_at": now,
+	})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
 }
 
 func (r *Repository) DeleteAssetFolder(userID string, folderID string) error {
@@ -179,19 +282,36 @@ func moveUserAssetsToFolder(tx *gorm.DB, userID string, assetIDs []string, folde
 	if len(assets) != len(assetIDs) {
 		return gorm.ErrRecordNotFound
 	}
-	now := time.Now().UTC()
 	for index := range assets {
-		payloadJSON, err := assetPayloadWithFolder(assets[index].PayloadJSON, folderID, now)
-		if err != nil {
-			return err
-		}
-		if err := tx.Model(&model.Asset{}).Where("id = ? AND user_id = ?", assets[index].ID, userID).Updates(map[string]any{
-			"folder_id": folderID, "payload_json": payloadJSON, "updated_at": now,
-		}).Error; err != nil {
+		if err := assignAssetFolder(tx, userID, assets[index], folderID); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func assignAssetFolder(tx *gorm.DB, userID string, item model.Asset, folderID string) error {
+	current := item
+	for attempt := 0; attempt < assetFolderAssignmentAttempts; attempt++ {
+		now := time.Now().UTC()
+		payloadJSON, err := assetPayloadWithFolder(current.PayloadJSON, folderID, now)
+		if err != nil {
+			return err
+		}
+		result := tx.Model(&model.Asset{}).Where("id = ? AND user_id = ? AND payload_json = ?", current.ID, userID, current.PayloadJSON).Updates(map[string]any{
+			"folder_id": folderID, "payload_json": payloadJSON, "updated_at": now,
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 1 {
+			return nil
+		}
+		if err := tx.Where("id = ? AND user_id = ?", current.ID, userID).First(&current).Error; err != nil {
+			return err
+		}
+	}
+	return ErrAssetFolderAssignmentConflict
 }
 
 func assetPayloadWithFolder(payloadJSON string, folderID string, updatedAt time.Time) (string, error) {

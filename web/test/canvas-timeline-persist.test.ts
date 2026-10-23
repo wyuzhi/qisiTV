@@ -106,9 +106,25 @@ describe("canvas timeline persistence", () => {
 
     test("timeline dialog subtitle does not expose an implementation phase", () => {
         const source = readFileSync(new URL("../src/components/canvas/canvas-timeline-dialog.tsx", import.meta.url), "utf8");
-        expect(source).toContain("轨道编辑与素材编排");
+        expect(source).toContain("多轨时间线");
         expect(source).not.toContain("第二期 ·");
         expect(source).toContain("loading={saving}");
         expect(source).toContain("if (saving) return");
+    });
+
+    test("all dialog close controls guard finalization and rendering cancellation aborts", () => {
+        const source = readFileSync(new URL("../src/components/canvas/canvas-timeline-dialog.tsx", import.meta.url), "utf8");
+        expect(source).toContain("onCancel={handleClose}");
+        expect(source).toContain("disabled={saving || finalizingExport} onClick={handleClose}");
+        expect(source).not.toContain("onClick={onClose}");
+        expect(source).toContain("disabled={saving || exporting || !draft.clips.length} onClick={() => void handleSave()}");
+        const close = source.slice(source.indexOf("const handleClose ="), source.indexOf("const handleSave ="));
+        expect(close).toContain("if (saving || finalizingExportRef.current) return");
+        expect(close.indexOf("exportControllerRef.current?.abort()")).toBeLessThan(close.indexOf("onClose()"));
+        const save = source.slice(source.indexOf("const handleSave ="), source.indexOf("const runExport ="));
+        expect(save.indexOf("if (exportControllerRef.current) return")).toBeLessThan(save.indexOf("runTimelineDialogSaveAttempt"));
+        expect(source).toContain("if (!finalizingExportRef.current) exportControllerRef.current?.abort()");
+        expect(source.match(/finalizingExportRef.current = true;\s+setFinalizingExport\(true\)/g)).toHaveLength(2);
+        expect(source).toContain("finalizingExportRef.current = false;");
     });
 });

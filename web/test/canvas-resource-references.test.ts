@@ -155,22 +155,35 @@ describe("canvas resource mention slots", () => {
     test("finds resource-backed media nodes that must be linked before syncing a canvas snapshot", () => {
         const source = videoNode("legacy-video");
         source.metadata = { content: "https://cdn.example.com/video.mp4", storageKey: "resource:video-resource" };
+        const urlOnly = imageNode("url-only-image");
+        urlOnly.metadata = { content: "/api/resources/image-resource/file" };
         const alreadyBound = videoNode("bound-video");
         alreadyBound.metadata = { content: "https://cdn.example.com/other.mp4", storageKey: "resource:other-resource", assetId: "asset-other" };
         const localOnly = imageNode("local-image");
         localOnly.metadata = { content: "data:image/png;base64,local" };
+        const substringInQuery = imageNode("query-image");
+        substringInQuery.metadata = { content: "https://cdn.example.com/preview.png?redirect=/api/resources/fake-res/file" };
+        const substringInNote = imageNode("note-image");
+        substringInNote.metadata = { content: "note: see /api/resources/fake-res/file" };
 
-        expect(canvasNodesMissingResourceAssetBinding([source, alreadyBound, localOnly]).map((node) => node.id)).toEqual(["legacy-video"]);
+        expect(canvasNodesMissingResourceAssetBinding([source, urlOnly, alreadyBound, localOnly, substringInQuery, substringInNote]).map((node) => node.id)).toEqual(["legacy-video", "url-only-image"]);
+
+        const urlOnlyAsset = canvasNodeToAsset(urlOnly, { canvasId: "canvas-1", source: "canvas-upload" });
+        expect(urlOnlyAsset?.kind).toBe("image");
+        expect(urlOnlyAsset && "storageKey" in urlOnlyAsset.data ? urlOnlyAsset.data.storageKey : undefined).toBe("resource:image-resource");
     });
 
-    test("history insert reuses the owned asset for the same resource", () => {
+    test("history insert reuses the owned asset for the same resource without guessing across conflicting siblings", () => {
         const original = videoNode("original");
         original.metadata = { assetId: "asset-owned", storageKey: "resource:audio-owned", content: "/api/resources/audio-owned/file" };
+        const conflictingSibling = videoNode("conflicting");
+        conflictingSibling.metadata = { assetId: "asset-other-copy", storageKey: "resource:audio-owned", content: "/api/resources/audio-owned/file" };
         const history = videoNode("history");
         history.metadata = { storageKey: "resource:audio-owned", content: "/api/resources/audio-owned/file" };
         const bound = bindCanvasNodeResourceAsset(history, [original], []);
         expect(bound.metadata?.assetId).toBe("asset-owned");
         expect(canvasNodesMissingResourceAssetBinding([original, bound])).toEqual([]);
+        expect(bindCanvasNodeResourceAsset(history, [original, conflictingSibling], []).metadata?.assetId).toBeUndefined();
 
         const fromStore = bindCanvasNodeResourceAsset(history, [], [{
             id: "asset-from-store",

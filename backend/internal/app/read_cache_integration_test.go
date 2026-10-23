@@ -63,7 +63,7 @@ func TestCachedTextReplayIsolatesUsersCursorsAndCopies(t *testing.T) {
 	if err != nil || len(result.Deltas) != 1 || result.Deltas[0].Sequence != 2 {
 		t.Fatalf("cursor isolation: %#v %v", result, err)
 	}
-	svc.textReplayReadCache.Clear()
+	svc.TextReplay().ClearCache()
 	if err := db.Model(&model.Task{}).Where("id = ?", "task").Update("status", model.TaskStatusSucceeded).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -133,6 +133,7 @@ func TestRouteCatalogFailureStormAndInvalidatedStaleSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := &Service{repo: repository.New(db), routeCatalogTTL: time.Second, routeCatalogMaxStale: time.Minute}
+	router := svc.ensureRouter()
 	var wg sync.WaitGroup
 	for range 50 {
 		wg.Add(1)
@@ -147,11 +148,11 @@ func TestRouteCatalogFailureStormAndInvalidatedStaleSnapshot(t *testing.T) {
 	if queries.Load() != 1 {
 		t.Fatalf("failure storm retried DB %d times", queries.Load())
 	}
-	svc.routeCatalog = &routeCatalogSnapshot{LoadedAt: time.Now().Add(-2 * time.Second), CatalogVersion: 0}
+	router.TestingReplaceSnapshot(&routeCatalogSnapshot{LoadedAt: time.Now().Add(-2 * time.Second), CatalogVersion: 0})
 	if _, err := svc.routeCatalogSnapshot(); err != nil {
 		t.Fatalf("existing same-version bounded fallback lost: %v", err)
 	}
-	svc.routeCatalogVersion = 1
+	router.TestingSetVersion(1)
 	if _, err := svc.routeCatalogSnapshot(); !errors.Is(err, wantErr) {
 		t.Fatal("explicitly invalidated version was served stale")
 	}

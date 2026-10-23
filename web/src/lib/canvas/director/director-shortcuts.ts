@@ -11,13 +11,13 @@
 
 /**
  * 语义动作。只保留导演台里已经存在真实执行路径的动作：
- * 变换模式（DirectorViewportDock 的 W/E/R）、删除选中对象或灯光、
+ * 变换模式（DirectorViewportDock 的 V/R/F，兼容 W/E）、删除选中对象或灯光、
  * 撤销/重做（顶栏按钮）、切换选中对象显隐（检查器「可见」开关）、
  * 取消选择、播放/暂停（时间轴 transport）。
  *
  * 聚焦、复制、重命名没有对应实现，不在这里造无处可去的动作。
  */
-export type DirectorShortcutAction = { kind: "transform-mode"; mode: "translate" | "rotate" | "scale" } | { kind: "delete-selected" } | { kind: "undo" } | { kind: "redo" } | { kind: "toggle-visibility" } | { kind: "deselect" } | { kind: "toggle-play" };
+export type DirectorShortcutAction = { kind: "transform-mode"; mode: "translate" | "rotate" | "scale" } | { kind: "nudge-selected"; direction: "up" | "down" | "left" | "right"; fine?: boolean } | { kind: "delete-selected" } | { kind: "undo" } | { kind: "redo" } | { kind: "toggle-visibility" } | { kind: "deselect" } | { kind: "toggle-play" } | { kind: "open-add-menu" };
 
 /** 只取事件的必要形状，便于测试构造，也避免耦合真实 KeyboardEvent。 */
 export type DirectorKeyEvent = {
@@ -31,9 +31,11 @@ export type DirectorKeyEvent = {
 };
 
 const TRANSFORM_KEYS: Record<string, "translate" | "rotate" | "scale"> = {
+    v: "translate",
+    r: "rotate",
+    f: "scale",
     w: "translate",
     e: "rotate",
-    r: "scale",
 };
 
 /**
@@ -41,7 +43,7 @@ const TRANSFORM_KEYS: Record<string, "translate" | "rotate" | "scale"> = {
  *
  * 约定：
  * - 交互控件语境一律不解析，交还给控件本身；
- * - 带修饰键的组合优先（Undo/Redo），避免 Ctrl+R 被当作 scale；
+ * - 带修饰键的组合优先（Undo/Redo），避免 Ctrl+R 被当作 rotate；
  * - 单字母快捷键不区分大小写，Shift+W 仍是 translate；
  * - Redo 同时接受 Ctrl/Cmd+Shift+Z 与 Ctrl/Cmd+Y。
  */
@@ -62,6 +64,10 @@ export function resolveDirectorShortcut(event: DirectorKeyEvent): DirectorShortc
 
     if (event.altKey) return null;
 
+    const arrowDirections: Record<string, "up" | "down" | "left" | "right"> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
+    if (arrowDirections[key]) return { kind: "nudge-selected", direction: arrowDirections[key], ...(event.shiftKey ? { fine: true } : {}) };
+
+    if (lower === "a" && event.shiftKey) return { kind: "open-add-menu" };
     if (lower in TRANSFORM_KEYS) return { kind: "transform-mode", mode: TRANSFORM_KEYS[lower] };
     if (key === "Delete" || key === "Backspace") return { kind: "delete-selected" };
     if (lower === "h") return { kind: "toggle-visibility" };

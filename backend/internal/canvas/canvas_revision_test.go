@@ -147,10 +147,53 @@ func newCanvasHistoryTestService(t *testing.T) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.CanvasProject{}, &model.CanvasSnapshot{}, &model.CanvasSnapshotResource{}, &model.Resource{}, &model.Asset{}); err != nil {
+	if err := db.AutoMigrate(
+		&model.CanvasProject{}, &model.CanvasSnapshot{}, &model.CanvasSnapshotResource{}, &model.CanvasUnitLink{},
+		&model.Resource{}, &model.Asset{}, &model.AssetVersion{}, &model.AssetRepresentation{}, &model.AssetFolder{},
+		&model.CanvasLibraryFolder{}, &model.CanvasDrawing{},
+		&model.AgentOpRecord{},
+		&model.Task{}, &model.TaskLog{}, &model.Result{}, &model.TaskTextDelta{}, &model.ApiCallLog{},
+		&model.CreationRun{}, &model.CreationSubmission{},
+		&model.Project{}, &model.StyleProfile{}, &model.VoiceProfile{},
+		&model.Shot{}, &model.ShotArtifact{}, &model.ShotAssetReference{},
+		&model.ProjectAssetCandidate{}, &model.ProjectAssetLink{},
+		&model.WorkflowInstance{}, &model.WorkflowStepInstance{},
+		&model.CharacterVoiceBinding{}, &model.ArkPrivateAssetBinding{},
+	); err != nil {
 		t.Fatal(err)
 	}
 	sqlDB, _ := db.DB()
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	return New(repository.New(db), nil)
+}
+
+func newCanvasLibraryTestPair(t *testing.T) (*Service, *Service, *gorm.DB) {
+	t.Helper()
+	svc := newCanvasHistoryTestService(t)
+	return svc, New(svc.repo, nil), svc.repo.DB()
+}
+
+func migrateUploadSettlementTables(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	if err := db.AutoMigrate(&model.UserDailyUploadUsage{}, &model.UserUploadReservation{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustOpenSQLite(t *testing.T, path string) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	return db
 }

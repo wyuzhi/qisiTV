@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import { canvasThemes } from "../src/lib/canvas-theme";
+import { CanvasNode } from "../src/components/canvas/canvas-node";
+import { CanvasNodeType, type CanvasNodeData } from "../src/types/canvas";
 
 describe("canvas visual contrast", () => {
     test("keeps the canvas substrate distinct from node surfaces in both themes", () => {
@@ -39,10 +43,16 @@ describe("canvas visual contrast", () => {
         expect(source).toContain('opacity: mode === "dots" ? 0.34 : 0.46');
     });
 
-    test("keeps the original transparent edge for standard canvas nodes", async () => {
-        const source = await Bun.file(new URL("../src/components/canvas/canvas-node.tsx", import.meta.url)).text();
-
-        expect(source).toContain('border: isComposerNode ? "0" : `1px solid ${isSelected || isFocusRelated || isConnectionTarget ? theme.node.activeStroke : "transparent"}`');
-        expect(source).not.toContain('border: isComposerNode ? "0" : `1px solid ${theme.node.edge}`');
+    test("keeps the original transparent edge for standard canvas nodes", () => {
+        const node: CanvasNodeData = { id: "ordinary-video", type: CanvasNodeType.Video, title: "视频", position: { x: 0, y: 0 }, width: 300, height: 200, metadata: {} };
+        const markup = renderToStaticMarkup(createElement(CanvasNode, {
+            data: node, scale: 1, isSelected: false, isRelated: false, isFocusRelated: false,
+            isConnectionTarget: false, showImageInfo: false,
+            onMouseDown: () => {}, onHoverStart: () => {}, onHoverEnd: () => {},
+            onConnectStart: () => {}, onResize: () => {}, onContentChange: () => {}, onContextMenu: () => {},
+        }));
+        const shell = markup.match(/class="canvas-node-shell[^\"]*"[^>]*style="([^"]*)"/)?.[1];
+        expect(shell).toContain("border:1px solid transparent");
+        expect(shell).toContain(`background:${canvasThemes.dark.node.fill}`);
     });
 });

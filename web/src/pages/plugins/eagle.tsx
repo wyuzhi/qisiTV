@@ -14,6 +14,7 @@ import { useAppearanceStore } from "@/stores/use-appearance-store";
 import { usePluginStore } from "@/stores/use-plugin-store";
 import { CollectionGrid, ListToolbar, PageHeader, PaginationBar, WorkspacePage } from "@/components/layout/workspace-page";
 import { AssetLibraryCard, AssetLibraryCardMedia } from "@/components/assets/asset-library-card";
+import { AuthenticatedDownload, AuthenticatedImage } from "@/components/assets/authenticated-media";
 import "./eagle.css";
 
 export default function EagleLibraryPage() {
@@ -218,7 +219,7 @@ export default function EagleLibraryPage() {
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2">
                                     <Button icon={<FolderPlus className="size-3.5" />} onClick={() => setFolderName((value) => value ? "" : "新文件夹")}>新建文件夹</Button>
-                                    <Button icon={<Download className="size-3.5" />} onClick={() => { const firstFile = visibleItems.find((item) => item.fileUrl); if (firstFile?.fileUrl) window.open(firstFile.fileUrl, "_blank", "noopener,noreferrer"); }}>下载当前文件</Button>
+                                    {visibleItems.find(item => item.fileUrl) ? <AuthenticatedDownload url={visibleItems.find(item => item.fileUrl)!.fileUrl!} name={visibleItems.find(item => item.fileUrl)!.title} label="下载当前文件"><Download className="size-3.5" />下载当前文件</AuthenticatedDownload> : null}
                                 </div>
                             </div>
 
@@ -251,14 +252,14 @@ function EagleItemCard({ item, selected, onOpen }: { item: ExternalAssetItem; se
     return <AssetLibraryCard selected={selected}>
         <AssetLibraryCardMedia className={item.kind === "image" || item.kind === "video" ? "assets-cover" : "assets-cover is-light"}>
             <button type="button" className="assets-cover-link" onClick={onOpen} aria-label={"查看 Eagle 素材：" + item.title}>
-                {item.thumbnailUrl ? <img src={item.thumbnailUrl} alt={item.title} loading="lazy" decoding="async" className="assets-cover-media" /> : <div className="assets-cover-fallback"><AssetKindIcon kind={item.kind} size="size-7" /></div>}
+                {item.thumbnailUrl ? <AuthenticatedImage src={item.thumbnailUrl} alt={item.title} className="assets-cover-media" /> : <div className="assets-cover-fallback"><AssetKindIcon kind={item.kind} size="size-7" /></div>}
                 <span className="assets-cover-vignette" aria-hidden="true" />
             </button>
             <span className="assets-cover-badges">
                 <span className="assets-cover-badge is-kind"><AssetKindIcon kind={item.kind} size="size-3" />{assetKindLabel(item.kind)}</span>
                 <span className="assets-cover-badge is-category">Eagle</span>
             </span>
-            {item.fileUrl ? <a href={item.fileUrl} download={item.title} target="_blank" rel="noreferrer" className="eagle-cover-download" aria-label={"下载原文件：" + item.title}><Download className="size-3.5" aria-hidden="true" /></a> : null}
+            {item.fileUrl ? <AuthenticatedDownload url={item.fileUrl} name={item.title} className="eagle-cover-download" label={"下载原文件：" + item.title}><Download className="size-3.5" aria-hidden="true" /></AuthenticatedDownload> : null}
         </AssetLibraryCardMedia>
         <button type="button" className="block w-full px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--workspace-accent)]" onClick={onOpen}>
             <div className="flex min-w-0 items-center justify-between gap-2">
@@ -286,7 +287,7 @@ function EagleAssetDrawer({ item, onClose, totalBytes }: { item: ExternalAssetIt
                 </div>
             </div>
             <div className="eagle-drawer-preview">
-                {item.thumbnailUrl ? <img src={item.thumbnailUrl} alt={item.title} loading="lazy" decoding="async" /> : <AssetKindIcon kind={item.kind} size="size-9" />}
+                {item.thumbnailUrl ? <AuthenticatedImage src={item.thumbnailUrl} alt={item.title} /> : <AssetKindIcon kind={item.kind} size="size-9" />}
             </div>
             <div className="grid gap-2">
                 <EagleFact label="类型" value={assetKindLabel(item.kind)} />
@@ -297,7 +298,7 @@ function EagleAssetDrawer({ item, onClose, totalBytes }: { item: ExternalAssetIt
             </div>
             {item.tags?.length ? <div><Typography.Text strong className="text-xs">标签</Typography.Text><div className="mt-2 flex flex-wrap gap-1.5">{item.tags.map((tag) => <Tag key={tag} className="m-0">{tag}</Tag>)}</div></div> : null}
             {item.description ? <div><Typography.Text strong className="text-xs">备注</Typography.Text><p className="mt-2 text-sm leading-6 text-foreground/65">{item.description}</p></div> : null}
-            {item.fileUrl ? <a href={item.fileUrl} download={item.title} target="_blank" rel="noreferrer" className="eagle-drawer-download inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium"><Download className="size-4" aria-hidden="true" />下载 Eagle 原文件</a> : null}
+            {item.fileUrl ? <AuthenticatedDownload url={item.fileUrl} name={item.title} label="下载 Eagle 原文件" className="eagle-drawer-download inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium"><Download className="size-4" aria-hidden="true" />下载 Eagle 原文件</AuthenticatedDownload> : null}
         </div> : null}
     </Drawer>;
 }

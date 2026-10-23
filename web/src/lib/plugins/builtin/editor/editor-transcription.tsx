@@ -1,17 +1,24 @@
 // 转写由后端 whisper.cpp 任务执行；前端只提交资源 ID、观察任务状态，
 // 并将成功结果转换为 SrtEntry[]，通过 rebuildSubtitleClips 原子替换字幕轨道快照。
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AudioLines, Loader2 } from "lucide-react";
 
 import { useEditorHostContext, useEditorStoreContext } from "@/components/editor/editor-context";
-import { getSubtitleTracks } from "@/lib/timeline/timeline-tracks";
-import { waitForGenerationTask } from "@/services/api/task-center";
 import {
-    createTimelineTranscriptionTask,
-    type TimelineTranscriptionResult,
-    type TimelineTranscriptionSegment,
-} from "@/services/api/timeline-tasks";
+    attachLocalExecutorResult,
+    beginLocalExecutorSession,
+    isLocalExecutorSessionStop,
+    localExecutorFrozenInputKey,
+    localExecutorIntentAfterError,
+    localExecutorIntentAfterSubmit,
+    nextLocalExecutorClientOperationId,
+    runOwnedTimelineTranscription,
+    type LocalExecutorIntentState,
+} from "@/lib/plugins/builtin/editor/local-executor-session";
+import { getSubtitleTracks } from "@/lib/timeline/timeline-tracks";
+import { captureUserScope } from "@/lib/user-scope-guard";
+import type { TimelineTranscriptionSegment } from "@/services/api/timeline-tasks";
 import type { ProjectAsset } from "@/services/api/projects";
 import type { SrtEntry } from "@/types/timeline";
 
@@ -25,8 +32,22 @@ function resourceIdOfAsset(asset: ProjectAsset): string | null {
 }
 
 export function EditorTranscription() {
-    const { assets } = useEditorHostContext();
+    const { assets, projectId } = useEditorHostContext();
     const { project, dispatch } = useEditorStoreContext();
+    const mountedRef = useRef(true);
+    const projectIdRef = useRef(projectId);
+    const runningRef = useRef(false);
+    const observationRef = useRef<AbortController | null>(null);
+    const submitIntentRef = useRef<LocalExecutorIntentState | null>(null);
+    projectIdRef.current = projectId;
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+            observationRef.current?.abort();
+        };
+    }, []);
+    useEffect(() => () => observationRef.current?.abort(), [projectId]);
     // 音频与视频素材均可转写（视频静音会由后端明确报错）。
     const transcribableAssets = useMemo(
         () => assets.filter((a) => a.mediaType === "audio" || a.mediaType === "video"),
@@ -60,51 +81,83 @@ export function EditorTranscription() {
             .filter((entry) => entry.text.trim() !== "" && entry.endMs > entry.startMs);
 
     const transcribe = async () => {
-        if (!selected || running) return;
+        if (!selected || runningRef.current) return;
         const resourceId = resourceIdOfAsset(selected);
         if (!resourceId) {
             setFailed(true);
             setMessage("该素材没有可转写的媒体对象（缺少 storageKey）");
             return;
         }
+        runningRef.current = true;
+        const expectedScope = captureUserScope();
+        const originalProjectId = projectId;
+        const originalTrackId = subtitleTrack?.id;
+        const originalSelectedId = selected.id;
+        const originalDispatch = dispatch;
+        const observer = new AbortController();
+        observationRef.current?.abort();
+        observationRef.current = observer;
+        const frozenInputKey = localExecutorFrozenInputKey(["timeline_transcription", originalProjectId, resourceId]);
+        const clientOperationId = nextLocalExecutorClientOperationId(submitIntentRef.current, frozenInputKey);
+        submitIntentRef.current = { clientOperationId, frozenInputKey };
         setRunning(true);
         setFailed(false);
         setMessage(null);
         setProgressLabel("排队中…");
         try {
-            const created = await createTimelineTranscriptionTask({
-                resourceId,
+            const session = beginLocalExecutorSession(originalProjectId, {
+                controller: observer,
+                getLiveProjectId: () => projectIdRef.current,
+                expectedScope,
             });
-            const done = await waitForGenerationTask(created.id, {
+            const { task, result } = await runOwnedTimelineTranscription({
+                session,
+                resourceId,
+                projectId: originalProjectId,
+                clientOperationId,
                 timeoutMs: WHISPER_WAIT_TIMEOUT_MS,
                 intervalMs: 2000,
-                onTaskUpdate: (task) => {
-                    const stage = task.stage;
-                    const progress = task.progress ?? 0;
+                onCreated: (created) => {
+                    submitIntentRef.current = localExecutorIntentAfterSubmit(clientOperationId, created, submitIntentRef.current ?? { clientOperationId, frozenInputKey });
+                },
+                onTaskUpdate: (next) => {
+                    const stage = next.stage;
+                    const progress = next.progress ?? 0;
                     if (stage) setProgressLabel(`${stage}${progress > 0 && progress < 100 ? ` ${progress}%` : ""}`);
                 },
             });
-            const parsed = JSON.parse(done.resultJson ?? "{}") as TimelineTranscriptionResult;
-            const entries = toSrtEntries(parsed.segments ?? []);
-            if (entries.length === 0) {
-                setMessage("转写完成，但没有识别出可用字幕（语音内容为空？）");
-            } else if (!subtitleTrack) {
-                setMessage("项目没有字幕轨道，无法写入转写字幕");
-            } else {
-                dispatch({
-                    op: "rebuildSubtitleClips",
-                    payload: { nodeId: `transcription:${selected.id}`, entries, trackId: subtitleTrack.id },
-                });
-                const langHint = parsed.language ? `（${parsed.language}）` : "";
-                setMessage(`已写入 ${entries.length} 条转写字幕${langHint}`);
-            }
-            setProgressLabel(null);
+            submitIntentRef.current = localExecutorIntentAfterSubmit(clientOperationId, task, submitIntentRef.current ?? { clientOperationId, frozenInputKey });
+            const entries = toSrtEntries(result.segments ?? []);
+            await attachLocalExecutorResult(session, () => {
+                if (entries.length === 0) {
+                    setMessage("转写完成，但没有识别出可用字幕（语音内容为空？）");
+                } else if (!originalTrackId) {
+                    setMessage("项目没有字幕轨道，无法写入转写字幕");
+                } else {
+                    originalDispatch({
+                        op: "rebuildSubtitleClips",
+                        payload: { nodeId: `transcription:${originalSelectedId}`, entries, trackId: originalTrackId },
+                    });
+                    const langHint = result.language ? `（${result.language}）` : "";
+                    setMessage(`已写入 ${entries.length} 条转写字幕${langHint}`);
+                }
+                setProgressLabel(null);
+            });
         } catch (err) {
+            if (isLocalExecutorSessionStop(err)) {
+                if (mountedRef.current) {
+                    setRunning(false);
+                    setProgressLabel(null);
+                }
+                return;
+            }
+            submitIntentRef.current = localExecutorIntentAfterError(submitIntentRef.current ?? { clientOperationId, frozenInputKey }, err);
             setFailed(true);
             setMessage(err instanceof Error ? err.message : "转写失败，请稍后重试");
             setProgressLabel(null);
         } finally {
-            setRunning(false);
+            runningRef.current = false;
+            if (mountedRef.current) setRunning(false);
         }
     };
 

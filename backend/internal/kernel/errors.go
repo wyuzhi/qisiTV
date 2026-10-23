@@ -3,10 +3,12 @@ package kernel
 // AppError 是业务层对外公开的结构化错误。
 // Message 必须可安全展示给用户，Cause 仅用于保留内部诊断链路，不得直接写入 HTTP 响应。
 type AppError struct {
-	Status    int
-	Code      int
-	Reason    ErrorReason
-	Message   string
+	Status  int
+	Code    int
+	Reason  ErrorReason
+	Message string
+	// Details contains only explicitly authored, public validation information.
+	Details   map[string]any
 	Retryable bool
 	Cause     error
 }

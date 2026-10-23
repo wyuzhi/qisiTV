@@ -176,14 +176,14 @@
 
 .eagle-library-page .eagle-drawer-download {
     width: 100%;
-    background: var(--primary);
-    color: var(--primary-foreground);
+    background: var(--btn-solid-bg);
+    color: var(--btn-solid-fg);
     transition: background-color var(--motion-state) ease-out;
 }
 
 .eagle-library-page .eagle-drawer-download:hover {
-    background: color-mix(in srgb, var(--primary) 88%, var(--foreground));
-    color: var(--primary-foreground);
+    background: var(--btn-solid-hover-bg);
+    color: var(--btn-solid-fg);
 }
 
 @media (max-width: 640px) {

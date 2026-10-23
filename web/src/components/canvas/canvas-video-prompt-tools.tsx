@@ -20,6 +20,9 @@ type CompactMenuItem = {
 };
 
 type CanvasVideoPromptToolsProps = {
+    middleFrameSupported?: boolean;
+    endFrameSupported?: boolean;
+    referenceLabel?: string;
     metadata?: CanvasNodeMetadata;
     frameOptions: VideoFrameOption[];
     onMetadataChange: (patch: Partial<CanvasNodeMetadata>) => void;
@@ -33,7 +36,7 @@ const MENU_MARGIN = 8;
 const MENU_ITEM_HEIGHT = 28;
 const CONTROL_TEXT_STYLE: CSSProperties = { fontFamily: "inherit", fontSize: 11, fontWeight: 400, letterSpacing: 0, lineHeight: 1 };
 
-export function CanvasVideoPromptTools({ metadata, frameOptions, onMetadataChange, referenceMode = "frames", referenceSummary }: CanvasVideoPromptToolsProps) {
+export function CanvasVideoPromptTools({ metadata, frameOptions, onMetadataChange, referenceMode = "frames", referenceSummary, middleFrameSupported = false, endFrameSupported = true, referenceLabel = "工作流参考" }: CanvasVideoPromptToolsProps) {
     const theme = canvasThemes[useActiveTheme()];
     const startFrame = metadata?.videoStartFrameNodeId || EMPTY_FRAME_VALUE;
     const endFrame = metadata?.videoEndFrameNodeId || EMPTY_FRAME_VALUE;
@@ -45,11 +48,9 @@ export function CanvasVideoPromptTools({ metadata, frameOptions, onMetadataChang
 
     if (referenceMode === "all") {
         const summary = referenceSummary
-            ? [
-                  referenceSummary.imageCount ? `${referenceSummary.imageCount} 图` : "",
-                  referenceSummary.videoCount ? `${referenceSummary.videoCount} 视频` : "",
-                  referenceSummary.audioCount ? `${referenceSummary.audioCount} 音频` : "",
-              ].filter(Boolean).join(" · ")
+            ? [referenceSummary.imageCount ? `${referenceSummary.imageCount} 图` : "", referenceSummary.videoCount ? `${referenceSummary.videoCount} 视频` : "", referenceSummary.audioCount ? `${referenceSummary.audioCount} 音频` : ""]
+                  .filter(Boolean)
+                  .join(" · ")
             : "";
         return (
             <div
@@ -61,7 +62,7 @@ export function CanvasVideoPromptTools({ metadata, frameOptions, onMetadataChang
                 onPointerDown={(event) => event.stopPropagation()}
             >
                 <ImageIcon className="size-3.5 shrink-0 opacity-80" />
-                <span className="shrink-0 text-[var(--fs-tiny)] font-medium">工作流参考</span>
+                <span className="shrink-0 text-[var(--fs-tiny)] font-medium">{referenceLabel}</span>
                 <span className="min-w-0 truncate text-[var(--fs-micro)] opacity-65">{summary || "尚未连接媒体"}</span>
             </div>
         );
@@ -70,14 +71,28 @@ export function CanvasVideoPromptTools({ metadata, frameOptions, onMetadataChang
     if (!frameOptions.length) return null;
 
     return (
-        <div
-            className="grid min-w-0 grid-cols-2 items-center gap-1"
-            data-canvas-no-zoom
-            onMouseDown={(event) => event.stopPropagation()}
-            onPointerDown={(event) => event.stopPropagation()}
-        >
+        <div className="grid min-w-0 grid-cols-2 items-center gap-1" data-canvas-no-zoom onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
             <FrameMenu label="首帧" value={startFrame} options={frameOptions} theme={theme} onChange={(value) => setFrame("videoStartFrameNodeId", value)} />
-            <FrameMenu label="尾帧" value={endFrame} options={frameOptions} theme={theme} onChange={(value) => setFrame("videoEndFrameNodeId", value)} />
+            {endFrameSupported ? <FrameMenu label="尾帧" value={endFrame} options={frameOptions} theme={theme} onChange={(value) => setFrame("videoEndFrameNodeId", value)} /> : null}
+            {middleFrameSupported ? (
+                <>
+                    <FrameMenu label="中间帧" value={metadata?.videoMiddleFrameNodeId || EMPTY_FRAME_VALUE} options={frameOptions} theme={theme} onChange={(v) => onMetadataChange(v === EMPTY_FRAME_VALUE ? { videoMiddleFrameNodeId: undefined, videoMiddleFrameTime: undefined } : { videoMiddleFrameNodeId: v })} />
+                    <label className="flex min-w-0 items-center gap-1 text-[var(--fs-micro)]">
+                        <span className="shrink-0 whitespace-nowrap">时间（秒）</span>
+                        <input
+                            aria-label="中间帧时间（秒）"
+                            className="min-w-0 w-0 flex-1 rounded border px-1"
+                            style={{ color: theme.node.text, background: theme.toolbar.itemHover, borderColor: theme.toolbar.border }}
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={metadata?.videoMiddleFrameTime ?? ""}
+                            onChange={(e) => onMetadataChange({ videoMiddleFrameTime: e.target.value === "" ? undefined : Number(e.target.value) })}
+                        />
+                    </label>
+                    <span className="col-span-2 text-[var(--fs-micro)] opacity-65">中间帧须同时选择首尾帧，仅支持 480P 和 768P。</span>
+                </>
+            ) : null}
         </div>
     );
 }
@@ -85,19 +100,7 @@ export function CanvasVideoPromptTools({ metadata, frameOptions, onMetadataChang
 function FrameMenu({ label, value, options, theme, onChange }: { label: string; value: string; options: VideoFrameOption[]; theme: CanvasTheme; onChange: (value: string) => void }) {
     const selected = options.find((item) => item.nodeId === value);
     const items = [{ value: EMPTY_FRAME_VALUE, label: "不指定" }, ...options.map((option) => ({ value: option.nodeId, label: `${option.label} · ${option.title}`, previewUrl: option.previewUrl }))];
-    return (
-        <CompactMenuButton
-            theme={theme}
-            title={label}
-            label={selected?.label || label}
-            icon={<ImageIcon className="size-3.5 shrink-0 opacity-90" />}
-            value={value}
-            items={items}
-            menuWidth={220}
-            maxMenuHeight={208}
-            onSelect={onChange}
-        />
-    );
+    return <CompactMenuButton theme={theme} title={label} label={selected?.label || label} icon={<ImageIcon className="size-3.5 shrink-0 opacity-90" />} value={value} items={items} menuWidth={220} maxMenuHeight={208} onSelect={onChange} />;
 }
 
 function CompactMenuButton({

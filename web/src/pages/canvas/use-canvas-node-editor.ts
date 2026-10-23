@@ -12,7 +12,10 @@ import { applyBatchPrimaryImage, applyNodeConfigPatch } from "@/lib/canvas/canva
 import { resetGenerationTaskMetadata } from "@/lib/canvas/canvas-project-generation";
 import { CONTENT_MODERATION_ERROR_CODE, isContentModerationError } from "@/lib/generation-error";
 import { ensureCanvasNodeAsset } from "@/services/project-asset-sync";
+import type { AssetCategory } from "@/stores/use-asset-store";
 import { CanvasNodeType, type CanvasFolderStyle, type CanvasFolderTheme, type CanvasNodeData, type CanvasNodeMetadata, type Position } from "@/types/canvas";
+import { useCanvasOwnerLifetime } from "./canvas-owner-epoch";
+import { createOwnedCanvasUploadGuard, persistOwnedCanvasUploadNode } from "./canvas-upload-ownership";
 
 type UseCanvasNodeEditorOptions = {
     canvasId: string;
@@ -41,6 +44,9 @@ export function useCanvasNodeEditor({
 }: UseCanvasNodeEditorOptions) {
     const { message } = App.useApp();
     const queryClient = useQueryClient();
+    const canvasIdRef = useRef(canvasId);
+    canvasIdRef.current = canvasId;
+    const { lifetime, mountedRef } = useCanvasOwnerLifetime(canvasId);
     const [collapsingBatchIds, setCollapsingBatchIds] = useState<Set<string>>(new Set());
     const [openingBatchIds, setOpeningBatchIds] = useState<Set<string>>(new Set());
     const batchMotionTimers = useRef(new Map<string, number>());
@@ -177,6 +183,35 @@ export function useCanvasNodeEditor({
         }));
     }, [setNodes]);
 
+    const persistOwnedEditorNode = useCallback(async (node: CanvasNodeData, category?: AssetCategory) => {
+        const guard = createOwnedCanvasUploadGuard({
+            lifetime,
+            canvasId,
+            getLiveCanvasId: () => canvasIdRef.current,
+            mounted: () => mountedRef.current,
+        });
+        const result = await persistOwnedCanvasUploadNode({
+            owner: guard.owner,
+            expectedScope: guard.expectedScope,
+            getLiveCanvasId: () => canvasIdRef.current,
+            getLiveLifetime: () => lifetime.current(),
+            mounted: () => mountedRef.current,
+            canvasId,
+            domainProjectId,
+            node,
+            signal: guard.signal,
+            source: "canvas-manual",
+            category,
+        }, {
+            ensureCanvasNodeAsset,
+            setNodes,
+            invalidateProject: domainProjectId
+                ? async (projectId) => { await queryClient.invalidateQueries({ queryKey: ["project", projectId] }); }
+                : undefined,
+        });
+        return { guard, result };
+    }, [canvasId, domainProjectId, lifetime, mountedRef, queryClient, setNodes]);
+
     const handleConfigNodeChange = useCallback((nodeId: string, patch: Partial<CanvasNodeMetadata>) => {
         setNodes((current) => {
             const next = current.map((node) => (node.id === nodeId ? applyNodeConfigPatch(node, patch) : node));
@@ -188,14 +223,17 @@ export function useCanvasNodeEditor({
         const node = nodesRef.current.find((item) => item.id === nodeId);
         if (!node?.metadata?.content?.trim()) return;
         const updatedNode = applyNodeConfigPatch(node, patch);
-        void ensureCanvasNodeAsset({ canvasId, domainProjectId, node: updatedNode, source: "canvas-manual", category: patch.assetCategory })
-            .then(async (result) => {
-                setNodes((current) => current.map((item) => item.id === nodeId ? { ...item, metadata: { ...item.metadata, assetId: result.assetId } } : item));
-                if (domainProjectId) await queryClient.invalidateQueries({ queryKey: ["project", domainProjectId] });
-                message.success("资产分类已更新");
-            })
-            .catch((error) => message.error(error instanceof Error ? error.message : "资产分类更新失败"));
-    }, [canvasId, domainProjectId, message, nodesRef, queryClient, setNodes]);
+        void persistOwnedEditorNode(updatedNode, patch.assetCategory).then(({ guard, result }) => {
+            if (!guard.alive()) return;
+            if (result.applied) {
+                if (result.confirmed) message.success("资产分类已更新");
+                else message.warning("文件目前只在这台设备上");
+                return;
+            }
+            if (result.error === undefined) return;
+            message.error(result.error instanceof Error ? result.error.message : "资产分类更新失败");
+        });
+    }, [message, nodesRef, persistOwnedEditorNode, setNodes]);
 
     const downloadNodeImage = useCallback((node: CanvasNodeData) => {
         if (node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) return;
@@ -211,15 +249,16 @@ export function useCanvasNodeEditor({
     const saveNodeAsset = useCallback(async (node: CanvasNodeData) => {
         if (node.type !== CanvasNodeType.Text && node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) return message.error("当前节点类型不能保存为素材");
         if (!node.metadata?.content?.trim()) return message.error("当前节点没有可保存的内容");
-        try {
-            const result = await ensureCanvasNodeAsset({ canvasId, domainProjectId, node, source: "canvas-manual" });
-            setNodes((current) => current.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, assetId: result.assetId } } : item));
-            if (domainProjectId) await queryClient.invalidateQueries({ queryKey: ["project", domainProjectId] });
-            message.success(result.linkedToProject ? "已加入项目资产" : "已加入我的素材");
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : "素材保存失败");
+        const { guard, result } = await persistOwnedEditorNode(node);
+        if (!guard.alive()) return;
+        if (result.applied) {
+            if (!result.confirmed) message.warning("文件目前只在这台设备上");
+            else message.success(result.linkedToProject ? "已加入项目资产" : "已加入我的素材");
+            return;
         }
-    }, [canvasId, domainProjectId, message, queryClient, setNodes]);
+        if (result.error === undefined) return;
+        message.error(result.error instanceof Error ? result.error.message : "素材保存失败");
+    }, [message, persistOwnedEditorNode]);
 
     const handleFontSizeChange = useCallback((nodeId: string, fontSize: number) => {
         setNodes((current) => current.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, fontSize } } : node)));

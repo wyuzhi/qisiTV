@@ -1,6 +1,8 @@
 import { modelCapabilityConfigFor, videoResolutionRequest } from "@/lib/model-capabilities";
 import { boolConfig } from "@/lib/seedance-video";
-import { getResourceOSSUrl } from "@/services/api/resources";
+import { h3Duration, h3GenerationControls, h3MediaPayload, isH3Model } from "@/lib/h3-video";
+import { getResourceBlob, getResourceOSSUrl } from "@/services/api/resources";
+import { beefAPIVideoContract, isBeefAPIEndpoint } from "@/lib/beefapi-video-contracts";
 import { modelOptionName } from "@/stores/use-config-store";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import type { ReferenceImage } from "@/types/image";
@@ -8,30 +10,45 @@ import type { ReferenceImage } from "@/types/image";
 import type { ApiEnvelope, ApiVideoResponse, RequestOptions, ResolvedAiConfig, VideoGenerationTask, VideoGenerationTaskState } from "./video-contracts";
 import type { VideoProviderDeps } from "./video-provider-deps";
 import { normalizeVideoSeconds, normalizeVideoSize } from "./video-validation";
+import { blobToDataUrl } from "./video-response";
 
 export async function createVideoGenerationsTask(deps: VideoProviderDeps, config: ResolvedAiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions): Promise<VideoGenerationTask> {
     const profile = modelCapabilityConfigFor(config, model).video!;
+    const contract = isBeefAPIEndpoint(config.baseUrl) ? beefAPIVideoContract(modelOptionName(model)) : undefined;
+    if (contract?.maxReferences) {
+        for (const [label, count, limit] of [["图片", references.length, contract.maxReferences.image], ["视频", videoReferences.length, contract.maxReferences.video], ["音频", audioReferences.length, contract.maxReferences.audio]] as const) {
+            if (limit !== undefined && count > limit) throw new Error(limit === 0 ? `当前模型暂不支持参考${label}，请移除此素材或选择支持该素材的模型` : `当前模型最多支持 ${limit} 个参考${label}，请移除多余素材后重新生成`);
+        }
+    }
+    const inline = contract?.inlineMedia === true && contract.protocol === config.interfaceType;
     if (references.length > profile.references.maxImages) throw new Error(`当前视频模型最多支持 ${profile.references.maxImages} 张参考图`);
     if (videoReferences.length > profile.references.maxVideos) throw new Error(`当前视频模型最多支持 ${profile.references.maxVideos} 个参考视频`);
     if (audioReferences.length > profile.references.maxAudios) throw new Error(`当前视频模型最多支持 ${profile.references.maxAudios} 段参考音频`);
     if (audioReferences.length > 0 && videoReferences.length === 0 && !profile.operations.includes("audio_to_video")) throw new Error("NewAPI Video Generations 的参考音频必须同时提供至少 1 个参考视频；纯音频生视频请切换到支持该模式的渠道");
     const [imageUrls, videoUrls, audioUrls] = await Promise.all([
-        Promise.all(references.map((item) => resolveVideoGenerationsUrl(item.url || item.dataUrl, item.storageKey))),
-        Promise.all(videoReferences.map((item) => resolveVideoGenerationsUrl(item.url, item.storageKey))),
-        Promise.all(audioReferences.map((item) => resolveVideoGenerationsUrl(item.url, item.storageKey))),
+        Promise.all(references.map((item) => resolveVideoGenerationsUrl(inline ? item.dataUrl || item.url : item.url || item.dataUrl, item.storageKey, inline, profile.references.maxImageBytes))),
+        Promise.all(videoReferences.map((item) => resolveVideoGenerationsUrl(item.url, item.storageKey, inline))),
+        Promise.all(audioReferences.map((item) => resolveVideoGenerationsUrl(item.url, item.storageKey, inline))),
     ]);
     const resolution = newAPIVideoResolutionRequest(profile, config.vquality, modelOptionName(model));
+    const h3 = contract !== undefined && isH3Model(model);
+    const h3Media = h3 ? h3MediaPayload(model,[...imageUrls.map((url,i)=>({id:references[i]!.id,type:"image" as const,url})),...videoUrls.map((url,i)=>({id:videoReferences[i]!.id,type:"video" as const,url})),...audioUrls.map((url,i)=>({id:audioReferences[i]!.id,type:"audio" as const,url}))],options,Number(h3Duration(model,config.videoSeconds)),resolution) : undefined;
+    const h3Ratio = config.size.trim() || (h3Media?.referenceMode ? "adaptive" : "16:9");
+    if (h3 && !h3Media?.referenceMode && !h3Media?.frameMode && h3Ratio==="adaptive") throw new Error("自适应比例仅支持参考生成，请选择固定比例");
     const payload = {
         model: modelOptionName(model),
         prompt: prompt.trim(),
+        ...(h3 ? h3GenerationControls(model, options?.videoH3Options) : {}),
         ...(isApiMartVideoConfig(config)
             ? { duration: normalizeVideoSeconds(config.videoSeconds), size: normalizeVideoSize(config.size) || "16:9" }
-            : { seconds: normalizeVideoSeconds(config.videoSeconds), aspect_ratio: normalizeVideoSize(config.size) || "16:9" }),
+            : { seconds: h3 ? h3Duration(model, config.videoSeconds) : normalizeVideoSeconds(config.videoSeconds), ...(h3 ? (h3Media?.frameMode ? {} : {aspect_ratio: h3Ratio}) : {aspect_ratio: normalizeVideoSize(config.size) || "16:9"}) }),
         ...(resolution ? { resolution } : {}),
-        ...(profile.generateAudio.supported ? { generate_audio: boolConfig(config.videoGenerateAudio, profile.generateAudio.default) } : {}),
-        ...(imageUrls.length ? { image_urls: imageUrls } : {}),
-        ...(videoUrls.length ? { video_urls: videoUrls } : {}),
-        ...(audioUrls.length ? { audio_urls: audioUrls } : {}),
+        ...(!h3 && profile.generateAudio.supported ? { generate_audio: boolConfig(config.videoGenerateAudio, profile.generateAudio.default) } : {}),
+        ...(h3 ? h3Media?.payload : {
+            ...(imageUrls.length ? {image_urls: imageUrls} : {}),
+            ...(videoUrls.length ? {video_urls: videoUrls} : {}),
+            ...(audioUrls.length ? {audio_urls: audioUrls} : {}),
+        }),
     };
     try {
         const raw = await deps.transport.post<ApiVideoResponse>(deps.transport.apiUrl(isApiMartVideoConfig(config) ? "/videos/generations" : "/video/generations"), payload, options);
@@ -87,7 +104,17 @@ function newAPIVideoResolutionRequest(profile: NonNullable<ReturnType<typeof mod
     return videoResolutionRequest(profile, value);
 }
 
-async function resolveVideoGenerationsUrl(value: string | undefined, storageKey?: string) {
+async function resolveVideoGenerationsUrl(value: string | undefined, storageKey?: string, inline = false, maxBytes = 0) {
+    if (inline && storageKey?.startsWith("resource:")) {
+        const blob = await getResourceBlob(storageKey);
+        if (!blob) throw new Error("参考素材无法读取，请重新导入后重试");
+        if (maxBytes > 0 && blob.size > maxBytes) throw new Error("参考图片超过当前模型的大小限制，请压缩后重新导入");
+        return blobToDataUrl(blob);
+    }
+    if (inline && value?.startsWith("data:")) {
+        if (maxBytes > 0 && value.length > Math.ceil(maxBytes / 3) * 4 + 256) throw new Error("参考图片超过当前模型的大小限制，请压缩后重新导入");
+        return value;
+    }
     if (storageKey?.startsWith("resource:")) return getResourceOSSUrl(storageKey);
     if (isPublicMediaUrl(value || "")) return String(value);
     throw new Error("NewAPI Video Generations 的参考素材需要公网 URL；本地素材不能直接发送到该渠道，请改用支持本地素材的渠道或提供公网素材地址");

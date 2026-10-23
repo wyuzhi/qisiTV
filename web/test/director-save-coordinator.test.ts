@@ -271,7 +271,9 @@ describe("DirectorSaveCoordinator", () => {
             h.editedScene({ title: "a" });
             h.editedScene({ title: "b" });
             expect(h.scheduler.size()).toBe(1);
+            expect(h.coord.hasActiveSave()).toBe(true);
             await h.flushMicrotasks();
+            expect(h.coord.hasActiveSave()).toBe(false);
             expect(h.requests).toHaveLength(1);
             expect(h.requests[0]?.scene.title).toBe("b");
         });
@@ -452,6 +454,62 @@ describe("DirectorSaveCoordinator", () => {
     });
 
     describe("17 invalid scene shape", () => {
+        it("accepts old adaptive scenes and valid saved aspect ratios, but rejects unknown ratios", () => {
+            const h = createHarness();
+            h.writeRaw(JSON.stringify(makeEnvelope({ scene: makeScene() })));
+            expect(h.coord.restoreCandidate()?.scene.aspectRatio).toBeUndefined();
+            h.writeRaw(JSON.stringify(makeEnvelope({ scene: makeScene({ aspectRatio: "9:16" }) })));
+            expect(h.coord.restoreCandidate()?.scene.aspectRatio).toBe("9:16");
+            h.writeRaw(corruptEnvelope((envelope) => {
+                envelope.scene = { ...makeScene(), aspectRatio: "0:0" };
+            }));
+            expect(h.coord.restoreCandidate()).toBeNull();
+        });
+
+        it("restores a persisted panorama and rejects malformed panorama metadata", () => {
+            const h = createHarness();
+            const panorama = { url: "blob:test-panorama", storageKey: "image:local:test", name: "测试全景.png", rotation: 35 };
+            h.writeRaw(JSON.stringify(makeEnvelope({ scene: makeScene({ panorama }) })));
+            expect(h.coord.restoreCandidate()?.scene.panorama).toEqual(panorama);
+            h.writeRaw(corruptEnvelope((envelope) => {
+                envelope.scene = { ...makeScene(), panorama: { ...panorama, rotation: "bad" } };
+            }));
+            expect(h.coord.restoreCandidate()).toBeNull();
+        });
+
+        it("restores sphere settings and rejects out-of-range values without breaking legacy scenes", () => {
+            const h = createHarness();
+            h.writeRaw(JSON.stringify(makeEnvelope({ scene: makeScene() })));
+            expect(h.coord.restoreCandidate()?.scene.panoramaRadius).toBeUndefined();
+            h.writeRaw(JSON.stringify(makeEnvelope({ scene: makeScene({ panoramaRadius: 500, panoramaRotation: 360 }) })));
+            expect(h.coord.restoreCandidate()?.scene).toMatchObject({ panoramaRadius: 500, panoramaRotation: 360 });
+            h.writeRaw(corruptEnvelope((envelope) => { envelope.scene = { ...makeScene(), panoramaRadius: 501 }; }));
+            expect(h.coord.restoreCandidate()).toBeNull();
+            h.writeRaw(corruptEnvelope((envelope) => { envelope.scene = { ...makeScene(), panoramaRotation: Number.NaN }; }));
+            expect(h.coord.restoreCandidate()).toBeNull();
+        });
+
+        it("restores grid snapping and rejects malformed switch values", () => {
+            const h = createHarness();
+            h.writeRaw(JSON.stringify(makeEnvelope({ scene: makeScene({ gridSnap: true }) })));
+            expect(h.coord.restoreCandidate()?.scene.gridSnap).toBe(true);
+            h.writeRaw(corruptEnvelope((envelope) => { envelope.scene = { ...makeScene(), gridSnap: "on" }; }));
+            expect(h.coord.restoreCandidate()).toBeNull();
+        });
+
+        it("restores ground settings without rejecting older scenes, but rejects invalid ranges", () => {
+            const h = createHarness();
+            h.writeRaw(JSON.stringify(makeEnvelope({ scene: makeScene() })));
+            expect(h.coord.restoreCandidate()?.scene.ground).toBeUndefined();
+            const ground = { visible: false, opacity: 0.4, height: -1.25 };
+            h.writeRaw(JSON.stringify(makeEnvelope({ scene: makeScene({ ground }) })));
+            expect(h.coord.restoreCandidate()?.scene.ground).toEqual(ground);
+            h.writeRaw(corruptEnvelope((envelope) => {
+                envelope.scene = { ...makeScene(), ground: { ...ground, opacity: 2 } };
+            }));
+            expect(h.coord.restoreCandidate()).toBeNull();
+        });
+
         it("should reject a candidate whose scene fails DirectorScene validation", () => {
             const h = createHarness();
 

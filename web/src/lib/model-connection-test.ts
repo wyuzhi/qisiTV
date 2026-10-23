@@ -1,16 +1,20 @@
-import { requestAudioGeneration } from "@/services/api/audio";
-import { requestGeneration, requestImageQuestion } from "@/services/api/image";
-import { createVideoGenerationTask } from "@/services/api/video";
+import { runBackendGenerationTask, type BackendGenerationResult } from "@/services/api/generation-task";
+import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
 import { channelHasGenerationCredential, defaultConfig, encodeChannelModel, isBuiltinBeefAPIChannel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 import type { ModelProtocol } from "@/lib/model-protocols";
 
-export async function testChannelModelConnection(channel: ModelChannel, model: string, capability: ModelCapability, protocol: ModelProtocol) {
+export async function testChannelModelConnection(channel: ModelChannel, model: string, capability: ModelCapability, protocol: ModelProtocol, runTask = runBackendGenerationTask) {
     if (!channel.baseUrl.trim()) throw new Error("请先填写 Base URL");
-    if (!channelHasGenerationCredential(channel)) {
-        throw new Error(isBuiltinBeefAPIChannel(channel) ? "请先连接 BeefAPI" : "请先填写 API Key");
+    if (!channelHasGenerationCredential(channel, model)) {
+        throw new Error(isBuiltinBeefAPIChannel(channel) ? "请先连接 BeefTV" : "请先填写 API Key");
     }
     const selectedModel = encodeChannelModel(channel.id, model);
     const modelProfile = channel.modelProfiles?.find((item) => item.model === model);
+    const limits = modelProfile?.capabilityConfig || defaultModelCapabilityConfig(protocol, model);
+    const duration = limits?.video?.duration;
+    const durations = duration?.values?.filter((value) => Number.isFinite(value) && value > 0) || [];
+    const seconds = duration?.selection === "enum" && durations.length ? Math.min(...durations) : duration?.default;
+    const resolution = [...(limits?.video?.resolutions || [])].sort((a, b) => resolutionRank(a) - resolutionRank(b))[0];
     const testProtocol = channel.apiFormat === "gemini" && !modelProfile?.protocol ? undefined : protocol;
     const testChannel: ModelChannel = {
         ...channel,
@@ -21,6 +25,7 @@ export async function testChannelModelConnection(channel: ModelChannel, model: s
                 displayName: modelProfile?.displayName,
                 capability,
                 protocol: testProtocol,
+                authType: modelProfile?.authType,
                 capabilityConfig: modelProfile?.capabilityConfig,
             },
             ...(channel.modelProfiles || []).filter((item) => item.model !== model),
@@ -44,34 +49,30 @@ export async function testChannelModelConnection(channel: ModelChannel, model: s
         textModels: capability === "text" ? [selectedModel] : [],
         audioModels: capability === "audio" ? [selectedModel] : [],
         count: "1",
-        size: capability === "image" ? "1024x1024" : "16:9",
-        videoSeconds: "6",
-        vquality: "720",
+        size: capability === "image" ? limits?.image?.size.default || "1024x1024" : limits?.video?.defaultRatio || "16:9",
+        quality: limits?.image?.quality.default || "auto",
+        videoSeconds: String(seconds || 6),
+        vquality: resolution || limits?.video?.defaultResolution || "720",
         videoGenerateAudio: "false",
     };
 
-    if (protocol.startsWith("likeai-")) {
-        const { runBackendGenerationTask } = await import("@/services/api/generation-task");
-        const { defaultModelCapabilityConfig } = await import("@/lib/model-capabilities");
-        const profile = modelProfile?.capabilityConfig || defaultModelCapabilityConfig(protocol, model);
-        const testConfig = { ...config, size: capability === "image" ? (profile.image?.size.default || "1:1") : (profile.video?.defaultRatio || "adaptive"), quality: profile.image?.quality.default || "1080p", videoSeconds: String(profile.video?.duration.default || 5), vquality: profile.video?.defaultResolution || "720p" };
-        await runBackendGenerationTask({ mode: capability, prompt: capability === "text" ? "Reply with OK." : "A simple gray circle on a white background.", config: testConfig, streamText: false });
-        return "LikeAI 任务已完成";
-    }
+    const prompt = capability === "text" ? "Reply with OK." : capability === "audio" ? "Model test." : "A static gray circle on a white background.";
+    const result = await runTask({ mode: capability, config, prompt, streamText: false, metadata: { source: "model-connection-test" } });
+    return modelConnectionResultDetail(result, capability);
+}
 
-    switch (capability) {
-        case "text":
-            await requestImageQuestion(config, [{ role: "user", content: "Reply with OK." }], () => undefined);
-            return "文本响应正常";
-        case "image":
-            await requestGeneration(config, "A simple gray circle on a white background.");
-            return "图片生成正常";
-        case "audio":
-            await requestAudioGeneration(config, "Model test.");
-            return "音频生成正常";
-        case "video": {
-            const task = await createVideoGenerationTask(config, "A static gray circle on a white background.");
-            return `视频任务已创建（${task.id}）`;
-        }
+export function modelConnectionResultDetail(result: BackendGenerationResult, capability: ModelCapability) {
+    const media = capability === "image" ? result.images?.[0] : capability === "video" ? result.video : result.audio;
+    if (capability === "text" ? !result.text?.trim() : !(media?.storageKey || media?.dataUrl || media?.url)) {
+        throw new Error("任务已结束，但没有返回可用结果。请在任务中心查看详情。");
     }
+    return capability === "text" ? "已收到文本响应" : `已完成${{ image: "图片", video: "视频", audio: "音频" }[capability]}生成，可在任务中心查看结果`;
+}
+
+function resolutionRank(value: string) {
+    const normalized = value.trim().toUpperCase();
+    const standard = normalized.match(/^(\d+)(P)?$/);
+    if (standard) return Number(standard[1]);
+    const kilo = normalized.match(/^(\d+(?:\.\d+)?)K$/);
+    return kilo ? Number(kilo[1]) * 540 : Number.POSITIVE_INFINITY;
 }

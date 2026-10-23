@@ -2,13 +2,17 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
-	"sort"
 	"strings"
+	"time"
 
+	"qisitv/backend/internal/generation"
+	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/modelcatalog"
+	"qisitv/backend/internal/protocol"
 )
 
 type ChannelModelsRequest struct {
@@ -20,122 +24,49 @@ type ChannelModelsRequest struct {
 	CredentialRef string           `json:"credentialRef"`
 }
 
-type channelModelsPayload struct {
-	Data   []channelModelItem `json:"data"`
-	Models []channelModelItem `json:"models"`
-	Error  *providerError     `json:"error"`
-	Code   *int               `json:"code"`
-	Msg    string             `json:"msg"`
-}
-
-type channelModelItem struct {
-	ID                     string                        `json:"id"`
-	Name                   string                        `json:"name"`
-	DisplayName            string                        `json:"display_name"`
-	ModelType              string                        `json:"model_type"`
-	SupportedEndpointTypes []string                      `json:"supported_endpoint_types"`
-	DefaultParameters      channelModelCatalogParameters `json:"default_parameters"`
-	Options                channelModelCatalogOptions    `json:"options"`
-	SupportsImages         *bool                         `json:"supports_images"`
-	MinImages              *int                          `json:"min_images"`
-	MaxImages              *int                          `json:"max_images"`
-}
-
-type channelModelCatalogParameters struct {
-	AspectRatio     string `json:"aspect_ratio"`
-	DurationSeconds string `json:"duration_seconds"`
-	Resolution      string `json:"resolution"`
-}
-
-type channelModelCatalogOptions struct {
-	AspectRatio     []ChannelModelCatalogOption `json:"aspect_ratio"`
-	DurationSeconds []ChannelModelCatalogOption `json:"duration_seconds"`
-	Resolution      []ChannelModelCatalogOption `json:"resolution"`
-}
-
 func (s *Service) FetchChannelModels(ctx context.Context, actor *model.User, input ChannelModelsRequest) ([]string, error) {
 	items, err := s.FetchChannelModelCatalog(ctx, actor, input)
 	if err != nil {
 		return nil, err
 	}
-	seen := make(map[string]bool, len(items))
-	models := make([]string, 0, len(items))
-	for _, item := range items {
-		name := strings.TrimSpace(item.ID)
-		if name == "" || seen[name] {
-			continue
-		}
-		seen[name] = true
-		models = append(models, name)
-	}
-	sort.Strings(models)
-	return models, nil
-}
-
-// ChannelModelCatalogItem 是前端自定义渠道拉取模型目录后的最小合同；
-// 协议、能力和可选参数均来自上游公开元数据，不展开供应商内部兼容模型。
-type ChannelModelCatalogItem struct {
-	ID                     string                               `json:"id"`
-	DisplayName            string                               `json:"displayName,omitempty"`
-	ModelType              string                               `json:"modelType,omitempty"`
-	SupportedEndpointTypes []string                             `json:"supportedEndpointTypes,omitempty"`
-	DefaultParameters      ChannelModelCatalogDefaultParameters `json:"defaultParameters,omitempty"`
-	Options                ChannelModelCatalogOptions           `json:"options,omitempty"`
-	SupportsImages         *bool                                `json:"supportsImages,omitempty"`
-	MinImages              *int                                 `json:"minImages,omitempty"`
-	MaxImages              *int                                 `json:"maxImages,omitempty"`
-}
-
-type ChannelModelCatalogDefaultParameters struct {
-	AspectRatio     string `json:"aspectRatio,omitempty"`
-	DurationSeconds string `json:"durationSeconds,omitempty"`
-	Resolution      string `json:"resolution,omitempty"`
-}
-
-type ChannelModelCatalogOptions struct {
-	AspectRatio     []ChannelModelCatalogOption `json:"aspectRatio,omitempty"`
-	DurationSeconds []ChannelModelCatalogOption `json:"durationSeconds,omitempty"`
-	Resolution      []ChannelModelCatalogOption `json:"resolution,omitempty"`
-}
-
-type ChannelModelCatalogOption struct {
-	Value string `json:"value"`
-	Label string `json:"label,omitempty"`
+	return modelcatalog.CatalogModelIDs(items), nil
 }
 
 func (s *Service) FetchChannelModelCatalog(ctx context.Context, actor *model.User, input ChannelModelsRequest) ([]ChannelModelCatalogItem, error) {
 	if actor == nil || strings.TrimSpace(actor.ID) == "" {
 		return nil, Unauthorized("请先登录")
 	}
-	if err := s.requireActiveCatalogProvider(&input); err != nil {
-		return nil, err
-	}
 	if err := s.resolveChannelModelsRequest(&input); err != nil {
 		return nil, err
 	}
-	baseURL := strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
-	apiKey := strings.TrimSpace(input.APIKey)
-	if baseURL == "" {
-		return nil, BadAuthRequest("请填写 Base URL")
-	}
-	if apiKey == "" {
-		return nil, BadAuthRequest("请填写 API Key")
-	}
-	apiFormat := strings.ToLower(strings.TrimSpace(input.APIFormat))
-	if apiFormat == "" {
-		apiFormat = "openai"
-	}
-	if apiFormat == "likeai" {
-		return fetchLikeAIModelCatalog(ctx, input)
-	}
-	if apiFormat != "openai" && apiFormat != "gemini" {
-		return nil, BadAuthRequest("接口协议不支持拉取模型")
+	if err := s.requireActiveCatalogProvider(&input); err != nil {
+		return nil, err
 	}
 	headers, err := NormalizeOutboundHeaders(input.Headers)
 	if err != nil {
 		return nil, err
 	}
+	catalog, err := modelcatalog.LoadChannelModelCatalog(ctx, s.fetchChannelModelCatalogBytes, input.BaseURL, input.APIFormat, input.APIKey, headers, s.catalogExtraSource())
+	if err != nil {
+		return nil, mapChannelModelCatalogError(err)
+	}
+	return catalog, nil
+}
 
+func (s *Service) fetchChannelModelCatalogBytes(ctx context.Context, baseURL, apiFormat, apiKey string, headers []modelcatalog.ChannelHeader) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+	if apiFormat == "likeai" {
+		body, err := generation.ExecuteProtocolRequest(ctx, generation.Config{BaseURL: baseURL, APIKey: apiKey, Headers: headers, InterfaceType: "likeai-image"}, protocol.RequestSpec{Method: http.MethodGet, Path: "/task/models"})
+		if err != nil {
+			var httpErr providerHTTPError
+			if errors.As(err, &httpErr) {
+				return nil, modelcatalog.CatalogFetchError{StatusCode: httpErr.StatusCode, Cause: err}
+			}
+			return nil, modelcatalog.CatalogFetchError{Cause: err}
+		}
+		return body, nil
+	}
 	target := apiURL(baseURL, "/models")
 	if apiFormat == "gemini" {
 		if !strings.HasSuffix(strings.ToLower(baseURL), "/v1beta") {
@@ -144,131 +75,84 @@ func (s *Service) FetchChannelModelCatalog(ctx context.Context, actor *model.Use
 		target = baseURL + "/models"
 	}
 	if _, err := ValidateOutboundURL(target); err != nil {
-		return nil, err
+		return nil, catalogError(http.StatusBadRequest, "catalog_address_invalid", err.Error(), err)
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return nil, BadAuthRequest("模型服务地址无效")
 	}
+	ApplyOutboundHeaders(request, headers)
 	if apiFormat == "gemini" {
 		request.Header.Set("x-goog-api-key", apiKey)
 	} else {
 		request.Header.Set("Authorization", "Bearer "+apiKey)
 	}
-	ApplyOutboundHeaders(request, headers)
-
-	// 只代理固定的模型目录 GET；用户密钥仅用于本次请求，不写入数据库或日志。
 	data, _, err := doBinary(request)
 	if err != nil {
-		return nil, channelModelsUpstreamError(err)
-	}
-	var payload channelModelsPayload
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return nil, WrapAppError(http.StatusBadGateway, "模型服务返回的不是有效 JSON", err)
-	}
-	if payload.Error != nil && strings.TrimSpace(payload.Error.Message) != "" {
-		return nil, NewAppError(http.StatusBadGateway, "模型服务返回失败，请检查渠道配置")
-	}
-	if payload.Code != nil && *payload.Code != 0 {
-		return nil, NewAppError(http.StatusBadGateway, "模型服务返回失败，请检查渠道配置")
-	}
-
-	items := payload.Data
-	if apiFormat == "gemini" {
-		items = payload.Models
-	}
-	seen := make(map[string]bool, len(items))
-	catalog := make([]ChannelModelCatalogItem, 0, len(items))
-	for _, item := range items {
-		name := strings.TrimPrefix(strings.TrimSpace(firstNonEmpty(item.ID, item.Name)), "models/")
-		if name == "" || seen[name] {
-			continue
+		var httpErr providerHTTPError
+		if errors.As(err, &httpErr) {
+			return nil, modelcatalog.CatalogFetchError{StatusCode: httpErr.StatusCode, Cause: err}
 		}
-		seen[name] = true
-		catalog = append(catalog, ChannelModelCatalogItem{
-			ID:                     name,
-			DisplayName:            strings.TrimSpace(item.DisplayName),
-			ModelType:              normalizeCatalogModelType(item.ModelType),
-			SupportedEndpointTypes: normalizeCatalogEndpointTypes(item.SupportedEndpointTypes),
-			DefaultParameters: ChannelModelCatalogDefaultParameters{
-				AspectRatio:     strings.TrimSpace(item.DefaultParameters.AspectRatio),
-				DurationSeconds: strings.TrimSpace(item.DefaultParameters.DurationSeconds),
-				Resolution:      strings.TrimSpace(item.DefaultParameters.Resolution),
-			},
-			Options: ChannelModelCatalogOptions{
-				AspectRatio:     normalizeCatalogOptions(item.Options.AspectRatio),
-				DurationSeconds: normalizeCatalogOptions(item.Options.DurationSeconds),
-				Resolution:      normalizeCatalogOptions(item.Options.Resolution),
-			},
-			SupportsImages: item.SupportsImages,
-			MinImages:      item.MinImages,
-			MaxImages:      item.MaxImages,
-		})
+		return nil, modelcatalog.CatalogFetchError{Cause: err}
 	}
-	sort.Slice(catalog, func(left int, right int) bool {
-		return catalog[left].ID < catalog[right].ID
-	})
-	if s.isPluginEnabled() {
-		catalog = extendChannelModelCatalog(baseURL, apiFormat, headers, catalog)
-	}
-	return catalog, nil
+	return data, nil
 }
 
-func normalizeCatalogModelType(value string) string {
-	normalized := strings.ToLower(strings.TrimSpace(value))
-	switch normalized {
-	case "text", "image", "video", "audio":
-		return normalized
-	default:
-		return ""
+func (s *Service) catalogExtraSource() modelcatalog.CatalogExtraSource {
+	if s == nil || !s.isPluginEnabled() {
+		return nil
 	}
+	return extraChannelModelCatalogItems
 }
 
-func normalizeCatalogOptions(options []ChannelModelCatalogOption) []ChannelModelCatalogOption {
-	seen := make(map[string]bool, len(options))
-	normalized := make([]ChannelModelCatalogOption, 0, len(options))
-	for _, option := range options {
-		value := strings.TrimSpace(option.Value)
-		if value == "" || seen[value] {
-			continue
-		}
-		seen[value] = true
-		normalized = append(normalized, ChannelModelCatalogOption{Value: value, Label: strings.TrimSpace(option.Label)})
+func mapChannelModelCatalogError(err error) error {
+	if err == nil {
+		return nil
 	}
-	return normalized
-}
-
-func normalizeCatalogEndpointTypes(values []string) []string {
-	seen := make(map[string]bool, len(values))
-	normalized := make([]string, 0, len(values))
-	for _, value := range values {
-		item := strings.TrimSpace(value)
-		if item == "" || seen[item] {
-			continue
-		}
-		seen[item] = true
-		normalized = append(normalized, item)
+	var fetchErr modelcatalog.CatalogFetchError
+	if errors.As(err, &fetchErr) {
+		return channelModelsUpstreamError(fetchErr.Cause)
 	}
-	return normalized
+	var jsonErr modelcatalog.CatalogJSONError
+	if errors.As(err, &jsonErr) {
+		return catalogError(http.StatusBadGateway, "catalog_response_invalid", "模型目录响应格式不兼容，需要 OpenAI data 数组或 Gemini models 数组", jsonErr.Cause)
+	}
+	var rejected modelcatalog.CatalogUpstreamRejectedError
+	if errors.As(err, &rejected) {
+		return catalogError(http.StatusBadGateway, "catalog_upstream_rejected", rejected.Error(), err)
+	}
+	return err
 }
 
 func channelModelsUpstreamError(err error) error {
+	var network net.Error
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &network) && network.Timeout()) {
+		return catalogError(http.StatusGatewayTimeout, "catalog_timeout", "读取模型目录超时，请检查渠道地址和网络后重试", err)
+	}
 	var authErr *AuthError
 	if errors.As(err, &authErr) {
 		return authErr
 	}
 	var httpErr providerHTTPError
 	if !errors.As(err, &httpErr) {
-		return WrapAppError(http.StatusBadGateway, "连接模型服务失败，请检查渠道地址和网络", err)
+		return catalogError(http.StatusBadGateway, "catalog_network_failed", "连接模型服务失败，请检查渠道地址和网络", err)
 	}
 	switch httpErr.StatusCode {
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return NewAppError(http.StatusBadGateway, "模型服务鉴权失败，请检查 API Key")
+		return catalogError(http.StatusBadGateway, "catalog_auth_failed", "模型服务鉴权失败，请检查 API Key 或服务商访问权限", err)
 	case http.StatusNotFound:
-		return NewAppError(http.StatusBadGateway, "模型服务未提供 /models 接口")
+		return catalogError(http.StatusBadGateway, "catalog_unsupported", "模型服务未提供此模型目录接口，请核对地址或手动添加模型", err)
+	case http.StatusMethodNotAllowed, http.StatusNotImplemented:
+		return catalogError(http.StatusBadGateway, "catalog_unsupported", "模型服务不支持读取模型目录，请手动添加模型", err)
 	case http.StatusTooManyRequests:
-		return NewAppError(http.StatusBadGateway, "模型服务请求过于频繁或额度不足")
+		return catalogError(http.StatusBadGateway, "catalog_rate_limited", "模型服务请求过于频繁或额度不足", err)
 	default:
-		return WrapAppError(http.StatusBadGateway, httpErr.Error(), err)
+		return catalogError(http.StatusBadGateway, "catalog_upstream_failed", httpErr.Error(), err)
 	}
+}
+
+func catalogError(status int, reason kernel.ErrorReason, message string, cause error) *AppError {
+	err := WrapAppError(status, message, cause)
+	err.Reason = reason
+	return err
 }

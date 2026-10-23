@@ -1,4 +1,6 @@
 import { nanoid } from "nanoid";
+import { removeCanvasNodes } from "./canvas-project-domain";
+import { isFrameNode } from "./canvas-frame";
 
 import { getNodeSpec } from "@/constant/canvas";
 import { getNodeDefinition } from "./node-registry";
@@ -268,8 +270,9 @@ export function previewCanvasOperations(ops?: CanvasOperation[], snapshot?: Canv
         }
         if (op.type === "delete_node") {
             const ids = op.ids || (op.id ? [op.id] : op.nodeType ? (snapshot?.nodes || []).filter((node) => node.type === op.nodeType).map((node) => node.id) : []);
-            ids.forEach((id) => affectedNodeIds.add(id));
-            destructiveCount += Math.max(1, ids.length);
+            const removedIds = removeCanvasNodes(snapshot?.nodes || [], new Set(ids)).removedIds;
+            removedIds.forEach((id) => affectedNodeIds.add(id));
+            destructiveCount += Math.max(1, removedIds.size);
             const names = ids.slice(0, 3).map((id) => nodeById.get(id)?.title || id);
             items.push(ids.length ? `删除 ${ids.length} 个节点${names.length ? `：${names.join("、")}${ids.length > names.length ? "等" : ""}` : ""}` : `删除全部${canvasNodeTypeLabel(op.nodeType)}`);
             return;
@@ -342,8 +345,8 @@ export function applyCanvasOperations(snapshot: CanvasSnapshot, ops?: CanvasOper
             if (!op.id) return;
             const current = nodes.find((node) => node.id === op.id);
             const nextPosition = op.patch?.position;
-            const dx = current?.type === CanvasNodeType.Frame && nextPosition ? nextPosition.x - current.position.x : 0;
-            const dy = current?.type === CanvasNodeType.Frame && nextPosition ? nextPosition.y - current.position.y : 0;
+            const dx = current && isFrameNode(current) && nextPosition ? nextPosition.x - current.position.x : 0;
+            const dy = current && isFrameNode(current) && nextPosition ? nextPosition.y - current.position.y : 0;
             nodes = nodes.map((node) => {
                 if (node.id === op.id) return { ...node, ...op.patch, metadata: { ...node.metadata, ...op.patch?.metadata, ...op.metadata } };
                 if (node.parentId === op.id && (dx || dy)) return { ...node, position: { x: node.position.x + dx, y: node.position.y + dy } };
@@ -352,9 +355,10 @@ export function applyCanvasOperations(snapshot: CanvasSnapshot, ops?: CanvasOper
         }
         if (op.type === "delete_node") {
             const ids = new Set(op.ids || (op.id ? [op.id] : op.nodeType ? nodes.filter((node) => node.type === op.nodeType).map((node) => node.id) : []));
-            nodes = nodes.filter((node) => !ids.has(node.id)).map((node) => (node.parentId && ids.has(node.parentId) ? { ...node, parentId: undefined } : node));
-            connections = connections.filter((conn) => !ids.has(conn.fromNodeId) && !ids.has(conn.toNodeId));
-            selectedNodeIds = selectedNodeIds.filter((id) => !ids.has(id));
+            const removal = removeCanvasNodes(nodes, ids);
+            nodes = removal.nodes;
+            connections = connections.filter((conn) => !removal.removedIds.has(conn.fromNodeId) && !removal.removedIds.has(conn.toNodeId));
+            selectedNodeIds = selectedNodeIds.filter((id) => !removal.removedIds.has(id));
         }
         if (op.type === "delete_connections") {
             const ids = new Set(op.ids || (op.id ? [op.id] : []));
@@ -365,7 +369,7 @@ export function applyCanvasOperations(snapshot: CanvasSnapshot, ops?: CanvasOper
             const exists = connections.some((conn) => conn.fromNodeId === op.fromNodeId && conn.toNodeId === op.toNodeId && conn.fromHandleId === op.fromHandleId && conn.toHandleId === op.toHandleId);
             const from = nodes.find((node) => node.id === op.fromNodeId);
             const to = nodes.find((node) => node.id === op.toNodeId);
-            const hasNodes = Boolean(from && to && from.type !== CanvasNodeType.Frame && to.type !== CanvasNodeType.Frame);
+            const hasNodes = Boolean(from && to && !isFrameNode(from) && !isFrameNode(to));
             if (!exists && hasNodes) connections = [...connections, { id: op.id || nanoid(), fromNodeId: op.fromNodeId, toNodeId: op.toNodeId, fromHandleId: op.fromHandleId, toHandleId: op.toHandleId }];
         }
         if (op.type === "set_viewport" && op.viewport) viewport = op.viewport;

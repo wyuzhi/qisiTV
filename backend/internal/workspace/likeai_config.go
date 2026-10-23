@@ -1,77 +1,34 @@
 package workspace
 
-import "strings"
-
 const LikeAIBaseURL = "https://task.likeai.pro/task-api"
+const QisiAPIBaseURL = "https://cheeser.link/api-service/likeai"
 
-// NewLikeAIProviderConfig exposes qisiTV's active provider without deleting
-// historical channel settings from the local workspace file.
+// Selecting a preferred service does not filter independent assistant channels.
 func NewLikeAIProviderConfig(dataDir string) (*ProviderConfig, error) {
-	store, err := NewProviderConfig(dataDir)
-	if err == nil {
-		store.likeAIOnly = true
-	}
-	return store, err
+	return NewProviderConfig(dataDir)
 }
 
-func likeAIOnlyConfig(config map[string]any) map[string]any {
-	channel := map[string]any{
-		"id": "likeai", "name": "LikeAI", "baseUrl": LikeAIBaseURL,
-		"apiFormat": "likeai", "scope": "user", "pinned": true,
-		"presetVersion": 1, "models": []any{}, "modelProfiles": []any{},
-		"apiKey": "", "secretKey": "", "headers": []any{}, "enabled": true,
-	}
-	if channels, ok := config["channels"].([]any); ok {
-		for _, item := range channels {
-			local, ok := item.(map[string]any)
-			if !ok || local["id"] != "likeai" {
-				continue
-			}
-			for key, value := range local {
-				channel[key] = value
-			}
-			break
-		}
-	}
-	channel["id"], channel["name"] = "likeai", "LikeAI"
-	channel["baseUrl"], channel["apiFormat"] = LikeAIBaseURL, "likeai"
-	channel["pinned"] = true
-	config["channels"] = []any{channel}
-	for _, key := range []string{"imageModel", "videoModel", "textModel", "audioModel"} {
-		if value, ok := config[key].(string); ok && !strings.HasPrefix(value, "likeai::") {
-			config[key] = ""
-		}
-	}
-	return config
-}
-
-func preserveInactiveProviderConfig(incoming, existing map[string]any) map[string]any {
-	channels := []any{}
-	var active any
-	if previous, ok := existing["channels"].([]any); ok {
-		for _, value := range previous {
-			channel, ok := value.(map[string]any)
-			if !ok {
-				continue
-			}
-			if channel["id"] == "likeai" {
-				active = value
-			} else {
-				channels = append(channels, value)
+func appendPreferredMediaChannels(channels []any) []any {
+	for _, preset := range []struct{ id, name, base string }{{"qisi-api", "qisi API", QisiAPIBaseURL}, {"likeai", "LikeAI", LikeAIBaseURL}} {
+		found := false
+		ids := map[string]bool{}
+		for _, raw := range channels {
+			if channel, ok := raw.(map[string]any); ok {
+				id, _ := channel["id"].(string)
+				ids[id] = true
+				found = found || channel["baseUrl"] == preset.base && channel["apiFormat"] == "likeai"
 			}
 		}
-	}
-	if next, ok := incoming["channels"].([]any); ok {
-		for _, value := range next {
-			if channel, ok := value.(map[string]any); ok && channel["id"] == "likeai" {
-				active = channel
-				break
-			}
+		if found {
+			continue
 		}
+		id := preset.id
+		for ids[id] {
+			id += "-service"
+		}
+		channels = append(channels, map[string]any{"id": id, "name": preset.name, "baseUrl": preset.base,
+			"apiFormat": "likeai", "scope": "user", "models": []any{}, "modelProfiles": []any{},
+			"apiKey": "", "secretKey": "", "headers": []any{}, "enabled": true})
 	}
-	if active != nil {
-		channels = append(channels, active)
-	}
-	incoming["channels"] = channels
-	return incoming
+	return channels
 }

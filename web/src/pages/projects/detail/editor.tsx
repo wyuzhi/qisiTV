@@ -329,13 +329,23 @@ export default function ProjectEditorView({ detail }: { detail: ProjectDetail })
         [projectId, scope],
     );
 
-    useEffect(() => registerDesktopUpdatePreparation(async () => {
-        if (store.getState().inPreview) throw new Error("请先完成当前剪辑操作。");
-        await store.getState().flushSave();
-        const saved = store.getState();
-        // The editor records save failures in state rather than rejecting.
-        if (saved.isDirty || saved.saving || saved.saveError) throw new Error("剪辑内容尚未保存完成。");
-    }), [store]);
+    useEffect(() => {
+        const unregister = registerDesktopUpdatePreparation(async () => {
+            if (store.getState().inPreview) throw new Error("请先完成当前剪辑操作。");
+            await store.getState().flushSave();
+            const saved = store.getState();
+            // The editor records save failures in state rather than rejecting.
+            if (saved.isDirty || saved.saving || saved.saveError) throw new Error("剪辑内容尚未保存完成。");
+        }, () => store.getState().hasActiveSave());
+        return () => {
+            // Start the final write before unregistering so the update guard
+            // keeps observing it after this editor disappears.
+            void store.getState().flushSave().catch(error => {
+                console.error("编辑器卸载前保存时间线失败，待下次操作重试", { error });
+            });
+            unregister();
+        };
+    }, [store]);
 
     // 进入编辑器时只加载当前用户和项目作用域的本地时间线；没有真实数据时保持空时间线，禁止注入虚构片段。
     useEffect(() => {
@@ -366,14 +376,6 @@ export default function ProjectEditorView({ detail }: { detail: ProjectDetail })
         })();
         return () => {
             cancelled = true;
-            // 卸载前冲刷尚未落盘的改动（如切页发生在防抖窗口内），避免最后几次操作丢失。
-            // flushSave 失败时 editor-store 会保留 isDirty；这里必须留下错误证据，不能假装已保存。
-            const flushSave = store.getState().flushSave;
-            if (flushSave) {
-                void flushSave().catch((error) => {
-                    console.error("编辑器卸载前保存时间线失败，待下次操作重试", { projectId, error });
-                });
-            }
         };
     }, [scope, projectId, store]);
 
