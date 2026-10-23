@@ -111,7 +111,7 @@ func validateClosedEngine(directory string) error {
 	}
 	// The workspace lock guarantees an offline snapshot. Immutable read mode
 	// prevents validation itself from creating journal/shared-memory files.
-	dsn := (&url.URL{Scheme: "file", Path: filepath.Join(directory, "open_ai_canvas.db"), RawQuery: "mode=ro&immutable=1&_query_only=1"}).String()
+	dsn := closedEngineSQLiteURI(filepath.Join(directory, "open_ai_canvas.db"))
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return err
@@ -126,6 +126,16 @@ func validateClosedEngine(directory string) error {
 		return errors.New("source does not contain the qisiTV canvas schema")
 	}
 	return nil
+}
+
+func closedEngineSQLiteURI(file string) string {
+	// SQLite file URIs use forward slashes, including on Windows. A drive must
+	// be in the absolute path (/C:/...), not parsed as a URI authority.
+	uriPath := filepath.ToSlash(file)
+	if filepath.VolumeName(file) != "" && !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	return (&url.URL{Scheme: "file", Path: uriPath, RawQuery: "mode=ro&immutable=1&_query_only=1"}).String()
 }
 
 // No running database is renamed or copied. Both pointer mutation and runtime

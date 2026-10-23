@@ -104,6 +104,8 @@ LikeAI [官方公开文档](https://task.likeai.pro/api-doc) 的图片 `huoshan_
 
 PR #10 首轮云端 Linux Backend 全 Go 检查、Windows 存储迁移及 Director Chrome 83/83 断言通过。Web 两个夹具在 CI 的 Bun 1.3.9 中路径解析失败，已用相同版本复现并修正，1.3.9 与 1.4.2 的真实 Chrome 复验均通过。旧安装 CI 调用已删除的 Wails 构建脚本，现改为四平台本机引擎源码检查，Mac ARM 另行打包并做完整离仓库验收；发布检查中 Ubuntu 镜像的断言改为检查真正运行 apt 的任务，完整 233 项本机通过。修正后的云端结果须在对应提交重新运行后确认。
 
+提交 `8ac9c8eb` 的云端 Quality 四项已全部通过：完整 Backend、Web、Release publisher、Windows storage migration。独立引擎流水线的 Linux、Intel Mac、Apple Silicon Mac 原生检查通过；Apple Silicon 的固定源码媒体构建、App/DMG 打包及八项离仓库验收也通过。Windows 引擎检查另发现 SQLite 只读校验 URI 未规范化盘符，现修正为绝对路径与正斜杠，并补真实数据库重开、拒写、原文件不变和无日志文件的回归检查。两处 Windows 测试夹具也改为解析 JSON 路径及实际子进程环境，保留原有行为断言；修正后的 Windows 云端结果单独跟踪，不以其他平台通过代替。
+
 GitGuardian 扫描合入的上游历史时标记两处测试样例：`agent-host/model-proxy-cases.mjs` 的仅供本机子进程信任的自签测试证书，以及 `agent-host/eval/sim-go.test.mjs` 的脱敏断言输入。已核对两者均为合成 fixture，不含用户密钥；当前源码改为测试运行时生成证书和随机 token，相关 11 项通过。没有删除上游提交历史、关闭扫描或跳过安全检查；历史告警的分类由 GitGuardian 工作区处理。
 
 ### 旧合同测试替代

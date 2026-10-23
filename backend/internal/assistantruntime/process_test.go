@@ -62,6 +62,14 @@ func runHTTPFixture() int {
 	if dataDir := os.Getenv("BEEFTV_AGENT_DATA_DIR"); dataDir != "" {
 		_ = os.WriteFile(filepath.Join(dataDir, "child-env.txt"), []byte(strings.Join(os.Environ(), "\n")), 0o600)
 		_ = os.WriteFile(filepath.Join(dataDir, "child-pid.txt"), []byte(strconv.Itoa(os.Getpid())), 0o600)
+		// Read through the actual child OS semantics. On Windows os/exec merges
+		// NO_PROXY and no_proxy, retaining the latter spelling in os.Environ.
+		projection, _ := json.Marshal(map[string]string{
+			"baseURL":     os.Getenv("BEEFTV_AGENT_BASE_URL"),
+			"noProxy":     os.Getenv("NO_PROXY"),
+			"useEnvProxy": os.Getenv("NODE_USE_ENV_PROXY"),
+		})
+		_ = os.WriteFile(filepath.Join(dataDir, "child-proxy-env.json"), projection, 0o600)
 	}
 	go func() {
 		buf := make([]byte, 1)

@@ -45,7 +45,12 @@ func TestEngineFolderConfirmationPersistsAndRejectsReplacement(t *testing.T) {
 	if got := request("GET", "/project-folders/list", ""); got.Code != 409 {
 		t.Fatal(got.Code, got.Body.String())
 	}
-	if got := request("POST", "/project-folders/choose", ""); got.Code != 200 || !strings.Contains(got.Body.String(), root) {
+	var chosen struct {
+		Data struct {
+			Path string `json:"path"`
+		} `json:"data"`
+	}
+	if got := request("POST", "/project-folders/choose", ""); got.Code != 200 || json.Unmarshal(got.Body.Bytes(), &chosen) != nil || chosen.Data.Path != root {
 		t.Fatal(got.Code, got.Body.String())
 	}
 	if shell.configured() {
@@ -66,7 +71,8 @@ func TestEngineFolderConfirmationPersistsAndRejectsReplacement(t *testing.T) {
 		t.Fatal("same directory is not idempotent")
 	}
 	settings, err := os.ReadFile(filepath.Join(data, "qisitv-engine.json"))
-	if err != nil || !strings.Contains(string(settings), root) {
+	var persisted engineSettings
+	if err != nil || json.Unmarshal(settings, &persisted) != nil || persisted.ProjectDirectory != root {
 		t.Fatal("directory was not persisted", err)
 	}
 	other, _ := json.Marshal(map[string]any{"path": t.TempDir(), "confirmed": true})

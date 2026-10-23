@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"io"
 	"math/big"
@@ -203,14 +204,23 @@ func TestModelOriginChangeRebuildsOwnedChildProxyEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := host.PID()
-	readChild := func() []string {
-		raw, err := os.ReadFile(filepath.Join(host.dataDir(), "child-env.txt"))
+	type childProjection struct {
+		BaseURL     string `json:"baseURL"`
+		NoProxy     string `json:"noProxy"`
+		UseEnvProxy string `json:"useEnvProxy"`
+	}
+	readChild := func() childProjection {
+		raw, err := os.ReadFile(filepath.Join(host.dataDir(), "child-proxy-env.json"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		return strings.Split(string(raw), "\n")
+		var projection childProjection
+		if err := json.Unmarshal(raw, &projection); err != nil {
+			t.Fatal(err)
+		}
+		return projection
 	}
-	if !strings.Contains(envValue(readChild(), "NO_PROXY"), "old-model.invalid") {
+	if !strings.Contains(readChild().NoProxy, "old-model.invalid") {
 		t.Fatal("original model projection absent")
 	}
 	updated := original
@@ -218,15 +228,15 @@ func TestModelOriginChangeRebuildsOwnedChildProxyEnvironment(t *testing.T) {
 	if launched, err := host.Ensure(updated, "http://127.0.0.1:18090/api", "", false); err != nil || launched || host.PID() != first {
 		t.Fatal("busy host must retain its original model and environment")
 	}
-	if envValue(readChild(), "BEEFTV_AGENT_BASE_URL") != original.BaseURL {
+	if readChild().BaseURL != original.BaseURL {
 		t.Fatal("busy host changed its model")
 	}
 	if launched, err := host.Ensure(updated, "http://127.0.0.1:18090/api", "", true); err != nil || !launched || host.PID() == first {
 		t.Fatal("idle model-origin change must restart the owned child")
 	}
 	env := readChild()
-	if envValue(env, "BEEFTV_AGENT_BASE_URL") != updated.BaseURL || envValue(env, "NODE_USE_ENV_PROXY") != "1" ||
-		!strings.Contains(envValue(env, "NO_PROXY"), "new-model.invalid") || strings.Contains(envValue(env, "NO_PROXY"), "old-model.invalid") {
+	if env.BaseURL != updated.BaseURL || env.UseEnvProxy != "1" ||
+		!strings.Contains(env.NoProxy, "new-model.invalid") || strings.Contains(env.NoProxy, "old-model.invalid") {
 		t.Fatal("restarted child retained stale model proxy projection")
 	}
 }

@@ -2,14 +2,69 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"qisitv/backend/internal/bootstrap"
 	"qisitv/backend/internal/desktopstorage"
 	"qisitv/backend/internal/runtimeinfo"
 )
+
+func TestClosedEngineSQLiteURIUsesNativeAbsolutePathAndReadOnlyConnection(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "workspace #100%")
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(directory, "canvas.db")
+	write, err := sql.Open("sqlite3", file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = write.Exec("CREATE TABLE fixture(value TEXT); INSERT INTO fixture VALUES('original')"); err != nil {
+		write.Close()
+		t.Fatal(err)
+	}
+	if err = write.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dsn := closedEngineSQLiteURI(file)
+	parsed, err := url.Parse(dsn)
+	if err != nil || parsed.Scheme != "file" || parsed.Host != "" || strings.Contains(parsed.Path, `\`) || !strings.HasPrefix(parsed.Path, "/") || !strings.HasSuffix(parsed.Path, "/workspace #100%/canvas.db") {
+		t.Fatal("SQLite URI lost or misclassified the native path", dsn, err)
+	}
+	read, err := sql.Open("sqlite3", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer read.Close()
+	var value string
+	if err = read.QueryRow("SELECT value FROM fixture").Scan(&value); err != nil || value != "original" {
+		t.Fatal("URI did not reopen the original database", value, err)
+	}
+	if _, err = read.Exec("UPDATE fixture SET value='mutated'"); err == nil {
+		t.Fatal("offline validation URI allowed a write")
+	}
+	if err = read.Close(); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(file)
+	if err != nil || string(before) != string(after) {
+		t.Fatal("read-only validation changed the original database", err)
+	}
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		if _, err = os.Stat(file + suffix); !os.IsNotExist(err) {
+			t.Fatal("read-only validation created a journal", suffix, err)
+		}
+	}
+}
 
 func closedStorageFixture(t *testing.T) string {
 	t.Helper()
