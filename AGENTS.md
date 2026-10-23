@@ -8,6 +8,8 @@ qisiTV 是基于上游 `glanderness/BeefTV` 二次开发的 AI 影视与短剧�
 
 当前用户确定的产品范围：画布无需注册、登录或积分；模型服务保留独立的 qisi API 和官方 LikeAI 配置与密钥。qisi API 的账号和余额属于模型服务，不改变画布的本机存储方式。网站模式由 `VITE_QISITV_BROWSER_ONLY=1` 启用，用户授权本机目录后，项目和素材写入真实独立文件夹，IndexedDB 仅作句柄、配置与恢复缓存；网站函数只临时转发 LikeAI 请求，不建立云端工作区。不要在合并上游时恢复 BeefAPI 钱包或其他服务商入口。
 
+2026-10-24 用户更新目标：qisiTV 与 BeefTV 的区别是 Web 交付与客户端交付，要求上游已有能力全部对齐。这覆盖此前“不需要网页内 Agent”和仅选取少量修复的范围约束；内置创作助手、技能市场、可复用工作流、AI 超分、导演台和媒体执行都在目标内。不能因网站模式直接排除功能，也不能把菜单可见或替代模型当作完整对齐。具体迁移合同和未完成项见 `docs/design/web-feature-parity.md`。用户已选择“网页操作，本地引擎按需自动启动，素材留本机”。本机目录、qisiTV 品牌、已有外部 MCP、无需画布账号及默认模型服务仍保留；不擅自上传整个项目或建立云端项目数据库。
+
 每个项目必须对应本机真实独立文件夹，导入素材和生成结果自动写入；浏览器缓存不算最终项目持久化。Agent 上手主流程是「选择自己的客户端并复制安装指令 → 加载工具并调用 qisitv_pair → 点击连接链接并在网页确认」，支持 Codex、WorkBuddy、Claude Desktop、Claude Code、OpenClaw、Hermes、CodeBuddy、Cursor、VS Code 和通用本机 stdio MCP，WorkBuddy 紧跟 Codex，不能把主流程限定为 Codex。安装指令检查 Git、Node.js 18+ 与对应客户端能力；Codex 从 `https://github.com/wyuzhi/qisiTV.git` 的 `main` 分支添加 `qisitv` marketplace，安装 `qisitv@qisitv` 并新建任务。其他客户端克隆官方仓库到临时目录，运行 `node plugins/qisitv/scripts/prepare.mjs --json`，取得指向稳定程序目录的真实 `{command,args}`，再备份并合并原生配置、保留无关字段。准备程序不改客户端配置、不启动 MCP；许可证与程序必须一起保留。Desktop 聊天没有本机执行能力时，说明需要本机 Agent 帮助准备并通过设置粘贴配置，不假装可以自动安装。WorkBuddy 使用用户级 `~/.workbuddy/mcp.json` 的 `mcpServers`；CodeBuddy 区分 CLI / IDE；VS Code 使用本机用户配置的 `servers` 根键。
 
 所有入口使用 `qisitv-web` MCP 自动管理本机服务，要求 Agent 进程与浏览器同机；Claude 网页版、远程 Gateway 或云端 Agent 不在本机直连范围。环境缺失、安装失败或未实测客户端不得宣称成功。不要把手选系统包、手动 `start` 或保留终端窗口作为推荐主流程；手动包留作折叠备选。安装不取代目录授权、网页配对或付费生成授权。MCP 0.3.0 的 qisitv_pair 返回 pairingUrl，短码只放在 URL fragment，页面读取后立即移除；浏览器令牌仅保留在当前标签页 sessionStorage，不放 URL / localStorage / 项目文件。首次连接由用户确认。同一标签页在原最长十二小时授权内可恢复连接，重连不续期、不抢占其他在线标签页、不重播旧命令；显式断开撤销授权。本机服务重启后重新配对。命令经回环 WebSocket 交给已打开的网页执行，网页是唯一文件写入者；不要另建 Go 数据库或声称网页关闭后仍可执行。旧 `qisitv` MCP 继续连接桌面 Go 工作区，两者不自动合并。见 `docs/design/project-folders-and-agent.md`。
@@ -24,7 +26,7 @@ qisiTV 是基于上游 `glanderness/BeefTV` 二次开发的 AI 影视与短剧�
 
 ## 2. 开始工作前
 
-上游许可证边界：`glanderness/BeefTV` 的 `6b30abfe` 开始为新增原创内容采用源码可用许可，对外网站服务需要单独授权；其明确保留 `2327ee2d` 等历史 MIT 内容的既有授权。用户已于 2026-10-24 确认取得适用于 qisiTV / cheeser.link 的授权，本次可选择适配 `8a14a160` 的视频与引用修复。新增上游代码保留对应许可与署名，完整条款随源码和应用交付；不把授权解释为将新增代码改为 MIT，或自动授予下游同等网站服务权限。未来超出已确认范围的版本或用途仍需核对。同步前检查具体来源、产品依赖和许可，并更新 `docs/upstream-maintenance.md`，不能直接覆盖品牌、本机目录、模型服务和外部 MCP 定制。
+上游许可证边界：`glanderness/BeefTV` 的 `6b30abfe` 开始为新增原创内容采用源码可用许可，对外网站服务需要单独授权；其明确保留 `2327ee2d` 等历史 MIT 内容的既有授权。用户已于 2026-10-24 确认取得适用于 qisiTV / cheeser.link 的授权，并进一步要求当前上游版本完整功能对齐；不要重复索取同一授权确认。新增上游代码保留对应许可与署名，完整条款随源码和应用交付；不把授权解释为将新增代码改为 MIT，或自动授予下游同等网站服务权限，也不推定已拥有外部算力账号或市场服务凭据。未来超出已确认范围的版本或用途仍需核对。同步前检查具体来源、产品依赖和许可，并更新 `docs/upstream-maintenance.md`，不能直接覆盖品牌、本机目录、模型服务和外部 MCP 定制。
 
 1. 先读取任务涉及的入口、调用方、配置、锁文件和相邻测试；先理解现状，再决定是否抽象或重构。
 2. 使用 `rg` / `rg --files` 搜索，优先并行读取相关文件。不要为了“统一风格”改动无关模块、依赖、格式或用户已有修改。
