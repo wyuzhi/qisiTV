@@ -37,9 +37,22 @@ func LocateTarget(executable string) (Target, error) {
 		return locateDarwin(platform, resolved)
 	case "windows":
 		return locateWindows(platform, resolved)
+	case "linux":
+		return locateLinux(platform, resolved)
 	default:
 		return Target{}, ErrUnsupported
 	}
+}
+
+func locateLinux(platform, executable string) (Target, error) {
+	bundle := filepath.Dir(executable)
+	if filepath.Base(executable) != "qisiTV" || filepath.Base(bundle) != linuxBundleName {
+		return Target{}, fmt.Errorf("当前运行方式不支持自动安装更新")
+	}
+	if err := requireRegularFile(executable, true); err != nil {
+		return Target{}, err
+	}
+	return Target{Platform: platform, Kind: "bundle", Path: bundle, Executable: executable, PluginDir: filepath.Join(bundle, pluginDirName)}, nil
 }
 
 func locateDarwin(platform, executable string) (Target, error) {

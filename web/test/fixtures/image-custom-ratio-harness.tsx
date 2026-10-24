@@ -2,7 +2,7 @@ import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { CanvasImageSettingsPopover } from "../../src/components/canvas/canvas-image-settings-popover";
 import { useCanvasThemeStore } from "../../src/stores/canvas/use-canvas-theme-store";
-import { createModelChannel, defaultConfig, encodeChannelModel } from "../../src/stores/use-config-store";
+import { createModelChannel, defaultConfig, encodeChannelModel } from "@/stores/use-config-store";
 
 const channel = createModelChannel({
     id: "likeai-test", name: "LikeAI", scope: "user", apiFormat: "likeai", baseUrl: "https://task.likeai.pro/task-api", models: ["vidu_image2"],

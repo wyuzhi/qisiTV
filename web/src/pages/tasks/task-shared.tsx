@@ -1,4 +1,4 @@
-import { explainGenerationError, shouldBlockAutomaticRetry } from "@/lib/generation-error";
+import { explainGenerationError, shouldBlockManualRetry } from "@/lib/generation-error";
 import type { GenerationTask, TaskStatus } from "@/services/api/task-center";
 import { modelDisplayName, type AiConfig } from "@/stores/use-config-store";
 
@@ -7,7 +7,7 @@ export function getTaskCanvasContext(task: GenerationTask, canvasById: Map<strin
     const canvas = canvasById.get(task.projectId);
     if (canvas) return { canvasName: canvas.title || "未命名画布", projectName: canvas.projectId ? projectNameById.get(canvas.projectId) || "" : "" };
     const projectName = projectNameById.get(task.projectId);
-    return projectName ? { canvasName: "项目级任务", projectName } : { canvasName: "画布已移除", projectName: "" };
+    return projectName ? { canvasName: "项目级任务", projectName } : { canvasName: `未加载或已移除的画布 · ${task.projectId}`, projectName: "" };
 }
 
 export function isTaskFailed(task: GenerationTask) {
@@ -25,7 +25,7 @@ export function taskAttentionReason(task: GenerationTask) {
 }
 
 export function taskRetryBlocked(task: GenerationTask) {
-    return shouldBlockAutomaticRetry({ code: task.errorCode, message: task.error }, task.stage);
+    return shouldBlockManualRetry({ code: task.errorCode, message: task.error }, task.stage);
 }
 
 export function providerCancelStatusLabel(task: GenerationTask) {

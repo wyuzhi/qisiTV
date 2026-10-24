@@ -1,15 +1,28 @@
 // 默认由后端 ffmpeg 渲染并把产物写入资源存储；浏览器 ffmpeg.wasm 只承担离线降级。
-// 构建渲染计划时跳过已失去媒体来源的片段，避免悬空 nodeId 阻断其余有效片段导出。
+// 缺源阻止完整成片导出；规划错误在面板呈现，不中断编辑器。
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, Loader2, PackageOpen, Server } from "lucide-react";
+import { AuthenticatedVideo, AuthenticatedDownload } from "@/components/assets/authenticated-media";
 
 import { useEditorHostContext, useEditorStoreContext } from "@/components/editor/editor-context";
-import { buildTimelineRenderPlan, type TimelineRenderSource } from "@/lib/timeline/timeline-to-ffmpeg";
+import {
+    attachLocalExecutorResult,
+    beginLocalExecutorSession,
+    isLocalExecutorSessionStop,
+    localExecutorFrozenInputKey,
+    localExecutorIntentAfterError,
+    localExecutorIntentAfterSubmit,
+    nextLocalExecutorClientOperationId,
+    runOwnedTimelineRender,
+    type LocalExecutorIntentState,
+} from "@/lib/plugins/builtin/editor/local-executor-session";
+import { lowerCanonicalPlan, getVisibleMediaClips, type TimelineRenderPlan, type TimelineRenderSource } from "@/lib/timeline/timeline-to-ffmpeg";
 import { exportTimelineToMp4, type TimelineExportProgress } from "@/lib/timeline/timeline-export";
 import { resourceFileUrl } from "@/services/api/resources";
-import { waitForGenerationTask } from "@/services/api/task-center";
-import { createTimelineRenderTask, type TimelineRenderResult } from "@/services/api/timeline-tasks";
+import { compileTimelineRenderPlan, type TimelineRenderResult } from "@/services/api/timeline-tasks";
+import { isIgnorablePlanPreviewError, RENDER_PLAN_PREVIEW_DEBOUNCE_MS } from "@/lib/timeline/timeline-plan-preview";
+import { captureUserScope } from "@/lib/user-scope-guard";
 import type { TimelineProject } from "@/types/timeline";
 
 type ExportState = {
@@ -20,12 +33,11 @@ type ExportState = {
     result: TimelineRenderResult | null;
 };
 
-/** 从时间线 clip 收集渲染源（按 nodeId 关联；directMedia 提供本地媒体定位）。 */
+/** 从时间线 clip 收集渲染源（按 nodeId 关联；directMedia 提供本地媒体定位）。含静音音轨与图片。 */
 function collectRenderSources(project: TimelineProject): TimelineRenderSource[] {
     const seen = new Set<string>();
     const sources: TimelineRenderSource[] = [];
-    for (const clip of project.clips) {
-        if (clip.kind !== "video" && clip.kind !== "image") continue;
+    for (const clip of getVisibleMediaClips(project)) {
         const direct = clip.directMedia;
         if (!direct) continue;
         if (seen.has(clip.nodeId)) continue;
@@ -33,52 +45,134 @@ function collectRenderSources(project: TimelineProject): TimelineRenderSource[] 
         sources.push({
             nodeId: clip.nodeId,
             fileName: `input-${sources.length}.mp4`,
-            durationMs: clip.durationMs,
+            durationMs: clip.sourceDurationMs || clip.durationMs,
             storageKey: direct.storageKey,
-            url: direct.url,
+            url: direct.url || direct.dataUrl || direct.content,
         });
     }
     return sources;
 }
 
+const IDLE_EXPORT_STATE: ExportState = { phase: "idle", mode: null, percent: 0, detail: "", result: null };
+
 export function EditorExport() {
     const { project } = useEditorStoreContext();
     const { projectId } = useEditorHostContext();
-    const [state, setState] = useState<ExportState>({ phase: "idle", mode: null, percent: 0, detail: "", result: null });
+    const [state, setState] = useState<ExportState>(IDLE_EXPORT_STATE);
+    const runningRef = useRef(false);
+    const mountedRef = useRef(true);
+    const projectIdRef = useRef(projectId);
+    const localControllerRef = useRef<AbortController | null>(null);
+    const remoteObservationRef = useRef<AbortController | null>(null);
+    const submitIntentRef = useRef<LocalExecutorIntentState | null>(null);
+    projectIdRef.current = projectId;
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+            localControllerRef.current?.abort();
+            remoteObservationRef.current?.abort();
+        };
+    }, []);
+    useEffect(() => () => remoteObservationRef.current?.abort(), [projectId]);
 
     const sources = useMemo(() => (project ? collectRenderSources(project) : []), [project]);
-    const plan = useMemo(() => (project ? buildTimelineRenderPlan(project, sources) : null), [project, sources]);
+    const [preview, setPreview] = useState<{ plan: TimelineRenderPlan | null; planError: string; loading: boolean }>({
+        plan: null,
+        planError: "",
+        loading: false,
+    });
+    useEffect(() => {
+        if (!project) {
+            setPreview({ plan: null, planError: "", loading: false });
+            return;
+        }
+        const controller = new AbortController();
+        setPreview((current) => ({ ...current, loading: true, planError: "" }));
+        const timer = window.setTimeout(() => {
+            compileTimelineRenderPlan({
+                timeline: project,
+                sources: sources.map((source) => ({ id: source.nodeId, durationMs: source.durationMs })),
+            }, controller.signal)
+                .then((canonical) => {
+                    if (controller.signal.aborted) return;
+                    setPreview({ plan: lowerCanonicalPlan(canonical, sources), planError: "", loading: false });
+                })
+                .catch((error: unknown) => {
+                    if (isIgnorablePlanPreviewError(error, controller.signal)) {
+                        if (!controller.signal.aborted) setPreview((current) => ({ ...current, loading: false }));
+                        return;
+                    }
+                    setPreview({
+                        plan: null,
+                        planError: error instanceof Error ? error.message : "无法生成导出计划",
+                        loading: false,
+                    });
+                });
+        }, RENDER_PLAN_PREVIEW_DEBOUNCE_MS);
+        return () => {
+            window.clearTimeout(timer);
+            controller.abort();
+        };
+    }, [project, sources]);
+    const plan = preview.plan;
+    const planError = preview.planError;
 
     // 主路径：提交后端渲染任务并轮询（服务端任务上限 60 分钟，前端多留余量）。
     const renderRemote = async () => {
-        if (!project || sources.length === 0 || state.phase === "running") return;
+        if (!project || sources.length === 0 || runningRef.current) return;
+        runningRef.current = true;
+        const expectedScope = captureUserScope();
+        const originalProjectId = projectId;
+        const originalTimeline = project;
+        const observer = new AbortController();
+        remoteObservationRef.current?.abort();
+        remoteObservationRef.current = observer;
+        const frozenInputKey = localExecutorFrozenInputKey(["timeline_render", originalProjectId, originalTimeline]);
+        const clientOperationId = nextLocalExecutorClientOperationId(submitIntentRef.current, frozenInputKey);
+        submitIntentRef.current = { clientOperationId, frozenInputKey };
         setState({ phase: "running", mode: "remote", percent: 0, detail: "提交渲染任务…", result: null });
         try {
-            const created = await createTimelineRenderTask({ projectId, timeline: project });
-            const done = await waitForGenerationTask(created.id, {
-                timeoutMs: 62 * 60 * 1000,
-                intervalMs: 3000,
-                onTaskUpdate: (task) =>
+            const session = beginLocalExecutorSession(originalProjectId, {
+                controller: observer,
+                getLiveProjectId: () => projectIdRef.current,
+                expectedScope,
+            });
+            const { task, result } = await runOwnedTimelineRender({
+                session,
+                projectId: originalProjectId,
+                timeline: originalTimeline,
+                clientOperationId,
+                onCreated: (created) => {
+                    submitIntentRef.current = localExecutorIntentAfterSubmit(clientOperationId, created, submitIntentRef.current ?? { clientOperationId, frozenInputKey });
+                },
+                onTaskUpdate: (next) =>
                     setState({
                         phase: "running",
                         mode: "remote",
-                        percent: task.progress ?? 0,
-                        detail: task.stage
-                            ? `${task.stage}${task.progress ? ` · ${task.progress}%` : ""}`
+                        percent: next.progress ?? 0,
+                        detail: next.stage
+                            ? `${next.stage}${next.progress ? ` · ${next.progress}%` : ""}`
                             : "渲染中…",
                         result: null,
                     }),
             });
-            const parsed = JSON.parse(done.resultJson ?? "{}") as TimelineRenderResult;
-            if (!parsed.resourceId) throw new Error("渲染任务未返回产物");
-            setState({
-                phase: "done",
-                mode: "remote",
-                percent: 100,
-                detail: `渲染完成：${parsed.fileName ?? "timeline.mp4"}`,
-                result: parsed,
+            submitIntentRef.current = localExecutorIntentAfterSubmit(clientOperationId, task, submitIntentRef.current ?? { clientOperationId, frozenInputKey });
+            await attachLocalExecutorResult(session, () => {
+                setState({
+                    phase: "done",
+                    mode: "remote",
+                    percent: 100,
+                    detail: `渲染完成：${result.fileName ?? "timeline.mp4"}`,
+                    result,
+                });
             });
         } catch (error) {
+            if (isLocalExecutorSessionStop(error)) {
+                if (mountedRef.current) setState(IDLE_EXPORT_STATE);
+                return;
+            }
+            submitIntentRef.current = localExecutorIntentAfterError(submitIntentRef.current ?? { clientOperationId, frozenInputKey }, error);
             setState({
                 phase: "error",
                 mode: "remote",
@@ -86,15 +180,19 @@ export function EditorExport() {
                 detail: error instanceof Error ? error.message : "渲染失败",
                 result: null,
             });
-        }
+        } finally { runningRef.current = false; }
     };
 
     // 降级路径：ffmpeg.wasm 浏览器本地合成（无后端/离线时可用）。
     const exportLocalMp4 = async () => {
-        if (!project || sources.length === 0 || state.phase === "running") return;
+        if (!project || sources.length === 0 || runningRef.current) return;
+        runningRef.current = true;
+        const controller = new AbortController();
+        localControllerRef.current = controller;
         setState({ phase: "running", mode: "local", percent: 0, detail: "准备导出", result: null });
         try {
             const blob = await exportTimelineToMp4(project, sources, {
+                signal: controller.signal,
                 onProgress: (p: TimelineExportProgress) =>
                     setState({ phase: "running", mode: "local", percent: p.percent, detail: p.detail, result: null }),
             });
@@ -113,7 +211,7 @@ export function EditorExport() {
                 detail: error instanceof Error ? error.message : "导出失败",
                 result: null,
             });
-        }
+        } finally { runningRef.current = false; localControllerRef.current = null; }
     };
 
     if (!project) return null;
@@ -141,7 +239,7 @@ export function EditorExport() {
                             )}
                         </ul>
                     ) : (
-                        <p className="mt-2 text-[11px] text-[var(--director-dock-fg)]/55">时间线没有可渲染的视频片段。</p>
+                        <p className="mt-2 text-[11px] text-[var(--director-dock-fg)]/55">{planError || (preview.loading ? "正在生成渲染计划" : "时间线没有可渲染的媒体片段。")}</p>
                     )}
                 </div>
 
@@ -170,7 +268,7 @@ export function EditorExport() {
                 <button
                     type="button"
                     onClick={exportLocalMp4}
-                    disabled={sources.length === 0 || state.phase === "running"}
+                    disabled={sources.length === 0 || Boolean(planError) || state.phase === "running"}
                     className="mt-1.5 flex w-full items-center justify-center gap-2 rounded-md border border-[var(--director-sequencer-border)] px-2 py-1.5 text-xs text-[var(--director-dock-fg)]/80 hover:bg-[var(--director-control-hover)] disabled:opacity-40"
                 >
                     {state.phase === "running" && state.mode === "local" ? (
@@ -183,6 +281,7 @@ export function EditorExport() {
 
                 {state.phase === "running" && (
                     <div className="mt-3">
+                        {state.mode === "local" && <button type="button" onClick={() => localControllerRef.current?.abort()}>取消导出</button>}
                         <div className="mb-1 flex justify-between text-[10px] text-[var(--director-dock-fg)]/70">
                             <span>{state.detail}</span>
                             <span className="tabular-nums">{state.percent}%</span>
@@ -198,17 +297,18 @@ export function EditorExport() {
 
                 {state.phase === "done" && state.result && state.mode === "remote" && (
                     <div className="mt-2 overflow-hidden rounded-md border border-[var(--director-sequencer-border)] bg-[var(--director-control-hover)]">
-                        <video src={resourceFileUrl(state.result.resourceId)} controls className="aspect-video w-full bg-black" />
+                        <AuthenticatedVideo src={resourceFileUrl(state.result.resourceId)} controls className="aspect-video w-full bg-black" />
                         <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-[11px] text-[var(--director-dock-fg)]/80">
                             <span className="truncate">{state.result.fileName ?? "timeline.mp4"}</span>
-                            <a
-                                href={resourceFileUrl(state.result.resourceId)}
-                                download={state.result.fileName ?? "timeline.mp4"}
+                            <AuthenticatedDownload
+                                url={resourceFileUrl(state.result.resourceId)}
+                                name={state.result.fileName ?? "timeline.mp4"}
+                                label="下载成片"
                                 className="flex shrink-0 items-center gap-1 text-[var(--director-accent)] hover:underline"
                             >
                                 <Download className="size-3" />
                                 下载
-                            </a>
+                            </AuthenticatedDownload>
                         </div>
                     </div>
                 )}
@@ -221,7 +321,7 @@ export function EditorExport() {
                     默认提交服务端渲染任务（异步，产物可直接预览/下载）；本地 ffmpeg.wasm 导出保留为离线兜底。
                 </p>
                 {sources.length === 0 && (
-                    <p className="mt-1 text-[11px] text-[var(--director-dock-fg)]/55">悬空引用片段（节点已删除）按计划跳过，不影响其余片段导出。</p>
+                    <p className="mt-1 text-[11px] text-[var(--director-dock-fg)]/55">请补齐缺失媒体后再导出完整成片。</p>
                 )}
             </div>
         </div>

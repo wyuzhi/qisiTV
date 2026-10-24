@@ -44,15 +44,15 @@ func TestHandleHelperCommandRequiresRequestPath(t *testing.T) {
 func TestSpawnedHelperReplacesInstall(t *testing.T) {
 	root := t.TempDir()
 	oldDir := filepath.Join(root, "old")
-	staged := filepath.Join(root, "staged")
 	if err := WriteDarwinLayout(oldDir, "OLD"); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteDarwinLayout(staged, "NEW"); err != nil {
+	work, err := os.MkdirTemp(oldDir, ".qisitv-update-")
+	if err != nil {
 		t.Fatal(err)
 	}
-	work := filepath.Join(root, "helper work")
-	if err := os.MkdirAll(work, 0o700); err != nil {
+	staged := filepath.Join(work, "payload")
+	if err := WriteDarwinLayout(staged, "NEW"); err != nil {
 		t.Fatal(err)
 	}
 	req := HelperRequest{
@@ -61,7 +61,7 @@ func TestSpawnedHelperReplacesInstall(t *testing.T) {
 		Platform:       "darwin-arm64",
 		TargetPath:     filepath.Join(oldDir, appBundleName),
 		StagedPath:     staged,
-		BackupPath:     filepath.Join(root, "backup", appBundleName),
+		BackupPath:     filepath.Join(work, "backup"),
 		PreparedPath:   filepath.Join(work, "prepared"),
 		ResultPath:     filepath.Join(work, "result.json"),
 		WaitTimeoutSec: 5,
@@ -89,7 +89,6 @@ func TestSpawnedHelperReplacesInstall(t *testing.T) {
 		}
 		req.Platform = "windows-amd64"
 		req.TargetPath = filepath.Join(oldDir, windowsExeName)
-		req.BackupPath = filepath.Join(root, "backup")
 		t.Setenv("QISITV_UPDATER_TEST_LAUNCH", "1")
 	}
 	encoded, err := json.Marshal(req)
@@ -130,6 +129,15 @@ func TestSpawnedHelperReplacesInstall(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "NEW") {
 		t.Fatalf("installed = %q helper=%s", got, out)
+	}
+	if !pathExists(req.BackupPath) {
+		t.Fatal("process launch alone discarded the recovery copy")
+	}
+	if err := cleanupCompletedUpdates(Target{Path: req.TargetPath, Platform: req.Platform}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if pathExists(work) || (runtime.GOOS == "windows" && pathExists(filepath.Join(oldDir, ".qisiTV.update.lock"))) {
+		t.Fatal("confirmed startup retained update files")
 	}
 }
 

@@ -1,10 +1,9 @@
 import { motion } from "motion/react";
-import { CheckCircle2, CloudUpload, Eye, LoaderCircle, RotateCcw, TriangleAlert, X } from "lucide-react";
+import { CheckCircle2, CloudUpload, LoaderCircle, TriangleAlert } from "lucide-react";
 
 import type { GenerationTask } from "@/services/api/task-center";
 import type { MergeVideoProgress } from "@/lib/canvas/canvas-video-merge";
 import { canvasThemes } from "@/lib/canvas-theme";
-import type { CanvasOperationChange } from "./use-canvas-operation-history";
 import { aceternityMotion } from "@/lib/aceternity-motion";
 
 export type CanvasUploadStatus = {
@@ -48,7 +47,7 @@ export function CanvasUploadStatusToast({ status, theme }: { status: CanvasUploa
                 </motion.span>
                 <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-semibold">{status.title}</span>
-                    <span className="mt-1 block truncate text-[var(--fs-label)]" style={{ color: theme.node.muted }}>
+                    <span className="mt-1 block break-words text-[var(--fs-label)]" style={{ color: theme.node.muted }}>
                         {status.detail}
                     </span>
                 </span>
@@ -83,8 +82,9 @@ export function TaskDetailItem({ label, value }: { label: string; value: string 
 }
 
 export function CanvasMergeStatusToast({ progress, theme }: { progress: MergeVideoProgress; theme: CanvasTheme }) {
-    const detail = progress.phase === "loading" ? "加载视频工具" : progress.phase === "reading" ? "读取选中视频" : "正在编码合并成片";
+    const detail = progress.phase === "loading" ? "加载视频工具" : progress.phase === "reading" ? "读取选中视频" : progress.phase === "saving" ? "编码已完成，正在保存视频" : progress.phase === "binding" ? "正在加入画布并保存项目" : progress.phase === "done" ? "成片已保存并加入画布" : "正在编码合并成片";
     const percent = Math.max(0, Math.min(100, Math.round(progress.progress)));
+    const showPercent = progress.phase === "encoding" || progress.phase === "done";
     return (
         <div
             data-canvas-no-zoom
@@ -103,49 +103,11 @@ export function CanvasMergeStatusToast({ progress, theme }: { progress: MergeVid
                     </span>
                 </span>
                 <span className="shrink-0 text-[var(--fs-tiny)] tabular-nums" style={{ color: theme.node.faint }}>
-                    {percent}%
+                    {showPercent ? percent + "%" : "处理中"}
                 </span>
             </div>
             <div className="mt-2 h-1 overflow-hidden rounded-full" style={{ background: theme.toolbar.itemHover }}>
-                <div className="h-full rounded-full transition-all duration-300" style={{ width: `${percent}%`, background: theme.node.activeStroke }} />
-            </div>
-        </div>
-    );
-}
-
-export function CanvasOperationChangeToast({ change, theme, onView, onUndo, onClose }: { change: CanvasOperationChange; theme: CanvasTheme; onView: () => void; onUndo: () => void; onClose: () => void }) {
-    return (
-        <div
-            data-canvas-no-zoom
-            aria-live="polite"
-            className="absolute bottom-20 right-4 z-[var(--z-panel-floating)] w-[var(--panel-width-compact)] rounded-lg border p-3 shadow-lg backdrop-blur-xl"
-            style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
-        >
-            <div className="flex items-start gap-2.5">
-                <span className="grid size-8 shrink-0 place-items-center rounded-md" style={{ background: theme.toolbar.itemHover, color: theme.node.activeStroke }}>
-                    <span className="size-2 rounded-full bg-current" />
-                </span>
-                <span className="min-w-0 flex-1">
-                    <span className="block text-xs font-semibold">Agent 已写回画布</span>
-                    <span className="mt-0.5 block truncate text-[var(--fs-label)]" style={{ color: theme.node.muted }}>
-                        {change.summary} · 可撤销最近 {change.undoCount} 批
-                    </span>
-                </span>
-                <button type="button" className="grid size-7 place-items-center rounded-md opacity-55 transition hover:opacity-100" onClick={onClose} aria-label="关闭">
-                    <X className="size-3.5" />
-                </button>
-            </div>
-            <div className="mt-3 flex items-center justify-end gap-1.5">
-                {change.nodeIds.length ? (
-                    <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition hover:bg-black/5 dark:hover:bg-white/10" onClick={onView}>
-                        <Eye className="size-3.5" />
-                        查看本次改动
-                    </button>
-                ) : null}
-                <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition hover:bg-black/5 dark:hover:bg-white/10" onClick={onUndo}>
-                    <RotateCcw className="size-3.5" />
-                    撤销本次操作
-                </button>
+                <div className="h-full rounded-full transition-all duration-300" style={{ width: showPercent ? `${percent}%` : "30%", background: theme.node.activeStroke }} />
             </div>
         </div>
     );

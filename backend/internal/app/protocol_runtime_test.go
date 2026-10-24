@@ -141,6 +141,46 @@ func TestPluginRuntimeRefreshesExistingOfficialPackageDocumentation(t *testing.T
 	t.Fatal("refreshed OpenAI Images plugin is missing")
 }
 
+func TestPluginRuntimeUpgradesInstalledWanMediaTransport(t *testing.T) {
+	packageData, err := os.ReadFile(filepath.Join("..", "..", "..", "plugin-packages", "dashscope-wan-video.qisitv-plugin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := protocol.ParsePluginPackage(packageData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := pkg.Manifest
+	stale.Metadata.Version = "2.0.0"
+	stale.Metadata.MediaTransport = nil
+	stale.Contributes.Providers[0].MediaTransport = nil
+	staleRaw, err := json.Marshal(stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := json.Marshal([]pluginRegistryRecord{{ID: "dashscope-wan-video", Raw: staleRaw, Source: PluginOriginOfficial, FileName: "dashscope-wan-video.qisitv-plugin", PackageSHA256: "stale"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "plugin_registry.json"), records, 0600); err != nil {
+		t.Fatal(err)
+	}
+	center, err := newPluginRuntime(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{pluginRuntime: center}
+	adapter, ok := svc.protocolRegistry().Resolve("dashscope-wan-video")
+	if !ok {
+		t.Fatal("installed Wan provider missing")
+	}
+	metadata := adapter.Metadata()
+	if metadata.Version != "2.0.1" || metadata.MediaTransport["image"] != "inline" || metadata.MediaTransport["audio"] != "url" {
+		t.Fatalf("installed provider retained stale transport: %#v", metadata)
+	}
+}
+
 func TestBundledWorkflowPluginsControlAvailability(t *testing.T) {
 	center, err := newPluginRuntime(t.TempDir())
 	if err != nil {
@@ -224,6 +264,40 @@ func TestPluginRuntimeIsTheProtocolSourceOfTruth(t *testing.T) {
 	}
 	if _, ok := center.registrySnapshot().Resolve("uploaded-runtime"); ok {
 		t.Fatal("uninstalled plugin remained selectable")
+	}
+}
+
+func TestSeedanceLegacyProtocolResolvesInstalledProvider(t *testing.T) {
+	dataDir := t.TempDir()
+	center, err := newPluginRuntime(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"newapi", "openai-video", "openai-videos"} {
+		adapter, ok := center.registrySnapshot().Resolve(id)
+		if !ok || adapter.Metadata().ID != "newapi" {
+			t.Fatalf("%s did not resolve installed newapi provider", id)
+		}
+		if err := validateGenerationInterfaceWithRegistry(center.registrySnapshot(), "video", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := center.setEnabled("openai-videos", false); err != nil {
+		t.Fatal(err)
+	}
+	// Restart must preserve disabled state for the canonical ID and old profiles.
+	center, err = newPluginRuntime(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"newapi", "openai-video", "openai-videos"} {
+		adapter, ok := center.registrySnapshot().Resolve(id)
+		if !ok || adapter.Metadata().Enabled {
+			t.Fatalf("%s bypassed disabled plugin", id)
+		}
+		if err := validateGenerationInterfaceWithRegistry(center.registrySnapshot(), "video", id); err == nil {
+			t.Fatalf("%s accepted disabled plugin", id)
+		}
 	}
 }
 
@@ -415,7 +489,7 @@ func TestDeclarativeProtocolPollRecoversFromTransientGatewayFailure(t *testing.T
 	}
 }
 
-func TestDeclarativeProtocolRetriesResultDownloadWithoutRepolling(t *testing.T) {
+func TestDeclarativeProtocolRetriesResultDownloadByQueryingOriginalTask(t *testing.T) {
 	allowLoopbackProviderTest(t)
 	adapter, err := protocol.LoadManifest([]byte(`{
 		"apiVersion":"qisitv.plugin/v1",
@@ -427,13 +501,21 @@ func TestDeclarativeProtocolRetriesResultDownloadWithoutRepolling(t *testing.T) 
 	}
 	pollCalls := 0
 	downloadCalls := 0
+	createCalls := 0
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/tasks":
+			if r.Method != http.MethodPost {
+				t.Errorf("generation method = %s", r.Method)
+			}
+			createCalls++
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"provider-task-1","status":"pending"}`))
 		case "/v1/tasks/provider-task-1":
+			if r.Method != http.MethodGet {
+				t.Errorf("original task query method = %s", r.Method)
+			}
 			pollCalls++
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"provider-task-1","status":"succeeded","video_url":"` + server.URL + `/media.mp4"}`))
@@ -457,8 +539,8 @@ func TestDeclarativeProtocolRetriesResultDownloadWithoutRepolling(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result["mode"] != "video" || pollCalls != 1 || downloadCalls != 2 {
-		t.Fatalf("result = %#v, poll calls = %d, download calls = %d", result, pollCalls, downloadCalls)
+	if result["mode"] != "video" || createCalls != 1 || pollCalls != 2 || downloadCalls != 2 {
+		t.Fatalf("result = %#v, create calls = %d, poll calls = %d, download calls = %d", result, createCalls, pollCalls, downloadCalls)
 	}
 }
 

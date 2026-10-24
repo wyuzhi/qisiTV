@@ -1,13 +1,14 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
-import { Check, ChevronDown, ChevronLeft } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { Popover } from "antd";
 
 import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
 import { compatibleModelInGroup, configuredModelDisplayName, groupModelsByDisplayName, modelCompatibilityError, resolveCompatibleModel, type ModelRequirements } from "@/lib/model-selection";
 import { cn } from "@/lib/utils";
-import { modelDisplayName, modelIcon, PUBLIC_MODEL_CATALOG_ID, resolveModelChannel, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { modelDisplayName, modelIcon, modelOptionName, resolveModelChannel, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { ModelLogo } from "@/components/model-logo";
+import { portraitPriceLines, seedancePortraitLabel, seedancePortraitModel } from "@/lib/seedance-portrait";
 
 type ModelPickerProps = {
     config: AiConfig;
@@ -54,7 +55,6 @@ export function ModelPicker({
             .map((channel) => ({
                 key: channel.id,
                 label: channel.name || "未命名渠道",
-                scope: channel.id === PUBLIC_MODEL_CATALOG_ID ? "" : channel.scope === "system" ? "平台服务" : "我的模型",
                 models: groupModelsByDisplayName(
                     config,
                     options.filter((model) => resolveModelChannel(config, model).id === channel.id),
@@ -71,10 +71,13 @@ export function ModelPicker({
     const resolvedCurrent = resolveCompatibleModel(config, storedCurrent, selectionRequirements) || storedCurrent;
     // 旧画布可能保存过已下架或前端历史内置模型；它们不能重新进入当前可选目录。
     const current = options.includes(resolvedCurrent) ? resolvedCurrent : "";
+    const portrait = seedancePortraitModel(current || storedCurrent);
+    const portraitQuote = current ? resolveModelChannel(config, current).modelProfiles?.find((item) => item.model === modelOptionName(current))?.videoPricing : undefined;
+    const priceLines = portraitPriceLines(portraitQuote);
     const creationVariant = variant === "creation";
     const triggerLabel = current
         ? (creationVariant ? pickerModelDisplayName(config, current, showConfiguredModelName) : pickerModelOptionLabel(config, current, showConfiguredModelName))
-        : placeholder;
+        : portrait ? `${seedancePortraitLabel(storedCurrent)}（不可用）` : placeholder;
 
     useLayoutEffect(() => {
         const trigger = triggerRef.current;
@@ -144,6 +147,15 @@ export function ModelPicker({
         const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : event.key === "ArrowUp" ? Math.max(0, activeIndex - 1) : Math.min(buttons.length - 1, activeIndex + 1);
         buttons[nextIndex]?.focus();
     };
+    const toggleGroup = (group: (typeof optionGroups)[number]) => {
+        if (activeGroupKey === group.key) {
+            setActiveGroupKey(null);
+            return;
+        }
+        const groupCurrent = group.models.find((item) => item.models.includes(current));
+        setActiveGroupKey(group.key);
+        setPreviewedModel(groupCurrent?.models[0] || group.models[0]?.models[0] || "");
+    };
     const content = (
         <div
             ref={menuRef}
@@ -169,10 +181,8 @@ export function ModelPicker({
                 activeGroupKey === null ? (
                     <div className="canvas-model-picker-brands" aria-label="选择模型品牌">
                         {optionGroups.map((group) => {
-                            const groupCurrent = group.models.find((item) => item.models.includes(current));
-                            const firstModel = groupCurrent?.models[0] || group.models[0]?.models[0] || "";
-                            return <button key={group.key} type="button" className="canvas-model-picker-brand" onClick={() => { setActiveGroupKey(group.key); setPreviewedModel(firstModel); }}>
-                                <span className="canvas-model-picker-brand-copy"><strong>{group.label}</strong><small>{group.models.length} 个模型{group.scope ? ` · ${group.scope}` : ""}</small></span>
+                            return <button key={group.key} type="button" className="canvas-model-picker-brand" aria-expanded={false} onClick={() => toggleGroup(group)}>
+                                <span className="canvas-model-picker-brand-copy"><strong>{group.label}</strong></span>
                                 <ChevronDown className="canvas-model-picker-brand-arrow" aria-hidden="true" />
                             </button>;
                         })}
@@ -180,19 +190,13 @@ export function ModelPicker({
                 ) : <div className="canvas-model-picker-two-pane">
                     <div className="canvas-model-picker-brand-rail" aria-label="模型品牌">
                         {optionGroups.map((group) => {
-                            const groupCurrent = group.models.find((item) => item.models.includes(current));
-                            const firstModel = groupCurrent?.models[0] || group.models[0]?.models[0] || "";
-                            return <button key={group.key} type="button" className={cn("canvas-model-picker-brand", activeGroupKey === group.key && "is-active")} aria-pressed={activeGroupKey === group.key} onClick={() => { setActiveGroupKey(group.key); setPreviewedModel(firstModel); }}>
-                                <span className="canvas-model-picker-brand-copy"><strong>{group.label}</strong><small>{group.models.length} 个模型{group.scope ? ` · ${group.scope}` : ""}</small></span>
+                            return <button key={group.key} type="button" className={cn("canvas-model-picker-brand", activeGroupKey === group.key && "is-active")} aria-expanded={activeGroupKey === group.key} onClick={() => toggleGroup(group)}>
+                                <span className="canvas-model-picker-brand-copy"><strong>{group.label}</strong></span>
                                 <ChevronDown className="canvas-model-picker-brand-arrow" aria-hidden="true" />
                             </button>;
                         })}
                     </div>
                     {optionGroups.filter((group) => group.key === activeGroupKey).map((group) => <section key={group.key} className="canvas-model-picker-group canvas-model-picker-model-pane min-w-0 overflow-hidden">
-                        <div className="canvas-model-picker-secondary-head">
-                            <button type="button" className="canvas-model-picker-back" onClick={() => setActiveGroupKey(null)} aria-label="返回品牌列表"><ChevronLeft /></button>
-                            <span><strong>{group.label}</strong>{group.scope ? <small>{group.scope}</small> : null}</span>
-                        </div>
                         <div className="canvas-model-picker-options grid min-w-0 gap-1">
                             {group.models.map((modelGroup) => {
                                 const selected = modelGroup.models.includes(current);
@@ -240,7 +244,7 @@ export function ModelPicker({
     );
 
     return (
-        <div className={cn(fullWidth ? "w-full min-w-0" : "w-fit max-w-full")} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+        <div className={cn("flex items-center gap-2", fullWidth ? "w-full min-w-0" : "w-fit max-w-full")} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
             <Popover
                 open={open}
                 onOpenChange={setPickerOpen}
@@ -270,6 +274,15 @@ export function ModelPicker({
                     <ChevronDown className={cn("canvas-model-picker-chevron", open && "is-open")} aria-hidden="true" />
                 </button>
             </Popover>
+            {portrait || priceLines.length > 0 ? <Popover trigger="click" placement="topLeft" content={
+                <div className="max-w-[min(26rem,calc(100vw-3rem))] text-xs leading-relaxed" role="note">
+                    {priceLines.length ? <><p>视频参考单价</p>{priceLines.map((line) => <p key={line}>{line}</p>)}<p>实际费用见生成账单。素材仍需通过审核。</p></> : <p>价格暂不可用，请刷新模型列表后再生成。</p>}
+                </div>
+            }>
+                <button type="button" className="shrink-0 rounded px-1 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" style={{ color: theme.node.muted }} aria-label="视频参考单价" title={priceLines.join("\n") || "价格暂不可用，请刷新模型列表后再生成。"}>
+                    {priceLines.length ? "价格" : "价格暂不可用"}
+                </button>
+            </Popover> : null}
         </div>
     );
 }

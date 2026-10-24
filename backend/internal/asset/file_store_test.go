@@ -84,6 +84,24 @@ func TestFileStoreRejectsTraversalAndSupportsOpenDelete(t *testing.T) {
 	}
 }
 
+func TestFileStoreAliasesShareWriteSpace(t *testing.T) {
+	dataDir := t.TempDir()
+	trailing := dataDir + string(filepath.Separator)
+	alias := filepath.Join(t.TempDir(), "alias-root")
+	if err := os.Symlink(dataDir, alias); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	first := NewFileStore(dataDir)
+	second := NewFileStore(trailing)
+	third := NewFileStore(alias)
+	if first.writeSpace() == "" {
+		t.Fatal("canonical write space is empty")
+	}
+	if first.writeSpace() != second.writeSpace() || first.writeSpace() != third.writeSpace() {
+		t.Fatalf("writeSpace dataDir=%q trailing=%q alias=%q", first.writeSpace(), second.writeSpace(), third.writeSpace())
+	}
+}
+
 func TestFileStoreRejectsSymlinkEscape(t *testing.T) {
 	dataDir := t.TempDir()
 	outside := t.TempDir()

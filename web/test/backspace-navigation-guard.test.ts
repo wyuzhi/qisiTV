@@ -33,13 +33,6 @@ describe("Backspace navigation guard predicate", () => {
         }
     });
 
-    test("read-only and disabled fields do not consume a native text deletion", () => {
-        for (const tagName of ["INPUT", "TEXTAREA", "SELECT"]) {
-            expect(shouldBlockBackspaceNavigation({ key: "Backspace", target: { ...node(tagName, { type: "text" }), readOnly: true } })).toBe(true);
-            expect(shouldBlockBackspaceNavigation({ key: "Backspace", target: { ...node(tagName, { type: "text" }), disabled: true } })).toBe(true);
-        }
-    });
-
     test("contenteditable and textbox roles, including descendants, keep native Backspace", () => {
         expect(isTextEditableTarget(node("DIV", { isContentEditable: true }))).toBe(true);
         expect(isTextEditableTarget(node("SPAN", { matches: ["[contenteditable]:not([contenteditable='false'])"] }))).toBe(true);

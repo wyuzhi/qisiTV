@@ -8,6 +8,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { modelCapabilityConfigFor, normalizeImageValue } from "@/lib/model-capabilities";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
+import { seedreamFamily } from "@/lib/seedream-image";
 
 type CanvasImageSettingsPopoverProps = {
     config: AiConfig;
@@ -30,10 +31,13 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
     const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
     const profile = modelCapabilityConfigFor(config, config.model || config.imageModel).image!;
     const normalized = normalizeImageValue(profile, config);
+    const seedream = seedreamFamily(config.model || config.imageModel);
     const summaryParts = [
-        ...(profile.size.parameter !== "none" ? [imageSizeLabel(normalized.size)] : []),
+        ...(seedream && config.seedreamMode === "layers" ? ["图层拆分"] : []),
+        ...(profile.size.parameter !== "none" ? [imageSizeLabel(normalized.size, profile)] : []),
         ...(profile.quality.supported ? [imageQualityLabel(normalized.quality)] : []),
-        ...(showCount && profile.maxOutputs > 1 ? [`${normalized.count} 张`] : []),
+        ...(seedream && seedream !== "pro" && seedream !== "flash" && Number(config.seedreamMaxImages) > 1 ? [`每批最多 ${config.seedreamMaxImages} 张`] : []),
+        ...(showCount && profile.maxOutputs > 1 ? [`${normalized.count} ${seedream ? "批" : "张"}`] : []),
         ...(profile.transparentBackground.supported && normalized.transparentBackground === "true" ? ["透明"] : []),
     ];
     const summary = summaryOverride || summaryParts.join(" · ");

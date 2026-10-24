@@ -1,0 +1,144 @@
+name: Local engine builds
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'agent-host/**'
+      - 'plugin-packages/**'
+      - 'scripts/*engine*'
+      - 'scripts/*agent-host*'
+      - 'scripts/engine/**'
+      - 'scripts/assert-windows-dwarf5-cgo.ps1'
+      - 'licenses/**'
+      - 'VERSION'
+      - '.github/workflows/desktop-installers.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: engine-builds-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native:
+    name: Engine source (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: darwin-arm64
+            target: darwin/arm64
+          - os: macos-15-intel
+            platform: darwin-amd64
+            target: darwin/amd64
+          - os: windows-2022
+            platform: windows-amd64
+            target: windows/amd64
+          - os: ubuntu-24.04
+            platform: linux-amd64
+            target: linux/amd64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Select bundled Node runtime
+        run: |
+          node -e 'const fs=require("fs"),p=require("path"); const bin=p.dirname(process.execPath); fs.appendFileSync(process.env.GITHUB_ENV, `BEEFTV_NODE_RUNTIME=${process.platform==="win32"?bin:p.dirname(bin)}\nQISITV_TEST_NODE=${process.execPath}\n`);'
+      - name: Windows compiler
+        id: msys2
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          release: true
+          path-type: inherit
+          install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-binutils
+      - name: Select supported Windows compiler
+        if: runner.os == 'Windows'
+        env:
+          MSYSTEM_PREFIX: ${{ steps.msys2.outputs.msys2-location }}\ucrt64
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\assert-windows-dwarf5-cgo.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install locked Agent host dependencies
+        working-directory: agent-host
+        run: bun install --frozen-lockfile
+      - name: Verify bundled Agent runtime
+        run: bun test scripts/package-agent-host.test.mjs
+      - name: Test native authority, folder persistence, and CLI
+        working-directory: backend
+        env:
+          CGO_ENABLED: '1'
+          GIN_MODE: release
+        run: go test ./cmd/qisitv-engine ./cmd/qisitv-connect ./cmd/beeftv ./internal/projectfolder ./internal/browserbridge ./internal/assistantruntime -count=1
+      - name: Build native engine programs
+        run: python scripts/build-engine-runtime.py --target '${{ matrix.target }}' --output "$RUNNER_TEMP/engine-runtime"
+      - name: Preserve native build receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-source-check-${{ matrix.platform }}
+          path: ${{ runner.temp }}/engine-runtime/build-receipt.json
+          retention-days: 7
+          if-no-files-found: error
+      # A successful source build is not an installer support claim. The only
+      # presently supported web-engine package is Apple Silicon macOS 13.5+.
+      - name: Package Mac Apple Silicon Agent host
+        if: matrix.platform == 'darwin-arm64'
+        run: bun scripts/package-agent-host.mjs darwin/arm64 "$RUNNER_TEMP/engine-runtime/agent-host"
+      - name: Install pinned media build tools
+        if: matrix.platform == 'darwin-arm64'
+        run: python -m pip install --target "$RUNNER_TEMP/media-tools" cmake==3.31.10 meson==1.7.2 ninja==1.11.1.4
+      - name: Build redistributable media runtime from pinned sources
+        if: matrix.platform == 'darwin-arm64'
+        run: python scripts/package-engine-media-runtime-macos.py --output "$RUNNER_TEMP/engine-runtime/agent-host/media-runtime" --source-dir "$RUNNER_TEMP/media-sources" --tools-dir "$RUNNER_TEMP/media-tools" --build-dir "$RUNNER_TEMP/media-build"
+      - name: Package and verify Mac Apple Silicon beta installer
+        if: matrix.platform == 'darwin-arm64'
+        run: |
+          set -euo pipefail
+          xcrun swiftc -parse-as-library scripts/engine/EngineLaunchRequest.swift scripts/engine/EngineLaunchRequestTests.swift -o "$RUNNER_TEMP/launcher-tests"
+          "$RUNNER_TEMP/launcher-tests"
+          sh plugin-packages/build-packages.sh
+          version="$(tr -d '[:space:]' < VERSION)"
+          python scripts/package-engine-macos.py --runtime "$RUNNER_TEMP/engine-runtime" --node-source "$BEEFTV_NODE_RUNTIME" --output dist/engine-ci --version "${version#v}" --dmg
+          TMPDIR="$RUNNER_TEMP" python scripts/smoke-engine-macos.py --app 'dist/engine-ci/qisiTV Engine.app' | tee "$RUNNER_TEMP/engine-package-smoke.log"
+      - name: Preserve verified Mac beta installer
+        if: success() && matrix.platform == 'darwin-arm64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-installer-beta-darwin-arm64
+          path: |
+            dist/engine-ci/*.dmg
+            dist/engine-ci/*.sha256
+            ${{ runner.temp }}/engine-package-smoke.log
+            ${{ runner.temp }}/qisitv-packaged-engine-smoke-*/smoke-report.json
+          retention-days: 7
+          if-no-files-found: error
+      - name: Preserve media build diagnostics
+        if: always() && matrix.platform == 'darwin-arm64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-media-build-log-darwin-arm64
+          path: ${{ runner.temp }}/media-build/logs
+          retention-days: 7
+          if-no-files-found: ignore

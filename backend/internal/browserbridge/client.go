@@ -152,6 +152,9 @@ func (c *Client) Call(ctx context.Context, operation string, args map[string]any
 		if !ok || code == "" {
 			return nil, errors.New("local service returned no pairing code")
 		}
+		if result["engine"] == true {
+			return map[string]any{"code": code, "expiresAt": result["expiresAt"], "website": "https://cheeser.link/qisitv/", "pairingUrl": "https://cheeser.link/qisitv/#/?pair=" + url.QueryEscape(code), "engine": true, "instructions": "Show pairingUrl as a clickable link. The user confirms this local connection and selects their project directory on the website. Then open the Agent page and register the qisitv MCP configuration for their client to use the native canvas, assistant, workflows and media tools. This qisitv-web connection is the startup/pairing helper only; do not call its legacy canvas tools against the native workspace. Browser pairing does not grant paid generation approval. Never replay uncertain writes."}, nil
+		}
 		return map[string]any{
 			"code": result["code"], "expiresAt": result["expiresAt"],
 			"website":      "https://cheeser.link/qisitv/#/local",

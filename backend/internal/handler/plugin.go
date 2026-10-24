@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/eagle"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/protocol"
 
@@ -181,7 +182,7 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 		if _, allowed := requireEnabledPlugin(c, svc, app.PluginEagleAssetConnector); !allowed {
 			return
 		}
-		library, err := svc.EagleLibrary(c.Query("baseUrl"))
+		library, err := requestEagle(c).Library(c.Query("baseUrl"))
 		if err != nil {
 			failService(c, err)
 			return
@@ -195,7 +196,7 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 		}
 		limit, _ := strconv.Atoi(c.DefaultQuery("limit", "60"))
 		offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
-		items, err := svc.EagleItems(c.Query("baseUrl"), app.EagleItemQuery{FolderID: c.Query("folderId"), Keyword: c.Query("keyword"), Limit: limit, Offset: offset})
+		items, err := requestEagle(c).Items(c.Query("baseUrl"), eagle.ItemQuery{FolderID: c.Query("folderId"), Keyword: c.Query("keyword"), Limit: limit, Offset: offset})
 		if err != nil {
 			failService(c, err)
 			return
@@ -206,7 +207,7 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 		if _, allowed := requireEnabledPlugin(c, svc, app.PluginEagleAssetConnector); !allowed {
 			return
 		}
-		file, err := svc.OpenEagleItemFile(c.Query("baseUrl"), c.Param("itemId"))
+		file, err := requestEagle(c).OpenFile(c.Query("baseUrl"), c.Param("itemId"))
 		if err != nil {
 			failService(c, err)
 			return
@@ -221,7 +222,7 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 		if _, allowed := requireEnabledPlugin(c, svc, app.PluginEagleAssetConnector); !allowed {
 			return
 		}
-		file, err := svc.OpenEagleItemThumbnail(c.Query("baseUrl"), c.Param("itemId"))
+		file, err := requestEagle(c).OpenThumbnail(c.Query("baseUrl"), c.Param("itemId"))
 		if err != nil {
 			failService(c, err)
 			return
@@ -236,12 +237,12 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 			return
 		}
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 160<<20)
-		var request app.EagleAddItemRequest
+		var request eagle.AddItemRequest
 		if err := c.ShouldBindJSON(&request); err != nil {
 			fail(c, http.StatusBadRequest, err)
 			return
 		}
-		item, err := svc.AddEagleItem(c.Query("baseUrl"), request)
+		item, err := requestEagle(c).AddItem(c.Query("baseUrl"), request)
 		if err != nil {
 			failService(c, err)
 			return
@@ -261,12 +262,19 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 			fail(c, http.StatusBadRequest, err)
 			return
 		}
-		if err := svc.CreateEagleFolder(c.Query("baseUrl"), request.Name, request.ParentID); err != nil {
+		if err := requestEagle(c).CreateFolder(c.Query("baseUrl"), request.Name, request.ParentID); err != nil {
 			failService(c, err)
 			return
 		}
 		ok(c, gin.H{"created": true})
 	})
+}
+
+func requestEagle(c *gin.Context) *eagle.Client {
+	if dependencies, ok := runtimeDependencies(c); ok && dependencies.Eagle != nil {
+		return dependencies.Eagle
+	}
+	return eagle.New()
 }
 
 func requirePluginCenterAccess(svc *app.Service) gin.HandlerFunc {

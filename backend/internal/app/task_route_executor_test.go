@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"qisitv/backend/internal/model"
@@ -112,5 +114,29 @@ func TestTaskRouteExecutorStopsWhenRouteSwitchFails(t *testing.T) {
 	}
 	if len(p.processCalls) != 1 || len(p.finished) != 1 || len(p.logs) != 1 {
 		t.Fatalf("expected one failed route and one warning, calls=%v finished=%v logs=%v", p.processCalls, p.finished, p.logs)
+	}
+}
+
+func TestImageVODParameterFailureRemainsTerminal(t *testing.T) {
+	for _, message := range []string{"invalid parameters", "invalid parameters (upstream_task_id: supplier-task)"} {
+		cause := providerHTTPError{StatusCode: 400, Body: fmt.Sprintf(`{"error":{"code":"vod_image_invalid_params","message":%q}}`, message)}
+		port := &taskRouteExecutionPortStub{processResults: map[string]taskRouteExecutionStubResult{"route": {err: cause}}}
+		executor := &taskRouteExecutor{port: port}
+		task := &model.Task{ID: "task", Type: "canvas_image", RouteID: "route"}
+		attempt := &model.RouteAttempt{RouteID: "route", DispatchState: "submission_unknown"}
+		execution, err := executor.execute(context.Background(), task, attempt)
+		if err != nil || isImageRecoveryError(execution.err) || classifyTaskFailure(execution.err).Uncertain {
+			t.Fatalf("incorrect uncertainty: %+v %v", execution, err)
+		}
+		if len(port.processCalls) != 1 {
+			t.Fatalf("unexpected resend: %v", port.processCalls)
+		}
+		info := routeFailureInfo(execution.err)
+		if message == "invalid parameters" && !info.ExplicitRejection {
+			t.Fatal("rejection not recognized")
+		}
+		if strings.Contains(message, "upstream_task_id:") && (!info.TerminalProviderFailure || info.ExplicitRejection) {
+			t.Fatal("supplier terminal failure treated as no job")
+		}
 	}
 }

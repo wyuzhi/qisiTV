@@ -2,13 +2,13 @@ import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { CanvasNodeType, type CanvasNodeData, type Position } from "@/types/canvas";
 
-export const CANVAS_UPLOAD_ACCEPT = "image/*,video/*,audio/*,.mp3,.wav,text/plain,text/markdown,.txt,.md,.markdown";
+export const CANVAS_UPLOAD_ACCEPT = "image/*,video/*,.mp4,.mov,.m4v,.mkv,.webm,.avi,audio/*,.mp3,.wav,text/plain,text/markdown,.txt,.md,.markdown";
 export function isTextUploadFile(file: Pick<File, "name" | "type">) {
     return /\.(txt|md|markdown)$/i.test(file.name) || file.type === "text/plain" || file.type === "text/markdown";
 }
 export function uploadNodeType(file: Pick<File, "name" | "type">) {
     if (file.type.startsWith("image/")) return CanvasNodeType.Image;
-    if (file.type.startsWith("video/")) return CanvasNodeType.Video;
+    if (file.type.startsWith("video/") || /\.(mp4|mov|m4v|mkv|webm|avi)$/i.test(file.name)) return CanvasNodeType.Video;
     if (file.type.startsWith("audio/") || /\.(mp3|wav)$/i.test(file.name)) return CanvasNodeType.Audio;
     if (isTextUploadFile(file)) return CanvasNodeType.Text;
     return null;
@@ -25,36 +25,13 @@ export async function createFileUploadPlaceholder(id: string, file: File, positi
     const type = uploadNodeType(file);
     if (!type) throw new Error("请选择图片、视频、音频或 TXT / Markdown 文件");
     if (type === CanvasNodeType.Image) return createImageUploadPlaceholder(id, file, position, await readUploadImageSize(file));
-    const size = type === CanvasNodeType.Video ? fitNodeSize(...await readUploadVideoSize(file)) : NODE_DEFAULT_SIZE[type];
+    // 浏览器能否解码不决定能否导入；尺寸与封面由上传后的媒体信息补齐。
+    const size = NODE_DEFAULT_SIZE[type];
     return {
-        id, type, title: file.name, ...size,
+        ...size, id, type, title: file.name,
         position: { x: position.x - size.width / 2, y: position.y - size.height / 2 },
         metadata: { fileUpload: "uploading", bytes: file.size, mimeType: file.type },
     } satisfies CanvasNodeData;
-}
-
-async function readUploadVideoSize(file: File): Promise<[number, number]> {
-    const url = URL.createObjectURL(file);
-    const video = document.createElement("video");
-    try {
-        return await new Promise((resolve, reject) => {
-            const timer = window.setTimeout(() => reject(new Error("视频尺寸读取超时，请确认文件可播放")), 15000);
-            video.onloadedmetadata = () => {
-                window.clearTimeout(timer);
-                if (video.videoWidth && video.videoHeight) resolve([video.videoWidth, video.videoHeight]);
-                else reject(new Error("无法读取视频尺寸"));
-            };
-            video.onerror = () => { window.clearTimeout(timer); reject(new Error("无法读取视频，请确认格式受浏览器支持")); };
-            video.preload = "metadata";
-            video.src = url;
-        });
-    } finally {
-        video.onloadedmetadata = null;
-        video.onerror = null;
-        video.removeAttribute("src");
-        video.load();
-        URL.revokeObjectURL(url);
-    }
 }
 
 // 不使用 readImageMeta 的默认尺寸兜底：上传占位必须来自实际解码尺寸。

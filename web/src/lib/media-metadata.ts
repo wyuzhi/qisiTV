@@ -12,6 +12,12 @@ function isProbeable(file: File): boolean {
  * 这是上传附加信息而不是写入前置条件，调用方必须允许缺少时长，但不能编造默认时长。
  */
 export async function probeMediaDurationMs(file: File): Promise<number | undefined> {
+    return (await probeMediaMetadata(file))?.durationMs;
+}
+
+export type MediaMetadata = { durationMs?: number; width?: number; height?: number };
+
+export async function probeMediaMetadata(file: File): Promise<MediaMetadata | undefined> {
     if (!isProbeable(file)) return undefined;
     const url = URL.createObjectURL(file);
     const el: HTMLVideoElement | HTMLAudioElement = /^video\//.test(file.type)
@@ -22,16 +28,16 @@ export async function probeMediaDurationMs(file: File): Promise<number | undefin
     // 某些浏览器只有在静音时才允许视频元素主动加载元数据；这里只禁止声音，不触发自动播放。
     el.muted = true;
     try {
-        const durationMs = await new Promise<number>((resolve, reject) => {
+        const metadata = await new Promise<MediaMetadata>((resolve, reject) => {
             timeoutId = window.setTimeout(() => reject(new Error("媒体元数据读取超时")), PROBE_TIMEOUT_MS);
             el.onloadedmetadata = () => {
                 const durationSeconds = el.duration;
-                resolve(Number.isFinite(durationSeconds) && durationSeconds > 0 ? Math.round(durationSeconds * 1000) : 0);
+                resolve({ durationMs: Number.isFinite(durationSeconds) && durationSeconds > 0 ? Math.round(durationSeconds * 1000) : undefined, width: "videoWidth" in el && typeof el.videoWidth === "number" ? el.videoWidth || undefined : undefined, height: "videoHeight" in el && typeof el.videoHeight === "number" ? el.videoHeight || undefined : undefined });
             };
-            el.onerror = () => resolve(0);
+            el.onerror = () => resolve({});
             el.src = url;
         });
-        return durationMs > 0 ? durationMs : undefined;
+        return metadata;
     } catch {
         return undefined;
     } finally {

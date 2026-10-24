@@ -1,12 +1,15 @@
 import { lazy, Suspense, type ReactNode } from "react";
-import { createBrowserRouter, createHashRouter, Navigate, Outlet, useLocation, useParams } from "react-router";
+import { Navigate, Outlet, useLocation, useParams } from "react-router";
 
+import { createWorkspaceRouter } from "@/lib/app-routing";
 import { FullScreenLoader, WorkspaceRouteLoader } from "@/components/ui/aceternity/full-screen-loader";
-import { loadAssetsPage, loadCanvasPage, loadCanvasProjectPage, loadCreatePage, loadHomePage, loadProjectDetailPage } from "@/lib/workspace-route-modules";
+import { loadAgentsPage, loadAssetsPage, loadCanvasPage, loadCanvasProjectPage, loadCreatePage, loadHomePage, loadProjectDetailPage } from "@/lib/workspace-route-modules";
 import { CanvasRefreshShell } from "@/pages/canvas/canvas-refresh-shell";
 import RouteErrorPage from "@/pages/route-error";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
+import { isEngineWebsite } from "@/services/browser-workspace";
 
+const AgentsPage = lazy(loadAgentsPage);
 const AssetsPage = lazy(loadAssetsPage);
 const HomePage = lazy(loadHomePage);
 const CanvasPage = lazy(loadCanvasPage);
@@ -17,7 +20,10 @@ const PluginsPage = lazy(() => import("@/pages/plugins"));
 const EagleLibraryPage = lazy(() => import("@/pages/plugins/eagle"));
 const ProjectDetailPage = lazy(loadProjectDetailPage);
 const SettingsPage = lazy(() => import("@/pages/settings"));
+const TasksPage = lazy(() => import("@/pages/tasks"));
+const EnginePage = lazy(() => import("@/pages/engine"));
 const LocalSetupPage = lazy(() => import("@/pages/local-setup"));
+const SkillsPage = lazy(() => import("@/pages/skills/marketplace"));
 const TestVoiceRecording = lazy(() => import("@/pages/test-voice-recording"));
 const UserLayout = lazy(() => import("@/layouts/user-layout"));
 const RequireFeature = lazy(() => import("@/components/workspace/require-feature").then((module) => ({ default: module.RequireFeature })));
@@ -60,14 +66,14 @@ function LegacyProjectAliasRoute() {
 function devRoutes() {
     const FolderPreviewLab = lazy(() => import("@/pages/dev/folder-preview-lab"));
     const DirectorReproLab = lazy(() => import("@/pages/dev/director-repro-lab"));
+    const AssistantPanelLab = lazy(() => import("@/pages/dev/assistant-panel-lab"));
     return [
         { path: "/dev/folders", element: fullScreenDeferred(<FolderPreviewLab />), errorElement: <RouteErrorPage /> },
         { path: "/dev/director-repro", element: fullScreenDeferred(<DirectorReproLab />), errorElement: <RouteErrorPage /> },
+        { path: "/dev/assistant-panel", element: fullScreenDeferred(<AssistantPanelLab />), errorElement: <RouteErrorPage /> },
     ];
 }
 
-// Hash routing keeps the static website's own routes separate from the canvas.
-const createWorkspaceRouter = import.meta.env.VITE_QISITV_BROWSER_ONLY === "1" ? createHashRouter : createBrowserRouter;
 export const router = createWorkspaceRouter([
     ...(import.meta.env.DEV ? devRoutes() : []),
     {
@@ -78,12 +84,11 @@ export const router = createWorkspaceRouter([
             { path: "/create", element: deferred(<CreatePage />) },
             {
                 path: "/tasks",
-                // 任务页暂不开放，保留路由以避免旧链接进入半成品界面。
-                element: <Navigate to="/" replace />,
+                element: <RequireFeature feature="taskCenterEnabled">{deferred(<TasksPage />)}</RequireFeature>,
             },
             { path: "/assets", element: deferred(<AssetsPage />) },
-            { path: "/skills", element: <Navigate to="/" replace /> },
-            { path: "/skill", element: <Navigate to="/" replace /> },
+            { path: "/skills", element: deferred(<SkillsPage />) },
+            { path: "/skill", element: <Navigate to="/skills" replace /> },
             { path: "/skills/reference", element: <Navigate to="/" replace /> },
             {
                 path: "/plugins",
@@ -94,7 +99,9 @@ export const router = createWorkspaceRouter([
                 element: <RequireFeature feature="pluginCenterEnabled">{deferred(<EagleLibraryPage />)}</RequireFeature>,
             },
             { path: "/settings", element: deferred(<SettingsPage />) },
-            { path: "/local", element: deferred(<LocalSetupPage />) },
+            { path: "/engine", element: deferred(<EnginePage />) },
+            { path: "/local", element: isEngineWebsite() ? <Navigate to="/engine" replace /> : deferred(<LocalSetupPage />) },
+            { path: "/agents", element: deferred(<AgentsPage />) },
             { path: "/test-voice-recording", element: deferred(<TestVoiceRecording />) },
             {
                 path: "/projects",

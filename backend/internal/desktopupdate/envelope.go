@@ -94,7 +94,7 @@ func validatePayload(payload Payload) error {
 
 func knownPlatform(platform string) bool {
 	switch platform {
-	case "darwin-arm64", "darwin-amd64", "windows-amd64":
+	case "darwin-arm64", "darwin-amd64", "windows-amd64", "linux-amd64":
 		return true
 	default:
 		return false

@@ -4,11 +4,10 @@ import { AppModal } from "@/components/ui/product/app-modal";
 import { assertUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
 
 // Capture scope at the entry point, before a lazy dialog can finish loading.
-export function CanvasDeleteConfirmation({ title, description, scope, validate, onConfirm, onCancel }: {
+export function CanvasDeleteConfirmation({ title, description, scope, onConfirm, onCancel }: {
     title: string;
     description: string;
     scope: CapturedUserScope;
-    validate?: () => void;
     onConfirm: (assertCurrent: () => void) => Promise<void>;
     onCancel: () => void;
 }) {
@@ -21,7 +20,7 @@ export function CanvasDeleteConfirmation({ title, description, scope, validate, 
         setDeleting(true);
         setError("");
         try {
-            const assertCurrent = () => { assertUserScope(scope); validate?.(); };
+            const assertCurrent = () => assertUserScope(scope);
             assertCurrent();
             await onConfirm(assertCurrent);
             assertCurrent();

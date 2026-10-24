@@ -1,11 +1,11 @@
 import { Button, Modal } from "antd";
-import { ImagePlus, X, XCircle } from "lucide-react";
+import { X, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { CanvasImagePreview } from "@/components/canvas/canvas-image-preview";
 import { TaskDetailItem } from "./canvas-project-feedback";
 import { generationTaskShowsProgress, generationTaskStageLabel } from "@/lib/generation-task-display";
-import { formatTaskLog, type GenerationTask, type TaskLog } from "@/services/api/task-center";
+import { canRetrieveVideoResult, formatTaskLog, type GenerationTask, type TaskLog } from "@/services/api/task-center";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { VideoPlayer } from "@/components/video-player";
 import { AppModal } from "@/components/ui/product/app-modal";
@@ -19,10 +19,7 @@ export function CanvasResourceReloadStatus({ feedback, onDismiss }: { feedback: 
     if (!feedback.length) return null;
     return <div data-canvas-no-zoom className="flex max-h-40 shrink-0 flex-col gap-2 overflow-y-auto p-2" onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
         {feedback.map((item) => <div key={item.id} role={item.phase === "error" ? "alert" : "status"} className="flex items-start gap-3 rounded-lg border bg-background px-3 py-2 text-sm text-foreground">
-            <div className="min-w-0 flex-1 break-words">
-                <div className="font-medium">{item.nodeTitle} · {item.phase === "loading" ? "正在取回" : item.phase === "success" ? "已保存" : "取回未完成"}</div>
-                <p className="mt-1 text-xs leading-5">{item.content}</p>
-            </div>
+            <div className="min-w-0 flex-1 break-words"><div className="font-medium">{item.nodeTitle} · {item.phase === "loading" ? "正在取回" : item.phase === "success" ? "已取回" : "取回未完成"}</div><p className="mt-1 text-xs leading-5">{item.content}</p></div>
             <Button type="text" size="small" aria-label={`关闭${item.nodeTitle}的取回提示`} icon={<X className="size-4" aria-hidden />} onClick={() => onDismiss(item.id)} />
         </div>)}
     </div>;
@@ -36,9 +33,8 @@ type CanvasProjectStatusDialogsProps = {
     taskError?: boolean;
     onCloseTask: () => void;
     onCancelTask?: (task: GenerationTask) => void;
-    superResolveNode: CanvasNodeData | null;
-    onCloseSuperResolve: () => void;
-    onUseLocalUpscale: () => void;
+    onRetrieveTask?: (task: GenerationTask) => void;
+    retrievingTaskId?: string | null;
     previewNode: CanvasNodeData | null;
     onClosePreview: () => void;
     clearConfirmOpen: boolean;
@@ -46,7 +42,7 @@ type CanvasProjectStatusDialogsProps = {
     onConfirmClear: () => void;
 };
 
-export function CanvasProjectStatusDialogs({ theme, task, taskLogs, taskLoading, taskError, superResolveNode, previewNode, clearConfirmOpen, onCloseTask, onCancelTask, onCloseSuperResolve, onUseLocalUpscale, onClosePreview, onCancelClear, onConfirmClear }: CanvasProjectStatusDialogsProps) {
+export function CanvasProjectStatusDialogs({ theme, task, taskLogs, taskLoading, taskError, previewNode, clearConfirmOpen, onCloseTask, onCancelTask, onRetrieveTask, retrievingTaskId, onClosePreview, onCancelClear, onConfirmClear }: CanvasProjectStatusDialogsProps) {
     const config = useEffectiveConfig();
     const previewSource = useResolvedPreviewSource(previewNode);
     return (
@@ -74,6 +70,13 @@ export function CanvasProjectStatusDialogs({ theme, task, taskLogs, taskLoading,
                             </div>
                         </div>
                         <TaskGenerationParameters inputJson={task.inputJson} theme={theme} />
+                        {task.error ? <p role="status" className="whitespace-pre-wrap break-words">{task.error}</p> : null}
+                        {onRetrieveTask && canRetrieveVideoResult(task) ? (
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <p>查询原任务并取回视频，不会重新生成。</p>
+                                <Button loading={retrievingTaskId === task.id} onClick={() => onRetrieveTask(task)}>取回结果</Button>
+                            </div>
+                        ) : null}
                         {onCancelTask && (task.status === "queued" || task.status === "running") ? (
                             <div className="flex justify-end">
                                 <Button danger icon={<XCircle className="size-4" />} onClick={() => onCancelTask(task)}>
@@ -93,17 +96,6 @@ export function CanvasProjectStatusDialogs({ theme, task, taskLogs, taskLoading,
                 ) : null}
             </Modal>
 
-            <Modal title="AI 超分" open={Boolean(superResolveNode?.metadata?.content)} centered footer={null} onCancel={onCloseSuperResolve}>
-                <div className="space-y-4 py-3">
-                    <div className="rounded-lg border p-3 text-sm leading-6" style={{ borderColor: theme.node.stroke, background: theme.node.panel, color: theme.node.muted }}>
-                        当前部署未配置独立的 AI 超分模型。你仍可以使用本地高质量插值放大，原图会保留，结果将作为新的图片节点放回画布。
-                    </div>
-                    <div className="flex justify-end gap-2">
-                        <Button onClick={onCloseSuperResolve}>取消</Button>
-                        <Button type="primary" icon={<ImagePlus className="size-4" />} onClick={onUseLocalUpscale}>使用本地高质量放大</Button>
-                    </div>
-                </div>
-            </Modal>
 
             <AppModal
                 title="视频预览"

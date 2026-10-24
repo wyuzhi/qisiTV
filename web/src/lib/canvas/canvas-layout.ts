@@ -1,4 +1,5 @@
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type Position } from "@/types/canvas";
+import { isFrameNode } from "./canvas-frame";
 
 export type CanvasLayoutMode = "row" | "column" | "grid";
 export type CanvasAlignmentMode = "left" | "centerX" | "right" | "top" | "centerY" | "bottom" | "distributeX" | "distributeY";
@@ -134,7 +135,7 @@ export function layoutCanvasNodesByMediaType(nodes: CanvasNodeData[]) {
 }
 
 export function layoutCanvasAuto(nodes: CanvasNodeData[], connections: CanvasConnection[]) {
-    const candidates = nodes.filter((node) => !node.metadata?.locked && node.type !== CanvasNodeType.Frame);
+    const candidates = nodes.filter((node) => !node.metadata?.locked && !isFrameNode(node));
     if (candidates.length < 2) return new Map<string, Position>();
     const candidateIds = new Set(candidates.map((node) => node.id));
     const hasConnections = connections.some((connection) => candidateIds.has(connection.fromNodeId) && candidateIds.has(connection.toNodeId));

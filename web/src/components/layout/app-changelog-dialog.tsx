@@ -1,65 +1,51 @@
 import { motion, useReducedMotion } from "motion/react";
-import { ScrollText } from "lucide-react";
-import ReactMarkdown from "react-markdown";
+import { ChevronDown } from "lucide-react";
+import { useState } from "react";
 
+import { appChangelogZh } from "@/components/layout/app-changelog.zh";
 import { AppModal } from "@/components/ui/product/app-modal/app-modal";
 import { aceternityMotion } from "@/lib/aceternity-motion";
+import { publicAssetUrl } from "@/lib/public-asset";
+import { useThemeStore } from "@/stores/use-theme-store";
 
 export function AppChangelogDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
     const reducedMotion = useReducedMotion();
+    const [showLicenses, setShowLicenses] = useState(false);
+    const theme = useThemeStore((state) => state.theme);
     const version = `v${__APP_VERSION__.replace(/^v/, "")}`;
+    const publishedNotes = appChangelogZh.filter((entry) => entry.version.localeCompare(version, undefined, { numeric: true }) <= 0);
+    const notes = publishedNotes[0]?.version === version
+        ? publishedNotes
+        : [{ version, changes: ["当前版本的更新内容将在发布后提供。"] }, ...publishedNotes];
 
     return (
         <AppModal
             rootClassName="app-spatial-modal app-changelog-modal"
-            title={
-                <div className="app-changelog-heading">
-                    <span className="app-changelog-heading-icon">
-                        <ScrollText className="size-4" />
-                    </span>
-                    <div className="app-changelog-heading-copy">
-                        <div className="app-changelog-heading-title">更新日志</div>
-                        <div className="app-changelog-heading-description">按版本查看产品能力、交互与稳定性变化</div>
-                    </div>
-                    <span className="app-changelog-current-version">当前版本 {version}</span>
-                </div>
-            }
+            title={<div className="app-changelog-heading"><span>{showLicenses ? "第三方许可与源码" : "更新日志"}</span><span className="app-changelog-heading-version">{version}</span></div>}
             open={open}
-            width={820}
-            footer={null}
+            width={680}
+            footer={<button type="button" className="text-sm text-primary underline-offset-4 hover:underline focus-visible:underline" onClick={() => setShowLicenses(!showLicenses)}>{showLicenses ? "返回更新日志" : "第三方许可与源码"}</button>}
             centered
-            onCancel={onClose}
+            onCancel={() => { setShowLicenses(false); onClose(); }}
             modalRender={(node) => (
                 <motion.div initial={reducedMotion ? false : { opacity: 0, y: 14, scale: 0.975 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: aceternityMotion.duration.panel, ease: aceternityMotion.easing.enter }}>
                     {node}
                 </motion.div>
             )}
         >
-            <div className="app-changelog-scroll thin-scrollbar">
-                <ReactMarkdown
-                    components={{
-                        h1: () => null,
-                        h2: ({ children }) => {
-                            const label = String(children);
-                            const latest = label === "Unreleased";
-
-                            return (
-                                <h3 className={`app-changelog-section-heading${latest ? " is-latest" : ""}`}>
-                                    <span className="app-changelog-section-marker" aria-hidden="true" />
-                                    <span>{latest ? "开发中" : label}</span>
-                                    {latest ? <span className="app-changelog-latest-badge">最新</span> : null}
-                                </h3>
-                            );
-                        },
-                        ul: ({ children }) => <ul className="app-changelog-list">{children}</ul>,
-                        li: ({ children }) => <li>{children}</li>,
-                        p: ({ children }) => <p className="app-changelog-paragraph">{children}</p>,
-                        code: ({ children }) => <code className="app-changelog-code">{children}</code>,
-                    }}
-                >
-                    {__APP_CHANGELOG__}
-                </ReactMarkdown>
-            </div>
+            {showLicenses ? <iframe title="第三方许可与源码" src={publicAssetUrl("licenses/index.html")} className="block h-[min(60vh,560px)] w-full border-0" style={{ colorScheme: theme }} /> : <div className="app-changelog-scroll thin-scrollbar">
+                {notes.map((entry, index) => (
+                    <details className="app-changelog-release" key={entry.version} open={index === 0 ? true : undefined}>
+                        <summary className="app-changelog-release-summary">
+                            <span>{index === 0 ? "本次更新" : entry.version}</span>
+                            <ChevronDown className="app-changelog-chevron" aria-hidden="true" />
+                        </summary>
+                        <ul className="app-changelog-list">
+                            {entry.changes.map((change) => <li key={change}>{change}</li>)}
+                        </ul>
+                    </details>
+                ))}
+            </div>}
         </AppModal>
     );
 }

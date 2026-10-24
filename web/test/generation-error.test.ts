@@ -1,5 +1,94 @@
+import referenceVideoErrors from "./fixtures/reference-video-errors.json";
 import { describe, expect, test } from "bun:test";
+import { ApiError } from "../src/services/api/request";
+
+test("reference transport admission identifies blocked inputs and survives persisted display", () => {
+    const message = "当前渠道需要在线素材链接：参考图片 2、参考视频 1无法直接读取。请替换为可访问的 HTTPS 链接，或切换支持本地素材的渠道";
+    const failure = explainGenerationError(new ApiError(message, { status: 400, reason: "reference_media_requires_url" }));
+    expect(failure.category).toBe("invalid_params");
+    expect(failure.message).toContain("参考图片 2、参考视频 1");
+    expect(failure.action).toContain("HTTPS");
+    expect(failure.blockAutomaticRetry).toBe(true);
+    expect(explainGenerationError(failure.message).reason).toBe(failure.reason);
+});
+
+test("Windows socket disconnects explain saved historical errors without exposing network details", () => {
+    for (const detail of ["An existing connection was forcibly closed by the remote host.", "An established connection was aborted by the software in your host machine."]) {
+        const failure = explainGenerationError(`Get "https://private.example/task?token=secret": read tcp: wsarecv: ${detail}`);
+        expect(failure.category).toBe("network");
+        expect(failure.message).not.toMatch(/wsarecv|secret|private\.example/);
+    }
+});
+
+test("local task persistence errors keep their cause through API and saved details", () => {
+    const error = new ApiError("本地任务保存失败，尚未提交生成", { status: 500, reason: "local_storage_failed" });
+    const result = explainGenerationError(error);
+    expect(result.category).toBe("local_storage");
+    expect(result.message).toContain("尚未提交生成");
+    expect(result.message).not.toContain("模型不接受");
+    expect(result.blockAutomaticRetry).toBe(true);
+    expect(explainGenerationError(result.message).category).toBe("local_storage");
+    const diagnostics = formatGenerationDiagnostics(result);
+    expect(diagnostics).toContain("类别：local_storage");
+    expect(diagnostics).toContain("错误来源：本地任务存储");
+    expect(diagnostics).toContain("尚未提交生成");
+});
+
+test("local API quota keeps the actual capacity error instead of channel permissions", () => {
+    const result = explainGenerationError(new ApiError("账号任务历史已达到 100 条上限", {status: 403, code: 40301, reason: "quota_exceeded"}));
+    expect(result.category).toBe("quota_limit");
+    expect(result.reason).toContain("100 条上限");
+    expect(result.action).toContain("清理");
+    expect(result.message).not.toMatch(/权限|供应商|账单/);
+    expect(result.blockAutomaticRetry).toBe(true);
+});
 import audioErrorContract from "../../fixtures/reference-audio-errors.json";
+
+test("local database failures never blame model parameters", () => {
+    for (const message of ["table tasks has no column named failure_diagnostics", "no such column: failure_diagnostics", "no such table: tasks", "database is locked", "attempt to write a readonly database", "disk I/O error", "UNIQUE constraint failed: tasks.id", "NOT NULL constraint failed: tasks.type", "CHECK constraint failed: task_status", "FOREIGN KEY constraint failed"]) {
+        for (const input of [message, new Error(message), { status: 400, code: 400, reason: "invalid_argument", message }, { status: 500, data: { error: { code: "invalid_argument", message } } }]) {
+            const failure = explainGenerationError(input);
+            expect(failure.category).toBe("local_storage");
+            expect(failure.reason).toContain("数据库");
+            expect(failure.message).not.toContain("failure_diagnostics");
+            expect(failure.retryable).toBe(false);
+            expect(failure.blockAutomaticRetry).toBe(true);
+            expect(explainGenerationError(failure.message).category).toBe("local_storage");
+        }
+    }
+});
+
+test("database classification preserves provider parameters and stable codes", () => {
+    for (const prompt of ["UNIQUE constraint failed: tasks.id", "NOT NULL constraint failed: tasks.type", "CHECK constraint failed: task_status", "FOREIGN KEY constraint failed"]) {
+        expect(explainGenerationError({ error: { code: "invalid_parameter", message: "invalid size" }, prompt }).category).toBe("invalid_params");
+    }
+    for (const input of [{ error: { code: "invalid_parameter", message: "invalid size" }, prompt: "table tasks has no column named failure_diagnostics" }, { error: { code: "invalid_parameter", message: "invalid size" } }]) {
+        expect(explainGenerationError(input).category).toBe("invalid_params");
+    }
+    expect(explainGenerationError({ status: 500, data: { code: "local_storage", message: "" } }).category).toBe("local_storage");
+});
+
+test("canvas save conflicts are not vendor parameter failures", () => {
+    const saveConflict = new ApiError("云端画布已有更新，已停止覆盖；请保留本地草稿并加载最新版本", { status: 409, reason: "conflict" });
+    const explained = explainGenerationError(saveConflict);
+    expect(explained.category).toBe("canvas_conflict");
+    expect(explained.action).toContain("不要重新生成");
+    expect(explained.message).not.toContain("模型不接受");
+    expect(explainGenerationError(explained.message).category).toBe("canvas_conflict");
+
+    expect(explainGenerationError(new ApiError("保存失败", { status: 409, reason: "stale_revision" })).category).toBe("canvas_conflict");
+    expect(explainGenerationError({ code: "canvas_conflict", message: "生成结果已保留，但画布有版本冲突。请先使用画布最新版本，再重新加载资源，不要重新生成。" }).category).toBe("canvas_conflict");
+    expect(explainGenerationError(new Error("画布有未处理的外部改动，本次未提交")).category).toBe("canvas_conflict");
+});
+
+test("image receipt states never invite automatic paid regeneration", () => {
+    for (const code of ["image_result_unknown", "image_submission_pending", "image_result_expired", "image_result_unavailable", "idempotency_conflict"]) {
+        const failure = explainGenerationError({ status: 409, data: { error: { code, message: "" } } });
+        expect(failure.category).toBe("submission_uncertain");
+        expect(failure.blockAutomaticRetry).toBe(true);
+        expect(failure.retryable).toBe(false);
+    }
+});
 
 test("whole request limits retain actionable copy after persistence", () => {
     for (const body of ["", "<html>413 Request Entity Too Large</html>"]) expect(explainGenerationError({ status: 413, data: body }).reason).toContain("整次请求");
@@ -125,7 +214,7 @@ import gatewayCodes from "../../fixtures/generation-error-codes.json";
 
 describe("generation error classification", () => {
     test("all declared gateway error codes match the shared backend contract", () => {
-        expect(Object.keys(gatewayCodes)).toHaveLength(43);
+        expect(Object.keys(gatewayCodes)).toHaveLength(53);
         for (const [code, category] of Object.entries(gatewayCodes)) {
             expect(explainGenerationError({ code, message: "opaque provider message" }).category).toBe(category);
             expect(explainGenerationError({ status: 400, data: { error: { code } } }).category).toBe(category);
@@ -337,6 +426,84 @@ describe("generation error classification", () => {
         expect(text).not.toContain("api-key");
     });
 
+    test("diagnostics use the failed task model and distinguish body size from transmission", () => {
+        const text = formatGenerationDiagnostics(explainGenerationError({ code: "request_not_sent" }), {
+            model: "beefapi::seedance-2.0-fast",
+            failureDiagnostics: {
+                source: "unknown",
+                input: { model: "minimax-h3", promptChars: 10, imageCount: 3, videoCount: 0, audioCount: 0 },
+                requests: [{ operation: "submit", method: "POST", dispatched: false, outcome: "not_dispatched", transportPhase: "tls", transportRoute: "direct", startedAt: "2026-10-15T03:25:27Z", durationMs: 15312, requestBytes: 7557896 }],
+            },
+        });
+        expect(text).toContain("模型：minimax-h3");
+        expect(text).not.toContain("seedance");
+        expect(text).toContain("请求体大小=7557896（不代表已发送）");
+        expect(text).toContain("直连；阶段=TLS 握手");
+        expect(text).toContain("请求未发送");
+        expect(text).not.toContain("上游任务可能仍在执行");
+    });
+
+    test("persisted category is never advertised as an upstream code", () => {
+        const explanation = explainGenerationError({ code: "invalid_params", message: "模型不接受当前参数" });
+        const text = formatGenerationDiagnostics(explanation, { taskId: "local-task-123", createdAt: "2026-09-30T15:39:21+08:00" });
+        expect(text).not.toContain("上游代码：invalid_params");
+        expect(text).toContain("错误来源：未记录");
+        expect(text).toContain("请求 ID：未记录");
+        expect(text).toContain("任务创建时间：2026-09-30T15:39:21+08:00");
+    });
+
+    test("diagnostics preserve constraint, request and distinct failure time", () => {
+        const text = formatGenerationDiagnostics(explainGenerationError({ code: "invalid_params" }), {
+            taskId: "local-task-123", createdAt: "2026-09-30T15:39:21+08:00", completedAt: "2026-09-30T15:40:11+08:00",
+            failureDiagnostics: { source: "upstream_http", summary: "size must be 1024x1024", providerCode: "invalid_size", httpStatus: 400, requestId: "req-123456", param: "size", stage: "正在生成", capturedAt: "2026-09-30T15:40:10+08:00" },
+        });
+        for (const expected of ["上游代码：invalid_size", "HTTP 状态：400", "请求 ID：req-123456", "参数：size", "错误摘要：size must be 1024x1024", "错误记录时间：2026-09-30T15:40:10+08:00", "任务结束时间：2026-09-30T15:40:11+08:00"]) expect(text).toContain(expected);
+    });
+
+    test("copied diagnostic evidence is sanitized again", () => {
+        const text = formatGenerationDiagnostics(explainGenerationError("failed"), { failureDiagnostics: {
+            source: "local_validation", summary: "cannot read C:\\Users\\PRIVATE\\image.png https://host/file?token=PRIVATE Authorization: Bearer PRIVATE multi word",
+            providerCode: "invalid_params", requestId: "secret-PRIVATE", stage: "prompt=PRIVATE", capturedAt: "Cookie: PRIVATE",
+        } });
+        expect(text).toContain("错误来源：本地参数校验");
+        expect(text).not.toContain("PRIVATE");
+        expect(text).not.toContain("上游代码");
+    });
+
+    test("reference upload diagnostics identify storage and the failing asset", () => {
+        const failure = explainGenerationError("参考素材上传失败，本次尚未开始生成。请检查网络或稍后重试。");
+        expect(failure.blockAutomaticRetry).toBe(true);
+        expect(failure.blockManualRetry).toBe(false);
+        const text = formatGenerationDiagnostics(failure, { failureDiagnostics: {
+            source: "reference_upload", summary: "参考图 2 上传文件失败：HTTP 403 SignatureDoesNotMatch", providerCode: "SignatureDoesNotMatch", httpStatus: 403,
+            requests: [{ operation: "reference_put", method: "PUT", dispatched: true, outcome: "http_error", httpStatus: 403, startedAt: "2026-10-19T03:00:00Z", durationMs: 123, summary: "参考图 2 上传文件失败" }],
+        } });
+        expect(text).toContain("错误来源：参考素材上传");
+        expect(text).toContain("存储返回代码：SignatureDoesNotMatch");
+        expect(text).toContain("请求 1：上传素材文件");
+        expect(text).toContain("参考图 2");
+    });
+
+    test("copied original-task DNS failure identifies local network and query stage", () => {
+        const text = formatGenerationDiagnostics(explainGenerationError("模型服务域名解析失败"), { failureDiagnostics: {
+            source: "local_network", stage: "查询原任务（DNS 解析）", summary: "外部服务域名解析失败",
+        } });
+        expect(text).toContain("错误来源：本地网络");
+        expect(text).toContain("失败阶段：查询原任务（DNS 解析）");
+        expect(text).not.toContain("正在连接上游");
+        expect(text).not.toContain("上游业务响应");
+    });
+
+    test("copied reference failure keeps DNS stage and recovery attempt", () => {
+        const text = formatGenerationDiagnostics(explainGenerationError("参考素材上传失败，本次尚未开始生成"), { failureDiagnostics: {
+            source: "reference_upload", requests: [{ operation: "reference_put", method: "PUT", dispatched: false, outcome: "not_dispatched", transportPhase: "dns", transportRoute: "direct", startedAt: "2026-10-22T03:00:00Z", durationMs: 123, summary: "参考图 1 上传文件（第 3 次）失败：域名解析失败" }],
+        } });
+        expect(text).toContain("阶段=DNS 解析");
+        expect(text).toContain("第 3 次");
+        expect(text).toContain("请求未发送");
+        expect(text).not.toContain("上游任务可能仍在执行");
+    });
+
     test("content moderation helper recognizes new categories", () => {
         expect(isContentModerationError("提示词未通过内容安全审核")).toBe(true);
         expect(isContentModerationError("上游 HTTP 400")).toBe(false);
@@ -357,4 +524,39 @@ describe("image transport errors go through the classifier", () => {
         expect(htmlMessage).not.toContain("secret");
         expect(htmlMessage).not.toContain("<html");
     });
+});
+
+
+test("pixel failure explains actual input and upstream range", () => {
+    const raw = explainGenerationError({ error: { code: "400", message: "素材转换失败: Pixel count must be between 407696 and 8295044." } });
+    expect(raw.action).toContain("407696–8295044");
+    const measured = explainGenerationError("第 1 个参考视频像素总量为 331776（432×768），需要 407696–8295044 像素；请调整尺寸");
+    expect(measured.reason).toContain("432×768");
+    expect(measured.action).toContain("407696–8295044");
+});
+
+test("gateway video preflight failures preserve actionable details", () => {
+    for (const item of referenceVideoErrors) {
+        const failure = explainGenerationError({ error: { code: "invalid_reference_video", message: item.message }, status: 400 });
+        expect(failure.reason).toContain(item.reason);
+        expect(failure.action).toContain(item.action);
+        expect(explainGenerationError(`${failure.reason}。${failure.action}`).action).toContain(item.action);
+    }
+});
+
+test("reference pixel diagnostic ID is not duplicated", () => {
+    const id = "202609290516575609492488268d9d6HqaXq7bq";
+    const input = `第 1 个参考视频像素总量为 331776（432×768）。需要 407696–8295044 像素；请调整尺寸。排查编号：请求 ${id}。`;
+    const failure = explainGenerationError(input);
+    expect(failure.message.split(id).length - 1).toBe(1);
+    expect(failure.action).not.toContain(id);
+});
+
+test("media details preserve authentication and ignore prompt echoes", () => {
+    for (const message of ["asset access denied", "unsupported video codec", "Frame rate must be between 24 and 60."]) {
+        const failure = explainGenerationError({error: {code: "invalid_api_key", message}, request_id: "req_media_auth_123"});
+        expect(failure.category).toBe("auth");
+        expect(failure.requestId).toBe("req_media_auth_123");
+    }
+    expect(explainGenerationError({error: {code: "unknown", message: "Failure"}, prompt: "unsupported video codec"}).category).toBe("unknown");
 });

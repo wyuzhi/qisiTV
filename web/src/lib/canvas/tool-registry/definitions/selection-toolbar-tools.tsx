@@ -1,8 +1,10 @@
-import { AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd, AlignHorizontalJustifyStart, AlignHorizontalSpaceAround, AlignHorizontalSpaceBetween, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, AlignVerticalJustifyStart, AlignVerticalSpaceAround, AlignVerticalSpaceBetween, AtSign, Film, FolderTree, Grid3X3, LayoutTemplate, Link2, LoaderCircle, Workflow } from "lucide-react";
+import { AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd, AlignHorizontalJustifyStart, AlignHorizontalSpaceAround, AlignHorizontalSpaceBetween, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, AlignVerticalJustifyStart, AlignVerticalSpaceAround, AlignVerticalSpaceBetween, Film, FolderTree, Grid3X3, LayoutTemplate, Link2, LoaderCircle, Sparkles, Workflow } from "lucide-react";
 
 import { registerToolbarTools, type ToolDefinition } from "@/lib/canvas/tool-registry";
 
 export const selectionToolbarTools: ToolDefinition[] = [
+    { id: "selection-save-workflow", toolbar: "selection", category: "selection", label: "保存为工作流", icon: <Workflow />, defaultVisible: true, defaultOrder: 6, applicable: (ctx) => Boolean(ctx.handlers.onSaveWorkflow), run: (ctx) => ctx.handlers.onSaveWorkflow?.() },
+    { id: "selection-ask-assistant", toolbar: "selection", category: "selection", label: "问助手", icon: <Sparkles />, defaultVisible: true, defaultOrder: 5, applicable: (ctx) => Boolean(ctx.handlers.onAskAssistant), run: (ctx) => ctx.handlers.onAskAssistant?.() },
     { id: "selection-align-left", toolbar: "selection", category: "layout", label: "左对齐", icon: <AlignHorizontalJustifyStart />, defaultVisible: true, defaultOrder: 10, run: (ctx) => ctx.handlers.onAlign("left") },
     { id: "selection-align-center-x", toolbar: "selection", category: "layout", label: "水平居中", icon: <AlignHorizontalJustifyCenter />, defaultVisible: true, defaultOrder: 20, run: (ctx) => ctx.handlers.onAlign("centerX") },
     { id: "selection-align-right", toolbar: "selection", category: "layout", label: "右对齐", icon: <AlignHorizontalJustifyEnd />, defaultVisible: true, defaultOrder: 30, run: (ctx) => ctx.handlers.onAlign("right") },
@@ -18,9 +20,9 @@ export const selectionToolbarTools: ToolDefinition[] = [
     { id: "selection-create-storyboard", toolbar: "selection", category: "selection", label: "创建分镜组", icon: <LayoutTemplate />, defaultVisible: true, defaultOrder: 130, disabled: (ctx) => ctx.selectedCount < 2, run: (ctx) => ctx.handlers.onCreateStoryboard() },
     { id: "selection-create-reference-group", toolbar: "selection", category: "selection", label: "创建引用组", icon: <FolderTree />, defaultVisible: false, defaultOrder: 140, disabled: (ctx) => ctx.selectedCount < 2, run: (ctx) => ctx.handlers.onCreateReferenceGroup() },
     { id: "selection-batch-connect", toolbar: "selection", category: "selection", label: "批量连接", icon: <Link2 />, defaultVisible: true, defaultOrder: 145, disabled: (ctx) => ctx.selectedCount < 2, run: (ctx) => ctx.handlers.onBatchConnect() },
-    { id: "selection-send-to-agent", toolbar: "selection", category: "selection", label: "发送到 Agent", icon: <AtSign />, defaultVisible: true, defaultOrder: 148, applicable: () => !isBrowserWorkspace(), disabled: (ctx) => ctx.selectedCount < 1, run: (ctx) => ctx.handlers.onSendSelectionToAgent() },
     {
         id: "selection-merge-videos",
+        workflow: { operationId: "video.merge", outputType: "video" },
         toolbar: "selection",
         category: "selection",
         label: (ctx) => `合并选中视频（${ctx.selectedVideoCount}）`,
@@ -34,4 +36,3 @@ export const selectionToolbarTools: ToolDefinition[] = [
 ];
 
 registerToolbarTools(selectionToolbarTools);
-import { isBrowserWorkspace } from "@/services/browser-workspace";

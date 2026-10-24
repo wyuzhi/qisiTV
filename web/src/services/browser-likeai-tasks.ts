@@ -15,6 +15,7 @@ export type BrowserLikeAITaskStore = {
 type Dependencies = {
     store: BrowserLikeAITaskStore;
     lock<T>(name: string, action: () => Promise<T>): Promise<T>;
+    withProjectWriteLock?<T>(projectId: string, action: () => Promise<T>): Promise<T>;
     request: typeof browserLikeAIRequest;
     credential(channelId: string, baseUrl?: string): Promise<string>;
     reference(ref: LikeAIReference, kind: "image" | "video" | "audio", apiKey: string, baseUrl?: string): Promise<LikeAIReference>;
@@ -110,6 +111,7 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
     });
     return {
         async create(request: CreateTaskInput): Promise<GenerationTask> {
+            const execute = async () => {
             const input = likeAIInput(request.input);
             validateLikeAIReferences(input);
             const channelId = String(input.config.channelId || "");
@@ -164,6 +166,8 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
                     }
                 });
             });
+            };
+            return deps.withProjectWriteLock ? deps.withProjectWriteLock(request.projectId || "", execute) : execute();
         },
         query,
         async list(limit: number, options?: { projectId?: string; activeOnly?: boolean }, signal?: AbortSignal) {
@@ -245,6 +249,14 @@ export function browserLikeAITasks() {
             lock: (name, action) => {
                 if (!globalThis.navigator?.locks) throw new Error("当前浏览器不支持安全的生成任务互斥，请使用最新 Chrome、Edge 或 Safari");
                 return navigator.locks.request(`qisitv:${scope}:${name}`, action);
+            },
+            withProjectWriteLock: (projectId, action) => {
+                if (!projectId || !globalThis.navigator?.locks) throw new Error("生成前需要有效的本机项目和浏览器保存锁。");
+                return navigator.locks.request(`qisitv:project-folder:${projectId}`, async () => {
+                    const { assertBrowserProjectWritable } = await import("@/services/browser-project-folder");
+                    await assertBrowserProjectWritable(projectId);
+                    return action();
+                });
             },
             request: browserLikeAIRequest,
             credential: async (channelId, baseUrl = OFFICIAL_LIKEAI_BASE_URL) => {

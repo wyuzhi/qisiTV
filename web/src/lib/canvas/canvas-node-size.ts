@@ -14,6 +14,20 @@ export function fitNodeSize(width: number, height: number, maxWidth = 720, maxHe
     return { width: w * scale, height: h * scale };
 }
 
+export function fitImageNodeToDecodedSize(node: CanvasNodeData, naturalWidth: number, naturalHeight: number): CanvasNodeData {
+    const metadata = node.metadata;
+    const needsMetadata = metadata?.naturalWidth !== naturalWidth || metadata?.naturalHeight !== naturalHeight;
+    const keepGeometry = metadata?.freeResize || metadata?.manualSize || metadata?.locked || metadata?.workflowSlot;
+    // Batch spacing was calculated with these bounds. Image decoding must not
+    // silently enlarge every card after the grid has already been placed.
+    const size = metadata?.isBatchRoot || metadata?.batchRootId
+        ? fitNodeSize(naturalWidth, naturalHeight, node.width, node.height)
+        : fitNodeSize(naturalWidth, naturalHeight);
+    const needsResize = !keepGeometry && (Math.abs(size.width - node.width) >= 1 || Math.abs(size.height - node.height) >= 1);
+    if (!needsMetadata && !needsResize) return node;
+    return { ...node, ...(needsResize ? size : {}), metadata: needsMetadata ? { ...metadata, naturalWidth, naturalHeight } : metadata };
+}
+
 export function nodeSizeFromRatio(size: string, baseWidth: number, baseHeight: number) {
     const raw = String(size || "").trim();
     if (!raw || raw.toLowerCase() === "auto") return null;
@@ -53,6 +67,8 @@ export function nodeSizeFromRatio(size: string, baseWidth: number, baseHeight: n
 }
 
 export function ensureMediaNodeMinimumSize(node: CanvasNodeData) {
+    // Workflow cards own their layout, including empty upload and output slots.
+    if (node.metadata?.workflowSlot) return node;
     if (node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video) return node;
     const title = node.title === "New Generation" ? "图片" : node.title === "Video" ? "视频" : node.title;
     let width = node.width;

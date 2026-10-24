@@ -1,3 +1,4 @@
+import { AuthenticatedImage, AuthenticatedVideo, AuthenticatedAudio } from "@/components/assets/authenticated-media";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { keepPreviousData, useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Dropdown, Form, Input, Modal, Popconfirm, Tabs, type FormInstance } from "antd";
@@ -8,7 +9,9 @@ import { PaginationBar } from "@/components/layout/workspace-page";
 import { AssetMediaPreview } from "@/components/asset-media-preview";
 import { CachedResourceImage } from "@/components/cached-resource-image";
 import { AssetLibraryCard, AssetLibraryCardMedia } from "@/components/assets/asset-library-card";
+import { shouldSuppressAssetViewError } from "@/components/assets/asset-view-session";
 import { AssetLibraryPickerModal, type AssetLibraryPickerItem } from "@/components/assets/asset-library-picker-modal";
+import { assertUserScope, captureUserScope, userScopeMatches, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { useExternalAssetSources } from "@/hooks/use-external-asset-sources";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { CanvasFolderPreview } from "@/components/canvas/canvas-folder-preview";
@@ -46,7 +49,7 @@ import { useAssetStore, type Asset, type AssetCategory, type AssetStatus, type E
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { CanvasNodeType, type CanvasFolderStyle, type CanvasFolderTheme, type CanvasNodeData } from "@/types/canvas";
 import { downloadOwnedOrBrowserMedia, reportOwnedMediaSave } from "@/services/desktop-media-save";
-import { sanitizeDownloadFileName } from "@/lib/canvas/canvas-media-download";
+import { mediaFileExtension, sanitizeDownloadFileName } from "@/lib/canvas/canvas-media-download";
 
 import { ProjectCharacterCard } from "./project-character-card";
 import { linkSelectedProjectAssets } from "./project-asset-linking";
@@ -89,7 +92,7 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
     const externalAssetSources = useExternalAssetSources(addOpen || Boolean(imageAsset));
     const [voiceAsset, setVoiceAsset] = useState<ProjectAsset | null>(null);
     const [previewAsset, setPreviewAsset] = useState<ProjectAsset | null>(null);
-    const [voiceSample, setVoiceSample] = useState<{ resourceId: string; name: string; url: string } | null>(null);
+    const [voiceSample, setVoiceSample] = useState<{ resourceId: string; name: string; url: string; expectedScope?: CapturedUserScope } | null>(null);
     const [voicePickerOpen, setVoicePickerOpen] = useState(false);
     const [voiceInstructions, setVoiceInstructions] = useState("");
     const [form] = Form.useForm<CharacterForm>();
@@ -231,17 +234,18 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
     const done = (content: string) => { refreshProject(); message.success(content); };
     const failed = (fallback: string) => (error: unknown) => message.error(error instanceof Error ? error.message : fallback);
     const addMutation = useMutation({
-        mutationFn: async ({ ids, nextFolderId }: { ids: string[]; nextFolderId?: string }) => {
+        mutationFn: async ({ ids, nextFolderId, expectedScope }: { ids: string[]; nextFolderId?: string; expectedScope: CapturedUserScope }) => {
+            assertUserScope(expectedScope);
             const result = await linkSelectedProjectAssets(ids, async (id) => {
                 const pickerItem = availablePickerItems.find((item) => item.id === id);
                 if (pickerItem?.external) {
-                    const imported = await externalAssetSources.importExternalAsset(pickerItem.external);
+                    const imported = await externalAssetSources.importExternalAsset(pickerItem.external, undefined, expectedScope);
                     const assetId = addAsset(imported);
                     return linkProjectAsset(detail.project.id, {
                         assetId,
                         category: normalizeAssetCategory(imported.category, defaultAssetCategoryForKind(imported.kind)),
                         folderId: nextFolderId,
-                    });
+                    }, undefined, expectedScope);
                 }
                 const selected = pickerItem?.asset || useAssetStore.getState().assets.find((asset) => asset.id === id);
                 if (!selected) throw new Error("所选素材已不存在，请重新选择");
@@ -249,21 +253,25 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
                     assetId: selected.id,
                     category: normalizeAssetCategory(selected.category, defaultAssetCategoryForKind(selected.kind)),
                     folderId: nextFolderId,
-                });
+                }, undefined, expectedScope);
             });
             return {
                 assets: result.linked.map((item) => item.asset),
                 failedCount: result.failedCount,
             };
         },
-        onSuccess: ({ assets, failedCount }) => {
+        onSuccess: ({ assets, failedCount }, variables) => {
+            if (!userScopeMatches(variables.expectedScope)) return;
             assets.forEach((asset) => updatePersonalAsset(asset.id, { category: asset.category as AssetCategory, status: asset.status as AssetStatus, primaryVersionId: asset.primaryVersionId }));
             setAddOpen(false);
             refreshProject();
             if (failedCount) message.warning(`已引用 ${assets.length} 个素材，${failedCount} 个素材引用失败`);
             else message.success(`已引用 ${assets.length} 个素材`);
         },
-        onError: failed("资产引用失败"),
+        onError: (error, variables) => {
+            if (shouldSuppressAssetViewError(error, variables.expectedScope)) return;
+            failed("资产引用失败")(error);
+        },
     });
     const versionMutation = useMutation({ mutationFn: (id: string) => createProjectAssetVersion(detail.project.id, id, {}), onSuccess: () => done("已创建新版本"), onError: failed("版本创建失败") });
     const unlinkMutation = useMutation({ mutationFn: (id: string) => unlinkProjectAsset(detail.project.id, id), onSuccess: () => done("资产已移出项目"), onError: failed("资产移除失败") });
@@ -337,21 +345,48 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
         onError: failed("三视图生成失败"),
     });
     const bindImagesMutation = useMutation({
-        mutationFn: async (selectedAssetId: string) => {
+        mutationFn: async ({ selectedAssetId, expectedScope }: { selectedAssetId: string; expectedScope: CapturedUserScope }) => {
+            assertUserScope(expectedScope);
             if (!imageAsset) throw new Error("未选择角色");
             if (hasRemoteUserDataSyncSession()) await saveRemoteUserDataNow();
+            assertUserScope(expectedScope);
             const latest = useAssetStore.getState().assets;
             const pickerItem = imagePickerItems.find((item) => item.id === selectedAssetId);
-            const selected = latest.find((asset) => asset.id === selectedAssetId) || (pickerItem?.external ? await externalAssetSources.importExternalAsset(pickerItem.external) : undefined);
+            const selected = latest.find((asset) => asset.id === selectedAssetId) || (pickerItem?.external ? await externalAssetSources.importExternalAsset(pickerItem.external, undefined, expectedScope) : undefined);
             if (selected?.kind !== "image") throw new Error("请选择一张包含正面、侧面和背面的三视图设定图");
             const resourceId = resourceIdFromStorageKey((selected as ImageAsset).data.storageKey);
-            if (!resourceId) throw new Error(localMode ? "浏览器本地素材尚未写入桌面资源目录，请在 qisiTV APP 中完成绑定" : "所选图片尚未同步到后端资源库");
-            return replaceProjectCharacterRepresentations(detail.project.id, imageAsset.id, [{ role: "turnaround_sheet", resourceId, metadata: { sourceAssetId: selected.id } }, { role: "primary", resourceId, metadata: { source: "turnaround_sheet", sourceAssetId: selected.id } }]);
+            if (!resourceId) throw new Error(localMode ? "浏览器本地素材尚未写入桌面资源目录，请在 BeefTV APP 中完成绑定" : "所选图片尚未同步到后端资源库");
+            return replaceProjectCharacterRepresentations(detail.project.id, imageAsset.id, [{ role: "turnaround_sheet", resourceId, metadata: { sourceAssetId: selected.id } }, { role: "primary", resourceId, metadata: { source: "turnaround_sheet", sourceAssetId: selected.id } }], expectedScope);
         },
-        onSuccess: (result) => { syncPersonalCharacterProjection(result.asset); setImageAsset(null); done("三视图已绑定到新角色版本"); },
-        onError: failed("三视图绑定失败"),
+        onSuccess: (result, variables) => {
+            if (!userScopeMatches(variables.expectedScope)) return;
+            syncPersonalCharacterProjection(result.asset);
+            setImageAsset(null);
+            done("三视图已绑定到新角色版本");
+        },
+        onError: (error, variables) => {
+            if (shouldSuppressAssetViewError(error, variables.expectedScope)) return;
+            failed("三视图绑定失败")(error);
+        },
     });
-    const bindVoiceMutation = useMutation({ mutationFn: () => voiceAsset && voiceSample ? bindProjectCharacterVoice(detail.project.id, voiceAsset.id, { sampleResourceId: voiceSample.resourceId, voiceName: voiceSample.name, instructions: voiceInstructions }) : Promise.reject(new Error("请选择一份声音素材")), onSuccess: (result) => { syncPersonalCharacterProjection(result.asset); setVoiceAsset(null); setVoiceSample(null); done("声音素材已绑定到新角色版本"); }, onError: failed("声音绑定失败") });
+    const bindVoiceMutation = useMutation({
+        mutationFn: (expectedScope: CapturedUserScope) => {
+            if (!voiceAsset || !voiceSample) return Promise.reject(new Error("请选择一份声音素材"));
+            assertUserScope(expectedScope);
+            return bindProjectCharacterVoice(detail.project.id, voiceAsset.id, { sampleResourceId: voiceSample.resourceId, voiceName: voiceSample.name, instructions: voiceInstructions }, expectedScope);
+        },
+        onSuccess: (result, expectedScope) => {
+            if (!userScopeMatches(expectedScope)) return;
+            syncPersonalCharacterProjection(result.asset);
+            setVoiceAsset(null);
+            setVoiceSample(null);
+            done("声音素材已绑定到新角色版本");
+        },
+        onError: (error, expectedScope) => {
+            if (shouldSuppressAssetViewError(error, expectedScope)) return;
+            failed("声音绑定失败")(error);
+        },
+    });
     const unbindVoiceMutation = useMutation({ mutationFn: () => voiceAsset ? unbindProjectCharacterVoice(detail.project.id, voiceAsset.id) : Promise.reject(new Error("未选择角色")), onSuccess: (result) => { syncPersonalCharacterProjection(result.asset); setVoiceAsset(null); done("声音绑定已解除并生成新角色版本"); }, onError: failed("声音解绑失败") });
 
     const openCharacterEditor = (asset: ProjectAsset | "new") => {
@@ -378,11 +413,10 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
         const personal = personalAssets.find((item) => item.id === asset.id);
         if (personal && (personal.kind === "image" || personal.kind === "video" || personal.kind === "audio" || personal.kind === "model")) {
             const url = personal.kind === "image" ? personal.data.dataUrl : personal.data.url;
-            const extension = personal.kind === "model" ? personal.data.fileName.split(".").pop() || "glb" : personal.data.mimeType.split("/")[1] || "bin";
+            const extension = personal.kind === "model" ? personal.data.fileName.split(".").pop() || "glb" : mediaFileExtension(personal.data.mimeType, url) || "bin";
             void reportOwnedMediaSave(message, downloadOwnedOrBrowserMedia({
                 fileName: sanitizeDownloadFileName(`${asset.title || "素材"}.${extension}`),
                 resourceId: ownedResourceIdFromMediaRef(personal.data.storageKey, url) || undefined,
-                storageKey: personal.data.storageKey,
                 browserUrl: url,
             }));
             return;
@@ -402,7 +436,6 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
             void reportOwnedMediaSave(message, downloadOwnedOrBrowserMedia({
                 fileName: sanitizeDownloadFileName(`${asset.title || "素材"}.${projectAssetFileExtension(asset.mediaType)}`),
                 resourceId: projectResourceId || undefined,
-                storageKey: asset.storageKey,
                 browserUrl: remoteUrl,
             }));
             return;
@@ -499,8 +532,8 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
                 emptyTitle="没有可引用的素材"
                 emptyDescription="本地素材已全部加入项目，或切换到插件来源选择外部素材。"
                 onClose={() => setAddOpen(false)}
-                onConfirm={async (ids) => {
-                    await addMutation.mutateAsync({ ids, nextFolderId: folderId === ALL_FOLDERS ? undefined : folderId });
+                onConfirm={async (ids, expectedScope) => {
+                    await addMutation.mutateAsync({ ids, nextFolderId: folderId === ALL_FOLDERS ? undefined : folderId, expectedScope });
                 }}
             />
             <ProjectAssetPreviewModal asset={previewAsset} personalAsset={previewAsset ? personalAssets.find((item) => item.id === previewAsset.id) : undefined} onClose={() => setPreviewAsset(null)} onDownload={() => previewAsset && downloadPreviewAsset(previewAsset)} onReplaceImage={() => { if (!previewAsset || previewAsset.category !== "character") return; setPreviewAsset(null); openImages(previewAsset); }} />
@@ -523,9 +556,9 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
                 emptyTitle="没有可绑定的图片"
                 emptyDescription="需要一张包含正面、侧面、背面的角色设定图。"
                 onClose={() => setImageAsset(null)}
-                onConfirm={async (ids) => {
+                onConfirm={async (ids, expectedScope) => {
                     if (!ids[0]) throw new Error("请选择一张三视图设定图");
-                    await bindImagesMutation.mutateAsync(ids[0]);
+                    await bindImagesMutation.mutateAsync({ selectedAssetId: ids[0], expectedScope });
                 }}
             />
             <AssetLibraryPickerModal
@@ -541,32 +574,35 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
                 confirmLabel={() => "使用这份声音"}
                 emptyTitle="素材库还没有可用音频"
                 emptyDescription="可以从底部上传声音素材，上传后会自动选中。"
-                upload={{ accept: CHARACTER_VOICE_UPLOAD_ACCEPT, description: `支持 ${CHARACTER_VOICE_FORMAT_LABEL}；上传后保存到素材库`, onUpload: async (files) => {
+                upload={{ accept: CHARACTER_VOICE_UPLOAD_ACCEPT, description: `支持 ${CHARACTER_VOICE_FORMAT_LABEL}；上传后保存到素材库`, onUpload: async (files, expectedScope) => {
+                    assertUserScope(expectedScope);
                     const ids: string[] = [];
                     for (const file of Array.from(files)) {
                         if (!isSupportedCharacterVoiceFile(file)) throw new Error(`声音素材支持 ${CHARACTER_VOICE_FORMAT_LABEL}`);
-                        const uploaded = await uploadMediaFile(file, "character-voice");
+                        const uploaded = await uploadMediaFile(file, "character-voice", undefined, expectedScope);
+                        assertUserScope(expectedScope);
                         const resourceId = resourceIdFromStorageKey(uploaded.storageKey);
-                        if (!resourceId) throw new Error(localMode ? "浏览器本地声音已保存，但角色绑定需要 qisiTV APP 的本地资源目录" : "声音上传未同步到服务端资源库，请检查后端连接");
+                        if (!resourceId) throw new Error(localMode ? "浏览器本地声音已保存，但角色绑定需要 BeefTV APP 的本地资源目录" : "声音上传未同步到服务端资源库，请检查后端连接");
                         ids.push(addAsset({ kind: "audio", title: characterVoiceTitleFromFileName(file.name), coverUrl: "", tags: ["角色声音"], status: "confirmed", source: "角色卡", data: { url: uploaded.url, storageKey: uploaded.storageKey, durationMs: uploaded.durationMs, bytes: uploaded.bytes, mimeType: uploaded.mimeType || file.type || "application/octet-stream" } }));
                     }
                     return ids;
                 } }}
                 onClose={() => setVoicePickerOpen(false)}
-                onConfirm={(ids) => {
+                onConfirm={(ids, expectedScope) => {
+                    assertUserScope(expectedScope);
                     const id = ids[0];
                     const resourceId = id ? audioResourceByItemId.get(id) : "";
-                    if (!resourceId) throw new Error(localMode ? "浏览器本地声音已保存，但角色绑定需要 qisiTV APP 的本地资源目录" : "所选声音素材尚未同步到服务端资源库");
+                    if (!resourceId) throw new Error(localMode ? "浏览器本地声音已保存，但角色绑定需要 BeefTV APP 的本地资源目录" : "所选声音素材尚未同步到服务端资源库");
                     const item = audioPickerItems.find((entry) => entry.id === id);
-                    setVoiceSample({ resourceId, name: item?.title || "角色声音", url: resourceFileUrl(resourceId) });
+                    setVoiceSample({ resourceId, name: item?.title || "角色声音", url: resourceFileUrl(resourceId), expectedScope });
                     setVoicePickerOpen(false);
                 }}
             />
-            <Modal className="workspace-modal workspace-modal-compact" title={`绑定声音素材 · ${voiceAsset?.title || ""}`} open={Boolean(voiceAsset)} okText="绑定并生成新版本" cancelText="取消" okButtonProps={{ loading: bindVoiceMutation.isPending, disabled: !voiceSample }} onCancel={() => { setVoiceAsset(null); setVoiceSample(null); }} onOk={() => bindVoiceMutation.mutate()}>
+            <Modal className="workspace-modal workspace-modal-compact" title={`绑定声音素材 · ${voiceAsset?.title || ""}`} open={Boolean(voiceAsset)} okText="绑定并生成新版本" cancelText="取消" okButtonProps={{ loading: bindVoiceMutation.isPending, disabled: !voiceSample }} onCancel={() => { setVoiceAsset(null); setVoiceSample(null); }} onOk={() => bindVoiceMutation.mutate(voiceSample?.expectedScope ?? captureUserScope())}>
                 <div className="grid gap-3">
                     <div className="rounded-md border border-border/70 bg-foreground/[.025] p-3">
                         <div className="flex items-center justify-between gap-3"><div className="min-w-0"><div className="text-[var(--fs-label)] text-foreground/48">当前声音素材</div><div className="mt-1 truncate text-sm font-medium">{voiceSample?.name || "尚未选择声音素材"}</div></div><Button icon={<FolderOpen className="size-3.5" />} onClick={() => setVoicePickerOpen(true)}>选择或上传音频</Button></div>
-                        {voiceSample ? <audio className="mt-3 w-full" src={voiceSample.url} controls preload="metadata" /> : <div className="mt-2 text-[var(--fs-tiny)] text-foreground/42">从素材库选择已有音频，或上传 {CHARACTER_VOICE_FORMAT_LABEL} 格式的声音样本。</div>}
+                        {voiceSample ? <AuthenticatedAudio className="mt-3 w-full" src={voiceSample.url} controls preload="metadata" /> : <div className="mt-2 text-[var(--fs-tiny)] text-foreground/42">从素材库选择已有音频，或上传 {CHARACTER_VOICE_FORMAT_LABEL} 格式的声音样本。</div>}
                     </div>
                     <Input.TextArea rows={3} value={voiceInstructions} placeholder="表演指令，例如：克制、温暖、语速稍慢" onChange={(event) => setVoiceInstructions(event.target.value)} />
                     {voiceAsset?.character && voiceAsset.character.voiceStatus !== "missing" ? <div className="flex items-center justify-between pt-1"><span className="text-[var(--fs-label)] text-foreground/45">当前绑定：{voiceAsset.character.voice?.profile.name || "声音素材不可用"}</span><Popconfirm title="解除当前声音绑定？" description="该操作会保留历史版本，并创建一个未绑定声音的新版本。" okText="解除" cancelText="取消" onConfirm={() => unbindVoiceMutation.mutate()}><Button type="text" danger size="small" loading={unbindVoiceMutation.isPending} icon={<VolumeX className="size-3.5" />}>解除声音</Button></Popconfirm></div> : null}
@@ -719,8 +755,8 @@ function MediaAssetCard({ asset, personalAsset, folderItems, onOpen, onMove, onC
 function ProjectAssetMedia({ asset, personalAsset }: { asset: ProjectAsset; personalAsset?: Asset }) {
     if (personalAsset) return <AssetMediaPreview asset={personalAsset} alt={asset.title} className="h-full w-full bg-black object-cover" fallback={<div className="grid h-full place-items-center text-foreground/25"><MediaIcon kind={asset.mediaType} /></div>} />;
     const remoteUrl = projectAssetRemoteUrl(asset);
-    if (asset.mediaType === "image" && remoteUrl) return <img src={remoteUrl} alt={asset.title} className="h-full w-full bg-black object-cover" />;
-    if (asset.mediaType === "video" && remoteUrl) return <video src={remoteUrl} muted preload="metadata" className="h-full w-full bg-black object-cover" />;
+    if (asset.mediaType === "image" && remoteUrl) return <AuthenticatedImage src={remoteUrl} alt={asset.title} className="h-full w-full bg-black object-cover" />;
+    if (asset.mediaType === "video" && remoteUrl) return <AuthenticatedVideo src={remoteUrl} muted preload="metadata" className="h-full w-full bg-black object-cover" />;
     if (asset.mediaType === "text" && asset.previewText) return <p className="line-clamp-6 h-full overflow-hidden p-4 text-left text-xs leading-5 text-foreground/62">{asset.previewText}</p>;
     return <div className="grid h-full place-items-center text-foreground/25"><MediaIcon kind={asset.mediaType} /></div>;
 }
@@ -735,7 +771,7 @@ function ProjectAssetPreviewModal({ asset, personalAsset, onClose, onDownload, o
         <Modal className="workspace-modal workspace-modal-wide library-modal project-asset-preview-modal" title={asset?.category === "character" ? "角色卡预览" : "资产预览"} open={Boolean(asset)} onCancel={onClose} footer={<div className="flex justify-end gap-2"><Button onClick={onClose}>关闭</Button>{asset?.category === "character" ? <Button onClick={onReplaceImage}>替换图片</Button> : null}{canDownload ? <Button type="primary" icon={<Download className="size-3.5" />} onClick={onDownload}>下载</Button> : null}</div>}>
             {asset ? <div className="project-asset-preview-layout">
                 <div className={`project-asset-preview-stage ${previewClass}`}>
-                    {asset.category === "character" ? characterCover ? <CachedResourceImage storageKey={`resource:${characterCover.resourceId}`} src={resourceFileUrl(characterCover.resourceId)} alt={asset.title} className="project-asset-preview-media" fallback={<div className="grid min-h-48 place-items-center text-foreground/35"><UserRound className="size-12" /></div>} /> : <div className="grid min-h-48 place-items-center text-foreground/35"><UserRound className="size-12" /></div> : personalAsset?.kind === "video" ? <video src={personalAsset.data.url} controls className="project-asset-preview-media" /> : personalAsset?.kind === "audio" ? <audio src={personalAsset.data.url} controls className="project-asset-preview-audio" /> : personalAsset?.kind === "image" ? <AssetMediaPreview asset={personalAsset} alt={asset.title} className="project-asset-preview-media" /> : personalAsset?.kind === "text" ? <p className="project-asset-preview-text">{personalAsset.data.content}</p> : asset.mediaType === "video" && remoteUrl ? <video src={remoteUrl} controls className="project-asset-preview-media" /> : asset.mediaType === "audio" && remoteUrl ? <audio src={remoteUrl} controls className="project-asset-preview-audio" /> : asset.mediaType === "image" && remoteUrl ? <img src={remoteUrl} alt={asset.title} className="project-asset-preview-media" /> : asset.mediaType === "text" && asset.previewText ? <p className="project-asset-preview-text">{asset.previewText}</p> : <div className="grid min-h-48 place-items-center text-foreground/35"><MediaIcon kind={asset.mediaType} /></div>}
+                    {asset.category === "character" ? characterCover ? <CachedResourceImage storageKey={`resource:${characterCover.resourceId}`} src={resourceFileUrl(characterCover.resourceId)} alt={asset.title} className="project-asset-preview-media" fallback={<div className="grid min-h-48 place-items-center text-foreground/35"><UserRound className="size-12" /></div>} /> : <div className="grid min-h-48 place-items-center text-foreground/35"><UserRound className="size-12" /></div> : personalAsset?.kind === "video" ? <AuthenticatedVideo src={personalAsset.data.url} controls className="project-asset-preview-media" /> : personalAsset?.kind === "audio" ? <AuthenticatedAudio src={personalAsset.data.url} controls className="project-asset-preview-audio" /> : personalAsset?.kind === "image" ? <AssetMediaPreview asset={personalAsset} alt={asset.title} className="project-asset-preview-media" /> : personalAsset?.kind === "text" ? <p className="project-asset-preview-text">{personalAsset.data.content}</p> : asset.mediaType === "video" && remoteUrl ? <AuthenticatedVideo src={remoteUrl} controls className="project-asset-preview-media" /> : asset.mediaType === "audio" && remoteUrl ? <AuthenticatedAudio src={remoteUrl} controls className="project-asset-preview-audio" /> : asset.mediaType === "image" && remoteUrl ? <AuthenticatedImage src={remoteUrl} alt={asset.title} className="project-asset-preview-media" /> : asset.mediaType === "text" && asset.previewText ? <p className="project-asset-preview-text">{asset.previewText}</p> : <div className="grid min-h-48 place-items-center text-foreground/35"><MediaIcon kind={asset.mediaType} /></div>}
                 </div>
                 <aside className="project-asset-preview-details">
                     <div className="project-asset-preview-eyebrow">{asset.category === "character" ? "角色卡" : mediaLabel(asset.mediaType)}</div>

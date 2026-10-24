@@ -42,7 +42,6 @@ describe("local-only source boundary", () => {
             "src/services/workspace-mode.ts",
             "src/stores/use-user-store.ts",
             "src/services/api/creation-runs.ts",
-            "src/services/creative-agent-controller.ts",
             "src/services/api/task-center.ts",
         ];
         for (const file of files) {

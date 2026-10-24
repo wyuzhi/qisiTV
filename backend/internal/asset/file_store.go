@@ -17,7 +17,51 @@ type FileStore struct {
 }
 
 func NewFileStore(dataDir string) *FileStore {
-	return &FileStore{root: filepath.Join(dataDir, "resources")}
+	return &FileStore{root: canonicalPath(filepath.Join(strings.TrimSpace(dataDir), "resources"))}
+}
+
+func (s *FileStore) writeSpace() string {
+	if s == nil {
+		return ""
+	}
+	return canonicalPath(s.root)
+}
+
+// canonicalPath is the process-wide lock identity for a FileStore root.
+// Abs+Clean alone splits trailing-slash and symlink aliases of the same
+// directory; this walks up to the first existing path, EvalSymlinks it, then
+// rejoins missing trailing components so NewFileStore can run before
+// resources/ exists.
+func canonicalPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	abs = filepath.Clean(abs)
+	probe := abs
+	var missing []string
+	for {
+		resolved, err := filepath.EvalSymlinks(probe)
+		if err == nil {
+			for index := len(missing) - 1; index >= 0; index-- {
+				resolved = filepath.Join(resolved, missing[index])
+			}
+			return resolved
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return abs
+		}
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			return abs
+		}
+		missing = append(missing, filepath.Base(probe))
+		probe = parent
+	}
 }
 
 func (s *FileStore) Write(objectKey string, body io.Reader) (returnErr error) {
@@ -79,6 +123,25 @@ func (s *FileStore) Open(objectKey string) (*os.File, error) {
 		return nil, err
 	}
 	return os.Open(path)
+}
+
+// Exists reports whether objectKey names a regular file inside the store.
+func (s *FileStore) Exists(objectKey string) error {
+	path, err := s.path(objectKey)
+	if err != nil {
+		return err
+	}
+	if err := s.ensureSafeExistingPath(path); err != nil {
+		return err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return errors.New("local resource path points to a directory")
+	}
+	return nil
 }
 
 func (s *FileStore) Delete(objectKey string) error {

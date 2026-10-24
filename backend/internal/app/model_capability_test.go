@@ -1,14 +1,37 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 )
 
+func TestSourcedSeedanceGenerationKeepsServerLimitsAndAudio(t *testing.T) {
+	version := "gateway-version"
+	profile := DefaultModelCapabilityConfigForModel("newapi", "seedance-2.0")
+	profile.Video.References.MaxImages = 12
+	profile.Video.GenerateAudio.Supported = false
+	input := canvasGenerationInput{Mode: "video", Prompt: "test", Config: providerConfig{InterfaceType: "newapi", BaseURL: "https://enterprise.beefapi.com", Model: "seedance-2.0", VideoSeconds: "5", Size: "16:9", VQuality: "720p", CapabilityConfig: profile, VideoCapabilitiesVersion: &version}}
+	for i := 0; i < 10; i++ {
+		input.ReferenceImages = append(input.ReferenceImages, providerMedia{URL: "asset://test", Width: 640, Height: 640, Bytes: 10})
+	}
+	if err := (&Service{}).validateResolvedVideoCapability(&input); err != nil {
+		t.Fatal(err)
+	}
+	if input.VideoCapability.GenerateAudio.Supported {
+		t.Fatal("catalog audio false was restored by legacy repair")
+	}
+	input.Config.VideoCapabilitiesVersion = nil
+	restoreBeefAPISeedanceAudioControl(context.Background(), input.Config, input.VideoCapability)
+	if !input.VideoCapability.GenerateAudio.Supported {
+		t.Fatal("legacy saved profiles should retain the audio repair")
+	}
+}
+
 func TestNativeArkModelDefaultsAndExplicitRestrictions(t *testing.T) {
 	for _, protocol := range []string{"volcengine-ark-video", "volcengine-ark-agent-plan-video"} {
-		for _, name := range []string{"seedance-2.5", "doubao-seedance-2-5-260528"} {
+		for _, name := range []string{"seedance-2.5", "doubao-seedance-2-5-260528", "dreamina-seedance-2-5-260628"} {
 			profile := DefaultModelCapabilityConfigForModel(protocol, name).Video
 			if profile.References.MaxImages != 30 || profile.References.MaxVideos != 10 || profile.References.MaxAudios != 10 || profile.References.MinAudioDuration != 2 || profile.Duration.Max != 30 {
 				t.Fatalf("%s %s defaults = %#v", protocol, name, profile)
@@ -40,6 +63,66 @@ func TestNativeArkModelDefaultsAndExplicitRestrictions(t *testing.T) {
 			profile := DefaultModelCapabilityConfigForModel(protocol, name).Video
 			if videoCapabilityAllowsAudioOnly(profile) {
 				t.Fatalf("unknown or 2.0 model %s inferred audio-only", name)
+			}
+		}
+	}
+}
+
+func TestDreaminaFastMiniRejectUnsupportedResolution(t *testing.T) {
+	for _, name := range []string{"dreamina-seedance-2-0-fast-260128", "dreamina-seedance-2-0-mini-260615"} {
+		for _, resolution := range []string{"480p", "720p", "1080p"} {
+			profile := DefaultModelCapabilityConfigForModel("volcengine-ark-video", name)
+			input := canvasGenerationInput{Mode: "video", Prompt: "test", Config: providerConfig{InterfaceType: "volcengine-ark-video", Model: name, VideoSeconds: "5", Size: "16:9", VQuality: resolution, CapabilityConfig: profile}}
+			err := (&Service{}).validateResolvedVideoCapability(&input)
+			if (err != nil) != (resolution == "1080p") {
+				t.Fatalf("%s %s validation = %v", name, resolution, err)
+			}
+		}
+	}
+}
+
+func TestDreaminaOperationsValidateAndReachOfficialWireContract(t *testing.T) {
+	for _, operation := range []string{"inpaint", "extend", "reference_to_video"} {
+		input := canvasGenerationInput{Mode: "video", Prompt: "change the light", Config: providerConfig{InterfaceType: "volcengine-ark-video", Model: "dreamina-seedance-2-5-260628", VideoSeconds: "6", Size: "16:9", VQuality: "480p"}, Metadata: map[string]interface{}{"videoEditOperation": operation}, ReferenceVideos: []providerMedia{{URL: "https://cdn.example/video.mp4", Width: 864, Height: 496, DurationMs: 4000}}}
+		if err := (&Service{}).validateResolvedVideoCapability(&input); err != nil {
+			t.Fatalf("%s validation: %v", operation, err)
+		}
+		body := officialVideoCreateBody(t, input)
+		wantType, wantRatio, wantDuration := "reference", "16:9", float64(6)
+		if operation == "inpaint" {
+			wantType, wantRatio, wantDuration = "edit", "adaptive", -1
+		}
+		if operation == "extend" {
+			wantType, wantRatio = "extend", "adaptive"
+		}
+		if body["omni_reference_task_type"] != wantType || body["ratio"] != wantRatio || body["duration"] != wantDuration {
+			t.Fatalf("%s body: %#v", operation, body)
+		}
+		input.ReferenceVideos[0].DurationMs = 3999
+		err := (&Service{}).validateResolvedVideoCapability(&input)
+		if (err != nil) != (operation == "inpaint") {
+			t.Fatalf("%s 3999ms: %v", operation, err)
+		}
+		input.ReferenceVideos[0].DurationMs = 4000
+		input.Config.CapabilityConfig.Video.Operations = []string{"text_to_video"}
+		if err := (&Service{}).validateResolvedVideoCapability(&input); err == nil {
+			t.Fatal("explicit profile operations expanded")
+		}
+	}
+}
+
+func TestDreaminaDefaultDurationAndAdaptiveAdmission(t *testing.T) {
+	for _, name := range []string{"dreamina-seedance-2-0-260128", "dreamina-seedance-2-0-fast-260128", "dreamina-seedance-2-0-mini-260615", "dreamina-seedance-2-5-260628"} {
+		profile := DefaultModelCapabilityConfigForModel("volcengine-ark-video", name).Video
+		if profile.Duration.Selection != "enum" || len(profile.Duration.Values) != profile.Duration.Max-2 || profile.Duration.Values[0] != -1 || profile.Duration.Values[1] != 4 || profile.Duration.Values[len(profile.Duration.Values)-1] != profile.Duration.Max {
+			t.Fatalf("missing automatic/duration choices: %#v", profile.Duration)
+		}
+		for _, seconds := range []string{"-1", "1", "3", "4", "15", "30"} {
+			input := canvasGenerationInput{Mode: "video", Prompt: "forest", Config: providerConfig{InterfaceType: "volcengine-ark-video", Model: name, VideoSeconds: seconds, Size: "adaptive", VQuality: "480p"}}
+			err := (&Service{}).validateResolvedVideoCapability(&input)
+			blocked := seconds == "1" || seconds == "3" || (seconds == "30" && !strings.Contains(name, "2-5"))
+			if (err != nil) != blocked {
+				t.Fatalf("%s %ss: %v", name, seconds, err)
 			}
 		}
 	}
@@ -90,6 +173,46 @@ func TestEnterpriseSeedanceMaxImagesNotExpandedToOfficial30(t *testing.T) {
 	}
 	if normalized.Video.References.MaxImages != 9 {
 		t.Fatalf("enterprise maxImages expanded: %d", normalized.Video.References.MaxImages)
+	}
+}
+
+func TestNativeArkSeedanceUsesDocumentedVideoPixelFloor(t *testing.T) {
+	profile := DefaultModelCapabilityConfigForModel("volcengine-ark-video", "seedance-2.0").Video
+	if profile.References.MinVideoPixels != officialSeedanceVideoMinPixels {
+		t.Fatalf("stored default min pixels = %d", profile.References.MinVideoPixels)
+	}
+	input := canvasGenerationInput{
+		Config:          providerConfig{InterfaceType: "volcengine-ark-video", Model: "seedance-2.0", BaseURL: "https://ark.cn-beijing.volces.com/api/v3"},
+		ReferenceVideos: []providerMedia{{Width: 720, Height: 567, DurationMs: 3000, Bytes: 1}},
+	}
+	if err := validateVideoReferenceMedia(profile, input); err != nil {
+		t.Fatalf("720×567 should pass documented 407696 floor: %v", err)
+	}
+	input.ReferenceVideos[0].Height = 566
+	if err := validateVideoReferenceMedia(profile, input); err == nil {
+		t.Fatal("720×566 accepted below 407696")
+	}
+}
+
+func TestCustomSeedancePixelRestrictionIsPreserved(t *testing.T) {
+	profile := DefaultModelCapabilityConfigForModel("newapi", "seedance-2.0").Video
+	profile.References.MinVideoPixels = 500000
+	profile.References.MaxVideoPixels = officialSeedanceVideoMaxPixels
+	input := canvasGenerationInput{
+		Config:          providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://example.com"},
+		ReferenceVideos: []providerMedia{{Width: 720, Height: 700, DurationMs: 3000, Bytes: 1}},
+	}
+	if err := validateVideoReferenceMedia(profile, input); err != nil {
+		t.Fatalf("custom 500000 floor rejected 720×700: %v", err)
+	}
+	input.ReferenceVideos[0].Height = 694
+	if err := validateVideoReferenceMedia(profile, input); err == nil {
+		t.Fatal("custom 500000 floor accepted 720×694")
+	}
+	overlay := DefaultModelCapabilityConfigForModel("newapi", "seedance-2.0").Video
+	input.ReferenceVideos[0] = providerMedia{Width: 720, Height: 567, DurationMs: 3000, Bytes: 1}
+	if err := validateVideoReferenceMedia(overlay, input); err == nil {
+		t.Fatal("custom newapi remapped overlay 409600 to 407696")
 	}
 }
 
@@ -269,36 +392,18 @@ func TestValidateVideoTaskRejectsPromptAboveCapabilityLimit(t *testing.T) {
 	}
 }
 
-// 未公开字符限制的接口不套统一上限，用户保存的明确限制仍然有效。
+// 未公布字符上限的通道不应被宿主编造的限制拒绝。
 func TestDefaultVideoPromptMaxCharsAllowsComposedCanvasPrompt(t *testing.T) {
 	profile := DefaultModelCapabilityConfigForModel("seedance-videos-compatible", "sd-2.5").Video
 	if profile.References.PromptMaxChars != 0 {
 		t.Fatalf("视频默认提示词上限 = %d, want 0", profile.References.PromptMaxChars)
 	}
 
-	// 画布实际合成出的提示词量级（输入框 + 连线 + 技能上下文）必须通过。
-	composed := canvasGenerationInput{Mode: "video", Prompt: strings.Repeat("镜", 2399), Config: providerConfig{Model: "sd-2.5", VideoSeconds: "6", Size: "16:9", VQuality: "720p"}}
-	if err := validateVideoTask(profile, composed); err != nil {
-		t.Fatalf("合成提示词 2399 字符被拒绝: %v", err)
-	}
-	longPrompt := composed
-	longPrompt.Prompt = strings.Repeat("镜", 32001)
-	if err := validateVideoTask(profile, longPrompt); err != nil {
-		t.Fatalf("未公开限制的接口不应拒绝长提示词: %v", err)
-	}
-	profile.References.PromptMaxChars = 8000
-	// 用户指定上限后，恰好等于上限仍然放行。
-	atLimit := composed
-	atLimit.Prompt = strings.Repeat("镜", 8000)
-	if err := validateVideoTask(profile, atLimit); err != nil {
-		t.Fatalf("提示词 8000 字符被拒绝: %v", err)
-	}
-	// 超出上限必须明确失败，并保持“不自动截断”的语义。
-	overLimit := composed
-	overLimit.Prompt = strings.Repeat("镜", 8001)
-	err := validateVideoTask(profile, overLimit)
-	if err == nil || !strings.Contains(err.Error(), "最多 8000 个字符") || !strings.Contains(err.Error(), "8001 个字符") {
-		t.Fatalf("validateVideoTask() error = %v", err)
+	for _, length := range []int{2399, 8001, 32001} {
+		composed := canvasGenerationInput{Mode: "video", Prompt: strings.Repeat("镜", length), Config: providerConfig{Model: "sd-2.5", VideoSeconds: "6", Size: "16:9", VQuality: "720p"}}
+		if err := validateVideoTask(profile, composed); err != nil {
+			t.Fatalf("合成提示词 %d 字符被拒绝: %v", length, err)
+		}
 	}
 }
 
@@ -458,6 +563,9 @@ func TestNormalizeBeefAPISeedanceFullModalReferenceCapability(t *testing.T) {
 	}
 	if normalized.Video.References.MaxVideos < 3 {
 		t.Fatalf("max videos = %d, want at least 3", normalized.Video.References.MaxVideos)
+	}
+	if !normalized.Video.GenerateAudio.Supported {
+		t.Fatal("BeefAPI Seedance must expose the audio toggle")
 	}
 	if !containsCapabilityString(normalized.Video.Operations, "reference_to_video") {
 		t.Fatalf("operations = %v, want reference_to_video", normalized.Video.Operations)

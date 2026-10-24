@@ -53,7 +53,9 @@ describe("enterprise MiniMax speech settings", () => {
 
     test("MiniMax formats follow the native adapter, not OpenAI-only opus", () => {
         expect(audioSpeechProfile("minimax-speech-2.8-hd").formats.map((item) => item.value)).toEqual(["mp3", "wav", "aac", "flac", "pcm"]);
-        expect(audioSpeechProfile("minimax-music-v3.0").formats.map((item) => item.value)).toEqual(["mp3", "wav", "aac", "flac", "pcm"]);
+        expect(audioSpeechProfile("minimax-music-v3.0").formats.map((item) => item.value)).toEqual(["mp3"]);
+        expect(normalizeAudioFormatValue("flac", "minimax-music-v3.0")).toBe("mp3");
+        expect(audioSettingsSummary({ model: "minimax-music-v3.0", audioFormat: "flac" })).toBe("MP3 · 256 kbps");
         expect(audioSpeechProfile("gpt-4o-mini-tts").formats.map((item) => item.value)).toContain("opus");
         expect(normalizeAudioFormatValue("opus", "minimax-speech-2.8-hd")).toBe("mp3");
     });
@@ -89,6 +91,7 @@ describe("enterprise MiniMax speech settings", () => {
             model: "minimax-music-v3.0",
             input: "轻快的钢琴",
             response_format: "mp3",
+            metadata: { audio_setting: { sample_rate: 44100, bitrate: 256000, format: "mp3" } },
         });
         expect(
             buildAudioSpeechRequest(

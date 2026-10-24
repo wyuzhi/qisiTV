@@ -28,7 +28,7 @@ const modeOptions = [
     { value: "github", label: <span className="inline-flex items-center gap-1.5"><GitBranch className="size-3.5" />GitHub</span> },
 ];
 
-export function SkillInstallModal({ open, onClose, onInstalled, onManualCreate }: { open: boolean; onClose: () => void; onInstalled: (skill: Skill) => void; onManualCreate: () => void }) {
+export function SkillInstallModal({ open, onClose, onInstalled, onManualCreate }: { open: boolean; onClose: () => void; onInstalled: (skill: Skill) => void; onManualCreate?: () => void }) {
     const { message } = App.useApp();
     const [form] = Form.useForm<InstallFormValues>();
     const [mode, setMode] = useState<InstallMode>("markdown");
@@ -41,8 +41,8 @@ export function SkillInstallModal({ open, onClose, onInstalled, onManualCreate }
         if (!open) return;
         setMode("markdown");
         setFileList([]);
-        form.setFieldsValue({ tag: "creative", is_public: true, autoUpdate: true, name: "", description: "", url: "", ref: "", subdir: "" });
-    }, [form, open]);
+        form.setFieldsValue({ tag: "creative", is_public: !localRuntime, autoUpdate: true, name: "", description: "", url: "", ref: "", subdir: "" });
+    }, [form, open, localRuntime]);
 
     const install = async () => {
         const values = await form.validateFields();
@@ -59,7 +59,7 @@ export function SkillInstallModal({ open, onClose, onInstalled, onManualCreate }
                     ref: values.ref || undefined,
                     subdir: values.subdir || undefined,
                     tag: values.tag,
-                    isPrivate: !values.is_public,
+                    isPrivate: localRuntime || !values.is_public,
                     autoUpdate: values.autoUpdate,
                 })
                 : await installSkillUpload({
@@ -68,7 +68,7 @@ export function SkillInstallModal({ open, onClose, onInstalled, onManualCreate }
                     name: values.name || undefined,
                     description: values.description || undefined,
                     tag: values.tag,
-                    isPrivate: !values.is_public,
+                    isPrivate: localRuntime || !values.is_public,
                 });
             message.success("技能已安装");
             onInstalled(result.skill);
@@ -90,7 +90,7 @@ export function SkillInstallModal({ open, onClose, onInstalled, onManualCreate }
             onCancel={onClose}
             footer={(
                 <div className="flex items-center justify-between gap-3">
-                    <Button type="text" onClick={onManualCreate}>从空白创建单文件技能</Button>
+                    {onManualCreate ? <Button type="text" onClick={onManualCreate}>从空白创建单文件技能</Button> : <span />}
                     <div className="flex gap-2"><Button onClick={onClose}>取消</Button><Button type="primary" loading={installing} onClick={() => void install()}>安装技能</Button></div>
                 </div>
             )}
@@ -140,7 +140,7 @@ export function SkillInstallModal({ open, onClose, onInstalled, onManualCreate }
                     <Form.Item name="tag" label="技能分类" rules={[{ required: true, message: "请选择技能分类" }]}>
                         <Select options={fallbackSkillCategories} />
                     </Form.Item>
-                    <Form.Item name="is_public" label="公开状态" valuePropName="checked" extra="公开后其他用户可以加入使用。">
+                    <Form.Item hidden={localRuntime} name="is_public" label="公开状态" valuePropName="checked" extra="公开后其他用户可以加入使用。">
                         <Switch checkedChildren="公开" unCheckedChildren="私有" />
                     </Form.Item>
                 </div>

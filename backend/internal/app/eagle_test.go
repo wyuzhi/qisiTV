@@ -1,15 +1,18 @@
 package app
 
-import "testing"
+import (
+	"testing"
 
-func TestNormalizeEagleItemCollectionsKeepsEmptyArrays(t *testing.T) {
-	item := &EagleItem{}
-	normalizeEagleItemCollections(item)
+	"qisitv/backend/internal/eagle"
+)
 
-	if item.FolderIDs == nil || len(item.FolderIDs) != 0 {
-		t.Fatalf("folder IDs = %#v, want a non-nil empty slice", item.FolderIDs)
+func TestEagleAdapterDelegatesEmptyItemCollections(t *testing.T) {
+	item := &eagle.Item{}
+	if item.FolderIDs != nil || item.Tags != nil {
+		t.Fatalf("fresh item already had collections: %#v", item)
 	}
-	if item.Tags == nil || len(item.Tags) != 0 {
-		t.Fatalf("tags = %#v, want a non-nil empty slice", item.Tags)
+	library, err := (&Service{}).EagleLibrary("http://10.0.0.1:41595")
+	if err == nil || library != nil {
+		t.Fatalf("non-loopback Eagle library = %#v, %v", library, err)
 	}
 }

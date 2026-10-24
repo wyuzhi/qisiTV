@@ -99,6 +99,8 @@ describe("public release boundary", () => {
 
         fixtureFile(destination, "data/private.db");
         const rejected = spawnSync("sh", [auditScript, destination], { encoding: "utf8" });
+        expect(rejected.error).toBeUndefined();
+        expect(rejected.signal).toBeNull();
         expect(rejected.status).not.toBe(0);
         expect(`${rejected.stdout}${rejected.stderr}`).toContain("data/private.db");
     });
@@ -110,6 +112,8 @@ describe("public release boundary", () => {
 
         const result = spawnSync("sh", [exportScript, source, destination], { encoding: "utf8" });
 
+        expect(result.error).toBeUndefined();
+        expect(result.signal).toBeNull();
         expect(result.status).not.toBe(0);
         expect(`${result.stdout}${result.stderr}`).toContain("destination already exists");
     });

@@ -80,23 +80,24 @@ export function useDirectorSaveCoordinator(input: { sceneId: string | null; init
 
         const unregisterUpdate = registerDesktopUpdatePreparation(async () => {
             if (!(await coordinator.flushLatest())) throw new Error("导演工作台尚未保存完成。");
-        });
+        }, coordinator.hasActiveSave);
 
         return () => {
             active = false;
-            unregisterUpdate();
             unsubscribe();
             coordinatorRef.current = null;
 
             // 卸载前把未确认改动推完再 dispose，否则 debounce 里的最后一次编辑只剩本地草稿。
             const pending = coordinator.getSnapshot();
             if (pending.confirmedRevision < pending.revision) {
-                void coordinator
-                    .flushLatest()
+                const flushing = coordinator.flushLatest();
+                unregisterUpdate();
+                void flushing
                     .catch(() => undefined)
                     .finally(() => coordinator.dispose());
                 return;
             }
+            unregisterUpdate();
             coordinator.dispose();
         };
     }, [sceneId, scope]);

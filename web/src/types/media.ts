@@ -12,6 +12,7 @@ export type ReferenceVideo = {
 
 export type ReferenceAudio = {
     id: string;
+    sourceNodeId?: string;
     name: string;
     type: string;
     url: string;

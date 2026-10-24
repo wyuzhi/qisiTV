@@ -41,8 +41,8 @@ const controlTheme = {
         selectActiveBg: "rgba(17, 17, 17, 0.035)",
         selectSelectedBg: "rgba(17, 17, 17, 0.065)",
         selectText: "#171717",
-        tableSelectedBg: "rgba(17, 17, 17, 0.05)",
-        tableSelectedHoverBg: "rgba(17, 17, 17, 0.08)",
+        tableSelectedBg: "#f3f3f3",
+        tableSelectedHoverBg: "#ececec",
     },
     dark: {
         solidBg: "#f5f5f5",
@@ -80,8 +80,8 @@ const controlTheme = {
         selectActiveBg: "rgba(255, 255, 255, 0.055)",
         selectSelectedBg: "rgba(255, 255, 255, 0.09)",
         selectText: "#fafafa",
-        tableSelectedBg: "rgba(255, 255, 255, 0.08)",
-        tableSelectedHoverBg: "rgba(255, 255, 255, 0.12)",
+        tableSelectedBg: "#313132",
+        tableSelectedHoverBg: "#3a3a3b",
     },
 };
 
@@ -177,7 +177,7 @@ export function getAntThemeConfig(dark: boolean, skinID: unknown = "classic"): T
             colorErrorTextHover: color.dangerHover,
             colorErrorTextActive: color.dangerActive,
             colorBgElevated: elevatedBackground,
-            colorBgContainer: skin.controlSurface || undefined,
+            ...(skin.controlSurface ? { colorBgContainer: skin.controlSurface } : {}),
             colorBorderSecondary: dark ? "rgba(255, 255, 255, 0.1)" : "rgba(17, 17, 17, 0.09)",
             boxShadowSecondary:
                 skin.shadowStyle === "none" ? "none" : skin.shadowStyle === "strong" ? (dark ? "0 28px 84px rgba(0, 0, 0, 0.68)" : "0 26px 72px rgba(15, 23, 42, 0.22)") : dark ? "0 24px 72px rgba(0, 0, 0, 0.48)" : "0 22px 64px rgba(15, 23, 42, 0.14)",
@@ -195,6 +195,10 @@ export function getAntThemeConfig(dark: boolean, skinID: unknown = "classic"): T
             motionDurationSlow: `${Math.max(skin.motionNormal ?? 180, 240)}ms`,
         },
         components: {
+            Tag: {
+                defaultBg: skin.subtleBackground || color.selectedBg,
+                defaultColor: skin.text || color.selectedFg,
+            },
             Button: {
                 primaryShadow: "none",
                 dangerShadow: "none",
@@ -204,10 +208,10 @@ export function getAntThemeConfig(dark: boolean, skinID: unknown = "classic"): T
                 paddingInline: 14,
                 paddingInlineLG: 16,
                 paddingInlineSM: 10,
-                colorPrimary: color.solidBg,
-                colorPrimaryHover: color.solidHoverBg,
-                colorPrimaryActive: color.solidActiveBg,
-                primaryColor: color.solidFg,
+                colorPrimary: "var(--btn-solid-bg)",
+                colorPrimaryHover: "var(--btn-solid-hover-bg)",
+                colorPrimaryActive: "var(--btn-solid-active-bg)",
+                primaryColor: "var(--btn-solid-fg)",
                 defaultBg: skin.controlSurface || "transparent",
                 defaultColor: color.selectedFg,
                 defaultBorderColor: color.controlBorder,
@@ -246,6 +250,7 @@ export function getAntThemeConfig(dark: boolean, skinID: unknown = "classic"): T
                 controlOutline: color.controlFocus,
             },
             Checkbox: {
+                colorWhite: color.checkFg,
                 borderRadiusSM: skin.checkboxRadius || 4,
                 colorBgContainer: color.controlSurface,
                 colorBgContainerDisabled: color.controlDisabledBg,
@@ -301,10 +306,12 @@ export function getAntThemeConfig(dark: boolean, skinID: unknown = "classic"): T
                 optionSelectedColor: color.selectText,
             },
             Table: {
-                headerBg: subtleBackground,
+                // 固定列会覆盖滚动内容，表头与行状态都必须使用实底色。
+                colorBgContainer: elevatedBackground,
+                headerBg: skin.subtleBackground || (dark ? "#2b2b2c" : "#f7f7f7"),
                 headerColor: skin.textMuted || (dark ? "rgba(250, 250, 250, 0.62)" : "rgba(23, 23, 23, 0.58)"),
                 headerBorderRadius: 0,
-                rowHoverBg: skin.controlHover || (dark ? "rgba(255, 255, 255, 0.035)" : "rgba(17, 17, 17, 0.025)"),
+                rowHoverBg: skin.controlHover || (dark ? "#272728" : "#f9f9f9"),
                 borderColor: skin.controlBorder || (dark ? "rgba(255, 255, 255, 0.08)" : "rgba(17, 17, 17, 0.075)"),
                 cellPaddingBlockMD: 13,
                 cellPaddingInlineMD: 14,
@@ -388,6 +395,8 @@ export function getWorkspaceAntThemeConfig(): ThemeConfig {
         components: {
             Button: {
                 borderRadius: 12, borderRadiusSM: 8, borderRadiusLG: 14, fontWeight: 550,
+                colorPrimary: "var(--user-action-bg)", colorPrimaryHover: "var(--user-action-bg-hover)",
+                colorPrimaryActive: "var(--user-action-bg-active)", primaryColor: "var(--user-action-foreground)",
                 defaultBg: "var(--user-surface-muted)", defaultColor: "var(--user-ink)", defaultBorderColor: "transparent",
                 defaultHoverBg: "var(--user-surface-hover)", defaultHoverColor: "var(--user-ink)", defaultHoverBorderColor: "transparent",
                 defaultActiveBg: "var(--user-control-pressed)", defaultActiveColor: "var(--user-ink)", defaultActiveBorderColor: "transparent",

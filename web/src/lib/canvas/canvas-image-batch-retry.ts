@@ -1,3 +1,4 @@
+import { canvasNodeResourceId } from "@/lib/canvas/canvas-resource-id";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 
 export function liveImageBatchChildren(root: CanvasNodeData, nodes: CanvasNodeData[]) {
@@ -159,7 +160,17 @@ export function reconcileImageBatchRoot(root: CanvasNodeData, nodes: CanvasNodeD
         delete metadata.generationErrorCode;
         delete metadata.failedPromptFingerprint;
         delete metadata.failedInputFingerprint;
+        const nextRoot: CanvasNodeData = { ...root, metadata };
+        const primaryResourceId = canvasNodeResourceId(primary);
+        const rootResourceId = canvasNodeResourceId(nextRoot);
+        if (primary.metadata?.assetId && primaryResourceId && rootResourceId && primaryResourceId === rootResourceId) {
+            metadata.assetId = primary.metadata.assetId;
+        } else {
+            delete metadata.assetId;
+        }
+        return nextRoot;
     } else {
+        delete metadata.assetId;
         delete metadata.content;
         delete metadata.storageKey;
         delete metadata.mimeType;

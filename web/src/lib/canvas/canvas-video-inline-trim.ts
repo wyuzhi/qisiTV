@@ -4,6 +4,15 @@ export type InlineVideoTrimRange = { startMs: number; endMs: number };
 
 export const INLINE_VIDEO_TRIM_MIN_MS = 100;
 
+export function placeInlineVideoTrimDuration(timelineWidth: number, startPercent: number, endPercent: number, labelWidth: number) {
+    if (timelineWidth <= 0 || labelWidth <= 0) return { floating: false, left: 0 };
+    const selectionWidth = ((endPercent - startPercent) / 100) * timelineWidth;
+    const floating = selectionWidth < labelWidth + 64; // Two 28px handles plus breathing room.
+    const selectionCenter = ((startPercent + endPercent) / 200) * timelineWidth;
+    const edgeInset = labelWidth / 2 + 4;
+    return { floating, left: Math.max(edgeInset, Math.min(timelineWidth - edgeInset, selectionCenter)) };
+}
+
 export function normalizeInlineVideoTrimRange(range: InlineVideoTrimRange, durationMs: number): InlineVideoTrimRange {
     const duration = Math.max(INLINE_VIDEO_TRIM_MIN_MS, Math.round(durationMs));
     let startMs = Math.min(duration, Math.max(0, Math.round(range.startMs)));

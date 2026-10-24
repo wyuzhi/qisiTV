@@ -1,4 +1,5 @@
 import { resourceFileUrl, resourceStorageKey, uploadResourceFile } from "@/services/api/resources";
+import { readAuthenticatedMediaBlob } from "@/services/authenticated-media";
 import type { ReferenceImage } from "@/types/image";
 
 /** 调色参数，单位与 CSS filter 一致（百分比 / 度） */
@@ -32,28 +33,33 @@ function cacheKey(url: string, grade: CanvasColorGrade) {
 }
 
 async function renderGradedBlob(url: string, grade: CanvasColorGrade) {
-    const image = new Image();
-    image.crossOrigin = "anonymous";
-    await new Promise<void>((resolve, reject) => {
-        image.onload = () => resolve();
-        image.onerror = () => reject(new Error("源图无法读取（可能不允许跨域）"));
-        image.src = url;
-    });
+    const sourceBlob = await readAuthenticatedMediaBlob(url);
+    const sourceUrl = URL.createObjectURL(sourceBlob);
+    try {
+        const image = new Image();
+        await new Promise<void>((resolve, reject) => {
+            image.onload = () => resolve();
+            image.onerror = () => reject(new Error("源图无法读取（可能不允许跨域）"));
+            image.src = sourceUrl;
+        });
 
-    const canvas = document.createElement("canvas");
-    canvas.width = image.naturalWidth;
-    canvas.height = image.naturalHeight;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("无法创建画布上下文");
-    // ctx.filter 在少数浏览器上不存在——那会静默导出一张未调色的图，
-    // 与用户看到的预览不一致。宁可明确失败。
-    if (!("filter" in ctx)) throw new Error("当前浏览器不支持导出调色结果，请换用 Chrome / Edge");
-    ctx.filter = colorGradeCssFilter(grade);
-    ctx.drawImage(image, 0, 0);
+        const canvas = document.createElement("canvas");
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("无法创建画布上下文");
+        // ctx.filter 在少数浏览器上不存在——那会静默导出一张未调色的图，
+        // 与用户看到的预览不一致。宁可明确失败。
+        if (!("filter" in ctx)) throw new Error("当前浏览器不支持导出调色结果，请换用 Chrome / Edge");
+        ctx.filter = colorGradeCssFilter(grade);
+        ctx.drawImage(image, 0, 0);
 
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-    if (!blob) throw new Error("调色结果导出失败");
-    return { blob, width: canvas.width, height: canvas.height };
+        const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+        if (!blob) throw new Error("调色结果导出失败");
+        return { blob, width: canvas.width, height: canvas.height };
+    } finally {
+        URL.revokeObjectURL(sourceUrl);
+    }
 }
 
 /**

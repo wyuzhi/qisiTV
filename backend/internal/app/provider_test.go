@@ -27,7 +27,7 @@ func TestNativeArkPluginPreservesInlineAssetsCountsAndAutomaticDuration(t *testi
 	for _, name := range []string{"volcengine-ark-video", "volcengine-ark-agent-plan-video"} {
 		input := canvasGenerationInput{Config: providerConfig{InterfaceType: name, Model: "doubao-seedance-2-5-260528", VideoSeconds: "-1"}, Prompt: "test"}
 		policy := providerMediaHydrationPolicyFor(context.Background(), input)
-		if policy.requireURL {
+		if policy.RequireURL {
 			t.Fatalf("%s requires public URL", name)
 		}
 		input.ReferenceAudios = []providerMedia{{URL: "data:audio/wav;base64,AAAA", DurationMs: 2000}, {URL: "asset://voice", DurationMs: 2000}}
@@ -74,19 +74,19 @@ func officialVideoCreateBody(t *testing.T, input canvasGenerationInput) map[stri
 
 func TestProviderMediaHydrationPolicyPrefersObjectURLs(t *testing.T) {
 	prefer := providerMediaHydrationPolicyFor(context.Background(), canvasGenerationInput{Config: providerConfig{InterfaceType: string(model.ChannelInterfaceGrokImage)}})
-	if prefer.requireURL || !prefer.preferURL {
+	if prefer.RequireURL || !prefer.PreferURL {
 		t.Fatalf("grok image policy = %#v", prefer)
 	}
 	required := providerMediaHydrationPolicyFor(context.Background(), canvasGenerationInput{Config: providerConfig{InterfaceType: string(model.ChannelInterfaceMiniMaxVideo)}})
-	if !required.requireURL || !required.preferURL {
+	if !required.RequireURL || !required.PreferURL {
 		t.Fatalf("minimax policy = %#v", required)
 	}
 	bytesOnly := providerMediaHydrationPolicyFor(context.Background(), canvasGenerationInput{Config: providerConfig{InterfaceType: string(model.ChannelInterfaceGeminiImage)}})
-	if bytesOnly.requireURL || bytesOnly.preferURL {
+	if bytesOnly.RequireURL || bytesOnly.PreferURL {
 		t.Fatalf("gemini image policy = %#v", bytesOnly)
 	}
 	masked := providerMediaHydrationPolicyFor(context.Background(), canvasGenerationInput{Config: providerConfig{InterfaceType: string(model.ChannelInterfaceOpenAIImage)}, Mask: &providerMedia{ID: "mask"}})
-	if masked.requireURL || masked.preferURL {
+	if masked.RequireURL || masked.PreferURL {
 		t.Fatalf("openai mask policy = %#v", masked)
 	}
 	if resourceUsesObjectStorage(&model.Resource{Provider: "aliyun"}) != true {
@@ -819,12 +819,12 @@ data: {"choices":[{"delta":{"content":"执行","tool_calls":[{"index":0,"functio
 data: [DONE]
 
 `
-	parser.consume("text/event-stream", []byte(stream[:47]))
-	parser.consume("text/event-stream", []byte(stream[47:]))
-	parser.flush()
-	result, err := parser.result()
+	parser.Consume("text/event-stream", []byte(stream[:47]))
+	parser.Consume("text/event-stream", []byte(stream[47:]))
+	parser.Flush()
+	result, err := parser.Result()
 	if err != nil {
-		t.Fatalf("streamingAgentParser.result() error = %v", err)
+		t.Fatalf("streamingAgentParser.Result() error = %v", err)
 	}
 	if result["text"] != "准备执行" || deltas.String() != "准备执行" {
 		t.Fatalf("text = %v, deltas = %q", result["text"], deltas.String())
@@ -842,7 +842,7 @@ func TestStreamingAgentParserSeparatesResponsesReasoningFromVisibleText(t *testi
 	parser := newStreamingAgentParser("responses", func(delta string) {
 		deltas.WriteString(delta)
 	})
-	parser.consume("text/event-stream", []byte(`event: response.reasoning_summary_text.delta
+	parser.Consume("text/event-stream", []byte(`event: response.reasoning_summary_text.delta
 data: {"type":"response.reasoning_summary_text.delta","delta":"内部分析"}
 
 event: response.output_text.delta
@@ -852,10 +852,10 @@ event: response.completed
 data: {"type":"response.completed","response":{"output":[{"type":"message","content":[{"type":"output_text","text":"可见回答"}]}]}}
 
 `))
-	parser.flush()
-	result, err := parser.result()
+	parser.Flush()
+	result, err := parser.Result()
 	if err != nil {
-		t.Fatalf("streamingAgentParser.result() error = %v", err)
+		t.Fatalf("streamingAgentParser.Result() error = %v", err)
 	}
 	if result["text"] != "可见回答" || result["reasoning"] != "内部分析" || deltas.String() != "可见回答" {
 		t.Fatalf("result = %#v, deltas = %q", result, deltas.String())
@@ -864,15 +864,15 @@ data: {"type":"response.completed","response":{"output":[{"type":"message","cont
 
 func TestStreamingAgentParserWaitsForCompleteClaudeToolJSON(t *testing.T) {
 	parser := newStreamingAgentParser("claude-api", nil)
-	parser.consume("text/event-stream", []byte(`event: content_block_start
+	parser.Consume("text/event-stream", []byte(`event: content_block_start
 data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call-2","name":"canvas_get_state","input":{}}}
 
 event: content_block_delta
 data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"include\":"}}
 
 `))
-	parser.flush()
-	if _, err := parser.result(); err == nil || !strings.Contains(err.Error(), "完整 JSON") {
+	parser.Flush()
+	if _, err := parser.Result(); err == nil || !strings.Contains(err.Error(), "完整 JSON") {
 		t.Fatalf("incomplete tool arguments error = %v", err)
 	}
 }
@@ -1780,11 +1780,26 @@ func TestSeedancePayloadPreservesRequestedResolutionAndDuration(t *testing.T) {
 		VideoCapability: capability,
 		ReferenceImages: []providerMedia{{ID: "image-1", DataURL: testReferenceImageDataURL}},
 	}
+	assertReferenceContract := func(body map[string]interface{}) {
+		t.Helper()
+		content, ok := body["content"].([]map[string]interface{})
+		if !ok || len(content) != 1 || content[0]["type"] != "image_url" || content[0]["role"] != "reference_image" {
+			t.Fatalf("single image reference payload = %#v", body)
+		}
+		metadata, ok := body["metadata"].(map[string]interface{})
+		if !ok || metadata["ratio"] != "16:9" {
+			t.Fatalf("selected reference ratio lost: %#v", body)
+		}
+		if _, legacy := body["duration"]; legacy {
+			t.Fatalf("reference request contains legacy duration: %#v", body)
+		}
+	}
 	body, err := beefAPIVideoRequestBody(input)
 	if err != nil {
 		t.Fatalf("beefAPIVideoRequestBody() error = %v", err)
 	}
-	if fmt.Sprint(body["resolution"]) != "1080p" || fmt.Sprint(body["duration"]) != "20" {
+	assertReferenceContract(body)
+	if fmt.Sprint(body["resolution"]) != "1080p" || fmt.Sprint(body["seconds"]) != "20" {
 		t.Fatalf("fast 1080/20 payload = %#v", body)
 	}
 	input.Config.VQuality = "2k"
@@ -1793,7 +1808,8 @@ func TestSeedancePayloadPreservesRequestedResolutionAndDuration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("2k/30 body error = %v", err)
 	}
-	if fmt.Sprint(body["resolution"]) != "1440p" || fmt.Sprint(body["duration"]) != "30" {
+	assertReferenceContract(body)
+	if fmt.Sprint(body["resolution"]) != "1440p" || fmt.Sprint(body["seconds"]) != "30" {
 		t.Fatalf("2k/30 payload = %#v", body)
 	}
 	videos, err := seedanceVideosRequestBody(canvasGenerationInput{
@@ -2145,13 +2161,15 @@ func TestRunVideoTaskRetriesTransientPollFailureWithoutRecreating(t *testing.T) 
 	}
 }
 
-func TestRunVideoTaskRetriesDownloadWithoutRepolling(t *testing.T) {
+func TestRunVideoTaskRenewsOriginalContentWithoutResubmitting(t *testing.T) {
 	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "true")
+	createCalls := 0
 	pollCalls := 0
 	downloadCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method + " " + r.URL.Path {
 		case "POST /v1/videos":
+			createCalls++
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"video-1","status":"queued"}`))
 		case "GET /v1/videos/video-1":
@@ -2179,8 +2197,8 @@ func TestRunVideoTaskRetriesDownloadWithoutRepolling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result["mode"] != "video" || pollCalls != 1 || downloadCalls != 2 {
-		t.Fatalf("result = %#v, poll calls = %d, download calls = %d", result, pollCalls, downloadCalls)
+	if result["mode"] != "video" || createCalls != 1 || pollCalls != 2 || downloadCalls != 2 {
+		t.Fatalf("result = %#v, create calls = %d, poll calls = %d, download calls = %d", result, createCalls, pollCalls, downloadCalls)
 	}
 }
 
@@ -3074,8 +3092,10 @@ func TestProcessResumedSeedanceVideoDoesNotRevalidateDeletedReferences(t *testin
 	defer server.Close()
 	input := canvasGenerationInput{Mode: "video", Prompt: "test", Config: providerConfig{BaseURL: server.URL, APIKey: "key", Model: "seedance-2.5", InterfaceType: "newapi-channel-2"}, ReferenceAudios: []providerMedia{{StorageKey: "resource:deleted-voice"}}}
 	raw, _ := json.Marshal(input)
-	ctx := withProviderAnalytics(context.Background(), nil, model.Task{ID: "task-1", Type: "canvas_video", ProviderRequestID: "existing-provider-task"})
-	result, err := (&Service{}).processCanvasGenerationTask(ctx, "user-1", "", "canvas_video", "", string(raw))
+	service, task := workflowPaidTaskFixture(t)
+	task.ProviderRequestID = "existing-provider-task"
+	ctx := withProviderAnalytics(context.Background(), service, task)
+	result, err := service.processCanvasGenerationTask(ctx, task.UserID, "", "canvas_video", "", string(raw))
 	if err != nil || result["video"] == nil {
 		t.Fatalf("resume failed: %v %#v", err, result)
 	}
@@ -3433,7 +3453,8 @@ func TestRunMiniMaxVideoTaskSendsOfficial2KResolution(t *testing.T) {
 		Mode: "video", Prompt: "make it move",
 		Config: providerConfig{BaseURL: server.URL, APIKey: "test-key", Model: "MiniMax-H3", InterfaceType: "minimax-video", VideoSeconds: "6", VQuality: "2K"},
 	})
-	if !requested || err == nil || !strings.Contains(err.Error(), "没有返回任务 ID") {
+	var unknown providerSubmissionUnknownError
+	if !requested || !errors.As(err, &unknown) {
 		t.Fatalf("expected submission without task ID, requested=%v err=%v", requested, err)
 	}
 }

@@ -76,6 +76,25 @@ func TestTaskClientContextPreservesCanvasNodeID(t *testing.T) {
 	}
 }
 
+func TestTaskSummaryExposesDirectorPanoramaRecoveryIdentityOnly(t *testing.T) {
+	summary := taskSummaryForOutput(model.Task{
+		ID: "task-1", ProjectID: "project-1", Type: "canvas_image",
+		InputJSON: `{"metadata":{"source":"director-panorama","sceneId":"scene-1","providerOptions":{"secret":"hidden"}},"config":{"apiKey":"private-test-value"}}`,
+	})
+	if summary.ClientContext == nil || summary.ClientContext.Source != "director-panorama" || summary.ClientContext.SceneID != "scene-1" {
+		t.Fatalf("director panorama recovery identity missing: %+v", summary.ClientContext)
+	}
+	encoded, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"private-test-value", "hidden", "providerOptions", "inputJson"} {
+		if strings.Contains(string(encoded), secret) {
+			t.Fatalf("summary leaked %s: %s", secret, encoded)
+		}
+	}
+}
+
 func TestTaskSummaryProjectsClassifiedErrorWithoutRawBody(t *testing.T) {
 	summary := taskSummaryForOutput(model.Task{
 		ID:    "task-1",
@@ -142,5 +161,23 @@ func TestTaskOutputResourceReadsPersistedMedia(t *testing.T) {
 	id, mediaType := taskOutputResource(`{"mode":"video","video":{"resourceId":"resource-1","storageKey":"resource:resource-1"}}`, "canvas_video")
 	if id != "resource-1" || mediaType != "video" {
 		t.Fatalf("unexpected task output resource: id=%q mediaType=%q", id, mediaType)
+	}
+}
+
+func TestHistoricalVODParameterFailureProjection(t *testing.T) {
+	original := model.Task{Type: "canvas_image", Status: model.TaskStatusFailed, Stage: "submission_unknown", Error: "图片结果尚未确认", FailureDiagnostics: &model.TaskFailureDiagnostics{ProviderCode: "vod_image_invalid_params", HTTPStatus: 400, Requests: []model.TaskRequestEvidence{{Dispatched: true, Outcome: "http_error", HTTPStatus: 400, ProviderCode: "vod_image_invalid_params"}}}}
+	got := taskForOutput(original)
+	if got.ErrorCode != "invalid_params" || got.Stage == "submission_unknown" {
+		t.Fatalf("not corrected: %+v", got)
+	}
+	if taskSummaryForOutput(original).ErrorCode != "invalid_params" {
+		t.Fatal("list differs from detail")
+	}
+	if original.Stage != "submission_unknown" || original.FailureDiagnostics.Summary != "" {
+		t.Fatal("history mutated")
+	}
+	original.FailureDiagnostics.Requests = append(original.FailureDiagnostics.Requests, model.TaskRequestEvidence{Outcome: "transport_error"})
+	if taskForOutput(original).Stage != "submission_unknown" {
+		t.Fatal("earlier unknown submission discarded")
 	}
 }

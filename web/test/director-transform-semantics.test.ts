@@ -7,6 +7,8 @@ import {
     directorTransformDelta,
     resolveDirectorCameraAlignment,
     resolveDirectorCameraMoveKeyframes,
+    resolveDirectorCameraMoveLookAtMode,
+    resolveDirectorCameraMoveTransform,
     resolveDirectorKeyframeRecord,
     resolveDirectorObjectTransformEdit,
     snapDirectorTime,
@@ -52,9 +54,43 @@ describe("摄影机对齐当前视图", () => {
         expect(next.keyframes.find((item) => item.id === "start")).toEqual(camera.keyframes[0]);
         expect(next.keyframes.find((item) => item.id === "end")).toEqual(camera.keyframes[1]);
     });
+
+    test("移动光学专用帧时重新建立位置关键帧，且保留焦点", () => {
+        const camera = { ...createDirectorCamera(), keyframes: [
+            keyframe("start", 0, transform([0, 0, 0])),
+            { ...keyframe("focus", 1, transform([5, 0, 0])), positionKeyed: false, target: [1, 1, 0] as [number, number, number] },
+            keyframe("end", 2, transform([10, 0, 0])),
+        ] };
+        const next = resolveDirectorCameraAlignment(camera, transform([6, 0, 0]), 1);
+        expect(next.keyframes[1].id).toBe("focus");
+        expect(next.keyframes[1].positionKeyed).toBe(true);
+        expect(next.keyframes[1].target).toEqual([1, 1, 0]);
+        expect(next.keyframes[1].transform.position).toEqual([6, 0, 0]);
+    });
 });
 
 describe("生成摄影机运镜首尾帧", () => {
+    test("推进、拉远和环绕相对当前焦点计算；摇镜与俯仰旋转摄影机而不平移", () => {
+        const start = transform([0, 2, 0]);
+        const target: [number, number, number] = [10, 2, 0];
+        const pushed = resolveDirectorCameraMoveTransform(start, target, "push_in");
+        const pulled = resolveDirectorCameraMoveTransform(start, target, "pull_out");
+        const panned = resolveDirectorCameraMoveTransform(start, target, "pan_right");
+        const tilted = resolveDirectorCameraMoveTransform(start, target, "tilt_up");
+        const orbited = resolveDirectorCameraMoveTransform(start, target, "orbit_left");
+
+        expect(pushed.position).toEqual([2, 2, 0]);
+        expect(pulled.position).toEqual([-2, 2, 0]);
+        expect(panned.position).toEqual(start.position);
+        expect(panned.rotation[1]).toBeLessThan(0);
+        expect(tilted.position).toEqual(start.position);
+        expect(tilted.rotation[0]).toBeGreaterThan(0);
+        expect(resolveDirectorCameraMoveLookAtMode("coordinates", "pan_left")).toBe("rotation");
+        expect(resolveDirectorCameraMoveLookAtMode("object", "orbit_left")).toBe("object");
+        expect(new Vector3(...orbited.position).distanceTo(new Vector3(...target))).toBeCloseTo(10);
+        expect(orbited.position[2]).toBeGreaterThan(0);
+    });
+
     test("保留手工中间帧、已有 id 与 easing，只更新首尾 transform", () => {
         const existing: DirectorKeyframe[] = [{ ...keyframe("start", 0, transform([9, 0, 0])), easing: "step" }, { ...keyframe("manual", 1, transform([4, 2, 0])), easing: "smooth" }, keyframe("end", 2, transform([8, 0, 0]))];
         const next = resolveDirectorCameraMoveKeyframes(existing, transform([0, 0, 0]), transform([2, 0, 0]), 2);
@@ -101,6 +137,15 @@ describe("Transform 轨迹统计", () => {
         expect(renderable.map((item) => item.id)).toEqual(["start", "end"]);
         expect(renderable.flatMap((item) => [item.time, ...item.transform.position]).every(Number.isFinite)).toBe(true);
     });
+
+    test("纯旋转帧不得伪造人物运动轨迹", () => {
+        const keys: DirectorKeyframe[] = [
+            { ...keyframe("start", 0, transform([0, 0, 0])), positionKeyed: false, rotationKeyed: true },
+            { ...keyframe("end", 2, transform([5, 0, 0])), positionKeyed: false, rotationKeyed: true },
+        ];
+        expect(finiteDirectorTransformKeyframes(keys)).toEqual([]);
+        expect(directorTransformPathLength(keys)).toBe(0);
+    });
 });
 
 describe("resolveDirectorObjectTransformEdit：Auto Key 打开", () => {
@@ -119,6 +164,15 @@ describe("resolveDirectorObjectTransformEdit：Auto Key 打开", () => {
         const edit = resolveDirectorObjectTransformEdit({ base: transform([0, 0, 0]), keyframes: [keyframe("k1", 1, transform([1, 0, 0]))], rendered: transform([1, 0, 0]), edited: transform([9, 0, 0]), autoKey: true, time: 1 });
         expect(edit.keyframes).toHaveLength(1);
         expect(edit.keyframes[0].transform.position).toEqual([9, 0, 0]);
+    });
+
+    test("已有部分属性组帧时自动关键帧编辑位置会启用位置，而不误开缩放", () => {
+        const base = transform([0, 0, 0]);
+        const keyframes: DirectorKeyframe[] = [{ id: "rotation-only", time: 1, transform: base, positionKeyed: false, rotationKeyed: true, scaleKeyed: false }];
+        const edit = resolveDirectorObjectTransformEdit({ base, keyframes, rendered: base, edited: transform([5, 0, 0]), autoKey: true, time: 1 });
+        expect(edit.keyframes).toHaveLength(1);
+        expect(edit.keyframes[0]).toMatchObject({ positionKeyed: true, rotationKeyed: true, scaleKeyed: false });
+        expect(interpolateDirectorTransform(base, edit.keyframes, 1).position).toEqual([5, 0, 0]);
     });
 });
 
@@ -219,6 +273,23 @@ describe("raw playhead 与 snapped 目的时间的分工（#2 回归）", () => 
         expect(record.transform.position[0]).toBeCloseTo(10.2, 6);
         const written = record.keyframes.find((item) => Math.abs(item.time - snappedTime) < 0.001);
         expect(written?.transform.position[0]).toBeCloseTo(10.2, 6);
+    });
+
+    test("位置菱形只切换位置组，第二次点击移除这一组而不创建空帧", () => {
+        const first = resolveDirectorKeyframeRecord({ base, keyframes: [], rawTime: 1, snappedTime: 1, channel: "position" });
+        expect(first.keyframes).toHaveLength(1);
+        expect(first.keyframes[0]).toMatchObject({ positionKeyed: true, rotationKeyed: false, scaleKeyed: false });
+        const second = resolveDirectorKeyframeRecord({ base, keyframes: first.keyframes, rawTime: 1, snappedTime: 1, channel: "position" });
+        expect(second.keyframes).toEqual([]);
+    });
+
+    test("已有旋转组的同一帧加入位置，再取消位置仍保留旋转", () => {
+        const rotation = resolveDirectorKeyframeRecord({ base, keyframes: [], rawTime: 1, snappedTime: 1, channel: "rotation" });
+        const withPosition = resolveDirectorKeyframeRecord({ base, keyframes: rotation.keyframes, rawTime: 1, snappedTime: 1, channel: "position" });
+        expect(withPosition.keyframes[0]).toMatchObject({ positionKeyed: true, rotationKeyed: true, scaleKeyed: false });
+        const withoutPosition = resolveDirectorKeyframeRecord({ base, keyframes: withPosition.keyframes, rawTime: 1, snappedTime: 1, channel: "position" });
+        expect(withoutPosition.keyframes).toHaveLength(1);
+        expect(withoutPosition.keyframes[0]).toMatchObject({ positionKeyed: false, rotationKeyed: true, scaleKeyed: false });
     });
 
     test("AutoKey OFF 的增量起点必须是 rendered-at-raw，否则编辑后在 raw 处漂移", () => {

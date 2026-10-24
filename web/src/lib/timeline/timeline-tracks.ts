@@ -31,7 +31,7 @@ export function getTracksByKind(tracks: TimelineTrack[], kind: TimelineTrack["ki
     return tracks.filter((track) => track.kind === kind).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
 }
 
-/** 规范化时间线数据：轨道去重、补默认轨、时长取片段末端最大值。 */
+/** 保留已有轨道身份，仅为缺少的类型补默认轨。 */
 export function normalizeTimelineProject(timeline: Partial<TimelineProject> | null | undefined): TimelineProject {
     const rawTracks = Array.isArray(timeline?.tracks) ? timeline.tracks : [];
     const seen = new Set<string>();
@@ -41,7 +41,18 @@ export function normalizeTimelineProject(timeline: Partial<TimelineProject> | nu
         return true;
     });
     const baseTracks = createDefaultTracks();
-    const tracks = [...baseTracks, ...deduped.filter((track) => !baseTracks.some((base) => base.id === track.id))];
+    const names = { video: "视频", image: "图片", audio: "音频", subtitle: "字幕", text: "文字" };
+    const counts = new Map<string, number>();
+    const tracks = deduped.map((track, index) => {
+        const number = (counts.get(track.kind) ?? 0) + 1;
+        counts.set(track.kind, number);
+        return { ...track, label: track.label?.trim() || `${names[track.kind]} ${number}`, order: Number.isFinite(track.order) ? track.order : index };
+    });
+    for (const track of baseTracks) {
+        if (!tracks.some((item) => item.kind === track.kind) && !seen.has(track.id)) {
+            tracks.push({ ...track, order: Math.max(-1, ...tracks.map((item) => item.order)) + 1 });
+        }
+    }
     const clips = Array.isArray(timeline?.clips) ? timeline.clips : [];
     const durationMs = clips.reduce((max, clip) => Math.max(max, clip.startMs + clip.durationMs), 0);
     return {
@@ -50,5 +61,6 @@ export function normalizeTimelineProject(timeline: Partial<TimelineProject> | nu
         clips,
         durationMs,
         updatedAt: timeline?.updatedAt,
+        ...(timeline?.output ? { output: { ...timeline.output } } : {}),
     };
 }

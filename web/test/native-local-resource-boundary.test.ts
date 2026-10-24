@@ -14,6 +14,6 @@ test("native local mode uses the Go resource store with browser fallback", () =>
     for (const source of [imageStorage, fileStorage]) {
         expect(source).toContain("usesBrowserLocalResourceStore");
         expect(source).toContain("uploadResourceFile");
-        expect(source).toContain("pendingRemoteUpload: localRuntime ? undefined : true");
+        expect(source).toContain("pendingRemoteUpload: true");
     }
 });

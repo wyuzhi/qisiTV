@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/plugins"
 	"qisitv/backend/internal/repository"
 
 	"gorm.io/driver/sqlite"
@@ -15,14 +16,15 @@ func TestApplicationPluginUsesUserStateUnderPlatformAvailability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.PluginPlatformState{}, &model.UserPluginState{}, &model.AdminAuditEvent{}); err != nil {
+	if err := db.AutoMigrate(&model.SystemSetting{}, &model.PluginPlatformState{}, &model.UserPluginState{}, &model.AdminAuditEvent{}); err != nil {
 		t.Fatal(err)
 	}
-	center, err := newPluginRuntime(t.TempDir())
+	repo := repository.New(db)
+	center, err := newPluginRuntimeWithStore(t.TempDir(), plugins.NewRepositoryStore(repo))
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := &Service{repo: repository.New(db), pluginRuntime: center}
+	svc := &Service{repo: repo, pluginRuntime: center}
 	user := &model.User{ID: "user-1", Role: model.UserRoleUser}
 	admin := &model.User{ID: "admin-1", Role: model.UserRoleAdmin}
 
@@ -92,14 +94,15 @@ func TestEditorShellReportsPlatformAvailableWithoutPlatformState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.PluginPlatformState{}, &model.UserPluginState{}, &model.AdminAuditEvent{}); err != nil {
+	if err := db.AutoMigrate(&model.SystemSetting{}, &model.PluginPlatformState{}, &model.UserPluginState{}, &model.AdminAuditEvent{}); err != nil {
 		t.Fatal(err)
 	}
-	center, err := newPluginRuntime(t.TempDir())
+	repo := repository.New(db)
+	center, err := newPluginRuntimeWithStore(t.TempDir(), plugins.NewRepositoryStore(repo))
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := &Service{repo: repository.New(db), pluginRuntime: center}
+	svc := &Service{repo: repo, pluginRuntime: center}
 	user := &model.User{ID: "user-1", Role: model.UserRoleUser}
 
 	states, err := svc.PluginStatesForUser(user)

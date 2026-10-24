@@ -1,5 +1,7 @@
 import { publicAssetUrl } from "@/lib/public-asset";
 import { resolveDirectorPlacement } from "@/lib/canvas/director/director-placement";
+import { DIRECTOR_QUATERNIUS_FEMALE_URL, DIRECTOR_QUATERNIUS_MALE_URL } from "@/lib/canvas/director/director-actor-assets";
+import { createDirectorActorPreset, DIRECTOR_ACTOR_PRESET_OPTIONS } from "@/lib/canvas/director/director-actor-presets";
 import { createDirectorModel, touchDirectorScene } from "@/lib/canvas/director/director-scene";
 import type { DirectorObject, DirectorScene, DirectorVec3 } from "@/types/director";
 
@@ -7,12 +9,12 @@ import type { DirectorObject, DirectorScene, DirectorVec3 } from "@/types/direct
  * P0 复现用确定性 fixture。
  *
  * 硬约束：fixture 自身绝不引用网络资产。
- * - 不使用 createDirectorScene（它会放入依赖远端 GLB 的默认演员）；
+ * - 不使用 createDirectorScene（它默认包含演员，影响测试对象数量）；
  * - 所有对象都是 primitive，不带 url / storageKey / assetId；
  * - 所有 id 与时间戳都是字面量，因此每次构造完全一致（可直接断言）。
  *
  * 注意边界：这只保证「初始 fixture」离线。真实工作台自带的新增控件
- * （默认演员、上传模型、画布图片立牌）仍可能联网，因此模型相关的复现项
+ * （上传模型、画布图片立牌）仍可能联网，因此模型相关的复现项
  * 需要显式注入本地资产，不能假装当前 fixture 已经覆盖。
  */
 
@@ -45,7 +47,7 @@ export function createDirectorReproScene(): DirectorScene {
         id: FIXTURE_SCENE_ID,
         version: 1,
         title: "P0 复现场景",
-        background: "#d8dde3",
+        background: "#060608",
         environmentIntensity: 0.7,
         gridVisible: true,
         objects: [
@@ -97,6 +99,74 @@ export function createDirectorReproScene(): DirectorScene {
     };
 }
 
+/**
+ * 离线人物视觉对照场景：无 URL 的历史标准演员会使用本地内置模型。
+ * 原始 P0 fixture 保持不变，避免影响已有的交互与回归用例。
+ */
+export function createDirectorReproActorScene(): DirectorScene {
+    const scene = createDirectorReproScene();
+    const actor: DirectorObject = {
+        id: "repro-actor-1",
+        name: "演员 1",
+        kind: "actor",
+        transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        color: "#4f8ef7",
+        visible: true,
+        castShadow: true,
+        receiveShadow: true,
+        pose: "stand",
+        rig: { status: "unmapped", boneMap: {}, animationNames: [] },
+        motionClips: [],
+        boneOverrides: {},
+        boneTracks: [],
+        keyframes: [],
+    };
+    return {
+        ...scene,
+        title: "人物视觉对照场景",
+        objects: [actor],
+        cameras: scene.cameras.map((camera) => ({ ...camera, name: "机位1", transform: { ...camera.transform, position: [0, 2.2, 10] }, target: [0, 1.2, 0] })),
+    };
+}
+
+/** Side-by-side preview of both free CC0 Quaternius Standard bodies. */
+export function createDirectorReproQuaterniusCompareScene(): DirectorScene {
+    const scene = createDirectorReproActorScene();
+    const original = scene.objects[0];
+    const quaternius: DirectorObject = {
+        ...original,
+        id: "repro-quaternius-male",
+        name: "Quaternius 免费男性",
+        url: DIRECTOR_QUATERNIUS_MALE_URL,
+        mimeType: "model/gltf-binary",
+        transform: { ...original.transform, position: [1.1, 0, 0] },
+    };
+    return {
+        ...scene,
+        title: "Quaternius 男女模型对照",
+        objects: [
+            { ...original, name: "Quaternius 免费女性", actorPreset: "standard_female", url: DIRECTOR_QUATERNIUS_FEMALE_URL, mimeType: "model/gltf-binary", transform: { ...original.transform, position: [-1.1, 0, 0] } },
+            quaternius,
+        ],
+        cameras: scene.cameras.map((camera) => ({ ...camera, transform: { ...camera.transform, position: [0, 2.4, 6.4] }, target: [0, 1, 0] })),
+    };
+}
+
+/** Same lighting and camera for every built-in body type; useful for visual proportion comparison. */
+export function createDirectorReproActorPresetScene(): DirectorScene {
+    const scene = createDirectorReproActorScene();
+    const actors = DIRECTOR_ACTOR_PRESET_OPTIONS.map(({ id, label }, index) => ({
+        ...createDirectorActorPreset(id, label, [((index % 3) - 1) * 1.45, 0, (Math.floor(index / 3) - 1) * 1.75]),
+        id: `repro-preset-${id}`,
+    }));
+    return {
+        ...scene,
+        title: "人物预设对照场景",
+        objects: actors,
+        cameras: scene.cameras.map((camera) => ({ ...camera, transform: { ...camera.transform, position: [0, 3.2, 10] }, target: [0, 0.9, 0] })),
+    };
+}
+
 /** fixture 是否完全不依赖网络资产：任何 url/storageKey/assetId 都算违约。 */
 export function directorReproSceneIsOffline(scene: DirectorScene): boolean {
     return scene.objects.every((object) => !object.url && !object.storageKey && !object.assetId);
@@ -143,7 +213,9 @@ export const DIRECTOR_REPRO_MODEL_IDS: Record<DirectorReproModelVariant, string>
  *  因此不需要 KTX2Loader / DRACOLoader 也能被 GLTFLoader 直接解析。 */
 export const DIRECTOR_REPRO_LOCAL_MODEL_URL = publicAssetUrl("canvas/models/director-repro-triangle.gltf");
 /** 同源但确定不存在：稳定触发加载失败路径，不依赖外网可达性。 */
-export const DIRECTOR_REPRO_MISSING_MODEL_URL = "/__director-repro-missing.glb";
+export const DIRECTOR_REPRO_MISSING_MODEL_URL = publicAssetUrl("__director-repro-missing.glb");
+/** 轻量离线人形 GLTF，含真实手臂旋转动画，用于动作时间轴交互验收。 */
+export const DIRECTOR_REPRO_ANIMATED_PERSON_URL = publicAssetUrl("canvas/models/director-repro-animated-person.gltf");
 
 const MODEL_URLS: Record<DirectorReproModelVariant, string> = {
     local: DIRECTOR_REPRO_LOCAL_MODEL_URL,
@@ -188,5 +260,23 @@ export function injectDirectorReproModel(scene: DirectorScene, variant: Director
     return touchDirectorScene({
         ...scene,
         objects: [...others, { ...model, transform: { ...model.transform, position } }],
+    });
+}
+
+/** Add/replace a same-origin animated character fixture without touching the production actor asset path. */
+export function injectDirectorReproAnimatedPerson(scene: DirectorScene): DirectorScene {
+    const id = "repro-animated-person";
+    const model = createDirectorModel({
+        name: "离线动画人物",
+        assetId: id,
+        storageKey: undefined,
+        url: DIRECTOR_REPRO_ANIMATED_PERSON_URL,
+        mimeType: "model/gltf+json",
+    });
+    const others = scene.objects.filter((object) => object.id !== id);
+    const position = resolveDirectorPlacement({ object: model, existing: others });
+    return touchDirectorScene({
+        ...scene,
+        objects: [...others, { ...model, id, transform: { ...model.transform, position } }],
     });
 }

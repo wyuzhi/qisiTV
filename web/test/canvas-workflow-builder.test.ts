@@ -2,13 +2,12 @@ import { describe, expect, it } from "bun:test";
 
 import { buildCanvasWorkflowOps, looksLikeWorkflowRequest } from "@/lib/canvas/canvas-workflow-builder";
 import { applyCanvasOperations, canvasOperationPostconditionMessage, verifyCanvasOperations, type CanvasSnapshot } from "@/lib/canvas/canvas-operation-contract";
-import { extractCloudAgentQuickActions } from "@/components/canvas/canvas-cloud-agent-chat-ui";
 import { CanvasNodeType } from "@/types/canvas";
 
 const config = { imageModel: "image-model", videoModel: "video-model", audioModel: "audio-model" } as never;
 const snapshot: CanvasSnapshot = { projectId: "p", title: "空画布", nodes: [], connections: [], selectedNodeIds: [], viewport: { x: 0, y: 0, k: 1 } };
 
-describe("cloud canvas agent workflow builder", () => {
+describe("canvas workflow builder", () => {
     it("creates semantic media nodes, non-overlapping layout and real edges", () => {
         const ops = buildCanvasWorkflowOps({
             title: "搞笑修仙小说流水线",
@@ -30,15 +29,6 @@ describe("cloud canvas agent workflow builder", () => {
         expect(result.expectedConnectionCount).toBe(2);
         expect(result.overlapWarnings).toEqual([]);
         expect(canvasOperationPostconditionMessage(result)).toContain("实际新增 2 条");
-    });
-
-    it("turns numbered assistant choices into clickable prompts", () => {
-        expect(extractCloudAgentQuickActions("请选择下一步：\n1. 继续细化角色\n2、增加故事元素\n3) 调整布局")).toEqual([
-            { label: "继续细化角色", prompt: "继续细化角色" },
-            { label: "增加故事元素", prompt: "增加故事元素" },
-            { label: "调整布局", prompt: "调整布局" },
-        ]);
-        expect(extractCloudAgentQuickActions("```json\n1. not an action\n```")).toEqual([]);
     });
 
     it("rejects workflow-shaped text batches", () => {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"net/url"
 	"strings"
 
@@ -40,6 +41,12 @@ func (s *Service) resolveManagedBeefAPISecrets(input map[string]any) (map[string
 	}
 	apiKey, resolvedBase, accountID, tokenID, err := s.lookupBeefAPICredential()
 	if err != nil {
+		var structured *AppError
+		if errors.As(err, &structured) && structured.Reason == "local_credential_failed" {
+			copy := *structured
+			copy.Message = "尚未提交生成。" + structured.Message
+			return nil, &copy
+		}
 		return nil, err
 	}
 	if apiKey == "" {
@@ -77,6 +84,10 @@ func (s *Service) lookupBeefAPICredential() (apiKey, baseURL, accountID, tokenID
 		if s.beefAPI.HasManagedCredential() {
 			cred, resolveErr := s.beefAPI.Resolve()
 			if resolveErr != nil {
+				var structured *AppError
+				if errors.As(resolveErr, &structured) {
+					return "", "", "", "", structured
+				}
 				return "", "", "", "", BadAuthRequest(resolveErr.Error())
 			}
 			return cred.APIKey, cred.BaseURL, cred.AccountID, cred.TokenID, nil
@@ -100,7 +111,7 @@ func (s *Service) lookupBeefAPICredential() (apiKey, baseURL, accountID, tokenID
 		if channel.ID == beefapi.ChannelID && strings.TrimSpace(channel.APIKey) != "" {
 			base := strings.TrimSpace(channel.BaseURL)
 			if base == "" {
-				base = beefapi.ProductionOrigin
+				base = beefapi.LegacyOrigin
 			}
 			return channel.APIKey, base, "", "", nil
 		}
@@ -131,9 +142,8 @@ func (s *Service) resolveChannelModelsRequest(input *ChannelModelsRequest) error
 		return nil
 	}
 	input.APIKey = apiKey
-	if strings.TrimSpace(input.BaseURL) == "" || beefapi.IsEnterpriseBaseURL(input.BaseURL) || input.ChannelID == beefapi.ChannelID {
-		input.BaseURL = baseURL
-	}
+	// Stored credentials must only be sent to their configured origin.
+	input.BaseURL = baseURL
 	input.CredentialRef = managedBeefAPIRef
 	return nil
 }

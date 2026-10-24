@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { App, Button } from "antd";
 import { useSyncProgressStore } from "@/stores/use-sync-progress-store";
-import { keepLocalCanvasCopyAndLoadLatest, syncLocalCanvasProjectToBackend } from "@/services/local-workspace-repository";
+import { acceptExternalCanvasRevision, syncLocalCanvasProjectToBackend } from "@/services/local-workspace-repository";
 
 export function CanvasLocalSaveStatus({ canvasId, onShowVersions }: { canvasId: string; onShowVersions: () => void }) {
     const progress = useSyncProgressStore((state) => state.syncingProjects[canvasId]);
@@ -18,7 +18,7 @@ export function CanvasLocalSaveStatus({ canvasId, onShowVersions }: { canvasId: 
         setBusy(true);
         try {
             if (keepCopy) {
-                await keepLocalCanvasCopyAndLoadLatest(canvasId);
+                await acceptExternalCanvasRevision(canvasId);
                 window.location.reload();
             } else await syncLocalCanvasProjectToBackend(canvasId);
         } catch (error) {
@@ -30,7 +30,7 @@ export function CanvasLocalSaveStatus({ canvasId, onShowVersions }: { canvasId: 
         <Button size="small" loading={busy} onClick={() => void resolve(false)}>重试保存</Button>
         {progress.phase === "conflict" && <>
             <Button size="small" disabled={busy} onClick={onShowVersions}>查看版本</Button>
-            <Button size="small" disabled={busy} onClick={() => void resolve(true)}>保留副本并载入最新</Button>
+            <Button size="small" disabled={busy} onClick={() => void resolve(true)}>保留草稿并载入最新</Button>
         </>}
     </div>;
 }

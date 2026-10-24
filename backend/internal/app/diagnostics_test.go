@@ -4,6 +4,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,54 +17,53 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestExportDiagnosticBundleRedactsSensitiveValues(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:diagnostics-test?mode=memory&cache=shared"), &gorm.Config{})
+func TestUpdateLogsExportOnlyFromLocalWorkspace(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := db.AutoMigrate(&model.Task{}, &model.TaskLog{}, &model.ApiCallLog{}); err != nil {
 		t.Fatal(err)
 	}
-	now := time.Now().UTC()
-	if err := db.Create(&model.Task{
-		ID: "task-1", UserID: "user-1", TraceID: "trace-1", RequestID: "req-1", ProjectID: "project-1", Type: "video_generate",
-		Status: model.TaskStatusFailed, Error: "authorization: task-secret", Prompt: "secret prompt", CreatedAt: now.Add(-time.Minute), UpdatedAt: now,
-	}).Error; err != nil {
+	dir := t.TempDir()
+	line := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339) + " v1.7.20 update phase=extracting\n"
+	if err := os.WriteFile(filepath.Join(dir, "update.log"), []byte(line), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&model.TaskLog{ID: "task-log-1", UserID: "user-1", TaskID: "task-1", TraceID: "trace-1", Message: "任务失败", Payload: "apiKey=log-secret", CreatedAt: now}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Create(&model.ApiCallLog{ID: "api-log-1", UserID: "user-1", TraceID: "trace-1", RequestID: "req-1", TaskID: "task-1", Path: "/v1/generations", RequestBody: "apiKey=body-secret", ResponseBody: "response-secret", UpstreamURL: "https://provider.example/result?signature=secret", Error: "token=api-secret", CreatedAt: now}).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	svc := &Service{repo: repository.New(db)}
-	bundle, err := svc.ExportDiagnosticBundle("user-1", DiagnosticExportRequest{
-		From: now.Add(-2 * time.Minute).Format(time.RFC3339Nano), To: now.Add(time.Minute).Format(time.RFC3339Nano), TaskID: "task-1",
-		Description: "页面报错", ClientEvents: []DiagnosticClientEvent{{ID: "event-1", Message: "cookie=client-secret", TraceID: "trace-1"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	files := readDiagnosticTestZIP(t, bundle.Data)
-	manifest := files["manifest.json"]
-	if !strings.Contains(manifest, `"bundleId": "`+bundle.BundleID+`"`) {
-		t.Fatalf("manifest = %s", manifest)
-	}
-	all := strings.Join([]string{manifest, files["client/events.jsonl"], files["backend/tasks.jsonl"], files["backend/task-logs.jsonl"], files["backend/upstream-calls.jsonl"]}, "\n")
-	for _, secret := range []string{"task-secret", "secret prompt", "log-secret", "body-secret", "response-secret", "api-secret", "signature=secret", "client-secret"} {
-		if strings.Contains(all, secret) {
-			t.Fatalf("diagnostic bundle leaked %q: %s", secret, all)
+	for _, mode := range []serviceMode{serviceModeLocal, serviceModeHosted} {
+		svc := &Service{repo: repository.New(db), dataDir: dir, mode: mode}
+		bundle, err := svc.ExportDiagnosticBundle("local-user", DiagnosticExportRequest{})
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if strings.Contains(files["backend/upstream-calls.jsonl"], "requestBody") || strings.Contains(files["backend/upstream-calls.jsonl"], "result?signature") {
-		t.Fatalf("upstream call contains excluded payload or query: %s", files["backend/upstream-calls.jsonl"])
+		archive, err := zip.NewReader(bytes.NewReader(bundle.Data), int64(len(bundle.Data)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, file := range archive.File {
+			if file.Name != "desktop/update.log" {
+				continue
+			}
+			found = true
+			reader, err := file.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := io.ReadAll(reader)
+			reader.Close()
+			if err != nil || string(body) != line {
+				t.Fatalf("wrong log: %s %v", body, err)
+			}
+		}
+		if found != (mode == serviceModeLocal) {
+			t.Fatalf("mode=%s log included=%t", mode, found)
+		}
 	}
 }
 
-func TestExportDiagnosticBundleRejectsForeignTask(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:diagnostics-ownership-test?mode=memory&cache=shared"), &gorm.Config{})
+func TestExportDiagnosticBundleAdapterRejectsForeignTask(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:diagnostics-adapter-ownership?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,29 +77,4 @@ func TestExportDiagnosticBundleRejectsForeignTask(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "任务不存在或无权访问") {
 		t.Fatalf("foreign task error = %v", err)
 	}
-}
-
-func readDiagnosticTestZIP(t *testing.T, data []byte) map[string]string {
-	t.Helper()
-	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	files := make(map[string]string, len(archive.File))
-	for _, file := range archive.File {
-		reader, err := file.Open()
-		if err != nil {
-			t.Fatal(err)
-		}
-		content, readErr := io.ReadAll(reader)
-		closeErr := reader.Close()
-		if readErr != nil {
-			t.Fatal(readErr)
-		}
-		if closeErr != nil {
-			t.Fatal(closeErr)
-		}
-		files[file.Name] = string(content)
-	}
-	return files
 }

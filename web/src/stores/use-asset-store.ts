@@ -8,6 +8,7 @@ import { parseAssetStorageDocumentRecovering, rebaseAssetSnapshot, serializeAsse
 import { parseCanvasStorageDocument } from "@/lib/canvas/canvas-storage-revision";
 import { localForageStorageForScope } from "@/lib/localforage-storage";
 import { getActiveUserScope } from "@/lib/user-scope";
+import { assertUserScope, captureUserScope, userScopeMatches, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { resourceFileUrl, resourceIdFromStorageKey } from "@/services/api/resources";
 import { cleanupUnusedImages, collectImageStorageKeys, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { cleanupUnusedMedia, collectMediaStorageKeys, resolveMediaUrl } from "@/services/file-storage";
@@ -47,6 +48,8 @@ type AssetBase<T extends AssetKind> = {
     note?: string;
     arkAssetId?: string;
     portraitCertified?: boolean;
+    pendingRemoteUpload?: boolean;
+    remoteUploadError?: string;
     createdAt: string;
     updatedAt: string;
     metadata?: Record<string, unknown>;
@@ -58,7 +61,7 @@ type AssetStore = {
     addAsset: (asset: NewAsset) => string;
     addGenerationAsset: (effectKey: string, asset: NewAsset, signal?: AbortSignal) => Promise<string>;
     updateAsset: (id: string, patch: Partial<Omit<Asset, "id" | "createdAt">>) => void;
-    removeAsset: (id: string) => Promise<void>;
+    removeAsset: (id: string, options?: { cleanupMedia?: boolean }) => Promise<void>;
     replaceAssets: (assets: Asset[]) => void;
     cleanupImages: (extra?: unknown) => Promise<void>;
 };
@@ -74,19 +77,356 @@ type ObservedAssetPersist = {
 type QueuedAssetPersist = {
     name: string;
     scope: string;
+    epoch: number;
     baseAssets: Asset[];
     baseRevision: number;
     assets: Asset[];
     token: number;
 };
 
+export type AssetStoreDraftKind = "upsert" | "delete";
+
+export type AssetStoreDraft = {
+    kind: AssetStoreDraftKind;
+    version: number;
+    /** Upsert payload captured at edit time. Delete drafts are tombstones only. */
+    asset?: Asset;
+};
+
+export type AssetStoreDraftRecord = AssetStoreDraft & { id: string };
+
+type AssetStoreDraftDocument = {
+    drafts: Record<string, AssetStoreDraft>;
+    clocks: Record<string, number>;
+};
+
+export const ASSET_STORE_DRAFTS_KEY = "infinite-canvas:asset_store_drafts";
+
 let suppressAssetStorePersistence = 0;
+let suppressAssetStoreDraftTracking = 0;
 const assetMemoryStates = new Map<string, PersistedAssetState>();
 const observedAssetPersists = new Map<string, ObservedAssetPersist>();
 const queuedAssetPersists = new Map<string, QueuedAssetPersist>();
 const assetPersistTokens = new Map<string, number>();
-const assetOperations = new Set<Promise<unknown>>();
+const assetOperations = new Map<Promise<unknown>, CapturedUserScope>();
+/** Uncommitted commit-intent, keyed by userScope so A→B→A can recover without auto-dispatch. */
+const assetStoreDrafts = new Map<string, Map<string, AssetStoreDraft>>();
+/** Per-asset high-water version; survives ack so an older ack cannot match a new edit. */
+const assetStoreDraftClocks = new Map<string, Map<string, number>>();
+const hydratedAssetDraftScopes = new Set<string>();
+const hydratingAssetDraftScopes = new Map<string, Promise<void>>();
+const assetDraftWriteChains = new Map<string, Promise<unknown>>();
+const assetDraftWriteFailures = new Map<string, unknown>();
 const generationAssetFailures = new Map<string, unknown>();
+
+function assetPersistNamespace(scope: CapturedUserScope) {
+    return `${scope.userScope}\0${scope.epoch}`;
+}
+
+function dropAbandonedAssetPersists(live: CapturedUserScope) {
+    for (const [key, queued] of [...queuedAssetPersists.entries()]) {
+        if (queued.scope === live.userScope && queued.epoch === live.epoch) continue;
+        queuedAssetPersists.delete(key);
+        assetPersistTokens.delete(key);
+    }
+}
+
+function cloneAssetSnapshot(asset: Asset): Asset {
+    return parseAssetRecord(JSON.parse(JSON.stringify(asset)));
+}
+
+function cloneAssetStoreDraft(draft: AssetStoreDraft): AssetStoreDraft {
+    return {
+        kind: draft.kind,
+        version: draft.version,
+        ...(draft.kind === "upsert" && draft.asset ? { asset: cloneAssetSnapshot(draft.asset) } : {}),
+    };
+}
+
+function parsePersistedAssetStoreDraftDocument(raw: string | null): { drafts: Map<string, AssetStoreDraft>; clocks: Map<string, number> } {
+    const drafts = new Map<string, AssetStoreDraft>();
+    const clocks = new Map<string, number>();
+    if (!raw) return { drafts, clocks };
+    try {
+        const parsed = JSON.parse(raw) as { drafts?: Record<string, { kind?: unknown; version?: unknown; asset?: unknown }>; clocks?: Record<string, unknown> };
+        if (!parsed || typeof parsed !== "object") return { drafts, clocks };
+        if (parsed.clocks && typeof parsed.clocks === "object") {
+            for (const [id, value] of Object.entries(parsed.clocks)) {
+                const version = Number(value);
+                if (!id || !Number.isInteger(version) || version < 1) continue;
+                clocks.set(id, version);
+            }
+        }
+        if (!parsed.drafts || typeof parsed.drafts !== "object") return { drafts, clocks };
+        for (const [id, value] of Object.entries(parsed.drafts)) {
+            if (!id || (value?.kind !== "upsert" && value?.kind !== "delete")) continue;
+            const version = Number(value.version);
+            if (!Number.isInteger(version) || version < 1) continue;
+            const draft: AssetStoreDraft = { kind: value.kind, version };
+            if (value.kind === "upsert" && value.asset !== undefined) {
+                try {
+                    draft.asset = parseAssetRecord(value.asset);
+                } catch {
+                    // Keep the upsert intent even if a historical snapshot is unreadable.
+                }
+            }
+            drafts.set(id, draft);
+            const clock = clocks.get(id) ?? 0;
+            if (version > clock) clocks.set(id, version);
+        }
+    } catch {
+        // Recoverable commit-intent only; a bad cache must not block the asset library.
+    }
+    return { drafts, clocks };
+}
+
+function snapshotAssetStoreDraftDocument(userScope: string): AssetStoreDraftDocument {
+    const drafts: Record<string, AssetStoreDraft> = {};
+    const source = assetStoreDrafts.get(userScope);
+    if (source) {
+        for (const [id, draft] of source) drafts[id] = cloneAssetStoreDraft(draft);
+    }
+    const clocks: Record<string, number> = {};
+    const clockSource = assetStoreDraftClocks.get(userScope);
+    if (clockSource) {
+        for (const [id, version] of clockSource) clocks[id] = version;
+    }
+    return { drafts, clocks };
+}
+
+function serializeAssetStoreDraftDocument(document: AssetStoreDraftDocument) {
+    return JSON.stringify(document);
+}
+
+function isEmptyAssetStoreDraftDocument(serialized: string) {
+    try {
+        const parsed = JSON.parse(serialized) as AssetStoreDraftDocument;
+        const draftCount = parsed?.drafts && typeof parsed.drafts === "object" ? Object.keys(parsed.drafts).length : 0;
+        const clockCount = parsed?.clocks && typeof parsed.clocks === "object" ? Object.keys(parsed.clocks).length : 0;
+        return draftCount === 0 && clockCount === 0;
+    } catch {
+        return true;
+    }
+}
+
+async function writeSerializedAssetStoreDrafts(userScope: string, serialized: string) {
+    const storage = localForageStorageForScope(userScope);
+    if (isEmptyAssetStoreDraftDocument(serialized)) {
+        await storage.removeItem(ASSET_STORE_DRAFTS_KEY);
+        return;
+    }
+    await storage.setItem(ASSET_STORE_DRAFTS_KEY, serialized);
+}
+
+function scheduleAssetStoreDraftPersist(userScope: string, captured = captureUserScope()) {
+    const serialized = serializeAssetStoreDraftDocument(snapshotAssetStoreDraftDocument(userScope));
+    const previous = assetDraftWriteChains.get(userScope) ?? Promise.resolve();
+    const run = previous.then(undefined, () => undefined).then(async () => {
+        try {
+            await writeSerializedAssetStoreDrafts(userScope, serialized);
+            assetDraftWriteFailures.delete(userScope);
+        } catch (error) {
+            assetDraftWriteFailures.set(userScope, error);
+            throw error;
+        }
+    });
+    const tail = run.then(() => undefined, () => undefined);
+    assetDraftWriteChains.set(userScope, tail);
+    void tail.then(() => {
+        if (assetDraftWriteChains.get(userScope) === tail) assetDraftWriteChains.delete(userScope);
+    });
+    if (captured.userScope === userScope) return trackAssetOperation(run, captured);
+    void run.then(undefined, () => undefined);
+    return run;
+}
+
+function nextAssetStoreDraftVersion(userScope: string, id: string) {
+    const clocks = assetStoreDraftClocks.get(userScope) ?? new Map<string, number>();
+    const current = Math.max(clocks.get(id) ?? 0, assetStoreDrafts.get(userScope)?.get(id)?.version ?? 0);
+    const version = current + 1;
+    clocks.set(id, version);
+    assetStoreDraftClocks.set(userScope, clocks);
+    return version;
+}
+
+/**
+ * Hydration merge order:
+ * 1. Read durable drafts and clocks.
+ * 2. In-process memory drafts win every overlapping id. An edit made while
+ *    getItem awaited is newer than that durable snapshot, even when the
+ *    durable counter is larger.
+ * 3. Durable fills ids that memory does not have.
+ * 4. clocks[id] = max(durable clocks, durable draft versions, memory clocks,
+ *    memory draft versions).
+ * 5. If a memory-winning draft is at or below that high-water, bump it to
+ *    high-water + 1 so an older ack cannot match the new edit.
+ * Upsert snapshots project into effective assets without a backend save.
+ * Delete drafts stay tombstones and drop matching effective assets.
+ */
+function mergeHydratedAssetStoreDrafts(
+    durableDrafts: Map<string, AssetStoreDraft>,
+    durableClocks: Map<string, number>,
+    memoryDrafts: Map<string, AssetStoreDraft>,
+    memoryClocks: Map<string, number>,
+) {
+    const clocks = new Map<string, number>();
+    const ids = new Set([...durableDrafts.keys(), ...durableClocks.keys(), ...memoryDrafts.keys(), ...memoryClocks.keys()]);
+    for (const id of ids) {
+        clocks.set(
+            id,
+            Math.max(durableClocks.get(id) ?? 0, durableDrafts.get(id)?.version ?? 0, memoryClocks.get(id) ?? 0, memoryDrafts.get(id)?.version ?? 0),
+        );
+    }
+
+    const merged = new Map<string, AssetStoreDraft>();
+    for (const [id, draft] of durableDrafts) merged.set(id, cloneAssetStoreDraft(draft));
+    let bumped = false;
+    for (const [id, draft] of memoryDrafts) {
+        const highWater = clocks.get(id) ?? draft.version;
+        if (highWater > draft.version) {
+            const version = highWater + 1;
+            clocks.set(id, version);
+            merged.set(id, { ...cloneAssetStoreDraft(draft), version });
+            bumped = true;
+        } else {
+            merged.set(id, cloneAssetStoreDraft(draft));
+        }
+    }
+    return { merged, clocks, bumped };
+}
+
+function applyAssetStoreDraftsToEffectiveAssets(drafts: Map<string, AssetStoreDraft>) {
+    withAssetStorePersistenceSuppressed(() => {
+        runAssetStoreProjection(() => {
+            useAssetStore.setState((state) => {
+                const upserts = new Map<string, Asset>();
+                const deleted = new Set<string>();
+                for (const [id, draft] of drafts) {
+                    if (draft.kind === "delete") deleted.add(id);
+                    else if (draft.asset) upserts.set(id, cloneAssetSnapshot(draft.asset));
+                }
+                const next: Asset[] = [];
+                const seen = new Set<string>();
+                for (const asset of state.assets) {
+                    if (deleted.has(asset.id)) continue;
+                    next.push(upserts.get(asset.id) ?? asset);
+                    seen.add(asset.id);
+                }
+                for (const [id, asset] of upserts) {
+                    if (seen.has(id) || deleted.has(id)) continue;
+                    next.unshift(asset);
+                }
+                return { assets: next };
+            });
+        });
+    });
+}
+
+export async function hydrateAssetStoreDrafts(userScope = getActiveUserScope()) {
+    if (hydratedAssetDraftScopes.has(userScope)) return;
+    const pending = hydratingAssetDraftScopes.get(userScope);
+    if (pending) return pending;
+    const entryScope = captureUserScope();
+
+    const done = (async () => {
+        const durable = parsePersistedAssetStoreDraftDocument(await localForageStorageForScope(userScope).getItem(ASSET_STORE_DRAFTS_KEY));
+        const memoryDrafts = assetStoreDrafts.get(userScope) ?? new Map<string, AssetStoreDraft>();
+        const memoryClocks = assetStoreDraftClocks.get(userScope) ?? new Map<string, number>();
+        const { merged, clocks, bumped } = mergeHydratedAssetStoreDrafts(durable.drafts, durable.clocks, memoryDrafts, memoryClocks);
+        if (merged.size) assetStoreDrafts.set(userScope, merged);
+        else assetStoreDrafts.delete(userScope);
+        if (clocks.size) assetStoreDraftClocks.set(userScope, clocks);
+        else assetStoreDraftClocks.delete(userScope);
+        hydratedAssetDraftScopes.add(userScope);
+        if (entryScope.userScope === userScope && userScopeMatches(entryScope)) applyAssetStoreDraftsToEffectiveAssets(merged);
+        if (memoryDrafts.size > 0 || bumped) scheduleAssetStoreDraftPersist(userScope);
+    })();
+
+    hydratingAssetDraftScopes.set(userScope, done);
+    try {
+        await done;
+    } finally {
+        if (hydratingAssetDraftScopes.get(userScope) === done) hydratingAssetDraftScopes.delete(userScope);
+    }
+}
+
+function markAssetStoreDraft(id: string, kind: AssetStoreDraftKind, expected?: CapturedUserScope) {
+    if (suppressAssetStoreDraftTracking) return;
+    const captured = expected ?? captureUserScope();
+    if (expected) assertUserScope(expected);
+    const userScope = captured.userScope;
+    const drafts = assetStoreDrafts.get(userScope) ?? new Map<string, AssetStoreDraft>();
+    const version = nextAssetStoreDraftVersion(userScope, id);
+    if (kind === "delete") {
+        drafts.set(id, { kind, version });
+    } else {
+        const asset = useAssetStore.getState().assets.find((item) => item.id === id);
+        drafts.set(id, { kind, version, ...(asset ? { asset: cloneAssetSnapshot(asset) } : {}) });
+    }
+    assetStoreDrafts.set(userScope, drafts);
+    scheduleAssetStoreDraftPersist(userScope, captured);
+}
+
+/** Record an explicit delete intent without waiting for removeAsset. 404 is idempotent. */
+export function recordAssetStoreDraft(id: string, kind: AssetStoreDraftKind, expected?: CapturedUserScope) {
+    markAssetStoreDraft(id, kind, expected);
+}
+
+export function peekAssetStoreDraft(userScope: string, id: string) {
+    return assetStoreDrafts.get(userScope)?.get(id);
+}
+
+/** Apply a server projection without treating the local patch as a new uncommitted write. */
+export function runAssetStoreProjection<T>(operation: () => T): T {
+    suppressAssetStoreDraftTracking += 1;
+    try {
+        return operation();
+    } finally {
+        suppressAssetStoreDraftTracking -= 1;
+    }
+}
+
+export function readAssetStoreDrafts(expected: CapturedUserScope) {
+    assertUserScope(expected);
+    const drafts = assetStoreDrafts.get(expected.userScope) ?? new Map<string, AssetStoreDraft>();
+    const upserts: AssetStoreDraftRecord[] = [];
+    const deletes: AssetStoreDraftRecord[] = [];
+    for (const [id, draft] of drafts) {
+        if (draft.kind === "upsert") upserts.push({ id, ...draft });
+        else deletes.push({ id, ...draft });
+    }
+    return { upserts, deletes };
+}
+
+/** Ack only the submitted version. A later local edit keeps its draft. Clocks stay. */
+export function ackAssetStoreDraft(expected: CapturedUserScope, id: string, version: number) {
+    if (!userScopeMatches(expected)) return;
+    const drafts = assetStoreDrafts.get(expected.userScope);
+    if (!drafts) return;
+    const current = drafts.get(id);
+    if (!current || current.version !== version) return;
+    drafts.delete(id);
+    if (drafts.size) assetStoreDrafts.set(expected.userScope, drafts);
+    else assetStoreDrafts.delete(expected.userScope);
+    scheduleAssetStoreDraftPersist(expected.userScope, expected);
+}
+
+export function unloadAssetStoreDraftsForTests() {
+    assetStoreDrafts.clear();
+    assetStoreDraftClocks.clear();
+    hydratedAssetDraftScopes.clear();
+    hydratingAssetDraftScopes.clear();
+    assetDraftWriteChains.clear();
+    assetDraftWriteFailures.clear();
+}
+
+export async function resetAssetStoreDraftsForTests() {
+    const scopes = new Set([...assetStoreDrafts.keys(), ...assetStoreDraftClocks.keys(), ...hydratedAssetDraftScopes, ...assetDraftWriteChains.keys(), getActiveUserScope()]);
+    const pending = [...assetDraftWriteChains.values()];
+    await Promise.all(pending);
+    unloadAssetStoreDraftsForTests();
+    await Promise.all([...scopes].map((scope) => localForageStorageForScope(scope).removeItem(ASSET_STORE_DRAFTS_KEY)));
+}
 
 function recordAssetStorageDocument(scope: string, document: AssetStorageDocument) {
     observedAssetPersists.set(scope, {
@@ -104,12 +444,18 @@ function withAssetStorePersistenceSuppressed<T>(operation: () => T) {
     }
 }
 
-async function commitPendingAssetStorePersistenceLocked(scope: string) {
+async function commitPendingAssetStorePersistenceLocked(scope: string, epoch = captureUserScope().epoch) {
+    const expected: CapturedUserScope = { userScope: scope, epoch };
+    const namespace = assetPersistNamespace(expected);
     const storage = localForageStorageForScope(scope);
     let committed: AssetStorageDocument | null = null;
 
     while (true) {
-        const queued = queuedAssetPersists.get(scope);
+        if (!userScopeMatches(expected)) {
+            queuedAssetPersists.delete(namespace);
+            return committed;
+        }
+        const queued = queuedAssetPersists.get(namespace);
         if (!queued) return committed;
 
         // 读取旧版本时允许隔离历史坏记录；真正写回前，queued.assets 已经由 persistAssetState 严格校验。
@@ -121,6 +467,10 @@ async function commitPendingAssetStorePersistenceLocked(scope: string) {
                 invalid: recovery.invalid,
             });
         }
+        if (!userScopeMatches(expected)) {
+            queuedAssetPersists.delete(namespace);
+            return committed;
+        }
         const durable = recovery.document;
         const rebased = rebaseAssetSnapshot({
             document: durable,
@@ -128,13 +478,21 @@ async function commitPendingAssetStorePersistenceLocked(scope: string) {
             localAssets: queued.assets,
             baseRevision: queued.baseRevision,
         });
+        if (!userScopeMatches(expected)) {
+            queuedAssetPersists.delete(namespace);
+            return committed;
+        }
         await storage.setItem(queued.name, serializeAssetStorageDocument(rebased));
+        if (!userScopeMatches(expected)) {
+            queuedAssetPersists.delete(namespace);
+            return committed;
+        }
         committed = rebased;
         recordAssetStorageDocument(scope, rebased);
 
-        const latest = queuedAssetPersists.get(scope);
+        const latest = queuedAssetPersists.get(namespace);
         if (!latest || latest.token === queued.token) {
-            if (latest?.token === queued.token) queuedAssetPersists.delete(scope);
+            if (latest?.token === queued.token) queuedAssetPersists.delete(namespace);
             return committed;
         }
 
@@ -143,8 +501,8 @@ async function commitPendingAssetStorePersistenceLocked(scope: string) {
     }
 }
 
-async function writeQueuedAssetPersist(scope: string, _token: number) {
-    await withGenerationAssetStorageLock(scope, () => commitPendingAssetStorePersistenceLocked(scope));
+async function writeQueuedAssetPersist(scope: string, epoch: number, _token: number) {
+    await withGenerationAssetStorageLock(scope, () => commitPendingAssetStorePersistenceLocked(scope, epoch));
 }
 
 async function readPersistedAssetDocumentForScope(scope: string) {
@@ -165,40 +523,43 @@ async function readPersistedAssetDocumentForScope(scope: string) {
  * Promise 也会拒绝并产生未处理拒绝。用 then 的成功/失败分支做同一个清理动作，
  * 既保留原 Promise 给调用方观察真实错误，也不会制造第二条未处理错误链。
  */
-function trackAssetOperation<T>(operation: Promise<T>) {
-    assetOperations.add(operation);
+function trackAssetOperation<T>(operation: Promise<T>, captured: CapturedUserScope) {
+    assetOperations.set(operation, captured);
     const cleanup = () => assetOperations.delete(operation);
     void operation.then(cleanup, cleanup);
     return operation;
 }
 
 function persistAssetState(name: string, value: StorageValue<AssetStore>) {
-    const scope = getActiveUserScope();
+    const captured = captureUserScope();
+    const scope = captured.userScope;
+    const namespace = assetPersistNamespace(captured);
     const nextAssets = value.state.assets.map(parseAssetRecord);
-    const queued = queuedAssetPersists.get(scope);
+    const queued = queuedAssetPersists.get(namespace);
     const observed = observedAssetPersists.get(scope);
     const baseAssets = assetMemoryStates.get(scope)?.assets ?? observed?.assets ?? [];
     assetMemoryStates.set(scope, { assets: nextAssets });
     if (suppressAssetStorePersistence) return;
 
-    const token = (assetPersistTokens.get(scope) ?? 0) + 1;
-    assetPersistTokens.set(scope, token);
-    queuedAssetPersists.set(scope, {
+    const token = (assetPersistTokens.get(namespace) ?? 0) + 1;
+    assetPersistTokens.set(namespace, token);
+    queuedAssetPersists.set(namespace, {
         name,
         scope,
+        epoch: captured.epoch,
         baseAssets: queued?.baseAssets ?? baseAssets,
         baseRevision: queued?.baseRevision ?? observed?.revision ?? 0,
         assets: nextAssets,
         token,
     });
-    return trackAssetOperation(writeQueuedAssetPersist(scope, token));
+    return trackAssetOperation(writeQueuedAssetPersist(scope, captured.epoch, token), captured);
 }
 
 function generationAssetFailureKey(scope: string, effectKey: string) {
     return `${scope}\0${effectKey}`;
 }
 
-function trackGenerationAssetOperation<T>(scope: string, effectKey: string, operation: Promise<T>) {
+function trackGenerationAssetOperation<T>(scope: string, effectKey: string, captured: CapturedUserScope, operation: Promise<T>) {
     const failureKey = generationAssetFailureKey(scope, effectKey);
     return trackAssetOperation(
         operation.then(
@@ -210,28 +571,60 @@ function trackGenerationAssetOperation<T>(scope: string, effectKey: string, oper
                 throw error;
             },
         ),
+        captured,
     );
 }
 
-export async function flushAssetStorePersistence() {
+function operationsFor(expected: CapturedUserScope) {
+    return [...assetOperations.entries()].flatMap(([operation, captured]) => (captured.userScope === expected.userScope && captured.epoch === expected.epoch ? [operation] : []));
+}
+
+function generationFailureFor(expected: CapturedUserScope) {
+    const prefix = `${expected.userScope}\0`;
+    for (const [key, error] of generationAssetFailures) {
+        if (key.startsWith(prefix)) return error;
+    }
+}
+
+export async function flushAssetStorePersistence(expectedScope?: CapturedUserScope) {
+    const expected = expectedScope ?? captureUserScope();
+    assertUserScope(expected);
+    const namespace = assetPersistNamespace(expected);
+    dropAbandonedAssetPersists(expected);
+
     while (true) {
-        if (assetOperations.size) {
-            await Promise.all([...assetOperations]);
+        assertUserScope(expected);
+        const scopedOperations = operationsFor(expected);
+        if (scopedOperations.length) {
+            await Promise.all(scopedOperations);
             continue;
         }
 
-        const writes = [...queuedAssetPersists.values()].map(({ scope, token }) => writeQueuedAssetPersist(scope, token));
-        if (writes.length) {
-            await Promise.all(writes);
+        const queued = queuedAssetPersists.get(namespace);
+        if (queued) {
+            await writeQueuedAssetPersist(queued.scope, queued.epoch, queued.token);
             continue;
         }
 
         await flushGenerationAssetStorageLocks();
-        if (!assetOperations.size && !queuedAssetPersists.size) break;
+        if (!operationsFor(expected).length && !queuedAssetPersists.has(namespace)) break;
     }
 
-    const failure = generationAssetFailures.values().next();
-    if (!failure.done) throw failure.value;
+    const draftWrites = assetDraftWriteChains.get(expected.userScope);
+    if (draftWrites) await draftWrites;
+    assertUserScope(expected);
+
+    const draftFailure = assetDraftWriteFailures.get(expected.userScope);
+    if (draftFailure !== undefined) throw draftFailure;
+
+    const failure = generationFailureFor(expected);
+    if (failure !== undefined) throw failure;
+}
+
+export function hasActiveAssetStorePersistence() {
+    // queuedAssetPersists can retain a failed save for explicit retry. Active
+    // operations cover running and lock-waiting writes, including draft IO.
+    return assetOperations.size > 0 || assetDraftWriteChains.size > 0;
 }
 
 const assetStorage: PersistStorage<AssetStore> = {
@@ -308,6 +701,7 @@ export const useAssetStore = create<AssetStore>()(
                 const now = new Date().toISOString();
                 const id = nanoid();
                 set((state) => ({ assets: [parseAssetRecord({ ...asset, id, createdAt: now, updatedAt: now }), ...state.assets] }));
+                markAssetStoreDraft(id, "upsert");
                 return id;
             },
             addGenerationAsset: (effectKey, asset, signal) => {
@@ -316,6 +710,7 @@ export const useAssetStore = create<AssetStore>()(
                 return trackGenerationAssetOperation(
                     scope,
                     effectKey,
+                    captureUserScope(),
                     (async () => {
                         const id = await generationAssetId(effectKey);
                         let persistedDocument: AssetStorageDocument | null = null;
@@ -389,11 +784,13 @@ export const useAssetStore = create<AssetStore>()(
                     })(),
                 );
             },
-            updateAsset: (id, patch) =>
+            updateAsset: (id, patch) => {
                 set((state) => ({
                     assets: state.assets.map((asset) => (asset.id === id ? parseAssetRecord({ ...asset, ...patch, updatedAt: new Date().toISOString() }) : asset)),
-                })),
-            removeAsset: async (id) => {
+                }));
+                markAssetStoreDraft(id, "upsert");
+            },
+            removeAsset: async (id, options) => {
                 let remainingAssets: Asset[] = [];
                 let removedAsset: Asset | undefined;
                 set((state) => {
@@ -402,8 +799,10 @@ export const useAssetStore = create<AssetStore>()(
                     remainingAssets = assets;
                     return { assets };
                 });
+                markAssetStoreDraft(id, "delete");
                 // 没有本地媒体定位时没有需要由该删除动作回收的 Blob；跳过全库扫描，
                 // 避免纯文本/远程资源删除依赖浏览器 IndexedDB 驱动。
+                if (options?.cleanupMedia === false) return;
                 if (!removedAsset || (!collectImageStorageKeys(removedAsset).size && !collectMediaStorageKeys(removedAsset).size)) return;
                 await get().cleanupImages({ assets: remainingAssets });
             },
@@ -448,6 +847,7 @@ export const useAssetStore = create<AssetStore>()(
             partialize: (state) => ({ assets: state.assets }) as StorageValue<AssetStore>["state"],
             onRehydrateStorage: () => () => {
                 useAssetStore.setState({ hydrated: true });
+                void hydrateAssetStoreDrafts();
             },
         },
     ),

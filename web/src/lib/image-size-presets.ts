@@ -13,7 +13,7 @@ const standardSizes: Record<string, string[]> = {
     "2:3": ["1024x1536", "1664x2496", "2336x3504"],
     "4:5": ["1024x1280", "1792x2240", "2560x3200"],
     "5:4": ["1280x1024", "2240x1792", "3200x2560"],
-    "21:9": ["2048x878", "3136x1344", "3808x1632"],
+    "21:9": ["2048x880", "3136x1344", "3808x1632"],
 };
 
 export function imagePresetForRatio(tier: ImageResolutionTier, input: string): ImageResolutionOption {

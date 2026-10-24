@@ -6,20 +6,21 @@ const card = readFileSync(new URL("../src/components/canvas/canvas-folder-card.t
 const recycleBin = readFileSync(new URL("../src/components/canvas/recycle-bin-dialog.tsx", import.meta.url), "utf8");
 const exportService = readFileSync(new URL("../src/lib/canvas/canvas-export.ts", import.meta.url), "utf8");
 const exportTypes = readFileSync(new URL("../src/types/canvas-export.ts", import.meta.url), "utf8");
+const restoreService = readFileSync(new URL("../src/lib/canvas/canvas-archive-restore.ts", import.meta.url), "utf8");
 const deleteDialog = readFileSync(new URL("../src/components/canvas/canvas-delete-projects-dialog.tsx", import.meta.url), "utf8");
 const lifecycle = readFileSync(new URL("../src/pages/canvas/use-canvas-project-lifecycle.ts", import.meta.url), "utf8");
 const projectRepository = readFileSync(new URL("../src/services/workspace-project-repository.ts", import.meta.url), "utf8");
 
 test("local project library exposes the complete local workspace lifecycle", () => {
     expect(libraryPage).toContain("useCanvasStore");
-    expect(libraryPage).toContain("createLocalCanvasProject");
+    expect(libraryPage).toContain("beginLocalCanvasProject");
     expect(libraryPage).not.toContain("createCanvasProjectWithRemoteSync");
     expect(libraryPage).toContain("新建文件夹");
     expect(libraryPage).toContain("回收站");
     expect(libraryPage).toContain("导入");
     expect(libraryPage).toContain("exportCanvasProjects");
     expect(libraryPage).toContain("搜索项目");
-    expect(libraryPage).toContain('onClick={() => createFolder("未命名文件夹")}');
+    expect(libraryPage).toContain('createCanvasLibraryFolder("未命名文件夹")');
     expect(libraryPage).toContain('title="重命名文件夹"');
     expect(libraryPage).not.toContain('title={editingFolderId ? "重命名文件夹" : "新建文件夹"}');
     expect(libraryPage).toContain('const visibleFolders = folderFilter === "all" ? folders : [];');
@@ -33,9 +34,10 @@ test("local project library exposes the complete local workspace lifecycle", () 
     expect(recycleBin).not.toContain('import.meta.env.VITE_CANVAS_LOCAL_MODE !== "false"');
     expect(exportService).toContain("folders?: CanvasFolder[]");
     expect(exportService).toContain("projectFolderIds");
-    expect(libraryPage).toContain("folderIdMap");
-    expect(libraryPage).toContain("data.folders || []");
-    expect(exportTypes).toContain("folders?: CanvasFolder[]");
+    expect(libraryPage).toContain("restoreCanvasArchive(file");
+    expect(restoreService).toContain("folderIdMap");
+    expect(restoreService).toContain("data.folders || []");
+    expect(exportTypes).toContain("CanvasFolder & { coverPath?: string");
     expect(deleteDialog).not.toContain('import.meta.env.VITE_CANVAS_LOCAL_MODE !== "false"');
     expect(deleteDialog).toContain("deleteWorkspaceCanvasProjects");
     expect(lifecycle).toContain("createWorkspaceCanvasProject");

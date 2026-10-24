@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -113,7 +115,7 @@ func ensureLocalBridge(ctx context.Context, port int) (*browserbridge.Client, er
 	if err != nil {
 		return nil, err
 	}
-	child := exec.Command(executable, "managed-serve", "--port", strconv.Itoa(port))
+	child := exec.Command(managedExecutable(executable), "managed-serve", "--port", strconv.Itoa(port))
 	detachService(child)
 	// No inherited stdio: the bridge must not hold the MCP client's protocol pipes
 	// open after that client exits. Startup diagnostics are reported by this parent.
@@ -121,7 +123,7 @@ func ensureLocalBridge(ctx context.Context, port int) (*browserbridge.Client, er
 		return nil, fmt.Errorf("cannot start the qisiTV local service: %w", err)
 	}
 	go func() { _ = child.Wait() }()
-	deadline := time.NewTimer(10 * time.Second)
+	deadline := time.NewTimer(45 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -137,4 +139,19 @@ func ensureLocalBridge(ctx context.Context, port int) (*browserbridge.Client, er
 		case <-ticker.C:
 		}
 	}
+}
+
+// Only a sibling from the installed package may replace the lightweight bridge.
+// PATH is deliberately ignored: a similarly named program is not our engine.
+func managedExecutable(connector string) string {
+	name := "qisitv-engine"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	candidate := filepath.Join(filepath.Dir(connector), name)
+	info, err := os.Stat(candidate)
+	if err == nil && info.Mode().IsRegular() && info.Size() > 0 && (runtime.GOOS == "windows" || info.Mode().Perm()&0o111 != 0) {
+		return candidate
+	}
+	return connector
 }

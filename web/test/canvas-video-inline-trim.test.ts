@@ -4,6 +4,7 @@ import {
     applyInlineVideoTrimMetadata,
     moveInlineVideoTrimRange,
     normalizeInlineVideoTrimRange,
+    placeInlineVideoTrimDuration,
 } from "../src/lib/canvas/canvas-video-inline-trim";
 
 describe("inline video trim range", () => {
@@ -15,6 +16,18 @@ describe("inline video trim range", () => {
     test("moves the whole selection without changing its duration or crossing source bounds", () => {
         expect(moveInlineVideoTrimRange({ startMs: 2_000, endMs: 5_000 }, -4_000, 12_000)).toEqual({ startMs: 0, endMs: 3_000 });
         expect(moveInlineVideoTrimRange({ startMs: 8_000, endMs: 11_000 }, 4_000, 12_000)).toEqual({ startMs: 9_000, endMs: 12_000 });
+    });
+});
+
+describe("inline video trim duration placement", () => {
+    test("centers the duration inside a wide selection", () => {
+        expect(placeInlineVideoTrimDuration(600, 20, 80, 76)).toEqual({ floating: false, left: 300 });
+    });
+
+    test("floats above a narrow selection and stays within the timeline ends", () => {
+        expect(placeInlineVideoTrimDuration(600, 40, 43, 76)).toEqual({ floating: true, left: 249 });
+        expect(placeInlineVideoTrimDuration(600, 0, 3, 76)).toEqual({ floating: true, left: 42 });
+        expect(placeInlineVideoTrimDuration(600, 97, 100, 76)).toEqual({ floating: true, left: 558 });
     });
 });
 

@@ -47,7 +47,7 @@ export function CanvasFocusModeBar({ versionsOpen, onToggleVersions, syncStatus,
                     </button>
                 </Tooltip>
                 {syncStatus}
-                <Tooltip title="版本记录与本地草稿">
+                <Tooltip title="版本记录">
                     <button type="button" onClick={onToggleVersions} className="grid size-8 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.text, background: versionsOpen ? theme.toolbar.itemHover : undefined }} aria-label="版本记录" aria-pressed={versionsOpen}>
                         <History className="size-4" />
                     </button>

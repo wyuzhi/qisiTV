@@ -1,7 +1,8 @@
-import { memo, useEffect, useMemo, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
 import { Link2 } from "lucide-react";
 
-import { ConnectionPath } from "@/components/canvas/canvas-connections";
+import { ConnectionPath, canvasConnectionPath } from "@/components/canvas/canvas-connections";
+import { canvasNodeDragGeometry, subscribeCanvasNodeDragPreview } from "@/lib/canvas/canvas-live-viewport";
 import { CanvasFrameNode } from "@/components/canvas/canvas-frame-node";
 import { CanvasNode } from "@/components/canvas/canvas-node";
 import type { CanvasVideoCropRect } from "@/components/canvas/canvas-video-crop-dialog";
@@ -19,6 +20,7 @@ type DragPreview = { x: number; y: number; nodeIds: Set<string> } | null;
 type NodeBounds = { left: number; top: number; width: number; height: number; count: number } | null;
 
 type CanvasProjectWorldLayersProps = {
+    containerRef: RefObject<HTMLDivElement | null>;
     projectId: string;
     viewportScale: number;
     connectionLayerBounds: { left: number; top: number; width: number; height: number };
@@ -53,7 +55,6 @@ type CanvasProjectWorldLayersProps = {
     selectedNodeBounds: NodeBounds;
     batchSourceNodeIds: string[];
     batchConnectionPreview: CanvasBatchConnectionPreview | null;
-    isNodeDragging: boolean;
     selectionBoundsElementRef: RefObject<HTMLDivElement | null>;
     renderCanvasNodeContent: (node: CanvasNodeData) => ReactNode;
     onConnectionSelect: (connectionId: string) => void;
@@ -79,7 +80,6 @@ type CanvasProjectWorldLayersProps = {
     onViewImage: (node: CanvasNodeData) => void;
     onReplaceMedia: (node: CanvasNodeData) => void;
     onOpenTextEditor: (node: CanvasNodeData) => void;
-    onOpenDirector: (node: CanvasNodeData) => void;
     onOpenDrawing: (node: CanvasNodeData) => void;
     onStartBatchConnection: (event: ReactPointerEvent, sourceNodeIds: string[]) => void;
     imageCropNodeId?: string | null;
@@ -102,6 +102,38 @@ const EMPTY_CANVAS_NODES: CanvasNodeData[] = [];
 
 export const CanvasProjectWorldLayers = memo(function CanvasProjectWorldLayers(props: CanvasProjectWorldLayersProps) {
     const { viewportScale } = props;
+    const connectionLayerRef = useRef<SVGSVGElement>(null);
+    useLayoutEffect(() => {
+        const layer = connectionLayerRef.current;
+        const container = props.containerRef.current || layer?.closest<HTMLDivElement>("[data-canvas-viewport]");
+        if (!container || !layer) return;
+        const groups = new Map<string, SVGGElement>();
+        layer.querySelectorAll<SVGGElement>("g[data-canvas-connection-id]").forEach((group) => {
+            const id = group.dataset.canvasConnectionId;
+            if (id) groups.set(id, group);
+        });
+        return subscribeCanvasNodeDragPreview(container, (preview) => {
+            for (const { connection, from, to } of props.displayConnections) {
+                if (preview && !preview.nodeIds.has(from.id) && !preview.nodeIds.has(to.id)) continue;
+                const group = groups.get(connection.id);
+                if (!group) continue;
+                const movedFrom = canvasNodeDragGeometry(from, preview);
+                const movedTo = canvasNodeDragGeometry(to, preview);
+                const { pathD, startX, startY, endX, endY } = canvasConnectionPath(connection, movedFrom, movedTo, props.scriptScrollTopById[from.id] || 0, props.scriptScrollTopById[to.id] || 0);
+                group.querySelectorAll<SVGPathElement>("path[d]").forEach((path) => path.setAttribute("d", pathD));
+                const endpoints = group.querySelectorAll<SVGCircleElement>("circle");
+                endpoints[0]?.setAttribute("cx", String(startX));
+                endpoints[0]?.setAttribute("cy", String(startY));
+                endpoints[1]?.setAttribute("cx", String(endX));
+                endpoints[1]?.setAttribute("cy", String(endY));
+                const gradient = group.querySelector<SVGLinearGradientElement>("linearGradient[gradientUnits]");
+                gradient?.setAttribute("x1", String(startX));
+                gradient?.setAttribute("y1", String(startY));
+                gradient?.setAttribute("x2", String(endX));
+                gradient?.setAttribute("y2", String(endY));
+            }
+        });
+    }, [props.containerRef, props.displayConnections, props.scriptScrollTopById]);
     const [activeMediaNodeId, setActiveMediaNodeId] = useState<string | null>(null);
     useEffect(() => {
         if (activeMediaNodeId && !props.nodeById.has(activeMediaNodeId)) setActiveMediaNodeId(null);
@@ -127,6 +159,7 @@ export const CanvasProjectWorldLayers = memo(function CanvasProjectWorldLayers(p
     return (
         <>
             <svg
+                ref={connectionLayerRef}
                 className="absolute overflow-visible"
                 viewBox={`${props.connectionLayerBounds.left} ${props.connectionLayerBounds.top} ${props.connectionLayerBounds.width} ${props.connectionLayerBounds.height}`}
                 style={{ left: props.connectionLayerBounds.left, top: props.connectionLayerBounds.top, width: props.connectionLayerBounds.width, height: props.connectionLayerBounds.height, pointerEvents: "none", zIndex: 0 }}
@@ -140,9 +173,7 @@ export const CanvasProjectWorldLayers = memo(function CanvasProjectWorldLayers(p
                         fromScrollTop={props.scriptScrollTopById[from.id] || 0}
                         toScrollTop={props.scriptScrollTopById[to.id] || 0}
                         active={props.selectedConnectionId === connection.id || props.relatedConnectionIds.has(connection.id)}
-                        visualMode="hover-only"
-                        // 拖动预览由 Leafer 图形层逐帧同步；隐藏这层静态 SVG 描边，避免两套位置叠出残影。
-                        hideVisual={props.isNodeDragging}
+                        visualMode="full"
                         onSelect={() => props.onConnectionSelect(connection.id)}
                         onContextMenu={(event) => props.onConnectionContextMenu(event, connection.id)}
                     />
@@ -225,7 +256,6 @@ export const CanvasProjectWorldLayers = memo(function CanvasProjectWorldLayers(p
                         onViewImage={props.onViewImage}
                         onReplaceMedia={props.onReplaceMedia}
                         onOpenTextEditor={props.onOpenTextEditor}
-                        onOpenDirector={props.onOpenDirector}
                         onOpenDrawing={props.onOpenDrawing}
                         onContextMenu={props.onNodeContextMenu}
                     />

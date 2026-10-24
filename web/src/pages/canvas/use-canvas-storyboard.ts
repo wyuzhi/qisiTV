@@ -48,6 +48,8 @@ type UseCanvasStoryboardOptions = {
     setConnections: Dispatch<SetStateAction<CanvasConnection[]>>;
     setSelectedNodeIds: Dispatch<SetStateAction<Set<string>>>;
     enqueueGenerationBatch: (sourceNodeId: string, mode: CanvasGenerationBatchMode, targets: Array<{ rowId: string; nodeId: string }>) => string | undefined;
+    startGenerationRequest: (targetNodeId: string, originNodeId: string, runningId?: string, controller?: AbortController) => AbortController;
+    finishGenerationRequest: (targetNodeId: string, controller: AbortController) => void;
 };
 
 const NODE_STATUS_IDLE = "idle" as const;
@@ -64,6 +66,8 @@ export function useCanvasStoryboard({
     setConnections,
     setSelectedNodeIds,
     enqueueGenerationBatch,
+    startGenerationRequest,
+    finishGenerationRequest,
 }: UseCanvasStoryboardOptions) {
     const { message, modal } = App.useApp();
     const effectiveConfig = useEffectiveConfig();
@@ -137,7 +141,9 @@ export function useCanvasStoryboard({
         if (!scriptNode || !prompt.trim()) return;
         if (storyboardRequests.current.has(nodeId) || scriptNode.metadata?.status === NODE_STATUS_LOADING) { message.warning("当前分镜正在处理，请等待原任务完成"); return false; }
         const lifetimeSignal = storyboardLifetime.current.signal;
-        const signal = callerSignal ? AbortSignal.any([lifetimeSignal, callerSignal]) : lifetimeSignal;
+        // 拆镜登记为画布上的进行中请求：切换画布、同一节点上发起新请求时随之取消。
+        const requestController = new AbortController();
+        const signal = AbortSignal.any([lifetimeSignal, requestController.signal, ...(callerSignal ? [callerSignal] : [])]);
         const scope = getActiveUserScope();
         const originalRows = JSON.stringify(scriptNode.metadata?.storyboard?.rows || []);
         const assertCurrent = () => {
@@ -163,6 +169,7 @@ export function useCanvasStoryboard({
             return;
         }
         storyboardRequests.current.add(nodeId);
+        startGenerationRequest(nodeId, nodeId, nodeId, requestController);
         try {
             const skillExecution = await skillRuntime.prepare({
                 profile: "shortDrama",
@@ -250,14 +257,16 @@ export function useCanvasStoryboard({
             message.error(details);
             return false;
         } finally {
-            if (signal.aborted && !lifetimeSignal.aborted && scope === getActiveUserScope()) setNodes((current) => current.map((node) => {
+            // 被同一节点上的新请求接替时，节点归新请求，这里不再改它的状态。
+            if (signal.aborted && !lifetimeSignal.aborted && !requestController.signal.aborted && scope === getActiveUserScope()) setNodes((current) => current.map((node) => {
                 if (node.id !== nodeId) return node;
                 const active = node.metadata?.taskStatus === "queued" || node.metadata?.taskStatus === "running";
                 return { ...node, metadata: { ...node.metadata, status: active ? NODE_STATUS_LOADING : NODE_STATUS_IDLE, taskStage: active ? "已提交后台任务，等待结果" : undefined } };
             }));
             storyboardRequests.current.delete(nodeId);
+            finishGenerationRequest(nodeId, requestController);
         }
-    }, [addedSkills, confirmGenerationSubmission, connectionsRef, effectiveConfig, isAiConfigReady, localMode, message, modal, nodesRef, projectId, replaceScriptRows, setNodes]);
+    }, [addedSkills, confirmGenerationSubmission, connectionsRef, effectiveConfig, finishGenerationRequest, isAiConfigReady, localMode, message, modal, nodesRef, projectId, replaceScriptRows, setNodes, startGenerationRequest]);
 
     const ensureScriptImageNodes = useCallback((nodeId: string, rowIds: string[]) => {
         const scriptNode = nodesRef.current.find((node) => node.id === nodeId && node.type === CanvasNodeType.Script);

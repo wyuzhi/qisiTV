@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ImgHTMLAttributes, type ReactNode } from "react";
 
-import { resourceIdFromStorageKey } from "@/services/api/resources";
+import { ownedResourceIdFromMediaRef, resourceIdFromStorageKey } from "@/services/api/resources";
 import { cacheResourceObjectUrl } from "@/services/resource-blob-cache";
 import { resolveImageUrl } from "@/services/image-storage";
 
@@ -17,6 +17,8 @@ type CachedResourceImageProps = Omit<ImgHTMLAttributes<HTMLImageElement>, "src">
  * 任意本地图片 storageKey 都会自动从 LocalForage 恢复有效的 Object URL。
  */
 export function CachedResourceImage({ storageKey, src = "", fallback = null, loadingFallback = fallback, eager = false, onError, ...props }: CachedResourceImageProps) {
+    const inferredResourceId = !storageKey ? ownedResourceIdFromMediaRef(undefined, src) : "";
+    if (inferredResourceId) storageKey = `resource:${inferredResourceId}`;
     const remoteResource = Boolean(resourceIdFromStorageKey(storageKey));
     const localImageResource = Boolean(storageKey && !remoteResource);
     const storageBackedImage = remoteResource || localImageResource;

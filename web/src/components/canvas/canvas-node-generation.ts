@@ -17,6 +17,7 @@ import { isCanvasWorkflowProvider } from "@/lib/canvas/canvas-workflow";
 import { audioFileExtension } from "@/lib/character-voice-formats";
 import type { ModelReferenceLimits } from "@/lib/model-selection";
 import type { Asset } from "@/stores/use-asset-store";
+import { resourceIdFromStorageKey } from "@/services/api/resources";
 import { assertCanvasImageReferenceTable, type CanvasImageTableReference } from "@/lib/canvas/canvas-reference-table";
 import { compileBoundMediaReferences, renderCharacterReferenceBindings, type BoundMediaMention, type CharacterReferenceBinding } from "@/lib/canvas/generation-reference-contract";
 import { resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
@@ -205,6 +206,9 @@ function buildComposerGenerationContext(
     workflowMediaInputs: NodeGenerationInput[] = [],
     preserveMediaBindings = false,
 ): NodeGenerationContext {
+    // Identity tokens already have a closing delimiter. Parsing them before
+    // rendering positional labels keeps adjacent prose and repeated tokens intact.
+    const normalizedPrompt = prompt;
     const slotInputByToken = new Map(generationSlotEntries(inputs).map(({ token, input }) => [token, input]));
     const assetInputById = new Map(inputs.filter((input) => input.nodeId.startsWith("asset:")).map((input) => [input.nodeId.slice("asset:".length), input]));
     const nodeInputById = new Map(inputs.filter((input) => !input.nodeId.startsWith("asset:")).map((input) => [input.nodeId, input]));
@@ -227,10 +231,10 @@ function buildComposerGenerationContext(
         });
     }
 
-    for (const match of prompt.matchAll(GENERATION_MENTION_PATTERN)) {
+    for (const match of normalizedPrompt.matchAll(GENERATION_MENTION_PATTERN)) {
         if (match.index === undefined) continue;
-        nextPrompt += prompt.slice(lastIndex, match.index);
-        const input = resolveGenerationMention(prompt, match, slotInputByToken, nodeInputById, assetInputById);
+        nextPrompt += normalizedPrompt.slice(lastIndex, match.index);
+        const input = resolveGenerationMention(normalizedPrompt, match, slotInputByToken, nodeInputById, assetInputById);
         if (input) {
             hasToken = true;
             let label = labelByNodeId.get(input.nodeId);
@@ -250,7 +254,7 @@ function buildComposerGenerationContext(
         lastIndex = match.index + match[0].length;
     }
 
-    nextPrompt += prompt.slice(lastIndex);
+    nextPrompt += normalizedPrompt.slice(lastIndex);
     // 显式 @文本 引用是用户写进输入框的内容，必须内联真实文本；promptOnly 只拦自动上游文本。
     if (textBlocks.length) nextPrompt = `${nextPrompt.trim()}\n\n${textBlocks.join("\n\n")}`;
     if (preserveMediaBindings) {
@@ -335,6 +339,14 @@ export function generationInputMentionLabel(input: NodeGenerationInput, inputs: 
     return entry?.label || generationLabel(input.sourceKind === "drawing" ? "drawing" : input.type, 0);
 }
 
+export function normalizeGenerationNodeMentionTokens(prompt: string, inputs: NodeGenerationInput[]) {
+    const labelByNodeId = new Map(generationSlotEntries(inputs).map(({ input, label }) => [input.nodeId, label]));
+    return prompt.replace(/@\[node:([^\]]+)\]/g, (token, nodeId: string) => {
+        const label = labelByNodeId.get(nodeId);
+        return label ? `@${label}` : token;
+    });
+}
+
 function hasResolvableGenerationMention(prompt: string, inputs: NodeGenerationInput[]) {
     return inspectGenerationMentions(prompt, inputs).hasResolved;
 }
@@ -346,17 +358,18 @@ function assertResolvableGenerationMentions(prompt: string, inputs: NodeGenerati
 }
 
 function inspectGenerationMentions(prompt: string, inputs: NodeGenerationInput[]) {
+    const normalizedPrompt = prompt;
     const slotInputByToken = new Map(generationSlotEntries(inputs).map(({ token, input }) => [token, input]));
     const nodeInputById = new Map(inputs.filter((input) => !input.nodeId.startsWith("asset:")).map((input) => [input.nodeId, input]));
     const assetInputById = new Map(inputs.filter((input) => input.nodeId.startsWith("asset:")).map((input) => [input.nodeId.slice("asset:".length), input]));
     const unresolved = new Set<string>();
     let hasResolved = false;
-    for (const match of prompt.matchAll(GENERATION_MENTION_PATTERN)) {
+    for (const match of normalizedPrompt.matchAll(GENERATION_MENTION_PATTERN)) {
         if (match[3]) {
             const end = (match.index || 0) + match[0].length;
-            if (!hasMentionBoundary(prompt, end)) continue;
+            if (!hasMentionBoundary(normalizedPrompt, end)) continue;
         }
-        if (resolveGenerationMention(prompt, match, slotInputByToken, nodeInputById, assetInputById)) hasResolved = true;
+        if (resolveGenerationMention(normalizedPrompt, match, slotInputByToken, nodeInputById, assetInputById)) hasResolved = true;
         else unresolved.add(match[0]);
     }
     return { hasResolved, unresolved: [...unresolved] };
@@ -525,18 +538,21 @@ export async function hydrateNodeGenerationContext(context: NodeGenerationContex
         ]);
         context = { ...context, referenceVideos, referenceAudios };
     }
-    const { imageToDataUrl } = await import("@/services/image-storage");
     let referenceImages = await Promise.all(
         context.referenceImages.map(async (image) => {
             if (image.source?.kind === "drawing") return resolveCanvasDrawingReference(projectId, image);
             if (image.source?.kind === "colorgrade") return resolveCanvasColorGradeReference(image);
+            // Backend task preparation consumes these references directly. Reading
+            // their preview blob here would make submission wait for the UI cache.
+            if (resourceIdFromStorageKey(image.storageKey) || /^https?:\/\//i.test(image.url || image.dataUrl)) return image;
+            const { imageToDataUrl } = await import("@/services/image-storage");
             return { ...image, dataUrl: await imageToDataUrl(image) };
         }),
     );
     if (!context.characterReferences.length) return { ...context, referenceImages };
     if (!domainProjectId) throw new Error("角色引用未关联短剧项目，无法解析角色版本");
     const { getProjectCharacter } = await import("@/services/api/projects");
-    const { getResource, resourceFileUrl, resourceIdFromStorageKey, resourceStorageKey } = await import("@/services/api/resources");
+    const { getResource, resourceFileUrl, resourceStorageKey } = await import("@/services/api/resources");
     const details = await Promise.all(context.characterReferences.map((reference) => getProjectCharacter(domainProjectId, reference.assetId)));
     const remainingBudget = Math.max(0, (referenceLimits?.maxImages ?? 9) - referenceImages.length);
     const selected = details.flatMap((detail, index) => {
@@ -558,8 +574,7 @@ export async function hydrateNodeGenerationContext(context: NodeGenerationContex
         dataUrl: "",
         storageKey: resourceStorageKey(representation.resourceId),
     } satisfies ReferenceImage));
-    const hydratedCharacterImages = await Promise.all(characterImages.map(async (image) => ({ ...image, dataUrl: await imageToDataUrl(image) })));
-    referenceImages = [...referenceImages, ...hydratedCharacterImages];
+    referenceImages = [...referenceImages, ...characterImages];
     const characterBlocks = details.map((detail) => compileCharacterReferencePrompt(detail.asset.title, detail.character.definition));
     const resolvedCharacterVersions = details.map((detail) => ({ assetId: detail.asset.id, versionId: detail.character.versionId }));
     const resolvedCharacterVoices = details.flatMap((detail): ResolvedCharacterVoice[] => {
@@ -600,6 +615,7 @@ export async function hydrateNodeGenerationContext(context: NodeGenerationContex
         const extension = audioFileExtension(resource.mimeType, resource.objectKey);
         return resolveReferenceMediaDuration({
             id: `character-voice-${voice.assetId}`,
+            sourceNodeId: context.characterReferences.find((reference) => reference.assetId === voice.assetId)?.nodeId,
             name: `${voice.characterName}-声音样本.${extension}`,
             type: resource.mimeType || "audio/mpeg",
             url: resourceFileUrl(voice.sampleResourceId!),
@@ -638,11 +654,9 @@ export async function hydrateNodeGenerationContext(context: NodeGenerationContex
 /** Resolve bound references after model selection; only Seedance reference arrays use mention order. */
 export function compileNodeGenerationReferences<T extends NodeGenerationContext>(context: T, config: AiConfig, operation?: string): T {
     const request = resolveModelRequestConfig(config, config.model);
-    const likeaiSeedance = (request.interfaceType === "likeai-video" || (!request.interfaceType && request.apiFormat === "likeai"))
-        && /^doubao_seedance_2(?:_|$)/i.test(request.model);
     const seedanceReferences = operation === "reference_to_video"
         && (!config.taskWorkflowProvider || config.taskWorkflowProvider === "model")
-        && (likeaiSeedance || isSeedance2Family(request.interfaceType, request.model));
+        && isSeedance2Family(request.interfaceType, request.model);
     const compiled = compileBoundMediaReferences(context, seedanceReferences);
     return seedanceReferences && context.characterReferenceBindings?.length
         ? { ...compiled, prompt: `${renderCharacterReferenceBindings(context.characterReferenceBindings, compiled)}\n\n${compiled.prompt}` }

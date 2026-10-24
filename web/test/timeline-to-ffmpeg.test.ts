@@ -1,22 +1,14 @@
 import { describe, expect, test } from "bun:test";
 
-import { buildTimelineRenderPlan, formatSrtTimestamp, type TimelineRenderSource } from "../src/lib/timeline/timeline-to-ffmpeg";
-import type { TimelineClip, TimelineProject } from "../src/types/timeline";
-
-function videoClip(id: string, nodeId: string, startMs: number, durationMs: number): TimelineClip {
-    return { id, kind: "video", nodeId, trackId: "video", startMs, durationMs, title: id, sourceStartMs: 0, sourceDurationMs: durationMs };
-}
-
-function timeline(clips: TimelineClip[]): TimelineProject {
-    return { version: 2, tracks: [], clips, durationMs: clips.reduce((max, clip) => Math.max(max, clip.startMs + clip.durationMs), 0) };
-}
+import type { CanonicalTimelinePlan } from "../src/lib/timeline/timeline-canonical-plan";
+import { formatSrtTimestamp, lowerCanonicalPlan, type TimelineRenderSource } from "../src/lib/timeline/timeline-to-ffmpeg";
+import { loadEditingPlan } from "./helpers/editing-fixtures";
 
 function source(nodeId: string): TimelineRenderSource {
     return { nodeId, fileName: `input-${nodeId}.mp4`, durationMs: 15_000, url: `file:///${nodeId}.mp4` };
 }
 
-/** 从导出计划推导 concat 后的总时长：trim 用 -t，gap 用 lavfi 黑场 d=。 */
-function concatTotalSeconds(plan: ReturnType<typeof buildTimelineRenderPlan>): number {
+function concatTotalSeconds(plan: ReturnType<typeof lowerCanonicalPlan>): number {
     let total = 0;
     for (const entry of plan.concatEntries) {
         const step = plan.steps.find((item) => item.output === entry);
@@ -29,8 +21,7 @@ function concatTotalSeconds(plan: ReturnType<typeof buildTimelineRenderPlan>): n
     return total;
 }
 
-/** 按 concat 顺序逐段累加，校验每个片段/黑场在成片中的实际起点与时间线期望一致。 */
-function concatStartOffsetsMs(plan: ReturnType<typeof buildTimelineRenderPlan>): number[] {
+function concatStartOffsetsMs(plan: ReturnType<typeof lowerCanonicalPlan>): number[] {
     const offsets: number[] = [];
     let cursor = 0;
     for (const entry of plan.concatEntries) {
@@ -46,111 +37,135 @@ function concatStartOffsetsMs(plan: ReturnType<typeof buildTimelineRenderPlan>):
     return offsets;
 }
 
-describe("buildTimelineRenderPlan 片段与黑场对齐", () => {
-    test("全部片段有源素材且首尾相接：无黑场、concat 顺序=片段顺序、总长等于时间线", () => {
-        const project = timeline([videoClip("a", "node-a", 0, 15_000), videoClip("b", "node-b", 15_000, 4_000), videoClip("c", "node-c", 19_000, 15_000)]);
-        const plan = buildTimelineRenderPlan(project, [source("node-a"), source("node-b"), source("node-c")], { width: 1280, height: 720, fps: 30, outputName: "out.mp4" });
-        expect(plan.steps.filter((step) => step.kind === "gap")).toHaveLength(0);
-        expect(concatTotalSeconds(plan)).toBe(34);
-        expect(plan.concatEntries).toEqual(["trim-0.mp4", "trim-1.mp4", "trim-2.mp4"]);
-    });
-
-    test("全部有源但中间有空隙：黑场必须插在片段之间，而不是追加到片尾", () => {
-        // A(0-15s) 与 B(25-40s) 之间有 10s 空隙：修复前 concat=[trim-0,trim-1,gap-1]（黑场在片尾，字幕错位）。
-        const project = timeline([videoClip("a", "node-a", 0, 15_000), videoClip("b", "node-b", 25_000, 15_000)]);
-        const plan = buildTimelineRenderPlan(project, [source("node-a"), source("node-b")], { width: 1280, height: 720, fps: 30, outputName: "out.mp4" });
-        expect(plan.concatEntries).toEqual(["trim-0.mp4", "gap-1.mp4", "trim-1.mp4"]);
+describe("lowerCanonicalPlan 片段与黑场对齐", () => {
+    test("共享 gap-mix 夹具：中间空隙插黑场，配音裁剪/音量/淡化进入 mix", () => {
+        const canonical = loadEditingPlan("gap-mix.plan.json");
+        const plan = lowerCanonicalPlan(canonical, [source("node-a"), source("node-b"), source("voice")], { width: 1280, height: 720, fps: 30, outputName: "out.mp4" });
+        expect(plan.concatEntries).toEqual(["trim-0.mp4", "gap-1.mp4", "trim-2.mp4"]);
         const gaps = plan.steps.filter((step) => step.kind === "gap");
         expect(gaps).toHaveLength(1);
         expect(gaps[0].args.join(" ")).toContain("d=10");
         expect(concatTotalSeconds(plan)).toBe(40);
-        // B 在成片中的起点 = 15s + 10s 黑场 = 25s，与时间线一致。
         expect(concatStartOffsetsMs(plan)).toEqual([0, 15_000, 25_000]);
+        const mix = plan.steps.find((step) => step.kind === "mix")!;
+        expect(mix.args.join(" ")).toContain("atrim=start=0.1:duration=1.5");
+        expect(mix.args.join(" ")).toContain("volume=0,afade=t=in:st=0:d=0.1,afade=t=out:st=1.3:d=0.2,adelay=500:all=1");
+        expect(mix.args.join(" ")).toContain("amix=inputs=2:normalize=0:duration=first");
+        expect(mix.args.join(" ")).not.toContain("alimiter");
+        expect(plan.request).toEqual({
+            videoClipIds: ["a", "b"],
+            audioClipIds: ["voice"],
+            subtitleClipIds: ["sub"],
+            durationMs: 40000,
+            burnSubtitles: true,
+        });
+        expect(plan.steps.some((step) => step.kind === "burn")).toBe(true);
+        expect(plan.subtitleSrt).toContain("中文");
     });
 
-    test("中间片段无源素材（节点已删除）：该片段跨度补黑场，顺序与总长保持时间线语义", () => {
-        const project = timeline([videoClip("a", "node-a", 0, 15_000), videoClip("b", "node-b", 15_000, 4_000), videoClip("c", "node-c", 19_000, 15_000)]);
-        const plan = buildTimelineRenderPlan(project, [source("node-a"), source("node-c")], { width: 1280, height: 720, fps: 30, outputName: "out.mp4" });
-        // 黑场 4s 顶替无源的 B，插在 A 与 C 之间：修复前为 [trim-0,trim-2,gap-2]（黑场跑到了片尾）。
-        expect(plan.concatEntries).toEqual(["trim-0.mp4", "gap-2.mp4", "trim-2.mp4"]);
-        const gaps = plan.steps.filter((step) => step.kind === "gap");
-        expect(gaps).toHaveLength(1);
-        expect(gaps[0].args.join(" ")).toContain("d=4");
-        expect(concatTotalSeconds(plan)).toBe(34);
-        // C 的起点 = 15s + 4s 黑场 = 19s，与时间线一致，后续字幕不漂移。
-        expect(concatStartOffsetsMs(plan)).toEqual([0, 15_000, 19_000]);
+    test("共享 six-second-mix 夹具：无黑场、concat 顺序=片段顺序", () => {
+        const canonical = loadEditingPlan("six-second-mix.plan.json");
+        const plan = lowerCanonicalPlan(canonical, [source("v0"), source("v1"), source("v2"), source("voice"), source("bgm")], { width: 320, height: 180, fps: 30, outputName: "out.mp4" });
+        expect(plan.steps.filter((step) => step.kind === "gap")).toHaveLength(0);
+        expect(concatTotalSeconds(plan)).toBe(6);
+        expect(plan.concatEntries).toEqual(["trim-0.mp4", "trim-1.mp4", "trim-2.mp4"]);
+        expect(plan.request.audioClipIds).toEqual(["bgm", "voice"]);
+        expect(plan.subtitleSrt).toContain("中文字幕完整性验证");
     });
 
-    test("无源片段前有空隙：只补一个 gap，黑场不重复、成片不超长", () => {
-        // a(0-15s 有源)、b(20-24s 无源)、c(24-39s 有源)：b 前有 5s 空隙。
-        // 修复前 b 会先产出 gap(d=5)，c 又按全跨度产出 gap(d=9)，黑场重复计长、成片 44s≠39s。
-        const project = timeline([videoClip("a", "node-a", 0, 15_000), videoClip("b", "node-b", 20_000, 4_000), videoClip("c", "node-c", 24_000, 15_000)]);
-        const plan = buildTimelineRenderPlan(project, [source("node-a"), source("node-c")], { width: 1280, height: 720, fps: 30, outputName: "out.mp4" });
-        const gaps = plan.steps.filter((step) => step.kind === "gap");
-        expect(gaps).toHaveLength(1);
-        // 单个 gap 覆盖 b 的跨度 + 空隙 = 24s - 15s = 9s。
-        expect(gaps[0].args.join(" ")).toContain("d=9");
-        expect(plan.concatEntries).toEqual(["trim-0.mp4", "gap-2.mp4", "trim-2.mp4"]);
-        expect(concatTotalSeconds(plan)).toBe(39);
-        expect(concatStartOffsetsMs(plan)).toEqual([0, 15_000, 24_000]);
+    test("缺少计划所需媒体源必须明确失败", () => {
+        const canonical = loadEditingPlan("gap-mix.plan.json");
+        expect(() => lowerCanonicalPlan(canonical, [source("node-a")])).toThrow("找不到素材");
     });
 
-    test("连续两个无源片段：合并为一个黑场，跨度等于两段之和", () => {
-        // a(0-15s 有源)、b(15-19s 无源)、c(19-27s 无源)、d(27-42s 有源)。
-        const project = timeline([videoClip("a", "node-a", 0, 15_000), videoClip("b", "node-b", 15_000, 4_000), videoClip("c", "node-c", 19_000, 8_000), videoClip("d", "node-d", 27_000, 15_000)]);
-        const plan = buildTimelineRenderPlan(project, [source("node-a"), source("node-d")], { width: 1280, height: 720, fps: 30, outputName: "out.mp4" });
-        const gaps = plan.steps.filter((step) => step.kind === "gap");
-        expect(gaps).toHaveLength(1);
-        // 15s→27s 之间（b+c）只补一个黑场 d=12。
-        expect(gaps[0].args.join(" ")).toContain("d=12");
-        expect(plan.concatEntries).toEqual(["trim-0.mp4", "gap-3.mp4", "trim-3.mp4"]);
-        expect(concatTotalSeconds(plan)).toBe(42);
-        expect(concatStartOffsetsMs(plan)).toEqual([0, 15_000, 27_000]);
+    test("静音独立音轨仍进入 mix，音量为 0", () => {
+        const canonical = structuredClone(loadEditingPlan("six-second-mix.plan.json"));
+        canonical.audio.find((clip) => clip.clipId === "bgm")!.muted = true;
+        const plan = lowerCanonicalPlan(canonical, [source("v0"), source("v1"), source("v2"), source("voice"), source("bgm")]);
+        const mix = plan.steps.find((step) => step.kind === "mix")!;
+        expect(mix.args.join(" ")).toContain("volume=0");
+        expect(plan.steps.some((step) => step.kind === "mix")).toBe(true);
     });
 
-    test("开头无源且起点非零：单个 gap 从 0 补到首个有源片段起点", () => {
-        // x(5-9s 无源)、a(9-24s 有源)：开头到 a 之间应只有一个 d=9 的黑场。
-        const project = timeline([videoClip("x", "node-x", 5_000, 4_000), videoClip("a", "node-a", 9_000, 15_000)]);
-        const plan = buildTimelineRenderPlan(project, [source("node-a")], { width: 1280, height: 720, fps: 30, outputName: "out.mp4" });
-        const gaps = plan.steps.filter((step) => step.kind === "gap");
-        expect(gaps).toHaveLength(1);
-        expect(gaps[0].args.join(" ")).toContain("d=9");
-        expect(plan.concatEntries).toEqual(["gap-1.mp4", "trim-1.mp4"]);
-        expect(concatTotalSeconds(plan)).toBe(24);
-        expect(concatStartOffsetsMs(plan)).toEqual([0, 9_000]);
+    test("未探测音轨时保留计划 hasAudio，探测失败才改静音", () => {
+        const keepPlan: CanonicalTimelinePlan = {
+            version: 1,
+            output: { width: 1280, height: 720, fps: 30, sampleRate: 44100, burnSubtitles: false },
+            durationMs: 1000,
+            segments: [{ kind: "video", clipId: "a", sourceId: "node-a", startMs: 0, durationMs: 1000, volume: 1, hasAudio: true }],
+            audio: [],
+            subtitles: [],
+        };
+        const keep = lowerCanonicalPlan(keepPlan, [source("node-a")]);
+        expect(keep.steps.find((step) => step.kind === "trim")!.args.join(" ")).toContain("-map 0:a:0");
+        const silent = lowerCanonicalPlan({ ...keepPlan, segments: [{ ...keepPlan.segments[0], hasAudio: false }] }, [{ ...source("node-a"), hasAudio: false }]);
+        expect(silent.steps.find((step) => step.kind === "trim")!.args.join(" ")).toContain("-map 1:a:0");
     });
 
-    test("首个片段无源素材：开头补黑场，后续片段位置保持", () => {
-        const project = timeline([videoClip("b", "node-b", 0, 4_000), videoClip("c", "node-c", 4_000, 15_000)]);
-        const plan = buildTimelineRenderPlan(project, [source("node-c")], { width: 1280, height: 720, fps: 30, outputName: "out.mp4" });
-        expect(plan.concatEntries).toEqual(["gap-1.mp4", "trim-1.mp4"]);
-        const gaps = plan.steps.filter((step) => step.kind === "gap");
-        expect(gaps).toHaveLength(1);
-        expect(gaps[0].args.join(" ")).toContain("d=4");
-        expect(concatTotalSeconds(plan)).toBe(19);
+    test("图片片段 lowering 使用 -loop 1，不抛错", () => {
+        const canonical: CanonicalTimelinePlan = {
+            version: 1,
+            output: { width: 1280, height: 720, fps: 30, sampleRate: 44100, burnSubtitles: false },
+            durationMs: 2000,
+            segments: [
+                { kind: "video", clipId: "v", sourceId: "v", startMs: 0, durationMs: 1000, volume: 1, hasAudio: true },
+                { kind: "image", clipId: "still", sourceId: "still", startMs: 1000, durationMs: 1000, volume: 1, hasAudio: false },
+            ],
+            audio: [],
+            subtitles: [],
+        };
+        const plan = lowerCanonicalPlan(canonical, [source("v"), { ...source("still"), fileName: "still.png" }]);
+        const image = plan.steps.find((step) => step.description.includes("图片"))!;
+        expect(image.args.slice(0, 4)).toEqual(["-loop", "1", "-t", "1"]);
+        const lastInput = image.args.lastIndexOf("-i");
+        const outputDuration = image.args.map((arg, index) => (arg === "-t" && index > lastInput ? Number(image.args[index + 1]) : -1)).find((value) => value >= 0);
+        expect(outputDuration).toBe(1);
+        expect(image.args).toContain("-shortest");
+        expect(image.args.join(" ")).toContain("anullsrc=r=44100:cl=stereo");
     });
 
-    test("无任何源素材：不产出 concat 与最终输出步骤", () => {
-        const project = timeline([videoClip("a", "node-a", 0, 15_000)]);
-        const plan = buildTimelineRenderPlan(project, [], { width: 1280, height: 720, fps: 30, outputName: "out.mp4" });
-        expect(plan.concatEntries).toEqual([]);
-        expect(plan.steps.some((step) => step.output === "out.mp4")).toBe(false);
+    test("执行器不得覆盖计划中的输出尺寸或字幕策略", () => {
+        const canonical = loadEditingPlan("gap-mix.plan.json");
+        const sources = [source("node-a"), source("node-b"), source("voice")];
+        expect(() => lowerCanonicalPlan(canonical, sources, { width: 1920, height: 1080 })).toThrow("导出尺寸必须与渲染计划一致");
+        expect(() => lowerCanonicalPlan(canonical, sources, { fps: 24 })).toThrow("导出帧率必须与渲染计划一致");
+        expect(() => lowerCanonicalPlan(canonical, sources, { burnSubtitles: false })).toThrow("字幕烧录必须与渲染计划一致");
+        const matched = lowerCanonicalPlan(canonical, sources, { width: 1280, height: 720, fps: 30, outputName: "out.mp4" });
+        expect(matched.finalOutput).toBe("out.mp4");
+        expect(matched.steps.find((step) => step.kind === "gap")!.args.join(" ")).toContain("1280x720");
+    });
+
+    test("共享 image-gap-sub 夹具：图片输出时长有界，采样率来自计划", () => {
+        const canonical = loadEditingPlan("image-gap-sub.plan.json");
+        const plan = lowerCanonicalPlan(canonical, [
+            { ...source("still"), fileName: "still.png" },
+            { ...source("voice"), fileName: "voice.wav" },
+        ], { outputName: "out.mp4" });
+        const image = plan.steps.find((step) => step.kind === "trim")!;
+        const lastInput = image.args.lastIndexOf("-i");
+        expect(image.args.slice(0, lastInput).includes("-t")).toBe(true);
+        expect(image.args.slice(lastInput).includes("-t")).toBe(true);
+        expect(plan.steps.find((step) => step.kind === "gap")).toBeTruthy();
+        expect(plan.steps.find((step) => step.kind === "mix")!.args.join(" ")).toContain("aresample=44100");
+        expect(plan.steps.find((step) => step.kind === "mix")!.args.join(" ")).not.toContain("alimiter");
+        expect(plan.request.subtitleClipIds).toEqual(["sub"]);
+        expect(concatTotalSeconds(plan)).toBe(3);
     });
 });
 
 describe("trim 步骤输出 seek（-ss 在 -i 之后）", () => {
     test("裁切参数必须把 -ss 放在 -i 之后：输入 seek 会按关键帧对齐导致切点偏移", () => {
-        const project = timeline([videoClip("a", "node-a", 0, 15_000)]);
-        const plan = buildTimelineRenderPlan(project, [source("node-a")], { width: 1280, height: 720, fps: 30, outputName: "out.mp4" });
+        const canonical = loadEditingPlan("six-second-mix.plan.json");
+        const plan = lowerCanonicalPlan(canonical, [source("v0"), source("v1"), source("v2"), source("voice"), source("bgm")], { width: 320, height: 180, fps: 30, outputName: "out.mp4" });
         const trims = plan.steps.filter((step) => step.kind === "trim");
-        expect(trims).toHaveLength(1);
-        const args = trims[0].args;
-        const inputIndex = args.indexOf("-i");
-        const ssIndex = args.indexOf("-ss");
-        expect(inputIndex).toBeGreaterThan(-1);
-        expect(ssIndex).toBeGreaterThan(-1);
-        // -ss 必须在 -i 之后（输出 seek，帧精确）；在 -i 之前是输入 seek，MP4/H.264 只对齐关键帧。
-        expect(ssIndex).toBeGreaterThan(inputIndex);
+        expect(trims.length).toBeGreaterThan(0);
+        for (const trim of trims) {
+            const inputIndex = trim.args.indexOf("-i");
+            const ssIndex = trim.args.indexOf("-ss");
+            expect(inputIndex).toBeGreaterThan(-1);
+            expect(ssIndex).toBeGreaterThan(-1);
+            expect(ssIndex).toBeGreaterThan(inputIndex);
+        }
     });
 });
 

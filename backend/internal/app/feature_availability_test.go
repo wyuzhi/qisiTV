@@ -81,11 +81,11 @@ func TestPluginsForUserKeepsOfficialApplicationsAndHidesManagedPlugins(t *testin
 	}); err != nil {
 		t.Fatal(err)
 	}
-	svc.pluginRuntime = &pluginRuntime{plugins: map[string]pluginRecord{
+	svc.pluginRuntime = pluginRuntimeFromRecords(map[string]pluginRecord{
 		"bundled":  {Source: "bundled", Metadata: protocol.Metadata{ID: "bundled", Name: "系统协议", Version: "1"}},
 		"uploaded": {Source: "uploaded", Metadata: protocol.Metadata{ID: "uploaded", Name: "自定义协议", Version: "1"}},
 		"app":      {Source: "bundled", Metadata: protocol.Metadata{ID: WorkflowPluginRunningHub, Name: "官方应用", Version: "1"}},
-	}}
+	})
 
 	visibleToUser, err := svc.PluginsForUser(&model.User{ID: "user-1", Role: model.UserRoleUser})
 	if err != nil {

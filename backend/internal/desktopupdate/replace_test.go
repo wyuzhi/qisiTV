@@ -2,6 +2,7 @@ package desktopupdate
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -132,6 +133,68 @@ func TestWindowsSwapPreservesNeighborFilesAndUserPlugins(t *testing.T) {
 	uploaded, err := os.ReadFile(custom)
 	if err != nil || string(uploaded) != "uploaded" {
 		t.Fatalf("user plugin = %q err=%v", uploaded, err)
+	}
+}
+
+func TestWindowsAgentHostSwapAndRollback(t *testing.T) {
+	for _, oldHasHost := range []bool{false, true} {
+		t.Run(fmt.Sprint(oldHasHost), func(t *testing.T) {
+			root := t.TempDir()
+			target, staged := filepath.Join(root, "old with spaces"), filepath.Join(root, "staged")
+			if err := WriteWindowsLayout(target, "OLD"); err != nil {
+				t.Fatal(err)
+			}
+			if !oldHasHost {
+				if err := os.RemoveAll(filepath.Join(target, "agent-host")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := WriteWindowsLayout(staged, "NEW"); err != nil {
+				t.Fatal(err)
+			}
+			req := HelperRequest{Platform: "windows-amd64", TargetPath: filepath.Join(target, windowsExeName), StagedPath: staged, BackupPath: filepath.Join(root, "backup")}
+			if err := SwapInstall(req); err != nil {
+				t.Fatal(err)
+			}
+			node := filepath.Join(target, "agent-host", "runtime", "node.exe")
+			if got, err := os.ReadFile(node); err != nil || string(got) != "NEW" {
+				t.Fatalf("host not replaced: %q %v", got, err)
+			}
+			if err := RestoreBackup(req); err != nil {
+				t.Fatal(err)
+			}
+			if err := RestoreBackup(req); err != nil {
+				t.Fatal(err)
+			}
+			if oldHasHost {
+				if got, err := os.ReadFile(node); err != nil || string(got) != "OLD" {
+					t.Fatalf("host not restored: %q %v", got, err)
+				}
+			} else if pathExists(filepath.Join(target, "agent-host")) {
+				t.Fatal("new host survived rollback to pre-agent install")
+			}
+		})
+	}
+}
+
+func TestWindowsMissingAgentRuntimeDoesNotTouchInstall(t *testing.T) {
+	root := t.TempDir()
+	target, staged := filepath.Join(root, "old"), filepath.Join(root, "new")
+	if err := WriteWindowsLayout(target, "OLD"); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteWindowsLayout(staged, "NEW"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(staged, "agent-host", "runtime", "node.exe")); err != nil {
+		t.Fatal(err)
+	}
+	req := HelperRequest{Platform: "windows-amd64", TargetPath: filepath.Join(target, windowsExeName), StagedPath: staged, BackupPath: filepath.Join(root, "backup")}
+	if err := SwapInstall(req); err == nil {
+		t.Fatal("missing host accepted")
+	}
+	if got, err := os.ReadFile(req.TargetPath); err != nil || string(got) != "MZ-OLD" {
+		t.Fatalf("old exe changed: %q %v", got, err)
 	}
 }
 

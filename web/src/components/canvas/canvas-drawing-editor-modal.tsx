@@ -6,6 +6,7 @@ import { Check, Maximize2, X } from "lucide-react";
 import type { CanvasDrawingEditorHandle } from "@/components/canvas/canvas-drawing-editor-types";
 import { drawingEngineForNode, drawingEngineLabel } from "@/lib/canvas/canvas-drawing-engine";
 import { loadCanvasDrawing, saveCanvasDrawing, type CanvasDrawingSnapshot } from "@/lib/canvas/canvas-drawing-storage";
+import { captureUserScope, isUserScopeAbandonedError } from "@/lib/user-scope-guard";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import type { CanvasNodeData } from "@/types/canvas";
 
@@ -30,24 +31,30 @@ export function CanvasDrawingEditorModal({ open, projectId, node, onClose, onSav
     const [ready, setReady] = useState(false);
     const [saving, setSaving] = useState(false);
     const [loadError, setLoadError] = useState("");
+    const [draftHint, setDraftHint] = useState("");
 
     useEffect(() => {
         if (!open || !node?.metadata?.drawingId) return;
         let cancelled = false;
+        const expected = captureUserScope();
         setLoaded(false);
         setReady(false);
         setLoadError("");
+        setDraftHint("");
         setSnapshot(null);
         currentRef.current = null;
-        void loadCanvasDrawing(projectId, node.metadata.drawingId).then((saved) => {
+        void loadCanvasDrawing(projectId, node.metadata.drawingId, expected).then((saved) => {
             if (cancelled) return;
             if (saved && saved.engine !== engine) throw new Error(`绘图节点标记为 ${drawingEngineLabel(engine)}，但文档属于 ${drawingEngineLabel(saved.engine)}`);
             currentRef.current = saved;
             setSnapshot(saved?.snapshot || null);
+            setDraftHint(saved?.canonicalMissing ? "工作区里没有这份绘图，草稿已留在本机" : saved?.origin === "draft" ? "有未保存的修改" : "");
             setLoaded(true);
         }).catch((error) => {
             if (cancelled) return;
-            const detail = error instanceof Error ? error.message : "本地绘图文档无法读取";
+            const detail = isUserScopeAbandonedError(error)
+                ? error.message
+                : error instanceof Error ? error.message : "绘图文档无法读取";
             setLoadError(detail);
             message.error(`绘图加载失败：${detail}`);
         });
@@ -57,10 +64,12 @@ export function CanvasDrawingEditorModal({ open, projectId, node, onClose, onSav
     const handleSave = async () => {
         if (!node?.metadata?.drawingId || !ready || !editorRef.current) return false;
         setSaving(true);
+        const expected = captureUserScope();
         try {
             const draft = await editorRef.current.createSave();
-            const saved = await saveCanvasDrawing(projectId, node.metadata.drawingId, engine, draft.snapshot, currentRef.current, draft.preview, draft.render);
+            const saved = await saveCanvasDrawing(projectId, node.metadata.drawingId, engine, draft.snapshot, currentRef.current, draft.preview, draft.render, expected);
             currentRef.current = saved;
+            setDraftHint(saved.canonicalMissing ? "工作区里没有这份绘图，草稿已留在本机" : "");
             onSaved(node.id, saved);
             return true;
         } catch (error) {
@@ -80,7 +89,7 @@ export function CanvasDrawingEditorModal({ open, projectId, node, onClose, onSav
         <AppModal flush open={open} onCancel={() => void handleClose()} footer={null} closable={false} destroyOnHidden width="100vw" centered className="canvas-drawing-editor-modal">
             <div className="flex h-[min(92dvh,980px)] flex-col">
                 <div className="flex h-12 shrink-0 items-center justify-between border-b px-4" style={{ background: "var(--background)", borderColor: "var(--border)" }}>
-                    <div className="flex min-w-0 items-center gap-2"><Maximize2 className="size-4 opacity-55" /><span className="truncate text-sm font-semibold">{node?.title || "绘图"}</span><span className="text-[var(--fs-label)] opacity-45">{drawingEngineLabel(engine)} · {ready ? "已加载" : "正在加载"}</span></div>
+                    <div className="flex min-w-0 items-center gap-2"><Maximize2 className="size-4 opacity-55" /><span className="truncate text-sm font-semibold">{node?.title || "绘图"}</span><span className="text-[var(--fs-label)] opacity-45">{drawingEngineLabel(engine)} · {ready ? "已加载" : "正在加载"}</span>{draftHint ? <span className="truncate text-[var(--fs-label)] text-amber-700 dark:text-amber-300">{draftHint}</span> : null}</div>
                     <div className="flex items-center gap-2">
                         <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition hover:bg-black/5 disabled:opacity-45 dark:hover:bg-white/10" disabled={!ready || saving} onClick={() => void handleSave()}><Check className="size-3.5" />{saving ? "保存中" : "保存绘图"}</button>
                         <button type="button" className="grid size-8 place-items-center rounded-md border transition hover:bg-black/5 dark:hover:bg-white/10" aria-label="关闭绘图编辑器" onClick={() => void handleClose()}><X className="size-4" /></button>

@@ -9,11 +9,6 @@ import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type Canvas
 
 export type CanvasResourceKind = "image" | "video" | "audio" | "text" | "skill" | "character";
 
-/** Display the source name while keeping numbered labels stable for model prompts. */
-export function canvasResourceDisplayName(reference: CanvasResourceReference) {
-    return reference.title.trim() || reference.label;
-}
-
 export type CanvasResourceReference = {
     id: string;
     nodeId: string;
@@ -26,6 +21,8 @@ export type CanvasResourceReference = {
     storageKey?: string;
     /** 视频首帧是独立的图片资源，不能用视频 storageKey 解析。 */
     previewStorageKey?: string;
+    /** Share display-only poster leases with canvas video nodes. */
+    videoPreviewSource?: Pick<CanvasNodeData, "metadata">;
     /** 绘图预览保存在按项目隔离的本地绘图仓库，不复用普通图片 storageKey。 */
     drawingId?: string;
     drawingRevision?: number;
@@ -42,6 +39,11 @@ export function canvasSkillMentionToken(skillId: string) {
     return `@[skill:${skillId}]`;
 }
 
+/** Display the source name while keeping numbered labels stable for model prompts. */
+export function canvasResourceDisplayName(reference: CanvasResourceReference) {
+    return reference.title.trim() || reference.label;
+}
+
 export function canvasNodeMentionToken(nodeId: string) {
     return `@[node:${nodeId}]`;
 }
@@ -52,6 +54,16 @@ export function canvasResourceMentionToken(reference: CanvasResourceReference) {
     if (reference.assetId) return `@[asset:${reference.assetId}]`;
     if (reference.nodeId) return canvasNodeMentionToken(reference.nodeId);
     return `@${reference.label}`;
+}
+
+/**
+ * 消息里显式插入的素材库 token。素材菜单自己加载库数据，不在画布节点列表里。
+ *
+ * 后端只把这里列出的素材授予内置助手只读权限，所以必须由界面按用户原文推导，
+ * 不能让模型自己声明「我要读哪些素材」。
+ */
+export function referencedAssetIdsInPrompt(prompt: string): string[] {
+    return [...new Set(Array.from(prompt.matchAll(/@\[asset:([^\]\s]+)\]/g), (match) => match[1]))];
 }
 
 /** 将提示词内已连接素材的名称替换为对应引用；同名的每处指代都会保留为独立引用。 */
@@ -277,6 +289,7 @@ export function buildAssetMentionReferences(assets: Asset[]): CanvasResourceRefe
             title: asset.title,
             previewUrl,
             mediaUrl: asset.kind === "video" && !previewUrl ? asset.data.url : undefined,
+            videoPreviewSource: asset.kind === "video" ? { metadata: { content: asset.data.url, storageKey: asset.data.storageKey } } : undefined,
             storageKey: "storageKey" in asset.data ? asset.data.storageKey : undefined,
             text,
             active: false,
@@ -313,6 +326,7 @@ export function buildCanvasAgentMentionReferences(nodes: CanvasNodeData[]): Canv
                     : node.metadata?.previewContent || node.metadata?.content,
             storageKey: node.metadata?.storageKey,
             previewStorageKey: node.type === CanvasNodeType.Video ? node.metadata?.videoPreview?.storageKey : undefined,
+            videoPreviewSource: node.type === CanvasNodeType.Video ? { metadata: node.metadata } : undefined,
             drawingId: node.type === CanvasNodeType.Drawing ? node.metadata?.drawingId : undefined,
             drawingRevision: node.type === CanvasNodeType.Drawing ? node.metadata?.drawingRevision : undefined,
             text: node.metadata?.content || node.metadata?.composerContent || node.metadata?.prompt || node.title,
@@ -479,6 +493,7 @@ function labelResourceNodes(nodes: CanvasNodeData[], active: boolean) {
                         : node.metadata?.previewContent || node.metadata?.content,
                 storageKey: node.metadata?.storageKey,
                 previewStorageKey: node.type === CanvasNodeType.Video ? node.metadata?.videoPreview?.storageKey : undefined,
+                videoPreviewSource: node.type === CanvasNodeType.Video ? { metadata: node.metadata } : undefined,
                 drawingId: node.type === CanvasNodeType.Drawing ? node.metadata?.drawingId : undefined,
                 drawingRevision: node.type === CanvasNodeType.Drawing ? node.metadata?.drawingRevision : undefined,
                 text: node.metadata?.workflowKind === "character" ? node.metadata.characterPrompt : node.type === CanvasNodeType.Text ? node.metadata?.content || node.metadata?.prompt : node.type === CanvasNodeType.Skill ? skillResourceText(node) : undefined,

@@ -102,6 +102,10 @@ export async function flushGenerationAssetStorageLocks() {
     while (assetStorageTails.size || artifactCommitTails.size) await Promise.all([...assetStorageTails.values(), ...artifactCommitTails.values()]);
 }
 
+export function hasActiveGenerationAssetWrites() {
+    return assetStorageTails.size > 0 || artifactCommitTails.size > 0;
+}
+
 export async function insertOrReturnGenerationAsset<TAsset extends GenerationAssetRecord>(dependencies: {
     storageScope: string;
     effectKey: string;

@@ -18,6 +18,7 @@ import (
 const helperRequestSchema = 1
 
 type HelperRequest struct {
+	DataDir        string `json:"dataDir,omitempty"`
 	Schema         int    `json:"schema"`
 	ParentPID      int    `json:"parentPid"`
 	Platform       string `json:"platform"`
@@ -87,7 +88,17 @@ func RunHelperRequest(req HelperRequest) error {
 		}
 		_ = os.WriteFile(req.ResultPath, data, 0o600)
 	}
-	defer writeRecovery()
+	var releaseLock func()
+	defer func() {
+		if result.Error != "" && result.Status != "rolled_back" {
+			result.Status = "failed"
+		}
+		// Startup cleanup must see the final record before it can take the lock.
+		writeRecovery()
+		if releaseLock != nil {
+			releaseLock()
+		}
+	}()
 
 	if err := validateHelperRequest(req); err != nil {
 		result.Error = err.Error()
@@ -98,7 +109,7 @@ func RunHelperRequest(req HelperRequest) error {
 		result.Error = "已有更新正在安装"
 		return err
 	}
-	defer unlock()
+	releaseLock = unlock
 	if req.PreparedPath != "" {
 		if err := os.WriteFile(req.PreparedPath, []byte("ok\n"), 0o600); err != nil {
 			result.Error = err.Error()
@@ -170,6 +181,10 @@ func validateHelperRequest(req HelperRequest) error {
 		if filepath.Base(req.TargetPath) != windowsExeName {
 			return fmt.Errorf("当前应用名称不支持自动更新")
 		}
+	case req.Platform == "linux-amd64":
+		if filepath.Base(req.TargetPath) != linuxBundleName {
+			return fmt.Errorf("当前应用包名称不支持自动更新")
+		}
 	default:
 		return ErrUnsupported
 	}
@@ -182,6 +197,9 @@ func pathExists(path string) bool {
 }
 
 func (e *Engine) prepareAndStartHelper(ctx context.Context, staged *stagedUpdate) error {
+	started := time.Now()
+	defer func() { e.logf("install preparation elapsed=%s", time.Since(started).Round(time.Millisecond)) }()
+	e.setPhase("verifying")
 	target, err := e.locate()
 	if err != nil {
 		return err
@@ -224,16 +242,33 @@ func (e *Engine) prepareAndStartHelper(ctx context.Context, staged *stagedUpdate
 		return err
 	}
 	hash := sha256.New()
-	n, copyErr := io.Copy(hash, io.LimitReader(archive, staged.artifact.Size+1))
+	n, copyErr := io.Copy(hash, io.LimitReader(contextReader{ctx, archive}, staged.artifact.Size+1))
 	_ = archive.Close()
+	if ctx.Err() != nil {
+		return ErrPreparationTimeout
+	}
 	if copyErr != nil || n != staged.artifact.Size || !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), staged.artifact.SHA256) {
 		return ErrTampered
 	}
 	payloadPath := filepath.Join(workDir, "payload")
-	if err := extractSecureZip(staged.archive, payloadPath, defaultExtractLimits()); err != nil {
+	e.setPhase("extracting")
+	if err := extractSecureZipWithProgress(ctx, staged.archive, payloadPath, defaultExtractLimits(), func(completed, total int) {
+		e.set(func(state *UpdateState) { state.CompletedFiles, state.TotalFiles = completed, total })
+	}); err != nil {
+		if ctx.Err() != nil {
+			return ErrPreparationTimeout
+		}
 		return err
 	}
+	e.setPhase("preparing")
+	if err := validateExtractedLayout(payloadPath, staged.platform); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidArchive, err)
+	}
+	if ctx.Err() != nil {
+		return ErrPreparationTimeout
+	}
 	req := HelperRequest{
+		DataDir:        e.dataDir,
 		Schema:         helperRequestSchema,
 		ParentPID:      parentPID,
 		Platform:       staged.platform,

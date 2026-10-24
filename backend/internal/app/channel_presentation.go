@@ -5,23 +5,15 @@ import (
 	"time"
 
 	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/modelcatalog"
 )
 
-func (req ChannelRequest) presentationOnly() bool {
-	return (req.PublicAlias != nil || req.SortOrder != nil) && req.Name == "" && req.BaseURL == "" && req.APIKey == "" && req.SecretKey == "" && req.ConcurrencyLimit == nil && req.UseGlobalConcurrency == nil && req.Models == nil && req.Headers == nil && req.Enabled == nil
-}
-
 func (s *Service) updateChannelPresentation(id string, req ChannelRequest) (*PublicModelChannel, error) {
-	if req.SortOrder != nil {
-		if err := validateChannelSortOrder(*req.SortOrder); err != nil {
-			return nil, err
-		}
+	if err := modelcatalog.ApplyChannelPresentation(req); err != nil {
+		return nil, err
 	}
 	if req.PublicAlias != nil {
 		alias := strings.TrimSpace(*req.PublicAlias)
-		if len([]rune(alias)) > 80 {
-			return nil, BadAuthRequest("前台别名不能超过 80 字")
-		}
 		req.PublicAlias = &alias
 	}
 	if err := s.repo.UpdateSystemChannelPresentation(id, req.PublicAlias, req.SortOrder, time.Now()); err != nil {
@@ -42,13 +34,6 @@ func (s *Service) updateChannelPresentation(id string, req ChannelRequest) (*Pub
 
 type ChannelModelSortRequest struct {
 	SortOrder *int `json:"sortOrder"`
-}
-
-func validateChannelSortOrder(value int) error {
-	if value < 0 || value > 999999 {
-		return BadAuthRequest("排序值必须是 0-999999 的整数，数值越小越靠前")
-	}
-	return nil
 }
 
 func (s *Service) UpdateAdminChannelModelSort(actor *model.User, channelID, modelID string, req ChannelModelSortRequest) error {

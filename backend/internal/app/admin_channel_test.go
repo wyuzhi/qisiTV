@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"qisitv/backend/internal/model"
@@ -490,6 +491,43 @@ func TestResolveProviderConfigMapsSKUToProviderModel(t *testing.T) {
 	}
 	if config.ChannelModelKey != item.ModelKey || config.Model != item.ProviderModelKey {
 		t.Fatalf("resolved config = %#v", config)
+	}
+	again, err := svc.resolveProviderConfig(config)
+	if err != nil {
+		t.Fatalf("resolved SKU must be idempotent: %v", err)
+	}
+	if again.ChannelModelKey != item.ModelKey || again.Model != item.ProviderModelKey {
+		t.Fatalf("second resolve = %#v", again)
+	}
+}
+
+func TestResolveProviderConfigRejectsHostileUpstreamKey(t *testing.T) {
+	svc, db := newChannelModelTestService(t)
+	svc.dataDir = t.TempDir()
+	channel := model.ModelChannel{
+		ID: "channel-1", Scope: model.ChannelScopeSystem, Enabled: true, Name: "Seedance",
+		BaseURL: "https://ark.cn-beijing.volces.com/api/v3", APIKey: "test-key", APIFormat: "openai",
+	}
+	if err := svc.encryptSystemChannelSecrets(&channel); err != nil {
+		t.Fatal(err)
+	}
+	item := model.ChannelModel{
+		ID: "model-1", ChannelID: channel.ID, ModelKey: "seedance-2-5-480p", ProviderModelKey: "doubao-seedance-2-5",
+		Capability: "video", Protocol: model.ChannelInterfaceVolcengineArkVideo, Enabled: true,
+	}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&item).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, err := svc.resolveProviderConfig(providerConfig{ChannelID: channel.ID, ChannelModelKey: item.ModelKey, Model: "gpt-4"})
+	if err == nil || !strings.Contains(err.Error(), "系统渠道模型标识不一致") {
+		t.Fatalf("hostile model error = %v", err)
+	}
+	_, err = svc.resolveProviderConfig(providerConfig{ChannelID: channel.ID, ChannelModelKey: item.ModelKey, Model: item.ModelKey, ProviderModelKey: "other-upstream"})
+	if err == nil || !strings.Contains(err.Error(), "系统渠道模型标识不一致") {
+		t.Fatalf("hostile provider key error = %v", err)
 	}
 }
 

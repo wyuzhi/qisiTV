@@ -181,7 +181,7 @@ func canvasProjectPayload(project model.CanvasProject) (json.RawMessage, error) 
 	if payload == nil {
 		return nil, kernel.BadAuthRequest("画布数据格式错误")
 	}
-	for key, value := range map[string]any{"id": project.ID, "title": project.Title, "projectId": project.ProjectID, "revision": project.Revision, "createdAt": project.CreatedAt, "updatedAt": project.UpdatedAt} {
+	for key, value := range map[string]any{"id": project.ID, "title": project.Title, "projectId": project.ProjectID, "folderId": project.LibraryFolderID, "revision": project.Revision, "createdAt": project.CreatedAt, "updatedAt": project.UpdatedAt} {
 		encoded, err := json.Marshal(value)
 		if err != nil {
 			return nil, err

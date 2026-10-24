@@ -1,7 +1,7 @@
 {
   "id": "beefapi",
-  "displayName": "BeefAPI",
-  "baseUrl": "https://enterprise.beefapi.com",
+  "displayName": "BeefTV",
+  "baseUrl": "https://beeftv.app",
   "catalogProtocol": "openai",
   "presetVersion": 1,
   "pinned": true,

@@ -72,7 +72,7 @@ export function WorkspaceSidebarStorageMeter({ collapsed }: { collapsed: boolean
                 query.data?.usedBytes ? "has-usage" : null,
                 query.isPending && !query.data && "is-pending",
             )}
-            title={`${summary}。${localMode ? "统计浏览器本地素材" : "包含素材文件和 Agent 会话附件"}`}
+            title={`${summary}。${localMode ? "统计浏览器本地素材" : "包含素材文件和创作会话附件"}`}
             aria-label={`${localMode ? "本地存储" : "账号容量"}，${summary}`}
             aria-busy={query.isPending && !query.data}
             onFocus={() => preloadWorkspaceRoute("/assets")}

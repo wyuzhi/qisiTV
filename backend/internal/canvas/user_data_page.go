@@ -8,37 +8,13 @@ import (
 )
 
 func (s *Service) UserAssetsByIDs(userID string, ids []string) ([]json.RawMessage, error) {
-	if len(ids) > 100 {
-		return nil, kernel.BadAuthRequest("每次最多读取 100 个素材")
-	}
-	unique := make([]string, 0, len(ids))
-	seen := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
-		if id == "" || len(id) > 80 {
-			return nil, kernel.BadAuthRequest("素材 ID 无效")
-		}
-		if !seen[id] {
-			seen[id] = true
-			unique = append(unique, id)
-		}
-	}
-	assets, err := s.repo.AssetsForUserIDs(userID, unique)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]json.RawMessage, 0, len(assets))
-	for _, asset := range assets {
-		if payload := ClientAssetPayload(asset); len(payload) > 0 {
-			result = append(result, payload)
-		}
-	}
-	return result, nil
+	return s.Library().UserAssetsByIDs(userID, ids)
 }
 
 type CanvasLibrarySummary struct {
 	ID           string           `json:"id"`
 	ProjectID    string           `json:"projectId,omitempty"`
+	FolderID     string           `json:"folderId,omitempty"`
 	Title        string           `json:"title"`
 	Revision     int64            `json:"revision"`
 	CreatedAt    time.Time        `json:"createdAt"`
@@ -81,7 +57,7 @@ func (s *Service) UserCanvasProjectsPage(userID string, page int, pageSize int, 
 			return CanvasLibraryPage{}, err
 		}
 		preview := canvasLibraryPreviewNodes(document.Nodes)
-		result.Projects = append(result.Projects, CanvasLibrarySummary{ID: project.ID, ProjectID: project.ProjectID, Title: project.Title, Revision: project.Revision, CreatedAt: project.CreatedAt, UpdatedAt: project.UpdatedAt, NodeCount: len(document.Nodes), PreviewNodes: preview})
+		result.Projects = append(result.Projects, CanvasLibrarySummary{ID: project.ID, ProjectID: project.ProjectID, FolderID: project.LibraryFolderID, Title: project.Title, Revision: project.Revision, CreatedAt: project.CreatedAt, UpdatedAt: project.UpdatedAt, NodeCount: len(document.Nodes), PreviewNodes: preview})
 	}
 	return result, nil
 }

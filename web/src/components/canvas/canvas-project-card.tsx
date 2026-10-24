@@ -12,10 +12,11 @@ import { resourceFileUrl, resourceIdFromStorageKey } from "@/services/api/resour
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import { resolveBackendApiUrl } from "@/stores/use-config-store";
 import { CachedResourceImage } from "@/components/cached-resource-image";
+import { AuthenticatedVideo } from "@/components/assets/authenticated-media";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { MediaPlaceholder } from "@/components/ui/product/media-placeholder";
 import { cn } from "@/lib/utils";
-import { useSyncProgressStore } from "@/stores/use-sync-progress-store";
+import { canvasSyncProgressKey, useSyncProgressStore } from "@/stores/use-sync-progress-store";
 
 type ProjectPreviewMedia = { node: CanvasNodeData; url: string; storageKey?: string; kind: "image" | "video" };
 const projectPreviewMediaCache = new WeakMap<CanvasNodeData[], { first: ProjectPreviewMedia[]; latest: ProjectPreviewMedia[] }>();
@@ -56,7 +57,7 @@ export function CanvasProjectCard({ project, projectName, variant = "library", r
 
     const compact = variant === "recent";
     return (
-        <article className={cn("app-canvas-project-card group h-full cursor-pointer", compact ? "is-recent" : "is-library", selected && "is-selected")} onClick={() => (!editing || readOnly) && open()}>
+        <article data-onboarding-project={project.id} className={cn("app-canvas-project-card group h-full cursor-pointer", compact ? "is-recent" : "is-library", selected && "is-selected")} onClick={() => (!editing || readOnly) && open()}>
             <div className="app-canvas-project-preview relative">
                 <button
                     type="button"
@@ -149,7 +150,7 @@ export function CanvasProjectCard({ project, projectName, variant = "library", r
 }
 
 export function ProjectPreview({ project, preferLatestImage = false, emptyVariant = "default" }: { project: Pick<CanvasProject, "id" | "nodes">; preferLatestImage?: boolean; emptyVariant?: "default" | "libtv" }) {
-    const syncProgress = useSyncProgressStore((state) => state.syncingProjects[project.id]);
+    const syncProgress = useSyncProgressStore((state) => state.syncingProjects[canvasSyncProgressKey(project.id)]);
     const isSyncing = Boolean(syncProgress && (syncProgress.phase === "uploading" || syncProgress.phase === "saving"));
     // The progress message can be stale while a canvas is rehydrating. Use the
     // persistence boundary as the source of truth so local workspaces never
@@ -277,7 +278,7 @@ function ProjectPreviewVideo({ media, onError }: { media: ProjectPreviewMedia; o
         }).catch(() => { if (active) onError(); });
         return () => { active = false; };
     }, [media.storageKey, media.url]);
-    return source ? <video className="canvas-project-video size-full object-cover" src={source} muted playsInline preload="auto" aria-label={media.node.title || "项目视频"} onLoadedData={(event) => { event.currentTarget.currentTime = 0; }} onError={onError} /> : null;
+    return source ? <AuthenticatedVideo className="canvas-project-video size-full object-cover" src={source} muted playsInline preload="auto" aria-label={media.node.title || "项目视频"} onLoadedData={(event) => { event.currentTarget.currentTime = 0; }} onError={onError} /> : null;
 }
 
 function buildNodePreviewLayout(nodes: CanvasNodeData[]) {

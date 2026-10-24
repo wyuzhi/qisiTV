@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { App } from "antd";
 import copyToClipboard from "copy-to-clipboard";
 import { nanoid } from "nanoid";
@@ -8,7 +8,7 @@ import { FOLDER_COLLAPSED_HEIGHT, FOLDER_COLLAPSED_WIDTH, FRAME_HEADER_HEIGHT, g
 import { alignCanvasNodes, layoutCanvasAuto, layoutCanvasFlow, layoutCanvasNodes, nextCanvasVersionLabel, spreadCanvasNodes, type CanvasAlignmentMode } from "@/lib/canvas/canvas-layout";
 import { applyCanvasConnectionPromptSync } from "@/lib/canvas/canvas-resource-references";
 import { createCanvasNode, isHiddenBatchChild, removeCanvasNodes } from "@/lib/canvas/canvas-project-domain";
-import { isolateCopiedNodeMetadata, nextCopiedNodeTitle } from "@/lib/canvas/canvas-node-copy";
+import { isolateCopiedDirectorScenes, isolateCopiedNodeMetadata, nextCopiedNodeTitle } from "@/lib/canvas/canvas-node-copy";
 import { canOpenCanvasNodePromptPanel, mediaGeneratorMetadata } from "@/lib/canvas/canvas-node-semantics";
 import { getCanvasNodeCreationDisabledReason } from "@/lib/canvas/canvas-feature-availability";
 import { CanvasNodeType, type CanvasConnection, type CanvasFolderStyle, type CanvasFolderTheme, type CanvasNodeData, type CanvasNodeMetadata, type CanvasNodeTypeId, type ContextMenuState, type Position } from "@/types/canvas";
@@ -17,10 +17,19 @@ import type { CanvasDrawingEngine } from "@/lib/canvas/canvas-drawing-engine";
 import { useEffectiveConfig } from "@/stores/use-config-store";
 import { workflowProviderPluginEnabled } from "@/lib/plugins/builtin/workflows";
 import { usePluginStore } from "@/stores/use-plugin-store";
+import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
+import type { DirectorScene } from "@/types/director";
+import { isCanvasNodeGenerating } from "@/lib/canvas/canvas-node-task-state";
+import { cancelWorkflowRun } from "@/services/api/canvas-workflows";
+import { cancelGenerationTask } from "@/services/api/task-center";
+import { canvasTaskConfirmation } from "./canvas-task-confirmation";
+import { subscribeUserScope } from "@/lib/user-scope";
+import { captureUserScope, userScopeMatches } from "@/lib/user-scope-guard";
 
 type CanvasClipboard = {
     nodes: CanvasNodeData[];
     connections: CanvasConnection[];
+    directorScenes?: DirectorScene[];
 };
 
 const CANVAS_NODES_CLIPBOARD_PREFIX = "open-ai-canvas-nodes:";
@@ -29,7 +38,6 @@ const CANVAS_NODES_CLIPBOARD_STORAGE_KEY = "open-ai-canvas:nodes-clipboard";
 
 type UseCanvasNodeOperationsOptions = {
     projectId: string;
-    agentOpen?: boolean;
     viewportScale?: number;
     defaultDrawingEngine: CanvasDrawingEngine;
     nodesRef: { current: CanvasNodeData[] };
@@ -47,7 +55,6 @@ type UseCanvasNodeOperationsOptions = {
 
 export function useCanvasNodeOperations({
     projectId,
-    agentOpen = false,
     viewportScale = 1,
     defaultDrawingEngine,
     nodesRef,
@@ -62,7 +69,25 @@ export function useCanvasNodeOperations({
     setDialogNodeId,
     onNodesDeleted,
 }: UseCanvasNodeOperationsOptions) {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
+    const deletionContext = useRef({ projectId });
+    if (deletionContext.current.projectId !== projectId) deletionContext.current = { projectId };
+    const mounted = useRef(true);
+    const deleteConfirmation = useRef<{ destroy?: () => void } | null>(null);
+    useLayoutEffect(() => {
+        mounted.current = true;
+        const dismiss = () => {
+            const pending = deleteConfirmation.current;
+            deleteConfirmation.current = null;
+            pending?.destroy?.();
+        };
+        const unsubscribe = subscribeUserScope(dismiss);
+        return () => {
+            mounted.current = false;
+            unsubscribe();
+            dismiss();
+        };
+    }, [projectId]);
     const effectiveConfig = useEffectiveConfig();
     const runtimeStatuses = usePluginStore((state) => state.runtimeStatuses);
     const clipboardRef = useRef<CanvasClipboard | null>(null);
@@ -101,6 +126,14 @@ export function useCanvasNodeOperations({
         connectionsRef.current = nextConnections;
         setConnections(nextConnections);
     }, [connectionsRef, setConnections]);
+
+    const isolateDirectorCopies = useCallback((copies: CanvasNodeData[], idMap: ReadonlyMap<string, string>, sourceScenes?: DirectorScene[]) => {
+        const store = useCanvasStore.getState();
+        const project = store.projects.find((item) => item.id === projectId);
+        const isolated = isolateCopiedDirectorScenes(copies, sourceScenes || project?.directorScenes || [], idMap);
+        if (project && isolated.scenes.length) store.updateProject(projectId, { directorScenes: [...project.directorScenes, ...isolated.scenes] });
+        return isolated.nodes;
+    }, [projectId]);
 
     const cloneDrawingForNode = useCallback((source: CanvasNodeData, target: CanvasNodeData, failureMessage: string) => {
         const sourceDrawingId = source.metadata?.drawingId;
@@ -154,13 +187,12 @@ export function useCanvasNodeOperations({
                     ? mediaGeneratorMetadata({ generationMode: type === CanvasNodeType.Image ? "image" : type === CanvasNodeType.Video ? "video" : "audio" })
                 : undefined;
         const center = position || getCanvasCenter();
-        // Only menu-created nodes use the implicit center. When the Agent dock is
-        // open LibTV biases that placement right/up; explicit canvas/connection
-        // coordinates remain untouched.
-        const creationPosition = position || !agentOpen
-            ? center
-            : { x: center.x + 43 / Math.max(viewportScale, 0.05), y: center.y - 24 / Math.max(viewportScale, 0.05) };
+        // Only menu-created nodes use the implicit canvas center; explicit
+        // canvas/connection coordinates remain untouched.
+        const creationPosition = position || center;
         const node = createCanvasNode(type, creationPosition, metadata);
+        // Keep the processing controls below the card within the initial view.
+        if (type === CanvasNodeType.Upscale && !position) node.position.y -= 220 / Math.max(0.5, viewportScale || 1);
         if (type === CanvasNodeType.Text) {
             const nextNumber = nodesRef.current.filter((item) => item.type === CanvasNodeType.Text).length + 1;
             node.title = `文本节点 ${nextNumber}`;
@@ -175,8 +207,8 @@ export function useCanvasNodeOperations({
         commitNodes([...nodesRef.current, node]);
         selectNodes(new Set([node.id]));
         if (type === CanvasNodeType.Script) setDialogNodeId(null);
-        if (type !== CanvasNodeType.Text && type !== CanvasNodeType.Script && type !== CanvasNodeType.BatchTable && type !== CanvasNodeType.Frame && type !== CanvasNodeType.Drawing && type !== CanvasNodeType.MediaConversion) setDialogNodeId(node.id);
-    }, [agentOpen, commitNodes, defaultDrawingEngine, effectiveConfig.runningHub.enabled, effectiveConfig.runningHub.workflows.length, getCanvasCenter, message, nodesRef, runtimeStatuses, selectNodes, setDialogNodeId, viewportScale]);
+        if (canOpenCanvasNodePromptPanel(node) && type !== CanvasNodeType.Text) setDialogNodeId(node.id);
+    }, [commitNodes, defaultDrawingEngine, effectiveConfig.runningHub.enabled, effectiveConfig.runningHub.workflows.length, getCanvasCenter, message, nodesRef, runtimeStatuses, selectNodes, setDialogNodeId, viewportScale]);
 
     const createFolder = useCallback((position?: Position, linked?: { id: string; projectId: string; title: string; style: CanvasFolderStyle; theme: CanvasFolderTheme; createdAt: string }) => {
         const folder = createCanvasNode(CanvasNodeType.Frame, position || getCanvasCenter(), {
@@ -359,7 +391,7 @@ export function useCanvasNodeOperations({
         message.success(locked ? "节点已锁定位置和尺寸" : "节点已解锁");
     }, [commitNodes, message, nodesRef]);
 
-    const deleteNodes = useCallback((ids: Set<string>) => {
+    const removeNodes = useCallback((ids: Set<string>) => {
         if (!ids.size) return;
         const previousNodes = nodesRef.current;
         const previousConnections = connectionsRef.current;
@@ -372,6 +404,55 @@ export function useCanvasNodeOperations({
         selectNodes(new Set());
         onNodesDeleted(result.removedIds, nextNodes, removedNodes);
     }, [commitConnections, commitNodes, connectionsRef, nodesRef, onNodesDeleted, selectNodes]);
+
+    const deleteNodes = useCallback((ids: Set<string>) => {
+        if (!ids.size || deleteConfirmation.current || !mounted.current) return;
+        const requestedIds = new Set(ids);
+        const removedIds = removeCanvasNodes(nodesRef.current, requestedIds).removedIds;
+        const removedNodes = nodesRef.current.filter((node) => removedIds.has(node.id));
+        const activeBatchItems = removedNodes.flatMap((node) => node.metadata?.generationBatches?.flatMap((batch) =>
+            batch.items.filter((item) => ["waiting", "submitting", "queued", "running"].includes(item.status))) || []);
+        const hasActiveWorkflow = removedNodes.some(node => ["queued", "running"].includes(node.metadata?.reusableWorkflow?.run?.status || "") || node.metadata?.reusableWorkflow?.intent);
+        if (!hasActiveWorkflow && !removedNodes.some((node) => isCanvasNodeGenerating(node)) && !activeBatchItems.length) {
+            removeNodes(requestedIds);
+            return;
+        }
+        const context = deletionContext.current;
+        const expectedScope = captureUserScope();
+        const pending: { destroy?: () => void } = {};
+        deleteConfirmation.current = pending;
+        const isCurrent = () => mounted.current && deletionContext.current === context && userScopeMatches(expectedScope);
+        const confirmation = modal.confirm({
+            ...canvasTaskConfirmation,
+            title: "删除正在生成的节点？",
+            content: "任务已提交后可能产生费用。",
+            okText: "确认删除",
+            cancelText: "取消",
+            afterClose: () => { if (deleteConfirmation.current === pending) deleteConfirmation.current = null; },
+            onOk: async () => {
+                if (deleteConfirmation.current !== pending || !isCurrent()) return;
+                const currentRemovedIds = removeCanvasNodes(nodesRef.current, requestedIds).removedIds;
+                const currentRemovedNodes = nodesRef.current.filter((node) => currentRemovedIds.has(node.id));
+                const taskIds = new Set([
+                    ...currentRemovedNodes.filter((node) => isCanvasNodeGenerating(node)).map((node) => node.metadata?.taskId),
+                    ...currentRemovedNodes.flatMap((node) => node.metadata?.generationBatches?.flatMap((batch) =>
+                        batch.items.filter((item) => ["submitting", "queued", "running"].includes(item.status)).map((item) => item.taskId)) || []),
+                ].filter((id): id is string => Boolean(id)));
+                // Start cancellation before removing nodes; failures must not block deletion.
+                const workflowRuns = new Set(currentRemovedNodes.flatMap(node => {
+                    const run = node.metadata?.reusableWorkflow?.run;
+                    return run && ["queued", "running"].includes(run.status) ? [run.id] : [];
+                }));
+                const cancellations = [...[...taskIds].map((id) => cancelGenerationTask(id)), ...[...workflowRuns].map(id => cancelWorkflowRun(id, { expectedScope }))];
+                removeNodes(requestedIds);
+                const results = await Promise.allSettled(cancellations);
+                if (isCurrent() && results.some((result) => result.status === "rejected")) {
+                    message.warning("节点已删除，未能取消的任务将继续运行。");
+                }
+            },
+        });
+        pending.destroy = confirmation.destroy;
+    }, [message, modal, nodesRef, removeNodes]);
 
     const deleteConnection = useCallback((connectionId: string) => {
         const previousNodes = nodesRef.current;
@@ -392,7 +473,7 @@ export function useCanvasNodeOperations({
         const versionRootId = duplicateMode === "variant" && !isFrameNode(source) ? source.metadata?.versionOfNodeId || source.id : undefined;
         const versionLabel = versionRootId ? nextCanvasVersionLabel(versionRootId, nodesRef.current) : undefined;
         const copyTitle = duplicateMode === "copy" ? nextCopiedNodeTitle(source.title, nodesRef.current.map((node) => node.title)) : undefined;
-        const copiedNodes = sources.map((node) => {
+        const copiedNodes = isolateDirectorCopies(sources.map((node) => {
             const metadata = isolateCopiedNodeMetadata(node, idMap);
             if (node.type === CanvasNodeType.Drawing) {
                 metadata.drawingId = `${idMap.get(node.id)}-document`;
@@ -414,7 +495,7 @@ export function useCanvasNodeOperations({
                 parentId: node.parentId ? idMap.get(node.parentId) || node.parentId : undefined,
                 metadata,
             };
-        });
+        }), idMap);
         const copiedIds = new Set(sources.map((node) => node.id));
         const copiedConnections = connectionsRef.current
             .filter((connection) => copiedIds.has(connection.fromNodeId) && copiedIds.has(connection.toNodeId))
@@ -436,7 +517,7 @@ export function useCanvasNodeOperations({
             if (sourceNode) cloneDrawingForNode(sourceNode, targetNode, "绘图副本保存失败，请重新复制");
         });
         setDialogNodeId(canOpenCanvasNodePromptPanel(copiedNodes.find((node) => node.id === id)) ? id : null);
-    }, [cloneDrawingForNode, commitConnections, commitNodes, connectionsRef, nodesRef, selectNodes, setDialogNodeId]);
+    }, [cloneDrawingForNode, commitConnections, commitNodes, connectionsRef, isolateDirectorCopies, nodesRef, selectNodes, setDialogNodeId]);
 
     const setPrimaryVersion = useCallback((nodeId: string) => {
         const target = nodesRef.current.find((node) => node.id === nodeId);
@@ -457,7 +538,9 @@ export function useCanvasNodeOperations({
             .map((node) => ({ ...node, position: { ...node.position }, metadata: node.metadata ? { ...node.metadata, frame: node.metadata.frame ? { ...node.metadata.frame } : undefined } : undefined }));
         if (!copiedNodes.length) return;
         const copiedConnections = connectionsRef.current.filter((connection) => copyIds.has(connection.fromNodeId) && copyIds.has(connection.toNodeId)).map((connection) => ({ ...connection }));
-        clipboardRef.current = { nodes: copiedNodes, connections: copiedConnections };
+        const sceneIds = new Set(copiedNodes.map((node) => node.metadata?.directorSceneId));
+        const directorScenes = structuredClone((useCanvasStore.getState().projects.find((item) => item.id === projectId)?.directorScenes || []).filter((scene) => sceneIds.has(scene.id)));
+        clipboardRef.current = { nodes: copiedNodes, connections: copiedConnections, directorScenes };
         try {
             sessionStorage.setItem(CANVAS_NODES_CLIPBOARD_STORAGE_KEY, JSON.stringify(clipboardRef.current));
         } catch {
@@ -483,7 +566,7 @@ export function useCanvasNodeOperations({
             markerWritePendingRef.current = false;
             preferCopiedNodesRef.current = true;
         }
-    }, [connectionsRef, nodesRef]);
+    }, [connectionsRef, nodesRef, projectId]);
 
     const copySelectedNodes = useCallback(() => {
         copyNodesToClipboard(new Set(selectedNodeIdsRef.current));
@@ -504,7 +587,7 @@ export function useCanvasNodeOperations({
         const idMap = new Map(clipboard.nodes.map((node, index) => [node.id, `${node.type}-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`]));
         const copiedSourceIds = new Set(clipboard.nodes.map((node) => node.id));
         const reservedTitles = new Set(nodesRef.current.map((node) => node.title));
-        const nextNodes = clipboard.nodes.map((node) => {
+        const nextNodes = isolateDirectorCopies(clipboard.nodes.map((node) => {
             const metadata = isolateCopiedNodeMetadata(node, idMap);
             const title = nextCopiedNodeTitle(node.title, reservedTitles);
             reservedTitles.add(title);
@@ -523,7 +606,7 @@ export function useCanvasNodeOperations({
                 parentId: node.parentId ? idMap.get(node.parentId) : undefined,
                 metadata,
             };
-        });
+        }), idMap, clipboard.directorScenes);
         // 1) 剪贴板内部连线；2) 仍保留到画布上未复制参考节点的入边（只复制结果节点时常见）。
         const nextConnections = clipboard.connections.flatMap((connection, index) => {
             const fromNodeId = idMap.get(connection.fromNodeId);
@@ -551,7 +634,7 @@ export function useCanvasNodeOperations({
         const primaryNode = nextNodes.find((node) => !node.parentId);
         setDialogNodeId(canOpenCanvasNodePromptPanel(primaryNode) ? primaryNode!.id : null);
         return true;
-    }, [cloneDrawingForNode, commitConnections, commitNodes, connectionsRef, getCanvasCenter, nodesRef, selectNodes, setContextMenu, setDialogNodeId]);
+    }, [cloneDrawingForNode, commitConnections, commitNodes, connectionsRef, getCanvasCenter, isolateDirectorCopies, nodesRef, selectNodes, setContextMenu, setDialogNodeId]);
 
     const restoreCopiedNodesFromText = useCallback((value: string) => {
         const isMarker = value.startsWith(CANVAS_NODES_CLIPBOARD_PREFIX);
@@ -562,7 +645,7 @@ export function useCanvasNodeOperations({
             if (!serialized) return false;
             const parsed = JSON.parse(serialized) as Partial<CanvasClipboard>;
             if (!parsed.nodes?.length) return false;
-            clipboardRef.current = { nodes: parsed.nodes, connections: parsed.connections || [] };
+            clipboardRef.current = { nodes: parsed.nodes, connections: parsed.connections || [], directorScenes: parsed.directorScenes };
             setHasCopiedNodes(true);
             preferCopiedNodesRef.current = true;
             markerWritePendingRef.current = false;

@@ -83,6 +83,7 @@ export function CanvasFolderCard({ project, projectName, folders = [], onMoveToF
     return (
         <LibraryCardShell
             ariaLabel={`打开画布 ${project.title}`}
+            onboardingProjectId={project.id}
             className={cn("canvas-collection-card", selected && "is-selected", editing && "is-editing", opening && "is-opening")}
             updatedAt={project.updatedAt}
             onOpen={onClick}

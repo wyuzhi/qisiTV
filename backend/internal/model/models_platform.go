@@ -49,6 +49,29 @@ type UserDailyUploadUsage struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+// UserUploadReservation is a recovery index for an open daily-upload
+// reservation. Bytes stay on UserDailyUploadUsage. A positive Size and a real
+// Day mean this identity already incremented daily and has not been Released
+// or Committed. Day equal to UploadReservationUnattributedDay (Size 0) marks a
+// pre-witness leftover that must not reserve, refund, or be guessed from totals.
+type UserUploadReservation struct {
+	ID        string    `json:"id" gorm:"primaryKey;size:200"`
+	UserID    string    `json:"userId" gorm:"size:36;uniqueIndex:idx_user_upload_reservation_identity,priority:1"`
+	Identity  string    `json:"identity" gorm:"size:128;uniqueIndex:idx_user_upload_reservation_identity,priority:2"`
+	Day       string    `json:"day" gorm:"size:16"`
+	Size      int64     `json:"size"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// UploadReservationUnattributedDay marks a leftover that already has a resource
+// row but cannot be matched to daily bytes without a second ledger.
+const UploadReservationUnattributedDay = "unattributed"
+
+func (r UserUploadReservation) Unattributed() bool {
+	return r.Day == UploadReservationUnattributedDay || r.Size <= 0
+}
+
 type Skill struct {
 	ID                string     `json:"id" gorm:"primaryKey;size:36"`
 	OwnerID           string     `json:"ownerId" gorm:"index;size:36"`
@@ -87,16 +110,17 @@ type Skill struct {
 }
 
 type SkillVersion struct {
-	ID           string    `json:"id" gorm:"primaryKey;size:36"`
-	SkillID      string    `json:"skillId" gorm:"size:36;index"`
-	VersionLabel string    `json:"versionLabel" gorm:"size:64"`
-	ContentHash  string    `json:"contentHash" gorm:"size:64;index"`
-	EntryPath    string    `json:"entryPath" gorm:"size:1000"`
-	PackageKey   string    `json:"packageKey" gorm:"size:1000"`
-	FileCount    int       `json:"fileCount"`
-	TotalBytes   int64     `json:"totalBytes"`
-	SourceCommit string    `json:"sourceCommit" gorm:"size:64"`
-	CreatedAt    time.Time `json:"createdAt" gorm:"index"`
+	ID                string    `json:"id" gorm:"primaryKey;size:36"`
+	SkillID           string    `json:"skillId" gorm:"size:36;index"`
+	VersionLabel      string    `json:"versionLabel" gorm:"size:64"`
+	ContentHash       string    `json:"contentHash" gorm:"size:64;index"`
+	EntryPath         string    `json:"entryPath" gorm:"size:1000"`
+	PackageKey        string    `json:"packageKey" gorm:"size:1000"`
+	FileCount         int       `json:"fileCount"`
+	TotalBytes        int64     `json:"totalBytes"`
+	SourceCommit      string    `json:"sourceCommit" gorm:"size:64"`
+	MarketReleaseJSON string    `json:"-" gorm:"type:text"`
+	CreatedAt         time.Time `json:"createdAt" gorm:"index"`
 }
 
 type SkillFile struct {

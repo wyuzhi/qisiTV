@@ -33,7 +33,4 @@ describe("LibTV add-node menu search", () => {
         expect(contextMenuSource).toContain("disabledReason: command.disabledReason");
     });
 
-    test("keeps the compact palette free of a second scrollbar", () => {
-        expect(readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-cloud-agent.css"), "utf8")).toContain("overflow: visible");
-    });
 });

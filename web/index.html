@@ -12,43 +12,36 @@
                 margin: 0;
                 background: var(--background, #0f0f0f);
             }
-            :root { --bootstrap-ink: 24, 24, 27; }
-            :root.dark { --bootstrap-ink: 255, 255, 255; }
             #root:empty {
-                min-height: 100vh;
-            }
-            #root:empty::before {
-                content: "";
                 position: fixed;
-                left: 50%;
-                top: 50%;
-                width: 12px;
-                height: 12px;
-                margin: -6px 0 0 -6px;
-                background: rgba(var(--bootstrap-ink), 0.84);
-                border-radius: 999px;
-                box-shadow: 0 0 0 7px rgba(var(--bootstrap-ink), 0.08);
-                animation: appearance-bootstrap-pulse 1.8s ease-in-out infinite;
+                inset: 0;
+                min-height: 100vh;
+                overflow: hidden;
+                background: #090909;
             }
             #root:empty::after {
                 content: "";
-                position: fixed;
+                position: absolute;
                 left: 50%;
                 top: 50%;
-                width: 82px;
-                height: 82px;
-                margin: -42px 0 0 -42px;
-                border: 1px solid rgba(var(--bootstrap-ink), 0.14);
-                border-right-color: transparent;
-                border-radius: 999px;
-                animation: appearance-bootstrap-orbit 2.8s linear infinite;
+                width: min(240px, 42vw);
+                aspect-ratio: 17 / 10;
+                transform: translate(-50%, -50%);
+                background: linear-gradient(105deg, #c9c9c9 0%, #e4e4e4 43%, #fff 49%, #fff 52%, #e4e4e4 58%, #c9c9c9 100%);
+                background-size: 240% 100%;
+                background-position: 100% 0;
+                -webkit-mask: url('/beef-logo.png') center / contain no-repeat;
+                mask: url('/beef-logo.png') center / contain no-repeat;
+                animation: appearance-bootstrap-shimmer 2.6s ease-in-out infinite;
             }
-            @keyframes appearance-bootstrap-pulse { 0%, 100% { opacity: .62; transform: scale(.82); } 50% { opacity: 1; transform: scale(1.08); } }
-            @keyframes appearance-bootstrap-orbit { to { transform: rotate(360deg); } }
+            @keyframes appearance-bootstrap-shimmer {
+                0%, 12% { background-position: 100% 0; }
+                82%, 100% { background-position: 0 0; }
+            }
             @media (prefers-reduced-motion: reduce) {
-                #root:empty::before,
                 #root:empty::after {
                     animation: none;
+                    background: #f2f2f2;
                 }
             }
         </style>

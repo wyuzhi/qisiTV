@@ -22,7 +22,7 @@ describe("findAvailableGenerationGroupPosition", () => {
 
     test("按完整批次范围检测碰撞", () => {
         const groupSize = imageGenerationGroupSize({ width: 340, height: 240 }, { width: 340, height: 240 }, 4);
-        expect(groupSize).toEqual({ width: 1176, height: 516 });
+        expect(groupSize).toEqual({ width: 1176, height: 564 });
         expect(findAvailableGenerationGroupPosition([node("child-area", 900, 0)], { x: 436, y: 0 }, groupSize)).toEqual({ x: 436, y: 276 });
     });
 });

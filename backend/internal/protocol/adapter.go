@@ -39,6 +39,12 @@ type ResultCapability interface {
 	ResultAvailable() bool
 }
 
+// MediaAuthAdapter retains the selected provider's authentication format for
+// same-origin result URLs. The host never applies it to external media hosts.
+type MediaAuthAdapter interface {
+	MediaAuth() ManifestAuth
+}
+
 type AgentRequestContext struct {
 	BaseURL string
 	Model   string

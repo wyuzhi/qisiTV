@@ -14,16 +14,18 @@ describe("local asset upload semantics", () => {
         expect(assets).toContain('remoteMode ? "正在上传到云端" : "正在保存到本地"');
     });
 
-    test("does not mark intentionally local files as pending remote uploads", () => {
-        expect(imageStorage).toContain("pendingRemoteUpload: localRuntime ? undefined : true");
-        expect(fileStorage).toContain("pendingRemoteUpload: localRuntime ? undefined : true");
+    test("browser-local files stay canonical; desktop IndexedDB fallback reports pending", () => {
+        expect(imageStorage).toContain("pendingRemoteUpload: true");
+        expect(fileStorage).toContain("pendingRemoteUpload: true");
+        expect(imageStorage).not.toContain("pendingRemoteUpload: localRuntime ? undefined : true");
+        expect(fileStorage).not.toContain("pendingRemoteUpload: localRuntime ? undefined : true");
         expect(imageStorage).toContain("usesBrowserLocalResourceStore()");
         expect(fileStorage).toContain("usesBrowserLocalResourceStore()");
         expect(resourceStorageMode).toContain("isNativeDesktopRuntime");
         expect(imageStorage).toContain("await store.setItem(storageKey, blob);");
         expect(fileStorage).toContain('from "@/services/local-media-repository"');
         expect(localMediaRepository).toContain("saveLocalMedia");
-        expect(localMediaRepository).toContain("localforage.createInstance");
+        expect(localMediaRepository).toContain("localForageInstance(MEDIA_FILES_STORE_NAME)");
     });
 
     test("3D model fallback uses hosted-only remote wording", () => {

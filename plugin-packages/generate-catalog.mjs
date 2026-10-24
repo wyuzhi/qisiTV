@@ -915,6 +915,8 @@ add({
 
 add({
   id: "dashscope-wan-video", providerId: "dashscope-wan-video", name: "DashScope Wan Video", vendor: "Alibaba Cloud", capability: "video",
+  mediaTransport: { image: "inline", video: "url", audio: "url" },
+  version: "2.0.1",
   baseUrl: "https://dashscope.aliyuncs.com", auth: bearer, params: videoParams, requiresPublicMediaUrls: true,
   validations: [
     { assert: { $lte: [len(mediaWithRoles("request.images", ["first_frame"])), 1] }, message: "Wan 视频最多只能有一个首帧" },
@@ -1115,7 +1117,7 @@ function manifestFor(spec) {
     apiVersion: "qisitv.plugin/v2",
     id: spec.id,
     name: spec.name,
-    version: "2.0.0",
+    version: spec.version || "2.0.0",
     author: "BeefTV Contributors",
     description: `${spec.name} 独立请求协议插件。`,
     documentation: `# ${spec.name}\n\n完整字段、映射、响应、鉴权和兼容边界见包内 README.md 与 docs/interface.md。\n\n## qisiTV运行时合同\n\n用户只操作统一的文本、图片或视频能力；插件负责把统一请求转换为 ${spec.name} 上游协议。`,
@@ -1129,6 +1131,7 @@ function manifestFor(spec) {
         scopes,
         baseUrl: spec.baseUrl,
         requiresPublicMediaUrls: spec.requiresPublicMediaUrls === true,
+        ...(spec.mediaTransport ? { mediaTransport: spec.mediaTransport } : {}),
         auth: spec.auth,
         parameters: parameters(spec.params),
         ...(spec.validations ? { validations: spec.validations } : {}),

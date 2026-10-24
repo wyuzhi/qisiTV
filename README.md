@@ -1,3 +1,5 @@
+[简体中文](README.md) · [English](README.en.md)
+
 <p align="center">
   <img src="web/public/qisitv-logo.jpg" width="160" alt="qisiTV — 本地优先、轻量、AI Native 的视频创作工作台">
 </p>
@@ -50,16 +52,28 @@ qisiTV 同时提供项目库、个人资产库、异步任务、模型渠道和�
 
 ## 开放与本地优先
 
-- 当前版本统一使用 LikeAI，支持其目录中的文本、图片、视频与音频模型。
+- 保留独立的 qisi API 与官方 LikeAI 配置和密钥，模型费用由服务商收取。
 - 项目、画布、素材与任务由统一工作区管理，数据可以本地保存和迁移。
 - 基于 React、Go 与 Wails，模型协议和工作台能力可继续扩展。
 - 本地 Agent 连接使用现有工作区，不另建数据库。见 [MCP 与 CLI 接入](docs/content/docs/backend/local-agent.mdx)及 [LikeAI 配置](docs/content/docs/backend/likeai.mdx)。
 
 ## 开始使用
 
-网站版无需注册。使用桌面 Chrome / Edge，在「本地文件与 Agent」选择一个项目根目录；每个项目的画布与素材自动写入独立文件夹。需要 Agent 时，在页面选择 Codex、WorkBuddy、Claude Desktop / Code、OpenClaw、Hermes、CodeBuddy、Cursor、VS Code 或通用 MCP，把对应安装指令交给能在本机执行命令的 Agent。Codex 使用 [qisiTV 插件](plugins/qisitv/README.md)，其他客户端自动准备同一连接器后合并各自的 MCP 配置，无需手选系统包或另外保留服务终端。
+网站版无需注册。新版源码采用「网页操作、本机引擎执行」：安装 qisiTV 本机引擎后，从网页唤起并确认配对，选择本机项目根目录。每个项目对应真实独立文件夹；画布、导入素材和生成结果由同一本机工作区持久化。独立项目目录与引擎数据库、缓存目录分别管理，网页缓存不是最终存储。
 
-安装后让 Agent 调用 `qisitv_pair` 获取配对码，在网页确认连接即可控制画布。Agent 进程与浏览器须运行在同一台电脑，使用时保持网页打开；Claude 网页版不支持此本机连接方式。Desktop 聊天若不能执行本机命令，可由本机 Agent 帮助准备，再在设置粘贴配置。详细步骤、客户端差异和数据边界见[网站版说明](docs/content/docs/backend/browser-workspace.mdx)。下面的旧桌面 Go 工作区独立保留，不与网站项目自动合并。
+需要外部 Agent 时，在网页的「Agent」页选择 Codex、WorkBuddy、Claude Desktop / Code、OpenClaw、Hermes、CodeBuddy、Cursor、VS Code 或通用 MCP，生成独立授权的 `qisitv` 配置并合并到客户端原配置。Agent 与引擎必须运行在同一台电脑。`qisitv-connect open` 可独立启动和配对，不要求先安装 MCP。旧 `qisitv-web` 在新版引擎模式只负责启动、配对和会话发现；旧画布工具会要求改用原生 `qisitv`，不会写入另一份浏览器项目。
+
+<details>
+<summary>用过旧版 qisitv-web？查看升级步骤</summary>
+
+1. 在用过的 Agent 客户端中停用旧 `qisitv-web` 连接，并关闭手动启动旧连接器的终端窗口。
+2. 等待约 30 秒，让旧服务退出；如果上次异常退出，可能需要约 75 秒。
+3. 打开新版 qisiTV 本机引擎，按网页提示完成连接。
+4. 在网页的「qisiTV MCP」页选择自己的 Agent，按页面提示配置新的 `qisitv` 连接。
+
+</details>
+
+内置创作助手、技能、工作流和媒体能力复用上游运行时；付费生成仍需要明确授权，不因安装、配对或创建项目而自动收费。旧浏览器项目需按文件夹迁移流程明确接管，不能自动合并两份工作区。各平台安装包、模型与发布体验仍需验收；当前合同与验证范围见 [Web 本机引擎说明](docs/design/web-engine-contract.md) 和 [功能对齐设计](docs/design/web-feature-parity.md)。
 
 本地开发需要 Bun 和 Go 1.25。在本仓库中打开两个终端：
 

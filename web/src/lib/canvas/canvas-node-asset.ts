@@ -1,8 +1,10 @@
 import { getDataUrlByteSize } from "@/lib/image-utils";
 import { canvasNodeVideoPreviewUrl } from "@/lib/canvas/canvas-media-preview";
-import { ownedResourceIdFromMediaRef } from "@/services/api/resources";
+import { assetResourceId, bindCanvasNodeResourceAsset, canvasNodeResourceId, extractOwnedResourceId } from "@/lib/canvas/canvas-resource-id";
 import type { Asset, AssetCategory, NewAsset } from "@/stores/use-asset-store";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeTypeId } from "@/types/canvas";
+
+export { assetResourceId, bindCanvasNodeResourceAsset, canvasNodeResourceId, extractOwnedResourceId };
 
 export type CanvasAssetSource = "canvas-generation" | "canvas-upload" | "canvas-manual";
 
@@ -14,7 +16,8 @@ type CanvasNodeAssetOptions = {
 
 export function canvasNodeToAsset(node: CanvasNodeData, options: CanvasNodeAssetOptions): NewAsset | null {
     const content = node.metadata?.content?.trim() || "";
-    const storageKey = node.metadata?.storageKey?.trim() || undefined;
+    const inferredResourceId = extractOwnedResourceId(node.metadata?.storageKey, content);
+    const storageKey = node.metadata?.storageKey?.trim() || (inferredResourceId ? `resource:${inferredResourceId}` : undefined);
     const isMedia = node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio;
 
     // 文本素材必须直接携带正文；媒体则允许只有持久 storageKey。后者常见于页面重载后：
@@ -31,9 +34,11 @@ export function canvasNodeToAsset(node: CanvasNodeData, options: CanvasNodeAsset
         prompt: node.metadata?.prompt,
         resourceKey: storageKey,
     };
+    const canonicalResourceUrl = inferredResourceId ? `/api/resources/${inferredResourceId}/file` : "";
+    const mediaUrl = content || canonicalResourceUrl;
     const base = {
         title,
-        coverUrl: node.type === CanvasNodeType.Image ? content : node.type === CanvasNodeType.Video ? canvasNodeVideoPreviewUrl(node) : "",
+        coverUrl: node.type === CanvasNodeType.Image ? mediaUrl : node.type === CanvasNodeType.Video ? canvasNodeVideoPreviewUrl(node) : "",
         tags: node.metadata?.assetTags || [],
         category: canvasNodeAssetCategory(node),
         status: "confirmed" as const,
@@ -64,7 +69,7 @@ export function canvasNodeToAsset(node: CanvasNodeData, options: CanvasNodeAsset
             ...base,
             kind: "video",
             data: {
-                url: content,
+                url: mediaUrl,
                 storageKey,
                 width: node.metadata?.naturalWidth || node.width,
                 height: node.metadata?.naturalHeight || node.height,
@@ -80,7 +85,7 @@ export function canvasNodeToAsset(node: CanvasNodeData, options: CanvasNodeAsset
             ...base,
             kind: "audio",
             data: {
-                url: content,
+                url: mediaUrl,
                 storageKey,
                 durationMs: node.metadata?.durationMs,
                 bytes: node.metadata?.bytes || 0,
@@ -89,29 +94,6 @@ export function canvasNodeToAsset(node: CanvasNodeData, options: CanvasNodeAsset
         };
     }
     return null;
-}
-
-function canvasNodeResourceId(node: CanvasNodeData) {
-    return ownedResourceIdFromMediaRef(node.metadata?.storageKey, node.metadata?.content);
-}
-
-function assetResourceId(asset: Asset) {
-    if (asset.kind === "text" || asset.kind === "entity") return "";
-    return ownedResourceIdFromMediaRef(asset.data.storageKey, "url" in asset.data ? asset.data.url : undefined);
-}
-
-/** History insert reuses the owned Asset for the same Resource. Do not invent a new pairing. */
-export function bindCanvasNodeResourceAsset(node: CanvasNodeData, sourceNodes: CanvasNodeData[], assets: Asset[]): CanvasNodeData {
-    if (node.metadata?.assetId) return node;
-    const resourceID = canvasNodeResourceId(node);
-    if (!resourceID) return node;
-    const sibling = sourceNodes.find((item) => item.metadata?.assetId && canvasNodeResourceId(item) === resourceID);
-    if (sibling?.metadata?.assetId) {
-        return { ...node, metadata: { ...node.metadata, assetId: sibling.metadata.assetId } };
-    }
-    const asset = assets.find((item) => assetResourceId(item) === resourceID);
-    if (!asset) return node;
-    return { ...node, metadata: { ...node.metadata, assetId: asset.id } };
 }
 
 /**
@@ -144,30 +126,44 @@ export function canvasNodesMissingResourceAssetBinding(nodes: CanvasNodeData[]) 
     return nodes.filter((node) => {
         if (node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) return false;
         if (node.metadata?.assetId) return false;
-        const locators = [node.metadata?.storageKey, node.metadata?.content].map((value) => String(value || "").trim());
-        return locators.some((value) => value.startsWith("resource:") || /(?:^|\/)api\/resources\/[A-Za-z0-9_-]+\/file(?:[?#]|$)/u.test(value));
+        return Boolean(canvasNodeResourceId(node));
     });
 }
 
 export function findCanvasNodeAsset(assets: Asset[], node: CanvasNodeData, canvasId: string, taskId?: string) {
     const explicitId = node.metadata?.assetId;
+    let explicitMismatched = false;
     if (explicitId) {
         const explicit = assets.find((asset) => asset.id === explicitId);
-        if (explicit && sameAssetResource(explicit, node)) return explicit;
+        if (explicit) {
+            if (sameAssetResource(explicit, node, true)) return explicit;
+            explicitMismatched = true;
+        }
     }
     const generationTaskId = taskId || node.metadata?.taskId;
-    return assets.find((asset) => {
-        if (generationTaskId && asset.metadata?.taskId === generationTaskId && asset.metadata?.nodeId === node.id) return true;
+    const byNode = assets.find((asset) => {
+        if (generationTaskId && asset.metadata?.taskId === generationTaskId && asset.metadata?.nodeId === node.id) return sameAssetResource(asset, node);
         if (asset.metadata?.nodeId !== node.id) return false;
         const sourceCanvasId = asset.metadata?.canvasId;
         if (sourceCanvasId !== canvasId && (sourceCanvasId || asset.metadata?.source !== "canvas-generation")) return false;
-        const nodeResourceKey = node.metadata?.storageKey;
-        const assetResourceKey = typeof asset.metadata?.resourceKey === "string" ? asset.metadata.resourceKey : assetStorageKey(asset);
-        return !nodeResourceKey || !assetResourceKey || nodeResourceKey === assetResourceKey;
+        return sameAssetResource(asset, node);
     });
+    if (byNode) return byNode;
+    if (!explicitId || explicitMismatched) {
+        const nodeResourceId = canvasNodeResourceId(node);
+        if (nodeResourceId) {
+            return assets.find((asset) => assetResourceId(asset) === nodeResourceId);
+        }
+    }
+    return undefined;
 }
 
-function sameAssetResource(asset: Asset, node: CanvasNodeData) {
+function sameAssetResource(asset: Asset, node: CanvasNodeData, allowUnboundExplicitAsset = false) {
+    const nodeResourceId = canvasNodeResourceId(node);
+    const assetResId = assetResourceId(asset);
+    if (nodeResourceId && assetResId) return nodeResourceId === assetResId;
+    if (allowUnboundExplicitAsset && nodeResourceId && !assetResId) return true;
+    if (nodeResourceId || assetResId) return nodeResourceId === assetResId;
     const nodeResourceKey = node.metadata?.storageKey;
     const assetResourceKey = typeof asset.metadata?.resourceKey === "string" ? asset.metadata.resourceKey : assetStorageKey(asset);
     return !nodeResourceKey || !assetResourceKey || nodeResourceKey === assetResourceKey;

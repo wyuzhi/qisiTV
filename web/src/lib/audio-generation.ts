@@ -102,7 +102,7 @@ export function audioSpeechProfile(model = ""): AudioSpeechProfile {
         return {
             kind,
             voices: [],
-            formats: minimaxAudioFormatOptions,
+            formats: audioFormatOptions.filter((item) => item.value === "mp3"),
             defaultVoice: "",
             defaultFormat: "mp3",
             speedMin: 1,
@@ -225,6 +225,7 @@ export function audioSettingsSummary(config: { model?: string; audioVoice?: stri
     const parts: string[] = [];
     if (profile.showVoice) parts.push(audioVoiceLabel(config.audioVoice || "", model));
     parts.push(audioFormatLabel(config.audioFormat || "", model));
+    if (profile.kind === "minimax-music") parts.push("256 kbps");
     if (profile.showSpeed) parts.push(audioSpeedLabel(config.audioSpeed || "", model));
     if (profile.showPitch) parts.push(`音调${audioPitchLabel(config.audioPitch || "")}`);
     if (profile.showVolume) parts.push(`音量${audioVolumeLabel(config.audioVolume || "")}`);
@@ -251,6 +252,9 @@ export function buildAudioSpeechRequest(
     };
     if (profile.showVoice) payload.voice = settings.audioVoice;
     if (profile.showSpeed) payload.speed = Number(settings.audioSpeed);
+    if (profile.kind === "minimax-music") {
+        payload.metadata = { audio_setting: { sample_rate: 44100, bitrate: 256000, format: "mp3" } };
+    }
     const instructions = settings.audioInstructions.trim();
     if (profile.showInstructions && instructions) payload.instructions = instructions;
     return payload;

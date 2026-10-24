@@ -149,3 +149,17 @@ describe("buildGenerationTaskNodeResult history reuse", () => {
         expect(fetched).toEqual([]);
     });
 });
+
+
+test("fixed-output history restores each image from its own index", async () => {
+    const { io, resolveImageCalls, uploaded } = mockIO();
+    const output = task("canvas_image", { images: Array.from({ length: 4 }, (_, index) => ({ dataUrl: `expired:${index}`, storageKey: `image:four-${index}`, width: 1024, height: 1024 })) });
+    for (let index = 0; index < 4; index++) {
+        const node = mediaNode(CanvasNodeType.Image);
+        node.metadata = { ...node.metadata, taskOutputIndex: index };
+        const recovered = await buildGenerationTaskNodeResult(node, output, undefined, io);
+        expect(recovered.metadata?.storageKey).toBe(`image:four-${index}`);
+    }
+    expect(resolveImageCalls.map(([key]) => key)).toEqual(["image:four-0", "image:four-1", "image:four-2", "image:four-3"]);
+    expect(uploaded).toEqual([]);
+});

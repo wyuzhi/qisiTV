@@ -89,7 +89,7 @@ func TestUpdateStateJSONContract(t *testing.T) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"status", "currentVersion", "latestVersion", "releaseNotes", "downloadedBytes", "totalBytes", "error"}
+	want := []string{"status", "currentVersion", "latestVersion", "releaseNotes", "downloadedBytes", "totalBytes", "bytesPerSecond", "reconnecting", "error"}
 	if len(raw) != len(want) {
 		t.Fatalf("fields = %v", raw)
 	}

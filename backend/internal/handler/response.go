@@ -60,7 +60,7 @@ func writeAppError(c *gin.Context, appErr *app.AppError) {
 		}
 		logHandlerError(c, appErr.Status, diagnosticErr)
 	}
-	writeFailure(c, appErr.Status, code, reason, message)
+	writeFailure(c, appErr.Status, code, reason, message, appErr.Details)
 }
 
 // failInternal 保留真实 HTTP 状态，但绝不把未分类错误原文写入响应。
@@ -72,8 +72,11 @@ func failInternal(c *gin.Context, status int, err error) {
 	writeFailure(c, status, status, app.ReasonForStatus(status), safeInternalErrorMessage(status))
 }
 
-func writeFailure(c *gin.Context, status int, code int, reason app.ErrorReason, message string) {
+func writeFailure(c *gin.Context, status int, code int, reason app.ErrorReason, message string, details ...map[string]any) {
 	body := gin.H{"code": code, "data": nil, "msg": message}
+	if len(details) > 0 && details[0] != nil {
+		body["details"] = details[0]
+	}
 	if reason != "" {
 		body["reason"] = reason
 	}

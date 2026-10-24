@@ -1,20 +1,23 @@
 import { useEffect, useState } from "react";
-import { App, Button, Input, Segmented, Tag } from "antd";
+import { Alert, App, Button, Popconfirm, Segmented, Tag } from "antd";
+import { ReferenceMediaTransportFields } from "./reference-media-transport-fields";
 import { ChevronRight, FlaskConical, Settings2 } from "lucide-react";
 
 import { ModelEditorModal } from "@/components/model-editor-modal";
 import { ModelProtocolBrowser } from "@/components/model-protocol-browser";
 import { testChannelModelConnection } from "@/lib/model-connection-test";
+import { seedancePortraitLabel } from "@/lib/seedance-portrait";
 import { ModelCapabilityEditor } from "@/components/model-capability-editor";
 import { type ModelCapabilityChoice } from "@/components/model-protocol-picker";
 import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
 import { defaultProtocolForCapability, defaultProtocolForModel, inferProtocolCapabilityFromModel, modelProtocolCapability, modelProtocolDefinition, type ModelProtocol, type ModelProtocolDefinition } from "@/lib/model-protocols";
 import { fetchPluginProviderCatalog } from "@/services/api/plugin-catalog";
 import { modelOptionName, type ModelChannel } from "@/stores/use-config-store";
+import { currentModelConnectionReceipt, useModelConnectionTests } from "@/stores/use-model-connection-tests";
 
 type ModelProfile = NonNullable<ModelChannel["modelProfiles"]>[number];
 
-export function ChannelModelSettings({ channel, onChange }: { channel: ModelChannel; onChange: (profiles: ModelProfile[]) => void }) {
+export function ChannelModelSettings({ channel, onChange, draft = false }: { channel: ModelChannel; onChange: (profiles: ModelProfile[]) => void; draft?: boolean }) {
     const { message } = App.useApp();
     const [testingModel, setTestingModel] = useState("");
     const [editorTab, setEditorTab] = useState("protocol");
@@ -22,6 +25,8 @@ export function ChannelModelSettings({ channel, onChange }: { channel: ModelChan
     const [protocolError, setProtocolError] = useState("");
     const [activeModel, setActiveModel] = useState<string | null>(null);
     const [availableProtocols, setAvailableProtocols] = useState<ModelProtocolDefinition[]>([]);
+    const { receipts, record } = useModelConnectionTests();
+    const testResult = activeModel ? currentModelConnectionReceipt(receipts, channel, activeModel) : undefined;
 
     useEffect(() => {
         let active = true;
@@ -31,10 +36,17 @@ export function ChannelModelSettings({ channel, onChange }: { channel: ModelChan
         return () => { active = false; };
     }, []);
 
-    if (!channel.models.length) return null;
+    if (!channel.models.length) return (
+        <div className="mt-4">
+            <div className="text-xs font-medium">模型能力与请求协议</div>
+            <p className="mt-2 text-xs leading-5 text-foreground/58">
+                先在上方「模型列表」输入模型名并按回车，再为模型选择能力与请求协议。
+            </p>
+        </div>
+    );
 
     const updateProfile = (model: string, patch: Partial<ModelProfile>) => {
-        const defaultProtocol = defaultProtocolForModel(model, availableProtocols);
+        const defaultProtocol = inferProtocolCapabilityFromModel(model) === "video" ? channel.interfaceType : defaultProtocolForModel(model, availableProtocols);
         const defaultCap = modelProtocolCapability(defaultProtocol, availableProtocols) || inferProtocolCapabilityFromModel(model);
         const current = channel.modelProfiles?.find((item) => item.model === model) || {
             model,
@@ -42,7 +54,9 @@ export function ChannelModelSettings({ channel, onChange }: { channel: ModelChan
             protocol: defaultProtocol,
             capabilityConfig: defaultModelCapabilityConfig(defaultProtocol, model),
         };
-        const next = [...(channel.modelProfiles || []).filter((item) => item.model !== model), { ...current, ...patch, model }];
+        const nextProfile = { ...current, ...patch, model };
+        if ("protocol" in patch) nextProfile.authType = modelProtocolDefinition(nextProfile.protocol, availableProtocols)?.authType;
+        const next = [...(channel.modelProfiles || []).filter((item) => item.model !== model), nextProfile];
         onChange(next.filter((item) => channel.models.includes(item.model)));
     };
 
@@ -50,17 +64,20 @@ export function ChannelModelSettings({ channel, onChange }: { channel: ModelChan
         setTestingModel(model);
         try {
             const detail = await testChannelModelConnection(channel, model, capability, protocol);
+            record(channel, model, { success: true, detail });
             message.success(`模型测试通过：${detail}`);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "模型测试失败");
+            const detail = error instanceof Error ? error.message : "模型测试失败";
+            record(channel, model, { success: false, detail });
+            message.error(detail);
         } finally {
             setTestingModel("");
         }
     };
 
     const activeModelProfile = activeModel ? channel.modelProfiles?.find((item) => item.model === activeModel) : undefined;
-    const inferredProtocol = activeModel ? defaultProtocolForModel(activeModel, availableProtocols) : "";
-    const activeProtocol = activeModelProfile?.protocol || inferredProtocol;
+    const inferredProtocol = activeModel ? (inferProtocolCapabilityFromModel(activeModel) === "video" ? channel.interfaceType || "" : defaultProtocolForModel(activeModel, availableProtocols)) : "";
+    const activeProtocol = activeModelProfile ? activeModelProfile.protocol || channel.interfaceType || "" : inferredProtocol;
     const activeCapability = activeModelProfile?.capability || modelProtocolCapability(activeProtocol, availableProtocols) || (activeModel ? inferProtocolCapabilityFromModel(activeModel) : "text");
 
     return (
@@ -68,7 +85,7 @@ export function ChannelModelSettings({ channel, onChange }: { channel: ModelChan
             <div className="mb-2 flex items-center justify-between gap-3">
                 <div>
                     <div className="text-xs font-medium">模型能力与请求协议</div>
-                    <div className="mt-0.5 text-[var(--fs-tiny)] text-foreground/42">LikeAI 模型参数；测试会发起真实请求并可能产生供应商费用</div>
+                    <div className="mt-0.5 text-[var(--fs-tiny)] text-foreground/42">按服务商要求调整参数，也可以生成一次来验证连接。</div>
                 </div>
                 <span className="text-[var(--fs-tiny)] text-foreground/35">{channel.models.length} 个模型</span>
             </div>
@@ -76,9 +93,9 @@ export function ChannelModelSettings({ channel, onChange }: { channel: ModelChan
                 {channel.models.map((rawModel) => {
                     const model = modelOptionName(rawModel);
                     const profile = channel.modelProfiles?.find((item) => item.model === model);
-                    const protocol = profile?.protocol || defaultProtocolForModel(model, availableProtocols);
+                    const protocol = profile ? profile.protocol || channel.interfaceType || "" : (inferProtocolCapabilityFromModel(model) === "video" ? channel.interfaceType || "" : defaultProtocolForModel(model, availableProtocols));
                     const capability = profile?.capability || modelProtocolCapability(protocol, availableProtocols) || inferProtocolCapabilityFromModel(model);
-                    const displayName = profile?.displayName?.trim() || model;
+                    const displayName = seedancePortraitLabel(model) || profile?.displayName?.trim() || model;
                     return (
                         <div key={model} className="flex min-w-0 items-center gap-3 rounded-md bg-surface-active px-3 py-2.5 transition-colors hover:bg-surface-hover">
                             <span className="grid size-8 shrink-0 place-items-center rounded-md bg-foreground/[.045] text-foreground/65">
@@ -114,16 +131,17 @@ export function ChannelModelSettings({ channel, onChange }: { channel: ModelChan
                 onClose={() => setActiveModel(null)}
                 footer={
                     <div className="model-editor-footer">
-                        <span className="text-xs text-foreground/50">更改实时保存到本地工作区</span>
+                        <span className="text-xs text-foreground/50">{draft ? "完成后，点击「保存并使用」保存更改" : "更改实时保存到本地工作区"}</span>
                         <div className="model-editor-footer-actions">
+                            <Popconfirm title="生成一次测试结果？" description="会向当前服务商提交真实生成任务，费用由服务商收取。结果可在任务中心查看。" okText="开始生成" cancelText="取消" onConfirm={() => { if (activeModel && activeProtocol) void testModel(activeModel, activeCapability, activeProtocol); }}>
                             <Button
                                 icon={<FlaskConical className="size-4" />}
                                 loading={Boolean(testingModel)}
                                 disabled={!activeProtocol || protocolLoading || Boolean(protocolError)}
-                                onClick={() => { if (activeModel && activeProtocol) void testModel(activeModel, activeCapability, activeProtocol); }}
                             >
-                                测试模型
+                                生成测试
                             </Button>
+                            </Popconfirm>
                             <Button disabled={Boolean(testingModel)} onClick={() => setActiveModel(null)}>完成</Button>
                         </div>
                     </div>
@@ -133,6 +151,7 @@ export function ChannelModelSettings({ channel, onChange }: { channel: ModelChan
                         key: "protocol",
                         label: "基本信息",
                         children: <div className="space-y-4" inert={Boolean(testingModel)}>
+                            {!testingModel && testResult && <Alert type={testResult.success ? "success" : "error"} title={testResult.detail} showIcon />}
                             <section className="space-y-2">
                                 <div className="text-xs font-medium">模型能力</div>
                                 <Segmented<ModelCapabilityChoice>
@@ -140,7 +159,7 @@ export function ChannelModelSettings({ channel, onChange }: { channel: ModelChan
                                     options={[{ label: "文本", value: "text" }, { label: "图片", value: "image" }, { label: "视频", value: "video" }, { label: "音频", value: "audio" }]}
                                     value={activeCapability}
                                     onChange={(nextCapability) => {
-                                        const nextProtocol = availableProtocols.find((item) => item.value === activeProtocol && item.capability === nextCapability)?.value || availableProtocols.find((item) => item.capability === nextCapability && item.enabled !== false)?.value || defaultProtocolForCapability(nextCapability, availableProtocols);
+                                        const nextProtocol = availableProtocols.find((item) => item.value === activeProtocol && item.capability === nextCapability && item.enabled !== false)?.value || (nextCapability === "video" ? undefined : defaultProtocolForCapability(nextCapability, availableProtocols));
                                         updateProfile(activeModel, {
                                             protocol: nextProtocol,
                                             capability: nextCapability,
@@ -149,6 +168,7 @@ export function ChannelModelSettings({ channel, onChange }: { channel: ModelChan
                                     }}
                                 />
                             </section>
+                            {channel.scope !== "system" && activeCapability !== "text" && activeProtocol !== "full-video" && <ReferenceMediaTransportFields value={activeModelProfile?.referenceMediaTransport} onChange={(referenceMediaTransport) => updateProfile(activeModel, { referenceMediaTransport })} />}
                             <section className="space-y-2">
                                 <div className="text-xs font-medium">请求协议</div>
                                 <ModelProtocolBrowser
@@ -171,7 +191,6 @@ export function ChannelModelSettings({ channel, onChange }: { channel: ModelChan
                         children: <div inert={Boolean(testingModel)}>
                             {activeCapability === "image" || activeCapability === "video" ? (
                                 <ModelCapabilityEditor
-                                    baseUrl={channel.baseUrl}
                                     capability={activeCapability}
                                     model={activeModel}
                                     value={activeModelProfile?.capabilityConfig || defaultModelCapabilityConfig(activeProtocol, activeModel)}
@@ -179,28 +198,12 @@ export function ChannelModelSettings({ channel, onChange }: { channel: ModelChan
                                     onChange={(capabilityConfig) => updateProfile(activeModel, { capabilityConfig })}
                                 />
                             ) : <p className="text-xs text-foreground/50">当前模型类型无需额外配置引用与参数。</p>}
-                            {activeProtocol.startsWith("likeai-") && <LikeAIOptions key={activeModel} value={activeModelProfile?.defaultOptions} onChange={(defaultOptions) => updateProfile(activeModel, { defaultOptions })} />}
                         </div>,
                     },
                 ] : []}
             />
         </div>
     );
-}
-
-function LikeAIOptions({ value, onChange }: { value?: Record<string, unknown>; onChange: (value: Record<string, unknown>) => void }) {
-    const [draft, setDraft] = useState(JSON.stringify(value || {}, null, 2));
-    const [error, setError] = useState("");
-    return <section className="mt-4 space-y-2">
-        <div className="text-xs font-medium">LikeAI 模型扩展参数</div>
-        <p className="text-xs text-foreground/50">模型目录不含参数范围。请按该模型文档调整上方能力；额外参数填写 JSON，例如 {`{"kwargs":{"web_search":true}}`}。顶层特殊字段放在 body 对象中。</p>
-        <Input.TextArea aria-label="LikeAI 模型扩展参数 JSON" value={draft} rows={6} status={error ? "error" : undefined} onChange={(event) => setDraft(event.target.value)} onBlur={() => {
-            try { const parsed: unknown = JSON.parse(draft || "{}"); if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("请填写 JSON 对象"); onChange(parsed as Record<string, unknown>); setError(""); }
-            catch (error) { setError(error instanceof Error ? error.message : "JSON 无效"); }
-        }} />
-        {error && <p role="alert" className="text-xs text-red-500">{error}；当前修改尚未保存。</p>}
-        <a className="text-xs" href="https://task.likeai.pro/api-doc" target="_blank" rel="noreferrer">查看 LikeAI 模型文档</a>
-    </section>;
 }
 
 function capabilityLabel(value: ModelProfile["capability"]) {

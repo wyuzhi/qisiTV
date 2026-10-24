@@ -51,6 +51,21 @@ and cgo bindings distributed under their package license.
 
 ## Bundled runtime files
 
+The macOS Apple Silicon headless engine additionally ships standalone `ffmpeg`
+and `ffprobe`, built by `scripts/package-engine-media-runtime-macos.py`. This
+configuration includes libx264 and is **GPL-2.0-or-later**, not LGPL-only. It
+statically includes FreeType (its GPL alternative), FriBidi (LGPL-2.1-or-later),
+HarfBuzz (MIT), libass (ISC), and libunibreak (Zlib). No nonfree codecs are enabled.
+The macOS system frameworks and zlib remain system dependencies. Fonts are read
+from the user's operating system; Apple fonts are not redistributed.
+
+Every engine distribution must retain `agent-host/media-runtime/licenses/` and
+`agent-host/media-runtime/sources/`, containing the complete pinned upstream
+source archives, SHA-256 checksums, build recipe, and configuration receipt.
+`agent-host/media-runtime/manifest.json` records the exact source versions and
+binary hashes. These independent command-line programs are run as child
+processes. The repository license does not override their component licenses.
+
 | Repository paths | Origin and terms |
 | --- | --- |
 | `web/public/mediapipe/wasm/*`, `web/public/canvas/models/blaze-face-full-range-sparse.tflite` | MediaPipe Tasks Vision distribution, Apache-2.0 |

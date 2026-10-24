@@ -413,7 +413,9 @@ func TestAckLostResponseRecoversAfterRestart(t *testing.T) {
 	restartDir := t.TempDir()
 	copyWorkspaceFile(t, dir, restartDir, connectionStoreFile)
 	copyWorkspaceFile(t, dir, restartDir, ".settings-key")
+	fake.mu.Lock()
 	fake.completeMode = ""
+	fake.mu.Unlock()
 	store, err := workspace.NewProviderConfig(restartDir)
 	if err != nil {
 		t.Fatal(err)

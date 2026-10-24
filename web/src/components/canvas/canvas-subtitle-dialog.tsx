@@ -1,9 +1,10 @@
+import "./canvas-media-editors.css";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, ColorPicker, Input, InputNumber, Progress, Segmented } from "antd";
+import { App, Button, ColorPicker, Dropdown, Input, InputNumber, Progress, Segmented } from "antd";
 import { AppModal } from "@/components/ui/product/app-modal";
 import { Switch } from "@/components/ui/base/switch";
 import { Captions, FileDown, FileUp, ListPlus, LoaderCircle, Plus, Scissors, Sparkles, Trash2 } from "lucide-react";
-import { saveAs } from "file-saver";
+import { reportOwnedMediaSave, saveOwnedOrBrowserBlob } from "@/services/desktop-media-save";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
@@ -18,6 +19,7 @@ import { generateSubtitleHighlights, type SubtitleHighlightProgress } from "@/li
 import { createDefaultSubtitleStyle, type SrtEntry, type SubtitleHighlight, type SubtitlePosition, type SubtitleStyle } from "@/types/timeline";
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 import { SubtitleHighlightedText } from "./canvas-subtitle-text";
+import { CanvasTranscriptionControls } from "./canvas-transcription-controls";
 
 type CanvasSubtitleDialogProps = {
     node: CanvasNodeData;
@@ -36,6 +38,8 @@ export function CanvasSubtitleDialog({ node, open, projectId, config, onClose, o
     const [highlights, setHighlights] = useState<SubtitleHighlight[]>([]);
     const [style, setStyle] = useState<SubtitleStyle>(createDefaultSubtitleStyle);
     const [running, setRunning] = useState(false);
+    const [transcriptionRunning, setTranscriptionRunning] = useState(false);
+    const busy = running || transcriptionRunning;
     const [progress, setProgress] = useState<SubtitleHighlightProgress | null>(null);
     const [videoUrl, setVideoUrl] = useState("");
     const [currentTimeMs, setCurrentTimeMs] = useState(0);
@@ -257,7 +261,7 @@ export function CanvasSubtitleDialog({ node, open, projectId, config, onClose, o
             message.warning("暂无字幕可导出");
             return;
         }
-        saveAs(new Blob([content], { type: "text/plain;charset=utf-8" }), `${node.title || "subtitle"}.srt`);
+        void reportOwnedMediaSave(message, saveOwnedOrBrowserBlob(`${node.title || "subtitle"}.srt`, new Blob([content], { type: "text/plain;charset=utf-8" })));
     };
 
     const runAiHighlight = async () => {
@@ -432,7 +436,8 @@ export function CanvasSubtitleDialog({ node, open, projectId, config, onClose, o
                     return (
                         <div
                             key={`${entry.index}-${idx}`}
-                            className="cursor-pointer rounded-xl border p-2.5 transition-colors"
+                            className="subtitle-editor-entry cursor-pointer rounded-xl border p-2.5 transition-colors"
+                            data-active={activeEntry?.index === entry.index}
                             title="点击跳转到该条字幕时间"
                             style={{ background: theme.node.fill, borderColor: activeEntry?.index === entry.index ? theme.accent.primary : theme.node.stroke }}
                             onClick={(event) => {
@@ -441,19 +446,19 @@ export function CanvasSubtitleDialog({ node, open, projectId, config, onClose, o
                                 seekToEntry(entry);
                             }}
                         >
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
                                 <span className="grid size-6 shrink-0 place-items-center rounded-md text-xs font-semibold" style={{ background: theme.accent.primarySoft, color: theme.accent.primary }}>
                                     {idx + 1}
                                 </span>
-                                <InputNumber size="small" min={0} step={100} value={entry.startMs} onChange={(startMs) => updateEntry(idx, { startMs: startMs ?? 0 })} className="w-32" aria-label={`第 ${idx + 1} 条开始时间（毫秒）`} />
+                                <InputNumber size="small" disabled={busy} min={0} step={100} value={entry.startMs} onChange={(startMs) => updateEntry(idx, { startMs: startMs ?? 0 })} className="w-32" aria-label={`第 ${idx + 1} 条开始时间（毫秒）`} />
                                 <span className="text-xs opacity-40">→</span>
-                                <InputNumber size="small" min={0} step={100} value={entry.endMs} onChange={(endMs) => updateEntry(idx, { endMs: endMs ?? 0 })} className="w-32" aria-label={`第 ${idx + 1} 条结束时间（毫秒）`} />
+                                <InputNumber size="small" disabled={busy} min={0} step={100} value={entry.endMs} onChange={(endMs) => updateEntry(idx, { endMs: endMs ?? 0 })} className="w-32" aria-label={`第 ${idx + 1} 条结束时间（毫秒）`} />
                                 <button
                                     type="button"
                                     title="切分这条字幕"
                                     className="ml-auto grid size-7 place-items-center rounded-lg border transition-colors hover:opacity-75"
                                     style={{ borderColor: theme.toolbar.border }}
-                                    disabled={running}
+                                    disabled={busy}
                                     onClick={() => splitEntry(idx)}
                                 >
                                     <Scissors className="size-3.5" />
@@ -463,13 +468,13 @@ export function CanvasSubtitleDialog({ node, open, projectId, config, onClose, o
                                     title="删除这条字幕"
                                     className="grid size-7 place-items-center rounded-lg border text-red-500 transition-colors hover:opacity-75"
                                     style={{ borderColor: theme.toolbar.border }}
-                                    disabled={running}
+                                    disabled={busy}
                                     onClick={() => deleteEntry(idx)}
                                 >
                                     <Trash2 className="size-3.5" />
                                 </button>
                             </div>
-                            <Input.TextArea value={entry.text} autoSize={{ minRows: 1, maxRows: 3 }} placeholder="字幕文本" className="mt-2" onChange={(event) => updateEntry(idx, { text: event.target.value })} />
+                            <Input.TextArea disabled={busy} value={entry.text} autoSize={{ minRows: 1, maxRows: 3 }} placeholder="字幕文本" className="mt-2" onChange={(event) => updateEntry(idx, { text: event.target.value })} />
                             {highlight ? (
                                 <div className="mt-1.5 text-xs" style={{ color: theme.accent.primary }}>
                                     重点：{highlight.highlightText}
@@ -482,7 +487,7 @@ export function CanvasSubtitleDialog({ node, open, projectId, config, onClose, o
                 <div className="grid h-40 place-items-center text-center">
                     <div className="text-xs opacity-45">
                         <ListPlus className="mx-auto mb-2 size-8" />
-                        还没有字幕：导入 SRT 或文本文件，或点击工具栏“新增字幕”。
+                        导入字幕、自动转写或新增第一条字幕
                     </div>
                 </div>
             )}
@@ -502,9 +507,21 @@ export function CanvasSubtitleDialog({ node, open, projectId, config, onClose, o
     );
 
     return (
-        <AppModal className="canvas-subtitle-dialog" title={title} open={open} centered footer={null} width={1120} destroyOnHidden onCancel={onClose} flush>
-            <div className="flex h-[min(72vh,680px)] min-h-[420px] flex-col text-sm" style={{ color: theme.node.text }}>
-                <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3" style={{ borderColor: theme.toolbar.border, background: theme.toolbar.panel }}>
+        <AppModal className="canvas-subtitle-dialog" title={title} open={open} centered footer={null} width="min(1280px, calc(100vw - 32px))" destroyOnHidden onCancel={onClose} flush>
+            <div className="media-editor-body subtitle-editor-body flex flex-col text-sm" style={{ color: theme.node.text }}>
+                <CanvasTranscriptionControls
+                    key={`${projectId}:${node.id}:${node.metadata?.storageKey || ""}`}
+                    projectId={projectId}
+                    nodeId={node.id}
+                    resourceId={resourceIdFromStorageKey(node.metadata?.storageKey || "")}
+                    disabled={busy}
+                    onRunningChange={setTranscriptionRunning}
+                    onResult={(next) => {
+                        setEntries(next);
+                        setHighlights([]);
+                    }}
+                />
+                <div className="media-editor-toolbar flex flex-wrap items-center gap-2" style={{ borderColor: theme.toolbar.border, background: theme.toolbar.panel }}>
                     <input
                         ref={fileInputRef}
                         type="file"
@@ -527,26 +544,34 @@ export function CanvasSubtitleDialog({ node, open, projectId, config, onClose, o
                             event.target.value = "";
                         }}
                     />
-                    <Button size="small" icon={<FileUp className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
-                        导入 SRT
-                    </Button>
-                    <Button size="small" icon={<FileUp className="size-3.5" />} onClick={() => textInputRef.current?.click()}>
-                        导入文本
-                    </Button>
+                    <Dropdown
+                        trigger={["click"]}
+                        disabled={busy}
+                        menu={{
+                            items: [
+                                { key: "srt", label: "导入 SRT", onClick: () => fileInputRef.current?.click() },
+                                { key: "text", label: "导入文本", onClick: () => textInputRef.current?.click() },
+                            ],
+                        }}
+                    >
+                        <Button size="small" disabled={busy} icon={<FileUp className="size-3.5" />}>
+                            导入字幕
+                        </Button>
+                    </Dropdown>
                     <Button size="small" icon={<FileDown className="size-3.5" />} disabled={!entries.length} onClick={exportSrt}>
                         导出 SRT
                     </Button>
-                    <Button size="small" icon={<Scissors className="size-3.5" />} disabled={!entries.length || running} onClick={resegmentAll}>
+                    <Button size="small" icon={<Scissors className="size-3.5" />} disabled={!entries.length || busy} onClick={resegmentAll}>
                         自动切分
                     </Button>
-                    <Button size="small" icon={<Plus className="size-3.5" />} disabled={running} onClick={addEntry}>
+                    <Button size="small" icon={<Plus className="size-3.5" />} disabled={busy} onClick={addEntry}>
                         新增字幕
                     </Button>
                     <Button
                         size="small"
                         danger
                         icon={<Trash2 className="size-3.5" />}
-                        disabled={!entries.length || running}
+                        disabled={!entries.length || busy}
                         onClick={() =>
                             modal.confirm({
                                 title: "清空全部字幕",
@@ -575,7 +600,7 @@ export function CanvasSubtitleDialog({ node, open, projectId, config, onClose, o
                         size="small"
                         type={running ? "default" : "primary"}
                         icon={running ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-                        disabled={!entries.length}
+                        disabled={!entries.length || transcriptionRunning}
                         onClick={running ? cancelAiHighlight : () => void runAiHighlight()}
                     >
                         {running ? "取消高亮" : "AI 关键词高亮"}
@@ -588,26 +613,37 @@ export function CanvasSubtitleDialog({ node, open, projectId, config, onClose, o
                     </div>
                 ) : null}
 
-                <div className="min-h-0 flex-1 px-4 py-3">
-                    <div className="grid h-full grid-cols-[minmax(250px,300px)_minmax(0,1fr)_minmax(230px,270px)] gap-3">
-                        {entriesBlock}
-                        {previewBlock}
-                        <div className="thin-scrollbar min-h-0 space-y-3 overflow-y-auto pr-1">
-                            <div className="text-xs font-medium opacity-55">字幕样式</div>
-                            {styleControls}
+                <div className="subtitle-editor-workspace">
+                    <section className="media-editor-pane subtitle-editor-list" aria-label="字幕列表">
+                        <div className="media-editor-pane-heading">
+                            <h2>字幕列表</h2>
+                            <span>{entries.length} 条</span>
                         </div>
-                    </div>
+                        {entriesBlock}
+                    </section>
+                    <section className="media-editor-pane subtitle-editor-preview" aria-label="视频预览">
+                        <div className="media-editor-pane-heading">
+                            <h2>预览</h2>
+                        </div>
+                        {previewBlock}
+                    </section>
+                    <section className="media-editor-pane subtitle-editor-style" aria-label="字幕样式">
+                        <div className="media-editor-pane-heading">
+                            <h2>字幕样式</h2>
+                        </div>
+                        <div className="thin-scrollbar min-h-0 space-y-4 overflow-y-auto">{styleControls}</div>
+                    </section>
                 </div>
 
-                <div className="flex items-center justify-between gap-3 border-t px-4 py-3" style={{ borderColor: theme.toolbar.border, background: theme.toolbar.panel }}>
+                <div className="media-editor-footer flex items-center justify-between gap-3" style={{ borderColor: theme.toolbar.border, background: theme.toolbar.panel }}>
                     <div className="text-xs opacity-45">
                         {entries.length} 条字幕 · 单条上限 {style.maxCharsPerEntry || DEFAULT_MAX_CHARS_PER_ENTRY} 字
                     </div>
                     <div className="flex items-center gap-2">
-                        <Button disabled={running} onClick={onClose}>
+                        <Button disabled={busy} onClick={onClose}>
                             取消
                         </Button>
-                        <Button type="primary" disabled={running} onClick={handleSave}>
+                        <Button type="primary" disabled={busy} onClick={handleSave}>
                             保存
                         </Button>
                     </div>

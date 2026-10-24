@@ -68,6 +68,8 @@ func OfficialDeclarativeVideoInterface(interfaceType string) (string, bool) {
 		return "Novita", true
 	case string(model.ChannelInterfaceNewAPIChannel2):
 		return "NewAPI Video Generations", true
+	case "video-generations-json":
+		return "视频生成 JSON", true
 	case string(model.ChannelInterfaceNewAPIChannel1):
 		return "NewAPI 媒体任务", true
 	case string(model.ChannelInterfaceXAIVideo):

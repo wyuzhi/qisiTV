@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { appQueryClient } from "../../src/lib/query-client";
 import { CanvasResourceMentionTextarea } from "../../src/components/canvas/canvas-resource-mention-textarea";
 import { useAssetStore, type Asset } from "../../src/stores/use-asset-store";
 import type { CanvasResourceReference } from "../../src/lib/canvas/canvas-resource-references";
@@ -102,39 +104,27 @@ const mockReferences: CanvasResourceReference[] = [
             fileCount: 4,
         },
     },
-    { id: "ref-image-named", nodeId: "named-image", kind: "image", label: "图片1", title: "角色正面参考", previewUrl: pixelDataUrl, active: true },
 ];
 
 function TestApp() {
     const [richPrompt, setRichPrompt] = useState("");
     const [plainPrompt, setPlainPrompt] = useState("");
     const [underlyingClicks, setUnderlyingClicks] = useState(0);
-    const [canvasDeleteKeys, setCanvasDeleteKeys] = useState(0);
-    const [showReferences, setShowReferences] = useState(true);
 
     return (
-        <div
-            onKeyDown={(event) => {
-                if (event.key === "F2") {
-                    event.preventDefault();
-                    setShowReferences((current) => !current);
-                }
-                if (event.key === "Backspace" || event.key === "Delete") setCanvasDeleteKeys((current) => current + 1);
-            }}
-            style={{ padding: "40px", maxWidth: "680px", margin: "0 auto", background: "#18181b", minHeight: "100vh", color: "#fff" }}
-        >
+        <div style={{ padding: "40px", maxWidth: "680px", margin: "0 auto", background: "#18181b", minHeight: "100vh", color: "#fff" }}>
             <div style={{ marginBottom: "16px", display: "flex", gap: "16px", alignItems: "center" }}>
                 <span id="rich-prompt-display">RichPrompt: {richPrompt}</span>
                 <span id="underlying-click-count">UnderlyingClicks: {underlyingClicks}</span>
-                <span id="canvas-delete-keys">CanvasDeleteKeys: {canvasDeleteKeys}</span>
             </div>
 
             {/* Rich Editor Section */}
             <div style={{ background: "#27272a", borderRadius: "8px", padding: "12px", minHeight: "100px", position: "relative" }}>
                 <CanvasResourceMentionTextarea
                     id="rich-mention-input"
+                    aria-label="rich-editor"
                     value={richPrompt}
-                    references={showReferences ? mockReferences : []}
+                    references={mockReferences}
                     includeAssetLibrary
                     onChange={setRichPrompt}
                     onSelectReference={(ref) => ref}
@@ -163,6 +153,7 @@ function TestApp() {
                 <div style={{ background: "#27272a", borderRadius: "8px", padding: "12px", minHeight: "100px" }}>
                     <CanvasResourceMentionTextarea
                         id="plain-mention-input"
+                    aria-label="secondary-editor"
                         value={plainPrompt}
                         references={mockReferences}
                         includeAssetLibrary
@@ -180,5 +171,5 @@ function TestApp() {
 
 const rootElement = document.getElementById("root");
 if (rootElement) {
-    createRoot(rootElement).render(<TestApp />);
+    createRoot(rootElement).render(<QueryClientProvider client={appQueryClient}><TestApp /></QueryClientProvider>);
 }

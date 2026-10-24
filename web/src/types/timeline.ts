@@ -117,4 +117,12 @@ export type TimelineProject = {
     /** 时间线总时长（毫秒），取所有片段末端最大值 */
     durationMs: number;
     updatedAt?: string;
+    /** 保存到工程的输出规格；单次导出可显式覆盖。 */
+    output?: {
+        width?: number;
+        height?: number;
+        fps?: number;
+        sampleRate?: number;
+        burnSubtitles?: boolean;
+    };
 };

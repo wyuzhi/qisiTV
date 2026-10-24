@@ -2,37 +2,48 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
+	"qisitv/backend/internal/appearance"
+	localasset "qisitv/backend/internal/asset"
+	"qisitv/backend/internal/assistantturns"
 	"qisitv/backend/internal/beefapi"
 	"qisitv/backend/internal/canvas"
+	"qisitv/backend/internal/depthcapture"
+	"qisitv/backend/internal/diagnostics"
 	"qisitv/backend/internal/kernel"
-	"qisitv/backend/internal/mcp"
 	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/modelcatalog"
+	"qisitv/backend/internal/operations"
 	"qisitv/backend/internal/platform"
+	"qisitv/backend/internal/playback"
+	"qisitv/backend/internal/plugins"
+	localproject "qisitv/backend/internal/project"
 	"qisitv/backend/internal/prompts"
 	"qisitv/backend/internal/repository"
 	"qisitv/backend/internal/skills"
+	"qisitv/backend/internal/supporttrace"
 	localtask "qisitv/backend/internal/task"
+	"qisitv/backend/internal/taskdelivery"
+	"qisitv/backend/internal/textreplay"
 )
 
 type Service struct {
+	canvasWorkflowMu         sync.Mutex
+	canvasWorkflowLoop       bool
 	repo                     *repository.Repository
 	dataDir                  string
 	mode                     serviceMode
-	likeAIOnly               bool
 	cancelMu                 sync.Mutex
 	storageMu                sync.Mutex
 	workerRuntimeMu          sync.Mutex
-	agentSchedulerMu         sync.Mutex
-	agentSchedulerCursor     string
-	agentConflictStreak      map[string]int
 	characterTaskMu          sync.Mutex
 	activeCancels            map[string]context.CancelFunc
 	pendingStorage           map[string]int64
@@ -47,45 +58,69 @@ type Service struct {
 	pluginRuntime            *pluginRuntime
 	pluginRuntimeErr         error
 	workerID                 string
-	routeCatalogMu           sync.RWMutex
-	routeCatalogRefreshMu    sync.Mutex
-	routeCatalog             *routeCatalogSnapshot
+	routerMu                 sync.Mutex
+	router                   *modelcatalog.Router
 	routeCatalogTTL          time.Duration
 	routeCatalogMaxStale     time.Duration
-	routeCatalogVersion      int64
-	routeHealthMu            sync.Mutex
-	routeHealthBlocked       map[string]time.Time
 	workers                  *platform.Worker
 	readCachesOnce           sync.Once
 	concurrencyReadCache     *platform.BoundedReadCache[string, platform.RuntimeTaskPolicy]
-	textReplayReadCache      *platform.BoundedReadCache[textReplayCacheKey, *TextReplayResult]
+	textReplay               *textreplay.Service
+	textReplayOnce           sync.Once
 	routeVersionReadCache    *platform.BoundedReadCache[string, int64]
-	routeCatalogRetryAt      time.Time
-	routeCatalogRefreshError error
 	skills                   *skills.Service
 	prompts                  *prompts.Service
+	projects                 *localproject.Service
 	canvas                   *canvas.Service
+	assistantTurns           *assistantturns.Service
+	continuationBackground   assistantContinuationBackground
+	assets                   *localasset.Service
+	assetsOnce               sync.Once
+	appearance               *appearance.Service
+	appearanceOnce           sync.Once
+	diagnostics              *diagnostics.Service
+	diagnosticsOnce          sync.Once
+	supportTraceOnce         sync.Once
+	supportTraceRecorder     *supporttrace.Recorder
+	supportTraceErr          error
+	supportTraceClosed       atomic.Bool
+	playback                 *playback.Service
+	playbackOnce             sync.Once
+	depthCapture             *depthcapture.Service
+	depthCaptureOnce         sync.Once
 	beefAPI                  *beefapi.Service
-	mcpOnce                  sync.Once
-	mcpSession               *mcp.Session
+	generationDeliveryMedia  taskdelivery.Media
+	generationDelivery       *taskdelivery.Deliverer
+	deliveryMu               sync.Mutex
+	deliveryProgress         *deliveryProgressRegistry
+	deliveryProgressOnce     sync.Once
+	referenceProgress        sync.Map
+	deliveryControlMu        sync.Mutex
+	deliveryCancels          map[string]context.CancelFunc
+	deliveryDeadlines        map[string]time.Time
+	deliveryClosed           bool
+	tasks                    *localtask.Service
+	tasksOnce                sync.Once
+	workspaceOps             *operations.Registry
+	workspaceOpsMu           sync.Mutex
+	bindAfterID              string
+	bindCursorMu             sync.Mutex
 }
 
 const taskWorkerConcurrency = 3
 const taskLogPayloadLimit = 4000
 
 type CreateTaskRequest struct {
-	creationPrepare *creationTaskPreparation
-	admission       *taskAdmission
-	ProjectID       string         `json:"projectId"`
-	Type            string         `json:"type"`
-	Operation       string         `json:"operation"`
-	Prompt          string         `json:"prompt"`
-	Provider        string         `json:"provider"`
-	Model           string         `json:"model"`
-	LogicalModelID  string         `json:"logicalModelId"`
-	Input           map[string]any `json:"input"`
-	TraceID         string         `json:"-"`
-	RequestID       string         `json:"-"`
+	ProjectID      string         `json:"projectId"`
+	Type           string         `json:"type"`
+	Operation      string         `json:"operation"`
+	Prompt         string         `json:"prompt"`
+	Provider       string         `json:"provider"`
+	Model          string         `json:"model"`
+	LogicalModelID string         `json:"logicalModelId"`
+	Input          map[string]any `json:"input"`
+	TraceID        string         `json:"-"`
+	RequestID      string         `json:"-"`
 }
 
 type TaskListOptions = localtask.ListOptions
@@ -124,26 +159,49 @@ type serviceOptions struct {
 func newService(repo *repository.Repository, dataDir string, options serviceOptions) *Service {
 	localResourceStorage := options.mode == serviceModeLocal
 	coordinator := platform.NewLocalCoordinator()
-	pluginRuntime, pluginRuntimeErr := newPluginRuntime(dataDir)
-	service := &Service{repo: repo, dataDir: dataDir, mode: options.mode, activeCancels: make(map[string]context.CancelFunc), agentConflictStreak: make(map[string]int), coordinator: coordinator, localResourceStorage: localResourceStorage, pluginRuntime: pluginRuntime, pluginRuntimeErr: pluginRuntimeErr, workerID: newID(), routeCatalogTTL: 30 * time.Second, routeCatalogMaxStale: 5 * time.Minute, routeHealthBlocked: make(map[string]time.Time)}
+	var pluginRuntime *pluginRuntime
+	var pluginRuntimeErr error
+	if repo == nil {
+		pluginRuntimeErr = fmt.Errorf("插件状态存储未初始化")
+	} else {
+		pluginRuntime, pluginRuntimeErr = newPluginRuntimeWithStore(dataDir, plugins.NewRepositoryStore(repo))
+	}
+	service := &Service{repo: repo, dataDir: dataDir, mode: options.mode, activeCancels: make(map[string]context.CancelFunc), coordinator: coordinator, localResourceStorage: localResourceStorage, pluginRuntime: pluginRuntime, pluginRuntimeErr: pluginRuntimeErr, workerID: newID(), routeCatalogTTL: 30 * time.Second, routeCatalogMaxStale: 5 * time.Minute}
 	service.taskTerminalCoordinator = newTaskTerminalCoordinator(service)
 	service.taskRouteExecutor = newTaskRouteExecutor(service)
 	service.taskWorkerCoordinator = newTaskWorkerCoordinator(service)
 	service.taskLifecycleCoordinator = newTaskLifecycleCoordinator(service)
 	service.skills = skills.New(service.repo, service.dataDir, service.runWorkerLoop)
 	service.prompts = prompts.New(service.repo, newPromptAdminGate(service))
+	service.projects = localproject.New(repo, localproject.Dependencies{})
 	service.canvas = canvas.New(service.repo, newCanvasHost(service))
+	service.assistantTurns = assistantturns.New(assistantturns.NewStore(service.repo), assistantCanvasFactory{service}, filepath.Join(dataDir, "assistant-turns"))
+	service.assets = localasset.NewService(localasset.Dependencies{
+		DataDir:      dataDir,
+		Repository:   localasset.NewRepository(repo),
+		Blobs:        localasset.NewFileStore(dataDir),
+		Quota:        resourceQuota{svc: service},
+		Lifecycle:    resourceLifecycle{svc: service},
+		LocalStorage: localResourceStorage,
+	})
+	service.tasks = localtask.NewService(localtask.NewStore(service.repo), service.taskDependencies())
 	if service.IsLocalMode() {
 		service.platform = platform.NewLocal(service.repo, coordinator, newPlatformHost(service))
 	} else {
 		service.platform = platform.New(service.repo, coordinator, newPlatformHost(service))
 	}
+	service.ensureRouter()
 	return service
 }
 
 func (s *Service) StartWorker() {
+	s.deliveryControlMu.Lock()
 	runtime := s.backgroundWorkers()
 	ctx, started := runtime.Start()
+	if started {
+		s.deliveryClosed = false
+	}
+	s.deliveryControlMu.Unlock()
 	if !started {
 		return
 	}
@@ -151,9 +209,12 @@ func (s *Service) StartWorker() {
 	s.startResourceDeletionWorker(ctx)
 }
 
-func (s *Service) BeginDrain() { s.backgroundWorkers().BeginDrain() }
+func (s *Service) BeginDrain() { s.stopGenerationDownloads(); s.backgroundWorkers().BeginDrain() }
 
-func (s *Service) StopWorker(ctx context.Context) error { return s.backgroundWorkers().Stop(ctx) }
+func (s *Service) StopWorker(ctx context.Context) error {
+	s.stopGenerationDownloads()
+	return s.backgroundWorkers().Stop(ctx)
+}
 
 func (s *Service) IsDraining() bool { return s.backgroundWorkers().IsDraining() }
 
@@ -176,31 +237,20 @@ func (s *Service) runWorkerTask(fn func()) bool {
 	return s.backgroundWorkers().GoTask(fn)
 }
 
-func channelModelNames(channel model.ModelChannel) []string {
-	models := []string{}
-	_ = json.Unmarshal([]byte(channel.ModelsJSON), &models)
-	return uniqueNonEmpty(models)
-}
-
 func (s *Service) Tasks(userID string, limit int) ([]TaskSummary, error) {
 	return s.TasksWithOptions(userID, TaskListOptions{Limit: limit})
 }
 
 func (s *Service) TasksWithOptions(userID string, options TaskListOptions) ([]TaskSummary, error) {
-	tasks, err := s.repo.Tasks(userID, options.Limit, options.ProjectID, options.ActiveOnly)
-	if err != nil {
-		return nil, err
-	}
-	return taskSummariesForOutput(tasks), nil
+	return s.taskDomain().TasksWithOptions(userID, options)
 }
 
 func (s *Service) Task(userID string, id string) (*model.Task, error) {
-	task, err := s.repo.TaskForUser(userID, id)
-	if err != nil {
-		return nil, err
-	}
-	s.hydrateTaskProviderRequestID(task)
-	return taskForOutput(*task), nil
+	return s.taskDomain().Get(userID, id)
+}
+
+func (s *Service) TaskByClientOperation(userID, projectID, operationID string) (*model.Task, error) {
+	return s.taskDomain().FindOperation(userID, projectID, operationID)
 }
 
 func (s *Service) hydrateTaskProviderRequestID(task *model.Task) {
@@ -226,6 +276,7 @@ func (s *Service) refreshTaskProviderState(task *model.Task) error {
 	if latest.ProviderRequestID != "" {
 		task.ProviderRequestID = latest.ProviderRequestID
 	}
+	task.Stage, task.Progress = latest.Stage, latest.Progress
 	task.PollStage = latest.PollStage
 	task.NextPollAt = latest.NextPollAt
 	task.ProviderCancelStatus = latest.ProviderCancelStatus
@@ -238,15 +289,29 @@ func (s *Service) refreshTaskProviderState(task *model.Task) error {
 }
 
 func (s *Service) RetryTask(userID string, id string) (*model.Task, error) {
-	return s.taskLifecycle().retryTask(userID, id)
+	if s.IsDraining() {
+		return s.taskDomain().Retry(userID, id)
+	}
+	if task, err := s.repo.TaskForUser(userID, id); err == nil {
+		if task.Status == model.TaskStatusSucceeded && deliveryPaused(task.Stage) {
+			return s.resumeGenerationDownload(*task)
+		}
+		if restored, handled, err := s.recoverAcceptedImage(*task); handled {
+			return restored, err
+		}
+	}
+	return s.taskDomain().Retry(userID, id)
 }
 
 func (s *Service) CancelTask(ctx context.Context, userID string, id string) (*model.Task, error) {
-	return s.taskLifecycle().cancelTask(ctx, userID, id)
+	if task, err := s.repo.TaskForUser(userID, id); err == nil && task.Status == model.TaskStatusSucceeded {
+		return s.pauseGenerationDownload(*task, "delivery_paused")
+	}
+	return s.taskDomain().Cancel(ctx, userID, id)
 }
 
 func (s *Service) TaskLogs(userID string, id string) ([]model.TaskLog, error) {
-	return s.repo.TaskLogs(userID, id)
+	return s.taskDomain().Logs(userID, id)
 }
 
 func (s *Service) ProcessNextTask() error {
@@ -313,6 +378,9 @@ func truncateTaskLogPayload(payload string) string {
 func (s *Service) registerActiveTask(id string, cancel context.CancelFunc) {
 	s.cancelMu.Lock()
 	defer s.cancelMu.Unlock()
+	if s.activeCancels == nil {
+		s.activeCancels = make(map[string]context.CancelFunc)
+	}
 	s.activeCancels[id] = cancel
 }
 
@@ -329,6 +397,13 @@ func (s *Service) cancelActiveTask(id string) {
 	if cancel != nil {
 		cancel()
 	}
+	s.deliveryControlMu.Lock()
+	for identity, stop := range s.deliveryCancels {
+		if strings.HasPrefix(identity, id+":") {
+			stop()
+		}
+	}
+	s.deliveryControlMu.Unlock()
 }
 
 func nodeOp(id string, nodeType string, title string, x int, y int, workflowKind string, content string) map[string]any {

@@ -14,10 +14,11 @@ type LibraryCardShellProps = {
     onPointerDown?: () => void;
     onFocusCapture?: () => void;
     openDisabled?: boolean;
+    onboardingProjectId?: string;
 };
 
 /** Shared visual shell for folder and project cards. Only cover and actions vary. */
-export function LibraryCardShell({ ariaLabel, className, cover, title, updatedAt, actions, onOpen, onPointerEnter, onPointerDown, onFocusCapture, openDisabled = false }: LibraryCardShellProps) {
+export function LibraryCardShell({ ariaLabel, className, cover, title, updatedAt, actions, onOpen, onPointerEnter, onPointerDown, onFocusCapture, openDisabled = false, onboardingProjectId }: LibraryCardShellProps) {
     const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
         if (event.target !== event.currentTarget || openDisabled) return;
         if (event.key === "Enter" || event.key === " ") {
@@ -28,7 +29,7 @@ export function LibraryCardShell({ ariaLabel, className, cover, title, updatedAt
 
     return (
         <article className={cn("libtv-library-card", className)} onPointerEnter={onPointerEnter} onPointerDown={onPointerDown} onFocusCapture={onFocusCapture}>
-            <div className="libtv-library-card-open" role="button" tabIndex={0} aria-label={ariaLabel} aria-disabled={openDisabled || undefined} onClick={() => !openDisabled && onOpen()} onKeyDown={handleKeyDown}>
+            <div className="libtv-library-card-open" data-onboarding-project={onboardingProjectId} role="button" tabIndex={0} aria-label={ariaLabel} aria-disabled={openDisabled || undefined} onClick={() => !openDisabled && onOpen()} onKeyDown={handleKeyDown}>
                 <div className="libtv-library-card-cover" aria-hidden="true">{cover}</div>
                 <div className="libtv-library-card-body">
                     <div className="libtv-library-card-title">{title}</div>

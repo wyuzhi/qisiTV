@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const SetVersion = "canvas-capabilities/v4"
+const SetVersion = "canvas-capabilities/v5"
 
 type Registry struct{ descriptors map[string]Descriptor }
 
@@ -110,6 +110,53 @@ func (r *Registry) Resolve(nodeType string) (Descriptor, bool) {
 	}
 	d = cloneDescriptor(d)
 	return d, ok
+}
+
+// ValidateReferenceConnection 是参考连线的唯一判定入口：
+// 来源必须声明可作输入（CanSource 且 InputKind 非空），目标必须声明可接收（CanTarget），
+// 目标的接受/拒绝类型表还必须放行来源的 InputKind。
+//
+// 调用方（统一操作层、旧内置 Agent 的工具层）都走这里，避免各自复制方向判断——
+// 曾经拿来源描述符去校验目标类型，结果 text→image 被错拒、image→text 反而放行。
+func (r *Registry) ValidateReferenceConnection(fromType, toType string) error {
+	from, ok := r.Resolve(fromType)
+	if !ok {
+		return fmt.Errorf("未知的节点类型 %s", strings.TrimSpace(fromType))
+	}
+	to, ok := r.Resolve(toType)
+	if !ok {
+		return fmt.Errorf("未知的节点类型 %s", strings.TrimSpace(toType))
+	}
+	return ValidateReferenceConnectionBetween(from, to)
+}
+
+// ValidateReferenceConnectionBetween 用两个已知描述符判定连线，供自带类型表的调用方复用同一套规则。
+func ValidateReferenceConnectionBetween(from, to Descriptor) error {
+	if from.InputKind == "" || !from.Connection.CanSource {
+		return fmt.Errorf("来源节点类型 %s 不能作为生成输入；引用连线不能用于普通节点关联", from.Type)
+	}
+	if !to.Connection.CanTarget {
+		return fmt.Errorf("目标节点类型 %s 不能接收生成输入；无需为文档归档建立引用连线", to.Type)
+	}
+	return to.ValidateConnection(from.InputKind)
+}
+
+// MaxReferenceInputCount 返回目标类型声明的输入上限；0 表示不限制。
+func (r *Registry) MaxReferenceInputCount(nodeType string) int {
+	to, ok := r.Resolve(nodeType)
+	if !ok {
+		return 0
+	}
+	return to.Connection.MaxInputCount
+}
+
+// LabelFor 返回类型的用户可见名称，用于错误文案；未知类型退回原始类型名。
+func (r *Registry) LabelFor(nodeType string) string {
+	descriptor, ok := r.Resolve(nodeType)
+	if !ok || strings.TrimSpace(descriptor.Label) == "" {
+		return strings.TrimSpace(nodeType)
+	}
+	return descriptor.Label
 }
 func (r *Registry) List() []Descriptor {
 	if r == nil {

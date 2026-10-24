@@ -105,6 +105,8 @@ const BUILTIN_NODE_TRAITS = {
         showInCreateMenu: true,
         // 背板只是视觉容器，既不是素材也不参与计数。
     },
+    [CanvasNodeType.Workflow]: { label: "工作流", icon: <PanelTop />, minSize: { width: 720, height: 400 }, showInCreateMenu: false, showOutputConnection: false },
+    [CanvasNodeType.WorkflowControl]: { label: "工作流进度", icon: <Settings2 />, minSize: { width: 300, height: 160 }, showInCreateMenu: false, showOutputConnection: false },
     [CanvasNodeType.Markdown]: {
         label: "Markdown",
         icon: <FileText />,
@@ -156,7 +158,9 @@ const BUILTIN_NODE_TRAITS = {
         inputKind: "text",
     },
     [CanvasNodeType.BatchTable]: { label: "批量创作表", icon: <Table2 />, minSize: { width: 1080, height: 420 }, showInCreateMenu: true, acceptsInputKind: "image", inputKind: "text", resourceKind: () => null },
+    [CanvasNodeType.Director]: { label: "导演台", icon: <Clapperboard />, minSize: { width: 320, height: 320 }, showInCreateMenu: true, resourceKind: () => null },
     [CanvasNodeType.MediaConversion]: { label: "转换", icon: <WandSparkles />, minSize: { width: 400, height: 360 }, showInCreateMenu: true, resourceKind: (node: CanvasNodeData) => { const c = node.metadata?.mediaConversion; return c?.status === "completed" && c.resultStorageKey ? (c.outputKind === "video" ? "video" : "image") : null; }, acceptsInputKind: ["image", "video"], maxInputCount: 1, inputKind: "image" },
+    [CanvasNodeType.Upscale]: { label: "AI超分", icon: <WandSparkles />, minSize: { width: 360, height: 240 }, showInCreateMenu: true, resourceKind: () => null, acceptsInputKind: ["image", "video"] },
     [CanvasNodeType.ColorGrade]: {
         label: "调色",
         icon: <Palette />,

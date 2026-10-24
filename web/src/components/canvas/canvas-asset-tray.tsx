@@ -1,8 +1,9 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { CircleUserRound, Crosshair, FolderOpen, ImageIcon, Images, PanelLeftClose, Plus, Search, X } from "lucide-react";
+import { ChevronDown, CircleUserRound, Crosshair, ImageIcon, Images, Plus, Search, X } from "lucide-react";
 
 import { FloatingDock, type FloatingDockEntry } from "@/components/ui/aceternity/floating-dock";
+import { AssetMediaPreview } from "@/components/asset-media-preview";
 import { CachedResourceImage } from "@/components/cached-resource-image";
 import { useCanvasOverlayLayer } from "@/components/canvas/canvas-overlay-layer";
 import { aceternityMotion } from "@/lib/aceternity-motion";
@@ -10,7 +11,7 @@ import { canvasDockStyle } from "@/lib/canvas/canvas-aceternity-style";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { cn } from "@/lib/utils";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
-import type { ImageAsset } from "@/stores/use-asset-store";
+import type { Asset, ImageAsset } from "@/stores/use-asset-store";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 export const CANVAS_IMAGE_ASSET_DND_TYPE = "application/x-infinite-canvas-image-asset";
@@ -40,17 +41,19 @@ function clampTrayHeight(height: number) {
     return Math.min(Math.max(height, minHeight), maxHeight);
 }
 
+type TrayAsset = Extract<Asset, { kind: "image" | "video" | "audio" | "text" }>;
+
 type CanvasAssetTrayProps = {
-    assetImages: ImageAsset[];
+    libraryAssets: TrayAsset[];
     canvasImages: CanvasNodeData[];
     showLibrary?: boolean;
     activeNodeId?: string | null;
-    onInsertAssetImage: (asset: ImageAsset) => void;
+    onInsertAsset: (asset: TrayAsset) => void;
     onFocusCanvasImage: (nodeId: string) => void;
     libtvReadonlyDense?: boolean;
 };
 
-export function CanvasAssetTray({ assetImages, canvasImages, showLibrary = true, activeNodeId, onInsertAssetImage, onFocusCanvasImage, libtvReadonlyDense = false }: CanvasAssetTrayProps) {
+export function CanvasAssetTray({ libraryAssets, canvasImages, showLibrary = true, activeNodeId, onInsertAsset, onFocusCanvasImage, libtvReadonlyDense = false }: CanvasAssetTrayProps) {
     const theme = canvasThemes[useActiveTheme()];
     const reducedMotion = useReducedMotion();
     const { bringToFront, zIndex } = useCanvasOverlayLayer("asset-tray", "var(--z-panel)");
@@ -65,7 +68,7 @@ export function CanvasAssetTray({ assetImages, canvasImages, showLibrary = true,
     const resizeCleanupRef = useRef<(() => void) | null>(null);
     const resizeHandleRef = useRef<{ element: HTMLButtonElement; pointerId: number } | null>(null);
     const query = keyword.trim().toLowerCase();
-    const filteredAssets = useMemo(() => assetImages.filter((asset) => !query || [asset.title, ...(asset.tags || [])].join(" ").toLowerCase().includes(query)), [assetImages, query]);
+    const filteredAssets = useMemo(() => libraryAssets.filter((asset) => !query || [asset.title, ...(asset.tags || [])].join(" ").toLowerCase().includes(query)), [libraryAssets, query]);
     const filteredNodes = useMemo(() => canvasImages.filter((node) => {
         if (!query) return true;
         // Generated nodes can expose their useful search text through workflowTitle
@@ -176,9 +179,9 @@ export function CanvasAssetTray({ assetImages, canvasImages, showLibrary = true,
     const dockItems: FloatingDockEntry[] = [
         {
             id: "asset-tray-toggle",
-            label: open ? "收起素材空间" : `打开素材空间，共 ${(showLibrary ? assetImages.length : 0) + canvasImages.length} 项`,
+            label: open ? "收起素材空间" : `打开素材空间，共 ${(showLibrary ? libraryAssets.length : 0) + canvasImages.length} 项`,
             displayLabel: libtvReadonlyDense ? "" : "资产管理",
-            icon: libtvReadonlyDense ? <CircleUserRound /> : <span className="relative"><Images /><span className="absolute -right-1.5 -top-1.5 min-w-3 rounded-full px-0.5 text-center text-[var(--fs-nano)] font-bold leading-3" style={{ background: theme.accent.primary, color: theme.accent.onPrimary }}>{(showLibrary ? assetImages.length : 0) + canvasImages.length}</span></span>,
+            icon: libtvReadonlyDense ? <CircleUserRound /> : <span className="relative"><Images /><span className="absolute -right-1.5 -top-1.5 min-w-3 rounded-full px-0.5 text-center text-[var(--fs-nano)] font-bold leading-3" style={{ background: theme.accent.primary, color: theme.accent.onPrimary }}>{(showLibrary ? libraryAssets.length : 0) + canvasImages.length}</span></span>,
             active: open,
             onClick: () => {
                 bringToFront();
@@ -205,38 +208,33 @@ export function CanvasAssetTray({ assetImages, canvasImages, showLibrary = true,
                             <span className="h-1 w-12 rounded-full bg-current" />
                         </button>
 
-                        <div className="flex items-center justify-between gap-2 px-1 pb-2.5 pt-1.5">
-                            <div className="flex min-w-0 items-center gap-2">
-                                <span className="grid size-8 shrink-0 place-items-center rounded-[var(--dock-item-radius)]" style={{ background: theme.spatial.surface, color: theme.accent.primary }}>
-                                    <FolderOpen className="size-3.5" />
-                                </span>
-                            </div>
+                        <div className="flex justify-end px-1 pb-2.5 pt-1.5">
                             <motion.button type="button" whileHover={motionEnabled ? { rotate: -5, scale: 1.05 } : undefined} whileTap={motionEnabled ? { scale: 0.92 } : undefined} className="grid size-7 shrink-0 place-items-center rounded-full outline-none focus-visible:ring-2" style={{ background: theme.spatial.surface, color: theme.node.muted }} onClick={() => setOpen(false)} aria-label="收起素材空间">
-                                <PanelLeftClose className="size-3" />
+                                <ChevronDown className="size-4" />
                             </motion.button>
                         </div>
 
                         <div className={cn("relative grid gap-1 rounded-[var(--r-lg)] p-0.5", showLibrary ? "grid-cols-2" : "grid-cols-1")} style={{ background: theme.spatial.surface }}>
-                            {showLibrary ? <TrayTabButton active={tab === "library"} label={`素材库 ${assetImages.length}`} theme={theme} onClick={() => setTab("library")} /> : null}
+                            {showLibrary ? <TrayTabButton active={tab === "library"} label={`个人资产库 ${libraryAssets.length}`} theme={theme} onClick={() => setTab("library")} /> : null}
                             <TrayTabButton active={tab === "canvas"} label={`当前画布 ${canvasImages.length}`} theme={theme} onClick={() => setTab("canvas")} />
                         </div>
 
                         <label className="mt-2 flex h-8 items-center gap-1.5 rounded-[11px] px-2.5 focus-within:ring-2" style={{ background: theme.spatial.surface }}>
                             <Search className="size-3.5 shrink-0" style={{ color: theme.node.muted }} />
-                            <input type="search" value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索图片素材..." className="min-w-0 flex-1 bg-transparent text-[var(--fs-tiny)] outline-none placeholder:opacity-55" aria-label="搜索图片素材" />
+                            <input type="search" value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索资产..." className="min-w-0 flex-1 bg-transparent text-[var(--fs-tiny)] outline-none placeholder:opacity-55" aria-label="搜索资产" />
                             {keyword ? <button type="button" className="grid size-6 shrink-0 place-items-center rounded-full opacity-55 hover:opacity-100" onClick={() => setKeyword("")} aria-label="清空搜索"><X className="size-3" /></button> : null}
                         </label>
 
-                        <div className="thin-scrollbar mt-2.5 min-h-0 flex-1 overflow-y-auto pr-1">
+                        <div className="thin-scrollbar mt-2.5 min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-1">
                             {showLibrary && tab === "library" ? (
                                 filteredAssets.length ? (
                                     <div className="space-y-1.5">
                                         {filteredAssets.map((asset) => (
-                                            <AssetTrayRow key={asset.id} title={asset.title} imageUrl={asset.coverUrl || asset.data.dataUrl} storageKey={asset.data.storageKey} draggable motionEnabled={motionEnabled} onDragStart={(event) => startAssetDrag(event, asset)} onClick={() => onInsertAssetImage(asset)} icon={<Plus className="size-3.5" />} />
+                                            <AssetTrayRow key={asset.id} title={asset.title} imageUrl="" asset={asset} insertable draggable={asset.kind === "image"} motionEnabled={motionEnabled} onDragStart={asset.kind === "image" ? (event) => startAssetDrag(event, asset) : undefined} onClick={() => onInsertAsset(asset)} icon={<Plus className="size-3.5" />} />
                                         ))}
                                     </div>
                                 ) : (
-                                    <TrayEmpty text="没有匹配的图片素材" theme={theme} />
+                                    <TrayEmpty text="没有匹配的资产" theme={theme} />
                                 )
                             ) : filteredNodes.length ? (
                                 <div className="space-y-1.5">
@@ -282,12 +280,13 @@ function TrayTabButton({ active, label, theme, onClick }: { active: boolean; lab
     );
 }
 
-function AssetTrayRow({ title, imageUrl, storageKey, icon, active = false, draggable = false, motionEnabled, onClick, onDragStart }: { title: string; imageUrl: string; storageKey?: string; icon: ReactNode; active?: boolean; draggable?: boolean; motionEnabled: boolean; onClick: () => void; onDragStart?: (event: DragEvent<HTMLElement>) => void }) {
+function AssetTrayRow({ title, imageUrl, storageKey, asset, insertable = false, icon, active = false, draggable = false, motionEnabled, onClick, onDragStart }: { title: string; imageUrl: string; storageKey?: string; asset?: Asset; insertable?: boolean; icon: ReactNode; active?: boolean; draggable?: boolean; motionEnabled: boolean; onClick: () => void; onDragStart?: (event: DragEvent<HTMLElement>) => void }) {
     const theme = canvasThemes[useActiveTheme()];
     return (
         <motion.button
             type="button"
             data-canvas-asset-row
+            aria-label={`${title}，${active ? "当前已选择" : draggable ? "拖入画布或点击插入" : insertable ? "点击插入画布" : "点击定位到画布"}`}
             draggable={draggable}
             whileHover={motionEnabled ? { x: 4, scale: 1.008 } : undefined}
             whileTap={motionEnabled ? { scale: 0.985 } : undefined}
@@ -298,11 +297,10 @@ function AssetTrayRow({ title, imageUrl, storageKey, icon, active = false, dragg
             onDragStartCapture={onDragStart}
         >
             <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-[var(--dock-item-radius)]" style={{ background: theme.node.fill }}>
-                {imageUrl || storageKey ? <CachedResourceImage storageKey={storageKey} src={imageUrl} alt="" width={36} height={36} className="size-full object-cover" draggable={false} fallback={<ImageIcon className="size-3.5 opacity-55" />} /> : <ImageIcon className="size-3.5 opacity-55" />}
+                {asset ? <AssetMediaPreview asset={asset} alt={title} className="size-full object-cover" hoverPlayDelayMs={100} fallback={<ImageIcon className="size-3.5 opacity-55" />} /> : imageUrl || storageKey ? <CachedResourceImage storageKey={storageKey} src={imageUrl} alt="" width={36} height={36} className="size-full object-cover" draggable={false} fallback={<ImageIcon className="size-3.5 opacity-55" />} /> : <ImageIcon className="size-3.5 opacity-55" />}
             </span>
             <span className="min-w-0">
                 <span className="block truncate text-[var(--fs-tiny)] font-semibold">{title}</span>
-                <span className="mt-0.5 block text-[var(--fs-micro)] opacity-45">{active ? "当前已选择" : draggable ? "拖入画布或点击插入" : "点击定位到画布"}</span>
             </span>
             <span className="grid size-6 place-items-center rounded-full opacity-45 transition-opacity group-hover:opacity-90" style={{ background: theme.node.panel }}>{icon}</span>
         </motion.button>

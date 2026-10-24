@@ -1,7 +1,7 @@
 import { canvasThemes, type CanvasBackgroundMode, type CanvasColorTheme } from "@/lib/canvas-theme";
 import { scopedLocalStorage } from "@/lib/user-scope";
 
-export type CanvasAppearanceMode = "light" | "dark" | "custom";
+export type CanvasAppearanceMode = "follow" | "light" | "dark" | "custom";
 
 export type CanvasCustomAppearance = {
     baseTheme: CanvasColorTheme;
@@ -60,14 +60,15 @@ export function enterCustomCanvasAppearance(current: CanvasAppearance, currentTh
 }
 
 export function canvasAppearanceBaseTheme(appearance: CanvasAppearance | undefined, fallback: CanvasColorTheme): CanvasColorTheme {
+    if (!appearance || appearance.mode === "follow") return fallback;
     if (appearance?.mode === "light" || appearance?.mode === "dark") return appearance.mode;
     return appearance?.custom?.baseTheme === "light" ? "light" : appearance?.custom?.baseTheme === "dark" ? "dark" : fallback;
 }
 
 export function normalizeCanvasAppearance(value: unknown, fallback: CanvasColorTheme): CanvasAppearance {
-    if (!value || typeof value !== "object") return canvasAppearanceForTheme(fallback);
+    if (!value || typeof value !== "object") return { mode: "follow" };
     const candidate = value as Partial<CanvasAppearance>;
-    const mode = candidate.mode === "custom" || candidate.mode === "light" || candidate.mode === "dark" ? candidate.mode : fallback;
+    const mode = candidate.mode === "follow" || candidate.mode === "custom" || candidate.mode === "light" || candidate.mode === "dark" ? candidate.mode : "follow";
     const custom = normalizeCustomAppearance(candidate.custom);
     if (mode === "custom" && !custom) return customCanvasAppearanceFromTheme(fallback);
     return custom ? { mode, custom } : { mode };

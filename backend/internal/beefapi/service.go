@@ -9,14 +9,15 @@ import (
 	"sync"
 	"time"
 
+	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/workspace"
 
 	"github.com/pkg/browser"
 )
 
 var (
-	errRevoked      = errors.New("BeefAPI 连接已失效，请重新连接")
-	errNotConnected = errors.New("尚未连接 BeefAPI")
+	errRevoked      = errors.New("BeefTV 连接已失效，请重新连接")
+	errNotConnected = errors.New("尚未连接 BeefTV")
 	errStore        = errors.New("保存连接失败，请重试")
 )
 
@@ -51,6 +52,9 @@ type Service struct {
 	state      persistedState
 	pollCancel context.CancelFunc
 	closed     bool
+	lifecycle  context.Context
+	shutdown   context.CancelFunc
+	workers    sync.WaitGroup
 }
 
 func New(opts Options) (*Service, error) {
@@ -63,9 +67,6 @@ func New(opts Options) (*Service, error) {
 		return nil, errors.New("本地工作区数据目录不能为空")
 	}
 	httpClient := opts.HTTPClient
-	if httpClient == nil {
-		httpClient = defaultHTTPClient()
-	}
 	openURL := opts.OpenURL
 	if openURL == nil {
 		openURL = browser.OpenURL
@@ -75,29 +76,41 @@ func New(opts Options) (*Service, error) {
 		now = time.Now
 	}
 	sleep := opts.Sleep
-	if sleep == nil {
-		sleep = time.Sleep
-	}
 	hostname := strings.TrimSpace(opts.Hostname)
 	if hostname == "" {
 		hostname, _ = os.Hostname()
 	}
 	if hostname == "" {
-		hostname = "qisiTV"
+		hostname = "BeefTV"
 	}
 	clientVersion := strings.TrimSpace(opts.ClientVersion)
 	if clientVersion == "" {
 		clientVersion = "dev"
 	}
 	state, err := loadState(dataDir)
+	if err == nil {
+		state.AuthorizationOrigin, err = savedOrigin(state, origin)
+	}
 	if err != nil {
 		state = persistedState{SchemaVersion: connectionSchema, Status: StateStoreError, LastError: "读取已保存的连接失败", Balance: BalanceUnknown}
 	}
-	return &Service{
+	lifecycle, shutdown := context.WithCancel(context.Background())
+	svc := &Service{
 		dataDir: dataDir, origin: origin, httpClient: httpClient, openURL: openURL,
 		now: now, sleep: sleep, provider: opts.Provider, clientVersion: clientVersion,
 		hostname: hostname, fetchCatalog: opts.FetchCatalog, persistFn: opts.Persist, state: state,
-	}, nil
+		lifecycle: lifecycle, shutdown: shutdown,
+	}
+	if svc.httpClient == nil {
+		svc.httpClient = defaultHTTPClient(func() {
+			svc.mu.Lock()
+			defer svc.mu.Unlock()
+			if !svc.closed && svc.state.Status == StateConnecting {
+				svc.state.LastError = "正在尝试其他连接方式"
+			}
+		})
+	}
+	return svc, nil
 }
 
 func (s *Service) persistState(state persistedState) error {
@@ -109,15 +122,87 @@ func (s *Service) persistState(state persistedState) error {
 
 func (s *Service) Close() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.closed = true
+	s.shutdown()
 	if s.pollCancel != nil {
 		s.pollCancel()
 		s.pollCancel = nil
 	}
+	s.mu.Unlock()
+	// Admission and Add are protected by mu; no new worker can race this Wait.
+	// Never hold mu here: finishing workers need it to save their state.
+	s.workers.Wait()
 }
 
-func (s *Service) Origin() string { return s.origin }
+func (s *Service) beginWork() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errors.New("企业连接服务已关闭")
+	}
+	s.workers.Add(1)
+	return nil
+}
+
+func (s *Service) pause(ctx context.Context, duration time.Duration) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	if s.sleep != nil {
+		s.sleep(duration)
+		return ctx.Err() == nil
+	}
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func (s *Service) Origin() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state.AuthorizationOrigin != "" {
+		return s.state.AuthorizationOrigin
+	}
+	return s.origin
+}
+
+// Existing encrypted credentials and pending grants remain bound to their issuer.
+// Only the two production origins or this explicitly configured test origin may be restored.
+func savedOrigin(state persistedState, fallback string) (string, error) {
+	candidate := state.AuthorizationOrigin
+	if candidate == "" {
+		candidate = state.ProviderBaseURL
+	}
+	if candidate == "" && state.Device != nil {
+		for _, origin := range []string{ProductionOrigin, LegacyOrigin, fallback} {
+			if _, err := ValidateVerificationURL(origin, state.Device.VerificationURI); err == nil {
+				candidate = origin
+				break
+			}
+		}
+		if candidate == "" {
+			return "", errStore
+		}
+	}
+	if candidate == "" && state.hasCredential() {
+		candidate = LegacyOrigin
+	}
+	if candidate == "" {
+		candidate = fallback
+	}
+	if candidate != ProductionOrigin && candidate != LegacyOrigin && candidate != fallback {
+		return "", errStore
+	}
+	if state.ProviderBaseURL != "" && state.ProviderBaseURL != candidate {
+		return "", errStore
+	}
+	return candidate, nil
+}
 
 func (s *Service) Status() Summary {
 	s.mu.Lock()
@@ -143,7 +228,7 @@ func (s *Service) Resolve() (Credential, error) {
 	}
 	apiKey, err := decryptSecret(s.dataDir, state.EncryptedAPIKey)
 	if err != nil {
-		return Credential{}, errStore
+		return Credential{}, &kernel.AppError{Status: 500, Code: 500, Reason: "local_credential_failed", Message: "本地算力凭据读取失败。" + credentialFailureDetail(err) + "。请检查工作区数据目录并重新连接算力账号；不要删除工作区密钥", Cause: err}
 	}
 	if strings.TrimSpace(apiKey) == "" {
 		return Credential{}, errNotConnected
@@ -154,9 +239,25 @@ func (s *Service) Resolve() (Credential, error) {
 	}
 	baseURL := state.ProviderBaseURL
 	if baseURL == "" {
-		baseURL = ProviderBaseURL(s.origin)
+		baseURL = state.AuthorizationOrigin
 	}
 	return Credential{APIKey: apiKey, BaseURL: baseURL, AccountID: accountID, TokenID: state.TokenID, KeyName: state.KeyName}, nil
+}
+
+// Only allowlisted causes leave the credential boundary; never copy a key or path.
+func credentialFailureDetail(err error) string {
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return "工作区密钥文件不存在"
+	case errors.Is(err, os.ErrPermission):
+		return "没有读取工作区密钥文件的权限"
+	}
+	switch err.Error() {
+	case "工作区密钥长度无效", "本地密钥密文格式无效", "本地密钥密文长度无效", "本地密钥解密失败，请检查工作区密钥":
+		return err.Error()
+	default:
+		return "读取工作区密钥文件失败"
+	}
 }
 
 func (s *Service) MarkRevoked() {
@@ -188,10 +289,19 @@ func (s *Service) needsFinalizeLocked() bool {
 }
 
 func (s *Service) Start(ctx context.Context) (Summary, error) {
+	if err := s.beginWork(); err != nil {
+		return Summary{}, err
+	}
+	defer s.workers.Done()
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return Summary{}, errors.New("企业连接服务已关闭")
+	}
+	if s.state.Status == StateConnecting {
+		summary := s.summaryLocked()
+		s.mu.Unlock()
+		return summary, nil
 	}
 	if s.needsFinalizeLocked() {
 		s.mu.Unlock()
@@ -221,15 +331,26 @@ func (s *Service) Start(ctx context.Context) (Summary, error) {
 		s.pollCancel()
 		s.pollCancel = nil
 	}
+	s.state.AuthorizationOrigin = s.origin
+	s.state.ProviderBaseURL = ""
+	s.state.Status = StateConnecting
+	s.state.LastError = "正在连接 BeefTV"
 	s.mu.Unlock()
 
 	device, err := s.requestDeviceCode()
+	if s.lifecycle.Err() != nil {
+		return s.Status(), s.lifecycle.Err()
+	}
 	if err != nil {
-		s.setError(StateStoreError, err.Error())
+		s.setError(StateConnectionError, err.Error())
 		return s.Status(), err
 	}
 	expiresAt := s.now().Add(time.Duration(device.ExpiresIn) * time.Second).UTC().Format(time.RFC3339Nano)
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return s.Status(), context.Canceled
+	}
 	s.state.Status = StatePending
 	s.state.LastError = ""
 	s.state.Device = &persistedDevice{
@@ -243,8 +364,9 @@ func (s *Service) Start(ctx context.Context) (Summary, error) {
 		s.mu.Unlock()
 		return s.Status(), errStore
 	}
-	pollCtx, cancel := context.WithCancel(context.Background())
+	pollCtx, cancel := context.WithCancel(s.lifecycle)
 	s.pollCancel = cancel
+	s.workers.Add(1)
 	summary := s.summaryLocked()
 	s.mu.Unlock()
 
@@ -255,11 +377,18 @@ func (s *Service) Start(ctx context.Context) (Summary, error) {
 	if err := s.openTrusted(openTarget); err != nil {
 		s.setError(StatePending, "无法打开系统浏览器，请复制确认页地址")
 	}
-	go s.pollLoop(pollCtx, device.DeviceCode, time.Duration(device.Interval)*time.Second, parseTime(expiresAt))
+	go func() {
+		defer s.workers.Done()
+		s.pollLoop(pollCtx, device.DeviceCode, time.Duration(device.Interval)*time.Second, parseTime(expiresAt))
+	}()
 	return summary, nil
 }
 
 func (s *Service) Cancel(ctx context.Context) (Summary, error) {
+	if err := s.beginWork(); err != nil {
+		return Summary{}, err
+	}
+	defer s.workers.Done()
 	s.mu.Lock()
 	deviceCode := ""
 	if s.state.Device != nil {
@@ -292,6 +421,10 @@ func (s *Service) Cancel(ctx context.Context) (Summary, error) {
 }
 
 func (s *Service) Disconnect(ctx context.Context) (Summary, error) {
+	if err := s.beginWork(); err != nil {
+		return Summary{}, err
+	}
+	defer s.workers.Done()
 	s.mu.Lock()
 	if s.pollCancel != nil {
 		s.pollCancel()
@@ -304,12 +437,14 @@ func (s *Service) Disconnect(ctx context.Context) (Summary, error) {
 			_ = s.revokeRemote(apiKey)
 		}
 	}
-	if err := clearBeefAPIModels(s.provider); err != nil {
-		s.setError(StateStoreError, "保存连接失败，请重试")
-		return s.Status(), errStore
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Catalog removal and credential invalidation must be atomic to refreshes.
+	if err := clearBeefAPIModels(s.provider); err != nil {
+		s.state.Status = StateStoreError
+		s.state.LastError = "保存连接失败，请重试"
+		return s.summaryLocked(), errStore
+	}
 	s.state = persistedState{SchemaVersion: connectionSchema, Status: StateDisconnected, Balance: BalanceUnknown}
 	if err := s.persistState(s.state); err != nil {
 		s.state.Status = StateStoreError
@@ -324,6 +459,10 @@ func (s *Service) OpenWallet() error {
 }
 
 func (s *Service) Recover(ctx context.Context) error {
+	if err := s.beginWork(); err != nil {
+		return err
+	}
+	defer s.workers.Done()
 	s.mu.Lock()
 	needsFinalize := s.needsFinalizeLocked()
 	state := s.state
@@ -338,25 +477,41 @@ func (s *Service) Recover(ctx context.Context) error {
 			return nil
 		}
 		s.mu.Lock()
-		if s.pollCancel != nil {
+		if s.closed || s.pollCancel != nil {
 			s.mu.Unlock()
 			return nil
 		}
-		pollCtx, cancel := context.WithCancel(context.Background())
+		pollCtx, cancel := context.WithCancel(s.lifecycle)
 		s.pollCancel = cancel
+		s.workers.Add(1)
 		deviceCode := state.Device.DeviceCode
 		interval := time.Duration(state.Device.IntervalSeconds) * time.Second
 		s.mu.Unlock()
-		go s.pollLoop(pollCtx, deviceCode, interval, expires)
+		go func() { defer s.workers.Done(); s.pollLoop(pollCtx, deviceCode, interval, expires) }()
 	}
 	if state.Status == StateConnected && state.hasCredential() {
-		go s.verifyRemote()
+		s.mu.Lock()
+		if !s.closed {
+			s.workers.Add(1)
+			go func() { defer s.workers.Done(); s.verifyRemote() }()
+		}
+		s.mu.Unlock()
 	}
 	return nil
 }
 
 func (s *Service) RedactConfig(config map[string]any) map[string]any {
-	return RedactConfig(config, s.HasManagedCredential())
+	managed := s.HasManagedCredential()
+	result := RedactConfig(config, managed)
+	if managed {
+		channels, _ := result["channels"].([]any)
+		for _, raw := range channels {
+			if channel, ok := raw.(map[string]any); ok && channel["id"] == ChannelID {
+				channel["baseUrl"] = s.Origin()
+			}
+		}
+	}
+	return result
 }
 
 func (s *Service) PreserveWrite(incoming, existing map[string]any) {
@@ -378,14 +533,22 @@ func (s *Service) pollLoop(ctx context.Context, deviceCode string, interval time
 			return
 		}
 		token, code, err := s.pollToken(deviceCode)
+		if ctx.Err() != nil {
+			return
+		}
 		if err != nil {
-			s.sleep(interval)
+			s.updatePollMessage(deviceCode, "连接中断，正在重试")
+			if !s.pause(ctx, interval) {
+				return
+			}
 			continue
 		}
 		switch code {
 		case "", "success":
 			if strings.TrimSpace(token.APIKey) == "" {
-				s.sleep(interval)
+				if !s.pause(ctx, interval) {
+					return
+				}
 				continue
 			}
 			if err := s.acceptToken(ctx, deviceCode, token); err != nil {
@@ -393,10 +556,15 @@ func (s *Service) pollLoop(ctx context.Context, deviceCode string, interval time
 			}
 			return
 		case "authorization_pending":
-			s.sleep(interval)
+			s.updatePollMessage(deviceCode, "")
+			if !s.pause(ctx, interval) {
+				return
+			}
 		case "slow_down":
 			interval += 5 * time.Second
-			s.sleep(interval)
+			if !s.pause(ctx, interval) {
+				return
+			}
 		case "expired_token", "expired":
 			s.setError(StateExpired, "授权已过期，请重新连接")
 			return
@@ -404,15 +572,30 @@ func (s *Service) pollLoop(ctx context.Context, deviceCode string, interval time
 			s.setError(StateRejected, "授权被拒绝")
 			return
 		default:
-			s.sleep(interval)
+			s.updatePollMessage(deviceCode, "授权状态读取失败，正在重试")
+			if !s.pause(ctx, interval) {
+				return
+			}
 		}
+	}
+}
+
+func (s *Service) updatePollMessage(deviceCode, message string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.closed && s.state.Status == StatePending && s.state.Device != nil && s.state.Device.DeviceCode == deviceCode {
+		s.state.LastError = message
 	}
 }
 
 const ackRetryLimit = 5
 
 func (s *Service) acceptToken(ctx context.Context, deviceCode string, token tokenSuccess) error {
-	accountID, tokenID, err := validateTokenSuccess(s.origin, token)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	origin := s.Origin()
+	accountID, tokenID, err := validateTokenSuccess(origin, token)
 	if err != nil {
 		s.setError(StateRejected, err.Error())
 		return err
@@ -435,7 +618,7 @@ func (s *Service) acceptToken(ctx context.Context, deviceCode string, token toke
 	}
 	s.state.Device.DeviceCode = deviceCode
 	s.state.EncryptedAPIKey = encrypted
-	s.state.ProviderBaseURL = ProviderBaseURL(s.origin)
+	s.state.ProviderBaseURL = ProviderBaseURL(origin)
 	s.state.Market = "enterprise"
 	s.state.Group = "enterprise"
 	s.state.Account = &account
@@ -443,6 +626,7 @@ func (s *Service) acceptToken(ctx context.Context, deviceCode string, token toke
 	s.state.TokenID = tokenID
 	s.state.Acked = false
 	s.state.CatalogOK = false
+	s.state.AssistantDefaultPending = true
 	s.state.Status = StatePending
 	s.state.Balance = BalanceUnknown
 	s.state.LastError = ""
@@ -462,7 +646,12 @@ func (s *Service) acceptToken(ctx context.Context, deviceCode string, token toke
 }
 
 func (s *Service) finalizeSavedCredential(ctx context.Context, previousAccountID string) error {
-	_ = ctx
+	if s.lifecycle.Err() != nil {
+		return s.lifecycle.Err()
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	s.mu.Lock()
 	state := s.state
 	deviceCode := ""
@@ -479,7 +668,14 @@ func (s *Service) finalizeSavedCredential(ctx context.Context, previousAccountID
 			s.markDoomedCredential(StateExpired, "授权已过期，请重新连接")
 			return errAckExpired
 		}
+		s.mu.Lock()
+		s.state.Status = StatePending
+		s.state.LastError = "正在完成连接确认"
+		s.mu.Unlock()
 		if err := s.acknowledgeWithRetry(deviceCode); err != nil {
+			if s.lifecycle.Err() != nil {
+				return s.lifecycle.Err()
+			}
 			s.noteAckFailure(err)
 			return err
 		}
@@ -504,6 +700,9 @@ func (s *Service) finalizeSavedCredential(ctx context.Context, previousAccountID
 		return errStore
 	}
 	models, err := s.fetchModels(apiKey)
+	if s.lifecycle.Err() != nil {
+		return s.lifecycle.Err()
+	}
 	if err != nil {
 		if errors.Is(err, errRevoked) {
 			s.MarkRevoked()
@@ -528,7 +727,11 @@ func (s *Service) finalizeSavedCredential(ctx context.Context, previousAccountID
 		nextAccount = s.state.Account.ID.String()
 	}
 	s.mu.Unlock()
-	if err := applyCatalog(s.provider, models, previousAccount, nextAccount); err != nil {
+	authorizationID := ""
+	if state.AssistantDefaultPending {
+		authorizationID = state.TokenID
+	}
+	if err := applyCatalog(s.provider, models, previousAccount, nextAccount, authorizationID); err != nil {
 		s.mu.Lock()
 		s.state.Status = StateCatalogFailed
 		s.state.CatalogOK = false
@@ -545,6 +748,7 @@ func (s *Service) finalizeSavedCredential(ctx context.Context, previousAccountID
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.state.CatalogOK = true
+	s.state.AssistantDefaultPending = false
 	s.state.Status = StateConnected
 	s.state.LastError = ""
 	s.state.Device = nil
@@ -563,8 +767,13 @@ func (s *Service) finalizeSavedCredential(ctx context.Context, previousAccountID
 func (s *Service) acknowledgeWithRetry(deviceCode string) error {
 	var last error
 	for attempt := 0; attempt < ackRetryLimit; attempt++ {
+		if s.lifecycle.Err() != nil {
+			return s.lifecycle.Err()
+		}
 		if attempt > 0 {
-			s.sleep(time.Second)
+			if !s.pause(s.lifecycle, time.Second) {
+				return s.lifecycle.Err()
+			}
 		}
 		last = s.acknowledge(deviceCode)
 		if last == nil {
@@ -589,10 +798,10 @@ func (s *Service) noteAckFailure(err error) {
 	default:
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		s.state.Status = StatePending
+		s.state.Status = StateConnectionError
 		s.state.Acked = false
 		s.state.CatalogOK = false
-		s.state.LastError = "正在完成连接确认"
+		s.state.LastError = "连接确认失败，请重试"
 		if persistErr := s.persistState(s.state); persistErr != nil {
 			s.state.Status = StateStoreError
 			s.state.LastError = "保存连接失败，请重试"
@@ -623,6 +832,9 @@ func (s *Service) verifyRemote() {
 		return
 	}
 	_, status, err := s.remoteConnection(cred.APIKey)
+	if s.lifecycle.Err() != nil {
+		return
+	}
 	if err != nil {
 		return
 	}
@@ -638,7 +850,7 @@ func (s *Service) openTrusted(raw string) error {
 	}
 	parsed, err := ValidateWalletURL(s.origin, target)
 	if err != nil {
-		if parsed, err = ValidateVerificationURL(s.origin, target); err != nil {
+		if parsed, err = ValidateVerificationURL(s.Origin(), target); err != nil {
 			return err
 		}
 	}
@@ -648,6 +860,9 @@ func (s *Service) openTrusted(raw string) error {
 func (s *Service) setError(status, message string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
 	s.state.Status = status
 	s.state.LastError = message
 	if status != StatePending {

@@ -43,6 +43,10 @@ export type RequestOptions = {
     videoEditOperation?: string;
     videoStartFrameNodeId?: string;
     videoEndFrameNodeId?: string;
+    videoMiddleFrameNodeId?: string;
+    videoMiddleFrameTime?: number;
+    videoH3Options?: import("@/lib/h3-video").H3VideoOptions;
+    videoReferenceOrder?: string[];
 };
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };

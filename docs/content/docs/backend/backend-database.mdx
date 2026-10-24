@@ -1,35 +1,193 @@
 ---
 title: 后端数据库
-description: qisiTV后端核心持久化表与状态边界
+description: BeefTV后端核心持久化表与状态边界
 ---
 
 # 后端数据库
 
-后端通过 GORM 管理 SQLite 与 PostgreSQL 表结构。Backend 启动时按版本顺序应用缺失迁移并写入 `schema_migrations`；公开 Compose 显式启用 `CANVAS_AUTO_MIGRATE=true`。业务写路径必须通过 service 和 repository 的状态约束，不能直接依赖前端状态。
+后端通过 GORM 管理本地 SQLite 表结构。Backend 启动时按版本顺序应用缺失迁移并写入 `local_schema_migrations`。业务写路径必须通过 service 和 repository 的状态约束，不能直接依赖前端状态。
 
 ## 结构迁移与版本
 
-### 云端 Agent 运行时
+### qisiTV 网页本机引擎的项目文件夹投影
 
-每轮 Agent 存为 `tasks` 中 `operation = cloud_agent` 的 `canvas_text` 任务，任务 `input_json.cloudAgent` 保存版本 1 的已校验请求、父轮 ID、请求指纹和技能快照；历史从服务端父轮结果构造。任务 ID 由用户与幂等键确定，利用现有主键、任务 admission 和积分预留事务防止重复提交重复扣费。Agent 的模型循环、工具调用、审批、子任务和事件写入 `cloud_agent_executions.state_json`，任务 Worker 只负责推进状态，不依赖浏览器连接。公共任务创建与重试接口禁止绕过 Agent admission；删除任务会影响该轮继续对话与回放。
+`projectfolder` 在明确选择项目根目录后安装三张独立 SQLite 表，不重写上游的工作区迁移记录：
+
+| 表 | 责任 |
+| --- | --- |
+| `qisitv_project_folders` | 绑定同一用户、工作区和画布到原项目目录，记录已确认的文档 SHA256、导出版本、写入状态及待确认的原子替换见证。 |
+| `qisitv_project_folder_outbox` | 记录画布、绘图与任务变更的待落盘版本；SQLite 触发器使其与业务变更在同一事务提交。递增 generation 独立于画布 revision，不删除已确认的行。 |
+| `qisitv_browser_task_receipts` | 保留旧浏览器任务 ID、服务商任务 ID 和脱敏回执；这些记录不是可执行任务，不会迁移进 Worker 队列或重发计费请求。 |
+
+接管后的工作区 SQLite 是唯一业务写入源。`project.qisitv.json` 升级为 `formatVersion: 2`，携带 `engineAuthority`，浏览器旧写入器拒绝覆盖。后台按持久化 outbox 将画布、绘图、引用媒体和任务回执投影到真实项目文件夹；文件写入失败时保留待处理记录，只有文件原子替换和数据库确认完成后才报告文件夹已保存。文件 rename 与确认之间崩溃，可凭预先保存的 SHA256 见证继续确认，不猜测成功。
+
+浏览器 `blob:` 预览、`data:` 内联媒体和 `image:` / `video:` / `audio:` 缓存键不能被当作媒体已经落盘。同一媒体对象必须有可验证的原生 Resource 身份，投影器才会用实际文件替换临时引用；否则保留上一版项目文档并显示保存错误。
+
+旧 v1 项目必须显式导入。浏览器提交原目录相对路径、文档 SHA256、根目录工作区标记和完整终态任务回执；引擎锚定已授权目录、逐个核对媒体大小及摘要，保留原文档备份，再在一个事务中建立资源、资产、画布、绘图、回执及投影身份。仍在等待的生成任务、缺失回执、同 ID 已存在、路径越界或内容失效都拒绝导入。API Key 等凭据不写入项目或回执。模型配置仍使用独立加密配置。
+
+导入事务前先写入 `.qisitv/migration-pending.json` 接管保留标记，成功后也保留它作为旧浏览器的写入隔离记录。事务回滚或首次投影失败时，浏览器不能继续写旧 v1 文件；首次投影未确认前，引擎也不接受业务修改。使用同一原文档摘要重新导入可继续完成，不能删除该标记来启用第二个写入源。
+
+根目录的 `.qisitv-engine-owner.json` 防止不同引擎工作区同时认领。写 API 与投影器核对原文档摘要；外部修改标记为 `conflict` 后停止写入。显式重新核对仅在用户已恢复最后确认的原文件或原子替换见证时解除冲突，不自动选择或覆盖外部版本。旧文件和备份不自动删除。
+
+状态查询核对真实目录、文档摘要，以及媒体文件是否存在、大小是否一致；不只读取上次成功记录。为避免每次轮询重读大型视频，媒体完整 SHA256 在投影和显式恢复核对时验证。文件丢失或改变后显示错误，恢复必须保留并使用原文件。
+
+这些项目文件夹不是完整的原生工作区备份：原生助手会话、工作流及其他业务状态仍在引擎工作区 SQLite 和其运行时文件中。当前 v1 接管流程不支持把单个 v2 文件夹恢复为一个全新的原生工作区；备份时需要同时保存完整引擎数据目录。
+
+### 本地模型配置加密
+
+`local-model-config.json` 和它的 `.bak` 使用 `schemaVersion: 2` 外层封装，`encryptedConfig` 为 AES-GCM 密文。解密后仍使用原有 provider state、revision 与助手默认授权记录；保存冲突校验保持不变。API Key、Secret Key 和自定义 Header 值不以明文保存在这些文件或持久任务输入中。明文旧配置可以读取，在下一次成功保存时连同备份迁移。
+
+加密密钥是工作区的 `.settings-key`，备份和恢复必须包含它。密钥丢失或损坏时拒绝解密和覆盖现有配置，不自动创建替代密钥。文件加密不能防止拥有同一工作区读取权限的程序访问凭据。
+
+旧版本不能读取这个加密封装。降级前须停止所有工作区写入者，恢复升级前的完整工作区备份；不能只替换可执行文件后继续写入新配置。自动更新器的二进制回滚与工作区数据恢复是不同操作。
+
+当前本地候选的结构版本为 v25。正式 v1.6.21 的结构版本为 v3，历史 Agent 候选曾使用 v3–v6，另有图片恢复预览分支使用 v3 或 v7；这些预览编号不能当作正式版本已发布的证据。
+
+v14 `assistant-skill-version-pins` 为 `assistant_turns` 追加文本列 `skill_pins_json`。保存用户明确选定的技能、版本和内容摘要；旧回合留空。迁移保留未知字段、旧历史和回合快照。恢复时重新校验安装授权与包文件校验和，不自动切换新版。
+
+v15 `assistant-permission-and-canvas-snapshots` 追加文本列 `permission_mode` 和 `canvas_snapshots_json`，不改写已应用的 v14 ledger。权限字段保存只读、当前画布或完全访问；旧空值按当前画布处理。快照按目标画布保存其首次写入前的 revision 与完整文档，供跨画布整组撤销使用；快照、实际写入和操作回执在同一事务提交。缺列会阻止 Ready，未知列、旧回合与历史内容保留。
+
+v16 `assistant-durable-session-binding` 追加 `durable_session_id` 与 `durable_native_sources` 文本列。由内置宿主按官方持久会话绑定原回合，绑定后不可转移；精确记录历史原生素材的资源与版本，不把历史读取资格并入本轮工具权限。恢复原生历史仍验证同用户、同会话、当前回合未结束以及资源归属、可用状态和文件摘要；旧历史仅凭官方提交与宿主日志的明确关联迁移，无法证明时提示新对话重新添加。
+
+v17 `assistant-active-skill-context` 追加 `assistant_skill_contexts` 与 `assistant_skill_context_mutations`。上下文以 `(user_id, canvas_id, durable_session_id)` 为主键，只保存范围、revision、活动版本 pin 与生命周期，不保存另一份技能正文；变更回执再以 `request_id` 去重。恢复会话时按活动 pin 重新读安装文件，缺失或校验失败时停止本轮请求，不静默沿用历史正文。清除当前选择和开始独立任务是显式上下文变更。
+
+v18 `assistant-generation-continuations` 在既有 v17 活动技能上下文之后追加 `assistant_continuations`。一条用户确认记录固定原回合、提议、画布/会话/scope revision、原权限、全部提交 operationId/输出节点集合，以及接续 requestId/turnId；真实 task IDs 从原提交回读。认领与业务回合快照同事务提交，撤销/范围变化/停止使授权失效，不取消或重发收费媒体任务。结构检查包含完整字段、主键与 turnId 唯一索引；不改写旧表和历史 ledger。详见仓库 `docs/refactor/assistant-generation-continuation.md`。
+
+v19 `assistant-continuation-intent-fence` 为 `assistant_turns` 追加 `continuation_invalidated`，默认 false。停止、新用户输入或用户范围变化在取消已有回执的同事务标记旧源回合，阻止仍在准备中的旧确认稍后重新登记接续；普通回合保存不得清除此标记。宿主当前轮的正常 `skill_load` 不代表新用户意图，在同事务同步同用户、画布、会话和原 scope/version 下仍有效的接续回执；已取消或失效的记录不恢复。旧历史、未知列与迁移记录保留，缺列阻止 Ready。
+
+v20 `assistant-production-authorization` 为 `assistant_turns` 追加文本列 `generation_authorization_json`。用户一次确认的有限素材计划固定原回合、方案、节点、模型、提示词、参数及参考节点；后续官方 Pi 接续轮继承同一授权，不能增加素材或改变已确认输入。授权与首批既有任务、画布绑定及接续回执在同一事务保存。每个素材沿用 `proposal:<proposalId>:<nodeId>` 的任务身份，未知响应或再次确认不会重复创建付费任务。停止、新需求或会话变化仍通过 v19 撤销，旧历史不自动获得授权。该字段不代表人民币金额封顶；实际费用由渠道结算。缺列阻止 Ready，重复迁移保留既有授权。
+
+v21 `skill-market-release-metadata` 为 `skill_versions` 追加 `market_release_json TEXT`，在旧库还没有版本表时先创建该表。已审核的发布身份、作者、来源、许可和完整清单属于具体本地版本，私有改编保留原来源，不改写原包内容摘要。迁移保留历史回合、未知字段和既有 ledger；与公开服务的发布状态分别验收。
+
+v22 `canvas-reusable-workflows` 增加 `canvas_workflows`、`canvas_workflow_runs` 与 `canvas_workflow_resources`。模板保存公开节点定义与加密执行配方；运行保存模板快照、输入、步骤任务回执和输出，删除模板不会删除既有运行。`(user_id, client_operation_id)` 唯一约束防止重复创建同次运行，步骤使用由运行与节点派生的稳定任务操作编号对账。模板固定资源、原配方的外部资源和运行输入输出加入资源删除引用检查。配方整体使用已有工作区密钥加密，接口不返回密文或凭据。
+
+v23 `canvas-workflow-source-snapshots` 为任务追加私有文本列 `workflow_source_cipher`。任务成功时，在完整输入被公共投影清理前，将原 canonical 命令整体加密，并与成功结果在同一事务保存；图片后续交付清理保留该列。文本、图片、视频和音频共用此完成路径。快照不进入任务 JSON 或导出，不单独占用素材引用，随任务删除；创建模板时再校验素材可用性并建立引用保护。历史已清理完整参数的任务保留原状，封装时提示手动重新运行，不从模型名或现有连线猜测原请求。
+
+v24 为工作流增加不可变模板版本快照。v25 在保留历史迁移记录的前提下补齐预览版曾占用 v17–v19 导致缺失的助手技能上下文与生成接续结构。既有模板保留原定义与密文作为第 1 版；保存采用预期版本比较，运行记录所选版本。资源引用覆盖仍保留的版本，删除模板时事务清理版本，已存在运行的引用继续保护素材。
+
+
+v13 `upload-reservation-witness` 追加 `user_upload_reservations`，以 `(user_id, identity)` 唯一索引记录未完成上传预留的日期和字节数。日额仍由 `user_daily_upload_usages` 记账，预留索引与日额增加在同一事务内完成。资源进入 READY 时与状态保存在同一事务清除索引并保留日额；进入 FAILED 或放弃时与状态保存在同一事务按索引金额和日期释放。FAILED 准入只把状态改成 PENDING，不退日额。未结算资源写成 READY 前必须持有见证，缺见证时再预留；残留 FAILED 若仍持有原见证则沿用，不二次扣额。已结算 READY 丢失物理文件时，恢复不重新预留；物理写入或最终保存失败保留原 READY 状态并返回错误，下一次恢复仍复用原资源身份及已消费额度。启动恢复：无对应资源则释放一次；PENDING 保留索引；FAILED 释放；READY 清索引且保留日额。删除 READY 资源只清索引，不把已计入日额当成孤儿退还。重复清理不再扣减其他上传的日额。分片会话文件不是配额账；查询失败时保留恢复证据并记录恢复错误。同一身份的进行中重复预留映射为上传进行中。
+
+实验 v8 `reconcile-product-agent-schema` 在一个事务中补齐 `tasks.failure_diagnostics`（可空 TEXT）、图片恢复表 `image_submissions`、Agent 操作表（包括 `turn_id` 索引）、任务 `client_operation_id`/`client_operation_hash` 和用户维度操作编号唯一索引。已有数据和原迁移名称保持不变；不通过重建 `tasks` 来删除产品字段。相同版本号但缺表、列或必要索引时拒绝 Ready；未来更高版本拒绝迁移。唯一索引遇到重复身份时整步回滚，不自动删除或合并任务。
+
+v13 迁移前遗留的 PENDING/FAILED 若没有可关联的预留索引，迁移写入 `day=unattributed, size=0` 标记，不依据匿名日总量猜测是否已预留。上述释放、消费规则仅适用于有明确日期及正字节数的见证；未归属标记在重启、失败、重试及释放时保留，自动恢复返回 409，原资源和日额不变。删除该资源记录只移除标记，不退还无法归属的日额；这条仓储行为不代表产品提供独立的未完成资源删除按钮。升级后的新上传若缺见证，仍按正常流程预留一次。该回填属于尚未发布的 v13，已运行早期 v13 实验构建的开发库不自动重跑迁移。
+
+### 迁移实验的隔离验收与回滚
+
+v9 `repair-product-agent-contracts` 为已经标记 v8 但缺少诊断列、恢复表或恢复字段的合成历史结构提供显式修复；不重写历史 ledger。Ready 同时检查图片恢复与 Agent 操作表的完整字段、主键，以及任务操作编号唯一索引的列顺序、唯一性和非部分索引属性。已有表缺主键时拒绝自动重建；重复操作身份无法建立唯一索引时保留全部行并回滚。结构校验在 v9 事务内完成后才写入版本。v10 `assistant-business-turns` 在 v9 之后只追加 `assistant_turns` 及 `(user_id, canvas_id)` 索引，不改写 v1–v9 身份。v11 `creation-conversations` 再追加 `creation_conversations`、`(user_id, updated_at)` 索引，以及 `(user_id, import_operation_id)` 部分唯一索引（仅 `import_operation_id` 非空），主键为 `(user_id, conversation_id)`，不改写 v1–v10 身份。同为当前版本但缺结构仍阻断，未来版本拒绝迁移。状态接口在结构损坏时保留实际版本，不能用 Ready=false、current=0 掩盖已经存在的 ledger。
+
+在本分支仓库根目录执行以下命令，仅创建 `t.TempDir()` 内的合成 SQLite 数据库；不打开应用、不读取真实工作区、不连接上游。
+
+```sh
+cd backend
+go test ./internal/database -count=1
+go test ./internal/database -run 'TestAgentProductReconcile' -count=1 -v
+go test ./internal/database -run 'TestAgentProductReconcileBackupRestoreUsesOldSchemaCopy' -count=1 -v
+go test ./internal/database -run 'TestSchemaRepair|TestSchemaReadiness' -count=1 -v
+```
+
+验收在真实 SQLite 文件中按历史 DDL 建立任务、Agent 操作和图片恢复表，再追加未知扩展列；不从当前模型删列来模拟这些历史表，也不使用客户数据库副本。覆盖正式 v2/v3、Agent v3/v4/v5/v6、图片恢复预览 v3/v7、同号异名且缺表、整合 v8/v9 等布局。检查任务结果、失败诊断、资源记录、Agent 回执、恢复发送计数、未知字段、原 ledger 和唯一索引。v3–v9 升级不对旧业务表执行整表 AutoMigrate。注入 v8/v9 ledger 写入故障验证 DDL 与 ledger 同时回滚；重复操作身份阻止升级且保留所有行。未来版本在任何 DDL 前拒绝。备份用 SQLite `VACUUM INTO` 生成一致副本，迁移后从未修改的备份重新打开并验证旧版本及输出引用。
+
+本整合分支已包含产品功能与 Agent 合同；数据库迁移测试仍不能替代运行验收。真实 CLI/MCP 服务与重启回放使用下列独立测试：它构建 CLI，在临时 SQLite 工作区启动本机 HTTP 服务，写入后关闭并重开服务，再以相同操作编号验证仅一次写入，并运行官方 MCP 客户端握手、工具调用、幂等冲突及只读检查。测试不配置模型、不调用付费上游。
+
+```sh
+cd backend
+go test ./cmd/beeftv -run TestCLIAndMCPAgainstIsolatedIntegratedRuntime -count=1 -v
+go test -race ./internal/app -run 'TestImageSubmission|TestCreateTaskReplaysSameClientOperation|TestMCPApprovedFrozenArgsPersistOneTaskAcrossDuplicateAndRestart' -count=1
+```
+
+Agent 宿主在安装仓库锁定的依赖后，可从仓库根目录执行 `bun test agent-host/*.test.mjs`；其中运行探针使用真实 Node/pi SDK 和本机模型、操作端点替身。该结果不代表真实供应商、用户工作区或桌面安装链已经验收。任何真实升级都必须先停止所有工作区写入者，创建完整工作区备份（包括 SQLite、资源文件和设置加密密钥），验证备份可读取，再只对独立副本升级并核验结果。正式安装、发布及真实数据库迁移还需用户单独授权。
+
+回滚只允许停止新程序后，将升级前完整备份恢复到新的隔离目录，由与该备份版本匹配的二进制打开；不得把旧程序指向已升级数据库，不得删除 v8/v9 ledger、降低版本号或删列模拟回滚。升级后产生的新数据不在旧备份中，应保留升级后目录并由 owner 决定如何迁回。本实验没有执行任何真实数据备份、升级、回滚或应用安装。
+
+### Lucas 统一候选测试入口
+
+待测远端分支为 `codex/pr41-sr-repair-20260930`。从干净的独立 checkout 拉取该分支并记录完整 commit；不要把其他会话的未提交修改覆盖到候选。上面的 Go 命令可先验证合成数据迁移和 CLI/MCP 合同。前端可在已有依赖和 FFmpeg/Chromium 环境执行 `BEEFTV_NATIVE_FFMPEG_TEST=1 BEEFTV_BROWSER_WORKER_TEST=1 bun run test`（工作目录 `web`），启用真实媒体和浏览器 Worker 用例；缺少工具不得记作通过。
+
+人工桌面验收须另行取得按候选 commit 构建的完整包。先关闭所有使用源工作区的程序，复制整个工作区到备份目录，再从备份复制一个测试目录；保留未打开过的备份。启动候选时显式设置 `CANVAS_DESKTOP_DATA_DIR` 为测试目录的绝对路径，核对启动日志及工作区内容后再操作。不得省略此变量而误用默认工作区。Windows PowerShell 示例（路径必须替换为实际独立目录）：
+
+```powershell
+$env:CANVAS_DESKTOP_DATA_DIR = 'D:\BeefTV-tests\candidate-workspace'
+& 'D:\BeefTV-tests\candidate-app\BeefTV.exe'
+```
+
+测试包应解压到新目录，保留 `BeefTV.exe`、`plugins`、`cli`、`agent-host` 完整布局，并按提供方的签名清单核对签名、大小及 SHA-256；本轮没有发布可下载包。旧 Windows 升级器不能直接接受这个布局，过渡升级器的本地方案在 `codex/product-windows-bridge-20260930`，尚未完成 Windows 真机验收或更新源部署。不要把新包只覆盖到旧目录、绕过验签或运行正式发布工作流来代替测试。
+
+人工检查画布与任务历史、失败诊断、重启后输出找回、CLI/MCP 操作回放、独立音轨和字幕成片、ZIP 在空工作区导入。生成类上游调用须另行获得预算授权。回滚时退出候选，把未升级的完整备份复制到另一个新目录，再使用匹配该备份的旧包显式指向该目录；禁止旧 Agent v6 或旧整合 v8 程序打开升级后的 v9 目录。
+
+### 桌面本地任务诊断
+
+`failure_diagnostics` 的请求记录可包含 `transportPhase`、`transportRoute` 和 `attempt`，分别保存脱敏的连接阶段、直连/代理类型和当前上传操作的尝试序号；这些可选 JSON 字段不需要数据库迁移。旧记录缺失这些字段时，不据此推断请求未发送，也不自动解锁提交状态未知的任务。
+
+`failure_diagnostics.source=local_network` 表示本机访问外部服务时的网络故障。DNS 底层 cause 只用于运行时的取消与重试判断；持久化内容仅包含安全摘要、`transportPhase=dns` 和实际操作阶段，不包含解析目标或 DNS 服务器地址。
+
+本地 SQLite 使用 `local_schema_migrations` 记录版本。本地候选目前为 v25，正式 v1.6.21 为 v3；历史图片恢复预览曾使用 v7。正式 v3 为 `tasks` 新增可空文本列 `failure_diagnostics`，存储有界、脱敏的执行证据和失败摘要；旧任务保留空值。失败诊断与任务终态在同一次带租约校验的更新中保存，成功任务也保留执行证据，主动重试时清除上一轮诊断。任务列表和详情均读取该列，字段说明见 [HTTP API](./http-api)。整合 v8 同时补齐历史分支可能缺失的产品与 Agent 结构，v9 修复已标 v8 的已知结构缺损并强化完整性检查，v10 追加助手业务回合表，v11 追加创作对话表，v12 追加画布文件夹与画板，v13 追加上传预留恢复索引，v14 追加固定技能版本，v15 追加内置权限和跨画布快照，v16 追加助手持久会话绑定，保留原迁移记录、Agent 表和任务扩展列。v17–v21 的活动技能、生成接续、意图撤销、制作授权和市场版本元数据见本文前述迁移说明。
+
+部分预览版曾将 v3–v6 用于其他迁移。启动时还会按实际表结构检查并补齐 `failure_diagnostics`，不覆盖迁移记录、不删除预览版字段或旧任务；就绪检查同时要求最低版本和该字段存在。任务入库失败返回 HTTP 500、`reason=local_storage_failed`，界面明确显示本地保存失败、尚未提交生成。内部错误链保留数据库原因，HTTP 响应不包含 SQL 原文；handler 日志记录错误类型。
+
+该迁移不删除任务或用户素材。升级后旧版程序会因本地 schema 版本检查而拒绝连接；修复发布应使用更高版本，不能通过降级二进制或删除诊断列回滚用户数据库。
+
+实验 Agent 的 v3–v6 与正式版本使用过重叠编号，迁移执行器按最大已应用版本推进。图片恢复预览 v7 不创建 Agent 运行时结构。本分支通过 v8 追加迁移显式补齐 `agent_op_records`（包含 `turn_id` 及其索引）、`tasks.client_operation_id`、`tasks.client_operation_hash` 和 `(user_id, client_operation_id)` 唯一索引；不依赖旧 v3–v6 再次执行。历史 Agent v6 程序不能直接连接升级后的 v7/v8 数据库。
+
+本地完整重构候选以正式 v1.6.21 与 Agent 开发分支为整合起点，当前验收状态见仓库 `docs/refactor/progress.md`。原生桌面完整交互、Windows 真机升级和用户数据副本验收仍是新候选的发布门槛；旧候选或正式版的验收回执不能替代这些验证。历史候选及旧数据备份独立保留，更新开发分支不触发真实工作区迁移。
+
+历史图片恢复预览 v7 拒绝同为 v7 但缺少 `image_submissions` 或 `tasks.failure_diagnostics` 的数据库；本候选通过追加 v8/v9 显式补齐这些历史结构，再以 v10 追加业务回合表，v11 追加创作对话表。同为当前版本但结构缺损仍拒绝 Ready，版本号本身不构成结构完备证明。不能改历史记录伪造兼容。回滚只能停止所有写入者后，恢复升级前完整工作区备份到独立目录，再用匹配该备份的旧二进制打开；禁止旧程序直接打开新数据库。
+
+### 桌面图片请求恢复
+
+本地工作区使用 `local_schema_migrations`；版本 7 新增 `image_submissions`。每条记录绑定用户、任务和路由尝试，保存经工作区密钥加密的完整 HTTP 请求（包括素材、请求头和幂等键）、首次保存时间、已发送次数及网关已返回成功的标记。任务 API 不返回这些字段。恢复前校验任务归属、运行状态和有效租约；保存失败时不发出请求。
+
+HTTPS 图片提交前读取同源 `/models` 元数据，仅成功响应明确声明 `X-Image-Submission-Protocol: idempotency-key-v1` 时，对对应 `/images/generations`、`/images/edits` 启用同键恢复，不按域名授权。元数据请求不跟随重定向。网络中断、服务暂时不可用和 `image_submission_pending` 使用原字节和原键退避重试；尚未收到成功响应时，每次提交最多发送 12 次，每轮等待最长 10 分钟（仍受任务超时限制），重启不会重置计数。已收到成功响应后，如本地保存失败，可继续取回同一回执：每轮最多三次网络尝试，轮次之间按 1–15 分钟退避，首次保存请求后 23 小时停止，为网关 24 小时回执保留期留出余量。明确限流拒绝可创建新尝试，单个任务轮次最多三次；余额、鉴权、参数及审核失败不会自动重新生成。未知结果、过期回执与幂等冲突停止自动恢复，并阻止任务重试接口和画布新建重试任务换键重发。取消只停止本地等待，不表示上游已取消或退款。
+
+新请求入库时清除超过 24 小时的历史请求密文，保留身份记录，避免过期记录被误当成未提交任务。此表是提交恢复记录，不是任务状态或计费的第二套来源；现有任务表、租约和终态规则继续决定画布展示与取消。
+
+未声明协议的上游不启用同键恢复；图片提交结果不明确时停止自动重发，并禁止通过任务重试换键重新生成。恢复等待会持久化本轮诊断证据，以便重启后继续排查。媒体文件写入与任务完成不属于同一事务；在两者之间崩溃可能留下未关联的本地资源，幂等上游恢复不等于本地文件写入的恰好一次保证。
+
+图片生成成功后先保存原始结果 URL，再交给现有断点下载流程保存资源和绑定画布。待下载任务的 `input_json.imageDeliveryCipher` 仅保存工作区密钥加密的下载配置，不含参考图或提示词，任务 API 不返回该字段；所有产物保存后清除。鉴权头只发送给原渠道同源地址，重定向离开原站后不再恢复。桌面下载复用账号连接的静态系统代理和排除地址规则，显式环境代理优先，目标地址仍须通过统一出站校验：默认允许本机与局域网，仍拒绝链路本地、未指定、组播和带账号密码的 URL。
+
+旧版图片任务若仅有一条完整、成功的 OpenAI 图片创建回执，任务重试先恢复该回执中的原图 URL，再继续下载，不创建新生成任务。多次创建回执、失败响应或不完整正文不作为成功恢复的依据；原任务和诊断记录继续保留。
+
+### 旧内置 Agent 运行时（已退场，数据保留）
+
+旧内置 Agent 已从产品运行面退场：`/agent/*` 接口不再注册，通用任务创建、任务重试和任务执行都按产品边界拒绝 `cloud_agent`、`cloud_agent_step` 和 `agent_memory_compact`，Agent 轮次调度与记忆压缩调度也不再随 worker 启动。下面的结构与数据保持原样，不做破坏性迁移，便于后续替换内核复用或迁移。
+
+退场前的设计如下。每轮 Agent 存为 `tasks` 中 `operation = cloud_agent` 的 `canvas_text` 任务，任务 `input_json.cloudAgent` 保存版本 1 的已校验请求、父轮 ID、请求指纹和技能快照；历史从服务端父轮结果构造。任务 ID 由用户与幂等键确定，利用现有主键、任务 admission 和积分预留事务防止重复提交重复扣费。Agent 的模型循环、工具调用、审批、子任务和事件写入 `cloud_agent_executions.state_json`，任务 Worker 只负责推进状态，不依赖浏览器连接。公共任务创建与重试接口禁止绕过 Agent admission；删除任务会影响该轮继续对话与回放。这些约束现在由“退场即拒绝”的产品边界保证。
 
 | 表 | 用途 | 关键边界 |
 | --- | --- | --- |
-| `schema_migrations` | 保存已成功应用的结构版本、名称、校验和与时间 | 已应用版本的校验和发生变化时拒绝启动；数据库版本高于当前二进制支持版本时拒绝旧程序连接 |
-| `cloud_agent_executions` | 保存 Agent 每轮的持久化执行状态、修订号和运行状态 | `(id, user_id)` 归属受服务端校验；状态通过 revision CAS 更新；`state_json` 包含技能快照、工具调用、审批、活动子任务和事件，不保存浏览器密钥 |
-| `agent_profiles` | 保存用户、项目和画布层的 Agent 常驻偏好、哈希和独立 revision | `(user_id, scope, project_id, canvas_id)` 唯一；归属由 service 校验，写入使用 revision CAS；正文不能授权新能力 |
-| `agent_lessons` | 用户私有的 Agent 记忆。Agent 写入待审，用户自己批准后才会注入该用户的会话 | 按 `author_user_id` 隔离；写入机械脱敏；`steps_json` 存路线；`hits` 是主动查阅、`injected` 是自动注入；管理员可按用户查看和删除，不能代批 |
-| `agent_memory_settings` | 用户私有的记忆压缩周期、文本模型和最近一次压缩任务状态 | 主键 `user_id`；压缩结果只在 `compact_task_id` 匹配时应用到该用户已批准记忆 |
+| `cloud_agent_executions` | 保存旧内置 Agent 每轮的持久化执行状态、修订号和运行状态（保留，不再有新写入） | `(id, user_id)` 归属受服务端校验；状态通过 revision CAS 更新；`state_json` 包含技能快照、工具调用、审批、活动子任务和事件，不保存浏览器密钥 |
+| `agent_profiles` | 保存用户、项目和画布层的旧内置 Agent 常驻偏好、哈希和独立 revision（保留，不再有新写入） | `(user_id, scope, project_id, canvas_id)` 唯一；归属由 service 校验，写入使用 revision CAS；正文不能授权新能力 |
+| `agent_lessons` | 用户私有的旧内置 Agent 记忆（保留）。原设计中 Agent 写入待审、用户批准后才会注入该用户的会话 | 按 `author_user_id` 隔离；写入机械脱敏；`steps_json` 存路线；`hits` 是主动查阅、`injected` 是自动注入；管理员可按用户查看和删除，不能代批 |
+| `agent_memory_settings` | 用户私有的旧内置 Agent 记忆压缩周期、文本模型和最近一次压缩任务状态（保留，自动压缩已停止） | 主键 `user_id`；压缩结果只在 `compact_task_id` 匹配时应用到该用户已批准记忆 |
 
-公开镜像不附带独立迁移程序。`CANVAS_AUTO_MIGRATE=true` 时，Backend 在开始接受请求前完成迁移与兼容性检查；失败时进程直接退出，不会带着不兼容结构提供服务。后续迁移必须新增版本，不得修改已经发布迁移的实现或校验和。
+### 本地工作区结构（桌面形态）
 
-当前结构版本为 23。版本 2 为 `schema_migrations.applied_at` 增加 `idx_schema_migrations_applied_at` 索引；版本 3 `asset_taxonomy_candidate_identity` 为资产候选增加规范化名称和来源，收敛资产分类，并为待确认候选建立项目内部分唯一索引；版本 4 `resource_upload_key` 为资源上传幂等补充 `resources.upload_key` 列和用户维度唯一索引；版本 5 `payment_topup` 创建积分充值、支付通知和对账所需结构；版本 6 `resource_playback_variant` 增加资源播放副本状态；版本 7 `asset_library_folders` 增加用户素材自定义分类及 `assets.folder_id`；版本 8 `logical_model_active_code` 将前台模型 code 的唯一约束限定为未归档记录；版本 9 `channel_presentation` 为渠道添加 `public_alias`（默认空字符串）与 `sort_order`（默认 0），为渠道模型添加 `sort_order`（默认 0），不重写既有凭据、价格或能力配置；版本 10 `creation_runtime` 创建创作运行与提交表，并为任务增加可空且唯一的 `creation_submission_id`，旧任务无需伪造提交标识即可继续使用；版本 11 `cloud_agent_runtime` 创建 `cloud_agent_executions`；版本 12 `agent_token_charge_limit` 为账单增加 Agent Token 收费上限；版本 13 `cloud_agent_canvas_mutation` 持久化 Agent 画布变更；版本 14 `cloud_agent_recovery_control` 增加运行恢复控制字段和旧运行回填；版本 15 `agent_profiles` 创建常驻偏好表；版本 16 `agent_lessons` 创建用户记忆表（含分类、路线 JSON、注入/查阅计数）；版本 17 `agent_lessons_owner_index` 为 `(author_user_id, status)` 增加复合索引；版本 18 `agent_memory_settings` 创建按用户隔离的压缩周期与最近一次压缩任务状态；版本 19 `payment_plugin_version` 为已有 `payment_provider_configs` 和 `payment_orders` 补上 `plugin_version`，用于把配置和订单钉在具体插件版本上；版本 20 `banner_announcements` 创建首页常驻滚动通知表；版本 21 `banner_announcement_title_runs` 为通知标题增加样式分段；版本 22 `banner_announcement_notice_type` 增加通知类型底色；版本 23 `canvas_revision_history` 为既有画布回填 `revision = 1` 并新增历史快照与资源引用表。已发布版本的实现和校验和不得修改。
+桌面形态使用由 `local_schema_migrations` 管理的本地结构版本（当前候选为 21，见 `backend/internal/database/local_schema.go`），
+与上面的托管版本序列相互独立。版本 11 由会话工作单独占用，本序列从 10 直接进入 12。
 
-历史发布曾使用版本 6 `asset_library_folders`，之后合并引入了上述 6/7 顺序冲突。迁移器仅在该历史记录的名称和校验和均精确匹配时选择历史顺序：保留版本 6 的素材目录记录及时间，在版本 7 应用 `resource_playback_variant`，再继续版本 8。新数据库及已采用“6 播放副本、7 素材目录”的数据库保持原顺序；状态检查与启动校验采用同一套识别规则。未知名称、被改动的校验和或冲突的版本 7 记录仍会拒绝迁移，不通过删除、改名或伪造已应用记录绕过检查。
+版本 3 `agent-operation-records` 为既有版本 2 工作区创建 `agent_op_records` 及用户、操作 ID 联合主键；版本 4/5 为任务的客户端操作编号补充结构；版本 6 `agent-operation-turn-attribution` 为 `agent_op_records` 增加可空的 `turn_id` 与索引，用于把内置助手一轮对话的写入回执归到该轮上。迁移只新增结构，不重写画布、项目或任务数据；结构创建与迁移记录在同一事务中提交。重复启动不会重复迁移，已成功操作的幂等结果在重启后继续回放。
 
-升级前必须备份数据库，并确保新 Backend 沿用部署实际配置的数据库连接和数据目录。重新启动新镜像后应等待健康检查通过；迁移失败时先查看 Backend 日志并保持旧版本与备份，不手工改迁移表。迁移与记录写入在事务中执行；回退旧二进制可能无法识别新结构，必要时应恢复匹配的备份和版本。
+`turn_id` 为空表示这次写入不属于助手回合（CLI、MCP 与 owner 直连都是如此）。回读既有 `opId` 时不会改写 `turn_id`，同一稳定操作在跨回合重放后仍归属最早执行它的那一轮。
 
-版本 3 会将 `wardrobe`、`weapon`、`accessory` 迁移为 `prop`，将 `style` 迁移为 `material`，并把原先归入 `other` 的图片、视频、音频和 3D 模型迁移为 `material`。迁移只合并重复的待确认候选：保留最早记录，其余标记为 `ignored`；已经确认的资产不会被自动删除或归并。
+| 表 | 用途 | 关键边界 |
+| --- | --- | --- |
+| `canvas_projects` | 画布文档（含 `revision` 与 `library_folder_id`） | 写入按 `revision` 原子 CAS：缺少读取时的 revision 或 revision 已过期都拒绝，不会覆盖别人刚写入的内容；`viewport` 属于本机查看偏好，由服务端规范化，不按内容保存；文件夹归属以 `library_folder_id` 为准，读回时覆盖 payload 中的 `folderId` |
+| `canvas_library_folders` | 画布库文件夹 | 按用户归属；删除写入 `deleted_at` 墓碑并清空封面引用，不会物理删行；同时把仍指向它的画布 `library_folder_id`、`payload_json` 与 `revision` 一并更新并记历史。同 ID 不能再导入。封面是资源 ID |
+| `canvas_drawings` | 画板快照与 revision | 主键 `(user_id, canvas_id, drawing_id)`；写入按 revision CAS，丢失应答且正文相同可回放已提交结果；预览和成品字节走资源 ID，参与资源删除引用检查；删除写入墓碑并清空快照与资源引用。未保存草稿由前端保留为可恢复内容，禁止按原 ID 自动重建；后端不另存一份正文。快照计入账号画布和素材数据上限（`StructuredDataMB`），HTTP 请求体为该上限加 JSON 信封余量，没有单独的 8MB 画板上限 |
+| `canvas_snapshots`、`canvas_snapshot_resources` | 画布历史快照与快照引用的资源 | 快照读写按归属校验；历史恢复同样走 revision 前置条件 |
+| `agent_op_records` | 统一操作层的幂等记录：`(user_id, op_id)` 主键、payload 哈希、状态与可空 `turn_id` | 同一 `opId` 同参数回读原结果、不同参数返回冲突；失败操作回滚且不留幂等记录；只在本用户命名空间内回放，不跨用户读取；`turn_id` 与业务写入同事务提交，只有后端鉴权的内置宿主能写入归属 |
+| `assistant_turns` | 助手业务回合：范围、权限、轮前画布快照、结算摘要与撤销标记 | 主键 `turn_id`；必须带用户和画布身份；open 回合才接受写入归属。v15 `permission_mode` 按回合固定，`canvas_snapshots_json` 保存所有写入目标的轮前文档与版本；撤销先检查全部目标，再将旧文档写成新 revision，与 undone 标记同事务提交。v14 `skill_pins_json` 保存用户选定的技能 ID、版本 ID 与内容摘要，并附带选定时记下的显示名 `skillName` 与版本号 `version`（只用于显示，不参与身份比较；旧记录可能没有）；恢复不得自动替换版本。不保存模型对话稿 |
+| `creation_conversations` | `/create` 页面对话与消息文档 | 主键 `(user_id, conversation_id)`；按 revision CAS 写入；删除写墓碑，稳定 ID 不会被 IndexedDB 缓存复活。导入操作在 `(user_id, import_operation_id)` 上有部分唯一索引。不保存密钥。临时媒体只从附件/结果 URL 字段去掉，正文保留。删除对话不删除任务或素材 |
+
+版本 10 `assistant-business-turns` 为既有 v9 工作区创建 `assistant_turns`。旧 JSON 文件 `assistant-turns/<hexID>.json` 是只读迁移输入，按被访问的 ID 校验后导入，导入后不再作为竞争事实；生产路径不改写、不删除原文件。保留策略只压缩超龄大快照、留下身份墓碑，不会删掉进行中的回合、回执引用的回合或操作回执。操作层若要把回执记到某一轮，必须在该操作自己的事务里校验回合仍为 open；只做事务外预检无法关闭结算与写入的竞态。
+
+版本 11 `creation-conversations` 为既有 v10 工作区创建 `creation_conversations`。浏览器 IndexedDB `creation-conversations-v1` 只是导入源：没有后端记录或墓碑时，按稳定 `operationId` 与文档哈希在同一事务内导入；已有记录不覆盖。全量数组替换会删掉未见过的对话，因此写入是按对话 CAS，删除走显式墓碑。后续任务绑定可在同一调用方事务里调用 `AttachMessageResult`，只改该消息的结果字段。
+
+版本 12 `canvas-library-drawings` 为既有工作区创建 `canvas_library_folders`、`canvas_drawings`，并为 `canvas_projects` 增加 `library_folder_id`。两张新表带 `deleted_at` 墓碑列：删除保留身份、释放资源引用，禁止同 ID 自动重建。未保存的画板草稿由前端保留为可恢复内容并决定如何提示恢复，后端不另存一份正文。画板快照由 SQLite 持有，预览和成品字节引用已有资源；IndexedDB 只作草稿和缓存。写入按账号画布和素材数据上限（`StructuredDataMB`，默认 256MB）核算字节，HTTP 请求体为该上限加 JSON 信封余量，没有单独的 8MB 画板上限。保留版本 11 的会话迁移身份。
+
+公开镜像不附带独立迁移程序。`CANVAS_AUTO_MIGRATE=true` 时，Backend 在开始接受请求前完成迁移与兼容性检查；失败时进程直接退出，不会带着不兼容结构提供服务。后续迁移必须新增版本，不得改写已应用迁移记录的版本名称与时间。
+
+本地 v2 `retire-hosted-schema` 迁移会删除遗留的托管版表：`migrateRetiredHostedSchema` 调用 `dropHostedTables`，并在删除前把可迁移的旧创作执行项和渠道模型规格转入本地结构。
 
 ## 画布版本与快照
 
@@ -47,21 +205,9 @@ description: qisiTV后端核心持久化表与状态边界
 
 ## 平台外观配置
 
-平台外观复用既有 `system_settings` 表，不新增结构迁移。键 `appearance` 的 JSON 值使用版本化合同；版本 3 保存品牌名称、英文品牌标识、登录页主标题与可选说明文案、浅色与可选深色 Logo 资源 ID、Logo 外框开关、登录页视频资源 ID、可选封面资源 ID 和预留皮肤 ID。只配置一套 Logo 时，公开投影会在浅色和深色主题复用同一资源；旧版本缺少深色 Logo 与外框字段时分别回退到单 Logo 和启用外框，不改变既有视觉。资源元数据和文件仍分别由 `resources` 表与当前资源存储承担。恢复默认外观时删除这条设置记录并回到内置值，不级联删除已经上传的资源。
+平台外观复用既有 `system_settings` 表，不新增结构迁移。键 `appearance` 的 JSON 值使用版本化合同；版本 3 保存品牌名称、英文品牌标识、登录页主标题与可选说明文案、浅色与可选深色 Logo 资源 ID、Logo 外框开关、登录页视频资源 ID、可选封面资源 ID 和预留皮肤 ID。只配置一套 Logo 时，公开投影会在浅色和深色主题复用同一资源；旧版本缺少深色 Logo 与外框字段时分别回退到单 Logo 和启用外框，不改变既有视觉。资源元数据和文件仍分别由 `resources` 表与当前资源存储承担。
 
-公开接口只投影品牌名、英文品牌标识、登录页公开文案、深浅主题使用的稳定 slot 资源 URL、Logo 外框状态、配置状态和修订标识，不返回内部资源 ID、对象路径或存储凭据。管理员保存新配置前，服务层会校验文本长度与安全字符、资源为就绪状态、类型与 slot 匹配，且新绑定资源由当前管理员上传；两套 Logo、视频和封面中任何正在使用的资源都会进入管理员删除保护。品牌变更同时写入 `admin_audit_events`。
-
-## 账号认证与密码找回
-
-| 表 | 用途 | 关键边界 |
-| --- | --- | --- |
-| `users` | 保存用户名、唯一非空邮箱、本地密码哈希、角色和状态 | 密码只保存 bcrypt 哈希；密码找回只面向状态正常且已有本地密码的账号 |
-| `auth_sessions` | 保存登录 Cookie 对应的服务端会话和令牌哈希 | 密码重置成功时删除该用户全部会话，旧 Cookie 立即失效 |
-| `email_verification_codes` | 保存注册和密码重置的一次性邮箱验证码 | 只保存带用途隔离的 HMAC 哈希；验证码 10 分钟过期、只能消费一次，明文不进入数据库 |
-
-密码重置在单个数据库事务中条件消费 `password_reset` 验证码、更新 `users.password_hash` 并删除 `auth_sessions`。任一步失败都会回滚，不能出现密码已修改但旧会话仍有效，或验证码已消耗但密码未更新的部分状态。
-
-邮件系统设置还保存电子邮件域名白名单。新配置默认填入 Gmail、163、126、QQ、Outlook、Hotmail、iCloud、Yahoo 和 Foxmail；管理员可按行编辑完整域名。白名单为空时不限制邮箱域名，非空时只有精确匹配的域名可注册。该规则只作用于新用户注册和注册验证码，不限制 SMTP 发件邮箱，也不影响已有账号找回密码。
+公开接口只投影品牌名、英文品牌标识、登录页公开文案、深浅主题使用的稳定 slot 资源 URL、Logo 外框状态、配置状态和修订标识，不返回内部资源 ID、对象路径或存储凭据。
 
 ## 技能包与版本
 
@@ -99,6 +245,7 @@ description: qisiTV后端核心持久化表与状态边界
 | `creation_runs` | 保存创作 Agent 的服务端权威状态、执行租约、已批准提案和画布快照 | `(user_id, client_key)` 唯一；客户端会话只作为输入，修订号、执行 epoch 和租约由 service 强校验，不能据前端状态跳过审批或重复执行 |
 | `creation_submissions` | 保存创作提案中每个生成项的请求、报价签名、审批和任务绑定 | `(run_id, item_key)` 与 `task_id` 分别唯一；相同提交只允许创建一个任务，过期、撤销或提案哈希不一致时拒绝执行 |
 | `tasks.creation_submission_id` | 将生成任务反向绑定到已批准的创作提交 | 字段可空以兼容普通任务和旧数据；非空值唯一，阻止同一提交产生多个任务 |
+| `tasks.client_operation_id` / `client_operation_hash` | 保存普通生成确认的稳定编号和原始请求 SHA-256 摘要 | 编号可空；`(user_id, client_operation_id)` 唯一。重放必须匹配完整原始生成请求，模型、参考素材或参数不同返回 409；摘要不对外返回。旧记录没有摘要时拒绝重放，不自动补单 |
 | `workflow_template_versions` / `workflow_instances` / `workflow_step_instances` | 保存短剧生产模板和项目、章节实例 | 短剧分镜工作流 v2 顺序为剧情、资产、分镜、动作预演、视频、交付 |
 
 短剧项目状态以这些领域表为准。自由画布可以承载探索节点，但画布 metadata 不作为生产完成度、镜头版本或交付可用性的真相源。
@@ -131,25 +278,12 @@ description: qisiTV后端核心持久化表与状态边界
 - `idx_project_asset_candidates_project_unit_status`、`idx_project_asset_candidates_project_status_category`：章节候选和待确认分类队列。
 - `idx_tasks_user_project_created`：项目任务恢复读取。
 
-## 支付与插件版本
-
-| 表 | 用途 | 关键边界 |
-| --- | --- | --- |
-| `topup_products` | 保存服务端维护的充值商品、金额和积分快照 | 客户端只能提交商品 ID；金额和积分由 service 读取，不能由请求覆盖 |
-| `payment_provider_configs` | 保存支付插件某个渠道配置的不可变版本 | `provider_id + version` 唯一；密钥只保存加密密文；`plugin_id` / `plugin_version` 记录配置对应的插件版本 |
-| `payment_orders` | 保存充值订单、幂等键、渠道交易号和入账状态 | 创建订单时固定 `plugin_id`、`plugin_version`、配置 ID 与配置版本；回调、查单、关单必须使用同一运行时版本 |
-| `payment_notifications` | 保存已验签的支付通知收件箱 | 以渠道事件 ID 幂等；只保存用于异步入账的标准化证据，重复通知不会重复发放积分 |
-| `payment_reconciliation_runs` / `payment_reconciliation_items` | 保存渠道账单下载和对账结果 | 账单只能作为发现线索，金额、币种和交易号仍需由插件查单确认；历史订单继续绑定原插件版本 |
-
-支付宝、微信及后续聚合平台都只作为支付插件包提供 `qisitv.payment/v1` 适配器，宿主数据库不保存平台专用字段。插件升级不会改写历史订单的 `plugin_version`；存在未完成订单时，原插件版本和配置必须继续可解析通知、查单和关单。
-
 ## 模型渠道与目录
 
 | 表 | 用途 | 关键边界 |
 | --- | --- | --- |
 | `model_channels` | 保存系统渠道与用户渠道的连接配置，以及系统渠道前台别名和排序 | 系统渠道密钥不进入公开目录；公开名称优先使用 `public_alias`，为空时使用原名；按 `sort_order, created_at, id` 升序展示 |
 | `channel_models` | 保存系统渠道中的产品模型标识、上游模型 ID、显示名称、模型 Logo、排序、能力、协议和版本状态 | 模型排序独立保存，不递增价格或能力版本；能力、协议、启用状态和价格仍由 service 强校验 |
-| `channel_model_price_tiers` | 保存系统模型按规格匹配的上游 SKU 与价格 | 价格档与渠道模型同事务保存；未启用或未完成定价的规格不进入普通用户目录。档位 `provider_model_key` 非空时优先于渠道模型上游键发往供应商；管理端修改模型级上游 ID 时，与旧值相同的档位键自动级联跟随，其余显式 SKU 保持不变 |
 | `logical_models` | 保存前台模型的公开名称、Logo、能力类型和归档状态 | 前台模型与系统渠道模型分别维护展示信息；供应线路通过 revision 和 route 关联；`code` 仅在 `archived_at IS NULL` 的活动记录中唯一，归档后可用同 code 重建目录项 |
 
 图片分档尺寸保存在现有模型能力 JSON 的 `image.size.presets` 中，不新增表、列或 SQL 迁移。每项结构为 `{ tier, ratio, size, width, height }`，例如 `{ "tier": "1k", "ratio": "16:9", "size": "1824x1024", "width": 1824, "height": 1024 }`。
@@ -169,38 +303,16 @@ description: qisiTV后端核心持久化表与状态边界
 
 有效状态由服务端计算为 `platform_available AND user_enabled`。官方应用插件没有平台状态记录时默认可用；用户没有个人记录时默认停用，历史上全局启用的工作流插件在用户首次保存个人选择前沿用旧状态。管理员上传包的来源和作用域由宿主覆盖，不能通过 Manifest 提权。
 
-## 系统公告
-
-| 表 | 用途 | 关键边界 |
-| --- | --- | --- |
-| `announcements` | 保存管理员发布的系统公告 | `pinned` 只改变排序；`image_resource_id` 只能绑定由当前管理员上传并在发布事务中消费的公告配图草稿 |
-| `announcement_image_drafts` | 标记尚未发布的公告配图资源 | 发布/更新事务消费草稿；取消编辑显式回收，超过 24 小时的异常遗留草稿由后台清理 |
-| `user_announcement_reads` | 保存用户已读状态 | 同一用户和公告唯一；公告重新发布时清除旧已读记录 |
-| `banner_announcements` | 保存首页顶部常驻展示的滚动通知条 | 与系统公告完全独立：只有标题、图标与跳转链接，无正文、无配图、无已读状态；`link` 仅接受 `http(s)` 外链或 `/` 开头的站内路径；`status` 为 `active` / `disabled`，`starts_at` / `ends_at` 构成生效窗口（可预约未来开始）；`title_runs` 以 JSON 文本保存标题的样式分段；`notice_type` 决定通知条底色，`icon` 是标题前的图标键 |
-
-活动公告按置顶状态优先、发布时间倒序返回；置顶不会绕过关闭状态或用户登录校验。公告只要求标题，正文和配图均可为空。用户首次进入工作区时会自动看到未读公告，可以只关闭本次或选择今日不再提醒；主动打开公告中心后才会写入服务端已读状态。替换或移除配图时，公告更新、旧资源记录删除和物理删除任务入队在同一数据库事务完成。
-
-常驻通知的标题支持按分段设置样式：`title_runs` 是可选的 JSON 数组，每项为 `{ text, fontSize?, fontWeight?, fontFamily?, color? }`，只在有分段时写入，历史数据与纯文本标题保持为空。后端在写入前统一收口取值——字号 10-20、字重 400/500/600/700、字体 `sans` / `serif` / `mono`、颜色 `#RRGGBB`，并合并相邻同样式分段；标题总字数上限 120 与纯文本标题一致。`title` 列始终保存由分段拼接出的纯文本，列表展示与关键字检索不受样式影响，通知条渲染分段时也不依赖该列。
-
-常驻通知的通知类型与标题图标同样是白名单枚举。`notice_type` 取 `notice`（公告）/ `activity`（活动）/ `update`（更新）/ `warning`（警告），决定通知条底色——四种类型在 `globals.css` 里各有一组明暗两档色值，浅色档按白字 4.5:1 反推，深色档统一压到 7:1 以上。`icon` 取前端 `lib/announcements/banner-notice` 图标库里的键（kebab-case，当前 42 个），前端按下标取 lucide 组件渲染。两个字段都允许为空，后端在写入时补齐默认值（`notice` / `megaphone`），保证行数据始终是可直接渲染的具体取值；白名单在 `backend/internal/app/announcement.go`，与前端注册表的一致性由 `web/test/banner-notice.test.ts` 双向校验，改任一侧都会让测试失败。
-
-常驻通知由管理后台「运营 → 常驻通知」维护，公开接口 `GET /api/banner-announcements` 按生效窗口返回 `active` 条目（`starts_at <= now <= ends_at`，空窗口视为长期有效），前台工作台顶部布局层轮播展示；点击按 `link` 跳转：外链新窗口打开，站内路径前端路由跳转，无链接则不可点击。
-
-后台编辑弹窗可选中通知类型（卡片上直接铺出该类型的真实底色）、选中标题文字直接调整样式，并通过工具栏「图标」按钮在光标处插入 emoji 素材（可插入多个、任意位置），全部实时联动到深浅两套主题的预览（含文字对比度提示）。预览与前台通知条共用 `components/layout/banner-announcement-content.tsx` 的展示单元，因此「预览即前台结果」；标题在通知条内固定单行展示，超长按可用宽度裁切。通知条默认不显示任何图标，是否带图标完全由标题内容决定。
-
 ## 资源存储
 
 | 表 | 用途 | 关键边界 |
 | --- | --- | --- |
-| `resources` | 保存资源元数据和实际存储位置引用 | `user_id + upload_key` 唯一约束保证逻辑上传幂等；S3 资源必须通过 `storage_setting_id` 固定绑定创建时的位置；浏览器默认经同源接口读取 |
-| `storage_locations` | 保存平台或个人 S3 位置版本、加密凭据和连接测试摘要 | Endpoint、Bucket、Region、PathStyle、PathPrefix、Provider 组成不可变位置；同位置只轮换凭据，位置变化创建新记录 |
-| `resource_deletion_jobs` | 在业务记录删除后可靠清理物理对象 | 固化资源的存储位置与对象键；删除失败保留任务并重试，S3 404 按幂等成功处理 |
+| `resources` | 保存资源元数据和实际存储位置引用 | `user_id + upload_key` 唯一约束保证逻辑上传幂等；浏览器默认经同源接口读取 |
+| `resource_deletion_jobs` | 在业务记录删除后可靠清理物理对象 | 固化资源的对象键；删除失败保留任务并重试，本地文件已不存在时按幂等成功处理 |
 
-`storage_locations.value_json` 中的 Secret Key 和 Session Token 使用后端设置密钥加密。启用 S3 前，关键位置字段和凭据摘要必须与最近一次 Put、Range Get、Delete 连接测试结果一致；历史资源继续按绑定的位置读取和删除，不随当前配置切换。
+`resources.upload_key` 保存客户端 `X-Idempotency-Key` 的 SHA-256 摘要。相同用户重复提交同一逻辑上传时复用已有资源。未提供幂等标识的后台生成资源保持 `NULL`，不参与该唯一约束。
 
-`resources.upload_key` 保存客户端 `X-Idempotency-Key` 的 SHA-256 摘要。相同用户重复提交同一逻辑上传时复用已有资源；失败重试继续使用原对象路径，避免对象存储已经接收请求但响应丢失时产生第二份物理对象。未提供幂等标识的后台生成资源保持 `NULL`，不参与该唯一约束。
-
-个人画布中的图片、视频和音频采用 `Asset -> Resource` 所有权约束：前端先提交素材，再提交带 `assetId` 的画布节点或时间线直连媒体；后端保存画布前校验资源属于当前用户、状态为 `ready`、素材存在且引用同一资源。素材更新、全量替换和删除也会反向检查已有画布，不能把仍在使用的资源从素材库中移除或替换成其他资源。登录历史账号时，前端会按资源键补建缺失素材并回写 `assetId`。这项修复复用现有表和 Outbox，不新增结构迁移。
+个人画布中的图片、视频和音频采用 `Asset -> Resource` 所有权约束：前端先提交素材，再提交带 `assetId` 的画布节点或时间线直连媒体；后端保存画布前校验资源属于当前用户、状态为 `ready`、素材存在且引用同一资源。素材更新、全量替换和删除也会反向检查已有画布，不能把仍在使用的资源从素材库中移除或替换成其他资源。
 
 账号文件容量只统计 `ready` 资源，并按 Provider、Endpoint、Bucket、ObjectKey 对同一物理对象去重。上传中或失败记录不占用已存储容量。后台每小时检查资源生命周期：超过 1 小时的 `pending/failed` 记录，以及超过 24 小时仍没有任何素材、画布、任务或其他业务引用的 `ready` 记录，会在再次校验引用后删除数据库记录并写入 `resource_deletion_jobs`，由幂等 Worker 清理物理对象。
 

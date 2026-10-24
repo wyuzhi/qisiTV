@@ -36,7 +36,10 @@ RUN apk add --no-cache ca-certificates tzdata wget \
 
 WORKDIR /app
 ENV GIN_MODE=release
-ENV CANVAS_BACKEND_ADDR=:8080
+# Loopback inside the container. Compose sets CANVAS_BACKEND_ADDR=:8080 so other
+# containers can reach the API. Do not publish 8080 on all host interfaces:
+# the server profile has no launch token.
+ENV CANVAS_BACKEND_ADDR=127.0.0.1:8080
 ENV CANVAS_BACKEND_DATA_DIR=/data
 
 RUN mkdir -p /data && chown -R app:app /data

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link } from "react-router";
-import { Check, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Columns2, CopyPlus, Focus, FolderKanban, Gauge, History, Home, LayoutGrid, MoreHorizontal, Pencil, Plus, Redo2, Save, Search, Trash2, Undo2, Upload, Workflow, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Columns2, CopyPlus, Focus, FolderKanban, Gauge, History, Home, LayoutGrid, MoreHorizontal, Pencil, Plus, Redo2, Save, Search, Sparkles, Trash2, Undo2, Upload, Workflow, X } from "lucide-react";
 import { Button, Dropdown, Tooltip } from "antd";
 
 import { BrandLogoFrame } from "@/components/brand/brand-logo";
@@ -10,8 +10,6 @@ import type { CanvasShortDramaProgress } from "@/lib/canvas/canvas-short-drama";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useCanvasThemeStore } from "@/stores/canvas/use-canvas-theme-store";
 import type { CanvasMediaPerformanceMode } from "@/types/canvas";
-import { CanvasShortcutsModal } from "./canvas-shortcuts-modal";
-import { isBrowserWorkspace } from "@/services/browser-workspace";
 
 type CanvasTopBarProps = {
     workspaceView: "workflow" | "storyboard";
@@ -19,6 +17,10 @@ type CanvasTopBarProps = {
     syncStatus?: ReactNode;
     versionsOpen: boolean;
     onToggleVersions: () => void;
+    onOpenWorkflows?: () => void;
+    workflowsOpen?: boolean;
+    assistantOpen?: boolean;
+    onToggleAssistant?: () => void;
     title: string;
     titleDraft: string;
     isTitleEditing: boolean;
@@ -44,12 +46,9 @@ type CanvasTopBarProps = {
     onImportTapNow: () => void;
     onUndo: () => void;
     onRedo: () => void;
-    shortcutRequestNonce: number;
     mediaPerformanceMode: CanvasMediaPerformanceMode;
     onMediaPerformanceModeChange: (mode: CanvasMediaPerformanceMode) => void;
     onOpenSearch: () => void;
-    onOpenAgent?: () => void;
-    agentOpen?: boolean;
     projectContext?: CanvasContextSummary & { projectId: string; projectName: string };
     onEnterFocusMode: () => void;
     shortDramaGuide?: { progress: CanvasShortDramaProgress; collapsed: boolean; onToggle: () => void };
@@ -66,6 +65,10 @@ export function CanvasTopBar({
     syncStatus,
     versionsOpen,
     onToggleVersions,
+    onOpenWorkflows,
+    workflowsOpen = false,
+    assistantOpen = false,
+    onToggleAssistant,
     title,
     titleDraft,
     isTitleEditing,
@@ -89,12 +92,9 @@ export function CanvasTopBar({
     onImportImage,
     onUndo,
     onRedo,
-    shortcutRequestNonce,
     mediaPerformanceMode,
     onMediaPerformanceModeChange,
     onOpenSearch,
-    onOpenAgent,
-    agentOpen = false,
     projectContext,
     onEnterFocusMode,
     shortDramaGuide,
@@ -110,7 +110,6 @@ export function CanvasTopBar({
     const currentCanvasLabel = projectCanvases[currentCanvasIndex]?.title || `画布 ${currentCanvasIndex + 1}`;
     const titleRef = useRef<HTMLDivElement>(null);
     const renameCanvasInputRef = useRef<HTMLInputElement>(null);
-    const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const [renameCanvas, setRenameCanvas] = useState<{ id: string; title: string } | null>(null);
     const [canvasMenuOpen, setCanvasMenuOpen] = useState(false);
     const [canvasActionMenuId, setCanvasActionMenuId] = useState<string | null>(null);
@@ -129,9 +128,6 @@ export function CanvasTopBar({
 
     const cancelCanvasRename = () => setRenameCanvas(null);
 
-    useEffect(() => {
-        if (shortcutRequestNonce > 0) setShortcutsOpen(true);
-    }, [shortcutRequestNonce]);
 
     useEffect(() => {
         if (!renameCanvas) return;
@@ -172,7 +168,7 @@ export function CanvasTopBar({
 
     return (
         <>
-            <div data-agent-open={agentOpen ? "true" : "false"} className="canvas-topbar pointer-events-none absolute inset-x-0 top-0 z-[var(--z-toolbar)] flex h-[var(--canvas-topbar-h)] items-center justify-between px-2 sm:px-2" style={{ paddingRight: agentOpen ? 356 : undefined }}>
+            <div className="canvas-topbar pointer-events-none absolute inset-x-0 top-0 z-[var(--z-toolbar)] flex h-[var(--canvas-topbar-h)] items-center justify-between px-2 sm:px-2">
                 <div className="pointer-events-none flex items-center gap-2">
                 <div className="canvas-topbar-cluster canvas-topbar-project-cluster pointer-events-auto flex min-w-0 items-center gap-2" style={dockStyle}>
                     <Dropdown
@@ -186,7 +182,7 @@ export function CanvasTopBar({
                                     { key: "projects", label: <Link to="/canvas">全部项目</Link> },
                                     { type: "divider" },
                                     { key: "new", label: <Link to="/canvas?mode=new">创建新项目</Link> },
-                                    { key: "delete", label: "删除项目", onClick: onDeleteProject },
+                                    { key: "delete", danger: true, label: "删除当前画布", onClick: onDeleteProject },
                                 ],
                             }}
                         >
@@ -194,7 +190,7 @@ export function CanvasTopBar({
                                 {libtvChrome ? (
                                     <span className="canvas-topbar-libtv-brand-mark" aria-hidden="true" />
                                 ) : (
-                                    <BrandLogoFrame className="canvas-topbar-brand-mark" logoClassName="canvas-topbar-brand-mark-image" alt="" fallback={<span className="canvas-topbar-brand-mark-fallback" aria-hidden="true" />} />
+                                    <BrandLogoFrame className="canvas-topbar-brand-mark" logoClassName="canvas-topbar-brand-mark-image" alt="" fallback={<span className="canvas-topbar-brand-mark-fallback" aria-hidden="true">B</span>} />
                                 )}
                                 <ChevronDown className="size-2.5 opacity-55" aria-hidden="true" />
                             </button>
@@ -333,7 +329,7 @@ export function CanvasTopBar({
                             <span>{currentCanvasLabel}</span>{canvasMenuOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
                         </button>
                     </Dropdown>
-                    {!libtvChrome || isBrowserWorkspace() ? <span className={isBrowserWorkspace() ? "canvas-folder-save-status" : "canvas-topbar-sync-status"}>{syncStatus}</span> : null}
+                    <span className="canvas-topbar-sync-status">{syncStatus}</span>
                 </div>
                 </div>
 
@@ -349,10 +345,27 @@ export function CanvasTopBar({
                 ) : null}
 
                 <div className="canvas-topbar-cluster canvas-topbar-local-cluster pointer-events-auto hidden items-center gap-1 lg:flex" style={dockStyle}>
-                    {!libtvChrome ? <CanvasTopBarTooltip label="版本记录与本地历史"><Button type="text" className="canvas-topbar-action !h-9 !w-9 !min-w-9 !rounded-xl !p-0" style={{ color: theme.node.text, background: versionsOpen ? theme.toolbar.activeBg : undefined }} icon={<History className="size-4" />} onClick={onToggleVersions} aria-label="版本记录" aria-pressed={versionsOpen} /></CanvasTopBarTooltip> : null}
+                    {onOpenWorkflows ? <Button type="text" className="canvas-topbar-action canvas-topbar-workflow-button !h-9 !rounded-xl !px-2.5" style={{ color: theme.node.text, background: workflowsOpen ? theme.toolbar.activeBg : undefined }} aria-pressed={workflowsOpen} icon={<Workflow className="size-4" />} onClick={onOpenWorkflows}>工作流</Button> : null}
+                    {onToggleAssistant ? (
+                        <CanvasTopBarTooltip label="Agent（Ctrl/Cmd + J）">
+                            <Button
+                                type="text"
+                                className="canvas-topbar-action canvas-topbar-agent-button !h-9 !rounded-xl !px-2.5 !font-medium"
+                                style={{ color: theme.node.text, background: assistantOpen ? theme.toolbar.activeBg : undefined }}
+                                icon={<Sparkles className="size-4" />}
+                                onClick={onToggleAssistant}
+                                aria-label="Agent"
+                                aria-pressed={assistantOpen}
+                            >
+                                Agent
+                            </Button>
+                        </CanvasTopBarTooltip>
+                    ) : null}
+                    {!libtvChrome ? <CanvasTopBarTooltip label="版本记录"><Button type="text" className="canvas-topbar-action !h-9 !w-9 !min-w-9 !rounded-xl !p-0" style={{ color: theme.node.text, background: versionsOpen ? theme.toolbar.activeBg : undefined }} icon={<History className="size-4" />} onClick={onToggleVersions} aria-label="版本记录" aria-pressed={versionsOpen} /></CanvasTopBarTooltip> : null}
                 </div>
 
                 <div className="canvas-topbar-cluster canvas-topbar-tools-cluster pointer-events-auto flex items-center gap-1.5 lg:hidden" style={dockStyle}>
+                    {onOpenWorkflows ? <CanvasTopBarTooltip label="工作流"><Button type="text" className="canvas-topbar-action canvas-topbar-workflow-button !h-10 !w-10 !min-w-10 !rounded-xl !p-0" style={{ color: theme.node.text, background: workflowsOpen ? theme.toolbar.activeBg : undefined }} aria-pressed={workflowsOpen} icon={<Workflow className="size-4" />} aria-label="工作流" onClick={onOpenWorkflows} /></CanvasTopBarTooltip> : null}
                     <CanvasTopBarTooltip label="搜索画布节点">
                         <Button
                             type="text"
@@ -398,7 +411,22 @@ export function CanvasTopBar({
                             </Button>
                         </CanvasTopBarTooltip>
                     ) : null}
-                    <CanvasTopBarTooltip label="版本记录与本地草稿">
+                    {onToggleAssistant ? (
+                        <CanvasTopBarTooltip label="Agent（Ctrl/Cmd + J）">
+                            <Button
+                                type="text"
+                                className="canvas-topbar-action canvas-topbar-agent-button !h-10 !rounded-xl !px-2.5 !font-medium"
+                                style={{ color: theme.node.text, background: assistantOpen ? theme.toolbar.activeBg : undefined }}
+                                icon={<Sparkles className="size-4" />}
+                                onClick={onToggleAssistant}
+                                aria-label="Agent"
+                                aria-pressed={assistantOpen}
+                            >
+                                <span className="sr-only">Agent</span>
+                            </Button>
+                        </CanvasTopBarTooltip>
+                    ) : null}
+                    <CanvasTopBarTooltip label="版本记录">
                         <Button
                             type="text"
                             className="canvas-topbar-action canvas-topbar-version-button !h-10 !rounded-xl !px-2.5 !font-medium"
@@ -413,7 +441,6 @@ export function CanvasTopBar({
                     </CanvasTopBarTooltip>
                 </div>
             </div>
-            <CanvasShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
         </>
     );
 }

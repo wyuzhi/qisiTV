@@ -8,7 +8,7 @@ const versionHistory = readFileSync(resolve(import.meta.dir, "../src/pages/canva
 describe("local resource copy", () => {
     test("local-only UI describes a local resource boundary without cloud wording", () => {
         expect(storageStatus).toContain('localRuntime ? "仅保存在本机资源库"');
-        expect(versionHistory).toContain('{localOnly ? "本地历史" : "本地草稿"}');
+        expect(versionHistory).toContain("本机草稿");
         expect(versionHistory).toContain("本机备份");
     });
 });

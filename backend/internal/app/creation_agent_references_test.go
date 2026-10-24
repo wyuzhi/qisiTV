@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"qisitv/backend/internal/generation"
 )
 
 func TestCreationAgentImagesResolveOnlyApprovedResources(t *testing.T) {
@@ -12,10 +14,10 @@ func TestCreationAgentImagesResolveOnlyApprovedResources(t *testing.T) {
 		Claude:         map[string]any{"messages": []any{map[string]any{"content": []any{map[string]any{"type": "image", "source": map[string]any{"type": "url", "url": "resource:allowed"}}}}}},
 		Gemini:         map[string]any{"contents": []any{map[string]any{"parts": []any{map[string]any{"fileData": map[string]any{"fileUri": "resource:allowed", "mimeType": "image/png"}}}}}},
 	}}
-	if err := validateAgentResourcePlaceholders(input); err != nil {
+	if _, err := generation.ResolveAgentResourcePlaceholders(input, false); err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := resolveAgentResourcePlaceholders(input, true)
+	resolved, err := generation.ResolveAgentResourcePlaceholders(input, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +33,7 @@ func TestCreationAgentImagesResolveOnlyApprovedResources(t *testing.T) {
 		t.Fatal("persistable protocol mutated")
 	}
 	input.AgentRequests.Responses = map[string]any{"input": []any{map[string]any{"image_url": "resource:other"}}}
-	if err := validateAgentResourcePlaceholders(input); err == nil {
+	if _, err := generation.ResolveAgentResourcePlaceholders(input, false); err == nil {
 		t.Fatal("unlisted resource allowed")
 	}
 }

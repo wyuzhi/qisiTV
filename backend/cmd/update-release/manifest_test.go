@@ -13,11 +13,9 @@ import (
 )
 
 const testCommit = "0123456789abcdef0123456789abcdef01234567"
-const testDownloadBase = "https://releases.example.com/qisitv"
-const testFeedURL = "https://releases.example.com/qisitv/desktop-update.json"
 
 func TestSignVerifyRoundTripAndTamper(t *testing.T) {
-	t.Setenv("QISITV_UPDATER_DOWNLOAD_BASE", testDownloadBase)
+	t.Setenv("QISITV_UPDATER_DOWNLOAD_BASE", "https://updates.example.com/qisitv")
 	dir := t.TempDir()
 	public, private, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -87,7 +85,7 @@ func TestSignVerifyRoundTripAndTamper(t *testing.T) {
 		t.Fatalf("notes %q", body.Notes)
 	}
 	asset := body.Platforms[platformDarwinARM64]
-	if !strings.HasPrefix(asset.URL, testDownloadBase+"/v1.6.0/") {
+	if asset.URL != "https://updates.example.com/qisitv/v1.6.0/BeefTV-v1.6.0-darwin-arm64.zip" {
 		t.Fatalf("url %q", asset.URL)
 	}
 	if asset.Size <= 0 || len(asset.SHA256) != 64 {
@@ -126,7 +124,7 @@ func TestSignVerifyRoundTripAndTamper(t *testing.T) {
 }
 
 func TestSignRejectsInvalidInputs(t *testing.T) {
-	t.Setenv("QISITV_UPDATER_DOWNLOAD_BASE", testDownloadBase)
+	t.Setenv("QISITV_UPDATER_DOWNLOAD_BASE", "https://updates.example.com/qisitv")
 	dir := t.TempDir()
 	_, private, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -175,21 +173,20 @@ func TestSignRejectsInvalidInputs(t *testing.T) {
 }
 
 func TestPrintLdflags(t *testing.T) {
-	t.Setenv("QISITV_UPDATER_FEED_URL", testFeedURL)
 	public := encodeKey(bytes.Repeat([]byte{1}, ed25519.PublicKeySize))
 	var stdout bytes.Buffer
-	if err := run([]string{"print-ldflags", "--public-key", public}, &stdout, ioDiscard{}); err != nil {
+	if err := run([]string{"print-ldflags", "--public-key", public, "--feed-url", "https://updates.example.com/qisitv/desktop-update.json"}, &stdout, ioDiscard{}); err != nil {
 		t.Fatal(err)
 	}
 	got := strings.TrimSpace(stdout.String())
-	if !strings.Contains(got, "qisitv/backend/internal/desktopupdate.FeedURL="+testFeedURL) {
+	if !strings.Contains(got, "qisitv/backend/internal/desktopupdate.FeedURL=https://updates.example.com/qisitv/desktop-update.json") {
 		t.Fatalf("missing feed ldflag: %s", got)
 	}
 	if !strings.Contains(got, "qisitv/backend/internal/desktopupdate.PublicKey="+public) {
 		t.Fatalf("missing public key ldflag: %s", got)
 	}
 	t.Setenv(publicKeyEnv, public)
-	t.Setenv("QISITV_UPDATER_FEED_URL", "https://example.com/desktop-update.json")
+	t.Setenv("BEEFTV_UPDATER_FEED_URL", "https://example.com/desktop-update.json")
 	stdout.Reset()
 	if err := run([]string{"print-ldflags"}, &stdout, ioDiscard{}); err != nil {
 		t.Fatal(err)
@@ -215,9 +212,15 @@ func packageNamed(t *testing.T, dir, platform, version string) string {
 		}
 		writer := zip.NewWriter(file)
 		for name, body := range map[string]string{
-			"qisiTV.app/Contents/MacOS/qisiTV":                                 "binary",
-			"qisiTV.app/Contents/Info.plist":                                   "<plist></plist>",
-			"qisiTV.app/Contents/Resources/plugin-packages/core.qisitv-plugin": "plugin",
+			"BeefTV.app/Contents/MacOS/BeefTV":                                                                   "binary",
+			"BeefTV.app/Contents/MacOS/cli/beeftv":                                                               "cli",
+			"BeefTV.app/Contents/Info.plist":                                                                     "<plist></plist>",
+			"BeefTV.app/Contents/Resources/plugin-packages/core.beeftv-plugin":                                   "plugin",
+			"BeefTV.app/Contents/Resources/agent-host/server.mjs":                                                "host",
+			"BeefTV.app/Contents/Resources/agent-host/session-identity.mjs":                                      "identity",
+			"BeefTV.app/Contents/Resources/agent-host/package.json":                                              "{}",
+			"BeefTV.app/Contents/Resources/agent-host/runtime/bin/node":                                          "node",
+			"BeefTV.app/Contents/Resources/agent-host/node_modules/@earendil-works/pi-coding-agent/package.json": "{}",
 		} {
 			header := &zip.FileHeader{Name: name, Method: zip.Deflate}
 			header.SetMode(0o755)
@@ -243,7 +246,7 @@ func packageNamed(t *testing.T, dir, platform, version string) string {
 	}
 	switch platform {
 	case platformDarwinARM64, platformDarwinAMD64:
-		writeFakeDarwinApp(t, filepath.Join(input, "qisiTV.app"))
+		writeFakeDarwinApp(t, filepath.Join(input, "BeefTV.app"))
 	case platformWindowsAMD64:
 		writeFakeWindowsBin(t, input)
 	}

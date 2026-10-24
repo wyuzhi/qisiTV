@@ -37,7 +37,7 @@ func TestOfficialProtocolPackagesAreSelfContainedDeclarativePlugins(t *testing.T
 		if err != nil {
 			t.Fatalf("parse %s: %v", filepath.Base(path), err)
 		}
-		if pkg.Manifest.APIVersion != "qisitv.plugin/v2" {
+		if pkg.Manifest.APIVersion != "qisitv.plugin/v2" && pkg.Manifest.APIVersion != "beeftv.plugin/v2" {
 			t.Fatalf("%s apiVersion = %q", filepath.Base(path), pkg.Manifest.APIVersion)
 		}
 		if strings.HasPrefix(strings.TrimSpace(pkg.Manifest.Runtime.Backend), "host:") {

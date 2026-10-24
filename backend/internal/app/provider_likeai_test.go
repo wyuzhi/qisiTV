@@ -7,10 +7,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
 
+	"qisitv/backend/internal/generation"
+	"qisitv/backend/internal/modelcatalog"
 	"qisitv/backend/internal/protocol"
 )
 
@@ -74,6 +77,24 @@ func TestLikeAIRequestMappingAndResponseStates(t *testing.T) {
 	}
 }
 
+type likeAIFixtureTransport struct{ target string }
+
+func (f likeAIFixtureTransport) Intercept(request *http.Request) (bool, []byte, string, error) {
+	if request.URL.Host != "task.likeai.pro" {
+		return false, nil, "", nil
+	}
+	target, _ := url.Parse(f.target)
+	clone := request.Clone(request.Context())
+	clone.URL.Scheme, clone.URL.Host = target.Scheme, target.Host
+	response, err := http.DefaultClient.Do(clone)
+	if err != nil {
+		return true, nil, "", err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	return true, body, response.Header.Get("Content-Type"), err
+}
+
 func TestLikeAIMockCatalogUploadGenerationAndRecovery(t *testing.T) {
 	allowLoopbackProviderTest(t)
 	var server *httptest.Server
@@ -118,8 +139,13 @@ func TestLikeAIMockCatalogUploadGenerationAndRecovery(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	base := server.URL + "/task-api"
-	catalog, err := fetchLikeAIModelCatalog(context.Background(), ChannelModelsRequest{BaseURL: base, APIKey: "test-secret"})
+	base := generation.LikeAIBaseURL
+	fixtureCtx := generation.WithRuntime(context.Background(), generation.Runtime{Images: likeAIFixtureTransport{target: server.URL}})
+	bytes, err := generation.ExecuteProtocolRequest(fixtureCtx, generation.Config{BaseURL: base, APIKey: "test-secret", InterfaceType: "likeai-video"}, protocol.RequestSpec{Method: "GET", Path: "/task/models"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := modelcatalog.ParseChannelModelCatalog(bytes, "likeai")
 	if err != nil || len(catalog) != 3 {
 		t.Fatalf("catalog %#v: %v", catalog, err)
 	}
@@ -127,18 +153,18 @@ func TestLikeAIMockCatalogUploadGenerationAndRecovery(t *testing.T) {
 		t.Fatalf("chat classification %#v", catalog)
 	}
 	input := canvasGenerationInput{Mode: "video", Prompt: "test", Config: providerConfig{BaseURL: base, APIKey: "test-secret", Model: "doubao_seedance_2_5", InterfaceType: "likeai-video", VideoSeconds: "5", VQuality: "720p"}, ReferenceImages: []providerMedia{{Name: "ref.png", MimeType: "image/png", DataURL: "data:image/png;base64,dGVzdA=="}}}
-	if err := prepareLikeAIReferences(context.Background(), &input); err != nil {
+	if err := generation.PrepareLikeAIReferences(fixtureCtx, &input); err != nil {
 		t.Fatal(err)
 	}
 	if input.ReferenceImages[0].DataURL != "" || input.ReferenceImages[0].URL != "https://media.example/upload.png" {
 		t.Fatal("upload not substituted")
 	}
 	adapter := likeAIAdapter(t, "video")
-	result, err := runProtocolAdapterTaskWithPolicy(context.Background(), input, adapter, fastVideoPollPolicy())
+	result, err := runProtocolAdapterTaskWithPolicy(fixtureCtx, input, adapter, fastVideoPollPolicy())
 	if err != nil || result["mode"] != "video" {
 		t.Fatalf("generation %#v: %v", result, err)
 	}
-	resumeCtx := context.WithValue(context.Background(), providerAnalyticsKey{}, providerAnalyticsContext{ProviderRequestID: "mock-task"})
+	resumeCtx := generation.WithCallMeta(fixtureCtx, generation.CallMeta{ProviderRequestID: "mock-task"})
 	_, err = runProtocolAdapterTaskWithPolicy(resumeCtx, input, adapter, fastVideoPollPolicy())
 	if err != nil {
 		t.Fatal(err)
@@ -146,7 +172,7 @@ func TestLikeAIMockCatalogUploadGenerationAndRecovery(t *testing.T) {
 	if creates != 1 || uploads != 1 || polls != 2 {
 		t.Fatalf("calls create/upload/poll %d/%d/%d", creates, uploads, polls)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(fixtureCtx)
 	cancel()
 	_, err = runProtocolAdapterTaskWithPolicy(ctx, input, adapter, fastVideoPollPolicy())
 	if !errors.Is(err, context.Canceled) {

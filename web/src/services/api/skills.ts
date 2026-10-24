@@ -1,5 +1,6 @@
 import { ApiError, http, apiBaseURL, compactApiParams, serializeApiParams, type ApiParams } from "@/services/api/request";
 import { getActiveUserScope } from "@/lib/user-scope";
+import type { MarketRelease } from "./skill-market";
 
 
 let addedSkillsRequest: { scope: string; promise: Promise<{ skills: Skill[] }> } | null = null;
@@ -48,6 +49,7 @@ export type Skill = {
     ownerUid: string;
     effectiveUser: { name: string; avatarUrl: string; uid: string };
     originalSkillId: string | null;
+    marketRelease?: MarketRelease;
     showcaseMedia: SkillShowcaseMedia[];
     addedCount: number;
     isTest: boolean;
@@ -171,7 +173,7 @@ async function readAddedSkillsWithRetry() {
     }
 }
 
-function invalidateAddedSkillsCache() {
+export function invalidateAddedSkillsCache() {
     addedSkillsCache = null;
     if (typeof window !== "undefined") window.dispatchEvent(new Event("canvas-skills-changed"));
 }
@@ -218,6 +220,11 @@ export function syncSkill(id: string) {
 export function skillFileRawURL(id: string, path: string) {
     const base = String(apiBaseURL).replace(/\/$/, "");
     return `${base}/skills/${encodeURIComponent(id)}/file/raw?path=${encodeURIComponent(path)}`;
+}
+
+export async function getSkillFileBlob(id: string, path: string, signal?: AbortSignal) {
+    const result = await http.raw<Blob>({ method: "GET", url: `/skills/${encodeURIComponent(id)}/file/raw`, params: { path }, responseType: "blob", timeout: 0, signal });
+    return result.data;
 }
 
 export function updateSkill(id: string, input: SkillMutationInput) {

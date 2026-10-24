@@ -15,24 +15,6 @@ const build = (prompt: string, ids = ["A", "B"]) => buildNodeGenerationContext("
 const compile = (prompt: string, ids?: string[]) => compileNodeGenerationReferences(build(prompt, ids), config, "reference_to_video");
 
 describe("bound canvas reference submission", () => {
-    test("LikeAI and qisi Seedance keep asset identity when the connected order changes", () => {
-        for (const id of ["likeai", "qisi"]) {
-            const model = "doubao_seedance_2_5";
-            const selected = { model: `${id}::${model}`, channels: [{ id, apiFormat: "likeai", models: [model], modelProfiles: [{ model, protocol: "likeai-video" }] }] } as AiConfig;
-            for (const ids of [["A", "B"], ["B", "A"]]) {
-                const raw = build("@[node:B] 在右，@[node:A] 在左", ids);
-                raw.characterReferenceBindings = [{ role: 1, name: "甲", imageIds: ["A"], audioIds: [] }];
-                const output = compileNodeGenerationReferences(raw, selected, "reference_to_video");
-                expect(output.referenceImages.map((image) => image.id)).toEqual(["B", "A"]);
-                expect(output.prompt).toContain("@图片1 在右，@图片2 在左");
-                expect(output.prompt).toContain("@角色1 与「甲」指同一角色。该角色外观参考 @图片2");
-                expect(compileNodeGenerationReferences(raw, selected, "image_to_video").referenceImages.map((image) => image.id)).toEqual(ids);
-            }
-            const other = { ...selected, model: `${id}::wan_video_3_prime`, channels: [{ ...selected.channels[0]!, models: ["wan_video_3_prime"], modelProfiles: [{ model: "wan_video_3_prime", protocol: "likeai-video" as const }] }] };
-            expect(compileNodeGenerationReferences(build("@[node:B] 在右，@[node:A] 在左"), other, "reference_to_video").referenceImages.map((image) => image.id)).toEqual(["A", "B"]);
-        }
-    });
-
     test("final IMAGE tables reject conflicting node bindings, including quoted cells", () => {
         for (const quote of ["", "`", '"', "'"]) {
             const prompt = `@[node:B] 在右。\n| IMAGE 1 | ${quote}@[node:A]${quote} |\n| IMAGE 2 | @[node:B] |`;

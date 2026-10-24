@@ -14,7 +14,7 @@ describe("canvas resource mention editor", () => {
         expect(rejection).toContain('modal.error({ title: "参考素材需要调整", content: generationErrorMessage(error) })');
         expect(rejection).toMatch(/modal\.error\([^;]+;\s*return;/);
         expect(rejection).not.toContain("message.error");
-        expect(compileStart).toBeLessThan(executor.indexOf("const controller = startGenerationRequest("));
+        expect(compileStart).toBeLessThan(executor.indexOf("await executeVideoGeneration(execution)"));
     });
 
     test("refreshes async reference previews even when prompt text has not changed", () => {
@@ -115,37 +115,24 @@ describe("canvas resource mention editor", () => {
         expect(css).toContain(".canvas-resource-mention-meta");
     });
 
-    test("agent composer attachments stay large, previewable, and mentionable", () => {
-        const component = source("../src/components/canvas/canvas-cloud-agent-chat-ui.tsx");
-        expect(component).toContain("w-20 shrink-0");
-        expect(component).toContain("insertAttachmentMention");
-        expect(component).toContain("@[attachment:");
-        expect(component).toContain("AgentImagePreview");
-        expect(component).toContain("composerReferences");
-        expect(component).toContain("点击放大预览");
-    });
-
-    test("agent composer renders slash skill references as stable skill chips and consumes the typed slash query", () => {
-        const component = source("../src/components/canvas/canvas-cloud-agent-chat-ui.tsx");
-
-        expect(component).toContain("const token = `@[skill:${skill.skillId}] `");
-        expect(component).toContain("slash.start + 1 + slash.query.length");
-        expect(component).toContain("buildSkillMentionReferences(availableSlashSkills)");
-    });
-
     test("skill chips use one colored icon instead of exposing the serialized token", () => {
         const component = source("../src/components/canvas/canvas-resource-mention-textarea.tsx");
-        const chat = source("../src/components/canvas/canvas-cloud-agent-chat-ui.tsx");
-        const css = source("../src/components/canvas/canvas-cloud-agent.css");
 
         expect(component).toContain('chip.className = `canvas-resource-inline-mention ${reference.kind === "skill" ? "is-skill" : reference.kind === "text" ? "is-node" : ""}`');
         expect(component).toContain('prefix.textContent = reference.kind === "skill" ? "✦" : reference.kind === "text" ? "▤" : "@"');
         expect(component).toContain('if (reference.kind !== "skill" && reference.kind !== "text") chip.appendChild(createInlinePreview(reference));');
         expect(component).toContain('chip.style.setProperty("--canvas-skill-mention-color", skillMentionColor(reference))');
-        expect(chat).toContain("sendOnEnter={false}");
-        expect(chat).toContain("agent-composer-resize-handle");
-        expect(chat).toContain("Enter 换行 · ⌘/Ctrl+Enter 发送");
-        expect(css).toContain(".agent-composer-prompt-scroll");
-        expect(css).not.toContain(".agent-tool-row:hover {");
+    });
+
+    test("protects mention menu from blur and outside pointer misfires when clicking asset library folders", () => {
+        const component = source("../src/components/canvas/canvas-resource-mention-textarea.tsx");
+
+        expect(component).toContain("interactingWithMenuRef = useRef(false)");
+        expect(component).toContain("if (interactingWithMenuRef.current) return;");
+        expect(component).toContain('if (target?.tagName !== "INPUT")');
+        expect(component).toContain("event.preventDefault();");
+        expect(component).toContain("className=\"canvas-resource-mention-folder\"");
+        expect(component).toContain("className=\"canvas-resource-mention-back\"");
+        expect(component).toContain("event.composedPath");
     });
 });

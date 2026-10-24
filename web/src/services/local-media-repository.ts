@@ -1,8 +1,7 @@
-import localforage from "localforage";
-
+import { MEDIA_FILES_STORE_NAME, localForageInstance } from "@/lib/localforage-storage";
 import { getActiveUserScope } from "@/lib/user-scope";
 
-const store = localforage.createInstance({ name: "infinite-canvas", storeName: "media_files" });
+const store = localForageInstance(MEDIA_FILES_STORE_NAME);
 const objectUrls = new Map<string, string>();
 
 /** Local-only media persistence. This module never calls a network or resource API. */

@@ -42,6 +42,8 @@ func run(ctx context.Context, args []string) error {
 		return serve(ctx, args, true)
 	case "mcp":
 		return runMCP(ctx, args)
+	case "open":
+		return openWebsite(ctx, args)
 	case "version", "--version":
 		fmt.Println("qisitv-connect", browserbridge.Version)
 		return nil

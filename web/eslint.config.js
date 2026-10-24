@@ -1,6 +1,6 @@
 import babelParser from "@babel/eslint-parser";
 
-// 这不是风格检查。只锁已经退场的 AntD 用法，防止 Empty / 静态 Modal.confirm 再长回来。
+// 这不是风格检查。锁住已退场的 AntD 用法和已知会导致旧 WebView 崩溃的 API。
 // 用 Babel 解析 TS/TSX：typescript-eslint 8 在 TypeScript 7 上会直接拒绝启动。
 const emptyMessage = "列表和面板空态用 @/components/ui/product/empty-state 的 EmptyState，不要再引入 antd Empty。";
 const confirmMessage = "命令式确认必须走 App.useApp().modal.confirm，静态 Modal.confirm 拿不到主题和 App 上下文。";
@@ -21,6 +21,15 @@ const commentCompatPlugin = {
 export default [
     {
         ignores: ["dist/**", "node_modules/**", "coverage/**"],
+    },
+    {
+        files: ["src/**/*.{ts,tsx}"],
+        rules: {
+            "no-restricted-properties": ["error", {
+                property: "toSorted",
+                message: "桌面 WebView 可能不支持 toSorted；对 filter/map 等新数组使用 sort，原数组需先复制。",
+            }],
+        },
     },
     {
         files: ["src/**/*.{ts,tsx}", "test/**/*.{ts,tsx,mjs}"],

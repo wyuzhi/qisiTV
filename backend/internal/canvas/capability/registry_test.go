@@ -19,6 +19,26 @@ func testDescriptor() Descriptor {
 	}
 }
 
+func TestUpscaleProcessingConnections(t *testing.T) {
+	r := BuiltinRegistry()
+	for _, edge := range [][2]string{{"image", "upscale"}, {"video", "upscale"}, {"upscale", "image"}, {"upscale", "video"}} {
+		if err := r.ValidateReferenceConnection(edge[0], edge[1]); err != nil {
+			t.Fatalf("valid processing edge %v: %v", edge, err)
+		}
+	}
+	for _, edge := range [][2]string{{"text", "upscale"}, {"audio", "upscale"}, {"upscale", "text"}, {"upscale", "audio"}, {"upscale", "upscale"}} {
+		if err := r.ValidateReferenceConnection(edge[0], edge[1]); err == nil {
+			t.Fatalf("invalid processing edge accepted: %v", edge)
+		}
+	}
+	if r.MaxReferenceInputCount("upscale") != 0 {
+		t.Fatal("upscale must allow multiple inputs")
+	}
+	if d, ok := r.Resolve("upscale"); !ok || d.GenerationMode != "" || d.Connection.CanReference {
+		t.Fatal("processor must not masquerade as a media generator or reference")
+	}
+}
+
 func TestRegistryNormalizesAndProtectsDescriptors(t *testing.T) {
 	input := testDescriptor()
 	registry, err := NewRegistry([]Descriptor{input})

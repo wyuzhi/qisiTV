@@ -372,14 +372,15 @@ type ProductionTaskLink struct {
 }
 
 type CanvasProject struct {
-	ID          string    `json:"id" gorm:"primaryKey;size:80"`
-	UserID      string    `json:"userId" gorm:"index;size:36;index:idx_canvas_projects_user_updated,priority:1;index:idx_canvas_projects_user_project_updated,priority:1"`
-	ProjectID   string    `json:"projectId,omitempty" gorm:"index;size:36;index:idx_canvas_projects_user_project_updated,priority:2"`
-	Title       string    `json:"title" gorm:"size:240"`
-	PayloadJSON string    `json:"payloadJson" gorm:"type:text"`
-	Revision    int64     `json:"revision" gorm:"not null;default:1"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt" gorm:"index:idx_canvas_projects_user_updated,priority:2;index:idx_canvas_projects_user_project_updated,priority:3"`
+	ID              string    `json:"id" gorm:"primaryKey;size:80"`
+	UserID          string    `json:"userId" gorm:"index;size:36;index:idx_canvas_projects_user_updated,priority:1;index:idx_canvas_projects_user_project_updated,priority:1;index:idx_canvas_projects_library_folder,priority:1"`
+	ProjectID       string    `json:"projectId,omitempty" gorm:"index;size:36;index:idx_canvas_projects_user_project_updated,priority:2"`
+	LibraryFolderID string    `json:"libraryFolderId,omitempty" gorm:"index:idx_canvas_projects_library_folder,priority:2;size:80"`
+	Title           string    `json:"title" gorm:"size:240"`
+	PayloadJSON     string    `json:"payloadJson" gorm:"type:text"`
+	Revision        int64     `json:"revision" gorm:"not null;default:1"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt" gorm:"index:idx_canvas_projects_user_updated,priority:2;index:idx_canvas_projects_user_project_updated,priority:3"`
 }
 
 type PromptTemplate struct {

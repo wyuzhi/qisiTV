@@ -5,7 +5,7 @@ import { WorkspaceTopBarExtensionSlot } from "@/components/layout/workspace-top-
 import { useAppearanceStore } from "@/stores/use-appearance-store";
 
 const PAGE_TITLES: Record<string, string> = {
-    home: "创作", create: "创作", projects: "短剧 Agent", canvas: "自由画布",
+    home: "创作", create: "创作", projects: "项目", canvas: "自由画布",
     assets: "资产", skills: "技能", plugins: "插件", settings: "设置",
 };
 

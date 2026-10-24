@@ -11,8 +11,13 @@ import { generationInputMentionLabel, type NodeGenerationInput } from "./canvas-
 import { CanvasVideoPromptTools } from "./canvas-video-prompt-tools";
 import { CanvasPresetPicker, type CanvasPromptPreset } from "./canvas-preset-picker";
 import type { CanvasGenerationMode, CanvasNodeMetadata, CanvasWorkspaceMode } from "@/types/canvas";
+import { CanvasH3ReferenceOrder } from "./canvas-h3-reference-order";
+import { isH3Style } from "@/lib/h3-video";
+import { CanvasPromptFontControl } from "./canvas-prompt-font-control";
+import { DEFAULT_PROMPT_FONT_SIZE, useCreationPreferencesStore } from "@/stores/use-creation-preferences-store";
 
 type CanvasConfigComposerProps = {
+    model?: string;
     value: string;
     inputs: NodeGenerationInput[];
     skillReferences?: CanvasResourceReference[];
@@ -44,8 +49,10 @@ type ComposerCandidate =
 
 export const CONFIG_REFERENCE_PATTERN = /@\[node:([^\]]+)\]|@(图片|视频|音频|文本|角色|绘图)(\d+)/g;
 
-export function CanvasConfigComposer({ value, inputs, skillReferences = [], generationMode, metadata, onChange, onMetadataChange, onClose, workspaceMode = "professional" }: CanvasConfigComposerProps) {
+export function CanvasConfigComposer({ value, inputs, skillReferences = [], generationMode, metadata, model="", onChange, onMetadataChange, onClose, workspaceMode = "professional" }: CanvasConfigComposerProps) {
     const theme = canvasThemes[useActiveTheme()];
+    const promptFontSize = useCreationPreferencesStore((state) => state.preferences.promptFontSize ?? DEFAULT_PROMPT_FONT_SIZE);
+    const promptTextStyle = { fontSize: promptFontSize, lineHeight: 1.5 };
     const editorRef = useRef<HTMLDivElement>(null);
     const composingRef = useRef(false);
     const [mention, setMention] = useState<MentionState | null>(null);
@@ -173,6 +180,7 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
                     <div className="truncate text-[var(--fs-label)] opacity-55">{simpleMode ? "已连接素材会自动带入" : workflowVideoReferenceMode ? "已连接媒体会按工作流字段顺序自动带入" : "@ 引用已连接素材或已激活技能，发送前自动组装"}</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
+                    <CanvasPromptFontControl />
                     <Button size="small" type="text" className="!h-7 !w-7 !min-w-7 !p-0" icon={<X className="size-3.5" />} onClick={onClose} />
                 </div>
             </div>
@@ -180,8 +188,10 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
                 <div className="mb-3 rounded-lg px-2 py-2" style={{ background: theme.node.fill }}>
                     <CanvasVideoPromptTools
                         metadata={metadata}
+                        endFrameSupported={!isH3Style(model)}
+                        referenceLabel={workflowVideoReferenceMode?"工作流参考":"参考生成"}
                         frameOptions={videoFrameOptions}
-                        referenceMode={workflowVideoReferenceMode ? "all" : "frames"}
+                        referenceMode={workflowVideoReferenceMode || model.split("::").at(-1)==="minimax-h3" && metadata?.videoEditOperation==="reference_to_video" ? "all" : "frames"}
                         referenceSummary={{
                             imageCount: inputs.filter((input) => input.type === "image" || input.type === "character").length,
                             videoCount: inputs.filter((input) => input.type === "video").length,
@@ -189,16 +199,17 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
                         }}
                         onMetadataChange={onMetadataChange}
                     />
+                    <CanvasH3ReferenceOrder model={model} inputs={inputs} metadata={metadata} onChange={onMetadataChange} />
                 </div>
             ) : null}
             <div className="canvas-config-composer-editor relative rounded-lg" style={{ background: theme.node.fill }}>
-                {!value.trim() ? <div className="pointer-events-none absolute left-4 top-3 text-sm leading-7" style={{ color: theme.node.placeholder }}>输入提示词，按 @ 引用连接素材或技能</div> : null}
+                {!value.trim() ? <div className="pointer-events-none absolute left-4 top-3 text-sm leading-7" style={{ color: theme.node.placeholder, ...promptTextStyle }}>输入提示词，按 @ 引用连接素材或技能</div> : null}
                 <div
                     ref={editorRef}
                     contentEditable
                     suppressContentEditableWarning
                     className="thin-scrollbar min-h-32 max-h-[min(42vh,360px)] w-full overflow-y-auto whitespace-pre-wrap break-words px-4 py-3 text-sm leading-7 outline-none"
-                    style={{ color: theme.node.text }}
+                    style={{ color: theme.node.text, ...promptTextStyle }}
                     onInput={() => {
                         if (!composingRef.current) syncFromEditor();
                     }}

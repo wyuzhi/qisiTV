@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 )
 
 type deviceCodeRequest struct {
@@ -62,11 +61,14 @@ type connectionView struct {
 
 type modelsPayload struct {
 	Data []struct {
-		ID                     string   `json:"id"`
-		Name                   string   `json:"name"`
-		DisplayName            string   `json:"display_name"`
-		ModelType              string   `json:"model_type"`
-		SupportedEndpointTypes []string `json:"supported_endpoint_types"`
+		ID                       string          `json:"id"`
+		Name                     string          `json:"name"`
+		DisplayName              string          `json:"display_name"`
+		ModelType                string          `json:"model_type"`
+		SupportedEndpointTypes   []string        `json:"supported_endpoint_types"`
+		VideoCapabilities        json.RawMessage `json:"video_capabilities"`
+		VideoCapabilitiesVersion string          `json:"video_capabilities_version"`
+		VideoPricing             json.RawMessage `json:"video_pricing"`
 	} `json:"data"`
 }
 
@@ -75,7 +77,7 @@ func (s *Service) postJSON(path string, payload any, header http.Header) (*http.
 	if err != nil {
 		return nil, nil, err
 	}
-	request, err := http.NewRequest(http.MethodPost, s.origin+path, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(s.lifecycle, http.MethodPost, s.Origin()+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -106,10 +108,16 @@ func (s *Service) requestDeviceCode() (deviceCodeResponse, error) {
 		Hostname:      s.hostname,
 	}, nil)
 	if err != nil {
-		return deviceCodeResponse{}, fmt.Errorf("无法开始企业授权")
+		return deviceCodeResponse{}, fmt.Errorf("无法连接 BeefTV 服务，请检查网络后重试")
 	}
 	if response.StatusCode >= 300 {
-		return deviceCodeResponse{}, fmt.Errorf("无法开始企业授权")
+		if response.StatusCode == http.StatusTooManyRequests {
+			return deviceCodeResponse{}, fmt.Errorf("连接尝试过于频繁，请稍后重试")
+		}
+		if response.StatusCode >= 500 {
+			return deviceCodeResponse{}, fmt.Errorf("BeefTV 连接服务暂时不可用，请稍后重试")
+		}
+		return deviceCodeResponse{}, fmt.Errorf("BeefTV 服务未接受连接，请更新应用后重试")
 	}
 	var result deviceCodeResponse
 	if err := json.Unmarshal(raw, &result); err != nil || strings.TrimSpace(result.DeviceCode) == "" || strings.TrimSpace(result.UserCode) == "" {
@@ -122,13 +130,13 @@ func (s *Service) requestDeviceCode() (deviceCodeResponse, error) {
 		result.Interval = 5
 	}
 	if result.VerificationURI == "" {
-		result.VerificationURI = s.origin + "/desktop-auth"
+		result.VerificationURI = s.Origin() + "/desktop-auth"
 	}
-	if _, err := ValidateVerificationURL(s.origin, result.VerificationURI); err != nil {
+	if _, err := ValidateVerificationURL(s.Origin(), result.VerificationURI); err != nil {
 		return deviceCodeResponse{}, err
 	}
 	if result.VerificationURIComplete != "" {
-		if _, err := ValidateVerificationURL(s.origin, result.VerificationURIComplete); err != nil {
+		if _, err := ValidateVerificationURL(s.Origin(), result.VerificationURIComplete); err != nil {
 			return deviceCodeResponse{}, err
 		}
 	}
@@ -213,7 +221,7 @@ func (s *Service) cancelRemote(deviceCode string) error {
 }
 
 func (s *Service) remoteConnection(apiKey string) (connectionView, int, error) {
-	request, err := http.NewRequest(http.MethodGet, TokenBaseURL(s.origin)+"/beeftv/connection", nil)
+	request, err := http.NewRequestWithContext(s.lifecycle, http.MethodGet, TokenBaseURL(s.Origin())+"/beeftv/connection", nil)
 	if err != nil {
 		return connectionView{}, 0, err
 	}
@@ -236,7 +244,7 @@ func (s *Service) remoteConnection(apiKey string) (connectionView, int, error) {
 }
 
 func (s *Service) revokeRemote(apiKey string) error {
-	request, err := http.NewRequest(http.MethodDelete, TokenBaseURL(s.origin)+"/beeftv/connection", nil)
+	request, err := http.NewRequestWithContext(s.lifecycle, http.MethodDelete, TokenBaseURL(s.Origin())+"/beeftv/connection", nil)
 	if err != nil {
 		return err
 	}
@@ -255,9 +263,9 @@ func (s *Service) revokeRemote(apiKey string) error {
 
 func (s *Service) fetchModels(apiKey string) ([]CatalogModel, error) {
 	if s.fetchCatalog != nil {
-		return s.fetchCatalog(apiKey, ProviderBaseURL(s.origin))
+		return s.fetchCatalog(apiKey, ProviderBaseURL(s.Origin()))
 	}
-	request, err := http.NewRequest(http.MethodGet, TokenBaseURL(s.origin)+"/models", nil)
+	request, err := http.NewRequestWithContext(s.lifecycle, http.MethodGet, TokenBaseURL(s.Origin())+"/models", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -294,10 +302,13 @@ func (s *Service) fetchModels(apiKey string) ([]CatalogModel, error) {
 		}
 		seen[id] = true
 		models = append(models, CatalogModel{
-			ID:                     id,
-			DisplayName:            strings.TrimSpace(item.DisplayName),
-			ModelType:              strings.ToLower(strings.TrimSpace(item.ModelType)),
-			SupportedEndpointTypes: item.SupportedEndpointTypes,
+			ID:                       id,
+			DisplayName:              strings.TrimSpace(item.DisplayName),
+			ModelType:                strings.ToLower(strings.TrimSpace(item.ModelType)),
+			SupportedEndpointTypes:   item.SupportedEndpointTypes,
+			VideoCapabilities:        append(json.RawMessage(nil), item.VideoCapabilities...),
+			VideoCapabilitiesVersion: strings.TrimSpace(item.VideoCapabilitiesVersion),
+			VideoPricing:             append(json.RawMessage(nil), item.VideoPricing...),
 		})
 	}
 	return models, nil
@@ -338,10 +349,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func defaultHTTPClient() *http.Client {
-	return &http.Client{Timeout: 20 * time.Second}
 }
 
 func validateTokenSuccess(origin string, token tokenSuccess) (accountID, tokenID string, err error) {

@@ -1,8 +1,9 @@
 package handler
 
 import (
-	"github.com/gin-gonic/gin"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
 	"qisitv/backend/internal/app"
 )
 
@@ -32,6 +33,9 @@ func RegisterCreationRoutes(r *gin.RouterGroup, svc *app.Service) {
 	}
 	write := func(action string) gin.HandlerFunc {
 		return func(c *gin.Context) {
+			if !requireCreationWritePrincipal(c) {
+				return
+			}
 			user, err := currentUser(c, svc)
 			if err != nil {
 				failService(c, err)
@@ -81,4 +85,10 @@ func RegisterCreationRoutes(r *gin.RouterGroup, svc *app.Service) {
 	r.POST("/creation-runs/:id/canvas", write("canvas"))
 	r.GET("/creation-runs/:id/canvas-snapshot", read("snapshot"))
 	r.POST("/creation-runs/:id/canvas-commit", write("commit"))
+}
+
+// requireCreationWritePrincipal binds the existing desktop UI capability.
+// JSON owner is a lease identity after this trusted call, not a caller role.
+func requireCreationWritePrincipal(c *gin.Context) bool {
+	return requireTrustedDesktopWritePrincipal(c, "创作操作只能由当前桌面界面完成")
 }

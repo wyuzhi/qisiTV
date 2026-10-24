@@ -132,8 +132,8 @@ func TestRuntimeOpenStartClose(t *testing.T) {
 	}
 	err = json.NewDecoder(configResponse.Body).Decode(&configEnvelope)
 	_ = configResponse.Body.Close()
-	if err != nil || configResponse.StatusCode != http.StatusOK || len(configEnvelope.Data.Config.Channels) != 1 || configEnvelope.Data.Config.Channels[0].ID != "likeai" {
-		t.Fatalf("runtime must expose only LikeAI: status=%d payload=%#v error=%v", configResponse.StatusCode, configEnvelope, err)
+	if err != nil || configResponse.StatusCode != http.StatusOK || len(configEnvelope.Data.Config.Channels) != 2 || configEnvelope.Data.Config.Channels[0].ID != "qisi-api" || configEnvelope.Data.Config.Channels[1].ID != "likeai" {
+		t.Fatalf("runtime must expose independent qisi API and LikeAI channels: status=%d payload=%#v error=%v", configResponse.StatusCode, configEnvelope, err)
 	}
 
 	tasksRequest, err := http.NewRequest(http.MethodGet, runtime.BaseURL()+"/tasks?pageSize=1", nil)
@@ -189,9 +189,7 @@ func TestRuntimeOpenStartClose(t *testing.T) {
 		"/finance/account",
 		"/resources/import",
 		"/resources/demo/oss-url",
-		"/beefapi/connection",
 		"/beefapi/connection/open-wallet",
-		"/ai/custom",
 	} {
 		hostedRequest, err := http.NewRequest(http.MethodGet, runtime.BaseURL()+hostedPath, nil)
 		if err != nil {
@@ -206,6 +204,38 @@ func TestRuntimeOpenStartClose(t *testing.T) {
 		if hostedResponse.StatusCode != http.StatusNotFound {
 			t.Fatalf("desktop hosted route %s status = %d, want %d", hostedPath, hostedResponse.StatusCode, http.StatusNotFound)
 		}
+	}
+	optionalConnection, err := http.NewRequest(http.MethodGet, runtime.BaseURL()+"/beefapi/connection", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	optionalConnection.Header.Set("X-Desktop-Token", runtime.LaunchToken())
+	optionalResponse, err := http.DefaultClient.Do(optionalConnection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var optionalEnvelope struct {
+		Data struct {
+			State string `json:"state"`
+		} `json:"data"`
+	}
+	err = json.NewDecoder(optionalResponse.Body).Decode(&optionalEnvelope)
+	_ = optionalResponse.Body.Close()
+	if err != nil || optionalResponse.StatusCode != http.StatusOK || optionalEnvelope.Data.State != "disconnected" {
+		t.Fatalf("optional media account must remain disconnected until explicitly connected: status=%d state=%q err=%v", optionalResponse.StatusCode, optionalEnvelope.Data.State, err)
+	}
+	customRequest, err := http.NewRequest(http.MethodGet, runtime.BaseURL()+"/ai/custom", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	customRequest.Header.Set("X-Desktop-Token", runtime.LaunchToken())
+	customResponse, err := http.DefaultClient.Do(customRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = customResponse.Body.Close()
+	if customResponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("local custom provider route must reject a request without upstream settings: %d", customResponse.StatusCode)
 	}
 
 	unknownProxyRequest, err := http.NewRequest(http.MethodPost, runtime.BaseURL()+"/stale-channel/v1/images/generations", nil)

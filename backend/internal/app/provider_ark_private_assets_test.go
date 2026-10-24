@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/model"
 )
 
@@ -20,7 +21,7 @@ func TestSyncResourceToArkPrivateAssetRejectsLocalMode(t *testing.T) {
 }
 
 func TestArkPrivateAssetUsesRegionalArkControlPlane(t *testing.T) {
-	value, err := arkPrivateAssetControlPlaneURL("test-region")
+	value, err := arkPrivateAssetControlPlaneURL(context.Background(), "test-region")
 	if err != nil || value != "https://ark.test-region.volcengineapi.com" {
 		t.Fatalf("arkPrivateAssetControlPlaneURL() = %q, %v", value, err)
 	}
@@ -50,11 +51,9 @@ func TestCallArkPrivateAssetAPISignsAndUsesAssetContract(t *testing.T) {
 	}))
 	defer server.Close()
 
-	previousBaseURL := arkPrivateAssetAPIBaseURLOverride
-	arkPrivateAssetAPIBaseURLOverride = server.URL
-	t.Cleanup(func() { arkPrivateAssetAPIBaseURLOverride = previousBaseURL })
+	ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{ArkPrivateAssetAPIBaseURL: server.URL})
 
-	response, err := callArkPrivateAssetAPI(context.Background(), arkPrivateAssetSettingValue{
+	response, err := callArkPrivateAssetAPI(ctx, arkPrivateAssetSettingValue{
 		Region:          "test-region",
 		ProjectName:     "project-test",
 		AccessKeyID:     "test-access-key",
@@ -85,11 +84,9 @@ func TestCallArkPrivateAssetAPIUsesIDForGetAsset(t *testing.T) {
 	}))
 	defer server.Close()
 
-	previousBaseURL := arkPrivateAssetAPIBaseURLOverride
-	arkPrivateAssetAPIBaseURLOverride = server.URL
-	t.Cleanup(func() { arkPrivateAssetAPIBaseURLOverride = previousBaseURL })
+	ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{ArkPrivateAssetAPIBaseURL: server.URL})
 
-	_, err := callArkPrivateAssetAPI(context.Background(), arkPrivateAssetSettingValue{
+	_, err := callArkPrivateAssetAPI(ctx, arkPrivateAssetSettingValue{
 		Region: "test-region", AccessKeyID: "test-access-key", AccessKeySecret: "test-secret-key",
 	}, "GetAsset", map[string]interface{}{"Id": "asset-test", "ProjectName": "project-test"})
 	if err != nil {
@@ -98,10 +95,10 @@ func TestCallArkPrivateAssetAPIUsesIDForGetAsset(t *testing.T) {
 }
 
 func TestArkPrivateAssetControlPlaneDisablesGenerationAnalytics(t *testing.T) {
-	ctx := context.WithValue(context.Background(), providerAnalyticsKey{}, providerAnalyticsContext{ServiceID: "service", Capability: "video"})
+	ctx := context.WithValue(context.Background(), providerAnalyticsKey{}, providerAnalyticsContext{Capability: "video"})
 	ctx = withoutProviderAnalytics(ctx)
 	metadata, ok := ctx.Value(providerAnalyticsKey{}).(providerAnalyticsContext)
-	if !ok || metadata.ServiceID != "" || metadata.Capability != "" {
+	if !ok || metadata.Capability != "" {
 		t.Fatalf("provider analytics = %#v, %v", metadata, ok)
 	}
 }
@@ -229,11 +226,9 @@ func TestCallArkPrivateAssetAPIPassesThroughUpstreamHTTPErrors(t *testing.T) {
 	}))
 	defer server.Close()
 
-	previousBaseURL := arkPrivateAssetAPIBaseURLOverride
-	arkPrivateAssetAPIBaseURLOverride = server.URL
-	t.Cleanup(func() { arkPrivateAssetAPIBaseURLOverride = previousBaseURL })
+	ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{ArkPrivateAssetAPIBaseURL: server.URL})
 
-	_, err := callArkPrivateAssetAPI(context.Background(), arkPrivateAssetSettingValue{
+	_, err := callArkPrivateAssetAPI(ctx, arkPrivateAssetSettingValue{
 		Region: "test-region", AccessKeyID: "test-access-key", AccessKeySecret: "test-secret-key",
 	}, "CreateAssetGroup", map[string]interface{}{"ProjectName": "project-test"})
 	if err == nil {

@@ -1,4 +1,7 @@
 import axios, { type AxiosRequestConfig, type AxiosResponse } from "axios";
+import { ENGINE_ORIGIN, ENGINE_SESSION_HEADER, getEngineSession, installEngineFetch } from "@/services/engine-session";
+
+import { assertUserScope, isUserScopeAbandonedError, type CapturedUserScope } from "@/lib/user-scope-guard";
 
 export type ApiParams = Record<string, string | string[] | number | number[] | undefined>;
 
@@ -7,6 +10,7 @@ export type BackendEnvelope<T> = {
     data: T;
     msg: string;
     reason?: string;
+    details?: Record<string, unknown>;
 };
 
 /**
@@ -18,20 +22,30 @@ export class ApiError extends Error {
     readonly status?: number;
     readonly code?: number;
     readonly reason?: string;
+    readonly details?: Record<string, unknown>;
+    readonly requestId?: string;
     readonly retryable: boolean;
     readonly retryAfterMs?: number;
     readonly cause?: unknown;
 
-    constructor(message: string, options: { status?: number; code?: number; reason?: string; retryable?: boolean; retryAfterMs?: number; cause?: unknown } = {}) {
+    constructor(message: string, options: { status?: number; code?: number; reason?: string; details?: Record<string, unknown>; requestId?: string; retryable?: boolean; retryAfterMs?: number; cause?: unknown } = {}) {
         super(message);
         this.name = "ApiError";
         this.status = options.status;
         this.code = options.code;
         this.reason = options.reason;
-        this.retryable = options.retryable ?? isRetryableStatus(options.status ?? options.code);
+        this.details = options.details;
+        this.requestId = options.requestId;
+        this.retryable = options.reason === "local_credential_failed" || options.reason === "local_disk_full" ? false : options.retryable ?? isRetryableStatus(options.status ?? options.code);
         this.retryAfterMs = options.retryAfterMs;
         this.cause = options.cause;
     }
+}
+
+export function getTransportFailureKind(error: unknown): "timeout" | "network" | undefined {
+    const cause = error instanceof ApiError ? error.cause : error;
+    if (!axios.isAxiosError(cause) || cause.response || axios.isCancel(cause)) return undefined;
+    return cause.code === "ECONNABORTED" || cause.code === "ETIMEDOUT" ? "timeout" : "network";
 }
 
 // 所有后端 JSON 请求共用同一实例，避免认证、Base URL 和错误语义在模块间漂移。
@@ -40,10 +54,22 @@ export let apiBaseURL = import.meta.env.VITE_CANVAS_BACKEND_URL || "/api";
 // 没有超时会让启动水合一直停留在 loading，Playwright 和用户都看不到页面。
 export const apiClient = axios.create({ baseURL: apiBaseURL, withCredentials: true, timeout: 4_000 });
 
-export function configureApiRuntime(baseURL: string, launchToken: string) {
+export function configureApiRuntime(baseURL: string, launchToken: string, uiBootstrapToken?: string) {
     apiBaseURL = baseURL;
     apiClient.defaults.baseURL = baseURL;
     apiClient.defaults.headers.common["X-Desktop-Token"] = launchToken;
+    if (uiBootstrapToken) apiClient.defaults.headers.common["X-Beeftv-UI-Bootstrap"] = uiBootstrapToken;
+    else delete apiClient.defaults.headers.common["X-Beeftv-UI-Bootstrap"];
+}
+
+export function configureEngineApiRuntime() {
+    if (!getEngineSession()) throw new Error("本机引擎尚未授权");
+    apiBaseURL = `${ENGINE_ORIGIN}/engine/api`;
+    apiClient.defaults.baseURL = apiBaseURL;
+    apiClient.defaults.withCredentials = false;
+    delete apiClient.defaults.headers.common["X-Desktop-Token"];
+    delete apiClient.defaults.headers.common["X-Beeftv-UI-Bootstrap"];
+    installEngineFetch();
 }
 
 /**
@@ -59,6 +85,8 @@ export async function request<T>(promise: Promise<{ data: BackendEnvelope<T>; st
                 status: response.status,
                 code: response.data.code,
                 reason: response.data.reason,
+                details: response.data.details,
+                requestId: responseRequestId(response.headers),
                 retryable: isRetryableStatus(response.status) || isRetryableStatus(response.data.code),
                 retryAfterMs: retryAfterMilliseconds(response.headers),
             });
@@ -70,7 +98,7 @@ export async function request<T>(promise: Promise<{ data: BackendEnvelope<T>; st
 }
 
 function unwrapTransportError(error: unknown): never {
-    if (error instanceof ApiError || (error instanceof DOMException && error.name === "AbortError")) {
+    if (error instanceof ApiError || (error instanceof DOMException && error.name === "AbortError") || isUserScopeAbandonedError(error)) {
         throw error;
     }
     if (axios.isCancel(error) || (axios.isAxiosError(error) && error.code === axios.AxiosError.ERR_CANCELED)) {
@@ -83,12 +111,21 @@ function unwrapTransportError(error: unknown): never {
             status,
             code,
             reason: error.response?.data?.reason,
+            details: error.response?.data?.details,
+            requestId: responseRequestId(error.response?.headers),
             retryable: isRetryableStatus(status) || isRetryableStatus(code),
             retryAfterMs: retryAfterMilliseconds(error.response?.headers),
             cause: error,
         });
     }
     throw error;
+}
+
+function responseRequestId(headers: unknown): string | undefined {
+    if (!headers || typeof headers !== "object") return undefined;
+    const bag = headers as { get?: (name: string) => unknown; [key: string]: unknown };
+    const value = bag.get?.("x-request-id") ?? bag["x-request-id"] ?? bag["X-Request-ID"];
+    return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{5,127}$/.test(value) ? value : undefined;
 }
 
 function transportFailureMessage(status?: number, fallback?: string) {
@@ -123,10 +160,45 @@ function retryAfterMilliseconds(headers: unknown) {
     return Math.max(0, retryAt - Date.now());
 }
 
-export type HttpRequestConfig = Omit<AxiosRequestConfig, "method" | "url" | "data" | "baseURL">;
+export type HttpRequestConfig = Omit<AxiosRequestConfig, "method" | "url" | "data" | "baseURL"> & {
+    expectedScope?: CapturedUserScope;
+};
+
+function assertExpectedHttpScope(config?: { expectedScope?: CapturedUserScope }) {
+    if (config?.expectedScope) assertUserScope(config.expectedScope);
+}
+
+apiClient.interceptors.request.use((config) => {
+    assertExpectedHttpScope(config as HttpRequestConfig);
+    if (apiBaseURL === `${ENGINE_ORIGIN}/engine/api`) {
+        if (config.baseURL !== apiBaseURL) throw new Error("本机请求不可覆盖服务地址");
+        const route = config.url || "";
+        if (/^[a-z][a-z\d+.-]*:|^\/\//i.test(route)) throw new Error("本机请求必须使用相对路径");
+        // Match Axios' baseURL combination, then normalize traversal before authorizing.
+        const resolved = new URL(`${apiBaseURL}/${route.replace(/^\/+/, "")}`);
+        if (resolved.origin !== ENGINE_ORIGIN || !resolved.pathname.startsWith("/engine/api/")) throw new Error("本机请求不可发送到外部地址");
+        const session = getEngineSession();
+        if (!session) throw new Error("本机授权已结束，请重新连接；当前草稿仍保留");
+        config.headers.set(ENGINE_SESSION_HEADER, session.token);
+        config.headers.delete("X-Desktop-Token");
+        config.headers.delete("X-Beeftv-UI-Bootstrap");
+        config.withCredentials = false;
+        config.adapter = "fetch";
+        // Axios implements fetch upload progress with a ReadableStream. Chromium
+        // cannot send that body to the engine's HTTP/1.1 loopback listener.
+        // Keep the original FormData/Blob body; completion is reported by the
+        // resource receipt after the engine has persisted the bytes.
+        delete config.onUploadProgress;
+        config.fetchOptions = { ...config.fetchOptions, redirect: "error", credentials: "omit" };
+    }
+    return config;
+});
 
 async function send<T>(method: string, url: string, data?: unknown, config?: HttpRequestConfig) {
-    return request<T>(apiClient.request<BackendEnvelope<T>>({ method, url, data, ...config }));
+    assertExpectedHttpScope(config);
+    const result = await request<T>(apiClient.request<BackendEnvelope<T>>({ method, url, data, ...config }));
+    assertExpectedHttpScope(config);
+    return result;
 }
 
 /**
@@ -139,9 +211,12 @@ export const http = {
     put: <T>(url: string, data?: unknown, config?: HttpRequestConfig) => send<T>("put", url, data, config),
     patch: <T>(url: string, data?: unknown, config?: HttpRequestConfig) => send<T>("patch", url, data, config),
     delete: <T>(url: string, config?: HttpRequestConfig) => send<T>("delete", url, undefined, config),
-    async raw<T>(config: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+    async raw<T>(config: AxiosRequestConfig & { expectedScope?: CapturedUserScope }): Promise<AxiosResponse<T>> {
         try {
-            return await apiClient.request<T>(config);
+            assertExpectedHttpScope(config);
+            const result = await apiClient.request<T>(config);
+            assertExpectedHttpScope(config);
+            return result;
         } catch (error) {
             throw unwrapTransportError(error);
         }

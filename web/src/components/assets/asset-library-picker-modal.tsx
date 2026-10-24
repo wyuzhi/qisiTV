@@ -1,21 +1,28 @@
-import { App, Button, Dropdown, Popconfirm } from "antd";
+import { Button, Dropdown } from "antd";
 import type { MenuProps } from "antd";
 import { AppModal } from "@/components/ui/product/app-modal";
-import { Check, ChevronDown, FileText, FolderOpen, HardDrive, Image as ImageIcon, LoaderCircle, Music2, Puzzle, RotateCcw, Search, Trash2, Upload, UserRound, Video } from "lucide-react";
+import { Check, ChevronDown, FileText, FolderOpen, HardDrive, Image as ImageIcon, LoaderCircle, Music2, Puzzle, Search, Upload, UserRound, Video } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useUserStore } from "@/stores/use-user-store";
-import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 
 import { AssetMediaPreview } from "@/components/asset-media-preview";
 import { AssetLibraryCard } from "@/components/assets/asset-library-card";
+import {
+    assetPickerQueryKey,
+    expectedScopeFromQueryKey,
+    runAssetViewAction,
+    shouldSuppressAssetViewError,
+    useAssetViewGeneration,
+} from "@/components/assets/asset-view-session";
+import { captureUserScope, userScopeMatches, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { CachedResourceImage } from "@/components/cached-resource-image";
 import { PaginationBar } from "@/components/layout/workspace-page";
 import { cn } from "@/lib/utils";
 import type { ExternalAssetPickerReference } from "@/lib/plugins/plugin-types";
-import { useAssetStore, type Asset } from "@/stores/use-asset-store";
-import { loadAssetLibraryPage, localSavedRemotePendingMessage } from "@/services/local-workspace-sync";
-import { deleteWorkspaceAsset, persistWorkspaceAssetChanges } from "@/services/workspace-asset-repository";
+import type { Asset } from "@/stores/use-asset-store";
+import { loadAssetLibraryPage } from "@/services/local-workspace-sync";
+import { isUnsavedWorkspaceAsset, usesWorkspaceAssetLibraryApi, workspaceAssetTraversalTotal } from "@/services/workspace-asset-read";
 
 export type AssetPickerMediaKind = "image" | "video" | "audio" | "text";
 
@@ -74,19 +81,25 @@ type Props = {
     upload?: {
         accept: string;
         description: string;
-        onUpload: (files: FileList) => Promise<string[]>;
+        onUpload: (files: FileList, expectedScope: CapturedUserScope) => Promise<string[]>;
         external?: {
             accept: string;
             description: string;
-            onUpload: (files: FileList, folderId?: string) => Promise<AssetLibraryPickerItem[]>;
+            onUpload: (files: FileList, folderId: string | undefined, expectedScope: CapturedUserScope) => Promise<AssetLibraryPickerItem[]>;
         };
     };
     onClose: () => void;
-    onConfirm: (ids: string[]) => Promise<void> | void;
-    onFolderAction?: (folderId: string) => Promise<void> | void;
+    onConfirm: (ids: string[], expectedScope: CapturedUserScope) => Promise<void> | void;
+    onFolderAction?: (folderId: string, expectedScope: CapturedUserScope) => Promise<void> | void;
 };
 
-export function AssetLibraryPickerModal({
+export function AssetLibraryPickerModal(props: Props) {
+    const queryClient = useQueryClient();
+    const generation = useAssetViewGeneration(queryClient);
+    return <AssetLibraryPickerModalSession key={generation} {...props} />;
+}
+
+function AssetLibraryPickerModalSession({
     remoteLibrary = false,
     remoteKind,
     mediaKinds = DEFAULT_MEDIA_KINDS,
@@ -113,7 +126,7 @@ export function AssetLibraryPickerModal({
     onConfirm,
     onFolderAction,
 }: Props) {
-    const { message } = App.useApp();
+    const [entryScope] = useState(() => captureUserScope());
     const [category, setCategory] = useState(initialCategory);
     const [mediaKind, setMediaKind] = useState<AssetPickerMediaKind | "all">("all");
     const [folderId, setFolderId] = useState(initialFolderId);
@@ -130,10 +143,7 @@ export function AssetLibraryPickerModal({
     const [remotePage, setRemotePage] = useState(1);
     const [remotePageSize, setRemotePageSize] = useState(40);
     const [remoteKeyword, setRemoteKeyword] = useState("");
-    // The local desktop workspace may still have a synthetic user id. That id
-    // must never turn on the hosted asset-library query; local mode reads the
-    // IndexedDB/Go resource store only.
-    const remoteEnabled = remoteLibrary && !isLocalWorkspaceMode() && Boolean(userId) && source === "local";
+    const remoteEnabled = remoteLibrary && usesWorkspaceAssetLibraryApi() && Boolean(userId) && source === "local";
     useEffect(() => {
         const timer = window.setTimeout(() => setRemoteKeyword(keyword.trim()), 250);
         return () => window.clearTimeout(timer);
@@ -142,15 +152,34 @@ export function AssetLibraryPickerModal({
     // remoteKind 是调用方写死的能力约束；媒体类型筛选只在没有该约束时参与服务端查询。
     const remoteQueryKind = remoteKind || (mediaKind === "all" ? undefined : mediaKind);
     const remoteQuery = useQuery({
-        queryKey: ["asset-picker", userId, remotePage, remotePageSize, category, remoteKeyword, remoteQueryKind],
-        queryFn: ({ signal }) => loadAssetLibraryPage({ page: remotePage, pageSize: remotePageSize, kind: remoteQueryKind, category: category === "all" || category === "archived" || category === remoteQueryKind ? undefined : category, status: category === "archived" ? "archived" : "active", query: remoteKeyword, signal }),
+        queryKey: assetPickerQueryKey(entryScope, remotePage, remotePageSize, category, remoteKeyword, remoteQueryKind),
+        queryFn: ({ queryKey, signal }) => loadAssetLibraryPage({
+            page: remotePage,
+            pageSize: remotePageSize,
+            kind: remoteQueryKind,
+            category: category === "all" || category === remoteQueryKind ? undefined : category,
+            status: "active",
+            query: remoteKeyword,
+            signal,
+            expectedScope: expectedScopeFromQueryKey(queryKey),
+        }),
         enabled: remoteEnabled && open && sessionHydrated,
     });
-    const remoteItems = useMemo<AssetLibraryPickerItem[]>(() => (remoteQuery.data?.assets || []).filter((asset) => asset.kind !== "entity" && asset.kind !== "model").map((asset) => ({
-        id: asset.id, title: asset.title, category: asset.category || "other", archived: asset.status === "archived", asset,
-        kindLabel: asset.kind === "image" ? "图片" : asset.kind === "video" ? "视频" : asset.kind === "audio" ? "音频" : "文本", searchText: (asset.tags ?? []).join(" "),
-        ...(items.find((item) => item.id === asset.id) || { disabledReason: "此素材不适用于当前操作" }),
-    })), [remoteQuery.data, items]);
+    const remoteItems = useMemo<AssetLibraryPickerItem[]>(() => (remoteQuery.data?.assets || []).filter((asset) => asset.kind !== "entity" && asset.kind !== "model").map((asset) => {
+        const parent = items.find((item) => item.id === asset.id);
+        return {
+            ...parent,
+            id: asset.id,
+            title: asset.title,
+            category: asset.category || "other",
+            archived: asset.status === "archived",
+            asset,
+            kindLabel: asset.kind === "image" ? "图片" : asset.kind === "video" ? "视频" : asset.kind === "audio" ? "音频" : "文本",
+            mediaKind: pickerAssetMediaKind(asset),
+            searchText: (asset.tags ?? []).join(" "),
+            disabledReason: workspaceAssetPickerDisabledReason(asset, items, mediaKinds, remoteKind),
+        };
+    }), [items, mediaKinds, remoteKind, remoteQuery.data]);
     const uploadInputRef = useRef<HTMLInputElement>(null);
     const initialSelectedIdsRef = useRef(initialSelectedIds);
     const itemsRef = useRef(items);
@@ -161,14 +190,16 @@ export function AssetLibraryPickerModal({
     }, [items, uploadedItems]);
     itemsRef.current = allItems;
     const localItems = useMemo(() => allItems.filter((item) => !item.external), [allItems]);
-    // 远端成功且有可展示素材时用远端。真正的空结果保持空列表。
-    // 仅在远端空而本地仍有素材、或远端总数>0 但本页全被排除时回退本地，避免合法空搜索被缓存铺满。
     const remoteTotal = remoteQuery.data?.total ?? 0;
     const remoteReady = remoteEnabled && remoteQuery.isSuccess;
-    const preferLocalUnsynced = remoteReady && remoteTotal === 0 && localItems.length > 0;
-    const remoteEntityOnlyPage = remoteReady && remoteItems.length === 0 && remoteTotal > 0;
-    const useRemoteItems = remoteReady && !preferLocalUnsynced && !remoteEntityOnlyPage && (remoteItems.length > 0 || remoteTotal === 0);
-    const effectivePagination = useRemoteItems ? { current: remotePage, pageSize: remotePageSize, total: remoteTotal, onChange: (page: number, pageSize: number) => { setRemotePage(page); setRemotePageSize(pageSize); } } : pagination;
+    const useRemoteItems = Boolean(remoteReady);
+    const traversalTotal = remoteReady && remoteQuery.data ? workspaceAssetTraversalTotal(remoteQuery.data) : (pagination?.total ?? 0);
+    const effectivePagination = useRemoteItems ? { current: remotePage, pageSize: remotePageSize, total: traversalTotal, onChange: (page: number, pageSize: number) => { setRemotePage(page); setRemotePageSize(pageSize); } } : pagination;
+    useEffect(() => {
+        if (!remoteEnabled) return;
+        const maxPage = Math.max(1, Math.ceil(traversalTotal / remotePageSize));
+        setRemotePage((value) => Math.min(value, maxPage));
+    }, [remoteEnabled, remotePageSize, traversalTotal]);
     const pluginItems = useMemo(() => allItems.filter((item) => Boolean(item.external)), [allItems]);
     const hasPluginSource = useMemo(() => Object.keys(categoryLabels).some((value) => value.startsWith("external:")) || pluginItems.some((item) => item.category.startsWith("external:")), [categoryLabels, pluginItems]);
     // 媒体类型在分类之前收窄数据源，让左侧分类计数、网格和分页始终描述同一批素材。
@@ -178,22 +209,15 @@ export function AssetLibraryPickerModal({
         return base.filter((item) => pickerItemMediaKind(item) === mediaKind);
     }, [localItems, mediaKind, pluginItems, useRemoteItems, remoteItems, source]);
     const activeSourceItems = useMemo(() => sourceItems.filter((item) => !item.archived), [sourceItems]);
-    const archivedItems = useMemo(() => sourceItems.filter((item) => item.archived), [sourceItems]);
     const mediaKindOptions = useMemo(() => (remoteKind ? [] : Array.from(new Set(mediaKinds))), [mediaKinds, remoteKind]);
     const sourceFolders = source === "plugin" ? folders : [];
     const showCategories = source === "local" || !sourceFolders.length;
     const normalCategories = useMemo(() => useRemoteItems ? Object.keys(categoryLabels).filter((value) => value !== "archived" && !value.startsWith("external:")) : ["all", ...Array.from(new Set(activeSourceItems.map((item) => item.category || "other"))).filter((value) => value !== "all")], [activeSourceItems, categoryLabels, useRemoteItems]);
-    const archivedCount = archivedItems.length;
-    const isRecycleBin = category === "archived";
 
     const visibleItems = useMemo(() => {
         const query = keyword.trim().toLowerCase();
         return sourceItems.filter((item) => {
-            if (category === "archived") {
-                if (!item.archived) return false;
-            } else if (item.archived || (category !== "all" && item.category !== category)) {
-                return false;
-            }
+            if (item.archived || (category !== "all" && item.category !== category)) return false;
             if (folderId !== "all" && (item.folderId || "") !== folderId) return false;
             return useRemoteItems || !query || [item.title, item.searchText || "", item.description || ""].join(" ").toLowerCase().includes(query);
         });
@@ -201,12 +225,11 @@ export function AssetLibraryPickerModal({
     const selectedIds = useMemo(
         () =>
             Array.from(selected).filter((id) => {
-                const item = allItems.find((entry) => entry.id === id);
-                return !item?.disabledReason;
+                const item = resolvePickerCatalogItem(id, allItems, useRemoteItems ? remoteItems : []);
+                return item ? !item.disabledReason : false;
             }),
-        [allItems, selected],
+        [allItems, remoteItems, selected, useRemoteItems],
     );
-    const archivedSelectedIds = useMemo(() => selectedIds.filter((id) => allItems.find((item) => item.id === id)?.archived), [allItems, selectedIds]);
 
     useEffect(() => {
         if (!open) return;
@@ -225,7 +248,7 @@ export function AssetLibraryPickerModal({
     }, [initialCategory, initialFolderId, open]);
 
     useEffect(() => {
-        if (category === "all" || category === "archived" || normalCategories.includes(category)) return;
+        if (category === "all" || normalCategories.includes(category)) return;
         setCategory("all");
     }, [normalCategories, category]);
 
@@ -264,62 +287,16 @@ export function AssetLibraryPickerModal({
         setWorking(true);
         setError("");
         try {
-            await onConfirm(selectedIds);
+            const confirmed = await runAssetViewAction(entryScope, async (scope) => {
+                await onConfirm(selectedIds, scope);
+                return true;
+            });
+            if (!confirmed) return;
         } catch (reason) {
+            if (shouldSuppressAssetViewError(reason, entryScope)) return;
             setError(reason instanceof Error ? reason.message : "素材操作失败，请重试");
         } finally {
-            setWorking(false);
-        }
-    };
-
-    const handleRestoreSelected = async () => {
-        if (!archivedSelectedIds.length) return;
-        setWorking(true);
-        try {
-            for (const id of archivedSelectedIds) {
-                useAssetStore.getState().updateAsset(id, { status: "confirmed" });
-            }
-            await persistWorkspaceAssetChanges();
-            setSelected(new Set());
-            message.success(`已还原 ${archivedSelectedIds.length} 个素材至素材库`);
-            setCategory("all");
-        } catch (error) {
-            message.warning(localSavedRemotePendingMessage("已在本地还原", error));
-        } finally {
-            setWorking(false);
-            if (remoteEnabled) void remoteQuery.refetch();
-        }
-    };
-
-    const handleDeleteSelected = async () => {
-        if (!archivedSelectedIds.length) return;
-        setWorking(true);
-        try {
-            for (const id of archivedSelectedIds) await deleteWorkspaceAsset(id);
-            setSelected(new Set());
-            message.success(`已彻底删除 ${archivedSelectedIds.length} 个素材`);
-        } catch (err) {
-            message.error(err instanceof Error ? err.message : "删除失败");
-        } finally {
-            setWorking(false);
-            if (remoteEnabled) void remoteQuery.refetch();
-        }
-    };
-
-    const handleEmptyRecycleBin = async () => {
-        const toDelete = archivedItems;
-        if (!toDelete.length) return;
-        setWorking(true);
-        try {
-            for (const item of toDelete) await deleteWorkspaceAsset(item.id);
-            setSelected(new Set());
-            message.success(`已删除${remoteEnabled ? "当前页" : "回收站"} ${toDelete.length} 个素材`);
-            setCategory("all");
-        } catch (err) {
-            message.error(err instanceof Error ? err.message : "清空回收站失败");
-        } finally {
-            setWorking(false);
-            if (remoteEnabled) void remoteQuery.refetch();
+            if (userScopeMatches(entryScope)) setWorking(false);
         }
     };
 
@@ -329,21 +306,31 @@ export function AssetLibraryPickerModal({
         setError("");
         setUploadingCount(files.length);
         try {
-            if (source === "plugin") {
-                const uploaded = await upload!.external!.onUpload(files, folderId === "all" ? undefined : folderId);
-                setUploadedItems((current) => [...current, ...uploaded]);
-                const ids = uploaded.map((item) => item.id);
+            const uploaded = await runAssetViewAction(entryScope, async (scope) => {
+                if (source === "plugin") {
+                    const items = await upload!.external!.onUpload(files, folderId === "all" ? undefined : folderId, scope);
+                    return { kind: "plugin" as const, items };
+                }
+                const ids = await upload!.onUpload(files, scope);
+                return { kind: "local" as const, ids };
+            });
+            if (!uploaded) return;
+            if (uploaded.kind === "plugin") {
+                setUploadedItems((current) => [...current, ...uploaded.items]);
+                const ids = uploaded.items.map((item) => item.id);
                 if (ids.length) setSelected((current) => new Set(multiple ? [...current, ...ids] : ids.slice(-1)));
-            } else {
-                const ids = await upload!.onUpload(files);
-                if (ids.length) setSelected((current) => new Set(multiple ? [...current, ...ids] : ids.slice(-1)));
+            } else if (uploaded.ids.length) {
+                setSelected((current) => new Set(multiple ? [...current, ...uploaded.ids] : uploaded.ids.slice(-1)));
             }
         } catch (reason) {
+            if (shouldSuppressAssetViewError(reason, entryScope)) return;
             setError(reason instanceof Error ? reason.message : "素材上传失败，请重试");
         } finally {
-            if (uploadInputRef.current) uploadInputRef.current.value = "";
-            setWorking(false);
-            setUploadingCount(0);
+            if (userScopeMatches(entryScope)) {
+                if (uploadInputRef.current) uploadInputRef.current.value = "";
+                setWorking(false);
+                setUploadingCount(0);
+            }
         }
     };
 
@@ -352,11 +339,16 @@ export function AssetLibraryPickerModal({
         setWorking(true);
         setError("");
         try {
-            await onFolderAction(folderId);
+            const done = await runAssetViewAction(entryScope, async (scope) => {
+                await onFolderAction(folderId, scope);
+                return true;
+            });
+            if (!done) return;
         } catch (reason) {
+            if (shouldSuppressAssetViewError(reason, entryScope)) return;
             setError(reason instanceof Error ? reason.message : "文件夹操作失败，请重试");
         } finally {
-            setWorking(false);
+            if (userScopeMatches(entryScope)) setWorking(false);
         }
     };
 
@@ -369,7 +361,7 @@ export function AssetLibraryPickerModal({
             label: (
                 <span className="asset-picker-source-menu-label">
                     <span>本地素材</span>
-                    <em>{localItems.filter((item) => !item.archived).length}</em>
+                    <em>{useRemoteItems ? remoteTotal : localItems.filter((item) => !item.archived).length}</em>
                 </span>
             ),
         },
@@ -388,7 +380,7 @@ export function AssetLibraryPickerModal({
               ]
             : []),
     ];
-    const activeUpload = isRecycleBin ? undefined : source === "plugin" ? upload?.external : upload;
+    const activeUpload = source === "plugin" ? upload?.external : upload;
     const uploading = uploadingCount > 0;
 
     return (
@@ -426,7 +418,7 @@ export function AssetLibraryPickerModal({
                                 }}
                             >
                                 <button type="button" className="asset-picker-title-trigger" aria-haspopup="menu" aria-expanded={sourceMenuOpen} aria-label={"素材库来源：" + sourceLabel}>
-                                    <strong>{isRecycleBin ? "回收站" : title}</strong>
+                                    <strong>{title}</strong>
                                     <ChevronDown aria-hidden="true" />
                                 </button>
                             </Dropdown>
@@ -442,7 +434,7 @@ export function AssetLibraryPickerModal({
                 </header>
                 <div className="asset-picker-body">
                     <nav className="asset-picker-categories" aria-label="素材分类">
-                        {mediaKindOptions.length > 1 && !isRecycleBin ? (
+                        {mediaKindOptions.length > 1 ? (
                             <>
                                 <span className="asset-picker-nav-label">媒体类型</span>
                                 {(["all", ...mediaKindOptions] as const).map((value) => (
@@ -471,40 +463,30 @@ export function AssetLibraryPickerModal({
                                         <span className="assets-filter-count">{countFor(value)}</span>
                                     </button>
                                 ))}
-                                {archivedCount > 0 || remoteEnabled ? (
-                                    <div className="mt-3 border-t border-border/40 pt-2">
-                                        <button
-                                            type="button"
-                                            className={cn("assets-filter-item text-amber-500 hover:text-amber-400 dark:text-amber-400", category === "archived" && "is-active !bg-amber-500/10")}
-                                            aria-pressed={category === "archived"}
-                                            onClick={() => setCategory("archived")}
-                                        >
-                                            <span className="assets-filter-item-label flex items-center gap-1.5">
-                                                <Trash2 className="size-3.5" />
-                                                <span>回收站</span>
-                                            </span>
-                                            <span className="assets-filter-count">{archivedCount}</span>
-                                        </button>
-                                    </div>
-                                ) : null}
                             </>
                         ) : null}
                     </nav>
                     <div className="asset-picker-grid-wrap">
                         <div className="asset-picker-grid">
-                            {remoteEnabled && remoteQuery.isError ? <div role="alert">素材读取失败<Button onClick={() => void remoteQuery.refetch()}>重试</Button></div> : loading || (useRemoteItems && remoteQuery.isFetching) ? (
+                            {remoteEnabled && remoteQuery.isError ? (
+                                <div className="asset-picker-empty" role="alert">
+                                    <strong>素材读取失败</strong>
+                                    <span>请稍后重试。</span>
+                                    <Button onClick={() => void remoteQuery.refetch()}>重试</Button>
+                                </div>
+                            ) : loading || (remoteEnabled && !remoteQuery.isSuccess) ? (
                                 <div className="asset-picker-empty">
                                     <LoaderCircle className="animate-spin" />
                                     <strong>正在读取素材</strong>
-                                    <span>素材会按页加载，不会一次下载整个项目库。</span>
+                                    <span>正在加载已保存的素材。</span>
                                 </div>
                             ) : visibleItems.length ? (
                                 visibleItems.map((item) => <PickerCard key={item.id} item={item} selected={selected.has(item.id)} onToggle={() => toggle(item)} />)
                             ) : (
                                 <div className="asset-picker-empty">
                                     <FolderOpen />
-                                    <strong>{isRecycleBin ? "回收站是空的" : emptyTitle}</strong>
-                                    <span>{isRecycleBin ? "删除画布或手动归档的素材会暂存到这里，可在需要时还原。" : activeUpload ? "换个分类，或从底部上传一份新素材。" : emptyDescription}</span>
+                                    <strong>{emptyTitle}</strong>
+                                    <span>{activeUpload ? "换个分类，或从底部上传一份新素材。" : emptyDescription}</span>
                                 </div>
                             )}
                         </div>
@@ -534,40 +516,19 @@ export function AssetLibraryPickerModal({
                         </span>
                     ) : null}
                     <div className="asset-picker-actions">
-                        {isRecycleBin ? (
-                            <>
-                                <Popconfirm title={remoteEnabled ? "确认删除当前页回收站素材？" : "确认清空回收站？"} description="仅删除当前列表中的素材；仍被引用的素材由服务端拒绝删除。删除不可恢复。" onConfirm={handleEmptyRecycleBin} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
-                                    <Button type="text" danger disabled={working || !archivedCount}>
-                                        {remoteEnabled ? "删除当前页" : "清空回收站"}
-                                    </Button>
-                                </Popconfirm>
-                                <Popconfirm title="确认彻底删除已选素材？" onConfirm={handleDeleteSelected} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
-                                    <Button type="text" danger disabled={working || !archivedSelectedIds.length}>
-                                        彻底删除
-                                    </Button>
-                                </Popconfirm>
-                                <Button type="text" onClick={onClose} disabled={working}>
-                                    关闭
+                        <>
+                            {onFolderAction && folderId !== "all" && (folderActionSource !== "local" || source === "local") ? (
+                                <Button type="text" icon={<FolderOpen />} disabled={working} onClick={() => void runFolderAction()}>
+                                    {folderActionLabel}
                                 </Button>
-                                <Button type="primary" icon={<RotateCcw className="size-3.5" />} disabled={working || !archivedSelectedIds.length} loading={working} onClick={handleRestoreSelected}>
-                                    还原已选素材{archivedSelectedIds.length ? `（${archivedSelectedIds.length}）` : ""}
-                                </Button>
-                            </>
-                        ) : (
-                            <>
-                                {onFolderAction && folderId !== "all" && (folderActionSource !== "local" || source === "local") ? (
-                                    <Button type="text" icon={<FolderOpen />} disabled={working} onClick={() => void runFolderAction()}>
-                                        {folderActionLabel}
-                                    </Button>
-                                ) : null}
-                                <Button type="text" onClick={onClose} disabled={working}>
-                                    取消
-                                </Button>
-                                <Button type="primary" icon={<Check />} disabled={working || !selectedIds.length} loading={working && !uploading} onClick={() => void confirm()}>
-                                    {confirmLabel(selectedIds.length)}
-                                </Button>
-                            </>
-                        )}
+                            ) : null}
+                            <Button type="text" onClick={onClose} disabled={working}>
+                                取消
+                            </Button>
+                            <Button type="primary" icon={<Check />} disabled={working || !selectedIds.length} loading={working && !uploading} onClick={() => void confirm()}>
+                                {confirmLabel(selectedIds.length)}
+                            </Button>
+                        </>
                     </div>
                 </footer>
             </div>
@@ -580,6 +541,30 @@ export function pickerItemMediaKind(item: AssetLibraryPickerItem): AssetPickerMe
     if (item.mediaKind) return item.mediaKind;
     const kind = item.external?.item.kind || item.asset?.kind;
     return kind === "image" || kind === "video" || kind === "audio" || kind === "text" ? kind : undefined;
+}
+
+function pickerAssetMediaKind(asset: Asset): AssetPickerMediaKind | undefined {
+    return asset.kind === "image" || asset.kind === "video" || asset.kind === "audio" || asset.kind === "text" ? asset.kind : undefined;
+}
+
+/** Empty parent items must not disable a SQLite asset that matches the picker media constraint. */
+export function workspaceAssetPickerDisabledReason(
+    asset: Asset,
+    items: AssetLibraryPickerItem[],
+    mediaKinds: AssetPickerMediaKind[] = DEFAULT_MEDIA_KINDS,
+    remoteKind?: string,
+) {
+    const parent = items.find((item) => item.id === asset.id);
+    if (parent) return parent.disabledReason;
+    const mediaKind = pickerAssetMediaKind(asset);
+    if (remoteKind && mediaKind !== remoteKind) return "此素材不适用于当前操作";
+    if (mediaKind && mediaKinds.length > 0 && !mediaKinds.includes(mediaKind)) return "此素材不适用于当前操作";
+    if (!mediaKind && (Boolean(remoteKind) || mediaKinds.length > 0)) return "此素材不适用于当前操作";
+    return undefined;
+}
+
+function resolvePickerCatalogItem(id: string, localItems: AssetLibraryPickerItem[], remoteItems: AssetLibraryPickerItem[]) {
+    return remoteItems.find((item) => item.id === id) || localItems.find((item) => item.id === id);
 }
 
 function PickerCard({ item, selected, onToggle }: { item: AssetLibraryPickerItem; selected: boolean; onToggle: () => void }) {
@@ -613,6 +598,7 @@ function PickerCard({ item, selected, onToggle }: { item: AssetLibraryPickerItem
                 <div className="asset-picker-card-copy">
                     <strong>{item.title || "未命名素材"}</strong>
                     {item.description ? <span>{item.description}</span> : null}
+                    {item.asset && isUnsavedWorkspaceAsset(item.asset) ? <span>未保存</span> : null}
                 </div>
             </button>
         </AssetLibraryCard>

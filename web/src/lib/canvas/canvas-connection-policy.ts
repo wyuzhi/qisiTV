@@ -12,17 +12,19 @@ type CanvasConnectionPolicyOptions = {
 export function canvasConnectionError(config: AiConfig, nodes: CanvasNodeData[], connections: CanvasConnection[], candidate: ConnectionCandidate, options: CanvasConnectionPolicyOptions = {}) {
     const target = nodes.find((node) => node.id === candidate.toNodeId);
     if (!target) return "找不到连线目标节点";
+    const sourceNode = nodes.find((node) => node.id === candidate.fromNodeId);
+    if (sourceNode?.type === CanvasNodeType.Upscale && target.type !== CanvasNodeType.Image && target.type !== CanvasNodeType.Video) return "超分节点右侧只连接图片或视频结果节点";
     const acceptedInputKinds = getNodeAcceptedInputKinds(target.type);
     if (acceptedInputKinds.length) {
         const source = nodes.find((node) => node.id === candidate.fromNodeId);
         const sourceKind = source ? getNodeInputKind(source.type) : undefined;
-        const isMediaConversion = target.type === CanvasNodeType.MediaConversion;
+        const isMediaConversion = target.type === CanvasNodeType.MediaConversion || target.type === CanvasNodeType.Upscale;
         const hasAcceptedSource = isMediaConversion
             ? source?.type === CanvasNodeType.Image || source?.type === CanvasNodeType.Video
             : Boolean(sourceKind && acceptedInputKinds.includes(sourceKind));
         if (!sourceKind || !hasAcceptedSource) {
             const labels = acceptedInputKinds.map(acceptedInputKindLabel).join("或");
-            const targetLabel = isMediaConversion ? "转换" : target.type === CanvasNodeType.BatchTable ? "批量创作表" : labels;
+            const targetLabel = target.type === CanvasNodeType.Upscale ? "超分" : isMediaConversion ? "转换" : target.type === CanvasNodeType.BatchTable ? "批量创作表" : labels;
             return `${targetLabel}节点只接受${labels}输入`;
         }
         const maxInputCount = getNodeMaxInputCount(target.type);

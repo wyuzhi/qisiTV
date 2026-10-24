@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"qisitv/backend/internal/generation"
 	"strings"
 	"time"
 
 	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/provider/workflow"
 	"qisitv/backend/internal/repository"
 )
 
@@ -69,7 +71,8 @@ func (s *Service) queryFailedVideoTask(ctx context.Context, task *model.Task, cl
 	if task.Status != model.TaskStatusFailed {
 		return nil, BadAuthRequest("只能人工查询状态为失败的任务")
 	}
-	if !strings.HasPrefix(task.Type, "canvas_video") && !strings.HasPrefix(task.Type, "video_") {
+	upscale := generation.UpscaleMediaType(task.Model) != ""
+	if !strings.HasPrefix(task.Type, "canvas_video") && !strings.HasPrefix(task.Type, "video_") && !upscale {
 		return nil, BadAuthRequest("该任务不是视频生成任务")
 	}
 
@@ -92,7 +95,11 @@ func (s *Service) queryFailedVideoTask(ctx context.Context, task *model.Task, cl
 	}
 	ctx = ensureOfficialProtocolAdapter(ctx, config.InterfaceType)
 	adapter, declarative := declarativeProtocolAdapterForContext(ctx, config.InterfaceType)
-	if !declarative {
+	beefVideo := isBeefAPIVideoConfig(ctx, config)
+	workflowVideo := workflow.IsProviderInterface(config.InterfaceType)
+	_, officialVideo := generation.OfficialDeclarativeVideoInterface(config.InterfaceType)
+	legacyVideo := !officialVideo && (strings.TrimSpace(config.InterfaceType) == "" || isArkPlanVideoConfig(config))
+	if !declarative && !beefVideo && !workflowVideo && !legacyVideo && !upscale {
 		return nil, BadAuthRequest("该任务的请求协议不支持安全查询上游状态")
 	}
 	input.Config = config
@@ -124,7 +131,17 @@ func (s *Service) queryFailedVideoTask(ctx context.Context, task *model.Task, cl
 	queryCtx := withProviderAnalytics(recoveryCtx, s, *task)
 	var result map[string]interface{}
 	var providerStatus string
-	result, providerStatus, err = queryProtocolAdapterVideoTask(queryCtx, input, adapter, providerRequestID)
+	if upscale {
+		result, providerStatus, err = generation.RecoverUpscaleResult(queryCtx, input, providerRequestID)
+	} else if beefVideo {
+		result, providerStatus, err = queryBeefAPIVideoResult(queryCtx, input, providerRequestID)
+	} else if workflowVideo {
+		result, providerStatus, err = s.workflowClient(nil).QueryVideo(queryCtx, workflowConfigFromProvider(config), workflow.RootURL(config.BaseURL), providerRequestID)
+	} else if !declarative && legacyVideo {
+		result, providerStatus, err = generation.QueryHandwrittenVideoTask(queryCtx, input, providerRequestID)
+	} else {
+		result, providerStatus, err = queryProtocolAdapterVideoTask(queryCtx, input, adapter, providerRequestID)
+	}
 	if err != nil {
 		_ = s.log(task.UserID, task.ID, "error", "人工查询上游视频任务失败", err.Error())
 		return nil, err
@@ -134,7 +151,7 @@ func (s *Service) queryFailedVideoTask(ctx context.Context, task *model.Task, cl
 		return &ProviderTaskQueryResult{Task: taskForOutput(*task), ProviderStatus: providerStatus, Recovered: false}, nil
 	}
 
-	result, err = s.persistGeneratedMediaResult(task.UserID, result)
+	result, err = s.persistTaskGeneratedMediaResult(*task, result)
 	if err != nil {
 		_ = s.log(task.UserID, task.ID, "error", "人工查询已取得视频，但结果保存失败", err.Error())
 		return nil, err
@@ -154,8 +171,38 @@ func (s *Service) queryFailedVideoTask(ctx context.Context, task *model.Task, cl
 		_ = s.log(task.UserID, task.ID, "error", "任务恢复成功但项目产物登记失败", err.Error())
 		return nil, fmt.Errorf("任务已恢复，但项目素材登记失败：%w", err)
 	}
+	projected := s.attachRecoveredProviderTask(task)
 	_ = s.log(task.UserID, task.ID, "info", "人工查询确认生成成功，任务已恢复并登记项目产物", providerStatus)
-	return &ProviderTaskQueryResult{Task: taskForOutput(*task), ProviderStatus: providerStatus, Recovered: true}, nil
+	return &ProviderTaskQueryResult{Task: projected, ProviderStatus: providerStatus, Recovered: true}, nil
+}
+
+// Query-only: never route recovery through create, even when the original
+// persisted channel metadata names the legacy generations protocol.
+func queryBeefAPIVideoResult(ctx context.Context, input canvasGenerationInput, id string) (map[string]interface{}, string, error) {
+	var state map[string]interface{}
+	if err := getJSON(ctx, input.Config, "/videos/"+id, &state); err != nil {
+		return nil, "", err
+	}
+	var err error
+	state, err = generation.ValidateVideoTaskState(id, state)
+	if err != nil {
+		return nil, "", err
+	}
+	status, videoURL := seedancePollStatusAndURL(state)
+	if status == "failed" || status == "cancelled" || status == "expired" {
+		return nil, status, errors.New(defaultString(seedanceErrorMessage(state), "视频生成失败"))
+	}
+	if !generation.VideoTaskSucceeded(status) {
+		return nil, status, nil
+	}
+	if videoURL == "" {
+		videoURL = generation.APIURL(input.Config.BaseURL, "/videos/"+id+"/content")
+	}
+	data, mimeType, err := generation.DownloadVideoResult(ctx, input.Config, videoURL, id)
+	if err != nil {
+		return nil, status, err
+	}
+	return map[string]interface{}{"mode": "video", "video": map[string]interface{}{"dataUrl": dataURL(mimeType, data), "mimeType": mimeType}}, status, nil
 }
 
 func providerTaskRecoveryContext(parent context.Context) (context.Context, context.CancelFunc) {

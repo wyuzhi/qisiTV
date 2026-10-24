@@ -7,6 +7,7 @@ import type { CanvasImageAngleParams } from "@/components/canvas/canvas-node-ang
 import type { NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
 import { isFrameNode } from "@/lib/canvas/canvas-frame";
 import { nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
+import { canvasNodeResourceId } from "@/lib/canvas/canvas-resource-id";
 import { canvasNodeMentionToken, canvasResourceMentionToken, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { normalizeCanvasMediaNodeSemantics } from "@/lib/canvas/canvas-node-semantics";
@@ -169,6 +170,7 @@ const NODE_MODEL_GENERATION_PARAMS: ReadonlyArray<keyof CanvasNodeMetadata> = [
     "size",
     "quality",
     "transparentBackground",
+    "seedreamMode", "seedreamMaxImages", "seedreamOutputFormat", "seedreamOptimize", "seedreamWatermark",
     "count",
     "seconds",
     "vquality",
@@ -405,33 +407,55 @@ export function sameNodeSemanticData(left: CanvasNodeData, right: CanvasNodeData
 
 export function applyBatchPrimaryImage(root: CanvasNodeData, primary: CanvasNodeData): CanvasNodeData {
     // 主图是根节点对媒体的完整代理；可选字段也必须显式覆盖，避免残留上一张图的存储身份。
-    return {
+    const nextMetadata: NonNullable<CanvasNodeData["metadata"]> = {
+        ...root.metadata,
+        primaryImageId: primary.id,
+        content: primary.metadata?.content,
+        storageKey: primary.metadata?.storageKey,
+        status: primary.metadata?.status,
+        naturalWidth: primary.metadata?.naturalWidth,
+        naturalHeight: primary.metadata?.naturalHeight,
+        bytes: primary.metadata?.bytes,
+        mimeType: primary.metadata?.mimeType,
+        errorDetails: primary.metadata?.errorDetails,
+        generationErrorCode: primary.metadata?.generationErrorCode,
+        failedPromptFingerprint: primary.metadata?.failedPromptFingerprint,
+        freeResize: primary.metadata?.freeResize,
+    };
+    const nextRoot: CanvasNodeData = {
         ...root,
         width: primary.width,
         height: primary.height,
-        metadata: {
-            ...root.metadata,
-            primaryImageId: primary.id,
-            content: primary.metadata?.content,
-            storageKey: primary.metadata?.storageKey,
-            status: primary.metadata?.status,
-            naturalWidth: primary.metadata?.naturalWidth,
-            naturalHeight: primary.metadata?.naturalHeight,
-            bytes: primary.metadata?.bytes,
-            mimeType: primary.metadata?.mimeType,
-            errorDetails: primary.metadata?.errorDetails,
-            generationErrorCode: primary.metadata?.generationErrorCode,
-            failedPromptFingerprint: primary.metadata?.failedPromptFingerprint,
-            freeResize: primary.metadata?.freeResize,
-        },
+        metadata: nextMetadata,
     };
+    const primaryResourceId = canvasNodeResourceId(primary);
+    const rootResourceId = canvasNodeResourceId(nextRoot);
+    if (primary.metadata?.assetId && primaryResourceId && rootResourceId && primaryResourceId === rootResourceId) {
+        nextMetadata.assetId = primary.metadata.assetId;
+    } else {
+        delete nextMetadata.assetId;
+    }
+    return nextRoot;
 }
 
 export function removeCanvasNodes(nodes: CanvasNodeData[], requestedIds: Set<string>) {
     const removedIds = new Set(requestedIds);
-    nodes.forEach((node) => {
-        if (requestedIds.has(node.id)) node.metadata?.batchChildIds?.forEach((childId) => removedIds.add(childId));
-    });
+    // A workflow is one owned graph. Ordinary frames still detach their contents.
+    const workflowFrames = new Set(nodes.filter(node => node.type === CanvasNodeType.Workflow
+        || nodes.some(child => child.parentId === node.id && child.metadata?.reusableWorkflow)).map(node => node.id));
+    for (const node of nodes) {
+        if (removedIds.has(node.id) && node.metadata?.reusableWorkflow && node.parentId && workflowFrames.has(node.parentId)) removedIds.add(node.parentId);
+    }
+    const ownedIds = new Set([...removedIds].filter(id => workflowFrames.has(id)));
+    let expanded = true;
+    while (expanded) {
+        const previousSize = removedIds.size + ownedIds.size;
+        for (const node of nodes) {
+            if (removedIds.has(node.id)) node.metadata?.batchChildIds?.forEach(id => removedIds.add(id));
+            if (node.parentId && ownedIds.has(node.parentId)) { removedIds.add(node.id); ownedIds.add(node.id); }
+        }
+        expanded = previousSize !== removedIds.size + ownedIds.size;
+    }
     const remainingNodes = nodes.filter((node) => !removedIds.has(node.id));
     const nextNodes = remainingNodes.map((node) => {
         const detached = node.parentId && removedIds.has(node.parentId) ? { ...node, parentId: undefined } : node;

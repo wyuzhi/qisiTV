@@ -22,6 +22,8 @@ export const NODE_DEFAULT_SIZE = {
     // shallow waveform strip; this keeps the empty-state affordance visible.
     [CanvasNodeType.Audio]: { width: 320, height: 320, title: "音频" },
     [CanvasNodeType.Frame]: { width: 760, height: 520, title: "未命名背板" },
+    [CanvasNodeType.Workflow]: { width: 1180, height: 1030, title: "工作流" },
+    [CanvasNodeType.WorkflowControl]: { width: 1100, height: 180, title: "工作流进度" },
     [CanvasNodeType.Markdown]: { width: 420, height: 320, title: "Markdown" },
     [CanvasNodeType.Svg]: { width: 420, height: 320, title: "SVG" },
     [CanvasNodeType.Html]: { width: 520, height: 380, title: "HTML" },
@@ -30,7 +32,9 @@ export const NODE_DEFAULT_SIZE = {
     [CanvasNodeType.Chart]: { width: 480, height: 320, title: "图表" },
     [CanvasNodeType.ColorGrade]: { width: 420, height: 360, title: "调色" },
     [CanvasNodeType.MediaConversion]: { width: 480, height: 460, title: "转换" },
+    [CanvasNodeType.Upscale]: { width: 420, height: 240, title: "AI超分" },
     [CanvasNodeType.BatchTable]: { width: 1280, height: 560, title: "批量创作表" },
+    [CanvasNodeType.Director]: { width: 640, height: 640, title: "导演台" },
 } satisfies Record<CanvasNodeType, { width: number; height: number; title: string }>;
 
 export const NODE_SPECS = {
@@ -78,6 +82,8 @@ export const NODE_SPECS = {
         ...NODE_DEFAULT_SIZE[CanvasNodeType.Frame],
         metadata: { frame: { collapsed: false, expandedWidth: NODE_DEFAULT_SIZE[CanvasNodeType.Frame].width, expandedHeight: NODE_DEFAULT_SIZE[CanvasNodeType.Frame].height } },
     },
+    [CanvasNodeType.Workflow]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.Workflow], metadata: undefined },
+    [CanvasNodeType.WorkflowControl]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.WorkflowControl], metadata: undefined },
     [CanvasNodeType.Markdown]: {
         ...NODE_DEFAULT_SIZE[CanvasNodeType.Markdown],
         metadata: { content: "", status: "idle" },
@@ -107,6 +113,7 @@ export const NODE_SPECS = {
         metadata: { status: "idle" },
     },
     [CanvasNodeType.MediaConversion]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.MediaConversion], metadata: { status: "idle" } },
+    [CanvasNodeType.Upscale]: { ...NODE_DEFAULT_SIZE[CanvasNodeType.Upscale], metadata: { status: "idle" } },
     [CanvasNodeType.BatchTable]: {
         ...NODE_DEFAULT_SIZE[CanvasNodeType.BatchTable],
         metadata: {
@@ -122,6 +129,10 @@ export const NODE_SPECS = {
                 rows: [],
             },
         },
+    },
+    [CanvasNodeType.Director]: {
+        ...NODE_DEFAULT_SIZE[CanvasNodeType.Director],
+        metadata: { status: "idle", workflowKind: "shot" },
     },
 } satisfies Record<CanvasNodeType, CanvasNodeSpec>;
 

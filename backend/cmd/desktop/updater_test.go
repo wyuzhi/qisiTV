@@ -38,3 +38,10 @@ func TestInstallUpdateRequiresReadyWindow(t *testing.T) {
 		t.Fatal("expected install to fail before the window is ready")
 	}
 }
+
+func TestUpdateCleanupRequiresReadyWorkspace(t *testing.T) {
+	app := newDesktopApp(t.TempDir())
+	if err := app.ConfirmUpdateStartup(); err == nil {
+		t.Fatal("startup cleanup must wait for the workspace")
+	}
+}

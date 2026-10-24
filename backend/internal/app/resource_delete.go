@@ -1,200 +1,23 @@
 package app
 
 import (
-	"errors"
-	"fmt"
-	"sort"
-	"strings"
-	"time"
-
 	localasset "qisitv/backend/internal/asset"
 	"qisitv/backend/internal/assets"
 	"qisitv/backend/internal/model"
-	"qisitv/backend/internal/repository"
 )
 
-func (s *Service) deleteUserAssetWithResources(userID string, assetID string) error {
-	asset, err := s.repo.AssetForUser(userID, assetID)
-	if err != nil {
-		return err
-	}
-	assetReferences, err := s.repo.AssetBusinessReferences(userID, assetID)
-	if err != nil {
-		return err
-	}
-	versions, representations, err := s.repo.AssetResourceRecords(assetID)
-	if err != nil {
-		return err
-	}
-
-	resourceIDs := map[string]struct{}{}
-	if err := collectOwnedAssetDocumentReferences(asset.PayloadJSON, resourceIDs); err != nil {
-		return BadAuthRequest("素材数据无法解析，已停止删除以避免误删文件")
-	}
-	for _, version := range versions {
-		if err := collectOwnedAssetDocumentReferences(version.DefinitionJSON, resourceIDs); err != nil {
-			return BadAuthRequest("素材版本数据无法解析，已停止删除以避免误删文件")
-		}
-	}
-	for _, representation := range representations {
-		if resourceID := validCanvasResourceID(representation.ResourceID); resourceID != "" {
-			resourceIDs[resourceID] = struct{}{}
-		}
-		if err := collectOwnedAssetDocumentReferences(representation.MetadataJSON, resourceIDs); err != nil {
-			return BadAuthRequest("素材表现数据无法解析，已停止删除以避免误删文件")
-		}
-	}
-
-	candidateIDs := sortedReferenceIDs(resourceIDs)
-	resources, err := s.repo.ResourcesForUserIDs(userID, candidateIDs)
-	if err != nil {
-		return err
-	}
-	ownedIDs := make([]string, 0, len(resources))
-	ownedIDSet := make(map[string]struct{}, len(resources))
-	for _, resource := range resources {
-		ownedIDs = append(ownedIDs, resource.ID)
-		ownedIDSet[resource.ID] = struct{}{}
-	}
-
-	usages := make([]resourceUsage, 0, len(assetReferences))
-	for _, reference := range assetReferences {
-		usages = append(usages, resourceUsage{Kind: reference.Kind, ID: reference.ID, Title: reference.Title})
-	}
-	if len(ownedIDs) > 0 {
-		snapshot, snapshotErr := s.repo.ResourceReferenceSnapshot(userID, assetID, ownedIDs)
-		if snapshotErr != nil {
-			return snapshotErr
-		}
-		sharedAssetResourceIDs := map[string]struct{}{}
-		for _, reference := range snapshot.Direct {
-			if _, exists := ownedIDSet[reference.ResourceID]; exists {
-				if reference.Kind == "素材" {
-					sharedAssetResourceIDs[reference.ResourceID] = struct{}{}
-					continue
-				}
-				usages = append(usages, resourceUsage{Kind: reference.Kind, ID: reference.ID, Title: reference.Title})
-			}
-		}
-		for _, document := range snapshot.Documents {
-			// 已结束任务的输出和日志仅记录生成历史，不构成素材占用。
-			// 仅在素材删除时放行；孤儿清理仍保留尚未入库的任务产物。
-			switch document.TaskStatus {
-			case model.TaskStatusSucceeded, model.TaskStatusFailed, model.TaskStatusCancelled:
-				if document.Kind == "任务日志" || document.Kind == "任务结果" {
-					continue
-				}
-				if document.Kind == "任务" {
-					document.SecondaryJSON = ""
-				}
-			}
-			referencedIDs := documentReferencedResourceIDs(document.PrimaryJSON, ownedIDSet)
-			for resourceID := range documentReferencedResourceIDs(document.SecondaryJSON, ownedIDSet) {
-				referencedIDs[resourceID] = struct{}{}
-			}
-			if len(referencedIDs) > 0 {
-				if document.Kind == "素材" {
-					for resourceID := range referencedIDs {
-						sharedAssetResourceIDs[resourceID] = struct{}{}
-					}
-					continue
-				}
-				usages = append(usages, resourceUsage{Kind: document.Kind, ID: document.ID, Title: document.Title})
-			}
-		}
-		if len(sharedAssetResourceIDs) > 0 {
-			deletableOwnedIDs := ownedIDs[:0]
-			for _, resourceID := range ownedIDs {
-				if _, shared := sharedAssetResourceIDs[resourceID]; !shared {
-					deletableOwnedIDs = append(deletableOwnedIDs, resourceID)
-				}
-			}
-			ownedIDs = deletableOwnedIDs
-		}
-	}
-	if message := resourceOccupiedMessage(usages); message != "" {
-		return BadAuthRequest(message)
-	}
-
-	// 所有引用校验必须先完成；仍被其他资源记录共享的物理对象不会进入删除队列。
-	physicalObjects := map[string]*model.Resource{}
-	for index := range resources {
-		resource := &resources[index]
-		sharedCount, countErr := s.repo.ResourceStorageReferenceCount(resource, ownedIDs)
-		if countErr != nil {
-			return countErr
-		}
-		if sharedCount > 0 {
-			continue
-		}
-		physicalObjects[resourceStorageIdentity(resource)] = resource
-	}
-	deletionJobs := resourceDeletionJobs(userID, physicalObjects)
-	// 业务记录和 Outbox 必须在同一事务提交。事务失败时物理文件完全不动；
-	// 提交成功后由幂等 worker 清理，进程退出或对象存储暂时失败都可继续重试。
-	if err := s.repo.DeleteAssetAndResources(userID, assetID, ownedIDs, deletionJobs); err != nil {
-		if errors.Is(err, repository.ErrCanvasHistoryResourceReferenced) {
-			return BadAuthRequest("素材仍被画布历史版本引用，已保留文件")
-		}
-		return fmt.Errorf("素材记录删除失败，请重试：%w", err)
-	}
-	if len(deletionJobs) > 0 {
-		s.runWorkerTask(func() { s.drainResourceDeletionJobs(len(deletionJobs)) })
-	}
-	return nil
+func (s *Service) deleteUserAssetWithResources(userID string, assetID string, expectedStatus ...string) error {
+	return s.resourceDomain().DeleteUserAssetWithResources(userID, assetID, expectedStatus...)
 }
 
 func resourceDeletionJobs(userID string, physicalObjects map[string]*model.Resource) []model.ResourceDeletionJob {
-	keys := make([]string, 0, len(physicalObjects))
-	for key := range physicalObjects {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	now := time.Now()
-	jobs := make([]model.ResourceDeletionJob, 0, len(keys))
-	for _, key := range keys {
-		resource := physicalObjects[key]
-		jobs = append(jobs, model.ResourceDeletionJob{
-			ID: newID(), UserID: userID, ResourceID: resource.ID,
-			Provider: resource.Provider, Endpoint: resource.Endpoint, Bucket: resource.Bucket,
-			StorageSettingID: resource.StorageSettingID, ObjectKey: resource.ObjectKey,
-			Status: model.ResourceDeletionStatusPending, NextAttemptAt: now,
-		})
-	}
-	return jobs
+	return localasset.DeletionJobs(userID, physicalObjects)
 }
 
-type resourceUsage struct {
-	Kind  string
-	ID    string
-	Title string
-}
+type resourceUsage = localasset.ResourceUsage
 
 func resourceOccupiedMessage(usages []resourceUsage) string {
-	seen := map[string]struct{}{}
-	labels := make([]string, 0, len(usages))
-	for _, usage := range usages {
-		key := usage.Kind + "\x00" + usage.ID
-		if _, exists := seen[key]; exists {
-			continue
-		}
-		seen[key] = struct{}{}
-		title := strings.TrimSpace(usage.Title)
-		if title == "" {
-			title = usage.ID
-		}
-		title = truncateRunes(title, 32)
-		labels = append(labels, usage.Kind+"「"+title+"」")
-	}
-	if len(labels) == 0 {
-		return ""
-	}
-	sort.Strings(labels)
-	visible := labels
-	if len(visible) > 3 {
-		visible = append(append([]string{}, visible[:3]...), fmt.Sprintf("等 %d 处", len(labels)))
-	}
-	return "素材仍被" + strings.Join(visible, "、") + "引用，请先在对应画布、任务或业务记录中解除引用后再删除"
+	return localasset.OccupiedMessage(usages)
 }
 
 func collectOwnedAssetDocumentReferences(raw string, resourceIDs map[string]struct{}) error {
@@ -214,48 +37,13 @@ func sortedReferenceIDs(values map[string]struct{}) []string {
 }
 
 func resourceStorageIdentity(resource *model.Resource) string {
-	if resource == nil {
-		return ""
-	}
-	provider := strings.ToLower(strings.TrimSpace(resource.Provider))
-	if provider == "" {
-		provider = "local"
-	}
-	return strings.Join([]string{provider, resource.Endpoint, resource.Bucket, resource.ObjectKey}, "\x00")
+	return localasset.StorageIdentity(resource)
 }
 
 func (s *Service) deleteStoredResourceObject(userID string, resource *model.Resource) error {
-	_ = userID
-	if resource == nil {
-		return errors.New("资源记录为空")
-	}
-	if strings.TrimSpace(resource.ObjectKey) == "" {
-		return fmt.Errorf("资源 %s 的存储路径为空", resource.ID)
-	}
-	protected, err := s.repo.CanvasHistoryReferencesObject(resource)
-	if err != nil {
-		return err
-	}
-	if protected {
-		return errors.New("资源仍被画布历史版本引用")
-	}
-	provider := strings.ToLower(strings.TrimSpace(resource.Provider))
-	if s.localResourceStorage && provider != "" && provider != "local" {
-		// Desktop mode never reaches back into a historical hosted location.
-		// The database row/outbox can still be removed without contacting OSS.
-		return nil
-	}
-	switch provider {
-	case "", "local":
-		return s.deleteLocalResourceObject(resource.ObjectKey)
-	default:
-		return nil
-	}
+	return s.resourceDomain().DeleteStoredObject(userID, resource)
 }
 
 func (s *Service) deleteLocalResourceObject(objectKey string) error {
-	if err := localasset.NewFileStore(s.dataDir).Delete(objectKey); err != nil {
-		return fmt.Errorf("删除本地资源文件失败：%w", err)
-	}
-	return nil
+	return s.resourceDomain().DeleteLocalObject(objectKey)
 }

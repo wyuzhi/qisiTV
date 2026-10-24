@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -126,6 +127,10 @@ func TestCheckDownloadInstallHappyPath(t *testing.T) {
 	if state.Status != StatusReady || state.DownloadedBytes != state.TotalBytes || state.TotalBytes == 0 {
 		t.Fatalf("%+v", state)
 	}
+	entries, err := os.ReadDir(filepath.Dir(engine.staged.archive))
+	if err != nil || len(entries) != 1 || entries[0].Name() != "update.zip" {
+		t.Fatalf("download must keep only archive, without redundant extraction: %v %v", entries, err)
+	}
 	if err := engine.InstallUpdate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -205,6 +210,7 @@ func TestCheckRejectsDowngradeEqualWrongPlatformTimeoutAndHash(t *testing.T) {
 			Platform:       "darwin-arm64",
 			Client:         server.Client(),
 			FeedTimeout:    200 * time.Millisecond,
+			RetryBackoff:   func(int) time.Duration { return time.Millisecond },
 		})
 		_, err := engine.CheckForUpdate(context.Background())
 		if !errors.Is(err, ErrTimeout) {
@@ -344,6 +350,7 @@ func signedFeedServer(t *testing.T, priv ed25519.PrivateKey, payload Payload, zi
 			}
 			_, _ = w.Write(body)
 		case "/qisiTV.zip":
+			w.Header().Set("Content-Length", strconv.Itoa(len(zipBytes)))
 			_, _ = w.Write(zipBytes)
 		default:
 			http.NotFound(w, r)

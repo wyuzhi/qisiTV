@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { buildVideoFrameNodes } from "../src/lib/canvas/canvas-video-frame-nodes";
-import { normalizeVideoFrameTimes, videoFrameSeekSeconds, waitForPresentedVideoFrame } from "../src/lib/canvas/canvas-video-frame";
+import { normalizeVideoFrameTimes, resolveVideoFramePresetTimeMs, videoFrameFetchCredentials, videoFrameSeekSeconds, waitForPresentedVideoFrame } from "../src/lib/canvas/canvas-video-frame";
 import { CanvasNodeType, type CanvasNodeData } from "../src/types/canvas";
 
 const sourceNode: CanvasNodeData = {
@@ -21,6 +21,27 @@ describe("normalizeVideoFrameTimes", () => {
 
     test("视频时长无效时不返回时间点", () => {
         expect(normalizeVideoFrameTimes([0, 1000], 0)).toEqual([]);
+    });
+
+    test("未预先记录视频时长时，尾帧预设会在视频解码后自动对齐到真实尾帧", () => {
+        const presetTimeMs = resolveVideoFramePresetTimeMs("last", 0, 0);
+        expect(presetTimeMs).toBe(Number.MAX_SAFE_INTEGER);
+        expect(normalizeVideoFrameTimes([presetTimeMs], 8000)).toEqual([7900]);
+    });
+});
+
+describe("resolveVideoFramePresetTimeMs & videoFrameFetchCredentials", () => {
+    test("支持首帧、当前帧与已知/未知时长的尾帧计算", () => {
+        expect(resolveVideoFramePresetTimeMs("first", 6000, 2300)).toBe(0);
+        expect(resolveVideoFramePresetTimeMs("current", 6000, 2300)).toBe(2300);
+        expect(resolveVideoFramePresetTimeMs("last", 6000, 2300)).toBe(5999);
+        expect(resolveVideoFramePresetTimeMs("last", 0, 0)).toBe(Number.MAX_SAFE_INTEGER);
+    });
+
+    test("区分受保护资源路径与跨源 CDN 直链的凭据策略", () => {
+        expect(videoFrameFetchCredentials("/api/resources/res-123/file")).toBe("include");
+        expect(videoFrameFetchCredentials("http://127.0.0.1:8080/api/resources/res-123/file")).toBe("include");
+        expect(videoFrameFetchCredentials("blob:http://localhost:5173/abc")).toBe("same-origin");
     });
 });
 

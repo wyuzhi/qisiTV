@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"strings"
 
 	"qisitv/backend/internal/model"
 
@@ -35,6 +36,57 @@ func (r *Repository) SavePluginPlatformState(state *model.PluginPlatformState) e
 
 func (r *Repository) DeletePluginPlatformState(pluginID string) error {
 	return r.db.Delete(&model.PluginPlatformState{}, "plugin_id = ?", pluginID).Error
+}
+
+func (r *Repository) DeletePluginStates(pluginID string) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(&model.UserPluginState{}, "plugin_id = ?", pluginID).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&model.PluginPlatformState{}, "plugin_id = ?", pluginID).Error
+	})
+}
+
+func (r *Repository) LookupSystemSetting(key string) (*model.SystemSetting, error) {
+	var setting model.SystemSetting
+	if err := r.db.First(&setting, "key = ?", key).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &setting, nil
+}
+
+// CommitPluginRegistry writes the namespaced plugin registry setting together
+// with optional platform upsert or user/platform state removal.
+func (r *Repository) CommitPluginRegistry(settingKey, valueJSON string, platform *model.PluginPlatformState, deletePluginID string) error {
+	if strings.TrimSpace(settingKey) == "" {
+		return errors.New("plugin registry setting key is empty")
+	}
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		setting := &model.SystemSetting{Key: settingKey, ValueJSON: valueJSON}
+		if err := tx.Save(setting).Error; err != nil {
+			return err
+		}
+		if deletePluginID != "" {
+			if err := tx.Delete(&model.UserPluginState{}, "plugin_id = ?", deletePluginID).Error; err != nil {
+				return err
+			}
+			if err := tx.Delete(&model.PluginPlatformState{}, "plugin_id = ?", deletePluginID).Error; err != nil {
+				return err
+			}
+		}
+		if platform != nil {
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "plugin_id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"available", "updated_by", "updated_at"}),
+			}).Create(platform).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (r *Repository) UserPluginState(userID string, pluginID string) (*model.UserPluginState, error) {

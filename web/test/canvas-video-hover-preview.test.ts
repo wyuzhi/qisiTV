@@ -11,12 +11,15 @@ let visibility: (entries: { isIntersecting: boolean }[]) => void;
 const cleanups: (() => void)[] = [];
 class FakeVideo extends EventTarget {
     paused = true; currentTime = 0; src = ""; muted = false; playsInline = false; preload = "";
-    className = ""; dataset: Record<string, string> = {}; removed = false; loads = 0;
+    className = ""; dataset: Record<string, string> = {}; style = { opacity: "" }; removed = false; loads = 0;
+    frameCallback?: () => void;
     setAttribute() {}
     removeAttribute() { this.src = ""; }
     load() { this.loads++; }
     remove() { this.removed = true; }
     pause() { this.paused = true; }
+    requestVideoFrameCallback(callback: () => void) { this.frameCallback = callback; return 1; }
+    presentFrame() { this.frameCallback?.(); }
     async play() { this.paused = false; this.dispatchEvent(new Event("playing")); }
 }
 class FakeElement extends EventTarget {
@@ -29,7 +32,8 @@ function stub(key: string, value: unknown) {
     originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
 }
-function setup(resolve: () => Promise<string> = async () => "test.mp4") {
+type Source = { url: string; release: () => void };
+function setup(resolve: (signal: AbortSignal) => Promise<Source> = async () => ({ url: "test.mp4", release: () => {} })) {
     const element = new FakeElement();
     cleanups.push(bindCanvasVideoHoverPreview(element as unknown as HTMLElement, resolve));
     return element;
@@ -55,7 +59,7 @@ afterEach(() => {
 
 test("quick pass, touch, dragging and reduced motion never resolve media", async () => {
     let calls = 0;
-    const element = setup(async () => { calls++; return "test.mp4"; });
+    const element = setup(async () => { calls++; return { url: "test.mp4", release: () => {} }; });
     enter(element); element.dispatchEvent(new Event("pointerleave"));
     enter(element, "touch"); enter(element, "mouse", 1);
     reduced = true; enter(element);
@@ -63,17 +67,36 @@ test("quick pass, touch, dragging and reduced motion never resolve media", async
     expect(calls).toBe(0);
 });
 test("hover is muted and capped at first three seconds; resources are released", async () => {
-    const element = setup(); enter(element); await wait();
+    let released = 0;
+    const element = setup(async () => ({ url: "test.mp4", release: () => { released++; } })); enter(element); await wait();
     const video = videos[0];
     expect(video.muted).toBe(true); expect(video.playsInline).toBe(true);
     video.currentTime = 3; video.dispatchEvent(new Event("timeupdate"));
     expect(video.paused).toBe(true); expect(video.src).toBe(""); expect(video.loads).toBe(1); expect(video.removed).toBe(true);
+    expect(released).toBe(1);
+    element.dispatchEvent(new Event("pointerleave"));
+    expect(released).toBe(1);
+});
+test("hover keeps the static poster visible until a video frame is presented", async () => {
+    const element = setup(); enter(element); await wait();
+    const video = videos[0];
+    expect(video.style.opacity).toBe("0");
+    video.presentFrame();
+    expect(video.style.opacity).toBe("1");
+    element.dispatchEvent(new Event("pointerleave"));
+    expect(video.style.opacity).toBe("0");
+    expect(video.removed).toBe(true);
 });
 test("new hover cancels previous decoder and ignores stale URL resolution", async () => {
-    let resolve!: (value: string) => void;
-    const slow = setup(() => new Promise<string>((done) => { resolve = done; }));
+    let resolve!: (value: Source) => void;
+    let signal!: AbortSignal;
+    let released = 0;
+    const slow = setup((requestSignal) => { signal = requestSignal; return new Promise<Source>((done) => { resolve = done; }); });
     enter(slow); await wait();
-    const next = setup(); enter(next); resolve("stale.mp4"); await wait();
+    const next = setup(); enter(next);
+    expect(signal.aborted).toBe(true);
+    resolve({ url: "stale.mp4", release: () => { released++; } }); await wait();
+    expect(released).toBe(1);
     expect(videos.length).toBe(1); expect(videos[0].src).toBe("test.mp4");
     enter(slow); expect(videos[0].removed).toBe(true);
 });
@@ -85,6 +108,6 @@ test("wheel, viewport interaction and leaving viewport cancel playback", async (
 });
 test("manual playback is never competing with hover", async () => {
     const manual = new FakeVideo(); manual.paused = false; videos.push(manual);
-    let calls = 0; const element = setup(async () => { calls++; return "test.mp4"; });
+    let calls = 0; const element = setup(async () => { calls++; return { url: "test.mp4", release: () => {} }; });
     enter(element); await wait(); expect(calls).toBe(0); expect(manual.paused).toBe(false);
 });

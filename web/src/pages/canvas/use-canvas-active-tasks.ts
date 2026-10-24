@@ -11,8 +11,8 @@ export function useCanvasActiveTasks(projectId: string, enabled: boolean) {
     const query = useQuery<GenerationTask[]>({
         queryKey: ["canvas-active-tasks", projectId],
         // Agent 的持久化执行仍复用任务队列生命周期，但不应占据画布右上角的“生成任务”浮层。
-        // 多取一页再过滤，避免 Agent 排在前面时把真正的画布生成任务挤掉。
-        queryFn: () => listGenerationTasks(30, { projectId, activeOnly: true }).then((tasks) => tasks.filter((task) => !isInternalAgentTask(task)).slice(0, 5)),
+        // 保留这页中的全部生成任务，面板支持滚动，数量与实际任务一致。
+        queryFn: () => listGenerationTasks(30, { projectId, activeOnly: true }).then((tasks) => tasks.filter((task) => !isRetiredAgentTask(task))),
         enabled: shouldEnableCanvasActiveTaskQuery(enabled, projectId),
         refetchInterval: (current) => (current.state.data?.length ? 2_000 : 10_000),
         refetchOnWindowFocus: true,
@@ -41,6 +41,7 @@ export function useCanvasActiveTasks(projectId: string, enabled: boolean) {
     };
 }
 
-function isInternalAgentTask(task: GenerationTask) {
+// 旧内置 Agent 已退场；历史库里的 Agent 任务不再属于画布活动任务。
+function isRetiredAgentTask(task: GenerationTask) {
     return task.operation?.startsWith("cloud_agent") === true;
 }

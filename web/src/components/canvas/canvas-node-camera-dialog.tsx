@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronUp, ChevronDown, Camera as CameraIcon, RotateCcw, X } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
@@ -188,7 +188,7 @@ const HoverTip = memo(({ title, description, useCase, children }: HoverTipProps)
     };
 
     return (
-        <div ref={anchorRef} className="relative" onMouseEnter={handleEnter} onMouseLeave={handleLeave}>
+        <div ref={anchorRef} className="relative w-full" onMouseEnter={handleEnter} onMouseLeave={handleLeave}>
             {children}
             {coords &&
                 createPortal(
@@ -223,14 +223,13 @@ interface CardColumnProps {
     tooltipDesc?: string;
     tooltipUseCase?: string;
     visual: React.ReactNode;
-    cornerBadge?: React.ReactNode;
     captionBelow: string;
     onPrev: () => void;
     onNext: () => void;
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
 }
 
-const CardColumn = memo(({ label, tooltipTitle, tooltipDesc, tooltipUseCase, visual, cornerBadge, captionBelow, onPrev, onNext, theme }: CardColumnProps) => {
+const CardColumn = memo(({ label, tooltipTitle, tooltipDesc, tooltipUseCase, visual, captionBelow, onPrev, onNext, theme }: CardColumnProps) => {
     return (
         <div className="flex min-w-0 flex-col items-center gap-1.5">
             <button
@@ -239,21 +238,17 @@ const CardColumn = memo(({ label, tooltipTitle, tooltipDesc, tooltipUseCase, vis
                 className="flex h-5 w-full items-center justify-center rounded-md transition-colors"
                 style={{ color: theme.node.faint }}
                 title="上一项"
+                aria-label={`上一项${label}`}
             >
                 <ChevronUp className="size-3.5" />
             </button>
             <HoverTip title={tooltipTitle} description={tooltipDesc} useCase={tooltipUseCase}>
                 <div
-                    className="relative flex h-[clamp(116px,14vw,140px)] w-full min-w-0 cursor-help flex-col items-center justify-between rounded-xl border px-2.5 pt-2 pb-2 transition-colors"
-                    style={{ borderColor: theme.toolbar.border, background: theme.toolbar.itemHover }}
+                    className="flex h-[clamp(116px,14vw,140px)] w-full min-w-0 cursor-help flex-col items-center rounded-xl px-2.5 py-2"
+                    style={{ background: theme.toolbar.itemHover }}
                 >
                     <span className="text-[11px] font-medium tracking-wide" style={{ color: theme.node.muted }}>{label}</span>
                     <div className="flex w-full flex-1 items-center justify-center">{visual}</div>
-                    {cornerBadge && (
-                        <div className="absolute right-1.5 top-1.5 rounded-md px-1.5 py-0.5 text-[10px] font-medium" style={{ background: "rgba(0,0,0,.5)", color: "rgba(255,255,255,.8)" }}>
-                            {cornerBadge}
-                        </div>
-                    )}
                 </div>
             </HoverTip>
             <button
@@ -262,10 +257,11 @@ const CardColumn = memo(({ label, tooltipTitle, tooltipDesc, tooltipUseCase, vis
                 className="flex h-5 w-full items-center justify-center rounded-md transition-colors"
                 style={{ color: theme.node.faint }}
                 title="下一项"
+                aria-label={`下一项${label}`}
             >
                 <ChevronDown className="size-3.5" />
             </button>
-            <span className="max-w-full truncate text-center text-[11px] leading-4" style={{ color: theme.node.muted }}>{captionBelow}</span>
+            <span className="max-w-full text-center text-xs leading-4" style={{ color: theme.node.muted }}>{captionBelow}</span>
         </div>
     );
 });
@@ -302,8 +298,6 @@ export function CanvasNodeCameraPanel({
     const currentLens = LENS_PROFILES[lensIdx];
     const focalMeta = FOCAL_LENGTH_META[focal];
     const apertureMeta = APERTURE_META[aperture];
-
-    const summary = useMemo(() => `${currentCamera.zhName} · ${currentLens.zhName} · ${focal}mm · f/${aperture}`, [currentCamera, currentLens, focal, aperture]);
 
     const cycleCamera = (dir: 1 | -1) => setCameraIdx((i) => (i + dir + CAMERA_PROFILES.length) % CAMERA_PROFILES.length);
     const cycleLens = (dir: 1 | -1) => setLensIdx((i) => (i + dir + LENS_PROFILES.length) % LENS_PROFILES.length);
@@ -350,15 +344,14 @@ export function CanvasNodeCameraPanel({
             initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={reducedMotion ? { duration: 0 } : aceternityMotion.spring.panel}
-            className="w-full overflow-hidden rounded-[var(--r-xl)] border backdrop-blur-2xl"
-            style={{ background: theme.spatial.elevated, borderColor: theme.toolbar.border, color: theme.node.text, boxShadow: `0 28px 80px ${theme.spatial.shadow}` }}
+            className="w-full overflow-hidden rounded-[var(--r-xl)] backdrop-blur-2xl"
+            style={{ background: theme.spatial.elevated, color: theme.node.text, boxShadow: `0 28px 80px ${theme.spatial.shadow}` }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
         >
-            <div className="flex items-center justify-between gap-3 border-b px-4 py-3" style={{ borderColor: theme.toolbar.border }}>
+            <div className="flex items-center justify-between gap-3 px-5 pt-4 pb-2">
                 <div className="min-w-0">
                     <div className="text-sm font-semibold tracking-tight">摄像机控制</div>
-                    <div className="mt-0.5 truncate text-[11px]" style={{ color: theme.node.muted }}>为当前图片生成设置镜头、焦距与光圈</div>
                 </div>
                 <button
                     type="button"
@@ -373,7 +366,7 @@ export function CanvasNodeCameraPanel({
             </div>
 
             {/* 相机、镜头、焦距和光圈均来自已注册枚举，确认时由纯函数再次强校验。 */}
-            <div className="grid grid-cols-2 gap-2.5 px-4 py-4 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-5 py-3 sm:grid-cols-4">
                 <CardColumn
                     label="相机"
                     tooltipTitle={`${currentCamera.zhName} · ${currentCamera.label}`}
@@ -407,7 +400,6 @@ export function CanvasNodeCameraPanel({
                             <div className="mt-1 text-[10px] tracking-wider" style={{ color: theme.node.faint }}>mm</div>
                         </div>
                     }
-                    cornerBadge={focalMeta?.zhName}
                     captionBelow={focalMeta?.zhName ?? ""}
                     onPrev={() => cycleFocal(-1)}
                     onNext={() => cycleFocal(1)}
@@ -423,10 +415,8 @@ export function CanvasNodeCameraPanel({
                             <div className="text-[30px] font-light leading-none">
                                 <span className="text-[18px]" style={{ color: theme.node.faint }}>f/</span>{aperture}
                             </div>
-                            <div className="mt-1 text-[10px] tracking-wider" style={{ color: theme.node.faint }}>aperture</div>
                         </div>
                     }
-                    cornerBadge={apertureMeta?.zhName}
                     captionBelow={apertureMeta?.zhName ?? ""}
                     onPrev={() => cycleAperture(-1)}
                     onNext={() => cycleAperture(1)}
@@ -434,14 +424,8 @@ export function CanvasNodeCameraPanel({
                 />
             </div>
 
-            {/* 当前有效配置摘要。 */}
-            <div className="mx-4 mb-3 rounded-lg border px-3.5 py-2.5" style={{ borderColor: theme.toolbar.border, background: theme.toolbar.itemHover }}>
-                <div className="text-[10px] uppercase tracking-wide" style={{ color: theme.node.faint }}>当前配置</div>
-                <div className="mt-0.5 text-xs">{summary}</div>
-            </div>
-
             {/* 操作区：重置与复制不产生写入，只有应用会提交生成配置。 */}
-            <div className="flex min-h-12 flex-wrap items-center gap-2 border-t px-4 py-2" style={{ borderColor: theme.toolbar.border }}>
+            <div className="flex min-h-12 flex-wrap items-center gap-2 px-5 pt-2 pb-4">
                 <button type="button" className={secondaryButtonClass} style={{ color: theme.node.muted }} onClick={handleReset}>
                     <RotateCcw className="size-3.5" />重置参数
                 </button>
@@ -457,6 +441,7 @@ export function CanvasNodeCameraPanel({
                     <button
                         type="button"
                         role="switch"
+                        aria-label="启用摄像机控制"
                         aria-checked={enabled}
                         onClick={() => setEnabled((v) => !v)}
                         className="canvas-node-camera-switch relative inline-flex h-5 w-9 cursor-pointer items-center rounded-full border transition-colors"

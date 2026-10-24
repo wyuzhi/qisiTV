@@ -1,8 +1,10 @@
 import { buildLibTVVideoPreviewUrl } from "@/lib/canvas/libtv-import";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { parseVideoBoolean } from "@/lib/video-generation-options";
+import { isSilentDirectorClayVideo } from "@/lib/canvas/director/director-clay-output";
 
 export function inferVideoHasAudio(metadata: CanvasNodeData["metadata"]): boolean | undefined {
+    if (isSilentDirectorClayVideo(metadata)) return false;
     if (typeof metadata?.hasAudio === "boolean") return metadata.hasAudio;
     return parseVideoBoolean(metadata?.generateAudio);
 }

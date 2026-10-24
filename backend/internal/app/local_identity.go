@@ -2,6 +2,7 @@ package app
 
 import (
 	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/workspace"
 )
 
 // AuthUser is retained as a response-shape compatibility type. Local mode has
@@ -14,34 +15,19 @@ type AuthUser struct {
 	IdentityUsername string `json:"identityUsername,omitempty"`
 }
 
-func (s *Service) LocalWorkspaceOwner() (*model.User, error) {
+func (s *Service) WorkspaceIdentity() *workspace.Service {
 	if s == nil || s.repo == nil {
-		return nil, Unauthorized("本地工作区尚未初始化")
+		return workspace.NewService(nil)
 	}
-	value, err := s.repo.DefaultWorkspace()
-	if err != nil {
-		return nil, err
-	}
-	return localWorkspacePrincipal(value), nil
+	return workspace.NewService(s.repo)
+}
+
+func (s *Service) LocalWorkspaceOwner() (*model.User, error) {
+	return s.WorkspaceIdentity().LocalWorkspaceOwner()
 }
 
 func (s *Service) WorkspaceOwner(id string) (*model.User, error) {
-	value, err := s.repo.Workspace(id)
-	if err != nil {
-		return nil, err
-	}
-	return localWorkspacePrincipal(value), nil
-}
-
-func localWorkspacePrincipal(value *model.Workspace) *model.User {
-	if value == nil {
-		return nil
-	}
-	return &model.User{
-		ID: value.ID, Username: "local", DisplayName: value.Name,
-		Role: model.UserRoleAdmin, Status: model.UserStatusActive,
-		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
-	}
+	return s.WorkspaceIdentity().WorkspaceOwner(id)
 }
 
 func (s *Service) PublicAuthUser(user *model.User) (AuthUser, error) {

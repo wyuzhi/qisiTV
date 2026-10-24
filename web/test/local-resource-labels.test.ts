@@ -22,7 +22,7 @@ describe("local resource labels", () => {
 
     test("canvas text uploads use the same local-first media boundary", () => {
         const source = readFileSync(resolve(root, "src/pages/canvas/use-canvas-upload.ts"), "utf8");
-        expect(source).toContain('const uploaded = await uploadMediaFile(file, "file", onProgress);');
+        expect(source).toContain('const uploaded = await uploadMediaFile(file, "file", onProgress, guard.expectedScope);');
         expect(source).toContain("storageKey: uploaded.storageKey");
         expect(source).not.toContain('uploadResourceFile(file, "file"');
     });

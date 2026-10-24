@@ -2,13 +2,15 @@ import { create } from "zustand";
 import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
 
 import { nanoid } from "nanoid";
-import { sameCanvasContent } from "@/lib/canvas/canvas-content";
+import { sameCanvasContent, sameCanvasDocument } from "@/lib/canvas/canvas-content";
+import { traceCanvasGraph } from "@/lib/canvas/canvas-graph-trace";
 import { DEFAULT_CANVAS_BACKGROUND_MODE, normalizeCanvasAppearance, readCanvasAppearanceDefault, type CanvasAppearance } from "@/lib/canvas/canvas-appearance";
-import { useThemeStore } from "@/stores/use-theme-store";
+import { decideExternalCanvasRevision } from "@/lib/canvas/canvas-external-revision";
 import { parseCanvasStorageDocument, rebaseCanvasProjects, serializeCanvasStorageDocument, type CanvasStorageDocument } from "@/lib/canvas/canvas-storage-revision";
 import { localForageStorageForScope } from "@/lib/localforage-storage";
 import { scopedLocalStorage } from "@/lib/user-scope";
 import { getActiveUserScope } from "@/lib/user-scope";
+import { usesBrowserLocalResourceStore } from "@/services/workspace-resource-storage";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasStarterMode } from "@/lib/canvas/canvas-starter";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
@@ -47,6 +49,9 @@ export type CanvasFolder = {
     createdAt: string;
     updatedAt: string;
     coverDataUrl?: string;
+    coverResourceId?: string;
+    unsaved?: boolean;
+    saveError?: string;
 };
 
 type CanvasStore = {
@@ -58,6 +63,7 @@ type CanvasStore = {
     renameFolder: (id: string, name: string) => void;
     deleteFolder: (id: string) => void;
     setFolderCover: (id: string, coverDataUrl: string) => void;
+    replaceFolders: (folders: CanvasFolder[]) => void;
     moveProjectsToFolder: (ids: string[], folderId?: string) => void;
     importProject: (project: Partial<CanvasProject>, workspaceProjectId?: string) => string;
     openProject: (id: string) => CanvasProject | null;
@@ -70,18 +76,45 @@ type CanvasStore = {
 
 export const CANVAS_FOLDERS_KEY = "infinite-canvas:canvas_folders";
 
+function isStaleProcessCoverUrl(value: string) {
+    if (value.startsWith("blob:")) return true;
+    try {
+        const parsed = new URL(value, "http://127.0.0.1");
+        return (parsed.protocol === "http:" || parsed.protocol === "https:")
+            && (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost");
+    } catch {
+        return false;
+    }
+}
+
 function readCanvasFolders(): CanvasFolder[] {
     try {
         const value = scopedLocalStorage.getItem(CANVAS_FOLDERS_KEY);
         const parsed = value ? JSON.parse(value) : [];
-        return Array.isArray(parsed) ? parsed.filter((folder): folder is CanvasFolder => Boolean(folder && typeof folder.id === "string" && typeof folder.name === "string")) : [];
+        return Array.isArray(parsed) ? parsed.filter((folder): folder is CanvasFolder => Boolean(folder && typeof folder.id === "string" && typeof folder.name === "string")).map((folder) => {
+            const coverResourceId = typeof folder.coverResourceId === "string" ? folder.coverResourceId : undefined;
+            const coverDataUrl = typeof folder.coverDataUrl === "string" && !isStaleProcessCoverUrl(folder.coverDataUrl) ? folder.coverDataUrl : undefined;
+            return {
+                ...folder,
+                coverResourceId,
+                coverDataUrl,
+                unsaved: folder.unsaved === true ? true : undefined,
+                saveError: typeof folder.saveError === "string" && folder.saveError ? folder.saveError : undefined,
+            };
+        }) : [];
     } catch {
         return [];
     }
 }
 
 function writeCanvasFolders(folders: CanvasFolder[]) {
-    scopedLocalStorage.setItem(CANVAS_FOLDERS_KEY, JSON.stringify(folders));
+    const persistable = usesBrowserLocalResourceStore()
+        ? folders
+        : folders.map((folder) => ({
+            ...folder,
+            coverDataUrl: folder.coverDataUrl?.startsWith("data:") ? undefined : folder.coverDataUrl,
+        }));
+    scopedLocalStorage.setItem(CANVAS_FOLDERS_KEY, JSON.stringify(persistable));
 }
 
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
@@ -122,6 +155,8 @@ const canvasPersistTokens = new Map<string, number>();
 type CanvasGenerationPersistenceAttempt = {
     previousNodes?: CanvasNodeData[];
     nodes?: CanvasNodeData[];
+    previousConnections?: CanvasConnection[];
+    connections?: CanvasConnection[];
     previousChatSessions?: CanvasAssistantSession[];
     chatSessions?: CanvasAssistantSession[];
 };
@@ -175,8 +210,181 @@ function clearCanvasSaveTimer(scope: string) {
     canvasSaveTimers.delete(scope);
 }
 
-export function canvasStoreStorageRevision(scope: string) {
-    return observedCanvasPersists.get(scope)?.revision ?? 0;
+/** 该作用域最近一次落进浏览器存储的画布内容；没有记录返回 undefined。 */
+export function canvasDurableSnapshot(scope: string, projectId: string) {
+    return observedCanvasPersists.get(scope)?.projects.find((project) => project.id === projectId);
+}
+
+type CanvasDocumentBase = {
+    revision: number;
+    snapshot: CanvasProject;
+};
+
+const canvasDocumentBases = new Map<string, CanvasDocumentBase>();
+
+function canvasDocumentBaseKey(scope: string, projectId: string) {
+    return `${scope}\0${projectId}`;
+}
+
+/** 最近一次被服务端确认的画布基线（revision + 文档），与 IndexedDB 存储队列无关。 */
+export function recordCanvasDocumentBase(project: CanvasProject, scope = getActiveUserScope()) {
+    canvasDocumentBases.set(canvasDocumentBaseKey(scope, project.id), {
+        revision: project.revision ?? 0,
+        snapshot: project,
+    });
+}
+
+export function canvasDocumentBase(projectId: string, scope = getActiveUserScope()) {
+    return canvasDocumentBases.get(canvasDocumentBaseKey(scope, projectId));
+}
+
+export function clearCanvasDocumentBase(projectId: string, scope = getActiveUserScope()) {
+    canvasDocumentBases.delete(canvasDocumentBaseKey(scope, projectId));
+}
+
+export type CanvasExternalRevisionConflict = {
+    projectId: string;
+    localRevision: number;
+    remoteRevision: number;
+    detectedAt: string;
+    /** 被挡下的外部内容：保留为候选，用户选择「以最新为准」时使用它。 */
+    candidate: CanvasProject;
+};
+
+type CanvasExternalRevisionState = {
+    conflicts: Map<string, CanvasExternalRevisionConflict>;
+    /** 每次冲突集合变化都自增，供订阅方重新投影。 */
+    version: number;
+};
+
+const canvasExternalRevisionState: CanvasExternalRevisionState = { conflicts: new Map(), version: 0 };
+const canvasExternalRevisionListeners = new Set<() => void>();
+
+function canvasExternalRevisionKey(scope: string, projectId: string) {
+    return `${scope}\0${projectId}`;
+}
+
+export function canvasExternalRevisionVersion() {
+    return canvasExternalRevisionState.version;
+}
+
+export function subscribeCanvasExternalRevision(listener: () => void) {
+    canvasExternalRevisionListeners.add(listener);
+    return () => { canvasExternalRevisionListeners.delete(listener); };
+}
+
+function publishCanvasExternalRevision() {
+    canvasExternalRevisionState.version += 1;
+    for (const listener of [...canvasExternalRevisionListeners]) listener();
+}
+
+/** 读某个画布当前是否处于「外部写入被本地编辑挡住」的冲突态。 */
+export function canvasExternalRevisionConflict(scope: string, projectId: string) {
+    const key = canvasExternalRevisionKey(scope, projectId);
+    const conflict = canvasExternalRevisionState.conflicts.get(key);
+    if (!conflict) return undefined;
+    // 本地 revision 已前进说明这次提交被服务端接受，冲突前提消失；
+    // 否则不同入口之间会一直提示同一份早已过时的冲突。
+    const localRevision = useCanvasStore.getState().projects.find((project) => project.id === projectId)?.revision ?? 0;
+    if (localRevision > conflict.remoteRevision) {
+        canvasExternalRevisionState.conflicts.delete(key);
+        return undefined;
+    }
+    return conflict;
+}
+
+/** 冲突解除：本地编辑已被服务端接受，或用户选择以最新内容为准。 */
+export function clearCanvasExternalRevisionConflict(scope: string, projectId: string) {
+    if (!canvasExternalRevisionState.conflicts.delete(canvasExternalRevisionKey(scope, projectId))) return;
+    publishCanvasExternalRevision();
+}
+
+function markCanvasExternalRevisionConflict(scope: string, conflict: CanvasExternalRevisionConflict) {
+    const key = canvasExternalRevisionKey(scope, conflict.projectId);
+    const previous = canvasExternalRevisionState.conflicts.get(key);
+    if (previous && previous.localRevision === conflict.localRevision && previous.remoteRevision === conflict.remoteRevision && sameCanvasDocument(previous.candidate, conflict.candidate)) return;
+    canvasExternalRevisionState.conflicts.set(key, conflict);
+    publishCanvasExternalRevision();
+}
+
+type ApplyExternalCanvasRevisionOptions = {
+    scope?: string;
+    /**
+     * 本地是否有服务端尚未确认的编辑。必须由持有服务端确认基线与 HTTP 提交状态的
+     * 调用方给出；本地存储队列为空并不能证明服务端已经保存。
+     */
+    hasUnsyncedEdits: boolean;
+    onApplied?: (project: CanvasProject, previous: CanvasProject | undefined) => void;
+};
+
+/**
+ * 把一次外部写入（内置助手回合、CLI/MCP 操作）投影到本地存储与编辑器。
+ *
+ * 无未确认编辑时安全应用外部内容（保留本机视角与外观偏好），并通过 `onApplied`
+ * 把这次替换交给调用方通知编辑器；有未确认编辑时保留本地内容、把外部内容留作
+ * 候选并记录冲突，绝不覆盖用户正在编辑的值。
+ */
+export function applyExternalCanvasRevision(remote: CanvasProject, options: ApplyExternalCanvasRevisionOptions) {
+    const scope = options.scope ?? getActiveUserScope();
+    const previous = useCanvasStore.getState().projects.find((project) => project.id === remote.id)
+        ?? canvasMemoryStates.get(scope)?.projects.find((project) => project.id === remote.id);
+    return applyCanvasExternalDecision(scope, decideExternalCanvasRevision({
+        remote,
+        local: previous,
+        hasLocalEdits: options.hasUnsyncedEdits,
+    }), previous, options.onApplied);
+}
+
+/**
+ * 用户显式选择「以最新内容为准」：用保留的候选覆盖本地文档。
+ *
+ * 这是唯一允许在存在本地编辑时替换文档的路径，且只能由用户动作触发。
+ */
+export function acceptCanvasExternalRevisionCandidate(
+    projectId: string,
+    options: { scope?: string; onApplied?: (project: CanvasProject, previous: CanvasProject | undefined) => void } = {},
+) {
+    const scope = options.scope ?? getActiveUserScope();
+    const conflict = canvasExternalRevisionState.conflicts.get(canvasExternalRevisionKey(scope, projectId));
+    if (!conflict) return undefined;
+    const previous = useCanvasStore.getState().projects.find((project) => project.id === projectId);
+    return applyCanvasExternalDecision(scope, decideExternalCanvasRevision({
+        remote: conflict.candidate,
+        local: previous,
+        hasLocalEdits: false,
+    }), previous, options.onApplied);
+}
+
+function applyCanvasExternalDecision(
+    scope: string,
+    decision: ReturnType<typeof decideExternalCanvasRevision>,
+    previous: CanvasProject | undefined,
+    onApplied?: (project: CanvasProject, previous: CanvasProject | undefined) => void,
+) {
+    if (decision.kind === "keep-local") {
+        markCanvasExternalRevisionConflict(scope, {
+            projectId: decision.projectId,
+            localRevision: decision.localRevision,
+            remoteRevision: decision.remoteRevision,
+            detectedAt: new Date().toISOString(),
+            candidate: decision.candidate,
+        });
+        return decision;
+    }
+    const applied = decision.project;
+    useCanvasStore.setState((state) => ({
+        projects: state.projects.some((project) => project.id === applied.id)
+            ? state.projects.map((project) => project.id === applied.id ? applied : project)
+            : [...state.projects, applied],
+    }));
+    canvasMemoryStates.set(scope, { projects: useCanvasStore.getState().projects });
+    clearCanvasExternalRevisionConflict(scope, applied.id);
+    try {
+        onApplied?.(applied, previous);
+    } catch (error) {
+        console.error("画布刷新通知失败", { id: applied.id, error });
+    }
+    return decision;
 }
 
 export function recordCanvasStorageDocument(scope: string, document: CanvasStorageDocument) {
@@ -202,6 +410,10 @@ export async function commitPendingCanvasStorePersistenceLocked(scope: string) {
             baseRevision: queued.baseRevision,
         }).document;
         await storage.setItem(queued.name, serializeCanvasStorageDocument(rebased));
+        for (const project of rebased.state.projects) {
+            const previous = durable.state.projects.find((item) => item.id === project.id);
+            if (previous?.connections?.length !== project.connections?.length) traceCanvasGraph("cache.commit", { previous, queued: queued.state.projects.find((item) => item.id === project.id), saved: project });
+        }
         committed = rebased;
         recordCanvasStorageDocument(scope, rebased);
 
@@ -223,16 +435,6 @@ async function writeQueuedCanvasPersist(scope: string, _token: number) {
 export function pendingCanvasStorePersistence(scope: string) {
     const queued = queuedCanvasPersists.get(scope);
     return queued ? { projects: queued.state.projects, token: queued.token } : null;
-}
-
-export function rebasePendingCanvasStorePersistenceAfterGenerationCommitLocked(scope: string, committed: CanvasStorageDocument) {
-    const queued = queuedCanvasPersists.get(scope);
-    if (!queued) return;
-    const latestMemory = canvasMemoryStates.get(scope)?.projects ?? queued.state.projects;
-    // Dedicated commit 已确认 generation stamp；用同 scope 最新内存重新投影队列，避免同节点普通编辑被旧 durable 快照替换。
-    queued.baseProjects = committed.state.projects;
-    queued.baseRevision = committed.storageRevision;
-    queued.state = ordinaryCanvasPersistenceState(scope, { projects: latestMemory }, committed.state.projects);
 }
 
 export function withCanvasStorePersistenceSuppressed<T>(operation: () => T) {
@@ -318,10 +520,45 @@ function pendingGenerationAttempt(scope: string, projectId: string, effectKeys?:
     return undefined;
 }
 
+function rollbackGenerationConnections(live: CanvasConnection[], attempt: CanvasGenerationPersistenceAttempt) {
+    if (!attempt.previousConnections || !attempt.connections) return live;
+    const previous = new Map(attempt.previousConnections.map((edge) => [edge.id, edge]));
+    const attempted = new Map(attempt.connections.map((edge) => [edge.id, edge]));
+    const liveIds = new Set(live.map((edge) => edge.id));
+    const result: CanvasConnection[] = [];
+    for (const edge of live) {
+        const before = previous.get(edge.id);
+        const after = attempted.get(edge.id);
+        if (samePersistenceValue(before, after)) result.push(edge);
+        else if (before) result.push(rollbackGenerationValue(before, after, edge, before) as CanvasConnection);
+        // An edge created by this uncommitted effect must not escape through ordinary persistence.
+    }
+    for (const edge of attempt.previousConnections) {
+        if (!attempted.has(edge.id) && !liveIds.has(edge.id)) result.push(edge);
+    }
+    return result;
+}
+
 function ordinaryCanvasProjectSnapshot(scope: string, project: CanvasProject, durableProject: CanvasProject | undefined) {
     if (!hasGenerationEffectKeys(project) && !hasGenerationEffectKeys(durableProject)) return project;
     const durableNodes = new Map((durableProject?.nodes || []).map((node) => [node.id, node]));
     const durableSessions = new Map((durableProject?.chatSessions || []).map((session) => [session.id, session]));
+    // A confirmed backend projection may be ahead of IndexedDB. Its stamps are committed too;
+    // treating them as speculative rolls the projection back while writing its new revision.
+    const confirmed = canvasDocumentBase(project.id, scope)?.snapshot;
+    for (const node of confirmed?.nodes || []) {
+        const cachedKeys = durableNodes.get(node.id)?.metadata?.generationEffectKeys;
+        if (hasUnconfirmedGenerationKey(node.metadata?.generationEffectKeys, cachedKeys)) {
+            durableNodes.set(node.id, { ...node, metadata: { ...node.metadata, generationEffectKeys: [...new Set([...(cachedKeys || []), ...(node.metadata?.generationEffectKeys || [])])] } });
+        }
+    }
+    for (const session of confirmed?.chatSessions || []) {
+        const cachedKeys = durableSessions.get(session.id)?.generationEffectKeys;
+        if (hasUnconfirmedGenerationKey(session.generationEffectKeys, cachedKeys)) {
+            durableSessions.set(session.id, { ...session, generationEffectKeys: [...new Set([...(cachedKeys || []), ...(session.generationEffectKeys || [])])] });
+        }
+    }
+    const unconfirmedAttempts = new Set<CanvasGenerationPersistenceAttempt>();
     let changed = false;
     let hasUnconfirmedGeneration = false;
     const nodes: CanvasNodeData[] = [];
@@ -332,8 +569,9 @@ function ordinaryCanvasProjectSnapshot(scope: string, project: CanvasProject, du
         if (durableProject && hasUnconfirmedGenerationKey(localKeys, durableKeys)) {
             hasUnconfirmedGeneration = true;
             changed = true;
+            const attempt = pendingGenerationAttempt(scope, project.id, localKeys);
+            if (attempt) unconfirmedAttempts.add(attempt);
             if (durableNode) {
-                const attempt = pendingGenerationAttempt(scope, project.id, localKeys);
                 const previousNode = attempt?.previousNodes?.find((candidate) => candidate.id === node.id);
                 const attemptedNode = attempt?.nodes?.find((candidate) => candidate.id === node.id);
                 // durableNode comes from the observed storage snapshot. Never mutate that snapshot while
@@ -359,14 +597,17 @@ function ordinaryCanvasProjectSnapshot(scope: string, project: CanvasProject, du
         nodes.push({ ...node, metadata });
     }
     const chatSessions: CanvasAssistantSession[] = [];
+    // Backend-created canvases may omit assistant sessions. Treat the missing
+    // optional collection like an empty one, as document hydration does.
     for (const session of project.chatSessions || []) {
         const durableSession = durableSessions.get(session.id);
         const durableKeys = durableSession?.generationEffectKeys;
         if (durableProject && hasUnconfirmedGenerationKey(session.generationEffectKeys, durableKeys)) {
             hasUnconfirmedGeneration = true;
             changed = true;
+            const attempt = pendingGenerationAttempt(scope, project.id, session.generationEffectKeys);
+            if (attempt) unconfirmedAttempts.add(attempt);
             if (durableSession) {
-                const attempt = pendingGenerationAttempt(scope, project.id, session.generationEffectKeys);
                 const previousSession = attempt?.previousChatSessions?.find((candidate) => candidate.id === session.id);
                 const attemptedSession = attempt?.chatSessions?.find((candidate) => candidate.id === session.id);
                 const rolledBack = previousSession && attemptedSession
@@ -389,11 +630,13 @@ function ordinaryCanvasProjectSnapshot(scope: string, project: CanvasProject, du
         chatSessions.push(nextSession);
     }
     if (durableProject && hasUnconfirmedGeneration) {
+        let connections = project.connections;
+        for (const attempt of unconfirmedAttempts) connections = rollbackGenerationConnections(connections, attempt);
+        const nodeIds = new Set(nodes.map((node) => node.id));
         return {
             ...project,
             nodes,
-            // Connection/active-chat records carry no effect stamp provenance, so keep them fail-closed while any generation entity is unconfirmed.
-            connections: durableProject.connections,
+            connections: connections.filter((edge) => nodeIds.has(edge.fromNodeId) && nodeIds.has(edge.toNodeId)),
             chatSessions,
             activeChatId: durableProject.activeChatId,
         };
@@ -421,14 +664,6 @@ function ordinaryCanvasPersistenceState(scope: string, state: PersistedCanvasSta
     };
 }
 
-export function reconcileCanvasGenerationFailure(scope: string, durableProjects: CanvasProject[]) {
-    if (getActiveUserScope() !== scope) return;
-    const projects = ordinaryCanvasPersistenceState(scope, { projects: useCanvasStore.getState().projects }, durableProjects).projects;
-    withCanvasStorePersistenceSuppressed(() => {
-        useCanvasStore.setState({ projects });
-    });
-}
-
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
         const scope = getActiveUserScope();
@@ -440,6 +675,7 @@ const canvasStorage: PersistStorage<CanvasStore> = {
         }
         const document = parseCanvasStorageDocument(value);
         const state = document.state as PersistedCanvasState;
+        for (const project of state.projects) traceCanvasGraph("cache.rehydrate", { project });
         canvasMemoryStates.set(scope, state);
         recordCanvasStorageDocument(scope, document);
         return document as unknown as StorageValue<CanvasStore>;
@@ -490,6 +726,12 @@ export async function flushCanvasStorePersistence() {
     }
 }
 
+export function hasActiveCanvasStorePersistence() {
+    // Failed queues remain retryable, but only a timer or storage tail can
+    // still perform IO without another explicit save request.
+    return canvasStorageTails.size > 0 || canvasSaveTimers.size > 0;
+}
+
 export const useCanvasStore = create<CanvasStore>()(
     persist(
         (set, get) => ({
@@ -512,7 +754,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     connections: [],
                     chatSessions: [],
                     activeChatId: null,
-                    appearance: appearanceDefault?.appearance ?? { mode: useThemeStore.getState().theme },
+                    appearance: appearanceDefault?.appearance ?? { mode: "follow" },
                     backgroundMode: appearanceDefault?.backgroundMode || DEFAULT_CANVAS_BACKGROUND_MODE,
                     showImageInfo: false,
                     viewport: initialViewport,
@@ -549,6 +791,10 @@ export const useCanvasStore = create<CanvasStore>()(
                 writeCanvasFolders(folders);
                 return { folders };
             }),
+            replaceFolders: (folders) => {
+                writeCanvasFolders(folders);
+                set({ folders });
+            },
             moveProjectsToFolder: (ids, folderId) => set((state) => ({ projects: state.projects.map((project) => ids.includes(project.id) ? { ...project, folderId, updatedAt: new Date().toISOString() } : project) })),
             importProject: (source, workspaceProjectId) => {
                 const now = new Date().toISOString();
@@ -603,6 +849,7 @@ export const useCanvasStore = create<CanvasStore>()(
                 const next = { ...current, ...patch };
                 const contentChanged = !sameCanvasContent(current, next);
                 if (!contentChanged && samePersistenceValue(current.viewport, next.viewport)) return state;
+                if (patch.connections && current.connections.length !== patch.connections.length) traceCanvasGraph("store.updateProject", { previous: current, next });
                 if (contentChanged) next.updatedAt = new Date().toISOString();
                 return { projects: state.projects.map((project) => project === current ? next : project) };
             }),

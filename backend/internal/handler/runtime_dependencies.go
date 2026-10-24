@@ -3,13 +3,21 @@ package handler
 import (
 	"context"
 	"mime/multipart"
+	"net/http"
 	"time"
 
 	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/appearance"
+	"qisitv/backend/internal/assistantruntime"
 	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/conversation"
+	"qisitv/backend/internal/diagnostics"
+	"qisitv/backend/internal/eagle"
 	"qisitv/backend/internal/localapp"
 	"qisitv/backend/internal/model"
+	localproject "qisitv/backend/internal/project"
 	localtask "qisitv/backend/internal/task"
+	"qisitv/backend/internal/textreplay"
 	"qisitv/backend/internal/workspace"
 
 	"github.com/gin-gonic/gin"
@@ -41,19 +49,34 @@ type RuntimeDependencies struct {
 	Projects           localapp.ProjectPort
 	Tasks              localapp.TaskPort
 	Generation         localapp.GenerationPort
-	BeefAPI            *beefapi.Service
+	Conversations      *conversation.Service
+	// TextReplay is the archive owned by the runtime; legacy callers use its app facade.
+	TextReplay  textreplay.API
+	BeefAPI     *beefapi.Service
+	Eagle       *eagle.Client
+	Diagnostics *diagnostics.Service
+	Appearance  *appearance.Service
+	// AssistantHost is the per-runtime supervisor for the built-in agent-host child.
+	// Separate runtimes must not share this value.
+	AssistantHost *assistantruntime.Host
+	// DesktopTrust verifies both the launch token and the separate Wails UI bootstrap credential.
+	// 桌面形态用它代替开发引导开关签发 UI 会话；服务端形态为 nil。
+	DesktopTrust func(*http.Request) bool
 }
 
 type serviceRuntimeAdapter struct {
-	allowRequest        func(context.Context, string, int, time.Duration) (bool, error)
-	requestRetryAfter   func(context.Context, string, time.Duration) time.Duration
-	readModelConfig     func() ([]byte, error)
-	saveModelConfig     func([]byte) error
-	resources           func(string, int) ([]model.Resource, error)
-	uploadLocalResource func(string, *multipart.FileHeader, string, int, int, int64, ...string) (*model.Resource, error)
-	listProjects        func(string) ([]app.ProjectSummary, error)
-	tasksWithOptions    func(string, localtask.ListOptions) ([]localtask.Summary, error)
-	createTask          func(string, localtask.CreateRequest) (*model.Task, error)
+	allowRequest                func(context.Context, string, int, time.Duration) (bool, error)
+	requestRetryAfter           func(context.Context, string, time.Duration) time.Duration
+	readModelConfig             func() ([]byte, error)
+	saveModelConfig             func([]byte) error
+	resources                   func(string, int) ([]model.Resource, error)
+	uploadLocalResource         func(string, *multipart.FileHeader, string, int, int, int64, ...string) (*model.Resource, error)
+	listProjects                func(string) ([]localproject.Summary, error)
+	tasksWithOptions            func(string, localtask.ListOptions) ([]localtask.Summary, error)
+	createTask                  func(string, localtask.CreateRequest) (*model.Task, error)
+	createTimelineRender        func(string, localtask.TimelineRenderCreateRequest) (*model.Task, error)
+	createTimelineTranscription func(string, localtask.TimelineTranscriptionCreateRequest) (*model.Task, error)
+	createDepthCapture          func(string, localtask.DepthCaptureCreateRequest) (*model.Task, error)
 }
 
 func newServiceRuntimeAdapter(value *app.Service) serviceRuntimeAdapter {
@@ -62,6 +85,8 @@ func newServiceRuntimeAdapter(value *app.Service) serviceRuntimeAdapter {
 		readModelConfig: value.ReadLocalModelConfig, saveModelConfig: value.SaveLocalModelConfig,
 		resources: value.Resources, uploadLocalResource: value.UploadLocalResource,
 		listProjects: value.ListProjects, tasksWithOptions: value.TasksWithOptions, createTask: value.CreateLocalTask,
+		createTimelineRender: value.CreateTimelineRenderTask, createTimelineTranscription: value.CreateTimelineTranscriptionTask,
+		createDepthCapture: value.CreateDepthCaptureTask,
 	}
 }
 
@@ -89,7 +114,7 @@ func (a serviceRuntimeAdapter) UploadLocalResource(userID string, header *multip
 	return a.uploadLocalResource(userID, header, kind, width, height, durationMs, identity...)
 }
 
-func (a serviceRuntimeAdapter) ListProjects(userID string) ([]app.ProjectSummary, error) {
+func (a serviceRuntimeAdapter) ListProjects(userID string) ([]localproject.Summary, error) {
 	return a.listProjects(userID)
 }
 
@@ -99,6 +124,18 @@ func (a serviceRuntimeAdapter) TasksWithOptions(userID string, options localtask
 
 func (a serviceRuntimeAdapter) CreateTask(userID string, request localtask.CreateRequest) (*model.Task, error) {
 	return a.createTask(userID, request)
+}
+
+func (a serviceRuntimeAdapter) CreateTimelineRenderTask(userID string, request localtask.TimelineRenderCreateRequest) (*model.Task, error) {
+	return a.createTimelineRender(userID, request)
+}
+
+func (a serviceRuntimeAdapter) CreateTimelineTranscriptionTask(userID string, request localtask.TimelineTranscriptionCreateRequest) (*model.Task, error) {
+	return a.createTimelineTranscription(userID, request)
+}
+
+func (a serviceRuntimeAdapter) CreateDepthCaptureTask(userID string, request localtask.DepthCaptureCreateRequest) (*model.Task, error) {
+	return a.createDepthCapture(userID, request)
 }
 
 func requestAssetPort(c *gin.Context, fallback *app.Service) localapp.AssetPort {
@@ -134,6 +171,13 @@ func requestProviderConfig(c *gin.Context, fallback *app.Service) ProviderConfig
 		return dependencies.ProviderConfig
 	}
 	return newServiceRuntimeAdapter(fallback)
+}
+
+func requestTextReplay(c *gin.Context, fallback *app.Service) textReplayAPI {
+	if dependencies, ok := runtimeDependencies(c); ok && dependencies.TextReplay != nil {
+		return dependencies.TextReplay
+	}
+	return appTextReplayAPI{fallback}
 }
 
 const runtimeDependenciesKey = "canvas.runtime-dependencies"

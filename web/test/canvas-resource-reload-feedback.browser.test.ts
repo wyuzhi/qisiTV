@@ -3,7 +3,11 @@ import { existsSync } from "node:fs";
 import { chromium } from "playwright";
 
 test("result recovery feedback remains visible when Ant notifications are hidden and can be dismissed", async () => {
-    const build = await Bun.build({ entrypoints: [import.meta.dir + "/fixtures/resource-reload-feedback-harness.tsx"], target: "browser", define: { "import.meta.env": "{}", "process.env.NODE_ENV": '"production"' } });
+    const build = await Bun.build({ entrypoints: [import.meta.dir + "/fixtures/resource-reload-feedback-harness.tsx"], target: "browser", define: { "import.meta.env": "{}", "process.env.NODE_ENV": '"production"' },
+        plugins: [{ name: "source-alias", setup(builder) {
+            builder.onResolve({ filter: /^@\// }, (args) => ({ path: Bun.resolveSync("../src/" + args.path.slice(2), import.meta.dir) }));
+        } }],
+    });
     if (!build.success) throw new Error(build.logs.join("\n"));
     const script = await build.outputs[0].text();
     const server = Bun.serve({ port: 0, fetch: (request) => new URL(request.url).pathname === "/harness.js" ? new Response(script, { headers: { "Content-Type": "text/javascript" } }) : new Response('<div id="root"></div><script type="module" src="/harness.js"></script>', { headers: { "Content-Type": "text/html" } }) });

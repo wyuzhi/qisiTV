@@ -9,6 +9,7 @@ import type { CanvasConnection, CanvasNodeData } from "@/types/canvas";
 
 export type CanvasGenerationExecutorDependencies = {
     projectId: string;
+    nodesRef: { current: CanvasNodeData[] };
     setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
     setConnections: Dispatch<SetStateAction<CanvasConnection[]>>;
     setSelectedNodeIds: Dispatch<SetStateAction<Set<string>>>;
@@ -19,6 +20,7 @@ export type CanvasGenerationExecutorDependencies = {
     bindGenerationTask: (targetNodeId: string, task: GenerationTask) => void;
     applyGenerationTaskResult: (targetNodeId: string, task: GenerationTask) => Promise<void>;
     showError: (content: string) => void;
+    resolveReferenceLinks?: import("@/services/api/reference-link-replacement").ResolveReferenceLinks;
 };
 
 export type CanvasGenerationExecution = CanvasGenerationExecutorDependencies & {
@@ -36,5 +38,7 @@ export type CanvasGenerationExecution = CanvasGenerationExecutorDependencies & {
     skillMetadata: SkillRuntimeMetadata;
     taskContext?: { conversationId?: string; messageId?: string };
     retryContext?: { retryOf: string; attemptGroupId: string; clientOperationId: string };
+    clientOperationId?: string;
+    onSubmissionPlan?: (manifest: import("@/services/api/assistant-continuation").AssistantSubmissionManifest) => Promise<void>;
     registerPendingNodeIds: (nodeIds: string[]) => void;
 };

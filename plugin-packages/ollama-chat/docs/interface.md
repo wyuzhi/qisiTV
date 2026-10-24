@@ -14,7 +14,7 @@
 
 | 字段 | 类型 | 必填 | 含义 |
 | --- | --- | --- | --- |
-| `apiKey` | secret | 是 | API Key |
+| `apiKey` | secret | 否 | API Key。Ollama 默认无鉴权，可留空。 |
 
 ## 统一字段映射
 
@@ -86,7 +86,7 @@
 
 ```json
 {
-  "apiVersion": "qisitv.plugin/v2",
+  "apiVersion": "beeftv.plugin/v2",
   "id": "ollama-chat",
   "name": "Ollama Chat",
   "version": "2.0.0",
@@ -103,7 +103,7 @@
         "name": "apiKey",
         "type": "secret",
         "label": "API Key",
-        "required": true
+        "required": false
       }
     ]
   },

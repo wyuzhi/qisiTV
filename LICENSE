@@ -6,10 +6,12 @@ the MIT License below. It does not override the license of later upstream
 additions or third-party components.
 
 Starting with qisiTV v1.5.17, selected additions adapted from BeefTV commit
-8a14a160afa4e248eddaf966857b920038a15e64 are covered by Part A of the
+8a14a160afa4e248eddaf966857b920038a15e64, and in the 2.0 web-engine integration
+the additions from BeefTV v2.0.3 (e13263c948fbbada3724442fc2c9ee6aaea6cfa2),
+are covered by Part A of the
 BeefTV Source Available License 1.0, reproduced in full in
 licenses/BeefTV-Source-Available-1.0.txt. See NOTICE and
-docs/upstream-sync-20261024.md for provenance and the affected components.
+docs/upstream-sync-20261024.md and docs/design/web-feature-parity.md for provenance.
 Those portions are not offered under MIT. Separate deployment permissions
 do not grant downstream recipients broader rights unless expressly stated.
 

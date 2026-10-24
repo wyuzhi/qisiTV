@@ -8,11 +8,16 @@ const MIME_EXTENSIONS: Record<string, string> = {
     "image/webp": "webp",
     "image/gif": "gif",
     "image/svg+xml": "svg",
+    "image/avif": "avif",
+    "image/bmp": "bmp",
+    "image/tiff": "tiff",
     "video/mp4": "mp4",
     "video/webm": "webm",
     "video/quicktime": "mov",
     "video/ogg": "ogv",
     "video/mpeg": "mpeg",
+    "video/x-msvideo": "avi",
+    "video/x-matroska": "mkv",
     "audio/mpeg": "mp3",
     "audio/mp4": "m4a",
     "audio/wav": "wav",
@@ -24,9 +29,11 @@ const MIME_EXTENSIONS: Record<string, string> = {
     "audio/flac": "flac",
     "audio/ogg": "ogg",
     "audio/opus": "opus",
+    "audio/webm": "webm",
+    "audio/x-m4a": "m4a",
 };
 
-const CONTENT_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "svg", "mp4", "webm", "mov", "ogv", "ogg", "mpeg", "mpg", "mp3", "m4a", "wav", "aac", "flac", "opus"]);
+const CONTENT_EXTENSIONS = new Set(Object.values(MIME_EXTENSIONS).concat(["jpeg", "mpg"]));
 
 export function buildCanvasMediaDownloadFileName(canvasTitle: string, node: CanvasNodeData, now = new Date()) {
     const canvasName = safeFileNamePart(canvasTitle, "未命名画布");
@@ -45,9 +52,12 @@ export function sanitizeDownloadFileName(value: string, fallback = "未命名文
 }
 
 export function canvasMediaFileExtension(node: CanvasNodeData) {
-    return extensionFromMimeType(node.metadata?.mimeType)
-        || extensionFromContent(node.metadata?.content)
+    return mediaFileExtension(node.metadata?.mimeType, node.metadata?.content)
         || defaultExtension(node.type);
+}
+
+export function mediaFileExtension(mimeType?: string, content?: string) {
+    return extensionFromMimeType(mimeType) || extensionFromContent(content);
 }
 
 function extensionFromMimeType(mimeType?: string) {

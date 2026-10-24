@@ -67,14 +67,16 @@
 
 同步 /v1/audio/speech 返回原始音频流，由 binaryPayload 包装为统一音频结果。
 
-<!-- QISITV_PLUGIN_MANIFEST_START -->
+MiniMax Music 通过企业接口生成时，输出固定为 MP3，默认 44.1 kHz、256 kbps。较慢的生成请求使用 SSE 心跳等待结果；只有收到完成事件并取得有效音频后，任务才成功。中断、错误事件或非音频响应均按失败处理，不自动重发生成。
+
+<!-- BEEFTV_PLUGIN_MANIFEST_START -->
 ## Manifest 完整接口定义
 
 以下 JSON 与插件包内实际 `manifest.json` 逐字段一致，覆盖插件身份、权限、配置、鉴权、参数、校验、创建、Agent、查询、取消、结果下载、响应和 Agent 响应映射。`documentation` 字段的值就是当前完整文档；为避免文档在自身内部无限递归，JSON 中仅用等义占位文本表示正文。
 
 ```json
 {
-  "apiVersion": "qisitv.plugin/v2",
+  "apiVersion": "beeftv.plugin/v2",
   "id": "openai-audio",
   "name": "OpenAI Audio Speech",
   "version": "2.0.0",
@@ -210,6 +212,191 @@
                     "$ref": "request.providerOptions.openai-audio.instructions"
                   }
                 ]
+              }
+            },
+            "metadata": {
+              "$omitEmpty": {
+                "$ref": "request.extra.audioMetadata"
+              }
+            },
+            "stream_format": {
+              "$omitEmpty": {
+                "$ref": "request.extra.audioStreamFormat"
+              }
+            }
+          }
+        },
+        "response": {
+          "binaryPayload": true,
+          "resultKind": "audio",
+          "status": "succeeded",
+          "errorPaths": [
+            "error.code"
+          ],
+          "messagePaths": [
+            "error.message"
+          ]
+        }
+      }
+    ]
+  }
+}
+```
+<!-- BEEFTV_PLUGIN_MANIFEST_END -->
+
+<!-- QISITV_PLUGIN_MANIFEST_START -->
+## Manifest 完整接口定义
+
+以下 JSON 与插件包内实际 `manifest.json` 逐字段一致，覆盖插件身份、权限、配置、鉴权、参数、校验、创建、Agent、查询、取消、结果下载、响应和 Agent 响应映射。`documentation` 字段的值就是当前完整文档；为避免文档在自身内部无限递归，JSON 中仅用等义占位文本表示正文。
+
+```json
+{
+  "apiVersion": "beeftv.plugin/v2",
+  "id": "openai-audio",
+  "name": "OpenAI Audio Speech",
+  "version": "2.0.0",
+  "author": "BeefTV Contributors",
+  "description": "OpenAI Audio Speech 独立请求协议插件。",
+  "documentation": "<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>",
+  "permissions": [
+    "generation.run",
+    "media.read"
+  ],
+  "configuration": {
+    "fields": [
+      {
+        "name": "apiKey",
+        "type": "secret",
+        "label": "API Key",
+        "required": true
+      }
+    ]
+  },
+  "contributes": {
+    "providers": [
+      {
+        "id": "openai-audio",
+        "label": "OpenAI Audio Speech",
+        "capabilities": [
+          "audio"
+        ],
+        "scopes": [
+          "admin.system-channel",
+          "user.custom-channel",
+          "canvas",
+          "creation",
+          "agent"
+        ],
+        "baseUrl": "https://api.openai.com",
+        "requiresPublicMediaUrls": false,
+        "auth": {
+          "type": "bearer",
+          "field": "apiKey"
+        },
+        "parameters": [
+          {
+            "name": "model",
+            "type": "string",
+            "required": true,
+            "mapping": "model",
+            "description": "音频模型 ID。"
+          },
+          {
+            "name": "prompt",
+            "type": "string",
+            "required": true,
+            "mapping": "input",
+            "description": "待合成文本。"
+          },
+          {
+            "name": "providerOptions",
+            "type": "object",
+            "required": false,
+            "mapping": "provider-specific fields",
+            "description": "插件命名空间内的厂商扩展字段。"
+          }
+        ],
+        "create": {
+          "method": "POST",
+          "path": "/v1/audio/speech",
+          "contentType": "application/json",
+          "body": {
+            "model": {
+              "$ref": "request.model"
+            },
+            "input": {
+              "$ref": "request.prompt"
+            },
+            "voice": {
+              "$coalesce": [
+                {
+                  "$ref": "request.extra.audioVoice"
+                },
+                {
+                  "$ref": "request.providerOptions.openai-audio.voice"
+                },
+                "alloy"
+              ]
+            },
+            "response_format": {
+              "$coalesce": [
+                {
+                  "$ref": "request.extra.audioFormat"
+                },
+                {
+                  "$ref": "request.providerOptions.openai-audio.response_format"
+                },
+                "mp3"
+              ]
+            },
+            "speed": {
+              "$coalesce": [
+                {
+                  "$if": {
+                    "condition": {
+                      "$ne": [
+                        {
+                          "$toFloat": {
+                            "$ref": "request.extra.audioSpeed"
+                          }
+                        },
+                        0
+                      ]
+                    },
+                    "then": {
+                      "$toFloat": {
+                        "$ref": "request.extra.audioSpeed"
+                      }
+                    },
+                    "else": null
+                  }
+                },
+                {
+                  "$ref": "request.providerOptions.openai-audio.speed"
+                },
+                1
+              ]
+            },
+            "instructions": {
+              "$omitEmpty": {
+                "$coalesce": [
+                  {
+                    "$ref": "request.extra.audioInstructions"
+                  },
+                  {
+                    "$ref": "request.providerOptions.openai-audio.instructions"
+                  }
+                ]
+              }
+            },
+            "metadata": {
+              "$omitEmpty": {
+                "$ref": "request.extra.audioMetadata"
+              }
+            },
+            "stream_format": {
+              "$omitEmpty": {
+                "$ref": "request.extra.audioStreamFormat"
               }
             }
           }

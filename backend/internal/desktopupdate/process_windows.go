@@ -68,14 +68,15 @@ func detachedSysProcAttr() *syscall.SysProcAttr {
 }
 
 func lockInstall(path string) (func(), error) {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	name, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, err
 	}
-	var overlapped windows.Overlapped
-	if err := windows.LockFileEx(windows.Handle(file.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &overlapped); err != nil {
-		_ = file.Close()
+	// Exclusive sharing also excludes old helpers that use LockFileEx. Windows
+	// deletes the file atomically when this handle closes, including on a crash.
+	handle, err := windows.CreateFile(name, windows.GENERIC_READ|windows.GENERIC_WRITE|windows.DELETE, 0, nil, windows.OPEN_ALWAYS, windows.FILE_ATTRIBUTE_NORMAL|windows.FILE_FLAG_DELETE_ON_CLOSE|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
 		return nil, err
 	}
-	return func() { _ = windows.UnlockFileEx(windows.Handle(file.Fd()), 0, 1, 0, &overlapped); _ = file.Close() }, nil
+	return func() { _ = windows.CloseHandle(handle) }, nil
 }

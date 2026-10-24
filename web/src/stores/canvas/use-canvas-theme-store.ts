@@ -1,26 +1,35 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
-import type { ThemeName } from "@/stores/use-theme-store";
-import { normalizeTheme, useThemeStore } from "@/stores/use-theme-store";
 import { useLayoutEffect } from "react";
+import { canvasAppearanceBaseTheme, type CanvasAppearance } from "@/lib/canvas/canvas-appearance";
+import { normalizeTheme, useThemeStore, type ThemeName } from "@/stores/use-theme-store";
 
-type CanvasThemeStore = { theme: ThemeName; active: boolean; setTheme: (theme?: string) => void };
+type CanvasThemeStore = {
+    theme: ThemeName;
+    active: boolean;
+    followGlobal: boolean;
+    setTheme: (theme?: string) => void;
+    setAppearance: (appearance: CanvasAppearance) => void;
+};
 
-/** 画布外观是编辑器状态，不能写入用户工作台的全局主题。 */
-export const useCanvasThemeStore = create<CanvasThemeStore>()(
-    persist(
-        (set) => ({ theme: "dark", active: false, setTheme: (theme) => set({ theme: normalizeTheme(theme) }) }),
-        {
-            // v2 intentionally drops the legacy key: older builds could persist
-            // an incidental light fallback and later revive it while opening a canvas.
-            name: "infinite-canvas:canvas-theme:v2",
-            partialize: ({ theme }) => ({ theme }),
-            merge: (persisted, current) => ({ ...current, theme: normalizeTheme((persisted as Partial<CanvasThemeStore> | null)?.theme) }),
-        },
-    ),
-);
+// 外观选择由画布持久化；这里只保存当前编辑器解析后的主题，不另存历史快照。
+export const useCanvasThemeStore = create<CanvasThemeStore>()((set) => ({
+    theme: useThemeStore.getState().theme,
+    active: false,
+    followGlobal: true,
+    setTheme: (theme) => set({ theme: normalizeTheme(theme), followGlobal: false }),
+    setAppearance: (appearance) => set({
+        followGlobal: appearance.mode === "follow",
+        theme: canvasAppearanceBaseTheme(appearance, useThemeStore.getState().theme),
+    }),
+}));
 
-/** 编辑器卸载后自动恢复工作台的主题偏好；包括 body 上的 AntD 浮层。 */
+// 工具栏和 body 上的 AntD 浮层都使用同一次主题更新。
+useThemeStore.subscribe((state, previous) => {
+    if (state.theme !== previous.theme && useCanvasThemeStore.getState().followGlobal) {
+        useCanvasThemeStore.setState({ theme: state.theme });
+    }
+});
+
 export function useCanvasThemeScope() {
     useLayoutEffect(() => {
         useCanvasThemeStore.setState({ active: true });

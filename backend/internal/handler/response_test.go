@@ -31,6 +31,25 @@ func TestFailServiceProjectsAppError(t *testing.T) {
 	}
 }
 
+func TestFailServicePreservesPublicReferenceRequirements(t *testing.T) {
+	recorder, context := responseTestContext()
+	failService(context, &app.AppError{Status: 400, Code: 400, Reason: "reference_media_requires_url", Message: "参考音频需要链接", Details: map[string]any{"requiredReferences": []map[string]any{{"kind": "audio", "index": 0}}}})
+	var envelope struct {
+		Details struct {
+			RequiredReferences []struct {
+				Kind  string
+				Index int
+			} `json:"requiredReferences"`
+		} `json:"details"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Details.RequiredReferences) != 1 || envelope.Details.RequiredReferences[0].Kind != "audio" {
+		t.Fatal(recorder.Body.String())
+	}
+}
+
 func TestFailServiceQuotaExceeded(t *testing.T) {
 	recorder, context := responseTestContext()
 	failService(context, app.QuotaExceeded("账号素材数量已达到 100 个上限"))

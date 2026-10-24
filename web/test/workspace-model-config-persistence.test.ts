@@ -2,9 +2,52 @@ import { expect, test } from "bun:test";
 
 import * as workspaceBootstrap from "../src/components/workspace/workspace-bootstrap-hydrator";
 import { localWorkspaceConfig } from "../src/lib/user-session";
-import { applyFetchedChannelModelCatalog, withUpdatedLikeAIChannel } from "../src/pages/settings/channel-settings-pane";
+import { applyFetchedChannelModelCatalog } from "../src/pages/settings/channel-settings-pane";
 import { createModelChannel, defaultConfig, type AiConfig } from "../src/stores/use-config-store";
 import { createModelConfigRepository } from "../src/services/model-config-repository";
+
+test("an unacknowledged config write remains dirty and can be retried", async () => {
+    let acknowledge = false;
+    const repository = createModelConfigRepository({
+        read: async () => ({ config: defaultConfig, revision: 1, health: "ready", source: "builtin+local" }),
+        write: async () => ({ saved: acknowledge, revision: acknowledge ? 2 : 1 }),
+    });
+    await repository.hydrate();
+    await repository.commit({ ...defaultConfig, channels: [] });
+    expect(repository.getState()).toMatchObject({ status: "error", dirty: true, revision: 1 });
+    acknowledge = true;
+    await repository.flush();
+    expect(repository.getState()).toMatchObject({ status: "saved", dirty: false, revision: 2 });
+});
+
+test("an acknowledged no-op save can keep its revision", async () => {
+    const repository = createModelConfigRepository({
+        read: async () => ({ config: defaultConfig, revision: 3, health: "ready", source: "builtin+local" }),
+        write: async () => ({ saved: true, revision: 3 }),
+    });
+    await repository.hydrate();
+    await repository.commit(defaultConfig);
+    expect(repository.getState()).toMatchObject({ status: "saved", dirty: false, revision: 3 });
+});
+
+test("a deleted custom channel stays absent after a new repository hydrates", async () => {
+    let stored = { ...defaultConfig, channels: [createModelChannel({ id: "custom", apiKey: "dummy", models: ["chat"] })] };
+    let revision = 3;
+    const dependencies = {
+        read: async () => ({ config: structuredClone(stored), revision, health: "ready" as const, source: "builtin+local" as const }),
+        write: async (config: AiConfig, expectedRevision: number) => {
+            expect(expectedRevision).toBe(revision);
+            stored = structuredClone(config);
+            return { saved: true, revision: ++revision };
+        },
+    };
+    const repository = createModelConfigRepository(dependencies);
+    await repository.hydrate();
+    await repository.commit({ ...stored, channels: [] });
+    const restarted = createModelConfigRepository(dependencies);
+    expect((await restarted.hydrate()).config.channels).toEqual([]);
+    expect(restarted.getState().revision).toBe(4);
+});
 
 test("local-mode startup restores the local model config after the session", async () => {
     const initialize = (workspaceBootstrap as Record<string, unknown>).initializeWorkspaceState as undefined | ((input: {
@@ -194,10 +237,11 @@ test("catalog refresh keeps pending manual provider edits across delayed read an
         await catalogRead;
         const channel = current.channels.find((item) => item.id === "likeai")!;
         const serverChannel = serverCatalog.channels.find((item) => item.id === "likeai")!;
-        return withUpdatedLikeAIChannel(current, applyFetchedChannelModelCatalog(channel, {
+        const updated = applyFetchedChannelModelCatalog(channel, {
             models: serverChannel.models,
             catalog: serverChannel.models.map((id) => ({ id, modelType: "image", supportedEndpointTypes: ["likeai-image"] })),
-        }));
+        });
+        return { ...current, channels: current.channels.map((item) => item.id === channel.id ? updated : item) };
     })();
     current = {
         ...current,
@@ -214,11 +258,14 @@ test("catalog refresh keeps pending manual provider edits across delayed read an
 
     expect(merged.channels.find((channel) => channel.id === "manual")?.name).toBe("连接过程中的改名");
     expect(merged.channels.find((channel) => channel.id === "manual")?.models).toEqual(["draft-image", "extra-image"]);
-    expect(merged.channels.find((channel) => channel.id === "likeai")?.models).toEqual(["enterprise-image"]);
+    expect(merged.channels.find((channel) => channel.id === "likeai")?.models).toEqual(["stale-image"]);
+    expect(merged.channels.find((channel) => channel.id === "likeai")?.modelProfiles).toEqual(expect.arrayContaining([expect.objectContaining({ model: "enterprise-image", protocol: "likeai-image" })]));
+    expect(merged.imageModel).toBe("manual::draft-image");
     const lastWrite = writes[writes.length - 1];
     expect(lastWrite?.channels.find((channel) => channel.id === "manual")?.name).toBe("连接过程中的改名");
     expect(lastWrite?.channels.find((channel) => channel.id === "manual")?.models).toEqual(["draft-image", "extra-image"]);
-    expect(lastWrite?.channels.find((channel) => channel.id === "likeai")?.models).toEqual(["enterprise-image"]);
+    expect(lastWrite?.channels.find((channel) => channel.id === "likeai")?.models).toEqual(["stale-image"]);
+    expect(lastWrite?.channels.find((channel) => channel.id === "likeai")?.modelProfiles).toEqual(expect.arrayContaining([expect.objectContaining({ model: "enterprise-image", protocol: "likeai-image" })]));
     expect(writes.some((config) => config.channels.find((channel) => channel.id === "manual")?.name === "第一次改名")).toBe(true);
     expect(repository.getState()).toMatchObject({ dirty: false });
 });

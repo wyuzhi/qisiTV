@@ -14,6 +14,7 @@ test("HTTP 402 explains the upstream billing cause and exposes a stable canvas e
     expect(generationFailureMetadata(raw, "prompt")).toEqual({
         errorDetails: generationErrorMessage(raw),
         generationErrorCode: "quota_unknown",
+        generationErrorSummary: raw,
     });
 });
 

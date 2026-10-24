@@ -153,3 +153,21 @@ test("resource metadata avoids downloading media and probe failures remain unkno
         mocks.restore();
     }
 });
+
+
+test("known video duration still resolves missing dimensions before validation", async () => {
+    const blob = spyOn(storage, "getMediaBlob").mockResolvedValue(new Blob(["video"], { type: "video/mp4" }));
+    const probe = spyOn(metadata, "probeMediaMetadata").mockResolvedValue({ durationMs: 4833, width: 432, height: 768 });
+    try {
+        const video = await resolveReferenceMediaDuration({ id: "short-video", name: "video.mp4", type: "video/mp4", url: "blob:test", storageKey: "local-video", durationMs: 4833 });
+        expect(video).toMatchObject({ width: 432, height: 768, durationMs: 4833 });
+        expect(() => assertVideoCapability(profile, [], [video], [], "5")).toThrow("331776（432×768）");
+        expect(probe).toHaveBeenCalledTimes(1);
+    } finally { blob.mockRestore(); probe.mockRestore(); }
+});
+
+test("missing video dimensions fail closed, while opaque provider assets remain usable", () => {
+    const video = { id: "v", name: "v.mp4", type: "video/mp4", url: "https://example.com/v.mp4", durationMs: 3000 };
+    expect(() => assertVideoCapability(profile, [], [video], [], "5")).toThrow("尺寸无法读取");
+    expect(() => assertVideoCapability(profile, [], [{ ...video, url: "asset://opaque" }], [], "5")).not.toThrow();
+});

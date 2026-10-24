@@ -14,7 +14,7 @@ export type DirectorModeCapabilities = {
     timeline: boolean;
     /** 是否允许记录/删除关键帧与 Auto Key。只有动画模式允许。 */
     keyframes: boolean;
-    /** 是否展示骨骼与姿势入口。姿态与动画模式展示。 */
+    /** 是否开放骨骼视图与多选骨骼编辑。单个演员的姿势检查器不受此能力限制。 */
     bones: boolean;
     /** 是否突出 shot/camera 检查器与运镜入口。摄影机模式突出。 */
     cameraTools: boolean;
@@ -23,7 +23,7 @@ export type DirectorModeCapabilities = {
 };
 
 const CAPABILITIES: Record<DirectorMode, DirectorModeCapabilities> = {
-    // 摆场：先把人和物放对位置，隐藏骨骼、关键帧、Auto Key、深度/法线。
+    // 摆场：先把人和物放对位置，隐藏骨骼叠加视图/多选骨骼编辑、关键帧、Auto Key、深度/法线。
     layout: { timeline: false, keyframes: false, bones: false, cameraTools: false, renderModes: ["beauty", "clay"] },
     // 姿态：调骨骼与姿势，但不默认制造关键帧。
     pose: { timeline: false, keyframes: false, bones: true, cameraTools: false, renderModes: ["beauty", "clay", "pose"] },
@@ -41,6 +41,9 @@ export const DIRECTOR_MODES: Array<{ mode: DirectorMode; label: string; hint: st
 ];
 
 export const DIRECTOR_DEFAULT_MODE: DirectorMode = "layout";
+
+/** 入口先是摆场；左侧机位预设列表只是导航，不应强制切换右侧检查器。 */
+export const DIRECTOR_ENTRY_MODE: DirectorMode = "layout";
 
 export function directorModeCapabilities(mode: DirectorMode): DirectorModeCapabilities {
     return CAPABILITIES[mode] ?? CAPABILITIES[DIRECTOR_DEFAULT_MODE];

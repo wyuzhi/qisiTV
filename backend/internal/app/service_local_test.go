@@ -17,6 +17,9 @@ func TestNewLocalKeepsLocalBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := db.AutoMigrate(&model.SystemSetting{}, &model.PluginPlatformState{}, &model.UserPluginState{}); err != nil {
+		t.Fatal(err)
+	}
 
 	svc := NewLocal(repository.New(db), t.TempDir())
 	if svc == nil {

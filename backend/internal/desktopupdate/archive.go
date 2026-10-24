@@ -2,6 +2,7 @@ package desktopupdate
 
 import (
 	"archive/zip"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -73,6 +74,26 @@ func isZipSymlink(file *zip.File) bool {
 }
 
 func extractSecureZip(zipPath, dest string, limits extractLimits) error {
+	return extractSecureZipWithProgress(context.Background(), zipPath, dest, limits, nil)
+}
+
+// contextReader also checks cancellation while processing a large entry.
+type contextReader struct {
+	ctx context.Context
+	io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.Reader.Read(p)
+}
+
+func extractSecureZipWithProgress(ctx context.Context, zipPath, dest string, limits extractLimits, progress func(int, int)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	reader, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return ErrInvalidArchive
@@ -102,7 +123,11 @@ func extractSecureZip(zipPath, dest string, limits extractLimits) error {
 		dirOnly bool
 	}
 	plan := make([]planned, 0, len(reader.File))
+	totalFiles := 0
 	for _, file := range reader.File {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		rel, dirOnly, err := sanitizeZipName(file.Name)
 		if err != nil {
 			return err
@@ -131,9 +156,19 @@ func extractSecureZip(zipPath, dest string, limits extractLimits) error {
 			return ErrInvalidArchive
 		}
 		plan = append(plan, planned{file: file, rel: rel, dirOnly: dirOnly || file.FileInfo().IsDir()})
+		if !plan[len(plan)-1].dirOnly {
+			totalFiles++
+		}
+	}
+	completed := 0
+	if progress != nil {
+		progress(0, totalFiles)
 	}
 	var written uint64
 	for _, item := range plan {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		full := filepath.Join(root, filepath.FromSlash(item.rel))
 		if item.dirOnly {
 			if err := os.MkdirAll(full, 0o755); err != nil {
@@ -162,7 +197,7 @@ func extractSecureZip(zipPath, dest string, limits extractLimits) error {
 		if limit > limits.MaxEntryBytes {
 			limit = limits.MaxEntryBytes
 		}
-		copied, copyErr := io.Copy(out, io.LimitReader(stream, int64(limit)+1))
+		copied, copyErr := io.Copy(out, io.LimitReader(contextReader{ctx, stream}, int64(limit)+1))
 		closeErr := stream.Close()
 		syncErr := out.Sync()
 		closeOutErr := out.Close()
@@ -185,6 +220,10 @@ func extractSecureZip(zipPath, dest string, limits extractLimits) error {
 			return ErrInvalidArchive
 		}
 		written += uint64(copied)
+		completed++
+		if progress != nil {
+			progress(completed, totalFiles)
+		}
 	}
 	return rejectExtractedSymlinks(root)
 }

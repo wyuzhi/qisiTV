@@ -1,46 +1,34 @@
 package app
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 	"testing"
-
-	"qisitv/backend/internal/model"
 )
 
-func TestLikeAIOnlyPolicyRejectsOtherProvidersBeforeAdmission(t *testing.T) {
+func TestLikeAIPolicyPreservesIndependentAssistantChannels(t *testing.T) {
 	s := NewLocal(nil, t.TempDir())
 	s.UseLikeAIOnly()
-	for _, config := range []map[string]any{
-		{"interfaceType": "openai-image", "baseUrl": "https://enterprise.beefapi.com"},
-		{"interfaceType": "likeai-image", "baseUrl": "https://task.likeai.pro.attacker.example/task-api"},
-		{"interfaceType": "likeai-image", "baseUrl": "http://task.likeai.pro/task-api"},
-		{"interfaceType": "likeai-image", "baseUrl": "https://task.likeai.pro:8443/task-api"},
-		{"interfaceType": "likeai-image", "baseUrl": "https://task.likeai.pro/task-api?x=1"},
-		{"interfaceType": "runninghub", "baseUrl": "https://www.runninghub.cn"},
-	} {
-		_, err := s.CreateTask("local", CreateTaskRequest{Type: "canvas_image", Prompt: "test", Input: map[string]any{"config": config}})
-		if err == nil || !strings.Contains(err.Error(), "LikeAI") {
-			t.Fatalf("provider admitted: %v", err)
-		}
-		_, err = s.resolveProviderConfig(providerConfig{BaseURL: stringValue(config["baseUrl"]), InterfaceType: stringValue(config["interfaceType"])})
-		if err == nil {
-			t.Fatal("historical provider execution resumed")
+	for _, protocol := range []string{"chat-completion", "claude-api", "runninghub", "openai-image"} {
+		if err := s.requireActiveProvider(protocol, "https://custom.example/v1"); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if err := s.requireActiveProvider("likeai-image", "https://task.likeai.pro/task-api"); err != nil {
-		t.Fatal(err)
+	for _, base := range []string{"https://task.likeai.pro.attacker.example/task-api", "http://task.likeai.pro/task-api", "https://task.likeai.pro:8443/task-api", "https://task.likeai.pro/task-api?x=1"} {
+		if err := s.requireActiveProvider("likeai-image", base); err == nil {
+			t.Fatal("untrusted LikeAI origin accepted")
+		}
 	}
-	_, err := s.FetchChannelModelCatalog(context.Background(), &model.User{ID: "local"}, ChannelModelsRequest{APIFormat: "openai", BaseURL: "https://enterprise.beefapi.com", APIKey: "fixture"})
-	if err == nil || !strings.Contains(err.Error(), "LikeAI") {
-		t.Fatal("legacy catalog accepted")
+	for _, base := range []string{likeAIBaseURL, "https://cheeser.link/api-service/likeai"} {
+		if err := s.requireActiveProvider("likeai-video", base); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
-func TestLikeAIOnlyAgentModelsPreserveCurrentCatalog(t *testing.T) {
+func TestAgentModelsPreserveConfiguredChannelsWithoutSecrets(t *testing.T) {
 	s := NewLocal(nil, t.TempDir())
-	if err := s.SaveLocalModelConfig([]byte(`{"channels":[{"id":"beefapi","apiKey":"old-secret","models":["old-model"],"modelProfiles":[{"model":"old-model","capability":"image","protocol":"openai-image"}]},{"id":"likeai","apiKey":"active-secret","models":["doubao_seedance_2_5","image-model"],"modelProfiles":[{"model":"doubao_seedance_2_5","capability":"video","protocol":"likeai-video"},{"model":"image-model","capability":"image","protocol":"likeai-image"}]}]}`)); err != nil {
+	if err := s.SaveLocalModelConfig([]byte(`{"channels":[{"id":"assistant","baseUrl":"https://example.com/v1","apiKey":"assistant-secret","models":["text-model"],"modelProfiles":[{"model":"text-model","capability":"text","protocol":"chat-completion"}]},{"id":"likeai","baseUrl":"https://task.likeai.pro/task-api","apiFormat":"likeai","apiKey":"media-secret","models":["doubao_seedance_2_5"],"modelProfiles":[{"model":"doubao_seedance_2_5","capability":"video","protocol":"likeai-video"}]}],"textModel":"assistant::text-model","assistantModel":"assistant::text-model"}`)); err != nil {
 		t.Fatal(err)
 	}
 	s.UseLikeAIOnly()
@@ -49,22 +37,10 @@ func TestLikeAIOnlyAgentModelsPreserveCurrentCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(models) != 2 {
-		t.Fatalf("models = %#v", models)
-	}
-	for _, model := range models {
-		if model["channelId"] != "likeai" {
-			t.Fatal("inactive model exposed")
-		}
+		t.Fatalf("configured models lost: %#v", models)
 	}
 	raw, _ := json.Marshal(models)
 	if strings.Contains(string(raw), "secret") {
-		t.Fatal("catalog exposed a secret")
-	}
-	config, found := s.localAgentProviderConfig("doubao_seedance_2_5", "likeai")
-	if !found || config["apiKey"] != "active-secret" {
-		t.Fatal("Agent cannot resolve existing LikeAI config")
-	}
-	if _, found := s.localAgentProviderConfig("old-model", "beefapi"); found {
-		t.Fatal("Agent can resolve inactive provider")
+		t.Fatal("catalog exposed credential")
 	}
 }

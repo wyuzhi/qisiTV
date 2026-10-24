@@ -12,6 +12,8 @@ import { defaultModelCapabilityConfig, pluginWorkflowCapabilityConfig } from "..
 import { ChannelModelSettings } from "../src/pages/settings/channel-model-settings";
 import { applyFetchedChannelModelCatalog } from "../src/pages/settings/channel-settings-pane";
 import { fetchChannelModels } from "../src/services/api/image";
+import { disconnectBeefAPIConnection } from "../src/services/api/beefapi-connection";
+import { getActiveUserScope, setActiveUserScope } from "../src/lib/user-scope";
 import { apiClient } from "../src/services/api/request";
 import { createVideoGenerationTask } from "../src/services/api/video";
 import { createModelChannel, defaultConfig, modelDisplayName, normalizeConfigSnapshot, resolveModelRequestConfig, selectableModelsByCapability, type AiConfig } from "../src/stores/use-config-store";
@@ -19,9 +21,39 @@ import { createModelChannel, defaultConfig, modelDisplayName, normalizeConfigSna
 const originalAxiosRequest = axios.request;
 const originalApiRequest = apiClient.request;
 
+test("官方GPT图片旧默认配置升级质量和21:9尺寸，保留显式限制与第三方配置", () => {
+    const model = "gpt-image-2.5-flare";
+    const legacy = defaultModelCapabilityConfig("openai-image", "gpt-image-2");
+    legacy.image!.quality = { supported: true, values: ["auto", "low", "medium", "high"], default: "auto" };
+    legacy.image!.size.values = ["2048x878"];
+    legacy.image!.size.default = "2048x878";
+    legacy.image!.size.presets = [{ tier: "1k", ratio: "21:9", size: "2048x878", width: 2048, height: 878 }];
+    const configFor = (baseUrl: string, capabilityConfig = legacy) => normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [createModelChannel({ id: "beefapi", baseUrl, models: [model], modelProfiles: [{ model, capability: "image", protocol: "openai-image", capabilityConfig }] })] } }).config;
+    const upgraded = configFor("https://enterprise.beefapi.com/v1").channels[0]!.modelProfiles![0]!.capabilityConfig!.image!;
+    expect(upgraded.quality.values).toEqual(["auto", "low", "medium", "high", "xhigh", "max"]);
+    expect(upgraded.size.default).toBe("2048x880");
+    expect(upgraded.size.presets![0]!.height).toBe(880);
+    expect(legacy.image!.size.values).toEqual(["2048x878"]);
+    const restricted = structuredClone(legacy);
+    restricted.image!.quality = { supported: true, values: ["low"], default: "low" };
+    expect(configFor("https://enterprise.beefapi.com/v1", restricted).channels[0]!.modelProfiles![0]!.capabilityConfig!.image!.quality.values).toEqual(["low"]);
+    expect(configFor("https://custom.example.com/v1").channels[0]!.modelProfiles![0]!.capabilityConfig!.image!.quality.values).toEqual(["auto", "low", "medium", "high"]);
+});
+
 afterEach(() => {
     axios.request = originalAxiosRequest;
     apiClient.request = originalApiRequest;
+});
+
+test("backend discovery forwards cancellation and preserves AbortError", async () => {
+    const controller = new AbortController();
+    let received: AbortSignal | undefined;
+    apiClient.request = (async (config: { signal?: AbortSignal }) => {
+        received = config.signal;
+        throw new DOMException("cancelled", "AbortError");
+    }) as typeof apiClient.request;
+    await expect(fetchChannelModels(createModelChannel({ id: "custom", baseUrl: "https://example.test/v1", apiKey: "dummy" }), true, controller.signal)).rejects.toBeInstanceOf(DOMException);
+    expect(received).toBe(controller.signal);
 });
 
 const omniCatalog: ChannelModelCatalogItem = {
@@ -66,6 +98,57 @@ function formEntries(body: unknown) {
 }
 
 describe("public channel model catalog", () => {
+    test("managed catalog drops delayed results after user or enterprise connection changes", async () => {
+        const originalScope = getActiveUserScope();
+        try {
+            for (const change of [() => { setActiveUserScope("catalog-other-user"); }, () => disconnectBeefAPIConnection()]) {
+                let release!: () => void;
+                apiClient.request = (async (request) => {
+                    if (request.url === "/beefapi/connection/models") await new Promise<void>((resolve) => { release = resolve; });
+                    return { status: 200, data: { code: 0, data: { models: [{ id: "seedance-2.0-portrait" }] }, msg: "" } };
+                }) as typeof apiClient.request;
+                const pending = fetchChannelModels(createModelChannel({ id: "beefapi", credentialRef: "beefapi-enterprise" }), true);
+                const outcome = pending.catch((error) => error);
+                await change();
+                release();
+                expect(await outcome).toMatchObject({ name: "UserScopeAbandonedError" });
+            }
+        } finally {
+            setActiveUserScope(originalScope);
+        }
+    });
+    test("managed catalog refresh persists through the trusted endpoint without accepting client credentials or prices", async () => {
+        const requests: Array<{ url?: string; data?: unknown }> = [];
+        apiClient.request = (async (request) => {
+            requests.push(request);
+            return { status: 200, data: { code: 0, data: { models: [{ id: "seedance-2.0-portrait" }] }, msg: "" } };
+        }) as typeof apiClient.request;
+        await fetchChannelModels(createModelChannel({ id: "beefapi", credentialRef: "beefapi-enterprise", apiKey: "synthetic-ignored", baseUrl: "https://ignored.example" }), true);
+        expect(requests[0]?.url).toBe("/beefapi/connection/models");
+        expect(requests[0]?.data).toEqual({});
+        await fetchChannelModels(createModelChannel({ id: "manual", apiKey: "synthetic-local", baseUrl: "https://manual.example" }), true);
+        expect(requests[1]?.url).toBe("/ai/models");
+        expect(requests[1]?.data).toMatchObject({ baseUrl: "https://manual.example", apiKey: "synthetic-local" });
+    });
+    test("backend catalogue authentication failure keeps its actionable message", async () => {
+        apiClient.request = (async () => ({ status: 502, data: { code: 502, data: null, msg: "模型服务鉴权失败，请检查 API Key", reason: "bad_gateway" } })) as typeof apiClient.request;
+        await expect(fetchChannelModels(createModelChannel({ apiKey: "synthetic-invalid" }), true)).rejects.toThrow("模型服务鉴权失败，请检查 API Key");
+    });
+    test("direct discovery forwards custom headers for OpenAI and Gemini", async () => {
+        const requests: Array<Record<string, unknown>> = [];
+        axios.request = (async (request: Record<string, unknown>) => {
+            requests.push(request);
+            return { status: 200, data: { data: [{ id: "custom-model" }], models: [{ name: "models/gemini-pro" }] } };
+        }) as typeof axios.request;
+        for (const apiFormat of ["openai", "gemini"] as const) {
+            await fetchChannelModels(createModelChannel({ baseUrl: "https://provider.example", apiFormat, apiKey: "synthetic-key", headers: [{ name: "X-Project-Key", value: "synthetic-header" }] }));
+        }
+        expect(requests).toHaveLength(2);
+        for (const request of requests) {
+            const headers = request.headers as Record<string, string>;
+            expect(JSON.parse(atob(headers["x-canvas-upstream-headers"]))).toEqual([{ name: "X-Project-Key", value: "synthetic-header" }]);
+        }
+    });
     test("keeps the fetched BeefAPI catalog dynamic while normalizing discovered image profiles", () => {
         const channel = createModelChannel({
             id: "beefapi",
@@ -87,6 +170,15 @@ describe("public channel model catalog", () => {
         ]));
         expect(resolveModelRequestConfig(normalized, "beefapi::gpt-image-2").interfaceType).toBe("openai-image");
         expect(resolveModelRequestConfig(normalized, "beefapi::gpt-5.6-sol").interfaceType).toBe("chat-completion");
+    });
+
+    test("repairs stale chat protocols on known BeefAPI image models without changing custom routes", () => {
+        const make = (baseUrl: string) => createModelChannel({ id: "test", baseUrl, apiKey: "synthetic-key", models: ["gpt-image-2"], modelProfiles: [{ model: "gpt-image-2", capability: "text", protocol: "chat-completion" }] });
+        const official = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [make("https://enterprise.beefapi.com")] } }).config;
+        expect(selectableModelsByCapability(official, "image")).toEqual(["test::gpt-image-2"]);
+        expect(resolveModelRequestConfig(official, "test::gpt-image-2").interfaceType).toBe("openai-image");
+        const custom = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [make("https://studio.example")] } }).config;
+        expect(resolveModelRequestConfig(custom, "test::gpt-image-2").interfaceType).toBe("chat-completion");
     });
 
     test("maps BeefAPI speech and music to audio without treating ASR as chat or TTS", () => {

@@ -4,20 +4,18 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"qisitv/backend/internal/kernel"
 	"strings"
 	"time"
-	"unicode/utf8"
 
+	"qisitv/backend/internal/asset"
+	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/repository"
 
 	"gorm.io/gorm"
 )
 
-type AssetsSyncRequest struct {
-	Assets []json.RawMessage `json:"assets"`
-}
+type AssetsSyncRequest = asset.AssetsSyncRequest
 
 type UserDataSummary struct {
 	ID        string           `json:"id"`
@@ -51,7 +49,7 @@ type UserDataSnapshot struct {
 }
 
 func (s *Service) UserDataSnapshot(userID string) (UserDataSnapshot, error) {
-	assets, err := s.UserAssets(userID)
+	items, err := s.UserAssets(userID)
 	if err != nil {
 		return UserDataSnapshot{}, err
 	}
@@ -59,123 +57,43 @@ func (s *Service) UserDataSnapshot(userID string) (UserDataSnapshot, error) {
 	if err != nil {
 		return UserDataSnapshot{}, err
 	}
-	return UserDataSnapshot{Assets: assets, Projects: projects}, nil
+	return UserDataSnapshot{Assets: items, Projects: projects}, nil
 }
 
 func (s *Service) UserAssetSummaries(userID string) ([]UserDataSummary, error) {
-	assets, err := s.repo.AssetSummaries(userID)
+	items, err := s.Library().UserAssetSummaries(userID)
 	if err != nil {
 		return nil, err
 	}
-	result := make([]UserDataSummary, 0, len(assets))
-	for _, asset := range assets {
-		result = append(result, UserDataSummary{ID: asset.ID, FolderID: asset.FolderID, Kind: asset.Kind, Category: string(asset.Category), Status: string(asset.Status), Title: asset.Title, CreatedAt: asset.CreatedAt, UpdatedAt: asset.UpdatedAt})
+	result := make([]UserDataSummary, 0, len(items))
+	for _, item := range items {
+		result = append(result, userDataSummaryFromAsset(item))
 	}
 	return result, nil
 }
 
 func (s *Service) UserAsset(userID string, id string) (json.RawMessage, error) {
-	asset, err := s.repo.AssetForUser(userID, id)
-	if err != nil {
-		return nil, err
-	}
-	return ClientAssetPayload(*asset), nil
+	return s.Library().UserAsset(userID, id)
 }
 
 func (s *Service) UpsertUserAsset(userID string, raw json.RawMessage) (UserDataSummary, error) {
-	asset, err := AssetFromJSON(userID, raw)
+	item, err := s.Library().UpsertUserAsset(userID, raw)
 	if err != nil {
 		return UserDataSummary{}, err
 	}
-	err = s.host.WithStorageLock(func() error {
-		if asset.FolderID != "" {
-			if _, err := s.repo.AssetFolderForUser(userID, asset.FolderID); err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return kernel.BadAuthRequest("素材分类不存在")
-				}
-				return err
-			}
-		}
-		existing, existingErr := s.repo.AssetForUser(userID, asset.ID)
-		if existingErr != nil && !errors.Is(existingErr, gorm.ErrRecordNotFound) {
-			return existingErr
-		}
-		if existing != nil && existing.PayloadJSON != asset.PayloadJSON {
-			if err := s.ValidateAssetCanvasReferences(userID, asset); err != nil {
-				return err
-			}
-		}
-		existingBytes := int64(0)
-		if existing != nil {
-			existingBytes = int64(len([]byte(existing.PayloadJSON)))
-		}
-		if err := s.host.StructuredQuota(userID, "asset", errors.Is(existingErr, gorm.ErrRecordNotFound), int64(len(raw))-existingBytes); err != nil {
-			return err
-		}
-		if err := s.repo.UpsertAsset(&asset); err != nil {
-			return err
-		}
-		if existingErr != nil {
-			s.host.RecordActivity(userID, "asset", 1)
-		}
-		return nil
-	})
-	if err != nil {
-		return UserDataSummary{}, err
-	}
-	return UserDataSummary{ID: asset.ID, FolderID: asset.FolderID, Kind: asset.Kind, Category: string(asset.Category), Status: string(asset.Status), Title: asset.Title, CreatedAt: asset.CreatedAt, UpdatedAt: asset.UpdatedAt}, nil
+	return userDataSummaryFromAsset(item), nil
 }
 
-func (s *Service) DeleteUserAsset(userID string, id string) error {
-	return s.host.WithStorageLock(func() error {
-		return s.host.DeleteUserAssetWithResources(userID, id)
-	})
+func (s *Service) DeleteUserAsset(userID string, id string, expectedStatus ...string) error {
+	return s.Library().DeleteUserAsset(userID, id, expectedStatus...)
 }
 
 func (s *Service) UserAssets(userID string) ([]json.RawMessage, error) {
-	assets, err := s.repo.Assets(userID)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]json.RawMessage, 0, len(assets))
-	for _, asset := range assets {
-		if payload := ClientAssetPayload(asset); len(payload) > 0 {
-			result = append(result, payload)
-		}
-	}
-	return result, nil
+	return s.Library().UserAssets(userID)
 }
 
 func (s *Service) ReplaceUserAssets(userID string, req AssetsSyncRequest) ([]json.RawMessage, error) {
-	assets := make([]model.Asset, 0, len(req.Assets))
-	var totalBytes int64
-	for _, raw := range req.Assets {
-		item, err := AssetFromJSON(userID, raw)
-		if err != nil {
-			return nil, err
-		}
-		assets = append(assets, item)
-		totalBytes += int64(len(raw))
-	}
-	err := s.host.WithStorageLock(func() error {
-		if err := s.ValidateAssetReplacementCanvasReferences(userID, assets); err != nil {
-			return err
-		}
-		if err := s.host.StructuredReplacementQuota(userID, "asset", len(assets), totalBytes); err != nil {
-			return err
-		}
-		if err := s.repo.ReplaceAssets(userID, assets); err != nil {
-			return err
-		}
-		if len(assets) > 0 {
-			s.host.RecordActivity(userID, "asset", len(assets))
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return s.UserAssets(userID)
+	return s.Library().ReplaceUserAssets(userID, req)
 }
 
 func (s *Service) UserCanvasProjects(userID string) ([]json.RawMessage, error) {
@@ -203,7 +121,7 @@ func (s *Service) UserCanvasProjectSummaries(userID string) ([]UserDataSummary, 
 	}
 	result := make([]UserDataSummary, 0, len(projects))
 	for _, project := range projects {
-		result = append(result, UserDataSummary{ID: project.ID, Title: project.Title, CreatedAt: project.CreatedAt, UpdatedAt: project.UpdatedAt, Revision: project.Revision})
+		result = append(result, UserDataSummary{ID: project.ID, FolderID: project.LibraryFolderID, Title: project.Title, CreatedAt: project.CreatedAt, UpdatedAt: project.UpdatedAt, Revision: project.Revision})
 	}
 	return result, nil
 }
@@ -218,140 +136,6 @@ func (s *Service) UserCanvasProject(userID string, id string) (json.RawMessage, 
 
 func (s *Service) UpsertUserCanvasProject(userID string, raw json.RawMessage) (UserDataSummary, error) {
 	return s.upsertUserCanvasProjectWithHistory(userID, raw, "automatic")
-}
-
-func (s *Service) CommitUserCanvasProjectAssets(userID string, raw json.RawMessage, assetPayloads []json.RawMessage) (UserDataSummary, error) {
-	items := make([]model.Asset, 0, len(assetPayloads))
-	for _, payload := range assetPayloads {
-		asset, err := AssetFromJSON(userID, payload)
-		if err != nil {
-			return UserDataSummary{}, err
-		}
-		items = append(items, asset)
-	}
-	bound, err := BindCanvasMediaAssets(raw, items)
-	if err != nil {
-		return UserDataSummary{}, err
-	}
-	return s.upsertUserCanvasProjectWithAssets(userID, bound, items, "automatic")
-}
-
-// DeleteUserCanvasNode applies a single-node mutation without exposing the
-// whole canvas document to the caller. It still uses the existing revision and
-// history machinery, so old clients and conflict semantics remain unchanged.
-func (s *Service) DeleteUserCanvasNode(userID, canvasID, nodeID string) (UserDataSummary, error) {
-	// Legacy HTTP/MCP callers share the operation path, including incident
-	// edges, reference roles and timeline cleanup, revision CAS and history.
-	raw, err := s.ApplyCanvasOperations(userID, canvasID, CanvasOperationsRequest{Operations: []CanvasOperation{{Op: "delete", NodeID: nodeID}}})
-	if err != nil {
-		return UserDataSummary{}, err
-	}
-	var summary UserDataSummary
-	if err := json.Unmarshal(raw, &summary); err != nil {
-		return UserDataSummary{}, err
-	}
-	count := canvasNodeCount(string(raw))
-	summary.SaveAudit = &CanvasSaveAudit{NodesBefore: count + 1, NodesAfter: count}
-	return summary, nil
-}
-
-func (s *Service) UpdateUserCanvasNode(userID, canvasID, nodeID string, patch map[string]json.RawMessage) (UserDataSummary, error) {
-	project, err := s.repo.CanvasProjectForUser(userID, canvasID)
-	if err != nil {
-		return UserDataSummary{}, err
-	}
-	raw, err := canvasProjectPayload(*project)
-	if err != nil {
-		return UserDataSummary{}, err
-	}
-	var document map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &document); err != nil {
-		return UserDataSummary{}, kernel.BadAuthRequest("画布数据格式错误")
-	}
-	var nodes []map[string]json.RawMessage
-	if err := json.Unmarshal(document["nodes"], &nodes); err != nil {
-		return UserDataSummary{}, kernel.BadAuthRequest("画布节点数据格式错误")
-	}
-	found := false
-	for _, node := range nodes {
-		var id string
-		_ = json.Unmarshal(node["id"], &id)
-		if id != nodeID {
-			continue
-		}
-		found = true
-		for key, value := range patch {
-			if key == "id" || key == "type" {
-				continue
-			}
-			node[key] = value
-		}
-		break
-	}
-	if !found {
-		return UserDataSummary{}, kernel.NewAppError(http.StatusNotFound, "节点不存在")
-	}
-	document["nodes"], err = json.Marshal(nodes)
-	if err != nil {
-		return UserDataSummary{}, err
-	}
-	updated, err := json.Marshal(document)
-	if err != nil {
-		return UserDataSummary{}, err
-	}
-	return s.upsertUserCanvasProjectWithHistory(userID, updated, "automatic")
-}
-
-func (s *Service) ConnectUserCanvasNodes(userID, canvasID, fromNodeID, toNodeID string, connection map[string]json.RawMessage) (UserDataSummary, error) {
-	project, err := s.repo.CanvasProjectForUser(userID, canvasID)
-	if err != nil {
-		return UserDataSummary{}, err
-	}
-	raw, err := canvasProjectPayload(*project)
-	if err != nil {
-		return UserDataSummary{}, err
-	}
-	var document map[string]json.RawMessage
-	if err = json.Unmarshal(raw, &document); err != nil {
-		return UserDataSummary{}, kernel.BadAuthRequest("画布数据格式错误")
-	}
-	var nodes []map[string]json.RawMessage
-	_ = json.Unmarshal(document["nodes"], &nodes)
-	nodeIDs := map[string]bool{}
-	for _, node := range nodes {
-		var id string
-		_ = json.Unmarshal(node["id"], &id)
-		nodeIDs[id] = true
-	}
-	if !nodeIDs[fromNodeID] || !nodeIDs[toNodeID] {
-		return UserDataSummary{}, kernel.NewAppError(http.StatusNotFound, "连接节点不存在")
-	}
-	var connections []map[string]json.RawMessage
-	_ = json.Unmarshal(document["connections"], &connections)
-	for _, item := range connections {
-		var from, to string
-		_ = json.Unmarshal(item["fromNodeId"], &from)
-		_ = json.Unmarshal(item["toNodeId"], &to)
-		if from == fromNodeID && to == toNodeID {
-			return UserDataSummary{}, kernel.NewAppError(http.StatusConflict, "节点连接已存在")
-		}
-	}
-	if connection == nil {
-		connection = map[string]json.RawMessage{}
-	}
-	connection["id"], _ = json.Marshal(kernel.NewID())
-	connection["fromNodeId"], _ = json.Marshal(fromNodeID)
-	connection["toNodeId"], _ = json.Marshal(toNodeID)
-	connections = append(connections, connection)
-	document["connections"], err = json.Marshal(connections)
-	if err != nil {
-		return UserDataSummary{}, err
-	}
-	updated, err := json.Marshal(document)
-	if err != nil {
-		return UserDataSummary{}, err
-	}
-	return s.upsertUserCanvasProjectWithHistory(userID, updated, "automatic")
 }
 
 func (s *Service) upsertUserCanvasProjectWithHistory(userID string, raw json.RawMessage, reason string) (UserDataSummary, error) {
@@ -381,33 +165,15 @@ func (s *Service) upsertUserCanvasProjectWithAssets(userID string, raw json.RawM
 		if err := s.validateCanvasMediaAssetsWithCandidates(userID, raw, candidateAssets); err != nil {
 			return err
 		}
-		for index := range candidateAssets {
-			asset := &candidateAssets[index]
-			if asset.FolderID != "" {
-				if _, err := s.repo.AssetFolderForUser(userID, asset.FolderID); err != nil {
-					return err
-				}
-			}
-			existingAsset, assetErr := s.repo.AssetForUser(userID, asset.ID)
-			if assetErr != nil && !errors.Is(assetErr, gorm.ErrRecordNotFound) {
-				return assetErr
-			}
-			if existingAsset != nil && existingAsset.PayloadJSON != asset.PayloadJSON {
-				if err := s.ValidateAssetCanvasReferences(userID, *asset); err != nil {
-					return err
-				}
-			}
-			existingAssetBytes := int64(0)
-			if existingAsset != nil {
-				existingAssetBytes = int64(len([]byte(existingAsset.PayloadJSON)))
-			}
-			creatingAsset := errors.Is(assetErr, gorm.ErrRecordNotFound)
-			if err := s.host.StructuredQuota(userID, "asset", creatingAsset, int64(len([]byte(asset.PayloadJSON)))-existingAssetBytes); err != nil {
+		if len(candidateAssets) > 0 {
+			created, err := s.Library().PrepareAssetWrites(userID, candidateAssets)
+			if err != nil {
 				return err
 			}
-			if creatingAsset {
-				createdAssets++
-			}
+			createdAssets = created
+		}
+		if err := s.requireCanvasLibraryFolder(userID, project.LibraryFolderID); err != nil {
+			return err
 		}
 		existing, existingErr := s.repo.CanvasProjectForUser(userID, project.ID)
 		if existingErr != nil && !errors.Is(existingErr, gorm.ErrRecordNotFound) {
@@ -446,23 +212,33 @@ func (s *Service) upsertUserCanvasProjectWithAssets(userID string, raw json.RawM
 		if err := s.host.StructuredQuota(userID, "canvas", errors.Is(existingErr, gorm.ErrRecordNotFound), int64(len(cleaned))-existingBytes); err != nil {
 			return err
 		}
-		if err := SaveDocumentWithHistoryAndAssets(s.repo, existing, &project, candidateAssets, reason); err != nil {
-			if errors.Is(err, repository.ErrCanvasRevisionConflict) {
-				return canvasRevisionConflict()
+		return s.repo.Transaction(func(tx *repository.Repository) error {
+			if len(candidateAssets) > 0 {
+				if _, err := s.Library().WithRepository(tx).PersistPreparedAssets(userID, candidateAssets); err != nil {
+					return err
+				}
 			}
-			if errors.Is(err, repository.ErrCanvasHistoryResourceMissing) {
-				return kernel.NewAppError(http.StatusConflict, "画布引用的素材已变化，当前内容未被覆盖，请保留草稿并重新加载")
+			if err := SaveDocumentWithHistory(tx, existing, &project, reason); err != nil {
+				if errors.Is(err, repository.ErrCanvasRevisionConflict) {
+					return canvasRevisionConflict()
+				}
+				if errors.Is(err, repository.ErrCanvasHistoryResourceMissing) {
+					return kernel.NewAppError(http.StatusConflict, "画布引用的素材已变化，当前内容未被覆盖，请保留草稿并重新加载")
+				}
+				if errors.Is(err, repository.ErrCanvasLibraryFolderMissing) {
+					return kernel.BadAuthRequest("画布文件夹不存在")
+				}
+				return err
 			}
-			return err
-		}
-		audit.NodesAfter = canvasNodeCount(project.PayloadJSON)
-		if existing != nil {
-			audit.NodesBefore = canvasNodeCount(existing.PayloadJSON)
-		}
-		if existingErr != nil || existing.PayloadJSON != project.PayloadJSON || existing.Title != project.Title {
-			s.host.RecordActivity(userID, "canvas", 1)
-		}
-		return nil
+			audit.NodesAfter = canvasNodeCount(project.PayloadJSON)
+			if existing != nil {
+				audit.NodesBefore = canvasNodeCount(existing.PayloadJSON)
+			}
+			if existingErr != nil || existing.PayloadJSON != project.PayloadJSON || existing.Title != project.Title {
+				s.host.RecordActivity(userID, "canvas", 1)
+			}
+			return nil
+		})
 	})
 	if err != nil {
 		return UserDataSummary{}, err
@@ -478,58 +254,14 @@ func (s *Service) DeleteUserCanvasProject(userID string, id string) error {
 }
 
 func AssetFromJSON(userID string, raw json.RawMessage) (model.Asset, error) {
-	if err := ValidateSyncedPayload(raw, "素材"); err != nil {
-		return model.Asset{}, err
+	return asset.AssetFromJSON(userID, raw)
+}
+
+func userDataSummaryFromAsset(item asset.Summary) UserDataSummary {
+	return UserDataSummary{
+		ID: item.ID, FolderID: item.FolderID, Kind: item.Kind, Category: item.Category,
+		Status: item.Status, Title: item.Title, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
-	var payload struct {
-		ID               string `json:"id"`
-		FolderID         string `json:"folderId"`
-		Kind             string `json:"kind"`
-		Category         string `json:"category"`
-		Status           string `json:"status"`
-		PrimaryVersionID string `json:"primaryVersionId"`
-		Title            string `json:"title"`
-		CreatedAt        string `json:"createdAt"`
-		UpdatedAt        string `json:"updatedAt"`
-	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return model.Asset{}, kernel.BadAuthRequest("素材数据格式错误")
-	}
-	now := time.Now()
-	createdAt := parseClientTime(payload.CreatedAt, now)
-	updatedAt := parseClientTime(payload.UpdatedAt, createdAt)
-	id := strings.TrimSpace(payload.ID)
-	if id == "" {
-		id = kernel.NewID()
-	}
-	if utf8.RuneCountInString(id) > model.AssetIDMaxLength {
-		return model.Asset{}, kernel.BadAuthRequest("素材 ID 不能超过 80 个字符")
-	}
-	primaryVersionID := strings.TrimSpace(payload.PrimaryVersionID)
-	if utf8.RuneCountInString(primaryVersionID) > 36 {
-		return model.Asset{}, kernel.BadAuthRequest("素材主版本 ID 不能超过 36 个字符")
-	}
-	if err := validateUserAssetDocument(raw); err != nil {
-		return model.Asset{}, err
-	}
-	category := model.NormalizeAssetCategory(model.AssetCategory(payload.Category), payload.Kind)
-	status := model.AssetVersionStatus(strings.TrimSpace(payload.Status))
-	if status == "" {
-		status = model.AssetVersionStatusConfirmed
-	}
-	return model.Asset{
-		ID:               id,
-		UserID:           userID,
-		FolderID:         strings.TrimSpace(payload.FolderID),
-		Kind:             strings.TrimSpace(payload.Kind),
-		Category:         category,
-		Status:           status,
-		PrimaryVersionID: primaryVersionID,
-		Title:            strings.TrimSpace(payload.Title),
-		PayloadJSON:      string(raw),
-		CreatedAt:        createdAt,
-		UpdatedAt:        updatedAt,
-	}, nil
 }
 
 func canvasProjectFromJSON(userID string, raw json.RawMessage) (model.CanvasProject, error) {
@@ -540,6 +272,7 @@ func canvasProjectFromJSON(userID string, raw json.RawMessage) (model.CanvasProj
 		ID        string `json:"id"`
 		Title     string `json:"title"`
 		ProjectID string `json:"projectId"`
+		FolderID  string `json:"folderId"`
 		CreatedAt string `json:"createdAt"`
 		UpdatedAt string `json:"updatedAt"`
 	}
@@ -554,47 +287,23 @@ func canvasProjectFromJSON(userID string, raw json.RawMessage) (model.CanvasProj
 		id = kernel.NewID()
 	}
 	return model.CanvasProject{
-		ID:          id,
-		UserID:      userID,
-		ProjectID:   strings.TrimSpace(payload.ProjectID),
-		Title:       strings.TrimSpace(payload.Title),
-		PayloadJSON: string(raw),
-		CreatedAt:   createdAt,
-		UpdatedAt:   updatedAt,
+		ID:              id,
+		UserID:          userID,
+		ProjectID:       strings.TrimSpace(payload.ProjectID),
+		LibraryFolderID: strings.TrimSpace(payload.FolderID),
+		Title:           strings.TrimSpace(payload.Title),
+		PayloadJSON:     string(raw),
+		CreatedAt:       createdAt,
+		UpdatedAt:       updatedAt,
 	}, nil
 }
 
 func ValidateSyncedPayload(raw json.RawMessage, label string) error {
-	if len(raw) > 4<<20 {
-		return kernel.BadAuthRequest(label + "数据超过 4MB，请先把媒体文件保存到资源存储")
-	}
-	var payload interface{}
-	if err := json.Unmarshal(raw, &payload); err == nil && ContainsInlineMediaDataURL(payload) {
-		return kernel.BadAuthRequest(label + "数据包含内嵌媒体，请先上传到资源存储")
-	}
-	return nil
+	return asset.ValidateSyncedPayload(raw, label)
 }
 
-// 同步数据只禁止作为字段值存在的媒体 Data URL；提示词和上游错误文案可能合法提到相同字符串。
 func ContainsInlineMediaDataURL(value interface{}) bool {
-	switch item := value.(type) {
-	case string:
-		text := strings.ToLower(strings.TrimSpace(item))
-		return strings.HasPrefix(text, "data:image/") || strings.HasPrefix(text, "data:video/") || strings.HasPrefix(text, "data:audio/")
-	case []interface{}:
-		for _, child := range item {
-			if ContainsInlineMediaDataURL(child) {
-				return true
-			}
-		}
-	case map[string]interface{}:
-		for _, child := range item {
-			if ContainsInlineMediaDataURL(child) {
-				return true
-			}
-		}
-	}
-	return false
+	return asset.ContainsInlineMediaDataURL(value)
 }
 
 func parseClientTime(value string, fallback time.Time) time.Time {

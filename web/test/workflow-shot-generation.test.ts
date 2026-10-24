@@ -1,10 +1,12 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 
 import { createModelChannel, defaultConfig, encodeChannelModel } from "../src/stores/use-config-store";
 import { submitBackendGenerationTask, type GenerationTaskDependencies } from "../src/services/api/generation-task";
 import type { GenerationTask } from "../src/services/api/task-center";
 import type { ProjectDetail } from "../src/services/api/projects";
 import { buildShotAssetReferenceContext, resolveShotAssetMentionPrompt } from "../src/pages/projects/detail/workflow-shot-references";
+import * as resources from "../src/services/api/resources";
+import * as storage from "../src/services/file-storage";
 
 function videoTaskConfig() {
     const channel = createModelChannel({
@@ -105,25 +107,37 @@ test("shot generation submits historical character image, current voice and asse
         createdAt: "2026-08-30T00:00:00.000Z",
         updatedAt: "2026-08-30T00:00:00.000Z",
     } satisfies GenerationTask;
-    await submitBackendGenerationTask({
-        projectId: "project-1",
-        mode: "video",
-        prompt,
-        config: videoTaskConfig(),
-        referenceImages: context.referenceImages,
-        referenceAudios: context.referenceAudios,
-        metadata: { shotId: "shot-1", videoEditOperation: "reference_to_video" },
-    }, {
-        createTask: async (input) => { createdInput = input; return task; },
-        waitTask: async () => { throw new Error("should not wait"); },
-        runLocal: async () => ({ mode: "video" }),
-        createId: () => "id-1",
-        now: () => "2026-08-30T00:00:00.000Z",
-    });
+    // Task creation is already a fixture boundary; resource metadata must also
+    // come from its API fixture rather than the test runner's browser storage.
+    const resourceMetadata = spyOn(resources, "getResource").mockResolvedValue({ id: "character-audio-1", durationMs: 2500, mimeType: "audio/mpeg" } as resources.RemoteResource);
+    const browserBlob = spyOn(storage, "getMediaBlob").mockRejectedValue(new Error("known resource metadata must not read browser media"));
+    try {
+        await submitBackendGenerationTask({
+            projectId: "project-1",
+            mode: "video",
+            prompt,
+            config: videoTaskConfig(),
+            referenceImages: context.referenceImages,
+            referenceAudios: context.referenceAudios,
+            metadata: { shotId: "shot-1", videoEditOperation: "reference_to_video" },
+        }, {
+            createTask: async (input) => { createdInput = input; return task; },
+            waitTask: async () => { throw new Error("should not wait"); },
+            runLocal: async () => ({ mode: "video" }),
+            createId: () => "id-1",
+            now: () => "2026-08-30T00:00:00.000Z",
+        });
+        expect(resourceMetadata).toHaveBeenCalledWith("character-audio-1", expect.objectContaining({ params: { metadata: "ensure" } }));
+        expect(browserBlob).not.toHaveBeenCalled();
+    } finally {
+        resourceMetadata.mockRestore();
+        browserBlob.mockRestore();
+    }
 
     expect(createdInput?.prompt).toContain("【资产参考】");
     expect(createdInput?.input.referenceImages.map((reference) => reference.storageKey)).toEqual(["resource:character-image-1", "resource:scene-image-1"]);
     expect(createdInput?.input.referenceAudios.map((reference) => reference.storageKey)).toEqual(["resource:character-audio-1"]);
+    expect(createdInput?.input.referenceAudios[0]?.durationMs).toBe(2500);
 });
 
 test("background generation submission returns after task creation without waiting", async () => {

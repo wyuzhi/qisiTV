@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
-import { Check, Film, LoaderCircle, Pause, Play, Repeat2, Volume2, VolumeX, X } from "lucide-react";
+import { Check, Film, LoaderCircle, Pause, Play, X } from "lucide-react";
 
 import { CanvasNodePanelOverlay } from "@/components/canvas/canvas-workspace-overlays";
 import {
     INLINE_VIDEO_TRIM_MIN_MS,
     moveInlineVideoTrimRange,
     normalizeInlineVideoTrimRange,
+    placeInlineVideoTrimDuration,
     type InlineVideoTrimRange,
 } from "@/lib/canvas/canvas-video-inline-trim";
+import { canvasNodeVideoPreviewUrl } from "@/lib/canvas/canvas-media-preview";
 import { cacheResourceObjectUrl } from "@/services/resource-blob-cache";
 import { resourceIdFromStorageKey } from "@/services/api/resources";
 import { resolveMediaUrl } from "@/services/file-storage";
@@ -45,7 +47,7 @@ export function CanvasVideoInlineTrimOverlay({ node, viewport, containerRef, dra
             panelMinWidth={520}
             panelMaxWidth={920}
             panelWidthScale={1.5}
-            panelHeight={104}
+            panelHeight={82}
             allowOverflow
             keepBelowNode
             avoidBottomDock
@@ -60,14 +62,15 @@ export function CanvasVideoInlineTrimOverlay({ node, viewport, containerRef, dra
 
 export function CanvasVideoInlineTrim({ node, busy, onCancel, onConfirm }: CanvasVideoInlineTrimProps) {
     const timelineRef = useRef<HTMLDivElement>(null);
+    const durationRef = useRef<HTMLOutputElement>(null);
     const dragRef = useRef<DragSession | null>(null);
     const [videoUrl, setVideoUrl] = useState(node.metadata?.content || "");
     const [durationMs, setDurationMs] = useState(Math.max(0, node.metadata?.durationMs || 0));
     const [range, setRange] = useState<InlineVideoTrimRange>(() => ({ startMs: 0, endMs: Math.max(INLINE_VIDEO_TRIM_MIN_MS, node.metadata?.durationMs || INLINE_VIDEO_TRIM_MIN_MS) }));
     const [frames, setFrames] = useState<string[]>([]);
+    const [frameStatus, setFrameStatus] = useState<"loading" | "ready" | "unavailable">("loading");
+    const [trackMetrics, setTrackMetrics] = useState({ width: 0, labelWidth: 0 });
     const [playing, setPlaying] = useState(false);
-    const [muted, setMuted] = useState(false);
-    const [loop, setLoop] = useState(true);
 
     useEffect(() => {
         let cancelled = false;
@@ -89,6 +92,8 @@ export function CanvasVideoInlineTrim({ node, busy, onCancel, onConfirm }: Canva
     }, [node.id, node.metadata?.durationMs]);
 
     useEffect(() => {
+        setFrames([]);
+        setFrameStatus(videoUrl ? "loading" : "unavailable");
         if (!videoUrl || typeof document === "undefined") return;
         let cancelled = false;
         const source = document.createElement("video");
@@ -109,7 +114,10 @@ export function CanvasVideoInlineTrim({ node, busy, onCancel, onConfirm }: Canva
             canvas.width = 144;
             canvas.height = 82;
             const context = canvas.getContext("2d");
-            if (!context || !seconds) return;
+            if (!context || !seconds) {
+                setFrameStatus("unavailable");
+                return;
+            }
             const captured: string[] = [];
             for (let index = 0; index < FRAME_COUNT && !cancelled; index += 1) {
                 source.currentTime = Math.min(Math.max(0, seconds - 0.04), (seconds * (index + 0.5)) / FRAME_COUNT);
@@ -117,10 +125,11 @@ export function CanvasVideoInlineTrim({ node, busy, onCancel, onConfirm }: Canva
                 if (cancelled) return;
                 context.drawImage(source, 0, 0, canvas.width, canvas.height);
                 captured.push(canvas.toDataURL("image/jpeg", 0.72));
+                setFrames([...captured]);
+                setFrameStatus("ready");
             }
-            if (!cancelled) setFrames(captured);
         };
-        void capture().catch(() => { if (!cancelled) setFrames([]); });
+        void capture().catch(() => { if (!cancelled) setFrameStatus("unavailable"); });
         return () => {
             cancelled = true;
             source.removeAttribute("src");
@@ -131,17 +140,12 @@ export function CanvasVideoInlineTrim({ node, busy, onCancel, onConfirm }: Canva
     useEffect(() => {
         const preview = canvasNodeVideo(node.id);
         if (!preview) return;
-        preview.muted = muted;
+        preview.muted = false;
         preview.loop = false;
         const handleTimeUpdate = () => {
             if (preview.currentTime * 1000 < range.endMs - 20) return;
-            if (loop) {
-                preview.currentTime = range.startMs / 1000;
-                void preview.play();
-            } else {
-                preview.pause();
-                setPlaying(false);
-            }
+            preview.pause();
+            setPlaying(false);
         };
         const handlePause = () => setPlaying(false);
         preview.addEventListener("timeupdate", handleTimeUpdate);
@@ -150,15 +154,37 @@ export function CanvasVideoInlineTrim({ node, busy, onCancel, onConfirm }: Canva
             preview.removeEventListener("timeupdate", handleTimeUpdate);
             preview.removeEventListener("pause", handlePause);
         };
-    }, [loop, muted, node.id, range.endMs, range.startMs]);
+    }, [node.id, range.endMs, range.startMs]);
 
     useEffect(() => () => canvasNodeVideo(node.id)?.pause(), [node.id]);
+
+    useEffect(() => {
+        const timeline = timelineRef.current;
+        const label = durationRef.current;
+        if (!timeline || !label) return;
+        const measure = () => {
+            const width = timeline.getBoundingClientRect().width;
+            const labelWidth = label.getBoundingClientRect().width;
+            setTrackMetrics((current) => current.width === width && current.labelWidth === labelWidth ? current : { width, labelWidth });
+        };
+        measure();
+        if (typeof ResizeObserver === "undefined") {
+            window.addEventListener("resize", measure);
+            return () => window.removeEventListener("resize", measure);
+        }
+        const observer = new ResizeObserver(measure);
+        observer.observe(timeline);
+        observer.observe(label);
+        return () => observer.disconnect();
+    }, []);
 
     const startPercent = durationMs ? (range.startMs / durationMs) * 100 : 0;
     const endPercent = durationMs ? (range.endMs / durationMs) * 100 : 100;
     const selectedDuration = Math.max(0, range.endMs - range.startMs);
-    const fallbackFrame = node.metadata?.videoPreview?.content || node.metadata?.previewContent || node.metadata?.content || "";
-    const visibleFrames = useMemo(() => frames.length ? frames : Array.from({ length: FRAME_COUNT }, () => fallbackFrame), [fallbackFrame, frames]);
+    const durationPlacement = placeInlineVideoTrimDuration(trackMetrics.width, startPercent, endPercent, trackMetrics.labelWidth);
+    const fallbackFrame = canvasNodeVideoPreviewUrl(node);
+    const visibleFrames = useMemo(() => Array.from({ length: FRAME_COUNT }, (_, index) => frames[index] || frames[0] || fallbackFrame), [fallbackFrame, frames]);
+    const showFrameStatus = !visibleFrames.some(Boolean);
 
     const seekPreview = (timeMs: number) => {
         const preview = canvasNodeVideo(node.id);
@@ -202,7 +228,7 @@ export function CanvasVideoInlineTrim({ node, busy, onCancel, onConfirm }: Canva
             return;
         }
         if (preview.currentTime * 1000 < range.startMs || preview.currentTime * 1000 >= range.endMs) preview.currentTime = range.startMs / 1000;
-        preview.muted = muted;
+        preview.muted = false;
         void preview.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
     };
 
@@ -222,9 +248,10 @@ export function CanvasVideoInlineTrim({ node, busy, onCancel, onConfirm }: Canva
             <button type="button" className="canvas-video-trim-icon-button" aria-label={playing ? "暂停片段预览" : "播放片段预览"} onClick={togglePlayback}>{playing ? <Pause /> : <Play />}</button>
             <Film className="canvas-video-trim-film-icon" aria-hidden />
 
+            <div className="canvas-video-trim-track">
             <div className="canvas-video-trim-timeline" ref={timelineRef} data-video-trim-filmstrip="true">
                 <div className="canvas-video-trim-frames" aria-hidden>
-                    {visibleFrames.map((frame, index) => frame ? <img key={`${frame.slice(0, 24)}-${index}`} src={frame} alt="" draggable={false} /> : <span key={index} />)}
+                    {visibleFrames.map((frame, index) => <span key={index} style={frame ? { backgroundImage: `url(${JSON.stringify(frame)})` } : undefined} />)}
                 </div>
                 <div className="canvas-video-trim-dim is-before" style={{ width: `${startPercent}%` }} aria-hidden />
                 <div className="canvas-video-trim-dim is-after" style={{ left: `${endPercent}%` }} aria-hidden />
@@ -238,7 +265,6 @@ export function CanvasVideoInlineTrim({ node, busy, onCancel, onConfirm }: Canva
                     onPointerUp={endDrag}
                     onPointerCancel={endDrag}
                 >
-                    <span className="canvas-video-trim-duration">{formatTrimDuration(selectedDuration)}</span>
                 </button>
                 <button
                     type="button"
@@ -260,10 +286,15 @@ export function CanvasVideoInlineTrim({ node, busy, onCancel, onConfirm }: Canva
                     onPointerUp={endDrag}
                     onPointerCancel={endDrag}
                 ><span /></button>
+                {showFrameStatus ? <span className="canvas-video-trim-frame-status" role="status">{frameStatus === "unavailable" ? "缩略图不可用" : "正在读取缩略图"}</span> : null}
             </div>
-
-            <button type="button" className={`canvas-video-trim-icon-button is-audio${muted ? " is-active" : ""}`} aria-label={muted ? "开启原声" : "静音预览"} onClick={() => setMuted((value) => !value)}>{muted ? <VolumeX /> : <Volume2 />}</button>
-            <button type="button" className={`canvas-video-trim-icon-button is-loop${loop ? " is-active" : ""}`} aria-label={loop ? "关闭循环预览" : "循环预览"} onClick={() => setLoop((value) => !value)}><Repeat2 /></button>
+            <output
+                ref={durationRef}
+                className={`canvas-video-trim-duration${durationPlacement.floating ? " is-floating" : ""}`}
+                style={{ left: trackMetrics.width ? `${durationPlacement.left}px` : `${(startPercent + endPercent) / 2}%` }}
+                aria-label="所选片段时长"
+            >{formatTrimDuration(selectedDuration)}</output>
+            </div>
             <button type="button" className="canvas-video-trim-confirm" aria-label="确认剪辑" disabled={busy || !durationMs} onClick={() => onConfirm(range)}>{busy ? <LoaderCircle className="animate-spin" /> : <Check />}</button>
         </section>
     );

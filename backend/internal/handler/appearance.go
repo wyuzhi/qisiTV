@@ -5,13 +5,14 @@ import (
 	"net/http"
 
 	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/appearance"
 
 	"github.com/gin-gonic/gin"
 )
 
 func RegisterDesktopAppearanceRoutes(r *gin.RouterGroup, svc *app.Service) {
 	r.GET("/public/appearance", func(c *gin.Context) {
-		setting, err := svc.Appearance()
+		setting, err := requestAppearance(c, svc).Public()
 		if err != nil {
 			failService(c, err)
 			return
@@ -51,4 +52,14 @@ func RegisterDesktopAppearanceRoutes(r *gin.RouterGroup, svc *app.Service) {
 		c.DataFromReader(stream.StatusCode, stream.ContentLength, mimeType, stream.Body, nil)
 	})
 
+}
+
+func requestAppearance(c *gin.Context, svc *app.Service) *appearance.Service {
+	if dependencies, ok := runtimeDependencies(c); ok && dependencies.Appearance != nil {
+		return dependencies.Appearance
+	}
+	if svc == nil {
+		return appearance.New(appearance.Dependencies{})
+	}
+	return svc.AppearanceDomain()
 }

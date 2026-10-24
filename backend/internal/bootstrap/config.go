@@ -13,6 +13,10 @@ const (
 	ProfileDesktop Profile = "desktop"
 )
 
+// DefaultServerListenAddr 是服务端 profile 未设置监听地址时的回环地址。
+// 该 profile 没有桌面启动令牌；要让局域网或 Compose 网络访问，必须显式设置 CANVAS_BACKEND_ADDR。
+const DefaultServerListenAddr = "127.0.0.1:8080"
+
 type Config struct {
 	Profile          Profile
 	DataDir          string
@@ -36,7 +40,7 @@ func (c Config) withDefaults() Config {
 		if c.Profile == ProfileDesktop {
 			c.ListenAddr = "127.0.0.1:0"
 		} else {
-			c.ListenAddr = ":8080"
+			c.ListenAddr = DefaultServerListenAddr
 		}
 	}
 	if c.ShutdownTimeout <= 0 {

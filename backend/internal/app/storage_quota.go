@@ -1,11 +1,14 @@
 package app
 
 import (
+	"errors"
 	"fmt"
+	"qisitv/backend/internal/kernel"
 	"time"
 
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/repository"
+	localtask "qisitv/backend/internal/task"
 )
 
 type AccountFileStorageUsage struct {
@@ -33,19 +36,27 @@ func structuredBytes(usage repository.UserStorageUsage) int64 {
 }
 
 func validateStructuredStorageQuotaWithPolicy(usage repository.UserStorageUsage, kind string, creating bool, deltaBytes int64, policy RuntimeResourcePolicy) error {
+	created := 0
+	if creating {
+		created = 1
+	}
+	return validateStructuredCountQuotaWithPolicy(usage, kind, created, deltaBytes, policy)
+}
+
+func validateStructuredCountQuotaWithPolicy(usage repository.UserStorageUsage, kind string, createdCount int, deltaBytes int64, policy RuntimeResourcePolicy) error {
 	if structuredBytes(usage)+deltaBytes > megabytes(policy.StructuredDataMB) {
 		return QuotaExceeded(fmt.Sprintf("账号画布和素材数据已达到 %dMB 上限，请先删除不需要的内容", policy.StructuredDataMB))
 	}
-	if !creating {
+	if createdCount <= 0 {
 		return nil
 	}
 	switch kind {
 	case "asset":
-		if usage.AssetCount >= policy.AssetCount {
+		if usage.AssetCount+int64(createdCount) > policy.AssetCount {
 			return QuotaExceeded(fmt.Sprintf("账号素材数量已达到 %d 个上限", policy.AssetCount))
 		}
 	case "canvas":
-		if usage.CanvasCount >= policy.CanvasCount {
+		if usage.CanvasCount+int64(createdCount) > policy.CanvasCount {
 			return QuotaExceeded(fmt.Sprintf("账号画布数量已达到 %d 个上限", policy.CanvasCount))
 		}
 	}
@@ -99,17 +110,36 @@ func (s *Service) createTaskWithinStorageQuota(task *model.Task, policy RuntimeP
 func createTaskWithStorageQuotaRepository(repo *repository.Repository, task *model.Task, policy RuntimePolicySetting) error {
 	usage, err := repo.UserStorageUsage(task.UserID)
 	if err != nil {
-		return err
+		return taskStorageError(err)
 	}
 	incomingBytes := int64(len([]byte(task.Prompt)) + len([]byte(task.InputJSON)) + len([]byte(task.Error)))
 	if err := validateTaskStorageQuotaWithPolicy(usage, incomingBytes, policy.Resource); err != nil {
 		return err
 	}
-	return repo.CreateTaskWithActiveLimit(task, policy.Task.ActiveTaskLimit)
+	err = repo.CreateTaskWithActiveLimit(task, policy.Task.ActiveTaskLimit)
+	if err == nil || errors.Is(err, repository.ErrActiveTaskLimit) || errors.Is(err, repository.ErrLogicalModelUnavailable) {
+		return err
+	}
+	return taskStorageError(err)
+}
+
+func taskStorageError(cause error) error {
+	if full := kernel.DiskFullError(cause); full != nil {
+		return full
+	}
+	if mapped := localtask.AdmissionValidationError(cause); mapped != nil {
+		return mapped
+	}
+	return &AppError{Status: 500, Code: 500, Reason: "local_storage_failed", Message: "本地任务保存失败，尚未提交生成。请重启 BeefTV 后重试；若仍失败，请更新应用并联系支持", Cause: cause}
 }
 
 // 任务完成会同时扩张任务历史和画布操作数据，必须在同一临界区核算并原子写入。
-func (s *Service) saveTaskCompletionWithinStorageQuota(task *model.Task, resultJSON []byte, opsJSON []byte, hasCanvasOps bool) error {
+func (s *Service) saveTaskCompletionWithinStorageQuota(task *model.Task, resultJSON []byte, opsJSON []byte, hasCanvasOps bool) (returnErr error) {
+	defer func() {
+		if full := kernel.DiskFullError(returnErr); full != nil {
+			returnErr = full
+		}
+	}()
 	policy, err := s.RuntimePolicy()
 	if err != nil {
 		return err
@@ -121,8 +151,15 @@ func (s *Service) saveTaskCompletionWithinStorageQuota(task *model.Task, resultJ
 	if err != nil {
 		return err
 	}
-	publicInputJSON := publicTaskInputJSON(task.InputJSON)
-	taskDelta := int64(len(resultJSON) + len(publicInputJSON) - len(task.ResultJSON) - len(task.InputJSON))
+	publicInputJSON, err := s.completionInputJSON(*task, resultJSON)
+	if err != nil {
+		return err
+	}
+	sourceCipher, err := s.captureCanvasWorkflowSource(*task)
+	if err != nil {
+		return err
+	}
+	taskDelta := int64(len(resultJSON) + len(publicInputJSON) + len(sourceCipher) - len(task.ResultJSON) - len(task.InputJSON) - len(task.WorkflowSourceCipher))
 
 	results := make([]model.Result, 0, 2)
 	structuredDelta := int64(0)
@@ -146,6 +183,7 @@ func (s *Service) saveTaskCompletionWithinStorageQuota(task *model.Task, resultJ
 	completed.Progress = 100
 	completed.ResultJSON = string(resultJSON)
 	completed.InputJSON = publicInputJSON
+	completed.WorkflowSourceCipher = sourceCipher
 	completed.CompletedAt = ptr(time.Now())
 	if err := s.repo.SaveTaskCompletion(&completed, expectedStatus, results); err != nil {
 		return err

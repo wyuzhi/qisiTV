@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"qisitv/backend/internal/generation"
 	"strings"
 	"time"
 
@@ -78,7 +79,7 @@ func (s *Service) requestProviderCancellation(ctx context.Context, task *model.T
 	if err != nil {
 		return s.markProviderCancellationUncertain(task, providerCancellationUncertainMessage("读取上游取消配置失败")+"："+err.Error())
 	}
-	if !supportsProviderCancellation(input.Config.InterfaceType) {
+	if !supportsProviderCancellation(input.Config.InterfaceType) && generation.UpscaleMediaType(input.Config.Model) == "" {
 		return s.markProviderCancellationUncertain(task, providerCancellationUncertainMessage("当前上游协议不支持取消"))
 	}
 
@@ -180,6 +181,12 @@ func supportsProviderCancellation(interfaceType string) bool {
 }
 
 func cancelProviderTask(ctx context.Context, config providerConfig, providerRequestID string) error {
+	if generation.IsLikeAIUpscaleModel(config.Model) {
+		return errors.New("LikeAI 未声明上游取消接口；停止本机等待不代表退款")
+	}
+	if generation.UpscaleMediaType(config.Model) != "" {
+		return generation.CancelUpscale(ctx, config, providerRequestID)
+	}
 	switch {
 	case config.InterfaceType == string(model.ChannelInterfaceGeminiVeo):
 		path := "/" + strings.TrimLeft(providerRequestID, "/") + ":cancel"
@@ -210,6 +217,25 @@ func deleteProviderTask(ctx context.Context, config providerConfig, path string)
 }
 
 func queryProviderCancellation(ctx context.Context, config providerConfig, providerRequestID string) (providerCancellationOutcome, string, error) {
+	if generation.IsLikeAIUpscaleModel(config.Model) {
+		return "", "", errors.New("LikeAI 未声明上游取消接口")
+	}
+	if generation.UpscaleMediaType(config.Model) != "" {
+		status, err := generation.QueryUpscaleStatus(ctx, config, providerRequestID)
+		if err != nil {
+			return "", "", err
+		}
+		switch status {
+		case "cancelled":
+			return providerCancellationConfirmed, status, nil
+		case "completed":
+			return providerCancellationSucceeded, status, nil
+		case "failed":
+			return providerCancellationFailed, status, nil
+		default:
+			return providerCancellationPending, status, nil
+		}
+	}
 	switch {
 	case config.InterfaceType == string(model.ChannelInterfaceGeminiVeo):
 		// Gemini 用 operation.error 表示取消终态，此处必须保留该字段再判断，

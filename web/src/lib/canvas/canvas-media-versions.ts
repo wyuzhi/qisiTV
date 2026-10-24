@@ -13,11 +13,15 @@ function snapshotMetadata(metadata: CanvasNodeMetadata | undefined, rootId: stri
     delete snapshot.taskUpdatedAt;
     delete snapshot.errorDetails;
     delete snapshot.generationErrorCode;
+    delete snapshot.generationErrorSummary;
+    delete snapshot.taskFailureDiagnostics;
+    delete snapshot.taskProviderRequestId;
     delete snapshot.failedPromptFingerprint;
     delete snapshot.failedInputFingerprint;
     delete snapshot.isBatchRoot;
     delete snapshot.batchRootId;
     delete snapshot.batchChildIds;
+    delete snapshot.generationOutputNodeIds;
     delete snapshot.batchFailedCount;
     delete snapshot.primaryImageId;
     delete snapshot.imageBatchExpanded;

@@ -1,16 +1,16 @@
 import { AppDrawer } from "@/components/ui/product/app-drawer";
 import { EmptyState } from "@/components/ui/product/empty-state";
 import { App, Button, Grid, Spin } from "antd";
-import { Check, ChevronDown, Cloud, Download, FileClock, History, RefreshCw, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Check, ChevronDown, Download, RefreshCw, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { getCanvasHistoryEntry, listCanvasHistory, type CanvasHistoryEntry } from "@/services/api/workspace-data";
 import { preserveCanvasSyncDraft, readCanvasSyncDrafts, type CanvasSyncDraft } from "@/services/canvas-sync-drafts";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
-import { getActiveUserScope } from "@/lib/user-scope";
+import { getActiveUserScope, getActiveUserScopeEpoch, subscribeUserScope } from "@/lib/user-scope";
+import { captureUserScope, userScopeMatches } from "@/lib/user-scope-guard";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
-import { useSyncProgressStore } from "@/stores/use-sync-progress-store";
-import { workspaceCapabilities } from "@/services/workspace-mode";
+import { canvasSyncProgressKey, useSyncProgressStore } from "@/stores/use-sync-progress-store";
 import "./canvas-version-history.css";
 
 export type CanvasVersionPreviewState = {
@@ -27,27 +27,29 @@ export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotI
     const { message, modal } = App.useApp();
     const desktop = Boolean(Grid.useBreakpoint().lg);
     const scope = getActiveUserScope();
-    const contextRef = useRef({ projectId, scope });
-    contextRef.current = { projectId, scope };
-    const isCurrentContext = () => contextRef.current.projectId === projectId && contextRef.current.scope === scope && getActiveUserScope() === scope;
-    const draftCount = useSyncProgressStore((state) => state.syncingProjects[projectId]?.draftCount);
+    const scopeEpoch = useSyncExternalStore(subscribeUserScope, getActiveUserScopeEpoch, getActiveUserScopeEpoch);
+    const contextRef = useRef({ projectId, scopeEpoch });
+    if (contextRef.current.projectId !== projectId || contextRef.current.scopeEpoch !== scopeEpoch) contextRef.current = { projectId, scopeEpoch };
+    const context = contextRef.current;
+    const expectedScope = captureUserScope(scope, scopeEpoch);
+    const isCurrentContext = () => contextRef.current === context && userScopeMatches(expectedScope);
     const storedProject = useCanvasStore((state) => state.projects.find((project) => project.id === projectId));
     const currentProject = projectFromEditor || storedProject;
-    const localOnly = workspaceCapabilities().local;
+    const draftCount = useSyncProgressStore((state) => state.syncingProjects[canvasSyncProgressKey(projectId)]?.draftCount);
     const [open, setOpen] = useState(false);
     const [listOpen, setListOpen] = useState(true);
-    const [tab, setTab] = useState<"cloud" | "draft">(localOnly ? "draft" : "cloud");
     const [entries, setEntries] = useState<CanvasHistoryEntry[]>([]);
+    const [tab, setTab] = useState<"cloud" | "draft">("cloud");
     const [drafts, setDrafts] = useState<CanvasSyncDraft[]>([]);
+    const [draftLoading, setDraftLoading] = useState(false);
+    const [draftError, setDraftError] = useState("");
     const [currentRevision, setCurrentRevision] = useState<number>();
     const [preview, setPreview] = useState<CanvasVersionPreviewState | null>(null);
     const [loading, setLoading] = useState(false);
-    const [draftLoading, setDraftLoading] = useState(false);
     const [restoring, setRestoring] = useState(false);
     const [confirming, setConfirming] = useState(false);
     const [exporting, setExporting] = useState(false);
     const [error, setError] = useState("");
-    const [draftError, setDraftError] = useState("");
     const [reload, setReload] = useState(0);
     const previewRequest = useRef<AbortController | null>(null);
     const returnToCurrent = useCallback(() => {
@@ -55,20 +57,20 @@ export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotI
         setPreview(null);
     }, []);
     const close = useCallback(() => {
-        if (!restoring) {
+        if (!restoring && !confirming) {
             setOpen(false);
             returnToCurrent();
         }
-    }, [restoring, returnToCurrent]);
+    }, [restoring, confirming, returnToCurrent]);
 
     useEffect(() => {
         setOpen(false);
-        setTab(localOnly ? "draft" : "cloud");
+        setTab("cloud");
         returnToCurrent();
-    }, [localOnly, projectId, scope, returnToCurrent]);
+    }, [projectId, scopeEpoch, returnToCurrent]);
 
     useEffect(() => {
-        if (!open || localOnly) return;
+        if (!open) return;
         const controller = new AbortController();
         setLoading(true);
         setError("");
@@ -88,7 +90,7 @@ export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotI
                 if (!controller.signal.aborted && isCurrentContext()) setLoading(false);
             });
         return () => controller.abort();
-    }, [localOnly, open, projectId, reload, scope]);
+    }, [open, projectId, reload, scope, scopeEpoch]);
 
     useEffect(() => {
         if (!open) return;
@@ -106,23 +108,22 @@ export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotI
             .finally(() => {
                 if (active && isCurrentContext()) setDraftLoading(false);
             });
-        return () => {
-            active = false;
-        };
-    }, [open, projectId, reload, scope, draftCount]);
+        return () => { active = false; };
+    }, [open, projectId, reload, scope, scopeEpoch, draftCount]);
 
     useEffect(
         () => () => {
             previewRequest.current?.abort();
         },
-        [open, projectId, scope],
+        [open, projectId, scopeEpoch],
     );
 
     const selectVersion = (entry: CanvasHistoryEntry) => {
+        if (restoring || confirming) return;
         previewRequest.current?.abort();
         const controller = new AbortController();
         previewRequest.current = controller;
-        const selection: CanvasVersionPreviewState = { key: entry.id, label: `版本 ${entry.revision}`, date: entry.contentUpdatedAt, kind: "cloud", snapshot: entry };
+        const selection: CanvasVersionPreviewState = { key: entry.id, label: canvasHistoryDisplayLabel(entries, entry.id), date: entry.contentUpdatedAt, kind: "cloud", snapshot: entry };
         setPreview(selection);
         setListOpen(false);
         void getCanvasHistoryEntry(projectId, entry.id, controller.signal)
@@ -136,11 +137,11 @@ export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotI
 
     const restore = () => {
         const selected = preview?.snapshot;
-        if (!selected || !preview.project || currentRevision === undefined || restoring) return;
+        if (!selected || !preview.project || currentRevision === undefined || restoring || confirming) return;
         setConfirming(true);
         modal.confirm({
-            title: `恢复版本 ${selected.revision} 的内容？`,
-            content: "恢复前会备份当前云端内容，并保留本地草稿。恢复后会生成一个新版本，画布的项目归属保持当前设置。",
+            title: `恢复${preview.label}的内容？`,
+            content: "恢复前会备份当前画布，并保留本机草稿。恢复后会生成一个新版本。",
             okText: "恢复此版本",
             cancelText: "取消",
             afterClose: () => setConfirming(false),
@@ -151,6 +152,9 @@ export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotI
                 }
                 setRestoring(true);
                 try {
+                    const snapshotProject = currentProject || useCanvasStore.getState().openProject(projectId);
+                    if (snapshotProject) await preserveCanvasSyncDraft(snapshotProject, scope);
+                    if (!isCurrentContext()) return;
                     await onRestore(selected.id, currentRevision);
                     returnToCurrent();
                     setReload((value) => value + 1);
@@ -192,25 +196,15 @@ export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotI
         preview,
         loading,
         draftLoading,
+        draftError,
         restoring,
         confirming,
         exporting,
         error,
-        draftError,
-        localOnly,
         show: () => {
+            if (restoring || confirming) return;
             setOpen(true);
             setListOpen(true);
-            // Local mode has no remote save boundary to create a history entry.
-            // Capture the current canvas on demand so the version drawer always
-            // has a real, downloadable snapshot to preview. The draft store
-            // de-duplicates identical content, so reopening the drawer is safe.
-            const snapshotProject = currentProject || useCanvasStore.getState().openProject(projectId);
-            if (localOnly && snapshotProject) {
-                void preserveCanvasSyncDraft(snapshotProject, scope)
-                    .then(() => setReload((value) => value + 1))
-                    .catch(() => setDraftError("本地草稿保存失败，请刷新重试"));
-            }
         },
         toggle: () => {
             if (open && (desktop || listOpen)) close();
@@ -220,27 +214,32 @@ export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotI
             }
         },
         hideList: () => {
-            if (!restoring) {
+            if (!restoring && !confirming) {
                 setListOpen(false);
                 if (!preview) setOpen(false);
             }
         },
         close,
         changeTab: (next: "cloud" | "draft") => {
+            if (restoring || confirming) return;
             setTab(next);
             returnToCurrent();
         },
         refresh: () => {
+            if (restoring || confirming) return;
             returnToCurrent();
             setReload((value) => value + 1);
         },
         selectVersion,
         selectDraft: (draft: CanvasSyncDraft) => {
+            if (restoring || confirming) return;
             previewRequest.current?.abort();
-            setPreview({ key: draft.id, label: "本地草稿", date: draft.savedAt, kind: "draft", project: draft.project });
+            setPreview({ key: draft.id, label: "本机草稿", date: draft.savedAt, kind: "draft", project: draft.project });
             setListOpen(false);
         },
-        returnToCurrent,
+        returnToCurrent: () => {
+            if (!restoring && !confirming) returnToCurrent();
+        },
         restore,
         download,
     };
@@ -249,9 +248,8 @@ export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotI
 export type CanvasVersionHistoryController = ReturnType<typeof useCanvasVersionHistory>;
 
 export function CanvasVersionHistory({ history }: { history: CanvasVersionHistoryController }) {
-    const { open, tab, entries, drafts, currentProject, currentRevision, preview, loading, draftLoading, restoring, exporting, error, draftError, localOnly } = history;
+    const { open, tab, entries, drafts: displayDrafts, currentRevision, preview, loading, draftLoading, draftError, restoring, exporting, error } = history;
     if (!open) return null;
-    const displayDrafts = drafts.length || !localOnly || !currentProject ? drafts : [{ id: "current-local-snapshot", savedAt: currentProject.updatedAt, project: currentProject }];
     const groups = new Map<string, CanvasHistoryEntry[]>();
     for (const entry of entries) {
         const day = new Date(entry.contentUpdatedAt).toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" });
@@ -260,133 +258,81 @@ export function CanvasVersionHistory({ history }: { history: CanvasVersionHistor
     const content = (
         <div className="canvas-version-panel" data-canvas-no-zoom data-canvas-wheel-scroll>
             <header className="canvas-version-header">
-                <History size={17} />
                 <h2>版本记录</h2>
-                <Button type="text" size="small" aria-label="刷新版本记录" icon={<RefreshCw size={15} />} disabled={restoring || loading} onClick={history.refresh} />
-                <Button type="text" size="small" aria-label="关闭版本记录" icon={<X size={17} />} disabled={restoring} onClick={history.close} />
+                <Button type="text" size="small" aria-label="刷新版本记录" icon={<RefreshCw size={16} />} disabled={restoring || loading} onClick={history.refresh} />
+                <Button type="text" size="small" aria-label="关闭版本记录" icon={<X size={16} />} disabled={restoring} onClick={history.close} />
             </header>
-            {!localOnly ? <div
-                className="canvas-version-tabs"
-                role="tablist"
-                aria-label="版本来源"
-                onKeyDown={(event) => {
-                    if (restoring || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-                    event.preventDefault();
-                    const next = localOnly ? "draft" : event.key === "Home" ? "cloud" : event.key === "End" ? "draft" : tab === "cloud" ? "draft" : "cloud";
-                    history.changeTab(next);
-                    event.currentTarget.querySelector<HTMLButtonElement>(`[data-tab="${next}"]`)?.focus();
-                }}
-            >
-                {!localOnly ? <button
-                    type="button"
-                    id="canvas-cloud-tab"
-                    role="tab"
-                    data-tab="cloud"
-                    aria-selected={tab === "cloud"}
-                    aria-controls="canvas-version-list"
-                    tabIndex={tab === "cloud" ? 0 : -1}
-                    disabled={restoring}
-                    onClick={() => history.changeTab("cloud")}
-                >
-                    <Cloud size={14} />
-                    云端历史
-                </button> : null}
-                <button
-                    type="button"
-                    id="canvas-draft-tab"
-                    role="tab"
-                    data-tab="draft"
-                    aria-selected={tab === "draft"}
-                    aria-controls="canvas-version-list"
-                    tabIndex={tab === "draft" ? 0 : -1}
-                    disabled={restoring}
-                    onClick={() => history.changeTab("draft")}
-                >
-                    <FileClock size={14} />
-                    {localOnly ? "本地历史" : "本地草稿"} <span className="canvas-version-count">{displayDrafts.length}</span>
+            <div className="canvas-version-tabs" role="tablist" aria-label="版本来源" onKeyDown={event => {
+                if (restoring || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+                event.preventDefault();
+                const next = event.key === "Home" ? "cloud" : event.key === "End" ? "draft" : tab === "cloud" ? "draft" : "cloud";
+                history.changeTab(next);
+                event.currentTarget.querySelector<HTMLButtonElement>(`[data-tab="${next}"]`)?.focus();
+            }}>
+                <button type="button" id="canvas-saved-tab" role="tab" data-tab="cloud" aria-selected={tab === "cloud"} aria-controls="canvas-version-list" tabIndex={tab === "cloud" ? 0 : -1} disabled={restoring} onClick={() => history.changeTab("cloud")}>
+                    已保存版本 <span className="canvas-version-count">{entries.length}</span>
                 </button>
-            </div> : null}
-            <div id="canvas-version-list" role="tabpanel" aria-labelledby={tab === "cloud" ? "canvas-cloud-tab" : "canvas-draft-tab"} className="canvas-version-list">
-                {tab === "cloud" && !localOnly ? (
-                    <>
-                        <button type="button" className="canvas-version-current" aria-pressed={!preview} disabled={restoring} onClick={history.returnToCurrent}>
-                            <span className="canvas-version-dot">
-                                <Check size={12} />
-                            </span>
-                            <span>
-                                <strong>当前画布</strong>
-                                <small>{currentRevision === undefined ? "云端版本待确认" : `打开记录时云端为 v${currentRevision}`}</small>
-                            </span>
-                            {!preview ? <span className="canvas-version-tag">当前</span> : null}
-                        </button>
-                        <p className="canvas-version-hint">查看旧版不会修改当前画布</p>
-                        {error ? (
-                            <p role="alert" className="canvas-version-error">
-                                {error}
-                            </p>
-                        ) : null}
-                        {loading ? (
-                            <div className="canvas-version-empty">
-                                <Spin size="small" />
-                            </div>
-                        ) : !entries.length && !error ? (
-                            <EmptyState size="compact" description="暂无历史版本，后续保存时会自动保留" />
-                        ) : null}
-                        {[...groups].map(([day, items]) => (
-                            <details className="canvas-version-group" key={day} open>
-                                <summary>
-                                    <ChevronDown size={14} />
-                                    <span>{day}</span>
-                                    <span className="canvas-version-count">{items.length}</span>
-                                </summary>
-                                <div className="canvas-version-branches">
-                                    {items.map((entry) => (
-                                        <button type="button" key={entry.id} className="canvas-version-item" disabled={restoring} aria-pressed={preview?.key === entry.id} onClick={() => history.selectVersion(entry)}>
-                                            <span className="canvas-version-item-title">
-                                                <time dateTime={entry.contentUpdatedAt}>{formatTime(entry.contentUpdatedAt)}</time>
-                                                <span className="canvas-version-tag">v{entry.revision}</span>
-                                            </span>
-                                            <span className="canvas-version-reason">{entry.reason === "before_restore" ? "恢复前备份" : "自动保存"}</span>
-                                            <small>
-                                                {entry.nodeCount} 个节点 · {entry.connectionCount} 条连线
-                                            </small>
-                                        </button>
-                                    ))}
-                                </div>
-                            </details>
-                        ))}
-                    </>
-                ) : (
-                    <>
-                        {draftError ? (
-                            <p role="alert" className="canvas-version-error">
-                                {draftError}
-                            </p>
-                        ) : null}
-                        {draftLoading ? (
-                            <div className="canvas-version-empty">
-                                <Spin size="small" />
-                            </div>
-                        ) : !displayDrafts.length && !draftError ? (
-                            <EmptyState size="compact" description="暂无本地草稿" />
-                        ) : null}
-                        {displayDrafts.map((draft) => (
-                            <button type="button" key={draft.id} className="canvas-version-item canvas-version-draft" disabled={restoring} aria-pressed={preview?.key === draft.id} onClick={() => history.selectDraft(draft)}>
-                                <span className="canvas-version-item-title">
-                                    <FileClock size={15} />
-                                    <strong>本机备份</strong>
-                                    {draft.project.revision !== undefined ? <span className="canvas-version-tag">基于 v{draft.project.revision}</span> : null}
-                                </span>
-                                <time dateTime={draft.savedAt}>{new Date(draft.savedAt).toLocaleString("zh-CN")}</time>
-                                <small>
-                                    {draft.project.nodes.length} 个节点 · {draft.project.connections.length} 条连线
-                                </small>
-                            </button>
-                        ))}
-                    </>
-                )}
+                <button type="button" id="canvas-draft-tab" role="tab" data-tab="draft" aria-selected={tab === "draft"} aria-controls="canvas-version-list" tabIndex={tab === "draft" ? 0 : -1} disabled={restoring} onClick={() => history.changeTab("draft")}>
+                    本机草稿 <span className="canvas-version-count">{displayDrafts.length}</span>
+                </button>
             </div>
-            <footer className="canvas-version-footer">
+            <div id="canvas-version-list" role="tabpanel" aria-labelledby={tab === "cloud" ? "canvas-saved-tab" : "canvas-draft-tab"} className="canvas-version-list">
+                {tab === "cloud" ? <>
+                <button type="button" className="canvas-version-current" aria-pressed={!preview} disabled={restoring} onClick={history.returnToCurrent}>
+                    <span className="canvas-version-dot">
+                        <Check size={12} />
+                    </span>
+                    <span>
+                        <strong>当前画布</strong>
+                    </span>
+                </button>
+                {error ? (
+                    <p role="alert" className="canvas-version-error">
+                        {error}
+                    </p>
+                ) : null}
+                {loading ? (
+                    <div className="canvas-version-empty">
+                        <Spin size="small" />
+                    </div>
+                ) : !entries.length && !error ? (
+                    <EmptyState size="compact" description="暂无历史版本，后续保存时会自动保留" />
+                ) : null}
+                {[...groups].map(([day, items]) => (
+                    <details className="canvas-version-group" key={day} open>
+                        <summary>
+                            <ChevronDown size={14} />
+                            <span>{day}</span>
+                        </summary>
+                        <div className="canvas-version-branches">
+                            {items.map((entry) => (
+                                <button type="button" key={entry.id} className="canvas-version-item" disabled={restoring} aria-pressed={preview?.key === entry.id} onClick={() => history.selectVersion(entry)}>
+                                    <span className="canvas-version-item-title">
+                                        <time dateTime={entry.contentUpdatedAt}>{formatTime(entry.contentUpdatedAt)}</time>
+                                        <span className="canvas-version-tag">{canvasHistoryDisplayLabel(entries, entry.id)}</span>
+                                    </span>
+                                    {entry.reason === "before_restore" ? <span className="canvas-version-reason">恢复前备份</span> : null}
+                                    <small>
+                                        {entry.nodeCount} 个节点 · {entry.connectionCount} 条连线
+                                    </small>
+                                </button>
+                            ))}
+                        </div>
+                    </details>
+                ))}
+                </> : <>
+                    {draftError ? <p role="alert" className="canvas-version-error">{draftError}</p> : null}
+                    {draftLoading ? <div className="canvas-version-empty"><Spin size="small" /></div> : !displayDrafts.length && !draftError ? <EmptyState size="compact" description="暂无本机草稿" /> : null}
+                    {displayDrafts.map((draft) => (
+                        <button type="button" key={draft.id} className="canvas-version-item canvas-version-draft" disabled={restoring} aria-pressed={preview?.key === draft.id} onClick={() => history.selectDraft(draft)}>
+                            <span className="canvas-version-item-title"><strong>本机备份</strong></span>
+                            <time dateTime={draft.savedAt}>{new Date(draft.savedAt).toLocaleString("zh-CN")}</time>
+                            <small>{draft.project.nodes.length} 个节点 · {draft.project.connections.length} 条连线</small>
+                        </button>
+                    ))}
+                </>}
+            </div>
+            <footer className="canvas-version-footer" hidden={!preview}>
                 {preview ? (
                     <>
                         <div className="canvas-version-item-title">
@@ -401,11 +347,9 @@ export function CanvasVersionHistory({ history }: { history: CanvasVersionHistor
                         ) : null}
                         {preview.project?.nodes.some((node) => node.type === "drawing") ? <p className="canvas-version-hint">绘图仅保留已上传的预览，不含本机历史笔画。</p> : null}
                         <div className="canvas-version-actions">
-                            {preview.kind === "cloud" ? (
-                                <Button block type="primary" loading={restoring} disabled={!preview.project || currentRevision === undefined || loading} onClick={history.restore}>
+                            {preview.kind === "cloud" ? <Button block type="primary" loading={restoring} disabled={!preview.project || currentRevision === undefined || loading} onClick={history.restore}>
                                     恢复此版本
-                                </Button>
-                            ) : null}
+                            </Button> : null}
                             <Button block type={preview.kind === "draft" ? "primary" : "default"} icon={<Download size={14} />} loading={exporting} disabled={!preview.project || restoring} onClick={() => void history.download()}>
                                 {preview.kind === "draft" ? "下载草稿" : "下载此版本"}
                             </Button>
@@ -431,7 +375,7 @@ export function CanvasVersionHistory({ history }: { history: CanvasVersionHistor
             onClose={history.hideList}
             maskClosable={!restoring}
             keyboard={!restoring}
-            size="min(350px, 92vw)"
+            size="min(380px, 92vw)"
             aria-label="版本记录"
         >
             {content}
@@ -441,4 +385,11 @@ export function CanvasVersionHistory({ history }: { history: CanvasVersionHistor
 
 function formatTime(date: string) {
     return new Date(date).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+// Number the retained history chronologically; revisions remain internal save preconditions.
+function canvasHistoryDisplayLabel(entries: CanvasHistoryEntry[], id: string) {
+    const ordered = [...entries].sort((a, b) => a.revision - b.revision || a.id.localeCompare(b.id));
+    const index = ordered.findIndex(entry => entry.id === id);
+    return index >= 0 ? `版本 ${index + 1}` : "历史版本";
 }

@@ -149,78 +149,21 @@ export const CanvasFrameNode = React.memo(function CanvasFrameNode({
     const active = isSelected || isDropTarget;
     const linkedFolder = Boolean(data.metadata?.folder?.assetFolderId);
     const workflowLabel = frameWorkflowLabel(data.metadata?.workflowKind);
-    const headerInverseScale = scale < 0.5 ? 1 / Math.max(scale, 0.05) : 1;
+    const workflow = data.type === CanvasNodeType.Workflow;
+    const headerInverseScale = workflow || scale < 0.5 ? 1 / Math.max(scale, 0.05) : 1;
     const compactFrameTitle = scale < 0.5 && (data.metadata?.fixture === "libtv-storyboard" || workflowLabel === "分镜")
         ? data.title.split("｜", 1)[0]
         : data.title;
 
-    return (
-        <div
-            data-node-id={data.id}
-            data-canvas-node-type={data.type}
-            data-canvas-parent-id={data.parentId || undefined}
-            data-canvas-frame-kind={folder ? "folder" : "frame"}
-            data-canvas-frame-collapsed={collapsed ? "true" : "false"}
-            data-canvas-child-count={String(childNodes.length)}
-            role={folder && collapsed ? "group" : undefined}
-            tabIndex={folder && collapsed ? 0 : undefined}
-            aria-label={folder && collapsed ? `${data.title}，文件夹，${childNodes.length} 项内容。按回车打开` : undefined}
-            className={`absolute z-0 select-none${folder && collapsed ? " canvas-folder-node" : ""} ${dragOffset ? "cursor-grabbing" : "cursor-default"}`}
-            style={{ transform: `translate(${data.position.x + (dragOffset?.x || 0)}px, ${data.position.y + (dragOffset?.y || 0)}px)`, width: data.width, height: data.height, contain: "layout style" }}
-            onMouseDown={(event) => onMouseDown(event, data.id)}
-            onDoubleClick={(event) => {
-                if (!collapsed || (event.target instanceof Element && event.target.closest("button,input"))) return;
-                event.stopPropagation();
-                onToggleCollapsed(data.id);
-            }}
-            onContextMenu={(event) => onContextMenu(event, data.id)}
-            onKeyDown={(event) => {
-                if (!folder || !collapsed || (event.target instanceof Element && event.target.closest("button,input"))) return;
-                if (event.key !== "Enter" && event.key !== " ") return;
-                event.preventDefault();
-                onToggleCollapsed(data.id);
-            }}
-            onMouseEnter={() => onHoverStart?.(data.id)}
-            onMouseLeave={() => onHoverEnd?.(data.id)}
-        >
-            {/* 帧节点同样禁用指针跟随 3D 位移，hover 使用 CSS 静态抬升 */}
-            <CometCard
-                containerClassName="h-full w-full"
-                className={folder && collapsed ? "canvas-folder-shell overflow-visible" : `canvas-frame-shell overflow-hidden rounded-[var(--dock-radius)] border${folder ? " canvas-folder-expanded" : ""}`}
-                disabled
-                data-canvas-frame-hover-locked={!collapsed || editing || Boolean(dragOffset) || scale < 0.32 ? "true" : "false"}
-                style={{
-                    background: folder && collapsed ? "transparent" : active ? theme.frame.activeFill : theme.frame.fill,
-                    borderColor: folder && collapsed ? "transparent" : active ? theme.frame.activeStroke : theme.frame.stroke,
-                    borderWidth: folder && collapsed ? 0 : 1 / Math.max(scale, 0.05),
-                    // 原版公开画布的分组更接近“空间分区”而不是浮起的卡片：
-                    // 默认只保留很轻的环境阴影，选中时再用描边承担反馈，避免密集节点被大面积阴影吞掉。
-                    boxShadow: folder && collapsed ? "none" : isSelected ? `0 0 0 ${1 / Math.max(scale, 0.05)}px ${theme.frame.activeStroke}33, 0 10px 28px color-mix(in srgb, ${theme.spatial.shadow} 52%, transparent)` : `0 8px 24px color-mix(in srgb, ${theme.spatial.shadow} 40%, transparent)`,
-                }}
-            >
-                {folder && collapsed ? (
-                    // 素材库目录是单一事实源；画布节点只负责浏览和调用，避免本地改名后被同步结果覆盖。
-                    <CanvasFolderPreview
-                        data={data}
-                        childNodes={childNodes}
-                        active={active}
-                        isDropTarget={isDropTarget}
-                        readOnly={readOnly || linkedFolder}
-                        onToggleCollapsed={onToggleCollapsed}
-                        onTitleChange={onTitleChange}
-                        onStyleChange={onFolderStyleChange}
-                        onThemeChange={onFolderThemeChange}
-                    />
-                ) : (
-                    <>
+    const header = (
                 <div data-canvas-frame-header
-                    className="pointer-events-auto absolute inset-x-0 top-0 z-10 flex items-center gap-1.5 px-1.5"
+                    className={`pointer-events-auto absolute left-0 z-10 flex items-center gap-1.5 px-1.5 ${workflow ? "bottom-full" : "inset-x-0 top-0"}`}
                     style={{
                         height: FRAME_HEADER_HEIGHT,
-                        width: scale < 0.5 ? data.width * scale : undefined,
+                        width: workflow ? `calc(${data.width}px * var(--canvas-live-scale, ${scale}))` : headerInverseScale !== 1 ? data.width * scale : undefined,
                         color: theme.node.text,
-                        transform: `scale(${headerInverseScale})`,
-                        transformOrigin: "left top",
+                        transform: workflow ? `scale(var(--canvas-live-inverse-scale, ${headerInverseScale}))` : `scale(${headerInverseScale})`,
+                        transformOrigin: workflow ? "left bottom" : "left top",
                     }}
                 >
                     <button
@@ -276,10 +219,74 @@ export const CanvasFrameNode = React.memo(function CanvasFrameNode({
                             {workflowLabel}
                         </span>
                     ) : null}
-                    <span data-canvas-frame-count className="ml-auto shrink-0 pr-1 text-[var(--fs-label)] tabular-nums" style={{ color: theme.node.muted }}>
+                    {!workflow && <span data-canvas-frame-count className="ml-auto shrink-0 pr-1 text-[var(--fs-label)] tabular-nums" style={{ color: theme.node.muted }}>
                         {childNodes.length}
-                    </span>
+                    </span>}
                 </div>
+    );
+
+    return (
+        <div
+            data-node-id={data.id}
+            data-canvas-node-type={data.type}
+            data-canvas-parent-id={data.parentId || undefined}
+            data-canvas-frame-kind={folder ? "folder" : "frame"}
+            data-canvas-frame-collapsed={collapsed ? "true" : "false"}
+            data-canvas-child-count={String(childNodes.length)}
+            role={folder && collapsed ? "group" : undefined}
+            tabIndex={folder && collapsed ? 0 : undefined}
+            aria-label={folder && collapsed ? `${data.title}，文件夹，${childNodes.length} 项内容。按回车打开` : undefined}
+            className={`absolute z-0 select-none${folder && collapsed ? " canvas-folder-node" : ""} ${dragOffset ? "cursor-grabbing" : "cursor-default"}`}
+            style={{ transform: `translate(${data.position.x + (dragOffset?.x || 0)}px, ${data.position.y + (dragOffset?.y || 0)}px)`, width: data.width, height: data.height, contain: "layout style" }}
+            onMouseDown={(event) => onMouseDown(event, data.id)}
+            onDoubleClick={(event) => {
+                if (!collapsed || (event.target instanceof Element && event.target.closest("button,input"))) return;
+                event.stopPropagation();
+                onToggleCollapsed(data.id);
+            }}
+            onContextMenu={(event) => onContextMenu(event, data.id)}
+            onKeyDown={(event) => {
+                if (!folder || !collapsed || (event.target instanceof Element && event.target.closest("button,input"))) return;
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                onToggleCollapsed(data.id);
+            }}
+            onMouseEnter={() => onHoverStart?.(data.id)}
+            onMouseLeave={() => onHoverEnd?.(data.id)}
+        >
+            {workflow && header}
+            {/* 帧节点同样禁用指针跟随 3D 位移，hover 使用 CSS 静态抬升 */}
+            <CometCard
+                containerClassName="h-full w-full"
+                className={folder && collapsed ? "canvas-folder-shell overflow-visible" : `canvas-frame-shell overflow-hidden rounded-[var(--dock-radius)] border${folder ? " canvas-folder-expanded" : ""}`}
+                disabled
+                data-canvas-frame-hover-locked={!collapsed || editing || Boolean(dragOffset) || scale < 0.32 ? "true" : "false"}
+                style={{
+                    background: folder && collapsed ? "transparent" : active ? theme.frame.activeFill : theme.frame.fill,
+                    borderColor: folder && collapsed ? "transparent" : active ? theme.frame.activeStroke : theme.frame.stroke,
+                    borderWidth: folder && collapsed ? 0 : 1 / Math.max(scale, 0.05),
+                    // 原版公开画布的分组更接近“空间分区”而不是浮起的卡片：
+                    // 默认只保留很轻的环境阴影，选中时再用描边承担反馈，避免密集节点被大面积阴影吞掉。
+                    boxShadow: folder && collapsed ? "none" : isSelected ? `0 0 0 ${1 / Math.max(scale, 0.05)}px ${theme.frame.activeStroke}33, 0 10px 28px color-mix(in srgb, ${theme.spatial.shadow} 52%, transparent)` : `0 8px 24px color-mix(in srgb, ${theme.spatial.shadow} 40%, transparent)`,
+                }}
+            >
+                {folder && collapsed ? (
+                    // 素材库目录是单一事实源；画布节点只负责浏览和调用，避免本地改名后被同步结果覆盖。
+                    <CanvasFolderPreview
+                        data={data}
+                        childNodes={childNodes}
+                        active={active}
+                        isDropTarget={isDropTarget}
+                        readOnly={readOnly || linkedFolder}
+                        onToggleCollapsed={onToggleCollapsed}
+                        onTitleChange={onTitleChange}
+                        onStyleChange={onFolderStyleChange}
+                        onThemeChange={onFolderThemeChange}
+                    />
+                ) : (
+                    <>
+                {!workflow && header}
+
 
                 {collapsed ? <FramePreview nodes={childNodes} frame={data} theme={theme} /> : null}
                     </>

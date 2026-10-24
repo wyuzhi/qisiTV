@@ -2,17 +2,15 @@ package canvas
 
 import (
 	"encoding/json"
+
+	"qisitv/backend/internal/asset"
 	"qisitv/backend/internal/assets"
 	"qisitv/backend/internal/kernel"
-	"strings"
 
 	"qisitv/backend/internal/model"
 )
 
-type MediaAssetReference struct {
-	AssetID    string
-	ResourceID string
-}
+type MediaAssetReference = asset.CanvasMediaReference
 
 // validateCanvasMediaAssets is the final server-side invariant for canvas sync:
 // a persisted canvas may only point at an uploaded Resource through an Asset
@@ -81,179 +79,19 @@ func (s *Service) validateCanvasMediaAssetsWithCandidates(userID string, raw jso
 	return nil
 }
 
-// BindCanvasMediaAssets fills missing/stale asset bindings from candidate
-// assets by exact Resource identity. It never guesses from titles or URLs.
-func BindCanvasMediaAssets(raw json.RawMessage, candidates []model.Asset) (json.RawMessage, error) {
-	byResource := map[string]string{}
-	for _, asset := range candidates {
-		ids := map[string]struct{}{}
-		if err := assets.CollectOwnedDocumentReferences(asset.PayloadJSON, ids); err != nil {
-			return nil, err
-		}
-		for resourceID := range ids {
-			if existing, found := byResource[resourceID]; found && existing != asset.ID {
-				delete(byResource, resourceID)
-				continue
-			}
-			byResource[resourceID] = asset.ID
-		}
-	}
-	var document map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &document); err != nil {
-		return nil, err
-	}
-	var nodes []map[string]json.RawMessage
-	if err := json.Unmarshal(document["nodes"], &nodes); err != nil && len(document["nodes"]) > 0 {
-		return nil, err
-	}
-	for _, node := range nodes {
-		var kind string
-		_ = json.Unmarshal(node["type"], &kind)
-		if !isCanvasMediaKind(kind) {
-			continue
-		}
-		var metadata map[string]json.RawMessage
-		if json.Unmarshal(node["metadata"], &metadata) != nil {
-			continue
-		}
-		var storageKey, content string
-		_ = json.Unmarshal(metadata["storageKey"], &storageKey)
-		_ = json.Unmarshal(metadata["content"], &content)
-		if assetID := byResource[firstCanvasResourceID(storageKey, content)]; assetID != "" {
-			metadata["assetId"], _ = json.Marshal(assetID)
-			node["metadata"], _ = json.Marshal(metadata)
-		}
-	}
-	document["nodes"], _ = json.Marshal(nodes)
-	return json.Marshal(document)
-}
-
 // validateAssetCanvasReferences prevents an Asset update from changing the
 // resource behind a canvas that already points at that Asset.
-func (s *Service) ValidateAssetCanvasReferences(userID string, asset model.Asset) error {
-	canvases, err := s.repo.CanvasProjects(userID)
-	if err != nil {
-		return err
-	}
-	for _, canvas := range canvases {
-		references, parseErr := MediaAssetReferences(json.RawMessage(canvas.PayloadJSON))
-		if parseErr != nil {
-			return kernel.BadAuthRequest("已有画布媒体数据无法解析，已停止修改素材")
-		}
-		for _, reference := range references {
-			if reference.AssetID != asset.ID {
-				continue
-			}
-			candidate := map[string]struct{}{reference.ResourceID: {}}
-			if !assets.DocumentReferences(asset.PayloadJSON, candidate) {
-				return kernel.BadAuthRequest("素材仍被画布引用，不能替换为其他资源")
-			}
-		}
-	}
-	return nil
+func (s *Service) ValidateAssetCanvasReferences(userID string, item model.Asset) error {
+	return s.Library().GuardCanvasReferences(userID, item)
 }
 
 // validateAssetReplacementCanvasReferences applies the same invariant to the
 // legacy full-replacement endpoint, which otherwise could silently remove an
 // Asset that a canvas still needs.
 func (s *Service) ValidateAssetReplacementCanvasReferences(userID string, replacement []model.Asset) error {
-	assetByID := make(map[string]model.Asset, len(replacement))
-	for _, asset := range replacement {
-		assetByID[asset.ID] = asset
-	}
-	canvases, err := s.repo.CanvasProjects(userID)
-	if err != nil {
-		return err
-	}
-	for _, canvas := range canvases {
-		references, parseErr := MediaAssetReferences(json.RawMessage(canvas.PayloadJSON))
-		if parseErr != nil {
-			return kernel.BadAuthRequest("已有画布媒体数据无法解析，已停止替换素材库")
-		}
-		for _, reference := range references {
-			asset, exists := assetByID[reference.AssetID]
-			if !exists {
-				return kernel.BadAuthRequest("素材仍被画布引用，不能从素材库移除")
-			}
-			candidate := map[string]struct{}{reference.ResourceID: {}}
-			if !assets.DocumentReferences(asset.PayloadJSON, candidate) {
-				return kernel.BadAuthRequest("画布媒体与替换后的素材库记录不一致")
-			}
-		}
-	}
-	return nil
+	return s.Library().GuardReplacementCanvasReferences(userID, replacement)
 }
 
 func MediaAssetReferences(raw json.RawMessage) ([]MediaAssetReference, error) {
-	var payload struct {
-		Nodes []struct {
-			Type     string `json:"type"`
-			Metadata struct {
-				AssetID    string `json:"assetId"`
-				StorageKey string `json:"storageKey"`
-				Content    string `json:"content"`
-			} `json:"metadata"`
-		} `json:"nodes"`
-		Timeline struct {
-			Clips []struct {
-				DirectMedia *struct {
-					Kind       string `json:"kind"`
-					AssetID    string `json:"assetId"`
-					StorageKey string `json:"storageKey"`
-					URL        string `json:"url"`
-					DataURL    string `json:"dataUrl"`
-					Content    string `json:"content"`
-				} `json:"directMedia"`
-			} `json:"clips"`
-		} `json:"timeline"`
-	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, err
-	}
-
-	references := make([]MediaAssetReference, 0)
-	for _, node := range payload.Nodes {
-		if !isCanvasMediaKind(node.Type) {
-			continue
-		}
-		resourceID := firstCanvasResourceID(node.Metadata.StorageKey, node.Metadata.Content)
-		if resourceID == "" {
-			continue
-		}
-		references = append(references, MediaAssetReference{
-			AssetID: strings.TrimSpace(node.Metadata.AssetID), ResourceID: resourceID,
-		})
-	}
-	for _, clip := range payload.Timeline.Clips {
-		media := clip.DirectMedia
-		if media == nil || !isCanvasMediaKind(media.Kind) {
-			continue
-		}
-		resourceID := firstCanvasResourceID(media.StorageKey, media.URL, media.DataURL, media.Content)
-		if resourceID == "" {
-			continue
-		}
-		references = append(references, MediaAssetReference{
-			AssetID: strings.TrimSpace(media.AssetID), ResourceID: resourceID,
-		})
-	}
-	return references, nil
-}
-
-func firstCanvasResourceID(values ...string) string {
-	for _, value := range values {
-		if resourceID := assets.ResourceID(value); resourceID != "" {
-			return resourceID
-		}
-	}
-	return ""
-}
-
-func isCanvasMediaKind(kind string) bool {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "image", "video", "audio":
-		return true
-	default:
-		return false
-	}
+	return asset.CanvasMediaReferences(raw)
 }

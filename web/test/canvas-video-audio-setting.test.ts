@@ -52,6 +52,7 @@ describe("video audio setting at JSON boundaries", () => {
     test("observed audio tracks take precedence over generation settings", () => {
         expect(inferVideoHasAudio({ ...metadata(false), hasAudio: true })).toBe(true);
         expect(inferVideoHasAudio({ ...metadata(true), hasAudio: false })).toBe(false);
+        expect(inferVideoHasAudio({ ...metadata(true), hasAudio: true, workflowKind: "reference_video", assetTags: ["导演台白膜"] })).toBe(false);
         expect(inferVideoHasAudio(undefined)).toBeUndefined();
     });
 

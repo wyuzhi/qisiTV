@@ -31,6 +31,7 @@ mkdir -p "$destination_directory"
 
 rsync -a \
     --exclude='.git/' \
+    --exclude='.local/' \
     --exclude='.worktrees/' \
     --exclude='.playwright-mcp/' \
     --exclude='.superpowers/' \
@@ -55,6 +56,7 @@ rsync -a \
     --exclude='backend/desktop/' \
     --exclude='backend/frontend/dist/' \
     --exclude='web/node_modules/' \
+    --exclude='agent-host/node_modules/' \
     --exclude='web/dist/' \
     --exclude='web/.playwright/' \
     --exclude='web/.libtv-*' \

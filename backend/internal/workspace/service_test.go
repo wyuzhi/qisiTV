@@ -32,7 +32,7 @@ func TestProviderConfigIsAtomicPrivateAndPreservesRedactedSecrets(t *testing.T) 
 		t.Fatal(err)
 	}
 	if bytes.Contains(redacted, []byte("secret-key")) || !bytes.Contains(redacted, []byte(RedactedSecret)) {
-		t.Fatalf("redacted config leaks or drops secret marker: %s", redacted)
+		t.Fatal("redacted config leaks or drops secret marker")
 	}
 	var view map[string]any
 	if err := json.Unmarshal(redacted, &view); err != nil {
@@ -48,7 +48,7 @@ func TestProviderConfigIsAtomicPrivateAndPreservesRedactedSecrets(t *testing.T) 
 		t.Fatal(err)
 	}
 	if !bytes.Contains(raw, []byte("secret-key")) || !bytes.Contains(raw, []byte("updated")) {
-		t.Fatalf("secret-preserving update failed: %s", raw)
+		t.Fatal("secret-preserving update failed")
 	}
 
 	if err := store.SaveLocalModelConfig([]byte(`{"channels":`)); err == nil {

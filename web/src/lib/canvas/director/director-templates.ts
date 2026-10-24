@@ -1,6 +1,8 @@
 import { nanoid } from "nanoid";
 
 import { createDirectorActor, createDirectorCamera, createDirectorLight, createDirectorObject, directorFocalLengthToFov, DIRECTOR_ACTOR_COLORS } from "@/lib/canvas/director/director-scene";
+import { DIRECTOR_DEFAULT_GROUND } from "@/lib/canvas/director/director-ground";
+import { DIRECTOR_DEFAULT_STAGE_TRANSFORM } from "@/lib/canvas/director/director-stage-transform";
 import type { DirectorCamera, DirectorLight, DirectorObject, DirectorScene, DirectorShot } from "@/types/director";
 
 /**
@@ -12,7 +14,7 @@ import type { DirectorCamera, DirectorLight, DirectorObject, DirectorScene, Dire
  * 硬约束：
  * - 纯函数 + 确定性布局。同一模板每次生成的结构完全一致，只有 id 与时间戳不同。
  * - 每次调用都产生独立 id（工厂内部 nanoid），两个实例不会共享对象身份。
- * - 不改 DirectorScene schema/version：模板只是预填内容，不引入新字段。
+ * - 不改变 DirectorScene 版本：模板只预填已有场景字段。
  * - 对象之间 XZ 占位不重叠，判据与 resolveDirectorPlacement 完全一致。
  */
 
@@ -130,9 +132,16 @@ export function createDirectorSceneFromTemplate(templateId: DirectorTemplateId, 
         id: nanoid(),
         version: 1,
         title,
-        background: "#d8dde3",
+        background: "#060608",
         environmentIntensity: 0.7,
         gridVisible: true,
+        gridSnap: false,
+        panoramaRotation: 0,
+        panoramaRadius: 60,
+        ground: { ...DIRECTOR_DEFAULT_GROUND },
+        stageTransform: { ...DIRECTOR_DEFAULT_STAGE_TRANSFORM, position: [...DIRECTOR_DEFAULT_STAGE_TRANSFORM.position], rotation: [...DIRECTOR_DEFAULT_STAGE_TRANSFORM.rotation] },
+        labelsVisible: true,
+        aspectRatio: "adaptive",
         objects: blueprint.objects,
         cameras: [blueprint.camera],
         lights: threePointRig(),

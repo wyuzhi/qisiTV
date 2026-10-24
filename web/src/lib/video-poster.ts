@@ -1,9 +1,12 @@
+import { videoFrameSeekSeconds, waitForPresentedVideoFrame } from "@/lib/canvas/canvas-video-frame";
+
 export type CapturedVideoPoster = {
     width: number;
     height: number;
     durationMs?: number;
     hasAudio?: boolean;
     poster?: Blob;
+    capturedAtMs?: number;
 };
 
 type CaptureVideoPosterOptions = {
@@ -85,30 +88,68 @@ function captureVideoPosterNow(source: string, options: CaptureVideoPosterOption
                 fail(abortError());
                 return;
             }
-            const maxWidth = Math.max(1, options.maxWidth ?? 400);
-            const width = Math.max(1, Math.min(metadata.width, maxWidth));
-            const height = Math.max(1, Math.round(width * metadata.height / Math.max(1, metadata.width)));
-            const canvas = document.createElement("canvas");
-            canvas.width = width;
-            canvas.height = height;
-            const context = canvas.getContext("2d");
-            if (!context) {
-                finish(metadata);
-                return;
-            }
-            try {
-                context.fillStyle = "#000";
-                context.fillRect(0, 0, width, height);
-                context.drawImage(video, 0, 0, width, height);
-                canvas.toBlob((poster) => finish({ ...metadata, poster: poster || undefined }), "image/jpeg", 0.82);
-            } catch {
-                // Cross-origin videos without CORS can still expose metadata but cannot be drawn safely.
-                finish(metadata);
-            }
+            void prepareVideoPosterFrame(video, signal)
+                .then(() => capturePresentedVideoPoster(video, document.createElement("canvas"), options))
+                .then((captured) => finish({ ...metadata, ...captured }))
+                .catch((error) => {
+                    if (error instanceof DOMException && error.name === "AbortError") fail(error);
+                    else finish(metadata);
+                });
         };
         video.src = source;
         video.load();
     });
+}
+
+async function prepareVideoPosterFrame(video: HTMLVideoElement, signal?: AbortSignal) {
+    const targetSeconds = videoFrameSeekSeconds(0, video.duration * 1000);
+    if (Math.abs(video.currentTime - targetSeconds) <= 0.0005) return;
+    await new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
+            video.removeEventListener("seeked", handleSeeked);
+            video.removeEventListener("error", handleError);
+            signal?.removeEventListener("abort", handleAbort);
+        };
+        const finish = (error?: Error) => {
+            cleanup();
+            if (error) reject(error);
+            else resolve();
+        };
+        const handleSeeked = () => finish();
+        const handleError = () => finish(new Error("Video poster seek failed"));
+        const handleAbort = () => finish(abortError());
+        video.addEventListener("seeked", handleSeeked, { once: true });
+        video.addEventListener("error", handleError, { once: true });
+        signal?.addEventListener("abort", handleAbort, { once: true });
+        video.currentTime = targetSeconds;
+    });
+}
+
+export async function capturePresentedVideoPoster(
+    video: HTMLVideoElement,
+    canvas: HTMLCanvasElement,
+    options: Pick<CaptureVideoPosterOptions, "maxWidth" | "timeoutMs"> = {},
+): Promise<CapturedVideoPoster> {
+    await waitForPresentedVideoFrame(video, Math.min(options.timeoutMs ?? 1_500, 1_500));
+    const width = video.videoWidth || 1280;
+    const height = video.videoHeight || 720;
+    const maxWidth = Math.max(1, options.maxWidth ?? 400);
+    canvas.width = Math.max(1, Math.min(width, maxWidth));
+    canvas.height = Math.max(1, Math.round(canvas.width * height / Math.max(1, width)));
+    const context = canvas.getContext("2d");
+    if (!context) return { width, height };
+    context.fillStyle = "#000";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const poster = await new Promise<Blob | undefined>((resolve) => canvas.toBlob((blob) => resolve(blob || undefined), "image/jpeg", 0.82));
+    return {
+        width,
+        height,
+        durationMs: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : undefined,
+        hasAudio: detectVideoAudioTrack(video),
+        poster,
+        capturedAtMs: Math.round(video.currentTime * 1000),
+    };
 }
 
 function isCrossOriginHttpUrl(source: string) {

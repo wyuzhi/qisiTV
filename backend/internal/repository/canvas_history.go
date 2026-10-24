@@ -13,6 +13,21 @@ import (
 var ErrCanvasHistoryResourceMissing = errors.New("canvas history resource missing")
 var ErrCanvasHistoryResourceReferenced = errors.New("resource referenced by canvas history")
 
+func requireLiveCanvasLibraryFolder(tx *gorm.DB, userID, folderID string) error {
+	if folderID == "" || !tx.Migrator().HasTable(&model.CanvasLibraryFolder{}) {
+		return nil
+	}
+	var count int64
+	if err := liveCanvasLibraryFolders(tx.Model(&model.CanvasLibraryFolder{})).
+		Where("id = ? AND user_id = ?", folderID, userID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrCanvasLibraryFolderMissing
+	}
+	return nil
+}
+
 const canvasSnapshotSummaryColumns = "id, canvas_id, user_id, revision, title, node_count, connection_count, payload_bytes, reason, content_updated_at, created_at"
 
 func (r *Repository) CanvasProjectMetadata(userID, id string) (*model.CanvasProject, error) {
@@ -39,6 +54,9 @@ func (r *Repository) CanvasSnapshot(userID, canvasID, id string) (*model.CanvasS
 func (r *Repository) SaveCanvasWithSnapshot(project *model.CanvasProject, snapshot *model.CanvasSnapshot, resourceIDs, restoredResourceIDs []string, cutoff time.Time, limit int, force bool) error {
 	next := *project
 	err := r.db.Transaction(func(tx *gorm.DB) error {
+		if err := requireLiveCanvasLibraryFolder(tx, next.UserID, next.LibraryFolderID); err != nil {
+			return err
+		}
 		if err := New(tx).UpsertCanvasProject(&next); err != nil {
 			return err
 		}
