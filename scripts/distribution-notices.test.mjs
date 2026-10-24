@@ -76,6 +76,25 @@ test("WASM source links require the matching published core", (t) => {
     assert.throws(() => distributionNotices({ root, version: "v1.7.27" }), /does not match/);
 });
 
+test("release builds require current-version sources and produce the exact release URL", (t) => {
+    const root = fixture(t);
+    const version = "v2.0.3-web-beta.2";
+    assert.throws(() => distributionNotices({ root, version, requireSources: true }), /Required distribution source packet/);
+    const binaryHashes = JSON.parse(distributionNotices({ root, version }).get("sources.json")).components[0].binaryHashes;
+    writeFileSync(resolve(root, "licenses/ffmpeg-wasm-sources.json"), JSON.stringify({ version: "0.12.10", binaryHashes }));
+    mkdirSync(resolve(root, "dist"));
+    writeFileSync(resolve(root, "dist/qisiTV-v2.0.2-ffmpeg-wasm-sources.tar.gz"), "older source packet");
+    assert.throws(() => distributionNotices({ root, version, requireSources: true }), /Required distribution source packet/);
+    const name = `qisiTV-${version}-ffmpeg-wasm-sources.tar.gz`;
+    writeFileSync(resolve(root, "dist", name), "");
+    assert.throws(() => distributionNotices({ root, version, requireSources: true }), /Required distribution source packet/);
+    writeFileSync(resolve(root, "dist", name), "current source packet");
+    const index = JSON.parse(distributionNotices({ root, version, requireSources: true }).get("sources.json"));
+    assert.equal(index.version, version);
+    assert.equal(index.components[0].source.url, `https://github.com/wyuzhi/qisiTV/releases/download/${version}/${name}`);
+    assert.equal(index.components[0].source.sha256, createHash("sha256").update("current source packet").digest("hex"));
+});
+
 test("slim builds omit WASM and invalid inputs fail before producing notices", (t) => {
     const root = fixture(t);
     const files = distributionNotices({ root, version: "v1.7.28", heavyMedia: false });

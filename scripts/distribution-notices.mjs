@@ -7,7 +7,7 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const escapeHTML = (text) => text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
-export function distributionNotices({ root = repo, version, platform = "web", heavyMedia = true, sourcesDir = resolve(root, "dist") }) {
+export function distributionNotices({ root = repo, version, platform = "web", heavyMedia = true, sourcesDir = resolve(root, "dist"), requireSources = false }) {
     if (!/^v?\d+\.\d+\.\d+(?:[.-][\w.-]+)?$/.test(version)) throw new Error("Invalid distribution version");
     version = `v${version.replace(/^v/, "")}`;
     if (!["web", "darwin-arm64", "darwin-amd64", "windows-amd64", "linux-amd64"].includes(platform)) throw new Error("Invalid distribution platform");
@@ -40,6 +40,9 @@ export function distributionNotices({ root = repo, version, platform = "web", he
         const name = `qisiTV-${version}-${component.id}-sources.tar.gz`;
         const source = resolve(sourcesDir, name);
         const bytes = existsSync(source) ? readFileSync(source) : null;
+        if (requireSources && component.id === "ffmpeg-wasm" && !bytes?.length) {
+            throw new Error(`Required distribution source packet is missing or empty: ${name}`);
+        }
         if (bytes && component.id === "ffmpeg-wasm") {
             const lock = JSON.parse(readFileSync(resolve(root, "licenses/ffmpeg-wasm-sources.json"), "utf8"));
             if (lock.version !== component.version || Object.entries(component.binaryHashes).some(([key, hash]) => lock.binaryHashes[key] !== hash)) {

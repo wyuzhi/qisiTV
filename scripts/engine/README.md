@@ -61,9 +61,21 @@ The website install gate and engine download link use the same-origin package
 building, `scripts/export-qisitv-website.sh` requires that exact filename and its
 `.sha256` companion in `dist/engine/`, or at the path set by `QISITV_ENGINE_DMG`.
 It checks the release version and SHA-256, pins the frontend to the same
-`VERSION`, then copies both files into the exported website without deleting
-older downloads. Missing or mismatched packages stop the export before build.
-Exporting does not deploy the website.
+`VERSION`, then configures two exact 307 redirects to
+`https://github.com/wyuzhi/qisiTV/releases/download/v<VERSION without v>/`
+for that DMG and checksum. The default `github-release` delivery mode verifies
+`dist/qisiTV-v<VERSION without v>-ffmpeg-wasm-sources.tar.gz` against its locked
+sources and the installed WASM core before building. The build requires that
+source packet and emits its matching release URL in `licenses/sources.json`.
+Missing or mismatched packages stop the export before build. Publish all three
+verified assets to that release before promoting the website.
+
+The exported website does not contain the large engine installer: build-time
+`downloads/` files are excluded, and previously copied engine DMG/checksum files
+are removed. Existing non-engine downloads and unrelated website routes remain
+intact. Set `QISITV_ENGINE_DOWNLOAD_MODE=static` for an isolated local preview;
+this removes the current release redirects and copies the verified DMG/checksum
+instead. Exporting does not deploy the website.
 
 For an isolated preview, a verified package may be copied into the ignored
 `web/public/downloads/engine/` directory. Do not commit the DMG. The current beta

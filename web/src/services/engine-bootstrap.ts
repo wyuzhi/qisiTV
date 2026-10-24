@@ -1,5 +1,6 @@
 import { engineRequest, pairEngine, restoreEngineSession, type EngineStatus } from "@/services/engine-session";
 import { engineInstallerUrl, ENGINE_INSTALLER_BETA_NOTICE, ENGINE_INSTALLER_PLATFORM } from "@/services/engine-installer";
+import { ENGINE_UPGRADE_HELP_STEPS, ENGINE_UPGRADE_HELP_TITLE } from "@/services/engine-upgrade-help";
 import { publicAssetUrl } from "@/lib/public-asset";
 
 /** Runs before stores hydrate, so a disconnected engine never creates a second workspace. */
@@ -40,6 +41,11 @@ async function showConnectionGate(invitation: string): Promise<void> {
     launchRow.append(launch, install); panel.append(launchRow);
     panel.append(element("p", `${ENGINE_INSTALLER_PLATFORM}。${ENGINE_INSTALLER_BETA_NOTICE}`));
     panel.append(element("small", "首次安装后，点击打开本机引擎。引擎会给出连接链接或连接码；浏览器询问访问本地网络时请选择允许。"));
+    const upgradeHelp = element("details");
+    upgradeHelp.append(element("summary", ENGINE_UPGRADE_HELP_TITLE));
+    const upgradeSteps = element("ol");
+    for (const step of ENGINE_UPGRADE_HELP_STEPS) upgradeSteps.append(element("li", step));
+    upgradeHelp.append(upgradeSteps); panel.append(upgradeHelp);
     const row = element("div"); row.className = "row";
     const code = element("input"); code.value = invitation; code.placeholder = "输入本机引擎的连接码"; code.autocomplete = "off"; code.setAttribute("aria-label", "本机连接码");
     const connect = element("button", "确认连接"); connect.className = "primary";

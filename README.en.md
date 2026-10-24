@@ -29,6 +29,16 @@ On the website's Agent page, choose Codex, WorkBuddy, Claude Desktop / Code, Ope
 
 `qisitv-connect open` starts and pairs the engine without requiring MCP first. In native engine mode, the older `qisitv-web` MCP is only a startup, pairing and session-discovery helper. Its old canvas tools refuse writes and direct users to the native `qisitv` configuration.
 
+<details>
+<summary>Previously used qisitv-web? Upgrade steps</summary>
+
+1. Disable the old `qisitv-web` connection in each Agent client you used, and close any terminal running the old connector manually.
+2. Wait about 30 seconds for the old service to exit. After an abnormal exit, this may take about 75 seconds.
+3. Open the new qisiTV local engine and follow the website's connection prompts.
+4. Select your Agent on the website's **qisiTV MCP** page and follow its instructions to configure the new `qisitv` connection.
+
+</details>
+
 ## Local development
 
 Requires Bun and Go 1.25. Clone this repository:

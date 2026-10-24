@@ -63,6 +63,16 @@ qisiTV 同时提供项目库、个人资产库、异步任务、模型渠道和�
 
 需要外部 Agent 时，在网页的「Agent」页选择 Codex、WorkBuddy、Claude Desktop / Code、OpenClaw、Hermes、CodeBuddy、Cursor、VS Code 或通用 MCP，生成独立授权的 `qisitv` 配置并合并到客户端原配置。Agent 与引擎必须运行在同一台电脑。`qisitv-connect open` 可独立启动和配对，不要求先安装 MCP。旧 `qisitv-web` 在新版引擎模式只负责启动、配对和会话发现；旧画布工具会要求改用原生 `qisitv`，不会写入另一份浏览器项目。
 
+<details>
+<summary>用过旧版 qisitv-web？查看升级步骤</summary>
+
+1. 在用过的 Agent 客户端中停用旧 `qisitv-web` 连接，并关闭手动启动旧连接器的终端窗口。
+2. 等待约 30 秒，让旧服务退出；如果上次异常退出，可能需要约 75 秒。
+3. 打开新版 qisiTV 本机引擎，按网页提示完成连接。
+4. 在网页的「qisiTV MCP」页选择自己的 Agent，按页面提示配置新的 `qisitv` 连接。
+
+</details>
+
 内置创作助手、技能、工作流和媒体能力复用上游运行时；付费生成仍需要明确授权，不因安装、配对或创建项目而自动收费。旧浏览器项目需按文件夹迁移流程明确接管，不能自动合并两份工作区。各平台安装包、模型与发布体验仍需验收；当前合同与验证范围见 [Web 本机引擎说明](docs/design/web-engine-contract.md) 和 [功能对齐设计](docs/design/web-feature-parity.md)。
 
 本地开发需要 Bun 和 Go 1.25。在本仓库中打开两个终端：

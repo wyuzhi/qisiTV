@@ -73,7 +73,9 @@ CLI 在目录指针锁内核对 `--expected-source` 与网页显示的当前目�
 
 网页更新和引擎更新分别交付。当前引擎没有接入上游 BeefTV 的签名更新源；引擎自动更新和各平台深链接注册仍需要随 qisiTV 安装包独立验收，不能宣称已经完成所有发布体验。
 
-首次安装与侧栏更新入口共同读取网页构建版本，下载同源 `downloads/engine/qisiTV-Engine-<版本>-darwin-arm64.dmg`。网站导出脚本在构建前要求相同 `VERSION` 的 DMG 和 SHA-256 文件，校验后一起复制，保留旧下载。安装包来源为 `QISITV_ENGINE_DMG` 或仓库 `dist/engine/`；缺包、版本不符或哈希错误会中止导出。当前只提供 Mac Apple 芯片、macOS 13.5 及以上的临时签名测试包，未完成 Apple 公证，不将旧 MCP 包或 GitHub release 列表作为完整引擎安装入口。
+首次安装与侧栏更新入口共同读取网页构建版本，下载同源 `downloads/engine/qisiTV-Engine-<版本>-darwin-arm64.dmg`。网站导出脚本在构建前要求相同 `VERSION` 的 DMG 和 SHA-256 文件；默认以两个精确的 307 跳转交付 DMG 与校验文件，目标固定为 `wyuzhi/qisiTV` 同版本 GitHub Release，不使用 latest 或任意仓库地址。安装包来源为 `QISITV_ENGINE_DMG` 或仓库 `dist/engine/`；缺包、版本不符或哈希错误会中止导出。生产导出还校验当前版本 FFmpeg.wasm 对应源码包及其二进制匹配，构建后的 `licenses/sources.json` 必须包含同版本源码地址。
+
+大体积引擎安装包不会进入网站静态上传；导出会清理既有 engine DMG/校验文件，保留旧非引擎下载与网站其他路由。上线前必须先向对应 Release 上传已验证的 DMG、SHA-256 与 FFmpeg.wasm 源码包。显式设置 `QISITV_ENGINE_DOWNLOAD_MODE=static` 可供本机预览，改为复制已校验安装包并移除当前版本跳转。当前只提供 Mac Apple 芯片、macOS 13.5 及以上的临时签名测试包，未完成 Apple 公证，不将旧 MCP 包或 GitHub release 列表作为完整引擎安装入口。
 
 ## 当前验证边界
 
