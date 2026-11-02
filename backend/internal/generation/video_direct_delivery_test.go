@@ -312,6 +312,9 @@ func (queuedVideoDownloadLimits) AcquireChannelSlot(ctx context.Context, _, _ st
 
 func TestVideoIdleTimerStartsAfterChannelAdmission(t *testing.T) {
 	t.Setenv("CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS", "127.0.0.1")
+	// The local queue/transfer contract must not depend on system proxy latency.
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+	t.Setenv("NO_PROXY", "*")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("complete video"))
 	}))

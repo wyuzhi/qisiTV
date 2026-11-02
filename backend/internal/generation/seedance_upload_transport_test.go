@@ -26,6 +26,9 @@ func TestReferenceUploadGateway4xxKeepsRequestIDAndCategory(t *testing.T) {
 
 func TestReferenceUploadTLSDeadlineIsRecordedBeforeGeneration(t *testing.T) {
 	t.Setenv("CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS", "127.0.0.1")
+	// The deadline measures the stalled TLS handshake, not system proxy lookup.
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+	t.Setenv("NO_PROXY", "*")
 	address, closeServer := stalledTLS(t)
 	defer closeServer()
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
