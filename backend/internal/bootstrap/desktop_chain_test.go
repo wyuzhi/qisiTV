@@ -50,9 +50,9 @@ func TestDesktopProfileStartupChain(t *testing.T) {
 	}
 	for _, name := range []string{
 		"server.mjs", "session-identity.mjs", "canvas-turn.mjs", "request-budget.mjs", "durable-request-budget.mjs",
-		"durable-session-owner.mjs", "durable-turn-projection.mjs", "durable-extensions.mjs", "durable-turn-budget.mjs", "media-content.mjs", "native-part-store.mjs",
-		"native-history.mjs", "skill-resource.mjs", "operation-bridge.mjs", "canvas-read-view.mjs",
-		"session-owner.mjs", "system-prompt.mjs", "model-stream-idle.mjs", "plan.mjs", "studio-digest.mjs", "package.json", "run-agent-host.sh",
+		"durable-session-owner.mjs", "durable-turn-projection.mjs", "durable-extensions.mjs", "business-progress.mjs", "durable-turn-budget.mjs", "media-content.mjs", "native-part-store.mjs",
+		"native-history.mjs", "skill-resource.mjs", "active-skills.mjs", "operation-bridge.mjs", "await-business-tasks.mjs", "timeline-delivery.mjs", "canvas-read-view.mjs", "canvas-write-view.mjs",
+		"session-owner.mjs", "system-prompt.mjs", "model-stream-idle.mjs", "model-transport-error.mjs", "plan.mjs", "studio-digest.mjs", "dispatch-diagnostics.mjs", "plugin-packages.mjs", "package.json", "run-agent-host.sh",
 	} {
 		copyFile(t, filepath.Join(hostSource, name), filepath.Join(agentDir, name))
 	}
