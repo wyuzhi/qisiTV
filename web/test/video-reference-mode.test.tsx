@@ -76,10 +76,16 @@ describe("resolveVideoReferenceModeState", () => {
         const noRefVideoModelState = resolveVideoReferenceModeState({
             references: makeImageRefs(1),
             referenceVideoSupported: false,
+            endFrameSupported: false,
         });
         expect(noRefVideoModelState.mode).toBe("frames");
         expect(noRefVideoModelState.canSelectAll).toBe(false);
-        expect(noRefVideoModelState.allDisabledReason).toContain("不支持全能参考");
+        expect(noRefVideoModelState.endFrameSupported).toBe(false);
+        expect(
+            renderToStaticMarkup(
+                <VideoReferenceModeSwitch state={noRefVideoModelState} theme={canvasThemes.dark} onChange={() => {}} />,
+            ),
+        ).toBe("");
     });
 });
 
