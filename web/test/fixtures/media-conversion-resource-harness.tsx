@@ -1,11 +1,11 @@
 import { createRoot } from "react-dom/client";
-import { MediaConversionNodeContent } from "../../src/components/canvas/nodes/media-conversion-node";
-import { CanvasNodeGraphContext } from "../../src/components/canvas/canvas-node-graph-context";
-import { canvasThemes } from "../../src/lib/canvas-theme";
-import { mediaConversionSourceFingerprint } from "../../src/lib/media-conversion/contracts";
-import { configureEngineApiRuntime } from "../../src/services/api/request";
-import { rememberEngineSession } from "../../src/services/engine-session";
-import { CanvasNodeType, type CanvasNodeData } from "../../src/types/canvas";
+import { MediaConversionNodeContent } from "@/components/canvas/nodes/media-conversion-node";
+import { CanvasNodeGraphContext } from "@/components/canvas/canvas-node-graph-context";
+import { canvasThemes } from "@/lib/canvas-theme";
+import { mediaConversionSourceFingerprint } from "@/lib/media-conversion/contracts";
+import { configureEngineApiRuntime } from "@/services/api/request";
+import { rememberEngineSession } from "@/services/engine-session";
+import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 rememberEngineSession({ token: "t".repeat(48), sessionId: "synthetic-conversion-test", expiresAt: new Date(Date.now() + 60_000).toISOString() });
 configureEngineApiRuntime();
