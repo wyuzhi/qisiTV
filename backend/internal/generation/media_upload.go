@@ -57,7 +57,7 @@ type BeefAPISeedanceUploadPart = beefapi.UploadPart
 // Managed uploads must finish before dispatch. Storage failures never send the
 // same large bytes back through the gateway as an inline generation request.
 func PrepareBeefAPIVideoReferences(ctx context.Context, config Config, input *Input, read BeefAPISeedanceMediaReader) error {
-	if input == nil || (!managedConnection(config) && !IsBeefAPIVideoConfig(ctx, config)) {
+	if input == nil || (input.Mode != "" && input.Mode != "video" && input.Upscale == nil) || (!managedConnection(config) && !IsBeefAPIVideoConfig(ctx, config)) {
 		return nil
 	}
 	runtime, _ := RuntimeFromContext(ctx)

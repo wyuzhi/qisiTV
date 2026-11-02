@@ -11,9 +11,9 @@ import (
 
 type publicHTTPSContextKey struct{}
 
-// WithPublicHTTPS restricts managed storage targets independently of the
-// user-configurable BYOK LAN policy. Explicit desktop proxies remain trusted
-// network routes; their remote DNS behavior is outside this process.
+// WithPublicHTTPS validates media and storage URLs against the outbound host
+// policy: HTTPS is required for public hosts, while local/private hosts and
+// Fake-IP/TUN routes follow CANVAS_ALLOW_PRIVATE_UPSTREAMS (#177).
 func WithPublicHTTPS(ctx context.Context) context.Context {
 	return context.WithValue(ctx, publicHTTPSContextKey{}, true)
 }
@@ -24,13 +24,17 @@ func requiresPublicHTTPS(ctx context.Context) bool {
 }
 
 func resolvePublicHost(ctx context.Context, host string) ([]net.IP, error) {
-	addresses, err := resolveOutboundHostWithPolicy(ctx, normalizeOutboundHost(host), false)
+	host = normalizeOutboundHost(host)
+	allowPrivateHost := allowPrivateUpstreams() || AllowedPrivateUpstreamHost(host)
+	addresses, err := resolveOutboundHostWithPolicy(ctx, host, allowPrivateHost)
 	if err != nil {
 		return nil, err
 	}
-	for _, ip := range addresses {
-		if blockedCustomRelayIP(ip) {
-			return nil, BadAuthRequest("媒体地址不允许访问内网或保留地址")
+	if !allowPrivateHost {
+		for _, ip := range addresses {
+			if blockedCustomRelayIP(ip) {
+				return nil, BadAuthRequest("媒体地址不允许访问内网或保留地址")
+			}
 		}
 	}
 	return addresses, nil
@@ -45,11 +49,15 @@ func validatePublicHTTPSURLContext(ctx context.Context, raw string, resolve func
 		return nil, err
 	}
 	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" {
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" {
 		return nil, BadAuthRequest("媒体地址需要安全的 HTTPS 链接")
 	}
-	if _, err := resolve(ctx, parsed.Hostname()); err != nil {
+	addresses, err := resolve(ctx, parsed.Hostname())
+	if err != nil {
 		return nil, err
+	}
+	if parsed.Scheme == "http" && !addressesAllowLocalHTTP(addresses, allowPrivateUpstreams()) {
+		return nil, BadAuthRequest("媒体地址需要安全的 HTTPS 链接")
 	}
 	return parsed, nil
 }

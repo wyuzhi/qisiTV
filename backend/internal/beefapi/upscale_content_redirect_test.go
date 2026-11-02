@@ -105,8 +105,11 @@ func TestUpscaleJSONAndPOSTStillRefuseRedirects(t *testing.T) {
 	}
 }
 
-// Production clients (no test mode) refuse every non-public or non-HTTPS hop.
+// Production clients (no test mode) refuse every non-public or non-HTTPS hop
+// when private upstreams are disabled, and always refuse link-local, URL
+// credentials, and plain HTTP to public hosts.
 func TestStorageRedirectHopPolicyInProduction(t *testing.T) {
+	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "false")
 	client := &MediaClient{}
 	for _, target := range []string{
 		"https://127.0.0.1/saved",

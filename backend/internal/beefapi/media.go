@@ -391,7 +391,7 @@ func (c *MediaClient) Execute(ctx context.Context, request MediaRequest, refs []
 		if err != nil {
 			return nil, err
 		}
-		if !strings.HasPrefix(link, "https://") && !c.AllowHTTPTest {
+		if err := c.validURLContext(ctx, link); err != nil {
 			return nil, errors.New("媒体参考素材需要 HTTPS 链接")
 		}
 		request.Input.References = append(request.Input.References, MediaReference{Kind: ref.Kind, Role: ref.Role, URL: link})
