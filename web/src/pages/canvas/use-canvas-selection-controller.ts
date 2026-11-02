@@ -8,8 +8,11 @@ import { canExportWorkflowResult, workflowAtPoint } from "@/lib/canvas/reusable-
 import { canvasNodeResourceId } from "@/lib/canvas/canvas-resource-id";
 import { canvasNodeBounds } from "@/lib/canvas/canvas-spatial-index";
 import type { CanvasNodeData, Position, SelectionBox, ViewportTransform } from "@/types/canvas";
+import type { CanvasPageUiStoreHook } from "@/stores/canvas/use-canvas-page-ui-store";
 
 type UseCanvasSelectionControllerOptions = {
+    pageUi: CanvasPageUiStoreHook;
+    projectId: string;
     containerRef: RefObject<HTMLDivElement | null>;
     nodesRef: { current: CanvasNodeData[] };
     viewportRef: { current: ViewportTransform };
@@ -17,8 +20,6 @@ type UseCanvasSelectionControllerOptions = {
     historyPausedRef: { current: boolean };
     screenToCanvas: (clientX: number, clientY: number) => Position;
     setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
-    setSelectedNodeIds: Dispatch<SetStateAction<Set<string>>>;
-    setSelectedConnectionId: Dispatch<SetStateAction<string | null>>;
     cancelPendingConnectionCreate: () => void;
     onCanvasSelectionStart: () => void;
     onNodeInteractionStart: (selectionModifier: boolean) => void;
@@ -69,6 +70,8 @@ function snapCanvasOffsetToGrid(offset: Position, anchor: { x: number; y: number
 }
 
 export function useCanvasSelectionController({
+    pageUi,
+    projectId,
     containerRef,
     nodesRef,
     viewportRef,
@@ -76,8 +79,6 @@ export function useCanvasSelectionController({
     historyPausedRef,
     screenToCanvas,
     setNodes,
-    setSelectedNodeIds,
-    setSelectedConnectionId,
     cancelPendingConnectionCreate,
     onCanvasSelectionStart,
     onNodeInteractionStart,
@@ -129,18 +130,18 @@ export function useCanvasSelectionController({
         const restoredSelection = new Set(initialSelection);
         if (sameStringSet(restoredSelection, selectedNodeIdsRef.current)) return;
         selectedNodeIdsRef.current = restoredSelection;
-        setSelectedNodeIds(restoredSelection);
-    }, [resetSelectionBox, selectedNodeIdsRef, setSelectedNodeIds]);
+        pageUi.getState().setSelectedNodeIds(restoredSelection);
+    }, [pageUi, projectId, resetSelectionBox, selectedNodeIdsRef]);
 
     const deselectCanvas = useCallback(() => {
         cancelPendingConnectionCreate();
         cancelSelectionBox();
         const emptySelection = new Set<string>();
         selectedNodeIdsRef.current = emptySelection;
-        setSelectedNodeIds(emptySelection);
-        setSelectedConnectionId(null);
+        pageUi.getState().setSelectedNodeIds(emptySelection);
+        pageUi.getState().setSelectedConnectionId(null);
         onDeselect();
-    }, [cancelPendingConnectionCreate, cancelSelectionBox, onDeselect, selectedNodeIdsRef, setSelectedConnectionId, setSelectedNodeIds]);
+    }, [pageUi, projectId, cancelPendingConnectionCreate, cancelSelectionBox, onDeselect, selectedNodeIdsRef]);
 
     const handleCanvasMouseDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
         cancelPendingConnectionCreate();
@@ -160,8 +161,8 @@ export function useCanvasSelectionController({
         };
         selectionGestureRef.current = { phase: "pending", initialSelection, selection: nextSelectionBox };
         selectionSpatialIndexCacheRef.current.get(nodesRef.current);
-        setSelectedConnectionId(null);
-    }, [cancelPendingConnectionCreate, nodesRef, onCanvasSelectionStart, screenToCanvas, selectedNodeIdsRef, setSelectedConnectionId]);
+        pageUi.getState().setSelectedConnectionId(null);
+    }, [pageUi, projectId, cancelPendingConnectionCreate, nodesRef, onCanvasSelectionStart, screenToCanvas, selectedNodeIdsRef]);
 
     const handleNodeMouseDown = useCallback((event: ReactMouseEvent | ReactPointerEvent, nodeId: string) => {
         event.stopPropagation();
@@ -170,7 +171,7 @@ export function useCanvasSelectionController({
         // Paint order is session-local UI state. Update it once at the start
         // of a real node interaction so dragging also survives deselection.
         onNodeBringToFront?.(nodeId);
-        setSelectedConnectionId(null);
+        pageUi.getState().setSelectedConnectionId(null);
         const currentNodes = nodesRef.current;
         const nextSelected = new Set(selectedNodeIdsRef.current);
         const isSubtractClick = event.altKey;
@@ -188,7 +189,7 @@ export function useCanvasSelectionController({
         }
 
         selectedNodeIdsRef.current = nextSelected;
-        setSelectedNodeIds(nextSelected);
+        pageUi.getState().setSelectedNodeIds(nextSelected);
         if (isSelectionModifier && !nextSelected.has(nodeId)) {
             dragRef.current = { ...EMPTY_DRAG_STATE, openPanelOnClick: false };
             return;
@@ -228,7 +229,7 @@ export function useCanvasSelectionController({
         setAlignmentGuides({});
         setDragPreview({ x: 0, y: 0, nodeIds: draggedRenderNodeIdSet });
         applyCanvasNodeDragPreview(containerRef.current, { x: 0, y: 0, nodeIds: draggedRenderNodeIdSet });
-    }, [containerRef, historyPausedRef, nodesRef, onBatchConnectionTarget, onNodeBringToFront, onNodeClick, onNodeInteractionStart, selectedNodeIdsRef, setSelectedConnectionId, setSelectedNodeIds]);
+    }, [pageUi, projectId, containerRef, historyPausedRef, nodesRef, onBatchConnectionTarget, onNodeBringToFront, onNodeClick, onNodeInteractionStart, selectedNodeIdsRef]);
 
     const finishNodeDrag = useCallback((clientX?: number, clientY?: number) => {
         if (dragFrameRef.current) {
@@ -345,10 +346,10 @@ export function useCanvasSelectionController({
         const nextSelected = applyCanvasSelectionStrategy(gesture.initialSelection, hitNodeIds, selection.strategy);
         if (!sameStringSet(nextSelected, selectedNodeIdsRef.current)) {
             selectedNodeIdsRef.current = nextSelected;
-            setSelectedNodeIds(nextSelected);
+            pageUi.getState().setSelectedNodeIds(nextSelected);
         }
         return true;
-    }, [containerRef, nodesRef, selectedNodeIdsRef, setSelectedNodeIds, viewportRef]);
+    }, [pageUi, projectId, containerRef, nodesRef, selectedNodeIdsRef, viewportRef]);
 
     const handlePointerMove = useCallback((event: PointerEvent) => {
         if (dragRef.current.isDraggingNode) {

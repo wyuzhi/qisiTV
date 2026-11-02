@@ -75,13 +75,13 @@ func TestPreparationFailureOutcomeAppliedFollowsTerminalWrite(t *testing.T) {
 	cause := routeDispatchUncertainError{"上一次提交结果不明确，为避免重复创建上游任务已停止自动重发"}
 	task := &model.Task{ID: "prep-ok", UserID: "user", Status: model.TaskStatusRunning, LeaseOwner: "owner"}
 	terminal := newTaskTerminalCoordinatorForTest(&taskTerminalRepositoryStub{task: task}, &taskTerminalReplayStub{}, &taskTerminalLoggerStub{}, &taskTerminalOutputStub{})
-	termErr := terminal.markPreparationFailure(task, "路由准备失败", cause, true, "路由准备失败，上游请求未发出")
+	termErr := terminal.MarkPreparationFailure(task, "路由准备失败", cause, true, "路由准备失败，上游请求未发出")
 	if !terminalWriteApplied(termErr, cause) {
 		t.Fatal("successful preparation failure write should be Applied")
 	}
 	failedTask := &model.Task{ID: "prep-fail", UserID: "user", Status: model.TaskStatusRunning, LeaseOwner: "owner"}
 	failedTerminal := newTaskTerminalCoordinatorForTest(&taskTerminalRepositoryStub{task: failedTask, terminalError: errors.New("db down")}, &taskTerminalReplayStub{}, &taskTerminalLoggerStub{}, &taskTerminalOutputStub{})
-	failedErr := failedTerminal.markPreparationFailure(failedTask, "路由准备失败", cause, true, "路由准备失败，上游请求未发出")
+	failedErr := failedTerminal.MarkPreparationFailure(failedTask, "路由准备失败", cause, true, "路由准备失败，上游请求未发出")
 	if terminalWriteApplied(failedErr, cause) {
 		t.Fatal("failed preparation write should not be Applied")
 	}

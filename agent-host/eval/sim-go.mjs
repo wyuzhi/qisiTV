@@ -36,7 +36,7 @@ description: 把一段短剧剧本或梗概，按「角色设定 → 分镜脚�
 
 ## 第 2 步：分镜脚本
 - 建一个分镜脚本节点（script 类型），标题「分镜脚本」，再往里追加分镜行。
-- 每一镜填写：剧情描述、景别、机位、镜头运动、台词、情绪、时长、首帧图片提示词（imageGenerationPrompt）和视频提示词（videoMotionPrompt）。
+- 每一镜只填核心字段：剧情描述（plotDescription）、首帧图片提示词（imageGenerationPrompt）、视频提示词（videoMotionPrompt），有对白时填台词（dialogue），有明确镜长需求时填时长（durationSeconds，默认 6 秒可省）；不要填写景别、机位、情绪等未在工具参数中列出的冗余字段。
 - 这一步不建图片节点，不提生成。
 
 ## 第 3 步：首帧图
@@ -73,17 +73,17 @@ const NODE_CAPABILITIES = {
   image: {
     defaultWidth: 720, defaultHeight: 405, inputKind: 'image', generationMode: 'image',
     canSource: true, canTarget: true, acceptedInputKinds: ['text', 'image'], maxInputCount: 0,
-    patchFields: new Set(['title', 'content', 'model', 'size', 'quality', 'transparentBackground', 'count']),
+    patchFields: new Set(['title', 'content', 'prompt', 'model', 'size', 'quality', 'transparentBackground', 'count']),
   },
   video: {
     defaultWidth: 720, defaultHeight: 405, inputKind: 'video', generationMode: 'video',
     canSource: true, canTarget: true, acceptedInputKinds: ['text', 'image', 'video', 'audio'], maxInputCount: 0,
-    patchFields: new Set(['title', 'content', 'model', 'size', 'seconds', 'vquality', 'generateAudio', 'watermark']),
+    patchFields: new Set(['title', 'content', 'prompt', 'model', 'size', 'seconds', 'vquality', 'generateAudio', 'watermark']),
   },
   audio: {
     defaultWidth: 340, defaultHeight: 120, inputKind: 'audio', generationMode: 'audio',
     canSource: true, canTarget: true, acceptedInputKinds: ['text'], maxInputCount: 1,
-    patchFields: new Set(['title', 'content', 'model', 'audioVoice', 'audioFormat', 'audioSpeed', 'audioPitch', 'audioVolume', 'audioInstructions']),
+    patchFields: new Set(['title', 'content', 'prompt', 'model', 'audioVoice', 'audioFormat', 'audioSpeed', 'audioPitch', 'audioVolume', 'audioInstructions']),
   },
   frame: {
     defaultWidth: 760, defaultHeight: 520, inputKind: '', generationMode: '',
@@ -717,21 +717,22 @@ export function createSimGo(options = {}) {
         if (!node) throw notFound('node_not_found', `目标节点不存在: ${nodeId}`);
         const cap = NODE_CAPABILITIES[node.type] || NODE_CAPABILITIES.text;
         node.metadata ||= {};
+        if (patch.prompt !== undefined && patch.content !== undefined && patch.prompt !== patch.content) {
+          throw invalidArg('conflicting_patch_fields', 'patch.prompt 与 patch.content 不能同时提交不同内容');
+        }
         for (const [k, v] of Object.entries(patch)) {
           if (k === 'title') {
             if (typeof v !== 'string') throw invalidArg('invalid_params', 'title 必须是字符串');
             node.title = v;
-          } else if (k === 'prompt') {
-            if (typeof v !== 'string') throw invalidArg('invalid_params', 'prompt 必须是字符串');
-            node.metadata.prompt = v;
-          } else if (k === 'content') {
-            if (!cap.patchFields.has('content')) {
-              throw invalidArg('unsupported_field', `${node.type} 节点不支持更新字段 content`);
+          } else if (k === 'prompt' || k === 'content') {
+            if (!cap.patchFields.has(k)) {
+              throw invalidArg('unsupported_field', `${node.type} 节点不支持更新字段 ${k}`);
             }
-            if (typeof v !== 'string') throw invalidArg('invalid_params', 'content 必须是字符串');
+            if (typeof v !== 'string') throw invalidArg('invalid_params', `${k} 必须是字符串`);
             if (['image', 'video', 'audio'].includes(node.type)) {
               node.metadata.composerContent = v;
-              node.metadata.prompt = v;
+              delete node.metadata.promptTemplateOperation;
+              delete node.metadata.promptTemplateVariables;
             } else {
               node.metadata.content = v;
             }
@@ -775,6 +776,15 @@ export function createSimGo(options = {}) {
               throw invalidArg('invalid_parameter', 'count 必须是 1..8 的整数');
             }
             node.metadata.count = count;
+            continue;
+          }
+          if (name === 'prompt') {
+            if (typeof val !== 'string') {
+              throw invalidArg('invalid_parameter', 'prompt 必须是字符串');
+            }
+            node.metadata.composerContent = val;
+            delete node.metadata.promptTemplateOperation;
+            delete node.metadata.promptTemplateVariables;
             continue;
           }
           if (typeof val !== 'string' || !val.trim()) {
@@ -1010,6 +1020,8 @@ export function createSimGo(options = {}) {
         const updated = [];
         const createdEdgeIds = [];
         const deletedEdgeIds = [];
+        const syncedNodeIds = [];
+        const skippedNodeIds = [];
         for (const patch of patches) {
           const rowId = String(patch?.rowId || '').trim();
           if (!rowId) throw invalidArg('invalid_params', '每个 patch 都需要 rowId');
@@ -1019,6 +1031,9 @@ export function createSimGo(options = {}) {
           if (keys.length === 0) throw invalidArg('empty_patch', `patch 至少要有一个字段: ${rowId}`);
           const row = rows.find((r) => r.id === rowId);
           if (!row) throw notFound('row_not_found', `分镜行不存在: ${rowId}`);
+          const oldImagePrompt = String(row.imageGenerationPrompt || '');
+          const oldVideoPrompt = String(row.videoMotionPrompt || '');
+          const oldPlot = String(row.plotDescription || '');
           applyStoryboardDraft(row, patch);
           if (patch.imageNodeId !== undefined) {
             const { created, deleted } = bindStoryboardRowOutput(doc, nodeId, row, 'imageNodeId', 'image', String(patch.imageNodeId));
@@ -1029,6 +1044,47 @@ export function createSimGo(options = {}) {
             const { created, deleted } = bindStoryboardRowOutput(doc, nodeId, row, 'videoNodeId', 'video', String(patch.videoNodeId));
             createdEdgeIds.push(...created);
             deletedEdgeIds.push(...deleted);
+          }
+          for (const spec of [
+            { field: 'imageNodeId', kind: 'image', oldPrompt: oldImagePrompt, nextPrompt: patch.imageGenerationPrompt },
+            { field: 'videoNodeId', kind: 'video', oldPrompt: oldVideoPrompt, nextPrompt: patch.videoMotionPrompt },
+          ]) {
+            if (spec.nextPrompt === undefined) continue;
+            const boundId = String(row[spec.field] || '').trim();
+            if (!boundId) continue;
+            const target = (doc.nodes || []).find((n) => n.id === boundId && n.type === spec.kind);
+            if (!target) continue;
+            target.metadata ||= {};
+            const currentDraft = String(target.metadata.composerContent || target.metadata.prompt || '');
+            const trimmedCurrent = currentDraft.trim();
+            let refPrefix = '';
+            let bodyDraft = trimmedCurrent;
+            if (trimmedCurrent.startsWith('参考资产：')) {
+              const nl = trimmedCurrent.indexOf('\n');
+              if (nl >= 0) {
+                refPrefix = trimmedCurrent.slice(0, nl).trim();
+                bodyDraft = trimmedCurrent.slice(nl + 1).trim();
+              } else {
+                refPrefix = trimmedCurrent;
+                bodyDraft = '';
+              }
+            }
+            const nextText = String(spec.nextPrompt);
+            const oldTrimmed = spec.oldPrompt.trim();
+            const oldFallback = oldPlot.trim();
+            const nextTrimmed = nextText.trim();
+            if (!bodyDraft || bodyDraft === oldTrimmed || bodyDraft === oldFallback || bodyDraft === nextTrimmed) {
+              target.metadata.composerContent = refPrefix
+                ? (nextTrimmed ? `${refPrefix}\n${nextTrimmed}` : refPrefix)
+                : nextText;
+              const hasOutput = ['content', 'storageKey', 'assetId', 'resourceId', 'taskId'].some((k) => String(target.metadata[k] || '').trim() !== '');
+              if (!hasOutput) target.metadata.prompt = nextText;
+              delete target.metadata.promptTemplateOperation;
+              delete target.metadata.promptTemplateVariables;
+              if (!syncedNodeIds.includes(boundId)) syncedNodeIds.push(boundId);
+            } else if (!skippedNodeIds.includes(boundId)) {
+              skippedNodeIds.push(boundId);
+            }
           }
           updated.push({ id: row.id, shotNumber: row.shotNumber });
         }
@@ -1041,6 +1097,8 @@ export function createSimGo(options = {}) {
           rowCount: rows.length,
           createdEdgeIds,
           deletedEdgeIds,
+          syncedNodeIds,
+          skippedNodeIds,
         };
         break;
       }
@@ -1084,6 +1142,158 @@ export function createSimGo(options = {}) {
         });
         const saved = saveCanvas(canvasId, doc, expectedRevision, 'canvas.script.row.remove', turnId);
         result = { canvasId, nodeId, revision: saved.revision, removed: rowIds.length, rowCount: kept.length, deletedEdgeIds };
+        break;
+      }
+      case 'canvas.script.prepare': {
+        const canvasId = String(rawParams.canvasId || '').trim();
+        let nodeId = String(rawParams.nodeId || '').trim();
+        const expectedRevision = Number(rawParams.expectedRevision);
+        let rowIds = Array.isArray(rawParams.rowIds) ? rawParams.rowIds.map(String) : [];
+        const referenceNodeIds = Array.isArray(rawParams.referenceNodeIds) ? rawParams.referenceNodeIds.map(String) : [];
+        const imageCfg = rawParams.image && typeof rawParams.image === 'object' ? rawParams.image : null;
+        const videoCfg = rawParams.video && typeof rawParams.video === 'object' ? rawParams.video : null;
+        const scriptDraft = rawParams.script && typeof rawParams.script === 'object' ? rawParams.script : null;
+        if (!canvasId || !Number.isSafeInteger(expectedRevision) || expectedRevision <= 0 || (!scriptDraft && !nodeId)) {
+          throw invalidArg('invalid_params', '需要画布、分镜节点和当前版本');
+        }
+        if (scriptDraft && (nodeId || rowIds.length > 0 || !String(scriptDraft.title || '').trim() || !Array.isArray(scriptDraft.rows) || scriptDraft.rows.length < 1 || scriptDraft.rows.length > 8)) {
+          throw invalidArg('invalid_params', '新分镜需要名称和1至8行正文，不能同时指定已有分镜');
+        }
+        if ((!scriptDraft && rowIds.length < 1) || rowIds.length > 8 || referenceNodeIds.length > 4 || (!scriptDraft && !imageCfg && !videoCfg)) {
+          throw invalidArg('invalid_params', '请选择 1..8 个分镜及图片或视频参数，参考图片最多 4 张');
+        }
+        if (!imageCfg && referenceNodeIds.length > 0) {
+          throw invalidArg('invalid_params', '角色或风格参考用于首帧图片；视频沿用各分镜自己的首帧');
+        }
+        const doc = clone(ensureCanvas(canvasId));
+        if (doc.revision !== expectedRevision) {
+          counts.revisionConflicts += 1;
+          throw conflict('revision_conflict', '画布已变化，请重新读取', { currentRevision: doc.revision });
+        }
+        const created = [];
+        const createdEdgeIds = [];
+        const shots = [];
+        let scriptNode;
+        if (scriptDraft) {
+          const title = String(scriptDraft.title).trim();
+          if ((doc.nodes || []).some((n) => String(n.title || '').trim() === title)) {
+            counts.duplicateNodeAttempts += 1;
+            throw conflict('duplicate_node_title', `标题已存在: ${title}`);
+          }
+          nodeSeq += 1;
+          nodeId = `node-${nodeSeq}`;
+          const cap = NODE_CAPABILITIES.script;
+          const builtRows = scriptDraft.rows.map((draft, idx) => {
+            const row = buildStoryboardRow(idx + 1, draft);
+            if (!String(row.plotDescription || '').trim()) {
+              row.plotDescription = String(row.imageGenerationPrompt || '').trim();
+            }
+            return row;
+          });
+          rowIds = builtRows.map((r) => r.id);
+          scriptNode = {
+            id: nodeId,
+            type: 'script',
+            title,
+            position: { x: 120, y: 160 },
+            width: cap.defaultWidth,
+            height: cap.defaultHeight,
+            metadata: {
+              status: 'idle',
+              workflowKind: 'script',
+              storyboard: {
+                rows: builtRows,
+                referenceNodeIds: [],
+                visibleColumns: ['shotNumber', 'durationSeconds', 'videoMotionPrompt', 'dialogue', 'assets'],
+              },
+            },
+          };
+          doc.nodes.push(scriptNode);
+          created.push({ id: nodeId, title, type: 'script' });
+        } else {
+          scriptNode = (doc.nodes || []).find((n) => n.id === nodeId && n.type === 'script');
+          if (!scriptNode) throw notFound('node_not_found', `目标节点不存在: ${nodeId}`);
+        }
+        const rows = scriptNode.metadata?.storyboard?.rows || [];
+        let x = 120;
+        for (const n of doc.nodes || []) {
+          const right = Number(n.position?.x || 0) + Number(n.width || 320) + 60;
+          if (right > x) x = right;
+        }
+        for (let idx = 0; idx < rowIds.length; idx += 1) {
+          const rId = rowIds[idx];
+          const row = rows.find((r) => r.id === rId);
+          if (!row) throw invalidArg('row_not_found', `分镜不存在或重复: ${rId}`);
+          const shot = { rowId: rId };
+          if (row.imageNodeId) shot.imageNodeId = row.imageNodeId;
+          for (const [kind, cfg, promptField, label] of [
+            ['image', imageCfg, 'imageGenerationPrompt', '首帧'],
+            ['video', videoCfg, 'videoMotionPrompt', '视频'],
+          ]) {
+            if (!cfg) continue;
+            if (row[`${kind}NodeId`]) {
+              throw invalidArg('already_bound', `分镜已有${kind}节点，请修改原节点而不是重复创建`);
+            }
+            if (kind === 'image' && !String(row[promptField] || '').trim() && String(row.plotDescription || '').trim()) {
+              row[promptField] = String(row.plotDescription).trim();
+            }
+            const promptText = String(row[promptField] || '').trim();
+            if (!promptText) throw invalidArg('missing_prompt', `分镜缺少${promptField}`);
+            const choice = resolveGenerationModel(kind, String(cfg.model || ''));
+            if (choice.kindMismatch || !choice.modelKey) {
+              throw invalidArg('invalid_parameter', '请选择明确的生成模型');
+            }
+            nodeSeq += 1;
+            const mId = `node-${nodeSeq}`;
+            const title = `镜头 ${row.shotNumber} · ${label}`;
+            const meta = buildDefaultMetadata(kind, promptText);
+            meta.workflowKind = 'shot';
+            meta.shotIndex = row.shotNumber;
+            meta.model = choice.modelKey;
+            for (const [k, v] of Object.entries(cfg)) {
+              if (k !== 'model') meta[k] = v;
+            }
+            if (kind === 'video') {
+              meta.seconds = String(row.durationSeconds || 6);
+              meta.videoEditOperation = shot.imageNodeId ? 'image_to_video' : 'text_to_video';
+              if (shot.imageNodeId) meta.videoStartFrameNodeId = shot.imageNodeId;
+            } else {
+              meta.count = 1;
+            }
+            doc.nodes.push({
+              id: mId,
+              type: kind,
+              title,
+              position: { x: kind === 'video' ? x + 800 : x, y: 160 + idx * 485 },
+              width: 720,
+              height: 405,
+              metadata: meta,
+            });
+            created.push({ id: mId, title, type: kind });
+            const bound = bindStoryboardRowOutput(doc, nodeId, row, `${kind}NodeId`, kind, mId);
+            createdEdgeIds.push(...bound.created);
+            if (kind === 'image') {
+              shot.imageNodeId = mId;
+              for (const refId of referenceNodeIds) {
+                edgeSeq += 1;
+                const eId = `edge-${edgeSeq}`;
+                doc.connections.push({ id: eId, fromNodeId: refId, toNodeId: mId, relation: 'storyboard-asset-reference', storyboardRowId: rId });
+                createdEdgeIds.push(eId);
+              }
+            } else {
+              shot.videoNodeId = mId;
+              if (shot.imageNodeId) {
+                edgeSeq += 1;
+                const eId = `edge-${edgeSeq}`;
+                doc.connections.push({ id: eId, fromNodeId: shot.imageNodeId, toNodeId: mId, relation: 'storyboard-asset-reference', storyboardRowId: rId });
+                createdEdgeIds.push(eId);
+              }
+            }
+          }
+          shots.push(shot);
+        }
+        const saved = saveCanvas(canvasId, doc, expectedRevision, 'canvas.script.prepare', turnId);
+        result = { canvasId, nodeId, revision: saved.revision, created, createdEdgeIds, shots };
         break;
       }
       case 'canvas.generation.propose': {
@@ -1141,6 +1351,26 @@ export function createSimGo(options = {}) {
         };
         proposals.set(proposalId, proposal);
         if (turnRec) turnRec.proposals.push(proposalId);
+        const targetsSummary = deduped.map((id) => {
+          const node = (doc.nodes || []).find((n) => n.id === id);
+          const meta = node?.metadata || {};
+          const prompt = String(meta.composerContent || meta.prompt || '');
+          const parameters = {};
+          for (const key of ['size', 'quality', 'count', 'transparentBackground', 'seconds', 'vquality', 'generateAudio', 'watermark', 'audioVoice', 'audioFormat', 'audioSpeed', 'audioInstructions', 'videoStartFrameNodeId', 'videoEndFrameNodeId', 'videoMiddleFrameNodeId']) {
+            if (meta[key] !== undefined && meta[key] !== null && String(meta[key]) !== '') {
+              parameters[key] = String(meta[key]);
+            }
+          }
+          return {
+            nodeId: id,
+            title: String(node?.title || ''),
+            kind,
+            model: choice.display,
+            modelKey: choice.modelKey,
+            prompt,
+            parameters,
+          };
+        });
         result = {
           proposalId,
           kind,
@@ -1148,6 +1378,7 @@ export function createSimGo(options = {}) {
           model: choice.display,
           modelKey: choice.modelKey,
           note,
+          targets: targetsSummary,
           source: proposal.source,
         };
         break;
@@ -1985,7 +2216,11 @@ export function createSimGo(options = {}) {
         }
       }
 
-      if (pathname === '/api/assistant/turns') {
+      if (
+        pathname === '/api/assistant/turns' ||
+        pathname === '/api/assistant/runtime/turns' ||
+        pathname === '/assistant/runtime/turns'
+      ) {
         if (req.method === 'POST') {
           const body = await readJsonBody(req);
           const rec = beginTurn(body);
@@ -1994,6 +2229,7 @@ export function createSimGo(options = {}) {
             canvasId: rec.canvasId,
             permissionMode: rec.permissionMode,
             open: rec.open,
+            sessionId: rec.sessionId,
             revisionBefore: rec.revisionBefore,
           });
           return;

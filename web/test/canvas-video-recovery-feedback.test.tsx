@@ -16,8 +16,9 @@ test("video recovery errors stay visible alongside the node's original failure",
     const html = render(true);
     expect(html).toContain('role="alert"');
     expect(html).toContain(feedback);
-    expect(html).toContain("参考素材未通过内容安全审核");
+    expect(html).toContain(original.metadata!.errorDetails!);
     expect(html).toContain("关闭Video的取回提示");
     expect(render(false)).not.toContain(feedback);
+    expect(render(false)).toContain(original.metadata!.errorDetails!);
     expect(original.metadata?.taskId).toBe("original");
 });

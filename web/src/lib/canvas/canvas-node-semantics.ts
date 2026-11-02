@@ -16,7 +16,7 @@ export function isCanvasMediaNode(node: CanvasNodeData | null | undefined): bool
     return node?.type === CanvasNodeType.Image || node?.type === CanvasNodeType.Video || node?.type === CanvasNodeType.Audio;
 }
 
-function hasMediaResource(node: CanvasNodeData): boolean {
+export function hasMediaResource(node: CanvasNodeData): boolean {
     return Boolean(node.metadata?.content || node.metadata?.storageKey || node.metadata?.previewContent || node.metadata?.fileUpload);
 }
 

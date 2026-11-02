@@ -17,7 +17,8 @@ import { WorkingDots, WorkingGlow } from "@/components/ai/working-indicator";
 import { MessageReasoning } from "@/components/ai/message-reasoning";
 import { creationResultAssetIds } from "@/lib/canvas/canvas-asset-handoff";
 import { GenerationFailureNotice } from "@/components/generation/generation-failure-notice";
-import { explainGenerationError, shouldBlockManualRetry } from "@/lib/generation-error";
+import { explainGenerationError } from "@/lib/generation-error";
+import { isRegenerateBlocked, normalizeTaskOutcome } from "@/lib/task-outcome";
 import { formatVideoResolutionLabel as videoResolutionLabel } from "@/lib/video-generation-options";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { CachedResourceImage } from "@/components/cached-resource-image";
@@ -33,7 +34,7 @@ import { ASSET_CATEGORY_LABELS } from "@/lib/asset-category";
 import { formatShotOrdinal } from "@/lib/shot-label";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { buildImageResolutionOptions, formatImageResolutionSize, supportsImageResolutionPresets } from "@/lib/image-resolution-tiers";
-import { modelCapabilityConfigFor, normalizeVideoValue, videoDurationOptions, type ImageCapabilityConfig, type VideoCapabilityConfig } from "@/lib/model-capabilities";
+import { normalizeVideoValue, videoDurationOptions, type ImageCapabilityConfig, type VideoCapabilityConfig } from "@/lib/model-capabilities";
 import { mergedImageCapabilityConfig, type ModelRequirements } from "@/lib/model-selection";
 import { listAddedSkills, type Skill } from "@/services/api/skills";
 import { resolveResourceUrl } from "@/services/api/resources";
@@ -44,6 +45,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import type { PromptOptimizerProvider } from "@/lib/plugins/plugin-types";
 import { displayCreationPrompt, type CreationReference } from "./creation-references";
 import { creationAttachmentKind, creationMediaAspectRatio, removeCreationAttachment, type CreationAttachment, type CreationMode } from "./creation-assets";
+import { creationReferenceCounts, creationReferenceHasRoom, creationReferenceKinds, creationReferenceLimit, creationReferenceLimitMessage, creationReferenceLimitsLabel, type CreationReferenceLimits } from "./creation-references";
 import { conversationTimestamp, isImageAttachment, isVideoAttachment } from "./creation-conversations";
 import { conversationTimeFormatter, countOptions, historyDayFormatter, messageTimeFormatter, modeLabels, qualityOptions, ratioOptions, resolutionOptions, shotScriptLabels, type CreationConversation, type CreationMessage, type CreationShotRailEntry, type CreationStatus } from "./creation-types";
 import "./creation-product.css";
@@ -219,9 +221,13 @@ export function CreationMessageView({ item, shotNumber, onRetryFailure, onCreate
             <>{shotNumber > 0 ? <span className="creation-shot-badge">镜 {shotNumber}</span> : null}<span className="creation-message-mark"><Sparkles /></span><strong>{brandName}</strong>{item.createdAt ? <time dateTime={item.createdAt}>{formatMessageTime(item.createdAt)}</time> : null}{stateLabel ? <span className={`creation-message-state is-${item.status}`}>{stateLabel}</span> : null}</>
         );
     const toolStatus: GenerationToolStatus = item.status === "pending" ? "running" : item.status === "error" ? "error" : item.status === "cancelled" ? "cancelled" : "completed";
+    const textErrorInput = item.generationErrorCode ? { code: item.generationErrorCode, message: item.error } : item.error;
+    const textOutcome = normalizeTaskOutcome(item.taskOutcome);
+    const textExplanation = explainGenerationError(textErrorInput, { stage: textOutcome ? undefined : item.generationStage });
+    const textRetryBlocked = textOutcome ? isRegenerateBlocked(textOutcome) : textExplanation.blockManualRetry;
     return <article className={`creation-assistant-message is-${mode}`}>
         {mode === "text" ? <><div className="creation-message-heading">{heading}</div>{item.reasoning ? <div className="creation-message-reasoning-wrap"><MessageReasoning reasoning={item.reasoning} isStreaming={item.status === "streaming"} /></div> : null}<div className="creation-message-content">{item.content ? <AIMessageMarkdown isStreaming={item.status === "streaming"}>{item.content}</AIMessageMarkdown> : <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><WorkingDots dotSize={5} gap={2} /><span>正在生成…</span></span>}</div></> : <GenerationToolCard status={toolStatus} heading={heading}><MediaResult item={item} onRetryFailure={onRetryFailure} onCreateVariant={onCreateVariant} onContinueCanvas={onContinueCanvas} openingCanvas={openingCanvas} /></GenerationToolCard>}
-        {item.error && mode === "text" ? <div className="creation-message-error"><GenerationFailureNotice explanation={explainGenerationError(item.error, { stage: item.generationStage })} onRetry={shouldBlockManualRetry(item.error, item.generationStage) ? undefined : onRetryFailure} /></div> : null}
+        {item.error && mode === "text" ? <div className="creation-message-error"><GenerationFailureNotice explanation={{ ...textExplanation, blockManualRetry: textRetryBlocked }} context={{ failureDiagnostics: item.taskFailureDiagnostics, errorSummary: item.generationErrorSummary, providerCode: item.generationProviderCode, model: item.model, createdAt: item.createdAt, stage: item.generationStage }} retryDisabled={textRetryBlocked} onRetry={textRetryBlocked ? undefined : onRetryFailure} /></div> : null}
     </article>;
 }
 
@@ -281,8 +287,11 @@ function MediaResult({ item, onRetryFailure, onCreateVariant, onContinueCanvas, 
     if (item.status === "pending") return <CreationMediaPending mode={item.mode || "image"} ratio={item.settings?.ratio} />;
     if ((item.status === "error" || item.status === "cancelled") && !resultUrls.length) {
         if (item.status === "cancelled") return <div className="creation-media-error"><span>{item.content || "已停止"}</span></div>;
-        const explanation = explainGenerationError(item.error || "生成失败", { stage: item.generationStage });
-        return <div className="creation-media-error"><GenerationFailureNotice explanation={explanation} onRetry={explanation.blockManualRetry ? undefined : onRetryFailure} /></div>;
+        const mediaErrorMessage = item.error || "生成失败";
+        const mediaOutcome = normalizeTaskOutcome(item.taskOutcome);
+        const explanation = explainGenerationError(item.generationErrorCode ? { code: item.generationErrorCode, message: mediaErrorMessage } : mediaErrorMessage, { stage: mediaOutcome ? undefined : item.generationStage });
+        const retryBlocked = mediaOutcome ? isRegenerateBlocked(mediaOutcome) : explanation.blockManualRetry;
+        return <div className="creation-media-error"><GenerationFailureNotice explanation={{ ...explanation, blockManualRetry: retryBlocked }} context={{ failureDiagnostics: item.taskFailureDiagnostics, errorSummary: item.generationErrorSummary, providerCode: item.generationProviderCode, model: item.model, createdAt: item.createdAt, stage: item.generationStage }} retryDisabled={retryBlocked} onRetry={retryBlocked ? undefined : onRetryFailure} /></div>;
     }
     if (!resultUrls.length) return <div className="creation-media-empty">没有返回可预览结果 <button type="button" onClick={onRetryFailure}>重试</button></div>;
     const isVideo = item.mode === "video";
@@ -346,7 +355,9 @@ type ComposerProps = {
     referenceReplacementBusy: boolean;
     attachments: CreationAttachment[];
     referenceImageSize?: { width: number; height: number };
-    maxReferences: number;
+    referenceLimits: CreationReferenceLimits;
+    /** 页内可见的超限说明：全站已关闭右上角 Toast，提示必须留在页面里。 */
+    referenceNotice?: string;
     references: CreationReference[];
     onRemoveAttachment: (id: string) => void;
     onClearAttachments: () => void;
@@ -380,6 +391,8 @@ type ComposerProps = {
     composerFocusRef: RefObject<HTMLTextAreaElement | null>;
     onPromptFocus: () => void;
     placeholderOverride?: string;
+    /** 提交前被拦下的说明：写清哪一项、现在多少、要改成多少，显示在输入框内。 */
+    notice?: string;
     onSubmit: () => void;
 };
 
@@ -415,15 +428,19 @@ export function CreationComposer(props: ComposerProps) {
             ? "描述画面、人物、场景、构图与风格"
             : "描述镜头内容、运动、光线与节奏";
     const emptyPlaceholder = "输入你的镜头、画面或故事。也可以添加参考图开始创作";
-    const imageReferencesSupported = props.imageProfile.references.maxImages > 0;
+    const imageReferencesSupported = props.referenceLimits.image === undefined || props.imageProfile.references.maxImages > 0;
     const referencesSupported = props.mode === "image" ? imageReferencesSupported : props.mode !== "video" || props.videoProfile.operations.includes("image_to_video");
-    const canAddMoreReferences = referencesSupported && props.attachments.length < props.maxReferences;
-    const addReferenceLabel = interactionBusy ? (props.referenceReplacementBusy ? "正在替换参考图" : "生成中暂不能添加参考内容") : canAddMoreReferences ? "添加更多参考内容" : `已达到当前模型的参考内容上限（${props.maxReferences} 个）`;
-    const referenceCounts = useMemo(() => props.attachments.reduce((counts, attachment) => {
-        const kind = creationAttachmentKind(attachment);
-        counts[kind] += 1;
-        return counts;
-    }, { image: 0, video: 0, audio: 0, file: 0 }), [props.attachments]);
+    const referenceCounts = useMemo(() => creationReferenceCounts(props.attachments), [props.attachments]);
+    // 参考素材按官方文档分类型限量，只要还有任意一类没满就能继续添加。
+    const canAddMoreReferences = referencesSupported && creationReferenceKinds.some((kind) => creationReferenceHasRoom(props.referenceLimits, referenceCounts, kind));
+    const referenceLimitsLabel = creationReferenceLimitsLabel(props.referenceLimits);
+    const addReferenceLabel = interactionBusy
+        ? props.referenceReplacementBusy
+            ? "正在替换参考图"
+            : "生成中暂不能添加参考内容"
+        : canAddMoreReferences
+          ? "添加更多参考内容"
+          : `已达到当前模型的参考内容上限${referenceLimitsLabel ? `（${referenceLimitsLabel}）` : ""}`;
     const visibleAttachments = useMemo(() => referenceFilter === "all"
         ? props.attachments
         : props.attachments.filter((attachment) => creationAttachmentKind(attachment) === referenceFilter), [props.attachments, referenceFilter]);
@@ -529,18 +546,19 @@ export function CreationComposer(props: ComposerProps) {
                     {trackState.isExpanded ? <div className="creation-reference-panel-header">
                         <div className="creation-reference-filter-tabs" role="group" aria-label="筛选参考内容">
                             {([
-                                { id: "all", label: "全部", count: props.attachments.length },
-                                { id: "image", label: "图片", count: referenceCounts.image },
-                                { id: "video", label: "视频", count: referenceCounts.video },
-                                { id: "audio", label: "音频", count: referenceCounts.audio },
-                                { id: "file", label: "文件", count: referenceCounts.file },
-                            ] as const).map((filter) => <button key={filter.id} type="button" aria-pressed={referenceFilter === filter.id} className={referenceFilter === filter.id ? "is-active" : undefined} onClick={() => setReferenceFilter(filter.id)}>{filter.label}{filter.count ? ` (${filter.count})` : ""}</button>)}
+                                { id: "all", label: "全部", count: props.attachments.length, limit: undefined },
+                                { id: "image", label: "图片", count: referenceCounts.image, limit: creationReferenceLimit(props.referenceLimits, "image") },
+                                { id: "video", label: "视频", count: referenceCounts.video, limit: creationReferenceLimit(props.referenceLimits, "video") },
+                                { id: "audio", label: "音频", count: referenceCounts.audio, limit: creationReferenceLimit(props.referenceLimits, "audio") },
+                                { id: "file", label: "文件", count: referenceCounts.file, limit: creationReferenceLimit(props.referenceLimits, "file") },
+                            ] as const).map((filter) => <button key={filter.id} type="button" aria-pressed={referenceFilter === filter.id} title={filter.limit === undefined ? undefined : creationReferenceLimitMessage(props.referenceLimits, filter.id)} className={referenceFilter === filter.id ? "is-active" : undefined} onClick={() => setReferenceFilter(filter.id)}>{filter.label}{filter.count ? ` (${filter.count}${filter.limit ? `/${filter.limit}` : ""})` : ""}</button>)}
                         </div>
                         <div className="creation-reference-panel-actions">
                             {props.attachments.length ? <button type="button" onClick={props.onClearAttachments} disabled={interactionBusy}>清空全部素材</button> : null}
                             <Tooltip title="收起素材面板"><button type="button" className="creation-reference-panel-collapse" onClick={() => setReferencePanelExpanded(false)} aria-label="收起素材面板"><Minimize2 aria-hidden="true" /></button></Tooltip>
                         </div>
                     </div> : null}
+                    {props.referenceNotice ? <p className="creation-reference-notice" role="status">{props.referenceNotice}</p> : null}
                     <div className="creation-reference-track-wrapper">
                         <div className="creation-reference-stack-shell">
                             {trackState.canScrollLeft ? <button type="button" className="creation-reference-track-button is-left" onClick={() => scrollAttachmentTrack(-1)} aria-label="向左浏览参考内容" title="向左浏览参考内容"><ChevronLeft aria-hidden="true" /></button> : null}
@@ -590,6 +608,7 @@ export function CreationComposer(props: ComposerProps) {
                 </div> : null}
             </div>
         </div>
+        {props.notice ? <p className="creation-composer-notice" role="alert">{props.notice}</p> : null}
         <footer className="creation-chat-dock">
             <div className="creation-chat-controls">
                 {props.variant === "thread" ? <ModePicker mode={props.mode} onModeChange={props.onModeChange} /> : null}
@@ -613,8 +632,8 @@ export function CreationComposer(props: ComposerProps) {
                     </button>
                 </Tooltip> : null}
 				<ModelPicker config={props.config} value={props.model} onChange={props.onModelChange} capability={props.mode} requirements={props.modelRequirements} className="creation-model-picker" placeholder={`选择${modeLabels[props.mode]}模型`} variant="creation" />
-                {props.mode === "video" || (props.mode === "image" && imageSettingsSupported) ? <GenerationSettingsMenu {...props} /> : null}
-                {props.mode === "video" ? <DurationMenu profile={props.videoProfile} seconds={props.seconds} onChange={props.setSeconds} /> : null}
+                {(props.mode === "video" && (props.videoProfile.ratios.length > 0 || props.videoProfile.resolutions.length > 0)) || (props.mode === "image" && imageSettingsSupported) ? <GenerationSettingsMenu {...props} /> : null}
+                {props.mode === "video" && props.videoProfile.durationSupported !== false ? <DurationMenu profile={props.videoProfile} seconds={props.seconds} onChange={props.setSeconds} /> : null}
                 {props.mode === "text" ? <>
                     <Tooltip title={interactionBusy ? "生成中，此开关将在下次发送时生效" : (props.textStreaming ? "流式输出已开启" : "流式输出已关闭")}><button type="button" className="creation-chat-control" aria-pressed={props.textStreaming} disabled={interactionBusy} onClick={() => props.setTextStreaming(!props.textStreaming)}><Waves /><span>流式</span></button></Tooltip>
                     <Tooltip title={interactionBusy ? "生成中，此开关将在下次发送时生效" : (props.textThinking ? "思考已开启，会展示模型返回的推理摘要" : "开启模型思考")}><button type="button" className="creation-chat-control" aria-pressed={props.textThinking} disabled={interactionBusy} onClick={() => props.setTextThinking(!props.textThinking)}><Brain /><span>思考</span></button></Tooltip>

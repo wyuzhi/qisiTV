@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"qisitv/backend/internal/localcrypto"
+	"qisitv/backend/internal/providerpreset"
 )
 
 const (
@@ -273,6 +274,124 @@ func (s *ProviderConfig) LoadEffectiveModelConfig() (EffectiveModelConfig, Confi
 		return EffectiveModelConfig{}, health, fmt.Errorf("合并内置模型配置失败: %w", err)
 	}
 	return effective, health, nil
+}
+
+// SavedProtocolReferences counts the protocol IDs saved in local channels and
+// model profiles. Bootstrap uses it to keep an official protocol plugin alive
+// while a saved connection still executes with it.
+//
+// The audit is read-only on purpose: it decodes the stored document without
+// rewriting it, never returns a credential value, and leaves repair and
+// migration to the normal read path.
+func (s *ProviderConfig) SavedProtocolReferences() (map[string]int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	body, err := s.readAuditDocument()
+	if err != nil {
+		return nil, err
+	}
+	if body == nil {
+		return map[string]int64{}, nil
+	}
+	document, _, decodeErr := s.decodeStoredDocument(body)
+	if decodeErr != nil {
+		return nil, fmt.Errorf("本地模型配置无法解析，保留全部官方协议: %w", decodeErr)
+	}
+	return savedProtocolCounts(document.Config), nil
+}
+
+// savedProtocolCounts counts, per protocol ID, the saved channels and models
+// that execute with it. A model's protocol is decided by
+// providerpreset.SavedModelProtocol, the same rule the client submits with, so
+// a profile that omits the field is counted under the legacy default it has
+// always run with (an audio profile under openai-audio) rather than not at all.
+func savedProtocolCounts(config map[string]any) map[string]int64 {
+	counts := make(map[string]int64)
+	channels, _ := config["channels"].([]any)
+	for _, entry := range channels {
+		channel, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		// interfaceType keeps the protocol of channels that were configured
+		// before per-model profiles existed.
+		countProtocolReference(counts, channel["interfaceType"])
+		countProtocolReference(counts, channel["protocol"])
+		saved := providerpreset.SavedChannel{
+			Scope:         stringField(channel, "scope"),
+			APIFormat:     stringField(channel, "apiFormat"),
+			InterfaceType: stringField(channel, "interfaceType"),
+		}
+		profiles, _ := channel["modelProfiles"].([]any)
+		seen := make(map[string]struct{}, len(profiles))
+		for _, profile := range profiles {
+			item, ok := profile.(map[string]any)
+			if !ok {
+				continue
+			}
+			model := stringField(item, "model")
+			seen[model] = struct{}{}
+			pending, _ := item["protocolPending"].(bool)
+			countProtocolReference(counts, providerpreset.SavedModelProtocol(saved, providerpreset.SavedModel{
+				Model: model, Capability: stringField(item, "capability"), Protocol: stringField(item, "protocol"),
+				ProtocolPending: pending,
+			}))
+		}
+		// A listed model without a profile runs with the channel protocol or the
+		// legacy default, so it needs that protocol just as much.
+		models, _ := channel["models"].([]any)
+		for _, value := range models {
+			model, _ := value.(string)
+			if _, profiled := seen[model]; profiled || strings.TrimSpace(model) == "" {
+				continue
+			}
+			countProtocolReference(counts, providerpreset.SavedModelProtocol(saved, providerpreset.SavedModel{Model: model}))
+		}
+	}
+	return counts
+}
+
+func stringField(values map[string]any, key string) string {
+	text, _ := values[key].(string)
+	return strings.TrimSpace(text)
+}
+
+// readAuditDocument returns the configuration bytes the audit should count,
+// without repairing, migrating or rewriting anything.
+//
+// The normal read path recovers a lost primary file from its backup, so a
+// missing primary is not the same as "no configuration": silently reporting an
+// empty inventory there would delete the plugins the recovered connections
+// need. A first run (neither file) is genuinely empty; an unreadable pair is
+// reported as an error so bootstrap keeps everything.
+func (s *ProviderConfig) readAuditDocument() ([]byte, error) {
+	body, err := os.ReadFile(s.path())
+	if err == nil {
+		return body, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("读取本地模型配置失败: %w", err)
+	}
+	backup, backupErr := os.ReadFile(s.backupPath())
+	if errors.Is(backupErr, os.ErrNotExist) {
+		return nil, nil
+	}
+	if backupErr != nil {
+		return nil, fmt.Errorf("读取本地模型配置备份失败: %w", backupErr)
+	}
+	return backup, nil
+}
+
+func countProtocolReference(counts map[string]int64, value any) {
+	text, ok := value.(string)
+	if !ok {
+		return
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	counts[text]++
 }
 
 func (s *ProviderConfig) loadDocument() (ProviderStateDocument, ConfigHealth, error) {
@@ -572,6 +691,9 @@ func preserveSecrets(incoming, existing any) error {
 }
 
 func preserveSecretList(next, previous []any) error {
+	if !containsRedactedSecret(next) {
+		return nil
+	}
 	incoming := inspectArrayIdentity(next)
 	if incoming.invalid || incoming.duplicate {
 		return ErrInvalidProviderIdentity
@@ -604,6 +726,47 @@ func preserveSecretList(next, previous []any) error {
 		}
 	}
 	return nil
+}
+
+func containsRedactedSecret(value any) bool {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			if strings.EqualFold(key, "headers") {
+				switch headers := child.(type) {
+				case []any:
+					for _, raw := range headers {
+						if header, ok := raw.(map[string]any); ok && isRedactedMarker(header["value"]) {
+							return true
+						}
+					}
+				case map[string]any:
+					for _, raw := range headers {
+						if isRedactedMarker(raw) {
+							return true
+						}
+					}
+				}
+				continue
+			}
+			if isSecretKey(key) && isRedactedMarker(child) {
+				return true
+			}
+			if containsRedactedSecret(child) {
+				return true
+			}
+		}
+		return false
+	case []any:
+		for _, child := range typed {
+			if containsRedactedSecret(child) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
 }
 
 type arrayIdentity struct {

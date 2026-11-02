@@ -9,14 +9,17 @@ import (
 	"io"
 	"net/http"
 
-	"qisitv/backend/internal/app"
 	"qisitv/backend/internal/assistantruntime"
 	"qisitv/backend/internal/assistantturns"
 )
 
+type assistantTurnFinalizer interface {
+	FinalizeAssistantTurn(turnID string) error
+}
+
 // AssistantContinuationSubmitter uses the same owned host admission and
 // completion receipts as /assistant/chat, with no composer or browser state.
-func AssistantContinuationSubmitter(svc *app.Service, host *assistantruntime.Host) func(context.Context, assistantturns.ContinuationView) error {
+func AssistantContinuationSubmitter(svc assistantTurnFinalizer, host *assistantruntime.Host) func(context.Context, assistantturns.ContinuationView) error {
 	client := assistantChatClient(assistantChatHeaderTimeout)
 	return func(ctx context.Context, row assistantturns.ContinuationView) error {
 		body, err := json.Marshal(map[string]any{

@@ -3,7 +3,7 @@ import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../.
 
 // Synthetic reconstructions of the two reported input shapes. The exported
 // diagnostics did not include the click or graph, so these are separate cases.
-export type CustomerGenerationScenario = "five-images" | "video-image" | "missing-audio-duration" | "character";
+export type CustomerGenerationScenario = "five-images" | "video-image" | "missing-audio-duration" | "character" | "library-references";
 
 export function customerGenerationProject(scenario: CustomerGenerationScenario) {
     const refs: CanvasNodeData[] = [];
@@ -23,6 +23,8 @@ export function customerGenerationProject(scenario: CustomerGenerationScenario) 
         add("image-1", CanvasNodeType.Image);
         add("audio-1", CanvasNodeType.Audio, { durationMs: 0, mimeType: "audio/wav" });
         prompt = "参考 @图片1，以 @音频1 配音";
+    } else if (scenario === "library-references") {
+        prompt = "参考 @[asset:library-image] 中的人物，保留 @[asset:library-video] 的动作";
     } else {
         refs.push({ id: "character-1", type: CanvasNodeType.Config, title: "测试角色", position: { x: 0, y: 0 }, width: 320, height: 180, metadata: { workflowKind: "character", characterAssetId: "character-asset", characterVersionId: "character-v1" } });
         prompt = "让 @角色1 在画面中缓慢移动";

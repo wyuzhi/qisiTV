@@ -13,7 +13,7 @@ beforeAll(async () => {
     const executablePath = [process.env.CHROME_PATH, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((path): path is string => Boolean(path && existsSync(path)));
     browser = await chromium.launch({ executablePath, headless: true });
 }, 60000);
-afterAll(async () => { for (const state of runtime.contexts.values()) state.release(); await browser?.close(); runtime?.stop(); });
+afterAll(async () => { for (const state of runtime.contexts.values()) state.release(); await browser?.close(); runtime?.stop(); }, 30000);
 
 async function open(scenario: CustomerGenerationScenario, options = "") {
     const { id, state } = runtime.create(scenario);
@@ -24,7 +24,8 @@ async function open(scenario: CustomerGenerationScenario, options = "") {
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(`${server.url}?case=${id}&scenario=${scenario}&${options}`);
-    await page.getByRole("button", { name: "生成视频", exact: true }).waitFor();
+    try { await page.getByRole("button", { name: "生成视频", exact: true }).waitFor({ timeout: 5000 }); }
+    catch (error) { await context.close(); throw new Error(`Scenario did not render: ${errors.join("; ")}`, { cause: error }); }
     return { page, state, errors, close: async () => { state.release(); await context.close(); } };
 }
 async function start(page: Page) { await page.getByRole("button", { name: "生成视频", exact: true }).click(); }
@@ -33,6 +34,255 @@ async function until(predicate: () => boolean, timeout = 3500) {
     while (!predicate() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20));
     expect(predicate()).toBe(true);
 }
+
+test("copied pending video can submit independently without querying an undefined receipt", async () => {
+    const { page, state, close } = await open("five-images", "copied-submission");
+    try {
+        await start(page);
+        await until(() => state.posts.length === 1);
+        expect(state.lookups).toEqual([]);
+        const source = await page.evaluate(() => (window as any).__customer.nodes.find((node: any) => node.id === "original-pending"));
+        expect(source.metadata.taskClientOperationId).toBe("canvas:original");
+        expect(source.metadata.generationSubmissionState).toBe("unknown");
+        await page.getByRole("button", { name: "取消准备", exact: true }).click();
+    } finally { await close(); }
+});
+
+test("missing submission identity shows a persistent reason without a lookup or a paid retry", async () => {
+    const { page, state, close } = await open("five-images", "missing-submission-id&recover");
+    try {
+        await page.waitForFunction(() => (window as any).__customer.nodes.find((node: any) => node.id === "target").metadata.errorDetails.includes("缺少任务标识"));
+        await start(page);
+        await page.waitForFunction(() => (window as any).__customer.settled);
+        expect(state.posts).toHaveLength(0);
+        expect(state.lookups).toEqual([]);
+        expect(await page.evaluate(() => (window as any).__customer.nodes.find((node: any) => node.id === "target").metadata.generationPreflightError)).toContain("缺少任务标识");
+        expect(await page.evaluate(() => (window as any).__customer.nodes.find((node: any) => node.id === "target").metadata.generationSubmissionState)).toBe("unknown");
+    } finally { await close(); }
+});
+
+test("a known task without an operation id is recovered by task id without another submission", async () => {
+    const { page, state, close } = await open("five-images", "known-task-only");
+    try {
+        Object.assign(state, { task: { id: "original-customer-task", projectId: state.project.id, type: "canvas_video", status: "running", attempts: 1, createdAt: "2026-10-25T00:00:00Z", updatedAt: "2026-10-25T00:00:00Z" } });
+        await start(page);
+        await page.waitForFunction(() => (window as any).__customer.nodes.find((node: any) => node.id === "target").metadata.generationSubmissionState === "accepted");
+        expect(state.posts).toHaveLength(0);
+        expect(state.lookups).toEqual([]);
+        await page.getByRole("button", { name: "取消准备", exact: true }).click();
+    } finally { await close(); }
+});
+
+test("recovery creates a clean connected node only after confirmation and leaves submission to the user", async () => {
+    const { page, state, close } = await open("five-images", "missing-submission-id&recover&submission-recovery-ui");
+    try {
+        const actions = page.getByRole("region", { name: "生成恢复" });
+        await actions.waitFor();
+        await page.getByRole("button", { name: "生成", exact: true }).click();
+        await page.waitForFunction(() => (window as any).__customer.settled);
+        const original = await page.evaluate(() => (window as any).__customer.nodes.find((node: any) => node.id === "target"));
+        await actions.getByRole("button", { name: "新建节点继续" }).click();
+        let dialog = page.getByRole("dialog", { name: "新建节点继续生成？" });
+        await dialog.waitFor();
+        expect(await dialog.textContent()).toContain("可能再次计费");
+        await dialog.getByRole("button", { name: "取消", exact: true }).click();
+        await dialog.waitFor({ state: "hidden" });
+        expect(await page.evaluate(() => (window as any).__customer.nodes.length)).toBe(state.project.nodes.length);
+        expect(state.posts).toHaveLength(0);
+        await actions.getByRole("button", { name: "新建节点继续" }).click();
+        dialog = page.getByRole("dialog", { name: "新建节点继续生成？" });
+        await dialog.getByRole("button", { name: "新建节点", exact: true }).click();
+        await page.waitForFunction(() => (window as any).__customer.activeNodeId !== "target");
+        const snapshot = await page.evaluate(() => { const h = (window as any).__customer; return { original: h.nodes.find((n: any) => n.id === "target"), replacement: h.nodes.find((n: any) => n.id === h.activeNodeId), connections: h.connections }; });
+        expect(snapshot.original.metadata).toEqual(original.metadata);
+        expect(snapshot.replacement.metadata.composerContent).toBe(original.metadata.composerContent);
+        expect(snapshot.replacement.metadata.generationSubmissionState).toBeUndefined();
+        expect(snapshot.replacement.metadata.generationPreflightError).toBeUndefined();
+        expect(snapshot.replacement.metadata.taskId).toBeUndefined();
+        expect(snapshot.connections.filter((c: any) => c.toNodeId === snapshot.replacement.id).map((c: any) => c.fromNodeId)).toEqual(state.project.connections.filter(c => c.toNodeId === "target").map(c => c.fromNodeId));
+        expect(state.posts).toHaveLength(0);
+        await dialog.waitFor({ state: "hidden" });
+        await actions.waitFor({ state: "hidden" });
+        await page.getByRole("button", { name: "生成", exact: true }).click();
+        await until(() => state.posts.length === 1);
+        expect(state.posts[0].input.metadata.nodeId).toBe(snapshot.replacement.id);
+        expect(state.posts[0].input.referenceImages).toHaveLength(5);
+        expect(state.lookups).toEqual([]);
+        await page.getByRole("button", { name: "取消准备", exact: true }).click();
+    } finally { await close(); }
+}, 15000);
+
+test("missing-identity recovery opens the existing generation history without creating a node or task", async () => {
+    const { page, state, close } = await open("five-images", "missing-submission-id&recover&submission-recovery-ui");
+    try {
+        await page.getByRole("region", { name: "生成恢复" }).getByRole("button", { name: "查看生成历史" }).click();
+        await page.getByRole("dialog", { name: "生成历史", exact: true }).waitFor();
+        expect(state.posts).toHaveLength(0);
+        expect(state.lookups).toEqual([]);
+        expect(await page.evaluate(() => (window as any).__customer.activeNodeId)).toBe("target");
+    } finally { await close(); }
+});
+
+test("recovery actions fit the narrow expanded editor and its confirmation remains clickable", async () => {
+    const { page, state, close } = await open("five-images", "missing-submission-id&recover&submission-recovery-ui");
+    try {
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.getByRole("button", { name: "放大编辑提示词" }).first().click();
+        const editor = page.getByRole("dialog");
+        const actions = editor.getByRole("region", { name: "生成恢复" });
+        await actions.waitFor();
+        const geometry = await actions.evaluate(el => ({ width: el.getBoundingClientRect().width, client: el.clientWidth, scroll: el.scrollWidth }));
+        expect(geometry.width).toBeLessThanOrEqual(390);
+        expect(geometry.scroll).toBeLessThanOrEqual(geometry.client);
+        await actions.getByRole("button", { name: "新建节点继续" }).click();
+        const confirmation = page.getByRole("dialog", { name: "新建节点继续生成？" });
+        await confirmation.getByRole("button", { name: "取消", exact: true }).click();
+        await confirmation.waitFor({ state: "hidden" });
+        expect(state.posts).toHaveLength(0);
+        expect(await page.evaluate(() => (window as any).__customer.activeNodeId)).toBe("target");
+    } finally { await close(); }
+});
+
+test("reference repair marks and locates invalid bindings, cancels safely, then submits only after explicit reselect", async () => {
+    const { page, state, errors, close } = await open("five-images", "reference-repair-ui");
+    try {
+        const issues = page.getByRole("region", { name: "需要修正的引用" });
+        await issues.waitFor();
+        expect(await page.locator(".canvas-resource-inline-mention.is-invalid").count()).toBe(2);
+        const original = await page.evaluate(() => (window as any).__customer.nodes.find((node: any) => node.id === "target").metadata.composerContent);
+        await page.getByRole("button", { name: "生成", exact: true }).click();
+        expect(state.posts).toHaveLength(0);
+        const disconnected = issues.getByRole("listitem").filter({ hasText: "未连接到当前生成节点" });
+        await disconnected.getByRole("button", { name: "定位引用" }).click();
+        expect(await page.locator("[data-reference-located]").getAttribute("data-mention-token")).toBe("@[node:unlinked]");
+        await disconnected.getByRole("button", { name: "定位节点" }).click();
+        expect(await page.evaluate(() => (window as any).__customer.locatedNodeId)).toBe("unlinked");
+        await disconnected.getByRole("button", { name: "重新选择" }).click();
+        await page.getByRole("button", { name: "取消重新选择" }).click();
+        expect(await page.evaluate(() => (window as any).__customer.nodes.find((node: any) => node.id === "target").metadata.composerContent)).toBe(original);
+        await disconnected.getByRole("button", { name: "重新选择" }).click();
+        await page.locator("[data-canvas-resource-mention-menu]").getByRole("button").filter({ hasText: "image-2" }).click();
+        expect(await page.locator(".canvas-resource-inline-mention.is-invalid").count()).toBe(1);
+        await issues.getByRole("button", { name: "重新选择" }).click();
+        await page.locator("[data-canvas-resource-mention-menu]").getByRole("button").filter({ hasText: "image-3" }).click();
+        await issues.waitFor({ state: "hidden" });
+        const repaired = await page.evaluate(() => (window as any).__customer.nodes.find((node: any) => node.id === "target").metadata.composerContent);
+        expect(repaired).toBe("保留 @[node:image-1]，参考 @[node:image-2] 和 @[node:image-3]。正文保持不变。");
+        expect(state.posts).toHaveLength(0);
+        await page.getByRole("textbox", { name: "视频提示词" }).fill(original);
+        await page.getByRole("button", { name: "放大编辑提示词" }).first().click();
+        const dialog = page.getByRole("dialog");
+        await dialog.waitFor();
+        expect(await page.locator("[data-canvas-resource-mention-menu]").count()).toBe(0);
+        await dialog.getByRole("button", { name: "重新选择", exact: true }).first().click();
+        await page.locator("[data-canvas-resource-mention-menu]").waitFor();
+        expect(await page.locator("[data-canvas-resource-mention-menu]").count()).toBe(1);
+        expect(await page.evaluate(() => Number(getComputedStyle(document.querySelector('[data-canvas-resource-mention-menu]')!).zIndex) > Number(getComputedStyle(document.querySelector('.ant-modal-wrap')!).zIndex))).toBe(true);
+        await page.locator("[data-canvas-resource-mention-menu]").getByRole("button").filter({ hasText: "image-2" }).click();
+        await dialog.getByRole("button", { name: "重新选择", exact: true }).click();
+        await page.locator("[data-canvas-resource-mention-menu]").getByRole("button").filter({ hasText: "image-3" }).click();
+        await dialog.getByRole("button", { name: "Close", exact: true }).click();
+        await dialog.waitFor({ state: "hidden" });
+        expect(await page.locator("[data-canvas-resource-mention-menu]").count()).toBe(0);
+        await page.getByRole("button", { name: "生成", exact: true }).click();
+        await until(() => state.posts.length === 1);
+        expect(state.posts[0].input.referenceImages).toHaveLength(5);
+        expect(errors).toEqual([]);
+    } finally { await close(); }
+}, 20000);
+
+test("reference lookup stays pending until authoritative read completes and network failures offer retry", async () => {
+    const { page, state, errors, close } = await open("five-images", "reference-repair-ui");
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    try {
+        await page.getByRole("region", { name: "需要修正的引用" }).waitFor();
+        await page.route("**/api/assets/batch", async route => { await gate; await route.continue(); });
+        await page.getByRole("textbox", { name: "视频提示词" }).fill("参考 @[asset:library-image]，保留正文。");
+        await page.getByRole("status").filter({ hasText: "正在检查参考素材" }).waitFor();
+        expect(await page.locator(".canvas-resource-inline-mention.is-invalid").count()).toBe(0);
+        release();
+        await page.getByRole("status").filter({ hasText: "正在检查参考素材" }).waitFor({ state: "hidden" });
+        expect(await page.getByRole("region", { name: "需要修正的引用" }).count()).toBe(0);
+        await page.getByRole("textbox", { name: "视频提示词" }).fill("参考 @[asset:library-image]，@");
+        const menu = page.locator("[data-canvas-resource-mention-menu]");
+        await menu.waitFor();
+        expect(await menu.locator("section").filter({ hasText: "画布节点" }).innerText()).not.toContain("library-image");
+        await page.keyboard.press("Escape");
+        await page.unroute("**/api/assets/batch");
+        await page.route("**/api/assets/batch", route => route.abort("internetdisconnected"));
+        await page.getByRole("textbox", { name: "视频提示词" }).fill("参考 @[asset:library-video]，保留正文。");
+        await page.getByRole("button", { name: "重新检查" }).waitFor();
+        expect(await page.locator(".canvas-resource-inline-mention.is-invalid").count()).toBe(0);
+        await page.unroute("**/api/assets/batch");
+        await page.getByRole("button", { name: "重新检查" }).click();
+        await page.getByRole("button", { name: "重新检查" }).waitFor({ state: "hidden" });
+        expect(state.posts).toHaveLength(0);
+        expect(errors).toEqual([]);
+    } finally { release(); await close(); }
+}, 20000);
+
+test("owned library references missing from the visible catalog resolve before task submission", async () => {
+    const { page, state, errors, close } = await open("library-references");
+    try {
+        await start(page);
+        await until(() => state.posts.length === 1).catch(async error => {
+            const metadata = await page.evaluate(() => (window as any).__customer.nodes.find((node: any) => node.id === "target").metadata);
+            throw new Error(JSON.stringify(metadata), { cause: error });
+        });
+        expect(state.posts[0].input.referenceImages.map((image: any) => image.id)).toEqual(["library-image"]);
+        expect(state.posts[0].input.referenceVideos.map((video: any) => video.id)).toEqual(["library-video"]);
+        expect(errors).toEqual([]);
+    } finally { await close(); }
+}, 15000);
+
+test("missing library records still block submission and preserve the previous output", async () => {
+    const { page, state, errors, close } = await open("library-references");
+    await page.route("**/api/assets/batch", route => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ code: 0, data: { assets: [] }, msg: "ok" }) }));
+    try {
+        await start(page);
+        await page.waitForFunction(() => (window as any).__customer.settled);
+        expect(state.posts).toHaveLength(0);
+        const metadata = await page.evaluate(() => (window as any).__customer.nodes.find((node: any) => node.id === "target").metadata);
+        expect(metadata.generationPreflightError).toContain("素材不存在");
+        expect(metadata.storageKey).toBe("resource:previous-result");
+        expect(errors).toEqual([]);
+    } finally { await close(); }
+}, 15000);
+
+test("cancelled library lookup cannot submit when the late lookup completes", async () => {
+    const { page, state, errors, close } = await open("library-references");
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let held = false;
+    await page.route("**/api/assets/batch", async route => { held = true; await gate; await route.continue(); });
+    try {
+        await start(page);
+        await until(() => held);
+        await page.getByRole("button", { name: "取消准备" }).click();
+        await page.waitForFunction(() => (window as any).__customer.settled);
+        const completedLookup = page.waitForResponse(response => new URL(response.url()).pathname === "/api/assets/batch");
+        release();
+        await completedLookup;
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        expect(await page.evaluate(() => (window as any).__customer.nodes.find((node: any) => node.id === "target").metadata.storageKey)).toBe("resource:previous-result");
+        expect(state.posts).toHaveLength(0);
+        expect(errors).toEqual([]);
+    } finally { release(); await close(); }
+}, 15000);
+
+test("long prompt submits directly so the server validates prompt length without client truncation", async () => {
+    const { page, state, errors, close } = await open("five-images", "long-prompt-limit");
+    try {
+        await start(page);
+        await until(() => state.posts.length === 1);
+        expect(Array.from(state.posts[0].prompt).length).toBe(8066);
+        expect(state.posts[0].input.referenceImages).toHaveLength(5);
+        expect(await page.evaluate(() => (window as any).__customer.nodes.find((node: any) => node.id === "target").metadata.generationPreflightError)).toBeUndefined();
+        await page.getByRole("button", { name: "取消准备", exact: true }).click();
+        expect(errors).toEqual([]);
+    } finally { await close(); }
+}, 15000);
 
 for (const scenario of ["five-images", "video-image", "character"] as const) test(`customer ${scenario}: owned references submit while actual blob cache queue is blocked`, async () => {
     const { page, state, errors, close } = await open(scenario, "block-cache");
@@ -172,14 +422,15 @@ test("customer creation accepted then HTTP response lost refreshes by operation 
     } finally { await close(); }
 }, 15000);
 
-test("customer default model incompatible with five images reports a visible reason and never switches model", async () => {
+test("customer default model without server capability declaration submits five images to server without switching model", async () => {
     const { page, state, errors, close } = await open("five-images", "incompatible-model");
     try {
         await start(page);
-        await page.waitForFunction(() => (window as any).__customer.settled);
-        expect(await page.locator(".ant-message").innerText()).toContain("当前模型无法支持");
-        expect(state.posts).toHaveLength(0);
+        await until(() => state.posts.length === 1);
+        expect(state.posts[0].model).toBe("synthetic::kling-v2.6");
+        expect(state.posts[0].input.referenceImages).toHaveLength(5);
         expect(state.downloads).toHaveLength(0);
+        await page.getByRole("button", { name: "取消准备", exact: true }).click();
         expect(errors).toEqual([]);
     } finally { await close(); }
 }, 15000);

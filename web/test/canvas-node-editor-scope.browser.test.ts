@@ -6,13 +6,11 @@ import { chromium, type Browser, type Page } from "playwright";
 let browser: Browser;
 let page: Page;
 let server: ReturnType<typeof Bun.serve>;
-let switched = false;
 let failEnsure = false;
 let unconfirmed = false;
 let personalOnly = false;
 let gateEnsure = false;
 let ensureHits = 0;
-let writesAfterSwitch = 0;
 let ensureGate: { promise: Promise<void>; resolve: () => void } | undefined;
 
 function resetGate() {
@@ -44,7 +42,6 @@ beforeAll(async () => {
                                 category: options.category,
                                 canvasId: options.canvasId,
                                 nodeId: options.node && options.node.id,
-                                hasExpectedScope: Boolean(options.expectedScope),
                                 hasSignal: Boolean(options.signal),
                             });
                             const response = await fetch("/api/harness/ensure", { method: "POST" });
@@ -88,17 +85,12 @@ beforeAll(async () => {
             const url = new URL(request.url);
             const path = url.pathname;
             if (path === "/harness.js") return new Response(script, { headers: { "Content-Type": "text/javascript" } });
-            if (path === "/harness/switch" && request.method === "POST") {
-                switched = true;
-                return Response.json({ ok: true });
-            }
             if (path === "/harness/release-ensure" && request.method === "POST") {
                 ensureGate?.resolve();
                 return Response.json({ ok: true });
             }
             if (path === "/api/harness/ensure" && request.method === "POST") {
                 ensureHits += 1;
-                if (switched) writesAfterSwitch += 1;
                 if (gateEnsure && ensureGate) await ensureGate.promise;
                 if (failEnsure) return Response.json({ error: "网络中断" });
                 return Response.json({
@@ -117,13 +109,11 @@ beforeAll(async () => {
 
 beforeEach(async () => {
     await page?.close();
-    switched = false;
     failEnsure = false;
     unconfirmed = false;
     personalOnly = false;
     gateEnsure = false;
     ensureHits = 0;
-    writesAfterSwitch = 0;
     resetGate();
     page = await browser.newPage();
     await page.goto(server.url.toString());
@@ -138,18 +128,9 @@ afterAll(async () => {
 type HarnessState = {
     writes: string[];
     toasts: string[];
-    ensureCalls: Array<{ source?: string; category?: string; hasExpectedScope: boolean; hasSignal: boolean }>;
-    switchABA: () => Promise<void>;
+    ensureCalls: Array<{ source?: string; category?: string; hasSignal: boolean }>;
     switchCanvas: () => void;
 };
-
-async function switchABA() {
-    await page.evaluate(async () => {
-        const harness = (window as Window & { __editorHarness?: HarnessState }).__editorHarness;
-        if (!harness) throw new Error("harness missing");
-        await harness.switchABA();
-    });
-}
 
 async function harnessState() {
     return page.evaluate(() => (window as Window & { __editorHarness?: HarnessState }).__editorHarness);
@@ -160,67 +141,6 @@ async function waitForEnsureHit() {
     while (ensureHits < 1 && Date.now() < deadline) await Bun.sleep(20);
     expect(ensureHits).toBeGreaterThanOrEqual(1);
 }
-
-test("delayed category success after A→B→A does not write assetId or toast the replacement generation", async () => {
-    gateEnsure = true;
-    await page.getByRole("button", { name: "set-category" }).click();
-    await waitForEnsureHit();
-    await switchABA();
-    await fetch(new URL("/harness/release-ensure", server.url), { method: "POST" });
-    await page.waitForTimeout(800);
-    const harness = await harnessState();
-    expect(await page.getByTestId("node-category").textContent()).toBe("character");
-    expect(await page.getByTestId("node-asset").textContent()).toBe("none");
-    expect((harness?.writes ?? []).filter((item) => item === "invalidate")).toEqual([]);
-    expect((harness?.toasts ?? []).join("\n")).not.toContain("资产分类已更新");
-    expect((harness?.toasts ?? []).join("\n")).not.toContain("文件目前只在这台设备上");
-    expect(writesAfterSwitch).toBe(0);
-}, 15_000);
-
-test("delayed ordinary category error after A→B→A does not toast the replacement generation", async () => {
-    failEnsure = true;
-    gateEnsure = true;
-    await page.getByRole("button", { name: "set-category" }).click();
-    await waitForEnsureHit();
-    await switchABA();
-    await fetch(new URL("/harness/release-ensure", server.url), { method: "POST" });
-    await page.waitForTimeout(800);
-    const harness = await harnessState();
-    expect(await page.getByTestId("node-asset").textContent()).toBe("none");
-    expect((harness?.toasts ?? []).join("\n")).not.toContain("网络中断");
-    expect((harness?.toasts ?? []).join("\n")).not.toContain("资产分类更新失败");
-    expect(writesAfterSwitch).toBe(0);
-}, 15_000);
-
-test("delayed save success after A→B→A does not overlay live nodes or claim saved", async () => {
-    gateEnsure = true;
-    await page.getByRole("button", { name: "save-asset" }).click();
-    await waitForEnsureHit();
-    await switchABA();
-    await fetch(new URL("/harness/release-ensure", server.url), { method: "POST" });
-    await page.waitForTimeout(800);
-    const harness = await harnessState();
-    expect(await page.getByTestId("node-asset").textContent()).toBe("none");
-    expect((harness?.writes ?? []).filter((item) => item === "invalidate")).toEqual([]);
-    expect((harness?.toasts ?? []).join("\n")).not.toContain("已加入项目资产");
-    expect((harness?.toasts ?? []).join("\n")).not.toContain("已加入我的素材");
-    expect(writesAfterSwitch).toBe(0);
-}, 15_000);
-
-test("delayed ordinary save error after A→B→A does not toast the replacement generation", async () => {
-    failEnsure = true;
-    gateEnsure = true;
-    await page.getByRole("button", { name: "save-asset" }).click();
-    await waitForEnsureHit();
-    await switchABA();
-    await fetch(new URL("/harness/release-ensure", server.url), { method: "POST" });
-    await page.waitForTimeout(800);
-    const harness = await harnessState();
-    expect(await page.getByTestId("node-asset").textContent()).toBe("none");
-    expect((harness?.toasts ?? []).join("\n")).not.toContain("网络中断");
-    expect((harness?.toasts ?? []).join("\n")).not.toContain("素材保存失败");
-    expect(writesAfterSwitch).toBe(0);
-}, 15_000);
 
 test("unconfirmed save keeps a recoverable draft and does not claim saved", async () => {
     unconfirmed = true;
@@ -242,7 +162,6 @@ test("owned category update writes assetId and keeps current valid copy", async 
     expect(harness?.ensureCalls[0]).toMatchObject({
         source: "canvas-manual",
         category: "character",
-        hasExpectedScope: true,
         hasSignal: true,
     });
     expect((harness?.writes ?? []).filter((item) => item === "invalidate")).toEqual(["invalidate"]);

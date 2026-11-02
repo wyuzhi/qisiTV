@@ -46,14 +46,55 @@ func CollectOwnedDocumentReferences(raw string, resourceIDs map[string]struct{})
 	if err := json.Unmarshal([]byte(raw), &value); err != nil {
 		return err
 	}
+	collectDecodedDocumentReferences(value, resourceIDs)
+	return nil
+}
+
+// CollectOwnedDocumentReferencesFromDecoded reuses a decoded JSON document.
+// Scientific notation and very long numbers retain the original parser's range
+// checks, including values overwritten by duplicate keys during decoding.
+func CollectOwnedDocumentReferencesFromDecoded(raw string, value any, resourceIDs map[string]struct{}) error {
+	if referenceNumbersNeedValidation(raw) {
+		return CollectOwnedDocumentReferences(raw, resourceIDs)
+	}
+	collectDecodedDocumentReferences(value, resourceIDs)
+	return nil
+}
+
+func collectDecodedDocumentReferences(value any, resourceIDs map[string]struct{}) {
 	if scalar, ok := value.(string); ok {
 		if resourceID := ResourceID(scalar); resourceID != "" {
 			resourceIDs[resourceID] = struct{}{}
 		}
-		return nil
+		return
 	}
 	walkReferenceDocument(value, "", resourceIDs)
-	return nil
+}
+
+// raw is already validated JSON. Skip strings (including escaped quotes) so
+// resource IDs and prompts containing exponent-like text stay on the fast path.
+func referenceNumbersNeedValidation(raw string) bool {
+	digits := 0
+	for i := 0; i < len(raw); i++ {
+		if raw[i] == '"' {
+			digits = 0
+			for i++; i < len(raw); i++ {
+				if raw[i] == '\\' {
+					i++
+				} else if raw[i] == '"' {
+					break
+				}
+			}
+		} else if raw[i] >= '0' && raw[i] <= '9' {
+			digits++
+			if digits >= 309 || (i+1 < len(raw) && (raw[i+1] == 'e' || raw[i+1] == 'E')) {
+				return true
+			}
+		} else {
+			digits = 0
+		}
+	}
+	return false
 }
 
 func SortedIDs(values map[string]struct{}) []string {

@@ -37,7 +37,7 @@ func TestRegisterTaskOutputFromTaskPersistsMediaAssetAndArtifactIdempotently(t *
 	if err := service.EnsureBuiltinProjectWorkflowTemplate(); err != nil {
 		t.Fatal(err)
 	}
-	workflow, err := service.CreateUnitWorkflow("user-1", project.ID, unit.ID)
+	workflow, err := service.ProjectService().CreateUnitWorkflow("user-1", project.ID, unit.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,12 +47,12 @@ func TestRegisterTaskOutputFromTaskPersistsMediaAssetAndArtifactIdempotently(t *
 			videoStep = step
 		}
 	}
-	shot, err := service.CreateProjectShot("user-1", project.ID, CreateProjectShotRequest{UnitID: unit.ID, Title: "SC.01", Description: "人物抬头", DurationMs: 3000})
+	shot, err := service.ProjectService().CreateProjectShot("user-1", project.ID, CreateProjectShotRequest{UnitID: unit.ID, Title: "SC.01", Description: "人物抬头", DurationMs: 3000})
 	if err != nil {
 		t.Fatal(err)
 	}
 	submittedRevisionID := shot.CurrentRevisionID
-	if _, _, err = service.CreateShotRevision("user-1", project.ID, shot.ID, ShotRevisionInput{PlotDescription: "任务提交后修改的镜头", DurationMs: 3000}); err != nil {
+	if _, _, err = service.ProjectService().CreateShotRevision("user-1", project.ID, shot.ID, ShotRevisionInput{PlotDescription: "任务提交后修改的镜头", DurationMs: 3000}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()
@@ -145,7 +145,7 @@ func TestShortDramaWorkflowV2UsesProductionOrder(t *testing.T) {
 	if err := service.EnsureBuiltinProjectWorkflowTemplate(); err != nil {
 		t.Fatal(err)
 	}
-	workflow, err := service.CreateUnitWorkflow("user-1", project.ID, unit.ID)
+	workflow, err := service.ProjectService().CreateUnitWorkflow("user-1", project.ID, unit.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,14 +173,14 @@ func TestCreateProjectCharacterCandidatesIsIdempotentAcrossPendingAndConfirmed(t
 		}},
 	}
 
-	created, err := service.CreateProjectAssetCandidates("user-1", project.ID, request)
+	created, err := service.ProjectService().CreateProjectAssetCandidates("user-1", project.ID, request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(created) != 1 {
 		t.Fatalf("created candidates = %d, want 1", len(created))
 	}
-	created, err = service.CreateProjectAssetCandidates("user-1", project.ID, request)
+	created, err = service.ProjectService().CreateProjectAssetCandidates("user-1", project.ID, request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,10 +188,10 @@ func TestCreateProjectCharacterCandidatesIsIdempotentAcrossPendingAndConfirmed(t
 		t.Fatalf("duplicate pending candidates = %d, want 0", len(created))
 	}
 
-	if _, err := service.ConfirmProjectAssetCandidate("user-1", project.ID, firstProjectCandidateID(t, db), ConfirmProjectAssetCandidateRequest{}); err != nil {
+	if _, err := service.ProjectService().ConfirmProjectAssetCandidate("user-1", project.ID, firstProjectCandidateID(t, db), ConfirmProjectAssetCandidateRequest{}); err != nil {
 		t.Fatal(err)
 	}
-	created, err = service.CreateProjectAssetCandidates("user-1", project.ID, request)
+	created, err = service.ProjectService().CreateProjectAssetCandidates("user-1", project.ID, request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestCreateProjectCharacterCandidatesIsIdempotentAcrossPendingAndConfirmed(t
 func TestCreateProjectCharacterCandidatesRejectsNonChapterSource(t *testing.T) {
 	service, db := newProjectWorkflowV2TestService(t)
 	project, unit := seedWorkflowProject(t, db)
-	_, err := service.CreateProjectAssetCandidates("user-1", project.ID, CreateAssetCandidatesRequest{
+	_, err := service.ProjectService().CreateProjectAssetCandidates("user-1", project.ID, CreateAssetCandidatesRequest{
 		Source:     "agent",
 		Candidates: []AssetCandidateInput{{UnitID: unit.ID, Name: "猎人", Category: string(model.AssetCategoryCharacter), Details: validCharacterCandidateDetails(nil)}},
 	})
@@ -241,15 +241,15 @@ func TestWorkflowCompletionRequiresStageGate(t *testing.T) {
 	if err := service.EnsureBuiltinProjectWorkflowTemplate(); err != nil {
 		t.Fatal(err)
 	}
-	workflow, err := service.CreateUnitWorkflow("user-1", project.ID, unit.ID)
+	workflow, err := service.ProjectService().CreateUnitWorkflow("user-1", project.ID, unit.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	step := workflow.Steps[0]
-	if _, err := service.UpdateWorkflowStep("user-1", project.ID, step.ID, UpdateWorkflowStepRequest{Status: "running"}); err != nil {
+	if _, err := service.ProjectService().UpdateWorkflowStep("user-1", project.ID, step.ID, UpdateWorkflowStepRequest{Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.UpdateWorkflowStep("user-1", project.ID, step.ID, UpdateWorkflowStepRequest{Status: "completed"}); err == nil {
+	if _, err := service.ProjectService().UpdateWorkflowStep("user-1", project.ID, step.ID, UpdateWorkflowStepRequest{Status: "completed"}); err == nil {
 		t.Fatal("empty chapter completed story gate")
 	}
 	unit.SourceText = "第一章正文"
@@ -257,7 +257,7 @@ func TestWorkflowCompletionRequiresStageGate(t *testing.T) {
 	if err := db.Save(&unit).Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.UpdateWorkflowStep("user-1", project.ID, step.ID, UpdateWorkflowStepRequest{Status: "completed"}); err != nil {
+	if _, err := service.ProjectService().UpdateWorkflowStep("user-1", project.ID, step.ID, UpdateWorkflowStepRequest{Status: "completed"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -268,11 +268,11 @@ func TestCreateShotRevisionInvalidatesExistingArtifacts(t *testing.T) {
 	if err := service.EnsureBuiltinProjectWorkflowTemplate(); err != nil {
 		t.Fatal(err)
 	}
-	workflow, err := service.CreateUnitWorkflow("user-1", project.ID, unit.ID)
+	workflow, err := service.ProjectService().CreateUnitWorkflow("user-1", project.ID, unit.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	shot, err := service.CreateProjectShot("user-1", project.ID, CreateProjectShotRequest{UnitID: unit.ID, Title: "SC.01", Description: "人物推门进入", DurationMs: 3000})
+	shot, err := service.ProjectService().CreateProjectShot("user-1", project.ID, CreateProjectShotRequest{UnitID: unit.ID, Title: "SC.01", Description: "人物推门进入", DurationMs: 3000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func TestCreateShotRevisionInvalidatesExistingArtifacts(t *testing.T) {
 	if err := db.Create(&artifact).Error; err != nil {
 		t.Fatal(err)
 	}
-	updatedShot, revision, err := service.CreateShotRevision("user-1", project.ID, shot.ID, ShotRevisionInput{PlotDescription: "人物推门后停在门口", Action: "推门、停顿", DurationMs: 3500})
+	updatedShot, revision, err := service.ProjectService().CreateShotRevision("user-1", project.ID, shot.ID, ShotRevisionInput{PlotDescription: "人物推门后停在门口", Action: "推门、停顿", DurationMs: 3500})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestReplaceProjectUnitShotsCreatesGeneratedAssetReferencesAtomically(t *tes
 		}
 	}
 
-	shots, err := service.ReplaceProjectUnitShots("user-1", project.ID, unit.ID, ReplaceProjectUnitShotsRequest{
+	shots, err := service.ProjectService().ReplaceProjectUnitShots("user-1", project.ID, unit.ID, ReplaceProjectUnitShotsRequest{
 		ExpectedShotIDs:  []string{},
 		ExpectedRevision: workflowProjectRevision(t, db, project.ID),
 		Shots: []ReplaceProjectUnitShotInput{{
@@ -347,7 +347,7 @@ func TestReplaceProjectUnitShotsCreatesGeneratedAssetReferencesAtomically(t *tes
 	if len(references) != 1 || references[0].AssetVersionID != version.ID || references[0].Role != "reference" {
 		t.Fatalf("references = %+v, want one generated reference", references)
 	}
-	_, err = service.ReplaceProjectUnitShots("user-1", project.ID, unit.ID, ReplaceProjectUnitShotsRequest{
+	_, err = service.ProjectService().ReplaceProjectUnitShots("user-1", project.ID, unit.ID, ReplaceProjectUnitShotsRequest{
 		ExpectedShotIDs:  []string{"stale-shot-id"},
 		ExpectedRevision: workflowProjectRevision(t, db, project.ID),
 		Shots:            []ReplaceProjectUnitShotInput{{CreateProjectShotRequest: CreateProjectShotRequest{Title: "SC.02", Description: "并发替换", DurationMs: 3000}}},
@@ -356,7 +356,7 @@ func TestReplaceProjectUnitShotsCreatesGeneratedAssetReferencesAtomically(t *tes
 		t.Fatalf("concurrent replacement error = %v", err)
 	}
 
-	_, err = service.ReplaceProjectUnitShots("user-1", project.ID, unit.ID, ReplaceProjectUnitShotsRequest{
+	_, err = service.ProjectService().ReplaceProjectUnitShots("user-1", project.ID, unit.ID, ReplaceProjectUnitShotsRequest{
 		ExpectedRevision: workflowProjectRevision(t, db, project.ID),
 		Shots: []ReplaceProjectUnitShotInput{{
 			CreateProjectShotRequest: CreateProjectShotRequest{Title: "SC.02", Description: "无效资产", DurationMs: 3000},
@@ -381,11 +381,11 @@ func TestUnlinkShotAssetDeletesReferenceAndInvalidatesProduction(t *testing.T) {
 	if err := service.EnsureBuiltinProjectWorkflowTemplate(); err != nil {
 		t.Fatal(err)
 	}
-	workflow, err := service.CreateUnitWorkflow("user-1", project.ID, unit.ID)
+	workflow, err := service.ProjectService().CreateUnitWorkflow("user-1", project.ID, unit.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	shot, err := service.CreateProjectShot("user-1", project.ID, CreateProjectShotRequest{UnitID: unit.ID, Title: "SC.01", Description: "人物走入画面", DurationMs: 3000})
+	shot, err := service.ProjectService().CreateProjectShot("user-1", project.ID, CreateProjectShotRequest{UnitID: unit.ID, Title: "SC.01", Description: "人物走入画面", DurationMs: 3000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,10 +401,10 @@ func TestUnlinkShotAssetDeletesReferenceAndInvalidatesProduction(t *testing.T) {
 		}
 	}
 
-	if err := service.UnlinkShotAsset("user-2", project.ID, shot.ID, reference.ID); err == nil {
+	if err := service.ProjectService().UnlinkShotAsset("user-2", project.ID, shot.ID, reference.ID); err == nil {
 		t.Fatal("another user should not unlink the shot asset")
 	}
-	if err := service.UnlinkShotAsset("user-1", project.ID, shot.ID, reference.ID); err != nil {
+	if err := service.ProjectService().UnlinkShotAsset("user-1", project.ID, shot.ID, reference.ID); err != nil {
 		t.Fatal(err)
 	}
 	var referenceCount int64
@@ -428,7 +428,7 @@ func TestUnlinkShotAssetDeletesReferenceAndInvalidatesProduction(t *testing.T) {
 	if storyboardStep.Status != model.WorkflowStepStatusRunning {
 		t.Fatalf("storyboard step status = %s, want running", storyboardStep.Status)
 	}
-	if err := service.UnlinkShotAsset("user-1", project.ID, shot.ID, reference.ID); err == nil {
+	if err := service.ProjectService().UnlinkShotAsset("user-1", project.ID, shot.ID, reference.ID); err == nil {
 		t.Fatal("second unlink should report missing reference")
 	}
 }
@@ -439,13 +439,13 @@ func TestDeleteProjectShotCleansRelationsAndCompactsPositions(t *testing.T) {
 	if err := service.EnsureBuiltinProjectWorkflowTemplate(); err != nil {
 		t.Fatal(err)
 	}
-	workflow, err := service.CreateUnitWorkflow("user-1", project.ID, unit.ID)
+	workflow, err := service.ProjectService().CreateUnitWorkflow("user-1", project.ID, unit.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	shots := make([]model.Shot, 0, 3)
 	for index, title := range []string{"SC.01", "SC.02", "SC.03"} {
-		shot, createErr := service.CreateProjectShot("user-1", project.ID, CreateProjectShotRequest{
+		shot, createErr := service.ProjectService().CreateProjectShot("user-1", project.ID, CreateProjectShotRequest{
 			UnitID: unit.ID, Title: title, Description: "镜头画面", Position: index, DurationMs: 3000,
 		})
 		if createErr != nil {
@@ -468,10 +468,10 @@ func TestDeleteProjectShotCleansRelationsAndCompactsPositions(t *testing.T) {
 		}
 	}
 
-	if err := service.DeleteProjectShot("user-2", project.ID, target.ID); err == nil {
+	if err := service.ProjectService().DeleteProjectShot("user-2", project.ID, target.ID); err == nil {
 		t.Fatal("another user should not delete the shot")
 	}
-	if err := service.DeleteProjectShot("user-1", project.ID, target.ID); err != nil {
+	if err := service.ProjectService().DeleteProjectShot("user-1", project.ID, target.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -513,11 +513,11 @@ func TestUpdateChapterSourceInvalidatesAllUnitArtifacts(t *testing.T) {
 	if err := service.EnsureBuiltinProjectWorkflowTemplate(); err != nil {
 		t.Fatal(err)
 	}
-	workflow, err := service.CreateUnitWorkflow("user-1", project.ID, unit.ID)
+	workflow, err := service.ProjectService().CreateUnitWorkflow("user-1", project.ID, unit.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	shot, err := service.CreateProjectShot("user-1", project.ID, CreateProjectShotRequest{UnitID: unit.ID, Title: "SC.01", Description: "旧剧情镜头", DurationMs: 3000})
+	shot, err := service.ProjectService().CreateProjectShot("user-1", project.ID, CreateProjectShotRequest{UnitID: unit.ID, Title: "SC.01", Description: "旧剧情镜头", DurationMs: 3000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -525,7 +525,7 @@ func TestUpdateChapterSourceInvalidatesAllUnitArtifacts(t *testing.T) {
 	if err := db.Create(&artifact).Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.UpdateProjectUnit("user-1", project.ID, unit.ID, UpdateProjectUnitRequest{Title: unit.Title, SourceText: "修改后的章节正文"}); err != nil {
+	if _, err := service.ProjectService().UpdateProjectUnit("user-1", project.ID, unit.ID, UpdateProjectUnitRequest{Title: unit.Title, SourceText: "修改后的章节正文"}); err != nil {
 		t.Fatal(err)
 	}
 	var storedArtifact model.ShotArtifact
@@ -550,11 +550,11 @@ func TestRegisterTaskOutputAcceptsLinkedCanvasAndCreatesShotArtifact(t *testing.
 	if err := service.EnsureBuiltinProjectWorkflowTemplate(); err != nil {
 		t.Fatal(err)
 	}
-	workflow, err := service.CreateUnitWorkflow("user-1", project.ID, unit.ID)
+	workflow, err := service.ProjectService().CreateUnitWorkflow("user-1", project.ID, unit.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	shot, err := service.CreateProjectShot("user-1", project.ID, CreateProjectShotRequest{UnitID: unit.ID, Title: "SC.01", Description: "人物走入画面", DurationMs: 3000})
+	shot, err := service.ProjectService().CreateProjectShot("user-1", project.ID, CreateProjectShotRequest{UnitID: unit.ID, Title: "SC.01", Description: "人物走入画面", DurationMs: 3000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -567,7 +567,7 @@ func TestRegisterTaskOutputAcceptsLinkedCanvasAndCreatesShotArtifact(t *testing.
 		}
 	}
 	step := workflow.Steps[0]
-	updatedStep, err := service.RegisterTaskOutput("user-1", project.ID, step.ID, RegisterTaskOutputRequest{TaskID: task.ID, UnitID: unit.ID, ShotID: shot.ID, ArtifactType: "storyboard", ResourceID: resource.ID, MediaType: "image"})
+	updatedStep, err := service.ProjectService().RegisterTaskOutput("user-1", project.ID, step.ID, RegisterTaskOutputRequest{TaskID: task.ID, UnitID: unit.ID, ShotID: shot.ID, ArtifactType: "storyboard", ResourceID: resource.ID, MediaType: "image"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -603,7 +603,7 @@ func TestChapterStoryboardOutputRegistrationDoesNotInvalidateApprovedRevision(t 
 		t.Fatal(err)
 	}
 	project, unit := seedWorkflowProject(t, db)
-	created, err := service.ReplaceProjectUnitShots("user-1", project.ID, unit.ID, ReplaceProjectUnitShotsRequest{
+	created, err := service.ProjectService().ReplaceProjectUnitShots("user-1", project.ID, unit.ID, ReplaceProjectUnitShotsRequest{
 		ExpectedShotIDs:  []string{},
 		ExpectedRevision: workflowProjectRevision(t, db, project.ID),
 		Shots:            []ReplaceProjectUnitShotInput{{CreateProjectShotRequest: CreateProjectShotRequest{Title: "SC.01", Description: "批准时的画面", DurationMs: 3000}}},
@@ -662,7 +662,7 @@ func TestChapterStoryboardOutputRegistrationDoesNotInvalidateApprovedRevision(t 
 		t.Fatalf("ProjectDetail repair bumped revision to %d, want approved %d", workflowProjectRevision(t, db, project.ID), approvedRevision)
 	}
 
-	replaced, err := service.ReplaceProjectUnitShots("user-1", project.ID, unit.ID, ReplaceProjectUnitShotsRequest{
+	replaced, err := service.ProjectService().ReplaceProjectUnitShots("user-1", project.ID, unit.ID, ReplaceProjectUnitShotsRequest{
 		ExpectedShotIDs:  approvedShotIDs,
 		ExpectedRevision: approvedRevision,
 		Shots:            []ReplaceProjectUnitShotInput{{CreateProjectShotRequest: CreateProjectShotRequest{Title: "SC.02", Description: "按原批准快照恢复", DurationMs: 3000}}},
@@ -678,7 +678,7 @@ func TestChapterStoryboardOutputRegistrationDoesNotInvalidateApprovedRevision(t 
 func TestChapterStoryboardApprovedRevisionConflictsAfterInPlaceShotEdit(t *testing.T) {
 	service, db := newProjectWorkflowV2TestService(t)
 	project, unit := seedWorkflowProject(t, db)
-	created, err := service.ReplaceProjectUnitShots("user-1", project.ID, unit.ID, ReplaceProjectUnitShotsRequest{
+	created, err := service.ProjectService().ReplaceProjectUnitShots("user-1", project.ID, unit.ID, ReplaceProjectUnitShotsRequest{
 		ExpectedShotIDs:  []string{},
 		ExpectedRevision: workflowProjectRevision(t, db, project.ID),
 		Shots:            []ReplaceProjectUnitShotInput{{CreateProjectShotRequest: CreateProjectShotRequest{Title: "SC.01", Description: "批准时的画面", DurationMs: 3000}}},
@@ -709,7 +709,7 @@ func TestChapterStoryboardApprovedRevisionConflictsAfterInPlaceShotEdit(t *testi
 	if err := db.Create(&task).Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := service.CreateShotRevision("user-1", project.ID, created[0].ID, ShotRevisionInput{PlotDescription: "镜头已改内容", DurationMs: 3200}); err != nil {
+	if _, _, err := service.ProjectService().CreateShotRevision("user-1", project.ID, created[0].ID, ShotRevisionInput{PlotDescription: "镜头已改内容", DurationMs: 3200}); err != nil {
 		t.Fatal(err)
 	}
 	afterEdit := workflowProjectRevision(t, db, project.ID)
@@ -722,7 +722,7 @@ func TestChapterStoryboardApprovedRevisionConflictsAfterInPlaceShotEdit(t *testi
 	if workflowProjectRevision(t, db, project.ID) != afterEdit {
 		t.Fatalf("chapter storyboard output registration changed revision from %d to %d", afterEdit, workflowProjectRevision(t, db, project.ID))
 	}
-	_, err = service.ReplaceProjectUnitShots("user-1", project.ID, unit.ID, ReplaceProjectUnitShotsRequest{
+	_, err = service.ProjectService().ReplaceProjectUnitShots("user-1", project.ID, unit.ID, ReplaceProjectUnitShotsRequest{
 		ExpectedShotIDs:  []string{created[0].ID},
 		ExpectedRevision: approvedRevision,
 		Shots:            []ReplaceProjectUnitShotInput{{CreateProjectShotRequest: CreateProjectShotRequest{Title: "SC.99", Description: "恢复写入会覆盖改稿", DurationMs: 3000}}},

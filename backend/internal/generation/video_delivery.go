@@ -217,6 +217,9 @@ func VideoResultDownloader(config Config, taskID string, primary VideoResultSour
 		if ctx.Err() != nil {
 			return nil, "", ctx.Err()
 		}
+		if videoResultPending(err) {
+			return nil, "", err
+		}
 		retry, _ := RetryableVideoPollError(ctx, err)
 		if !retry && !videoMediaLinkRejected(ctx, config, primary.URL, err) {
 			return nil, "", err

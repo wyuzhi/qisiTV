@@ -57,10 +57,6 @@ func (s *Service) InstallPluginForAdmin(actor *model.User, data []byte, fileName
 	return plugin, nil
 }
 
-func (s *Service) PluginPackage(id string) ([]byte, string, error) {
-	return s.pluginDomain().Package(id)
-}
-
 func (s *Service) SetPluginEnabled(id string, enabled bool) (PluginView, error) {
 	return s.pluginDomain().SetEnabled(id, enabled)
 }

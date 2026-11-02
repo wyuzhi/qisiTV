@@ -73,6 +73,123 @@ export function canPlaceAt(args: CanPlaceAtArgs): CanPlaceAtResult {
     return { ok: true };
 }
 
+export type PlanClipMoveArgs = {
+    /** 被拖动的片段（用它在快照里的原位置判断拖动方向）。 */
+    clipId: string;
+    trackId: string;
+    /** 拖动后的目标起点。 */
+    startMs: number;
+    durationMs: number;
+    /** 拖动起点处的片段快照：整次拖动都基于它计算，避免逐帧结果互相叠加。 */
+    clips: TimelineClip[];
+};
+
+/**
+ * 拖动片段时的同轨落位方案：被压到的片段沿拖动方向依次推开，返回需要改动的片段起点。
+ *
+ * 为什么不能像 canPlaceAt 那样直接拒绝：轨道上首尾紧贴的两个片段中，前一个片段的
+ * 右侧完全没有空隙，任何向右的位移都会判定为重叠并静默丢弃，用户看到的就是
+ * 「第一个素材拖不动」。这里改为让位（吸附式时间线行为），同时保持同轨不重叠这一
+ * 前提，导出与预览的顺序假设不被破坏。
+ *
+ * 调用约定：结果只针对「以 clips 为基准」的这一次拖动，调用方必须按快照重建整条轨道
+ * （未出现在返回值里的同轨片段回到快照位置），不能只更新返回值涉及的片段——否则上一帧
+ * 被推开的片段会残留在当时的位置，连续拖动就会造成重叠。
+ *
+ * 向左让位会越过 0 时返回 null：此时空间不足，由调用方丢弃本次位移。
+ */
+export function planClipMove(args: PlanClipMoveArgs): Map<string, number> | null {
+    const { clipId, trackId, startMs, durationMs, clips } = args;
+    const moved = new Map<string, number>();
+    moved.set(clipId, startMs);
+    const dragged = clips.find((clip) => clip.id === clipId);
+    if (!dragged || startMs === dragged.startMs) return moved;
+    const others = clips.filter((clip) => clip.trackId === trackId && clip.id !== clipId).sort((a, b) => a.startMs - b.startMs);
+
+    if (startMs > dragged.startMs) {
+        // 向右拖动：中心点已被被拖片段越过的后方片段左移让出前位（实现跨片段交换顺序），
+        // 尚未越过中心点的后方片段顺次推到被拖片段右缘之后。
+        const draggedCenter = startMs + durationMs / 2;
+        const leftGroup: TimelineClip[] = [];
+        const rightGroup: TimelineClip[] = [];
+        for (const other of others) {
+            const otherCenter = other.startMs + other.durationMs / 2;
+            if (other.startMs < dragged.startMs || draggedCenter >= otherCenter) {
+                leftGroup.push(other);
+            } else {
+                rightGroup.push(other);
+            }
+        }
+
+        let effectiveStartMs = startMs;
+        const tempLeft = new Map<string, number>();
+        let leftCursor = effectiveStartMs;
+        let overflowLeft = false;
+        for (let index = leftGroup.length - 1; index >= 0; index--) {
+            const other = leftGroup[index];
+            const endMs = other.startMs + other.durationMs;
+            if (endMs <= leftCursor) {
+                leftCursor = other.startMs;
+                continue;
+            }
+            const nextStartMs = leftCursor - other.durationMs;
+            if (nextStartMs < 0) {
+                overflowLeft = true;
+                break;
+            }
+            tempLeft.set(other.id, nextStartMs);
+            leftCursor = nextStartMs;
+        }
+
+        if (overflowLeft) {
+            let forwardCursor = 0;
+            for (const other of leftGroup) {
+                const target = other.startMs < dragged.startMs && other.startMs >= forwardCursor ? other.startMs : forwardCursor;
+                if (target !== other.startMs) {
+                    moved.set(other.id, target);
+                }
+                forwardCursor = target + other.durationMs;
+            }
+            effectiveStartMs = Math.max(startMs, forwardCursor);
+            moved.set(clipId, effectiveStartMs);
+        } else {
+            for (const [id, pos] of tempLeft) {
+                moved.set(id, pos);
+            }
+        }
+
+        let cursor = effectiveStartMs + durationMs;
+        for (const other of rightGroup) {
+            const endMs = other.startMs + other.durationMs;
+            if (endMs <= effectiveStartMs) continue;
+            if (other.startMs >= cursor) {
+                cursor = endMs;
+                continue;
+            }
+            moved.set(other.id, cursor);
+            cursor += other.durationMs;
+        }
+        return moved;
+    }
+
+    // 向左：从右往左让位，越界即整体不可行。
+    let cursor = startMs;
+    for (let index = others.length - 1; index >= 0; index--) {
+        const other = others[index];
+        if (other.startMs >= startMs + durationMs) continue;
+        const endMs = other.startMs + other.durationMs;
+        if (endMs <= cursor) {
+            cursor = Math.min(cursor, other.startMs);
+            continue;
+        }
+        const nextStartMs = cursor - other.durationMs;
+        if (nextStartMs < 0) return null;
+        moved.set(other.id, nextStartMs);
+        cursor = nextStartMs;
+    }
+    return moved;
+}
+
 /** 返回与候选区间碰撞的所有片段（按现有顺序，不排序）。 */
 export function findCollidingItems(args: CanPlaceAtArgs): TimelineClip[] {
     const { trackId, startMs, durationMs, excludeClipId, clips } = args;

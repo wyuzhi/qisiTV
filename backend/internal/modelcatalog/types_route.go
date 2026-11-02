@@ -194,6 +194,8 @@ type ChannelModelCatalogItem struct {
 	SupportsImages           *bool                                `json:"supportsImages,omitempty"`
 	MinImages                *int                                 `json:"minImages,omitempty"`
 	MaxImages                *int                                 `json:"maxImages,omitempty"`
+	ImageCapabilities        json.RawMessage                      `json:"imageCapabilities,omitempty"`
+	ImageCapabilitiesVersion *string                              `json:"imageCapabilitiesVersion,omitempty"`
 	VideoCapabilities        json.RawMessage                      `json:"videoCapabilities,omitempty"`
 	VideoCapabilitiesVersion *string                              `json:"videoCapabilitiesVersion,omitempty"`
 	VideoPricing             json.RawMessage                      `json:"videoPricing,omitempty"`

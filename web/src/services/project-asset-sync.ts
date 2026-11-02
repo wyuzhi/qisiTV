@@ -16,7 +16,8 @@ import { getImageBlob, resolveImageUrl, setImageBlob } from "@/services/image-st
 import { generationArtifactStorageKey, loadOrStoreGenerationArtifact } from "@/services/generation-artifact-sink";
 import { createProviderNeutralGenerationTaskEffectStore } from "@/services/provider-neutral-generation-effects";
 import { getActiveUserScope } from "@/lib/user-scope";
-import { assertUserScope, captureUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
+import { isEngineWebsite } from "@/services/browser-workspace";
+import { captureEngineSessionGuard } from "@/services/engine-session";
 import { runGenerationConsumer } from "@/services/generation-consumer-lifecycle";
 import { flushAssetStorePersistence, useAssetStore, type Asset, type AssetCategory, type NewAsset } from "@/stores/use-asset-store";
 import type { CanvasNodeData } from "@/types/canvas";
@@ -38,7 +39,6 @@ export type EnsureCanvasNodeAssetOptions = {
     category?: AssetCategory;
     folderId?: string;
     signal?: AbortSignal;
-    expectedScope?: CapturedUserScope;
 };
 
 export type CanvasNodeAssetResult = {
@@ -50,15 +50,13 @@ export type CanvasNodeAssetResult = {
 
 type MaterializedLocalAssetDependencies = {
     localWorkspace: () => boolean;
-    putAsset: (id: string, asset: Asset, expectedScope?: CapturedUserScope) => Promise<void>;
+    putAsset: (id: string, asset: Asset) => Promise<void>;
 };
 
 const defaultMaterializedLocalAssetDependencies: MaterializedLocalAssetDependencies = {
     localWorkspace: isLocalWorkspaceMode,
-    putAsset: async (id, asset, expectedScope) => {
-        const expected = expectedScope ?? captureUserScope();
-        assertUserScope(expected);
-        await http.put(`/assets/${encodeURIComponent(id)}`, { asset }, { expectedScope: expected });
+    putAsset: async (id, asset) => {
+        await http.put(`/assets/${encodeURIComponent(id)}`, { asset });
     },
 };
 
@@ -66,14 +64,11 @@ const defaultMaterializedLocalAssetDependencies: MaterializedLocalAssetDependenc
 export async function registerMaterializedLocalAsset(
     asset: Asset,
     dependencies: MaterializedLocalAssetDependencies = defaultMaterializedLocalAssetDependencies,
-    expectedScope?: CapturedUserScope,
 ) {
-    const expected = expectedScope ?? captureUserScope();
-    assertUserScope(expected);
     if (!dependencies.localWorkspace()) return;
     const storageKey = "storageKey" in asset.data ? asset.data.storageKey : undefined;
     if (!storageKey || !resourceIdFromStorageKey(storageKey)) return;
-    await dependencies.putAsset(asset.id, asset, expected);
+    await dependencies.putAsset(asset.id, asset);
 }
 
 export async function registerMaterializedTaskAssets(
@@ -97,7 +92,6 @@ type CanvasAssetSyncRetryOptions = {
     signal?: AbortSignal;
     maxRetries?: number;
     wait?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
-    expectedScope?: CapturedUserScope;
 };
 
 function waitForCanvasAssetSyncRetry(delayMs: number, signal?: AbortSignal) {
@@ -119,38 +113,32 @@ function waitForCanvasAssetSyncRetry(delayMs: number, signal?: AbortSignal) {
 }
 
 export async function retryCanvasAssetSyncAfterRateLimit<T>(operation: () => Promise<T>, options: CanvasAssetSyncRetryOptions = {}): Promise<T> {
-    const expected = options.expectedScope ?? captureUserScope();
     const maxRetries = Math.max(0, options.maxRetries ?? 2);
     const wait = options.wait ?? waitForCanvasAssetSyncRetry;
     for (let attempt = 0; ; attempt += 1) {
         throwIfAborted(options.signal);
-        assertUserScope(expected);
         try {
             return await operation();
         } catch (error) {
             if (!(error instanceof ApiError) || error.status !== 429 || attempt >= maxRetries) throw error;
             const delayMs = Math.min(MAX_RATE_LIMIT_RETRY_MS, Math.max(0, error.retryAfterMs ?? DEFAULT_RATE_LIMIT_RETRY_MS));
             await wait(delayMs, options.signal);
-            assertUserScope(expected);
         }
     }
 }
 
 export function ensureCanvasNodeAsset(options: EnsureCanvasNodeAssetOptions) {
-    const expected = options.expectedScope ?? captureUserScope();
     const identity = options.taskId || options.node.metadata?.taskId || options.node.metadata?.storageKey || options.node.id;
-    const key = [expected.userScope, String(expected.epoch), options.domainProjectId || "personal", options.canvasId, options.node.id, identity].join(":");
+    const key = [getActiveUserScope(), options.domainProjectId || "personal", options.canvasId, options.node.id, identity].join(":");
     const pending = pendingAssetSyncs.get(key);
     if (pending) return pending;
-    const request = runGenerationConsumer(options.signal, (signal) => persistCanvasNodeAsset({ ...options, signal, expectedScope: expected })).finally(() => pendingAssetSyncs.delete(key));
+    const request = runGenerationConsumer(options.signal, (signal) => persistCanvasNodeAsset({ ...options, signal })).finally(() => pendingAssetSyncs.delete(key));
     pendingAssetSyncs.set(key, request);
     return request;
 }
 
 async function persistCanvasNodeAsset(options: EnsureCanvasNodeAssetOptions): Promise<CanvasNodeAssetResult> {
-    const expected = options.expectedScope ?? captureUserScope();
     throwIfAborted(options.signal);
-    assertUserScope(expected);
     const store = useAssetStore.getState();
     let asset = findCanvasNodeAsset(store.assets, options.node, options.canvasId, options.taskId);
     const declaredCategory = options.category || declaredCanvasNodeAssetCategory(options.node);
@@ -182,18 +170,15 @@ async function persistCanvasNodeAsset(options: EnsureCanvasNodeAssetOptions): Pr
     const storageKey = "storageKey" in asset.data ? asset.data.storageKey : undefined;
     const confirmed = workspaceAssetHasCanonicalMediaPersist(asset);
     if (!confirmed) {
-        await flushAssetStorePersistence(expected);
-        assertUserScope(expected);
+        await flushAssetStorePersistence();
         return { assetId: asset.id, created, linkedToProject: false, confirmed: false };
     }
     // Browser-local IndexedDB is the durable store, but a proxied Go canvas
     // repository still requires an owned Asset for resource: keys. Desktop and
     // hosted commits go through persistWorkspaceAssetLink's typed APIs instead.
     if (usesBrowserLocalResourceStore() && isLocalWorkspaceMode() && storageKey && resourceIdFromStorageKey(storageKey)) {
-        assertUserScope(expected);
-        await http.put(`/assets/${encodeURIComponent(asset.id)}`, { asset }, { signal: options.signal, expectedScope: expected });
+        await http.put(`/assets/${encodeURIComponent(asset.id)}`, { asset }, { signal: options.signal });
         throwIfAborted(options.signal);
-        assertUserScope(expected);
     }
     await persistWorkspaceAssetLink({
         asset,
@@ -202,9 +187,7 @@ async function persistCanvasNodeAsset(options: EnsureCanvasNodeAssetOptions): Pr
         folderId: options.folderId,
         source: "canvas",
         signal: options.signal,
-        expectedScope: expected,
     });
-    assertUserScope(expected);
     return { assetId: asset.id, created, linkedToProject: Boolean(options.domainProjectId), confirmed: true };
 }
 
@@ -263,7 +246,6 @@ export function hasBackendDeliveredGenerationOutputs(task: Pick<GenerationTask, 
 }
 
 export type HydrateBackendGeneratedAssetDependencies = {
-    expectedScope?: CapturedUserScope;
     getAsset?: (id: string, signal?: AbortSignal) => Promise<{ asset: Asset }>;
     readAssets?: () => Asset[];
     writeAsset?: (asset: Asset) => void;
@@ -285,16 +267,13 @@ export async function hydrateBackendGeneratedAsset(
     throwIfAborted(signal);
     const id = assetId.trim();
     if (!id) throw new Error("任务产物尚未由后端交付");
-    const expectedScope = dependencies.expectedScope;
-    if (expectedScope) assertUserScope(expectedScope);
-    const getAsset = dependencies.getAsset ?? ((id, signal) => getWorkspaceAsset(id, signal, { expectedScope }).then((payload) => ({ asset: payload.asset })));
+    const getAsset = dependencies.getAsset ?? ((id, signal) => getWorkspaceAsset(id, signal).then((payload) => ({ asset: payload.asset })));
     const readAssets = dependencies.readAssets ?? defaultHydrateBackendGeneratedAssetDependencies.readAssets!;
     const writeAsset = dependencies.writeAsset ?? defaultHydrateBackendGeneratedAssetDependencies.writeAsset!;
     const existing = readAssets().find((asset) => asset.id === id);
     if (existing) return existing;
     const payload = await getAsset(id, signal);
     throwIfAborted(signal);
-    if (expectedScope) assertUserScope(expectedScope);
     const asset = parseAssetRecord(payload.asset);
     writeAsset(asset);
     return asset;
@@ -314,7 +293,7 @@ export async function hydrateBackendGeneratedOutputs(
 async function storedGenerationImage(result: NonNullable<BackendGenerationResult["images"]>[number], effectKey: string, scope: string, signal?: AbortSignal) {
     throwIfAborted(signal);
     if (result.storageKey) {
-        const url = await resolveImageUrl(result.storageKey, result.dataUrl);
+        const url = await resolveImageUrl(result.storageKey, result.dataUrl, { cacheMiss: true });
         if (!url) throw new Error("图片结果资源不可用");
         const meta = result.width && result.height ? undefined : await readImageMeta(url, signal);
         throwIfAborted(signal);
@@ -395,16 +374,20 @@ async function fetchGenerationBlob(url: string, signal?: AbortSignal) {
 }
 
 async function persistGenerationMedia(url: string, kind: "image" | "video" | "audio", idempotencyKey: string, scope: string, signal?: AbortSignal) {
-    const expected = captureUserScope();
-    if (expected.userScope !== scope) throw new Error("工作区已切换，请重新读取生成结果");
+    const assertSession = isEngineWebsite() ? captureEngineSessionGuard() : () => {};
+    const assertCurrent = () => {
+        throwIfAborted(signal);
+        assertSession();
+        if (getActiveUserScope() !== scope) throw new DOMException("工作区已切换，请重新读取生成结果", "AbortError");
+    };
+    assertCurrent();
     const blob = await fetchGenerationBlob(url, signal);
-    throwIfAborted(signal);
-    assertUserScope(expected);
-    const resource = await uploadResourceFile(blob, kind, { idempotencyKey, expectedScope: expected });
-    throwIfAborted(signal);
-    assertUserScope(expected);
+    assertCurrent();
+    const resource = await uploadResourceFile(blob, kind, { idempotencyKey });
+    assertCurrent();
     const storageKey = resourceStorageKey(resource.id);
-    const savedUrl = await (kind === "image" ? resolveImageUrl(storageKey) : resolveMediaUrl(storageKey));
+    const savedUrl = await (kind === "image" ? resolveImageUrl(storageKey, "", { cacheMiss: true }) : resolveMediaUrl(storageKey));
+    assertCurrent();
     if (!savedUrl) throw new Error("生成结果已写入本机，但暂时无法读取");
     return { storageKey, url: savedUrl, width: resource.width, height: resource.height, durationMs: resource.durationMs, bytes: resource.size || blob.size, mimeType: resource.mimeType || blob.type };
 }

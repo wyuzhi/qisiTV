@@ -25,6 +25,15 @@ func TestArkPrivateAssetUsesRegionalArkControlPlane(t *testing.T) {
 	if err != nil || value != "https://ark.test-region.volcengineapi.com" {
 		t.Fatalf("arkPrivateAssetControlPlaneURL() = %q, %v", value, err)
 	}
+	for _, r := range []string{"ap-southeast-1", "ap-southeast"} {
+		bpURL, err := arkPrivateAssetControlPlaneURL(context.Background(), r)
+		if err != nil || bpURL != "https://ark.ap-southeast-1.byteplusapi.com" {
+			t.Fatalf("arkPrivateAssetControlPlaneURL(%q) = %q, %v", r, bpURL, err)
+		}
+	}
+	if arkPrivateAssetTypeForMime("image/png") != "Image" || arkPrivateAssetTypeForMime("video/mp4") != "Video" || arkPrivateAssetTypeForMime("audio/mpeg") != "Audio" {
+		t.Fatalf("unexpected mime mapping")
+	}
 }
 
 func TestCallArkPrivateAssetAPISignsAndUsesAssetContract(t *testing.T) {

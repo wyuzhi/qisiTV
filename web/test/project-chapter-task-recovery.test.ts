@@ -72,11 +72,9 @@ describe("章节生成任务刷新恢复", () => {
         expect(helper).toContain("approvedRevision: input.approvedRevision");
         expect(helper).toContain("approvedShotIds: input.approvedShotIds.slice()");
         expect(helper).toContain("taskId: completed.id");
-        expect(helper).toContain("expectedScope: options?.expectedScope");
         expect(source).toContain("listChapterApplyReceipts");
         expect(source).toContain("sourceTaskId");
-        expect(source).toContain("captureUserScope");
-        expect(source).toContain("queryGenerationTask(task.id, { expectedScope })");
+        expect(source).toContain("queryGenerationTask(task.id)");
         expect(source).toContain("核对后写入");
         expect(createStoryboard.indexOf("const approvedRevision")).toBeLessThan(createStoryboard.indexOf("confirmStoryboardReplacement"));
         expect(applyRecovery.indexOf("const reviewedRevision")).toBeLessThan(applyRecovery.indexOf("confirmRecoveredStoryboardWrite"));

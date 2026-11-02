@@ -5,7 +5,11 @@ import "./node-registry/definitions/index.ts";
 // @ts-expect-error -- Node 原生 TypeScript 测试运行器需要保留扩展名。
 import { canvasNodeHasCommittedContent, writeCanvasNodePrompt } from "./canvas-node-prompt.ts";
 // @ts-expect-error -- Node 原生 TypeScript 测试运行器需要保留扩展名。
-import { CanvasNodeType, type CanvasNodeData } from "../../types/canvas.ts";
+import { createStoryboardRow } from "./canvas-project-domain.ts";
+// @ts-expect-error -- Node 原生 TypeScript 测试运行器需要保留扩展名。
+import { syncBoundStoryboardNodesForRows } from "./canvas-storyboard-materializer.ts";
+// @ts-expect-error -- Node 原生 TypeScript 测试运行器需要保留扩展名。
+import { CanvasNodeType, type CanvasNodeData, type StoryboardRow } from "../../types/canvas.ts";
 
 function node(type: CanvasNodeData["type"], metadata: CanvasNodeData["metadata"] = {}): CanvasNodeData {
     return {
@@ -89,4 +93,60 @@ test("调用方可先清理失败任务元数据，再由统一写入器保存�
     assert.equal(updated.metadata?.taskId, undefined);
     assert.equal(updated.metadata?.promptTemplateOperation, undefined);
     assert.equal(updated.metadata?.promptTemplateVariables, undefined);
+});
+
+test("分镜行更新时自动同步未手动偏离的绑定节点草稿，并跳过已手动编辑的节点草稿", () => {
+    const prevRow: StoryboardRow = {
+        ...createStoryboardRow(1),
+        id: "shot-1",
+        plotDescription: "原始画面",
+        imageGenerationPrompt: "旧图片提示词",
+        videoMotionPrompt: "旧视频提示词",
+        imageNodeId: "img-1",
+        videoNodeId: "vid-1",
+    };
+    const nextRow: StoryboardRow = {
+        ...prevRow,
+        imageGenerationPrompt: "新图片提示词",
+        videoMotionPrompt: "新视频提示词",
+    };
+    const scriptNode = node(CanvasNodeType.Script, {
+        storyboard: {
+            rows: [prevRow],
+            visibleColumns: ["shotNumber", "durationSeconds", "videoMotionPrompt", "dialogue", "assets"],
+            referenceNodeIds: [],
+        },
+    });
+    const imageNode = {
+        ...node(CanvasNodeType.Image, {
+            content: "https://example.com/img-1.png",
+            prompt: "旧图片提示词",
+            composerContent: "旧图片提示词",
+            status: "success",
+        }),
+        id: "img-1",
+    };
+    const videoNodeManuallyEdited = {
+        ...node(CanvasNodeType.Video, {
+            content: "https://example.com/vid-1.mp4",
+            prompt: "旧视频提示词",
+            composerContent: "用户在节点上单独手改的运镜草稿",
+            status: "success",
+        }),
+        id: "vid-1",
+    };
+
+    const synced = syncBoundStoryboardNodesForRows(
+        scriptNode,
+        [prevRow],
+        [nextRow],
+        [scriptNode, imageNode, videoNodeManuallyEdited],
+        [],
+    );
+    const updatedImage = synced.find((item) => item.id === "img-1");
+    const updatedVideo = synced.find((item) => item.id === "vid-1");
+
+    assert.equal(updatedImage?.metadata?.prompt, "旧图片提示词");
+    assert.equal(updatedImage?.metadata?.composerContent, "新图片提示词");
+    assert.equal(updatedVideo?.metadata?.composerContent, "用户在节点上单独手改的运镜草稿");
 });

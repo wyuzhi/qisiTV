@@ -252,9 +252,24 @@ func (e *Engine) prepareAndStartHelper(ctx context.Context, staged *stagedUpdate
 	}
 	payloadPath := filepath.Join(workDir, "payload")
 	e.setPhase("extracting")
-	if err := extractSecureZipWithProgress(ctx, staged.archive, payloadPath, defaultExtractLimits(), func(completed, total int) {
+	progressFn := func(completed, total int) {
 		e.set(func(state *UpdateState) { state.CompletedFiles, state.TotalFiles = completed, total })
-	}); err != nil {
+	}
+	if staged.isDelta {
+		if err := applyDeltaZipWithProgress(ctx, staged.archive, target.Path, staged.platform, payloadPath, defaultExtractLimits(), progressFn); err != nil {
+			if ctx.Err() != nil {
+				return ErrPreparationTimeout
+			}
+			_ = os.RemoveAll(payloadPath)
+			if fallbackErr := e.fallbackExtractFullArchive(ctx, staged, payloadPath, progressFn); fallbackErr != nil {
+				if ctx.Err() != nil {
+					return ErrPreparationTimeout
+				}
+				e.logf("delta apply failed (%v) and full archive fallback failed: %v", err, fallbackErr)
+				return fallbackErr
+			}
+		}
+	} else if err := extractSecureZipWithProgress(ctx, staged.archive, payloadPath, defaultExtractLimits(), progressFn); err != nil {
 		if ctx.Err() != nil {
 			return ErrPreparationTimeout
 		}
@@ -405,4 +420,19 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return out.Close()
+}
+
+func (e *Engine) fallbackExtractFullArchive(ctx context.Context, staged *stagedUpdate, payloadPath string, progress func(int, int)) error {
+	e.mu.Lock()
+	verified := e.verified
+	e.mu.Unlock()
+	if verified == nil || verified.payload.Version != staged.version || len(verified.artifact.CandidateURLs()) == 0 {
+		return fmt.Errorf("no full archive fallback available")
+	}
+	e.logf("delta apply failed during install; downloading full archive for %s", staged.version)
+	fullZip := filepath.Join(filepath.Dir(staged.archive), "update.zip")
+	if err := e.downloadArchive(ctx, verified.artifact, fullZip); err != nil {
+		return err
+	}
+	return extractSecureZipWithProgress(ctx, fullZip, payloadPath, defaultExtractLimits(), progress)
 }

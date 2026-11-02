@@ -49,12 +49,12 @@ func TestWanLocalReferencesRemainOwnedForHTTPUpload(t *testing.T) {
 		t.Fatal("foreign media accepted")
 	}
 	input.ReferenceVideos = []providerMedia{{URL: "https://example.com/ref.mp4"}}
-	if err := svc.validateResolvedVideoCapability(&input); err == nil || !strings.Contains(err.Error(), "暂不支持参考视频") {
-		t.Fatalf("unsupported media silently accepted: %v", err)
+	if err := svc.validateResolvedVideoCapability(&input); err != nil {
+		t.Fatalf("custom channel should delegate reference validation to upstream: %v", err)
 	}
 	input.Config.Model = "wan4.0-video"
-	if !providerMediaHydrationPolicyFor(context.Background(), input).RequireURL {
-		t.Fatal("unknown model inherited built-in upload support")
+	if !providerMediaHydrationPolicyFor(context.Background(), input).KeepLocal {
+		t.Fatal("new built-in model did not inherit the same upload protocol")
 	}
 	input.Config.Model = "wan3.0-video"
 	input.Config.BaseURL = "https://another.example/enterprise.beefapi.com"
@@ -104,7 +104,7 @@ func TestSavedBeefAPISeedanceAudioControl(t *testing.T) {
 				}
 				if isBeefAPIVideoConfig(context.Background(), input.Config) {
 					body, err := beefAPIVideoRequestBody(input)
-					if err != nil || body["generate_audio"] != false {
+					if err != nil || body["metadata"].(map[string]any)["generate_audio"] != false {
 						t.Fatalf("explicit false lost: %#v, %v", body, err)
 					}
 				}

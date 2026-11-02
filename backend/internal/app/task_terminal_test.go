@@ -9,6 +9,7 @@ import (
 
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/repository"
+	"qisitv/backend/internal/taskruntime"
 )
 
 type taskTerminalRepositoryStub struct {
@@ -49,14 +50,14 @@ func (r *taskTerminalRepositoryStub) UpdateTaskTerminalState(_ string, _ string,
 
 type taskTerminalReplayStub struct{ statuses []model.TaskStatus }
 
-func (r *taskTerminalReplayStub) finalizeTaskTextReplay(_ string, status model.TaskStatus) error {
+func (r *taskTerminalReplayStub) FinalizeTaskTextReplay(_ string, status model.TaskStatus) error {
 	r.statuses = append(r.statuses, status)
 	return nil
 }
 
 type taskTerminalLoggerStub struct{ messages []string }
 
-func (l *taskTerminalLoggerStub) log(_ string, _ string, _ string, message string, _ string) error {
+func (l *taskTerminalLoggerStub) Log(_ string, _ string, _ string, message string, _ string) error {
 	l.messages = append(l.messages, message)
 	return nil
 }
@@ -81,15 +82,19 @@ func (o *taskTerminalOutputStub) RegisterTaskOutputFromTask(model.Task) error {
 	return o.err
 }
 
-func newTaskTerminalCoordinatorForTest(repo taskTerminalRepository, replay *taskTerminalReplayStub, logger *taskTerminalLoggerStub, outputs *taskTerminalOutputStub) *taskTerminalCoordinator {
-	return &taskTerminalCoordinator{repo: repo, replay: replay, logger: logger, outputs: outputs, userFacingMessage: func(err error) string { return "public: " + err.Error() }}
+func newTaskTerminalCoordinatorForTest(repo taskTerminalRepository, replay *taskTerminalReplayStub, logger *taskTerminalLoggerStub, outputs *taskTerminalOutputStub, failedLog ...func(model.Task, error)) *taskTerminalCoordinator {
+	deps := taskruntime.TerminalDependencies{Repository: repo, Replay: replay, Logger: logger, Outputs: outputs, CaptureFailure: captureTaskFailureDiagnostics, UserFacingMessage: func(err error) string { return "public: " + err.Error() }}
+	if len(failedLog) > 0 {
+		deps.LogFailedAttempt = failedLog[0]
+	}
+	return taskruntime.NewTerminal(deps)
 }
 
 func TestTaskTerminalConflictDoesNotFinalize(t *testing.T) {
 	repo := &taskTerminalRepositoryStub{terminalConflict: true}
 	replay := &taskTerminalReplayStub{}
 	c := newTaskTerminalCoordinatorForTest(repo, replay, &taskTerminalLoggerStub{}, &taskTerminalOutputStub{})
-	err := c.handleExecutionFailure(&model.Task{ID: "task", LeaseOwner: "stale", Status: model.TaskStatusRunning}, errors.New("upstream failed"), false, false)
+	err := c.HandleExecutionFailure(&model.Task{ID: "task", LeaseOwner: "stale", Status: model.TaskStatusRunning}, errors.New("upstream failed"), false, false)
 	if !errors.Is(err, repository.ErrTaskStateConflict) {
 		t.Fatalf("missing conflict: %v", err)
 	}
@@ -107,7 +112,7 @@ func TestTaskTerminalPreservesImageAndVideoSubmissionUncertainty(t *testing.T) {
 			task := &model.Task{ID: "task", Status: model.TaskStatusRunning}
 			repo := &taskTerminalRepositoryStub{task: task}
 			coordinator := newTaskTerminalCoordinatorForTest(repo, &taskTerminalReplayStub{}, &taskTerminalLoggerStub{}, &taskTerminalOutputStub{})
-			if err := coordinator.handleExecutionFailure(task, cause, false, false); !errors.Is(err, cause) {
+			if err := coordinator.HandleExecutionFailure(task, cause, false, false); !errors.Is(err, cause) {
 				t.Fatalf("original failure lost: %v", err)
 			}
 			if task.Stage != "submission_unknown" || !persistedFailureBlocksRetry(persistableTaskFailureMessage(cause), task.Stage) {
@@ -125,7 +130,7 @@ func TestTaskTerminalCoordinatorHandlesCancellation(t *testing.T) {
 	repo := &taskTerminalRepositoryStub{task: task}
 	replay, logger := &taskTerminalReplayStub{}, &taskTerminalLoggerStub{}
 	coordinator := newTaskTerminalCoordinatorForTest(repo, replay, logger, &taskTerminalOutputStub{})
-	if err := coordinator.handleExecutionFailure(task, context.Canceled, false, false); err != nil {
+	if err := coordinator.HandleExecutionFailure(task, context.Canceled, false, false); err != nil {
 		t.Fatalf("handleExecutionFailure() error = %v", err)
 	}
 	if task.Status != model.TaskStatusCancelled || task.Error != "任务已取消" {
@@ -142,7 +147,7 @@ func TestTaskTerminalCoordinatorRecordsProviderFailure(t *testing.T) {
 	replay := &taskTerminalReplayStub{}
 	coordinator := newTaskTerminalCoordinatorForTest(repo, replay, &taskTerminalLoggerStub{}, &taskTerminalOutputStub{})
 	failure := errors.New("provider unavailable")
-	if err := coordinator.handleExecutionFailure(task, failure, false, true); !errors.Is(err, failure) {
+	if err := coordinator.HandleExecutionFailure(task, failure, false, true); !errors.Is(err, failure) {
 		t.Fatalf("handleExecutionFailure() error = %v, want %v", err, failure)
 	}
 	if task.Status != model.TaskStatusFailed || task.Error != "public: provider unavailable" {
@@ -155,12 +160,11 @@ func TestTaskTerminalCoordinatorRecordsProviderFailure(t *testing.T) {
 
 func TestTaskTerminalCoordinatorLogsUnrecordedProviderFailure(t *testing.T) {
 	task := &model.Task{ID: "task-1", UserID: "user-1"}
-	coordinator := newTaskTerminalCoordinatorForTest(&taskTerminalRepositoryStub{task: task}, &taskTerminalReplayStub{}, &taskTerminalLoggerStub{}, &taskTerminalOutputStub{})
 	var loggedTask model.Task
 	var loggedErr error
-	coordinator.logFailedAttempt = func(value model.Task, err error) { loggedTask, loggedErr = value, err }
+	coordinator := newTaskTerminalCoordinatorForTest(&taskTerminalRepositoryStub{task: task}, &taskTerminalReplayStub{}, &taskTerminalLoggerStub{}, &taskTerminalOutputStub{}, func(value model.Task, err error) { loggedTask, loggedErr = value, err })
 	failure := errors.New("provider preflight failed")
-	if err := coordinator.handleExecutionFailure(task, failure, false, true); !errors.Is(err, failure) {
+	if err := coordinator.HandleExecutionFailure(task, failure, false, true); !errors.Is(err, failure) {
 		t.Fatalf("handleExecutionFailure() error = %v, want %v", err, failure)
 	}
 	if loggedTask.ID != task.ID || !errors.Is(loggedErr, failure) {
@@ -173,7 +177,7 @@ func TestTaskTerminalCoordinatorReturnsTerminalStateWriteError(t *testing.T) {
 	terminalError := errors.New("database unavailable")
 	coordinator := newTaskTerminalCoordinatorForTest(&taskTerminalRepositoryStub{task: task, terminalError: terminalError}, &taskTerminalReplayStub{}, &taskTerminalLoggerStub{}, &taskTerminalOutputStub{})
 	providerError := errors.New("provider unavailable")
-	if err := coordinator.handleExecutionFailure(task, providerError, false, true); !errors.Is(err, providerError) || !errors.Is(err, terminalError) {
+	if err := coordinator.HandleExecutionFailure(task, providerError, false, true); !errors.Is(err, providerError) || !errors.Is(err, terminalError) {
 		t.Fatalf("handleExecutionFailure() error = %v, want provider and terminal errors", err)
 	}
 }
@@ -183,7 +187,7 @@ func TestTaskTerminalCoordinatorReturnsOutputRegistrationErrorAfterSuccess(t *te
 	outputError := errors.New("project output unavailable")
 	outputs := &taskTerminalOutputStub{err: outputError}
 	coordinator := newTaskTerminalCoordinatorForTest(&taskTerminalRepositoryStub{task: task}, &taskTerminalReplayStub{}, &taskTerminalLoggerStub{}, outputs)
-	if err := coordinator.handleSuccess(task); !errors.Is(err, outputError) {
+	if err := coordinator.HandleSuccess(task); !errors.Is(err, outputError) {
 		t.Fatalf("handleSuccess() error = %v, want %v", err, outputError)
 	}
 	if outputs.deliverCalls != 2 || outputs.calls != 1 {
@@ -199,7 +203,7 @@ func TestTaskTerminalCoordinatorDeliversBeforeWorkflowRegistration(t *testing.T)
 	deliverError := errors.New("delivery unavailable")
 	outputs := &taskTerminalOutputStub{deliverErr: deliverError}
 	coordinator := newTaskTerminalCoordinatorForTest(&taskTerminalRepositoryStub{task: task}, &taskTerminalReplayStub{}, &taskTerminalLoggerStub{}, outputs)
-	if err := coordinator.handleSuccess(task); !errors.Is(err, deliverError) {
+	if err := coordinator.HandleSuccess(task); !errors.Is(err, deliverError) {
 		t.Fatalf("handleSuccess() error = %v, want %v", err, deliverError)
 	}
 	if outputs.deliverCalls != 2 || outputs.calls != 1 {
@@ -214,7 +218,7 @@ func TestTaskTerminalCoordinatorReturnsTaskReadErrorAfterSuccess(t *testing.T) {
 	task := &model.Task{ID: "task-1", UserID: "user-1"}
 	taskError := errors.New("task database unavailable")
 	coordinator := newTaskTerminalCoordinatorForTest(&taskTerminalRepositoryStub{taskError: taskError}, &taskTerminalReplayStub{}, &taskTerminalLoggerStub{}, &taskTerminalOutputStub{})
-	if err := coordinator.handleSuccess(task); !errors.Is(err, taskError) {
+	if err := coordinator.HandleSuccess(task); !errors.Is(err, taskError) {
 		t.Fatalf("handleSuccess() error = %v, want %v", err, taskError)
 	}
 }

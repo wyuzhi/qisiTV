@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { autoMentionCanvasResourceReferences, findCanvasResourceAutoLinkMatch, type CanvasResourceReference, applyCanvasConnectionPromptSync, buildAssetMentionReferences, buildCanvasNodeMentionReferenceMap, buildNodeMentionReferences, buildOrderedCanvasResourceReferences, canvasResourceMentionToken, collectUpstreamVideoNodes, imageGenerationReferenceConnections, reorderCanvasResourceConnections, replaceCanvasMentionToken, replaceCanvasReferenceMentions } from "../src/lib/canvas/canvas-resource-references";
+import { autoMentionCanvasResourceReferences, findCanvasResourceAutoLinkMatch, isCanvasTextResourceNode, type CanvasResourceReference, applyCanvasConnectionPromptSync, buildAssetMentionReferences, buildCanvasNodeMentionReferenceMap, buildNodeMentionReferences, buildOrderedCanvasResourceReferences, canvasResourceMentionToken, canvasResourceReferenceInsertText, collectUpstreamVideoNodes, imageGenerationReferenceConnections, reorderCanvasResourceConnections, replaceCanvasMentionToken, replaceCanvasReferenceMentions } from "../src/lib/canvas/canvas-resource-references";
 import { bindCanvasNodeResourceAsset, bindMissingCanvasResourceAssets, canvasNodeToAsset, canvasNodesMissingResourceAssetBinding } from "../src/lib/canvas/canvas-node-asset";
 import { buildNodeGenerationInputs } from "../src/components/canvas/canvas-node-generation";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../src/types/canvas";
@@ -12,11 +12,34 @@ const smartReferences: CanvasResourceReference[] = [
 
 describe("canvas smart references", () => {
     test("converts repeated names and aliases without rewriting existing mentions", () => {
+        // 用户自己写的标题（宫门全景 / 唐妙菱）保留原文，引用追加在后面；自动编号仍然直接替换。
         expect(autoMentionCanvasResourceReferences("图片6在前景，图6退后；宫门全景可见。唐妙菱看向图片60。", smartReferences))
-            .toBe("@[node:image-6] 在前景，@[node:image-6] 退后；@[node:image-6] 可见。@[node:character] 看向图片60。");
+            .toBe("@[node:image-6] 在前景，@[node:image-6] 退后；宫门全景 @[node:image-6] 可见。唐妙菱 @[node:character] 看向图片60。");
+        const alreadyLinked = "唐妙菱 @[node:character] 看向远景";
+        expect(autoMentionCanvasResourceReferences(alreadyLinked, smartReferences)).toBe(alreadyLinked);
         const existing = "已有 @图片6 和 @[node:image-6]、@[asset:宫门全景]。";
         expect(autoMentionCanvasResourceReferences(existing, smartReferences)).toBe(existing);
         expect(autoMentionCanvasResourceReferences("请使用 2。不要改约2秒。", smartReferences)).toBe("请使用 2。不要改约2秒。");
+    });
+
+    test("上传素材以标题为编号时仍保留用户写的标题", () => {
+        const asset: CanvasResourceReference = { id: "asset:宫门全景", nodeId: "asset", kind: "image", label: "宫门全景", title: "宫门全景", active: true };
+        expect(autoMentionCanvasResourceReferences("宫门全景 推近", [asset])).toBe("宫门全景 @[node:asset] 推近");
+        // 没有自定义标题的节点只显示自动编号，仍然直接替换。
+        const untitled: CanvasResourceReference = { id: "image-3", nodeId: "image-3", kind: "image", label: "图片3", title: "图片3", active: true };
+        expect(autoMentionCanvasResourceReferences("图片3 在左侧", [untitled])).toBe("@[node:image-3] 在左侧");
+    });
+
+    test("@ 选中和 Tab 补全时，完整打出的角色名保留，搜索片段和自动编号只插引用", () => {
+        const character = smartReferences[1];
+        expect(canvasResourceReferenceInsertText(character, "唐妙菱")).toBe("唐妙菱 @[node:character] ");
+        expect(canvasResourceReferenceInsertText(character, "唐")).toBe("@[node:character] ");
+        expect(canvasResourceReferenceInsertText(character, "")).toBe("@[node:character] ");
+        expect(canvasResourceReferenceInsertText(character, "角色1")).toBe("@[node:character] ");
+        // 名字后面已经跟着自己的引用时，Tab 不再重复提示。
+        const linked = "唐妙菱 @[node:character] 看向远景";
+        expect(findCanvasResourceAutoLinkMatch(linked, "唐妙菱".length, smartReferences)).toBeNull();
+        expect(findCanvasResourceAutoLinkMatch("唐妙菱 看向远景", "唐妙菱".length, smartReferences)?.reference.id).toBe("character");
     });
 
     test("returns exact replacement offsets for names and shelf orders", () => {
@@ -33,7 +56,7 @@ describe("canvas smart references", () => {
             { ...smartReferences[0], id: "image-2", label: "图片2", title: "2" },
         ];
         const prompt = "固定 2 人，只有 1 句对白。\n| IMAGE 1 | 走廊 |\n| IMAGE 2 | 服装 |\n0-2.4 秒，6.0-7.0 秒，机位 30 度，@图片2 保持一致。";
-        expect(autoMentionCanvasResourceReferences(prompt, references)).toBe(prompt.replace("走廊", "@[node:image-6]"));
+        expect(autoMentionCanvasResourceReferences(prompt, references)).toBe(prompt.replace("走廊", "走廊 @[node:image-6]"));
     });
 
     test("image aliases use the image label instead of the mixed resource shelf position", () => {
@@ -44,7 +67,7 @@ describe("canvas smart references", () => {
             smartReferences[1],
         ];
         expect(autoMentionCanvasResourceReferences("image1、image 2、图1、图片2、声音、唐妙菱", references))
-            .toBe("@[node:image-6]、@[node:image-2]、@[node:image-6]、@[node:image-2]、@[node:audio]、@[node:character]");
+            .toBe("@[node:image-6]、@[node:image-2]、@[node:image-6]、@[node:image-2]、声音 @[node:audio]、唐妙菱 @[node:character]");
         expect(findCanvasResourceAutoLinkMatch("image1", 6, references)?.reference.nodeId).toBe("image-6");
         expect(findCanvasResourceAutoLinkMatch("image2", 6, smartReferences)).toBeNull();
     });
@@ -74,7 +97,7 @@ describe("canvas smart references", () => {
 
     test("escapes regular expression characters and preserves explicit mention tokens", () => {
         const reference = { ...smartReferences[0], title: "场景(夜)+", mentionToken: "@[node:image-6]" };
-        expect(autoMentionCanvasResourceReferences("场景(夜)+出现", [reference])).toBe("@[node:image-6] 出现");
+        expect(autoMentionCanvasResourceReferences("场景(夜)+出现", [reference])).toBe("场景(夜)+ @[node:image-6] 出现");
         expect(findCanvasResourceAutoLinkMatch(reference.title, reference.title.length, [reference])?.reference).toBe(reference);
     });
 });
@@ -381,6 +404,15 @@ describe("canvas resource mention slots", () => {
             title: "场景图",
             active: false,
         })).toBe("@[asset:asset-a]");
+    });
+
+    test("文本类资源判定覆盖 Text/Skill/Markdown/Svg/Html 并排除角色卡节点", () => {
+        for (const type of [CanvasNodeType.Text, CanvasNodeType.Skill, CanvasNodeType.Markdown, CanvasNodeType.Svg, CanvasNodeType.Html]) {
+            expect(isCanvasTextResourceNode({ ...textNode(type), type })).toBe(true);
+        }
+        expect(isCanvasTextResourceNode({ ...textNode("character"), metadata: { workflowKind: "character", characterAssetId: "char-1" } })).toBe(false);
+        expect(isCanvasTextResourceNode(imageNode("img"))).toBe(false);
+        expect(isCanvasTextResourceNode(videoNode("vid"))).toBe(false);
     });
 });
 

@@ -14,6 +14,7 @@ import (
 )
 
 type ManifestOperation struct {
+	DefaultPathPrefix   string             `json:"defaultPathPrefix,omitempty"`
 	Method              string             `json:"method"`
 	Path                string             `json:"path"`
 	PathTemplate        any                `json:"pathTemplate,omitempty"`
@@ -35,16 +36,18 @@ type ManifestFilePart struct {
 }
 
 type ManifestResponse struct {
-	TaskIDPaths     []string `json:"taskIdPaths,omitempty"`
-	StatusPaths     []string `json:"statusPaths,omitempty"`
-	ErrorPaths      []string `json:"errorPaths,omitempty"`
-	MessagePaths    []string `json:"messagePaths,omitempty"`
-	TextPaths       []string `json:"textPaths,omitempty"`
-	ReasoningPaths  []string `json:"reasoningPaths,omitempty"`
-	ResultURLPaths  []string `json:"resultUrlPaths,omitempty"`
-	ResultPaths     []string `json:"resultPaths,omitempty"`
-	ResultKind      string   `json:"resultKind,omitempty"`
-	ResultEphemeral bool     `json:"resultEphemeral,omitempty"`
+	Stream          *ManifestImageStream `json:"stream,omitempty"`
+	DetectImageMIME bool                 `json:"detectImageMime,omitempty"`
+	TaskIDPaths     []string             `json:"taskIdPaths,omitempty"`
+	StatusPaths     []string             `json:"statusPaths,omitempty"`
+	ErrorPaths      []string             `json:"errorPaths,omitempty"`
+	MessagePaths    []string             `json:"messagePaths,omitempty"`
+	TextPaths       []string             `json:"textPaths,omitempty"`
+	ReasoningPaths  []string             `json:"reasoningPaths,omitempty"`
+	ResultURLPaths  []string             `json:"resultUrlPaths,omitempty"`
+	ResultPaths     []string             `json:"resultPaths,omitempty"`
+	ResultKind      string               `json:"resultKind,omitempty"`
+	ResultEphemeral bool                 `json:"resultEphemeral,omitempty"`
 	// BinaryPayload 表示 create 同步返回二进制媒体（如 /audio/speech 的音频流）。
 	// 声明式解析会把整个响应体包装为对应能力的单个媒体结果，不做 JSON 路径提取。
 	BinaryPayload bool `json:"binaryPayload,omitempty"`
@@ -57,6 +60,10 @@ type ManifestResponse struct {
 	Videos        any  `json:"videos,omitempty"`
 	Audios        any  `json:"audios,omitempty"`
 	Usage         any  `json:"usage,omitempty"`
+	// SuccessCodes 声明协议自己的业务成功码：命中的 errorPaths 值不再算失败。
+	// 只有显式声明该字段的协议生效（即梦 CV 接口用 code=10000 表示成功），
+	// 未声明的协议继续沿用共享的「零值即成功」规则。
+	SuccessCodes []any `json:"successCodes,omitempty"`
 }
 
 // ManifestAgentResponse describes the provider response shape for a
@@ -250,7 +257,7 @@ func loadDeclarativeManifestProvider(manifest Manifest, index int) (Adapter, err
 
 func ValidateManifest(manifest Manifest) error {
 	// Stored third-party packages keep their original manifest and signature.
-	if version := strings.TrimSpace(manifest.APIVersion); version != "qisitv.plugin/v1" && version != "qisitv.plugin/v2" && version != "beeftv.plugin/v1" && version != "beeftv.plugin/v2" {
+	if version := strings.TrimSpace(manifest.APIVersion); version != "qisitv.plugin/v1" && version != "qisitv.plugin/v2" && version != "qisitv.plugin/v3" && version != "beeftv.plugin/v1" && version != "beeftv.plugin/v2" && version != "beeftv.plugin/v3" {
 		return fmt.Errorf("unsupported protocol manifest apiVersion %q", manifest.APIVersion)
 	}
 	if strings.TrimSpace(manifest.Metadata.ID) == "" || strings.TrimSpace(manifest.Metadata.Version) == "" {
@@ -283,6 +290,30 @@ func ValidateManifest(manifest Manifest) error {
 			return fmt.Errorf("duplicate provider contribution %q", provider.ID)
 		}
 		providerIDs[provider.ID] = struct{}{}
+		requiresV3 := len(provider.Variables) > 0 || provider.Response.Stream != nil || provider.Response.DetectImageMIME
+		for _, operation := range []*ManifestOperation{&provider.Create, provider.Poll, provider.Cancel, provider.Result, provider.Agent} {
+			requiresV3 = requiresV3 || (operation != nil && operation.DefaultPathPrefix != "")
+		}
+		if version := strings.TrimSpace(manifest.APIVersion); version != "beeftv.plugin/v3" && version != "qisitv.plugin/v3" && requiresV3 {
+			return fmt.Errorf("provider %q requires qisitv.plugin/v3 or beeftv.plugin/v3 for variables, defaultPathPrefix or image response extensions", provider.ID)
+		}
+		var expressions []any
+		for _, operation := range []*ManifestOperation{&provider.Create, provider.Poll, provider.Cancel, provider.Result, provider.Agent} {
+			if operation != nil {
+				expressions = append(expressions, operation.Body)
+			}
+		}
+		for _, rule := range provider.Validations {
+			expressions = append(expressions, rule.Assert)
+		}
+		if err := validateManifestVariables(provider.Variables, expressions...); err != nil {
+			return fmt.Errorf("provider %q: %w", provider.ID, err)
+		}
+		if stream := provider.Response.Stream; stream != nil {
+			if strings.TrimSpace(stream.TypePath) == "" || len(stream.ItemEvents) == 0 || stream.Images == nil || provider.Response.BinaryPayload {
+				return fmt.Errorf("provider %q image stream requires typePath, itemEvents and images, without binaryPayload", provider.ID)
+			}
+		}
 		if len(provider.Capabilities) == 0 || len(provider.Scopes) == 0 {
 			return fmt.Errorf("provider contribution %q requires capabilities and scopes", provider.ID)
 		}
@@ -379,6 +410,7 @@ func normalizeManifestForProvider(manifest *Manifest, index int) error {
 	manifest.AgentResponse = provider.AgentResponse
 	manifest.Auth = provider.Auth
 	manifest.Validations = provider.Validations
+	manifest.Variables = provider.Variables
 	return nil
 }
 
@@ -400,6 +432,9 @@ func operationSummaryPtr(operation *ManifestOperation) string {
 }
 
 func validateManifestOperation(operation ManifestOperation) error {
+	if prefix := operation.DefaultPathPrefix; prefix != "" && (!isRelativePath(prefix) || strings.Contains(prefix, "..") || strings.ContainsAny(prefix, "?#\\")) {
+		return fmt.Errorf("invalid default path prefix")
+	}
 	method := strings.ToUpper(strings.TrimSpace(operation.Method))
 	if method != http.MethodGet && method != http.MethodPost && method != http.MethodDelete && method != http.MethodPut {
 		return fmt.Errorf("unsupported HTTP method %q", operation.Method)
@@ -433,48 +468,22 @@ func (a manifestAdapter) AgentAvailable() bool {
 }
 func (a manifestAdapter) ResultAvailable() bool { return a.manifest.ResultOperation != nil }
 func (a manifestAdapter) BuildCreate(_ context.Context, c RequestContext) (RequestSpec, error) {
-	if a.manifest.Metadata.ID == "volcengine-ark-seedance" || a.manifest.Metadata.ID == "volcengine-ark-video" || a.manifest.Metadata.ID == "volcengine-ark-agent-plan-video" || a.manifest.Metadata.ID == "seedance-videos-compatible" {
-		c.Request = NormalizeSeedanceTaskOptions(c.Request)
-	}
+	c.Request = applyManifestTaskOptions(a.manifest.Metadata.ID, c.Request)
 	if len(a.manifest.Contributes.Providers) == 0 {
 		return RequestSpec{}, fmt.Errorf("plugin %s does not provide a provider", a.manifest.Metadata.ID)
 	}
-	if err := validateManifestRequest(a.manifest.Validations, c.Request); err != nil {
-		return RequestSpec{}, err
-	}
-	spec, err := buildManifestOperation(a.manifest.Create, a.manifest.Auth, c.Request, "")
+	variables, err := manifestRequestVariables(a.manifest.Variables, c.Request)
 	if err != nil {
 		return RequestSpec{}, err
 	}
-	if a.manifest.Metadata.ID == "volcengine-ark-seedance" || a.manifest.Metadata.ID == "volcengine-ark-video" || a.manifest.Metadata.ID == "volcengine-ark-agent-plan-video" || a.manifest.Metadata.ID == "seedance-videos-compatible" {
-		if kind := SeedanceOmniTaskType(c.Request); kind != "" {
-			if body, ok := spec.Body.(map[string]any); ok {
-				body["omni_reference_task_type"] = kind
-			}
-		}
+	if err := validateManifestRequest(a.manifest.Validations, c.Request, variables); err != nil {
+		return RequestSpec{}, err
 	}
-	// Some NewAPI-compatible gateways validate the prompt under input.content
-	// even though the historical channel-1 contract used input.prompt. Keep the
-	// legacy field and add the canonical content alias for that shipped profile.
-	if a.manifest.Metadata.ID == "newapi-channel-1" && c.Request.Capability == CapabilityVideo {
-		if body, ok := spec.Body.(map[string]any); ok {
-			if input, ok := body["input"].(map[string]any); ok {
-				if _, exists := input["content"]; !exists {
-					if prompt, ok := input["prompt"]; ok && strings.TrimSpace(fmt.Sprint(prompt)) != "" {
-						input["content"] = []any{map[string]any{"type": "text", "text": fmt.Sprint(prompt)}}
-					}
-				}
-				if content, ok := input["content"]; ok {
-					// WhatsToken's gateway validates the ByteDance-compatible
-					// content array at the top level, while older NewAPI channels
-					// keep it under input. Send both projections during migration.
-					if _, exists := body["content"]; !exists {
-						body["content"] = content
-					}
-				}
-			}
-		}
+	spec, err := buildManifestOperation(a.manifest.Create, a.manifest.Auth, c.Request, "", variables)
+	if err != nil {
+		return RequestSpec{}, err
 	}
+	applyManifestBodyFields(a.manifest.Metadata.ID, &spec, c.Request)
 	return spec, nil
 }
 func (a manifestAdapter) BuildAgent(_ context.Context, c AgentRequestContext) (RequestSpec, error) {
@@ -482,7 +491,7 @@ func (a manifestAdapter) BuildAgent(_ context.Context, c AgentRequestContext) (R
 		return RequestSpec{}, fmt.Errorf("protocol %s has no agent operation", a.manifest.Metadata.ID)
 	}
 	request := GenerationRequest{Model: c.Model, Extra: map[string]any{"agent": c.Request}}
-	return buildManifestOperation(*a.manifest.Agent, a.manifest.Auth, request, "")
+	return a.buildOperation(*a.manifest.Agent, request, "")
 }
 func (a manifestAdapter) ParseAgent(_ context.Context, body []byte) (AgentResult, error) {
 	if a.manifest.AgentResponse == nil {
@@ -530,7 +539,13 @@ func (a manifestAdapter) ParseCreate(_ context.Context, body []byte) (CreateResu
 	if err != nil {
 		return CreateResult{}, err
 	}
-	return a.parse(payload, PollContext{}), nil
+	result := a.parse(payload, PollContext{})
+	if a.manifest.Response.DetectImageMIME {
+		if err := detectInlineImageMIME(result.Result); err != nil {
+			return CreateResult{}, err
+		}
+	}
+	return result, nil
 }
 
 // binaryPayloadCreateResult 把同步二进制响应包装为单个媒体结果。MIME 以响应内容探测为准，
@@ -560,7 +575,7 @@ func (a manifestAdapter) BuildPoll(_ context.Context, c PollContext) (RequestSpe
 	}
 	request := c.Request
 	request.Model = c.Model
-	return buildManifestOperation(*a.manifest.Poll, a.manifest.Auth, request, c.TaskID)
+	return a.buildOperation(*a.manifest.Poll, request, c.TaskID)
 }
 func (a manifestAdapter) ParsePoll(_ context.Context, c PollContext, body []byte) (PollResult, error) {
 	payload, err := decodeObject(body)
@@ -576,7 +591,7 @@ func (a manifestAdapter) BuildCancel(_ context.Context, c PollContext) (RequestS
 	}
 	request := c.Request
 	request.Model = c.Model
-	return buildManifestOperation(*a.manifest.Cancel, a.manifest.Auth, request, c.TaskID)
+	return a.buildOperation(*a.manifest.Cancel, request, c.TaskID)
 }
 
 func (a manifestAdapter) BuildResult(_ context.Context, c PollContext) (RequestSpec, error) {
@@ -585,7 +600,15 @@ func (a manifestAdapter) BuildResult(_ context.Context, c PollContext) (RequestS
 	}
 	request := c.Request
 	request.Model = c.Model
-	return buildManifestOperation(*a.manifest.ResultOperation, a.manifest.Auth, request, c.TaskID)
+	return a.buildOperation(*a.manifest.ResultOperation, request, c.TaskID)
+}
+
+func (a manifestAdapter) buildOperation(operation ManifestOperation, request GenerationRequest, taskID string) (RequestSpec, error) {
+	variables, err := manifestRequestVariables(a.manifest.Variables, request)
+	if err != nil {
+		return RequestSpec{}, err
+	}
+	return buildManifestOperation(operation, a.manifest.Auth, request, taskID, variables)
 }
 
 func (a manifestAdapter) parse(payload map[string]any, c PollContext) CreateResult {
@@ -610,7 +633,7 @@ func (a manifestAdapter) parse(payload map[string]any, c PollContext) CreateResu
 	if message == "" {
 		message = firstPathValue(payload, response.MessagePaths...)
 	}
-	if manifestError(payload, response.ErrorPaths...) {
+	if manifestError(payload, response.ErrorPaths, response.SuccessCodes) {
 		status = StatusFailed
 	}
 	result := &Result{
@@ -658,6 +681,7 @@ func (a manifestAdapter) parse(payload map[string]any, c PollContext) CreateResu
 			}
 		}
 	}
+	attachLastFrameMetadata(result.Videos, payload)
 	if status == StatusPending && (result.Text != "" || len(result.Images) > 0 || len(result.Videos) > 0 || len(result.Audios) > 0) {
 		status = StatusSucceeded
 	}
@@ -667,11 +691,81 @@ func (a manifestAdapter) parse(payload map[string]any, c PollContext) CreateResu
 	return CreateResult{TaskID: id, Status: status, Result: result, Message: message}
 }
 
-func validateManifestRequest(rules []ManifestValidation, request GenerationRequest) error {
-	if len(rules) == 0 {
+var manifestVariableName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+func validateManifestVariables(bindings []ManifestVariable, expressions ...any) error {
+	known := map[string]bool{}
+	var check func(any) error
+	check = func(value any) error {
+		switch value := value.(type) {
+		case map[string]any:
+			if ref, ok := value["$ref"].(string); ok && strings.HasPrefix(ref, "vars.") {
+				name := strings.Split(strings.TrimPrefix(ref, "vars."), ".")[0]
+				if !known[name] {
+					return fmt.Errorf("unknown or forward provider variable %q", name)
+				}
+			}
+			for _, child := range value {
+				if err := check(child); err != nil {
+					return err
+				}
+			}
+		case []any:
+			for _, child := range value {
+				if err := check(child); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	for _, binding := range bindings {
+		if !manifestVariableName.MatchString(binding.Name) || binding.Value == nil {
+			return fmt.Errorf("provider variable requires a simple name and value")
+		}
+		if known[binding.Name] {
+			return fmt.Errorf("duplicate provider variable %q", binding.Name)
+		}
+		if err := check(binding.Value); err != nil {
+			return err
+		}
+		known[binding.Name] = true
+	}
+	for _, expression := range expressions {
+		if err := check(expression); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func manifestRequestVariables(bindings []ManifestVariable, request GenerationRequest) (map[string]any, error) {
+	values := map[string]any{}
+	env := map[string]any{"request": manifestRequestValues(request), "vars": values}
+	for _, binding := range bindings {
+		if !manifestVariableName.MatchString(binding.Name) {
+			return nil, fmt.Errorf("provider variable requires a simple name")
+		}
+		if _, exists := values[binding.Name]; exists {
+			return nil, fmt.Errorf("duplicate provider variable %q", binding.Name)
+		}
+		value, err := evaluateManifestValue(binding.Value, env)
+		if err != nil {
+			return nil, fmt.Errorf("provider variable %s: %w", binding.Name, err)
+		}
+		values[binding.Name] = value
+	}
+	return values, nil
+}
+
+func validateManifestRequest(rules []ManifestValidation, request GenerationRequest, variables ...map[string]any) error {
+	if draftTaskID, ok := request.Extra["draft_task_id"].(string); len(rules) == 0 || (ok && strings.TrimSpace(draftTaskID) != "") {
 		return nil
 	}
 	env := map[string]any{"request": manifestRequestValues(request)}
+	if len(variables) > 0 {
+		env["vars"] = variables[0]
+	}
 	for _, rule := range rules {
 		value, err := evaluateManifestValue(rule.Assert, env)
 		if err != nil {
@@ -739,6 +833,9 @@ func mediaReferencesFromManifestValue(value any, kind string, ephemeral bool) []
 				ID: manifestString(typed["id"]), URL: manifestString(typed["url"]), DataURL: manifestString(typed["dataUrl"]),
 				Kind: defaultValue(manifestString(typed["kind"]), kind), Role: manifestString(typed["role"]), MIMEType: manifestString(typed["mimeType"]),
 				Name: manifestString(typed["name"]), Order: manifestInt(typed["order"]), Weight: manifestFloat(typed["weight"]), Ephemeral: ephemeral || manifestTruthy(typed["ephemeral"]),
+			}
+			if metadata, ok := typed["metadata"].(map[string]any); ok {
+				reference.Metadata = metadata
 			}
 			if reference.URL == "" {
 				reference.URL = firstString(typed, "file_url", "fileUrl", "image_url", "imageUrl", "video_url", "videoUrl", "audio_url", "audioUrl", "uri")
@@ -856,9 +953,12 @@ func mediaPathValues(payload map[string]any, path string) []string {
 	return values
 }
 
-func buildManifestOperation(operation ManifestOperation, auth ManifestAuth, request GenerationRequest, taskID string) (RequestSpec, error) {
+func buildManifestOperation(operation ManifestOperation, auth ManifestAuth, request GenerationRequest, taskID string, variables ...map[string]any) (RequestSpec, error) {
 	requestValues := manifestRequestValues(request)
 	env := map[string]any{"request": requestValues, "taskId": taskID}
+	if len(variables) > 0 {
+		env["vars"] = variables[0]
+	}
 	var body any
 	if operation.Body != nil {
 		value, err := evaluateManifestValue(operation.Body, env)
@@ -912,7 +1012,7 @@ func buildManifestOperation(operation ManifestOperation, auth ManifestAuth, requ
 		return RequestSpec{}, fmt.Errorf("evaluate request content type: %w", err)
 	}
 	contentType := defaultValue(manifestString(evaluatedContentType), "application/json")
-	return RequestSpec{Method: strings.ToUpper(operation.Method), Path: path, OriginPath: operation.OriginPath, ContentType: contentType, Headers: headers, Query: query, Body: body, Files: files, Auth: auth}, nil
+	return RequestSpec{Method: strings.ToUpper(operation.Method), Path: path, DefaultPathPrefix: operation.DefaultPathPrefix, OriginPath: operation.OriginPath, ContentType: contentType, Headers: headers, Query: query, Body: body, Files: files, Auth: auth}, nil
 }
 
 func evaluateManifestStringMap(values map[string]any, env map[string]any) (map[string]string, error) {
@@ -1054,6 +1154,9 @@ func manifestExpressionValue(expression string, request GenerationRequest, taskI
 // platform request. It lets uploaded manifests address media items by index
 // without exposing Go structs or adding provider-specific host code.
 func manifestRequestValues(request GenerationRequest) map[string]any {
+	// providerOptions 是 map[string]map[string]any，模板路径只认 map[string]any；
+	// 直接放进去会让 request.providerOptions.<namespace>.<key> 永远取到 nil。
+	providerOptions, _ := requestAsManifestValue(request.ProviderOptions)
 	userContent := make([]any, 0)
 	if strings.TrimSpace(request.Prompt) != "" {
 		userContent = append(userContent, map[string]any{"type": "text", "text": request.Prompt})
@@ -1122,9 +1225,6 @@ func manifestRequestValues(request GenerationRequest) map[string]any {
 	output.GenerateAudio = output.GenerateAudio || request.GenerateAudio
 	output.Watermark = output.Watermark || request.Watermark
 	outputValue, _ := requestAsManifestValue(output)
-	// Expression paths traverse map[string]any; preserve nested provider options
-	// instead of handing them an opaque map[string]map[string]any.
-	providerOptions, _ := requestAsManifestValue(request.ProviderOptions)
 
 	return map[string]any{
 		"capability":      request.Capability,
@@ -1385,9 +1485,15 @@ func manifestTextPathValues(value any, parts []string) []string {
 	return manifestTextPathValues(manifestPathValue(value, parts[0]), parts[1:])
 }
 
-func manifestError(payload map[string]any, paths ...string) bool {
+// manifestError 判断声明的错误路径上是否出现了失败值。successCodes 是协议自己
+// 声明的业务成功码（即梦 CV 用 code=10000 表示成功）：只有在该路径值命中成功码时
+// 才跳过失败判定，其余厂商的协议不声明这个字段，判定规则保持原样。
+func manifestError(payload map[string]any, paths []string, successCodes []any) bool {
 	for _, path := range paths {
 		value := pathValue(payload, path)
+		if manifestValueInSuccessCodes(value, successCodes) {
+			continue
+		}
 		switch typed := value.(type) {
 		case nil:
 			continue
@@ -1423,6 +1529,41 @@ func manifestError(payload map[string]any, paths ...string) bool {
 		}
 	}
 	return false
+}
+
+// manifestValueInSuccessCodes 用文本形式比较成功码，避免上游把 code 写成数字或
+// 字符串（10000 与 "10000"）时判定不一致。
+func manifestValueInSuccessCodes(value any, successCodes []any) bool {
+	if len(successCodes) == 0 {
+		return false
+	}
+	text := manifestCodeText(value)
+	if text == "" {
+		return false
+	}
+	for _, code := range successCodes {
+		if manifestCodeText(code) == text {
+			return true
+		}
+	}
+	return false
+}
+
+func manifestCodeText(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case float32:
+		return strconv.FormatFloat(float64(typed), 'f', -1, 32)
+	case int, int8, int16, int32, int64:
+		return fmt.Sprintf("%d", typed)
+	case uint, uint8, uint16, uint32, uint64:
+		return fmt.Sprintf("%d", typed)
+	default:
+		return ""
+	}
 }
 
 func reflectValueIsZero(value any) bool {

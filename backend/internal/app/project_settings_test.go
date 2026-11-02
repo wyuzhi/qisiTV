@@ -48,7 +48,7 @@ func TestUpdateProjectCoverRequiresOwnedReadyImage(t *testing.T) {
 	}
 
 	coverID := "cover-ready"
-	updated, err := service.UpdateProject("user-1", project.ID, UpdateProjectRequest{CoverResourceID: &coverID})
+	updated, err := service.ProjectService().UpdateProject("user-1", project.ID, UpdateProjectRequest{CoverResourceID: &coverID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,13 +64,13 @@ func TestUpdateProjectCoverRequiresOwnedReadyImage(t *testing.T) {
 	}
 
 	for _, invalidID := range []string{"cover-pending", "cover-video", "cover-other-user", "missing"} {
-		if _, err := service.UpdateProject("user-1", project.ID, UpdateProjectRequest{CoverResourceID: &invalidID}); err == nil {
+		if _, err := service.ProjectService().UpdateProject("user-1", project.ID, UpdateProjectRequest{CoverResourceID: &invalidID}); err == nil {
 			t.Fatalf("UpdateProject cover %q succeeded, want validation error", invalidID)
 		}
 	}
 
 	empty := ""
-	cleared, err := service.UpdateProject("user-1", project.ID, UpdateProjectRequest{CoverResourceID: &empty})
+	cleared, err := service.ProjectService().UpdateProject("user-1", project.ID, UpdateProjectRequest{CoverResourceID: &empty})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestUpdateProjectPersistsDefaultGenerationModels(t *testing.T) {
 
 	imageModel := " system-channel::image-model "
 	videoModel := "user-channel::MiniMax-H3"
-	updated, err := service.UpdateProject("user-1", project.ID, UpdateProjectRequest{DefaultImageModel: &imageModel, DefaultVideoModel: &videoModel})
+	updated, err := service.ProjectService().UpdateProject("user-1", project.ID, UpdateProjectRequest{DefaultImageModel: &imageModel, DefaultVideoModel: &videoModel})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestUpdateProjectPersistsDefaultGenerationModels(t *testing.T) {
 	}
 
 	empty := ""
-	cleared, err := service.UpdateProject("user-1", project.ID, UpdateProjectRequest{DefaultVideoModel: &empty})
+	cleared, err := service.ProjectService().UpdateProject("user-1", project.ID, UpdateProjectRequest{DefaultVideoModel: &empty})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestProjectUnitSummaryPersistsWordCount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	unit, err := service.CreateProjectUnit("user-1", project.ID, CreateProjectUnitRequest{Title: "第一章", SourceText: "<p>张振天&nbsp;归来</p>"})
+	unit, err := service.ProjectService().CreateProjectUnit("user-1", project.ID, CreateProjectUnitRequest{Title: "第一章", SourceText: "<p>张振天&nbsp;归来</p>"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestProjectUnitSummaryPersistsWordCount(t *testing.T) {
 		t.Fatalf("created word count = %d, want 6", unit.WordCount)
 	}
 
-	unit, err = service.UpdateProjectUnit("user-1", project.ID, unit.ID, UpdateProjectUnitRequest{Title: unit.Title, SourceText: "<p>新的正文</p>"})
+	unit, err = service.ProjectService().UpdateProjectUnit("user-1", project.ID, unit.ID, UpdateProjectUnitRequest{Title: unit.Title, SourceText: "<p>新的正文</p>"})
 	if err != nil {
 		t.Fatal(err)
 	}

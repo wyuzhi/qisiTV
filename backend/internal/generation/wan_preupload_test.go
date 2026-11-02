@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"qisitv/backend/internal/beefapi"
 	"qisitv/backend/internal/protocol"
 )
 
@@ -66,7 +67,7 @@ func TestExecuteWanReferenceUpload(t *testing.T) {
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.Path {
-				case "/v1/video-references/uploads":
+				case "/v1/media/uploads":
 					creates++
 					if name == "missing-upload" {
 						w.WriteHeader(404)
@@ -90,18 +91,20 @@ func TestExecuteWanReferenceUpload(t *testing.T) {
 					if r.Method != "PUT" || r.Header.Get("Authorization") != "" || !bytes.Equal(data, payload) {
 						t.Error("signed PUT changed bytes or leaked credentials")
 					}
-				case "/v1/video-references/uploads/complete":
+				case "/v1/media/uploads/complete":
 					completes++
 					sum := hex.EncodeToString(digest[:])
 					if name == "invalid-receipt" {
 						sum = "invalid"
 					}
 					_ = json.NewEncoder(w).Encode(BeefAPISeedanceUploadComplete{URL: server.URL + "/named/first-frame", Kind: "image", Mime: "image/png", Bytes: int64(len(payload)), SHA256: sum})
-				case "/v1/video/generations":
+				case "/v1/video/generations", "/v1/videos":
 					generates++
 					if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
 						t.Error(err)
 					}
+					_, _ = io.WriteString(w, `{"id":"fixture-wan","status":"failed","error":{"message":"fixture terminal"}}`)
+				case "/v1/videos/fixture-wan":
 					_, _ = io.WriteString(w, `{"id":"fixture-wan","status":"failed","error":{"message":"fixture terminal"}}`)
 				default:
 					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -141,7 +144,10 @@ func TestExecuteWanReferenceUpload(t *testing.T) {
 				input.Config.VideoCapabilitiesVersion = &version
 				input.Config.VideoGenerateAudio = "false"
 			}
-			_, err := Execute(WithProtocolRegistry(WithRuntime(context.Background(), runtime), registry), input)
+			if name != "custom-inline" {
+				input.Config.CredentialRef = beefapi.CredentialRef
+			}
+			_, err := Execute(WithSubmissionKey(WithProtocolRegistry(WithRuntime(context.Background(), runtime), registry), "stable-wan-attempt"), input)
 			blocked := name == "missing-upload" || name == "unsupported-upload" || name == "invalid-receipt" || name == "asset"
 			if blocked {
 				if err == nil || generates != 0 {
@@ -176,11 +182,24 @@ func TestExecuteWanReferenceUpload(t *testing.T) {
 			if creates != wantUploads || puts != wantUploads || completes != wantUploads {
 				t.Fatalf("upload counts=%d/%d/%d want %d", creates, puts, completes, wantUploads)
 			}
-			if posted["seconds"] != "6" || posted["aspect_ratio"] != "9:16" || posted["resolution"] != "720p" || posted["generate_audio"] != (name != "versioned-audio-false") {
+			var audio any = posted["generate_audio"]
+			if metadata, ok := posted["metadata"].(map[string]any); ok {
+				audio = metadata["generate_audio"]
+			}
+			if posted["seconds"] != "6" || posted["aspect_ratio"] != "9:16" || posted["resolution"] != "720p" || audio != (name != "versioned-audio-false") {
 				t.Fatalf("requested controls changed: %#v", posted)
 			}
-			if name != "text" && !reflect.DeepEqual(posted["image_urls"], []any{wantURL}) {
-				t.Fatal("reference did not reach official plugin unchanged as expected")
+			if name != "text" {
+				if name == "custom-inline" {
+					if !reflect.DeepEqual(posted["image_urls"], []any{wantURL}) {
+						t.Fatal("third-party inline reference changed")
+					}
+				} else {
+					content := posted["content"].([]any)
+					if content[0].(map[string]any)["image_url"].(map[string]any)["url"] != wantURL {
+						t.Fatal("canonical reference changed")
+					}
+				}
 			}
 		})
 	}

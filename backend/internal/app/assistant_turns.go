@@ -46,6 +46,9 @@ func (s *Service) assistantTurnDir() string {
 	return filepath.Join(s.dataDir, "assistant-turns")
 }
 
+// AssistantTurns exposes the domain service to the HTTP composition layer.
+func (s *Service) AssistantTurns() *assistantturns.Service { return s.assistantTurnsOrInit() }
+
 func (s *Service) assistantTurnsOrInit() *assistantturns.Service {
 	if s == nil {
 		return nil
@@ -64,10 +67,6 @@ func (s *Service) BeginAssistantTurn(userID, canvasID, turnID string, input Assi
 	return revision, err
 }
 
-func (s *Service) AssistantTurnScopeForHost(userID, turnID string) (AssistantTurnScope, bool, error) {
-	return s.assistantTurnsOrInit().ScopeForHost(userID, turnID)
-}
-
 func (s *Service) FinalizeAssistantTurn(turnID string) error {
 	err := s.assistantTurnsOrInit().Finalize(turnID)
 	if err == nil && s.repo != nil {
@@ -78,20 +77,8 @@ func (s *Service) FinalizeAssistantTurn(turnID string) error {
 	return err
 }
 
-func (s *Service) AssistantTurnRuntimeState(userID, turnID string) (*assistantturns.RuntimeState, error) {
-	return s.assistantTurnsOrInit().RuntimeState(userID, turnID)
-}
-
-func (s *Service) ExtendAssistantTurn(userID, canvasID, turnID string, input AssistantTurnInput) error {
-	return s.assistantTurnsOrInit().Extend(userID, canvasID, turnID, input)
-}
-
 func (s *Service) AssistantTurnUndone(userID, canvasID, turnID string) bool {
 	return s.assistantTurnsOrInit().Undone(userID, canvasID, turnID)
-}
-
-func (s *Service) UndoAssistantTurn(userID, canvasID, turnID string) (int64, error) {
-	return s.assistantTurnsOrInit().Undo(userID, canvasID, turnID)
 }
 
 // VerifyOpenAssistantTurnInTx is the operation-transaction contract for Lead

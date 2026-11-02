@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"time"
 
-	"qisitv/backend/internal/app"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/textreplay"
 
@@ -25,27 +24,9 @@ type textReplayAPI interface {
 	Complete(userID, taskID, text string) (*model.Task, error)
 }
 
-type appTextReplayAPI struct{ svc *app.Service }
-
-func (a appTextReplayAPI) Append(userID, taskID, content string) (*model.TaskTextDelta, error) {
-	return a.svc.AppendTaskTextDelta(userID, taskID, content)
-}
-
-func (a appTextReplayAPI) Read(userID, taskID string, after int64) (*textreplay.Result, error) {
-	return a.svc.TaskTextReplay(userID, taskID, after)
-}
-
-func (a appTextReplayAPI) CachedRead(ctx context.Context, userID, taskID string, after int64) (*textreplay.Result, error) {
-	return a.svc.CachedTaskTextReplay(ctx, userID, taskID, after)
-}
-
-func (a appTextReplayAPI) Complete(userID, taskID, text string) (*model.Task, error) {
-	return a.svc.CompleteTextReplayTask(userID, taskID, text)
-}
-
-func registerTaskTextReplayRoutes(r *gin.RouterGroup, svc *app.Service) {
+func registerTaskTextReplayRoutes(r *gin.RouterGroup, owners workspaceOwners, replay textReplayAPI) {
 	r.POST("/tasks/:id/text-deltas", func(c *gin.Context) {
-		user, err := currentUser(c, svc)
+		user, err := currentUser(c, owners)
 		if err != nil {
 			failService(c, err)
 			return
@@ -57,7 +38,7 @@ func registerTaskTextReplayRoutes(r *gin.RouterGroup, svc *app.Service) {
 			fail(c, http.StatusBadRequest, err)
 			return
 		}
-		item, err := requestTextReplay(c, svc).Append(user.ID, c.Param("id"), req.Content)
+		item, err := requestTextReplay(c, replay).Append(user.ID, c.Param("id"), req.Content)
 		if err != nil {
 			failService(c, err)
 			return
@@ -65,7 +46,7 @@ func registerTaskTextReplayRoutes(r *gin.RouterGroup, svc *app.Service) {
 		ok(c, item)
 	})
 	r.GET("/tasks/:id/text-deltas", func(c *gin.Context) {
-		user, err := currentUser(c, svc)
+		user, err := currentUser(c, owners)
 		if err != nil {
 			failService(c, err)
 			return
@@ -75,7 +56,7 @@ func registerTaskTextReplayRoutes(r *gin.RouterGroup, svc *app.Service) {
 			fail(c, http.StatusBadRequest, err)
 			return
 		}
-		result, err := requestTextReplay(c, svc).Read(user.ID, c.Param("id"), after)
+		result, err := requestTextReplay(c, replay).Read(user.ID, c.Param("id"), after)
 		if err != nil {
 			failService(c, err)
 			return
@@ -83,7 +64,7 @@ func registerTaskTextReplayRoutes(r *gin.RouterGroup, svc *app.Service) {
 		ok(c, result)
 	})
 	r.GET("/tasks/:id/text-events", func(c *gin.Context) {
-		user, err := currentUser(c, svc)
+		user, err := currentUser(c, owners)
 		if err != nil {
 			failService(c, err)
 			return
@@ -93,7 +74,7 @@ func registerTaskTextReplayRoutes(r *gin.RouterGroup, svc *app.Service) {
 			fail(c, http.StatusBadRequest, err)
 			return
 		}
-		replayAPI := requestTextReplay(c, svc)
+		replayAPI := requestTextReplay(c, replay)
 		initial, err := replayAPI.CachedRead(c.Request.Context(), user.ID, c.Param("id"), after)
 		if err != nil {
 			failService(c, err)
@@ -102,7 +83,7 @@ func registerTaskTextReplayRoutes(r *gin.RouterGroup, svc *app.Service) {
 		streamTaskTextEvents(c, replayAPI, user.ID, c.Param("id"), after, initial)
 	})
 	r.POST("/tasks/:id/text-replay-complete", func(c *gin.Context) {
-		user, err := currentUser(c, svc)
+		user, err := currentUser(c, owners)
 		if err != nil {
 			failService(c, err)
 			return
@@ -114,7 +95,7 @@ func registerTaskTextReplayRoutes(r *gin.RouterGroup, svc *app.Service) {
 			fail(c, http.StatusBadRequest, err)
 			return
 		}
-		task, err := requestTextReplay(c, svc).Complete(user.ID, c.Param("id"), req.Text)
+		task, err := requestTextReplay(c, replay).Complete(user.ID, c.Param("id"), req.Text)
 		if err != nil {
 			fail(c, http.StatusBadRequest, err)
 			return

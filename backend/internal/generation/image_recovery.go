@@ -90,8 +90,12 @@ func probeImageReplay(req *http.Request, configured *http.Client) (*http.Request
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.Header.Get("X-Image-Submission-Protocol") == ImageReplayProtocol {
-		return req.WithContext(WithImageReplayProtocol(req.Context(), ImageReplayProtocol)), nil
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		ctx := req.Context()
+		if resp.Header.Get("X-Image-Submission-Protocol") == ImageReplayProtocol {
+			ctx = WithImageReplayProtocol(ctx, ImageReplayProtocol)
+		}
+		return req.WithContext(ctx), nil
 	}
 	return req, nil
 }

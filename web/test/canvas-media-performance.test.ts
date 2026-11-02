@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { describe, expect, test } from "bun:test";
 
 import { canvasNodeRenderPadding, resolveActiveCanvasMediaNodeId } from "../src/lib/canvas/canvas-performance-mode";
-import { shouldRefreshCanvasVirtualization } from "../src/lib/canvas/canvas-viewport-render-sync";
+import { canvasGestureRenderPadding, shouldCommitCanvasScaleDuringGesture, shouldRefreshCanvasVirtualization } from "../src/lib/canvas/canvas-viewport-render-sync";
 import { videoMetadata } from "../src/lib/canvas/canvas-generation-task-sync";
 import { canvasNodeVideoPreviewUrl, canvasVideoAssetPreviewUrl } from "../src/lib/canvas/canvas-media-preview";
 import { collectImageStorageKeys } from "../src/services/image-storage";
@@ -13,7 +13,11 @@ import { detectVideoAudioTrack, detectVideoAudioTrackFromBlob, detectVideoAudioT
 
 const canvasNodeContentSource = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-node-content.tsx"), "utf8");
 const canvasAudioPlayerSource = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-audio-player.tsx"), "utf8");
-const canvasMentionSource = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-resource-mention-textarea.tsx"), "utf8");
+const canvasMentionSource = [
+    "../src/components/canvas/canvas-resource-mention-textarea.tsx",
+    "../src/components/canvas/canvas-mention-editable-dom.ts",
+    "../src/components/canvas/canvas-resource-mention-menu.tsx",
+].map((file) => readFileSync(resolve(import.meta.dir, file), "utf8")).join("\n");
 const canvasNodeSource = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-node.tsx"), "utf8");
 const canvasVideoPreviewSource = readFileSync(resolve(import.meta.dir, "../src/services/canvas-video-preview.ts"), "utf8");
 const videoPlayerSource = readFileSync(resolve(import.meta.dir, "../src/components/video-player.tsx"), "utf8");
@@ -56,6 +60,38 @@ describe("large canvas media rendering", () => {
         expect(shouldRefreshCanvasVirtualization(previous, moved, 1_000, 1_030)).toBe(false);
         expect(shouldRefreshCanvasVirtualization(previous, moved, 1_000, 1_064)).toBe(true);
         expect(shouldRefreshCanvasVirtualization(previous, previous, 1_000, 1_200)).toBe(false);
+    });
+
+    test("pans inside the pre-rendered margin without a page refresh", () => {
+        const size = { width: 1000, height: 800 };
+        const committed = { x: 0, y: 0, k: 1 };
+        // The committed window only pre-renders its base margin, so the first
+        // gesture refresh widens it right away.
+        expect(shouldRefreshCanvasVirtualization(committed, { x: -20, y: 0, k: 1 }, 0, 1_000, size)).toBe(true);
+        // A window mounted with the full gesture margin waits until the camera
+        // nears its edge.
+        expect(shouldRefreshCanvasVirtualization(committed, { x: -150, y: 0, k: 1 }, 0, 1_000, size, 320)).toBe(false);
+        expect(shouldRefreshCanvasVirtualization(committed, { x: -240, y: 0, k: 1 }, 0, 1_000, size, 320)).toBe(true);
+        // Zooming in shrinks the visible world and never leaves the covered window.
+        expect(shouldRefreshCanvasVirtualization(committed, { x: -50, y: -40, k: 1.1 }, 0, 1_000, size, 320)).toBe(false);
+        // Zooming out widens it.
+        expect(shouldRefreshCanvasVirtualization(committed, { x: 100, y: 80, k: 0.6 }, 0, 1_000, size, 320)).toBe(true);
+    });
+
+    test("widens the gesture margin a step per refresh instead of all at once", () => {
+        expect(canvasGestureRenderPadding(0)).toBe(128);
+        expect(canvasGestureRenderPadding(1)).toBe(192);
+        expect(canvasGestureRenderPadding(2)).toBe(256);
+        expect(canvasGestureRenderPadding(3)).toBe(320);
+        expect(canvasGestureRenderPadding(10)).toBe(320);
+    });
+
+    test("re-commits node scale mid-gesture only for large zoom stretches", () => {
+        const committed = { x: 0, y: 0, k: 1 };
+        expect(shouldCommitCanvasScaleDuringGesture({ x: 0, y: 0, k: 1.5 }, committed)).toBe(false);
+        expect(shouldCommitCanvasScaleDuringGesture({ x: 0, y: 0, k: 0.7 }, committed)).toBe(false);
+        expect(shouldCommitCanvasScaleDuringGesture({ x: 0, y: 0, k: 1.7 }, committed)).toBe(true);
+        expect(shouldCommitCanvasScaleDuringGesture({ x: 0, y: 0, k: 0.6 }, committed)).toBe(true);
     });
 
     test("keeps rendered nodes mounted longer than newly entering nodes", () => {

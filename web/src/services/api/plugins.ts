@@ -1,8 +1,8 @@
 import { http } from "@/services/api/request";
-import type { PluginManifest } from "@/lib/plugins/plugin-types";
+import type { RegisteredPlugin } from "@/lib/plugins/plugin-types";
 
 export type BackendPlugin = {
-    manifest: PluginManifest;
+    manifest: RegisteredPlugin["manifest"];
     source: "bundled" | "uploaded" | string;
     fileName: string;
     package: string;

@@ -28,7 +28,8 @@ export function canvasWriteView(data, operation, params = {}) {
   const metadata = {};
   for (const name of Object.keys(params.patch || {})) {
     if (name === 'title') continue;
-    const key = operation === 'canvas.node.update' && name === 'content' && MEDIA_KINDS.has(source.type)
+    const key = ((operation === 'canvas.node.update' && name === 'content') ||
+      (operation === 'canvas.node.configure' && name === 'prompt')) && MEDIA_KINDS.has(source.type)
       ? 'composerContent' : name;
     if (Object.hasOwn(source.metadata || {}, key)) {
       metadata[key] = field(source.metadata[key], `/metadata/${key.replace(/~/g, '~0').replace(/\//g, '~1')}`);
@@ -40,8 +41,6 @@ export function canvasWriteView(data, operation, params = {}) {
   } };
 }
 
-export function canvasWriteViewDescription(operation) {
-  return NODE_WRITES.has(operation) || operation === 'canvas.task.bind'
-    ? '。写入回执只含节点身份及本次修改字段的实际值；writeView 标明省略的节点数据。长字段的 preview 不是完整原文，需要时把 readView 传给 canvas_get 读取。'
-    : '';
+export function canvasWriteViewDescription(_operation) {
+  return '';
 }

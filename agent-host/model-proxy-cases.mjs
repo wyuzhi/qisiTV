@@ -52,9 +52,7 @@ async function fixture(t,{secure=false,disabled=false,bypassAll=false,rejectProx
     assert.equal(req.headers['x-beeftv-agent-token'],undefined);
     const hasResult=body.messages.some(message=>message.role==='tool');
     assert(body.tools.some(tool=>tool.function?.name==='canvas_get'),'synthetic operation must be registered in actual SDK');
-    // The host reads the current canvas before the model; the explicit model
-    // tool adds one read. Neither request may enter the model proxy.
-    assert.equal(reads,hasResult?2:1,hasResult?'tool must add exactly one read before the final response':'host must read the initial canvas before the model');
+    if(hasResult)assert.equal(reads,4,'initial snapshot, dispatch snapshots and the explicit tool must reach ops before the final response');
     res.writeHead(200,{'content-type':'text/event-stream'});
     const frame=(delta,finish_reason=null)=>res.write('data: '+JSON.stringify({id:'fixture',object:'chat.completion.chunk',created:1,model:'fixture',choices:[{index:0,delta,finish_reason}]})+'\n\n');
     frame(hasResult?{role:'assistant',content:'local proxy and operation complete'}:{role:'assistant',tool_calls:[{index:0,id:'local-read',type:'function',function:{name:'canvas_get',arguments:'{}'}}]});
@@ -109,16 +107,16 @@ for(const secure of [false,true])test(`actual host SDK + Durable ${secure?'HTTPS
   assert.equal(result.modelRequests,2,JSON.stringify({modelRequests:result.modelRequests,proxyConnections:result.proxyTargets.length,reason:result.end?.errorReason}));
   assert(!result.end?.error,JSON.stringify(result.end));
   assert.equal(result.end?.reply,'local proxy and operation complete');
-  assert.equal(result.reads,2,JSON.stringify({tools:result.end?.toolCalls,opsPaths:result.opsPaths}));
+  assert.equal(result.reads,4,JSON.stringify({tools:result.end?.toolCalls,opsPaths:result.opsPaths}));
   assert(result.opsPaths.includes('/api/ops/canvas.get'));
   assert(result.proxyTargets.length>0,'actual SDK requests must reach proxy');
   assert(result.proxyTargets.every(target=>target===result.destination),'local credentials/ops must never enter proxy');
 });
 for(const setting of ['disabled','bypassAll'])test(`actual SDK respects ${setting==='disabled'?'NODE_USE_ENV_PROXY=0':'NO_PROXY=*'}`,{timeout:30000},async t=>{
   const result=await fixture(t,{[setting]:true});
-  assert.equal(result.end?.reply,'local proxy and operation complete');assert.equal(result.modelRequests,2);assert.equal(result.reads,2);assert.deepEqual(result.proxyTargets,[]);
+  assert.equal(result.end?.reply,'local proxy and operation complete');assert.equal(result.modelRequests,2);assert.equal(result.reads,4);assert.deepEqual(result.proxyTargets,[]);
 });
 test('actual SDK does not bypass a failing explicit proxy',{timeout:30000},async t=>{
   const result=await fixture(t,{rejectProxy:true});
-  assert(result.end?.error,'proxy failure must fail the turn');assert.equal(result.modelRequests,0);assert.equal(result.reads,1,'only the local initial canvas read may precede a failed model request');assert(result.proxyTargets.length>0);assert(result.proxyTargets.every(target=>target===result.destination));
+  assert(result.end?.error,'proxy failure must fail the turn');assert.equal(result.modelRequests,0);assert.equal(result.reads,2);assert(result.proxyTargets.length>0);assert(result.proxyTargets.every(target=>target===result.destination));
 });

@@ -126,6 +126,8 @@ curl -s -X POST http://127.0.0.1:8082/inference \
 - 内置 UI 通过 Wails 绑定获得独立的短期引导凭据，再签发 UI 会话；单独出示桌面启动令牌不能取得助手写会话。
 - 客户端登记（`beeftv client register`）按合同需要 owner 凭据；桌面形态下同时需要桌面启动令牌。令牌值只在本机进程环境与本机 0600 文件里流转，不写入日志、不写进文档示例。
 
+面向脚本批量使用的完整命令、退出码与幂等约定见 [beeftv 命令行基础使用](beeftv-cli.mdx)。
+
 桌面发行包自带内置助手及 Node 24.22.1，无需用户安装 Node。macOS 的运行时位于 `BeefTV.app/Contents/Resources/agent-host/runtime/bin/node`，Windows 位于 `BeefTV.exe` 同级的 `agent-host/runtime/node.exe`。桌面后端直接启动随包 Node 与 `server.mjs`；更新系统 Node 不会替换发行包内置的运行时。
 
 构建发行包前必须设置 `BEEFTV_NODE_RUNTIME`：macOS 指向包含 `bin/node` 的官方 Node 目录，Windows 指向包含 `node.exe` 的官方 Node 目录。运行时版本、平台或架构不匹配都会终止构建；macOS 还会拒绝依赖 Homebrew 等非系统动态库的 Node。GitHub Actions 为每个平台准备固定版本运行时。

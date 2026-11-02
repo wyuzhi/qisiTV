@@ -7,8 +7,9 @@ const root = resolve(import.meta.dir, "..");
 describe("LibTV canvas connection visibility", () => {
     test("defaults to visible and persists the scoped preference", () => {
         const project = readFileSync(resolve(root, "src/pages/canvas/project.tsx"), "utf8");
-        expect(project).toContain('scopedLocalStorage.getItem("canvas:show-connections") !== "0"');
-        expect(project).toContain('scopedLocalStorage.setItem("canvas:show-connections", visible ? "1" : "0")');
+        const prefs = readFileSync(resolve(root, "src/pages/canvas/use-canvas-preferences.ts"), "utf8");
+        expect(prefs).toContain('scopedLocalStorage.getItem("canvas:show-connections") !== "0"');
+        expect(prefs).toContain('scopedLocalStorage.setItem("canvas:show-connections", visible ? "1" : "0")');
         expect(project).toContain("const renderedConnections = showConnections ? displayConnections : [];");
     });
 
@@ -28,7 +29,7 @@ describe("LibTV canvas connection visibility", () => {
         expect(zoomControls).toContain('{ id: "zoom-connections", label: showConnections ? "隐藏节点连线" : "显示节点连线"');
         expect(zoomControls).toContain('{ id: "zoom-minimap", label: "切换小地图", icon: <Map />');
         expect(project).toContain("showConnections={showConnections}");
-        expect(project).toContain("onToggleConnections={() => setShowConnections");
+        expect(project).toContain("onToggleConnections={toggleConnections}");
     });
 
     test("keeps canvas cleanup in the view dock and moves grid snapping out of the main creation dock", () => {
@@ -42,6 +43,6 @@ describe("LibTV canvas connection visibility", () => {
         expect(zoomControls).toContain('id: "zoom-snap-grid"');
         expect(zoomControls).toContain("snapToGrid: boolean;");
         expect(project).toContain("snapToGrid={snapToGrid}");
-        expect(project).toContain("onSnapToGridChange={(enabled) => {");
+        expect(project).toContain("onSnapToGridChange={changeSnapToGrid}");
     });
 });

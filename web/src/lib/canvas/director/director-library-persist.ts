@@ -1,4 +1,4 @@
-import { assertUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
+import { getActiveUserScope } from "@/lib/user-scope";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { uploadImage, type UploadedImage } from "@/services/image-storage";
 import { persistWorkspaceAssetLink, WorkspaceAssetMediaPendingError } from "@/services/workspace-asset-repository";
@@ -43,15 +43,13 @@ export function findWorkspaceAssetIdByStorageKey(storageKey?: string) {
  */
 export async function persistDirectorLibraryAsset(input: {
     asset: NewAsset;
-    expectedScope: CapturedUserScope;
     signal?: AbortSignal;
     existingAssetId?: string;
     existingPersisted?: boolean;
     pendingRemoteUpload?: boolean;
 }): Promise<DirectorLibraryPersistResult> {
-    const { expectedScope, signal } = input;
+    const { signal } = input;
     throwIfAborted(signal);
-    assertUserScope(expectedScope);
 
     const canonical = isDirectorCanonicalPersistSource({
         storageKey: storageKeyOf(input.asset),
@@ -62,18 +60,17 @@ export async function persistDirectorLibraryAsset(input: {
     if (existingId) {
         const live = useAssetStore.getState().assets.find((item) => item.id === existingId);
         if (live) {
-            if (canonical && input.existingPersisted && !peekAssetStoreDraft(expectedScope.userScope, live.id)) {
+            if (canonical && input.existingPersisted && !peekAssetStoreDraft(getActiveUserScope(), live.id)) {
                 return { assetId: live.id, created: false, confirmed: true };
             }
             let confirmed = canonical;
             try {
-                await persistWorkspaceAssetLink({ asset: live, expectedScope, signal, source: "uploaded" });
+                await persistWorkspaceAssetLink({ asset: live, signal, source: "uploaded" });
             } catch (error) {
                 if (!(error instanceof WorkspaceAssetMediaPendingError)) throw error;
                 confirmed = false;
             }
             throwIfAborted(signal);
-            assertUserScope(expectedScope);
             return { assetId: live.id, created: false, confirmed };
         }
     }
@@ -83,20 +80,18 @@ export async function persistDirectorLibraryAsset(input: {
     if (!asset) throw new Error("素材写入本地失败");
     let confirmed = canonical;
     try {
-        await persistWorkspaceAssetLink({ asset, expectedScope, signal, source: "uploaded" });
+        await persistWorkspaceAssetLink({ asset, signal, source: "uploaded" });
     } catch (error) {
         if (!(error instanceof WorkspaceAssetMediaPendingError)) throw error;
         confirmed = false;
     }
     throwIfAborted(signal);
-    assertUserScope(expectedScope);
     return { assetId, created: true, confirmed };
 }
 
-/** Upload with the captured identity, then persist. Do not recapture after the original upload. */
+/** Upload, then persist. */
 export async function persistDirectorImageUpload(input: {
     source: string | Blob;
-    expectedScope: CapturedUserScope;
     signal?: AbortSignal;
     toAsset: (uploaded: UploadedImage) => NewAsset;
     existingAssetId?: string;
@@ -104,13 +99,10 @@ export async function persistDirectorImageUpload(input: {
     onProgress?: (uploadedBytes: number, totalBytes: number) => void;
 }): Promise<{ uploaded: UploadedImage; persist: DirectorLibraryPersistResult }> {
     throwIfAborted(input.signal);
-    assertUserScope(input.expectedScope);
-    const uploaded = await uploadImage(input.source, input.onProgress, input.expectedScope);
+    const uploaded = await uploadImage(input.source, input.onProgress);
     throwIfAborted(input.signal);
-    assertUserScope(input.expectedScope);
     const persist = await persistDirectorLibraryAsset({
         asset: input.toAsset(uploaded),
-        expectedScope: input.expectedScope,
         signal: input.signal,
         existingAssetId: input.existingAssetId,
         existingPersisted: input.existingPersisted,
@@ -122,7 +114,6 @@ export async function persistDirectorImageUpload(input: {
 export async function persistDirectorMediaUpload(input: {
     source: Blob;
     prefix: string;
-    expectedScope: CapturedUserScope;
     signal?: AbortSignal;
     toAsset: (uploaded: UploadedFile) => NewAsset;
     existingAssetId?: string;
@@ -130,13 +121,10 @@ export async function persistDirectorMediaUpload(input: {
     onProgress?: (uploadedBytes: number, totalBytes: number) => void;
 }): Promise<{ uploaded: UploadedFile; persist: DirectorLibraryPersistResult }> {
     throwIfAborted(input.signal);
-    assertUserScope(input.expectedScope);
-    const uploaded = await uploadMediaFile(input.source, input.prefix, input.onProgress, input.expectedScope);
+    const uploaded = await uploadMediaFile(input.source, input.prefix, input.onProgress);
     throwIfAborted(input.signal);
-    assertUserScope(input.expectedScope);
     const persist = await persistDirectorLibraryAsset({
         asset: input.toAsset(uploaded),
-        expectedScope: input.expectedScope,
         signal: input.signal,
         existingAssetId: input.existingAssetId,
         existingPersisted: input.existingPersisted,

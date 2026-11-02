@@ -3,19 +3,12 @@ import type { MenuProps } from "antd";
 import { AppModal } from "@/components/ui/product/app-modal";
 import { Check, ChevronDown, FileText, FolderOpen, HardDrive, Image as ImageIcon, LoaderCircle, Music2, Puzzle, Search, Upload, UserRound, Video } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useUserStore } from "@/stores/use-user-store";
 
 import { AssetMediaPreview } from "@/components/asset-media-preview";
 import { AssetLibraryCard } from "@/components/assets/asset-library-card";
-import {
-    assetPickerQueryKey,
-    expectedScopeFromQueryKey,
-    runAssetViewAction,
-    shouldSuppressAssetViewError,
-    useAssetViewGeneration,
-} from "@/components/assets/asset-view-session";
-import { captureUserScope, userScopeMatches, type CapturedUserScope } from "@/lib/user-scope-guard";
+import { assetPickerQueryKey } from "@/components/assets/asset-view-session";
 import { CachedResourceImage } from "@/components/cached-resource-image";
 import { PaginationBar } from "@/components/layout/workspace-page";
 import { cn } from "@/lib/utils";
@@ -81,25 +74,19 @@ type Props = {
     upload?: {
         accept: string;
         description: string;
-        onUpload: (files: FileList, expectedScope: CapturedUserScope) => Promise<string[]>;
+        onUpload: (files: FileList) => Promise<string[]>;
         external?: {
             accept: string;
             description: string;
-            onUpload: (files: FileList, folderId: string | undefined, expectedScope: CapturedUserScope) => Promise<AssetLibraryPickerItem[]>;
+            onUpload: (files: FileList, folderId: string | undefined) => Promise<AssetLibraryPickerItem[]>;
         };
     };
     onClose: () => void;
-    onConfirm: (ids: string[], expectedScope: CapturedUserScope) => Promise<void> | void;
-    onFolderAction?: (folderId: string, expectedScope: CapturedUserScope) => Promise<void> | void;
+    onConfirm: (ids: string[]) => Promise<void> | void;
+    onFolderAction?: (folderId: string) => Promise<void> | void;
 };
 
-export function AssetLibraryPickerModal(props: Props) {
-    const queryClient = useQueryClient();
-    const generation = useAssetViewGeneration(queryClient);
-    return <AssetLibraryPickerModalSession key={generation} {...props} />;
-}
-
-function AssetLibraryPickerModalSession({
+export function AssetLibraryPickerModal({
     remoteLibrary = false,
     remoteKind,
     mediaKinds = DEFAULT_MEDIA_KINDS,
@@ -126,7 +113,6 @@ function AssetLibraryPickerModalSession({
     onConfirm,
     onFolderAction,
 }: Props) {
-    const [entryScope] = useState(() => captureUserScope());
     const [category, setCategory] = useState(initialCategory);
     const [mediaKind, setMediaKind] = useState<AssetPickerMediaKind | "all">("all");
     const [folderId, setFolderId] = useState(initialFolderId);
@@ -152,8 +138,8 @@ function AssetLibraryPickerModalSession({
     // remoteKind 是调用方写死的能力约束；媒体类型筛选只在没有该约束时参与服务端查询。
     const remoteQueryKind = remoteKind || (mediaKind === "all" ? undefined : mediaKind);
     const remoteQuery = useQuery({
-        queryKey: assetPickerQueryKey(entryScope, remotePage, remotePageSize, category, remoteKeyword, remoteQueryKind),
-        queryFn: ({ queryKey, signal }) => loadAssetLibraryPage({
+        queryKey: assetPickerQueryKey(remotePage, remotePageSize, category, remoteKeyword, remoteQueryKind),
+        queryFn: ({ signal }) => loadAssetLibraryPage({
             page: remotePage,
             pageSize: remotePageSize,
             kind: remoteQueryKind,
@@ -161,7 +147,6 @@ function AssetLibraryPickerModalSession({
             status: "active",
             query: remoteKeyword,
             signal,
-            expectedScope: expectedScopeFromQueryKey(queryKey),
         }),
         enabled: remoteEnabled && open && sessionHydrated,
     });
@@ -287,16 +272,11 @@ function AssetLibraryPickerModalSession({
         setWorking(true);
         setError("");
         try {
-            const confirmed = await runAssetViewAction(entryScope, async (scope) => {
-                await onConfirm(selectedIds, scope);
-                return true;
-            });
-            if (!confirmed) return;
+            await onConfirm(selectedIds);
         } catch (reason) {
-            if (shouldSuppressAssetViewError(reason, entryScope)) return;
             setError(reason instanceof Error ? reason.message : "素材操作失败，请重试");
         } finally {
-            if (userScopeMatches(entryScope)) setWorking(false);
+            setWorking(false);
         }
     };
 
@@ -306,31 +286,21 @@ function AssetLibraryPickerModalSession({
         setError("");
         setUploadingCount(files.length);
         try {
-            const uploaded = await runAssetViewAction(entryScope, async (scope) => {
-                if (source === "plugin") {
-                    const items = await upload!.external!.onUpload(files, folderId === "all" ? undefined : folderId, scope);
-                    return { kind: "plugin" as const, items };
-                }
-                const ids = await upload!.onUpload(files, scope);
-                return { kind: "local" as const, ids };
-            });
-            if (!uploaded) return;
-            if (uploaded.kind === "plugin") {
-                setUploadedItems((current) => [...current, ...uploaded.items]);
-                const ids = uploaded.items.map((item) => item.id);
+            if (source === "plugin") {
+                const items = await upload!.external!.onUpload(files, folderId === "all" ? undefined : folderId);
+                setUploadedItems((current) => [...current, ...items]);
+                const ids = items.map((item) => item.id);
                 if (ids.length) setSelected((current) => new Set(multiple ? [...current, ...ids] : ids.slice(-1)));
-            } else if (uploaded.ids.length) {
-                setSelected((current) => new Set(multiple ? [...current, ...uploaded.ids] : uploaded.ids.slice(-1)));
+            } else {
+                const ids = await upload!.onUpload(files);
+                if (ids.length) setSelected((current) => new Set(multiple ? [...current, ...ids] : ids.slice(-1)));
             }
         } catch (reason) {
-            if (shouldSuppressAssetViewError(reason, entryScope)) return;
             setError(reason instanceof Error ? reason.message : "素材上传失败，请重试");
         } finally {
-            if (userScopeMatches(entryScope)) {
-                if (uploadInputRef.current) uploadInputRef.current.value = "";
-                setWorking(false);
-                setUploadingCount(0);
-            }
+            if (uploadInputRef.current) uploadInputRef.current.value = "";
+            setWorking(false);
+            setUploadingCount(0);
         }
     };
 
@@ -339,16 +309,11 @@ function AssetLibraryPickerModalSession({
         setWorking(true);
         setError("");
         try {
-            const done = await runAssetViewAction(entryScope, async (scope) => {
-                await onFolderAction(folderId, scope);
-                return true;
-            });
-            if (!done) return;
+            await onFolderAction(folderId);
         } catch (reason) {
-            if (shouldSuppressAssetViewError(reason, entryScope)) return;
             setError(reason instanceof Error ? reason.message : "文件夹操作失败，请重试");
         } finally {
-            if (userScopeMatches(entryScope)) setWorking(false);
+            setWorking(false);
         }
     };
 

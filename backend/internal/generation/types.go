@@ -76,6 +76,8 @@ type TextMessage struct {
 
 type Config struct {
 	ChannelID                string                    `json:"channelId"`
+	CredentialRef            string                    `json:"credentialRef,omitempty"`
+	MediaProtocolVersion     string                    `json:"mediaProtocolVersion,omitempty"`
 	ChannelModelKey          string                    `json:"channelModelKey,omitempty"`
 	VariantID                string                    `json:"variantId,omitempty"`
 	ProviderModelKey         string                    `json:"providerModelKey,omitempty"`
@@ -101,6 +103,8 @@ type Config struct {
 	VQuality                 string                    `json:"vquality"`
 	VideoGenerateAudio       string                    `json:"videoGenerateAudio"`
 	VideoWatermark           string                    `json:"videoWatermark"`
+	VideoDraft               string                    `json:"videoDraft"`
+	VideoReturnLastFrame     string                    `json:"videoReturnLastFrame,omitempty"`
 	ArkPrivateAssetUpload    string                    `json:"videoArkPrivateAssetUpload"`
 	AudioVoice               string                    `json:"audioVoice"`
 	AudioFormat              string                    `json:"audioFormat"`
@@ -108,6 +112,7 @@ type Config struct {
 	AudioInstructions        string                    `json:"audioInstructions"`
 	SystemPrompt             string                    `json:"systemPrompt"`
 	CapabilityConfig         *ModelCapabilityConfig    `json:"capabilityConfig"`
+	ImageCapabilitiesVersion *string                   `json:"imageCapabilitiesVersion,omitempty"`
 	VideoCapabilitiesVersion *string                   `json:"videoCapabilitiesVersion,omitempty"`
 	WorkflowID               string                    `json:"workflowId"`
 	WebappID                 string                    `json:"webappId"`
@@ -145,6 +150,7 @@ type MediaHydrationPolicy struct {
 
 type ImageResponse struct {
 	Data  []map[string]interface{} `json:"data"`
+	Usage map[string]interface{}   `json:"usage,omitempty"`
 	Error *UpstreamError           `json:"error"`
 	Code  *int                     `json:"code"`
 	Msg   string                   `json:"msg"`

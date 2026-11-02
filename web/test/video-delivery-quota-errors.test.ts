@@ -17,5 +17,5 @@ test("delivery failure and saved message preserve already generated guidance", (
  expect(failure.category).toBe("delivery_failed");
  expect(failure.message).toContain("无需重新付费生成");
  expect(failure.blockAutomaticRetry).toBe(true);
- expect(explainGenerationError(failure.message).category).toBe("delivery_failed");
+ expect(explainGenerationError({ code: failure.category, message: failure.message }).category).toBe("delivery_failed");
 });

@@ -31,7 +31,7 @@ func TestReferenceRecoveryEvidenceSurvivesSQLiteAndDiagnosticZIP(t *testing.T) {
 		case "/storage":
 			puts++
 			w.WriteHeader(503)
-		case "/v1/video-references/uploads/complete":
+		case "/v1/media/uploads/complete":
 			confirms++
 			w.WriteHeader(400)
 			_, _ = w.Write([]byte(`{"error":{"code":"video_reference_upload_incomplete","message":"not received"}}`))

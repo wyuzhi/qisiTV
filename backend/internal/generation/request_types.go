@@ -17,30 +17,19 @@ func RequestAsMap(value interface{}) (map[string]interface{}, error) {
 type SeedanceVideosRequest struct {
 	OmniReferenceTaskType string   `json:"omni_reference_task_type,omitempty"`
 	Model                 string   `json:"model"`
-	Prompt                string   `json:"prompt"`
-	AspectRatio           string   `json:"aspect_ratio"`
-	Duration              int      `json:"duration"`
+	Prompt                string   `json:"prompt,omitempty"`
+	AspectRatio           string   `json:"aspect_ratio,omitempty"`
+	Resolution            string   `json:"resolution,omitempty"`
+	Duration              int      `json:"duration,omitempty"`
 	GenerateAudio         *bool    `json:"generate_audio,omitempty"`
+	Draft                 *bool    `json:"draft,omitempty"`
+	DraftTaskID           string   `json:"draft_task_id,omitempty"`
+	ReturnLastFrame       *bool    `json:"return_last_frame,omitempty"`
 	ImageURL              string   `json:"image_url,omitempty"`
 	ReferenceImageURLs    []string `json:"reference_image_urls,omitempty"`
 	ImageURLs             []string `json:"image_urls,omitempty"`
 	ReferenceVideos       []string `json:"reference_videos,omitempty"`
 	ReferenceAudios       []string `json:"reference_audios,omitempty"`
-}
-
-type GrokImageRequest struct {
-	Model          string          `json:"model"`
-	Prompt         string          `json:"prompt"`
-	Image          *GrokImageInput `json:"image,omitempty"`
-	N              int             `json:"n"`
-	ResponseFormat string          `json:"response_format"`
-	AspectRatio    string          `json:"aspect_ratio,omitempty"`
-	// Resolution 对应 xAI / grok2api 的 resolution（常见 1k / 2k）。
-	Resolution string `json:"resolution,omitempty"`
-}
-
-type GrokImageInput struct {
-	URL string `json:"url"`
 }
 
 type GeminiImageRequest struct {
@@ -78,9 +67,11 @@ type SeedanceAgentPlanRequest struct {
 	OmniReferenceTaskType string                   `json:"omni_reference_task_type,omitempty"`
 	Model                 string                   `json:"model"`
 	Content               []map[string]interface{} `json:"content"`
-	Ratio                 string                   `json:"ratio"`
+	Ratio                 string                   `json:"ratio,omitempty"`
 	Resolution            string                   `json:"resolution"`
-	Duration              int                      `json:"duration"`
+	Duration              int                      `json:"duration,omitempty"`
 	GenerateAudio         *bool                    `json:"generate_audio,omitempty"`
 	Watermark             *bool                    `json:"watermark,omitempty"`
+	Draft                 *bool                    `json:"draft,omitempty"`
+	ReturnLastFrame       *bool                    `json:"return_last_frame,omitempty"`
 }

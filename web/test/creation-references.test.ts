@@ -18,7 +18,7 @@ describe("creation references", () => {
     test("removes attachments and prompt tokens beyond the current model limit", () => {
         const attachments = [imageAttachment("first"), imageAttachment("second"), imageAttachment("third")];
         const references = buildCreationMentionReferences([], attachments);
-        const result = reconcileCreationAttachmentLimit(attachments, references, 1);
+        const result = reconcileCreationAttachmentLimit(attachments, references, { image: 1 });
         const prompt = references.map(canvasResourceMentionToken).join(" ");
         const nextPrompt = removeCreationReferenceTokens(prompt, result.removedReferences);
 
@@ -31,7 +31,7 @@ describe("creation references", () => {
 
     test("returns the original attachment list when it is already within the limit", () => {
         const attachments = [imageAttachment("first")];
-        const result = reconcileCreationAttachmentLimit(attachments, buildCreationMentionReferences([], attachments), 1);
+        const result = reconcileCreationAttachmentLimit(attachments, buildCreationMentionReferences([], attachments), { image: 1 });
 
         expect(result.attachments).toBe(attachments);
         expect(result.removedReferences).toEqual([]);

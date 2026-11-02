@@ -2,7 +2,16 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+const MENTION_EDITOR_FILES = [
+    "../src/components/canvas/canvas-resource-mention-textarea.tsx",
+    "../src/components/canvas/canvas-mention-editable-dom.ts",
+    "../src/components/canvas/canvas-resource-mention-menu.tsx",
+];
+
 function source(path: string) {
+    if (path === "../src/components/canvas/canvas-resource-mention-textarea.tsx") {
+        return MENTION_EDITOR_FILES.map((file) => readFileSync(resolve(import.meta.dir, file), "utf8")).join("\n");
+    }
     return readFileSync(resolve(import.meta.dir, path), "utf8");
 }
 
@@ -19,7 +28,7 @@ describe("canvas resource mention editor", () => {
 
     test("refreshes async reference previews even when prompt text has not changed", () => {
         const component = source("../src/components/canvas/canvas-resource-mention-textarea.tsx");
-        const unchangedTextBranch = component.match(/if \(currentValue === value && lastRenderedValueRef.current === value\) \{([^}]+)\}/)?.[1] || "";
+        const unchangedTextBranch = component.match(/if \(currentValue === value && lastRenderedValueRef.current === value[^)]*\) \{([^}]+)\}/)?.[1] || "";
         expect(unchangedTextBranch).toContain("syncInlineMentionPreviews(editor, activeReferences)");
         const sync = component.slice(component.indexOf("function syncInlineMentionPreviews("), component.indexOf("function MentionMenu("));
         expect(sync).toContain('byId.get(chip.dataset.mentionReferenceId || "")');

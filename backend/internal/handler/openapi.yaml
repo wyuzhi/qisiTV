@@ -138,7 +138,7 @@ paths:
   /beefapi/connection:
     get:
       tags: [beefapi]
-      summary: 读取内置 BeefAPI 连接状态
+      summary: 读取内置 BeefTV 连接状态
       description: 只返回账号和状态，不含密钥或 device_code。
       responses:
         "200":

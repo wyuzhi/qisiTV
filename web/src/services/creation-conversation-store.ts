@@ -1,6 +1,5 @@
 import { localForageStorageForScope } from "@/lib/localforage-storage";
-import { captureUserScopeEpoch, getActiveUserScope, userScopeEpochMatches, type UserScopeEpoch } from "@/lib/user-scope";
-import { assertUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
+import { getActiveUserScope } from "@/lib/user-scope";
 import { ApiError } from "@/services/api/request";
 import { creationConversationsApi, type CreationConversationDocument, type CreationConversationRecord } from "@/services/api/creation-conversations";
 
@@ -8,7 +7,6 @@ export const CREATION_CONVERSATIONS_KEY = "creation-conversations-v1";
 const CREATION_CONVERSATION_DRAFTS_KEY = "creation-conversation-drafts-v1";
 const CREATION_CONVERSATION_DRAFT_INDEX_KEY = "creation-conversation-drafts-v1:index";
 const CREATION_CONVERSATION_TOMBSTONES_KEY = "creation-conversation-tombstones-v1";
-const SCOPE_SWITCHED_MESSAGE = "工作区已更换，这次操作没有继续。";
 
 type PendingCreationMessage = {
     id: string;
@@ -302,14 +300,6 @@ function sortKeys(value: unknown): unknown {
     return value;
 }
 
-function rejectIfScopeChanged(epoch: UserScopeEpoch) {
-    if (!userScopeEpochMatches(epoch)) throw new Error(SCOPE_SWITCHED_MESSAGE);
-}
-
-function captureScope(scope = getActiveUserScope()): UserScopeEpoch {
-    return captureUserScopeEpoch(scope);
-}
-
 function enqueue(scope: string, id: string, work: () => Promise<void>) {
     const key = scopeKey(scope, id);
     const previous = writeQueues.get(key) || Promise.resolve();
@@ -501,19 +491,13 @@ export async function loadLocalCreationConversationDrafts<T extends StoredCreati
 }
 
 export async function loadCreationConversations<T extends StoredCreationConversation>(scope = getActiveUserScope()) {
-    const epoch = captureScope(scope);
-    rejectIfScopeChanged(epoch);
     const listed = await creationConversationsApi.list();
-    rejectIfScopeChanged(epoch);
     const deleted = new Set(listed.deletedIds || []);
     await rememberTombstones(scope, listed.deletedIds || []);
-    rejectIfScopeChanged(epoch);
     const committedRecords = new Map((listed.conversations || []).map((item) => [item.id, item]));
     const tombstones = await withScopeStorage(scope, () => readTombstones(scope));
     const legacy = await withScopeStorage(scope, () => readLegacyArray(scope));
-    rejectIfScopeChanged(epoch);
     for (const local of legacy || []) {
-        rejectIfScopeChanged(epoch);
         if (!local?.id || deleted.has(local.id) || tombstones.has(local.id)) continue;
         const existing = committedRecords.get(local.id);
         if (existing && !existing.deleted) {
@@ -521,20 +505,15 @@ export async function loadCreationConversations<T extends StoredCreationConversa
             const localFingerprint = persistableFingerprint(local);
             const remoteFingerprint = persistableFingerprint(remoteDocument);
             if (localFingerprint && remoteFingerprint && localFingerprint === remoteFingerprint) {
-                rejectIfScopeChanged(epoch);
                 await withScopeStorage(scope, () => removeLegacyConversation(scope, local.id));
-                rejectIfScopeChanged(epoch);
                 continue;
             }
-            rejectIfScopeChanged(epoch);
             await withScopeStorage(scope, () => writeDraft(scope, local.id, {
                 baseRevision: existing.revision,
                 document: cloneConversation(local),
                 remote: { revision: existing.revision, document: remoteDocument },
             }));
-            rejectIfScopeChanged(epoch);
             await withScopeStorage(scope, () => removeLegacyConversation(scope, local.id));
-            rejectIfScopeChanged(epoch);
             continue;
         }
         let document: CreationConversationDocument;
@@ -542,29 +521,23 @@ export async function loadCreationConversations<T extends StoredCreationConversa
             document = persistableDocument(local);
         } catch {
             await withScopeStorage(scope, () => writeDraft(scope, local.id, { baseRevision: 0, document: cloneConversation(local) }));
-            rejectIfScopeChanged(epoch);
             continue;
         }
-        rejectIfScopeChanged(epoch);
         const imported = await creationConversationsApi.importLegacy({
             operationId: `${CREATION_CONVERSATIONS_KEY}:${local.id}`,
             document,
         });
-        rejectIfScopeChanged(epoch);
         if (imported.deleted) {
             deleted.add(imported.id);
             await rememberTombstones(scope, [imported.id]);
-            rejectIfScopeChanged(epoch);
             continue;
         }
         if (imported.conversation?.id) {
             committedRecords.set(imported.conversation.id, imported.conversation);
             await withScopeStorage(scope, () => removeLegacyConversation(scope, imported.conversation.id));
-            rejectIfScopeChanged(epoch);
         }
     }
     const drafts = await withScopeStorage(scope, () => listDrafts(scope));
-    rejectIfScopeChanged(epoch);
     const loaded: T[] = [];
     for (const record of committedRecords.values()) {
         if (record.deleted || deleted.has(record.id) || tombstones.has(record.id)) continue;
@@ -609,8 +582,7 @@ function isConflictError(error: unknown) {
     return error instanceof ApiError && (error.status === 409 || error.reason === "conflict");
 }
 
-async function recoverLostAck(scope: string, epoch: UserScopeEpoch, id: string, document: StoredCreationConversation): Promise<CreationConversationRecord | null> {
-    rejectIfScopeChanged(epoch);
+async function recoverLostAck(scope: string, id: string, document: StoredCreationConversation): Promise<CreationConversationRecord | null> {
     let remote: CreationConversationRecord;
     try {
         remote = await creationConversationsApi.get(id);
@@ -618,7 +590,6 @@ async function recoverLostAck(scope: string, epoch: UserScopeEpoch, id: string, 
         if (error instanceof ApiError && (error.status === 404 || error.reason === "not_found")) return null;
         throw error;
     }
-    rejectIfScopeChanged(epoch);
     if (remote.deleted) return null;
     const remoteDocument = documentFromRecord(remote);
     const localFingerprint = persistableFingerprint(document);
@@ -637,8 +608,7 @@ async function recoverLostAck(scope: string, epoch: UserScopeEpoch, id: string, 
     return null;
 }
 
-async function flushConversation(scope: string, epoch: UserScopeEpoch, id: string, resolveConflict: boolean) {
-    rejectIfScopeChanged(epoch);
+async function flushConversation(scope: string, id: string, resolveConflict: boolean) {
     const key = scopeKey(scope, id);
     for (;;) {
         const snapshot = pendingWrites.get(key);
@@ -653,22 +623,19 @@ async function flushConversation(scope: string, epoch: UserScopeEpoch, id: strin
             return;
         }
         const draft = await withScopeStorage(scope, () => readDraft(scope, id));
-        rejectIfScopeChanged(epoch);
         if (!resolveConflict && draft?.remote) return;
         const expectedRevision = resolveConflict
             ? (draft?.remote?.revision ?? committed.get(key)?.revision ?? 0)
             : await draftBaseRevision(scope, id);
-        rejectIfScopeChanged(epoch);
         let saved: CreationConversationRecord;
         try {
             saved = await putConversation(id, expectedRevision, snapshot.document);
         } catch (error) {
             if (!isConflictError(error)) throw error;
-            const recovered = await recoverLostAck(scope, epoch, id, snapshot.document);
+            const recovered = await recoverLostAck(scope, id, snapshot.document);
             if (!recovered) throw error;
             saved = recovered;
         }
-        rejectIfScopeChanged(epoch);
         const canonical = documentFromRecord(saved);
         if (!commitIfCurrent(scope, id, saved.revision, canonical)) return;
         const latest = pendingWrites.get(key);
@@ -694,7 +661,6 @@ export async function saveCreationConversations<T extends StoredCreationConversa
     scope = getActiveUserScope(),
     options?: { resolveConflictIds?: string[] },
 ) {
-    const epoch = captureScope(scope);
     const resolveIds = new Set(options?.resolveConflictIds || []);
     const jobs = conversations.map((conversation) => {
         if (!conversation?.id) throw new Error("缺少要保存的创作对话 ID");
@@ -704,9 +670,8 @@ export async function saveCreationConversations<T extends StoredCreationConversa
         pendingWrites.set(key, { generation, document: cloned });
         const resolveConflict = resolveIds.has(cloned.id);
         return captureDraft(scope, cloned.id, cloned).then(() => {
-            rejectIfScopeChanged(epoch);
             if (conversationHasConflict(cloned) && !resolveConflict) return;
-            return enqueue(scope, cloned.id, () => flushConversation(scope, epoch, cloned.id, resolveConflict));
+            return enqueue(scope, cloned.id, () => flushConversation(scope, cloned.id, resolveConflict));
         });
     });
     await Promise.all(jobs);
@@ -718,8 +683,6 @@ export async function parkCreationConversationDraft(
     remote: { revision: number; document: StoredCreationConversation } | undefined,
     scope = getActiveUserScope(),
 ) {
-    const epoch = captureScope(scope);
-    rejectIfScopeChanged(epoch);
     const storage = localForageStorageForScope(scope);
     const { conflictRemote: _conflictRemote, ...local } = document;
     await storage.setItem(parkedDraftKey(id), JSON.stringify({
@@ -738,10 +701,8 @@ export async function adoptServerConfirmedConversationDocument(
     conversationId: string,
     document: StoredCreationConversation,
     revision: number,
-    entryCapturedScope: CapturedUserScope,
 ) {
-    assertUserScope(entryCapturedScope);
-    const scope = entryCapturedScope.userScope;
+    const scope = getActiveUserScope();
     const id = conversationId.trim();
     if (!id) throw new Error("缺少要采纳的创作对话 ID");
     if (!Number.isInteger(revision) || revision < 1) throw new Error("对话版本无效");
@@ -749,7 +710,6 @@ export async function adoptServerConfirmedConversationDocument(
     let adopted: StoredCreationConversation | undefined;
 
     await withScopeStorage(scope, async () => {
-        assertUserScope(entryCapturedScope);
         const key = scopeKey(scope, id);
         const current = committed.get(key);
         if (current && current.revision > revision) {
@@ -763,7 +723,6 @@ export async function adoptServerConfirmedConversationDocument(
         // Every storage await can admit another edit, including the final
         // remove. Only publish/ack a generation still current after its I/O.
         for (;;) {
-            assertUserScope(entryCapturedScope);
             const generation = writeGenerations.get(key) ?? 0;
             const pending = pendingWrites.get(key);
             const ours = pending?.document ?? draft?.document;
@@ -800,7 +759,6 @@ export async function adoptServerConfirmedConversationDocument(
         }
     });
 
-    assertUserScope(entryCapturedScope);
     if (!adopted) throw new Error("这次生成结果没能写进对话。请再试一次。");
     return adopted;
 }
@@ -811,20 +769,14 @@ export async function acceptSavedCreationConversation(
     remote: { revision: number; document: StoredCreationConversation },
     scope = getActiveUserScope(),
 ) {
-    const epoch = captureScope(scope);
-    rejectIfScopeChanged(epoch);
     await parkCreationConversationDraft(id, document, remote, scope);
-    rejectIfScopeChanged(epoch);
     pendingWrites.delete(scopeKey(scope, id));
     rememberCommitted(scope, id, remote.revision, remote.document);
     await withScopeStorage(scope, () => removeDraft(scope, id));
 }
 
 export async function restoreParkedCreationConversation<T extends StoredCreationConversation>(id: string, scope = getActiveUserScope()) {
-    const epoch = captureScope(scope);
-    rejectIfScopeChanged(epoch);
     const parked = await takeParkedCreationConversationDraft<T>(id, scope);
-    rejectIfScopeChanged(epoch);
     if (!parked) return null;
     const remote = parked.conflictRemote;
     const document = cloneConversation(parked);
@@ -839,11 +791,8 @@ export async function restoreParkedCreationConversation<T extends StoredCreation
 }
 
 export async function takeParkedCreationConversationDraft<T extends StoredCreationConversation>(id: string, scope = getActiveUserScope()) {
-    const epoch = captureScope(scope);
-    rejectIfScopeChanged(epoch);
     const storage = localForageStorageForScope(scope);
     const raw = await storage.getItem(parkedDraftKey(id));
-    rejectIfScopeChanged(epoch);
     await storage.removeItem(parkedDraftKey(id));
     if (!raw) return null;
     try {
@@ -862,16 +811,13 @@ export async function hasParkedCreationConversationDraft(id: string, scope = get
 
 export async function deleteCreationConversation(conversationId: string, scope = getActiveUserScope()) {
     if (!conversationId) throw new Error("缺少要删除的创作对话 ID");
-    const epoch = captureScope(scope);
     return enqueue(scope, conversationId, async () => {
-        rejectIfScopeChanged(epoch);
         const expectedRevision = committed.get(scopeKey(scope, conversationId))?.revision ?? 0;
         try {
             await creationConversationsApi.remove(conversationId, expectedRevision);
         } catch (error) {
             if (!(error instanceof ApiError) || error.status !== 404) throw error;
         }
-        rejectIfScopeChanged(epoch);
         forgetCommitted(scope, conversationId);
         await rememberTombstones(scope, [conversationId]);
         await withScopeStorage(scope, async () => {

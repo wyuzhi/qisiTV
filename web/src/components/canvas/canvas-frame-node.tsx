@@ -156,7 +156,7 @@ export const CanvasFrameNode = React.memo(function CanvasFrameNode({
         : data.title;
 
     const header = (
-                <div data-canvas-frame-header
+                <div data-canvas-frame-header data-canvas-live-scale={workflow || undefined}
                     className={`pointer-events-auto absolute left-0 z-10 flex items-center gap-1.5 px-1.5 ${workflow ? "bottom-full" : "inset-x-0 top-0"}`}
                     style={{
                         height: FRAME_HEADER_HEIGHT,

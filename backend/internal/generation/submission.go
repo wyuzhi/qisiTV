@@ -84,7 +84,7 @@ func SafeRouteRejection(err error) bool {
 			return true
 		}
 		switch upstream.StatusCode {
-		case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden, http.StatusNotFound, http.StatusTooManyRequests:
+		case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden, http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusTooManyRequests, http.StatusNotImplemented:
 			return true
 		}
 	}

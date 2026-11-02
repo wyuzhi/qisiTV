@@ -227,7 +227,7 @@ test("F02: reference-driven compatibility fallback is rejected after re-resoluti
             const capabilityConfig = defaultModelCapabilityConfig(undefined, model);
             capabilityConfig.video!.operations = [index ? "image_to_video" : "text_to_video"];
             capabilityConfig.video!.references.maxImages = index;
-            return { model, displayName: "Cinema", capability: "video", billingMode: "per_second", unitPriceMicrocredits: 1, capabilityConfig };
+            return { model, displayName: "Cinema", capability: "video", billingMode: "per_second", unitPriceMicrocredits: 1, capabilityConfig, capabilitySource: "user" as const };
         }) }],
     };
     const videoNode = { ...node, type: CanvasNodeType.Video };
@@ -321,4 +321,30 @@ test("partially started proposals are marked handled exactly once and keep the c
     await executeAssistantProposal(args);
     expect(handled).toEqual([proposal.proposalId]);
     expect(args.claims.has(proposal.proposalId)).toBe(true);
+});
+
+test("unified backend confirmOrder handles ordinary image and audio proposals without calling per-node generate", async () => {
+    const handled: string[] = [];
+    let generated = 0;
+    let confirmedCalls = 0;
+    const audioNode: CanvasNodeData = { ...node, id: "audio-1", type: CanvasNodeType.Audio };
+    for (const currentProposal of [
+        proposal,
+        { ...proposal, proposalId: "proposal-audio", kind: "audio" as const, nodeIds: [audioNode.id] },
+    ]) {
+        const currentNodes = currentProposal.kind === "audio" ? [audioNode] : [node];
+        await executeAssistantProposal(input({
+            proposal: currentProposal,
+            nodes: currentNodes,
+            confirmOrder: async () => {
+                confirmedCalls++;
+                return { taskIds: [`task-${currentProposal.proposalId}`] };
+            },
+            generate: async () => { generated++; },
+            markHandled: (id) => { handled.push(id); },
+        }));
+    }
+    expect(confirmedCalls).toBe(2);
+    expect(generated).toBe(0);
+    expect(handled).toEqual(["proposal-1", "proposal-audio"]);
 });

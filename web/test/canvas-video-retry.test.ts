@@ -9,7 +9,6 @@ test("video retry reuses the persisted task without reading changed canvas input
     const waitForGenerationTask = mock(async () => ({ ...task, status: "succeeded" as const }));
     const result = await retryStoredCanvasVideo(task.id, new AbortController().signal, () => {}, { queryGenerationTask, retryGenerationTask, waitForGenerationTask });
     expect(retryGenerationTask.mock.calls[0]?.[0]).toBe("original");
-    expect(retryGenerationTask.mock.calls[0]?.[1]).toHaveProperty("expectedScope");
     expect(result.prompt).toBe(task.prompt);
     expect(waitForGenerationTask.mock.calls[0]?.[0]).toBe(task.id);
 });

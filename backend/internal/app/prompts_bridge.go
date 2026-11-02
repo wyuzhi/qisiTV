@@ -54,6 +54,9 @@ func newPromptAdminGate(service *Service) promptAdminGate {
 	return promptAdminGate{requireAdmin: service.RequireAdmin, appendAudit: service.appendAdminAudit}
 }
 
+// PromptService exposes the domain service to the HTTP composition layer.
+func (s *Service) PromptService() *prompts.Service { return s.promptDomain() }
+
 func (s *Service) promptDomain() *prompts.Service {
 	if s == nil {
 		return prompts.New(nil, nil)
@@ -62,30 +65,6 @@ func (s *Service) promptDomain() *prompts.Service {
 		return s.prompts
 	}
 	return prompts.New(s.repo, newPromptAdminGate(s))
-}
-
-func (s *Service) ListStyleProfiles(userID string) ([]model.StyleProfile, error) {
-	return s.promptDomain().ListStyleProfiles(userID)
-}
-
-func (s *Service) CreateStyleProfile(userID string, req StyleProfileRequest) (model.StyleProfile, error) {
-	return s.promptDomain().CreateStyleProfile(userID, req)
-}
-
-func (s *Service) UpdateStyleProfile(userID string, id string, req StyleProfileRequest) (model.StyleProfile, error) {
-	return s.promptDomain().UpdateStyleProfile(userID, id, req)
-}
-
-func (s *Service) SetStyleProfileFavorite(userID string, id string, favorite bool) error {
-	return s.promptDomain().SetStyleProfileFavorite(userID, id, favorite)
-}
-
-func (s *Service) TouchStyleProfile(userID string, id string) error {
-	return s.promptDomain().TouchStyleProfile(userID, id)
-}
-
-func (s *Service) DeleteStyleProfile(userID string, id string) error {
-	return s.promptDomain().DeleteStyleProfile(userID, id)
 }
 
 func (s *Service) EnsureDefaultPromptTemplates() error {
@@ -106,18 +85,6 @@ func (s *Service) UpdatePromptTemplate(actor *model.User, id string, req PromptT
 
 func (s *Service) DeletePromptTemplate(actor *model.User, id string) error {
 	return s.promptDomain().DeletePromptTemplate(actor, id)
-}
-
-func (s *Service) UserPromptPreferences(user *model.User) ([]UserPromptPreference, error) {
-	return s.promptDomain().UserPromptPreferences(user)
-}
-
-func (s *Service) UpdateUserPromptCustomization(user *model.User, operation string, req UserPromptCustomizationRequest) (*model.UserPromptCustomization, error) {
-	return s.promptDomain().UpdateUserPromptCustomization(user, operation, req)
-}
-
-func (s *Service) ResetUserPromptCustomization(user *model.User, operation string) error {
-	return s.promptDomain().ResetUserPromptCustomization(user, operation)
 }
 
 func (s *Service) compilePrompt(userID string, operation string, values map[string]string) (CompiledPrompt, error) {

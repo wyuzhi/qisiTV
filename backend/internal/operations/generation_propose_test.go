@@ -63,6 +63,10 @@ func TestOpGenerationProposeUsesNodeOverrideBeforeDefault(t *testing.T) {
 	if source["modelConfigRevision"] != int64(9) || source["canvasRevision"] != float64(4) {
 		t.Fatalf("source binding: %#v", source)
 	}
+	targets, ok := payload["targets"].([]map[string]any)
+	if !ok || len(targets) != 1 || targets[0]["nodeId"] != "n1" || targets[0]["modelKey"] != "beefapi::gpt-image-2.5-flare" || targets[0]["prompt"] != "n1" {
+		t.Fatalf("propose should echo targets with effective prompt and model: %#v", payload["targets"])
+	}
 }
 
 func TestOpGenerationProposeFallsBackToDefaultWithoutNodeModel(t *testing.T) {

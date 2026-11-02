@@ -114,7 +114,7 @@ describe("asset picker canonical read gate", () => {
         const source = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-project-asset-modal.tsx"), "utf8");
         expect(source).toContain("usesWorkspaceAssetLibraryApi()");
         expect(source).toContain("remoteLibrary={!detail && usesWorkspaceAssetLibraryApi()}");
-        expect(source).toContain("getWorkspaceAsset(item.project.id, undefined, { expectedScope })");
+        expect(source).toContain("getWorkspaceAsset(item.project.id)");
         expect(source).not.toContain("isLocalWorkspaceMode");
         expect(source).not.toContain("preferLocalUnsynced");
     });

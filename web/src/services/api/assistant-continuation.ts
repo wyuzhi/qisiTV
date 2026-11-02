@@ -13,9 +13,6 @@ export async function registerAssistantSubmission(id: string, manifest: Assistan
 export async function listAssistantContinuations(canvasId: string, sessionId: string) {
     return http.get<AssistantContinuation[]>("/assistant/continuations", { ...await headers(), params: { canvasId, sessionId } });
 }
-export async function claimAssistantContinuation(id: string) {
-    return http.post<AssistantContinuation>(`/assistant/continuations/${encodeURIComponent(id)}/claim`, {}, await headers());
-}
 export async function cancelAssistantContinuations(canvasId: string, sessionId: string) {
     return http.post("/assistant/continuations/cancel", { canvasId, sessionId }, await headers());
 }

@@ -155,8 +155,13 @@ func enforceRateLimit(c *gin.Context, key string, limit int, window time.Duratio
 	return false
 }
 
-func loadRuntimePolicy(c *gin.Context, svc *app.Service) (app.RuntimePolicySetting, bool) {
-	policy, err := svc.RuntimePolicy()
+// runtimePolicies is the only platform read shared by request throttling.
+type runtimePolicies interface {
+	RuntimePolicy() (app.RuntimePolicySetting, error)
+}
+
+func loadRuntimePolicy(c *gin.Context, policies runtimePolicies) (app.RuntimePolicySetting, bool) {
+	policy, err := policies.RuntimePolicy()
 	if err != nil {
 		failInternal(c, http.StatusServiceUnavailable, err)
 		return app.RuntimePolicySetting{}, false

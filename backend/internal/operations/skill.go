@@ -33,8 +33,8 @@ func truncateSkillDescription(value string) string {
 }
 
 func registerSkillOps(r *Registry) {
-	r.Register(Op{AssistantCanvas: true, ID: "skill.catalog", Summary: "列出当前用户已安装技能的名称、说明和当前版本；不含正文", ReadOnly: true, Scope: ScopeWorkspaceRead,
-		Params: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string","description":"精确技能 id"},"q":{"type":"string","description":"按名称或说明搜索"},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}`),
+	r.Register(Op{AssistantCanvas: true, ID: "skill.catalog", Summary: "列出已安装技能", ReadOnly: true, Scope: ScopeWorkspaceRead,
+		Params: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"q":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}}}`),
 		Handler: func(ctx *Context, raw json.RawMessage) (any, error) {
 			var args struct {
 				ID     string `json:"id"`
@@ -87,7 +87,7 @@ func registerSkillOps(r *Registry) {
 		}})
 	for _, id := range []string{"skill.get", "skill.file"} {
 		operation := id
-		r.Register(Op{AssistantCanvas: true, ID: operation, Summary: "读取当前对话选定技能的固定版本正文或包内辅助文本；不执行脚本", ReadOnly: true, Scope: ScopeCanvas,
+		r.Register(Op{AssistantCanvas: true, ID: operation, Summary: "读取选定技能固定版本的正文或包内文件", ReadOnly: true, Scope: ScopeCanvas,
 			Params: json.RawMessage(`{"type":"object","properties":{"skillId":{"type":"string"},"versionId":{"type":"string"},"contentHash":{"type":"string"},"path":{"type":"string"}},"required":["skillId","versionId","contentHash"]}`),
 			Handler: func(ctx *Context, raw json.RawMessage) (any, error) {
 				var args struct {

@@ -7,8 +7,11 @@ import { ReferenceMediaTransportFields } from "../../src/pages/settings/referenc
 import type { ReferenceMediaTransport } from "../../src/stores/use-config-store";
 import { CanvasUploadModal } from "../../src/components/canvas/canvas-upload-modal";
 import { createReferenceLinkResolver } from "@/components/generation-reference-links";
+import { getWorkspaceAntThemeConfig } from "@/lib/app-theme";
 const params = new URLSearchParams(location.search);
+const workspaceTheme = getWorkspaceAntThemeConfig();
 document.documentElement.classList.toggle("dark",params.has("dark"));
+document.getElementById("root")!.className = "app-user-workspace app-product-workspace";
 document.body.style.background="var(--background)";
 document.body.style.color="var(--foreground)";
 const initial = { dataDir: "C:\\Users\\Creator\\AppData\\Roaming\\BeefTV", usedBytes: 1024 ** 3, freeBytes: 40 * 1024 ** 3 };
@@ -67,7 +70,7 @@ function Harness() {
         }
     };
     return (
-        <main className="space-y-8" style={{ padding: 16, maxWidth: 900, margin: "auto" }}>
+        <main className="settings-page space-y-8" style={{ padding: 16, maxWidth: 900, margin: "auto" }}>
             {params.has("transport") ? <ReferenceMediaTransportFields value={transport} onChange={setTransport} /> : <StorageSettingsPane />}
             <ReferenceStoragePane />
             {!params.has("transport") && <><button onClick={() => setOpen(true)}>添加测试素材</button><button onClick={() => void generate()}>生成测试</button><output>{result}</output></>}
@@ -84,7 +87,7 @@ function Harness() {
     );
 }
 createRoot(document.getElementById("root")!).render(
-    <ConfigProvider theme={{ algorithm: params.has("dark") ? theme.darkAlgorithm : theme.defaultAlgorithm, token: { motion: false } }}>
+    <ConfigProvider theme={{ ...workspaceTheme, algorithm: params.has("dark") ? theme.darkAlgorithm : theme.defaultAlgorithm, token: { ...workspaceTheme.token, motion: false } }}>
         <App>
             <Harness />
         </App>

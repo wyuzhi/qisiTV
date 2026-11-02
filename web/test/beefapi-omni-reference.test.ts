@@ -1,32 +1,36 @@
 import { expect, test } from "bun:test";
+import { managedVideoCatalogItem } from "./managed-video-fixture";
+import { mergeFetchedChannelModelProfiles } from "../src/lib/channel-model-catalog";
 import { defaultModelCapabilityConfig, modelCapabilityConfigFor } from "../src/lib/model-capabilities";
 import { modelCompatibilityError } from "../src/lib/model-selection";
 import { createModelChannel, defaultConfig, normalizeConfigSnapshot, resolveModelRequestConfig } from "../src/stores/use-config-store";
 
-for (const model of ["seedance-2.0", "seedance-2.0-fast", "seedance-2.0-mini", "seedance-2.5", "seedance-2.5-official"]) {
+for (const model of ["seedance-2.0", "seedance-2.0-fast", "seedance-2.0-mini", "seedance-2.5", "seedance-2.5-portrait"]) {
     test(`${model} enterprise catalog needs no manual protocol selection`, () => {
         const channel = createModelChannel({ id: "beefapi", baseUrl: "https://enterprise.beefapi.com", models: [model] });
+        channel.modelProfiles = mergeFetchedChannelModelProfiles(channel, [managedVideoCatalogItem(model)]);
         const config = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [channel] } }).config;
-        expect(resolveModelRequestConfig(config, `beefapi::${model}`).interfaceType).toBe("newapi");
+        expect(resolveModelRequestConfig(config, `beefapi::${model}`).interfaceType).toBe("openai-videos");
     });
     for (const legacy of [false, true]) {
-        test(`${model} supports mixed references after ${legacy ? "legacy restore" : "catalog import"} and reload`, async () => {
-            const manifest = await Bun.file(new URL("../../plugin-packages/openai-videos/manifest.json", import.meta.url)).json();
+        test(`${model} keeps server mixed-reference capabilities after ${legacy ? "legacy restore" : "catalog import"} and reload`, () => {
             const capabilityConfig = defaultModelCapabilityConfig("newapi-channel-2", model);
             capabilityConfig.video!.operations = ["text_to_video", "image_to_video"];
             Object.assign(capabilityConfig.video!.references, { maxImages: 9, maxVideos: 0, maxAudios: 0, maxVideoDurationSeconds: 0, maxAudioDurationSeconds: 0 });
             const channel = createModelChannel({ id: "beefapi", baseUrl: "https://enterprise.beefapi.com", models: [model], modelProfiles: [{ model, capability: "video", protocol: "openai-videos", ...(legacy ? { capabilityConfig } : {}) }] });
+            expect(modelCapabilityConfigFor({ channels: [channel] }, `beefapi::${model}`).videoCapabilitiesUnavailable).toBeUndefined();
+            channel.modelProfiles = mergeFetchedChannelModelProfiles(channel, [managedVideoCatalogItem(model)]);
             let config = { ...defaultConfig, channels: [channel] };
             for (let reload = 0; reload < 2; reload++) {
                 config = normalizeConfigSnapshot({ config }).config;
                 const selected = `beefapi::${model}`;
-                expect(config.channels[0].modelProfiles?.find((item) => item.model === model)?.protocol).toBe("newapi");
+                expect(config.channels[0].modelProfiles?.find((item) => item.model === model)?.protocol).toBe("openai-videos");
                 const request = resolveModelRequestConfig(config, selected);
-                expect(manifest.contributes.providers.map((provider: { id: string }) => provider.id)).toContain(request.interfaceType);
+                expect(request.interfaceType).toBe("openai-videos");
                 const profile = modelCapabilityConfigFor(config, selected).video!;
                 expect(profile.references.maxVideos).toBe(model.startsWith("seedance-2.5") ? 10 : 3);
                 expect(profile.references.maxAudios).toBeGreaterThan(0);
-                expect(modelCompatibilityError(config, selected, { capability: "video", input: { textCount: 1, imageCount: 1, videoCount: 1, audioCount: 1, characterCount: 0 }, videoSeconds: "5", videoOperation: "reference_to_video" })).toBe("");
+                expect(modelCompatibilityError(config, selected, { capability: "video", input: { textCount: 1, imageCount: 1, videoCount: 1, audioCount: 1, characterCount: 0 }, videoSeconds: "5", videoOperation: "reference_to_video" })).toBe(model.endsWith("-portrait") ? "真人素材版价格暂不可用，请刷新模型列表" : "");
             }
         });
     }
@@ -46,16 +50,16 @@ test("custom provider reference restrictions remain authoritative", () => {
     expect(modelCapabilityConfigFor(config, `custom::${model}`).video!.references.maxVideos).toBe(0);
 });
 
-test("enterprise migration preserves unrelated user limits", () => {
+test("server declaration replaces legacy model-name repairs and user limits", () => {
     const model = "seedance-2.5";
     const capabilityConfig = defaultModelCapabilityConfig("newapi-channel-2", model);
     capabilityConfig.video!.operations = ["text_to_video", "image_to_video"];
     Object.assign(capabilityConfig.video!.references, { maxImages: 9, maxVideos: 0, maxAudios: 0, maxVideoDurationSeconds: 0, maxAudioDurationSeconds: 0, maxImageBytes: 1234 });
     capabilityConfig.video!.resolutions = ["720P"];
     const channel = createModelChannel({ id: "beefapi", baseUrl: "https://enterprise.beefapi.com", models: [model], modelProfiles: [{ model, capability: "video", protocol: "newapi-channel-2", capabilityConfig }] });
+    channel.modelProfiles = mergeFetchedChannelModelProfiles(channel, [managedVideoCatalogItem(model)]);
     const config = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [channel] } }).config;
     const video = modelCapabilityConfigFor(config, `beefapi::${model}`).video!;
     expect(video.references.maxVideos).toBe(10);
-    expect(video.references.maxImageBytes).toBe(1234);
-    expect(video.resolutions).toEqual(["720P"]);
+    expect(video).toEqual(managedVideoCatalogItem(model).videoCapabilities);
 });

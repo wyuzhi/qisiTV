@@ -2,7 +2,6 @@ const VIDEO_FRAME_TIMEOUT_MS = 20_000;
 const VIDEO_FRAME_PRESENTATION_TIMEOUT_MS = 1_500;
 const MINIMUM_SEEK_EPSILON_MS = 1;
 const LAST_FRAME_EPSILON_MS = 100;
-const VIDEO_TAIL_PRESENTATION_EPSILON_SECONDS = 0.02;
 
 export type CapturedVideoFrame = {
     timeMs: number;
@@ -31,6 +30,10 @@ export function videoFrameSeekSeconds(timeMs: number, durationMs: number) {
     return Math.min(Math.max(0, durationMs - MINIMUM_SEEK_EPSILON_MS), Math.max(MINIMUM_SEEK_EPSILON_MS, timeMs)) / 1000;
 }
 
+function hasDecodedVideoFrame(video: HTMLVideoElement) {
+    return Number(video.readyState) >= 2 && Number(video.videoWidth) > 0 && Number(video.videoHeight) > 0;
+}
+
 export async function waitForPresentedVideoFrame(video: HTMLVideoElement, timeoutMs = VIDEO_FRAME_PRESENTATION_TIMEOUT_MS) {
     try {
         if (typeof video.requestVideoFrameCallback !== "function") {
@@ -38,22 +41,49 @@ export async function waitForPresentedVideoFrame(video: HTMLVideoElement, timeou
             await waitForAnimationFrames();
             return;
         }
-        const isSeekingToEnd = Number.isFinite(video.duration) && video.duration - video.currentTime <= VIDEO_TAIL_PRESENTATION_EPSILON_SECONDS;
-        const presented = isSeekingToEnd
-            ? waitForVideoEvent(video, "ended", "视频尾帧解码超时", timeoutMs)
-            : new Promise<void>((resolve, reject) => {
-                  let settled = false;
-                  const finish = (error?: unknown) => {
-                      if (settled) return;
-                      settled = true;
-                      globalThis.clearTimeout(timer);
-                      if (error) reject(error);
-                      else resolve();
-                  };
-                  const timer = globalThis.setTimeout(() => finish(new Error("视频画面解码超时")), timeoutMs);
-                  video.requestVideoFrameCallback(() => finish());
-              });
-        await video.play();
+        let handle: number | undefined;
+        const isNearTailSeek = Number.isFinite(video.duration)
+            && video.duration > 0
+            && Number.isFinite(video.currentTime)
+            && video.duration - video.currentTime <= LAST_FRAME_EPSILON_MS / 1000 + 0.05;
+        const presented = new Promise<void>((resolve, reject) => {
+            let settled = false;
+            let endedTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
+            const cleanup = () => {
+                globalThis.clearTimeout(timer);
+                if (endedTimer !== undefined) globalThis.clearTimeout(endedTimer);
+                if (isNearTailSeek && typeof video.removeEventListener === "function") {
+                    video.removeEventListener("ended", onEnded);
+                }
+            };
+            const finish = (error?: unknown) => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                if (error && handle !== undefined && typeof video.cancelVideoFrameCallback === "function") {
+                    video.cancelVideoFrameCallback(handle);
+                }
+                if (error) reject(error);
+                else resolve();
+            };
+            const onEnded = () => {
+                if (settled || endedTimer !== undefined) return;
+                const graceMs = Math.min(80, Math.max(10, Math.floor(timeoutMs / 4)));
+                endedTimer = globalThis.setTimeout(() => {
+                    if (hasDecodedVideoFrame(video)) finish();
+                }, graceMs);
+            };
+            if (isNearTailSeek && typeof video.addEventListener === "function") {
+                video.addEventListener("ended", onEnded, { once: true });
+            }
+            const timer = globalThis.setTimeout(() => {
+                finish(new Error("视频画面解码超时"));
+            }, timeoutMs);
+            handle = video.requestVideoFrameCallback(() => finish());
+        });
+        await video.play().catch((error) => {
+            if (!hasDecodedVideoFrame(video)) throw error;
+        });
         await presented;
     } finally {
         video.pause();
@@ -77,6 +107,16 @@ export async function captureVideoFrames(source: Blob | string, timesMs: number[
     video.muted = true;
     video.playsInline = true;
     video.preload = "auto";
+    if (typeof document !== "undefined" && document.body && video.style) {
+        video.style.position = "fixed";
+        video.style.left = "-9999px";
+        video.style.top = "-9999px";
+        video.style.width = "1px";
+        video.style.height = "1px";
+        video.style.opacity = "0";
+        video.style.pointerEvents = "none";
+        document.body.appendChild(video);
+    }
 
     try {
         const loaded = waitForVideoEvent(video, "loadeddata", "视频读取超时或编码不受浏览器支持");
@@ -98,12 +138,34 @@ export async function captureVideoFrames(source: Blob | string, timesMs: number[
         for (const timeMs of normalizedTimes) {
             try {
                 const targetSeconds = videoFrameSeekSeconds(timeMs, video.duration * 1000);
-                if (Math.abs(video.currentTime - targetSeconds) > 0.0005) {
-                    const seeked = waitForVideoEvent(video, "seeked", `无法定位到 ${formatVideoFrameTime(timeMs)}`);
-                    video.currentTime = targetSeconds;
-                    await seeked;
+                let seekPresented = false;
+                let seekCallbackFired = false;
+                let seekHandle: number | undefined;
+                if (typeof video.requestVideoFrameCallback === "function") {
+                    seekHandle = video.requestVideoFrameCallback((_now?: number, metadata?: { mediaTime?: number }) => {
+                        seekCallbackFired = true;
+                        const presentedSeconds = typeof metadata?.mediaTime === "number" && Number.isFinite(metadata.mediaTime)
+                            ? metadata.mediaTime
+                            : video.currentTime;
+                        if (hasDecodedVideoFrame(video) && Math.abs(presentedSeconds - targetSeconds) <= 0.12) {
+                            seekPresented = true;
+                        }
+                    });
                 }
-                await waitForPresentedVideoFrame(video);
+                try {
+                    if (Math.abs(video.currentTime - targetSeconds) > 0.0005) {
+                        const seeked = waitForVideoEvent(video, "seeked", `无法定位到 ${formatVideoFrameTime(timeMs)}`);
+                        video.currentTime = targetSeconds;
+                        await seeked;
+                    }
+                } finally {
+                    if (!seekCallbackFired && seekHandle !== undefined && typeof video.cancelVideoFrameCallback === "function") {
+                        video.cancelVideoFrameCallback(seekHandle);
+                    }
+                }
+                if (!seekPresented) {
+                    await waitForPresentedVideoFrame(video);
+                }
                 context.drawImage(video, 0, 0, canvas.width, canvas.height);
                 frames.push({ timeMs, blob: await canvasToPngBlob(canvas), width: canvas.width, height: canvas.height });
             } catch (error) {
@@ -116,6 +178,7 @@ export async function captureVideoFrames(source: Blob | string, timesMs: number[
         video.pause();
         video.removeAttribute("src");
         video.load();
+        video.remove?.();
         URL.revokeObjectURL(objectUrl);
     }
 }

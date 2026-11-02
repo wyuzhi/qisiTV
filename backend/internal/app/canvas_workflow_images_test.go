@@ -27,24 +27,24 @@ func TestCanvasWorkflowImageSelectionRoundTrip(t *testing.T) {
 				t.Fatal(err)
 			}
 			d := cw.Definition{Version: 1, Nodes: []cw.Node{{ID: "gen", Title: "生成图片 1", Role: "operation", OperationID: "generate.image", OperationVersion: 1, MediaType: "image", SourceTaskID: "original"}, {ID: "select", Title: "选择图片结果 1", Role: "operation", OperationID: "image.select", OperationVersion: 1, MediaType: "image"}}, Edges: []cw.Edge{{From: "gen", To: "select", FromPort: "output", ToPort: "images"}}, OutputNodeIDs: []string{"select"}}
-			template, err := s.CreateCanvasWorkflow("owner", cw.CreateRequest{Name: "选择图片", Definition: d})
+			template, err := s.workflowTemplates().Create("owner", cw.CreateRequest{Name: "选择图片", Definition: d})
 			if err != nil {
 				t.Fatal(err)
 			}
-			reopened, err := s.CanvasWorkflowEditor("owner", template.ID, 1)
+			reopened, err := s.workflowTemplates().Editor("owner", template.ID, 1)
 			if err != nil || len(reopened.Workflow.Definition.Nodes) != 2 {
 				t.Fatalf("reopen: %v", err)
 			}
-			run, err := s.StartCanvasWorkflow("owner", template.ID, cw.RunRequest{ClientOperationID: "image-selection"})
+			run, err := s.workflowRuns().Start("owner", template.ID, cw.RunRequest{ClientOperationID: "image-selection"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			operation := workflowOperation(run.ID, "gen")
+			operation := cw.StepOperation(run.ID, "gen")
 			if err = db.Create(&model.Task{ID: "admitted-images", UserID: "owner", Type: "canvas_image", Status: model.TaskStatusSucceeded, ClientOperationID: &operation, ResultJSON: string(result)}).Error; err != nil {
 				t.Fatal(err)
 			}
-			s.advanceCanvasWorkflows(context.Background())
-			run, err = s.CanvasWorkflowRun("owner", run.ID)
+			s.workflowRuns().AdvanceAll(context.Background())
+			run, err = s.workflowRuns().Get("owner", run.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -52,19 +52,19 @@ func TestCanvasWorkflowImageSelectionRoundTrip(t *testing.T) {
 			if selected.Status != "waiting_selection" || len(selected.Candidates) != count || run.Status != "running" {
 				t.Fatalf("selection checkpoint: %+v", run)
 			}
-			if _, err = s.SelectCanvasWorkflowImage("other", run.ID, "select", "candidate-1"); err == nil {
+			if _, err = s.workflowRuns().Select("other", run.ID, "select", "candidate-1"); err == nil {
 				t.Fatal("foreign run selectable")
 			}
-			if _, err = s.SelectCanvasWorkflowImage("owner", run.ID, "select", "fixed-mask"); err == nil {
+			if _, err = s.workflowRuns().Select("owner", run.ID, "select", "fixed-mask"); err == nil {
 				t.Fatal("foreign candidate selectable")
 			}
 			for i := 0; i < 2; i++ {
-				if _, err = s.SelectCanvasWorkflowImage("owner", run.ID, "select", "candidate-1"); err != nil {
+				if _, err = s.workflowRuns().Select("owner", run.ID, "select", "candidate-1"); err != nil {
 					t.Fatal(err)
 				}
 			}
-			s.advanceCanvasWorkflows(context.Background())
-			run, err = s.CanvasWorkflowRun("owner", run.ID)
+			s.workflowRuns().AdvanceAll(context.Background())
+			run, err = s.workflowRuns().Get("owner", run.ID)
 			if err != nil || run.Status != "succeeded" || len(run.Outputs) != 1 || run.Outputs[0].ResourceID != "candidate-1" {
 				t.Fatalf("selected result: %+v %v", run, err)
 			}
@@ -121,11 +121,11 @@ func TestCanvasWorkflowDescribeAndUpscaleTemplateRoundTrip(t *testing.T) {
 		}
 	}
 	d := cw.Definition{Version: 1, PresentationVersion: 1, Nodes: []cw.Node{{ID: "input", Title: "图片输入", Role: "input", MediaType: "image"}, {ID: "describe", Title: "提示词反推", Role: "operation", OperationID: "image.describe", OperationVersion: 1, MediaType: "text", Config: map[string]any{"modelOption": "vision::vision-model", "prompt": "描述画面"}}, {ID: "upscale", Title: "图片AI超分", Role: "operation", OperationID: "image.ai-upscale", OperationVersion: 1, MediaType: "image", Config: map[string]any{"channelId": "beefapi", "preset": "precision|Standard V2", "scale": 2, "outputFormat": "png"}}}, Edges: []cw.Edge{{From: "input", To: "describe", FromPort: "output", ToPort: "image"}, {From: "input", To: "upscale", FromPort: "output", ToPort: "image"}}, OutputNodeIDs: []string{"describe", "upscale"}}
-	template, err := s.CreateCanvasWorkflow("owner", cw.CreateRequest{Name: "图片处理", Definition: d})
+	template, err := s.workflowTemplates().Create("owner", cw.CreateRequest{Name: "图片处理", Definition: d})
 	if err != nil {
 		t.Fatal(err)
 	}
-	editor, err := s.CanvasWorkflowEditor("owner", template.ID, 1)
+	editor, err := s.workflowTemplates().Editor("owner", template.ID, 1)
 	if err != nil || len(editor.Workflow.Definition.Nodes) != 3 {
 		t.Fatalf("reopen: %v", err)
 	}

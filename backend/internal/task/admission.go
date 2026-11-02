@@ -44,10 +44,10 @@ func (s *Service) admit(userID string, req CreateRequest) (*model.Task, error) {
 		return nil, drainError(DrainCreateMessage)
 	}
 	prompt := strings.TrimSpace(req.Prompt)
-	if prompt == "" {
+	taskType := strings.TrimSpace(req.Type)
+	if prompt == "" && !allowsEmptyPrompt(taskType, req.Input) {
 		return nil, kernel.BadAuthRequest(PromptRequiredMessage)
 	}
-	taskType := strings.TrimSpace(req.Type)
 	if err := ValidateType(taskType); err != nil {
 		return nil, kernel.BadAuthRequest(err.Error())
 	}
@@ -196,6 +196,21 @@ func (s *Service) requireAdmitCollaborators() error {
 		return unavailable()
 	}
 	return nil
+}
+
+func allowsEmptyPrompt(taskType string, input map[string]any) bool {
+	if taskType != "canvas_video" && !strings.HasPrefix(taskType, "video_") {
+		return false
+	}
+	if input == nil {
+		return false
+	}
+	metadata, _ := input["metadata"].(map[string]any)
+	if metadata == nil {
+		return false
+	}
+	draftID, _ := metadata["videoDraftTaskId"].(string)
+	return strings.TrimSpace(draftID) != ""
 }
 
 func encodeTaskInput(input map[string]any) (string, error) {

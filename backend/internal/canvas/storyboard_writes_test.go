@@ -369,3 +369,60 @@ func TestStoryboardRowsRejectOversizedBatch(t *testing.T) {
 		t.Fatal("超上限批次应被拒绝")
 	}
 }
+
+func TestUpdateUserCanvasStoryboardRowsAutoSyncsBoundNodeDrafts(t *testing.T) {
+	svc := newCanvasHistoryTestService(t)
+	created, err := svc.UpsertUserCanvasProject("owner", json.RawMessage(`{
+		"id":"canvas-sync","revision":0,"title":"分镜同步",
+		"nodes":[
+			{"id":"script","type":"script","metadata":{"storyboard":{"rows":[
+				{"id":"r1","shotNumber":1,"imageGenerationPrompt":"旧首帧1","videoMotionPrompt":"旧视频1","imageNodeId":"img-1","videoNodeId":"vid-1"},
+				{"id":"r2","shotNumber":2,"plotDescription":"旧剧情2","imageGenerationPrompt":"","videoMotionPrompt":"旧视频2","imageNodeId":"img-2","videoNodeId":"vid-2"}
+			]}}},
+			{"id":"img-1","type":"image","metadata":{"content":"","taskId":"task-1","prompt":"已提交首帧1","composerContent":"参考资产：@角色1\n旧首帧1","status":"success"}},
+			{"id":"vid-1","type":"video","metadata":{"content":"","prompt":"旧视频1","composerContent":"用户单独手改过的视频草稿","status":"idle"}},
+			{"id":"img-2","type":"image","metadata":{"content":"","storageKey":"canvas/image/r2.png","prompt":"已提交首帧2","composerContent":"旧剧情2","status":"success"}},
+			{"id":"vid-2","type":"video","metadata":{"content":"","prompt":"旧视频2","composerContent":"旧视频2","status":"idle"}}
+		],"connections":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, update, err := svc.UpdateUserCanvasStoryboardRows("owner", "canvas-sync", "script", []StoryboardRowPatch{
+		{
+			RowID: "r1",
+			StoryboardRowDraft: StoryboardRowDraft{
+				ImageGenerationPrompt: strPtr("新首帧1：雨夜特写"),
+				VideoMotionPrompt:     strPtr("新视频1：缓慢拉远"),
+			},
+		},
+		{
+			RowID: "r2",
+			StoryboardRowDraft: StoryboardRowDraft{
+				ImageGenerationPrompt: strPtr("新首帧2：剧情回退同步"),
+				VideoMotionPrompt:     strPtr("新视频2：推镜"),
+			},
+		},
+	}, created.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(update.SyncedNodeIDs, ",") != "img-1,img-2,vid-2" || strings.Join(update.SkippedNodeIDs, ",") != "vid-1" {
+		t.Fatalf("synced/skipped receipt = %#v", update)
+	}
+	doc, err := svc.loadCanvasDoc("owner", "canvas-sync")
+	if err != nil {
+		t.Fatal(err)
+	}
+	imgMeta := findCanvasNode(doc, "img-1")["metadata"].(map[string]any)
+	if imgMeta["composerContent"] != "参考资产：@角色1\n新首帧1：雨夜特写" || imgMeta["prompt"] != "已提交首帧1" {
+		t.Fatalf("带参考资产前缀的首帧草稿应保留前缀并保留历史提示词: %#v", imgMeta)
+	}
+	img2Meta := findCanvasNode(doc, "img-2")["metadata"].(map[string]any)
+	if img2Meta["composerContent"] != "新首帧2：剧情回退同步" || img2Meta["prompt"] != "已提交首帧2" {
+		t.Fatalf("plotDescription 回退与仅含 storageKey 的节点应同步草稿并保留历史提示词: %#v", img2Meta)
+	}
+	vidMeta := findCanvasNode(doc, "vid-1")["metadata"].(map[string]any)
+	if vidMeta["composerContent"] != "用户单独手改过的视频草稿" {
+		t.Fatalf("单独手改过的视频草稿不应被覆盖: %#v", vidMeta)
+	}
+}

@@ -48,6 +48,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-qisitv-windo
 QISITV_GO_DIR=/path/to/go ./scripts/verify-qisitv-local-release.sh
 ```
 
+## 用命令行批量操作
+
+安装包自带 `beeftv` 命令行工具，可以直接用 shell 脚本批量读取和整理画布、素材与任务，不需要经过助手，也不需要启动 MCP 服务。macOS 的路径是 `/Applications/BeefTV.app/Contents/MacOS/cli/beeftv`，Windows 是 `BeefTV.exe` 同级的 `cli\beeftv.exe`。
+
+在侧栏的「BeefTV MCP」页选一个工具并「生成连接配置」，配置里已经包含 `BEEFTV_DATA_DIR`、`BEEFTV_CLIENT_ID` 与 `BEEFTV_CLIENT_TOKEN`，把它们抽出来放进环境变量即可；只读凭据只能读。纯命令行批量跑不需要启动 MCP。完整用法见 [beeftv 命令行基础使用](docs/content/docs/backend/beeftv-cli.mdx)。
+
 ## 数据位置与备份
 
 桌面运行时会在本地工作区保存 SQLite 数据库、资源文件、模型配置和迁移备份。升级迁移前会自动创建数据库备份；如需迁移或恢复，请先退出 qisiTV 并完整复制工作区数据目录。

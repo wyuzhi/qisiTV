@@ -87,8 +87,8 @@ test("pending deletion cannot delete another canvas, including A→B→A with co
     expect(await page.evaluate(() => (window as any).__repairHarness.destroyed)).toBe(1);
     expect(errors).toEqual([]);
 }, 15000);
-test("account A→B→A and unmount dismiss pending deletion without cancellation", async () => {
-    for (const action of ["switchScope", "unmountEditor"]) {
+test("unmount dismisses pending deletion without cancellation", async () => {
+    for (const action of ["unmountEditor"]) {
         await page.goto(server.url.toString());
         await page.getByRole("button", { name: "delete-node", exact: true }).click();
         await run(action);

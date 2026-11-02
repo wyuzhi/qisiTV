@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 import { CanvasImagePreview } from "@/components/canvas/canvas-image-preview";
 import { TaskDetailItem } from "./canvas-project-feedback";
 import { generationTaskShowsProgress, generationTaskStageLabel } from "@/lib/generation-task-display";
-import { canRetrieveVideoResult, formatTaskLog, type GenerationTask, type TaskLog } from "@/services/api/task-center";
+import { canRecoverTaskOutcome, readTaskOutcome } from "@/lib/task-outcome";
+import { formatTaskLog, type GenerationTask, type TaskLog } from "@/services/api/task-center";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { VideoPlayer } from "@/components/video-player";
 import { AppModal } from "@/components/ui/product/app-modal";
@@ -71,9 +72,9 @@ export function CanvasProjectStatusDialogs({ theme, task, taskLogs, taskLoading,
                         </div>
                         <TaskGenerationParameters inputJson={task.inputJson} theme={theme} />
                         {task.error ? <p role="status" className="whitespace-pre-wrap break-words">{task.error}</p> : null}
-                        {onRetrieveTask && canRetrieveVideoResult(task) ? (
+                        {onRetrieveTask && canRecoverTaskOutcome(readTaskOutcome(task)) ? (
                             <div className="flex flex-wrap items-center justify-between gap-3">
-                                <p>查询原任务并取回视频，不会重新生成。</p>
+                                <p>查询原任务并取回生成结果，不会重新生成。</p>
                                 <Button loading={retrievingTaskId === task.id} onClick={() => onRetrieveTask(task)}>取回结果</Button>
                             </div>
                         ) : null}

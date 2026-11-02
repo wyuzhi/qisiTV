@@ -83,34 +83,3 @@ test("failure stays visible and retry succeeds", async () => {
         expect(calls).toEqual(["/delete/c1", "/delete/c1"]);
     } finally { await page.close(); }
 }, 30000);
-
-test("A to B to A invalidates an open confirmation", async () => {
-    const page = await browser.newPage();
-    try {
-        await page.goto(server.url.toString());
-        await page.getByRole("button", { name: "删除单个", exact: true }).click();
-        await page.evaluate(() => { (window as any).__deletion.switchScope("owner-b"); (window as any).__deletion.switchScope("owner-a"); });
-        await page.getByRole("button", { name: "删除", exact: true }).click();
-        await page.getByRole("alert").waitFor();
-        expect(await page.getByRole("alert").textContent()).toContain("账号已切换");
-        expect(calls).toEqual([]);
-    } finally { await page.close(); }
-}, 30000);
-
-test("switching account during deletion does not report success or clear new selection", async () => {
-    const page = await browser.newPage();
-    gate = new Promise(resolve => { release = resolve; });
-    const requestReceived = new Promise<void>(resolve => { received = resolve; });
-    try {
-        await page.goto(server.url.toString());
-        await page.getByRole("button", { name: "删除单个", exact: true }).click();
-        await page.getByRole("button", { name: "删除", exact: true }).click();
-        await requestReceived;
-        await page.evaluate(() => { (window as any).__deletion.switchScope("owner-b"); (window as any).__deletion.select(["b1"]); });
-        release!();
-        await page.getByRole("alert").waitFor();
-        expect(await page.getByRole("alert").textContent()).toContain("账号已切换");
-        expect(calls).toEqual(["/delete/c1"]);
-        expect(await page.getByRole("dialog").isVisible()).toBe(true);
-    } finally { received = undefined; release?.(); await page.close(); }
-}, 30000);

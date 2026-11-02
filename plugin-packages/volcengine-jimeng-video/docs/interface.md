@@ -26,12 +26,12 @@
 | `images` | media[] | 否 | `first/last/reference image` | 显式 role 图片输入。 |
 | `videos` | media[] | 否 | `reference video` | 参考视频。 |
 | `audios` | media[] | 否 | `reference audio/voice` | 参考音频或音色。 |
-| `duration` | integer | 否 | `duration/seconds` | 时长秒数。 |
-| `aspectRatio` | string | 否 | `ratio/aspect_ratio/size` | 画幅比例或尺寸。 |
-| `resolution` | string | 否 | `resolution` | 分辨率档位。 |
+| `duration` | integer | 否 | `frames（24*秒数+1）` | 时长秒数；官方只有 5 秒和 10 秒，按最近一档换算成 frames=121/241。 |
+| `aspectRatio` | string | 否 | `aspect_ratio` | 画幅比例，官方取值 16:9/9:16/1:1/4:3/3:4/21:9。 |
+| `resolution` | string | 否 | `resolution` | 分辨率档位；实际清晰度由 req_key 决定，这里只透传。 |
 | `generateAudio` | boolean | 否 | `generate_audio` | 是否生成音频。 |
 | `watermark` | boolean | 否 | `watermark` | 水印开关。 |
-| `providerOptions` | object | 否 | `provider-specific fields` | 插件命名空间内的厂商扩展字段。 |
+| `providerOptions` | object | 否 | `provider-specific fields` | 插件命名空间内的厂商扩展字段；volcengine-jimeng-video.req_json 属于查询请求，只在 poll 发送。 |
 
 ## 上游请求模板逐字段清单
 
@@ -45,10 +45,9 @@
 | `create.body.req_key` | `{"$ref":"request.model"}` |
 | `create.body.prompt` | `{"$ref":"request.prompt"}` |
 | `create.body.image_urls` | `{"$omitEmpty":{"$map":{"from":{"$sortByOrder":{"$ref":"request.images"}},"as":"media","in":{"$ref":"media.value"}}}}` |
-| `create.body.duration` | `{"$omitEmpty":{"$ref":"request.duration"}}` |
-| `create.body.ratio` | `{"$omitEmpty":{"$ref":"request.aspectRatio"}}` |
+| `create.body.aspect_ratio` | `{"$omitEmpty":{"$ref":"request.aspectRatio"}}` |
+| `create.body.frames` | `{"$omitEmpty":{"$if":{"condition":{"$gt":[{"$ref":"request.duration"},0]},"then":{"$if":{"condition":{"$lte":[{"$ref":"request.duration"},7]},"then":121,"else":241}},"else":null}}}` |
 | `create.body.resolution` | `{"$omitEmpty":{"$ref":"request.resolution"}}` |
-| `create.body.req_json` | `{"$omitEmpty":{"$ref":"request.providerOptions.volcengine-jimeng-video.req_json"}}` |
 | `create.query.Action` | `"CVSync2AsyncSubmitTask"` |
 | `create.query.Version` | `"2022-08-31"` |
 | `poll.method` | `"POST"` |
@@ -56,6 +55,7 @@
 | `poll.contentType` | `"application/json"` |
 | `poll.body.req_key` | `{"$ref":"request.model"}` |
 | `poll.body.task_id` | `{"$ref":"taskId"}` |
+| `poll.body.req_json` | `{"$omitEmpty":{"$ref":"request.providerOptions.volcengine-jimeng-video.req_json"}}` |
 | `poll.query.Action` | `"CVSync2AsyncGetResult"` |
 | `poll.query.Version` | `"2022-08-31"` |
 
@@ -75,15 +75,16 @@
 | `response.videos` | `{"$coalesce":[{"$ref":"response.data.video_urls"},{"$ref":"response.data.video_url"}]}` |
 | `response.errorPaths[0]` | `"code"` |
 | `response.resultEphemeral` | `true` |
+| `response.successCodes[0]` | `10000` |
 | `response.messagePaths[0]` | `"message"` |
 
 ## 响应与错误
 
-插件把上游 task/status/text/media/usage 映射为统一结果。临时媒体 URL 标记为 ephemeral，由宿主立即下载持久化。HTTP 错误、业务 code 和 error object 保持失败语义，不包装成成功。
+插件把上游 task/status/text/media/usage 映射为统一结果。临时媒体 URL 标记为 ephemeral，由宿主立即下载持久化。HTTP 错误和 error object 保持失败语义，不包装成成功；业务 code 中 `10000` 是该协议声明的成功码，不算失败，其他业务码仍然失败。
 
 ## 兼容边界
 
-该包只代表上述线协议 profile；同一品牌的其他 endpoint、云区域或网关包装必须使用独立插件，不能根据模型名猜测。
+线协议按即梦官方视频接口收敛：创建正文只发 req_key、prompt、image_urls、aspect_ratio、frames、resolution；官方用 frames=24*秒数+1 表达时长（121=5 秒、241=10 秒），只提供 5 秒和 10 秒两档，其他秒数取最近一档。req_json 是查询请求的配置串，只在 poll 发送。业务成功码为 code=10000，插件显式声明 successCodes，不会把完成的任务判成失败。分辨率由 req_key 决定，resolution 仅作为透传不被推导。
 
 <!-- QISITV_PLUGIN_MANIFEST_START -->
 ## Manifest 完整接口定义
@@ -183,22 +184,22 @@
             "name": "duration",
             "type": "integer",
             "required": false,
-            "mapping": "duration/seconds",
-            "description": "时长秒数。"
+            "mapping": "frames（24*秒数+1）",
+            "description": "时长秒数；官方只有 5 秒和 10 秒，按最近一档换算成 frames=121/241。"
           },
           {
             "name": "aspectRatio",
             "type": "string",
             "required": false,
-            "mapping": "ratio/aspect_ratio/size",
-            "description": "画幅比例或尺寸。"
+            "mapping": "aspect_ratio",
+            "description": "画幅比例，官方取值 16:9/9:16/1:1/4:3/3:4/21:9。"
           },
           {
             "name": "resolution",
             "type": "string",
             "required": false,
             "mapping": "resolution",
-            "description": "分辨率档位。"
+            "description": "分辨率档位；实际清晰度由 req_key 决定，这里只透传。"
           },
           {
             "name": "generateAudio",
@@ -219,7 +220,7 @@
             "type": "object",
             "required": false,
             "mapping": "provider-specific fields",
-            "description": "插件命名空间内的厂商扩展字段。"
+            "description": "插件命名空间内的厂商扩展字段；volcengine-jimeng-video.req_json 属于查询请求，只在 poll 发送。"
           }
         ],
         "create": {
@@ -248,24 +249,43 @@
                 }
               }
             },
-            "duration": {
-              "$omitEmpty": {
-                "$ref": "request.duration"
-              }
-            },
-            "ratio": {
+            "aspect_ratio": {
               "$omitEmpty": {
                 "$ref": "request.aspectRatio"
+              }
+            },
+            "frames": {
+              "$omitEmpty": {
+                "$if": {
+                  "condition": {
+                    "$gt": [
+                      {
+                        "$ref": "request.duration"
+                      },
+                      0
+                    ]
+                  },
+                  "then": {
+                    "$if": {
+                      "condition": {
+                        "$lte": [
+                          {
+                            "$ref": "request.duration"
+                          },
+                          7
+                        ]
+                      },
+                      "then": 121,
+                      "else": 241
+                    }
+                  },
+                  "else": null
+                }
               }
             },
             "resolution": {
               "$omitEmpty": {
                 "$ref": "request.resolution"
-              }
-            },
-            "req_json": {
-              "$omitEmpty": {
-                "$ref": "request.providerOptions.volcengine-jimeng-video.req_json"
               }
             }
           },
@@ -290,6 +310,11 @@
             },
             "task_id": {
               "$ref": "taskId"
+            },
+            "req_json": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.volcengine-jimeng-video.req_json"
+              }
             }
           }
         },
@@ -345,6 +370,9 @@
             "code"
           ],
           "resultEphemeral": true,
+          "successCodes": [
+            10000
+          ],
           "messagePaths": [
             "message"
           ]

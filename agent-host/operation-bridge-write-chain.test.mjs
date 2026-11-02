@@ -23,6 +23,11 @@ async function fixture(run) {
     for await (const chunk of req) body += chunk;
     const { opId, params } = JSON.parse(body);
     const op = req.url.slice('/ops/'.length);
+    if (op === 'canvas.get') {
+      res.end(JSON.stringify({ code: 0, data: { result: { canvasId: params.canvasId,
+        canvas: { revision: state.revisions[params.canvasId], nodes: [], connections: [] } } } }));
+      return;
+    }
     state.posts.push({ opId, op, params });
     const fail = (reason) => {
       res.writeHead(409);
@@ -68,9 +73,9 @@ test('full-access writes cannot borrow another canvas chain to swallow its user 
     expect(state.posts.at(-1).params.expectedRevision).toBe(9);
     expect(state.writes).toBe(1);
     expect(state.revisions).toEqual({ A: 10, B: 10 });
-    await call('a2');
-    expect(state.posts.at(-1).params.expectedRevision).toBe(10);
-    expect(turn.writeChains).toEqual([{ canvasId: 'A', start: 9, head: 11 }]);
+    await expect(call('a2')).rejects.toThrow('canvas_context_changed');
+    expect(state.writes).toBe(1);
+    expect(turn.writeChains).toEqual([{ canvasId: 'A', start: 9, head: 10 }]);
   });
 });
 

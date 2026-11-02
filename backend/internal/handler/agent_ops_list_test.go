@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -96,4 +97,98 @@ func listingHas(ids []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestExternalWritesListAndUndoRoutes(t *testing.T) {
+	env := newAssistantTestEnv(t, nil)
+	owner, err := env.service.LocalWorkspaceOwner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	canvasID := env.canvasID
+	storedRaw, err := env.service.UserCanvasProject(owner.ID, canvasID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var storedDoc map[string]any
+	if err := json.Unmarshal(storedRaw, &storedDoc); err != nil {
+		t.Fatal(err)
+	}
+	rev0 := int64(storedDoc["revision"].(float64))
+
+	reg, token, err := env.clients.RegisterKind("cli", "codex-test", agentops.ClientReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extHeaders := map[string]string{
+		"X-Beeftv-Client": reg.ID,
+		"Authorization":   "Bearer " + token,
+		"Content-Type":    "application/json",
+	}
+
+	updateBody, _ := json.Marshal(map[string]any{
+		"opId": "ext-http-op-1",
+		"params": map[string]any{
+			"canvasId":         canvasID,
+			"nodeId":           "n1",
+			"expectedRevision": rev0,
+			"patch":            map[string]any{"title": "Codex 改过的镜头"},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18090/api/ops/canvas.node.update", bytes.NewReader(updateBody))
+	req.Host = "127.0.0.1:18090"
+	req.RemoteAddr = "127.0.0.1:12345"
+	for k, v := range extHeaders {
+		req.Header.Set(k, v)
+	}
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/ops/canvas.node.update = %d %s", rec.Code, rec.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:18090/api/ops/external-writes?canvasId="+canvasID, nil)
+	listReq.Host = "127.0.0.1:18090"
+	listReq.RemoteAddr = "127.0.0.1:12345"
+	for k, v := range extHeaders {
+		listReq.Header.Set(k, v)
+	}
+	listRec := httptest.NewRecorder()
+	env.router.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/ops/external-writes = %d %s", listRec.Code, listRec.Body.String())
+	}
+	var listEnv struct {
+		Data struct {
+			Writes []agentops.ExternalCanvasWrite `json:"writes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listEnv); err != nil {
+		t.Fatal(err)
+	}
+	if len(listEnv.Data.Writes) != 1 || listEnv.Data.Writes[0].OpID != "ext-http-op-1" || listEnv.Data.Writes[0].ClientLabel != "codex-test" {
+		t.Fatalf("unexpected external writes response: %+v", listEnv.Data.Writes)
+	}
+
+	undoBody, _ := json.Marshal(map[string]any{"canvasId": canvasID})
+	undoReq := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18090/api/ops/external-writes/ext-http-op-1/undo", bytes.NewReader(undoBody))
+	undoReq.Host = "127.0.0.1:18090"
+	undoReq.RemoteAddr = "127.0.0.1:12345"
+	for k, v := range extHeaders {
+		undoReq.Header.Set(k, v)
+	}
+	undoRec := httptest.NewRecorder()
+	env.router.ServeHTTP(undoRec, undoReq)
+	if undoRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/ops/external-writes/:opId/undo = %d %s", undoRec.Code, undoRec.Body.String())
+	}
+	var undoEnv struct {
+		Data agentops.ExternalCanvasWriteUndoResult `json:"data"`
+	}
+	if err := json.Unmarshal(undoRec.Body.Bytes(), &undoEnv); err != nil {
+		t.Fatal(err)
+	}
+	if !undoEnv.Data.Undone || undoEnv.Data.OpID != "ext-http-op-1" {
+		t.Fatalf("unexpected undo response: %+v", undoEnv.Data)
+	}
 }

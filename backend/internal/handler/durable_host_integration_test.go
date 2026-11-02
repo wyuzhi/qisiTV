@@ -54,7 +54,7 @@ func TestDurableActualHostRestartsAgainstRealGoTurnAndUndo(t *testing.T) {
 	if len(doc.Nodes) != 3 || len(doc.Connections) != 2 {
 		t.Fatalf("duplicate/missing effects: %s", raw)
 	}
-	if _, err := env.service.UndoAssistantTurn(owner.ID, env.canvasID, turnID); err != nil {
+	if _, err := env.service.AssistantTurns().Undo(owner.ID, env.canvasID, turnID); err != nil {
 		t.Fatal(err)
 	}
 	raw, err = env.service.UserCanvasProject(owner.ID, env.canvasID)

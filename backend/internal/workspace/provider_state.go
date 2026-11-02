@@ -120,6 +120,10 @@ func overlayHostedBeefAPIMediaProfiles(channel map[string]any) map[string]any {
 			continue
 		}
 		seen[model] = true
+		if version, _ := profile["videoCapabilitiesVersion"].(string); strings.TrimSpace(version) != "" && declaredVideoProfile(profile) {
+			next = append(next, profile)
+			continue
+		}
 		if capability, protocol, ok := hostedBeefAPIMediaProfile(baseURL, model); ok {
 			overlaid := cloneProfileMap(profile)
 			overlaid["capability"] = capability
@@ -141,6 +145,37 @@ func overlayHostedBeefAPIMediaProfiles(channel map[string]any) map[string]any {
 	}
 	channel["modelProfiles"] = next
 	return channel
+}
+
+// This storage overlay only recognizes complete declarations. Capability
+// validation before submission still belongs to the generation boundary.
+func declaredVideoProfile(profile map[string]any) bool {
+	config, _ := profile["capabilityConfig"].(map[string]any)
+	video, _ := config["video"].(map[string]any)
+	refs, _ := video["references"].(map[string]any)
+	duration, _ := video["duration"].(map[string]any)
+	operations, _ := video["operations"].([]any)
+	if profile["capability"] != "video" || refs == nil || duration == nil || len(operations) == 0 {
+		return false
+	}
+	for _, key := range []string{"maxImages", "maxVideos", "maxAudios"} {
+		if number, ok := refs[key].(float64); !ok || number < 0 {
+			return false
+		}
+	}
+	if duration["selection"] != "range" && duration["selection"] != "enum" {
+		return false
+	}
+	for _, key := range []string{"generateAudio", "watermark"} {
+		control, _ := video[key].(map[string]any)
+		if _, ok := control["supported"].(bool); !ok {
+			return false
+		}
+		if _, ok := control["default"].(bool); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func hostedBeefAPIMediaProfile(baseURL, model string) (string, string, bool) {

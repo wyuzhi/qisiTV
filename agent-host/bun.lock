@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "beeftv-agent-host",
+      "name": "qisitv-agent-host",
       "dependencies": {
         "@earendil-works/chord": "1.3.0",
         "@earendil-works/pi-ai": "1.3.0",

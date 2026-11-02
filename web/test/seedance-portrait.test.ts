@@ -13,7 +13,7 @@ import { defaultConfig, normalizeConfigSnapshot, normalizeModelOptionValue, type
 
 function fixture(): AiConfig {
     const ids = ["seedance-2.0", "seedance-2.0-portrait"];
-    return { ...defaultConfig, channels: [{ id: "beefapi", name: "BeefAPI", apiFormat: "openai", baseUrl: "https://beefapi.com", apiKey: "", models: ids, modelProfiles: ids.map((id) => ({ model: id, displayName: "Seedance 2.0 真人素材版", capability: "video", protocol: "newapi", capabilityConfig: defaultModelCapabilityConfig("newapi", id), videoPricing: { currency: "CNY", mode: "tokens", rates: { "720p": { output: 69, reference_video: 42 } } } })) }], models: ids.map((id) => `beefapi::${id}`), videoModels: ids.map((id) => `beefapi::${id}`) };
+    return { ...defaultConfig, channels: [{ id: "beefapi", name: "BeefAPI", apiFormat: "openai", baseUrl: "https://beefapi.com", apiKey: "", models: ids, modelProfiles: ids.map((id) => ({ model: id, displayName: "Seedance 2.0 真人素材版", capability: "video", protocol: "newapi", capabilityConfig: defaultModelCapabilityConfig("newapi", id), videoCapabilitiesVersion: "fixture-v1", videoPricing: { currency: "CNY", mode: "tokens", rates: { "720p": { output: 69, reference_video: 42 } } } })) }], models: ids.map((id) => `beefapi::${id}`), videoModels: ids.map((id) => `beefapi::${id}`) };
 }
 
 test("settings show one Seedance option and retain the selected legacy ID", () => {

@@ -17,6 +17,13 @@ func TestChannelAPIURLNormalizesConfiguredVersionPrefix(t *testing.T) {
 		{"https://api.example.com/v1", "/chat/completions", "https://api.example.com/v1/chat/completions"},
 		{"https://api.example.com/v1/", "/v2/videos", "https://api.example.com/v2/videos"},
 		{"https://api.example.com/api/v3", "/videos", "https://api.example.com/api/v3/videos"},
+		{"https://api.minimaxi.com/v1/video_generation", "/video_generation", "https://api.minimaxi.com/v1/video_generation"},
+		{"https://api.minimaxi.com/v1/video_generation", "/v2/video_generation", "https://api.minimaxi.com/v2/video_generation"},
+		{"https://api.minimaxi.com/v1/video_generation", "/v2/query/video_generation/task-1", "https://api.minimaxi.com/v2/query/video_generation/task-1"},
+		{"https://api.minimaxi.com/v1/video_generation", "/v1/query/video_generation?task_id=task-1", "https://api.minimaxi.com/v1/query/video_generation?task_id=task-1"},
+		{"https://api.minimaxi.com/v2/video_generation", "/v2/video_generation", "https://api.minimaxi.com/v2/video_generation"},
+		{"https://api.minimaxi.com/v2/video_generation", "/v2/video_generation/task-1", "https://api.minimaxi.com/v2/video_generation/task-1"},
+		{"https://api.minimaxi.com/v2/video_generation", "/v2/query/video_generation/task-1", "https://api.minimaxi.com/v2/query/video_generation/task-1"},
 	}
 	for _, test := range tests {
 		if got := ChannelAPIURL(test.base, test.path); got != test.want {
@@ -116,5 +123,17 @@ func TestProviderRelativeResultDownloadsWithSameOriginAuth(t *testing.T) {
 	body, _, err := GetProviderExternalBinary(context.Background(), Config{BaseURL: server.URL + "/v1", APIKey: "fixture-key"}, "/v1/videos/task-fixture/content")
 	if err != nil || string(body) != "fixture-video" {
 		t.Fatalf("relative output download failed: %v", err)
+	}
+}
+
+func TestHTTP405And501ClassifyAsModelMissingAndSafeRouteRejection(t *testing.T) {
+	for _, status := range []int{http.StatusMethodNotAllowed, http.StatusNotImplemented} {
+		failure := ClassifyHTTP(status, http.StatusText(status), "")
+		if failure.Category != CategoryModelMissing {
+			t.Fatalf("ClassifyHTTP(%d) category = %q, want %q", status, failure.Category, CategoryModelMissing)
+		}
+		if !SafeRouteRejection(HTTPError{StatusCode: status, Status: http.StatusText(status)}) {
+			t.Fatalf("SafeRouteRejection(%d) = false, want true", status)
+		}
 	}
 }

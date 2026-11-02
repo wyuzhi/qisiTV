@@ -45,7 +45,7 @@ func installTestSkill(t *testing.T, env *assistantTestEnv, userID string, files 
 		t.Fatal(err)
 	}
 	defer req.MultipartForm.RemoveAll()
-	installed, err := env.service.InstallSkillUpload(userID, "zip", req.MultipartForm.File["file"][0], app.SkillInstallRequest{IsPrivate: true})
+	installed, err := env.service.SkillsDomain().InstallSkillUpload(userID, "zip", req.MultipartForm.File["file"][0], app.SkillInstallRequest{IsPrivate: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestSkillScopeFollowsConversationAcrossTurns(t *testing.T) {
 	begin := func(turnID, sessionID string, pins []skills.Pin, finalize bool) {
 		t.Helper()
 		env.beginTurn(t, turnID, app.AssistantTurnInput{SkillPins: pins})
-		if err := env.service.BindAssistantDurableSession(owner.ID, turnID, sessionID, false); err != nil {
+		if err := env.service.AssistantTurns().BindDurableSession(owner.ID, turnID, sessionID, false); err != nil {
 			t.Fatal(err)
 		}
 		if finalize {
@@ -133,7 +133,7 @@ func TestSkillScopeFollowsConversationAcrossTurns(t *testing.T) {
 	if code != http.StatusOK || !strings.Contains(body, installed.SkillID) || !strings.Contains(body, "先出一批再确认") || strings.Contains(body, "第一步") {
 		t.Fatalf("catalog must list installed skills without bodies: %d %s", code, body)
 	}
-	foreign, err := env.service.AgentSkillCatalog("another-user")
+	foreign, err := env.service.SkillsDomain().AgentCatalog("another-user")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -39,6 +39,12 @@ async function batchFixture(foreignWrite, run) {
     try {
       let raw = ''; for await (const chunk of req) raw += chunk;
       const input = JSON.parse(raw), { opId, params } = input;
+      if (req.url === '/ops/canvas.get') {
+        res.end(JSON.stringify({ code: 0, data: { result: { canvasId: 'canvas', canvas: {
+          revision: state.revision, nodes: [{ id: 'shot-two', type: 'image', metadata: { size: state.size } }], connections: state.edges,
+        } } } }));
+        return;
+      }
       state.posts.push({ ...input, op: req.url.slice('/ops/'.length) });
       if (state.posts.length === 1) { entered.resolve(); await release.promise; }
       const prior = state.receipts.get(opId);
@@ -103,13 +109,13 @@ async function batchFixture(foreignWrite, run) {
     assert.equal(fixture.requests.length, 2, 'the first response must issue all three calls');
     const replies = fixture.payloads[1].messages.filter(message => message.role === 'tool');
     assert.deepEqual(replies.map(reply => reply.tool_call_id), calls.map(call => call.id));
-    assert.deepEqual(state.posts.map(post => post.op), ['canvas.edge.create', 'canvas.node.configure', 'canvas.edge.create']);
-    assert.equal(new Set(state.posts.map(post => post.opId)).size, 3);
+    assert.deepEqual(state.posts.map(post => post.op), foreignWrite ? ['canvas.edge.create', 'canvas.node.configure'] : ['canvas.edge.create', 'canvas.node.configure', 'canvas.edge.create']);
+    assert.equal(new Set(state.posts.map(post => post.opId)).size, foreignWrite ? 2 : 3);
     await run({ state, result, replies });
     const duplicate = await fixture.store.submit(entry, input);
     assert.equal(duplicate.id, submission.id);
     await fixture.store.wait(entry, duplicate);
-    assert.equal(state.posts.length, 3, 'observing the completed request must not repeat any write');
+    assert.equal(state.posts.length, foreignWrite ? 2 : 3, 'observing the completed request must not repeat any write');
     assert.equal(fixture.requests.length, 2);
   } finally {
     release.resolve();
@@ -132,16 +138,16 @@ test('one official response serializes mixed independent writes and chains their
   });
 });
 
-test('a foreign edit between same-response writes stays intact and later calls fail CAS without retrying', { timeout: 30000 }, async () => {
+test('a foreign edit stays intact and a CAS conflict fences later same-response writes without retrying', { timeout: 30000 }, async () => {
   await batchFixture(true, async ({ state, result, replies }) => {
-    assert.deepEqual(state.posts.map(post => post.params.expectedRevision), [9, 10, 10]);
+    assert.deepEqual(state.posts.map(post => post.params.expectedRevision), [9, 10]);
     assert.equal(state.revision, 11); assert.equal(state.receipts.size, 1);
     assert.equal(state.size, '4:3'); assert.equal(state.edges.length, 1);
-    assert.deepEqual(state.failures, ['revision_conflict', 'revision_conflict']);
+    assert.deepEqual(state.failures, ['revision_conflict']);
     assert.equal(JSON.parse(text(replies[0])).result.revision, 10);
-    for (const reply of replies.slice(1)) assert.match(text(reply), /revision_conflict/);
-    // Sequential is neither atomic nor fail-fast: the first write remains,
-    // and the third queued call also runs but cannot swallow the foreign edit.
+    assert.match(text(replies[1]), /revision_conflict/);
+    assert.match(text(replies[1]), /4:3/);
+    assert.match(text(replies[2]), /canvas_context_changed/);
     assert.deepEqual(result.toolCalls.map(call => call.isError), [false, true, true]);
     assert.equal(result.change.revisionAfter, 10);
     assert.equal(result.change.operationIds.length, 1);

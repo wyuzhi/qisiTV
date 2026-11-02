@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 const canvasStylesSource = readFileSync(resolve(import.meta.dir, "../src/styles/globals.css"), "utf8");
 const nodeSource = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-node.tsx"), "utf8");
 const projectSource = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/project.tsx"), "utf8");
+const nodeClickSource = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/use-canvas-node-click.ts"), "utf8");
 const createNodeSource = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/use-canvas-node-operations.ts"), "utf8");
 const contextMenuSource = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-context-menu.tsx"), "utf8");
 const emptyContentSource = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-node-content.tsx"), "utf8");
@@ -68,7 +69,7 @@ describe("canvas text inline edit and empty card", () => {
         expect(nodeSource).toMatch(/if \(readOnly \|\| data\.type !== CanvasNodeType\.Text\) return;[\s\S]*setIsEditingContent\(true\)/);
         expect(contextMenuSource).toContain('{isText ? <MenuButton icon={<Maximize2 />} label="放大编辑" onClick={() => runAction(onEditText)} /> : null}');
         expect(projectSource).toContain("onEditText={openTextNodeEditor}");
-        expect(projectSource).toMatch(/node.type === CanvasNodeType.Text\)\s*\{\s*setDialogNodeId\(node.id\)/);
+        expect(nodeClickSource).toMatch(/node.type === CanvasNodeType.Text\)\s*\{\s*setDialogNodeId\(node.id\)/);
         expect(createNodeSource).toContain("if (canOpenCanvasNodePromptPanel(node) && type !== CanvasNodeType.Text) setDialogNodeId(node.id);");
     });
 });

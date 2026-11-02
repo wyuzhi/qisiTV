@@ -79,6 +79,22 @@ func (r *Repository) SucceededTasksForDelivery(afterID string, limit int) ([]mod
 	return tasks, err
 }
 
+// UpdateCanvasBindRecovery stores or clears the background scanner's private
+// canvas bind marker on a succeeded task. recovery_outcome also holds media
+// recovery conclusions (no_result / unrecoverable), so this only replaces an
+// empty value or an earlier canvas marker and never overwrites a conclusion.
+// updated_at is left alone: the marker is scanner state, not a task change.
+func (r *Repository) UpdateCanvasBindRecovery(userID, taskID string, marker *string) error {
+	if r == nil || r.db == nil {
+		return gorm.ErrInvalidDB
+	}
+	prefix := model.CanvasBindRecoveryPrefix
+	return r.db.Model(&model.Task{}).
+		Where("id = ? AND user_id = ? AND status = ?", taskID, userID, model.TaskStatusSucceeded).
+		Where("recovery_outcome IS NULL OR recovery_outcome = '' OR substr(recovery_outcome, 1, ?) = ?", len(prefix), prefix).
+		UpdateColumn("recovery_outcome", marker).Error
+}
+
 func insertOwnedAsset(tx *gorm.DB, asset *model.Asset) error {
 	if err := tx.Create(asset).Error; err == nil {
 		return nil

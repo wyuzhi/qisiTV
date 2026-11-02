@@ -50,7 +50,7 @@ func TestConfigureRealBusinessReceiptReplayCASAndUndo(t *testing.T) {
 	if err := env.service.FinalizeAssistantTurn(turnID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.service.UndoAssistantTurn(owner.ID, env.canvasID, turnID); err != nil {
+	if _, err := env.service.AssistantTurns().Undo(owner.ID, env.canvasID, turnID); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ = env.service.UserCanvasProject(owner.ID, env.canvasID)

@@ -93,7 +93,7 @@ func TestUndoAssistantTurnVerifiedSequentialOperations(t *testing.T) {
 	if err := h.s.FinalizeAssistantTurn("aabbcc"); err != nil {
 		t.Fatal(err)
 	}
-	revision, err := h.s.UndoAssistantTurn("local", "c", "aabbcc")
+	revision, err := h.s.AssistantTurns().Undo("local", "c", "aabbcc")
 	if err != nil {
 		t.Fatalf("two committed assistant writes must undo: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestUndoAssistantTurnRecoversWhenSettlementNeverRan(t *testing.T) {
 	h.run(t, "canvas.nodes.create", "recovered", "00112233aabbccdd",
 		map[string]any{"nodes": []any{map[string]any{"title": "恢复", "type": "text"}}})
 	// 刻意不调用 FinalizeAssistantTurn：撤销必须自己从回执重建这一轮的改动。
-	restored, err := h.s.UndoAssistantTurn("local", "c", "00112233aabbccdd")
+	restored, err := h.s.AssistantTurns().Undo("local", "c", "00112233aabbccdd")
 	if err != nil {
 		t.Fatalf("unsettled turn must still undo from receipts: %v", err)
 	}

@@ -230,8 +230,9 @@ function DockCommandButton({ command, mouseX, metrics, motionEnabled, compact, s
     const [focused, setFocused] = useState(false);
     const [hovered, setHovered] = useState(false);
     const distance = useTransform(mouseX, (value) => {
+        if (!motionEnabled || !Number.isFinite(value)) return Number.POSITIVE_INFINITY;
         const bounds = ref.current?.getBoundingClientRect();
-        if (!bounds || !Number.isFinite(value)) return Number.POSITIVE_INFINITY;
+        if (!bounds) return Number.POSITIVE_INFINITY;
         return value - bounds.left - bounds.width / 2;
     });
     const itemTarget = useTransform(distance, (value) => proximitySize(value, metrics.base, metrics.magnified, metrics.distance, motionEnabled));

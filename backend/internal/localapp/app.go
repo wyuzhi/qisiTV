@@ -3,27 +3,31 @@ package localapp
 import (
 	"context"
 	"fmt"
+
+	"qisitv/backend/internal/modelcatalog"
 )
 
 type Options struct {
-	Workspace      WorkspacePort
-	Projects       ProjectPort
-	Assets         AssetPort
-	Tasks          TaskPort
-	Generation     GenerationPort
-	ProviderConfig ProviderConfigPort
-	Lifecycle      Lifecycle
+	Workspace       WorkspacePort
+	Projects        ProjectPort
+	Assets          AssetPort
+	Tasks           TaskPort
+	Generation      GenerationPort
+	ProviderConfig  ProviderConfigPort
+	ModelCapability ModelCapabilityPort
+	Lifecycle       Lifecycle
 }
 
 // App is the desktop-only composition root. Legacy is a temporary HTTP
 // adapter, not a source of dependencies for new local modules.
 type App struct {
-	Workspace      WorkspacePort
-	Projects       ProjectPort
-	Assets         AssetPort
-	Tasks          TaskPort
-	Generation     GenerationPort
-	ProviderConfig ProviderConfigPort
+	Workspace       WorkspacePort
+	Projects        ProjectPort
+	Assets          AssetPort
+	Tasks           TaskPort
+	Generation      GenerationPort
+	ProviderConfig  ProviderConfigPort
+	ModelCapability ModelCapabilityPort
 
 	lifecycle Lifecycle
 }
@@ -49,10 +53,15 @@ func New(options Options) (*App, error) {
 	if missing != "" {
 		return nil, fmt.Errorf("local app requires %s port", missing)
 	}
+	modelCapability := options.ModelCapability
+	if modelCapability == nil {
+		modelCapability = modelcatalog.NewCapabilityNormalizer()
+	}
 	return &App{
 		Workspace: options.Workspace, Projects: options.Projects, Assets: options.Assets,
 		Tasks: options.Tasks, Generation: options.Generation, ProviderConfig: options.ProviderConfig,
-		lifecycle: options.Lifecycle,
+		ModelCapability: modelCapability,
+		lifecycle:       options.Lifecycle,
 	}, nil
 }
 

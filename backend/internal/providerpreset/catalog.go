@@ -46,7 +46,7 @@ func BeefAPI() ChannelPreset {
 			return preset.Clone()
 		}
 	}
-	panic("BeefAPI preset missing")
+	panic("BeefTV preset missing")
 }
 
 func (preset ChannelPreset) Model(name string) (ModelProfile, bool) {

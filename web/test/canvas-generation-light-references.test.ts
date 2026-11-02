@@ -43,11 +43,13 @@ test("character main and supplemental representations remain resource references
     } as Awaited<ReturnType<typeof projects.getProjectCharacter>>);
     restores.push(() => detail.mockRestore());
     const input = { ...context([]), characterReferences: [{ nodeId: "character-node", assetId: "character" }] };
-    const hydrated = await hydrateNodeGenerationContext(input, "canvas", "project", "image");
+    const hydrated = await hydrateNodeGenerationContext(input, "canvas", "project", "image", false, true, { maxImages: 9, maxVideos: 0, maxAudios: 0 });
     expect(hydrated.referenceImages.map(image => image.storageKey)).toEqual(["resource:primary-image", "resource:side-image"]);
     expect(hydrated.referenceImages.every(image => image.dataUrl === "")).toBe(true);
     expect(hydrated.resolvedCharacterVersions).toEqual([{ assetId: "character", versionId: "v2" }]);
     expect(hydrated.prompt).toContain("禾禾");
+    const undeclaredHydrated = await hydrateNodeGenerationContext(input, "canvas", "project", "image");
+    expect(undeclaredHydrated.referenceImages.map(image => image.storageKey)).toEqual(["resource:primary-image"]);
     expect(read).not.toHaveBeenCalled();
 });
 

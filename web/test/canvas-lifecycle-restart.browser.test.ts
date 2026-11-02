@@ -49,7 +49,7 @@ beforeAll(async () => {
             return json({ id: "late-failed", type: "canvas_video", status: "failed", error: "测试任务失败", attempts: 1, createdAt: "2026-10-15", updatedAt: "2026-10-15" });
         }
         if (path.startsWith("/api/")) return json([]);
-        return new Response('<div id="root"></div>' + (['reopen-stamp', 'startup-stamp', 'missing-chat-sessions'].includes(new URL(request.url).searchParams.get('scenario') || '') ? '<script>window.__reopenProject=' + JSON.stringify(backend).replaceAll('<', '\\u003c') + '</script>' : '') + '<script type="module" src="/harness.js"></script>', { headers: { "Content-Type": "text/html" } });
+        return new Response('<div id="root"></div>' + (['reopen-stamp', 'startup-stamp', 'missing-chat-sessions'].includes(new URL(request.url).searchParams.get('scenario') || '') ? '<script>window.__reopenProject=' + JSON.stringify(backend).replaceAll('<', '\\u003c') + '</script>' : '') + '<script type="module" src="/harness.js"></script>', { headers: { "Content-Type": "text/html; charset=utf-8" } });
     } });
     const executablePath = [process.env.CHROME_PATH, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((path): path is string => Boolean(path && existsSync(path)));
     browser = await chromium.launch({ executablePath, headless: true });
@@ -63,6 +63,28 @@ beforeEach(() => {
     taskPosts = [];
     manifests = [];
 });
+
+test("opening an old taskless failure saves its classification and local outcome without a manual edit", async () => {
+    backend.nodes[0].metadata = { status: "error", errorDetails: "too many requests" } as never;
+    release();
+    const page = await browser.newPage();
+    try {
+        await page.goto(server.url.toString());
+        await page.waitForFunction(() => document.querySelector('[data-testid="graph"]')?.textContent === "true:10:6");
+        await page.evaluate(() => (window as any).__lifecycle.pulse());
+        const metadata = backend.nodes[0].metadata as any;
+        expect(metadata.generationFailure?.explanation.category).toBe("throttled");
+        expect(metadata.taskOutcome).toEqual({ phase: "failed", regenerate: "allowed", reason: "task_failed" });
+        expect(metadata.taskOutcomeSource).toBe("local");
+        expect(await page.evaluate(() => (window as any).__lifecycle.held())).toEqual({ paused: false, candidateTitle: null });
+        expect(taskPosts).toHaveLength(0);
+        await page.goto(`${server.url}?scenario=reopen-stamp`);
+        await page.waitForFunction(() => document.querySelector('[data-testid="graph"]')?.textContent === "true:10:6");
+        const reopened = await page.evaluate(() => (window as any).__lifecycle.nodeState("n0").metadata);
+        expect(reopened.generationFailure.explanation).toEqual(metadata.generationFailure.explanation);
+        expect(reopened.taskOutcome).toEqual(metadata.taskOutcome);
+    } finally { await page.close(); }
+}, 30000);
 
 test("first image submission flushes an unobserved preparation state without a false conflict", async () => {
     const page = await browser.newPage();

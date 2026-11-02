@@ -6,7 +6,7 @@ const textContent = source.slice(source.indexOf("function TextContent("), source
 
 describe("text node selection (#429)", () => {
     test("media generators open the generation panel while all media results use tools", () => {
-        const project = readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8");
+        const project = readFileSync(new URL("../src/pages/canvas/use-canvas-node-click.ts", import.meta.url), "utf8");
         const clickHandler = project.slice(project.indexOf("const handleSelectedNodeClick ="), project.indexOf("const handleNodeBringToFront ="));
         expect(clickHandler).toContain("node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio");
         expect(clickHandler).toMatch(/canOpenCanvasNodePromptPanel\(node\)[\s\S]*?setToolbarNodeId\(null\);[\s\S]*?setDialogNodeId\(node\.id\);[\s\S]*?setDialogNodeId\(null\);[\s\S]*?setToolbarNodeId\(node\.id\);/);
@@ -28,7 +28,7 @@ describe("text node selection (#429)", () => {
     });
 
     test("opens the text generation panel on a node click", () => {
-        const project = readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8");
+        const project = readFileSync(new URL("../src/pages/canvas/use-canvas-node-click.ts", import.meta.url), "utf8");
         const clickHandler = project.slice(project.indexOf("const handleSelectedNodeClick ="), project.indexOf("const handleNodeBringToFront ="));
         expect(clickHandler).toMatch(/node.type === CanvasNodeType.Text\)\s*\{\s*setDialogNodeId\(node.id\)/);
     });

@@ -3,7 +3,6 @@ package app
 import (
 	"encoding/json"
 	"errors"
-	"strconv"
 	"strings"
 
 	"qisitv/backend/internal/model"
@@ -11,7 +10,7 @@ import (
 	localtask "qisitv/backend/internal/task"
 )
 
-const canvasBindRecoveryBatch = 64
+const canvasBindRecoveryBatch = localtask.CanvasBindRecoveryBatch
 
 func (s *Service) workspaceOperations() *operations.Registry {
 	if s == nil || s.repo == nil {
@@ -33,112 +32,48 @@ func (s *Service) workspaceOperations() *operations.Registry {
 }
 
 func (s *Service) recoverCanvasTaskBindings(task model.Task) error {
-	if s == nil || strings.TrimSpace(task.ID) == "" || strings.TrimSpace(task.UserID) == "" {
+	if s == nil {
 		return nil
-	}
-	if task.Status != model.TaskStatusSucceeded {
-		return nil
-	}
-	if err := s.prepareSeedreamOutputNodes(task); err != nil {
-		return err
 	}
 	registry := s.workspaceOperations()
-	intents := s.CanvasBindingIntents(task)
-	var last error
-	if registry != nil {
-		for _, target := range canvasBindTargets(task, intents) {
-			if err := s.executeCanvasTaskBind(registry, task, target.nodeID, target.outputIndex); err != nil {
-				if skippableCanvasBindError(err) {
-					continue
-				}
-				last = err
-			}
-		}
-		for _, target := range messageBindTargets(task, intents) {
-			if err := s.executeMessageTaskAttach(registry, task, target.conversationID, target.messageID, target.outputIndex); err != nil {
-				if skippableCanvasBindError(err) {
-					continue
-				}
-				last = err
-			}
-		}
-	}
-	if err := s.RegisterTaskOutputFromTask(task); err != nil {
-		last = err
-	}
-	if projectID := strings.TrimSpace(task.ProjectID); projectID != "" {
-		s.reconcileCharacterTurnaroundTasks(task.UserID, projectID)
-	}
-	return last
+	return localtask.RecoverCanvasTaskBindings(localtask.CanvasBindDeps{
+		Repo:            s.repo,
+		Intents:         s.CanvasBindingIntents,
+		PrepareSeedream: s.prepareSeedreamOutputNodes,
+		RegisterOutput:  s.RegisterTaskOutputFromTask,
+		DeliverAndIntents: func(t model.Task) []localtask.CanvasBindingIntent {
+			_ = s.generationDeliverer().Deliver(t)
+			return s.CanvasBindingIntents(t)
+		},
+		HasWorkspaceOps: registry != nil,
+		ExecuteCanvasBind: func(t model.Task, nodeID string, outputIndex int) error {
+			return s.executeCanvasTaskBind(registry, t, nodeID, outputIndex)
+		},
+		ExecuteMessageBind: func(t model.Task, conversationID, messageID string, outputIndex int) error {
+			return s.executeMessageTaskAttach(registry, t, conversationID, messageID, outputIndex)
+		},
+		Refusal:             canvasBindRefusal,
+		ReconcileTurnaround: s.reconcileCharacterTurnaroundTasks,
+	}, task)
 }
 
 func (s *Service) recoverPendingCanvasBindings(limit int) error {
 	if s == nil || s.repo == nil {
 		return nil
 	}
-	if s.workspaceOperations() == nil {
-		return nil
-	}
-	if limit <= 0 {
-		limit = canvasBindRecoveryBatch
-	}
-	s.bindCursorMu.Lock()
-	afterID := s.bindAfterID
-	s.bindCursorMu.Unlock()
-	tasks, err := s.repo.SucceededTasksForDelivery(afterID, limit)
-	if err != nil {
-		if bindInfrastructureUnavailable(err) {
-			return nil
-		}
-		return err
-	}
-	if len(tasks) == 0 && afterID != "" {
-		tasks, err = s.repo.SucceededTasksForDelivery("", limit)
-		if err != nil {
-			if bindInfrastructureUnavailable(err) {
-				return nil
-			}
-			return err
-		}
-	}
-	s.bindCursorMu.Lock()
-	if len(tasks) == 0 || len(tasks) < limit {
-		s.bindAfterID = ""
-	} else {
-		s.bindAfterID = tasks[len(tasks)-1].ID
-	}
-	s.bindCursorMu.Unlock()
-	var last error
-	for _, task := range tasks {
-		if err := s.recoverCanvasTaskBindings(task); err != nil {
-			last = err
-		}
-	}
-	return last
+	return localtask.RecoverPendingCanvasBindings(s.repo, s.workspaceOperations() != nil, &s.bindCursorMu, &s.bindAfterID, limit, s.recoverCanvasTaskBindings)
 }
 
 func (s *Service) executeMessageTaskAttach(registry *operations.Registry, task model.Task, conversationID, messageID string, outputIndex int) error {
-	conversationID = strings.TrimSpace(conversationID)
-	messageID = strings.TrimSpace(messageID)
+	conversationID, messageID = strings.TrimSpace(conversationID), strings.TrimSpace(messageID)
 	if registry == nil || conversationID == "" || messageID == "" {
 		return nil
 	}
-	params, err := json.Marshal(map[string]any{
-		"conversationId": conversationID,
-		"taskId":         task.ID,
-		"messageId":      messageID,
-		"outputIndex":    outputIndex,
-	})
+	params, err := json.Marshal(map[string]any{"conversationId": conversationID, "taskId": task.ID, "messageId": messageID, "outputIndex": outputIndex})
 	if err != nil {
 		return err
 	}
-	_, err = registry.Execute(operations.Request{
-		Op:     "conversation.message.attach",
-		OpID:   localtask.AttachMessageEffectKey(task.ID, messageID, outputIndex),
-		UserID: task.UserID,
-		Caller: operations.ManualCaller(false),
-		Params: params,
-	})
+	_, err = registry.Execute(operations.Request{Op: "conversation.message.attach", OpID: localtask.AttachMessageEffectKey(task.ID, messageID, outputIndex), UserID: task.UserID, Caller: operations.ManualCaller(false), Params: params})
 	if skippableCanvasBindError(err) {
 		return nil
 	}
@@ -146,130 +81,42 @@ func (s *Service) executeMessageTaskAttach(registry *operations.Registry, task m
 }
 
 func (s *Service) executeCanvasTaskBind(registry *operations.Registry, task model.Task, nodeID string, outputIndex int) error {
-	canvasID := strings.TrimSpace(task.ProjectID)
-	nodeID = strings.TrimSpace(nodeID)
+	canvasID, nodeID := strings.TrimSpace(task.ProjectID), strings.TrimSpace(nodeID)
 	if registry == nil || canvasID == "" || nodeID == "" {
 		return nil
 	}
-	params, err := json.Marshal(map[string]any{
-		"canvasId":    canvasID,
-		"taskId":      task.ID,
-		"nodeId":      nodeID,
-		"outputIndex": outputIndex,
-	})
+	params, err := json.Marshal(map[string]any{"canvasId": canvasID, "taskId": task.ID, "nodeId": nodeID, "outputIndex": outputIndex})
 	if err != nil {
 		return err
 	}
-	_, err = registry.Execute(operations.Request{
-		Op:     "canvas.task.bind",
-		OpID:   localtask.AttachNodeEffectKey(task.ID, nodeID, outputIndex),
-		UserID: task.UserID,
-		Caller: operations.ManualCaller(false),
-		Params: params,
-	})
-	if skippableCanvasBindError(err) {
-		return nil
-	}
+	_, err = registry.Execute(operations.Request{Op: "canvas.task.bind", OpID: localtask.AttachNodeEffectKey(task.ID, nodeID, outputIndex), UserID: task.UserID, Caller: operations.ManualCaller(false), Params: params})
 	return err
 }
 
-type canvasBindTarget struct {
-	nodeID      string
-	outputIndex int
-}
-
-type messageBindTarget struct {
-	conversationID string
-	messageID      string
-	outputIndex    int
-}
-
-func canvasBindTargets(task model.Task, intents []localtask.CanvasBindingIntent) []canvasBindTarget {
-	seen := map[string]bool{}
-	targets := make([]canvasBindTarget, 0, len(intents)+1)
-	add := func(nodeID string, outputIndex int) {
-		nodeID = strings.TrimSpace(nodeID)
-		if nodeID == "" {
-			return
-		}
-		key := nodeID + ":" + strconv.Itoa(outputIndex)
-		if seen[key] {
-			return
-		}
-		seen[key] = true
-		targets = append(targets, canvasBindTarget{nodeID: nodeID, outputIndex: outputIndex})
-	}
-	for _, intent := range intents {
-		if intent.TargetBinding == nil {
-			continue
-		}
-		add(intent.TargetBinding.NodeID, intent.OutputIndex)
-	}
-	switch strings.TrimSpace(task.Type) {
-	case "canvas_text", "text_replay":
-		add(localtask.TargetBindingFromInput(task.InputJSON).NodeID, 0)
-	}
-	return targets
-}
-
-func messageBindTargets(task model.Task, intents []localtask.CanvasBindingIntent) []messageBindTarget {
-	seen := map[string]bool{}
-	targets := make([]messageBindTarget, 0, len(intents)+1)
-	add := func(conversationID, messageID string, outputIndex int) {
-		conversationID = strings.TrimSpace(conversationID)
-		messageID = strings.TrimSpace(messageID)
-		if conversationID == "" || messageID == "" {
-			return
-		}
-		key := conversationID + ":" + messageID + ":" + strconv.Itoa(outputIndex)
-		if seen[key] {
-			return
-		}
-		seen[key] = true
-		targets = append(targets, messageBindTarget{conversationID: conversationID, messageID: messageID, outputIndex: outputIndex})
-	}
-	for _, intent := range intents {
-		if intent.TargetBinding == nil {
-			continue
-		}
-		add(intent.TargetBinding.ConversationID, intent.TargetBinding.MessageID, intent.OutputIndex)
-	}
-	target := localtask.TargetBindingFromInput(task.InputJSON)
-	add(target.ConversationID, target.MessageID, 0)
-	return targets
-}
-
 func skippableCanvasBindError(err error) bool {
-	if err == nil {
-		return true
-	}
-	if bindInfrastructureUnavailable(err) {
-		return true
-	}
+	return localtask.SkippableCanvasBindError(err, canvasBindRefusal)
+}
+
+func (s *Service) canvasRevision(task model.Task) func() (int64, error) {
+	return localtask.CanvasRevisionFromRepo(s.repo, task)
+}
+
+func (s *Service) canvasExists(userID string) func(string) (bool, error) {
+	return localtask.CanvasExistsInRepo(s.repo, userID)
+}
+
+func (s *Service) isOwnedBusinessProject(userID string) func(string) (bool, error) {
+	return localtask.IsOwnedBusinessProjectInRepo(s.repo, userID)
+}
+
+func canvasBindRefusal(err error) (string, map[string]any) {
 	var opErr *operations.Error
-	if !errors.As(err, &opErr) {
-		return false
+	if err == nil || !errors.As(err, &opErr) {
+		return "", nil
 	}
-	switch opErr.Reason {
-	case "node_deleted", "node_task_mismatch", "node_mismatch", "canvas_mismatch",
-		"conversation_deleted", "message_deleted", "message_mismatch", "conversation_mismatch",
-		"message_task_mismatch",
-		"task_not_found", "task_not_succeeded", "task_foreign",
-		"output_not_ready", "resource_not_ready", "resource_missing", "resource_foreign",
-		"resource_mismatch", "asset_foreign", "delivery_unreadable", "unsupported_result_shape",
-		"effect_identity_mismatch":
-		return true
-	default:
-		return false
-	}
+	return opErr.Reason, opErr.Details
 }
 
 func bindInfrastructureUnavailable(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "no such table") ||
-		strings.Contains(message, "op_store_unavailable") ||
-		strings.Contains(message, "op_domain_unavailable")
+	return localtask.BindInfrastructureUnavailable(err)
 }

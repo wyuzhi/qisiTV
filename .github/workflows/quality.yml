@@ -9,7 +9,7 @@ on:
 
 concurrency:
   group: quality-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -76,19 +76,32 @@ jobs:
           name: released-windows-upgrade-evidence
           path: upgrade-evidence/
 
+  structure-budget:
+    name: Structure budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Structure numbers may only shrink
+        run: |
+          node --test scripts/structure-budget.test.mjs
+          node scripts/structure-budget.mjs
+
   release-publisher:
     name: Release publisher checks
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Test immutable publication and activation
         run: |
+          sh scripts/audit-public-docs.sh
           node --test scripts/configure-ubuntu-apt.test.mjs
-          node --test scripts/image-preparation-release-contract.test.mjs
-          node --test scripts/music3-release-contract.test.mjs
-          node --test scripts/v201-release-contract.test.mjs scripts/v202-release-contract.test.mjs scripts/v203-release-contract.test.mjs
+          node --test scripts/verify-real-generation-release.test.mjs
           python3 -m unittest discover -s scripts -p 'test_publish_desktop_r2.py'
+          python3 -m unittest discover -s scripts -p 'test_mirror_desktop_cnb.py'
           node --test scripts/distribution-notices.test.mjs
           python3 -m unittest discover -s scripts -p 'test_package_macos_media_source.py'
           python3 -m unittest discover -s scripts -p 'test_package_wasm_sources.py'
@@ -98,7 +111,7 @@ jobs:
   backend:
     name: Backend checks
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: backend
@@ -121,19 +134,26 @@ jobs:
       - name: Install native media test dependencies
         run: |
           bash ../scripts/configure-ubuntu-apt.sh
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg fontconfig fonts-noto-cjk
-          fc-cache -f
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null || ! fc-list ':lang=zh-cn' | grep -q .; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends ffmpeg fontconfig fonts-noto-cjk
+            fc-cache -f
+          fi
           fc-match ':lang=zh-cn'
           ffmpeg -version
           ffprobe -version
       - name: Build official protocol packages
         run: sh ../plugin-packages/build-packages.sh
       - name: Run Go tests
-        run: go test ./...
+        run: go test ./... -p 2 -timeout=20m
       - name: Verify real production timing report
         working-directory: agent-host/eval
         run: python3 -m unittest report_production_test.py
+      - name: Verify agent-host request efficiency gate
+        working-directory: agent-host
+        run: |
+          bun test studio-digest.test.mjs skill-resource.test.mjs plan-and-skills.test.mjs eval/request-efficiency-gate.test.mjs
+          bun eval/request-efficiency-gate.mjs
 
   web:
     name: Web checks
@@ -224,7 +244,7 @@ jobs:
               for name in ['manifest.json', 'README.md', 'docs', 'assets', 'web', 'backend', 'LICENSE']:
                   source = package / name
                   files.extend([source] if source.is_file() else [item for item in source.rglob('*') if item.is_file()])
-              with ZipFile(root / (package.name + '.beeftv-plugin'), 'w', ZIP_DEFLATED) as archive:
+              with ZipFile(root / (package.name + '.qisitv-plugin'), 'w', ZIP_DEFLATED) as archive:
                   for source in sorted(files):
                       archive.write(source, source.relative_to(package).as_posix())
           PY

@@ -24,6 +24,10 @@ Seedance 专用调度与声明式视频插件共用该下载合同，包括直�
 自定义渠道统一使用用户明确选择的请求协议，不按域名或模型名称自动更换协议。选择「视频生成 JSON · ratio / duration」后，同一格式的其他服务地址和模型也可完整发送多张参考图；顺序保持不变，未指定首尾帧的图片明确标为 `reference_image`。模型能力设置中的数量等限制仍生效。旧配置若误选了 `newapi`（Sora multipart），请在模型的高级设置中选择与服务商实际接口一致的 JSON 协议。插件未安装或停用时仍在发送前失败。
 
 - OpenAI Videos / Sora 使用 `POST /v1/videos` 和 multipart，最多一张参考图。不支持的多图、参考视频、参考音频、尾帧及蒙版会在提交前报错。
+- OpenAI 已于 2026-09-24 关闭官方 Sora 2 模型与 Videos API，且没有一对一的替代接口；这条协议现在只对仍转发同名 `/v1/videos` 合同的第三方中转有意义。用普通 OpenAI Key 直接在 `api.openai.com` 生成视频不保证可用。
+- Google 已停止 Gemini API 的 Veo 预览模型（2026-10-22）与 Veo 3.0 / 2.0 正式模型（2026-06-30），官方建议改用 Gemini Omni Flash；`gemini-veo` 协议保留给仍转发同名 `predictLongRunning` 的中转或尚未关闭的模型。
+- Runway 的 `promptImage` 按模型区分：`gen4.5`、`gen4_turbo`、`gemini_omni_flash`、`grok_imagine_1_5` 等模型的 `position` 只有 `first`，带尾帧会在提交前报错；`veo3.1`、`kling2.5_turbo_pro`、`seedance2_5`、`h3_max` 等支持尾帧的模型照常发送，本地只拦官方明确限制的单帧模型。创建与查询都带官方的 `X-Runway-Version`。
+- Luma 的 `keyframes.frame0.url` 只接受在线图片地址：本地首帧先上传到对象存储换成在线地址，拿不到在线地址时在提交前报错（`reference_media_requires_url`），不会把 data URL 发进该字段。
 - 「视频生成 JSON · ratio / duration」使用 `POST /v1/video/generations` 和 JSON，发送 `images` 对象数组及图片角色、整数 `duration`、`ratio`，并从查询结果 `data[].url` 取回视频。只有服务商文档符合该格式时才选择。
 - 既有 NewAPI Video Generations 使用 `seconds/aspect_ratio/image_urls`，与上一项的字段不同；方舟原生、fal 和其他专用协议也须按各自文档选择。
 

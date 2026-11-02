@@ -7,6 +7,8 @@ import { getNodeGenerationMode } from "../src/lib/canvas/node-registry";
 import "../src/lib/canvas/node-registry/definitions";
 import type { CanvasNodeData } from "../src/types/canvas";
 import type { DirectorScene } from "../src/types/director";
+import { createCanvasPageUiStore } from "../src/stores/canvas/use-canvas-page-ui-store";
+const pageUi = createCanvasPageUiStore();
 
 test("creating a director shot opens an empty workbench at the requested canvas position", () => {
     const projectId = useCanvasStore.getState().createProject("empty director test");
@@ -17,7 +19,7 @@ test("creating a director shot opens an empty workbench at the requested canvas 
     const useApp = spyOn(App, "useApp").mockReturnValue({ message: { success: () => {} } } as ReturnType<typeof App.useApp>);
 
     function Harness() {
-        const director = useCanvasDirector({
+        const director = useCanvasDirector({ pageUi,
             projectId,
             directorNodeId: null,
             directorScenes: [],
@@ -26,8 +28,6 @@ test("creating a director shot opens an empty workbench at the requested canvas 
             getCanvasCenter: () => ({ x: 0, y: 0 }),
             setNodes: (value) => { nodesRef.current = typeof value === "function" ? value(nodesRef.current) : value; },
             setConnections: () => {},
-            setSelectedNodeIds: () => {},
-            setSelectedConnectionId: () => {},
             setDirectorNodeId: (value) => { openedNodeId = typeof value === "function" ? value(openedNodeId) : value; },
             updateProject: (_id, patch) => { savedScenes = patch.directorScenes; },
         });

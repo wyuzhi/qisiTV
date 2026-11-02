@@ -3,15 +3,17 @@ import { AlertCircle, BookOpenCheck, Download, Image as ImageIcon, LoaderCircle,
 
 import { VideoPlayer } from "@/components/video-player";
 import { CachedResourceImage } from "@/components/cached-resource-image";
+import { usesCanvasCustomNodeContent } from "@/lib/canvas/canvas-node-content-policy";
 import { GenerationFailureNotice } from "@/components/generation/generation-failure-notice";
 import { explainGenerationError } from "@/lib/generation-error";
-import { canvasNodeFailureExplanation, canRecoverOrRetryDepthCapture } from "@/lib/canvas/canvas-depth-capture";
-import { isGenerationTaskSubmissionUncertain } from "@/lib/generation-task-display";
+import { canRecoverOrRetryDepthCapture } from "@/lib/canvas/canvas-depth-capture";
+import { canvasNodeFailureView } from "@/lib/canvas/canvas-node-failure-view";
 import { canvasNodeOperation } from "@/lib/operation-progress";
 import { useOperationProgress } from "@/stores/use-operation-progress";
 import { canvasRichTextHTML } from "@/lib/canvas/canvas-rich-text";
 import { fitImageNodeToDecodedSize, fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { loadCanvasDrawingPreview } from "@/lib/canvas/canvas-drawing-storage";
+import { prewarmCanvasLodThumbnails } from "@/lib/canvas/canvas-lod-thumbnails";
 import { canvasNodeVideoPreviewUrl, inferVideoHasAudio } from "@/lib/canvas/canvas-media-preview";
 import { bindCanvasVideoHoverPreview } from "@/lib/canvas/canvas-video-hover-preview";
 import { canvasVideoPresentationState } from "@/lib/canvas/canvas-video-presentation";
@@ -20,8 +22,8 @@ import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-refer
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { resourceIdFromStorageKey } from "@/services/api/resources";
-import type { GenerationTask } from "@/services/api/task-center";
-import { cacheResourceObjectUrl, getCachedResourceObjectUrl, peekCachedResourceObjectUrl, scheduleResourceBlobCache } from "@/services/resource-blob-cache";
+import { cacheResourceImagePreviewObjectUrl, cacheResourceObjectUrl, getCachedResourceObjectUrl, peekCachedResourceObjectUrl, scheduleResourceBlobCache } from "@/services/resource-blob-cache";
+import { canvasImagePreviewSize } from "@/lib/canvas/canvas-image-preview-blob";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { useResourceVideoPlayback } from "@/hooks/use-resource-video-playback";
 import { resolveImageUrl } from "@/services/image-storage";
@@ -29,7 +31,6 @@ import { recordDiagnosticEvent } from "@/services/diagnostics/client-diagnostics
 import { canvasNodeDiagnosticContext, recordCanvasVideoDiagnostic } from "@/services/diagnostics/canvas-media-diagnostics";
 import { acquireCanvasVideoPreview, canvasDerivedPreviewSourceKey, canvasVideoPreviewNeedsHydration } from "@/services/canvas-video-preview";
 import { acquireCanvasVideoSource } from "@/services/canvas-video-source";
-import { getActiveUserScopeEpoch, subscribeUserScope } from "@/lib/user-scope";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { ART_CRITIQUE_NODE_TYPE } from "@/lib/art-critique/contracts";
@@ -85,16 +86,7 @@ export function CanvasNodeContent(props: CanvasNodeContentProps) {
     if (props.node.type === CanvasNodeType.Upscale) return <UpscaleNodeContent node={props.node} theme={props.theme} />;
     if (props.node.metadata?.fileUpload) return <CanvasFileUploadContent node={props.node} theme={props.theme} reduceMotion={props.reduceMediaEffects} />;
     if (operation) return <CanvasNodeGenerationProgress node={props.node} theme={props.theme} operation={operation} onOpenTaskDetails={props.onOpenTaskDetails} onCancelTask={props.onCancelTask} />;
-    const hasCustomContent = props.node.type === CanvasNodeType.Config
-        || Boolean(props.node.metadata?.reusableWorkflow)
-        || Boolean(props.node.metadata?.workflowSlot)
-        || props.node.type === CanvasNodeType.Script
-        || props.node.type === CanvasNodeType.BatchTable
-        || props.node.type === CanvasNodeType.Director
-        || Boolean(props.node.metadata?.directorSceneId)
-        || (props.node.metadata?.workflowKind === "character" && Boolean(props.node.metadata.characterAssetId))
-        || (props.node.metadata?.workflowKind === "story_input" && !props.isEditingContent)
-        || (props.node.metadata?.workflowKind === "styleboard" && !props.node.metadata.content);
+    const hasCustomContent = usesCanvasCustomNodeContent(props.node, props.isEditingContent);
     if (hasCustomContent && props.renderNodeContent) return props.renderNodeContent(props.node);
     if (props.node.type === ART_CRITIQUE_NODE_TYPE) return <ArtCritiqueNodeContent node={props.node} />;
     if (props.node.type === MEDIA_CONVERSION_NODE_TYPE) return <MediaConversionNodeContent node={props.node} theme={props.theme} />;
@@ -201,22 +193,19 @@ function DrawingContent({ node, theme, drawingProjectId }: CanvasNodeContentProp
 }
 
 function ErrorContent({ node, theme, onRetry, onReloadResource, onOpenTaskDetails }: Pick<CanvasNodeContentProps, "node" | "theme" | "onRetry" | "onReloadResource" | "onOpenTaskDetails">) {
-    const explanation = canvasNodeFailureExplanation(node);
+    const failureView = canvasNodeFailureView(node);
+    const explanation = failureView.explanation;
     const batchChild = Boolean(node.metadata?.batchRootId);
     const localDepthAction = canRecoverOrRetryDepthCapture(node);
     const upscaleAction = Boolean(node.metadata?.workflowOperation?.id.endsWith(".ai-upscale"));
-    const errorDisplayTask = {
-        provider: node.metadata?.taskProvider,
-        status: (node.metadata?.taskStatus || "failed") as GenerationTask["status"],
-        stage: node.metadata?.taskStage,
-        officialStatus: node.metadata?.taskOfficialStatus,
-        errorCode: node.metadata?.taskErrorCode || node.metadata?.generationErrorCode,
-    };
-    const submissionUncertain = isGenerationTaskSubmissionUncertain(errorDisplayTask) || explanation.uncertain;
+    const canReload = failureView.canReload;
+    const retryBlocked = failureView.retryBlocked;
+    const submissionUncertain = failureView.cardSubmissionUncertain;
     return (
         <div
             data-canvas-no-zoom
             data-canvas-wheel-scroll
+            data-canvas-live-scale
             className="canvas-node-error-content flex max-w-[260px] flex-col items-center gap-3 overflow-y-auto px-3 py-2 text-center"
             style={{
                 boxSizing: "border-box",
@@ -231,13 +220,14 @@ function ErrorContent({ node, theme, onRetry, onReloadResource, onOpenTaskDetail
                     compact
                     summaryOnly={batchChild}
                     explanation={explanation}
-                    context={{ ...canvasNodeDiagnosticContext(node), model: node.metadata?.model, createdAt: node.metadata?.taskCreatedAt, stage: node.metadata?.taskStage, providerRequestId: node.metadata?.taskProviderRequestId, failureDiagnostics: node.metadata?.taskFailureDiagnostics, errorSummary: node.metadata?.generationErrorSummary, completedAt: node.metadata?.taskCompletedAt, updatedAt: node.metadata?.taskUpdatedAt }}
+                    context={{ ...canvasNodeDiagnosticContext(node), model: node.metadata?.model, createdAt: node.metadata?.taskCreatedAt, stage: node.metadata?.taskStage, providerRequestId: node.metadata?.taskProviderRequestId, failureDiagnostics: node.metadata?.taskFailureDiagnostics, errorSummary: node.metadata?.generationErrorSummary, providerCode: node.metadata?.generationProviderCode, completedAt: node.metadata?.taskCompletedAt, updatedAt: node.metadata?.taskUpdatedAt }}
                     onOpenDetails={node.metadata?.taskId && onOpenTaskDetails ? () => onOpenTaskDetails(node) : undefined}
-                    onRetry={!localDepthAction && (submissionUncertain || explanation.uncertain || explanation.category === "download_failed") ? undefined : onRetry ? () => onRetry(node) : undefined}
+                    retryDisabled={retryBlocked}
+                    onRetry={retryBlocked ? undefined : onRetry ? () => onRetry(node) : undefined}
                     retryLabel={upscaleAction ? node.metadata?.taskId ? "取回原结果" : "重试未提交项" : explanation.category === "result_target_unavailable" ? "生成历史" : localDepthAction && node.metadata?.taskStatus === "succeeded" ? "恢复结果" : node.metadata?.isBatchRoot ? "重新生成失败项" : "重新生成"}
                 />
             </div>
-            {node.metadata?.resourceReloadAvailable ? (
+            {canReload ? (
                 <button
                     type="button"
                     className="inline-flex h-8 items-center gap-1.5 rounded-[var(--r-md)] px-3 text-xs font-medium transition-colors"
@@ -527,11 +517,10 @@ function AudioNodeContent({ node, theme }: CanvasNodeContentProps) {
 export function InactiveVideoPreview({ node, theme, onPlay, hoverEnabled = true, showPlayButton = true }: Pick<CanvasNodeContentProps, "node" | "theme"> & { onPlay: () => void; hoverEnabled?: boolean; showPlayButton?: boolean }) {
     const previewRef = useRef<HTMLDivElement>(null);
     const nearViewport = useNearViewport(previewRef);
-    const [scopeEpoch, setScopeEpoch] = useState(getActiveUserScopeEpoch);
     const sourceKey = canvasDerivedPreviewSourceKey(node);
-    const [derivedPreview, setDerivedPreview] = useState<{ sourceKey: string; epoch: number; content: string }>();
+    const [derivedPreview, setDerivedPreview] = useState<{ sourceKey: string; content: string }>();
     const persistedPreviewUrl = canvasNodeVideoPreviewUrl(node);
-    const derivedPreviewUrl = derivedPreview?.sourceKey === sourceKey && derivedPreview.epoch === getActiveUserScopeEpoch() ? derivedPreview.content : "";
+    const derivedPreviewUrl = derivedPreview?.sourceKey === sourceKey ? derivedPreview.content : "";
     const previewNeedsHydration = canvasVideoPreviewNeedsHydration(node);
     const previewUrl = previewNeedsHydration ? derivedPreviewUrl || persistedPreviewUrl : persistedPreviewUrl;
     const [hydrating, setHydrating] = useState(false);
@@ -546,10 +535,6 @@ export function InactiveVideoPreview({ node, theme, onPlay, hoverEnabled = true,
     }, [hoverEnabled, node.metadata?.content, node.metadata?.storageKey, node.metadata?.importSource?.provider]);
 
     useEffect(() => {
-        return subscribeUserScope((epoch) => { setDerivedPreview(undefined); setScopeEpoch(epoch.generation); });
-    }, []);
-
-    useEffect(() => {
         if (!previewNeedsHydration || !nearViewport || (!node.metadata?.storageKey && !node.metadata?.content)) {
             setHydrating(false);
             return;
@@ -560,14 +545,17 @@ export function InactiveVideoPreview({ node, theme, onPlay, hoverEnabled = true,
         setHydrating(true);
         void lease.promise
             .then((videoPreview) => {
-                if (active && scopeEpoch === getActiveUserScopeEpoch() && videoPreview) setDerivedPreview({ sourceKey, epoch: scopeEpoch, content: videoPreview.content });
+                if (active && videoPreview) {
+                    setDerivedPreview({ sourceKey, content: videoPreview.content });
+                    prewarmCanvasLodThumbnails([node]);
+                }
             })
             .catch(() => undefined)
             .finally(() => {
                 if (active) setHydrating(false);
             });
         return () => { active = false; lease.release(); };
-    }, [nearViewport, sourceKey, previewNeedsHydration, scopeEpoch]);
+    }, [nearViewport, sourceKey, previewNeedsHydration]);
 
     if (previewUrl) {
         return <div ref={previewRef} className="group/video-preview relative size-full overflow-hidden rounded-[var(--node-radius)] bg-black">
@@ -615,7 +603,17 @@ function EmptyAudioContent({ theme }: { theme: CanvasTheme }) {
 function ImageContent({ node, theme, scale = 1, isBatchRoot, batchCount, batchPreviewNodes, batchExpanded, batchOpening, batchRecovering, onToggleBatch }: Pick<CanvasNodeContentProps, "node" | "theme" | "scale" | "isBatchRoot" | "batchCount" | "batchPreviewNodes" | "batchExpanded" | "batchOpening" | "batchRecovering" | "onToggleBatch">) {
     const imageContainerRef = useRef<HTMLDivElement>(null);
     const nearViewport = useNearViewport(imageContainerRef);
-    const { url, loading, error, retry, fail } = useNodeResourceUrl(node, nearViewport);
+    const [pixelRatio, setPixelRatio] = useState(() => typeof window === "undefined" ? 1 : window.devicePixelRatio || 1);
+    useEffect(() => {
+        const resolution = window.matchMedia(`(resolution: ${pixelRatio}dppx)`);
+        const update = () => setPixelRatio(window.devicePixelRatio || 1);
+        resolution.addEventListener("change", update);
+        window.addEventListener("resize", update);
+        return () => { resolution.removeEventListener("change", update); window.removeEventListener("resize", update); };
+    }, [pixelRatio]);
+    const previewSize = resourceIdFromStorageKey(node.metadata?.storageKey)
+        ? canvasImagePreviewSize(node.width, node.height, scale, pixelRatio, node.metadata?.naturalWidth || 0, node.metadata?.naturalHeight || 0, node.metadata?.mimeType || "") : undefined;
+    const { url, loading, error, retry, fail } = useNodeResourceUrl(node, nearViewport, previewSize);
     const importedFromLibTV = node.metadata?.importSource?.provider === "libtv";
     const { updateMediaNode } = useCanvasNodeActions();
     const measuredSizeRef = useRef<{ width: number; height: number } | null>(null);
@@ -634,8 +632,8 @@ function ImageContent({ node, theme, scale = 1, isBatchRoot, batchCount, batchPr
     const fitToImage = (element: HTMLImageElement) => {
         // LibTV 已提供原图尺寸和节点尺寸；960px 缩略图不能反向覆盖这些数据。
         if (importedFromLibTV) return;
-        const naturalWidth = element.naturalWidth;
-        const naturalHeight = element.naturalHeight;
+        const naturalWidth = previewSize ? node.metadata!.naturalWidth! : element.naturalWidth;
+        const naturalHeight = previewSize ? node.metadata!.naturalHeight! : element.naturalHeight;
         if (!naturalWidth || !naturalHeight) return;
         if (measuredSizeRef.current?.width === naturalWidth && measuredSizeRef.current.height === naturalHeight) return;
         measuredSizeRef.current = { width: naturalWidth, height: naturalHeight };
@@ -647,7 +645,7 @@ function ImageContent({ node, theme, scale = 1, isBatchRoot, batchCount, batchPr
             <div ref={imageContainerRef} className="h-full w-full overflow-hidden rounded-[var(--node-radius)]">
                 {error ? (
                     <div role="status" aria-label="图片加载失败" className="flex size-full items-center justify-center text-center text-xs" style={{ background: theme.node.fill, color: theme.node.text }}>
-                        <div className="flex flex-col items-center gap-2" style={{ transform: "scale(var(--canvas-live-inverse-scale, 1))", transformOrigin: "center" }}>
+                        <div data-canvas-live-scale className="flex flex-col items-center gap-2" style={{ transform: "scale(var(--canvas-live-inverse-scale, 1))", transformOrigin: "center" }}>
                             {!compactStatus ? <span>图片加载失败</span> : null}
                             <button type="button" data-canvas-no-zoom aria-label="重新加载图片" title="重新加载图片" className={`inline-flex items-center justify-center gap-1.5 rounded border focus-visible:outline focus-visible:outline-2 ${compactStatus ? "size-7" : "px-3 py-1"}`} style={{ borderColor: theme.node.stroke, color: theme.node.text }} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); retry(); }}>
                                 <RefreshCw className="size-4 shrink-0" aria-hidden />
@@ -655,13 +653,13 @@ function ImageContent({ node, theme, scale = 1, isBatchRoot, batchCount, batchPr
                             </button>
                         </div>
                     </div>
-                ) : url ? <img src={url} alt={node.title} loading="lazy" decoding="async" draggable={false} onDragStart={(event) => event.preventDefault()} onError={fail} onLoad={(event) => fitToImage(event.currentTarget)} className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`} /> : <div role="status" aria-label="正在加载图片" className="grid size-full place-items-center" style={{ background: theme.node.fill, color: theme.node.muted }}><span style={{ transform: "scale(var(--canvas-live-inverse-scale, 1))" }}>{loading ? <LoaderCircle className="size-5 animate-spin" /> : <ImageIcon className="size-5" />}</span></div>}
+                ) : url ? <img src={url} alt={node.title} loading="lazy" decoding="async" draggable={false} onDragStart={(event) => event.preventDefault()} onError={fail} onLoad={(event) => fitToImage(event.currentTarget)} className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`} /> : <div role="status" aria-label="正在加载图片" className="grid size-full place-items-center" style={{ background: theme.node.fill, color: theme.node.muted }}><span data-canvas-live-scale style={{ transform: "scale(var(--canvas-live-inverse-scale, 1))" }}>{loading ? <LoaderCircle className="size-5 animate-spin" /> : <ImageIcon className="size-5" />}</span></div>}
             </div>
         </BatchFrame>
     );
 }
 
-function useNodeResourceUrl(node: CanvasNodeData, eager: boolean) {
+function useNodeResourceUrl(node: CanvasNodeData, eager: boolean, previewSize?: number) {
     const storageKey = node.metadata?.storageKey || "";
     const rawContent = node.metadata?.content || "";
     const content = node.type === CanvasNodeType.Video && node.metadata?.importSource?.provider === "libtv"
@@ -678,7 +676,7 @@ function useNodeResourceUrl(node: CanvasNodeData, eager: boolean) {
     const isRemoteResource = Boolean(resourceId);
     // 远程资源接口受登录/桌面令牌保护，原生 `<img>` 无法附带该令牌。
     // 重登后只能先通过 cacheResourceObjectUrl() 走鉴权下载，再挂载 Blob URL。
-    const synchronousUrl = eager && isRemoteResource && node.type === CanvasNodeType.Image ? peekCachedResourceObjectUrl(storageKey) : "";
+    const synchronousUrl = eager && isRemoteResource && node.type === CanvasNodeType.Image ? peekCachedResourceObjectUrl(storageKey, previewSize) : "";
     // Inline data URLs are already local, but decoding thousands of them is
     // still expensive. Images must wait for the same viewport gate as remote
     // resources; otherwise DOM virtualization does not reduce image work.
@@ -689,8 +687,7 @@ function useNodeResourceUrl(node: CanvasNodeData, eager: boolean) {
     const [error, setError] = useState(false);
     const [attempt, setAttempt] = useState(0);
     const reloadRequested = useRef(false);
-    const [scopeEpoch, setScopeEpoch] = useState(getActiveUserScopeEpoch);
-    useEffect(() => subscribeUserScope((epoch) => setScopeEpoch(epoch.generation)), []);
+    const sourceIdentityRef = useRef(storageKey);
     const reportImageEvent = useCallback((code: "CANVAS_IMAGE_READ_FAILED" | "CANVAS_IMAGE_DECODE_FAILED" | "CANVAS_IMAGE_RELOAD") => {
         if (node.type !== CanvasNodeType.Image) return;
         const safeNodeId = /^[A-Za-z0-9._:-]{1,96}$/.test(node.id) ? node.id : "unknown";
@@ -707,6 +704,10 @@ function useNodeResourceUrl(node: CanvasNodeData, eager: boolean) {
 
     useEffect(() => {
         let cancelled = false;
+        const sourceIdentity = storageKey;
+        const sourceChanged = sourceIdentityRef.current !== sourceIdentity;
+        sourceIdentityRef.current = sourceIdentity;
+        if (sourceChanged) setUrl("");
         setError(false);
         if (!isRemoteResource && isLazyVisual && storageKey) {
             if (!eager) {
@@ -734,18 +735,21 @@ function useNodeResourceUrl(node: CanvasNodeData, eager: boolean) {
         }
         const reload = reloadRequested.current;
         reloadRequested.current = false;
-        const cachedSync = reload ? "" : peekCachedResourceObjectUrl(storageKey);
+        const cachedSync = reload || !eager ? "" : peekCachedResourceObjectUrl(storageKey, previewSize);
         if (cachedSync) {
             setUrl(cachedSync);
             setLoading(false);
             return;
         }
-        setUrl("");
+        // Keep the current image while the next display tier is prepared.
+        if (!isLazyVisual || sourceChanged || reload) setUrl("");
         setLoading(eager);
         // 只有进入视口或被激活的节点才下载远程媒体；缓存层会复用已有 Blob URL 和 in-flight 请求。
-        const resolve = eager ? cacheResourceObjectUrl(storageKey, reload) : getCachedResourceObjectUrl(storageKey);
+        const resolve = previewSize
+            ? eager ? cacheResourceImagePreviewObjectUrl(storageKey, previewSize, reload) : Promise.resolve("")
+            : eager ? cacheResourceObjectUrl(storageKey, reload) : getCachedResourceObjectUrl(storageKey);
         void resolve.then((cached) => {
-            if (!cancelled && cached) setUrl(cached);
+            if (!cancelled && cached) { setUrl(cached); setError(false); }
             if (!cancelled && eager && !cached) { setError(true); reportImageEvent("CANVAS_IMAGE_READ_FAILED"); }
             // Never hand a protected resource URL to a native <img> after a
             // cache miss. It cannot attach the auth header and would render
@@ -756,7 +760,7 @@ function useNodeResourceUrl(node: CanvasNodeData, eager: boolean) {
             if (!cancelled) setLoading(false);
         });
         return () => { cancelled = true; };
-    }, [eager, fallback, isLazyVisual, isRemoteResource, storageKey, attempt, scopeEpoch, reportImageEvent]);
+    }, [eager, fallback, isLazyVisual, isRemoteResource, storageKey, attempt, reportImageEvent, previewSize]);
 
     return { url, loading, error, retry, fail };
 }
@@ -769,14 +773,33 @@ function useNearViewport(ref: RefObject<Element | null>) {
             setNearViewport(true);
             return;
         }
+        let zoomWaitTimer: ReturnType<typeof setTimeout> | null = null;
         const observer = new IntersectionObserver((entries) => {
-            if (entries.some((entry) => entry.isIntersecting)) {
-                setNearViewport(true);
-                observer.disconnect();
+            if (!entries.some((entry) => entry.isIntersecting)) return;
+            if (element.closest('[data-canvas-viewport-zooming="true"]')) {
+                if (!zoomWaitTimer) {
+                    const retryWhenZoomIdle = () => {
+                        zoomWaitTimer = null;
+                        if (!element.isConnected) return;
+                        if (element.closest('[data-canvas-viewport-zooming="true"]')) {
+                            zoomWaitTimer = setTimeout(retryWhenZoomIdle, 80);
+                            return;
+                        }
+                        observer.unobserve(element);
+                        observer.observe(element);
+                    };
+                    zoomWaitTimer = setTimeout(retryWhenZoomIdle, 80);
+                }
+                return;
             }
+            setNearViewport(true);
+            observer.disconnect();
         }, { rootMargin: "600px" });
         observer.observe(element);
-        return () => observer.disconnect();
+        return () => {
+            if (zoomWaitTimer) clearTimeout(zoomWaitTimer);
+            observer.disconnect();
+        };
     }, [ref]);
     return nearViewport;
 }

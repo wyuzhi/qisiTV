@@ -3,7 +3,6 @@ import localforage from "localforage";
 
 import * as runtimeMode from "@/lib/runtime-mode";
 import { getActiveUserScope, setActiveUserScope } from "@/lib/user-scope";
-import { captureUserScope } from "@/lib/user-scope-guard";
 import { apiClient } from "@/services/api/request";
 import { persistWorkspaceAssetChanges, resetWorkspaceAssetCommitStateForTests } from "@/services/workspace-asset-repository";
 import {
@@ -80,37 +79,6 @@ afterEach(async () => {
 });
 
 describe("asset store durable draft storage", () => {
-    test("a delayed draft hydrate cannot project into a later A to B to A epoch", async () => {
-        const restore = switchScope("owner-a");
-        const originalWindow = globalThis.window;
-        globalThis.window = originalWindow ?? ({ localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} } } as never);
-        const entered = deferred();
-        const gate = deferred();
-        const getItem = spyOn(localforage, "getItem").mockImplementation(async (key) => {
-            if (!isDraftsKey(key)) return null;
-            entered.resolve();
-            await gate.promise;
-            return JSON.stringify({ drafts: { "asset-1": { kind: "upsert", version: 1, asset: textAsset("asset-1", "旧草稿") } } });
-        });
-        try {
-            unloadAssetStoreDraftsForTests();
-            const hydrating = hydrateAssetStoreDrafts("owner-a");
-            await entered.promise;
-            setActiveUserScope("owner-b");
-            setActiveUserScope("owner-a");
-            useAssetStore.setState({ assets: [textAsset("asset-1", "当前画面")] });
-            gate.resolve();
-            await hydrating;
-            expect(useAssetStore.getState().assets[0]?.title).toBe("当前画面");
-            expect(peekAssetStoreDraft("owner-a", "asset-1")?.asset?.title).toBe("旧草稿");
-        } finally {
-            gate.resolve();
-            getItem.mockRestore();
-            if (!originalWindow) delete (globalThis as { window?: unknown }).window;
-            restore();
-        }
-    });
-
     test("serializes draft writes per userScope and keeps the later immutable document", async () => {
         const restore = switchScope("owner-a");
         const originalWindow = globalThis.window;
@@ -153,7 +121,7 @@ describe("asset store durable draft storage", () => {
             await waitFor(() => draftWrites.length === 2, "second draft setItem");
             expect(draftWrites[1]?.value).toContain("第二版");
             draftWrites[1]?.resolve();
-            await flushAssetStorePersistence(captureUserScope());
+            await flushAssetStorePersistence();
 
             const stored = [...memory.entries()].find(([key]) => isDraftsKey(key))?.[1] ?? "";
             expect(stored).toContain("第二版");
@@ -194,8 +162,8 @@ describe("asset store durable draft storage", () => {
                 source: "手动添加",
                 data: { content: "x" },
             });
-            await expect(flushAssetStorePersistence(captureUserScope())).rejects.toThrow("disk full");
-            await expect(flushAssetStorePersistence(captureUserScope())).rejects.toThrow("disk full");
+            await expect(flushAssetStorePersistence()).rejects.toThrow("disk full");
+            await expect(flushAssetStorePersistence()).rejects.toThrow("disk full");
         } finally {
             getItem.mockRestore();
             setItem.mockRestore();
@@ -225,12 +193,12 @@ describe("asset store durable draft storage", () => {
                 data: { content: "v1" },
             });
             expect(peekAssetStoreDraft("owner-a", id)?.version).toBe(1);
-            await persistWorkspaceAssetChanges(captureUserScope());
+            await persistWorkspaceAssetChanges();
             expect(peekAssetStoreDraft("owner-a", id)).toBeUndefined();
             useAssetStore.getState().updateAsset(id, { title: "第二版" });
             const second = peekAssetStoreDraft("owner-a", id);
             expect(second?.version).toBe(2);
-            ackAssetStoreDraft(captureUserScope(), id, 1);
+            ackAssetStoreDraft(id, 1);
             expect(peekAssetStoreDraft("owner-a", id)?.version).toBe(2);
         } finally {
             apiClient.defaults.adapter = previous;
@@ -280,7 +248,7 @@ describe("asset store durable draft storage", () => {
             const merged = peekAssetStoreDraft("owner-a", "asset-1");
             expect(merged?.asset?.title).toBe("新稿");
             expect(merged?.version).toBeGreaterThan(9);
-            ackAssetStoreDraft(captureUserScope(), "asset-1", 9);
+            ackAssetStoreDraft("asset-1", 9);
             expect(peekAssetStoreDraft("owner-a", "asset-1")?.asset?.title).toBe("新稿");
         } finally {
             gate.resolve();

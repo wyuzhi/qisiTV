@@ -98,18 +98,18 @@ func TestCanvasWorkflowSelectedDurationSourceAndEditorRoundTrip(t *testing.T) {
 	db.Model(&model.Resource{}).Where("id = ?", "new-depth").Update("duration_ms", 9900)
 	d.Edges = append(d.Edges, cw.Edge{From: "action", To: "gen"})
 	d.Nodes[0].VideoDurationSourceNodeID = "action"
-	template, err := s.CreateCanvasWorkflow("owner", cw.CreateRequest{Name: "Duration", Definition: d})
+	template, err := s.workflowTemplates().Create("owner", cw.CreateRequest{Name: "Duration", Definition: d})
 	if err != nil {
 		t.Fatal(err)
 	}
-	editor, err := s.CanvasWorkflowEditor("owner", template.ID, template.Revision)
+	editor, err := s.workflowTemplates().Editor("owner", template.ID, template.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if editor.Workflow.Definition.Nodes[0].VideoDurationSourceNodeID != "action" {
 		t.Fatal("editor lost duration source")
 	}
-	saved, err := s.UpdateCanvasWorkflow("owner", template.ID, cw.UpdateRequest{Name: template.Name, Definition: editor.Workflow.Definition, ExpectedRevision: template.Revision})
+	saved, err := s.workflowTemplates().Update("owner", template.ID, cw.UpdateRequest{Name: template.Name, Definition: editor.Workflow.Definition, ExpectedRevision: template.Revision})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -159,13 +159,14 @@ export function CanvasScriptNodeContent({
               errorCode: node.metadata.taskErrorCode,
           }
         : null;
+    const nodeErrorCode = node.metadata?.generationErrorCode || node.metadata?.taskErrorCode;
     const taskFeedback =
         node.metadata?.status === "loading"
             ? displayTask
                 ? `${generationTaskStageLabel(displayTask)}${generationTaskShowsProgress(displayTask) && typeof node.metadata.taskProgress === "number" ? ` · ${node.metadata.taskProgress}%` : ""}`
                 : "正在创建任务"
             : node.metadata?.status === "error"
-              ? generationErrorMessage(node.metadata.errorDetails)
+              ? generationErrorMessage(nodeErrorCode ? { code: nodeErrorCode, message: node.metadata.errorDetails } : node.metadata.errorDetails)
               : "";
     const [batchDetailsOpen, setBatchDetailsOpen] = useState(false);
     const [moreMenuOpen, setMoreMenuOpen] = useState(false);
@@ -549,11 +550,12 @@ function GenerationBatchDetails({ batch, rows, onRetryItem }: { batch: CanvasGen
             </div>
             <div className="thin-scrollbar max-h-72 overflow-y-auto">
                 {batch.items.map((item) => {
-                    const requiresPromptChange = isContentModerationError(item.errorDetails);
+                    const itemErrorInput = item.errorCode ? { code: item.errorCode, message: item.errorDetails } : item.errorDetails;
+                    const requiresPromptChange = isContentModerationError(itemErrorInput);
                     return (
                         <div key={item.id} className="flex min-h-9 items-center gap-2 border-t border-foreground/10 py-1.5 first:border-t-0">
                             <span className="w-14 shrink-0 text-xs font-medium">镜头 {shotByRowId.get(item.rowId) || "--"}</span>
-                            <span className="min-w-0 flex-1 truncate text-xs text-foreground/60" title={item.errorDetails ? generationErrorMessage(item.errorDetails) : undefined}>
+                            <span className="min-w-0 flex-1 truncate text-xs text-foreground/60" title={item.errorDetails ? generationErrorMessage(itemErrorInput) : undefined}>
                                 {generationBatchItemLabel(item)}
                                 {item.retryCount ? ` · 重试 ${item.retryCount}` : ""}
                             </span>
@@ -590,7 +592,7 @@ function generationBatchSummary(batch: CanvasGenerationBatch) {
 
 function generationBatchItemLabel(item: CanvasGenerationBatchItem) {
     if (item.submissionUncertain) return "状态待确认";
-    if (isContentModerationError(item.errorDetails)) return "审核未通过，需修改提示词";
+    if (isContentModerationError(item.errorCode ? { code: item.errorCode, message: item.errorDetails } : item.errorDetails)) return "审核未通过，需修改提示词";
     const labels: Record<CanvasGenerationBatchItemStatus, string> = { waiting: "等待", submitting: "提交中", queued: "排队", running: "生成中", succeeded: "成功", failed: "失败", cancelled: "已停止" };
     return labels[item.status];
 }

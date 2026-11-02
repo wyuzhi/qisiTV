@@ -6,13 +6,14 @@ import { App } from "antd";
 import { useCanvasNodeEditor } from "../../src/pages/canvas/use-canvas-node-editor";
 import { setActiveUserScope } from "../../src/lib/user-scope";
 import { CanvasNodeType, type CanvasNodeData } from "../../src/types/canvas";
+import { createCanvasPageUiStore } from "../../src/stores/canvas/use-canvas-page-ui-store";
+const pageUi = createCanvasPageUiStore();
 
 type EnsureCall = {
     source?: string;
     category?: string;
     canvasId?: string;
     nodeId?: string;
-    hasExpectedScope: boolean;
     hasSignal: boolean;
 };
 
@@ -21,7 +22,6 @@ type HarnessWindow = Window & {
         writes: string[];
         toasts: string[];
         ensureCalls: EnsureCall[];
-        switchABA: () => Promise<void>;
         switchCanvas: () => void;
     };
 };
@@ -65,7 +65,6 @@ harnessWindow.__editorHarness = {
     writes: [],
     toasts: [],
     ensureCalls: [],
-    switchABA: async () => {},
     switchCanvas: () => {},
 };
 
@@ -91,25 +90,14 @@ function Harness() {
         setNodesState((current) => (typeof value === "function" ? value(current) : value));
     };
 
-    const editor = useCanvasNodeEditor({
+    const editor = useCanvasNodeEditor({ pageUi,
         canvasId,
         canvasTitle: "画布",
         domainProjectId: "project-a",
         nodesRef,
         setNodes,
-        setSelectedNodeIds: () => {},
-        setSelectedConnectionId: () => {},
-        setDialogNodeId: () => {},
-        setToolbarNodeId: () => {},
-        setHoveredNodeId: () => {},
     });
 
-    harnessWindow.__editorHarness!.switchABA = async () => {
-        await fetch("/harness/switch", { method: "POST" });
-        setActiveUserScope("owner-b");
-        setActiveUserScope("owner-a");
-        setTick((value) => value + 1);
-    };
     harnessWindow.__editorHarness!.switchCanvas = () => {
         setCanvasId("canvas-b");
     };
@@ -117,7 +105,6 @@ function Harness() {
     return (
         <>
             <div style={{ position: "fixed", top: 0, left: 0, zIndex: 11000, display: "flex", gap: 8, padding: 8 }}>
-                <button type="button" onClick={() => void harnessWindow.__editorHarness!.switchABA()}>switch-aba</button>
                 <button type="button" onClick={() => harnessWindow.__editorHarness!.switchCanvas()}>switch-canvas</button>
                 <button type="button" onClick={() => editor.handleConfigNodeChange("node-1", { assetCategory: "character" })}>set-category</button>
                 <button type="button" onClick={() => void editor.saveNodeAsset(nodesRef.current[0]!)}>save-asset</button>

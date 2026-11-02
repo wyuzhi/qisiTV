@@ -44,7 +44,7 @@ func TestTaskTerminalPersistsDiagnosticBeforeReplacingError(t *testing.T) {
 	repo := &taskTerminalRepositoryStub{task: task}
 	c := newTaskTerminalCoordinatorForTest(repo, &taskTerminalReplayStub{}, &taskTerminalLoggerStub{}, &taskTerminalOutputStub{})
 	err := errors.New("cannot save /Users/private-name/image.png")
-	if got := c.handleExecutionFailure(task, err, true, false); !errors.Is(got, err) {
+	if got := c.HandleExecutionFailure(task, err, true, false); !errors.Is(got, err) {
 		t.Fatal(got)
 	}
 	if task.FailureDiagnostics == nil || task.FailureDiagnostics.Source != "local_result" || strings.Contains(task.FailureDiagnostics.Summary, "private-name") {

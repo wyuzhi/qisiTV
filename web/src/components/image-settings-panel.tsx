@@ -109,6 +109,24 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     </span>
                 </div> : null}
                 {seedream ? <SeedreamSettings config={config} family={seedream} profile={profile} onChange={onConfigChange} theme={theme} /> : showSize ? <ImageSizePicker profile={profile} size={activeSize} quality={quality} onChange={(size, nextQuality) => applyImageSizeSelection(onConfigChange, size, nextQuality)} /> : null}
+                {!seedream && profile.sequentialGeneration?.supported ? (
+                    <label className="block space-y-1.5 text-xs">
+                        <span>关联组图上限</span>
+                        <input
+                            aria-label="关联组图上限"
+                            type="number"
+                            min={1}
+                            max={15}
+                            className="h-8 w-full rounded-lg border px-2"
+                            style={{ background: theme.canvas.background, color: theme.node.text, borderColor: theme.node.stroke }}
+                            value={config.seedreamMaxImages || "1"}
+                            onChange={(event) => onConfigChange("seedreamMaxImages", event.target.value)}
+                        />
+                        <span className="block leading-relaxed" style={{ color: theme.node.muted }}>
+                            同一次生成中的关联图片，按实际出图收费；参考图与输出图合计最多 15 张。
+                        </span>
+                    </label>
+                ) : null}
                 {showCount && profile.fixedOutputs ? (
                     <div className="space-y-2">
                         <SettingTitle color={theme.node.muted}>{seedream ? "生成批次" : "生成张数"}</SettingTitle>

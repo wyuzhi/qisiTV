@@ -6,6 +6,8 @@ import { stampCanvasNodeChanges } from "../src/lib/canvas/canvas-node-timestamps
 import { useCanvasStore } from "../src/stores/canvas/use-canvas-store";
 import * as imageStorage from "../src/services/image-storage";
 import { CanvasNodeType, type CanvasNodeData } from "../src/types/canvas";
+import { createCanvasPageUiStore } from "../src/stores/canvas/use-canvas-page-ui-store";
+const pageUi = createCanvasPageUiStore();
 
 test("cover write preserves the old node until the canvas setter stamps its revision", async () => {
     const scene = createDirectorScene("镜头");
@@ -17,13 +19,13 @@ test("cover write preserves the old node until the canvas setter stamps its revi
     const upload = spyOn(imageStorage, "uploadImage").mockResolvedValue({ storageKey: "image:cover", url: "blob:cover", width: 100, height: 100, bytes: 1, mimeType: "image/png" });
     let director!: ReturnType<typeof useCanvasDirector>;
     function Harness() {
-        director = useCanvasDirector({ projectId, directorNodeId: node.id, directorScenes: [scene], nodesRef, connectionsRef: { current: [] }, getCanvasCenter: () => ({ x: 0, y: 0 }),
+        director = useCanvasDirector({ pageUi, projectId, directorNodeId: node.id, directorScenes: [scene], nodesRef, connectionsRef: { current: [] }, getCanvasCenter: () => ({ x: 0, y: 0 }),
             setNodes: (value) => {
                 expect(nodesRef.current[0]).toBe(node);
                 const next = typeof value === "function" ? value(nodesRef.current) : value;
                 nodesRef.current = stampCanvasNodeChanges(nodesRef.current, next, after);
             },
-            setConnections: () => {}, setSelectedNodeIds: () => {}, setSelectedConnectionId: () => {}, setDirectorNodeId: () => {}, updateProject: () => {},
+            setConnections: () => {}, setDirectorNodeId: () => {}, updateProject: () => {},
         });
         return null;
     }

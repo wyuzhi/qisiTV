@@ -1,8 +1,7 @@
 import { nanoid } from "nanoid";
 
 import { CANVAS_FOLDER_PENDING_STORE_NAME, localForageInstance } from "@/lib/localforage-storage";
-import { scopedStorageKey } from "@/lib/user-scope";
-import { assertUserScope, captureUserScope, isUserScopeAbandonedError, type CapturedUserScope } from "@/lib/user-scope-guard";
+import { getActiveUserScope, scopedStorageKey } from "@/lib/user-scope";
 import { ApiError } from "@/services/api/request";
 import { resourceFileUrl, uploadResourceFile } from "@/services/api/resources";
 import { deleteCanvasLibraryFolder as deleteCanvasLibraryFolderRemote, listCanvasLibraryFolders as listCanvasLibraryFoldersRemote, putCanvasLibraryFolder } from "@/services/api/workspace-data";
@@ -49,12 +48,6 @@ const folderRemovedAt = new Map<string, number>();
 let folderOpClock = 0;
 let folderHydrateGeneration = 0;
 let digestDelayForTests: (() => Promise<void>) | undefined;
-
-function captureScope(expectedScope?: CapturedUserScope) {
-    const expected = expectedScope ?? captureUserScope();
-    assertUserScope(expected);
-    return expected;
-}
 
 function folderCommitKey(userScope: string, id: string) {
     return `${userScope}\0${id}`;
@@ -175,13 +168,10 @@ function persistablePending(record: FolderPendingRecord): FolderPendingRecord {
 
 async function mutatePending(
     userScope: string,
-    expected: CapturedUserScope,
     mutator: (live: FolderPendingRecord) => FolderPendingRecord,
 ): Promise<FolderPendingRecord> {
     return withPendingLock(userScope, async () => {
-        assertUserScope(expected);
         const live = await readPendingRecord(userScope);
-        assertUserScope(expected);
         const next = persistablePending(mutator({
             version: 1,
             intents: { ...live.intents },
@@ -190,7 +180,6 @@ async function mutatePending(
         const empty = !Object.keys(next.intents).length && !Object.keys(next.highWater).length;
         if (empty) await folderPendingStore.removeItem(userScope);
         else await folderPendingStore.setItem(userScope, next);
-        assertUserScope(expected);
         return next;
     });
 }
@@ -263,8 +252,7 @@ function projectFolders(canonical: CanvasFolder[], pending: FolderPendingMap): C
     return [...byId.values()].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.id.localeCompare(b.id));
 }
 
-function publishFolders(canonical: CanvasFolder[], pending: FolderPendingMap, expected: CapturedUserScope) {
-    assertUserScope(expected);
+function publishFolders(canonical: CanvasFolder[], pending: FolderPendingMap) {
     useCanvasStore.getState().replaceFolders(projectFolders(canonical, pending));
 }
 
@@ -286,21 +274,16 @@ async function contentDigest(blob: Blob) {
     return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function folderCoverResourceId(folder: CanvasFolder, expected: CapturedUserScope) {
+async function folderCoverResourceId(folder: CanvasFolder) {
     if (folder.coverResourceId) return folder.coverResourceId;
     const dataUrl = folder.coverDataUrl;
     if (!dataUrl?.startsWith("data:image")) return undefined;
-    assertUserScope(expected);
     const blob = await (await fetch(dataUrl)).blob();
-    assertUserScope(expected);
     const digest = await contentDigest(blob);
-    assertUserScope(expected);
     const resource = await uploadResourceFile(blob, "image", {
         fileName: "folder-cover.jpg",
         idempotencyKey: `canvas-folder-cover:sha256:${digest}`,
-        expectedScope: expected,
     });
-    assertUserScope(expected);
     return resource.id;
 }
 
@@ -309,36 +292,30 @@ function isFailedPrecondition(error: unknown) {
 }
 
 function persistErrorMessage(error: unknown) {
-    if (isUserScopeAbandonedError(error)) return error.message;
     if (isFailedPrecondition(error)) return "文件夹已删除，未保存的修改还在本机";
     if (error instanceof Error && error.message) return error.message;
     return "文件夹没有保存成功";
 }
 
-async function commitFolderIntent(id: string, generation: number, expected: CapturedUserScope) {
-    assertUserScope(expected);
-    const pending = await readPendingRecord(expected.userScope);
+async function commitFolderIntent(id: string, generation: number) {
+    const pending = await readPendingRecord(getActiveUserScope());
     const intent = pending.intents[id];
     if (!intent || intent.generation !== generation) return;
     if (intent.blockedReimport) throw new Error(intent.error || "文件夹已删除，未保存的修改还在本机");
     if (intent.kind === "delete") {
         try {
-            await deleteCanvasLibraryFolderRemote(id, { expectedScope: expected });
+            await deleteCanvasLibraryFolderRemote(id);
         } catch (error) {
-            if (isUserScopeAbandonedError(error)) throw error;
             if (!(error instanceof ApiError) || (error.status !== 404 && error.code !== 404)) throw error;
         }
-        assertUserScope(expected);
-        await reconcileCanvasesAfterFolderDelete(id, expected);
-        assertUserScope(expected);
-        const live = await readPendingRecord(expected.userScope);
-        publishFolders(canonicalFromProjection(live.intents), live.intents, expected);
+        await reconcileCanvasesAfterFolderDelete(id);
+        const live = await readPendingRecord(getActiveUserScope());
+        publishFolders(canonicalFromProjection(live.intents), live.intents);
         return;
     }
     if (!intent.folder) return;
-    const coverResourceId = await folderCoverResourceId(intent.folder, expected);
-    assertUserScope(expected);
-    const latest = await readPendingRecord(expected.userScope);
+    const coverResourceId = await folderCoverResourceId(intent.folder);
+    const latest = await readPendingRecord(getActiveUserScope());
     if (latest.intents[id]?.generation !== generation) return;
     const saved = await putCanvasLibraryFolder(id, {
         id,
@@ -346,13 +323,12 @@ async function commitFolderIntent(id: string, generation: number, expected: Capt
         coverResourceId,
         createdAt: latest.intents[id].folder?.createdAt || intent.folder.createdAt,
         updatedAt: latest.intents[id].folder?.updatedAt || intent.folder.updatedAt,
-    }, { expectedScope: expected });
-    assertUserScope(expected);
+    });
     const staged = latest.intents[id];
     if (!folderReceiptMatches(saved, id, staged?.folder?.name || intent.folder.name)) {
         throw new Error("文件夹没有保存成功");
     }
-    const live = await mutatePending(expected.userScope, expected, (current) => {
+    const live = await mutatePending(getActiveUserScope(), (current) => {
         if (current.intents[id]?.generation !== generation) return current;
         delete current.intents[id];
         rememberGeneration(current, id, generation);
@@ -360,12 +336,12 @@ async function commitFolderIntent(id: string, generation: number, expected: Capt
     });
     const receipt = mapRecord(saved.folder, staged?.folder || intent.folder);
     const canonical = canonicalFromProjection(live.intents);
-    publishFolders(canonical.some((folder) => folder.id === id) ? canonical.map((folder) => folder.id === id ? receipt : folder) : [receipt, ...canonical], live.intents, expected);
+    publishFolders(canonical.some((folder) => folder.id === id) ? canonical.map((folder) => folder.id === id ? receipt : folder) : [receipt, ...canonical], live.intents);
 }
 
-async function stageUpsert(folder: CanvasFolder, expected: CapturedUserScope) {
+async function stageUpsert(folder: CanvasFolder) {
     let generation = 0;
-    const pending = await mutatePending(expected.userScope, expected, (live) => {
+    const pending = await mutatePending(getActiveUserScope(), (live) => {
         generation = nextGeneration(folder.id, live);
         live.intents[folder.id] = {
             generation,
@@ -376,12 +352,12 @@ async function stageUpsert(folder: CanvasFolder, expected: CapturedUserScope) {
         rememberGeneration(live, folder.id, generation);
         return live;
     });
-    publishFolders(canonicalFromProjection(pending.intents), pending.intents, expected);
+    publishFolders(canonicalFromProjection(pending.intents), pending.intents);
     return generation;
 }
 
-async function markPendingError(id: string, generation: number, error: unknown, expected: CapturedUserScope) {
-    const pending = await mutatePending(expected.userScope, expected, (live) => {
+async function markPendingError(id: string, generation: number, error: unknown) {
+    const pending = await mutatePending(getActiveUserScope(), (live) => {
         if (live.intents[id]?.generation !== generation) return live;
         live.intents[id] = {
             ...live.intents[id],
@@ -390,35 +366,31 @@ async function markPendingError(id: string, generation: number, error: unknown, 
         };
         return live;
     });
-    publishFolders(canonicalFromProjection(pending.intents), pending.intents, expected);
+    publishFolders(canonicalFromProjection(pending.intents), pending.intents);
 }
 
-async function reconcileCanvasesAfterFolderDelete(folderId: string, expected: CapturedUserScope) {
+async function reconcileCanvasesAfterFolderDelete(folderId: string) {
     const affected = useCanvasStore.getState().projects.filter((project) => project.folderId === folderId);
     if (!affected.length) return;
     const { refreshLocalCanvasProjectIfChanged } = await import("@/services/local-workspace-repository");
     for (const project of affected) {
         try {
-            await refreshLocalCanvasProjectIfChanged(project.id, expected);
+            await refreshLocalCanvasProjectIfChanged(project.id);
         } catch (error) {
-            if (isUserScopeAbandonedError(error)) throw error;
         }
     }
 }
 
-export async function persistCanvasLibraryFolder(folder: CanvasFolder, expectedScope?: CapturedUserScope): Promise<CanvasFolder> {
-    const expected = captureScope(expectedScope);
+export async function persistCanvasLibraryFolder(folder: CanvasFolder): Promise<CanvasFolder> {
     if (usesBrowserLocalResourceStore()) {
-        publishFolders(useCanvasStore.getState().folders.map((item) => item.id === folder.id ? liveCover(folder) : item), {}, expected);
+        publishFolders(useCanvasStore.getState().folders.map((item) => item.id === folder.id ? liveCover(folder) : item), {});
         return liveCover(folder);
     }
-    const generation = await stageUpsert(folder, expected);
+    const generation = await stageUpsert(folder);
     try {
-        await enqueueFolderCommit(expected.userScope, folder.id, () => commitFolderIntent(folder.id, generation, expected));
+        await enqueueFolderCommit(getActiveUserScope(), folder.id, () => commitFolderIntent(folder.id, generation));
     } catch (error) {
-        if (isUserScopeAbandonedError(error)) throw error;
-        assertUserScope(expected);
-        await markPendingError(folder.id, generation, error, expected);
+        await markPendingError(folder.id, generation, error);
         if (isFailedPrecondition(error)) throw new Error(persistErrorMessage(error));
         throw error;
     }
@@ -426,78 +398,66 @@ export async function persistCanvasLibraryFolder(folder: CanvasFolder, expectedS
     return live || liveCover(folder);
 }
 
-export async function createCanvasLibraryFolder(name = "未命名文件夹", expectedScope?: CapturedUserScope) {
-    const expected = captureScope(expectedScope);
+export async function createCanvasLibraryFolder(name = "未命名文件夹") {
     const now = new Date().toISOString();
     const folder: CanvasFolder = { id: nanoid(), name: name.trim() || "未命名文件夹", createdAt: now, updatedAt: now };
     if (usesBrowserLocalResourceStore()) {
         const id = useCanvasStore.getState().createFolder(folder.name);
-        assertUserScope(expected);
         return id;
     }
-    const generation = await stageUpsert(folder, expected);
+    const generation = await stageUpsert(folder);
     try {
-        await enqueueFolderCommit(expected.userScope, folder.id, () => commitFolderIntent(folder.id, generation, expected));
+        await enqueueFolderCommit(getActiveUserScope(), folder.id, () => commitFolderIntent(folder.id, generation));
         return folder.id;
     } catch (error) {
-        if (isUserScopeAbandonedError(error)) throw error;
-        assertUserScope(expected);
-        await markPendingError(folder.id, generation, error, expected);
+        await markPendingError(folder.id, generation, error);
         if (isFailedPrecondition(error)) throw new Error(persistErrorMessage(error));
         throw error;
     }
 }
 
-export async function renameCanvasLibraryFolder(id: string, name: string, expectedScope?: CapturedUserScope) {
-    const expected = captureScope(expectedScope);
+export async function renameCanvasLibraryFolder(id: string, name: string) {
     const nextName = name.trim() || "未命名文件夹";
     if (usesBrowserLocalResourceStore()) {
         useCanvasStore.getState().renameFolder(id, nextName);
-        assertUserScope(expected);
         return;
     }
     const current = useCanvasStore.getState().folders.find((folder) => folder.id === id);
     if (!current) throw new Error("文件夹没有保存成功");
-    const generation = await stageUpsert({ ...current, name: nextName, updatedAt: new Date().toISOString() }, expected);
+    const generation = await stageUpsert({ ...current, name: nextName, updatedAt: new Date().toISOString() });
     try {
-        await enqueueFolderCommit(expected.userScope, id, () => commitFolderIntent(id, generation, expected));
+        await enqueueFolderCommit(getActiveUserScope(), id, () => commitFolderIntent(id, generation));
     } catch (error) {
-        if (isUserScopeAbandonedError(error)) throw error;
-        assertUserScope(expected);
-        await markPendingError(id, generation, error, expected);
+        await markPendingError(id, generation, error);
         if (isFailedPrecondition(error)) throw new Error(persistErrorMessage(error));
         throw error;
     }
 }
 
-export async function deleteCanvasLibraryFolder(id: string, expectedScope?: CapturedUserScope) {
-    const expected = captureScope(expectedScope);
+export async function deleteCanvasLibraryFolder(id: string) {
     if (usesBrowserLocalResourceStore()) {
         useCanvasStore.getState().deleteFolder(id);
         return;
     }
     let generation = 0;
-    folderRemovedAt.set(`${expected.userScope}:${id}`, ++folderOpClock);
-    const pending = await mutatePending(expected.userScope, expected, (live) => {
+    folderRemovedAt.set(`${getActiveUserScope()}:${id}`, ++folderOpClock);
+    const pending = await mutatePending(getActiveUserScope(), (live) => {
         generation = nextGeneration(id, live);
         live.intents[id] = { generation, kind: "delete" };
         rememberGeneration(live, id, generation);
         return live;
     });
-    publishFolders(canonicalFromProjection(pending.intents), pending.intents, expected);
+    publishFolders(canonicalFromProjection(pending.intents), pending.intents);
     try {
-        await enqueueFolderCommit(expected.userScope, id, () => commitFolderIntent(id, generation, expected));
+        await enqueueFolderCommit(getActiveUserScope(), id, () => commitFolderIntent(id, generation));
     } catch (error) {
-        if (isUserScopeAbandonedError(error)) throw error;
-        assertUserScope(expected);
-        await markPendingError(id, generation, error, expected);
+        await markPendingError(id, generation, error);
         if (isFailedPrecondition(error)) throw new Error(persistErrorMessage(error));
         throw error;
     }
 }
 
-export async function persistCanvasFolderCover(id: string, coverDataUrl: string, expectedScope?: CapturedUserScope) {
-    const expected = captureScope(expectedScope);
+export async function persistCanvasFolderCover(id: string, coverDataUrl: string) {
     if (usesBrowserLocalResourceStore()) {
         useCanvasStore.getState().setFolderCover(id, coverDataUrl);
         return;
@@ -509,63 +469,58 @@ export async function persistCanvasFolderCover(id: string, coverDataUrl: string,
         coverResourceId: undefined,
         coverDataUrl,
         updatedAt: new Date().toISOString(),
-    }, expected);
+    });
     try {
-        await enqueueFolderCommit(expected.userScope, id, () => commitFolderIntent(id, generation, expected));
+        await enqueueFolderCommit(getActiveUserScope(), id, () => commitFolderIntent(id, generation));
     } catch (error) {
-        if (isUserScopeAbandonedError(error)) throw error;
-        assertUserScope(expected);
-        await markPendingError(id, generation, error, expected);
+        await markPendingError(id, generation, error);
         if (isFailedPrecondition(error)) throw new Error(persistErrorMessage(error));
         throw error;
     }
 }
 
-export async function hydrateCanvasLibraryFolders(expectedScope?: CapturedUserScope) {
-    const expected = captureScope(expectedScope);
+export async function hydrateCanvasLibraryFolders() {
+    const userScope = getActiveUserScope();
     if (usesBrowserLocalResourceStore()) return;
     const hydrateId = ++folderHydrateGeneration;
     const startedAt = folderOpClock;
     const local = useCanvasStore.getState().folders;
-    const existingPending = await readPendingRecord(expected.userScope);
+    const existingPending = await readPendingRecord(userScope);
     let remoteFolders: CanvasFolder[] = [];
     let listedIds = new Set<string>();
     try {
-        const data = await listCanvasLibraryFoldersRemote({ expectedScope: expected });
-        assertUserScope(expected);
+        const data = await listCanvasLibraryFoldersRemote();
         if (hydrateId !== folderHydrateGeneration) return;
         const latestLocal = useCanvasStore.getState().folders;
         listedIds = new Set((data.folders || []).map((folder) => folder.id));
         remoteFolders = (data.folders || []).map((folder) => mapRecord(folder, latestLocal.find((item) => item.id === folder.id)))
-            .filter((folder) => (folderRemovedAt.get(`${expected.userScope}:${folder.id}`) || 0) <= startedAt);
+            .filter((folder) => (folderRemovedAt.get(`${userScope}:${folder.id}`) || 0) <= startedAt);
     } catch (error) {
-        if (isUserScopeAbandonedError(error)) throw error;
-        assertUserScope(expected);
         const covers = useCanvasStore.getState().folders.map(liveCover);
-        const livePending = await readPendingRecord(expected.userScope);
-        publishFolders(covers.filter((folder) => livePending.intents[folder.id]?.kind !== "delete"), livePending.intents, expected);
+        const livePending = await readPendingRecord(userScope);
+        publishFolders(covers.filter((folder) => livePending.intents[folder.id]?.kind !== "delete"), livePending.intents);
         throw error;
     }
 
     const remoteIds = new Set(remoteFolders.map((folder) => folder.id));
-    const nextPending = await mutatePending(expected.userScope, expected, (live) => {
+    const nextPending = await mutatePending(userScope, (live) => {
         for (const [id, intent] of Object.entries(live.intents)) {
             if (intent.kind !== "delete") continue;
-            const removedAt = folderRemovedAt.get(`${expected.userScope}:${id}`) || 0;
+            const removedAt = folderRemovedAt.get(`${userScope}:${id}`) || 0;
             if (!listedIds.has(id) && removedAt <= startedAt) {
                 rememberGeneration(live, id, intent.generation);
                 delete live.intents[id];
-                folderRemovedAt.delete(`${expected.userScope}:${id}`);
+                folderRemovedAt.delete(`${userScope}:${id}`);
             }
         }
         for (const [key, removedAt] of [...folderRemovedAt.entries()]) {
-            if (!key.startsWith(`${expected.userScope}:`)) continue;
-            const id = key.slice(expected.userScope.length + 1);
+            if (!key.startsWith(`${userScope}:`)) continue;
+            const id = key.slice(userScope.length + 1);
             if (!listedIds.has(id) && removedAt <= startedAt && live.intents[id]?.kind !== "delete") folderRemovedAt.delete(key);
         }
         for (const folder of [...local, ...useCanvasStore.getState().folders]) {
             if (remoteIds.has(folder.id) || live.intents[folder.id]) continue;
-            if ((folderRemovedAt.get(`${expected.userScope}:${folder.id}`) || 0) > startedAt) continue;
+            if ((folderRemovedAt.get(`${userScope}:${folder.id}`) || 0) > startedAt) continue;
             if (existingPending.intents[folder.id]?.kind === "delete") continue;
             const generation = nextGeneration(folder.id, live);
             live.intents[folder.id] = {
@@ -577,7 +532,7 @@ export async function hydrateCanvasLibraryFolders(expectedScope?: CapturedUserSc
         }
         return live;
     });
-    publishFolders(remoteFolders, nextPending.intents, expected);
+    publishFolders(remoteFolders, nextPending.intents);
 }
 
 export async function peekCanvasFolderPendingForTests(userScope: string) {

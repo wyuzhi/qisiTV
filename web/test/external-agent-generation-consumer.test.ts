@@ -4,7 +4,6 @@ import { generationTaskMetadata, resetInterruptedGeneration } from "../src/lib/c
 import type { GenerationTask } from "../src/services/api/task-center";
 import { CanvasNodeType, type CanvasNodeData } from "../src/types/canvas";
 import { useCanvasStore, type CanvasProject } from "../src/stores/canvas/use-canvas-store";
-import { captureUserScope } from "../src/lib/user-scope-guard";
 
 const task: GenerationTask = {
     id: "external-task", projectId: "canvas", type: "canvas_image", status: "succeeded",
@@ -26,12 +25,10 @@ test("external Agent output uses the same idempotent engine bind and retains man
     useCanvasStore.setState({ projects: [project] });
     const operations = new Set<string>();
     let binds = 0;
-    const identity = captureUserScope();
     const consume = () => bindBackendCanvasGenerationResult({
         canvasId: "canvas", nodeId: node.id, task: { ...task, outputs: [{ outputIndex: 0, mediaType: "image", materializedAssetId: "already-saved-by-backend" }] },
         nodesRef, isCurrent: () => true, setNodes: (value) => { nodesRef.current = typeof value === "function" ? value(nodesRef.current) : value; },
         runtime: {
-            captureScope: () => identity, liveScope: () => identity,
             hydrateOutputs: async () => undefined,
             persistDocument: async (_id, patch) => { expect(patch.nodes?.[0]?.metadata?.prompt).toBe("Unsaved local prompt"); },
             bindOutput: async (input) => {

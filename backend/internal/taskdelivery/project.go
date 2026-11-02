@@ -8,11 +8,22 @@ import (
 type Projection struct {
 	Outputs     []localtask.CanonicalOutput
 	ResultState string
+	Outcome     localtask.Outcome
 	Stage       string
 	Err         error
 }
 
 func Project(task model.Task, stored []localtask.CanonicalOutput, loadErr error, failedRetryBlocked bool) Projection {
+	return ProjectWithFacts(task, stored, loadErr, failedRetryBlocked, localtask.OutcomeFacts{})
+}
+
+func ProjectWithFacts(task model.Task, stored []localtask.CanonicalOutput, loadErr error, failedRetryBlocked bool, facts localtask.OutcomeFacts) (projection Projection) {
+	defer func() {
+		if loadErr != nil {
+			facts.Unreadable = true
+		}
+		projection.Outcome = localtask.ComputeOutcome(task, projection.ResultState, facts)
+	}()
 	parsed, _ := localtask.InspectResultJSON(task.ResultJSON, task.Type)
 	if loadErr != nil {
 		outputs := parsed

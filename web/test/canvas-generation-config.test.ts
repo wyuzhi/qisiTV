@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test";
-import { buildCanvasGenerationRequirements, buildGenerationConfig, resolvedCanvasGenerationRequirements } from "@/lib/canvas/canvas-generation-config";
+import { buildCanvasGenerationRequirements, buildGenerationConfig, preferredMediaGeneratorMetadata, resolvedCanvasGenerationRequirements } from "@/lib/canvas/canvas-generation-config";
 import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
 import { modelCompatibilityError } from "@/lib/model-selection";
-import { defaultConfig, type AiConfig } from "@/stores/use-config-store";
+import { defaultConfig, normalizeConfigSnapshot, type AiConfig } from "@/stores/use-config-store";
+import { useCreationPreferencesStore } from "@/stores/use-creation-preferences-store";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 const input = { textCount: 1, imageCount: 1, videoCount: 0, audioCount: 0, characterCount: 0 };
@@ -17,7 +18,7 @@ function config(): AiConfig {
         const capabilityConfig = defaultModelCapabilityConfig();
         capabilityConfig.video!.operations = [operation];
         capabilityConfig.video!.references.maxImages = images;
-        return { ...model, capability: "video" as const, capabilityConfig };
+        return { ...model, capability: "video" as const, capabilityConfig, capabilitySource: "user" as const };
     });
     return { ...defaultConfig, channels: [{ id: "channel", name: "Test", baseUrl: "https://example.test", apiKey: "fixture", apiFormat: "openai", models: profiles.map(profile => profile.model), modelProfiles: profiles }], videoModel: "channel::cinema-text", videoSeconds: "10", videoGenerateAudio: "true", videoWatermark: "true" };
 }
@@ -66,3 +67,41 @@ test("resolved requirements retain admitted defaults rather than restoring raw n
     const imageNode = { ...node, type: CanvasNodeType.Image, metadata: { count: 9, size: "1:1" } };
     expect(resolvedCanvasGenerationRequirements(resolved, imageNode, "image", input).options).toMatchObject({ count: 2, size: "3:2" });
 });
+
+for (const savedModel of [false, true]) {
+    for (const mode of ["image", "video"] as const) {
+        test(`new ${mode} nodes preserve parameters supported by another same-name model, saved model: ${savedModel}`, () => {
+            const previous = useCreationPreferencesStore.getState().preferences;
+            try {
+                const profiles = ["low", "high"].map((tier) => {
+                    const capabilityConfig = defaultModelCapabilityConfig(mode === "image" ? "openai-image" : "openai-videos");
+                    const size = tier === "low" ? "1024x1024" : "4096x4096";
+                    capabilityConfig.image!.size = { parameter: "size", values: [size], default: size, allowCustom: false };
+                    capabilityConfig.video!.duration = { selection: "enum", values: [tier === "low" ? 5 : 10], default: tier === "low" ? 5 : 10 };
+                    return { model: `${mode}-${tier}`, displayName: "Same product", capability: mode, protocol: mode === "image" ? "openai-image" as const : "openai-videos" as const, capabilityConfig, capabilitySource: "user" as const };
+                });
+                const global = normalizeConfigSnapshot({ config: {
+                    ...defaultConfig,
+                    imageModel: "channel::image-low",
+                    videoModel: "channel::video-low",
+                    channels: [{ id: "channel", name: "Fixture", baseUrl: "https://example.test", apiKey: "fixture", apiFormat: "openai", models: profiles.map(profile => profile.model), modelProfiles: profiles }],
+                } }).config;
+                useCreationPreferencesStore.setState({ preferences: {
+                    [mode]: { ...(savedModel ? { model: `channel::${mode}-low` } : {}), ...(mode === "image" ? { ratio: "4096x4096" } : { seconds: "10" }) },
+                } });
+                const restored = preferredMediaGeneratorMetadata(global, mode);
+                expect(restored.model).toBe(`channel::${mode}-high`);
+                expect(mode === "image" ? restored.size : restored.seconds).toBe(mode === "image" ? "4096x4096" : "10");
+                const generated = buildGenerationConfig(global, { ...node, type: mode === "image" ? CanvasNodeType.Image : CanvasNodeType.Video, metadata: restored }, mode);
+                expect(generated.model).toBe(`channel::${mode}-high`);
+                expect(mode === "image" ? generated.size : generated.videoSeconds).toBe(mode === "image" ? "4096x4096" : "10");
+
+                useCreationPreferencesStore.setState({ preferences: { [mode]: { ...(savedModel ? { model: `channel::${mode}-low` } : {}), ...(mode === "image" ? { ratio: "8192x8192" } : { seconds: "20" }) } } });
+                const unsupported = preferredMediaGeneratorMetadata(global, mode);
+                expect(mode === "image" ? unsupported.size : unsupported.seconds).toBe(mode === "image" ? "1024x1024" : "5");
+            } finally {
+                useCreationPreferencesStore.setState({ preferences: previous });
+            }
+        });
+    }
+}

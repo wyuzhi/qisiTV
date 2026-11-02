@@ -27,10 +27,17 @@ func imageSubmissionFixture(t *testing.T, multipartBody bool) (*Service, *gorm.D
 	t.Helper()
 	s, db, _, _ := creationTestService(t)
 	s.workerID = newID()
+	key, err := s.encryptSettingSecret("private-test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.ModelChannel{}).Where("id = ?", "channel").Updates(map[string]any{"base_url": "https://enterprise.beefapi.com", "api_key": key}).Error; err != nil {
+		t.Fatal(err)
+	}
 	task := model.Task{ID: "image-task", UserID: "user", Type: "canvas_image", Status: model.TaskStatusRunning, LeaseOwner: "owner", InputJSON: `{"mode":"image"}`}
 	expires := time.Now().Add(time.Hour)
 	task.LeaseExpiresAt = &expires
-	attempt := &model.RouteAttempt{ID: "image-attempt", TaskID: task.ID, Status: "dispatching", DispatchState: "submission_unknown", StartedAt: time.Now()}
+	attempt := &model.RouteAttempt{ID: "image-attempt", TaskID: task.ID, ChannelID: "channel", Status: "dispatching", DispatchState: "submission_unknown", StartedAt: time.Now()}
 	for _, row := range []any{&task, attempt} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
@@ -160,7 +167,7 @@ func TestImageSubmissionUnknownProviderCannotReplayOrRetryLostResponse(t *testin
 	if err := s.validateImageTaskRetry(&task); err == nil {
 		t.Fatal("new key retry allowed")
 	}
-	if err := s.terminalCoordinator().handleExecutionFailure(&task, result.err, false, false); err == nil {
+	if err := s.terminalCoordinator().HandleExecutionFailure(&task, result.err, false, false); err == nil {
 		t.Fatal("missing terminal failure")
 	}
 	stored, err := s.repo.Task(task.ID)
@@ -199,6 +206,9 @@ func TestImageSubmissionDiskRestartReplaysOneGenerationAndCompletesOnce(t *testi
 		got, _ := io.ReadAll(req.Body)
 		if !bytes.Equal(got, body) {
 			t.Fatal("replay changed request bytes")
+		}
+		if req.Header.Get("X-BeefAPI-Image-Media-Protocol") != "" {
+			t.Fatal("legacy frozen request acquired a new media contract")
 		}
 		if key == "" {
 			key = req.Header.Get("Idempotency-Key")

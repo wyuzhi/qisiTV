@@ -113,6 +113,26 @@ class InputContractTests(unittest.TestCase):
         self.assertAlmostEqual(metadata.fps, 5.0)
         self.assertEqual(metadata.frames, 2)
 
+    def test_encodes_a_grayscale_preview_at_minimum_30fps_when_source_is_24fps(self) -> None:
+        depths = np.zeros((24, 8, 8), dtype=np.uint8)
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "preview_30fps.mp4"
+
+            encode_depth_preview(
+                depths,
+                output,
+                fps=24.0,
+                width=64,
+                height=48,
+                min_output_fps=30.0,
+            )
+            metadata = probe_video(output)
+
+        self.assertEqual((metadata.width, metadata.height), (64, 48))
+        self.assertAlmostEqual(metadata.fps, 30.0, places=2)
+        self.assertEqual(metadata.frames, 30)
+        self.assertAlmostEqual(metadata.duration, 1.0, places=2)
+
 
 if __name__ == "__main__":
     unittest.main()

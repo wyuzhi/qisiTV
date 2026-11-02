@@ -1,5 +1,3 @@
-import { subscribeUserScope } from "@/lib/user-scope";
-import { userScopeMatches, type CapturedUserScope } from "@/lib/user-scope-guard";
 import type { GenerationTask } from "@/services/api/task-center";
 import { startOperation } from "@/stores/use-operation-progress";
 import { generationTaskNodeId } from "@/lib/canvas/canvas-generation-task-identity";
@@ -8,11 +6,9 @@ const observations = new Map<string, ReturnType<typeof startOperation>>();
 const latestRequests = new Map<string, number>();
 let requestSequence = 0;
 export const beginTaskReferenceObservation = () => ++requestSequence;
-subscribeUserScope(() => { observations.clear(); latestRequests.clear(); });
 
-export function publishTaskReferenceProgress(task: GenerationTask, owner: CapturedUserScope, request = beginTaskReferenceObservation()) {
-    if (!userScopeMatches(owner)) return;
-    const key = owner.userScope + ":" + owner.epoch + ":" + task.id;
+export function publishTaskReferenceProgress(task: GenerationTask, request = beginTaskReferenceObservation()) {
+    const key = task.id;
     if (request < (latestRequests.get(key) ?? 0)) return;
     latestRequests.set(key, request);
     let observation = observations.get(key);
@@ -21,7 +17,7 @@ export function publishTaskReferenceProgress(task: GenerationTask, owner: Captur
     const target = task.projectId && nodeId ? { projectId: task.projectId, nodeId, taskId: task.id } : undefined;
     if (progress && task.status === "running") {
         if (!observation) {
-            observation = startOperation("上传参考素材", { owner, target });
+            observation = startOperation("上传参考素材", { target });
             observations.set(key, observation);
         }
         observation.update({ ...progress, detail: (progress.phase === "transferring" ? "正在上传" : progress.phase === "processing" ? "正在确认" : "正在准备") + progress.label });

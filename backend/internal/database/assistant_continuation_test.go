@@ -41,7 +41,7 @@ func TestContinuationMigrationPreservesHistoryAndChecksReceiptStructure(t *testi
 	}
 	var after []localSchemaMigration
 	db.Order("version").Find(&after)
-	if len(after) != len(before)+8 || after[len(before)].Name != "assistant-generation-continuations" || after[len(before)+1].Name != "assistant-continuation-intent-fence" || after[len(before)+2].Name != "assistant-production-authorization" || after[len(before)+3].Name != "skill-market-release-metadata" || after[len(before)+7].Name != "reconcile-preview-assistant-schema" {
+	if len(after) != len(before)+11 || after[len(before)].Name != "assistant-generation-continuations" || after[len(before)+1].Name != "assistant-continuation-intent-fence" || after[len(before)+2].Name != "assistant-production-authorization" || after[len(before)+3].Name != "skill-market-release-metadata" || after[len(before)+7].Name != "reconcile-preview-assistant-schema" || after[len(before)+8].Name != "task-recovery-outcome" || after[len(before)+9].Name != "task-beefapi-settlement" || after[len(before)+10].Name != "managed-media-query-identity" {
 		t.Fatal("migration identity")
 	}
 	for i, row := range before {
@@ -103,7 +103,7 @@ func TestContinuationIntentFenceMigrationPreservesV18History(t *testing.T) {
 	}
 	var after []localSchemaMigration
 	db.Order("version").Find(&after)
-	if len(after) != len(before)+7 || after[len(before)].Name != "assistant-continuation-intent-fence" || after[len(before)+1].Name != "assistant-production-authorization" || after[len(before)+2].Name != "skill-market-release-metadata" || after[len(before)+6].Name != "reconcile-preview-assistant-schema" {
+	if len(after) != len(before)+10 || after[len(before)].Name != "assistant-continuation-intent-fence" || after[len(before)+1].Name != "assistant-production-authorization" || after[len(before)+2].Name != "skill-market-release-metadata" || after[len(before)+6].Name != "reconcile-preview-assistant-schema" || after[len(before)+7].Name != "task-recovery-outcome" || after[len(before)+8].Name != "task-beefapi-settlement" || after[len(before)+9].Name != "managed-media-query-identity" {
 		t.Fatal("migration identity")
 	}
 	for i, row := range before {

@@ -196,7 +196,7 @@ func RegisterTaskRoutes(r *gin.RouterGroup, svc *app.Service, hostedProfile ...b
 		}
 		ok(c, task)
 	})
-	registerTaskTextReplayRoutes(r, svc)
+	registerTaskTextReplayRoutes(r, svc, svc.TextReplay())
 	r.POST("/tasks/:id/retry", func(c *gin.Context) {
 		if !requireTrustedDesktopWritePrincipal(c, "任务只能由当前桌面界面重试") {
 			return
@@ -214,6 +214,20 @@ func RegisterTaskRoutes(r *gin.RouterGroup, svc *app.Service, hostedProfile ...b
 			} else {
 				fail(c, http.StatusBadRequest, err)
 			}
+			return
+		}
+		ok(c, task)
+	})
+	r.POST("/tasks/:id/recover", func(c *gin.Context) {
+		user, err := currentUser(c, svc)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		// 用户点「继续取回」：只有这个入口允许把 BeefAPI 没收到的托管原请求按原编号补交一次。
+		task, err := requestTaskPort(c, svc).RecoverTask(localtask.WithManualRecovery(c.Request.Context()), user.ID, c.Param("id"))
+		if err != nil {
+			failService(c, err)
 			return
 		}
 		ok(c, task)

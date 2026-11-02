@@ -56,7 +56,7 @@ func TestSelectedSkillsActualHostBusinessFlows(t *testing.T) {
 				t.Fatal(e)
 			}
 			defer req.MultipartForm.RemoveAll()
-			installed, e := env.service.InstallSkillUpload(owner.ID, "zip", req.MultipartForm.File["file"][0], app.SkillInstallRequest{IsPrivate: true})
+			installed, e := env.service.SkillsDomain().InstallSkillUpload(owner.ID, "zip", req.MultipartForm.File["file"][0], app.SkillInstallRequest{IsPrivate: true})
 			if e != nil {
 				t.Fatal(e)
 			}

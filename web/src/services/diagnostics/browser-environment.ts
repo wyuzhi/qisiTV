@@ -1,14 +1,8 @@
 import type { EnvironmentCheck } from "./environment-check";
-import { captureUserScopeEpoch, subscribeUserScope, userScopeEpochMatches } from "@/lib/user-scope";
 
 let storageWritable: boolean | undefined;
 let storageTimedOut = false;
 let latestStorageProbe = 0;
-subscribeUserScope(() => {
-    latestStorageProbe++;
-    storageWritable = undefined;
-    storageTimedOut = false;
-});
 
 export type BrowserCapabilities = { secureRandom: boolean; randomUUID: boolean; structuredClone: boolean; indexedDB: boolean; storageWritable?: boolean; storageTimedOut?: boolean; webGL: boolean; h264: boolean; hevc: boolean };
 
@@ -49,9 +43,8 @@ type StorageProbeResult = Pick<BrowserCapabilities, "storageWritable" | "storage
 export async function probeBrowserStorage(signal?: AbortSignal): Promise<StorageProbeResult> {
     if (signal?.aborted) return {};
     const probe = ++latestStorageProbe;
-    const epoch = captureUserScopeEpoch();
     const publish = (result: StorageProbeResult) => {
-        if (probe === latestStorageProbe && !signal?.aborted && userScopeEpochMatches(epoch)) {
+        if (probe === latestStorageProbe && !signal?.aborted) {
             storageWritable = result.storageWritable;
             storageTimedOut = result.storageTimedOut ?? false;
         }

@@ -86,6 +86,7 @@ const GENERATION_BIND_METADATA_KEYS = [
     "resultOrigin",
     "generationEffectKeys",
     "status",
+    "taskOutcome",
     "taskStatus",
     "taskProgress",
     "taskStage",
@@ -97,7 +98,11 @@ const GENERATION_ERROR_METADATA_KEYS = [
     "errorDetails",
     "generationErrorCode",
     "generationErrorSummary",
-    "resourceReloadAvailable",
+    "generationProviderCode",
+    "taskFailureDiagnostics",
+    "generationFailure",
+    "generationPreflightError",
+    "taskOutcomeSource",
     "failedPromptFingerprint",
     "failedInputFingerprint",
     "processingLabel",
@@ -118,9 +123,19 @@ function nonemptyMediaRef(value: unknown): value is string {
     return typeof value === "string" && value.trim().length > 0;
 }
 
+function hasInFlightTaskOutcome(value: unknown) {
+    if (!isPlainObject(value)) return false;
+    return value.phase === "running" || value.phase === "fetching";
+}
+
 function isInFlightGenerationOverlay(node: CanvasNodeData) {
     const status = node.metadata?.status;
-    return status === "loading" || status === "error";
+    if (status === "loading" || status === "error") return true;
+    return (
+        status === "success"
+        && (!node.metadata?.taskStatus || node.metadata.taskStatus === "succeeded")
+        && hasInFlightTaskOutcome(node.metadata?.taskOutcome)
+    );
 }
 
 function remoteHasBoundGenerationResult(node: CanvasNodeData | undefined) {
@@ -178,6 +193,9 @@ export function settleInFlightGenerationOverlay(input: {
         }
         for (const key of GENERATION_ERROR_METADATA_KEYS) {
             delete (metadata as Record<string, unknown>)[key];
+        }
+        if (!isPlainObject(metadata.taskOutcome) || hasInFlightTaskOutcome(metadata.taskOutcome)) {
+            metadata.taskOutcome = { phase: "ready", regenerate: "allowed", reason: "result_ready" };
         }
         changed = true;
         return { ...localNode, metadata };

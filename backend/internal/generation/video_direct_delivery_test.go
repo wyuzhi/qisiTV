@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"reflect"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -18,31 +17,19 @@ import (
 	"qisitv/backend/internal/protocol"
 )
 
-func TestBeefAPIVideoDeliveryKeepsTaskAcrossPendingAndExpiredBackup(t *testing.T) {
+func TestBeefAPIVideoDeliveryKeepsTaskAcrossExpiredURLsByQueryingAPI(t *testing.T) {
 	t.Setenv("CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS", "127.0.0.1")
-	for _, tc := range []struct {
-		model    string
-		interval time.Duration
-	}{
-		{"seedance-2.0-mini", 5 * time.Second},
-		{"sora-2", 5 * time.Second},
-	} {
-		model := tc.model
+	for _, model := range []string{"seedance-2.0-mini", "sora-2", "opaque-future-video"} {
 		for _, resumed := range []bool{false, true} {
 			t.Run(model+"/resumed="+strconv.FormatBool(resumed), func(t *testing.T) {
-				creates, polls, direct, backup, signed := 0, 0, 0, 0, 0
+				creates, polls, downloads, backup := 0, 0, 0, 0
 				media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					if r.Header.Get("Authorization") != "" || r.Header.Get("X-Gateway-Secret") != "" || r.Header.Get("X-Beeftv-Owner") != "" || r.Header.Get(beefAPIVideoDeliveryHeader) != "" {
-						t.Error("media request leaked gateway headers")
+					downloads++
+					if r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" || r.Header.Get("X-Gateway-Secret") != "" {
+						t.Error("gateway credential reached storage")
 					}
-					if r.URL.Path == "/tos.mp4" {
-						direct++
-						w.WriteHeader(http.StatusForbidden)
-						return
-					}
-					signed++
-					if r.URL.Query().Get("signature") == "expired" {
-						w.WriteHeader(http.StatusForbidden)
+					if r.URL.Query().Get("signature") != "fresh" {
+						w.WriteHeader(403)
 						return
 					}
 					w.Header().Set("Content-Type", "video/mp4")
@@ -51,86 +38,42 @@ func TestBeefAPIVideoDeliveryKeepsTaskAcrossPendingAndExpiredBackup(t *testing.T
 				defer media.Close()
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.Header.Get("Authorization") != "Bearer test-key" {
-						t.Error("gateway request missing credential")
+						t.Error("gateway credential missing")
 					}
-					switch {
-					case r.Method == http.MethodPost && r.URL.Path == "/v1/videos":
-						if r.Header.Get(beefAPIVideoDeliveryHeader) != "" {
-							t.Error("opt-in header sent on generation create")
-						}
+					switch r.URL.Path {
+					case "/v1/videos":
 						creates++
-						_ = json.NewEncoder(w).Encode(map[string]any{"id": "original", "status": "queued"})
-					case r.Method == http.MethodGet && r.URL.Path == "/v1/videos/original":
-						if r.Header.Get(beefAPIVideoDeliveryHeader) != "direct" {
-							t.Error("video status did not opt in to direct delivery")
-						}
+						_ = json.NewEncoder(w).Encode(map[string]any{"id": "original"})
+					case "/v1/videos/original":
 						polls++
-						_ = json.NewEncoder(w).Encode(map[string]any{"id": "original", "status": "completed", "video_url": media.URL + "/tos.mp4", "metadata": map[string]any{"url": media.URL + "/tos.mp4"}})
-					case r.Method == http.MethodGet && r.URL.Path == "/v1/videos/original/content" && r.URL.Query().Get("delivery") == "backup":
-						if r.Header.Get(beefAPIVideoDeliveryHeader) != "" {
-							t.Error("backup request sent direct delivery opt-in")
+						signature := "expired"
+						if polls >= 3 {
+							signature = "fresh"
 						}
-						backup++
-						if backup <= 4 {
-							w.Header().Set("Retry-After", "7")
-							w.WriteHeader(http.StatusServiceUnavailable)
-							_, _ = w.Write([]byte(`{"error":{"code":"video_delivery_pending"}}`))
-							return
+						if r.Header.Get(beefAPIVideoDeliveryHeader) != "direct" {
+							t.Error("missing direct status request")
 						}
-						signature := "fresh"
-						if backup == 5 {
-							signature = "expired"
-						}
-						http.Redirect(w, r, media.URL+"/cos.mp4?signature="+signature, http.StatusFound)
+						_ = json.NewEncoder(w).Encode(map[string]any{"id": "original", "status": "completed", "video_url": media.URL + "/result.mp4?signature=" + signature})
 					default:
-						t.Errorf("unexpected operation: %s %s", r.Method, r.URL.Path)
-						w.WriteHeader(http.StatusNotFound)
+						backup++
+						t.Errorf("unexpected client recovery route %s", r.URL.Path)
+						w.WriteHeader(404)
 					}
 				}))
 				defer server.Close()
-				ctx := WithEndpoints(context.Background(), Endpoints{BeefAPIVideoBaseURL: server.URL})
-				manifest, err := os.ReadFile("../../../plugin-packages/openai-videos/manifest.json")
-				if err != nil {
-					t.Fatal(err)
-				}
-				adapters, err := protocol.LoadInstalledProviders(manifest, nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				registry, err := protocol.NewRegistry(adapters...)
-				if err != nil {
-					t.Fatal(err)
-				}
-				ctx = WithProtocolRegistry(ctx, registry)
+				ctx := WithSubmissionKey(WithEndpoints(context.Background(), Endpoints{BeefAPIVideoBaseURL: server.URL}), "stable-attempt")
 				if resumed {
 					ctx = WithCallMeta(ctx, CallMeta{ProviderRequestID: "original"})
 				}
-				var waits []time.Duration
 				policy := DefaultVideoPollPolicy()
-				policy.Sleep = func(_ context.Context, delay time.Duration) error {
-					waits = append(waits, delay)
-					return nil
-				}
-				result, err := RunVideoTaskWithPolicy(ctx, Input{Mode: "video", Prompt: "test", Config: Config{
-					BaseURL: server.URL, APIKey: "test-key", InterfaceType: "newapi", Model: model,
-					VideoSeconds: "4", VQuality: "480P", Size: "16:9",
-					Headers: []outbound.OutboundHeader{{Name: "X-Gateway-Secret", Value: "private-value"}, {Name: "X-Beeftv-Owner", Value: "private-owner"}},
-				}}, policy)
-				if err != nil {
-					t.Fatal(err)
-				}
-				video, _ := result["video"].(map[string]any)
-				_, data, err := DecodeProviderDataURL(stringField(video, "dataUrl"))
+				policy.Sleep = func(context.Context, time.Duration) error { return nil }
+				result, err := RunVideoTaskWithPolicy(ctx, Input{Mode: "video", Prompt: "scene", Config: Config{BaseURL: server.URL, APIKey: "test-key", Model: model, Headers: []outbound.OutboundHeader{{Name: "X-Gateway-Secret", Value: "private"}}}}, policy)
 				wantCreates := 1
 				if resumed {
 					wantCreates = 0
 				}
-				if err != nil || string(data) != "original video bytes" || creates != wantCreates || polls != 1 || direct != 1 || backup != 6 || signed != 2 {
-					t.Fatalf("bytes=%q creates=%d polls=%d direct=%d backup=%d signed=%d err=%v", data, creates, polls, direct, backup, signed, err)
-				}
-				wantWaits := []time.Duration{tc.interval, 7 * time.Second, 7 * time.Second, 7 * time.Second, 7 * time.Second, tc.interval}
-				if !reflect.DeepEqual(waits, wantWaits) {
-					t.Fatalf("waits = %v, want %v", waits, wantWaits)
+				if err != nil || result == nil || creates != wantCreates || polls != 3 || downloads != 3 || backup != 0 {
+					t.Fatalf("err=%v create=%d poll=%d storage=%d backup=%d", err, creates, polls, downloads, backup)
 				}
 			})
 		}
@@ -369,6 +312,9 @@ func (queuedVideoDownloadLimits) AcquireChannelSlot(ctx context.Context, _, _ st
 
 func TestVideoIdleTimerStartsAfterChannelAdmission(t *testing.T) {
 	t.Setenv("CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS", "127.0.0.1")
+	// The local queue/transfer contract must not depend on system proxy latency.
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+	t.Setenv("NO_PROXY", "*")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("complete video"))
 	}))
@@ -409,7 +355,7 @@ func TestSeedanceOctetStreamMP4IsVideoForDirectAndBackup(t *testing.T) {
 					downloads++
 					if r.URL.Query().Get("delivery") == "backup" {
 						backups++
-					} else if useBackup {
+					} else if useBackup && downloads == 1 {
 						w.WriteHeader(http.StatusServiceUnavailable)
 						return
 					}
@@ -427,11 +373,11 @@ func TestSeedanceOctetStreamMP4IsVideoForDirectAndBackup(t *testing.T) {
 				}
 				video := result["video"].(map[string]any)
 				mimeType, data, err := DecodeProviderDataURL(stringField(video, "dataUrl"))
-				wantBackups := 0
+				wantDownloads := 1
 				if useBackup {
-					wantBackups = 1
+					wantDownloads = 2
 				}
-				if err != nil || mimeType != "video/mp4" || video["mimeType"] != "video/mp4" || !bytes.Equal(data, payload) || creates != 0 || backups != wantBackups || downloads != 1+wantBackups {
+				if err != nil || mimeType != "video/mp4" || video["mimeType"] != "video/mp4" || !bytes.Equal(data, payload) || creates != 0 || backups != 0 || downloads != wantDownloads {
 					t.Fatalf("mime=%s/%v bytes=%d creates=%d downloads=%d backups=%d err=%v", mimeType, video["mimeType"], len(data), creates, downloads, backups, err)
 				}
 			})

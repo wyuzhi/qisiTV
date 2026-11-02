@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-const projectSource = await Bun.file(new URL("../src/pages/canvas/project.tsx", import.meta.url)).text();
+const projectSource = await Bun.file(new URL("../src/pages/canvas/use-canvas-context-menu.ts", import.meta.url)).text();
 const promptEditorSource = await Bun.file(new URL("../src/components/canvas/canvas-resource-mention-textarea.tsx", import.meta.url)).text();
 
 test("canvas node context menu preserves the native menu for editable text targets", () => {

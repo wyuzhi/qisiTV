@@ -4,8 +4,6 @@
 FROM oven/bun:1.3.13 AS web-build
 
 WORKDIR /app/web
-ARG BUILD_VERSION
-ENV CANVAS_BUILD_VERSION=${BUILD_VERSION}
 COPY web/package.json web/bun.lock ./
 COPY web/patches ./patches
 RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile --cache-dir=/root/.bun/install/cache
@@ -19,6 +17,8 @@ COPY assets /app/assets
 COPY backend/internal/providerpreset/image_contracts.json /app/backend/internal/providerpreset/image_contracts.json
 COPY backend/internal/providerpreset/video_contracts.json /app/backend/internal/providerpreset/video_contracts.json
 COPY web ./
+ARG BUILD_VERSION
+ENV CANVAS_BUILD_VERSION=${BUILD_VERSION}
 # 生产镜像只构建云端工作台前端；Agent Runtime 在后端 Worker 中运行。
 RUN bun --bun ./node_modules/vite/bin/vite.js build
 

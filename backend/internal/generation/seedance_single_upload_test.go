@@ -73,7 +73,7 @@ func TestSeedanceSingleUploadRecovery(t *testing.T) {
 						_ = conn.Close()
 						return
 					}
-				case "/v1/video-references/uploads/complete":
+				case "/v1/media/uploads/complete":
 					confirms++
 					var req struct {
 						Ticket string `json:"ticket"`

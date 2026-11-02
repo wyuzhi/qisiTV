@@ -89,6 +89,8 @@ func (s *Service) RegisterTaskOutputFromTask(task model.Task, decryptedInputJSON
 	if projectID == "" {
 		if _, projectErr := s.Owned(task.UserID, task.ProjectID); projectErr == nil {
 			projectID = task.ProjectID
+		} else if canvas, canvasErr := s.repo.CanvasProjectForUser(task.UserID, task.ProjectID); canvasErr == nil && strings.TrimSpace(canvas.ProjectID) != "" {
+			projectID = strings.TrimSpace(canvas.ProjectID)
 		}
 	}
 	if projectID == "" {

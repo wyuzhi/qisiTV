@@ -3,7 +3,6 @@ import { readImageMeta } from "@/lib/image-utils";
 import { IMAGE_FILES_STORE_NAME, localForageInstance } from "@/lib/localforage-storage";
 import { isLocalRuntimeMode } from "@/lib/runtime-mode";
 import { getActiveUserScope } from "@/lib/user-scope";
-import { assertUserScope, captureUserScope, isUserScopeAbandonedError, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { importResourceFromUrl, isResourceUrl, resourceFileUrl, resourceIdFromStorageKey, resourceStorageKey, ResourceUploadError, uploadResourceFile } from "@/services/api/resources";
 import { cacheResourceObjectUrl, getCachedResourceBlob, getCachedResourceObjectUrl, primeResourceBlobCache } from "@/services/resource-blob-cache";
 import { usesBrowserLocalResourceStore } from "@/services/workspace-resource-storage";
@@ -30,17 +29,14 @@ export type UploadedImage = {
 const store = localForageInstance(IMAGE_FILES_STORE_NAME);
 const objectUrls = new Map<string, string>();
 
-export async function uploadImage(input: string | Blob, onProgress?: (uploadedBytes: number, totalBytes: number) => void, expectedScope?: CapturedUserScope): Promise<UploadedImage> {
+export async function uploadImage(input: string | Blob, onProgress?: (uploadedBytes: number, totalBytes: number) => void): Promise<UploadedImage> {
     // 同一个逻辑上传在本地资源服务不可用后会退回 IndexedDB。
     // 提前生成稳定 key，确保恢复路径仍能定位同一份本地媒体。
-    const expected = expectedScope ?? captureUserScope();
-    const storageKey = `image:${expected.userScope}:${nanoid()}`;
+    const storageKey = `image:${getActiveUserScope()}:${nanoid()}`;
     const localRuntime = isLocalRuntimeMode();
     if (!localRuntime && typeof input === "string" && shouldImportRemoteImage(input)) {
         try {
-            assertUserScope(expected);
-            const resource = await importResourceFromUrl(input, "image", { idempotencyKey: storageKey, expectedScope: expected });
-            assertUserScope(expected);
+            const resource = await importResourceFromUrl(input, "image", { idempotencyKey: storageKey });
             return {
                 url: resource.publicUrl || resourceFileUrl(resource.id),
                 storageKey: resourceStorageKey(resource.id),
@@ -50,19 +46,21 @@ export async function uploadImage(input: string | Blob, onProgress?: (uploadedBy
                 mimeType: resource.mimeType || "image/png",
             };
         } catch (error) {
-            if (isUserScopeAbandonedError(error)) throw error;
             // Keep the browser-side path as a fallback for CORS-enabled HTTPS images.
         }
     }
-    const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
-    assertUserScope(expected);
+    const blob = typeof input === "string"
+        ? await (async () => {
+              const response = await fetch(input, { credentials: isResourceUrl(input) ? "include" : "same-origin" });
+              if (!response.ok) throw new Error("图片读取失败");
+              return response.blob();
+          })()
+        : input;
     const previewUrl = URL.createObjectURL(blob);
     try {
         const meta = await readImageMeta(previewUrl);
-        assertUserScope(expected);
         if (usesBrowserLocalResourceStore()) {
-            assertUserScope(expected);
-            const progress = startOperation(input instanceof File ? input.name : "保存图片", { owner: expected, totalBytes: blob.size, detail: "正在保存图片到本机" });
+            const progress = startOperation(input instanceof File ? input.name : "保存图片", { totalBytes: blob.size, detail: "正在保存图片到本机" });
             try { await store.setItem(storageKey, blob); progress.done("图片已保存到本机"); }
             catch (error) { progress.fail("图片保存未完成，请检查本机存储空间"); throw error; }
             objectUrls.set(storageKey, previewUrl);
@@ -73,12 +71,10 @@ export async function uploadImage(input: string | Blob, onProgress?: (uploadedBy
         // as the canonical durable store in local mode; IndexedDB remains a safe
         // browser fallback when the backend is temporarily unavailable.
         try {
-            const resource = await uploadResourceFile(blob, "image", { width: meta.width, height: meta.height, fileName: input instanceof File ? input.name : undefined, idempotencyKey: storageKey, expectedScope: expected }, onProgress);
-            assertUserScope(expected);
+            const resource = await uploadResourceFile(blob, "image", { width: meta.width, height: meta.height, fileName: input instanceof File ? input.name : undefined, idempotencyKey: storageKey }, onProgress);
             try {
-                await primeResourceBlobCache(resourceStorageKey(resource.id), blob, expected);
+                await primeResourceBlobCache(resourceStorageKey(resource.id), blob);
             } catch (error) {
-                if (isUserScopeAbandonedError(error)) throw error;
             }
             URL.revokeObjectURL(previewUrl);
             return {
@@ -90,13 +86,11 @@ export async function uploadImage(input: string | Blob, onProgress?: (uploadedBy
                 mimeType: resource.mimeType || blob.type || meta.mimeType,
             };
         } catch (error) {
-            if (isUserScopeAbandonedError(error)) throw error;
             if (isEngineWebsite()) throw error;
             // 鉴权失效、越权、体积超限这类失败重传也是同样结果，不能退化成"稍后自动同步"。
             if (error instanceof ResourceUploadError && error.permanent) throw error;
             remoteUploadError = error instanceof Error ? error.message : "图片直传失败";
         }
-        assertUserScope(expected);
         // 本地服务暂时不可用时退回浏览器本地缓存，确保当前创作不中断。
         await store.setItem(storageKey, blob);
         const url = previewUrl;

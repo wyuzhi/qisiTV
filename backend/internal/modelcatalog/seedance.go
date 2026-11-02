@@ -25,13 +25,19 @@ func referenceDurationIsOpaqueAsset(media MediaRef) bool {
 }
 
 const (
-	OfficialSeedanceImageMinEdge    = 300
-	OfficialSeedanceImageMaxEdge    = 6000
-	OfficialSeedanceImageMinAspect  = 0.4
-	OfficialSeedanceImageMaxAspect  = 2.5
-	OfficialSeedanceVideoMinPixels  = 409600
-	OfficialSeedanceVideoMaxPixels  = 8295044
-	OfficialSeedanceMinAudioSeconds = 1.8
+	OfficialSeedanceImageMinEdge   = 300
+	OfficialSeedanceImageMaxEdge   = 6000
+	OfficialSeedanceImageMinAspect = 0.4
+	OfficialSeedanceImageMaxAspect = 2.5
+	OfficialSeedanceVideoMinPixels = 409600
+	OfficialSeedanceVideoMaxPixels = 8295044
+	// 火山方舟与腾讯 WAND 的 Seedance 文档都把参考音频单段下限写成 2 秒。
+	OfficialSeedanceMinAudioSeconds = 2
+)
+
+const (
+	// 火山方舟与腾讯 WAND 的输出时长下限都是 4 秒（2.0 为 4~15，2.5 为 4~30）。
+	documentedSeedanceOutputMinSeconds = 4
 )
 
 const (
@@ -46,8 +52,12 @@ const (
 
 func isSeedance2Family(protocol, modelName string) bool {
 	normalizedProtocol := strings.TrimSpace(protocol)
-	if normalizedProtocol != "newapi-channel-2" && normalizedProtocol != "newapi" && normalizedProtocol != "openai" && normalizedProtocol != "openai-videos" && !model.IsVolcengineArkVideoProtocol(model.ChannelInterfaceType(normalizedProtocol)) {
-		return false
+	switch normalizedProtocol {
+	case "newapi-channel-1", "newapi-channel-2", "newapi", "openai", "openai-videos", "video-generations-json", "seedance-videos-compatible", "full-video":
+	default:
+		if !model.IsVolcengineArkVideoProtocol(model.ChannelInterfaceType(normalizedProtocol)) {
+			return false
+		}
 	}
 	name := strings.ToLower(strings.TrimSpace(modelName))
 	return strings.Contains(name, "seedance-2")
@@ -62,13 +72,16 @@ func isSeedance25Model(modelName string) bool {
 const documentedSeedanceVideoMinPixels = 407696
 
 func applySeedanceDocumentedVideoPixelFloor(config TaskConfig, refs *VideoReferenceConfig) {
+	if hasServerVideoCapability(config) {
+		return
+	}
 	if refs == nil || refs.MinVideoPixels != officialSeedanceVideoMinPixels || refs.MaxVideoPixels != officialSeedanceVideoMaxPixels {
 		return
 	}
 	if !isSeedance2Family(config.InterfaceType, config.Model) {
 		return
 	}
-	if model.IsVolcengineArkVideoProtocol(model.ChannelInterfaceType(config.InterfaceType)) || seedanceMaterialLibraryHost(config.BaseURL) {
+	if model.IsVolcengineArkVideoProtocol(model.ChannelInterfaceType(config.InterfaceType)) || seedanceMaterialLibraryHost(config.BaseURL) || strings.EqualFold(strings.TrimSpace(config.ChannelID), "beefapi") {
 		refs.MinVideoPixels = documentedSeedanceVideoMinPixels
 	}
 }
@@ -84,6 +97,133 @@ func seedanceMaterialLibraryHost(baseURL string) bool {
 	default:
 		return false
 	}
+}
+
+// 输出时长下限官方是 4 秒：2.0 为 4~15，2.5 为 4~30。
+// 区间、连续（fractionalMin）和枚举三种已保存配置都要收紧，枚举里的 -1（自动）保留。
+func tightenSeedanceOutputDuration(duration *VideoDurationConfig) {
+	minimum := documentedSeedanceOutputMinSeconds
+	if duration == nil {
+		return
+	}
+	if duration.Selection == "enum" {
+		values := make([]int, 0, len(duration.Values))
+		for _, seconds := range duration.Values {
+			if seconds != -1 && seconds < minimum {
+				continue
+			}
+			values = append(values, seconds)
+		}
+		// 过滤后没有合法时长时保留空列表：这份配置没有可提交的时长，
+		// 让校验直接拒绝，而不是退回原来的低于 4 秒的值。
+		duration.Values = values
+		if len(values) == 0 {
+			return
+		}
+		if duration.Default == -1 && containsInt(values, -1) || containsInt(values, duration.Default) {
+			return
+		}
+		duration.Default = values[0]
+		if duration.Default == -1 && len(values) > 1 {
+			duration.Default = values[1]
+		}
+		return
+	}
+	if duration.Continuous && duration.FractionalMin > 0 && duration.FractionalMin < float64(minimum) {
+		duration.FractionalMin = float64(minimum)
+	}
+	if duration.Min < minimum {
+		duration.Min = minimum
+	}
+	if duration.Default < minimum {
+		duration.Default = minimum
+	}
+}
+
+// 官方文档写的下限只会收紧素材合同，不会放宽管理员已经配得更严的数值。
+// 输出时长与参考音频下限对所有 Seedance 2.x 线路都成立。
+func tightenSeedanceDocumentedRouteLimits(config TaskConfig, value *VideoCapabilityConfig) {
+	if value == nil || !isSeedance2Family(config.InterfaceType, config.Model) {
+		return
+	}
+	tightenSeedanceOutputDuration(&value.Duration)
+	if value.References.MinAudioDuration < officialSeedanceMinAudioSeconds {
+		value.References.MinAudioDuration = officialSeedanceMinAudioSeconds
+	}
+}
+
+func tightenedVideoCapability(config TaskConfig, profile *VideoCapabilityConfig) *VideoCapabilityConfig {
+	if hasServerVideoCapability(config) {
+		return profile
+	}
+	if profile == nil {
+		return nil
+	}
+	value := *profile
+	value.References = profile.References
+	if isSeedance2Family(config.InterfaceType, config.Model) {
+		defaults := overlayOfficialSeedance2References(VideoReferenceConfig{}, isSeedance25Model(config.Model))
+		if value.References.MinImageWidth <= 0 {
+			value.References.MinImageWidth = defaults.MinImageWidth
+		}
+		if value.References.MaxImageWidth <= 0 {
+			value.References.MaxImageWidth = defaults.MaxImageWidth
+		}
+		if value.References.MinImageHeight <= 0 {
+			value.References.MinImageHeight = defaults.MinImageHeight
+		}
+		if value.References.MaxImageHeight <= 0 {
+			value.References.MaxImageHeight = defaults.MaxImageHeight
+		}
+		if value.References.MinImageAspect <= 0 {
+			value.References.MinImageAspect = defaults.MinImageAspect
+		}
+		if value.References.MaxImageAspect <= 0 {
+			value.References.MaxImageAspect = defaults.MaxImageAspect
+		}
+		if value.References.MinVideoWidth <= 0 {
+			value.References.MinVideoWidth = defaults.MinVideoWidth
+		}
+		if value.References.MaxVideoWidth <= 0 {
+			value.References.MaxVideoWidth = defaults.MaxVideoWidth
+		}
+		if value.References.MinVideoHeight <= 0 {
+			value.References.MinVideoHeight = defaults.MinVideoHeight
+		}
+		if value.References.MaxVideoHeight <= 0 {
+			value.References.MaxVideoHeight = defaults.MaxVideoHeight
+		}
+		if value.References.MinVideoAspect <= 0 {
+			value.References.MinVideoAspect = defaults.MinVideoAspect
+		}
+		if value.References.MaxVideoAspect <= 0 {
+			value.References.MaxVideoAspect = defaults.MaxVideoAspect
+		}
+		if value.References.MinVideoPixels <= 0 {
+			value.References.MinVideoPixels = defaults.MinVideoPixels
+		}
+		if value.References.MaxVideoPixels <= 0 {
+			value.References.MaxVideoPixels = defaults.MaxVideoPixels
+		}
+		if value.References.MinVideoDuration <= 0 {
+			value.References.MinVideoDuration = defaults.MinVideoDuration
+		}
+		if value.References.MaxVideoTotalDuration <= 0 {
+			value.References.MaxVideoTotalDuration = defaults.MaxVideoTotalDuration
+		}
+		if value.References.MaxAudioTotalDuration <= 0 {
+			value.References.MaxAudioTotalDuration = defaults.MaxAudioTotalDuration
+		}
+		if isSeedance25Model(config.Model) {
+			value.TaskTypeConstraints = true
+		}
+	}
+	tightenSeedanceDocumentedRouteLimits(config, &value)
+	return &value
+}
+
+func hasServerVideoCapability(config TaskConfig) bool {
+	return config.VideoCapabilitiesVersion != nil && strings.TrimSpace(*config.VideoCapabilitiesVersion) != ""
 }
 
 func overlayOfficialSeedance2References(base VideoReferenceConfig, is25 bool) VideoReferenceConfig {
@@ -126,26 +266,27 @@ func validateVideoReferenceMedia(profile *VideoCapabilityConfig, input TaskInput
 	if profile == nil {
 		return kernel.BadAuthRequest("当前视频模型能力参数无效")
 	}
-	refs := profile.References
+	if videoTaskOperation(profile, input) == "draft_to_final" {
+		if metadataString(input.Metadata, "videoDraftTaskId") == "" {
+			return kernel.BadAuthRequest("高清成片需要关联已完成的有声样片任务 ID")
+		}
+		if len(input.ReferenceImages) > 0 || len(input.ReferenceVideos) > 0 || len(input.ReferenceAudios) > 0 {
+			return kernel.BadAuthRequest("样片转高清成片直接复用原样片设定，不能再附加参考图片、视频或音频")
+		}
+		return nil
+	}
+	profile = tightenedVideoCapability(input.Config, profile)
+	refs := videoReferencesForOperation(profile, metadataString(input.Metadata, "videoEditOperation"))
 	applySeedanceDocumentedVideoPixelFloor(input.Config, &refs)
-	if isNativeDreaminaSeedance(input.Config.InterfaceType, input.Config.Model) && isSeedance25Model(input.Config.Model) && metadataString(input.Metadata, "videoEditOperation") == "inpaint" && refs.MinVideoDuration < 4 {
+	if !hasServerVideoCapability(input.Config) && isNativeDreaminaSeedance(input.Config.InterfaceType, input.Config.Model) && isSeedance25Model(input.Config.Model) && metadataString(input.Metadata, "videoEditOperation") == "inpaint" && refs.MinVideoDuration < 4 {
 		refs.MinVideoDuration = 4
 	}
 
-	if len(input.ReferenceImages) > refs.MaxImages {
-		return kernel.BadAuthRequest(fmt.Sprintf("当前视频模型最多支持 %d 张参考图", refs.MaxImages))
-	}
-	if len(input.ReferenceVideos) > refs.MaxVideos {
-		return kernel.BadAuthRequest(fmt.Sprintf("当前视频模型最多支持 %d 个参考视频", refs.MaxVideos))
-	}
-	if len(input.ReferenceAudios) > refs.MaxAudios {
-		return kernel.BadAuthRequest(fmt.Sprintf("当前视频模型最多支持 %d 段参考音频", refs.MaxAudios))
+	if err := validateVideoReferenceCounts(refs, input); err != nil {
+		return err
 	}
 	if !videoCapabilityAllowsAudioOnly(profile) && len(input.ReferenceAudios) > 0 && len(input.ReferenceImages) == 0 && len(input.ReferenceVideos) == 0 {
 		return kernel.BadAuthRequest("当前视频模型不支持只用音频生成视频，请同时添加参考图片或参考视频")
-	}
-	if len(input.ReferenceImages) < refs.MinImages {
-		return kernel.BadAuthRequest(fmt.Sprintf("当前视频模型至少需要 %d 张参考图", refs.MinImages))
 	}
 	if input.DeferReferenceMetadata {
 		return nil

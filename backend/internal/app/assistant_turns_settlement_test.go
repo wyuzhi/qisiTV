@@ -136,7 +136,7 @@ func TestFinalizeIsIdempotentAndPreservesEvidence(t *testing.T) {
 		t.Fatalf("重复结算清掉了已确认证据: %+v", second)
 	}
 
-	if _, err := service.UndoAssistantTurn("local", canvasID, turnID); err != nil {
+	if _, err := service.AssistantTurns().Undo("local", canvasID, turnID); err != nil {
 		t.Fatalf("撤销失败: %v", err)
 	}
 	// 撤销之后再结算一次也不能抹掉「已撤销」这件事。
@@ -168,7 +168,7 @@ func TestFinalizeIgnoresIdempotentWriteThatDidNotAdvanceRevision(t *testing.T) {
 	if record.Change != nil {
 		t.Fatalf("没有推进版本的幂等写入不应产生变更摘要: %+v", record.Change)
 	}
-	if _, err := service.UndoAssistantTurn("local", canvasID, turnID); err == nil {
+	if _, err := service.AssistantTurns().Undo("local", canvasID, turnID); err == nil {
 		t.Fatal("没有改动的回合应被拒绝撤销")
 	} else if turnErr, ok := err.(*AssistantTurnError); !ok || turnErr.Reason != AssistantTurnReasonNoChange {
 		t.Fatalf("撤销原因应为 %s，得到 %v", AssistantTurnReasonNoChange, err)
@@ -206,7 +206,7 @@ func TestFinalizeDeduplicatesIdempotentReplayOnSameRevision(t *testing.T) {
 		t.Fatalf("变更区间应为 (%d, %d]，得到 (%d, %d]", before, second,
 			record.Change.RevisionBefore, record.Change.RevisionAfter)
 	}
-	if _, err := service.UndoAssistantTurn("local", canvasID, turnID); err != nil {
+	if _, err := service.AssistantTurns().Undo("local", canvasID, turnID); err != nil {
 		t.Fatalf("去重后的多写回合应可撤销: %v", err)
 	}
 	if ids := nodeIDs(t, service, canvasID); len(ids) != 1 || ids[0] != "n1" {
@@ -240,21 +240,21 @@ func TestAssistantTurnScopeRequiresOpenOwnedTurn(t *testing.T) {
 	if _, err := service.BeginAssistantTurn("local", canvasID, turnID, AssistantTurnInput{}); err != nil {
 		t.Fatal(err)
 	}
-	scope, ok, err := service.AssistantTurnScopeForHost("local", turnID)
+	scope, ok, err := service.AssistantTurns().ScopeForHost("local", turnID)
 	if err != nil || !ok {
 		t.Fatalf("开启中的回合应可读范围: ok=%v err=%v", ok, err)
 	}
 	if scope.CanvasID != canvasID {
 		t.Fatalf("范围里的画布应为 %s，得到 %s", canvasID, scope.CanvasID)
 	}
-	if _, ok, _ := service.AssistantTurnScopeForHost("other-user", turnID); ok {
+	if _, ok, _ := service.AssistantTurns().ScopeForHost("other-user", turnID); ok {
 		t.Fatal("其他用户不应读到这一轮的范围")
 	}
 	settleTurn(t, service, turnID)
-	if _, ok, _ := service.AssistantTurnScopeForHost("local", turnID); ok {
+	if _, ok, _ := service.AssistantTurns().ScopeForHost("local", turnID); ok {
 		t.Fatal("已结算的回合不应再接受写入归属")
 	}
-	if _, ok, _ := service.AssistantTurnScopeForHost("local", "not-a-turn"); ok {
+	if _, ok, _ := service.AssistantTurns().ScopeForHost("local", "not-a-turn"); ok {
 		t.Fatal("未知回合不应给出范围")
 	}
 }
@@ -296,7 +296,7 @@ func TestBeginAssistantTurnPersistsVerifiedReferences(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	scope, ok, err := service.AssistantTurnScopeForHost("local", turnID)
+	scope, ok, err := service.AssistantTurns().ScopeForHost("local", turnID)
 	if err != nil || !ok {
 		t.Fatalf("开启中的回合应可读范围: ok=%v err=%v", ok, err)
 	}

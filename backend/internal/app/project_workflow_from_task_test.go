@@ -16,7 +16,7 @@ func TestRegisterTaskOutputFromTaskDecryptsEncryptedInputThenRegisters(t *testin
 	if err := service.EnsureBuiltinProjectWorkflowTemplate(); err != nil {
 		t.Fatal(err)
 	}
-	workflow, err := service.CreateUnitWorkflow("user-1", project.ID, unit.ID)
+	workflow, err := service.ProjectService().CreateUnitWorkflow("user-1", project.ID, unit.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestRegisterTaskOutputFromTaskDecryptsEncryptedInputThenRegisters(t *testin
 			videoStep = step
 		}
 	}
-	shot, err := service.CreateProjectShot("user-1", project.ID, CreateProjectShotRequest{UnitID: unit.ID, Title: "SC.01", Description: "人物抬头", DurationMs: 3000})
+	shot, err := service.ProjectService().CreateProjectShot("user-1", project.ID, CreateProjectShotRequest{UnitID: unit.ID, Title: "SC.01", Description: "人物抬头", DurationMs: 3000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestRegisterTaskOutputFromTaskStopsWhenDecryptFails(t *testing.T) {
 	if err := service.EnsureBuiltinProjectWorkflowTemplate(); err != nil {
 		t.Fatal(err)
 	}
-	workflow, err := service.CreateUnitWorkflow("user-1", project.ID, unit.ID)
+	workflow, err := service.ProjectService().CreateUnitWorkflow("user-1", project.ID, unit.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

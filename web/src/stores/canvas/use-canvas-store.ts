@@ -857,6 +857,32 @@ export const useCanvasStore = create<CanvasStore>()(
         {
             name: CANVAS_STORE_KEY,
             storage: canvasStorage,
+            merge: (persisted, current) => {
+                const persistedState = (persisted ?? {}) as Partial<CanvasStore>;
+                const cachedProjects = persistedState.projects;
+                if (!Array.isArray(cachedProjects) || cachedProjects.length === 0 || current.projects.length === 0) {
+                    return { ...current, ...persistedState };
+                }
+                // revision 护栏：IndexedDB rehydrate 可能晚于后端读取完成。缓存里 revision
+                // 低于内存中已应用后端 revision 的画布是过期缓存（例如画布随后被 agent API
+                // 改写），不得把刚加载的正确状态拉回旧版本；丢弃过期缓存条目并采用后端内容。
+                const appliedById = new Map(current.projects.map((project) => [project.id, project]));
+                const seen = new Set<string>();
+                const projects: CanvasProject[] = [];
+                for (const project of cachedProjects) {
+                    if (seen.has(project.id)) continue;
+                    seen.add(project.id);
+                    const applied = appliedById.get(project.id);
+                    projects.push(applied && (project.revision ?? 0) < (applied.revision ?? 0) ? applied : project);
+                }
+                for (const project of current.projects) {
+                    if (!seen.has(project.id)) {
+                        seen.add(project.id);
+                        projects.push(project);
+                    }
+                }
+                return { ...current, ...persistedState, projects };
+            },
             partialize: (state) =>
                 ({
                     projects: state.projects,

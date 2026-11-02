@@ -121,7 +121,7 @@ func evaluateManifestOperator(operator string, operand any, env map[string]any) 
 			result = append(result, manifestArray(value)...)
 		}
 		return result, nil
-	case "$map", "$filter":
+	case "$map", "$flatMap", "$filter":
 		spec, ok := operand.(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("%s requires an object", operator)
@@ -154,7 +154,9 @@ func evaluateManifestOperator(operator string, operand any, env map[string]any) 
 			if err != nil {
 				return nil, err
 			}
-			if mapped != nil {
+			if operator == "$flatMap" {
+				result = append(result, manifestArray(mapped)...)
+			} else if mapped != nil {
 				result = append(result, mapped)
 			}
 		}

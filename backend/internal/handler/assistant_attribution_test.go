@@ -224,7 +224,7 @@ func TestAssistantUndoRecoversAfterStreamBreakWithoutTurnEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, open, err := env.service.AssistantTurnScopeForHost(owner.ID, captured.TurnID); err != nil || !open {
+	if _, open, err := env.service.AssistantTurns().ScopeForHost(owner.ID, captured.TurnID); err != nil || !open {
 		t.Fatalf("宿主断流后应保留恢复权限: open=%v err=%v", open, err)
 	}
 
@@ -236,7 +236,7 @@ func TestAssistantUndoRecoversAfterStreamBreakWithoutTurnEnd(t *testing.T) {
 	if _, nodes := env.canvasSnapshot(t); nodes != 1 {
 		t.Fatalf("撤销后应回到轮前节点集合，得到 %d 个节点", nodes)
 	}
-	if _, open, err := env.service.AssistantTurnScopeForHost(owner.ID, captured.TurnID); err != nil || open {
+	if _, open, err := env.service.AssistantTurns().ScopeForHost(owner.ID, captured.TurnID); err != nil || open {
 		t.Fatalf("明确撤销后不得恢复写入: open=%v err=%v", open, err)
 	}
 }

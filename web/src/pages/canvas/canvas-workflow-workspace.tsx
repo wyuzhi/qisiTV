@@ -2,7 +2,6 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { Alert, Button, Dropdown, Popconfirm, Spin, Tooltip } from "antd";
 import { MoreHorizontal, Plus, RefreshCw, Scan, Settings2, Trash2, Workflow, X } from "lucide-react";
 import { AppDrawer } from "@/components/ui/product/app-drawer";
-import { captureUserScope, assertUserScope } from "@/lib/user-scope-guard";
 import { compileCanvasWorkflow } from "@/lib/canvas/reusable-workflow";
 import { deleteCanvasWorkflow, getWorkflowEditor, listWorkflowOperations, listCanvasWorkflows, saveCanvasWorkflow, type CanvasWorkflow, type WorkflowDefinition, type WorkflowOperation } from "@/services/api/canvas-workflows";
 import { abstractWorkflowDefinition } from "@/lib/canvas/workflow-editor";
@@ -23,7 +22,6 @@ export const CanvasWorkflowWorkspace = forwardRef<CanvasWorkflowsHandle, {
     onOpenChange(open: boolean): void;
     onInstantiate(workflow: CanvasWorkflow): Promise<void>;
 }>(function CanvasWorkflowWorkspace({ nodes, connections, selection, readOnly, dockable, visible, onOpenChange, onInstantiate }, ref) {
-    const [scope] = useState(captureUserScope);
     const [open, setOpen] = useState(false);
     const [draft, setDraft] = useState<{ definition: WorkflowDefinition; externalCount: number } | null>(null);
     const [workflows, setWorkflows] = useState<CanvasWorkflow[]>([]);
@@ -40,8 +38,7 @@ export const CanvasWorkflowWorkspace = forwardRef<CanvasWorkflowsHandle, {
         setLoading(true);
         setError("");
         try {
-            const result = await listCanvasWorkflows({ expectedScope: scope });
-            assertUserScope(scope);
+            const result = await listCanvasWorkflows();
             if (alive.current) setWorkflows(result.workflows);
         } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : "读取工作流失败"); }
         finally { if (alive.current) setLoading(false); }
@@ -53,8 +50,7 @@ export const CanvasWorkflowWorkspace = forwardRef<CanvasWorkflowsHandle, {
     };
     useImperativeHandle(ref, () => ({ openLibrary: () => { setLibraryOpen(true); void load(); }, toggleLibrary: () => { setLibraryOpen(!open); if (!open) void load(); }, closeLibrary: () => setLibraryOpen(false), saveSelection }));
     const save = async (input: { name: string; description: string; definition: WorkflowDefinition }) => {
-        const workflow = await saveCanvasWorkflow(input, { expectedScope: scope });
-        assertUserScope(scope);
+        const workflow = await saveCanvasWorkflow(input);
         if (alive.current) {
             setWorkflows(current => [workflow, ...current.filter(item => item.id !== workflow.id)]);
             setDraft(null);
@@ -65,8 +61,7 @@ export const CanvasWorkflowWorkspace = forwardRef<CanvasWorkflowsHandle, {
     };
     const remove = async (id: string) => {
         try {
-            await deleteCanvasWorkflow(id, { expectedScope: scope });
-            assertUserScope(scope);
+            await deleteCanvasWorkflow(id);
             if (alive.current) setWorkflows(current => current.filter(item => item.id !== id));
         } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : "删除失败"); }
     };
@@ -83,8 +78,7 @@ export const CanvasWorkflowWorkspace = forwardRef<CanvasWorkflowsHandle, {
         if (openingEditor) return;
         setOpeningEditor(workflow.id);
         try {
-            const detail = await getWorkflowEditor(workflow.id, undefined, { expectedScope: scope });
-            assertUserScope(scope);
+            const detail = await getWorkflowEditor(workflow.id);
             if (alive.current) { setEditing(detail); setLibraryOpen(false); }
         } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : "打开工作流设定失败"); }
         finally { if (alive.current) setOpeningEditor(undefined); }
@@ -93,8 +87,7 @@ export const CanvasWorkflowWorkspace = forwardRef<CanvasWorkflowsHandle, {
         if (readOnly || openingEditor) return;
         setOpeningEditor("new");
         try {
-            const { operations } = await listWorkflowOperations({ expectedScope: scope });
-            assertUserScope(scope);
+            const { operations } = await listWorkflowOperations();
             if (alive.current) { setEditing({ operations, workflow: { id: "", name: "新工作流", description: "", createdAt: "", updatedAt: "", revision: 1, definition: { version: 1, nodes: [], edges: [], outputNodeIds: [] } } }); setLibraryOpen(false); }
         } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : "无法创建工作流"); }
         finally { if (alive.current) setOpeningEditor(undefined); }

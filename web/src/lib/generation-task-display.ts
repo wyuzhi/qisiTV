@@ -1,3 +1,4 @@
+import { normalizeTaskOutcome, taskOutcomeCopy } from "@/lib/task-outcome";
 import type { GenerationTask, TaskStatus } from "@/services/api/task-center";
 
 export const statusLabel: Record<TaskStatus, string> = {
@@ -8,19 +9,31 @@ export const statusLabel: Record<TaskStatus, string> = {
     cancelled: "已取消",
 };
 
-type GenerationTaskDisplayTarget = Pick<GenerationTask, "status" | "stage">;
+type GenerationTaskDisplayTarget = Pick<GenerationTask, "status" | "stage"> & { outcome?: GenerationTask["outcome"] };
 
 export function isGenerationTaskSubmissionUncertain(task: GenerationTaskDisplayTarget) {
+    const outcome = normalizeTaskOutcome(task.outcome);
+    if (outcome) {
+        return outcome.phase === "retrievable" && outcome.reason !== "delivery_pending";
+    }
     return task.stage === "submission_unknown";
 }
 
 export function generationTaskStatusLabel(task: GenerationTaskDisplayTarget) {
+    const outcome = normalizeTaskOutcome(task.outcome);
+    if (outcome) {
+        return taskOutcomeCopy(outcome).badge;
+    }
     if (isGenerationTaskSubmissionUncertain(task)) return "提交结果待确认";
     if (task.stage === "delivery_paused" || task.stage === "delivery_timed_out") return "待取回结果";
     return statusLabel[task.status];
 }
 
 export function generationTaskStageLabel(task: GenerationTaskDisplayTarget) {
+    const outcome = normalizeTaskOutcome(task.outcome);
+    if (outcome && (outcome.phase === "retrievable" || outcome.reason === "settlement_pending")) {
+        return taskOutcomeCopy(outcome).reason;
+    }
     if (isGenerationTaskSubmissionUncertain(task)) return "为避免重复创建上游任务，未自动重试";
     if (task.stage === "delivery_paused") return "已暂停取回结果";
     if (task.stage === "delivery_timed_out") return "下载超时，可继续取回原结果";
@@ -30,6 +43,8 @@ export function generationTaskStageLabel(task: GenerationTaskDisplayTarget) {
 }
 
 export function generationTaskShowsProgress(task: GenerationTaskDisplayTarget) {
+    const outcome = normalizeTaskOutcome(task.outcome);
+    if (outcome && outcome.phase !== "running" && outcome.phase !== "fetching") return false;
     if (isGenerationTaskSubmissionUncertain(task) || task.stage === "delivery_paused" || task.stage === "delivery_timed_out") return false;
     // 排队、后端接管和连接供应商都没有真实百分比。只有上游状态响应
     // 已经写回任务后才显示进度，避免所有图片/视频长期停在同一个假数值。

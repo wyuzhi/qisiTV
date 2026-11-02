@@ -135,6 +135,11 @@ func changeFromReceipts(record Record, receipts []model.AgentOpRecord) (*Change,
 						change.CreatedEdgeIDs = append(change.CreatedEdgeIDs, id)
 					}
 				}
+				for _, id := range stringItems(item.payload["syncedNodeIds"]) {
+					if id != "" && !slices.Contains(change.UpdatedNodeIDs, id) {
+						change.UpdatedNodeIDs = append(change.UpdatedNodeIDs, id)
+					}
+				}
 			}
 			if id, _ := item.payload["nodeId"].(string); id != "" && !slices.Contains(change.UpdatedNodeIDs, id) {
 				change.UpdatedNodeIDs = append(change.UpdatedNodeIDs, id)

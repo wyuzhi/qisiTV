@@ -2,9 +2,11 @@ package operations
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"qisitv/backend/internal/canvas"
+	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
 	localtask "qisitv/backend/internal/task"
 	"qisitv/backend/internal/taskbinding"
@@ -28,8 +30,17 @@ func opCanvasTaskBind(ctx *Context, params json.RawMessage) (any, error) {
 	})
 	if err != nil {
 		mapped := mapDomainError(err)
-		if failure, ok := mapped.(*Error); ok && failure.Reason == "node_task_mismatch" {
-			failure.Details = canvasBindConflictEvidence(ctx, args.CanvasID, args.NodeID, args.OutputIndex)
+		if failure, ok := mapped.(*Error); ok {
+			switch failure.Reason {
+			case "node_task_mismatch":
+				failure.Details = canvasBindConflictEvidence(ctx, args.CanvasID, args.NodeID, args.OutputIndex)
+				setCanvasBindRefusalRevision(failure, err)
+			case "node_deleted":
+				failure.Details = map[string]any{"canvasBinding": map[string]any{
+					"source": "server", "nodeId": args.NodeID, "nodePresent": false, "outputIndex": args.OutputIndex,
+				}}
+				setCanvasBindRefusalRevision(failure, err)
+			}
 		}
 		return nil, mapped
 	}
@@ -61,6 +72,25 @@ func canvasBindConflictEvidence(ctx *Context, canvasID, nodeID string, outputInd
 		"nodeStatus": text(metadata, "status"), "nodeHasMedia": hasMedia,
 		"revision": canvasRevision(doc), "outputIndex": outputIndex,
 	}}
+}
+
+// setCanvasBindRefusalRevision copies the revision read by the refusing bind
+// attempt. It is the same read that decided the refusal, so a scanner can skip
+// the target until any later canvas write.
+func setCanvasBindRefusalRevision(failure *Error, cause error) {
+	var appErr *kernel.AppError
+	if !errors.As(cause, &appErr) || appErr.Details == nil {
+		return
+	}
+	revision, ok := appErr.Details["revision"].(int64)
+	if !ok || revision <= 0 {
+		return
+	}
+	binding, _ := failure.Details["canvasBinding"].(map[string]any)
+	if binding == nil {
+		return
+	}
+	binding["revision"] = revision
 }
 
 func projectCanvasTaskBindReplay(ctx *Context, params json.RawMessage, stored any) (any, error) {

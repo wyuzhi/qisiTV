@@ -1,5 +1,6 @@
 import { beefAPIVideoContract, isBeefAPIEndpoint } from "./beefapi-video-contracts";
 import { h3ReferenceMode, h3VideoOperation, isH3Model, isH3Style } from "./h3-video";
+import { modelCapabilityConfigFor } from "./model-capabilities";
 import { seedanceSettingsConstraints, type SeedanceSettingsConstraints } from "./seedance-task-constraints";
 import { modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 import type { CanvasNodeMetadata } from "@/types/canvas";
@@ -42,5 +43,5 @@ export function videoSettingsConstraints(
             ratioHelp: `视频比例由${frame}图片决定。需要其他比例时，请先裁切或扩图，再生成视频。`,
         };
     }
-    return seedanceSettingsConstraints(model, imageCount, videoCount, audioCount, metadata?.videoEditOperation, Boolean(first || last));
+    return seedanceSettingsConstraints(modelCapabilityConfigFor(config, config.model).video, imageCount, videoCount, audioCount, metadata?.videoEditOperation, Boolean(first || last));
 }

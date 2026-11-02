@@ -36,10 +36,6 @@ type beefAPISeedanceMediaGroup = generation.BeefAPISeedanceMediaGroup
 const beefAPISeedanceImageMaxBytes = generation.BeefAPISeedanceImageMaxBytes
 const beefAPISeedanceVideoMaxBytes = generation.BeefAPISeedanceVideoMaxBytes
 const beefAPISeedanceUploadTimeout = generation.BeefAPISeedanceUploadTimeout
-const jiMengSubmitAction = generation.JiMengSubmitAction
-const jiMengResultAction = generation.JiMengResultAction
-const volcengineArkImageMinPixels = generation.VolcengineArkImageMinPixels
-const volcengineArkImageMaxPixels = generation.VolcengineArkImageMaxPixels
 
 var errBeefAPISeedanceUploadUnavailable = generation.ErrBeefAPISeedanceUploadUnavailable
 var errBeefAPISeedanceUploadIncomplete = generation.ErrBeefAPISeedanceUploadIncomplete

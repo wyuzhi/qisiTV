@@ -120,7 +120,11 @@ func generatedMediaDescriptor(nodeType, version, label string, width, height flo
 }
 
 func generatedDraftFields(kind string) map[string]PatchField {
-	fields := editableNodeFields("metadata.composerContent", "下一版提示词", "下次生成使用的提示词草稿；不覆盖已提交提示词或媒体结果")
+	fields := editableNodeFields("metadata.composerContent", "下一版提示词", "下次生成提示词草稿，不覆盖现有成品")
+	fields["prompt"] = PatchField{
+		Path: "metadata.composerContent", Kind: patchKindString, Label: "生成提示词草稿", Order: 25,
+		Description: "下次生成提示词草稿，不覆盖现有成品", MaxRunes: maxAgentNodeContentRunes,
+	}
 	names := []string{"model"}
 	switch kind {
 	case "image":
@@ -137,7 +141,7 @@ func generatedDraftFields(kind string) map[string]PatchField {
 			max = 4096
 		}
 		fields[name] = PatchField{Path: "metadata." + name, Kind: patchKindString, Label: name, Order: 40 + index,
-			Description: "下次生成使用的草稿参数；提交生成时仍会校验模型能力", MaxRunes: max}
+			Description: "草稿参数", MaxRunes: max}
 	}
 	return fields
 }

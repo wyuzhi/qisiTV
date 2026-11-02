@@ -100,21 +100,21 @@ export function CanvasVideoCropEditor({ videoUrl, videoDimensions, onCancel, onC
                     style={{ left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%` }}
                     onPointerDown={(event) => beginDrag(event)}
                 >
-                    <span data-canvas-no-zoom className="pointer-events-none absolute left-1.5 top-1.5 rounded-md bg-black/72 px-1.5 py-0.5 text-xs font-medium tabular-nums text-white shadow-sm" style={{ transform: screenScale, transformOrigin: "left top" }}>{sizeLabel}</span>
+                    <span data-canvas-live-scale data-canvas-no-zoom className="pointer-events-none absolute left-1.5 top-1.5 rounded-md bg-black/72 px-1.5 py-0.5 text-xs font-medium tabular-nums text-white shadow-sm" style={{ transform: screenScale, transformOrigin: "left top" }}>{sizeLabel}</span>
                     <div className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3 opacity-50" aria-hidden>
                         <i className="border-b border-r border-white/60" /><i className="border-b border-r border-white/60" /><i className="border-b border-white/60" />
                         <i className="border-b border-r border-white/60" /><i className="border-b border-r border-white/60" /><i className="border-b border-white/60" />
                         <i className="border-r border-white/60" /><i className="border-r border-white/60" /><i />
                     </div>
                     {cropHandles.map((handle) => (
-                        <button key={handle} type="button" aria-label={`resize-${handle}`} data-canvas-no-zoom className="absolute z-10 grid size-5 place-items-center rounded-full" style={{ ...handlePosition(handle), transform: `translate(-50%, -50%) ${screenScale}`, transformOrigin: "center" }} onPointerDown={(event) => beginDrag(event, handle)}>
+                        <button key={handle} type="button" aria-label={`resize-${handle}`} data-canvas-live-scale data-canvas-no-zoom className="absolute z-10 grid size-5 place-items-center rounded-full" style={{ ...handlePosition(handle), transform: `translate(-50%, -50%) ${screenScale}`, transformOrigin: "center" }} onPointerDown={(event) => beginDrag(event, handle)}>
                             <span className="pointer-events-none size-3 rounded-full border-2 border-white bg-neutral-900 shadow-sm" />
                         </button>
                     ))}
                 </div>
             </div>
 
-            <div data-canvas-no-zoom className="absolute left-1/2 flex h-11 items-center gap-2 rounded-2xl border border-white/12 bg-[#202020]/94 p-1.5 pl-2.5 text-white shadow-xl backdrop-blur-xl" style={{ top: "calc(100% + 12px * var(--canvas-live-inverse-scale, 1))", transform: `translateX(-50%) ${screenScale}`, transformOrigin: "center top" }}>
+            <div data-canvas-live-scale data-canvas-no-zoom className="absolute left-1/2 flex h-11 items-center gap-2 rounded-2xl border border-white/12 bg-[#202020]/94 p-1.5 pl-2.5 text-white shadow-xl backdrop-blur-xl" style={{ top: "calc(100% + 12px * var(--canvas-live-inverse-scale, 1))", transform: `translateX(-50%) ${screenScale}`, transformOrigin: "center top" }}>
                 <button type="button" aria-label="取消裁切" title="取消裁切" onClick={onCancel} className="grid size-8 place-items-center rounded-xl text-white/72 transition hover:bg-white/10 hover:text-white"><X className="size-4" /></button>
                 <span className="border-l border-white/12 pl-3 pr-1 text-xs font-medium tabular-nums text-white/88">{sizeLabel}</span>
                 <button type="button" aria-label={isSubmitting ? "正在裁切" : "确认裁切"} title={isSubmitting ? "正在裁切" : "确认裁切"} disabled={isSubmitting} onClick={() => void confirmCrop()} className="grid size-8 place-items-center rounded-xl bg-white text-black transition hover:bg-white/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-wait disabled:opacity-80">{isSubmitting ? <LoaderCircle className="size-4 animate-spin" stroke="#111111" strokeWidth={2.25} /> : <ArrowUp className="size-4" stroke="#111111" strokeWidth={2.25} />}</button>

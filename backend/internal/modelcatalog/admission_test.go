@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"qisitv/backend/internal/beefapi"
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
 )
@@ -37,14 +36,14 @@ func TestTaskInputUsesWorkflowProvider(t *testing.T) {
 
 func TestTaskInputUsesCustomChannelManagedBeefAPI(t *testing.T) {
 	withCreds := map[string]any{"config": map[string]any{
-		"credentialRef": beefapi.CredentialRef,
+		"credentialRef": managedCredentialRef,
 		"baseUrl":       "https://api.beefapi.example/v1",
 		"apiKey":        "managed-key",
 	}}
 	if !TaskInputUsesCustomChannel(withCreds) {
 		t.Fatal("managed BeefAPI with live credentials must be classified as a custom channel")
 	}
-	channelIDOnly := map[string]any{"config": map[string]any{"channelId": beefapi.ChannelID, "model": "x"}}
+	channelIDOnly := map[string]any{"config": map[string]any{"channelId": managedChannelID, "model": "x"}}
 	if TaskInputUsesCustomChannel(channelIDOnly) {
 		t.Fatal("beefapi channel id without credentials is not a custom channel")
 	}

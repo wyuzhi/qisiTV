@@ -10,8 +10,8 @@ type ModelCatalogReader interface {
 }
 
 func registerModelCatalogOp(r *Registry) {
-	r.Register(Op{AssistantCanvas: true, ID: "model.catalog", Summary: "按所需类型查询模型、参考能力和已保存的视频报价（videoPricing）；未返回报价表示价格未知，不能承诺预算；不含密钥", ReadOnly: true, Scope: ScopeWorkspaceRead,
-		Params: json.RawMessage(`{"type":"object","properties":{"capability":{"type":"string","enum":["text","image","video","audio"]},"capabilities":{"type":"array","minItems":1,"maxItems":4,"uniqueItems":true,"items":{"type":"string","enum":["text","image","video","audio"]},"description":"一次读取本次需要的多种类型；整片制作用 image、video、audio，不必逐类型往返"}},"additionalProperties":false}`),
+	r.Register(Op{AssistantCanvas: true, ID: "model.catalog", Summary: "按类型查询可用模型、参考能力与报价", ReadOnly: true, Scope: ScopeWorkspaceRead,
+		Params: json.RawMessage(`{"type":"object","properties":{"capability":{"type":"string","enum":["text","image","video","audio"]},"capabilities":{"type":"array","items":{"type":"string","enum":["text","image","video","audio"]}}}}`),
 		Handler: func(ctx *Context, raw json.RawMessage) (any, error) {
 			var args struct {
 				Capability   string   `json:"capability"`

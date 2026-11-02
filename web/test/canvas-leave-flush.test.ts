@@ -28,7 +28,7 @@ describe("canvas editor flushes content when leaving", () => {
         const effect = leaveFlushEffect();
         expect(effect).toContain("if (editorProjectIdRef.current !== projectId) return;");
         expect(effect).toContain("const snapshot = { nodes: nodesRef.current, connections: connectionsRef.current, ...live };");
-        expect(effect).toContain("JSON.stringify(observedContentRef.current) !== JSON.stringify(snapshot)");
+        expect(effect).toContain("!canvasDocumentMatchesFields(observedContentRef.current, snapshot)");
         // Store changes the editor has not seen yet are carried into the write, not overwritten.
         expect(effect).toContain("const { next } = reconcileEditorSnapshot(snapshot);");
         expect(effect).toContain("nodes: next.nodes,");
@@ -38,7 +38,7 @@ describe("canvas editor flushes content when leaving", () => {
 
     test("flushes the store write queue and then the local backend without waiting for timers", () => {
         const effect = leaveFlushEffect();
-        expect(effect).toMatch(/await flushCanvasStorePersistence\(\);\s*if \(!userScopeMatches\(owner\)\) return;\s*if \(localMode\) await syncLocalCanvasProjectToBackend\(projectId, owner\);/);
+        expect(effect).toMatch(/await flushCanvasStorePersistence\(\);\s*if \(localMode\) await syncLocalCanvasProjectToBackend\(projectId\);/);
         expect(effect).toContain('console.error("离开画布时保存失败"');
     });
 

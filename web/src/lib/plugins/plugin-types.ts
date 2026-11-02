@@ -2,6 +2,7 @@ import type { Asset } from "@/stores/use-asset-store";
 
 export const PLUGIN_API_VERSION = "qisitv.plugin/v1" as const;
 export const PLUGIN_API_VERSION_V2 = "qisitv.plugin/v2" as const;
+export const PLUGIN_API_VERSION_V3 = "qisitv.plugin/v3" as const;
 
 export type EditorSlotKind =
     | "timeline-panel"
@@ -26,7 +27,8 @@ export type PluginContributionsV2 = PluginContributions & {
 
 // 注意：必须把 permissions 一并 Omit 掉再完全替换，否则数组交叉类型会被归约为 v1 的 PluginPermission[]，v2 权限字面量无法赋值。
 export type PluginManifestV2 = Omit<PluginManifest, "apiVersion" | "contributes" | "permissions"> & {
-    apiVersion: typeof PLUGIN_API_VERSION_V2;
+    // v3 keeps the v2 UI schema and adds backend provider expressions/streams.
+    apiVersion: typeof PLUGIN_API_VERSION_V2 | typeof PLUGIN_API_VERSION_V3;
     permissions: Array<PluginPermission | EditorPluginPermission>;
     contributes: PluginContributionsV2;
 };
@@ -79,6 +81,8 @@ export type PluginProviderContribution = {
         resultPaths?: string[];
         resultKind?: "image" | "video" | "audio";
         resultEphemeral?: boolean;
+        /** 业务成功码；只有声明它的协议生效，命中的 errorPaths 值不算失败。 */
+        successCodes?: Array<string | number>;
     };
 };
 export type PluginWorkflowContribution = {

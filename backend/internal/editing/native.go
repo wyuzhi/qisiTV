@@ -2,9 +2,10 @@ package editing
 
 import (
 	"fmt"
-	"qisitv/backend/internal/mediatools"
 	"math"
 	"strings"
+
+	"qisitv/backend/internal/mediatools"
 )
 
 const (
@@ -64,7 +65,10 @@ func BuildFFmpegArgs(plan Plan, files map[string]string, target string) []string
 			args = append(args, "-f", "lavfi", "-t", seconds, "-i", fmt.Sprintf("anullsrc=r=%d:cl=stereo", rate))
 		}
 		volume := seg.Volume
-		filters = append(filters, fmt.Sprintf("[%d:v]setpts=PTS-STARTPTS,fps=%d,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setsar=1,tpad=stop_mode=clone:stop_duration=%.3f,trim=duration=%.3f[v%d]", 2*i, fps, width, height, width, height, duration, duration, i))
+		// Some ffmpeg versions reuse the last source PTS for the first cloned
+		// frame. Rebuild the normalized frame clock after padding so concat
+		// cannot shift the following clip by one frame for each short source.
+		filters = append(filters, fmt.Sprintf("[%d:v]setpts=PTS-STARTPTS,fps=%d,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setsar=1,tpad=stop_mode=clone:stop_duration=%.3f,setpts=N/(%d*TB),trim=duration=%.3f[v%d]", 2*i, fps, width, height, width, height, duration, fps, duration, i))
 		filters = append(filters, fmt.Sprintf("[%d:a]aformat=sample_fmts=fltp:sample_rates=%d:channel_layouts=stereo,asetpts=PTS-STARTPTS,volume=%.3f,apad,atrim=duration=%.3f%s[a%d]", 2*i+1, rate, volume, duration, audioFades(seg.FadeInMs, seg.FadeOutMs, seg.DurationMs), i))
 		labels += fmt.Sprintf("[v%d][a%d]", i, i)
 	}

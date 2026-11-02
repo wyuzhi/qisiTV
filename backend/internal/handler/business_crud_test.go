@@ -13,8 +13,8 @@ func TestBusinessProjectAndAssetCRUD(t *testing.T) {
 	env := newAssistantTestEnv(t, nil)
 	api := env.router.Group("/api")
 	api.Use(RuntimeDependenciesMiddleware(RuntimeDependencies{RequestCoordinator: &stubRequestCoordinator{allowed: true}}))
-	RegisterProjectRoutes(api, env.service)
-	RegisterDesktopUserDataRoutes(api, env.service)
+	registerShortDramaRoutes(api, env.service)
+	RegisterDesktopUserDataRoutes(api, env.service, env.service.CanvasService(), env.service.PromptService(), env.service.AssetLibraryService(), env.service.ResourceService(), env.service.PlaybackService(), env.service, env.service, env.service)
 	catalog := NewBusinessCatalog(env.router.Routes())
 	call := func(method, path string, body any) map[string]any {
 		t.Helper()

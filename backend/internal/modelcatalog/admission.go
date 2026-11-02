@@ -4,9 +4,14 @@ import (
 	"fmt"
 	"strings"
 
-	"qisitv/backend/internal/beefapi"
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
+)
+
+const (
+	managedChannelID             = "beefapi"
+	managedCredentialRef         = "beefapi-enterprise"
+	defaultManagedAssistantModel = "deepseek-v4.1-flash"
 )
 
 // TaskSelectRequest is the typed admission input. App supplies the live
@@ -266,7 +271,7 @@ func TaskInputUsesCustomChannel(input map[string]any) bool {
 	baseURL, _ := config["baseUrl"].(string)
 	apiKey, _ := config["apiKey"].(string)
 	credentialRef, _ := config["credentialRef"].(string)
-	if strings.EqualFold(strings.TrimSpace(credentialRef), beefapi.CredentialRef) || strings.TrimSpace(channelID) == beefapi.ChannelID {
+	if strings.EqualFold(strings.TrimSpace(credentialRef), managedCredentialRef) || strings.TrimSpace(channelID) == managedChannelID {
 		return strings.TrimSpace(baseURL) != "" && strings.TrimSpace(apiKey) != ""
 	}
 	if strings.TrimSpace(channelID) != "" || SystemChannelIDFromBaseURL(baseURL) != "" {

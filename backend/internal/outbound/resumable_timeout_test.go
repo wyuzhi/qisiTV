@@ -13,6 +13,9 @@ import (
 
 func TestResumableTimeoutIsNotUserCancellation(t *testing.T) {
 	allowLoopback(t)
+	// Keep machine proxy discovery outside these narrow transfer deadlines.
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+	t.Setenv("NO_PROXY", "*")
 	for _, phase := range []string{"headers", "body", "user-cancel"} {
 		t.Run(phase, func(t *testing.T) {
 			started := make(chan struct{})

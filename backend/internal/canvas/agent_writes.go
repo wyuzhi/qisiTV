@@ -251,20 +251,17 @@ func (s *Service) UpdateUserCanvasNodeFields(userID, canvasID, nodeID string, pa
 		}
 		node["title"] = text
 	}
+	if promptVal, hasPrompt := patch["prompt"]; hasPrompt {
+		if contentVal, hasContent := patch["content"]; hasContent && promptVal != contentVal {
+			return UserDataSummary{}, kernel.NewAppError(http.StatusBadRequest, "patch.prompt 与 patch.content 不能同时提交不同内容")
+		}
+	}
 
 	declared := map[string]any{}
 	for key, value := range patch {
 		switch key {
 		case "title":
 			continue // 已按通用字段处理
-		case "prompt":
-			// prompt 是生成结果字段（已提交提示词），不在可编辑字段表里：
-			// 保留直接写入语义，避免既有 CLI/MCP 入口失效。
-			text, isString := value.(string)
-			if !isString {
-				return UserDataSummary{}, kernel.NewAppError(http.StatusBadRequest, "prompt 必须是字符串")
-			}
-			metadata["prompt"] = text
 		case "content":
 			if hasDescriptor {
 				if _, ok := descriptor.PatchFields[key]; ok {
@@ -293,6 +290,12 @@ func (s *Service) UpdateUserCanvasNodeFields(userID, canvasID, nodeID string, pa
 	if len(declared) > 0 {
 		if err := descriptor.ApplyPatch(node, declared); err != nil {
 			return UserDataSummary{}, kernel.NewAppError(http.StatusBadRequest, err.Error())
+		}
+		if _, hasPrompt := declared["prompt"]; hasPrompt || declared["content"] != nil {
+			if nodeType == "image" || nodeType == "video" || nodeType == "audio" {
+				delete(metadata, "promptTemplateOperation")
+				delete(metadata, "promptTemplateVariables")
+			}
 		}
 		// ApplyPatch 只写声明过的路径（形如 metadata.xxx），不会替换整个 metadata 对象；
 		// 这里把同一个 map 回写一次，保证节点上挂的就是刚改过的那个。

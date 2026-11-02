@@ -5,7 +5,6 @@ import { createHostedAssetSources, type HostedAssetSource } from "@/services/ext
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import type { ExternalAssetFolder, ExternalAssetItem, ExternalAssetPickerReference } from "@/lib/plugins/plugin-types";
 import { usePluginStore } from "@/stores/use-plugin-store";
-import { assertUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
 import type { Asset } from "@/stores/use-asset-store";
 
 type LoadedAssetSource = {
@@ -20,8 +19,8 @@ export type ExternalAssetSourceState = {
     categoryLabels: Record<string, string>;
     loading: boolean;
     error: string;
-    importExternalAsset: (reference: ExternalAssetPickerReference, signal?: AbortSignal, expectedScope?: CapturedUserScope) => Promise<Asset>;
-    uploadExternalFiles: (files: FileList | File[], folderId?: string, signal?: AbortSignal, expectedScope?: CapturedUserScope) => Promise<AssetLibraryPickerItem[]>;
+    importExternalAsset: (reference: ExternalAssetPickerReference, signal?: AbortSignal) => Promise<Asset>;
+    uploadExternalFiles: (files: FileList | File[], folderId?: string, signal?: AbortSignal) => Promise<AssetLibraryPickerItem[]>;
 };
 
 export function useExternalAssetSources(open: boolean): ExternalAssetSourceState {
@@ -85,27 +84,20 @@ export function useExternalAssetSources(open: boolean): ExternalAssetSourceState
         [sources],
     );
 
-    const importExternalAsset = useCallback(async (reference: ExternalAssetPickerReference, signal?: AbortSignal, expectedScope?: CapturedUserScope) => {
-        if (expectedScope) assertUserScope(expectedScope);
+    const importExternalAsset = useCallback(async (reference: ExternalAssetPickerReference, signal?: AbortSignal) => {
         if (isLocalWorkspaceMode()) throw new Error("本地工作区仅支持本地素材");
         const source = sources.find((item) => item.id === reference.sourceId);
         if (!source?.provider.importAsset) throw new Error(`${reference.sourceName}暂不支持导入项目资产`);
-        const imported = await source.provider.importAsset(reference.item, signal);
-        if (expectedScope) assertUserScope(expectedScope);
-        return imported;
+        return source.provider.importAsset(reference.item, signal);
     }, [sources]);
 
-    const uploadExternalFiles = useCallback(async (files: FileList | File[], folderId?: string, signal?: AbortSignal, expectedScope?: CapturedUserScope) => {
-        if (expectedScope) assertUserScope(expectedScope);
+    const uploadExternalFiles = useCallback(async (files: FileList | File[], folderId?: string, signal?: AbortSignal) => {
         if (isLocalWorkspaceMode()) throw new Error("本地工作区仅支持本地素材");
         const source = resolveUploadSource(sources, folderId);
         if (!source?.provider.uploadFile) throw new Error("当前插件不支持写入文件");
         const providerFolderId = folderId ? externalFolderValue(source.id, folderId) : undefined;
         const uploadedItems: ExternalAssetItem[] = [];
-        for (const file of Array.from(files)) {
-            uploadedItems.push(await source.provider.uploadFile(file, providerFolderId, signal));
-            if (expectedScope) assertUserScope(expectedScope);
-        }
+        for (const file of Array.from(files)) uploadedItems.push(await source.provider.uploadFile(file, providerFolderId, signal));
         const pickerItems = uploadedItems.map((item) => toPickerItem(source, item));
         setLoadedSources((current) => {
             const existing = current.find((item) => item.source.id === source.id);

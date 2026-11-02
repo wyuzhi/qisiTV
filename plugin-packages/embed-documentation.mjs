@@ -13,13 +13,19 @@ function normalizeNewlines(document) {
 }
 
 function withoutGeneratedContract(document) {
-  const start = document.indexOf(contractStart);
-  if (start < 0) return document.trimEnd();
-  const end = document.indexOf(contractEnd, start);
-  if (end < 0) {
-    throw new Error("docs/interface.md contains an unterminated generated manifest contract");
+  // A namespace migration or upstream merge can leave more than one generated
+  // contract. Strip every generated block before adding the current manifest.
+  for (const [startMarker, endMarker] of [[contractStart, contractEnd], ["<!-- BEEFTV_PLUGIN_MANIFEST_START -->", "<!-- BEEFTV_PLUGIN_MANIFEST_END -->"]]) {
+    let start;
+    while ((start = document.indexOf(startMarker)) >= 0) {
+      const end = document.indexOf(endMarker, start);
+      if (end < 0) {
+        throw new Error("docs/interface.md contains an unterminated generated manifest contract");
+      }
+      document = `${document.slice(0, start)}${document.slice(end + endMarker.length)}`;
+    }
   }
-  return `${document.slice(0, start)}${document.slice(end + contractEnd.length)}`.trimEnd();
+  return document.trimEnd();
 }
 
 function renderContract(manifest) {

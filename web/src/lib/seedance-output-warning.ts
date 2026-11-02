@@ -18,7 +18,8 @@ export function seedanceOutputWarning(inputJson: string | undefined, width?: num
         const videoCount = parameters?.videoCount ?? videos.length;
         const audioCount = parameters?.audioCount ?? audios.length;
         const firstFrame = operation !== "reference_to_video" && (explicitFrame || (imageCount > 0 && imageCount <= 2 && !videoCount && !audioCount));
-        const { ratio } = seedanceTaskOptions(model, String(parameters?.size || input.config?.size || ""), 5, firstFrame ? ["first_frame"] : [], videoCount, operation);
+        const videoCapability = input.config?.capabilityConfig?.video ?? /(?:seedance-2[.-]5|seedance-2-5)/i.test(model);
+        const { ratio } = seedanceTaskOptions(videoCapability, String(parameters?.size || input.config?.size || ""), 5, firstFrame ? ["first_frame"] : [], videoCount, operation);
         const match = /^(\d+):(\d+)$/.exec(ratio);
         if (!match || Number(match[2]) <= 0) return undefined;
         if (Math.abs(width / height / (Number(match[1]) / Number(match[2])) - 1) <= 0.02) return undefined;

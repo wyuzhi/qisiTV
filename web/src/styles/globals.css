@@ -5,6 +5,38 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Camera coordinates are observed on the viewport itself. The world receives
+   its transform directly; inheriting these values needlessly restyles nodes. */
+@property --canvas-live-x {
+    syntax: "*";
+    inherits: false;
+    initial-value: 0;
+}
+
+@property --canvas-live-y {
+    syntax: "*";
+    inherits: false;
+    initial-value: 0;
+}
+
+@property --canvas-live-scale {
+    syntax: "<number>";
+    inherits: false;
+    initial-value: 1;
+}
+
+@property --canvas-live-inverse-scale {
+    syntax: "<number>";
+    inherits: false;
+    initial-value: 1;
+}
+
+@property --canvas-committed-scale {
+    syntax: "<number>";
+    inherits: false;
+    initial-value: 1;
+}
+
 /* =========================================================================
    Design Token System — 三层架构 (Primitive → Semantic → Component)
    这些是产品工作区的共享基础样式。
@@ -5995,22 +6027,22 @@ html:not(.dark) .creation-studio-control:hover,
     .model-default-option-check { background: color-mix(in srgb, var(--foreground) 7%, transparent); }
     .model-default-option-check.is-selected { background: var(--control-check-bg); color: var(--control-check-fg); }
 
-    .settings-page :where(.ant-input, .ant-input-affix-wrapper, .ant-select-selector, .ant-input-number, .ant-picker) {
+    .settings-page :where(.ant-input:not(.ant-input-affix-wrapper > .ant-input), .ant-input-affix-wrapper, .ant-select-selector, .ant-input-number, .ant-picker) { /* 带图标、清除按钮或密码切换的输入框由外框负责边框，里层输入保持 AntD 默认重置，否则会出现双层边框、比普通输入框高 12px */
         min-height: 34px;
         border-radius: var(--r-md) !important;
     }
 
-    .settings-page :where(.ant-input, .ant-input-affix-wrapper, .ant-select-selector) {
+    .settings-page :where(.ant-input:not(.ant-input-affix-wrapper > .ant-input), .ant-input-affix-wrapper, .ant-select-selector) {
         border-color: color-mix(in srgb, var(--foreground) 14%, transparent) !important;
         background: color-mix(in srgb, var(--foreground) 2.5%, transparent) !important;
         box-shadow: none !important;
     }
 
-    .settings-page :where(.ant-input:hover, .ant-input-affix-wrapper:hover, .ant-select-selector:hover) {
+    .settings-page :where(.ant-input:not(.ant-input-affix-wrapper > .ant-input):hover, .ant-input-affix-wrapper:hover, .ant-select-selector:hover) {
         border-color: color-mix(in srgb, var(--foreground) 24%, transparent) !important;
     }
 
-    .settings-page :where(.ant-input:focus, .ant-input-affix-wrapper-focused, .ant-select-focused .ant-select-selector) {
+    .settings-page :where(.ant-input:not(.ant-input-affix-wrapper > .ant-input):focus, .ant-input-affix-wrapper-focused, .ant-select-focused .ant-select-selector) {
         border-color: color-mix(in srgb, var(--workspace-accent) 46%, transparent) !important;
         box-shadow: 0 0 0 3px color-mix(in srgb, var(--workspace-accent) 10%, transparent) !important;
     }
@@ -11518,20 +11550,8 @@ html:not(.dark) .creation-studio-control:hover,
         text-align: center;
     }
 
-    [data-canvas-viewport-interacting="true"] .canvas-node-shell,
-    [data-canvas-viewport-interacting="true"] .canvas-frame-shell,
-    [data-canvas-viewport-interacting="true"] .aceternity-comet-card {
-        transition: none !important;
-    }
-
-    /* 平移时优先保证世界层合成，暂时关闭每个媒体卡片及其内部浮层的滤镜和阴影绘制。 */
-    [data-canvas-viewport-interacting="true"] :where(.canvas-node-shell, .canvas-frame-shell, .canvas-folder-preview, .canvas-folder-front, .aceternity-comet-card),
-    [data-canvas-viewport-interacting="true"] :where(.canvas-node-shell, .canvas-frame-shell) :where([class*="backdrop-blur"], [class*="shadow-"]) {
-        box-shadow: none !important;
-        filter: none !important;
-        backdrop-filter: none !important;
-        -webkit-backdrop-filter: none !important;
-    }
+    /* Keep card effects stable through camera gestures. Toggling filters and
+       shadows rebuilt WebKit's layer tree at every gesture boundary. */
 
     /* LibTV 式默认选择光标：短促圆润的黑色箭头配细白描边，不使用发光或阴影。 */
     .canvas-cursor-select {
@@ -11556,14 +11576,11 @@ html:not(.dark) .creation-studio-control:hover,
         cursor: grab !important;
     }
 
-    [data-canvas-pan-state="grabbing"] [data-node-id] {
-        cursor: grabbing !important;
-    }
-
     /* 静止期用最终倍率重新排版 DOM，避免 Windows Chromium 复用交互期的低分辨率合成纹理。 */
     .canvas-world-layer {
         transform: translate(var(--canvas-live-x), var(--canvas-live-y)) scale(var(--canvas-live-scale-ratio));
         transform-origin: 0 0;
+        will-change: transform;
     }
 
     .canvas-world-raster-layer {
@@ -11572,24 +11589,42 @@ html:not(.dark) .creation-studio-control:hover,
         transform-origin: 0 0;
     }
 
-    [data-canvas-viewport-interacting="true"] .canvas-world-layer {
-        transform: translate3d(var(--canvas-live-x), var(--canvas-live-y), 0) scale(var(--canvas-live-scale-ratio));
-        will-change: transform;
+    @supports (font: -apple-system-body) {
+        /* Screen-sized titles counter-scale during zoom. Keep their repaint
+           separate from media; otherwise each title dirties a shared surface
+           containing the full image. Use this only for windows of up to 80
+           mounted nodes. Overlap also promotes unmarked siblings, so partial
+           promotion in a larger world can exceed WebKit's RemoteLayerTree IPC
+           limit. Larger windows keep normal rendering and all their nodes. */
+        [data-canvas-world-raster-layer]:not(:has(> .node-element:nth-of-type(81))) > .node-element > .canvas-node-external-header,
+        [data-canvas-world-raster-layer]:not(:has(> .node-element:nth-of-type(81))) > .node-element > .canvas-node-shell {
+            will-change: transform;
+        }
     }
 
-    [data-canvas-viewport-interacting="true"] :where(.canvas-connection-flow, .canvas-connection-comet, .canvas-connection-draft) {
-        animation: none !important;
-    }
-
-    [data-canvas-viewport-interacting="true"] :where(.canvas-node-toolbar, [data-canvas-node-panel]) {
-        will-change: transform;
-    }
+    [data-canvas-viewport-interacting="true"] :where(.canvas-connection-flow, .canvas-connection-comet, .canvas-connection-draft) { animation: none !important; }
+    .canvas-editor-shell[data-canvas-editor-panel-open="true"] :where(.canvas-connection-flow, .canvas-connection-comet) { animation: none !important; }
+    [data-canvas-viewport-interacting="true"] :where(.canvas-node-toolbar, [data-canvas-node-panel]) { will-change: transform; }
 
     [data-canvas-viewport-interacting="true"] :where(.canvas-node-toolbar, .canvas-node-toolbar > div, [data-canvas-node-panel], [data-canvas-node-panel] .canvas-floating-panel, [data-canvas-node-panel] .canvas-node-panel-placement-change) {
         animation-play-state: paused !important;
         filter: none !important;
         backdrop-filter: none !important;
     }
+
+    /* 节点内的徽章和按钮也用了毛玻璃。WebKit 每帧都要对底下的图片重新取样模糊，
+       平移、缩放时先关掉，手势结束后恢复。 */
+    [data-canvas-viewport-interacting="true"] [data-canvas-world-layer] :where(*, *::before, *::after) {
+        -webkit-backdrop-filter: none !important;
+        backdrop-filter: none !important;
+    }
+
+    /* 平移、缩放期间每条连线只画一条单色主线：底衬描边、光晕、端点、流光都先不画。
+       透明的点击路径不产生绘制，保留不动。 */
+    [data-canvas-viewport-interacting="true"] g[data-canvas-connection-id] > :not(.canvas-connection-line, [data-connection-id], defs) { display: none; }
+
+    /* 缩放进入概览画布时，手势期间保留在 DOM 中的非固定卡片仅隐藏绘制与命中，避免 display: none 重建渲染树与合成层。 */
+    [data-canvas-lod-dom-hidden="true"] .node-element:not([data-node-lod-pinned="true"]) { visibility: hidden !important; pointer-events: none !important; }
 
     /* 节点状态徽章 success 淡出动画（对应 #97 决策2）*/
     @keyframes canvas-status-success-fade {
@@ -11720,14 +11755,14 @@ html:not(.dark) .creation-studio-control:hover,
     .canvas-node-inspector-error { border-radius: var(--r-md); background: color-mix(in srgb, var(--destructive) 10%, transparent); padding: 12px 14px; color: var(--destructive); line-height: 1.6; }
     .generation-failure-notice { display: flex; min-width: 0; flex-direction: column; gap: 8px; text-align: left; }
     .generation-failure-notice.is-compact { gap: 6px; text-align: center; }
-    .generation-failure-reason, .generation-failure-action { margin: 0; overflow-wrap: anywhere; font-size: var(--fs-tiny); line-height: 1.55; }
-    .generation-failure-action { color: color-mix(in srgb, currentColor 72%, transparent); }
+    .generation-failure-reason, .generation-failure-action, .generation-failure-upstream { margin: 0; overflow-wrap: anywhere; font-size: var(--fs-tiny); line-height: 1.55; }
+    .generation-failure-action { color: color-mix(in srgb, currentColor 72%, transparent); } .generation-failure-upstream { color: color-mix(in srgb, currentColor 62%, transparent); font-size: var(--fs-label); }
     .generation-failure-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
     .generation-failure-button { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; border: 0; border-radius: var(--r-md); background: color-mix(in srgb, currentColor 8%, transparent); padding: 0 10px; color: inherit; font-size: var(--fs-label); line-height: 1.3; }
     .generation-failure-button:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
     .canvas-node-error-content .generation-failure-reason,
     .canvas-node-error-content .generation-failure-action { font-size: 13px; }
-    .canvas-node-error-content .generation-failure-button { font-size: 12px; }
+    .canvas-node-error-content .generation-failure-upstream, .canvas-node-error-content .generation-failure-button { font-size: 12px; }
     .canvas-node-inspector-json { box-sizing: border-box; margin: 0; padding: 14px; font-size: var(--fs-label); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 
     @media (max-width: 640px) {
@@ -12023,6 +12058,18 @@ html:not(.dark) .creation-chat-reference:hover:not(:disabled) { background: rgba
     gap: 12px;
     padding: 6px 12px 12px 14px;
 }
+
+/* 提交前被拦下的说明：写清哪一项、现在多少、要改成多少，放在输入框内始终可见。 */
+.creation-composer-notice {
+    margin: 0;
+    padding: 0 18px 8px;
+    color: var(--creation-warning, #f5a524);
+    font-size: 12px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.creation-chat-composer.is-empty .creation-composer-notice { padding: 0 24px 8px; }
 
 .creation-chat-controls {
     display: flex;

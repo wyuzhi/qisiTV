@@ -1,5 +1,4 @@
 import { parseAssetRecord } from "@/lib/asset-record";
-import { assertUserScope, captureUserScope, UserScopeAbandonedError, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { resourceFileUrl, resourceIdFromStorageKey } from "@/services/api/resources";
 import {
     listWorkspaceAssetSummaries,
@@ -7,6 +6,7 @@ import {
     lookupWorkspaceAssetsByIds,
     type WorkspaceAssetPageResponse,
 } from "@/services/api/workspace-assets";
+import { getActiveUserScope } from "@/lib/user-scope";
 import { usesBrowserLocalResourceStore } from "@/services/workspace-resource-storage";
 import {
     hydrateAssetStoreDrafts,
@@ -48,7 +48,6 @@ export type WorkspaceAssetLibraryPageOptions = {
     project?: string;
     generated?: boolean;
     signal?: AbortSignal;
-    expectedScope?: CapturedUserScope;
 };
 
 export type WorkspaceAssetLibraryPage = {
@@ -85,10 +84,7 @@ export async function loadWorkspaceAssetLibraryPage(options: WorkspaceAssetLibra
     throwIfAborted(options.signal);
     if (!usesWorkspaceAssetLibraryApi()) return loadBrowserLocalAssetPage(options);
 
-    const expected = options.expectedScope ?? captureUserScope();
-    assertUserScope(expected);
-    await hydrateAssetStoreDrafts(expected.userScope);
-    assertUserScope(expected);
+    await hydrateAssetStoreDrafts();
     throwIfAborted(options.signal);
 
     const remote = await listWorkspaceAssetsPage(
@@ -106,35 +102,39 @@ export async function loadWorkspaceAssetLibraryPage(options: WorkspaceAssetLibra
             project: options.project,
             generated: options.generated,
         },
-        { signal: options.signal, expectedScope: expected },
+        { signal: options.signal },
     );
-    assertUserScope(expected);
     throwIfAborted(options.signal);
 
     const parsed = parseWorkspaceAssetPage(remote);
-    const overlaid = await overlayAssetDrafts(parsed, options, expected);
-    projectCommittedAssets(parsed.assets, expected);
+    const overlaid = await overlayAssetDrafts(parsed, options);
+    projectCommittedAssets(parsed.assets);
     return overlaid;
 }
 
-export async function loadWorkspaceAssetsForUse(ids: Iterable<string>, expectedScope?: CapturedUserScope) {
+export class WorkspaceAssetUnavailableError extends Error {
+    constructor(public readonly assetIds: string[]) {
+        super("部分本地素材不存在，请重新选择素材");
+        this.name = "WorkspaceAssetUnavailableError";
+    }
+}
+
+export async function loadWorkspaceAssetsForUse(ids: Iterable<string>) {
     const unique = [...new Set([...ids].map((id) => id.trim()).filter(Boolean))];
     if (!unique.length) return;
     if (!usesWorkspaceAssetLibraryApi()) {
         const available = new Set(useAssetStore.getState().assets.map((asset) => asset.id));
-        if (unique.some((id) => !available.has(id))) throw new Error("部分本地素材不存在，请重新选择素材");
+        const missing = unique.filter((id) => !available.has(id));
+        if (missing.length) throw new WorkspaceAssetUnavailableError(missing);
         return;
     }
 
-    const expected = expectedScope ?? captureUserScope();
-    assertUserScope(expected);
-    await hydrateAssetStoreDrafts(expected.userScope);
-    assertUserScope(expected);
-    const drafts = readAssetStoreDrafts(expected);
+    await hydrateAssetStoreDrafts();
+    const drafts = readAssetStoreDrafts();
     const deleted = new Set(drafts.deletes.map((draft) => draft.id));
     const upsertById = new Map(drafts.upserts.map((draft) => [draft.id, draft]));
     const storeById = new Map(useAssetStore.getState().assets.map((asset) => [asset.id, asset]));
-    if (unique.some((id) => deleted.has(id))) throw new Error("部分本地素材不存在，请重新选择素材");
+    if (unique.some((id) => deleted.has(id))) throw new WorkspaceAssetUnavailableError(unique.filter((id) => deleted.has(id)));
 
     const lookupIds = unique.filter((id) => !upsertById.has(id));
     const found = new Set<string>();
@@ -149,34 +149,30 @@ export async function loadWorkspaceAssetsForUse(ids: Iterable<string>, expectedS
     }
     const loaded: Asset[] = [];
     for (const chunk of chunkIds(lookupIds, WORKSPACE_ASSET_BATCH_LIMIT)) {
-        const result = await lookupWorkspaceAssetsByIds(chunk, { expectedScope: expected });
-        assertUserScope(expected);
+        const result = await lookupWorkspaceAssetsByIds(chunk);
         for (const asset of parseWorkspaceAssetPayloads(result.assets)) {
             found.add(asset.id);
             loaded.push(asset);
         }
     }
-    projectCommittedAssets(loaded, expected);
-    if (snapshots.length) projectDraftSnapshots(snapshots, expected);
-    if (unique.some((id) => !found.has(id))) throw new Error("部分本地素材不存在，请重新选择素材");
+    projectCommittedAssets(loaded);
+    if (snapshots.length) projectDraftSnapshots(snapshots);
+    if (unique.some((id) => !found.has(id))) throw new WorkspaceAssetUnavailableError(unique.filter((id) => !found.has(id)));
 }
 
-export async function preserveLegacyCacheOnlyAssetDrafts(expectedScope?: CapturedUserScope) {
-    const expected = expectedScope ?? captureUserScope();
-    assertUserScope(expected);
+export async function preserveLegacyCacheOnlyAssetDrafts() {
+    const userScope = getActiveUserScope();
     if (!usesWorkspaceAssetLibraryApi()) {
         return { preservedIds: [] as string[], tombstoneSeam: WORKSPACE_ASSET_TOMBSTONE_SEAM };
     }
-    if (preservedDraftScopes.has(expected.userScope)) {
+    if (preservedDraftScopes.has(userScope)) {
         return { preservedIds: [] as string[], tombstoneSeam: WORKSPACE_ASSET_TOMBSTONE_SEAM };
     }
 
-    await hydrateAssetStoreDrafts(expected.userScope);
-    assertUserScope(expected);
-    const summaries = await listWorkspaceAssetSummaries({ expectedScope: expected });
-    assertUserScope(expected);
+    await hydrateAssetStoreDrafts(userScope);
+    const summaries = await listWorkspaceAssetSummaries();
     const committed = new Set((summaries.assets || []).map((item) => item.id).filter(Boolean));
-    const drafts = readAssetStoreDrafts(expected);
+    const drafts = readAssetStoreDrafts();
     const drafted = new Set([...drafts.upserts, ...drafts.deletes].map((draft) => draft.id));
     const preservedIds: string[] = [];
     for (const asset of useAssetStore.getState().assets) {
@@ -187,7 +183,7 @@ export async function preserveLegacyCacheOnlyAssetDrafts(expectedScope?: Capture
         });
         preservedIds.push(asset.id);
     }
-    preservedDraftScopes.add(expected.userScope);
+    preservedDraftScopes.add(userScope);
     return { preservedIds, tombstoneSeam: WORKSPACE_ASSET_TOMBSTONE_SEAM };
 }
 
@@ -220,9 +216,8 @@ function loadBrowserLocalAssetPage(options: WorkspaceAssetLibraryPageOptions): W
     };
 }
 
-async function overlayAssetDrafts(page: WorkspaceAssetLibraryPage, options: WorkspaceAssetLibraryPageOptions, expected: CapturedUserScope): Promise<WorkspaceAssetLibraryPage> {
-    assertUserScope(expected);
-    const drafts = readAssetStoreDrafts(expected);
+async function overlayAssetDrafts(page: WorkspaceAssetLibraryPage, options: WorkspaceAssetLibraryPageOptions): Promise<WorkspaceAssetLibraryPage> {
+    const drafts = readAssetStoreDrafts();
     if (!drafts.upserts.length && !drafts.deletes.length) return page;
 
     const deleted = new Set(drafts.deletes.map((draft) => draft.id));
@@ -230,8 +225,7 @@ async function overlayAssetDrafts(page: WorkspaceAssetLibraryPage, options: Work
     const storeById = new Map(useAssetStore.getState().assets.map((asset) => [asset.id, asset]));
     const query = options.query?.trim().toLowerCase() || "";
     const affectedIds = [...new Set([...drafts.deletes, ...drafts.upserts].map((draft) => draft.id))];
-    const canonical = await lookupCanonicalAssets(affectedIds, options, expected);
-    assertUserScope(expected);
+    const canonical = await lookupCanonicalAssets(affectedIds, options);
     throwIfAborted(options.signal);
 
     const seen = new Set<string>();
@@ -306,10 +300,9 @@ async function overlayAssetDrafts(page: WorkspaceAssetLibraryPage, options: Work
     };
 }
 
-function projectCommittedAssets(assets: Asset[], expected: CapturedUserScope) {
+function projectCommittedAssets(assets: Asset[]) {
     if (!assets.length) return;
-    assertUserScope(expected);
-    const drafts = readAssetStoreDrafts(expected);
+    const drafts = readAssetStoreDrafts();
     const skip = new Set([...drafts.upserts, ...drafts.deletes].map((draft) => draft.id));
     runAssetStoreProjection(() => {
         useAssetStore.setState((state) => {
@@ -323,9 +316,8 @@ function projectCommittedAssets(assets: Asset[], expected: CapturedUserScope) {
     });
 }
 
-function projectDraftSnapshots(assets: Asset[], expected: CapturedUserScope) {
+function projectDraftSnapshots(assets: Asset[]) {
     if (!assets.length) return;
-    assertUserScope(expected);
     runAssetStoreProjection(() => {
         useAssetStore.setState((state) => {
             const next = new Map(state.assets.map((asset) => [asset.id, asset]));
@@ -432,12 +424,11 @@ function resolveDraftAsset(draft: AssetStoreDraftRecord, storeById: Map<string, 
     return applyResourceDisplayUrls(snapshot);
 }
 
-async function lookupCanonicalAssets(ids: string[], options: WorkspaceAssetLibraryPageOptions, expected: CapturedUserScope) {
+async function lookupCanonicalAssets(ids: string[], options: WorkspaceAssetLibraryPageOptions) {
     const found = new Map<string, Asset>();
     for (const chunk of chunkIds(ids, WORKSPACE_ASSET_BATCH_LIMIT)) {
         throwIfAborted(options.signal);
-        const result = await lookupWorkspaceAssetsByIds(chunk, { signal: options.signal, expectedScope: expected });
-        assertUserScope(expected);
+        const result = await lookupWorkspaceAssetsByIds(chunk, { signal: options.signal });
         for (const asset of parseWorkspaceAssetPayloads(result.assets)) found.set(asset.id, asset);
     }
     return found;
@@ -603,5 +594,3 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function throwIfAborted(signal?: AbortSignal) {
     if (signal?.aborted) throw new DOMException("The operation was aborted", "AbortError");
 }
-
-export { UserScopeAbandonedError };

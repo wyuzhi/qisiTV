@@ -25,7 +25,7 @@ import (
 // RegisterAgentClientRoutes 暴露 /agent-clients：列出、签发、吊销外部客户端凭据。
 // 信任判据与签发内置 UI 会话完全一致（本机同源 + owner 凭据 / 桌面壳 / 显式本地引导），
 // 外部客户端凭据一律不能进入这组路由。
-func RegisterAgentClientRoutes(r gin.IRouter, svc *app.Service, clients *agentops.ClientRegistry, desktopTrust func(*http.Request) bool) {
+func RegisterAgentClientRoutes(r gin.IRouter, svc ownerCredentialDirs, clients *agentops.ClientRegistry, desktopTrust func(*http.Request) bool) {
 	r.GET("/agent-clients", func(c *gin.Context) {
 		if !requireDesktopUITrust(c, svc, desktopTrust) {
 			return
@@ -46,9 +46,10 @@ func RegisterAgentClientRoutes(r gin.IRouter, svc *app.Service, clients *agentop
 			return
 		}
 		var req struct {
-			Kind  string `json:"kind"`
-			Mode  string `json:"mode"`
-			Label string `json:"label"`
+			Kind         string `json:"kind"`
+			Mode         string `json:"mode"`
+			Label        string `json:"label"`
+			ApprovalMode string `json:"approvalMode"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			fail(c, http.StatusBadRequest, app.BadAuthRequest("请求体无效"))
@@ -65,7 +66,7 @@ func RegisterAgentClientRoutes(r gin.IRouter, svc *app.Service, clients *agentop
 			failInternal(c, http.StatusInternalServerError, err)
 			return
 		}
-		reg, token, err := clients.RegisterKind(string(kind), req.Label, agentops.ClientMode(strings.TrimSpace(req.Mode)))
+		reg, token, err := clients.RegisterClient(string(kind), req.Label, agentops.ClientMode(strings.TrimSpace(req.Mode)), agentops.ClientApprovalMode(req.ApprovalMode))
 		if err != nil {
 			failAgentOps(c, err)
 			return
@@ -96,7 +97,7 @@ func failAgentOps(c *gin.Context, err error) {
 
 // requireDesktopUITrust 复用签发内置 UI 会话的同一条信任链。
 // 外部客户端凭据在这里没有任何作用：它只能操作工作区，不能签发或吊销凭据。
-func requireDesktopUITrust(c *gin.Context, svc *app.Service, desktopTrust func(*http.Request) bool) bool {
+func requireDesktopUITrust(c *gin.Context, svc ownerCredentialDirs, desktopTrust func(*http.Request) bool) bool {
 	if strings.TrimSpace(c.GetHeader("X-Beeftv-Client")) != "" {
 		fail(c, http.StatusForbidden, app.BadAuthRequest("外部客户端不能管理客户端凭据"))
 		return false
@@ -124,13 +125,18 @@ func clientViews(items []agentops.ClientRegistration) []gin.H {
 }
 
 func clientView(item agentops.ClientRegistration) gin.H {
+	approvalMode, err := agentops.NormalizeClientApprovalMode(string(item.ApprovalMode))
+	if err != nil {
+		approvalMode = agentops.ClientApprovalCaller
+	}
 	view := gin.H{
-		"id":         item.ID,
-		"label":      item.Label,
-		"kind":       string(agentops.NormalizeClientKind(string(item.Kind))),
-		"mode":       string(item.Mode),
-		"createdAt":  item.CreatedAt.UTC().Format(time.RFC3339),
-		"lastUsedAt": nil,
+		"id":           item.ID,
+		"label":        item.Label,
+		"kind":         string(agentops.NormalizeClientKind(string(item.Kind))),
+		"mode":         string(item.Mode),
+		"approvalMode": string(approvalMode),
+		"createdAt":    item.CreatedAt.UTC().Format(time.RFC3339),
+		"lastUsedAt":   nil,
 	}
 	if item.LastUsedAt != nil {
 		view["lastUsedAt"] = item.LastUsedAt.UTC().Format(time.RFC3339)
@@ -155,12 +161,22 @@ func bundledCLIPath() (string, bool) {
 	if err != nil {
 		return "", false
 	}
+	return bundledCLIPathForExecutable(executable, name)
+}
+
+func bundledCLIPathForExecutable(executable, name string) (string, bool) {
 	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
 		executable = resolved
 	}
+	self, err := os.Stat(executable)
+	if err != nil {
+		return "", false
+	}
 	for _, candidate := range []string{filepath.Join(filepath.Dir(executable), "cli", name), filepath.Join(filepath.Dir(executable), name)} {
 		info, err := os.Stat(candidate)
-		if err == nil && info.Mode().IsRegular() && info.Size() > 0 && (runtime.GOOS == "windows" || info.Mode().Perm()&0o111 != 0) && candidate != executable {
+		// Case-insensitive names and symlink/hardlink aliases can name the host
+		// itself. It cannot serve as the external stdio MCP CLI.
+		if err == nil && info.Mode().IsRegular() && info.Size() > 0 && (runtime.GOOS == "windows" || info.Mode().Perm()&0o111 != 0) && !os.SameFile(info, self) {
 			return candidate, true
 		}
 	}

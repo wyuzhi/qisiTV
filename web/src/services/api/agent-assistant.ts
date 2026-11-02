@@ -1,7 +1,6 @@
 // 内置创作助手：浏览器只与同源 Go 代理通信，宿主/owner/模型凭据都不进入页面。
 // 三个端点的真实路径都在 /api/assistant/* 下；写错路径会让面板永远拿不到回复。
 import { ApiError, apiBaseURL, http } from "./request";
-import { assertUserScope, captureUserScope, userScopeMatches, type CapturedUserScope } from "@/lib/user-scope-guard";
 
 /** 后端给出的不可用原因（穷举，见契约 A1）；未知值一律走兜底文案。 */
 export type AssistantUnavailableReason =
@@ -30,6 +29,18 @@ export type AgentHostStatus = {
     model?: AssistantModelInfo;
     url?: string;
     health?: { raw?: string };
+};
+
+/**
+ * 模型思考过程的一个可读片段。
+ *
+ * 宿主只投影可读纯文本：签名、加密占位、工具参数和上游原始报文都不在这里。
+ * 一个回合的思考会被模型拆成多段（中间夹工具调用），`status` 表示这一段是否还在生成。
+ */
+export type AssistantReasoningSegment = {
+    id: string;
+    text: string;
+    status: "streaming" | "done";
 };
 
 export type AgentToolCall = {
@@ -70,22 +81,76 @@ export type AssistantTurnChange = {
 
 export type AssistantCanvasChange = Omit<AssistantTurnChange, "canvasChanges"> & { canvasId: string; operationIds: string[] };
 
-/** 付费生成提议：后端只登记，不生成、不扣费，执行发生在画布既有生成链路。 */
+export type GenerationOrderTargetView = {
+    nodeId: string;
+    title: string;
+    kind: "image" | "video" | "audio";
+    model?: string;
+    modelKey: string;
+    pricing?: unknown;
+    prompt: string;
+    parameters: Record<string, string>;
+    metadata?: Record<string, unknown>;
+    referenceNodeIds: string[];
+};
+
+export type GenerationOrder = {
+    orderId: string;
+    proposalId: string;
+    canvasId: string;
+    canvasRevision: number;
+    modelConfigRevision: number;
+    callerKind: "manual" | "assistant" | "external";
+    callerClient?: string;
+    approvalMode: "ask" | "caller" | "auto";
+    status: "pending" | "approved" | "submitted" | "rejected";
+    approvedBy?: string;
+    approvedAt?: string;
+    kind: "image" | "video" | "audio";
+    model: string;
+    modelKey: string;
+    pricing?: unknown;
+    note?: string;
+    nodeIds: string[];
+    productionNodeIds?: string[];
+    targetViews?: GenerationOrderTargetView[];
+    sourceTurnId?: string;
+    taskIds?: string[];
+    continuationId?: string;
+    createdAt: string;
+    updatedAt: string;
+};
+
+/** 付费生成提议（生成单）：后端只登记，不生成、不扣费，批准后统一按生成单执行。 */
 export type AssistantGenerationProposal = {
     proposalId: string;
+    orderId?: string;
     kind: "image" | "video" | "audio";
     nodeIds: string[];
     model: string;
     modelKey: string;
+    pricing?: unknown;
+    approvalMode?: "ask" | "caller" | "auto";
+    status?: "pending" | "approved" | "submitted" | "rejected";
     note?: string;
+    targets?: GenerationOrderTargetView[];
+    order?: GenerationOrder;
     production?: { targets: { nodeId: string; title: string; kind: "image" | "video" | "audio"; modelKey: string; prompt: string; parameters: Record<string,string>; metadata?: Record<string, unknown>; referenceNodeIds: string[] }[] };
     source?: { canvasId: string; canvasRevision: number; modelConfigRevision: number };
 };
 
-export async function confirmAssistantProduction(canvasId: string, turnId: string, proposal: AssistantGenerationProposal) {
-    return http.post<{ taskIds: string[]; continuationId: string }>(`/assistant/turns/${encodeURIComponent(turnId)}/proposals/${encodeURIComponent(proposal.proposalId)}/production`, {
-        canvasId, kind: proposal.kind, nodeIds: proposal.nodeIds, targets: proposal.production?.targets,
+export async function confirmAssistantProduction(canvasId: string, turnId: string, proposal: AssistantGenerationProposal, continuePlan = false) {
+    return http.post<{ taskIds: string[]; continuationId: string; orderId?: string; order?: GenerationOrder }>(`/assistant/turns/${encodeURIComponent(turnId)}/proposals/${encodeURIComponent(proposal.proposalId)}/production`, {
+        canvasId, kind: proposal.kind, nodeIds: proposal.nodeIds, targets: proposal.production?.targets, continuePlan,
     }, await uiSessionConfig());
+}
+
+export async function listGenerationOrders(canvasId: string) {
+    return http.get<{ orders: GenerationOrder[] }>(`/assistant/generation-orders?canvasId=${encodeURIComponent(canvasId)}`, await uiSessionConfig());
+}
+
+export async function approveGenerationOrder(proposalId: string) {
+    return http.post<{ taskIds: string[]; continuationId?: string; order?: GenerationOrder }>(`/assistant/generation-orders/${encodeURIComponent(proposalId)}/approve`, {}, await uiSessionConfig());
 }
 
 export type AssistantPlan = {
@@ -108,6 +173,8 @@ export type AgentTurnEnd = {
     permissionMode?: AssistantPermissionMode;
     reply: string;
     toolCalls: AgentToolCall[];
+    /** 本回合模型返回的思考片段；宿主总是写这个字段（没有可读思考时是空数组），旧记录可能没有。 */
+    reasoning?: AssistantReasoningSegment[];
     change?: AssistantTurnChange | null;
     proposals?: AssistantGenerationProposal[];
     outputs?: AssistantTurnOutput[];
@@ -132,6 +199,8 @@ export type AssistantTurn = {
     selectedNodeIds: string[];
     reply: string;
     toolCalls: AgentToolCall[];
+    /** 与 AgentTurnEnd.reasoning 同形；旧记录没有这个字段，没有可读思考的回合是空数组。 */
+    reasoning?: AssistantReasoningSegment[];
     change: AssistantTurnChange | null;
     proposals: AssistantGenerationProposal[];
     outputs?: AssistantTurnOutput[];
@@ -169,12 +238,14 @@ export type AssistantHistory = {
     active?: { turnId: string; requestId?: string; continuationId?: string; userText: string; selectedNodeIds: string[]; attachments?: AssistantAttachment[]; skills?: AssistantSkillSelection[];
         references?: AgentChatReference[]; supplements?: string[]; supplementInputs?: AssistantSupplementInput[]; permissionMode?: AssistantPermissionMode; createdAt: string; status: "running";
         /** 正在进行的回合此刻的进度（例如模型重试），只用于展示，结束后不再返回。 */
-        lifecycle?: AgentLifecycleEvent | null; plan?: AssistantPlan | null; streamed?: string } | null;
+        lifecycle?: AgentLifecycleEvent | null; plan?: AssistantPlan | null; streamed?: string;
+        /** 正在进行回合的思考片段，与流式推送的 reasoning_snapshot 同形。 */
+        reasoning?: AssistantReasoningSegment[] } | null;
 };
 
 // UI 会话凭据只保存在内存里：刷新页面即重新签发，不写入 localStorage。
-let uiSession: { token: string; expiresAt: number; scope: CapturedUserScope } | null = null;
-let uiSessionPending: { promise: Promise<string>; scope: CapturedUserScope } | null = null;
+let uiSession: { token: string; expiresAt: number } | null = null;
+let uiSessionPending: { promise: Promise<string> } | null = null;
 let uiSessionGeneration = 0;
 
 /**
@@ -323,12 +394,11 @@ export function assistantUndoFailure(error: unknown): AssistantUndoFailure {
 }
 
 export async function ensureAgentUiSession(): Promise<string> {
-    const scope = captureUserScope();
-    if (uiSession && userScopeMatches(uiSession.scope, scope) && Date.now() + 30_000 < uiSession.expiresAt) return uiSession.token;
-    if (uiSessionPending && userScopeMatches(uiSessionPending.scope, scope)) return uiSessionPending.promise;
+    if (uiSession && Date.now() + 30_000 < uiSession.expiresAt) return uiSession.token;
+    if (uiSessionPending) return uiSessionPending.promise;
     const generation = ++uiSessionGeneration;
-    const promise = issueAgentUiSession(scope, generation);
-    uiSessionPending = { promise, scope };
+    const promise = issueAgentUiSession(generation);
+    uiSessionPending = { promise };
     try {
         return await promise;
     } finally {
@@ -336,7 +406,7 @@ export async function ensureAgentUiSession(): Promise<string> {
     }
 }
 
-async function issueAgentUiSession(scope: CapturedUserScope, generation: number): Promise<string> {
+async function issueAgentUiSession(generation: number): Promise<string> {
     let data: { token?: string; expiresAt?: string };
     try {
         data = await http.post<{ token: string; expiresAt: string }>("/assistant/ui-session", {});
@@ -348,11 +418,10 @@ async function issueAgentUiSession(scope: CapturedUserScope, generation: number)
         throw new Error(agentAssistantFailureText(undefined, "创作助手暂时不可用，请稍后再试"));
     }
     if (!data?.token) throw new Error("创作助手暂时不可用，请稍后再试");
-    assertUserScope(scope);
     if (generation !== uiSessionGeneration) throw new Error("当前页面会话已更新，请重新发送");
     // Invalid/missing expiry is never cached; the server remains the authority on validity.
     const expiresAt = Date.parse(data.expiresAt ?? "");
-    uiSession = Number.isFinite(expiresAt) ? { token: data.token, expiresAt, scope } : null;
+    uiSession = Number.isFinite(expiresAt) ? { token: data.token, expiresAt } : null;
     return data.token;
 }
 
@@ -381,6 +450,8 @@ export type StreamHandlers = {
     onSession?: (sessionId: string) => void;
     onDelta?: (delta: string) => void;
     onText?: (text: string) => void;
+    /** 整段替换本回合的思考片段；宿主每次给的都是当前完整状态。 */
+    onReasoning?: (segments: AssistantReasoningSegment[]) => void;
     onPlan?: (plan: AssistantPlan | null) => void;
     onTurnEnd?: (end: AgentTurnEnd) => void;
     onLifecycle?: (event: AgentLifecycleEvent) => void;
@@ -426,7 +497,6 @@ export type AssistantSkillSelection = { skillId: string; versionId: string; cont
 export type AssistantSupplementInput = { message: string; attachments?: AssistantAttachment[]; skills?: AssistantSkillSelection[] };
 
 export type AgentChatRequest = {
-    continuationId?: string;
     permissionMode?: AssistantPermissionMode;
     signal?: AbortSignal;
     selectedNodeIds?: string[];
@@ -472,11 +542,9 @@ export async function streamAgentChat(
     request: AgentChatRequest = {},
 ): Promise<void> {
     const { signal, selectedNodeIds = [], references = [], sessionId, requestId, attachments = [], skills = [] } = request;
-    const scope = captureUserScope();
     let token: string;
     try {
         token = await ensureAgentUiSession();
-        assertUserScope(scope);
     } catch (error) {
         throw new AgentChatNotAdmittedError(error instanceof Error ? error.message : "消息未发送，请重试");
     }
@@ -485,7 +553,6 @@ export async function streamAgentChat(
     if (references.length) body.references = references;
     if (sessionId) body.sessionId = sessionId;
     if (requestId) body.requestId = requestId;
-    if (request.continuationId) body.continuationId = request.continuationId;
     if (attachments.length) body.attachments = attachments.map(attachmentRequestValue);
     if (skills.length) body.skills = skills.map(({ skillId, versionId, contentHash }) => ({ skillId, versionId, contentHash }));
     const response = await fetch(`${apiBaseURL}/assistant/chat`, {
@@ -555,6 +622,10 @@ async function readAgentTurnStream(
         }
         if (payload.type === "text_snapshot" && typeof payload.text === "string") {
             handlers.onText?.(payload.text);
+            return;
+        }
+        if (payload.type === "reasoning_snapshot" && Array.isArray(payload.segments)) {
+            handlers.onReasoning?.(payload.segments as AssistantReasoningSegment[]);
             return;
         }
         if (payload.type === "plan") {

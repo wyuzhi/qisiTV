@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/skillhub"
 	"qisitv/backend/internal/skills"
 )
@@ -30,10 +30,10 @@ func marketReply(c *gin.Context, value any, err error) {
 	}
 	ok(c, value)
 }
-func registerSkillMarketRoutes(r *gin.RouterGroup, svc *app.Service) {
+func registerSkillMarketRoutes(r *gin.RouterGroup, owners workspaceOwners, domain *skills.Service) {
 	m := r.Group("/skills/market")
 	m.Use(func(c *gin.Context) {
-		user, e := currentUser(c, svc)
+		user, e := currentUser(c, owners)
 		if e != nil {
 			failService(c, e)
 			c.Abort()
@@ -45,7 +45,7 @@ func registerSkillMarketRoutes(r *gin.RouterGroup, svc *app.Service) {
 	m.GET("/search", func(c *gin.Context) {
 		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 		size, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
-		value, err := svc.SkillsDomain().MarketSearch(c.Request.Context(), c.Query("q"), page, size)
+		value, err := domain.MarketSearch(c.Request.Context(), c.Query("q"), page, size)
 		marketReply(c, value, err)
 	})
 	m.GET("/catalog", func(c *gin.Context) {
@@ -57,20 +57,20 @@ func registerSkillMarketRoutes(r *gin.RouterGroup, svc *app.Service) {
 		if size < 1 || size > 100 {
 			size = 20
 		}
-		v, e := svc.SkillsDomain().MarketCatalog(c.Request.Context(), c.Query("q"), page, size)
+		v, e := domain.MarketCatalog(c.Request.Context(), c.Query("q"), page, size)
 		marketReply(c, v, e)
 	})
 	m.GET("/releases/:skillId/:releaseId", func(c *gin.Context) {
-		v, e := svc.SkillsDomain().MarketRelease(c.Request.Context(), c.Param("skillId"), c.Param("releaseId"))
+		v, e := domain.MarketRelease(c.Request.Context(), c.Param("skillId"), c.Param("releaseId"))
 		marketReply(c, v, e)
 	})
 	m.GET("/releases/:skillId/:releaseId/file", func(c *gin.Context) {
 		offset, err := strconv.Atoi(c.DefaultQuery("offset", "0"))
 		if err != nil {
-			marketReply(c, nil, app.BadAuthRequest("文件读取范围无效"))
+			marketReply(c, nil, kernel.BadAuthRequest("文件读取范围无效"))
 			return
 		}
-		value, err := svc.SkillsDomain().MarketFile(c.Request.Context(), c.Param("skillId"), c.Param("releaseId"), c.Query("path"), offset, 32<<10)
+		value, err := domain.MarketFile(c.Request.Context(), c.Param("skillId"), c.Param("releaseId"), c.Query("path"), offset, 32<<10)
 		marketReply(c, value, err)
 	})
 	m.POST("/install", func(c *gin.Context) {
@@ -79,14 +79,14 @@ func registerSkillMarketRoutes(r *gin.RouterGroup, svc *app.Service) {
 			ReleaseID string `json:"releaseId"`
 		}
 		if e := c.ShouldBindJSON(&a); e != nil {
-			marketReply(c, nil, app.BadAuthRequest("请选择技能版本"))
+			marketReply(c, nil, kernel.BadAuthRequest("请选择技能版本"))
 			return
 		}
-		v, e := svc.SkillsDomain().InstallMarket(c.Request.Context(), owner(c), a.SkillID, a.ReleaseID)
+		v, e := domain.InstallMarket(c.Request.Context(), owner(c), a.SkillID, a.ReleaseID)
 		marketReply(c, gin.H{"skill": v}, e)
 	})
 	m.GET("/versions/:skillId", func(c *gin.Context) {
-		v, e := svc.SkillsDomain().MarketVersions(owner(c), c.Param("skillId"))
+		v, e := domain.MarketVersions(owner(c), c.Param("skillId"))
 		marketReply(c, gin.H{"versions": v}, e)
 	})
 	m.POST("/fork", func(c *gin.Context) {
@@ -94,10 +94,10 @@ func registerSkillMarketRoutes(r *gin.RouterGroup, svc *app.Service) {
 			SkillID string `json:"skillId"`
 		}
 		if e := c.ShouldBindJSON(&a); e != nil {
-			marketReply(c, nil, app.BadAuthRequest("请选择技能"))
+			marketReply(c, nil, kernel.BadAuthRequest("请选择技能"))
 			return
 		}
-		v, e := svc.SkillsDomain().ForkMarket(owner(c), a.SkillID)
+		v, e := domain.ForkMarket(owner(c), a.SkillID)
 		marketReply(c, gin.H{"skill": v}, e)
 	})
 	m.POST("/rollback", func(c *gin.Context) {
@@ -106,30 +106,30 @@ func registerSkillMarketRoutes(r *gin.RouterGroup, svc *app.Service) {
 			VersionID string `json:"versionId"`
 		}
 		if e := c.ShouldBindJSON(&a); e != nil {
-			marketReply(c, nil, app.BadAuthRequest("请选择要恢复的版本"))
+			marketReply(c, nil, kernel.BadAuthRequest("请选择要恢复的版本"))
 			return
 		}
-		v, e := svc.SkillsDomain().RollbackMarket(owner(c), a.SkillID, a.VersionID)
+		v, e := domain.RollbackMarket(owner(c), a.SkillID, a.VersionID)
 		marketReply(c, gin.H{"skill": v}, e)
 	})
 	m.POST("/authorization/start", func(c *gin.Context) {
-		v, e := svc.SkillsDomain().MarketAuthorization(c.Request.Context(), owner(c), true)
+		v, e := domain.MarketAuthorization(c.Request.Context(), owner(c), true)
 		marketReply(c, v, e)
 	})
 	m.GET("/authorization", func(c *gin.Context) {
-		v, e := svc.SkillsDomain().MarketAuthorization(c.Request.Context(), owner(c), false)
+		v, e := domain.MarketAuthorization(c.Request.Context(), owner(c), false)
 		marketReply(c, v, e)
 	})
 	m.DELETE("/authorization", func(c *gin.Context) {
-		e := svc.SkillsDomain().MarketDisconnect(c.Request.Context(), owner(c))
+		e := domain.MarketDisconnect(c.Request.Context(), owner(c))
 		marketReply(c, gin.H{"connected": false}, e)
 	})
 	m.GET("/submissions", func(c *gin.Context) {
-		v, e := svc.SkillsDomain().MarketSubmissions(c.Request.Context(), owner(c))
+		v, e := domain.MarketSubmissions(c.Request.Context(), owner(c))
 		marketReply(c, v, e)
 	})
 	m.GET("/publish-plans", func(c *gin.Context) {
-		v, e := svc.SkillsDomain().PublishPlans(owner(c))
+		v, e := domain.PublishPlans(owner(c))
 		marketReply(c, gin.H{"items": v}, e)
 	})
 	m.POST("/publish-plans", func(c *gin.Context) {
@@ -140,24 +140,24 @@ func registerSkillMarketRoutes(r *gin.RouterGroup, svc *app.Service) {
 			Metadata     skillhub.Metadata `json:"metadata"`
 		}
 		if e := c.ShouldBindJSON(&a); e != nil {
-			marketReply(c, nil, app.BadAuthRequest("请填写投稿信息"))
+			marketReply(c, nil, kernel.BadAuthRequest("请填写投稿信息"))
 			return
 		}
 		var v *skills.PublishPlan
 		var e error
 		if a.SourcePlanID != "" {
-			v, e = svc.SkillsDomain().PublishReprepare(owner(c), a.SourcePlanID, a.Metadata, a.PublicationTarget)
+			v, e = domain.PublishReprepare(owner(c), a.SourcePlanID, a.Metadata, a.PublicationTarget)
 		} else {
-			v, e = svc.SkillsDomain().PublishPrepare(owner(c), a.SkillID, a.Metadata, a.PublicationTarget)
+			v, e = domain.PublishPrepare(owner(c), a.SkillID, a.Metadata, a.PublicationTarget)
 		}
 		marketReply(c, v, e)
 	})
 	m.GET("/publish-plans/:id", func(c *gin.Context) {
-		v, e := svc.SkillsDomain().PublishPlan(owner(c), c.Param("id"))
+		v, e := domain.PublishPlan(owner(c), c.Param("id"))
 		marketReply(c, v, e)
 	})
 	m.POST("/publish-plans/:id/refresh", func(c *gin.Context) {
-		v, e := svc.SkillsDomain().RefreshPublication(c.Request.Context(), owner(c), c.Param("id"))
+		v, e := domain.RefreshPublication(c.Request.Context(), owner(c), c.Param("id"))
 		marketReply(c, v, e)
 	})
 	m.POST("/publish-plans/:id/upload", func(c *gin.Context) {
@@ -167,10 +167,10 @@ func registerSkillMarketRoutes(r *gin.RouterGroup, svc *app.Service) {
 			ArchiveSHA256 string `json:"archiveSha256"`
 		}
 		if e := c.ShouldBindJSON(&a); e != nil || !a.Confirmed {
-			marketReply(c, nil, app.BadAuthRequest("请先确认本次上传的文件"))
+			marketReply(c, nil, kernel.BadAuthRequest("请先确认本次上传的文件"))
 			return
 		}
-		v, e := svc.SkillsDomain().PublishUpload(c.Request.Context(), owner(c), c.Param("id"), a.ArchiveSHA256)
+		v, e := domain.PublishUpload(c.Request.Context(), owner(c), c.Param("id"), a.ArchiveSHA256)
 		marketReply(c, v, e)
 	})
 	m.POST("/publish-plans/:id/submit", func(c *gin.Context) {
@@ -181,10 +181,10 @@ func registerSkillMarketRoutes(r *gin.RouterGroup, svc *app.Service) {
 			PreviewDigest string `json:"previewDigest"`
 		}
 		if e := c.ShouldBindJSON(&a); e != nil || !a.Confirmed {
-			marketReply(c, nil, app.BadAuthRequest("请先确认本次公开的内容"))
+			marketReply(c, nil, kernel.BadAuthRequest("请先确认本次公开的内容"))
 			return
 		}
-		v, e := svc.SkillsDomain().PublishSubmit(c.Request.Context(), owner(c), c.Param("id"), a.Revision, a.PreviewDigest)
+		v, e := domain.PublishSubmit(c.Request.Context(), owner(c), c.Param("id"), a.Revision, a.PreviewDigest)
 		marketReply(c, v, e)
 	})
 }

@@ -130,7 +130,7 @@ export function inferProtocolCapabilityFromModel(model: string): ProtocolCapabil
         lower.includes("veo") ||
         lower.includes("kling") ||
         lower.includes("seedance") ||
-        lower.includes("minimax-video") ||
+        /minimax-(?:video|h3)/.test(lower) ||
         lower.includes("hailuo") ||
         lower.includes("pika") ||
         lower.includes("runway") ||

@@ -33,8 +33,8 @@ type mediaReviewArgs struct {
 
 func registerMediaReview(r *Registry) {
 	r.Register(Op{ID: "media.review", AssistantCanvas: true, ReadOnly: true, ReplayUnsafe: true, Scope: ScopeCanvas,
-		Summary: "用单独配置的多模态审片模型检查已关联影音的指定区间（最多15秒），返回观察和用量，可能收费。mode默认video，包含原音轨；独立音频用audio。先用media.overview取得版本。问题应来自用户要求，不预填正确答案或已知缺陷。结果是模型观察，不是整片合格证明；失败或中断不自动重发。未配置时明确不可用。",
-		Params:  json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"canvasId":{"type":"string"},"nodeId":{"type":"string"},"assetId":{"type":"string"},"resourceId":{"type":"string","description":"目标关联多个资源时，指定其中一个 resourceId；不能读取未关联资源。"},"expectedVersion":{"type":"string","minLength":1},"startMs":{"type":"integer","minimum":0},"endMs":{"type":"integer","minimum":1},"mode":{"type":"string","enum":["video","audio"]},"question":{"type":"string","minLength":1,"maxLength":4000}},"required":["canvasId","expectedVersion","startMs","endMs","question"]}`), Handler: runMediaReview})
+		Summary: "用独立多模态审片模型检查指定区间（可能收费，最多15秒）",
+		Params:  json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"canvasId":{"type":"string"},"nodeId":{"type":"string"},"assetId":{"type":"string"},"resourceId":{"type":"string"},"expectedVersion":{"type":"string"},"startMs":{"type":"integer"},"endMs":{"type":"integer"},"mode":{"type":"string","enum":["video","audio"]},"question":{"type":"string"}},"required":["canvasId","expectedVersion","startMs","endMs","question"]}`), Handler: runMediaReview})
 }
 
 func runMediaReview(ctx *Context, raw json.RawMessage) (any, error) {

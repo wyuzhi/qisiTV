@@ -22,18 +22,6 @@ type ProjectShotAssetReferenceVersion = localproject.ShotAssetReferenceVersion
 type ProjectAssetCandidatePage = localproject.AssetCandidatePage
 type ProjectAssetPage = localproject.AssetPage
 
-func (s *Service) ProjectCore(userID string, projectID string) (ProjectCore, error) {
-	return s.projectDomain().ProjectCore(userID, projectID)
-}
-
-func (s *Service) ProjectUnitSummaries(userID string, projectID string) (ProjectUnitSummaries, error) {
-	return s.projectDomain().ProjectUnitSummaries(userID, projectID)
-}
-
-func (s *Service) ProjectOverview(userID string, projectID string) (ProjectOverview, error) {
-	return s.projectDomain().ProjectOverview(userID, projectID)
-}
-
 func (s *Service) ProjectUnitWorkspace(userID string, projectID string, unitID string) (ProjectUnitWorkspace, error) {
 	workspace, err := s.projectDomain().ProjectUnitWorkspace(userID, projectID, unitID)
 	if err != nil {
@@ -77,16 +65,4 @@ func (s *Service) ProjectUnitWorkspace(userID string, projectID string, unitID s
 		ShotReferences: workspace.ShotReferences, AssetCandidates: workspace.AssetCandidates,
 		Assets: workspace.Assets, Tasks: tasks,
 	}, nil
-}
-
-func (s *Service) ProjectCanvasesPage(userID string, projectID string, page int, pageSize int) (ProjectCanvasPage, error) {
-	return s.projectDomain().ProjectCanvasesPage(userID, projectID, page, pageSize)
-}
-
-func (s *Service) ProjectAssetCandidatesPage(userID string, projectID string, page int, pageSize int, unitID string, status string, category string, query string) (ProjectAssetCandidatePage, error) {
-	return s.projectDomain().ProjectAssetCandidatesPage(userID, projectID, page, pageSize, unitID, status, category, query)
-}
-
-func (s *Service) ProjectAssetsPage(userID string, projectID string, page int, pageSize int, category string, mediaType string, status string, folderID *string, query string) (ProjectAssetPage, error) {
-	return s.projectDomain().ProjectAssetsPage(userID, projectID, page, pageSize, category, mediaType, status, folderID, query)
 }

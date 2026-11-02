@@ -840,6 +840,10 @@ func (s *Service) verifyRemote() {
 	}
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
 		s.MarkRevoked()
+		return
+	}
+	if status >= 200 && status < 300 {
+		_, _ = s.RefreshCatalog(s.lifecycle)
 	}
 }
 

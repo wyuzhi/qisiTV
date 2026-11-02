@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"qisitv/backend/internal/mediatools"
+	"qisitv/backend/internal/outbound"
 )
 
 type upscaleResources struct {
@@ -114,8 +115,24 @@ func TestUpscaleExecuteFourModelsUsesOwnedUploadAndOriginalResult(t *testing.T) 
 			if kind == "video" {
 				source, output, mime = upscaleClip(t, 64, 48, true), upscaleClip(t, 128, 96, false), "video/mp4"
 			}
-			var creates, uploads, downloads, estimates atomic.Int32
+			var creates, uploads, downloads, estimates, stored atomic.Int32
 			progress := &upscaleProgressPort{}
+			// The API answers content with 307 to the file it already saved in object
+			// storage. Storage must receive no API key, cookie or custom API header.
+			storage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				stored.Add(1)
+				for _, key := range []string{"Authorization", "Cookie", "X-Api-Key", "X-Private-Gateway", "Idempotency-Key"} {
+					if r.Header.Get(key) != "" {
+						t.Errorf("storage received %s", key)
+					}
+				}
+				if r.Method != http.MethodGet || r.URL.Path != "/saved/result" {
+					t.Errorf("unexpected storage request %s %s", r.Method, r.URL.Path)
+				}
+				w.Header().Set("Content-Type", mime)
+				_, _ = w.Write(output)
+			}))
+			defer storage.Close()
 			var posted map[string]any
 			var server *httptest.Server
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -124,7 +141,7 @@ func TestUpscaleExecuteFourModelsUsesOwnedUploadAndOriginalResult(t *testing.T) 
 					t.Error("missing gateway auth")
 				}
 				switch r.URL.Path {
-				case "/v1/video-references/uploads":
+				case "/v1/media/uploads":
 					uploads.Add(1)
 					_ = json.NewEncoder(w).Encode(BeefAPISeedanceUploadSession{Ticket: "ticket", UploadURL: server.URL + "/put", UploadMethod: "PUT", RequiredHeaders: map[string]string{"Content-Type": mime}})
 				case "/put":
@@ -132,7 +149,7 @@ func TestUpscaleExecuteFourModelsUsesOwnedUploadAndOriginalResult(t *testing.T) 
 					if !bytes.Equal(data, source) || r.Header.Get("Authorization") != "" {
 						t.Error("upload altered original bytes or leaked key")
 					}
-				case "/v1/video-references/uploads/complete":
+				case "/v1/media/uploads/complete":
 					sum := sha256.Sum256(source)
 					_ = json.NewEncoder(w).Encode(BeefAPISeedanceUploadComplete{URL: server.URL + "/source", Kind: kind, Mime: mime, Bytes: int64(len(source)), SHA256: hex.EncodeToString(sum[:])})
 				case "/v1/media-upscale/estimate":
@@ -153,8 +170,10 @@ func TestUpscaleExecuteFourModelsUsesOwnedUploadAndOriginalResult(t *testing.T) 
 					_ = json.NewEncoder(w).Encode(map[string]any{"task_id": "original-task", "status": "completed", "model": model, "media_type": kind, "result_url": "https://untrusted.invalid/steal"})
 				case "/v1/media-upscale/tasks/original-task/content":
 					downloads.Add(1)
-					w.Header().Set("Content-Type", mime)
-					_, _ = w.Write(output)
+					if r.Method != http.MethodGet {
+						t.Error("content must be read with GET")
+					}
+					http.Redirect(w, r, storage.URL+"/saved/result?sig=short", http.StatusTemporaryRedirect)
 				default:
 					t.Errorf("unexpected endpoint %s", r.URL.Path)
 					http.NotFound(w, r)
@@ -167,7 +186,7 @@ func TestUpscaleExecuteFourModelsUsesOwnedUploadAndOriginalResult(t *testing.T) 
 				r.ReferenceProgress = progress
 				r.Stages = progress
 			})
-			input := Input{Mode: kind, Prompt: "AI 超分", Config: Config{BaseURL: server.URL, APIKey: "synthetic-upscale-key", Model: model, InterfaceType: "newapi"}, Upscale: &UpscaleOptions{Factor: 2}}
+			input := Input{Mode: kind, Prompt: "AI 超分", Config: Config{BaseURL: server.URL, APIKey: "synthetic-upscale-key", Model: model, InterfaceType: "newapi", Headers: []outbound.OutboundHeader{{Name: "X-Private-Gateway", Value: "private"}}}, Upscale: &UpscaleOptions{Factor: 2}}
 			if kind == "image" {
 				input.ReferenceImages = []Media{{StorageKey: "resource:source"}}
 			} else {
@@ -187,9 +206,6 @@ func TestUpscaleExecuteFourModelsUsesOwnedUploadAndOriginalResult(t *testing.T) 
 				want["image_url"] = server.URL + "/source"
 				want["face_enhancement"] = false
 				want["output_format"] = "png"
-				if model == "topaz-wonder-3.5" {
-					want["enhancement_strength"] = "low"
-				}
 			} else {
 				want["video_url"] = server.URL + "/source"
 				want["H264_output"] = true
@@ -197,8 +213,8 @@ func TestUpscaleExecuteFourModelsUsesOwnedUploadAndOriginalResult(t *testing.T) 
 			if !reflect.DeepEqual(posted, want) {
 				t.Fatalf("native payload = %#v want %#v", posted, want)
 			}
-			if creates.Load() != 1 || downloads.Load() != 1 || estimates.Load() != 1 {
-				t.Fatalf("creates=%d downloads=%d estimates=%d", creates.Load(), downloads.Load(), estimates.Load())
+			if creates.Load() != 1 || downloads.Load() != 1 || stored.Load() != 1 || estimates.Load() != 1 {
+				t.Fatalf("creates=%d downloads=%d stored=%d estimates=%d", creates.Load(), downloads.Load(), stored.Load(), estimates.Load())
 			}
 			if kind == "video" {
 				video := result["video"].(map[string]any)
@@ -221,7 +237,7 @@ func TestUpscaleExecuteFourModelsUsesOwnedUploadAndOriginalResult(t *testing.T) 
 			if _, err := Execute(WithRuntime(context.Background(), runtime), input); err != nil {
 				t.Fatal(err)
 			}
-			if creates.Load() != 1 || uploads.Load() != before || downloads.Load() != 2 {
+			if creates.Load() != 1 || uploads.Load() != before || downloads.Load() != 2 || stored.Load() != 2 {
 				t.Fatal("resume uploaded or submitted generation again")
 			}
 		})
@@ -274,7 +290,7 @@ func TestUpscaleOriginalStatusIdentityAndCancellation(t *testing.T) {
 	if err != nil || result != nil || observed != "unknown" {
 		t.Fatalf("unknown result=%v status=%s err=%v", result, observed, err)
 	}
-	if _, _, err := RecoverUpscaleResult(ctx, Input{Mode: "image", Config: config}, "original-task"); err != nil || recovers.Load() != 1 {
+	if _, _, err := RecoverUpscaleResult(ctx, Input{Mode: "image", Config: config}, "original-task"); err != nil || recovers.Load() != 0 {
 		t.Fatalf("manual recover: calls=%d err=%v", recovers.Load(), err)
 	}
 	if err := CancelUpscale(ctx, config, "original-task"); err != nil {

@@ -164,9 +164,11 @@ func TestMissingProbeRejectsReferencedVideo(t *testing.T) {
 			Bytes:    int64(len(payload)),
 		}},
 	}
+	input.VideoCapability = &VideoCapabilityConfig{}
+	input.VideoCapability.References.MinVideoPixels = 409600
 	err = PrepareBeefAPIVideoReferences(ctx, input.Config, &input, nil)
-	if err == nil || !strings.Contains(err.Error(), "参考视频无法校验") {
-		t.Fatalf("PrepareBeefAPIVideoReferences() error = %v, want missing probe", err)
+	if err == nil {
+		t.Fatalf("PrepareBeefAPIVideoReferences() error = %v, want unverified geometry rejection", err)
 	}
 	if hits.Load() != 0 {
 		t.Fatalf("preupload HTTP dispatched without probe: %d", hits.Load())

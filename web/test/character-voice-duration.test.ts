@@ -4,7 +4,6 @@ import type { AiConfig } from "../src/stores/use-config-store";
 import * as projects from "../src/services/api/projects";
 import * as resources from "../src/services/api/resources";
 import { modelCapabilityConfigFor } from "../src/lib/model-capabilities";
-import { assertVideoCapability } from "../src/services/api/video-validation";
 import * as imageStorage from "../src/services/image-storage";
 import { h3ResolvedReferenceOrder } from "../src/lib/h3-video";
 
@@ -35,7 +34,6 @@ test("stored character voice keeps duration through canvas hydration and preflig
         expect(hydrated.referenceAudios[0]?.bytes).toBe(1234);
         const model = "seedance-2.5";
         const profile = modelCapabilityConfigFor({ channels: [{ id: "beef", models: [model], modelProfiles: [{ model, protocol: "newapi-channel-2" }] }] }, `beef::${model}`).video!;
-        expect(() => assertVideoCapability(profile, [], [], hydrated.referenceAudios, "5")).not.toThrow();
     } finally {
         character.mockRestore();
         resource.mockRestore();
@@ -50,7 +48,7 @@ test("character images and voice retain the source card for H3 ordering", async 
     const resource = spyOn(resources, "getResource").mockResolvedValue({ id: "voice-1", mimeType: "audio/mpeg", objectKey: "voice.mp3", durationMs: 2500, size: 1234 } as resources.RemoteResource);
     const images = spyOn(imageStorage, "imageToDataUrl").mockResolvedValue("data:image/png;base64,fixture");
     try {
-        const hydrated = await hydrateNodeGenerationContext({ prompt: "test", referenceImages: [], referenceVideos: [], referenceAudios: [], characterReferences: [{ nodeId: "character-node", assetId: "character-1" }], resolvedCharacterVersions: [], resolvedCharacterVoices: [], textCount: 1, imageCount: 0, videoCount: 0, audioCount: 0 }, "canvas-1", "project-1", "video", true);
+        const hydrated = await hydrateNodeGenerationContext({ prompt: "test", referenceImages: [], referenceVideos: [], referenceAudios: [], characterReferences: [{ nodeId: "character-node", assetId: "character-1" }], resolvedCharacterVersions: [], resolvedCharacterVoices: [], textCount: 1, imageCount: 0, videoCount: 0, audioCount: 0 }, "canvas-1", "project-1", "video", true, false, { maxImages: 9, maxVideos: 3, maxAudios: 3 });
         expect(hydrated.referenceImages).toHaveLength(2);
         expect(hydrated.referenceImages.every((image) => image.sourceNodeId === "character-node")).toBe(true);
         expect(hydrated.referenceAudios[0]?.sourceNodeId).toBe("character-node");
@@ -78,7 +76,7 @@ test("video promptOnly keeps character identity bound to actual non-contiguous i
             referenceVideos: [], referenceAudios: [],
             characterReferences: [{ nodeId: "node-b", assetId: "b" }, { nodeId: "node-a", assetId: "a" }],
             resolvedCharacterVersions: [], resolvedCharacterVoices: [], textCount: 0, imageCount: 1, videoCount: 0, audioCount: 0,
-        }, "canvas", "project", "video", true, false), seedanceConfig, "reference_to_video");
+        }, "canvas", "project", "video", true, false, { maxImages: 9, maxVideos: 3, maxAudios: 3 }), seedanceConfig, "reference_to_video");
         expect(hydrated.referenceImages.map(image => image.storageKey)).toEqual(["resource:scene", "resource:b-front", "resource:a-front", "resource:b-side", "resource:a-side"]);
         expect(hydrated.prompt).toContain("@角色1 与「小乙」指同一角色。该角色外观参考 @图片2、@图片4");
         expect(hydrated.prompt).toContain("@角色2 与「小甲」指同一角色。该角色外观参考 @图片3、@图片5");

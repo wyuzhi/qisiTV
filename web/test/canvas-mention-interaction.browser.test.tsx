@@ -46,8 +46,11 @@ beforeAll(async () => {
     <meta charset="utf-8" />
     <style>
         * { box-sizing: border-box; }
+        :root { --z-dialog-popover: 1100; }
         body { margin: 0; background: #121212; color: #fff; font-family: sans-serif; }
         .canvas-resource-mention-menu {
+            position: fixed;
+            z-index: var(--z-dialog-popover);
             background: #222;
             border: 1px solid rgba(255,255,255,0.15);
             border-radius: 8px;
@@ -113,7 +116,17 @@ afterAll(async () => {
 });
 
 async function clearRichEditor(page: Page, input: ReturnType<Page["locator"]>) {
-    await input.fill("");
+    await input.evaluate((element) => {
+        if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+            const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set;
+            setter?.call(element, "");
+            element.dispatchEvent(new Event("input", { bubbles: true }));
+            return;
+        }
+        element.replaceChildren();
+        element.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    });
+    await input.focus();
     await page.waitForTimeout(50);
 }
 
@@ -327,7 +340,7 @@ test("Scenario 8: Backspacing '@' automatically dismisses menu", async () => {
 test("returning to either editor before its blur timer expires keeps a new mention menu open", async () => {
     for (const name of ["rich-editor", "secondary-editor"]) {
         const input = page.getByRole("textbox", { name });
-        await input.fill("");
+        await clearRichEditor(page, input);
         await input.evaluate(element => (element as HTMLElement).blur());
         await input.focus();
         await input.pressSequentially("@");
@@ -336,7 +349,100 @@ test("returning to either editor before its blur timer expires keeps a new menti
         await page.waitForTimeout(200);
         expect(await menu.isVisible()).toBe(true);
         expect(await input.evaluate(element => document.activeElement === element)).toBe(true);
-        await input.fill("");
+        await clearRichEditor(page, input);
         await menu.waitFor({ state: "hidden", timeout: 5000 });
     }
 }, 15000);
+
+test("expanded modal allows pointer selection of references and image/video parameters above its actual layer", async () => {
+    for (const layer of [1200, 2400]) {
+        await page.selectOption("#modal-layer", String(layer));
+        await page.locator("#open-expanded").click();
+        const dialog = page.getByRole("dialog", { name: "放大提示词" });
+        await dialog.waitFor({ state: "visible" });
+        const editor = dialog.getByRole("textbox", { name: "expanded-editor" });
+        // Clicking waits for modal motion to settle; fill only waits for visibility/editability.
+        await editor.click();
+        await clearRichEditor(page, editor);
+        await editor.pressSequentially("@");
+        const menu = page.locator("[data-canvas-resource-mention-menu]");
+        await menu.waitFor({ state: "visible", timeout: 5000 }).catch(async error => {
+            throw new Error(`${error.message} editor=${await editor.innerText()} focused=${await editor.evaluate(element => document.activeElement === element)}`);
+        });
+        expect(await menu.evaluate((element) => Number(getComputedStyle(element).zIndex))).toBeGreaterThan(layer);
+        await menu.locator(".canvas-resource-mention-folder", { hasText: "个人资产库" }).click();
+        await menu.locator(".canvas-resource-mention-item", { hasText: "道具钥匙" }).click();
+        await menu.waitFor({ state: "hidden" });
+        expect(await page.locator("#expanded-prompt").textContent()).toContain("@[asset:asset-prop-1]");
+
+        await dialog.locator('[data-testid="image-settings"] button').click();
+        const settings = page.locator(".canvas-image-settings-popover");
+        await settings.waitFor({ state: "visible" });
+        expect(await settings.evaluate((element) => Number(getComputedStyle(element).zIndex))).toBeGreaterThan(layer);
+        await settings.getByRole("button", { name: "9:16", exact: true }).click();
+        expect(await page.locator("#parameter-update").textContent()).toBe("image:size:1024x1824");
+
+        await dialog.locator('[data-testid="video-settings"] button').click();
+        await settings.waitFor({ state: "visible" });
+        expect(await settings.evaluate((element) => Number(getComputedStyle(element).zIndex))).toBeGreaterThan(layer);
+        await settings.getByRole("spinbutton", { name: "视频时长（秒）" }).fill("8");
+        await settings.getByRole("spinbutton", { name: "视频时长（秒）" }).press("Enter");
+        expect(await page.locator("#parameter-update").textContent()).toBe("video:videoSeconds:8");
+        await dialog.getByRole("button", { name: "Close", exact: true }).click();
+        await dialog.waitFor({ state: "hidden" });
+    }
+}, 30000);
+
+test("Scenario 9: 手动 @ 选中角色时保留提示词里写的角色名", async () => {
+    const input = page.getByRole("textbox", { name: "rich-editor" });
+    await clearRichEditor(page, input);
+    await input.pressSequentially("镜头一：@唐妙菱");
+
+    const menu = page.locator("[data-canvas-resource-mention-menu]");
+    await menu.waitFor({ state: "visible", timeout: 5000 });
+
+    const characterItem = menu.locator(".canvas-resource-mention-item", { hasText: "唐妙菱" });
+    await characterItem.waitFor({ state: "visible", timeout: 5000 });
+    await characterItem.click();
+
+    await menu.waitFor({ state: "hidden", timeout: 5000 });
+    const promptText = (await page.locator("#rich-prompt-display").innerText()).trim();
+    // 角色名保留在提示词里，引用追加在后面，而不是把角色名替换成引用
+    expect(promptText).toBe("RichPrompt: 镜头一：唐妙菱 @[node:node-char-1]");
+    expect(promptText.split("唐妙菱").length - 1).toBe(1);
+}, 30000);
+
+test("Scenario 10: 按 Tab 补全角色引用时保留角色名", async () => {
+    const input = page.getByRole("textbox", { name: "rich-editor" });
+    await clearRichEditor(page, input);
+    await input.pressSequentially("镜头二：@唐妙菱");
+
+    const menu = page.locator("[data-canvas-resource-mention-menu]");
+    await menu.waitFor({ state: "visible", timeout: 5000 });
+
+    const characterItem = menu.locator(".canvas-resource-mention-item", { hasText: "唐妙菱" });
+    await characterItem.waitFor({ state: "visible", timeout: 5000 });
+
+    await input.press("Tab");
+
+    await menu.waitFor({ state: "hidden", timeout: 5000 });
+    const promptText = (await page.locator("#rich-prompt-display").innerText()).trim();
+    expect(promptText).toBe("RichPrompt: 镜头二：唐妙菱 @[node:node-char-1]");
+    expect(promptText.split("唐妙菱").length - 1).toBe(1);
+}, 30000);
+
+test("Scenario 11: 输入角色名按 Tab 自动补全引用时保留角色名", async () => {
+    const input = page.getByRole("textbox", { name: "autolink-editor" });
+    await clearRichEditor(page, input);
+    await input.pressSequentially("唐妙菱");
+
+    const autoLinkHint = page.getByRole("button", { name: "引用唐妙菱" });
+    await autoLinkHint.waitFor({ state: "visible", timeout: 5000 });
+
+    await input.press("Tab");
+    await autoLinkHint.waitFor({ state: "hidden", timeout: 5000 });
+
+    const promptText = (await page.locator("#autolink-prompt-display").innerText()).trim();
+    expect(promptText).toBe("AutoLinkPrompt: 唐妙菱 @[node:node-char-1]");
+    expect(promptText.split("唐妙菱").length - 1).toBe(1);
+}, 30000);

@@ -115,3 +115,109 @@ func modelConfigResponseData(t *testing.T, recorder *httptest.ResponseRecorder) 
 	}
 	return envelope.Data
 }
+
+func TestWorkspaceModelConfigCapabilityNormalizesDrafts(t *testing.T) {
+	router, _ := newModelConfigTestRouter(t)
+
+	cases := []struct {
+		name       string
+		payload    map[string]any
+		wantStatus int
+		check      func(t *testing.T, data map[string]any)
+	}{
+		{
+			name: "unsaved custom Seedance 2.5 draft returns tightened video capability and taskTypeConstraints",
+			payload: map[string]any{
+				"type":          "video",
+				"interfaceType": "newapi-channel-2",
+				"model":         "bytedance/dreamina-seedance-2-5-flash",
+				"baseUrl":       "https://beefapi.com/v1",
+				"capabilityConfig": map[string]any{
+					"version": 1,
+					"video": map[string]any{
+						"operations":        []string{"text_to_video", "reference_to_video"},
+						"defaultOperation":  "text_to_video",
+						"duration":          map[string]any{"selection": "range", "min": 1, "max": 15, "step": 1, "default": 2},
+						"ratios":            []string{"16:9"},
+						"defaultRatio":      "16:9",
+						"resolutions":       []string{"480p", "720p"},
+						"defaultResolution": "720p",
+						"references": map[string]any{
+							"maxImages":               30,
+							"maxVideos":               10,
+							"maxAudios":               10,
+							"minVideoDurationSeconds": 1,
+							"maxVideoDurationSeconds": 15,
+							"minAudioDurationSeconds": 1,
+							"maxAudioDurationSeconds": 15,
+						},
+					},
+				},
+			},
+			wantStatus: http.StatusOK,
+			check: func(t *testing.T, data map[string]any) {
+				video, ok := data["video"].(map[string]any)
+				if !ok {
+					t.Fatalf("missing video capability: %#v", data)
+				}
+				if video["taskTypeConstraints"] != true {
+					t.Fatalf("taskTypeConstraints = %#v, want true", video["taskTypeConstraints"])
+				}
+				duration, _ := video["duration"].(map[string]any)
+				if duration["min"] != float64(4) || duration["default"] != float64(4) {
+					t.Fatalf("duration not tightened to 4s floor: %#v", duration)
+				}
+				refs, _ := video["references"].(map[string]any)
+				if refs["minAudioDurationSeconds"] != float64(2) || refs["minVideoDurationSeconds"] != float64(1) {
+					t.Fatalf("reference audio/video floors not tightened: %#v", refs)
+				}
+				if refs["minVideoPixels"] != float64(407696) {
+					t.Fatalf("minVideoPixels = %#v, want 407696", refs["minVideoPixels"])
+				}
+			},
+		},
+		{
+			name: "openai-response text draft returns thinking=true",
+			payload: map[string]any{
+				"category": "text",
+				"protocol": "openai-response",
+				"model":    "gpt-5.4",
+			},
+			wantStatus: http.StatusOK,
+			check: func(t *testing.T, data map[string]any) {
+				text, ok := data["text"].(map[string]any)
+				if !ok || text["thinking"] != true {
+					t.Fatalf("text capability = %#v, want thinking=true", data["text"])
+				}
+			},
+		},
+		{
+			name: "invalid capability category returns 400",
+			payload: map[string]any{
+				"category": "invalid-capability",
+				"protocol": "openai",
+				"model":    "gpt-4o",
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(tc.payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/workspace/model-config/capability", bytes.NewReader(raw))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, req)
+			if recorder.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, tc.wantStatus, recorder.Body.String())
+			}
+			if tc.check != nil {
+				tc.check(t, modelConfigResponseData(t, recorder))
+			}
+		})
+	}
+}

@@ -56,7 +56,7 @@ func TestBindProjectCharacterVoiceWithSampleResource(t *testing.T) {
 		}
 	}
 
-	result, err := (&Service{repo: repository.New(db)}).BindProjectCharacterVoice(project.UserID, project.ID, asset.ID, BindCharacterVoiceRequest{SampleResourceID: resource.ID, VoiceName: "张振天原声"})
+	result, err := (&Service{repo: repository.New(db)}).ProjectService().BindProjectCharacterVoice(project.UserID, project.ID, asset.ID, BindCharacterVoiceRequest{SampleResourceID: resource.ID, VoiceName: "张振天原声"})
 	if err != nil {
 		t.Fatal(err)
 	}

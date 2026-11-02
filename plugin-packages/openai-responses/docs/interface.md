@@ -119,7 +119,7 @@
 
 ```json
 {
-  "apiVersion": "beeftv.plugin/v2",
+  "apiVersion": "qisitv.plugin/v2",
   "id": "openai-responses",
   "name": "OpenAI Responses",
   "version": "2.0.0",

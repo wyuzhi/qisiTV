@@ -7,8 +7,10 @@
 - 能力：`video`。
 - 默认 Base URL：`https://api.x.ai`。
 - 鉴权驱动：`bearer`。
-- 创建：`POST /v1/videos/generations`。
-- 查询：`GET /v1/videos/{{taskId}}`。
+- 创建：`POST /v1/videos/generations`，官方只返回 `request_id`。
+- 查询：`GET /v1/videos/{{taskId}}`，官方返回 `status` 与 `video.url`。
+- 状态：`pending` / `done` / `failed`。
+- 结果：官方 `video.url`。
 
 ## 配置字段
 
@@ -43,14 +45,13 @@
 | `create.contentType` | `"application/json"` |
 | `create.body.model` | `{"$ref":"request.model"}` |
 | `create.body.prompt` | `{"$ref":"request.prompt"}` |
-| `create.body.duration` | `{"$if":{"condition":{"$gt":[{"$ref":"request.duration"},0]},"then":{"$ref":"request.duration"},"else":6}}` |
+| `create.body.duration` | `{"$if":{"condition":{"$gt":[{"$ref":"request.duration"},0]},"then":{"$ref":"request.duration"},"else":8}}` |
 | `create.body.aspect_ratio` | `{"$coalesce":[{"$ref":"request.aspectRatio"},"16:9"]}` |
 | `create.body.resolution` | `{"$coalesce":[{"$ref":"request.resolution"},"720p"]}` |
 | `create.body.image` | `{"$if":{"condition":{"$gt":[{"$len":{"$filter":{"from":{"$sortByOrder":{"$ref":"request.images"}},"as":"media","where":{"$in":[{"$ref":"media.role"},["first_frame",""]]}}}},0]},"then":{"url":{"$first":{"$map":{"from":{"$filter":{"from":{"$sortByOrder":{"$ref":"request.images"}},"as":"media","where":{"$in":[{"$ref":"media.role"},["first_frame",""]]}}},"as":"media","in":{"$ref":"media.value"}}}}},"else":null}}` |
 | `create.body.reference_images` | `{"$omitEmpty":{"$map":{"from":{"$filter":{"from":{"$ref":"request.images"},"as":"media","where":{"$in":[{"$ref":"media.role"},["reference_image","subject_reference","style_reference"]]}}},"as":"media","in":{"url":{"$ref":"media.value"}}}}}` |
 | `poll.method` | `"GET"` |
 | `poll.path` | `"/v1/videos/{{taskId}}"` |
-| `poll.contentType` | `"application/json"` |
 
 ## Provider 扩展键
 
@@ -62,11 +63,11 @@
 
 | 映射位置 | 上游路径或转换表达式 |
 | --- | --- |
-| `response.taskId` | `{"$coalesce":[{"$ref":"response.id"},{"$ref":"response.task_id"},{"$ref":"response.taskId"},{"$ref":"response.data.id"},{"$ref":"taskId"}]}` |
+| `response.taskId` | `{"$coalesce":[{"$ref":"response.request_id"},{"$ref":"response.id"},{"$ref":"response.task_id"},{"$ref":"response.taskId"},{"$ref":"response.data.id"},{"$ref":"taskId"}]}` |
 | `response.status` | `{"$coalesce":[{"$ref":"response.status"},{"$ref":"response.state"},{"$ref":"response.data.status"},"pending"]}` |
 | `response.message` | `{"$coalesce":[{"$ref":"response.error.message"},{"$ref":"response.message"},{"$ref":"response.fail_reason"}]}` |
-| `response.videos` | `{"$coalesce":[{"$ref":"response.video_url"},{"$ref":"response.videoUrl"},{"$ref":"response.result_url"},{"$ref":"response.url"},{"$ref":"response.data.video_url"},{"$ref":"response.output.url"}]}` |
-| `response.errorPaths[0]` | `"error.code"` |
+| `response.videos` | `{"$coalesce":[{"$ref":"response.video.url"},{"$ref":"response.video_url"},{"$ref":"response.videoUrl"},{"$ref":"response.result_url"},{"$ref":"response.url"},{"$ref":"response.data.video_url"},{"$ref":"response.output.url"}]}` |
+| `response.errorPaths` | `["error.code"]` |
 | `response.resultEphemeral` | `true` |
 
 ## 响应与错误
@@ -75,7 +76,7 @@
 
 ## 兼容边界
 
-该包只代表上述线协议 profile；同一品牌的其他 endpoint、云区域或网关包装必须使用独立插件，不能根据模型名猜测。
+该 profile 对应 Imagine API 的 `POST /v1/videos/generations` 与 `GET /v1/videos/{request_id}`，只发送 `model`、`prompt`、`duration`、`aspect_ratio`、`resolution`、`image` 与 `reference_images`。未指定时长时按官方默认 8 秒发送。同一品牌的其他 endpoint（视频编辑、视频续接、语音参考）或网关包装必须使用独立插件，不能根据模型名猜测。
 
 <!-- QISITV_PLUGIN_MANIFEST_START -->
 ## Manifest 完整接口定义
@@ -322,7 +323,7 @@
                 "then": {
                   "$ref": "request.duration"
                 },
-                "else": 6
+                "else": 8
               }
             },
             "aspect_ratio": {
@@ -449,6 +450,9 @@
           "taskId": {
             "$coalesce": [
               {
+                "$ref": "response.request_id"
+              },
+              {
                 "$ref": "response.id"
               },
               {
@@ -494,6 +498,9 @@
           },
           "videos": {
             "$coalesce": [
+              {
+                "$ref": "response.video.url"
+              },
               {
                 "$ref": "response.video_url"
               },

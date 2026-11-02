@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { chromium, type Browser } from "playwright";
 
 // Renders the real useCanvasProjectLifecycle through the shared restart harness
@@ -16,18 +16,6 @@ let secondBackend = { ...structuredClone(remote), id: "c2", title: "Second canva
 beforeAll(async () => {
     const build = await Bun.build({ entrypoints: [import.meta.dir + "/fixtures/canvas-lifecycle-restart-harness.tsx"], target: "browser", define: { "import.meta.env.DEV": "false", "import.meta.env.PROD": "true", "import.meta.env.MODE": '"production"', "import.meta.env.VITE_CANVAS_LOCAL_MODE": '"true"', "import.meta.env.VITE_CANVAS_BACKEND_URL": '"/api"', "process.env.NODE_ENV": '"production"' }, plugins: [{ name: "source", setup(builder) {
         builder.onResolve({ filter: /^@\// }, args => ({ path: Bun.resolveSync("../src/" + args.path.slice(2), import.meta.dir) }));
-        // Delay only test persistence, keeping the actual store flush implementation.
-        // This exposes the real hook's await boundary without replacing its save API.
-        builder.onLoad({ filter: /stores\/canvas\/use-canvas-store\.ts$/ }, args => ({
-            loader: "ts",
-            contents: readFileSync(args.path, "utf8").replace("export async function flushCanvasStorePersistence()", "async function originalFlushCanvasStorePersistence()") + `
-                export async function flushCanvasStorePersistence() {
-                    const gate = (window as any).__leavePersistenceGate;
-                    if (gate) { (window as any).__leavePersistenceEntered = true; await gate; }
-                    return originalFlushCanvasStorePersistence();
-                }
-            `,
-        }));
         builder.onLoad({ filter: /\.(css|svg|png|jpe?g|gif|webp|woff2?)$/ }, () => ({ contents: "export default ''", loader: "js" }));
     } }] });
     if (!build.success) throw new Error(build.logs.join("\n"));
@@ -86,30 +74,6 @@ for (const trigger of ["pagehide", "visibilitychange"] as const) test(`a deletio
     expect(backend.connections).toEqual([]);
     expect(errors).toEqual([]);
     await page.close();
-}, 30000);
-
-test("leave flush awaiting persistence cannot submit after A→B→A", async () => {
-    const page = await browser.newPage();
-    try {
-        await page.goto(server.url.toString());
-        await page.waitForFunction(() => document.querySelector('[data-testid="graph"]')?.textContent === "true:10:6");
-        const before = commits.length;
-        await page.evaluate(() => {
-            (window as any).__leavePersistenceGate = new Promise(resolve => { (window as any).__releaseLeavePersistence = resolve; });
-            (window as any).__lifecycle.deleteEdges();
-        });
-        await page.waitForFunction(() => document.querySelector('[data-testid="graph"]')?.textContent === "true:10:0");
-        await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
-        await page.waitForFunction(() => (window as any).__leavePersistenceEntered === true);
-        await page.evaluate(() => {
-            (window as any).__lifecycle.scopeCycle();
-            delete (window as any).__leavePersistenceGate;
-            (window as any).__releaseLeavePersistence();
-        });
-        await page.waitForTimeout(1100);
-        expect(commits.slice(before)).toEqual([]);
-        expect(backend.connections).toHaveLength(6);
-    } finally { await page.close(); }
 }, 30000);
 
 for (const leave of ["unmount", "switchCanvas"] as const) test(`${leave} flushes the old canvas deletion without adopting the next graph`, async () => {

@@ -180,3 +180,32 @@ func TestNormalizeClientKind(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeAndRegisterClientApprovalMode(t *testing.T) {
+	for input, want := range map[string]ClientApprovalMode{
+		"ask": ClientApprovalAsk, "ASK": ClientApprovalAsk,
+		"caller": ClientApprovalCaller, "": ClientApprovalCaller,
+		"auto": ClientApprovalAuto, " AUTO ": ClientApprovalAuto,
+	} {
+		if got, err := NormalizeClientApprovalMode(input); err != nil || got != want {
+			t.Fatalf("NormalizeClientApprovalMode(%q) = %q, %v，期望 %q, nil", input, got, err, want)
+		}
+	}
+	if _, err := NormalizeClientApprovalMode("unknown"); err == nil {
+		t.Fatal("NormalizeClientApprovalMode(\"unknown\") 应报错")
+	}
+	registry := NewClientRegistry(t.TempDir())
+	for _, mode := range []ClientApprovalMode{ClientApprovalAsk, ClientApprovalCaller, ClientApprovalAuto} {
+		reg, token, err := registry.RegisterClient("cli-"+string(mode), "codex", ClientReadWrite, mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reg.ApprovalMode != mode {
+			t.Fatalf("registered ApprovalMode = %q, want %q", reg.ApprovalMode, mode)
+		}
+		lookedUp, ok := registry.Lookup(reg.ID, token)
+		if !ok || lookedUp.ApprovalMode != mode {
+			t.Fatalf("lookup ApprovalMode = %+v, want %q", lookedUp, mode)
+		}
+	}
+}

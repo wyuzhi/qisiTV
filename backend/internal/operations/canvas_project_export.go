@@ -13,7 +13,7 @@ type CanvasProjectExporter interface {
 }
 
 func registerCanvasProjectExportOps(r *Registry) {
-	r.Register(Op{ID: "canvas.project.export", Summary: "免费导出已保存画布与素材为 BeefTV 可编辑工程 ZIP；返回可下载资源", Scope: ScopeCanvas, AssistantCanvas: true, ReplaySafe: true,
+	r.Register(Op{ID: "canvas.project.export", Summary: "免费导出可编辑工程 ZIP", Scope: ScopeCanvas, AssistantCanvas: true, ReplaySafe: true,
 		Params: json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"expectedRevision":{"type":"integer","minimum":0}},"required":["canvasId","expectedRevision"]}`), Handler: opCanvasProjectExport})
 }
 

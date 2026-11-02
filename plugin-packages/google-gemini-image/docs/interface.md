@@ -88,10 +88,10 @@ imageSize 只映射 1K/2K/4K；未知质量值（如视频清晰度 720）必须
 
 ```json
 {
-  "apiVersion": "qisitv.plugin/v2",
+  "apiVersion": "qisitv.plugin/v3",
   "id": "google-gemini-image",
   "name": "Google Gemini Image",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "author": "BeefTV Contributors",
   "description": "Google Gemini Image 独立请求协议插件。",
   "documentation": "<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>",
@@ -446,7 +446,15 @@ imageSize 只映射 1K/2K/4K；未知质量值（如视频清晰度 720）必须
               "from": {
                 "$filter": {
                   "from": {
-                    "$ref": "response.candidates.0.content.parts"
+                    "$flatMap": {
+                      "from": {
+                        "$ref": "response.candidates"
+                      },
+                      "as": "candidate",
+                      "in": {
+                        "$ref": "candidate.content.parts"
+                      }
+                    }
                   },
                   "as": "part",
                   "where": {
@@ -456,6 +464,12 @@ imageSize 只映射 1K/2K/4K；未知质量值（如视频清晰度 720）必须
                       },
                       {
                         "$ref": "part.inline_data"
+                      },
+                      {
+                        "$ref": "part.fileData"
+                      },
+                      {
+                        "$ref": "part.file_data"
                       }
                     ]
                   }
@@ -463,32 +477,64 @@ imageSize 只映射 1K/2K/4K；未知质量值（如视频清晰度 720）必须
               },
               "as": "part",
               "in": {
-                "dataUrl": {
-                  "$concat": [
-                    "data:",
-                    {
-                      "$coalesce": [
+                "$if": {
+                  "condition": {
+                    "$or": [
+                      {
+                        "$ref": "part.inlineData"
+                      },
+                      {
+                        "$ref": "part.inline_data"
+                      }
+                    ]
+                  },
+                  "then": {
+                    "dataUrl": {
+                      "$concat": [
+                        "data:",
                         {
-                          "$ref": "part.inlineData.mimeType"
+                          "$coalesce": [
+                            {
+                              "$ref": "part.inlineData.mimeType"
+                            },
+                            {
+                              "$ref": "part.inline_data.mime_type"
+                            },
+                            "image/png"
+                          ]
                         },
+                        ";base64,",
                         {
-                          "$ref": "part.inline_data.mime_type"
-                        },
-                        "image/png"
-                      ]
-                    },
-                    ";base64,",
-                    {
-                      "$coalesce": [
-                        {
-                          "$ref": "part.inlineData.data"
-                        },
-                        {
-                          "$ref": "part.inline_data.data"
+                          "$coalesce": [
+                            {
+                              "$ref": "part.inlineData.data"
+                            },
+                            {
+                              "$ref": "part.inline_data.data"
+                            }
+                          ]
                         }
                       ]
                     }
-                  ]
+                  },
+                  "else": {
+                    "url": {
+                      "$coalesce": [
+                        {
+                          "$ref": "part.fileData.fileUri"
+                        },
+                        {
+                          "$ref": "part.fileData.file_uri"
+                        },
+                        {
+                          "$ref": "part.file_data.fileUri"
+                        },
+                        {
+                          "$ref": "part.file_data.file_uri"
+                        }
+                      ]
+                    }
+                  }
                 }
               }
             }
@@ -498,7 +544,15 @@ imageSize 只映射 1K/2K/4K；未知质量值（如视频清晰度 720）必须
               "from": {
                 "$filter": {
                   "from": {
-                    "$ref": "response.candidates.0.content.parts"
+                    "$flatMap": {
+                      "from": {
+                        "$ref": "response.candidates"
+                      },
+                      "as": "candidate",
+                      "in": {
+                        "$ref": "candidate.content.parts"
+                      }
+                    }
                   },
                   "as": "part",
                   "where": {
@@ -520,8 +574,64 @@ imageSize 只映射 1K/2K/4K；未知质量值（如视频清晰度 720）必须
           ],
           "messagePaths": [
             "error.message"
-          ]
-        }
+          ],
+          "detectImageMime": true
+        },
+        "validations": [
+          {
+            "assert": {
+              "$eq": [
+                {
+                  "$len": {
+                    "$filter": {
+                      "from": {
+                        "$ref": "request.images"
+                      },
+                      "as": "media",
+                      "where": {
+                        "$eq": [
+                          {
+                            "$ref": "media.role"
+                          },
+                          "mask"
+                        ]
+                      }
+                    }
+                  }
+                },
+                0
+              ]
+            },
+            "message": "Gemini Images 不支持蒙版编辑，请移除蒙版后重试"
+          },
+          {
+            "assert": {
+              "$and": [
+                {
+                  "$eq": [
+                    {
+                      "$len": {
+                        "$ref": "request.videos"
+                      }
+                    },
+                    0
+                  ]
+                },
+                {
+                  "$eq": [
+                    {
+                      "$len": {
+                        "$ref": "request.audios"
+                      }
+                    },
+                    0
+                  ]
+                }
+              ]
+            },
+            "message": "Gemini Images 不支持参考视频或音频"
+          }
+        ]
       }
     ]
   }

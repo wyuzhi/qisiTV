@@ -1,5 +1,4 @@
 import { nanoid } from "nanoid";
-import { assertUserScope, captureUserScope, isUserScopeAbandonedError } from "@/lib/user-scope-guard";
 import { beginGenerationConsumer } from "@/services/generation-consumer-lifecycle";
 import { resolveCanvasGenerationModel } from "@/lib/canvas/canvas-project-generation";
 import { modelCapabilityConfigFor } from "@/lib/model-capabilities";
@@ -44,10 +43,8 @@ const defaultDependencies: DirectorPanoramaGenerationDependencies = {
 const defaultRecoveryDependencies: DirectorPanoramaRecoveryDependencies = { ...defaultDependencies, list: listGenerationTasks, query: queryGenerationTask };
 
 function panoramaSessionGuard(signal?: AbortSignal) {
-    const expected = captureUserScope();
     return () => {
         if (signal?.aborted) throw new DOMException("生成会话已结束", "AbortError");
-        assertUserScope(expected);
     };
 }
 
@@ -109,7 +106,6 @@ export async function recoverDirectorPanoramaTasks(projectId: string, sceneId: s
                 await panoramaFromTask(completed, sceneId, dependencies, assertCurrent, undefined, signal);
                 return true;
             } catch (error) {
-                if (isUserScopeAbandonedError(error)) throw error;
                 if (!signal?.aborted) console.warn("导演台全景图任务恢复失败", summary.id, error);
                 return false;
             }

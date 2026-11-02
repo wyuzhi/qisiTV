@@ -4,7 +4,6 @@ import { storyboardRowsFromTask, storyboardRowsOutputContract } from "@/lib/canv
 import { parseChapterAssetBreakdown, type ChapterAssetBreakdown } from "@/lib/canvas/chapter-asset-breakdown";
 import { parseCharacterBreakdown } from "@/lib/canvas/canvas-character-reference";
 import { backendProviderConfig, parseBackendGenerationResult } from "@/services/api/generation-task";
-import type { CapturedUserScope } from "@/lib/user-scope-guard";
 import { createGenerationTask, waitForGenerationTask, type GenerationTask } from "@/services/api/task-center";
 import type { Skill } from "@/services/api/skills";
 import { skillRuntime } from "@/services/skill-runtime";
@@ -24,7 +23,6 @@ type ChapterAnalysisInput = {
 
 type ChapterTaskOptions = {
     onTaskUpdate?: (task: GenerationTask) => void;
-    expectedScope?: CapturedUserScope;
 };
 
 export type ChapterTaskKind = "characters" | "storyboard";
@@ -154,9 +152,9 @@ export async function generateChapterStoryboard(input: ChapterStoryboardGenerati
                 approvedShotIds: input.approvedShotIds.slice(),
             },
         },
-    }, options?.expectedScope ? { expectedScope: options.expectedScope } : undefined);
+    });
     options?.onTaskUpdate?.(task);
-    const completed = await waitForGenerationTask(task.id, { initialTask: task, useTextEvents: true, onTaskUpdate: options?.onTaskUpdate, expectedScope: options?.expectedScope });
+    const completed = await waitForGenerationTask(task.id, { initialTask: task, useTextEvents: true, onTaskUpdate: options?.onTaskUpdate });
     return { ...storyboardRowsFromTask(completed), skillCount: skillExecution.selectedSkills.length, taskId: completed.id };
 }
 
@@ -174,7 +172,6 @@ async function runProjectTextTask(input: ChapterAnalysisInput, operation: string
             taskId = task.id;
             options?.onTaskUpdate?.(task);
         },
-        expectedScope: options?.expectedScope,
     });
     if (!result.text?.trim()) throw new Error("模型没有返回可用结果");
     if (!taskId) throw new Error("生成任务身份缺失");

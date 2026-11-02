@@ -33,8 +33,15 @@ func httpsRedirects(req *http.Request, via []*http.Request) error {
 	if len(via) >= maxRedirects {
 		return fmt.Errorf("重定向次数过多")
 	}
-	if req.URL == nil || req.URL.Scheme != "https" || req.URL.Host == "" {
+	if req.URL == nil || req.URL.Scheme != "https" || req.URL.Host == "" || req.URL.User != nil {
 		return errInsecureUpdateURL
+	}
+	if len(via) > 0 && isKnownDownloadHost(via[0].URL.Hostname()) && !isKnownRedirectHost(req.URL.Hostname()) {
+		return errInsecureUpdateURL
+	}
+	if len(via) > 0 && !strings.EqualFold(via[0].URL.Host, req.URL.Host) {
+		req.Header.Del("Authorization")
+		req.Header.Del("Cookie")
 	}
 	return nil
 }
@@ -88,13 +95,23 @@ func (e *Engine) getBytes(ctx context.Context, rawURL string, maxBytes int64, ti
 	return data, nil
 }
 
+func (e *Engine) orderedCandidateURLs(artifact PlatformArtifact) []string {
+	return orderArtifactURLs(artifact.CandidateURLs(), preferDomesticSource(e.locale, e.timezone))
+}
+
 // downloadArchive keeps the bytes it has already received in a per-hash
 // partial file, so a retry, a later click, or an app restart continues where
 // the link dropped. Integrity never depends on the transfer: the complete file
 // is hashed against the signed manifest before it is moved into staging.
 func (e *Engine) downloadArchive(ctx context.Context, artifact PlatformArtifact, dest string) error {
-	if _, err := normalizeFeedURL(artifact.URL); err != nil {
-		return err
+	urls := e.orderedCandidateURLs(artifact)
+	if len(urls) == 0 {
+		return ErrIncompleteConfig
+	}
+	for _, rawURL := range urls {
+		if _, err := normalizeFeedURL(rawURL); err != nil {
+			return err
+		}
 	}
 	partial, err := e.partialPath(artifact)
 	if err != nil {
@@ -131,17 +148,42 @@ func (e *Engine) fetchPartial(ctx context.Context, artifact PlatformArtifact, pa
 	if err != nil {
 		return 0, err
 	}
+	urls := e.orderedCandidateURLs(artifact)
+	if len(urls) == 0 {
+		return 0, ErrIncompleteConfig
+	}
 	resumedFrom := offset
 	e.setProgress(offset)
-	e.logf("download start size=%d resumeFrom=%d route=%s", artifact.Size, offset, e.route(artifact.URL))
-	err = e.retry(ctx, actionDownload, downloadMaxStalls, func() (bool, error) {
+	sourceIdx := 0
+	permanentFails := make(map[int]bool, len(urls))
+	e.logf("download start size=%d resumeFrom=%d route=%s", artifact.Size, offset, e.route(urls[0]))
+	maxStalls := downloadMaxStalls * len(urls)
+	err = e.retry(ctx, actionDownload, maxStalls, func() (bool, error) {
 		if offset >= artifact.Size {
 			return false, nil
 		}
+		idx := sourceIdx
+		targetURL := urls[idx]
 		before := offset
-		next, err := e.fetchRange(ctx, artifact, path, offset)
+		next, reqErr := e.fetchRangeFromURL(ctx, artifact, targetURL, len(urls) > 1, path, offset)
 		offset = next
-		return offset > before, err
+		if reqErr == nil {
+			return offset > before, nil
+		}
+		if len(urls) > 1 {
+			sourceIdx = (idx + 1) % len(urls)
+			if !isRetryable(reqErr) && ctx.Err() == nil {
+				permanentFails[idx] = true
+				if len(permanentFails) < len(urls) {
+					pub := networkSentinel(reqErr)
+					if pub == nil {
+						pub = ErrConnectionDropped
+					}
+					reqErr = failure(pub, rawCause(reqErr), true)
+				}
+			}
+		}
+		return offset > before, reqErr
 	})
 	if err != nil && isRetryable(err) && offset > 0 {
 		return resumedFrom, failure(ErrNetworkUnstable, rawCause(err), true)
@@ -150,11 +192,21 @@ func (e *Engine) fetchPartial(ctx context.Context, artifact PlatformArtifact, pa
 }
 
 func (e *Engine) fetchRange(ctx context.Context, artifact PlatformArtifact, path string, offset int64) (int64, error) {
+	return e.fetchRangeFromURL(ctx, artifact, artifact.URL, false, path, offset)
+}
+
+func (e *Engine) fetchRangeFromURL(ctx context.Context, artifact PlatformArtifact, targetURL string, multiSource bool, path string, offset int64) (int64, error) {
 	reqCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	watch := watchIdle(e.idleTimeout, cancel)
+	var minSpeed int64
+	var slowWindow time.Duration
+	if multiSource {
+		minSpeed = e.minSpeedBytesPerSec
+		slowWindow = e.slowSpeedWindow
+	}
+	watch := watchTransfer(e.idleTimeout, minSpeed, slowWindow, cancel)
 	defer watch.stop()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, artifact.URL, nil)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, targetURL, nil)
 	if err != nil {
 		return offset, err
 	}
@@ -173,11 +225,14 @@ func (e *Engine) fetchRange(ctx context.Context, artifact PlatformArtifact, path
 	switch resp.StatusCode {
 	case http.StatusPartialContent:
 		if offset == 0 || !contentRangeStartsAt(resp.Header.Get("Content-Range"), offset, artifact.Size) {
-			if err := truncatePartial(path); err != nil {
-				return 0, err
+			if !multiSource {
+				if err := truncatePartial(path); err != nil {
+					return 0, err
+				}
+				e.setProgress(0)
+				return 0, failure(ErrConnectionDropped, fmt.Errorf("unexpected Content-Range %q", resp.Header.Get("Content-Range")), true)
 			}
-			e.setProgress(0)
-			return 0, failure(ErrConnectionDropped, fmt.Errorf("unexpected Content-Range %q", resp.Header.Get("Content-Range")), true)
+			return offset, failure(ErrConnectionDropped, fmt.Errorf("unexpected Content-Range %q", resp.Header.Get("Content-Range")), true)
 		}
 	case http.StatusOK:
 		if resp.ContentLength > 0 && resp.ContentLength != artifact.Size {
@@ -186,15 +241,19 @@ func (e *Engine) fetchRange(ctx context.Context, artifact PlatformArtifact, path
 		offset = 0
 		e.setProgress(0)
 	case http.StatusRequestedRangeNotSatisfiable:
-		if err := truncatePartial(path); err != nil {
-			return 0, err
+		if !multiSource {
+			if err := truncatePartial(path); err != nil {
+				return 0, err
+			}
+			e.setProgress(0)
+			return 0, failure(ErrConnectionDropped, errors.New("HTTP 416"), true)
 		}
-		e.setProgress(0)
-		return 0, failure(ErrConnectionDropped, errors.New("HTTP 416"), true)
+		return offset, failure(ErrConnectionDropped, errors.New("HTTP 416"), true)
 	default:
 		return offset, classifyStatus(resp.StatusCode)
 	}
 
+	startOffset := offset
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return offset, err
@@ -215,8 +274,15 @@ func (e *Engine) fetchRange(ctx context.Context, artifact PlatformArtifact, path
 		n, err := body.Read(buf)
 		if n > 0 {
 			if offset+int64(n) > artifact.Size {
+				if multiSource && startOffset > 0 {
+					_ = file.Truncate(startOffset)
+					_ = file.Close()
+					e.setProgress(startOffset)
+					return startOffset, ErrTampered
+				}
 				_ = file.Close()
 				_ = os.Remove(path)
+				e.setProgress(0)
 				return 0, ErrTampered
 			}
 			if _, werr := file.Write(buf[:n]); werr != nil {
@@ -224,7 +290,7 @@ func (e *Engine) fetchRange(ctx context.Context, artifact PlatformArtifact, path
 				return offset, werr
 			}
 			offset += int64(n)
-			watch.touch()
+			watch.recordBytes(int64(n))
 			e.addDownloaded(int64(n))
 		}
 		if err != nil {
@@ -341,36 +407,117 @@ func verifyDownloadedFile(path string, artifact PlatformArtifact) error {
 	return file.Sync()
 }
 
-// idleWatch cancels a transfer only when no bytes arrive for the whole idle
-// window. A total deadline would abort slow but healthy links.
+type speedCheckpoint struct {
+	at    time.Time
+	bytes int64
+}
+
+// idleWatch cancels a transfer when no bytes arrive for the idle window, or
+// when a multi-source transfer stays below minSpeed over slowWindow so the
+// engine can switch to another source and resume from the current byte offset.
 type idleWatch struct {
-	mu        sync.Mutex
-	timer     *time.Timer
-	window    time.Duration
-	lastReset time.Time
-	didFire   bool
+	mu          sync.Mutex
+	timer       *time.Timer
+	window      time.Duration
+	lastReset   time.Time
+	didFire     bool
+	minSpeed    int64
+	slowWindow  time.Duration
+	checkpoints []speedCheckpoint
+	totalBytes  int64
+	stopSlow    chan struct{}
+	stopOnce    sync.Once
 }
 
 func watchIdle(window time.Duration, cancel context.CancelFunc) *idleWatch {
-	w := &idleWatch{window: window, lastReset: time.Now()}
+	return watchTransfer(window, 0, 0, cancel)
+}
+
+func watchTransfer(window time.Duration, minSpeed int64, slowWindow time.Duration, cancel context.CancelFunc) *idleWatch {
+	now := time.Now()
+	w := &idleWatch{
+		window:     window,
+		lastReset:  now,
+		minSpeed:   minSpeed,
+		slowWindow: slowWindow,
+	}
 	w.timer = time.AfterFunc(window, func() {
 		w.mu.Lock()
 		w.didFire = true
 		w.mu.Unlock()
 		cancel()
 	})
+	if minSpeed > 0 && slowWindow > 0 {
+		w.checkpoints = []speedCheckpoint{{at: now, bytes: 0}}
+		w.stopSlow = make(chan struct{})
+		tick := slowWindow / 4
+		if tick < 10*time.Millisecond {
+			tick = 10 * time.Millisecond
+		} else if tick > 250*time.Millisecond {
+			tick = 250 * time.Millisecond
+		}
+		go w.runSlowCheck(tick, cancel)
+	}
 	return w
 }
 
-func (w *idleWatch) touch() {
+func (w *idleWatch) runSlowCheck(tick time.Duration, cancel context.CancelFunc) {
+	ticker := time.NewTicker(tick)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-w.stopSlow:
+			return
+		case now := <-ticker.C:
+			w.mu.Lock()
+			if w.didFire {
+				w.mu.Unlock()
+				return
+			}
+			w.checkpoints = append(w.checkpoints, speedCheckpoint{at: now, bytes: w.totalBytes})
+			var ref *speedCheckpoint
+			cutoff := now.Add(-w.slowWindow)
+			pruneIdx := 0
+			for i := range w.checkpoints {
+				if !w.checkpoints[i].at.After(cutoff) {
+					ref = &w.checkpoints[i]
+					pruneIdx = i
+				} else {
+					break
+				}
+			}
+			if pruneIdx > 0 {
+				w.checkpoints = w.checkpoints[pruneIdx:]
+			}
+			if ref != nil {
+				elapsed := now.Sub(ref.at).Seconds()
+				delta := w.totalBytes - ref.bytes
+				if elapsed >= w.slowWindow.Seconds() && float64(delta) < float64(w.minSpeed)*elapsed {
+					w.didFire = true
+					w.mu.Unlock()
+					cancel()
+					return
+				}
+			}
+			w.mu.Unlock()
+		}
+	}
+}
+
+func (w *idleWatch) recordBytes(n int64) {
 	now := time.Now()
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.totalBytes += n
 	if w.didFire || now.Sub(w.lastReset) < w.window/8 {
 		return
 	}
 	w.lastReset = now
 	w.timer.Reset(w.window)
+}
+
+func (w *idleWatch) touch() {
+	w.recordBytes(0)
 }
 
 func (w *idleWatch) fired() bool {
@@ -381,4 +528,7 @@ func (w *idleWatch) fired() bool {
 
 func (w *idleWatch) stop() {
 	w.timer.Stop()
+	if w.stopSlow != nil {
+		w.stopOnce.Do(func() { close(w.stopSlow) })
+	}
 }

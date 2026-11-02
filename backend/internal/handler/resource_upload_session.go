@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -8,14 +9,22 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"qisitv/backend/internal/app"
 	localasset "qisitv/backend/internal/asset"
+	"qisitv/backend/internal/model"
 )
 
 const chunkUploadBodyCapJSON = 16 << 10
 
+type chunkedUploadService interface {
+	workspaceOwners
+	runtimePolicies
+	StartChunkedResourceUpload(userID string, req localasset.ChunkedUploadStart) (localasset.ChunkedUploadSessionInfo, error)
+	PutChunkedResourceUpload(userID string, uploadID string, index int, body io.Reader) error
+	CompleteChunkedResourceUpload(userID string, uploadID string) (*model.Resource, error)
+}
+
 // RegisterChunkedUploadRoutes 注册本地媒体分片上传三条接口（POST 开始 / PUT 上传片 / POST 合并）。
-func RegisterChunkedUploadRoutes(r *gin.RouterGroup, svc *app.Service, hostedProfile ...bool) {
+func RegisterChunkedUploadRoutes(r *gin.RouterGroup, svc chunkedUploadService, hostedProfile ...bool) {
 	_ = hostedProfile
 	r.POST("/resources/uploads", func(c *gin.Context) {
 		user, err := currentUser(c, svc)

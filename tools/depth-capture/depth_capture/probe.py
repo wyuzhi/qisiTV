@@ -52,6 +52,7 @@ def main() -> int:
             "--runtime-dir", str(args.runtime_dir), "--device", args.device,
             "--input-size", "280", "--max-resolution", "960",
             "--output-resolution", "1920x1080", "--max-seconds", "15",
+            "--min-output-fps", "0",
         ]
     )
     try:

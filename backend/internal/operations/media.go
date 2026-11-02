@@ -17,7 +17,9 @@ import (
 	"strings"
 	"time"
 
+	"qisitv/backend/internal/assets"
 	"qisitv/backend/internal/editing"
+	"qisitv/backend/internal/mediatools"
 )
 
 // MediaSourceOpener is optional: domain implementations must open only owned,
@@ -58,6 +60,7 @@ type MediaResult struct {
 	PeakDB           *float64               `json:"peakDb,omitempty"`
 	Note             string                 `json:"note,omitempty"`
 	Evidence         []string               `json:"evidence,omitempty"`
+	Image            *MediaImageRead        `json:"image,omitempty"`
 }
 
 type MediaSilenceDetection struct {
@@ -81,6 +84,7 @@ type mediaArgs struct {
 	EndMs           int64                 `json:"endMs"`
 	Mode            string                `json:"mode"`
 	Evidence        *mediaEvidenceRequest `json:"evidence,omitempty"`
+	ImageCrop       *MediaImageCrop       `json:"imageCrop,omitempty"`
 }
 
 type mediaEvidenceRequest struct {
@@ -90,7 +94,7 @@ type mediaEvidenceRequest struct {
 	Checks  bool     `json:"checks"`
 }
 
-const mediaEvidenceSchema = `{"type":"object","description":"从同一份媒体字节一次读取明确区间的实际证据；每次最多15秒，不代表质量通过。静态帧不能替代连续视频或声音。","properties":{"startMs":{"type":"integer","minimum":0},"endMs":{"type":"integer","minimum":1},"modes":{"type":"array","minItems":1,"maxItems":3,"uniqueItems":true,"items":{"type":"string","enum":["frames","video","audio"]}},"checks":{"type":"boolean","description":"同时检测该区间的黑场、音量与静音；不能判断声音内容。"}},"required":["startMs","endMs","modes"],"additionalProperties":false}`
+const mediaEvidenceSchema = `{"type":"object","description":"一次读取15秒内区间的证据","properties":{"startMs":{"type":"integer"},"endMs":{"type":"integer"},"modes":{"type":"array","items":{"type":"string","enum":["frames","video","audio"]}},"checks":{"type":"boolean"}},"required":["startMs","endMs","modes"]}`
 
 // ValidateMediaReference shares the owned-node/asset linkage checks with chat
 // admission. Client-supplied resource IDs never grant access on their own.
@@ -111,9 +115,9 @@ func ValidateMediaReference(domain Domain, userID, canvasID, nodeID, assetID, re
 func registerMediaOps(r *Registry) {
 	registerMediaReview(r)
 	summaries := map[string]string{
-		"media.overview": "获取已关联媒体的版本、时长与静态预览；概要不能替代连续视频或声音内容审查。已知15秒以内区间可用 evidence 一次读取真实 frames/video/audio 及客观检测。",
-		"media.inspect":  "实际读取指定区间，每次最多 15 秒：frames 看静态截图，video 看连续原生视频，audio 听原生音频；按问题选择，不把抽帧当作完整影音审查。",
-		"media.check":    "客观测量指定区间的黑屏、音量与静音停顿（固定 -35 dB、最少 120 ms，返回原素材坐标）；音量与停顿不能判断声音内容。停顿仅是候选切点，随后用 media.inspect audio 裁剪并实际听取确认，不能当作词时间戳或语义切点，不能替代实际查看和听取。",
+		"media.overview": "获取媒体版本、时长与概览（可选15秒内 evidence）；概览不能替代连续影音审查",
+		"media.inspect":  "读取媒体片段（每次最多 15 秒；图片可用 imageCrop 分区查看）",
+		"media.check":    "客观测量黑屏、音量与静音停顿；不能判断声音内容，不能替代实际听看",
 	}
 	for _, id := range []string{"media.overview", "media.inspect", "media.check"} {
 		operation := id
@@ -124,9 +128,11 @@ func registerMediaOps(r *Registry) {
 		properties := ""
 		if operation == "media.overview" {
 			properties = `,"evidence":` + mediaEvidenceSchema
+		} else if operation == "media.inspect" {
+			properties = `,"imageCrop":` + mediaImageCropSchema
 		}
 		r.Register(Op{AssistantCanvas: true, ID: operation, Summary: summaries[operation], ReadOnly: true, Scope: ScopeCanvas,
-			Params:  json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{"canvasId":{"type":"string"},"nodeId":{"type":"string"},"assetId":{"type":"string"},"resourceId":{"type":"string"},"expectedVersion":{"type":"string","minLength":1,"description":"先调用 media.overview，使用返回的 version；inspect 和 check 必填，不猜版本。"},"startMs":{"type":"integer","minimum":0},"endMs":{"type":"integer","minimum":0},"mode":{"type":"string","description":"frames：离散静态截图，用于构图与画面内容，不能判断连续运动或声音；video：连续原生视频片段，用于运镜、动作、转场与音画关系，保留可用音轨；audio：原生音频片段，用于说话、对白、音乐和声音内容。按检查目标选择；inspect 每次最多 15 秒。","enum":["frames","video","audio"]}%s},"required":%s}`, properties, required)),
+			Params:  json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{"canvasId":{"type":"string"},"nodeId":{"type":"string"},"assetId":{"type":"string"},"resourceId":{"type":"string"},"expectedVersion":{"type":"string","minLength":1},"startMs":{"type":"integer"},"endMs":{"type":"integer"},"mode":{"type":"string","description":"frames静态截图（不能判断连续运动或声音）；video连续；audio声音","enum":["frames","video","audio"]}%s},"required":%s}`, properties, required)),
 			Handler: func(ctx *Context, raw json.RawMessage) (any, error) { return runMedia(ctx, operation, raw) }})
 	}
 }
@@ -195,9 +201,8 @@ func collectMediaResourceIDs(value any, ids map[string]bool) {
 				}
 			}
 			if key == "storageKey" || key == "content" {
-				if value, ok := item.(string); ok && strings.HasPrefix(value, "resource:") {
-					id := strings.TrimPrefix(value, "resource:")
-					if mediaResourceIDPattern.MatchString(id) {
+				if value, ok := item.(string); ok {
+					if id := assets.ResourceID(value); id != "" {
 						ids[id] = true
 					}
 				}
@@ -228,8 +233,6 @@ func ReferencedMediaResourceIDs(raw json.RawMessage) ([]string, error) {
 	return result, nil
 }
 
-var mediaResourceIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,80}$`)
-
 const maxMediaSourceBytes int64 = 256 << 20
 const maxMediaPartBytes int64 = 8 << 20
 
@@ -249,6 +252,9 @@ func runMedia(opCtx *Context, operation string, raw json.RawMessage) (any, error
 	var args mediaArgs
 	if err := decodeParams(raw, &args); err != nil {
 		return nil, err
+	}
+	if args.ImageCrop != nil && (operation != "media.inspect" || (args.Mode != "" && args.Mode != "frames") || args.StartMs != 0 || args.EndMs != 0 || !args.ImageCrop.valid()) {
+		return nil, InvalidArg("invalid_image_crop", "图片局部范围必须位于原图内，且只能用于图片的零区间 frames 检查")
 	}
 	if args.Evidence != nil {
 		if operation != "media.overview" || args.Evidence.StartMs == nil || args.Evidence.EndMs == nil || len(args.Evidence.Modes) == 0 || len(args.Evidence.Modes) > 3 {
@@ -275,6 +281,11 @@ func runMedia(opCtx *Context, operation string, raw json.RawMessage) (any, error
 	}
 	if resource == nil || resource.Size > maxMediaSourceBytes {
 		return nil, PreconditionFailed("media_too_large", "当前媒体检查支持 256 MiB 以内的素材", nil)
+	}
+	isImage := strings.HasPrefix(resource.MimeType, "image/") || strings.EqualFold(resource.Kind, "image")
+	genericMime := resource.MimeType == "" || resource.MimeType == "application/octet-stream"
+	if args.ImageCrop != nil && !isImage && !genericMime {
+		return nil, InvalidArg("invalid_image_crop", "局部图片检查仅适用于图片素材")
 	}
 	opener, ok := opCtx.Domain.(MediaSourceOpener)
 	if !ok {
@@ -323,6 +334,14 @@ func runMedia(opCtx *Context, operation string, raw json.RawMessage) (any, error
 	if !selfContainedMedia(input) {
 		return nil, Unsupported("media_format_unsupported", "当前检查支持常见图片、MP4、WebM、WAV、MP3、OGG 和 FLAC 文件")
 	}
+	if !isImage && genericMime {
+		if _, _, cfgErr := imageConfig(input); cfgErr == nil || cfgErr == errImageTooManyPixels {
+			isImage = true
+		}
+	}
+	if args.ImageCrop != nil && !isImage {
+		return nil, InvalidArg("invalid_image_crop", "局部图片检查仅适用于图片素材")
+	}
 	version := hex.EncodeToString(hash.Sum(nil))
 	if operation != "media.overview" && args.ExpectedVersion == "" {
 		return nil, InvalidArg("media_version_required", "先读取 overview，再提供 expectedVersion")
@@ -330,11 +349,17 @@ func runMedia(opCtx *Context, operation string, raw json.RawMessage) (any, error
 	if args.ExpectedVersion != "" && args.ExpectedVersion != version {
 		return nil, Conflict("stale_media_version", "素材内容已变化，请重新读取 overview", map[string]any{"currentVersion": version})
 	}
-	facts, err := editing.Probe(ctx, input)
+	facts, err := probeMediaFacts(ctx, input, isImage)
 	if err != nil {
+		if err == errImageTooManyPixels {
+			return nil, PreconditionFailed("media_too_large", "图片像素超过 3200 万上限", nil)
+		}
+		if isImage {
+			return nil, Unsupported("media_format_unsupported", "当前图片检查支持 PNG、JPEG、WebP、GIF、BMP 和 TIFF 文件")
+		}
 		return nil, PreconditionFailed("media_probe_failed", "无法检查媒体，请确认 ffprobe 已安装且素材可读取", nil)
 	}
-	prepared := preparedMedia{input: input, directory: dir, source: MediaSource{CanvasID: args.CanvasID, NodeID: args.NodeID, AssetID: args.AssetID, ResourceID: resourceID, Version: version}, facts: facts, image: strings.HasPrefix(resource.MimeType, "image/")}
+	prepared := preparedMedia{input: input, directory: dir, source: MediaSource{CanvasID: args.CanvasID, NodeID: args.NodeID, AssetID: args.AssetID, ResourceID: resourceID, Version: version}, facts: facts, image: isImage}
 	if args.Evidence == nil {
 		return prepared.read(ctx, operation, args)
 	}
@@ -409,6 +434,9 @@ func (p preparedMedia) read(ctx context.Context, operation string, args mediaArg
 	source := p.source
 	source.StartMs, source.EndMs = args.StartMs, args.EndMs
 	result := MediaResult{Source: source, DurationMs: facts.DurationMs, HasVideo: facts.HasVideo, HasAudio: facts.HasAudio, Content: []MediaPart{}}
+	if image {
+		return p.readImage(ctx, operation, args, result)
+	}
 	bin, err := editing.ResolveFFmpegBinary()
 	if err != nil {
 		return MediaResult{}, PreconditionFailed("media_ffmpeg_unavailable", "媒体检查需要 ffmpeg", nil)
@@ -447,9 +475,6 @@ func (p preparedMedia) read(ctx context.Context, operation string, args mediaArg
 		count := 4
 		if operation == "media.overview" {
 			count = 3
-		}
-		if image {
-			count = 1
 		}
 		for i := 0; i < count; i++ {
 			at := args.StartMs + (args.EndMs-args.StartMs)*int64(2*i+1)/int64(2*count)
@@ -523,6 +548,7 @@ func (b *limitedMediaLog) Write(p []byte) (int, error) {
 
 func mediaCommand(ctx context.Context, bin string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
+	mediatools.HideConsole(cmd)
 	var log limitedMediaLog
 	cmd.Stdout = &log
 	cmd.Stderr = &log
@@ -557,7 +583,7 @@ func selfContainedMedia(path string) bool {
 	buf := make([]byte, 12)
 	n, _ := file.Read(buf)
 	buf = buf[:n]
-	for _, magic := range [][]byte{{0xff, 0xd8, 0xff}, {0x89, 'P', 'N', 'G'}, []byte("GIF8"), {0x1a, 0x45, 0xdf, 0xa3}, []byte("OggS"), []byte("fLaC"), []byte("ID3")} {
+	for _, magic := range [][]byte{{0xff, 0xd8, 0xff}, {0x89, 'P', 'N', 'G'}, []byte("GIF8"), []byte("II*\x00"), []byte("MM\x00*"), []byte("BM"), {0x1a, 0x45, 0xdf, 0xa3}, []byte("OggS"), []byte("fLaC"), []byte("ID3")} {
 		if len(buf) >= len(magic) && string(buf[:len(magic)]) == string(magic) {
 			return true
 		}

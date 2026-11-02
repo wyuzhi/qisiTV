@@ -15,6 +15,9 @@ type AgentOpRecord struct {
 	Status      string    `json:"status" gorm:"size:24"`
 	ResultJSON  string    `json:"resultJson" gorm:"type:text"`
 	TurnID      string    `json:"turnId,omitempty" gorm:"size:64;index"`
+	CallerKind  string    `json:"callerKind,omitempty" gorm:"size:24"`
+	ClientID    string    `json:"clientId,omitempty" gorm:"size:80"`
+	ClientLabel string    `json:"clientLabel,omitempty" gorm:"size:120"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 }

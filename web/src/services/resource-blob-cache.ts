@@ -1,7 +1,7 @@
 import { RESOURCE_BLOB_META_STORE_NAME, RESOURCE_BLOBS_STORE_NAME, localForageInstance } from "@/lib/localforage-storage";
 import { getActiveUserScope } from "@/lib/user-scope";
-import { assertUserScope, captureUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { getResourceBlob, resourceIdFromStorageKey } from "@/services/api/resources";
+import { createCanvasImagePreviewBlob } from "@/lib/canvas/canvas-image-preview-blob";
 
 type ResourceCacheMeta = {
     key: string;
@@ -18,12 +18,14 @@ const metaStore = localForageInstance(RESOURCE_BLOB_META_STORE_NAME);
 const objectUrls = new Map<string, string>();
 const sessionBlobs = new Map<string, Blob>();
 const inFlight = new Map<string, Promise<string>>();
+const persistedReads = new Map<string, Promise<Blob | null>>();
 const scheduled = new Set<string>();
 const cacheMetaTouchWarnings = new Set<string>();
 const metaTouchedAt = new Map<string, number>();
 const downloadQueue: Array<{ key?: string; run: () => void }> = [];
 let activeDownloads = 0;
 let persistQueue: Promise<void> = Promise.resolve();
+let imagePreviewQueue: Promise<unknown> = Promise.resolve();
 const MAX_CACHE_BYTES = 2 * 1024 * 1024 * 1024;
 const FALLBACK_CACHE_BYTES = 512 * 1024 * 1024;
 const MIN_CACHE_BYTES = 64 * 1024 * 1024;
@@ -35,31 +37,64 @@ const BUDGET_REFRESH_MS = 5 * 60 * 1000;
 const MAX_CONCURRENT_DOWNLOADS = 4;
 
 export async function getCachedResourceObjectUrl(storageKey: string) {
-    const expected = captureUserScope();
-    const target = cacheTarget(storageKey, expected.userScope);
+    const target = cacheTarget(storageKey, getActiveUserScope());
     if (!target) return "";
-    return readCachedObjectUrl(target, expected);
+    return readCachedObjectUrl(target);
+}
+
+export async function cacheResourceImagePreviewObjectUrl(storageKey: string, maxSize: number, reload = false) {
+    const originalTarget = cacheTarget(storageKey, getActiveUserScope());
+    if (!originalTarget || ![128, 512, 1024, 2048].includes(maxSize)) return "";
+    const version = `canvas-preview-v2-p3-${maxSize}`;
+    const target = { ...originalTarget, version, key: `${getActiveUserScope()}:${originalTarget.resourceId}:${version}` };
+    if (reload) await cacheResourceObjectUrl(storageKey, true);
+    const cached = reload ? "" : await readCachedObjectUrl(target);
+    if (cached) return cached;
+    const requestKey = target.key;
+    const pending = inFlight.get(requestKey);
+    if (pending) return pending;
+    // Decode one original at a time, sharing work across duplicated nodes.
+    const task = imagePreviewQueue.catch(() => undefined).then(async () => {
+        const original = await getCachedResourceBlob(storageKey);
+        if (!original) return "";
+        sessionBlobs.set(originalTarget.key, original);
+        const preview = await createCanvasImagePreviewBlob(original, maxSize);
+        if (preview === original) return objectUrl(originalTarget.key, original);
+        sessionBlobs.set(target.key, preview);
+        void enqueuePersist(target, preview);
+        const previous = objectUrls.get(target.key);
+        if (reload) objectUrls.delete(target.key);
+        const url = objectUrl(target.key, preview);
+        if (reload && previous) URL.revokeObjectURL(previous);
+        return url;
+    }).catch((error) => {
+        console.warn("图片预览生成失败，保留原图显示", { resourceId: target.resourceId, error });
+        return cacheResourceObjectUrl(storageKey);
+    }).finally(() => inFlight.delete(requestKey));
+    inFlight.set(requestKey, task);
+    imagePreviewQueue = task;
+    return task;
 }
 
 /** 同步读取本会话内存中的 Blob URL，命中时节点首帧即可上屏，不必等 IndexedDB 异步读取。 */
-export function peekCachedResourceObjectUrl(storageKey: string) {
+export function peekCachedResourceObjectUrl(storageKey: string, previewSize?: number) {
     const resourceId = resourceIdFromStorageKey(storageKey);
     if (!resourceId) return "";
     const userScope = getActiveUserScope();
+    if (previewSize && [128, 512, 1024, 2048].includes(previewSize)) {
+        return objectUrls.get(`${userScope}:${resourceId}:canvas-preview-v2-p3-${previewSize}`) || "";
+    }
     return objectUrls.get(`${userScope}:${resourceId}:file`) || "";
 }
 
 export async function cacheResourceObjectUrl(storageKey: string, reload = false, priority = false) {
-    const expected = captureUserScope();
-    const target = cacheTarget(storageKey, expected.userScope);
+    const target = cacheTarget(storageKey, getActiveUserScope());
     if (!target) return "";
-    const requestKey = `${target.key}:${expected.epoch}`;
+    const requestKey = target.key;
     if (reload) {
         // Explicit image decode recovery must bypass both memory and IndexedDB.
         await inFlight.get(requestKey)?.catch(() => undefined);
-        assertUserScope(expected);
-        const blob = await withDownloadSlot(() => downloadResourceBlob(storageKey, target, expected), priority);
-        assertUserScope(expected);
+        const blob = await withDownloadSlot(() => downloadResourceBlob(storageKey, target), priority);
         if (!blob) return "";
         const oldUrl = objectUrls.get(target.key);
         objectUrls.delete(target.key);
@@ -67,8 +102,7 @@ export async function cacheResourceObjectUrl(storageKey: string, reload = false,
         if (oldUrl) URL.revokeObjectURL(oldUrl);
         return url;
     }
-    const cached = await readCachedObjectUrl(target, expected);
-    assertUserScope(expected);
+    const cached = await readCachedObjectUrl(target);
     if (cached) return cached;
     const pending = inFlight.get(requestKey);
     if (pending) {
@@ -79,7 +113,7 @@ export async function cacheResourceObjectUrl(storageKey: string, reload = false,
         return pending;
     }
 
-    const task = withDownloadSlot(() => downloadAndCacheResource(storageKey, target, expected), priority, requestKey).finally(() => inFlight.delete(requestKey));
+    const task = withDownloadSlot(() => downloadAndCacheResource(storageKey, target), priority, requestKey).finally(() => inFlight.delete(requestKey));
     inFlight.set(requestKey, task);
     return task;
 }
@@ -89,13 +123,11 @@ export async function cacheResourceObjectUrl(storageKey: string, reload = false,
  * 这样不会让 IndexedDB 缓存阻塞首帧，同时后续打开可直接复用本地 Object URL。
  */
 export function scheduleResourceBlobCache(storageKey: string, delayMs = 4_000) {
-    const expected = captureUserScope();
-    const requestKey = `${expected.userScope}:${expected.epoch}:${storageKey}`;
+    const requestKey = `${getActiveUserScope()}:${storageKey}`;
     if (!resourceIdFromStorageKey(storageKey) || scheduled.has(requestKey)) return;
     scheduled.add(requestKey);
     const run = () => {
         void Promise.resolve().then(() => {
-            assertUserScope(expected);
             return cacheResourceObjectUrl(storageKey);
         })
             .catch((error) => {
@@ -131,10 +163,8 @@ function runDownloadQueue() {
     while (activeDownloads < MAX_CONCURRENT_DOWNLOADS && downloadQueue.length) downloadQueue.shift()?.run();
 }
 
-export async function primeResourceBlobCache(storageKey: string, blob: Blob, expectedScope?: CapturedUserScope) {
-    const expected = expectedScope ?? captureUserScope();
-    assertUserScope(expected);
-    const target = cacheTarget(storageKey, expected.userScope);
+export async function primeResourceBlobCache(storageKey: string, blob: Blob) {
+    const target = cacheTarget(storageKey, getActiveUserScope());
     if (!target) return "";
     sessionBlobs.set(target.key, blob);
     const url = objectUrl(target.key, blob);
@@ -143,34 +173,28 @@ export async function primeResourceBlobCache(storageKey: string, blob: Blob, exp
 }
 
 export async function getCachedResourceBlob(storageKey: string) {
-    const expected = captureUserScope();
-    const target = cacheTarget(storageKey, expected.userScope);
+    const target = cacheTarget(storageKey, getActiveUserScope());
     if (!target) return null;
     const sessionBlob = sessionBlobs.get(target.key);
     if (sessionBlob) return sessionBlob;
     const cached = await readPersistedBlob(target);
-    assertUserScope(expected);
     if (cached) {
         touchCacheMetaSafely(target);
         return cached;
     }
     await cacheResourceObjectUrl(storageKey, false, true);
-    assertUserScope(expected);
     const result = sessionBlobs.get(target.key) || await readPersistedBlob(target);
-    assertUserScope(expected);
     return result;
 }
 
-async function downloadAndCacheResource(storageKey: string, target: ResourceCacheMeta, expected: CapturedUserScope) {
-    const blob = await downloadResourceBlob(storageKey, target, expected);
-    assertUserScope(expected);
+async function downloadAndCacheResource(storageKey: string, target: ResourceCacheMeta) {
+    const blob = await downloadResourceBlob(storageKey, target);
     if (!blob) return "";
     return objectUrl(target.key, blob);
 }
 
-async function downloadResourceBlob(storageKey: string, target: ResourceCacheMeta, expected: CapturedUserScope) {
-    const blob = await getResourceBlob(storageKey, { expectedScope: expected });
-    assertUserScope(expected);
+async function downloadResourceBlob(storageKey: string, target: ResourceCacheMeta) {
+    const blob = await getResourceBlob(storageKey);
     if (!blob) return null;
     sessionBlobs.set(target.key, blob);
     if (blob.size <= MAX_CACHE_BYTES) void enqueuePersist(target, blob);
@@ -232,26 +256,31 @@ async function persistBlob(target: ResourceCacheMeta, blob: Blob) {
     }
 }
 
-async function readCachedObjectUrl(target: ResourceCacheMeta, expected: CapturedUserScope) {
+async function readCachedObjectUrl(target: ResourceCacheMeta) {
     const existing = objectUrls.get(target.key);
     if (existing) {
         touchCacheMetaSafely(target);
         return existing;
     }
     const blob = sessionBlobs.get(target.key) || await readPersistedBlob(target);
-    assertUserScope(expected);
     if (!blob) return "";
     touchCacheMetaSafely(target);
     return objectUrl(target.key, blob);
 }
 
-async function readPersistedBlob(target: ResourceCacheMeta) {
-    try {
-        return await blobStore.getItem<Blob>(target.key);
-    } catch (error) {
+function readPersistedBlob(target: ResourceCacheMeta) {
+    // Restoring duplicate nodes must share the IndexedDB read too, before the
+    // object URL exists. Large Blob replies otherwise cross WebKit IPC once
+    // per node even though their bytes and storage key are identical.
+    const requestKey = target.key;
+    const pending = persistedReads.get(requestKey);
+    if (pending) return pending;
+    const read = blobStore.getItem<Blob>(target.key).catch((error) => {
         console.warn("媒体缓存读取失败，重新下载资源", { resourceId: target.resourceId, error });
         return null;
-    }
+    }).finally(() => persistedReads.delete(requestKey));
+    persistedReads.set(requestKey, read);
+    return read;
 }
 
 function cacheTarget(storageKey: string, userScope: string): ResourceCacheMeta | null {

@@ -95,3 +95,45 @@ Directories under `plugin-packages/` are qisiTV protocol descriptions and
 adapters, including inherited protocols. Generated `.qisitv-plugin` archives are build artifacts and are not
 committed to the public source snapshot. Provider names identify compatible
 APIs only. No affiliation or endorsement is implied.
+
+### Field mappings derived from LiteLLM
+
+The video field mappings and their fixed success samples in
+`plugin-packages/runway-video` were transposed from LiteLLM's MIT-licensed
+provider code outside its `enterprise/` directory:
+
+- Project: <https://github.com/BerriAI/litellm>
+- Commit: `dddbaa803d6e9fcc862ea7a5412f771cb1ae040e`
+- Files consulted: `litellm/llms/runwayml/videos/transformation.py`,
+  `tests/unit/llms/runwayml/videos/test_runway_video_transformation.py`,
+  `litellm/llms/gemini/videos/transformation.py`,
+  `litellm/constants.py` (the default `X-Runway-Version` value)
+
+They were re-expressed as BeefTV declarative manifest templates and Go tests;
+no Python runtime or Python source is shipped.
+The same notice ships inside the plugin package as
+`plugin-packages/runway-video/LICENSE`, so a downloaded
+`runway-video.beeftv-plugin` carries it without the repository root. LiteLLM's MIT permission
+notice applies to that derived material:
+
+> MIT License
+>
+> Copyright (c) 2023 Berri AI
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy
+> of this software and associated documentation files (the "Software"), to deal
+> in the Software without restriction, including without limitation the rights
+> to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+> copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all
+> copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+> IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+> FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+> AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+> LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+> OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+> SOFTWARE.

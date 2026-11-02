@@ -6,9 +6,10 @@ import { useState } from "react";
 
 import { MediaPreview } from "@/components/media-preview";
 import { formatTaskKind, statusLabel } from "@/lib/generation-task-display";
+import { isTaskRegenerateBlocked } from "@/lib/task-outcome";
 import type { GenerationTask } from "@/services/api/task-center";
 import type { AiConfig } from "@/stores/use-config-store";
-import { formatModelName, getTaskCanvasContext, isTaskFailed, statusDotClassName, taskAttentionReason, TaskDate, taskRetryBlocked } from "./task-shared";
+import { formatModelName, getTaskCanvasContext, isTaskFailed, statusDotClassName, taskAttentionReason, TaskDate } from "./task-shared";
 import { TaskVideoThumbnail } from "./task-video-thumbnail";
 
 export function TaskListRow({
@@ -33,7 +34,7 @@ export function TaskListRow({
     const context = getTaskCanvasContext(task, canvasById, projectNameById);
     const isActive = task.status === "queued" || task.status === "running";
     const isFailed = isTaskFailed(task);
-    const retryDisabled = taskRetryBlocked(task);
+    const retryDisabled = isTaskRegenerateBlocked(task);
     return (
         <article className={`product-collection-card task-record-row group${isFailed ? " is-attention" : ""}`}>
             <TaskPreviewThumbnail task={task} onOpen={onPreview} />

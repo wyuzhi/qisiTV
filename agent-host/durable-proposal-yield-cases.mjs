@@ -96,18 +96,22 @@ test('successful proposal ends through official control without a summary reques
 test('writes and plan_update before proposing persist without a post-proposal model request', { timeout: 30000 }, async t => {
   const plan = { goal: 'Create the next shot', items: [{ id: 'shot', title: 'Generate the first frame', status: 'needs_user' }] };
   const f = await fixture(t, { onRequest: async (_, count) => count === 1
-    ? { toolCalls: [configure, { id: 'plan', name: 'plan_update', args: plan }] }
+    ? { reply: '已按你的要求把首帧画幅调整为 9:16，并更新了制作方案。', toolCalls: [configure, { id: 'plan', name: 'plan_update', args: plan }] }
     : count === 2 ? { toolCalls: [propose] } : { reply: 'Unexpected post-proposal summary.' } });
   const { store } = f.current, entry = await store.createSession('canvas');
   const record = await store.wait(entry, await store.submit(entry, input));
-  assert.equal(f.state.models.length, 2); assert.equal(record.reply, ''); assert.equal(record.error, null);
+  assert.equal(f.state.models.length, 2);
+  assert.equal(record.reply, '已按你的要求把首帧画幅调整为 9:16，并更新了制作方案。');
+  assert.equal(record.error, null);
   assert.equal(record.proposals.length, 1); assert.deepEqual(record.plan.items, plan.items);
   assert.equal(record.proposals[0].source.canvasRevision, 2);
   assert.equal(record.change.revisionAfter, 2); assert.deepEqual(record.change.updatedNodeIds, ['shot']);
   assert.deepEqual(f.state.completions[0].record.change, record.change);
+  assert.equal(f.state.completions[0].record.reply, '已按你的要求把首帧画幅调整为 9:16，并更新了制作方案。');
   const history = await store.history('canvas', entry.sessionId);
   assert.deepEqual(history.plan.items, plan.items); assert.deepEqual(history.turns[0].plan.items, plan.items);
-  assert.match(f.state.models[1].tools.find(tool => tool.function.name === 'canvas_generation_propose').function.description, /先完成本阶段的计划更新/);
+  assert.equal(history.turns[0].reply, '已按你的要求把首帧画幅调整为 9:16，并更新了制作方案。');
+  assert.match(f.state.models[1].tools.find(tool => tool.function.name === 'canvas_generation_propose').function.description, /plan_update 与本调用同一次响应发出/);
 });
 
 for (const failure of ['rejected', 'error-result']) {
@@ -185,4 +189,50 @@ test('reopen after a failed Go completion only acknowledges the durable result a
   assert.equal(f.state.completions.length, 1); assert.deepEqual(f.state.completions[0].record.proposals, expected);
   const replay = await store.submit(entry, input);
   assert.equal(replay.id, recovered.id); assert.deepEqual((await store.wait(entry, replay)).proposals, expected);
+});
+
+test('plan_update sent in the same response as a successful proposal ends the turn without a summary request', { timeout: 30000 }, async t => {
+  const plan = { goal: 'Create the next shot', items: [{ id: 'shot', title: 'Generate the first frame', status: 'needs_user' }] };
+  const f = await fixture(t, { calls: [{ id: 'plan', name: 'plan_update', args: plan }, propose] });
+  const { store } = f.current, entry = await store.createSession('canvas');
+  const record = await store.wait(entry, await store.submit(entry, input));
+  assert.equal(f.state.models.length, 1, 'no extra request after plan_update + proposal');
+  assert.equal(record.proposals.length, 1); assert.deepEqual(record.plan.items, plan.items);
+  assert.equal(record.error, null); assert.equal(record.status, 'done');
+});
+
+test('plan_update beside a rejected proposal does not end the turn', { timeout: 30000 }, async t => {
+  const plan = { goal: 'Create the next shot', items: [{ id: 'shot', title: 'Generate the first frame', status: 'needs_user' }] };
+  const f = await fixture(t, { reject: true, calls: [{ id: 'plan', name: 'plan_update', args: plan }, propose] });
+  const { store } = f.current, entry = await store.createSession('canvas');
+  const record = await store.wait(entry, await store.submit(entry, input));
+  assert.equal(f.state.models.length, 2, 'the model must see the rejected proposal');
+  assert.equal(record.proposals.length, 0); assert.equal(record.reply, 'Processed every result.');
+});
+
+test('plan_update without a proposal in the response keeps the normal continuation', { timeout: 30000 }, async t => {
+  const plan = { goal: 'Plan only', items: [{ id: 'shot', title: 'Think', status: 'done' }] };
+  const f = await fixture(t, { calls: [{ id: 'plan', name: 'plan_update', args: plan }] });
+  const { store } = f.current, entry = await store.createSession('canvas');
+  const record = await store.wait(entry, await store.submit(entry, input));
+  assert.equal(f.state.models.length, 2); assert.equal(record.reply, 'Processed every result.');
+});
+
+test('the same-response marker is rewritten by every response: a later plan_update alone does not end the turn', { timeout: 30000 }, async t => {
+  const done = { goal: 'Plan only', items: [{ id: 'shot', title: 'Think', status: 'done' }] };
+  const f = await fixture(t, { reject: true, onRequest: async (_, count) => count === 1
+    ? { toolCalls: [{ id: 'plan1', name: 'plan_update', args: done }, propose] }
+    : count === 2 ? { toolCalls: [{ id: 'plan2', name: 'plan_update', args: done }] } : { reply: 'Processed every result.' } });
+  const { store } = f.current, entry = await store.createSession('canvas');
+  const record = await store.wait(entry, await store.submit(entry, input));
+  assert.equal(f.state.models.length, 3, 'the rejected proposal and the plan-only round both go back to the model');
+  assert.equal(record.proposals.length, 0); assert.equal(record.reply, 'Processed every result.');
+});
+
+test('proposal listed before plan_update in the same response still ends the turn', { timeout: 30000 }, async t => {
+  const plan = { goal: 'Create the next shot', items: [{ id: 'shot', title: 'Generate the first frame', status: 'needs_user' }] };
+  const f = await fixture(t, { calls: [propose, { id: 'plan', name: 'plan_update', args: plan }] });
+  const { store } = f.current, entry = await store.createSession('canvas');
+  const record = await store.wait(entry, await store.submit(entry, input));
+  assert.equal(f.state.models.length, 1); assert.equal(record.proposals.length, 1); assert.deepEqual(record.plan.items, plan.items);
 });

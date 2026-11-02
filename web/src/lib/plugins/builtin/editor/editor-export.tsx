@@ -22,7 +22,6 @@ import { exportTimelineToMp4, type TimelineExportProgress } from "@/lib/timeline
 import { resourceFileUrl } from "@/services/api/resources";
 import { compileTimelineRenderPlan, type TimelineRenderResult } from "@/services/api/timeline-tasks";
 import { isIgnorablePlanPreviewError, RENDER_PLAN_PREVIEW_DEBOUNCE_MS } from "@/lib/timeline/timeline-plan-preview";
-import { captureUserScope } from "@/lib/user-scope-guard";
 import type { TimelineProject } from "@/types/timeline";
 
 type ExportState = {
@@ -122,7 +121,6 @@ export function EditorExport() {
     const renderRemote = async () => {
         if (!project || sources.length === 0 || runningRef.current) return;
         runningRef.current = true;
-        const expectedScope = captureUserScope();
         const originalProjectId = projectId;
         const originalTimeline = project;
         const observer = new AbortController();
@@ -136,7 +134,6 @@ export function EditorExport() {
             const session = beginLocalExecutorSession(originalProjectId, {
                 controller: observer,
                 getLiveProjectId: () => projectIdRef.current,
-                expectedScope,
             });
             const { task, result } = await runOwnedTimelineRender({
                 session,

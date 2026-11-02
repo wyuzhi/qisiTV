@@ -28,47 +28,8 @@ func (s *Service) localChannelModel(channelID, modelKey string) (localChannelMod
 }
 
 func (s *Service) localChannelModelListItems(intent *ModelRequestIntent) []map[string]any {
-	items := []map[string]any{}
-	for _, item := range modelcatalog.FilterLocalChannelModels(s.localChannelModels(), intent) {
-		selection := map[string]any{"channelId": item.ChannelID, "channelModelKey": item.Model}
-		if item.ChannelID == beefapi.ChannelID {
-			selection["credentialRef"] = managedBeefAPIRef
-		}
-		entry := map[string]any{"name": item.DisplayName, "capability": item.Capability, "selection": selection}
-		if item.CapabilityConfig != nil {
-			entry["options"] = item.CapabilityConfig
-		}
-		items = append(items, entry)
-	}
-	return items
+	return modelcatalog.LocalChannelModelListItems(s.localChannelModels(), intent, beefapi.ChannelID, managedBeefAPIRef)
 }
 
-func catalogModelName(raw any) string {
-	item, _ := raw.(map[string]any)
-	if item == nil {
-		return ""
-	}
-	if name, _ := item["name"].(string); name != "" {
-		return name
-	}
-	return ""
-}
-
-func coerceCatalogModels(value any) []map[string]any {
-	switch typed := value.(type) {
-	case []map[string]any:
-		return append([]map[string]any{}, typed...)
-	case []any:
-		items := make([]map[string]any, 0, len(typed))
-		for _, raw := range typed {
-			item, _ := raw.(map[string]any)
-			if item == nil {
-				continue
-			}
-			items = append(items, item)
-		}
-		return items
-	default:
-		return []map[string]any{}
-	}
-}
+func catalogModelName(raw any) string                 { return modelcatalog.CatalogModelName(raw) }
+func coerceCatalogModels(value any) []map[string]any  { return modelcatalog.CoerceCatalogModels(value) }

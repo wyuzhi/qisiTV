@@ -19,7 +19,11 @@ let canvas = { revision: 7, nodes: [], connections: [] };
 const readJSON = async req => { let raw = ''; for await (const part of req) raw += part; return JSON.parse(raw || '{}'); };
 const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
 const text = message => typeof message.content === 'string' ? message.content : (message.content || []).map(part => part.text || '').join('');
-const system = body => body.messages.filter(m => ['system', 'developer'].includes(m.role)).map(text).join('\n');
+const systemHeader = body => body.messages.filter(m => ['system', 'developer'].includes(m.role)).map(text).join('\n');
+const system = body => {
+  assert.doesNotMatch(systemHeader(body), /<beeftv_studio>/);
+  return text(body.messages.filter(m => m.role === 'user').at(-1) || {});
+};
 const users = body => body.messages.filter(m => m.role === 'user').map(text).join('\n');
 const descriptors = [
   { id: 'canvas.get', readOnly: true, replay: 'safe', assistantModes: ['canvas', 'read-only', 'full-access'], scope: 'canvas', summary: 'Read canvas', params: { type: 'object', properties: { canvasId: { type: 'string' } }, required: ['canvasId'] } },
@@ -27,11 +31,31 @@ const descriptors = [
 ];
 const provider = createServer(async (req, res) => {
   const body = await readJSON(req); payloads.push(body);
-  const tool = providerMode === 'unbound' && providerStep++ === 0
+  const step = providerStep++;
+  let tool = providerMode === 'unbound' && step === 0
     ? { name: 'canvas_nodes_create', arguments: JSON.stringify({ expectedRevision: canvas.revision, nodes: [{ id: 'image-new', type: 'image', title: '新首帧' }, { id: 'video-new', type: 'video', title: '新视频' }] }) } : null;
+  if (providerMode === 'foreign-read' && step === 0) {
+    canvas = { ...canvas, revision: canvas.revision + 1, nodes: [{ id: 'edited', type: 'text', title: '用户刚修改的节点' }] };
+    tool = { name: 'canvas_get', arguments: '{}' };
+  }
+  if (providerMode === 'foreign-hidden' && step === 0) {
+    canvas.revision++;
+    canvas.nodes.at(-1).metadata = { content: '用户在长画布末尾改过的正文' };
+    tool = { name: 'canvas_get', arguments: '{}' };
+  }
+  if (providerMode === 'conflict' && step < 2) {
+    tool = { name: 'canvas_nodes_create', arguments: JSON.stringify({ expectedRevision: canvas.revision,
+      nodes: [{ id: step === 0 ? 'rejected' : 'replanned', type: 'text', title: '重新规划后创建' }] }) };
+    if (step === 0) canvas = { ...canvas, revision: canvas.revision + 1, nodes: [{ id: 'user-kept', type: 'text', title: '保留用户修改' }] };
+  }
+  if (providerMode === 'read-outage' && step < 2) {
+    tool = { name: 'canvas_nodes_create', arguments: JSON.stringify({ expectedRevision: canvas.revision,
+      nodes: [{ id: `outage-${step}`, type: 'text', title: '读取失败前的写入' }] }) };
+    if (step === 0) readFailure = 'denied';
+  }
   res.writeHead(200, { 'content-type': 'text/event-stream' });
   const frame = (delta, finish_reason = null) => res.write('data: ' + JSON.stringify({ id: 'synthetic', object: 'chat.completion.chunk', choices: [{ index: 0, delta, finish_reason }] }) + '\n\n');
-  frame({ role: 'assistant', ...(tool ? { tool_calls: [{ index: 0, id: 'create-unbound', type: 'function', function: tool }] } : { content: 'Synthetic acknowledgement.' }) });
+  frame({ role: 'assistant', ...(tool ? { tool_calls: [{ index: 0, id: `call-${step}`, type: 'function', function: tool }] } : { content: 'Synthetic acknowledgement.' }) });
   frame({}, tool ? 'tool_calls' : 'stop');
   res.end('data: [DONE]\n\n');
 });
@@ -61,7 +85,7 @@ const ops = createServer(async (req, res) => {
     return res.end(JSON.stringify({ code: 0, data: { op: 'canvas.get', replayed: false, result } }));
   }
   if (req.url === '/api/ops/canvas.nodes.create' && !readOnly) {
-    assert.equal(body.params.expectedRevision, canvas.revision);
+    if (body.params.expectedRevision !== canvas.revision) return res.writeHead(409).end(JSON.stringify({ code: 409, reason: 'stale_revision', msg: 'Canvas changed' }));
     canvas = { ...canvas, revision: canvas.revision + 1, nodes: [...canvas.nodes, ...body.params.nodes] };
     return res.end(JSON.stringify({ code: 0, data: { op: 'canvas.nodes.create', replayed: false, result: { canvasId: body.params.canvasId, revision: canvas.revision, created: body.params.nodes } } }));
   }
@@ -118,12 +142,12 @@ try {
   for (const failure of ['missing', 'wrong-canvas', 'bad-revision', 'bad-nodes', 'bad-connections', 'denied', 'business-error', 'non-json']) {
     await scenario(`unknown-${failure}-does-not-reuse-studio-or-reset-snapshot`, async () => {
       readFailure = failure;
-      const [failed] = await chat(); assert.doesNotMatch(system(failed), /<beeftv_studio>|画布是空的/);
+      const [failed] = await chat(); assert.match(system(failed), /当前画布无法读取/); assert.doesNotMatch(system(failed), /画布是空的/);
       readFailure = ''; canvas.revision++;
       canvas.nodes[0].metadata.content += '-changed';
       const [recovered] = await chat();
       assert.match(system(recovered), /文本 6/);
-      const lastUser = recovered.messages.filter(m => m.role === 'user').at(-1);
+      const lastUser = recovered.messages.filter(m => m.role === 'user' && !text(m).trim().startsWith('<beeftv_studio>')).at(-1);
       assert.match(text(lastUser), /用户修改了「原节点0」/); assert.doesNotMatch(text(lastUser), /新增 6 个|删除了/);
     });
     readFailure = '';
@@ -153,6 +177,56 @@ try {
     assert.match(users(bodies[2]), /制作现场检查/); assert.match(users(bodies[2]), /image-new/); assert.match(users(bodies[2]), /video-new/);
     assert.match(users(bodies[2]), /expectedRevision=31/);
     assert.equal(calls.filter(c => c.path === '/api/ops/canvas.nodes.create').length, 1);
+  });
+  await scenario('foreign-edit-after-model-dispatch-is-current-on-next-model-request', async () => {
+    canvas = { revision: 40, nodes: [{ id: 'old', type: 'text', title: '旧节点' }], connections: [] };
+    providerMode = 'foreign-read'; providerStep = 0;
+    const bodies = await chat('foreign-canvas');
+    assert.equal(bodies.length, 2);
+    assert.match(system(bodies[1]), /画布版本 41/);
+    assert.match(system(bodies[1]), /用户刚修改的节点/);
+    assert.doesNotMatch(system(bodies[1]), /画布版本 40/);
+  });
+  await scenario('CAS-conflict-returns-new-evidence-and-replans-without-replaying-rejected-write', async () => {
+    canvas = { revision: 50, nodes: [], connections: [] };
+    providerMode = 'conflict'; providerStep = 0;
+    const bodies = await chat('conflict-canvas');
+    assert.equal(bodies.length, 3);
+    assert.match(system(bodies[1]), /画布版本 51/);
+    assert.match(JSON.stringify(bodies[1].messages.filter(m => m.role === 'tool')), /stale_revision/);
+    assert.deepEqual(canvas.nodes.map(n => n.id), ['user-kept', 'replanned']);
+    assert.equal(canvas.revision, 52);
+  });
+  await scenario('edits-outside-bounded-node-preview-still-reach-the-next-decision', async () => {
+    canvas = { revision: 55, nodes: Array.from({ length: 12 }, (_, i) => ({ id: `brief-${i}`, type: 'text', title: `内容节点${i}`, metadata: { content: '原文' } })), connections: [] };
+    providerMode = 'foreign-hidden'; providerStep = 0;
+    const bodies = await chat('long-canvas');
+    assert.equal(bodies.length, 2);
+    assert.match(system(bodies[1]), /用户修改了「内容节点11」/);
+    assert.match(system(bodies[1]), /画布版本 56/);
+  });
+  await scenario('read-outage-fences-writes-and-next-explicit-request-recovers', async () => {
+    canvas = { revision: 60, nodes: [], connections: [] };
+    providerMode = 'read-outage'; providerStep = 0;
+    const before = calls.filter(c => c.path === '/api/ops/canvas.nodes.create').length;
+    const bodies = await chat('outage-canvas');
+    assert.equal(bodies.length, 3);
+    assert.match(system(bodies[1]), /当前画布无法读取/);
+    assert.match(JSON.stringify(bodies[2].messages.filter(m => m.role === 'tool')), /canvas_snapshot_unavailable/);
+    assert.equal(calls.filter(c => c.path === '/api/ops/canvas.nodes.create').length - before, 1);
+    assert.deepEqual(canvas.nodes.map(n => n.id), ['outage-0']);
+    readFailure = ''; providerMode = '';
+    const [recovered] = await chat('outage-canvas');
+    assert.match(system(recovered), /画布版本 61/);
+    assert.doesNotMatch(system(recovered), /当前画布无法读取/);
+  });
+  await scenario('host-restart-preserves-session-and-refreshes-live-canvas-before-model', async () => {
+    await startHost(opsPort, modelPort, false);
+    canvas = { ...canvas, revision: 62, nodes: [{ id: 'after-restart', type: 'text', title: '重启后的现场' }] };
+    const [body] = await chat('outage-canvas');
+    assert.match(system(body), /画布版本 62/);
+    assert.match(system(body), /重启后的现场/);
+    assert.match(users(body), /Check the current canvas/);
   });
 } catch (error) { results.push({ name: 'probe-runtime', passed: false, error: error.message }); }
 finally {

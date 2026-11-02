@@ -41,7 +41,7 @@ On the website's Agent page, choose Codex, WorkBuddy, Claude Desktop / Code, Ope
 
 ## Local development
 
-Requires Bun and Go 1.25. Clone this repository:
+Requires Bun and Go 1.26. Clone this repository:
 
 ```bash
 git clone https://github.com/wyuzhi/qisiTV.git

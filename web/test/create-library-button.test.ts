@@ -55,7 +55,7 @@ describe("creation library button", () => {
 
     test("previews prompt reference images without removing them", () => {
         const createSource = readCreateWorkspaceSource();
-        const canvasSource = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-node-prompt-panel.tsx"), "utf8");
+        const canvasSource = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-node-reference-shelf.tsx"), "utf8");
 
         expect(createSource).toContain('className="creation-user-message-attachments"');
         expect(createSource).toContain('setPreviewType(kind === "video" ? "video" : "image")');
@@ -86,7 +86,7 @@ describe("creation library button", () => {
         expect(source).toContain("清空全部素材");
         expect(source).toContain('role="group"');
         expect(source).toContain("aria-pressed={referenceFilter === filter.id}");
-        expect(source).toContain('{ id: "file", label: "文件", count: referenceCounts.file }');
+        expect(source).toContain('{ id: "image", label: "图片", count: referenceCounts.image, limit: creationReferenceLimit(props.referenceLimits, "image") }');
         expect(source).toContain("canDragReferences");
         expect(source).toContain("creation-reference-track-wrapper");
         expect(source).toContain("creation-reference-stack-card");

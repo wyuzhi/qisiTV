@@ -119,11 +119,33 @@ eagle-asset-connector.beeftv-plugin
 
 - `id`：全局唯一，使用小写 kebab-case；安装后不能随意变更。
 - `version`：遵循 SemVer，用于更新和回滚判断。
-- `apiVersion`：固定为 `beeftv.plugin/v1`，不接受旧版本或平行 Manifest。
+- `apiVersion`：支持 `beeftv.plugin/v1`、`v2` 和 `v3`。v2 增加编辑器插槽；v3 保留 v2 的 UI 结构，并要求宿主支持 provider 变量、默认路径前缀及图片流响应。使用这些新字段必须声明 v3，旧宿主会在加载时拒绝该清单，避免忽略字段后错误提交。已有 v1/v2 插件继续读取。
 - `contributes`：声明 provider、workflow、canvasNodes、transforms、assetSources、agents 等能力。
 - `permissions`：最小权限集合，宿主在安装和首次使用时展示。
 - `dependencies`：插件依赖的其他插件或宿主能力。
 - `integrity`：用于校验远程产物是否被替换。
+
+### Provider 的 v3 请求与图片响应
+
+`contributes.providers[]` 可在 v3 清单中声明 `variables`：按数组顺序计算的纯表达式，输入为 `request`，前面的变量通过 `vars.<name>` 读取。变量仅在当前请求内存在，不共享状态。重复名称、前向引用，以及请求模板或参数校验中不存在的变量会在加载时拒绝。
+
+```json
+{
+  "variables": [{ "name": "size", "value": { "$coalesce": [{ "$ref": "request.aspectRatio" }, "2K"] } }],
+  "create": {
+    "method": "POST",
+    "path": "/images/generations",
+    "defaultPathPrefix": "/api/v3",
+    "body": { "size": { "$ref": "vars.size" } }
+  }
+}
+```
+
+`defaultPathPrefix` 是连接地址没有路径时使用的默认前缀；连接地址已有 `/v1` 等路径时保留该路径。它只接受相对路径，不能包含查询参数、片段或上级目录。
+
+图片响应可声明 `response.detectImageMime: true`，按实际 PNG、JPEG 或 WebP 字节确定内联图片类型。`response.stream` 指定事件类型路径、完成事件、错误事件、图片表达式和可选的非负整数索引路径；只有声明了此字段才读取图片 SSE。网关错标 Content-Type 时，仍可识别明确的 `data:` / `event:` 流。重复索引以第一张有效图片为准；坏事件不占用索引，部分成功保留已收到的图片，`[DONE]` 后不再接收。图层的名称、描述、边界框和层次顺序随图片结果保留。
+
+这些字段必须使用 `beeftv.plugin/v3`；旧宿主拒绝加载该版本，避免忽略字段后发送错误请求。
 
 ## 6. 宿主 API 边界
 
@@ -190,6 +212,7 @@ export interface PluginSetupApi {
 4. 停用阶段禁止新请求进入，等待可取消任务结束后调用清理函数。
 5. 卸载阶段清理插件存储、事件订阅、注册命令和可选的插件节点数据。
 6. 更新失败时保留旧版本，不能留下半启用状态。
+7. 官方协议插件随发行包撤下时不会立即删除：启动先盘点本地模型配置、系统渠道模型和未取回结果的任务，仍有引用就保留执行能力，并在插件中心和协议目录接口里带上“已撤下”标记；没有任何引用时才清理。目前前端还不读这个标记，新建模型时把已撤下的协议过滤掉，要等以后前端接入后才生效。
 
 平台状态与用户状态分开保存：`effectiveEnabled = platformAvailable && userEnabled`。协议和自定义插件只有平台状态。用户停用工作流插件后禁止新任务进入，但已经接收的任务和 Bridge 结果回传继续完成；管理员停用属于平台硬上限，同样不强行破坏已进入执行阶段的任务。
 

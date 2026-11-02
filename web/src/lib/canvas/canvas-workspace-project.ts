@@ -58,8 +58,29 @@ export function canvasIdsForWorkspaceProjects<T extends CanvasWorkspaceProjectRe
     return canvases
         .filter((canvas) => selectedWorkspaceProjectIds.has(canvasWorkspaceProjectId(canvas)))
         .slice()
-        .sort(compareCanvasCreationOrder)
+        .sort((left, right) => {
+            const leftProject = canvasWorkspaceProjectId(left);
+            const rightProject = canvasWorkspaceProjectId(right);
+            if (leftProject === rightProject) {
+                if (left.id === leftProject) return -1;
+                if (right.id === rightProject) return 1;
+            }
+            return compareCanvasCreationOrder(left, right);
+        })
         .map((canvas) => canvas.id);
+}
+
+export function resolveWorkspaceExportCanvasIds<T extends CanvasWorkspaceProjectRecord>(
+    canvases: readonly T[],
+    canvasIds: readonly string[],
+    options: { singleCanvasOnly?: boolean } = {},
+): string[] {
+    const validIds = [...new Set(canvasIds.filter(Boolean))];
+    if (options.singleCanvasOnly) return validIds;
+    const knownIds = new Set(canvases.map((canvas) => canvas.id));
+    const resolved = canvasIdsForWorkspaceProjects(canvases, validIds);
+    const unresolved = validIds.filter((id) => !knownIds.has(id));
+    return [...new Set([...resolved, ...unresolved])];
 }
 
 function compareCanvasCreationOrder(left: CanvasWorkspaceProjectRecord, right: CanvasWorkspaceProjectRecord) {

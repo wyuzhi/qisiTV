@@ -28,6 +28,16 @@ export function validEngineSession(value: unknown, now = Date.now()): value is E
 
 export function getEngineSession() { return validEngineSession(active) ? active : undefined; }
 
+/** Async imports must not continue writing through a different pairing. */
+export function captureEngineSessionGuard() {
+    const expected = getEngineSession();
+    return () => {
+        if (!expected || getEngineSession()?.token !== expected.token) {
+            throw new DOMException("本机引擎连接已改变，请重新执行当前操作", "AbortError");
+        }
+    };
+}
+
 export function rememberEngineSession(session?: EngineSession) {
     if (session && !validEngineSession(session)) throw new Error("本机连接授权无效或已过期");
     active = session;

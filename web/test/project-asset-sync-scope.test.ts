@@ -4,7 +4,6 @@ import localforage from "localforage";
 
 import * as runtimeMode from "@/lib/runtime-mode";
 import { getActiveUserScope, setActiveUserScope } from "@/lib/user-scope";
-import { UserScopeAbandonedError, captureUserScope } from "@/lib/user-scope-guard";
 import { apiClient, ApiError } from "@/services/api/request";
 import { ensureCanvasNodeAsset, retryCanvasAssetSyncAfterRateLimit } from "@/services/project-asset-sync";
 import { persistWorkspaceAssetChanges, persistWorkspaceAssetLink, resetWorkspaceAssetCommitStateForTests } from "@/services/workspace-asset-repository";
@@ -206,41 +205,6 @@ describe("ensureCanvasNodeAsset scope and canonical writes", () => {
         }
     });
 
-    test("A→B→A does not join the abandoned pending key", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        const firstEntered = deferred();
-        const firstGate = deferred();
-        const puts: string[] = [];
-        try {
-            await withAdapter(async (config) => {
-                if (String(config.method).toLowerCase() === "put") {
-                    puts.push(getActiveUserScope());
-                    if (puts.length === 1) {
-                        firstEntered.resolve();
-                        await firstGate.promise;
-                    }
-                    return envelope({ asset: { id: requestAssetID(config), title: "图片", createdAt: "2026-10-02T00:00:00.000Z", updatedAt: "2026-10-02T00:00:00.000Z" } });
-                }
-                return envelope({ asset: { id: requestAssetID(config), title: "图片", category: "material", status: "confirmed", mediaType: "image", versionCount: 1, usages: [], position: 0, updatedAt: "2026-10-02T00:00:00.000Z" } });
-            }, async () => {
-                const first = ensureCanvasNodeAsset({ canvasId: "canvas-1", domainProjectId: "project-1", node: imageNode("node-a"), source: "canvas-manual" });
-                await firstEntered.promise;
-                setActiveUserScope("owner-b");
-                setActiveUserScope("owner-a");
-                useAssetStore.setState({ assets: [] });
-                const second = ensureCanvasNodeAsset({ canvasId: "canvas-1", domainProjectId: "project-1", node: imageNode("node-a"), source: "canvas-manual" });
-                firstGate.resolve();
-                await expect(first).rejects.toBeInstanceOf(UserScopeAbandonedError);
-                const result = await second;
-                expect(result.created).toBe(true);
-                expect(puts.length).toBeGreaterThanOrEqual(2);
-            });
-        } finally {
-            restore();
-        }
-    });
-
     test("403 on asset put does not link the project", async () => {
         const restore = switchScope("owner-a");
         desktopBackend();
@@ -288,7 +252,6 @@ describe("ensureCanvasNodeAsset scope and canonical writes", () => {
                         updatedAt: "2026-10-02T00:00:00.000Z",
                     } satisfies Asset,
                     domainProjectId: "project-1",
-                    expectedScope: captureUserScope(),
                 })).rejects.toMatchObject({ status: 409 });
                 expect(urls).toEqual(["put /assets/asset-conflict"]);
             });
@@ -325,7 +288,6 @@ describe("ensureCanvasNodeAsset scope and canonical writes", () => {
     test("same-scope 429 retry continues after wait and then links", async () => {
         const restore = switchScope("owner-a");
         desktopBackend();
-        const expected = captureUserScope();
         const waitStarted = deferred();
         const waitGate = deferred();
         const urls: string[] = [];
@@ -341,9 +303,8 @@ describe("ensureCanvasNodeAsset scope and canonical writes", () => {
                 return envelope({ asset: { id: requestAssetID(config), title: "图片", category: "material", status: "confirmed", mediaType: "image", versionCount: 1, usages: [], position: 0, updatedAt: "2026-10-02T00:00:00.000Z" } });
             }, async () => {
                 const pending = retryCanvasAssetSyncAfterRateLimit(
-                    () => ensureCanvasNodeAsset({ canvasId: "canvas-1", domainProjectId: "project-1", node: imageNode(), source: "canvas-generation", expectedScope: expected }),
+                    () => ensureCanvasNodeAsset({ canvasId: "canvas-1", domainProjectId: "project-1", node: imageNode(), source: "canvas-generation" }),
                     {
-                        expectedScope: expected,
                         wait: async () => {
                             waitStarted.resolve();
                             await waitGate.promise;
@@ -360,40 +321,6 @@ describe("ensureCanvasNodeAsset scope and canonical writes", () => {
             });
         } finally {
             waitGate.resolve();
-            restore();
-        }
-    });
-
-    test("429 wait then account change abandons before the retry request", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        const expected = captureUserScope();
-        const waitStarted = deferred();
-        const waitGate = deferred();
-        const urls: string[] = [];
-        try {
-            await withAdapter(async (config) => {
-                urls.push(requestKey(config));
-                throw httpError(config, 429, "请求过于频繁，请稍后重试");
-            }, async () => {
-                const pending = retryCanvasAssetSyncAfterRateLimit(
-                    () => ensureCanvasNodeAsset({ canvasId: "canvas-1", domainProjectId: "project-1", node: imageNode(), source: "canvas-generation", expectedScope: expected }),
-                    {
-                        expectedScope: expected,
-                        wait: async () => {
-                            waitStarted.resolve();
-                            await waitGate.promise;
-                        },
-                    },
-                );
-                await waitStarted.promise;
-                setActiveUserScope("owner-b");
-                waitGate.resolve();
-                await expect(pending).rejects.toBeInstanceOf(UserScopeAbandonedError);
-                expect(urls.every((url) => url.startsWith("put /assets/"))).toBe(true);
-                expect(urls.some((url) => url.includes("/projects/"))).toBe(false);
-            });
-        } finally {
             restore();
         }
     });
@@ -432,7 +359,7 @@ describe("ensureCanvasNodeAsset scope and canonical writes", () => {
                     expect(again.confirmed).toBe(false);
                     expect(useAssetStore.getState().assets).toHaveLength(1);
 
-                    await expect(persistWorkspaceAssetChanges(captureUserScope())).rejects.toThrow("素材文件尚未保存到工作区");
+                    await expect(persistWorkspaceAssetChanges()).rejects.toThrow("素材文件尚未保存到工作区");
                     expect(urls).toEqual([]);
 
                     unloadAssetStoreDraftsForTests();

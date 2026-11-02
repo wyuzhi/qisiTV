@@ -206,7 +206,7 @@ func TestIntegratedCoffeeFilmBusinessOperations(t *testing.T) {
 			t.Fatal("render dedup failed")
 		}
 		taskID := admitted.Result.(map[string]any)["taskId"].(string)
-		trusted, ok, e := svc.AssistantTurnScopeForHost("coffee-owner", turnID)
+		trusted, ok, e := svc.AssistantTurns().ScopeForHost("coffee-owner", turnID)
 		if e != nil || !ok {
 			t.Fatal("task scope not available", e)
 		}

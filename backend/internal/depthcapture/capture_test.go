@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -447,5 +448,43 @@ func TestProcessCancelDuringDeviceProbeDoesNotFailTask(t *testing.T) {
 	}
 	if tasks.failStage != "" {
 		t.Fatalf("canceled probe wrote fail stage %s", tasks.failStage)
+	}
+}
+
+func TestProcessConforms24FPSPreviewTo30FPS(t *testing.T) {
+	ffmpeg, err := mediatools.ResolveFFmpeg()
+	if err != nil {
+		t.Skip(err)
+	}
+	if _, err := mediatools.ResolveFFprobe(); err != nil {
+		t.Skip(err)
+	}
+	tasks := &fakeTasks{}
+	media := &fakeMedia{resource: testVideo(), body: []byte("mp4-bytes")}
+	svc := New(Deps{
+		GOOS: "darwin", GOARCH: "arm64",
+		Media:     media,
+		Tasks:     tasks,
+		Installer: fakeInstaller{},
+		Stat:      func(string) error { return nil },
+		Getenv: func(key string) string {
+			switch key {
+			case pythonEnv, toolDirEnv, runtimeEnv:
+				return "override"
+			default:
+				return ""
+			}
+		},
+		Run: func(ctx context.Context, python, toolDir, modelRuntime, device, inputPath, outputDir string, onLine func(string)) error {
+			preview := filepath.Join(outputDir, "clip_depth_preview.mp4")
+			cmd := exec.CommandContext(ctx, ffmpeg, "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=64x48:r=24:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", preview)
+			return cmd.Run()
+		},
+	})
+	if err := svc.Process(context.Background(), &model.Task{ID: "t-fps", UserID: "user-1", InputJSON: `{"resourceId":"res-1"}`}); err != nil {
+		t.Fatal(err)
+	}
+	if tasks.result == nil || tasks.result.FPS < 29.95 {
+		t.Fatalf("result = %+v, want >= 30fps", tasks.result)
 	}
 }

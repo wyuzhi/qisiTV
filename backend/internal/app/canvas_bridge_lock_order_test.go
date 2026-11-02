@@ -132,7 +132,7 @@ func (fx *lockOrderFixture) prepareUndo() {
 }
 
 func (fx *lockOrderFixture) undo() error {
-	_, err := fx.service.UndoAssistantTurn(fx.userID, fx.canvasID, "aabbccddeeff0011")
+	_, err := fx.service.AssistantTurns().Undo(fx.userID, fx.canvasID, "aabbccddeeff0011")
 	return err
 }
 

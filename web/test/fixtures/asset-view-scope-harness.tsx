@@ -6,7 +6,6 @@ import { MemoryRouter } from "react-router";
 
 import { AssetLibraryPickerModal } from "../../src/components/assets/asset-library-picker-modal";
 import { setActiveUserScope } from "../../src/lib/user-scope";
-import { assertUserScope, type CapturedUserScope } from "../../src/lib/user-scope-guard";
 import { http } from "../../src/services/api/request";
 import { useUserStore } from "../../src/stores/use-user-store";
 import AssetsPage from "../../src/pages/assets/index";
@@ -16,7 +15,6 @@ type HarnessWindow = Window & {
     __assetViewHarness?: {
         writes: string[];
         toasts: string[];
-        switchABA: () => Promise<void>;
         seedLocalVideo: () => Promise<string>;
     };
 };
@@ -62,13 +60,7 @@ function watchToasts() {
     observer.observe(document.body, { childList: true, subtree: true });
 }
 
-async function switchABA() {
-    await fetch("/harness/switch", { method: "POST" });
-    setActiveUserScope("owner-b");
-    setActiveUserScope("owner-a");
-}
-
-harnessWindow.__assetViewHarness = { writes: [], toasts: [], switchABA,
+harnessWindow.__assetViewHarness = { writes: [], toasts: [],
     seedLocalVideo: () => saveLocalMedia("video:owner-a:local-fixture", new Blob(["persisted-local-video"], { type: "video/mp4" })),
 };
 
@@ -78,7 +70,6 @@ function Harness() {
     return (
         <>
             <div style={{ position: "fixed", top: 0, left: 0, zIndex: 11000, display: "flex", gap: 8, padding: 8 }}>
-                <button type="button" onClick={() => void switchABA()}>switch-aba</button>
                 <button type="button" onClick={() => setPickerOpen(true)}>open-picker</button>
             </div>
             <AssetsPage />
@@ -94,10 +85,8 @@ function Harness() {
                 emptyTitle="没有可引用的素材"
                 emptyDescription="当前账号还没有素材。"
                 onClose={() => setPickerOpen(false)}
-                onConfirm={async (ids: string[], expectedScope: CapturedUserScope) => {
-                    assertUserScope(expectedScope);
-                    await http.post("/harness/confirm", { ids }, { expectedScope });
-                    assertUserScope(expectedScope);
+                onConfirm={async (ids: string[]) => {
+                    await http.post("/harness/confirm", { ids });
                     harnessWindow.__assetViewHarness!.writes.push("confirm");
                     message.success("已加入项目");
                 }}

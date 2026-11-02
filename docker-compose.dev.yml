@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile.dev
       args:
-        GO_IMAGE: ${GO_IMAGE:-golang:1.25-alpine}
+        GO_IMAGE: ${GO_IMAGE:-golang:1.26-alpine}
         GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
         ALPINE_MIRROR: ${ALPINE_MIRROR:-}
     working_dir: /workspace/backend

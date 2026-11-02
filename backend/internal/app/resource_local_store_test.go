@@ -64,7 +64,7 @@ func TestOpenResourceRangeRejectsObjectKeyOutsideLocalStore(t *testing.T) {
 	if err := svc.repo.CreateResource(&resource); err != nil {
 		t.Fatal(err)
 	}
-	stream, err := svc.OpenResourceRange("local", resource.ID, "")
+	stream, err := svc.ResourceService().OpenRange("local", resource.ID, "")
 	if stream != nil {
 		_ = stream.Body.Close()
 	}

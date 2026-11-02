@@ -5,16 +5,17 @@
 - 插件 ID：`kling-video`。
 - Provider ID：`kling-video`。
 - 能力：`video`。
-- 默认 Base URL：`https://api.klingai.com`。
-- 鉴权驱动：`bearer`。
-- 创建：`POST /v1/videos/generations`。
-- 查询：`GET /v1/videos/generations/{{taskId}}`。
+- 默认 Base URL：`https://api-beijing.klingai.com`。
+- 鉴权驱动：`jwt-hs256`。
+- 创建：`POST /v1/videos/text2video`（带图时自动切 `POST /v1/videos/image2video`）。
+- 查询：`GET /v1/videos/text2video/{{taskId}}`（带图时 `GET /v1/videos/image2video/{{taskId}}`）。
 
 ## 配置字段
 
 | 字段 | 类型 | 必填 | 含义 |
 | --- | --- | --- | --- |
-| `apiKey` | secret | 是 | API Key |
+| `apiKey` | secret | 是 | Access Key / API Key |
+| `secretKey` | secret | 否 | Secret Key |
 
 ## 统一字段映射
 
@@ -96,8 +97,14 @@
       {
         "name": "apiKey",
         "type": "secret",
-        "label": "API Key",
+        "label": "Access Key / API Key",
         "required": true
+      },
+      {
+        "name": "secretKey",
+        "type": "secret",
+        "label": "Secret Key",
+        "required": false
       }
     ]
   },
@@ -116,11 +123,12 @@
           "creation",
           "agent"
         ],
-        "baseUrl": "https://api.klingai.com",
+        "baseUrl": "https://api-beijing.klingai.com",
         "requiresPublicMediaUrls": false,
         "auth": {
-          "type": "bearer",
-          "field": "apiKey"
+          "type": "jwt-hs256",
+          "field": "apiKey",
+          "secretField": "secretKey"
         },
         "parameters": [
           {
@@ -203,59 +211,124 @@
         ],
         "create": {
           "method": "POST",
-          "path": "/v1/videos/generations",
+          "path": "/v1/videos/text2video",
+          "pathTemplate": {
+            "$if": {
+              "condition": {
+                "$gt": [
+                  {
+                    "$len": {
+                      "$coalesce": [
+                        {
+                          "$ref": "request.images"
+                        },
+                        []
+                      ]
+                    }
+                  },
+                  0
+                ]
+              },
+              "then": "/v1/videos/image2video",
+              "else": "/v1/videos/text2video"
+            }
+          },
           "contentType": "application/json",
           "body": {
             "$merge": [
               {
-                "model": {
+                "model_name": {
                   "$ref": "request.model"
                 },
                 "prompt": {
                   "$ref": "request.prompt"
                 },
-                "images": {
+                "image": {
                   "$omitEmpty": {
-                    "$map": {
-                      "from": {
-                        "$ref": "request.images"
-                      },
-                      "as": "media",
-                      "in": {
-                        "$ref": "media.value"
+                    "$first": {
+                      "$map": {
+                        "from": {
+                          "$filter": {
+                            "from": {
+                              "$sortByOrder": {
+                                "$ref": "request.images"
+                              }
+                            },
+                            "as": "media",
+                            "where": {
+                              "$in": [
+                                {
+                                  "$ref": "media.role"
+                                },
+                                [
+                                  "first_frame",
+                                  "reference_image",
+                                  ""
+                                ]
+                              ]
+                            }
+                          }
+                        },
+                        "as": "media",
+                        "in": {
+                          "$ref": "media.value"
+                        }
                       }
                     }
                   }
                 },
-                "videos": {
+                "image_tail": {
                   "$omitEmpty": {
-                    "$map": {
-                      "from": {
-                        "$ref": "request.videos"
-                      },
-                      "as": "media",
-                      "in": {
-                        "$ref": "media.value"
-                      }
-                    }
-                  }
-                },
-                "audios": {
-                  "$omitEmpty": {
-                    "$map": {
-                      "from": {
-                        "$ref": "request.audios"
-                      },
-                      "as": "media",
-                      "in": {
-                        "$ref": "media.value"
+                    "$first": {
+                      "$map": {
+                        "from": {
+                          "$filter": {
+                            "from": {
+                              "$sortByOrder": {
+                                "$ref": "request.images"
+                              }
+                            },
+                            "as": "media",
+                            "where": {
+                              "$in": [
+                                {
+                                  "$ref": "media.role"
+                                },
+                                [
+                                  "last_frame"
+                                ]
+                              ]
+                            }
+                          }
+                        },
+                        "as": "media",
+                        "in": {
+                          "$ref": "media.value"
+                        }
                       }
                     }
                   }
                 },
                 "duration": {
                   "$omitEmpty": {
-                    "$ref": "request.duration"
+                    "$if": {
+                      "condition": {
+                        "$gt": [
+                          {
+                            "$ref": "request.duration"
+                          },
+                          0
+                        ]
+                      },
+                      "then": {
+                        "$concat": [
+                          {
+                            "$ref": "request.duration"
+                          }
+                        ]
+                      },
+                      "else": null
+                    }
                   }
                 },
                 "aspect_ratio": {
@@ -263,9 +336,9 @@
                     "$ref": "request.aspectRatio"
                   }
                 },
-                "resolution": {
+                "mode": {
                   "$omitEmpty": {
-                    "$ref": "request.resolution"
+                    "$ref": "request.providerOptions.kling-video.mode"
                   }
                 },
                 "parameters": {
@@ -290,11 +363,35 @@
         },
         "poll": {
           "method": "GET",
-          "path": "/v1/videos/generations/{{taskId}}"
+          "path": "/v1/videos/text2video/{{taskId}}",
+          "pathTemplate": {
+            "$if": {
+              "condition": {
+                "$gt": [
+                  {
+                    "$len": {
+                      "$coalesce": [
+                        {
+                          "$ref": "request.images"
+                        },
+                        []
+                      ]
+                    }
+                  },
+                  0
+                ]
+              },
+              "then": "/v1/videos/image2video/{{taskId}}",
+              "else": "/v1/videos/text2video/{{taskId}}"
+            }
+          }
         },
         "response": {
           "taskId": {
             "$coalesce": [
+              {
+                "$ref": "response.data.task_id"
+              },
               {
                 "$ref": "response.id"
               },
@@ -315,6 +412,9 @@
           "status": {
             "$coalesce": [
               {
+                "$ref": "response.data.task_status"
+              },
+              {
                 "$ref": "response.status"
               },
               {
@@ -329,6 +429,9 @@
           "message": {
             "$coalesce": [
               {
+                "$ref": "response.data.task_status_msg"
+              },
+              {
                 "$ref": "response.error.message"
               },
               {
@@ -341,6 +444,9 @@
           },
           "videos": {
             "$coalesce": [
+              {
+                "$ref": "response.data.task_result.videos"
+              },
               {
                 "$ref": "response.video_url"
               },
@@ -362,6 +468,7 @@
             ]
           },
           "errorPaths": [
+            "code",
             "error.code"
           ],
           "resultEphemeral": true

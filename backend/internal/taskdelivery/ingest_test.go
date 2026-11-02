@@ -1,6 +1,7 @@
 package taskdelivery
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -568,4 +569,25 @@ func TestIngestResultJSONRoundTripKeepsDeterministicBytes(t *testing.T) {
 	if strings.Contains(string(encoded), "data:video/") {
 		t.Fatalf("result still inline: %s", encoded)
 	}
+}
+
+func TestResumeGenerationDownloadReadsClosedUnderMutex(t *testing.T) {
+	var mu sync.Mutex
+	closed := false
+	cancels := map[string]context.CancelFunc{}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			StopGenerationDownloads(&mu, &closed, cancels)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			_, _ = ResumeGenerationDownload(&mu, &closed, func() bool { return true }, nil, cancels, nil, model.Task{ID: "t1", UserID: "u1"})
+		}
+	}()
+	wg.Wait()
 }

@@ -26,10 +26,6 @@ func validateCreationResultMetadata(repo *repository.Repository, userID, runID, 
 	return creation.ValidateResultMetadata(repo, userID, runID, nodeID, before, after)
 }
 
-func (s *Service) CreationCanvasSnapshot(userID, id string) (map[string]any, error) {
-	return s.creationDomain().CanvasSnapshot(userID, id)
-}
-
 func (s *Service) CreateRunCanvas(userID, id string, req CreationRequest) (map[string]any, error) {
 	s.storageMu.Lock()
 	defer s.storageMu.Unlock()

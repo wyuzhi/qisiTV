@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { ENGINE_ORIGIN, ENGINE_SESSION_HEADER, engineRequest, getEngineSession, installEngineFetch, rememberEngineSession, restoreEngineSession, validEngineSession } from "../src/services/engine-session";
+import { captureEngineSessionGuard, ENGINE_ORIGIN, ENGINE_SESSION_HEADER, engineRequest, getEngineSession, installEngineFetch, rememberEngineSession, restoreEngineSession, validEngineSession } from "../src/services/engine-session";
 
 const originalFetch = globalThis.fetch;
 const originalStorage = globalThis.sessionStorage;
@@ -15,6 +15,19 @@ beforeEach(() => {
 afterEach(() => { rememberEngineSession(); });
 
 describe("paired engine boundary", () => {
+    test("async writes retain their original pairing and stop after disconnect or replacement", () => {
+        const unpaired = captureEngineSessionGuard();
+        rememberEngineSession(session());
+        expect(unpaired).toThrow();
+        const original = captureEngineSessionGuard();
+        expect(original).not.toThrow();
+        rememberEngineSession({ ...session(), token: "b".repeat(48), sessionId: "replacement" });
+        expect(original).toThrow();
+        const replacement = captureEngineSessionGuard();
+        expect(replacement).not.toThrow();
+        rememberEngineSession();
+        expect(replacement).toThrow();
+    });
     test("rejects expired, malformed and unlimited sessions; corrupt storage cannot resurrect one", () => {
         expect(validEngineSession(session())).toBe(true);
         expect(validEngineSession({ ...session(), expiresAt: new Date(0).toISOString() })).toBe(false);

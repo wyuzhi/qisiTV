@@ -37,6 +37,10 @@ func ResourceMissing() error {
 	return kernel.BadAuthRequest("资源不存在")
 }
 
+func ResourceFileMissing() error {
+	return kernel.NotFound("本地媒体文件不存在或已丢失")
+}
+
 func UnreadableAssetDocument(kind string) error {
 	switch kind {
 	case "version":

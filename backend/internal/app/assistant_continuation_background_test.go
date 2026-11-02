@@ -45,13 +45,13 @@ func newBackgroundContinuation(t *testing.T, status model.TaskStatus) (*Service,
 	if _, err = svc.BeginAssistantTurn("local", canvasID, source, AssistantTurnInput{PermissionMode: assistantturns.PermissionCanvas}); err != nil {
 		t.Fatal(err)
 	}
-	if err = svc.BindAssistantDurableSession("local", source, backgroundContinuationSession, false); err != nil {
+	if err = svc.AssistantTurns().BindDurableSession("local", source, backgroundContinuationSession, false); err != nil {
 		t.Fatal(err)
 	}
 	if err = svc.FinalizeAssistantTurn(source); err != nil {
 		t.Fatal(err)
 	}
-	row, err := svc.ArmAssistantContinuation("local", assistantturns.ContinuationInput{
+	row, err := svc.AssistantTurns().ArmContinuation("local", assistantturns.ContinuationInput{
 		CanvasID: canvasID, SessionID: backgroundContinuationSession, SourceTurnID: source,
 		ProposalID: "gp-background", Kind: "image", NodeIDs: []string{"n1"},
 	})
@@ -59,7 +59,7 @@ func newBackgroundContinuation(t *testing.T, status model.TaskStatus) (*Service,
 		t.Fatal(err)
 	}
 	opID := "proposal:gp-background:n1"
-	if err = svc.RegisterAssistantContinuationManifest("local", row.ID, assistantturns.ContinuationManifest{
+	if err = svc.AssistantTurns().RegisterContinuationManifest("local", row.ID, assistantturns.ContinuationManifest{
 		SourceNodeID: "n1", Submissions: []assistantturns.ContinuationSubmission{{OperationID: opID, OutputNodeIDs: []string{"n1"}}},
 	}); err != nil {
 		t.Fatal(err)
@@ -178,7 +178,7 @@ func TestAssistantBackgroundContinuationDoesNotResurrectStopOrNewIntent(t *testi
 			if _, err := svc.ClaimAssistantContinuation("local", row.ID); err != nil {
 				t.Fatal(err)
 			}
-			if err := svc.CancelAssistantContinuations("local", row.CanvasID, row.SessionID, pendingOnly); err != nil {
+			if err := svc.AssistantTurns().CancelContinuations("local", row.CanvasID, row.SessionID, pendingOnly); err != nil {
 				t.Fatal(err)
 			}
 			// A new app service must see the persistent cancellation too.

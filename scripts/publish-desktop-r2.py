@@ -26,12 +26,14 @@ from desktop_cos_store import COSStore, PublishError, fingerprint
 PLATFORMS = {"darwin-arm64", "darwin-amd64", "windows-amd64", "linux-amd64"}
 PREFIX = "beeftv"
 LATEST = f"{PREFIX}/desktop-update.json"
+LATEST_V2 = f"{PREFIX}/desktop-update-v2.json"
 IMMUTABLE = "public, max-age=31536000, immutable"
 REVALIDATE = "no-store, max-age=0"
 MAX_MANIFEST = 2 * 1024 * 1024
 GITHUB_LATEST_FEED = "https://github.com/glanderness/BeefTV/releases/latest/download/desktop-update.json"
 COS_PUBLIC_BASE = "https://beeftv-components-1481187348.cos.ap-guangzhou.myqcloud.com/beeftv"
 R2_PUBLIC_BASE = "https://updates.beefapi.com/beeftv"
+CNB_PUBLIC_BASE = "https://cnb.cool/beeftv-downloads/desktop/-/releases/download"
 PROBE_BYTES = 1024
 
 
@@ -305,16 +307,58 @@ class Publisher:
 
     def load(self, manifest):
         payload = signed_payload(manifest, self.verifier)
+        if payload.get("schema") != 1:
+            raise PublishError("Legacy manifest must use schema 1")
         if set(payload["platforms"]) != PLATFORMS:
             raise PublishError("Manifest must contain exactly all four desktop platforms")
         for platform, asset in payload["platforms"].items():
             name = f"BeefTV-{payload['version']}-{platform}.zip"
-            if asset["url"] != f"{self.public_base}/{payload['version']}/{name}":
+            if "urls" in asset or "deltas" in asset or asset.get("url") != f"{self.public_base}/{payload['version']}/{name}":
                 raise PublishError("Manifest asset URL does not match immutable public version path")
             if type(asset["size"]) is not int or not 0 < asset["size"] <= 2 << 30:
                 raise PublishError("Invalid desktop archive size")
             if not re.fullmatch(r"[a-f0-9]{64}", asset["sha256"]):
                 raise PublishError("Invalid desktop archive hash")
+        return payload
+
+    def load_v2(self, manifest):
+        payload = signed_payload(manifest, self.verifier)
+        if payload.get("schema") != 2 or set(payload["platforms"]) != PLATFORMS:
+            raise PublishError("Manifest v2 must use schema 2 and contain all four desktop platforms")
+        target_vtuple = version_tuple(payload["version"])
+        url_counts = set()
+        delta_key_sets = set()
+        for platform, asset in payload["platforms"].items():
+            name = f"BeefTV-{payload['version']}-{platform}.zip"
+            r2_url = f"{self.public_base}/{payload['version']}/{name}"
+            cnb_url = f"{CNB_PUBLIC_BASE}/{payload['version']}/{name}"
+            urls = asset.get("urls")
+            if "url" in asset or urls not in ([r2_url], [cnb_url, r2_url]):
+                raise PublishError("Manifest v2 asset URLs must be [r2] or [cnb, r2]")
+            url_counts.add(len(urls))
+            if type(asset["size"]) is not int or not 0 < asset["size"] <= 2 << 30:
+                raise PublishError("Invalid desktop archive size")
+            if not re.fullmatch(r"[a-f0-9]{64}", asset["sha256"]):
+                raise PublishError("Invalid desktop archive hash")
+            deltas = asset.get("deltas") or {}
+            if not isinstance(deltas, dict):
+                raise PublishError("Manifest v2 deltas must be an object")
+            delta_key_sets.add(frozenset(deltas.keys()))
+            for from_ver, delta in deltas.items():
+                if version_tuple(from_ver) >= target_vtuple or not isinstance(delta, dict):
+                    raise PublishError("Manifest v2 delta fromVersion must be an older stable version")
+                d_name = f"BeefTV-{payload['version']}-{platform}-from-{from_ver}.delta.zip"
+                d_r2_url = f"{self.public_base}/{payload['version']}/{d_name}"
+                d_cnb_url = f"{CNB_PUBLIC_BASE}/{payload['version']}/{d_name}"
+                expected_d_urls = [d_r2_url] if len(urls) == 1 else [d_cnb_url, d_r2_url]
+                if delta.get("urls") != expected_d_urls:
+                    raise PublishError("Manifest v2 delta URLs must match platform source set")
+                if type(delta.get("size")) is not int or not 0 < delta["size"] <= asset["size"]:
+                    raise PublishError("Invalid desktop delta archive size")
+                if not re.fullmatch(r"[a-f0-9]{64}", str(delta.get("sha256", ""))):
+                    raise PublishError("Invalid desktop delta archive hash")
+        if len(url_counts) != 1 or len(delta_key_sets) != 1:
+            raise PublishError("Manifest v2 platforms must all share the same source and delta set")
         return payload
 
     def immutable_put(self, key, source):
@@ -352,7 +396,7 @@ class Publisher:
             self.public.check(f"{self.public_base}/{payload['version']}/{source.name}",
                               *fingerprint(source), version=payload['version'])
 
-    def stage(self, manifest, assets_dir, with_installers=False):
+    def stage(self, manifest, assets_dir, with_installers=False, manifest_v2=None):
         payload = self.load(manifest)
         sources = []
         for platform, asset in payload["platforms"].items():
@@ -361,10 +405,25 @@ class Publisher:
             if not source.is_file() or fingerprint(source) != (asset["size"], asset["sha256"]):
                 raise PublishError(f"Local archive missing or size/hash mismatch: {name}")
             sources.append((f"{PREFIX}/{payload['version']}/{name}", source))
+        delta_sources = []
+        if manifest_v2 is not None:
+            v2_payload = self.load_v2(manifest_v2)
+            if v2_payload["version"] != payload["version"] or v2_payload["commit"] != payload["commit"]:
+                raise PublishError("Staged manifest v2 metadata does not match manifest v1")
+            for platform, asset in v2_payload["platforms"].items():
+                for from_ver, delta in (asset.get("deltas") or {}).items():
+                    d_name = f"BeefTV-{payload['version']}-{platform}-from-{from_ver}.delta.zip"
+                    d_source = Path(assets_dir) / d_name
+                    if not d_source.is_file() or fingerprint(d_source) != (delta["size"], delta["sha256"]):
+                        raise PublishError(f"Local delta archive missing or size/hash mismatch: {d_name}")
+                    delta_sources.append((f"{PREFIX}/{payload['version']}/{d_name}", d_source, delta))
         installers = self.installer_sources(payload, assets_dir) if with_installers else []
-        for key, source in sources + installers:
+        for key, source in sources + [(k, s) for k, s, _ in delta_sources] + installers:
             self.immutable_put(key, source)
         self.check_installers(payload, installers)
+        for _, d_source, delta in delta_sources:
+            self.public.check(f"{self.public_base}/{payload['version']}/{d_source.name}",
+                              delta["size"], delta["sha256"], version=payload["version"])
         self.immutable_put(f"{PREFIX}/{payload['version']}/desktop-update.json", manifest)
         self.public_check(payload, manifest)
         return payload["version"]
@@ -400,6 +459,65 @@ class Publisher:
             if self.store.get(LATEST, current) is None or fingerprint(current) != fingerprint(manifest):
                 raise PublishError("Latest storage readback mismatch")
             self.public.check(f"{self.feed_public_base}/desktop-update.json", *fingerprint(manifest), version=payload["version"])
+        return payload["version"]
+
+    def activate_v2(self, manifest):
+        if getattr(self.store, "provider", "r2") != "r2" or self.feed_public_base != R2_PUBLIC_BASE:
+            raise PublishError("Manifest v2 publication is only supported on canonical R2")
+        payload = self.load_v2(manifest)
+        with tempfile.TemporaryDirectory(prefix="beeftv-release-latest-v2-") as directory:
+            active_v1 = Path(directory) / "active-v1.json"
+            if self.store.get(LATEST, active_v1) is None:
+                raise PublishError("R2 canonical v1 feed must be active before publishing v2 feed")
+            v1_payload = self.load(active_v1)
+            if (v1_payload["version"] != payload["version"] or v1_payload["commit"] != payload["commit"]
+                    or v1_payload["notes"] != payload["notes"]):
+                raise PublishError("Manifest v2 metadata does not match active R2 v1 feed")
+            for platform, asset in payload["platforms"].items():
+                v1_asset = v1_payload["platforms"][platform]
+                if (asset["size"], asset["sha256"]) != (v1_asset["size"], v1_asset["sha256"]):
+                    raise PublishError(f"Manifest v2 digest/size mismatch against active v1 feed: {platform}")
+            self.public.check(f"{self.public_base}/desktop-update.json", *fingerprint(active_v1),
+                              version=payload["version"])
+            for asset in payload["platforms"].values():
+                for url in asset["urls"]:
+                    self.public.check(url, asset["size"], asset["sha256"], version=payload["version"])
+                for delta in (asset.get("deltas") or {}).values():
+                    for url in delta["urls"]:
+                        self.public.check(url, delta["size"], delta["sha256"], version=payload["version"])
+            has_domestic = any(len(a["urls"]) == 2 for a in payload["platforms"].values())
+            version_manifest_name = "desktop-update-v2.json" if has_domestic else "desktop-update-v2-r2.json"
+            self.immutable_put(f"{PREFIX}/{payload['version']}/{version_manifest_name}", manifest)
+            self.public.check(f"{self.public_base}/{payload['version']}/{version_manifest_name}",
+                              *fingerprint(manifest), version=payload["version"])
+            previous = Path(directory) / "previous-v2.json"
+            etag = self.store.get(LATEST_V2, previous)
+            if etag is not None:
+                old = self.load_v2(previous)
+                if version_tuple(old["version"]) > version_tuple(payload["version"]):
+                    raise PublishError("Refusing to downgrade latest v2 feed")
+                if version_tuple(old["version"]) == version_tuple(payload["version"]):
+                    if fingerprint(previous) == fingerprint(manifest):
+                        self.public.check(f"{self.feed_public_base}/desktop-update-v2.json",
+                                          *fingerprint(manifest), version=payload["version"])
+                        return payload["version"]
+                    old_has_domestic = any(len(a["urls"]) == 2 for a in old["platforms"].values())
+                    if old_has_domestic or not has_domestic:
+                        raise PublishError("Same latest v2 version has conflicting signed content")
+                    for platform, asset in payload["platforms"].items():
+                        old_deltas = old["platforms"][platform].get("deltas") or {}
+                        new_deltas = asset.get("deltas") or {}
+                        if {k: (v["size"], v["sha256"]) for k, v in old_deltas.items()} != {k: (v["size"], v["sha256"]) for k, v in new_deltas.items()}:
+                            raise PublishError(f"Same latest v2 version has conflicting delta digests: {platform}")
+                backup = f"{PREFIX}/latest-v2-backups/{old['version']}-{fingerprint(previous)[1]}.json"
+                self.immutable_put(backup, previous)
+            if not self.store.put(LATEST_V2, manifest, REVALIDATE, etag=etag):
+                raise PublishError("Latest v2 feed changed concurrently; verify and rerun activation")
+            current = Path(directory) / "current-v2.json"
+            if self.store.get(LATEST_V2, current) is None or fingerprint(current) != fingerprint(manifest):
+                raise PublishError("Latest v2 storage readback mismatch")
+            self.public.check(f"{self.feed_public_base}/desktop-update-v2.json",
+                              *fingerprint(manifest), version=payload["version"])
         return payload["version"]
 
     def resume(self, manifest, original_lock, original_claim, *, confirm_no_inflight=False,
@@ -447,8 +565,9 @@ def storage_config(provider, endpoint, region, bucket, public_base):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["check-store", "stage", "activate", "bridge-cos", "resume", "resume-cos-bridge"])
+    parser.add_argument("command", choices=["check-store", "stage", "activate", "activate-v2", "bridge-cos", "resume", "resume-cos-bridge"])
     parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--manifest-v2", type=Path, help="Optional schema-2 manifest whose delta archives should be staged with stage")
     parser.add_argument("--assets-dir", type=Path)
     parser.add_argument("--with-installers", action="store_true")
     parser.add_argument("--verification-receipt", type=Path,
@@ -471,6 +590,8 @@ def main():
     try:
         if args.verification_receipt and args.command not in ("stage", "activate"):
             raise PublishError("Verification receipts are only supported for stage and activate")
+        if args.command == "activate-v2" and (args.provider != "r2" or args.with_installers):
+            raise PublishError("activate-v2 requires R2 provider and no installer staging")
         store = storage_config(args.provider, args.endpoint_url, args.region, args.bucket, args.public_base)
         if args.command != "check-store" and (args.manifest is None or args.verifier is None):
             raise PublishError("Publication requires --manifest and --verifier")
@@ -495,6 +616,14 @@ def main():
             if args.manifest.stat().st_size > MAX_MANIFEST:
                 raise PublishError("Manifest is too large")
             manifest.write_bytes(args.manifest.read_bytes())
+            manifest_v2 = None
+            if args.manifest_v2 is not None:
+                if args.command != "stage":
+                    raise PublishError("--manifest-v2 is only supported for stage")
+                if args.manifest_v2.stat().st_size > MAX_MANIFEST:
+                    raise PublishError("Manifest v2 is too large")
+                manifest_v2 = Path(directory) / "desktop-update-v2.json"
+                manifest_v2.write_bytes(args.manifest_v2.read_bytes())
             binding, verified = None, None
             if args.verification_receipt:
                 binding = verification_binding(manifest, args)
@@ -511,7 +640,7 @@ def main():
                                   feed_public_base=args.public_base)
             assets_dir = args.assets_dir or args.manifest.parent
             if args.command == "stage":
-                version = publisher.stage(manifest, assets_dir, args.with_installers)
+                version = publisher.stage(manifest, assets_dir, args.with_installers, manifest_v2=manifest_v2)
                 if args.verification_receipt:
                     write_verification_receipt(args.verification_receipt, binding, verified)
             elif args.command in ("resume", "resume-cos-bridge"):
@@ -523,6 +652,8 @@ def main():
                                            require_active_source=is_bridge)
             elif args.command == "bridge-cos":
                 version = publisher.activate(manifest, require_active_source=True)
+            elif args.command == "activate-v2":
+                version = publisher.activate_v2(manifest)
             else:
                 version = publisher.activate(manifest, assets_dir if args.with_installers else None)
         print(f"{args.command} verified: {version}")

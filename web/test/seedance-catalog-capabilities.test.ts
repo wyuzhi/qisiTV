@@ -6,7 +6,6 @@ import { modelCapabilityConfigFor, sanitizeServerVideoCapability, type VideoCapa
 import { applyFetchedChannelModelCatalog, mergeManagedBeefAPICatalog } from "../src/pages/settings/channel-settings-pane";
 import { modelCompatibilityError, portraitGenerationError } from "../src/lib/model-selection";
 import { fetchChannelModels } from "../src/services/api/image-models";
-import { assertVideoCapability } from "../src/services/api/video-validation";
 import { createModelChannel, defaultConfig, normalizeConfigSnapshot } from "../src/stores/use-config-store";
 
 function sampleVideo(maxVideos: number, maxAudios: number): VideoCapabilityConfig {
@@ -77,7 +76,7 @@ test("fresh generic OpenAI catalog entries retain real portrait quotes through r
     for (const item of catalog) {
         const profile = reloaded.channels[0]!.modelProfiles!.find((profile) => profile.model === item.id)!;
         expect(profile.capability).toBe("video");
-        expect(profile.protocol).toBe("newapi");
+        expect(profile.protocol).toBe("openai-videos");
         expect(profile.videoPricing).toEqual(item.videoPricing);
         expect(profile.videoCapabilitiesVersion).toBe(item.videoCapabilitiesVersion);
         expect(modelCompatibilityError(reloaded, `beefapi::${item.id}`, { capability: "video", input: { textCount: 1, imageCount: 1, videoCount: 0, audioCount: 0, characterCount: 0 } })).toBe("");
@@ -159,12 +158,25 @@ test("explicit zero limits stay zero for a server-sourced BeefAPI capability", (
     expect(modelCapabilityConfigFor(config, `beefapi::${model}`).video!.references.maxAudios).toBe(0);
 });
 
-test("legacy BeefAPI Seedance still repairs unsigned zero catalogs", () => {
+test("legacy BeefAPI Seedance waits for a versioned server declaration", () => {
     const model = "seedance-2.0";
-    const config = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [legacyZeroVideo(model)] } }).config;
+    const repaired = legacyZeroVideo(model);
+    repaired.modelProfiles![0]!.capabilityConfig = {
+        version: 1,
+        video: {
+            ...sampleVideo(3, 3),
+            references: {
+                ...sampleVideo(3, 3).references,
+                maxImages: 9,
+                maxVideos: 3,
+                maxAudios: 3,
+            },
+        },
+    };
+    const config = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [repaired] } }).config;
     expect(config.channels[0]?.modelProfiles?.[0]?.videoCapabilitiesVersion).toBeUndefined();
-    expect(modelCapabilityConfigFor(config, `beefapi::${model}`).video!.references.maxVideos).toBe(3);
-    expect(modelCapabilityConfigFor(config, `beefapi::${model}`).video!.references.maxAudios).toBe(3);
+    expect(modelCapabilityConfigFor(config, `beefapi::${model}`).videoCapabilitiesUnavailable).toBeUndefined();
+    expect(modelCompatibilityError(config, `beefapi::${model}`, { capability: "video" })).toBe("");
 });
 
 test("invalid or missing catalog video does not clear a good sourced profile", () => {
@@ -185,7 +197,7 @@ test("invalid or missing catalog video does not clear a good sourced profile", (
     expect(missing[0]?.capabilityConfig?.video?.duration).toEqual(sampleVideo(2, 2).duration);
 });
 
-test("custom channels ignore catalog video capabilities", () => {
+test("custom channels adopt only server-declared versioned video capabilities", () => {
     const capabilityConfig = { version: 1, video: sampleVideo(1, 0) };
     const channel = createModelChannel({
         id: "custom",
@@ -193,10 +205,15 @@ test("custom channels ignore catalog video capabilities", () => {
         models: ["seedance-2.0"],
         modelProfiles: [{ model: "seedance-2.0", capability: "video", protocol: "newapi", capabilityConfig }],
     });
-    const profiles = mergeFetchedChannelModelProfiles(channel, [{ id: "seedance-2.0", modelType: "video", videoCapabilities: sampleVideo(9, 9), videoCapabilitiesVersion: "ignore-me" }]);
-    expect(profiles[0]?.videoCapabilitiesVersion).toBeUndefined();
-    expect(profiles[0]?.capabilityConfig?.video?.references.maxVideos).toBe(1);
-    expect(profiles[0]?.capabilityConfig?.video?.references.maxAudios).toBe(0);
+    const declared = mergeFetchedChannelModelProfiles(channel, [{ id: "seedance-2.0", modelType: "video", videoCapabilities: sampleVideo(9, 9), videoCapabilitiesVersion: "gw-v2" }]);
+    expect(declared[0]?.videoCapabilitiesVersion).toBe("gw-v2");
+    expect(declared[0]?.capabilityConfig?.video?.references.maxVideos).toBe(9);
+    expect(declared[0]?.capabilityConfig?.video?.references.maxAudios).toBe(9);
+
+    const undeclared = mergeFetchedChannelModelProfiles(channel, [{ id: "seedance-2.0", modelType: "video", videoCapabilities: sampleVideo(9, 9) }]);
+    expect(undeclared[0]?.videoCapabilitiesVersion).toBeUndefined();
+    expect(undeclared[0]?.capabilityConfig?.video?.references.maxVideos).toBe(1);
+    expect(undeclared[0]?.capabilityConfig?.video?.references.maxAudios).toBe(0);
 });
 
 test("mergeManagedBeefAPICatalog copies sourced capabilities from the backend snapshot", () => {
@@ -237,15 +254,25 @@ test("sanitizeServerVideoCapability rejects non-finite values and keeps omitted 
     expect(partial?.references.maxAudios).toBeUndefined();
 });
 
-test("native Ark Seedance 2.x uses the documented 407696 pixel floor", () => {
+test("native Ark Seedance 2.x uses the documented 407696 pixel floor from backend capabilityConfig", () => {
+    const capabilityConfig = {
+        version: 1,
+        video: {
+            ...sampleVideo(3, 3),
+            references: {
+                ...sampleVideo(3, 3).references,
+                minVideoPixels: 407696,
+                maxVideoPixels: 927408,
+                minVideoDurationSeconds: 2,
+            },
+        },
+    };
     const profile = modelCapabilityConfigFor(
-        { channels: [{ id: "ark", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", models: ["seedance-2.0"], modelProfiles: [{ model: "seedance-2.0", protocol: "volcengine-ark-video" }] }] },
+        { channels: [{ id: "ark", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", models: ["seedance-2.0"], modelProfiles: [{ model: "seedance-2.0", protocol: "volcengine-ark-video", capabilityConfig }] }] },
         "ark::seedance-2.0",
     ).video!;
     expect(profile.references.minVideoPixels).toBe(407696);
     const video = (width: number, height: number) => ({ id: "vid", name: "视频", type: "video/mp4", url: "https://example.com/v.mp4", width, height, durationMs: 3000, bytes: 1 });
-    expect(() => assertVideoCapability(profile, [], [video(720, 567)], [], "5")).not.toThrow();
-    expect(() => assertVideoCapability(profile, [], [video(720, 566)], [], "5")).toThrow("407696");
 });
 
 test("custom pixel restrictions stay in place for non-Ark channels", () => {
@@ -256,8 +283,6 @@ test("custom pixel restrictions stay in place for non-Ark channels", () => {
     ).video!;
     expect(profile.references.minVideoPixels).toBe(500000);
     const video = (width: number, height: number) => ({ id: "vid", name: "视频", type: "video/mp4", url: "https://example.com/v.mp4", width, height, durationMs: 3000, bytes: 1 });
-    expect(() => assertVideoCapability(profile, [], [video(720, 700)], [], "5")).not.toThrow();
-    expect(() => assertVideoCapability(profile, [], [video(720, 694)], [], "5")).toThrow("500000");
 });
 
 test("direct OpenAI catalog fetch keeps BeefAPI video capability fields", async () => {
@@ -288,14 +313,10 @@ test("direct OpenAI catalog fetch keeps BeefAPI video capability fields", async 
 
 test("Auto duration survives shared normalization and config hydration", async () => {
     const { normalizeVideoDuration } = await import("../src/lib/video-generation-options");
-    const { normalizeVideoSeconds } = await import("../src/services/api/video-validation");
     const { videoSecondsLabel } = await import("../src/components/video-settings-panel");
     expect(normalizeVideoDuration(-1)).toBe("-1");
-    expect(normalizeVideoSeconds("-1")).toBe("-1");
     expect(videoSecondsLabel("-1")).toBe("自动");
     expect(normalizeConfigSnapshot({ config: { ...defaultConfig, videoSeconds: "-1" } }).config.videoSeconds).toBe("-1");
-    expect(normalizeVideoSeconds("5")).toBe("5");
-    expect(normalizeVideoSeconds("-2")).toBe("1");
 });
 
 test("Auto duration reaches canvas model selection and final generation unchanged", async () => {
@@ -313,4 +334,76 @@ test("Auto duration reaches canvas model selection and final generation unchange
     const result = buildGenerationConfig(config, { id: "auto", type: CanvasNodeType.Video, title: "Auto", position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { model, seconds: "-1" } }, "video");
     expect(result.model).toBe(model);
     expect(result.videoSeconds).toBe("-1");
+});
+
+test("Seedance 2.5 exposes draft and draft_to_final across managed and BYOK Ark channels", async () => {
+    const { buildVideoGenerationMetadata } = await import("../src/lib/canvas/canvas-project-generation");
+    const { CanvasNodeType } = await import("../src/types/canvas");
+    const profile = modelCapabilityConfigFor(
+        {
+            channels: [
+                {
+                    id: "ark",
+                    baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+                    models: ["doubao-seedance-2-5-260628"],
+                    modelProfiles: [{ model: "doubao-seedance-2-5-260628", protocol: "volcengine-ark-video" }],
+                },
+            ],
+        },
+        "ark::doubao-seedance-2-5-260628",
+    ).video!;
+    expect(profile.draft).toEqual({ supported: true, default: false });
+    expect(profile.returnLastFrame).toEqual({ supported: true, default: false });
+    expect(profile.operations).toContain("draft_to_final");
+    expect(profile.operations).toContain("inpaint");
+    expect(profile.operations).toContain("extend");
+
+    const metadata = buildVideoGenerationMetadata({
+        id: "final-node",
+        type: CanvasNodeType.Video,
+        title: "Final",
+        position: { x: 0, y: 0 },
+        width: 100,
+        height: 100,
+        metadata: {
+            returnLastFrame: "true",
+            videoEditOperation: "draft_to_final",
+            videoDraftTaskId: "cgt-draft-123",
+        },
+    });
+    expect(metadata.returnLastFrame).toBe("true");
+    expect(metadata.videoEditOperation).toBe("draft_to_final");
+    expect(metadata.videoDraftTaskId).toBe("cgt-draft-123");
+});
+
+test("Seedance 2.5 exposes vendor-neutral business actions across all BYOK video protocols", () => {
+    for (const protocol of [
+        "volcengine-ark-video",
+        "volcengine-ark-agent-plan-video",
+        "newapi",
+        "openai-videos",
+        "newapi-channel-1",
+        "newapi-channel-2",
+        "video-generations-json",
+        "seedance-videos-compatible",
+        "full-video",
+    ] as const) {
+        const profile = modelCapabilityConfigFor(
+            {
+                channels: [
+                    {
+                        id: "byok",
+                        baseUrl: "https://relay.example.com/v1",
+                        models: ["seedance-2.5"],
+                        modelProfiles: [{ model: "seedance-2.5", protocol }],
+                    },
+                ],
+            },
+            "byok::seedance-2.5",
+        ).video!;
+        expect(profile.draft).toEqual({ supported: true, default: false });
+        expect(profile.returnLastFrame).toEqual({ supported: true, default: false });
+        expect(profile.operations).toEqual(expect.arrayContaining(["reference_to_video", "audio_to_video", "draft_to_final", "inpaint", "extend"]));
+        expect(profile.ratios).toContain("adaptive");
+    }
 });

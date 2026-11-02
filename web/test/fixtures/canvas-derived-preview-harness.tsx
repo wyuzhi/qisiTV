@@ -22,6 +22,7 @@ function Harness() {
         source: (content: string) => setNode((n) => ({ ...n, metadata: { content } })),
         oldPoster: () => setNode((n) => ({ ...n, metadata: { content: "/red.mp4", videoPreview: { content: "/poster.svg", captureVersion: 2, sourceKey: "/red.mp4" } } })),
         cycle: () => { setActiveUserScope("B"); setActiveUserScope("A"); },
+        mount: () => setVisible(true),
         unmount: () => setVisible(false),
         retry: async () => {
             const node = { ...initial, metadata: { content: "/retry.mp4" } };

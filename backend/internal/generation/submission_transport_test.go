@@ -112,3 +112,25 @@ func TestVideoSubmissionAfterRequestOrRedirectRemainsUncertain(t *testing.T) {
 		})
 	}
 }
+
+func TestDoBinaryPreservesNon2xxErrorBodyInReceipt(t *testing.T) {
+	t.Setenv("CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS", "127.0.0.1")
+	expectedBody := `{"error":{"message":"Missing 'model' field","type":"invalid_request_error","code":""}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(expectedBody))
+	}))
+	defer server.Close()
+	receipts := &recordingReceipts{}
+	ctx := WithRuntime(context.Background(), Runtime{Receipts: receipts})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/v1/images/edits", strings.NewReader("body"))
+	_, _, err := DoBinary(req)
+	if err == nil {
+		t.Fatal("expected HTTP 400 error")
+	}
+	seen := receipts.snapshot()
+	if len(seen) != 1 || seen[0].HTTPStatus != http.StatusBadRequest || string(seen[0].Body) != expectedBody {
+		t.Fatalf("non-2xx response body lost from receipt observation: %+v", seen)
+	}
+}

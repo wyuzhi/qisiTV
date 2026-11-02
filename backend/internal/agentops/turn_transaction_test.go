@@ -16,7 +16,7 @@ func TestSettledTurnRejectsWriteAfterSuccessfulPreflight(t *testing.T) {
 	if _, err := h.service.BeginAssistantTurn(h.userID, h.canvasID, turnID, app.AssistantTurnInput{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, open, err := h.service.AssistantTurnScopeForHost(h.userID, turnID); err != nil || !open {
+	if _, open, err := h.service.AssistantTurns().ScopeForHost(h.userID, turnID); err != nil || !open {
 		t.Fatalf("preflight: %v %v", open, err)
 	}
 	// Finalization wins after HTTP scope validation but before the write TX.

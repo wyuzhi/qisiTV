@@ -76,7 +76,7 @@ func HydrateVideoReferenceMetadata(ctx context.Context, userID string, input *In
 			}
 		}
 	}
-	if modelcatalog.IsSeedance2Family(input.Config.InterfaceType, input.Config.Model) && !IsBeefAPISeedancePreuploadConfig(ctx, input.Config) {
+	if modelcatalog.IsSeedance2Family(input.Config.InterfaceType, input.Config.Model) && !managedConnection(input.Config) && !IsBeefAPISeedancePreuploadConfig(ctx, input.Config) {
 		for i := range input.ReferenceVideos {
 			media := &input.ReferenceVideos[i]
 			var data []byte

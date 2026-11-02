@@ -80,7 +80,7 @@ bun eval/run-eval.mjs --model real --scenario all --runs 3 --max-requests 25 --b
 | **S2** | `storyboard-8shot` | 写满 8 镜分镜表，只为前 2 镜创建首帧图节点并回填 `imageNodeId`，第 3–8 镜不越界建节点 | `PASS` |
 | **S3** | `local-edit` | 预置 4 镜画布，只改第 3 镜描述与第 3 首帧图提示词，断言第 1/2/4 镜与其余节点、连线 100% 未动 | `PASS` |
 | **S4** | `mid-turn-steer` | 首轮模型请求期间通过 `/steer` 注入改向（古风武侠 4 镜 -> 赛博朋克霓虹夜市 2 镜），同轮收敛完成 | `PASS` |
-| **S5** | `post-generation-review` | 提交生成提议后模拟器交付带六指缺陷的图片，检验自动唤醒复查能力（标注 `wake-on-generation` 能力缺口） | `GAP (expected)` |
+| **S5** | `post-generation-review` | 提交生成提议后模拟器交付带六指缺陷的图片，检验自动唤醒复查能力（`wake-on-generation`） | `PASS` |
 | **S6** | `skill-across-turns` | 仅首轮激活「短剧分镜到首帧」技能；后续自然补充和确认，检查每次请求仍带活动技能、首帧命名与画幅、有效 `imageNodeId` 回填和提议门禁；不触发压缩 | `PASS` |
 | **S7** | `user-requested-generation-review` | 首轮提议经用户确认并交付后，用户主动发起第二轮复查，助手检查产物、在原节点修正提示词并重提；重提仍等待确认 | `PASS` |
 
@@ -101,7 +101,24 @@ bun eval/run-eval.mjs --model real --scenario all --runs 3 --max-requests 25 --b
 ## 6. 已知限制与扩展方式
 
 - **费用阈值不是支付硬限额**：费用在请求返回 usage 后计算，未预留当前请求的最大成本。真实模型验收前仍需授权预算，并结合请求数量及模型输出上限控制支出，不能把 `--budget-cny` 当作绝不会超出的扣费上限。
-- **S5 自动唤醒缺口 (`wake-on-generation`)**：模拟器完成任务后，只向 `/events` 投递完成通知并观察 1 秒，不主动调用 `/chat`。接受事件且没有自动复查时标记 `baseline_gap`，整体报告也显示 `baseline_gap`；事件投递失败则属于测试失败。观察窗口内通过只能证明测试注入的事件能触发宿主，生产任务完成事件的实际投递还需单独验收。
+- **S5 自动唤醒复查 (`wake-on-generation`)**：模拟器完成任务后，向 `/events` 投递 `task_completed` 通知并观察宿主自动唤醒复查、修改原节点提示词并重新登记生成单（`expectedBaselinePass: true`）。如果期望基线通过的场景回退为 `baseline_gap`，整体报告会判定为 `failed` 并以非 0 状态码退出。观察窗口内通过证明宿主自动唤醒链路工作正常，生产任务完成事件的实际投递仍需配合后端续做测试验收。
 - **S7 是用户主动复查**：用户再发一条消息发起检查，与 S5 自动唤醒分别计分，不能用 S7 通过宣称自动续做已实现。图片和缺陷说明由模拟器提供；真实模型模式也使用模拟产物及缺陷说明，不是对真实图片视觉判断准确率的测量。
 - **S6 不测试压缩**：场景已从 `skill-after-compaction` 更名为 `skill-across-turns`。真实调用 Durable 压缩、故意使用有损摘要并验证技能重新注入的测试在 `../durable-skills-cases.mjs`，由 `bun test durable-skills.test.mjs` 运行；这份评测报告不继承其结论。
 - **新增场景**：在 `scenarios.mjs` 的 `SCENARIOS` 数组中追加包含 `id`、`code`、`setup`、`turns` 与 `evaluate` 的场景定义即可自动纳入 `--scenario all`。
+
+---
+
+## 真实后端效率测量（不用模拟器）
+
+`eval/real-go-driver.mjs` 加 `backend/internal/handler/assistant_real_baseline_test.go`：由 Go 测试起隔离的真实后端（真实画布、权限、方案登记），再起真实 `agent-host`，模型请求经计量代理转发，逐请求记录输入/输出 token、缓存命中、耗时和工具调用（含参数前 400 字），按回合汇总到 `summary.md` 与 `raw.json`。付费生成只登记方案，不会提交。
+
+```bash
+cd backend
+# 默认：脚本化假模型，只验证测量工具本身
+go test ./internal/handler -run TestAssistantEfficiencyBaselineOnRealBackend -count=1
+# 真实模型（费用自理；密钥只通过环境变量传入，不写文件）
+BEEFTV_REAL_BASELINE_URL=https://<网关>/v1 BEEFTV_REAL_BASELINE_KEY=... BEEFTV_REAL_BASELINE_MODEL=deepseek-v4.1-flash \
+BEEFTV_REAL_BASELINE_OUT=/tmp/baseline go test ./internal/handler -run TestAssistantEfficiencyBaselineOnRealBackend -count=1 -timeout 25m
+```
+
+模型目录由测试写入的本地配置提供；目录为空时测试直接失败，避免得到失真的基线。

@@ -123,7 +123,7 @@ func TestProjectSearchUsesRealLinksAndRechecksMembership(t *testing.T) {
 	if err := svc.ValidateAgentProjectReference("owner", "standalone", "asset", "linked"); err == nil {
 		t.Fatal("standalone expanded library")
 	}
-	page, err := svc.UserAssetsPage("owner", 1, 20, canvas.UserAssetPageFilter{ProjectID: "p1"})
+	page, err := svc.CanvasService().UserAssetsPage("owner", 1, 20, canvas.UserAssetPageFilter{ProjectID: "p1"})
 	if err != nil || len(page.Assets) != 1 || len(page.ProjectCounts) != 0 {
 		t.Fatalf("scoped filter=%+v err=%v", page, err)
 	}

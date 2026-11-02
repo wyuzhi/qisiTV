@@ -17,7 +17,6 @@ import {
     type LocalExecutorIntentState,
 } from "@/lib/plugins/builtin/editor/local-executor-session";
 import { getSubtitleTracks } from "@/lib/timeline/timeline-tracks";
-import { captureUserScope } from "@/lib/user-scope-guard";
 import type { TimelineTranscriptionSegment } from "@/services/api/timeline-tasks";
 import type { ProjectAsset } from "@/services/api/projects";
 import type { SrtEntry } from "@/types/timeline";
@@ -89,7 +88,6 @@ export function EditorTranscription() {
             return;
         }
         runningRef.current = true;
-        const expectedScope = captureUserScope();
         const originalProjectId = projectId;
         const originalTrackId = subtitleTrack?.id;
         const originalSelectedId = selected.id;
@@ -108,7 +106,6 @@ export function EditorTranscription() {
             const session = beginLocalExecutorSession(originalProjectId, {
                 controller: observer,
                 getLiveProjectId: () => projectIdRef.current,
-                expectedScope,
             });
             const { task, result } = await runOwnedTimelineTranscription({
                 session,

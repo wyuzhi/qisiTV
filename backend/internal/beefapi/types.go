@@ -59,13 +59,17 @@ type Credential struct {
 }
 
 type CatalogModel struct {
-	ID                       string          `json:"id"`
-	DisplayName              string          `json:"displayName,omitempty"`
-	ModelType                string          `json:"modelType,omitempty"`
-	SupportedEndpointTypes   []string        `json:"supportedEndpointTypes,omitempty"`
-	VideoCapabilities        json.RawMessage `json:"videoCapabilities,omitempty"`
-	VideoCapabilitiesVersion string          `json:"videoCapabilitiesVersion,omitempty"`
-	VideoPricing             json.RawMessage `json:"videoPricing,omitempty"`
+	ID                       string                     `json:"id"`
+	DisplayName              string                     `json:"displayName,omitempty"`
+	ModelType                string                     `json:"modelType,omitempty"`
+	SupportedEndpointTypes   []string                   `json:"supportedEndpointTypes,omitempty"`
+	ImageCapabilities        json.RawMessage            `json:"imageCapabilities,omitempty"`
+	ImageCapabilitiesVersion string                     `json:"imageCapabilitiesVersion,omitempty"`
+	VideoCapabilities        json.RawMessage            `json:"videoCapabilities,omitempty"`
+	VideoCapabilitiesVersion string                     `json:"videoCapabilitiesVersion,omitempty"`
+	VideoPricing             json.RawMessage            `json:"videoPricing,omitempty"`
+	MediaCapabilities        map[string]MediaCapability `json:"mediaCapabilities,omitempty"`
+	MediaCapabilitiesVersion string                     `json:"mediaCapabilitiesVersion,omitempty"`
 }
 
 type persistedDevice struct {

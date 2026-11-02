@@ -1,5 +1,5 @@
 import { createClientId } from "@/lib/client-id";
-import { generationErrorMessage } from "@/lib/generation-error";
+import { explainGenerationError, generationErrorCode } from "@/lib/generation-error";
 import type { BackendGenerationResult } from "@/services/api/generation-task";
 import type { GenerationTask } from "@/services/api/task-center";
 import { creationAttachmentKind, type CreationAttachment } from "./creation-assets";
@@ -114,13 +114,30 @@ export function reconcileCreationTaskMessages(runtime: CreationRuntime, conversa
 
             if (resultUrls.length) {
                 const content = message.mode === "video" ? "视频已生成" : failedCount ? `${resultUrls.length} 张图片已生成，${failedCount} 张失败` : "图片已生成";
-                return { ...message, status: "done" as const, content, resultUrls, error: undefined, taskIds: nextTaskIds };
+                return { ...message, status: "done" as const, content, resultUrls, error: undefined, generationErrorSummary: undefined, generationErrorCode: undefined, generationProviderCode: undefined, taskFailureDiagnostics: undefined, taskIds: nextTaskIds };
             }
             if (matches.every((task) => task.status === "cancelled")) {
-                return { ...message, status: "cancelled" as const, content: "已停止", error: undefined, taskIds: nextTaskIds };
+                return { ...message, status: "cancelled" as const, content: "已停止", error: undefined, generationErrorSummary: undefined, generationErrorCode: undefined, generationProviderCode: undefined, taskFailureDiagnostics: undefined, taskIds: nextTaskIds };
             }
             const failed = matches.find((task) => task.status === "failed" || task.creationError);
-            return { ...message, status: "error" as const, content: "生成失败", error: generationErrorMessage(failed?.creationError || failed?.error || "任务已结束，但生成结果暂时无法读取"), taskIds: nextTaskIds };
+            const rawError = failed?.creationError
+                ? failed.creationError
+                : failed?.errorCode
+                  ? { code: failed.errorCode, message: failed.error || "任务已结束，但生成结果暂时无法读取" }
+                  : failed?.error || "任务已结束，但生成结果暂时无法读取";
+            const explained = explainGenerationError(rawError);
+            return {
+                ...message,
+                status: "error" as const,
+                content: "生成失败",
+                error: explained.message,
+                generationErrorSummary: explained.summary,
+                ...(explained.providerCode ? { generationProviderCode: explained.providerCode } : {}),
+                taskFailureDiagnostics: failed?.failureDiagnostics,
+                generationErrorCode: failed?.creationError ? generationErrorCode(failed.creationError) : failed?.errorCode || generationErrorCode(rawError),
+                taskOutcome: failed?.outcome,
+                taskIds: nextTaskIds,
+            };
         });
         return conversationChanged ? { ...conversation, messages, updatedAt: completedAt } : conversation;
     });

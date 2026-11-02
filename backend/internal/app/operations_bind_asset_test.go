@@ -211,7 +211,7 @@ func TestBindAssetRealCanvasRegistryPermissionsReplayAndUndo(t *testing.T) {
 	if err := svc.FinalizeAssistantTurn("abcdef0123456789abcdef0123456789"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.UndoAssistantTurn("local", canvasID, "abcdef0123456789abcdef0123456789"); err != nil {
+	if _, err := svc.AssistantTurns().Undo("local", canvasID, "abcdef0123456789abcdef0123456789"); err != nil {
 		t.Fatal(err)
 	}
 	restored, _ := svc.UserCanvasProject("local", canvasID)

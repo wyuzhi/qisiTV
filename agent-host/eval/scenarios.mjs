@@ -1,8 +1,9 @@
 // 助手评测尺子：7 个固定评测场景（S1–S7）定义、确定性检查项与本地 Fake OpenAI SSE 模型服务。
 // 覆盖：短剧 2 镜开场、8 镜分镜表且仅物化前 2 镜首帧、单镜局部修改、同轮中途补充改向、
-// 生成后画面复查（标注 wake-on-generation 能力缺口）、长对话多轮后技能规则保持。
+// 生成后自动唤醒复查（wake-on-generation）、长对话多轮后技能规则保持。
 
 import http from 'node:http';
+import { isTransientStudioTailMessage } from '../studio-digest.mjs';
 
 function clone(val) {
   return val === undefined ? undefined : JSON.parse(JSON.stringify(val));
@@ -87,6 +88,7 @@ export function createFakeModelServer(options = {}) {
   const requests = [];
   const hooks = {
     onRequest: options.onRequest || null,
+    onResponse: options.onResponse || null,
   };
 
   let callSeq = 0;
@@ -170,8 +172,13 @@ export function createFakeModelServer(options = {}) {
         const hasImageAttachment =
           Array.isArray(messages[i].content) &&
           messages[i].content.some((p) => p && (p.type === 'image_url' || p.type === 'image'));
-        // 跳过媒体适配层追加的提示消息或 pi-ai 为图片工具结果追加的纯图片/附件用户消息
-        if (!txt || txt.startsWith('以下是前述工具返回的素材内容') || (hasImageAttachment && !txt.includes('BEEFTV_CONTEXT:'))) {
+        // 跳过媒体适配层追加的提示消息、末尾瞬态上下文（画布摘要/计划/压缩恢复技能）或纯图片附件用户消息
+        if (
+          !txt ||
+          txt.startsWith('以下是前述工具返回的素材内容') ||
+          isTransientStudioTailMessage(messages[i]) ||
+          (hasImageAttachment && !txt.includes('BEEFTV_CONTEXT:'))
+        ) {
           continue;
         }
         if (firstTurnUserIdx < 0) firstTurnUserIdx = i;
@@ -181,7 +188,9 @@ export function createFakeModelServer(options = {}) {
       }
     }
     const startIdx = lastUserIdx >= 0 ? lastUserIdx : 0;
-    const slice = messages.slice(startIdx);
+    const slice = messages
+      .slice(startIdx)
+      .filter((m) => !isTransientStudioTailMessage(m));
     const { toolResults } = parseToolMessages(slice);
     const allText = slice.map(extractMessageText).join('\n');
     const fullConversationText = messages.map(extractMessageText).join('\n');
@@ -190,8 +199,9 @@ export function createFakeModelServer(options = {}) {
 
   const server = http.createServer(async (req, res) => {
     try {
-      let raw = '';
-      for await (const chunk of req) raw += chunk;
+      const reqChunks = [];
+      for await (const chunk of req) reqChunks.push(Buffer.from(chunk));
+      const raw = Buffer.concat(reqChunks).toString('utf8');
       const body = raw ? JSON.parse(raw) : {};
       const reqIndex = requests.length + 1;
       requests.push({
@@ -205,6 +215,41 @@ export function createFakeModelServer(options = {}) {
 
       if (hooks.onRequest) {
         await hooks.onRequest({ reqIndex, body, req });
+      }
+
+      if (hooks.onResponse) {
+        let pendingStatus = 200;
+        let pendingHeaders = {};
+        const pendingChunks = [];
+        let capturedRespText = '';
+        const origWriteHead = res.writeHead.bind(res);
+        const origWrite = res.write.bind(res);
+        const origEnd = res.end.bind(res);
+        res.writeHead = (statusCode, headers) => {
+          pendingStatus = statusCode;
+          pendingHeaders = headers || {};
+          return res;
+        };
+        res.write = (chunk) => {
+          if (chunk) {
+            pendingChunks.push(chunk);
+            capturedRespText += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+          }
+          return true;
+        };
+        res.end = (chunk, ...rest) => {
+          if (chunk && typeof chunk !== 'function') {
+            pendingChunks.push(chunk);
+            capturedRespText += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+          }
+          res.writeHead = origWriteHead;
+          res.write = origWrite;
+          res.end = origEnd;
+          hooks.onResponse({ reqIndex, body, respText: capturedRespText });
+          origWriteHead(pendingStatus, pendingHeaders);
+          for (const c of pendingChunks) origWrite(c);
+          return origEnd(...rest);
+        };
       }
 
       const messages = body.messages || [];
@@ -254,10 +299,6 @@ export function createFakeModelServer(options = {}) {
                 durationSeconds: 5,
                 plotDescription: '赛博朋克霓虹夜市街头，黑客抬头看向闪烁的全息广告牌',
                 dialogue: '信号就是从夜市深处发出来的。',
-                shotSize: '近景',
-                camera: '平视',
-                motion: '缓慢推进',
-                emotion: '警觉',
                 imageGenerationPrompt: '赛博朋克霓虹夜市，全息招牌下的黑客近景，冷蓝与品红霓虹光，9:16',
                 videoMotionPrompt: '镜头缓慢推向黑客脸部，身后霓虹灯牌闪烁，雨水滑落',
               },
@@ -265,10 +306,6 @@ export function createFakeModelServer(options = {}) {
                 durationSeconds: 5,
                 plotDescription: '赛博朋克霓虹夜市暗巷，微型无人机掠过蒸汽摊位',
                 dialogue: '跟上它，别跟丢了！',
-                shotSize: '中景',
-                camera: '跟拍',
-                motion: '快速横移',
-                emotion: '紧张',
                 imageGenerationPrompt: '赛博朋克霓虹夜市暗巷，蒸汽与全息投影交织，微型无人机掠过，9:16',
                 videoMotionPrompt: '镜头跟随无人机快速穿梭于霓虹夜市摊位之间',
               },
@@ -337,10 +374,6 @@ export function createFakeModelServer(options = {}) {
               durationSeconds: n <= 4 ? 4 : 3,
               plotDescription: `第 ${n} 镜：深空探索任务关键画面 ${n}，展现星际跃迁与未知遗迹`,
               dialogue: n === 1 ? '这里是先驱号，准备进入跃迁轨道。' : `第 ${n} 镜台词：信号强度持续上升。`,
-              shotSize: n % 2 === 1 ? '远景' : '特写',
-              camera: '平视',
-              motion: '平稳推进',
-              emotion: '悬疑震撼',
               imageGenerationPrompt: `科幻电影感第 ${n} 镜首帧提示词，深空探索场景 ${n}，高细节写实光影`,
               videoMotionPrompt: `第 ${n} 镜视频运镜提示词，镜头平稳推进展现科幻空间纵深`,
             };
@@ -546,10 +579,6 @@ export function createFakeModelServer(options = {}) {
                   durationSeconds: 5,
                   plotDescription: '雨夜天台，林晚攥着染血的怀表质问沈默',
                   dialogue: '林晚：这块表为什么会在你手里？',
-                  shotSize: '近景',
-                  camera: '平视',
-                  motion: '缓慢推进',
-                  emotion: '震惊质问',
                   imageGenerationPrompt: '竖屏 9:16 写实电影感，雨夜天台，26岁黑色风衣女记者攥着怀表，冷色调',
                   videoMotionPrompt: '镜头从怀表特写上移至林晚质问的脸庞，雨水滑落',
                 },
@@ -557,10 +586,6 @@ export function createFakeModelServer(options = {}) {
                   durationSeconds: 5,
                   plotDescription: '沈默站在霓虹阴影中冷笑转身',
                   dialogue: '沈默：你以为你查到的是真相吗？',
-                  shotSize: '中景',
-                  camera: '侧拍',
-                  motion: '固定',
-                  emotion: '冷酷反转',
                   imageGenerationPrompt: '竖屏 9:16 写实电影感，30岁金丝眼镜男子站在天台阴影中回眸冷笑',
                   videoMotionPrompt: '沈默缓缓转头看向镜头，身后闪电划破夜空',
                 },
@@ -719,10 +744,6 @@ export function createFakeModelServer(options = {}) {
               durationSeconds: 5,
               plotDescription: '女主在都市雨夜街头积水旁发现失踪案关键银色袖扣',
               dialogue: '这枚袖扣……他昨晚真的来过这里！',
-              shotSize: '特写',
-              camera: '俯拍',
-              motion: '缓慢推镜',
-              emotion: '震惊',
               imageGenerationPrompt: '都市雨夜街头，女主撑着透明雨伞蹲在积水路边，捡起一枚带刻痕的银色袖扣，9:16',
               videoMotionPrompt: '镜头从雨水涟漪推向女主手中的银色袖扣，女主手指微微颤抖',
             },
@@ -730,10 +751,6 @@ export function createFakeModelServer(options = {}) {
               durationSeconds: 5,
               plotDescription: '女主抬头发现暗巷黑影闪过，立刻起身追入雨幕',
               dialogue: '站住！别走！',
-              shotSize: '中景',
-              camera: '平视跟拍',
-              motion: '快速推进',
-              emotion: '急切紧张',
               imageGenerationPrompt: '女主猛然抬头看向街角暗巷，远处黑影一闪而过，雨丝如织，悬疑冷色调，9:16',
               videoMotionPrompt: '女主撑伞急步追向街角暗巷，镜头快速跟拍',
             },
@@ -798,8 +815,12 @@ export function createFakeModelServer(options = {}) {
         '已完成都市短剧雨夜寻踪开场的 2 镜头分镜脚本、2 个首帧图节点与 2 个视频生成节点，完成了分镜行绑定与首帧到视频的参考连线，并提出了首帧图生成提议。',
       );
     } catch (error) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: { message: String(error?.message || error) } }));
+      res.writeHead(error?.reason === 'aborted_budget' ? 429 : 500, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          error: { message: String(error?.message || error), code: error?.reason || 'fake_model_error' },
+        }),
+      );
     }
   });
 
@@ -1313,7 +1334,7 @@ export const SCENARIOS = [
     name: 'S5 生成后自动唤醒画面复查与重提生成',
     description: '首轮提交生成提议并由模拟器完成带六指缺陷的生成产物，验证宿主是否具备 wake-on-generation 自动唤醒复查能力。',
     capabilities: ['wake-on-generation'],
-    expectedBaselinePass: false,
+    expectedBaselinePass: true,
     setup(simGo, canvasId) {
       const doc = simGo.ensureCanvas(canvasId);
       simGo.flagNextTaskDefect('人物右手有6根手指，手部明显畸形');
@@ -1434,7 +1455,7 @@ export const SCENARIOS = [
         {
           name: 'active_skill_present_in_every_turn_request',
           passed: new Set(requestEvidence.map((entry) => entry.turnId)).size === 4 && requestEvidence.every((entry) => entry.activeSkillPresent),
-          detail: `活动技能进入系统上下文=${requestEvidence.filter((entry) => entry.activeSkillPresent).length}/${requestEvidence.length} 次模型请求`,
+          detail: `活动技能进入非系统请求上下文=${requestEvidence.filter((entry) => entry.activeSkillPresent).length}/${requestEvidence.length} 次模型请求`,
         },
         {
           name: 'four_turns_completed_in_same_session',

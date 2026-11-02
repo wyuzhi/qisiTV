@@ -63,7 +63,7 @@ func TestV20MarketReleaseMigrationPreservesVersionsAndLedger(t *testing.T) {
 	if err := db.Order("version").Find(&after).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(after) != len(before)+5 || !reflect.DeepEqual(before, after[:len(before)]) || after[len(before)].Version != 21 || after[len(before)].Name != "skill-market-release-metadata" || after[len(before)+4].Name != "reconcile-preview-assistant-schema" {
+	if len(after) != len(before)+8 || !reflect.DeepEqual(before, after[:len(before)]) || after[len(before)].Version != 21 || after[len(before)].Name != "skill-market-release-metadata" || after[len(before)+4].Name != "reconcile-preview-assistant-schema" || after[len(before)+5].Name != "task-recovery-outcome" || after[len(before)+6].Name != "task-beefapi-settlement" || after[len(before)+7].Name != "managed-media-query-identity" {
 		t.Fatalf("migration ledger changed: %+v", after)
 	}
 	if err := db.Exec("ALTER TABLE skill_versions DROP COLUMN market_release_json").Error; err != nil {

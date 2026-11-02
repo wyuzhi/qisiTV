@@ -16,7 +16,7 @@ export async function modelFixture(directory, selected, available, onRequest = (
     // A scripted tool round uses the same official provider and Durable owner
     // as the plain-reply fixtures; tests need not replace the tool scheduler.
     const calls = response?.toolCalls;
-    frame(calls?.length ? { role: 'assistant', tool_calls: calls.map((call, index) => ({
+    frame(calls?.length ? { role: 'assistant', ...(response?.reply ? { content: response.reply } : {}), tool_calls: calls.map((call, index) => ({
       index, id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) },
     })) } : { role: 'assistant', content: response?.reply || `Actual ${body.model} reply` });
     frame({}, calls?.length ? 'tool_calls' : 'stop'); res.end('data: [DONE]\n\n');

@@ -27,10 +27,13 @@ func TestMidjourneyPromptControls(t *testing.T) {
 	if err != nil || strings.Count(got, "--ar") != 1 {
 		t.Fatalf("duplicate flags: %q %v", got, err)
 	}
-	for _, prompt := range []string{"a cube --ar 1:1", "a cube --hd", "a cube --q 2", "--ar 16:9", strings.Repeat("x", 2000)} {
+	for _, prompt := range []string{"a cube --ar 1:1", "a cube --hd", "a cube --q 2", "--ar 16:9"} {
 		if _, err := c.GenerationPrompt(prompt, "1456x816"); err == nil {
 			t.Fatalf("accepted invalid prompt %q", prompt)
 		}
+	}
+	if _, err := c.GenerationPrompt(strings.Repeat("x", 12000), "1456x816"); err != nil {
+		t.Fatalf("long prompt should be delegated to upstream, got %v", err)
 	}
 	if _, err := c.GenerationPrompt("a cube", "2048x2048"); err == nil {
 		t.Fatal("unpriced HD accepted")

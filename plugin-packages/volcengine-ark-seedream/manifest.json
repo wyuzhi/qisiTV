@@ -1,11 +1,11 @@
 {
-  "apiVersion": "qisitv.plugin/v2",
+  "apiVersion": "qisitv.plugin/v3",
   "id": "volcengine-ark-seedream",
   "name": "Volcengine Ark Seedream Images",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "author": "BeefTV Contributors",
   "description": "Volcengine Ark Seedream Images 独立请求协议插件。",
-  "documentation": "# Volcengine Ark Seedream Images\n\n该目录是 qisiTV 声明式协议插件源码。后端从生成的 `volcengine-ark-seedream.qisitv-plugin` 包加载，不依赖系统内置 `host:` 适配器。\n\n本插件源自 BeefTV Contributors 的开源实现，由 qisiTV 分支维护，用于适配 Volcengine 相关服务接口；不表示 qisiTV 与该服务商存在隶属、授权或合作关系。\n\n完整接口见 [docs/interface.md](docs/interface.md)。\n\n---\n\n# Volcengine Ark Seedream Images 接口字段\n\n## 协议身份\n\n- 插件 ID：`volcengine-ark-seedream`。\n- Provider ID：`volcengine-ark-image`。\n- 能力：`image`。\n- 默认 Base URL：`https://ark.cn-beijing.volces.com`。\n- 鉴权驱动：`bearer`。\n- 创建：`POST /api/v3/images/generations`。\n- 生命周期：同步响应。\n\n## 配置字段\n\n| 字段 | 类型 | 必填 | 含义 |\n| --- | --- | --- | --- |\n| `apiKey` | secret | 是 | API Key |\n\n## 统一字段映射\n\n| 统一字段 | 类型 | 必填 | 上游映射 | 说明 |\n| --- | --- | --- | --- | --- |\n| `model` | string | 是 | `model` | 图片模型 ID。 |\n| `prompt` | string | 是 | `prompt` | 图片提示词。 |\n| `images` | media[] | 否 | `provider image/reference fields` | 参考图或编辑源图，role 由业务层确定。 |\n| `imageCount` | integer | 否 | `n/sample_count` | 输出数量。 |\n| `aspectRatio` | string | 否 | `size/aspect_ratio` | 比例或尺寸，语义按协议说明。 |\n| `resolution` | string | 否 | `resolution/imageSize` | 分辨率档位。 |\n| `quality` | string | 否 | `quality` | 质量档位。 |\n| `providerOptions` | object | 否 | `provider-specific fields` | 插件命名空间内的厂商扩展字段。 |\n\n## 上游请求模板逐字段清单\n\n下表由插件请求模板生成，覆盖 body、query、headers 和 multipart 文件声明中的每个字段。\n\n| 上游位置 | 值或转换表达式 |\n| --- | --- |\n| `create.method` | `\"POST\"` |\n| `create.path` | `\"/api/v3/images/generations\"` |\n| `create.contentType` | `\"application/json\"` |\n| `create.body.model` | `{\"$ref\":\"request.model\"}` |\n| `create.body.prompt` | `{\"$ref\":\"request.prompt\"}` |\n| `create.body.size` | `{\"$omitEmpty\":{\"$switch\":{\"cases\":[{\"when\":{\"$eq\":[{\"$ref\":\"request.aspectRatio\"},\"auto\"]},\"then\":\"2k\"},{\"when\":{\"$eq\":[{\"$ref\":\"request.aspectRatio\"},\"1:1\"]},\"then\":\"2048x2048\"},{\"when\":{\"$eq\":[{\"$ref\":\"request.aspectRatio\"},\"4:3\"]},\"then\":\"2304x1728\"},{\"when\":{\"$eq\":[{\"$ref\":\"request.aspectRatio\"},\"3:4\"]},\"then\":\"1728x2304\"},{\"when\":{\"$eq\":[{\"$ref\":\"request.aspectRatio\"},\"16:9\"]},\"then\":\"2560x1440\"},{\"when\":{\"$eq\":[{\"$ref\":\"request.aspectRatio\"},\"9:16\"]},\"then\":\"1440x2560\"},{\"when\":{\"$eq\":[{\"$ref\":\"request.aspectRatio\"},\"3:2\"]},\"then\":\"2496x1664\"},{\"when\":{\"$eq\":[{\"$ref\":\"request.aspectRatio\"},\"2:3\"]},\"then\":\"1664x2496\"},{\"when\":{\"$eq\":[{\"$ref\":\"request.aspectRatio\"},\"21:9\"]},\"then\":\"3024x1296\"}],\"default\":{\"$ref\":\"request.aspectRatio\"}}}}` |\n| `create.body.image` | `{\"$omitEmpty\":{\"$if\":{\"condition\":{\"$eq\":[{\"$len\":{\"$ref\":\"request.images\"}},1]},\"then\":{\"$first\":{\"$map\":{\"from\":{\"$ref\":\"request.images\"},\"as\":\"media\",\"in\":{\"$ref\":\"media.value\"}}}},\"else\":{\"$if\":{\"condition\":{\"$gt\":[{\"$len\":{\"$ref\":\"request.images\"}},1]},\"then\":{\"$map\":{\"from\":{\"$ref\":\"request.images\"},\"as\":\"media\",\"in\":{\"$ref\":\"media.value\"}}},\"else\":null}}}}}` |\n| `create.body.sequential_image_generation` | `{\"$omitEmpty\":{\"$ref\":\"request.providerOptions.volcengine-ark-image.sequential_image_generation\"}}` |\n| `create.body.sequential_image_generation_options` | `{\"$omitEmpty\":{\"$ref\":\"request.providerOptions.volcengine-ark-image.sequential_image_generation_options\"}}` |\n| `create.body.watermark` | `{\"$coalesce\":[{\"$ref\":\"request.providerOptions.volcengine-ark-image.watermark\"},{\"$ref\":\"request.watermark\"},false]}` |\n| `create.body.seed` | `{\"$omitEmpty\":{\"$ref\":\"request.providerOptions.volcengine-ark-image.seed\"}}` |\n| `create.body.response_format` | `{\"$coalesce\":[{\"$ref\":\"request.providerOptions.volcengine-ark-image.response_format\"},\"b64_json\"]}` |\n\n## Provider 扩展键\n\n- `providerOptions.volcengine-ark-image.response_format`\n- `providerOptions.volcengine-ark-image.seed`\n- `providerOptions.volcengine-ark-image.sequential_image_generation`\n- `providerOptions.volcengine-ark-image.sequential_image_generation_options`\n- `providerOptions.volcengine-ark-image.watermark`\n\n动态模型或工作流允许使用文档声明的完整 `parameters/input/extra_body` 对象；该对象是协议本身的开放 schema，不会被宿主裁剪。\n\n## 响应映射逐字段清单\n\n| 映射位置 | 上游路径或转换表达式 |\n| --- | --- |\n| `response.status` | `\"succeeded\"` |\n| `response.images` | `{\"$ref\":\"response.data\"}` |\n| `response.usage` | `{\"$ref\":\"response.usage\"}` |\n| `response.errorPaths[0]` | `\"error.code\"` |\n| `response.messagePaths[0]` | `\"error.message\"` |\n\n## 响应与错误\n\n插件把上游 task/status/text/media/usage 映射为统一结果。临时媒体 URL 标记为 ephemeral，由宿主立即下载持久化。HTTP 错误、业务 code 和 error object 保持失败语义，不包装成成功。\n\n## 兼容边界\n\n官方 Ark 推理接入：Base URL 使用 /api/v3，API Key 来自方舟推理接入控制台，不可与 Agent Plan 专属 Key 混用。\n\n<!-- QISITV_PLUGIN_MANIFEST_START -->\n## Manifest 完整接口定义\n\n以下 JSON 与插件包内实际 `manifest.json` 逐字段一致，覆盖插件身份、权限、配置、鉴权、参数、校验、创建、Agent、查询、取消、结果下载、响应和 Agent 响应映射。`documentation` 字段的值就是当前完整文档；为避免文档在自身内部无限递归，JSON 中仅用等义占位文本表示正文。\n\n```json\n{\n  \"apiVersion\": \"qisitv.plugin/v2\",\n  \"id\": \"volcengine-ark-seedream\",\n  \"name\": \"Volcengine Ark Seedream Images\",\n  \"version\": \"2.0.0\",\n  \"author\": \"BeefTV Contributors\",\n  \"description\": \"Volcengine Ark Seedream Images 独立请求协议插件。\",\n  \"documentation\": \"<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>\",\n  \"permissions\": [\n    \"generation.run\",\n    \"media.read\"\n  ],\n  \"configuration\": {\n    \"fields\": [\n      {\n        \"name\": \"apiKey\",\n        \"type\": \"secret\",\n        \"label\": \"API Key\",\n        \"required\": true\n      }\n    ]\n  },\n  \"contributes\": {\n    \"providers\": [\n      {\n        \"id\": \"volcengine-ark-image\",\n        \"label\": \"Volcengine Ark Seedream Images\",\n        \"capabilities\": [\n          \"image\"\n        ],\n        \"scopes\": [\n          \"admin.system-channel\",\n          \"user.custom-channel\",\n          \"canvas\",\n          \"creation\",\n          \"agent\"\n        ],\n        \"baseUrl\": \"https://ark.cn-beijing.volces.com\",\n        \"requiresPublicMediaUrls\": false,\n        \"auth\": {\n          \"type\": \"bearer\",\n          \"field\": \"apiKey\"\n        },\n        \"parameters\": [\n          {\n            \"name\": \"model\",\n            \"type\": \"string\",\n            \"required\": true,\n            \"mapping\": \"model\",\n            \"description\": \"图片模型 ID。\"\n          },\n          {\n            \"name\": \"prompt\",\n            \"type\": \"string\",\n            \"required\": true,\n            \"mapping\": \"prompt\",\n            \"description\": \"图片提示词。\"\n          },\n          {\n            \"name\": \"images\",\n            \"type\": \"media[]\",\n            \"required\": false,\n            \"mapping\": \"provider image/reference fields\",\n            \"description\": \"参考图或编辑源图，role 由业务层确定。\"\n          },\n          {\n            \"name\": \"imageCount\",\n            \"type\": \"integer\",\n            \"required\": false,\n            \"mapping\": \"n/sample_count\",\n            \"description\": \"输出数量。\"\n          },\n          {\n            \"name\": \"aspectRatio\",\n            \"type\": \"string\",\n            \"required\": false,\n            \"mapping\": \"size/aspect_ratio\",\n            \"description\": \"比例或尺寸，语义按协议说明。\"\n          },\n          {\n            \"name\": \"resolution\",\n            \"type\": \"string\",\n            \"required\": false,\n            \"mapping\": \"resolution/imageSize\",\n            \"description\": \"分辨率档位。\"\n          },\n          {\n            \"name\": \"quality\",\n            \"type\": \"string\",\n            \"required\": false,\n            \"mapping\": \"quality\",\n            \"description\": \"质量档位。\"\n          },\n          {\n            \"name\": \"providerOptions\",\n            \"type\": \"object\",\n            \"required\": false,\n            \"mapping\": \"provider-specific fields\",\n            \"description\": \"插件命名空间内的厂商扩展字段。\"\n          }\n        ],\n        \"create\": {\n          \"method\": \"POST\",\n          \"path\": \"/api/v3/images/generations\",\n          \"contentType\": \"application/json\",\n          \"body\": {\n            \"model\": {\n              \"$ref\": \"request.model\"\n            },\n            \"prompt\": {\n              \"$ref\": \"request.prompt\"\n            },\n            \"size\": {\n              \"$omitEmpty\": {\n                \"$switch\": {\n                  \"cases\": [\n                    {\n                      \"when\": {\n                        \"$eq\": [\n                          {\n                            \"$ref\": \"request.aspectRatio\"\n                          },\n                          \"auto\"\n                        ]\n                      },\n                      \"then\": \"2k\"\n                    },\n                    {\n                      \"when\": {\n                        \"$eq\": [\n                          {\n                            \"$ref\": \"request.aspectRatio\"\n                          },\n                          \"1:1\"\n                        ]\n                      },\n                      \"then\": \"2048x2048\"\n                    },\n                    {\n                      \"when\": {\n                        \"$eq\": [\n                          {\n                            \"$ref\": \"request.aspectRatio\"\n                          },\n                          \"4:3\"\n                        ]\n                      },\n                      \"then\": \"2304x1728\"\n                    },\n                    {\n                      \"when\": {\n                        \"$eq\": [\n                          {\n                            \"$ref\": \"request.aspectRatio\"\n                          },\n                          \"3:4\"\n                        ]\n                      },\n                      \"then\": \"1728x2304\"\n                    },\n                    {\n                      \"when\": {\n                        \"$eq\": [\n                          {\n                            \"$ref\": \"request.aspectRatio\"\n                          },\n                          \"16:9\"\n                        ]\n                      },\n                      \"then\": \"2560x1440\"\n                    },\n                    {\n                      \"when\": {\n                        \"$eq\": [\n                          {\n                            \"$ref\": \"request.aspectRatio\"\n                          },\n                          \"9:16\"\n                        ]\n                      },\n                      \"then\": \"1440x2560\"\n                    },\n                    {\n                      \"when\": {\n                        \"$eq\": [\n                          {\n                            \"$ref\": \"request.aspectRatio\"\n                          },\n                          \"3:2\"\n                        ]\n                      },\n                      \"then\": \"2496x1664\"\n                    },\n                    {\n                      \"when\": {\n                        \"$eq\": [\n                          {\n                            \"$ref\": \"request.aspectRatio\"\n                          },\n                          \"2:3\"\n                        ]\n                      },\n                      \"then\": \"1664x2496\"\n                    },\n                    {\n                      \"when\": {\n                        \"$eq\": [\n                          {\n                            \"$ref\": \"request.aspectRatio\"\n                          },\n                          \"21:9\"\n                        ]\n                      },\n                      \"then\": \"3024x1296\"\n                    }\n                  ],\n                  \"default\": {\n                    \"$ref\": \"request.aspectRatio\"\n                  }\n                }\n              }\n            },\n            \"image\": {\n              \"$omitEmpty\": {\n                \"$if\": {\n                  \"condition\": {\n                    \"$eq\": [\n                      {\n                        \"$len\": {\n                          \"$ref\": \"request.images\"\n                        }\n                      },\n                      1\n                    ]\n                  },\n                  \"then\": {\n                    \"$first\": {\n                      \"$map\": {\n                        \"from\": {\n                          \"$ref\": \"request.images\"\n                        },\n                        \"as\": \"media\",\n                        \"in\": {\n                          \"$ref\": \"media.value\"\n                        }\n                      }\n                    }\n                  },\n                  \"else\": {\n                    \"$if\": {\n                      \"condition\": {\n                        \"$gt\": [\n                          {\n                            \"$len\": {\n                              \"$ref\": \"request.images\"\n                            }\n                          },\n                          1\n                        ]\n                      },\n                      \"then\": {\n                        \"$map\": {\n                          \"from\": {\n                            \"$ref\": \"request.images\"\n                          },\n                          \"as\": \"media\",\n                          \"in\": {\n                            \"$ref\": \"media.value\"\n                          }\n                        }\n                      },\n                      \"else\": null\n                    }\n                  }\n                }\n              }\n            },\n            \"sequential_image_generation\": {\n              \"$omitEmpty\": {\n                \"$ref\": \"request.providerOptions.volcengine-ark-image.sequential_image_generation\"\n              }\n            },\n            \"sequential_image_generation_options\": {\n              \"$omitEmpty\": {\n                \"$ref\": \"request.providerOptions.volcengine-ark-image.sequential_image_generation_options\"\n              }\n            },\n            \"watermark\": {\n              \"$coalesce\": [\n                {\n                  \"$ref\": \"request.providerOptions.volcengine-ark-image.watermark\"\n                },\n                {\n                  \"$ref\": \"request.watermark\"\n                },\n                false\n              ]\n            },\n            \"seed\": {\n              \"$omitEmpty\": {\n                \"$ref\": \"request.providerOptions.volcengine-ark-image.seed\"\n              }\n            },\n            \"response_format\": {\n              \"$coalesce\": [\n                {\n                  \"$ref\": \"request.providerOptions.volcengine-ark-image.response_format\"\n                },\n                \"b64_json\"\n              ]\n            }\n          }\n        },\n        \"response\": {\n          \"status\": \"succeeded\",\n          \"images\": {\n            \"$ref\": \"response.data\"\n          },\n          \"usage\": {\n            \"$ref\": \"response.usage\"\n          },\n          \"errorPaths\": [\n            \"error.code\"\n          ],\n          \"messagePaths\": [\n            \"error.message\"\n          ]\n        }\n      }\n    ]\n  }\n}\n```\n<!-- QISITV_PLUGIN_MANIFEST_END -->\n",
+  "documentation": "# Volcengine Ark Seedream Images\n\n该目录是 qisiTV 声明式协议插件源码。后端从生成的 `volcengine-ark-seedream.qisitv-plugin` 包加载，不依赖系统内置 `host:` 适配器。\n\n本插件源自 BeefTV Contributors 的开源实现，由 qisiTV 分支维护，用于适配 Volcengine 相关服务接口；不表示 qisiTV 与该服务商存在隶属、授权或合作关系。\n\n完整接口见 [docs/interface.md](docs/interface.md)。\n\n---\n\n# Volcengine Ark Seedream Images 接口字段\n\n## 协议身份\n\n- 插件 ID：`volcengine-ark-seedream`。\n- Provider ID：`volcengine-ark-image`。\n- 能力：`image`。\n- 默认 Base URL：`https://ark.cn-beijing.volces.com`。\n- 鉴权驱动：`bearer`。\n- 创建：`POST /images/generations`，默认路径前缀为 `/api/v3`；已配置的 `/v1`、`/api/v3` 等前缀保留。\n- 生命周期：单图与图层返回 JSON，组图可返回 `text/event-stream`；请求格式、尺寸校验及响应映射全部由本插件声明。\n\n## 配置字段\n\n| 字段 | 类型 | 必填 | 含义 |\n| --- | --- | --- | --- |\n| `apiKey` | secret | 是 | API Key |\n\n## 统一字段映射\n\n| 统一字段 | 类型 | 必填 | 上游映射 | 说明 |\n| --- | --- | --- | --- | --- |\n| `model` | string | 是 | `model` | 图片模型 ID。 |\n| `prompt` | string | 是 | `prompt` | 图片提示词。 |\n| `images` | media[] | 否 | `provider image/reference fields` | 参考图或编辑源图，role 由业务层确定。 |\n| `imageCount` | integer | 否 | 不直接发送 `n` | 组图使用 `output.options.maxImages`，并在单次请求中设置最大数量。 |\n| `aspectRatio` | string | 否 | `size/aspect_ratio` | 比例或尺寸，语义按协议说明。 |\n| `resolution` | string | 否 | `resolution/imageSize` | 分辨率档位。 |\n| `quality` | string | 否 | `quality` | 质量档位。 |\n| `providerOptions` | object | 否 | `provider-specific fields` | 插件命名空间内的厂商扩展字段。 |\n\n## 图片选项\n\n`output.options` 是宿主保存的图片控件值；插件按顺序计算 provider 内的纯表达式变量，并用同一组变量校验和构造请求。变量仅在当前请求有效，不能引用后面才声明的变量。\n\n| 选项 | 上游字段 | 行为 |\n| --- | --- | --- |\n| `mode=layers` | `layer_decomposition` | 必须有源图；保留各层的 `z_index`、`bounding_box`、`name`、`description`。 |\n| `maxImages` | `sequential_image_generation_options.max_images` | 支持组图的型号使用单次 SSE 请求；不补发缺少的图片。 |\n| `transparent=true` | `background=transparent` | 强制 PNG，并按型号校验透明背景能力。 |\n| `format` | `output_format` | 默认 PNG；只在支持该字段的型号发送。 |\n| `optimize` | `optimize_prompt_options.mode` | 保留用户选择。 |\n| `watermark` | `watermark` | 默认 false。 |\n\n`size` 由比例、尺寸档位和当前型号共同计算，不再经过宿主的 Ark 通用缩放器。未支持的尺寸、蒙版、图层或透明选项在发出 POST 前拒绝。完整表达式以下方生成的 manifest 为准。\n\n## Provider 扩展键\n\n- `providerOptions.volcengine-ark-image.response_format`\n- `providerOptions.volcengine-ark-image.seed`\n- `providerOptions.volcengine-ark-image.sequential_image_generation`\n- `providerOptions.volcengine-ark-image.sequential_image_generation_options`\n- `providerOptions.volcengine-ark-image.watermark`\n\n这些扩展键继续兼容；图片控件显式选择的值优先。`response_format` 默认 `url`，旧 `b64_json` 响应仍读取并按实际图片字节修正 MIME。\n\n## 响应映射逐字段清单\n\n| 映射位置 | 上游路径或转换表达式 |\n| --- | --- |\n| `response.status` | `\"succeeded\"` |\n| `response.images` | `{\"$ref\":\"response.data\"}` |\n| `response.usage` | `{\"$ref\":\"response.usage\"}` |\n| `response.errorPaths[0]` | `\"error.code\"` |\n| `response.messagePaths[0]` | `\"error.message\"` |\n\n## 响应与错误\n\nJSON 中的图片和 SSE 中的已完成图片使用同一结果合同。SSE 按非负整数索引排序并去重；空事件、坏事件和后续失败不会丢弃已收到的有效图片。全部失败则返回错误。只有 manifest 显式声明的 SSE 才会解析。\n\n临时图片 URL 标记为 ephemeral，由宿主立即下载并校验后持久化；拒绝空内容及伪装成图片的 HTML/JSON。透明像素不重编码。HTTP 错误、业务 code 和 error object 保持失败语义。\n\n## 兼容边界\n\n官方 Ark 推理接入：Base URL 使用 /api/v3，API Key 来自方舟推理接入控制台，不可与 Agent Plan 专属 Key 混用。\n\n2.1.0 的清单版本为 `qisitv.plugin/v3`，依赖同时支持 provider `variables`、`defaultPathPrefix`、图片 `response.stream` 和 `detectImageMime` 的宿主；旧宿主加载时即拒绝该清单，不能忽略新字段后继续请求。新版宿主继续读取 v1/v2 插件，但新字段必须声明 v3。Agent Plan 使用自己的独立插件与地址。插件未安装或停用时，宿主在 POST 前拒绝，不退回手写请求器。\n\n<!-- QISITV_PLUGIN_MANIFEST_START -->\n## Manifest 完整接口定义\n\n以下 JSON 与插件包内实际 `manifest.json` 逐字段一致，覆盖插件身份、权限、配置、鉴权、参数、校验、创建、Agent、查询、取消、结果下载、响应和 Agent 响应映射。`documentation` 字段的值就是当前完整文档；为避免文档在自身内部无限递归，JSON 中仅用等义占位文本表示正文。\n\n```json\n{\n  \"apiVersion\": \"qisitv.plugin/v3\",\n  \"id\": \"volcengine-ark-seedream\",\n  \"name\": \"Volcengine Ark Seedream Images\",\n  \"version\": \"2.1.0\",\n  \"author\": \"BeefTV Contributors\",\n  \"description\": \"Volcengine Ark Seedream Images 独立请求协议插件。\",\n  \"documentation\": \"<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>\",\n  \"permissions\": [\n    \"generation.run\",\n    \"media.read\"\n  ],\n  \"configuration\": {\n    \"fields\": [\n      {\n        \"name\": \"apiKey\",\n        \"type\": \"secret\",\n        \"label\": \"API Key\",\n        \"required\": true\n      }\n    ]\n  },\n  \"contributes\": {\n    \"providers\": [\n      {\n        \"id\": \"volcengine-ark-image\",\n        \"label\": \"Volcengine Ark Seedream Images\",\n        \"capabilities\": [\n          \"image\"\n        ],\n        \"scopes\": [\n          \"admin.system-channel\",\n          \"user.custom-channel\",\n          \"canvas\",\n          \"creation\",\n          \"agent\"\n        ],\n        \"baseUrl\": \"https://ark.cn-beijing.volces.com\",\n        \"requiresPublicMediaUrls\": false,\n        \"auth\": {\n          \"type\": \"bearer\",\n          \"field\": \"apiKey\"\n        },\n        \"parameters\": [\n          {\n            \"name\": \"model\",\n            \"type\": \"string\",\n            \"required\": true,\n            \"mapping\": \"model\",\n            \"description\": \"图片模型 ID。\"\n          },\n          {\n            \"name\": \"prompt\",\n            \"type\": \"string\",\n            \"required\": true,\n            \"mapping\": \"prompt\",\n            \"description\": \"图片提示词。\"\n          },\n          {\n            \"name\": \"images\",\n            \"type\": \"media[]\",\n            \"required\": false,\n            \"mapping\": \"provider image/reference fields\",\n            \"description\": \"参考图或编辑源图，role 由业务层确定。\"\n          },\n          {\n            \"name\": \"imageCount\",\n            \"type\": \"integer\",\n            \"required\": false,\n            \"mapping\": \"n/sample_count\",\n            \"description\": \"输出数量。\"\n          },\n          {\n            \"name\": \"aspectRatio\",\n            \"type\": \"string\",\n            \"required\": false,\n            \"mapping\": \"size/aspect_ratio\",\n            \"description\": \"比例或尺寸，语义按协议说明。\"\n          },\n          {\n            \"name\": \"resolution\",\n            \"type\": \"string\",\n            \"required\": false,\n            \"mapping\": \"resolution/imageSize\",\n            \"description\": \"分辨率档位。\"\n          },\n          {\n            \"name\": \"quality\",\n            \"type\": \"string\",\n            \"required\": false,\n            \"mapping\": \"quality\",\n            \"description\": \"质量档位。\"\n          },\n          {\n            \"name\": \"providerOptions\",\n            \"type\": \"object\",\n            \"required\": false,\n            \"mapping\": \"provider-specific fields\",\n            \"description\": \"插件命名空间内的厂商扩展字段。\"\n          }\n        ],\n        \"create\": {\n          \"method\": \"POST\",\n          \"path\": \"/images/generations\",\n          \"contentType\": \"application/json\",\n          \"body\": {\n            \"model\": {\n              \"$ref\": \"request.model\"\n            },\n            \"prompt\": {\n              \"$if\": {\n                \"condition\": {\n                  \"$ref\": \"request.instructions\"\n                },\n                \"then\": {\n                  \"$concat\": [\n                    {\n                      \"$ref\": \"request.instructions\"\n                    },\n                    \"\\n\\n\",\n                    {\n                      \"$ref\": \"request.prompt\"\n                    }\n                  ]\n                },\n                \"else\": {\n                  \"$ref\": \"request.prompt\"\n                }\n              }\n            },\n            \"size\": {\n              \"$omitEmpty\": {\n                \"$ref\": \"vars.size\"\n              }\n            },\n            \"image\": {\n              \"$omitEmpty\": {\n                \"$if\": {\n                  \"condition\": {\n                    \"$eq\": [\n                      {\n                        \"$len\": {\n                          \"$ref\": \"request.images\"\n                        }\n                      },\n                      1\n                    ]\n                  },\n                  \"then\": {\n                    \"$first\": {\n                      \"$map\": {\n                        \"from\": {\n                          \"$ref\": \"request.images\"\n                        },\n                        \"as\": \"media\",\n                        \"in\": {\n                          \"$ref\": \"media.value\"\n                        }\n                      }\n                    }\n                  },\n                  \"else\": {\n                    \"$if\": {\n                      \"condition\": {\n                        \"$gt\": [\n                          {\n                            \"$len\": {\n                              \"$ref\": \"request.images\"\n                            }\n                          },\n                          1\n                        ]\n                      },\n                      \"then\": {\n                        \"$map\": {\n                          \"from\": {\n                            \"$ref\": \"request.images\"\n                          },\n                          \"as\": \"media\",\n                          \"in\": {\n                            \"$ref\": \"media.value\"\n                          }\n                        }\n                      },\n                      \"else\": null\n                    }\n                  }\n                }\n              }\n            },\n            \"sequential_image_generation\": {\n              \"$if\": {\n                \"condition\": {\n                  \"$ref\": \"vars.group\"\n                },\n                \"then\": \"auto\",\n                \"else\": {\n                  \"$omitEmpty\": {\n                    \"$ref\": \"request.providerOptions.volcengine-ark-image.sequential_image_generation\"\n                  }\n                }\n              }\n            },\n            \"sequential_image_generation_options\": {\n              \"$if\": {\n                \"condition\": {\n                  \"$ref\": \"vars.group\"\n                },\n                \"then\": {\n                  \"max_images\": {\n                    \"$ref\": \"vars.maxImages\"\n                  }\n                },\n                \"else\": {\n                  \"$omitEmpty\": {\n                    \"$ref\": \"request.providerOptions.volcengine-ark-image.sequential_image_generation_options\"\n                  }\n                }\n              }\n            },\n            \"watermark\": {\n              \"$coalesce\": [\n                {\n                  \"$if\": {\n                    \"condition\": {\n                      \"$ref\": \"request.output.options.watermark\"\n                    },\n                    \"then\": {\n                      \"$eq\": [\n                        {\n                          \"$ref\": \"request.output.options.watermark\"\n                        },\n                        \"true\"\n                      ]\n                    },\n                    \"else\": null\n                  }\n                },\n                {\n                  \"$ref\": \"request.providerOptions.volcengine-ark-image.watermark\"\n                },\n                {\n                  \"$ref\": \"request.watermark\"\n                },\n                false\n              ]\n            },\n            \"seed\": {\n              \"$omitEmpty\": {\n                \"$ref\": \"request.providerOptions.volcengine-ark-image.seed\"\n              }\n            },\n            \"response_format\": {\n              \"$coalesce\": [\n                {\n                  \"$ref\": \"request.providerOptions.volcengine-ark-image.response_format\"\n                },\n                {\n                  \"$if\": {\n                    \"condition\": {\n                      \"$ref\": \"vars.recognized\"\n                    },\n                    \"then\": \"url\",\n                    \"else\": \"b64_json\"\n                  }\n                }\n              ]\n            },\n            \"layer_decomposition\": {\n              \"$if\": {\n                \"condition\": {\n                  \"$ref\": \"vars.layers\"\n                },\n                \"then\": true,\n                \"else\": null\n              }\n            },\n            \"background\": {\n              \"$if\": {\n                \"condition\": {\n                  \"$ref\": \"vars.transparent\"\n                },\n                \"then\": \"transparent\",\n                \"else\": null\n              }\n            },\n            \"output_format\": {\n              \"$if\": {\n                \"condition\": {\n                  \"$ref\": \"vars.supportsFormat\"\n                },\n                \"then\": {\n                  \"$if\": {\n                    \"condition\": {\n                      \"$ref\": \"vars.transparent\"\n                    },\n                    \"then\": \"png\",\n                    \"else\": {\n                      \"$ref\": \"vars.format\"\n                    }\n                  }\n                },\n                \"else\": null\n              }\n            },\n            \"optimize_prompt_options\": {\n              \"$if\": {\n                \"condition\": {\n                  \"$or\": [\n                    {\n                      \"$ref\": \"request.output.options.optimize\"\n                    },\n                    {\n                      \"$ref\": \"request.providerOptions.volcengine-ark-image.optimize_prompt_options.mode\"\n                    }\n                  ]\n                },\n                \"then\": {\n                  \"mode\": {\n                    \"$coalesce\": [\n                      {\n                        \"$omitEmpty\": {\n                          \"$ref\": \"request.output.options.optimize\"\n                        }\n                      },\n                      {\n                        \"$ref\": \"request.providerOptions.volcengine-ark-image.optimize_prompt_options.mode\"\n                      }\n                    ]\n                  }\n                },\n                \"else\": null\n              }\n            },\n            \"stream\": {\n              \"$if\": {\n                \"condition\": {\n                  \"$ref\": \"vars.group\"\n                },\n                \"then\": true,\n                \"else\": null\n              }\n            }\n          },\n          \"defaultPathPrefix\": \"/api/v3\"\n        },\n        \"response\": {\n          \"status\": \"succeeded\",\n          \"images\": {\n            \"$map\": {\n              \"from\": {\n                \"$ref\": \"response.data\"\n              },\n              \"as\": \"image\",\n              \"in\": {\n                \"url\": {\n                  \"$ref\": \"image.url\"\n                },\n                \"dataUrl\": {\n                  \"$ref\": \"image.b64_json\"\n                },\n                \"output_format\": {\n                  \"$ref\": \"image.output_format\"\n                },\n                \"metadata\": {\n                  \"layer\": {\n                    \"$if\": {\n                      \"condition\": {\n                        \"$or\": [\n                          {\n                            \"$ne\": [\n                              {\n                                \"$ref\": \"image.z_index\"\n                              },\n                              null\n                            ]\n                          },\n                          {\n                            \"$ne\": [\n                              {\n                                \"$ref\": \"image.bounding_box\"\n                              },\n                              null\n                            ]\n                          }\n                        ]\n                      },\n                      \"then\": {\n                        \"z_index\": {\n                          \"$ref\": \"image.z_index\"\n                        },\n                        \"bounding_box\": {\n                          \"$ref\": \"image.bounding_box\"\n                        },\n                        \"name\": {\n                          \"$ref\": \"image.name\"\n                        },\n                        \"description\": {\n                          \"$ref\": \"image.description\"\n                        },\n                        \"size\": {\n                          \"$ref\": \"image.size\"\n                        },\n                        \"output_format\": {\n                          \"$ref\": \"image.output_format\"\n                        }\n                      },\n                      \"else\": null\n                    }\n                  }\n                }\n              }\n            }\n          },\n          \"usage\": {\n            \"$ref\": \"response.usage\"\n          },\n          \"errorPaths\": [\n            \"error.code\"\n          ],\n          \"messagePaths\": [\n            \"error.message\"\n          ],\n          \"resultEphemeral\": true,\n          \"detectImageMime\": true,\n          \"stream\": {\n            \"typePath\": \"type\",\n            \"itemEvents\": [\n              \"image_generation.partial_succeeded\"\n            ],\n            \"errorEvents\": [\n              \"image_generation.partial_failed\",\n              \"error\"\n            ],\n            \"indexPath\": \"image_index\",\n            \"images\": [\n              {\n                \"url\": {\n                  \"$ref\": \"response.url\"\n                },\n                \"dataUrl\": {\n                  \"$ref\": \"response.b64_json\"\n                },\n                \"output_format\": {\n                  \"$ref\": \"response.output_format\"\n                },\n                \"metadata\": {\n                  \"layer\": {\n                    \"$if\": {\n                      \"condition\": {\n                        \"$or\": [\n                          {\n                            \"$ne\": [\n                              {\n                                \"$ref\": \"response.z_index\"\n                              },\n                              null\n                            ]\n                          },\n                          {\n                            \"$ne\": [\n                              {\n                                \"$ref\": \"response.bounding_box\"\n                              },\n                              null\n                            ]\n                          }\n                        ]\n                      },\n                      \"then\": {\n                        \"z_index\": {\n                          \"$ref\": \"response.z_index\"\n                        },\n                        \"bounding_box\": {\n                          \"$ref\": \"response.bounding_box\"\n                        },\n                        \"name\": {\n                          \"$ref\": \"response.name\"\n                        },\n                        \"description\": {\n                          \"$ref\": \"response.description\"\n                        },\n                        \"size\": {\n                          \"$ref\": \"response.size\"\n                        },\n                        \"output_format\": {\n                          \"$ref\": \"response.output_format\"\n                        }\n                      },\n                      \"else\": null\n                    }\n                  }\n                }\n              }\n            ],\n            \"usage\": {\n              \"$ref\": \"response.usage\"\n            },\n            \"messagePaths\": [\n              \"error.message\"\n            ]\n          }\n        },\n        \"validations\": [\n          {\n            \"assert\": {\n              \"$eq\": [\n                {\n                  \"$len\": {\n                    \"$filter\": {\n                      \"from\": {\n                        \"$ref\": \"request.images\"\n                      },\n                      \"as\": \"media\",\n                      \"where\": {\n                        \"$eq\": [\n                          {\n                            \"$ref\": \"media.role\"\n                          },\n                          \"mask\"\n                        ]\n                      }\n                    }\n                  }\n                },\n                0\n              ]\n            },\n            \"message\": \"Seedream 不支持蒙版编辑\"\n          },\n          {\n            \"assert\": {\n              \"$and\": [\n                {\n                  \"$eq\": [\n                    {\n                      \"$len\": {\n                        \"$ref\": \"request.videos\"\n                      }\n                    },\n                    0\n                  ]\n                },\n                {\n                  \"$eq\": [\n                    {\n                      \"$len\": {\n                        \"$ref\": \"request.audios\"\n                      }\n                    },\n                    0\n                  ]\n                }\n              ]\n            },\n            \"message\": \"Seedream 只支持图片参考\"\n          },\n          {\n            \"assert\": {\n              \"$lte\": [\n                {\n                  \"$len\": {\n                    \"$ref\": \"request.images\"\n                  }\n                },\n                {\n                  \"$if\": {\n                    \"condition\": {\n                      \"$ref\": \"vars.modern\"\n                    },\n                    \"then\": 10,\n                    \"else\": 14\n                  }\n                }\n              ]\n            },\n            \"message\": \"参考图数量超出当前 Seedream 型号的限制\"\n          },\n          {\n            \"assert\": {\n              \"$or\": [\n                {\n                  \"$not\": {\n                    \"$ref\": \"vars.layers\"\n                  }\n                },\n                {\n                  \"$and\": [\n                    {\n                      \"$ref\": \"vars.modern\"\n                    },\n                    {\n                      \"$eq\": [\n                        {\n                          \"$len\": {\n                            \"$ref\": \"request.images\"\n                          }\n                        },\n                        1\n                      ]\n                    }\n                  ]\n                }\n              ]\n            },\n            \"message\": \"图层拆分需要 Pro 或 Flash 型号和一张参考图\"\n          },\n          {\n            \"assert\": {\n              \"$or\": [\n                {\n                  \"$not\": {\n                    \"$ref\": \"vars.transparent\"\n                  }\n                },\n                {\n                  \"$and\": [\n                    {\n                      \"$ref\": \"vars.modern\"\n                    },\n                    {\n                      \"$not\": {\n                        \"$ref\": \"vars.layers\"\n                      }\n                    },\n                    {\n                      \"$eq\": [\n                        {\n                          \"$len\": {\n                            \"$ref\": \"request.images\"\n                          }\n                        },\n                        1\n                      ]\n                    }\n                  ]\n                }\n              ]\n            },\n            \"message\": \"透明背景需要 Pro 或 Flash 型号和一张参考图，不能与图层拆分同时使用\"\n          },\n          {\n            \"assert\": {\n              \"$or\": [\n                {\n                  \"$not\": {\n                    \"$ref\": \"vars.group\"\n                  }\n                },\n                {\n                  \"$lte\": [\n                    {\n                      \"$add\": [\n                        {\n                          \"$ref\": \"vars.maxImages\"\n                        },\n                        {\n                          \"$len\": {\n                            \"$ref\": \"request.images\"\n                          }\n                        }\n                      ]\n                    },\n                    15\n                  ]\n                }\n              ]\n            },\n            \"message\": \"参考图和生成图片合计不能超过 15 张\"\n          },\n          {\n            \"assert\": {\n              \"$or\": [\n                {\n                  \"$not\": {\n                    \"$ref\": \"vars.supportsFormat\"\n                  }\n                },\n                {\n                  \"$in\": [\n                    {\n                      \"$ref\": \"vars.format\"\n                    },\n                    [\n                      \"png\",\n                      \"jpeg\"\n                    ]\n                  ]\n                }\n              ]\n            },\n            \"message\": \"图片格式只支持 png 或 jpeg\"\n          },\n          {\n            \"assert\": {\n              \"$or\": [\n                {\n                  \"$not\": {\n                    \"$ref\": \"vars.recognized\"\n                  }\n                },\n                {\n                  \"$or\": [\n                    {\n                      \"$not\": {\n                        \"$and\": [\n                          {\n                            \"$in\": [\n                              \"seedream\",\n                              {\n                                \"$ref\": \"vars.modelTokens\"\n                              }\n                            ]\n                          },\n                          {\n                            \"$or\": [\n                              {\n                                \"$in\": [\n                                  \"4\",\n                                  {\n                                    \"$ref\": \"vars.modelTokens\"\n                                  }\n                                ]\n                              },\n                              {\n                                \"$in\": [\n                                  \"5\",\n                                  {\n                                    \"$ref\": \"vars.modelTokens\"\n                                  }\n                                ]\n                              }\n                            ]\n                          }\n                        ]\n                      }\n                    },\n                    {\n                      \"$in\": [\n                        {\n                          \"$ref\": \"vars.size\"\n                        },\n                        {\n                          \"$switch\": {\n                            \"cases\": [\n                              {\n                                \"when\": {\n                                  \"$ref\": \"vars.modern\"\n                                },\n                                \"then\": [\n                                  \"1K\",\n                                  \"1.5K\",\n                                  \"2K\"\n                                ]\n                              },\n                              {\n                                \"when\": {\n                                  \"$ref\": \"vars.legacy4\"\n                                },\n                                \"then\": [\n                                  \"1K\",\n                                  \"2K\",\n                                  \"4K\"\n                                ]\n                              },\n                              {\n                                \"when\": {\n                                  \"$in\": [\n                                    \"4\",\n                                    {\n                                      \"$ref\": \"vars.modelTokens\"\n                                    }\n                                  ]\n                                },\n                                \"then\": [\n                                  \"2K\",\n                                  \"4K\"\n                                ]\n                              }\n                            ],\n                            \"default\": [\n                              \"2K\",\n                              \"3K\",\n                              \"4K\"\n                            ]\n                          }\n                        }\n                      ]\n                    },\n                    {\n                      \"$and\": [\n                        {\n                          \"$ref\": \"vars.layers\"\n                        },\n                        {\n                          \"$eq\": [\n                            {\n                              \"$ref\": \"vars.size\"\n                            },\n                            \"auto\"\n                          ]\n                        }\n                      ]\n                    },\n                    {\n                      \"$and\": [\n                        {\n                          \"$not\": {\n                            \"$ref\": \"vars.layers\"\n                          }\n                        },\n                        {\n                          \"$and\": [\n                            {\n                              \"$eq\": [\n                                {\n                                  \"$len\": {\n                                    \"$split\": [\n                                      {\n                                        \"$ref\": \"vars.size\"\n                                      },\n                                      \"x\"\n                                    ]\n                                  }\n                                },\n                                2\n                              ]\n                            },\n                            {\n                              \"$gt\": [\n                                {\n                                  \"$ref\": \"vars.width\"\n                                },\n                                0\n                              ]\n                            },\n                            {\n                              \"$gt\": [\n                                {\n                                  \"$ref\": \"vars.height\"\n                                },\n                                0\n                              ]\n                            },\n                            {\n                              \"$lte\": [\n                                {\n                                  \"$ref\": \"vars.width\"\n                                },\n                                {\n                                  \"$multiply\": [\n                                    {\n                                      \"$ref\": \"vars.height\"\n                                    },\n                                    16\n                                  ]\n                                }\n                              ]\n                            },\n                            {\n                              \"$lte\": [\n                                {\n                                  \"$ref\": \"vars.height\"\n                                },\n                                {\n                                  \"$multiply\": [\n                                    {\n                                      \"$ref\": \"vars.width\"\n                                    },\n                                    16\n                                  ]\n                                }\n                              ]\n                            },\n                            {\n                              \"$gte\": [\n                                {\n                                  \"$ref\": \"vars.pixels\"\n                                },\n                                {\n                                  \"$if\": {\n                                    \"condition\": {\n                                      \"$or\": [\n                                        {\n                                          \"$ref\": \"vars.modern\"\n                                        },\n                                        {\n                                          \"$ref\": \"vars.legacy4\"\n                                        }\n                                      ]\n                                    },\n                                    \"then\": 921600,\n                                    \"else\": 3686400\n                                  }\n                                }\n                              ]\n                            },\n                            {\n                              \"$lte\": [\n                                {\n                                  \"$ref\": \"vars.pixels\"\n                                },\n                                {\n                                  \"$if\": {\n                                    \"condition\": {\n                                      \"$ref\": \"vars.modern\"\n                                    },\n                                    \"then\": 4624220,\n                                    \"else\": 16777216\n                                  }\n                                }\n                              ]\n                            }\n                          ]\n                        }\n                      ]\n                    }\n                  ]\n                }\n              ]\n            },\n            \"message\": \"当前 Seedream 型号或图层模式不支持这个尺寸，请调整尺寸后重试\"\n          }\n        ],\n        \"variables\": [\n          {\n            \"name\": \"modelTokens\",\n            \"value\": {\n              \"$split\": [\n                {\n                  \"$lower\": {\n                    \"$ref\": \"request.model\"\n                  }\n                },\n                \"-\"\n              ]\n            }\n          },\n          {\n            \"name\": \"rawSize\",\n            \"value\": {\n              \"$lower\": {\n                \"$trim\": {\n                  \"$coalesce\": [\n                    {\n                      \"$ref\": \"request.aspectRatio\"\n                    },\n                    \"\"\n                  ]\n                }\n              }\n            }\n          },\n          {\n            \"name\": \"modern\",\n            \"value\": {\n              \"$and\": [\n                {\n                  \"$in\": [\n                    \"seedream\",\n                    {\n                      \"$ref\": \"vars.modelTokens\"\n                    }\n                  ]\n                },\n                {\n                  \"$in\": [\n                    \"5\",\n                    {\n                      \"$ref\": \"vars.modelTokens\"\n                    }\n                  ]\n                },\n                {\n                  \"$or\": [\n                    {\n                      \"$in\": [\n                        \"pro\",\n                        {\n                          \"$ref\": \"vars.modelTokens\"\n                        }\n                      ]\n                    },\n                    {\n                      \"$in\": [\n                        \"flash\",\n                        {\n                          \"$ref\": \"vars.modelTokens\"\n                        }\n                      ]\n                    }\n                  ]\n                }\n              ]\n            }\n          },\n          {\n            \"name\": \"legacy4\",\n            \"value\": {\n              \"$and\": [\n                {\n                  \"$in\": [\n                    \"seedream\",\n                    {\n                      \"$ref\": \"vars.modelTokens\"\n                    }\n                  ]\n                },\n                {\n                  \"$and\": [\n                    {\n                      \"$in\": [\n                        \"4\",\n                        {\n                          \"$ref\": \"vars.modelTokens\"\n                        }\n                      ]\n                    },\n                    {\n                      \"$in\": [\n                        \"0\",\n                        {\n                          \"$ref\": \"vars.modelTokens\"\n                        }\n                      ]\n                    }\n                  ]\n                }\n              ]\n            }\n          },\n          {\n            \"name\": \"family45\",\n            \"value\": {\n              \"$and\": [\n                {\n                  \"$in\": [\n                    \"seedream\",\n                    {\n                      \"$ref\": \"vars.modelTokens\"\n                    }\n                  ]\n                },\n                {\n                  \"$in\": [\n                    \"4\",\n                    {\n                      \"$ref\": \"vars.modelTokens\"\n                    }\n                  ]\n                },\n                {\n                  \"$in\": [\n                    \"5\",\n                    {\n                      \"$ref\": \"vars.modelTokens\"\n                    }\n                  ]\n                }\n              ]\n            }\n          },\n          {\n            \"name\": \"recognized\",\n            \"value\": {\n              \"$or\": [\n                {\n                  \"$ref\": \"vars.modern\"\n                },\n                {\n                  \"$ref\": \"vars.legacy4\"\n                },\n                {\n                  \"$ref\": \"vars.family45\"\n                },\n                {\n                  \"$and\": [\n                    {\n                      \"$in\": [\n                        \"seedream\",\n                        {\n                          \"$ref\": \"vars.modelTokens\"\n                        }\n                      ]\n                    },\n                    {\n                      \"$in\": [\n                        \"5\",\n                        {\n                          \"$ref\": \"vars.modelTokens\"\n                        }\n                      ]\n                    },\n                    {\n                      \"$not\": {\n                        \"$in\": [\n                          \"4\",\n                          {\n                            \"$ref\": \"vars.modelTokens\"\n                          }\n                        ]\n                      }\n                    }\n                  ]\n                }\n              ]\n            }\n          },\n          {\n            \"name\": \"layers\",\n            \"value\": {\n              \"$or\": [\n                {\n                  \"$eq\": [\n                    {\n                      \"$ref\": \"request.output.options.mode\"\n                    },\n                    \"layers\"\n                  ]\n                },\n                {\n                  \"$eq\": [\n                    {\n                      \"$ref\": \"request.providerOptions.volcengine-ark-image.layer_decomposition\"\n                    },\n                    true\n                  ]\n                }\n              ]\n            }\n          },\n          {\n            \"name\": \"transparent\",\n            \"value\": {\n              \"$or\": [\n                {\n                  \"$eq\": [\n                    {\n                      \"$ref\": \"request.output.options.transparent\"\n                    },\n                    \"true\"\n                  ]\n                },\n                {\n                  \"$eq\": [\n                    {\n                      \"$ref\": \"request.providerOptions.volcengine-ark-image.background\"\n                    },\n                    \"transparent\"\n                  ]\n                }\n              ]\n            }\n          },\n          {\n            \"name\": \"maxImages\",\n            \"value\": {\n              \"$max\": [\n                1,\n                {\n                  \"$toInt\": {\n                    \"$coalesce\": [\n                      {\n                        \"$omitEmpty\": {\n                          \"$ref\": \"request.output.options.maxImages\"\n                        }\n                      },\n                      {\n                        \"$ref\": \"request.providerOptions.volcengine-ark-image.sequential_image_generation_options.max_images\"\n                      },\n                      1\n                    ]\n                  }\n                }\n              ]\n            }\n          },\n          {\n            \"name\": \"group\",\n            \"value\": {\n              \"$and\": [\n                {\n                  \"$ref\": \"vars.recognized\"\n                },\n                {\n                  \"$not\": {\n                    \"$ref\": \"vars.modern\"\n                  }\n                },\n                {\n                  \"$gt\": [\n                    {\n                      \"$ref\": \"vars.maxImages\"\n                    },\n                    1\n                  ]\n                }\n              ]\n            }\n          },\n          {\n            \"name\": \"supportsFormat\",\n            \"value\": {\n              \"$or\": [\n                {\n                  \"$ref\": \"vars.modern\"\n                },\n                {\n                  \"$and\": [\n                    {\n                      \"$in\": [\n                        \"seedream\",\n                        {\n                          \"$ref\": \"vars.modelTokens\"\n                        }\n                      ]\n                    },\n                    {\n                      \"$in\": [\n                        \"5\",\n                        {\n                          \"$ref\": \"vars.modelTokens\"\n                        }\n                      ]\n                    },\n                    {\n                      \"$not\": {\n                        \"$in\": [\n                          \"4\",\n                          {\n                            \"$ref\": \"vars.modelTokens\"\n                          }\n                        ]\n                      }\n                    }\n                  ]\n                }\n              ]\n            }\n          },\n          {\n            \"name\": \"format\",\n            \"value\": {\n              \"$coalesce\": [\n                {\n                  \"$omitEmpty\": {\n                    \"$ref\": \"request.output.options.format\"\n                  }\n                },\n                {\n                  \"$ref\": \"request.providerOptions.volcengine-ark-image.output_format\"\n                },\n                \"png\"\n              ]\n            }\n          },\n          {\n            \"name\": \"size\",\n            \"value\": {\n              \"$switch\": {\n                \"cases\": [\n                  {\n                    \"when\": {\n                      \"$in\": [\n                        {\n                          \"$ref\": \"vars.rawSize\"\n                        },\n                        [\n                          \"\",\n                          \"1:1\"\n                        ]\n                      ]\n                    },\n                    \"then\": {\n                      \"$if\": {\n                        \"condition\": {\n                          \"$ref\": \"vars.recognized\"\n                        },\n                        \"then\": \"2K\",\n                        \"else\": {\n                          \"$if\": {\n                            \"condition\": {\n                              \"$eq\": [\n                                {\n                                  \"$ref\": \"vars.rawSize\"\n                                },\n                                \"\"\n                              ]\n                            },\n                            \"then\": null,\n                            \"else\": \"2048x2048\"\n                          }\n                        }\n                      }\n                    }\n                  },\n                  {\n                    \"when\": {\n                      \"$eq\": [\n                        {\n                          \"$ref\": \"vars.rawSize\"\n                        },\n                        \"auto\"\n                      ]\n                    },\n                    \"then\": {\n                      \"$if\": {\n                        \"condition\": {\n                          \"$ref\": \"vars.recognized\"\n                        },\n                        \"then\": {\n                          \"$if\": {\n                            \"condition\": {\n                              \"$ref\": \"vars.layers\"\n                            },\n                            \"then\": \"auto\",\n                            \"else\": \"2K\"\n                          }\n                        },\n                        \"else\": \"2k\"\n                      }\n                    }\n                  },\n                  {\n                    \"when\": {\n                      \"$eq\": [\n                        {\n                          \"$ref\": \"vars.rawSize\"\n                        },\n                        \"4:3\"\n                      ]\n                    },\n                    \"then\": {\n                      \"$if\": {\n                        \"condition\": {\n                          \"$ref\": \"vars.layers\"\n                        },\n                        \"then\": \"2K\",\n                        \"else\": \"2304x1728\"\n                      }\n                    }\n                  },\n                  {\n                    \"when\": {\n                      \"$eq\": [\n                        {\n                          \"$ref\": \"vars.rawSize\"\n                        },\n                        \"3:4\"\n                      ]\n                    },\n                    \"then\": {\n                      \"$if\": {\n                        \"condition\": {\n                          \"$ref\": \"vars.layers\"\n                        },\n                        \"then\": \"2K\",\n                        \"else\": \"1728x2304\"\n                      }\n                    }\n                  },\n                  {\n                    \"when\": {\n                      \"$eq\": [\n                        {\n                          \"$ref\": \"vars.rawSize\"\n                        },\n                        \"16:9\"\n                      ]\n                    },\n                    \"then\": {\n                      \"$if\": {\n                        \"condition\": {\n                          \"$ref\": \"vars.layers\"\n                        },\n                        \"then\": \"2K\",\n                        \"else\": \"2560x1440\"\n                      }\n                    }\n                  },\n                  {\n                    \"when\": {\n                      \"$eq\": [\n                        {\n                          \"$ref\": \"vars.rawSize\"\n                        },\n                        \"9:16\"\n                      ]\n                    },\n                    \"then\": {\n                      \"$if\": {\n                        \"condition\": {\n                          \"$ref\": \"vars.layers\"\n                        },\n                        \"then\": \"2K\",\n                        \"else\": \"1440x2560\"\n                      }\n                    }\n                  },\n                  {\n                    \"when\": {\n                      \"$eq\": [\n                        {\n                          \"$ref\": \"vars.rawSize\"\n                        },\n                        \"3:2\"\n                      ]\n                    },\n                    \"then\": {\n                      \"$if\": {\n                        \"condition\": {\n                          \"$ref\": \"vars.layers\"\n                        },\n                        \"then\": \"2K\",\n                        \"else\": \"2496x1664\"\n                      }\n                    }\n                  },\n                  {\n                    \"when\": {\n                      \"$eq\": [\n                        {\n                          \"$ref\": \"vars.rawSize\"\n                        },\n                        \"2:3\"\n                      ]\n                    },\n                    \"then\": {\n                      \"$if\": {\n                        \"condition\": {\n                          \"$ref\": \"vars.layers\"\n                        },\n                        \"then\": \"2K\",\n                        \"else\": \"1664x2496\"\n                      }\n                    }\n                  },\n                  {\n                    \"when\": {\n                      \"$eq\": [\n                        {\n                          \"$ref\": \"vars.rawSize\"\n                        },\n                        \"21:9\"\n                      ]\n                    },\n                    \"then\": {\n                      \"$if\": {\n                        \"condition\": {\n                          \"$ref\": \"vars.layers\"\n                        },\n                        \"then\": \"2K\",\n                        \"else\": \"3024x1296\"\n                      }\n                    }\n                  },\n                  {\n                    \"when\": {\n                      \"$in\": [\n                        {\n                          \"$ref\": \"vars.rawSize\"\n                        },\n                        [\n                          \"1k\",\n                          \"1.5k\",\n                          \"2k\",\n                          \"3k\",\n                          \"4k\"\n                        ]\n                      ]\n                    },\n                    \"then\": {\n                      \"$if\": {\n                        \"condition\": {\n                          \"$ref\": \"vars.recognized\"\n                        },\n                        \"then\": {\n                          \"$upper\": {\n                            \"$ref\": \"vars.rawSize\"\n                          }\n                        },\n                        \"else\": {\n                          \"$ref\": \"request.aspectRatio\"\n                        }\n                      }\n                    }\n                  }\n                ],\n                \"default\": {\n                  \"$if\": {\n                    \"condition\": {\n                      \"$ref\": \"vars.recognized\"\n                    },\n                    \"then\": {\n                      \"$ref\": \"vars.rawSize\"\n                    },\n                    \"else\": {\n                      \"$ref\": \"request.aspectRatio\"\n                    }\n                  }\n                }\n              }\n            }\n          },\n          {\n            \"name\": \"width\",\n            \"value\": {\n              \"$toInt\": {\n                \"$at\": [\n                  {\n                    \"$split\": [\n                      {\n                        \"$ref\": \"vars.size\"\n                      },\n                      \"x\"\n                    ]\n                  },\n                  0\n                ]\n              }\n            }\n          },\n          {\n            \"name\": \"height\",\n            \"value\": {\n              \"$toInt\": {\n                \"$at\": [\n                  {\n                    \"$split\": [\n                      {\n                        \"$ref\": \"vars.size\"\n                      },\n                      \"x\"\n                    ]\n                  },\n                  1\n                ]\n              }\n            }\n          },\n          {\n            \"name\": \"pixels\",\n            \"value\": {\n              \"$multiply\": [\n                {\n                  \"$ref\": \"vars.width\"\n                },\n                {\n                  \"$ref\": \"vars.height\"\n                }\n              ]\n            }\n          }\n        ]\n      }\n    ]\n  }\n}\n```\n<!-- QISITV_PLUGIN_MANIFEST_END -->\n",
   "permissions": [
     "generation.run",
     "media.read"
@@ -101,123 +101,36 @@
         ],
         "create": {
           "method": "POST",
-          "path": "/api/v3/images/generations",
+          "path": "/images/generations",
           "contentType": "application/json",
           "body": {
             "model": {
               "$ref": "request.model"
             },
             "prompt": {
-              "$ref": "request.prompt"
+              "$if": {
+                "condition": {
+                  "$ref": "request.instructions"
+                },
+                "then": {
+                  "$concat": [
+                    {
+                      "$ref": "request.instructions"
+                    },
+                    "\n\n",
+                    {
+                      "$ref": "request.prompt"
+                    }
+                  ]
+                },
+                "else": {
+                  "$ref": "request.prompt"
+                }
+              }
             },
             "size": {
               "$omitEmpty": {
-                "$switch": {
-                  "cases": [
-                    {
-                      "when": {
-                        "$eq": [
-                          {
-                            "$ref": "request.aspectRatio"
-                          },
-                          "auto"
-                        ]
-                      },
-                      "then": "2k"
-                    },
-                    {
-                      "when": {
-                        "$eq": [
-                          {
-                            "$ref": "request.aspectRatio"
-                          },
-                          "1:1"
-                        ]
-                      },
-                      "then": "2048x2048"
-                    },
-                    {
-                      "when": {
-                        "$eq": [
-                          {
-                            "$ref": "request.aspectRatio"
-                          },
-                          "4:3"
-                        ]
-                      },
-                      "then": "2304x1728"
-                    },
-                    {
-                      "when": {
-                        "$eq": [
-                          {
-                            "$ref": "request.aspectRatio"
-                          },
-                          "3:4"
-                        ]
-                      },
-                      "then": "1728x2304"
-                    },
-                    {
-                      "when": {
-                        "$eq": [
-                          {
-                            "$ref": "request.aspectRatio"
-                          },
-                          "16:9"
-                        ]
-                      },
-                      "then": "2560x1440"
-                    },
-                    {
-                      "when": {
-                        "$eq": [
-                          {
-                            "$ref": "request.aspectRatio"
-                          },
-                          "9:16"
-                        ]
-                      },
-                      "then": "1440x2560"
-                    },
-                    {
-                      "when": {
-                        "$eq": [
-                          {
-                            "$ref": "request.aspectRatio"
-                          },
-                          "3:2"
-                        ]
-                      },
-                      "then": "2496x1664"
-                    },
-                    {
-                      "when": {
-                        "$eq": [
-                          {
-                            "$ref": "request.aspectRatio"
-                          },
-                          "2:3"
-                        ]
-                      },
-                      "then": "1664x2496"
-                    },
-                    {
-                      "when": {
-                        "$eq": [
-                          {
-                            "$ref": "request.aspectRatio"
-                          },
-                          "21:9"
-                        ]
-                      },
-                      "then": "3024x1296"
-                    }
-                  ],
-                  "default": {
-                    "$ref": "request.aspectRatio"
-                  }
-                }
+                "$ref": "vars.size"
               }
             },
             "image": {
@@ -276,17 +189,53 @@
               }
             },
             "sequential_image_generation": {
-              "$omitEmpty": {
-                "$ref": "request.providerOptions.volcengine-ark-image.sequential_image_generation"
+              "$if": {
+                "condition": {
+                  "$ref": "vars.group"
+                },
+                "then": "auto",
+                "else": {
+                  "$omitEmpty": {
+                    "$ref": "request.providerOptions.volcengine-ark-image.sequential_image_generation"
+                  }
+                }
               }
             },
             "sequential_image_generation_options": {
-              "$omitEmpty": {
-                "$ref": "request.providerOptions.volcengine-ark-image.sequential_image_generation_options"
+              "$if": {
+                "condition": {
+                  "$ref": "vars.group"
+                },
+                "then": {
+                  "max_images": {
+                    "$ref": "vars.maxImages"
+                  }
+                },
+                "else": {
+                  "$omitEmpty": {
+                    "$ref": "request.providerOptions.volcengine-ark-image.sequential_image_generation_options"
+                  }
+                }
               }
             },
             "watermark": {
               "$coalesce": [
+                {
+                  "$if": {
+                    "condition": {
+                      "$ref": "request.output.options.watermark"
+                    },
+                    "then": {
+                      "$eq": [
+                        {
+                          "$ref": "request.output.options.watermark"
+                        },
+                        "true"
+                      ]
+                    },
+                    "else": null
+                  }
+                },
                 {
                   "$ref": "request.providerOptions.volcengine-ark-image.watermark"
                 },
@@ -306,15 +255,162 @@
                 {
                   "$ref": "request.providerOptions.volcengine-ark-image.response_format"
                 },
-                "b64_json"
+                {
+                  "$if": {
+                    "condition": {
+                      "$ref": "vars.recognized"
+                    },
+                    "then": "url",
+                    "else": "b64_json"
+                  }
+                }
               ]
+            },
+            "layer_decomposition": {
+              "$if": {
+                "condition": {
+                  "$ref": "vars.layers"
+                },
+                "then": true,
+                "else": null
+              }
+            },
+            "background": {
+              "$if": {
+                "condition": {
+                  "$ref": "vars.transparent"
+                },
+                "then": "transparent",
+                "else": null
+              }
+            },
+            "output_format": {
+              "$if": {
+                "condition": {
+                  "$ref": "vars.supportsFormat"
+                },
+                "then": {
+                  "$if": {
+                    "condition": {
+                      "$ref": "vars.transparent"
+                    },
+                    "then": "png",
+                    "else": {
+                      "$ref": "vars.format"
+                    }
+                  }
+                },
+                "else": null
+              }
+            },
+            "optimize_prompt_options": {
+              "$if": {
+                "condition": {
+                  "$or": [
+                    {
+                      "$ref": "request.output.options.optimize"
+                    },
+                    {
+                      "$ref": "request.providerOptions.volcengine-ark-image.optimize_prompt_options.mode"
+                    }
+                  ]
+                },
+                "then": {
+                  "mode": {
+                    "$coalesce": [
+                      {
+                        "$omitEmpty": {
+                          "$ref": "request.output.options.optimize"
+                        }
+                      },
+                      {
+                        "$ref": "request.providerOptions.volcengine-ark-image.optimize_prompt_options.mode"
+                      }
+                    ]
+                  }
+                },
+                "else": null
+              }
+            },
+            "stream": {
+              "$if": {
+                "condition": {
+                  "$ref": "vars.group"
+                },
+                "then": true,
+                "else": null
+              }
             }
-          }
+          },
+          "defaultPathPrefix": "/api/v3"
         },
         "response": {
           "status": "succeeded",
           "images": {
-            "$ref": "response.data"
+            "$map": {
+              "from": {
+                "$ref": "response.data"
+              },
+              "as": "image",
+              "in": {
+                "url": {
+                  "$ref": "image.url"
+                },
+                "dataUrl": {
+                  "$ref": "image.b64_json"
+                },
+                "output_format": {
+                  "$ref": "image.output_format"
+                },
+                "metadata": {
+                  "layer": {
+                    "$if": {
+                      "condition": {
+                        "$or": [
+                          {
+                            "$ne": [
+                              {
+                                "$ref": "image.z_index"
+                              },
+                              null
+                            ]
+                          },
+                          {
+                            "$ne": [
+                              {
+                                "$ref": "image.bounding_box"
+                              },
+                              null
+                            ]
+                          }
+                        ]
+                      },
+                      "then": {
+                        "z_index": {
+                          "$ref": "image.z_index"
+                        },
+                        "bounding_box": {
+                          "$ref": "image.bounding_box"
+                        },
+                        "name": {
+                          "$ref": "image.name"
+                        },
+                        "description": {
+                          "$ref": "image.description"
+                        },
+                        "size": {
+                          "$ref": "image.size"
+                        },
+                        "output_format": {
+                          "$ref": "image.output_format"
+                        }
+                      },
+                      "else": null
+                    }
+                  }
+                }
+              }
+            }
           },
           "usage": {
             "$ref": "response.usage"
@@ -324,8 +420,1138 @@
           ],
           "messagePaths": [
             "error.message"
-          ]
-        }
+          ],
+          "resultEphemeral": true,
+          "detectImageMime": true,
+          "stream": {
+            "typePath": "type",
+            "itemEvents": [
+              "image_generation.partial_succeeded"
+            ],
+            "errorEvents": [
+              "image_generation.partial_failed",
+              "error"
+            ],
+            "indexPath": "image_index",
+            "images": [
+              {
+                "url": {
+                  "$ref": "response.url"
+                },
+                "dataUrl": {
+                  "$ref": "response.b64_json"
+                },
+                "output_format": {
+                  "$ref": "response.output_format"
+                },
+                "metadata": {
+                  "layer": {
+                    "$if": {
+                      "condition": {
+                        "$or": [
+                          {
+                            "$ne": [
+                              {
+                                "$ref": "response.z_index"
+                              },
+                              null
+                            ]
+                          },
+                          {
+                            "$ne": [
+                              {
+                                "$ref": "response.bounding_box"
+                              },
+                              null
+                            ]
+                          }
+                        ]
+                      },
+                      "then": {
+                        "z_index": {
+                          "$ref": "response.z_index"
+                        },
+                        "bounding_box": {
+                          "$ref": "response.bounding_box"
+                        },
+                        "name": {
+                          "$ref": "response.name"
+                        },
+                        "description": {
+                          "$ref": "response.description"
+                        },
+                        "size": {
+                          "$ref": "response.size"
+                        },
+                        "output_format": {
+                          "$ref": "response.output_format"
+                        }
+                      },
+                      "else": null
+                    }
+                  }
+                }
+              }
+            ],
+            "usage": {
+              "$ref": "response.usage"
+            },
+            "messagePaths": [
+              "error.message"
+            ]
+          }
+        },
+        "validations": [
+          {
+            "assert": {
+              "$eq": [
+                {
+                  "$len": {
+                    "$filter": {
+                      "from": {
+                        "$ref": "request.images"
+                      },
+                      "as": "media",
+                      "where": {
+                        "$eq": [
+                          {
+                            "$ref": "media.role"
+                          },
+                          "mask"
+                        ]
+                      }
+                    }
+                  }
+                },
+                0
+              ]
+            },
+            "message": "Seedream 不支持蒙版编辑"
+          },
+          {
+            "assert": {
+              "$and": [
+                {
+                  "$eq": [
+                    {
+                      "$len": {
+                        "$ref": "request.videos"
+                      }
+                    },
+                    0
+                  ]
+                },
+                {
+                  "$eq": [
+                    {
+                      "$len": {
+                        "$ref": "request.audios"
+                      }
+                    },
+                    0
+                  ]
+                }
+              ]
+            },
+            "message": "Seedream 只支持图片参考"
+          },
+          {
+            "assert": {
+              "$lte": [
+                {
+                  "$len": {
+                    "$ref": "request.images"
+                  }
+                },
+                {
+                  "$if": {
+                    "condition": {
+                      "$ref": "vars.modern"
+                    },
+                    "then": 10,
+                    "else": 14
+                  }
+                }
+              ]
+            },
+            "message": "参考图数量超出当前 Seedream 型号的限制"
+          },
+          {
+            "assert": {
+              "$or": [
+                {
+                  "$not": {
+                    "$ref": "vars.layers"
+                  }
+                },
+                {
+                  "$and": [
+                    {
+                      "$ref": "vars.modern"
+                    },
+                    {
+                      "$eq": [
+                        {
+                          "$len": {
+                            "$ref": "request.images"
+                          }
+                        },
+                        1
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "message": "图层拆分需要 Pro 或 Flash 型号和一张参考图"
+          },
+          {
+            "assert": {
+              "$or": [
+                {
+                  "$not": {
+                    "$ref": "vars.transparent"
+                  }
+                },
+                {
+                  "$and": [
+                    {
+                      "$ref": "vars.modern"
+                    },
+                    {
+                      "$not": {
+                        "$ref": "vars.layers"
+                      }
+                    },
+                    {
+                      "$eq": [
+                        {
+                          "$len": {
+                            "$ref": "request.images"
+                          }
+                        },
+                        1
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "message": "透明背景需要 Pro 或 Flash 型号和一张参考图，不能与图层拆分同时使用"
+          },
+          {
+            "assert": {
+              "$or": [
+                {
+                  "$not": {
+                    "$ref": "vars.group"
+                  }
+                },
+                {
+                  "$lte": [
+                    {
+                      "$add": [
+                        {
+                          "$ref": "vars.maxImages"
+                        },
+                        {
+                          "$len": {
+                            "$ref": "request.images"
+                          }
+                        }
+                      ]
+                    },
+                    15
+                  ]
+                }
+              ]
+            },
+            "message": "参考图和生成图片合计不能超过 15 张"
+          },
+          {
+            "assert": {
+              "$or": [
+                {
+                  "$not": {
+                    "$ref": "vars.supportsFormat"
+                  }
+                },
+                {
+                  "$in": [
+                    {
+                      "$ref": "vars.format"
+                    },
+                    [
+                      "png",
+                      "jpeg"
+                    ]
+                  ]
+                }
+              ]
+            },
+            "message": "图片格式只支持 png 或 jpeg"
+          },
+          {
+            "assert": {
+              "$or": [
+                {
+                  "$not": {
+                    "$ref": "vars.recognized"
+                  }
+                },
+                {
+                  "$or": [
+                    {
+                      "$not": {
+                        "$and": [
+                          {
+                            "$in": [
+                              "seedream",
+                              {
+                                "$ref": "vars.modelTokens"
+                              }
+                            ]
+                          },
+                          {
+                            "$or": [
+                              {
+                                "$in": [
+                                  "4",
+                                  {
+                                    "$ref": "vars.modelTokens"
+                                  }
+                                ]
+                              },
+                              {
+                                "$in": [
+                                  "5",
+                                  {
+                                    "$ref": "vars.modelTokens"
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "$in": [
+                        {
+                          "$ref": "vars.size"
+                        },
+                        {
+                          "$switch": {
+                            "cases": [
+                              {
+                                "when": {
+                                  "$ref": "vars.modern"
+                                },
+                                "then": [
+                                  "1K",
+                                  "1.5K",
+                                  "2K"
+                                ]
+                              },
+                              {
+                                "when": {
+                                  "$ref": "vars.legacy4"
+                                },
+                                "then": [
+                                  "1K",
+                                  "2K",
+                                  "4K"
+                                ]
+                              },
+                              {
+                                "when": {
+                                  "$in": [
+                                    "4",
+                                    {
+                                      "$ref": "vars.modelTokens"
+                                    }
+                                  ]
+                                },
+                                "then": [
+                                  "2K",
+                                  "4K"
+                                ]
+                              }
+                            ],
+                            "default": [
+                              "2K",
+                              "3K",
+                              "4K"
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$and": [
+                        {
+                          "$ref": "vars.layers"
+                        },
+                        {
+                          "$eq": [
+                            {
+                              "$ref": "vars.size"
+                            },
+                            "auto"
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "$and": [
+                        {
+                          "$not": {
+                            "$ref": "vars.layers"
+                          }
+                        },
+                        {
+                          "$and": [
+                            {
+                              "$eq": [
+                                {
+                                  "$len": {
+                                    "$split": [
+                                      {
+                                        "$ref": "vars.size"
+                                      },
+                                      "x"
+                                    ]
+                                  }
+                                },
+                                2
+                              ]
+                            },
+                            {
+                              "$gt": [
+                                {
+                                  "$ref": "vars.width"
+                                },
+                                0
+                              ]
+                            },
+                            {
+                              "$gt": [
+                                {
+                                  "$ref": "vars.height"
+                                },
+                                0
+                              ]
+                            },
+                            {
+                              "$lte": [
+                                {
+                                  "$ref": "vars.width"
+                                },
+                                {
+                                  "$multiply": [
+                                    {
+                                      "$ref": "vars.height"
+                                    },
+                                    16
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "$lte": [
+                                {
+                                  "$ref": "vars.height"
+                                },
+                                {
+                                  "$multiply": [
+                                    {
+                                      "$ref": "vars.width"
+                                    },
+                                    16
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "$gte": [
+                                {
+                                  "$ref": "vars.pixels"
+                                },
+                                {
+                                  "$if": {
+                                    "condition": {
+                                      "$or": [
+                                        {
+                                          "$ref": "vars.modern"
+                                        },
+                                        {
+                                          "$ref": "vars.legacy4"
+                                        }
+                                      ]
+                                    },
+                                    "then": 921600,
+                                    "else": 3686400
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "$lte": [
+                                {
+                                  "$ref": "vars.pixels"
+                                },
+                                {
+                                  "$if": {
+                                    "condition": {
+                                      "$ref": "vars.modern"
+                                    },
+                                    "then": 4624220,
+                                    "else": 16777216
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "message": "当前 Seedream 型号或图层模式不支持这个尺寸，请调整尺寸后重试"
+          }
+        ],
+        "variables": [
+          {
+            "name": "modelTokens",
+            "value": {
+              "$split": [
+                {
+                  "$lower": {
+                    "$ref": "request.model"
+                  }
+                },
+                "-"
+              ]
+            }
+          },
+          {
+            "name": "rawSize",
+            "value": {
+              "$lower": {
+                "$trim": {
+                  "$coalesce": [
+                    {
+                      "$ref": "request.aspectRatio"
+                    },
+                    ""
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "name": "modern",
+            "value": {
+              "$and": [
+                {
+                  "$in": [
+                    "seedream",
+                    {
+                      "$ref": "vars.modelTokens"
+                    }
+                  ]
+                },
+                {
+                  "$in": [
+                    "5",
+                    {
+                      "$ref": "vars.modelTokens"
+                    }
+                  ]
+                },
+                {
+                  "$or": [
+                    {
+                      "$in": [
+                        "pro",
+                        {
+                          "$ref": "vars.modelTokens"
+                        }
+                      ]
+                    },
+                    {
+                      "$in": [
+                        "flash",
+                        {
+                          "$ref": "vars.modelTokens"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "legacy4",
+            "value": {
+              "$and": [
+                {
+                  "$in": [
+                    "seedream",
+                    {
+                      "$ref": "vars.modelTokens"
+                    }
+                  ]
+                },
+                {
+                  "$and": [
+                    {
+                      "$in": [
+                        "4",
+                        {
+                          "$ref": "vars.modelTokens"
+                        }
+                      ]
+                    },
+                    {
+                      "$in": [
+                        "0",
+                        {
+                          "$ref": "vars.modelTokens"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "family45",
+            "value": {
+              "$and": [
+                {
+                  "$in": [
+                    "seedream",
+                    {
+                      "$ref": "vars.modelTokens"
+                    }
+                  ]
+                },
+                {
+                  "$in": [
+                    "4",
+                    {
+                      "$ref": "vars.modelTokens"
+                    }
+                  ]
+                },
+                {
+                  "$in": [
+                    "5",
+                    {
+                      "$ref": "vars.modelTokens"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "recognized",
+            "value": {
+              "$or": [
+                {
+                  "$ref": "vars.modern"
+                },
+                {
+                  "$ref": "vars.legacy4"
+                },
+                {
+                  "$ref": "vars.family45"
+                },
+                {
+                  "$and": [
+                    {
+                      "$in": [
+                        "seedream",
+                        {
+                          "$ref": "vars.modelTokens"
+                        }
+                      ]
+                    },
+                    {
+                      "$in": [
+                        "5",
+                        {
+                          "$ref": "vars.modelTokens"
+                        }
+                      ]
+                    },
+                    {
+                      "$not": {
+                        "$in": [
+                          "4",
+                          {
+                            "$ref": "vars.modelTokens"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "layers",
+            "value": {
+              "$or": [
+                {
+                  "$eq": [
+                    {
+                      "$ref": "request.output.options.mode"
+                    },
+                    "layers"
+                  ]
+                },
+                {
+                  "$eq": [
+                    {
+                      "$ref": "request.providerOptions.volcengine-ark-image.layer_decomposition"
+                    },
+                    true
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "transparent",
+            "value": {
+              "$or": [
+                {
+                  "$eq": [
+                    {
+                      "$ref": "request.output.options.transparent"
+                    },
+                    "true"
+                  ]
+                },
+                {
+                  "$eq": [
+                    {
+                      "$ref": "request.providerOptions.volcengine-ark-image.background"
+                    },
+                    "transparent"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "maxImages",
+            "value": {
+              "$max": [
+                1,
+                {
+                  "$toInt": {
+                    "$coalesce": [
+                      {
+                        "$omitEmpty": {
+                          "$ref": "request.output.options.maxImages"
+                        }
+                      },
+                      {
+                        "$ref": "request.providerOptions.volcengine-ark-image.sequential_image_generation_options.max_images"
+                      },
+                      1
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "group",
+            "value": {
+              "$and": [
+                {
+                  "$ref": "vars.recognized"
+                },
+                {
+                  "$not": {
+                    "$ref": "vars.modern"
+                  }
+                },
+                {
+                  "$gt": [
+                    {
+                      "$ref": "vars.maxImages"
+                    },
+                    1
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "supportsFormat",
+            "value": {
+              "$or": [
+                {
+                  "$ref": "vars.modern"
+                },
+                {
+                  "$and": [
+                    {
+                      "$in": [
+                        "seedream",
+                        {
+                          "$ref": "vars.modelTokens"
+                        }
+                      ]
+                    },
+                    {
+                      "$in": [
+                        "5",
+                        {
+                          "$ref": "vars.modelTokens"
+                        }
+                      ]
+                    },
+                    {
+                      "$not": {
+                        "$in": [
+                          "4",
+                          {
+                            "$ref": "vars.modelTokens"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "format",
+            "value": {
+              "$coalesce": [
+                {
+                  "$omitEmpty": {
+                    "$ref": "request.output.options.format"
+                  }
+                },
+                {
+                  "$ref": "request.providerOptions.volcengine-ark-image.output_format"
+                },
+                "png"
+              ]
+            }
+          },
+          {
+            "name": "size",
+            "value": {
+              "$switch": {
+                "cases": [
+                  {
+                    "when": {
+                      "$in": [
+                        {
+                          "$ref": "vars.rawSize"
+                        },
+                        [
+                          "",
+                          "1:1"
+                        ]
+                      ]
+                    },
+                    "then": {
+                      "$if": {
+                        "condition": {
+                          "$ref": "vars.recognized"
+                        },
+                        "then": "2K",
+                        "else": {
+                          "$if": {
+                            "condition": {
+                              "$eq": [
+                                {
+                                  "$ref": "vars.rawSize"
+                                },
+                                ""
+                              ]
+                            },
+                            "then": null,
+                            "else": "2048x2048"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "when": {
+                      "$eq": [
+                        {
+                          "$ref": "vars.rawSize"
+                        },
+                        "auto"
+                      ]
+                    },
+                    "then": {
+                      "$if": {
+                        "condition": {
+                          "$ref": "vars.recognized"
+                        },
+                        "then": {
+                          "$if": {
+                            "condition": {
+                              "$ref": "vars.layers"
+                            },
+                            "then": "auto",
+                            "else": "2K"
+                          }
+                        },
+                        "else": "2k"
+                      }
+                    }
+                  },
+                  {
+                    "when": {
+                      "$eq": [
+                        {
+                          "$ref": "vars.rawSize"
+                        },
+                        "4:3"
+                      ]
+                    },
+                    "then": {
+                      "$if": {
+                        "condition": {
+                          "$ref": "vars.layers"
+                        },
+                        "then": "2K",
+                        "else": "2304x1728"
+                      }
+                    }
+                  },
+                  {
+                    "when": {
+                      "$eq": [
+                        {
+                          "$ref": "vars.rawSize"
+                        },
+                        "3:4"
+                      ]
+                    },
+                    "then": {
+                      "$if": {
+                        "condition": {
+                          "$ref": "vars.layers"
+                        },
+                        "then": "2K",
+                        "else": "1728x2304"
+                      }
+                    }
+                  },
+                  {
+                    "when": {
+                      "$eq": [
+                        {
+                          "$ref": "vars.rawSize"
+                        },
+                        "16:9"
+                      ]
+                    },
+                    "then": {
+                      "$if": {
+                        "condition": {
+                          "$ref": "vars.layers"
+                        },
+                        "then": "2K",
+                        "else": "2560x1440"
+                      }
+                    }
+                  },
+                  {
+                    "when": {
+                      "$eq": [
+                        {
+                          "$ref": "vars.rawSize"
+                        },
+                        "9:16"
+                      ]
+                    },
+                    "then": {
+                      "$if": {
+                        "condition": {
+                          "$ref": "vars.layers"
+                        },
+                        "then": "2K",
+                        "else": "1440x2560"
+                      }
+                    }
+                  },
+                  {
+                    "when": {
+                      "$eq": [
+                        {
+                          "$ref": "vars.rawSize"
+                        },
+                        "3:2"
+                      ]
+                    },
+                    "then": {
+                      "$if": {
+                        "condition": {
+                          "$ref": "vars.layers"
+                        },
+                        "then": "2K",
+                        "else": "2496x1664"
+                      }
+                    }
+                  },
+                  {
+                    "when": {
+                      "$eq": [
+                        {
+                          "$ref": "vars.rawSize"
+                        },
+                        "2:3"
+                      ]
+                    },
+                    "then": {
+                      "$if": {
+                        "condition": {
+                          "$ref": "vars.layers"
+                        },
+                        "then": "2K",
+                        "else": "1664x2496"
+                      }
+                    }
+                  },
+                  {
+                    "when": {
+                      "$eq": [
+                        {
+                          "$ref": "vars.rawSize"
+                        },
+                        "21:9"
+                      ]
+                    },
+                    "then": {
+                      "$if": {
+                        "condition": {
+                          "$ref": "vars.layers"
+                        },
+                        "then": "2K",
+                        "else": "3024x1296"
+                      }
+                    }
+                  },
+                  {
+                    "when": {
+                      "$in": [
+                        {
+                          "$ref": "vars.rawSize"
+                        },
+                        [
+                          "1k",
+                          "1.5k",
+                          "2k",
+                          "3k",
+                          "4k"
+                        ]
+                      ]
+                    },
+                    "then": {
+                      "$if": {
+                        "condition": {
+                          "$ref": "vars.recognized"
+                        },
+                        "then": {
+                          "$upper": {
+                            "$ref": "vars.rawSize"
+                          }
+                        },
+                        "else": {
+                          "$ref": "request.aspectRatio"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "default": {
+                  "$if": {
+                    "condition": {
+                      "$ref": "vars.recognized"
+                    },
+                    "then": {
+                      "$ref": "vars.rawSize"
+                    },
+                    "else": {
+                      "$ref": "request.aspectRatio"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "name": "width",
+            "value": {
+              "$toInt": {
+                "$at": [
+                  {
+                    "$split": [
+                      {
+                        "$ref": "vars.size"
+                      },
+                      "x"
+                    ]
+                  },
+                  0
+                ]
+              }
+            }
+          },
+          {
+            "name": "height",
+            "value": {
+              "$toInt": {
+                "$at": [
+                  {
+                    "$split": [
+                      {
+                        "$ref": "vars.size"
+                      },
+                      "x"
+                    ]
+                  },
+                  1
+                ]
+              }
+            }
+          },
+          {
+            "name": "pixels",
+            "value": {
+              "$multiply": [
+                {
+                  "$ref": "vars.width"
+                },
+                {
+                  "$ref": "vars.height"
+                }
+              ]
+            }
+          }
+        ]
       }
     ]
   }

@@ -93,10 +93,10 @@
 
 ```json
 {
-  "apiVersion": "qisitv.plugin/v2",
+  "apiVersion": "qisitv.plugin/v3",
   "id": "volcengine-jimeng-image",
   "name": "Volcengine Jimeng Image",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "author": "BeefTV Contributors",
   "description": "Volcengine Jimeng Image 独立请求协议插件。",
   "documentation": "<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>",
@@ -211,7 +211,27 @@
               "$ref": "request.model"
             },
             "prompt": {
-              "$ref": "request.prompt"
+              "$concat": [
+                {
+                  "$if": {
+                    "condition": {
+                      "$ref": "request.instructions"
+                    },
+                    "then": {
+                      "$concat": [
+                        {
+                          "$ref": "request.instructions"
+                        },
+                        "\n\n"
+                      ]
+                    },
+                    "else": ""
+                  }
+                },
+                {
+                  "$ref": "request.prompt"
+                }
+              ]
             },
             "force_single": true,
             "binary_data_base64": {
@@ -540,12 +560,27 @@
             ]
           },
           "images": {
-            "$coalesce": [
+            "$concatArrays": [
               {
                 "$ref": "response.data.image_urls"
               },
               {
-                "$ref": "response.data.binary_data_base64"
+                "$map": {
+                  "from": {
+                    "$ref": "response.data.binary_data_base64"
+                  },
+                  "as": "image",
+                  "in": {
+                    "dataUrl": {
+                      "$concat": [
+                        "data:image/png;base64,",
+                        {
+                          "$ref": "image"
+                        }
+                      ]
+                    }
+                  }
+                }
               }
             ]
           },
@@ -555,8 +590,81 @@
           "resultEphemeral": true,
           "messagePaths": [
             "message"
+          ],
+          "detectImageMime": true,
+          "successCodes": [
+            10000,
+            "10000"
           ]
-        }
+        },
+        "validations": [
+          {
+            "assert": {
+              "$eq": [
+                {
+                  "$len": {
+                    "$filter": {
+                      "from": {
+                        "$ref": "request.images"
+                      },
+                      "as": "media",
+                      "where": {
+                        "$eq": [
+                          {
+                            "$ref": "media.role"
+                          },
+                          "mask"
+                        ]
+                      }
+                    }
+                  }
+                },
+                0
+              ]
+            },
+            "message": "即梦图片协议 不支持蒙版编辑，请移除蒙版后重试"
+          },
+          {
+            "assert": {
+              "$and": [
+                {
+                  "$eq": [
+                    {
+                      "$len": {
+                        "$ref": "request.videos"
+                      }
+                    },
+                    0
+                  ]
+                },
+                {
+                  "$eq": [
+                    {
+                      "$len": {
+                        "$ref": "request.audios"
+                      }
+                    },
+                    0
+                  ]
+                }
+              ]
+            },
+            "message": "即梦图片协议 不支持参考视频或音频"
+          },
+          {
+            "assert": {
+              "$lte": [
+                {
+                  "$len": {
+                    "$ref": "request.images"
+                  }
+                },
+                14
+              ]
+            },
+            "message": "即梦图片协议最多支持 14 张参考图"
+          }
+        ]
       }
     ]
   }

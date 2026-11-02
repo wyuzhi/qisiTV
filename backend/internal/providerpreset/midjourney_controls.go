@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"unicode/utf8"
 )
 
 var mjRatioFlag = regexp.MustCompile(`(?i)(?:^|\s)--(?:ar|aspect)\b(?:\s+([^\s]+))?`)
@@ -44,9 +43,6 @@ func (c ImageContract) GenerationPrompt(prompt, size string) (string, error) {
 	prompt = strings.TrimSpace(prompt)
 	if selected.Ratio != "1:1" {
 		prompt += " --ar " + selected.Ratio
-	}
-	if utf8.RuneCountInString(prompt) > c.PromptMaxChars {
-		return "", fmt.Errorf("含画幅和分辨率参数的提示词超过 %d 字符", c.PromptMaxChars)
 	}
 	return prompt, nil
 }

@@ -57,7 +57,6 @@ import { WorkspaceState } from "@/components/layout/workspace-state";
 import { resolveProjectCanvasStyle } from "@/components/canvas/canvas-style-picker-modal";
 import { decodeNovelText, splitTextIntoChapters } from "@/lib/canvas/canvas-document";
 import { navigateToSettings } from "@/lib/settings-navigation";
-import { captureUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
 import {
     createProjectAssetCandidates,
     createProjectUnit,
@@ -360,7 +359,7 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
     const markChapterOperationCompleted = (unitId: string, kind: ChapterOperationKind) => {
         setCompletedChapterOperations((current) => ({ ...current, [chapterOperationKey(unitId, kind)]: true }));
     };
-    const storeExtractedAssets = async (unitId: string, assets: Awaited<ReturnType<typeof extractChapterAssets>>, write: { sourceTaskId: string; expectedScope: CapturedUserScope }) => {
+    const storeExtractedAssets = async (unitId: string, assets: Awaited<ReturnType<typeof extractChapterAssets>>, write: { sourceTaskId: string }) => {
         // 去重由服务端按分类、名称及别名统一完成，避免使用页面分页快照漏判。
         const candidates = [
             ...assets.characters.map((asset) => ({ unitId, name: asset.name, category: "character" as const, details: { ...asset } })),
@@ -369,7 +368,6 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
         ];
         const created = await createProjectAssetCandidates(detail.project.id, candidates, "chapter_character_extract", {
             sourceTaskId: write.sourceTaskId,
-            expectedScope: write.expectedScope,
         });
         markChapterOperationCompleted(unitId, "characters");
         refreshProject();
@@ -379,12 +377,11 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
         unitId: string,
         rows: ReturnType<typeof chapterStoryboardFromGenerationTask>["rows"],
         approved: { revision: number; shotIds: string[] },
-        write: { sourceTaskId: string; expectedScope: CapturedUserScope },
+        write: { sourceTaskId: string },
     ) => {
         const shots = storyboardRowsToProjectShots(rows, detail);
         await replaceProjectUnitShots(detail.project.id, unitId, shots, approved.shotIds, approved.revision, {
             sourceTaskId: write.sourceTaskId,
-            expectedScope: write.expectedScope,
         });
         await Promise.all([
             queryClient.invalidateQueries({ queryKey: ["project", detail.project.id] }),
@@ -398,13 +395,12 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
         try {
             const input = chapterAnalysisInput(selectedTextModel);
             if (!input) return;
-            const expectedScope = captureUserScope();
             operationUnitId = input.chapterId;
             setCharacterExtractOpen(false);
             beginChapterOperation(operationUnitId, "characters");
             message.info("角色、场景与道具提取任务已开始，可继续编辑或切换章节");
-            const assets = await extractChapterAssets(input, { onTaskUpdate: (task) => updateChapterOperation(operationUnitId, "characters", task), expectedScope });
-            const freshCount = await storeExtractedAssets(operationUnitId, assets, { sourceTaskId: assets.taskId, expectedScope });
+            const assets = await extractChapterAssets(input, { onTaskUpdate: (task) => updateChapterOperation(operationUnitId, "characters", task) });
+            const freshCount = await storeExtractedAssets(operationUnitId, assets, { sourceTaskId: assets.taskId });
             if (!freshCount) {
                 message.info("没有新增资产：提取为空或资产已存在");
                 return;
@@ -431,7 +427,6 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
             navigateToSettings({ continueCreation: true });
             return;
         }
-        const expectedScope = captureUserScope();
         const approvedRevision = detail.project.revision;
         const approvedShotIds = detail.shots.filter((shot) => shot.unitId === unit.id).map((shot) => shot.id);
         if (storyboardImpact.shotCount && !(await confirmStoryboardReplacement(storyboardImpact))) return;
@@ -458,8 +453,8 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
                 selectedSkillIds,
                 approvedRevision,
                 approvedShotIds,
-            }, { onTaskUpdate: (task) => updateChapterOperation(unit.id, "storyboard", task), expectedScope });
-            const shotCount = await storeGeneratedStoryboard(unit.id, generated.rows, { revision: approvedRevision, shotIds: approvedShotIds }, { sourceTaskId: generated.taskId, expectedScope });
+            }, { onTaskUpdate: (task) => updateChapterOperation(unit.id, "storyboard", task) });
+            const shotCount = await storeGeneratedStoryboard(unit.id, generated.rows, { revision: approvedRevision, shotIds: approvedShotIds }, { sourceTaskId: generated.taskId });
             message.success(generated.skillCount ? `已生成 ${shotCount} 个分镜，并应用 ${generated.skillCount} 个技能` : `已生成 ${shotCount} 个分镜`);
             navigate(`/projects/${detail.project.id}/workflow/${unit.id}/storyboard`);
         } catch (error) {
@@ -523,14 +518,13 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
     };
     const applyPendingStoryboardRecovery = async (pending: PendingStoryboardRecovery) => {
         if (applyingStoryboardRecoveryRef.current) return;
-        const expectedScope = captureUserScope();
         const reviewedRevision = detail.project.revision;
         const reviewedShotIds = detail.shots.filter((shot) => shot.unitId === pending.chapterId).map((shot) => shot.id);
         const impact = chapterStoryboardReplaceImpact(detail, pending.chapterId);
         if (!(await confirmRecoveredStoryboardWrite(impact, pending.rows.length))) return;
         applyingStoryboardRecoveryRef.current = true;
         try {
-            const shotCount = await storeGeneratedStoryboard(pending.chapterId, pending.rows, { revision: reviewedRevision, shotIds: reviewedShotIds }, { sourceTaskId: pending.taskId, expectedScope });
+            const shotCount = await storeGeneratedStoryboard(pending.chapterId, pending.rows, { revision: reviewedRevision, shotIds: reviewedShotIds }, { sourceTaskId: pending.taskId });
             clearPendingStoryboardRecovery(pending.chapterId);
             message.success(`已写入 ${shotCount} 个分镜`);
             navigate(`/projects/${detail.project.id}/workflow/${pending.chapterId}/storyboard`);
@@ -557,11 +551,10 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
             && !recoveringTaskIdsRef.current.has(task.id)
         ));
         if (!pending.length) return;
-        const expectedScope = captureUserScope();
         for (const item of pending) recoveringTaskIdsRef.current.add(item.task.id);
         void (async () => {
             try {
-                const { receipts } = await listChapterApplyReceipts(detail.project.id, pending.map((item) => item.task.id), { expectedScope });
+                const { receipts } = await listChapterApplyReceipts(detail.project.id, pending.map((item) => item.task.id));
                 const appliedTaskIds = new Set(receipts.filter((receipt) => receipt.applied).map((receipt) => receipt.taskId));
                 for (const { task, chapterId: taskChapterId, kind } of pending) {
                     if (chapterStoryboardRecoveryDecision({ alreadyApplied: appliedTaskIds.has(task.id) }).action === "skip") {
@@ -569,9 +562,9 @@ export default function ProjectChaptersView({ detail, refreshProject }: ProjectD
                         markChapterOperationCompleted(taskChapterId, kind);
                         continue;
                     }
-                    const completedTask = await queryGenerationTask(task.id, { expectedScope });
+                    const completedTask = await queryGenerationTask(task.id);
                     if (kind === "characters") {
-                        await storeExtractedAssets(taskChapterId, { ...chapterAssetsFromGenerationTask(completedTask), taskId: completedTask.id }, { sourceTaskId: completedTask.id, expectedScope });
+                        await storeExtractedAssets(taskChapterId, { ...chapterAssetsFromGenerationTask(completedTask), taskId: completedTask.id }, { sourceTaskId: completedTask.id });
                         message.success("已恢复刷新前完成的章节资产提取结果");
                         recoveredTaskIdsRef.current.add(task.id);
                         continue;

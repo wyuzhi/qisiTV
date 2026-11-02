@@ -42,6 +42,13 @@ func (s *Service) RefreshCatalog(ctx context.Context) ([]CatalogModel, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	for _, model := range models {
+		if len(model.ImageCapabilities) > 0 && string(model.ImageCapabilities) != "null" {
+			if _, valid := NormalizeCatalogImageCapability(model.ImageCapabilities); !valid || model.ImageCapabilitiesVersion == "" {
+				return nil, errors.New("读取模型能力失败，请重试")
+			}
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// A disconnect or account change during the fetch invalidates its result.

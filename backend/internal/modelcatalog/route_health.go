@@ -42,7 +42,7 @@ func (r *Router) BlockLogicalRouteForFailure(attempt *model.RouteAttempt, info F
 	duration := time.Duration(0)
 	if attempt.FailureCode == "upstream_401" || attempt.FailureCode == "upstream_403" {
 		key, duration = "channel:"+attempt.ChannelID, 10*time.Minute
-	} else if attempt.FailureCode == "upstream_404" {
+	} else if attempt.FailureCode == "upstream_404" || attempt.FailureCode == "upstream_405" || attempt.FailureCode == "upstream_501" {
 		key, duration = "channel-model:"+attempt.ChannelModelID, 10*time.Minute
 	} else if attempt.FailureCode == "upstream_429" {
 		key, duration = "channel:"+attempt.ChannelID, 30*time.Second
@@ -69,6 +69,9 @@ func RouteFailureCode(info FailureInfo) string {
 	if info.PreparationFailed && !info.ImageRecovery {
 		return "request_not_sent"
 	}
+	if info.TerminalProviderFailure || info.ExplicitRejection {
+		return "upstream_failed"
+	}
 	return "submission_unknown"
 }
 
@@ -86,7 +89,7 @@ func SafeRouteRejection(info FailureInfo) bool {
 		return true
 	}
 	switch info.StatusCode {
-	case 401, 402, 403, 404, 429:
+	case 401, 402, 403, 404, 405, 429, 501:
 		return true
 	}
 	return false

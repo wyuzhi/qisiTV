@@ -72,7 +72,7 @@ func TestCanvasWorkflowSourceSurvivesCompletionAndDeliveryCleanup(t *testing.T) 
 				t.Fatal("task API exposed private source snapshot")
 			}
 			d := cw.Definition{Version: 1, Nodes: []cw.Node{{ID: "person", Title: "Person", MediaType: "image", Role: "input", ResourceID: "old-person"}, {ID: "generate", Title: "Generate", MediaType: mode, Role: "generation", ResourceID: resourceID, SourceTaskID: source.ID}}, Edges: []cw.Edge{{From: "person", To: "generate"}}, OutputNodeIDs: []string{"generate"}}
-			template, err := svc.CreateCanvasWorkflow("owner", cw.CreateRequest{Name: "Completed source", Definition: d})
+			template, err := svc.workflowTemplates().Create("owner", cw.CreateRequest{Name: "Completed source", Definition: d})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -109,7 +109,7 @@ func TestCanvasWorkflowLegacyClearedSourceRequiresManualRerun(t *testing.T) {
 	if err := db.Model(&model.Task{}).Where("id = ?", "original").Updates(map[string]any{"input_json": `{"mode":"video","metadata":{"nodeId":"historical"}}`, "model": "beefapi::gpt-image-2"}).Error; err != nil {
 		t.Fatal(err)
 	}
-	_, err := svc.CreateCanvasWorkflow("owner", cw.CreateRequest{Name: "Historical", Definition: d})
+	_, err := svc.workflowTemplates().Create("owner", cw.CreateRequest{Name: "Historical", Definition: d})
 	if err == nil || !strings.Contains(err.Error(), "完整配方已清理") || !strings.Contains(err.Error(), "手动重新运行") {
 		t.Fatalf("historical task fallback=%v", err)
 	}
@@ -120,7 +120,7 @@ func TestCanvasWorkflowRejectsAmbiguousMultipleOutputSource(t *testing.T) {
 	if err := db.Model(&model.Task{}).Where("id = ?", "original").Update("result_json", `{"images":[{"resourceId":"old-person"},{"resourceId":"new-person"}]}`).Error; err != nil {
 		t.Fatal(err)
 	}
-	_, err := svc.CreateCanvasWorkflow("owner", cw.CreateRequest{Name: "Multiple output", Definition: d})
+	_, err := svc.workflowTemplates().Create("owner", cw.CreateRequest{Name: "Multiple output", Definition: d})
 	if err == nil || !strings.Contains(err.Error(), "单结果生成任务") {
 		t.Fatalf("multiple outputs=%v", err)
 	}

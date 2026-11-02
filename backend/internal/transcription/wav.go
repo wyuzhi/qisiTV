@@ -8,12 +8,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"qisitv/backend/internal/mediatools"
 )
 
 // PrepareWAV writes the media stream to a temp file and converts it to 16 kHz
 // mono PCM wav for whisper.cpp. The caller must invoke cleanup.
 func PrepareWAV(ctx context.Context, reader io.Reader, mime string) (string, func(), error) {
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
+	ffmpegBin, err := mediatools.ResolveFFmpeg()
+	if err != nil {
 		return "", nil, fmt.Errorf("音频预处理依赖未安装（需要 ffmpeg）")
 	}
 	tmpDir, err := os.MkdirTemp("", "beeftv-whisper-*")
@@ -37,7 +40,8 @@ func PrepareWAV(ctx context.Context, reader io.Reader, mime string) (string, fun
 		return "", nil, fmt.Errorf("关闭临时文件失败: %w", err)
 	}
 	wavPath := filepath.Join(tmpDir, "audio16k.wav")
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-nostdin", "-y", "-i", inPath, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wavPath)
+	cmd := exec.CommandContext(ctx, ffmpegBin, "-nostdin", "-y", "-i", inPath, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wavPath)
+	mediatools.HideConsole(cmd)
 	output, runErr := cmd.CombinedOutput()
 	if runErr != nil {
 		cleanup()

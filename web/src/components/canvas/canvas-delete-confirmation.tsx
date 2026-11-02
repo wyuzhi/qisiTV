@@ -1,14 +1,11 @@
 import { Button } from "antd";
 import { useRef, useState } from "react";
 import { AppModal } from "@/components/ui/product/app-modal";
-import { assertUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
 
-// Capture scope at the entry point, before a lazy dialog can finish loading.
-export function CanvasDeleteConfirmation({ title, description, scope, onConfirm, onCancel }: {
+export function CanvasDeleteConfirmation({ title, description, onConfirm, onCancel }: {
     title: string;
     description: string;
-    scope: CapturedUserScope;
-    onConfirm: (assertCurrent: () => void) => Promise<void>;
+    onConfirm: () => Promise<void>;
     onCancel: () => void;
 }) {
     const busy = useRef(false);
@@ -20,10 +17,7 @@ export function CanvasDeleteConfirmation({ title, description, scope, onConfirm,
         setDeleting(true);
         setError("");
         try {
-            const assertCurrent = () => assertUserScope(scope);
-            assertCurrent();
-            await onConfirm(assertCurrent);
-            assertCurrent();
+            await onConfirm();
             onCancel();
         } catch (cause) {
             setError(cause instanceof Error ? cause.message : "删除失败，请稍后重试");

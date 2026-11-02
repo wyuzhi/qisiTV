@@ -65,11 +65,14 @@ func (p StoryboardRowPatch) IsZero() bool {
 	return p.StoryboardRowDraft.IsZero() && p.ImageNodeID == nil && p.VideoNodeID == nil
 }
 
-// StoryboardRowUpdate 是行更新的领域回执；连线 ID 是本次绑定实际新增和删除的产出连线。
+// StoryboardRowUpdate 是行更新的领域回执；连线 ID 是本次绑定实际新增和删除的产出连线，
+// SyncedNodeIDs 与 SkippedNodeIDs 记录分镜提示词更新时自动同步或因节点草稿已单独手改而跳过同步的绑定节点。
 type StoryboardRowUpdate struct {
 	Updated        []StoryboardRowIdentity
 	CreatedEdgeIDs []string
 	DeletedEdgeIDs []string
+	SyncedNodeIDs  []string
+	SkippedNodeIDs []string
 }
 
 // StoryboardRowIdentity 是写入成功后由领域返回的行身份；
@@ -117,7 +120,13 @@ func (s *Service) UpdateUserCanvasStoryboardRows(userID, canvasID, nodeID string
 	if err != nil {
 		return UserDataSummary{}, StoryboardRowUpdate{}, err
 	}
-	result := StoryboardRowUpdate{Updated: make([]StoryboardRowIdentity, 0, len(patches)), CreatedEdgeIDs: []string{}, DeletedEdgeIDs: []string{}}
+	result := StoryboardRowUpdate{
+		Updated:        make([]StoryboardRowIdentity, 0, len(patches)),
+		CreatedEdgeIDs: []string{},
+		DeletedEdgeIDs: []string{},
+		SyncedNodeIDs:  []string{},
+		SkippedNodeIDs: []string{},
+	}
 	seen := map[string]bool{}
 	for _, patch := range patches {
 		row := findStoryboardRow(rows, patch.RowID)
@@ -128,6 +137,9 @@ func (s *Service) UpdateUserCanvasStoryboardRows(userID, canvasID, nodeID string
 			return UserDataSummary{}, StoryboardRowUpdate{}, kernel.NewAppError(http.StatusBadRequest, "同一批次内行重复: "+patch.RowID)
 		}
 		seen[patch.RowID] = true
+		oldImagePrompt, _ := row["imageGenerationPrompt"].(string)
+		oldVideoPrompt, _ := row["videoMotionPrompt"].(string)
+		oldPlot, _ := row["plotDescription"].(string)
 		applyStoryboardRowDraft(row, patch.StoryboardRowDraft)
 		for _, binding := range []struct {
 			field, kind string
@@ -142,6 +154,31 @@ func (s *Service) UpdateUserCanvasStoryboardRows(userID, canvasID, nodeID string
 			}
 			result.CreatedEdgeIDs = append(result.CreatedEdgeIDs, created...)
 			result.DeletedEdgeIDs = append(result.DeletedEdgeIDs, deleted...)
+		}
+		for _, syncSpec := range []struct {
+			field, kind string
+			oldPrompt   string
+			nextPrompt  *string
+		}{
+			{"imageNodeId", "image", oldImagePrompt, patch.ImageGenerationPrompt},
+			{"videoNodeId", "video", oldVideoPrompt, patch.VideoMotionPrompt},
+		} {
+			if syncSpec.nextPrompt == nil {
+				continue
+			}
+			boundID, _ := row[syncSpec.field].(string)
+			if boundID == "" {
+				continue
+			}
+			target := findCanvasNode(doc, boundID)
+			if target == nil || canvasNodeType(target) != syncSpec.kind {
+				continue
+			}
+			if syncBoundStoryboardNodeDraft(target, syncSpec.oldPrompt, oldPlot, *syncSpec.nextPrompt) {
+				result.SyncedNodeIDs = appendUniqueStoryboardID(result.SyncedNodeIDs, boundID)
+			} else {
+				result.SkippedNodeIDs = appendUniqueStoryboardID(result.SkippedNodeIDs, boundID)
+			}
 		}
 		result.Updated = append(result.Updated, StoryboardRowIdentity{ID: patch.RowID, ShotNumber: rowShotNumber(row)})
 	}
@@ -212,6 +249,76 @@ func isStoryboardRowOutput(edge map[string]any, scriptID, rowID string) bool {
 	handle, _ := edge["fromHandleId"].(string)
 	tagged, _ := edge["storyboardRowId"].(string)
 	return handle == "row:"+rowID || edge["relation"] == "storyboard-output" && tagged == rowID
+}
+
+// syncBoundStoryboardNodeDraft 在分镜行提示词更新时，把未单独手改过的绑定媒体节点草稿一并更新。
+// 若节点草稿已被单独改为不同于原分镜提示词的内容，则保留节点手改稿并返回 false。
+func syncBoundStoryboardNodeDraft(target map[string]any, oldPrompt, oldPlot, nextPrompt string) bool {
+	meta, _ := target["metadata"].(map[string]any)
+	if meta == nil {
+		meta = map[string]any{}
+		target["metadata"] = meta
+	}
+	currentDraft, hasComposer := meta["composerContent"].(string)
+	if !hasComposer || currentDraft == "" {
+		currentDraft, _ = meta["prompt"].(string)
+	}
+	refPrefix, bodyDraft := splitStoryboardReferencePrefix(currentDraft)
+	trimmedBody := strings.TrimSpace(bodyDraft)
+	oldTrimmed := strings.TrimSpace(oldPrompt)
+	oldFallback := strings.TrimSpace(oldPlot)
+	nextTrimmed := strings.TrimSpace(nextPrompt)
+	if trimmedBody != "" && trimmedBody != oldTrimmed && trimmedBody != oldFallback && trimmedBody != nextTrimmed {
+		return false
+	}
+	if refPrefix != "" {
+		meta["composerContent"] = joinStoryboardReferencePrefix(refPrefix, nextPrompt)
+	} else {
+		meta["composerContent"] = nextPrompt
+	}
+	if !nodeHasCommittedOutput(meta) {
+		meta["prompt"] = nextPrompt
+	}
+	delete(meta, "promptTemplateOperation")
+	delete(meta, "promptTemplateVariables")
+	return true
+}
+
+func splitStoryboardReferencePrefix(draft string) (string, string) {
+	trimmed := strings.TrimSpace(draft)
+	if !strings.HasPrefix(trimmed, "参考资产：") {
+		return "", draft
+	}
+	if idx := strings.IndexByte(trimmed, '\n'); idx >= 0 {
+		return strings.TrimSpace(trimmed[:idx]), strings.TrimSpace(trimmed[idx+1:])
+	}
+	return trimmed, ""
+}
+
+func joinStoryboardReferencePrefix(prefix, prompt string) string {
+	trimmedPrompt := strings.TrimSpace(prompt)
+	if trimmedPrompt == "" {
+		return prefix
+	}
+	return prefix + "\n" + trimmedPrompt
+}
+
+func nodeHasCommittedOutput(meta map[string]any) bool {
+	for _, key := range []string{"content", "storageKey", "assetId", "resourceId", "taskId"} {
+		if text, ok := meta[key].(string); ok && strings.TrimSpace(text) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func appendUniqueStoryboardID(ids []string, id string) []string {
+	for _, existing := range ids {
+		if existing == id {
+			return ids
+		}
+	}
+	return append(ids, id)
 }
 
 // RemoveUserCanvasStoryboardRows 按行 ID 整批删除并重排剩余行镜号（index+1），

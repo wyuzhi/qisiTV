@@ -14,13 +14,12 @@ import { imageMetadata } from "@/lib/canvas/canvas-generation-task-sync";
 import { ensureMediaNodeMinimumSize } from "@/lib/canvas/canvas-node-size";
 import { repairOverlappingImageBatches } from "@/lib/canvas/canvas-generation-layout";
 import { interruptFileUpload } from "@/lib/canvas/canvas-file-upload";
-import { isDepthCaptureResultNode } from "@/lib/canvas/canvas-depth-capture";
+import { canvasNodeFailureView } from "@/lib/canvas/canvas-node-failure-view";
 import { isCanvasWorkflowProvider } from "@/lib/canvas/canvas-workflow";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import { CanvasNodeType, type CanvasAssistantSession, type CanvasConnection, type CanvasImageGenerationType, type CanvasNodeData, type CanvasNodeMetadata, type CanvasVideoEditOperation } from "@/types/canvas";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
-import { assertUserScope, captureUserScope, isUserScopeAbandonedError, userScopeMatches } from "@/lib/user-scope-guard";
 import { CanvasGenerationDurableAckError, CanvasGenerationMaterializationError } from "@/services/canvas-generation-errors";
 import type { persistCanvasGenerationTarget } from "@/services/canvas-generation-target";
 import { GenerationSubmissionUnknownError } from "@/services/api/generation-submission";
@@ -43,7 +42,6 @@ export async function runBackendCanvasGenerationTask(
         clientOperationId,
         retryOf,
         attemptGroupId,
-        expectedScope,
         resolveReferenceLinks,
     }: {
         projectId: string;
@@ -61,12 +59,10 @@ export async function runBackendCanvasGenerationTask(
         clientOperationId?: string;
         retryOf?: string;
         attemptGroupId?: string;
-        expectedScope?: import("@/lib/user-scope-guard").CapturedUserScope;
         resolveReferenceLinks?: import("@/services/api/reference-link-replacement").ResolveReferenceLinks;
     },
     dependencies?: GenerationTaskDependencies,
 ) {
-    if (mode === "image") assertCanvasImageReferenceLimit(config, referenceImages);
     return runBackendGenerationTask(
         {
             projectId,
@@ -83,24 +79,10 @@ export async function runBackendCanvasGenerationTask(
             clientOperationId,
             retryOf,
             attemptGroupId,
-            expectedScope,
             resolveReferenceLinks,
         },
         dependencies,
     );
-}
-
-export function canvasImageReferenceLimitError(config: AiConfig, referenceImages: ReferenceImage[]) {
-    // 工作流的参考素材上限由字段映射槽位决定，不能再套用当前普通图片模型的能力表。
-    if ((config.taskWorkflowProvider || "model") !== "model") return "";
-    const maxImages = modelCapabilityConfigFor(config, config.model).image?.references.maxImages;
-    if (maxImages === undefined || referenceImages.length <= maxImages) return "";
-    return `当前图片模型最多支持 ${maxImages} 张参考图，当前已连接 ${referenceImages.length} 张。请移除多余连线后重试`;
-}
-
-export function assertCanvasImageReferenceLimit(config: AiConfig, referenceImages: ReferenceImage[]) {
-    const error = canvasImageReferenceLimitError(config, referenceImages);
-    if (error) throw new Error(error);
 }
 
 export { backendProviderConfig };
@@ -144,8 +126,7 @@ export async function runCanvasGenerationTaskToConsumer(
 ) {
     input = { ...input, clientOperationId: input.clientOperationId || createClientId() };
     return runGenerationOperationOnce(input.clientOperationId, async () => {
-        const expectedScope = input.expectedScope ?? captureUserScope();
-        const isCurrent = () => !input.signal?.aborted && userScopeMatches(expectedScope) && (dependencies.isCurrent ? dependencies.isCurrent() : true);
+        const isCurrent = () => !input.signal?.aborted && (dependencies.isCurrent ? dependencies.isCurrent() : true);
         const submission = (state: NonNullable<CanvasNodeMetadata["generationSubmissionState"]>) => {
             if (!isCurrent()) return;
             const metadata = { taskClientOperationId: input.clientOperationId, generationSubmissionState: state, taskStage: state === "submitting" ? "正在提交生成任务" : state === "unknown" ? "提交结果待确认，请查询原任务" : undefined };
@@ -158,24 +139,21 @@ export async function runCanvasGenerationTaskToConsumer(
         submission("submitting");
         try {
             const prepare = dependencies.prepareTarget ?? (await import("@/services/canvas-generation-target")).persistCanvasGenerationTarget;
-            await prepare({ ...input, expectedScope, isCurrent });
+            await prepare({ ...input, isCurrent });
         } catch (error) {
             submission("rejected");
             throw error;
         }
         if (input.signal?.aborted) throw new DOMException("The operation was aborted", "AbortError");
-        assertUserScope(expectedScope);
         let completedTask: GenerationTask | undefined;
         let result: Awaited<ReturnType<typeof runBackendCanvasGenerationTask>>;
         let accepted = false;
         try { result = await (dependencies.runTask ?? runBackendCanvasGenerationTask)({
             ...input,
-            expectedScope,
             onTaskCreated: (task) => {
                 accepted = true;
                 submission("accepted");
                 if (input.signal?.aborted) throw new DOMException("The operation was aborted", "AbortError");
-                assertUserScope(expectedScope);
                 input.onTaskCreated?.(task);
                 dependencies.bindTask(task);
                 if (task.status === "succeeded") completedTask = task;
@@ -185,15 +163,13 @@ export async function runCanvasGenerationTaskToConsumer(
             throw error;
         }
         if (input.signal?.aborted) throw new DOMException("The operation was aborted", "AbortError");
-        assertUserScope(expectedScope);
         if (!completedTask) throw new Error("生成任务缺少成功终态");
         const taskForConsumer = input.mode === "text" && completedTask.type === "canvas_text" && result.text ? hydrateCompletedTextTask(completedTask, result.text) : completedTask;
         try {
             await dependencies.consumeTask(taskForConsumer);
             if (input.signal?.aborted) throw new DOMException("The operation was aborted", "AbortError");
-            assertUserScope(expectedScope);
         } catch (error) {
-            if (isUserScopeAbandonedError(error) || (error instanceof Error && error.name === "AbortError")) throw error;
+            if ((error instanceof Error && error.name === "AbortError")) throw error;
             const cause = error instanceof CanvasGenerationDurableAckError || error instanceof CanvasGenerationMaterializationError ? error.cause : error;
             dependencies.bindTask({
                 ...taskForConsumer,
@@ -234,6 +210,9 @@ export function generationTaskMetadata(task: GenerationTask): CanvasNodeMetadata
     return {
         taskId: task.id,
         taskType: task.type,
+        taskOutcome: task.outcome,
+        taskOutcomeSource: undefined,
+        generationPreflightError: undefined,
         taskClientOperationId: task.clientOperationId,
         generationSubmissionState: "accepted",
         retryOf: task.retryOf,
@@ -263,15 +242,18 @@ export function resetGenerationTaskMetadata(metadata: CanvasNodeMetadata | undef
         errorDetails: undefined,
         generationErrorCode: undefined,
         generationErrorSummary: undefined,
-        resourceReloadAvailable: undefined,
+        generationProviderCode: undefined,
+        generationPreflightError: undefined,
         failedPromptFingerprint: undefined,
         failedInputFingerprint: undefined,
     };
     delete next.taskId;
     delete next.taskType;
+    delete next.taskOutcome;
     delete next.taskOutputIndex;
     delete next.generationOutputNodeIds;
     delete next.taskClientOperationId;
+    delete next.generationSubmissionState;
     delete next.retryOf;
     delete next.attemptGroupId;
     delete next.taskStatus;
@@ -461,12 +443,16 @@ export function buildVideoGenerationMetadata(
     const workflowVideo = node?.type === CanvasNodeType.Config && (config?.taskWorkflowProvider === "runninghub" || isCanvasWorkflowProvider(metadata));
     const startFrame = workflowVideo ? undefined : requireConnectedVideoFrame(metadata?.videoStartFrameNodeId, "首帧", referenceImageIds);
     const endFrame = workflowVideo ? undefined : requireConnectedVideoFrame(metadata?.videoEndFrameNodeId, "尾帧", referenceImageIds);
+    const draftTaskId = metadata?.videoDraftTaskId?.trim() || undefined;
     return {
         ...(config ? generationWorkflowMetadata(config) : {}),
-        videoEditOperation:
-            config && isH3Model(config.model)
-                ? h3VideoOperation(config.model, { imageCount: context?.referenceImages.length || 0, videoCount: context?.referenceVideos.length || 0, audioCount: context?.referenceAudios.length || 0 }, metadata?.videoEditOperation)
-                : resolveVideoEditOperation(node, context),
+        videoEditOperation: draftTaskId
+            ? "draft_to_final"
+            : config && isH3Model(config.model)
+              ? h3VideoOperation(config.model, { imageCount: context?.referenceImages.length || 0, videoCount: context?.referenceVideos.length || 0, audioCount: context?.referenceAudios.length || 0 }, metadata?.videoEditOperation)
+              : resolveVideoEditOperation(node, context),
+        videoDraftTaskId: draftTaskId,
+        returnLastFrame: metadata?.returnLastFrame ?? config?.videoReturnLastFrame,
         videoCameraMoveId: metadata?.videoCameraMoveId,
         videoCameraMovePrompt: metadata?.videoCameraMovePrompt,
         videoStartFrameNodeId: startFrame,
@@ -550,16 +536,11 @@ export function supportsVideoReferenceAudio(config: AiConfig) {
     return interfaceType === "newapi-channel-1" || interfaceType === "newapi-channel-2" || isSeedanceVideoConfig(config);
 }
 
-const LEGACY_INTERRUPTED_GENERATION_DETAILS = "页面刷新后生成已中断，请重新生成。";
+export const MISSING_GENERATION_TASK_IDENTITY_DETAILS = "上次提交缺少任务标识，暂时无法确认是否已生成。请先在生成历史中核对结果，避免重复扣费。";
 
 /** 节点是否还要和任务中心对账。首次打开画布和之后才载入的快照共用这一条判定。 */
 export function canvasNodeNeedsGenerationRecovery(node: CanvasNodeData) {
-    const metadata = node.metadata;
-    if (!metadata || metadata.generationErrorCode === "result_target_unavailable" || metadata.fileUpload === "uploading" || isDepthCaptureResultNode(node)) return false;
-    const pendingAgentContinuation = metadata.agentGenerationContinuation?.status === "pending";
-    const aggregateBatchRoot = metadata.isBatchRoot && metadata.batchChildIds?.length && !metadata.taskId;
-    if (aggregateBatchRoot && !pendingAgentContinuation) return false;
-    return pendingAgentContinuation || ["submitting", "unknown"].includes(metadata.generationSubmissionState || "") || metadata.status === "loading" || metadata.errorDetails === LEGACY_INTERRUPTED_GENERATION_DETAILS || Boolean(metadata.taskId && (metadata.status !== "success" || (metadata.taskStatus === "succeeded" && !metadata.content && !metadata.storageKey)));
+    return canvasNodeFailureView(node).needsRecovery;
 }
 
 // 快照恢复交给任务对账的节点，在 metadata 上挂一个只存在于本页面内存里的记号（symbol 键）。

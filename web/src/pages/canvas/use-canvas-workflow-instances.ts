@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { nanoid } from "nanoid";
 import { App } from "antd";
-import { assertUserScope, captureUserScope } from "@/lib/user-scope-guard";
 import { canvasNodeResourceId } from "@/lib/canvas/canvas-resource-id";
 import { isWorkflowMaterialSource, canExportWorkflowResult, createWorkflowResultNode, upgradeWorkflowInstance, workflowAtPoint, createWorkflowInstance, normalizeWorkflowContainers, workflowDropSlot, workflowInstanceInputs, workflowInstanceLocked, type WorkflowInstanceAction } from "@/lib/canvas/reusable-workflow-instance";
 import { cancelWorkflowRun, getWorkflowEditor, getWorkflowRun, selectWorkflowImage, retryWorkflowRun, startWorkflowRun, type CanvasWorkflow, type WorkflowRun, type WorkflowValue } from "@/services/api/canvas-workflows";
@@ -17,7 +16,6 @@ export function useCanvasWorkflowInstances({ canvasId, domainProjectId, readOnly
     getCanvasCenter(): Position; focusNode(node: CanvasNodeData): void; persist(): Promise<boolean>; onError(message: string): void;
 }) {
     const { modal, message } = App.useApp();
-    const [scope] = useState(captureUserScope);
     const alive = useRef(true);
     const identity = useRef(canvasId);
     identity.current = canvasId;
@@ -26,7 +24,7 @@ export function useCanvasWorkflowInstances({ canvasId, domainProjectId, readOnly
     const locks = useRef(new Set<string>());
     const uploads = useRef(new Set<string>());
     const syncing = useRef(new Set<string>());
-    const config = { expectedScope: scope };
+    const config = {};
     useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, [canvasId]);
     useEffect(() => {
         if (readOnly) return;
@@ -34,7 +32,6 @@ export function useCanvasWorkflowInstances({ canvasId, domainProjectId, readOnly
         if (normalized !== nodesRef.current) { nodesRef.current = normalized; setNodes(normalized); }
     }, [nodes, nodesRef, readOnly, setNodes]);
     const assertCurrent = () => {
-        assertUserScope(scope);
         if (!alive.current || identity.current !== canvasId) throw new Error("画布已切换，请返回原画布查看工作流");
         if (currentReadOnly.current) throw new Error("只读画布不能修改工作流");
     };
@@ -52,7 +49,7 @@ export function useCanvasWorkflowInstances({ canvasId, domainProjectId, readOnly
             mimeType: resource?.mimeType, bytes: resource?.size, naturalWidth: resource?.width, naturalHeight: resource?.height, durationMs: resource?.durationMs,
         } };
         if (resource || node.type === "text" && value.text) {
-            const asset = await ensureCanvasNodeAsset({ canvasId, domainProjectId, node: next, source: "canvas-upload", expectedScope: scope });
+            const asset = await ensureCanvasNodeAsset({ canvasId, domainProjectId, node: next, source: "canvas-upload" });
             assertCurrent();
             next.metadata!.assetId = asset.assetId;
         }
@@ -162,7 +159,7 @@ export function useCanvasWorkflowInstances({ canvasId, domainProjectId, readOnly
         } catch (cause) {
             const error = cause instanceof Error ? cause.message : "工作流操作失败";
             if (alive.current && identity.current === canvasId) {
-                try { commit(current => current.map(node => node.id === instanceId ? { ...node, metadata: { ...node.metadata, reusableWorkflow: { ...node.metadata!.reusableWorkflow!, error } } } : node)); } catch { /* Scope changed; no writes to the new canvas. */ }
+                try { commit(current => current.map(node => node.id === instanceId ? { ...node, metadata: { ...node.metadata, reusableWorkflow: { ...node.metadata!.reusableWorkflow!, error } } } : node)); } catch { /* Canvas changed; no writes to the new canvas. */ }
                 onError(error);
             }
         } finally { locks.current.delete(instanceId); }
@@ -184,7 +181,7 @@ export function useCanvasWorkflowInstances({ canvasId, domainProjectId, readOnly
                     await syncRun(instanceId, run);
                 } catch (cause) {
                     if (!cancelled) {
-                        try { commit(current => current.map(node => node.id === instanceId ? { ...node, metadata: { ...node.metadata, reusableWorkflow: { ...node.metadata!.reusableWorkflow!, error: `${cause instanceof Error ? cause.message : "同步失败"}；后台仍会继续运行` } } } : node)); } catch { /* Switched scope. */ }
+                        try { commit(current => current.map(node => node.id === instanceId ? { ...node, metadata: { ...node.metadata, reusableWorkflow: { ...node.metadata!.reusableWorkflow!, error: `${cause instanceof Error ? cause.message : "同步失败"}；后台仍会继续运行` } } } : node)); } catch { /* Canvas changed. */ }
                     }
                 } finally { syncing.current.delete(instanceId); }
             }

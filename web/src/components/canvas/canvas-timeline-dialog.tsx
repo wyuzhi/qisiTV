@@ -10,14 +10,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 
 import { Captions, Clapperboard, FolderOpen, Library, Lock, LockOpen, Maximize2, MoreHorizontal, Music2, Plus, Scissors, Trash2, Upload, Video, Wand2, ZoomIn, ZoomOut } from "lucide-react";
 import { saveOwnedOrBrowserVideoBlob } from "@/services/desktop-media-save";
-import { captureUserScope } from "@/lib/user-scope-guard";
 
 import { CanvasTimelineRuler } from "./canvas-timeline-ruler";
 import { CanvasTimelinePreview } from "./canvas-timeline-preview";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { buildTimelineFromNodes, isNodeInTimeline, syncTimelineSubtitleClips } from "@/lib/timeline/timeline-build";
-import { canPlaceAt, clampClipDurationByNeighbors, findNearestAvailablePlacement } from "@/lib/timeline/timeline-placement";
+import { canPlaceAt, clampClipDurationByNeighbors, findNearestAvailablePlacement, planClipMove } from "@/lib/timeline/timeline-placement";
 import { computeSnap } from "@/lib/timeline/timeline-snap";
 import { DEFAULT_AUDIO_TRACK_ID, DEFAULT_VIDEO_TRACK_ID, normalizeTimelineProject } from "@/lib/timeline/timeline-tracks";
 import { formatTimelineTime, getTimelineTrackWidth, getFitTimelineZoom, zoomIn, zoomOut } from "@/lib/timeline/timeline-view";
@@ -67,7 +66,8 @@ export async function runTimelineDialogSaveAttempt(save: () => Promise<void>, cl
 type ClipDragMode = "move" | "trim-start" | "trim-end";
 
 type DragState =
-    | { mode: "move"; clipId: string; startClientX: number; originalStartMs: number }
+    // 移动基于拖动起点快照计算：同轨让位会同时改动相邻片段，用快照才能保证整次拖动结果确定、不随帧叠加漂移。
+    | { mode: "move"; clipId: string; startClientX: number; originalStartMs: number; clips: TimelineClip[] }
     | { mode: "trim-start"; clipId: string; startClientX: number; originalStartMs: number; originalDurationMs: number; originalSourceStartMs: number }
     | { mode: "trim-end"; clipId: string; startClientX: number; originalStartMs: number; originalDurationMs: number }
     | null;
@@ -206,14 +206,17 @@ export function CanvasTimelineDialog({
         updateClip(selectedClipId, patch);
     };
 
-    const moveClip = (clipId: string, candidateStartMs: number) => {
-        const clip = draft.clips.find((item) => item.id === clipId);
+    // 拖动落位：被压到的同轨片段沿拖动方向让位。首尾紧贴时前一个片段的右侧没有任何空隙，
+    // 直接按「碰撞即拒绝」处理会让它永远拖不动（首个素材拖不动的根因），因此改为让位而不是丢弃。
+    // 快照里空间不足（向左会让某段越过 0）时仍丢弃本次位移，拖动永不产生同轨重叠。
+    const moveClip = (clipId: string, candidateStartMs: number, snapshot: TimelineClip[]) => {
+        const clip = snapshot.find((item) => item.id === clipId);
         if (!clip) return;
         const snapped = snapEnabled
             ? computeSnap({
                   candidateMs: candidateStartMs,
                   playheadMs,
-                  clips: draft.clips,
+                  clips: snapshot,
                   excludeClipId: clipId,
                   pxPerMs,
                   thresholdPx: SNAP_THRESHOLD_PX,
@@ -221,15 +224,25 @@ export function CanvasTimelineDialog({
               })
             : { snappedMs: candidateStartMs, targets: [] };
         const nextStartMs = Math.max(0, Math.round(snapped.snappedMs));
-        const result = canPlaceAt({
+        const placement = planClipMove({
+            clipId,
             trackId: clip.trackId,
             startMs: nextStartMs,
             durationMs: clip.durationMs,
-            excludeClipId: clipId,
-            clips: draft.clips,
+            clips: snapshot,
         });
-        if (!result.ok) return;
-        updateClip(clipId, { startMs: nextStartMs });
+        if (!placement) return;
+        // 每帧都从快照重建整条轨道：只更新本帧涉及的片段，会把上一帧推开的片段留在它当时的位置，
+        // 连续拖动（同一手势里先拖到 1s 再拖到 8s）就会让两个片段叠在一起。
+        const snapshotStarts = new Map(snapshot.map((item) => [item.id, item.startMs]));
+        applyDraft((current) => ({
+            ...current,
+            clips: current.clips.map((item) => {
+                const baselineStartMs = snapshotStarts.get(item.id);
+                if (baselineStartMs === undefined) return item;
+                return { ...item, startMs: placement.get(item.id) ?? baselineStartMs };
+            }),
+        }));
     };
 
     // 裁剪统一基于拖动起点快照计算，避免“当前值 + 累计 delta”造成的漂移与越界。
@@ -286,7 +299,7 @@ export function CanvasTimelineDialog({
         (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
         setSelectedClipId(clipId);
         if (mode === "move") {
-            dragRef.current = { mode, clipId, startClientX: event.clientX, originalStartMs: clip.startMs };
+            dragRef.current = { mode, clipId, startClientX: event.clientX, originalStartMs: clip.startMs, clips: draft.clips };
         } else if (mode === "trim-start") {
             dragRef.current = {
                 mode,
@@ -307,7 +320,7 @@ export function CanvasTimelineDialog({
         if (!event.isPrimary) return;
         const deltaMs = Math.round((event.clientX - drag.startClientX) / Math.max(pxPerMs, 1e-6));
         if (drag.mode === "move") {
-            moveClip(drag.clipId, drag.originalStartMs + deltaMs);
+            moveClip(drag.clipId, drag.originalStartMs + deltaMs, drag.clips);
         } else if (drag.mode === "trim-start") {
             trimClipStart(drag.clipId, deltaMs, {
                 startMs: drag.originalStartMs,
@@ -560,13 +573,12 @@ export function CanvasTimelineDialog({
 
     const handleExport = async () => {
         if (exportControllerRef.current) return;
-        const expectedScope = captureUserScope();
         try {
             const blob = await runExport();
             finalizingExportRef.current = true;
             setFinalizingExport(true);
             setExportDetail("正在保存成片");
-            const saved = await saveOwnedOrBrowserVideoBlob((node.title || "成片") + ".mp4", blob, expectedScope);
+            const saved = await saveOwnedOrBrowserVideoBlob((node.title || "成片") + ".mp4", blob);
             if (saved === "saved") message.success("成片导出完成");
         } catch (error) {
             if (!(error instanceof DOMException && error.name === "AbortError")) message.error(error instanceof Error ? error.message : "导出失败");

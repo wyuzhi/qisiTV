@@ -58,6 +58,7 @@ class PublicationTests(unittest.TestCase):
         self.root = Path(self.directory.name)
         self.store = FakeS3()
         self.legacy_store = FakeS3()
+        self.cnb_store = FakeS3()
         store = self.store
         self.public_requests = []
         requests = self.public_requests
@@ -73,7 +74,10 @@ class PublicationTests(unittest.TestCase):
                 if not re.fullmatch(r"BeefTV-Desktop-Updater/v\d+\.\d+\.\d+", agent):
                     self.send_error(403)
                     return
-                origin = fixture.legacy_store if self.headers.get("X-Test-Origin") == "legacy" else store
+                origin_header = self.headers.get("X-Test-Origin")
+                origin = (fixture.legacy_store if origin_header == "legacy"
+                          else fixture.cnb_store if origin_header == "cnb"
+                          else store)
                 content = origin.objects.get(self.path.lstrip("/"))
                 if content is None:
                     self.send_error(404)
@@ -121,8 +125,11 @@ class PublicationTests(unittest.TestCase):
         def opener(request, timeout):
             url = f"http://127.0.0.1:{self.server.server_port}{urlsplit(request.full_url).path}"
             headers = dict(request.header_items())
-            if urlsplit(request.full_url).hostname == "legacy.example":
+            host = urlsplit(request.full_url).hostname
+            if host == "legacy.example":
                 headers["X-Test-Origin"] = "legacy"
+            elif host == "cnb.cool":
+                headers["X-Test-Origin"] = "cnb"
             return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout)
 
         # Cryptography belongs to the existing Go verifier. Exercise invocation
@@ -223,6 +230,62 @@ class PublicationTests(unittest.TestCase):
         path = self.root / f"{version}.json"
         path.write_text(json.dumps({"payload": base64.b64encode(json.dumps(payload).encode()).decode(), "signature": "fixture"}))
         return path
+
+    def manifest_v2(self, version="v1.5.7", with_domestic=False, from_version=None, copies=32):
+        platforms = {}
+        for platform in sorted(release.PLATFORMS):
+            name = f"BeefTV-{version}-{platform}.zip"
+            data = (version + platform).encode() * copies
+            (self.root / name).write_bytes(data)
+            r2_url = f"https://updates.beefapi.com/beeftv/{version}/{name}"
+            cnb_url = f"{release.CNB_PUBLIC_BASE}/{version}/{name}"
+            urls = [cnb_url, r2_url] if with_domestic else [r2_url]
+            entry = {"urls": urls, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+            if from_version:
+                d_name = f"BeefTV-{version}-{platform}-from-{from_version}.delta.zip"
+                d_data = (f"delta-{from_version}-{version}-{platform}").encode() * 8
+                (self.root / d_name).write_bytes(d_data)
+                d_r2_url = f"https://updates.beefapi.com/beeftv/{version}/{d_name}"
+                d_cnb_url = f"{release.CNB_PUBLIC_BASE}/{version}/{d_name}"
+                d_urls = [d_cnb_url, d_r2_url] if with_domestic else [d_r2_url]
+                entry["deltas"] = {from_version: {"urls": d_urls, "size": len(d_data), "sha256": hashlib.sha256(d_data).hexdigest()}}
+            platforms[platform] = entry
+        payload = {"schema": 2, "version": version, "commit": "a" * 40, "notes": "test release", "platforms": platforms}
+        suffix = "v2-domestic" if with_domestic else "v2-r2"
+        path = self.root / f"{version}-{suffix}.json"
+        path.write_text(json.dumps({"payload": base64.b64encode(json.dumps(payload).encode()).decode(), "signature": "fixture"}))
+        return path
+
+    def test_activate_v2_requires_active_r2_v1_feed_and_upgrades_r2_only_to_domestic_after_verification(self):
+        v1 = self.manifest("v2.1.0")
+        v2_r2 = self.manifest_v2("v2.1.0", with_domestic=False, from_version="v2.0.6")
+        v2_domestic = self.manifest_v2("v2.1.0", with_domestic=True, from_version="v2.0.6")
+        self.publisher.stage(v1, self.root, manifest_v2=v2_r2)
+        # Before R2 v1 feed is activated, v2 cannot be activated
+        with self.assertRaisesRegex(release.PublishError, "v1 feed must be active"):
+            self.publisher.activate_v2(v2_r2)
+        self.assertNotIn(release.LATEST_V2, self.store.objects)
+        # Activate R2 v1 feed, then activate R2-only v2 feed (including staged R2 delta zips)
+        self.publisher.activate(v1)
+        self.assertEqual(self.publisher.activate_v2(v2_r2), "v2.1.0")
+        self.assertEqual(self.store.objects[release.LATEST_V2], v2_r2.read_bytes())
+        # Domestic v2 manifest must fail when CNB assets (or CNB deltas) are missing, keeping R2-only v2 feed intact
+        with self.assertRaises(release.PublishError):
+            self.publisher.activate_v2(v2_domestic)
+        self.assertEqual(self.store.objects[release.LATEST_V2], v2_r2.read_bytes())
+        # Populate verified CNB full ZIPs and delta ZIPs, then upgrade v2 feed to domestic+R2
+        for platform in release.PLATFORMS:
+            for name in (f"BeefTV-v2.1.0-{platform}.zip", f"BeefTV-v2.1.0-{platform}-from-v2.0.6.delta.zip"):
+                self.cnb_store.objects[f"beeftv-downloads/desktop/-/releases/download/v2.1.0/{name}"] = (self.root / name).read_bytes()
+        self.assertEqual(self.publisher.activate_v2(v2_domestic), "v2.1.0")
+        self.assertEqual(self.store.objects[release.LATEST_V2], v2_domestic.read_bytes())
+        v2_backups = [val for key, val in self.store.objects.items() if key.startswith("beeftv/latest-v2-backups/")]
+        self.assertEqual(v2_backups, [v2_r2.read_bytes()])
+        # Idempotent re-run succeeds, but downgrading back to R2-only for the same version is rejected
+        self.assertEqual(self.publisher.activate_v2(v2_domestic), "v2.1.0")
+        with self.assertRaisesRegex(release.PublishError, "conflicting"):
+            self.publisher.activate_v2(v2_r2)
+        self.assertEqual(self.store.objects[release.LATEST_V2], v2_domestic.read_bytes())
 
     def test_installers_are_required_before_any_write_and_read_back_before_activation(self):
         manifest = self.manifest()

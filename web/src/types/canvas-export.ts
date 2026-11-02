@@ -1,11 +1,13 @@
 import type { CanvasFolder, CanvasProject } from "@/stores/canvas/use-canvas-store";
 import type { CanvasDrawingEngine } from "@/lib/canvas/canvas-drawing-engine";
+import type { MissingExportFile } from "@/lib/export-integrity";
 
 export type CanvasExportFile = {
     app: "infinite-canvas";
     version: 3 | 4;
     exportedAt: string;
     folders?: (CanvasFolder & { coverPath?: string; coverMimeType?: string })[];
+    skippedFiles?: MissingExportFile[];
     projects: CanvasProjectExportItem[];
 };
 

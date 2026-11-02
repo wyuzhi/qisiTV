@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { modelFixture } from './test-support/durable-model-switch-probe.mjs';
 
 test('official persisted idle sessions follow trusted new model; history retained; client ref ignored', { timeout: 30000 }, async () => {
@@ -39,7 +40,7 @@ test('SIGKILL recovery never switches active turn; unavailable frozen model reje
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'beeftv-model-resume-'));
   let fixture;
   try {
-    const child = spawn(process.execPath, [new URL('./test-support/durable-model-switch-probe.mjs', import.meta.url).pathname, 'crash', directory], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [fileURLToPath(new URL('./test-support/durable-model-switch-probe.mjs', import.meta.url)), 'crash', directory], { stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = ''; child.stderr.on('data', chunk => stderr += chunk);
     const exit = await new Promise(resolve => child.on('exit', (code, signal) => resolve({ code, signal })));
     assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'checkpoint.json'))).actualModel, 'astra', stderr);

@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } fr
 import { App } from "antd";
 import { nanoid } from "nanoid";
 
-import { generationBatchStatus, isGenerationSubmissionUncertainError } from "@/lib/canvas/canvas-generation-batch";
+import { generationBatchStatus } from "@/lib/canvas/canvas-generation-batch";
+import { canvasNodeFailureView } from "@/lib/canvas/canvas-node-failure-view";
 import { buildGenerationConfig, createGenerationRetryContext, generationTaskMetadata, resetGenerationTaskMetadata } from "@/lib/canvas/canvas-project-generation";
-import { shouldBlockManualRetry } from "@/lib/generation-error";
 import { listGenerationTasks } from "@/services/api/task-center";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -113,27 +113,31 @@ export function useCanvasGenerationBatches({ projectId, projectLoaded, nodes, no
                         const node = nodeById.get(item.nodeId);
                         let patch: Partial<CanvasGenerationBatchItem> | null = null;
                         if (!node) {
-                            patch = { status: "failed", errorDetails: "目标节点已不存在" };
+                            patch = { status: "failed", errorDetails: "目标节点已不存在", errorCode: undefined };
                         } else if (node.metadata?.status === "success" && node.metadata.content) {
-                            patch = { status: "succeeded", taskId: node.metadata.taskId, errorDetails: undefined, submissionUncertain: false };
+                            patch = { status: "succeeded", taskId: node.metadata.taskId, errorDetails: undefined, errorCode: undefined, submissionUncertain: false };
                         } else if (node.metadata?.status === "error") {
                             const errorDetails = node.metadata.errorDetails || "生成失败";
+                            const errorCode = node.metadata.generationErrorCode || node.metadata.taskErrorCode;
                             patch = {
                                 status: node.metadata.taskStatus === "cancelled" ? "cancelled" : "failed",
                                 taskId: node.metadata.taskId,
                                 errorDetails,
-                                submissionUncertain: isGenerationSubmissionUncertainError(new Error(errorDetails)),
+                                errorCode,
+                                submissionUncertain: canvasNodeFailureView(node).batchSubmissionUncertain,
                             };
                         } else if (node.metadata?.taskId) {
                             const taskStatus = node.metadata.taskStatus;
+                            const errorCode = taskStatus === "failed" ? node.metadata.generationErrorCode || node.metadata.taskErrorCode : undefined;
                             patch = {
                                 taskId: node.metadata.taskId,
                                 // 后端成功后还要下载并写入媒体，节点真正拿到内容才算批次成功。
                                 status: taskStatus === "queued" ? "queued" : taskStatus === "failed" ? "failed" : taskStatus === "cancelled" ? "cancelled" : "running",
-                                errorDetails: undefined,
+                                errorDetails: taskStatus === "failed" ? node.metadata.errorDetails : undefined,
+                                errorCode,
                             };
                         } else if (item.status === "submitting" && !controllersRef.current.has(batchItemKey(batch.id, item.id))) {
-                            patch = { status: "waiting", errorDetails: undefined };
+                            patch = { status: "waiting", errorDetails: undefined, errorCode: undefined };
                         }
                         if (!patch || !itemChanged(item, patch)) return item;
                         batchChanged = true;
@@ -216,7 +220,7 @@ export function useCanvasGenerationBatches({ projectId, projectLoaded, nodes, no
                 }
                 const controller = new AbortController();
                 controllersRef.current.set(key, controller);
-                updateBatch(batch.sourceNodeId, batch.id, (current) => withUpdatedItem(current, item.id, { status: "submitting", errorDetails: undefined }));
+                updateBatch(batch.sourceNodeId, batch.id, (current) => withUpdatedItem(current, item.id, { status: "submitting", errorDetails: undefined, errorCode: undefined }));
                 void handleGenerateNode(node.id, generationMode, prompt, {
                     controller,
                     waitForTaskCapacity: true,
@@ -244,7 +248,7 @@ export function useCanvasGenerationBatches({ projectId, projectLoaded, nodes, no
             const nodeById = new Map(nodesRef.current.map((node) => [node.id, node]));
             const blockedItems = failedItems.filter((item) => {
                 const node = nodeById.get(item.nodeId);
-                return item.submissionUncertain || shouldBlockManualRetry({ code: node?.metadata?.generationErrorCode || node?.metadata?.taskErrorCode, message: item.errorDetails || node?.metadata?.errorDetails }, node?.metadata?.taskStage);
+                return item.submissionUncertain || (node ? canvasNodeFailureView(node).regenerateBlocked : false);
             });
             const retryableItems = failedItems.filter((item) => !blockedItems.includes(item));
             if (blockedItems.length) message.warning(`${blockedItems.length} 个镜头需要先处理失败原因，请打开对应节点查看`);
@@ -266,7 +270,9 @@ export function useCanvasGenerationBatches({ projectId, projectLoaded, nodes, no
                             const batches = (node.metadata?.generationBatches || []).map((currentBatch) => {
                                 if (currentBatch.id !== batchId) return currentBatch;
                                 const items = currentBatch.items.map((item) =>
-                                    retryItemIds.has(item.id) ? { ...item, status: "waiting" as const, taskId: undefined, errorDetails: undefined, submissionUncertain: false, retryCount: item.retryCount + 1 } : item,
+                                    retryItemIds.has(item.id)
+                                        ? { ...item, status: "waiting" as const, taskId: undefined, errorDetails: undefined, errorCode: undefined, submissionUncertain: false, retryCount: item.retryCount + 1 }
+                                        : item,
                                 );
                                 const nextBatch = { ...currentBatch, items, updatedAt: new Date().toISOString() };
                                 return { ...nextBatch, status: generationBatchStatus(nextBatch) };
@@ -320,7 +326,7 @@ export function useCanvasGenerationBatches({ projectId, projectLoaded, nodes, no
                         : [];
                     const stoppableIds = new Set(latestStoppableItems.map((item) => item.id));
                     updateBatch(sourceNodeId, batchId, (current) => {
-                        const items = current.items.map((item) => (stoppableIds.has(item.id) ? { ...item, status: "cancelled" as const, errorDetails: undefined } : item));
+                        const items = current.items.map((item) => (stoppableIds.has(item.id) ? { ...item, status: "cancelled" as const, errorDetails: undefined, errorCode: undefined } : item));
                         const nextBatch = { ...current, items, updatedAt: new Date().toISOString() };
                         return { ...nextBatch, status: generationBatchStatus(nextBatch) };
                     });

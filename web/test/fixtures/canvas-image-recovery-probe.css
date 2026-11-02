@@ -1,0 +1,13 @@
+.image-recovery-probe { min-height: 100vh; padding: 32px; color: var(--probe-text); background: var(--probe-bg); font-family: var(--font-sans); }
+.image-recovery-probe h1 { margin: 0 0 12px; font-size: 24px; font-weight: 600; }
+.image-recovery-probe h2 { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
+.image-recovery-probe p { margin: 12px 0; color: var(--probe-muted); overflow-wrap: anywhere; }
+.probe-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 24px 0; }
+.probe-actions button { padding: 8px 14px; border: 1px solid var(--probe-border); border-radius: 8px; background: var(--probe-panel); }
+.probe-actions button:disabled { opacity: .45; }
+.probe-actions button:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.probe-comparison { display: flex; flex-wrap: wrap; gap: 28px; }
+.probe-node { width: 320px; height: 200px; max-width: 100%; overflow: hidden; border: 1px solid var(--probe-border); border-radius: var(--node-radius, 12px); background: var(--probe-panel); }
+.probe-comparison section { max-width: 100%; }
+.image-recovery-probe pre { max-width: 100%; overflow: auto; padding: 16px; background: var(--probe-panel); font-size: 12px; }
+@media (max-width: 420px) { .image-recovery-probe { padding: 20px; } }

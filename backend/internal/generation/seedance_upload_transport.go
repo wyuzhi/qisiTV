@@ -105,21 +105,3 @@ func referenceUploadAddressError(ctx context.Context, cause error) *ReferenceUpl
 	}
 	return upload
 }
-
-func inlineAfterReferencePutFailure(ctx context.Context, input *Input, read BeefAPISeedanceMediaReader, err error) error {
-	var upload *ReferenceUploadError
-	if ctx.Err() != nil || !errors.As(err, &upload) || upload.Meta.Stage != "put" ||
-		errors.Is(err, errBeefAPISeedanceUploadRedirect) ||
-		(upload.Code != "upload_transport_error" && upload.HTTPStatus != 403 && upload.HTTPStatus != 408 && upload.HTTPStatus != 429 && upload.HTTPStatus < 500) {
-		return err
-	}
-	// No model request exists yet. Reuse the gateway's existing bounded inline
-	// contract, never retry generation or send storage credentials to the gateway.
-	if fallbackErr := FallbackBeefAPISeedanceInline(ctx, input, read); fallbackErr != nil {
-		if errors.Is(fallbackErr, ErrVideoJSONRequestTooLarge) {
-			return err
-		}
-		return fallbackErr
-	}
-	return nil
-}

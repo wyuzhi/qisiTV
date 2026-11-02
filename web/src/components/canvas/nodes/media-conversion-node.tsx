@@ -22,7 +22,8 @@ import { runLocalLineartEstimation } from "@/services/lineart-runtime";
 import { runLocalPoseEstimation } from "@/services/pose-runtime";
 import { resolveImageUrl, setImageBlob, uploadImage } from "@/services/image-storage";
 import { usesBrowserLocalResourceStore } from "@/services/workspace-resource-storage";
-import { assertUserScope, captureUserScope, isUserScopeAbandonedError } from "@/lib/user-scope-guard";
+import { downloadOwnedOrBrowserMedia } from "@/services/desktop-media-save";
+import { resourceIdFromStorageKey } from "@/services/api/resources";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { LocalRuntimeClientError } from "@/services/local-runtime-session";
 import { useLocalRuntimeStore } from "@/stores/use-local-runtime-store";
@@ -66,8 +67,10 @@ export function MediaConversionNodeContent({ node, theme }: MediaConversionNodeC
         const fallback = input?.metadata?.previewContent || input?.metadata?.content || "";
         setSourceUrl(fallback);
         if (!input?.metadata?.storageKey) return () => { active = false; };
-        const resolver = input.type === CanvasNodeType.Image ? resolveImageUrl : resolveMediaUrl;
-        void resolver(input.metadata.storageKey, fallback)
+        const resolved = input.type === CanvasNodeType.Image
+            ? resolveImageUrl(input.metadata.storageKey, fallback, { cacheMiss: true })
+            : resolveMediaUrl(input.metadata.storageKey, fallback);
+        void resolved
             .then((resolved) => { if (active) setSourceUrl(resolved || fallback); })
             .catch(() => { if (active) setSourceUrl(fallback); });
         return () => { active = false; };
@@ -77,7 +80,7 @@ export function MediaConversionNodeContent({ node, theme }: MediaConversionNodeC
         let active = true;
         setResultUrl("");
         if (!state.resultStorageKey) return () => { active = false; };
-        void resolveImageUrl(state.resultStorageKey)
+        void resolveImageUrl(state.resultStorageKey, "", { cacheMiss: true })
             .then((resolved) => { if (active) setResultUrl(resolved); })
             .catch(() => { if (active) setResultUrl(""); });
         return () => { active = false; };
@@ -108,7 +111,7 @@ export function MediaConversionNodeContent({ node, theme }: MediaConversionNodeC
         if (status === "stale") setShowResult(false);
     }, [status]);
 
-    useEffect(() => () => abortRef.current?.abort(), []);
+    useEffect(() => () => abortRef.current?.abort(), [node.id, currentFingerprint, state.operation]);
 
     const updateState = (patch: Partial<MediaConversionNodeState>) => {
         if (updateNode) {
@@ -172,7 +175,6 @@ export function MediaConversionNodeContent({ node, theme }: MediaConversionNodeC
         const controller = new AbortController();
         abortRef.current = controller;
         const startedAt = new Date().toISOString();
-        const expectedScope = captureUserScope();
         updateState({ status: "processing", sourceNodeId: input.id, sourceFingerprint: currentFingerprint, outputKind: "image", errorCode: undefined, errorMessage: undefined, startedAt, updatedAt: startedAt });
         let posterObjectUrl = "";
         try {
@@ -200,7 +202,6 @@ export function MediaConversionNodeContent({ node, theme }: MediaConversionNodeC
                     ? await runLocalPoseEstimation(sourceUrl, controller.signal)
                 : await convertImageLocally(conversionSourceUrl, state.operation, { signal: controller.signal, maxDimension: 1024 });
             if (controller.signal.aborted) return;
-            assertUserScope(expectedScope);
             let storageKey: string;
             let url: string;
             try {
@@ -208,16 +209,14 @@ export function MediaConversionNodeContent({ node, theme }: MediaConversionNodeC
                     storageKey = localConversionStorageKey(node.id, currentFingerprint, state.operation);
                     url = await setImageBlob(storageKey, result.blob);
                 } else {
-                    const saved = await uploadImage(result.blob, undefined, expectedScope);
+                    const saved = await uploadImage(result.blob);
                     if (saved.pendingRemoteUpload) throw new Error(saved.remoteUploadError || "本机引擎未保存转换结果");
                     storageKey = saved.storageKey;
-                    url = await resolveImageUrl(storageKey, saved.url);
+                    url = await resolveImageUrl(storageKey, saved.url, { cacheMiss: true });
                 }
             } catch (error) {
-                if (isUserScopeAbandonedError(error)) throw error;
                 throw new LocalImageConversionError("source_unreadable", `转换结果保存失败：${error instanceof Error ? error.message : "请重试"}`);
             }
-            assertUserScope(expectedScope);
             if (controller.signal.aborted) return;
             const completedAt = new Date().toISOString();
             const detectedPeople = state.operation === "pose" && "personCount" in result && typeof result.personCount === "number" ? result.personCount : undefined;
@@ -270,7 +269,7 @@ export function MediaConversionNodeContent({ node, theme }: MediaConversionNodeC
             setResultUrl(url);
             setShowResult(true);
         } catch (error) {
-            if (controller.signal.aborted || isUserScopeAbandonedError(error)) return;
+            if (controller.signal.aborted) return;
             const aborted = error instanceof LocalImageConversionError && error.code === "aborted";
             if (aborted) return;
             if (error instanceof LocalRuntimeClientError) {
@@ -293,12 +292,19 @@ export function MediaConversionNodeContent({ node, theme }: MediaConversionNodeC
         }
     };
 
-    const downloadResult = () => {
-        if (!resultUrl) return;
-        const link = document.createElement("a");
-        link.href = resultUrl;
-        link.download = `${node.title || "转换结果"}-${state.operation}.png`;
-        link.click();
+    const downloadResult = async () => {
+        if (!resultUrl && !state.resultStorageKey) return;
+        try {
+            setNotice("");
+            await downloadOwnedOrBrowserMedia({
+                fileName: `${node.title || "转换结果"}-${state.operation}.png`,
+                resourceId: resourceIdFromStorageKey(state.resultStorageKey) || undefined,
+                storageKey: state.resultStorageKey,
+                browserUrl: resultUrl,
+            });
+        } catch (error) {
+            setNotice(error instanceof Error ? error.message : "下载转换结果失败，请重试");
+        }
     };
 
     const openVideoEditing = () => {

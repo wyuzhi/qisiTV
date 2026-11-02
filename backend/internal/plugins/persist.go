@@ -191,6 +191,20 @@ func (c *Runtime) discardBlobIfUnreferenced(name string) {
 	_ = os.Remove(filepath.Join(c.packageDir, name))
 }
 
+// build re-materializes the registry and re-applies the startup retention
+// notes. Every rebuild path (startup, install, enable/disable, uninstall) goes
+// through here: retention is derived state that is never persisted, so a rebuild
+// that skipped it would silently turn a retired protocol back into a selectable
+// one after an unrelated plugin change.
+func (c *Runtime) build(stored []RegistryRecord) (map[string]Record, *protocol.Registry, error) {
+	plugins, registry, err := materializeRecords(stored)
+	if err != nil {
+		return nil, nil, err
+	}
+	applyRetention(plugins, c.retained)
+	return plugins, registry, nil
+}
+
 func materializeRecords(stored []RegistryRecord) (map[string]Record, *protocol.Registry, error) {
 	plugins := make(map[string]Record, len(stored))
 	for _, storedRecord := range stored {

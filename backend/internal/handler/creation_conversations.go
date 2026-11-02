@@ -16,11 +16,11 @@ import (
 
 const creationConversationMaxBody = conversation.MaxDocumentBytes + (1 << 20)
 
-func RegisterCreationConversationRoutes(r *gin.RouterGroup, svc *app.Service, conversations *conversation.Service) {
+func RegisterCreationConversationRoutes(r *gin.RouterGroup, svc workspaceOwners, conversations *conversation.Service) {
 	registerCreationConversationRoutes(r, svc, conversations)
 }
 
-func registerCreationConversationRoutes(r *gin.RouterGroup, svc *app.Service, conversations *conversation.Service) {
+func registerCreationConversationRoutes(r *gin.RouterGroup, svc workspaceOwners, conversations *conversation.Service) {
 	r.GET("/creation-conversations", func(c *gin.Context) {
 		if !conversationReady(conversations) {
 			failConversation(c, conversation.ErrUnavailable())

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
@@ -73,11 +74,17 @@ func (s *Service) OpenOwnedRange(userID string, resource *model.Resource, rangeH
 	}
 	body, err := s.blobs.Open(resource.ObjectKey)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ResourceFileMissing()
+		}
 		return nil, err
 	}
 	info, err := body.Stat()
 	if err != nil {
 		_ = body.Close()
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ResourceFileMissing()
+		}
 		return nil, err
 	}
 	size := info.Size()

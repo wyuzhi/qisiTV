@@ -90,4 +90,22 @@ test('catalog mirrors available_skills, is bounded, and stays byte-stable across
   assert.equal(await section.render({}, {}), first, 'a failed refresh must not drop the section');
   assert.equal(calls, 3);
   assert.equal(cache.items.length, 2);
+
+  // An initially empty catalog stays frozen as undefined even if skills are installed later in the session,
+  // while cache.items still updates for skill_load.
+  let emptyFirst = true;
+  const emptyCache = {};
+  const emptySection = createSkillCatalogSection({
+    cache: emptyCache,
+    readCatalog: async () => {
+      if (emptyFirst) {
+        emptyFirst = false;
+        return { skills: [] };
+      }
+      return { skills: items.slice(0, 1) };
+    },
+  });
+  assert.equal(await emptySection.render({}, {}), undefined);
+  assert.equal(await emptySection.render({}, {}), undefined);
+  assert.equal(emptyCache.items.length, 1);
 });

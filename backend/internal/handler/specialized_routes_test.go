@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -28,8 +29,10 @@ type captureTaskPort struct {
 	userID string
 	render localtask.TimelineRenderCreateRequest
 	trans  localtask.TimelineTranscriptionCreateRequest
-	depth  localtask.DepthCaptureCreateRequest
-	gen    localtask.CreateRequest
+	depth          localtask.DepthCaptureCreateRequest
+	gen            localtask.CreateRequest
+	recovered      string
+	manualRecovery bool
 }
 
 func (c *captureTaskPort) TasksWithOptions(string, localtask.ListOptions) ([]localtask.Summary, error) {
@@ -58,6 +61,15 @@ func (c *captureTaskPort) CreateDepthCaptureTask(userID string, req localtask.De
 	c.userID = userID
 	c.depth = req
 	return &model.Task{ID: "depth-1", Type: model.TaskTypeDepthCapture, Status: model.TaskStatusQueued}, nil
+}
+
+func (c *captureTaskPort) RecoverTask(ctx context.Context, userID, id string) (*model.Task, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.userID = userID
+	c.recovered = id
+	c.manualRecovery = localtask.ManualRecovery(ctx)
+	return &model.Task{ID: id, UserID: userID, Status: model.TaskStatusSucceeded}, nil
 }
 
 func (c *captureTaskPort) CreateTask(userID string, req localtask.CreateRequest) (*model.Task, error) {
@@ -133,6 +145,11 @@ func TestSpecializedRoutesBindLocalExecutorRequests(t *testing.T) {
 	}
 	if capture.render.Timeline.Clips[0].DirectMedia == nil {
 		t.Fatal("render timeline was not bound")
+	}
+
+	postJSON(t, router, "/api/tasks/task-recover-1/recover", nil)
+	if capture.recovered != "task-recover-1" || capture.userID != owner.ID || !capture.manualRecovery {
+		t.Fatalf("recover bound = %s user=%s manual=%v", capture.recovered, capture.userID, capture.manualRecovery)
 	}
 }
 

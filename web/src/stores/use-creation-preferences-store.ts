@@ -6,15 +6,21 @@ import { scopedLocalStorage } from "@/lib/user-scope";
 export type CreationModePreference = "text" | "image" | "video";
 
 export type CreationImagePreferences = {
+    model?: string;
     ratio?: string;
     quality?: string;
     count?: string;
+    transparentBackground?: string;
 };
 
 export type CreationVideoPreferences = {
+    model?: string;
     ratio?: string;
     seconds?: string;
     videoQuality?: string;
+    generateAudio?: string;
+    watermark?: string;
+    draft?: string;
 };
 
 export type CreationComposerPreferences = {
@@ -50,9 +56,11 @@ function normalizeImagePreferences(value: unknown): CreationImagePreferences | u
     if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
     const raw = value as Record<string, unknown>;
     const preferences = {
+        ...(nonEmptyString(raw.model) ? { model: raw.model } : {}),
         ...(nonEmptyString(raw.ratio) ? { ratio: raw.ratio } : {}),
         ...(nonEmptyString(raw.quality) ? { quality: raw.quality } : {}),
         ...(nonEmptyString(raw.count) ? { count: raw.count } : {}),
+        ...(nonEmptyString(raw.transparentBackground) ? { transparentBackground: raw.transparentBackground } : {}),
     };
     return Object.keys(preferences).length ? preferences : undefined;
 }
@@ -61,9 +69,13 @@ function normalizeVideoPreferences(value: unknown): CreationVideoPreferences | u
     if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
     const raw = value as Record<string, unknown>;
     const preferences = {
+        ...(nonEmptyString(raw.model) ? { model: raw.model } : {}),
         ...(nonEmptyString(raw.ratio) ? { ratio: raw.ratio } : {}),
         ...(nonEmptyString(raw.seconds) ? { seconds: raw.seconds } : {}),
         ...(nonEmptyString(raw.videoQuality) ? { videoQuality: raw.videoQuality } : {}),
+        ...(nonEmptyString(raw.generateAudio) ? { generateAudio: raw.generateAudio } : {}),
+        ...(nonEmptyString(raw.watermark) ? { watermark: raw.watermark } : {}),
+        ...(nonEmptyString(raw.draft) ? { draft: raw.draft } : {}),
     };
     return Object.keys(preferences).length ? preferences : undefined;
 }

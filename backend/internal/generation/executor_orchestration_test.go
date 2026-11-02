@@ -236,3 +236,20 @@ func TestExecuteAudioHonorsCancel(t *testing.T) {
 		t.Fatalf("cancelled audio Execute error = %v hits=%d", err, hits.Load())
 	}
 }
+
+func TestExecuteAllowsEmptyPromptForVideoDraftToFinal(t *testing.T) {
+	ctx := WithRuntime(context.Background(), taskRuntime(func(runtime *Runtime) {
+		runtime.Call.TaskType = "canvas_video"
+	}))
+	_, err := Execute(ctx, Input{
+		Prompt: "",
+		Config: Config{ChannelID: "missing-channel"},
+		Metadata: map[string]any{
+			"videoEditOperation": "draft_to_final",
+			"videoDraftTaskId":   "cgt-draft-123",
+		},
+	})
+	if err == nil || strings.Contains(err.Error(), "prompt is required") {
+		t.Fatalf("expected empty prompt draft_to_final on canvas_video to pass prompt check, got %v", err)
+	}
+}

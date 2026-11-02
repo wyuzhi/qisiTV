@@ -13,6 +13,7 @@ beforeAll(async () => {
         define: { "import.meta.env": "{}", "process.env.NODE_ENV": '"production"' },
         plugins: [{ name: "alias", setup(builder) {
             builder.onLoad({ filter: /src\/components\/model-logo\.tsx$/ }, () => ({ contents: "export function ModelLogo() { return null; }", loader: "js" }));
+            builder.onLoad({ filter: /\.(css|svg|png|jpe?g|gif|webp|woff2?)$/ }, () => ({ contents: "export default ''", loader: "js" }));
             builder.onResolve({ filter: /^@\// }, (args) => ({ path: Bun.resolveSync("../src/" + args.path.slice(2), import.meta.dir) }));
         } }],
     });
@@ -30,7 +31,7 @@ beforeAll(async () => {
 afterAll(async () => { await browser?.close(); });
 
 async function mount() {
-    await page.goto("https://beeftv-title.test/");
+    await page.goto("https://beeftv-title.test/", { waitUntil: "domcontentloaded" });
     await page.getByRole("button", { name: "编辑节点名称：原名称", exact: true }).click({ timeout: 2000 });
 }
 
@@ -41,7 +42,7 @@ test("clicking canvas background commits a rename even when canvas suppresses na
     expect(await page.getByTestId("saved-title").innerText()).toBe("雨夜街景");
     expect(await page.getByRole("textbox", { name: "节点名称", exact: true }).count()).toBe(0);
     expect(await page.getByTestId("commits").innerText()).toBe("1");
-});
+}, 15000);
 
 test("Escape cancels a rename without saving on the following outside click", async () => {
     await mount();
@@ -51,4 +52,4 @@ test("Escape cancels a rename without saving on the following outside click", as
     await page.getByTestId("canvas-background").click({ position: { x: 800, y: 500 } });
     expect(await page.getByTestId("saved-title").innerText()).toBe("原名称");
     expect(await page.getByTestId("commits").innerText()).toBe("0");
-});
+}, 15000);

@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"qisitv/backend/internal/assistant"
-	"qisitv/backend/internal/beefapi"
 	"qisitv/backend/internal/protocol"
 )
 
@@ -23,7 +22,10 @@ var assistantProtocols = map[string]string{
 	"openai-response": "responses",
 }
 
-var managedAssistantModels = []string{beefapi.DefaultManagedAssistantModel, "claude-opus-5-5", "deepseek-v4.1-flash", "glm-5.3", "gemini-3.8-flash"}
+// managedAssistantModels 是 BeefAPI 托管渠道允许的助手模型。名单必须显式列出：
+// gpt-6-astra 已经不是默认值，但已选它的老用户仍要能继续使用，所以不能随手删掉
+// 旧默认值；换默认值只改 DefaultManagedAssistantModel，不动这份名单。
+var managedAssistantModels = []string{"deepseek-v4.1-flash", "gpt-6-astra", "claude-opus-5-5", "glm-5.3", "gemini-3.8-flash"}
 
 type AssistantModelProfile struct {
 	Model      string `json:"model"`

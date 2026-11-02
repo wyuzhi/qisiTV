@@ -29,7 +29,7 @@ func TestProbeLocalNativeAndFailures(t *testing.T) {
 		t.Fatalf("native fixture: %s %v", out, err)
 	}
 	facts, err := ProbeLocal(context.Background(), path)
-	if err != nil || facts.Width != 64 || facts.Height != 48 || facts.DurationMs != 400 || !facts.HasVideo {
+	if err != nil || facts.Width != 64 || facts.Height != 48 || facts.DurationMs != 400 || facts.FPS != 5 || !facts.HasVideo {
 		t.Fatalf("facts = %+v, %v", facts, err)
 	}
 	t.Setenv(FFprobePathEnv, filepath.Join(t.TempDir(), "missing-probe"))

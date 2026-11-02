@@ -50,7 +50,7 @@ func TestCanvasMediaNativeCropAndRecovery(t *testing.T) {
 	if task.Status != model.TaskStatusSucceeded {
 		t.Fatalf("crop failed: %s", task.Error)
 	}
-	id := workflowOutputResource(task.ResultJSON)
+	id := cw.OutputResource(task.ResultJSON)
 	output, err := svc.workflowResource("owner", id, "image")
 	if err != nil || output.Width != 32 || output.Height != 32 {
 		t.Fatalf("output %+v %v", output, err)
@@ -63,7 +63,7 @@ func TestCanvasMediaNativeCropAndRecovery(t *testing.T) {
 	if err = worker.processCanvasMedia(&task, context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if task.Status != model.TaskStatusSucceeded || workflowOutputResource(task.ResultJSON) != id {
+	if task.Status != model.TaskStatusSucceeded || cw.OutputResource(task.ResultJSON) != id {
 		t.Fatal("recovery did not reuse original resource")
 	}
 }

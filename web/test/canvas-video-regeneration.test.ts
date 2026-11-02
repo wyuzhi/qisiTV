@@ -102,6 +102,7 @@ describe("listVideoReferenceModels", () => {
             hasApiKey: true,
             models: ["seedance-1.0-pro"],
         };
+        config.channels[0].modelProfiles![0].videoCapabilitiesVersion = "fixture-v1";
         config.model = "beefapi::seedance-1.0-pro";
         config.videoModel = "beefapi::seedance-1.0-pro";
         expect(listVideoReferenceModels(config)).toEqual(["beefapi::seedance-1.0-pro"]);

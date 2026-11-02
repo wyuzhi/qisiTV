@@ -79,7 +79,7 @@ func TestAssistantNewIntentStopsRunningContinuationBeforeAdmission(t *testing.T)
 					})
 				})
 				row := claimBackgroundHTTPContinuation(t, env)
-				if err := env.service.VerifyAssistantContinuation(row.UserID, row.ID, row.TurnID, row.SessionID); err != nil {
+				if err := env.service.AssistantTurns().VerifyContinuation(row.UserID, row.ID, row.TurnID, row.SessionID); err != nil {
 					t.Fatal(err)
 				}
 				original.Store(row)
@@ -109,11 +109,11 @@ func TestAssistantNewIntentStopsRunningContinuationBeforeAdmission(t *testing.T)
 					if err := env.service.Database().First(&stored, "id = ?", row.ID).Error; err != nil || stored.State != "stopping" {
 						t.Fatalf("lost retryable host target: %+v %v", stored, err)
 					}
-					state, err := env.service.AssistantTurnRuntimeState(row.UserID, row.TurnID)
+					state, err := env.service.AssistantTurns().RuntimeState(row.UserID, row.TurnID)
 					if err != nil || state.Open || !state.ContinuationRevoked {
 						t.Fatalf("stopping continuation retained write authority: %+v %v", state, err)
 					}
-					listed, err := env.service.ListAssistantContinuations(row.UserID, row.CanvasID, row.SessionID)
+					listed, err := env.service.AssistantTurns().ListContinuations(row.UserID, row.CanvasID, row.SessionID)
 					if err != nil || len(listed) != 0 {
 						t.Fatalf("stopping receipt was offered to the page again: %+v %v", listed, err)
 					}
@@ -173,7 +173,7 @@ func TestAssistantSteerPreservesRunningContinuation(t *testing.T) {
 		})
 	})
 	row := claimBackgroundHTTPContinuation(t, env)
-	if err := env.service.VerifyAssistantContinuation(row.UserID, row.ID, row.TurnID, row.SessionID); err != nil {
+	if err := env.service.AssistantTurns().VerifyContinuation(row.UserID, row.ID, row.TurnID, row.SessionID); err != nil {
 		t.Fatal(err)
 	}
 	response := env.call(t, http.MethodPost, "/assistant/steer", fmt.Sprintf(`{"canvasId":%q,"sessionId":%q,"message":"字幕移到上方"}`, row.CanvasID, row.SessionID))

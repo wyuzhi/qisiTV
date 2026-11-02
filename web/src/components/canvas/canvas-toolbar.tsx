@@ -13,6 +13,7 @@ import { CanvasShortcutsPopover } from "@/components/canvas/canvas-shortcuts-pop
 import { aceternityMotion } from "@/lib/aceternity-motion";
 import { canvasDockStyle } from "@/lib/canvas/canvas-aceternity-style";
 import type { CanvasAppearance } from "@/lib/canvas/canvas-appearance";
+import type { CanvasWheelBehavior } from "@/lib/canvas/canvas-wheel";
 import { canvasThemes, type CanvasBackgroundMode, type CanvasTheme } from "@/lib/canvas-theme";
 import { defaultToolbarPrefs, readToolbarPrefs, resolveToolbarEntries, type ToolContext, type ToolbarHandlers, type ToolbarPrefs } from "@/lib/canvas/tool-registry";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
@@ -55,6 +56,8 @@ export function CanvasToolbar({
     onSnapToGridChange,
     showConnections,
     onShowConnectionsChange,
+    wheelBehavior,
+    onWheelBehaviorChange,
     onShowImageInfoChange,
     onOpenMyAssets,
     onOpenProjectCharacters,
@@ -98,6 +101,8 @@ export function CanvasToolbar({
     onSnapToGridChange: (enabled: boolean) => void;
     showConnections: boolean;
     onShowConnectionsChange: (visible: boolean) => void;
+    wheelBehavior: CanvasWheelBehavior;
+    onWheelBehaviorChange: (behavior: CanvasWheelBehavior) => void;
     onShowImageInfoChange: (show: boolean) => void;
     onOpenMyAssets: () => void;
     onOpenProjectCharacters: () => void;
@@ -321,7 +326,7 @@ export function CanvasToolbar({
             {appearanceOpen ? (
                 <div role="dialog" aria-label="画布外观" className="pointer-events-auto absolute bottom-[var(--canvas-dock-popover-offset)] w-[288px] max-w-[calc(100vw-24px)] max-h-[70vh] overflow-y-auto rounded-[18px] border p-4 shadow-xl" style={{ left: "50%", transform: "translateX(-50%)", background: theme.node.fill, borderColor: theme.toolbar.border, color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
                     <div className="text-sm font-semibold">画布外观</div>
-                    <CanvasAppearanceControls appearance={appearance} backgroundMode={backgroundMode} colorTheme={colorTheme} theme={theme} onAppearanceChange={onAppearanceChange} onSaveAppearanceDefault={onSaveAppearanceDefault} onBackgroundModeChange={onBackgroundModeChange} snapToGrid={snapToGrid} onSnapToGridChange={onSnapToGridChange} showConnections={showConnections} onShowConnectionsChange={onShowConnectionsChange} />
+                    <CanvasAppearanceControls appearance={appearance} backgroundMode={backgroundMode} colorTheme={colorTheme} theme={theme} onAppearanceChange={onAppearanceChange} onSaveAppearanceDefault={onSaveAppearanceDefault} onBackgroundModeChange={onBackgroundModeChange} snapToGrid={snapToGrid} onSnapToGridChange={onSnapToGridChange} showConnections={showConnections} onShowConnectionsChange={onShowConnectionsChange} wheelBehavior={wheelBehavior} onWheelBehaviorChange={onWheelBehaviorChange} />
                 </div>
             ) : null}
 

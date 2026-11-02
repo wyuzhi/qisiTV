@@ -14,6 +14,8 @@ Commands:
   gen-key            Generate an Ed25519 updater keypair into explicit files
   public-key         Print the base64 public key derived from a private key
   package            Zip a built desktop bundle with a safe updater layout
+  build-delta        Build a self-verified incremental .delta.zip from two release zips
+  verify-delta       Verify a .delta.zip archive structure and internal digests
   sign               Write a signed desktop-update.json envelope
   verify             Verify a signed envelope against a public key
   changelog          Extract ## VERSION notes from CHANGELOG.md
@@ -46,6 +48,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return cmdPublicKey(args[1:], stdout, stderr)
 	case "package":
 		return cmdPackage(args[1:], stdout, stderr)
+	case "build-delta":
+		return cmdBuildDelta(args[1:], stdout, stderr)
+	case "verify-delta":
+		return cmdVerifyDelta(args[1:], stdout, stderr)
 	case "sign":
 		return cmdSign(args[1:], stdout, stderr)
 	case "verify":

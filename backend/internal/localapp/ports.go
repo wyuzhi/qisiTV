@@ -5,6 +5,7 @@ import (
 	"mime/multipart"
 
 	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/modelcatalog"
 	localproject "qisitv/backend/internal/project"
 	localtask "qisitv/backend/internal/task"
 )
@@ -30,6 +31,7 @@ type TaskPort interface {
 	CreateTimelineRenderTask(string, localtask.TimelineRenderCreateRequest) (*model.Task, error)
 	CreateTimelineTranscriptionTask(string, localtask.TimelineTranscriptionCreateRequest) (*model.Task, error)
 	CreateDepthCaptureTask(string, localtask.DepthCaptureCreateRequest) (*model.Task, error)
+	RecoverTask(context.Context, string, string) (*model.Task, error)
 }
 
 type GenerationPort interface {
@@ -39,6 +41,10 @@ type GenerationPort interface {
 type ProviderConfigPort interface {
 	ReadLocalModelConfig() ([]byte, error)
 	SaveLocalModelConfig([]byte) error
+}
+
+type ModelCapabilityPort interface {
+	NormalizeModelCapabilityDraft(modelcatalog.ModelCapabilityDraft) (*modelcatalog.ModelCapabilityConfig, error)
 }
 
 type Lifecycle interface {

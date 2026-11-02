@@ -57,4 +57,7 @@ func TestVideoContractBoundaries(t *testing.T) {
 	if _, _, ok := HostedBeefAPIVideoProfile("https://enterprise.beefapi.com", "gpt-image-2"); ok {
 		t.Fatal("hosted image SKU must not be rewritten as video")
 	}
+	if got := InferModelCapability("MiniMax-H3"); got != "video" {
+		t.Fatalf("InferModelCapability(MiniMax-H3) = %q, want video", got)
+	}
 }

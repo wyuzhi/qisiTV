@@ -70,11 +70,16 @@ func (s *uiSessionStore) verify(token, userID string) (uiSession, bool) {
 	return item, true
 }
 
+type agentUISessionService interface {
+	workspaceOwners
+	ownerCredentialDirs
+}
+
 // resolveAgentCapability 统一判定内置助手入口的能力：
 // 1) 已登记外部客户端 → 服务端登记的只读/读写模式；
 // 2) 内置 UI 会话凭据 → 读写（绑定签发时的用户）；
 // 其他一律未认证。
-func resolveAgentCapability(c *gin.Context, svc *app.Service, clients *agentops.ClientRegistry, ui *uiSessionStore, userID string) (readOnly bool, identity string, ok bool, reason string) {
+func resolveAgentCapability(c *gin.Context, svc ownerCredentialDirs, clients *agentops.ClientRegistry, ui *uiSessionStore, userID string) (readOnly bool, identity string, ok bool, reason string) {
 	if strings.TrimSpace(c.GetHeader("X-Beeftv-Client")) != "" {
 		readOnly, label, err := resolveClientMode(c, svc, clients)
 		if err != nil {
@@ -89,7 +94,7 @@ func resolveAgentCapability(c *gin.Context, svc *app.Service, clients *agentops.
 }
 
 // RegisterAgentUISessionRoutes 只在本机同源且能出示 owner 凭据（或显式开发引导）时签发 UI 会话。
-func RegisterAgentUISessionRoutes(r gin.IRouter, svc *app.Service, ui *uiSessionStore, desktopTrust func(*http.Request) bool) {
+func RegisterAgentUISessionRoutes(r gin.IRouter, svc agentUISessionService, ui *uiSessionStore, desktopTrust func(*http.Request) bool) {
 	r.POST("/assistant/ui-session", func(c *gin.Context) {
 		if strings.TrimSpace(c.GetHeader("X-Beeftv-Client")) != "" {
 			fail(c, http.StatusForbidden, app.BadAuthRequest("外部客户端不能签发界面会话"))

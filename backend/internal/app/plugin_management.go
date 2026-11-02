@@ -52,10 +52,6 @@ func (s *Service) PluginsForUser(actor *model.User) ([]PluginView, error) {
 	return s.pluginDomain().ForUser(actor, visible), nil
 }
 
-func (s *Service) PluginStatesForUser(actor *model.User) (map[string]PluginStateView, error) {
-	return s.pluginDomain().StatesForUser(actor)
-}
-
 func (s *Service) SetUserPluginEnabled(actor *model.User, pluginID string, enabled bool) (PluginStateView, error) {
 	state, err := s.pluginDomain().SetUserEnabled(actor, pluginID, enabled)
 	return state, mapPluginAccessError(err)

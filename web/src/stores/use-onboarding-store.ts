@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { scopedLocalStorage, subscribeUserScope } from "@/lib/user-scope";
+import { scopedLocalStorage, onStorageNamespaceChange } from "@/lib/user-scope";
 
 export const onboardingSteps = ["official", "project", "node", "generate", "assets", "return"] as const;
 export type OnboardingStep = typeof onboardingSteps[number];
@@ -52,4 +52,5 @@ export const useOnboardingStore = create<Store>((set, get) => {
         restart: () => save({ ...initial, status: "active", projectId: undefined, nodeId: undefined, assetId: undefined, visitedLibrary: false, startedAt: new Date().toISOString() }),
     };
 });
-subscribeUserScope(() => useOnboardingStore.setState(read()));
+// 第一次启动时命名空间从 guest 切到工作区 ID，引导进度要按新命名空间重读。
+onStorageNamespaceChange(() => useOnboardingStore.setState(read()));

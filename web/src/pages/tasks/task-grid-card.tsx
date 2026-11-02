@@ -5,14 +5,15 @@ import { Eye, FileText, Image as ImageIcon, RotateCcw, Video } from "lucide-reac
 
 import { MediaPreview } from "@/components/media-preview";
 import { statusLabel } from "@/lib/generation-task-display";
+import { isTaskRegenerateBlocked } from "@/lib/task-outcome";
 import type { GenerationTask } from "@/services/api/task-center";
-import { isTaskFailed, statusDotClassName, taskAttentionReason, TaskDate, taskRetryBlocked } from "./task-shared";
+import { isTaskFailed, statusDotClassName, taskAttentionReason, TaskDate } from "./task-shared";
 import { TaskVideoThumbnail } from "./task-video-thumbnail";
 
 export function TaskGridCard({ task, actingId, onOpen, onRetry }: { task: GenerationTask; actingId: string; onOpen: () => void; onRetry: () => void }) {
     const isActive = task.status === "queued" || task.status === "running";
     const isFailed = isTaskFailed(task);
-    const retryDisabled = taskRetryBlocked(task);
+    const retryDisabled = isTaskRegenerateBlocked(task);
     const isVideo = task.previewKind === "video";
     const thumbnailUrl = isVideo ? task.previewPosterUrl : task.previewUrl;
     const fallbackVideo = task.type.includes("video");

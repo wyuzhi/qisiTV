@@ -36,6 +36,10 @@ func (fakePorts) CreateDepthCaptureTask(string, localtask.DepthCaptureCreateRequ
 	return nil, nil
 }
 
+func (fakePorts) RecoverTask(context.Context, string, string) (*model.Task, error) {
+	return nil, nil
+}
+
 func (fakePorts) CreateTask(string, localtask.CreateRequest) (*model.Task, error) { return nil, nil }
 func (fakePorts) ReadLocalModelConfig() ([]byte, error)                           { return nil, nil }
 func (fakePorts) SaveLocalModelConfig([]byte) error                               { return nil }

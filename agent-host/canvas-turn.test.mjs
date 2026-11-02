@@ -40,9 +40,9 @@ describe("本轮画布变更", () => {
         collectTurnEffects(turn, "canvas.script.row.update", { canvasId: "c1", revision: 5, nodeId: "script",
             createdEdgeIds: ["edge-img", "edge-vid"], deletedEdgeIds: ["edge-old"] }, "bind-op");
         collectTurnEffects(turn, "canvas.script.row.update", { canvasId: "c1", revision: 6, nodeId: "script",
-            createdEdgeIds: [], deletedEdgeIds: ["edge-vid"] }, "unbind-op");
+            createdEdgeIds: [], deletedEdgeIds: ["edge-vid"], syncedNodeIds: ["img-1"] }, "unbind-op");
         expect(turnChange(turn)).toEqual({ revisionBefore: 3, revisionAfter: 6,
-            createdNodeIds: [], updatedNodeIds: ["script"], createdEdgeIds: ["edge-img", "edge-vid"],
+            createdNodeIds: [], updatedNodeIds: ["script", "img-1"], createdEdgeIds: ["edge-img", "edge-vid"],
             deletedEdgeIds: ["edge-old", "edge-vid"], operationIds: ["append-op", "bind-op", "unbind-op"] });
     });
 

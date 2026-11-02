@@ -9,7 +9,8 @@ import { archiveFileExtension, assertUniqueArchiveNames, ExportIntegrityError, t
 import { startOperation } from "@/stores/use-operation-progress";
 import { usesBrowserLocalResourceStore } from "@/services/workspace-resource-storage";
 import { resourceFileUrl, resourceStorageKey, uploadResourceFile } from "@/services/api/resources";
-import { assertUserScope, captureUserScope } from "@/lib/user-scope-guard";
+import { isEngineWebsite } from "@/services/browser-workspace";
+import { captureEngineSessionGuard } from "@/services/engine-session";
 
 type AssetExportFile = {
     app: "infinite-canvas";
@@ -81,7 +82,8 @@ export async function exportAssets(assets: Asset[]): Promise<OwnedMediaSaveResul
 }
 
 export async function readAssetPackage(file: File, onProgress?: (completed: number, total: number) => void) {
-    const expectedScope = captureUserScope();
+    const assertImportSession = isEngineWebsite() ? captureEngineSessionGuard() : () => {};
+    assertImportSession();
     const canonical = !usesBrowserLocalResourceStore();
     const zip = await readZip(file);
     const assetFile = zip.get("assets.json");
@@ -97,13 +99,14 @@ export async function readAssetPackage(file: File, onProgress?: (completed: numb
             const blob = zip.get(item.path);
             if (!blob) return;
             const typedBlob = blob.type ? blob : blob.slice(0, blob.size, item.mimeType);
-            assertUserScope(expectedScope);
+            assertImportSession();
             if (canonical) {
                 const asset = data.assets.find((entry) => "storageKey" in entry.data && entry.data.storageKey === item.storageKey);
                 const kind = asset?.kind === "image" || asset?.kind === "video" || asset?.kind === "audio" ? asset.kind : "file";
                 const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await typedBlob.arrayBuffer())), (byte) => byte.toString(16).padStart(2, "0")).join("");
-                const resource = await uploadResourceFile(typedBlob, kind, { fileName: item.path.split("/").pop(), idempotencyKey: `asset-archive:${kind}:sha256:${digest}`, expectedScope: expectedScope });
-                assertUserScope(expectedScope);
+                assertImportSession();
+                const resource = await uploadResourceFile(typedBlob, kind, { fileName: item.path.split("/").pop(), idempotencyKey: `asset-archive:${kind}:sha256:${digest}` });
+                assertImportSession();
                 restoredMedia.set(item.storageKey, { storageKey: resourceStorageKey(resource.id), url: resource.publicUrl || resourceFileUrl(resource.id) });
             } else {
                 await (item.storageKey.startsWith("image:") ? setImageBlob(item.storageKey, typedBlob) : setMediaBlob(item.storageKey, typedBlob));
@@ -111,7 +114,7 @@ export async function readAssetPackage(file: File, onProgress?: (completed: numb
             onProgress?.(++completed, data.files.length);
         }),
     );
-    assertUserScope(expectedScope);
+    assertImportSession();
     if (!canonical) return data.assets;
     return data.assets.map((asset) => {
         if (!("storageKey" in asset.data)) return asset;

@@ -14,17 +14,20 @@ test("only affected routes and reference-video requests require informed consent
 });
 
 test("mode-specific controls keep free ratio in reference mode and unlock on model change", () => {
-    expect(seedanceSettingsConstraints("seedance-2.5",1,0,0).ratioLabel).toBe("随首帧");
-    expect(seedanceSettingsConstraints("seedance-2.5",1,1,1,"reference_to_video").ratioLabel).toBeUndefined();
-    expect(seedanceSettingsConstraints("seedance-2.5",1,0,0,"reference_to_video").ratioLabel).toBeUndefined();
-    expect(seedanceSettingsConstraints("seedance-2.0",1,0,0).ratioLabel).toBeUndefined();
-    expect(seedanceSettingsConstraints("seedance-2.5",0,1,0,"inpaint")).toEqual({ratioLabel:"随原视频",durationLocked:true});
+    const constrained = { taskTypeConstraints: true };
+    const unconstrained = { taskTypeConstraints: false };
+    expect(seedanceSettingsConstraints(constrained, 1, 0, 0).ratioLabel).toBe("随首帧");
+    expect(seedanceSettingsConstraints(constrained, 1, 1, 1, "reference_to_video").ratioLabel).toBeUndefined();
+    expect(seedanceSettingsConstraints(constrained, 1, 0, 0, "reference_to_video").ratioLabel).toBeUndefined();
+    expect(seedanceSettingsConstraints(unconstrained, 1, 0, 0).ratioLabel).toBeUndefined();
+    expect(seedanceSettingsConstraints(constrained, 0, 1, 0, "inpaint")).toEqual({ ratioLabel: "随原视频", durationLocked: true });
 });
 
 test("specific frame errors survive task-log serialization", () => {
-    for (const code of ["video_first_frame_ratio_unreadable", "video_first_frame_ratio_unsupported", "video_first_frame_ratio_mismatch"]) {
-        const first=explainGenerationError({error:{code:"invalid_request",message:code}});
+    for (const reason of ["无法读取首帧图片尺寸", "首帧图片比例超出当前模型支持范围", "首帧图片比例与当前设置不一致"]) {
+        const first = explainGenerationError({ code: "invalid_params", message: `${reason}。请更换首帧图片或调整画面比例后重试。` });
         expect(first.category).toBe("invalid_params");
+        expect(first.reason).toBe(reason);
         expect(first.message).not.toContain("检查模型、尺寸");
     }
 });

@@ -73,7 +73,7 @@ func TestDeleteProjectUnlinksCanvasAndKeepsIndependentRecords(t *testing.T) {
 		}
 	}
 
-	if err := service.DeleteProject("user-1", project.ID); err != nil {
+	if err := service.ProjectService().DeleteProject("user-1", project.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -150,7 +150,7 @@ func TestDeleteUserCanvasProjectPreservesHistoricalTaskScope(t *testing.T) {
 		}
 	}
 
-	if err := service.DeleteUserCanvasProject("user-1", canvas.ID); err != nil {
+	if err := service.CanvasService().DeleteUserCanvasProject("user-1", canvas.ID); err != nil {
 		t.Fatal(err)
 	}
 	var storedCanvas model.CanvasProject
@@ -184,7 +184,7 @@ func TestDeleteProjectRejectsActiveProjectOrCanvasTasks(t *testing.T) {
 		}
 	}
 
-	err := service.DeleteProject("user-1", project.ID)
+	err := service.ProjectService().DeleteProject("user-1", project.ID)
 	if err == nil || err.Error() != "项目仍有进行中的生成任务，请等待任务完成或取消后再删除" {
 		t.Fatalf("DeleteProject() error = %v", err)
 	}
@@ -239,7 +239,7 @@ func TestDeleteProjectRejectsCanvasPayloadThatCannotBeUpdated(t *testing.T) {
 		}
 	}
 
-	if err := service.DeleteProject("user-1", project.ID); err == nil {
+	if err := service.ProjectService().DeleteProject("user-1", project.ID); err == nil {
 		t.Fatal("DeleteProject() error = nil for malformed canvas payload")
 	}
 	var storedProject model.Project

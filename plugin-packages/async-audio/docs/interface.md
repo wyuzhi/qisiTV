@@ -83,10 +83,10 @@
 
 ```json
 {
-  "apiVersion": "qisitv.plugin/v2",
+  "apiVersion": "qisitv.plugin/v3",
   "id": "async-audio",
   "name": "Async Audio Tasks",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "author": "BeefTV Contributors",
   "description": "Async Audio Tasks 独立请求协议插件。",
   "documentation": "<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>",
@@ -160,26 +160,79 @@
               "$ref": "request.prompt"
             },
             "voice": {
-              "$coalesce": [
-                {
-                  "$ref": "request.extra.audioVoice"
-                },
-                {
-                  "$ref": "request.providerOptions.async-audio.voice"
-                },
-                "alloy"
-              ]
+              "$omitEmpty": {
+                "$if": {
+                  "condition": {
+                    "$ref": "vars.music"
+                  },
+                  "then": null,
+                  "else": {
+                    "$if": {
+                      "condition": {
+                        "$and": [
+                          {
+                            "$ref": "vars.speech"
+                          },
+                          {
+                            "$in": [
+                              {
+                                "$lower": {
+                                  "$ref": "vars.voice"
+                                }
+                              },
+                              [
+                                "",
+                                "中文",
+                                "alloy",
+                                "ash",
+                                "ballad",
+                                "coral",
+                                "echo",
+                                "fable",
+                                "nova",
+                                "onyx",
+                                "sage",
+                                "shimmer",
+                                "verse",
+                                "marin",
+                                "cedar"
+                              ]
+                            ]
+                          }
+                        ]
+                      },
+                      "then": "male-qn-qingse",
+                      "else": {
+                        "$coalesce": [
+                          {
+                            "$ref": "vars.voice"
+                          },
+                          "alloy"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
             },
             "response_format": {
-              "$coalesce": [
-                {
-                  "$ref": "request.extra.audioFormat"
+              "$if": {
+                "condition": {
+                  "$ref": "vars.music"
                 },
-                {
-                  "$ref": "request.providerOptions.async-audio.response_format"
-                },
-                "mp3"
-              ]
+                "then": "mp3",
+                "else": {
+                  "$coalesce": [
+                    {
+                      "$ref": "request.extra.audioFormat"
+                    },
+                    {
+                      "$ref": "request.providerOptions.async-audio.response_format"
+                    },
+                    "mp3"
+                  ]
+                }
+              }
             },
             "speed": {
               "$coalesce": [
@@ -220,6 +273,25 @@
                   }
                 ]
               }
+            },
+            "metadata": {
+              "$omitEmpty": {
+                "$if": {
+                  "condition": {
+                    "$ref": "vars.music"
+                  },
+                  "then": {
+                    "audio_setting": {
+                      "sample_rate": 44100,
+                      "bitrate": 256000,
+                      "format": "mp3"
+                    }
+                  },
+                  "else": {
+                    "$ref": "request.extra.audioMetadata"
+                  }
+                }
+              }
             }
           }
         },
@@ -244,7 +316,19 @@
                 "$ref": "response.task_id"
               },
               {
+                "$ref": "response.request_id"
+              },
+              {
                 "$ref": "response.data.id"
+              },
+              {
+                "$ref": "response.data.task_id"
+              },
+              {
+                "$ref": "response.result.id"
+              },
+              {
+                "$ref": "response.output.id"
               },
               {
                 "$ref": "taskId"
@@ -252,15 +336,37 @@
             ]
           },
           "status": {
-            "$coalesce": [
-              {
-                "$ref": "response.status"
+            "$if": {
+              "condition": {
+                "$coalesce": [
+                  {
+                    "$ref": "response.done"
+                  },
+                  {
+                    "$ref": "response.data.done"
+                  },
+                  false
+                ]
               },
-              {
-                "$ref": "response.data.status"
-              },
-              "pending"
-            ]
+              "then": "succeeded",
+              "else": {
+                "$coalesce": [
+                  {
+                    "$ref": "response.status"
+                  },
+                  {
+                    "$ref": "response.data.status"
+                  },
+                  {
+                    "$ref": "response.result.status"
+                  },
+                  {
+                    "$ref": "response.output.status"
+                  },
+                  "pending"
+                ]
+              }
+            }
           },
           "message": {
             "$coalesce": [
@@ -287,13 +393,139 @@
                 "$ref": "response.result_url"
               },
               {
+                "$ref": "response.resultUrl"
+              },
+              {
+                "$ref": "response.output_url"
+              },
+              {
+                "$ref": "response.outputUrl"
+              },
+              {
                 "$ref": "response.url"
+              },
+              {
+                "$ref": "response.data"
               },
               {
                 "$ref": "response.data.audio_url"
               },
               {
+                "$ref": "response.data.audioUrl"
+              },
+              {
+                "$ref": "response.data.result_url"
+              },
+              {
+                "$ref": "response.data.resultUrl"
+              },
+              {
+                "$ref": "response.data.output_url"
+              },
+              {
+                "$ref": "response.data.outputUrl"
+              },
+              {
+                "$ref": "response.data.url"
+              },
+              {
+                "$ref": "response.data.data"
+              },
+              {
+                "$ref": "response.result.audio_url"
+              },
+              {
+                "$ref": "response.result.audioUrl"
+              },
+              {
+                "$ref": "response.result.result_url"
+              },
+              {
+                "$ref": "response.result.resultUrl"
+              },
+              {
+                "$ref": "response.result.output_url"
+              },
+              {
+                "$ref": "response.result.outputUrl"
+              },
+              {
+                "$ref": "response.result.url"
+              },
+              {
+                "$ref": "response.result.data"
+              },
+              {
+                "$ref": "response.output.audio_url"
+              },
+              {
+                "$ref": "response.output.audioUrl"
+              },
+              {
+                "$ref": "response.output.result_url"
+              },
+              {
+                "$ref": "response.output.resultUrl"
+              },
+              {
+                "$ref": "response.output.output_url"
+              },
+              {
+                "$ref": "response.output.outputUrl"
+              },
+              {
                 "$ref": "response.output.url"
+              },
+              {
+                "$ref": "response.output.data"
+              },
+              {
+                "$ref": "response.audio.audio_url"
+              },
+              {
+                "$ref": "response.audio.audioUrl"
+              },
+              {
+                "$ref": "response.audio.result_url"
+              },
+              {
+                "$ref": "response.audio.resultUrl"
+              },
+              {
+                "$ref": "response.audio.output_url"
+              },
+              {
+                "$ref": "response.audio.outputUrl"
+              },
+              {
+                "$ref": "response.audio.url"
+              },
+              {
+                "$ref": "response.audio.data"
+              },
+              {
+                "$ref": "response.data.audio.audio_url"
+              },
+              {
+                "$ref": "response.data.audio.audioUrl"
+              },
+              {
+                "$ref": "response.data.audio.result_url"
+              },
+              {
+                "$ref": "response.data.audio.resultUrl"
+              },
+              {
+                "$ref": "response.data.audio.output_url"
+              },
+              {
+                "$ref": "response.data.audio.outputUrl"
+              },
+              {
+                "$ref": "response.data.audio.url"
+              },
+              {
+                "$ref": "response.data.audio.data"
               }
             ]
           },
@@ -304,7 +536,76 @@
           "messagePaths": [
             "error.message"
           ]
-        }
+        },
+        "variables": [
+          {
+            "name": "model",
+            "value": {
+              "$lower": {
+                "$last": {
+                  "$split": [
+                    {
+                      "$ref": "request.model"
+                    },
+                    "::"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "name": "music",
+            "value": {
+              "$gt": [
+                {
+                  "$len": {
+                    "$split": [
+                      {
+                        "$ref": "vars.model"
+                      },
+                      "minimax-music-"
+                    ]
+                  }
+                },
+                1
+              ]
+            }
+          },
+          {
+            "name": "speech",
+            "value": {
+              "$gt": [
+                {
+                  "$len": {
+                    "$split": [
+                      {
+                        "$ref": "vars.model"
+                      },
+                      "minimax-speech"
+                    ]
+                  }
+                },
+                1
+              ]
+            }
+          },
+          {
+            "name": "voice",
+            "value": {
+              "$trim": {
+                "$coalesce": [
+                  {
+                    "$ref": "request.extra.audioVoice"
+                  },
+                  {
+                    "$ref": "request.providerOptions.async-audio.voice"
+                  },
+                  ""
+                ]
+              }
+            }
+          }
+        ]
       }
     ]
   }

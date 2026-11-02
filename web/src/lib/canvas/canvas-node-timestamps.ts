@@ -18,6 +18,17 @@ const HYDRATED_MEDIA_KEYS = new Set<keyof CanvasNodeMetadata>([
     "drawingPreviewUrl",
 ]);
 
+// Failure records and locally derived outcomes are recomputed on every device
+// that opens the canvas. Stamping them would give the same node different
+// updatedAt values per device and make concurrent opens look like a conflict.
+const DERIVED_FAILURE_KEYS = new Set<keyof CanvasNodeMetadata>(["generationFailure", "taskOutcomeSource"]);
+
+function derivedOutcomeFill(previous: CanvasNodeMetadata, next: CanvasNodeMetadata) {
+    if (next.taskOutcomeSource === "local") return true;
+    // Backfilling a stable old node's missing outcome from its original task.
+    return !previous.taskOutcome && Boolean(next.taskId) && previous.taskId === next.taskId;
+}
+
 const MEDIA_NODE_TYPES = new Set<string>([CanvasNodeType.Image, CanvasNodeType.Video, CanvasNodeType.Audio, CanvasNodeType.Drawing]);
 
 export function canvasNodeCreatedAt(node: CanvasNodeData, fallback?: string) {
@@ -117,6 +128,8 @@ function canvasNodeMeaningfullyChanged(previous: CanvasNodeData, next: CanvasNod
     const keys = new Set([...Object.keys(previousMetadata), ...Object.keys(nextMetadata)] as Array<keyof CanvasNodeMetadata>);
     for (const key of keys) {
         if (MEDIA_NODE_TYPES.has(next.type) && HYDRATED_MEDIA_KEYS.has(key)) continue;
+        if (DERIVED_FAILURE_KEYS.has(key)) continue;
+        if (key === "taskOutcome" && derivedOutcomeFill(previousMetadata, nextMetadata)) continue;
         if (!serializableValuesEqual(previousMetadata[key], nextMetadata[key])) return true;
     }
     return false;

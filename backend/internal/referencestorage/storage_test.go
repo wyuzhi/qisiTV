@@ -130,3 +130,106 @@ func TestConfigAllowsLocalHTTPWhenPrivateUpstreamsEnabled(t *testing.T) {
 		t.Fatal("strict mode accepted allowlisted loopback HTTP")
 	}
 }
+
+func TestObjectEndpointURLHandlesVirtualHostedAndPathStyleProviders(t *testing.T) {
+	cases := []struct {
+		name     string
+		endpoint string
+		bucket   string
+		want     string
+	}{
+		{
+			name:     "standard path style S3/R2",
+			endpoint: "https://s3.example.com",
+			bucket:   "fixture",
+			want:     "https://s3.example.com/fixture/beeftv/references/abc",
+		},
+		{
+			name:     "tencent cos service endpoint promotes to virtual-hosted bucket domain",
+			endpoint: "https://cos.ap-guangzhou.myqcloud.com",
+			bucket:   "media-1250000000",
+			want:     "https://media-1250000000.cos.ap-guangzhou.myqcloud.com/beeftv/references/abc",
+		},
+		{
+			name:     "tencent cos bucket domain avoids duplicate bucket path segment",
+			endpoint: "https://media-1250000000.cos.ap-guangzhou.myqcloud.com",
+			bucket:   "media-1250000000",
+			want:     "https://media-1250000000.cos.ap-guangzhou.myqcloud.com/beeftv/references/abc",
+		},
+		{
+			name:     "alibaba oss service endpoint promotes to virtual-hosted bucket domain",
+			endpoint: "https://oss-cn-hangzhou.aliyuncs.com",
+			bucket:   "beeftv-media",
+			want:     "https://beeftv-media.oss-cn-hangzhou.aliyuncs.com/beeftv/references/abc",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := objectEndpointURL(Config{Endpoint: tc.endpoint, Bucket: tc.bucket}, "beeftv/references/abc")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSaveRecoversFromUndecryptableConfigWhenDisabledOrSecretProvided(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Save(dir, Config{
+		Enabled:         true,
+		Endpoint:        "https://1.1.1.1",
+		Bucket:          "fixture",
+		Region:          "auto",
+		AccessKeyID:     "access-1",
+		SecretAccessKey: "secret-1",
+		PublicBaseURL:   "https://1.1.1.1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a .settings-key reset or corrupted ciphertext.
+	if err := os.Remove(filepath.Join(dir, ".settings-key")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(dir); err == nil {
+		t.Fatal("expected Load to fail after key removal")
+	}
+	if _, err := Save(dir, Config{
+		Enabled:       true,
+		Endpoint:      "https://1.1.1.1",
+		Bucket:        "fixture",
+		Region:        "auto",
+		AccessKeyID:   "access-1",
+		PublicBaseURL: "https://1.1.1.1",
+	}); err == nil || !strings.Contains(err.Error(), "重新填写 Secret Key") {
+		t.Fatalf("expected actionable secret key error, got: %v", err)
+	}
+	if _, err := Save(dir, Config{Enabled: false}); err != nil {
+		t.Fatalf("expected disabling storage to recover unreadable config, got: %v", err)
+	}
+	restored, err := Load(dir)
+	if err != nil || restored.Enabled {
+		t.Fatalf("expected readable disabled config after recovery, got %+v, err=%v", restored, err)
+	}
+	// Simulate another key reset and recover by supplying a new SecretAccessKey while Enabled.
+	if err := os.Remove(filepath.Join(dir, ".settings-key")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Save(dir, Config{
+		Enabled:         true,
+		Endpoint:        "https://1.1.1.1",
+		Bucket:          "fixture",
+		Region:          "auto",
+		AccessKeyID:     "access-2",
+		SecretAccessKey: "secret-2",
+		PublicBaseURL:   "https://1.1.1.1",
+	}); err != nil {
+		t.Fatalf("expected saving new secret to recover unreadable config, got: %v", err)
+	}
+	restored, err = Load(dir)
+	if err != nil || !restored.Enabled || restored.SecretAccessKey != "secret-2" {
+		t.Fatalf("expected readable enabled config with new secret, got %+v, err=%v", restored, err)
+	}
+}

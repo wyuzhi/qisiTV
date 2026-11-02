@@ -7,33 +7,24 @@ import (
 	"strings"
 
 	"qisitv/backend/internal/canvas/capability"
+	"qisitv/backend/internal/providerpreset"
 )
 
 func registerCanvasNodeConfigureOps(r *Registry) {
-	properties := map[string]any{}
-	for _, kind := range []string{"image", "video", "audio"} {
-		descriptor, _ := capability.BuiltinRegistry().Resolve(kind)
-		for name, field := range descriptor.PatchFields {
-			if name == "title" || name == "content" {
-				continue
-			}
-			if previous, exists := properties[name]; exists {
-				previous.(map[string]any)["description"] = previous.(map[string]any)["description"].(string) + "、" + kind
-				continue
-			}
-			properties[name] = map[string]any{"type": field.Kind, "description": field.Description + "；适用 " + kind}
-		}
-	}
-	properties["count"] = map[string]any{"type": "integer", "minimum": 1, "maximum": 8, "description": "仅 image"}
-	for _, name := range []string{"transparentBackground", "generateAudio", "watermark"} {
-		properties[name].(map[string]any)["enum"] = []string{"true", "false"}
+	properties := map[string]any{
+		"model":         map[string]any{"type": "string"},
+		"prompt":        map[string]any{"type": "string"},
+		"size":          map[string]any{"type": "string"},
+		"seconds":       map[string]any{"type": "string"},
+		"generateAudio": map[string]any{"type": "string", "enum": []string{"true", "false"}},
+		"audioVoice":    map[string]any{"type": "string"},
 	}
 	params, _ := json.Marshal(map[string]any{"type": "object", "additionalProperties": false,
 		"properties": map[string]any{"canvasId": map[string]any{"type": "string"}, "nodeId": map[string]any{"type": "string"},
 			"kind": map[string]any{"type": "string", "enum": []string{"image", "video", "audio"}}, "expectedRevision": map[string]any{"type": "integer", "minimum": 1},
-			"patch": map[string]any{"type": "object", "additionalProperties": false, "minProperties": 1, "properties": properties}},
+			"patch": map[string]any{"type": "object", "minProperties": 1, "properties": properties}},
 		"required": []string{"canvasId", "nodeId", "kind", "expectedRevision", "patch"}})
-	r.Register(Op{ReplaySafe: true, AssistantCanvas: true, ID: "canvas.node.configure", Summary: "设置已有媒体节点的生成草稿参数；不生成、不扣费，不改任务或现有成品", Scope: ScopeCanvas, Params: params, Handler: opCanvasNodeConfigure})
+	r.Register(Op{ReplaySafe: true, AssistantCanvas: true, ID: "canvas.node.configure", Summary: "设置媒体节点的提示词草稿与生成参数；不启动生成", Scope: ScopeCanvas, Params: params, Handler: opCanvasNodeConfigure})
 }
 
 func opCanvasNodeConfigure(ctx *Context, raw json.RawMessage) (any, error) {
@@ -71,9 +62,18 @@ func opCanvasNodeConfigure(ctx *Context, raw json.RawMessage) (any, error) {
 	if node["type"] != args.Kind {
 		return nil, InvalidArg("node_kind_mismatch", "参数类型与目标节点不一致")
 	}
-	patch, err := resolveGenerationDraft(ctx, args.Kind, args.Patch)
+	// 节点上已有的草稿参数先铺底、patch 再覆盖：只改 size 时也要能看出节点是不是正在拆图层。
+	base := stringParameters(dependencyMetadata(node))
+	patch, err := resolveGenerationDraft(ctx, args.Kind, args.Patch, base)
 	if err != nil {
 		return nil, err
+	}
+	if _, hasModel := patch["model"]; !hasModel {
+		// 只改尺寸这类参数时 patch 里没有 model，用节点当前模型补上再校验，
+		// 否则同一份规则只在换模型时才生效。
+		if err := validateModelGenerationParameters(args.Kind, nodeSelectedModel(node), mergeParameters(base, stringParameters(patch))); err != nil {
+			return nil, err
+		}
 	}
 	if _, err := ctx.Domain.UpdateUserCanvasNodeFields(ctx.UserID, args.CanvasID, args.NodeID, patch, args.ExpectedRevision); err != nil {
 		return nil, mapDomainError(err)
@@ -84,7 +84,8 @@ func opCanvasNodeConfigure(ctx *Context, raw json.RawMessage) (any, error) {
 }
 
 // Single draft validator for a node edit and storyboard production preparation.
-func resolveGenerationDraft(ctx *Context, kind string, raw map[string]json.RawMessage) (map[string]any, error) {
+// base 是节点上已有的草稿参数（新建节点时为空），校验要看它和 patch 合并后的结果。
+func resolveGenerationDraft(ctx *Context, kind string, raw map[string]json.RawMessage, base map[string]string) (map[string]any, error) {
 	descriptor, _ := capability.BuiltinRegistry().Resolve(kind)
 	patch := map[string]any{}
 	for name, value := range raw {
@@ -121,8 +122,54 @@ func resolveGenerationDraft(ctx *Context, kind string, raw map[string]json.RawMe
 			return nil, PreconditionFailed("generation_model_unavailable", "所选模型当前不可用", nil)
 		}
 		patch["model"] = choice.ModelKey
+		if err := validateModelGenerationParameters(kind, choice.ModelKey, mergeParameters(base, stringParameters(patch))); err != nil {
+			return nil, err
+		}
 	}
 	return patch, nil
+}
+
+// validateModelGenerationParameters 用与真实请求同一份型号族规则，在写草稿、
+// 准备分镜和提交整片之前拦住模型不接受的尺寸；等上游拒绝时请求已经发出去了。
+func validateModelGenerationParameters(kind, modelKey string, params map[string]string) error {
+	if kind != "image" {
+		return nil
+	}
+	modelName := strings.TrimSpace(modelKey)
+	if i := strings.LastIndex(modelName, "::"); i >= 0 {
+		modelName = strings.TrimSpace(modelName[i+2:])
+	}
+	family := providerpreset.SeedreamFamily(modelName)
+	if family == "" {
+		return nil
+	}
+	if _, err := providerpreset.ResolveSeedreamSize(family, params["size"], params["seedreamMode"] == "layers"); err != nil {
+		return InvalidArg("invalid_parameter", err.Error())
+	}
+	return nil
+}
+
+func stringParameters(values map[string]any) map[string]string {
+	params := map[string]string{}
+	for key, value := range values {
+		if text, ok := value.(string); ok {
+			params[key] = text
+		}
+	}
+	return params
+}
+
+// mergeParameters 把节点现状和本次 patch 合并，patch 覆盖节点。只传 patch 会漏掉
+// 「节点正在拆图层、这次只改尺寸」这类组合。
+func mergeParameters(base, patch map[string]string) map[string]string {
+	merged := make(map[string]string, len(base)+len(patch))
+	for key, value := range base {
+		merged[key] = value
+	}
+	for key, value := range patch {
+		merged[key] = value
+	}
+	return merged
 }
 
 func validateDraftValue(name, value string) error {

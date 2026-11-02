@@ -55,6 +55,13 @@ func DefaultFeatureAvailability() FeatureAvailability {
 }
 
 func (s *Service) FeatureAvailability() (*PublicFeatureAvailability, error) {
+	if s != nil && s.localMode {
+		return publicFeatureAvailability(nil, DefaultFeatureAvailability()), nil
+	}
+	return s.hostedFeatureAvailability()
+}
+
+func (s *Service) hostedFeatureAvailability() (*PublicFeatureAvailability, error) {
 	setting, value, err := s.readFeatureAvailability()
 	if err != nil {
 		return nil, err
@@ -66,7 +73,7 @@ func (s *Service) AdminFeatureAvailability(actor *model.User) (*PublicFeatureAva
 	if err := s.requireAdmin(actor); err != nil {
 		return nil, err
 	}
-	return s.FeatureAvailability()
+	return s.hostedFeatureAvailability()
 }
 
 func (s *Service) UpdateFeatureAvailability(actor *model.User, value FeatureAvailability) (*PublicFeatureAvailability, error) {
@@ -95,6 +102,14 @@ func (s *Service) UpdateFeatureAvailability(actor *model.User, value FeatureAvai
 }
 
 func (s *Service) FeatureEnabled(feature string) (bool, error) {
+	if s != nil && s.localMode {
+		switch feature {
+		case FeatureFrontendModels:
+			return false, nil
+		case FeatureShortDrama, FeatureTaskCenter, FeatureCustomChannels, FeaturePluginCenter, FeatureSystemPlugins, FeatureTimelineTranscription:
+			return true, nil
+		}
+	}
 	_, value, err := s.readFeatureAvailability()
 	if err != nil {
 		return false, err
@@ -126,6 +141,9 @@ func (s *Service) RequireFeature(feature string) error {
 	}
 	if enabled {
 		return nil
+	}
+	if s != nil && s.localMode {
+		return kernel.Forbidden("当前工作区未开放此功能")
 	}
 	switch feature {
 	case FeatureShortDrama:

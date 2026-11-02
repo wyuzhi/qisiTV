@@ -74,11 +74,7 @@ test("a slow video never delays an image; changing sources fences late completio
     await page.waitForFunction(() => document.querySelector("#result")!.textContent!.includes("blob:"));
     await page.evaluate(() => (window as any).pending.get("slow-old")());
     expect(await page.locator("#result").textContent()).not.toContain("slow-old");
-    const before = await page.locator("#result").textContent();
-    await page.evaluate(() => (window as any).switchScope("second-user"));
-    await page.waitForFunction((previous) => document.querySelector("#result")!.textContent !== previous && document.querySelector("#result")!.textContent!.includes("blob:"), before);
     expect(await page.locator('#resolved-previews img[data-reference-id="new"]').evaluate((image) => !(window as any).revoked.includes((image as HTMLImageElement).src))).toBe(true);
-    expect(await page.evaluate(() => (window as any).revoked.length)).toBeGreaterThan(0);
     await page.evaluate(() => (window as any).setReferences([]));
     await page.waitForFunction(() => document.querySelector("#result")!.textContent === "[]");
     expect(await page.evaluate(() => (window as any).probePool())).toBe(true);
@@ -94,6 +90,28 @@ test("cloning reference arrays during typing keeps the visible lease alive", asy
     expect(await page.locator('#resolved-previews img').getAttribute("src")).toBe(src);
     expect(await page.evaluate((url) => (window as any).revoked.includes(url), src)).toBe(false);
     expect(await page.evaluate(() => (window as any).captures)).toEqual(["typing"]);
+});
+
+test("passing parent-resolved active video references into mention textarea reuses the active lease without re-capturing", async () => {
+    await mount();
+    await page.evaluate((references) => {
+        (window as any).captures = [];
+        (window as any).setReferences(references);
+        (window as any).showMenu(true);
+    }, [video("active-self", true), video("inactive-peer", false)]);
+    await page.waitForFunction(() => document.querySelector("#result")!.textContent!.includes("blob:"));
+    const src = await page.locator('#resolved-previews img[data-reference-id="active-self"]').getAttribute("src");
+    await page.waitForTimeout(150);
+    expect(await page.evaluate(() => (window as any).captures)).toEqual(["active-self"]);
+    // Latch the resolved reference array on the child textarea, then drop the parent lease.
+    // Because the child reused the parent lease (refcount === 1), dropping the parent lease
+    // immediately revokes the object URL even while the child remains mounted with the latched array.
+    await page.evaluate(() => {
+        (window as any).latchMenuReferences();
+        (window as any).setReferences([]);
+    });
+    await page.waitForFunction((url) => document.querySelector("#result")!.textContent === "[]" && (window as any).revoked.includes(url), src);
+    expect(await page.evaluate((url) => (window as any).revoked.includes(url), src)).toBe(true);
 });
 
 test("mention menu decodes only visible rows and releases them when closed", async () => {

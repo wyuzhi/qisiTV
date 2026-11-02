@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+
+	"gorm.io/gorm"
 )
 
 // Scope 声明操作触及的数据范围：读范围不等于写范围，默认不放大到全工作区批量写。
@@ -272,19 +274,59 @@ func (r *Registry) Execute(req Request) (Result, error) {
 		alternateHash = rawHash
 	}
 	var target struct {
-		CanvasID string `json:"canvasId"`
+		CanvasID         string `json:"canvasId"`
+		ExpectedRevision *int64 `json:"expectedRevision"`
 	}
-	if !op.ReadOnly && strings.TrimSpace(req.TurnID) != "" {
-		if err := json.Unmarshal(params, &target); err != nil || strings.TrimSpace(target.CanvasID) == "" {
+	if !op.ReadOnly {
+		_ = json.Unmarshal(params, &target)
+		if strings.TrimSpace(req.TurnID) != "" && strings.TrimSpace(target.CanvasID) == "" {
 			return Result{}, InvalidArg("missing_turn_canvas", "助手写入必须指定当前画布")
 		}
 	}
-	outcome, err := r.store.RunDomain(runCtx, RunRequest{UserID: req.UserID, OpID: opID, Op: op.ID,
-		PayloadHash: canonicalHash, AlternatePayloadHash: alternateHash, TurnID: req.TurnID, CanvasID: target.CanvasID}, r.binder, func(domain Domain) ([]byte, error) {
+	var beforeCanvasRaw []byte
+	var pendingWrite *ExternalCanvasWrite
+	var activeDomain Domain
+	runReq := RunRequest{
+		UserID:               req.UserID,
+		OpID:                 opID,
+		Op:                   op.ID,
+		PayloadHash:          canonicalHash,
+		AlternatePayloadHash: alternateHash,
+		TurnID:               req.TurnID,
+		CanvasID:             target.CanvasID,
+		CallerKind:           string(caller.Kind),
+		ClientID:             strings.TrimSpace(caller.ClientID),
+		ClientLabel:          caller.EffectiveClientLabel(),
+		AfterCommitInTx: func(tx *gorm.DB) error {
+			if pendingWrite == nil {
+				return nil
+			}
+			return UpsertCanvasWriteInTx(tx, req.UserID, *pendingWrite)
+		},
+		OnErrorInTx: func(tx *gorm.DB, err error) error {
+			opErr := AsError(err)
+			if strings.TrimSpace(target.CanvasID) != "" {
+				EnrichCanvasConflictErrorInTx(tx, activeDomain, req.UserID, target.CanvasID, target.ExpectedRevision, beforeCanvasRaw, opErr)
+			}
+			return opErr
+		},
+	}
+	outcome, err := r.store.RunDomain(runCtx, runReq, r.binder, func(domain Domain) ([]byte, error) {
+		activeDomain = domain
+		if !op.ReadOnly && strings.TrimSpace(target.CanvasID) != "" {
+			beforeCanvasRaw, _ = domain.UserCanvasProject(req.UserID, target.CanvasID)
+		}
 		execCtx := &Context{Context: runCtx, UserID: req.UserID, Caller: caller, Domain: domain, OperationID: opID, TurnID: req.TurnID}
 		value, runErr := op.Handler(execCtx, params)
 		if runErr != nil {
 			return nil, AsError(runErr)
+		}
+		if !op.ReadOnly && strings.TrimSpace(target.CanvasID) != "" && len(beforeCanvasRaw) > 0 {
+			if afterCanvasRaw, afterErr := domain.UserCanvasProject(req.UserID, target.CanvasID); afterErr == nil {
+				if write, changed := BuildCanvasWriteRecord(opID, op.ID, target.CanvasID, req.TurnID, caller, beforeCanvasRaw, afterCanvasRaw); changed {
+					pendingWrite = write
+				}
+			}
 		}
 		encoded, encErr := json.Marshal(value)
 		if encErr != nil {

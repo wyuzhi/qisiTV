@@ -80,7 +80,7 @@ func TestAgentModelCatalogBeefAPIVideoContractAndAudioPayload(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if payload["generate_audio"] != audio {
+				if payload["metadata"].(map[string]any)["generate_audio"] != audio {
 					t.Fatalf("lost selected audio=%v: %#v", audio, payload)
 				}
 			}

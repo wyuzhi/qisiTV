@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as React from "react";
 
 import { useCanvasKeyboard } from "../src/pages/canvas/use-canvas-keyboard";
+import { createCanvasPageUiStore } from "../src/stores/canvas/use-canvas-page-ui-store";
+const pageUi = createCanvasPageUiStore();
 
 // Behavior test without a DOM renderer: run the hook once with a minimal React
 // dispatcher (useEffect runs immediately), install fake window/document/Element
@@ -42,13 +44,11 @@ function mountHook() {
     };
     try {
         const noop = () => undefined;
-        useCanvasKeyboard({
+        useCanvasKeyboard({ pageUi,
+            projectId: "canvas",
             nodesRef: { current: [] },
             selectedNodeIdsRef: { current: new Set(["n1"]) },
             selectedConnectionId: null,
-            setSelectedNodeIds: noop,
-            setSelectedConnectionId: noop,
-            setContextMenu: noop,
             setShortcutRequestNonce: noop,
             setInfoNodeId: noop,
             setCropNodeId: noop,

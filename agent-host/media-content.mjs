@@ -138,8 +138,52 @@ export function trustedMediaSources(payload, { api, modelId, nativePartStore }) 
   }
   return sources;
 }
+function stripCacheControl(item) {
+  if (!item || typeof item !== 'object' || !('cache_control' in item)) return item;
+  const { cache_control: _ignored, ...rest } = item;
+  return rest;
+}
+
+// 多通道 Anthropic/Bedrock 网关在跨步工具调用时会把请求分发到不同上游节点：
+// 历史 assistant 消息里的 thinking 签名属于前一个节点，原样重发会触发 Invalid signature in thinking block；
+// 同时跨节点 ephemeral cache_control 会触发代理层虚报 9x cache_read_input_tokens 导致提前 compaction。
+// 这里在派发边界把历史 thinking 块转为普通 text（实时流与 SQLite 已在接收端完整落盘），并移除跨通道 cache_control。
+function adaptAnthropicRequest(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  const next = { ...payload };
+  if (Array.isArray(payload.system)) {
+    next.system = payload.system.map(stripCacheControl);
+  }
+  if (Array.isArray(payload.tools)) {
+    next.tools = payload.tools.map(stripCacheControl);
+  }
+  if (Array.isArray(payload.messages)) {
+    next.messages = payload.messages.flatMap((message) => {
+      if (!message || typeof message !== 'object' || !Array.isArray(message.content)) return [message];
+      if (message.role === 'assistant') {
+        const blocks = [];
+        for (const rawBlock of message.content) {
+          const block = stripCacheControl(rawBlock);
+          if (block?.type === 'redacted_thinking') continue;
+          if (block?.type === 'thinking') {
+            if (typeof block.thinking === 'string' && block.thinking.trim().length > 0) {
+              blocks.push({ type: 'text', text: block.thinking });
+            }
+            continue;
+          }
+          blocks.push(block);
+        }
+        return blocks.length > 0 ? [{ ...message, content: blocks }] : [];
+      }
+      return [{ ...message, content: message.content.map(stripCacheControl) }];
+    });
+  }
+  return next;
+}
+
 export function adaptMediaRequest(payload, { api, modelId, nativePartStore }, extra = {}) {
   nativePartStore ||= extra.nativePartStore || (typeof extra.read === 'function' ? extra : undefined);
+  if (api === 'anthropic-messages') return adaptAnthropicRequest(payload);
   if (api !== 'openai-completions') return payload;
   const toolNames = new Map();
   const messages = [];
@@ -177,4 +221,28 @@ export function adaptMediaRequest(payload, { api, modelId, nativePartStore }, ex
   }
   flush();
   return { ...payload, messages };
+}
+
+// 用户附带的图片先读成画面再交给模型。素材本身读不出来时（格式、大小、解码等 media_* 原因），
+// 明确告诉模型这张图没有看到，整轮对话继续；鉴权、权限等其他错误照常抛出。
+export async function attachmentContent(body, turnId, opsRequest) {
+  const content = [{type:'text',text:body.message || '请分析所提供的素材，并说明适合如何使用。'}];
+  for (const attachment of body.attachments || []) {
+    content.push({type:'text',text:`用户提供素材：${JSON.stringify(attachment)}。使用 media.inspect 读取实际画面或音频后再判断；片段秒数转换为 startMs/endMs。`});
+    if (attachment.kind !== 'image') continue;
+    const reference = {canvasId:body.canvasId,
+      ...(attachment.nodeId ? {nodeId:attachment.nodeId}:{assetId:attachment.assetId}),resourceId:attachment.resourceId};
+    try {
+      const overview = await opsRequest('POST','/ops/media.overview',{params:reference},undefined,turnId);
+      const mustUsePreview = overview.result.image?.view === 'preview' && overview.result.image?.inspectable !== true;
+      const data = mustUsePreview ? overview : await opsRequest('POST','/ops/media.inspect',{params:{...reference,
+        expectedVersion:overview.result.source.version,mode:'frames'}},undefined,turnId);
+      if (data.result.image) content.push({type:'text',text:JSON.stringify({image:data.result.image,note:data.result.note,source:data.result.source})});
+      content.push(...data.result.content.filter(part=>part.type==='image').map(part=>({type:'image',data:part.data,mimeType:part.mimeType})));
+    } catch (error) {
+      if (!String(error?.reason || '').startsWith('media_')) throw error;
+      content.push({type:'text',text:`这张图片没有读取成功（${error.reason}）。不要根据文件名或描述猜测画面内容；告诉用户这张图没有看到，可以换成 PNG 或 JPEG 后重新发送。`});
+    }
+  }
+  return content;
 }

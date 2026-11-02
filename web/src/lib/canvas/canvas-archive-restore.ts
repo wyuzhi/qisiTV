@@ -1,4 +1,5 @@
 import { createClientId } from "@/lib/client-id";
+import { getActiveUserScope } from "@/lib/user-scope";
 import { confinedArchivePath } from "@/lib/zip";
 import { canonicalize } from "json-canonicalize";
 import { startOperation } from "@/stores/use-operation-progress";
@@ -14,7 +15,6 @@ import { createCanvasLibraryFolder, deleteCanvasLibraryFolder, persistCanvasFold
 import { loadCanvasDrawing, saveCanvasDrawing, type CanvasDrawingRenderDraft } from "@/lib/canvas/canvas-drawing-storage";
 import { canvasWorkspaceProjectId } from "@/lib/canvas/canvas-workspace-project";
 import { normalizeLocalCanvasProject } from "@/lib/local-workspace-migration";
-import { assertUserScope, captureUserScope, isUserScopeAbandonedError, userScopeMatches, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { http } from "@/services/api/request";
 import { resourceFileUrl, resourceIdFromStorageKey, resourceStorageKey, uploadResourceFile } from "@/services/api/resources";
 import { primeResourceBlobCache } from "@/services/resource-blob-cache";
@@ -125,19 +125,18 @@ function isMediaNode(type: CanvasNodeData["type"]) {
     return type === CanvasNodeType.Image || type === CanvasNodeType.Video || type === CanvasNodeType.Audio;
 }
 
-export function createCanvasArchiveRestoreHost(overrides: Partial<CanvasArchiveRestoreHost> = {}, scope = captureUserScope()): CanvasArchiveRestoreHost {
+export function createCanvasArchiveRestoreHost(overrides: Partial<CanvasArchiveRestoreHost> = {}): CanvasArchiveRestoreHost {
     const store = () => useCanvasStore.getState();
     const usesCanonicalBackend = overrides.usesCanonicalBackend ?? !usesBrowserLocalResourceStore();
     const createdAssets = new Set<string>();
     return {
-        createFolder: (name) => createCanvasLibraryFolder(name, scope),
-        deleteFolder: (id) => deleteCanvasLibraryFolder(id, scope),
+        createFolder: (name) => createCanvasLibraryFolder(name),
+        deleteFolder: (id) => deleteCanvasLibraryFolder(id),
         restoreFolderCover: async (id, cover) => {
             const bytes = new Uint8Array(await cover.arrayBuffer());
-            assertUserScope(scope);
             let binary = "";
             for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
-            await persistCanvasFolderCover(id, `data:${cover.type || "image/png"};base64,${btoa(binary)}`, scope);
+            await persistCanvasFolderCover(id, `data:${cover.type || "image/png"};base64,${btoa(binary)}`);
         },
         importProject: (project, workspaceProjectId) => store().importProject(project, workspaceProjectId),
         updateProject: (id, patch) => store().updateProject(id, patch),
@@ -146,18 +145,16 @@ export function createCanvasArchiveRestoreHost(overrides: Partial<CanvasArchiveR
             if (!live) throw new Error("画布未保存到工作区");
             if (!usesCanonicalBackend) {
                 await flushCanvasStorePersistence();
-                assertUserScope(scope);
                 const cached = store().openProject(id);
                 if (!cached) throw new Error("画布未保存到工作区");
                 assertRestoredCanvasMatches(live, cached);
                 return;
             }
-            await syncLocalCanvasProjectToBackend(id, scope);
+            await syncLocalCanvasProjectToBackend(id);
             let saved: CanvasProject;
             try {
-                saved = await readLocalCanvasProjectFromBackend(id, scope);
+                saved = await readLocalCanvasProjectFromBackend(id);
             } catch (error) {
-                if (isUserScopeAbandonedError(error)) throw error;
                 throw new Error("画布未保存到工作区");
             }
             assertRestoredCanvasMatches(live, saved, "backend");
@@ -167,42 +164,38 @@ export function createCanvasArchiveRestoreHost(overrides: Partial<CanvasArchiveR
             const unique = [...new Set(ids.filter(Boolean))];
             if (usesCanonicalBackend) {
                 await Promise.all(unique.map(async (id) => {
-                    await http.delete(`/canvas-projects/${encodeURIComponent(id)}`, { expectedScope: scope });
+                    await http.delete(`/canvas-projects/${encodeURIComponent(id)}`);
                 }));
             }
-            assertUserScope(scope);
             store().deleteProjects(unique);
             for (const assetId of createdAssets) {
-                await deleteWorkspaceAsset(assetId, scope);
+                await deleteWorkspaceAsset(assetId);
                 createdAssets.delete(assetId);
             }
         },
         discardProjects: (ids) => store().deleteProjects([...ids]),
         uploadMedia: async (blob, kind, meta) => {
             if (!usesCanonicalBackend) {
-                const storageKey = `${kind}:${scope.userScope}:${createClientId()}`;
+                const storageKey = `${kind}:${getActiveUserScope()}:${createClientId()}`;
                 const url = await (kind === "image" ? setImageBlob(storageKey, blob) : setMediaBlob(storageKey, blob));
-                assertUserScope(scope);
                 return { storageKey, url: url || "" };
             }
-            const resource = await uploadResourceFile(blob, kind, { fileName: meta.fileName, idempotencyKey: await archiveMediaIdempotencyKey(blob), expectedScope: scope });
-            assertUserScope(scope);
+            const resource = await uploadResourceFile(blob, kind, { fileName: meta.fileName, idempotencyKey: await archiveMediaIdempotencyKey(blob) });
             const storageKey = resourceStorageKey(resource.id);
-            await primeResourceBlobCache(storageKey, blob, scope).catch((error) => {
-                if (isUserScopeAbandonedError(error)) throw error;
+            await primeResourceBlobCache(storageKey, blob).catch((error) => {
             });
             return { storageKey, url: resource.publicUrl || resourceFileUrl(resource.id), resourceId: resource.id };
         },
         bindMediaAsset: async (options) => {
-            const result = await ensureCanvasNodeAsset({ ...options, source: "canvas-upload", expectedScope: scope });
+            const result = await ensureCanvasNodeAsset({ ...options, source: "canvas-upload" });
             if (result.created) createdAssets.add(result.assetId);
             if (!result.confirmed) throw new Error("素材文件尚未保存到工作区，导入未完成");
             return result.assetId;
         },
         saveDrawing: (projectId, drawingId, engine, snapshot, previous, preview, render) =>
-            saveCanvasDrawing(projectId, drawingId, engine, snapshot, previous, preview, render, scope),
+            saveCanvasDrawing(projectId, drawingId, engine, snapshot, previous, preview, render),
         loadDrawing: async (projectId, drawingId) => {
-            const saved = await loadCanvasDrawing(projectId, drawingId, scope);
+            const saved = await loadCanvasDrawing(projectId, drawingId);
             if (usesCanonicalBackend && saved && saved.origin !== "canonical") {
                 throw new Error("画板尚未保存到工作区，导入未完成");
             }
@@ -213,36 +206,6 @@ export function createCanvasArchiveRestoreHost(overrides: Partial<CanvasArchiveR
     };
 }
 
-function withRestoreScope(host: CanvasArchiveRestoreHost, scope: CapturedUserScope): CanvasArchiveRestoreHost {
-    const run = <Args extends unknown[], Result>(fn: (...args: Args) => Result) => (...args: Args) => {
-        assertUserScope(scope);
-        const result = fn(...args);
-        if (result instanceof Promise) return result.then((value) => {
-            assertUserScope(scope);
-            return value;
-        }) as Result;
-        assertUserScope(scope);
-        return result;
-    };
-    return {
-        usesCanonicalBackend: host.usesCanonicalBackend,
-        createFolder: run(host.createFolder),
-        deleteFolder: run(host.deleteFolder),
-        restoreFolderCover: host.restoreFolderCover ? run(host.restoreFolderCover) : undefined,
-        importProject: run(host.importProject),
-        updateProject: run(host.updateProject),
-        persistProject: run(host.persistProject),
-        deleteProjects: run(host.deleteProjects),
-        discardProjects: run(host.discardProjects),
-        uploadMedia: run(host.uploadMedia),
-        bindMediaAsset: host.bindMediaAsset ? run(host.bindMediaAsset) : undefined,
-        saveDrawing: run(host.saveDrawing),
-        loadDrawing: host.loadDrawing ? run(host.loadDrawing) : undefined,
-        deleteResource: host.deleteResource ? run(host.deleteResource) : undefined,
-        onProjectProgress: host.onProjectProgress ? run(host.onProjectProgress) : undefined,
-    };
-}
-
 export async function restoreCanvasArchive(input: Blob | OpenCanvasArchive, host: Partial<CanvasArchiveRestoreHost> = {}): Promise<CanvasArchiveRestoreResult> {
     const progress = startOperation("导入画布备份", { detail: "正在解压并检查备份", totalBytes: input instanceof Blob ? input.size : undefined });
     try {
@@ -250,22 +213,19 @@ export async function restoreCanvasArchive(input: Blob | OpenCanvasArchive, host
         progress.done("画布与媒体已恢复并保存");
         return result;
     } catch (error) {
-        if (isUserScopeAbandonedError(error)) progress.dismiss();
-        else progress.fail("画布导入未完成，请查看错误后重试");
+        progress.fail("画布导入未完成，请查看错误后重试");
         throw error;
     }
 }
 
 async function restoreCanvasArchiveContents(input: Blob | OpenCanvasArchive, host: Partial<CanvasArchiveRestoreHost>, onProgress: (completed: number, total: number) => void): Promise<CanvasArchiveRestoreResult> {
-    const scope = captureUserScope();
     const localPersistence = isLocalRuntimeMode();
     const archive = "data" in input && "files" in input ? input : await openCanvasArchive(input);
-    assertUserScope(scope);
     preflightCanvasArchive(archive.data, archive.files);
     const totalMedia = archive.data.projects.reduce((total, item) => total + item.files.length, 0);
     let restoredMedia = 0;
     onProgress(0, totalMedia);
-    const restoreHost = withRestoreScope(createCanvasArchiveRestoreHost(host, scope), scope);
+    const restoreHost = createCanvasArchiveRestoreHost(host);
     const folderIds: string[] = [];
     const projectIds: string[] = [];
     const resourceIds: string[] = [];
@@ -288,7 +248,6 @@ async function restoreCanvasArchiveContents(input: Blob | OpenCanvasArchive, hos
                 await restoreHost.restoreFolderCover(id, cover.slice(0, cover.size, folder.coverMimeType || cover.type || "image/png"));
             } else if (folder.coverDataUrl?.startsWith("data:image/") && restoreHost.restoreFolderCover) {
                 const response = await fetch(folder.coverDataUrl);
-                assertUserScope(scope);
                 await restoreHost.restoreFolderCover(id, await response.blob());
             }
         }
@@ -362,9 +321,8 @@ async function restoreCanvasArchiveContents(input: Blob | OpenCanvasArchive, hos
             storage: restoreHost.usesCanonicalBackend ? "backend" : "browser",
         };
     } catch (error) {
-        if (isUserScopeAbandonedError(error) || !userScopeMatches(scope)) throw error;
         try {
-            await cleanupCanvasArchiveAttempt(restoreHost, scope, { folderIds, projectIds, resourceIds });
+            await cleanupCanvasArchiveAttempt(restoreHost, { folderIds, projectIds, resourceIds });
         } catch (cleanupError) {
             throw new AggregateError([error, cleanupError], `${error instanceof Error ? error.message : "导入未完成"}；部分导入内容未能清理，请检查工作区后重试`);
         }
@@ -372,9 +330,7 @@ async function restoreCanvasArchiveContents(input: Blob | OpenCanvasArchive, hos
     } finally {
         // Media upload and asset binding can fail before persistProject's
         // finally block. Their progress must not keep blocking exit/update.
-        if (userScopeMatches(scope)) {
-            for (const id of progressProjectIds) restoreHost.onProjectProgress?.(id, null);
-        }
+        for (const id of progressProjectIds) restoreHost.onProjectProgress?.(id, null);
     }
 }
 
@@ -634,40 +590,28 @@ async function restoreArchiveDrawings(
 
 async function cleanupCanvasArchiveAttempt(
     host: CanvasArchiveRestoreHost,
-    scope: CapturedUserScope,
     attempt: { folderIds: string[]; projectIds: string[]; resourceIds: string[] },
 ) {
-    if (!userScopeMatches(scope)) return;
-    try {
-        assertUserScope(scope);
-    } catch {
-        return;
-    }
     if (attempt.projectIds.length) {
         try {
             await host.deleteProjects(attempt.projectIds);
         } catch (error) {
-            if (isUserScopeAbandonedError(error) || !userScopeMatches(scope)) return;
             // Keep the visible projects when their durable deletion failed.
             throw error;
         }
     }
-    if (!userScopeMatches(scope)) return;
     for (const folderId of attempt.folderIds) {
         try {
             await host.deleteFolder(folderId);
         } catch (error) {
-            if (isUserScopeAbandonedError(error) || !userScopeMatches(scope)) return;
             throw error;
         }
     }
-    if (!host.deleteResource || !userScopeMatches(scope)) return;
+    if (!host.deleteResource) return;
     await Promise.all(attempt.resourceIds.map(async (resourceId) => {
         try {
-            assertUserScope(scope);
             await host.deleteResource?.(resourceId);
         } catch (error) {
-            if (isUserScopeAbandonedError(error) || !userScopeMatches(scope)) return;
             throw error;
         }
     }));

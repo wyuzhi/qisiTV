@@ -1,5 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { availableParallelism } from "node:os";
+import { createRequire } from "node:module";
+import { basename, dirname, join, relative } from "node:path";
 
 const root = join(import.meta.dir, "..");
 const testFilePattern = /\.test\.[cm]?[jt]sx?$/;
@@ -7,7 +9,35 @@ const browserGlobalName = /\b(?:window|document|navigator)\b/;
 const failures = [];
 const systemChrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const testEnv = { ...process.env };
-if (!testEnv.CHROME_PATH && existsSync(systemChrome)) testEnv.CHROME_PATH = systemChrome;
+if (!testEnv.CHROME_PATH) {
+    let bundledChrome;
+    try { bundledChrome = createRequire(import.meta.url)("playwright").chromium.executablePath(); } catch { /* Runner fixtures may not have Playwright installed. */ }
+    const headless = bundledChrome && installedHeadlessShell(bundledChrome);
+    if (headless) testEnv.CHROME_PATH = headless;
+    else if (bundledChrome && existsSync(bundledChrome)) testEnv.CHROME_PATH = bundledChrome;
+    else if (existsSync(systemChrome)) testEnv.CHROME_PATH = systemChrome;
+}
+
+function installedHeadlessShell(chromePath) {
+    // Use the same pinned revision as Playwright, including its platform-specific
+    // archive layout. A complete macOS Chrome app can stall during shutdown.
+    let directory = dirname(chromePath);
+    while (!/^chromium-\d+$/.test(basename(directory))) {
+        const parent = dirname(directory);
+        if (parent === directory) return;
+        directory = parent;
+    }
+    const root = join(dirname(directory), basename(directory).replace("chromium-", "chromium_headless_shell-"));
+    if (!existsSync(join(root, "INSTALLATION_COMPLETE"))) return;
+    function find(directory, depth) {
+        for (const entry of readdirSync(directory, { withFileTypes: true })) {
+            const path = join(directory, entry.name);
+            if (entry.isFile() && /^(?:chrome-headless-shell|headless_shell)(?:\.exe)?$/.test(entry.name)) return path;
+            if (entry.isDirectory() && depth > 0) { const found = find(path, depth - 1); if (found) return found; }
+        }
+    }
+    return find(root, 2);
+}
 
 function collectTestFiles(directory) {
     return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -29,22 +59,66 @@ function run(files) {
     if (result.exitCode !== 0) failures.push({ files, exitCode: result.exitCode ?? 1 });
 }
 
-const files = [...collectTestFiles(join(root, "test")), ...collectTestFiles(join(root, "src"))].sort();
-const isolated = files.filter((file) => {
-    // Browser suites own subprocesses and should not share a Bun worker with
-    // shell-script tests or modules that replace browser globals.
-    if (/\.browser\.test\.[jt]sx?$/.test(file)) return true;
-    const source = readFileSync(join(root, file), "utf8");
-    // Bun module replacements persist beyond mock.restore(); isolate their import graphs.
-    if (source.includes("mock.module(")) return true;
-    return source.includes("globalThis") && browserGlobalName.test(source);
-});
-const shared = files.filter((file) => !isolated.includes(file));
+async function defaultSpawnFile(file) {
+    const proc = Bun.spawn([process.execPath, "test", file], {
+        cwd: root,
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
+        env: testEnv,
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+    ]);
+    if (stdout) process.stdout.write(stdout);
+    if (stderr) process.stderr.write(stderr);
+    return exitCode ?? 1;
+}
 
-run(shared);
-for (const file of isolated) run([file]);
-if (failures.length) {
-    console.error(`\n${failures.length} test groups failed:`);
-    for (const failure of failures) console.error(`- ${failure.files.length === 1 ? failure.files[0] : `shared group (${failure.files.length} files)`}: exit ${failure.exitCode}`);
-    process.exit(1);
+export async function runIsolatedPool(files, concurrency, spawnFile = defaultSpawnFile) {
+    if (files.length === 0) return 0;
+    let nextIndex = 0;
+    let firstExitCode = 0;
+    const workerCount = Math.max(1, Math.min(concurrency, files.length));
+    const workers = Array.from({ length: workerCount }, async () => {
+        while (nextIndex < files.length && firstExitCode === 0) {
+            const file = files[nextIndex++];
+            const exitCode = await spawnFile(file);
+            if (exitCode !== 0 && firstExitCode === 0) {
+                firstExitCode = exitCode;
+            }
+        }
+    });
+    await Promise.all(workers);
+    return firstExitCode;
+}
+
+if (import.meta.main) {
+    const files = [...collectTestFiles(join(root, "test")), ...collectTestFiles(join(root, "src"))].sort();
+    const isolated = files.filter((file) => {
+        // Browser suites own subprocesses and should not share a Bun worker with
+        // shell-script tests or modules that replace browser globals.
+        if (/\.browser\.test\.[jt]sx?$/.test(file)) return true;
+        const source = readFileSync(join(root, file), "utf8");
+        // Bun module replacements persist beyond mock.restore(); isolate their import graphs.
+        if (source.includes("mock.module(")) return true;
+        return source.includes("globalThis") && browserGlobalName.test(source);
+    });
+    const shared = files.filter((file) => !isolated.includes(file));
+    const concurrency = Math.max(1, Math.min(Number(process.env.QISITV_TEST_CONCURRENCY ?? process.env.BEEFTV_TEST_CONCURRENCY) || Math.min(availableParallelism(), 4), 4));
+
+    run(shared);
+    if (concurrency <= 1) {
+        for (const file of isolated) run([file]);
+    } else {
+        const exitCode = await runIsolatedPool(isolated, concurrency);
+        if (exitCode !== 0) process.exitCode = exitCode;
+    }
+    if (failures.length) {
+        console.error(`\n${failures.length} test groups failed:`);
+        for (const failure of failures) console.error(`- ${failure.files.length === 1 ? failure.files[0] : `shared group (${failure.files.length} files)`}: exit ${failure.exitCode}`);
+        process.exitCode = 1;
+    }
 }

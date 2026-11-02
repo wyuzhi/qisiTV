@@ -1,8 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import axios, { AxiosError } from "axios";
-import { assertChannelBlob, assertChannelPayload, ChannelResponseError, createChannelTransport, normalizeChannelFailure } from "../src/services/api/channel-transport";
-import { parseImagePayload, readAxiosError as readImageError } from "../src/services/api/image-response";
-import { unwrapEnvelope, assertVideoBlob, readAxiosError as readVideoError } from "../src/services/api/video-response";
+import { assertChannelBlob, ChannelResponseError, createChannelTransport, normalizeChannelFailure } from "../src/services/api/channel-transport";
+import { readAxiosError as readImageError } from "../src/services/api/image-response";
 
 const adapter = axios.defaults.adapter;
 afterEach(() => {
@@ -21,30 +20,6 @@ test("HTTP 200 business rejection preserves normalized code and request ID", asy
         expect((error as ChannelResponseError).code).toBe("content_policy_violation");
         expect((error as ChannelResponseError).requestId).toBe("request-probe-123");
     }
-});
-
-test("explicit error strings and success false cannot become empty media or phantom task", () => {
-    for (const payload of [{ error: "upstream unavailable" }, { success: false, message: "quota exhausted" }, rejectedPayload]) {
-        expect(() => parseImagePayload(payload as never)).toThrow(ChannelResponseError);
-        expect(() => unwrapEnvelope(payload, "missing task")).toThrow(ChannelResponseError);
-    }
-    expect(() => assertChannelPayload({ data: { error: "rejected" } })).toThrow(ChannelResponseError);
-});
-
-test("valid zero and 200 success envelopes and normal task remain accepted", () => {
-    for (const code of [0, 200]) {
-        const data = { id: "task-success" };
-        expect(unwrapEnvelope({ code, data, msg: "ok" }, "missing")).toBe(data);
-        expect(parseImagePayload({ code, data: [{ url: "https://example.invalid/image.png" }] } as never)).toHaveLength(1);
-    }
-    expect(() => assertChannelPayload({ id: "task-success", status: "processing", error: null })).not.toThrow();
-});
-
-test("HTTP 200 JSON blob is rejected instead of returned as audio or video", async () => {
-    axios.defaults.adapter = async (config) => ({ config, data: new Blob([JSON.stringify(rejectedPayload)], { type: "application/json" }), status: 200, statusText: "OK", headers: {} });
-    await expect(transport().postBlob("https://example.invalid/v1/audio/speech", {})).rejects.toBeInstanceOf(ChannelResponseError);
-    await expect(transport().getExternalBlob("https://example.invalid/output")).rejects.toBeInstanceOf(ChannelResponseError);
-    await expect(assertVideoBlob(new Blob(["{}"], { type: "application/json" }))).rejects.toBeInstanceOf(ChannelResponseError);
 });
 
 test("non-2xx blob errors decode once within bound without retaining Axios secrets", async () => {
@@ -82,9 +57,9 @@ test("cancellation identity survives transport normalization", async () => {
     await expect(normalizeChannelFailure(cancelled)).rejects.toBe(cancelled);
 });
 
-test("legacy image/video catch wrappers cannot flatten structured errors", () => {
+test("legacy image catch wrappers cannot flatten structured errors", () => {
     for (const error of [new ChannelResponseError(rejectedPayload, 451), new DOMException("Aborted", "AbortError"), new axios.CanceledError("cancelled")])
-        for (const reader of [readImageError, readVideoError]) {
+        for (const reader of [readImageError]) {
             try {
                 throw new Error(reader(error, "fallback"));
             } catch (caught) {

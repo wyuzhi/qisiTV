@@ -1,7 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
 import { canvasNodeOperation, createTransferSampler, operationProgressView, type OperationProgress } from "@/lib/operation-progress";
-import { captureUserScope } from "@/lib/user-scope-guard";
-import { setActiveUserScope } from "@/lib/user-scope";
 import { startOperation, useOperationProgress } from "@/stores/use-operation-progress";
 import { beginTaskReferenceObservation, publishTaskReferenceProgress } from "@/services/task-reference-progress";
 import type { GenerationTask } from "@/services/api/task-center";
@@ -46,36 +44,25 @@ test("字节到头仍然等待确认，失败不会被显示为完成", () => {
     expect(Object.values(useOperationProgress.getState().entries)[0].phase).toBe("error");
 });
 test("较早的响应晚到时不能重新显示已经结束的参考上传", () => {
-    const owner = captureUserScope();
     const oldRequest = beginTaskReferenceObservation();
     const latestRequest = beginTaskReferenceObservation();
     const task = { id: "ordered-reference-task", status: "running", referenceProgress: { label: "参考视频 1", phase: "transferring", loadedBytes: 512, totalBytes: 1024, bytesPerSecond: 256, startedAt: 1000, updatedAt: 3000 } } as GenerationTask;
-    publishTaskReferenceProgress(task, owner, oldRequest);
-    publishTaskReferenceProgress({ ...task, referenceProgress: undefined }, owner, latestRequest);
+    publishTaskReferenceProgress(task, oldRequest);
+    publishTaskReferenceProgress({ ...task, referenceProgress: undefined }, latestRequest);
     const before = Object.values(useOperationProgress.getState().entries);
     expect(before).toHaveLength(0);
-    publishTaskReferenceProgress(task, owner, oldRequest);
+    publishTaskReferenceProgress(task, oldRequest);
     expect(Object.values(useOperationProgress.getState().entries)).toEqual(before);
 });
 test("参考上传在重试空档消失时不显示成功，明确任务成功才显示完成", () => {
-    const owner = captureUserScope();
     const task = { id: "retry-reference-task", status: "running", referenceProgress: { label: "参考视频 1", phase: "processing", loadedBytes: 1024, totalBytes: 1024, bytesPerSecond: 0, startedAt: 1000, updatedAt: 3000 } } as GenerationTask;
-    publishTaskReferenceProgress(task, owner);
-    publishTaskReferenceProgress({ ...task, referenceProgress: undefined }, owner);
+    publishTaskReferenceProgress(task);
+    publishTaskReferenceProgress({ ...task, referenceProgress: undefined });
     expect(Object.values(useOperationProgress.getState().entries)).toHaveLength(0);
-    publishTaskReferenceProgress(task, owner);
-    publishTaskReferenceProgress({ ...task, status: "succeeded", referenceProgress: undefined }, owner);
+    publishTaskReferenceProgress(task);
+    publishTaskReferenceProgress({ ...task, status: "succeeded", referenceProgress: undefined });
     expect(Object.values(useOperationProgress.getState().entries).map(item => item.phase)).toEqual(["done"]);
 });
-test("切换账号清除旧进度，旧回调不能把它重新显示", () => {
-    const operation = startOperation("私有素材", { owner: captureUserScope() });
-    setActiveUserScope("another-preview-account");
-    operation.progress(512, 1024);
-    expect(Object.keys(useOperationProgress.getState().entries)).toHaveLength(0);
-    operation.dismiss();
-    setActiveUserScope(null);
-});
-
 test("节点进度必须同时匹配画布、节点和当前任务，旧任务不能覆盖新任务", () => {
     const upload = { ...base, target: { projectId: "canvas-a", nodeId: "video", taskId: "old-task" } };
     const entries = { upload };
@@ -90,12 +77,11 @@ test("节点进度必须同时匹配画布、节点和当前任务，旧任务�
 });
 
 test("后台参考上传从完整任务元数据定位结果节点，上传结束后交回生成进度", () => {
-    const owner = captureUserScope();
     const task = { id: "canvas-reference-task", projectId: "canvas-a", status: "running", inputJson: JSON.stringify({ metadata: { nodeId: "output-video", sourceNodeId: "source-video" } }), referenceProgress: { label: "参考视频 1", phase: "transferring", loadedBytes: 512, totalBytes: 1024, bytesPerSecond: 256, startedAt: 1000, updatedAt: 3000 } } as GenerationTask;
-    publishTaskReferenceProgress(task, owner);
+    publishTaskReferenceProgress(task);
     const progress = canvasNodeOperation(useOperationProgress.getState().entries, "canvas-a", "output-video", task.id);
     expect(progress?.target).toEqual({ projectId: "canvas-a", nodeId: "output-video", taskId: task.id });
     expect(canvasNodeOperation(useOperationProgress.getState().entries, "canvas-a", "source-video", task.id)).toBeUndefined();
-    publishTaskReferenceProgress({ ...task, status: "succeeded", referenceProgress: undefined }, owner);
+    publishTaskReferenceProgress({ ...task, status: "succeeded", referenceProgress: undefined });
     expect(Object.values(useOperationProgress.getState().entries)).toHaveLength(0);
 });

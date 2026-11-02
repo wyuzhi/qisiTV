@@ -8,7 +8,7 @@ describe("canvas version history", () => {
     test("local workspace reads persisted snapshots and keeps drafts on a separate list", () => {
         expect(versionHistory).toContain("listCanvasHistory(projectId, controller.signal)");
         expect(versionHistory).toContain("getCanvasHistoryEntry(projectId, entry.id, controller.signal)");
-        expect(versionHistory).toContain("readCanvasSyncDrafts(projectId, scope)");
+        expect(versionHistory).toContain("readCanvasSyncDrafts(projectId)");
         expect(versionHistory).not.toContain("if (!open || localOnly) return");
         expect(versionHistory).not.toContain("loadPersistedCanvasVersion");
         expect(versionHistory).not.toContain("partitionCanvasVersionHistory");

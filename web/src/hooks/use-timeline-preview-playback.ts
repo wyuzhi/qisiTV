@@ -58,6 +58,10 @@ class TimelinePreviewPlayback {
     private lastPublishAt = 0;
     private lastPublished: number | null = null;
     private pendingElements = new WeakSet<HTMLMediaElement>();
+    // 素材加载失败只降级该片段：失败片段退出就绪门槛，避免时钟永久卡在缓冲，
+    // 同时不再像以前那样暂停全部媒体（用户看到的是「整条时间线一个素材都不能播放」）。
+    private failedVideoClips = new Set<string>();
+    private reportedClips = new Set<string>();
 
     constructor(options: TimelinePreviewPlaybackOptions) { this.options = options; }
 
@@ -78,6 +82,9 @@ class TimelinePreviewPlayback {
                 if (this.position >= this.duration()) { this.position = 0; externalSeek = true; this.publish(); }
                 this.running = this.duration() > 0;
                 this.lastTick = null;
+                // 每次（重新）起播都重新报告仍然失败的片段：预览按钮会先清空提示，
+                // 不重置这里，第二次播放就会在没有提示的情况下继续静默跳过失败片段。
+                this.reportedClips.clear();
                 if (this.running && this.frame === null) this.frame = requestAnimationFrame(this.tick);
             } else this.pause();
         }
@@ -115,19 +122,25 @@ class TimelinePreviewPlayback {
         this.frame = requestAnimationFrame(this.tick);
     };
 
+    private failed(clip: TimelineClip, record?: AudioRecord) {
+        return record?.error === true || this.failedVideoClips.has(clip.id);
+    }
+
     private ready() {
         const ready = (element: HTMLMediaElement | null) => Boolean(element?.src && element.readyState >= 2 &&
             (element.ended || (!element.paused && !this.pendingElements.has(element))));
-        for (const record of this.audios.values()) if (this.active(record.clip) && !this.track(record.clip)?.muted && !ready(record.element)) return false;
+        for (const record of this.audios.values()) if (!this.failed(record.clip, record) && this.active(record.clip) && !this.track(record.clip)?.muted && !ready(record.element)) return false;
         const activeVideo = this.options.clips.find(clip => clip.kind === "video" && this.active(clip));
-        return !activeVideo || (activeVideo.id === this.options.activeVideoClipId && ready(this.options.videoRef.current));
+        if (!activeVideo || this.failedVideoClips.has(activeVideo.id)) return true;
+        return activeVideo.id === this.options.activeVideoClipId && ready(this.options.videoRef.current);
     }
 
     private prepared() {
         const loaded = (element: HTMLMediaElement | null) => Boolean(element?.src && element.readyState >= 2);
-        for (const record of this.audios.values()) if (this.active(record.clip) && !this.track(record.clip)?.muted && !loaded(record.element)) return false;
+        for (const record of this.audios.values()) if (!this.failed(record.clip, record) && this.active(record.clip) && !this.track(record.clip)?.muted && !loaded(record.element)) return false;
         const video = this.options.clips.find(clip => clip.kind === "video" && this.active(clip));
-        return !video || (video.id === this.options.activeVideoClipId && loaded(this.options.videoRef.current));
+        if (!video || this.failedVideoClips.has(video.id)) return true;
+        return video.id === this.options.activeVideoClipId && loaded(this.options.videoRef.current);
     }
 
     private pause() {
@@ -147,6 +160,23 @@ class TimelinePreviewPlayback {
         this.options.onRequestPause();
     }
 
+    /**
+     * 片段级降级提示：只说明哪个素材没载入，不暂停其它媒体。
+     * 与 fail() 的区别是不改播放状态——素材缺失时把整条预览停掉，用户连正常素材也看不到，
+     * 而「重新打开剪辑」并不能修复素材本身。
+     */
+    private reportClipFailure(clip: TimelineClip) {
+        if (this.reportedClips.has(clip.id)) return;
+        if (!this.running || this.disposed || !this.active(clip)) return;
+        // 静音抑制只针对音频：视频轨静音只是关掉声音，画面被跳过时仍必须明确告知。
+        if (clip.kind === "audio" && this.track(clip)?.muted) return;
+        this.reportedClips.add(clip.id);
+        const title = clip.title || "未命名片段";
+        this.options.onPlaybackError(clip.kind === "audio"
+            ? `音轨「${title}」未能载入，已跳过该片段，其他轨道继续播放。`
+            : `视频「${title}」未能载入，已跳过画面，音轨继续播放。`);
+    }
+
     private reconcileAudio() {
         const keep = new Set<string>();
         for (const clip of this.options.clips) {
@@ -157,9 +187,11 @@ class TimelinePreviewPlayback {
             const previous = this.audios.get(clip.id);
             if (previous?.identity === identity) { previous.clip = clip; continue; }
             if (previous) this.release(previous);
+            // 换了素材地址就允许重新报告：新地址可能同样载入失败。
+            this.reportedClips.delete(clip.id);
             const element = new Audio();
             element.preload = "auto";
-            const record: AudioRecord = { clip, element, identity, disposed: false, error: false, loaded: () => this.syncAudio(record, true), failed: () => { record.error = true; if (this.active(record.clip) && !this.track(record.clip)?.muted) this.fail("音轨预览未能播放，请重新打开剪辑后重试。"); } };
+            const record: AudioRecord = { clip, element, identity, disposed: false, error: false, loaded: () => this.syncAudio(record, true), failed: () => { record.error = true; } };
             element.addEventListener("loadedmetadata", record.loaded);
             element.addEventListener("error", record.failed);
             this.audios.set(clip.id, record);
@@ -176,7 +208,12 @@ class TimelinePreviewPlayback {
     private apply(element: HTMLMediaElement, clip: TimelineClip, forceSeek: boolean, record?: AudioRecord) {
         const active = this.active(clip);
         const muted = this.track(clip)?.muted === true;
-        if (record?.error && active && !muted && this.running) { this.fail("音轨预览未能播放，请重新打开剪辑后重试。"); return; }
+        // 素材没载入：只跳过这个片段本身，让视频与其它音轨继续走同一个时钟。
+        if (this.failed(clip, record)) {
+            element.pause();
+            this.reportClipFailure(clip);
+            return;
+        }
         const shouldPlay = active && (clip.kind === "video" || !muted) && this.running && this.prepared();
         element.muted = muted;
         const gain = timelinePreviewGain(clip, this.position);
@@ -210,9 +247,21 @@ class TimelinePreviewPlayback {
     syncVideoMetadata = (forceSeek = true) => {
         const video = this.options.videoRef.current;
         const clip = this.options.clips.find(clip => clip.id === this.options.activeVideoClipId && clip.kind === "video");
-        if (video?.error && clip && this.running && this.active(clip)) { this.fail("视频预览未能播放，请重新打开剪辑后重试。"); return; }
-        if (video && clip) this.apply(video, clip, forceSeek);
-        else video?.pause();
+        if (!video) return;
+        // 视频素材失败同样只跳过画面；静音只关声音，画面被跳过必须提示。
+        if (clip && video.error) {
+            this.failedVideoClips.add(clip.id);
+            this.reportClipFailure(clip);
+            video.pause();
+            return;
+        }
+        if (clip) {
+            // 换到新地址后浏览器会清空 error：恢复就绪门槛，并允许新地址再次失败时重新提示。
+            this.failedVideoClips.delete(clip.id);
+            this.reportedClips.delete(clip.id);
+        }
+        if (clip) this.apply(video, clip, forceSeek);
+        else video.pause();
     };
 
     private release(record: AudioRecord) {

@@ -71,7 +71,7 @@ func TestNativeHistoryAudioKeepsExactSessionPinAcrossCanvasPermission(t *testing
 	if _, err := svc.BeginAssistantTurn("local", canvasID, origin, AssistantTurnInput{PermissionMode: assistantturns.PermissionFullAccess, AssetIDs: []string{"historic-audio"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.BindAssistantDurableSession("local", origin, session, false); err != nil {
+	if err := svc.AssistantTurns().BindDurableSession("local", origin, session, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.RegisterAssistantNativeSource(context.Background(), "local", origin, origin, session, source); err != nil {
@@ -91,10 +91,10 @@ func TestNativeHistoryAudioKeepsExactSessionPinAcrossCanvasPermission(t *testing
 	if _, err := svc.BeginAssistantTurn("local", canvasID, current, AssistantTurnInput{PermissionMode: assistantturns.PermissionCanvas}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.BindAssistantDurableSession("local", current, session, false); err != nil {
+	if err := svc.AssistantTurns().BindDurableSession("local", current, session, false); err != nil {
 		t.Fatal(err)
 	}
-	scope, ok, err := svc.AssistantTurnScopeForHost("local", current)
+	scope, ok, err := svc.AssistantTurns().ScopeForHost("local", current)
 	if err != nil || !ok {
 		t.Fatalf("%v %v", ok, err)
 	}
@@ -122,7 +122,7 @@ func TestNativeHistoryAudioKeepsExactSessionPinAcrossCanvasPermission(t *testing
 			}
 		})
 	}
-	if err := svc.BindAssistantDurableSession("local", origin, "durable:22222222-2222-2222-2222-222222222222", true); err == nil {
+	if err := svc.AssistantTurns().BindDurableSession("local", origin, "durable:22222222-2222-2222-2222-222222222222", true); err == nil {
 		t.Fatal("historical session moved")
 	}
 	if err := svc.FinalizeAssistantTurn(current); err != nil {
@@ -142,7 +142,7 @@ func TestNativeHistoryPinCapDedupAndDatabaseReopen(t *testing.T) {
 	if _, err := svc.BeginAssistantTurn("local", canvasID, turn, AssistantTurnInput{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.BindAssistantDurableSession("local", turn, session, false); err != nil {
+	if err := svc.AssistantTurns().BindDurableSession("local", turn, session, false); err != nil {
 		t.Fatal(err)
 	}
 	store := svc.assistantTurnsOrInit()
@@ -184,7 +184,7 @@ func TestNativeHistoryPinCapDedupAndDatabaseReopen(t *testing.T) {
 	if !fresh.assistantTurnsOrInit().HasNativeSource("local", turn, session, "verified-pin-000") {
 		t.Fatal("pin lost after database reopen")
 	}
-	if err := fresh.BindAssistantDurableSession("local", turn, "durable:44444444-4444-4444-4444-444444444444", false); err == nil {
+	if err := fresh.AssistantTurns().BindDurableSession("local", turn, "durable:44444444-4444-4444-4444-444444444444", false); err == nil {
 		t.Fatal("session changed after reopen")
 	}
 }

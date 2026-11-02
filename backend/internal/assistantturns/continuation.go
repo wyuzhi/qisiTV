@@ -12,7 +12,6 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"qisitv/backend/internal/model"
-	localtask "qisitv/backend/internal/task"
 )
 
 type ContinuationSubmission struct {
@@ -30,7 +29,7 @@ type ContinuationView struct {
 	Message         string   `json:"message"`
 }
 
-const ContinuationMessage = "【自动继续】本次生成状态已更新。先读取画布核对原任务与实际结果，不把旧媒体当成本次产物。整片授权内的素材已由任务调度按就绪依赖推进；素材齐后直接完成声音、字幕、剪辑、成片和可编辑工程。成功绑定节点的durationMs是实际时长，顺序剪辑无需逐份审片，集中检查最终成片。失败或结果未知时检查并恢复原任务，不重复购买。新增或修改已确认的付费内容才重新确认。不要改动或发送我的未发送草稿。"
+const ContinuationMessage = "【自动继续】本次生成状态已更新。先看制作现场摘要核对原任务与实际结果（仅在需要完整长文或时间线细节时才调 canvas_get），不把旧媒体当成本次产物。单批生成完成或用户要求生成后复查时，用 media_overview / media_inspect 检查新生成画面质量（如手部畸形、五官崩坏、文字错乱等），发现问题则修改提示词并重新提交生成提议。整片授权内的素材已由任务调度按就绪依赖推进；素材齐后直接完成声音、字幕、剪辑、成片和可编辑工程。成功绑定节点的durationMs是实际时长，顺序剪辑无需逐份审片，集中检查最终成片。失败或结果未知时检查并恢复原任务，不重复购买。新增或修改已确认的付费内容才重新确认。不要改动或发送我的未发送草稿。"
 
 type ContinuationInput struct {
 	CanvasID     string   `json:"canvasId"`
@@ -236,7 +235,7 @@ func (s *Service) continuationResults(tx *gorm.DB, row *model.AssistantContinuat
 		nodes[n.ID] = n.Metadata
 	}
 	ids, selected := []string{}, []string{}
-	waiting := false
+	waiting, targetChanged := false, false
 	for _, source := range sources {
 		manifest, ok := manifests[source]
 		if !ok {
@@ -273,63 +272,32 @@ func (s *Service) continuationResults(tx *gorm.DB, row *model.AssistantContinuat
 				return nil, nil, continuationError("task_mismatch")
 			}
 			ids = append(ids, task.ID)
-			if task.Status != "succeeded" && task.Status != "failed" && task.Status != "cancelled" {
-				waiting = true
-				continue
-			}
-			outputs := map[int]localtask.CanonicalOutput{}
-			if task.Status == "succeeded" {
-				var results []model.Result
-				if err = tx.Where("task_id = ? AND user_id = ? AND kind = ?", task.ID, row.UserID, localtask.ResultKindGenerationOutput).Find(&results).Error; err != nil {
-					return nil, nil, err
-				}
-				decoded, decodeErr := localtask.DecodeOutputResults(results)
-				if decodeErr != nil {
-					return nil, nil, decodeErr
-				}
-				for _, output := range decoded {
-					if _, duplicate := outputs[output.OutputIndex]; duplicate {
-						return ids, nil, continuationError("task_mismatch")
-					}
-					outputs[output.OutputIndex] = output
-				}
-				if len(outputs) != len(targets) {
-					waiting = true
-					continue
-				}
-			}
-			for index, nodeID := range targets {
+			inspection, err := InspectTaskTargetsInTx(tx, row.UserID, task, row.Kind, input.Metadata.NodeID, targets, func(nodeID string) (map[string]any, bool) {
 				meta, exists := nodes[nodeID]
-				if !exists || meta["taskId"] != task.ID {
-					return ids, nil, continuationError("target_changed")
+				return meta, exists
+			})
+			if err != nil {
+				var expected *Error
+				if errors.As(err, &expected) {
+					return ids, nil, err
 				}
-				if task.Status == "succeeded" {
-					key, _ := meta["storageKey"].(string)
-					output, present := outputs[index]
-					if !present || output.ResourceID == "" || output.MaterializationErrorCode != "" || !strings.HasPrefix(key, "resource:") || meta["status"] != "success" || meta["resourceReloadAvailable"] == true {
-						waiting = true
-						continue
-					}
-					// Delivery keeps the task's primary node on every canonical output.
-					// Native multi-image destinations are the immutable indexed outputNodeIds
-					// checked above, exactly as taskbinding.Bind resolves them.
-					if key != "resource:"+output.ResourceID || output.TargetBinding == nil || output.TargetBinding.NodeID != input.Metadata.NodeID || output.MediaType != row.Kind {
-						return ids, nil, continuationError("target_changed")
-					}
-					var resource model.Resource
-					if err = tx.First(&resource, "id = ? AND user_id = ? AND status = ?", strings.TrimPrefix(key, "resource:"), row.UserID, "ready").Error; err != nil {
-						if errors.Is(err, gorm.ErrRecordNotFound) {
-							return ids, nil, continuationError("waiting")
-						}
-						return nil, nil, err
-					}
-				}
-				selected = append(selected, nodeID)
+				return nil, nil, err
+			}
+			switch inspection.State {
+			case TargetBindingTargetChanged:
+				targetChanged = true
+			case TargetBindingWaiting:
+				waiting = true
+			case TargetBindingReady, TargetBindingFailed:
+				selected = append(selected, targets...)
 			}
 		}
 	}
 	if waiting {
 		return uniqueSorted(ids), nil, continuationError("waiting")
+	}
+	if targetChanged {
+		return uniqueSorted(ids), nil, continuationError("target_changed")
 	}
 	var admittedIDs []string
 	if row.TaskIDsJSON != "" {
@@ -402,9 +370,11 @@ func (s *Service) ClaimContinuation(userID, id string, prepare func(*gorm.DB, *m
 			ready, err := prepare(tx, &row)
 			if err != nil {
 				var changed *Error
-				if errors.As(err, &changed) && changed.Reason == "continuation_intent_changed" {
-					if err := s.cancelContinuations(tx, row.UserID, row.CanvasID, row.SessionID, row.SourceTurnID, false); err != nil {
-						return err
+				if errors.As(err, &changed) && (changed.Reason == "continuation_intent_changed" || changed.Reason == "continuation_target_changed") {
+					if changed.Reason == "continuation_intent_changed" {
+						if err := s.cancelContinuations(tx, row.UserID, row.CanvasID, row.SessionID, row.SourceTurnID, false); err != nil {
+							return err
+						}
 					}
 					stopped = changed
 					return nil

@@ -77,8 +77,7 @@ func (p appTaskPolicy) WorkerConcurrency(ctx context.Context) (int, error) {
 func (p appTaskPolicy) ExecutionTimeout(_ context.Context, taskType string) (time.Duration, error) {
 	policyCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	reader := &Service{repo: p.service.repo.WithContext(policyCtx)}
-	policy, err := reader.RuntimePolicy()
+	policy, err := p.service.runtimePolicyWithRepo(p.service.repo.WithContext(policyCtx))
 	if err != nil {
 		return 0, err
 	}

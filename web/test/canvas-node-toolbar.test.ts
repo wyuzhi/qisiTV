@@ -28,6 +28,21 @@ function createNodeContext(node: CanvasNodeData): ToolContext {
 }
 
 describe("canvas node toolbar model", () => {
+    test("hover history action depends on the displayed failure category", () => {
+        const node: CanvasNodeData = { id: "history", type: CanvasNodeType.Image, title: "图片", position: { x: 0, y: 0 }, metadata: {
+            status: "error", errorDetails: "opaque", taskOutcome: { phase: "failed", regenerate: "allowed", reason: "result_target_unavailable" },
+        } };
+        const ctx = createNodeContext(node);
+        const retry = resolveToolbarTools("node-hover", ctx, null).find((tool) => tool.id === "retry");
+        const label = retry?.label;
+        expect(typeof label === "function" ? label(ctx) : label).toBe("重新生成");
+        node.metadata = { ...node.metadata, generationErrorCode: "result_target_unavailable" };
+        ctx.nodeMetadata = node.metadata;
+        const saved = resolveToolbarTools("node-hover", ctx, null).find((tool) => tool.id === "retry");
+        const savedLabel = saved?.label;
+        expect(typeof savedLabel === "function" ? savedLabel(ctx) : savedLabel).toBe("从生成历史取回原结果");
+    });
+
     test("opens the same subtitles action for uploaded audio and video", () => {
         for (const type of [CanvasNodeType.Audio, CanvasNodeType.Video]) {
             const node: CanvasNodeData = { id: "media", type, title: "素材", position: { x: 0, y: 0 }, width: 320, height: 180, metadata: { storageKey: "resource:media-fixture" } };

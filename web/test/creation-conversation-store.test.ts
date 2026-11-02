@@ -4,10 +4,6 @@ import { ApiError } from "@/services/api/request";
 type Stored = Map<string, string>;
 const stored: Stored = new Map();
 let activeScope = "guest";
-let scopeGeneration = 1;
-let storageHold: Promise<void> | null = null;
-let releaseStorage: (() => void) | null = null;
-let storageEntered = 0;
 let draftHold: Promise<void> | null = null;
 let releaseDraftHold: (() => void) | null = null;
 let draftWriteEntered = 0;
@@ -16,14 +12,7 @@ let draftRemoveHold: Promise<void> | null = null;
 let draftRemoveEntered = 0;
 
 function switchScope(next: string) {
-    if (next !== activeScope) scopeGeneration += 1;
     activeScope = next;
-}
-
-function holdLegacyWrites() {
-    storageHold = new Promise((resolve) => {
-        releaseStorage = resolve;
-    });
 }
 
 type RecordShape = {
@@ -64,18 +53,10 @@ function holdDraftWrites() {
     });
 }
 
-function capturedGuest() {
-    return { userScope: "guest", epoch: 1 };
-}
-
 mock.module("@/lib/localforage-storage", () => ({
     localForageStorageForScope: (scope?: string) => ({
         getItem: async (name: string) => stored.get(`${scope ?? activeScope}:${name}`) ?? null,
         setItem: async (name: string, value: string) => {
-            if (storageHold && name === "creation-conversations-v1") {
-                storageEntered += 1;
-                await storageHold;
-            }
             if (name.startsWith("creation-conversation-drafts-v1:")) {
                 if (draftHold) {
                     draftWriteEntered += 1;
@@ -102,15 +83,8 @@ mock.module("@/lib/localforage-storage", () => ({
 
 mock.module("@/lib/user-scope", () => ({
     getActiveUserScope: () => activeScope,
-    getActiveUserScopeEpoch: () => scopeGeneration,
-    getUserScopeGeneration: () => scopeGeneration,
-    captureUserScopeEpoch: (scope = activeScope) => ({ scope, generation: scopeGeneration }),
-    userScopeEpochMatches: (epoch: { scope: string; generation: number }, live?: { scope: string; generation: number }) => {
-        const current = live || { scope: activeScope, generation: scopeGeneration };
-        return epoch.scope === current.scope && epoch.generation === current.generation;
-    },
+    onStorageNamespaceChange: () => () => undefined,
     setActiveUserScope: (userId?: string | null) => switchScope(userId || "guest"),
-    subscribeUserScope: () => () => undefined,
     scopedStorageKey: (name: string, scope = activeScope) => `${name}:user:${scope}`,
     scopedLocalStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
 }));
@@ -210,10 +184,6 @@ beforeEach(() => {
     server.releasePut = null;
     server.putEntered = 0;
     activeScope = "guest";
-    scopeGeneration = 1;
-    storageHold = null;
-    releaseStorage = null;
-    storageEntered = 0;
     draftHold = null;
     releaseDraftHold = null;
     draftWriteEntered = 0;
@@ -254,14 +224,6 @@ test("save failure keeps visible draft and does not mark server success", async 
     expect(server.conversations.get("draft-1")?.revision).toBe(1);
     server.puts = [];
     await saveCreationConversations([draft]);
-    expect(server.puts).toHaveLength(0);
-});
-
-test("scope switch rejects outstanding save", async () => {
-    const draft = { id: "scope-1", title: "原工作区", messages: [] };
-    const pending = saveCreationConversations([draft]);
-    switchScope("other-workspace");
-    await expect(pending).rejects.toThrow("工作区已更换，这次操作没有继续。");
     expect(server.puts).toHaveLength(0);
 });
 
@@ -385,24 +347,6 @@ test("caller mutation during delayed PUT cannot change in-flight payload", async
     expect(server.conversations.get("mut")?.document?.messages).toHaveLength(1);
 });
 
-test("delayed first cleanup does not import after account switch including A-B-A", async () => {
-    server.conversations.set("kept", { id: "kept", revision: 1, updatedAt: "2026-10-02T00:00:00.000Z", document: { id: "kept", title: "后端", messages: [] } });
-    stored.set(`guest:${CREATION_CONVERSATIONS_KEY}`, JSON.stringify([
-        { id: "kept", title: "后端", messages: [] },
-        { id: "fresh", title: "待导入", messages: [{ id: "m1", role: "user", content: "hi" }] },
-    ]));
-    holdLegacyWrites();
-    const pending = loadCreationConversations("guest");
-    for (let turn = 0; turn < 50 && storageEntered === 0; turn += 1) await Promise.resolve();
-    expect(storageEntered).toBeGreaterThan(0);
-    switchScope("other-workspace");
-    switchScope("guest");
-    releaseStorage?.();
-    await expect(pending).rejects.toThrow("工作区已更换，这次操作没有继续。");
-    expect(server.imports).toEqual([]);
-    expect(server.conversations.has("fresh")).toBe(false);
-});
-
 test("canonical untitled ack skips a second PUT", async () => {
     await saveCreationConversations([{ id: "untitled", messages: [] }]);
     expect(server.puts).toEqual([{ id: "untitled", expectedRevision: 0, title: "新创作", messageCount: 0 }]);
@@ -472,28 +416,13 @@ test("later generation is projected onto the canonical untitled ack", async () =
     expect(server.conversations.get("proj")?.document?.messages).toHaveLength(2);
 });
 
-test("adoptServerConfirmedConversationDocument uses the entry captured scope and does not PUT", async () => {
-    const captured = { userScope: "guest", epoch: 1 };
+test("adoptServerConfirmedConversationDocument adopts the server document and does not PUT", async () => {
     const adopted = await adoptServerConfirmedConversationDocument("conv-1", {
         id: "conv-1",
         title: "已绑定",
         messages: [{ id: "msg-1", role: "assistant", content: "图片已生成" }],
-    }, 4, captured);
+    }, 4);
     expect(adopted.title).toBe("已绑定");
-    expect(server.puts).toEqual([]);
-
-    await expect(adoptServerConfirmedConversationDocument("conv-1", {
-        id: "conv-1",
-        title: "下一账号",
-        messages: [],
-    }, 5, { userScope: "guest", epoch: 1 })).resolves.toMatchObject({ title: "下一账号" });
-
-    switchScope("user-b");
-    await expect(adoptServerConfirmedConversationDocument("conv-1", {
-        id: "conv-1",
-        title: "不该写入",
-        messages: [],
-    }, 6, captured)).rejects.toMatchObject({ name: "UserScopeAbandonedError" });
     expect(server.puts).toEqual([]);
 });
 
@@ -530,7 +459,7 @@ test("adopt keeps deferred user edits instead of dropping the draft", async () =
             { id: "user-1", role: "user", content: "镜头" },
             { id: "msg-1", role: "assistant", status: "done", content: "图片已生成", taskIds: ["task-1"], resultUrls: ["/api/resources/res-1/file"] },
         ],
-    }, 5, capturedGuest());
+    }, 5);
     expect(adopted.title).toBe("改名");
     expect((adopted.messages as Array<{ id: string; content?: string }>).map((item) => item.id)).toEqual(["user-1", "msg-1", "user-2"]);
     expect((adopted.messages as Array<{ id: string; content?: string }>).find((item) => item.id === "msg-1")?.content).toBe("图片已生成");
@@ -554,7 +483,7 @@ test("adopt keeps a local title edit without resurrecting a remotely deleted mes
     holdPuts();
     const saving = saveCreationConversations([{ id: "conv-1", title: "本地标题", messages: [{ id: "msg-1", role: "user", content: "旧消息" }] }]);
     while (!server.putEntered) await Promise.resolve();
-    const adopted = await adoptServerConfirmedConversationDocument("conv-1", { id: "conv-1", title: "原稿", messages: [] }, 5, capturedGuest());
+    const adopted = await adoptServerConfirmedConversationDocument("conv-1", { id: "conv-1", title: "原稿", messages: [] }, 5);
     expect(adopted.title).toBe("本地标题");
     expect(adopted.messages).toEqual([]);
     server.releasePut?.();
@@ -566,13 +495,13 @@ test("adopt refuses an older receipt instead of rolling back committed truth", a
         id: "conv-1",
         title: "新确认",
         messages: [{ id: "msg-1", role: "assistant", content: "图片已生成" }],
-    }, 5, capturedGuest());
+    }, 5);
     expect(newer.title).toBe("新确认");
     const older = await adoptServerConfirmedConversationDocument("conv-1", {
         id: "conv-1",
         title: "旧回执",
         messages: [{ id: "msg-1", role: "assistant", content: "旧内容" }],
-    }, 3, capturedGuest());
+    }, 3);
     expect(older.title).toBe("新确认");
     expect((older.messages as Array<{ content?: string }>)[0]?.content).toBe("图片已生成");
     const drafts = await loadLocalCreationConversationDrafts();
@@ -613,7 +542,7 @@ test("adopt IDB failure keeps the user draft and retry merges after restart", as
             { id: "user-1", role: "user", content: "镜头" },
             { id: "msg-1", role: "assistant", status: "done", content: "图片已生成", taskIds: ["task-1"] },
         ],
-    }, 5, capturedGuest())).rejects.toThrow("IndexedDB unavailable");
+    }, 5)).rejects.toThrow("IndexedDB unavailable");
     const kept = JSON.parse(stored.get("guest:creation-conversation-drafts-v1:conv-1") || "null") as { document?: { title?: string; messages?: unknown[] } };
     expect(kept.document?.title).toBe("改名");
     expect(kept.document?.messages).toHaveLength(3);
@@ -630,7 +559,7 @@ test("adopt IDB failure keeps the user draft and retry merges after restart", as
             { id: "user-1", role: "user", content: "镜头" },
             { id: "msg-1", role: "assistant", status: "done", content: "图片已生成", taskIds: ["task-1"] },
         ],
-    }, 5, capturedGuest());
+    }, 5);
     expect(retried.title).toBe("改名");
     expect((retried.messages as Array<{ id: string; content?: string }>).find((item) => item.id === "msg-1")?.content).toBe("图片已生成");
     expect((retried.messages as Array<{ id: string }>).find((item) => item.id === "user-2")).toBeDefined();
@@ -644,7 +573,7 @@ test("adopt keeps an edit arriving during the final draft removal", async () => 
     let release!: () => void;
     draftRemoveHold = new Promise<void>((resolve) => { release = resolve; });
     holdPuts();
-    const adoptP = adoptServerConfirmedConversationDocument("conv-1", { id: "conv-1", title: "原稿", messages: [] }, 5, capturedGuest());
+    const adoptP = adoptServerConfirmedConversationDocument("conv-1", { id: "conv-1", title: "原稿", messages: [] }, 5);
     while (!draftRemoveEntered) await Promise.resolve();
     const saveP = saveCreationConversations([{ id: "conv-1", title: "最后一步的新编辑", messages: [{ id: "new", role: "user", content: "保留" }] }]);
     release();
@@ -678,7 +607,7 @@ test("adopt keeps a newer draft that arrives while receipt persistence is in fli
             { id: "user-1", role: "user", content: "镜头" },
             { id: "msg-1", role: "assistant", status: "done", content: "图片已生成", taskIds: ["task-1"] },
         ],
-    }, 5, capturedGuest());
+    }, 5);
     while (draftWriteEntered === 0) await Promise.resolve();
     const saveP = saveCreationConversations([{
         id: "conv-1",

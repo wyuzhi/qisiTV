@@ -8,8 +8,8 @@ import { failedImageBatchChildren, markImageBatchRetrying, reconcileImageBatchRo
 import { bindMissingCanvasResourceAssets, canvasNodesMissingResourceAssetBinding } from "@/lib/canvas/canvas-node-asset";
 import { createCanvasNode } from "@/lib/canvas/canvas-project-domain";
 import { getGenerationCount } from "@/lib/canvas/canvas-project-generation";
-import { shouldBlockManualRetry } from "@/lib/generation-error";
-import { canvasNodeFailureExplanation, isDepthCaptureResultNode } from "@/lib/canvas/canvas-depth-capture";
+import { isDepthCaptureResultNode } from "@/lib/canvas/canvas-depth-capture";
+import { canvasNodeFailureView } from "@/lib/canvas/canvas-node-failure-view";
 import type { GenerationTask } from "@/services/api/task-center";
 import type { Asset } from "@/stores/use-asset-store";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type Position } from "@/types/canvas";
@@ -29,7 +29,7 @@ export type CanvasNodeRetryPlan =
     | { kind: "single" };
 
 export function canvasNodeRetryPlan(node: CanvasNodeData, nodes: CanvasNodeData[]): CanvasNodeRetryPlan {
-    if (canvasNodeFailureExplanation(node).category === "result_target_unavailable") return { kind: "history" };
+    if (canvasNodeFailureView(node).recoveryRoute === "history") return { kind: "history" };
     if (isDepthCaptureResultNode(node)) return { kind: "depth" };
     if (node.type === CanvasNodeType.Script) {
         const prompt = (node.metadata?.composerContent || node.metadata?.prompt || "").trim();
@@ -46,7 +46,11 @@ export function canvasNodeRetryPlan(node: CanvasNodeData, nodes: CanvasNodeData[
 }
 
 export function selectRetryableImageBatchChildren(children: CanvasNodeData[]) {
-    const retryable = children.filter((child) => !shouldBlockManualRetry({ code: child.metadata?.generationErrorCode || child.metadata?.taskErrorCode, message: child.metadata?.errorDetails }, child.metadata?.taskStage));
+    // 批量重试没有逐个确认：需要确认（可能再次扣费）的子节点只能单独重新生成。
+    const retryable = children.filter((child) => {
+        const view = canvasNodeFailureView(child);
+        return !view.regenerateBlocked && !view.regenerateConfirm;
+    });
     return { retryable, blocked: retryable.length < children.length };
 }
 
@@ -161,7 +165,8 @@ export async function insertCanvasGenerationHistoryTask(input: {
 }): Promise<{ node: CanvasNodeData; nextNodes: CanvasNodeData[]; insertedNodes?: CanvasNodeData[]; abandoned?: boolean }> {
     const mode = generationTaskMode(input.task);
     const nodeType = mode === "video" ? CanvasNodeType.Video : mode === "audio" ? CanvasNodeType.Audio : CanvasNodeType.Image;
-    const count = mode === "image" ? beefAPIImageContract(input.task.model || "")?.fixedOutputs || 1 : 1;
+    const declaredOutputs = input.task.outputs?.length ? Math.max(...input.task.outputs.map((item) => (item.outputIndex ?? 0) + 1), input.task.outputs.length) : 0;
+    const count = mode === "image" ? (beefAPIImageContract(input.task.model || "")?.fixedOutputs || declaredOutputs || 1) : 1;
     const insertedNodes: CanvasNodeData[] = [];
     for (let index = 0; index < count; index++) {
         const node = createCanvasNode(nodeType, { x: input.center.x + (index % 2) * 400, y: input.center.y + Math.floor(index / 2) * 400 }, {

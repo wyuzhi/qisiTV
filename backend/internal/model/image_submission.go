@@ -9,6 +9,7 @@ type ImageSubmission struct {
 	TaskID           string    `gorm:"size:36;index" json:"-"`
 	UserID           string    `gorm:"size:36;index" json:"-"`
 	RequestCipher    string    `gorm:"type:text" json:"-"`
+	QueryCipher      string    `gorm:"type:text" json:"-"`
 	SendCount        int       `json:"-"`
 	ResponseAccepted bool      `json:"-"`
 	CreatedAt        time.Time `json:"-"`

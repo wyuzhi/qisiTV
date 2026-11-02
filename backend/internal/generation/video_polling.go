@@ -232,6 +232,11 @@ func videoResultPending(err error) bool {
 		return false
 	}
 	code, _ := FailureDetails(payload)
+	if code == "" {
+		if errObj, ok := payload["error"].(map[string]any); ok {
+			code = normalizedUpstreamErrorCode(errObj["type"])
+		}
+	}
 	return httpErr.StatusCode == http.StatusServiceUnavailable && code == "video_delivery_pending"
 }
 

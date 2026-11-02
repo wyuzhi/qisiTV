@@ -39,7 +39,7 @@ func TestImageGatewayPreparationFailureDoesNotBecomeUnknownOrResend(t *testing.T
 	if retryErr := s.validateImageTaskRetry(&task); retryErr != nil {
 		t.Fatalf("confirmed unsent task cannot be retried: %v", retryErr)
 	}
-	_ = s.terminalCoordinator().handleExecutionFailure(&task, err, false, false)
+	_ = s.terminalCoordinator().HandleExecutionFailure(&task, err, false, false)
 	stored, readErr := s.repo.Task(task.ID)
 	if readErr != nil {
 		t.Fatal(readErr)

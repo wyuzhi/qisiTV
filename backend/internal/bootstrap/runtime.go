@@ -24,6 +24,7 @@ import (
 	"qisitv/backend/internal/eagle"
 	canvasHandler "qisitv/backend/internal/handler"
 	"qisitv/backend/internal/localapp"
+	"qisitv/backend/internal/modelcatalog"
 	"qisitv/backend/internal/projectfolder"
 	"qisitv/backend/internal/repository"
 	"qisitv/backend/internal/runtimeinfo"
@@ -145,12 +146,17 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 			}
 			models := make([]beefapi.CatalogModel, 0, len(items))
 			for _, item := range items {
+				imageVersion := ""
+				if item.ImageCapabilitiesVersion != nil {
+					imageVersion = *item.ImageCapabilitiesVersion
+				}
 				version := ""
 				if item.VideoCapabilitiesVersion != nil {
 					version = *item.VideoCapabilitiesVersion
 				}
 				models = append(models, beefapi.CatalogModel{
 					ID: item.ID, DisplayName: item.DisplayName, ModelType: item.ModelType, SupportedEndpointTypes: item.SupportedEndpointTypes,
+					ImageCapabilities: item.ImageCapabilities, ImageCapabilitiesVersion: imageVersion,
 					VideoCapabilities: item.VideoCapabilities, VideoCapabilitiesVersion: version,
 					VideoPricing: item.VideoPricing,
 				})
@@ -169,7 +175,7 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 	taskService := svc.TaskService()
 	localRoot, err := localapp.New(localapp.Options{
 		Workspace: workspace.NewService(repo), Projects: projectService, Assets: assetService, Tasks: taskService,
-		Generation: taskService, ProviderConfig: providerConfig, Lifecycle: localKernel,
+		Generation: taskService, ProviderConfig: providerConfig, ModelCapability: modelcatalog.NewCapabilityNormalizer(), Lifecycle: localKernel,
 	})
 	if err != nil {
 		cleanupService()
@@ -225,6 +231,7 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 	canvasHandler.RegisterDesktopCanvasAPIWithDependencies(api, svc, canvasHandler.RuntimeDependencies{
 		RequestCoordinator: localKernel,
 		ProviderConfig:     localRoot.ProviderConfig,
+		ModelCapability:    localRoot.ModelCapability,
 		Assets:             localRoot.Assets,
 		Projects:           localRoot.Projects,
 		Tasks:              localRoot.Tasks,
@@ -283,6 +290,10 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 		// Credential issuance and runtime administration retain desktop trust.
 		if isOpsEntryPath(r) && isLoopbackRemote(r.RemoteAddr) {
 			if _, ok := clients.Lookup(r.Header.Get("X-Beeftv-Client"), strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))); ok {
+				router.ServeHTTP(w, r)
+				return
+			}
+			if r.Header.Get("X-Beeftv-Client") == "" && agentops.OwnerTokenMatches(svc.DataDir(), strings.TrimSpace(r.Header.Get("X-Beeftv-Owner"))) && canvasHandler.IsLocalBusinessRequest(r) {
 				router.ServeHTTP(w, r)
 				return
 			}
@@ -528,17 +539,26 @@ func desktopCORSMiddleware() gin.HandlerFunc {
 	}
 }
 
-// isOpsEntryPath 只认操作层的两个入口：GET /api/ops 与 POST /api/ops/<op>。
-// /api/ops/clients 是凭据签发，不在豁免范围；带子路径的形态也一律不算。
+// isOpsEntryPath 只认操作层入口：GET /api/ops、GET /api/ops/orders、GET /api/ops/external-writes、
+// POST /api/ops/<op>、POST /api/ops/orders/<proposalId>/approve 与 POST /api/ops/external-writes/<opId>/undo。
+// /api/ops/clients 是凭据签发，不在豁免范围。
 func isOpsEntryPath(r *http.Request) bool {
 	path := r.URL.Path
-	if r.Method == http.MethodGet && path == "/api/ops" {
+	if r.Method == http.MethodGet && (path == "/api/ops" || path == "/api/ops/orders" || path == "/api/ops/external-writes") {
 		return true
 	}
 	if r.Method != http.MethodPost || !strings.HasPrefix(path, "/api/ops/") {
 		return false
 	}
 	op := strings.TrimPrefix(path, "/api/ops/")
+	if strings.HasPrefix(op, "orders/") && strings.HasSuffix(op, "/approve") {
+		proposalID := strings.TrimSuffix(strings.TrimPrefix(op, "orders/"), "/approve")
+		return proposalID != "" && !strings.Contains(proposalID, "/")
+	}
+	if strings.HasPrefix(op, "external-writes/") && strings.HasSuffix(op, "/undo") {
+		opID := strings.TrimSuffix(strings.TrimPrefix(op, "external-writes/"), "/undo")
+		return opID != "" && !strings.Contains(opID, "/")
+	}
 	return op != "" && op != "clients" && !strings.Contains(op, "/")
 }
 

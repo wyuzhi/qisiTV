@@ -2,10 +2,8 @@ import { CanvasNodeType, type CanvasMediaPerformanceMode, type CanvasNodeData } 
 
 const STORAGE_KEY = "canvas-media-performance-mode";
 
-// The DOM budget is deliberately below the connection budget. Image-heavy
-// canvases pay a texture/compositing profile per mounted card, even when the
-// cards themselves are already virtualized spatially.
-export const CANVAS_MAX_RENDERED_NODES = 720;
+// Overview cost is bounded by the LOD canvas (canvas-lod.ts), not a DOM node
+// count budget: a count cap hid visible nodes.
 export const CANVAS_MAX_RENDERED_CONNECTIONS = 5000;
 
 export function readCanvasMediaPerformanceMode(): CanvasMediaPerformanceMode {
@@ -35,12 +33,6 @@ export function shouldReduceCanvasMediaEffects(mode: CanvasMediaPerformanceMode,
 export function canvasNodeRenderPadding(reduceMediaEffects: boolean, previouslyRendered: boolean) {
     if (previouslyRendered) return reduceMediaEffects ? 640 : 384;
     return reduceMediaEffects ? 128 : 192;
-}
-
-export function canvasNodeRenderBudget(scale: number) {
-    if (scale < 0.14) return 280;
-    if (scale < 0.28) return 420;
-    return CANVAS_MAX_RENDERED_NODES;
 }
 
 export function resolveActiveCanvasMediaNodeId(selectedNodeIds: ReadonlySet<string>, nodeById: ReadonlyMap<string, CanvasNodeData>) {

@@ -41,13 +41,13 @@ func claimBackgroundHTTPContinuation(t *testing.T, env *assistantTestEnv) *assis
 	if _, err = env.service.BeginAssistantTurn(owner.ID, env.canvasID, source, app.AssistantTurnInput{PermissionMode: assistantturns.PermissionCanvas}); err != nil {
 		t.Fatal(err)
 	}
-	if err = env.service.BindAssistantDurableSession(owner.ID, source, session, false); err != nil {
+	if err = env.service.AssistantTurns().BindDurableSession(owner.ID, source, session, false); err != nil {
 		t.Fatal(err)
 	}
 	if err = env.service.FinalizeAssistantTurn(source); err != nil {
 		t.Fatal(err)
 	}
-	row, err := env.service.ArmAssistantContinuation(owner.ID, assistantturns.ContinuationInput{
+	row, err := env.service.AssistantTurns().ArmContinuation(owner.ID, assistantturns.ContinuationInput{
 		CanvasID: env.canvasID, SessionID: session, SourceTurnID: source,
 		ProposalID: "gp-background", Kind: "image", NodeIDs: []string{"n1"},
 	})
@@ -55,7 +55,7 @@ func claimBackgroundHTTPContinuation(t *testing.T, env *assistantTestEnv) *assis
 		t.Fatal(err)
 	}
 	opID := "proposal:gp-background:n1"
-	if err = env.service.RegisterAssistantContinuationManifest(owner.ID, row.ID, assistantturns.ContinuationManifest{
+	if err = env.service.AssistantTurns().RegisterContinuationManifest(owner.ID, row.ID, assistantturns.ContinuationManifest{
 		SourceNodeID: "n1", Submissions: []assistantturns.ContinuationSubmission{{OperationID: opID, OutputNodeIDs: []string{"n1"}}},
 	}); err != nil {
 		t.Fatal(err)
@@ -119,7 +119,7 @@ func TestAssistantBackgroundContinuationHTTPUnknownAdmissionDoesNotFinalize(t *t
 					t.Fatal("background request included composer input", field)
 				}
 			}
-			state, err := env.service.AssistantTurnRuntimeState(row.UserID, row.TurnID)
+			state, err := env.service.AssistantTurns().RuntimeState(row.UserID, row.TurnID)
 			if err != nil || !state.Open {
 				t.Fatalf("unknown admission settled the Go turn: %+v %v", state, err)
 			}
@@ -217,7 +217,7 @@ func TestAssistantBackgroundContinuationHTTPObserverStopsWithoutSettlingOnExit(t
 	case <-time.After(3 * time.Second):
 		t.Fatal("owned host HTTP request survived runtime exit")
 	}
-	state, err := env.service.AssistantTurnRuntimeState(row.UserID, row.TurnID)
+	state, err := env.service.AssistantTurns().RuntimeState(row.UserID, row.TurnID)
 	if err != nil || !state.Open {
 		t.Fatalf("exit discarded recoverable turn: %+v %v", state, err)
 	}

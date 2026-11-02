@@ -57,7 +57,7 @@ func TestFailedVideoManualRecoveryResumesProviderDownloadCache(t *testing.T) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		if r.URL.Path != "/v1/videos/original" {
+		if r.URL.Path != "/v1/videos/original" && r.URL.Path != "/v1/video/generations/original" {
 			t.Errorf("unexpected recovery route: %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return

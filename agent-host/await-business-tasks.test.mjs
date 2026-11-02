@@ -87,3 +87,38 @@ test('a failed progress commit still returns the admitted task identity', async 
   expect(result.result.status).toBe('pending');
   expect(result.result.observationFailed).toBe(true);
 });
+
+test('retrievable failed task and fetching succeeded task keep waiting until outcome is ready', async () => {
+  const states = [
+    { taskId: 'original', status: 'failed', outcome: { phase: 'retrievable', reason: 'provider_result_pending' }, outputs: [] },
+    { taskId: 'original', status: 'succeeded', resultState: 'PENDING_MATERIALIZATION', outcome: { phase: 'fetching', reason: 'result_fetching' }, outputs: [{ resourceId: 'original-resource' }] },
+    { taskId: 'original', status: 'succeeded', resultState: 'READY', outcome: { phase: 'ready', reason: 'result_ready' }, outputs: [{ resourceId: 'original-resource' }] },
+  ];
+  const progress = [];
+  const result = await awaitBusinessTasks({ result: { taskIds: ['original'] } }, {
+    intervalMs: 1,
+    onProgress: async value => progress.push(value.stage),
+    opsRequest: async (_method, path, body) => {
+      expect(path).toBe('/ops/task.get');
+      expect(body.params.taskId).toBe('original');
+      return { result: states.shift() };
+    },
+  });
+  expect(result.result.status).toBe('succeeded');
+  expect(progress).toEqual(['downloading', 'saving', 'saved']);
+});
+
+test('transient task observation error reports observation_unavailable without fabricating terminal failure', async () => {
+  const progress = [];
+  const result = await awaitBusinessTasks({ result: { taskIds: ['original'] } }, {
+    intervalMs: 1,
+    onProgress: async value => progress.push(value.stage),
+    opsRequest: async () => {
+      throw new Error('temporary sqlite busy');
+    },
+  });
+  expect(result.result.taskIds).toEqual(['original']);
+  expect(result.result.status).toBe('pending');
+  expect(result.result.observationFailed).toBe(true);
+  expect(progress).toEqual(['observation_unavailable']);
+});

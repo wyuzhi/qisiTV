@@ -42,7 +42,7 @@ func ConfigurationStatus() struct {
 // Desktop launchers do not inherit shell proxy variables. Read system settings
 // on each request so retry also works after the user changes their proxy.
 func Proxy(req *http.Request) (*url.URL, error) {
-	config := httpproxy.FromEnvironment()
+	config := environmentProxyConfig()
 	if ExplicitProxyConfigured() {
 		return config.ProxyFunc()(req.URL)
 	}
@@ -56,7 +56,7 @@ func ConfiguredProxyAddress(address string) bool {
 	if err != nil {
 		return false
 	}
-	config := *httpproxy.FromEnvironment()
+	config := *environmentProxyConfig()
 	if !ExplicitProxyConfigured() {
 		config = readSystemProxy().config
 	}
@@ -92,7 +92,7 @@ func ConfiguredProxyAddress(address string) bool {
 // HTTPSProxyEnvironment carries desktop proxy selection to HTTPS-only child
 // downloaders, including redirect hosts and the system bypass list.
 func HTTPSProxyEnvironment() []string {
-	config := httpproxy.FromEnvironment()
+	config := environmentProxyConfig()
 	if !ExplicitProxyConfigured() {
 		system := readSystemProxy()
 		config.HTTPSProxy = system.config.HTTPSProxy
@@ -107,6 +107,28 @@ func HTTPSProxyEnvironment() []string {
 	}
 	noProxy := strings.Join(bypass, ",")
 	return []string{"HTTPS_PROXY=" + config.HTTPSProxy, "https_proxy=" + config.HTTPSProxy, "NO_PROXY=" + noProxy, "no_proxy=" + noProxy, "ALL_PROXY=", "all_proxy="}
+}
+
+// golang.org/x/net v0.58.0+ flipped httpproxy.FromEnvironment to prefer
+// lowercase environment variables (golang/go#79656). Keep desktopnet's
+// uppercase-first precedence consistent with NodeProxyEnvironment and
+// child downloader tests.
+func environmentProxyConfig() *httpproxy.Config {
+	return &httpproxy.Config{
+		HTTPProxy:  firstNonEmptyEnv("HTTP_PROXY", "http_proxy"),
+		HTTPSProxy: firstNonEmptyEnv("HTTPS_PROXY", "https_proxy"),
+		NoProxy:    firstNonEmptyEnv("NO_PROXY", "no_proxy"),
+		CGI:        os.Getenv("REQUEST_METHOD") != "",
+	}
+}
+
+func firstNonEmptyEnv(names ...string) string {
+	for _, name := range names {
+		if v := os.Getenv(name); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // Explicit environment configuration must never be bypassed automatically.

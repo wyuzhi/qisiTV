@@ -52,7 +52,7 @@ test("任务已成功但还没有进度时显示正在取回结果", () => {
 });
 
 test("结果已保留的失败节点提供「继续取回」", () => {
-    const markup = render({ ...loadingVideo, metadata: { status: "error", taskId: "task-1", taskStatus: "succeeded", generationErrorCode: "download_failed", resourceReloadAvailable: true } });
+    const markup = render({ ...loadingVideo, metadata: { status: "error", taskId: "task-1", taskStatus: "succeeded", generationErrorCode: "download_failed", taskOutcome: { phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" } } });
     expect(markup).toContain("继续取回");
     expect(markup).not.toContain("重新加载资源");
 });

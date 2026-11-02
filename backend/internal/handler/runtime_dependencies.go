@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"qisitv/backend/internal/app"
 	"qisitv/backend/internal/appearance"
 	"qisitv/backend/internal/assistantruntime"
 	"qisitv/backend/internal/beefapi"
@@ -15,6 +14,7 @@ import (
 	"qisitv/backend/internal/eagle"
 	"qisitv/backend/internal/localapp"
 	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/modelcatalog"
 	localproject "qisitv/backend/internal/project"
 	localtask "qisitv/backend/internal/task"
 	"qisitv/backend/internal/textreplay"
@@ -45,6 +45,7 @@ type VersionedProviderConfig interface {
 type RuntimeDependencies struct {
 	RequestCoordinator RequestCoordinator
 	ProviderConfig     ProviderConfig
+	ModelCapability    localapp.ModelCapabilityPort
 	Assets             localapp.AssetPort
 	Projects           localapp.ProjectPort
 	Tasks              localapp.TaskPort
@@ -77,16 +78,26 @@ type serviceRuntimeAdapter struct {
 	createTimelineRender        func(string, localtask.TimelineRenderCreateRequest) (*model.Task, error)
 	createTimelineTranscription func(string, localtask.TimelineTranscriptionCreateRequest) (*model.Task, error)
 	createDepthCapture          func(string, localtask.DepthCaptureCreateRequest) (*model.Task, error)
+	recoverTask                 func(context.Context, string, string) (*model.Task, error)
 }
 
-func newServiceRuntimeAdapter(value *app.Service) serviceRuntimeAdapter {
+type serviceRuntimeSource interface {
+	RequestCoordinator
+	ProviderConfig
+	localapp.AssetPort
+	localapp.ProjectPort
+	localapp.TaskPort
+	CreateLocalTask(string, localtask.CreateRequest) (*model.Task, error)
+}
+
+func newServiceRuntimeAdapter(value serviceRuntimeSource) serviceRuntimeAdapter {
 	return serviceRuntimeAdapter{
 		allowRequest: value.AllowRequest, requestRetryAfter: value.RequestRetryAfter,
 		readModelConfig: value.ReadLocalModelConfig, saveModelConfig: value.SaveLocalModelConfig,
 		resources: value.Resources, uploadLocalResource: value.UploadLocalResource,
 		listProjects: value.ListProjects, tasksWithOptions: value.TasksWithOptions, createTask: value.CreateLocalTask,
 		createTimelineRender: value.CreateTimelineRenderTask, createTimelineTranscription: value.CreateTimelineTranscriptionTask,
-		createDepthCapture: value.CreateDepthCaptureTask,
+		createDepthCapture: value.CreateDepthCaptureTask, recoverTask: value.RecoverTask,
 	}
 }
 
@@ -138,46 +149,77 @@ func (a serviceRuntimeAdapter) CreateDepthCaptureTask(userID string, request loc
 	return a.createDepthCapture(userID, request)
 }
 
-func requestAssetPort(c *gin.Context, fallback *app.Service) localapp.AssetPort {
+func (a serviceRuntimeAdapter) RecoverTask(ctx context.Context, userID, id string) (*model.Task, error) {
+	return a.recoverTask(ctx, userID, id)
+}
+
+func requestAssetPort(c *gin.Context, fallback localapp.AssetPort) localapp.AssetPort {
 	if dependencies, ok := runtimeDependencies(c); ok && dependencies.Assets != nil {
 		return dependencies.Assets
 	}
-	return newServiceRuntimeAdapter(fallback)
+	return fallback
 }
 
-func requestProjectPort(c *gin.Context, fallback *app.Service) localapp.ProjectPort {
+func requestProjectPort(c *gin.Context, fallback serviceRuntimeSource) localapp.ProjectPort {
 	if dependencies, ok := runtimeDependencies(c); ok && dependencies.Projects != nil {
 		return dependencies.Projects
 	}
 	return newServiceRuntimeAdapter(fallback)
 }
 
-func requestTaskPort(c *gin.Context, fallback *app.Service) localapp.TaskPort {
+func requestTaskPort(c *gin.Context, fallback serviceRuntimeSource) localapp.TaskPort {
 	if dependencies, ok := runtimeDependencies(c); ok && dependencies.Tasks != nil {
 		return dependencies.Tasks
 	}
 	return newServiceRuntimeAdapter(fallback)
 }
 
-func requestGenerationPort(c *gin.Context, fallback *app.Service) localapp.GenerationPort {
+func requestGenerationPort(c *gin.Context, fallback serviceRuntimeSource) localapp.GenerationPort {
 	if dependencies, ok := runtimeDependencies(c); ok && dependencies.Generation != nil {
 		return dependencies.Generation
 	}
 	return newServiceRuntimeAdapter(fallback)
 }
 
-func requestProviderConfig(c *gin.Context, fallback *app.Service) ProviderConfig {
+// modelConfigFallback supplies the unversioned model-config read and write
+// when a request has no injected provider port.
+type modelConfigFallback interface {
+	ReadLocalModelConfig() ([]byte, error)
+	SaveLocalModelConfig([]byte) error
+}
+
+func requestProviderConfig(c *gin.Context, fallback modelConfigFallback) ProviderConfig {
 	if dependencies, ok := runtimeDependencies(c); ok && dependencies.ProviderConfig != nil {
 		return dependencies.ProviderConfig
 	}
-	return newServiceRuntimeAdapter(fallback)
+	if service, ok := fallback.(serviceRuntimeSource); ok {
+		return newServiceRuntimeAdapter(service)
+	}
+	return modelConfigMethods{read: fallback.ReadLocalModelConfig, save: fallback.SaveLocalModelConfig}
 }
 
-func requestTextReplay(c *gin.Context, fallback *app.Service) textReplayAPI {
+type modelConfigMethods struct {
+	read func() ([]byte, error)
+	save func([]byte) error
+}
+
+func (m modelConfigMethods) ReadLocalModelConfig() ([]byte, error) { return m.read() }
+func (m modelConfigMethods) SaveLocalModelConfig(value []byte) error {
+	return m.save(value)
+}
+
+func requestModelCapability(c *gin.Context) localapp.ModelCapabilityPort {
+	if dependencies, ok := runtimeDependencies(c); ok && dependencies.ModelCapability != nil {
+		return dependencies.ModelCapability
+	}
+	return modelcatalog.NewCapabilityNormalizer()
+}
+
+func requestTextReplay(c *gin.Context, fallback textReplayAPI) textReplayAPI {
 	if dependencies, ok := runtimeDependencies(c); ok && dependencies.TextReplay != nil {
 		return dependencies.TextReplay
 	}
-	return appTextReplayAPI{fallback}
+	return fallback
 }
 
 const runtimeDependenciesKey = "canvas.runtime-dependencies"

@@ -54,7 +54,7 @@ func TestFullAccessActualDurableCrossCanvasMoveCrashReplayAndGroupUndo(t *testin
 	if err := env.service.Database().Where("turn_id = ? AND status = ?", turn, "succeeded").Find(&receipts).Error; err != nil || len(receipts) != 2 {
 		t.Fatalf("receipts=%d %v", len(receipts), err)
 	}
-	if _, err := env.service.UndoAssistantTurn(owner.ID, env.canvasID, turn); err != nil {
+	if _, err := env.service.AssistantTurns().Undo(owner.ID, env.canvasID, turn); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{env.canvasID, other} {

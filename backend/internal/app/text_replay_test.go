@@ -57,7 +57,7 @@ func TestTextReplayFacadeDelegatesCompleteAppendRead(t *testing.T) {
 	if err != nil || len(got.Deltas) != 1 || got.Complete {
 		t.Fatalf("read: %#v %v", got, err)
 	}
-	task, err := svc.CompleteTextReplayTask("user", "task", "hello")
+	task, err := svc.TextReplay().Complete("user", "task", "hello")
 	if err != nil || task.Status != model.TaskStatusSucceeded {
 		t.Fatalf("complete: %#v %v", task, err)
 	}

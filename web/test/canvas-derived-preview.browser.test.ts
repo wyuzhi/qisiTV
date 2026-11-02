@@ -51,6 +51,12 @@ test("real near-viewport MP4 poster makes no node or backend writes and releases
     expect(state.node.metadata).toEqual({ content: "/red.mp4" }); expect(state.writes).toBe(0); expect(writes).toBe(0); expect(state.created).toHaveLength(1);
     await page.evaluate(() => (window as any).previewHarness.unmount());
     await page.waitForFunction(() => (window as any).previewHarness.state().revoked.length === 1);
+    await page.evaluate(() => (window as any).previewHarness.mount());
+    await ready();
+    expect(videoReads).toBe(1);
+    expect((await page.evaluate(() => (window as any).previewHarness.state())).created).toHaveLength(2);
+    await page.evaluate(() => (window as any).previewHarness.unmount());
+    await page.waitForFunction(() => (window as any).previewHarness.state().revoked.length === 2);
 });
 test("changed source revokes old poster and decodes new bytes", async () => {
     await enter(); await ready(); const old = await page.locator("img").getAttribute("src");

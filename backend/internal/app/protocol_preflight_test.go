@@ -59,7 +59,7 @@ func TestMissingProtocolFailsBeforeGenerationDispatch(t *testing.T) {
 			if !strings.Contains(storedAttempt.FailureMessage, "uninstalled-protocol-fixture 未安装") {
 				t.Fatalf("lost first failure: %q", storedAttempt.FailureMessage)
 			}
-			if err := s.terminalCoordinator().handleExecutionFailure(&task, result.err, false, false); err == nil {
+			if err := s.terminalCoordinator().HandleExecutionFailure(&task, result.err, false, false); err == nil {
 				t.Fatal("missing terminal error")
 			}
 			stored, err := s.repo.Task(task.ID)

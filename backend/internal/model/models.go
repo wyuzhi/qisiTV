@@ -44,6 +44,11 @@ const (
 	// 完成后调用 /tasks/:id/text-replay-complete 归并为最终正文。
 	TaskStatusTextReplay TaskStatus = "text_replay"
 
+	// CanvasBindRecoveryPrefix marks the background scanner's private canvas
+	// bind marker in tasks.recovery_outcome. The same column holds media
+	// recovery conclusions (no_result / unrecoverable) for failed tasks.
+	CanvasBindRecoveryPrefix = "canvas_bind:"
+
 	UserRoleAdmin UserRole = "admin"
 	UserRoleUser  UserRole = "user"
 

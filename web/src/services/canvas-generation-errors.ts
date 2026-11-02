@@ -1,4 +1,4 @@
-import { isCanvasRevisionConflict } from "@/services/canvas-revision-conflict";
+import { CanvasBackendSubmitPausedError, isCanvasRevisionConflict } from "@/services/canvas-revision-conflict";
 import { explainGenerationError } from "@/lib/generation-error";
 
 export class CanvasGenerationDurableAckError extends Error {
@@ -27,8 +27,11 @@ export class CanvasGenerationMaterializationError extends Error {
 }
 
 export class CanvasGenerationTargetSaveError extends Error {
-    constructor(cause?: unknown, message = "画布尚未保存，未开始生成。请先处理画布保存提示后重试。") {
-        super(message, { cause });
+    constructor(cause?: unknown, message?: string) {
+        const detail = isCanvasRevisionConflict(cause) || cause instanceof CanvasBackendSubmitPausedError
+            ? "画布保存已暂停，本次未开始生成。请点击画布顶部的保存状态，按提示处理后再试。"
+            : "画布尚未保存，未开始生成。请先处理画布保存提示后重试。";
+        super(message ?? detail, { cause });
         this.name = "CanvasGenerationTargetSaveError";
     }
 }

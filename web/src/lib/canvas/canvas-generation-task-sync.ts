@@ -15,6 +15,7 @@ import { applyGenerationConsumerEffect, generationEffectApplied } from "@/servic
 import { attachNodeEffectKey } from "@/services/generation-task-materializer";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 import { mediaResultMetadata } from "@/lib/canvas/canvas-node-semantics";
+import { readNodeTaskOutcome } from "@/lib/task-outcome";
 import { generationTaskInput, generationTaskNodeId } from "@/lib/canvas/canvas-generation-task-identity";
 export { generationTaskInput, generationTaskNodeId } from "@/lib/canvas/canvas-generation-task-identity";
 
@@ -28,11 +29,6 @@ export function generationTaskMode(task: GenerationTask, fallback?: CanvasGenera
     return fallback || "image";
 }
 
-export function generationTaskCanReloadResource(task: GenerationTask) {
-    const mode = generationTaskMode(task);
-    return task.status === "succeeded" && (mode === "image" || mode === "video" || mode === "audio") && (Boolean(task.resultJson) || Boolean(task.outputs?.length));
-}
-
 export function imageMetadata(image: UploadedImage): CanvasNodeMetadata {
     return {
         content: image.url,
@@ -44,7 +40,9 @@ export function imageMetadata(image: UploadedImage): CanvasNodeMetadata {
         mimeType: image.mimeType,
         errorDetails: undefined,
         generationErrorCode: undefined,
-        resourceReloadAvailable: undefined,
+        generationErrorSummary: undefined,
+        generationProviderCode: undefined,
+        generationPreflightError: undefined,
         failedPromptFingerprint: undefined,
     };
 }
@@ -71,7 +69,9 @@ export function videoMetadata(video: UploadedFile): CanvasNodeMetadata {
         } : undefined,
         errorDetails: undefined,
         generationErrorCode: undefined,
-        resourceReloadAvailable: undefined,
+        generationErrorSummary: undefined,
+        generationProviderCode: undefined,
+        generationPreflightError: undefined,
         failedPromptFingerprint: undefined,
     };
 }
@@ -93,7 +93,9 @@ export function audioMetadata(audio: UploadedFile): CanvasNodeMetadata {
         durationMs: audio.durationMs,
         errorDetails: undefined,
         generationErrorCode: undefined,
-        resourceReloadAvailable: undefined,
+        generationErrorSummary: undefined,
+        generationProviderCode: undefined,
+        generationPreflightError: undefined,
         failedPromptFingerprint: undefined,
     };
 }
@@ -206,11 +208,22 @@ export async function buildGenerationTaskNodeResult(node: CanvasNodeData, task: 
                   height: videoSize.height,
                   position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 },
               };
+        const lastFrameSource = result.video?.lastFrame?.url || result.video?.lastFrame?.dataUrl || "";
+        const lastFrameKey = reuseGeneratedMediaStorageKey(result.video?.lastFrame?.storageKey, lastFrameSource) || result.video?.lastFrame?.storageKey;
         return {
             ...node,
             type: CanvasNodeType.Video,
             ...geometry,
-            metadata: applyGeneratedMediaResultMetadata(node, { ...videoMetadata(video), outputParameterWarning: seedanceOutputWarning(task.inputJson, video.width, video.height, task.model) }, { prompt, ...completedTaskMetadata(task) }),
+            metadata: applyGeneratedMediaResultMetadata(
+                node,
+                {
+                    ...videoMetadata(video),
+                    ...(lastFrameSource ? { lastFrameUrl: lastFrameSource } : {}),
+                    ...(lastFrameKey ? { lastFrameStorageKey: lastFrameKey } : {}),
+                    outputParameterWarning: seedanceOutputWarning(task.inputJson, video.width, video.height, task.model),
+                },
+                { prompt, ...completedTaskMetadata(task) },
+            ),
         };
     }
 
@@ -228,7 +241,7 @@ export async function buildGenerationTaskNodeResult(node: CanvasNodeData, task: 
     return {
         ...node,
         type: CanvasNodeType.Text,
-        metadata: { ...node.metadata, content: result.text, richText: undefined, prompt, ...completedTaskMetadata(task), status: "success", errorDetails: undefined, generationErrorCode: undefined, resourceReloadAvailable: undefined, failedPromptFingerprint: undefined },
+        metadata: { ...node.metadata, content: result.text, richText: undefined, prompt, ...completedTaskMetadata(task), status: "success", errorDetails: undefined, generationErrorCode: undefined, generationErrorSummary: undefined, generationProviderCode: undefined, failedPromptFingerprint: undefined },
     };
 }
 
@@ -281,7 +294,7 @@ export async function applyMaterializedGenerationTaskResultToNodes(nodes: Canvas
         };
         result.images = images;
     } else if (asset.kind === "video") {
-        result.video = { dataUrl: asset.data.url, ...asset.data };
+        result.video = { ...result.video, dataUrl: asset.data.url, ...asset.data };
     } else if (asset.kind === "audio") {
         result.audio = { dataUrl: asset.data.url, ...asset.data };
     } else {
@@ -324,7 +337,31 @@ export async function syncGenerationTaskToCanvasStore(task: GenerationTask) {
     const candidates = project.nodes.filter((node) => node.metadata?.taskId === task.id || node.id === target?.id);
     let changed = false;
     for (const node of candidates) {
-        if (node.metadata?.taskId === task.id && node.metadata.status === "success" && node.metadata.content) continue;
+        const hasBoundMedia = Boolean(
+            node.metadata?.content || node.metadata?.storageKey || node.metadata?.assetId,
+        );
+        if (node.metadata?.taskId === task.id && node.metadata.status === "success" && hasBoundMedia) {
+            const outcomePhase = readNodeTaskOutcome(node.metadata)?.phase;
+            if (outcomePhase !== "running" && outcomePhase !== "fetching") {
+                continue;
+            }
+            const healedNode: CanvasNodeData = {
+                ...node,
+                metadata: {
+                    ...node.metadata,
+                    taskOutcome: { phase: "ready", regenerate: "allowed", reason: "result_ready" },
+                    taskOutcomeSource: undefined,
+                    generationFailure: undefined,
+                },
+            };
+            const latest = useCanvasStore.getState().projects.find((item) => item.id === project.id);
+            if (!latest?.nodes.some((item) => item.id === node.id)) continue;
+            useCanvasStore.getState().updateProject(project.id, {
+                nodes: latest.nodes.map((item) => (item.id === node.id ? healedNode : item)),
+            });
+            changed = true;
+            continue;
+        }
         const updatedNode = await buildGenerationTaskNodeResult(node, task, project.nodes);
         const latest = useCanvasStore.getState().projects.find((item) => item.id === project.id);
         if (!latest?.nodes.some((item) => item.id === node.id)) continue;
@@ -344,6 +381,10 @@ function completedTaskMetadata(task: GenerationTask): CanvasNodeMetadata {
         taskFailureDiagnostics: task.failureDiagnostics,
         taskProviderRequestId: task.providerRequestId,
         taskId: task.id,
+        taskOutcome:
+            !task.outcome || task.outcome.phase === "running" || task.outcome.phase === "fetching"
+                ? { phase: "ready", regenerate: "allowed", reason: "result_ready" }
+                : task.outcome,
         taskStatus: task.status,
         taskProgress: typeof task.progress === "number" && Number.isFinite(task.progress) ? Math.max(0, Math.min(100, Math.round(task.progress))) : 100,
         taskStage: task.stage,
@@ -354,6 +395,9 @@ function completedTaskMetadata(task: GenerationTask): CanvasNodeMetadata {
         taskUpdatedAt: task.updatedAt || task.updated_at,
         errorDetails: undefined,
         generationErrorCode: undefined,
+        generationErrorSummary: undefined,
+        generationProviderCode: undefined,
+        generationPreflightError: undefined,
         failedPromptFingerprint: undefined,
     };
 }

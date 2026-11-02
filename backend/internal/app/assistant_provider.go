@@ -58,7 +58,7 @@ func (s *Service) ResolveAssistantProvider() (AssistantProvider, error) {
 	}
 	for index, channel := range snapshot.Channels {
 		if strings.TrimSpace(channel.Name) == "" && channel.ID == beefapi.ChannelID {
-			snapshot.Channels[index].Name = "BeefAPI"
+			snapshot.Channels[index].Name = "BeefTV"
 		}
 	}
 	return modelcatalog.ResolveAssistantProvider(snapshot, s.assistantManagedCredentialLookup())
@@ -84,7 +84,7 @@ func assistantReasonMessage(reason string) string {
 func (s *Service) resolveAssistantChannelModel(snapshot assistantConfigSnapshot, modelKey string) (AssistantProvider, string) {
 	for index, channel := range snapshot.Channels {
 		if strings.TrimSpace(channel.Name) == "" && channel.ID == beefapi.ChannelID {
-			snapshot.Channels[index].Name = "BeefAPI"
+			snapshot.Channels[index].Name = "BeefTV"
 		}
 	}
 	return modelcatalog.ResolveAssistantChannelModel(snapshot, modelKey, s.assistantManagedCredentialLookup())
@@ -103,7 +103,7 @@ func assistantChannelName(channel assistantChannel) string {
 		return name
 	}
 	if channel.ID == beefapi.ChannelID {
-		return "BeefAPI"
+		return "BeefTV"
 	}
 	return modelcatalog.AssistantChannelName(channel)
 }

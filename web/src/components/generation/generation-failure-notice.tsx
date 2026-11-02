@@ -1,7 +1,7 @@
 import { Copy, Eye, RefreshCw } from "lucide-react";
 import { useState } from "react";
 
-import { formatGenerationDiagnostics, type GenerationFailureContext, type GenerationFailureExplanation } from "@/lib/generation-error";
+import { formatGenerationDiagnostics, formatUpstreamFailureDetail, type GenerationFailureContext, type GenerationFailureExplanation } from "@/lib/generation-error";
 import { getDiagnosticTraceId } from "@/services/diagnostics/client-diagnostics";
 
 type GenerationFailureNoticeProps = {
@@ -18,6 +18,7 @@ type GenerationFailureNoticeProps = {
 export function GenerationFailureNotice({ explanation, context, compact, onRetry, retryLabel, onOpenDetails, retryDisabled, summaryOnly }: GenerationFailureNoticeProps) {
     const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
     const diagnostics = formatGenerationDiagnostics(explanation, { ...context, traceId: context?.traceId || getDiagnosticTraceId(context?.taskId || explanation.taskId) });
+    const upstreamDetail = summaryOnly ? "" : formatUpstreamFailureDetail(explanation, context);
     const showRetry = Boolean(onRetry) && !explanation.blockManualRetry && !retryDisabled;
     const copyDiagnostics = async () => {
         try {
@@ -38,6 +39,7 @@ export function GenerationFailureNotice({ explanation, context, compact, onRetry
         <div className={`generation-failure-notice${compact ? " is-compact" : ""}`}>
             <p className="generation-failure-reason">{explanation.reason}</p>
             {!summaryOnly && explanation.action ? <p className="generation-failure-action">{explanation.action}</p> : null}
+            {upstreamDetail ? <p className="generation-failure-upstream">{upstreamDetail}</p> : null}
             <div className="generation-failure-actions">
                 {onOpenDetails ? (
                     <button

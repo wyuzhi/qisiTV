@@ -1,20 +1,16 @@
 import { Button, InputNumber, Select } from "antd";
 import { X } from "lucide-react";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import { resourceStorageKey } from "@/services/api/resources";
 import { useResourceVideoPlayback } from "@/hooks/use-resource-video-playback";
 import { cacheResourceObjectUrl, peekCachedResourceObjectUrl } from "@/services/resource-blob-cache";
-import { getActiveUserScope, getActiveUserScopeEpoch, subscribeUserScope } from "@/lib/user-scope";
-import { captureUserScope, userScopeMatches, assertUserScope } from "@/lib/user-scope-guard";
 import { ASSISTANT_ATTACHMENT_PURPOSES, assistantAttachmentPurposes, attachmentRangeError } from "@/services/assistant-attachments";
 import type { AssistantAttachment } from "@/services/api/agent-assistant";
 
 function AttachmentPreview({ attachment }: { attachment: AssistantAttachment }) {
-    const accountIdentity = useSyncExternalStore(subscribeUserScope, () => JSON.stringify([getActiveUserScope(), getActiveUserScopeEpoch()]), () => "");
-    const expected = useMemo(() => captureUserScope(), [accountIdentity]);
     const storageKey = resourceStorageKey(attachment.resourceId);
     const video = useResourceVideoPlayback(storageKey, "", attachment.kind === "video");
-    const identity = `${accountIdentity}:${attachment.kind}:${attachment.resourceId}`;
+    const identity = `${attachment.kind}:${attachment.resourceId}`;
     const [retry, setRetry] = useState(0);
     const [preview, setPreview] = useState<{ identity: string; url: string; error: boolean } | null>(null);
     useEffect(() => {
@@ -22,16 +18,15 @@ function AttachmentPreview({ attachment }: { attachment: AssistantAttachment }) 
         setPreview(null);
         if (attachment.kind === "video") return;
         const load = async () => {
-            assertUserScope(expected);
             return cacheResourceObjectUrl(storageKey);
         };
         void load().then(url => {
-            if (!cancelled && userScopeMatches(expected)) setPreview({ identity, url, error: !url });
+            if (!cancelled) setPreview({ identity, url, error: !url });
         }).catch(() => {
-            if (!cancelled && userScopeMatches(expected)) setPreview({ identity, url: "", error: true });
+            if (!cancelled) setPreview({ identity, url: "", error: true });
         });
         return () => { cancelled = true; };
-    }, [attachment.kind, expected, identity, retry, storageKey]);
+    }, [attachment.kind, identity, retry, storageKey]);
     const current = preview?.identity === identity ? preview : null;
     const url = attachment.kind === "video" ? video.url : current?.url || peekCachedResourceObjectUrl(storageKey);
     if (current?.error || video.error) return <span className="canvas-assistant-meta" role="status">预览暂时无法显示<Button size="small" onClick={() => attachment.kind === "video" ? video.retry() : setRetry(value => value + 1)}>重读预览</Button></span>;
