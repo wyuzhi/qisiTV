@@ -15,12 +15,12 @@ import (
 
 func TestManagedPublicHTTPSRespectsLocalAndFakeIPPolicy(t *testing.T) {
 	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "true")
-	for _, target := range []string{"https://127.0.0.1/a", "http://127.0.0.1/a", "https://10.0.0.1/a", "http://10.0.0.1/a", "https://[::1]/a", "https://100.64.0.1/a", "http://100.64.0.1/a", "https://198.18.0.1/a"} {
+	for _, target := range []string{"https://127.0.0.1/a", "http://127.0.0.1/a", "https://10.0.0.1/a", "http://10.0.0.1/a", "https://[::1]/a", "https://100.64.0.1/a", "http://100.64.0.1/a", "https://198.18.0.1/a", "http://198.18.0.1/a", "http://8.8.8.8/a"} {
 		if _, err := ValidatePublicHTTPSURLContext(context.Background(), target); err != nil {
 			t.Fatalf("rejected %s: %v", target, err)
 		}
 	}
-	for _, blocked := range []string{"https://169.254.169.254/a", "http://8.8.8.8/a", "http://198.18.0.1/a"} {
+	for _, blocked := range []string{"https://169.254.169.254/a", "http://169.254.169.254/a"} {
 		if _, err := ValidatePublicHTTPSURLContext(context.Background(), blocked); err == nil {
 			t.Fatalf("accepted %s", blocked)
 		}

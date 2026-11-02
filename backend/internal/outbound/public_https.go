@@ -52,12 +52,11 @@ func validatePublicHTTPSURLContext(ctx context.Context, raw string, resolve func
 	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" {
 		return nil, BadAuthRequest("媒体地址需要安全的 HTTPS 链接")
 	}
-	addresses, err := resolve(ctx, parsed.Hostname())
-	if err != nil {
-		return nil, err
-	}
-	if parsed.Scheme == "http" && !addressesAllowLocalHTTP(addresses, allowPrivateUpstreams()) {
+	if parsed.Scheme == "http" && !(allowPrivateUpstreams() || AllowedPrivateUpstreamHost(parsed.Hostname())) {
 		return nil, BadAuthRequest("媒体地址需要安全的 HTTPS 链接")
+	}
+	if _, err := resolve(ctx, parsed.Hostname()); err != nil {
+		return nil, err
 	}
 	return parsed, nil
 }
