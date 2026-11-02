@@ -27,3 +27,30 @@ test("video waits for completion with the lowest supported test specification", 
     expect(result).toContain("已完成视频生成");
     expect(result).not.toContain("画布");
 });
+
+test("reference_to_video-only video models attach a reference test video automatically", async () => {
+    const capabilityConfig = defaultModelCapabilityConfig("ll2-auto-hd-video", "auto-hd");
+    capabilityConfig.video!.operations = ["reference_to_video"];
+    capabilityConfig.video!.defaultOperation = "reference_to_video";
+    capabilityConfig.video!.references.maxVideos = 1;
+    capabilityConfig.video!.references.maxImages = 0;
+    const configured = {
+        ...channel,
+        models: ["auto-hd"],
+        modelProfiles: [
+            {
+                model: "auto-hd",
+                capability: "video" as const,
+                protocol: "ll2-auto-hd-video",
+                defaultOptions: { testVideoUrl: "https://example.invalid/sample.mp4" },
+                capabilityConfig,
+            },
+        ],
+    };
+    const result = await testChannelModelConnection(configured, "auto-hd", "video", "ll2-auto-hd-video", async ({ referenceVideos }) => {
+        expect(referenceVideos).toHaveLength(1);
+        expect(referenceVideos?.[0]?.url).toBe("https://example.invalid/sample.mp4");
+        return { video: { storageKey: "test-video", dataUrl: "" } };
+    });
+    expect(result).toContain("已完成视频生成");
+});

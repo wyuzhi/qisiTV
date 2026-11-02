@@ -400,40 +400,46 @@ func TestBuiltinLL2PluginPreinstalledAndRegistersProviders(t *testing.T) {
 
 	reg := svc.Registry()
 	cases := []struct {
-		providerID string
-		req        protocol.GenerationRequest
-		wantPath   string
-		pollJSON   string
+		providerID   string
+		req          protocol.GenerationRequest
+		wantPath     string
+		wantPollPath string
+		pollJSON     string
 	}{
 		{
-			providerID: "ll2-seedance-video",
-			req:        protocol.GenerationRequest{Model: "doubao-seedance-2-0-fast", Prompt: "hello", Duration: 4, AspectRatio: "16:9", Resolution: "720p"},
-			wantPath:   "/seedance/api/v3/contents/generations/tasks",
-			pollJSON:   `{"id":"cgt-1","status":"succeeded","content":{"video_url":"https://cdn.example.com/a.mp4"}}`,
+			providerID:   "ll2-seedance-video",
+			req:          protocol.GenerationRequest{Model: "doubao-seedance-2-0-fast", Prompt: "hello", Duration: 4, AspectRatio: "16:9", Resolution: "720p"},
+			wantPath:     "/seedance/api/v3/contents/generations/tasks",
+			wantPollPath: "/seedance/api/v3/contents/generations/tasks/task-1",
+			pollJSON:     `{"id":"cgt-1","status":"succeeded","content":{"video_url":"https://cdn.example.com/a.mp4"}}`,
 		},
 		{
-			providerID: "ll2-vidu-video",
-			req:        protocol.GenerationRequest{Model: "viduq3-turbo", Prompt: "hello", Duration: 5, AspectRatio: "16:9", Resolution: "720p"},
-			wantPath:   "/vidu/ent/v2/text2video",
-			pollJSON:   `{"id":"vidu-1","state":"success","creations":[{"url":"https://cdn.example.com/b.mp4"}]}`,
+			providerID:   "ll2-vidu-video",
+			req:          protocol.GenerationRequest{Model: "viduq3-turbo", Prompt: "hello", Duration: 5, AspectRatio: "16:9", Resolution: "720p"},
+			wantPath:     "/vidu/ent/v2/text2video",
+			wantPollPath: "/vidu/ent/v2/tasks/task-1/creations",
+			pollJSON:     `{"id":"vidu-1","state":"success","creations":[{"url":"https://cdn.example.com/b.mp4"}]}`,
 		},
 		{
-			providerID: "ll2-minimax-video",
-			req:        protocol.GenerationRequest{Model: "MiniMax-H3", Prompt: "hello", Duration: 5, AspectRatio: "16:9", Resolution: "720P"},
-			wantPath:   "/v2/video_generation",
-			pollJSON:   `{"task_id":"mm-1","status":"Success","video_url":"https://cdn.example.com/c.mp4"}`,
+			providerID:   "ll2-minimax-video",
+			req:          protocol.GenerationRequest{Model: "MiniMax-H3", Prompt: "hello", Duration: 5, AspectRatio: "16:9", Resolution: "720P"},
+			wantPath:     "/v2/video_generation",
+			wantPollPath: "/v2/query/video_generation/task-1",
+			pollJSON:     `{"task_id":"mm-1","status":"Success","video_url":"https://cdn.example.com/c.mp4"}`,
 		},
 		{
-			providerID: "ll2-super-vega-video",
-			req:        protocol.GenerationRequest{Model: "1.0-pro-mini", Prompt: "hello", Duration: 4, AspectRatio: "16:9", Resolution: "720P"},
-			wantPath:   "/super-vega/tasks",
-			pollJSON:   `{"Response":{"Status":"FINISH","AigcVideoTask":{"TaskId":"sv-1","Output":{"FileInfos":[{"FileUrl":"https://cdn.example.com/d.mp4"}]}}}}`,
+			providerID:   "ll2-super-vega-video",
+			req:          protocol.GenerationRequest{Model: "1.0-pro-mini", Prompt: "hello", Duration: 4, AspectRatio: "16:9", Resolution: "720P"},
+			wantPath:     "/super-vega/tasks",
+			wantPollPath: "/super-vega/tasks/task-1",
+			pollJSON:     `{"Response":{"Status":"FINISH","AigcVideoTask":{"TaskId":"sv-1","Output":{"FileInfos":[{"FileUrl":"https://cdn.example.com/d.mp4"}]}}}}`,
 		},
 		{
-			providerID: "ll2-auto-hd-video",
-			req:        protocol.GenerationRequest{Model: "auto-hd", Videos: []protocol.MediaReference{{URL: "https://cdn.example.com/src.mp4"}}, Resolution: "1080p"},
-			wantPath:   "/hd/tasks",
-			pollJSON:   `{"task_id":"hd-1","status":"finished","url":"https://cdn.example.com/e.mp4"}`,
+			providerID:   "ll2-auto-hd-video",
+			req:          protocol.GenerationRequest{Model: "auto-hd", Videos: []protocol.MediaReference{{URL: "https://cdn.example.com/src.mp4"}}, Resolution: "1080p"},
+			wantPath:     "/hd/tasks",
+			wantPollPath: "/hd/tasks/task-1",
+			pollJSON:     `{"task_id":"hd-1","status":"finished","url":"https://cdn.example.com/e.mp4"}`,
 		},
 	}
 	for _, tc := range cases {
@@ -450,6 +456,18 @@ func TestBuiltinLL2PluginPreinstalledAndRegistersProviders(t *testing.T) {
 		}
 		if spec.Path != tc.wantPath {
 			t.Fatalf("BuildCreate(%s) path = %q, want %q", tc.providerID, spec.Path, tc.wantPath)
+		}
+		pollSpec, err := adapter.BuildPoll(context.Background(), protocol.PollContext{
+			BaseURL: "https://api.ll2.cn",
+			Model:   tc.req.Model,
+			Request: tc.req,
+			TaskID:  "task-1",
+		})
+		if err != nil {
+			t.Fatalf("BuildPoll(%s) failed: %v", tc.providerID, err)
+		}
+		if pollSpec.Path != tc.wantPollPath {
+			t.Fatalf("BuildPoll(%s) path = %q, want %q", tc.providerID, pollSpec.Path, tc.wantPollPath)
 		}
 		polled, err := adapter.ParsePoll(context.Background(), protocol.PollContext{
 			BaseURL: "https://api.ll2.cn",

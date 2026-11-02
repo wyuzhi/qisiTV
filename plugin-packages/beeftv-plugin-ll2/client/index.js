@@ -191,17 +191,17 @@ export const LL2_PRESET_MODELS = [
         },
         ratios: ["adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
         defaultRatio: "16:9",
-        resolutions: ["768P", "2K"],
+        resolutions: ["768P"],
         defaultResolution: "768P",
-        generateAudio: { supported: true, default: false },
-        watermark: { supported: true, default: false },
+        generateAudio: { supported: false, default: false },
+        watermark: { supported: false, default: false },
         operations: ["text_to_video", "image_to_video", "reference_to_video"],
         defaultOperation: "text_to_video",
       },
     },
   },
   {
-    model: "1.0-pro-mini",
+    model: "Super Vega 1.0-pro-mini",
     displayName: "Super Vega 1.0 Pro Mini",
     family: "Super Vega",
     capability: "video",
@@ -229,7 +229,7 @@ export const LL2_PRESET_MODELS = [
     },
   },
   {
-    model: "1.0-lite",
+    model: "Super Vega 1.0-lite",
     displayName: "Super Vega 1.0 Lite",
     family: "Super Vega",
     capability: "video",
@@ -263,6 +263,10 @@ export const LL2_PRESET_MODELS = [
     capability: "video",
     protocol: "ll2-auto-hd-video",
     endpoint: "POST /hd/tasks",
+    defaultOptions: {
+      testVideoUrl:
+        "https://h3-gz-public-1483601991.cos.ap-guangzhou.myqcloud.com/outputs/f1303d6f8190c0dbc697b30b65c0eae1b648d4efa166e81689b4af735dbf6a6d.mp4",
+    },
     capabilityConfig: {
       version: 1,
       video: {
@@ -314,6 +318,7 @@ export function buildLL2ModelChannel({ apiKey, baseUrl, selectedModels }) {
     capability: item.capability,
     protocol: item.protocol,
     authType: "bearer",
+    ...(item.defaultOptions ? { defaultOptions: item.defaultOptions } : {}),
     capabilityConfig: item.capabilityConfig,
   }));
 

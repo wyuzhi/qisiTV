@@ -3,6 +3,9 @@ import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
 import { channelHasGenerationCredential, defaultConfig, encodeChannelModel, isBuiltinBeefAPIChannel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 import type { ModelProtocol } from "@/lib/model-protocols";
 
+const DEFAULT_REFERENCE_TEST_VIDEO_URL =
+    "https://h3-gz-public-1483601991.cos.ap-guangzhou.myqcloud.com/outputs/f1303d6f8190c0dbc697b30b65c0eae1b648d4efa166e81689b4af735dbf6a6d.mp4";
+
 export async function testChannelModelConnection(channel: ModelChannel, model: string, capability: ModelCapability, protocol: ModelProtocol, runTask = runBackendGenerationTask) {
     if (!channel.baseUrl.trim()) throw new Error("请先填写 Base URL");
     if (!channelHasGenerationCredential(channel, model)) {
@@ -26,6 +29,7 @@ export async function testChannelModelConnection(channel: ModelChannel, model: s
                 capability,
                 protocol: testProtocol,
                 authType: modelProfile?.authType,
+                defaultOptions: modelProfile?.defaultOptions,
                 capabilityConfig: modelProfile?.capabilityConfig,
             },
             ...(channel.modelProfiles || []).filter((item) => item.model !== model),
@@ -56,8 +60,22 @@ export async function testChannelModelConnection(channel: ModelChannel, model: s
         videoGenerateAudio: "false",
     };
 
+    const videoOps = limits?.video?.operations || [];
+    const needsReferenceVideo =
+        capability === "video" &&
+        !videoOps.includes("text_to_video") &&
+        videoOps.includes("reference_to_video") &&
+        (limits?.video?.references?.maxVideos ?? 0) > 0;
+    const customTestVideoUrl =
+        typeof modelProfile?.defaultOptions?.testVideoUrl === "string" && modelProfile.defaultOptions.testVideoUrl.trim()
+            ? modelProfile.defaultOptions.testVideoUrl.trim()
+            : DEFAULT_REFERENCE_TEST_VIDEO_URL;
+    const referenceVideos = needsReferenceVideo
+        ? [{ id: "connection-test-video", name: "test.mp4", type: "video/mp4", url: customTestVideoUrl, durationMs: 4000, width: 1280, height: 720 }]
+        : undefined;
+
     const prompt = capability === "text" ? "Reply with OK." : capability === "audio" ? "Model test." : "A static gray circle on a white background.";
-    const result = await runTask({ mode: capability, config, prompt, streamText: false, metadata: { source: "model-connection-test" } });
+    const result = await runTask({ mode: capability, config, prompt, ...(referenceVideos ? { referenceVideos } : {}), streamText: false, metadata: { source: "model-connection-test" } });
     return modelConnectionResultDetail(result, capability);
 }
 

@@ -396,7 +396,7 @@ describe("plugin host slots, events, and lifecycle", () => {
         const builtChannel = ll2Mod.buildLL2ModelChannel({ apiKey: "sk-test-demo", baseUrl: "https://api.ll2.cn" });
         expect(builtChannel.id).toBe("ll2");
         expect(builtChannel.models).toContain("doubao-seedance-2-0-fast");
-        expect(builtChannel.models).toContain("1.0-pro-mini");
+        expect(builtChannel.models).toContain("Super Vega 1.0-pro-mini");
         expect(builtChannel.models).toContain("auto-hd");
         expect(builtChannel.modelProfiles).toHaveLength(9);
 

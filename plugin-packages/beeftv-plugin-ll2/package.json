@@ -68,6 +68,11 @@
           ],
           "baseUrl": "https://api.ll2.cn",
           "requiresPublicMediaUrls": false,
+          "mediaTransport": {
+            "image": "inline",
+            "video": "url",
+            "audio": "url"
+          },
           "auth": {
             "type": "bearer",
             "field": "apiKey"
@@ -388,6 +393,9 @@
           ],
           "baseUrl": "https://api.ll2.cn",
           "requiresPublicMediaUrls": false,
+          "mediaTransport": {
+            "image": "inline"
+          },
           "auth": {
             "type": "bearer",
             "field": "apiKey"
@@ -723,7 +731,12 @@
             "agent"
           ],
           "baseUrl": "https://api.ll2.cn",
-          "requiresPublicMediaUrls": false,
+          "requiresPublicMediaUrls": true,
+          "mediaTransport": {
+            "image": "url",
+            "video": "url",
+            "audio": "url"
+          },
           "auth": {
             "type": "bearer",
             "field": "apiKey"
@@ -772,25 +785,13 @@
               "name": "resolution",
               "type": "string",
               "mapping": "resolution",
-              "description": "768P 或 2K。"
+              "description": "固定支持 768P。"
             },
             {
               "name": "aspectRatio",
               "type": "string",
               "mapping": "ratio",
               "description": "画幅比例。"
-            },
-            {
-              "name": "watermark",
-              "type": "boolean",
-              "mapping": "aigc_watermark",
-              "description": "AIGC 水印。"
-            },
-            {
-              "name": "generateAudio",
-              "type": "boolean",
-              "mapping": "generate_audio",
-              "description": "是否生成音频。"
             }
           ],
           "create": {
@@ -893,16 +894,14 @@
                 ]
               },
               "duration": {
-                "$ref": "request.duration"
-              },
-              "resolution": {
                 "$coalesce": [
                   {
-                    "$ref": "request.resolution"
+                    "$ref": "request.duration"
                   },
-                  "768P"
+                  5
                 ]
               },
+              "resolution": "768P",
               "ratio": {
                 "$if": {
                   "condition": {
@@ -941,28 +940,12 @@
                     ]
                   }
                 }
-              },
-              "aigc_watermark": {
-                "$if": {
-                  "condition": {
-                    "$ref": "request.watermark"
-                  },
-                  "then": true
-                }
-              },
-              "generate_audio": {
-                "$if": {
-                  "condition": {
-                    "$ref": "request.generateAudio"
-                  },
-                  "then": true
-                }
               }
             }
           },
           "poll": {
             "method": "GET",
-            "path": "/v2/query/video_generation?task_id={{taskId}}",
+            "path": "/v2/query/video_generation/{{taskId}}",
             "originPath": true
           },
           "response": {
@@ -1047,9 +1030,11 @@
             "agent"
           ],
           "baseUrl": "https://api.ll2.cn",
-          "requiresPublicMediaUrls": false,
+          "requiresPublicMediaUrls": true,
           "mediaTransport": {
-            "video": "url"
+            "image": "url",
+            "video": "url",
+            "audio": "url"
           },
           "auth": {
             "type": "bearer",
@@ -1061,7 +1046,7 @@
               "type": "string",
               "required": true,
               "mapping": "model",
-              "description": "Super Vega 视频模型 ID（如 1.0-pro-mini、1.0-lite）。"
+              "description": "Super Vega 视频模型 ID（如 Super Vega 1.0-pro-mini、Super Vega 1.0-lite）。"
             },
             {
               "name": "prompt",
@@ -1074,8 +1059,8 @@
               "name": "images",
               "type": "media[]",
               "required": false,
-              "mapping": "FileInfos / LastFrameUrl",
-              "description": "首帧与参考图写入 FileInfos(Category=Image)，尾帧写入 LastFrameUrl。"
+              "mapping": "FileInfos",
+              "description": "首帧、尾帧与参考图写入 FileInfos(Category=Image, Usage=FirstFrame|LastFrame|Reference)。"
             },
             {
               "name": "videos",
@@ -1083,6 +1068,13 @@
               "required": false,
               "mapping": "FileInfos",
               "description": "参考视频写入 FileInfos(Category=Video)。"
+            },
+            {
+              "name": "audios",
+              "type": "media[]",
+              "required": false,
+              "mapping": "FileInfos",
+              "description": "参考音频写入 FileInfos(Category=Audio)。"
             },
             {
               "name": "duration",
@@ -1120,7 +1112,33 @@
             "contentType": "application/json",
             "body": {
               "model": {
-                "$ref": "request.model"
+                "$if": {
+                  "condition": {
+                    "$eq": [
+                      {
+                        "$ref": "request.model"
+                      },
+                      "1.0-pro-mini"
+                    ]
+                  },
+                  "then": "Super Vega 1.0-pro-mini",
+                  "else": {
+                    "$if": {
+                      "condition": {
+                        "$eq": [
+                          {
+                            "$ref": "request.model"
+                          },
+                          "1.0-lite"
+                        ]
+                      },
+                      "then": "Super Vega 1.0-lite",
+                      "else": {
+                        "$ref": "request.model"
+                      }
+                    }
+                  }
+                }
               },
               "Prompt": {
                 "$omitEmpty": {
@@ -1133,21 +1151,8 @@
                     {
                       "$map": {
                         "from": {
-                          "$filter": {
-                            "from": {
-                              "$sortByOrder": {
-                                "$ref": "request.images"
-                              }
-                            },
-                            "as": "image",
-                            "where": {
-                              "$ne": [
-                                {
-                                  "$ref": "image.role"
-                                },
-                                "last_frame"
-                              ]
-                            }
+                          "$sortByOrder": {
+                            "$ref": "request.images"
                           }
                         },
                         "as": "media",
@@ -1156,6 +1161,33 @@
                           "Category": "Image",
                           "Url": {
                             "$ref": "media.value"
+                          },
+                          "Usage": {
+                            "$if": {
+                              "condition": {
+                                "$eq": [
+                                  {
+                                    "$ref": "media.role"
+                                  },
+                                  "first_frame"
+                                ]
+                              },
+                              "then": "FirstFrame",
+                              "else": {
+                                "$if": {
+                                  "condition": {
+                                    "$eq": [
+                                      {
+                                        "$ref": "media.role"
+                                      },
+                                      "last_frame"
+                                    ]
+                                  },
+                                  "then": "LastFrame",
+                                  "else": "Reference"
+                                }
+                              }
+                            }
                           }
                         }
                       }
@@ -1176,38 +1208,25 @@
                           }
                         }
                       }
-                    }
-                  ]
-                }
-              },
-              "LastFrameUrl": {
-                "$omitEmpty": {
-                  "$first": {
-                    "$map": {
-                      "from": {
-                        "$filter": {
-                          "from": {
-                            "$sortByOrder": {
-                              "$ref": "request.images"
-                            }
-                          },
-                          "as": "image",
-                          "where": {
-                            "$eq": [
-                              {
-                                "$ref": "image.role"
-                              },
-                              "last_frame"
-                            ]
+                    },
+                    {
+                      "$map": {
+                        "from": {
+                          "$sortByOrder": {
+                            "$ref": "request.audios"
+                          }
+                        },
+                        "as": "media",
+                        "in": {
+                          "Type": "Url",
+                          "Category": "Audio",
+                          "Url": {
+                            "$ref": "media.value"
                           }
                         }
-                      },
-                      "as": "media",
-                      "in": {
-                        "$ref": "media.value"
                       }
                     }
-                  }
+                  ]
                 }
               },
               "OutputConfig": {
@@ -1488,6 +1507,14 @@
                     }
                   },
                   "1080p"
+                ]
+              },
+              "duration": {
+                "$coalesce": [
+                  {
+                    "$ref": "request.duration"
+                  },
+                  5
                 ]
               }
             }
