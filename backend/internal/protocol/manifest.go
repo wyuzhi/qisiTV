@@ -271,8 +271,11 @@ func ValidateManifest(manifest Manifest) error {
 	if len(manifest.Metadata.Name) > 160 || len(manifest.Metadata.Vendor) > 120 {
 		return fmt.Errorf("protocol manifest metadata name or vendor is too long")
 	}
-	if len(manifest.Contributes.Providers) == 0 && !hasNonProviderContribution(manifest.Contributes) {
+	if len(manifest.Contributes.Providers) == 0 && !hasNonProviderContribution(manifest.Contributes) && strings.TrimSpace(manifest.Client) == "" {
 		return fmt.Errorf("plugin must declare at least one contribution")
+	}
+	if err := validateManifestPackageExtensions(manifest); err != nil {
+		return err
 	}
 	if backend := strings.TrimSpace(manifest.Runtime.Backend); backend != "" && backend != "declarative" && backend != "rpc" && backend != "wasm" && backend != "trusted-backend" && !strings.HasPrefix(backend, "host:") {
 		return fmt.Errorf("unsupported plugin backend %q", backend)
@@ -414,7 +417,7 @@ func normalizeManifestForProvider(manifest *Manifest, index int) error {
 }
 
 func hasNonProviderContribution(contributes ManifestContributions) bool {
-	return len(contributes.Workflows) > 0 || len(contributes.CanvasNodes) > 0 || len(contributes.Transforms) > 0 || len(contributes.Commands) > 0 || len(contributes.AssetSources) > 0 || len(contributes.UsageObservers) > 0 || len(contributes.AICapabilities) > 0 || len(contributes.Agents) > 0 || len(contributes.ImportExport) > 0
+	return len(contributes.Workflows) > 0 || len(contributes.CanvasNodes) > 0 || len(contributes.Transforms) > 0 || len(contributes.Commands) > 0 || len(contributes.AssetSources) > 0 || len(contributes.UsageObservers) > 0 || len(contributes.AICapabilities) > 0 || len(contributes.Agents) > 0 || len(contributes.Skills) > 0 || len(contributes.Extensions) > 0 || len(contributes.ImportExport) > 0
 }
 
 func operationSummary(operation ManifestOperation) string {
@@ -1615,39 +1618,7 @@ func firstPathJSONValue(payload map[string]any, paths ...string) string {
 	return ""
 }
 
-func setMapPath(target map[string]any, path string, value any) {
-	parts := strings.Split(strings.Trim(path, "."), ".")
-	current := target
-	for _, part := range parts[:len(parts)-1] {
-		next, ok := current[part].(map[string]any)
-		if !ok {
-			next = map[string]any{}
-			current[part] = next
-		}
-		current = next
-	}
-	if len(parts) > 0 {
-		current[parts[len(parts)-1]] = value
-	}
-}
-
 func isRelativePath(path string) bool {
 	parsed, err := url.Parse(strings.TrimSpace(path))
 	return err == nil && parsed.Path != "" && strings.HasPrefix(parsed.Path, "/") && !strings.HasPrefix(parsed.Path, "//") && parsed.Host == "" && parsed.User == nil && parsed.Scheme == ""
-}
-
-func validManifestIdentifier(value string) bool {
-	if len(value) == 0 || len(value) > 96 {
-		return false
-	}
-	for index, char := range value {
-		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '-' || char == '_' || char == '.' {
-			if index == 0 && (char == '-' || char == '_' || char == '.') {
-				return false
-			}
-			continue
-		}
-		return false
-	}
-	return true
 }

@@ -1,11 +1,29 @@
 package capability
 
+import "sync"
+
 const (
 	maxAgentNodeTitleRunes   = 240
 	maxAgentNodeContentRunes = 16000
 )
 
+var (
+	sharedRegistryOnce sync.Once
+	sharedRegistry     *Registry
+)
+
 func BuiltinRegistry() *Registry {
+	sharedRegistryOnce.Do(func() {
+		sharedRegistry = newBuiltinRegistry()
+	})
+	return sharedRegistry
+}
+
+func SharedRegistry() *Registry {
+	return BuiltinRegistry()
+}
+
+func newBuiltinRegistry() *Registry {
 	registry, err := NewRegistry([]Descriptor{
 		{
 			Type: "text", Version: "1", Label: "文本", DefaultWidth: 340, DefaultHeight: 240,

@@ -84,7 +84,7 @@ func (s *Service) ForUser(actor *model.User, systemPluginsVisible bool) []View {
 	}
 	filtered := make([]View, 0, len(items))
 	for _, item := range items {
-		if item.Management.ActivationScope == ScopeUser {
+		if item.Management.ActivationScope == ScopeUser || item.Source == OriginPackage || item.PackageDir != "" {
 			filtered = append(filtered, item)
 		}
 	}

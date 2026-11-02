@@ -12,6 +12,7 @@ const (
 	OriginOfficial = "official"
 	OriginSystem   = "system"
 	OriginUploaded = "uploaded"
+	OriginPackage  = "package"
 
 	KindProtocol    = "protocol"
 	KindApplication = "application"

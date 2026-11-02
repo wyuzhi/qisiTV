@@ -7,104 +7,231 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
 
 const SetVersion = "canvas-capabilities/v5"
 
-type Registry struct{ descriptors map[string]Descriptor }
+type Registry struct {
+	mu          sync.RWMutex
+	descriptors map[string]Descriptor
+	pluginNodes map[string][]string
+}
 
 func NewRegistry(descriptors []Descriptor) (*Registry, error) {
 	items := make(map[string]Descriptor, len(descriptors))
 	generationModes := make(map[string]string, len(descriptors))
 	for _, descriptor := range descriptors {
-		descriptor.Type = normalizeType(descriptor.Type)
-		descriptor.Version = strings.TrimSpace(descriptor.Version)
-		descriptor.Label = strings.TrimSpace(descriptor.Label)
-		descriptor.Purpose = strings.TrimSpace(descriptor.Purpose)
-		descriptor.GoodFor = normalizeFields(descriptor.GoodFor)
-		descriptor.NotIdealFor = normalizeFields(descriptor.NotIdealFor)
-		descriptor.Tradeoffs = normalizeFields(descriptor.Tradeoffs)
-		descriptor.Actions = normalizeFields(descriptor.Actions)
-		if descriptor.Type == "" || descriptor.Version == "" || descriptor.Label == "" || descriptor.DefaultWidth <= 0 || descriptor.DefaultHeight <= 0 {
-			return nil, fmt.Errorf("invalid canvas capability descriptor %q", descriptor.Type)
-		}
-		inputKind, err := normalizeInputKind(descriptor.InputKind)
+		normalized, err := normalizeAndValidateDescriptor(descriptor, false)
 		if err != nil {
-			return nil, fmt.Errorf("capability %q: %w", descriptor.Type, err)
+			return nil, err
 		}
-		descriptor.InputKind = inputKind
-		generationMode, err := normalizeGenerationMode(descriptor.GenerationMode)
-		if err != nil {
-			return nil, fmt.Errorf("capability %q: %w", descriptor.Type, err)
-		}
-		descriptor.GenerationMode = generationMode
-		if generationMode != "" {
-			if existing, exists := generationModes[generationMode]; exists {
-				return nil, fmt.Errorf("generation mode %q is registered by both %q and %q", generationMode, existing, descriptor.Type)
+		if normalized.GenerationMode != "" {
+			if existing, exists := generationModes[normalized.GenerationMode]; exists {
+				return nil, fmt.Errorf("generation mode %q is registered by both %q and %q", normalized.GenerationMode, existing, normalized.Type)
 			}
-			generationModes[generationMode] = descriptor.Type
+			generationModes[normalized.GenerationMode] = normalized.Type
 		}
-		projectionKind, err := normalizeProjectionKind(descriptor.ProjectionKind)
-		if err != nil {
-			return nil, fmt.Errorf("capability %q: %w", descriptor.Type, err)
+		if _, exists := items[normalized.Type]; exists {
+			return nil, fmt.Errorf("duplicate canvas capability %q", normalized.Type)
 		}
-		descriptor.ProjectionKind = projectionKind
-		descriptor.ProjectionField = strings.TrimSpace(descriptor.ProjectionField)
-		if (descriptor.ProjectionKind == "") != (descriptor.ProjectionField == "") {
-			return nil, fmt.Errorf("capability %q must declare projection kind and field together", descriptor.Type)
-		}
-		if descriptor.ProjectionField != "" {
-			if err := validatePatchPath(descriptor.ProjectionField); err != nil {
-				return nil, fmt.Errorf("capability %q has invalid projection field: %w", descriptor.Type, err)
-			}
-		}
-		if descriptor.Connection.MaxInputCount < 0 {
-			return nil, fmt.Errorf("capability %q has invalid max input count", descriptor.Type)
-		}
-		accepted, err := normalizeConnectionKinds(descriptor.Connection.AcceptedInputKinds)
-		if err != nil {
-			return nil, fmt.Errorf("capability %q: %w", descriptor.Type, err)
-		}
-		rejected, err := normalizeConnectionKinds(descriptor.Connection.RejectedInputKinds)
-		if err != nil {
-			return nil, fmt.Errorf("capability %q: %w", descriptor.Type, err)
-		}
-		rejectedSet := make(map[string]struct{}, len(rejected))
-		for _, kind := range rejected {
-			rejectedSet[kind] = struct{}{}
-		}
-		for _, kind := range accepted {
-			if _, conflict := rejectedSet[kind]; conflict {
-				return nil, fmt.Errorf("capability %q accepts and rejects input kind %q", descriptor.Type, kind)
-			}
-		}
-		if descriptor.Connection.CanSource && descriptor.InputKind == "" {
-			return nil, fmt.Errorf("capability %q can source without an input kind", descriptor.Type)
-		}
-		descriptor.Connection.AcceptedInputKinds = accepted
-		descriptor.Connection.RejectedInputKinds = rejected
-		descriptor.PatchFields, err = normalizePatchFields(descriptor.PatchFields)
-		if err != nil {
-			return nil, fmt.Errorf("capability %q: %w", descriptor.Type, err)
-		}
-		if descriptor.CanUpdate != (len(descriptor.PatchFields) > 0) {
-			return nil, fmt.Errorf("capability %q must declare both canUpdate and patch fields, or neither", descriptor.Type)
-		}
-		descriptor.SummaryFields = normalizeFields(descriptor.SummaryFields)
-		descriptor.DetailFields = normalizeFields(descriptor.DetailFields)
-		if _, exists := items[descriptor.Type]; exists {
-			return nil, fmt.Errorf("duplicate canvas capability %q", descriptor.Type)
-		}
-		items[descriptor.Type] = cloneDescriptor(descriptor)
+		items[normalized.Type] = cloneDescriptor(normalized)
 	}
-	return &Registry{descriptors: items}, nil
+	return &Registry{
+		descriptors: items,
+		pluginNodes: make(map[string][]string),
+	}, nil
+}
+
+func normalizeAndValidateDescriptor(descriptor Descriptor, isPlugin bool) (Descriptor, error) {
+	descriptor.Type = normalizeType(descriptor.Type)
+	descriptor.Version = strings.TrimSpace(descriptor.Version)
+	descriptor.Label = strings.TrimSpace(descriptor.Label)
+	descriptor.Purpose = strings.TrimSpace(descriptor.Purpose)
+	descriptor.GoodFor = normalizeFields(descriptor.GoodFor)
+	descriptor.NotIdealFor = normalizeFields(descriptor.NotIdealFor)
+	descriptor.Tradeoffs = normalizeFields(descriptor.Tradeoffs)
+	descriptor.Actions = normalizeFields(descriptor.Actions)
+	if isPlugin {
+		if descriptor.Version == "" {
+			descriptor.Version = "1"
+		}
+		if descriptor.Label == "" {
+			descriptor.Label = descriptor.Type
+		}
+		if descriptor.DefaultWidth <= 0 {
+			descriptor.DefaultWidth = 360
+		}
+		if descriptor.DefaultHeight <= 0 {
+			descriptor.DefaultHeight = 260
+		}
+		if len(descriptor.PatchFields) == 0 && !descriptor.CanUpdate {
+			descriptor.PatchFields = editableNodeFields("metadata.content", "内容", "插件节点内容")
+			descriptor.CanUpdate = true
+		} else if len(descriptor.PatchFields) > 0 {
+			descriptor.CanUpdate = true
+		}
+		if len(descriptor.SummaryFields) == 0 {
+			descriptor.SummaryFields = []string{"content", "pluginData"}
+		}
+		if len(descriptor.DetailFields) == 0 {
+			descriptor.DetailFields = []string{"content", "pluginData"}
+		}
+		if descriptor.Connection.CanTarget && len(descriptor.Connection.AcceptedInputKinds) == 0 {
+			descriptor.Connection.AcceptedInputKinds = []string{"text", "image", "video", "audio"}
+		}
+	}
+	if descriptor.Type == "" || descriptor.Version == "" || descriptor.Label == "" || descriptor.DefaultWidth <= 0 || descriptor.DefaultHeight <= 0 {
+		return Descriptor{}, fmt.Errorf("invalid canvas capability descriptor %q", descriptor.Type)
+	}
+	inputKind, err := normalizeInputKind(descriptor.InputKind)
+	if err != nil {
+		return Descriptor{}, fmt.Errorf("capability %q: %w", descriptor.Type, err)
+	}
+	descriptor.InputKind = inputKind
+	generationMode, err := normalizeGenerationMode(descriptor.GenerationMode)
+	if err != nil {
+		return Descriptor{}, fmt.Errorf("capability %q: %w", descriptor.Type, err)
+	}
+	descriptor.GenerationMode = generationMode
+	projectionKind, err := normalizeProjectionKind(descriptor.ProjectionKind)
+	if err != nil {
+		return Descriptor{}, fmt.Errorf("capability %q: %w", descriptor.Type, err)
+	}
+	descriptor.ProjectionKind = projectionKind
+	descriptor.ProjectionField = strings.TrimSpace(descriptor.ProjectionField)
+	if (descriptor.ProjectionKind == "") != (descriptor.ProjectionField == "") {
+		return Descriptor{}, fmt.Errorf("capability %q must declare projection kind and field together", descriptor.Type)
+	}
+	if descriptor.ProjectionField != "" {
+		if err := validatePatchPath(descriptor.ProjectionField); err != nil {
+			return Descriptor{}, fmt.Errorf("capability %q has invalid projection field: %w", descriptor.Type, err)
+		}
+	}
+	if descriptor.Connection.MaxInputCount < 0 {
+		return Descriptor{}, fmt.Errorf("capability %q has invalid max input count", descriptor.Type)
+	}
+	accepted, err := normalizeConnectionKinds(descriptor.Connection.AcceptedInputKinds)
+	if err != nil {
+		return Descriptor{}, fmt.Errorf("capability %q: %w", descriptor.Type, err)
+	}
+	rejected, err := normalizeConnectionKinds(descriptor.Connection.RejectedInputKinds)
+	if err != nil {
+		return Descriptor{}, fmt.Errorf("capability %q: %w", descriptor.Type, err)
+	}
+	rejectedSet := make(map[string]struct{}, len(rejected))
+	for _, kind := range rejected {
+		rejectedSet[kind] = struct{}{}
+	}
+	for _, kind := range accepted {
+		if _, conflict := rejectedSet[kind]; conflict {
+			return Descriptor{}, fmt.Errorf("capability %q accepts and rejects input kind %q", descriptor.Type, kind)
+		}
+	}
+	if descriptor.Connection.CanSource && descriptor.InputKind == "" {
+		return Descriptor{}, fmt.Errorf("capability %q can source without an input kind", descriptor.Type)
+	}
+	descriptor.Connection.AcceptedInputKinds = accepted
+	descriptor.Connection.RejectedInputKinds = rejected
+	descriptor.PatchFields, err = normalizePatchFields(descriptor.PatchFields)
+	if err != nil {
+		return Descriptor{}, fmt.Errorf("capability %q: %w", descriptor.Type, err)
+	}
+	if descriptor.CanUpdate != (len(descriptor.PatchFields) > 0) {
+		return Descriptor{}, fmt.Errorf("capability %q must declare both canUpdate and patch fields, or neither", descriptor.Type)
+	}
+	descriptor.SummaryFields = normalizeFields(descriptor.SummaryFields)
+	descriptor.DetailFields = normalizeFields(descriptor.DetailFields)
+	return descriptor, nil
+}
+
+// SetPluginDescriptors replaces all canvas node descriptors contributed by pluginID.
+func (r *Registry) SetPluginDescriptors(pluginID string, descriptors []Descriptor) error {
+	if r == nil {
+		return fmt.Errorf("canvas capability registry is nil")
+	}
+	pluginID = strings.TrimSpace(pluginID)
+	if pluginID == "" {
+		return fmt.Errorf("plugin id is required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.pluginNodes == nil {
+		r.pluginNodes = make(map[string][]string)
+	}
+	r.removePluginDescriptorsLocked(pluginID)
+	if len(descriptors) == 0 {
+		return nil
+	}
+	normalized := make([]Descriptor, 0, len(descriptors))
+	seenInBatch := make(map[string]struct{}, len(descriptors))
+	for _, descriptor := range descriptors {
+		item, err := normalizeAndValidateDescriptor(descriptor, true)
+		if err != nil {
+			return err
+		}
+		if _, dup := seenInBatch[item.Type]; dup {
+			return fmt.Errorf("duplicate canvas capability %q", item.Type)
+		}
+		if _, exists := r.descriptors[item.Type]; exists {
+			return fmt.Errorf("duplicate canvas capability %q", item.Type)
+		}
+		seenInBatch[item.Type] = struct{}{}
+		normalized = append(normalized, cloneDescriptor(item))
+	}
+	types := make([]string, 0, len(normalized))
+	for _, item := range normalized {
+		r.descriptors[item.Type] = item
+		types = append(types, item.Type)
+	}
+	r.pluginNodes[pluginID] = types
+	return nil
+}
+
+// RemovePluginDescriptors unregisters all canvas node descriptors contributed by pluginID.
+func (r *Registry) RemovePluginDescriptors(pluginID string) {
+	if r == nil {
+		return
+	}
+	pluginID = strings.TrimSpace(pluginID)
+	if pluginID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.removePluginDescriptorsLocked(pluginID)
+}
+
+// ResetPluginDescriptors removes all dynamically registered plugin canvas node descriptors.
+func (r *Registry) ResetPluginDescriptors() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for pluginID := range r.pluginNodes {
+		r.removePluginDescriptorsLocked(pluginID)
+	}
+}
+
+func (r *Registry) removePluginDescriptorsLocked(pluginID string) {
+	types, exists := r.pluginNodes[pluginID]
+	if !exists {
+		return
+	}
+	for _, nodeType := range types {
+		delete(r.descriptors, nodeType)
+	}
+	delete(r.pluginNodes, pluginID)
 }
 
 func (r *Registry) Resolve(nodeType string) (Descriptor, bool) {
 	if r == nil {
 		return Descriptor{}, false
 	}
+	r.mu.RLock()
 	d, ok := r.descriptors[normalizeType(nodeType)]
+	r.mu.RUnlock()
 	if !ok {
 		return Descriptor{}, false
 	}
@@ -162,10 +289,12 @@ func (r *Registry) List() []Descriptor {
 	if r == nil {
 		return nil
 	}
+	r.mu.RLock()
 	out := make([]Descriptor, 0, len(r.descriptors))
 	for _, d := range r.descriptors {
 		out = append(out, cloneDescriptor(d))
 	}
+	r.mu.RUnlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].Type < out[j].Type })
 	return out
 }
@@ -202,6 +331,8 @@ func (r *Registry) ResolveGenerationMode(mode string) (Descriptor, bool) {
 	if mode == "" || r == nil {
 		return Descriptor{}, false
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	for _, descriptor := range r.descriptors {
 		if descriptor.GenerationMode == mode {
 			return cloneDescriptor(descriptor), true

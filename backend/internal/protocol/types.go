@@ -3,6 +3,7 @@ package protocol
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // Capability is the kind of model operation handled by a protocol adapter.
@@ -194,6 +195,7 @@ type Manifest struct {
 	APIVersion    string                `json:"apiVersion"`
 	Metadata      Metadata              `json:"-"`
 	Entry         string                `json:"entry,omitempty"`
+	Client        string                `json:"client,omitempty"`
 	Surfaces      []string              `json:"surfaces,omitempty"`
 	Runtime       ManifestRuntime       `json:"runtime,omitempty"`
 	Permissions   []string              `json:"permissions,omitempty"`
@@ -226,6 +228,7 @@ func (m Manifest) MarshalJSON() ([]byte, error) {
 		Description   string                `json:"description,omitempty"`
 		Documentation string                `json:"documentation,omitempty"`
 		Entry         string                `json:"entry,omitempty"`
+		Client        string                `json:"client,omitempty"`
 		Surfaces      []string              `json:"surfaces,omitempty"`
 		Enabled       bool                  `json:"enabled"`
 		Installable   bool                  `json:"installable,omitempty"`
@@ -234,7 +237,7 @@ func (m Manifest) MarshalJSON() ([]byte, error) {
 		Configuration ManifestConfiguration `json:"configuration,omitempty"`
 		Contributes   ManifestContributions `json:"contributes"`
 	}
-	return json.Marshal(wire{APIVersion: m.APIVersion, ID: m.Metadata.ID, Name: m.Metadata.Name, Version: m.Metadata.Version, Author: m.Metadata.Vendor, Description: m.Metadata.Description, Documentation: m.Metadata.Documentation, Entry: m.Entry, Surfaces: m.Surfaces, Enabled: m.Metadata.Enabled, Installable: m.Metadata.Installable, Runtime: m.Runtime, Permissions: m.Permissions, Configuration: m.Configuration, Contributes: m.Contributes})
+	return json.Marshal(wire{APIVersion: m.APIVersion, ID: m.Metadata.ID, Name: m.Metadata.Name, Version: m.Metadata.Version, Author: m.Metadata.Vendor, Description: m.Metadata.Description, Documentation: m.Metadata.Documentation, Entry: m.Entry, Client: m.Client, Surfaces: m.Surfaces, Enabled: m.Metadata.Enabled, Installable: m.Metadata.Installable, Runtime: m.Runtime, Permissions: m.Permissions, Configuration: m.Configuration, Contributes: m.Contributes})
 }
 
 func (m *Manifest) UnmarshalJSON(data []byte) error {
@@ -242,11 +245,13 @@ func (m *Manifest) UnmarshalJSON(data []byte) error {
 		APIVersion    string                `json:"apiVersion"`
 		ID            string                `json:"id"`
 		Name          string                `json:"name"`
+		DisplayName   string                `json:"displayName"`
 		Version       string                `json:"version"`
 		Author        string                `json:"author"`
 		Description   string                `json:"description"`
 		Documentation string                `json:"documentation"`
 		Entry         string                `json:"entry"`
+		Client        string                `json:"client"`
 		Surfaces      []string              `json:"surfaces"`
 		Enabled       *bool                 `json:"enabled"`
 		Installable   bool                  `json:"installable"`
@@ -263,8 +268,15 @@ func (m *Manifest) UnmarshalJSON(data []byte) error {
 	if value.Enabled != nil {
 		enabled = *value.Enabled
 	}
-	m.APIVersion, m.Entry, m.Surfaces, m.Runtime, m.Permissions, m.Configuration, m.Contributes = value.APIVersion, value.Entry, value.Surfaces, value.Runtime, value.Permissions, value.Configuration, value.Contributes
-	m.Metadata = Metadata{ID: value.ID, Name: value.Name, Version: value.Version, Vendor: value.Author, Description: value.Description, Documentation: value.Documentation, Enabled: enabled, Installable: value.Installable}
+	name := strings.TrimSpace(value.Name)
+	if name == "" {
+		name = strings.TrimSpace(value.DisplayName)
+	}
+	for index := range value.Contributes.CanvasNodes {
+		value.Contributes.CanvasNodes[index].Normalize()
+	}
+	m.APIVersion, m.Entry, m.Client, m.Surfaces, m.Runtime, m.Permissions, m.Configuration, m.Contributes = value.APIVersion, value.Entry, value.Client, value.Surfaces, value.Runtime, value.Permissions, value.Configuration, value.Contributes
+	m.Metadata = Metadata{ID: value.ID, Name: name, Version: value.Version, Vendor: value.Author, Description: value.Description, Documentation: value.Documentation, Enabled: enabled, Installable: value.Installable}
 	return nil
 }
 
@@ -299,6 +311,8 @@ type ManifestContributions struct {
 	UsageObservers []string             `json:"usageObservers,omitempty"`
 	AICapabilities []string             `json:"aiCapabilities,omitempty"`
 	Agents         []string             `json:"agents,omitempty"`
+	Skills         []string             `json:"skills,omitempty"`
+	Extensions     []string             `json:"extensions,omitempty"`
 	ImportExport   []string             `json:"importExport,omitempty"`
 }
 
@@ -357,12 +371,73 @@ type ManifestWorkflow struct {
 }
 
 type ManifestCanvasNode struct {
-	ID           string         `json:"id"`
-	Label        string         `json:"label"`
-	DefaultTitle string         `json:"defaultTitle"`
-	DefaultSize  map[string]int `json:"defaultSize"`
-	Schema       map[string]any `json:"schema"`
-	Renderer     string         `json:"renderer"`
+	ID            string          `json:"id"`
+	Type          string          `json:"type,omitempty"`
+	Label         string          `json:"label"`
+	Title         string          `json:"title,omitempty"`
+	DefaultTitle  string          `json:"defaultTitle"`
+	DefaultSize   map[string]int  `json:"defaultSize,omitempty"`
+	DefaultWidth  int             `json:"defaultWidth,omitempty"`
+	DefaultHeight int             `json:"defaultHeight,omitempty"`
+	Fields        []ManifestField `json:"fields,omitempty"`
+	Schema        map[string]any  `json:"schema,omitempty"`
+	Renderer      string          `json:"renderer,omitempty"`
+}
+
+func (n *ManifestCanvasNode) Normalize() {
+	if n == nil {
+		return
+	}
+	if strings.TrimSpace(n.ID) == "" && strings.TrimSpace(n.Type) != "" {
+		n.ID = strings.TrimSpace(n.Type)
+	}
+	if strings.TrimSpace(n.Label) == "" {
+		n.Label = firstNonEmptyText(n.Title, n.DefaultTitle, n.ID)
+	}
+	if strings.TrimSpace(n.DefaultTitle) == "" {
+		n.DefaultTitle = firstNonEmptyText(n.Title, n.Label, n.ID)
+	}
+	if n.DefaultSize == nil && (n.DefaultWidth > 0 || n.DefaultHeight > 0) {
+		n.DefaultSize = map[string]int{}
+		if n.DefaultWidth > 0 {
+			n.DefaultSize["width"] = n.DefaultWidth
+		}
+		if n.DefaultHeight > 0 {
+			n.DefaultSize["height"] = n.DefaultHeight
+		}
+	}
+}
+
+func (n ManifestCanvasNode) NodeType() string {
+	return firstNonEmptyText(n.Type, n.ID)
+}
+
+func (n ManifestCanvasNode) NodeLabel() string {
+	return firstNonEmptyText(n.Label, n.Title, n.DefaultTitle, n.NodeType())
+}
+
+func (n ManifestCanvasNode) NodeDefaultTitle() string {
+	return firstNonEmptyText(n.DefaultTitle, n.Title, n.Label, n.NodeType())
+}
+
+func (n ManifestCanvasNode) NodeDimensions() (int, int) {
+	width, height := n.DefaultWidth, n.DefaultHeight
+	if width <= 0 && n.DefaultSize != nil {
+		width = n.DefaultSize["width"]
+	}
+	if height <= 0 && n.DefaultSize != nil {
+		height = n.DefaultSize["height"]
+	}
+	return width, height
+}
+
+func firstNonEmptyText(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 type ManifestTransform struct {

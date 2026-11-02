@@ -197,7 +197,17 @@ func (c *Runtime) setEnabledLocked(id string, enabled bool) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
-	if err := c.commitAndPublish(&stage, persistExtras{}); err != nil {
+	extras := persistExtras{}
+	if c.store != nil {
+		now := time.Now().UTC()
+		extras.platform = &model.PluginPlatformState{
+			PluginID:  strings.TrimSpace(id),
+			Available: enabled,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+	}
+	if err := c.commitAndPublish(&stage, extras); err != nil {
 		c.abortUncommitted(&stage)
 		return View{}, err
 	}
@@ -227,6 +237,7 @@ func (c *Runtime) stageSetEnabledLocked(id string, enabled bool) (stagedMutation
 	for index := range stored {
 		if stored[index].ID == record.Metadata.ID {
 			stored[index].Raw = data
+			stored[index].LoadError = ""
 			stored[index].UpdatedAt = time.Now().UTC()
 		}
 	}
@@ -245,6 +256,50 @@ func (c *Runtime) stageSetEnabledLocked(id string, enabled bool) (stagedMutation
 		nextRegistry: registry,
 		view:         view,
 	}, nil
+}
+
+func (c *Runtime) SetLoadError(id string, errText string) (View, error) {
+	if c == nil {
+		return View{}, fmt.Errorf("插件运行时未初始化")
+	}
+	c.beginMutation()
+	defer c.endMutation()
+	c.mu.RLock()
+	record, ok := c.plugins[strings.TrimSpace(id)]
+	c.mu.RUnlock()
+	if !ok {
+		return View{}, fmt.Errorf("插件 %q 不存在", id)
+	}
+	stored, err := c.currentRecords()
+	if err != nil {
+		return View{}, err
+	}
+	for index := range stored {
+		if stored[index].ID == record.Metadata.ID {
+			stored[index].LoadError = strings.TrimSpace(errText)
+			stored[index].UpdatedAt = time.Now().UTC()
+		}
+	}
+	plugins, registry, err := c.build(stored)
+	if err != nil {
+		return View{}, err
+	}
+	view, err := viewFromPlugins(plugins, record.Metadata.ID)
+	if err != nil {
+		return View{}, err
+	}
+	stage := stagedMutation{
+		previousLive: c.captureLive(),
+		nextDisk:     stored,
+		nextPlugins:  plugins,
+		nextRegistry: registry,
+		view:         view,
+	}
+	if err := c.commitAndPublish(&stage, persistExtras{}); err != nil {
+		c.abortUncommitted(&stage)
+		return View{}, err
+	}
+	return stage.view, nil
 }
 
 func (c *Runtime) Uninstall(id string) error {
@@ -307,6 +362,7 @@ func (c *Runtime) stageUninstallLocked(id string) (stagedMutation, error) {
 
 func (c *Runtime) commitUninstall(stage stagedMutation) {
 	c.discardBlobIfUnreferenced(stage.oldBlob)
+	c.cleanupUninstalledPackageDir(stage.previousLive.plugins, stage.nextPlugins)
 }
 
 func viewFromPlugins(plugins map[string]Record, id string) (View, error) {

@@ -123,6 +123,18 @@ func (s *Service) SetEnabled(id string, enabled bool) (View, error) {
 	return plugin, nil
 }
 
+func (s *Service) SetLoadError(id string, errText string) (View, error) {
+	if s == nil || s.runtime == nil {
+		return View{}, fmt.Errorf("插件运行时未初始化")
+	}
+	plugin, err := s.runtime.SetLoadError(id, errText)
+	if err != nil {
+		return View{}, err
+	}
+	plugin.Management = ManagementFromView(plugin)
+	return plugin, nil
+}
+
 func (s *Service) Uninstall(id string) error {
 	if s == nil || s.runtime == nil {
 		return fmt.Errorf("插件运行时未初始化")

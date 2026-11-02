@@ -525,9 +525,10 @@ func opCanvasNodeUpdate(ctx *Context, params json.RawMessage) (any, error) {
 		NodeID           string `json:"nodeId"`
 		ExpectedRevision int64  `json:"expectedRevision"`
 		Patch            struct {
-			Title   *string `json:"title"`
-			Prompt  *string `json:"prompt"`
-			Content *string `json:"content"`
+			Title      *string        `json:"title"`
+			Prompt     *string        `json:"prompt"`
+			Content    *string        `json:"content"`
+			PluginData map[string]any `json:"pluginData"`
 		} `json:"patch"`
 	}
 	if err := decodeParams(params, &args); err != nil {
@@ -549,6 +550,9 @@ func opCanvasNodeUpdate(ctx *Context, params json.RawMessage) (any, error) {
 	if args.Patch.Content != nil {
 		patch["content"] = *args.Patch.Content
 	}
+	if args.Patch.PluginData != nil {
+		patch["pluginData"] = args.Patch.PluginData
+	}
 	if len(patch) == 0 {
 		return nil, InvalidArg("empty_patch", "patch 至少要有一个字段")
 	}
@@ -565,9 +569,10 @@ func opCanvasNodesCreate(ctx *Context, params json.RawMessage) (any, error) {
 		CanvasID         string `json:"canvasId"`
 		ExpectedRevision int64  `json:"expectedRevision"`
 		Nodes            []struct {
-			Title  string `json:"title"`
-			Type   string `json:"type"`
-			Prompt string `json:"prompt"`
+			Title      string         `json:"title"`
+			Type       string         `json:"type"`
+			Prompt     string         `json:"prompt"`
+			PluginData map[string]any `json:"pluginData"`
 		} `json:"nodes"`
 	}
 	if err := decodeParams(params, &args); err != nil {
@@ -581,7 +586,7 @@ func opCanvasNodesCreate(ctx *Context, params json.RawMessage) (any, error) {
 	}
 	drafts := make([]canvas.NodeDraft, 0, len(args.Nodes))
 	for _, node := range args.Nodes {
-		drafts = append(drafts, canvas.NodeDraft{Title: node.Title, Type: node.Type, Prompt: node.Prompt})
+		drafts = append(drafts, canvas.NodeDraft{Title: node.Title, Type: node.Type, Prompt: node.Prompt, PluginData: node.PluginData})
 	}
 	_, createdNodes, err := ctx.Domain.CreateUserCanvasNodes(ctx.UserID, args.CanvasID, drafts, args.ExpectedRevision)
 	if err != nil {
