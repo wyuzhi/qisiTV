@@ -95,4 +95,16 @@ func TestManagedImageOptionsFollowCatalogCapability(t *testing.T) {
 	if got := closestImageSize([]string{"1K", "2K"}, 16, 9, ""); got != "1K" {
 		t.Fatalf("closestImageSize without pixel candidates or default = %q, want 1K", got)
 	}
+	if got := managedImageOptions(Input{Config: Config{Model: "dola-seedream-5-0-pro-260628"}})["watermark"]; got != false {
+		t.Fatalf("Seedream default watermark = %#v, want false", got)
+	}
+	if got := managedImageOptions(Input{Config: Config{Model: "dola-seedream-5-0-pro-260628", SeedreamWatermark: "true"}})["watermark"]; got != true {
+		t.Fatalf("Seedream explicit watermark = %#v, want true", got)
+	}
+	if _, exists := managedImageOptions(Input{Config: Config{Model: "gpt-image-2.5", SeedreamWatermark: "false"}, ImageCapability: gptImage25})["watermark"]; exists {
+		t.Fatal("non-Seedream managed image options must not send watermark=false")
+	}
+	if _, exists := managedImageOptions(Input{Config: Config{Model: "gpt-image-2.5", SeedreamWatermark: "true"}, ImageCapability: gptImage25})["watermark"]; exists {
+		t.Fatal("non-Seedream managed image options must not leak residual seedreamWatermark=true")
+	}
 }

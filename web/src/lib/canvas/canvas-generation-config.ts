@@ -73,7 +73,7 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
         seedreamMaxImages: node?.metadata?.seedreamMaxImages ?? config.seedreamMaxImages,
         seedreamOutputFormat: node?.metadata?.seedreamOutputFormat ?? config.seedreamOutputFormat,
         seedreamOptimize: node?.metadata?.seedreamOptimize ?? config.seedreamOptimize,
-        seedreamWatermark: node?.metadata?.seedreamWatermark ?? config.seedreamWatermark,
+        seedreamWatermark: node?.metadata?.seedreamWatermark ?? config.seedreamWatermark ?? defaultConfig.seedreamWatermark,
         videoSeconds:
             workflowProvider === "model" && !isH3Model(preferredModel)
                 ? normalizeVideoDuration(node?.metadata?.seconds ?? workflowParameterValue("videoSeconds") ?? config.videoSeconds ?? defaultConfig.videoSeconds)

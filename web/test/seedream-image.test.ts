@@ -36,5 +36,9 @@ describe("Seedream model capabilities", () => {
         expect(wire.seedreamMode).toBe("layers");
         expect(wire.seedreamOutputFormat).toBe("png");
         expect(wire.seedreamWatermark).toBe("false");
+        expect(backendProviderConfig({ ...defaultConfig, model: "dola-seedream-5-0-pro-260628", seedreamWatermark: undefined }).seedreamWatermark).toBe("false");
+        expect(backendProviderConfig({ ...defaultConfig, model: "dola-seedream-5-0-pro-260628", seedreamWatermark: "true" }).seedreamWatermark).toBe("true");
+        expect(backendProviderConfig({ ...defaultConfig, model: "gpt-image-2" }).seedreamWatermark).toBeUndefined();
+        expect(backendProviderConfig({ ...defaultConfig, model: "gpt-image-2", seedreamWatermark: "true" }).seedreamWatermark).toBeUndefined();
     });
 });

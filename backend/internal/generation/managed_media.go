@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/providerpreset"
 )
 
 // Managed connections expose content intent, never a supplier request body.
@@ -140,7 +141,7 @@ func managedImageOptions(input Input) map[string]any {
 	if config.SeedreamOptimize != "" {
 		options["optimize_prompt_options"] = map[string]any{"mode": config.SeedreamOptimize}
 	}
-	if config.SeedreamWatermark != "" {
+	if providerpreset.SeedreamFamily(config.Model) != "" {
 		options["watermark"] = config.SeedreamWatermark == "true"
 	}
 	return options

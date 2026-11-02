@@ -8,6 +8,7 @@ import { submitGenerationCommand } from "./generation-submission";
 import { modelCapabilityConfigFor } from "@/lib/model-capabilities";
 import { resolveGenerationWorkflowExecution, type GenerationWorkflowExecution } from "@/lib/generation-workflow-execution";
 import { isArkPlanBaseUrl } from "@/lib/seedance-video";
+import { seedreamFamily } from "@/lib/seedream-image";
 import { portraitGenerationError, resolveVideoOperation } from "@/lib/model-selection";
 import { logicalModelIDForConfig, modelOptionName, resolveModelChannel, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
@@ -443,6 +444,7 @@ export function backendProviderConfig(config: AiConfig, mode: BackendGenerationM
     const requestConfig = resolveModelRequestConfig(config, config.model);
     const workflow = resolveGenerationWorkflowExecution(config, mode);
     if (workflow) return workflowProviderConfig(config, requestConfig, workflow);
+    const seedream = Boolean(seedreamFamily(requestConfig.model || config.model));
     const generationOptions = {
         size: config.size,
         quality: omittedImageQuality(config.quality, requestConfig),
@@ -451,7 +453,7 @@ export function backendProviderConfig(config: AiConfig, mode: BackendGenerationM
         seedreamMaxImages: config.seedreamMaxImages,
         seedreamOutputFormat: config.seedreamOutputFormat,
         seedreamOptimize: config.seedreamOptimize,
-        seedreamWatermark: config.seedreamWatermark,
+        seedreamWatermark: seedream ? (config.seedreamWatermark === "true" ? "true" : "false") : undefined,
         count: config.count,
         videoSeconds: config.videoSeconds,
         vquality: config.videoDraft === "true" ? "480p" : config.vquality,
