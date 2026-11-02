@@ -199,7 +199,10 @@ export default function PluginsPage() {
     const categoryCounts = useMemo(() => {
         const visiblePlugins = registeredPlugins.filter((plugin) => {
             if (localRuntime && plugin.manifest.id === RUNNINGHUB_PLUGIN_ID) return false;
-            return user?.role === "admin" || features.systemPluginsVisibleToUsers || isOfficialApplicationPluginId(plugin.manifest.id);
+            const isApplicationPlugin =
+                backendPluginById.get(plugin.manifest.id)?.management.kind === "application" ||
+                isOfficialApplicationPluginId(plugin.manifest.id);
+            return user?.role === "admin" || features.systemPluginsVisibleToUsers || isApplicationPlugin;
         });
         const counts: Record<string, number> = { all: visiblePlugins.length, text: 0, image: 0, video: 0, audio: 0, other: 0 };
         for (const plugin of visiblePlugins) {
@@ -215,11 +218,13 @@ export default function PluginsPage() {
     const settingsInstallation = settingsPlugin ? installations.find((item) => item.manifest.id === settingsPlugin.manifest.id) : undefined;
     const detailsPlugin = detailsPluginId ? registeredPlugins.find((plugin) => plugin.manifest.id === detailsPluginId) : undefined;
 
+    const hasCustomAppSettings = (plugin: RegisteredPlugin) =>
+        appSettingsEntries.some((entry) => entry.pluginId === plugin.manifest.id);
     const hasPluginConfiguration = (plugin: RegisteredPlugin) =>
         Boolean(plugin.manifest.configuration?.fields?.length) ||
-        appSettingsEntries.some((entry) => entry.pluginId === plugin.manifest.id);
+        hasCustomAppSettings(plugin);
     const canConfigurePlugin = (plugin: RegisteredPlugin) =>
-        localRuntime
+        localRuntime || hasCustomAppSettings(plugin)
             ? hasPluginConfiguration(plugin)
             : Boolean(pluginStates[plugin.manifest.id]?.canConfigure) &&
               (hasPluginConfiguration(plugin) || plugin.manifest.id === RUNNINGHUB_PLUGIN_ID);
@@ -847,7 +852,7 @@ function providerCapabilitiesFor(manifest: PluginManifest | PluginManifestV2) {
 
 function pluginMatchesCategory(manifest: PluginManifest | PluginManifestV2, category: string) {
     const providerCapabilities = providerCapabilitiesFor(manifest);
-    if (category === "other") return providerCapabilities.length === 0;
+    if (category === "other") return providerCapabilities.length === 0 || Boolean(manifest.client);
     return providerCapabilities.includes(category as "text" | "image" | "video" | "audio");
 }
 

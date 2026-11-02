@@ -181,6 +181,9 @@ func (s *Service) stateForUser(actor *model.User, pluginID string, items []View)
 		return StateView{}, fmt.Errorf("插件 %q 不存在", pluginID)
 	}
 	policy := Management(pluginID, source)
+	if hasRuntime {
+		policy = ManagementFromView(runtimePlugin)
+	}
 	platformAvailable := policy.Kind == KindApplication
 	store := s.durableStore()
 	if hasRuntime && (policy.ActivationScope == ScopeSystem || store == nil) {
@@ -214,7 +217,7 @@ func (s *Service) stateForUser(actor *model.User, pluginID string, items []View)
 		if !userConfigured {
 			if pluginID == MediaConversion {
 				userEnabled = true
-			} else if hasRuntime && pluginID == WorkflowRunningHub {
+			} else if hasRuntime && (pluginID == WorkflowRunningHub || strings.TrimSpace(runtimePlugin.PackageDir) != "") {
 				userEnabled = runtimePlugin.Status == StatusEnabled
 			}
 		}
@@ -256,7 +259,11 @@ func (s *Service) SetUserEnabled(actor *model.User, pluginID string, enabled boo
 	if hasRuntime {
 		source = runtimePlugin.Source
 	}
-	if Management(pluginID, source).ActivationScope != ScopeUser {
+	policy := Management(pluginID, source)
+	if hasRuntime {
+		policy = ManagementFromView(runtimePlugin)
+	}
+	if policy.ActivationScope != ScopeUser {
 		return StateView{}, Forbidden("系统插件只能由管理员统一管理")
 	}
 	if !current.PlatformAvailable {
@@ -318,6 +325,9 @@ func (s *Service) SetPlatformAvailability(actor *model.User, pluginID string, av
 		return AdminStateView{}, ManagementView{}, fmt.Errorf("插件 %q 不存在", pluginID)
 	}
 	policy := Management(pluginID, source)
+	if hasRuntime {
+		policy = ManagementFromView(runtimePlugin)
+	}
 	now := time.Now()
 	platformState := &model.PluginPlatformState{PluginID: pluginID, Available: available, UpdatedBy: actor.ID, CreatedAt: now, UpdatedAt: now}
 	if policy.ActivationScope == ScopeSystem {

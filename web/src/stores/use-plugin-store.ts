@@ -70,7 +70,7 @@ export const usePluginStore = create<PluginStore>()(
             ensurePlugin: (manifest) => {
                 set((state) => {
                     const current = state.installations.find((item) => item.manifest.id === manifest.id);
-                    if (current && current.manifest.version === manifest.version) return { hydrated: true };
+                    if (current && current.manifest.version === manifest.version && current.manifest.trusted === manifest.trusted) return { hydrated: true };
                     const timestamp = now();
                     const next: PluginInstallation = current
                         ? { ...current, manifest, updatedAt: timestamp }

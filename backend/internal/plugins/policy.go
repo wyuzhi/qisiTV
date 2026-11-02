@@ -67,6 +67,12 @@ func ManagementFromView(plugin View) ManagementView {
 			ActivationScope: ScopeSystem, ConfigurationScope: ConfigurationSystem,
 		}
 	}
+	if strings.TrimSpace(plugin.PackageDir) != "" && strings.TrimSpace(plugin.Manifest.Client) != "" && len(plugin.Manifest.Configuration.Fields) > 0 {
+		return ManagementView{
+			Origin: OriginOfficial, Kind: KindApplication,
+			ActivationScope: ScopeUser, ConfigurationScope: ConfigurationUser,
+		}
+	}
 	if strings.TrimSpace(plugin.PackageDir) != "" && len(plugin.Manifest.Contributes.Providers) == 0 {
 		return ManagementView{
 			Origin: OriginOfficial, Kind: KindApplication,

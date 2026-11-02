@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"infinite-canvas/backend/internal/canvas/capability"
+	"infinite-canvas/backend/internal/protocol"
 )
 
 func writeSamplePluginDir(t *testing.T, version string) string {
@@ -376,3 +377,92 @@ func TestNpmPackageFetcherSeesNewVersionDespiteWarmCache(t *testing.T) {
 		t.Fatalf("install after publishing 1.0.1 got %s; the npm cache pinned the old version", got)
 	}
 }
+
+func TestBuiltinLL2PluginPreinstalledAndRegistersProviders(t *testing.T) {
+	dataDir := t.TempDir()
+	rt, err := NewRuntime(dataDir)
+	if err != nil {
+		t.Fatalf("NewRuntime failed: %v", err)
+	}
+	defer capability.BuiltinRegistry().ResetPluginDescriptors()
+	svc := New(rt, nil)
+
+	view, ok := ByID(svc.List(), "beeftv-plugin-ll2")
+	if !ok {
+		t.Fatal("expected beeftv-plugin-ll2 to be pre-installed by default")
+	}
+	if view.Status != StatusEnabled || view.Source != OriginOfficial {
+		t.Fatalf("unexpected beeftv-plugin-ll2 view: status=%q source=%q", view.Status, view.Source)
+	}
+	if view.Management.ConfigurationScope != ConfigurationUser || view.Management.ActivationScope != ScopeUser {
+		t.Fatalf("expected ScopeUser/ConfigurationUser for beeftv-plugin-ll2, got activation=%q config=%q", view.Management.ActivationScope, view.Management.ConfigurationScope)
+	}
+
+	reg := svc.Registry()
+	cases := []struct {
+		providerID string
+		req        protocol.GenerationRequest
+		wantPath   string
+		pollJSON   string
+	}{
+		{
+			providerID: "ll2-seedance-video",
+			req:        protocol.GenerationRequest{Model: "doubao-seedance-2-0-fast", Prompt: "hello", Duration: 4, AspectRatio: "16:9", Resolution: "720p"},
+			wantPath:   "/seedance/api/v3/contents/generations/tasks",
+			pollJSON:   `{"id":"cgt-1","status":"succeeded","content":{"video_url":"https://cdn.example.com/a.mp4"}}`,
+		},
+		{
+			providerID: "ll2-vidu-video",
+			req:        protocol.GenerationRequest{Model: "viduq3-turbo", Prompt: "hello", Duration: 5, AspectRatio: "16:9", Resolution: "720p"},
+			wantPath:   "/vidu/ent/v2/text2video",
+			pollJSON:   `{"id":"vidu-1","state":"success","creations":[{"url":"https://cdn.example.com/b.mp4"}]}`,
+		},
+		{
+			providerID: "ll2-minimax-video",
+			req:        protocol.GenerationRequest{Model: "MiniMax-H3", Prompt: "hello", Duration: 5, AspectRatio: "16:9", Resolution: "720P"},
+			wantPath:   "/v2/video_generation",
+			pollJSON:   `{"task_id":"mm-1","status":"Success","video_url":"https://cdn.example.com/c.mp4"}`,
+		},
+		{
+			providerID: "ll2-super-vega-video",
+			req:        protocol.GenerationRequest{Model: "1.0-pro-mini", Prompt: "hello", Duration: 4, AspectRatio: "16:9", Resolution: "720P"},
+			wantPath:   "/super-vega/tasks",
+			pollJSON:   `{"Response":{"Status":"FINISH","AigcVideoTask":{"TaskId":"sv-1","Output":{"FileInfos":[{"FileUrl":"https://cdn.example.com/d.mp4"}]}}}}`,
+		},
+		{
+			providerID: "ll2-auto-hd-video",
+			req:        protocol.GenerationRequest{Model: "auto-hd", Videos: []protocol.MediaReference{{URL: "https://cdn.example.com/src.mp4"}}, Resolution: "1080p"},
+			wantPath:   "/hd/tasks",
+			pollJSON:   `{"task_id":"hd-1","status":"finished","url":"https://cdn.example.com/e.mp4"}`,
+		},
+	}
+	for _, tc := range cases {
+		adapter, resolved := reg.Resolve(tc.providerID)
+		if !resolved {
+			t.Fatalf("expected provider %q from beeftv-plugin-ll2 to be registered in protocol registry", tc.providerID)
+		}
+		spec, err := adapter.BuildCreate(context.Background(), protocol.RequestContext{
+			BaseURL: "https://api.ll2.cn",
+			Request: tc.req,
+		})
+		if err != nil {
+			t.Fatalf("BuildCreate(%s) failed: %v", tc.providerID, err)
+		}
+		if spec.Path != tc.wantPath {
+			t.Fatalf("BuildCreate(%s) path = %q, want %q", tc.providerID, spec.Path, tc.wantPath)
+		}
+		polled, err := adapter.ParsePoll(context.Background(), protocol.PollContext{
+			BaseURL: "https://api.ll2.cn",
+			Model:   tc.req.Model,
+			Request: tc.req,
+			TaskID:  "task-1",
+		}, []byte(tc.pollJSON))
+		if err != nil {
+			t.Fatalf("ParsePoll(%s) failed: %v", tc.providerID, err)
+		}
+		if polled.Status != protocol.StatusSucceeded || len(polled.Result.Videos) != 1 {
+			t.Fatalf("ParsePoll(%s) unexpected result: status=%q videos=%v", tc.providerID, polled.Status, polled.Result.Videos)
+		}
+	}
+}
+

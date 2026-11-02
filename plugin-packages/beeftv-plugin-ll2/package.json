@@ -1,0 +1,1551 @@
+{
+  "name": "beeftv-plugin-ll2",
+  "version": "1.0.0",
+  "description": "内置 LL2 (DMC) 算力与视频渠道插件，提供一键 BYOK 接入与 Seedance 2.0、Vidu Q3、MiniMax H3、Super Vega、Auto HD 视频协议。",
+  "type": "module",
+  "main": "./client/index.js",
+  "license": "Apache-2.0",
+  "keywords": [
+    "beeftv-plugin",
+    "ll2",
+    "video",
+    "seedance",
+    "vidu",
+    "super-vega"
+  ],
+  "beeftv": {
+    "apiVersion": "beeftv.plugin/v2",
+    "schemaVersion": 2,
+    "id": "beeftv-plugin-ll2",
+    "name": "LL2 算力与视频渠道",
+    "version": "1.0.0",
+    "author": "BeefTV",
+    "trusted": true,
+    "description": "内置 LL2 (DMC) 算力与视频渠道插件，支持填写 API Key 一键同步 DeepSeek V4.1、Seedance 2.0、Vidu Q3、MiniMax H3、Super Vega 1.0 与 Auto HD 超分模型。",
+    "client": "./client/index.js",
+    "permissions": [
+      "generation.run",
+      "media.read",
+      "ui.slot",
+      "settings.write"
+    ],
+    "configuration": {
+      "fields": [
+        {
+          "name": "apiKey",
+          "type": "secret",
+          "label": "LL2 API Key",
+          "required": true,
+          "description": "填写 LL2 (https://api.ll2.cn) 提供的 sk-... 密钥"
+        },
+        {
+          "name": "baseUrl",
+          "type": "string",
+          "label": "Base URL",
+          "required": false,
+          "default": "https://api.ll2.cn",
+          "description": "LL2 接口根地址，默认 https://api.ll2.cn"
+        }
+      ]
+    },
+    "contributes": {
+      "slots": [
+        "app.settings"
+      ],
+      "providers": [
+        {
+          "id": "ll2-seedance-video",
+          "label": "LL2 Seedance 2.0 Video",
+          "capabilities": [
+            "video"
+          ],
+          "scopes": [
+            "admin.system-channel",
+            "user.custom-channel",
+            "canvas",
+            "creation",
+            "agent"
+          ],
+          "baseUrl": "https://api.ll2.cn",
+          "requiresPublicMediaUrls": false,
+          "auth": {
+            "type": "bearer",
+            "field": "apiKey"
+          },
+          "parameters": [
+            {
+              "name": "model",
+              "type": "string",
+              "required": true,
+              "mapping": "model",
+              "description": "Seedance 2.0 模型 ID（如 doubao-seedance-2-0、doubao-seedance-2-0-fast）。"
+            },
+            {
+              "name": "prompt",
+              "type": "string",
+              "required": true,
+              "mapping": "content[type=text].text",
+              "description": "视频提示词。"
+            },
+            {
+              "name": "images",
+              "type": "media[]",
+              "required": false,
+              "mapping": "content[type=image_url]",
+              "description": "首帧、尾帧、参考图等 role 原样映射。"
+            },
+            {
+              "name": "videos",
+              "type": "media[]",
+              "required": false,
+              "mapping": "content[type=video_url]",
+              "description": "参考视频。"
+            },
+            {
+              "name": "audios",
+              "type": "media[]",
+              "required": false,
+              "mapping": "content[type=audio_url]",
+              "description": "参考音频。"
+            },
+            {
+              "name": "aspectRatio",
+              "type": "string",
+              "required": false,
+              "mapping": "ratio",
+              "description": "输出画幅比例。"
+            },
+            {
+              "name": "resolution",
+              "type": "string",
+              "required": false,
+              "mapping": "resolution",
+              "description": "输出分辨率档位（480p、720p）。"
+            },
+            {
+              "name": "duration",
+              "type": "integer",
+              "required": false,
+              "mapping": "duration",
+              "description": "输出时长秒数（4-15 秒）。"
+            },
+            {
+              "name": "generateAudio",
+              "type": "boolean",
+              "required": false,
+              "mapping": "generate_audio",
+              "description": "是否生成音频。"
+            },
+            {
+              "name": "watermark",
+              "type": "boolean",
+              "required": false,
+              "mapping": "watermark",
+              "description": "是否带水印。"
+            }
+          ],
+          "create": {
+            "method": "POST",
+            "path": "/seedance/api/v3/contents/generations/tasks",
+            "originPath": true,
+            "contentType": "application/json",
+            "body": {
+              "model": {
+                "$ref": "request.model"
+              },
+              "content": {
+                "$concatArrays": [
+                  [
+                    {
+                      "type": "text",
+                      "text": {
+                        "$ref": "request.prompt"
+                      }
+                    }
+                  ],
+                  {
+                    "$map": {
+                      "from": {
+                        "$sortByOrder": {
+                          "$ref": "request.images"
+                        }
+                      },
+                      "as": "media",
+                      "in": {
+                        "type": "image_url",
+                        "image_url": {
+                          "url": {
+                            "$ref": "media.value"
+                          }
+                        },
+                        "role": {
+                          "$coalesce": [
+                            {
+                              "$ref": "media.role"
+                            },
+                            "reference_image"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "$map": {
+                      "from": {
+                        "$sortByOrder": {
+                          "$ref": "request.videos"
+                        }
+                      },
+                      "as": "media",
+                      "in": {
+                        "type": "video_url",
+                        "video_url": {
+                          "url": {
+                            "$ref": "media.value"
+                          }
+                        },
+                        "role": {
+                          "$coalesce": [
+                            {
+                              "$ref": "media.role"
+                            },
+                            "reference_video"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "$map": {
+                      "from": {
+                        "$sortByOrder": {
+                          "$ref": "request.audios"
+                        }
+                      },
+                      "as": "media",
+                      "in": {
+                        "type": "audio_url",
+                        "audio_url": {
+                          "url": {
+                            "$ref": "media.value"
+                          }
+                        },
+                        "role": {
+                          "$coalesce": [
+                            {
+                              "$ref": "media.role"
+                            },
+                            "reference_audio"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "ratio": {
+                "$coalesce": [
+                  {
+                    "$ref": "request.aspectRatio"
+                  },
+                  "16:9"
+                ]
+              },
+              "resolution": {
+                "$coalesce": [
+                  {
+                    "$lower": {
+                      "$ref": "request.resolution"
+                    }
+                  },
+                  "720p"
+                ]
+              },
+              "duration": {
+                "$if": {
+                  "condition": {
+                    "$or": [
+                      {
+                        "$gt": [
+                          {
+                            "$ref": "request.duration"
+                          },
+                          0
+                        ]
+                      },
+                      {
+                        "$eq": [
+                          {
+                            "$ref": "request.duration"
+                          },
+                          -1
+                        ]
+                      }
+                    ]
+                  },
+                  "then": {
+                    "$ref": "request.duration"
+                  },
+                  "else": 5
+                }
+              },
+              "generate_audio": {
+                "$ref": "request.generateAudio"
+              },
+              "watermark": {
+                "$ref": "request.watermark"
+              }
+            }
+          },
+          "poll": {
+            "method": "GET",
+            "path": "/seedance/api/v3/contents/generations/tasks/{{taskId}}",
+            "originPath": true
+          },
+          "cancel": {
+            "method": "DELETE",
+            "path": "/seedance/api/v3/contents/generations/tasks/{{taskId}}",
+            "originPath": true
+          },
+          "response": {
+            "taskId": {
+              "$coalesce": [
+                {
+                  "$ref": "response.id"
+                },
+                {
+                  "$ref": "response.task_id"
+                },
+                {
+                  "$ref": "response.data.id"
+                },
+                {
+                  "$ref": "taskId"
+                }
+              ]
+            },
+            "status": {
+              "$coalesce": [
+                {
+                  "$ref": "response.status"
+                },
+                {
+                  "$ref": "response.data.status"
+                },
+                "pending"
+              ]
+            },
+            "message": {
+              "$coalesce": [
+                {
+                  "$ref": "response.error.message"
+                },
+                {
+                  "$ref": "response.message"
+                },
+                {
+                  "$ref": "response.fail_reason"
+                }
+              ]
+            },
+            "videos": {
+              "$coalesce": [
+                {
+                  "$ref": "response.content.video_url"
+                },
+                {
+                  "$ref": "response.video_url"
+                },
+                {
+                  "$ref": "response.output.video_url"
+                },
+                {
+                  "$ref": "response.data.video_url"
+                }
+              ]
+            },
+            "usage": {
+              "$ref": "response.usage"
+            },
+            "errorPaths": [
+              "error.code"
+            ],
+            "resultEphemeral": true
+          }
+        },
+        {
+          "id": "ll2-vidu-video",
+          "label": "LL2 Vidu Q3 Video",
+          "capabilities": [
+            "video"
+          ],
+          "scopes": [
+            "admin.system-channel",
+            "user.custom-channel",
+            "canvas",
+            "creation",
+            "agent"
+          ],
+          "baseUrl": "https://api.ll2.cn",
+          "requiresPublicMediaUrls": false,
+          "auth": {
+            "type": "bearer",
+            "field": "apiKey"
+          },
+          "parameters": [
+            {
+              "name": "model",
+              "type": "string",
+              "required": true,
+              "mapping": "model",
+              "description": "Vidu 视频模型 ID（如 viduq3-pro、viduq3-turbo）。"
+            },
+            {
+              "name": "prompt",
+              "type": "string",
+              "required": false,
+              "mapping": "prompt",
+              "description": "视频提示词。"
+            },
+            {
+              "name": "images",
+              "type": "media[]",
+              "required": false,
+              "mapping": "images",
+              "description": "显式 role 图片输入（first_frame、last_frame、reference_image）。"
+            },
+            {
+              "name": "duration",
+              "type": "integer",
+              "required": false,
+              "mapping": "duration",
+              "description": "时长秒数（1-16 秒）。"
+            },
+            {
+              "name": "aspectRatio",
+              "type": "string",
+              "required": false,
+              "mapping": "aspect_ratio",
+              "description": "画幅比例（16:9、9:16、4:3、3:4、1:1）。"
+            },
+            {
+              "name": "resolution",
+              "type": "string",
+              "required": false,
+              "mapping": "resolution",
+              "description": "分辨率档位（540p、720p、1080p）。"
+            },
+            {
+              "name": "generateAudio",
+              "type": "boolean",
+              "required": false,
+              "mapping": "audio",
+              "description": "是否音视频直出。"
+            },
+            {
+              "name": "watermark",
+              "type": "boolean",
+              "required": false,
+              "mapping": "watermark",
+              "description": "水印开关。"
+            }
+          ],
+          "create": {
+            "method": "POST",
+            "path": "/vidu/ent/v2/text2video",
+            "originPath": true,
+            "pathTemplate": {
+              "$if": {
+                "condition": {
+                  "$gt": [
+                    {
+                      "$len": {
+                        "$filter": {
+                          "from": {
+                            "$ref": "request.images"
+                          },
+                          "as": "image",
+                          "where": {
+                            "$in": [
+                              {
+                                "$ref": "image.role"
+                              },
+                              [
+                                "reference_image",
+                                "subject_reference",
+                                "style_reference"
+                              ]
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    0
+                  ]
+                },
+                "then": "/vidu/ent/v2/reference2video",
+                "else": {
+                  "$if": {
+                    "condition": {
+                      "$gt": [
+                        {
+                          "$len": {
+                            "$filter": {
+                              "from": {
+                                "$ref": "request.images"
+                              },
+                              "as": "image",
+                              "where": {
+                                "$eq": [
+                                  {
+                                    "$ref": "image.role"
+                                  },
+                                  "last_frame"
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        0
+                      ]
+                    },
+                    "then": "/vidu/ent/v2/start-end2video",
+                    "else": {
+                      "$if": {
+                        "condition": {
+                          "$gt": [
+                            {
+                              "$len": {
+                                "$ref": "request.images"
+                              }
+                            },
+                            0
+                          ]
+                        },
+                        "then": "/vidu/ent/v2/img2video",
+                        "else": "/vidu/ent/v2/text2video"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "contentType": "application/json",
+            "body": {
+              "model": {
+                "$ref": "request.model"
+              },
+              "prompt": {
+                "$omitEmpty": {
+                  "$ref": "request.prompt"
+                }
+              },
+              "images": {
+                "$omitEmpty": {
+                  "$map": {
+                    "from": {
+                      "$sortByOrder": {
+                        "$ref": "request.images"
+                      }
+                    },
+                    "as": "media",
+                    "in": {
+                      "$ref": "media.value"
+                    }
+                  }
+                }
+              },
+              "duration": {
+                "$omitEmpty": {
+                  "$ref": "request.duration"
+                }
+              },
+              "aspect_ratio": {
+                "$if": {
+                  "condition": {
+                    "$or": [
+                      {
+                        "$eq": [
+                          {
+                            "$len": {
+                              "$ref": "request.images"
+                            }
+                          },
+                          0
+                        ]
+                      },
+                      {
+                        "$gt": [
+                          {
+                            "$len": {
+                              "$filter": {
+                                "from": {
+                                  "$ref": "request.images"
+                                },
+                                "as": "image",
+                                "where": {
+                                  "$in": [
+                                    {
+                                      "$ref": "image.role"
+                                    },
+                                    [
+                                      "reference_image",
+                                      "subject_reference",
+                                      "style_reference"
+                                    ]
+                                  ]
+                                }
+                              }
+                            }
+                          },
+                          0
+                        ]
+                      }
+                    ]
+                  },
+                  "then": {
+                    "$omitEmpty": {
+                      "$ref": "request.aspectRatio"
+                    }
+                  }
+                }
+              },
+              "resolution": {
+                "$omitEmpty": {
+                  "$lower": {
+                    "$ref": "request.resolution"
+                  }
+                }
+              },
+              "audio": {
+                "$if": {
+                  "condition": {
+                    "$ref": "request.generateAudio"
+                  },
+                  "then": true
+                }
+              },
+              "watermark": {
+                "$if": {
+                  "condition": {
+                    "$ref": "request.watermark"
+                  },
+                  "then": true
+                }
+              }
+            }
+          },
+          "poll": {
+            "method": "GET",
+            "path": "/vidu/ent/v2/tasks/{{taskId}}/creations",
+            "originPath": true
+          },
+          "response": {
+            "taskId": {
+              "$coalesce": [
+                {
+                  "$ref": "response.task_id"
+                },
+                {
+                  "$ref": "response.id"
+                },
+                {
+                  "$ref": "response.taskId"
+                },
+                {
+                  "$ref": "taskId"
+                }
+              ]
+            },
+            "status": {
+              "$coalesce": [
+                {
+                  "$ref": "response.state"
+                },
+                {
+                  "$ref": "response.status"
+                },
+                "pending"
+              ]
+            },
+            "message": {
+              "$coalesce": [
+                {
+                  "$ref": "response.err_code"
+                },
+                {
+                  "$ref": "response.error.message"
+                },
+                {
+                  "$ref": "response.message"
+                }
+              ]
+            },
+            "videos": {
+              "$coalesce": [
+                {
+                  "$map": {
+                    "from": {
+                      "$ref": "response.creations"
+                    },
+                    "as": "item",
+                    "in": {
+                      "$ref": "item.url"
+                    }
+                  }
+                },
+                {
+                  "$ref": "response.video_url"
+                },
+                {
+                  "$ref": "response.url"
+                }
+              ]
+            },
+            "errorPaths": [
+              "err_code",
+              "error.code"
+            ],
+            "resultEphemeral": true
+          }
+        },
+        {
+          "id": "ll2-minimax-video",
+          "label": "LL2 MiniMax H3 Video",
+          "capabilities": [
+            "video"
+          ],
+          "scopes": [
+            "admin.system-channel",
+            "user.custom-channel",
+            "canvas",
+            "creation",
+            "agent"
+          ],
+          "baseUrl": "https://api.ll2.cn",
+          "requiresPublicMediaUrls": false,
+          "auth": {
+            "type": "bearer",
+            "field": "apiKey"
+          },
+          "parameters": [
+            {
+              "name": "model",
+              "type": "string",
+              "required": true,
+              "mapping": "model",
+              "description": "MiniMax 视频模型 ID（如 MiniMax-H3）。"
+            },
+            {
+              "name": "prompt",
+              "type": "string",
+              "required": true,
+              "mapping": "content[type=text].text",
+              "description": "视频提示词。"
+            },
+            {
+              "name": "images",
+              "type": "media[]",
+              "mapping": "content[type=image_url]",
+              "description": "支持 first_frame、last_frame、reference_image。"
+            },
+            {
+              "name": "videos",
+              "type": "media[]",
+              "mapping": "content[type=video_url]",
+              "description": "参考视频。"
+            },
+            {
+              "name": "audios",
+              "type": "media[]",
+              "mapping": "content[type=audio_url]",
+              "description": "参考音频。"
+            },
+            {
+              "name": "duration",
+              "type": "integer",
+              "required": true,
+              "mapping": "duration",
+              "description": "4-15 秒。"
+            },
+            {
+              "name": "resolution",
+              "type": "string",
+              "mapping": "resolution",
+              "description": "768P 或 2K。"
+            },
+            {
+              "name": "aspectRatio",
+              "type": "string",
+              "mapping": "ratio",
+              "description": "画幅比例。"
+            },
+            {
+              "name": "watermark",
+              "type": "boolean",
+              "mapping": "aigc_watermark",
+              "description": "AIGC 水印。"
+            },
+            {
+              "name": "generateAudio",
+              "type": "boolean",
+              "mapping": "generate_audio",
+              "description": "是否生成音频。"
+            }
+          ],
+          "create": {
+            "method": "POST",
+            "path": "/v2/video_generation",
+            "originPath": true,
+            "contentType": "application/json",
+            "body": {
+              "model": {
+                "$ref": "request.model"
+              },
+              "content": {
+                "$concatArrays": [
+                  [
+                    {
+                      "type": "text",
+                      "text": {
+                        "$ref": "request.prompt"
+                      }
+                    }
+                  ],
+                  {
+                    "$map": {
+                      "from": {
+                        "$sortByOrder": {
+                          "$ref": "request.images"
+                        }
+                      },
+                      "as": "media",
+                      "in": {
+                        "type": "image_url",
+                        "image_url": {
+                          "url": {
+                            "$ref": "media.value"
+                          }
+                        },
+                        "role": {
+                          "$coalesce": [
+                            {
+                              "$ref": "media.role"
+                            },
+                            "reference_image"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "$map": {
+                      "from": {
+                        "$sortByOrder": {
+                          "$ref": "request.videos"
+                        }
+                      },
+                      "as": "media",
+                      "in": {
+                        "type": "video_url",
+                        "video_url": {
+                          "url": {
+                            "$ref": "media.value"
+                          }
+                        },
+                        "role": {
+                          "$coalesce": [
+                            {
+                              "$ref": "media.role"
+                            },
+                            "reference_video"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "$map": {
+                      "from": {
+                        "$sortByOrder": {
+                          "$ref": "request.audios"
+                        }
+                      },
+                      "as": "media",
+                      "in": {
+                        "type": "audio_url",
+                        "audio_url": {
+                          "url": {
+                            "$ref": "media.value"
+                          }
+                        },
+                        "role": {
+                          "$coalesce": [
+                            {
+                              "$ref": "media.role"
+                            },
+                            "reference_audio"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "duration": {
+                "$ref": "request.duration"
+              },
+              "resolution": {
+                "$coalesce": [
+                  {
+                    "$ref": "request.resolution"
+                  },
+                  "768P"
+                ]
+              },
+              "ratio": {
+                "$if": {
+                  "condition": {
+                    "$gt": [
+                      {
+                        "$len": {
+                          "$filter": {
+                            "from": {
+                              "$ref": "request.images"
+                            },
+                            "as": "image",
+                            "where": {
+                              "$in": [
+                                {
+                                  "$ref": "image.role"
+                                },
+                                [
+                                  "first_frame",
+                                  "last_frame"
+                                ]
+                              ]
+                            }
+                          }
+                        }
+                      },
+                      0
+                    ]
+                  },
+                  "then": "adaptive",
+                  "else": {
+                    "$coalesce": [
+                      {
+                        "$ref": "request.aspectRatio"
+                      },
+                      "16:9"
+                    ]
+                  }
+                }
+              },
+              "aigc_watermark": {
+                "$if": {
+                  "condition": {
+                    "$ref": "request.watermark"
+                  },
+                  "then": true
+                }
+              },
+              "generate_audio": {
+                "$if": {
+                  "condition": {
+                    "$ref": "request.generateAudio"
+                  },
+                  "then": true
+                }
+              }
+            }
+          },
+          "poll": {
+            "method": "GET",
+            "path": "/v2/query/video_generation?task_id={{taskId}}",
+            "originPath": true
+          },
+          "response": {
+            "taskId": {
+              "$coalesce": [
+                {
+                  "$ref": "response.task.id"
+                },
+                {
+                  "$ref": "response.task_id"
+                },
+                {
+                  "$ref": "response.id"
+                },
+                {
+                  "$ref": "taskId"
+                }
+              ]
+            },
+            "status": {
+              "$coalesce": [
+                {
+                  "$ref": "response.task.status"
+                },
+                {
+                  "$ref": "response.status"
+                },
+                "pending"
+              ]
+            },
+            "message": {
+              "$coalesce": [
+                {
+                  "$ref": "response.task.error.message"
+                },
+                {
+                  "$ref": "response.base_resp.status_msg"
+                },
+                {
+                  "$ref": "response.error.message"
+                },
+                {
+                  "$ref": "response.message"
+                }
+              ]
+            },
+            "videos": {
+              "$coalesce": [
+                {
+                  "$ref": "response.task.content.url"
+                },
+                {
+                  "$ref": "response.content.url"
+                },
+                {
+                  "$ref": "response.video_url"
+                },
+                {
+                  "$ref": "response.file.download_url"
+                }
+              ]
+            },
+            "errorPaths": [
+              "task.error.code",
+              "base_resp.status_code",
+              "error.code"
+            ],
+            "resultEphemeral": true
+          }
+        },
+        {
+          "id": "ll2-super-vega-video",
+          "label": "LL2 Super Vega Video",
+          "capabilities": [
+            "video"
+          ],
+          "scopes": [
+            "admin.system-channel",
+            "user.custom-channel",
+            "canvas",
+            "creation",
+            "agent"
+          ],
+          "baseUrl": "https://api.ll2.cn",
+          "requiresPublicMediaUrls": false,
+          "mediaTransport": {
+            "video": "url"
+          },
+          "auth": {
+            "type": "bearer",
+            "field": "apiKey"
+          },
+          "parameters": [
+            {
+              "name": "model",
+              "type": "string",
+              "required": true,
+              "mapping": "model",
+              "description": "Super Vega 视频模型 ID（如 1.0-pro-mini、1.0-lite）。"
+            },
+            {
+              "name": "prompt",
+              "type": "string",
+              "required": false,
+              "mapping": "Prompt",
+              "description": "视频提示词。"
+            },
+            {
+              "name": "images",
+              "type": "media[]",
+              "required": false,
+              "mapping": "FileInfos / LastFrameUrl",
+              "description": "首帧与参考图写入 FileInfos(Category=Image)，尾帧写入 LastFrameUrl。"
+            },
+            {
+              "name": "videos",
+              "type": "media[]",
+              "required": false,
+              "mapping": "FileInfos",
+              "description": "参考视频写入 FileInfos(Category=Video)。"
+            },
+            {
+              "name": "duration",
+              "type": "integer",
+              "required": false,
+              "mapping": "OutputConfig.Duration",
+              "description": "时长秒数（4-15 秒）。"
+            },
+            {
+              "name": "aspectRatio",
+              "type": "string",
+              "required": false,
+              "mapping": "OutputConfig.AspectRatio",
+              "description": "画幅比例（16:9、9:16、4:3、3:4、1:1、21:9）。"
+            },
+            {
+              "name": "resolution",
+              "type": "string",
+              "required": false,
+              "mapping": "OutputConfig.Resolution",
+              "description": "分辨率档位（720P、768P、1080P）。"
+            },
+            {
+              "name": "generateAudio",
+              "type": "boolean",
+              "required": false,
+              "mapping": "OutputConfig.AudioGeneration",
+              "description": "音画同出（Enabled；1.0-lite 自动省略）。"
+            }
+          ],
+          "create": {
+            "method": "POST",
+            "path": "/super-vega/tasks",
+            "originPath": true,
+            "contentType": "application/json",
+            "body": {
+              "model": {
+                "$ref": "request.model"
+              },
+              "Prompt": {
+                "$omitEmpty": {
+                  "$ref": "request.prompt"
+                }
+              },
+              "FileInfos": {
+                "$omitEmpty": {
+                  "$concatArrays": [
+                    {
+                      "$map": {
+                        "from": {
+                          "$filter": {
+                            "from": {
+                              "$sortByOrder": {
+                                "$ref": "request.images"
+                              }
+                            },
+                            "as": "image",
+                            "where": {
+                              "$ne": [
+                                {
+                                  "$ref": "image.role"
+                                },
+                                "last_frame"
+                              ]
+                            }
+                          }
+                        },
+                        "as": "media",
+                        "in": {
+                          "Type": "Url",
+                          "Category": "Image",
+                          "Url": {
+                            "$ref": "media.value"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "$map": {
+                        "from": {
+                          "$sortByOrder": {
+                            "$ref": "request.videos"
+                          }
+                        },
+                        "as": "media",
+                        "in": {
+                          "Type": "Url",
+                          "Category": "Video",
+                          "Url": {
+                            "$ref": "media.value"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              "LastFrameUrl": {
+                "$omitEmpty": {
+                  "$first": {
+                    "$map": {
+                      "from": {
+                        "$filter": {
+                          "from": {
+                            "$sortByOrder": {
+                              "$ref": "request.images"
+                            }
+                          },
+                          "as": "image",
+                          "where": {
+                            "$eq": [
+                              {
+                                "$ref": "image.role"
+                              },
+                              "last_frame"
+                            ]
+                          }
+                        }
+                      },
+                      "as": "media",
+                      "in": {
+                        "$ref": "media.value"
+                      }
+                    }
+                  }
+                }
+              },
+              "OutputConfig": {
+                "StorageMode": "Temporary",
+                "Resolution": {
+                  "$if": {
+                    "condition": {
+                      "$and": [
+                        {
+                          "$in": [
+                            {
+                              "$ref": "request.model"
+                            },
+                            [
+                              "1.0-lite",
+                              "Super Vega 1.0-lite"
+                            ]
+                          ]
+                        },
+                        {
+                          "$in": [
+                            {
+                              "$upper": {
+                                "$ref": "request.resolution"
+                              }
+                            },
+                            [
+                              "",
+                              "720P"
+                            ]
+                          ]
+                        }
+                      ]
+                    },
+                    "then": "768P",
+                    "else": {
+                      "$coalesce": [
+                        {
+                          "$upper": {
+                            "$ref": "request.resolution"
+                          }
+                        },
+                        "720P"
+                      ]
+                    }
+                  }
+                },
+                "Duration": {
+                  "$coalesce": [
+                    {
+                      "$ref": "request.duration"
+                    },
+                    5
+                  ]
+                },
+                "AspectRatio": {
+                  "$coalesce": [
+                    {
+                      "$ref": "request.aspectRatio"
+                    },
+                    "16:9"
+                  ]
+                },
+                "AudioGeneration": {
+                  "$if": {
+                    "condition": {
+                      "$and": [
+                        {
+                          "$ref": "request.generateAudio"
+                        },
+                        {
+                          "$not": {
+                            "$in": [
+                              {
+                                "$ref": "request.model"
+                              },
+                              [
+                                "1.0-lite",
+                                "Super Vega 1.0-lite"
+                              ]
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    "then": "Enabled"
+                  }
+                }
+              }
+            }
+          },
+          "poll": {
+            "method": "GET",
+            "path": "/super-vega/tasks/{{taskId}}",
+            "originPath": true
+          },
+          "response": {
+            "taskId": {
+              "$coalesce": [
+                {
+                  "$ref": "response.Response.TaskId"
+                },
+                {
+                  "$ref": "response.TaskId"
+                },
+                {
+                  "$ref": "response.id"
+                },
+                {
+                  "$ref": "taskId"
+                }
+              ]
+            },
+            "status": {
+              "$if": {
+                "condition": {
+                  "$gt": [
+                    {
+                      "$ref": "response.Response.AigcVideoTask.ErrCode"
+                    },
+                    0
+                  ]
+                },
+                "then": "failed",
+                "else": {
+                  "$coalesce": [
+                    {
+                      "$ref": "response.Response.AigcVideoTask.Status"
+                    },
+                    {
+                      "$ref": "response.Response.Status"
+                    },
+                    {
+                      "$ref": "response.Status"
+                    },
+                    {
+                      "$ref": "response.status"
+                    },
+                    "pending"
+                  ]
+                }
+              }
+            },
+            "message": {
+              "$coalesce": [
+                {
+                  "$ref": "response.Response.Error.Message"
+                },
+                {
+                  "$ref": "response.Response.AigcVideoTask.Message"
+                },
+                {
+                  "$ref": "response.error.message"
+                },
+                {
+                  "$ref": "response.message"
+                }
+              ]
+            },
+            "videos": {
+              "$coalesce": [
+                {
+                  "$map": {
+                    "from": {
+                      "$ref": "response.Response.AigcVideoTask.Output.FileInfos"
+                    },
+                    "as": "file",
+                    "in": {
+                      "$ref": "file.FileUrl"
+                    }
+                  }
+                },
+                {
+                  "$ref": "response.video_url"
+                },
+                {
+                  "$ref": "response.url"
+                }
+              ]
+            },
+            "errorPaths": [
+              "Response.Error.Code",
+              "Response.AigcVideoTask.ErrCode",
+              "error.code"
+            ],
+            "resultEphemeral": true
+          }
+        },
+        {
+          "id": "ll2-auto-hd-video",
+          "label": "LL2 Auto HD 视频超分",
+          "capabilities": [
+            "video"
+          ],
+          "scopes": [
+            "admin.system-channel",
+            "user.custom-channel",
+            "canvas",
+            "creation",
+            "agent"
+          ],
+          "baseUrl": "https://api.ll2.cn",
+          "requiresPublicMediaUrls": true,
+          "mediaTransport": {
+            "video": "url"
+          },
+          "auth": {
+            "type": "bearer",
+            "field": "apiKey"
+          },
+          "parameters": [
+            {
+              "name": "model",
+              "type": "string",
+              "required": true,
+              "mapping": "model",
+              "description": "模型名称（auto-hd）。"
+            },
+            {
+              "name": "videos",
+              "type": "media[]",
+              "required": true,
+              "mapping": "video_url",
+              "description": "待超分视频公网 URL（取第一段参考视频）。"
+            },
+            {
+              "name": "resolution",
+              "type": "string",
+              "required": true,
+              "mapping": "resolution",
+              "description": "目标清晰度（720p、1080p、2k、4k）。"
+            }
+          ],
+          "validations": [
+            {
+              "assert": {
+                "$gte": [
+                  {
+                    "$len": {
+                      "$ref": "request.videos"
+                    }
+                  },
+                  1
+                ]
+              },
+              "message": "auto-hd 视频超分需要提供 1 个参考视频"
+            }
+          ],
+          "create": {
+            "method": "POST",
+            "path": "/hd/tasks",
+            "originPath": true,
+            "contentType": "application/json",
+            "body": {
+              "model": {
+                "$ref": "request.model"
+              },
+              "video_url": {
+                "$first": {
+                  "$map": {
+                    "from": {
+                      "$sortByOrder": {
+                        "$ref": "request.videos"
+                      }
+                    },
+                    "as": "media",
+                    "in": {
+                      "$ref": "media.value"
+                    }
+                  }
+                }
+              },
+              "resolution": {
+                "$coalesce": [
+                  {
+                    "$lower": {
+                      "$ref": "request.resolution"
+                    }
+                  },
+                  "1080p"
+                ]
+              }
+            }
+          },
+          "poll": {
+            "method": "GET",
+            "path": "/hd/tasks/{{taskId}}",
+            "originPath": true
+          },
+          "response": {
+            "taskId": {
+              "$coalesce": [
+                {
+                  "$ref": "response.id"
+                },
+                {
+                  "$ref": "response.task_id"
+                },
+                {
+                  "$ref": "taskId"
+                }
+              ]
+            },
+            "status": {
+              "$coalesce": [
+                {
+                  "$ref": "response.status"
+                },
+                "pending"
+              ]
+            },
+            "message": {
+              "$coalesce": [
+                {
+                  "$ref": "response.error.message"
+                },
+                {
+                  "$ref": "response.message"
+                }
+              ]
+            },
+            "videos": {
+              "$coalesce": [
+                {
+                  "$ref": "response.url"
+                },
+                {
+                  "$ref": "response.video_url"
+                }
+              ]
+            },
+            "errorPaths": [
+              "error.code"
+            ],
+            "resultEphemeral": true
+          }
+        }
+      ]
+    }
+  }
+}

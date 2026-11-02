@@ -132,6 +132,11 @@ if [[ "$AGENT_TARGET" == linux/amd64 ]]; then
   mkdir -p "$LINUX_BUNDLE/plugin-packages" "$LINUX_BUNDLE/cli"
   mv "$DESKTOP_DIR/build/bin/BeefTV" "$LINUX_BUNDLE/BeefTV"
   cp "$ROOT_DIR/plugin-packages/"*.beeftv-plugin "$LINUX_BUNDLE/plugin-packages/"
+  for builtin_dir in beeftv-plugin-market beeftv-plugin-ll2 beeftv-plugin-sticky-note beeftv-plugin-ecommerce-hero; do
+    if [[ -d "$ROOT_DIR/plugin-packages/$builtin_dir" ]]; then
+      cp -R "$ROOT_DIR/plugin-packages/$builtin_dir" "$LINUX_BUNDLE/plugin-packages/"
+    fi
+  done
   cp "$ROOT_DIR/docs/linux-install.md" "$LINUX_BUNDLE/README.md"
   bun "$ROOT_DIR/scripts/package-agent-host.mjs" "$AGENT_TARGET" "$LINUX_BUNDLE/agent-host"
   bun "$ROOT_DIR/scripts/distribution-notices.mjs" "${AGENT_TARGET/\//-}" "$LINUX_BUNDLE/agent-host/licenses" "$VERSION_VALUE"
@@ -150,6 +155,11 @@ APP_BUNDLE="$DESKTOP_DIR/build/bin/BeefTV.app"
 PLUGIN_RESOURCE_DIR="$APP_BUNDLE/Contents/Resources/plugin-packages"
 mkdir -p "$PLUGIN_RESOURCE_DIR"
 cp "$ROOT_DIR/plugin-packages/"*.beeftv-plugin "$PLUGIN_RESOURCE_DIR/"
+for builtin_dir in beeftv-plugin-market beeftv-plugin-ll2 beeftv-plugin-sticky-note beeftv-plugin-ecommerce-hero; do
+  if [[ -d "$ROOT_DIR/plugin-packages/$builtin_dir" ]]; then
+    cp -R "$ROOT_DIR/plugin-packages/$builtin_dir" "$PLUGIN_RESOURCE_DIR/"
+  fi
+done
 
 bun "$ROOT_DIR/scripts/package-agent-host.mjs" "$AGENT_TARGET" \
   "$APP_BUNDLE/Contents/Resources/agent-host"

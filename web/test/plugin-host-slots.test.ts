@@ -357,12 +357,14 @@ describe("plugin host slots, events, and lifecycle", () => {
 
     test("activates real bundled ESM client plugins from plugin-packages and cleans up on disable", async () => {
         const marketMod = await import("../../plugin-packages/beeftv-plugin-market/client/index.js");
+        const ll2Mod = await import("../../plugin-packages/beeftv-plugin-ll2/client/index.js");
         const stickyMod = await import("../../plugin-packages/beeftv-plugin-sticky-note/client/index.js");
         const ecommerceMod = await import("../../plugin-packages/beeftv-plugin-ecommerce-hero/client/index.js");
         const slotTestMod = await import("../../plugin-packages/beeftv-plugin-slot-test/client/index.js");
 
         const packages = [
             { id: "beeftv-plugin-market", name: "插件市场", mod: marketMod },
+            { id: "beeftv-plugin-ll2", name: "LL2 算力与视频渠道", mod: ll2Mod },
             { id: "beeftv-plugin-sticky-note", name: "便签节点", mod: stickyMod },
             { id: "beeftv-plugin-ecommerce-hero", name: "一键商品主图", mod: ecommerceMod },
             { id: "beeftv-plugin-slot-test", name: "挂点测试套件", mod: slotTestMod },
@@ -386,6 +388,42 @@ describe("plugin host slots, events, and lifecycle", () => {
         expect(
             getPluginSlotEntries("pluginCenter.section").some((e) => e.pluginId === "beeftv-plugin-market"),
         ).toBe(true);
+
+        // LL2 plugin contributes app.settings and builds a complete BYOK channel
+        expect(
+            getPluginSlotEntries("app.settings").some((e) => e.pluginId === "beeftv-plugin-ll2"),
+        ).toBe(true);
+        const builtChannel = ll2Mod.buildLL2ModelChannel({ apiKey: "sk-test-demo", baseUrl: "https://api.ll2.cn" });
+        expect(builtChannel.id).toBe("ll2");
+        expect(builtChannel.models).toContain("doubao-seedance-2-0-fast");
+        expect(builtChannel.models).toContain("1.0-pro-mini");
+        expect(builtChannel.models).toContain("auto-hd");
+        expect(builtChannel.modelProfiles).toHaveLength(9);
+
+        // Untrusted plugins without settings.write cannot read or mutate channels
+        const untrustedHost = createBeefTVPluginHost("untrusted-plugin", {
+            apiVersion: "beeftv.plugin/v2",
+            id: "untrusted-plugin",
+            name: "Untrusted",
+            version: "1.0.0",
+            description: "Untrusted",
+            permissions: [],
+            contributes: {},
+        });
+        expect(() => untrustedHost.channels?.list()).toThrow();
+
+        // Trusted plugin with settings.write gets redacted channel copies
+        const trustedHost = createBeefTVPluginHost("beeftv-plugin-ll2", {
+            apiVersion: "beeftv.plugin/v2",
+            id: "beeftv-plugin-ll2",
+            name: "LL2",
+            version: "1.0.0",
+            description: "LL2",
+            trusted: true,
+            permissions: ["settings.write"],
+            contributes: {},
+        });
+        expect(Array.isArray(trustedHost.channels?.list())).toBe(true);
 
         // Sticky note plugin contributes canvas.node (sticky-note) and canvas.addNodeMenu
         expect(getPluginCanvasNodeRenderer("sticky-note")?.pluginId).toBe("beeftv-plugin-sticky-note");

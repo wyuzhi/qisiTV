@@ -121,7 +121,7 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 		byID[id] = next
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() || entry.Name() != "beeftv-plugin-market" {
+		if !entry.IsDir() || (entry.Name() != "beeftv-plugin-market" && entry.Name() != "beeftv-plugin-ll2") {
 			continue
 		}
 		pkgRoot := filepath.Join(officialDir, entry.Name())
@@ -130,7 +130,7 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 		}
 		pkg, err := protocol.ParsePluginPackageDir(pkgRoot)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("校验官方插件目录 %s：%w", entry.Name(), err)
 		}
 		id := pkg.Manifest.Metadata.ID
 		if _, duplicate := builtInIDs[id]; duplicate {

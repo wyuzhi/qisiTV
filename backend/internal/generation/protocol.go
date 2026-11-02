@@ -163,17 +163,19 @@ func ExtractProviderTaskID(body []byte) (string, error) {
 	if json.Unmarshal(body, &payload) != nil {
 		return "", nil
 	}
-	id, err := firstJSONString(payload, "id", "task_id", "taskId", "request_id", "name")
+	id, err := firstJSONString(payload, "id", "task_id", "taskId", "TaskId", "request_id", "name")
 	if id != "" {
 		return id, nil
 	}
-	if data, ok := payload["data"].(map[string]interface{}); ok {
-		nested, nestedErr := firstJSONString(data, "id", "task_id", "taskId", "request_id")
-		if nested != "" {
-			return nested, nil
-		}
-		if nestedErr != nil {
-			return "", nestedErr
+	for _, key := range []string{"data", "Response"} {
+		if data, ok := payload[key].(map[string]interface{}); ok {
+			nested, nestedErr := firstJSONString(data, "id", "task_id", "taskId", "TaskId", "request_id")
+			if nested != "" {
+				return nested, nil
+			}
+			if nestedErr != nil {
+				return "", nestedErr
+			}
 		}
 	}
 	return "", err
