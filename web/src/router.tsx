@@ -18,6 +18,7 @@ const CanvasPage = lazy(loadCanvasPage);
 const CanvasProjectPage = lazy(loadCanvasProjectPage);
 const CreatePage = lazy(loadCreatePage);
 const NotFound = lazy(() => import("@/pages/not-found"));
+const EagleLibraryPage = lazy(() => import("@/pages/plugins/eagle"));
 const PluginsPage = lazy(() => import("@/pages/plugins"));
 const ProjectDetailPage = lazy(loadProjectDetailPage);
 const SettingsPage = lazy(() => import("@/pages/settings"));
@@ -68,6 +69,9 @@ function PluginHostPageRoute() {
         ) ?? pageEntries.find((entry) => entry.pluginId === pluginId);
 
     if (!matched) {
+        if (pluginId === "eagle-asset-connector") {
+            return deferred(<EagleLibraryPage />);
+        }
         return deferred(<NotFound />);
     }
     const PageComp = matched.payload.component;

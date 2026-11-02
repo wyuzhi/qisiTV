@@ -42,6 +42,7 @@ const canvasNodeRenderersByType = new Map<
     string,
     { entryId: string; pluginId: string; contribution: PluginCanvasNodeSlotContribution }
 >();
+const canvasNodeOwnerByType = new Map<string, string>();
 const listeners = new Set<() => void>();
 let nextEntrySeq = 1;
 
@@ -134,8 +135,10 @@ function toCanvasNodeDefinition(pluginId: string, contribution: PluginCanvasNode
 function syncPluginCanvasNodeDefinitions(pluginId: string): void {
     unregisterNodeDefinitions(pluginId);
     const registered = getRegisteredPlugin(pluginId);
-    if (registered?.manifest.contributes.canvasNodes?.length) {
-        registerPluginCanvasNodes(pluginId, registered.manifest.contributes.canvasNodes);
+    const installed = usePluginStore.getState().installations.find((item) => item.manifest.id === pluginId);
+    const manifestCanvasNodes = registered?.manifest.contributes.canvasNodes ?? installed?.manifest.contributes?.canvasNodes;
+    if (manifestCanvasNodes?.length) {
+        registerPluginCanvasNodes(pluginId, manifestCanvasNodes);
     }
     const nodeEntries = (entriesBySlot.get("canvas.node") ?? []) as Array<SlotContributionEntry<"canvas.node">>;
     const defs = nodeEntries
@@ -198,6 +201,7 @@ export function contributeSlot<K extends PluginSlotName>(
 
     if (slot === "canvas.node") {
         const nodePayload = payload as PluginSlotMap["canvas.node"];
+        canvasNodeOwnerByType.set(nodePayload.type, pluginId);
         canvasNodeRenderersByType.set(nodePayload.type, {
             entryId,
             pluginId,
@@ -380,6 +384,10 @@ export function getPluginCanvasNodeRenderer(
         pluginId: found.pluginId,
         contribution: found.contribution,
     };
+}
+
+export function getPluginCanvasNodeOwner(nodeType: string): string | undefined {
+    return canvasNodeRenderersByType.get(nodeType)?.pluginId ?? canvasNodeOwnerByType.get(nodeType);
 }
 
 export async function runGenerationBeforeSubmitHooks(

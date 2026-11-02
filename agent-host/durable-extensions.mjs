@@ -316,7 +316,8 @@ export async function installDurableExtensions({
           const isError = rawResult?.isError === true;
           entry.log.push({
             toolCallId: String(api?.callId || api?.taskId || '') || null,
-            tool: pluginTool.label || pluginTool.name,
+            tool: pluginTool.name,
+            label: pluginTool.label || pluginTool.name,
             args: args || {},
             isError,
             ms: Date.now() - started,
@@ -325,7 +326,8 @@ export async function installDurableExtensions({
         } catch (error) {
           entry.log.push({
             toolCallId: String(api?.callId || api?.taskId || '') || null,
-            tool: pluginTool.label || pluginTool.name,
+            tool: pluginTool.name,
+            label: pluginTool.label || pluginTool.name,
             args: args || {},
             isError: true,
             error: error.message,

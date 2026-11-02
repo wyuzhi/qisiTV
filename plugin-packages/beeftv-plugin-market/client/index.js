@@ -119,13 +119,17 @@ async function searchNpmPlugins(query) {
   const apiUrl = `/api/plugins/market/search?q=${encodeURIComponent(trimmed)}`;
   try {
     const res = await fetchWithTimeout(apiUrl, 8000);
-    const items = Array.isArray(res?.data)
-      ? res.data
-      : Array.isArray(res?.results)
-        ? res.results
-        : Array.isArray(res)
-          ? res
-          : null;
+    const items = Array.isArray(res?.data?.items)
+      ? res.data.items
+      : Array.isArray(res?.data?.plugins)
+        ? res.data.plugins
+        : Array.isArray(res?.data)
+          ? res.data
+          : Array.isArray(res?.results)
+            ? res.results
+            : Array.isArray(res)
+              ? res
+              : null;
     if (items) return items;
   } catch {
     // 后端搜索代理不可用时回退到直接请求 npmjs 搜索接口

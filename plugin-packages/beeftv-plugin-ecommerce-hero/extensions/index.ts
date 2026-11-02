@@ -49,6 +49,11 @@ export default function registerEcommerceHeroExtension(pi: ExtensionAPI) {
       sellingPoints: Type.String({
         description: "核心卖点描述，例如「48dB 深度降噪、金属磨砂腔体、40 小时续航」",
       }),
+      sceneStyle: Type.Optional(
+        Type.String({
+          description: "场景风格：studio（棚拍质感）| lifestyle（生活场景）| festival（节日促销）",
+        }),
+      ),
       sceneCount: Type.Optional(
         Type.Number({
           description: "需要生成的场景图张数（1 到 4，默认 2）",
@@ -68,6 +73,7 @@ export default function registerEcommerceHeroExtension(pi: ExtensionAPI) {
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const count = Math.max(1, Math.min(4, Math.trunc(params.sceneCount ?? 2)));
+      const sceneStyle = String(params.sceneStyle || "studio").trim() || "studio";
       let revision = params.expectedRevision;
       if (!Number.isSafeInteger(revision) || (revision as number) < 0) {
         const read = await ctx.executeTool("canvas_get", {});
@@ -87,6 +93,12 @@ export default function registerEcommerceHeroExtension(pi: ExtensionAPI) {
           type: "ecommerce-hero",
           title: `${params.productTitle} · 商品主图配置`,
           prompt: `商品：${params.productTitle}\n卖点：${params.sellingPoints}\n场景数：${count} 张`,
+          pluginData: {
+            productTitle: params.productTitle,
+            sellingPoints: params.sellingPoints,
+            sceneStyle,
+            sceneCount: count,
+          },
         },
         ...selectedScenes.map((scene, index) => ({
           type: "image",

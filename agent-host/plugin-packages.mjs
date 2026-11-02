@@ -360,10 +360,54 @@ export async function loadPluginExtensionsFromPackages({
               err.details = reply;
               throw err;
             }
-            if (reply && typeof reply === 'object' && !reply.content && typeof reply.structuredOutput === 'string') {
-              return { ...reply, content: [{ type: 'text', text: reply.structuredOutput }] };
+            const rawContent = Array.isArray(reply?.content)
+              ? reply.content
+              : Array.isArray(reply?.output)
+                ? reply.output
+                : Array.isArray(reply?.result?.content)
+                  ? reply.result.content
+                  : typeof reply?.structuredOutput === 'string'
+                    ? [{ type: 'text', text: reply.structuredOutput }]
+                    : reply?.structuredOutput && typeof reply.structuredOutput === 'object'
+                      ? [{ type: 'text', text: JSON.stringify(reply.structuredOutput) }]
+                      : [];
+            const combinedText = rawContent
+              .map((part) => (part && typeof part.text === 'string' ? part.text : ''))
+              .join('');
+            let parsedStructured =
+              reply?.structuredContent ??
+              reply?.result?.structuredContent ??
+              (typeof reply?.structuredOutput === 'object' ? reply.structuredOutput : undefined);
+            if (!parsedStructured && combinedText) {
+              try {
+                parsedStructured = JSON.parse(combinedText);
+              } catch {
+                // non-JSON text tool output
+              }
             }
-            return reply;
+            const flattenedStructured =
+              parsedStructured &&
+              typeof parsedStructured === 'object' &&
+              !Array.isArray(parsedStructured) &&
+              parsedStructured.result &&
+              typeof parsedStructured.result === 'object' &&
+              !Array.isArray(parsedStructured.result)
+                ? { ...parsedStructured, ...parsedStructured.result }
+                : parsedStructured;
+            const normalizedResult = {
+              ...(reply?.result && typeof reply.result === 'object' ? reply.result : {}),
+              ...(flattenedStructured && typeof flattenedStructured === 'object' ? flattenedStructured : {}),
+              content: rawContent,
+              structuredContent: flattenedStructured,
+            };
+            return {
+              ...(reply && typeof reply === 'object' ? reply : {}),
+              isError: Boolean(reply?.isError),
+              content: rawContent,
+              output: rawContent,
+              structuredContent: flattenedStructured,
+              result: normalizedResult,
+            };
           };
           const reportProgress = (progress) => (typeof api?.details === 'function'
             ? api.details({ beeftvProgress: progress }, context)

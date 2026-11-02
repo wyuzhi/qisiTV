@@ -37,25 +37,34 @@ export default function registerStickyNoteExtension(pi: ExtensionAPI) {
     description:
       "在当前画布上创建一张便签卡片（sticky-note 节点）。当用户要求记录待办、贴便签或整理要点时使用。",
     parameters: Type.Object({
-      title: Type.String({ description: "便签标题（4 到 12 个字概括要点）" }),
-      text: Type.String({ description: "便签正文内容" }),
+      title: Type.Optional(Type.String({ description: "便签标题（4 到 12 个字概括要点）" })),
+      text: Type.Optional(Type.String({ description: "便签正文内容" })),
+      content: Type.Optional(Type.String({ description: "便签正文内容（与 text 等价）" })),
+      color: Type.Optional(Type.String({ description: "便签配色：amber | mint | sky | rose" })),
       expectedRevision: Type.Optional(
         Type.Number({ description: "画布期望版本号（未传时自动读取）" }),
       ),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const revision = await resolveCanvasRevision(ctx, params.expectedRevision);
+      const bodyText = String(params.text || params.content || params.title || "新建便签").trim();
+      const titleText = String(params.title || bodyText.slice(0, 12) || "便签").trim();
+      const color = String(params.color || "amber").trim() || "amber";
       const created = await ctx.executeTool("canvas_nodes_create", {
         expectedRevision: revision,
         nodes: [
           {
             type: "sticky-note",
-            title: params.title,
-            prompt: `📌 ${params.text}`,
+            title: titleText,
+            prompt: `📌 ${bodyText}`,
+            pluginData: {
+              content: bodyText,
+              color,
+            },
           },
         ],
       });
-      const createdText = created.result.content
+      const createdText = (created?.result?.content || created?.content || [])
         .map((part) => ("text" in part && part.text ? part.text : ""))
         .join("");
       if (created.isError) {
@@ -65,11 +74,13 @@ export default function registerStickyNoteExtension(pi: ExtensionAPI) {
         content: [
           {
             type: "text",
-            text: `已创建便签「${params.title}」`,
+            text: `已创建便签「${titleText}」`,
           },
         ],
         details: {
-          title: params.title,
+          title: titleText,
+          content: bodyText,
+          color,
           revision,
         },
       };

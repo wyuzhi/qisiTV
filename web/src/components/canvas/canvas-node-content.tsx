@@ -34,7 +34,7 @@ import { acquireCanvasVideoSource } from "@/services/canvas-video-source";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { getRegisteredPlugin } from "@/lib/plugins/plugin-registry";
-import { getPluginCanvasNodeRenderer, usePluginSlot } from "@/lib/plugins/slot-registry";
+import { getPluginCanvasNodeOwner, getPluginCanvasNodeRenderer, usePluginSlot } from "@/lib/plugins/slot-registry";
 import { isPluginEffectivelyEnabled, usePluginStore } from "@/stores/use-plugin-store";
 import { ART_CRITIQUE_NODE_TYPE } from "@/lib/art-critique/contracts";
 import { createDefaultSubtitleStyle } from "@/types/timeline";
@@ -123,14 +123,19 @@ export function CanvasNodeContent(props: CanvasNodeContentProps) {
 
     const slotRenderer = getPluginCanvasNodeRenderer(props.node.type);
     const pluginDefinition = getNodeDefinition(props.node.type)?.plugin;
-    const ownerPluginId = slotRenderer?.pluginId ?? pluginDefinition?.pluginId;
+    const ownerPluginId =
+        slotRenderer?.pluginId ?? pluginDefinition?.pluginId ?? getPluginCanvasNodeOwner(props.node.type);
     if (ownerPluginId) {
         const inst = pluginInstallations.find((item) => item.manifest.id === ownerPluginId);
         const explicitlyConfigured = Boolean(inst) || ownerPluginId in pluginStates || ownerPluginId in runtimeStatuses;
         if (explicitlyConfigured && !isPluginEffectivelyEnabled(ownerPluginId, inst?.enabled)) {
             const pluginName = inst?.manifest.name || getRegisteredPlugin(ownerPluginId)?.manifest.name || ownerPluginId;
             return (
-                <div className="flex h-full w-full items-center justify-center p-4 text-center text-xs" style={{ color: props.theme.node.placeholder }}>
+                <div
+                    data-testid="canvas-disabled-plugin-node"
+                    className="flex h-full w-full items-center justify-center p-4 text-center text-xs"
+                    style={{ color: props.theme.node.placeholder }}
+                >
                     需要启用 {pluginName} 插件
                 </div>
             );
