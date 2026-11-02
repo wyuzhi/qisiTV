@@ -406,4 +406,58 @@ describe("plugin host slots, events, and lifecycle", () => {
         expect(officialCopy.checkboxLabel).toBeNull();
         expect(officialCopy.nativeWarning).toBeNull();
     });
+
+    test("activates real bundled ESM client plugins from plugin-packages and cleans up on disable", async () => {
+        const marketMod = await import("../../plugin-packages/beeftv-plugin-market/client/index.js");
+        const stickyMod = await import("../../plugin-packages/beeftv-plugin-sticky-note/client/index.js");
+        const ecommerceMod = await import("../../plugin-packages/beeftv-plugin-ecommerce-hero/client/index.js");
+        const slotTestMod = await import("../../plugin-packages/beeftv-plugin-slot-test/client/index.js");
+
+        const packages = [
+            { id: "beeftv-plugin-market", name: "插件市场", mod: marketMod },
+            { id: "beeftv-plugin-sticky-note", name: "便签节点", mod: stickyMod },
+            { id: "beeftv-plugin-ecommerce-hero", name: "一键商品主图", mod: ecommerceMod },
+            { id: "beeftv-plugin-slot-test", name: "挂点测试套件", mod: slotTestMod },
+        ];
+
+        for (const pkg of packages) {
+            usePluginStore.getState().ensurePlugin({
+                id: pkg.id,
+                name: pkg.name,
+                version: "0.1.0",
+                description: pkg.name,
+                permissions: [],
+                contributes: {},
+            });
+            usePluginStore.getState().setEnabled(pkg.id, true);
+            const ok = await activateClientPluginModule(pkg.id, pkg.mod, { reportBackendError: false });
+            expect(ok).toBe(true);
+        }
+
+        // Market plugin contributes pluginCenter.section
+        expect(
+            getPluginSlotEntries("pluginCenter.section").some((e) => e.pluginId === "beeftv-plugin-market"),
+        ).toBe(true);
+
+        // Sticky note plugin contributes canvas.node (sticky-note) and canvas.addNodeMenu
+        expect(getPluginCanvasNodeRenderer("sticky-note")?.pluginId).toBe("beeftv-plugin-sticky-note");
+
+        // Ecommerce hero contributes canvas.node (ecommerce-hero), canvas.addNodeMenu, assistant.toolCard
+        expect(getPluginCanvasNodeRenderer("ecommerce-hero")?.pluginId).toBe("beeftv-plugin-ecommerce-hero");
+        expect(
+            getPluginSlotEntries("assistant.toolCard").some((e) => e.pluginId === "beeftv-plugin-ecommerce-hero"),
+        ).toBe(true);
+
+        // Slot test plugin contributes across all 21 slots and 8 events
+        expect(getPluginCanvasNodeRenderer("slot-test-node")?.pluginId).toBe("beeftv-plugin-slot-test");
+        expect(getPluginEventListenerCount("canvas.opened")).toBeGreaterThanOrEqual(1);
+        expect(getPluginEventListenerCount("generation.succeeded")).toBeGreaterThanOrEqual(1);
+
+        // Deactivate all and verify clean teardown
+        for (const pkg of packages) {
+            deactivateClientPlugin(pkg.id);
+        }
+        expect(getPluginCanvasNodeRenderer("sticky-note")).toBeUndefined();
+        expect(getPluginCanvasNodeRenderer("slot-test-node")).toBeUndefined();
+    });
 });

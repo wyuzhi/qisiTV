@@ -444,29 +444,48 @@ func (c *Runtime) InstallPackageFromSource(source string) (View, error) {
 		return View{}, fmt.Errorf("插件运行时未初始化")
 	}
 	source = strings.TrimSpace(source)
+	source = strings.TrimPrefix(source, "npm:")
+	source = strings.TrimSpace(source)
 	if source == "" {
 		return View{}, fmt.Errorf("插件来源不能为空")
 	}
-	if info, err := os.Stat(source); err == nil {
-		if info.IsDir() {
-			absSource, absErr := filepath.Abs(source)
-			if absErr == nil {
-				source = absSource
+	candidates := []string{source}
+	if officialDir, err := officialPluginPackageDir(); err == nil {
+		trimmedRel := strings.TrimPrefix(filepath.ToSlash(source), "plugin-packages/")
+		candidates = append(candidates, filepath.Join(officialDir, filepath.FromSlash(trimmedRel)))
+		baseSpec := trimmedRel
+		if at := strings.LastIndex(baseSpec, "@"); at > 0 {
+			baseSpec = baseSpec[:at]
+		}
+		if slash := strings.LastIndex(baseSpec, "/"); slash >= 0 {
+			baseSpec = baseSpec[slash+1:]
+		}
+		if baseSpec != "" {
+			candidates = append(candidates, filepath.Join(officialDir, baseSpec))
+		}
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil {
+			if info.IsDir() {
+				absSource, absErr := filepath.Abs(candidate)
+				if absErr == nil {
+					candidate = absSource
+				}
+				return c.InstallPackageFromDir(candidate, source)
 			}
-			return c.InstallPackageFromDir(source, source)
+			data, err := os.ReadFile(candidate)
+			if err != nil {
+				return View{}, err
+			}
+			if strings.HasSuffix(strings.ToLower(candidate), protocol.PluginPackageExtension) {
+				return c.Install(data, filepath.Base(candidate))
+			}
+			view, err := c.InstallPackageFromArchive(data, filepath.Base(candidate))
+			if err != nil {
+				return View{}, err
+			}
+			return view, nil
 		}
-		data, err := os.ReadFile(source)
-		if err != nil {
-			return View{}, err
-		}
-		if strings.HasSuffix(strings.ToLower(source), protocol.PluginPackageExtension) {
-			return c.Install(data, filepath.Base(source))
-		}
-		view, err := c.InstallPackageFromArchive(data, filepath.Base(source))
-		if err != nil {
-			return View{}, err
-		}
-		return view, nil
 	}
 	if strings.HasPrefix(source, "-") || strings.ContainsAny(source, " \t\r\n;|&$`><") {
 		return View{}, fmt.Errorf("无效的 npm 插件包标识 %q", source)
@@ -551,13 +570,23 @@ func (c *Runtime) ResolvePackageFile(id string, filePath string) (string, string
 	if c == nil {
 		return "", "", fmt.Errorf("插件运行时未初始化")
 	}
+	trimmedID := strings.TrimSpace(id)
 	c.mu.RLock()
-	record, ok := c.plugins[strings.TrimSpace(id)]
+	record, ok := c.plugins[trimmedID]
 	c.mu.RUnlock()
+	pkgDir := strings.TrimSpace(record.PackageDir)
+	if !ok || pkgDir == "" {
+		if officialDir, err := officialPluginPackageDir(); err == nil && trimmedID != "" && !strings.ContainsAny(trimmedID, `/\..`) {
+			candidate := filepath.Join(officialDir, trimmedID)
+			if info, statErr := os.Stat(filepath.Join(candidate, "package.json")); statErr == nil && !info.IsDir() {
+				pkgDir = candidate
+				ok = true
+			}
+		}
+	}
 	if !ok {
 		return "", "", fmt.Errorf("插件 %q 不存在", id)
 	}
-	pkgDir := strings.TrimSpace(record.PackageDir)
 	if pkgDir == "" {
 		return "", "", fmt.Errorf("插件 %q 不包含静态文件目录", id)
 	}
@@ -585,6 +614,8 @@ func (c *Runtime) ResolvePackageFile(id string, filePath string) (string, string
 		contentType = "text/css; charset=utf-8"
 	case ".json", ".map":
 		contentType = "application/json; charset=utf-8"
+	case ".md":
+		contentType = "text/markdown; charset=utf-8"
 	case ".svg":
 		contentType = "image/svg+xml"
 	case ".png", ".jpg", ".jpeg", ".webp", ".woff", ".woff2":

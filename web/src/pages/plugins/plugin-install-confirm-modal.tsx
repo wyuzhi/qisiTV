@@ -247,8 +247,13 @@ export function PluginInstallConfirmModal({
                         <div className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
                             <div className="flex items-center gap-1.5 font-semibold text-amber-600 dark:text-amber-400">
                                 <AlertTriangle className="size-4 shrink-0" />
-                                <span>执行边界与安全说明</span>
+                                <span>此插件将在你的电脑上运行代码，启用后可以：</span>
                             </div>
+                            <ul className="m-0 list-disc space-y-1 pl-5 text-foreground/85">
+                                <li>调用本机已配置的模型与画布接口</li>
+                                <li>访问本机文件与外部网络</li>
+                                <li>在当前页面渲染自定义界面</li>
+                            </ul>
                             {copy.clientWarning ? (
                                 <div className="flex items-start gap-2 text-foreground/85">
                                     <FileCode2 className="mt-0.5 size-3.5 shrink-0 opacity-75" />
@@ -261,6 +266,9 @@ export function PluginInstallConfirmModal({
                                     <span>{copy.nativeWarning}</span>
                                 </div>
                             ) : null}
+                            <div className="pt-0.5 font-medium text-amber-700 dark:text-amber-300">
+                                仅安装你信任来源的插件。
+                            </div>
                         </div>
                     ) : null}
 

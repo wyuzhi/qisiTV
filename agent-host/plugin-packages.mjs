@@ -519,6 +519,15 @@ export function createPluginPackageController({
   let loadedTools = [];
   let loadedSkills = [];
   let loadErrors = [];
+  let lastPackagesFingerprint = null;
+
+  function computeFingerprint(pkgs) {
+    if (!Array.isArray(pkgs)) return '';
+    return pkgs
+      .map((p) => `${p?.id || p?.name || ''}:${p?.version || ''}:${p?.packageDir || ''}`)
+      .sort()
+      .join('|');
+  }
 
   async function reload(explicitPackages = undefined, options = {}) {
     if (options?.registryUrl) {
@@ -552,6 +561,7 @@ export function createPluginPackageController({
     loadedTools = result.tools;
     loadedSkills = result.skills;
     loadErrors = result.errors;
+    lastPackagesFingerprint = computeFingerprint(packages);
     return {
       packages: loadedPackages,
       extensions: loadedExtensions,
@@ -565,6 +575,23 @@ export function createPluginPackageController({
   return {
     reload,
     reloadFromHost: (options) => reload(undefined, options),
+    syncIfChanged: async (options = {}) => {
+      if (typeof fetchEnabledPackages !== 'function') {
+        return { changed: false, extensions: loadedExtensions };
+      }
+      let packages;
+      try {
+        packages = await fetchEnabledPackages();
+      } catch {
+        return { changed: false, extensions: loadedExtensions };
+      }
+      const nextFingerprint = computeFingerprint(packages);
+      if (nextFingerprint === lastPackagesFingerprint) {
+        return { changed: false, extensions: loadedExtensions };
+      }
+      const res = await reload(packages, options);
+      return { changed: true, ...res };
+    },
     getExtensions: () => [...loadedExtensions],
     getTools: () => [...loadedTools],
     getToolNames: () => loadedTools.map((tool) => tool.name),

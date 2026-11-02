@@ -1,4 +1,4 @@
-import { Component, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ErrorInfo, type ReactNode, type RefObject } from "react";
+import { Component, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ErrorInfo, type ReactNode, type RefObject } from "react";
 import { AlertCircle, BookOpenCheck, Download, Image as ImageIcon, LoaderCircle, Music2, Pencil, Play, RefreshCw, Video } from "lucide-react";
 
 import { VideoPlayer } from "@/components/video-player";
@@ -110,6 +110,7 @@ export type CanvasNodeContentProps = {
 
 export function CanvasNodeContent(props: CanvasNodeContentProps) {
     usePluginSlot("canvas.node");
+    const { updateMetadata } = useCanvasNodeActions();
     const pluginInstallations = usePluginStore((state) => state.installations);
     const pluginStates = usePluginStore((state) => state.pluginStates);
     const runtimeStatuses = usePluginStore((state) => state.runtimeStatuses);
@@ -134,18 +135,26 @@ export function CanvasNodeContent(props: CanvasNodeContentProps) {
                 </div>
             );
         }
-        const CustomComp = slotRenderer?.contribution.component;
+        const CustomComp = slotRenderer?.contribution.component as ComponentType<Record<string, unknown>> | undefined;
         if (CustomComp) {
+            const handleUpdatePluginData = (patch: Record<string, unknown>) => {
+                updateMetadata?.(props.node.id, {
+                    pluginData: { ...(props.node.metadata?.pluginData ?? {}), ...patch },
+                });
+            };
             return (
                 <PluginCanvasNodeErrorBoundary pluginId={ownerPluginId}>
                     <CustomComp
                         node={props.node}
                         nodeId={props.node.id}
+                        projectId={props.projectId}
                         selected={false}
                         theme={props.theme.canvas.background === "#f0f0f0" ? "light" : "dark"}
                         data={props.node.metadata?.pluginData ?? {}}
-                        updateData={() => {}}
-                        updateContent={(next) => props.onContentChange(props.node.id, next)}
+                        updateData={handleUpdatePluginData}
+                        updateNodeData={handleUpdatePluginData}
+                        onContentChange={props.onContentChange}
+                        updateContent={(next: string) => props.onContentChange(props.node.id, next)}
                     />
                 </PluginCanvasNodeErrorBoundary>
             );

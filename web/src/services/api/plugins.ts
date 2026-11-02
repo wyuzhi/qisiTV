@@ -68,9 +68,11 @@ export async function uploadPlugin(file: File) {
 
 export async function installPluginPackage(payload: {
     spec?: string;
+    package?: string;
     packageUrl?: string;
     localPath?: string;
     source?: string;
+    registry?: string;
     sha256?: string;
     trustTier?: PluginTrustTier;
 }) {

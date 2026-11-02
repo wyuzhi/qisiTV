@@ -1,3 +1,4 @@
+import * as React from "react";
 import type { ComponentType } from "react";
 import { emitPluginEvent, onPluginEvent } from "@/lib/plugins/plugin-events";
 import { getRegisteredPlugin } from "@/lib/plugins/plugin-registry";
@@ -7,10 +8,12 @@ import {
     type BeefTVPluginHost,
     type PluginCanvasNodeProps,
     type PluginCanvasNodeSlotContribution,
+    type PluginInstallConfirmRequest,
     type PluginManifest,
     type PluginManifestV2,
 } from "@/lib/plugins/plugin-types";
 import { contributeSlot } from "@/lib/plugins/slot-registry";
+import { PLUGIN_INSTALL_REQUEST_EVENT } from "@/pages/plugins/plugin-install-confirm-modal";
 import { http } from "@/services/api/request";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
@@ -33,6 +36,45 @@ type GlobalBeefTVPluginHost = {
 declare global {
     interface Window {
         __BEEFTV_PLUGIN_HOST__?: GlobalBeefTVPluginHost;
+        __BEEFTV_REACT__?: typeof React;
+        __BEEFTV_REQUEST_INSTALL_PLUGIN__?: (req: Record<string, unknown>) => void;
+    }
+}
+
+export function normalizePluginInstallRequest(raw: Record<string, unknown> | PluginInstallConfirmRequest): PluginInstallConfirmRequest {
+    const req = raw as Record<string, unknown>;
+    const pkgName = String(req.packageName || req.id || req.name || "unknown-plugin").trim();
+    const id = String(req.id || pkgName).trim();
+    const name = String(req.name || pkgName).trim();
+    const version = String(req.version || "0.1.0").trim();
+    const source = String(req.source || "package").trim();
+    const isVerified = source.startsWith("plugin-packages/") || req.trustTier === "verified" || req.trustTier === "official";
+    const trustTier = (req.trustTier as PluginInstallConfirmRequest["trustTier"]) || (isVerified ? "verified" : "community");
+    return {
+        id,
+        name,
+        version,
+        description: typeof req.description === "string" ? req.description : undefined,
+        author: typeof req.author === "string" ? req.author : undefined,
+        source,
+        sourceLabel: typeof req.sourceLabel === "string" ? req.sourceLabel : undefined,
+        trustTier,
+        permissions: Array.isArray(req.permissions) ? (req.permissions as string[]) : ["canvas.read", "canvas.write"],
+        hasClientCode: typeof req.hasClientCode === "boolean" ? req.hasClientCode : true,
+        hasNativeHostCode: typeof req.hasNativeHostCode === "boolean" ? req.hasNativeHostCode : true,
+        packageUrl: typeof req.packageUrl === "string" ? req.packageUrl : source,
+        packageName: pkgName,
+        localPath: typeof req.localPath === "string" ? req.localPath : undefined,
+        registry: typeof req.registry === "string" ? req.registry : undefined,
+        isUpdate: Boolean(req.isUpdate),
+        sha256: typeof req.sha256 === "string" ? req.sha256 : undefined,
+    };
+}
+
+function dispatchInstallRequest(raw: Record<string, unknown> | PluginInstallConfirmRequest): void {
+    if (typeof window !== "undefined") {
+        const detail = normalizePluginInstallRequest(raw);
+        window.dispatchEvent(new CustomEvent(PLUGIN_INSTALL_REQUEST_EVENT, { detail }));
     }
 }
 
@@ -64,9 +106,23 @@ export function createBeefTVPluginHost(
 ): BeefTVPluginHost {
     const resolvedManifest = manifest ?? defaultManifestFor(pluginId);
 
+    const notify = (msg: string, level: "info" | "success" | "warning" | "error" = "info") => {
+        if (typeof window !== "undefined") {
+            import("antd")
+                .then(({ message }) => {
+                    const handler = message[level] ?? message.info;
+                    handler(msg);
+                })
+                .catch(() => {
+                    console.info(`[plugin:${pluginId}:${level}] ${msg}`);
+                });
+        }
+    };
+
     return {
         pluginId,
         manifest: resolvedManifest,
+        React,
         contribute: (slot, payload) => contributeSlot(pluginId, slot, payload),
         events: {
             on: (event, handler) => onPluginEvent(pluginId, event, handler),
@@ -92,18 +148,9 @@ export function createBeefTVPluginHost(
             },
         },
         ui: {
-            notify: (msg, level = "info") => {
-                if (typeof window !== "undefined") {
-                    import("antd")
-                        .then(({ message }) => {
-                            const handler = message[level] ?? message.info;
-                            handler(msg);
-                        })
-                        .catch(() => {
-                            console.info(`[plugin:${pluginId}:${level}] ${msg}`);
-                        });
-                }
-            },
+            React,
+            notify,
+            toast: notify,
             navigate: (path) => {
                 if (customNavigator) {
                     customNavigator(path);
@@ -114,6 +161,15 @@ export function createBeefTVPluginHost(
                     window.dispatchEvent(new PopStateEvent("popstate"));
                 }
             },
+            requestInstallPlugin: (req) => dispatchInstallRequest(req),
+        },
+        requestInstallPlugin: (req) => dispatchInstallRequest(req),
+        ops: {
+            call: async (opId, params) => http.post(`/ops/${opId}`, { params: params ?? {} }),
+        },
+        context: {
+            getCanvasId: () => useCanvasStore.getState().projects[0]?.id,
+            getCanvasRevision: () => (useCanvasStore.getState().projects[0] as unknown as { revision?: number })?.revision,
         },
         ai: {
             generateText: async (input) => {
@@ -178,6 +234,8 @@ export function ensureGlobalPluginHost(): GlobalBeefTVPluginHost {
 
     if (typeof window !== "undefined") {
         window.__BEEFTV_PLUGIN_HOST__ = globalHost;
+        window.__BEEFTV_REACT__ = React;
+        window.__BEEFTV_REQUEST_INSTALL_PLUGIN__ = dispatchInstallRequest;
     }
     return globalHost;
 }

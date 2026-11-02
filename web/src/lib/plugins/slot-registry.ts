@@ -18,6 +18,7 @@ import { usePluginStore } from "@/stores/use-plugin-store";
 import type {
     EditorSlotKind,
     GenerationSubmitContext,
+    GenerationSubmitPatch,
     PluginCanvasNodeSlotContribution,
     PluginSlotMap,
     PluginSlotName,
@@ -52,7 +53,15 @@ const EDITOR_SLOT_MAP: Record<
     | "editor.timeline.trackHeaders"
     | "editor.timeline.clipOverlays"
     | "editor.toolbar.actions"
-    | "editor.contextMenu.items",
+    | "editor.contextMenu.items"
+    | "editor.timeline-panel"
+    | "editor.preview-renderer"
+    | "editor.inspector"
+    | "editor.asset-ingest"
+    | "editor.subtitle-tool"
+    | "editor.transcription-provider"
+    | "editor.export-renderer"
+    | "editor.ai-assistant",
     EditorSlotKind
 > = {
     "editor.leftSidebar.panels": "asset-ingest",
@@ -63,6 +72,14 @@ const EDITOR_SLOT_MAP: Record<
     "editor.timeline.clipOverlays": "transcription-provider",
     "editor.toolbar.actions": "export-renderer",
     "editor.contextMenu.items": "ai-assistant",
+    "editor.timeline-panel": "timeline-panel",
+    "editor.preview-renderer": "preview-renderer",
+    "editor.inspector": "inspector",
+    "editor.asset-ingest": "asset-ingest",
+    "editor.subtitle-tool": "subtitle-tool",
+    "editor.transcription-provider": "transcription-provider",
+    "editor.export-renderer": "export-renderer",
+    "editor.ai-assistant": "ai-assistant",
 };
 
 function notifyListeners(): void {
@@ -136,10 +153,31 @@ export function isSlotEntryActive(entryId: string): boolean {
 export function contributeSlot<K extends PluginSlotName>(
     pluginId: string,
     slot: K,
-    payload: PluginSlotMap[K],
+    rawPayload: PluginSlotMap[K],
 ): () => void {
     const entryId = `${pluginId}:${slot}:${nextEntrySeq++}`;
     const order = nextEntrySeq;
+    const raw = (rawPayload ?? {}) as Record<string, unknown>;
+    const normalized: Record<string, unknown> = { ...raw };
+    if (!normalized.component && typeof normalized.render === "function") {
+        normalized.component = normalized.render;
+    }
+    if (!normalized.render && typeof normalized.component === "function") {
+        normalized.render = normalized.component;
+    }
+    if (!normalized.label && typeof normalized.title === "string") {
+        normalized.label = normalized.title;
+    }
+    if (!normalized.title && typeof normalized.label === "string") {
+        normalized.title = normalized.label;
+    }
+    if (!normalized.handler && typeof (normalized.onSelect ?? normalized.run ?? normalized.onClick) === "function") {
+        normalized.handler = normalized.onSelect ?? normalized.run ?? normalized.onClick;
+    }
+    if (!normalized.onSelect && typeof (normalized.handler ?? normalized.run ?? normalized.onClick) === "function") {
+        normalized.onSelect = normalized.handler ?? normalized.run ?? normalized.onClick;
+    }
+    const payload = normalized as PluginSlotMap[K];
     const entry: SlotContributionEntry<K> = {
         entryId,
         pluginId,
@@ -186,12 +224,13 @@ export function contributeSlot<K extends PluginSlotName>(
                     activeEntryIds.has(entryId) && (!ctx.enabledPluginIds || ctx.enabledPluginIds.has(pluginId)),
                 run: (ctx) => {
                     void menuPayload.onSelect({
+                        ...ctx,
                         position: { x: 0, y: 0 },
                         createNode: (input) => {
                             ctx.handlers.onAddExtensionNode(input.type);
                             return null;
                         },
-                    });
+                    } as Parameters<typeof menuPayload.onSelect>[0]);
                 },
             },
         ]);
@@ -368,20 +407,26 @@ export async function runGenerationBeforeSubmitHooks(
                 ...initialCtx,
                 prompt,
                 params: { ...params },
+                parameters: { ...params },
                 metadata: { ...metadata },
-            });
+            } as GenerationSubmitContext);
             if (!patch) continue;
+            const rawPatch = patch as GenerationSubmitPatch & { parameters?: Record<string, unknown>; reason?: string };
             let modified = false;
-            if (typeof patch.prompt === "string" && patch.prompt !== prompt) {
-                prompt = patch.prompt;
+            if (typeof rawPatch.prompt === "string" && rawPatch.prompt !== prompt) {
+                prompt = rawPatch.prompt;
                 modified = true;
             }
-            if (patch.params && Object.keys(patch.params).length > 0) {
-                params = { ...params, ...patch.params };
+            const nextParams = rawPatch.params ?? rawPatch.parameters;
+            if (nextParams && Object.keys(nextParams).length > 0) {
+                params = { ...params, ...nextParams };
                 modified = true;
             }
-            if (patch.metadata && Object.keys(patch.metadata).length > 0) {
-                metadata = { ...metadata, ...patch.metadata };
+            if (rawPatch.metadata && Object.keys(rawPatch.metadata).length > 0) {
+                metadata = { ...metadata, ...rawPatch.metadata };
+                modified = true;
+            }
+            if (typeof rawPatch.reason === "string" && rawPatch.reason.trim()) {
                 modified = true;
             }
             if (modified) {

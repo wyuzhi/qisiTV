@@ -163,20 +163,28 @@ func RegisterPluginRoutes(r *gin.RouterGroup, center pluginCenter, hosted ...boo
 		contentType := strings.ToLower(c.GetHeader("Content-Type"))
 		if strings.HasPrefix(contentType, "application/json") {
 			var request struct {
-				Source  string `json:"source"`
-				Package string `json:"package"`
-				Spec    string `json:"spec"`
+				Source     string `json:"source"`
+				Package    string `json:"package"`
+				Spec       string `json:"spec"`
+				PackageURL string `json:"packageUrl"`
+				LocalPath  string `json:"localPath"`
 			}
 			if err := c.ShouldBindJSON(&request); err != nil {
 				fail(c, http.StatusBadRequest, err)
 				return
 			}
-			src := strings.TrimSpace(request.Source)
+			src := strings.TrimSpace(request.LocalPath)
+			if src == "" {
+				src = strings.TrimSpace(request.PackageURL)
+			}
 			if src == "" {
 				src = strings.TrimSpace(request.Package)
 			}
 			if src == "" {
 				src = strings.TrimSpace(request.Spec)
+			}
+			if src == "" {
+				src = strings.TrimSpace(request.Source)
 			}
 			plugin, err := center.PluginDomain().InstallPackageFromSource(src)
 			if err != nil {
@@ -327,10 +335,6 @@ func RegisterPluginRoutes(r *gin.RouterGroup, center pluginCenter, hosted ...boo
 			failService(c, err)
 			return
 		}
-		if err := center.RequireAdmin(user); err != nil {
-			failService(c, err)
-			return
-		}
 		var request struct {
 			Enabled bool `json:"enabled"`
 		}
@@ -338,13 +342,34 @@ func RegisterPluginRoutes(r *gin.RouterGroup, center pluginCenter, hosted ...boo
 			fail(c, http.StatusBadRequest, err)
 			return
 		}
-		plugin, err := center.PluginDomain().SetEnabled(c.Param("id"), request.Enabled)
+		id := c.Param("id")
+		if plugins.IsKnownApplication(id) {
+			if state, userErr := center.SetUserPluginEnabled(user, id, request.Enabled); userErr == nil {
+				ok(c, gin.H{"state": state})
+				return
+			}
+		}
+		if err := center.RequireAdmin(user); err != nil {
+			failService(c, err)
+			return
+		}
+		plugin, err := center.PluginDomain().SetEnabled(id, request.Enabled)
 		if err != nil {
 			failService(c, err)
 			return
 		}
 		states, _ := center.PluginDomain().StatesForUser(user)
-		ok(c, gin.H{"plugin": plugin, "state": states[c.Param("id")]})
+		state := states[id]
+		if state.PluginID == "" {
+			state = plugins.StateView{
+				PluginID:          id,
+				PlatformAvailable: plugin.Status == plugins.StatusEnabled,
+				UserEnabled:       plugin.Status == plugins.StatusEnabled,
+				EffectiveEnabled:  plugin.Status == plugins.StatusEnabled,
+				CanToggle:         true,
+			}
+		}
+		ok(c, gin.H{"plugin": plugin, "state": state})
 	})
 	pluginRoutes.PUT("/:id/activation", func(c *gin.Context) {
 		user, err := currentUser(c, center)
@@ -359,8 +384,26 @@ func RegisterPluginRoutes(r *gin.RouterGroup, center pluginCenter, hosted ...boo
 			fail(c, http.StatusBadRequest, err)
 			return
 		}
-		state, err := center.SetUserPluginEnabled(user, c.Param("id"), request.Enabled)
+		id := c.Param("id")
+		state, err := center.SetUserPluginEnabled(user, id, request.Enabled)
 		if err != nil {
+			if strings.Contains(err.Error(), "系统插件只能由管理员统一管理") && center.RequireAdmin(user) == nil {
+				if plugin, sysErr := center.PluginDomain().SetEnabled(id, request.Enabled); sysErr == nil {
+					states, _ := center.PluginDomain().StatesForUser(user)
+					sysState := states[id]
+					if sysState.PluginID == "" {
+						sysState = plugins.StateView{
+							PluginID:          id,
+							PlatformAvailable: plugin.Status == plugins.StatusEnabled,
+							UserEnabled:       plugin.Status == plugins.StatusEnabled,
+							EffectiveEnabled:  plugin.Status == plugins.StatusEnabled,
+							CanToggle:         true,
+						}
+					}
+					ok(c, gin.H{"plugin": plugin, "state": sysState})
+					return
+				}
+			}
 			failService(c, err)
 			return
 		}

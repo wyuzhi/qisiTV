@@ -14,6 +14,7 @@ import { PROMPT_OPTIMIZER_PLUGIN_ID } from "@/lib/plugins/builtin/prompt-optimiz
 import { RUNNINGHUB_PLUGIN_ID } from "@/lib/plugins/builtin/workflows";
 import { isOfficialApplicationPluginId } from "@/lib/plugins/official-applications";
 import { deactivateClientPlugin, loadAndActivateClientPlugin, syncActiveClientPlugins } from "@/lib/plugins/plugin-client-loader";
+import { normalizePluginInstallRequest } from "@/lib/plugins/plugin-host-runtime";
 import type { PluginField, PluginInstallConfirmRequest, PluginManifest, PluginManifestV2, RegisteredPlugin } from "@/lib/plugins/plugin-types";
 import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { EaglePluginSettingsPanel } from "@/pages/plugins/eagle";
@@ -126,25 +127,29 @@ export default function PluginsPage() {
     }, []);
 
     const reloadBackendPlugins = async () => {
-        if (localRuntime) {
-            setBackendPlugins([]);
-            setPluginStates({});
-            return;
-        }
         setBackendPluginsLoading(true);
         try {
             const result = await fetchPlugins();
-            setBackendPlugins(result.plugins);
-            setPluginStates(result.states);
-            for (const item of result.plugins) {
+            setBackendPlugins(result.plugins || []);
+            setPluginStates(result.states || {});
+            for (const item of result.plugins || []) {
                 ensurePlugin(item.manifest);
-                if (item.status === "enabled" && (item.clientUrl || item.manifest.client)) {
+                const effective = result.states?.[item.manifest.id]?.effectiveEnabled ?? (item.status === "enabled");
+                setEnabled(item.manifest.id, effective);
+                if (effective && (item.clientUrl || item.manifest.client)) {
                     void loadAndActivateClientPlugin(item.manifest.id, { clientUrl: item.clientUrl, manifest: item.manifest });
+                } else if (!effective) {
+                    deactivateClientPlugin(item.manifest.id);
                 }
             }
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "读取插件中心失败");
+            if (!localRuntime) {
+                message.error(error instanceof Error ? error.message : "读取插件中心失败");
+            }
             setBackendPlugins([]);
+            if (localRuntime) {
+                setPluginStates({});
+            }
         } finally {
             setBackendPluginsLoading(false);
         }
@@ -233,23 +238,30 @@ export default function PluginsPage() {
 
     const togglePlugin = async (plugin: RegisteredPlugin, enabled: boolean) => {
         try {
-            if (localRuntime) {
+            const remote = backendPluginById.get(plugin.manifest.id);
+            if (localRuntime && !remote && !(plugin.manifest.id in pluginStates)) {
                 setEnabled(plugin.manifest.id, enabled);
                 message.success(`${plugin.manifest.name}${enabled ? "已启用" : "已停用"}`);
                 return;
             }
             const next = await setUserPluginEnabled(plugin.manifest.id, enabled);
-            setEnabled(plugin.manifest.id, enabled);
+            setEnabled(plugin.manifest.id, next.effectiveEnabled ?? enabled);
             setPluginStates({ ...usePluginStore.getState().pluginStates, [next.pluginId]: next });
             if (next.pluginId === RUNNINGHUB_PLUGIN_ID) {
                 setRuntimeStatuses({ ...usePluginStore.getState().runtimeStatuses, [next.pluginId]: next.effectiveEnabled ? "enabled" : "disabled" });
             }
-            const remote = backendPluginById.get(plugin.manifest.id);
             if (next.effectiveEnabled && (remote?.clientUrl || plugin.manifest.client)) {
                 void loadAndActivateClientPlugin(plugin.manifest.id, { clientUrl: remote?.clientUrl, manifest: plugin.manifest });
+            } else if (!next.effectiveEnabled) {
+                deactivateClientPlugin(plugin.manifest.id);
             }
             message.success(`${plugin.manifest.name}${enabled ? "已启用" : "已停用"}`);
         } catch (error) {
+            if (localRuntime) {
+                setEnabled(plugin.manifest.id, enabled);
+                message.success(`${plugin.manifest.name}${enabled ? "已启用" : "已停用"}`);
+                return;
+            }
             message.error(error instanceof Error ? error.message : "更新插件状态失败");
         }
     };
@@ -259,12 +271,15 @@ export default function PluginsPage() {
         try {
             const installed = await installPluginPackage({
                 source: request.source,
+                package: request.packageName,
                 packageUrl: request.packageUrl,
                 localPath: request.localPath,
+                registry: request.registry,
                 sha256: request.sha256,
                 trustTier: request.trustTier,
             });
             ensurePlugin(installed.manifest);
+            setEnabled(installed.manifest.id, installed.status === "enabled");
             if (installed.status === "enabled" && (installed.clientUrl || installed.manifest.client)) {
                 await loadAndActivateClientPlugin(installed.manifest.id, {
                     clientUrl: installed.clientUrl,
@@ -304,10 +319,10 @@ export default function PluginsPage() {
 
     const handleUninstallPlugin = async (plugin: RegisteredPlugin) => {
         try {
-            if (!localRuntime) {
+            if (!localRuntime || backendPluginById.has(plugin.manifest.id)) {
                 await uninstallPlugin(plugin.manifest.id);
             }
-            await deactivateClientPlugin(plugin.manifest.id);
+            deactivateClientPlugin(plugin.manifest.id);
             removePlugin(plugin.manifest.id);
             message.success(`已卸载插件「${plugin.manifest.name}」`);
             await reloadBackendPlugins();
@@ -432,7 +447,16 @@ export default function PluginsPage() {
 
                         {activeCustomSection ? (
                             <section className="plugin-section">
-                                <activeCustomSection.payload.component pluginId={activeCustomSection.pluginId} />
+                                <activeCustomSection.payload.component
+                                    pluginId={activeCustomSection.pluginId}
+                                    installedPlugins={registeredPlugins}
+                                    pluginStates={pluginStates}
+                                    reloadPlugins={reloadBackendPlugins}
+                                    requestInstallPlugin={(req) => {
+                                        setInstallPendingRequest(normalizePluginInstallRequest(req));
+                                        setInstallModalOpen(true);
+                                    }}
+                                />
                             </section>
                         ) : filteredPlugins.length ? (
                             <div className="plugins-sections">
@@ -465,8 +489,8 @@ export default function PluginsPage() {
                                                         const state = pluginStates[plugin.manifest.id];
                                                         const sourceLabel = pluginSourceLabel(plugin, state);
                                                         const canConfigure = canConfigurePlugin(plugin);
-                                                        const canToggle = localRuntime ? true : Boolean(state?.canToggle);
-                                                        const canUninstall = Boolean(remote && remote.source !== "bundled" && remote.source !== "system");
+                                                        const canToggle = localRuntime || user?.role === "admin" ? true : Boolean(state?.canToggle);
+                                                        const canUninstall = Boolean(remote && remote.source !== "bundled" && remote.source !== "system" && remote.source !== "official");
                                                         return (
                                                             <section key={plugin.manifest.id} className={`product-collection-card plugin-card library-card-surface${trusted ? " is-trusted" : ""}`}>
                                                                 <button
@@ -643,13 +667,20 @@ export default function PluginsPage() {
                                     </div>
 
                                     {matchedSettingsSlot ? (
-                                        <matchedSettingsSlot.payload.component
-                                            pluginId={settingsPlugin.manifest.id}
-                                            config={settingsInstallation?.config || {}}
-                                            updateConfig={async (patch) => {
+                                        (() => {
+                                            const SettingsComp = matchedSettingsSlot.payload.component as React.ComponentType<Record<string, unknown>>;
+                                            const handleSave = async (patch: Record<string, string | number | boolean>) => {
                                                 updateConfig(settingsPlugin.manifest.id, patch);
-                                            }}
-                                        />
+                                            };
+                                            return (
+                                                <SettingsComp
+                                                    pluginId={settingsPlugin.manifest.id}
+                                                    config={settingsInstallation?.config || {}}
+                                                    updateConfig={handleSave}
+                                                    onChange={handleSave}
+                                                />
+                                            );
+                                        })()
                                     ) : settingsPlugin.manifest.id === EAGLE_PLUGIN_ID ? (
                                         <EaglePluginSettingsPanel
                                             pluginId={EAGLE_PLUGIN_ID}

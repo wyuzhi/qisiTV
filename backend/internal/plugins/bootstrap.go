@@ -121,7 +121,7 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 		byID[id] = next
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || entry.Name() != "beeftv-plugin-market" {
 			continue
 		}
 		pkgRoot := filepath.Join(officialDir, entry.Name())

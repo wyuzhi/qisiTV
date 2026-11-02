@@ -104,14 +104,16 @@ export function CanvasAssistantTurnView({ turn, canvasId, sessionId, status, han
             {(turn.toolCalls || []).map((call: AgentToolCall, idx: number) => {
                 const match = toolCardEntries.find((entry) => entry.payload.toolName === call.tool);
                 if (!match) return null;
-                const CardComp = match.payload.component;
+                const CardComp = match.payload.component as React.ComponentType<Record<string, unknown>>;
                 return (
                     <div key={`${call.toolCallId || call.tool}:${idx}`} className="canvas-assistant-card">
                         <CardComp
                             toolName={call.tool}
                             status={call.isError ? "failed" : "completed"}
                             input={call.args}
+                            args={call.args}
                             output={call.mediaFacts}
+                            result={call.mediaFacts ?? call.error}
                             error={call.error}
                         />
                     </div>

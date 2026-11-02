@@ -147,7 +147,10 @@ export async function loadAndActivateClientPlugin(
             );
         }
 
-        const clientEntry = options?.clientUrl || (manifest?.client ? `/api/plugins/${encodeURIComponent(pluginId)}/client.js` : undefined);
+        const cleanClient = manifest?.client ? manifest.client.replace(/^\.\//, "").replace(/^\/+/, "") : "";
+        const clientEntry =
+            options?.clientUrl ||
+            (cleanClient ? `/api/plugins/${encodeURIComponent(pluginId)}/files/${cleanClient}` : undefined);
         if (!clientEntry) {
             return false;
         }
@@ -272,18 +275,25 @@ export function syncActiveClientPlugins(changedPluginId?: string): void {
         }
     }
 
-    for (const plugin of listRegisteredPlugins()) {
-        const pluginId = plugin.manifest.id;
+    const registeredById = new Map(listRegisteredPlugins().map((plugin) => [plugin.manifest.id, plugin]));
+    const allIds = new Set<string>([
+        ...registeredById.keys(),
+        ...installationsById.keys(),
+    ]);
+
+    for (const pluginId of allIds) {
+        const plugin = registeredById.get(pluginId);
         const inst = installationsById.get(pluginId);
+        const manifest = plugin?.manifest ?? inst?.manifest;
         const localEnabled = inst ? inst.enabled : false;
         const effective = isPluginEffectivelyEnabled(pluginId, localEnabled);
 
         if (effective) {
             if (!activeCleanups.has(pluginId)) {
-                if (plugin.setup) {
+                if (plugin?.setup) {
                     activateRegisteredSetupSync(pluginId);
-                } else if (plugin.manifest.client) {
-                    void loadAndActivateClientPlugin(pluginId, { manifest: plugin.manifest });
+                } else if (manifest?.client) {
+                    void loadAndActivateClientPlugin(pluginId, { manifest });
                 }
             }
         } else {

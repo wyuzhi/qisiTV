@@ -394,6 +394,10 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (req.method === 'GET' && url.pathname === '/tools') {
+    const synced = await pluginController.syncIfChanged().catch(() => ({ changed: false }));
+    if (synced.changed) {
+      await durable.reloadPluginExtensions(pluginController.getExtensions()).catch(() => {});
+    }
     const canvasId = url.searchParams.get('canvasId') || '';
     const entry = canvasId ? durable.sessions.get(canvasId) : null;
     const pluginToolNames = pluginController.getToolNames();
@@ -689,6 +693,12 @@ const server = http.createServer(async (req, res) => {
       const authority=await ops.opsRequest('GET',`/assistant/runtime/turns/${encodeURIComponent(turnId)}`);
       if(authority.canvasId!==canvasId || authority.open===false) throw Object.assign(new Error('turn_not_open'),{reason:'turn_not_open'});
       body.permissionMode=authority.permissionMode || 'canvas';
+      if (!body.continuationId) {
+        const synced = await pluginController.syncIfChanged().catch(() => ({ changed: false }));
+        if (synced.changed) {
+          await durable.reloadPluginExtensions(pluginController.getExtensions()).catch(() => {});
+        }
+      }
       // 只有 Durable 一套执行运行时：选中的是 Durable 会话就直接接上；否则（旧 JSONL 会话或尚无会话）
       // 新建一条 Durable 会话，并用旧会话文本作为交接说明开头。
       const entry = body.continuationId

@@ -603,12 +603,22 @@ export type PluginProjectViewContribution = {
     component: ComponentType<PluginProjectViewProps>;
 };
 
+export type PluginCenterSectionProps = {
+    pluginId: string;
+    installedPlugins?: RegisteredPlugin[];
+    pluginStates?: Record<string, unknown>;
+    reloadPlugins?: () => Promise<void> | void;
+    requestInstallPlugin?: (req: Record<string, unknown>) => void;
+};
+
 export type PluginCenterSectionContribution = {
     id: string;
     label: string;
+    description?: string;
     icon?: ReactNode;
     order?: number;
-    component: ComponentType<{ pluginId: string }>;
+    component: ComponentType<PluginCenterSectionProps>;
+    render?: ComponentType<PluginCenterSectionProps>;
 };
 
 export type PluginSlotMap = {
@@ -633,6 +643,14 @@ export type PluginSlotMap = {
     "editor.timeline.clipOverlays": PluginEditorSlotContribution;
     "editor.toolbar.actions": PluginEditorSlotContribution;
     "editor.contextMenu.items": PluginEditorSlotContribution;
+    "editor.timeline-panel": PluginEditorSlotContribution;
+    "editor.preview-renderer": PluginEditorSlotContribution;
+    "editor.inspector": PluginEditorSlotContribution;
+    "editor.asset-ingest": PluginEditorSlotContribution;
+    "editor.subtitle-tool": PluginEditorSlotContribution;
+    "editor.transcription-provider": PluginEditorSlotContribution;
+    "editor.export-renderer": PluginEditorSlotContribution;
+    "editor.ai-assistant": PluginEditorSlotContribution;
     "app.page": PluginAppPageContribution;
     "app.sidebar": PluginAppSidebarContribution;
     "app.command": PluginAppCommandContribution;
@@ -651,6 +669,7 @@ export type PluginEventMap = {
     "canvas.selectionChanged": { projectId?: string; canvasId?: string; selectedNodeIds: string[] };
     "generation.submitted": { nodeId: string; nodeType: string; model?: string; prompt: string; taskId?: string };
     "generation.succeeded": { nodeId: string; nodeType: string; resultUrls: string[]; taskId?: string };
+    "generation.completed": { nodeId: string; nodeType: string; resultUrls: string[]; taskId?: string };
     "generation.failed": { nodeId: string; nodeType: string; error: string; taskId?: string };
     "assets.imported": { assets: Array<{ id: string; name: string; type: string; url: string }> };
     "assistant.turnCompleted": { canvasId?: string; sessionId?: string; turnId?: string; status: "completed" | "failed" | "cancelled" };
@@ -669,12 +688,16 @@ export type PluginInstallConfirmRequest = {
     description?: string;
     author?: string;
     source: string;
+    sourceLabel?: string;
     trustTier: PluginTrustTier;
     permissions?: Array<PluginPermission | EditorPluginPermission | string>;
     hasClientCode?: boolean;
     hasNativeHostCode?: boolean;
     packageUrl?: string;
+    packageName?: string;
     localPath?: string;
+    registry?: string;
+    isUpdate?: boolean;
     sha256?: string;
     installPayload?: {
         spec?: string;
@@ -686,6 +709,7 @@ export type PluginInstallConfirmRequest = {
 export type BeefTVPluginHost = {
     pluginId: string;
     manifest: PluginManifest | PluginManifestV2;
+    React?: typeof import("react");
     contribute: <K extends PluginSlotName>(slot: K, payload: PluginSlotMap[K]) => () => void;
     events: {
         on: <E extends PluginEventName>(event: E, handler: (payload: PluginEventMap[E]) => void) => () => void;
@@ -698,8 +722,19 @@ export type BeefTVPluginHost = {
         set: (patch: Record<string, string | number | boolean>) => Promise<void>;
     };
     ui: {
+        React?: typeof import("react");
         notify: (message: string, level?: "info" | "success" | "warning" | "error") => void;
+        toast?: (message: string, level?: "info" | "success" | "warning" | "error") => void;
         navigate: (path: string) => void;
+        requestInstallPlugin?: (req: Record<string, unknown>) => void;
+    };
+    requestInstallPlugin?: (req: Record<string, unknown>) => void;
+    ops?: {
+        call: (opId: string, params?: Record<string, unknown>) => Promise<unknown>;
+    };
+    context?: {
+        getCanvasId?: () => string | undefined;
+        getCanvasRevision?: () => number | undefined;
     };
     ai: {
         generateText: (input: { prompt: string; systemPrompt?: string; model?: string }) => Promise<{ text: string; model: string }>;
