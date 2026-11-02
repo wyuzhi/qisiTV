@@ -19,7 +19,6 @@ import type { PluginField, PluginInstallConfirmRequest, PluginManifest, PluginMa
 import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { EaglePluginSettingsPanel } from "@/pages/plugins/eagle";
 import {
-    fetchPlugins,
     installPluginPackage,
     setPluginPlatformEnabled,
     setUserPluginEnabled,
@@ -28,6 +27,7 @@ import {
     type BackendPlugin,
     type PluginState,
 } from "@/services/api/plugins";
+import { syncPluginsFromBackend } from "@/services/plugin-sync";
 import { usePluginStore } from "@/stores/use-plugin-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { isLocalRuntimeMode } from "@/lib/runtime-mode";
@@ -130,14 +130,8 @@ export default function PluginsPage() {
     const reloadBackendPlugins = async () => {
         setBackendPluginsLoading(true);
         try {
-            const result = await fetchPlugins();
+            const result = await syncPluginsFromBackend();
             setBackendPlugins(result.plugins || []);
-            setPluginStates(result.states || {});
-            for (const item of result.plugins || []) {
-                ensurePlugin(item.manifest);
-                const effective = result.states?.[item.manifest.id]?.effectiveEnabled ?? (item.status === "enabled");
-                setEnabled(item.manifest.id, effective);
-            }
         } catch (error) {
             if (!localRuntime) {
                 message.error(error instanceof Error ? error.message : "读取插件中心失败");

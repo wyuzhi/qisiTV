@@ -120,10 +120,15 @@ func manifestView(raw []byte, metadata protocol.Metadata, source string) Manifes
 	if apiVersion == "" {
 		apiVersion = "beeftv.plugin/v1"
 	}
+	permissions := manifest.Permissions
+	if permissions == nil {
+		// A plain pi package declares none; clients read this field as a list.
+		permissions = []string{}
+	}
 	return ManifestView{
 		ID: metadata.ID, Name: metadata.Name, Version: metadata.Version, APIVersion: apiVersion, Entry: manifest.Entry, Client: manifest.Client, Surfaces: manifest.Surfaces,
 		Description: metadata.Description, Documentation: metadata.Documentation, Author: metadata.Vendor,
-		Permissions: manifest.Permissions, Trusted: IsBuiltInSource(source), Runtime: manifest.Runtime,
+		Permissions: permissions, Trusted: IsBuiltInSource(source), Runtime: manifest.Runtime,
 		Configuration: manifest.Configuration, Contributes: manifest.Contributes,
 	}
 }

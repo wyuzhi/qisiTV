@@ -139,27 +139,26 @@ func (s *Service) SearchMarket(ctx context.Context, query string) ([]MarketPlugi
 	}
 	remoteItems := fetchNpmMarketPlugins(ctx, query, installedByID)
 	curatedItems := loadCuratedRegistryItems(ctx, query, installedByID)
-	seen := make(map[string]struct{}, len(localItems)+len(curatedItems)+len(remoteItems))
-	merged := make([]MarketPluginItem, 0, len(localItems)+len(curatedItems)+len(remoteItems))
-	for _, item := range localItems {
-		seen[item.ID] = struct{}{}
-		merged = append(merged, item)
-	}
-	for _, item := range curatedItems {
-		if _, exists := seen[item.ID]; exists {
-			continue
+	return mergeMarketItems(curatedItems, remoteItems, localItems), nil
+}
+
+// mergeMarketItems lists each plugin once, keeping the first group that has it.
+// The recommendation list and npm describe what can be installed (latest
+// version, recommended flag) and already mark installed plugins, so installed
+// plugins only fill in what neither source lists.
+func mergeMarketItems(groups ...[]MarketPluginItem) []MarketPluginItem {
+	seen := map[string]struct{}{}
+	merged := []MarketPluginItem{}
+	for _, group := range groups {
+		for _, item := range group {
+			if _, exists := seen[item.ID]; exists {
+				continue
+			}
+			seen[item.ID] = struct{}{}
+			merged = append(merged, item)
 		}
-		seen[item.ID] = struct{}{}
-		merged = append(merged, item)
 	}
-	for _, item := range remoteItems {
-		if _, exists := seen[item.ID]; exists {
-			continue
-		}
-		seen[item.ID] = struct{}{}
-		merged = append(merged, item)
-	}
-	return merged, nil
+	return merged
 }
 
 // CuratedRegistryURL is the public recommendation list; authors add a line by

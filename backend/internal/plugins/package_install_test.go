@@ -216,6 +216,59 @@ func TestInstallPackageReplacesPreviousVersionAndKeepsItOnFailure(t *testing.T) 
 	}
 }
 
+func TestPlainPiPackageListsEmptyPermissions(t *testing.T) {
+	rt, err := NewRuntime(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer capability.BuiltinRegistry().ResetPluginDescriptors()
+	svc := New(rt, nil)
+	svc.SetPackageFetcher(copyPackageFetcher)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "extensions"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "extensions", "index.js"), []byte("export default function () {}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pkg := `{"name":"plain-pi-tools","version":"1.0.0","pi":{"extensions":["./extensions/index.js"]}}`
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(pkg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	view, err := svc.InstallPackage(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(view.Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Permissions *[]string `json:"permissions"`
+	}
+	if err := json.Unmarshal(encoded, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Permissions == nil || len(*manifest.Permissions) != 0 {
+		t.Fatalf("plain pi package must list permissions as [], got %s", encoded)
+	}
+}
+
+func TestMarketKeepsInstalledRecommendedPluginRecommended(t *testing.T) {
+	curated := []MarketPluginItem{{ID: "sticky", Version: "0.2.0", Recommended: true, Bundled: true, Installed: true, Enabled: true}}
+	local := []MarketPluginItem{{ID: "sticky", Version: "0.1.0", Installed: true, Enabled: true}, {ID: "side-loaded", Installed: true}}
+	merged := mergeMarketItems(curated, nil, local)
+	if len(merged) != 2 {
+		t.Fatalf("expected each plugin once, got %#v", merged)
+	}
+	if got := merged[0]; got.ID != "sticky" || !got.Recommended || !got.Bundled || !got.Installed || got.Version != "0.2.0" {
+		t.Fatalf("installed recommended plugin lost its market entry: %#v", got)
+	}
+	if merged[1].ID != "side-loaded" || !merged[1].Installed {
+		t.Fatalf("installed plugin missing from every source must still be listed: %#v", merged[1])
+	}
+}
+
 func TestInstallPackageRejectsUnknownRegistry(t *testing.T) {
 	rt, err := NewRuntime(t.TempDir())
 	if err != nil {

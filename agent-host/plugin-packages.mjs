@@ -133,7 +133,11 @@ export async function loadPluginExtensionsFromPackages({
       continue;
     }
 
-    const extensionPaths = extractEnabledResourcePaths(resolved?.extensions);
+    // With no agent resources declared, pi falls back to scanning the whole
+    // package as an extension directory, which would run a BeefTV plugin's web
+    // client here. A BeefTV plugin's agent side is only what it declares.
+    const extensionPaths = extractEnabledResourcePaths(resolved?.extensions)
+      .filter((entry) => !(packageJson.beeftv && path.resolve(entry) === packageDir));
     const skillPaths = extractEnabledResourcePaths(resolved?.skills);
 
     let loaded;

@@ -217,6 +217,40 @@ test('broken plugins and tool name collisions are isolated and reported via onLo
   assert.deepEqual(betaOut.output, [{ type: 'text', text: '9' }]);
 });
 
+test('web-only BeefTV plugins never run their client in the agent host, while plain pi packages keep pi discovery', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'beeftv-plugin-web-only-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  const webOnly = path.join(tmp, 'web-only');
+  fs.mkdirSync(path.join(webOnly, 'client'), { recursive: true });
+  fs.writeFileSync(path.join(webOnly, 'package.json'), JSON.stringify({
+    name: 'beeftv-plugin-web-only', version: '1.0.0', type: 'module',
+    beeftv: { name: 'Web only', client: './client/index.js' },
+  }));
+  fs.writeFileSync(path.join(webOnly, 'client', 'index.js'), "throw new Error('web client loaded in agent host');\n");
+
+  const plainPi = path.join(tmp, 'plain-pi');
+  fs.mkdirSync(plainPi, { recursive: true });
+  fs.writeFileSync(path.join(plainPi, 'package.json'), JSON.stringify({ name: 'plain-pi', version: '1.0.0', type: 'module' }));
+  fs.writeFileSync(path.join(plainPi, 'index.js'), `export default function (pi) {
+    pi.registerTool({
+      name: 'plain_pi_tool',
+      description: 'Plain pi tool',
+      parameters: { type: 'object', properties: {} },
+      async execute() { return { content: [{ type: 'text', text: 'plain' }] }; }
+    });
+  }`);
+
+  const reportedErrors = [];
+  const result = await loadPluginExtensionsFromPackages({
+    packages: [{ id: 'web-only', packageDir: webOnly }, { id: 'plain-pi', packageDir: plainPi }],
+    onLoadError: (pluginId, errorMessage) => { reportedErrors.push({ pluginId, errorMessage }); },
+  });
+
+  assert.deepEqual(reportedErrors, []);
+  assert.deepEqual(result.tools.map((tool) => tool.name), ['plain_pi_tool']);
+});
+
 test('read-only mode blocks plugin tool from calling write operations via ctx.executeTool with scope_denied (A5)', async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'beeftv-plugin-a5-'));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
