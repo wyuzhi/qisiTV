@@ -22,6 +22,7 @@ import {nativeSourceKey} from './native-history.mjs';
 import { createNativePartStore } from './native-part-store.mjs';
 import { fetchModelWithProgressIdle } from './model-stream-idle.mjs';
 import { createDispatchDiagnostics } from './dispatch-diagnostics.mjs';
+import { createPluginPackageController, searchNpmPlugins, stagePluginPackage } from './plugin-packages.mjs';
 
 // SDK imports install npm undici's direct dispatcher. Restore Node's public env
 // proxy support after imports, before any SDK/ops request or fetch wrapper runs.
@@ -178,8 +179,23 @@ const ops = createOperationBridge({
 
 const legacy = createLegacyHistory({ sessionRoot: SESSION_ROOT, workspaceRoot: WORKSPACE_ROOT });
 
+const pluginController = createPluginPackageController({
+  getReservedToolNames: () => new Set([...ops.descriptors.keys(), 'plan_update', 'skill_load', 'canvas_timeline_deliver']),
+  readOnly: READ_ONLY_MODE,
+  fetchEnabledPackages: async () => {
+    const data = await ops.opsRequest('GET', '/plugins/packages/enabled');
+    return Array.isArray(data?.packages) ? data.packages : Array.isArray(data) ? data : [];
+  },
+  reportLoadError: async (pluginId, error) => {
+    await ops.opsRequest('POST', `/plugins/${encodeURIComponent(pluginId)}/load-error`, {
+      error: String(error?.message || error),
+    });
+  },
+});
+
 const durable = createDurableSessionStore({
   sessionRoot: SESSION_ROOT, workspaceRoot: WORKSPACE_ROOT, buildTools: ops.buildTools,
+  extensions: () => pluginController.getExtensions(),
   getModels: entry => {
     const models = createModels(); const provider = modelRuntime.getProvider(PROVIDER_ID);
     const budgeted = fn => (...args) => {
@@ -380,10 +396,56 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/tools') {
     const canvasId = url.searchParams.get('canvasId') || '';
     const entry = canvasId ? durable.sessions.get(canvasId) : null;
-    respond(res, 200, { canvasId, activeTools: entry?.toolNames || [], known: [...ops.descriptors.keys()] });
+    const pluginToolNames = pluginController.getToolNames();
+    respond(res, 200, {
+      canvasId,
+      activeTools: entry ? entry.toolNames : pluginToolNames,
+      known: [...new Set([...ops.descriptors.keys(), ...pluginToolNames])],
+    });
     return;
   }
   try {
+    if (req.method === 'GET' && url.pathname === '/plugins') {
+      respond(res, 200, {
+        packages: pluginController.listLoaded(),
+        errors: pluginController.getErrors(),
+        registryUrl: pluginController.getRegistryUrl(),
+      });
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/plugins/reload') {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      const reloaded = await pluginController.reload(
+        Array.isArray(body.packages) ? body.packages : undefined,
+        { registryUrl: body.registryUrl },
+      );
+      await durable.reloadPluginExtensions(pluginController.getExtensions());
+      respond(res, 200, {
+        ok: true,
+        packages: reloaded.packages,
+        errors: reloaded.errors,
+        registryUrl: reloaded.registryUrl,
+      });
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/plugins/stage') {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      const staged = stagePluginPackage({
+        source: body.source,
+        targetDir: body.targetDir,
+        registryUrl: body.registryUrl || pluginController.getRegistryUrl(),
+        locale: body.locale,
+      });
+      respond(res, 200, staged);
+      return;
+    }
+    if (req.method === 'GET' && url.pathname === '/plugins/search') {
+      const query = url.searchParams.get('q') || url.searchParams.get('query') || '';
+      const size = url.searchParams.get('size');
+      const result = await searchNpmPlugins({ query, size, fetchImpl: realFetch });
+      respond(res, 200, result);
+      return;
+    }
     if (url.pathname === '/skill-context' && ['GET','POST'].includes(req.method)) {
       const body=req.method==='POST'?JSON.parse((await readBody(req)) || '{}'):Object.fromEntries(url.searchParams);
       const canvasId=String(body.canvasId || '').trim();
@@ -701,6 +763,9 @@ await initializeModel();
 try {
   const count = await ops.loadDescriptors();
   console.error(`agent-host: 载入 ${count} 个操作（readOnly=${READ_ONLY_MODE}）`);
+  if (process.env.BEEFTV_AGENT_LOAD_PLUGINS === '1' || ops.descriptors.has('skill_catalog') || ops.descriptors.has('plugin_list')) {
+    await pluginController.reloadFromHost();
+  }
 }
 catch (error) { console.error(`agent-host: 能力发现失败（稍后可重试）：${error?.message || error}`); }
 function onListen() {

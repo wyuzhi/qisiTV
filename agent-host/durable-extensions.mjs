@@ -234,7 +234,11 @@ export async function installDurableExtensions({
     return items;
   }
 
-  const tools = [...buildTools(canvasId, entry.log, entry.generation, entry.turn, sessionId), ...hostTools()].map((tool) => defineTool({
+  const baseHostTools = [...buildTools(canvasId, entry.log, entry.generation, entry.turn, sessionId), ...hostTools()];
+  entry.readOnlyToolNames = new Set(
+    baseHostTools.filter((tool) => tool.readOnly === true && tool.label !== 'canvas.generation.propose').map((tool) => tool.name),
+  );
+  const tools = baseHostTools.map((tool) => defineTool({
     name: tool.name, description: tool.description + (tool.label === 'canvas.generation.propose'
       ? '。成功提案会结束本轮；plan_update 与本调用同一次响应发出。' : ''), parameters: tool.parameters,
     replay: durableToolReplay(tool), executionMode: 'sequential',
@@ -263,7 +267,98 @@ export async function installDurableExtensions({
       } finally { await persistEffects(entry); }
     },
   }));
+  let selectedHostTools = tools;
+  entry.pluginExtensions = [];
+  entry.pluginTools = [];
   entry.toolNames = tools.map((tool) => tool.name);
+
+  function wrapPluginExtensionForEntry(rawExtension) {
+    if (!rawExtension || typeof rawExtension !== 'object') return null;
+    if (!Array.isArray(rawExtension.tools) || rawExtension.tools.length === 0) {
+      return rawExtension;
+    }
+    const wrappedTools = rawExtension.tools.map((pluginTool) => defineTool({
+      ...pluginTool,
+      name: pluginTool.name,
+      description: pluginTool.description || pluginTool.name,
+      parameters: pluginTool.parameters || { type: 'object', properties: {} },
+      replay: durableToolReplay(pluginTool),
+      executionMode: pluginTool.executionMode || 'sequential',
+      execute: async (args, api, context) => {
+        if (entry.generation.aborted) throw fail('aborted');
+        if (entry.generation.pendingInputError) throw fail(entry.generation.pendingInputError.reason);
+        if (entry.generation.pendingInput?.state === 'pending') throw fail('supplement_preparation_pending');
+        if (entry.turn?.turnId) await authorization(entry, entry.turn.turnId);
+        const started = Date.now();
+        const mode = entry.permissionMode || entry.generation?.permissionMode || 'canvas';
+        const enrichedContext = {
+          ...context,
+          permissionMode: mode,
+          isReadOnlyTool: (name) => entry.readOnlyToolNames?.has(name) === true,
+        };
+        const wrappedApi = {
+          ...api,
+          permissionMode: mode,
+          executeTool: async (toolName, toolParams, callContext = enrichedContext, options = {}) => {
+            const currentMode = entry.permissionMode || entry.generation?.permissionMode || 'canvas';
+            if (currentMode === 'read-only' && !entry.readOnlyToolNames?.has(toolName)) {
+              const err = new Error(`scope_denied: 本轮助手只能读取（禁止调用 ${toolName}）`);
+              err.reason = 'scope_denied';
+              throw err;
+            }
+            return api.executeTool(toolName, toolParams, callContext, options);
+          },
+        };
+        try {
+          const rawResult = await runWithBudget(entry, () => pluginTool.execute(args, wrappedApi, enrichedContext));
+          entry.generation.toolCalledSinceYield = true;
+          const output = rawResult?.output ?? rawResult?.content ?? [];
+          const isError = rawResult?.isError === true;
+          entry.log.push({
+            toolCallId: String(api?.callId || api?.taskId || '') || null,
+            tool: pluginTool.label || pluginTool.name,
+            args: args || {},
+            isError,
+            ms: Date.now() - started,
+          });
+          return { ...rawResult, output };
+        } catch (error) {
+          entry.log.push({
+            toolCallId: String(api?.callId || api?.taskId || '') || null,
+            tool: pluginTool.label || pluginTool.name,
+            args: args || {},
+            isError: true,
+            error: error.message,
+            ms: Date.now() - started,
+          });
+          throw error;
+        } finally {
+          await persistEffects(entry);
+        }
+      },
+    }));
+    return defineExtension({
+      ...rawExtension,
+      tools: wrappedTools,
+    });
+  }
+
+  function applyPluginExtensionsToRegistry(rawExtensions) {
+    const nextWrapped = (Array.isArray(rawExtensions) ? rawExtensions : [])
+      .map((ext) => wrapPluginExtensionForEntry(ext))
+      .filter(Boolean);
+    for (const prev of entry.pluginExtensions) {
+      if (!nextWrapped.some((next) => next.name === prev.name)) {
+        registry.uninstall(prev);
+      }
+    }
+    for (const ext of nextWrapped) {
+      registry.install(ext);
+    }
+    entry.pluginExtensions = nextWrapped;
+    entry.pluginTools = nextWrapped.flatMap((ext) => ext.tools || []);
+    entry.toolNames = [...selectedHostTools, ...entry.pluginTools].map((tool) => tool.name);
+  }
 
   const operationExtension = defineExtension({
     name: 'beeftv.operations.v1',
@@ -416,12 +511,28 @@ export async function installDurableExtensions({
     entry.generation.permissionMode = mode;
     const projected = [...buildTools(canvasId, entry.log, entry.generation, entry.turn, sessionId), ...hostTools()];
     const byName = new Map(projected.map((t) => [t.name, t]));
-    const selected = tools.filter((t) => byName.has(t.name)).map((t) => ({ ...t, parameters: byName.get(t.name).parameters }));
-    entry.toolNames = selected.map((tool) => tool.name);
-    registry.install(defineExtension({ ...operationExtension, tools: selected }));
+    selectedHostTools = tools.filter((t) => byName.has(t.name)).map((t) => ({ ...t, parameters: byName.get(t.name).parameters }));
+    const activeTools = [...selectedHostTools, ...entry.pluginTools];
+    entry.toolNames = activeTools.map((tool) => tool.name);
+    registry.install(defineExtension({ ...operationExtension, tools: selectedHostTools }));
     if (entry.root) {
       await entry.root.configure({
-        tools: selected,
+        tools: activeTools,
+        instructions: SYSTEM_PROMPT,
+      }, CTX);
+    }
+  };
+  entry.reloadPluginExtensions = async (newExtensions) => {
+    if (entry.busy) {
+      entry.pendingPluginExtensions = Array.isArray(newExtensions) ? [...newExtensions] : [];
+      return;
+    }
+    entry.pendingPluginExtensions = null;
+    applyPluginExtensionsToRegistry(newExtensions);
+    const activeTools = [...selectedHostTools, ...entry.pluginTools];
+    if (entry.root) {
+      await entry.root.configure({
+        tools: activeTools,
         instructions: SYSTEM_PROMPT,
       }, CTX);
     }
@@ -435,7 +546,7 @@ export async function installDurableExtensions({
       ],
     }));
   }
-  for (const extension of await extensions(entry)) registry.install(extension);
+  applyPluginExtensionsToRegistry(await extensions(entry));
 
   let models = await getModels(entry);
   if (skills) {
@@ -452,5 +563,5 @@ export async function installDurableExtensions({
     });
   }
 
-  return { tools, models };
+  return { tools: [...selectedHostTools, ...entry.pluginTools], models };
 }

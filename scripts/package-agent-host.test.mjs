@@ -1,12 +1,37 @@
-import { test, expect } from 'bun:test';
-import { mkdtempSync, cpSync, existsSync, rmSync, mkdirSync } from 'node:fs';
+import nodeTest from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, cpSync, existsSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createServer as createTCPServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
-import { packageAgentHost, verifyRuntime, NODE_VERSION } from './package-agent-host.mjs';
+import { bundleNpmRuntime, packageAgentHost, verifyRuntime, NODE_VERSION } from './package-agent-host.mjs';
+import { resolveNpmCommand, DEFAULT_CN_NPM_REGISTRY, DEFAULT_GLOBAL_NPM_REGISTRY } from '../agent-host/plugin-packages.mjs';
+
+const { test, expect } = process.versions.bun
+  ? await import('bun:test')
+  : {
+      test: (name, fn, timeout) => nodeTest(name, typeof timeout === 'number' ? { timeout } : {}, fn),
+      expect: (actual) => ({
+        toBe: (expected) => assert.strictEqual(actual, expected),
+        toEqual: (expected) => assert.deepStrictEqual(actual, expected),
+        toBeTruthy: () => assert.ok(actual),
+        toBeUndefined: () => assert.strictEqual(actual, undefined),
+        toThrow: (pattern) => {
+          if (pattern === undefined) assert.throws(actual);
+          else assert.throws(actual, typeof pattern === 'string' ? new RegExp(pattern) : pattern);
+        },
+      }),
+    };
+
+function resolveTestRuntime() {
+  if (process.env.BEEFTV_NODE_RUNTIME) return process.env.BEEFTV_NODE_RUNTIME;
+  const appRuntime = '/Applications/BeefTV.app/Contents/Resources/agent-host/runtime';
+  if (process.platform === 'darwin' && existsSync(path.join(appRuntime, 'bin', 'node'))) return appRuntime;
+  return '';
+}
 
 test('release rejects missing runtime and unsupported target', () => {
   expect(() => verifyRuntime('', 'darwin/arm64')).toThrow('required');
@@ -15,8 +40,63 @@ test('release rejects missing runtime and unsupported target', () => {
   expect(() => verifyRuntime('/missing', 'windows/amd64')).toThrow('Missing bundled Node');
 });
 
+test('bundleNpmRuntime copies npm CLI for unix and windows layouts and resolves bundled npm command', () => {
+  const scratch = mkdtempSync(path.join(tmpdir(), 'beeftv-npm-bundle-'));
+  try {
+    // Unix layout
+    const unixRuntime = path.join(scratch, 'unix-runtime');
+    const unixNode = path.join(unixRuntime, 'bin', 'node');
+    const unixNpmCli = path.join(unixRuntime, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    mkdirSync(path.dirname(unixNode), { recursive: true });
+    mkdirSync(path.dirname(unixNpmCli), { recursive: true });
+    writeFileSync(unixNode, '#!/bin/sh\n');
+    writeFileSync(unixNpmCli, 'console.log("bundled-npm");\n');
+    const unixStage = path.join(scratch, 'unix-stage');
+    const copiedUnixCli = bundleNpmRuntime({ runtime: unixRuntime, node: unixNode, target: 'darwin/arm64', stage: unixStage });
+    expect(existsSync(copiedUnixCli)).toBe(true);
+    expect(existsSync(path.join(unixStage, 'runtime', 'bin', 'npm'))).toBe(true);
+    const stagedUnixNode = path.join(unixStage, 'runtime', 'bin', 'node');
+    expect(resolveNpmCommand({ execPath: stagedUnixNode, platform: 'darwin' })).toEqual([
+      stagedUnixNode,
+      copiedUnixCli,
+      `--registry=${DEFAULT_CN_NPM_REGISTRY}`,
+      '--no-audit',
+      '--no-fund',
+    ]);
+    expect(resolveNpmCommand({ execPath: stagedUnixNode, platform: 'darwin', registryUrl: 'global' })).toEqual([
+      stagedUnixNode,
+      copiedUnixCli,
+      `--registry=${DEFAULT_GLOBAL_NPM_REGISTRY}`,
+      '--no-audit',
+      '--no-fund',
+    ]);
+
+    // Windows layout
+    const winRuntime = path.join(scratch, 'win-runtime');
+    const winNode = path.join(winRuntime, 'node.exe');
+    const winNpmCli = path.join(winRuntime, 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    mkdirSync(path.dirname(winNpmCli), { recursive: true });
+    writeFileSync(winNode, '');
+    writeFileSync(winNpmCli, 'console.log("bundled-win-npm");\n');
+    const winStage = path.join(scratch, 'win-stage');
+    const copiedWinCli = bundleNpmRuntime({ runtime: winRuntime, node: winNode, target: 'windows/amd64', stage: winStage });
+    expect(existsSync(copiedWinCli)).toBe(true);
+    expect(existsSync(path.join(winStage, 'runtime', 'npm.cmd'))).toBe(true);
+    const stagedWinNode = path.join(winStage, 'runtime', 'node.exe');
+    expect(resolveNpmCommand({ execPath: stagedWinNode, platform: 'win32' })).toEqual([
+      stagedWinNode,
+      copiedWinCli,
+      `--registry=${DEFAULT_CN_NPM_REGISTRY}`,
+      '--no-audit',
+      '--no-fund',
+    ]);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 test('bundled runtime, locked dependencies, and paths with spaces', () => {
-  const runtime = process.env.BEEFTV_NODE_RUNTIME;
+  const runtime = resolveTestRuntime();
   expect(runtime).toBeTruthy();
   const target = `${process.platform === 'win32' ? 'windows' : process.platform}/${process.arch === 'x64' ? 'amd64' : 'arm64'}`;
   const scratch = mkdtempSync(path.join(tmpdir(), 'beeftv package test '));
@@ -25,15 +105,23 @@ test('bundled runtime, locked dependencies, and paths with spaces', () => {
     const relative = process.platform === 'win32' ? 'node.exe' : 'bin/node';
     mkdirSync(path.dirname(path.join(runtimeCopy, relative)), { recursive: true });
     cpSync(path.join(runtime, relative), path.join(runtimeCopy, relative), { dereference: true });
+    const npmCliRelative = process.platform === 'win32'
+      ? path.join('node_modules', 'npm', 'bin', 'npm-cli.js')
+      : path.join('lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    mkdirSync(path.dirname(path.join(runtimeCopy, npmCliRelative)), { recursive: true });
+    writeFileSync(path.join(runtimeCopy, npmCliRelative), 'console.log("9.9.9-bundled");\n');
     expect(() => verifyRuntime(runtimeCopy, target === 'darwin/arm64' ? 'darwin/amd64' : 'darwin/arm64')).toThrow();
     const destination = path.join(scratch, 'release with spaces', 'agent-host');
     packageAgentHost({ runtime: runtimeCopy, target, destination });
     const bundled = path.join(destination, 'runtime', relative);
+    const bundledNpmCli = path.join(destination, 'runtime', npmCliRelative);
     expect(existsSync(bundled)).toBe(true);
+    expect(existsSync(bundledNpmCli)).toBe(true);
     expect(existsSync(path.join(destination, 'model-stream-idle.mjs'))).toBe(true);
     expect(existsSync(path.join(destination, 'model-transport-error.mjs'))).toBe(true);
     expect(existsSync(path.join(destination, 'durable-turn-projection.mjs'))).toBe(true);
     expect(existsSync(path.join(destination, 'durable-extensions.mjs'))).toBe(true);
+    expect(existsSync(path.join(destination, 'plugin-packages.mjs'))).toBe(true);
     expect(existsSync(path.join(destination, 'business-progress.mjs'))).toBe(true);
     expect(existsSync(path.join(destination, 'canvas-write-view.mjs'))).toBe(true);
     expect(existsSync(path.join(destination, 'node_modules/@earendil-works/pi-coding-agent/package.json'))).toBe(true);
@@ -47,7 +135,7 @@ test('bundled runtime, locked dependencies, and paths with spaces', () => {
 }, 240000);
 
 test('packaged server starts with local imports and makes zero model requests', async () => {
-  const runtime = process.env.BEEFTV_NODE_RUNTIME;
+  const runtime = resolveTestRuntime();
   expect(runtime).toBeTruthy();
   const target = `${process.platform === 'win32' ? 'windows' : process.platform}/${process.arch === 'x64' ? 'amd64' : 'arm64'}`;
   const scratch = mkdtempSync(path.join(tmpdir(), 'beeftv packaged server '));
