@@ -1,4 +1,6 @@
 import { generationErrorMessage } from "@/lib/generation-error";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
+import { browserLikeAITasks } from "@/services/browser-likeai-tasks";
 import { GENERATION_RESULT_FETCH_STAGE } from "@/lib/generation-delivery-progress";
 import { ApiError, http, apiBaseURL, type BackendEnvelope, type HttpRequestConfig } from "@/services/api/request";
 import { consumeTaskTextStream, createTaskTextStreamParser, type TaskTextStreamEvent } from "@/services/api/task-text-stream";
@@ -134,8 +136,9 @@ export type CreateTaskInput = {
 	logicalModelId?: string;
     input?: Record<string, unknown>;
 };
-export function createGenerationTask(input: CreateTaskInput, config?: HttpRequestConfig) {
-    return http.post<GenerationTask>("/tasks", input, config).then((task) => {
+export function createGenerationTask(input: CreateTaskInput, config?: Omit<HttpRequestConfig, "signal"> & { signal?: AbortSignal }) {
+    if (config?.signal?.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
+    return (isBrowserWorkspace() ? browserLikeAITasks().create(input, config?.signal) : http.post<GenerationTask>("/tasks", input, config)).then((task) => {
         recordDiagnosticEvent({ level: "info", category: "task", code: "task_created", message: "任务已创建", taskId: task.id, projectId: task.projectId, canvasId: task.projectId, nodeId: task.clientContext?.nodeId, clientOperationId: task.clientOperationId, traceId: task.traceId || getDiagnosticTraceId(task.id) });
         notifyCanvasTaskCreated(task);
         return task;
@@ -152,6 +155,8 @@ export type GenerationTaskPageRequest = {
 /** A missing receipt never authorizes another paid generation. */
 export async function findGenerationTaskByOperation(operationId: string, projectId: string, signal?: AbortSignal): Promise<GenerationTask | undefined> {
     if (typeof operationId !== "string" || !operationId.trim()) throw new Error("缺少提交标识，无法查询原任务");
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (isBrowserWorkspace()) return browserLikeAITasks().find(operationId, projectId);
     try {
         return await http.get<GenerationTask>(`/tasks/by-operation/${encodeURIComponent(operationId)}`, { params: { projectId }, signal });
     } catch (error) {
@@ -180,6 +185,7 @@ export async function listGenerationTasks(limit = 30, options?: { projectId?: st
     const observationRequest = beginTaskReferenceObservation();
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     const boundedLimit = Number.isFinite(limit) ? Math.max(1, Math.min(10_000, Math.trunc(limit))) : 30;
+    if (isBrowserWorkspace() && dependencies === defaultGenerationTaskListDependencies) return browserLikeAITasks().list(boundedLimit, options, signal);
     const baseRequest = {
         limit: Math.min(100, boundedLimit),
         ...(options?.projectId ? { projectId: options.projectId } : {}),
@@ -226,7 +232,7 @@ async function collectGenerationTaskPages<T>(readPage: (request: GenerationTaskP
 
 export function queryGenerationTask(id: string, options?: { signal?: AbortSignal }) {
     const observationRequest = beginTaskReferenceObservation();
-    return http.get<GenerationTask>(`/tasks/${encodeURIComponent(id)}`, { signal: options?.signal }).then(task => {
+    return (isBrowserWorkspace() ? browserLikeAITasks().query(id, options?.signal) : http.get<GenerationTask>(`/tasks/${encodeURIComponent(id)}`, { signal: options?.signal })).then(task => {
         if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
         publishTaskReferenceProgress(task, observationRequest);
         return task;
@@ -327,29 +333,36 @@ export function queryTaskTextReplay(id: string, after = 0) {
 }
 
 export function retryGenerationTask(id: string, options?: { signal?: AbortSignal }) {
+    // Browser recovery only re-reads the existing receipt; it never submits a
+    // replacement paid request. A fresh generation remains a canvas action.
+    if (isBrowserWorkspace()) return browserLikeAITasks().query(id, options?.signal, true);
     return http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/retry`, undefined, options);
 }
 
 export function recoverTask(id: string, options?: { signal?: AbortSignal }) {
+    if (isBrowserWorkspace()) return browserLikeAITasks().query(id, options?.signal, true);
     return http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/recover`, undefined, options);
 }
 
 export function cancelGenerationTask(id: string) {
-    return http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/cancel`).then((task) => {
+    return (isBrowserWorkspace() ? browserLikeAITasks().cancel(id) : http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/cancel`)).then((task) => {
         window.dispatchEvent(new CustomEvent("canvas:task-cancelled", { detail: { task } }));
         return task;
     });
 }
 
 export function refreshGenerationTaskStatus(id: string, options?: { signal?: AbortSignal }) {
+    if (isBrowserWorkspace()) return browserLikeAITasks().query(id, options?.signal, true);
     return http.get<GenerationTask>(`/tasks/${encodeURIComponent(id)}`, { signal: options?.signal });
 }
 
 export function deleteGenerationTask(id: string) {
+    if (isBrowserWorkspace()) return browserLikeAITasks().remove(id);
     return http.delete<void>(`/tasks/${encodeURIComponent(id)}`);
 }
 
 export async function listTaskLogs(id: string, options?: { signal?: AbortSignal }) {
+    if (isBrowserWorkspace()) return [];
     const raw = await http.get<Array<{ summary?: unknown; level?: unknown; message?: unknown; payload?: unknown; createdAt?: unknown }>>(`/tasks/${encodeURIComponent(id)}/logs`, { signal: options?.signal });
     return raw.map((log, index) => projectBackendSafeTaskLog(id, log, index));
 }
@@ -408,7 +421,7 @@ export function shouldUseTaskTextEvents(options?: Pick<WaitForGenerationTaskOpti
 }
 
 export async function waitForGenerationTask(id: string, options?: WaitForGenerationTaskOptions) {
-    if (shouldUseTaskTextEvents(options)) return waitForGenerationTaskTextEvents(id, options || {});
+    if (!isBrowserWorkspace() && shouldUseTaskTextEvents(options)) return waitForGenerationTaskTextEvents(id, options || {});
     const startedAt = Date.now();
     const intervalMs = options?.intervalMs || 2000;
     let lastTask = options?.initialTask;

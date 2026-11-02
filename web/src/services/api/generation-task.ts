@@ -1,4 +1,5 @@
 import { createClientId } from "@/lib/client-id";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { getMediaBlob } from "@/services/file-storage";
 import { resolveReferenceMediaDuration } from "@/lib/reference-media-metadata";
 import { getImageBlob } from "@/services/image-storage";
@@ -173,7 +174,7 @@ export function prepareBackendToolGenerationTask(options: BackendToolGenerationO
 }
 
 export async function runBackendToolGenerationTask(options: BackendToolGenerationOptions): Promise<ToolResponseResult> {
-    const task = await createGenerationTask(prepareBackendToolGenerationTask(options));
+    const task = await createGenerationTask(prepareBackendToolGenerationTask(options), { signal: options.signal });
     options.onTaskCreated?.(task);
     const completed = await waitForGenerationTask(task.id, { signal: options.signal, initialTask: task, onTextDelta: options.onDelta });
     const result = parseBackendGenerationResult(completed);
@@ -274,8 +275,8 @@ async function createBackendGenerationTask(options: BackendGenerationTaskOptions
     const submit = () => {
         throwIfAborted(options.signal);
         return submitGenerationCommand(backendGenerationTaskInput(options, prepared), operationId,
-            (input) => dependencies.createTask(input),
-            dependencies.findTask && options.projectId ? () => dependencies.findTask!(operationId, options.projectId!) : undefined,
+            (input) => dependencies.createTask(input, { signal: options.signal }),
+            dependencies.findTask && options.projectId ? () => dependencies.findTask!(operationId, options.projectId!, options.signal) : undefined,
             () => !options.signal?.aborted);
     };
     let task: GenerationTask;
@@ -379,6 +380,7 @@ function generationMetadata(config: AiConfig, metadata?: Record<string, unknown>
 
 async function prepareBackendMediaReference(media: ReferenceVideo | ReferenceAudio) {
     media = await resolveReferenceMediaDuration(media);
+    if (isBrowserWorkspace()) return backendMediaReference(media, { storageKey: media.storageKey, url: media.url });
     if (resourceIdFromStorageKey(media.storageKey)) return backendMediaReference(media, { storageKey: media.storageKey });
     const url = media.url || "";
     if (/^https?:\/\//i.test(url)) return backendMediaReference(media, { url });
@@ -396,6 +398,7 @@ async function prepareBackendMediaReference(media: ReferenceVideo | ReferenceAud
 }
 
 async function prepareBackendImageReference(image: ReferenceImage, preferArkAssetUrl = false) {
+    if (isBrowserWorkspace()) return { ...image };
     if (preferArkAssetUrl && image.arkAssetId) return backendImageReference(image, { url: `asset://${image.arkAssetId}` });
     if (resourceIdFromStorageKey(image.storageKey)) return backendImageReference(image, { storageKey: image.storageKey });
     const sourceUrl = image.url || image.dataUrl;
@@ -468,11 +471,13 @@ export function backendProviderConfig(config: AiConfig, mode: BackendGenerationM
         audioInstructions: config.audioInstructions,
         systemPrompt: config.systemPrompt,
     };
-    if (logicalModelIDForConfig(config)) return generationOptions;
+    if (logicalModelIDForConfig(config) && !isBrowserWorkspace()) return generationOptions;
     const modelProfile = resolveModelChannel(config, config.model).modelProfiles?.find((item) => item.model === requestConfig.model);
     const hasDeclaredCapability = Boolean(modelProfile?.capabilityConfig || modelProfile?.imageCapabilitiesVersion || modelProfile?.videoCapabilitiesVersion);
     return {
-        channelId: requestConfig.channelId,
+        // Browser receipts resolve credentials from their local channel on
+        // refresh; user channels have no backend-managed channelId.
+        channelId: isBrowserWorkspace() ? resolveModelChannel(config, config.model).id : requestConfig.channelId,
         apiFormat: requestConfig.apiFormat,
         interfaceType: requestConfig.interfaceType,
         baseUrl: requestConfig.baseUrl,

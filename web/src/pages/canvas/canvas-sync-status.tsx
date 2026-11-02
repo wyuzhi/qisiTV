@@ -3,7 +3,8 @@ import { CheckCircle2, CircleAlert, CloudCheck, CloudOff, LoaderCircle, RefreshC
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
-import { isEngineWebsite } from "@/services/browser-workspace";
+import { isBrowserWorkspace, isEngineWebsite } from "@/services/browser-workspace";
+import { getProjectFolderState, subscribeProjectFolderState, type ProjectFolderState } from "@/services/browser-project-folder";
 import { engineRequest, getEngineSession } from "@/services/engine-session";
 import type { EngineFolderStatus } from "@/services/browser-engine-migration";
 import { exportCanvasProjects, exportCanvasProjectsByIds } from "@/lib/canvas/canvas-export";
@@ -70,6 +71,17 @@ export function engineFolderSyncView(view: CanvasSyncStatusView, folder?: Engine
     return { label: "已写入项目文件夹", tone: "saved", detail: folder.directory, note: "项目与素材已确认落盘。助手会话及完整工作区备份还需保留引擎数据目录。" };
 }
 
+export function browserFolderSyncView(view: CanvasSyncStatusView, progress: Pick<SyncProjectProgress, "phase" | "message" | "storageTarget"> | undefined, folder: ProjectFolderState, projectId: string): CanvasSyncStatusView {
+    if (view.tone === "failed" || view.tone === "saving") return view;
+    if (folder.ready && folder.projectDirectories[projectId] && progress?.phase === "done" && progress.storageTarget === "project-folder") {
+        return { label: "已写入项目文件夹", tone: "saved", detail: `${folder.rootName}/${folder.projectDirectories[projectId]}`, note: "项目与素材已保存到你授权的本机文件夹。" };
+    }
+    if (progress?.phase === "done" && progress.storageTarget === "browser-cache") {
+        return { label: "仅保存在此浏览器", tone: "saved", detail: "当前内容已暂存在此浏览器，尚未写入项目文件夹。", note: "清理网站数据可能移除此暂存。可随时选择本机文件夹，将项目和素材长期保存。" };
+    }
+    return { label: "网页画布 · 文件夹保存待确认", tone: "saved", detail: "尚未确认本次内容已写入项目文件夹。", note: folder.ready ? "请等待保存完成；暂时不要清理网站数据。" : "基础画布可继续使用。需要长期保存时，选择本机项目文件夹。" };
+}
+
 export function CanvasSyncStatus({ projectId, onLoadLatest, onOpenVersions }: { projectId: string; onLoadLatest: () => Promise<void>; onOpenVersions?: () => void }) {
     const { message } = App.useApp();
     const progress = useSyncProgressStore((state) => state.syncingProjects[canvasSyncProgressKey(projectId)]);
@@ -82,6 +94,8 @@ export function CanvasSyncStatus({ projectId, onLoadLatest, onOpenVersions }: { 
     const externalConflict = pendingExternalCanvasRevision(projectId);
     const [adopting, setAdopting] = useState(false);
     const engine = isEngineWebsite();
+    const browser = isBrowserWorkspace();
+    const browserFolder = useSyncExternalStore(subscribeProjectFolderState, getProjectFolderState);
     const folder = useQuery({
         queryKey: ["engine-project-folder", getEngineSession()?.sessionId, projectId],
         queryFn: ({ signal }) => engineRequest<EngineFolderStatus>(`/engine/shell/project-folders/status?canvasId=${encodeURIComponent(projectId)}`, { signal }),
@@ -90,7 +104,7 @@ export function CanvasSyncStatus({ projectId, onLoadLatest, onOpenVersions }: { 
     const refetchFolder = folder.refetch;
     useEffect(() => { if (engine && projectId) void refetchFolder(); }, [engine, projectId, progress?.phase, refetchFolder]);
     const normalView = canvasSyncStatusView(localOnly, progress);
-    const view = engine ? engineFolderSyncView(normalView, folder.data, folder.error?.message) : normalView;
+    const view = engine ? engineFolderSyncView(normalView, folder.data, folder.error?.message) : browser ? browserFolderSyncView(normalView, progress, browserFolder, projectId) : normalView;
     const [externalWrites, setExternalWrites] = useState<ExternalCanvasWrite[]>([]);
     const [externalWriteOpen, setExternalWriteOpen] = useState(false);
     const [undoingOpId, setUndoingOpId] = useState<string | null>(null);
@@ -103,7 +117,7 @@ export function CanvasSyncStatus({ projectId, onLoadLatest, onOpenVersions }: { 
             setExternalWrites([]);
             setExternalWriteOpen(false);
         }
-        if (!localOnly || !projectId) {
+        if (!localOnly || !projectId || browser) {
             setExternalWrites([]);
             return;
         }
@@ -131,7 +145,7 @@ export function CanvasSyncStatus({ projectId, onLoadLatest, onOpenVersions }: { 
             cancelled = true;
             unsubscribe();
         };
-    }, [localOnly, projectId, externalRevision]);
+    }, [localOnly, projectId, externalRevision, browser]);
 
     const latestExternalWrite = externalWrites.find((item) => !item.undone);
     const handleUndoExternalWrite = async (write: ExternalCanvasWrite) => {
@@ -279,6 +293,7 @@ export function CanvasSyncStatus({ projectId, onLoadLatest, onOpenVersions }: { 
                         {view.note ? <p className="text-xs text-muted-foreground">{view.note}</p> : null}
                         <div className="flex flex-wrap gap-2">
                             {engine ? <Link to="/engine"><Button size="small">查看项目文件夹</Button></Link> : null}
+                            {browser ? <Link to="/local"><Button size="small">{browserFolder.ready ? "查看项目文件夹" : "选择项目文件夹"}</Button></Link> : null}
                             {view.action === "use-latest" ? <Button size="small" type="primary" loading={adopting} disabled={busy} onClick={() => void adoptLatest()}>使用最新版本</Button> : null}
                             {view.action === "retry-save" ? <Button size="small" type="primary" loading={busy} onClick={() => void run(() => syncLocalCanvasProjectToBackend(projectId))}>重试保存</Button> : null}
                             {view.action === "load-cloud" ? <Button size="small" loading={busy} onClick={() => void run(onLoadLatest)}>加载云端最新版本</Button> : null}

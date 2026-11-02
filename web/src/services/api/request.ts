@@ -1,4 +1,5 @@
 import axios, { type AxiosRequestConfig, type AxiosResponse } from "axios";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { ENGINE_ORIGIN, ENGINE_SESSION_HEADER, getEngineSession, installEngineFetch } from "@/services/engine-session";
 
 
@@ -162,6 +163,9 @@ function retryAfterMilliseconds(headers: unknown) {
 export type HttpRequestConfig = Omit<AxiosRequestConfig, "method" | "url" | "data" | "baseURL">;
 
 apiClient.interceptors.request.use((config) => {
+    if (isBrowserWorkspace()) {
+        throw new ApiError("此功能需要本机引擎，可在「本机引擎」中按需连接。基础画布可继续使用。", { reason: "engine_required", status: 409, retryable: false });
+    }
     if (apiBaseURL === `${ENGINE_ORIGIN}/engine/api`) {
         if (config.baseURL !== apiBaseURL) throw new Error("本机请求不可覆盖服务地址");
         const route = config.url || "";

@@ -124,10 +124,9 @@ describe("website and headless engine release contract", () => {
         expect(script).toContain('".dmg.sha256"');
     });
 
-    test("website build has versioned subpath assets and pairs before workspace hydration", () => {
+    test("website build has versioned subpath assets and explicit installer links", () => {
         const packageJson = JSON.parse(read("web/package.json")) as { scripts: Record<string, string> };
         const vite = read("web/vite.config.ts");
-        const main = read("web/src/main.tsx");
         const version = read("VERSION").trim();
         expect(version).toMatch(/^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
         expect(packageJson.scripts.build).toContain("tsc --noEmit && vite build");
@@ -136,13 +135,6 @@ describe("website and headless engine release contract", () => {
         expect(vite).toContain('"import.meta.env.VITE_APP_VERSION": JSON.stringify(appVersion)');
         expect(vite).toContain("licenseNoticesPlugin()");
         expect(vite).toContain("fileName: `licenses/${name}`");
-        expect(main).toContain('import.meta.env?.VITE_QISITV_ENGINE === "1"');
-        const pair = main.indexOf("requireEngineConnection()");
-        const transport = main.indexOf("configureEngineApiRuntime()");
-        const application = main.indexOf("startApplication()");
-        expect(pair).toBeGreaterThan(-1);
-        expect(transport).toBeGreaterThan(pair);
-        expect(application).toBeGreaterThan(transport);
         const gate = read("web/src/services/engine-bootstrap.ts");
         const updates = read("web/src/components/layout/workspace-sidebar-update.tsx");
         for (const entry of [gate, updates]) {

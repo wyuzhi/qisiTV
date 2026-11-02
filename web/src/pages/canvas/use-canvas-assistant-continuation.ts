@@ -3,6 +3,7 @@ import { cancelAssistantContinuations, listAssistantContinuations, type Assistan
 import { subscribeGenerationTasks } from "@/services/api/task-center";
 import type { CanvasAssistantController } from "./use-canvas-assistant";
 import { cancelAgentChat } from "@/services/api/agent-assistant";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 
 type ContinuationController = Pick<CanvasAssistantController, "historyLoaded" | "streaming" | "sessionBusy" | "sessionId" | "canvasId" | "reloadHistory">;
 
@@ -26,6 +27,7 @@ export function shouldReloadForContinuation(controller: ContinuationController, 
  * visible by re-reading history, and lets the user stop it. It never claims or sends.
  */
 export function useCanvasAssistantContinuation(assistant: CanvasAssistantController, enabled: boolean) {
+    enabled = enabled && !isBrowserWorkspace();
     const live = useRef(assistant); live.current = assistant;
     const [rows, setRows] = useState<AssistantContinuation[]>([]);
     const knownRows = useRef(rows); knownRows.current = rows;

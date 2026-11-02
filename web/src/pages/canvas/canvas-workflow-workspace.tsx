@@ -2,6 +2,8 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { Alert, Button, Dropdown, Popconfirm, Spin, Tooltip } from "antd";
 import { MoreHorizontal, Plus, RefreshCw, Scan, Settings2, Trash2, Workflow, X } from "lucide-react";
 import { AppDrawer } from "@/components/ui/product/app-drawer";
+import { EngineFeatureNotice } from "@/components/workspace/engine-feature-notice";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { compileCanvasWorkflow } from "@/lib/canvas/reusable-workflow";
 import { deleteCanvasWorkflow, getWorkflowEditor, listWorkflowOperations, listCanvasWorkflows, saveCanvasWorkflow, type CanvasWorkflow, type WorkflowDefinition, type WorkflowOperation } from "@/services/api/canvas-workflows";
 import { abstractWorkflowDefinition } from "@/lib/canvas/workflow-editor";
@@ -35,6 +37,7 @@ export const CanvasWorkflowWorkspace = forwardRef<CanvasWorkflowsHandle, {
     const alive = useRef(true);
     useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
     const load = async () => {
+        if (isBrowserWorkspace()) return;
         setLoading(true);
         setError("");
         try {
@@ -45,6 +48,7 @@ export const CanvasWorkflowWorkspace = forwardRef<CanvasWorkflowsHandle, {
     };
     const saveSelection = () => {
         if (readOnly) return;
+        if (isBrowserWorkspace()) { setLibraryOpen(true); return; }
         try { setDraft(compileCanvasWorkflow(nodes, connections, selection)); }
         catch (cause) { setError(cause instanceof Error ? cause.message : "无法转换选中节点"); setLibraryOpen(true); }
     };
@@ -92,7 +96,9 @@ export const CanvasWorkflowWorkspace = forwardRef<CanvasWorkflowsHandle, {
         } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : "无法创建工作流"); }
         finally { if (alive.current) setOpeningEditor(undefined); }
     };
-    const content = <section className="canvas-assistant-panel" aria-label="工作流库" data-canvas-no-zoom data-canvas-no-drag data-canvas-wheel-scroll>
+    const content = isBrowserWorkspace()
+        ? <section className="canvas-assistant-panel p-4" aria-label="工作流库" data-canvas-no-zoom data-canvas-no-drag data-canvas-wheel-scroll><EngineFeatureNotice feature="可复用工作流" onClose={() => setLibraryOpen(false)} /></section>
+        : <section className="canvas-assistant-panel" aria-label="工作流库" data-canvas-no-zoom data-canvas-no-drag data-canvas-wheel-scroll>
         <header className="canvas-assistant-header">
             <h2>工作流</h2>
             <Tooltip title="从选中节点创建"><Button type="text" size="small" aria-label="从选中节点创建工作流" icon={<Scan className="size-4" />} onClick={saveSelection} disabled={readOnly || selection.size === 0} /></Tooltip>

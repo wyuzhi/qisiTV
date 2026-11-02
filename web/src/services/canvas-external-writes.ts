@@ -1,4 +1,5 @@
 import { apiBaseURL, apiClient, http } from "@/services/api/request";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 
 export type CanvasNodeRef = {
     id: string;
@@ -80,7 +81,7 @@ export async function undoExternalCanvasWrite(canvasId: string, opId: string): P
  * Wails 桌面环境（wails: 协议或携带 X-Desktop-Token）使用流式 fetch，确保桌面版外部改动实时推送（消除 4 秒轮询延迟）。
  */
 export function subscribeCanvasEventsStream(projectId: string, onUpdate: () => void): () => void {
-    if (typeof window === "undefined" || !projectId) return () => {};
+    if (typeof window === "undefined" || !projectId || isBrowserWorkspace()) return () => {};
     const desktopToken = apiClient.defaults.headers.common["X-Desktop-Token"];
     const hasDesktopToken = typeof desktopToken === "string" && desktopToken.trim().length > 0;
 

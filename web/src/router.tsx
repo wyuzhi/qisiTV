@@ -7,7 +7,8 @@ import { loadAgentsPage, loadAssetsPage, loadCanvasPage, loadCanvasProjectPage, 
 import { CanvasRefreshShell } from "@/pages/canvas/canvas-refresh-shell";
 import RouteErrorPage from "@/pages/route-error";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
-import { isEngineWebsite } from "@/services/browser-workspace";
+import { isBrowserWorkspace, isEngineWebsite } from "@/services/browser-workspace";
+import { RequireLocalEngine } from "@/components/workspace/engine-feature-notice";
 
 const AgentsPage = lazy(loadAgentsPage);
 const AssetsPage = lazy(loadAssetsPage);
@@ -87,7 +88,7 @@ export const router = createWorkspaceRouter([
                 element: <RequireFeature feature="taskCenterEnabled">{deferred(<TasksPage />)}</RequireFeature>,
             },
             { path: "/assets", element: deferred(<AssetsPage />) },
-            { path: "/skills", element: deferred(<SkillsPage />) },
+            { path: "/skills", element: <RequireLocalEngine feature="技能市场与本机技能">{deferred(<SkillsPage />)}</RequireLocalEngine> },
             { path: "/skill", element: <Navigate to="/skills" replace /> },
             { path: "/skills/reference", element: <Navigate to="/" replace /> },
             {
@@ -96,12 +97,12 @@ export const router = createWorkspaceRouter([
             },
             {
                 path: "/plugins/eagle",
-                element: <RequireFeature feature="pluginCenterEnabled">{deferred(<EagleLibraryPage />)}</RequireFeature>,
+                element: <RequireLocalEngine feature="Eagle 素材库"><RequireFeature feature="pluginCenterEnabled">{deferred(<EagleLibraryPage />)}</RequireFeature></RequireLocalEngine>,
             },
             { path: "/settings", element: deferred(<SettingsPage />) },
             { path: "/engine", element: deferred(<EnginePage />) },
             { path: "/local", element: isEngineWebsite() ? <Navigate to="/engine" replace /> : deferred(<LocalSetupPage />) },
-            { path: "/agents", element: deferred(<AgentsPage />) },
+            { path: "/agents", element: isBrowserWorkspace() ? deferred(<LocalSetupPage />) : deferred(<AgentsPage />) },
             { path: "/test-voice-recording", element: deferred(<TestVoiceRecording />) },
             {
                 path: "/projects",

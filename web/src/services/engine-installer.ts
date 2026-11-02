@@ -9,7 +9,7 @@ export function engineInstallerFilename(version: string) {
     return `qisiTV-Engine-${release}-darwin-arm64.dmg`;
 }
 
-/** The same versioned, same-origin package is used by the install gate and update link. */
-export function engineInstallerUrl(version = import.meta.env?.VITE_APP_VERSION || "") {
+/** Web-only updates keep linking the independently verified engine release. */
+export function engineInstallerUrl(version = import.meta.env?.VITE_QISITV_ENGINE_VERSION || import.meta.env?.VITE_APP_VERSION || "") {
     return publicAssetUrl(`downloads/engine/${engineInstallerFilename(version)}`);
 }

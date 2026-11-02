@@ -45,7 +45,8 @@ describe("qisiTV website and desktop update UI contract", () => {
         expect(update).not.toContain("所有修改已保存");
         expect(update).toContain("href={engineInstallerUrl()}");
         expect(update).not.toContain("github.com");
-        expect(update).toContain("if (isEngineWebsite()) return");
+        expect(update).toContain("if (isWebsiteWorkspace()) return");
+        expect(update).toContain("{isEngineWebsite() ? <a href={engineInstallerUrl()}");
         expect(update).toContain("下载本机引擎安装包");
         expect(update).not.toContain("glanderness/BeefTV");
         expect(update).not.toContain("desktop-update.json");

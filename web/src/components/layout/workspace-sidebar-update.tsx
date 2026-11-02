@@ -19,7 +19,7 @@ import {
 } from "@/services/desktop-update";
 import { useDesktopUpdate } from "@/hooks/use-desktop-update";
 import DiagnosticsPanel from "@/pages/settings/diagnostics-panel";
-import { isEngineWebsite } from "@/services/browser-workspace";
+import { isEngineWebsite, isWebsiteWorkspace } from "@/services/browser-workspace";
 import { engineInstallerUrl, ENGINE_INSTALLER_PLATFORM } from "@/services/engine-installer";
 
 import "./workspace-sidebar-update.css";
@@ -88,9 +88,9 @@ export function WorkspaceSidebarUpdate({ collapsed }: { collapsed: boolean }) {
         {showBar ? <UpdateProgressBar state={state} percent={barPercent} reducedMotion={Boolean(reducedMotion)} paused={state.status === "error"} /> : null}
     </div> : null;
 
-    if (isEngineWebsite()) return <div className={cn("app-workspace-update", collapsed && "is-collapsed")}>
+    if (isWebsiteWorkspace()) return <div className={cn("app-workspace-update", collapsed && "is-collapsed")}>
         <AppChangelogButton className="app-workspace-update-version" showIcon={false} showVersion version={formatDesktopVersionLabel(APP_VERSION)} />
-        <a href={engineInstallerUrl()} download className="app-workspace-update-action" aria-label="下载本机引擎安装包" title={`下载本机引擎 · ${ENGINE_INSTALLER_PLATFORM}`}><Download className="size-4" /></a>
+        {isEngineWebsite() ? <a href={engineInstallerUrl()} download className="app-workspace-update-action" aria-label="下载本机引擎安装包" title={`下载本机引擎 · ${ENGINE_INSTALLER_PLATFORM}`}><Download className="size-4" /></a> : null}
     </div>;
 
     return (

@@ -9,6 +9,7 @@ export type SyncProjectProgress = {
     phase: "pending" | "uploading" | "saving" | "done" | "error" | "conflict";
     message?: string;
     draftCount?: number;
+    storageTarget?: "browser-cache" | "project-folder";
 };
 
 export function canvasSyncProgressKey(projectId: string, scope = getActiveUserScope()) {

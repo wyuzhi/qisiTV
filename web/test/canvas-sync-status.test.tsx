@@ -1,6 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { canvasSyncStatusView, engineFolderSyncView } from "@/pages/canvas/canvas-sync-status";
+import { browserFolderSyncView, canvasSyncStatusView, engineFolderSyncView } from "@/pages/canvas/canvas-sync-status";
 import type { EngineFolderStatus } from "@/services/browser-engine-migration";
+import type { ProjectFolderState } from "@/services/browser-project-folder";
+
+test("浏览器暂存与项目目录落盘分别确认，不把目录选择或旧进度当成已写入", () => {
+    const view = canvasSyncStatusView(true, { phase: "done" });
+    const unselected: ProjectFolderState = { supported: true, ready: false, status: "unselected", rootName: "", projectDirectories: {}, deletedProjectIds: [] };
+    const folder: ProjectFolderState = { ...unselected, ready: true, status: "ready", rootName: "projects", projectDirectories: { canvas: "qisitv-canvas" } };
+    expect(browserFolderSyncView(view, { phase: "done", storageTarget: "browser-cache" }, unselected, "canvas").label).toBe("仅保存在此浏览器");
+    expect(browserFolderSyncView(view, { phase: "done", storageTarget: "browser-cache" }, folder, "canvas").label).toBe("仅保存在此浏览器");
+    expect(browserFolderSyncView(view, { phase: "done", storageTarget: "project-folder" }, folder, "canvas")).toMatchObject({ label: "已写入项目文件夹", detail: "projects/qisitv-canvas" });
+    expect(browserFolderSyncView(view, { phase: "done", storageTarget: "project-folder" }, unselected, "canvas").label).not.toBe("已写入项目文件夹");
+    expect(browserFolderSyncView(view, undefined, folder, "canvas").label).not.toBe("已写入项目文件夹");
+    expect(browserFolderSyncView(canvasSyncStatusView(true, { phase: "error" }), { phase: "error", storageTarget: "browser-cache" }, folder, "canvas").tone).toBe("failed");
+});
 
 test("引擎已保存不等于项目目录已落盘，错误与待写状态必须持续可见", () => {
     const saved = canvasSyncStatusView(true, { phase: "done" });

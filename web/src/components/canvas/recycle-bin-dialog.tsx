@@ -9,7 +9,8 @@ import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import { flushCanvasStorePersistence, useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useCanvasHistoryStore } from "@/stores/canvas/use-canvas-history-store";
 import { isBrowserWorkspace } from "@/services/browser-workspace";
-import { persistProjectToFolder } from "@/services/browser-project-folder";
+import { getProjectFolderState, initializeProjectFolder, persistProjectToFolder } from "@/services/browser-project-folder";
+import { assertBrowserManifestWritable } from "@/services/browser-engine-migration";
 
 export function RecycleBinDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
     const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -60,10 +61,14 @@ export function RecycleBinDialog({ open, onClose }: { open: boolean; onClose: ()
                 const item = deletedProjects.find((entry) => entry.id === id);
                 if (browserOnly) {
                     if (!item?.project) throw new Error("此记录没有完整项目，请从原项目文件夹恢复");
+                    assertBrowserManifestWritable(item.project);
+                    await initializeProjectFolder();
                     // Commit removal of the disk tombstone before changing the
                     // active collection or removing its recovery record.
-                    const saved = await persistProjectToFolder(item.project);
-                    restoreProject({ ...item.project, revision: saved.revision });
+                    if (getProjectFolderState().rootName) {
+                        const saved = await persistProjectToFolder(item.project);
+                        restoreProject({ ...item.project, revision: saved.revision });
+                    } else restoreProject(item.project);
                 } else if (localOnly && item?.project) restoreProject(item.project);
                 await flushCanvasStorePersistence();
                 removeDeletedItem(id);

@@ -3,6 +3,7 @@ import { engineInstallerUrl, ENGINE_INSTALLER_BETA_NOTICE, ENGINE_INSTALLER_PLAT
 import { ENGINE_UPGRADE_HELP_STEPS, ENGINE_UPGRADE_HELP_TITLE } from "@/services/engine-upgrade-help";
 import { publicAssetUrl } from "@/lib/public-asset";
 import { engineCompatibilityError } from "@/services/engine-compatibility";
+import { returnToBrowserWorkspace } from "@/services/browser-workspace";
 
 /** Runs before stores hydrate, so a disconnected engine never creates a second workspace. */
 export async function requireEngineConnection(): Promise<void> {
@@ -12,6 +13,7 @@ export async function requireEngineConnection(): Promise<void> {
         const route = location.hash.split("?")[0] || "#/";
         const params = new URLSearchParams(location.hash.split("?")[1] || "");
         params.delete("pair");
+        params.set("workspace", "engine");
         history.replaceState(null, "", `${location.pathname}${location.search}${route}${params.size ? `?${params}` : ""}`);
     }
     if (!invitation && restoreEngineSession()) {
@@ -37,11 +39,14 @@ async function showConnectionGate(invitation: string, compatibilityMessage?: str
     style.textContent = `body{margin:0;background:#111214;color:#eee;font:15px/1.7 system-ui,-apple-system,sans-serif}.engine-setup{max-width:620px;margin:7vh auto;padding:32px;border:1px solid #303237;border-radius:24px;background:#191b1e}.engine-setup h1{font-size:30px;line-height:1.3;margin:12px 0}.engine-setup p{color:#b8bec8}.engine-setup input{box-sizing:border-box;background:#111214;color:#eee;border:1px solid #444;border-radius:9px;padding:10px 14px;min-width:0;flex:1;font:inherit}.engine-setup button,.engine-setup a{font:inherit;border-radius:9px;padding:10px 16px;border:1px solid #42464d;background:#24272d;color:#eee;cursor:pointer;text-decoration:none}.engine-setup button:disabled{opacity:.5;cursor:wait}.engine-setup .primary{background:#27cae1;color:#0b2228;border:0;font-weight:650}.engine-setup .row{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}.engine-setup .feedback{white-space:pre-wrap;color:#f2cc8f}.engine-setup small{color:#a3acb8}.engine-setup img{width:52px;height:52px;border-radius:50%}@media(max-width:700px){.engine-setup{margin:20px;padding:22px}}`;
     const panel = element("main"); panel.className = "engine-setup";
     const logo = element("img"); logo.src = publicAssetUrl("qisitv-logo.jpg"); logo.alt = "qisiTV";
-    panel.append(logo, element("h1", "连接这台电脑的 qisiTV"), element("p", "在网页里使用创作助手、工作流、导演台和媒体工具。项目与素材保存在你选择的本机文件夹。"));
+    panel.append(logo, element("h1", "连接本机引擎"), element("p", "基础画布无需安装。使用本机创作助手、工作流或原生媒体工具时，再连接引擎。引擎项目与素材保存在你选择的本机文件夹。"));
     const launchRow = element("div"); launchRow.className = "row";
     const launch = element("a", "打开本机引擎"); launch.className = "primary"; launch.href = "qisitv://open";
     const install = element("a", "安装 / 更新 Mac 引擎"); install.href = engineInstallerUrl(); install.setAttribute("download", "");
     launchRow.append(launch, install); panel.append(launchRow);
+    const browse = element("button", "使用网页画布");
+    browse.onclick = returnToBrowserWorkspace;
+    panel.append(browse, element("small", " 网页画布和引擎项目分开保存；已有引擎项目仍需连接引擎后打开。"));
     panel.append(element("p", `${ENGINE_INSTALLER_PLATFORM}。${ENGINE_INSTALLER_BETA_NOTICE}`));
     panel.append(element("small", "首次安装后，点击打开本机引擎。引擎会给出连接链接或连接码；浏览器询问访问本地网络时请选择允许。"));
     const upgradeHelp = element("details");

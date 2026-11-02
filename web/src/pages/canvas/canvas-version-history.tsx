@@ -3,6 +3,8 @@ import { EmptyState } from "@/components/ui/product/empty-state";
 import { App, Button, Grid, Spin } from "antd";
 import { Check, ChevronDown, Download, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { getCanvasHistoryEntry, listCanvasHistory, type CanvasHistoryEntry } from "@/services/api/workspace-data";
 import { preserveCanvasSyncDraft, readCanvasSyncDrafts, type CanvasSyncDraft } from "@/services/canvas-sync-drafts";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
@@ -23,6 +25,7 @@ export type CanvasVersionPreviewState = {
 
 export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotId: string, revision: number) => Promise<void>, projectFromEditor?: CanvasProject) {
     const { message, modal } = App.useApp();
+    const browser = isBrowserWorkspace();
     const desktop = Boolean(Grid.useBreakpoint().lg);
     const contextRef = useRef({ projectId });
     if (contextRef.current.projectId !== projectId) contextRef.current = { projectId };
@@ -34,7 +37,7 @@ export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotI
     const [open, setOpen] = useState(false);
     const [listOpen, setListOpen] = useState(true);
     const [entries, setEntries] = useState<CanvasHistoryEntry[]>([]);
-    const [tab, setTab] = useState<"cloud" | "draft">("cloud");
+    const [tab, setTab] = useState<"cloud" | "draft">(browser ? "draft" : "cloud");
     const [drafts, setDrafts] = useState<CanvasSyncDraft[]>([]);
     const [draftLoading, setDraftLoading] = useState(false);
     const [draftError, setDraftError] = useState("");
@@ -60,12 +63,12 @@ export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotI
 
     useEffect(() => {
         setOpen(false);
-        setTab("cloud");
+        setTab(browser ? "draft" : "cloud");
         returnToCurrent();
-    }, [projectId, returnToCurrent]);
+    }, [projectId, returnToCurrent, browser]);
 
     useEffect(() => {
-        if (!open) return;
+        if (!open || browser) return;
         const controller = new AbortController();
         setLoading(true);
         setError("");
@@ -85,7 +88,7 @@ export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotI
                 if (!controller.signal.aborted && isCurrentContext()) setLoading(false);
             });
         return () => controller.abort();
-    }, [open, projectId, reload]);
+    }, [open, projectId, reload, browser]);
 
     useEffect(() => {
         if (!open) return;
@@ -244,6 +247,7 @@ export type CanvasVersionHistoryController = ReturnType<typeof useCanvasVersionH
 
 export function CanvasVersionHistory({ history }: { history: CanvasVersionHistoryController }) {
     const { open, tab, entries, drafts: displayDrafts, currentRevision, preview, loading, draftLoading, draftError, restoring, exporting, error } = history;
+    const browser = isBrowserWorkspace();
     if (!open) return null;
     const groups = new Map<string, CanvasHistoryEntry[]>();
     for (const entry of entries) {
@@ -291,7 +295,7 @@ export function CanvasVersionHistory({ history }: { history: CanvasVersionHistor
                         <Spin size="small" />
                     </div>
                 ) : !entries.length && !error ? (
-                    <EmptyState size="compact" description="暂无历史版本，后续保存时会自动保留" />
+                    browser ? <div className="canvas-version-empty"><p>此网页画布不会自动保留历史版本，可在本机草稿中查看已保留的副本。当前内容的保存位置和进度以画布顶部提示为准。引擎项目的历史版本需连接对应本机引擎后查看。</p><Link to="/engine" className="underline">设置本机引擎</Link></div> : <EmptyState size="compact" description="暂无历史版本，后续保存时会自动保留" />
                 ) : null}
                 {[...groups].map(([day, items]) => (
                     <details className="canvas-version-group" key={day} open>

@@ -58,13 +58,13 @@ export default function LocalSetupPage() {
             <div className="mx-auto w-full max-w-4xl space-y-7 px-4 py-8 sm:px-8">
                 <header className="space-y-2">
                     <h1 className="text-2xl font-semibold">本地文件与 Agent</h1>
-                    <p className="text-sm leading-6 text-muted-foreground">画布在网页里打开，项目和素材保存在你的电脑。普通创作只需设置文件夹；使用 AI Agent 时，选择你正在用的工具并连接。</p>
+                    <p className="text-sm leading-6 text-muted-foreground">基础画布可以直接在网页使用。需要长期保存时，选择本机项目文件夹；使用 AI Agent 时，再选择你正在用的工具并连接。</p>
                 </header>
                 <section className="space-y-5 rounded-2xl border border-border bg-card p-6">
                     <div className="flex items-center gap-3"><FolderOpen className="size-5" /><h2 className="text-lg font-medium">1. 选择项目文件夹</h2></div>
                     <p className="text-sm leading-6 text-muted-foreground">选择一个专门存放 qisiTV 项目的文件夹。每次新建项目，会在里面创建独立子文件夹，保存画布、参考素材、图片、视频和音频。</p>
                     <div role="status" className="rounded-xl bg-muted/40 p-4 text-sm leading-6">
-                        {!folder.supported ? "当前浏览器（包括 Safari）不支持此文件夹功能。请用电脑上的 Chrome 或 Edge 打开此网页。" : folder.ready ? <><CheckCircle2 className="mr-2 inline size-4 text-emerald-500" />已连接：{folder.rootName} <span className="text-muted-foreground">· {Object.keys(folder.projectDirectories).length} 个磁盘项目</span></> : folder.status === "permission-required" ? `需要重新授权访问「${folder.rootName}」。文件仍保留在电脑中。` : folder.error || "还未选择。此前浏览器里的项目会保留，选择文件夹后迁移保存。"}
+                        {!folder.supported ? "当前浏览器（包括 Safari）不支持直接读写项目文件夹，基础画布仍可使用。如需此文件夹功能，请用电脑上的 Chrome 或 Edge。" : folder.ready ? <><CheckCircle2 className="mr-2 inline size-4 text-emerald-500" />已连接：{folder.rootName} <span className="text-muted-foreground">· {Object.keys(folder.projectDirectories).length} 个磁盘项目</span></> : folder.status === "permission-required" ? `需要重新授权访问「${folder.rootName}」。文件仍保留在电脑中。` : folder.error || "还未选择。此前浏览器里的项目会保留，选择文件夹后迁移保存。"}
                     </div>
                     <div className="flex flex-wrap gap-3">
                         <Button type="primary" icon={<FolderOpen className="size-4" />} disabled={!folder.supported || connection.canResume || connection.status === "connected" || connection.status === "connecting" || connection.status === "reconnecting" || connection.activeCommands > 0} loading={busy} onClick={() => void run(() => selectBrowserProjectRoot(), "项目文件夹已连接，已保存的项目可以继续打开")}>{folder.rootName ? "选择 / 打开项目根目录" : "选择项目文件夹"}</Button>

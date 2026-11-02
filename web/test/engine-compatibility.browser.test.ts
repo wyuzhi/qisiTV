@@ -16,7 +16,7 @@ beforeAll(async () => {
         return new Response('<div id="root"></div><script type="module">import {requireEngineConnection} from "/harness.js";requireEngineConnection().then(()=>document.body.dataset.hydrated="yes");</script>', { headers: { "content-type": "text/html" } });
     } });
     const build = await Bun.build({ entrypoints: [import.meta.dir + "/../src/services/engine-bootstrap.ts"], target: "browser", format: "esm", define: {
-        "import.meta.env": JSON.stringify({ VITE_QISITV_ENGINE_PORT: String(server.port), BASE_URL: "/", VITE_APP_VERSION: "2.1.2-web-beta.1" }),
+        "import.meta.env": JSON.stringify({ VITE_QISITV_ENGINE_PORT: String(server.port), BASE_URL: "/", VITE_APP_VERSION: "2.1.2-web-beta.2", VITE_QISITV_ENGINE_VERSION: "2.1.2-web-beta.1" }),
     }, plugins: [{ name: "source-alias", setup(builder) {
         builder.onResolve({ filter: /^@\// }, args => ({ path: Bun.resolveSync("../src/" + args.path.slice(2), import.meta.dir) }));
     } }] });

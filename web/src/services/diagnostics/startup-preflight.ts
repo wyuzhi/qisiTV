@@ -1,4 +1,5 @@
 import { browserCapabilities } from "./browser-environment";
+import { isEngineWebsite, returnToBrowserWorkspace } from "@/services/browser-workspace";
 
 type RequiredCapabilities = { secureRandom: boolean; structuredClone: boolean; indexedDB: boolean };
 
@@ -36,6 +37,14 @@ function showFailure(stage: "capability" | "workspace", capabilities: RequiredCa
     evidence.style.cssText = "white-space:pre-wrap;font-size:12px";
     evidence.textContent = JSON.stringify({ stage, capabilities: { secureRandom: capabilities.secureRandom, structuredClone: capabilities.structuredClone, indexedDB: capabilities.indexedDB } }, null, 2);
     for (const element of [heading, detail, button, evidence]) section.appendChild(element);
+    if (stage === "workspace" && isEngineWebsite()) {
+        const browse = document.createElement("button");
+        browse.textContent = "使用网页画布";
+        browse.onclick = returnToBrowserWorkspace;
+        const note = document.createElement("p");
+        note.textContent = "也可以继续使用独立的网页画布。已有引擎项目仍保留在本机引擎中，恢复连接后再打开。";
+        section.append(browse, note);
+    }
     while (root.firstChild) root.removeChild(root.firstChild);
     root.appendChild(section);
 }

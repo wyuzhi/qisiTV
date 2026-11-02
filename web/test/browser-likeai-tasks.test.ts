@@ -13,7 +13,7 @@ function request(overrides: Record<string, unknown> = {}): CreateTaskInput {
     } };
 }
 
-function fixture(options: { request?: (path: string) => Promise<Record<string, unknown>>; downloadFails?: boolean; storeFails?: boolean; withProjectWriteLock?: Parameters<typeof createBrowserLikeAITaskService>[0]["withProjectWriteLock"] } = {}) {
+function fixture(options: { request?: (path: string, init?: RequestInit) => Promise<Record<string, unknown>>; downloadFails?: boolean; storeFails?: boolean; withProjectWriteLock?: Parameters<typeof createBrowserLikeAITaskService>[0]["withProjectWriteLock"]; reference?: Parameters<typeof createBrowserLikeAITaskService>[0]["reference"]; stored?: (record: BrowserLikeAITaskRecord) => void; assertOwner?: () => void } = {}) {
     const records = new Map<string, BrowserLikeAITaskRecord>();
     const calls: string[] = [];
     const requests: Array<{ path: string; method?: string; body?: Record<string, unknown> }> = [];
@@ -22,7 +22,7 @@ function fixture(options: { request?: (path: string) => Promise<Record<string, u
     const store: BrowserLikeAITaskStore = {
         get: async (id) => structuredClone(records.get(id) || null),
         all: async () => structuredClone([...records.values()]),
-        put: async (record) => { if (options.storeFails) throw new Error("storage unavailable"); records.set(record.task.id, structuredClone(record)); },
+        put: async (record) => { if (options.storeFails) throw new Error("storage unavailable"); records.set(record.task.id, structuredClone(record)); options.stored?.(record); },
         remove: async (id) => { records.delete(id); },
     };
     const tails = new Map<string, Promise<unknown>>();
@@ -32,16 +32,16 @@ function fixture(options: { request?: (path: string) => Promise<Record<string, u
         try { return await operation; } finally { if (tails.get(name) === operation) tails.delete(name); }
     };
     const dependencies = {
-        store, lock, withProjectWriteLock: options.withProjectWriteLock,
+        store, lock, withProjectWriteLock: options.withProjectWriteLock, assertOwner: options.assertOwner,
         id: () => `id-${++sequence}`,
         now: () => "2026-09-28T00:00:00.000Z",
         credential: async () => "current-api-key",
-        reference: async (ref: Record<string, unknown>) => ({ ...ref, url: "https://media.example/reference.png" }),
+        reference: options.reference || (async (ref: Record<string, unknown>) => ({ ...ref, url: "https://media.example/reference.png" })),
         request: async (path: string, _apiKey: string, init?: RequestInit) => {
             calls.push(path);
             requests.push({ path, method: init?.method, body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined });
             expect(records.size).toBeGreaterThan(0);
-            if (options.request) return options.request(path);
+            if (options.request) return options.request(path, init);
             return path === "/task/create_task" ? { code: 200, data: { task_id: "provider-1", status: "queued" } }
                 : { code: 200, data: { task_id: "provider-1", status: "completed", result: { videos: ["https://media.example/result.mp4"] } } };
         },
@@ -100,6 +100,53 @@ describe("LikeAI browser protocol", () => {
 });
 
 describe("browser persisted LikeAI lifecycle", () => {
+    for (const invalidate of ["abort", "owner"] as const) {
+        test(`a ${invalidate} during reference preparation prevents the paid submission`, async () => {
+            const controller = new AbortController();
+            let currentOwner = true;
+            let started!: () => void;
+            let release!: () => void;
+            const waiting = new Promise<void>(resolve => { started = resolve; });
+            const upload = new Promise<void>(resolve => { release = resolve; });
+            const f = fixture({
+                assertOwner: () => { if (!currentOwner) throw new DOMException("changed workspace", "AbortError"); },
+                reference: async (ref, _kind, _key, _base, signal) => {
+                    expect(signal).toBe(controller.signal);
+                    started(); await upload;
+                    return { ...ref, url: "https://media.example/reference.png" };
+                },
+            });
+            const pending = f.service.create(request({ referenceImages: [{ dataUrl: "data:image/png;base64,AA==" }] }), controller.signal);
+            await waiting;
+            if (invalidate === "abort") controller.abort(); else currentOwner = false;
+            release();
+            await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+            expect(f.calls).toEqual([]);
+            expect([...f.records.values()][0]?.task.errorCode).toBe("preparation_failed");
+        });
+    }
+
+    test("abort while persisting the submission intent still prevents the paid request", async () => {
+        const controller = new AbortController();
+        const f = fixture({ stored: record => { if (record.task.stage === "submitting") controller.abort(); } });
+        await expect(f.service.create(request(), controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+        expect(f.calls).toEqual([]);
+        expect([...f.records.values()][0]?.task.errorCode).toBe("preparation_failed");
+    });
+
+    test("abort after submission retains the uncertain receipt and never resubmits on reopening", async () => {
+        const controller = new AbortController();
+        const f = fixture({ request: async (_path, init) => {
+            expect(init?.signal).toBe(controller.signal);
+            controller.abort();
+            throw new DOMException("Aborted", "AbortError");
+        } });
+        await expect(f.service.create(request(), controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+        expect([...f.records.values()][0]?.task.errorCode).toBe("submission_uncertain");
+        await f.reopen().create(request());
+        expect(f.calls).toEqual(["/task/create_task"]);
+    });
+
     test("a migrated project cannot submit or persist another browser task", async () => {
         let project = "";
         const f = fixture({ withProjectWriteLock: async (id) => { project = id; throw new Error("project is owned by engine"); } });
@@ -123,10 +170,9 @@ describe("browser persisted LikeAI lifecycle", () => {
                     referenceImages: mode === "image" || mode === "video" ? [{ id: "ref-1", name: "ref.png", type: "image/png", dataUrl: "", storageKey: "resource:ref-1", width: 1024, height: 1024, bytes: 128 }] : [],
                 };
                 const prepared = await prepareBackendGenerationTask(taskOptions);
-                expect(prepared.input?.config).toMatchObject({ channelId: "", apiFormat: "likeai", interfaceType: `likeai-${mode}`, model, apiKey: "test-api-key" });
-                // The retired v1 writer stored the user channel ID in its receipt.
-                // Construct that legacy shape explicitly; the engine UI must not
-                // gain a browser-only submission bypass to satisfy this fixture.
+                expect(prepared.input?.config).toMatchObject({ channelId: channel.id, apiFormat: "likeai", interfaceType: `likeai-${mode}`, model, apiKey: "test-api-key" });
+                // Browser receipts retain their own channel identity so refresh
+                // can find the original provider credentials without an engine.
                 const legacyRequest = (value: typeof prepared) => ({ ...value, input: { ...value.input, config: { ...value.input!.config, channelId: channel.id } } });
                 const f = fixture();
                 const accepted = await f.service.create(legacyRequest(prepared));
