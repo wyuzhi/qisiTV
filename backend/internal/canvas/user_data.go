@@ -43,6 +43,15 @@ func canvasNodeCount(payload string) int {
 	return len(document.Nodes)
 }
 
+func rawJSONSliceCount(raw json.RawMessage) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var items []json.RawMessage
+	_ = json.Unmarshal(raw, &items)
+	return len(items)
+}
+
 type UserDataSnapshot struct {
 	Assets   []json.RawMessage `json:"assets"`
 	Projects []json.RawMessage `json:"projects"`
@@ -143,26 +152,37 @@ func (s *Service) upsertUserCanvasProjectWithHistory(userID string, raw json.Raw
 }
 
 func (s *Service) upsertUserCanvasProjectWithAssets(userID string, raw json.RawMessage, candidateAssets []model.Asset, reason string) (UserDataSummary, error) {
+	summary, _, err := s.upsertUserCanvasProjectAndPayload(userID, raw, candidateAssets, reason, false)
+	return summary, err
+}
+
+func (s *Service) upsertUserCanvasProjectAndPayload(userID string, raw json.RawMessage, candidateAssets []model.Asset, reason string, includePayload bool) (UserDataSummary, json.RawMessage, error) {
 	var version struct {
 		Revision *int64 `json:"revision"`
 	}
 	if err := json.Unmarshal(raw, &version); err != nil {
-		return UserDataSummary{}, kernel.BadAuthRequest("画布版本格式错误")
+		return UserDataSummary{}, nil, kernel.BadAuthRequest("画布版本格式错误")
 	}
 	if version.Revision == nil {
-		return UserDataSummary{}, kernel.NewAppError(http.StatusPreconditionRequired, "缺少画布版本，请保留本地草稿后重新加载画布")
+		return UserDataSummary{}, nil, kernel.NewAppError(http.StatusPreconditionRequired, "缺少画布版本，请保留本地草稿后重新加载画布")
 	}
 	if *version.Revision < 0 || *version.Revision >= 9007199254740991 {
-		return UserDataSummary{}, kernel.BadAuthRequest("画布版本无效")
+		return UserDataSummary{}, nil, kernel.BadAuthRequest("画布版本无效")
 	}
 	project, err := canvasProjectFromJSON(userID, raw)
 	if err != nil {
-		return UserDataSummary{}, err
+		return UserDataSummary{}, nil, err
 	}
 	var audit CanvasSaveAudit
+	var payload map[string]json.RawMessage
+	var afterPayload json.RawMessage
 	createdAssets := 0
 	err = s.host.WithStorageLock(func() error {
-		if err := s.validateCanvasMediaAssetsWithCandidates(userID, raw, candidateAssets); err != nil {
+		existing, existingErr := s.repo.CanvasProjectForUser(userID, project.ID)
+		if existingErr != nil && !errors.Is(existingErr, gorm.ErrRecordNotFound) {
+			return existingErr
+		}
+		if err := s.validateCanvasMediaAssetsWithBaseline(userID, raw, existing, candidateAssets); err != nil {
 			return err
 		}
 		if len(candidateAssets) > 0 {
@@ -175,10 +195,6 @@ func (s *Service) upsertUserCanvasProjectWithAssets(userID string, raw json.RawM
 		if err := s.requireCanvasLibraryFolder(userID, project.LibraryFolderID); err != nil {
 			return err
 		}
-		existing, existingErr := s.repo.CanvasProjectForUser(userID, project.ID)
-		if existingErr != nil && !errors.Is(existingErr, gorm.ErrRecordNotFound) {
-			return existingErr
-		}
 		existingBytes := int64(0)
 		project.Revision = *version.Revision
 		project.UpdatedAt = time.Now().UTC()
@@ -189,15 +205,15 @@ func (s *Service) upsertUserCanvasProjectWithAssets(userID string, raw json.RawM
 		if (existing == nil && project.Revision != 0) || (existing != nil && project.Revision != existing.Revision) {
 			return canvasRevisionConflict()
 		}
-		var payload map[string]json.RawMessage
+		payload = nil
 		if err := json.Unmarshal(raw, &payload); err != nil {
 			return err
 		}
 		delete(payload, "revision")
 		delete(payload, "remoteContentHash")
 		payload["viewport"] = json.RawMessage(`{"x":0,"y":0,"k":1}`)
+		var previous map[string]json.RawMessage
 		if existing != nil {
-			var previous map[string]json.RawMessage
 			if json.Unmarshal([]byte(existing.PayloadJSON), &previous) == nil && previous["viewport"] != nil {
 				payload["viewport"] = previous["viewport"]
 			}
@@ -212,7 +228,12 @@ func (s *Service) upsertUserCanvasProjectWithAssets(userID string, raw json.RawM
 		if err := s.host.StructuredQuota(userID, "canvas", errors.Is(existingErr, gorm.ErrRecordNotFound), int64(len(cleaned))-existingBytes); err != nil {
 			return err
 		}
-		return s.repo.Transaction(func(tx *repository.Repository) error {
+		nodesAfter := rawJSONSliceCount(payload["nodes"])
+		nodesBefore := 0
+		if existing != nil {
+			nodesBefore = rawJSONSliceCount(previous["nodes"])
+		}
+		if err := s.repo.Transaction(func(tx *repository.Repository) error {
 			if len(candidateAssets) > 0 {
 				if _, err := s.Library().WithRepository(tx).PersistPreparedAssets(userID, candidateAssets); err != nil {
 					return err
@@ -230,23 +251,37 @@ func (s *Service) upsertUserCanvasProjectWithAssets(userID string, raw json.RawM
 				}
 				return err
 			}
-			audit.NodesAfter = canvasNodeCount(project.PayloadJSON)
-			if existing != nil {
-				audit.NodesBefore = canvasNodeCount(existing.PayloadJSON)
-			}
+			audit.NodesAfter = nodesAfter
+			audit.NodesBefore = nodesBefore
 			if existingErr != nil || existing.PayloadJSON != project.PayloadJSON || existing.Title != project.Title {
 				s.host.RecordActivity(userID, "canvas", 1)
 			}
 			return nil
-		})
+		}); err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
-		return UserDataSummary{}, err
+		return UserDataSummary{}, nil, err
+	}
+	if includePayload {
+		for key, value := range map[string]any{"id": project.ID, "title": project.Title, "projectId": project.ProjectID, "folderId": project.LibraryFolderID, "revision": project.Revision, "createdAt": project.CreatedAt, "updatedAt": project.UpdatedAt} {
+			encoded, err := json.Marshal(value)
+			if err != nil {
+				return UserDataSummary{}, nil, err
+			}
+			payload[key] = encoded
+		}
+		afterPayload, err = json.Marshal(payload)
+		if err != nil {
+			return UserDataSummary{}, nil, err
+		}
 	}
 	if createdAssets > 0 {
 		s.host.RecordActivity(userID, "asset", createdAssets)
 	}
-	return UserDataSummary{ID: project.ID, Title: project.Title, CreatedAt: project.CreatedAt, UpdatedAt: project.UpdatedAt, Revision: project.Revision, SaveAudit: &audit}, nil
+	return UserDataSummary{ID: project.ID, Title: project.Title, CreatedAt: project.CreatedAt, UpdatedAt: project.UpdatedAt, Revision: project.Revision, SaveAudit: &audit}, afterPayload, nil
 }
 
 func (s *Service) DeleteUserCanvasProject(userID string, id string) error {
@@ -299,7 +334,7 @@ func canvasProjectFromJSON(userID string, raw json.RawMessage) (model.CanvasProj
 }
 
 func ValidateSyncedPayload(raw json.RawMessage, label string) error {
-	return asset.ValidateSyncedPayload(raw, label)
+	return asset.ValidateSyncedPayloadWithLimit(raw, label, 16)
 }
 
 func ContainsInlineMediaDataURL(value interface{}) bool {

@@ -150,8 +150,16 @@ function retryAfterMilliseconds(headers: unknown) {
 
 export type HttpRequestConfig = Omit<AxiosRequestConfig, "method" | "url" | "data" | "baseURL">;
 
+const HEAVY_CANVAS_DOCUMENT_TIMEOUT_MS = 20_000;
+
+function isHeavyCanvasDocumentWrite(method: string, url: string) {
+    if (method === "get" || method === "delete") return false;
+    return url === "/ops/canvas.document.commit" || /^\/canvas-projects\/[^/?#]+$/.test(url);
+}
+
 function send<T>(method: string, url: string, data?: unknown, config?: HttpRequestConfig) {
-    return request<T>(apiClient.request<BackendEnvelope<T>>({ method, url, data, ...config }));
+    const timeout = config?.timeout ?? (isHeavyCanvasDocumentWrite(method, url) ? HEAVY_CANVAS_DOCUMENT_TIMEOUT_MS : undefined);
+    return request<T>(apiClient.request<BackendEnvelope<T>>({ method, url, data, ...(timeout !== undefined ? { timeout } : {}), ...config }));
 }
 
 /**

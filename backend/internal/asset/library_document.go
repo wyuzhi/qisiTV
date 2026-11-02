@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -276,9 +277,21 @@ func requireJSONObjectFieldPresent(object map[string]json.RawMessage, key string
 	return err
 }
 
+var inlineMediaDataURLPrefixes = [...]string{"data:image/", "data:video/", "data:audio/"}
+
 func ValidateSyncedPayload(raw json.RawMessage, label string) error {
-	if len(raw) > 4<<20 {
-		return kernel.BadAuthRequest(label + "数据超过 4MB，请先把媒体文件保存到资源存储")
+	return ValidateSyncedPayloadWithLimit(raw, label, 4)
+}
+
+func ValidateSyncedPayloadWithLimit(raw json.RawMessage, label string, maxMB int) error {
+	if maxMB <= 0 {
+		maxMB = 4
+	}
+	if len(raw) > maxMB<<20 {
+		return kernel.BadAuthRequest(label + "数据超过 " + strconv.Itoa(maxMB) + "MB，请先把媒体文件保存到资源存储")
+	}
+	if !mayContainInlineMediaDataURL(raw) {
+		return nil
 	}
 	var payload interface{}
 	if err := json.Unmarshal(raw, &payload); err == nil && ContainsInlineMediaDataURL(payload) {
@@ -287,11 +300,59 @@ func ValidateSyncedPayload(raw json.RawMessage, label string) error {
 	return nil
 }
 
+func mayContainInlineMediaDataURL(raw []byte) bool {
+	if bytes.Contains(raw, []byte(`\u`)) || bytes.Contains(raw, []byte(`\U`)) {
+		return true
+	}
+	for _, prefix := range inlineMediaDataURLPrefixes {
+		if containsASCIIFold(raw, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsASCIIFold(haystack []byte, needle string) bool {
+	n := len(needle)
+	if n == 0 || len(haystack) < n {
+		return false
+	}
+	first := needle[0]
+	firstUpper := first - ('a' - 'A')
+	limit := len(haystack) - n
+	for i := 0; i <= limit; i++ {
+		b := haystack[i]
+		if b != first && b != firstUpper {
+			continue
+		}
+		match := true
+		for j := 1; j < n; j++ {
+			hb := haystack[i+j]
+			if hb >= 'A' && hb <= 'Z' {
+				hb += 'a' - 'A'
+			}
+			if hb != needle[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
 func ContainsInlineMediaDataURL(value interface{}) bool {
 	switch item := value.(type) {
 	case string:
 		text := strings.ToLower(strings.TrimSpace(item))
-		return strings.HasPrefix(text, "data:image/") || strings.HasPrefix(text, "data:video/") || strings.HasPrefix(text, "data:audio/")
+		for _, prefix := range inlineMediaDataURLPrefixes {
+			if strings.HasPrefix(text, prefix) {
+				return true
+			}
+		}
+		return false
 	case []interface{}:
 		for _, child := range item {
 			if ContainsInlineMediaDataURL(child) {

@@ -94,8 +94,31 @@ export function canvasImagePendingResultMessage(node: CanvasNodeData | undefined
     return missing?.metadata?.errorDetails || node?.metadata?.errorDetails || "生成结果已保留，请点击「继续取回」";
 }
 
+const TRANSIENT_POLL_TIMESTAMP_KEYS = new Set(["taskUpdatedAt", "taskDurationMs"]);
+
+function isSameGenerationTaskNodeMetadata(prev: CanvasNodeMetadata | undefined, next: CanvasNodeMetadata): boolean {
+    if (!prev) return false;
+    const inFlightSameStatus =
+        prev.taskId === next.taskId &&
+        prev.taskStatus === next.taskStatus &&
+        (next.taskStatus === "queued" || next.taskStatus === "running" || next.taskStatus === "submitting");
+    const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
+    for (const key of keys) {
+        if (inFlightSameStatus && TRANSIENT_POLL_TIMESTAMP_KEYS.has(key)) continue;
+        const a = prev[key as keyof CanvasNodeMetadata];
+        const b = next[key as keyof CanvasNodeMetadata];
+        if (a === b) continue;
+        if (a !== undefined && b !== undefined && typeof a === "object" && typeof b === "object" && JSON.stringify(a) === JSON.stringify(b)) {
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+
 export function canvasGenerationTaskNodes(nodes: CanvasNodeData[], targetNodeId: string, task: GenerationTask): CanvasNodeData[] {
-    return nodes.map((node) => {
+    let changed = false;
+    const mapped = nodes.map((node) => {
         const failed = task.status === "failed" || task.status === "cancelled";
         if (node.id !== targetNodeId && !(failed && node.metadata?.taskId === task.id)) return node;
         const outputIndex = node.metadata?.taskOutputIndex ?? 0;
@@ -119,32 +142,36 @@ export function canvasGenerationTaskNodes(nodes: CanvasNodeData[], targetNodeId:
             : failed
               ? canvasTaskFailureMetadata(task, node.metadata)
               : undefined;
+        const nextMetadata: CanvasNodeMetadata = {
+            ...node.metadata,
+            ...generationTaskMetadata(task),
+            status: failed || paused || retainRecovery ? "error" : hasCompletedContent ? "success" : "loading",
+            ...(failure || (retainRecovery
+                ? {
+                      taskOutcome: targetUnavailable
+                          ? ({ phase: "failed", regenerate: "blocked", reason: "result_target_unavailable" } as const)
+                          : ({ phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" } as const),
+                      generationErrorCode: node.metadata?.generationErrorCode,
+                      errorDetails: node.metadata?.errorDetails || (targetUnavailable ? explainGenerationError({ code: "result_target_unavailable" }).message : "生成结果已保留，请点击「继续取回」"),
+                  }
+                : {
+                      ...(hasCompletedContent && (!task.outcome || task.outcome.phase === "running" || task.outcome.phase === "fetching")
+                          ? { taskOutcome: { phase: "ready", regenerate: "allowed", reason: "result_ready" } as const }
+                          : {}),
+                      errorDetails: undefined,
+                      generationErrorCode: undefined,
+                      generationErrorSummary: undefined,
+                      generationProviderCode: undefined,
+                      failedPromptFingerprint: undefined,
+                      failedInputFingerprint: undefined,
+                  })),
+        };
+        if (isSameGenerationTaskNodeMetadata(node.metadata, nextMetadata)) return node;
+        changed = true;
         return {
             ...node,
-            metadata: {
-                ...node.metadata,
-                ...generationTaskMetadata(task),
-                status: failed || paused || retainRecovery ? "error" : hasCompletedContent ? "success" : "loading",
-                ...(failure || (retainRecovery
-                    ? {
-                          taskOutcome: targetUnavailable
-                              ? ({ phase: "failed", regenerate: "blocked", reason: "result_target_unavailable" } as const)
-                              : ({ phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" } as const),
-                          generationErrorCode: node.metadata?.generationErrorCode,
-                          errorDetails: node.metadata?.errorDetails || (targetUnavailable ? explainGenerationError({ code: "result_target_unavailable" }).message : "生成结果已保留，请点击「继续取回」"),
-                      }
-                    : {
-                          ...(hasCompletedContent && (!task.outcome || task.outcome.phase === "running" || task.outcome.phase === "fetching")
-                              ? { taskOutcome: { phase: "ready", regenerate: "allowed", reason: "result_ready" } as const }
-                              : {}),
-                          errorDetails: undefined,
-                          generationErrorCode: undefined,
-                          generationErrorSummary: undefined,
-                          generationProviderCode: undefined,
-                          failedPromptFingerprint: undefined,
-                          failedInputFingerprint: undefined,
-                      })),
-            },
+            metadata: nextMetadata,
         };
     });
+    return changed ? mapped : nodes;
 }

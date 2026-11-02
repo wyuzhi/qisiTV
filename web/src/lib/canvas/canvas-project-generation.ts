@@ -6,7 +6,7 @@ import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { resourceIdFromStorageKey } from "@/services/api/resources";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
-import { isH3Model, h3VideoOperation, h3ResolvedReferenceOrder } from "@/lib/h3-video";
+import { isH3Model, isH3MaxModel, h3VideoOperation, h3ResolvedReferenceOrder } from "@/lib/h3-video";
 import { isSeedanceVideoConfig } from "@/lib/seedance-video";
 import { modelCapabilityConfigFor } from "@/lib/model-capabilities";
 import { resolveVideoOperation } from "@/lib/model-selection";
@@ -447,7 +447,7 @@ export function buildVideoGenerationMetadata(
           : resolveVideoEditOperation(node, context);
     // 工作流视频与非 H3 Max 的全模态参考生成不消费首尾帧/中间帧槽位，不再把历史帧选择当成硬约束或透传给后端。
     const workflowVideo = node?.type === CanvasNodeType.Config && (config?.taskWorkflowProvider === "runninghub" || isCanvasWorkflowProvider(metadata));
-    const h3Max = effectiveModel.split("::").at(-1) === "minimax-h3-max";
+    const h3Max = isH3MaxModel(effectiveModel);
     const ignoreFrameSelection = workflowVideo || videoEditOperation === "draft_to_final" || (videoEditOperation === "reference_to_video" && !h3Max);
     const startFrame = ignoreFrameSelection ? undefined : requireConnectedVideoFrame(metadata?.videoStartFrameNodeId, "首帧", referenceImageIds);
     const endFrame = ignoreFrameSelection ? undefined : requireConnectedVideoFrame(metadata?.videoEndFrameNodeId, "尾帧", referenceImageIds);

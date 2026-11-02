@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { rebaseCanvasDocumentThreeWay, settleInFlightGenerationOverlay } from "../src/lib/canvas/canvas-document-rebase";
+import { canvasGenerationTaskNodes } from "../src/pages/canvas/canvas-generation-failure";
+import type { GenerationTask } from "../src/services/api/task-center";
 import type { CanvasProject } from "../src/stores/canvas/use-canvas-store";
 import { CanvasNodeType, type CanvasNodeData } from "../src/types/canvas";
 
@@ -342,5 +344,119 @@ describe("rebaseCanvasDocumentThreeWay node timestamps", () => {
         });
         expect(result.conflict).toBe(true);
         expect(result.project.nodes.map((item) => item.title)).toEqual(["本地改过的标题"]);
+    });
+
+    test("node-level updatedAt differences and backend null-cleared bind fields do not cause false conflicts", () => {
+        const baseNode: CanvasNodeData = {
+            ...node("v1", "分镜视频", {
+                taskId: "task-1",
+                status: "loading",
+                taskStatus: "running",
+                taskStage: "generating",
+                errorDetails: "旧错误",
+            }),
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+        };
+        const localNode: CanvasNodeData = {
+            ...baseNode,
+            updatedAt: "2026-01-01T00:00:05.000Z",
+            metadata: {
+                ...baseNode.metadata,
+                taskProgress: 35,
+                taskUpdatedAt: "2026-01-01T00:00:05.000Z",
+            },
+        };
+        const remoteNode: CanvasNodeData = {
+            ...baseNode,
+            updatedAt: "2026-01-01T00:00:09.000Z",
+            metadata: {
+                taskId: "task-1",
+                status: "success",
+                taskStatus: "succeeded",
+                taskProgress: 100,
+                content: "/api/resources/res-v1/file",
+                storageKey: "resource:res-v1",
+                assetId: "asset-v1",
+                taskStage: null as unknown as undefined,
+                errorDetails: null as unknown as undefined,
+            },
+        };
+        const base = project([baseNode], 10);
+        const local = project([localNode], 10);
+        const remote = project([remoteNode], 11);
+        const settled = settleInFlightGenerationOverlay({ base, local, remote });
+        const rebased = rebaseCanvasDocumentThreeWay({ base, local: settled, remote });
+        expect(rebased.conflict).toBe(false);
+        expect(rebased.project.nodes[0]?.metadata?.status).toBe("success");
+        expect(rebased.project.nodes[0]?.metadata?.taskStage).toBeUndefined();
+        expect(rebased.project.nodes[0]?.metadata?.errorDetails).toBeUndefined();
+    });
+
+    test("same-task in-flight polling telemetry differences do not trigger rebase conflict", () => {
+        const baseNode = node("v1", "分镜视频", {
+            taskId: "task-running",
+            status: "loading",
+            taskStatus: "running",
+            taskProgress: 10,
+            taskStage: "queued",
+            taskUpdatedAt: "2026-01-01T00:00:01.000Z",
+        });
+        const localNode = {
+            ...baseNode,
+            updatedAt: "2026-01-01T00:00:04.000Z",
+            metadata: {
+                ...baseNode.metadata,
+                taskProgress: 45,
+                taskStage: "rendering",
+                taskUpdatedAt: "2026-01-01T00:00:04.000Z",
+            },
+        };
+        const remoteNode = {
+            ...baseNode,
+            updatedAt: "2026-01-01T00:00:02.000Z",
+            metadata: {
+                ...baseNode.metadata,
+                taskProgress: 20,
+                taskStage: "rendering",
+                taskUpdatedAt: "2026-01-01T00:00:02.000Z",
+            },
+        };
+        const rebased = rebaseCanvasDocumentThreeWay({
+            base: project([baseNode], 10),
+            local: project([localNode], 10),
+            remote: project([remoteNode], 11),
+        });
+        expect(rebased.conflict).toBe(false);
+        expect(rebased.project.nodes[0]?.metadata?.taskProgress).toBe(45);
+    });
+
+    test("canvasGenerationTaskNodes preserves array reference when running poll only changes updatedAt", () => {
+        const initialTask: GenerationTask = {
+            id: "task-poll-1",
+            type: "canvas_video",
+            status: "running",
+            stage: "generating",
+            progress: 30,
+            prompt: "镜头1",
+            attempts: 1,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:02.000Z",
+        };
+        const boundNodes = canvasGenerationTaskNodes([node("v1", "镜头1")], "v1", initialTask);
+        const pollTickNodes = canvasGenerationTaskNodes(boundNodes, "v1", {
+            ...initialTask,
+            updatedAt: "2026-01-01T00:00:04.000Z",
+            durationMs: 4000,
+        });
+        expect(pollTickNodes).toBe(boundNodes);
+
+        const progressedNodes = canvasGenerationTaskNodes(boundNodes, "v1", {
+            ...initialTask,
+            progress: 60,
+            updatedAt: "2026-01-01T00:00:06.000Z",
+        });
+        expect(progressedNodes).not.toBe(boundNodes);
+        expect(progressedNodes[0]?.metadata?.taskProgress).toBe(60);
     });
 });

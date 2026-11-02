@@ -25,7 +25,7 @@ import { videoSettingsConstraints } from "@/lib/video-settings-constraints";
 import { CanvasVideoPromptTools } from "./canvas-video-prompt-tools";
 import { CanvasH3Controls, CanvasH3UnsupportedFrames } from "./canvas-h3-controls";
 import { CanvasH3ReferenceOrder } from "./canvas-h3-reference-order";
-import { h3VideoOperation, isH3Model, isH3Style } from "@/lib/h3-video";
+import { h3VideoOperation, isH3MaxModel, isH3Model, isH3Style } from "@/lib/h3-video";
 import { CanvasPresetPicker, type CanvasPromptPreset } from "./canvas-preset-picker";
 import { CanvasPortraitTexturePopover } from "./canvas-portrait-texture-popover";
 import { CanvasPromptOptimizerDrawer } from "./canvas-prompt-optimizer-drawer";
@@ -144,7 +144,7 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
     const effectiveVideoOperation = mode === "video" && requirements.input
         ? (h3Model ? h3VideoOperation(config.model, requirements.input, node.metadata?.videoEditOperation) : resolveVideoOperation(requirements.input, node.metadata?.videoEditOperation))
         : undefined;
-    const referenceOnlyVideoMode = effectiveVideoOperation === "reference_to_video" && modelOptionName(config.model) !== "minimax-h3-max";
+    const referenceOnlyVideoMode = effectiveVideoOperation === "reference_to_video" && !isH3MaxModel(config.model);
     const videoReferenceInputs = useMemo(() => activeReferences.flatMap((reference) => reference.kind === "skill" ? [] : [{ nodeId: reference.nodeId, type: reference.kind, title: reference.title }]), [activeReferences]);
     const hasVideoPromptTools = mode === "video" && !simpleMode && (videoFrameOptions.length > 0 || (h3Model && videoReferenceInputs.some((input) => input.type !== "text")));
     const renderVideoPromptTools = () => (

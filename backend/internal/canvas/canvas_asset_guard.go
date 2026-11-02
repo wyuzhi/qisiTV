@@ -17,16 +17,42 @@ type MediaAssetReference = asset.CanvasMediaReference
 // owned by the same user. The client writes Assets before canvases, so rejecting
 // an incomplete pair prevents a durable Resource-only (ghost capacity) state.
 func (s *Service) ValidateCanvasMediaAssets(userID string, raw json.RawMessage) error {
-	return s.validateCanvasMediaAssetsWithCandidates(userID, raw, nil)
+	return s.validateCanvasMediaAssetsWithBaseline(userID, raw, nil, nil)
 }
 
 func (s *Service) validateCanvasMediaAssetsWithCandidates(userID string, raw json.RawMessage, candidates []model.Asset) error {
+	return s.validateCanvasMediaAssetsWithBaseline(userID, raw, nil, candidates)
+}
+
+func (s *Service) validateCanvasMediaAssetsWithBaseline(userID string, raw json.RawMessage, existing *model.CanvasProject, candidates []model.Asset) error {
 	references, err := MediaAssetReferences(raw)
 	if err != nil {
 		return kernel.BadAuthRequest("画布媒体数据格式错误")
 	}
 	if len(references) == 0 {
 		return nil
+	}
+	if existing != nil && len(candidates) == 0 && existing.PayloadJSON != "" {
+		if existingRefs, existingErr := MediaAssetReferences([]byte(existing.PayloadJSON)); existingErr == nil && len(existingRefs) > 0 {
+			baseline := make(map[MediaAssetReference]int, len(existingRefs))
+			for _, ref := range existingRefs {
+				if ref.AssetID != "" && ref.ResourceID != "" {
+					baseline[ref]++
+				}
+			}
+			filtered := make([]MediaAssetReference, 0, len(references))
+			for _, ref := range references {
+				if count := baseline[ref]; count > 0 {
+					baseline[ref] = count - 1
+					continue
+				}
+				filtered = append(filtered, ref)
+			}
+			references = filtered
+			if len(references) == 0 {
+				return nil
+			}
+		}
 	}
 
 	assetIDSet := make(map[string]struct{}, len(references))

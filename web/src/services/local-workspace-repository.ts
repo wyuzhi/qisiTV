@@ -10,10 +10,9 @@ import { CanvasJournalError, clearCanvasOperationJournal, clearCanvasPendingProj
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import { getActiveUserScope } from "@/lib/user-scope";
 import { sameCanvasDocument } from "@/lib/canvas/canvas-content";
-import { canvasUnconfirmedReason, canvasUnconfirmedDiagnostic, type CanvasUnconfirmedState } from "@/lib/canvas/canvas-unconfirmed-edits";
+import { canvasUnconfirmedReason, canvasUnconfirmedDiagnostic, revertUnchangedCanvasDocumentPatch, type CanvasDocumentPersistPatch, type CanvasUnconfirmedState } from "@/lib/canvas/canvas-unconfirmed-edits";
 import { rebaseCanvasDocumentThreeWay, settleInFlightGenerationOverlay } from "@/lib/canvas/canvas-document-rebase";
 import { traceCanvasGraph } from "@/lib/canvas/canvas-graph-trace";
-
 
 export { CanvasBackendSubmitPausedError } from "@/services/canvas-revision-conflict";
 
@@ -47,7 +46,6 @@ function incompleteCanvasProjection(id: string, scope: string, identity: string 
 
 type LocalCanvasContent = Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId">>;
 type CanvasSaveSummary = Pick<CanvasProject, "id" | "title" | "createdAt" | "updatedAt" | "revision">;
-type CanvasDocumentPersistPatch = Partial<Pick<CanvasProject, "nodes" | "connections" | "timeline" | "chatSessions" | "activeChatId" | "appearance" | "backgroundMode" | "showImageInfo" | "title" | "folderId" | "directorScenes">>;
 
 const backendSaveTails = new Map<string, Promise<void>>();
 const backendSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -666,53 +664,6 @@ function shouldKeepCanvasCommitIdentity(error: unknown) {
 
 export function syncLocalCanvasProjectToBackend(id: string): Promise<void> {
     return syncLocalCanvasProject(id);
-}
-
-function sameDocumentValue(left: unknown, right: unknown) {
-    return left === right || JSON.stringify(left) === JSON.stringify(right);
-}
-
-function revertUnchangedCanvasNodes(
-    previous: CanvasProject["nodes"],
-    attempted: CanvasProject["nodes"],
-    live: CanvasProject["nodes"],
-): CanvasProject["nodes"] {
-    if (sameDocumentValue(live, attempted)) return previous;
-    const previousById = new Map(previous.map((node) => [node.id, node]));
-    const attemptedById = new Map(attempted.map((node) => [node.id, node]));
-    const reverted: CanvasProject["nodes"] = [];
-    for (const node of live) {
-        const before = previousById.get(node.id);
-        const optimistic = attemptedById.get(node.id);
-        if (!before && optimistic) {
-            if (sameDocumentValue(node, optimistic)) continue;
-            reverted.push(node);
-            continue;
-        }
-        if (before && optimistic) {
-            reverted.push(sameDocumentValue(node, optimistic) ? before : node);
-            continue;
-        }
-        reverted.push(node);
-    }
-    return reverted;
-}
-
-function revertUnchangedCanvasDocumentPatch(current: CanvasProject, previous: CanvasProject, patch: CanvasDocumentPersistPatch): CanvasProject {
-    const next: CanvasProject = { ...current };
-    (Object.keys(patch) as Array<keyof CanvasDocumentPersistPatch>).forEach((key) => {
-        if (key === "nodes") {
-            if (!patch.nodes) return;
-            next.nodes = revertUnchangedCanvasNodes(previous.nodes, patch.nodes, current.nodes);
-            return;
-        }
-        const attempted = patch[key];
-        if (attempted === undefined) return;
-        if (sameDocumentValue(current[key], attempted)) {
-            (next as Record<string, unknown>)[key] = previous[key];
-        }
-    });
-    return next;
 }
 
 /**

@@ -497,7 +497,7 @@ func applyGenerationBindMetadata(metadata map[string]any, patch TaskOutputBind) 
 	}
 	metadata["taskStatus"] = "succeeded"
 	metadata["taskProgress"] = 100
-	metadata["taskStage"] = nil
+	delete(metadata, "taskStage")
 	metadata["taskOutcome"] = map[string]any{
 		"phase":      "ready",
 		"regenerate": "allowed",
@@ -506,11 +506,11 @@ func applyGenerationBindMetadata(metadata map[string]any, patch TaskOutputBind) 
 	delete(metadata, "taskOutcomeSource")
 	delete(metadata, "generationFailure")
 	delete(metadata, "generationPreflightError")
-	metadata["errorDetails"] = nil
-	metadata["generationErrorCode"] = nil
-	metadata["resourceReloadAvailable"] = nil
-	metadata["failedPromptFingerprint"] = nil
-	metadata["failedInputFingerprint"] = nil
+	delete(metadata, "errorDetails")
+	delete(metadata, "generationErrorCode")
+	delete(metadata, "resourceReloadAvailable")
+	delete(metadata, "failedPromptFingerprint")
+	delete(metadata, "failedInputFingerprint")
 	if strings.TrimSpace(patch.EffectKey) != "" {
 		metadata["generationEffectKeys"] = appendEffectKey(metadata["generationEffectKeys"], patch.EffectKey)
 	}

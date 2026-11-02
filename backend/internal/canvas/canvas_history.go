@@ -26,12 +26,30 @@ func SaveDocumentWithHistory(repo *repository.Repository, before *model.CanvasPr
 }
 
 func SaveDocumentWithHistoryAndAssets(repo *repository.Repository, before *model.CanvasProject, after *model.CanvasProject, items []model.Asset, reason string) error {
-	snapshot, resourceIDs, err := buildCanvasSnapshot(before, *after, reason)
-	if err != nil {
-		return err
+	cutoff := after.UpdatedAt.Add(-canvasHistoryInterval)
+	force := reason == "before_restore"
+	var snapshot *model.CanvasSnapshot
+	var resourceIDs []string
+	if before != nil {
+		capture, err := repo.ShouldCaptureCanvasSnapshot(after.ID, before.Revision, cutoff, force)
+		if err != nil {
+			return err
+		}
+		if capture {
+			snapshot, resourceIDs, err = buildCanvasSnapshot(before, *after, reason)
+			if err != nil {
+				return err
+			}
+			if !force && len(resourceIDs) > 0 {
+				resourceIDs, err = repo.ReadyResourceIDs(resourceIDs)
+				if err != nil {
+					return err
+				}
+			}
+		}
 	}
 	var restoredIDs []string
-	if reason == "before_restore" {
+	if force {
 		refs := map[string]struct{}{}
 		if err := assets.CollectOwnedDocumentReferences(after.PayloadJSON, refs); err != nil {
 			return err
@@ -39,9 +57,9 @@ func SaveDocumentWithHistoryAndAssets(repo *repository.Repository, before *model
 		restoredIDs = assets.SortedIDs(refs)
 	}
 	if len(items) > 0 {
-		return repo.SaveAssetsAndCanvasWithSnapshot(items, after, snapshot, resourceIDs, restoredIDs, after.UpdatedAt.Add(-canvasHistoryInterval), canvasHistoryLimit, reason == "before_restore")
+		return repo.SaveAssetsAndCanvasWithSnapshot(items, after, snapshot, resourceIDs, restoredIDs, cutoff, canvasHistoryLimit, force)
 	}
-	return repo.SaveCanvasWithSnapshot(after, snapshot, resourceIDs, restoredIDs, after.UpdatedAt.Add(-canvasHistoryInterval), canvasHistoryLimit, reason == "before_restore")
+	return repo.SaveCanvasWithSnapshot(after, snapshot, resourceIDs, restoredIDs, cutoff, canvasHistoryLimit, force)
 }
 
 func canvasRevisionConflict() error {

@@ -46,7 +46,7 @@ func RegisterCreationRoutes(r *gin.RouterGroup, svc creationRouteService) {
 				failService(c, err)
 				return
 			}
-			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2<<20)
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, agentOpsMaxBody)
 			var req creation.Command
 			if err = c.ShouldBindJSON(&req); err != nil {
 				fail(c, http.StatusBadRequest, err)

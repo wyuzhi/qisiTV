@@ -20,7 +20,7 @@ import (
 )
 
 // agentOpsMaxBody 与画布 PUT 上限对齐：文档提交会带上整份画布，1MB 不够。
-const agentOpsMaxBody = 5 << 20
+const agentOpsMaxBody = 20 << 20
 
 type agentOpsService interface {
 	operations.DomainBinder
@@ -259,7 +259,7 @@ func RegisterAgentOpsRoutes(r gin.IRouter, svc agentOpsService, store *agentops.
 			return
 		}
 		if int64(len(body)) > agentOpsMaxBody {
-			fail(c, http.StatusRequestEntityTooLarge, app.BadAuthRequest("请求体超过 5MB 限制"))
+			fail(c, http.StatusRequestEntityTooLarge, app.BadAuthRequest("请求体超过 20MB 限制"))
 			return
 		}
 		// 只读能力只由客户端身份（登记模式）决定：请求体不接受 readOnly，
