@@ -736,7 +736,7 @@ function ResponseFormatField({ label, value, disabled, selectable, onChange }: {
             <div className="min-w-0">
                 <div className="break-all text-xs font-medium">{label}</div>
                 <div className="mt-0.5 text-[var(--fs-tiny)] leading-5 text-foreground/45">
-                    {showSelect ? "b64_json 由渠道内联返回；url 由渠道返回图片链接，BeefTV 下载后存回画布" : "发送 b64_json 响应格式"}
+                    {showSelect ? "b64_json 由渠道内联返回；url 由渠道返回图片链接，qisiTV 下载后存回画布" : "发送 b64_json 响应格式"}
                 </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">

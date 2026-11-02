@@ -178,7 +178,7 @@ func TestRenderFFmpegShortVideoHoldsLastFrame(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	dir := t.TempDir()
-	run := func(args ...string) []byte {
+	run := func(t *testing.T, args ...string) []byte {
 		t.Helper()
 		cmd := exec.CommandContext(ctx, ffmpeg, args...)
 		cmd.Dir = dir
@@ -189,33 +189,37 @@ func TestRenderFFmpegShortVideoHoldsLastFrame(t *testing.T) {
 		return out
 	}
 	for _, color := range []string{"red", "blue"} {
-		run("-v", "error", "-y", "-f", "lavfi", "-i", "color=c="+color+":s=320x180:r=30:d=1", "-c:v", "libx264", color+".mp4")
+		run(t, "-v", "error", "-y", "-f", "lavfi", "-i", "color=c="+color+":s=320x180:r=30:d=1", "-c:v", "libx264", color+".mp4")
 	}
-	plan := Plan{
-		Output:     Output{Width: DefaultWidth, Height: DefaultHeight, FPS: DefaultFPS, SampleRate: DefaultSampleRate},
-		DurationMs: 3000,
-		Segments: []Segment{
-			{Kind: KindVideo, SourceID: "red", DurationMs: 2000, Volume: 1},
-			{Kind: KindVideo, SourceID: "blue", DurationMs: 1000, Volume: 1},
-		},
-	}
-	run(BuildFFmpegArgs(plan, map[string]string{"red": "red.mp4", "blue": "blue.mp4"}, "output.mp4")...)
-	cmd := exec.CommandContext(ctx, ffmpeg, "-v", "error", "-i", filepath.Join(dir, "output.mp4"), "-an", "-vf", "scale=1:1", "-pix_fmt", "rgb24", "-f", "rawvideo", "-")
-	pixels, err := cmd.Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pixels) != 90*3 {
-		t.Fatalf("short source changed plan duration: %d frames", len(pixels)/3)
-	}
-	for i := 0; i < 90; i++ {
-		r, b := pixels[i*3], pixels[i*3+2]
-		if i < 60 && (r < 180 || b > 40) {
-			t.Fatalf("red last frame not held at frame %d", i)
-		}
-		if i >= 60 && (b < 180 || r > 40) {
-			t.Fatalf("blue boundary shifted at frame %d", i)
-		}
+	for _, fps := range []int{24, 30, 60} {
+		t.Run(fmt.Sprintf("%dfps", fps), func(t *testing.T) {
+			plan := Plan{
+				Output:     Output{Width: DefaultWidth, Height: DefaultHeight, FPS: fps, SampleRate: DefaultSampleRate},
+				DurationMs: 3000,
+				Segments: []Segment{
+					{Kind: KindVideo, SourceID: "red", DurationMs: 2000, Volume: 1},
+					{Kind: KindVideo, SourceID: "blue", DurationMs: 1000, Volume: 1},
+				},
+			}
+			run(t, BuildFFmpegArgs(plan, map[string]string{"red": "red.mp4", "blue": "blue.mp4"}, "output.mp4")...)
+			cmd := exec.CommandContext(ctx, ffmpeg, "-v", "error", "-i", filepath.Join(dir, "output.mp4"), "-an", "-vf", "scale=1:1", "-pix_fmt", "rgb24", "-f", "rawvideo", "-")
+			pixels, err := cmd.Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(pixels) != 3*fps*3 {
+				t.Fatalf("short source changed plan duration: %d frames, want %d", len(pixels)/3, 3*fps)
+			}
+			for i := 0; i < 3*fps; i++ {
+				r, b := pixels[i*3], pixels[i*3+2]
+				if i < 2*fps && (r < 180 || b > 40) {
+					t.Fatalf("red last frame not held at frame %d", i)
+				}
+				if i >= 2*fps && (b < 180 || r > 40) {
+					t.Fatalf("blue boundary shifted at frame %d", i)
+				}
+			}
+		})
 	}
 }
 

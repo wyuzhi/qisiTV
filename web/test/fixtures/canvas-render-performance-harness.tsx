@@ -8,7 +8,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasNodeType, type CanvasNodeData, type ViewportTransform } from "@/types/canvas";
 import "antd/dist/reset.css";
 import "@/styles/globals.css";
-import "@/styles/beeftv-local-overrides.css";
+import "@/styles/qisitv-local-overrides.css";
 
 const noop = () => {};
 const selected = new Set<string>();

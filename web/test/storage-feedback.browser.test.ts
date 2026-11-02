@@ -94,7 +94,7 @@ beforeAll(async () => {
     const script = await build.outputs.find(output => output.path.endsWith(".js"))!.text();
     const stylesheet = import.meta.dir + "/../src/styles/globals.css";
     const css = (await postcss([tailwindcss({ base: import.meta.dir + "/.." })]).process(await Bun.file(stylesheet).text(), { from: stylesheet })).css
-        + (await Promise.all(["beeftv-local-overrides.css", "workspace-product.css"].map(file => Bun.file(import.meta.dir + "/../src/styles/" + file).text()))).join("\n")
+        + (await Promise.all(["qisitv-local-overrides.css", "workspace-product.css"].map(file => Bun.file(import.meta.dir + "/../src/styles/" + file).text()))).join("\n")
         + (await Promise.all(build.outputs.filter(output => output.path.endsWith(".css")).map(output => output.text()))).join("\n");
     server = Bun.serve({
         port: 0,

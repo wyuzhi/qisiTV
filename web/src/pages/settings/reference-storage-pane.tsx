@@ -4,7 +4,7 @@ import { getDesktopAppBinding, type ReferenceStorageConfig } from "@/services/de
 
 const fields = [
     ["endpoint", "S3 端点", "例如 https://cos.ap-guangzhou.myqcloud.com 或 R2 S3 地址"],
-    ["bucket", "存储桶名称", "例如 beeftv-media（腾讯云含 -APPID）"],
+    ["bucket", "存储桶名称", "例如 qisitv-media（腾讯云含 -APPID）"],
     ["region", "区域", "R2 填 auto；COS 如 ap-guangzhou；OSS 如 cn-hangzhou"],
     ["accessKeyId", "Access Key ID", ""],
     ["publicBaseURL", "存储桶公网地址", "例如 https://media.example.com 或存储桶公网默认域名"],

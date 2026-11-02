@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { chromium, type Browser, type Page } from "playwright";
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
@@ -14,14 +15,19 @@ beforeAll(async () => {
     if (!build.success) throw new Error(build.logs.join("\n"));
     const script = await build.outputs[0]!.text();
     server = Bun.serve({ port: 0, fetch: request => new URL(request.url).pathname === "/harness.js" ? new Response(script, { headers: { "Content-Type": "application/javascript" } })
-        : new Response('<!doctype html><meta charset="utf-8"><div id="root"></div><script src="/harness.js"></script>', { headers: { "Content-Type": "text/html; charset=utf-8" } }) });
-    browser = await chromium.launch({ headless: true });
+        : new Response('<!doctype html><meta charset="utf-8"><div id="root"></div><script type="module" src="/harness.js"></script>', { headers: { "Content-Type": "text/html; charset=utf-8" } }) });
+    const executablePath = process.env.CHROME_PATH && existsSync(process.env.CHROME_PATH) ? process.env.CHROME_PATH : undefined;
+    browser = await chromium.launch({ executablePath, headless: true });
 });
 afterAll(async () => { await browser?.close(); server?.stop(true); });
 async function open(): Promise<Page> {
     const page = await browser.newPage();
+    const errors: string[] = [];
+    page.on("pageerror", error => errors.push(error.message));
     await page.goto(server.url.toString());
-    await page.waitForFunction(() => (window as any).__documentTest?.snapshot?.().nodes.length === 1);
+    try {
+        await page.waitForFunction(() => (window as any).__documentTest?.snapshot?.().nodes.length === 1, undefined, { timeout: 3000 });
+    } catch (error) { throw new Error(`${error}\n${errors.join("\n")}`); }
     return page;
 }
 test("document media queue keeps both patches for its current node", async () => {

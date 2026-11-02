@@ -45,7 +45,7 @@ beforeAll(async () => {
         }
         return ok({});
     } });
-    browser = await chromium.launch({ headless: true, executablePath: ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium"].find(existsSync) });
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME_PATH || ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium"].find(existsSync) });
 });
 afterAll(async () => { await browser?.close(); server?.stop(true); if (scratch) rmSync(scratch, { recursive: true, force: true }); });
 

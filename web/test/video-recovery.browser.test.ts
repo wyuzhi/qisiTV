@@ -154,7 +154,7 @@ for (const change of ["replace node task", "delete node", "switch project"]) {
         await page.getByRole("button", { name: change, exact: true }).evaluate((button: HTMLButtonElement) => button.click());
         await page.waitForFunction(() => JSON.parse(document.getElementById("snapshot")!.textContent!).retrieving === null);
         expect(requests.filter((request) => request === "POST /api/ops/canvas.task.bind")).toHaveLength(0);
-        expect(requests.filter((request) => request.startsWith("POST /api/tasks"))).toEqual(["POST /api/tasks/original/query-provider"]);
+        expect(requests.filter((request) => request.startsWith("POST /api/tasks"))).toEqual(["POST /api/tasks/original/recover"]);
         const snapshot = JSON.parse(await page.locator("#snapshot").innerText());
         if (change === "replace node task") expect(snapshot.nodes[0].metadata.taskId).toBe("replacement");
         if (change === "delete node") expect(snapshot.nodes).toEqual([]);
@@ -172,7 +172,7 @@ test("retrieval preserves edits made while the original provider query is pendin
     expect(node.position).toEqual({ x: 900, y: 40 });
     expect(canonicalCanvas?.nodes[0].title).toBe("edited while retrieving");
     expect(canonicalCanvas?.nodes[0].position).toEqual({ x: 900, y: 40 });
-    expect(requests.filter((request) => request.startsWith("POST /api/tasks"))).toEqual(["POST /api/tasks/original/query-provider"]);
+    expect(requests.filter((request) => request.startsWith("POST /api/tasks"))).toEqual(["POST /api/tasks/original/recover"]);
 }, 15_000);
 
 test("a native binding failure retries the same receipt without creating another generation", async () => {
@@ -184,6 +184,6 @@ test("a native binding failure retries the same receipt without creating another
     await page.getByRole("button", { name: "取回结果", exact: true }).click();
     await page.waitForFunction(() => JSON.parse(document.getElementById("snapshot")!.textContent!).nodes[0]?.metadata?.status === "success");
     expect(requests.filter((request) => request === "POST /api/ops/canvas.task.bind")).toHaveLength(2);
-    expect(requests.filter((request) => request.startsWith("POST /api/tasks"))).toEqual(Array(2).fill("POST /api/tasks/original/query-provider"));
+    expect(requests.filter((request) => request.startsWith("POST /api/tasks"))).toEqual(Array(2).fill("POST /api/tasks/original/recover"));
     expect(canonicalCanvas?.nodes[0].metadata.taskId).toBe("original");
 }, 15_000);

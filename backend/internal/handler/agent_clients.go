@@ -161,12 +161,22 @@ func bundledCLIPath() (string, bool) {
 	if err != nil {
 		return "", false
 	}
+	return bundledCLIPathForExecutable(executable, name)
+}
+
+func bundledCLIPathForExecutable(executable, name string) (string, bool) {
 	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
 		executable = resolved
 	}
+	self, err := os.Stat(executable)
+	if err != nil {
+		return "", false
+	}
 	for _, candidate := range []string{filepath.Join(filepath.Dir(executable), "cli", name), filepath.Join(filepath.Dir(executable), name)} {
 		info, err := os.Stat(candidate)
-		if err == nil && info.Mode().IsRegular() && info.Size() > 0 && (runtime.GOOS == "windows" || info.Mode().Perm()&0o111 != 0) && candidate != executable {
+		// Case-insensitive names and symlink/hardlink aliases can name the host
+		// itself. It cannot serve as the external stdio MCP CLI.
+		if err == nil && info.Mode().IsRegular() && info.Size() > 0 && (runtime.GOOS == "windows" || info.Mode().Perm()&0o111 != 0) && !os.SameFile(info, self) {
 			return candidate, true
 		}
 	}

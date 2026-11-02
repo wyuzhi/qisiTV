@@ -1,6 +1,7 @@
 import referenceVideoErrors from "./fixtures/reference-video-errors.json";
 import { describe, expect, test } from "bun:test";
 import { ApiError } from "../src/services/api/request";
+import { sanitizeProviderText } from "../src/lib/generation-error-classifiers";
 
 test("reference transport admission identifies blocked inputs and survives persisted display", () => {
     const message = "当前渠道需要在线素材链接：参考图片 2、参考视频 1无法直接读取。请替换为可访问的 HTTPS 链接，或切换支持本地素材的渠道";
@@ -262,6 +263,17 @@ describe("generation error classification", () => {
     test("spaced credentials and arbitrary prompt text are never echoed", () => {
         for (const suffix of ["Authorization: Bearer PRIVATE VALUE", "Cookie: session=PRIVATE", "api_key = PRIVATE", "prompt = PRIVATE WORDS"]) {
             expect(generationErrorMessage(`操作失败 ${suffix}`)).not.toContain("PRIVATE");
+        }
+    });
+
+    test("credential tails are removed after diagnostic prose, including multiline values", () => {
+        const labels = ["Authorization", "Proxy-Authorization", "Cookie", "Set-Cookie", "api_key", "AWS access key id", "client secret", "password", '"refresh_token"'];
+        for (const prefix of ["", "操作失败 ", "provider failed: "]) {
+            for (const label of labels) {
+                for (const separator of [": ", " = ", "："]) {
+                    expect(sanitizeProviderText(`${prefix}${label}${separator}PRIVATE VALUE\nPRIVATE CONTINUATION`)).toBe(prefix.trim());
+                }
+            }
         }
     });
 

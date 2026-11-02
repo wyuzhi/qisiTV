@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
-import { join, relative } from "node:path";
+import { createRequire } from "node:module";
+import { basename, dirname, join, relative } from "node:path";
 
 const root = join(import.meta.dir, "..");
 const testFilePattern = /\.test\.[cm]?[jt]sx?$/;
@@ -8,7 +9,35 @@ const browserGlobalName = /\b(?:window|document|navigator)\b/;
 const failures = [];
 const systemChrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const testEnv = { ...process.env };
-if (!testEnv.CHROME_PATH && existsSync(systemChrome)) testEnv.CHROME_PATH = systemChrome;
+if (!testEnv.CHROME_PATH) {
+    let bundledChrome;
+    try { bundledChrome = createRequire(import.meta.url)("playwright").chromium.executablePath(); } catch { /* Runner fixtures may not have Playwright installed. */ }
+    const headless = bundledChrome && installedHeadlessShell(bundledChrome);
+    if (headless) testEnv.CHROME_PATH = headless;
+    else if (bundledChrome && existsSync(bundledChrome)) testEnv.CHROME_PATH = bundledChrome;
+    else if (existsSync(systemChrome)) testEnv.CHROME_PATH = systemChrome;
+}
+
+function installedHeadlessShell(chromePath) {
+    // Use the same pinned revision as Playwright, including its platform-specific
+    // archive layout. A complete macOS Chrome app can stall during shutdown.
+    let directory = dirname(chromePath);
+    while (!/^chromium-\d+$/.test(basename(directory))) {
+        const parent = dirname(directory);
+        if (parent === directory) return;
+        directory = parent;
+    }
+    const root = join(dirname(directory), basename(directory).replace("chromium-", "chromium_headless_shell-"));
+    if (!existsSync(join(root, "INSTALLATION_COMPLETE"))) return;
+    function find(directory, depth) {
+        for (const entry of readdirSync(directory, { withFileTypes: true })) {
+            const path = join(directory, entry.name);
+            if (entry.isFile() && /^(?:chrome-headless-shell|headless_shell)(?:\.exe)?$/.test(entry.name)) return path;
+            if (entry.isDirectory() && depth > 0) { const found = find(path, depth - 1); if (found) return found; }
+        }
+    }
+    return find(root, 2);
+}
 
 function collectTestFiles(directory) {
     return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {

@@ -42,12 +42,12 @@ beforeAll(async () => {
 beforeEach(async () => { await page?.close(); creates = []; page = await browser.newPage({ viewport: { width: 390, height: 844 } }); });
 afterAll(async () => { await browser?.close(); server?.stop(true); });
 
-test("official-only account can cancel CNY confirmation without creating a task", async () => {
+test("a connected Topaz service can cancel CNY confirmation without creating a task", async () => {
     await page.goto(server.url.toString());
     const start = page.getByRole("button", { name: "开始批量超分", exact: true });
     await start.click();
     const dialog = page.getByRole("dialog");
-    await dialog.getByText("共 1 个素材，先扣 ¥1.25。账单核对完成后按实际费用结算，多扣的退回。", { exact: true }).waitFor();
+    await dialog.getByText(/共 1 个素材，预计预留 ¥1\.25/).waitFor();
     expect(creates).toHaveLength(0);
     await dialog.getByRole("button", { name: /取\s*消/ }).click();
     await dialog.waitFor({ state: "hidden" });
@@ -55,7 +55,7 @@ test("official-only account can cancel CNY confirmation without creating a task"
     expect(JSON.parse(await page.locator("#snapshot").innerText()).nodes).toHaveLength(2);
 }, 15_000);
 
-test("confirmation submits one official task and repeats only query the original", async () => {
+test("confirmation submits one Topaz task and repeats only query the original", async () => {
     await page.goto(server.url.toString());
     await page.getByRole("button", { name: "开始批量超分", exact: true }).click();
     await page.getByRole("dialog").getByRole("button", { name: "确认超分", exact: true }).click();

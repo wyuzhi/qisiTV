@@ -21,7 +21,7 @@ beforeAll(async () => {
     const js = await build.outputs.find((output) => output.path.endsWith(".js"))!.text();
     const cssPath = import.meta.dir + "/../src/styles/globals.css";
     const css = (await postcss([tailwind({ base: import.meta.dir + "/.." })]).process(readFileSync(cssPath, "utf8"), { from: cssPath })).css
-        + readFileSync(import.meta.dir + "/../src/styles/beeftv-local-overrides.css", "utf8")
+        + readFileSync(import.meta.dir + "/../src/styles/qisitv-local-overrides.css", "utf8")
         + readFileSync(import.meta.dir + "/../src/styles/workspace-product.css", "utf8")
         + await build.outputs.find((output) => output.path.endsWith(".css"))!.text();
     const providers = [

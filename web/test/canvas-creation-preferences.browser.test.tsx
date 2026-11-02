@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { chromium, type Browser } from "playwright";
 import { productCss } from "./fixtures/product-css";
 
@@ -25,7 +26,8 @@ beforeAll(async () => {
         if (path.startsWith("/api/")) return Response.json({ code: 0, data: { items: [], providers: [], total: 0 } });
         return new Response('<!doctype html><html><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/harness.css"><body class="app-product-overlays"><div id="root"></div><script type="module" src="/harness.js"></script></body></html>', { headers: { "Content-Type": "text/html" } });
     } });
-    browser = await chromium.launch({ headless: true });
+    const executablePath = process.env.CHROME_PATH && existsSync(process.env.CHROME_PATH) ? process.env.CHROME_PATH : undefined;
+    browser = await chromium.launch({ executablePath, headless: true });
 }, 60000);
 
 afterAll(async () => { await browser?.close(); server?.stop(true); });

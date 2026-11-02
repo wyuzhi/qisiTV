@@ -55,19 +55,7 @@ beforeAll(async () => {
     const executablePath = [process.env.CHROME_PATH, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((p): p is string => Boolean(p && existsSync(p)));
     browser = await chromium.launch({ executablePath, headless: true });
 }, 60000);
-afterAll(async () => {
-    holdSave = false;
-    release?.();
-    release = undefined;
-    // Close sockets and explicit pages before Chromium teardown. A failed
-    // assertion may leave a polling page or a held persistence request alive.
-    server?.stop(true);
-    for (const context of browser?.contexts() || []) {
-        for (const page of context.pages()) await page.close();
-        await context.close();
-    }
-    await browser?.close();
-}, 15000);
+afterAll(async () => { release?.(); await browser?.close(); server?.stop(true); });
 
 test("default multimodal selection and explicit off persist without changing the main model", async () => {
     connectionState = "connected"; catalogReadFailures = 0;
