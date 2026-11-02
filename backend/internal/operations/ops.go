@@ -47,7 +47,7 @@ func RegisterDefaultOps(r *Registry) {
 		Params:  json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"nodeId":{"type":"string"},"expectedRevision":{"type":"integer"},"patch":{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string","description":"外部 CLI/MCP 提示词草稿别名"},"content":{"type":"string","description":"文本节点的正文，或下次生成提示词草稿"}}}},"required":["canvasId","nodeId","patch","expectedRevision"]}`),
 		Handler: opCanvasNodeUpdate})
 	r.Register(Op{ReplaySafe: true, AssistantCanvas: true, ID: "canvas.nodes.create", Summary: "批量创建画布节点", Scope: ScopeCanvas,
-		Params:  json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"expectedRevision":{"type":"integer"},"nodes":{"type":"array","items":{"type":"object","properties":{"title":{"type":"string"},"type":{"type":"string"},"prompt":{"type":"string"},"pluginData":{"type":"object","additionalProperties":true}},"required":["title","type"]}}},"required":["canvasId","nodes","expectedRevision"]}`),
+		Params:  json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"expectedRevision":{"type":"integer"},"nodes":{"type":"array","items":{"type":"object","properties":{"title":{"type":"string"},"type":{"type":"string"},"prompt":{"type":"string"}},"required":["title","type"]}}},"required":["canvasId","nodes","expectedRevision"]}`),
 		Handler: opCanvasNodesCreate})
 	r.Register(Op{ReplaySafe: true, AssistantCanvas: true, ID: "canvas.edge.create", Summary: "连接两个节点", Scope: ScopeCanvas,
 		Params:  json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"fromNodeId":{"type":"string"},"toNodeId":{"type":"string"},"expectedRevision":{"type":"integer"}},"required":["canvasId","fromNodeId","toNodeId","expectedRevision"]}`),
@@ -569,9 +569,11 @@ func opCanvasNodesCreate(ctx *Context, params json.RawMessage) (any, error) {
 		CanvasID         string `json:"canvasId"`
 		ExpectedRevision int64  `json:"expectedRevision"`
 		Nodes            []struct {
-			Title      string         `json:"title"`
-			Type       string         `json:"type"`
-			Prompt     string         `json:"prompt"`
+			Title  string `json:"title"`
+			Type   string `json:"type"`
+			Prompt string `json:"prompt"`
+			// Plugin tools pass their node data here; it stays out of the
+			// model-facing schema so the assistant's tool definitions do not grow.
 			PluginData map[string]any `json:"pluginData"`
 		} `json:"nodes"`
 	}

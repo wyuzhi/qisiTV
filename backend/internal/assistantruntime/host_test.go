@@ -150,6 +150,46 @@ func TestBundledAgentHostCommandFollowsAppLayout(t *testing.T) {
 	}
 }
 
+// 插件安装用随包 npm：路径与 scripts/package-agent-host.mjs 的 bundleNpmRuntime 一致。
+func TestBundledNpmCommandUsesNpmShippedNextToNode(t *testing.T) {
+	for _, goos := range []string{"darwin", "windows"} {
+		t.Run(goos, func(t *testing.T) {
+			root := t.TempDir()
+			executable := filepath.Join(root, "Contents", "MacOS", "BeefTV")
+			hostDir := filepath.Join(root, "Contents", "Resources", "agent-host")
+			node := filepath.Join(hostDir, "runtime", "bin", "node")
+			cli := filepath.Join(hostDir, "runtime", "lib", "node_modules", "npm", "bin", "npm-cli.js")
+			if goos == "windows" {
+				executable = filepath.Join(root, "BeefTV.exe")
+				hostDir = filepath.Join(root, "agent-host")
+				node = filepath.Join(hostDir, "runtime", "node.exe")
+				cli = filepath.Join(hostDir, "runtime", "node_modules", "npm", "bin", "npm-cli.js")
+			}
+			for _, file := range []string{node, filepath.Join(hostDir, "server.mjs")} {
+				if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(file, []byte("fixture"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := BundledNpmCommand(executable, goos); got != nil {
+				t.Fatalf("a runtime without npm must not invent one: %#v", got)
+			}
+			if err := os.MkdirAll(filepath.Dir(cli), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(cli, []byte("fixture"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			got := BundledNpmCommand(executable, goos)
+			if len(got) != 2 || got[0] != node || filepath.Clean(got[1]) != cli {
+				t.Fatalf("unexpected bundled npm command: %#v", got)
+			}
+		})
+	}
+}
+
 func TestAgentHostReapsExitAndRestartsWithSpacedPath(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "directory with spaces")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

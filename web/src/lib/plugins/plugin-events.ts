@@ -65,11 +65,6 @@ export function emitPluginEvent<E extends PluginEventName>(
     payload: PluginEventMap[E],
 ): void {
     dispatchBucket(eventName, payload);
-    if (eventName === "generation.succeeded") {
-        dispatchBucket("generation.completed", payload as PluginEventMap["generation.completed"]);
-    } else if (eventName === "generation.completed") {
-        dispatchBucket("generation.succeeded", payload as PluginEventMap["generation.succeeded"]);
-    }
 }
 
 export function disposePluginEvents(pluginId: string): void {
@@ -88,12 +83,7 @@ export function disposePluginEvents(pluginId: string): void {
 export function getPluginEventListenerCount(eventName?: PluginEventName, pluginId?: string): number {
     let count = 0;
     for (const [name, bucket] of listenersByEvent.entries()) {
-        if (eventName && name !== eventName) {
-            const isSuccessAlias =
-                (eventName === "generation.succeeded" && name === "generation.completed") ||
-                (eventName === "generation.completed" && name === "generation.succeeded");
-            if (!isSuccessAlias) continue;
-        }
+        if (eventName && name !== eventName) continue;
         for (const entry of bucket.values()) {
             if (pluginId && entry.pluginId !== pluginId) continue;
             count += 1;

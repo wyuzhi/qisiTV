@@ -126,7 +126,6 @@ export async function activateClientPluginModule(
 export async function loadAndActivateClientPlugin(
     pluginId: string,
     options?: {
-        clientUrl?: string;
         manifest?: PluginManifest | PluginManifestV2;
         timeoutMs?: number;
     },
@@ -148,9 +147,10 @@ export async function loadAndActivateClientPlugin(
         }
 
         const cleanClient = manifest?.client ? manifest.client.replace(/^\.\//, "").replace(/^\/+/, "") : "";
-        const clientEntry =
-            options?.clientUrl ||
-            (cleanClient ? `/api/plugins/${encodeURIComponent(pluginId)}/files/${cleanClient}` : undefined);
+        // The version in the query makes an updated package load its new module instead of the cached one.
+        const clientEntry = cleanClient
+            ? `/api/plugins/${encodeURIComponent(pluginId)}/files/${cleanClient}?v=${encodeURIComponent(manifest?.version ?? "")}`
+            : undefined;
         if (!clientEntry) {
             return false;
         }

@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"infinite-canvas/backend/internal/protocol"
 )
 
 func (s *Service) ResolvePackageFile(id string, filePath string) (string, string, error) {
@@ -41,24 +43,24 @@ func (c *Runtime) ResolvePackageFile(id string, filePath string) (string, string
 		}
 	}
 	if !ok {
-		return "", "", fmt.Errorf("插件 %q 不存在", id)
+		return "", "", packageError(http.StatusNotFound, "plugin_not_found", fmt.Sprintf("插件 %q 不存在", id))
 	}
 	if pkgDir == "" {
-		return "", "", fmt.Errorf("插件 %q 不包含静态文件目录", id)
+		return "", "", packageError(http.StatusNotFound, "plugin_file_not_found", fmt.Sprintf("插件 %q 不包含静态文件目录", id))
 	}
 	trimmed := strings.TrimSpace(filePath)
 	trimmed = strings.TrimPrefix(trimmed, "/")
 	trimmed = strings.TrimPrefix(trimmed, "./")
 	if trimmed == "" || strings.ContainsRune(trimmed, '\\') || path.IsAbs(trimmed) {
-		return "", "", fmt.Errorf("无效的插件文件路径 %q", filePath)
+		return "", "", packageError(http.StatusBadRequest, "plugin_file_path_invalid", fmt.Sprintf("无效的插件文件路径 %q", filePath))
 	}
 	cleanRel := path.Clean(trimmed)
 	if cleanRel == "." || cleanRel == ".." || strings.HasPrefix(cleanRel, "../") || strings.Contains(cleanRel, "..") {
-		return "", "", fmt.Errorf("插件文件路径越界 %q", filePath)
+		return "", "", packageError(http.StatusBadRequest, "plugin_file_path_invalid", fmt.Sprintf("插件文件路径越界 %q", filePath))
 	}
 	for _, seg := range strings.Split(cleanRel, "/") {
 		if seg == "node_modules" || seg == ".git" {
-			return "", "", fmt.Errorf("禁止访问插件目录 %s", seg)
+			return "", "", packageError(http.StatusBadRequest, "plugin_file_path_invalid", fmt.Sprintf("禁止访问插件目录 %s", seg))
 		}
 	}
 	ext := strings.ToLower(path.Ext(cleanRel))
@@ -80,7 +82,7 @@ func (c *Runtime) ResolvePackageFile(id string, filePath string) (string, string
 			contentType = "application/octet-stream"
 		}
 	default:
-		return "", "", fmt.Errorf("不支持的插件静态资源类型 %q", ext)
+		return "", "", packageError(http.StatusBadRequest, "plugin_file_type_unsupported", fmt.Sprintf("不支持的插件静态资源类型 %q", ext))
 	}
 	absRoot, err := filepath.Abs(pkgDir)
 	if err != nil {
@@ -89,17 +91,17 @@ func (c *Runtime) ResolvePackageFile(id string, filePath string) (string, string
 	absTarget := filepath.Join(absRoot, filepath.FromSlash(cleanRel))
 	relCheck, err := filepath.Rel(absRoot, absTarget)
 	if err != nil || strings.HasPrefix(relCheck, "..") || filepath.IsAbs(relCheck) {
-		return "", "", fmt.Errorf("插件文件路径越界 %q", filePath)
+		return "", "", packageError(http.StatusBadRequest, "plugin_file_path_invalid", fmt.Sprintf("插件文件路径越界 %q", filePath))
 	}
 	info, err := os.Stat(absTarget)
 	if err != nil || !info.Mode().IsRegular() {
-		return "", "", fmt.Errorf("插件文件 %q 不存在", cleanRel)
+		return "", "", packageError(http.StatusNotFound, "plugin_file_not_found", fmt.Sprintf("插件文件 %q 不存在", cleanRel))
 	}
 	if realRoot, err := filepath.EvalSymlinks(absRoot); err == nil {
 		if realTarget, err := filepath.EvalSymlinks(absTarget); err == nil {
 			relReal, relErr := filepath.Rel(realRoot, realTarget)
 			if relErr != nil || strings.HasPrefix(relReal, "..") || filepath.IsAbs(relReal) {
-				return "", "", fmt.Errorf("插件文件软链接越界 %q", filePath)
+				return "", "", packageError(http.StatusBadRequest, "plugin_file_path_invalid", fmt.Sprintf("插件文件软链接越界 %q", filePath))
 			}
 		}
 	}
@@ -136,7 +138,7 @@ func (s *Service) SearchMarket(ctx context.Context, query string) ([]MarketPlugi
 		}
 	}
 	remoteItems := fetchNpmMarketPlugins(ctx, query, installedByID)
-	curatedItems := loadCuratedRegistryItems(query, installedByID)
+	curatedItems := loadCuratedRegistryItems(ctx, query, installedByID)
 	seen := make(map[string]struct{}, len(localItems)+len(curatedItems)+len(remoteItems))
 	merged := make([]MarketPluginItem, 0, len(localItems)+len(curatedItems)+len(remoteItems))
 	for _, item := range localItems {
@@ -160,13 +162,34 @@ func (s *Service) SearchMarket(ctx context.Context, query string) ([]MarketPlugi
 	return merged, nil
 }
 
-func loadCuratedRegistryItems(query string, installed map[string]View) []MarketPluginItem {
+// CuratedRegistryURL is the public recommendation list; authors add a line by
+// pull request. The copy shipped with the market plugin covers offline use.
+const CuratedRegistryURL = "https://raw.githubusercontent.com/Sunnyender-org/beeftv-plugins/main/registry.json"
+
+func readCuratedRegistry(ctx context.Context) []byte {
+	reqCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, CuratedRegistryURL, nil); err == nil {
+		if resp, err := http.DefaultClient.Do(req); err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				if raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)); err == nil && json.Valid(raw) {
+					return raw
+				}
+			}
+		}
+	}
 	officialDir, err := officialPluginPackageDir()
 	if err != nil {
 		return nil
 	}
-	raw, err := os.ReadFile(filepath.Join(officialDir, "beeftv-plugin-market", "registry.json"))
-	if err != nil {
+	raw, _ := os.ReadFile(filepath.Join(officialDir, "beeftv-plugin-market", "registry.json"))
+	return raw
+}
+
+func loadCuratedRegistryItems(ctx context.Context, query string, installed map[string]View) []MarketPluginItem {
+	raw := readCuratedRegistry(ctx)
+	if len(raw) == 0 {
 		return nil
 	}
 	var payload struct {
@@ -177,6 +200,8 @@ func loadCuratedRegistryItems(query string, installed map[string]View) []MarketP
 			Version     string   `json:"version"`
 			Description string   `json:"description"`
 			Author      string   `json:"author"`
+			Category    string   `json:"category"`
+			Recommended bool     `json:"recommended"`
 			Tags        []string `json:"tags"`
 		} `json:"plugins"`
 	}
@@ -198,6 +223,7 @@ func loadCuratedRegistryItems(query string, installed map[string]View) []MarketP
 		if pkgName == "" {
 			pkgName = item.ID
 		}
+		_, bundled := BundledSampleDir(pkgName)
 		out = append(out, MarketPluginItem{
 			ID:          item.ID,
 			Name:        item.Name,
@@ -208,6 +234,9 @@ func loadCuratedRegistryItems(query string, installed map[string]View) []MarketP
 			Keywords:    item.Tags,
 			Installed:   isInstalled,
 			Enabled:     isInstalled && inst.Status == StatusEnabled,
+			Recommended: item.Recommended,
+			Category:    item.Category,
+			Bundled:     bundled,
 		})
 	}
 	return out
@@ -263,12 +292,7 @@ func fetchNpmMarketPlugins(ctx context.Context, query string, installed map[stri
 	out := make([]MarketPluginItem, 0, len(payload.Objects))
 	for _, obj := range payload.Objects {
 		pkg := obj.Package
-		id := strings.TrimPrefix(pkg.Name, "@beeftv/plugin-")
-		if strings.HasPrefix(id, "@") {
-			if slash := strings.IndexByte(id, '/'); slash >= 0 {
-				id = id[slash+1:]
-			}
-		}
+		id := protocol.PackageIDFromName(pkg.Name)
 		inst, isInstalled := installed[id]
 		out = append(out, MarketPluginItem{
 			ID:          id,

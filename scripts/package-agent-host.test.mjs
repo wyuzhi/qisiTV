@@ -8,7 +8,6 @@ import { createServer } from 'node:http';
 import { createServer as createTCPServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { bundleNpmRuntime, packageAgentHost, verifyRuntime, NODE_VERSION } from './package-agent-host.mjs';
-import { resolveNpmCommand, DEFAULT_CN_NPM_REGISTRY, DEFAULT_GLOBAL_NPM_REGISTRY } from '../agent-host/plugin-packages.mjs';
 
 const { test, expect } = process.versions.bun
   ? await import('bun:test')
@@ -40,7 +39,8 @@ test('release rejects missing runtime and unsupported target', () => {
   expect(() => verifyRuntime('/missing', 'windows/amd64')).toThrow('Missing bundled Node');
 });
 
-test('bundleNpmRuntime copies npm CLI for unix and windows layouts and resolves bundled npm command', () => {
+// Go's assistantruntime.BundledNpmCommand reads npm from exactly these paths next to the bundled node.
+test('bundleNpmRuntime copies the npm CLI next to the bundled node on unix and windows', () => {
   const scratch = mkdtempSync(path.join(tmpdir(), 'beeftv-npm-bundle-'));
   try {
     // Unix layout
@@ -55,21 +55,7 @@ test('bundleNpmRuntime copies npm CLI for unix and windows layouts and resolves 
     const copiedUnixCli = bundleNpmRuntime({ runtime: unixRuntime, node: unixNode, target: 'darwin/arm64', stage: unixStage });
     expect(existsSync(copiedUnixCli)).toBe(true);
     expect(existsSync(path.join(unixStage, 'runtime', 'bin', 'npm'))).toBe(true);
-    const stagedUnixNode = path.join(unixStage, 'runtime', 'bin', 'node');
-    expect(resolveNpmCommand({ execPath: stagedUnixNode, platform: 'darwin' })).toEqual([
-      stagedUnixNode,
-      copiedUnixCli,
-      `--registry=${DEFAULT_CN_NPM_REGISTRY}`,
-      '--no-audit',
-      '--no-fund',
-    ]);
-    expect(resolveNpmCommand({ execPath: stagedUnixNode, platform: 'darwin', registryUrl: 'global' })).toEqual([
-      stagedUnixNode,
-      copiedUnixCli,
-      `--registry=${DEFAULT_GLOBAL_NPM_REGISTRY}`,
-      '--no-audit',
-      '--no-fund',
-    ]);
+    expect(copiedUnixCli).toBe(path.join(unixStage, 'runtime', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'));
 
     // Windows layout
     const winRuntime = path.join(scratch, 'win-runtime');
@@ -82,14 +68,7 @@ test('bundleNpmRuntime copies npm CLI for unix and windows layouts and resolves 
     const copiedWinCli = bundleNpmRuntime({ runtime: winRuntime, node: winNode, target: 'windows/amd64', stage: winStage });
     expect(existsSync(copiedWinCli)).toBe(true);
     expect(existsSync(path.join(winStage, 'runtime', 'npm.cmd'))).toBe(true);
-    const stagedWinNode = path.join(winStage, 'runtime', 'node.exe');
-    expect(resolveNpmCommand({ execPath: stagedWinNode, platform: 'win32' })).toEqual([
-      stagedWinNode,
-      copiedWinCli,
-      `--registry=${DEFAULT_CN_NPM_REGISTRY}`,
-      '--no-audit',
-      '--no-fund',
-    ]);
+    expect(copiedWinCli).toBe(path.join(winStage, 'runtime', 'node_modules', 'npm', 'bin', 'npm-cli.js'));
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -149,6 +128,10 @@ test('packaged server starts with local imports and makes zero model requests', 
   const ops = createServer((request, response) => {
     requests.push({ method: request.method, path: request.url, host: request.headers['x-beeftv-agent-token'] });
     response.setHeader('Content-Type', 'application/json');
+    if (request.method === 'GET' && request.url === '/api/plugins/packages/enabled' && request.headers['x-beeftv-agent-token'] === 'test-host') {
+      response.end(JSON.stringify({ code: 0, data: { packages: [] } }));
+      return;
+    }
     if (request.method !== 'GET' || request.url !== '/api/ops' || request.headers['x-beeftv-agent-token'] !== 'test-host') {
       response.writeHead(403).end(JSON.stringify({ code: 403 }));
       return;
@@ -205,7 +188,10 @@ test('packaged server starts with local imports and makes zero model requests', 
     expect(health.operations).toBe(1);
     expect(health.requests).toEqual({ dispatched: 0, perTurnRequests: 40, perTurnToolSteps: 40, lifetimeBudget: 0, lifetimeUsed: 0 });
     expect(modelRequests).toBe(0);
-    expect(requests).toEqual([{ method: 'GET', path: '/api/ops', host: 'test-host' }]);
+    expect(requests).toEqual([
+      { method: 'GET', path: '/api/ops', host: 'test-host' },
+      { method: 'GET', path: '/api/plugins/packages/enabled', host: 'test-host' },
+    ]);
   } finally {
     if (child) {
       if (child.exitCode === null && child.signalCode === null) child.kill();

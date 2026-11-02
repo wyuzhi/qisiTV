@@ -394,14 +394,12 @@ export async function runGenerationBeforeSubmitHooks(
     initialCtx: GenerationSubmitContext,
 ): Promise<{
     prompt: string;
-    params: Record<string, unknown>;
     metadata: Record<string, unknown>;
     adjustedByPlugins: Array<{ pluginId: string; pluginName: string }>;
     notifications: string[];
 }> {
     const entries = getPluginSlotEntries("generation.beforeSubmit");
     let prompt = initialCtx.prompt;
-    let params = { ...initialCtx.params };
     let metadata = { ...(initialCtx.metadata ?? {}) };
     const adjustedByPlugins: Array<{ pluginId: string; pluginName: string }> = [];
     const notifications: string[] = [];
@@ -414,27 +412,16 @@ export async function runGenerationBeforeSubmitHooks(
             const patch = await entry.payload.transform({
                 ...initialCtx,
                 prompt,
-                params: { ...params },
-                parameters: { ...params },
                 metadata: { ...metadata },
             } as GenerationSubmitContext);
             if (!patch) continue;
-            const rawPatch = patch as GenerationSubmitPatch & { parameters?: Record<string, unknown>; reason?: string };
             let modified = false;
-            if (typeof rawPatch.prompt === "string" && rawPatch.prompt !== prompt) {
-                prompt = rawPatch.prompt;
+            if (typeof patch.prompt === "string" && patch.prompt !== prompt) {
+                prompt = patch.prompt;
                 modified = true;
             }
-            const nextParams = rawPatch.params ?? rawPatch.parameters;
-            if (nextParams && Object.keys(nextParams).length > 0) {
-                params = { ...params, ...nextParams };
-                modified = true;
-            }
-            if (rawPatch.metadata && Object.keys(rawPatch.metadata).length > 0) {
-                metadata = { ...metadata, ...rawPatch.metadata };
-                modified = true;
-            }
-            if (typeof rawPatch.reason === "string" && rawPatch.reason.trim()) {
+            if (patch.metadata && Object.keys(patch.metadata).length > 0) {
+                metadata = { ...metadata, ...patch.metadata };
                 modified = true;
             }
             if (modified) {
@@ -443,7 +430,7 @@ export async function runGenerationBeforeSubmitHooks(
                     usePluginStore.getState().installations.find((item) => item.manifest.id === entry.pluginId)?.manifest.name ||
                     entry.pluginId;
                 adjustedByPlugins.push({ pluginId: entry.pluginId, pluginName });
-                notifications.push(`已由插件「${pluginName}」调整生成参数`);
+                notifications.push(`提示词已由插件「${pluginName}」调整`);
             }
         } catch (err) {
             console.warn(`[slot-registry] generation.beforeSubmit hook error (${entry.pluginId}):`, err);
@@ -452,7 +439,6 @@ export async function runGenerationBeforeSubmitHooks(
 
     return {
         prompt,
-        params,
         metadata,
         adjustedByPlugins,
         notifications,

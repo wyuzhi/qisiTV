@@ -7,18 +7,8 @@ const STICKY_THEMES = [
   { key: "rose", label: "樱粉", bg: "#fecdd3", text: "#881337", border: "#fb7185" },
 ];
 
-function getReact(host) {
-  if (host?.React) return host.React;
-  if (host?.ui?.React) return host.ui.React;
-  if (typeof window !== "undefined") {
-    return window.__BEEFTV_REACT__ || window.React || null;
-  }
-  return null;
-}
-
 export function activate(host) {
-  const React = getReact(host);
-  if (!React) return;
+  const React = host.React;
   const h = React.createElement;
 
   function StickyNoteCard(props) {

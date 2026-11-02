@@ -207,16 +207,15 @@ export type PluginCanvasNodeProps<TPluginData = Record<string, unknown>> = {
 };
 
 export type PluginInstallConfirmRequest = {
-  name: string;
-  packageName: string;
+  /** npm spec, local package directory, or the name of a sample shipped with BeefTV. */
+  source: string;
+  name?: string;
   version?: string;
   description?: string;
   author?: string;
-  source: string;
-  sourceLabel?: string;
+  /** "https://registry.npmmirror.com" (default) or "https://registry.npmjs.org". */
   registry?: string;
-  permissions?: AnyPluginPermission[];
-  trusted?: boolean;
+  isUpdate?: boolean;
 };
 
 export type CanvasNodeSlotContribution = PluginCanvasNodeContribution & {
@@ -301,10 +300,10 @@ export type CanvasSidePanelSlotContribution = {
   render: (props: { canvasId?: string; projectId?: string; pluginId: string }) => unknown;
 };
 
+/** Rewrite the prompt or attach metadata; model parameters stay as the user set them. */
 export type GenerationBeforeSubmitPatch = {
   prompt?: string;
-  parameters?: Record<string, unknown>;
-  reason?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type GenerationBeforeSubmitSlotContribution = {
@@ -452,64 +451,47 @@ export interface BeefTVSlotMap {
 export type BeefTVSlotName = keyof BeefTVSlotMap;
 
 export interface BeefTVEventMap {
-  "canvas.opened": { canvasId: string; projectId?: string; revision?: number };
-  "canvas.changed": { canvasId: string; revision: number; nodeCount?: number; edgeCount?: number };
-  "canvas.selectionChanged": { canvasId?: string; selectedNodeIds: string[] };
-  "generation.submitted": { canvasId?: string; nodeIds: string[]; taskIds?: string[]; kind?: "image" | "video" | "audio" };
-  "generation.completed": { canvasId?: string; nodeId?: string; taskId: string; kind?: "image" | "video" | "audio" };
-  "generation.failed": { canvasId?: string; nodeId?: string; taskId?: string; reason?: string; message?: string };
-  "assets.imported": { assetIds: string[]; source?: string };
-  "assistant.turnCompleted": { canvasId?: string; turnId: string; status?: string };
+  "generation.submitted": { nodeId: string; nodeType: string; model?: string; prompt: string; taskId?: string };
+  "generation.completed": { nodeId: string; nodeType: string };
+  "generation.failed": { nodeId: string; nodeType: string; error: string; taskId?: string };
+  "assets.imported": { assets: Array<{ id: string; name: string; type: string; url: string }> };
+  "assistant.turnCompleted": { canvasId?: string; sessionId?: string; turnId?: string; status: "completed" | "failed" | "cancelled" };
 }
 
 export type BeefTVEventName = keyof BeefTVEventMap;
 
 export interface BeefTVPluginHost {
   readonly pluginId: string;
-  readonly apiVersion: PluginApiVersion;
+  readonly manifest: PluginManifest;
+  /** The host's React; plugins must not bundle their own copy. */
   readonly React: typeof import("react");
   contribute<K extends BeefTVSlotName>(slot: K, payload: BeefTVSlotMap[K]): () => void;
-  ops: {
-    call<TResult = unknown>(
-      operation: string,
-      params: Record<string, unknown>,
-      options?: { opId?: string; signal?: AbortSignal }
-    ): Promise<{
-      op: string;
-      opId?: string;
-      replayed: boolean;
-      result: TResult;
-      revision?: number;
-    }>;
-  };
   events: {
-    on<K extends BeefTVEventName>(
-      event: K,
-      handler: (payload: BeefTVEventMap[K]) => void
-    ): () => void;
-    emit?<K extends BeefTVEventName>(event: K, payload: BeefTVEventMap[K]): void;
-  };
-  ui: {
-    React: typeof import("react");
-    theme: {
-      mode: "light" | "dark";
-      tokens?: Record<string, string | number>;
-    };
-    notify: (message: string, type?: "info" | "success" | "warning" | "error") => void;
-    requestInstallPlugin?: (req: PluginInstallConfirmRequest) => void | Promise<void>;
-    [key: string]: unknown;
+    on<K extends BeefTVEventName>(event: K, handler: (payload: BeefTVEventMap[K]) => void): () => void;
+    emit<K extends BeefTVEventName>(event: K, payload: BeefTVEventMap[K]): void;
   };
   storage: PluginStorage;
   config: {
-    get<T = string | number | boolean>(key: string, defaultValue?: T): T | undefined;
-    all(): Readonly<Record<string, string | number | boolean>>;
+    getAll(): Record<string, string | number | boolean>;
+    get<T extends string | number | boolean = string>(key: string, fallback?: T): T | undefined;
+    set(patch: Record<string, string | number | boolean>): Promise<void>;
+  };
+  ui: {
+    notify(message: string, level?: "info" | "success" | "warning" | "error"): void;
+    navigate(path: string): void;
+    /** Opens the host install confirmation; nothing installs without the user's confirmation. */
+    requestInstallPlugin(request: PluginInstallConfirmRequest): void;
+  };
+  /** Business operations, the same set the CLI, MCP and assistant use; resolves to the operation result. */
+  ops: {
+    call<T = unknown>(op: string, params?: Record<string, unknown>): Promise<T>;
   };
   context: {
+    /** Canvas currently open in the workspace. Read its revision with the canvas.get operation. */
     getCanvasId(): string | undefined;
-    getCanvasRevision(): number | undefined;
-    getSelectedNodeIds(): string[];
-    getProjectId(): string | undefined;
-    getThemeMode(): "light" | "dark";
+  };
+  assets: {
+    list(): unknown[];
   };
 }
 

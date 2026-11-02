@@ -17,13 +17,13 @@ description: BeefTV 统一插件系统的扩展边界、Manifest 合同、宿主
 4. **一条业务写入路径**：插件在助手工具中通过 `ctx.executeTool("canvas_nodes_create", ...)`、在浏览器端通过 `host.ops.call("canvas.nodes.create", ...)` 调用 Go 业务操作。权限模式（只读 / 当前画布 / 完全访问）、付费生成确认与整组撤销全部由 Go 统一把关。
 5. **一份技能列表（`internal/skills`）**：插件包的 `pi.skills` 目录登记进 `internal/skills` 的安装包体系，来源标记为对应插件；停用或卸载插件时同步移除，助手原有的技能版本固定与 `skill_load` 机制原样复用。
 6. **官方 pi 组件复用**：
-   - 包下载与解包复用 `@earendil-works/pi-coding-agent` 的 `DefaultPackageManager`（由 Go 调用 `agent-host` 内部接口下载到暂存目录，经 Go 校验并事务提交后发布）。
+   - 包下载由 Go 完成：用桌面包自带的 node 与 npm 执行 `npm install --prefix`（下载源只允许 npmmirror 或 npmjs），依赖一起安装到暂存目录，经 Go 校验清单并事务提交后才替换旧版本；`agent-host` 只用 pi 官方 `DefaultPackageManager` 按单个包目录解析和加载扩展，不下载。
    - 扩展加载复用官方 `discoverAndLoadExtensions`（仅按 Go 下发的已启用插件包目录加载，不扫描宿主机用户主目录 `~/.agents/skills`，防止宿主机资源混入）。
    - 助手执行内核保持官方 `@earendil-works/pi-durable`，插件工具经 `agent-host/plugin-packages.mjs` 转换为 Durable 工具并在下一轮会话生效。
 
 ## 2. 信任模型与运行边界
 
-- **显式安装确认**：无论从插件市场、npm 包名、本地目录还是压缩包安装插件，都由宿主页面弹出统一的安装确认框，展示插件名称、包名、版本、来源与声明权限；用户点取消则不执行安装。
+- **显式安装确认**：无论从插件市场、npm 包名、本地目录还是压缩包安装插件，都由宿主页面弹出统一的安装确认框，展示插件名称、版本、来源与风险说明，第三方插件需勾选「我了解风险」；用户点取消则不执行安装。
 - **直接客户端渲染（`renderer: "client"`）**：已启用插件的前端入口（`beeftv.client`）由浏览器动态加载并调用 `activate(host)`，与宿主共享同一份 React、Ant Design 与明暗主题 token。单个插件加载失败或超时（3 秒）仅将该插件标为异常，不阻塞主应用或其他插件。
 - **推荐列表免责声明**：公开推荐仓库 `Sunnyender-org/beeftv-plugins` 收录社区提 PR 的插件列表，插件市场页面固定提示“被推荐列表收录不代表我们为它担保；请仅安装你信任来源的插件”。
 - **静态资源路径隔离**：Go 插件文件服务仅暴露登记表内该插件包目录下的静态与模块文件，路径校验位于 `internal/plugins`，任何越界或访问 `node_modules` 的请求一律返回 404。
@@ -111,11 +111,12 @@ beeftv-plugin-sticky-note/
 | `host.contribute(slot, payload)` | 向指定挂点注册界面扩展，返回卸载函数；插件停用或卸载时宿主按插件 ID 自动撤销全部挂载 |
 | `host.ops.call(operation, params)` | 调用后端 `/api/ops` 业务操作，遵循统一权限、付费确认与撤销规则 |
 | `host.events.on(event, handler)` | 订阅宿主状态变化事件，返回取消订阅函数 |
-| `host.ui` | 提供宿主共享的 `React`、主题信息、`notify` 提示与 `requestInstallPlugin` 安装确认触发器 |
+| `host.React` | 与宿主共用的 React |
+| `host.ui` | `notify` 提示、`navigate` 跳转与 `requestInstallPlugin` 安装确认触发器 |
 | `host.storage` / `host.config` | 插件命名空间下的键值存储与用户在插件中心填写的配置项 |
-| `host.context` | 读取当前画布 ID、画布 revision、选中节点 ID、当前项目 ID 与明暗主题模式 |
+| `host.context.getCanvasId()` | 当前打开的画布 ID；画布 revision 用 `canvas.get` 操作读取 |
 
-### 4.1 全部 21 个界面扩展位（挂点表）
+### 4.1 界面扩展位（挂点表）
 
 | 区域 | 挂点名称 | 插件可贡献内容 |
 | --- | --- | --- |
@@ -128,7 +129,7 @@ beeftv-plugin-sticky-note/
 | 画布 | `canvas.nodePanel` | 节点配置面板中的自定义扩展区域 |
 | 画布 | `canvas.promptActions` | 节点提示词输入框旁的操作按钮（内置提示词优化器同走此挂点） |
 | 画布 | `canvas.sidePanel` | 画布右侧边栏面板页，与创作助手面板并列切换 |
-| 生成 | `generation.beforeSubmit` | 提交生成前改写提示词或参数，并在界面显式标明修改内容与来源插件 |
+| 生成 | `generation.beforeSubmit` | 提交生成前改写提示词，并提示用户是哪个插件改的；模型参数保持用户的设置 |
 | 剪辑 | `editor.timeline-panel` | 剪辑工作台时间线面板扩展 |
 | 剪辑 | `editor.preview-renderer` | 剪辑工作台预览渲染区扩展 |
 | 剪辑 | `editor.inspector` | 剪辑工作台右侧属性检查器扩展 |
@@ -149,30 +150,26 @@ beeftv-plugin-sticky-note/
 
 此外，插件还可通过 `pi.extensions` 与 `pi.skills` 向创作助手贡献工具与技能，并通过 `beeftv.contributes.providers` 与 `workflows` 向后台贡献模型渠道与工作流模板。
 
-### 4.2 宿主事件表（8 类事件）
+### 4.2 宿主事件表
 
-每个事件仅在状态真正发生变化的那一处发出：
-
-| 事件名 | 触发时机 | 载荷字段 |
+| 事件名称 | 触发时机 | 回调参数 |
 | --- | --- | --- |
-| `canvas.opened` | 打开画布并完成初始加载 | `{ canvasId, projectId?, revision? }` |
-| `canvas.changed` | 画布文档内容提交或变更 | `{ canvasId, revision, nodeCount?, edgeCount? }` |
-| `canvas.selectionChanged` | 画布选中节点集合变化 | `{ canvasId?, selectedNodeIds }` |
-| `generation.submitted` | 生成任务已提交后端 | `{ canvasId?, nodeIds, taskIds?, kind? }` |
-| `generation.completed` | 生成任务成功完成并交付 | `{ canvasId?, nodeId?, taskId, kind? }` |
-| `generation.failed` | 生成任务失败 | `{ canvasId?, nodeId?, taskId?, reason?, message? }` |
-| `assets.imported` | 素材成功导入素材库 | `{ assetIds, source? }` |
-| `assistant.turnCompleted` | 创作助手一轮对话执行结束 | `{ canvasId?, turnId, status? }` |
+| `generation.submitted` | 画布节点的生成任务已提交 | `{ nodeId, nodeType, model?, prompt, taskId? }` |
+| `generation.completed` | 生成任务完成 | `{ nodeId, nodeType }` |
+| `generation.failed` | 生成任务失败 | `{ nodeId, nodeType, error, taskId? }` |
+| `assets.imported` | 素材导入完成 | `{ assets: [{ id, name, type, url }] }` |
+| `assistant.turnCompleted` | 创作助手一轮对话执行结束 | `{ canvasId?, sessionId?, turnId?, status }` |
+
+画布打开、画布内容变化、选中变化三类事件尚未接入。
 
 ## 5. 内置功能与样板插件
 
 - **内置能力统一走挂点**：提示词优化器（`canvas.promptActions`）、Eagle 素材库页面与设置（`app.page`、`assets.source`、`app.settings`）、AI 审美批改节点（`canvas.node`）均通过统一挂点机制接入。
 - **官方插件市场（`beeftv-plugin-market`）**：唯一随桌面包预装的插件，挂载于 `pluginCenter.section`，支持从 `Sunnyender-org/beeftv-plugins` 读取推荐列表（含内置离线兜底 `registry.json`）及按 `keywords:beeftv-plugin` 搜索 npm 社区插件。
 - **开发模板与样板插件**：
-  - `beeftv-plugin-slot-test`：覆盖全部 21 个界面插槽与 8 类宿主事件的演示与自检插件。
+  - `beeftv-plugin-slot-test`：往每个挂点各挂一项、订阅全部事件的开发自检插件，不在推荐列表里。
   - `beeftv-plugin-sticky-note`：画布便签模板插件（含自定义节点、助手工具与技能）。
   - `beeftv-plugin-ecommerce-hero`：「一键商品主图」电商样板插件。
-  - `beeftv-plugin-aihubkit-video`：可插拔视频模型渠道协议插件包。
 
 ## 6. Eagle 外部素材来源方案
 

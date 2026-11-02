@@ -290,16 +290,11 @@ export async function installDurableExtensions({
         if (entry.generation.pendingInput?.state === 'pending') throw fail('supplement_preparation_pending');
         if (entry.turn?.turnId) await authorization(entry, entry.turn.turnId);
         const started = Date.now();
-        const mode = entry.permissionMode || entry.generation?.permissionMode || 'canvas';
-        const enrichedContext = {
-          ...context,
-          permissionMode: mode,
-          isReadOnlyTool: (name) => entry.readOnlyToolNames?.has(name) === true,
-        };
+        // Plugin tools reach business operations only through this nested call,
+        // so the turn's permission mode is enforced here, once, for every plugin.
         const wrappedApi = {
           ...api,
-          permissionMode: mode,
-          executeTool: async (toolName, toolParams, callContext = enrichedContext, options = {}) => {
+          executeTool: async (toolName, toolParams, callContext = context, options = {}) => {
             const currentMode = entry.permissionMode || entry.generation?.permissionMode || 'canvas';
             if (currentMode === 'read-only' && !entry.readOnlyToolNames?.has(toolName)) {
               const err = new Error(`scope_denied: 本轮助手只能读取（禁止调用 ${toolName}）`);
@@ -310,7 +305,7 @@ export async function installDurableExtensions({
           },
         };
         try {
-          const rawResult = await runWithBudget(entry, () => pluginTool.execute(args, wrappedApi, enrichedContext));
+          const rawResult = await runWithBudget(entry, () => pluginTool.execute(args, wrappedApi, context));
           entry.generation.toolCalledSinceYield = true;
           const output = rawResult?.output ?? rawResult?.content ?? [];
           const isError = rawResult?.isError === true;

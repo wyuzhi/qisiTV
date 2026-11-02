@@ -188,3 +188,32 @@ func TestValidateManifestClientAndCanvasNodeConstraints(t *testing.T) {
 		t.Fatalf("expected valid client manifest to pass: %v", err)
 	}
 }
+
+func TestParsePluginPackageDirAcceptsPlainPiPackage(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "extensions"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "extensions", "index.ts"), []byte("export default function() {}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pkgJSON := `{"name":"@someone/pi-web-tools","version":"2.0.0","keywords":["pi-package"],"pi":{"extensions":["./extensions/index.ts"]}}`
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(pkgJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := ParsePluginPackageDir(dir)
+	if err != nil {
+		t.Fatalf("a pi package without a beeftv field must install: %v", err)
+	}
+	if pkg.Manifest.Metadata.ID != "someone-pi-web-tools" || pkg.Manifest.Metadata.Version != "2.0.0" || len(pkg.ExtensionPaths) != 1 {
+		t.Fatalf("unexpected parse: %#v", pkg.Manifest.Metadata)
+	}
+
+	empty := t.TempDir()
+	if err := os.WriteFile(filepath.Join(empty, "package.json"), []byte(`{"name":"left-pad","version":"1.0.0"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParsePluginPackageDir(empty); err == nil {
+		t.Fatal("a package with neither beeftv nor pi resources is not a plugin")
+	}
+}

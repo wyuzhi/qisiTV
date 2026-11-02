@@ -13,9 +13,6 @@ const EDITOR_SLOTS = [
 ];
 
 const HOST_EVENTS = [
-  "canvas.opened",
-  "canvas.changed",
-  "canvas.selectionChanged",
   "generation.submitted",
   "generation.completed",
   "generation.failed",
@@ -23,17 +20,8 @@ const HOST_EVENTS = [
   "assistant.turnCompleted",
 ];
 
-function getReact(host) {
-  if (host?.React) return host.React;
-  if (host?.ui?.React) return host.ui.React;
-  if (typeof window !== "undefined") {
-    return window.__BEEFTV_REACT__ || window.React || null;
-  }
-  return null;
-}
-
 export function activate(host) {
-  const React = getReact(host);
+  const React = host.React;
   const h = React ? React.createElement : () => null;
   const eventLog = [];
 
@@ -220,16 +208,13 @@ export function activate(host) {
       ),
   });
 
-  // 10. generation.beforeSubmit — 提交生成前改写钩子（向用户显式标明修改内容与来源插件）
+  // 10. generation.beforeSubmit — 提交生成前的钩子。返回 { prompt } 会改写提示词并提示用户是哪个插件改的；
+  //     这个自检插件只挂上钩子、不改任何东西，避免启用后影响真实生成。
   host.contribute("generation.beforeSubmit", {
     id: "slot-test-before-submit",
     label: "全插槽演示插件",
     order: 95,
-    transform: ({ prompt, parameters }) => ({
-      prompt,
-      parameters: { ...(parameters || {}) },
-      reason: "全插槽演示插件已核对生成请求参数",
-    }),
+    transform: () => undefined,
   });
 
   // 11. editor.* — 剪辑工作台全部 8 个插槽

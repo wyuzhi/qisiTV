@@ -13,14 +13,15 @@ import { EAGLE_PLUGIN_ID } from "@/lib/plugins/builtin/eagle";
 import { PROMPT_OPTIMIZER_PLUGIN_ID } from "@/lib/plugins/builtin/prompt-optimizer";
 import { RUNNINGHUB_PLUGIN_ID } from "@/lib/plugins/builtin/workflows";
 import { isOfficialApplicationPluginId } from "@/lib/plugins/official-applications";
-import { deactivateClientPlugin, loadAndActivateClientPlugin, syncActiveClientPlugins } from "@/lib/plugins/plugin-client-loader";
-import { normalizePluginInstallRequest } from "@/lib/plugins/plugin-host-runtime";
+import { deactivateClientPlugin, syncActiveClientPlugins } from "@/lib/plugins/plugin-client-loader";
+import { PLUGIN_INSTALL_REQUEST_EVENT } from "@/lib/plugins/plugin-host-runtime";
 import type { PluginField, PluginInstallConfirmRequest, PluginManifest, PluginManifestV2, RegisteredPlugin } from "@/lib/plugins/plugin-types";
 import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { EaglePluginSettingsPanel } from "@/pages/plugins/eagle";
 import {
     fetchPlugins,
     installPluginPackage,
+    setPluginPlatformEnabled,
     setUserPluginEnabled,
     uninstallPlugin,
     updatePluginPackage,
@@ -33,7 +34,7 @@ import { isLocalRuntimeMode } from "@/lib/runtime-mode";
 import { workspaceCapabilities } from "@/services/workspace-mode";
 
 import { PluginDetailsModal } from "./plugin-documentation-modals";
-import { PLUGIN_INSTALL_REQUEST_EVENT, PluginInstallConfirmModal } from "./plugin-install-confirm-modal";
+import { PluginInstallConfirmModal } from "./plugin-install-confirm-modal";
 import "./plugins.css";
 
 const categoryLabels: Record<string, string> = {
@@ -136,11 +137,6 @@ export default function PluginsPage() {
                 ensurePlugin(item.manifest);
                 const effective = result.states?.[item.manifest.id]?.effectiveEnabled ?? (item.status === "enabled");
                 setEnabled(item.manifest.id, effective);
-                if (effective && (item.clientUrl || item.manifest.client)) {
-                    void loadAndActivateClientPlugin(item.manifest.id, { clientUrl: item.clientUrl, manifest: item.manifest });
-                } else if (!effective) {
-                    deactivateClientPlugin(item.manifest.id);
-                }
             }
         } catch (error) {
             if (!localRuntime) {
@@ -244,16 +240,13 @@ export default function PluginsPage() {
                 message.success(`${plugin.manifest.name}${enabled ? "已启用" : "已停用"}`);
                 return;
             }
-            const next = await setUserPluginEnabled(plugin.manifest.id, enabled);
+            const next = remote?.management.activationScope === "system"
+                ? await setPluginPlatformEnabled(plugin.manifest.id, enabled)
+                : await setUserPluginEnabled(plugin.manifest.id, enabled);
             setEnabled(plugin.manifest.id, next.effectiveEnabled ?? enabled);
             setPluginStates({ ...usePluginStore.getState().pluginStates, [next.pluginId]: next });
             if (next.pluginId === RUNNINGHUB_PLUGIN_ID) {
                 setRuntimeStatuses({ ...usePluginStore.getState().runtimeStatuses, [next.pluginId]: next.effectiveEnabled ? "enabled" : "disabled" });
-            }
-            if (next.effectiveEnabled && (remote?.clientUrl || plugin.manifest.client)) {
-                void loadAndActivateClientPlugin(plugin.manifest.id, { clientUrl: remote?.clientUrl, manifest: plugin.manifest });
-            } else if (!next.effectiveEnabled) {
-                deactivateClientPlugin(plugin.manifest.id);
             }
             message.success(`${plugin.manifest.name}${enabled ? "已启用" : "已停用"}`);
         } catch (error) {
@@ -269,23 +262,8 @@ export default function PluginsPage() {
     const handleInstallConfirm = async (request: PluginInstallConfirmRequest) => {
         setInstalling(true);
         try {
-            const installed = await installPluginPackage({
-                source: request.source,
-                package: request.packageName,
-                packageUrl: request.packageUrl,
-                localPath: request.localPath,
-                registry: request.registry,
-                sha256: request.sha256,
-                trustTier: request.trustTier,
-            });
-            ensurePlugin(installed.manifest);
-            setEnabled(installed.manifest.id, installed.status === "enabled");
-            if (installed.status === "enabled" && (installed.clientUrl || installed.manifest.client)) {
-                await loadAndActivateClientPlugin(installed.manifest.id, {
-                    clientUrl: installed.clientUrl,
-                    manifest: installed.manifest,
-                });
-            }
+            const installed = await installPluginPackage({ source: request.source, registry: request.registry });
+            deactivateClientPlugin(installed.manifest.id);
             setInstallModalOpen(false);
             setInstallPendingRequest(null);
             message.success(`已安装插件「${installed.manifest.name}」`);
@@ -301,13 +279,7 @@ export default function PluginsPage() {
         setUpdatingPluginId(pluginId);
         try {
             const updated = await updatePluginPackage(pluginId);
-            ensurePlugin(updated.manifest);
-            if (updated.status === "enabled" && (updated.clientUrl || updated.manifest.client)) {
-                await loadAndActivateClientPlugin(updated.manifest.id, {
-                    clientUrl: updated.clientUrl,
-                    manifest: updated.manifest,
-                });
-            }
+            deactivateClientPlugin(updated.manifest.id);
             message.success(`插件「${updated.manifest.name}」已更新到 v${updated.manifest.version}`);
             await reloadBackendPlugins();
         } catch (error) {
@@ -453,7 +425,7 @@ export default function PluginsPage() {
                                     pluginStates={pluginStates}
                                     reloadPlugins={reloadBackendPlugins}
                                     requestInstallPlugin={(req) => {
-                                        setInstallPendingRequest(normalizePluginInstallRequest(req));
+                                        setInstallPendingRequest(req);
                                         setInstallModalOpen(true);
                                     }}
                                 />
@@ -568,7 +540,7 @@ export default function PluginsPage() {
                                                                         title={state?.blockedReason}
                                                                         onChange={(checked) => void togglePlugin(plugin, checked)}
                                                                     />
-                                                                    {remote?.updateAvailable ? (
+                                                                    {remote?.source === "package" && remote.packageSpec ? (
                                                                         <Button
                                                                             className="plugin-settings-button"
                                                                             icon={<ArrowUpCircle className="size-4" />}
@@ -745,7 +717,6 @@ export default function PluginsPage() {
                             open={installModalOpen}
                             initialRequest={installPendingRequest}
                             loading={installing}
-                            permissionLabels={permissionLabels}
                             onCancel={() => {
                                 setInstallModalOpen(false);
                                 setInstallPendingRequest(null);

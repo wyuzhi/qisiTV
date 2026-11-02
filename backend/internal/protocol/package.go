@@ -283,9 +283,14 @@ func ParsePluginPackageDir(rootDir string) (PluginPackage, error) {
 	if err := json.Unmarshal(pkgJSONBytes, &pkgJSON); err != nil {
 		return PluginPackage{}, fmt.Errorf("decode package.json: %w", err)
 	}
+	// A plain pi package (assistant tools and skills only) has no beeftv field;
+	// it installs with an empty BeefTV manifest and its pi resources.
 	beeftvRaw := bytes.TrimSpace(pkgJSON.BeefTV)
-	if len(beeftvRaw) == 0 || string(beeftvRaw) == "null" || beeftvRaw[0] != '{' {
-		return PluginPackage{}, fmt.Errorf("package.json is missing a beeftv object")
+	if len(beeftvRaw) == 0 || string(beeftvRaw) == "null" {
+		beeftvRaw = []byte("{}")
+	}
+	if beeftvRaw[0] != '{' {
+		return PluginPackage{}, fmt.Errorf("package.json beeftv must be an object")
 	}
 	var manifest Manifest
 	if err := json.Unmarshal(beeftvRaw, &manifest); err != nil {
@@ -301,7 +306,7 @@ func ParsePluginPackageDir(rootDir string) (PluginPackage, error) {
 		manifest.APIVersion = "beeftv.plugin/v1"
 	}
 	if strings.TrimSpace(manifest.Metadata.ID) == "" {
-		manifest.Metadata.ID = unscopedPackageName(pkgJSON.Name)
+		manifest.Metadata.ID = PackageIDFromName(pkgJSON.Name)
 	}
 	if strings.TrimSpace(manifest.Metadata.Version) == "" {
 		manifest.Metadata.Version = strings.TrimSpace(pkgJSON.Version)
@@ -403,12 +408,13 @@ func ParsePluginPackageDir(rootDir string) (PluginPackage, error) {
 	}, nil
 }
 
-func unscopedPackageName(raw string) string {
+// PackageIDFromName derives a plugin ID from an npm package name when the
+// package does not set beeftv.id: "@scope/name" becomes "scope-name", so two
+// scopes publishing the same name never replace each other.
+func PackageIDFromName(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if strings.HasPrefix(trimmed, "@") {
-		if slash := strings.IndexByte(trimmed, '/'); slash >= 0 && slash+1 < len(trimmed) {
-			trimmed = trimmed[slash+1:]
-		}
+		return strings.Replace(strings.TrimPrefix(trimmed, "@"), "/", "-", 1)
 	}
 	return trimmed
 }

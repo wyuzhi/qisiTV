@@ -11,18 +11,7 @@ import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { createModels } from '@earendil-works/pi-ai/models';
 import { createOperationBridge } from '../operation-bridge.mjs';
 import { createDurableSessionStore } from '../durable-session-owner.mjs';
-import {
-  DEFAULT_CN_NPM_REGISTRY,
-  DEFAULT_GLOBAL_NPM_REGISTRY,
-  NPM_SEARCH_REGISTRY,
-  createPluginPackageController,
-  loadPluginExtensionsFromPackages,
-  resolveBundledNpmCliPath,
-  resolveNpmCommand,
-  resolveRegistryUrl,
-  searchNpmPlugins,
-  stagePluginPackage,
-} from '../plugin-packages.mjs';
+import { createPluginPackageController, loadPluginExtensionsFromPackages } from '../plugin-packages.mjs';
 
 function writePluginPackage(baseDir, dirName, { name, version = '1.0.0', extensionCode, skillName = null, extraManifest = {} }) {
   const pkgDir = path.join(baseDir, dirName);
@@ -249,33 +238,6 @@ test('read-only mode blocks plugin tool from calling write operations via ctx.ex
       });
     }`,
   });
-
-  // 1. Direct unit check in read-only mode
-  const loaded = await loadPluginExtensionsFromPackages({
-    packages: [{ id: 'writer-plugin', packageDir: pkgWriter }],
-    readOnly: true,
-  });
-  let readCalls = 0;
-  let writeCalls = 0;
-  await assert.rejects(
-    loaded.tools[0].execute(
-      { title: 'blocked' },
-      {
-        executeTool: async (name) => {
-          if (name === 'canvas_get') {
-            readCalls += 1;
-            return { isError: false, structuredOutput: '{"canvas":{"revision":1}}' };
-          }
-          writeCalls += 1;
-          return { isError: false, structuredOutput: '{}' };
-        },
-      },
-      { permissionMode: 'read-only' },
-    ),
-    (err) => err.reason === 'scope_denied' && /scope_denied/.test(err.message),
-  );
-  assert.equal(readCalls, 1);
-  assert.equal(writeCalls, 0);
 
   // 2. End-to-end Durable Session Store + Operation Bridge check across read-only and canvas turns
   let currentPermissionMode = 'read-only';
@@ -620,104 +582,6 @@ test('hot reload updates plugin tools on existing session for the very next turn
   }
 });
 
-test('bundled npm command resolution, registry switching, staging, and npmjs search (Work Package 1.10)', async (t) => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'beeftv-plugin-npm-'));
-  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
-
-  // 1. Registry resolution defaults and switching
-  assert.equal(resolveRegistryUrl({ env: {} }), DEFAULT_CN_NPM_REGISTRY);
-  assert.equal(resolveRegistryUrl({ locale: 'zh-CN', env: {} }), DEFAULT_CN_NPM_REGISTRY);
-  assert.equal(resolveRegistryUrl({ locale: 'en-US', env: {} }), DEFAULT_GLOBAL_NPM_REGISTRY);
-  assert.equal(resolveRegistryUrl({ registryUrl: 'global', env: {} }), DEFAULT_GLOBAL_NPM_REGISTRY);
-  assert.equal(resolveRegistryUrl({ registryUrl: 'https://registry.npmjs.org/', env: {} }), DEFAULT_GLOBAL_NPM_REGISTRY);
-  assert.equal(
-    resolveRegistryUrl({ env: { BEEFTV_NPM_REGISTRY: 'https://registry.npmjs.org' } }),
-    DEFAULT_GLOBAL_NPM_REGISTRY,
-  );
-
-  // 2. Bundled npm path detection (Unix & Windows) vs fallback
-  const unixNode = path.join(tmp, 'unix', 'runtime', 'bin', 'node');
-  const unixNpmCli = path.join(tmp, 'unix', 'runtime', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
-  fs.mkdirSync(path.dirname(unixNode), { recursive: true });
-  fs.mkdirSync(path.dirname(unixNpmCli), { recursive: true });
-  fs.writeFileSync(unixNode, '');
-  fs.writeFileSync(unixNpmCli, '');
-
-  assert.equal(resolveBundledNpmCliPath({ execPath: unixNode, platform: 'darwin' }), unixNpmCli);
-  assert.deepEqual(resolveNpmCommand({ execPath: unixNode, platform: 'darwin', env: {} }), [
-    unixNode,
-    unixNpmCli,
-    `--registry=${DEFAULT_CN_NPM_REGISTRY}`,
-    '--no-audit',
-    '--no-fund',
-  ]);
-  assert.deepEqual(
-    resolveNpmCommand({ execPath: unixNode, platform: 'darwin', registryUrl: DEFAULT_GLOBAL_NPM_REGISTRY }),
-    [unixNode, unixNpmCli, `--registry=${DEFAULT_GLOBAL_NPM_REGISTRY}`, '--no-audit', '--no-fund'],
-  );
-
-  // Fallback when bundled npm-cli.js is absent
-  const bareNode = path.join(tmp, 'bare', 'bin', 'node');
-  assert.equal(resolveBundledNpmCliPath({ execPath: bareNode, platform: 'darwin' }), null);
-  assert.deepEqual(resolveNpmCommand({ execPath: bareNode, platform: 'darwin', env: {} }), [
-    'npm',
-    `--registry=${DEFAULT_CN_NPM_REGISTRY}`,
-    '--no-audit',
-    '--no-fund',
-  ]);
-
-  // 3. stagePluginPackage passes bundled npm and registry flags
-  const stageDir = path.join(tmp, 'staged-plugin');
-  const spawnCalls = [];
-  const stageResult = stagePluginPackage({
-    source: '@beeftv-plugin/sample@1.2.0',
-    targetDir: stageDir,
-    registryUrl: 'global',
-    execPath: unixNode,
-    platform: 'darwin',
-    spawnImpl: (cmd, args, opts) => {
-      spawnCalls.push({ cmd, args, opts });
-      return { status: 0, stdout: 'installed', stderr: '' };
-    },
-  });
-  assert.equal(stageResult.ok, true);
-  assert.equal(stageResult.registryUrl, DEFAULT_GLOBAL_NPM_REGISTRY);
-  assert.equal(spawnCalls.length, 1);
-  assert.equal(spawnCalls[0].cmd, unixNode);
-  assert.deepEqual(spawnCalls[0].args, [
-    unixNpmCli,
-    `--registry=${DEFAULT_GLOBAL_NPM_REGISTRY}`,
-    '--no-audit',
-    '--no-fund',
-    'install',
-    '--prefix',
-    stageDir,
-    '@beeftv-plugin/sample@1.2.0',
-  ]);
-
-  // 4. searchNpmPlugins always uses https://registry.npmjs.org
-  const searchCalls = [];
-  const searchResult = await searchNpmPlugins({
-    query: 'storyboard',
-    size: 10,
-    fetchImpl: async (url) => {
-      searchCalls.push(String(url));
-      return new Response(
-        JSON.stringify({
-          total: 1,
-          objects: [{ package: { name: '@beeftv-plugin/storyboard', version: '1.0.0' } }],
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      );
-    },
-  });
-  assert.equal(searchCalls.length, 1);
-  assert(searchCalls[0].startsWith(`${NPM_SEARCH_REGISTRY}/-/v1/search?`));
-  assert(searchCalls[0].includes(encodeURIComponent('keywords:beeftv-plugin storyboard')));
-  assert.equal(searchResult.packages.length, 1);
-  assert.equal(searchResult.packages[0].name, '@beeftv-plugin/storyboard');
-});
-
 test('server.mjs loads enabled plugins from Go on startup, reports load-error, and supports POST /plugins/reload + GET /tools', async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'beeftv-plugin-server-'));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
@@ -868,12 +732,11 @@ test('server.mjs loads enabled plugins from Go on startup, reports load-error, a
     const reloadRes = await fetch(`${baseUrl}/plugins/reload`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ registryUrl: 'global' }),
+      body: JSON.stringify({}),
     });
     assert.equal(reloadRes.status, 200);
     const reloadData = await reloadRes.json();
     assert.equal(reloadData.ok, true);
-    assert.equal(reloadData.registryUrl, DEFAULT_GLOBAL_NPM_REGISTRY);
     assert.deepEqual(reloadData.packages.map((p) => p.id), ['reloaded-server-plugin']);
 
     const toolsAfterRes = await fetch(`${baseUrl}/tools`, { headers });

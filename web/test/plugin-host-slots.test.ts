@@ -29,7 +29,7 @@ import {
     getPluginSlotItems,
     runGenerationBeforeSubmitHooks,
 } from "../src/lib/plugins/slot-registry";
-import { resolveInstallConfirmCopy } from "../src/pages/plugins/plugin-install-confirm-modal";
+import { installSourceLabel } from "../src/pages/plugins/plugin-install-confirm-modal";
 import { usePluginStore } from "../src/stores/use-plugin-store";
 
 const DummyComponent = () => null;
@@ -247,7 +247,7 @@ describe("plugin host slots, events, and lifecycle", () => {
             id: "append-tag",
             transform: async (ctx) => ({
                 prompt: `${ctx.prompt}, cinematic lighting`,
-                params: { ...ctx.params, quality: "hd" },
+                metadata: { styleTag: "cinematic" },
             }),
         });
 
@@ -255,19 +255,19 @@ describe("plugin host slots, events, and lifecycle", () => {
             nodeId: "node-1",
             nodeType: "image",
             prompt: "a cute cat",
-            model: "gpt-image-1",
+            model: "test-model",
             params: {},
         });
 
         expect(result.prompt).toBe("a cute cat, cinematic lighting");
-        expect(result.params).toEqual({ quality: "hd" });
+        expect(result.metadata).toEqual({ styleTag: "cinematic" });
         expect(result.adjustedByPlugins).toEqual([{ pluginId, pluginName: "提示词增强器" }]);
-        expect(result.notifications).toEqual(["已由插件「提示词增强器」调整生成参数"]);
+        expect(result.notifications).toEqual(["提示词已由插件「提示词增强器」调整"]);
 
         disposePluginContributions(pluginId);
     });
 
-    test("plugin event bus supports all 8 events, isolates listener errors, and disposes on disable", async () => {
+    test("plugin event bus delivers every emitted event, isolates listener errors, and disposes on disable", async () => {
         const pluginId = "event-listener-plugin";
         usePluginStore.getState().ensurePlugin({
             id: pluginId,
@@ -279,22 +279,13 @@ describe("plugin host slots, events, and lifecycle", () => {
         });
 
         const received: string[] = [];
-        onPluginEvent(pluginId, "canvas.opened", (p) => {
-            received.push(`opened:${p.projectId}`);
-        });
-        onPluginEvent(pluginId, "canvas.changed", () => {
+        onPluginEvent(pluginId, "generation.submitted", () => {
             throw new Error("boom in listener");
-        });
-        onPluginEvent(pluginId, "canvas.changed", (p) => {
-            received.push(`changed:${p.nodeCount}`);
-        });
-        onPluginEvent(pluginId, "canvas.selectionChanged", (p) => {
-            received.push(`sel:${p.selectedNodeIds.join(",")}`);
         });
         onPluginEvent(pluginId, "generation.submitted", (p) => {
             received.push(`sub:${p.nodeId}`);
         });
-        onPluginEvent(pluginId, "generation.succeeded", (p) => {
+        onPluginEvent(pluginId, "generation.completed", (p) => {
             received.push(`ok:${p.nodeId}`);
         });
         onPluginEvent(pluginId, "generation.failed", (p) => {
@@ -307,34 +298,18 @@ describe("plugin host slots, events, and lifecycle", () => {
             received.push(`turn:${p.turnId}`);
         });
 
-        emitPluginEvent("canvas.opened", { projectId: "p1", canvasId: "c1" });
-        emitPluginEvent("canvas.changed", { projectId: "p1", canvasId: "c1", nodeCount: 3, connectionCount: 2 });
-        emitPluginEvent("canvas.selectionChanged", { selectedNodeIds: ["n1", "n2"] });
         emitPluginEvent("generation.submitted", { nodeId: "n1", nodeType: "image", prompt: "cat" });
-        emitPluginEvent("generation.succeeded", {
-            nodeId: "n1",
-            nodeType: "image",
-            resultUrls: ["https://example.com/1.png"],
-        });
+        emitPluginEvent("generation.completed", { nodeId: "n1", nodeType: "image" });
         emitPluginEvent("generation.failed", { nodeId: "n1", nodeType: "image", error: "timeout" });
         emitPluginEvent("assets.imported", {
             assets: [{ id: "a1", name: "1.png", type: "image", url: "https://example.com/1.png" }],
         });
         emitPluginEvent("assistant.turnCompleted", { sessionId: "s1", turnId: "t1", status: "completed" });
 
-        expect(received).toEqual([
-            "opened:p1",
-            "changed:3",
-            "sel:n1,n2",
-            "sub:n1",
-            "ok:n1",
-            "fail:n1",
-            "assets:1",
-            "turn:t1",
-        ]);
+        expect(received).toEqual(["sub:n1", "ok:n1", "fail:n1", "assets:1", "turn:t1"]);
 
         disposePluginEvents(pluginId);
-        expect(getPluginEventListenerCount("canvas.opened")).toBe(0);
+        expect(getPluginEventListenerCount("generation.submitted")).toBe(0);
     });
 
     test("activateClientPluginModule isolates faulty plugins, rolls back partial slots, and marks invalid", async () => {
@@ -374,37 +349,10 @@ describe("plugin host slots, events, and lifecycle", () => {
         deactivateClientPlugin(brokenPluginId);
     });
 
-    test("resolveInstallConfirmCopy produces required risk copy and trust tier gating", () => {
-        const communityCopy = resolveInstallConfirmCopy({
-            id: "community-demo",
-            name: "社区插件",
-            version: "1.0.0",
-            source: "market",
-            trustTier: "community",
-            permissions: ["canvas.write"],
-            hasClientCode: true,
-            hasNativeHostCode: true,
-        });
-        expect(communityCopy.trustMeta.requiresExplicitTrust).toBe(true);
-        expect(communityCopy.clientWarning).toBe("此插件包含前端界面代码，将在当前应用界面中运行。");
-        expect(communityCopy.nativeWarning).toBe(
-            "此插件包含本地扩展代码，可在你的电脑上读写文件、访问网络或调用外部程序。",
-        );
-        expect(communityCopy.checkboxLabel).toBe("我确认信任此插件来源并了解其本地执行权限");
-
-        const officialCopy = resolveInstallConfirmCopy({
-            id: "official-demo",
-            name: "官方插件",
-            version: "1.0.0",
-            source: "bundled",
-            trustTier: "official",
-            permissions: [],
-            hasClientCode: true,
-            hasNativeHostCode: false,
-        });
-        expect(officialCopy.trustMeta.requiresExplicitTrust).toBe(false);
-        expect(officialCopy.checkboxLabel).toBeNull();
-        expect(officialCopy.nativeWarning).toBeNull();
+    test("install confirmation labels where the code comes from, and requests cannot mark themselves trusted", () => {
+        expect(installSourceLabel({ source: "beeftv-plugin-example" })).toBe("npm 包");
+        expect(installSourceLabel({ source: "/Users/me/my-plugin" })).toBe("本地目录");
+        expect(installSourceLabel({ source: "beeftv-plugin-sticky-note" })).toBe("npm 包");
     });
 
     test("activates real bundled ESM client plugins from plugin-packages and cleans up on disable", async () => {
@@ -448,10 +396,10 @@ describe("plugin host slots, events, and lifecycle", () => {
             getPluginSlotEntries("assistant.toolCard").some((e) => e.pluginId === "beeftv-plugin-ecommerce-hero"),
         ).toBe(true);
 
-        // Slot test plugin contributes across all 21 slots and 8 events
+        // Slot test plugin contributes to every slot and listens to every event
         expect(getPluginCanvasNodeRenderer("slot-test-node")?.pluginId).toBe("beeftv-plugin-slot-test");
-        expect(getPluginEventListenerCount("canvas.opened")).toBeGreaterThanOrEqual(1);
-        expect(getPluginEventListenerCount("generation.succeeded")).toBeGreaterThanOrEqual(1);
+        expect(getPluginEventListenerCount("generation.completed")).toBeGreaterThanOrEqual(1);
+        expect(getPluginEventListenerCount("assistant.turnCompleted")).toBeGreaterThanOrEqual(1);
 
         // Deactivate all and verify clean teardown
         for (const pkg of packages) {

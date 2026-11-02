@@ -33,9 +33,6 @@ export const BEEFTV_SLOTS = Object.freeze([
 ]);
 
 export const BEEFTV_EVENTS = Object.freeze([
-  "canvas.opened",
-  "canvas.changed",
-  "canvas.selectionChanged",
   "generation.submitted",
   "generation.completed",
   "generation.failed",

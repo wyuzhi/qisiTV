@@ -11,18 +11,8 @@ const SCENE_STYLES = [
 
 const SCENE_COUNTS = [1, 2, 4];
 
-function getReact(host) {
-  if (host?.React) return host.React;
-  if (host?.ui?.React) return host.ui.React;
-  if (typeof window !== "undefined") {
-    return window.__BEEFTV_REACT__ || window.React || null;
-  }
-  return null;
-}
-
 export function activate(host) {
-  const React = getReact(host);
-  if (!React) return;
+  const React = host.React;
   const h = React.createElement;
 
   function EcommerceHeroNodeCard(props) {
@@ -62,32 +52,18 @@ export function activate(host) {
           ? Number(sceneCount)
           : 2;
 
-        let canvasId =
-          props?.projectId ||
-          host.context?.getCanvasId?.() ||
-          (typeof window !== "undefined"
-            ? window.location.pathname.split("/").filter(Boolean).pop()
-            : "");
-        let expectedRevision = host.context?.getCanvasRevision?.();
-
-        if (canvasId && !Number.isSafeInteger(expectedRevision) && host.ops?.call) {
-          const readRes = await host.ops.call("canvas.get", { canvasId });
-          expectedRevision = readRes?.result?.canvas?.revision ?? readRes?.revision;
-        }
+        const canvasId = host.context.getCanvasId();
+        if (!canvasId) throw new Error("请先打开一张画布");
+        const current = await host.ops.call("canvas.get", { canvasId });
+        const expectedRevision = current?.canvas?.revision;
+        if (!Number.isSafeInteger(expectedRevision)) throw new Error("读不到画布版本，请刷新后重试");
 
         const drafts = Array.from({ length: count }, (_, idx) => ({
           type: "image",
           title: `${productTitle || "商品"} · ${styleItem.label} #${idx + 1}`,
           prompt: `${styleItem.promptPrefix}，商品主体：${productTitle || "主推商品"}，第 ${idx + 1} 视角构图${imageUrl ? `，参考商品图：${imageUrl}` : ""}。`,
         }));
-
-        if (host.ops?.call && canvasId && Number.isSafeInteger(expectedRevision)) {
-          await host.ops.call("canvas.nodes.create", {
-            canvasId,
-            expectedRevision,
-            nodes: drafts,
-          });
-        }
+        await host.ops.call("canvas.nodes.create", { canvasId, expectedRevision, nodes: drafts });
         setStatusMessage(`已创建 ${count} 个${styleItem.label}主图节点`);
         host.ui?.notify?.(
           `已为「${productTitle || "商品"}」生成 ${count} 个主图节点`,

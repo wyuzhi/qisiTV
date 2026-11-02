@@ -560,7 +560,7 @@ export function useCanvasGenerationExecutor({
                             else if (mode === "video") await executeVideoGeneration(execution);
                             else if (mode === "audio") await executeAudioGeneration(execution);
                             else await executeTextGeneration(execution);
-                            emitPluginEvent("generation.succeeded", { nodeId, nodeType: mode, resultUrls: [] });
+                            emitPluginEvent("generation.completed", { nodeId, nodeType: mode });
                         } catch (error) {
                             if (isGenerationCanceled(error)) return;
                             const failure = canvasGenerationFailureMetadata(error, { ...generationContext, mode });

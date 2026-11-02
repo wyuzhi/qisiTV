@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -24,7 +25,6 @@ import (
 type fakePluginCenter struct {
 	user      *model.User
 	pluginSvc *plugins.Service
-	skillsSvc *skills.Service
 }
 
 func (f *fakePluginCenter) WorkspaceOwner(string) (*model.User, error) {
@@ -37,10 +37,6 @@ func (f *fakePluginCenter) LocalWorkspaceOwner() (*model.User, error) {
 
 func (f *fakePluginCenter) PluginDomain() *plugins.Service {
 	return f.pluginSvc
-}
-
-func (f *fakePluginCenter) SkillsDomain() *skills.Service {
-	return f.skillsSvc
 }
 
 func (f *fakePluginCenter) PluginsForUser(*model.User) ([]plugins.View, error) {
@@ -161,6 +157,8 @@ func TestPluginPackageRoutesAndSkillSyncLifecycle(t *testing.T) {
 		t.Fatalf("create workspace: %v", err)
 	}
 	skillsSvc := skills.New(repository.New(db), filepath.Join(tmpDir, "skills-data"), nil)
+	pluginSvc.SetSkillSyncHook(skillsSvc.ApplyPluginSkills)
+	pluginSvc.SetPackageFetcher(copyPackageForTest)
 
 	center := &fakePluginCenter{
 		user: &model.User{
@@ -168,7 +166,6 @@ func TestPluginPackageRoutesAndSkillSyncLifecycle(t *testing.T) {
 			Role: model.UserRoleAdmin,
 		},
 		pluginSvc: pluginSvc,
-		skillsSvc: skillsSvc,
 	}
 
 	router := gin.New()
@@ -231,8 +228,8 @@ func TestPluginPackageRoutesAndSkillSyncLifecycle(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/api/plugins/story-card/files/../package.json", nil)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-	if rec.Code == http.StatusOK {
-		t.Fatalf("expected path traversal to fail, got 200")
+	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), `"reason"`) {
+		t.Fatalf("expected path traversal to fail with an envelope, got %d %s", rec.Code, rec.Body.String())
 	}
 
 	// 4. POST /api/plugins/:id/load-error marks plugin invalid
@@ -248,14 +245,12 @@ func TestPluginPackageRoutesAndSkillSyncLifecycle(t *testing.T) {
 		t.Fatalf("expected plugin status invalid in response: %s", rec.Body.String())
 	}
 
-	// 5. PUT /api/plugins/:id/state disables and re-enables plugin
-	stateBody, _ := json.Marshal(map[string]any{"enabled": false})
-	req = httptest.NewRequest(http.MethodPut, "/api/plugins/story-card/state", bytes.NewReader(stateBody))
-	req.Header.Set("Content-Type", "application/json")
+	// 5. Package plugins are system-scoped: disable and re-enable through the admin toggle
+	req = httptest.NewRequest(http.MethodPost, "/api/plugins/story-card/disable", nil)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("PUT /api/plugins/story-card/state (disable) status = %d, body = %s", rec.Code, rec.Body.String())
+		t.Fatalf("POST /api/plugins/story-card/disable status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 	addedAfterDisable, _ := skillsSvc.AddedSkills("admin-1")
 	for _, item := range addedAfterDisable {
@@ -264,13 +259,11 @@ func TestPluginPackageRoutesAndSkillSyncLifecycle(t *testing.T) {
 		}
 	}
 
-	stateBody, _ = json.Marshal(map[string]any{"enabled": true})
-	req = httptest.NewRequest(http.MethodPut, "/api/plugins/story-card/state", bytes.NewReader(stateBody))
-	req.Header.Set("Content-Type", "application/json")
+	req = httptest.NewRequest(http.MethodPost, "/api/plugins/story-card/enable", nil)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("PUT /api/plugins/story-card/state (enable) status = %d, body = %s", rec.Code, rec.Body.String())
+		t.Fatalf("POST /api/plugins/story-card/enable status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 
 	// 6. GET /api/plugins/market/search returns local package match
@@ -297,4 +290,19 @@ func TestPluginPackageRoutesAndSkillSyncLifecycle(t *testing.T) {
 			t.Fatalf("expected plugin skill to be removed after uninstall, still found %+v", item)
 		}
 	}
+}
+
+func copyPackageForTest(_ context.Context, spec, _ string, prefixDir string) (string, error) {
+	raw, err := os.ReadFile(filepath.Join(spec, "package.json"))
+	if err != nil {
+		return "", err
+	}
+	var pkg struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(raw, &pkg); err != nil {
+		return "", err
+	}
+	root := filepath.Join(prefixDir, "node_modules", filepath.FromSlash(pkg.Name))
+	return root, os.CopyFS(root, os.DirFS(spec))
 }

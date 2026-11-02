@@ -496,9 +496,9 @@ export type GenerationSubmitContext = {
     metadata?: Record<string, unknown>;
 };
 
+/** A plugin may rewrite the prompt and attach metadata; model parameters stay as the user set them. */
 export type GenerationSubmitPatch = {
     prompt?: string;
-    params?: Record<string, unknown>;
     metadata?: Record<string, unknown>;
 };
 
@@ -608,7 +608,7 @@ export type PluginCenterSectionProps = {
     installedPlugins?: RegisteredPlugin[];
     pluginStates?: Record<string, unknown>;
     reloadPlugins?: () => Promise<void> | void;
-    requestInstallPlugin?: (req: Record<string, unknown>) => void;
+    requestInstallPlugin?: (req: PluginInstallConfirmRequest) => void;
 };
 
 export type PluginCenterSectionContribution = {
@@ -664,12 +664,8 @@ export type PluginSlotName = keyof PluginSlotMap;
 // ── Section 5.3: 8 Frontend Plugin Events ────────────────────────────────────
 
 export type PluginEventMap = {
-    "canvas.opened": { projectId: string; canvasId: string };
-    "canvas.changed": { projectId?: string; canvasId?: string; nodeCount: number; connectionCount: number };
-    "canvas.selectionChanged": { projectId?: string; canvasId?: string; selectedNodeIds: string[] };
     "generation.submitted": { nodeId: string; nodeType: string; model?: string; prompt: string; taskId?: string };
-    "generation.succeeded": { nodeId: string; nodeType: string; resultUrls: string[]; taskId?: string };
-    "generation.completed": { nodeId: string; nodeType: string; resultUrls: string[]; taskId?: string };
+    "generation.completed": { nodeId: string; nodeType: string };
     "generation.failed": { nodeId: string; nodeType: string; error: string; taskId?: string };
     "assets.imported": { assets: Array<{ id: string; name: string; type: string; url: string }> };
     "assistant.turnCompleted": { canvasId?: string; sessionId?: string; turnId?: string; status: "completed" | "failed" | "cancelled" };
@@ -679,37 +675,23 @@ export type PluginEventName = keyof PluginEventMap;
 
 // ── Section 5.1 / 2.3: Host SDK & Install Confirmation Types ─────────────────
 
-export type PluginTrustTier = "official" | "verified" | "community" | "local";
-
+/** What the host install confirmation needs; Go reads the real package before committing. */
 export type PluginInstallConfirmRequest = {
-    id: string;
-    name: string;
-    version: string;
+    /** npm spec, local package directory, or the name of a sample shipped with BeefTV. */
+    source: string;
+    name?: string;
+    version?: string;
     description?: string;
     author?: string;
-    source: string;
-    sourceLabel?: string;
-    trustTier: PluginTrustTier;
-    permissions?: Array<PluginPermission | EditorPluginPermission | string>;
-    hasClientCode?: boolean;
-    hasNativeHostCode?: boolean;
-    packageUrl?: string;
-    packageName?: string;
-    localPath?: string;
+    /** npm registry chosen in the market: npmmirror or npmjs. */
     registry?: string;
     isUpdate?: boolean;
-    sha256?: string;
-    installPayload?: {
-        spec?: string;
-        localPath?: string;
-        manifest?: Record<string, unknown>;
-    };
 };
 
 export type BeefTVPluginHost = {
     pluginId: string;
     manifest: PluginManifest | PluginManifestV2;
-    React?: typeof import("react");
+    React: typeof import("react");
     contribute: <K extends PluginSlotName>(slot: K, payload: PluginSlotMap[K]) => () => void;
     events: {
         on: <E extends PluginEventName>(event: E, handler: (payload: PluginEventMap[E]) => void) => () => void;
@@ -722,27 +704,18 @@ export type BeefTVPluginHost = {
         set: (patch: Record<string, string | number | boolean>) => Promise<void>;
     };
     ui: {
-        React?: typeof import("react");
         notify: (message: string, level?: "info" | "success" | "warning" | "error") => void;
-        toast?: (message: string, level?: "info" | "success" | "warning" | "error") => void;
         navigate: (path: string) => void;
-        requestInstallPlugin?: (req: Record<string, unknown>) => void;
+        /** Opens the host install confirmation; nothing installs without the user's confirmation. */
+        requestInstallPlugin: (request: PluginInstallConfirmRequest) => void;
     };
-    requestInstallPlugin?: (req: Record<string, unknown>) => void;
-    ops?: {
-        call: (opId: string, params?: Record<string, unknown>) => Promise<unknown>;
+    /** Business operations, the same set the CLI, MCP and assistant use. Writes go through here only. */
+    ops: {
+        call: <T = unknown>(op: string, params?: Record<string, unknown>) => Promise<T>;
     };
-    context?: {
-        getCanvasId?: () => string | undefined;
-        getCanvasRevision?: () => number | undefined;
-    };
-    ai: {
-        generateText: (input: { prompt: string; systemPrompt?: string; model?: string }) => Promise<{ text: string; model: string }>;
-    };
-    canvas: {
-        getNodes: () => CanvasNodeData[];
-        getSelectedNodeIds: () => string[];
-        updateNode: (nodeId: string, patch: Partial<CanvasNodeData>) => void;
+    context: {
+        /** Canvas currently open in the workspace, from the route. */
+        getCanvasId: () => string | undefined;
     };
     assets: {
         list: () => Asset[];

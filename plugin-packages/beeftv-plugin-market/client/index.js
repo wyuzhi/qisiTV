@@ -1,162 +1,26 @@
-// BeefTV 预装官方插件市场：通过 pluginCenter.section 插槽在插件中心挂载「插件市场」栏。
-// 支持「精选推荐」（联网读取 GitHub raw，断网或超时自动回退内置离线副本）与「npm 社区搜索」（keywords:beeftv-plugin），
-// 点击安装或更新时统一调用宿主确认框，不由市场插件自行绕过确认。
-
-const REMOTE_REGISTRY_URL =
-  "https://raw.githubusercontent.com/Sunnyender-org/beeftv-plugins/main/registry.json";
-const LOCAL_FALLBACK_URL =
-  "/api/plugins/beeftv-plugin-market/files/registry.json";
+// BeefTV 预装的插件市场：通过 pluginCenter.section 插槽在插件中心挂一栏「插件市场」。
+// 推荐列表和 npm 搜索都由 BeefTV 后端 /api/plugins/market/search 合并返回（推荐列表联网读 GitHub，断网用内置副本）；
+// 安装与更新统一走宿主的确认框，市场插件自己不安装任何东西。
 
 const REGISTRY_MIRRORS = [
-  {
-    value: "https://registry.npmmirror.com",
-    label: "国内镜像（npmmirror，默认）",
-  },
-  {
-    value: "https://registry.npmjs.org",
-    label: "npm 官方源（npmjs.org）",
-  },
+  { value: "https://registry.npmmirror.com", label: "国内镜像（npmmirror，默认）" },
+  { value: "https://registry.npmjs.org", label: "npm 官方源（npmjs.org）" },
 ];
 
-const EMBEDDED_FALLBACK_PLUGINS = [
-  {
-    id: "beeftv-plugin-ecommerce-hero",
-    packageName: "beeftv-plugin-ecommerce-hero",
-    name: "一键商品主图",
-    version: "0.1.0",
-    description:
-      "上传商品图并选择场景图数量，自动编排电商主图画布节点、助手工具与生成技能。",
-    author: "BeefTV",
-    category: "电商创作",
-    recommended: true,
-    tags: ["画布节点", "助手工具", "技能", "电商"],
-    localSource: "plugin-packages/beeftv-plugin-ecommerce-hero",
-  },
-  {
-    id: "beeftv-plugin-sticky-note",
-    packageName: "beeftv-plugin-sticky-note",
-    name: "画布便签",
-    version: "0.1.0",
-    description:
-      "在画布上放置可换色、可编辑的便签卡片，并支持创作助手直接创建和修改便签。",
-    author: "BeefTV",
-    category: "画布效率",
-    recommended: true,
-    tags: ["画布节点", "助手工具"],
-    localSource: "plugin-packages/beeftv-plugin-sticky-note",
-  },
-  {
-    id: "beeftv-plugin-aihubkit-video",
-    packageName: "beeftv-plugin-aihubkit-video",
-    name: "AIHubKit 视频渠道",
-    version: "1.0.0",
-    description:
-      "接入 AIHubKit 统一视频生成与轮询协议，作为可插拔视频模型渠道使用。",
-    author: "Community",
-    category: "模型渠道",
-    recommended: true,
-    tags: ["视频协议", "异步轮询"],
-    localSource: "plugin-packages/beeftv-plugin-aihubkit-video",
-  },
-  {
-    id: "beeftv-plugin-slot-test",
-    packageName: "beeftv-plugin-slot-test",
-    name: "全插槽演示插件",
-    version: "0.1.0",
-    description:
-      "完整演示 BeefTV 全部 21 个界面扩展位与 8 类宿主事件的标准参考插件。",
-    author: "BeefTV",
-    category: "开发示例",
-    recommended: false,
-    tags: ["开发模板", "全插槽"],
-    localSource: "plugin-packages/beeftv-plugin-slot-test",
-  },
-];
-
-function getReact(host) {
-  if (host?.React) return host.React;
-  if (host?.ui?.React) return host.ui.React;
-  if (typeof window !== "undefined") {
-    return window.__BEEFTV_REACT__ || window.React || null;
-  }
-  return null;
+async function fetchMarket(query) {
+  const response = await fetch(`/api/plugins/market/search?q=${encodeURIComponent(String(query || "").trim())}`);
+  const body = await response.json().catch(() => null);
+  if (!response.ok || !body || body.code !== 0) throw new Error(body?.msg || `插件市场暂时打不开（HTTP ${response.status}）`);
+  return Array.isArray(body.data?.items) ? body.data.items : [];
 }
 
-async function fetchWithTimeout(url, timeoutMs = 3000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { signal: controller.signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.json();
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function loadCuratedRegistry() {
-  try {
-    const remote = await fetchWithTimeout(REMOTE_REGISTRY_URL, 3000);
-    if (Array.isArray(remote?.plugins) && remote.plugins.length > 0) {
-      return { plugins: remote.plugins, source: "remote" };
-    }
-  } catch {
-    // 断网、超时或远端尚未创建时平滑回退到内置离线副本
-  }
-  try {
-    const local = await fetchWithTimeout(LOCAL_FALLBACK_URL, 2000);
-    if (Array.isArray(local?.plugins) && local.plugins.length > 0) {
-      return { plugins: local.plugins, source: "offline-file" };
-    }
-  } catch {
-    // 静态文件不可达时回退到内存常量
-  }
-  return { plugins: EMBEDDED_FALLBACK_PLUGINS, source: "offline-embedded" };
-}
-
-async function searchNpmPlugins(query) {
-  const trimmed = String(query || "").trim();
-  const apiUrl = `/api/plugins/market/search?q=${encodeURIComponent(trimmed)}`;
-  try {
-    const res = await fetchWithTimeout(apiUrl, 8000);
-    const items = Array.isArray(res?.data?.items)
-      ? res.data.items
-      : Array.isArray(res?.data?.plugins)
-        ? res.data.plugins
-        : Array.isArray(res?.data)
-          ? res.data
-          : Array.isArray(res?.results)
-            ? res.results
-            : Array.isArray(res)
-              ? res
-              : null;
-    if (items) return items;
-  } catch {
-    // 后端搜索代理不可用时回退到直接请求 npmjs 搜索接口
-  }
-  const searchText = `keywords:beeftv-plugin${trimmed ? ` ${trimmed}` : ""}`;
-  const npmUrl = `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(searchText)}&size=20`;
-  const body = await fetchWithTimeout(npmUrl, 8000);
-  return (body?.objects || []).map((entry) => {
-    const pkg = entry?.package || {};
-    return {
-      id: pkg.name,
-      packageName: pkg.name,
-      name: pkg.name,
-      version: pkg.version || "0.1.0",
-      description: pkg.description || "社区发布的 BeefTV 插件包",
-      author: pkg.publisher?.username || pkg.author?.name || "Community",
-      category: "社区插件",
-      tags: Array.isArray(pkg.keywords) ? pkg.keywords : ["beeftv-plugin"],
-      homepage: pkg.links?.homepage || pkg.links?.repository || pkg.links?.npm || "",
-      repository: pkg.links?.repository || "",
-    };
-  });
+async function fetchReadme(pluginId) {
+  const response = await fetch(`/api/plugins/${encodeURIComponent(pluginId)}/files/README.md`);
+  return response.ok ? response.text() : "";
 }
 
 export function activate(host) {
-  const React = getReact(host);
-  if (!React) return;
+  const React = host.React;
   const h = React.createElement;
 
   function PluginMarketView(props) {
@@ -164,10 +28,7 @@ export function activate(host) {
     const [registryMirror, setRegistryMirror] = React.useState(
       REGISTRY_MIRRORS[0].value,
     );
-    const [curatedPlugins, setCuratedPlugins] = React.useState(
-      EMBEDDED_FALLBACK_PLUGINS,
-    );
-    const [curatedSource, setCuratedSource] = React.useState("offline");
+    const [curatedPlugins, setCuratedPlugins] = React.useState([]);
     const [loadingCurated, setLoadingCurated] = React.useState(false);
 
     const [searchQuery, setSearchQuery] = React.useState("");
@@ -195,11 +56,12 @@ export function activate(host) {
     React.useEffect(() => {
       let cancelled = false;
       setLoadingCurated(true);
-      loadCuratedRegistry()
-        .then((result) => {
-          if (cancelled) return;
-          setCuratedPlugins(result.plugins);
-          setCuratedSource(result.source);
+      fetchMarket("")
+        .then((items) => {
+          if (!cancelled) setCuratedPlugins(items.filter((item) => item.recommended));
+        })
+        .catch((err) => {
+          if (!cancelled) setSearchError(err?.message || "插件市场暂时打不开");
         })
         .finally(() => {
           if (!cancelled) setLoadingCurated(false);
@@ -215,7 +77,7 @@ export function activate(host) {
         setSearching(true);
         setSearchError("");
         try {
-          const items = await searchNpmPlugins(searchQuery);
+          const items = await fetchMarket(searchQuery);
           setSearchResults(items);
         } catch (err) {
           setSearchError(
@@ -230,17 +92,11 @@ export function activate(host) {
 
     const handleOpenDetail = React.useCallback((item) => {
       setSelectedPlugin(item);
-      setDetailReadme(item?.readme || "");
-      const pkgName = item?.packageName || item?.id;
-      if (!pkgName) return;
+      setDetailReadme("");
+      if (!item?.id || !(item.installed || item.bundled)) return;
       setLoadingReadme(true);
-      fetchWithTimeout(
-        `/api/plugins/${encodeURIComponent(pkgName)}/files/README.md`,
-        2000,
-      )
-        .then((res) => {
-          if (typeof res === "string") setDetailReadme(res);
-        })
+      fetchReadme(item.id)
+        .then((text) => setDetailReadme(text))
         .catch(() => {
           // 未安装时使用包描述展示
         })
@@ -249,44 +105,17 @@ export function activate(host) {
 
     const triggerInstall = React.useCallback(
       (item, isUpdate = false) => {
-        const packageName = item.packageName || item.id;
-        const source = item.localSource || `npm:${packageName}@${item.version || "latest"}`;
-        const payload = {
-          name: item.name || packageName,
-          packageName,
-          version: item.version || "0.1.0",
-          description: item.description || "",
-          author: item.author || "Community",
-          source,
-          sourceLabel: item.localSource ? "内置推荐插件包" : `npm (${registryMirror})`,
+        host.ui.requestInstallPlugin({
+          source: item.packageName || item.id,
+          name: item.name,
+          version: item.version,
+          description: item.description,
+          author: item.author,
           registry: registryMirror,
           isUpdate,
-        };
-        if (typeof props?.requestInstallPlugin === "function") {
-          props.requestInstallPlugin(payload);
-          return;
-        }
-        if (typeof host?.ui?.requestInstallPlugin === "function") {
-          host.ui.requestInstallPlugin(payload);
-          return;
-        }
-        if (typeof host?.requestInstallPlugin === "function") {
-          host.requestInstallPlugin(payload);
-          return;
-        }
-        if (
-          typeof window !== "undefined" &&
-          typeof window.__BEEFTV_REQUEST_INSTALL_PLUGIN__ === "function"
-        ) {
-          window.__BEEFTV_REQUEST_INSTALL_PLUGIN__(payload);
-          return;
-        }
-        host?.ui?.notify?.(
-          `准备${isUpdate ? "更新" : "安装"}插件：${payload.name} (${payload.packageName}@${payload.version})`,
-          "info",
-        );
+        });
       },
-      [props, registryMirror],
+      [registryMirror],
     );
 
     const visibleList = activeTab === "curated" ? curatedPlugins : searchResults;
@@ -453,11 +282,7 @@ export function activate(host) {
         : h(
             "div",
             { style: { fontSize: 12, opacity: 0.72 } },
-            loadingCurated
-              ? "正在同步推荐列表…"
-              : curatedSource === "remote"
-                ? "已同步 Sunnyender-org/beeftv-plugins 最新推荐列表"
-                : "当前展示内置推荐列表（离线可用）",
+            loadingCurated ? "正在读取推荐列表…" : "推荐列表来自 Sunnyender-org/beeftv-plugins，断网时显示内置副本",
           ),
 
       searchError && activeTab === "npm"
@@ -760,7 +585,7 @@ export function activate(host) {
                 loadingReadme
                   ? "正在读取插件说明文档…"
                   : detailReadme ||
-                      `# ${selectedPlugin.name || selectedPlugin.packageName}\n\n${selectedPlugin.description || ""}\n\n安装来源：${selectedPlugin.localSource || `npm:${selectedPlugin.packageName}@${selectedPlugin.version || "latest"}`}`,
+                      `# ${selectedPlugin.name || selectedPlugin.packageName}\n\n${selectedPlugin.description || ""}\n\n安装来源：${selectedPlugin.bundled ? "BeefTV 自带示例" : `npm 包 ${selectedPlugin.packageName}`}`,
               ),
               h(
                 "div",

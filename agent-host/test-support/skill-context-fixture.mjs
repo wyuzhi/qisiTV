@@ -33,3 +33,12 @@ export function serveEmptySkillContext(req,res) {
   res.end(JSON.stringify({code:0,data:{canvasId:decodeURIComponent(match[1]),sessionId:url.searchParams.get('sessionId'),scopeId:'fixture-empty-scope',revision:0,activePins:[],lifecycle:'active'}}));
   return true;
 }
+
+// Fake Go servers answer every host-state read the agent host makes per turn:
+// the empty skill context above and an empty list of enabled plugin packages.
+export function serveEmptyHostState(req,res) {
+  if(serveEmptySkillContext(req,res))return true;
+  if(req.method!=='GET' || new URL(req.url,'http://fixture.local').pathname!=='/api/plugins/packages/enabled')return false;
+  res.end(JSON.stringify({code:0,data:{packages:[]}}));
+  return true;
+}

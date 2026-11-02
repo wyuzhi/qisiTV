@@ -7,7 +7,7 @@ description: 从零编写、本地调试并发布一个 BeefTV 插件包（画�
 
 在 BeefTV 中，**一个插件就是一个标准 npm / pi 包**，只需在 `package.json` 中增加一个 `beeftv` 字段。你可以根据需要组合以下四项能力中的任意几项：
 
-1. **界面与画布节点（`beeftv.client`）**：通过 `activate(host)` 和 `host.contribute(slot, payload)` 向 BeefTV 的 21 个界面挂点添加画布节点、工具栏按钮、侧栏面板、独立页面或设置面板。
+1. **界面与画布节点（`beeftv.client`）**：通过 `activate(host)` 和 `host.contribute(slot, payload)` 向 BeefTV 的界面挂点添加画布节点、工具栏按钮、侧栏面板、独立页面或设置面板。
 2. **创作助手工具（`pi.extensions`）**：用 TypeScript 编写助手工具，通过 `ctx.executeTool` 调用 BeefTV 的画布与生成业务操作。
 3. **创作助手技能（`pi.skills`）**：附带 `SKILL.md`，让创作助手掌握特定领域的编排步骤。
 4. **模型协议与工作流（`beeftv.contributes.providers`）**：以声明式 JSON 接入新的图片、视频、音频或文本模型渠道。
@@ -142,11 +142,11 @@ description: 使用画布便签整理待办、灵感与批注。当用户要求�
 
 ## 4. 编写画布节点与界面扩展（`client/index.js`）
 
-浏览器端入口导出 `activate(host)`。插件与主应用共用 `host.React`（或 `host.ui.React`），无需在插件内重复打包 React。
+浏览器端入口导出 `activate(host)`。插件与主应用共用 `host.React`，不要在插件里再打包一份 React。
 
 ```js
 export function activate(host) {
-  const React = host.React || host.ui.React;
+  const React = host.React;
   const h = React.createElement;
 
   function StickyNoteCard({ node, updateNodeData }) {
@@ -212,7 +212,7 @@ export default activate;
 
 完整演示代码可直接查看仓库内的 `plugin-packages/beeftv-plugin-slot-test/`。
 
-### 5.1 21 个界面挂点（`host.contribute(slot, payload)`）
+### 5.1 界面挂点（`host.contribute(slot, payload)`）
 
 | 区域 | 挂点名称 | 载荷关键字段 | 说明 |
 | --- | --- | --- | --- |
@@ -225,7 +225,7 @@ export default activate;
 | 画布 | `canvas.nodePanel` | `{ id, title, nodeTypes?, render }` | 节点配置面板里的扩展区域 |
 | 画布 | `canvas.promptActions` | `{ id, label, onClick, render? }` | 提示词输入框旁的快捷操作按钮 |
 | 画布 | `canvas.sidePanel` | `{ id, label, title, render }` | 画布右侧边栏面板页（与助手并列） |
-| 生成 | `generation.beforeSubmit` | `{ id, label, transform }` | 提交生成前改写提示词或参数（界面会向用户展示改动来源） |
+| 生成 | `generation.beforeSubmit` | `{ id, label, transform }` | 提交生成前改写提示词（会提示用户是哪个插件改的；模型参数保持用户的设置） |
 | 剪辑 | `editor.timeline-panel` | `{ id, label, priority?, render }` | 剪辑工作台时间线面板 |
 | 剪辑 | `editor.preview-renderer` | `{ id, label, priority?, render }` | 剪辑工作台预览渲染器 |
 | 剪辑 | `editor.inspector` | `{ id, label, priority?, render }` | 剪辑工作台属性面板 |
@@ -244,25 +244,41 @@ export default activate;
 | 项目 | `project.view` | `{ id, label, title, render }` | 项目详情页分页视图 |
 | 助手 | `assistant.toolCard` | `{ toolName, label, render }` | 助手面板中该工具调用结果的自定义卡片 |
 
-### 5.2 8 类宿主事件（`host.events.on(event, callback)`）
+### 5.2 宿主事件（`host.events.on(event, callback)`）
 
-| 事件名称 | 说明 | 回调参数示例 |
+| 事件名称 | 说明 | 回调参数 |
 | --- | --- | --- |
-| `canvas.opened` | 画布打开 | `{ canvasId, projectId, revision }` |
-| `canvas.changed` | 画布内容变化 | `{ canvasId, revision, nodeCount, edgeCount }` |
-| `canvas.selectionChanged` | 选中节点变化 | `{ canvasId, selectedNodeIds }` |
-| `generation.submitted` | 生成任务已提交 | `{ canvasId, nodeIds, taskIds, kind }` |
-| `generation.completed` | 生成任务完成 | `{ canvasId, nodeId, taskId, kind }` |
-| `generation.failed` | 生成任务失败 | `{ canvasId, nodeId, taskId, reason, message }` |
-| `assets.imported` | 素材导入完成 | `{ assetIds, source }` |
-| `assistant.turnCompleted` | 助手一轮对话结束 | `{ canvasId, turnId, status }` |
+| `generation.submitted` | 画布节点的生成任务已提交 | `{ nodeId, nodeType, model?, prompt, taskId? }` |
+| `generation.completed` | 生成任务完成 | `{ nodeId, nodeType }` |
+| `generation.failed` | 生成任务失败 | `{ nodeId, nodeType, error, taskId? }` |
+| `assets.imported` | 素材导入完成 | `{ assets: [{ id, name, type, url }] }` |
+| `assistant.turnCompleted` | 助手一轮对话结束 | `{ canvasId?, sessionId?, turnId?, status }` |
+
+画布打开、画布内容变化、选中变化这三类事件还没有接入，接入前不会触发。
+
+### 5.3 宿主接口
+
+`activate(host)` 拿到的 `host` 只提供这些能力：
+
+| 接口 | 用途 |
+| --- | --- |
+| `host.React` | 和 BeefTV 共用同一份 React，插件不要自己再打包一份 |
+| `host.contribute(slot, payload)` | 往挂点加内容，返回撤销函数；插件停用时宿主会自动撤掉 |
+| `host.events.on(event, callback)` | 订阅上表的事件 |
+| `host.ops.call(op, params)` | 调用业务操作（如 `canvas.get`、`canvas.nodes.create`），和命令行、助手是同一套，权限与付费确认照旧 |
+| `host.context.getCanvasId()` | 当前打开的画布 ID |
+| `host.storage`、`host.config` | 插件自己的存储和设置值 |
+| `host.ui.notify`、`host.ui.navigate` | 提示消息、页面跳转 |
+| `host.ui.requestInstallPlugin({ source, registry? })` | 打开 BeefTV 的安装确认框；用户确认后才会安装 |
+
+写画布前先用 `canvas.get` 读出当前 `revision`，再把它作为 `expectedRevision` 传给写操作。
 
 ---
 
 ## 6. 本地安装与调试
 
 1. 打开 BeefTV 左下角或侧栏的 **插件中心（`/plugins`）**。
-2. 点击右上角 **从本地目录或包安装**，输入本地插件目录路径（例如 `plugin-packages/beeftv-plugin-sticky-note`）或上传 `.tgz` / `.beeftv-plugin` 文件。
+2. 点击右上角 **从本地目录或包安装**，输入 npm 包名、本地插件目录的完整路径，或 BeefTV 自带示例的名字（例如 `beeftv-plugin-sticky-note`）；也可以上传 `.tgz` / `.beeftv-plugin` 文件。BeefTV 用自带的 npm 安装，插件的依赖会一起装好。
 3. 在弹出的安装确认框中核对插件信息并点击 **确认安装**。
 4. 安装完成后无需重启应用：
    - 画布「添加节点」菜单会立即出现新节点类型；

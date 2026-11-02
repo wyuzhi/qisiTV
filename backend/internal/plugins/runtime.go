@@ -32,6 +32,7 @@ type Runtime struct {
 	references            ReferenceSource
 	retained              map[string]*RetentionView
 	skillSyncHook         func(pluginID string, pluginName string, version string, skillDirs []string, enabled bool)
+	packageFetcher        PackageFetcher
 	testBeforeMutation    func()
 	testFailCommit        func() error
 	testFailWriteRegistry func() error

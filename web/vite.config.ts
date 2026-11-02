@@ -3,7 +3,7 @@ import { readFileSync, readdirSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import react from "@vitejs/plugin-react";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, type Plugin, searchForWorkspaceRoot } from "vite";
 
 import { resolveHeavyMediaEnabled } from "./media-build-mode";
 import { distributionNotices } from "../scripts/distribution-notices.mjs";
@@ -75,6 +75,8 @@ export default defineConfig({
         "import.meta.env.VITE_BUILD_COMMIT": JSON.stringify(buildCommit),
     },
     server: {
+        // The in-app plugin guide renders the docs site page, the single source.
+        fs: { allow: [searchForWorkspaceRoot(webDir), resolve(webDir, "../docs/content/docs/plugins")] },
         proxy: {
             "/api": {
                 target: apiProxyTarget,
