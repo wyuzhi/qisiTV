@@ -1,4 +1,5 @@
 import type { ModelCapabilityConfig } from "@/lib/model-capabilities";
+import { defaultModelCapabilityConfig, normalizeModelCapabilityConfig } from "@/lib/model-capabilities";
 import type { ModelProtocol } from "@/lib/model-protocols";
 import { http } from "@/services/api/request";
 import type { WorkspaceCapabilityContract } from "@/services/workspace-mode";
@@ -19,7 +20,8 @@ export type ModelCapabilityDraftInput = {
     capabilityConfig?: ModelCapabilityConfig;
 };
 
-export function normalizeModelCapabilityDraft(draft: ModelCapabilityDraftInput) {
+export function normalizeModelCapabilityDraft(draft: ModelCapabilityDraftInput): Promise<ModelCapabilityConfig & { capabilityConfig?: ModelCapabilityConfig }> {
+    if (isBrowserWorkspace()) return Promise.resolve(normalizeModelCapabilityConfig(draft.capabilityConfig || defaultModelCapabilityConfig((draft.protocol || draft.interfaceType) as ModelProtocol | undefined, draft.model)));
     return http.post<ModelCapabilityConfig & { capabilityConfig?: ModelCapabilityConfig }>("/workspace/model-config/capability", draft);
 }
 

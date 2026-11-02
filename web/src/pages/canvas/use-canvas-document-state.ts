@@ -4,6 +4,7 @@ import { bringCanvasNodeToFront, type CanvasNodeStackOrder } from "@/lib/canvas/
 import { refreshLocalCanvasProjectIfChanged } from "@/services/local-workspace-repository";
 import { notifyExternalCanvasEvent, subscribeCanvasEventsStream } from "@/services/canvas-external-writes";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData } from "@/types/canvas";
 import { persistCanvasNodeFailure } from "@/lib/canvas/canvas-node-failure-state";
 import { useCanvasNodeContent } from "./use-canvas-node-content";
@@ -83,7 +84,7 @@ export function useCanvasDocumentState(projectId: string) {
         });
     }, [nodes]);
     useEffect(() => {
-        if (!projectId || !isLocalWorkspaceMode()) return;
+        if (!projectId || !isLocalWorkspaceMode() || isBrowserWorkspace()) return;
         let disposed = false;
         // Both event and timer refresh the repository. The lifecycle's single
         // revision-aware subscription merges it into the editor document.

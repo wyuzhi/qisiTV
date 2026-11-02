@@ -18,7 +18,7 @@ test("转换节点在空缓存中鉴权恢复输入和结果，并下载原文�
             resourceRequests.push(url.pathname);
             return new Response(png, { headers: { "Content-Type": "image/png" } });
         }
-        return new Response('<meta charset="utf-8"><div id="root"></div><script type="module" src="/harness.js"></script>', { headers: { "Content-Type": "text/html; charset=utf-8" } });
+        return new Response('<meta charset="utf-8"><div id="root"></div><script>sessionStorage.setItem("qisitv.website.workspace.v1","engine")</script><script type="module" src="/harness.js"></script>', { headers: { "Content-Type": "text/html; charset=utf-8" } });
     } });
     let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
     try {

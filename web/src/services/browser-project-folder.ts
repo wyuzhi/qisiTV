@@ -362,5 +362,16 @@ export const persistProjectToFolder = folderStorage.persist;
 export const getProjectFolderLocation = folderStorage.location;
 export const saveProjectExport = folderStorage.exportFile;
 export async function assertBrowserProjectWritable(id: string) {
+    const { useCanvasStore, flushCanvasStorePersistence } = await import("@/stores/canvas/use-canvas-store");
+    const project = useCanvasStore.getState().openProject(id);
+    if (!project) throw new Error("网页画布不存在");
+    assertBrowserManifestWritable(project);
+    await folderStorage.initialize();
+    if (!folderStorage.getState().rootName) {
+        // Browser-only drafts are usable before directory selection. A bound
+        // directory must still pass the original permission/migration fence.
+        await flushCanvasStorePersistence();
+        return;
+    }
     await folderStorage.assertWritable(id);
 }

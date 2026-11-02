@@ -6,6 +6,7 @@ import { isWorkflowMaterialSource, canExportWorkflowResult, createWorkflowResult
 import { cancelWorkflowRun, getWorkflowEditor, getWorkflowRun, selectWorkflowImage, retryWorkflowRun, startWorkflowRun, type CanvasWorkflow, type WorkflowRun, type WorkflowValue } from "@/services/api/canvas-workflows";
 import { getResource, resourceFileUrl } from "@/services/api/resources";
 import { submissionAcceptanceUnknown } from "@/services/api/generation-submission";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { ensureCanvasNodeAsset } from "@/services/project-asset-sync";
 import type { CanvasConnection, CanvasNodeData, Position } from "@/types/canvas";
 
@@ -78,6 +79,7 @@ export function useCanvasWorkflowInstances({ canvasId, domainProjectId, readOnly
             const state = control?.metadata?.reusableWorkflow;
             const operation = state?.definition.nodes.find(item => item.id === slot?.nodeId);
             if (node && control && state?.run && operation?.operationId === "image.select" && value.resourceId) {
+                if (isBrowserWorkspace()) throw new Error("此工作流由本机引擎运行，请先在“本机引擎（可选）”中连接。");
                 assertCurrent();
                 const run = await selectWorkflowImage(state.run.id, { nodeId:operation.id, resourceId:value.resourceId }, config);
                 assertCurrent();
@@ -119,6 +121,7 @@ export function useCanvasWorkflowInstances({ canvasId, domainProjectId, readOnly
         });
     };
     const action = async (instanceId: string, kind: WorkflowInstanceAction) => {
+        if (isBrowserWorkspace()) { onError("运行工作流需要本机引擎，可在侧栏按需连接。基础画布仍可继续使用。"); return; }
         if (locks.current.has(instanceId)) return;
         locks.current.add(instanceId);
         try {
@@ -166,7 +169,7 @@ export function useCanvasWorkflowInstances({ canvasId, domainProjectId, readOnly
     };
     const runningKey = nodes.filter(node => node.metadata?.reusableWorkflow?.run && (!node.metadata.reusableWorkflow.runApplied || ["queued", "running"].includes(node.metadata.reusableWorkflow.run.status))).map(node => `${node.id}:${node.metadata!.reusableWorkflow!.run!.id}`).join("|");
     useEffect(() => {
-        if (readOnly || !runningKey) return;
+        if (readOnly || !runningKey || isBrowserWorkspace()) return;
         let cancelled = false;
         let timer: ReturnType<typeof setTimeout>;
         const poll = async () => {
@@ -215,6 +218,7 @@ export function useCanvasWorkflowInstances({ canvasId, domainProjectId, readOnly
     }, [canvasId, readOnly, domainProjectId]);
     const uploadBusy = (id: string, busy: boolean) => { if (busy) uploads.current.add(id); else uploads.current.delete(id); };
     const update = async (instanceId: string) => {
+        if (isBrowserWorkspace()) { onError("更新工作流实例需要本机引擎，可在侧栏按需连接。"); return; }
         try {
             assertCurrent();
             const control = nodesRef.current.find(node => node.id === instanceId);

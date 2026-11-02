@@ -11,7 +11,7 @@ test("implemented skill route is discoverable while reference experiments remain
         source("../src/components/layout/workspace-sidebar-nav.tsx"),
     ]);
     expect(router).toContain('{ path: "/skill", element: <Navigate to="/skills" replace /> }');
-    expect(router).toContain('{ path: "/skills", element: deferred(<SkillsPage />) }');
+    expect(router).toContain('{ path: "/skills", element: <RequireLocalEngine feature="技能市场与本机技能">{deferred(<SkillsPage />)}</RequireLocalEngine> }');
     expect(router).not.toContain("SkillsReferencePage");
     expect(sidebar).toContain('toolItem("skills", "/skills")');
 });

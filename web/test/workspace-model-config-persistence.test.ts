@@ -94,6 +94,30 @@ test("local-mode startup still restores the canonical model config when browser 
     expect(restoreCalls).toBe(1);
 });
 
+for (const failure of ["load", "hydrate"] as const) {
+    test(`engine ${failure} failure never applies a browser fallback workspace`, async () => {
+        const sessions: string[] = [];
+        let fallbacks = 0;
+        let restores = 0;
+        await expect(workspaceBootstrap.initializeWorkspaceState({
+            allowLocalFallback: false,
+            loadWorkspace: async () => {
+                if (failure === "load") throw new Error("engine unavailable");
+                return { source: "engine" };
+            },
+            createLocalWorkspace: () => { fallbacks++; return { source: "browser" }; },
+            applySession: async ({ source }) => {
+                sessions.push(source);
+                if (failure === "hydrate") throw new Error("engine snapshot unavailable");
+            },
+            restoreModelConfig: async () => { restores++; },
+        })).rejects.toThrow(failure === "load" ? "engine unavailable" : "engine snapshot unavailable");
+        expect(fallbacks).toBe(0);
+        expect(sessions).toEqual(failure === "load" ? [] : ["engine"]);
+        expect(restores).toBe(1);
+    });
+}
+
 test("model config autosave predicate remains independently testable", () => {
     const shouldSave = (workspaceBootstrap as Record<string, unknown>).shouldSaveLocalModelConfig as undefined | ((input: {
         subscriptionReady: boolean;

@@ -17,7 +17,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { getDesktopAppBinding } from "@/services/desktop-runtime";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { OnboardingEntry } from "@/components/onboarding/first-creation-guide";
-import { isEngineWebsite } from "@/services/browser-workspace";
+import { isBrowserWorkspace, isEngineCapableWebsite, isEngineWebsite } from "@/services/browser-workspace";
 
 export type WorkspaceNavItem = {
     id: string;
@@ -57,7 +57,8 @@ function buildNav(features: FeatureAvailability): { groups: WorkspaceNavGroup[];
                 ...(features.taskCenterEnabled ? [{ id: "tasks", title: "任务中心", icon: ListChecks, to: "/tasks" }] : []),
                 ...(features.pluginCenterEnabled ? [{ id: "plugins", title: "插件", icon: Puzzle, to: "/plugins" }] : []),
                 { id: "settings:channels", title: "模型配置", icon: Settings2, to: "/settings?section=channels" },
-                ...(isEngineWebsite() ? [{ id: "engine", title: "本机项目与引擎", icon: HardDrive, to: "/engine" }] : []),
+                ...(isBrowserWorkspace() ? [{ id: "local", title: "本机项目文件夹", icon: HardDrive, to: "/local" }] : []),
+                ...(isEngineCapableWebsite() ? [{ id: "engine", title: isEngineWebsite() ? "本机项目与引擎" : "本机引擎（可选）", icon: HardDrive, to: "/engine" }] : []),
                 ...(getDesktopAppBinding()?.StorageSettings ? [{ id: "settings:storage", title: "存储设置", icon: HardDrive, to: "/settings?section=storage" }] : []),
                 { id: "agents", title: "qisiTV MCP", icon: Plug, to: "/agents" },
             ],

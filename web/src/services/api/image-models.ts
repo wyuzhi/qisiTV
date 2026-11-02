@@ -1,4 +1,6 @@
 import { sanitizeChannelModelCatalogItem, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
+import { fetchBrowserLikeAIModels } from "@/services/browser-likeai-client";
 import { createChannelTransport } from "@/services/api/channel-transport";
 import { readAxiosError, validateGeminiPayload } from "@/services/api/image-response";
 import { geminiApiUrl, geminiHeaders } from "@/services/api/image-transport";
@@ -73,6 +75,12 @@ export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKe
 export type ChannelModelFetchResult = { models: string[]; catalog: ChannelModelCatalogItem[] };
 
 export async function fetchChannelModels(channel: ModelChannel, viaBackend = false, signal?: AbortSignal): Promise<ChannelModelFetchResult> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (isBrowserWorkspace() && channel.apiFormat === "likeai") {
+        const result = await fetchBrowserLikeAIModels(channel.apiKey, channel.baseUrl);
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        return result;
+    }
     const managed = channel.id === "beefapi" && (channel.pinned || Boolean(channel.credentialRef));
     const connectionEpoch = getBeefAPIConnectionEpoch();
     if (managed || channel.apiFormat === "likeai") {

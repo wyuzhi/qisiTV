@@ -13,37 +13,13 @@ import { sameCanvasDocument } from "@/lib/canvas/canvas-content";
 import { canvasUnconfirmedReason, canvasUnconfirmedDiagnostic, type CanvasUnconfirmedState } from "@/lib/canvas/canvas-unconfirmed-edits";
 import { rebaseCanvasDocumentThreeWay, settleInFlightGenerationOverlay } from "@/lib/canvas/canvas-document-rebase";
 import { traceCanvasGraph } from "@/lib/canvas/canvas-graph-trace";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
+import { browserCanvasSavePending, deleteBrowserCanvases, hydrateBrowserCanvases, persistBrowserCanvas, readBrowserCanvas } from "@/services/browser-canvas-repository";
+import { CanvasProjectionError, incompleteCanvasProjection } from "@/services/canvas-projection-error";
 
 
 export { CanvasBackendSubmitPausedError } from "@/services/canvas-revision-conflict";
-
-export class CanvasProjectionError extends Error {
-    override cause?: unknown;
-    canvasId: string;
-    confirmedRevision: number;
-    projectionIdentity: string | null;
-
-    constructor(message: string, options: { cause?: unknown; canvasId: string; confirmedRevision: number; projectionIdentity?: string | null }) {
-        super(message);
-        this.name = "CanvasProjectionError";
-        this.cause = options.cause;
-        this.canvasId = options.canvasId;
-        this.confirmedRevision = options.confirmedRevision;
-        this.projectionIdentity = options.projectionIdentity ?? null;
-    }
-}
-
-const CANVAS_PROJECTION_INCOMPLETE = "服务端已保存，本地画布还没写完。请重试这次回写，不要重新生成。";
-
-function incompleteCanvasProjection(id: string, scope: string, identity: string | null | undefined, cause: unknown) {
-    const journal = peekCanvasOperationJournal(id, scope);
-    return new CanvasProjectionError(CANVAS_PROJECTION_INCOMPLETE, {
-        cause,
-        canvasId: id,
-        confirmedRevision: journal?.confirmedRevision ?? 0,
-        projectionIdentity: identity ?? journal?.pendingProjection?.identity ?? null,
-    });
-}
+export { CanvasProjectionError } from "@/services/canvas-projection-error";
 
 type LocalCanvasContent = Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId">>;
 type CanvasSaveSummary = Pick<CanvasProject, "id" | "title" | "createdAt" | "updatedAt" | "revision">;
@@ -141,6 +117,7 @@ function throwIfCanvasNotWritable(id: string, scope: string) {
  * 3. 没有服务端确认基线时，退回本机已落盘快照；两者都没有则保守判为有编辑。
  */
 export function hasUnconfirmedCanvasEdits(id: string) {
+    if (isBrowserWorkspace() && browserCanvasSavePending(id)) return true;
     return canvasUnconfirmedReason(readCanvasUnconfirmedState(id)) !== undefined;
 }
 
@@ -427,6 +404,7 @@ async function applyBackendCanvasRead(
 export function beginLocalCanvasProject(title: string, projectId?: string, initialContent?: LocalCanvasContent, workspaceProjectId?: string) {
     const id = useCanvasStore.getState().createProject(title, projectId, workspaceProjectId);
     if (initialContent) useCanvasStore.getState().updateProject(id, initialContent);
+    if (isBrowserWorkspace()) return { id, saved: persistBrowserCanvas(id) };
     // The in-memory project is already usable. Do not make navigation depend
     // on an IndexedDB/localForage flush completing successfully; the store
     // keeps its pending write queue and will retry it on the next flush.
@@ -451,6 +429,7 @@ export async function createLocalCanvasProject(title: string, projectId?: string
 
 /** Serialize writes per canvas so optimistic revisions cannot race each other. */
 function syncLocalCanvasProject(id: string): Promise<void> {
+    if (isBrowserWorkspace()) return persistBrowserCanvas(id);
     const scope = getActiveUserScope();
     const key = saveKey(scope, id);
     const previous = backendSaveTails.get(key) || Promise.resolve();
@@ -718,6 +697,12 @@ function revertUnchangedCanvasDocumentPatch(current: CanvasProject, previous: Ca
  * keeps the local draft. Other failures revert patch fields that nobody else changed.
  */
 export async function persistCanvasDocument(id: string, patch: CanvasDocumentPersistPatch) {
+    if (isBrowserWorkspace()) {
+        if (!readBrowserCanvas(id)) throw new Error("网页画布不存在");
+        useCanvasStore.getState().updateProject(id, patch);
+        await persistBrowserCanvas(id);
+        return;
+    }
     const scope = getActiveUserScope();
     const localMode = isLocalWorkspaceMode();
     const previous = useCanvasStore.getState().openProject(id);
@@ -820,6 +805,10 @@ export async function adoptServerConfirmedGenerationPatch(project: CanvasProject
 }
 
 export function scheduleLocalCanvasBackendSync(id: string) {
+    if (isBrowserWorkspace()) {
+        void persistBrowserCanvas(id).catch(() => { /* The browser save status retains the failed write. */ });
+        return;
+    }
     const scope = getActiveUserScope();
     const key = saveKey(scope, id);
     if (canvasDeleting.has(key)) return;
@@ -863,6 +852,7 @@ export async function hydrateLocalCanvasProjectsFromBackend() {
     const attempt=beginCanvasHydration();
     let failure="";
     try {
+        if (isBrowserWorkspace()) return await hydrateBrowserCanvases();
         const response = await http.get<{ projects: Array<Pick<CanvasProject, "id">> }>("/canvas-projects", {
             params: { page: 1, pageSize: 500, sort: "updated" },
         });
@@ -909,12 +899,18 @@ export async function hydrateLocalCanvasProjectsFromBackend() {
 
 /** Read the durable document without adopting it or hiding errors behind local state. */
 export async function readLocalCanvasProjectFromBackend(id: string): Promise<CanvasProject> {
+    if (isBrowserWorkspace()) {
+        const project = readBrowserCanvas(id);
+        if (!project) throw new Error("网页画布不存在");
+        return project;
+    }
     const response = await http.get<{ project: CanvasProject }>(`/canvas-projects/${encodeURIComponent(id)}`);
     if (!response.project) throw new Error("画布读取失败，请重试");
     return response.project;
 }
 
 export async function openLocalCanvasProjectFromBackend(id: string) {
+    if (isBrowserWorkspace()) return readBrowserCanvas(id);
     const scope = getActiveUserScope();
     const existed = Boolean(openLocalCanvasProject(id));
     try {
@@ -961,6 +957,7 @@ export async function restoreLocalCanvasProjectFromHistory(
     id: string,
     historyRestore: { snapshotId: string; revision: number },
 ): Promise<CanvasProject> {
+    if (isBrowserWorkspace()) throw new Error("此历史记录来自本机引擎，请连接对应引擎后恢复。");
     const canvasId = id.trim();
     if (!canvasId) throw new Error("画布不存在或无权访问");
     const { snapshotId, revision } = restoreHistoryRequestError(historyRestore.snapshotId, historyRestore.revision);
@@ -1024,6 +1021,7 @@ async function restoreLocalCanvasProjectFromHistoryUnlocked(
  * 用请求发出时的判断会漏掉这些新编辑。
  */
 export async function refreshLocalCanvasProjectIfChanged(id: string) {
+    if (isBrowserWorkspace()) return readBrowserCanvas(id);
     const scope = getActiveUserScope();
     const existed = Boolean(openLocalCanvasProject(id));
     try {
@@ -1122,6 +1120,7 @@ async function waitForCanvasBackendIdle(id: string, scope: string) {
 }
 
 export async function deleteLocalCanvasProjects(ids: readonly string[]) {
+    if (isBrowserWorkspace()) return deleteBrowserCanvases(ids);
     const scope = getActiveUserScope();
     const selected = [...new Set(ids)];
     const snapshots = selected

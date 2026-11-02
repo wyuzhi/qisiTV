@@ -10,6 +10,7 @@ import { getWorkspaceBootstrap, type WorkspaceBootstrapPayload } from "@/service
 import { commitModelConfig, flushModelConfig, hydrateModelConfig } from "@/services/model-config-repository";
 import { normalizeConfigSnapshot, useConfigStore } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { isEngineWebsite } from "@/services/browser-workspace";
 
 export function WorkspaceBootstrapHydrator({ children }: { children: ReactNode }) {
     const hydrated = useUserStore((state) => state.hydrated);
@@ -28,6 +29,7 @@ export function WorkspaceBootstrapHydrator({ children }: { children: ReactNode }
             createLocalWorkspace: createLocalWorkspacePayload,
             applySession: applyUserSession,
             restoreModelConfig: hydrateLocalModelConfig,
+            allowLocalFallback: !isEngineWebsite(),
         })
             .then(() => {
                 if (cancelled) return;
@@ -76,16 +78,19 @@ export async function initializeWorkspaceState<T>({
     createLocalWorkspace,
     applySession,
     restoreModelConfig,
+    allowLocalFallback = true,
 }: {
     loadWorkspace: () => Promise<T>;
     createLocalWorkspace: () => T;
     applySession: (payload: T) => Promise<void>;
     restoreModelConfig: () => Promise<void>;
+    allowLocalFallback?: boolean;
 }) {
     try {
         try {
             await applySession(await loadWorkspace());
-        } catch {
+        } catch (error) {
+            if (!allowLocalFallback) throw error;
             // Keep the desktop usable while the embedded backend is still
             // starting. There is no remote/account fallback in a local build.
             await applySession(createLocalWorkspace());

@@ -3,8 +3,10 @@ import { Alert, App, Button, Tag } from "antd";
 import { FolderOpen, RefreshCw, HardDrive, ArrowRight } from "lucide-react";
 import { Link, Navigate } from "react-router";
 import { PageHeader, WorkspacePage } from "@/components/layout/workspace-page";
-import { isEngineWebsite } from "@/services/browser-workspace";
+import { beginEngineWorkspaceConnection, isEngineCapableWebsite, isEngineWebsite, returnToBrowserWorkspace } from "@/services/browser-workspace";
 import { engineRequest, type EngineStatus } from "@/services/engine-session";
+import { engineInstallerUrl, ENGINE_INSTALLER_BETA_NOTICE, ENGINE_INSTALLER_PLATFORM } from "@/services/engine-installer";
+import { useSyncProgressStore } from "@/stores/use-sync-progress-store";
 import { authorizeBrowserMigrationRoot, getBrowserMigrationScope, listBrowserProjectFolderCandidates, migrateBrowserProjectFolder, type EngineFolderStatus } from "@/services/browser-engine-migration";
 import { EngineMaintenancePanel } from "./engine-maintenance-panel";
 
@@ -18,6 +20,28 @@ function statusLabel(folder: EngineFolderStatus) {
 function errorText(error: unknown) { return error instanceof Error ? error.message : "操作未完成，请检查本机引擎。"; }
 function needsFolderRecheck(folder: EngineFolderStatus) { return folder.state === "conflict" || folder.state === "error"; }
 
+function BrowserEngineSetup({ saving }: { saving: boolean }) {
+    return <WorkspacePage><div className="mx-auto max-w-2xl space-y-6 py-8">
+        <PageHeader title="本机引擎（按需连接）" description="基础画布已经可以直接在网页使用。" />
+        <section className="space-y-4 rounded-2xl border border-border bg-card p-6">
+            <h2 className="text-lg font-semibold">需要本机能力时再连接</h2>
+            <p className="text-sm leading-6 text-muted-foreground">编辑节点、连接素材、导入和下载图片／视频，以及通过已配置的 API 生成，都可以直接在网页完成。</p>
+            <p className="text-sm leading-6 text-muted-foreground">内置创作助手、可复用工作流和原生媒体处理由本机引擎执行。连接后可以按需接入原来的项目文件夹；网页项目不会自动合并或被覆盖。</p>
+            <div className="flex flex-wrap gap-3">
+                <Button type="primary" disabled={saving} onClick={beginEngineWorkspaceConnection}>连接本机引擎</Button>
+                <Link to="/project"><Button>继续使用网页画布</Button></Link>
+            </div>
+            {saving ? <p role="status" className="text-sm text-muted-foreground">当前内容尚未保存完成。请返回画布确认保存；若保存失败或有版本冲突，处理后再连接。</p> : null}
+            <p className="text-xs leading-5 text-muted-foreground">连接会重新打开工作区。只想把网页项目保存到电脑，可以直接<Link to="/local" className="underline">选择本机项目文件夹</Link>。</p>
+            <details className="space-y-3 text-sm">
+                <summary className="cursor-pointer text-muted-foreground">尚未安装？按需下载安装包</summary>
+                <p className="text-xs leading-6 text-muted-foreground">{ENGINE_INSTALLER_PLATFORM}。{ENGINE_INSTALLER_BETA_NOTICE}</p>
+                <a href={engineInstallerUrl()} download className="inline-flex rounded-lg border border-border px-4 py-2 text-sm">下载本机引擎安装包</a>
+            </details>
+        </section>
+    </div></WorkspacePage>;
+}
+
 export default function EnginePage() {
     const { message } = App.useApp();
     const [engine, setEngine] = useState<EngineStatus>();
@@ -26,6 +50,7 @@ export default function EnginePage() {
     const [failure, setFailure] = useState("");
     const [migrationFailure, setMigrationFailure] = useState("");
     const [busy, setBusy] = useState("");
+    const saving = useSyncProgressStore((state) => state.isAnySyncing());
     const scope = getBrowserMigrationScope();
     const refresh = useCallback(async () => {
         try {
@@ -64,9 +89,10 @@ export default function EnginePage() {
         if (status.pending || status.state !== "ready") throw new Error(status.error || "仍有内容等待写入文件夹。");
         message.success("项目文件夹写入已确认。");
     };
-    if (!isEngineWebsite()) return <Navigate to="/local" replace />;
+    if (!isEngineWebsite()) return isEngineCapableWebsite() ? <BrowserEngineSetup saving={saving} /> : <Navigate to="/local" replace />;
     return <WorkspacePage><div className="mx-auto max-w-5xl space-y-6 pb-8">
-        <PageHeader title="本机项目与引擎" description="网页负责操作，本机引擎保存项目并执行创作任务。" actions={<Button icon={<RefreshCw className="size-4" />} loading={busy === "refresh"} disabled={Boolean(busy)} onClick={() => void run("refresh", refresh)}>刷新状态</Button>} />
+        <PageHeader title="本机项目与引擎" description="网页负责操作，本机引擎保存项目并执行创作任务。" actions={<div className="flex flex-wrap gap-2"><Button disabled={saving || Boolean(busy)} onClick={returnToBrowserWorkspace}>使用网页画布</Button><Button icon={<RefreshCw className="size-4" />} loading={busy === "refresh"} disabled={Boolean(busy)} onClick={() => void run("refresh", refresh)}>刷新状态</Button></div>} />
+        {saving ? <p role="status" className="text-sm text-muted-foreground">当前内容尚未保存完成，请返回画布确认保存或处理错误后再切换。</p> : null}
         {failure ? <Alert type="error" title="未能读取本机状态" description={`${failure} 项目不会切回浏览器保存。重新打开本机引擎后，刷新网页连接。`} showIcon /> : null}
         <section className="space-y-3 rounded-2xl border border-border bg-card p-5">
             <div className="flex flex-wrap items-center gap-2"><HardDrive className="size-5" /><h2 className="font-semibold">项目保存位置</h2><Tag color={engine?.ready ? "success" : "default"}>{engine?.ready ? "本机引擎已连接" : "连接状态待确认"}</Tag></div>

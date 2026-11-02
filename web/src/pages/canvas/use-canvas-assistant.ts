@@ -6,6 +6,7 @@ import { ApiError } from "@/services/api/request";
 import { scopedLocalStorage } from "@/lib/user-scope";
 import { flushModelConfig, getModelConfigPersistenceState } from "@/services/model-config-repository";
 import { workspaceCapabilities } from "@/services/workspace-mode";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { saveCanvasForAssistant } from "@/services/assistant-canvas-save";
 import {
     activateAssistantSession,
@@ -195,7 +196,7 @@ function readStoredProposals(): Set<string> {
  * 切画布不会把回复落到别的画布上。已结束的回合来自服务端历史，刷新页面不丢。
  */
 export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
-    const [open, setOpenState] = useState(() => scopedLocalStorage.getItem(OPEN_STORAGE_KEY) !== "0");
+    const [open, setOpenState] = useState(() => !isBrowserWorkspace() && scopedLocalStorage.getItem(OPEN_STORAGE_KEY) !== "0");
     const [width, setWidthState] = useState(() => clampAssistantWidth(Number(scopedLocalStorage.getItem(WIDTH_STORAGE_KEY)) || ASSISTANT_DEFAULT_WIDTH));
     const [status, setStatus] = useState<AgentHostStatus | null>(null);
     const [statusBusy, setStatusBusy] = useState(false);
@@ -255,7 +256,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
     // 状态只在面板打开时复查：关着的面板不该一直问后端。正在启动时节奏更快。
     const starting = status?.reason === "host_starting";
     useEffect(() => {
-        if (!open) return;
+        if (!open || isBrowserWorkspace()) return;
         let cancelled = false;
         const refresh = () => {
             getAgentHostStatus()
@@ -268,6 +269,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
     }, [open, starting]);
 
     const loadHistory = useCallback(async (targetCanvas: string, sessionId?: string) => {
+        if (isBrowserWorkspace()) return false;
         const run = runFor(targetCanvas);
         const request = ++run.historyRequest;
         const planAtRequest = run.plan;
@@ -347,7 +349,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
 
     // 打开面板或切画布时补齐这条画布的历史；已经载入过就不重复拉。
     useEffect(() => {
-        if (!open) return;
+        if (!open || isBrowserWorkspace()) return;
         let reading = false;
         const timer = setInterval(() => {
             const run = runFor(canvasId);
@@ -359,7 +361,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
     }, [canvasId, loadHistory, open, runFor]);
 
     useEffect(() => {
-        if (!open) return;
+        if (!open || isBrowserWorkspace()) return;
         const run = runFor(canvasId);
         if (run.historyLoaded || run.streaming || run.sessionBusy) return;
         void loadHistory(canvasId);

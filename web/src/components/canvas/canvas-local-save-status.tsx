@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { App, Button } from "antd";
-import { useSyncProgressStore } from "@/stores/use-sync-progress-store";
+import { canvasSyncProgressKey, useSyncProgressStore } from "@/stores/use-sync-progress-store";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { acceptExternalCanvasRevision, syncLocalCanvasProjectToBackend } from "@/services/local-workspace-repository";
 
 export function CanvasLocalSaveStatus({ canvasId, onShowVersions }: { canvasId: string; onShowVersions: () => void }) {
-    const progress = useSyncProgressStore((state) => state.syncingProjects[canvasId]);
+    const progress = useSyncProgressStore((state) => state.syncingProjects[canvasSyncProgressKey(canvasId)]);
     const [busy, setBusy] = useState(false);
     const { message } = App.useApp();
     if (!progress || !["error", "conflict", "done"].includes(progress.phase)) return null;
@@ -26,7 +27,7 @@ export function CanvasLocalSaveStatus({ canvasId, onShowVersions }: { canvasId: 
         } finally { setBusy(false); }
     };
     return <div role="status" data-canvas-no-zoom className="absolute left-1/2 top-14 z-[var(--z-toast)] flex max-w-[90%] -translate-x-1/2 flex-wrap items-center gap-2 rounded-lg border bg-background p-3 text-sm text-foreground shadow-lg">
-        <span>{progress.phase === "conflict" ? "存在同时编辑的内容，本地修改已保留。" : "画布尚未保存到本地服务。"}</span>
+        <span>{progress.phase === "conflict" ? "存在同时编辑的内容，本地修改已保留。" : isBrowserWorkspace() ? progress.message || "网页画布保存尚未完成，请保留当前页面并重试。" : "画布尚未保存到本地服务。"}</span>
         <Button size="small" loading={busy} onClick={() => void resolve(false)}>重试保存</Button>
         {progress.phase === "conflict" && <>
             <Button size="small" disabled={busy} onClick={onShowVersions}>查看版本</Button>

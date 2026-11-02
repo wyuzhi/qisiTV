@@ -4,6 +4,8 @@ import { History, MessageSquarePlus, X, ArrowUpRight } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { AppDrawer } from "@/components/ui/product/app-drawer";
+import { EngineFeatureNotice } from "@/components/workspace/engine-feature-notice";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { assetLibraryQueryKey, assetPickerQueryKey } from "@/components/assets/asset-view-session";
 import { appQueryClient } from "@/lib/query-client";
 import { referencedAssetIdsInPrompt, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
@@ -53,6 +55,17 @@ export function CanvasAssistantPlan({ plan }: { plan: AssistantPlan | null | und
 }
 
 export function CanvasAssistantSidebar(props: Props) {
+    if (isBrowserWorkspace()) {
+        const close = () => props.assistant.setOpen(false);
+        const content = <div className="p-4"><EngineFeatureNotice feature="内置创作助手" onClose={close} /></div>;
+        return props.dockable
+            ? <aside className="canvas-assistant-sidebar" style={{ width: props.assistant.width, flexBasis: props.assistant.width }} aria-label="创作助手">{content}</aside>
+            : <AppDrawer flush open placement="right" title="创作助手" size="min(380px, 92vw)" onClose={close}>{content}</AppDrawer>;
+    }
+    return <ConnectedCanvasAssistantSidebar {...props} />;
+}
+
+function ConnectedCanvasAssistantSidebar(props: Props) {
     const { assistant, dockable, readOnly, selectedNodeIds, references, onLocateNodes, onRunProposal, onOpenModelSettings } = props;
     const [draft, setDraft] = useState("");
     const [attachments, setAttachments] = useState<AssistantAttachment[]>([]);

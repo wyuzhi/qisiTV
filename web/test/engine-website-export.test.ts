@@ -7,7 +7,8 @@ import { spawnSync } from "node:child_process";
 
 const sourceRoot = resolve(import.meta.dir, "../..");
 const version = readFileSync(join(sourceRoot, "VERSION"), "utf8").trim();
-const filename = `qisiTV-Engine-${version.replace(/^v/, "")}-darwin-arm64.dmg`;
+const engineVersion = readFileSync(join(sourceRoot, "ENGINE_VERSION"), "utf8").trim();
+const filename = `qisiTV-Engine-${engineVersion.replace(/^v/, "")}-darwin-arm64.dmg`;
 
 function fixture() {
     const root = mkdtempSync(join(tmpdir(), "qisitv-export-installer-"));
@@ -19,6 +20,7 @@ function fixture() {
         copyFileSync(join(sourceRoot, "scripts", name), join(repository, "scripts", name));
     }
     write(join(repository, "VERSION"), version);
+    write(join(repository, "ENGINE_VERSION"), engineVersion);
     for (const path of ["web/dist/index.html", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "licenses/BeefTV-Source-Available-1.0.txt", "assets/readme/qisitv-workspace.png", "deploy/website/api/qisitv/likeai.ts"]) write(join(repository, path));
     write(join(site, "astro.config.mjs"));
     write(join(site, "public/assets/.keep"));
@@ -30,7 +32,7 @@ function fixture() {
     const marker = join(root, "build-ran");
     // Building the website is intentionally a fixture. Installer verification
     // source packet verification and every copy/rsync use production commands.
-    write(join(root, "bin/bun"), '#!/bin/sh\nif [ "$1" = run ] && [ "$2" = build ]; then printf "%s" "$CANVAS_BUILD_VERSION" > "$QISITV_EXPORT_TEST_MARKER"; printf "%s" "$QISITV_REQUIRE_DISTRIBUTION_SOURCES" > "$QISITV_EXPORT_TEST_MARKER.sources"; exit 0; fi\nif [ "$1" = -e ]; then exit 0; fi\nexit 65\n');
+    write(join(root, "bin/bun"), '#!/bin/sh\nif [ "$1" = run ] && [ "$2" = build ]; then printf "%s" "$CANVAS_BUILD_VERSION" > "$QISITV_EXPORT_TEST_MARKER"; printf "%s" "$VITE_QISITV_ENGINE_VERSION" > "$QISITV_EXPORT_TEST_MARKER.engine"; printf "%s" "$QISITV_REQUIRE_DISTRIBUTION_SOURCES" > "$QISITV_EXPORT_TEST_MARKER.sources"; exit 0; fi\nif [ "$1" = -e ]; then exit 0; fi\nexit 65\n');
     const chmod = spawnSync("chmod", ["700", join(root, "bin/bun")]);
     if (chmod.status !== 0) throw new Error("cannot prepare isolated build fixture");
     const installer = join(repository, "dist/engine", filename);
@@ -84,7 +86,7 @@ packager.collect(lock, sys.argv[2], root / "dist", cache, offline=True)
     return { root, repository, site, marker, installer, install, run, bytes, write, sourceArchive };
 }
 
-describe("website export requires its matching engine installer", () => {
+describe("website export pins and verifies the optional engine independently", () => {
     for (const reason of ["missing installer", "missing checksum", "incorrect checksum", "different release"] as const) {
         test(`rejects ${reason} before running the frontend build`, () => {
             const f = fixture();
@@ -110,6 +112,7 @@ describe("website export requires its matching engine installer", () => {
                 const result = f.run(explicit ? path : undefined, "static");
                 expect(result.status).toBe(0);
                 expect(readFileSync(f.marker, "utf8")).toBe(version);
+                expect(readFileSync(`${f.marker}.engine`, "utf8")).toBe(engineVersion);
                 expect(readFileSync(`${f.marker}.sources`, "utf8")).toBe("0");
                 expect(readFileSync(join(f.site, "public/qisitv/downloads/engine", filename), "utf8")).toBe(f.bytes);
                 expect(readFileSync(join(f.site, "public/qisitv/downloads/engine", `${filename}.sha256`), "utf8")).toBe(readFileSync(`${path}.sha256`, "utf8"));
@@ -135,7 +138,7 @@ describe("website export requires its matching engine installer", () => {
             expect(result.status).toBe(0);
             expect(readFileSync(`${f.marker}.sources`, "utf8")).toBe("1");
             const config = JSON.parse(readFileSync(configPath, "utf8"));
-            const releaseRoot = `https://github.com/wyuzhi/qisiTV/releases/download/v${version.replace(/^v/, "")}/`;
+            const releaseRoot = `https://github.com/wyuzhi/qisiTV/releases/download/v${engineVersion.replace(/^v/, "")}/`;
             expect(config.redirects.slice(0, 2)).toEqual([filename, filename + ".sha256"].map(name => ({ source: `/qisitv/downloads/engine/${name}`, destination: releaseRoot + name, statusCode: 307 })));
             expect(config.redirects).toHaveLength(3);
             expect(config.redirects[2]).toEqual(original.redirects[0]);
@@ -165,7 +168,7 @@ describe("website export requires its matching engine installer", () => {
             const f = fixture();
             try {
                 f.install();
-                if (bad !== "other-repository") f.write(join(f.repository, "VERSION"), bad);
+                if (bad !== "other-repository") f.write(join(f.repository, "ENGINE_VERSION"), bad);
                 const result = f.run(undefined, bad === "other-repository" ? bad : undefined);
                 expect(result.status).not.toBe(0);
                 expect(existsSync(f.marker)).toBe(false);
