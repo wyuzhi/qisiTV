@@ -24,7 +24,7 @@ beforeAll(async () => {
         : { contentType: "text/html", body: '<div id="root"></div><script type="module">import { mountConnectionDragHarness } from "/app.js"; mountConnectionDragHarness(document.getElementById("root"));</script>' }));
 }, 30_000);
 
-afterAll(async () => { await browser?.close(); });
+afterAll(async () => { await browser?.close(); }, 30_000);
 
 async function mount() {
     await page.goto("https://beeftv-drag.test/");
@@ -39,6 +39,9 @@ async function paths(id: string) {
     return page.locator(`g[data-canvas-connection-id="${id}"] path[d]`).evaluateAll(paths => paths.map(path => path.getAttribute("d")));
 }
 
+// Each case loads the production bundle and renders 1,000 unrelated edges.
+// These are geometry/ownership assertions, not a five-second browser startup
+// benchmark; allow the same budget as other browser suites under the CI pool.
 test("dragging one node never reads unrelated endpoints, including on cancellation", async () => {
     await mount();
     expect(await move(["from"], 20, 10)).toBe(0);
@@ -46,7 +49,7 @@ test("dragging one node never reads unrelated endpoints, including on cancellati
     expect(await paths("next")).toEqual(Array(3).fill("M 400 40 C 500 40, 500 40, 600 40"));
     expect(await move(null)).toBe(0);
     expect(await paths("main")).toEqual(Array(3).fill("M 100 40 C 200 40, 200 40, 300 40"));
-});
+}, 30_000);
 
 test("multi-selection moves both ends once and restores the exact original curve", async () => {
     await mount();
@@ -54,7 +57,7 @@ test("multi-selection moves both ends once and restores the exact original curve
     expect(await paths("main")).toEqual(Array(3).fill("M 60 65 C 160 65, 160 65, 260 65"));
     await move(null);
     expect(await paths("main")).toEqual(Array(3).fill("M 100 40 C 200 40, 200 40, 300 40"));
-});
+}, 30_000);
 
 test("changing the dragged set resets edges no longer adjacent to the preview", async () => {
     await mount();
@@ -64,7 +67,7 @@ test("changing the dragged set resets edges no longer adjacent to the preview", 
     expect(await paths("next")).toEqual(Array(3).fill("M 400 40 C 500 40, 500 25, 600 25"));
     await move(null);
     expect(await paths("next")).toEqual(Array(3).fill("M 400 40 C 500 40, 500 40, 600 40"));
-});
+}, 30_000);
 
 test("indexes displayed collapsed-frame endpoints and preserves scrolled script anchors", async () => {
     await mount();
@@ -74,7 +77,7 @@ test("indexes displayed collapsed-frame endpoints and preserves scrolled script 
     expect(await paths("row")).toEqual(Array(3).fill("M 120 586 C 210 586, 210 40, 300 40"));
     await move(null);
     expect(await paths("row")).toEqual(Array(3).fill("M 100 576 C 200 576, 200 40, 300 40"));
-});
+}, 30_000);
 
 test("compact preview updates paths and endpoint circles using the existing geometry", async () => {
     await mount();
@@ -83,7 +86,7 @@ test("compact preview updates paths and endpoint circles using the existing geom
     expect(await page.locator('g[data-canvas-connection-id="main"] circle').evaluateAll(circles => circles.map(circle => [circle.getAttribute("cx"), circle.getAttribute("cy")]))).toEqual([["100", "120"], ["300", "40"]]);
     await move(null);
     expect(await paths("main")).toEqual(Array(3).fill("M 100 40 C 200 40, 200 40, 300 40"));
-});
+}, 30_000);
 
 test("highlight paths added after mount follow the drag and cancellation leaves identical pixels", async () => {
     await mount();
@@ -99,7 +102,7 @@ test("highlight paths added after mount follow the drag and cancellation leaves 
     await move(null);
     expect(await group.evaluate(element => element.outerHTML)).toBe(before);
     expect((await page.screenshot()).equals(baseline)).toBe(true);
-});
+}, 30_000);
 
 test("refreshing the connection subscription during a drag cannot leave a translated path after cancel", async () => {
     await mount();
@@ -110,7 +113,7 @@ test("refreshing the connection subscription during a drag cannot leave a transl
     expect(await paths("main")).toEqual(Array(3).fill("M 120 50 C 210 50, 210 40, 300 40"));
     await move(null);
     expect(await paths("main")).toEqual(Array(3).fill("M 100 40 C 200 40, 200 40, 300 40"));
-});
+}, 30_000);
 
 test("highlighting added while a drag pauses uses the live path before the next pointer event", async () => {
     await mount();
@@ -122,7 +125,7 @@ test("highlighting added while a drag pauses uses the live path before the next 
     expect(await group.locator("linearGradient[gradientUnits]").evaluate(element => ["x1", "y1", "x2", "y2"].map(name => element.getAttribute(name)))).toEqual(["120", "50", "300", "40"]);
     await move(null);
     expect(await paths("main")).toEqual(Array(6).fill("M 100 40 C 200 40, 200 40, 300 40"));
-});
+}, 30_000);
 
 test("switching canvas scope during a drag cannot retain a preview on reused connection objects", async () => {
     await mount();
@@ -130,4 +133,4 @@ test("switching canvas scope during a drag cannot retain a preview on reused con
     await page.evaluate(() => (window as any).connectionDrag.switchProject());
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     expect(await paths("main")).toEqual(Array(3).fill("M 100 40 C 200 40, 200 40, 300 40"));
-});
+}, 30_000);
