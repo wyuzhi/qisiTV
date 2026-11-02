@@ -34,6 +34,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { canvasNodeAssetCategory } from "@/lib/canvas/canvas-node-asset";
 import { isCanvasFolderNode, isFrameNode } from "@/lib/canvas/canvas-frame";
 import { resolveAddNodeMenuCommands, type AddNodeMenuContext } from "@/lib/canvas/tool-registry";
+import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { usePluginStore } from "@/stores/use-plugin-store";
 import { cn } from "@/lib/utils";
@@ -172,6 +173,18 @@ export function CanvasNodeContextMenu({
     const assetCategory = node ? canvasNodeAssetCategory(node) : "other";
     const hasMultiSelection = selectedCount >= 2;
     const position = getContextMenuPosition(menu, hasMultiSelection);
+    const pluginContextMenuEntries = usePluginSlot("canvas.contextMenu");
+    const pluginContextTarget = menu.type === "canvas" ? "canvas" : hasMultiSelection ? "selection" : "node";
+    const pluginContextMenuCtx = {
+        target: pluginContextTarget as "canvas" | "node" | "selection",
+        node: node ?? null,
+        selectedNodeIds: node ? [node.id] : [],
+        selectedNodes: node ? [node] : [],
+        position: { x: menu.x, y: menu.y },
+    };
+    const visiblePluginMenuItems = pluginContextMenuEntries.filter((entry) =>
+        entry.payload.when ? entry.payload.when(pluginContextMenuCtx) : true,
+    );
 
     return (
         <>
@@ -288,6 +301,21 @@ export function CanvasNodeContextMenu({
                             <MenuButton icon={<Trash2 className="size-4" />} label="删除连接" danger onClick={() => runAction(onDelete)} />
                         </>
                     )}
+                    {!categoryOpen && visiblePluginMenuItems.length > 0 ? (
+                        <>
+                            <MenuDivider />
+                            <MenuSection label="插件扩展" />
+                            {visiblePluginMenuItems.map((entry) => (
+                                <MenuButton
+                                    key={entry.entryId}
+                                    icon={entry.payload.icon ?? <Plus className="size-4" />}
+                                    label={entry.payload.label}
+                                    shortcut={entry.payload.shortcut}
+                                    onClick={() => runAction(() => void entry.payload.onSelect(pluginContextMenuCtx))}
+                                />
+                            ))}
+                        </>
+                    ) : null}
                 </div>
             </SpotlightSurface>
 

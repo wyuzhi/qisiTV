@@ -347,6 +347,14 @@ function createPromptOptimizer(context: Parameters<NonNullable<RegisteredPlugin[
 export const promptOptimizerPlugin: RegisteredPlugin = {
     manifest,
     createPromptOptimizer,
+    setup(host) {
+        return host.contribute("canvas.promptActions", {
+            id: "prompt-optimizer",
+            label: "润色",
+            order: 10,
+            nodeTypes: ["image", "video"],
+        });
+    },
 };
 
 registerPlugin(promptOptimizerPlugin);

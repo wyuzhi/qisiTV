@@ -9,6 +9,9 @@ import { WorkspaceSidebarSocialLinks } from "@/components/layout/workspace-sideb
 import { Kbd } from "@/components/ui/base/kbd";
 import { navigationTools, type NavigationToolSlug } from "@/constant/navigation-tools";
 import { aceternityMotion } from "@/lib/aceternity-motion";
+import "@/lib/plugins/builtin";
+import { syncActiveClientPlugins } from "@/lib/plugins/plugin-client-loader";
+import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { cn } from "@/lib/utils";
 import { preloadWorkspaceRoute } from "@/lib/workspace-route-modules";
 import { useUserStore, type FeatureAvailability } from "@/stores/use-user-store";
@@ -260,13 +263,33 @@ export function WorkspaceSidebarNav({ collapsed, onNavigate, onOpenSearch, onExp
     const { pathname } = useLocation();
     const [searchParams] = useSearchParams();
     const features = useUserStore((state) => state.features);
-    const { groups, footer } = useMemo(() => buildNav(features), [features]);
+    useEffect(() => {
+        syncActiveClientPlugins();
+    }, []);
+    const pluginSidebarEntries = usePluginSlot("app.sidebar");
+    const { groups: baseGroups, footer } = useMemo(() => buildNav(features), [features]);
+    const groups = useMemo(() => {
+        if (!pluginSidebarEntries.length) return baseGroups;
+        return [
+            ...baseGroups,
+            {
+                items: pluginSidebarEntries.map((entry) => ({
+                    id: entry.payload.id,
+                    title: entry.payload.label,
+                    icon: Plug,
+                    to: entry.payload.path,
+                    badge: entry.payload.badge,
+                })),
+            },
+        ];
+    }, [baseGroups, pluginSidebarEntries]);
 
     const rawSlug = pathname.split("/").filter(Boolean)[0] || "home";
     // `/project` is the LibTV-compatible alias for the existing canvas library route.
     const slug = rawSlug === "project" ? "canvas" : rawSlug;
     const section = searchParams.get("section");
-    const activeId = slug === "settings" && section ? `settings:${section}` : slug;
+    const matchedPluginNav = pluginSidebarEntries.find((entry) => pathname === entry.payload.path || pathname.startsWith(`${entry.payload.path}/`));
+    const activeId = matchedPluginNav ? matchedPluginNav.payload.id : slug === "settings" && section ? `settings:${section}` : slug;
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const [scrollState, setScrollState] = useState({ hasTopFade: false, hasBottomFade: false });

@@ -32,6 +32,8 @@ import { CanvasPromptOptimizerDrawer } from "./canvas-prompt-optimizer-drawer";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata, type CanvasWorkspaceMode } from "@/types/canvas";
 import { autoMentionCanvasResourceReferences, canvasResourceMentionToken, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { promptOptimizerPlugin, PROMPT_OPTIMIZER_PLUGIN_ID } from "@/lib/plugins/builtin/prompt-optimizer";
+import { syncActiveClientPlugins } from "@/lib/plugins/plugin-client-loader";
+import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { createPluginHostContext } from "@/services/plugin-host";
 import { usePluginStore } from "@/stores/use-plugin-store";
 import { useResolvedCanvasResourceReferences } from "./use-resolved-canvas-resource-references";
@@ -86,8 +88,12 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
     const rememberVideoSettings = useCreationPreferencesStore((state) => state.rememberVideoSettings);
     const promptFontSize = preferredFontSize ?? DEFAULT_PROMPT_FONT_SIZE;
     const expandedFontSize = promptFontSize;
+    useEffect(() => {
+        syncActiveClientPlugins();
+    }, []);
+    const promptActionEntries = usePluginSlot("canvas.promptActions");
     const promptOptimizerInstallation = usePluginStore((state) => state.installations.find((item) => item.manifest.id === PROMPT_OPTIMIZER_PLUGIN_ID));
-    const promptOptimizerEnabled = usePluginStore((state) => state.pluginStates[PROMPT_OPTIMIZER_PLUGIN_ID]?.effectiveEnabled ?? Boolean(state.installations.find((item) => item.manifest.id === PROMPT_OPTIMIZER_PLUGIN_ID)?.enabled));
+    const promptOptimizerEnabled = promptActionEntries.some((entry) => entry.pluginId === PROMPT_OPTIMIZER_PLUGIN_ID || entry.payload.id === "prompt-optimizer");
     const simpleMode = workspaceMode === "simple";
     const mode = defaultMode(node.type);
     const autoLinkLabel = mode === "image" || mode === "video" || mode === "audio" ? "AutoLink" : "引用";
@@ -285,6 +291,37 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
             )}
             <div className="ml-auto flex shrink-0 items-center justify-end gap-1">
                 {expanded ? <CanvasPromptFontControl /> : null}
+                {promptActionEntries
+                    .filter((entry) => entry.pluginId !== PROMPT_OPTIMIZER_PLUGIN_ID && entry.payload.id !== "prompt-optimizer")
+                    .filter((entry) => !entry.payload.nodeTypes?.length || entry.payload.nodeTypes.includes(mode))
+                    .map((entry) => {
+                        const actionProps = {
+                            nodeId: node.id,
+                            nodeType: mode,
+                            prompt,
+                            setPrompt: updatePrompt,
+                            model: config.model,
+                            aspectRatio: config.size,
+                            referenceImages: activeReferences.filter((item) => item.kind === "image").map((item) => item.previewUrl || "").filter(Boolean),
+                            disabled: isRunning,
+                        };
+                        if (entry.payload.component) {
+                            const Comp = entry.payload.component;
+                            return <Comp key={entry.entryId} {...actionProps} />;
+                        }
+                        return (
+                            <button
+                                key={entry.entryId}
+                                type="button"
+                                className="canvas-node-composer-header-action inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5"
+                                onClick={() => void entry.payload.onClick?.(actionProps)}
+                                disabled={isRunning}
+                            >
+                                {entry.payload.icon ?? <WandSparkles className="size-3" />}
+                                <span className="text-[var(--fs-tiny)] font-medium">{entry.payload.label}</span>
+                            </button>
+                        );
+                    })}
             {canOptimizePrompt ? (
                 <Tooltip title="用 AI 润色提示词">
                     <button

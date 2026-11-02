@@ -35,6 +35,8 @@ import { executeTextGeneration } from "./canvas-text-generation-executor";
 import { canvasGenerationFailureMetadata, canvasImagePendingResultMessage } from "./canvas-generation-failure";
 import { canvasNodeHasPendingOutcomeResult, isNodeRegenerateBlocked, isNodeRegenerateConfirm, readNodeTaskOutcome, taskOutcomeCopy } from "@/lib/task-outcome";
 import { createReferenceLinkResolver } from "@/components/generation-reference-links";
+import { emitPluginEvent } from "@/lib/plugins/plugin-events";
+import { runGenerationBeforeSubmitHooks } from "@/lib/plugins/slot-registry";
 import { confirmCanvasGeneration, waitForCanvasPreparation } from "./canvas-generation-preflight";
 import { startOperation } from "@/stores/use-operation-progress";
 import type { CanvasPageUiStoreHook } from "@/stores/canvas/use-canvas-page-ui-store";
@@ -320,7 +322,29 @@ export function useCanvasGenerationExecutor({
                             effectivePrompt = rawGenerationContext.prompt;
                         }
                         stage = "parameters";
-                        let styleMetadata = {};
+                        let styleMetadata: Record<string, unknown> = {};
+                        if (mode === "image" || mode === "video" || mode === "audio") {
+                            const hookResult = await runGenerationBeforeSubmitHooks({
+                                nodeId,
+                                nodeType: mode,
+                                prompt: effectivePrompt,
+                                model: generationConfig.model,
+                                params: { size: generationConfig.size, quality: generationConfig.quality },
+                                referenceImages: rawGenerationContext.referenceImages.map((item) => item.url || item.dataUrl || "").filter(Boolean),
+                                metadata: sourceNode?.metadata as Record<string, unknown> | undefined,
+                            });
+                            effectivePrompt = hookResult.prompt;
+                            if (hookResult.notifications.length > 0) {
+                                for (const note of hookResult.notifications) {
+                                    message.info(note);
+                                }
+                                styleMetadata = {
+                                    ...styleMetadata,
+                                    ...hookResult.metadata,
+                                    pluginAdjustedBy: hookResult.adjustedByPlugins.map((item) => item.pluginName),
+                                };
+                            }
+                        }
                         if (mode === "image") {
                             try {
                                 const styleRuntime = resolveCanvasStyleExecution(inputNodes, sourceNode, effectivePrompt, generationConfig, mode);
@@ -506,6 +530,7 @@ export function useCanvasGenerationExecutor({
                                 if (!boundTaskIds.has(task.id)) {
                                     boundTaskIds.add(task.id);
                                     recordDiagnosticEvent({ category: "task", level: "info", code: "generation_submission_bound", message: "画布提交已关联生成任务", requestId: attemptId, canvasId: projectId, taskId: task.id, canvasBinding: { source: "client", nodeId: targetNodeId, clientOperationId: task.clientOperationId } });
+                                    emitPluginEvent("generation.submitted", { nodeId: targetNodeId, nodeType: mode, model: generationConfig.model, prompt: effectivePrompt, taskId: task.id });
                                 }
                                 bindGenerationTask(targetNodeId, task);
                                 if (!sourceReleased && !controller.signal.aborted && canReleaseCanvasGenerationSource(nodeId, targetNodeId, task)) {
@@ -535,9 +560,11 @@ export function useCanvasGenerationExecutor({
                             else if (mode === "video") await executeVideoGeneration(execution);
                             else if (mode === "audio") await executeAudioGeneration(execution);
                             else await executeTextGeneration(execution);
+                            emitPluginEvent("generation.succeeded", { nodeId, nodeType: mode, resultUrls: [] });
                         } catch (error) {
                             if (isGenerationCanceled(error)) return;
                             const failure = canvasGenerationFailureMetadata(error, { ...generationContext, mode });
+                            emitPluginEvent("generation.failed", { nodeId, nodeType: mode, error: failure.errorDetails });
                             if (options?.waitForTaskCapacity && isGenerationTaskCapacityError(error)) {
                                 setNodes((current) =>
                                     current.map((node) => {

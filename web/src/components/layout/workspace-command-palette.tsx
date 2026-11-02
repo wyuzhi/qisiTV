@@ -4,11 +4,14 @@ import { useNavigate } from "react-router";
 
 import { navigationTools } from "@/constant/navigation-tools";
 import { Kbd } from "@/components/ui/base/kbd";
+import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { cn } from "@/lib/utils";
 
 type PaletteEntry = {
     id: string;
     title: string;
+    keywords?: string[];
+    shortcut?: string;
     icon: ComponentType<{ className?: string; strokeWidth?: number }>;
     to?: string;
     run?: () => void;
@@ -20,12 +23,23 @@ export function WorkspaceCommandPalette({ open, onClose }: { open: boolean; onCl
     const [query, setQuery] = useState("");
     const [highlight, setHighlight] = useState(0);
     const inputRef = useRef<HTMLInputElement>(null);
+    const pluginCommandEntries = usePluginSlot("app.command");
 
     const entries = useMemo<PaletteEntry[]>(() => {
         const toolEntry = (slug: string, to?: string): PaletteEntry => {
             const tool = navigationTools.find((item) => item.slug === slug);
             return { id: slug, title: tool?.label ?? slug, icon: tool?.icon ?? Home, to };
         };
+        const pluginEntries: PaletteEntry[] = pluginCommandEntries.map((entry) => ({
+            id: `plugin:${entry.entryId}`,
+            title: entry.payload.title,
+            keywords: entry.payload.keywords,
+            shortcut: entry.payload.shortcut,
+            icon: Command,
+            run: () => {
+                void entry.payload.handler();
+            },
+        }));
         return [
             { id: "home", title: "首页", icon: Home, to: "/" },
             toolEntry("projects", "/project"),
@@ -33,13 +47,18 @@ export function WorkspaceCommandPalette({ open, onClose }: { open: boolean; onCl
             toolEntry("assets", "/assets"),
             toolEntry("skills", "/skills"),
             toolEntry("settings", "/settings"),
+            ...pluginEntries,
         ];
-    }, []);
+    }, [pluginCommandEntries]);
 
     const filtered = useMemo(() => {
         const keyword = query.trim().toLowerCase();
         if (!keyword) return entries;
-        return entries.filter((entry) => entry.title.toLowerCase().includes(keyword));
+        return entries.filter(
+            (entry) =>
+                entry.title.toLowerCase().includes(keyword) ||
+                (entry.keywords ?? []).some((kw) => kw.toLowerCase().includes(keyword)),
+        );
     }, [entries, query]);
 
     const activateEntry = (entry: PaletteEntry) => {

@@ -1,5 +1,6 @@
 import { getRegisteredPlugin } from "@/lib/plugins/plugin-registry";
 import { pluginStorageFor } from "@/lib/plugins/plugin-storage";
+import { getPluginSlotEntries } from "@/lib/plugins/slot-registry";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import type { Asset } from "@/stores/use-asset-store";
 import { isPluginEffectivelyEnabled, usePluginStore } from "@/stores/use-plugin-store";
@@ -28,27 +29,45 @@ export type ExternalAssetSyncResult = {
 };
 
 export function createHostedAssetSources(installations: PluginInstallation[]): HostedAssetSource[] {
-    return installations.flatMap((installation) => {
-        if (!isPluginEffectivelyEnabled(installation.manifest.id, installation.enabled)) return [];
+    const seen = new Set<string>();
+    const result: HostedAssetSource[] = [];
+    const enabledByPluginId = new Map(installations.map((inst) => [inst.manifest.id, inst.enabled]));
+
+    for (const entry of getPluginSlotEntries("assets.source")) {
+        const instEnabled = enabledByPluginId.get(entry.pluginId) ?? true;
+        if (!isPluginEffectivelyEnabled(entry.pluginId, instEnabled)) continue;
+        const sourceId = entry.payload.id || entry.pluginId;
+        if (seen.has(sourceId)) continue;
+        seen.add(sourceId);
+        result.push({
+            id: sourceId,
+            name: entry.payload.name,
+            provider: entry.payload.provider,
+        });
+    }
+
+    for (const installation of installations) {
+        if (!isPluginEffectivelyEnabled(installation.manifest.id, installation.enabled)) continue;
+        if (seen.has(installation.manifest.id)) continue;
         const plugin = getRegisteredPlugin(installation.manifest.id);
-        if (!plugin?.createAssetSource) return [];
+        if (!plugin?.createAssetSource) continue;
         try {
-            return [
-                {
-                    id: plugin.manifest.id,
-                    name: plugin.manifest.name,
-                    provider: plugin.createAssetSource({
-                        manifest: plugin.manifest,
-                        permissions: new Set(plugin.manifest.permissions),
-                        storage: pluginStorageFor(plugin.manifest.id),
-                        config: installation.config,
-                    }),
-                },
-            ];
+            seen.add(plugin.manifest.id);
+            result.push({
+                id: plugin.manifest.id,
+                name: plugin.manifest.name,
+                provider: plugin.createAssetSource({
+                    manifest: plugin.manifest,
+                    permissions: new Set(plugin.manifest.permissions),
+                    storage: pluginStorageFor(plugin.manifest.id),
+                    config: installation.config,
+                }),
+            });
         } catch {
-            return [];
+            // ignore broken provider
         }
-    });
+    }
+    return result;
 }
 
 export async function uploadGeneratedAssetToConfiguredSources(asset: Asset, signal?: AbortSignal): Promise<ExternalAssetSyncResult> {
