@@ -758,3 +758,19 @@ describe("desktop update controller", () => {
     expect(desktopUpdateProgressPercent({ ...base, status: "installing", installPrepared: true })).toBe(100);
     expect(desktopUpdateProgressPercent({ ...base, status: "error", installPrepared: true })).toBeLessThan(100);
  });
+
+test("persistWorkspaceBeforeDesktopInstall flushes pending local canvas debounce timers before checking sync progress", async () => {
+    const { scheduleLocalCanvasBackendSync } = await import("@/services/local-workspace-repository");
+    const { projectSyncProgress } = await import("@/stores/use-sync-progress-store");
+    const flush = spyOn(modelConfig, "flushModelConfig").mockResolvedValue(undefined);
+    const state = spyOn(modelConfig, "getModelConfigPersistenceState").mockReturnValue({ status: "saved", dirty: false, revision: 1, error: "" });
+    try {
+        scheduleLocalCanvasBackendSync("non-existent-test-canvas");
+        expect(projectSyncProgress("non-existent-test-canvas")?.phase).toBe("pending");
+        await persistWorkspaceBeforeDesktopInstall();
+        expect(projectSyncProgress("non-existent-test-canvas")?.phase).toBe("done");
+    } finally {
+        flush.mockRestore();
+        state.mockRestore();
+    }
+});

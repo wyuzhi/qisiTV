@@ -9,7 +9,7 @@ import { modelOptionName, resolveModelChannel, selectableModelsByCapability, use
 import { buildGenerationConfig as buildNodeConfig, buildCanvasGenerationRequirements } from "@/lib/canvas/canvas-generation-config";
 import { PROMPT_EDITOR_VIEWPORT_MARGIN } from "@/lib/canvas/canvas-prompt-editor-size";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { modelRequestOptions, defaultImageParamsForModel, type ModelRequirements } from "@/lib/model-selection";
+import { modelRequestOptions, defaultImageParamsForModel, resolveVideoOperation, type ModelRequirements } from "@/lib/model-selection";
 import { navigateToSettings } from "@/lib/settings-navigation";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -135,6 +135,10 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
     const activeReferenceCount = activeReferences.length;
     const videoFrameOptions = useMemo(() => resolvedMentionReferences.filter((item) => item.active && item.kind === "image").map((item) => ({ nodeId: item.nodeId, label: item.label, title: item.title, previewUrl: item.previewUrl })), [resolvedMentionReferences]);
     const h3Model = isH3Model(config.model);
+    const effectiveVideoOperation = mode === "video" && requirements.input
+        ? (h3Model ? h3VideoOperation(config.model, requirements.input, node.metadata?.videoEditOperation) : resolveVideoOperation(requirements.input, node.metadata?.videoEditOperation))
+        : undefined;
+    const referenceOnlyVideoMode = effectiveVideoOperation === "reference_to_video" && modelOptionName(config.model) !== "minimax-h3-max";
     const videoReferenceInputs = useMemo(() => activeReferences.flatMap((reference) => reference.kind === "skill" ? [] : [{ nodeId: reference.nodeId, type: reference.kind, title: reference.title }]), [activeReferences]);
     const hasVideoPromptTools = mode === "video" && !simpleMode && (videoFrameOptions.length > 0 || (h3Model && videoReferenceInputs.some((input) => input.type !== "text")));
     const renderVideoPromptTools = () => (
@@ -143,8 +147,8 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
                 metadata={node.metadata}
                 frameOptions={videoFrameOptions}
                 endFrameSupported={!isH3Style(config.model)}
-                referenceLabel={h3Model ? "参考生成" : undefined}
-                referenceMode={modelOptionName(config.model) === "minimax-h3" && h3VideoOperation(config.model, requirements.input!, node.metadata?.videoEditOperation) === "reference_to_video" ? "all" : "frames"}
+                referenceLabel={h3Model || referenceOnlyVideoMode ? "参考生成" : undefined}
+                referenceMode={referenceOnlyVideoMode ? "all" : "frames"}
                 referenceSummary={requirements.input}
                 onMetadataChange={(patch) => onConfigChange(node.id, patch)}
             />

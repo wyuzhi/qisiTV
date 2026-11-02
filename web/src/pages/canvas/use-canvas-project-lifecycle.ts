@@ -30,6 +30,7 @@ import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "@/types/canvas";
 import type { CanvasHistorySnapshot } from "./use-canvas-history";
 import { backfillCanvasTaskOutcomes } from "@/services/canvas-task-outcome-backfill";
+import { registerDesktopUpdatePreparation } from "@/services/desktop-update-preparation";
 import { queryGenerationTask } from "@/services/api/task-center";
 import { persistCanvasNodeFailure } from "@/lib/canvas/canvas-node-failure-state";
 
@@ -738,6 +739,11 @@ export function useCanvasProjectLifecycle({
         await flushCanvasStorePersistence();
         if (localMode) await syncLocalCanvasProjectToBackend(projectId);
     }, [activeChatId, backgroundMode, canvasAppearance, chatSessions, connectionsRef, localMode, nodesRef, projectId, projectLoaded, showImageInfo, updateProject, viewportRef]);
+
+    useEffect(() => {
+        if (!projectLoaded) return;
+        return registerDesktopUpdatePreparation(() => persistLocalEdits());
+    }, [persistLocalEdits, projectLoaded]);
 
     const reloadLatestCanvasProject = useCallback(async () => {
         await persistLocalEdits();

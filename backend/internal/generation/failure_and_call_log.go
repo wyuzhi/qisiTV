@@ -756,7 +756,11 @@ func RecordTaskDiagnosticInput(ctx context.Context, input Input) {
 	if r == nil {
 		return
 	}
-	d := &model.TaskDiagnosticInput{Protocol: input.Config.InterfaceType, Model: input.Config.Model, Size: input.Config.Size, Quality: input.Config.Quality, Count: input.Config.Count,
+	quality := input.Config.Quality
+	if input.Mode == "video" {
+		quality = firstNonEmpty(input.Config.Quality, input.Config.VQuality)
+	}
+	d := &model.TaskDiagnosticInput{Protocol: input.Config.InterfaceType, Model: input.Config.Model, Size: input.Config.Size, Quality: quality, Count: input.Config.Count,
 		PromptChars: utf8.RuneCountInString(input.Prompt), ImageCount: len(input.ReferenceImages), VideoCount: len(input.ReferenceVideos), AudioCount: len(input.ReferenceAudios)}
 	for i, media := range input.ReferenceImages {
 		if i == 16 {

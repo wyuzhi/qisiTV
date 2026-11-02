@@ -546,7 +546,11 @@ func (c *MediaClient) wait(ctx context.Context, ref, kind string, legacy, stopWh
 }
 func (t MediaTask) failure() error {
 	if t.Error != nil {
-		return t.Error
+		err := *t.Error
+		if err.TaskID == "" {
+			err.TaskID = t.TaskID
+		}
+		return &err
 	}
-	return &MediaTaskError{Code: "media_task_failed", Category: "unknown", Message: "媒体生成失败，请保留原任务查询结算"}
+	return &MediaTaskError{Code: "media_task_failed", Category: "upstream", TaskID: t.TaskID, Message: "媒体生成失败，请保留原任务查询结算"}
 }

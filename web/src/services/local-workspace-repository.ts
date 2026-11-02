@@ -453,6 +453,11 @@ export async function createLocalCanvasProject(title: string, projectId?: string
 function syncLocalCanvasProject(id: string): Promise<void> {
     const scope = getActiveUserScope();
     const key = saveKey(scope, id);
+    const existingTimer = backendSaveTimers.get(key);
+    if (existingTimer) {
+        clearTimeout(existingTimer);
+        backendSaveTimers.delete(key);
+    }
     const previous = backendSaveTails.get(key) || Promise.resolve();
     const next = previous.catch(() => undefined).then(async () => {
         if (canvasDeleting.has(key)) throw new CanvasBackendSubmitPausedError("画布正在删除，未提交");
@@ -1106,6 +1111,32 @@ export function pendingExternalCanvasRevision(id: string) {
 
 export async function flushLocalWorkspace() {
     await flushCanvasStorePersistence();
+}
+
+export async function flushLocalCanvasBackendSaves(): Promise<void> {
+    const scope = getActiveUserScope();
+    const prefix = `${scope}\0`;
+    for (const [key, timer] of [...backendSaveTimers.entries()]) {
+        if (!key.startsWith(prefix)) continue;
+        clearTimeout(timer);
+        backendSaveTimers.delete(key);
+        const id = key.slice(prefix.length);
+        if (canvasDeleting.has(key)) {
+            publishCanvasSaveProgress(id, scope, true);
+            continue;
+        }
+        void syncLocalCanvasProject(id).catch(() => undefined);
+    }
+    const tails = [...backendSaveTails.entries()]
+        .filter(([key]) => key.startsWith(prefix))
+        .map(([, tail]) => tail);
+    if (tails.length > 0) {
+        const results = await Promise.allSettled(tails);
+        const failed = results.find((result) => result.status === "rejected");
+        if (failed?.status === "rejected" && !isCanvasSubmitControlError(failed.reason)) {
+            throw failed.reason;
+        }
+    }
 }
 
 async function waitForCanvasBackendIdle(id: string, scope: string) {

@@ -69,6 +69,14 @@ func isSeedance25Model(modelName string) bool {
 	return base == "seedance-2.5" || strings.HasPrefix(base, "seedance-2.5-") || strings.HasPrefix(base, "doubao-seedance-2-5") || strings.HasPrefix(base, "doubao-seedance-2.5") || base == "dreamina-seedance-2-5" || strings.HasPrefix(base, "dreamina-seedance-2-5-") || base == "dreamina-seedance-2.5" || strings.HasPrefix(base, "dreamina-seedance-2.5-")
 }
 
+var seedance2FastOrMiniPattern = regexp.MustCompile(`^(?:(?:doubao|dreamina)-)?seedance-2[.-]0-(?:fast|mini)(?:-|$)`)
+
+func isSeedance2FastOrMiniModel(modelName string) bool {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(modelName)), "/")
+	base := parts[len(parts)-1]
+	return seedance2FastOrMiniPattern.MatchString(base)
+}
+
 const documentedSeedanceVideoMinPixels = 407696
 
 func applySeedanceDocumentedVideoPixelFloor(config TaskConfig, refs *VideoReferenceConfig) {

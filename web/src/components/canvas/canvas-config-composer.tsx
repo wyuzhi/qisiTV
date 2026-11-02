@@ -12,7 +12,8 @@ import { CanvasVideoPromptTools } from "./canvas-video-prompt-tools";
 import { CanvasPresetPicker, type CanvasPromptPreset } from "./canvas-preset-picker";
 import type { CanvasGenerationMode, CanvasNodeMetadata, CanvasWorkspaceMode } from "@/types/canvas";
 import { CanvasH3ReferenceOrder } from "./canvas-h3-reference-order";
-import { isH3Style } from "@/lib/h3-video";
+import { h3VideoOperation, isH3Model, isH3Style } from "@/lib/h3-video";
+import { resolveVideoOperation } from "@/lib/model-selection";
 import { CanvasPromptFontControl } from "./canvas-prompt-font-control";
 import { DEFAULT_PROMPT_FONT_SIZE, useCreationPreferencesStore } from "@/stores/use-creation-preferences-store";
 
@@ -191,7 +192,7 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
                         endFrameSupported={!isH3Style(model)}
                         referenceLabel={workflowVideoReferenceMode?"工作流参考":"参考生成"}
                         frameOptions={videoFrameOptions}
-                        referenceMode={workflowVideoReferenceMode || model.split("::").at(-1)==="minimax-h3" && metadata?.videoEditOperation==="reference_to_video" ? "all" : "frames"}
+                        referenceMode={workflowVideoReferenceMode || (model.split("::").at(-1)!=="minimax-h3-max" && (isH3Model(model) ? h3VideoOperation(model, { imageCount: inputs.filter((input) => input.type === "image").length, characterCount: inputs.filter((input) => input.type === "character").length, videoCount: inputs.filter((input) => input.type === "video").length, audioCount: inputs.filter((input) => input.type === "audio").length }, metadata?.videoEditOperation) : resolveVideoOperation({ textCount: 0, imageCount: inputs.filter((input) => input.type === "image").length, characterCount: inputs.filter((input) => input.type === "character").length, videoCount: inputs.filter((input) => input.type === "video").length, audioCount: inputs.filter((input) => input.type === "audio").length }, metadata?.videoEditOperation)) === "reference_to_video") ? "all" : "frames"}
                         referenceSummary={{
                             imageCount: inputs.filter((input) => input.type === "image" || input.type === "character").length,
                             videoCount: inputs.filter((input) => input.type === "video").length,

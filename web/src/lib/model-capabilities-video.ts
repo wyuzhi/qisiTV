@@ -422,6 +422,13 @@ export function defaultVideoCapabilityConfig(protocol?: ModelProtocol, model = "
         video.returnLastFrame = { supported: true, default: false };
         video.references = overlayOfficialSeedance2References(video.references, isSeedance25Model(model));
         video.operations = Array.from(new Set([...video.operations, "reference_to_video", ...(isSeedance25Model(model) ? (["audio_to_video", "inpaint", "extend"] as const) : [])]));
+        if (isSeedance2FastOrMiniModel(model)) {
+            const filtered = video.resolutions.filter((value) => ["480p", "720p"].includes(value.trim().toLowerCase()));
+            video.resolutions = filtered.length ? filtered : ["480p", "720p"];
+            if (!video.resolutions.some((value) => value.trim().toLowerCase() === video.defaultResolution.trim().toLowerCase())) {
+                video.defaultResolution = video.resolutions.find((value) => value.trim().toLowerCase() === "720p") || video.resolutions[0] || "720p";
+            }
+        }
         if (isSeedance25Model(model)) {
             if (!video.ratios.includes("adaptive")) video.ratios = [...video.ratios, "adaptive"];
             if (video.resolutions.some((value) => value.toLowerCase() === "480p")) {
@@ -479,6 +486,11 @@ export function isSeedance2Family(protocol: ModelProtocol | undefined, modelName
 export function isSeedance25Model(modelName: string) {
     const base = String(modelName).trim().toLowerCase().split("/").pop() || "";
     return /^seedance-2\.5(?:-|$)/.test(base) || /^(?:doubao|dreamina)-seedance-2[.-]5(?:-|$)/.test(base);
+}
+
+export function isSeedance2FastOrMiniModel(modelName: string) {
+    const base = String(modelName).trim().toLowerCase().split("/").pop() || "";
+    return /^(?:(?:doubao|dreamina)-)?seedance-2[.-]0-(?:fast|mini)(?:-|$)/.test(base);
 }
 
 // 输出时长下限官方 4 秒：区间、连续（fractionalMin）和枚举三种已保存配置都要收紧，

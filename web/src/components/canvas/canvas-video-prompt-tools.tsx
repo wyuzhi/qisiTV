@@ -57,7 +57,7 @@ export function CanvasVideoPromptTools({ metadata, frameOptions, onMetadataChang
                 className="flex min-h-8 min-w-0 items-center gap-2 rounded-md px-2 py-1.5"
                 data-canvas-no-zoom
                 style={{ background: theme.toolbar.itemHover, color: theme.node.text }}
-                title="已连接的图片、视频和音频会按工作流字段映射传入"
+                title={referenceLabel === "参考生成" ? "当前为全模态参考模式，已连接的参考图将作为整体参考传入，不区分首尾帧" : "已连接的图片、视频和音频会按工作流字段映射传入"}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
             >

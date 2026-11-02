@@ -407,3 +407,109 @@ test("Seedance 2.5 exposes vendor-neutral business actions across all BYOK video
         expect(profile.ratios).toContain("adaptive");
     }
 });
+
+test("Seedance 2.0 fast and mini cap default resolutions to 480p and 720p while standard 2.0 keeps 1080p", () => {
+    const fast = modelCapabilityConfigFor(
+        {
+            channels: [
+                {
+                    id: "beefapi",
+                    baseUrl: "https://enterprise.beefapi.com",
+                    models: ["seedance-2.0-fast", "seedance-2.0-mini", "seedance-2.0"],
+                    modelProfiles: [
+                        { model: "seedance-2.0-fast", protocol: "newapi" },
+                        { model: "seedance-2.0-mini", protocol: "openai-videos" },
+                        { model: "seedance-2.0", protocol: "newapi" },
+                    ],
+                },
+            ],
+        },
+        "beefapi::seedance-2.0-fast",
+    ).video!;
+    const mini = modelCapabilityConfigFor(
+        {
+            channels: [
+                {
+                    id: "beefapi",
+                    baseUrl: "https://enterprise.beefapi.com",
+                    models: ["seedance-2.0-mini"],
+                    modelProfiles: [{ model: "seedance-2.0-mini", protocol: "openai-videos" }],
+                },
+            ],
+        },
+        "beefapi::seedance-2.0-mini",
+    ).video!;
+    const standard = modelCapabilityConfigFor(
+        {
+            channels: [
+                {
+                    id: "beefapi",
+                    baseUrl: "https://enterprise.beefapi.com",
+                    models: ["seedance-2.0"],
+                    modelProfiles: [{ model: "seedance-2.0", protocol: "newapi" }],
+                },
+            ],
+        },
+        "beefapi::seedance-2.0",
+    ).video!;
+    expect(fast.resolutions).toEqual(["480p", "720p"]);
+    expect(mini.resolutions).toEqual(["480p", "720p"]);
+    expect(standard.resolutions).toContain("1080p");
+});
+
+test("buildVideoGenerationMetadata strips stale frame roles in reference_to_video mode unless model is minimax-h3-max", async () => {
+    const { buildVideoGenerationMetadata } = await import("../src/lib/canvas/canvas-project-generation");
+    const { CanvasNodeType } = await import("../src/types/canvas");
+    const imageNodes = ["img-1", "img-2", "img-3", "img-4", "img-5"].map((id, index) => ({
+        id,
+        type: CanvasNodeType.Image,
+        title: id,
+        position: { x: index * 10, y: 0 },
+        width: 100,
+        height: 100,
+    }));
+    const seedanceMeta = buildVideoGenerationMetadata(
+        {
+            id: "vid-seedance",
+            type: CanvasNodeType.Video,
+            title: "Seedance Video",
+            position: { x: 0, y: 100 },
+            width: 100,
+            height: 100,
+            metadata: {
+                model: "beefapi::seedance-2.0-fast",
+                videoStartFrameNodeId: "img-1",
+                videoEndFrameNodeId: "img-2",
+            },
+        },
+        { referenceImages: imageNodes, referenceVideos: [], referenceAudios: [] },
+    );
+    expect(seedanceMeta.videoEditOperation).toBe("reference_to_video");
+    expect(seedanceMeta.videoStartFrameNodeId).toBeUndefined();
+    expect(seedanceMeta.videoEndFrameNodeId).toBeUndefined();
+
+    const h3MaxMeta = buildVideoGenerationMetadata(
+        {
+            id: "vid-h3max",
+            type: CanvasNodeType.Video,
+            title: "H3 Max Video",
+            position: { x: 0, y: 100 },
+            width: 100,
+            height: 100,
+            metadata: {
+                model: "beefapi::minimax-h3-max",
+                videoEditOperation: "reference_to_video",
+                videoStartFrameNodeId: "img-1",
+                videoEndFrameNodeId: "img-2",
+                videoMiddleFrameNodeId: "img-3",
+                videoMiddleFrameTime: "2.5",
+            },
+        },
+        { referenceImages: imageNodes, referenceVideos: [], referenceAudios: [] },
+    );
+    expect(h3MaxMeta.videoEditOperation).toBe("reference_to_video");
+    expect(h3MaxMeta.videoStartFrameNodeId).toBe("img-1");
+    expect(h3MaxMeta.videoEndFrameNodeId).toBe("img-2");
+    expect(h3MaxMeta.videoMiddleFrameNodeId).toBe("img-3");
+    expect(h3MaxMeta.videoMiddleFrameTime).toBe("2.5");
+});

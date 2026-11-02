@@ -274,13 +274,37 @@ func ClassifyError(err error) Failure {
 		case "upstream":
 			category = CategoryAsyncFailed
 		case "unknown":
-			category = CategorySubmissionUncertain
+			if managed.Pending() {
+				category = CategorySubmissionUncertain
+			} else {
+				category = CategoryAsyncFailed
+			}
 		}
 		if _, supported := categoryCopies[category]; !supported {
 			category = CategoryUnknown
 		}
 		uncertain := category == CategorySubmissionUncertain || managed.Pending()
-		return normalizeFailure(Failure{Category: category, Uncertain: uncertain, TaskID: sanitizeDebugID(managed.TaskID), ProviderCode: sanitizeProviderCode(managed.Code), ProviderMessage: DiagnosticSummary(managed.Message), Structured: true, FromCode: true})
+		failure := normalizeFailure(Failure{Category: category, Uncertain: uncertain, TaskID: sanitizeDebugID(managed.TaskID), ProviderCode: sanitizeProviderCode(managed.Code), ProviderMessage: DiagnosticSummary(managed.Message), Structured: true, FromCode: true})
+		if !uncertain && strings.TrimSpace(managed.Message) != "" && managed.Message != "原视频任务未成功，请查询原任务结果与扣费" {
+			textFailure := ClassifyText(managed.Message)
+			if textFailure.Category != CategoryUnknown && (category == CategoryAsyncFailed || category == CategoryInvalidParams || category == CategoryUnknown) {
+				failure.Category = textFailure.Category
+				if textFailure.Reason != "" {
+					failure.Reason = textFailure.Reason
+				}
+				if textFailure.Action != "" {
+					failure.Action = textFailure.Action
+				}
+				failure = normalizeFailure(failure)
+			} else if textFailure.Reason != "" && textFailure.Reason != categoryCopies[textFailure.Category].Reason {
+				failure.Reason = textFailure.Reason
+				if textFailure.Action != "" {
+					failure.Action = textFailure.Action
+				}
+				failure = normalizeFailure(failure)
+			}
+		}
+		return failure
 	}
 	var managedHTTP *beefapi.MediaHTTPError
 	if errors.As(err, &managedHTTP) {

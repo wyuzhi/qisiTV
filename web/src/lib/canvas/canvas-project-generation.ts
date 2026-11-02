@@ -438,27 +438,31 @@ export function buildVideoGenerationMetadata(
 ): CanvasNodeMetadata {
     const metadata = node?.metadata;
     const referenceImageIds = new Set((context?.referenceImages || []).map((image) => image.id));
-    // 工作流视频把已连接媒体交给字段映射处理，不再把历史首尾帧选择当成硬约束。
-    // 工作流视频把已连接媒体交给字段映射处理，不再把历史首尾帧选择当成硬约束。
-    const workflowVideo = node?.type === CanvasNodeType.Config && (config?.taskWorkflowProvider === "runninghub" || isCanvasWorkflowProvider(metadata));
-    const startFrame = workflowVideo ? undefined : requireConnectedVideoFrame(metadata?.videoStartFrameNodeId, "首帧", referenceImageIds);
-    const endFrame = workflowVideo ? undefined : requireConnectedVideoFrame(metadata?.videoEndFrameNodeId, "尾帧", referenceImageIds);
     const draftTaskId = metadata?.videoDraftTaskId?.trim() || undefined;
+    const effectiveModel = config?.model || metadata?.model || "";
+    const videoEditOperation = draftTaskId
+        ? "draft_to_final"
+        : effectiveModel && isH3Model(effectiveModel)
+          ? h3VideoOperation(effectiveModel, { imageCount: context?.referenceImages.length || 0, videoCount: context?.referenceVideos.length || 0, audioCount: context?.referenceAudios.length || 0 }, metadata?.videoEditOperation)
+          : resolveVideoEditOperation(node, context);
+    // 工作流视频与非 H3 Max 的全模态参考生成不消费首尾帧/中间帧槽位，不再把历史帧选择当成硬约束或透传给后端。
+    const workflowVideo = node?.type === CanvasNodeType.Config && (config?.taskWorkflowProvider === "runninghub" || isCanvasWorkflowProvider(metadata));
+    const h3Max = effectiveModel.split("::").at(-1) === "minimax-h3-max";
+    const ignoreFrameSelection = workflowVideo || videoEditOperation === "draft_to_final" || (videoEditOperation === "reference_to_video" && !h3Max);
+    const startFrame = ignoreFrameSelection ? undefined : requireConnectedVideoFrame(metadata?.videoStartFrameNodeId, "首帧", referenceImageIds);
+    const endFrame = ignoreFrameSelection ? undefined : requireConnectedVideoFrame(metadata?.videoEndFrameNodeId, "尾帧", referenceImageIds);
+    const middleFrame = ignoreFrameSelection || !metadata?.videoMiddleFrameNodeId ? undefined : requireConnectedVideoFrame(metadata.videoMiddleFrameNodeId, "中间帧", referenceImageIds);
     return {
         ...(config ? generationWorkflowMetadata(config) : {}),
-        videoEditOperation: draftTaskId
-            ? "draft_to_final"
-            : config && isH3Model(config.model)
-              ? h3VideoOperation(config.model, { imageCount: context?.referenceImages.length || 0, videoCount: context?.referenceVideos.length || 0, audioCount: context?.referenceAudios.length || 0 }, metadata?.videoEditOperation)
-              : resolveVideoEditOperation(node, context),
+        videoEditOperation,
         videoDraftTaskId: draftTaskId,
         returnLastFrame: metadata?.returnLastFrame ?? config?.videoReturnLastFrame,
         videoCameraMoveId: metadata?.videoCameraMoveId,
         videoCameraMovePrompt: metadata?.videoCameraMovePrompt,
         videoStartFrameNodeId: startFrame,
         videoEndFrameNodeId: endFrame,
-        videoMiddleFrameNodeId: metadata?.videoMiddleFrameNodeId ? requireConnectedVideoFrame(metadata.videoMiddleFrameNodeId, "中间帧", referenceImageIds) : undefined,
-        videoMiddleFrameTime: metadata?.videoMiddleFrameTime,
+        videoMiddleFrameNodeId: middleFrame,
+        videoMiddleFrameTime: ignoreFrameSelection ? undefined : metadata?.videoMiddleFrameTime,
         videoH3Options: metadata?.videoH3Options,
         videoReferenceOrder: config && isH3Model(config.model) ? h3ResolvedReferenceOrder(metadata?.videoReferenceOrder, [...(context?.referenceImages || []), ...(context?.referenceVideos || []), ...(context?.referenceAudios || [])]) : metadata?.videoReferenceOrder,
     };
