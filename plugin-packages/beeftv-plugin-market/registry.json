@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-02",
+  "plugins": [
+    {
+      "id": "beeftv-plugin-ecommerce-hero",
+      "packageName": "beeftv-plugin-ecommerce-hero",
+      "name": "一键商品主图",
+      "version": "0.1.0",
+      "description": "上传商品图并选择场景图数量，自动编排电商主图画布节点、助手工具与生成技能。",
+      "author": "BeefTV",
+      "category": "电商创作",
+      "recommended": true,
+      "tags": [
+        "画布节点",
+        "助手工具",
+        "技能",
+        "电商"
+      ],
+      "localSource": "plugin-packages/beeftv-plugin-ecommerce-hero"
+    },
+    {
+      "id": "beeftv-plugin-sticky-note",
+      "packageName": "beeftv-plugin-sticky-note",
+      "name": "画布便签",
+      "version": "0.1.0",
+      "description": "在画布上放置可换色、可编辑的便签卡片，并支持创作助手直接创建和修改便签。",
+      "author": "BeefTV",
+      "category": "画布效率",
+      "recommended": true,
+      "tags": [
+        "画布节点",
+        "助手工具"
+      ],
+      "localSource": "plugin-packages/beeftv-plugin-sticky-note"
+    },
+    {
+      "id": "beeftv-plugin-aihubkit-video",
+      "packageName": "beeftv-plugin-aihubkit-video",
+      "name": "AIHubKit 视频渠道",
+      "version": "1.0.0",
+      "description": "接入 AIHubKit 统一视频生成与轮询协议，作为可插拔视频模型渠道使用。",
+      "author": "Community",
+      "category": "模型渠道",
+      "recommended": true,
+      "tags": [
+        "视频协议",
+        "异步轮询"
+      ],
+      "localSource": "plugin-packages/beeftv-plugin-aihubkit-video"
+    },
+    {
+      "id": "beeftv-plugin-slot-test",
+      "packageName": "beeftv-plugin-slot-test",
+      "name": "全插槽演示插件",
+      "version": "0.1.0",
+      "description": "完整演示 BeefTV 全部 21 个界面扩展位与 8 类宿主事件的标准参考插件。",
+      "author": "BeefTV",
+      "category": "开发示例",
+      "recommended": false,
+      "tags": [
+        "开发模板",
+        "全插槽"
+      ],
+      "localSource": "plugin-packages/beeftv-plugin-slot-test"
+    }
+  ]
+}

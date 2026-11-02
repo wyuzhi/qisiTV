@@ -35,7 +35,7 @@ Wails / local dev
 | 视频结果取回 | `backend/internal/generation/video_delivery.go` | 所有视频入口共用下载重试、10 秒无进展检测和原任务结果刷新；BeefAPI 取备用存储，自接供应商只查询自己的原任务。认证由所选协议提供，跨域媒体请求清除供应商凭据 |
 | 供应商适配 | `backend/internal/provider`, `protocol`, `outbound` | 外部模型 API、自定义渠道和插件协议 |
 | 模型目录 | `backend/internal/modelcatalog` | 能力合同、渠道目录校验/解析/合并与 BeefAPI/WhatsToken overlay；出站 HTTP 仍走 outbound |
-| 协议插件 | `backend/internal/plugins` | registry、安装/启用和渠道设置用的 provider 能力目录；live 快照按 Runtime 隔离 |
+| 插件注册与能力 | `backend/internal/plugins`、`agent-host/plugin-packages.mjs` | 唯一插件登记表（`plugin_registry`：含 `OriginPackage` `"package"`、`PackageDir`、`PackageSpec`）、安装/启停、静态文件隔离、provider 能力目录，以及把已启用插件的 `canvasNodes` 注入共享的 `capability.BuiltinRegistry()`；宿主侧经 `agent-host/plugin-packages.mjs` 复用 pi 官方 `DefaultPackageManager` 与 `discoverAndLoadExtensions` 加载插件工具 |
 | Seedance 参考素材预上传 | `backend/internal/app/beefapi_seedance_preupload.go` | 仅内置 BeefAPI Seedance：本机后端把参考图片/视频/音频换成短期 HTTPS 链接后再提交 `/v1/videos`；本机文件在上传完成前保持本地引用 |
 | 数据 | `backend/internal/database`, `repository` | SQLite schema、迁移和持久化 |
 | 支持诊断 | `backend/internal/diagnostics`、`supporttrace`、`assistantdiagnostics` | schema 3 脱敏 ZIP、各来源完整性、本地 OTel 记录、只读官方助手元数据及离线阶段分析；不参与生成、重试或恢复决策 |

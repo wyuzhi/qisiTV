@@ -1,0 +1,131 @@
+{
+  "name": "beeftv-plugin-slot-test",
+  "version": "0.1.0",
+  "description": "完整演示 BeefTV 全部 21 个界面扩展位与 8 类宿主事件的标准参考插件。",
+  "type": "module",
+  "license": "Apache-2.0",
+  "keywords": [
+    "beeftv-plugin",
+    "slot-test",
+    "example"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "beeftv": {
+    "id": "beeftv-plugin-slot-test",
+    "apiVersion": "beeftv.plugin/v2",
+    "schemaVersion": 2,
+    "name": "全插槽演示插件",
+    "version": "0.1.0",
+    "description": "完整演示 BeefTV 全部 21 个界面扩展位与 8 类宿主事件的标准参考插件。",
+    "author": "BeefTV",
+    "surfaces": [
+      "node",
+      "fullscreen",
+      "hybrid",
+      "asset-source",
+      "settings"
+    ],
+    "permissions": [
+      "canvas.read",
+      "canvas.write",
+      "asset.read",
+      "asset.search",
+      "asset.import",
+      "generation.run",
+      "timeline.read",
+      "timeline.command",
+      "export.run",
+      "external.open"
+    ],
+    "client": "./client/index.js",
+    "canvasNodes": [
+      {
+        "id": "slot-test-node",
+        "type": "slot-test-node",
+        "label": "插槽测试节点",
+        "title": "插槽测试节点",
+        "defaultTitle": "插槽测试节点",
+        "renderer": "client",
+        "defaultWidth": 260,
+        "defaultHeight": 160,
+        "defaultSize": {
+          "width": 260,
+          "height": 160
+        },
+        "schema": {
+          "type": "object",
+          "properties": {
+            "note": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    ],
+    "configuration": {
+      "fields": [
+        {
+          "name": "greeting",
+          "key": "greeting",
+          "label": "测试问候语",
+          "type": "string",
+          "default": "你好 BeefTV",
+          "defaultValue": "你好 BeefTV"
+        }
+      ]
+    },
+    "contributes": {
+      "canvasNodes": [
+        {
+          "id": "slot-test-node",
+          "type": "slot-test-node",
+          "label": "插槽测试节点",
+          "title": "插槽测试节点",
+          "defaultTitle": "插槽测试节点",
+          "renderer": "client",
+          "defaultWidth": 260,
+          "defaultHeight": 160,
+          "defaultSize": {
+            "width": 260,
+            "height": 160
+          },
+          "schema": {
+            "type": "object",
+            "properties": {
+              "note": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ],
+      "editorSlots": [
+        { "slot": "timeline-panel", "priority": 10 },
+        { "slot": "preview-renderer", "priority": 10 },
+        { "slot": "inspector", "priority": 10 },
+        { "slot": "asset-ingest", "priority": 10 },
+        { "slot": "subtitle-tool", "priority": 10 },
+        { "slot": "transcription-provider", "priority": 10 },
+        { "slot": "export-renderer", "priority": 10 },
+        { "slot": "ai-assistant", "priority": 10 }
+      ]
+    }
+  },
+  "files": [
+    "extensions",
+    "skills",
+    "client",
+    "README.md"
+  ]
+}

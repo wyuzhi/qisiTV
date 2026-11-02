@@ -1,0 +1,551 @@
+{
+  "name": "beeftv-plugin-aihubkit-video",
+  "version": "1.0.0",
+  "description": "接入 AIHubKit 统一视频生成与轮询协议，作为可插拔视频模型渠道使用。",
+  "type": "module",
+  "license": "Apache-2.0",
+  "keywords": [
+    "beeftv-plugin",
+    "video",
+    "aihubkit"
+  ],
+  "beeftv": {
+    "apiVersion": "beeftv.plugin/v2",
+    "schemaVersion": 2,
+    "id": "beeftv-plugin-aihubkit-video",
+    "name": "AIHubKit 视频渠道",
+    "version": "1.0.0",
+    "author": "BeefTV Contributors",
+    "description": "AIHubKit Video 独立请求协议插件。",
+    "permissions": [
+      "generation.run",
+      "media.read"
+    ],
+    "configuration": {
+      "fields": [
+        {
+          "name": "apiKey",
+          "type": "secret",
+          "label": "API Key",
+          "required": true
+        }
+      ]
+    },
+    "contributes": {
+      "providers": [
+        {
+          "id": "aihubkit-video",
+          "label": "AIHubKit Video",
+          "capabilities": [
+            "video"
+          ],
+          "scopes": [
+            "admin.system-channel",
+            "user.custom-channel",
+            "canvas",
+            "creation",
+            "agent"
+          ],
+          "baseUrl": "https://apimodel.aihubkit.com",
+          "requiresPublicMediaUrls": true,
+          "auth": {
+            "type": "bearer",
+            "field": "apiKey"
+          },
+          "parameters": [
+            {
+              "name": "model",
+              "type": "string",
+              "required": true,
+              "mapping": "model",
+              "description": "渠道模型 ID。"
+            },
+            {
+              "name": "prompt",
+              "type": "string",
+              "required": true,
+              "mapping": "prompt",
+              "description": "视频提示词。"
+            },
+            {
+              "name": "duration",
+              "type": "integer",
+              "required": true,
+              "mapping": "duration",
+              "description": "视频时长（秒），范围由模型决定。"
+            },
+            {
+              "name": "resolution",
+              "type": "string",
+              "required": true,
+              "mapping": "resolution",
+              "description": "分辨率；数字档位转换为带 p 后缀的小写值。"
+            },
+            {
+              "name": "aspectRatio",
+              "type": "string",
+              "required": false,
+              "mapping": "ratio",
+              "description": "视频比例，例如 16:9。"
+            },
+            {
+              "name": "images",
+              "type": "media[]",
+              "required": false,
+              "mapping": "referenceImages",
+              "description": "参考图片的公网 HTTPS URL，按素材顺序发送。"
+            },
+            {
+              "name": "videos",
+              "type": "media[]",
+              "required": false,
+              "mapping": "referenceVideos",
+              "description": "参考视频的公网 HTTPS URL。"
+            },
+            {
+              "name": "audios",
+              "type": "media[]",
+              "required": false,
+              "mapping": "referenceAudios",
+              "description": "参考音频的公网 HTTPS URL。"
+            }
+          ],
+          "validations": [
+            {
+              "assert": {
+                "$gt": [
+                  {
+                    "$len": {
+                      "$trim": {
+                        "$ref": "request.model"
+                      }
+                    }
+                  },
+                  0
+                ]
+              },
+              "message": "AIHubKit Video 必须选择模型"
+            },
+            {
+              "assert": {
+                "$gt": [
+                  {
+                    "$len": {
+                      "$trim": {
+                        "$ref": "request.prompt"
+                      }
+                    }
+                  },
+                  0
+                ]
+              },
+              "message": "AIHubKit Video 提示词不能为空"
+            },
+            {
+              "assert": {
+                "$gt": [
+                  {
+                    "$ref": "request.duration"
+                  },
+                  0
+                ]
+              },
+              "message": "AIHubKit Video 时长必须为正整数"
+            },
+            {
+              "assert": {
+                "$gt": [
+                  {
+                    "$len": {
+                      "$trim": {
+                        "$ref": "request.resolution"
+                      }
+                    }
+                  },
+                  0
+                ]
+              },
+              "message": "AIHubKit Video 必须选择分辨率"
+            },
+            {
+              "assert": {
+                "$eq": [
+                  {
+                    "$len": {
+                      "$filter": {
+                        "from": {
+                          "$ref": "request.images"
+                        },
+                        "as": "media",
+                        "where": {
+                          "$not": {
+                            "$in": [
+                              {
+                                "$coalesce": [
+                                  {
+                                    "$ref": "media.role"
+                                  },
+                                  "reference_image"
+                                ]
+                              },
+                              [
+                                "reference_image",
+                                "subject_reference",
+                                "style_reference"
+                              ]
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  0
+                ]
+              },
+              "message": "AIHubKit Video 当前接口文档仅明确参考图字段，请使用参考图片，勿设置首尾帧或遮罩"
+            },
+            {
+              "assert": {
+                "$eq": [
+                  {
+                    "$len": {
+                      "$filter": {
+                        "from": {
+                          "$ref": "request.images"
+                        },
+                        "as": "media",
+                        "where": {
+                          "$not": {
+                            "$and": [
+                              {
+                                "$eq": [
+                                  {
+                                    "$at": [
+                                      {
+                                        "$split": [
+                                          {
+                                            "$ref": "media.value"
+                                          },
+                                          "://"
+                                        ]
+                                      },
+                                      0
+                                    ]
+                                  },
+                                  "https"
+                                ]
+                              },
+                              {
+                                "$gt": [
+                                  {
+                                    "$len": {
+                                      "$at": [
+                                        {
+                                          "$split": [
+                                            {
+                                              "$ref": "media.value"
+                                            },
+                                            "://"
+                                          ]
+                                        },
+                                        1
+                                      ]
+                                    }
+                                  },
+                                  0
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  0
+                ]
+              },
+              "message": "AIHubKit Video 参考素材必须使用公网 HTTPS URL，请先配置公网素材存储"
+            },
+            {
+              "assert": {
+                "$eq": [
+                  {
+                    "$len": {
+                      "$filter": {
+                        "from": {
+                          "$ref": "request.videos"
+                        },
+                        "as": "media",
+                        "where": {
+                          "$not": {
+                            "$and": [
+                              {
+                                "$eq": [
+                                  {
+                                    "$at": [
+                                      {
+                                        "$split": [
+                                          {
+                                            "$ref": "media.value"
+                                          },
+                                          "://"
+                                        ]
+                                      },
+                                      0
+                                    ]
+                                  },
+                                  "https"
+                                ]
+                              },
+                              {
+                                "$gt": [
+                                  {
+                                    "$len": {
+                                      "$at": [
+                                        {
+                                          "$split": [
+                                            {
+                                              "$ref": "media.value"
+                                            },
+                                            "://"
+                                          ]
+                                        },
+                                        1
+                                      ]
+                                    }
+                                  },
+                                  0
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  0
+                ]
+              },
+              "message": "AIHubKit Video 参考素材必须使用公网 HTTPS URL，请先配置公网素材存储"
+            },
+            {
+              "assert": {
+                "$eq": [
+                  {
+                    "$len": {
+                      "$filter": {
+                        "from": {
+                          "$ref": "request.audios"
+                        },
+                        "as": "media",
+                        "where": {
+                          "$not": {
+                            "$and": [
+                              {
+                                "$eq": [
+                                  {
+                                    "$at": [
+                                      {
+                                        "$split": [
+                                          {
+                                            "$ref": "media.value"
+                                          },
+                                          "://"
+                                        ]
+                                      },
+                                      0
+                                    ]
+                                  },
+                                  "https"
+                                ]
+                              },
+                              {
+                                "$gt": [
+                                  {
+                                    "$len": {
+                                      "$at": [
+                                        {
+                                          "$split": [
+                                            {
+                                              "$ref": "media.value"
+                                            },
+                                            "://"
+                                          ]
+                                        },
+                                        1
+                                      ]
+                                    }
+                                  },
+                                  0
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  0
+                ]
+              },
+              "message": "AIHubKit Video 参考素材必须使用公网 HTTPS URL，请先配置公网素材存储"
+            }
+          ],
+          "create": {
+            "method": "POST",
+            "path": "/v1/videos",
+            "contentType": "application/json",
+            "body": {
+              "model": {
+                "$ref": "request.model"
+              },
+              "prompt": {
+                "$ref": "request.prompt"
+              },
+              "duration": {
+                "$ref": "request.duration"
+              },
+              "ratio": {
+                "$omitEmpty": {
+                  "$ref": "request.aspectRatio"
+                }
+              },
+              "resolution": {
+                "$if": {
+                  "condition": {
+                    "$gt": [
+                      {
+                        "$toInt": {
+                          "$trim": {
+                            "$ref": "request.resolution"
+                          }
+                        }
+                      },
+                      0
+                    ]
+                  },
+                  "then": {
+                    "$concat": [
+                      {
+                        "$toInt": {
+                          "$trim": {
+                            "$ref": "request.resolution"
+                          }
+                        }
+                      },
+                      "p"
+                    ]
+                  },
+                  "else": {
+                    "$lower": {
+                      "$trim": {
+                        "$ref": "request.resolution"
+                      }
+                    }
+                  }
+                }
+              },
+              "referenceImages": {
+                "$omitEmpty": {
+                  "$map": {
+                    "from": {
+                      "$sortByOrder": {
+                        "$ref": "request.images"
+                      }
+                    },
+                    "as": "media",
+                    "in": {
+                      "$ref": "media.value"
+                    }
+                  }
+                }
+              },
+              "referenceVideos": {
+                "$omitEmpty": {
+                  "$map": {
+                    "from": {
+                      "$sortByOrder": {
+                        "$ref": "request.videos"
+                      }
+                    },
+                    "as": "media",
+                    "in": {
+                      "$ref": "media.value"
+                    }
+                  }
+                }
+              },
+              "referenceAudios": {
+                "$omitEmpty": {
+                  "$map": {
+                    "from": {
+                      "$sortByOrder": {
+                        "$ref": "request.audios"
+                      }
+                    },
+                    "as": "media",
+                    "in": {
+                      "$ref": "media.value"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "poll": {
+            "method": "GET",
+            "path": "/v1/videos/{{taskId}}"
+          },
+          "result": {
+            "method": "GET",
+            "path": "/v1/videos/{{taskId}}/content",
+            "headers": {
+              "Accept": "video/mp4"
+            }
+          },
+          "response": {
+            "taskId": {
+              "$coalesce": [
+                {
+                  "$ref": "response.id"
+                },
+                {
+                  "$ref": "response.task_id"
+                },
+                {
+                  "$ref": "taskId"
+                }
+              ]
+            },
+            "status": {
+              "$coalesce": [
+                {
+                  "$ref": "response.status"
+                },
+                "unknown"
+              ]
+            },
+            "videos": {
+              "$ref": "response.url"
+            },
+            "usage": {
+              "$ref": "response.usage"
+            },
+            "messagePaths": [
+              "error.message",
+              "message"
+            ],
+            "errorPaths": [
+              "error.code"
+            ],
+            "resultEphemeral": true
+          }
+        }
+      ]
+    }
+  },
+  "files": [
+    "docs",
+    "README.md"
+  ]
+}

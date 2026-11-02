@@ -1,79 +1,272 @@
-# 上传统一插件包
+# 开发一个插件
 
-宿主只有一种插件：一个版本化 Manifest 描述一个插件包可以向宿主贡献的全部能力。Provider、工作流、画布节点、媒体转换、素材源、Agent 和命令都写在同一个 `contributes` 下；运行时可以不同，但不会再出现“协议插件”和“UI 插件”两套清单。
+在 BeefTV 中，**一个插件就是一个标准 npm / pi 包**，只需在 `package.json` 中增加一个 `beeftv` 字段。你可以根据需要组合以下四项能力中的任意几项：
 
-## 1. 包格式
+1. **界面与画布节点（`beeftv.client`）**：通过 `activate(host)` 和 `host.contribute(slot, payload)` 向 BeefTV 的 21 个界面挂点添加画布节点、工具栏按钮、侧栏面板、独立页面或设置面板。
+2. **创作助手工具（`pi.extensions`）**：用 TypeScript 编写助手工具，通过 `ctx.executeTool` 调用 BeefTV 的画布与生成业务操作。
+3. **创作助手技能（`pi.skills`）**：附带 `SKILL.md`，让创作助手掌握特定领域的编排步骤。
+4. **模型协议与工作流（`beeftv.contributes.providers`）**：以声明式 JSON 接入新的图片、视频、音频或文本模型渠道（同时兼容传统 `.beeftv-plugin` 归档包）。
 
-上传文件必须是 `.beeftv-plugin` ZIP 包，大小不超过 48 MiB。包内必须有根目录 `manifest.json`；不能上传裸 JSON。清单和可选的 Web 运行时代码、静态资源属于同一个版本、权限和生命周期：
+---
+
+## 1. 最小插件包结构
+
+新建一个目录（例如 `beeftv-plugin-sticky-note`），推荐文件结构如下：
 
 ```text
-my-plugin.beeftv-plugin
-├── manifest.json
-├── web/entry.js       # 可选；必须配合 runtime.web=sandbox 或 worker
-├── web/assets/...     # 可选静态资源
-└── docs/...           # 可选文档
+beeftv-plugin-sticky-note/
+├── package.json
+├── extensions/
+│   └── index.ts          # 助手扩展工具（可选）
+├── skills/
+│   └── sticky-note/
+│       └── SKILL.md      # 助手技能说明（可选）
+├── client/
+│   └── index.js          # 浏览器端界面入口（可选）
+└── README.md
 ```
 
-后端 Provider 只使用清单中的声明式映射，不执行包内代码。UI/功能代码必须声明 `entry`，由宿主隔离运行时加载；不能把脚本注入主应用页面。当前版本先完成包校验、存储和入口合同，未授权的 Web 代码不会自动进入主页面。
+### `package.json` 清单
 
-## 2. 最小清单
-
-`manifest.json` 必须是 UTF-8 JSON。插件 ID 使用小写 kebab-case。Manifest 不得包含 Cookie、Token 或 API Key。`entry` 只能指向包内 `web/` 文件。
+插件 ID 和版本直接取自 `package.json` 的 `name`（小写 `kebab-case`）和 `version`。在 `keywords` 中加入 `"beeftv-plugin"` 即可被插件市场的 npm 搜索发现：
 
 ```json
 {
-  "apiVersion": "beeftv.plugin/v1",
-  "id": "acme-comfyui", "name": "Acme ComfyUI", "version": "1.0.0", "author": "Acme", "description": "通过工作流贡献提供视频生成能力",
-  "permissions": ["generation.run", "media.read"],
-  "configuration": { "fields": [{ "name": "apiKey", "type": "secret", "label": "API Token", "required": true }] },
-  "contributes": {
-    "providers": [{
-      "id": "acme-comfyui", "label": "Acme ComfyUI", "capabilities": ["video"], "scopes": ["user.custom-channel", "canvas"],
-      "baseUrl": "https://api.example.com", "auth": { "type": "bearer", "field": "apiKey" },
-      "create": { "method": "POST", "path": "/workflows/{{model}}", "fields": { "prompt": "request.prompt", "duration": "request.duration" } },
-      "poll": { "method": "GET", "path": "/tasks/{{taskId}}" },
-      "response": { "taskIdPaths": ["data.task_id"], "statusPaths": ["data.status"], "resultPaths": ["data.results"], "resultKind": "video", "resultEphemeral": true }
-    }],
-    "workflows": [{
-      "id": "minimax-h3", "label": "MiniMax H3 文生视频", "providerId": "acme-comfyui", "capability": "video",
-      "parameters": [{ "name": "duration", "type": "number", "required": true }, { "name": "resolution", "type": "string", "values": ["720p", "1080p"] }],
-      "defaults": { "duration": 5, "resolution": "720p" }
-    }]
+  "name": "beeftv-plugin-sticky-note",
+  "version": "0.1.0",
+  "description": "在画布上放置可换色、可编辑的便签卡片，并支持创作助手直接创建和修改便签。",
+  "type": "module",
+  "license": "Apache-2.0",
+  "keywords": ["beeftv-plugin", "sticky-note"],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": ["./extensions/index.ts"],
+    "skills": ["./skills"]
+  },
+  "beeftv": {
+    "id": "beeftv-plugin-sticky-note",
+    "apiVersion": "beeftv.plugin/v2",
+    "schemaVersion": 2,
+    "name": "画布便签",
+    "version": "0.1.0",
+    "description": "在画布上放置可换色、可编辑的便签卡片，并支持创作助手直接创建和修改便签。",
+    "author": "BeefTV",
+    "client": "./client/index.js",
+    "permissions": ["canvas.read", "canvas.write"],
+    "canvasNodes": [
+      {
+        "id": "sticky-note",
+        "type": "sticky-note",
+        "label": "画布便签",
+        "title": "画布便签",
+        "defaultTitle": "便签",
+        "renderer": "client",
+        "defaultWidth": 240,
+        "defaultHeight": 180,
+        "defaultSize": { "width": 240, "height": 180 }
+      }
+    ]
   }
 }
 ```
 
-带 Web 功能的插件在同一份清单中增加：
+可安装 `@beeftv/plugin-sdk` 获取完整的 TypeScript 类型提示（`packages/plugin-sdk`）。
 
-```json
-{
-  "entry": "web/entry.js",
-  "surfaces": ["fullscreen"],
-  "runtime": { "web": "sandbox" }
+---
+
+## 2. 给创作助手加一个工具（`extensions/index.ts`）
+
+助手扩展遵循标准 pi 扩展写法。在 `execute` 中调用 `ctx.executeTool(toolName, args)` 即可调用 Go 后端提供的业务操作（如 `canvas_get`、`canvas_nodes_create`、`canvas_node_update`、`canvas_edge_create`、`canvas_generation_propose`），自动复用宿主权限校验、付费确认和整组撤销：
+
+```ts
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+
+export default function (pi: ExtensionAPI) {
+  pi.registerTool({
+    name: "sticky_note_create",
+    label: "新建便签",
+    description: "在当前画布上创建一张便签卡片（sticky-note 节点）。",
+    parameters: Type.Object({
+      title: Type.String({ description: "便签标题" }),
+      text: Type.String({ description: "便签正文内容" }),
+    }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      const read = await ctx.executeTool("canvas_get", {});
+      const readText = read.result.content.map((p) => ("text" in p ? p.text : "")).join("");
+      if (read.isError) throw new Error(`读取画布失败：${readText}`);
+      const revision = Number(/"revision"\s*:\s*(\d+)/.exec(readText)?.[1]);
+
+      const created = await ctx.executeTool("canvas_nodes_create", {
+        expectedRevision: revision,
+        nodes: [{ type: "sticky-note", title: params.title, prompt: `📌 ${params.text}` }],
+      });
+      if (created.isError) throw new Error("创建便签失败");
+      return {
+        content: [{ type: "text", text: `已创建便签「${params.title}」` }],
+        details: { revision },
+      };
+    },
+  });
 }
 ```
 
-## 3. Contribution 规则
+---
 
-- `providers` 声明上游能力和字段映射。鉴权、Base URL、超时、私网校验、轮询、下载和计费由宿主负责。
-- `workflows` 声明一个 provider 下的具体工作流或模型入口。AutoDL/ComfyUI 等工作流型 API 必须在这里扩展，不能为每个工作流新增宿主代码。
-- `canvasNodes` 声明节点 ID、默认尺寸和 schema。`renderer` 为 `declarative` 时使用宿主 schema renderer；`sandbox` 由隔离运行时承载。
-- `transforms` 声明媒体或生成请求转换，必须匹配清单权限和受控 runtime。
-- `assetSources`、`usageObservers`、`agents`、`commands` 和 `importExport` 是同一清单的其他贡献面。
+## 3. 给创作助手加一项技能（`skills/<name>/SKILL.md`）
 
-一个插件可以同时声明多种贡献，但 ID 必须在插件包内唯一，并且所有贡献共享同一个安装、启停、权限和版本生命周期。
+在 `skills/sticky-note/SKILL.md` 中编写带 YAML Frontmatter 的技能说明。插件启用时，Go `internal/skills` 会自动将该技能纳入技能目录；插件卸载时自动清理：
 
-## 4. Provider 与工作流
+```markdown
+---
+name: sticky-note
+description: 使用画布便签整理待办、灵感与批注。当用户要求贴便签或记待办时使用。
+---
 
-请求字段右侧只能引用宿主统一请求，例如 `request.prompt`、`request.model`、`request.duration`、`request.extra`。声明式字段也支持安全的对象/数组路径（例如 `request.images.0.url`）和通用字符串变换（`|trim`、`|lower`、`|upper`），不执行插件代码。渠道声明的枚举值由画布完整保留，插件可使用通用大小写变换适配上游，不应要求宿主增加渠道专用归一化。字段解析为空时会省略该字段，适合映射可选参考素材。Provider 如果把 `requiresPublicMediaUrls` 设为 `true`，宿主会在请求前把用户资源转换为短期签名公网 URL。响应映射支持对象路径和数组下标，并可用 `errorPaths` 声明上游错误码路径；如果上游用非零业务码表示成功（如即梦 `code=10000`），在该协议里用 `successCodes` 列出这些值，只有声明了它的协议不把这些值判成失败。同步 provider 只需要 `create` 和 `response`；异步 provider 再声明 `poll`。
+# 画布便签
 
-结果 URL 如果是短期地址，必须设置 `resultEphemeral: true`。宿主会在任务完成后立即下载并保存资源，画布和任务记录只保存宿主资源引用。
+1. 将用户要记录的内容拆成短句，每条一张便签。
+2. 调用 `sticky_note_create`，标题用 4 到 12 个字概括要点。
+3. 完成后告知用户创建了几张便签。
+```
 
-## 5. 安全与运行边界
+---
 
-- API Key 只在渠道配置中输入和保存，不进入 Manifest、URL、日志或任务正文。
-- 上传插件不能请求 `host:` 执行器，不能执行任意浏览器脚本。
-- 外部请求必须通过后端 provider runtime，宿主统一执行 SSRF、防重放、超时、并发、错误和计费策略。
-- 插件声明的权限是最小权限；没有对应权限的 contribution 不会被激活。
+## 4. 编写画布节点与界面扩展（`client/index.js`）
 
-上传、启用、停用和卸载都作用于同一个插件 registry record。清单校验失败时整包不会安装，不会留下半激活的 provider、节点或工作流。
+浏览器端入口导出 `activate(host)`。插件与主应用共用 `host.React`（或 `host.ui.React`），无需在插件内重复打包 React。
+
+```js
+export function activate(host) {
+  const React = host.React || host.ui.React;
+  const h = React.createElement;
+
+  function StickyNoteCard({ node, updateNodeData }) {
+    const data = node.metadata?.pluginData || {};
+    const [text, setText] = React.useState(data.content || node.metadata?.prompt || "双击输入便签…");
+
+    return h(
+      "div",
+      {
+        style: {
+          height: "100%",
+          padding: "36px 14px 12px",
+          background: "#fef08a",
+          color: "#713f12",
+          borderRadius: 10,
+          boxSizing: "border-box",
+        },
+      },
+      h("textarea", {
+        value: text,
+        onChange: (e) => {
+          setText(e.target.value);
+          updateNodeData?.({ content: e.target.value });
+        },
+        style: { width: "100%", height: "100%", border: "none", background: "transparent" },
+      }),
+    );
+  }
+
+  // 1. 注册自定义画布节点渲染器
+  host.contribute("canvas.node", {
+    id: "sticky-note",
+    type: "sticky-note",
+    label: "画布便签",
+    title: "画布便签",
+    defaultTitle: "便签",
+    defaultWidth: 240,
+    defaultHeight: 180,
+    defaultSize: { width: 240, height: 180 },
+    renderer: "client",
+    render: StickyNoteCard,
+  });
+
+  // 2. 往画布「添加节点」菜单增加入口
+  host.contribute("canvas.addNodeMenu", {
+    id: "sticky-note-add",
+    label: "画布便签",
+    nodeType: "sticky-note",
+    section: "node",
+    defaultOrder: 88,
+    run: (ctx) => ctx?.handlers?.onAddExtensionNode?.("sticky-note"),
+  });
+}
+
+export default activate;
+```
+
+如果需要在前端直接调用后端业务操作，可使用 `await host.ops.call("canvas.nodes.create", { canvasId, expectedRevision, nodes })`。
+
+---
+
+## 5. 宿主挂点与事件完整参考
+
+完整演示代码可直接查看仓库内的 `plugin-packages/beeftv-plugin-slot-test/`。
+
+### 5.1 21 个界面挂点（`host.contribute(slot, payload)`）
+
+| 区域 | 挂点名称 | 载荷关键字段 | 说明 |
+| --- | --- | --- | --- |
+| 画布 | `canvas.node` | `{ type, title, defaultWidth, defaultHeight, render }` | 注册新的画布节点类型与渲染组件 |
+| 画布 | `canvas.addNodeMenu` | `{ id, label, nodeType, section, run }` | 往「添加节点」菜单增加条目 |
+| 画布 | `canvas.toolbar.main` | `{ id, label, icon?, onClick, run }` | 画布主工具栏按钮 |
+| 画布 | `canvas.toolbar.selection` | `{ id, label, icon?, onClick, run }` | 多选节点时的工具栏按钮 |
+| 画布 | `canvas.toolbar.nodeHover` | `{ id, label, icon?, onClick, run }` | 节点悬停工具栏按钮 |
+| 画布 | `canvas.contextMenu` | `{ id, label, target, onSelect }` | 画布空白处或节点右键菜单项 |
+| 画布 | `canvas.nodePanel` | `{ id, title, nodeTypes?, render }` | 节点配置面板里的扩展区域 |
+| 画布 | `canvas.promptActions` | `{ id, label, onClick, render? }` | 提示词输入框旁的快捷操作按钮 |
+| 画布 | `canvas.sidePanel` | `{ id, label, title, render }` | 画布右侧边栏面板页（与助手并列） |
+| 生成 | `generation.beforeSubmit` | `{ id, label, transform }` | 提交生成前改写提示词或参数（界面会向用户展示改动来源） |
+| 剪辑 | `editor.timeline-panel` | `{ id, label, priority?, render }` | 剪辑工作台时间线面板 |
+| 剪辑 | `editor.preview-renderer` | `{ id, label, priority?, render }` | 剪辑工作台预览渲染器 |
+| 剪辑 | `editor.inspector` | `{ id, label, priority?, render }` | 剪辑工作台属性面板 |
+| 剪辑 | `editor.asset-ingest` | `{ id, label, priority?, render }` | 剪辑工作台素材导入 |
+| 剪辑 | `editor.subtitle-tool` | `{ id, label, priority?, render }` | 剪辑工作台字幕工具 |
+| 剪辑 | `editor.transcription-provider` | `{ id, label, priority?, render }` | 剪辑工作台转写服务 |
+| 剪辑 | `editor.export-renderer` | `{ id, label, priority?, render }` | 剪辑工作台导出渲染器 |
+| 剪辑 | `editor.ai-assistant` | `{ id, label, priority?, render }` | 剪辑工作台 AI 助手 |
+| 素材 | `assets.source` | `{ id, label, listFolders?, list?, render? }` | 外部素材库连接器 |
+| 素材 | `assets.itemActions` | `{ id, label, applicable?, onSelect }` | 素材卡片与素材详情上的动作 |
+| 全局 | `app.page` | `{ id, path, title, render }` | 独立插件页面（地址为 `/p/<pluginId>/...`） |
+| 全局 | `app.sidebar` | `{ id, label, path, icon? }` | 工作区左侧导航栏入口 |
+| 全局 | `app.command` | `{ id, label, shortcut?, onSelect }` | 命令面板（`Cmd/Ctrl+K`）命令 |
+| 全局 | `app.settings` | `{ id, title, render }` | 插件中心内该插件的自定义设置面板 |
+| 全局 | `pluginCenter.section` | `{ id, label, description?, render }` | 插件中心左侧栏目（如插件市场） |
+| 项目 | `project.view` | `{ id, label, title, render }` | 项目详情页分页视图 |
+| 助手 | `assistant.toolCard` | `{ toolName, label, render }` | 助手面板中该工具调用结果的自定义卡片 |
+
+### 5.2 8 类宿主事件（`host.events.on(event, callback)`）
+
+| 事件名称 | 说明 | 回调参数示例 |
+| --- | --- | --- |
+| `canvas.opened` | 画布打开 | `{ canvasId, projectId, revision }` |
+| `canvas.changed` | 画布内容变化 | `{ canvasId, revision, nodeCount, edgeCount }` |
+| `canvas.selectionChanged` | 选中节点变化 | `{ canvasId, selectedNodeIds }` |
+| `generation.submitted` | 生成任务已提交 | `{ canvasId, nodeIds, taskIds, kind }` |
+| `generation.completed` | 生成任务完成 | `{ canvasId, nodeId, taskId, kind }` |
+| `generation.failed` | 生成任务失败 | `{ canvasId, nodeId, taskId, reason, message }` |
+| `assets.imported` | 素材导入完成 | `{ assetIds, source }` |
+| `assistant.turnCompleted` | 助手一轮对话结束 | `{ canvasId, turnId, status }` |
+
+---
+
+## 6. 本地安装与调试
+
+1. 打开 BeefTV 左下角或侧栏的 **插件中心（`/plugins`）**。
+2. 点击右上角 **从本地目录或包安装**，输入本地插件目录路径（例如 `plugin-packages/beeftv-plugin-sticky-note`）或上传 `.tgz` / `.beeftv-plugin` 文件。
+3. 在弹出的安装确认框中核对插件信息并点击 **确认安装**。
+4. 安装完成后无需重启应用：
+   - 画布「添加节点」菜单会立即出现新节点类型；
+   - 创作助手下一轮对话即可调用插件注册的工具和技能；
+   - 在插件中心关闭插件开关后，插件挂载的所有界面项、工具和技能会立即卸载清理。
+
+---
+
+## 7. 发布到 npm 与上架推荐列表
+
+1. 确保 `package.json` 的 `keywords` 包含 `"beeftv-plugin"`，运行 `npm publish --access public` 发布到 npm。发布后，所有用户即可在插件市场的「npm 社区搜索」中搜到并安装你的插件。
+2. 若希望进入「精选推荐」列表，向公开仓库 `https://github.com/Sunnyender-org/beeftv-plugins` 的 `registry.json` 提交 Pull Request，补充插件的 `id`、`packageName`、`name`、`version`、`description`、`author`、`category` 与 `tags`。
