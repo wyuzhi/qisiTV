@@ -5,10 +5,14 @@ import (
 	"errors"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 	"infinite-canvas/backend/internal/repository"
+	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"infinite-canvas/backend/internal/kernel"
 	"infinite-canvas/backend/internal/model"
@@ -143,7 +147,14 @@ func TestCanvasProjectPersistsTimelineRoundTrip(t *testing.T) {
 
 func newCanvasHistoryTestService(t *testing.T) *Service {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "canvas.db")), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "canvas.db")), &gorm.Config{
+		Logger: logger.New(log.New(os.Stdout, "\r\n", log.LstdFlags), logger.Config{
+			SlowThreshold:             time.Second,
+			LogLevel:                  logger.Warn,
+			IgnoreRecordNotFoundError: true,
+			ParameterizedQueries:      true,
+		}),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
