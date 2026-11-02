@@ -9,7 +9,6 @@ import { CanvasAssistantSidebar } from "@/pages/canvas/canvas-assistant-sidebar"
 import { hydrateModelConfig } from "@/services/model-config-repository";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { readAssistantInputDraft } from "@/services/assistant-attachments";
-import { captureUserScope } from "@/lib/user-scope-guard";
 
 await hydrateModelConfig();
 function Harness() {
@@ -22,7 +21,7 @@ function Harness() {
         Object.assign(window, { productionFixture: {
             finish: () => setNodes(current => current.map(node => ({ ...node, metadata: { ...node.metadata, taskStatus: "succeeded", status: "success", storageKey: "resource:fixture" } }))),
             refresh: () => assistant.reloadHistory(),
-            draft: () => readAssistantInputDraft("production-test", captureUserScope()),
+            draft: () => readAssistantInputDraft("production-test"),
             show: (next: boolean) => setVisible(next),
         } });
     }, []);

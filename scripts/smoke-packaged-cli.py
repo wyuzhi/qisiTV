@@ -115,8 +115,14 @@ def smoke(archive, platform):
                 send({"method": "notifications/initialized"})
                 send({"id": 2, "method": "tools/list", "params": {}})
                 tools = receive(2).get("tools", [])
-                if sorted(tool.get("name") for tool in tools) != ["release.business.smoke", "release.smoke"]:
+                # Business handlers are reached through the business.list / business.call gateway.
+                if sorted(tool.get("name") for tool in tools) != ["business.call", "business.list", "release.smoke"]:
                     raise RuntimeError("tools/list did not return the authenticated mock catalog")
+                send({"id": 3, "method": "tools/call", "params": {"name": "business.list", "arguments": {}}})
+                listed = receive(3)
+                listed_text = "".join(part.get("text", "") for part in listed.get("content", []))
+                if listed.get("isError") or "release.business.smoke" not in listed_text:
+                    raise RuntimeError("business.list did not return the authenticated mock business catalog")
                 if ({route for route, _ in requests} != {"/api/ops", "/api/business/tools"}
                         or not all(authorized for _, authorized in requests)):
                     raise RuntimeError("catalog request did not use isolated client credentials")
@@ -155,7 +161,7 @@ def smoke(archive, platform):
             server.shutdown()
             server.server_close()
             worker.join(timeout=5)
-        print(f"PASS {platform}: extracted shipped CLI initialize + tools/list; authenticated mock only")
+        print(f"PASS {platform}: extracted shipped CLI initialize + tools/list + business.list; authenticated mock only")
 
 
 if __name__ == "__main__":

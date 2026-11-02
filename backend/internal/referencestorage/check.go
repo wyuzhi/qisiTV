@@ -10,7 +10,6 @@ import (
 	"image"
 	"image/png"
 	"net/http"
-	"net/url"
 	"os"
 	"time"
 
@@ -71,7 +70,7 @@ func check(ctx context.Context, config Config, tempDir string, client *http.Clie
 }
 
 func deleteCheckObject(ctx context.Context, config Config, key string, client *http.Client) error {
-	endpoint, err := url.JoinPath(config.Endpoint, config.Bucket, key)
+	endpoint, err := objectEndpointURL(config, key)
 	if err != nil {
 		return errors.New("无法清理存储测试文件")
 	}

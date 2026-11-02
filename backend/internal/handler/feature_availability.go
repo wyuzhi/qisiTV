@@ -1,18 +1,25 @@
 package handler
 
 import (
-	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/platform"
 
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterDesktopFeatureAvailabilityRoutes(r *gin.RouterGroup, svc *app.Service) {
+// featureGates resolves the caller and the workspace feature switches.
+type featureGates interface {
+	workspaceOwners
+	FeatureAvailability() (*platform.PublicFeatureAvailability, error)
+	RequireFeature(feature string) error
+}
+
+func RegisterDesktopFeatureAvailabilityRoutes(r *gin.RouterGroup, gates featureGates) {
 	r.GET("/features", func(c *gin.Context) {
-		if _, err := currentUser(c, svc); err != nil {
+		if _, err := currentUser(c, gates); err != nil {
 			failService(c, err)
 			return
 		}
-		setting, err := svc.FeatureAvailability()
+		setting, err := gates.FeatureAvailability()
 		if err != nil {
 			failService(c, err)
 			return
@@ -23,14 +30,14 @@ func RegisterDesktopFeatureAvailabilityRoutes(r *gin.RouterGroup, svc *app.Servi
 }
 
 // 功能守卫先解析本地工作区身份，再判断功能开放状态。
-func RequireFeature(svc *app.Service, feature string) gin.HandlerFunc {
+func RequireFeature(gates featureGates, feature string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if _, err := currentUser(c, svc); err != nil {
+		if _, err := currentUser(c, gates); err != nil {
 			failService(c, err)
 			c.Abort()
 			return
 		}
-		if err := svc.RequireFeature(feature); err != nil {
+		if err := gates.RequireFeature(feature); err != nil {
 			failService(c, err)
 			c.Abort()
 			return

@@ -1,0 +1,74 @@
+---
+title: 外部 Agent 接入
+description: 通过 BeefTV MCP 将 Codex、Claude Code、Claude Desktop、Cursor 等外部 Agent 接入本地工作区
+---
+
+除了使用内置创作助手，你也可以通过 **BeefTV MCP** 把 Codex、Claude Code、Claude Desktop、Cursor 或其他支持 MCP（Model Context Protocol）的外部 Agent 接入当前正在运行的 BeefTV 本地工作区，直接读取画布、查看图片与音频素材、整理节点或调用底层业务接口。
+
+底层命令行用法与纯脚本批量调用见 [beeftv 命令行基础使用](./beeftv-cli.mdx)。
+
+## 1. 在侧栏「BeefTV MCP」页生成连接配置
+
+1. 打开 BeefTV 桌面端并保持运行，点击左侧边栏的 **「BeefTV MCP」**。
+2. 在列表中选择你要连接的客户端（**Codex**、**Claude Code**、**Claude Desktop**、**Cursor** 或 **其他 MCP 客户端**），点击右侧的 **「连接」** → **「生成连接配置」**。
+3. 按页面给出的方式完成接入：
+   - **Codex / Claude Code**：页面生成一条终端命令，直接复制粘贴到终端运行（Windows 请使用 PowerShell）。
+   - **Claude Desktop**：打开 Claude Desktop 的「设置 → 开发者 → 编辑配置」，将生成的 `beeftv` 项合并到 `mcpServers`（保留已有服务），然后完全退出并重新打开 Claude。
+   - **Cursor / 其他 MCP 客户端**：将生成的 JSON 配置粘贴到 `~/.cursor/mcp.json` 或对应工具的 MCP 配置文件中。
+
+生成的命令或 JSON 配置里已经包含随包 CLI 的绝对路径（macOS 为 `/Applications/BeefTV.app/Contents/MacOS/cli/beeftv`，Windows 为安装目录下的 `cli\beeftv.exe`，Linux 为 `BeefTV-linux/cli/beeftv`）以及工作区数据目录与专属客户端凭据（`BEEFTV_DATA_DIR`、`BEEFTV_CLIENT_ID`、`BEEFTV_CLIENT_TOKEN`）。
+
+需要注意：
+
+- **凭证只展示一次**：服务端只保存 token 哈希，关闭配置面板后无法再次查看明文 token；如需重新配置，可在该客户端的「管理」中点击「断开」或「新增连接」重新生成。
+- **保持 BeefTV 开启**：外部 Agent 通过本地回环接口访问正在运行的桌面工作区；首次成功访问后，页面状态会从「等待连接」变为「已验证连接」，并显示最近使用时间。
+- **随时断开**：在「BeefTV MCP」页点击已连接客户端的「管理」→「断开」，即可立即吊销该客户端凭据，断开后它无法再读取或修改画布。
+
+## 2. 默认提供的工具与 `--all-business-tools`
+
+`beeftv mcp serve` 默认采用精简工具集（共 40 个工具），避免把上百个底层路由一次性塞满外部 Agent 的上下文窗口：
+
+- **创作业务操作（38 个）**：与内置创作助手共用同一套高频操作面（默认省去面向桌面面板的 `conversation.*` 与 `skill.publish.*`），直接覆盖画布读写（`canvas.*`）、素材查询与整理（`asset.*`）、媒体检查（`media.*`）与技能查询（`skill.*`）。
+- **底层业务接口的两个统一入口（2 个）**：
+  - `business.list`：按关键字（`query`，匹配接口 ID、说明或路径，例如 `assets`、`folders`、`timeline`）和读写属性（`readOnly`）检索本地工作区的底层业务接口，返回接口 ID、说明、HTTP 方法、路径和参数结构。
+  - `business.call`：按 `business.list` 查到的接口 `tool` ID 调用对应底层接口，参数支持 `path`、`query`、`body`、`filePath`（由本机 CLI 读取本地文件上传，单文件上限 64 MiB）或 `file`（base64 文件内容，与 `filePath` 二选一）以及 `operationId`。
+
+画布、素材、媒体、技能优先使用专门的业务操作工具；专门工具未覆盖的底层能力（如文件夹、项目、任务、时间线、设置等），先用 `business.list` 查找接口 ID，再用 `business.call` 调用。
+
+### `--all-business-tools` 的作用
+
+如果你使用的客户端需要把每个底层业务 REST 接口都单独列成独立的 MCP 工具（共 210+ 个工具，此时不再注册 `business.list` 与 `business.call`），可以在 MCP 启动命令中加上 `--all-business-tools`，或设置环境变量 `BEEFTV_MCP_ALL_BUSINESS_TOOLS=1`：
+
+```bash
+beeftv mcp serve --all-business-tools
+```
+
+## 3. 看图结果以图片形式返回
+
+外部 Agent 检查画布素材或生成结果时，MCP 服务会把图片和音频转换为原生多模态内容块返回，而不是把 base64 字符串留在 JSON 文本里：
+
+- **`media.overview` / `media.inspect`**：读取到的图片作为 **MCP 图片内容块（`ImageContent`）** 返回，音频作为 **MCP 音频内容块（`AudioContent`）** 返回，支持看图的外部 Agent（如 Codex、Claude、Cursor）可以直接看到画面；JSON 文本块中只保留 `type`、`mimeType`、`sha256`、`source` 与 `attached: "image" | "audio"` 等事实信息。因为 MCP 协议本身没有视频内容类型，`media.*` 操作不会附带视频二进制片段，而是保留提示说明：查看视频画面请使用 `media.inspect` 并指定 `mode=frames` 抽帧看图，查看连续动作或核对声音请使用 `media.review`。
+- **`business.call` 读取媒体文件**：通过底层接口直接读取图片（`image/*`）或音频（`audio/*`）文件响应时，同样转换为 MCP 图片或音频内容块返回，文本块只保留 `{"mimeType", "bytes"}`。注意其他非 JSON 二进制响应（例如直接调用 `GET /resources/:id/file` 读取原始视频文件）仍会按 `{"mimeType", "data": "<base64>"}` 文本返回，因此检查视频内容时应使用 `media.inspect`（`mode=frames`）或 `media.review`，避免把整段视频读进上下文。
+
+## 4. 写操作 `operationId` 与提交生成防重复扣费
+
+MCP 写调用与命令行生成提交都要求提供幂等键，按调用路径区分如下：
+
+- **工作区业务写操作（`canvas.*` 等 `/ops` 工具）**：调用任何修改工作区的业务操作工具时，参数中必须提供非空 `operationId`（作为请求体的 `opId` 发送给 `/ops/:op`）。服务端操作表按 `opId` 记录并去重：结果未知需要重试同一操作时，复用原来的 `operationId`（画布写入同时保持原 `expectedRevision`），服务端会直接回放首次执行结果（`replayed: true`）；若拿同一个 `operationId` 发送不同的请求内容，服务端会以 `operation_id_reused_with_different_payload` 拒绝。
+- **底层业务写接口（`business.call`）**：通过 `business.call`（或 `--all-business-tools` 下的底层写工具）调用任何非只读底层接口（`readOnly: false`）时，参数中也必须提供非空 `operationId`（缺少会返回 `missing_operation_id`），CLI 会将其作为 `X-Idempotency-Key` 请求头转发。普通底层 REST 写接口若未单独实现幂等回放，重试前应先用读取接口确认是否已创建成功。
+- **提交生成防重复扣费**：
+  - 在 MCP 中通过 `business.call` 调用提交生成任务的接口（`POST /tasks`）时，`operationId` 会自动写入请求体的 `input.metadata.clientOperationId`（须为 8–128 位字母、数字或 `:_-`；若请求体已显式填写且与 `operationId` 不一致，会以 `operation_id_conflict` 拒绝）。重试同一次生成提交时，服务端按 `clientOperationId` 去重并返回原任务，**不会创建第二个任务，也不会重复扣费**。
+  - 在命令行直接使用 `beeftv business call` 或 `beeftv business upload` 时，可通过 `--operation-id <id>` 传入幂等键；当调用会触发计费生成的接口（`submitsGeneration: true`）时，**`--operation-id` 必填**，未提供时 CLI 会在发送前直接拒绝：
+
+```text
+beeftv: missing_operation_id: 提交生成会扣费，必须用 --operation-id 提供幂等键，重试时复用同一个值
+```
+
+## 5. 只读连接
+
+在侧栏「BeefTV MCP」页新建的连接默认是 **「全部创作工具」（`read-write`）**，可调用读写工具，每次操作的确认由所连接的外部 Agent 客户端负责。
+
+如果希望外部 Agent 只能读取画布、素材和任务，不允许修改工作区或提交生成，可以使用以下两种只读方式：
+
+1. **启动命令加 `--read-only`**：在 MCP 配置或启动命令中使用 `beeftv mcp serve --read-only`。此时 MCP 服务只暴露只读业务操作，`business.list` 只返回只读接口，`business.call` 也只允许调用只读接口。
+2. **登记只读凭据（`read-only`）**：历史「旧版只读连接」或通过 owner 凭据显式登记的只读客户端（`beeftv client register --label "只读客户端" --kind other --mode read-only`），其权限由服务端强制限定为只读。使用只读凭据调用任何写操作都会被服务端拒绝（退出码 6），客户端无法通过本地参数自行提权。

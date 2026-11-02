@@ -40,28 +40,8 @@ type ProjectDetail struct {
 	Tasks           []TaskSummary                 `json:"tasks"`
 }
 
-func (s *Service) ListProjectFolders(userID string) ([]model.ProjectFolder, error) {
-	return s.projectDomain().ListProjectFolders(userID)
-}
-
-func (s *Service) CreateProjectFolder(userID string, req CreateProjectFolderRequest) (model.ProjectFolder, error) {
-	return s.projectDomain().CreateProjectFolder(userID, req)
-}
-
-func (s *Service) MoveProjectToFolder(userID, projectID, folderID string) error {
-	return s.projectDomain().MoveProjectToFolder(userID, projectID, folderID)
-}
-
-func (s *Service) DuplicateProject(userID, projectID string) (model.Project, error) {
-	return s.projectDomain().DuplicateProject(userID, projectID)
-}
-
 func (s *Service) ListProjects(userID string) ([]ProjectSummary, error) {
 	return s.projectDomain().ListProjects(userID)
-}
-
-func (s *Service) ListProjectsPage(userID string, page int, pageSize int) (ProjectListPage, error) {
-	return s.projectDomain().ListProjectsPage(userID, page, pageSize)
 }
 
 func (s *Service) ProjectDetail(userID string, id string) (ProjectDetail, error) {
@@ -92,56 +72,8 @@ func (s *Service) ProjectDetail(userID string, id string) (ProjectDetail, error)
 	}, nil
 }
 
-func (s *Service) CreateProject(userID string, req CreateProjectRequest) (model.Project, error) {
-	return s.projectDomain().CreateProject(userID, req)
-}
-
-func (s *Service) UpdateProject(userID string, id string, req UpdateProjectRequest) (model.Project, error) {
-	return s.projectDomain().UpdateProject(userID, id, req)
-}
-
-func (s *Service) DeleteProject(userID string, id string) error {
-	return s.projectDomain().DeleteProject(userID, id)
-}
-
 func (s *Service) activeProjectForUser(userID string, projectID string) (*model.Project, error) {
 	return s.projectDomain().Active(userID, projectID)
-}
-
-func (s *Service) CreateProjectUnit(userID string, projectID string, req CreateProjectUnitRequest) (model.ProjectUnit, error) {
-	return s.projectDomain().CreateProjectUnit(userID, projectID, req)
-}
-
-func (s *Service) GetProjectUnit(userID string, projectID string, unitID string) (model.ProjectUnit, error) {
-	return s.projectDomain().GetProjectUnit(userID, projectID, unitID)
-}
-
-func (s *Service) ImportProjectUnits(userID string, projectID string, req ImportProjectUnitsRequest) ([]model.ProjectUnit, error) {
-	return s.projectDomain().ImportProjectUnits(userID, projectID, req)
-}
-
-func (s *Service) ReorderProjectUnits(userID string, projectID string, req ReorderProjectUnitsRequest) error {
-	return s.projectDomain().ReorderProjectUnits(userID, projectID, req)
-}
-
-func (s *Service) DeleteProjectUnit(userID string, projectID string, unitID string) error {
-	return s.projectDomain().DeleteProjectUnit(userID, projectID, unitID)
-}
-
-func (s *Service) UpdateProjectUnit(userID string, projectID string, unitID string, req UpdateProjectUnitRequest) (model.ProjectUnit, error) {
-	return s.projectDomain().UpdateProjectUnit(userID, projectID, unitID, req)
-}
-
-func (s *Service) LinkCanvasUnit(userID string, projectID string, req LinkCanvasUnitRequest) (model.CanvasUnitLink, error) {
-	return s.projectDomain().LinkCanvasUnit(userID, projectID, req)
-}
-
-func (s *Service) UnlinkCanvasUnit(userID string, projectID string, canvasID string, unitID string) error {
-	return s.projectDomain().UnlinkCanvasUnit(userID, projectID, canvasID, unitID)
-}
-
-func (s *Service) UnlinkCanvasProject(userID string, projectID string, canvasID string) error {
-	return s.projectDomain().UnlinkCanvasProject(userID, projectID, canvasID)
 }
 
 func IsProjectNotFound(err error) bool {

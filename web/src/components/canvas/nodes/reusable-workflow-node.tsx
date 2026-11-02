@@ -6,7 +6,6 @@ import { useResourceVideoPlayback } from "@/hooks/use-resource-video-playback";
 import { canvasNodeResourceId } from "@/lib/canvas/canvas-resource-id";
 import { isWorkflowOperation } from "@/lib/canvas/workflow-editor";
 import { canExportWorkflowResult, workflowInstanceLocked, type WorkflowInstanceAction } from "@/lib/canvas/reusable-workflow-instance";
-import { captureUserScope, assertUserScope } from "@/lib/user-scope-guard";
 import { resourceIdFromStorageKey } from "@/services/api/resources";
 import { uploadMediaFile } from "@/services/file-storage";
 import { cacheResourceObjectUrl } from "@/services/resource-blob-cache";
@@ -59,12 +58,10 @@ export function ReusableWorkflowNode({ node, nodes, readOnly, dropTarget, onActi
     const upload = async (file?: File) => {
         if (!file || !slot || locked || busy || slot.role !== "input" || slot.mediaType === "text") return;
         if (!file.type.startsWith(`${slot.mediaType}/`)) { onError(`「${node.title}」需要${mediaLabels[slot.mediaType]}文件`); return; }
-        const scope = captureUserScope();
         setBusy(true);
         onUploadBusy(node.id, true);
         try {
-            const result = await uploadMediaFile(file, slot.mediaType, undefined, scope);
-            assertUserScope(scope);
+            const result = await uploadMediaFile(file, slot.mediaType);
             if (!active.current) return;
             const resourceId = resourceIdFromStorageKey(result.storageKey);
             if (!resourceId || result.pendingRemoteUpload) throw new Error("素材尚未保存完成，请稍后重试");

@@ -10,10 +10,6 @@ import (
 	"qisitv/backend/internal/skills"
 )
 
-func (s *Service) AssistantSkillContext(userID, canvasID, sessionID string) (*assistantturns.SkillContext, error) {
-	return s.assistantTurnsOrInit().SkillContext(userID, canvasID, sessionID)
-}
-
 func (s *Service) ChangeAssistantSkillContext(userID, canvasID string, change assistantturns.SkillContextChange) (*assistantturns.SkillContext, error) {
 	return s.assistantTurnsOrInit().ChangeSkillContextValidated(userID, canvasID, change, func(tx *gorm.DB, pins []skills.Pin) ([]skills.Pin, error) {
 		return s.validateAssistantSkillContextPins(skills.New(s.repo.WithTx(tx), s.dataDir, nil), userID, pins)
@@ -92,12 +88,4 @@ func validateAssistantSkillContextPins(domain *skills.Service, userID string, pi
 		}
 	}
 	return nil, err
-}
-
-func (s *Service) AcknowledgeAssistantSkillScope(userID, canvasID, sessionID, scopeID string, revision int64) (*assistantturns.SkillContext, error) {
-	return s.assistantTurnsOrInit().AcknowledgeSkillScope(userID, canvasID, sessionID, scopeID, revision)
-}
-
-func (s *Service) BoundAssistantSkillContext(userID, turnID, sessionID string) (*assistantturns.SkillContext, error) {
-	return s.assistantTurnsOrInit().BoundSkillContext(userID, turnID, sessionID)
 }

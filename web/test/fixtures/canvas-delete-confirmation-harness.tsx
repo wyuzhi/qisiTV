@@ -7,7 +7,6 @@ import { setActiveUserScope } from "../../src/lib/user-scope";
 setActiveUserScope("owner-a");
 (window as any).__deletion = {
     select: (ids: string[]) => useCanvasUiStore.getState().setDeleteProjectIds(ids),
-    switchScope: (id: string) => setActiveUserScope(id),
 };
 function Harness() {
     const ids = useCanvasUiStore(state => state.deleteProjectIds);

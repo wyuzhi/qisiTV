@@ -1,4 +1,9 @@
 import { useState } from "react";
+import { ConfigProvider, Modal } from "antd";
+import { CanvasImageSettingsPopover } from "../../src/components/canvas/canvas-image-settings-popover";
+import { CanvasVideoSettingsPopover } from "../../src/components/canvas/canvas-video-settings-popover";
+import { defaultConfig } from "../../src/stores/use-config-store";
+import { getAntThemeConfig } from "../../src/lib/app-theme";
 import { createRoot } from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { appQueryClient } from "../../src/lib/query-client";
@@ -104,15 +109,45 @@ const mockReferences: CanvasResourceReference[] = [
             fileCount: 4,
         },
     },
+    {
+        id: "ref-node-char-1",
+        kind: "character",
+        label: "唐妙菱",
+        title: "唐妙菱",
+        nodeId: "node-char-1",
+        active: true,
+    },
 ];
 
 function TestApp() {
+    const [expanded, setExpanded] = useState(false);
+    const [modalLayer, setModalLayer] = useState(1200);
+    const [expandedPrompt, setExpandedPrompt] = useState("");
+    const [imageConfig, setImageConfig] = useState({ ...defaultConfig, model: "gpt-image-1" });
+    const [videoConfig, setVideoConfig] = useState({ ...defaultConfig, model: "seedance-2.0" });
+    const [parameterUpdate, setParameterUpdate] = useState("");
     const [richPrompt, setRichPrompt] = useState("");
     const [plainPrompt, setPlainPrompt] = useState("");
+    const [autoLinkPrompt, setAutoLinkPrompt] = useState("");
     const [underlyingClicks, setUnderlyingClicks] = useState(0);
 
     return (
         <div style={{ padding: "40px", maxWidth: "680px", margin: "0 auto", background: "#18181b", minHeight: "100vh", color: "#fff" }}>
+            <button id="open-expanded" onClick={() => setExpanded(true)}>放大编辑</button>
+            <select id="modal-layer" value={modalLayer} onChange={(event) => setModalLayer(Number(event.target.value))}><option value={1200}>1200</option><option value={2400}>2400</option></select>
+            <output id="expanded-prompt">{expandedPrompt}</output>
+            <output id="parameter-update">{parameterUpdate}</output>
+            <ConfigProvider theme={getAntThemeConfig(true)}>
+                <Modal title="放大提示词" open={expanded} zIndex={modalLayer} footer={null} onCancel={() => setExpanded(false)}>
+                    <CanvasResourceMentionTextarea aria-label="expanded-editor" value={expandedPrompt} references={mockReferences} includeAssetLibrary onChange={setExpandedPrompt} onSelectReference={(ref) => ref} style={{ height: 140 }} />
+                    <div data-testid="image-settings">
+                        <CanvasImageSettingsPopover config={imageConfig} onConfigChange={(key, value) => { setImageConfig((config) => ({ ...config, [key]: value })); setParameterUpdate(`image:${key}:${value}`); }} />
+                    </div>
+                    <div data-testid="video-settings">
+                        <CanvasVideoSettingsPopover config={videoConfig} onConfigChange={(key, value) => { setVideoConfig((config) => ({ ...config, [key]: value })); setParameterUpdate(`video:${key}:${value}`); }} />
+                    </div>
+                </Modal>
+            </ConfigProvider>
             <div style={{ marginBottom: "16px", display: "flex", gap: "16px", alignItems: "center" }}>
                 <span id="rich-prompt-display">RichPrompt: {richPrompt}</span>
                 <span id="underlying-click-count">UnderlyingClicks: {underlyingClicks}</span>
@@ -161,6 +196,26 @@ function TestApp() {
                         onChange={setPlainPrompt}
                         onSelectReference={(ref) => ref}
                         placeholder="纯原生 textarea 输入框"
+                        style={{ width: "100%", height: "80px", color: "#fff", background: "transparent", border: "none", resize: "none" }}
+                    />
+                </div>
+            </div>
+
+            {/* Auto Link Section */}
+            <div style={{ marginTop: "24px" }}>
+                <div style={{ marginBottom: "8px" }}>
+                    <span id="autolink-prompt-display">AutoLinkPrompt: {autoLinkPrompt}</span>
+                </div>
+                <div style={{ background: "#27272a", borderRadius: "8px", padding: "12px", minHeight: "100px" }}>
+                    <CanvasResourceMentionTextarea
+                        id="autolink-mention-input"
+                        aria-label="autolink-editor"
+                        value={autoLinkPrompt}
+                        references={mockReferences}
+                        autoLinkEnabled
+                        onChange={setAutoLinkPrompt}
+                        onSelectReference={(ref) => ref}
+                        placeholder="输入角色名后按 Tab 自动补全引用"
                         style={{ width: "100%", height: "80px", color: "#fff", background: "transparent", border: "none", resize: "none" }}
                     />
                 </div>

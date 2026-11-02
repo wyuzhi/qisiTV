@@ -28,7 +28,7 @@ func TestApplicationPluginUsesUserStateUnderPlatformAvailability(t *testing.T) {
 	user := &model.User{ID: "user-1", Role: model.UserRoleUser}
 	admin := &model.User{ID: "admin-1", Role: model.UserRoleAdmin}
 
-	states, err := svc.PluginStatesForUser(user)
+	states, err := svc.PluginDomain().StatesForUser(user)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestEditorShellReportsPlatformAvailableWithoutPlatformState(t *testing.T) {
 	svc := &Service{repo: repo, pluginRuntime: center}
 	user := &model.User{ID: "user-1", Role: model.UserRoleUser}
 
-	states, err := svc.PluginStatesForUser(user)
+	states, err := svc.PluginDomain().StatesForUser(user)
 	if err != nil {
 		t.Fatal(err)
 	}

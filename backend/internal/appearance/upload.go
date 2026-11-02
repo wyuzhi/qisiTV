@@ -7,8 +7,54 @@ import (
 	"net/http"
 	"strings"
 
+	"qisitv/backend/internal/assets"
 	"qisitv/backend/internal/kernel"
+	"qisitv/backend/internal/model"
 )
+
+func (s *Service) UploadAsset(
+	actor *model.User,
+	slot string,
+	header *multipart.FileHeader,
+	uploadLocal func(userID string, header *multipart.FileHeader, kind string, width, height int, durationMs int64, uploadIdentity ...string) (*model.Resource, error),
+	uploadResource func(userID string, header *multipart.FileHeader, kind string, width, height int, durationMs int64, uploadIdentity ...string) (*model.Resource, error),
+) (*model.Resource, error) {
+	if err := s.requireAdmin(actor); err != nil {
+		return nil, err
+	}
+	mimeType, err := ValidateUpload(slot, header)
+	if err != nil {
+		return nil, err
+	}
+	header.Header.Set("Content-Type", mimeType)
+	kind := "image"
+	if slot == AssetVideo {
+		kind = "video"
+	}
+	var resource *model.Resource
+	if slot == AssetLogo || slot == AssetDarkLogo {
+		resource, err = uploadLocal(actor.ID, header, kind, 0, 0, 0)
+	} else {
+		resource, err = uploadResource(actor.ID, header, kind, 0, 0, 0)
+	}
+	if err != nil {
+		return nil, err
+	}
+	resource.PublicURL = ""
+	return resource, nil
+}
+
+func (s *Service) OpenAsset(
+	slot string,
+	rangeHeader string,
+	openRange func(userID string, resource *model.Resource, rangeHeader string) (*assets.ResourceStream, error),
+) (*assets.ResourceStream, error) {
+	resource, err := s.ConfiguredResource(slot)
+	if err != nil {
+		return nil, err
+	}
+	return openRange(resource.UserID, resource, rangeHeader)
+}
 
 func AssetMaxBytes(slot string) (int64, error) {
 	switch strings.TrimSpace(slot) {

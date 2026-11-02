@@ -102,7 +102,7 @@
 
 ```json
 {
-  "apiVersion": "beeftv.plugin/v2",
+  "apiVersion": "qisitv.plugin/v2",
   "id": "dashscope-wan-video",
   "name": "DashScope Wan Video",
   "version": "2.0.1",

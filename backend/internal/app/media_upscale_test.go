@@ -87,6 +87,9 @@ func TestUpscaleAdmissionPinsOfficialCredentialAndPayload(t *testing.T) {
 	if err := (taskCatalogAdapter{s}).ValidateCapability(resolved); err != nil {
 		t.Fatal(err)
 	}
+	if config["mediaProtocolVersion"] != "managed-media-v1" {
+		t.Fatal("new upscale admission did not freeze managed media protocol")
+	}
 	if _, err := (taskCatalogAdapter{s}).Select("owner", localtask.SelectRequest{Input: resolved, Model: "topaz-standard-v2", Type: "canvas_image"}); err != nil {
 		t.Fatalf("managed upscale admission rejected: %v", err)
 	}
@@ -131,7 +134,7 @@ func TestUpscaleConfigRequiresConnectedAccount(t *testing.T) {
 }
 
 func TestUpscaleRecoveryNeverResubmitsUnknownOrAcceptedWithoutReceipt(t *testing.T) {
-	for _, dispatch := range []string{"", "submission_unknown", "accepted"} {
+	for _, dispatch := range []string{"", "submission_unknown", "accepted", "not_sent", "rejected_no_job"} {
 		t.Run(dispatch, func(t *testing.T) {
 			s, db, _, _ := creationTestService(t)
 			task := model.Task{ID: "original", UserID: "user", Type: "canvas_video", Model: "topaz-proteus", Status: model.TaskStatusFailed}
@@ -162,7 +165,7 @@ func TestUpscaleRecoveryNeverResubmitsUnknownOrAcceptedWithoutReceipt(t *testing
 func TestUpscaleImageRejectionRetainsNoJobEvidence(t *testing.T) {
 	s, _, _, _ := creationTestService(t)
 	rejected := generation.SubmissionRejectedError{Cause: generation.HTTPError{StatusCode: 400, Body: `{"error":{"code":"fal_billing_unavailable","message":"billing unavailable"}}`}}
-	task := &model.Task{ID: "upscale-rejected", UserID: "user", Type: "canvas_image", Model: "topaz-standard-v2", RouteID: "original"}
+	task := &model.Task{ID: "upscale-rejected", UserID: "user", Type: "canvas_image", Operation: "media.upscale.topaz", Model: "topaz-standard-v2", RouteID: "original"}
 	attempt := &model.RouteAttempt{ID: "upscale-attempt", TaskID: task.ID, RouteID: "original", DispatchState: "submission_unknown"}
 	s.finishTaskRouteAttempt(attempt, task, rejected)
 	if attempt.DispatchState != "rejected_no_job" || attempt.FailureCode != "upstream_400" {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"qisitv/backend/internal/beefapi"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -43,8 +44,8 @@ func TestRunMusicNormalizesOldFormatAndSendsSSE(t *testing.T) {
 	defer server.Close()
 	t.Setenv("BEEFTV_ENTERPRISE_TEST_ORIGIN", server.URL)
 	for _, withPlugin := range []bool{false, true} {
-		ctx := context.Background()
-		config := Config{Model: "minimax-music-v3.0", BaseURL: server.URL, AudioFormat: "flac"}
+		ctx := WithEndpoints(context.Background(), Endpoints{BeefAPIVideoBaseURL: server.URL})
+		config := Config{CredentialRef: beefapi.CredentialRef, Model: "minimax-music-v3.0", BaseURL: server.URL, AudioFormat: "flac"}
 		if withPlugin {
 			config.InterfaceType = "openai-audio"
 			registry := LoadOfficialFallbackRegistry()

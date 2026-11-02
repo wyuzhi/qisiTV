@@ -4,7 +4,6 @@ import { AssetLibraryPickerModal, type AssetLibraryPickerItem } from "@/componen
 import { useExternalAssetSources } from "@/hooks/use-external-asset-sources";
 import { ASSET_CATEGORY_LABELS, normalizeAssetCategory } from "@/lib/asset-category";
 import type { ExternalAssetPickerReference } from "@/lib/plugins/plugin-types";
-import { assertUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { useAssetStore, type Asset } from "@/stores/use-asset-store";
 
 type InsertableAsset = Extract<Asset, { kind: "text" | "image" | "video" | "audio" }>;
@@ -33,7 +32,7 @@ export type InsertAssetPayload =
 type Props = {
     open: boolean;
     multiple?: boolean;
-    onInsert: (payloads: InsertAssetPayload[], expectedScope: CapturedUserScope) => Promise<void> | void;
+    onInsert: (payloads: InsertAssetPayload[]) => Promise<void> | void;
     onClose: () => void;
 };
 
@@ -73,9 +72,8 @@ export function AssetPickerModal({ open, multiple = true, onInsert, onClose }: P
             confirmLabel={(count) => `插入已选素材${count ? `（${count}）` : ""}`}
             emptyDescription="先在素材库中添加图片、视频、音频或文本。"
             onClose={onClose}
-            onConfirm={async (ids, expectedScope) => {
-                await onInsert(assetPickerItemsToInsertPayloads(ids, items), expectedScope);
-                assertUserScope(expectedScope);
+            onConfirm={async (ids) => {
+                await onInsert(assetPickerItemsToInsertPayloads(ids, items));
                 onClose();
             }}
         />

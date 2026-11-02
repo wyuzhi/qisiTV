@@ -9,6 +9,8 @@ import { CanvasNodeType, type CanvasNodeData } from "../../src/types/canvas";
 import { useCanvasGenerationOrchestration } from "../../src/pages/canvas/use-canvas-generation-orchestration";
 import { useCanvasResourceHandoff } from "../../src/pages/canvas/use-canvas-resource-handoff";
 import { queryGenerationTask } from "../../src/services/api/task-center";
+import { createCanvasPageUiStore } from "../../src/stores/canvas/use-canvas-page-ui-store";
+const pageUi = createCanvasPageUiStore();
 
 const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 const noop = () => {};
@@ -16,11 +18,14 @@ const noop = () => {};
 function Harness() {
     const [projectId, setProjectId] = useState("canvas-test");
     const [, refresh] = useState(0);
-    const [nodes, setNodes] = useState<CanvasNodeData[]>([{ id: "node-test", type: CanvasNodeType.Video, title: "取回测试", position: { x: 0, y: 0 }, width: 560, height: 320, metadata: { status: "loading", taskId: "task-test", taskStatus: "succeeded", content: location.search.includes("old") ? "data:video/mp4;base64,AA==" : undefined } }]);
+    const unknownSubmission = location.search.includes("unknown");
+    const [nodes, setNodes] = useState<CanvasNodeData[]>([{ id: "node-test", type: CanvasNodeType.Video, title: "取回测试", position: { x: 0, y: 0 }, width: 560, height: 320, metadata: unknownSubmission
+        ? { status: "error", taskId: "task-test", taskStatus: "failed", errorDetails: "提交结果待确认", taskOutcome: { phase: "retrievable", regenerate: "blocked", reason: "submission_unknown" } }
+        : { status: "loading", taskId: "task-test", taskStatus: "succeeded", content: location.search.includes("old") ? "data:video/mp4;base64,AA==" : undefined } }]);
     const nodesRef = useRef(nodes);
     nodesRef.current = nodes;
     const connectionsRef = useRef([]);
-    const generation = useCanvasGenerationOrchestration({ projectId, projectLoaded: false, localOnly: true, addedSkills: [], assets: [], nodes, connections: [], nodesRef, connectionsRef, setNodes, setConnections: noop, setSelectedNodeIds: noop, setSelectedConnectionId: noop, setDialogNodeId: noop, setGenerationHistoryOpen: noop, getCanvasCenter: () => ({ x: 0, y: 0 }) });
+    const generation = useCanvasGenerationOrchestration({ pageUi, projectId, projectLoaded: false, localOnly: true, addedSkills: [], assets: [], nodes, connections: [], nodesRef, connectionsRef, setNodes, setConnections: noop, setGenerationHistoryOpen: noop, getCanvasCenter: () => ({ x: 0, y: 0 }) });
     // Applying a fully downloaded asset is outside this test. Keep the actual
     // resume hook and task metadata projection, then stop at resumed delivery.
     const handoff = useCanvasResourceHandoff({ projectId, linkedProjectId: "", projectLoaded: false, assets: [], assetsHydrated: false, nodesRef, searchParams: new URLSearchParams(), setSearchParams: noop, setNodes, getCanvasCenter: () => ({ x: 0, y: 0 }), createHandoffNodes: async () => [], applyGenerationTaskResult: async (id, task) => { generation.bindGenerationTask(id, task); }, startGenerationRequest: generation.startGenerationRequest, finishGenerationRequest: generation.finishGenerationRequest });

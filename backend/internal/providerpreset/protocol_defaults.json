@@ -1,0 +1,12 @@
+{
+  "legacy": {
+    "text": "chat-completion",
+    "image": "openai-image",
+    "audio": "openai-audio"
+  },
+  "capabilityKeywords": [
+    {"capability": "audio", "keywords": ["audio", "tts", "voice", "speech", "sound", "music"]},
+    {"capability": "image", "keywords": ["seedream", "gpt-image", "image", "dall-e", "dalle", "flux", "imagen", "banana", "midjourney", "sdxl", "stable-diffusion"]},
+    {"capability": "video", "keywords": ["video", "sora", "veo", "kling", "seedance", "minimax-video", "minimax-h3", "hailuo", "pika", "runway", "omni", "cogvideo", "wan"]}
+  ]
+}

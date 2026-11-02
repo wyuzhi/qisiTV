@@ -5,14 +5,22 @@ export function timelineDeliveryTool(tools) {
   const byOperation = new Map(tools.map(tool => [tool.label, tool]));
   if (!required.every(name => byOperation.has(name))) return null;
   const render = byOperation.get('canvas.timeline.render');
-  const timelineSchema = structuredClone(byOperation.get('canvas.timeline.update').parameters.properties.timeline);
+  const updateTool = byOperation.get('canvas.timeline.update');
+  const timelineSchema = structuredClone(updateTool.parameters.properties.timeline);
+  updateTool.parameters = {
+    ...updateTool.parameters,
+    properties: {
+      ...updateTool.parameters.properties,
+      timeline: { type: 'object', description: '同 canvas_timeline_deliver.timeline' },
+    },
+  };
   timelineSchema.properties.clips.items.properties.lines = {
     type: 'array', minItems: 1, maxItems: 8, items: { type: 'string' },
-    description: '多行字幕逐行提供字符串；保存为真实换行，并优先于text。不要把换行转义写进每行正文。',
+    description: '多行字幕数组（优先于 text）',
   };
   return {
     name: 'canvas_timeline_deliver', label: 'canvas.timeline.deliver', readOnly: false, replay: 'safe',
-    description: '用户需要成片和可编辑工程时使用本组合工具，一次免费完成时间线交付：可先保存timeline，再渲染、等待文件、创建空成片节点并绑定、导出可编辑工程。不必拆成多次模型调用。局部重生成且剪辑不变时只传refreshNodeIds，精确更新指定节点的素材引用并保留字幕、时序、裁剪、声音和输出规格；它与timeline二选一。两者均省略则使用已保存时间线。仅处理已有素材，不生成付费素材。expectedRevision必须是当前画布版本。成功后检查成片。失败保留回执，只用failedStep对应原生工具及原任务继续。',
+    description: '一次完成时间线保存、本地渲染、创建成片节点绑定与导出工程 ZIP；局部重生成传 refreshNodeIds',
     parameters: {
       type: 'object', additionalProperties: false,
       properties: {
@@ -20,7 +28,7 @@ export function timelineDeliveryTool(tools) {
         timeline: timelineSchema,
         refreshNodeIds: byOperation.get('canvas.timeline.update').parameters.properties.refreshNodeIds,
         options: render.parameters.properties.options,
-        title: { type: 'string', maxLength: 120, description: '新成片节点名称；默认“成片”' },
+        title: { type: 'string', maxLength: 120 },
         ...(render.parameters.properties.canvasId ? { canvasId: render.parameters.properties.canvasId } : {}),
       },
       required: ['expectedRevision'],

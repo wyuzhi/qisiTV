@@ -84,38 +84,81 @@ func TestExternalCLIAndMCPRealBusinessUpload(t *testing.T) {
 			t.Fatal("not actual media")
 		}
 	}
-	command := exec.Command(bin, "mcp", "serve")
-	command.Env = env
-	client := mcp.NewClient(&mcp.Implementation{Name: "business-fixture", Version: "1"}, nil)
-	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: command}, nil)
-	if err != nil {
-		t.Fatal(err)
+	connect := func(args ...string) *mcp.ClientSession {
+		command := exec.Command(bin, append([]string{"mcp", "serve"}, args...)...)
+		command.Env = env
+		session, err := mcp.NewClient(&mcp.Implementation{Name: "business-fixture", Version: "1"}, nil).Connect(ctx, &mcp.CommandTransport{Command: command}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = session.Close() })
+		return session
 	}
-	defer session.Close()
+	toolText := func(result *mcp.CallToolResult) string {
+		var parts []string
+		for _, content := range result.Content {
+			if text, ok := content.(*mcp.TextContent); ok {
+				parts = append(parts, text.Text)
+			}
+		}
+		return strings.Join(parts, "\n")
+	}
+	sensitive := func(name string) bool {
+		return strings.Contains(name, "agent_clients") || strings.Contains(name, "assistant_host")
+	}
+
+	// Default: workspace operations plus the business gateway, not one tool per route.
+	session := connect()
 	tools, err := session.ListTools(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) < 100 {
-		t.Fatal("MCP only exposed fixed ops", len(tools.Tools))
+	names := map[string]bool{}
+	for _, tool := range tools.Tools {
+		names[tool.Name] = true
+		if sensitive(tool.Name) {
+			t.Fatal("sensitive MCP tool exposed", tool.Name)
+		}
+	}
+	if !names["business.list"] || !names["business.call"] || names["business_post_resources"] || len(tools.Tools) >= 100 {
+		t.Fatalf("default MCP must expose the business gateway instead of every route: %d tools", len(tools.Tools))
+	}
+	catalog, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "business.list", Arguments: map[string]any{}})
+	if err != nil || catalog.IsError || !strings.Contains(toolText(catalog), "business_post_resources") {
+		t.Fatalf("business.list must find the resource upload: %v %s", err, toolText(catalog))
+	}
+	if sensitive(toolText(catalog)) {
+		t.Fatal("sensitive handler listed by business.list")
+	}
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "business.call", Arguments: map[string]any{"tool": "business_post_resources", "filePath": pngPath, "body": map[string]any{"kind": "image"}, "operationId": "mcp-gateway-upload-1"}})
+	if err != nil || result.IsError || !strings.Contains(toolText(result), "resource") {
+		t.Fatalf("official MCP real upload through business.call err=%v result=%s", err, toolText(result))
+	}
+
+	// Opt-in: every business route as its own tool, as before.
+	all := connect("--all-business-tools")
+	listed, err := all.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Tools) < 100 {
+		t.Fatal("--all-business-tools only exposed", len(listed.Tools))
 	}
 	found := false
-	for _, tool := range tools.Tools {
-		if tool.Name == "business_post_resources" {
-			found = true
+	for _, tool := range listed.Tools {
+		found = found || tool.Name == "business_post_resources"
+		if sensitive(tool.Name) {
+			t.Fatal("sensitive MCP tool exposed", tool.Name)
 		}
-		if strings.Contains(tool.Name, "agent_clients") || strings.Contains(tool.Name, "assistant_host") {
-			t.Fatal("sensitive MCP tool exposed")
+		if tool.Name == "business.list" || tool.Name == "business.call" {
+			t.Fatal("--all-business-tools must not also register the gateway", tool.Name)
 		}
 	}
 	if !found {
 		t.Fatal("MCP missing resource upload")
 	}
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "business_post_resources", Arguments: map[string]any{"filePath": pngPath, "body": map[string]any{"kind": "image"}}})
-	if err != nil || result.IsError {
-		t.Fatalf("official MCP real upload err=%v result=%+v", err, result)
-	}
-	if len(result.Content) == 0 {
-		t.Fatal("missing resource response")
+	direct, err := all.CallTool(ctx, &mcp.CallToolParams{Name: "business_post_resources", Arguments: map[string]any{"filePath": pngPath, "body": map[string]any{"kind": "image"}, "operationId": "mcp-route-upload-1"}})
+	if err != nil || direct.IsError || len(direct.Content) == 0 {
+		t.Fatalf("official MCP real upload err=%v result=%s", err, toolText(direct))
 	}
 }

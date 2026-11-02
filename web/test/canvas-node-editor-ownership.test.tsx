@@ -7,6 +7,8 @@ import { useCanvasNodeEditor } from "@/pages/canvas/use-canvas-node-editor";
 import { getActiveUserScope, setActiveUserScope } from "@/lib/user-scope";
 import * as assetSync from "@/services/project-asset-sync";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { createCanvasPageUiStore } from "../src/stores/canvas/use-canvas-page-ui-store";
+const pageUi = createCanvasPageUiStore();
 
 function deferred<T = void>() {
     let resolve!: (value: T | PromiseLike<T>) => void;
@@ -41,7 +43,7 @@ function mountEditor(canvasId = "canvas-a") {
     const writes: string[] = [];
     let editor!: ReturnType<typeof useCanvasNodeEditor>;
     function Harness() {
-        editor = useCanvasNodeEditor({
+        editor = useCanvasNodeEditor({ pageUi,
             canvasId,
             canvasTitle: "画布",
             domainProjectId: "project-a",
@@ -50,11 +52,7 @@ function mountEditor(canvasId = "canvas-a") {
                 writes.push("setNodes");
                 nodesRef.current = typeof value === "function" ? value(nodesRef.current) : value;
             },
-            setSelectedNodeIds: () => {},
-            setSelectedConnectionId: () => {},
-            setDialogNodeId: () => {},
-            setToolbarNodeId: () => {},
-            setHoveredNodeId: () => {},
+            openProjectAssets: () => {},
         });
         return null;
     }
@@ -68,7 +66,7 @@ function mountEditor(canvasId = "canvas-a") {
     return { editor, nodesRef, writes };
 }
 
-test("category change threads canvas-manual source, category, captured scope and signal", async () => {
+test("category change threads canvas-manual source, category and signal", async () => {
     const restore = switchScope("owner-a");
     const entered = deferred();
     const gate = deferred();
@@ -87,63 +85,11 @@ test("category change threads canvas-manual source, category, captured scope and
             source: "canvas-manual",
             category: "character",
         });
-        expect(ensure.mock.calls[0]?.[0].expectedScope).toEqual(expect.objectContaining({ userScope: "owner-a" }));
         expect(ensure.mock.calls[0]?.[0].signal).toBeInstanceOf(AbortSignal);
         expect(nodesRef.current[0]?.metadata?.assetCategory).toBe("character");
         gate.resolve();
         await Bun.sleep(20);
         expect(nodesRef.current[0]?.metadata?.assetId).toBe("asset-1");
-    } finally {
-        gate.resolve();
-        ensure.mockRestore();
-        restore();
-    }
-});
-
-test("A to B to A during category ensure keeps the local category patch and does not write assetId", async () => {
-    const restore = switchScope("owner-a");
-    const entered = deferred();
-    const gate = deferred();
-    const ensure = spyOn(assetSync, "ensureCanvasNodeAsset").mockImplementation(async () => {
-        entered.resolve();
-        await gate.promise;
-        return { assetId: "stale-asset", created: true, linkedToProject: true, confirmed: true };
-    });
-    try {
-        const { editor, nodesRef } = mountEditor();
-        editor.handleConfigNodeChange("node-1", { assetCategory: "character" });
-        await entered.promise;
-        setActiveUserScope("owner-b");
-        setActiveUserScope("owner-a");
-        gate.resolve();
-        await Bun.sleep(20);
-        expect(nodesRef.current[0]?.metadata?.assetCategory).toBe("character");
-        expect(nodesRef.current[0]?.metadata?.assetId).toBeUndefined();
-    } finally {
-        gate.resolve();
-        ensure.mockRestore();
-        restore();
-    }
-});
-
-test("A to B to A during saveNodeAsset does not write assetId", async () => {
-    const restore = switchScope("owner-a");
-    const entered = deferred();
-    const gate = deferred();
-    const ensure = spyOn(assetSync, "ensureCanvasNodeAsset").mockImplementation(async () => {
-        entered.resolve();
-        await gate.promise;
-        return { assetId: "stale-asset", created: true, linkedToProject: true, confirmed: true };
-    });
-    try {
-        const { editor, nodesRef } = mountEditor();
-        const pending = editor.saveNodeAsset(nodesRef.current[0]!);
-        await entered.promise;
-        setActiveUserScope("owner-b");
-        setActiveUserScope("owner-a");
-        gate.resolve();
-        await pending;
-        expect(nodesRef.current[0]?.metadata?.assetId).toBeUndefined();
     } finally {
         gate.resolve();
         ensure.mockRestore();
@@ -166,31 +112,6 @@ test("unconfirmed save keeps a recoverable draft assetId", async () => {
         expect(ensure.mock.calls[0]?.[0].source).toBe("canvas-manual");
         expect(ensure.mock.calls[0]?.[0].category).toBeUndefined();
     } finally {
-        ensure.mockRestore();
-        restore();
-    }
-});
-
-test("ordinary save error after A to B to A does not write a replacement assetId", async () => {
-    const restore = switchScope("owner-a");
-    const entered = deferred();
-    const gate = deferred();
-    const ensure = spyOn(assetSync, "ensureCanvasNodeAsset").mockImplementation(async () => {
-        entered.resolve();
-        await gate.promise;
-        throw new Error("网络中断");
-    });
-    try {
-        const { editor, nodesRef } = mountEditor();
-        const pending = editor.saveNodeAsset(nodesRef.current[0]!);
-        await entered.promise;
-        setActiveUserScope("owner-b");
-        setActiveUserScope("owner-a");
-        gate.resolve();
-        await pending;
-        expect(nodesRef.current[0]?.metadata?.assetId).toBeUndefined();
-    } finally {
-        gate.resolve();
         ensure.mockRestore();
         restore();
     }

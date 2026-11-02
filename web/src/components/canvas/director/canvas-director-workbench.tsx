@@ -41,7 +41,6 @@ import { createDirectorGeometricObject, DIRECTOR_GEOMETRY_PRESET_OPTIONS } from 
 import { appendDirectorScreenshot, isDirectorOutputSnapshotCurrent, nextDirectorScreenshotName, shouldReinitializeDirectorSession } from "@/lib/canvas/director/director-session";
 import { directorAsyncSession } from "@/lib/canvas/director/director-async-session";
 import { persistDirectorImageUpload, persistDirectorLibraryAsset, persistDirectorMediaUpload, type DirectorCanvasImageHandoff } from "@/lib/canvas/director/director-library-persist";
-import { isUserScopeAbandonedError, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { restoreDirectorPlaybackOnEnd, waitForDirectorCaptureCamera } from "@/lib/canvas/director/director-output-camera";
 import { bindDirectorCameraFollow, removeDirectorCameraBindingsForObject, replaceDirectorSceneObjects, unbindDirectorCameraFollow } from "@/lib/canvas/director/director-camera-binding";
 import { blocksDirectorShortcut, releaseDirectorFocusAfterPointer, resolveDirectorShortcut, type DirectorShortcutAction } from "@/lib/canvas/director/director-shortcuts";
@@ -59,7 +58,7 @@ import type { CanvasNodeData } from "@/types/canvas";
 import type { ReferenceImage } from "@/types/image";
 import type { DirectorCamera, DirectorCameraMove, DirectorHumanoidBone, DirectorKeyframeDeleteTarget, DirectorKeyframeEasing, DirectorLight, DirectorObject, DirectorPose, DirectorQuat, DirectorRenderMode, DirectorRig, DirectorScene, DirectorSceneOutput, DirectorShot, DirectorShotSize, DirectorTransform, DirectorVec3 } from "@/types/director";
 
-export function CanvasDirectorWorkbench({ open, scene, projectId, imageNodes, onboardingScope, onClose, onChange, onApply, onDeleteImageNode, onAddCanvasImage, onFlush, onShouldCaptureCover, onCaptureCover, generatePanorama = generateDirectorPanorama }: { open: boolean; scene: DirectorScene | null; projectId?: string; imageNodes: CanvasNodeData[]; onboardingScope: string; onClose: () => void; onChange: (scene: DirectorScene) => void; onApply: (output: DirectorSceneOutput) => Promise<void | { confirmed?: boolean }>; onDeleteImageNode: (nodeId: string) => void; onAddCanvasImage?: (image: Awaited<ReturnType<typeof uploadImage>>, title: string, signal: AbortSignal, expectedScope: CapturedUserScope) => void | Promise<void | DirectorCanvasImageHandoff>; onFlush?: () => void | Promise<void>; onShouldCaptureCover?: (scene: DirectorScene, shotId: string) => boolean; onCaptureCover?: (input: { scene: DirectorScene; shotId: string; beauty: Blob }) => Promise<void>; generatePanorama?: typeof generateDirectorPanorama }) {
+export function CanvasDirectorWorkbench({ open, scene, projectId, imageNodes, onboardingScope, onClose, onChange, onApply, onDeleteImageNode, onAddCanvasImage, onFlush, onShouldCaptureCover, onCaptureCover, generatePanorama = generateDirectorPanorama }: { open: boolean; scene: DirectorScene | null; projectId?: string; imageNodes: CanvasNodeData[]; onboardingScope: string; onClose: () => void; onChange: (scene: DirectorScene) => void; onApply: (output: DirectorSceneOutput) => Promise<void | { confirmed?: boolean }>; onDeleteImageNode: (nodeId: string) => void; onAddCanvasImage?: (image: Awaited<ReturnType<typeof uploadImage>>, title: string, signal: AbortSignal) => void | Promise<void | DirectorCanvasImageHandoff>; onFlush?: () => void | Promise<void>; onShouldCaptureCover?: (scene: DirectorScene, shotId: string) => boolean; onCaptureCover?: (input: { scene: DirectorScene; shotId: string; beauty: Blob }) => Promise<void>; generatePanorama?: typeof generateDirectorPanorama }) {
     const { message, modal } = App.useApp();
     const theme = canvasThemes[useActiveTheme()];
     const effectiveConfig = useEffectiveConfig();
@@ -90,7 +89,7 @@ export function CanvasDirectorWorkbench({ open, scene, projectId, imageNodes, on
         if (!open || !scene?.id || !projectId) return;
         const controller = new AbortController();
         void recoverDirectorPanoramaTasks(projectId, scene.id, controller.signal).catch((error) => {
-            if (controller.signal.aborted || isUserScopeAbandonedError(error)) return;
+            if (controller.signal.aborted) return;
             console.warn("导演台全景图历史恢复失败", error);
         });
         return () => controller.abort();
@@ -557,11 +556,11 @@ export function CanvasDirectorWorkbench({ open, scene, projectId, imageNodes, on
                         const beauty = await viewportRef.current.capture("beauty");
                         session.assertCurrent();
                         void onCaptureCover({ scene: current, shotId: shot.id, beauty }).catch((error) => {
-                            if (isUserScopeAbandonedError(error) || (error instanceof DOMException && error.name === "AbortError")) return;
+                            if ((error instanceof DOMException && error.name === "AbortError")) return;
                             message.warning("导演台封面保存失败，下次打开镜头后可重试");
                         });
                     } catch (error) {
-                        if (isUserScopeAbandonedError(error) || (error instanceof DOMException && error.name === "AbortError")) return;
+                        if ((error instanceof DOMException && error.name === "AbortError")) return;
                         message.warning("导演台截图失败，下次打开镜头后可重试");
                     }
                 }
@@ -796,7 +795,6 @@ export function CanvasDirectorWorkbench({ open, scene, projectId, imageNodes, on
         try {
             const { uploaded, persist } = await persistDirectorImageUpload({
                 source: file,
-                expectedScope: session.expectedScope,
                 signal: session.signal,
                 toAsset: (image) => ({ kind: "image", title: file.name, coverUrl: image.url, tags: ["全景图"], source: "导演台", data: { dataUrl: image.url, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType }, metadata: { source: "director-panorama" } }),
             });
@@ -844,7 +842,6 @@ export function CanvasDirectorWorkbench({ open, scene, projectId, imageNodes, on
             const { uploaded, persist } = await persistDirectorMediaUpload({
                 source: file,
                 prefix: "model",
-                expectedScope: session.expectedScope,
                 signal: session.signal,
                 toAsset: (media) => ({ kind: "model", title: file.name.replace(/\.(glb|gltf)$/i, ""), coverUrl: "", tags: ["3D模型"], source: "导演台", data: { url: media.url, storageKey: media.storageKey, bytes: media.bytes, mimeType: media.mimeType, fileName: file.name }, metadata: { source: "director" } }),
             });
@@ -868,14 +865,13 @@ export function CanvasDirectorWorkbench({ open, scene, projectId, imageNodes, on
         setSceneReferenceUploading(true);
         const session = directorAsyncSession(sessionRef.current.signal);
         try {
-            const uploaded = await uploadImage(file, undefined, session.expectedScope);
+            const uploaded = await uploadImage(file);
             session.assertCurrent();
             const name = file.name.replace(/\.[^.]+$/, "") || "场景参考";
-            const canvasHandoff = await onAddCanvasImage?.(uploaded, name, session.signal, session.expectedScope);
+            const canvasHandoff = await onAddCanvasImage?.(uploaded, name, session.signal);
             session.assertCurrent();
             const persist = await persistDirectorLibraryAsset({
                 asset: { kind: "image", title: name, coverUrl: uploaded.url, tags: ["导演台参考图"], source: "导演台", data: { dataUrl: uploaded.url, storageKey: uploaded.storageKey, width: uploaded.width, height: uploaded.height, bytes: uploaded.bytes, mimeType: uploaded.mimeType }, metadata: { source: "director-scene-reference", sceneId: draftRef.current?.id } },
-                expectedScope: session.expectedScope,
                 signal: session.signal,
                 existingAssetId: canvasHandoff?.assetId,
                 existingPersisted: canvasHandoff?.persisted,
@@ -1483,7 +1479,7 @@ export function CanvasDirectorWorkbench({ open, scene, projectId, imageNodes, on
             const beauty = await viewportRef.current.capture("beauty");
             session.assertCurrent();
             if (!openRef.current || draftRef.current?.id !== current.id) throw new Error("截图期间场景已切换，请重试");
-            const uploaded = await uploadImage(beauty, undefined, session.expectedScope);
+            const uploaded = await uploadImage(beauty);
             session.assertCurrent();
             const latest = draftRef.current;
             const latestShot = latest?.shots.find((item) => item.id === shot.id);
@@ -1492,7 +1488,6 @@ export function CanvasDirectorWorkbench({ open, scene, projectId, imageNodes, on
             const screenshot = { id: nanoid(), name, url: uploaded.url, storageKey: uploaded.storageKey, width: uploaded.width, height: uploaded.height, createdAt: new Date().toISOString() };
             const persist = await persistDirectorLibraryAsset({
                 asset: { kind: "image", title: name, coverUrl: uploaded.url, tags: ["导演台截图"], source: "导演台", data: { dataUrl: uploaded.url, storageKey: uploaded.storageKey, width: uploaded.width, height: uploaded.height, bytes: uploaded.bytes, mimeType: uploaded.mimeType }, metadata: { source: "director-screenshot", sceneId: latest.id, shotId: shot.id } },
-                expectedScope: session.expectedScope,
                 signal: session.signal,
                 pendingRemoteUpload: uploaded.pendingRemoteUpload,
             });
@@ -1520,7 +1515,7 @@ export function CanvasDirectorWorkbench({ open, scene, projectId, imageNodes, on
         const expected = { scene: current, shotId: activeShot.id };
         const previousViewMode = useDirectorWorkbenchStore.getState().viewMode;
         const session = directorAsyncSession(sessionRef.current.signal);
-        const progress = startOperation("导出白膜视频", { owner: session.expectedScope, detail: "正在准备录制镜头" });
+        const progress = startOperation("导出白膜视频", { detail: "正在准备录制镜头" });
         setRecording(true);
         const wasPlaying = playing;
         const previousPlayhead = playhead;

@@ -53,7 +53,7 @@ test("local database failures never blame model parameters", () => {
             expect(failure.message).not.toContain("failure_diagnostics");
             expect(failure.retryable).toBe(false);
             expect(failure.blockAutomaticRetry).toBe(true);
-            expect(explainGenerationError(failure.message).category).toBe("local_storage");
+            expect(explainGenerationError({ code: failure.category, message: failure.message }).category).toBe("local_storage");
         }
     }
 });
@@ -94,7 +94,7 @@ test("whole request limits retain actionable copy after persistence", () => {
     for (const body of ["", "<html>413 Request Entity Too Large</html>"]) expect(explainGenerationError({ status: 413, data: body }).reason).toContain("整次请求");
     for (const raw of ["video request body is too large", "video request body exceeds the 64 MiB request limit; use public media URLs instead of inline base64", { error: { code: "video_request_body_too_large", message: "" } }]) {
         const failure = explainGenerationError(raw);
-        for (const got of [failure, explainGenerationError(`${failure.reason}。${failure.action}。`)]) {
+        for (const got of [failure, explainGenerationError({ code: failure.category, message: `${failure.reason}。${failure.action}。` })]) {
             expect(got.category).toBe("input_too_large");
             expect(got.reason).toContain("整次请求");
             expect(got.action).toContain("素材链接");
@@ -108,7 +108,7 @@ test("actual persisted task output contract renders identically in the frontend"
         // Backend app test writes the corresponding upstream failure through the
         // real terminal coordinator and DB, then asserts this exact list payload.
         const error = `${fixture.display}。排查编号：请求 req_reference_audio_123。`;
-        const result = explainGenerationError(error);
+        const result = explainGenerationError({ code: "invalid_params", message: error });
         expect(result.message).toBe(error);
         expect(result.category).toBe("invalid_params");
         expect(result.requestId).toBe("req_reference_audio_123");
@@ -138,7 +138,7 @@ describe("measured reference audio API errors", () => {
             for (const input of [{ response: { status: 400, data: body } }, `接口请求失败：${JSON.stringify(body)} (request id: ${requestId})`]) {
                 const first = explainGenerationError(input);
                 const metadata = generationFailureMetadata(input, "test prompt");
-                const persisted = explainGenerationError(metadata.errorDetails);
+                const persisted = explainGenerationError({ code: metadata.generationErrorCode, message: metadata.errorDetails });
                 for (const failure of [first, persisted]) {
                     expect(failure.category).toBe("invalid_params");
                     expect(failure.retryable).toBe(false);
@@ -159,7 +159,7 @@ describe("measured reference audio API errors", () => {
     test("local total limit and combined diagnostic IDs survive persistence", () => {
         const raw = "参考音频总时长为 16.00 秒，当前模型最多支持 15 秒；请裁剪或减少参考音频后再提交";
         const first = explainGenerationError(raw, { taskId: "task_existing_123", providerRequestId: requestId });
-        const second = explainGenerationError(first.message);
+        const second = explainGenerationError({ code: first.category, message: first.message });
         expect(second.message).toBe(first.message);
         expect(second.requestId).toBe(requestId);
         expect(second.taskId).toBe("task_existing_123");
@@ -177,8 +177,8 @@ test("height, aspect, pixel and request-size errors stay human and never leak JS
     expect(failure.action).toContain("300–6000 像素");
     expect(failure.requestId).toBe("202609270829245377912978268d9d6USz1NP3R");
     expect(failure.message).not.toContain("{");
-    expect(explainGenerationError(failure.message).action).toContain("300–6000 像素");
-    expect(explainGenerationError(failure.message).category).toBe("invalid_params");
+    expect(explainGenerationError({ code: failure.category, message: failure.message }).action).toContain("300–6000 像素");
+    expect(explainGenerationError({ code: failure.category, message: failure.message }).category).toBe("invalid_params");
     expect(explainGenerationError({ code: "invalid_parameter", message: "aspect ratio must be between 0.4 and 2.5" }).action).toContain("0.4–2.5");
     expect(explainGenerationError({ code: "invalid_parameter", message: "pixel count must be between 409600 and 8295044" }).reason).toContain("像素总量");
     expect(explainGenerationError({ status: 413, data: { error: { message: "Request entity too large" } } }).reason).toContain("整次请求");
@@ -222,13 +222,14 @@ describe("generation error classification", () => {
     });
     test("canonical categories survive persistence and structured codes without HTTP", () => {
         for (const code of ["moderation_reference", "moderation_output", "quota_user", "invalid_params", "download_failed"] as const) {
-            const failure = explainGenerationError({ code, message: "opaque" });
+            const failure = explainGenerationError({ code, message: explainGenerationError({ code }).message });
             expect(failure.category).toBe(code);
-            expect(explainGenerationError(failure.message).category).toBe(code);
         }
         expect(explainGenerationError({ code: "insufficient_user_quota" }).action).toContain("余额");
         expect(explainGenerationError({ code: "no_available_channel" }).category).toBe("provider_unavailable");
         expect(explainGenerationError({ code: "channel:invalid_key" }).category).toBe("provider_unavailable");
+        expect(explainGenerationError({ status: 405, message: "405 Method Not Allowed" }).category).toBe("model_missing");
+        expect(explainGenerationError({ status: 501, message: "Not Implemented" }).category).toBe("model_missing");
     });
 
     test("copy diagnostics validates context at the final boundary", () => {
@@ -471,7 +472,7 @@ describe("generation error classification", () => {
     });
 
     test("reference upload diagnostics identify storage and the failing asset", () => {
-        const failure = explainGenerationError("参考素材上传失败，本次尚未开始生成。请检查网络或稍后重试。");
+        const failure = explainGenerationError({ code: "provider_unavailable", message: "参考素材上传失败，本次尚未开始生成。请检查网络或稍后重试。" });
         expect(failure.blockAutomaticRetry).toBe(true);
         expect(failure.blockManualRetry).toBe(false);
         const text = formatGenerationDiagnostics(failure, { failureDiagnostics: {
@@ -495,7 +496,7 @@ describe("generation error classification", () => {
     });
 
     test("copied reference failure keeps DNS stage and recovery attempt", () => {
-        const text = formatGenerationDiagnostics(explainGenerationError("参考素材上传失败，本次尚未开始生成"), { failureDiagnostics: {
+        const text = formatGenerationDiagnostics(explainGenerationError({ code: "provider_unavailable", message: "参考素材上传失败，本次尚未开始生成。请检查网络或稍后重试。" }), { failureDiagnostics: {
             source: "reference_upload", requests: [{ operation: "reference_put", method: "PUT", dispatched: false, outcome: "not_dispatched", transportPhase: "dns", transportRoute: "direct", startedAt: "2026-10-22T03:00:00Z", durationMs: 123, summary: "参考图 1 上传文件（第 3 次）失败：域名解析失败" }],
         } });
         expect(text).toContain("阶段=DNS 解析");
@@ -505,7 +506,13 @@ describe("generation error classification", () => {
     });
 
     test("content moderation helper recognizes new categories", () => {
-        expect(isContentModerationError("提示词未通过内容安全审核")).toBe(true);
+        expect(isContentModerationError({ code: "moderation_input" })).toBe(true);
+        expect(isContentModerationError({ code: "moderation_reference" })).toBe(true);
+        expect(isContentModerationError({ code: "moderation_output" })).toBe(true);
+        expect(isContentModerationError({ code: "sensitive_words_detected" })).toBe(true);
+        expect(isContentModerationError({ category: "moderation_input" })).toBe(true);
+        expect(isContentModerationError({ code: "quota_user", message: "提示词未通过内容安全审核" })).toBe(false);
+        expect(isContentModerationError("提示词未通过内容安全审核")).toBe(false);
         expect(isContentModerationError("上游 HTTP 400")).toBe(false);
     });
 });
@@ -540,14 +547,14 @@ test("gateway video preflight failures preserve actionable details", () => {
         const failure = explainGenerationError({ error: { code: "invalid_reference_video", message: item.message }, status: 400 });
         expect(failure.reason).toContain(item.reason);
         expect(failure.action).toContain(item.action);
-        expect(explainGenerationError(`${failure.reason}。${failure.action}`).action).toContain(item.action);
+        expect(explainGenerationError({ code: failure.category, message: `${failure.reason}。${failure.action}` }).action).toContain(item.action);
     }
 });
 
 test("reference pixel diagnostic ID is not duplicated", () => {
     const id = "202609290516575609492488268d9d6HqaXq7bq";
     const input = `第 1 个参考视频像素总量为 331776（432×768）。需要 407696–8295044 像素；请调整尺寸。排查编号：请求 ${id}。`;
-    const failure = explainGenerationError(input);
+    const failure = explainGenerationError({ code: "invalid_params", message: input });
     expect(failure.message.split(id).length - 1).toBe(1);
     expect(failure.action).not.toContain(id);
 });
@@ -559,4 +566,86 @@ test("media details preserve authentication and ignore prompt echoes", () => {
         expect(failure.requestId).toBe("req_media_auth_123");
     }
     expect(explainGenerationError({error: {code: "unknown", message: "Failure"}, prompt: "unsupported video codec"}).category).toBe("unknown");
+});
+
+const BACKEND_IDS = "排查编号：任务 task_abc123 · 请求 req_abc123";
+const BACKEND_CASES: Array<{ code: string; reason: string; action: string; moderation?: boolean; uncertain?: boolean }> = [
+    { code: "moderation_reference", reason: "第 1 张参考图片疑似包含真人形象，该模型拒绝生成", action: "请检查并更换参考图片后重新生成", moderation: true },
+    { code: "quota_user", reason: "当前账号可用额度不足", action: "请检查账号余额，补充额度或调整令牌、套餐额度后重试" },
+    { code: "invalid_params", reason: "首尾帧模式的画面比例需跟随首帧", action: "请选择自适应比例后重新生成；如需指定比例，请改用参考生成模式" },
+    { code: "invalid_params", reason: "第 2 个参考视频时长为 3.00 秒", action: "请将这段参考视频裁剪或更换为 5–15 秒" },
+    { code: "timeout", reason: "图片任务执行超时", action: "请联系支持查询原任务结果，不要立即重新生成", uncertain: true },
+    { code: "results_missing", reason: "图片任务已结束，但未返回可用图片", action: "请联系支持核对原任务，不要重复提交", uncertain: true },
+    { code: "throttled", reason: "请求过于频繁", action: "请稍后再试" },
+];
+for (const item of BACKEND_CASES) {
+    test(`backend task failure ${item.code} uses the structured category: ${item.reason}`, () => {
+        const result = explainGenerationError({ code: item.code, message: `${item.reason}。${item.action}。${BACKEND_IDS}。` });
+        expect(result.category).toBe(item.code as typeof result.category);
+        expect(result.reason).toBe(item.reason);
+        expect(result.action).toBe(item.action);
+        expect(result.taskId).toBe("task_abc123");
+        expect(result.requestId).toBe("req_abc123");
+        expect(result.moderation).toBe(Boolean(item.moderation));
+        expect(result.uncertain).toBe(Boolean(item.uncertain));
+        expect(result.message).toBe(`${item.reason}。${item.action}。${BACKEND_IDS}。`);
+    });
+}
+
+test("backend task failure category comes from the code, never from the message text", () => {
+    const result = explainGenerationError({ code: "invalid_params", message: "额度不足。请检查账号余额。" });
+    expect(result.category).toBe("invalid_params");
+    expect(result.moderation).toBe(false);
+    expect(explainGenerationError({ code: "canvas_conflict", message: "后端不会这样说。请忽略。" }).reason).toBe("生成结果已保留，画布尚未更新");
+});
+
+test("third-party gateway channel_excluded and generic invalid_request_error wrapper keep accurate categories", () => {
+    const channelBody = {
+        error: {
+            message: "这个模型的线路已经在这把密钥的「渠道管理」里被全部取消勾选了，所以当前没有可用渠道。请打开这把密钥的「渠道管理」，至少勾上一条线路后再试。 (request id: req.20261101.zB868dI1)",
+            type: "invalid_request_error",
+            param: "",
+            code: "channel_excluded",
+        },
+    };
+    const channelFailure = explainGenerationError({ status: 403, data: channelBody });
+    expect(channelFailure.category).toBe("permission");
+    expect(channelFailure.providerCode).toBe("channel_excluded");
+    expect(channelFailure.requestId).toBe("req.20261101.zB868dI1");
+    const persistedChannel = explainGenerationError({ code: channelFailure.category, message: channelFailure.message });
+    expect(persistedChannel.category).toBe("permission");
+    expect(persistedChannel.reason).toBe(channelFailure.reason);
+    expect(persistedChannel.action).toBe(channelFailure.action);
+    expect(persistedChannel.requestId).toBe("req.20261101.zB868dI1");
+
+    const opaqueStatuses: Array<[number, string]> = [
+        [400, "invalid_params"],
+        [402, "quota_unknown"],
+        [403, "permission"],
+        [413, "input_too_large"],
+        [429, "throttled"],
+        [451, "unknown"],
+        [503, "provider_unavailable"],
+    ];
+    for (const [status, want] of opaqueStatuses) {
+        const got = explainGenerationError({ status, data: { error: { message: "opaque gateway error", type: "invalid_request_error", code: "custom_gateway_code" } } });
+        expect(got.category).toBe(want as typeof got.category);
+        expect(got.providerCode).toBe("custom_gateway_code");
+    }
+
+    for (const status of [400, 402, 403, 413, 429, 451, 503]) {
+        const height = explainGenerationError({ status, data: { error: { message: "Height must be between 300px and 6000px", type: "invalid_request_error", code: "custom_gateway_code" } } });
+        expect(height.category).toBe("invalid_params");
+        expect(height.retryable).toBe(false);
+        expect(height.action).toContain("300–6000 像素");
+        expect(height.providerCode).toBe("custom_gateway_code");
+
+        const quota = explainGenerationError({ status, data: { error: { message: "Your account quota is exhausted", type: "invalid_request_error", code: "custom_quota_code" } } });
+        expect(quota.category).toBe("quota_unknown");
+        expect(quota.providerCode).toBe("custom_quota_code");
+    }
+
+    const authoritativeType = explainGenerationError(`{"error":{"message":"Your account quota is exhausted (request id: req_inner_123456)","type":"model_capability_not_supported","code":"invalid_request_error"}} (request id: req_outer_654321)`);
+    expect(authoritativeType.category).toBe("invalid_params");
+    expect(authoritativeType.requestId).toBe("req_outer_654321");
 });

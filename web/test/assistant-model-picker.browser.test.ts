@@ -55,7 +55,19 @@ beforeAll(async () => {
     const executablePath = [process.env.CHROME_PATH, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((p): p is string => Boolean(p && existsSync(p)));
     browser = await chromium.launch({ executablePath, headless: true });
 }, 60000);
-afterAll(async () => { release?.(); await browser?.close(); server?.stop(true); });
+afterAll(async () => {
+    holdSave = false;
+    release?.();
+    release = undefined;
+    // Close sockets and explicit pages before Chromium teardown. A failed
+    // assertion may leave a polling page or a held persistence request alive.
+    server?.stop(true);
+    for (const context of browser?.contexts() || []) {
+        for (const page of context.pages()) await page.close();
+        await context.close();
+    }
+    await browser?.close();
+}, 15000);
 
 test("default multimodal selection and explicit off persist without changing the main model", async () => {
     connectionState = "connected"; catalogReadFailures = 0;
@@ -91,7 +103,7 @@ test("connected account can disconnect and expose the authorization action again
     try {
         await page.goto(new URL("/settings", server.url).toString());
         await page.getByRole("button", { name: "断开连接", exact: true }).click();
-        const connect = page.locator("button:not(.ant-btn-loading)").filter({ hasText: /^连接 BeefTV$/ });
+        const connect = page.locator("button:not(.ant-btn-loading)").filter({ hasText: /^连接 Topaz 算力$/ });
         await connect.waitFor({ timeout: 5000 });
         expect(disconnectCalls).toBe(1);
         expect(connectionState).toBe("disconnected");
@@ -102,7 +114,7 @@ test("connected account can disconnect and expose the authorization action again
 test("explicit compute connection retries its catalog without replacing the independent assistant selection", async () => {
     connectionState = "disconnected"; catalogReadFailures = 0;
     const page = await browser.newPage(); await page.goto(new URL("/settings", server.url).toString());
-    await page.getByRole("button", { name: "连接 BeefTV", exact: true }).click();
+    await page.getByRole("button", { name: "连接 Topaz 算力", exact: true }).click();
     const retry = page.getByRole("button", { name: "重试更新模型列表" });
     await retry.waitFor(); await retry.click();
     await retry.waitFor({ state: "hidden" });

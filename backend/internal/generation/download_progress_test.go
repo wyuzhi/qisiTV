@@ -231,20 +231,34 @@ func TestVideoDownloadDoesNotReportErrorBodyAsMedia(t *testing.T) {
 
 func TestVideoDeliveryPendingDoesNotExhaustTransferRetries(t *testing.T) {
 	for _, retryAfter := range []time.Duration{0, time.Second} {
-		t.Run(retryAfter.String(), func(t *testing.T) {
-			policy := fastPolicy(2, func(context.Context, time.Duration) error { return nil })
-			calls := 0
-			data, _, err := RunVideoDownload(context.Background(), "original", policy, func(context.Context) ([]byte, string, error) {
-				calls++
-				if calls <= 4 {
-					return nil, "", HTTPError{StatusCode: 503, Body: `{"error":{"code":"video_delivery_pending"}}`, RetryAfter: retryAfter}
+		for _, body := range []string{
+			`{"error":{"code":"video_delivery_pending"}}`,
+			`{"error":{"message":"Video is being saved; retry later","type":"video_delivery_pending"}}`,
+		} {
+			t.Run(retryAfter.String()+"/"+body, func(t *testing.T) {
+				policy := fastPolicy(2, func(context.Context, time.Duration) error { return nil })
+				calls := 0
+				renews := 0
+				primary := VideoResultSource{
+					URL: "https://gateway.example/v1/videos/original/content",
+					Read: func(context.Context) ([]byte, string, error) {
+						calls++
+						if calls <= 4 {
+							return nil, "", HTTPError{StatusCode: 503, Body: body, RetryAfter: retryAfter}
+						}
+						return []byte("saved video"), "video/mp4", nil
+					},
 				}
-				return []byte("saved video"), "video/mp4", nil
+				downloader := VideoResultDownloader(Config{BaseURL: "https://gateway.example"}, "original", primary, func(context.Context) (VideoResultSource, error) {
+					renews++
+					return primary, nil
+				})
+				data, _, err := RunVideoDownload(context.Background(), "original", policy, downloader)
+				if err != nil || calls != 5 || renews != 0 || string(data) != "saved video" {
+					t.Fatalf("calls=%d renews=%d data=%q error=%v", calls, renews, data, err)
+				}
 			})
-			if err != nil || calls != 5 || string(data) != "saved video" {
-				t.Fatalf("calls=%d data=%q error=%v", calls, data, err)
-			}
-		})
+		}
 	}
 }
 

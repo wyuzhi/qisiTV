@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +12,32 @@ import (
 	"qisitv/backend/internal/repository"
 	"qisitv/backend/internal/taskruntime"
 )
+
+func TestWorkerExecutionTimeoutPreservesRuntimeProfile(t *testing.T) {
+	s, _ := retiredAgentProductService(t)
+	policy := defaultRuntimePolicy()
+	policy.Task.ImageTimeoutMinutes = 23
+	encoded, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.repo.SaveSystemSetting(&model.SystemSetting{Key: "runtime_policy", ValueJSON: string(encoded)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []serviceMode{serviceModeLocal, serviceModeHosted} {
+		t.Run(string(mode), func(t *testing.T) {
+			svc := &Service{repo: s.repo, mode: mode}
+			want := 23 * time.Minute
+			if mode == serviceModeLocal {
+				want = time.Duration(selfUseRuntimePolicy().Task.ImageTimeoutMinutes) * time.Minute
+			}
+			got, err := (appTaskPolicy{service: svc}).ExecutionTimeout(context.Background(), "canvas_image")
+			if err != nil || got != want {
+				t.Fatalf("execution timeout = %s, %v; want %s", got, err, want)
+			}
+		})
+	}
+}
 
 func TestStartWorkerRepeatedIsIdempotentAndRestartable(t *testing.T) {
 	s, _ := retiredAgentProductService(t)

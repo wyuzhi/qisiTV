@@ -9,6 +9,9 @@ import (
 	"qisitv/backend/internal/repository"
 )
 
+// PlaybackService exposes the domain service to the HTTP composition layer.
+func (s *Service) PlaybackService() *playback.Service { return s.playbackRuntime() }
+
 func (s *Service) playbackRuntime() *playback.Service {
 	if s == nil {
 		return playback.New(playback.Deps{})

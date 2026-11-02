@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
-
-	"qisitv/backend/internal/beefapi"
 )
 
 // OverlayCatalogVideoCapabilities applies the official BeefAPI/WhatsToken
@@ -13,7 +11,7 @@ import (
 // are dropped so callers never persist implicit zeros.
 func OverlayCatalogVideoCapabilities(items []ChannelModelCatalogItem) []ChannelModelCatalogItem {
 	for index, item := range items {
-		if video, ok := beefapi.NormalizeCatalogVideoCapability(item.VideoCapabilities); ok {
+		if video, ok := NormalizeCatalogVideoCapability(item.VideoCapabilities); ok && item.VideoCapabilitiesVersion != nil && strings.TrimSpace(*item.VideoCapabilitiesVersion) != "" {
 			if raw, err := json.Marshal(video); err == nil {
 				items[index].VideoCapabilities = raw
 				version := ""

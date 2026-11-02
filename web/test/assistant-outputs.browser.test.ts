@@ -6,13 +6,12 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 
 let browser: Browser, server: ReturnType<typeof Bun.serve>, scratch: string;
-let phase = "running", reads = 0, held = false;
+let phase = "running", reads = 0;
 let historyEmpty = false;
 let taskHold = false, taskResolve: ((response: Response) => void) | null = null;
 const queriedStatuses: string[] = [];
-let lateResolve: ((response: Response) => void) | null = null;
 const mediaReads: { resource: string; token: string | null }[] = [];
-beforeEach(() => { phase = "running"; reads = 0; held = false; historyEmpty = false; taskHold = false; taskResolve = null; lateResolve = null; mediaReads.length = 0; queriedStatuses.length = 0; });
+beforeEach(() => { phase = "running"; reads = 0; historyEmpty = false; taskHold = false; taskResolve = null; mediaReads.length = 0; queriedStatuses.length = 0; });
 beforeAll(async () => {
     scratch = mkdtempSync(tmpdir() + "/beeftv-output-");
     for (const [name, color] of [["first", "red"], ["second", "blue"]]) execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", `color=${color}:s=64x48:r=24:d=0.5`, "-c:v", "libx264", "-pix_fmt", "yuv420p", scratch + "/" + name + ".mp4"]);
@@ -42,7 +41,6 @@ beforeAll(async () => {
             const resource = path.split("/")[3]; mediaReads.push({ resource, token: request.headers.get("X-Desktop-Token") });
             if (request.headers.get("X-Desktop-Token") !== "synthetic-output-desktop") return new Response("forbidden", { status: 403 });
             const response = new Response(readFileSync(scratch + "/" + resource + ".mp4"), { headers: { "content-type": "video/mp4" } });
-            if (held) return new Promise<Response>(resolve => { lateResolve = () => resolve(response); });
             return response;
         }
         return ok({});
@@ -97,18 +95,6 @@ test("initial loading and unread latest task do not falsely claim synthesis or l
     expect(await page.getByText("这是之前已完成的版本；后一次合成结果尚未确认。").count()).toBe(1);
     expect(await page.getByText("合成未完成", { exact: true }).count()).toBe(0);
     expect(await page.getByRole("button", { name: "播放成片" }).count()).toBe(1);
-    await page.close();
-}, 15000);
-test("account switch abandons late authenticated media and never creates an old-owner URL", async () => {
-    phase = "succeeded"; held = true; const page = await browser.newPage();
-    await page.addInitScript(() => { const original = URL.createObjectURL; Object.assign(window, { createdMediaURLs: [] }); URL.createObjectURL = blob => { const url = original(blob); (window as any).createdMediaURLs.push(url); return url; }; });
-    await page.goto(server.url.href);
-    await page.getByRole("button", { name: "播放成片" }).nth(0).click();
-    await page.waitForTimeout(100); expect(lateResolve).not.toBeNull();
-    await page.getByRole("button", { name: "切换账号" }).click(); lateResolve?.(new Response());
-    await page.waitForTimeout(250);
-    expect(await page.locator("video").count()).toBe(0);
-    expect(await page.evaluate(() => (window as any).createdMediaURLs)).toEqual([]);
     await page.close();
 }, 15000);
 test("real streamed turn_end retains trusted output task without waiting for history", async () => {

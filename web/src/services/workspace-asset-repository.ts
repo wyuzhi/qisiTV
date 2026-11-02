@@ -1,8 +1,8 @@
 import { linkProjectAsset, moveProjectAsset, updateProjectAssetCategory } from "@/services/api/projects";
 import { ApiError } from "@/services/api/request";
 import { deleteWorkspaceAssetRecord, putWorkspaceAsset } from "@/services/api/workspace-data";
+import { getActiveUserScope } from "@/lib/user-scope";
 import { normalizeAssetCategory } from "@/lib/asset-category";
-import { assertUserScope, captureUserScope, userScopeMatches, UserScopeAbandonedError, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { usesBrowserLocalResourceStore, workspaceAssetHasCanonicalMediaPersist } from "@/services/workspace-resource-storage";
 import {
     ackAssetStoreDraft,
@@ -25,7 +25,6 @@ export type WorkspaceAssetLinkOptions = {
     folderId?: string;
     source?: "uploaded" | "canvas";
     signal?: AbortSignal;
-    expectedScope?: CapturedUserScope;
 };
 
 const assetCommitChains = new Map<string, Promise<unknown>>();
@@ -53,14 +52,10 @@ function assetCommitKey(userScope: string, assetId: string) {
     return `${userScope}\0${assetId}`;
 }
 
-function enqueueAssetCommit<T>(userScope: string, assetId: string, epoch: number, job: () => Promise<T>): Promise<T> {
+function enqueueAssetCommit<T>(userScope: string, assetId: string, job: () => Promise<T>): Promise<T> {
     const key = assetCommitKey(userScope, assetId);
     const previous = assetCommitChains.get(key) ?? Promise.resolve();
-    const run = previous.then(undefined, () => undefined).then(async () => {
-        const live = captureUserScope();
-        if (live.userScope !== userScope || live.epoch !== epoch) throw new UserScopeAbandonedError();
-        return job();
-    });
+    const run = previous.then(undefined, () => undefined).then(job);
     assetCommitChains.set(key, run.then(() => undefined, () => undefined));
     return run;
 }
@@ -123,22 +118,20 @@ function applyReceiptProjection(id: string, submitted: Asset, receipt: AssetWrit
     return true;
 }
 
-async function commitTrackedAssetDraft(id: string, expected: CapturedUserScope, signal?: AbortSignal) {
+async function commitTrackedAssetDraft(id: string, signal?: AbortSignal) {
     throwIfAborted(signal);
-    assertUserScope(expected);
-    const draft = peekAssetStoreDraft(expected.userScope, id);
+    const draft = peekAssetStoreDraft(getActiveUserScope(), id);
     if (!draft) return;
     const submittedVersion = draft.version;
     if (draft.kind === "delete") {
         try {
-            await deleteWorkspaceAssetRecord(id, { signal, expectedScope: expected });
+            await deleteWorkspaceAssetRecord(id, { signal });
         } catch (error) {
             if (!isNotFoundAssetError(error)) throw error;
         }
         throwIfAborted(signal);
-        if (!userScopeMatches(expected)) throw new UserScopeAbandonedError();
-        ackAssetStoreDraft(expected, id, submittedVersion);
-        const later = peekAssetStoreDraft(expected.userScope, id);
+        ackAssetStoreDraft(id, submittedVersion);
+        const later = peekAssetStoreDraft(getActiveUserScope(), id);
         if (later?.kind === "upsert") return;
         if (useAssetStore.getState().assets.some((item) => item.id === id)) {
             await runAssetStoreProjection(() => useAssetStore.getState().removeAsset(id));
@@ -149,27 +142,23 @@ async function commitTrackedAssetDraft(id: string, expected: CapturedUserScope, 
     const asset = useAssetStore.getState().assets.find((item) => item.id === id) ?? draft.asset;
     if (!asset) return;
     if (!workspaceAssetHasCanonicalMediaPersist(asset)) {
-        await flushAssetStorePersistence(expected);
+        await flushAssetStorePersistence();
         throw new WorkspaceAssetMediaPendingError();
     }
     const submitted = asset;
-    const saved = await putWorkspaceAsset(id, submitted, { signal, expectedScope: expected });
+    const saved = await putWorkspaceAsset(id, submitted, { signal });
     throwIfAborted(signal);
-    if (!userScopeMatches(expected)) throw new UserScopeAbandonedError();
     assertAssetWriteReceipt(saved?.asset, id);
-    ackAssetStoreDraft(expected, id, submittedVersion);
+    ackAssetStoreDraft(id, submittedVersion);
     applyReceiptProjection(id, submitted, saved.asset);
 }
 
 /** Single boundary for local asset persistence and optional project linking. */
-export async function persistWorkspaceAssetLink({ asset, domainProjectId, category, folderId, source, signal, expectedScope }: WorkspaceAssetLinkOptions) {
-    const expected = expectedScope ?? captureUserScope();
+export async function persistWorkspaceAssetLink({ asset, domainProjectId, category, folderId, source, signal }: WorkspaceAssetLinkOptions) {
     throwIfAborted(signal);
-    assertUserScope(expected);
-    await hydrateAssetStoreDrafts(expected.userScope);
-    assertUserScope(expected);
+    await hydrateAssetStoreDrafts();
     if (!workspaceAssetHasCanonicalMediaPersist(asset)) {
-        await flushAssetStorePersistence(expected);
+        await flushAssetStorePersistence();
         throw new WorkspaceAssetMediaPendingError();
     }
 
@@ -178,32 +167,29 @@ export async function persistWorkspaceAssetLink({ asset, domainProjectId, catego
             const projectIds = linkedProjectIds(asset, domainProjectId);
             useAssetStore.getState().updateAsset(asset.id, { metadata: { ...asset.metadata, projectIds } });
         }
-        const submittedVersion = peekAssetStoreDraft(expected.userScope, asset.id)?.version;
-        await flushAssetStorePersistence(expected);
-        assertUserScope(expected);
-        if (submittedVersion) ackAssetStoreDraft(expected, asset.id, submittedVersion);
+        const submittedVersion = peekAssetStoreDraft(getActiveUserScope(), asset.id)?.version;
+        await flushAssetStorePersistence();
+        if (submittedVersion) ackAssetStoreDraft(asset.id, submittedVersion);
         return;
     }
 
-    await enqueueAssetCommit(expected.userScope, asset.id, expected.epoch, async () => {
+    await enqueueAssetCommit(getActiveUserScope(), asset.id, async () => {
         throwIfAborted(signal);
-        assertUserScope(expected);
-        const live = useAssetStore.getState().assets.find((item) => item.id === asset.id) ?? peekAssetStoreDraft(expected.userScope, asset.id)?.asset ?? asset;
-        const draft = peekAssetStoreDraft(expected.userScope, live.id);
+        const live = useAssetStore.getState().assets.find((item) => item.id === asset.id) ?? peekAssetStoreDraft(getActiveUserScope(), asset.id)?.asset ?? asset;
+        const draft = peekAssetStoreDraft(getActiveUserScope(), live.id);
         const submittedVersion = draft?.version;
         if (draft?.kind === "delete") {
-            await commitTrackedAssetDraft(live.id, expected, signal);
+            await commitTrackedAssetDraft(live.id, signal);
             return;
         }
         const submitted = live;
-        const saved = await putWorkspaceAsset(live.id, submitted, { signal, expectedScope: expected });
+        const saved = await putWorkspaceAsset(live.id, submitted, { signal });
         throwIfAborted(signal);
-        if (!userScopeMatches(expected)) throw new UserScopeAbandonedError();
         assertAssetWriteReceipt(saved?.asset, live.id);
-        if (submittedVersion) ackAssetStoreDraft(expected, live.id, submittedVersion);
-        const afterPut = peekAssetStoreDraft(expected.userScope, live.id);
+        if (submittedVersion) ackAssetStoreDraft(live.id, submittedVersion);
+        const afterPut = peekAssetStoreDraft(getActiveUserScope(), live.id);
         if (afterPut?.kind === "delete") {
-            await commitTrackedAssetDraft(live.id, expected, signal);
+            await commitTrackedAssetDraft(live.id, signal);
             return;
         }
         if (!useAssetStore.getState().assets.some((item) => item.id === live.id)) return;
@@ -214,20 +200,16 @@ export async function persistWorkspaceAssetLink({ asset, domainProjectId, catego
                 domainProjectId,
                 { assetId: live.id, category: normalizeAssetCategory(category || live.category), folderId, source },
                 signal,
-                expected,
             );
             throwIfAborted(signal);
-            assertUserScope(expected);
-            let linked = category && linkedAsset.category !== category ? (await updateProjectAssetCategory(domainProjectId, live.id, category, signal, expected)).asset : linkedAsset;
+            let linked = category && linkedAsset.category !== category ? (await updateProjectAssetCategory(domainProjectId, live.id, category, signal)).asset : linkedAsset;
             throwIfAborted(signal);
-            assertUserScope(expected);
-            if (folderId !== undefined && (linked.folderId || "") !== folderId) linked = (await moveProjectAsset(domainProjectId, live.id, folderId, signal, expected)).asset;
+            if (folderId !== undefined && (linked.folderId || "") !== folderId) linked = (await moveProjectAsset(domainProjectId, live.id, folderId, signal)).asset;
             throwIfAborted(signal);
-            assertUserScope(expected);
             receipt = linked;
         }
-        if (peekAssetStoreDraft(expected.userScope, live.id)?.kind === "delete") {
-            await commitTrackedAssetDraft(live.id, expected, signal);
+        if (peekAssetStoreDraft(getActiveUserScope(), live.id)?.kind === "delete") {
+            await commitTrackedAssetDraft(live.id, signal);
             return;
         }
         applyReceiptProjection(live.id, submitted, receipt, domainProjectId);
@@ -239,13 +221,10 @@ export type DeleteWorkspaceAssetOptions = {
     onDraftRecorded?: (version: number) => void;
 };
 
-export async function deleteWorkspaceAsset(id: string, expectedScope?: CapturedUserScope, options?: DeleteWorkspaceAssetOptions) {
-    const expected = expectedScope ?? captureUserScope();
+export async function deleteWorkspaceAsset(id: string, options?: DeleteWorkspaceAssetOptions) {
     const assetId = id.trim();
     if (!assetId) throw new Error("素材 ID 不能为空");
-    assertUserScope(expected);
-    await hydrateAssetStoreDrafts(expected.userScope);
-    assertUserScope(expected);
+    await hydrateAssetStoreDrafts();
 
     if (usesBrowserLocalResourceStore()) {
         if (options?.expectedStatus) {
@@ -255,51 +234,43 @@ export async function deleteWorkspaceAsset(id: string, expectedScope?: CapturedU
             }
         }
         await useAssetStore.getState().removeAsset(assetId);
-        await flushAssetStorePersistence(expected);
-        const draft = peekAssetStoreDraft(expected.userScope, assetId);
-        if (draft) ackAssetStoreDraft(expected, assetId, draft.version);
+        await flushAssetStorePersistence();
+        const draft = peekAssetStoreDraft(getActiveUserScope(), assetId);
+        if (draft) ackAssetStoreDraft(assetId, draft.version);
         return;
     }
 
-    recordAssetStoreDraft(assetId, "delete", expected);
-    const submittedVersion = peekAssetStoreDraft(expected.userScope, assetId)?.version ?? 0;
+    recordAssetStoreDraft(assetId, "delete");
+    const submittedVersion = peekAssetStoreDraft(getActiveUserScope(), assetId)?.version ?? 0;
     options?.onDraftRecorded?.(submittedVersion);
-    await enqueueAssetCommit(expected.userScope, assetId, expected.epoch, async () => {
-        assertUserScope(expected);
-        const current = peekAssetStoreDraft(expected.userScope, assetId);
+    await enqueueAssetCommit(getActiveUserScope(), assetId, async () => {
+        const current = peekAssetStoreDraft(getActiveUserScope(), assetId);
         if (current && current.version !== submittedVersion && current.kind === "upsert") return;
         try {
-            await deleteWorkspaceAssetRecord(assetId, {
-                expectedScope: expected,
-                ...(options?.expectedStatus ? { params: { expectedStatus: options.expectedStatus } } : {}),
+            await deleteWorkspaceAssetRecord(assetId, { ...(options?.expectedStatus ? { params: { expectedStatus: options.expectedStatus } } : {}),
             });
         } catch (error) {
             if (!isNotFoundAssetError(error)) throw error;
         }
-        if (!userScopeMatches(expected)) throw new UserScopeAbandonedError();
-        const later = peekAssetStoreDraft(expected.userScope, assetId);
+        const later = peekAssetStoreDraft(getActiveUserScope(), assetId);
         if (later && later.version !== submittedVersion && later.kind === "upsert") return;
-        if (later && later.version === submittedVersion) ackAssetStoreDraft(expected, assetId, submittedVersion);
+        if (later && later.version === submittedVersion) ackAssetStoreDraft(assetId, submittedVersion);
         if (useAssetStore.getState().assets.some((item) => item.id === assetId)) {
             await runAssetStoreProjection(() => useAssetStore.getState().removeAsset(assetId, { cleanupMedia: false }));
         }
     });
 }
 
-export async function persistWorkspaceAssetChanges(expectedScope?: CapturedUserScope) {
-    const expected = expectedScope ?? captureUserScope();
-    assertUserScope(expected);
-    await hydrateAssetStoreDrafts(expected.userScope);
-    assertUserScope(expected);
+export async function persistWorkspaceAssetChanges() {
+    await hydrateAssetStoreDrafts();
     if (usesBrowserLocalResourceStore()) {
-        const snapshot = readAssetStoreDrafts(expected);
-        await flushAssetStorePersistence(expected);
-        assertUserScope(expected);
-        for (const draft of [...snapshot.upserts, ...snapshot.deletes]) ackAssetStoreDraft(expected, draft.id, draft.version);
+        const snapshot = readAssetStoreDrafts();
+        await flushAssetStorePersistence();
+        for (const draft of [...snapshot.upserts, ...snapshot.deletes]) ackAssetStoreDraft(draft.id, draft.version);
         return;
     }
 
-    const drafts = readAssetStoreDrafts(expected);
+    const drafts = readAssetStoreDrafts();
     const ids = [...new Set([...drafts.upserts, ...drafts.deletes].map((draft) => draft.id))];
-    await Promise.all(ids.map((id) => enqueueAssetCommit(expected.userScope, id, expected.epoch, () => commitTrackedAssetDraft(id, expected))));
+    await Promise.all(ids.map((id) => enqueueAssetCommit(getActiveUserScope(), id, () => commitTrackedAssetDraft(id))));
 }

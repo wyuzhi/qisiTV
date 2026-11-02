@@ -111,6 +111,16 @@ processTest('crash recovery rejects authority changing frozen read-only to full-
  const crash=await run(directory,'permission-crash');assertCheckpointKill(crash,directory,'permission-crash');
  const recovered=await run(directory,'permission-upgrade');assert.equal(recovered.code,0,recovered.output);
 });
+test('history projection keeps the curated reasoning view and still drops provider blocks', () => {
+  const reasoning = [{ id: 'entry:0', text: '先读画布。', status: 'done' }];
+  const projected = publicDurableTurn({ turnId: 't', reply: '正文', reasoning,
+    content: [{ type: 'thinking', thinking: 'raw', thinkingSignature: 'signature-secret' }], effects: {} });
+  assert.deepEqual(projected.reasoning, reasoning);
+  assert(!JSON.stringify(projected).includes('signature-secret'));
+  assert(!('content' in projected));
+  // 没有思考的回合不写空字段，界面据此不生成空抽屉。
+  assert(!('reasoning' in publicDurableTurn({ turnId: 't', reply: '正文' })));
+});
 test('history projection excludes native media bytes and replay defaults unknown writes to unsafe', () => {
   const projected = publicDurableTurn({ turnId: 't', userText: 'read', content: [{ type: 'image', data: 'large-native-image' }],
     log: [{ data: 'secret' }], result: {}, effects: {}, supplementContents: [{ content: 'raw' }],

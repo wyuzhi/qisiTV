@@ -483,6 +483,9 @@ func TestReferenceDurationAdviceSurvivesPersistence(t *testing.T) {
 		"第 1 段参考音频时长为 16.00 秒，需要 不超过 15 秒；请裁剪或更换这段素材后再提交",
 		"第 1 张参考图高度为 216 像素，需要 至少 300 像素；请调整尺寸或更换后再提交",
 		"第 2 段参考音频时长为 0.90 秒，需要 2–30 秒；请裁剪或更换这段素材后再提交",
+		"第 2 段参考音频时长为 0.90 秒，需要改到 2–30 秒；请换一段更长的音频后再提交",
+		"参考音频「配音.wav」时长为 0.90 秒，需要改到 2 秒以上；请换一段更长的音频后再提交",
+		"输出时长为 3 秒，当前模型只支持 4–15 秒；请改成 4–15 秒后再提交",
 		"参考素材时长不符合模型要求。请检查每段参考音频和视频，将不符合要求的素材调整为 1.8–30.2 秒后重新提交。",
 	} {
 		failure := generation.ClassifyText(text)
@@ -563,5 +566,51 @@ func TestWindowsSocketFailureIsActionable(t *testing.T) {
 		if failure.Category != generation.CategoryNetwork || strings.Contains(failure.UserMessage(), "wsarecv") || strings.Contains(failure.UserMessage(), "secret") {
 			t.Fatalf("failure=%+v message=%s", failure, failure.UserMessage())
 		}
+	}
+}
+
+func TestThirdPartyGatewayChannelExcludedAndWrapperParity(t *testing.T) {
+	channelBody := `{"error":{"message":"这个模型的线路已经在这把密钥的「渠道管理」里被全部取消勾选了，所以当前没有可用渠道。请打开这把密钥的「渠道管理」，至少勾上一条线路后再试。 (request id: req.20261101.zB868dI1)","type":"invalid_request_error","param":"","code":"channel_excluded"}}`
+	channelFailure := generation.ClassifyHTTP(http.StatusForbidden, "403 Forbidden", channelBody)
+	if channelFailure.Category != generation.CategoryPermission || !channelFailure.FromCode || channelFailure.ProviderCode != "channel_excluded" || channelFailure.RequestID != "req.20261101.zB868dI1" {
+		t.Fatalf("channel_excluded misclassified: %+v", channelFailure)
+	}
+	reloadedChannel := generation.ClassifyText(channelFailure.UserMessage())
+	if reloadedChannel.Category != generation.CategoryPermission || reloadedChannel.Reason != channelFailure.Reason || reloadedChannel.Action != channelFailure.Action || reloadedChannel.RequestID != channelFailure.RequestID {
+		t.Fatalf("channel_excluded lost on persisted round-trip: %+v -> %+v", channelFailure, reloadedChannel)
+	}
+
+	// Generic OpenAI type wrapper with unrecognized gateway code falls back to HTTP status when message is opaque.
+	for status, want := range map[int]generation.FailureCategory{
+		http.StatusBadRequest:            generation.CategoryInvalidParams,
+		http.StatusPaymentRequired:       generation.CategoryQuotaUnknown,
+		http.StatusForbidden:             generation.CategoryPermission,
+		http.StatusRequestEntityTooLarge: generation.CategoryInputTooLarge,
+		http.StatusTooManyRequests:       generation.CategoryThrottled,
+		451:                              generation.CategoryUnknown,
+		http.StatusServiceUnavailable:    generation.CategoryProviderUnavailable,
+	} {
+		got := generation.ClassifyHTTP(status, "", `{"error":{"message":"opaque gateway error","type":"invalid_request_error","code":"custom_gateway_code"}}`)
+		if got.Category != want || got.ProviderCode != "custom_gateway_code" {
+			t.Fatalf("HTTP %d with generic type wrapper became %+v, want %s", status, got, want)
+		}
+	}
+
+	// Specific parameter-range advice or message category refinement wins over generic wrapper across statuses.
+	for _, status := range []int{400, 402, 403, 413, 429, 451, 503} {
+		height := generation.ClassifyHTTP(status, "", `{"error":{"message":"Height must be between 300px and 6000px","type":"invalid_request_error","code":"custom_gateway_code"}}`)
+		if height.Category != generation.CategoryInvalidParams || !height.FromCode || height.Retryable || !strings.Contains(height.Action, "300–6000 像素") || height.ProviderCode != "custom_gateway_code" {
+			t.Fatalf("HTTP %d height range lost: %+v", status, height)
+		}
+		quota := generation.ClassifyHTTP(status, "", `{"error":{"message":"Your account quota is exhausted","type":"invalid_request_error","code":"custom_quota_code"}}`)
+		if quota.Category != generation.CategoryQuotaUnknown || !quota.FromCode || quota.ProviderCode != "custom_quota_code" {
+			t.Fatalf("HTTP %d quota message lost: %+v", status, quota)
+		}
+	}
+
+	// A recognized non-generic type remains authoritative over message text even when code is generic.
+	authoritativeType := generation.ClassifyHTTP(http.StatusBadRequest, "", `{"error":{"message":"Your account quota is exhausted (request id: req_inner_123456)","type":"model_capability_not_supported","code":"invalid_request_error"}} (request id: req_outer_654321)`)
+	if authoritativeType.Category != generation.CategoryInvalidParams || !authoritativeType.FromCode || authoritativeType.RequestID != "req_outer_654321" {
+		t.Fatalf("authoritative type or outer request ID overwritten: %+v", authoritativeType)
 	}
 }

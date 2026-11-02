@@ -1,4 +1,3 @@
-import { assertUserScope, captureUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { rebindInconsistentCanvasAssets, type CanvasAssetRebindResult } from "@/services/canvas-asset-repair";
 import { createLocalCanvasProject, deleteLocalCanvasProjects, openLocalCanvasProject, openLocalCanvasProjectFromBackend, persistCanvasDocument, restoreLocalCanvasProjectFromHistory } from "@/services/local-workspace-repository";
 import { flushAssetStorePersistence, useAssetStore, type Asset } from "@/stores/use-asset-store";
@@ -35,15 +34,12 @@ export async function loadCanvasProjectForEditing(
     id: string,
     options: { latest?: boolean; historyRestore?: { snapshotId: string; revision: number }; onLoad?: (project: CanvasProject) => void } = {},
 ) {
-    const expected = captureUserScope();
-    assertUserScope(expected);
     if (options.historyRestore) {
-        const restored = await restoreLocalCanvasProjectFromHistory(id, options.historyRestore, expected);
-        assertUserScope(expected);
+        const restored = await restoreLocalCanvasProjectFromHistory(id, options.historyRestore);
         options.onLoad?.(restored);
         return restored;
     }
-    const project = await openLocalCanvasProjectFromBackend(id, expected);
+    const project = await openLocalCanvasProjectFromBackend(id);
     if (project) options.onLoad?.(project);
     return project || undefined;
 }
@@ -64,15 +60,12 @@ export function notifyCanvasRefresh(project: CanvasProject, previous: CanvasProj
  * mutate the canvas outside the autosave flow (for example node deletion) must
  * use this bridge so the next remote refresh cannot resurrect a stale snapshot.
  */
-export async function syncLocalCanvasSnapshot(id: string, patch: Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "appearance" | "backgroundMode" | "showImageInfo" | "viewport">>, expectedScope?: CapturedUserScope) {
-    const expected = expectedScope ?? captureUserScope();
-    assertUserScope(expected);
+export async function syncLocalCanvasSnapshot(id: string, patch: Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "appearance" | "backgroundMode" | "showImageInfo" | "viewport">>) {
     const current = openLocalCanvasProject(id);
     if (!current) throw new Error("本地画布不存在");
     const { viewport, ...documentPatch } = patch;
     if (viewport) useCanvasStore.getState().updateProject(id, { viewport });
-    if (Object.keys(documentPatch).length > 0) await persistCanvasDocument(id, documentPatch, expected);
-    assertUserScope(expected);
+    if (Object.keys(documentPatch).length > 0) await persistCanvasDocument(id, documentPatch);
     const saved = openLocalCanvasProject(id);
     if (!saved) throw new Error("本地画布不存在");
     return saved;
@@ -84,8 +77,8 @@ export function loadAssetLibraryPage(options: LocalAssetPageOptions) {
     return loadWorkspaceAssetLibraryPage(options);
 }
 
-export function loadAssetsForUse(ids: Iterable<string>, expectedScope?: WorkspaceAssetLibraryPageOptions["expectedScope"]) {
-    return loadWorkspaceAssetsForUse(ids, expectedScope);
+export function loadAssetsForUse(ids: Iterable<string>) {
+    return loadWorkspaceAssetsForUse(ids);
 }
 
 export function localSavedRemotePendingMessage(localAction: string, error: unknown) {

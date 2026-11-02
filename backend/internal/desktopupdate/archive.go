@@ -164,6 +164,18 @@ func extractSecureZipWithProgress(ctx context.Context, zipPath, dest string, lim
 	if progress != nil {
 		progress(0, totalFiles)
 	}
+	createdDirs := make(map[string]struct{}, 512)
+	ensureDir := func(dir string) error {
+		if _, ok := createdDirs[dir]; ok {
+			return nil
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		createdDirs[dir] = struct{}{}
+		return nil
+	}
+	copyBuf := make([]byte, 64*1024)
 	var written uint64
 	for _, item := range plan {
 		if err := ctx.Err(); err != nil {
@@ -171,12 +183,12 @@ func extractSecureZipWithProgress(ctx context.Context, zipPath, dest string, lim
 		}
 		full := filepath.Join(root, filepath.FromSlash(item.rel))
 		if item.dirOnly {
-			if err := os.MkdirAll(full, 0o755); err != nil {
+			if err := ensureDir(full); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		if err := ensureDir(filepath.Dir(full)); err != nil {
 			return err
 		}
 		perm := item.file.Mode().Perm()
@@ -197,18 +209,14 @@ func extractSecureZipWithProgress(ctx context.Context, zipPath, dest string, lim
 		if limit > limits.MaxEntryBytes {
 			limit = limits.MaxEntryBytes
 		}
-		copied, copyErr := io.Copy(out, io.LimitReader(contextReader{ctx, stream}, int64(limit)+1))
+		copied, copyErr := io.CopyBuffer(out, io.LimitReader(contextReader{ctx, stream}, int64(limit)+1), copyBuf)
 		closeErr := stream.Close()
-		syncErr := out.Sync()
 		closeOutErr := out.Close()
 		if copyErr != nil {
 			return copyErr
 		}
 		if closeErr != nil {
 			return closeErr
-		}
-		if syncErr != nil {
-			return syncErr
 		}
 		if closeOutErr != nil {
 			return closeOutErr

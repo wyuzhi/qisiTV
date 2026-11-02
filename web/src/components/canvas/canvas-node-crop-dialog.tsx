@@ -77,7 +77,7 @@ export function CanvasImageCropEditor({ imageUrl, imageDimensions, onCancel, onC
                     style={{ left: `${crop.x * 100}%`, top: `${crop.y * 100}%`, width: `${crop.width * 100}%`, height: `${crop.height * 100}%` }}
                     onPointerDown={(event) => beginDrag(event)}
                 >
-                    <span data-canvas-no-zoom className="pointer-events-none absolute left-1.5 top-1.5 rounded-md bg-black/72 px-1.5 py-0.5 text-xs font-medium tabular-nums text-white shadow-sm" style={{ transform: screenScale, transformOrigin: "left top" }}>{sizeLabel}</span>
+                    <span data-canvas-live-scale data-canvas-no-zoom className="pointer-events-none absolute left-1.5 top-1.5 rounded-md bg-black/72 px-1.5 py-0.5 text-xs font-medium tabular-nums text-white shadow-sm" style={{ transform: screenScale, transformOrigin: "left top" }}>{sizeLabel}</span>
                     <div className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3 opacity-50" aria-hidden>
                         <i className="border-b border-r border-white/60" />
                         <i className="border-b border-r border-white/60" />
@@ -90,13 +90,13 @@ export function CanvasImageCropEditor({ imageUrl, imageDimensions, onCancel, onC
                         <i />
                     </div>
                     {handles.map((handle) => (
-                        <button key={handle} type="button" aria-label={`resize-${handle}`} data-canvas-no-zoom className="absolute z-10 grid size-5 place-items-center rounded-full" style={{ ...handlePosition(handle), transform: `translate(-50%, -50%) ${screenScale}`, transformOrigin: "center" }} onPointerDown={(event) => beginDrag(event, handle)}>
+                        <button key={handle} type="button" aria-label={`resize-${handle}`} data-canvas-live-scale data-canvas-no-zoom className="absolute z-10 grid size-5 place-items-center rounded-full" style={{ ...handlePosition(handle), transform: `translate(-50%, -50%) ${screenScale}`, transformOrigin: "center" }} onPointerDown={(event) => beginDrag(event, handle)}>
                             <span className="pointer-events-none size-3 rounded-full border-2 border-white bg-neutral-900 shadow-sm" />
                         </button>
                     ))}
                 </div>
             </div>
-            <div data-canvas-no-zoom className="absolute left-1/2 flex h-11 items-center gap-2 rounded-2xl border border-white/12 bg-[#202020]/94 p-1.5 pl-2.5 text-white shadow-xl backdrop-blur-xl" style={{ top: "calc(100% + 12px * var(--canvas-live-inverse-scale, 1))", transform: `translateX(-50%) ${screenScale}`, transformOrigin: "center top" }}>
+            <div data-canvas-live-scale data-canvas-no-zoom className="absolute left-1/2 flex h-11 items-center gap-2 rounded-2xl border border-white/12 bg-[#202020]/94 p-1.5 pl-2.5 text-white shadow-xl backdrop-blur-xl" style={{ top: "calc(100% + 12px * var(--canvas-live-inverse-scale, 1))", transform: `translateX(-50%) ${screenScale}`, transformOrigin: "center top" }}>
                 <button type="button" aria-label="取消裁切" title="取消裁切" onClick={onCancel} className="grid size-8 place-items-center rounded-xl text-white/72 transition hover:bg-white/10 hover:text-white">
                     <X className="size-4" />
                 </button>

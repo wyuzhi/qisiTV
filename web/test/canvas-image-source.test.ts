@@ -45,7 +45,7 @@ describe("上传图片是输入素材", () => {
     test("页面和工具入口共享素材判定，人物质感接入原图连线", () => {
         expect(read("pages/canvas/project.tsx")).toContain("canOpenCanvasNodePromptPanel");
         expect(read("lib/canvas/tool-registry/definitions/node-hover-tools.tsx")).toContain("canOpenCanvasNodePromptPanel(ctx.node)");
-        const mediaTools = read("pages/canvas/use-canvas-media-tools.ts");
+        const mediaTools = read("pages/canvas/use-canvas-image-tools.ts");
         const portrait = mediaTools.slice(mediaTools.indexOf("const openPortraitTextureEditor"), mediaTools.indexOf("const cropImageNode"));
         expect(portrait).toContain("fromNodeId: node.id, toNodeId: child.id");
         expect(portrait).toContain("setDialogNodeId(child.id)");

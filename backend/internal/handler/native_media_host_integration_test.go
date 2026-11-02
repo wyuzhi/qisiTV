@@ -38,9 +38,10 @@ func TestDefaultDurableHostDispatchesActualNativeMediaBytes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 	defer cancel()
 	files := map[string]string{"image": filepath.Join(directory, "image.jpg"), "audio": filepath.Join(directory, "audio.wav"), "video": filepath.Join(directory, "video.mp4")}
-	picture := image.NewRGBA(image.Rect(0, 0, 512, 320))
-	for y := 0; y < 320; y++ {
-		for x := 0; x < 512; x++ {
+	const imageWidth, imageHeight = 3072, 1920
+	picture := image.NewRGBA(image.Rect(0, 0, imageWidth, imageHeight))
+	for y := 0; y < imageHeight; y++ {
+		for x := 0; x < imageWidth; x++ {
 			picture.Set(x, y, color.RGBA{uint8(x), uint8(y), uint8(x + y), 255})
 		}
 	}
@@ -75,7 +76,7 @@ func TestDefaultDurableHostDispatchesActualNativeMediaBytes(t *testing.T) {
 		}
 		width, height, duration := 0, 0, int64(15000)
 		if kind == "image" {
-			width, height, duration = 512, 320, 0
+			width, height, duration = imageWidth, imageHeight, 0
 		}
 		if kind == "video" {
 			width, height = 640, 360

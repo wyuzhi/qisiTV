@@ -76,3 +76,40 @@ func TestRetryOfRejectsNonStringAndPreservesStringContract(t *testing.T) {
 		t.Fatalf("cross-type retryOf error = %v", err)
 	}
 }
+
+func TestDraftToFinalAllowsEmptyPromptWhileStandardVideoRequiresPrompt(t *testing.T) {
+	store := newMemStore()
+	svc := domainService(store, nil)
+
+	if _, err := svc.CreateTask("user", CreateRequest{
+		Type: "canvas_video", Prompt: "", ProjectID: "canvas-1",
+		Input: map[string]any{"metadata": map[string]any{"clientOperationId": "proposal:gp-1:empty-prompt"}},
+	}); err == nil || !strings.Contains(err.Error(), PromptRequiredMessage) {
+		t.Fatalf("expected empty prompt error for normal video task, got %v", err)
+	}
+
+	if _, err := svc.CreateTask("user", CreateRequest{
+		Type: "canvas_image", Prompt: "", ProjectID: "canvas-1",
+		Input: map[string]any{"metadata": map[string]any{
+			"clientOperationId": "proposal:gp-1:non-video-draft-id",
+			"videoDraftTaskId":  "cgt-draft-123",
+		}},
+	}); err == nil || !strings.Contains(err.Error(), PromptRequiredMessage) {
+		t.Fatalf("expected empty prompt error for non-video task even with videoDraftTaskId, got %v", err)
+	}
+
+	task, err := svc.CreateTask("user", CreateRequest{
+		Type: "canvas_video", Prompt: "", ProjectID: "canvas-1",
+		Input: map[string]any{"metadata": map[string]any{
+			"clientOperationId":  "proposal:gp-1:draft-to-final",
+			"videoEditOperation": "draft_to_final",
+			"videoDraftTaskId":   "cgt-draft-123",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("expected draft_to_final task with empty prompt to be admitted, got %v", err)
+	}
+	if task.ID == "" || task.Status != model.TaskStatusQueued {
+		t.Fatalf("unexpected draft_to_final task state: %+v", task)
+	}
+}

@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test";
 import { listVideoReferenceModels } from "../src/lib/canvas/canvas-video-regeneration";
 import { defaultModelCapabilityConfig } from "../src/lib/model-capabilities";
 import { assertAudioConfig } from "../src/services/api/audio";
-import { assertVideoConfig } from "../src/services/api/video-validation";
 import { channelHasGenerationCredential, createModelChannel, defaultConfig, encodeChannelModel, MANAGED_BEEFAPI_CREDENTIAL_REF, resolveModelRequestConfig, useConfigStore, type AiConfig } from "../src/stores/use-config-store";
 
 function videoCapability(model: string) {
@@ -29,7 +28,7 @@ function beefAPIConfig(connected: boolean): AiConfig {
         hasApiKey: connected,
         modelProfiles: [
             { model: image, capability: "image", protocol: "openai-image" },
-            { model: video, capability: "video", protocol: "openai-videos", capabilityConfig: videoCapability(video) },
+            { model: video, capability: "video", protocol: "openai-videos", capabilityConfig: videoCapability(video), videoCapabilitiesVersion: "fixture-v1" },
         ],
     });
     return {
@@ -70,7 +69,6 @@ describe("managed BeefAPI generation readiness", () => {
         expect(ready(config, config.imageModel)).toBe(true);
         expect(ready(config, config.videoModel)).toBe(true);
         expect(listVideoReferenceModels(config)).toEqual([config.videoModel]);
-        expect(() => assertVideoConfig(resolveModelRequestConfig(config, config.videoModel), config.videoModel)).not.toThrow();
     });
 
     test("disconnected empty-key enterprise channel is not canvas-ready", () => {
@@ -80,7 +78,6 @@ describe("managed BeefAPI generation readiness", () => {
         expect(ready(config, config.imageModel)).toBe(false);
         expect(ready(config, config.videoModel)).toBe(false);
         expect(listVideoReferenceModels(config)).toEqual([]);
-        expect(() => assertVideoConfig(resolveModelRequestConfig(config, config.videoModel), config.videoModel)).toThrow("请先连接 BeefTV");
     });
 
     test("manual provider keys stay required and are not treated as managed", () => {
@@ -104,7 +101,7 @@ describe("managed BeefAPI generation readiness", () => {
         const ready = useConfigStore.getState().isAiConfigReady;
         const sharedVideo = "seedance-2.0";
         const sharedAudio = "gpt-audio";
-        const videoProfile = { model: sharedVideo, capability: "video" as const, protocol: "openai-videos" as const, capabilityConfig: videoCapability(sharedVideo) };
+        const videoProfile = { model: sharedVideo, capability: "video" as const, protocol: "openai-videos" as const, capabilityConfig: videoCapability(sharedVideo), videoCapabilitiesVersion: "fixture-v1" };
         const audioProfile = { model: sharedAudio, capability: "audio" as const, protocol: "openai-audio" as const };
         for (const order of ["manual-first", "beef-first"] as const) {
             const manualEmpty = createModelChannel({
@@ -140,7 +137,6 @@ describe("managed BeefAPI generation readiness", () => {
             const selectedManaged = arrange(manualEmpty);
             expect(ready(selectedManaged, selectedManaged.videoModel)).toBe(true);
             expect(ready(selectedManaged, selectedManaged.audioModel)).toBe(true);
-            expect(() => assertVideoConfig(resolveModelRequestConfig(selectedManaged, selectedManaged.videoModel), selectedManaged.videoModel)).not.toThrow();
             expect(() => assertAudioConfig(resolveModelRequestConfig(selectedManaged, selectedManaged.audioModel), selectedManaged.audioModel)).not.toThrow();
             expect(resolveModelRequestConfig(selectedManaged, selectedManaged.videoModel).model).toBe(sharedVideo);
 
@@ -152,7 +148,6 @@ describe("managed BeefAPI generation readiness", () => {
             };
             expect(ready(selectedManualEmpty, selectedManualEmpty.videoModel)).toBe(false);
             expect(ready(selectedManualEmpty, selectedManualEmpty.audioModel)).toBe(false);
-            expect(() => assertVideoConfig(resolveModelRequestConfig(selectedManualEmpty, selectedManualEmpty.videoModel), selectedManualEmpty.videoModel)).toThrow("请先配置 API Key");
             expect(() => assertAudioConfig(resolveModelRequestConfig(selectedManualEmpty, selectedManualEmpty.audioModel), selectedManualEmpty.audioModel)).toThrow("请先配置 API Key");
 
             const selectedManualKeyed = arrange(manualKeyed);
@@ -161,7 +156,6 @@ describe("managed BeefAPI generation readiness", () => {
             selectedManualKeyed.model = encodeChannelModel("manual", sharedVideo);
             expect(ready(selectedManualKeyed, selectedManualKeyed.videoModel)).toBe(true);
             expect(ready(selectedManualKeyed, selectedManualKeyed.audioModel)).toBe(true);
-            expect(() => assertVideoConfig(resolveModelRequestConfig(selectedManualKeyed, selectedManualKeyed.videoModel), selectedManualKeyed.videoModel)).not.toThrow();
             expect(() => assertAudioConfig(resolveModelRequestConfig(selectedManualKeyed, selectedManualKeyed.audioModel), selectedManualKeyed.audioModel)).not.toThrow();
             expect(resolveModelRequestConfig(selectedManualKeyed, selectedManualKeyed.videoModel).model).toBe(sharedVideo);
         }

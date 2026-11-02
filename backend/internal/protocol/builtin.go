@@ -2,7 +2,6 @@ package protocol
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -225,7 +224,21 @@ func newAPIVideosAdapter() Adapter {
 			body["generate_audio"] = true
 		}
 		if len(r.Images) > 0 {
-			body["image_urls"] = mediaValues(r.Images)
+			urls := mediaValues(r.Images)
+			body["image_urls"] = urls
+			if len(urls) > 0 {
+				firstURL := urls[0]
+				for _, image := range r.Images {
+					if strings.TrimSpace(image.Role) == "first_frame" {
+						if candidate := mediaValue(image); candidate != "" {
+							firstURL = candidate
+							break
+						}
+					}
+				}
+				body["image"] = firstURL
+				body["image_url"] = firstURL
+			}
 		}
 		if len(r.Videos) > 0 {
 			body["video_urls"] = mediaValues(r.Videos)
@@ -407,6 +420,7 @@ func agnesAdapter() Adapter {
 	info.Version = "1.2.0"
 	info.Description = "Agnes AI 官方异步视频协议，支持 Agnes Video V2.0、2.5 与 2.5 Flash。"
 	info.RequiresPublicMediaURLs = true
+	info.MediaTransport = map[string]string{"image": "inline", "video": "url", "audio": "url"}
 	info.Parameters = []Parameter{
 		{Name: "model", Type: "string", Required: true, Mapping: "model", Description: "官方模型 ID：agnes-video-v2.0、agnes-video-2.5 或 agnes-video-2.5-flash。"},
 		{Name: "prompt", Type: "string", Required: true, Mapping: "prompt", Description: "视频生成提示词。"},
@@ -487,9 +501,6 @@ func buildAgnesV25Body(r GenerationRequest) (map[string]any, error) {
 		return nil, fmt.Errorf("Agnes 2.5 mode 必须是 text、keyframe 或 reference")
 	}
 	seconds := defaultInt(r.Duration, 5)
-	if seconds < 4 || seconds > 12 {
-		return nil, fmt.Errorf("Agnes 2.5 seconds 必须在 4 到 12 秒之间")
-	}
 	size, err := normalizeAgnesV25Resolution(defaultValue(r.Resolution, firstString(r.Extra, "size")))
 	if err != nil {
 		return nil, err
@@ -726,7 +737,7 @@ func asyncMediaAdapter(info Metadata, capability Capability, create func(Generat
 
 func asyncMediaAdapterWithPoll(info Metadata, capability Capability, create func(GenerationRequest) (RequestSpec, error), poll func(PollContext) (RequestSpec, error)) Adapter {
 	return builtinAdapter{
-		info: info, create: create, parseCreate: parseAsyncCreate, poll: poll,
+		info: info, create: wrapBuiltinCreate(info, capability, create), parseCreate: parseAsyncCreate, poll: poll,
 		parsePoll: func(c PollContext, payload map[string]any) (PollResult, error) {
 			return parseAsyncMediaPoll(c, payload, capability)
 		},
@@ -840,35 +851,6 @@ func parseGeminiVeoPoll(c PollContext, payload map[string]any) (PollResult, erro
 	return PollResult{TaskID: id, Status: StatusSucceeded, Result: &Result{Videos: videos}}, nil
 }
 
-func geminiVeoVideos(response map[string]any) []MediaReference {
-	if response == nil {
-		return nil
-	}
-	containers := []map[string]any{response}
-	for _, key := range []string{"generateVideoResponse", "generate_video_response"} {
-		if nested := object(response[key]); nested != nil {
-			containers = append(containers, nested)
-		}
-	}
-	result := make([]MediaReference, 0)
-	for _, container := range containers {
-		for _, key := range []string{"generatedVideos", "generated_videos", "generatedSamples", "generated_samples", "videos"} {
-			items, _ := container[key].([]any)
-			for _, item := range items {
-				entry := object(item)
-				video := object(entry["video"])
-				if video == nil {
-					video = entry
-				}
-				if value := firstString(video, "uri", "url", "videoUri", "video_url"); value != "" {
-					result = append(result, MediaReference{URL: value, Kind: string(CapabilityVideo)})
-				}
-			}
-		}
-	}
-	return result
-}
-
 func parseAsyncCreate(payload map[string]any) (CreateResult, error) {
 	id := firstString(payload, "id", "task_id", "taskId", "request_id")
 	status := normalizeStatus(firstString(payload, "status", "state"))
@@ -895,12 +877,15 @@ func parseAsyncMediaPoll(c PollContext, payload map[string]any, capability Capab
 	}
 	status := normalizeStatus(firstString(payload, "status", "state", "task_status"))
 	if task := object(payload["task"]); task != nil {
-		status = normalizeStatus(defaultValue(firstString(task, "status", "state"), string(status)))
+		status = normalizeStatus(defaultValue(firstString(task, "status", "state", "task_status"), string(status)))
 		payload = mergeMaps(task, payload)
 	}
 	if data := object(payload["data"]); data != nil {
 		payload = mergeMaps(data, payload)
-		status = normalizeStatus(defaultValue(firstString(data, "status", "state"), string(status)))
+		status = normalizeStatus(defaultValue(firstString(data, "status", "state", "task_status"), string(status)))
+	}
+	if file := object(payload["file"]); file != nil {
+		payload = mergeMaps(file, payload)
 	}
 	// BeefAPI keeps the transport task in `in_progress` while its nested
 	// generation has already completed and is saving the output.  The actual
@@ -914,7 +899,11 @@ func parseAsyncMediaPoll(c PollContext, payload map[string]any, capability Capab
 		}
 	}
 	if status == "" {
-		status = StatusProcessing
+		if failure := object(payload["error"]); failure != nil && firstString(failure, "message", "detail", "code") != "" {
+			status = StatusFailed
+		} else {
+			status = StatusProcessing
+		}
 	}
 	result := &Result{}
 	resultKind := string(capability)
@@ -923,7 +912,7 @@ func parseAsyncMediaPoll(c PollContext, payload map[string]any, capability Capab
 	if content := object(payload["content"]); content != nil {
 		references = append(references, mediaFromArray([]any{content}, capability)...)
 	}
-	keys := []string{resultKind + "_url", resultKind + "Url", "result_url", "url"}
+	keys := []string{resultKind + "_url", resultKind + "Url", "result_url", "download_url", "downloadUrl", "url"}
 	if resultKind == "video" {
 		keys = append(keys, "object")
 	}
@@ -936,12 +925,22 @@ func parseAsyncMediaPoll(c PollContext, payload map[string]any, capability Capab
 	case CapabilityAudio:
 		result.Audios = references
 	case CapabilityVideo:
+		attachLastFrameMetadata(references, payload)
 		result.Videos = references
 	}
 	if status == StatusSucceeded && len(references) == 0 {
 		result = nil
 	}
-	return PollResult{TaskID: defaultValue(firstString(payload, "id", "task_id", "taskId"), c.TaskID), Status: status, Result: result, Message: firstString(payload, "message", "error", "fail_reason")}, nil
+	message := firstString(payload, "message", "error", "fail_reason")
+	if failure := object(payload["error"]); failure != nil {
+		message = defaultValue(firstString(failure, "message", "detail", "code"), message)
+	}
+	if message == "" {
+		if baseResp := object(payload["base_resp"]); baseResp != nil {
+			message = firstString(baseResp, "status_msg")
+		}
+	}
+	return PollResult{TaskID: defaultValue(firstString(payload, "id", "task_id", "taskId"), c.TaskID), Status: status, Result: result, Message: message}, nil
 }
 
 func parseAudioResponse(payload map[string]any) (CreateResult, error) {
@@ -950,182 +949,4 @@ func parseAudioResponse(payload map[string]any) (CreateResult, error) {
 		return CreateResult{}, fmt.Errorf("audio response has no result")
 	}
 	return CreateResult{Status: StatusSucceeded, Result: &Result{Audios: []MediaReference{{URL: value, Kind: "audio"}}}}, nil
-}
-
-func normalizeStatus(raw string) Status {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "queued", "pending", "created", "submitted", "in_queue", "task_status_queued":
-		return StatusPending
-	case "running", "processing", "in_progress", "executing", "task_status_running":
-		return StatusProcessing
-	case "succeeded", "success", "completed", "complete", "done", "task_status_succeed":
-		return StatusSucceeded
-	case "cancelled", "canceled", "aborted":
-		return StatusCancelled
-	case "failed", "failure", "error", "expired":
-		return StatusFailed
-	default:
-		return ""
-	}
-}
-
-func decodeObject(body []byte) (map[string]any, error) {
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, fmt.Errorf("protocol response is not JSON: %w", err)
-	}
-	return payload, nil
-}
-func object(value any) map[string]any { result, _ := value.(map[string]any); return result }
-func mergeMaps(primary, fallback map[string]any) map[string]any {
-	result := make(map[string]any, len(fallback)+len(primary))
-	for k, v := range fallback {
-		result[k] = v
-	}
-	for k, v := range primary {
-		result[k] = v
-	}
-	return result
-}
-func firstString(payload map[string]any, keys ...string) string {
-	for _, key := range keys {
-		if value, ok := payload[key].(string); ok && strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-func defaultValue(value, fallback string) string {
-	if strings.TrimSpace(value) == "" {
-		return fallback
-	}
-	return value
-}
-func defaultInt(value, fallback int) int {
-	if value <= 0 {
-		return fallback
-	}
-	return value
-}
-func copyIf(body map[string]any, key, value string) {
-	if strings.TrimSpace(value) != "" {
-		body[key] = value
-	}
-}
-func mergeExtra(body map[string]any, extra map[string]any, keys ...string) {
-	for _, key := range keys {
-		if value, ok := extra[key]; ok {
-			body[key] = value
-		}
-	}
-}
-func compactMap(body map[string]any) map[string]any {
-	result := make(map[string]any)
-	for key, value := range body {
-		switch item := value.(type) {
-		case string:
-			if strings.TrimSpace(item) != "" {
-				result[key] = value
-			}
-		case int:
-			if item > 0 {
-				result[key] = value
-			}
-		case bool:
-			result[key] = value
-		case nil:
-		default:
-			result[key] = item
-		}
-	}
-	return result
-}
-func mediaValue(media MediaReference) string { return defaultValue(media.URL, media.DataURL) }
-func mediaRole(media MediaReference, fallback string) string {
-	return defaultValue(strings.TrimSpace(media.Role), fallback)
-}
-
-func splitVideoImages(images []MediaReference) (frames []MediaReference, references []MediaReference, unspecified []MediaReference) {
-	firstFrames := make([]MediaReference, 0, 1)
-	lastFrames := make([]MediaReference, 0, 1)
-	for _, image := range images {
-		switch strings.TrimSpace(image.Role) {
-		case "first_frame":
-			firstFrames = append(firstFrames, image)
-		case "last_frame":
-			lastFrames = append(lastFrames, image)
-		case "reference_image":
-			references = append(references, image)
-		default:
-			unspecified = append(unspecified, image)
-		}
-	}
-	frames = append(frames, firstFrames...)
-	frames = append(frames, lastFrames...)
-	return frames, references, unspecified
-}
-
-func orderedFrameImages(images []MediaReference) []MediaReference {
-	frames, _, unspecified := splitVideoImages(images)
-	if len(frames) == 0 {
-		return unspecified
-	}
-	return append(frames, unspecified...)
-}
-
-func hasVideoImageRole(images []MediaReference, role string) bool {
-	for _, image := range images {
-		if strings.TrimSpace(image.Role) == role {
-			return true
-		}
-	}
-	return false
-}
-
-func mediaValues(values []MediaReference) []string {
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		if item := mediaValue(value); item != "" {
-			result = append(result, item)
-		}
-	}
-	return result
-}
-func mediaFromArray(value any, capability Capability) []MediaReference {
-	values, _ := value.([]any)
-	result := make([]MediaReference, 0, len(values))
-	kind := string(capability)
-	for _, item := range values {
-		if value, ok := item.(string); ok && strings.TrimSpace(value) != "" {
-			result = append(result, MediaReference{URL: strings.TrimSpace(value), Kind: kind})
-			continue
-		}
-		if m, ok := item.(map[string]any); ok {
-			if capability == CapabilityImage {
-				if value := firstString(m, "b64_json", "data"); value != "" {
-					if !strings.HasPrefix(value, "data:") {
-						value = "data:image/png;base64," + value
-					}
-					result = append(result, MediaReference{DataURL: value, Kind: kind})
-					continue
-				}
-			}
-			if value := firstString(m, "url", "image_url", "video_url", "audio_url"); value != "" {
-				result = append(result, MediaReference{URL: value, Kind: kind})
-			}
-		}
-	}
-	return result
-}
-func dataMIME(value string) string {
-	if index := strings.Index(value, ";"); strings.HasPrefix(value, "data:") && index > 5 {
-		return strings.TrimPrefix(value[5:index], "")
-	}
-	return "application/octet-stream"
-}
-func dataPayload(value string) string {
-	if index := strings.Index(value, ","); strings.HasPrefix(value, "data:") && index >= 0 {
-		return value[index+1:]
-	}
-	return value
 }

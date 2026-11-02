@@ -264,12 +264,12 @@ describe("异步导演台输出使用最新权威状态", () => {
         expect(hook.slice(commitValidation)).toContain("const committedNodes = [...nodesRef.current]");
         expect(hook).toContain("saveDirectorScene(committedScene);");
         expect(hook).not.toContain("saveDirectorScene({ ...output.scene");
-        expect(hook).toContain("uploadImage(output.beauty, undefined, expectedScope)");
-        expect(hook).toContain('uploadMediaFile(output.clayVideo, "director-clay", undefined, expectedScope)');
-        expect(hook).toContain("ensureCanvasNodeAsset({ canvasId: projectId, domainProjectId, node: mediaNode, source: \"canvas-manual\", expectedScope })");
+        expect(hook).toContain("uploadImage(output.beauty)");
+        expect(hook).toContain('uploadMediaFile(output.clayVideo, "director-clay")');
+        expect(hook).toContain("ensureCanvasNodeAsset({ canvasId: projectId, domainProjectId, node: mediaNode, source: \"canvas-manual\" })");
         expect(hook).toContain("if (!result.confirmed) confirmed = false");
         expect(hook).toContain("return { confirmed };");
-        expect(hook).toContain("uploadImage(beauty, undefined, expectedScope)");
+        expect(hook).toContain("uploadImage(beauty)");
     });
 });
 

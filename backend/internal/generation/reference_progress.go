@@ -77,7 +77,11 @@ func ReferenceUploadObserver(ctx context.Context, label string) func(int64, int6
 		if reporter == nil {
 			_, reporter = beginReferenceProgress(ctx, label, total)
 		}
-		reporter.report(phase, loaded)
+		if phase == "resuming" {
+			reporter.resumeAt(loaded)
+		} else {
+			reporter.report(phase, loaded)
+		}
 	}
 }
 

@@ -1,4 +1,3 @@
-import { assertUserScope, captureUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
 import type { AssetCategory } from "../../src/lib/asset-category";
 import type { ProjectAsset } from "../../src/services/api/projects";
 
@@ -8,7 +7,6 @@ export type ResourceUploadMeta = {
     durationMs?: number;
     fileName?: string;
     idempotencyKey?: string;
-    expectedScope?: CapturedUserScope;
 };
 
 export type EditorAssetIngestCall = {
@@ -19,8 +17,6 @@ export type EditorAssetIngestCall = {
     projectId?: string;
     assetId?: string;
     durationMs?: number;
-    expectedScope?: CapturedUserScope;
-    liveScope: CapturedUserScope;
 };
 
 export type EditorAssetIngestDoubles = {
@@ -34,9 +30,6 @@ export type EditorAssetIngestDoubles = {
         refresh: boolean;
     };
     durationMs: number | undefined;
-    switched: boolean;
-    writesAfterSwitch: number;
-    refreshAfterSwitch: number;
     resourceSeq: number;
     linked: ProjectAsset[];
     calls: EditorAssetIngestCall[];
@@ -53,23 +46,13 @@ function doubles(): EditorAssetIngestDoubles {
     return api;
 }
 
-function liveScope() {
-    return captureUserScope();
-}
-
 async function waitIfHeld(step: "probe" | "upload" | "link" | "refresh") {
     const api = doubles();
     if (api.hold[step]) await api.gates[step].promise;
 }
 
-function record(call: Omit<EditorAssetIngestCall, "liveScope">) {
-    const api = doubles();
-    api.calls.push({ ...call, liveScope: liveScope() });
-}
-
-function countMutationAfterSwitch() {
-    const api = doubles();
-    if (api.switched) api.writesAfterSwitch += 1;
+function record(call: EditorAssetIngestCall) {
+    doubles().calls.push(call);
 }
 
 export async function probeMediaDurationMs(file: File): Promise<number | undefined> {
@@ -98,19 +81,14 @@ export async function uploadResourceFile(
         name,
         kind,
         durationMs: meta?.durationMs,
-        expectedScope: meta?.expectedScope,
     });
     await waitIfHeld("upload");
-    const expected = meta?.expectedScope ?? liveScope();
-    assertUserScope(expected);
-    countMutationAfterSwitch();
     record({
         phase: "write",
         step: "upload",
         name,
         kind,
         durationMs: meta?.durationMs,
-        expectedScope: meta?.expectedScope,
     });
     const api = doubles();
     if (api.fail.upload) {
@@ -123,7 +101,7 @@ export async function uploadResourceFile(
     if (api.fail.uploadStatusFailed) {
         return {
             id,
-            userId: expected.userScope,
+            userId: "owner-a",
             kind,
             status: "failed",
             provider: "test",
@@ -140,7 +118,7 @@ export async function uploadResourceFile(
     }
     return {
         id,
-        userId: expected.userScope,
+        userId: "owner-a",
         kind,
         status: "ready",
         provider: "test",
@@ -160,7 +138,6 @@ export function linkProjectAsset(
     projectId: string,
     input: { assetId: string; category: AssetCategory; folderId?: string; title?: string; source?: "uploaded" | "canvas" },
     _signal?: AbortSignal,
-    expectedScope?: CapturedUserScope,
 ) {
     return (async () => {
         record({
@@ -169,12 +146,8 @@ export function linkProjectAsset(
             projectId,
             assetId: input.assetId,
             name: input.title,
-            expectedScope,
         });
         await waitIfHeld("link");
-        const expected = expectedScope ?? liveScope();
-        assertUserScope(expected);
-        countMutationAfterSwitch();
         const api = doubles();
         if (api.fail.linkOnce) {
             api.fail.linkOnce = false;
@@ -187,7 +160,6 @@ export function linkProjectAsset(
             projectId,
             assetId: input.assetId,
             name: input.title,
-            expectedScope,
         });
         const asset: ProjectAsset = {
             id: input.assetId,
@@ -223,9 +195,6 @@ export function createEditorAssetIngestDoubles(): EditorAssetIngestDoubles {
             refresh: false,
         },
         durationMs: 1500,
-        switched: false,
-        writesAfterSwitch: 0,
-        refreshAfterSwitch: 0,
         resourceSeq: 0,
         linked: [],
         calls: [],

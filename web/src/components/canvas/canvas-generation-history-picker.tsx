@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { App, Button, Spin } from "antd";
 import { FileAudio, FileVideo, Image as ImageIcon } from "lucide-react";
@@ -14,8 +14,6 @@ import {
     type CanvasGenerationHistorySelectGate,
 } from "@/lib/canvas/canvas-generation-history";
 import { generationTaskMode } from "@/lib/canvas/canvas-generation-task-sync";
-import { captureUserScopeEpoch, getActiveUserScope, getActiveUserScopeEpoch, subscribeUserScope } from "@/lib/user-scope";
-import { captureUserScope, userScopeMatches } from "@/lib/user-scope-guard";
 import { ownedResourceIdFromMediaRef, resourceIdFromStorageKey, resourceStorageKey } from "@/services/api/resources";
 import { listGenerationTasks, queryGenerationTask, type GenerationTask } from "@/services/api/task-center";
 import "@/styles/assets-reference-baseline.css";
@@ -45,15 +43,14 @@ export function CanvasGenerationHistoryPicker({ open, projectId, onClose, onSele
             mountedRef.current = false;
         };
     }, []);
-    const scope = useSyncExternalStore(subscribeUserScope, () => `${getActiveUserScope()}:${getActiveUserScopeEpoch()}`, () => "");
     const cancelSelection = () => {
         selectionEpoch.current += 1;
         selectionRequest.current?.abort();
         selectionRequest.current = null;
     };
-    useEffect(() => () => cancelSelection(), [open, projectId, scope]);
+    useEffect(() => () => cancelSelection(), [open, projectId]);
     const query = useQuery({
-        queryKey: ["canvas-generation-history", scope, projectId],
+        queryKey: ["canvas-generation-history", projectId],
         queryFn: ({ signal }) => listGenerationTasks(100, { projectId, activeOnly: false }, undefined, signal),
         enabled: open && Boolean(projectId.trim()),
         staleTime: 15_000,
@@ -65,13 +62,12 @@ export function CanvasGenerationHistoryPicker({ open, projectId, onClose, onSele
     );
     useEffect(() => {
         setSelectingId("");
-    }, [open, projectId, scope]);
+    }, [open, projectId]);
     const groups = [...new Set(tasks.map(historyTaskDay))];
 
     const liveSelectGate = (): CanvasGenerationHistorySelectGate => ({
         open: openRef.current,
         projectId: projectIdRef.current,
-        epoch: captureUserScopeEpoch(),
         mounted: mountedRef.current,
         selectionEpoch: selectionEpoch.current,
     });
@@ -107,7 +103,7 @@ export function CanvasGenerationHistoryPicker({ open, projectId, onClose, onSele
                     groups.map(date => <section key={date} className="generation-history-group">
                         <h2>{date}</h2>
                         <div className="generation-history-grid" style={{ gridTemplateColumns: "repeat(auto-fill, 142px)", maxWidth: "100%" }}>
-                            {tasks.filter(task => historyTaskDay(task) === date).map(task => <HistoryTaskCard key={`${scope}:${projectId}:${task.id}`} task={task} active={open} selecting={selectingId === task.id} onSelect={() => void selectSummary(task)} />)}
+                            {tasks.filter(task => historyTaskDay(task) === date).map(task => <HistoryTaskCard key={`${projectId}:${task.id}`} task={task} active={open} selecting={selectingId === task.id} onSelect={() => void selectSummary(task)} />)}
                         </div>
                     </section>)
                 ) : (
@@ -150,18 +146,17 @@ function HistoryMediaPreview({ task }: { task: GenerationTask }) {
     useEffect(() => {
         let cancelled = false;
         const controller = new AbortController();
-        const expected = captureUserScope();
         setMedia(null); setError(false);
         void (async () => {
-            const detail = assertCanvasGenerationHistoryTaskForInsert(await queryGenerationTask(task.id, { signal: controller.signal, expectedScope: expected }), { expectedId: task.id, projectId: task.projectId || "" });
-            if (cancelled || !userScopeMatches(expected)) return;
+            const detail = assertCanvasGenerationHistoryTaskForInsert(await queryGenerationTask(task.id, { signal: controller.signal }), { expectedId: task.id, projectId: task.projectId || "" });
+            if (cancelled) return;
             const result = JSON.parse(detail.resultJson || "{}");
             const media = result.video;
             const fallback = media?.dataUrl || media?.url || "";
             const id = resourceIdFromStorageKey(media?.storageKey) || ownedResourceIdFromMediaRef(media?.storageKey, fallback) || (typeof result.resourceId === "string" ? result.resourceId : "");
             if (!id && !fallback) throw new Error("缺少媒体地址");
-            if (!cancelled && userScopeMatches(expected)) setMedia({ storageKey: id ? resourceStorageKey(id) : media?.storageKey || "", url: fallback });
-        })().catch(() => { if (!cancelled && userScopeMatches(expected)) setError(true); });
+            if (!cancelled) setMedia({ storageKey: id ? resourceStorageKey(id) : media?.storageKey || "", url: fallback });
+        })().catch(() => { if (!cancelled) setError(true); });
         return () => { cancelled = true; controller.abort(); };
     }, [task.id, task.projectId, retry]);
     const playback = useResourceVideoPlayback(media?.storageKey || "", media?.url || "", Boolean(media));

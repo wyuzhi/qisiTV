@@ -1,14 +1,15 @@
 import { FolderKanban, RotateCcw } from "lucide-react";
 
+import { isTaskRegenerateBlocked } from "@/lib/task-outcome";
 import type { GenerationTask } from "@/services/api/task-center";
-import { isTaskFailed, taskRetryBlocked } from "./task-shared";
+import { isTaskFailed } from "./task-shared";
 
 export type TaskGroup = { key: string; title: string; projectName: string; tasks: GenerationTask[] };
 
 export function TaskGroupHeader({ group, retrying = false, onRetryFailed }: { group: TaskGroup; retrying?: boolean; onRetryFailed: () => void }) {
     const succeeded = group.tasks.filter((task) => task.status === "succeeded").length;
     const active = group.tasks.filter((task) => task.status === "queued" || task.status === "running").length;
-    const failed = group.tasks.filter((task) => isTaskFailed(task) && !taskRetryBlocked(task)).length;
+    const failed = group.tasks.filter((task) => isTaskFailed(task) && !isTaskRegenerateBlocked(task)).length;
     const title = group.projectName ? `${group.title} · ${group.projectName}` : group.title;
     return (
         <div className="task-group-head">

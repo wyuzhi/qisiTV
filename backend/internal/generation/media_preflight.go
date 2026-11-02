@@ -13,6 +13,9 @@ import (
 // ValidateMediaTransport uses the same installed contract as execution, without
 // reading file bytes, uploading anything, or creating a provider task.
 func ValidateMediaTransport(ctx context.Context, input Input) error {
+	if managedConnection(input.Config) {
+		return nil
+	}
 	for kind, transport := range input.Config.ReferenceMediaTransport {
 		if (kind != "image" && kind != "video" && kind != "audio") || (transport != "" && transport != "auto" && transport != "inline" && transport != "url" && transport != "link") {
 			return &kernel.AppError{Status: 400, Code: 400, Reason: "invalid_reference_transport", Message: "参考素材传输方式无效，请重新选择"}
@@ -90,7 +93,12 @@ func isBytePlusVideoInput(input Input) bool {
 		return false
 	}
 	endpoint, err := url.Parse(strings.TrimSpace(input.Config.BaseURL))
-	return err == nil && strings.EqualFold(endpoint.Hostname(), "ark.ap-southeast.bytepluses.com")
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSpace(endpoint.Hostname()))
+	return host == "ark.ap-southeast.bytepluses.com" ||
+		(strings.HasPrefix(host, "ark.") && (strings.HasSuffix(host, ".bytepluses.com") || strings.HasSuffix(host, ".byteplusapi.com")))
 }
 
 func validateBytePlusVideoTransport(ctx context.Context, input Input) error {
@@ -104,13 +112,18 @@ func validateBytePlusVideoTransport(ctx context.Context, input Input) error {
 	var blocked []string
 	var required []map[string]any
 	for index, media := range input.ReferenceVideos {
-		if strings.HasPrefix(media.StorageKey, "resource:") && !mediaPolicyForKind(ctx, input, "video", MediaHydrationPolicyFor(ctx, input)).ManualURL && runtime.ReferenceStorage != nil {
-			enabled, err := runtime.ReferenceStorage.Enabled()
-			if err != nil {
-				return kernel.WrapAppError(500, "参考素材对象存储配置无法读取，请检查存储设置", err)
-			}
-			if enabled {
+		if strings.HasPrefix(media.StorageKey, "resource:") && !mediaPolicyForKind(ctx, input, "video", MediaHydrationPolicyFor(ctx, input)).ManualURL {
+			if runtime.Resources != nil && !runtime.Resources.LocalMode() {
 				continue
+			}
+			if runtime.ReferenceStorage != nil {
+				enabled, err := runtime.ReferenceStorage.Enabled()
+				if err != nil {
+					return kernel.WrapAppError(500, "参考素材对象存储配置无法读取，请检查存储设置", err)
+				}
+				if enabled {
+					continue
+				}
 			}
 		}
 		address, err := url.Parse(strings.TrimSpace(media.URL))

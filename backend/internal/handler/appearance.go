@@ -4,15 +4,21 @@ import (
 	"io"
 	"net/http"
 
-	"qisitv/backend/internal/app"
 	"qisitv/backend/internal/appearance"
+	"qisitv/backend/internal/assets"
 
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterDesktopAppearanceRoutes(r *gin.RouterGroup, svc *app.Service) {
+// appearanceAssets opens the bytes for a configured slot. The domain service
+// only knows which resource is configured; streaming stays at the composition root.
+type appearanceAssets interface {
+	OpenAppearanceAsset(slot string, rangeHeader string) (*assets.ResourceStream, error)
+}
+
+func RegisterDesktopAppearanceRoutes(r *gin.RouterGroup, assets appearanceAssets) {
 	r.GET("/public/appearance", func(c *gin.Context) {
-		setting, err := requestAppearance(c, svc).Public()
+		setting, err := requestAppearance(c).Public()
 		if err != nil {
 			failService(c, err)
 			return
@@ -22,7 +28,7 @@ func RegisterDesktopAppearanceRoutes(r *gin.RouterGroup, svc *app.Service) {
 	})
 
 	r.GET("/public/appearance/assets/:slot", func(c *gin.Context) {
-		stream, err := svc.OpenAppearanceAsset(c.Param("slot"), c.GetHeader("Range"))
+		stream, err := assets.OpenAppearanceAsset(c.Param("slot"), c.GetHeader("Range"))
 		if err != nil {
 			failService(c, err)
 			return
@@ -54,12 +60,9 @@ func RegisterDesktopAppearanceRoutes(r *gin.RouterGroup, svc *app.Service) {
 
 }
 
-func requestAppearance(c *gin.Context, svc *app.Service) *appearance.Service {
+func requestAppearance(c *gin.Context) *appearance.Service {
 	if dependencies, ok := runtimeDependencies(c); ok && dependencies.Appearance != nil {
 		return dependencies.Appearance
 	}
-	if svc == nil {
-		return appearance.New(appearance.Dependencies{})
-	}
-	return svc.AppearanceDomain()
+	return appearance.New(appearance.Dependencies{})
 }

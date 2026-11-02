@@ -1,12 +1,14 @@
 package asset
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
 )
 
@@ -81,5 +83,24 @@ func TestOpenRangeRejectsPendingResource(t *testing.T) {
 	}
 	if _, err := svc.OpenRange("user-1", resource.ID, ""); err == nil {
 		t.Fatal("pending resource opened")
+	}
+}
+
+func TestOpenRangeReturnsNotFoundWhenLocalFileMissing(t *testing.T) {
+	svc, repo, _ := newTestDomain(t)
+	resource := model.Resource{
+		ID: "resource-missing-file", UserID: "user-1", Kind: "video", Status: model.ResourceStatusReady,
+		Provider: "local", ObjectKey: "users/user-1/video/missing.mp4", Size: 128,
+	}
+	if err := repo.CreateResource(&resource); err != nil {
+		t.Fatal(err)
+	}
+	_, err := svc.OpenRange("user-1", resource.ID, "")
+	if err == nil {
+		t.Fatal("missing file opened without error")
+	}
+	var appErr *kernel.AppError
+	if !errors.As(err, &appErr) || appErr.Status != http.StatusNotFound {
+		t.Fatalf("err = %#v, want 404 AppError", err)
 	}
 }

@@ -9,7 +9,6 @@ import type { CanvasDrawingExport } from "@/types/canvas-export";
 import { normalizeLocalCanvasProject } from "@/lib/local-workspace-migration";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import { archiveFileExtension, assertUniqueArchiveNames, ExportIntegrityError, type MissingExportFile } from "@/lib/export-integrity";
-import { assertUserScope, captureUserScope } from "@/lib/user-scope-guard";
 import { http } from "@/services/api/request";
 import { startOperation } from "@/stores/use-operation-progress";
 import { recordDiagnosticEvent } from "@/services/diagnostics/client-diagnostics";
@@ -35,16 +34,15 @@ export function canvasExportProgressLabel(progress: CanvasExportProgress) {
     }
 }
 
-export async function exportCanvasProjects(projects: CanvasProject[], fileName = "画布", options: { includeLocalDrawings?: boolean; folders?: CanvasFolder[]; signal?: AbortSignal; onProgress?: (progress: CanvasExportProgress) => void } = {}): Promise<OwnedMediaSaveResult> {
-    const scope = captureUserScope();
-    const operation = startOperation("导出画布", { owner: scope, detail: "正在读取画布与媒体文件", totalFiles: projects.reduce((sum, project) => sum + collectStorageKeys(project).length, 0) });
+export async function exportCanvasProjects(projects: CanvasProject[], fileName = "画布", options: { includeLocalDrawings?: boolean; allowMissingMedia?: boolean; onSkippedFiles?: (missing: MissingExportFile[]) => void; folders?: CanvasFolder[]; signal?: AbortSignal; onProgress?: (progress: CanvasExportProgress) => void } = {}): Promise<OwnedMediaSaveResult> {
+    const operation = startOperation("导出画布", { detail: "正在读取画布与媒体文件", totalFiles: projects.reduce((sum, project) => sum + collectStorageKeys(project).length, 0) });
     const finish = (result: OwnedMediaSaveResult) => {
         if (result === "cancelled") operation.dismiss(); else operation.done("画布备份已保存");
         return result;
     };
     try {
     const recordedPhases = new Set<CanvasExportProgress["phase"]>();
-    const check = () => { options.signal?.throwIfAborted(); assertUserScope(scope); };
+    const check = () => { options.signal?.throwIfAborted(); };
     const step = <T,>(promise: Promise<T>) => awaitCanvasExportStep(promise, options.signal);
     const progress = (value: CanvasExportProgress) => {
         check();
@@ -64,6 +62,8 @@ export async function exportCanvasProjects(projects: CanvasProject[], fileName =
     const exportedProjects = await Promise.all(
         projects.map(async (project) => {
             const files: CanvasExportAsset[] = [];
+            const missingStorageKeys = new Set<string>();
+            const missingDrawingIds = new Set<string>();
             await Promise.all(
                 collectStorageKeys(project).map(async (storageKey) => {
                     let blob: Blob | null | undefined;
@@ -72,12 +72,14 @@ export async function exportCanvasProjects(projects: CanvasProject[], fileName =
                         check();
                     } catch (error) {
                         check();
+                        missingStorageKeys.add(storageKey);
                         missingFiles.push({ owner: project.title || project.id, reference: `${storageKey}（读取失败）` });
                         return;
                     } finally {
                         if (!options.signal?.aborted) progress({ phase: "media", completed: ++completed, total });
                     }
                     if (!blob || blob.size === 0) {
+                        missingStorageKeys.add(storageKey);
                         missingFiles.push({ owner: project.title || project.id, reference: storageKey });
                         return;
                     }
@@ -92,13 +94,24 @@ export async function exportCanvasProjects(projects: CanvasProject[], fileName =
             const drawingDocuments = (await Promise.all(drawingNodes.map(async (node): Promise<CanvasDrawingExport | null> => {
                 const drawingId = node.metadata?.drawingId;
                 if (!drawingId) return null;
-                const [saved, preview, render] = await step(Promise.all([
-                    loadCanvasDrawing(project.id, drawingId, scope),
-                    loadCanvasDrawingPreview(project.id, drawingId, scope),
-                    loadCanvasDrawingRender(project.id, drawingId, scope),
-                ]));
-                check();
+                let saved: Awaited<ReturnType<typeof loadCanvasDrawing>>;
+                let preview: Awaited<ReturnType<typeof loadCanvasDrawingPreview>>;
+                let render: Awaited<ReturnType<typeof loadCanvasDrawingRender>>;
+                try {
+                    [saved, preview, render] = await step(Promise.all([
+                        loadCanvasDrawing(project.id, drawingId),
+                        loadCanvasDrawingPreview(project.id, drawingId),
+                        loadCanvasDrawingRender(project.id, drawingId),
+                    ]));
+                    check();
+                } catch (error) {
+                    check();
+                    missingDrawingIds.add(drawingId);
+                    missingFiles.push({ owner: project.title || project.id, reference: `画板 ${node.title || drawingId}（读取失败）` });
+                    return null;
+                }
                 if (!saved) {
+                    missingDrawingIds.add(drawingId);
                     missingFiles.push({ owner: project.title || project.id, reference: `画板 ${node.title || drawingId}` });
                     return null;
                 }
@@ -116,30 +129,52 @@ export async function exportCanvasProjects(projects: CanvasProject[], fileName =
                 } satisfies CanvasDrawingExport;
             }))).filter((item): item is CanvasDrawingExport => item !== null);
             drawingDocuments.forEach((document) => zipFiles.push({ name: `projects/${project.id}/drawings/${safeFileName(document.drawingId)}.json`, data: JSON.stringify(document) }));
-            return { project: isLocalWorkspaceMode() ? normalizeLocalCanvasProject(project) : project, files, drawingDocuments };
+            const normalizedProject = isLocalWorkspaceMode() ? normalizeLocalCanvasProject(project) : project;
+            const exportedProject = options.allowMissingMedia && (missingStorageKeys.size > 0 || missingDrawingIds.size > 0)
+                ? stripMissingArchiveReferences(normalizedProject, missingStorageKeys, missingDrawingIds)
+                : normalizedProject;
+            return {
+                project: exportedProject,
+                files,
+                ...(options.includeLocalDrawings === false ? {} : { drawingDocuments }),
+            };
         }),
     );
 
-    assertUserScope(scope);
     const projectFolderIds = new Set(projects.map((project) => project.folderId).filter((id): id is string => Boolean(id)));
     const folders: CanvasExportFile["folders"] = [];
     for (const folder of options.folders?.filter((item) => projectFolderIds.has(item.id)) || []) {
         let cover: Blob | undefined;
-        if (folder.coverResourceId) {
-            const response = await http.raw<Blob>({ method: "GET", url: `/resources/${encodeURIComponent(folder.coverResourceId)}/file?proxy=1`, responseType: "blob", expectedScope: scope, signal: options.signal });
-            cover = response.data;
-        } else if (folder.coverDataUrl) {
-            const response = await fetch(folder.coverDataUrl, { signal: options.signal });
-            if (!response.ok) throw new ExportIntegrityError([{ owner: folder.name, reference: "文件夹封面" }]);
-            cover = await step(response.blob());
+        try {
+            if (folder.coverResourceId) {
+                const response = await http.raw<Blob>({ method: "GET", url: `/resources/${encodeURIComponent(folder.coverResourceId)}/file?proxy=1`, responseType: "blob", signal: options.signal });
+                cover = response.data;
+            } else if (folder.coverDataUrl) {
+                const response = await fetch(folder.coverDataUrl, { signal: options.signal });
+                if (!response.ok) throw new ExportIntegrityError([{ owner: folder.name, reference: "文件夹封面" }]);
+                cover = await step(response.blob());
+            }
+            if (cover && !cover.size) throw new ExportIntegrityError([{ owner: folder.name, reference: "文件夹封面" }]);
+        } catch (error) {
+            check();
+            if (!options.allowMissingMedia) throw error;
+            missingFiles.push({ owner: folder.name, reference: "文件夹封面" });
+            cover = undefined;
         }
-        assertUserScope(scope);
-        if (cover && !cover.size) throw new ExportIntegrityError([{ owner: folder.name, reference: "文件夹封面" }]);
         const coverPath = cover ? `folders/${encodeURIComponent(folder.id)}/cover.${archiveFileExtension(cover.type, "png")}` : undefined;
         if (cover && coverPath) zipFiles.push({ name: coverPath, data: cover, resourceId: folder.coverResourceId });
         folders.push({ ...folder, coverResourceId: undefined, coverDataUrl: undefined, coverPath, coverMimeType: cover?.type || undefined });
     }
-    if (missingFiles.length) throw new ExportIntegrityError(missingFiles);
+    const exportedFolderIds = new Set(folders.map((folder) => folder.id));
+    for (const item of exportedProjects) {
+        if (item.project.folderId && !exportedFolderIds.has(item.project.folderId)) {
+            item.project = { ...item.project, folderId: undefined };
+        }
+    }
+    if (missingFiles.length) {
+        if (!options.allowMissingMedia) throw new ExportIntegrityError(missingFiles);
+        options.onSkippedFiles?.(missingFiles);
+    }
     assertUniqueArchiveNames(["projects.json", ...zipFiles.map((file) => file.name)]);
     for (const item of exportedProjects) {
         const liveKeys = new Set(collectStorageKeys(item.project));
@@ -150,10 +185,17 @@ export async function exportCanvasProjects(projects: CanvasProject[], fileName =
         }
     }
 
-    const data: CanvasExportFile = { app: "infinite-canvas", version: 4, exportedAt: new Date().toISOString(), ...(folders?.length ? { folders } : {}), projects: exportedProjects };
+    const data: CanvasExportFile = {
+        app: "infinite-canvas",
+        version: 4,
+        exportedAt: new Date().toISOString(),
+        ...(folders?.length ? { folders } : {}),
+        ...(missingFiles.length ? { skippedFiles: missingFiles } : {}),
+        projects: exportedProjects,
+    };
     progress({ phase: "packing" });
     const archiveFiles = [{ name: "projects.json", data: JSON.stringify(data, null, 2) }, ...zipFiles];
-    const saved = await saveOwnedNativeArchiveFiles(`${safeFileName(fileName)}.zip`, archiveFiles, scope, { signal: options.signal, onSaving: () => progress({ phase: "saving" }) });
+    const saved = await saveOwnedNativeArchiveFiles(`${safeFileName(fileName)}.zip`, archiveFiles, { signal: options.signal, onSaving: () => progress({ phase: "saving" }) });
     if (saved !== undefined) return finish(saved);
     const zip = await step(createZip(archiveFiles));
     check();
@@ -175,6 +217,43 @@ export function awaitCanvasExportStep<T>(promise: Promise<T>, signal?: AbortSign
         signal.addEventListener("abort", onAbort, { once: true });
         promise.then((value) => { signal.removeEventListener("abort", onAbort); resolve(value); }, (error) => { signal.removeEventListener("abort", onAbort); reject(error); });
     });
+}
+
+export async function exportCanvasProjectsByIds(
+    canvasIds: readonly string[],
+    loadProject: (id: string) => Promise<CanvasProject | null | undefined> | CanvasProject | null | undefined,
+    options: {
+        archiveTitle?: string;
+        singleCanvasOnly?: boolean;
+        folders?: CanvasFolder[];
+        allowMissingMedia?: boolean;
+        onSkipped?: (count: number, missing: MissingExportFile[]) => void;
+        signal?: AbortSignal;
+        onProgress?: (progress: CanvasExportProgress) => void;
+    } = {},
+): Promise<OwnedMediaSaveResult> {
+    if (!canvasIds.length) throw new Error("画布不存在，无法导出");
+    const loaded: CanvasProject[] = [];
+    for (const id of canvasIds) {
+        const project = await awaitCanvasExportStep(Promise.resolve(loadProject(id)), options.signal);
+        options.signal?.throwIfAborted();
+        if (!project) throw new Error("画布不存在，无法导出");
+        loaded.push(project);
+    }
+    let skippedFiles: MissingExportFile[] = [];
+    const baseTitle = loaded[0]?.title || "画布";
+    const fileName = options.archiveTitle || (options.singleCanvasOnly ? `${baseTitle}-画布备份` : `${baseTitle}-${loaded.length}个画布`);
+    const result = await exportCanvasProjects(loaded, fileName, {
+        folders: options.folders,
+        allowMissingMedia: options.allowMissingMedia ?? false,
+        onSkippedFiles: (missing) => { skippedFiles = missing; },
+        signal: options.signal,
+        onProgress: options.onProgress,
+    });
+    if (result !== "cancelled" && skippedFiles.length > 0) {
+        options.onSkipped?.(skippedFiles.length, skippedFiles);
+    }
+    return result;
 }
 
 export type OpenCanvasArchive = {
@@ -314,6 +393,36 @@ export function collectStorageKeys(value: unknown, keys = new Set<string>()) {
     if ("storageKey" in value && typeof value.storageKey === "string" && isArchiveStorageKey(value.storageKey)) keys.add(value.storageKey);
     Object.values(value).forEach((item) => (Array.isArray(item) ? item.forEach((child) => collectStorageKeys(child, keys)) : collectStorageKeys(item, keys)));
     return [...keys];
+}
+
+function stripMissingArchiveReferences<T>(
+    value: T,
+    missingStorageKeys: ReadonlySet<string>,
+    missingDrawingIds: ReadonlySet<string>,
+): T {
+    if (!value || typeof value !== "object") return value;
+    if (Array.isArray(value)) {
+        return value.map((item) => stripMissingArchiveReferences(item, missingStorageKeys, missingDrawingIds)) as T;
+    }
+    const record = value as Record<string, unknown>;
+    const next: Record<string, unknown> = {};
+    const droppedResourceId = typeof record.storageKey === "string" && missingStorageKeys.has(record.storageKey)
+        ? resourceIdFromStorageKey(record.storageKey)
+        : "";
+    for (const [key, child] of Object.entries(record)) {
+        if (key === "storageKey" && typeof child === "string" && missingStorageKeys.has(child)) {
+            continue;
+        }
+        if (key === "drawingId" && typeof child === "string" && missingDrawingIds.has(child)) {
+            continue;
+        }
+        if (droppedResourceId && (key === "content" || key === "previewContent" || key === "url") && typeof child === "string" && child.includes(`/resources/${encodeURIComponent(droppedResourceId)}/file`)) {
+            next[key] = "";
+            continue;
+        }
+        next[key] = stripMissingArchiveReferences(child, missingStorageKeys, missingDrawingIds);
+    }
+    return next as T;
 }
 
 function safeFileName(value: string) {

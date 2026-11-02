@@ -4,7 +4,6 @@ import { resolve } from "node:path";
 
 import * as runtimeMode from "@/lib/runtime-mode";
 import { getActiveUserScope, setActiveUserScope } from "@/lib/user-scope";
-import { captureUserScope, UserScopeAbandonedError } from "@/lib/user-scope-guard";
 import { apiClient } from "@/services/api/request";
 import { resourceFileUrl } from "@/services/api/resources";
 import { loadAssetLibraryPage } from "@/services/local-workspace-sync";
@@ -26,16 +25,6 @@ import {
     workspaceAssetTraversalTotal,
 } from "@/services/workspace-asset-read";
 import { hydrateAssetStoreDrafts, peekAssetStoreDraft, recordAssetStoreDraft, resetAssetStoreDraftsForTests, useAssetStore, type Asset } from "@/stores/use-asset-store";
-
-function deferred<T = void>() {
-    let resolve!: (value: T | PromiseLike<T>) => void;
-    let reject!: (error: unknown) => void;
-    const promise = new Promise<T>((res, rej) => {
-        resolve = res;
-        reject = rej;
-    });
-    return { promise, resolve, reject };
-}
 
 function switchScope(userId: string) {
     const previous = getActiveUserScope();
@@ -338,29 +327,6 @@ describe("workspace asset canonical reads", () => {
             expect(page.assets[0]?.title).toBe("本地新标题");
             expect(isUnsavedWorkspaceAsset(page.assets[0]!)).toBe(true);
             expect(useAssetStore.getState().assets.find((asset) => asset.id === "live")?.title).toBe("本地新标题");
-        } finally {
-            restore();
-        }
-    });
-
-    test("A→B→A after a pending read abandons the original expectedScope", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        const expected = captureUserScope();
-        const entered = deferred();
-        const gate = deferred();
-        try {
-            const pending = withAdapter(async () => {
-                entered.resolve();
-                await gate.promise;
-                return envelope(pageResponse([sampleClientAsset("sqlite-1")]));
-            }, async () => loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, expectedScope: expected }));
-            await entered.promise;
-            setActiveUserScope("owner-b");
-            setActiveUserScope("owner-a");
-            gate.resolve();
-            await expect(pending).rejects.toBeInstanceOf(UserScopeAbandonedError);
-            expect(useAssetStore.getState().assets).toEqual([]);
         } finally {
             restore();
         }

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -73,7 +74,10 @@ func TestDreaminaFastMiniRejectUnsupportedResolution(t *testing.T) {
 		for _, resolution := range []string{"480p", "720p", "1080p"} {
 			profile := DefaultModelCapabilityConfigForModel("volcengine-ark-video", name)
 			input := canvasGenerationInput{Mode: "video", Prompt: "test", Config: providerConfig{InterfaceType: "volcengine-ark-video", Model: name, VideoSeconds: "5", Size: "16:9", VQuality: resolution, CapabilityConfig: profile}}
-			err := (&Service{}).validateResolvedVideoCapability(&input)
+			if err := (&Service{}).resolveVideoCapability(context.Background(), &input); err != nil {
+				t.Fatalf("%s %s resolve = %v", name, resolution, err)
+			}
+			err := validateVideoTask(input.VideoCapability, input)
 			if (err != nil) != (resolution == "1080p") {
 				t.Fatalf("%s %s validation = %v", name, resolution, err)
 			}
@@ -84,10 +88,13 @@ func TestDreaminaFastMiniRejectUnsupportedResolution(t *testing.T) {
 func TestDreaminaOperationsValidateAndReachOfficialWireContract(t *testing.T) {
 	for _, operation := range []string{"inpaint", "extend", "reference_to_video"} {
 		input := canvasGenerationInput{Mode: "video", Prompt: "change the light", Config: providerConfig{InterfaceType: "volcengine-ark-video", Model: "dreamina-seedance-2-5-260628", VideoSeconds: "6", Size: "16:9", VQuality: "480p"}, Metadata: map[string]interface{}{"videoEditOperation": operation}, ReferenceVideos: []providerMedia{{URL: "https://cdn.example/video.mp4", Width: 864, Height: 496, DurationMs: 4000}}}
-		if err := (&Service{}).validateResolvedVideoCapability(&input); err != nil {
+		if err := (&Service{}).resolveVideoCapability(context.Background(), &input); err != nil {
+			t.Fatalf("%s resolve: %v", operation, err)
+		}
+		if err := validateVideoTask(input.VideoCapability, input); err != nil {
 			t.Fatalf("%s validation: %v", operation, err)
 		}
-		body := officialVideoCreateBody(t, input)
+		body := officialPluginCreateBody(t, input)
 		wantType, wantRatio, wantDuration := "reference", "16:9", float64(6)
 		if operation == "inpaint" {
 			wantType, wantRatio, wantDuration = "edit", "adaptive", -1
@@ -99,13 +106,16 @@ func TestDreaminaOperationsValidateAndReachOfficialWireContract(t *testing.T) {
 			t.Fatalf("%s body: %#v", operation, body)
 		}
 		input.ReferenceVideos[0].DurationMs = 3999
-		err := (&Service{}).validateResolvedVideoCapability(&input)
+		err := validateVideoTask(input.VideoCapability, input)
 		if (err != nil) != (operation == "inpaint") {
 			t.Fatalf("%s 3999ms: %v", operation, err)
 		}
 		input.ReferenceVideos[0].DurationMs = 4000
 		input.Config.CapabilityConfig.Video.Operations = []string{"text_to_video"}
-		if err := (&Service{}).validateResolvedVideoCapability(&input); err == nil {
+		if err := (&Service{}).resolveVideoCapability(context.Background(), &input); err != nil {
+			t.Fatalf("%s resolve explicit operations: %v", operation, err)
+		}
+		if err := validateVideoTask(input.VideoCapability, input); err == nil {
 			t.Fatal("explicit profile operations expanded")
 		}
 	}
@@ -119,7 +129,10 @@ func TestDreaminaDefaultDurationAndAdaptiveAdmission(t *testing.T) {
 		}
 		for _, seconds := range []string{"-1", "1", "3", "4", "15", "30"} {
 			input := canvasGenerationInput{Mode: "video", Prompt: "forest", Config: providerConfig{InterfaceType: "volcengine-ark-video", Model: name, VideoSeconds: seconds, Size: "adaptive", VQuality: "480p"}}
-			err := (&Service{}).validateResolvedVideoCapability(&input)
+			if err := (&Service{}).resolveVideoCapability(context.Background(), &input); err != nil {
+				t.Fatalf("%s %ss resolve: %v", name, seconds, err)
+			}
+			err := validateVideoTask(input.VideoCapability, input)
 			blocked := seconds == "1" || seconds == "3" || (seconds == "30" && !strings.Contains(name, "2-5"))
 			if (err != nil) != blocked {
 				t.Fatalf("%s %ss: %v", name, seconds, err)
@@ -221,8 +234,11 @@ func TestDefaultSeedance25UsesOfficialCounts(t *testing.T) {
 	if profile.References.MaxImages != 30 || profile.References.MaxVideos != 10 || profile.References.MaxAudios != 10 {
 		t.Fatalf("default 2.5 counts = %#v", profile.References)
 	}
-	if profile.References.MinAudioDuration != 1.8 {
+	if profile.References.MinAudioDuration != 2 {
 		t.Fatalf("default 2.5 min audio = %v", profile.References.MinAudioDuration)
+	}
+	if profile.Duration.Min != 4 {
+		t.Fatalf("default 2.5 output duration min = %d", profile.Duration.Min)
 	}
 	if profile.Duration.Max < 30 {
 		t.Fatalf("default 2.5 output duration max = %d", profile.Duration.Max)
@@ -310,13 +326,89 @@ func TestSeedanceReferenceDurationRejectsShortAndUnknownBeforeSubmit(t *testing.
 		if err := validateVideoTask(profile, input); err == nil || !strings.Contains(err.Error(), "时长无法读取") {
 			t.Fatalf("unknown duration: %v", err)
 		}
-		input.ReferenceAudios[1].DurationMs = 1700
-		if err := validateVideoTask(profile, input); err == nil || !strings.Contains(err.Error(), "1.70") || !strings.Contains(err.Error(), "1.8") {
-			t.Fatalf("1.7s audio: %v", err)
-		}
 		input.ReferenceAudios[1].DurationMs = 1800
-		if err := validateVideoTask(profile, input); err != nil {
+		if err := validateVideoTask(profile, input); err == nil || !strings.Contains(err.Error(), "1.80") || !strings.Contains(err.Error(), "2–") {
 			t.Fatalf("1.8s audio: %v", err)
+		}
+		input.ReferenceAudios[1].DurationMs = 2000
+		if err := validateVideoTask(profile, input); err != nil {
+			t.Fatalf("2s audio: %v", err)
+		}
+	}
+}
+
+func TestSeedanceDocumentedOutputDurationFloor(t *testing.T) {
+	// 输出时长下限官方是 4 秒：3 秒被拒、4 秒通过，提示写出现在的值和支持的范围。
+	profile := DefaultModelCapabilityConfigForModel("newapi", "seedance-2.0").Video
+	for _, seconds := range []string{"3", "4"} {
+		input := canvasGenerationInput{
+			Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://enterprise.beefapi.com", VideoSeconds: seconds},
+			ReferenceImages: []providerMedia{{Width: 512, Height: 512, Bytes: 1000}},
+		}
+		err := validateVideoTask(profile, input)
+		if seconds == "3" {
+			if err == nil || !strings.Contains(err.Error(), "输出时长为 3 秒") || !strings.Contains(err.Error(), "4–15 秒") {
+				t.Fatalf("3s output duration: %v", err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("4s output duration: %v", err)
+		}
+	}
+}
+
+func TestSeedanceReferenceAudioMessageNamesItemAndFix(t *testing.T) {
+	// 提示要说清哪一段、现在多少、要改到多少，用户才知道下一步做什么。
+	profile := DefaultModelCapabilityConfigForModel("newapi", "seedance-2.0").Video
+	input := canvasGenerationInput{
+		Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://enterprise.beefapi.com", VideoSeconds: "5"},
+		ReferenceImages: []providerMedia{{Width: 512, Height: 512, Bytes: 1000}},
+		ReferenceAudios: []providerMedia{{DurationMs: 1900, Bytes: 1000}},
+	}
+	err := validateVideoTask(profile, input)
+	if err == nil || !strings.Contains(err.Error(), "第 1 段参考音频时长为 1.90 秒") || !strings.Contains(err.Error(), "需要改到 2–15 秒") || !strings.Contains(err.Error(), "请换一段更长的音频") {
+		t.Fatalf("audio duration message: %v", err)
+	}
+}
+
+func TestSeedanceSavedEnumAndContinuousDurationsRespectDocumentedFloor(t *testing.T) {
+	enumProfile := DefaultModelCapabilityConfigForModel("newapi", "seedance-2.0").Video
+	enumProfile.Duration = VideoDurationConfig{Selection: "enum", Values: []int{-1, 1, 2, 3, 4, 5}, Default: 5}
+	continuous := DefaultModelCapabilityConfigForModel("newapi", "seedance-2.0").Video
+	continuous.Duration = VideoDurationConfig{Selection: "range", Min: 1, Max: 15, Step: 1, FractionalMin: 0.92, Continuous: true, Default: 5}
+	for label, profile := range map[string]*VideoCapabilityConfig{"enum": enumProfile, "continuous": continuous} {
+		for seconds, wantRejected := range map[string]bool{"1": true, "3": true, "4": false, "5": false} {
+			input := canvasGenerationInput{
+				Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://enterprise.beefapi.com", VideoSeconds: seconds},
+				ReferenceImages: []providerMedia{{Width: 512, Height: 512, Bytes: 1000}},
+			}
+			err := validateVideoTask(profile, input)
+			if wantRejected != (err != nil) {
+				t.Fatalf("%s %ss duration: rejected=%t err=%v", label, seconds, err != nil, err)
+			}
+		}
+	}
+	// 自动时长（-1）在枚举里保留。
+	if !slices.Contains(enumProfile.Duration.Values, -1) {
+		t.Fatalf("auto duration dropped: %v", enumProfile.Duration.Values)
+	}
+}
+
+func TestSeedanceEnumWithoutLegalDurationRejectsSubmission(t *testing.T) {
+	// 保存的枚举全部低于官方 4 秒下限时，没有任何合法时长可提交：
+	// 收紧后必须拒绝，而不是退回原来的 1 秒。
+	for _, values := range [][]int{{1}, {1, 2, 3}} {
+		profile := DefaultModelCapabilityConfigForModel("newapi", "seedance-2.0").Video
+		profile.Duration = VideoDurationConfig{Selection: "enum", Values: slices.Clone(values), Default: 1}
+		for _, seconds := range []string{"1", "2", "3", "4"} {
+			input := canvasGenerationInput{
+				Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://enterprise.beefapi.com", VideoSeconds: seconds},
+				ReferenceImages: []providerMedia{{Width: 512, Height: 512, Bytes: 1000}},
+			}
+			if err := validateVideoTask(profile, input); err == nil {
+				t.Fatalf("enum %v accepted %ss", values, seconds)
+			}
 		}
 	}
 }
@@ -339,14 +431,17 @@ func TestSeedanceReferenceDurationWithoutPersistedCapability(t *testing.T) {
 	for _, protocol := range []string{"openai", "newapi", "newapi-channel-2"} {
 		for _, name := range []string{"seedance-2.5", "provider/seedance-2.0-fast"} {
 			input := canvasGenerationInput{Prompt: "test", Config: providerConfig{InterfaceType: protocol, Model: name, VideoSeconds: "5"}, ReferenceImages: []providerMedia{{Width: 512, Height: 512}}, ReferenceAudios: []providerMedia{{DurationMs: 900}}}
-			if err := (&Service{}).validateResolvedVideoCapability(&input); err == nil || !strings.Contains(err.Error(), "第 1 段参考音频") {
+			if err := (&Service{}).resolveVideoCapability(context.Background(), &input); err != nil {
+				t.Fatalf("%s %s resolve: %v", protocol, name, err)
+			}
+			if err := validateVideoTask(input.VideoCapability, input); err == nil || !strings.Contains(err.Error(), "第 1 段参考音频") {
 				t.Fatalf("%s %s bypassed short audio validation: %v", protocol, name, err)
 			}
 		}
 	}
 }
 
-func TestValidateImageTaskRejectsOversizedGrokPromptByUTF8Bytes(t *testing.T) {
+func TestValidateImageTaskDelegatesGrokPromptLengthToUpstream(t *testing.T) {
 	prompt := strings.Repeat("中", 4001)
 	input := canvasGenerationInput{
 		Mode:   "image",
@@ -354,13 +449,8 @@ func TestValidateImageTaskRejectsOversizedGrokPromptByUTF8Bytes(t *testing.T) {
 		Config: providerConfig{InterfaceType: "grok-image", Model: "grok-imagine-image-quality"},
 	}
 
-	err := validateImageTask(DefaultImageCapabilityConfig("grok-image", "grok-imagine-image-quality"), input)
-	if err == nil {
-		t.Fatal("validateImageTask() error = nil")
-	}
-	wantBytes := fmt.Sprintf("%d UTF-8 字节", len(prompt))
-	if !strings.Contains(err.Error(), wantBytes) || !strings.Contains(err.Error(), "8000") || !strings.Contains(err.Error(), "连线文本") {
-		t.Fatalf("validateImageTask() error = %q", err)
+	if err := validateImageTask(DefaultImageCapabilityConfig("grok-image", "grok-imagine-image-quality"), input); err != nil {
+		t.Fatalf("validateImageTask() should delegate prompt length to upstream, got error = %q", err)
 	}
 }
 
@@ -377,18 +467,17 @@ func TestValidateImageTaskDoesNotApplyQualityPromptLimitToGrokLite(t *testing.T)
 	}
 }
 
-func TestValidateVideoTaskRejectsPromptAboveCapabilityLimit(t *testing.T) {
+func TestValidateVideoTaskDelegatesPromptLengthToUpstream(t *testing.T) {
 	profile := DefaultModelCapabilityConfigForModel("autodl-comfyui", "MiniMax H3").Video
 	profile.References.PromptMaxChars = 10_000
 	input := canvasGenerationInput{
 		Mode:   "video",
 		Prompt: strings.Repeat("镜", 23_142),
-		Config: providerConfig{Model: "MiniMax H3", VideoSeconds: "15", Size: "16:9", VQuality: "768p横"},
+		Config: providerConfig{Model: "MiniMax H3", VideoSeconds: "6", Size: "16:9", VQuality: "720p"},
 	}
 
-	err := validateVideoTask(profile, input)
-	if err == nil || !strings.Contains(err.Error(), "最多 10000 个字符") || !strings.Contains(err.Error(), "23142 个字符") || !strings.Contains(err.Error(), "不会自动截断") {
-		t.Fatalf("validateVideoTask() error = %v", err)
+	if err := validateVideoTask(profile, input); err != nil {
+		t.Fatalf("validateVideoTask() should delegate prompt length to upstream, got error = %v", err)
 	}
 }
 
@@ -415,13 +504,14 @@ func TestValidateTaskCapabilityRejectsWorkflowPromptAboveConfiguredLimit(t *test
 		"prompt": strings.Repeat("镜", 10_001),
 		"config": map[string]any{
 			"interfaceType":    "runninghub-workflow-video",
+			"apiKey":           "rh-key",
+			"workflowId":       "wf-1",
 			"capabilityConfig": profile,
 		},
 	}
 
-	err := (&Service{}).ValidateTaskCapability(input)
-	if err == nil || !strings.Contains(err.Error(), "完整提示词为 10001 个字符") {
-		t.Fatalf("ValidateTaskCapability() error = %v", err)
+	if err := (&Service{}).ValidateTaskCapability(input); err != nil {
+		t.Fatalf("ValidateTaskCapability() should delegate workflow prompt length to upstream, got error = %v", err)
 	}
 }
 
@@ -763,5 +853,73 @@ func TestValidateVideoTaskRequiresDeclaredMinimumImages(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "至少需要 1 张参考图") {
 		t.Fatalf("validateVideoTask() error = %v", err)
+	}
+}
+
+func TestCustomChannelHonoursServerDeclaredImageAndVideoCapabilities(t *testing.T) {
+	imgVersion := "custom-gateway-img-v1"
+	imgProfile := DefaultImageCapabilityConfig("openai-image", "gpt-image-2")
+	imgProfile.References.PromptMaxChars = 0
+	imgProfile.References.MaxImages = 5
+	imgProfile.References.MaxImageBytes = 0
+	imgProfile.Quality = ImageQualityConfig{Supported: true, Values: []string{"ultra"}, Default: "ultra"}
+	imgProfile.MaxOutputs = 4
+	imgProfile.FixedOutputs = 4
+
+	imgInput := canvasGenerationInput{
+		Mode:   "image",
+		Prompt: "custom image",
+		Config: providerConfig{
+			ChannelID:                "custom-gateway",
+			BaseURL:                  "https://gateway.example.com/v1",
+			APIKey:                   "custom-key",
+			InterfaceType:            "openai-image",
+			Model:                    "gpt-image-2",
+			Size:                     "1024x1024",
+			Quality:                  "ultra",
+			Count:                    "4",
+			CapabilityConfig:         &ModelCapabilityConfig{Version: 1, Image: imgProfile},
+			ImageCapabilitiesVersion: &imgVersion,
+		},
+		ReferenceImages: make([]providerMedia, 5),
+	}
+	if err := (&Service{}).validateResolvedImageCapability(&imgInput); err != nil {
+		t.Fatalf("custom channel versioned image capability rejected: %v", err)
+	}
+	if imgInput.ImageCapability == nil || imgInput.ImageCapability.References.MaxImages != 5 || imgInput.ImageCapability.Quality.Default != "ultra" || imgInput.ImageCapability.FixedOutputs != 4 {
+		t.Fatalf("custom channel image capability = %#v", imgInput.ImageCapability)
+	}
+
+	videoVersion := "custom-gateway-vid-v1"
+	videoProfile := DefaultModelCapabilityConfigForModel("newapi", "seedance-2.0")
+	videoProfile.Video.References.MaxImages = 11
+	videoProfile.Video.GenerateAudio.Supported = false
+	videoProfile.Video.Resolutions = []string{"1080p"}
+	videoProfile.Video.DefaultResolution = "1080p"
+
+	videoInput := canvasGenerationInput{
+		Mode:   "video",
+		Prompt: "custom video",
+		Config: providerConfig{
+			ChannelID:                "custom-gateway",
+			BaseURL:                  "https://gateway.example.com/v1",
+			APIKey:                   "custom-key",
+			InterfaceType:            "newapi",
+			Model:                    "seedance-2.0",
+			VideoSeconds:             "5",
+			Size:                     "16:9",
+			VQuality:                 "720p",
+			CapabilityConfig:         videoProfile,
+			VideoCapabilitiesVersion: &videoVersion,
+		},
+	}
+	for i := 0; i < 11; i++ {
+		videoInput.ReferenceImages = append(videoInput.ReferenceImages, providerMedia{URL: "asset://test", Width: 640, Height: 640, Bytes: 10})
+	}
+	if err := (&Service{}).validateResolvedVideoCapability(&videoInput); err != nil {
+		t.Fatalf("custom channel versioned video capability rejected: %v", err)
+	}
+	if videoInput.VideoCapability == nil || videoInput.VideoCapability.References.MaxImages != 11 || videoInput.VideoCapability.GenerateAudio.Supported || videoInput.Config.VQuality != "1080p" {
+		t.Fatalf("custom channel video capability = %#v, vquality = %q", videoInput.VideoCapability, videoInput.Config.VQuality)
 	}
 }

@@ -56,20 +56,10 @@ func Bind(ports Ports, userID string, req Request) (Receipt, error) {
 	}
 	// Multi-output image tasks freeze the destination for every output before
 	// submission. Never accept a new destination supplied by the bind request.
-	if task.Type == "canvas_image" && localtask.SeedreamOutputRoot(*task) == "" {
-		var input struct {
-			Metadata struct {
-				OutputNodeIDs []string `json:"outputNodeIds"`
-			} `json:"metadata"`
-		}
-		if json.Unmarshal([]byte(task.InputJSON), &input) == nil && len(input.Metadata.OutputNodeIDs) > 0 {
-			if req.OutputIndex >= len(input.Metadata.OutputNodeIDs) {
-				return Receipt{}, conflict("node_mismatch", "产物未指定画布节点")
-			}
-			nodeID = strings.TrimSpace(input.Metadata.OutputNodeIDs[req.OutputIndex])
-			if nodeID == "" {
-				return Receipt{}, conflict("node_mismatch", "产物未指定画布节点")
-			}
+	if len(localtask.FrozenOutputNodeIDs(*task)) > 0 {
+		nodeID = localtask.CanvasBindNodeID(*task, req.OutputIndex, "")
+		if nodeID == "" {
+			return Receipt{}, conflict("node_mismatch", "产物未指定画布节点")
 		}
 	}
 	if nodeID != "" && nodeID != req.NodeID {

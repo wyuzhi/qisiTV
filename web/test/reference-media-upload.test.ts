@@ -26,18 +26,16 @@ test("shared uploader uses only selected owned references and preserves their sl
     expect(links).toEqual({ "image:0": "https://cdn.example/reference", "image:1": "https://cdn.example/reference" });
 });
 
-test("abort and account changes after settings prevent upload", async () => {
-    for (const action of ["abort", "switch"] as const) {
-        setActiveUserScope("reference-owner");
-        const controller = new AbortController();
-        let uploads = 0;
-        globalThis.window = { go: { main: { DesktopApp: {
-            ReferenceStorageSettings: async () => { if (action === "abort") controller.abort(); else setActiveUserScope("other-owner"); return { enabled: true }; },
-            UploadReferenceMedia: async () => { uploads++; return {}; },
-        } } } } as unknown as Window & typeof globalThis;
-        await expect(uploadReferenceLinks([{ key: "image:0", label: "图片 1", resourceID: "owned" }], controller.signal)).rejects.toThrow();
-        expect(uploads).toBe(0);
-    }
+test("abort after settings prevents upload", async () => {
+    setActiveUserScope("reference-owner");
+    const controller = new AbortController();
+    let uploads = 0;
+    globalThis.window = { go: { main: { DesktopApp: {
+        ReferenceStorageSettings: async () => { controller.abort(); return { enabled: true }; },
+        UploadReferenceMedia: async () => { uploads++; return {}; },
+    } } } } as unknown as Window & typeof globalThis;
+    await expect(uploadReferenceLinks([{ key: "image:0", label: "图片 1", resourceID: "owned" }], controller.signal)).rejects.toThrow();
+    expect(uploads).toBe(0);
 });
 
 test("all task entry points can recover URL admission using the configured desktop storage", async () => {

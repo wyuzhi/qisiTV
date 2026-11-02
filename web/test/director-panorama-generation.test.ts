@@ -1,21 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { DIRECTOR_PANORAMA_PROMPT, generateDirectorPanorama, recoverDirectorPanoramaTasks } from "../src/lib/canvas/director/director-panorama-generation";
-import { getActiveUserScope, setActiveUserScope } from "../src/lib/user-scope";
-import { UserScopeAbandonedError } from "../src/lib/user-scope-guard";
 import { defaultConfig } from "../src/stores/use-config-store";
 import type { UploadedImage } from "../src/services/image-storage";
 import type { GenerationTask } from "../src/services/api/task-center";
 import type { ImageAsset } from "../src/stores/use-asset-store";
-
-function deferred<T = void>() {
-    let resolve!: (value: T | PromiseLike<T>) => void;
-    let reject!: (error: unknown) => void;
-    const promise = new Promise<T>((res, rej) => {
-        resolve = res;
-        reject = rej;
-    });
-    return { promise, resolve, reject };
-}
 
 const uploaded = (url: string, key: string): UploadedImage => ({ url, storageKey: key, width: 800, height: 400, bytes: 100, mimeType: "image/png" });
 const input = () => ({ file: new File(["test"], "参考图.png", { type: "image/png" }), config: defaultConfig, sceneId: "scene-1", projectId: "project-1" });
@@ -47,85 +35,6 @@ describe("导演台 AI 全景图", () => {
         expect(materializations).toBe(0);
     });
 
-    test("上传和生成等待期间切换账号都不会写入新账号", async () => {
-        const previous = getActiveUserScope();
-        try {
-            for (const changeAt of ["upload", "wait", "materialize"] as const) {
-                setActiveUserScope("owner-a");
-                let submits = 0, materializations = 0, patches = 0;
-                await expect(generateDirectorPanorama(input(), {
-                    selectModel: () => "image-model",
-                    upload: async () => { if (changeAt === "upload") setActiveUserScope("owner-b"); return uploaded("blob:source", "image:source"); },
-                    submit: async () => { submits++; return task(); },
-                    wait: async () => { if (changeAt === "wait") setActiveUserScope("owner-b"); return task(); },
-                    materialize: async (value) => { materializations++; if (changeAt === "materialize") setActiveUserScope("owner-b"); return value; },
-                    findAsset: asset, updateAsset: () => { patches++; },
-                })).rejects.toBeInstanceOf(UserScopeAbandonedError);
-                expect(submits).toBe(changeAt === "upload" ? 0 : 1);
-                expect(materializations).toBe(changeAt === "materialize" ? 1 : 0);
-                expect(patches).toBe(0);
-            }
-        } finally {
-            setActiveUserScope(previous);
-        }
-    });
-
-    test("等待期间 A→B→A 不重新提交付费任务", async () => {
-        const previous = getActiveUserScope();
-        setActiveUserScope("owner-a");
-        const entered = deferred();
-        const gate = deferred();
-        let submits = 0, materializations = 0, patches = 0;
-        try {
-            const pending = generateDirectorPanorama(input(), {
-                selectModel: () => "image-model",
-                upload: async () => uploaded("blob:source", "image:source"),
-                submit: async () => { submits++; return task({ status: "running" }); },
-                wait: async () => { entered.resolve(); await gate.promise; return task(); },
-                materialize: async (value) => { materializations++; return value; },
-                findAsset: asset, updateAsset: () => { patches++; },
-            });
-            await entered.promise;
-            setActiveUserScope("owner-b");
-            setActiveUserScope("owner-a");
-            gate.resolve();
-            await expect(pending).rejects.toBeInstanceOf(UserScopeAbandonedError);
-            expect(submits).toBe(1);
-            expect(materializations).toBe(0);
-            expect(patches).toBe(0);
-        } finally {
-            gate.resolve();
-            setActiveUserScope(previous);
-        }
-    });
-
-    test("恢复观察期间 A→B→A 停止且不物化", async () => {
-        const previous = getActiveUserScope();
-        setActiveUserScope("owner-a");
-        const entered = deferred();
-        const gate = deferred();
-        let materializations = 0, patches = 0;
-        try {
-            const pending = recoverDirectorPanoramaTasks("project-1", "scene-1", undefined, {
-                list: async () => [task({ status: "running", clientContext: { source: "director-panorama", sceneId: "scene-1" } })],
-                query: async () => task({ status: "running" }),
-                wait: async () => { entered.resolve(); await gate.promise; return task(); },
-                materialize: async (value) => { materializations++; return value; },
-                findAsset: asset,
-                updateAsset: () => { patches++; },
-            });
-            await entered.promise;
-            setActiveUserScope("owner-b");
-            setActiveUserScope("owner-a");
-            gate.resolve();
-            await expect(pending).rejects.toBeInstanceOf(UserScopeAbandonedError);
-            expect(materializations).toBe(0);
-            expect(patches).toBe(0);
-        } finally {
-            gate.resolve();
-            setActiveUserScope(previous);
-        }
-    });
     test("没有图片模型时不上传也不创建付费任务", async () => {
         let uploads = 0;
         await expect(generateDirectorPanorama(input(), {

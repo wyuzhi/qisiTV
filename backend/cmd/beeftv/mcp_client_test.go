@@ -55,7 +55,25 @@ func TestMCPClientLoop(t *testing.T) {
 	}
 	registry := operations.NewRegistry(nil, nil)
 	operations.RegisterDefaultOps(registry)
-	expected := registry.List(operations.ManualCaller(false))
+	excluded := map[string]bool{
+		"conversation.message.attach": true,
+		"skill.publish.prepare":       true,
+		"skill.publish.status":        true,
+	}
+	var expected []operations.Descriptor
+	for _, op := range registry.List(operations.ManualCaller(false)) {
+		if !excluded[op.ID] {
+			expected = append(expected, op)
+		}
+	}
+	if len(expected) != 38 {
+		t.Fatalf("expected 38 default MCP operations, got %d", len(expected))
+	}
+	for _, tool := range tools.Tools {
+		if excluded[tool.Name] {
+			t.Fatalf("excluded operation %s leaked into default MCP tools", tool.Name)
+		}
+	}
 	apiClient, clientErr := newClient()
 	if clientErr != nil {
 		t.Fatal(clientErr)
@@ -64,8 +82,13 @@ func TestMCPClientLoop(t *testing.T) {
 	if discoveryErr != nil {
 		t.Fatal(discoveryErr)
 	}
-	if len(tools.Tools) != len(expected)+len(business) {
-		t.Fatalf("MCP tools = %d, workspace operations = %d, business handlers = %d", len(tools.Tools), len(expected), len(business))
+	// 底层业务接口默认只通过 business.list / business.call 两个入口暴露。
+	gateway := 0
+	if len(business) > 0 {
+		gateway = 2
+	}
+	if len(tools.Tools) != len(expected)+gateway {
+		t.Fatalf("MCP tools = %d, workspace operations = %d, business gateway = %d", len(tools.Tools), len(expected), gateway)
 	}
 	for _, operation := range expected {
 		found := false

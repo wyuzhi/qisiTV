@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -179,9 +180,13 @@ func (c *client) do(ctx context.Context, method, path string, body any) (json.Ra
 		return nil, &cliError{code: exitTransportFailure, reason: "transport_failed", msg: fmt.Sprintf("无法连接本地工作区 %s：%v", base, err)}
 	}
 	defer resp.Body.Close()
-	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	// 单段媒体最多 8 MiB，转成 base64 加上 JSON 约 11 MiB；上限要能放下一整段，超出时明确报错，不截断后再解析失败。
+	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, maxWorkspaceResponseBytes+1))
 	if readErr != nil {
 		return nil, &cliError{code: exitTransportFailure, reason: "read_failed", msg: readErr.Error()}
+	}
+	if len(raw) > maxWorkspaceResponseBytes {
+		return nil, &cliError{code: exitInternal, reason: "response_too_large", msg: "工作区返回的结果超过 24 MiB，请缩小媒体检查区间或减少检查模式"}
 	}
 	if resp.StatusCode == http.StatusOK {
 		var envelope struct {
@@ -272,6 +277,9 @@ func (c *client) listOpsCtx(ctx context.Context, readOnly bool) ([]opDescriptor,
 func (c *client) callOp(opID, requestID string, params json.RawMessage) (json.RawMessage, error) {
 	return c.callOpCtx(context.Background(), opID, requestID, params)
 }
+
+// maxWorkspaceResponseBytes bounds one workspace JSON response read by the CLI.
+const maxWorkspaceResponseBytes = 24 << 20
 
 func (c *client) callOpCtx(ctx context.Context, opID, requestID string, params json.RawMessage) (json.RawMessage, error) {
 	body := map[string]any{"opId": requestID, "params": json.RawMessage(params)}
@@ -373,6 +381,14 @@ func run(args []string) error {
 		return runTask(c, args[1:])
 	case "client":
 		return runClient(c, args[1:])
+	case "approve":
+		return runApprove(c, args[1:])
+	case "orders":
+		return runOrders(c, args[1:])
+	case "writes":
+		return runExternalWrites(c, args[1:])
+	case "undo":
+		return runUndoExternalWrite(c, args[1:])
 	case "mcp":
 		return runMCP(c, args[1:])
 	case "business":
@@ -391,8 +407,8 @@ func usage() {
   beeftv ops [--read-only] [--json]
   beeftv ops call <operation> --params '<json>' [--operation-id <id>] [--json]
   beeftv business discover
-  beeftv business call --tool <id> --params '<path/query/body json>'
-  beeftv business upload --file <path> [--target resource|skill|plugin] [--params '<json>']
+  beeftv business call --tool <id> --params '<path/query/body json>' [--operation-id <id>]
+  beeftv business upload --file <path> [--target resource|skill|plugin] [--params '<json>'] [--operation-id <id>]
   beeftv canvas get --canvas <id> [--json]
   beeftv canvas search [--query <q>] [--page N] [--page-size N] [--json]
   beeftv canvas node update --canvas <id> --node <id> --expected-revision N [--title T] [--prompt P] [--content C] --op-id <id>
@@ -401,8 +417,12 @@ func usage() {
   beeftv asset list [--query <q>] [--kind <kind>] [--favorite] [--recent] [--project <name>] [--generated] [--json]
   beeftv asset get --asset <id> [--json]
   beeftv task get --task <id> [--json]
-  beeftv client register --label <label> [--kind codex|claude|cursor|other] [--mode read-only|read-write]
-  beeftv mcp serve [--read-only]
+  beeftv orders [--canvas <id>] [--json]
+  beeftv approve <proposalId> [--json]
+  beeftv writes [--canvas <id>] [--json]
+  beeftv undo <opId|latest> [--canvas <id>] [--json]
+  beeftv client register --label <label> [--kind codex|claude|cursor|other] [--mode read-only|read-write] [--approval ask|caller|auto]
+  beeftv mcp serve [--read-only] [--all-business-tools]
 
 连接哪个工作区：不设 BEEFTV_BASE_URL 时自动连正在运行的 BeefTV 桌面应用，端口是动态的。
 BEEFTV_DATA_DIR 可以指向非默认数据目录。Windows 从用户目录下 .beeftv/runtime 读取对应
@@ -410,9 +430,12 @@ BEEFTV_DATA_DIR 可以指向非默认数据目录。Windows 从用户目录下 .
 
 凭据：在 BeefTV 的设置里新建一个客户端，把它给出的 BEEFTV_CLIENT_ID 与 BEEFTV_CLIENT_TOKEN
 填进环境变量即可，不需要桌面令牌。新连接默认开放全部业务工具，操作审批由外部 Agent 管理。
+MCP 默认只列出画布、素材、媒体与技能操作，底层业务接口通过 business.list 查找、business.call 调用；
+需要把每个底层接口单独列成工具时加 --all-business-tools（或设 BEEFTV_MCP_ALL_BUSINESS_TOOLS=1）。
 历史只读凭据继续保持只读；CLI 仍支持显式签发只读凭据。
 
-写操作必须带幂等键（CLI 的 --op-id，MCP 工具参数里的 operationId）：重试同一操作要复用同一个值。
+写操作必须带幂等键（CLI 的 --op-id / --operation-id，MCP 工具参数里的 operationId）：重试同一操作要复用同一个值。
+business call 提交生成（会扣费）时 --operation-id 必填，并作为任务的 clientOperationId。
 
 环境变量：BEEFTV_BASE_URL、BEEFTV_DATA_DIR、BEEFTV_CLIENT_ID、BEEFTV_CLIENT_TOKEN、
 BEEFTV_OWNER_TOKEN（owner 可信通道）、BEEFTV_DESKTOP_TOKEN（桌面自身调用）
@@ -674,16 +697,169 @@ func runClient(c *client, args []string) error {
 	fs := flag.NewFlagSet("client register", flag.ContinueOnError)
 	label := fs.String("label", "", "客户端名称")
 	mode := fs.String("mode", "read-write", "read-only 或 read-write")
+	approval := fs.String("approval", "caller", "生成审批模式：ask（每次问我）、caller（调用方自己批）或 auto（自动）")
 	kind := fs.String("kind", "other", "codex、claude、cursor 或 other")
 	jsonOut := fs.Bool("json", false, "输出 JSON")
 	if err := fs.Parse(args[1:]); err != nil {
 		return flagError(err)
 	}
-	raw, err := c.do(context.Background(), http.MethodPost, "/ops/clients", map[string]any{"label": *label, "mode": *mode, "kind": *kind})
+	raw, err := c.do(context.Background(), http.MethodPost, "/ops/clients", map[string]any{
+		"label":        *label,
+		"mode":         *mode,
+		"approvalMode": *approval,
+		"kind":         *kind,
+	})
 	if err != nil {
 		return err
 	}
 	return printResult(raw, *jsonOut)
+}
+
+func (c *client) ensureLocalOwnerToken() {
+	if c.clientID != "" || c.token != "" || c.ownerToken != "" {
+		return
+	}
+	if strings.TrimSpace(os.Getenv("BEEFTV_AGENT_TOKEN")) != "" || strings.TrimSpace(os.Getenv("BEEFTV_AGENT_TURN")) != "" || strings.TrimSpace(os.Getenv("BEEFTV_AGENT_DESKTOP_TOKEN")) != "" {
+		return
+	}
+	dataDir, err := runtimeinfo.DefaultDataDir()
+	if err != nil || strings.TrimSpace(dataDir) == "" {
+		return
+	}
+	raw, err := os.ReadFile(filepath.Join(dataDir, "agent_owner_token"))
+	if err != nil {
+		return
+	}
+	if token := strings.TrimSpace(string(raw)); token != "" {
+		c.ownerToken = token
+	}
+}
+
+func runApprove(c *client, args []string) error {
+	jsonOut := false
+	proposalID := ""
+	for i := 0; i < len(args); i++ {
+		arg := strings.TrimSpace(args[i])
+		switch {
+		case arg == "--help" || arg == "-h":
+			fmt.Fprintln(os.Stderr, "用法: beeftv approve <proposalId> [--json]")
+			return nil
+		case arg == "--json" || arg == "-json":
+			jsonOut = true
+		case arg == "--proposal" || arg == "-proposal":
+			if i+1 >= len(args) {
+				return &cliError{code: exitUsage, reason: "missing_flag", msg: "--proposal 需要参数"}
+			}
+			i++
+			proposalID = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "--proposal="):
+			proposalID = strings.TrimSpace(strings.TrimPrefix(arg, "--proposal="))
+		case strings.HasPrefix(arg, "-"):
+			return &cliError{code: exitUsage, reason: "bad_flags", msg: "未知参数: " + arg}
+		case proposalID == "":
+			proposalID = arg
+		default:
+			return &cliError{code: exitUsage, reason: "bad_flags", msg: "多余的参数: " + arg}
+		}
+	}
+	if proposalID == "" {
+		return &cliError{code: exitUsage, reason: "missing_flag", msg: "请提供生成单编号：beeftv approve <proposalId>"}
+	}
+	c.ensureLocalOwnerToken()
+	raw, err := c.do(context.Background(), http.MethodPost, "/ops/orders/"+url.PathEscape(proposalID)+"/approve", map[string]any{})
+	if err != nil {
+		return err
+	}
+	return printResult(raw, jsonOut)
+}
+
+func runOrders(c *client, args []string) error {
+	fs := flag.NewFlagSet("orders", flag.ContinueOnError)
+	canvasID := fs.String("canvas", "", "按画布 ID 过滤")
+	jsonOut := fs.Bool("json", false, "输出 JSON")
+	if err := fs.Parse(args); err != nil {
+		return flagError(err)
+	}
+	c.ensureLocalOwnerToken()
+	path := "/ops/orders"
+	if trimmed := strings.TrimSpace(*canvasID); trimmed != "" {
+		path += "?canvasId=" + url.QueryEscape(trimmed)
+	}
+	raw, err := c.do(context.Background(), http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	return printResult(raw, *jsonOut)
+}
+
+func runExternalWrites(c *client, args []string) error {
+	fs := flag.NewFlagSet("writes", flag.ContinueOnError)
+	canvasID := fs.String("canvas", "", "按画布 ID 过滤")
+	jsonOut := fs.Bool("json", false, "输出 JSON")
+	if err := fs.Parse(args); err != nil {
+		return flagError(err)
+	}
+	c.ensureLocalOwnerToken()
+	path := "/ops/external-writes"
+	if trimmed := strings.TrimSpace(*canvasID); trimmed != "" {
+		path += "?canvasId=" + url.QueryEscape(trimmed)
+	}
+	raw, err := c.do(context.Background(), http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	return printResult(raw, *jsonOut)
+}
+
+func runUndoExternalWrite(c *client, args []string) error {
+	jsonOut := false
+	opID := ""
+	canvasID := ""
+	for i := 0; i < len(args); i++ {
+		arg := strings.TrimSpace(args[i])
+		switch {
+		case arg == "--help" || arg == "-h":
+			fmt.Fprintln(os.Stderr, "用法: beeftv undo <opId|latest> [--canvas <id>] [--json]")
+			return nil
+		case arg == "--json" || arg == "-json":
+			jsonOut = true
+		case arg == "--canvas" || arg == "-canvas":
+			if i+1 >= len(args) {
+				return &cliError{code: exitUsage, reason: "missing_flag", msg: "--canvas 需要参数"}
+			}
+			i++
+			canvasID = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "--canvas="):
+			canvasID = strings.TrimSpace(strings.TrimPrefix(arg, "--canvas="))
+		case arg == "--op-id" || arg == "-op-id":
+			if i+1 >= len(args) {
+				return &cliError{code: exitUsage, reason: "missing_flag", msg: "--op-id 需要参数"}
+			}
+			i++
+			opID = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "--op-id="):
+			opID = strings.TrimSpace(strings.TrimPrefix(arg, "--op-id="))
+		case strings.HasPrefix(arg, "-"):
+			return &cliError{code: exitUsage, reason: "bad_flags", msg: "未知参数: " + arg}
+		case opID == "":
+			opID = arg
+		default:
+			return &cliError{code: exitUsage, reason: "bad_flags", msg: "多余的参数: " + arg}
+		}
+	}
+	if opID == "" {
+		if canvasID != "" {
+			opID = "latest"
+		} else {
+			return &cliError{code: exitUsage, reason: "missing_flag", msg: "请提供写入 opId 或 --canvas：beeftv undo <opId> [--canvas <id>]"}
+		}
+	}
+	c.ensureLocalOwnerToken()
+	raw, err := c.do(context.Background(), http.MethodPost, "/ops/external-writes/"+url.PathEscape(opID)+"/undo", map[string]any{"canvasId": canvasID})
+	if err != nil {
+		return err
+	}
+	return printResult(raw, jsonOut)
 }
 
 func runMCP(c *client, args []string) error {
@@ -692,6 +868,7 @@ func runMCP(c *client, args []string) error {
 	}
 	fs := flag.NewFlagSet("mcp serve", flag.ContinueOnError)
 	readOnly := fs.Bool("read-only", false, "只暴露只读工具")
+	allBusiness := fs.Bool("all-business-tools", os.Getenv("BEEFTV_MCP_ALL_BUSINESS_TOOLS") == "1", "把每个底层业务接口注册成单独的工具（默认只给 business.list / business.call 两个入口）")
 	if err := fs.Parse(args[1:]); err != nil {
 		return flagError(err)
 	}
@@ -708,6 +885,13 @@ func runMCP(c *client, args []string) error {
 		return err
 	}
 	server := mcp.NewServer(&mcp.Implementation{Name: "beeftv", Version: "1.0.0"}, nil)
+	filteredOps := make([]opDescriptor, 0, len(ops))
+	for _, op := range ops {
+		if isDefaultMCPOperation(op.ID) {
+			filteredOps = append(filteredOps, op)
+		}
+	}
+	ops = filteredOps
 	registeredTools := len(ops)
 	business, businessErr := c.businessTools(ctx)
 	if businessErr != nil {
@@ -715,13 +899,15 @@ func runMCP(c *client, args []string) error {
 		if !errors.As(businessErr, &unavailable) || unavailable.code != exitNotFound {
 			return businessErr
 		}
-	} else {
+	} else if *allBusiness {
 		registerBusinessMCP(server, c, business, *readOnly)
 		for _, tool := range business {
 			if !*readOnly || tool.ReadOnly {
 				registeredTools++
 			}
 		}
+	} else {
+		registeredTools += registerBusinessGateway(server, c, business, *readOnly)
 	}
 	for _, op := range ops {
 		descriptor := op
@@ -758,12 +944,16 @@ func runMCP(c *client, args []string) error {
 				if err != nil {
 					return toolError(err), nil
 				}
-				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(result)}}}, nil
+				return &mcp.CallToolResult{Content: opToolContent(result)}, nil
 			})
 	}
 	_, baseSource := resolveBaseURL()
 	fmt.Fprintf(os.Stderr, "beeftv mcp serve: %d 个工具，base=%s（%s），client=%s\n", registeredTools, c.currentBaseURL(), baseSource, orNone(c.clientID))
 	return server.Run(ctx, &mcp.StdioTransport{})
+}
+
+func isDefaultMCPOperation(id string) bool {
+	return !strings.HasPrefix(id, "conversation.") && !strings.HasPrefix(id, "skill.publish.")
 }
 
 func orNone(value string) string {

@@ -1,11 +1,8 @@
 import { create } from "zustand";
 import { nanoid } from "nanoid";
-import { subscribeUserScope } from "@/lib/user-scope";
-import { captureUserScope, userScopeMatches, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { createTransferSampler, type CanvasOperationTarget, type OperationProgress } from "@/lib/operation-progress";
 
-type Entry = OperationProgress & { owner: CapturedUserScope };
-type ProgressStore = { entries: Record<string, Entry>; remove: (id: string) => void };
+type ProgressStore = { entries: Record<string, OperationProgress>; remove: (id: string) => void };
 export const useOperationProgress = create<ProgressStore>((set) => ({
     entries: {},
     remove: (id) => set(state => {
@@ -15,26 +12,22 @@ export const useOperationProgress = create<ProgressStore>((set) => ({
     }),
 }));
 
-// These are transient observations, never cross-account history or saved media metadata.
-subscribeUserScope(() => useOperationProgress.setState({ entries: {} }));
-
-export function startOperation(title: string, options: { detail?: string; totalBytes?: number; totalFiles?: number; owner?: CapturedUserScope; target?: CanvasOperationTarget } = {}) {
+export function startOperation(title: string, options: { detail?: string; totalBytes?: number; totalFiles?: number; target?: CanvasOperationTarget } = {}) {
     const id = nanoid();
-    const owner = options.owner ?? captureUserScope();
     const startedAt = Date.now();
     const sample = createTransferSampler(startedAt);
     let finished = false;
     let lastReport = 0;
     const update = (patch: Partial<OperationProgress>) => {
-        if (finished || !userScopeMatches(owner)) return;
+        if (finished) return;
         useOperationProgress.setState(state => {
             const previous = state.entries[id];
             if (!previous) return state;
             return { entries: { ...state.entries, [id]: { ...previous, ...patch, updatedAt: patch.updatedAt ?? Date.now() } } };
         });
     };
-    if (userScopeMatches(owner)) useOperationProgress.setState(state => ({ entries: { ...state.entries, [id]: {
-        id, owner, title, target: options.target, detail: options.detail || "正在准备文件", phase: "preparing", totalBytes: options.totalBytes, totalFiles: options.totalFiles, startedAt, updatedAt: startedAt,
+    useOperationProgress.setState(state => ({ entries: { ...state.entries, [id]: {
+        id, title, target: options.target, detail: options.detail || "正在准备文件", phase: "preparing", totalBytes: options.totalBytes, totalFiles: options.totalFiles, startedAt, updatedAt: startedAt,
     } } }));
     const settle = (phase: "done" | "error", detail: string) => {
         update({ phase, detail, bytesPerSecond: 0 });

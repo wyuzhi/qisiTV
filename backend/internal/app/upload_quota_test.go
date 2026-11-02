@@ -56,8 +56,8 @@ func TestCommitUserUploadQuotaKeepsDailyUsageWithoutPendingStorage(t *testing.T)
 		t.Fatal(err)
 	}
 	svc.commitUserUploadQuota("user-1", 49<<20)
-	if svc.pendingStorage[pendingStorageKey("user-1", "")] != 0 {
-		t.Fatalf("pending storage = %d", svc.pendingStorage[pendingStorageKey("user-1", "")])
+	if pendingStorageValue(svc, "user-1", "") != 0 {
+		t.Fatalf("pending storage = %d", pendingStorageValue(svc, "user-1", ""))
 	}
 	usage, err := svc.repo.DailyUploadBytes("user-1", day)
 	if err != nil {
@@ -143,10 +143,10 @@ func TestCommitIdentifiedQuotaLeavesOtherPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc.commitUserUploadQuotaFor("user-1", 7, "generated-orphan")
-	if got := svc.pendingStorage[pendingStorageKey("user-1", "ordinary-upload")]; got != ordinary {
+	if got := pendingStorageValue(svc, "user-1", "ordinary-upload"); got != ordinary {
 		t.Fatalf("ordinary pending = %d", got)
 	}
-	if _, ok := svc.pendingStorage[pendingStorageKey("user-1", "generated-orphan")]; ok {
+	if _, ok := svc.fileQuota().PendingBytes("user-1", "generated-orphan"); ok {
 		t.Fatal("missing identity created a pending entry")
 	}
 }
@@ -160,10 +160,10 @@ func TestRetryReservationDoesNotConsumeUploadPending(t *testing.T) {
 	if _, err := svc.reserveRetryGeneratedQuotaFor("user-1", 7, "generated-retry"); err != nil {
 		t.Fatal(err)
 	}
-	if got := svc.pendingStorage[pendingStorageKey("user-1", "ordinary-upload")]; got != ordinary {
+	if got := pendingStorageValue(svc, "user-1", "ordinary-upload"); got != ordinary {
 		t.Fatalf("ordinary pending = %d", got)
 	}
-	if _, ok := svc.pendingStorage[pendingStorageKey("user-1", "generated-retry")]; ok {
+	if _, ok := svc.fileQuota().PendingBytes("user-1", "generated-retry"); ok {
 		t.Fatal("retry-only reservation wrote pending storage")
 	}
 }
@@ -208,7 +208,7 @@ func TestPromoteReadyDoesNotDebitOrdinaryUploadPending(t *testing.T) {
 	if promoteErr != nil {
 		t.Fatal(promoteErr)
 	}
-	if got := svc.pendingStorage[pendingStorageKey("user-1", "ordinary-upload")]; got != ordinary {
+	if got := pendingStorageValue(svc, "user-1", "ordinary-upload"); got != ordinary {
 		t.Fatalf("ordinary pending = %d", got)
 	}
 	usageAfter, err := svc.repo.DailyUploadBytes("user-1", day)
@@ -234,7 +234,7 @@ func TestUnkeyedGeneratedOperationsUseIndependentPending(t *testing.T) {
 	if err != nil || second == nil || second.ID == first.ID {
 		t.Fatalf("second generated = %#v err=%v", second, err)
 	}
-	if got := svc.pendingStorage[pendingStorageKey("user-1", "ordinary-upload")]; got != ordinary {
+	if got := pendingStorageValue(svc, "user-1", "ordinary-upload"); got != ordinary {
 		t.Fatalf("ordinary pending = %d", got)
 	}
 }
@@ -252,10 +252,10 @@ func TestChunkedUploadStartUsesCanonicalQuota(t *testing.T) {
 	if session.UploadID == "" || session.ChunkSize != localasset.ChunkUploadSize || session.ChunkCount != 1 {
 		t.Fatalf("session = %#v", session)
 	}
-	if got := svc.pendingStorage[pendingStorageKey("user-1", "ordinary-upload")]; got != ordinary {
+	if got := pendingStorageValue(svc, "user-1", "ordinary-upload"); got != ordinary {
 		t.Fatalf("ordinary pending = %d", got)
 	}
-	if got := svc.pendingStorage[pendingStorageKey("user-1", session.UploadID)]; got != 7 {
+	if got := pendingStorageValue(svc, "user-1", session.UploadID); got != 7 {
 		t.Fatalf("session pending = %d", got)
 	}
 }
@@ -327,7 +327,7 @@ func TestChunkedUploadCompleteCommitsCanonicalQuota(t *testing.T) {
 	if err != nil || resource == nil || resource.Status != model.ResourceStatusReady {
 		t.Fatalf("complete = %#v err=%v", resource, err)
 	}
-	if got := svc.pendingStorage[pendingStorageKey("user-1", session.UploadID)]; got != 0 {
+	if got := pendingStorageValue(svc, "user-1", session.UploadID); got != 0 {
 		t.Fatalf("pending leftover after complete = %d", got)
 	}
 	day := time.Now().UTC().Format("2006-01-02")
@@ -429,7 +429,7 @@ func TestDuplicateLiveUploadFileMapsToUploadInProgress(t *testing.T) {
 	svc.assets = localasset.NewService(localasset.Dependencies{
 		Repository: &holdCreateResourceRepo{Repository: localasset.NewRepository(svc.repo), announced: announced, hold: hold},
 		Blobs:      localasset.NewFileStore(svc.dataDir),
-		Quota:      resourceQuota{svc: svc},
+		Quota:      svc.fileQuota(),
 		Lifecycle:  nopLifecycleAdapter{},
 		DataDir:    svc.dataDir,
 	})

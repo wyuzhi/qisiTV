@@ -1,0 +1,13 @@
+[
+  {"name": "explicit protocol wins", "channel": {"interfaceType": "newapi"}, "profile": {"model": "gpt-image-3", "capability": "image", "protocol": "gemini-image"}, "want": "gemini-image"},
+  {"name": "legacy audio profile keeps openai-audio", "channel": {}, "profile": {"model": "custom-voice", "capability": "audio"}, "want": "openai-audio"},
+  {"name": "legacy image profile keeps openai-image", "channel": {"apiFormat": "openai"}, "profile": {"model": "gpt-image-3", "capability": "image"}, "want": "openai-image"},
+  {"name": "capability inferred from the model name", "channel": {}, "profile": {"model": "minimax-speech-2.8-hd"}, "want": "openai-audio"},
+  {"name": "pending profile has no protocol", "channel": {}, "profile": {"model": "gpt-image-3", "capability": "image", "protocolPending": true}, "want": ""},
+  {"name": "pending profile ignores the channel protocol", "channel": {"interfaceType": "openai-image"}, "profile": {"model": "gpt-image-3", "capability": "image", "protocolPending": true}, "want": ""},
+  {"name": "channel protocol applies to a profile without one", "channel": {"interfaceType": "video-generations-json"}, "profile": {"model": "seedance-2.5", "capability": "video"}, "want": "video-generations-json"},
+  {"name": "video has no legacy default", "channel": {}, "profile": {"model": "seedance-2.5", "capability": "video"}, "want": ""},
+  {"name": "system channels never guess", "channel": {"scope": "system"}, "profile": {"model": "gpt-4.1-mini", "capability": "text"}, "want": ""},
+  {"name": "gemini channels never guess", "channel": {"apiFormat": "gemini"}, "profile": {"model": "reasoner", "capability": "text"}, "want": ""},
+  {"name": "listed model without a profile", "channel": {}, "profile": {"model": "gpt-4.1-mini"}, "want": "chat-completion"}
+]

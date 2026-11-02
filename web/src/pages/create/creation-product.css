@@ -279,6 +279,18 @@ html:not(.dark) .app-product-overlays .creation-control-popover-surface {
     .creation-demo-banner { width: calc(100% - 28px); margin-top: 10px; }
 }
 
+/* 参考素材超限说明：右上角 Toast 已被全站规则隐藏，这里改为面板内就地提示。 */
+.creation-reference-notice {
+    margin: 8px 2px 0;
+    padding: 8px 12px;
+    border: 1px solid color-mix(in srgb, var(--creation-text) 14%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--creation-text) 6%, transparent);
+    color: var(--creation-text);
+    font-size: 12.5px;
+    line-height: 1.55;
+}
+
 .creation-conflict-banner {
     display: flex;
     flex-wrap: wrap;

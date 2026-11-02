@@ -53,7 +53,7 @@ func TestWorkflowMigratedMediaProbesBeforeMergeAndDurationBinding(t *testing.T) 
 			resource := migratedWorkflowVideo(t, svc)
 			steps := map[string]*cw.Step{"a": {Status: "succeeded", ResourceID: resource.ID}, "b": {Status: "succeeded", ResourceID: resource.ID}}
 			if operation == "merge" {
-				task, err := svc.executeCanvasWorkflowMedia("owner", "imported-merge", cw.Node{ID: "merge", OperationID: "video.merge"}, []cw.Edge{{From: "a", To: "merge", Order: 1}, {From: "b", To: "merge", Order: 2}}, steps)
+				task, err := executeWorkflowTimeline(svc, "owner", "imported-merge", cw.Node{ID: "merge", OperationID: "video.merge"}, []cw.Edge{{From: "a", To: "merge", Order: 1}, {From: "b", To: "merge", Order: 2}}, steps)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -65,7 +65,7 @@ func TestWorkflowMigratedMediaProbesBeforeMergeAndDurationBinding(t *testing.T) 
 					t.Fatalf("merge did not use probed metadata: %+v", input)
 				}
 			} else {
-				recipe := workflowRecipe{Request: CreateTaskRequest{Input: map[string]any{"config": map[string]any{"videoSeconds": "9"}}}, VideoDurationSourceNodeID: "a"}
+				recipe := workflowRecipe{Request: cw.RecipeRequest{Input: map[string]any{"config": map[string]any{"videoSeconds": "9"}}}, VideoDurationSourceNodeID: "a"}
 				req, err := svc.materializeCanvasWorkflowRequest("owner", "imported-duration", recipe, map[string]cw.Node{"a": {MediaType: "video"}}, steps)
 				if err != nil || req.Input["config"].(map[string]any)["videoSeconds"] != "1" {
 					t.Fatalf("duration source did not use probed facts: %+v %v", req, err)
@@ -89,7 +89,7 @@ func TestWorkflowInvalidImportedMediaDoesNotEnqueueTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	steps := map[string]*cw.Step{"a": {Status: "succeeded", ResourceID: "bad-media"}, "b": {Status: "succeeded", ResourceID: "bad-media"}}
-	if _, err := svc.executeCanvasWorkflowMedia("owner", "invalid-merge", cw.Node{ID: "merge", OperationID: "video.merge"}, []cw.Edge{{From: "a", To: "merge"}, {From: "b", To: "merge"}}, steps); err == nil {
+	if _, err := executeWorkflowTimeline(svc, "owner", "invalid-merge", cw.Node{ID: "merge", OperationID: "video.merge"}, []cw.Edge{{From: "a", To: "merge"}, {From: "b", To: "merge"}}, steps); err == nil {
 		t.Fatal("missing original bytes accepted")
 	}
 	var tasks int64

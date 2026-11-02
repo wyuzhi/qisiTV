@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"qisitv/backend/internal/model"
+	localtask "qisitv/backend/internal/task"
 )
 
 // Guard is the page-held execution fence. Models cannot mint one.
@@ -33,25 +34,24 @@ type CanvasOp struct {
 	IDs          []string       `json:"ids,omitempty"`
 }
 
-// Command is the transport-neutral write command. HTTP payloads stay on the
-// app alias until handlers switch over.
+// Command is the transport-neutral write command.
 type Command struct {
 	Guard
-	ClientKey            string
-	CanvasID             string
-	Revision             int64
-	ExpectedEpoch        int64
-	State                map[string]any
-	Status               string
-	ProposalVersion      int64
-	Proposal             json.RawMessage
-	Ops                  []CanvasOp
-	ItemKey              string
-	Task                 TaskRequest
-	SubmissionIDs        []string
-	SubmissionID         string
-	ExpectedSnapshotHash string
-	Document             json.RawMessage
+	ClientKey            string          `json:"clientKey"`
+	CanvasID             string          `json:"canvasId"`
+	Revision             int64           `json:"revision"`
+	ExpectedEpoch        int64           `json:"expectedEpoch"`
+	State                map[string]any  `json:"state"`
+	Status               string          `json:"status"`
+	ProposalVersion      int64           `json:"proposalVersion"`
+	Proposal             json.RawMessage `json:"proposal"`
+	Ops                  []CanvasOp      `json:"ops"`
+	ItemKey              string          `json:"itemKey"`
+	Task                 TaskRequest     `json:"request"`
+	SubmissionIDs        []string        `json:"submissionIds"`
+	SubmissionID         string          `json:"submissionId"`
+	ExpectedSnapshotHash string          `json:"expectedSnapshotHash"`
+	Document             json.RawMessage `json:"document"`
 }
 
 // TaskRequest is the creation-owned quote/submit intent. PrepareOnly and
@@ -69,6 +69,28 @@ type TaskRequest struct {
 	RequestID      string         `json:"-"`
 	PrepareOnly    bool           `json:"-"`
 	AdmissionID    string         `json:"-"`
+}
+
+func (req TaskRequest) ToLocalCreateRequest() localtask.CreateRequest {
+	return localtask.CreateRequest{
+		ProjectID: req.ProjectID, Type: req.Type, Operation: req.Operation,
+		Prompt: req.Prompt, Provider: req.Provider, Model: req.Model,
+		LogicalModelID: req.LogicalModelID, Input: req.Input,
+		TraceID: req.TraceID, RequestID: req.RequestID,
+		AdmissionID: req.AdmissionID, PrepareOnly: true,
+	}
+}
+
+func PreparedFromTask(task *model.Task, err error) (*PreparedTask, error) {
+	if err != nil {
+		return nil, err
+	}
+	var input map[string]any
+	if err = json.Unmarshal([]byte(task.InputJSON), &input); err != nil {
+		return nil, err
+	}
+	config, _ := input["config"].(map[string]any)
+	return &PreparedTask{Task: task, Input: input, Config: config}, nil
 }
 
 type RunOutput struct {

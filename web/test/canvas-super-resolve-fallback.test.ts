@@ -14,7 +14,7 @@ test("image and video AI upscale create processing nodes and retain local size a
     expect(editorDialogs).not.toContain("onAIUpscale={status.onAIUpscale}");
     expect(toolbar.match(/id: "ai-upscale"/g)).toHaveLength(2);
     expect(mediaDialogs).toContain("<CanvasNodeUpscaleDialog");
-    expect(project).toContain("onUpscale: (node, params) => void upscaleImageNode(node, params)");
+    expect(editorDialogs).toContain("onUpscale={(node, params) => void mediaTools.upscaleImageNode(node, params)}");
 });
 
 test("upscale retry uses the original task or processing batch before generic generation", () => {

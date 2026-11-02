@@ -8,18 +8,39 @@ import { CanvasVideoSettingsPopover } from "../src/components/canvas/canvas-vide
 import { VideoSettingsPanel } from "../src/components/video-settings-panel";
 import { canvasThemes } from "../src/lib/canvas-theme";
 import { mergeFetchedChannelModelProfiles, type ChannelModelCatalogItem } from "../src/lib/channel-model-catalog";
-import { defaultModelCapabilityConfig, pluginWorkflowCapabilityConfig } from "../src/lib/model-capabilities";
+import { defaultModelCapabilityConfig, modelCapabilityConfigFor, pluginWorkflowCapabilityConfig } from "../src/lib/model-capabilities";
 import { ChannelModelSettings } from "../src/pages/settings/channel-model-settings";
 import { applyFetchedChannelModelCatalog } from "../src/pages/settings/channel-settings-pane";
 import { fetchChannelModels } from "../src/services/api/image";
 import { disconnectBeefAPIConnection } from "../src/services/api/beefapi-connection";
-import { getActiveUserScope, setActiveUserScope } from "../src/lib/user-scope";
 import { apiClient } from "../src/services/api/request";
-import { createVideoGenerationTask } from "../src/services/api/video";
 import { createModelChannel, defaultConfig, modelDisplayName, normalizeConfigSnapshot, resolveModelRequestConfig, selectableModelsByCapability, type AiConfig } from "../src/stores/use-config-store";
 
 const originalAxiosRequest = axios.request;
 const originalApiRequest = apiClient.request;
+
+test("陌生图片ID刷新服务端能力后可选，保留零文件上限和新增质量", () => {
+    const model = "opaque-future-2030";
+    const channel = createModelChannel({ id: "beefapi", baseUrl: "https://beeftv.app", credentialRef: "beefapi-enterprise", models: [model] });
+    const image = defaultModelCapabilityConfig("openai-image", model).image!;
+    image.references.maxImageBytes = 0;
+    image.quality = { supported: true, values: ["ultra"], default: "ultra" };
+    image.maxOutputs = 4;
+    image.fixedOutputs = 4;
+    channel.modelProfiles = mergeFetchedChannelModelProfiles(channel, [{ id: model, supportedEndpointTypes: ["image-generation"], imageCapabilities: image, imageCapabilitiesVersion: "v1" }]);
+    const config = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [channel] } }).config;
+    expect(selectableModelsByCapability(config, "image")).toContain(`beefapi::${model}`);
+    expect(resolveModelRequestConfig(config, `beefapi::${model}`).model).toBe(model);
+    expect(modelCapabilityConfigFor(config, `beefapi::${model}`).image).toEqual(image);
+    const changed = structuredClone(image);
+    changed.references.maxImages = 7;
+    channel.modelProfiles = mergeFetchedChannelModelProfiles(channel, [{ id: model, supportedEndpointTypes: ["image-generation"], imageCapabilities: changed, imageCapabilitiesVersion: "v2" }]);
+    expect(modelCapabilityConfigFor({ channels: [channel] }, model).image!.references.maxImages).toBe(7);
+    expect(channel.modelProfiles[0]!.imageCapabilitiesVersion).toBe("v2");
+    channel.modelProfiles = mergeFetchedChannelModelProfiles(channel, [{ id: model, supportedEndpointTypes: ["image-generation"] }]);
+    expect(channel.modelProfiles[0]!.imageCapabilitiesVersion).toBe("v2");
+    expect(channel.modelProfiles[0]!.capabilityConfig!.image).toEqual(changed);
+});
 
 test("官方GPT图片旧默认配置升级质量和21:9尺寸，保留显式限制与第三方配置", () => {
     const model = "gpt-image-2.5-flare";
@@ -98,24 +119,17 @@ function formEntries(body: unknown) {
 }
 
 describe("public channel model catalog", () => {
-    test("managed catalog drops delayed results after user or enterprise connection changes", async () => {
-        const originalScope = getActiveUserScope();
-        try {
-            for (const change of [() => { setActiveUserScope("catalog-other-user"); }, () => disconnectBeefAPIConnection()]) {
-                let release!: () => void;
-                apiClient.request = (async (request) => {
-                    if (request.url === "/beefapi/connection/models") await new Promise<void>((resolve) => { release = resolve; });
-                    return { status: 200, data: { code: 0, data: { models: [{ id: "seedance-2.0-portrait" }] }, msg: "" } };
-                }) as typeof apiClient.request;
-                const pending = fetchChannelModels(createModelChannel({ id: "beefapi", credentialRef: "beefapi-enterprise" }), true);
-                const outcome = pending.catch((error) => error);
-                await change();
-                release();
-                expect(await outcome).toMatchObject({ name: "UserScopeAbandonedError" });
-            }
-        } finally {
-            setActiveUserScope(originalScope);
-        }
+    test("managed catalog drops delayed results after the enterprise connection changes", async () => {
+        let release!: () => void;
+        apiClient.request = (async (request) => {
+            if (request.url === "/beefapi/connection/models") await new Promise<void>((resolve) => { release = resolve; });
+            return { status: 200, data: { code: 0, data: { models: [{ id: "seedance-2.0-portrait" }] }, msg: "" } };
+        }) as typeof apiClient.request;
+        const pending = fetchChannelModels(createModelChannel({ id: "beefapi", credentialRef: "beefapi-enterprise" }), true);
+        const outcome = pending.catch((error) => error);
+        await disconnectBeefAPIConnection();
+        release();
+        expect(await outcome).toMatchObject({ name: "BeefAPIConnectionChangedError" });
     });
     test("managed catalog refresh persists through the trusted endpoint without accepting client credentials or prices", async () => {
         const requests: Array<{ url?: string; data?: unknown }> = [];
@@ -440,22 +454,6 @@ describe("public channel model catalog", () => {
         expect(profiles).toEqual(channel.modelProfiles);
     });
 
-    test("requires the declared minimum image count and selects image-to-video", async () => {
-        const catalog: ChannelModelCatalogItem = {
-            id: "image-required-video",
-            modelType: "video",
-            minImages: 1,
-            maxImages: 2,
-        };
-        const config = configForCatalog([catalog]);
-        const profile = config.channels[0]!.modelProfiles![0]!.capabilityConfig!.video!;
-
-        expect(profile.references).toMatchObject({ minImages: 1, maxImages: 2 });
-        expect(profile.operations).toEqual(["image_to_video"]);
-        expect(profile.defaultOperation).toBe("image_to_video");
-        expect(createVideoGenerationTask(config, "synthetic prompt")).rejects.toThrow("至少需要 1 张参考图");
-    });
-
     test("preserves an ID-only manual video model profile when both protocol sources are missing", () => {
         const channel = createModelChannel({
             id: "manual-no-protocol",
@@ -565,78 +563,70 @@ describe("public channel model catalog", () => {
         expect(selectableModelsByCapability(staleSnapshot, "image")).not.toContain("ghost-image");
     });
 
-    test("omits resolution_name for Omni and for auto instead of inventing 720p", async () => {
-        const bodies: Record<string, string>[] = [];
-        axios.request = (async (request) => {
-            bodies.push(formEntries(request.data));
-            return { data: { id: `synthetic-${bodies.length}` } };
-        }) as typeof axios.request;
+    test("preserves server-declared versioned image and video capabilities and pricing on custom channels", async () => {
+        const image = defaultModelCapabilityConfig("openai-image", "custom-img-pro").image!;
+        image.references.maxImages = 6;
+        image.references.maxImageBytes = 0;
+        image.quality = { supported: true, values: ["ultra"], default: "ultra" };
+        image.maxOutputs = 4;
+        image.fixedOutputs = 4;
 
-        const omniConfig = configForCatalog([omniCatalog], { videoSeconds: "10", size: "16:9", vquality: "720" });
-        await createVideoGenerationTask(omniConfig, "synthetic prompt");
-
-        const declaredResolution: ChannelModelCatalogItem = {
-            ...omniCatalog,
-            id: "veo-public",
-            displayName: "Veo Public",
-            defaultParameters: { ...omniCatalog.defaultParameters, durationSeconds: "8", resolution: "1080p" },
-            options: { ...omniCatalog.options, durationSeconds: [{ value: "8" }], resolution: [{ value: "720p" }, { value: "1080p" }] },
+        const video = defaultModelCapabilityConfig("newapi", "custom-vid-pro").video!;
+        video.references.maxImages = 8;
+        video.references.maxVideos = 2;
+        video.references.maxAudios = 1;
+        video.resolutions = ["1080p"];
+        video.defaultResolution = "1080p";
+        const pricing = {
+            currency: "CNY" as const,
+            mode: "tokens" as const,
+            rates: { "1080p": { output: 50, reference_video: 30 } },
         };
-        const autoConfig = configForCatalog([declaredResolution], { videoSeconds: "8", size: "16:9", vquality: "auto" });
-        await createVideoGenerationTask(autoConfig, "synthetic prompt");
 
-        expect(bodies[0]).not.toHaveProperty("resolution_name");
-        expect(bodies[1]).not.toHaveProperty("resolution_name");
-    });
-
-    test("sends a declared compatible HD resolution for a video capability", async () => {
-        let body: Record<string, string> = {};
-        axios.request = (async (request) => {
-            body = formEntries(request.data);
-            return { data: { id: "synthetic-hd" } };
-        }) as typeof axios.request;
-        const catalog: ChannelModelCatalogItem = {
-            ...omniCatalog,
-            id: "veo-public",
-            displayName: "Veo Public",
-            defaultParameters: { aspectRatio: "16:9", durationSeconds: "8", resolution: "1080p" },
-            options: { ...omniCatalog.options, durationSeconds: [{ value: "8" }], resolution: [{ value: "1080p" }] },
-        };
-        const config = configForCatalog([catalog], { videoSeconds: "8", size: "16:9", vquality: "1080" });
-
-        await createVideoGenerationTask(config, "synthetic prompt");
-
-        expect(body.resolution_name).toBe("1080p");
-        expect(body.model).toBe("veo-public");
-        expect(body.seconds).toBe("8");
-        expect(body.size).toBe("1280x720");
-    });
-
-    test("preserves provider resolution enums with direction suffixes across Canvas display and requests", async () => {
-        let body: Record<string, string> = {};
-        axios.request = (async (request) => {
-            body = formEntries(request.data);
-            return { data: { id: "synthetic-directional" } };
-        }) as typeof axios.request;
-        const catalog: ChannelModelCatalogItem = {
-            ...omniCatalog,
-            id: "directional-video",
-            displayName: "Directional Video",
-            defaultParameters: { aspectRatio: "16:9", durationSeconds: "8", resolution: "768p竖" },
-            options: {
-                ...omniCatalog.options,
-                durationSeconds: [{ value: "8" }],
-                resolution: [{ value: "480p竖" }, { value: "768p竖" }, { value: "480p横" }, { value: "768p横" }],
+        axios.request = (async () => ({
+            data: {
+                data: [
+                    {
+                        id: "custom-img-pro",
+                        display_name: "Custom Image Pro",
+                        model_type: "image",
+                        supported_endpoint_types: ["image-generation"],
+                        image_capabilities: image,
+                        image_capabilities_version: "gw-img-v1",
+                    },
+                    {
+                        id: "custom-vid-pro",
+                        display_name: "Custom Video Pro",
+                        supported_endpoint_types: ["openai-video"],
+                        video_capabilities: video,
+                        video_capabilities_version: "gw-vid-v1",
+                        video_pricing: pricing,
+                    },
+                ],
             },
-        };
-        const config = configForCatalog([catalog], { videoSeconds: "8", size: "16:9", vquality: "768P竖" });
+        })) as typeof axios.request;
 
-        const html = renderToStaticMarkup(React.createElement(CanvasVideoSettingsPopover, { config, onConfigChange: () => undefined }));
-        const panelHtml = renderToStaticMarkup(React.createElement(VideoSettingsPanel, { config, onConfigChange: () => undefined, theme: canvasThemes.dark }));
-        await createVideoGenerationTask(config, "synthetic prompt");
+        const channel = createModelChannel({
+            id: "custom-gw",
+            name: "Custom Gateway",
+            baseUrl: "https://gateway.example.com/v1",
+            apiKey: "synthetic-test-key",
+            models: [],
+        });
 
-        expect(html).toContain("768P竖 · 16:9 · 8s");
-        expect(panelHtml).toMatch(/aria-pressed="true"[^>]*>768P竖<\/button>/);
-        expect(body.resolution_name).toBe("768p竖");
+        const discovered = await fetchChannelModels(channel);
+        const applied = applyFetchedChannelModelCatalog(channel, discovered);
+        const normalized = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [applied] } }).config;
+
+        expect(selectableModelsByCapability(normalized, "image")).toContain("custom-gw::custom-img-pro");
+        expect(selectableModelsByCapability(normalized, "video")).toContain("custom-gw::custom-vid-pro");
+        expect(modelCapabilityConfigFor(normalized, "custom-gw::custom-img-pro").image).toEqual(image);
+        expect(modelCapabilityConfigFor(normalized, "custom-gw::custom-vid-pro").video).toEqual(video);
+
+        const profiles = normalized.channels[0]!.modelProfiles!;
+        expect(profiles.find((p) => p.model === "custom-img-pro")?.imageCapabilitiesVersion).toBe("gw-img-v1");
+        expect(profiles.find((p) => p.model === "custom-vid-pro")?.videoCapabilitiesVersion).toBe("gw-vid-v1");
+        expect(profiles.find((p) => p.model === "custom-vid-pro")?.videoPricing).toEqual(pricing);
     });
+
 });

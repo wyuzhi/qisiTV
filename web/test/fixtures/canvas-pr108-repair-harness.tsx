@@ -12,6 +12,8 @@ import type { CanvasProject } from "../../src/stores/canvas/use-canvas-store";
 import type { GenerationTask } from "../../src/services/api/task-center";
 import { MemoryRouter } from "react-router";
 import SettingsPage from "../../src/pages/settings";
+import { createCanvasPageUiStore } from "../../src/stores/canvas/use-canvas-page-ui-store";
+const pageUi = createCanvasPageUiStore();
 
 const harness = (window as any).__repairHarness = { deleted: [], destroyed: 0, confirmation: null, downloads: [], restored: [] };
 setActiveUserScope("owner-a");
@@ -39,12 +41,10 @@ function Editor() {
     nodesRef.current = nodes;
     const connectionsRef = useRef([]);
     const selectedNodeIdsRef = useRef(new Set<string>());
-    const ops = useCanvasNodeOperations({ projectId, nodesRef, connectionsRef, selectedNodeIdsRef, defaultDrawingEngine: "excalidraw",
-        getCanvasCenter: () => ({ x: 0, y: 0 }), setNodes, setConnections: () => {}, setSelectedNodeIds: () => {},
-        setSelectedConnectionId: () => {}, setContextMenu: () => {}, setDialogNodeId: () => {},
+    const ops = useCanvasNodeOperations({ pageUi, projectId, nodesRef, connectionsRef, selectedNodeIdsRef, defaultDrawingEngine: "excalidraw",
+        getCanvasCenter: () => ({ x: 0, y: 0 }), setNodes, setConnections: () => {},
         onNodesDeleted: (_ids, _next, removed) => harness.deleted.push({ projectId, tasks: removed.map(item => item.metadata?.taskId) }) });
     harness.switchCanvas = () => { setProjectId(value => value === "canvas-a" ? "canvas-b" : "canvas-a"); setNodes([node("task-b")]); };
-    harness.switchScope = () => { setActiveUserScope("owner-b"); setActiveUserScope("owner-a"); };
     return <><button onClick={() => ops.deleteNodes(new Set(["shared-node"]))}>delete-node</button><output data-testid="nodes">{nodes.map(item => item.metadata?.taskId).join(",")}</output><output data-testid="canvas">{projectId}</output></>;
 }
 function Versions() {

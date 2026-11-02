@@ -51,10 +51,10 @@ test("old built-in Q logos migrate while custom remote logos keep their original
     expect(custom.logoConfigured).toBe(true);
 });
 
-test("an installed legacy v2 plugin keeps its editor slots in the qisiTV registry", () => {
+test.each(["beeftv.plugin/v2", "beeftv.plugin/v3", "qisitv.plugin/v2", "qisitv.plugin/v3"])("plugin %s keeps its editor slots in the qisiTV registry", (apiVersion) => {
     const plugin = {
         manifest: {
-            apiVersion: "beeftv.plugin/v2", id: "brand-migration-plugin", name: "Existing plugin", version: "1.0.0",
+            apiVersion, id: "brand-migration-plugin", name: "Existing plugin", version: "1.0.0",
             description: "Existing plugin", author: "Third party", surfaces: ["fullscreen"], permissions: ["timeline.read"],
             trusted: false, runtime: { backend: "trusted-backend", web: "declarative" },
             contributes: { editorSlots: [{ slot: "preview-renderer" }] },
@@ -62,9 +62,9 @@ test("an installed legacy v2 plugin keeps its editor slots in the qisiTV registr
     } as unknown as RegisteredPlugin;
     try {
         registerPlugin(plugin);
-        expect(getRegisteredPlugin(plugin.manifest.id)?.manifest.apiVersion).toBe("qisitv.plugin/v2");
+        expect(getRegisteredPlugin(plugin.manifest.id)?.manifest.apiVersion).toBe(apiVersion.replace("beeftv.", "qisitv."));
         expect(getRegisteredPlugin(plugin.manifest.id)?.editorSlots).toEqual([{ slot: "preview-renderer" }]);
-        expect(plugin.manifest.apiVersion as string).toBe("beeftv.plugin/v2");
+        expect(plugin.manifest.apiVersion as string).toBe(apiVersion);
     } finally {
         unregisterPlugin(plugin.manifest.id);
     }

@@ -61,7 +61,7 @@ func metadataRouteFixture(t *testing.T) (*gin.Engine, *gorm.DB, *model.Resource)
 		t.Fatal(err)
 	}
 	router := gin.New()
-	RegisterUserDataRoutes(router.Group("/api"), svc)
+	RegisterUserDataRoutes(router.Group("/api"), svc, svc.CanvasService(), svc.PromptService(), svc.AssetLibraryService(), svc.ResourceService(), svc.PlaybackService(), svc, svc, svc)
 	return router, db, resource
 }
 

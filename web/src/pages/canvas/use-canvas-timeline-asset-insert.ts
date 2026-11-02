@@ -2,15 +2,14 @@ import { useCallback, useRef, useState } from "react";
 import { App } from "antd";
 
 import type { InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
-import { assertUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
 import type { CanvasNodeData, Position } from "@/types/canvas";
 import type { TimelineDirectMedia } from "@/types/timeline";
 
 type UseCanvasTimelineAssetInsertOptions = {
     linkedProjectId?: string;
     refetchLinkedProject: () => Promise<unknown>;
-    handleAssetsInsert: (payloads: InsertAssetPayload[], expectedScope?: CapturedUserScope) => Promise<CanvasNodeData[]>;
-    handleProjectAssetsInsert: (payloads: InsertAssetPayload[], position?: Position, expectedScope?: CapturedUserScope) => Promise<CanvasNodeData[]>;
+    handleAssetsInsert: (payloads: InsertAssetPayload[]) => Promise<CanvasNodeData[]>;
+    handleProjectAssetsInsert: (payloads: InsertAssetPayload[], position?: Position) => Promise<CanvasNodeData[]>;
     openAssetsAtPosition: (position?: Position) => void;
 };
 
@@ -58,25 +57,21 @@ export function useCanvasTimelineAssetInsert({
     const [projectAssetInsertPosition, setProjectAssetInsertPosition] = useState<Position | undefined>();
 
     const handleLibraryAssetsInsert = useCallback(
-        async (payloads: InsertAssetPayload[], expectedScope: CapturedUserScope) => {
-            assertUserScope(expectedScope);
+        async (payloads: InsertAssetPayload[]) => {
             if (assetInsertScope === "timeline") {
                 const media = payloads.map(payloadToTimelineMedia).filter((item): item is TimelineDirectMedia => Boolean(item));
                 if (media.length !== payloads.length) throw new Error("图片和文本素材暂不支持直接入轨，请先插入画布");
                 media.forEach((item) => timelineMediaAddRef.current?.(item));
-                assertUserScope(expectedScope);
                 return;
             }
-            const created = await handleAssetsInsert(payloads, expectedScope);
-            assertUserScope(expectedScope);
+            const created = await handleAssetsInsert(payloads);
             created.forEach((node) => timelineAddNodeRef.current?.(node));
         },
         [assetInsertScope, handleAssetsInsert],
     );
 
     const handleTimelineProjectAssetsInsert = useCallback(
-        async (payloads: InsertAssetPayload[], expectedScope: CapturedUserScope) => {
-            assertUserScope(expectedScope);
+        async (payloads: InsertAssetPayload[]) => {
             if (projectAssetScope === "timeline") {
                 let inserted = 0;
                 for (const payload of payloads) {
@@ -87,11 +82,9 @@ export function useCanvasTimelineAssetInsert({
                     }
                 }
                 if (inserted < payloads.length) message.info("图片/文本/角色素材暂不支持直接入轨，仅音视频素材已加入时间线");
-                assertUserScope(expectedScope);
                 return;
             }
-            const created = await handleProjectAssetsInsert(payloads, projectAssetInsertPosition, expectedScope);
-            assertUserScope(expectedScope);
+            const created = await handleProjectAssetsInsert(payloads, projectAssetInsertPosition);
             created.forEach((node) => timelineAddNodeRef.current?.(node));
         },
         [handleProjectAssetsInsert, message, projectAssetInsertPosition, projectAssetScope],

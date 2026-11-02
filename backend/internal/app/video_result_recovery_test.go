@@ -199,7 +199,7 @@ func TestVideoRecoveryBeefAPIQueryUsesOnlyGet(t *testing.T) {
 		_, _ = io.WriteString(w, `{"data":{"id":"original","status":"completed"}}`)
 	}))
 	defer server.Close()
-	result, _, err := queryBeefAPIVideoResult(context.Background(), canvasGenerationInput{Config: providerConfig{BaseURL: server.URL + "/v1", APIKey: "test-key"}}, "original")
+	result, _, err := queryBeefAPIVideoResult(generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: server.URL}), canvasGenerationInput{Config: providerConfig{BaseURL: server.URL + "/v1", APIKey: "test-key"}}, "original")
 	if err != nil || result == nil || queries.Load() != 1 || downloads.Load() != 1 {
 		t.Fatalf("result=%v err=%v queries=%d downloads=%d", result, err, queries.Load(), downloads.Load())
 	}
@@ -222,7 +222,7 @@ func TestVideoRecoveryBeefAPIRejectsDifferentTaskBeforeDownload(t *testing.T) {
 		_, _ = io.WriteString(w, `{"id":"original","data":{"task_id":"different","status":"completed"}}`)
 	}))
 	defer server.Close()
-	result, _, err := queryBeefAPIVideoResult(context.Background(), canvasGenerationInput{Config: providerConfig{BaseURL: server.URL + "/v1", APIKey: "test-key"}}, "original")
+	result, _, err := queryBeefAPIVideoResult(generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: server.URL}), canvasGenerationInput{Config: providerConfig{BaseURL: server.URL + "/v1", APIKey: "test-key"}}, "original")
 	if err == nil || result != nil || queries.Load() != 1 || downloads.Load() != 0 || creates.Load() != 0 {
 		t.Fatalf("result=%v err=%v queries=%d downloads=%d creates=%d", result, err, queries.Load(), downloads.Load(), creates.Load())
 	}
@@ -247,13 +247,13 @@ func TestVideoRecoveryTaskLogsExplainFailureWithoutRawPayload(t *testing.T) {
 	}
 }
 
-func TestFailedBeefAPIVideoRecoveryUsesFreshBackupAndKeepsOriginalTask(t *testing.T) {
+func TestFailedBeefAPIVideoRecoveryQueriesFreshURLAndKeepsOriginalTask(t *testing.T) {
 	allowLoopbackProviderTest(t)
 	payload, err := os.ReadFile("testdata/reference-fragmented-30fps.mp4")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var creates, polls, primary, backups, mediaDownloads atomic.Int32
+	var creates, polls, primary, mediaDownloads atomic.Int32
 	media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "" || r.Header.Get("X-Gateway-Secret") != "" || r.Header.Get("X-Beeftv-Video-Delivery") != "" {
 			t.Error("gateway credentials reached external media")
@@ -277,24 +277,16 @@ func TestFailedBeefAPIVideoRecoveryUsesFreshBackupAndKeepsOriginalTask(t *testin
 		if r.Header.Get("Authorization") != "Bearer test-key" || r.Header.Get("X-Gateway-Secret") != "private-value" {
 			t.Error("gateway request lost authentication")
 		}
-		if r.URL.Path == "/v1/videos/original" {
-			polls.Add(1)
-			_ = json.NewEncoder(w).Encode(map[string]any{"status": "completed", "metadata": map[string]any{"url": media.URL + "/tos.mp4?signature=expired"}})
+		if r.URL.Path == "/v1/videos/original" || r.URL.Path == "/v1/video/generations/original" {
+			link := media.URL + "/tos.mp4?signature=expired"
+			if polls.Add(1) > 1 {
+				link = media.URL + "/cos.mp4?signature=fresh"
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "original", "status": "completed", "metadata": map[string]any{"url": link}})
 			return
 		}
-		if r.URL.Path != "/v1/videos/original/content" || r.URL.Query().Get("delivery") != "backup" {
-			t.Errorf("unexpected recovery route %s", r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		n := backups.Add(1)
-		if n == 1 {
-			w.Header().Set("Retry-After", "1")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte(`{"error":{"code":"video_delivery_pending"}}`))
-			return
-		}
-		http.Redirect(w, r, media.URL+"/cos.mp4?signature=fresh", http.StatusFound)
+		t.Errorf("unexpected recovery route %s", r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer gateway.Close()
 	svc, db := openDBRuntimeMatrix(t, t.TempDir())
@@ -317,8 +309,8 @@ func TestFailedBeefAPIVideoRecoveryUsesFreshBackupAndKeepsOriginalTask(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !recovered.Recovered || recovered.Task.ID != task.ID || recovered.Task.ProviderRequestID != "original" || recovered.Task.Status != model.TaskStatusSucceeded || creates.Load() != 0 || polls.Load() != 1 || primary.Load() != 1 || backups.Load() != 2 || mediaDownloads.Load() != 1 {
-		t.Fatalf("recovered=%+v creates=%d polls=%d primary=%d backups=%d media=%d", recovered, creates.Load(), polls.Load(), primary.Load(), backups.Load(), mediaDownloads.Load())
+	if !recovered.Recovered || recovered.Task.ID != task.ID || recovered.Task.ProviderRequestID != "original" || recovered.Task.Status != model.TaskStatusSucceeded || creates.Load() != 0 || polls.Load() != 2 || primary.Load() != 1 || mediaDownloads.Load() != 1 {
+		t.Fatalf("recovered=%+v creates=%d polls=%d primary=%d media=%d", recovered, creates.Load(), polls.Load(), primary.Load(), mediaDownloads.Load())
 	}
 	var stored model.Task
 	if err := db.First(&stored, "id = ?", task.ID).Error; err != nil {

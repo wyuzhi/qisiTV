@@ -7,6 +7,8 @@ import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import * as imageStorage from "@/services/image-storage";
 import * as assetSync from "@/services/project-asset-sync";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { createCanvasPageUiStore } from "../src/stores/canvas/use-canvas-page-ui-store";
+const pageUi = createCanvasPageUiStore();
 
 test("实际回写画布后重新迁移，不把编译输出追加进用户场景描述", async () => {
     const scene = createDirectorScene();
@@ -19,9 +21,9 @@ test("实际回写画布后重新迁移，不把编译输出追加进用户场�
     const asset = spyOn(assetSync, "ensureCanvasNodeAsset").mockResolvedValue({ assetId: "asset-output", created: false, linkedToProject: false, confirmed: true });
     let director!: ReturnType<typeof useCanvasDirector>;
     function Harness() {
-        director = useCanvasDirector({ projectId, directorNodeId: node.id, directorScenes: [scene], nodesRef, connectionsRef: { current: [] }, getCanvasCenter: () => ({ x: 0, y: 0 }),
+        director = useCanvasDirector({ pageUi, projectId, directorNodeId: node.id, directorScenes: [scene], nodesRef, connectionsRef: { current: [] }, getCanvasCenter: () => ({ x: 0, y: 0 }),
             setNodes: (value) => { nodesRef.current = typeof value === "function" ? value(nodesRef.current) : value; },
-            setConnections: () => {}, setSelectedNodeIds: () => {}, setSelectedConnectionId: () => {}, setDirectorNodeId: () => {}, updateProject: useCanvasStore.getState().updateProject,
+            setConnections: () => {}, setDirectorNodeId: () => {}, updateProject: useCanvasStore.getState().updateProject,
         });
         return null;
     }

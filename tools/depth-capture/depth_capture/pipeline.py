@@ -56,21 +56,27 @@ def encode_depth_preview(
     width: int,
     height: int,
     crf: int = 18,
+    min_output_fps: float | None = None,
 ) -> None:
     values = np.asarray(frames)
     if values.ndim != 3 or values.dtype != np.uint8 or not values.size:
         raise ValueError("预览帧必须是非空的 uint8 [frames, height, width] 数组")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     input_height, input_width = values.shape[1:]
+    output_fps = max(fps, min_output_fps) if (min_output_fps is not None and min_output_fps > 0) else fps
     command = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
         "-f", "rawvideo", "-pixel_format", "gray",
         "-video_size", f"{input_width}x{input_height}",
         "-framerate", f"{fps:.6f}", "-i", "-",
         "-vf", f"scale={width}:{height}:flags=bicubic",
+    ]
+    if abs(output_fps - fps) > 1e-3:
+        command.extend(["-r", f"{output_fps:.6f}"])
+    command.extend([
         "-an", "-c:v", "libx264", "-crf", str(crf),
         "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(output_path),
-    ]
+    ])
     process = subprocess.Popen(command, stdin=subprocess.PIPE)
     assert process.stdin is not None
     try:

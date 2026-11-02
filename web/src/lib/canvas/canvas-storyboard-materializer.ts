@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 
+import { writeCanvasNodePrompt } from "@/lib/canvas/canvas-node-prompt";
 import { storyboardAssetRoleForNode } from "@/lib/canvas/canvas-storyboard-assets";
 import { buildOrderedCanvasResourceReferences, canvasResourceMentionToken } from "@/lib/canvas/canvas-resource-references";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type StoryboardAssetBinding, type StoryboardRow } from "@/types/canvas";
@@ -79,4 +80,84 @@ function defaultRolePriority(role: StoryboardAssetBinding["role"]) {
     if (role === "prop" || role === "weapon" || role === "wardrobe") return 80;
     if (role === "motion" || role === "audio") return 70;
     return 60;
+}
+
+export function syncBoundStoryboardNodesForRows(
+    scriptNode: CanvasNodeData,
+    prevRows: StoryboardRow[],
+    nextRows: StoryboardRow[],
+    nodes: CanvasNodeData[],
+    connections: CanvasConnection[],
+) {
+    const prevById = new Map(prevRows.map((row) => [row.id, row]));
+    const syncTargets = new Map<string, { expectedType: CanvasNodeData["type"]; allowedOldDrafts: Set<string>; nextComposer: string }>();
+    for (const nextRow of nextRows) {
+        const prevRow = prevById.get(nextRow.id);
+        if (!prevRow) continue;
+        if (nextRow.imageNodeId && (nextRow.imageGenerationPrompt || "") !== (prevRow.imageGenerationPrompt || "")) {
+            const refIds = storyboardRowReferenceNodeIds(scriptNode, nextRow, nodes, connections, false, nextRow.imageNodeId);
+            const oldRaw = (prevRow.imageGenerationPrompt || prevRow.plotDescription || "").trim();
+            const nextRaw = (nextRow.imageGenerationPrompt || nextRow.plotDescription || "").trim();
+            syncTargets.set(nextRow.imageNodeId, {
+                expectedType: CanvasNodeType.Image,
+                allowedOldDrafts: new Set([
+                    "",
+                    prevRow.imageGenerationPrompt || "",
+                    oldRaw,
+                    storyboardComposerContent(oldRaw, refIds, nodes),
+                    nextRow.imageGenerationPrompt || "",
+                    nextRaw,
+                    storyboardComposerContent(nextRaw, refIds, nodes),
+                ]),
+                nextComposer: storyboardComposerContent(nextRaw, refIds, nodes),
+            });
+        }
+        if (nextRow.videoNodeId && (nextRow.videoMotionPrompt || "") !== (prevRow.videoMotionPrompt || "")) {
+            const videoNode = nodes.find((node) => node.id === nextRow.videoNodeId);
+            const includeFirstFrame = Boolean(videoNode?.metadata?.videoStartFrameNodeId || videoNode?.metadata?.videoEditOperation === "image_to_video");
+            const refIdsNoFrame = storyboardRowReferenceNodeIds(scriptNode, nextRow, nodes, connections, false, nextRow.videoNodeId);
+            const refIdsWithFrame = storyboardRowReferenceNodeIds(scriptNode, nextRow, nodes, connections, true, nextRow.videoNodeId);
+            const activeRefIds = includeFirstFrame ? refIdsWithFrame : refIdsNoFrame;
+            const oldRaw = (prevRow.videoMotionPrompt || prevRow.plotDescription || "").trim();
+            const nextRaw = (nextRow.videoMotionPrompt || nextRow.plotDescription || "").trim();
+            syncTargets.set(nextRow.videoNodeId, {
+                expectedType: CanvasNodeType.Video,
+                allowedOldDrafts: new Set([
+                    "",
+                    prevRow.videoMotionPrompt || "",
+                    oldRaw,
+                    storyboardComposerContent(oldRaw, refIdsNoFrame, nodes),
+                    storyboardComposerContent(oldRaw, refIdsWithFrame, nodes),
+                    nextRow.videoMotionPrompt || "",
+                    nextRaw,
+                    storyboardComposerContent(nextRaw, refIdsNoFrame, nodes),
+                    storyboardComposerContent(nextRaw, refIdsWithFrame, nodes),
+                ]),
+                nextComposer: storyboardComposerContent(nextRaw, activeRefIds, nodes),
+            });
+        }
+    }
+    return nodes.map((node) => {
+        if (node.id === scriptNode.id) {
+            return {
+                ...node,
+                metadata: {
+                    ...node.metadata,
+                    storyboard: {
+                        rows: nextRows,
+                        visibleColumns: node.metadata?.storyboard?.visibleColumns || ["shotNumber", "durationSeconds", "videoMotionPrompt", "dialogue", "assets"],
+                        referenceNodeIds: node.metadata?.storyboard?.referenceNodeIds || [],
+                    },
+                },
+            };
+        }
+        const sync = syncTargets.get(node.id);
+        if (!sync || node.type !== sync.expectedType) return node;
+        const rawDraft = node.metadata?.composerContent ?? node.metadata?.prompt ?? "";
+        const currentDraft = rawDraft.trim();
+        if (sync.allowedOldDrafts.has(currentDraft) || sync.allowedOldDrafts.has(rawDraft)) {
+            return writeCanvasNodePrompt(node, sync.nextComposer, { clearPromptTemplate: true });
+        }
+        return node;
+    });
 }

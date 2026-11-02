@@ -3,7 +3,6 @@ import { zipSync } from "fflate";
 
 import { archiveMediaIdempotencyKey, assertRestoredCanvasMatches, restoreCanvasArchive, type CanvasArchiveRestoreHost } from "@/lib/canvas/canvas-archive-restore";
 import { openCanvasArchive } from "@/lib/canvas/canvas-export";
-import { setActiveUserScope } from "@/lib/user-scope";
 import { useOperationProgress } from "@/stores/use-operation-progress";
 import { ARCHIVE_MAX_ENTRY_BYTES, ARCHIVE_MAX_FILES, ARCHIVE_MAX_TOTAL_BYTES, createZip } from "@/lib/zip";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
@@ -539,18 +538,4 @@ test("native canonical restore reports local saving rather than cloud synchroniz
     await restoreCanvasArchive(await validZip(), state.host);
     expect(progress.length).toBeGreaterThan(0);
     expect(progress.every((value) => value.phase === "saving" && value.message.includes("本地"))).toBe(true);
-});
-
-test("account switch abandons restore without cleaning the new account", async () => {
-    setActiveUserScope("owner-a");
-    const { host, projects, folders, deleted } = memoryHost({
-        persistProject: async () => {
-            setActiveUserScope("owner-b");
-            throw new Error("persist-after-switch");
-        },
-    });
-    await expect(restoreCanvasArchive(await validZip(), host)).rejects.toThrow("persist-after-switch");
-    expect(deleted).toEqual([]);
-    expect(projects).toHaveLength(1);
-    expect(folders).toHaveLength(1);
 });

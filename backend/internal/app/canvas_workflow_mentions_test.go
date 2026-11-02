@@ -20,18 +20,18 @@ func TestCanvasWorkflowNodeMentionsRoundTripAndMaterialize(t *testing.T) {
 	input["referenceVideos"] = append(input["referenceVideos"].([]any), map[string]any{"storageKey": "resource:old-action"})
 	raw, _ := json.Marshal(input)
 	db.Model(&task).Update("input_json", string(raw))
-	created, err := s.CreateCanvasWorkflow("owner", cw.CreateRequest{Name: "Node mentions", Definition: d})
+	created, err := s.workflowTemplates().Create("owner", cw.CreateRequest{Name: "Node mentions", Definition: d})
 	if err != nil {
 		t.Fatal(err)
 	}
-	editor, err := s.CanvasWorkflowEditor("owner", created.ID, 0)
+	editor, err := s.workflowTemplates().Editor("owner", created.ID, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := range editor.Workflow.Definition.Nodes {
 		editor.Workflow.Definition.Nodes[i].Title = "重新命名"
 	}
-	saved, err := s.UpdateCanvasWorkflow("owner", created.ID, cw.UpdateRequest{Name: created.Name, ExpectedRevision: created.Revision, Definition: editor.Workflow.Definition})
+	saved, err := s.workflowTemplates().Update("owner", created.ID, cw.UpdateRequest{Name: created.Name, ExpectedRevision: created.Revision, Definition: editor.Workflow.Definition})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestCanvasWorkflowNodeMentionsRoundTripAndMaterialize(t *testing.T) {
 	if req.Input["referenceImages"].([]any)[0].(map[string]any)["storageKey"] != "resource:new-person" {
 		t.Fatal("node mention did not bind current media")
 	}
-	editor, err = s.CanvasWorkflowEditor("owner", saved.ID, 0)
+	editor, err = s.workflowTemplates().Editor("owner", saved.ID, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

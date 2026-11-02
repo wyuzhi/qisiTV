@@ -12,7 +12,7 @@ test("Midjourney exposes fixed four-image settings and tracks delivery for each 
     const nodes = [0, 1].map((index) => ({ id: String(index), type: CanvasNodeType.Image, title: "MJ", position: { x: 0, y: 0 }, width: 320, height: 320, metadata: { taskOutputIndex: index, content: `image:${index}` } }));
     const task = { id: "task", type: "canvas_image", status: "succeeded", stage: "delivery_paused", outputs: [{ outputIndex: 0, materializedAssetId: "first" }, { outputIndex: 1, materializationErrorCode: "delivery_paused" }] } as GenerationTask;
     expect(canvasGenerationTaskNodes(nodes, "0", task)[0]!.metadata!.status).toBe("success");
-    expect(canvasGenerationTaskNodes(nodes, "1", task)[1]!.metadata).toMatchObject({ status: "error", resourceReloadAvailable: true });
+    expect(canvasGenerationTaskNodes(nodes, "1", task)[1]!.metadata).toMatchObject({ status: "error", taskOutcome: { phase: "retrievable", regenerate: "blocked" } });
 });
 
 test("Midjourney creates one four-image task and preserves all output identities during recovery", async () => {

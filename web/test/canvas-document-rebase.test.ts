@@ -262,6 +262,60 @@ describe("settleInFlightGenerationOverlay", () => {
         expect(settled.nodes[0]?.metadata?.content).toBe("");
         expect(settled.nodes[0]?.metadata?.storageKey).toBe("old-key");
     });
+
+    test("settled overlay and stale running bound node both resolve taskOutcome to ready", () => {
+        const inFlightOutcome = { phase: "running" as const, regenerate: "blocked" as const, reason: "in_flight" };
+        const original = node("image-origin", "原图", {
+            taskId: "task-1",
+            status: "loading",
+            taskStatus: "running",
+            taskOutcome: inFlightOutcome,
+        });
+        const remoteBoundWithoutOutcome = project([
+            node("image-origin", "原图", {
+                taskId: "task-1",
+                status: "success",
+                taskStatus: "succeeded",
+                taskProgress: 100,
+                content: "/api/resources/res-1/file",
+                storageKey: "resource:res-1",
+                assetId: "asset-1",
+            }),
+        ], 12);
+        const settledFromLoading = settleInFlightGenerationOverlay({
+            base: project([original], 10),
+            local: project([original], 10),
+            remote: remoteBoundWithoutOutcome,
+        });
+        expect(settledFromLoading.nodes[0]?.metadata?.taskOutcome).toEqual({
+            phase: "ready",
+            regenerate: "allowed",
+            reason: "result_ready",
+        });
+
+        const staleBoundLocal = project([
+            node("image-origin", "原图", {
+                taskId: "task-1",
+                status: "success",
+                taskStatus: "succeeded",
+                taskProgress: 100,
+                content: "/api/resources/res-1/file",
+                storageKey: "resource:res-1",
+                assetId: "asset-1",
+                taskOutcome: inFlightOutcome,
+            }),
+        ], 12);
+        const settledFromStaleSuccess = settleInFlightGenerationOverlay({
+            base: remoteBoundWithoutOutcome,
+            local: staleBoundLocal,
+            remote: remoteBoundWithoutOutcome,
+        });
+        expect(settledFromStaleSuccess.nodes[0]?.metadata?.taskOutcome).toEqual({
+            phase: "ready",
+            regenerate: "allowed",
+            reason: "result_ready",
+        });
+    });
 });
 
 describe("rebaseCanvasDocumentThreeWay node timestamps", () => {

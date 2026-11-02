@@ -2,8 +2,13 @@ import { expect, test } from "bun:test";
 import { ApiError } from "@/services/api/request";
 import { GenerationSubmissionUnknownError, submitGenerationCommand } from "@/services/api/generation-submission";
 import type { GenerationTask } from "@/services/api/task-center";
+import { findGenerationTaskByOperation } from "@/services/api/task-center";
 
 const task = { id: "original", projectId: "canvas", type: "canvas_video", status: "queued" } as GenerationTask;
+
+test.each([undefined, "", "   "])("a missing operation identity %p is rejected before task lookup", async (operationId) => {
+    await expect(findGenerationTaskByOperation(operationId as string, "canvas")).rejects.toThrow("缺少提交标识");
+});
 
 test("lost response finds the original admission without a second POST", async () => {
     let posts = 0;

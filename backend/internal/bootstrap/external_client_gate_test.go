@@ -136,6 +136,24 @@ func TestOpsGateAcceptsRegisteredClientWithoutLaunchToken(t *testing.T) {
 	if _, reason := decodeEnvelope(t, operation); reason == "desktop_token_required" {
 		t.Fatalf("已登记客户端在操作入口被启动令牌守卫拦下：%d %s", operation.Code, operation.Body.String())
 	}
+
+	// 生成单查询入口对已登记客户端放行，但批准入口必须拒绝客户端凭据自批。
+	orders := harness.call(requestOptions{method: "GET", path: "/ops/orders", clientID: registration.ID, clientToken: token})
+	if orders.Code != http.StatusOK {
+		t.Fatalf("已登记客户端应能查询生成单，得到 %d %s", orders.Code, orders.Body.String())
+	}
+	selfApprove := harness.call(requestOptions{method: "POST", path: "/ops/orders/gp-test/approve", clientID: registration.ID, clientToken: token})
+	if _, reason := decodeEnvelope(t, selfApprove); selfApprove.Code != http.StatusForbidden || reason != "agent_token_cannot_approve" {
+		t.Fatalf("客户端凭据批准生成单应被 agent_token_cannot_approve 拒绝，得到 %d %s", selfApprove.Code, selfApprove.Body.String())
+	}
+	ownerTok, err := agentops.EnsureOwnerToken(harness.dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerApprove := harness.call(requestOptions{method: "POST", path: "/ops/orders/gp-missing/approve", extraHeaders: map[string]string{"X-Beeftv-Owner": ownerTok}})
+	if _, reason := decodeEnvelope(t, ownerApprove); ownerApprove.Code != http.StatusNotFound || reason != "generation_order_not_found" {
+		t.Fatalf("本机 Owner 凭据应穿过启动令牌守卫进入生成单批准路由，得到 %d %s", ownerApprove.Code, ownerApprove.Body.String())
+	}
 }
 
 // 伪造或不存在的凭据不能换来豁免：守卫回落到启动令牌，结果是 403。

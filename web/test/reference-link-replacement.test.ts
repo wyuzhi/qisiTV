@@ -52,7 +52,7 @@ test("HTTPS replacement requires HTTPS without embedded credentials", () => {
     expect(isReferenceHTTPSLink(" https://cdn.example/x?signature=fixture ")).toBe(true);
 });
 
-for (const action of ["replace", "cancel", "abort", "switch", "invalid", "upstream-error"] as const) {
+for (const action of ["replace", "cancel", "abort", "invalid", "upstream-error"] as const) {
     test(`reference admission recovery: ${action}`, async () => {
         setActiveUserScope("link-owner");
         const calls: any[] = [];
@@ -63,7 +63,6 @@ for (const action of ["replace", "cancel", "abort", "switch", "invalid", "upstre
             expect(refs.map((ref) => ref.label)).toEqual(["参考图片 1"]);
             if (action === "cancel") return null;
             if (action === "abort") controller.abort();
-            if (action === "switch") { setActiveUserScope("other-owner"); setActiveUserScope("link-owner"); }
             return { "referenceImages:0": action === "invalid" ? "http://cdn.example/x" : "https://cdn.example/x" };
         } }, {
             createTask: async (input) => {

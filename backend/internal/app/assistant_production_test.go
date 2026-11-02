@@ -30,7 +30,7 @@ func TestAssistantProductionAtomicAuthorizationAndReplay(t *testing.T) {
 	if _, err := svc.BeginAssistantTurn("local", canvasID, source, AssistantTurnInput{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.BindAssistantDurableSession("local", source, backgroundContinuationSession, false); err != nil {
+	if err := svc.AssistantTurns().BindDurableSession("local", source, backgroundContinuationSession, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.FinalizeAssistantTurn(source); err != nil {
@@ -104,7 +104,7 @@ func TestAssistantProductionAtomicAuthorizationAndReplay(t *testing.T) {
 	if _, err = svc.BeginAssistantTurn("local", canvasID, next, AssistantTurnInput{}); err != nil {
 		t.Fatal(err)
 	}
-	if err = svc.BindAssistantDurableSession("local", next, backgroundContinuationSession, false); err != nil {
+	if err = svc.AssistantTurns().BindDurableSession("local", next, backgroundContinuationSession, false); err != nil {
 		t.Fatal(err)
 	}
 	svc.Database().Model(&model.AssistantTurn{}).Where("turn_id = ?", next).Update("generation_authorization_json", origin.GenerationAuthorizationJSON)
@@ -150,7 +150,7 @@ func TestAssistantProductionAtomicAuthorizationAndReplay(t *testing.T) {
 	if err == nil {
 		t.Fatal("changed paid input accepted")
 	}
-	if err = svc.CancelAssistantContinuations("local", canvasID, backgroundContinuationSession, false); err != nil {
+	if err = svc.AssistantTurns().CancelContinuations("local", canvasID, backgroundContinuationSession, false); err != nil {
 		t.Fatal(err)
 	}
 	err = svc.Database().Transaction(func(tx *gorm.DB) error {
@@ -159,5 +159,99 @@ func TestAssistantProductionAtomicAuthorizationAndReplay(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("stopped authorization revived")
+	}
+}
+
+func TestAssistantProductionPendingProposalCannotAuthorizeNextTurn(t *testing.T) {
+	svc, canvasID, _ := newAssistantTurnService(t)
+	sqlDB, _ := svc.Database().DB()
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
+	if err := svc.SaveLocalModelConfig([]byte(`{"imageModel":"custom::image","audioModel":"custom::speech","channels":[{"id":"custom","enabled":true,"baseUrl":"https://example.invalid/v1","apiKey":"test-only","models":["image","speech"],"modelProfiles":[{"model":"image","capability":"image","protocol":"openai-image"},{"model":"speech","capability":"audio","protocol":"openai-audio"}]}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := svc.UserCanvasProject("local", canvasID)
+	var doc map[string]any
+	_ = json.Unmarshal(raw, &doc)
+	doc["nodes"] = []any{
+		map[string]any{"id": "image", "type": "image", "title": "首帧", "metadata": map[string]any{"prompt": "雨后的花店", "size": "9:16", "count": 1}},
+		map[string]any{"id": "speech", "type": "audio", "title": "旁白", "metadata": map[string]any{"prompt": "把春天，带回家。", "model": "custom::speech", "audioVoice": "alloy"}},
+	}
+	doc["connections"] = []any{}
+	raw, _ = json.Marshal(doc)
+	if _, err := svc.UpsertUserCanvasProject("local", raw); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = svc.UserCanvasProject("local", canvasID)
+	_ = json.Unmarshal(raw, &doc)
+	targets, err := operations.GenerationTargets(svc.BindDomain(nil), doc, []string{"image", "speech"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const proposeTurn = "1111222233334444"
+	if _, err := svc.BeginAssistantTurn("local", canvasID, proposeTurn, AssistantTurnInput{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.AssistantTurns().BindDurableSession("local", proposeTurn, backgroundContinuationSession, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Database().Transaction(func(tx *gorm.DB) error {
+		return svc.BindDomain(tx).(*operationSession).RecordAssistantGenerationProposal("local", proposeTurn, canvasID, operations.GenerationAuthorization{
+			ProposalID: "gp-chat-confirm",
+			Targets:    targets,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Self-confirming in the same turn without a user reply must be rejected.
+	if err := svc.Database().Transaction(func(tx *gorm.DB) error {
+		_, e := svc.BindDomain(tx).(*operationSession).SubmitAuthorizedGeneration("local", proposeTurn, canvasID, targets[:1])
+		return e
+	}); err == nil {
+		t.Fatal("model self-confirmed proposal in the proposing turn")
+	}
+	if err := svc.FinalizeAssistantTurn(proposeTurn); err != nil {
+		t.Fatal(err)
+	}
+
+	// A new user turn (question, rejection, or edit request)
+	// invalidates previous continuations on /assistant/chat admission.
+	if err := svc.AssistantTurns().CancelContinuations("local", canvasID, backgroundContinuationSession, true); err != nil {
+		t.Fatal(err)
+	}
+	const confirmTurn = "5555666677778888"
+	if _, err := svc.BeginAssistantTurn("local", canvasID, confirmTurn, AssistantTurnInput{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.AssistantTurns().BindDurableSession("local", confirmTurn, backgroundContinuationSession, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// A model's next-turn submit call is not a user confirmation event.
+	err = svc.Database().Transaction(func(tx *gorm.DB) error {
+		_, e := svc.BindDomain(tx).(*operationSession).SubmitAuthorizedGeneration("local", confirmTurn, canvasID, targets[:1])
+		return e
+	})
+	if err == nil {
+		t.Fatal("pending proposal was promoted without an explicit confirmation grant")
+	}
+	var count int64
+	svc.Database().Model(&model.Task{}).Count(&count)
+	if count != 0 {
+		t.Fatalf("unconfirmed next turn admitted %d paid tasks", count)
+	}
+	for _, id := range []string{proposeTurn, confirmTurn} {
+		var turn model.AssistantTurn
+		if err := svc.Database().First(&turn, "turn_id = ?", id).Error; err != nil {
+			t.Fatal(err)
+		}
+		var grant operations.GenerationAuthorization
+		if turn.GenerationAuthorizationJSON != "" {
+			_ = json.Unmarshal([]byte(turn.GenerationAuthorizationJSON), &grant)
+		}
+		if grant.SourceTurnID != "" {
+			t.Fatal("unconfirmed call persisted a spend grant")
+		}
 	}
 }

@@ -1,6 +1,5 @@
 import { depthCaptureTaskMetadata, depthCaptureWaitFailureMetadata, isDepthCaptureResultNode } from "@/lib/canvas/canvas-depth-capture";
 import { assertLocalExecutorSession, beginLocalExecutorSession, isLocalExecutorSessionStop, observeLocalExecutorTask, type LocalExecutorSession } from "@/lib/plugins/builtin/editor/local-executor-session";
-import type { CapturedUserScope } from "@/lib/user-scope-guard";
 import type { GenerationTask } from "@/services/api/task-center";
 import { bindBackendCanvasGenerationResult } from "@/services/canvas-generation-consumer";
 import type { CanvasNodeData } from "@/types/canvas";
@@ -38,7 +37,6 @@ export async function attachOwnedDepthCaptureResult(input: DepthTarget & { task:
             assertLocalExecutorSession(input.session);
             return input.nodesRef.current.some(node => ownsTask(input, node));
         },
-        runtime: { captureScope: () => input.session.expectedScope },
     });
 }
 
@@ -72,7 +70,6 @@ export async function recoverOwnedDepthCaptureNode(input: DepthTarget, bind = bi
 export function recoverOwnedDepthCaptureNodes(input: {
     nodesRef: { current: CanvasNodeData[] };
     signal: AbortSignal;
-    expectedScope: CapturedUserScope;
     projectId: string;
     getLiveProjectId: () => string;
     observers: Set<AbortController>;
@@ -87,7 +84,7 @@ export function recoverOwnedDepthCaptureNodes(input: {
         const onAbort = () => observer.abort();
         if (input.signal.aborted) onAbort();
         else input.signal.addEventListener("abort", onAbort, { once: true });
-        const session = beginLocalExecutorSession(input.projectId, { controller: observer, getLiveProjectId: input.getLiveProjectId, expectedScope: input.expectedScope });
+        const session = beginLocalExecutorSession(input.projectId, { controller: observer, getLiveProjectId: input.getLiveProjectId });
         void recoverOwnedDepthCaptureNode({ node, session, nodesRef: input.nodesRef, setNodes: input.setNodes }).finally(() => {
             input.signal.removeEventListener("abort", onAbort);
             input.observers.delete(observer);

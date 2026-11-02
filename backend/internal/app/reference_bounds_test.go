@@ -30,7 +30,10 @@ func TestNativeArkLimitMeasuresSerializedBodyOnly(t *testing.T) {
 func TestNativeArkUnconfiguredReferencesStillPreflight(t *testing.T) {
 	for _, protocol := range []string{"volcengine-ark-video", "volcengine-ark-agent-plan-video"} {
 		input := canvasGenerationInput{Prompt: "test", Config: providerConfig{InterfaceType: protocol, Model: "doubao-seedance-2-5-260528", VideoSeconds: "5"}, ReferenceImages: []providerMedia{{Width: 384, Height: 216}}}
-		if err := (&Service{}).validateResolvedVideoCapability(&input); err == nil || !strings.Contains(err.Error(), "高度为 216") {
+		if err := (&Service{}).resolveVideoCapability(context.Background(), &input); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateVideoTask(input.VideoCapability, input); err == nil || !strings.Contains(err.Error(), "高度为 216") {
 			t.Fatalf("native preflight skipped: %v", err)
 		}
 	}
@@ -42,7 +45,13 @@ func TestReferenceDurationIndependentBounds(t *testing.T) {
 		min, max float64
 		want     string
 	}{
-		{16000, 0, 15, "不超过 15"}, {1000, 2, 0, "至少 2"}, {0, 0, 0, ""}, {15000, 0, 15, ""}, {2000, 2, 0, ""},
+		{16000, 0, 15, "需要改到 15 秒以内；请裁剪或换一段更短的音频后再提交"},
+		{1000, 2, 0, "需要改到 2 秒以上；请换一段更长的音频后再提交"},
+		{0, 0, 0, ""}, {15000, 0, 15, ""}, {2000, 2, 0, ""},
+		// 2–15 秒的限制下，过短要换更长、过长要裁短，不能都给同一个建议。
+		{1900, 2, 15, "需要改到 2–15 秒；请换一段更长的音频后再提交"},
+		{16000, 2, 15, "需要改到 2–15 秒；请裁剪或换一段更短的音频后再提交"},
+		{16000, 2, 15, "第 1 段参考音频时长为 16.00 秒"},
 	} {
 		err := validateReferenceDuration("音频", 0, tc.duration, tc.min, tc.max)
 		if tc.want == "" {
@@ -66,7 +75,10 @@ func TestSeedanceInlineVideoDimensionsOverrideForgedMetadata(t *testing.T) {
 	if input.ReferenceVideos[0].Width != 432 || input.ReferenceVideos[0].Height != 768 {
 		t.Fatal("caller metadata trusted")
 	}
-	err := (&Service{}).validateResolvedVideoCapability(&input)
+	if err := (&Service{}).resolveVideoCapability(context.Background(), &input); err != nil {
+		t.Fatal(err)
+	}
+	err := validateVideoTask(input.VideoCapability, input)
 	if err == nil || !strings.Contains(err.Error(), "331776（432×768）") {
 		t.Fatalf("invalid video admitted: %v", err)
 	}

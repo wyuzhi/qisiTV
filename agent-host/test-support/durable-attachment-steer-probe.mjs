@@ -12,6 +12,7 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'beeftv-durable-http-ste
 const hostToken = 'fixture-http-steer';
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jfWQAAAAASUVORK5CYII=';
 let child, log = '', writes = 0, modelCalls = 0, base, releaseOld, releaseImage, imageArrived, releaseLatest;
+let previewMode = false, imageInspectCalls = 0;
 const imageStarted = new Promise(resolve => { imageArrived = resolve; });
 const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
 const read = async req => { let raw = ''; for await (const chunk of req) raw += chunk; return JSON.parse(raw || '{}'); };
@@ -22,12 +23,16 @@ const ops = createServer(async (req, res) => {
   if(serveEmptySkillContext(req,res))return;
   const turn = req.url.match(/\/assistant\/runtime\/turns\/([^/]+)(\/complete)?$/);
   if (turn) { if (turn[2]) closed.add(turn[1]); res.end(JSON.stringify({ code: 0, data: { turnId: turn[1], canvasId: 'canvas', open: !closed.has(turn[1]), revision: 1 } })); return; }
-  if (req.url === '/api/ops') { res.end(JSON.stringify({ code: 0, data: { ops: [{ id: 'canvas.node.update', summary: 'update', assistantModes: ['canvas', 'full-access'], replay: 'safe', readOnly: false, params: { type: 'object', properties: { nodeId: { type: 'string' }, expectedRevision: { type: 'integer' }, patch: { type: 'object' } } } }] } })); return; }
+  if (req.url === '/api/ops') { res.end(JSON.stringify({ code: 0, data: { ops: [
+    { id: 'canvas.get', summary: 'read', assistantModes: ['canvas', 'full-access'], replay: 'safe', readOnly: true, params: { type: 'object', properties: { canvasId: { type: 'string' } } } },
+    { id: 'canvas.node.update', summary: 'update', assistantModes: ['canvas', 'full-access'], replay: 'safe', readOnly: false, params: { type: 'object', properties: { nodeId: { type: 'string' }, expectedRevision: { type: 'integer' }, patch: { type: 'object' } } } }] } })); return; }
   const body = await read(req);
+  if (req.url === '/api/ops/canvas.get') { res.end(JSON.stringify({ code: 0, data: { result: { canvasId: 'canvas', canvas: { revision: writes + 1, nodes: [{ id: 'n1', type: 'text', title: 'draft' }], connections: [] } } } })); return; }
   if(req.url.endsWith('/bind-session')) {assert.match(body.sessionId,/^durable:/);res.end(JSON.stringify({code:0,data:{bound:true}}));return;}
   if (req.url === '/api/ops/skill.catalog') { res.end(JSON.stringify({ code: 0, data: { result: { skills: [], total: 0 } } })); return; }
-  if (req.url === '/api/ops/media.overview') { res.end(JSON.stringify({ code: 0, data: { result: { source: { version: 'owned-fixture-version' } } } })); return; }
+  if (req.url === '/api/ops/media.overview') { res.end(JSON.stringify({ code: 0, data: { result: { source: { version: 'owned-fixture-version' }, ...(previewMode ? { image: { view: 'preview', width: 2048, height: 1536, originalWidth: 4000, originalHeight: 3000 }, note: 'Inspect imageCrop for original detail.', content: [{ type: 'image', mimeType: 'image/png', data: png }] } : {}) } } })); return; }
   if (req.url === '/api/ops/media.inspect') {
+    imageInspectCalls++;
     assert.equal(body.params.expectedVersion, 'owned-fixture-version');
     imageArrived(); await new Promise(resolve => { releaseImage = resolve; });
     res.end(JSON.stringify({ code: 0, data: { result: { content: [{ type: 'image', mimeType: 'image/png', data: png }] } } })); return;
@@ -39,7 +44,8 @@ const ops = createServer(async (req, res) => {
 const provider = createServer(async (req, res) => {
   const body = await read(req); modelCalls++;
   if (modelCalls === 1) await new Promise(resolve => { releaseOld = resolve; });
-  else { assert(JSON.stringify(body.messages).includes('image_url')); assert(JSON.stringify(body.messages).includes('BEEFTV_INPUT:attachment-only')); }
+  else if (modelCalls <= 4) { assert(JSON.stringify(body.messages).includes('image_url')); assert(JSON.stringify(body.messages).includes('BEEFTV_INPUT:attachment-only')); }
+  else { assert.equal(modelCalls, 5); assert(JSON.stringify(body.messages).includes('image_url')); assert(JSON.stringify(body.messages).includes('Inspect imageCrop for original detail.')); }
   if (modelCalls === 3) await new Promise(resolve => { releaseLatest = resolve; });
   res.writeHead(200, { 'content-type': 'text/event-stream' });
   const isTool = modelCalls === 1 || modelCalls === 3;
@@ -79,6 +85,11 @@ try {
   assert.equal(history.turns[0].error, null); assert.equal(writes, 1); assert.equal(history.turns[0].reply, 'Updated draft using the attached image.');
   assert.equal(modelCalls, 4); assert(closed.has('http-steer-turn'));
   await request('/history?canvasId=canvas'); assert.equal(modelCalls, 4); assert.equal(writes, 1);
+  previewMode = true;
+  const inspectionsBeforePreview = imageInspectCalls;
+  await (await request('/chat', { canvasId: 'canvas', sessionId: session.sessionId, turnId: 'large-image-turn', message: 'Read this large image', revisionBefore: 2, attachments: [{ kind: 'image', nodeId: 'n1', resourceId: 'owned-image' }] })).text();
+  await until(async () => (await (await request('/history?canvasId=canvas')).json()).turns?.length === 2);
+  assert.equal(modelCalls, 5); assert.equal(imageInspectCalls, inspectionsBeforePreview, 'large attachment must reach the model with a labeled preview instead of failing a full-size inspect');
   console.log(JSON.stringify({ passed: true, modelCalls, writes, attachmentOnly: true, durable: true }));
 } finally {
   if (child && child.exitCode === null) { const done = new Promise(resolve => child.once('close', resolve)); child.kill('SIGTERM'); await Promise.race([done, delay(3000)]); if (child.exitCode === null) child.kill('SIGKILL'); await done; }

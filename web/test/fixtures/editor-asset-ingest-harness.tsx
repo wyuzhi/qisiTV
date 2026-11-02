@@ -4,8 +4,6 @@ import { createRoot } from "react-dom/client";
 import { EditorStoreProvider } from "../../src/components/editor/editor-context";
 import { EditorAssetIngest } from "../../src/lib/plugins/builtin/editor/editor-asset-ingest";
 import { normalizeTimelineProject } from "../../src/lib/timeline/timeline-tracks";
-import { setActiveUserScope } from "@/lib/user-scope";
-import { captureUserScope } from "@/lib/user-scope-guard";
 import type { ProjectAsset } from "../../src/services/api/projects";
 import { createEditorStore } from "../../src/stores/editor/editor-store";
 import { createEditorAssetIngestDoubles, type EditorAssetIngestDoubles } from "./editor-asset-ingest-doubles";
@@ -16,7 +14,6 @@ type HarnessWindow = Window & {
         doubles: EditorAssetIngestDoubles;
         assets: ProjectAsset[];
         projectId: string;
-        switchABA: () => void;
         switchProject: () => void;
         remountEditor: () => void;
     };
@@ -24,7 +21,6 @@ type HarnessWindow = Window & {
 
 const harnessWindow = window as HarnessWindow;
 
-setActiveUserScope("owner-a");
 const doubles = createEditorAssetIngestDoubles();
 harnessWindow.__editorAssetIngestDoubles = doubles;
 
@@ -43,19 +39,13 @@ function Harness() {
             phase: "enter",
             step: "refresh",
             projectId,
-            liveScope: captureUserScope(),
         });
         if (doubles.hold.refresh) await doubles.gates.refresh.promise;
-        if (doubles.switched) {
-            doubles.refreshAfterSwitch += 1;
-            return null;
-        }
         if (doubles.fail.refresh) return null;
         doubles.calls.push({
             phase: "write",
             step: "refresh",
             projectId,
-            liveScope: captureUserScope(),
         });
         const list = doubles.linked.slice();
         setAssets(list);
@@ -66,11 +56,6 @@ function Harness() {
         doubles,
         assets,
         projectId,
-        switchABA: () => {
-            doubles.switched = true;
-            setActiveUserScope("owner-b");
-            setActiveUserScope("owner-a");
-        },
         switchProject: () => {
             setProjectId("project-b");
             setAssets([]);

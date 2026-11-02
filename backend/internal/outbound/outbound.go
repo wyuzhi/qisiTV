@@ -54,6 +54,9 @@ func ValidateOutboundURL(rawURL string) (*url.URL, error) {
 // ValidateOutboundURLContext keeps DNS safety checks inside the caller's
 // cancellation/deadline, including reference-upload recovery budgets.
 func ValidateOutboundURLContext(ctx context.Context, rawURL string) (*url.URL, error) {
+	if requiresPublicHTTPS(ctx) {
+		return ValidatePublicHTTPSURLContext(ctx, rawURL)
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -107,7 +110,7 @@ func ValidateCustomRelayURL(rawURL string) (*url.URL, error) {
 
 func OutboundHTTPClient(timeout time.Duration) *http.Client {
 	return &http.Client{
-		Transport: outboundTransport,
+		Transport: outboundPolicyTransport{},
 		Timeout:   timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= maxOutboundRedirects {

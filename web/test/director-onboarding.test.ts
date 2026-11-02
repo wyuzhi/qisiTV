@@ -558,8 +558,8 @@ describe("引导产品接线", () => {
 
     test("页面只把已认证用户 id 传给引导，不使用 guest fallback 或未定义变量", () => {
         expect(projectCode).toContain('const directorOnboardingScope = useUserStore((state) => state.user?.id?.trim() || "")');
-        expect(projectCode).toContain("onboardingScope: directorOnboardingScope");
-        expect(editorDialogs).toContain("onboardingScope={director.onboardingScope}");
+        expect(editorDialogs).toContain("directorOnboardingScope: string");
+        expect(editorDialogs).toContain("onboardingScope={directorOnboardingScope}");
         expect(projectCode).not.toContain("trimmedUserId");
         expect(projectCode).not.toContain("onboardingScope={canvasStorageScope}");
     });

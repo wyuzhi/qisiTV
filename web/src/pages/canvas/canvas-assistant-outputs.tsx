@@ -1,7 +1,5 @@
 import { Button } from "antd";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { getActiveUserScope, getActiveUserScopeEpoch, subscribeUserScope } from "@/lib/user-scope";
-import { assertUserScope, captureUserScope, userScopeMatches } from "@/lib/user-scope-guard";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { queryGenerationTask, type GenerationTask } from "@/services/api/task-center";
 import { getResourceBlob, getResourcePlaybackBlob, resourceStorageKey } from "@/services/api/resources";
 import { downloadOwnedOrBrowserMedia, isWailsNativeShell } from "@/services/desktop-media-save";
@@ -27,26 +25,24 @@ function AssistantProjectDownload({output}: {output: Extract<AssistantTurnOutput
     const [feedback,setFeedback] = useState("");
     const [loading,setLoading] = useState(false);
     async function download() {
-        const scope = captureUserScope(); let url = "";
+        let url = "";
         setLoading(true);setFeedback("");
         try {
             if (!isWailsNativeShell()) {
-                const blob = await getResourceBlob(resourceStorageKey(output.resourceId)); assertUserScope(scope);
+                const blob = await getResourceBlob(resourceStorageKey(output.resourceId));
                 if (!blob) throw Error("missing project"); url=URL.createObjectURL(blob);
             }
             const result = await downloadOwnedOrBrowserMedia({fileName:output.fileName,resourceId:output.resourceId,browserUrl:url || undefined});
-            assertUserScope(scope);if(result === "saved")setFeedback("工程已保存，可在 BeefTV 导入后继续编辑");
-        } catch { if(userScopeMatches(scope))setFeedback("工程下载未完成，请重试"); }
+            if(result === "saved")setFeedback("工程已保存，可在 BeefTV 导入后继续编辑");
+        } catch { setFeedback("工程下载未完成，请重试"); }
         finally { setLoading(false);if(url)setTimeout(()=>URL.revokeObjectURL(url),1000); }
     }
     return <div className="canvas-assistant-card"><strong>可编辑工程</strong><span>{output.fileName}</span><div className="canvas-assistant-card-actions"><Button size="small" loading={loading} onClick={()=>void download()}>下载工程</Button></div>{feedback?<span role="status">{feedback}</span>:null}</div>;
 }
 
 function CanvasAssistantVideoOutputs({ outputs }: { outputs: Extract<AssistantTurnOutput,{kind:"video"}>[] }) {
-    const account = useSyncExternalStore(subscribeUserScope, () => JSON.stringify([getActiveUserScope(), getActiveUserScopeEpoch()]), () => "");
-    const expected = useMemo(() => captureUserScope(), [account]);
     const signature = JSON.stringify(outputs.map(output => [output.taskId, output.kind, output.sourceRevision]));
-    const identity = `${account}:${signature}`;
+    const identity = signature;
     const currentIdentity = useRef(identity);
     currentIdentity.current = identity;
     const [records, setRecords] = useState<{ identity: string; tasks: Record<string, GenerationTask>; unread: string[] }>({ identity: "", tasks: {}, unread: [] });
@@ -63,10 +59,10 @@ function CanvasAssistantVideoOutputs({ outputs }: { outputs: Extract<AssistantTu
         const targets = JSON.parse(signature) as [string, string, number?][];
         const read = async () => {
             const entries = await Promise.all(targets.map(async ([taskId]) => {
-                try { return [taskId, await queryGenerationTask(taskId, { signal: controller.signal, expectedScope: expected })] as const; }
+                try { return [taskId, await queryGenerationTask(taskId, { signal: controller.signal })] as const; }
                 catch { return [taskId, null] as const; }
             }));
-            if (cancelled || !userScopeMatches(expected)) return;
+            if (cancelled) return;
             const tasks: Record<string, GenerationTask> = {}, unread: string[] = [];
             for (const [id, task] of entries) {
                 if (task && task.id === id) tasks[id] = task;
@@ -77,7 +73,7 @@ function CanvasAssistantVideoOutputs({ outputs }: { outputs: Extract<AssistantTu
         };
         void read();
         return () => { cancelled = true; controller.abort(); if (timer) clearTimeout(timer); };
-    }, [identity, signature, expected, retry]);
+    }, [identity, signature, retry]);
     useEffect(() => {
         const urls = ownedURLs.current;
         return () => { requestSerial.current++; for (const url of urls) URL.revokeObjectURL(url); urls.clear(); playerURL.current = ""; };
@@ -98,9 +94,7 @@ function CanvasAssistantVideoOutputs({ outputs }: { outputs: Extract<AssistantTu
         const serial = ++requestSerial.current;
         setPlayback({ identity, taskId, url: "", loading: true });
         try {
-            assertUserScope(expected);
             const blob = await getResourcePlaybackBlob(resourceStorageKey(resourceId));
-            assertUserScope(expected);
             if (serial !== requestSerial.current || currentIdentity.current !== identity) return;
             if (!blob) throw Error("missing media");
             const url = URL.createObjectURL(blob);
@@ -108,7 +102,7 @@ function CanvasAssistantVideoOutputs({ outputs }: { outputs: Extract<AssistantTu
             playerURL.current = url; ownedURLs.current.add(url);
             setPlayback({ identity, taskId, url });
         } catch {
-            if (serial === requestSerial.current && currentIdentity.current === identity && userScopeMatches(expected)) setPlayback({ identity, taskId, url: "", error: true });
+            if (serial === requestSerial.current && currentIdentity.current === identity) setPlayback({ identity, taskId, url: "", error: true });
         }
     }
     async function download(taskId: string, title: string) {
@@ -117,19 +111,17 @@ function CanvasAssistantVideoOutputs({ outputs }: { outputs: Extract<AssistantTu
         const serial = requestSerial.current;
         let url = "";
         try {
-            assertUserScope(expected);
             if (!isWailsNativeShell()) {
                 const blob = await getResourceBlob(resourceStorageKey(resourceId));
-                assertUserScope(expected);
                 if (serial !== requestSerial.current || currentIdentity.current !== identity) return;
                 if (!blob) throw Error("missing media");
                 url = URL.createObjectURL(blob);
                 ownedURLs.current.add(url);
             }
             const result = await downloadOwnedOrBrowserMedia({ fileName: `${title}.mp4`, resourceId, browserUrl: url || undefined });
-            if (result === "saved" && currentIdentity.current === identity && userScopeMatches(expected)) setFeedback({ identity, text: "成片已保存" });
+            if (result === "saved" && currentIdentity.current === identity) setFeedback({ identity, text: "成片已保存" });
         } catch {
-            if (currentIdentity.current === identity && userScopeMatches(expected)) setFeedback({ identity, text: "下载没有完成，请再试一次" });
+            if (currentIdentity.current === identity) setFeedback({ identity, text: "下载没有完成，请再试一次" });
         } finally {
             // The browser starts reading the clicked link asynchronously.
             // Scope/unmount cleanup can revoke earlier; otherwise let it start first.

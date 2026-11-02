@@ -78,7 +78,7 @@ func TestStreamTaskTextEventsCachedReplayReachesTerminalWithoutDuplicateDelta(t 
 	t.Cleanup(func() { _ = svc.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
-	replayAPI := appTextReplayAPI{svc}
+	replayAPI := svc.TextReplay()
 	initial, err := replayAPI.CachedRead(ctx, "user", "task", 7)
 	if err != nil {
 		t.Fatal(err)

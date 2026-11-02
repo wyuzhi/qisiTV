@@ -2,12 +2,10 @@ import { AppDrawer } from "@/components/ui/product/app-drawer";
 import { EmptyState } from "@/components/ui/product/empty-state";
 import { App, Button, Grid, Spin } from "antd";
 import { Check, ChevronDown, Download, RefreshCw, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getCanvasHistoryEntry, listCanvasHistory, type CanvasHistoryEntry } from "@/services/api/workspace-data";
 import { preserveCanvasSyncDraft, readCanvasSyncDrafts, type CanvasSyncDraft } from "@/services/canvas-sync-drafts";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
-import { getActiveUserScope, getActiveUserScopeEpoch, subscribeUserScope } from "@/lib/user-scope";
-import { captureUserScope, userScopeMatches } from "@/lib/user-scope-guard";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { canvasSyncProgressKey, useSyncProgressStore } from "@/stores/use-sync-progress-store";
@@ -26,13 +24,10 @@ export type CanvasVersionPreviewState = {
 export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotId: string, revision: number) => Promise<void>, projectFromEditor?: CanvasProject) {
     const { message, modal } = App.useApp();
     const desktop = Boolean(Grid.useBreakpoint().lg);
-    const scope = getActiveUserScope();
-    const scopeEpoch = useSyncExternalStore(subscribeUserScope, getActiveUserScopeEpoch, getActiveUserScopeEpoch);
-    const contextRef = useRef({ projectId, scopeEpoch });
-    if (contextRef.current.projectId !== projectId || contextRef.current.scopeEpoch !== scopeEpoch) contextRef.current = { projectId, scopeEpoch };
+    const contextRef = useRef({ projectId });
+    if (contextRef.current.projectId !== projectId) contextRef.current = { projectId };
     const context = contextRef.current;
-    const expectedScope = captureUserScope(scope, scopeEpoch);
-    const isCurrentContext = () => contextRef.current === context && userScopeMatches(expectedScope);
+    const isCurrentContext = () => contextRef.current === context;
     const storedProject = useCanvasStore((state) => state.projects.find((project) => project.id === projectId));
     const currentProject = projectFromEditor || storedProject;
     const draftCount = useSyncProgressStore((state) => state.syncingProjects[canvasSyncProgressKey(projectId)]?.draftCount);
@@ -67,7 +62,7 @@ export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotI
         setOpen(false);
         setTab("cloud");
         returnToCurrent();
-    }, [projectId, scopeEpoch, returnToCurrent]);
+    }, [projectId, returnToCurrent]);
 
     useEffect(() => {
         if (!open) return;
@@ -90,7 +85,7 @@ export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotI
                 if (!controller.signal.aborted && isCurrentContext()) setLoading(false);
             });
         return () => controller.abort();
-    }, [open, projectId, reload, scope, scopeEpoch]);
+    }, [open, projectId, reload]);
 
     useEffect(() => {
         if (!open) return;
@@ -98,7 +93,7 @@ export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotI
         setDraftLoading(true);
         setDraftError("");
         setDrafts([]);
-        void readCanvasSyncDrafts(projectId, scope)
+        void readCanvasSyncDrafts(projectId)
             .then((items) => {
                 if (active && isCurrentContext()) setDrafts(items.sort((a, b) => b.savedAt.localeCompare(a.savedAt)));
             })
@@ -109,13 +104,13 @@ export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotI
                 if (active && isCurrentContext()) setDraftLoading(false);
             });
         return () => { active = false; };
-    }, [open, projectId, reload, scope, scopeEpoch, draftCount]);
+    }, [open, projectId, reload, draftCount]);
 
     useEffect(
         () => () => {
             previewRequest.current?.abort();
         },
-        [open, projectId, scopeEpoch],
+        [open, projectId],
     );
 
     const selectVersion = (entry: CanvasHistoryEntry) => {
@@ -153,7 +148,7 @@ export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotI
                 setRestoring(true);
                 try {
                     const snapshotProject = currentProject || useCanvasStore.getState().openProject(projectId);
-                    if (snapshotProject) await preserveCanvasSyncDraft(snapshotProject, scope);
+                    if (snapshotProject) await preserveCanvasSyncDraft(snapshotProject);
                     if (!isCurrentContext()) return;
                     await onRestore(selected.id, currentRevision);
                     returnToCurrent();

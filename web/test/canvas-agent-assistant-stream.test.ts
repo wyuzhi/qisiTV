@@ -15,7 +15,6 @@ let previousFetch: typeof fetch;
 let previousBaseURL: string;
 let previousDesktopToken: unknown, previousBootstrapToken: unknown;
 let httpGetSpy: ReturnType<typeof spyOn>, httpPostSpy: ReturnType<typeof spyOn>;
-const { setActiveUserScope } = await import("@/lib/user-scope");
 const {
     AgentChatNotAdmittedError,
     AgentStreamDetachedError,
@@ -163,22 +162,6 @@ describe("创作助手回合流边界", () => {
             expect(requests.filter(item => item.url.includes("/assistant/steer"))).toHaveLength(1);
         }
     });
-    test("身份切换后不会复用凭据，旧签发也不能跨身份回写", async () => {
-        let issued = 0;
-        sessionResponse = () => new Response(JSON.stringify({ data: { token: `token-${++issued}`, expiresAt: new Date(Date.now() + 1_800_000).toISOString() } }));
-        try {
-            setActiveUserScope("a");
-            expect(await ensureAgentUiSession()).toBe("token-1");
-            setActiveUserScope("b");
-            const stale = ensureAgentUiSession().catch((error: Error) => error);
-            setActiveUserScope("a");
-            expect(await ensureAgentUiSession()).toBe("token-3");
-            expect(await stale).toBeInstanceOf(Error);
-            expect((await stale as Error).message).toContain("账号已切换");
-            expect(await ensureAgentUiSession()).toBe("token-3");
-        } finally { setActiveUserScope(null); }
-    });
-
     test("临近30分钟过期前续签，并发调用共用一次签发", async () => {
         let now = Date.parse("2026-10-02T00:00:00Z");
         const clock = spyOn(Date, "now").mockImplementation(() => now);

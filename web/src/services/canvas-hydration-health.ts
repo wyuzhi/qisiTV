@@ -21,8 +21,3 @@ export function beginCanvasHydration() {
 export function finishCanvasHydration(id: number, error = "") {
     if (id === attempt) setCanvasHydrationHealth({ error, loading: false });
 }
-import { subscribeUserScope } from "@/lib/user-scope";
-subscribeUserScope(() => {
-    ++attempt;
-    setCanvasHydrationHealth({ error: "", loading: true });
-});

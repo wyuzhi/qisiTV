@@ -1,0 +1,102 @@
+name: Mirror desktop installers and update zips to CNB
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+    secrets:
+      BEEFTV_CNB_TRIGGER_TOKEN:
+        required: true
+      BEEFTV_UPDATER_PRIVATE_KEY:
+        required: false
+      BEEFTV_R2_ACCESS_KEY_ID:
+        required: false
+      BEEFTV_R2_SECRET_ACCESS_KEY:
+        required: false
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Published version to mirror (for example v2.1.0); does not rebuild or republish'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-cnb-mirror
+  cancel-in-progress: false
+
+env:
+  GOTOOLCHAIN: local
+  UPDATER_DOWNLOAD_BASE: https://updates.beefapi.com/beeftv
+  DOMESTIC_DOWNLOAD_BASE: https://cnb.cool/beeftv-downloads/desktop/-/releases/download
+  RELEASE_ENDPOINT: ${{ vars.BEEFTV_R2_ENDPOINT }}
+  RELEASE_REGION: auto
+  RELEASE_BUCKET: beeftv-releases
+
+jobs:
+  mirror:
+    if: github.repository == 'glanderness/BeefTV' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: Check mirror and publisher tooling
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_mirror_desktop_cnb.py'
+          python3 -m unittest discover -s scripts -p 'test_publish_desktop_r2.py'
+          cd backend
+          go build -o "$RUNNER_TEMP/update-release" ./cmd/update-release
+
+      - name: Trigger CNB and wait for anonymous verification
+        env:
+          VERSION: ${{ inputs.version }}
+          BEEFTV_CNB_TRIGGER_TOKEN: ${{ secrets.BEEFTV_CNB_TRIGGER_TOKEN }}
+        run: python3 scripts/mirror-desktop-cnb.py --version "$VERSION"
+
+      - name: Publish domestic+R2 desktop-update-v2.json after CNB verification
+        env:
+          VERSION: ${{ inputs.version }}
+          BEEFTV_UPDATER_PRIVATE_KEY: ${{ secrets.BEEFTV_UPDATER_PRIVATE_KEY }}
+          BEEFTV_UPDATER_PUBLIC_KEY: ${{ vars.BEEFTV_UPDATER_PUBLIC_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.BEEFTV_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BEEFTV_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_EC2_METADATA_DISABLED: "true"
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+        run: |
+          set -euo pipefail
+          if ! python3 -c 'import os, re, sys; m = re.match(r"^v(\d+)\.(\d+)\.(\d+)$", os.environ["VERSION"]); sys.exit(0 if m and (int(m[1]), int(m[2]), int(m[3])) >= (2, 1, 0) else 1)'; then
+            echo "Skipping desktop-update-v2.json activation for legacy version $VERSION (< v2.1.0)."
+            exit 0
+          fi
+          curl --fail --silent --show-error --location \
+            "$UPDATER_DOWNLOAD_BASE/$VERSION/desktop-update-v2-r2.json" \
+            -o "$RUNNER_TEMP/source-update.json"
+          "$RUNNER_TEMP/update-release" sign \
+            --schema 2 \
+            --version "$VERSION" \
+            --from-envelope "$RUNNER_TEMP/source-update.json" \
+            --download-base "$UPDATER_DOWNLOAD_BASE" \
+            --domestic-download-base "$DOMESTIC_DOWNLOAD_BASE" \
+            --expect-public-key "$BEEFTV_UPDATER_PUBLIC_KEY" \
+            --output "$RUNNER_TEMP/desktop-update-v2.json"
+          "$RUNNER_TEMP/update-release" verify \
+            --envelope "$RUNNER_TEMP/desktop-update-v2.json" \
+            --public-key-text "$BEEFTV_UPDATER_PUBLIC_KEY"
+          python3 scripts/publish-desktop-r2.py activate-v2 \
+            --manifest "$RUNNER_TEMP/desktop-update-v2.json" \
+            --verifier "$RUNNER_TEMP/update-release" --provider r2 \
+            --endpoint-url "$RELEASE_ENDPOINT" --region "$RELEASE_REGION" \
+            --bucket "$RELEASE_BUCKET" --public-base "$UPDATER_DOWNLOAD_BASE"

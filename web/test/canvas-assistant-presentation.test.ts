@@ -190,7 +190,7 @@ describe("生成结果只使用这项提议的真实回执", () => {
     });
     test("上游成功但还没取回不能检查，失败与取消可以主动分析", () => {
         expect(assistantProposalProgress(proposal, [ready("a", { status: "loading", storageKey: undefined })]).ready).toBe(false);
-        expect(assistantProposalProgress(proposal, [ready("a", { resourceReloadAvailable: true })]).ready).toBe(false);
+        expect(assistantProposalProgress(proposal, [ready("a", { taskOutcome: { phase: "fetching", regenerate: "blocked", reason: "fetching_outputs" } })]).ready).toBe(false);
         for (const taskStatus of ["failed", "cancelled"]) expect(assistantProposalProgress(proposal, [ready("a", { taskStatus, status: "error", storageKey: undefined })]).ready).toBe(true);
     });
     test("批量等待原始输出全部终态，缺项与未提交不能被成功结果掩盖", () => {
@@ -224,7 +224,7 @@ describe("生成结果只使用这项提议的真实回执", () => {
         expect(progress.text).toContain("2 个结果已就绪");
         expect(assistantProposalProgress(proposal, [root]).ready).toBe(false);
         expect(assistantProposalProgress(proposal, [root, ready("sibling", { taskStatus: "running" })]).ready).toBe(false);
-        expect(assistantProposalProgress(proposal, [root, ready("sibling", { resourceReloadAvailable: true })]).ready).toBe(false);
+        expect(assistantProposalProgress(proposal, [root, ready("sibling", { taskOutcome: { phase: "fetching", regenerate: "blocked", reason: "fetching_outputs" } })]).ready).toBe(false);
         expect(assistantProposalProgress(proposal, [root, ready("sibling", { taskClientOperationId: "older" })]).ready).toBe(false);
         expect(assistantProposalProgress(proposal, removeCanvasNodes([root, sibling], new Set(["sibling"])).nodes).ready).toBe(false);
         expect(assistantProposalProgress(proposal, [ready("source", { generationOutputNodeIds: ["source"], isBatchRoot: false })]).ready).toBe(true);

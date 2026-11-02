@@ -40,15 +40,3 @@ export function moderationErrorCopy(code: string, message: string): ModerationCo
     }
     return { category, reason, action };
 }
-
-// Persist only our exact generated copy, never arbitrary provider instructions.
-export function persistedModerationCopy(text: string): ModerationCopy | undefined {
-    for (const direction of ["input", "output"]) {
-        for (const media of mediaTypes) {
-            for (const suffix of ["", ".PolicyViolation", ".PrivacyInformation", ".DeepFake"]) {
-                const copy = moderationErrorCopy(`${direction}${media}SensitiveContentDetected${suffix}`, "")!;
-                if (text.startsWith(`${copy.reason}。${copy.action}。`)) return copy;
-            }
-        }
-    }
-}

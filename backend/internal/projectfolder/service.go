@@ -33,7 +33,14 @@ func (s *Service) CheckWritable(ctx context.Context, userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var bindings []binding
-	if err := s.db.WithContext(ctx).Where("user_id=?", userID).Find(&bindings).Error; err != nil {
+	// A fully projected deletion retires its directory. Archiving that folder
+	// must not freeze unrelated projects, while an unflushed deletion still does.
+	if err := s.db.WithContext(ctx).Where("user_id=?", userID).
+		Where(`NOT EXISTS (SELECT 1 FROM qisitv_project_folder_outbox AS job
+		 WHERE job.canvas_id=qisitv_project_folders.canvas_id
+		 AND job.user_id=qisitv_project_folders.user_id AND job.deleted=1
+		 AND job.generation<=qisitv_project_folders.exported_generation
+		 AND qisitv_project_folders.pending_manifest_sha256='')`).Find(&bindings).Error; err != nil {
 		return err
 	}
 	for _, b := range bindings {

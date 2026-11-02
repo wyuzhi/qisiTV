@@ -7,7 +7,10 @@ export function isGenerationTaskCapacityError(error: unknown) {
 }
 
 export function isGenerationSubmissionUncertainError(error: unknown) {
-    const message = error instanceof Error ? error.message : String(error || "");
+    if (error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "submission_uncertain") {
+        return true;
+    }
+    const message = error instanceof Error ? error.message : error && typeof error === "object" && "message" in error ? String((error as { message?: unknown }).message || "") : String(error || "");
     return /(?:^|\D)524(?:\D|$)|提交状态不确定|可能仍在服务端执行/i.test(message);
 }
 

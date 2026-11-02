@@ -61,9 +61,13 @@ func (s *Service) retry(userID, id string, refresh *retryCredentialRefresh) (*mo
 			return nil, err
 		}
 	}
-	if s.deps.Failures.BlocksRetry(task.Error, task.Stage) && !(refresh != nil && s.deps.Failures.Category(task.Error, task.Stage) == generation.CategoryAuth) {
-		category := s.deps.Failures.Category(task.Error, task.Stage)
-		if task.Stage == "submission_unknown" || category == generation.CategorySubmissionUncertain {
+	effectiveStage := task.Stage
+	if task.RecoveryOutcome != nil && *task.RecoveryOutcome == RecoveryNoResult && effectiveStage == "submission_unknown" {
+		effectiveStage = ""
+	}
+	if s.deps.Failures.BlocksRetry(task.Error, effectiveStage) && !(refresh != nil && s.deps.Failures.Category(task.Error, effectiveStage) == generation.CategoryAuth) {
+		category := s.deps.Failures.Category(task.Error, effectiveStage)
+		if effectiveStage == "submission_unknown" || category == generation.CategorySubmissionUncertain {
 			return nil, kernel.BadAuthRequest(SubmissionUncertainRetryMessage)
 		}
 		if category == generation.CategoryDownloadFailed {

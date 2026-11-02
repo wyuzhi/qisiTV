@@ -23,13 +23,23 @@ function messageText(message) {
 }
 
 // 正文是否仍在可见消息里：以技能块的 versionId + contentHash 为准（formatSkillBlock 的固定属性）。
-export function skillBlockVisible(messages, record) {
-  const needle = `versionId="${record.versionId}" contentHash="${record.contentHash}"`;
-  return messages.some((message) => (message.role === 'user' || message.role === 'toolResult') && messageText(message).includes(needle));
+export function skillBlockVisible(messages, recordOrResource) {
+  const pin = recordOrResource?.pin || recordOrResource || {};
+  const needle = `versionId="${pin.versionId}" contentHash="${pin.contentHash}"`;
+  return messages.some(
+    (message) =>
+      (message.role === 'user' || message.role === 'toolResult' || message.role === 'tool') &&
+      messageText(message).includes(needle),
+  );
 }
 
 export function missingActiveSkills(messages, loaded, limit = ACTIVE_SKILL_LIMIT) {
   return pickActiveSkills(loaded, limit).filter((record) => !skillBlockVisible(messages, record));
+}
+
+export function missingSkillResources(messages, resources = [], contextWindow) {
+  const missing = (resources || []).filter((resource) => !skillBlockVisible(messages, resource));
+  return missing.length > 0 ? fitRestoredSkills(missing, contextWindow) : [];
 }
 
 // 补回消息：用同一个官方格式的技能块，前面写明原因，避免模型当成新要求。

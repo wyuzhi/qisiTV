@@ -3,17 +3,21 @@ package agentops
 import "qisitv/backend/internal/operations"
 
 type (
-	Scope      = operations.Scope
-	Context    = operations.Context
-	Handler    = operations.Handler
-	Op         = operations.Op
-	Descriptor = operations.Descriptor
-	Caller     = operations.Caller
-	CallerKind = operations.CallerKind
-	Request    = operations.Request
-	Result     = operations.Result
-	Receipt    = operations.Receipt
-	Registry   = operations.Registry
+	Scope        = operations.Scope
+	Context      = operations.Context
+	Handler      = operations.Handler
+	Op           = operations.Op
+	Descriptor   = operations.Descriptor
+	Caller       = operations.Caller
+	CallerKind   = operations.CallerKind
+	ApprovalMode = operations.ApprovalMode
+	Request      = operations.Request
+	Result       = operations.Result
+	Receipt                       = operations.Receipt
+	Registry                      = operations.Registry
+	ExternalCanvasWrite           = operations.ExternalCanvasWrite
+	ExternalCanvasWriteUndoResult = operations.ExternalCanvasWriteUndoResult
+	CanvasNodeRef                 = operations.CanvasNodeRef
 )
 
 const (
@@ -22,6 +26,9 @@ const (
 	CallerManual       = operations.CallerManual
 	CallerAssistant    = operations.CallerAssistant
 	CallerExternal     = operations.CallerExternal
+	ApprovalModeAsk    = operations.ApprovalModeAsk
+	ApprovalModeCaller = operations.ApprovalModeCaller
+	ApprovalModeAuto   = operations.ApprovalModeAuto
 )
 
 func NewRegistry(binder operations.DomainBinder, store *Store) *Registry {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"qisitv/backend/internal/beefapi"
 	"qisitv/backend/internal/outbound"
 )
 
@@ -69,6 +70,7 @@ type LimitsPort interface {
 
 type TransportObservation struct {
 	Request               *http.Request
+	Headers               http.Header
 	StartedAt             time.Time
 	StatusCode            int
 	Body                  []byte
@@ -182,6 +184,7 @@ type Runtime struct {
 	DownloadCache     VideoDownloadCachePort
 	ReferenceProgress ReferenceProgressPort
 	Images            ImageSubmissionPort
+	ManagedMedia      beefapi.MediaStatePort
 	Workflow          WorkflowPort
 	Prompt            PromptPort
 	Config            ConfigPort

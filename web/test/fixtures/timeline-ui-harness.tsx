@@ -18,14 +18,29 @@ const project: TimelineProject = {
     })),
 };
 const node = { id: "video", type: "video", title: "测试成片", metadata: {}, x: 0, y: 0, width: 320, height: 180 } as CanvasNodeData;
+// 报障场景（需求表 reczz28SFuiwD5Z7）：视频轨上首尾紧贴的两个片段，第一个片段右侧没有空隙。
+const dragProject: TimelineProject = {
+    version: 2, durationMs: 8000,
+    tracks: [{ id: "video", kind: "video", label: "视频1", order: 0 }, { id: "voice", kind: "audio", label: "音频1", order: 1 }],
+    clips: [
+        { id: "clip-first", kind: "video", nodeId: "first", trackId: "video", startMs: 0, durationMs: 4000, title: "首个素材" },
+        { id: "clip-second", kind: "video", nodeId: "second", trackId: "video", startMs: 4000, durationMs: 4000, title: "第二个素材" },
+    ],
+};
+const dragNode = { id: "first", type: "video", title: "首个素材", metadata: {}, x: 0, y: 0, width: 320, height: 180 } as CanvasNodeData;
 const store = createEditorStore();
 store.getState().load(project);
 HTMLAnchorElement.prototype.click = function () { receipt.downloads++; };
 const root = createRoot(document.getElementById("root")!);
 Object.assign(window, { timelineFixture: { receipt, unmount: () => root.unmount() } });
-root.render(<App>{new URLSearchParams(location.search).get("mode") === "canvas" ?
+const mode = new URLSearchParams(location.search).get("mode");
+root.render(<App>{mode === "canvas" ?
     <CanvasTimelineDialog node={node} nodes={[]} timeline={project} open onClose={() => root.unmount()}
         onSave={() => {}} onSaveSubtitles={() => {}} onUploadLocalFiles={async () => []}
         onCreateAssembledNode={async () => { receipt.created++; return node; }} /> :
-    <EditorStoreProvider store={store} host={{ projectId: "fixture", assets: [], refreshAssets: async () => [] }}><EditorExport /></EditorStoreProvider>
+    mode === "canvas-drag" ?
+        <CanvasTimelineDialog node={dragNode} nodes={[]} timeline={dragProject} open onClose={() => root.unmount()}
+            onSave={() => {}} onSaveSubtitles={() => {}} onUploadLocalFiles={async () => []}
+            onCreateAssembledNode={async () => { receipt.created++; return dragNode; }} /> :
+        <EditorStoreProvider store={store} host={{ projectId: "fixture", assets: [], refreshAssets: async () => [] }}><EditorExport /></EditorStoreProvider>
 }</App>);

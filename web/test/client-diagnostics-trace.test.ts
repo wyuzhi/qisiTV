@@ -53,5 +53,17 @@ test("exported events contain structural media facts while dropping URLs, prompt
     recordDiagnosticEvent({ level: "error", category: "runtime", message: "decode https://secret.example/private-signed.mp4?key=canary prompt=hidden prompt", stack: "/Users/person/private-canary/file.js", nodeId: "node-1", media: { phase: "playback_failed", errorCode: 3, width: 864, height: 496 } });
     const event = (await getClientDiagnosticSnapshot()).events[0];
     expect(event.media).toMatchObject({ phase: "playback_failed", errorCode: 3 });
-    expect(JSON.stringify(event)).not.toMatch(/secret\.example|private-canary|hidden prompt|canary/);
+    expect(JSON.stringify(event)).not.toMatch(/secret\.example|private-canary|private-signed\.mp4|hidden prompt|canary/);
+});
+
+test("aborted requests are not recorded as NETWORK_ERROR events", async () => {
+    setDiagnosticUserScope("trace-canceled");
+    const controller = new AbortController();
+    controller.abort();
+    apiClient.defaults.adapter = async (config) => {
+        const error = Object.assign(new Error("canceled"), { code: "ERR_CANCELED", name: "CanceledError", config });
+        throw error;
+    };
+    await expect(http.get("/resources/demo", { signal: controller.signal })).rejects.toBeTruthy();
+    expect(getClientDiagnosticEvents()).toEqual([]);
 });

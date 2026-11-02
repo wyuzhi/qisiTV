@@ -15,6 +15,8 @@ type ProposalExecution = {
     /** 后端确认这一轮仍有效；返回的文案表示拒绝，不会提交任何生成。 */
     confirmRunnable?: () => Promise<string | null>;
     prepare: () => Promise<ConfirmedGenerationInputs>;
+    /** 优先走后端统一生成单确认；返回 null 时回退到页面多输出生成器。 */
+    confirmOrder?: (confirmedInputs: ConfirmedGenerationInputs) => Promise<{ taskIds: string[]; continuationId?: string } | null>;
     generate: (nodeId: string, mode: "image" | "video", prompt: string, options?: CanvasNodeGenerationOptions) => Promise<unknown>;
     markHandled: (proposalId: string) => void;
     notify: (content: string) => void;
@@ -40,9 +42,9 @@ export function buildConfirmedGenerationConfig(
     return result;
 }
 
-export async function executeAssistantProposal({ proposal, nodes, claims, isHandled, confirmRunnable, prepare, generate, markHandled, notify, stillOwns }: ProposalExecution) {
+export async function executeAssistantProposal({ proposal, nodes, claims, isHandled, confirmRunnable, prepare, confirmOrder, generate, markHandled, notify, stillOwns }: ProposalExecution) {
     const kind = proposal.kind;
-    if (kind === "audio") { notify("请将配音加入完整制作方案后确认。"); return; }
+    if (kind === "audio" && !confirmOrder) { notify("请将配音加入完整制作方案后确认。"); return; }
     if (isHandled || claims.has(proposal.proposalId)) {
         notify("这项提案已提交或正在提交，请在任务列表查看进度。");
         return;
@@ -87,6 +89,38 @@ export async function executeAssistantProposal({ proposal, nodes, claims, isHand
         const confirmedTargets = [...new Set(proposal.nodeIds)].map((id) => confirmedInputs.nodes.find((node) => node.id === id));
         if (confirmedTargets.some((node) => !node)) {
             notify(ASSISTANT_PROPOSAL_BLOCKED_TEXT.canvas_changed);
+            return;
+        }
+        if (confirmOrder) {
+            try {
+                const orderResult = await confirmOrder(confirmedInputs);
+                if (orderResult !== null) {
+                    if (stillOwns && !stillOwns()) {
+                        notify(CANVAS_OWNER_CHANGED_PROPOSAL_MESSAGE);
+                        return;
+                    }
+                    if (orderResult.taskIds?.length) {
+                        receivedTask = true;
+                        markHandled(proposal.proposalId);
+                    } else {
+                        notify("未确认有生成任务开始。请检查节点提示和任务列表，再让助手重新提出生成方案。");
+                    }
+                    return;
+                }
+            } catch (error) {
+                if (stillOwns && !stillOwns()) {
+                    notify(CANVAS_OWNER_CHANGED_PROPOSAL_MESSAGE);
+                    return;
+                }
+                notify(error instanceof AssistantProposalBlockedError ? ASSISTANT_PROPOSAL_BLOCKED_TEXT[error.reason]
+                    : error instanceof ApiError && error.reason === "continuation_intent_changed" ? "要求已更新，请让助手重新提出生成方案。"
+                    : error instanceof ApiError && error.message ? error.message
+                    : "暂未确认生成是否开始，请重试确认同一生成单，不会重复提交已接受的素材。");
+                return;
+            }
+        }
+        if (kind === "audio") {
+            notify("请将配音加入完整制作方案后确认。");
             return;
         }
         await Promise.allSettled(confirmedTargets.map(async (node) => {

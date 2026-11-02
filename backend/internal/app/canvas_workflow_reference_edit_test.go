@@ -22,27 +22,27 @@ func TestCanvasWorkflowNewAudioReferenceRoundTrip(t *testing.T) {
 	raw, _ := json.Marshal(input)
 	db.Model(&original).Update("input_json", string(raw))
 	d.PresentationVersion = 1
-	created, err := s.CreateCanvasWorkflow("owner", cw.CreateRequest{Name: "Audio", Definition: d})
+	created, err := s.workflowTemplates().Create("owner", cw.CreateRequest{Name: "Audio", Definition: d})
 	if err != nil {
 		t.Fatal(err)
 	}
-	editor, err := s.CanvasWorkflowEditor("owner", created.ID, 1)
+	editor, err := s.workflowTemplates().Editor("owner", created.ID, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	d = editor.Workflow.Definition
 	d.Nodes = append(d.Nodes, cw.Node{ID: "audio", Title: "音频输入", Role: "input", MediaType: "audio"})
 	d.Edges = append(d.Edges, cw.Edge{From: "audio", To: "gen", FromPort: "output", ToPort: "referenceAudios"})
-	updated, err := s.UpdateCanvasWorkflow("owner", created.ID, cw.UpdateRequest{Name: "Audio", ExpectedRevision: 1, Definition: d})
+	updated, err := s.workflowTemplates().Update("owner", created.ID, cw.UpdateRequest{Name: "Audio", ExpectedRevision: 1, Definition: d})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Empty reusable slots must survive both prepare/save passes and reopening.
-	editor, err = s.CanvasWorkflowEditor("owner", created.ID, updated.Revision)
+	editor, err = s.workflowTemplates().Editor("owner", created.ID, updated.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := s.PrepareCanvasWorkflow("owner", editor.Workflow.Definition, created.ID, updated.Revision)
+	prepared, err := s.workflowTemplates().Prepare("owner", editor.Workflow.Definition, created.ID, updated.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestCanvasWorkflowNewAudioReferenceRoundTrip(t *testing.T) {
 			prepared.Nodes[i].Config["prompt"] = "person performs action @[node:audio]"
 		}
 	}
-	updated, err = s.UpdateCanvasWorkflow("owner", created.ID, cw.UpdateRequest{Name: "Audio", ExpectedRevision: updated.Revision, Definition: prepared})
+	updated, err = s.workflowTemplates().Update("owner", created.ID, cw.UpdateRequest{Name: "Audio", ExpectedRevision: updated.Revision, Definition: prepared})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestCanvasWorkflowNewAudioReferenceRoundTrip(t *testing.T) {
 			filtered.Edges = append(filtered.Edges, edge)
 		}
 	}
-	withoutAudio, err := s.UpdateCanvasWorkflow("owner", created.ID, cw.UpdateRequest{Name: "Audio", ExpectedRevision: updated.Revision, Definition: filtered})
+	withoutAudio, err := s.workflowTemplates().Update("owner", created.ID, cw.UpdateRequest{Name: "Audio", ExpectedRevision: updated.Revision, Definition: filtered})
 	if err != nil {
 		t.Fatal(err)
 	}

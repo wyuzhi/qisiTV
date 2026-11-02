@@ -20,7 +20,10 @@ export type CreationMessage = {
     model?: string;
     resultUrls?: string[];
     error?: string;
+    generationErrorSummary?: string;
     generationErrorCode?: string;
+    generationProviderCode?: string;
+    taskFailureDiagnostics?: import("@/lib/generation-error").GenerationFailureDiagnostics;
     generationOperation?: string;
     attachments?: CreationAttachment[];
     references?: CreationReference[];
@@ -31,6 +34,7 @@ export type CreationMessage = {
     attemptGroupId?: string;
     generationStage?: string;
     generationEffectKeys?: string[];
+    taskOutcome?: import("@/lib/task-outcome").TaskOutcome;
 };
 export type CreationConversationConflict = {
     revision: number;

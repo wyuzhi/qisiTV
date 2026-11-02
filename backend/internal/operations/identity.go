@@ -16,6 +16,18 @@ const (
 	CallerExternal  CallerKind = "external"
 )
 
+// ApprovalMode 是调用方执行付费生成（生成单）时的审批档位：
+// - ask：每次问我（内置助手默认，或登记为 ask 的外部凭据；需 owner 在界面或 beeftv approve 批准）
+// - caller：调用方自己批（外部 Agent 凭据默认；先 propose 拿到生成单，再凭单 submit）
+// - auto：自动，不设限额（脚本专用凭据；submit 一步开单并自动批准）
+type ApprovalMode string
+
+const (
+	ApprovalModeAsk    ApprovalMode = "ask"
+	ApprovalModeCaller ApprovalMode = "caller"
+	ApprovalModeAuto   ApprovalMode = "auto"
+)
+
 // Authorizer 是调用方范围裁决。操作核不知道画布/素材规则，只在回放之前调用它。
 type Authorizer interface {
 	Allows(op *Op, params json.RawMessage) error
@@ -24,9 +36,12 @@ type Authorizer interface {
 
 // Caller 是一次调用的能力身份。
 type Caller struct {
-	Kind     CallerKind
-	ReadOnly bool
-	Scope    Authorizer
+	Kind         CallerKind
+	ReadOnly     bool
+	Scope        Authorizer
+	ClientID     string
+	ClientLabel  string
+	ApprovalMode ApprovalMode
 }
 
 func ManualCaller(readOnly bool) Caller {
@@ -34,11 +49,38 @@ func ManualCaller(readOnly bool) Caller {
 }
 
 func AssistantCaller(scope Authorizer, readOnly bool) Caller {
-	return Caller{Kind: CallerAssistant, ReadOnly: readOnly, Scope: scope}
+	return Caller{Kind: CallerAssistant, ReadOnly: readOnly, Scope: scope, ApprovalMode: ApprovalModeAsk}
 }
 
 func ExternalCaller(readOnly bool) Caller {
-	return Caller{Kind: CallerExternal, ReadOnly: readOnly}
+	return Caller{Kind: CallerExternal, ReadOnly: readOnly, ApprovalMode: ApprovalModeCaller}
+}
+
+func (c Caller) EffectiveApprovalMode() ApprovalMode {
+	resolved := c.resolved()
+	switch c.ApprovalMode {
+	case ApprovalModeAsk, ApprovalModeCaller, ApprovalModeAuto:
+		return c.ApprovalMode
+	}
+	switch resolved.Kind {
+	case CallerAssistant:
+		return ApprovalModeAsk
+	case CallerExternal:
+		return ApprovalModeCaller
+	default:
+		return ApprovalModeCaller
+	}
+}
+
+func (c Caller) EffectiveClientLabel() string {
+	if c.ClientLabel != "" {
+		return c.ClientLabel
+	}
+	if c.ClientID != "" {
+		return c.ClientID
+	}
+	resolved := c.resolved()
+	return string(resolved.Kind)
 }
 
 func (c Caller) resolved() Caller {

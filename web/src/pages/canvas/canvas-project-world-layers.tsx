@@ -1,8 +1,8 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
 import { Link2 } from "lucide-react";
 
 import { ConnectionPath, canvasConnectionPath } from "@/components/canvas/canvas-connections";
-import { canvasNodeDragGeometry, subscribeCanvasNodeDragPreview } from "@/lib/canvas/canvas-live-viewport";
+import { canvasNodeDragGeometry, subscribeCanvasNodeDragPreview, type CanvasNodeDragPreview } from "@/lib/canvas/canvas-live-viewport";
 import { CanvasFrameNode } from "@/components/canvas/canvas-frame-node";
 import { CanvasNode } from "@/components/canvas/canvas-node";
 import type { CanvasVideoCropRect } from "@/components/canvas/canvas-video-crop-dialog";
@@ -23,7 +23,6 @@ type CanvasProjectWorldLayersProps = {
     containerRef: RefObject<HTMLDivElement | null>;
     projectId: string;
     viewportScale: number;
-    connectionLayerBounds: { left: number; top: number; width: number; height: number };
     displayConnections: CanvasDisplayConnection[];
     selectedConnectionId: string | null;
     relatedConnectionIds: Set<string>;
@@ -39,6 +38,10 @@ type CanvasProjectWorldLayersProps = {
     linkedFolderPreviewNodesById: Map<string, CanvasNodeData[]>;
     dragPreview: DragPreview;
     selectedNodeIds: Set<string>;
+    lodPinnedNodeIds?: ReadonlySet<string>;
+    /** Playing media node; owned by the page so the overview keeps it mounted. */
+    activeMediaNodeId: string | null;
+    onActiveMediaNodeChange: (nodeId: string | null) => void;
     frameDropTargetId: string | null;
     relatedNodeIds: Set<string>;
     activeNodeId: string | null;
@@ -102,7 +105,13 @@ const EMPTY_CANVAS_NODES: CanvasNodeData[] = [];
 
 export const CanvasProjectWorldLayers = memo(function CanvasProjectWorldLayers(props: CanvasProjectWorldLayersProps) {
     const { viewportScale } = props;
+    const retryRef = useRef(props.onRetry);
+    useLayoutEffect(() => { retryRef.current = props.onRetry; }, [props.onRetry]);
+    // Retry is an event, not node display state. Keep its identity stable while
+    // always invoking the handler from the latest committed project render.
+    const retryNode = useCallback((node: CanvasNodeData) => retryRef.current(node), []);
     const connectionLayerRef = useRef<SVGSVGElement>(null);
+    const connectionDragPreviewRef = useRef<{ container: HTMLDivElement; projectId: string; preview: CanvasNodeDragPreview } | null>(null);
     useLayoutEffect(() => {
         const layer = connectionLayerRef.current;
         const container = props.containerRef.current || layer?.closest<HTMLDivElement>("[data-canvas-viewport]");
@@ -112,9 +121,25 @@ export const CanvasProjectWorldLayers = memo(function CanvasProjectWorldLayers(p
             const id = group.dataset.canvasConnectionId;
             if (id) groups.set(id, group);
         });
-        return subscribeCanvasNodeDragPreview(container, (preview) => {
-            for (const { connection, from, to } of props.displayConnections) {
-                if (preview && !preview.nodeIds.has(from.id) && !preview.nodeIds.has(to.id)) continue;
+        const connectionsByNodeId = new Map<string, Set<CanvasDisplayConnection>>();
+        for (const display of props.displayConnections) {
+            for (const nodeId of [display.from.id, display.to.id]) {
+                let adjacent = connectionsByNodeId.get(nodeId);
+                if (!adjacent) connectionsByNodeId.set(nodeId, adjacent = new Set());
+                adjacent.add(display);
+            }
+        }
+        let previousConnections = new Set<CanvasDisplayConnection>();
+        const updatePreview = (preview: CanvasNodeDragPreview | null) => {
+            connectionDragPreviewRef.current = preview ? { container, projectId: props.projectId, preview } : null;
+            const currentConnections = new Set<CanvasDisplayConnection>();
+            for (const nodeId of preview?.nodeIds || []) {
+                for (const display of connectionsByNodeId.get(nodeId) || []) currentConnections.add(display);
+            }
+            // Reset edges leaving the preview as well, including cancellation.
+            const affectedConnections = new Set([...previousConnections, ...currentConnections]);
+            previousConnections = currentConnections;
+            for (const { connection, from, to } of affectedConnections) {
                 const group = groups.get(connection.id);
                 if (!group) continue;
                 const movedFrom = canvasNodeDragGeometry(from, preview);
@@ -132,12 +157,34 @@ export const CanvasProjectWorldLayers = memo(function CanvasProjectWorldLayers(p
                 gradient?.setAttribute("x2", String(endX));
                 gradient?.setAttribute("y2", String(endY));
             }
+        };
+        // Layout effects may refresh while a pointer is still captured. Reapply
+        // its preview before paint and keep cancellation tied to those edges.
+        const retained = connectionDragPreviewRef.current;
+        if (retained?.container === container && retained.projectId === props.projectId) updatePreview(retained.preview);
+        else if (retained) {
+            for (const nodeId of retained.preview.nodeIds) {
+                for (const display of connectionsByNodeId.get(nodeId) || []) previousConnections.add(display);
+            }
+            updatePreview(null);
+        }
+        const unsubscribe = subscribeCanvasNodeDragPreview(container, updatePreview);
+        // Hover mounts extra strokes inside a memoized connection. Keep newly
+        // mounted strokes aligned even while the pointer is paused mid-drag.
+        const observer = new MutationObserver(() => {
+            const live = connectionDragPreviewRef.current;
+            if (live) updatePreview(live.preview);
         });
-    }, [props.containerRef, props.displayConnections, props.scriptScrollTopById]);
-    const [activeMediaNodeId, setActiveMediaNodeId] = useState<string | null>(null);
+        observer.observe(layer, { childList: true, subtree: true });
+        return () => {
+            unsubscribe();
+            observer.disconnect();
+        };
+    }, [props.containerRef, props.displayConnections, props.projectId, props.scriptScrollTopById]);
+    const { activeMediaNodeId, onActiveMediaNodeChange: setActiveMediaNodeId } = props;
     useEffect(() => {
         if (activeMediaNodeId && !props.nodeById.has(activeMediaNodeId)) setActiveMediaNodeId(null);
-    }, [activeMediaNodeId, props.nodeById]);
+    }, [activeMediaNodeId, props.nodeById, setActiveMediaNodeId]);
     const orderedVisibleNodes = useMemo(() => [
         ...props.visibleNodes.filter(isFrameNode),
         ...sortCanvasNodesByStackOrder(props.visibleNodes.filter((node) => !isFrameNode(node)), props.nodeStackOrder),
@@ -158,11 +205,14 @@ export const CanvasProjectWorldLayers = memo(function CanvasProjectWorldLayers(p
     };
     return (
         <>
-            <svg
+            {/* Paths already use world coordinates. A viewport-sized SVG grows
+                as 1 / zoom and makes WebKit allocate a huge empty surface. */}
+            {props.displayConnections.length > 0 ? <svg
                 ref={connectionLayerRef}
                 className="absolute overflow-visible"
-                viewBox={`${props.connectionLayerBounds.left} ${props.connectionLayerBounds.top} ${props.connectionLayerBounds.width} ${props.connectionLayerBounds.height}`}
-                style={{ left: props.connectionLayerBounds.left, top: props.connectionLayerBounds.top, width: props.connectionLayerBounds.width, height: props.connectionLayerBounds.height, pointerEvents: "none", zIndex: 0 }}
+                width={1}
+                height={1}
+                style={{ left: 0, top: 0, pointerEvents: "none", zIndex: 0 }}
             >
                 {props.displayConnections.map(({ connection, from, to }) => (
                     <ConnectionPath
@@ -178,7 +228,7 @@ export const CanvasProjectWorldLayers = memo(function CanvasProjectWorldLayers(p
                         onContextMenu={(event) => props.onConnectionContextMenu(event, connection.id)}
                     />
                 ))}
-            </svg>
+            </svg> : null}
 
             {orderedVisibleNodes.map((node) =>
                 isFrameNode(node) ? (
@@ -204,6 +254,7 @@ export const CanvasProjectWorldLayers = memo(function CanvasProjectWorldLayers(p
                         data={node}
                         dragOffset={props.dragPreview?.nodeIds.has(node.id) ? props.dragPreview : undefined}
                         scale={viewportScale}
+                        lodPinned={props.lodPinnedNodeIds?.has(node.id)}
                         isSelected={props.selectedNodeIds.has(node.id)}
                         mediaActive={activeMediaNodeId === node.id}
                         onMediaPlayRequest={setActiveMediaNodeId}
@@ -248,7 +299,7 @@ export const CanvasProjectWorldLayers = memo(function CanvasProjectWorldLayers(p
                         onContentChange={props.onNodeContentChange}
                         onToggleBatch={props.onToggleBatch}
                         onSetBatchPrimary={props.onSetBatchPrimary}
-                        onRetry={props.onRetry}
+                        onRetry={retryNode}
                         onReloadResource={props.onReloadResource}
                         onOpenTaskDetails={props.onOpenTaskDetails}
                         onCancelTask={props.onCancelTask}

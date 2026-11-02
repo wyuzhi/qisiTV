@@ -8,17 +8,20 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"qisitv/backend/internal/mediatools"
 )
 
 // Probe reads codec_type streams and container duration from a local media file.
 func Probe(ctx context.Context, path string) (SourceFacts, error) {
-	bin, err := exec.LookPath("ffprobe")
+	bin, err := mediatools.ResolveFFprobe()
 	if err != nil {
 		return SourceFacts{}, fmt.Errorf("媒体探测依赖未安装（需要 ffprobe）")
 	}
 	cmd := exec.CommandContext(ctx, bin,
 		"-v", "error", "-show_entries", "stream=codec_type:format=duration",
 		"-of", "json", path)
+	mediatools.HideConsole(cmd)
 	output, runErr := cmd.Output()
 	if runErr != nil {
 		return SourceFacts{}, fmt.Errorf("媒体音轨探测失败: %w", runErr)

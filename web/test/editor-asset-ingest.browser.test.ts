@@ -13,7 +13,6 @@ type HarnessState = {
     doubles: EditorAssetIngestDoubles;
     assets: { id: string }[];
     projectId: string;
-    switchABA: () => void;
     switchProject: () => void;
     remountEditor: () => void;
 };
@@ -111,14 +110,6 @@ async function release(step: "probe" | "upload" | "link" | "refresh") {
     }, step);
 }
 
-async function switchABA() {
-    await page.evaluate(() => {
-        const harness = (window as Window & { __editorAssetIngestHarness?: HarnessState }).__editorAssetIngestHarness;
-        if (!harness) throw new Error("harness missing");
-        harness.switchABA();
-    });
-}
-
 async function switchProject() {
     await page.evaluate(() => {
         const harness = (window as Window & { __editorAssetIngestHarness?: HarnessState }).__editorAssetIngestHarness;
@@ -173,7 +164,6 @@ test("ordinary import probes, uploads, links and shows ready for a successful re
     expect(writes(harness, "probe")).toHaveLength(1);
     expect(writes(harness, "upload")).toHaveLength(1);
     expect(writes(harness, "link")).toHaveLength(1);
-    expect(writes(harness, "upload")[0]?.expectedScope).toEqual(writes(harness, "upload")[0]?.liveScope);
     expect(writes(harness, "upload")[0]?.durationMs).toBe(1500);
     expect(writes(harness, "link")[0]?.projectId).toBe("project-a");
     expect(await page.getByTestId("asset-ids").textContent()).toBe("res-1");
@@ -222,70 +212,6 @@ test("sequential batch dedupes the same filename and kind", async () => {
     const harness = await harnessState();
     expect(writes(harness, "upload")).toHaveLength(1);
     expect(writes(harness, "link")).toHaveLength(1);
-}, 15_000);
-
-test("delayed probe after A→B→A does not upload, link, or paint stale status", async () => {
-    await hold("probe");
-    await importFiles(["clip.mp4"]);
-    await waitForCall("probe");
-    await switchABA();
-    await release("probe");
-    await settle();
-    const harness = await harnessState();
-    expect(writes(harness, "upload")).toHaveLength(0);
-    expect(writes(harness, "link")).toHaveLength(0);
-    expect(harness?.doubles.writesAfterSwitch).toBe(0);
-    expect(await page.getByText("已导入").count()).toBe(0);
-    expect(await page.getByText("导入失败").count()).toBe(0);
-    expect(await page.getByText("账号已切换").count()).toBe(0);
-    expect(await page.getByRole("button", { name: "导入媒体" }).count()).toBe(1);
-}, 15_000);
-
-test("delayed upload after A→B→A does not link or paint stale status", async () => {
-    await hold("upload");
-    await importFiles(["clip.mp4"]);
-    await waitForCall("upload");
-    await switchABA();
-    await release("upload");
-    await settle();
-    const harness = await harnessState();
-    expect(writes(harness, "link")).toHaveLength(0);
-    expect(harness?.doubles.writesAfterSwitch).toBe(0);
-    expect(await page.getByText("已导入").count()).toBe(0);
-    expect(await page.getByText("导入失败").count()).toBe(0);
-    expect(await page.getByRole("button", { name: "导入媒体" }).count()).toBe(1);
-}, 15_000);
-
-test("delayed link after A→B→A does not write under the replacement identity", async () => {
-    await hold("link");
-    await importFiles(["clip.mp4"]);
-    await waitForCall("link");
-    await switchABA();
-    await release("link");
-    await settle();
-    const harness = await harnessState();
-    expect(writes(harness, "link")).toHaveLength(0);
-    expect(harness?.doubles.writesAfterSwitch).toBe(0);
-    expect(harness?.doubles.refreshAfterSwitch).toBe(0);
-    expect(await page.getByText("已导入").count()).toBe(0);
-    expect(await page.getByText("导入失败").count()).toBe(0);
-    expect(await page.getByRole("button", { name: "导入媒体" }).count()).toBe(1);
-}, 15_000);
-
-test("delayed ordinary upload error after A→B→A does not paint on the replacement generation", async () => {
-    await fail("upload");
-    await hold("upload");
-    await importFiles(["clip.mp4"]);
-    await waitForCall("upload");
-    await switchABA();
-    await release("upload");
-    await settle();
-    expect(await page.getByText("网络中断").count()).toBe(0);
-    expect(await page.getByText("导入失败").count()).toBe(0);
-    expect(await page.getByText("已导入").count()).toBe(0);
-    const harness = await harnessState();
-    expect(harness?.doubles.writesAfterSwitch).toBe(0);
-    expect(await page.getByRole("button", { name: "导入媒体" }).count()).toBe(1);
 }, 15_000);
 
 test("delayed ordinary upload error after editor remount does not paint on the new mount", async () => {
@@ -345,40 +271,6 @@ test("delayed upload after project switch does not link into the new editor", as
     expect(await page.getByText("已导入").count()).toBe(0);
     expect(await page.getByText("导入失败").count()).toBe(0);
     expect(await page.getByRole("button", { name: "导入媒体" }).count()).toBe(1);
-}, 15_000);
-
-test("delayed refresh after A→B→A does not paint ready on the replacement generation", async () => {
-    await hold("refresh");
-    await importFiles(["clip.mp4"]);
-    await waitForCall("refresh");
-    await switchABA();
-    await release("refresh");
-    await settle();
-    const harness = await harnessState();
-    expect(harness?.doubles.calls.filter((call) => call.step === "refresh" && call.phase === "write")).toHaveLength(0);
-    expect(await page.getByText("已导入").count()).toBe(0);
-    expect(await page.getByRole("button", { name: "导入媒体" }).count()).toBe(1);
-}, 15_000);
-
-test("a new import after A→B→A still succeeds under the live identity", async () => {
-    await hold("probe");
-    await importFiles(["stale.mp4"]);
-    await waitForCall("probe");
-    await switchABA();
-    await release("probe");
-    await settle();
-    await page.evaluate(() => {
-        const harness = (window as Window & { __editorAssetIngestHarness?: HarnessState }).__editorAssetIngestHarness;
-        if (!harness) throw new Error("harness missing");
-        harness.doubles.hold.probe = false;
-        harness.doubles.resetGate("probe");
-        harness.doubles.switched = false;
-        harness.doubles.linked = [];
-        harness.doubles.calls = [];
-    });
-    await importFiles(["fresh.mp4"]);
-    await page.getByText("已导入 1 个媒体").waitFor({ timeout: 8_000 });
-    expect(await page.getByTestId("asset-ids").textContent()).toBe("res-1");
 }, 15_000);
 
 test("old import completion cannot clear a new project import busy state", async () => {

@@ -6,7 +6,6 @@ import { chromium, type Browser, type Page } from "playwright";
 let browser: Browser;
 let page: Page;
 let server: ReturnType<typeof Bun.serve>;
-let switched = false;
 let failSave = false;
 let gatePatch = false;
 let patchHits = 0;
@@ -59,7 +58,6 @@ type HarnessState = {
     refreshCount: number;
     strictSetups: number;
     strictCleanups: number;
-    switchABA: () => Promise<void>;
     switchProjectABA: () => void;
 };
 
@@ -99,16 +97,12 @@ beforeAll(async () => {
             const url = new URL(request.url);
             const path = url.pathname;
             if (path === "/harness.js") return new Response(script, { headers: { "Content-Type": "text/javascript" } });
-            if (path === "/harness/switch" && request.method === "POST") {
-                switched = true;
-                return Response.json({ ok: true });
-            }
             if (path === "/harness/release-patch" && request.method === "POST") {
                 patchGate?.resolve();
                 return Response.json({ ok: true });
             }
             if (path === "/harness/patches") {
-                return Response.json({ patches, patchHits, switched });
+                return Response.json({ patches, patchHits });
             }
             const projectId = projectIdFromPath(path);
             if (projectId && request.method === "GET") {
@@ -136,7 +130,6 @@ beforeAll(async () => {
 
 beforeEach(async () => {
     await page?.close();
-    switched = false;
     failSave = false;
     gatePatch = false;
     patchHits = 0;
@@ -226,40 +219,6 @@ test("delayed ordinary save error after project ABA does not toast the replaceme
         const harness = (window as Window & { __projectSettingsHarness?: HarnessState }).__projectSettingsHarness;
         if (!harness) throw new Error("harness missing");
         harness.switchProjectABA();
-    });
-    await fetch(new URL("/harness/release-patch", server.url), { method: "POST" });
-    await page.waitForTimeout(800);
-    expect(await toastText()).not.toContain("保存失败");
-    expect(await toastText()).not.toContain("网络中断");
-    expect((await harnessState())?.refreshCount ?? 0).toBe(0);
-}, 15_000);
-
-test("delayed ordinary save success after scope ABA does not toast the replacement generation", async () => {
-    gatePatch = true;
-    await page.getByLabel("项目名称").fill("项目甲已改");
-    await page.getByRole("button", { name: "保存设置" }).click();
-    await waitForPatchHits(1);
-    await page.evaluate(async () => {
-        const harness = (window as Window & { __projectSettingsHarness?: HarnessState }).__projectSettingsHarness;
-        if (!harness) throw new Error("harness missing");
-        await harness.switchABA();
-    });
-    await fetch(new URL("/harness/release-patch", server.url), { method: "POST" });
-    await page.waitForTimeout(800);
-    expect(await toastText()).not.toContain("项目设置已保存");
-    expect((await harnessState())?.refreshCount ?? 0).toBe(0);
-}, 15_000);
-
-test("delayed ordinary save error after scope ABA does not toast the replacement generation", async () => {
-    failSave = true;
-    gatePatch = true;
-    await page.getByLabel("项目名称").fill("项目甲已改");
-    await page.getByRole("button", { name: "保存设置" }).click();
-    await waitForPatchHits(1);
-    await page.evaluate(async () => {
-        const harness = (window as Window & { __projectSettingsHarness?: HarnessState }).__projectSettingsHarness;
-        if (!harness) throw new Error("harness missing");
-        await harness.switchABA();
     });
     await fetch(new URL("/harness/release-patch", server.url), { method: "POST" });
     await page.waitForTimeout(800);

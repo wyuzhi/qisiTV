@@ -653,6 +653,8 @@ add({
   create: jsonCreate("/v1/video/generations", {
     model: ref("request.model"), prompt: ref("request.prompt"), seconds: { $toString: ref("request.duration") },
     aspect_ratio: coalesce(ref("request.aspectRatio"), "16:9"), resolution: omit(ref("request.resolution")), generate_audio: ref("request.generateAudio"),
+    image: omit(coalesce(firstMediaFieldWithRoles("request.images", ["first_frame"], "value"), first(map({ $sortByOrder: ref("request.images") }, "media", ref("media.value"))))),
+    image_url: omit(coalesce(firstMediaFieldWithRoles("request.images", ["first_frame"], "value"), first(map({ $sortByOrder: ref("request.images") }, "media", ref("media.value"))))),
     image_urls: omit(map({ $sortByOrder: ref("request.images") }, "media", ref("media.value"))),
     video_urls: omit(map({ $sortByOrder: ref("request.videos") }, "media", ref("media.value"))),
     audio_urls: omit(map({ $sortByOrder: ref("request.audios") }, "media", ref("media.value")))
@@ -738,17 +740,33 @@ add({
   poll: { method: "GET", path: "/v3/async/task-result", query: { task_id: ref("taskId") } }, response: asyncResponse("video")
 });
 
+// 即梦官方视频的线协议与通用视频模板有三处不同，必须按官方合同逐个映射：
+// 时长用 frames 表示（24*n+1：121=5 秒、241=10 秒），画幅用 aspect_ratio，
+// req_json 属于查询请求而不是创建正文。成功业务码是 code=10000，所以只有这个协议
+// 声明 successCodes，其他厂商的错误码判定维持原样。
+// 官方只提供 5 秒和 10 秒两档；宿主给的是秒数，取最近一档，避免发出不存在的帧数。
+const jimengVideoSeconds = ref("request.duration");
+const jimengVideoFrames = omit(conditional(gt(jimengVideoSeconds, 0), conditional(lte(jimengVideoSeconds, 7), 121, 241)));
+// 参数表只用于插件文档和统一字段说明；按实际线字段写明，避免继续宣称发送 duration/ratio。
+const jimengVideoParams = videoParams.map(([name, type, required, mapping, description]) => {
+  if (name === "duration") return [name, type, required, "frames（24*秒数+1）", "时长秒数；官方只有 5 秒和 10 秒，按最近一档换算成 frames=121/241。"];
+  if (name === "aspectRatio") return [name, type, required, "aspect_ratio", "画幅比例，官方取值 16:9/9:16/1:1/4:3/3:4/21:9。"];
+  if (name === "resolution") return [name, type, required, "resolution", "分辨率档位；实际清晰度由 req_key 决定，这里只透传。"];
+  if (name === "providerOptions") return [name, type, required, mapping, "插件命名空间内的厂商扩展字段；volcengine-jimeng-video.req_json 属于查询请求，只在 poll 发送。"];
+  return [name, type, required, mapping, description];
+});
+
 add({
   id: "volcengine-jimeng-video", providerId: "volcengine-jimeng-video", name: "Volcengine Jimeng Video", vendor: "Volcengine", capability: "video",
-  baseUrl: "https://visual.volcengineapi.com", auth: { type: "volcengine-v4", field: "apiKey", secretField: "secretKey", service: "cv", region: "cn-north-1" }, params: videoParams,
+  baseUrl: "https://visual.volcengineapi.com", auth: { type: "volcengine-v4", field: "apiKey", secretField: "secretKey", service: "cv", region: "cn-north-1" }, params: jimengVideoParams,
   configuration: config([{ name: "secretKey", type: "secret", label: "Secret Key", required: true }]),
+  notes: "线协议按即梦官方视频接口收敛：创建正文只发 req_key、prompt、image_urls、aspect_ratio、frames、resolution；官方用 frames=24*秒数+1 表达时长（121=5 秒、241=10 秒），只提供 5 秒和 10 秒两档，其他秒数取最近一档。req_json 是查询请求的配置串，只在 poll 发送。业务成功码为 code=10000，插件显式声明 successCodes，不会把完成的任务判成失败。分辨率由 req_key 决定，resolution 仅作为透传不被推导。",
   create: jsonCreate("/", {
     req_key: ref("request.model"), prompt: ref("request.prompt"), image_urls: omit(map({ $sortByOrder: ref("request.images") }, "media", ref("media.value"))),
-    duration: omit(ref("request.duration")), ratio: omit(ref("request.aspectRatio")), resolution: omit(ref("request.resolution")),
-    req_json: omit(ref("request.providerOptions.volcengine-jimeng-video.req_json"))
+    aspect_ratio: omit(ref("request.aspectRatio")), frames: jimengVideoFrames, resolution: omit(ref("request.resolution"))
   }, { originPath: true, query: { Action: "CVSync2AsyncSubmitTask", Version: "2022-08-31" } }),
-  poll: { method: "POST", path: "/", originPath: true, contentType: "application/json", query: { Action: "CVSync2AsyncGetResult", Version: "2022-08-31" }, body: { req_key: ref("request.model"), task_id: ref("taskId") } },
-  response: asyncResponse("video", { taskId: coalesce(ref("response.data.task_id"), ref("response.task_id"), ref("taskId")), status: coalesce(ref("response.data.status"), ref("response.status"), "pending"), videos: coalesce(ref("response.data.video_urls"), ref("response.data.video_url")), errorPaths: ["code"], messagePaths: ["message"] })
+  poll: { method: "POST", path: "/", originPath: true, contentType: "application/json", query: { Action: "CVSync2AsyncGetResult", Version: "2022-08-31" }, body: { req_key: ref("request.model"), task_id: ref("taskId"), req_json: omit(ref("request.providerOptions.volcengine-jimeng-video.req_json")) } },
+  response: asyncResponse("video", { taskId: coalesce(ref("response.data.task_id"), ref("response.task_id"), ref("taskId")), status: coalesce(ref("response.data.status"), ref("response.status"), "pending"), videos: coalesce(ref("response.data.video_urls"), ref("response.data.video_url")), errorPaths: ["code"], successCodes: [10000], messagePaths: ["message"] })
 });
 
 const agnesFrameImages = mediaWithRoles("request.images", ["first_frame", "last_frame"]);
@@ -757,10 +775,10 @@ const agnesReferenceMode = { $or: [gt(len(agnesReferenceImages), 0), gt(len(ref(
 
 add({
   id: "agnes-video-25", providerId: "agnes-video", name: "Agnes Video 2.5 / 2.5 Flash", vendor: "Agnes AI", capability: "video",
+  mediaTransport: { image: "inline", video: "url", audio: "url" },
   baseUrl: "https://apihub.agnes-ai.com/v1", auth: bearer, params: videoParams, requiresPublicMediaUrls: true,
   validations: [
     { assert: { $in: [ref("request.model"), ["agnes-video-2.5", "agnes-video-2.5-flash"]] }, message: "Agnes 2.5 插件仅支持 agnes-video-2.5 与 agnes-video-2.5-flash" },
-    { assert: { $and: [{ $gte: [ref("request.duration"), 4] }, { $lte: [ref("request.duration"), 12] }] }, message: "Agnes Video 2.5 时长必须在 4–12 秒之间" },
     { assert: { $in: [{ $upper: coalesce(ref("request.resolution"), "720P") }, ["720P", "960P", "2K"]] }, message: "Agnes Video 2.5 分辨率必须是 720P、960P 或 2K" },
     { assert: { $not: { $and: [gt(len(agnesFrameImages), 0), agnesReferenceMode] } }, message: "Agnes Video 2.5 不能同时混用首尾帧和角色、视频或音频参考素材" },
     { assert: { $or: [ne(ref("request.model"), "agnes-video-2.5-flash"), eq({ $upper: coalesce(ref("request.resolution"), "720P") }, "720P")] }, message: "Agnes Video 2.5 Flash 仅支持 720P" },
@@ -838,21 +856,24 @@ add({
   }
 });
 
+const agnesV20FrameImages = mediaWithRoles("request.images", ["first_frame", "last_frame", ""]);
+
 add({
   id: "agnes-video-v20", providerId: "agnes-video-v20", name: "Agnes Video V2.0", vendor: "Agnes AI", capability: "video",
+  mediaTransport: { image: "inline", video: "url", audio: "url" },
   baseUrl: "https://apihub.agnes-ai.com/v1", auth: bearer, params: videoParams, requiresPublicMediaUrls: true,
   validations: [
     { assert: eq(ref("request.model"), "agnes-video-v2.0"), message: "Agnes Video V2.0 插件仅支持 agnes-video-v2.0" },
     { assert: eq(len(ref("request.videos")), 0), message: "Agnes Video V2.0 不支持参考视频" },
     { assert: eq(len(ref("request.audios")), 0), message: "Agnes Video V2.0 不支持参考音频" },
     { assert: eq(len(agnesReferenceImages), 0), message: "Agnes Video V2.0 不支持角色或风格参考图" },
-    { assert: { $lte: [len(agnesFrameImages), 2] }, message: "Agnes Video V2.0 最多支持首帧和尾帧各一张" }
+    { assert: { $lte: [len(agnesV20FrameImages), 2] }, message: "Agnes Video V2.0 最多支持首帧和尾帧各一张" }
   ],
   create: jsonCreate("/videos", {
     model: ref("request.model"), prompt: ref("request.prompt"), frame_rate: 24,
     num_frames: { $min: [441, { $add: [{ $ceilStep: [{ $multiply: [coalesce(ref("request.duration"), 5), 24] }, 8] }, 1] }] },
-    image: conditional(eq(len(agnesFrameImages), 1), firstMediaFieldWithRoles("request.images", ["first_frame", "last_frame"], "value")),
-    extra_body: conditional(gt(len(agnesFrameImages), 1), { image: map(agnesFrameImages, "media", ref("media.value")), mode: "keyframes" })
+    image: conditional(eq(len(agnesV20FrameImages), 1), firstMediaFieldWithRoles("request.images", ["first_frame", "last_frame", ""], "value")),
+    extra_body: conditional(gt(len(agnesV20FrameImages), 1), { image: map(agnesV20FrameImages, "media", ref("media.value")), mode: "keyframes" })
   }),
   poll: { method: "GET", path: "/agnesapi", originPath: true, query: { video_id: ref("taskId"), model_name: ref("request.model") } },
   response: asyncResponse("video", {
@@ -1198,7 +1219,11 @@ function docsFor(spec) {
   const optionRefs = [...new Set([...manifestJSON.matchAll(new RegExp(`request\\.providerOptions\\.${spec.providerId.replaceAll("-", "\\-")}\\.([A-Za-z0-9_.-]+)`, "g"))].map((match) => match[1]))].sort();
   const optionRows = optionRefs.length ? optionRefs.map((name) => `- \`providerOptions.${spec.providerId}.${name}\``).join("\n") : "- 无额外扩展键。";
   const configRows = (spec.configuration || config()).fields.map((field) => `| \`${field.name}\` | ${field.type} | ${field.required ? "是" : "否"} | ${field.label || ""} |`).join("\n");
-  return `# ${spec.name} 接口字段\n\n## 协议身份\n\n- 插件 ID：\`${spec.id}\`。\n- Provider ID：\`${spec.providerId}\`。\n- 能力：\`${spec.capability}\`。\n- 默认 Base URL：\`${spec.baseUrl}\`。\n- 鉴权驱动：\`${spec.auth?.type || "默认"}\`。\n- 创建：\`${spec.create.method} ${spec.create.path || "动态路径"}\`。\n${spec.agent ? `- Agent：\`${spec.agent.method} ${spec.agent.path || "动态路径"}\`。\n` : ""}${spec.poll ? `- 查询：\`${spec.poll.method} ${spec.poll.path}\`。\n` : "- 生命周期：同步响应。\n"}${spec.cancel ? `- 取消：\`${spec.cancel.method} ${spec.cancel.path}\`。\n` : ""}\n## 配置字段\n\n| 字段 | 类型 | 必填 | 含义 |\n| --- | --- | --- | --- |\n${configRows}\n\n## 统一字段映射\n\n| 统一字段 | 类型 | 必填 | 上游映射 | 说明 |\n| --- | --- | --- | --- | --- |\n${rows}\n\n## 上游请求模板逐字段清单\n\n下表由插件请求模板生成，覆盖 body、query、headers 和 multipart 文件声明中的每个字段。\n\n| 上游位置 | 值或转换表达式 |\n| --- | --- |\n${operationRows || "| `create` | 无请求字段 |"}\n\n## Provider 扩展键\n\n${optionRows}\n\n动态模型或工作流允许使用文档声明的完整 \`parameters/input/extra_body\` 对象；该对象是协议本身的开放 schema，不会被宿主裁剪。\n\n## 响应映射逐字段清单\n\n| 映射位置 | 上游路径或转换表达式 |\n| --- | --- |\n${mappedResponseRows || "| `response` | 无显式映射 |"}\n\n## 响应与错误\n\n插件把上游 task/status/text/media/usage 映射为统一结果。临时媒体 URL 标记为 ephemeral，由宿主立即下载持久化。HTTP 错误、业务 code 和 error object 保持失败语义，不包装成成功。\n\n## 兼容边界\n\n${spec.notes || "该包只代表上述线协议 profile；同一品牌的其他 endpoint、云区域或网关包装必须使用独立插件，不能根据模型名猜测。"}\n`;
+  const successCodes = Array.isArray(spec.response?.successCodes) ? spec.response.successCodes : [];
+  const errorSemantics = successCodes.length
+    ? `HTTP 错误和 error object 保持失败语义，不包装成成功；业务 code 中 ${successCodes.map((code) => `\`${code}\``).join("、")} 是该协议声明的成功码，不算失败，其他业务码仍然失败。`
+    : "HTTP 错误、业务 code 和 error object 保持失败语义，不包装成成功。";
+  return `# ${spec.name} 接口字段\n\n## 协议身份\n\n- 插件 ID：\`${spec.id}\`。\n- Provider ID：\`${spec.providerId}\`。\n- 能力：\`${spec.capability}\`。\n- 默认 Base URL：\`${spec.baseUrl}\`。\n- 鉴权驱动：\`${spec.auth?.type || "默认"}\`。\n- 创建：\`${spec.create.method} ${spec.create.path || "动态路径"}\`。\n${spec.agent ? `- Agent：\`${spec.agent.method} ${spec.agent.path || "动态路径"}\`。\n` : ""}${spec.poll ? `- 查询：\`${spec.poll.method} ${spec.poll.path}\`。\n` : "- 生命周期：同步响应。\n"}${spec.cancel ? `- 取消：\`${spec.cancel.method} ${spec.cancel.path}\`。\n` : ""}\n## 配置字段\n\n| 字段 | 类型 | 必填 | 含义 |\n| --- | --- | --- | --- |\n${configRows}\n\n## 统一字段映射\n\n| 统一字段 | 类型 | 必填 | 上游映射 | 说明 |\n| --- | --- | --- | --- | --- |\n${rows}\n\n## 上游请求模板逐字段清单\n\n下表由插件请求模板生成，覆盖 body、query、headers 和 multipart 文件声明中的每个字段。\n\n| 上游位置 | 值或转换表达式 |\n| --- | --- |\n${operationRows || "| `create` | 无请求字段 |"}\n\n## Provider 扩展键\n\n${optionRows}\n\n动态模型或工作流允许使用文档声明的完整 \`parameters/input/extra_body\` 对象；该对象是协议本身的开放 schema，不会被宿主裁剪。\n\n## 响应映射逐字段清单\n\n| 映射位置 | 上游路径或转换表达式 |\n| --- | --- |\n${mappedResponseRows || "| `response` | 无显式映射 |"}\n\n## 响应与错误\n\n插件把上游 task/status/text/media/usage 映射为统一结果。临时媒体 URL 标记为 ephemeral，由宿主立即下载持久化。${errorSemantics}\n\n## 兼容边界\n\n${spec.notes || "该包只代表上述线协议 profile；同一品牌的其他 endpoint、云区域或网关包装必须使用独立插件，不能根据模型名猜测。"}\n`;
 }
 
 const requestedPackageIDs = new Set(process.argv.slice(2).map((value) => value.trim()).filter(Boolean));

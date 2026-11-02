@@ -7,9 +7,9 @@ const librarySource = readFileSync(new URL("../src/pages/canvas/index.tsx", impo
 
 test("local canvas export includes media and drawing documents", () => {
     expect(exportSource).toContain("getMediaBlob(storageKey)");
-    expect(exportSource).toContain("loadCanvasDrawing(project.id, drawingId, scope)");
-    expect(exportSource).toContain("loadCanvasDrawingPreview(project.id, drawingId, scope)");
-    expect(exportSource).toContain("loadCanvasDrawingRender(project.id, drawingId, scope)");
+    expect(exportSource).toContain("loadCanvasDrawing(project.id, drawingId)");
+    expect(exportSource).toContain("loadCanvasDrawingPreview(project.id, drawingId)");
+    expect(exportSource).toContain("loadCanvasDrawingRender(project.id, drawingId)");
     expect(exportSource).toContain("drawingDocuments");
     expect(exportSource).toContain('name: "projects.json"');
 });

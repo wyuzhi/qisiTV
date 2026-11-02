@@ -1185,6 +1185,9 @@
     .app-product-workspace *,
     .app-product-overlays * { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
     /* Placement must measure unscaled coordinates; keep motion-end events. */
+    .app-product-overlays .ant-select-dropdown,
+    .app-product-overlays .ant-popover,
+    .app-product-overlays .ant-dropdown,
     .app-product-overlays .model-default-select-popup,
     .app-product-overlays .model-channel-delete-confirm { transition-property: opacity !important; transform: none !important; }
     .app-product-workspace .product-collection-card:hover,

@@ -35,6 +35,23 @@ export type CanvasResourceReference = {
     mentionToken?: string;
 };
 
+/** Keep memoized nodes independent of unrelated reference-map rebuilds. */
+export function reuseCanvasResourceReferences(previous: CanvasResourceReference[] | undefined, next: CanvasResourceReference[]) {
+    if (!previous) return next;
+    if (!previous.length && !next.length) return previous;
+    const previousById = new Map(previous.map(reference => [reference.id, reference]));
+    const shared = next.map(reference => {
+        const old = previousById.get(reference.id);
+        if (!old) return reference;
+        const keys = Object.keys(reference) as Array<keyof CanvasResourceReference>;
+        const equal = keys.length === Object.keys(old).length && keys.every(key => key === "videoPreviewSource"
+            ? Boolean(old.videoPreviewSource) === Boolean(reference.videoPreviewSource) && old.videoPreviewSource?.metadata === reference.videoPreviewSource?.metadata
+            : old[key] === reference[key]);
+        return equal ? old : reference;
+    });
+    return shared.length === previous.length && shared.every((reference, index) => reference === previous[index]) ? previous : shared;
+}
+
 export function canvasSkillMentionToken(skillId: string) {
     return `@[skill:${skillId}]`;
 }
@@ -66,6 +83,17 @@ export function referencedAssetIdsInPrompt(prompt: string): string[] {
     return [...new Set(Array.from(prompt.matchAll(/@\[asset:([^\]\s]+)\]/g), (match) => match[1]))];
 }
 
+/** The editor and submission checks recognize the same explicit reference syntax. */
+export function canvasGenerationMentionMatches(prompt: string) {
+    return [...prompt.matchAll(/@\[(node|asset):([^\]]+)\]|@(图片|视频|音频|文本|角色|绘图)(\d+)/g)]
+        .filter((match) => !match[3] || hasCanvasMentionBoundary(prompt, (match.index || 0) + match[0].length));
+}
+
+export function hasCanvasMentionBoundary(value: string, index: number) {
+    const next = value[index];
+    return !next || /\s|[,.!?;:，。！？；：、)\]}】）`"'|]/.test(next);
+}
+
 /** 将提示词内已连接素材的名称替换为对应引用；同名的每处指代都会保留为独立引用。 */
 export function autoMentionCanvasResourceReferences(prompt: string, references: CanvasResourceReference[]) {
     const referenceByName = new Map<string, CanvasResourceReference | null>();
@@ -87,14 +115,23 @@ export function autoMentionCanvasResourceReferences(prompt: string, references: 
     if (!names.length) return prompt;
 
     const matcher = new RegExp(`(^|[^A-Za-z0-9_@])(${names.map(escapeRegExp).join("|")})(?![A-Za-z0-9_])`, "gu");
+    // 分段替换，跳过已经是 @ 引用的片段；另记每段在原文里的起点，用来判断名字后面是否已有同一引用。
+    let partOffset = 0;
     return prompt
         .split(/(@\[[^\]]+\]|@[^\s@,.;:!?，。；：！？、)\]}】）]+)/gu)
         .map((part) => {
+            const startOfPart = partOffset;
+            partOffset += part.length;
             if (part.startsWith("@")) return part;
             return part.replace(matcher, (match, prefix: string, name: string, offset: number, source: string) => {
+                const reference = referenceByName.get(name)!;
+                const token = canvasResourceMentionToken(reference);
                 const nextCharacter = source[offset + match.length];
                 const separator = needsAutoMentionSeparator(nextCharacter) ? " " : "";
-                return `${prefix}${canvasResourceMentionToken(referenceByName.get(name)!)}${separator}`;
+                if (!keepsTypedResourceName(reference, name)) return `${prefix}${token}${separator}`;
+                // 用户自己写的名字（角色名、素材标题）是提示词的语义，保留原文并把引用追加在后面。
+                if (prompt.slice(startOfPart + offset + match.length).trimStart().startsWith(token)) return match;
+                return `${prefix}${name} ${token}${separator}`;
             });
         })
         .join("");
@@ -134,6 +171,8 @@ export function findCanvasResourceAutoLinkMatch(prompt: string, cursor: number, 
         if (candidate.isBareOrder && previous && !/[\s,.!?;:，。！？；：、)\]}】）]/u.test(previous)) continue;
         if (candidate.isBareOrder && next && !/[\s,.!?;:，。！？；：、)\]}】）]/u.test(next)) continue;
         if (/^[A-Za-z0-9_]+$/u.test(candidate.name) && previous && /[A-Za-z0-9_]/u.test(previous)) continue;
+        // 名字后面已经跟着同一个引用（保留名字时插入的），不再重复提示。
+        if (prompt.slice(cursor).trimStart().startsWith(canvasResourceMentionToken(candidate.reference))) continue;
         return { reference: candidate.reference, start, end: cursor, query: candidate.name };
     }
     return null;
@@ -159,6 +198,26 @@ function escapeRegExp(value: string) {
 
 function needsAutoMentionSeparator(nextCharacter: string | undefined) {
     return Boolean(nextCharacter && !/[\s,.!?;:，。！？；：、)\]}】）]/u.test(nextCharacter));
+}
+
+const AUTO_RESOURCE_LABEL = /^(角色|图片|图|视频|音频|绘图|文本|技能)\s*\d+$/u;
+
+/**
+ * 用户自己起的名字（角色名、素材标题）要保留原文，把引用追加在后面；
+ * 自动编号「图片1 / 角色1」保留下来只会变成「图片1 @图片1」，仍然直接替换。
+ */
+function keepsTypedResourceName(reference: CanvasResourceReference, name: string) {
+    return name === reference.title.trim() && !AUTO_RESOURCE_LABEL.test(name);
+}
+
+/**
+ * @ 菜单选中和 Tab 补全时替换输入文字的内容：用户打出的是完整的角色名/素材标题，就保留名字再追加引用；
+ * 只是搜索片段或自动编号时，仍只插入引用。
+ */
+export function canvasResourceReferenceInsertText(reference: CanvasResourceReference, typedName: string) {
+    const token = canvasResourceMentionToken(reference);
+    const name = typedName.trim();
+    return keepsTypedResourceName(reference, name) ? `${name} ${token} ` : `${token} `;
 }
 
 const CANVAS_RESOURCE_MENTION_BOUNDARY = /(?:$|\s|[,.!?;:，。！？；：、)\]}】）])/;
@@ -511,6 +570,10 @@ function labelForKind(kind: CanvasResourceKind, index: number) {
     if (kind === "audio") return seedanceReferenceLabel("audio", index);
     if (kind === "skill") return `技能${index + 1}`;
     return `文本${index + 1}`;
+}
+
+export function isCanvasTextResourceNode(node: CanvasNodeData) {
+    return resourceKind(node) === "text";
 }
 
 function isResourceNode(node: CanvasNodeData) {

@@ -11,6 +11,8 @@ import { CanvasNodeGraphContext } from "@/components/canvas/canvas-node-graph-co
 import { isFrameNode, isNodeHiddenByCollapsedFrame, resolveFrameConnection } from "@/lib/canvas/canvas-frame";
 import { getCanvasNodesBounds, viewportAtScale, viewportForBounds } from "@/lib/canvas/canvas-viewport";
 import { resolveCanvasAppearance } from "@/lib/canvas/canvas-appearance";
+import { parseCanvasWheelBehavior } from "@/lib/canvas/canvas-wheel";
+import { scopedLocalStorage } from "@/lib/user-scope";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { resourceFileUrl, resourceIdFromStorageKey } from "@/services/api/resources";
 import { resolveMediaUrl } from "@/services/file-storage";
@@ -29,6 +31,7 @@ export function CanvasVersionPreview({ preview, busy = false, onReturn, onShowVe
     const [mediaError, setMediaError] = useState("");
     const theme = useActiveTheme();
     const project = preview.project;
+    const wheelBehavior = useMemo(() => parseCanvasWheelBehavior(scopedLocalStorage.getItem("canvas:wheel-behavior")), []);
     useEffect(() => {
         const node = project?.nodes.find((item) => item.id === selectedId);
         const key = node?.metadata?.storageKey;
@@ -129,6 +132,7 @@ export function CanvasVersionPreview({ preview, busy = false, onReturn, onShowVe
                                 viewport={viewport}
                                 appearance={project.appearance}
                                 backgroundMode={project.backgroundMode}
+                                wheelBehavior={wheelBehavior}
                                 onViewportChange={setViewport}
                                 onContextMenu={(event) => event.preventDefault()}
                                 onDrop={(event) => event.preventDefault()}

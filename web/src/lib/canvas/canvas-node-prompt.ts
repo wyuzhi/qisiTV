@@ -14,7 +14,11 @@ export type WriteCanvasNodePromptOptions = {
 export function canvasNodeHasCommittedContent(node: CanvasNodeData) {
     const resourceKind = getNodeResourceKind(node);
     if (resourceKind === "text") return Boolean(node.metadata?.content?.trim());
-    return resourceKind !== null;
+    if (resourceKind !== null) return true;
+    if (node.type === "image" || node.type === "video" || node.type === "audio") {
+        return Boolean(node.metadata?.taskId?.trim());
+    }
+    return false;
 }
 
 /**

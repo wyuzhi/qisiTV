@@ -7,20 +7,18 @@ import { useNavigate, useSearchParams } from "react-router";
 
 import type { AssetLibraryPickerItem } from "@/components/assets/asset-library-picker-modal";
 import { createReferenceLinkResolver } from "@/components/generation-reference-links";
-import { generationErrorCode, generationErrorMessage } from "@/lib/generation-error";
+import { explainGenerationError, generationErrorCode, generationErrorMessage } from "@/lib/generation-error";
 import { creationResultAssetIds } from "@/lib/canvas/canvas-asset-handoff";
-import { captureUserScopeEpoch, userScopeEpochMatches } from "@/lib/user-scope";
-import { assertUserScope, captureUserScope, userScopeMatches, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { continueCreationConversationOnCanvas } from "@/services/creation-canvas-conversation";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import { useExternalAssetSources } from "@/hooks/use-external-asset-sources";
-import { modelCapabilityConfigFor, normalizeImageValue, normalizeVideoValue, videoDurationAllowed, videoDurationOptions } from "@/lib/model-capabilities";
-import { inferVideoOperation, resolveCompatibleModel, mergedImageCapabilityConfig, type ModelRequirements } from "@/lib/model-selection";
+import { modelCapabilityConfigFor, normalizeImageValue, normalizeVideoValue, videoDurationOptions } from "@/lib/model-capabilities";
+import { hasDeclaredModelCapability, inferVideoOperation, resolveCompatibleModel, mergedImageCapabilityConfig, type ModelRequirements } from "@/lib/model-selection";
 import type { BackendGenerationResult } from "@/services/api/generation-task";
 import type { Skill } from "@/services/api/skills";
 import type { GenerationTask } from "@/services/api/task-center";
 import { acceptSavedCreationConversation, conversationHasConflict, deleteCreationConversation, hasParkedCreationConversationDraft, loadCreationConversations, loadLocalCreationConversationDrafts, pendingCreationTaskIds, removeCreationConversationSnapshot, restoreParkedCreationConversation, saveCreationConversations, updateCreationConversationSnapshot } from "@/services/creation-conversation-store";
-import { resolveModelChannel, selectableModelsByCapability, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { modelOptionName, resolveModelChannel, selectableModelsByCapability, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useCreationPreferencesStore } from "@/stores/use-creation-preferences-store";
 import { useAssetStore, type Asset } from "@/stores/use-asset-store";
 import { useAppearanceStore } from "@/stores/use-appearance-store";
@@ -30,7 +28,7 @@ import type { PromptOptimizerProvider } from "@/lib/plugins/plugin-types";
 import { promptOptimizerPlugin, PROMPT_OPTIMIZER_PLUGIN_ID } from "@/lib/plugins/builtin/prompt-optimizer";
 import { createPluginHostContext } from "@/services/plugin-host";
 import { usePluginStore } from "@/stores/use-plugin-store";
-import { buildCreationMentionReferences, expandCreationPrompt, reconcileCreationAttachmentLimit, removeCreationReferenceTokens, replaceCreationAttachmentReference, selectedCreationReferences, type CreationReference } from "./creation-references";
+import { buildCreationMentionReferences, creationReferenceKindMessage, creationReferenceLimitsFor, expandCreationPrompt, fitCreationAttachmentsToLimits, reconcileCreationAttachmentLimit, removeCreationReferenceTokens, replaceCreationAttachmentReference, selectedCreationReferences, type CreationReference } from "./creation-references";
 import { creationAttachmentFromAsset, creationAttachmentFromAudio, creationAttachmentFromAudioAsset, creationAttachmentFromDocument, creationAttachmentFromExternalAsset, creationAttachmentFromImage, creationAttachmentFromVideo, creationAttachmentFromVideoAsset, creationAttachmentKind, creationAudioAsset, creationFileAccepted, creationImageAsset, creationMediaAspectRatio, creationUploadAccept, creationVideoAsset, removeCreationAttachment, splitCreationAttachments, type CreationAttachment } from "./creation-assets";
 import { defaultCreationMode, modeLabels, type CreationConversation, type CreationMessage, type CreationMode, type CreationRetryContext, type CreationSettings, type CreationShotRailEntry, type CreationStatus } from "./creation-types";
 import { attachCreationTaskContexts, completedCreationGenerationTask, conversationTimestamp, creationShotRail, creationVideoShotOrdinal, isImageAttachment, isVideoAttachment, materializeCreationTaskResults, newConversation, newMessage, reconcileCreationTaskMessages } from "./creation-conversations";
@@ -117,10 +115,14 @@ export default function CreatePage() {
     const [count, setCount] = useState(String(Math.max(1, Math.min(4, Number(config.count) || 1))));
     const [textStreaming, setTextStreaming] = useState(() => readComposerPref(TEXT_STREAMING_PREF_KEY, true));
     const [textThinking, setTextThinking] = useState(() => readComposerPref(TEXT_THINKING_PREF_KEY, false));
+    const [composerNotice, setComposerNotice] = useState("");
     const [busy, setBusy] = useState(false);
     const [referenceReplacementBusy, setReferenceReplacementBusy] = useState(false);
     const [historyOpen, setHistoryOpen] = useState(false);
     const [libraryOpen, setLibraryOpen] = useState(false);
+    // 全站关闭了右上角 Toast（globals.css 里 .ant-message 被隐藏），
+    // 参考素材超限这类必须让用户看见的说明改在参考内容面板里就地显示。
+    const [referenceNotice, setReferenceNotice] = useState("");
     const externalAssetSources = useExternalAssetSources(libraryOpen);
     const abortRef = useRef<AbortController | null>(null);
     const composerFocusRef = useRef<HTMLTextAreaElement>(null);
@@ -165,7 +167,15 @@ export default function CreatePage() {
     const selectedModel = resolveCompatibleModel(config, preferredModel, modelRequirements) || preferredModel;
     const imageProfile = useMemo(() => modelCapabilityConfigFor(config, selectedModel).image!, [config, selectedModel]);
     const videoProfile = useMemo(() => modelCapabilityConfigFor(config, selectedModel).video!, [config, selectedModel]);
-    const maxReferences = mode === "video" ? videoProfile.operations.includes("image_to_video") ? videoProfile.references.maxImages : 0 : mode === "image" ? imageProfile.references.maxImages : 6;
+    // 参考素材上限按官方文档分类型取（视频：图 / 视频 / 音频各自限量，见 Seedance 2.0 的 9/3/3），
+    // 不再自己合成一个总数上限。
+    const referenceLimits = useMemo(() => {
+        const profile = resolveModelChannel(config, selectedModel).modelProfiles?.find((item) => item.model === modelOptionName(selectedModel));
+        const textReferencesDeclared = Boolean(profile?.capabilityConfig?.text);
+        const imageReferencesDeclared = hasDeclaredModelCapability(config, selectedModel, "image");
+        const videoReferencesDeclared = hasDeclaredModelCapability(config, selectedModel, "video");
+        return creationReferenceLimitsFor(mode, modelCapabilityConfigFor(config, selectedModel), { textReferencesDeclared, imageReferencesDeclared, videoReferencesDeclared });
+    }, [config, mode, selectedModel]);
     const referenceImageSize = useMemo(() => {
         const imageAttachments = attachments.filter(isImageAttachment);
         if (imageAttachments.length !== 1) return undefined;
@@ -244,16 +254,14 @@ export default function CreatePage() {
         setSeconds(normalized.seconds);
         setRatio(normalized.ratio);
         setVideoQuality(normalized.resolution.replace(/p$/i, ""));
-        const maxReferences = videoProfile.operations.includes("image_to_video") ? videoProfile.references.maxImages : 0;
-        if (attachments.length > maxReferences) setAttachments((current) => current.slice(0, maxReferences));
-    }, [composerPreferencesHydrated, composerPreferencesInitialized, mode, selectedModel, videoProfile]);
+    }, [composerPreferencesHydrated, composerPreferencesInitialized, mode, selectedModel, videoProfile, config]);
 
     useEffect(() => {
-        const reconciled = reconcileCreationAttachmentLimit(attachments, mentionReferences, maxReferences);
+        const reconciled = reconcileCreationAttachmentLimit(attachments, mentionReferences, referenceLimits);
         if (reconciled.attachments === attachments) return;
         setAttachments(reconciled.attachments);
         if (reconciled.removedReferences.length) setPrompt((current) => removeCreationReferenceTokens(current, reconciled.removedReferences));
-    }, [attachments, maxReferences, mentionReferences]);
+    }, [attachments, mentionReferences, referenceLimits]);
 
     useEffect(() => {
         let cancelled = false;
@@ -265,28 +273,27 @@ export default function CreatePage() {
             setHydrated(true);
             return () => { cancelled = true; };
         }
-        const loadEpoch = captureUserScopeEpoch();
-        void loadCreationConversations<CreationConversation>(loadEpoch.scope).then(async (stored) => {
-            if (cancelled || !userScopeEpochMatches(loadEpoch)) return;
+        void loadCreationConversations<CreationConversation>().then(async (stored) => {
+            if (cancelled) return;
             skipPersistRef.current = true;
             const next = stored?.length ? stored : [newConversation()];
             conversationsRef.current = next;
             setConversations(next);
             setActiveId(next[0].id);
             setHydrated(true);
-            const parked = next[0]?.id ? await hasParkedCreationConversationDraft(next[0].id, loadEpoch.scope) : false;
-            if (cancelled || !userScopeEpochMatches(loadEpoch)) return;
+            const parked = next[0]?.id ? await hasParkedCreationConversationDraft(next[0].id) : false;
+            if (cancelled) return;
             setParkedDraftId(parked && next[0] ? next[0].id : "");
         }).catch(async (error) => {
-            if (cancelled || !userScopeEpochMatches(loadEpoch)) return;
+            if (cancelled) return;
             toastRef.current.error(error instanceof Error ? error.message : "对话加载失败");
             let local: CreationConversation[] | null = null;
             try {
-                local = await loadLocalCreationConversationDrafts<CreationConversation>(loadEpoch.scope);
+                local = await loadLocalCreationConversationDrafts<CreationConversation>();
             } catch {
                 local = null;
             }
-            if (cancelled || !userScopeEpochMatches(loadEpoch)) return;
+            if (cancelled) return;
             skipPersistRef.current = true;
             const next = local?.length ? local : [newConversation()];
             conversationsRef.current = next;
@@ -313,13 +320,11 @@ export default function CreatePage() {
             skipPersistRef.current = false;
             return;
         }
-        const persistEpoch = captureUserScopeEpoch();
-        void saveCreationConversations(conversations, persistEpoch.scope).catch(async (error) => {
-            if (!userScopeEpochMatches(persistEpoch)) return;
+        void saveCreationConversations(conversations).catch(async (error) => {
             toastRef.current.error(error instanceof Error ? error.message : "对话保存失败");
             try {
-                const local = await loadLocalCreationConversationDrafts<CreationConversation>(persistEpoch.scope);
-                if (!userScopeEpochMatches(persistEpoch) || !local?.length) return;
+                const local = await loadLocalCreationConversationDrafts<CreationConversation>();
+                if (!local?.length) return;
                 const remotes = new Map(local.flatMap((item) => item.conflictRemote ? [[item.id, item.conflictRemote] as const] : []));
                 if (!remotes.size) return;
                 skipPersistRef.current = true;
@@ -432,17 +437,17 @@ export default function CreatePage() {
         }));
         conversationsRef.current = next;
         setConversations(next);
-        const epoch = captureUserScopeEpoch();
         try {
-            await saveCreationConversations(next, epoch.scope);
+            await saveCreationConversations(next);
         } catch (error) {
-            if (!userScopeEpochMatches(epoch)) return;
             toastRef.current.error(error instanceof Error ? error.message : "对话保存失败");
         }
     }, []);
 
     const selectMode = (next: CreationMode) => {
+        setReferenceNotice("");
         setMode(next);
+        setComposerNotice("");
         rememberMode(next);
         const nextModels = selectableModelsByCapability(config, next);
         const current = next === "text" ? config.textModel : next === "image" ? config.imageModel : config.videoModel;
@@ -458,6 +463,8 @@ export default function CreatePage() {
     };
     const setComposerSeconds = (value: string) => {
         setSeconds(value);
+        // 用户改了时长就清掉上一轮的拦截说明，避免旧提示留在输入框里。
+        setComposerNotice("");
         if (mode === "video") rememberVideoSettings({ seconds: value });
     };
     const setComposerQuality = (value: string) => {
@@ -494,47 +501,39 @@ export default function CreatePage() {
             })),
         ...externalLibraryItems,
     ], [assets, externalLibraryItems, mode]);
-    const uploadCreationAsset = async (file: File, expectedScope: CapturedUserScope) => {
+    const uploadCreationAsset = async (file: File) => {
         const { uploadImage, uploadMediaFile } = await loadCreationRuntime();
-        assertUserScope(expectedScope);
         if (file.type.startsWith("video/")) {
-            const uploaded = await uploadMediaFile(file, "create-upload", undefined, expectedScope);
-            assertUserScope(expectedScope);
+            const uploaded = await uploadMediaFile(file, "create-upload");
             return {
                 asset: creationVideoAsset({ title: file.name, uploaded, metadata: { source: "create-upload", fileName: file.name } }),
                 attachment: creationAttachmentFromVideo(file, uploaded),
             };
         }
         if (file.type.startsWith("audio/")) {
-            const uploaded = await uploadMediaFile(file, "create-upload", undefined, expectedScope);
-            assertUserScope(expectedScope);
+            const uploaded = await uploadMediaFile(file, "create-upload");
             return {
                 asset: creationAudioAsset({ title: file.name, uploaded, metadata: { source: "create-upload", fileName: file.name } }),
                 attachment: creationAttachmentFromAudio(file, uploaded),
             };
         }
         if (!file.type.startsWith("image/")) {
-            const uploaded = await uploadMediaFile(file, "create-upload", undefined, expectedScope);
-            assertUserScope(expectedScope);
+            const uploaded = await uploadMediaFile(file, "create-upload");
             return { attachment: creationAttachmentFromDocument(file, uploaded) };
         }
-        const uploaded = await uploadImage(file, undefined, expectedScope);
-        assertUserScope(expectedScope);
+        const uploaded = await uploadImage(file);
         return {
             asset: creationImageAsset({ title: file.name, uploaded, metadata: { source: "create-upload", fileName: file.name } }),
             attachment: creationAttachmentFromImage(file, uploaded),
         };
     };
-    const uploadLibraryAssets = async (files: FileList | File[], expectedScope: CapturedUserScope) => {
-        assertUserScope(expectedScope);
+    const uploadLibraryAssets = async (files: FileList | File[]) => {
         const next = Array.from(files).filter((file) => creationFileAccepted(mode, file));
         if (!next.length) return [];
         const settled = await Promise.allSettled(next.map(async (file) => {
-            const { asset } = await uploadCreationAsset(file, expectedScope);
-            assertUserScope(expectedScope);
+            const { asset } = await uploadCreationAsset(file);
             return asset ? addAsset(asset) : "";
         }));
-        if (!userScopeMatches(expectedScope)) return [];
         const assetIds = settled.flatMap((entry) => entry.status === "fulfilled" && entry.value ? [entry.value] : []);
         const failed = settled.filter((entry) => entry.status === "rejected");
         if (assetIds.length) toast.success(`${assetIds.length} 个素材已上传到素材库并自动选中`);
@@ -542,8 +541,7 @@ export default function CreatePage() {
         return assetIds;
     };
 
-    const handleLibrarySelect = (selectedIds: string[], expectedScope: CapturedUserScope) => {
-        assertUserScope(expectedScope);
+    const handleLibrarySelect = (selectedIds: string[]) => {
         const next = selectedIds.flatMap((id): CreationAttachment[] => {
             const asset = assets.find((item) => item.id === id);
             if (asset?.kind === "image") return [creationAttachmentFromAsset(asset)];
@@ -553,17 +551,24 @@ export default function CreatePage() {
             return external ? [creationAttachmentFromExternalAsset(external)] : [];
         });
         if (!next.length) return;
-        setAttachments((current) => [...current.filter((item) => !next.some((candidate) => candidate.id === item.id)), ...next].slice(0, maxReferences));
+        const merged = [...attachments.filter((item) => !next.some((candidate) => candidate.id === item.id)), ...next];
+        const fitted = fitCreationAttachmentsToLimits(merged, referenceLimits);
+        setReferenceNotice(fitted.dropped.length ? `${creationReferenceKindMessage(referenceLimits, fitted.dropped[0])}，超出的 ${fitted.dropped.length} 个素材没有加入` : "");
+        setAttachments(fitted.attachments);
         setLibraryOpen(false);
     };
 
     const removeAttachment = (id: string) => {
+        setReferenceNotice("");
+        setComposerNotice("");
         const reference = mentionReferences.find((item) => item.attachmentId === id);
         setAttachments((current) => removeCreationAttachment(current, id));
         if (reference) setPrompt((current) => removeCreationReferenceTokens(current, [reference]));
     };
 
     const clearAttachments = () => {
+        setReferenceNotice("");
+        setComposerNotice("");
         const attachmentIds = new Set(attachments.map((item) => item.id));
         const references = mentionReferences.filter((item) => item.attachmentId && attachmentIds.has(item.attachmentId));
         setAttachments([]);
@@ -571,6 +576,8 @@ export default function CreatePage() {
     };
 
     const clearComposer = () => {
+        setReferenceNotice("");
+        setComposerNotice("");
         promptRef.current = "";
         attachmentsRef.current = [];
         setPrompt("");
@@ -615,15 +622,12 @@ export default function CreatePage() {
             return;
         }
         setReferenceReplacementBusy(true);
-        const expectedScope = captureUserScope();
         try {
-            const { asset, attachment } = await uploadCreationAsset(file, expectedScope);
-            if (!userScopeMatches(expectedScope)) return;
+            const { asset, attachment } = await uploadCreationAsset(file);
             if (creationAttachmentKind(attachment) !== "image") throw new Error("上传结果不是可用图片");
             if (asset) addAsset(asset);
             if (replaceAttachmentReference(targetAttachmentId, attachment)) toast.success("参考图已替换，槽位不变，提示词无需修改");
         } catch (error) {
-            if (!userScopeMatches(expectedScope)) return;
             toast.error(error instanceof Error ? error.message : "参考图上传或替换失败");
         } finally {
             setReferenceReplacementBusy(false);
@@ -644,20 +648,9 @@ export default function CreatePage() {
             releaseRetryLock();
             return;
         }
-        if (mode === "video" && !videoDurationAllowed(videoProfile, Number(seconds))) {
-            toast.error("当前模型不支持所选视频时长，请重新选择");
-            releaseRetryLock();
-            return;
-        }
-        if (attachments.length > maxReferences) {
-            toast.warning("参考内容正在按当前模型能力调整，请稍后重试");
-            releaseRetryLock();
-            return;
-        }
+        const { referenceImages, referenceVideos, referenceAudios } = splitCreationAttachments(attachments);
         const settings = { ratio, seconds, quality, videoQuality, count };
         const references = selectedCreationReferences(text, mentionReferences);
-        // 后端对图片和视频使用不同的参考字段；这里先拆分，避免媒体类型在写入任务时被误判。
-        const { referenceImages, referenceVideos, referenceAudios } = splitCreationAttachments(attachments);
         const videoOperation = inferVideoOperation({
             textCount: text ? 1 : 0,
             imageCount: referenceImages.length,
@@ -683,6 +676,7 @@ export default function CreatePage() {
         const expandedPrompt = skillExecution.prompt;
         const referenceMetadata = skillExecution.metadata;
         followLatestMessageRef.current = true;
+        setComposerNotice("");
         const userMessage = newMessage("user", text, { mode, model: selectedModel, attachments, references, settings });
         const assistantMessage = newMessage("assistant", "", { mode, model: selectedModel, status: mode === "text" && textStreaming ? "streaming" : "pending", settings, ...retryContext });
         const originConversationId = activeConversation.id;
@@ -695,7 +689,7 @@ export default function CreatePage() {
             boundTaskIds.add(task.id);
             activeGenerationTaskIdsRef.current.add(task.id);
             boundTasks.set(task.id, task);
-            updateOriginAssistant((item) => ({ ...item, generationStage: task.stage, generationOperation: task.operation, generationErrorCode: task.errorCode, taskIds: Array.from(new Set([...(item.taskIds || []), task.id])), clientOperationId: task.clientOperationId, retryOf: task.retryOf, attemptGroupId: task.attemptGroupId }));
+            updateOriginAssistant((item) => ({ ...item, taskOutcome: task.outcome, taskFailureDiagnostics: task.failureDiagnostics ?? item.taskFailureDiagnostics, generationStage: task.stage, generationOperation: task.operation, generationErrorCode: task.errorCode, taskIds: Array.from(new Set([...(item.taskIds || []), task.id])), clientOperationId: task.clientOperationId, retryOf: task.retryOf, attemptGroupId: task.attemptGroupId }));
             if (abortRef.current === controller) {
                 abortRef.current = null;
                 setBusy(false);
@@ -710,6 +704,7 @@ export default function CreatePage() {
         setPrompt("");
         setAttachments([]);
         setDraftReferences([]);
+        setReferenceNotice("");
         setBusy(true);
         const controller = new AbortController();
         const requestLifecycle = runtime.beginGenerationConsumer(controller.signal);
@@ -849,8 +844,9 @@ export default function CreatePage() {
                 updateOriginAssistant((item) => ({ ...item, status: "cancelled", content: "已停止" }));
                 return;
             }
-            const message = generationErrorMessage(error);
-            updateOriginAssistant((item) => ({ ...item, status: "error", error: message, generationErrorCode: item.generationErrorCode || generationErrorCode(error), generationOperation: item.generationOperation || (mode === "video" ? videoOperation : mode), createdAt: assistantMessage.createdAt, content: "生成失败" }));
+            const failedTask = Array.from(boundTasks.values()).find((task) => task.errorCode || task.failureDiagnostics || task.outcome);
+            const explained = explainGenerationError(failedTask?.errorCode && error instanceof Error ? { code: failedTask.errorCode, message: error.message } : error);
+            updateOriginAssistant((item) => ({ ...item, status: "error", error: explained.message, generationErrorSummary: explained.summary, generationProviderCode: explained.providerCode, taskFailureDiagnostics: failedTask?.failureDiagnostics, taskOutcome: failedTask?.outcome ?? item.taskOutcome, generationErrorCode: item.generationErrorCode || failedTask?.errorCode || (explained.category === "unknown" ? undefined : explained.errorCode), generationOperation: item.generationOperation || (mode === "video" ? videoOperation : mode), createdAt: assistantMessage.createdAt, content: "生成失败" }));
         } finally {
             for (const taskId of boundTaskIds) activeGenerationTaskIdsRef.current.delete(taskId);
             requestLifecycle.release();
@@ -878,6 +874,7 @@ export default function CreatePage() {
         setPrompt("");
         setAttachments([]);
         setDraftReferences([]);
+        setReferenceNotice("");
         setHistoryOpen(false);
     };
 
@@ -885,8 +882,6 @@ export default function CreatePage() {
         if (!activeConversation || openingCanvasRef.current) return;
         openingCanvasRef.current = true;
         setOpeningCanvas(true);
-        const epoch = captureUserScopeEpoch();
-        const scope = epoch.scope;
         const source = activeConversation;
         try {
             const assets = useAssetStore.getState().assets;
@@ -900,12 +895,10 @@ export default function CreatePage() {
             const referenceAssetIds = assets.filter((asset) => (asset.kind === "image" || asset.kind === "video") && asset.data.storageKey && referenceKeys.has(asset.data.storageKey)).map((asset) => asset.id);
             const assetIds = [...generatedAssetIds, ...referenceAssetIds];
             const result = await continueCreationConversationOnCanvas(source);
-            if (!userScopeEpochMatches(epoch)) return;
             const next = updateCreationConversationSnapshot(conversationsRef.current, source.id, (item) => ({ ...item, canvasId: result.id }));
             conversationsRef.current = next;
             setConversations(next);
-            await saveCreationConversations(next, scope);
-            if (!userScopeEpochMatches(epoch)) return;
+            await saveCreationConversations(next);
             if (result.syncError && !localMode) toastRef.current.warning("会话已保存在本机，云端同步尚未完成。");
             const params = new URLSearchParams({ conversation: result.sessionId });
             if (assetIds.length) {
@@ -914,7 +907,7 @@ export default function CreatePage() {
             }
             navigate(`/canvas/${result.id}?${params.toString()}`);
         } catch (cause) {
-            if (userScopeEpochMatches(epoch)) toastRef.current.error(cause instanceof Error ? cause.message : "转入画布失败，原会话已保留");
+            toastRef.current.error(cause instanceof Error ? cause.message : "转入画布失败，原会话已保留");
         } finally { openingCanvasRef.current = false; setOpeningCanvas(false); }
     };
 
@@ -924,11 +917,10 @@ export default function CreatePage() {
         setPrompt("");
         setAttachments([]);
         setDraftReferences([]);
+        setReferenceNotice("");
         setHistoryOpen(false);
         setConflictOpen(false);
-        const epoch = captureUserScopeEpoch();
-        void hasParkedCreationConversationDraft(conversation.id, epoch.scope).then((parked) => {
-            if (!userScopeEpochMatches(epoch)) return;
+        void hasParkedCreationConversationDraft(conversation.id).then((parked) => {
             setParkedDraftId(parked ? conversation.id : "");
         });
     };
@@ -936,10 +928,8 @@ export default function CreatePage() {
     const useSavedConflictVersion = async (conversation: CreationConversation) => {
         const remote = conversation.conflictRemote;
         if (!remote) return;
-        const epoch = captureUserScopeEpoch();
         try {
-            await acceptSavedCreationConversation(conversation.id, conversation, remote, epoch.scope);
-            if (!userScopeEpochMatches(epoch)) return;
+            await acceptSavedCreationConversation(conversation.id, conversation, remote);
             const saved = { ...remote.document, id: conversation.id } as CreationConversation;
             const next = updateCreationConversationSnapshot(conversationsRef.current, conversation.id, () => saved);
             skipPersistRef.current = true;
@@ -948,32 +938,27 @@ export default function CreatePage() {
             setConflictOpen(false);
             setParkedDraftId(conversation.id);
         } catch (error) {
-            if (!userScopeEpochMatches(epoch)) return;
             toastRef.current.error(error instanceof Error ? error.message : "无法换成已保存的版本");
         }
     };
 
     const restoreParkedDraft = async (conversationId: string) => {
-        const epoch = captureUserScopeEpoch();
         try {
-            const parked = await restoreParkedCreationConversation<CreationConversation>(conversationId, epoch.scope);
-            if (!userScopeEpochMatches(epoch) || !parked) return;
+            const parked = await restoreParkedCreationConversation<CreationConversation>(conversationId);
+            if (!parked) return;
             const next = updateCreationConversationSnapshot(conversationsRef.current, conversationId, () => parked);
             skipPersistRef.current = true;
             conversationsRef.current = next;
             setConversations(next);
             setParkedDraftId("");
         } catch (error) {
-            if (!userScopeEpochMatches(epoch)) return;
             toastRef.current.error(error instanceof Error ? error.message : "无法恢复刚才的草稿");
         }
     };
 
     const overwriteSavedWithDraft = async (conversation: CreationConversation) => {
-        const epoch = captureUserScopeEpoch();
         try {
-            await saveCreationConversations([conversation], epoch.scope, { resolveConflictIds: [conversation.id] });
-            if (!userScopeEpochMatches(epoch)) return;
+            await saveCreationConversations([conversation], undefined, { resolveConflictIds: [conversation.id] });
             const { conflictRemote: _conflictRemote, ...resolved } = conversation;
             const next = updateCreationConversationSnapshot(conversationsRef.current, conversation.id, () => resolved as CreationConversation);
             skipPersistRef.current = true;
@@ -981,7 +966,6 @@ export default function CreatePage() {
             setConversations(next);
             setConflictOpen(false);
         } catch (error) {
-            if (!userScopeEpochMatches(epoch)) return;
             toastRef.current.error(error instanceof Error ? error.message : "这份草稿没有保存成功，原来的版本还在");
         }
     };
@@ -997,11 +981,8 @@ export default function CreatePage() {
             okButtonProps: { danger: true },
             cancelText: "保留",
             onOk: async () => {
-                const epoch = captureUserScopeEpoch();
-                const scope = epoch.scope;
                 try {
-                    await deleteCreationConversation(conversation.id, scope);
-                    if (!userScopeEpochMatches(epoch)) return;
+                    await deleteCreationConversation(conversation.id);
                     const remaining = removeCreationConversationSnapshot(conversationsRef.current, conversation.id);
                     const sortedRemaining = [...remaining].sort((left, right) => conversationTimestamp(right.updatedAt) - conversationTimestamp(left.updatedAt));
                     const fallback = sortedRemaining.find((item) => item.messages.length > 0) || sortedRemaining[0] || newConversation();
@@ -1015,10 +996,10 @@ export default function CreatePage() {
                         setPrompt("");
                         setAttachments([]);
                         setDraftReferences([]);
+                        setReferenceNotice("");
                     }
                     toastRef.current.success("历史对话已删除，素材仍保留");
                 } catch (error) {
-                    if (!userScopeEpochMatches(epoch)) throw error;
                     toastRef.current.error(error instanceof Error ? error.message : "历史对话删除失败");
                     throw error;
                 }
@@ -1032,9 +1013,7 @@ export default function CreatePage() {
         const next = updateCreationConversationSnapshot(conversationsRef.current, conversation.id, (item) => ({ ...item, title: nextTitle }));
         conversationsRef.current = next;
         setConversations(next);
-        const epoch = captureUserScopeEpoch();
-        void saveCreationConversations(next, epoch.scope).catch((error) => {
-            if (!userScopeEpochMatches(epoch)) return;
+        void saveCreationConversations(next).catch((error) => {
             toastRef.current.error(error instanceof Error ? error.message : "对话重命名保存失败");
         });
     };
@@ -1126,7 +1105,8 @@ export default function CreatePage() {
         referenceReplacementBusy,
         attachments,
         referenceImageSize,
-        maxReferences,
+        referenceLimits,
+        referenceNotice,
         references: mentionReferences,
         onRemoveAttachment: removeAttachment,
         onClearAttachments: clearAttachments,
@@ -1141,7 +1121,11 @@ export default function CreatePage() {
         imageProfile,
         videoProfile,
         config,
-        onModelChange: (value: string) => updateConfig(mode === "text" ? "textModel" : mode === "image" ? "imageModel" : "videoModel", value),
+        onModelChange: (value: string) => {
+            // 换模型后各类上限会变，上一轮的超限说明不再成立。
+            setReferenceNotice("");
+            updateConfig(mode === "text" ? "textModel" : mode === "image" ? "imageModel" : "videoModel", value);
+        },
         ratio,
         setRatio: setComposerRatio,
         seconds,
@@ -1158,6 +1142,7 @@ export default function CreatePage() {
         setTextThinking,
         promptOptimizerProvider,
         composerFocusRef,
+        notice: composerNotice,
         onPromptFocus: loadAddedSkills,
         onSubmit: () => void submit(),
     };
@@ -1249,7 +1234,7 @@ export default function CreatePage() {
             categoryLabels={{ ...creationAssetCategoryLabels, ...externalAssetSources.categoryLabels }}
             folders={externalAssetSources.folders}
             initialSelectedIds={attachments.flatMap((item) => item.id.startsWith("asset:") ? [item.id.slice(6)] : item.id.startsWith("external:") ? [item.id] : [])}
-            upload={{ accept: creationUploadAccept(mode), description: mode === "text" ? "支持图片、视频、音频和常用文档；媒体会保存到素材库" : `支持图片${mode === "video" ? "、视频和音频" : ""}，上传后保存到素材库`, onUpload: uploadLibraryAssets, external: { accept: "image/*", description: "写入当前 Eagle 文件夹；Eagle 当前支持图片文件", onUpload: (files, folderId, expectedScope) => externalAssetSources.uploadExternalFiles(files, folderId, undefined, expectedScope) } }}
+            upload={{ accept: creationUploadAccept(mode), description: mode === "text" ? "支持图片、视频、音频和常用文档；媒体会保存到素材库" : `支持图片${mode === "video" ? "、视频和音频" : ""}，上传后保存到素材库`, onUpload: uploadLibraryAssets, external: { accept: "image/*", description: "写入当前 Eagle 文件夹；Eagle 当前支持图片文件", onUpload: (files, folderId) => externalAssetSources.uploadExternalFiles(files, folderId) } }}
             onClose={() => setLibraryOpen(false)}
             onConfirm={handleLibrarySelect}
         /></Suspense> : null}

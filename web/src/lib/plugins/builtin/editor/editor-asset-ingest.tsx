@@ -3,7 +3,7 @@
 // "仅时间线作用域"直连媒体（nodeId=asset:<id>）。导入链路：uploadResourceFile →
 // linkProjectAsset（后端按资源元数据合成资产记录）→ refreshAssets。
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Boxes, Check, ChevronDown, ChevronRight, Clapperboard, Film, FolderOpen, HardDrive, Image as ImageIcon, Loader2, Music2, Plus, X } from "lucide-react";
 
 import { useEditorHostContext, useEditorStoreContext } from "@/components/editor/editor-context";
@@ -11,8 +11,6 @@ import { defaultAssetCategoryForKind } from "@/lib/asset-category";
 import { probeMediaDurationMs } from "@/lib/media-metadata";
 import { makeClipFromAsset } from "@/lib/timeline/asset-ingest";
 import { DEFAULT_AUDIO_TRACK_ID, DEFAULT_SUBTITLE_TRACK_ID, DEFAULT_VIDEO_TRACK_ID } from "@/lib/timeline/timeline-tracks";
-import { assertUserScope, captureUserScope, isUserScopeAbandonedError } from "@/lib/user-scope-guard";
-import { getActiveUserScopeEpoch, subscribeUserScope } from "@/lib/user-scope";
 import { linkProjectAsset } from "@/services/api/projects";
 import { uploadResourceFile, type ResourceUploadMeta } from "@/services/api/resources";
 import { resolveMediaUrl } from "@/services/file-storage";
@@ -47,7 +45,7 @@ class EditorImportAbandonedError extends Error {
 }
 
 function isAbandonedImportError(error: unknown) {
-    return isUserScopeAbandonedError(error) || (error instanceof Error && error.name === "EditorImportAbandonedError");
+    return (error instanceof Error && error.name === "EditorImportAbandonedError");
 }
 
 type AssetFilter = "all" | "project" | "uploaded";
@@ -306,8 +304,7 @@ function AssetDetailSheet({
 
 export function EditorAssetIngest() {
     const { projectId } = useEditorHostContext();
-    const scopeEpoch = useSyncExternalStore(subscribeUserScope, getActiveUserScopeEpoch, getActiveUserScopeEpoch);
-    return <EditorAssetIngestSession key={JSON.stringify([projectId, scopeEpoch])} />;
+    return <EditorAssetIngestSession key={projectId} />;
 }
 
 function EditorAssetIngestSession() {
@@ -356,11 +353,9 @@ function EditorAssetIngestSession() {
             setImportError("仅支持视频、音频与图片文件");
             return;
         }
-        const expectedScope = captureUserScope();
         const originalProjectId = projectId;
         const startedMountedGeneration = mountedGenerationRef.current;
         const assertImportOwner = () => {
-            assertUserScope(expectedScope);
             if (
                 mountedGenerationRef.current !== startedMountedGeneration
                 || !timelineReadyRef.current
@@ -400,7 +395,7 @@ function EditorAssetIngestSession() {
                     // 上传前探测真实时长（视频/音频），随 meta 入库供时间线片段使用。
                     const durationMs = await probeMediaDurationMs(file);
                     assertImportOwner();
-                    const meta: ResourceUploadMeta = { expectedScope };
+                    const meta: ResourceUploadMeta = {};
                     if (durationMs !== undefined) meta.durationMs = durationMs;
                     const resource = await uploadResourceFile(file, kind, meta);
                     assertImportOwner();
@@ -412,14 +407,14 @@ function EditorAssetIngestSession() {
                     let linked = false;
                     try {
                         assertImportOwner();
-                        await linkProjectAsset(originalProjectId, linkInput(file, kind, resource.id), undefined, expectedScope);
+                        await linkProjectAsset(originalProjectId, linkInput(file, kind, resource.id));
                         linked = true;
                     } catch (error) {
                         if (isAbandonedImportError(error)) throw error;
                         // 链接偶发失败（网络抖动/后端竞态）时重试一次，避免资源已入库却未挂到项目下。
                         assertImportOwner();
                         try {
-                            await linkProjectAsset(originalProjectId, linkInput(file, kind, resource.id), undefined, expectedScope);
+                            await linkProjectAsset(originalProjectId, linkInput(file, kind, resource.id));
                             linked = true;
                         } catch (retryError) {
                             if (isAbandonedImportError(retryError)) throw retryError;

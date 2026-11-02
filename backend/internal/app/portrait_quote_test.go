@@ -11,6 +11,7 @@ import (
 
 	"qisitv/backend/internal/beefapi"
 	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/modelcatalog"
 )
 
 const portraitTestQuote = `{"currency":"CNY","mode":"tokens","rates":{"720p":{"output":69,"reference_video":42}}}`
@@ -23,9 +24,14 @@ func savePortraitTestCatalog(t *testing.T, s *Service, id, modelID, quote string
 			t.Fatal(err)
 		}
 	}
+	profile := map[string]any{"model": modelID, "capability": "video", "protocol": "newapi", "videoPricing": pricing}
+	if id == beefapi.ChannelID {
+		profile["capabilityConfig"] = modelcatalog.DefaultModelCapabilityConfigForModel("newapi", modelID)
+		profile["videoCapabilitiesVersion"] = "fixture-v1"
+	}
 	body, err := json.Marshal(map[string]any{"channels": []any{map[string]any{
 		"id": id, "enabled": true, "baseUrl": "https://enterprise.beefapi.com", "apiKey": "synthetic-key",
-		"models": []string{modelID}, "modelProfiles": []any{map[string]any{"model": modelID, "capability": "video", "protocol": "newapi", "videoPricing": pricing}},
+		"models": []string{modelID}, "modelProfiles": []any{profile},
 	}}})
 	if err != nil {
 		t.Fatal(err)

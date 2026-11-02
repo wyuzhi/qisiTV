@@ -1,11 +1,32 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { runIsolatedPool } from "../scripts/run-test-suite.mjs";
 
 const root = resolve(import.meta.dir, "../..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
 
 describe("website and headless engine release contract", () => {
+    test("runner exits unsuccessfully for a failing shared group even when isolated tests pass", () => {
+        const fixture = mkdtempSync(resolve(tmpdir(), "qisitv-test-runner-"));
+        try {
+            for (const dir of ["scripts", "src", "test"]) mkdirSync(resolve(fixture, dir));
+            copyFileSync(resolve(root, "web/scripts/run-test-suite.mjs"), resolve(fixture, "scripts/run-test-suite.mjs"));
+            writeFileSync(resolve(fixture, "test/shared.test.ts"), 'import {test, expect} from "bun:test"; test("fixture failure", () => expect(1).toBe(2));');
+            writeFileSync(resolve(fixture, "test/isolated.test.ts"), '// globalThis document\nimport {test, expect} from "bun:test"; test("fixture pass", () => expect(1).toBe(1));');
+            for (const concurrency of ["1", "2"]) {
+                const result = Bun.spawnSync([process.execPath, "scripts/run-test-suite.mjs"], {
+                    cwd: fixture, env: { ...process.env, QISITV_TEST_CONCURRENCY: concurrency },
+                    stdout: "pipe", stderr: "pipe",
+                });
+                expect(result.exitCode).not.toBe(0);
+                expect(result.stderr.toString()).toContain("test/shared.test.ts: exit 1");
+                expect(result.stderr.toString()).toContain("fixture pass");
+            }
+        } finally { rmSync(fixture, { recursive: true, force: true }); }
+    });
+
     test("builds protocol packages and host dependencies before backend CI tests", () => {
         const workflow = read(".github/workflows/quality.yml");
         const packageBuild = workflow.indexOf("sh ../plugin-packages/build-packages.sh");
@@ -33,6 +54,59 @@ describe("website and headless engine release contract", () => {
         expect(packageScript).toContain('resources / "agent-host", symlinks=False');
         expect(packageScript).toContain('ROOT / "plugin-packages"');
         expect(packageScript).not.toContain("wails build");
+    });
+
+    test("keeps public container builds independent from removed payment artifacts", () => {
+        const dockerfile = readFileSync(resolve(root, "backend/Dockerfile"), "utf8");
+        const packageJson = JSON.parse(readFileSync(resolve(root, "web/package.json"), "utf8")) as {
+            scripts?: Record<string, string>;
+        };
+
+        expect(dockerfile).toContain("AS protocol-package-build");
+        expect(dockerfile).not.toContain("payment-package");
+        expect(dockerfile).not.toContain("verify-payment-packages.sh");
+        expect(dockerfile).not.toContain("migrate-schema");
+        expect(dockerfile).not.toContain("migrate-sqlite-postgres");
+        expect(packageJson.scripts?.test).toContain("scripts/run-test-suite.mjs");
+        const testRunner = readFileSync(resolve(root, "web/scripts/run-test-suite.mjs"), "utf8");
+        expect(testRunner).toContain('source.includes("globalThis")');
+        expect(testRunner).toContain("for (const file of isolated) run([file])");
+    });
+
+    test("runs isolated files one per invocation with bounded concurrency and stops scheduling after failure", async () => {
+        const seen: string[] = [];
+        let active = 0;
+        let maxActive = 0;
+        const okCode = await runIsolatedPool(["a.test.ts", "b.test.ts", "c.test.ts", "d.test.ts"], 2, async (file) => {
+            active++;
+            maxActive = Math.max(maxActive, active);
+            seen.push(file);
+            await new Promise((r) => setTimeout(r, 5));
+            active--;
+            return 0;
+        });
+        expect(okCode).toBe(0);
+        expect(seen.sort()).toEqual(["a.test.ts", "b.test.ts", "c.test.ts", "d.test.ts"]);
+        expect(maxActive).toBeLessThanOrEqual(2);
+
+        const afterFail: string[] = [];
+        const failCode = await runIsolatedPool(["1.test.ts", "2.test.ts", "3.test.ts"], 1, async (file) => {
+            afterFail.push(file);
+            return file === "1.test.ts" ? 7 : 0;
+        });
+        expect(failCode).toBe(7);
+        expect(afterFail).toEqual(["1.test.ts"]);
+    });
+
+    test("keeps published deployment aligned with binaries present in public source", () => {
+        const workflow = readFileSync(resolve(root, ".github/workflows/publish-images.yml"), "utf8");
+        expect(workflow).not.toContain("cmd/host-updater");
+        expect(workflow).not.toContain("beeftv-host-updater");
+        expect(workflow).not.toContain("docker-compose.deploy.yml");
+
+        for (const name of ["docker-compose.server.yml", "docker-compose.deploy.yml"]) {
+            expect(existsSync(resolve(root, name))).toBe(false);
+        }
     });
 
     test("retains licenses and verifies signed package bytes without overwriting an installer", () => {

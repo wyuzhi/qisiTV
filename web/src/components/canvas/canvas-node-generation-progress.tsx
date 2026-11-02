@@ -5,7 +5,6 @@ import { generationDeliveryProgressView, generationTaskFetchingResult } from "@/
 import { formatGenerationElapsed, generationProgressDisplay, generationTaskShowsProgress, isGenerationTaskSubmissionUncertain, trackGenerationProgressChange, type GenerationProgressRecord } from "@/lib/generation-task-display";
 import { operationProgressView, type OperationProgress } from "@/lib/operation-progress";
 import type { GenerationTask } from "@/services/api/task-center";
-import { subscribeUserScope } from "@/lib/user-scope";
 import { useGenerationDeliveryProgress } from "@/stores/use-generation-delivery-progress";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
@@ -75,7 +74,6 @@ function useSecondTick(active: boolean) {
 }
 
 const progressChangeByTask = new Map<string, GenerationProgressRecord>();
-subscribeUserScope(() => progressChangeByTask.clear());
 function rememberProgressChange(key: string, progress: number, now: number) {
     const previous = progressChangeByTask.get(key);
     const next = trackGenerationProgressChange(previous, progress, now);

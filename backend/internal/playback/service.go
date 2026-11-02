@@ -84,10 +84,10 @@ func (s *Service) MaybeStart(resource *model.Resource) {
 	}
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
-	s.maybeStart(resource)
+	s.maybeStart(resource, false)
 }
 
-func (s *Service) maybeStart(resource *model.Resource) {
+func (s *Service) maybeStart(resource *model.Resource, force bool) {
 	if s.runContext(nil).Err() != nil {
 		return
 	}
@@ -118,20 +118,24 @@ func (s *Service) maybeStart(resource *model.Resource) {
 		markNone(s.store, resource.ID, resource.PlaybackStatus)
 		return
 	}
-	switch ProbeCodec(src) {
-	case CodecH265, CodecMPEG4:
-		if s.store == nil || s.runner == nil {
-			return
-		}
-		claimed, err := s.store.ClaimPlaybackTranscode(resource.ID)
-		if err != nil || !claimed {
-			return
-		}
-		resource.PlaybackStatus = model.PlaybackStatusProcessing
-		s.launch(resource.ID, src)
-	case CodecH264, CodecAV1, CodecVP9, "":
+	if _, err := os.Stat(src); err != nil {
 		markNone(s.store, resource.ID, resource.PlaybackStatus)
+		return
 	}
+	codec := ProbeCodec(src)
+	if !force && codec != CodecH265 && codec != CodecMPEG4 {
+		markNone(s.store, resource.ID, resource.PlaybackStatus)
+		return
+	}
+	if s.store == nil || s.runner == nil {
+		return
+	}
+	claimed, err := s.store.ClaimPlaybackTranscode(resource.ID)
+	if err != nil || !claimed {
+		return
+	}
+	resource.PlaybackStatus = model.PlaybackStatusProcessing
+	s.launch(resource.ID, src)
 }
 
 func (s *Service) launch(resourceID, src string) {

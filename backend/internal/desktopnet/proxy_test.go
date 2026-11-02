@@ -104,6 +104,30 @@ func TestSystemProxySelection(t *testing.T) {
 
 func TestExplicitProxyAndBypassTakePriority(t *testing.T) {
 	if runtime.GOOS != "windows" {
+		t.Setenv("HTTP_PROXY", "http://127.0.0.1:5554")
+		t.Setenv("http_proxy", "http://127.0.0.1:9998")
+		t.Setenv("HTTPS_PROXY", "http://127.0.0.1:5555")
+		t.Setenv("https_proxy", "http://127.0.0.1:9999")
+		t.Setenv("NO_PROXY", "github.com")
+		t.Setenv("no_proxy", "example.com")
+		cfg := environmentProxyConfig()
+		if cfg.HTTPProxy != "http://127.0.0.1:5554" || cfg.HTTPSProxy != "http://127.0.0.1:5555" || cfg.NoProxy != "github.com" {
+			t.Fatalf("uppercase precedence lost: %+v", cfg)
+		}
+		req, _ := http.NewRequest(http.MethodGet, "https://example.com", nil)
+		if got, err := Proxy(req); err != nil || got == nil || got.String() != "http://127.0.0.1:5555" {
+			t.Fatalf("Proxy uppercase precedence lost: %v %v", got, err)
+		}
+		if !ConfiguredProxyAddress("127.0.0.1:5554") || ConfiguredProxyAddress("127.0.0.1:9998") {
+			t.Fatal("ConfiguredProxyAddress uppercase precedence lost")
+		}
+		t.Setenv("HTTP_PROXY", "")
+		t.Setenv("HTTPS_PROXY", "")
+		t.Setenv("NO_PROXY", "")
+		cfg = environmentProxyConfig()
+		if cfg.HTTPProxy != "http://127.0.0.1:9998" || cfg.HTTPSProxy != "http://127.0.0.1:9999" || cfg.NoProxy != "example.com" {
+			t.Fatalf("lowercase fallback lost: %+v", cfg)
+		}
 		t.Setenv("http_proxy", "")
 		t.Setenv("https_proxy", "")
 		t.Setenv("no_proxy", "")

@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
 import { explainGenerationError, shouldBlockAutomaticRetry } from "@/lib/generation-error";
+import { canReloadCanvasNodeResource, canvasNodeHasPendingOutcomeResult, isNodeRegenerateBlocked, readNodeTaskOutcome } from "@/lib/task-outcome";
 import { CanvasGenerationDurableAckError, CanvasGenerationMaterializationError } from "@/services/canvas-generation-errors";
 import { ApiError } from "@/services/api/request";
-import { canvasGenerationFailureMetadata, canvasGenerationRetryBlocked, canvasImageGenerationHasPendingResult, canvasGenerationTaskNodes, isKeptGenerationResultCode } from "@/pages/canvas/canvas-generation-failure";
+import { canvasGenerationFailureMetadata, canvasGenerationTaskNodes } from "@/pages/canvas/canvas-generation-failure";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import type { GenerationTask } from "@/services/api/task-center";
 import { assistantProposalProgress } from "@/pages/canvas/canvas-assistant-copy";
@@ -46,7 +47,7 @@ describe("generation result-apply error codes", () => {
                 const original = node({ taskId: "task-1", status: "loading", content });
                 const [next] = canvasGenerationTaskNodes([original], "n1", { ...succeededTask, stage, outputs: [{ outputIndex: 0, mediaType: "video", materializationErrorCode: stage }] });
                 expect(next.metadata?.status).toBe("error");
-                expect(next.metadata?.resourceReloadAvailable).toBe(true);
+                expect(canReloadCanvasNodeResource(next)).toBe(true);
                 expect(next.metadata?.generationErrorCode).toBe("download_failed");
                 expect(next.metadata?.content).toBe(content);
             }
@@ -60,7 +61,7 @@ describe("generation result-apply error codes", () => {
         const complete = { ...pending, stage: "delivery_paused", outputs: [{ outputIndex: 0, mediaType: "video" as const, materializedAssetId: "asset-current" }] };
         const [next] = canvasGenerationTaskNodes([original], "n1", complete);
         expect(next.metadata?.status).toBe("success");
-        expect(next.metadata?.resourceReloadAvailable).toBeUndefined();
+        expect(canReloadCanvasNodeResource(next)).toBe(false);
         expect(canvasGenerationTaskNodes([original], "n1", succeededTask)[0].metadata?.status).toBe("success");
     });
     test("durable ack is a canvas conflict only for a revision conflict", () => {
@@ -84,12 +85,13 @@ describe("generation result-apply error codes", () => {
         expect(shouldBlockAutomaticRetry({ code: "download_failed" })).toBe(true);
     });
 
-    test("kept-result codes include both reloadable results and saved history recovery", () => {
-        for (const code of ["canvas_conflict", "download_failed", "result_apply_failed", "result_target_unavailable"]) {
-            expect(isKeptGenerationResultCode(code)).toBe(true);
+    test("kept-result codes map to retrievable or saved-history task outcomes", () => {
+        for (const code of ["canvas_conflict", "download_failed", "result_apply_failed"]) {
+            expect(readNodeTaskOutcome({ generationErrorCode: code })?.phase).toBe("retrievable");
         }
-        for (const code of [undefined, "", "throttled", "auth"]) {
-            expect(isKeptGenerationResultCode(code)).toBe(false);
+        expect(readNodeTaskOutcome({ generationErrorCode: "result_target_unavailable" })?.reason).toBe("result_target_unavailable");
+        for (const code of ["throttled", "auth"]) {
+            expect(readNodeTaskOutcome({ generationErrorCode: code })?.phase).toBe("failed");
         }
     });
 
@@ -97,19 +99,19 @@ describe("generation result-apply error codes", () => {
         for (const code of ["canvas_conflict", "download_failed", "result_apply_failed"]) {
             const failure = canvasGenerationFailureMetadata({ code }, { prompt: "猫", mode: "image" });
             expect(failure.generationErrorCode).toBe(code);
-            expect(failure.resourceReloadAvailable).toBe(true);
-            expect(canvasGenerationRetryBlocked(failure, { prompt: "猫", mode: "image" })).toBe(true);
+            expect(canReloadCanvasNodeResource({ taskId: "task-1", ...failure })).toBe(true);
+            expect(isNodeRegenerateBlocked(failure)).toBe(true);
         }
     });
 
     test("pending-result detection and task nodes keep the retained code", () => {
         for (const code of ["canvas_conflict", "download_failed", "result_apply_failed"]) {
-            const pending = node({ taskId: "task-1", status: "error", generationErrorCode: code, resourceReloadAvailable: true });
-            expect(canvasImageGenerationHasPendingResult(pending, [pending])).toBe(true);
+            const pending = node({ taskId: "task-1", status: "error", generationErrorCode: code, taskOutcome: { phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" } });
+            expect(canvasNodeHasPendingOutcomeResult(pending, [pending])).toBe(true);
             const [next] = canvasGenerationTaskNodes([pending], "n1", succeededTask);
             expect(next.metadata?.generationErrorCode).toBe(code);
             expect(next.metadata?.status).toBe("error");
-            expect(next.metadata?.resourceReloadAvailable).toBe(true);
+            expect(canReloadCanvasNodeResource(next)).toBe(true);
         }
     });
 });

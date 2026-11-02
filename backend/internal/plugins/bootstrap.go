@@ -57,6 +57,10 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 		return nil, fmt.Errorf("读取官方插件目录失败：%w", err)
 	}
 	builtInIDs := make(map[string]struct{}, len(entries)+2)
+	// One inventory read serves every decision below: which shipped plugin may
+	// not be overwritten yet, and which removed plugin must be kept.
+	snapshot := c.snapshotReferences()
+	retained := make(map[string]*RetentionView)
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), protocol.PluginPackageExtension) {
 			continue
@@ -94,9 +98,6 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 		}
 		hash := pluginHash(packageData)
 		packageName := hash + protocol.PluginPackageExtension
-		if _, err := ensurePluginBlob(filepath.Join(c.packageDir, packageName), packageData); err != nil {
-			return nil, fmt.Errorf("缓存官方插件 %q：%w", id, err)
-		}
 		now := time.Now().UTC()
 		next := RegistryRecord{
 			ID: id, Raw: manifestData, Source: OriginOfficial, FileName: entry.Name(),
@@ -107,6 +108,15 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 		}
 		if !registryRecordContentChanged(record, next) {
 			next.UpdatedAt = record.UpdatedAt
+		}
+		// Keep the installed definition if the release removes a referenced ID.
+		// Compatible fixes must also reach tasks that still need their results.
+		if note := deferralFor(record, next, snapshot); note != nil {
+			retained[id] = note
+			continue
+		}
+		if _, err := ensurePluginBlob(filepath.Join(c.packageDir, packageName), packageData); err != nil {
+			return nil, fmt.Errorf("缓存官方插件 %q：%w", id, err)
 		}
 		byID[id] = next
 	}
@@ -142,17 +152,37 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 		}
 		byID[bundled.Metadata.ID] = next
 	}
+	missing := make([]RegistryRecord, 0, len(byID))
+	for _, record := range byID {
+		if !IsBuiltInSource(record.Source) {
+			continue
+		}
+		if _, shipped := builtInIDs[record.ID]; !shipped {
+			missing = append(missing, record)
+		}
+	}
+	// A release must not silently delete an official plugin that saved
+	// configuration or an unfinished task still executes with. Retained records
+	// keep their committed manifest, package hash and enabled state; they are
+	// marked as retired so no new selection offers them.
+	for id, note := range c.retentionDecisions(missing, snapshot) {
+		retained[id] = note
+	}
 	result := make([]RegistryRecord, 0, len(byID))
 	for _, record := range byID {
 		if IsBuiltInSource(record.Source) {
-			if _, exists := builtInIDs[record.ID]; !exists {
+			if _, shipped := builtInIDs[record.ID]; !shipped {
 				// Built-in records are reconciled from repository packages and host
-				// manifests on every startup, so removed plugins cannot survive stale.
-				continue
+				// manifests on every startup, so an unreferenced removed plugin
+				// cannot survive stale.
+				if _, keep := retained[record.ID]; !keep {
+					continue
+				}
 			}
 		}
 		result = append(result, record)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	c.retained = retained
 	return result, nil
 }

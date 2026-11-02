@@ -37,6 +37,39 @@ test("failed storage check keeps an actionable HTTP status", async () => {
 
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
+for (const width of [1440, 390]) for (const dark of [false, true]) test(`storage password matches ordinary field height ${width} dark=${dark}`, async () => {
+    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    try {
+        await page.goto(server.url + (dark ? "?dark" : ""));
+        const secret = page.locator('input[aria-label="Secret Access Key"]');
+        await secret.waitFor({ state: "visible" });
+        const geometry = () => secret.evaluate(input => {
+            const wrapper = input.closest(".ant-input-affix-wrapper")!;
+            const ordinary = document.querySelector('input[aria-label="存储桶公网地址"]')!;
+            return {
+                password: wrapper.getBoundingClientRect().height,
+                ordinary: ordinary.getBoundingClientRect().height,
+                innerBackground: getComputedStyle(input).backgroundColor,
+            };
+        });
+        let bounds = await geometry();
+        expect(bounds.ordinary).toBe(38);
+        expect(bounds.password).toBe(bounds.ordinary);
+        expect(bounds.innerBackground).toBe("rgba(0, 0, 0, 0)");
+        await secret.fill("fixture-secret");
+        await secret.focus();
+        bounds = await geometry();
+        expect(bounds.password).toBe(bounds.ordinary);
+        // CI 的无头浏览器里眼睛图标可能量不出尺寸；这里只验证切换明文后的高度，直接触发点击。
+        await page.locator(".ant-input-password-icon").dispatchEvent("click");
+        expect(await secret.getAttribute("type")).toBe("text");
+        bounds = await geometry();
+        expect(bounds.password).toBe(bounds.ordinary);
+        expect(bounds.innerBackground).toBe("rgba(0, 0, 0, 0)");
+    } finally {
+        await page.close();
+    }
+}, 30000);
 beforeAll(async () => {
     const stubs: Record<string, string> = {
         "@/services/model-config-repository": "export const flushModelConfig=async()=>{}; export const getModelConfigPersistenceState=()=>({dirty:false,status:'ready'});",
@@ -58,9 +91,11 @@ beforeAll(async () => {
         ],
     });
     if (!build.success) throw new Error(build.logs.join("\n"));
-    const script = await build.outputs[0].text();
+    const script = await build.outputs.find(output => output.path.endsWith(".js"))!.text();
     const stylesheet = import.meta.dir + "/../src/styles/globals.css";
-    const css = (await postcss([tailwindcss({ base: import.meta.dir + "/.." })]).process(await Bun.file(stylesheet).text(), { from: stylesheet })).css;
+    const css = (await postcss([tailwindcss({ base: import.meta.dir + "/.." })]).process(await Bun.file(stylesheet).text(), { from: stylesheet })).css
+        + (await Promise.all(["beeftv-local-overrides.css", "workspace-product.css"].map(file => Bun.file(import.meta.dir + "/../src/styles/" + file).text()))).join("\n")
+        + (await Promise.all(build.outputs.filter(output => output.path.endsWith(".css")).map(output => output.text()))).join("\n");
     server = Bun.serve({
         port: 0,
         fetch: (req) => {

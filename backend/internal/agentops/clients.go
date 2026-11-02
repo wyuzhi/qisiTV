@@ -21,6 +21,32 @@ const (
 	ClientReadOnly  ClientMode = "read-only"
 )
 
+// ClientApprovalMode 是外部客户端凭据在执行付费生成时的审批档位。
+// - ask：每次问我（开单后进入待批准，需在 BeefTV 界面或用 beeftv approve 批准）
+// - caller：调用方自己批（外部 Agent 凭据默认；先 propose 拿到生成单再凭单 submit）
+// - auto：自动，不设限额（确定性脚本专用；submit 一步开单即批）
+type ClientApprovalMode string
+
+const (
+	ClientApprovalAsk    ClientApprovalMode = "ask"
+	ClientApprovalCaller ClientApprovalMode = "caller"
+	ClientApprovalAuto   ClientApprovalMode = "auto"
+)
+
+// NormalizeClientApprovalMode 把历史空值收敛为 caller（调用方自己批）；未知非空值报错。
+func NormalizeClientApprovalMode(raw string) (ClientApprovalMode, error) {
+	switch ClientApprovalMode(strings.TrimSpace(strings.ToLower(raw))) {
+	case "", ClientApprovalCaller:
+		return ClientApprovalCaller, nil
+	case ClientApprovalAsk:
+		return ClientApprovalAsk, nil
+	case ClientApprovalAuto:
+		return ClientApprovalAuto, nil
+	default:
+		return "", InvalidArg("invalid_approval_mode", "approvalMode 必须是 ask、caller 或 auto")
+	}
+}
+
 // ClientKind 只是登记来源的展示分类（codex/claude/cursor/other），不参与任何鉴权判断。
 type ClientKind string
 
@@ -56,16 +82,17 @@ func NormalizeClientKind(kind string) ClientKind {
 }
 
 // ClientRegistration 记录一个被本机用户登记过的非交互客户端。
-// Kind/LastUsedAt/RevokedAt 是后加字段：历史文件里缺失时按零值解析，读出后统一补默认。
+// Kind/ApprovalMode/LastUsedAt/RevokedAt 是后加字段：历史文件里缺失时按零值解析，读出后统一补默认。
 type ClientRegistration struct {
-	ID         string     `json:"id"`
-	Label      string     `json:"label"`
-	Kind       ClientKind `json:"kind,omitempty"`
-	Mode       ClientMode `json:"mode"`
-	TokenHash  string     `json:"tokenHash"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
-	RevokedAt  *time.Time `json:"revokedAt,omitempty"`
+	ID           string             `json:"id"`
+	Label        string             `json:"label"`
+	Kind         ClientKind         `json:"kind,omitempty"`
+	Mode         ClientMode         `json:"mode"`
+	ApprovalMode ClientApprovalMode `json:"approvalMode,omitempty"`
+	TokenHash    string             `json:"tokenHash"`
+	CreatedAt    time.Time          `json:"createdAt"`
+	LastUsedAt   *time.Time         `json:"lastUsedAt,omitempty"`
+	RevokedAt    *time.Time         `json:"revokedAt,omitempty"`
 }
 
 // Revoked 判断该登记是否已被本机用户吊销：吊销后凭据立即失效，且不再出现在列表里。
@@ -101,25 +128,39 @@ func (r *ClientRegistry) load() ([]ClientRegistration, error) {
 	if err := json.Unmarshal(raw, &items); err != nil {
 		return nil, err
 	}
-	// 老版本文件没有 kind：补成 other，后续读写都按同一形状处理。
+	// 老版本文件没有 kind 或 approvalMode：统一补默认，后续读写都按同一形状处理。
 	for index := range items {
 		items[index].Kind = NormalizeClientKind(string(items[index].Kind))
+		mode, err := NormalizeClientApprovalMode(string(items[index].ApprovalMode))
+		if err != nil {
+			mode = ClientApprovalCaller
+		}
+		items[index].ApprovalMode = mode
 	}
 	return items, nil
 }
 
 // Register 生成一次性展示的 token，并在服务端保存其哈希与模式。
 func (r *ClientRegistry) Register(label string, mode ClientMode) (ClientRegistration, string, error) {
-	return r.RegisterKind("", label, mode)
+	return r.RegisterClient("", label, mode, ClientApprovalCaller)
 }
 
 // RegisterKind 与 Register 相同，额外记录来源分类（仅用于展示与生成接入说明）。
 func (r *ClientRegistry) RegisterKind(kind, label string, mode ClientMode) (ClientRegistration, string, error) {
+	return r.RegisterClient(kind, label, mode, ClientApprovalCaller)
+}
+
+// RegisterClient 登记一个客户端凭据，记录来源分类、读写模式与付费生成审批档位。
+func (r *ClientRegistry) RegisterClient(kind, label string, mode ClientMode, approvalMode ClientApprovalMode) (ClientRegistration, string, error) {
 	if mode == "" {
 		mode = ClientReadWrite
 	}
 	if mode != ClientReadOnly && mode != ClientReadWrite {
 		return ClientRegistration{}, "", InvalidArg("invalid_mode", "mode 必须是 read-only 或 read-write")
+	}
+	normalizedApproval, err := NormalizeClientApprovalMode(string(approvalMode))
+	if err != nil {
+		return ClientRegistration{}, "", err
 	}
 	normalizedKind := NormalizeClientKind(kind)
 	if strings.TrimSpace(label) == "" {
@@ -134,8 +175,15 @@ func (r *ClientRegistry) RegisterKind(kind, label string, mode ClientMode) (Clie
 		return ClientRegistration{}, "", AsError(err)
 	}
 	token := hex.EncodeToString(buf)
-	reg := ClientRegistration{ID: "client-" + hex.EncodeToString(idBuf), Label: label, Kind: normalizedKind, Mode: mode,
-		TokenHash: hashToken(token), CreatedAt: time.Now().UTC()}
+	reg := ClientRegistration{
+		ID:           "client-" + hex.EncodeToString(idBuf),
+		Label:        label,
+		Kind:         normalizedKind,
+		Mode:         mode,
+		ApprovalMode: normalizedApproval,
+		TokenHash:    hashToken(token),
+		CreatedAt:    time.Now().UTC(),
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	items, err := r.load()

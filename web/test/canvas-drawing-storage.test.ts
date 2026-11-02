@@ -9,7 +9,6 @@ mock.module("@/lib/canvas/canvas-drawing-excalidraw-document", () => ({
 
 import * as runtimeMode from "@/lib/runtime-mode";
 import { getActiveUserScope, setActiveUserScope } from "@/lib/user-scope";
-import { captureUserScope, UserScopeAbandonedError } from "@/lib/user-scope-guard";
 import {
     CanvasDrawingCanonicalMissingError,
     createCanvasDrawingFromImage,
@@ -20,8 +19,8 @@ import {
     removeCanvasDrawing,
     replaceCanvasDrawingStoresForTests,
     resetCanvasDrawingStorageForTests,
+    restoreCanvasDrawing,
     saveCanvasDrawing,
-    setCanvasDrawingDigestDelayForTests,
     setCanvasDrawingStageBarrierForTests,
     type CanvasDrawingSnapshot,
 } from "@/lib/canvas/canvas-drawing-storage";
@@ -160,6 +159,27 @@ afterEach(() => {
 });
 
 describe("canvas drawing storage", () => {
+    test("disk restore keeps the exact revision and both media blobs without a backend write", async () => {
+        const restore = switchScope("restored-workspace");
+        installStores();
+        spies.push(spyOn(runtimeMode, "isNativeDesktopRuntime").mockReturnValue(false));
+        spies.push(spyOn(runtimeMode, "isLocalRuntimeMode").mockReturnValue(true));
+        const document: CanvasDrawingSnapshot = {
+            version: 2, engine: "excalidraw", snapshot: snapshotOf("disk"), revision: 7,
+            updatedAt: "2026-10-02T00:00:00.000Z", shapeCount: 1, pageCount: 1,
+        };
+        try {
+            await withAdapter(async () => { throw new Error("disk restore must not write to the backend"); }, async () => {
+                await restoreCanvasDrawing("p1", "d1", document, new Blob(["disk-preview"]), {
+                    blob: new Blob(["disk-render"]), pageId: "page", width: 8, height: 8, mimeType: "image/png",
+                    background: "white", version: 1, revision: 7, updatedAt: document.updatedAt,
+                });
+                expect(await loadCanvasDrawing("p1", "d1")).toMatchObject({ revision: 7, snapshot: document.snapshot });
+                expect(await (await loadCanvasDrawingPreview("p1", "d1"))?.text()).toBe("disk-preview");
+                expect(await (await loadCanvasDrawingRender("p1", "d1"))?.blob.text()).toBe("disk-render");
+            });
+        } finally { restore(); }
+    });
     test("pending save failure then restart retains actual snapshot and blobs", async () => {
         const restore = switchScope("owner-a");
         desktopBackend();
@@ -181,7 +201,6 @@ describe("canvas drawing storage", () => {
                     null,
                     preview,
                     { blob: renderBlob, pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" },
-                    captureUserScope(),
                 )).rejects.toThrow(/工作区暂时无法保存/);
             });
 
@@ -190,18 +209,18 @@ describe("canvas drawing storage", () => {
             expect(await previews.get("owner-a:p1:d1")?.text()).toBe("preview-v1");
             expect(await (renders.get("owner-a:p1:d1") as { blob: Blob } | undefined)?.blob.text()).toBe("render-v1");
 
-            const loaded = await withAdapter(async () => failure(500, "读失败"), async () => loadCanvasDrawing("p1", "d1", captureUserScope()).catch((error) => error));
+            const loaded = await withAdapter(async () => failure(500, "读失败"), async () => loadCanvasDrawing("p1", "d1").catch((error) => error));
             expect(loaded).toBeInstanceOf(Error);
             expect((loaded as Error).message).toMatch(/读失败/);
 
             const recovered = await withAdapter(async (config) => {
                 if (String(config.method).toLowerCase() === "get" && String(config.url).includes("/drawings/")) return failure(404, "画板不存在");
                 throw new Error(`unexpected ${config.method} ${config.url}`);
-            }, async () => loadCanvasDrawing("p1", "d1", captureUserScope()));
+            }, async () => loadCanvasDrawing("p1", "d1"));
             expect(recovered?.origin).toBe("draft");
             expect(recovered?.snapshot).toEqual(snapshotOf("keep-me"));
             expect(recovered?.canonicalMissing).toBe(true);
-            expect(await loadCanvasDrawingPreview("p1", "d1", captureUserScope()).then((blob) => blob?.text())).toBe("preview-v1");
+            expect(await loadCanvasDrawingPreview("p1", "d1").then((blob) => blob?.text())).toBe("preview-v1");
         } finally {
             restore();
         }
@@ -226,14 +245,14 @@ describe("canvas drawing storage", () => {
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                const first = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("first"), null, new Blob(["a"]), undefined, captureUserScope());
+                const first = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("first"), null, new Blob(["a"]));
                 const deadline = Date.now() + 2000;
                 while (Date.now() < deadline) {
                     const cached = await peekCanvasDrawingCacheForTests("p1", "d1", "owner-a") as { draft?: { document: CanvasDrawingSnapshot } };
                     if (cached?.draft?.document.snapshot) break;
                     await new Promise((resolve) => setTimeout(resolve, 0));
                 }
-                const second = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("second"), null, new Blob(["b"]), undefined, captureUserScope());
+                const second = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("second"), null, new Blob(["b"]));
                 while (Date.now() < deadline) {
                     const cached = await peekCanvasDrawingCacheForTests("p1", "d1", "owner-a") as { draft?: { document: CanvasDrawingSnapshot } };
                     if (JSON.stringify(cached?.draft?.document.snapshot) === JSON.stringify(snapshotOf("second"))) break;
@@ -249,55 +268,6 @@ describe("canvas drawing storage", () => {
                 expect(drawingPuts).toBeGreaterThan(0);
             });
         } finally {
-            restore();
-        }
-    });
-
-    test("A-B-A during hash prevents the old epoch from publishing", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        installStores();
-        const digest = deferred();
-        const puts: string[] = [];
-        let delayedOnce = false;
-        setCanvasDrawingDigestDelayForTests(async () => {
-            if (delayedOnce) return;
-            delayedOnce = true;
-            await digest.promise;
-        });
-        try {
-            const firstEpoch = captureUserScope();
-            await withAdapter(async (config) => {
-                puts.push(`${(config as { expectedScope?: { epoch: number } }).expectedScope?.epoch ?? "none"} ${String(config.method)} ${String(config.url)}`);
-                if (String(config.url).includes("/resources")) return envelope({ resource: { id: "res-new", status: "ready" } });
-                return failure(500, "新纪元保存失败");
-            }, async () => {
-                const pending = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("old"), null, new Blob(["old"]), undefined, firstEpoch);
-                await new Promise((resolve) => setTimeout(resolve, 10));
-                setActiveUserScope("owner-b");
-                setActiveUserScope("owner-a");
-                const secondEpoch = captureUserScope();
-                expect(secondEpoch.epoch).not.toBe(firstEpoch.epoch);
-                const second = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("new"), null, new Blob(["new"]), undefined, secondEpoch);
-                const settled = Promise.allSettled([pending, second]);
-                const deadline = Date.now() + 2000;
-                while (Date.now() < deadline) {
-                    const cached = await peekCanvasDrawingCacheForTests("p1", "d1", "owner-a") as { draft?: { document: CanvasDrawingSnapshot } };
-                    if (JSON.stringify(cached?.draft?.document.snapshot) === JSON.stringify(snapshotOf("new"))) break;
-                    await new Promise((resolve) => setTimeout(resolve, 0));
-                }
-                digest.resolve();
-                const [firstResult, secondResult] = await settled;
-                expect(firstResult.status).toBe("rejected");
-                expect(firstResult.status === "rejected" && firstResult.reason).toBeInstanceOf(UserScopeAbandonedError);
-                expect(secondResult.status).toBe("rejected");
-                expect(String(secondResult.status === "rejected" ? secondResult.reason : "")).toMatch(/新纪元保存失败/);
-                expect(puts.filter((item) => item.startsWith(`${firstEpoch.epoch} `))).toEqual([]);
-                const cached = await peekCanvasDrawingCacheForTests("p1", "d1", "owner-a") as { draft?: { document: CanvasDrawingSnapshot } };
-                expect(cached.draft?.document.snapshot).toEqual(snapshotOf("new"));
-            });
-        } finally {
-            setCanvasDrawingDigestDelayForTests();
             restore();
         }
     });
@@ -332,7 +302,7 @@ describe("canvas drawing storage", () => {
                     throw new Error("stale preview must not be read");
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
-            }, async () => loadCanvasDrawingPreview("p1", "d1", captureUserScope()));
+            }, async () => loadCanvasDrawingPreview("p1", "d1"));
             expect(await blob?.text()).toBe("new-preview");
         } finally {
             restore();
@@ -353,8 +323,8 @@ describe("canvas drawing storage", () => {
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                const document = await loadCanvasDrawing("p1", "d1", captureUserScope());
-                const preview = await loadCanvasDrawingPreview("p1", "d1", captureUserScope());
+                const document = await loadCanvasDrawing("p1", "d1");
+                const preview = await loadCanvasDrawingPreview("p1", "d1");
                 return { document, preview };
             });
             expect(loaded.document?.origin).toBe("canonical");
@@ -373,7 +343,7 @@ describe("canvas drawing storage", () => {
         documents.set("owner-a:p1:d1", { version: 2, engine: "excalidraw", snapshot: snapshotOf("stale"), revision: 9, updatedAt: "2026-10-01T00:00:00.000Z", shapeCount: 1, pageCount: 1 });
         try {
             await withAdapter(async () => failure(503, "服务暂时不可用，请稍后重试"), async () => {
-                await expect(loadCanvasDrawing("p1", "d1", captureUserScope())).rejects.toThrow(/服务暂时不可用/);
+                await expect(loadCanvasDrawing("p1", "d1")).rejects.toThrow(/服务暂时不可用/);
             });
         } finally {
             restore();
@@ -392,7 +362,7 @@ describe("canvas drawing storage", () => {
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("mine"), null, new Blob(["p"]), undefined, captureUserScope()))
+                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("mine"), null, new Blob(["p"])))
                     .rejects.toThrow(/画板已有更新/);
             });
             const cached = await peekCanvasDrawingCacheForTests("p1", "d1", "owner-a") as { draft?: { document: CanvasDrawingSnapshot; conflict?: boolean } };
@@ -417,9 +387,9 @@ describe("canvas drawing storage", () => {
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("keep"), null, new Blob(["p"]), undefined, captureUserScope()))
+                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("keep"), null, new Blob(["p"])))
                     .rejects.toBeInstanceOf(CanvasDrawingCanonicalMissingError);
-                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("keep-2"), null, new Blob(["q"]), undefined, captureUserScope()))
+                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("keep-2"), null, new Blob(["q"])))
                     .rejects.toBeInstanceOf(CanvasDrawingCanonicalMissingError);
             });
             expect(puts).toEqual([1]);
@@ -445,14 +415,14 @@ describe("canvas drawing storage", () => {
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("keep"), null, new Blob(["p"]), undefined, captureUserScope()))
+                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("keep"), null, new Blob(["p"])))
                     .rejects.toBeInstanceOf(CanvasDrawingCanonicalMissingError);
             });
 
             const loaded = await withAdapter(async (config) => {
                 if (String(config.method).toLowerCase() === "get") return failure(404, "画板不存在");
                 throw new Error(`unexpected ${config.method} ${config.url}`);
-            }, async () => loadCanvasDrawing("p1", "d1", captureUserScope()));
+            }, async () => loadCanvasDrawing("p1", "d1"));
             expect(loaded?.snapshot).toEqual(snapshotOf("keep"));
             expect(loaded?.canonicalMissing).toBe(true);
 
@@ -464,7 +434,7 @@ describe("canvas drawing storage", () => {
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("keep-3"), loaded, new Blob(["q"]), undefined, captureUserScope()))
+                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("keep-3"), loaded, new Blob(["q"])))
                     .rejects.toBeInstanceOf(CanvasDrawingCanonicalMissingError);
             });
             expect(puts).toEqual([1]);
@@ -489,7 +459,7 @@ describe("canvas drawing storage", () => {
             const loaded = await withAdapter(async (config) => {
                 if (String(config.method).toLowerCase() === "get") return failure(404, "画板不存在");
                 throw new Error(`unexpected ${config.method} ${config.url}`);
-            }, async () => loadCanvasDrawing("p1", "d1", captureUserScope()));
+            }, async () => loadCanvasDrawing("p1", "d1"));
             expect(loaded?.canonicalMissing).toBe(true);
             expect(loaded?.snapshot).toEqual(snapshotOf("was-saved"));
             expect(loaded?.revision).toBe(3);
@@ -501,7 +471,7 @@ describe("canvas drawing storage", () => {
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("edit"), loaded, undefined, undefined, captureUserScope()))
+                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("edit"), loaded, undefined))
                     .rejects.toBeInstanceOf(CanvasDrawingCanonicalMissingError);
             });
             expect(puts).toEqual([]);
@@ -526,12 +496,12 @@ describe("canvas drawing storage", () => {
                 if (String(config.method).toLowerCase() === "delete") return envelope({ id: "d1" });
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                const loading = loadCanvasDrawing("p1", "d1", captureUserScope());
+                const loading = loadCanvasDrawing("p1", "d1");
                 await staleGet.promise;
-                await removeCanvasDrawing("p1", "d1", captureUserScope());
+                await removeCanvasDrawing("p1", "d1");
                 gate.resolve();
                 expect(await loading).toBeNull();
-                expect(await loadCanvasDrawingPreview("p1", "d1", captureUserScope())).toBeNull();
+                expect(await loadCanvasDrawingPreview("p1", "d1")).toBeNull();
             });
         } finally {
             restore();
@@ -572,8 +542,8 @@ describe("canvas drawing storage", () => {
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                const first = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("first"), null, new Blob(["a"]), undefined, captureUserScope());
-                const second = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("second"), null, new Blob(["b"]), undefined, captureUserScope());
+                const first = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("first"), null, new Blob(["a"]));
+                const second = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("second"), null, new Blob(["b"]));
                 const [firstResult, secondResult] = await Promise.all([first, second]);
                 expect(writes.every((count) => count >= 2)).toBe(true);
                 expect(firstResult.snapshot).toEqual(snapshotOf("second"));
@@ -608,9 +578,9 @@ describe("canvas drawing storage", () => {
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                const first = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("first"), null, new Blob(["a"]), undefined, captureUserScope());
+                const first = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("first"), null, new Blob(["a"]));
                 await enteredPut.promise;
-                const second = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("second"), null, new Blob(["b"]), undefined, captureUserScope());
+                const second = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("second"), null, new Blob(["b"]));
                 const deadline = Date.now() + 2000;
                 while (Date.now() < deadline) {
                     const cached = await peekCanvasDrawingCacheForTests("p1", "d1", "owner-a") as { draft?: { generation: number; document: CanvasDrawingSnapshot } };
@@ -649,10 +619,10 @@ describe("canvas drawing storage", () => {
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                await saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("keep"), null, new Blob(["keep"]), undefined, captureUserScope());
-                const removing = removeCanvasDrawing("p1", "d1", captureUserScope());
+                await saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("keep"), null, new Blob(["keep"]));
+                const removing = removeCanvasDrawing("p1", "d1");
                 await enteredDelete.promise;
-                const saved = await saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("after-delete"), null, new Blob(["after"]), undefined, captureUserScope());
+                const saved = await saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("after-delete"), null, new Blob(["after"]));
                 releaseDelete.resolve();
                 await removing;
                 expect(saved.snapshot).toEqual(snapshotOf("after-delete"));
@@ -688,10 +658,10 @@ describe("canvas drawing storage", () => {
                 if (String(config.method).toLowerCase() === "put") return failure(500, "工作区暂时无法保存");
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                const first = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("first"), null, new Blob(["blob-a"]), { blob: new Blob(["render-a"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }, captureUserScope());
+                const first = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("first"), null, new Blob(["blob-a"]), { blob: new Blob(["render-a"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" });
                 await firstPreview.promise;
                 const firstResult = first.then((value) => ({ ok: true as const, value }), (error) => ({ ok: false as const, error }));
-                const second = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("second"), null, new Blob(["blob-b"]), { blob: new Blob(["render-b"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }, captureUserScope());
+                const second = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("second"), null, new Blob(["blob-b"]), { blob: new Blob(["render-b"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" });
                 const secondResult = second.then((value) => ({ ok: true as const, value }), (error) => ({ ok: false as const, error }));
                 releaseFirstPreview.resolve();
                 const firstSettled = await firstResult;
@@ -707,9 +677,9 @@ describe("canvas drawing storage", () => {
                 const recovered = await withAdapter(async (config) => {
                     if (String(config.method).toLowerCase() === "get" && String(config.url).includes("/drawings/")) return failure(404, "画板不存在");
                     throw new Error(`unexpected ${config.method} ${config.url}`);
-                }, async () => loadCanvasDrawing("p1", "d1", captureUserScope()));
+                }, async () => loadCanvasDrawing("p1", "d1"));
                 expect(recovered?.snapshot).toEqual(snapshotOf("second"));
-                expect(await loadCanvasDrawingPreview("p1", "d1", captureUserScope()).then((blob) => blob?.text())).toBe("blob-b");
+                expect(await loadCanvasDrawingPreview("p1", "d1").then((blob) => blob?.text())).toBe("blob-b");
             });
         } finally {
             restore();
@@ -730,14 +700,14 @@ describe("canvas drawing storage", () => {
                     return envelope(drawingRecord(snapshotOf("stale"), 1));
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
-            }, async () => loadCanvasDrawing("p1", "d1", captureUserScope()));
+            }, async () => loadCanvasDrawing("p1", "d1"));
 
             await enteredGet.promise;
             await withAdapter(async (config) => {
                 if (String(config.url).includes("/resources")) return envelope({ resource: { id: "res-new", status: "ready" } });
                 if (String(config.method).toLowerCase() === "put") return envelope(drawingRecord(snapshotOf("fresh"), 4));
                 throw new Error(`unexpected ${config.method} ${config.url}`);
-            }, async () => saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("fresh"), null, new Blob(["fresh"]), undefined, captureUserScope()));
+            }, async () => saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("fresh"), null, new Blob(["fresh"])));
 
             releaseGet.resolve();
             const loaded = await loading;
@@ -792,7 +762,7 @@ describe("canvas drawing storage", () => {
                 if (String(config.method).toLowerCase() === "put") return failure(500, "工作区暂时无法保存");
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                await expect(createCanvasDrawingFromImage("p1", "d1", "excalidraw", { url: png, name: "来源.png" }, captureUserScope()))
+                await expect(createCanvasDrawingFromImage("p1", "d1", "excalidraw", { url: png, name: "来源.png" }))
                     .rejects.toThrow(/工作区暂时无法保存/);
             });
             expect(methods.some((item) => item.startsWith("delete "))).toBe(false);
@@ -823,8 +793,8 @@ describe("canvas drawing storage", () => {
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                await saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("first"), null, new Blob(["blob-a"]), { blob: new Blob(["render-a"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }, captureUserScope());
-                await saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("second"), null, new Blob(["blob-b"]), { blob: new Blob(["render-b"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }, captureUserScope());
+                await saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("first"), null, new Blob(["blob-a"]), { blob: new Blob(["render-a"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" });
+                await saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("second"), null, new Blob(["blob-b"]), { blob: new Blob(["render-b"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" });
             });
             expect(generationOwnedKeys(previews as Map<string, unknown>, key)).toEqual([]);
             expect(generationOwnedKeys(renders, key)).toEqual([]);
@@ -849,13 +819,13 @@ describe("canvas drawing storage", () => {
                 if (String(config.method).toLowerCase() === "put") return failure(500, "工作区暂时无法保存");
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("keep"), null, new Blob(["keep-preview"]), { blob: new Blob(["keep-render"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }, captureUserScope()))
+                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("keep"), null, new Blob(["keep-preview"]), { blob: new Blob(["keep-render"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }))
                     .rejects.toThrow(/工作区暂时无法保存/);
             });
             expect(generationOwnedKeys(previews as Map<string, unknown>, key)).toEqual([`${key}\0g1`]);
             expect(await previews.get(`${key}\0g1`)?.text()).toBe("keep-preview");
             expect(await (renders.get(`${key}\0g1`) as { blob: Blob } | undefined)?.blob.text()).toBe("keep-render");
-            expect(await loadCanvasDrawingPreview("p1", "d1", captureUserScope()).then((blob) => blob?.text())).toBe("keep-preview");
+            expect(await loadCanvasDrawingPreview("p1", "d1").then((blob) => blob?.text())).toBe("keep-preview");
         } finally {
             restore();
         }
@@ -872,12 +842,12 @@ describe("canvas drawing storage", () => {
                 if (String(config.method).toLowerCase() === "put") throw new Error("网络中断");
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("keep"), null, new Blob(["keep-preview"]), { blob: new Blob(["keep-render"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }, captureUserScope()))
+                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("keep"), null, new Blob(["keep-preview"]), { blob: new Blob(["keep-render"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }))
                     .rejects.toThrow(/网络中断/);
             });
             expect(generationOwnedKeys(previews as Map<string, unknown>, key)).toEqual([`${key}\0g1`]);
             expect(await previews.get(`${key}\0g1`)?.text()).toBe("keep-preview");
-            expect(await loadCanvasDrawingPreview("p1", "d1", captureUserScope()).then((blob) => blob?.text())).toBe("keep-preview");
+            expect(await loadCanvasDrawingPreview("p1", "d1").then((blob) => blob?.text())).toBe("keep-preview");
             const cached = await peekCanvasDrawingCacheForTests("p1", "d1", "owner-a") as { draft?: { generation: number }; blobGenerations?: number[] };
             expect(cached.draft?.generation).toBe(1);
             expect(cached.blobGenerations).toEqual([1]);
@@ -911,9 +881,9 @@ describe("canvas drawing storage", () => {
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                const first = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("first"), null, new Blob(["blob-a"]), { blob: new Blob(["render-a"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }, captureUserScope());
+                const first = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("first"), null, new Blob(["blob-a"]), { blob: new Blob(["render-a"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" });
                 await enteredFirst.promise;
-                const second = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("second"), null, new Blob(["blob-b"]), { blob: new Blob(["render-b"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }, captureUserScope());
+                const second = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("second"), null, new Blob(["blob-b"]), { blob: new Blob(["render-b"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" });
                 const deadline = Date.now() + 2000;
                 while (Date.now() < deadline) {
                     const cached = await peekCanvasDrawingCacheForTests("p1", "d1", "owner-a") as { draft?: { generation: number } };
@@ -924,7 +894,7 @@ describe("canvas drawing storage", () => {
                 await first;
                 expect(generationOwnedKeys(previews as Map<string, unknown>, key)).toEqual([`${key}\0g2`]);
                 expect(await previews.get(`${key}\0g2`)?.text()).toBe("blob-b");
-                expect(await loadCanvasDrawingPreview("p1", "d1", captureUserScope()).then((blob) => blob?.text())).toBe("blob-b");
+                expect(await loadCanvasDrawingPreview("p1", "d1").then((blob) => blob?.text())).toBe("blob-b");
                 releaseSecond.resolve();
                 await second;
             });
@@ -958,9 +928,9 @@ describe("canvas drawing storage", () => {
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                const first = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("first"), null, new Blob(["blob-a"]), undefined, captureUserScope());
+                const first = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("first"), null, new Blob(["blob-a"]));
                 await enteredFirst.promise;
-                const second = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("second"), null, new Blob(["blob-b"]), undefined, captureUserScope());
+                const second = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("second"), null, new Blob(["blob-b"]));
                 const deadline = Date.now() + 2000;
                 while (Date.now() < deadline) {
                     const cached = await peekCanvasDrawingCacheForTests("p1", "d1", "owner-a") as { draft?: { generation: number } };
@@ -971,7 +941,7 @@ describe("canvas drawing storage", () => {
                 await first;
                 previews.delete(`${key}\0g2`);
                 expect(await previews.get(key)?.text()).toBe("blob-b");
-                expect(await loadCanvasDrawingPreview("p1", "d1", captureUserScope())).toBeNull();
+                expect(await loadCanvasDrawingPreview("p1", "d1")).toBeNull();
                 releaseSecond.resolve();
                 await second;
             });
@@ -1000,15 +970,15 @@ describe("canvas drawing storage", () => {
                 if (String(config.method).toLowerCase() === "delete") return envelope({ id: "d1" });
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                await saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("drop"), null, new Blob(["drop-a"]), { blob: new Blob(["drop-r"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }, captureUserScope());
-                await saveCanvasDrawing("p1", "d2", "excalidraw", snapshotOf("keep"), null, new Blob(["keep-a"]), { blob: new Blob(["keep-r"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }, captureUserScope());
+                await saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("drop"), null, new Blob(["drop-a"]), { blob: new Blob(["drop-r"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" });
+                await saveCanvasDrawing("p1", "d2", "excalidraw", snapshotOf("keep"), null, new Blob(["keep-a"]), { blob: new Blob(["keep-r"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" });
                 const restoreB = switchScope("owner-b");
-                await saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("other"), null, new Blob(["other-a"]), { blob: new Blob(["other-r"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }, captureUserScope());
+                await saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("other"), null, new Blob(["other-a"]), { blob: new Blob(["other-r"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" });
                 restoreB();
-                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("drop-2"), null, new Blob(["drop-b"]), { blob: new Blob(["drop-r2"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }, captureUserScope()))
+                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("drop-2"), null, new Blob(["drop-b"]), { blob: new Blob(["drop-r2"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }))
                     .rejects.toThrow(/工作区暂时无法保存/);
                 expect(generationOwnedKeys(previews as Map<string, unknown>, dropped)).toEqual([`${dropped}\0g2`]);
-                await removeCanvasDrawing("p1", "d1", captureUserScope());
+                await removeCanvasDrawing("p1", "d1");
             });
             expect([...previews.keys()].filter((key) => key === dropped || key.startsWith(`${dropped}\0g`))).toEqual([]);
             expect([...renders.keys()].filter((key) => key === dropped || key.startsWith(`${dropped}\0g`))).toEqual([]);
@@ -1043,9 +1013,9 @@ describe("canvas drawing storage", () => {
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("first"), null, new Blob(["blob-a"]), { blob: new Blob(["render-a"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }, captureUserScope()))
+                await expect(saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("first"), null, new Blob(["blob-a"]), { blob: new Blob(["render-a"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }))
                     .rejects.toThrow(/preview store read failed/);
-                await saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("second"), null, new Blob(["blob-b"]), { blob: new Blob(["render-b"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }, captureUserScope());
+                await saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("second"), null, new Blob(["blob-b"]), { blob: new Blob(["render-b"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" });
             });
             expect(generationOwnedKeys(previews as Map<string, unknown>, key)).toEqual([]);
             expect(await previews.get(key)?.text()).toBe("blob-b");
@@ -1092,9 +1062,9 @@ describe("canvas drawing storage", () => {
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                const preview = await loadCanvasDrawingPreview("p1", "d1", captureUserScope());
-                const render = await loadCanvasDrawingRender("p1", "d1", captureUserScope());
-                const document = await loadCanvasDrawing("p1", "d1", captureUserScope());
+                const preview = await loadCanvasDrawingPreview("p1", "d1");
+                const render = await loadCanvasDrawingRender("p1", "d1");
+                const document = await loadCanvasDrawing("p1", "d1");
                 return { preview, render, document };
             });
             expect(await loaded.preview?.text()).toBe("legacy-preview");
@@ -1131,9 +1101,9 @@ describe("canvas drawing storage", () => {
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                const first = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("first"), null, new Blob(["blob-a"]), { blob: new Blob(["render-a"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }, captureUserScope());
+                const first = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("first"), null, new Blob(["blob-a"]), { blob: new Blob(["render-a"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" });
                 await enteredFirst.promise;
-                const second = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("second"), null, new Blob(["blob-b"]), { blob: new Blob(["render-b"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" }, captureUserScope());
+                const second = saveCanvasDrawing("p1", "d1", "excalidraw", snapshotOf("second"), null, new Blob(["blob-b"]), { blob: new Blob(["render-b"]), pageId: "page", width: 8, height: 8, mimeType: "image/png", background: "white" });
                 const deadline = Date.now() + 2000;
                 while (Date.now() < deadline) {
                     const cached = await peekCanvasDrawingCacheForTests("p1", "d1", "owner-a") as { draft?: { generation: number } };

@@ -38,18 +38,6 @@ func (s *Service) TextReplay() *textreplay.Service {
 	return s.textReplayOrInit()
 }
 
-func (s *Service) CompleteTextReplayTask(userID string, taskID string, text string) (*model.Task, error) {
-	return s.textReplayOrInit().Complete(userID, taskID, text)
-}
-
-func (s *Service) AppendTaskTextDelta(userID string, taskID string, content string) (*model.TaskTextDelta, error) {
-	return s.textReplayOrInit().Append(userID, taskID, content)
-}
-
-func (s *Service) TaskTextReplay(userID string, taskID string, after int64) (*TextReplayResult, error) {
-	return s.textReplayOrInit().Read(userID, taskID, after)
-}
-
 func (s *Service) finalizeTaskTextReplay(taskID string, status model.TaskStatus) error {
 	return s.textReplayOrInit().Finalize(taskID, status)
 }
@@ -72,4 +60,12 @@ func (s *Service) startTextReplayCleanup(ctx context.Context) {
 			log.Printf("text replay cleanup failed: %v", err)
 		})
 	})
+}
+
+func (s *Service) AppendTaskTextDelta(userID string, taskID string, content string) (*model.TaskTextDelta, error) {
+	return s.textReplayOrInit().Append(userID, taskID, content)
+}
+
+func (s *Service) TaskTextReplay(userID string, taskID string, after int64) (*TextReplayResult, error) {
+	return s.textReplayOrInit().Read(userID, taskID, after)
 }

@@ -6,14 +6,12 @@ import { createCanvasOwnerLifetime } from "../../src/pages/canvas/canvas-owner-e
 import { persistOwnedCanvasUploadNode } from "../../src/pages/canvas/canvas-upload-ownership";
 import { shouldApplyProjectSettingsMutation } from "../../src/pages/projects/detail/project-settings-session";
 import { setActiveUserScope } from "../../src/lib/user-scope";
-import { captureUserScope } from "../../src/lib/user-scope-guard";
 import { CanvasNodeType, type CanvasNodeData } from "../../src/types/canvas";
 
 type HarnessWindow = Window & {
     __uploadSettingsHarness?: {
         writes: string[];
         toasts: string[];
-        switchABA: () => Promise<void>;
         switchProject: () => void;
     };
 };
@@ -41,13 +39,7 @@ function watchToasts() {
     observer.observe(document.body, { childList: true, subtree: true });
 }
 
-async function switchABA() {
-    await fetch("/harness/switch", { method: "POST" });
-    setActiveUserScope("owner-b");
-    setActiveUserScope("owner-a");
-}
-
-harnessWindow.__uploadSettingsHarness = { writes: [], toasts: [], switchABA, switchProject: () => {} };
+harnessWindow.__uploadSettingsHarness = { writes: [], toasts: [], switchProject: () => {} };
 
 function mediaNode(assetId?: string): CanvasNodeData {
     return {
@@ -78,12 +70,10 @@ function Harness() {
     };
 
     const persistUpload = async () => {
-        const expectedScope = captureUserScope();
         const owner = lifetime.capture("canvas-a");
         setPersistState("pending");
         const result = await persistOwnedCanvasUploadNode({
             owner,
-            expectedScope,
             getLiveCanvasId: () => canvasIdRef.current,
             getLiveLifetime: () => lifetime.current(),
             canvasId: "canvas-a",
@@ -118,7 +108,6 @@ function Harness() {
     };
 
     const saveSettings = async () => {
-        const entryScope = captureUserScope();
         const mountedProjectId = projectIdRef.current;
         setSettingsState("pending");
         try {
@@ -126,7 +115,6 @@ function Harness() {
             const body = await response.json() as { ok?: boolean; error?: string };
             if (body.error) throw new Error(body.error);
             if (!shouldApplyProjectSettingsMutation({
-                entryScope,
                 mountedProjectId,
                 liveProjectId: projectIdRef.current,
                 mounted: true,
@@ -139,11 +127,9 @@ function Harness() {
             message.success("项目设置已保存");
         } catch (error) {
             if (!shouldApplyProjectSettingsMutation({
-                entryScope,
                 mountedProjectId,
                 liveProjectId: projectIdRef.current,
                 mounted: true,
-                error,
             })) {
                 setSettingsState("idle");
                 return;
@@ -156,7 +142,6 @@ function Harness() {
     return (
         <>
             <div style={{ position: "fixed", top: 0, left: 0, zIndex: 11000, display: "flex", gap: 8, padding: 8 }}>
-                <button type="button" onClick={() => void switchABA()}>switch-aba</button>
                 <button type="button" onClick={() => harnessWindow.__uploadSettingsHarness!.switchProject()}>switch-project</button>
                 <button type="button" onClick={() => void persistUpload()}>persist-upload</button>
                 <button type="button" onClick={() => void saveSettings()}>save-settings</button>

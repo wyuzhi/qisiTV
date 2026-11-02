@@ -1,4 +1,5 @@
-import { explainGenerationError, shouldBlockManualRetry } from "@/lib/generation-error";
+import { explainGenerationError } from "@/lib/generation-error";
+import { normalizeTaskOutcome, taskOutcomeCopy } from "@/lib/task-outcome";
 import type { GenerationTask, TaskStatus } from "@/services/api/task-center";
 import { modelDisplayName, type AiConfig } from "@/stores/use-config-store";
 
@@ -11,21 +12,38 @@ export function getTaskCanvasContext(task: GenerationTask, canvasById: Map<strin
 }
 
 export function isTaskFailed(task: GenerationTask) {
+    const outcome = normalizeTaskOutcome(task.outcome);
+    if (outcome) return outcome.phase === "failed";
     return task.status === "failed" || task.status === "cancelled";
 }
 
 export function taskAttentionReason(task: GenerationTask) {
-    if (task.status === "cancelled") return providerCancelStatusLabel(task);
-    const explanation = explainGenerationError({ code: task.errorCode, message: task.error }, { taskId: task.id, providerRequestId: task.providerRequestId, model: task.model, createdAt: task.createdAt, stage: task.stage });
+    const outcome = normalizeTaskOutcome(task.outcome);
+    if (outcome) {
+        if (
+            outcome.phase === "retrievable" ||
+            outcome.reason === "settlement_pending" ||
+            outcome.reason === "billing_pending" ||
+            outcome.reason === "reconcile_pending" ||
+            outcome.reason === "charged_result_unrecoverable" ||
+            outcome.reason === "result_unrecoverable" ||
+            outcome.reason === "no_result" ||
+            (!task.error && !task.errorCode && task.status !== "cancelled")
+        ) {
+            return taskOutcomeCopy(outcome).message;
+        }
+    }
+    if (!outcome && task.status === "cancelled") return providerCancelStatusLabel(task);
+    const explanation = explainGenerationError(
+        { code: task.errorCode, message: task.error },
+        { taskId: task.id, providerRequestId: task.providerRequestId, model: task.model, createdAt: task.createdAt, stage: outcome ? undefined : task.stage },
+    );
     const text = explanation.message.trim();
     if (text.startsWith("{") || text.startsWith("[")) return explanation.reason || "生成失败，打开详情查看原因";
     if (explanation.moderation) return explanation.message;
     if (task.error || task.errorCode) return explanation.message;
+    if (outcome) return taskOutcomeCopy(outcome).message;
     return task.stage || "生成失败，打开详情查看原因";
-}
-
-export function taskRetryBlocked(task: GenerationTask) {
-    return shouldBlockManualRetry({ code: task.errorCode, message: task.error }, task.stage);
 }
 
 export function providerCancelStatusLabel(task: GenerationTask) {

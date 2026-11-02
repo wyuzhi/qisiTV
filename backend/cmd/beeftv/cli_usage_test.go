@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 
@@ -280,5 +281,61 @@ func TestExplicitBaseURLWinsOverDiscovery(t *testing.T) {
 	base, source := resolveBaseURL()
 	if base != "http://127.0.0.1:8080/api" || source != "BEEFTV_BASE_URL" {
 		t.Fatalf("显式地址应优先，得到 %q（%s）", base, source)
+	}
+}
+
+func TestApproveOrdersAndClientApprovalFlag(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dataDir, "agent_owner_token"), []byte("local-owner-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var lastPath, lastOwner, lastClient string
+	var lastBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lastPath = r.URL.RequestURI()
+		lastOwner = r.Header.Get("X-Beeftv-Owner")
+		lastClient = r.Header.Get("X-Beeftv-Client")
+		lastBody = nil
+		_ = json.NewDecoder(r.Body).Decode(&lastBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"data":{"ok":true},"msg":"ok"}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("BEEFTV_BASE_URL", server.URL)
+	t.Setenv("BEEFTV_DATA_DIR", dataDir)
+	t.Setenv("BEEFTV_OWNER_TOKEN", "")
+	t.Setenv("BEEFTV_CLIENT_ID", "")
+	t.Setenv("BEEFTV_CLIENT_TOKEN", "")
+
+	if err := run([]string{"approve", "gp-123", "--json"}); err != nil {
+		t.Fatalf("approve failed: %v", err)
+	}
+	if lastPath != "/ops/orders/gp-123/approve" || lastOwner != "local-owner-secret" || lastClient != "" {
+		t.Fatalf("approve request = path:%q owner:%q client:%q", lastPath, lastOwner, lastClient)
+	}
+
+	if err := run([]string{"orders", "--canvas", "c1", "--json"}); err != nil {
+		t.Fatalf("orders failed: %v", err)
+	}
+	if lastPath != "/ops/orders?canvasId=c1" || lastOwner != "local-owner-secret" {
+		t.Fatalf("orders request = path:%q owner:%q", lastPath, lastOwner)
+	}
+
+	if err := run([]string{"client", "register", "--label", "script-bot", "--approval", "auto", "--json"}); err != nil {
+		t.Fatalf("client register failed: %v", err)
+	}
+	if lastPath != "/ops/clients" || lastBody["approvalMode"] != "auto" {
+		t.Fatalf("client register body = %+v", lastBody)
+	}
+
+	// 当处于外部 Agent 环境（带有 BEEFTV_CLIENT_ID）时，不得隐式读取本机 owner token 越权自批。
+	t.Setenv("BEEFTV_CLIENT_ID", "agent-1")
+	t.Setenv("BEEFTV_CLIENT_TOKEN", "agent-secret")
+	if err := run([]string{"approve", "gp-123", "--json"}); err != nil {
+		t.Fatalf("approve with client token call: %v", err)
+	}
+	if lastOwner != "" || lastClient != "agent-1" {
+		t.Fatalf("agent token must not load owner token: owner=%q client=%q", lastOwner, lastClient)
 	}
 }

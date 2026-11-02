@@ -11,6 +11,72 @@ import { serveEmptySkillContext } from './test-support/skill-context-fixture.mjs
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const UPSTREAM_SECRET = 'sk-synthetic-upstream-secret';
+const THINKING_SIGNATURE = 'sig-synthetic-thinking-secret';
+
+/**
+ * Anthropic Messages SSE 替身：两段思考（各自增量）→ 两段正文。
+ * 签名只出现在 signature_delta 里，用来证明它不会进入任何展示字段。
+ * 分片之间留出间隔，否则 durable 会把整轮事件合并成一次推送，看不出增量。
+ */
+async function anthropicThinkingReply(res) {
+  res.writeHead(200, { 'content-type': 'text/event-stream' });
+  const send = async (type, data) => { res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`); await delay(120); };
+  await send('message_start', { type: 'message_start', message: { id: 'msg_synthetic', type: 'message', role: 'assistant', model: 'synthetic', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } } });
+  await send('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '', signature: '' } });
+  await send('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: '先看画布上的两个节点' } });
+  await send('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: '，再确认时间线顺序。' } });
+  await send('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: THINKING_SIGNATURE } });
+  await send('content_block_stop', { type: 'content_block_stop', index: 0 });
+  await send('content_block_start', { type: 'content_block_start', index: 1, content_block: { type: 'thinking', thinking: '', signature: '' } });
+  await send('content_block_delta', { type: 'content_block_delta', index: 1, delta: { type: 'thinking_delta', thinking: '现在把结论写下来。' } });
+  await send('content_block_stop', { type: 'content_block_stop', index: 1 });
+  await send('content_block_start', { type: 'content_block_start', index: 2, content_block: { type: 'text', text: '' } });
+  await send('content_block_delta', { type: 'content_block_delta', index: 2, delta: { type: 'text_delta', text: '第一段正文。' } });
+  await send('content_block_stop', { type: 'content_block_stop', index: 2 });
+  await send('content_block_start', { type: 'content_block_start', index: 3, content_block: { type: 'text', text: '' } });
+  await send('content_block_delta', { type: 'content_block_delta', index: 3, delta: { type: 'text_delta', text: '第二段正文。' } });
+  await send('content_block_stop', { type: 'content_block_stop', index: 3 });
+  await send('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 20 } });
+  await send('message_stop', { type: 'message_stop' });
+  res.end();
+}
+
+/**
+ * 分脚本的 Anthropic Messages 替身：第一段思考 → canvas_get 工具调用 → 第二段思考 → 正文。
+ * 签名只出现在 signature_delta 里，用来证明它不会进入任何展示字段。
+ */
+async function anthropicToolThenAnswer(call, res) {
+  res.writeHead(200, { 'content-type': 'text/event-stream' });
+  const send = async (type, data) => { res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`); await delay(60); };
+  const begin = (id) => send('message_start', { type: 'message_start', message: { id, type: 'message', role: 'assistant', model: 'synthetic',
+    content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } } });
+  const thinkingBlock = async (index, text) => {
+    await send('content_block_start', { type: 'content_block_start', index, content_block: { type: 'thinking', thinking: '', signature: '' } });
+    await send('content_block_delta', { type: 'content_block_delta', index, delta: { type: 'thinking_delta', thinking: text } });
+    await send('content_block_delta', { type: 'content_block_delta', index, delta: { type: 'signature_delta', signature: THINKING_SIGNATURE } });
+    await send('content_block_stop', { type: 'content_block_stop', index });
+  };
+  const end = async (stopReason) => {
+    await send('message_delta', { type: 'message_delta', delta: { stop_reason: stopReason, stop_sequence: null }, usage: { output_tokens: 20 } });
+    await send('message_stop', { type: 'message_stop' });
+    res.end();
+  };
+  if (call === 1) {
+    await begin('msg_synthetic_tool');
+    await thinkingBlock(0, '先读画布上的两个节点。');
+    await send('content_block_start', { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'toolu_synthetic_1', name: 'canvas_get', input: {} } });
+    await send('content_block_delta', { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: JSON.stringify({ canvasId: 'reasoning-tool-canvas' }) } });
+    await send('content_block_stop', { type: 'content_block_stop', index: 1 });
+    await end('tool_use');
+    return;
+  }
+  await begin('msg_synthetic_answer');
+  await thinkingBlock(0, '再确认时间线顺序，然后给出结论。');
+  await send('content_block_start', { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } });
+  await send('content_block_delta', { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '两段都看过了。' } });
+  await send('content_block_stop', { type: 'content_block_stop', index: 1 });
+  await end('end_turn');
+}
 
 async function withHost(run, envExtra = {}, options = {}) {
   const { slowFirstModel = true } = options;
@@ -52,7 +118,7 @@ async function withHost(run, envExtra = {}, options = {}) {
     opsRequests.push(`${req.method} ${req.url}`);
     if (serveEmptySkillContext(req, res)) return;
     if (req.url === '/api/ops') {
-      res.end(JSON.stringify({ code: 0, data: { ops: [{ id: 'canvas.get', summary: 'Read', readOnly: true, scope: 'canvas', params: { type: 'object', properties: { canvasId: { type: 'string' } }, required: ['canvasId'] } }] } }));
+      res.end(JSON.stringify({ code: 0, data: { ops: [{ id: 'canvas.get', summary: 'Read', readOnly: true, scope: 'canvas', assistantModes: ['full-access', 'read-only', 'canvas'], params: { type: 'object', properties: { canvasId: { type: 'string' } }, required: ['canvasId'] } }] } }));
       return;
     }
     // Go 回合记录：宿主在开始/恢复前读取它，并按 canvasId 校验归属。
@@ -87,6 +153,9 @@ async function withHost(run, envExtra = {}, options = {}) {
       await delay(8000);
       if (res.writableEnded) return;
     }
+    if (options.anthropicThinking) { await anthropicThinkingReply(res); return; }
+    // 分脚本的 Anthropic 替身：用来复现跨工具调用的多消息回合。
+    if (options.anthropicScript) { await options.anthropicScript(modelCalls, res); return; }
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     const reply = options.modelReply?.(modelCalls);
     const delta = { role: 'assistant', content: reply?.text ?? 'ok', ...(reply?.tool ? {
@@ -117,10 +186,10 @@ async function withHost(run, envExtra = {}, options = {}) {
       BEEFTV_AGENT_HOST_TOKEN: hostToken,
       BEEFTV_AGENT_PORT: String(port),
       BEEFTV_OPS_URL: `http://127.0.0.1:${opsPort}/api`,
-      BEEFTV_AGENT_API: 'openai-completions',
+      BEEFTV_AGENT_API: options.anthropicThinking || options.anthropicScript ? 'anthropic-messages' : 'openai-completions',
       BEEFTV_AGENT_MODEL: 'synthetic',
       BEEFTV_AGENT_API_KEY: 'synthetic-only',
-      BEEFTV_AGENT_BASE_URL: `http://127.0.0.1:${modelPort}/v1`,
+      BEEFTV_AGENT_BASE_URL: `http://127.0.0.1:${modelPort}${options.anthropicThinking || options.anthropicScript ? '' : '/v1'}`,
       BEEFTV_AGENT_TURN_TIMEOUT_MS: '20000',
       ...envExtra,
     };
@@ -529,9 +598,8 @@ test('真实宿主：停止先于 /chat 到达时只停这一条请求；同一�
     expect(await chat('late-turn', 'late-req')).toMatchObject({ turnId: 'late-turn', requestId: 'late-req', cancelled: true });
     expect(await chat('early-turn-3', 'early-req')).toMatchObject({ turnId: 'early-turn-1', cancelled: true });
     expect(getModelCalls()).toBe(1);
-    // The request that ran read the current canvas and skill catalog; stopped
-    // requests do neither, including those replayed after the restart.
-    expect(getOpsRequests().filter((line) => line.includes('/api/ops/'))).toEqual(['POST /api/ops/canvas.get', 'POST /api/ops/skill.catalog']);
+    // Only the admitted request reads its initial and dispatch snapshots/catalog.
+    expect(getOpsRequests().filter((line) => line.includes('/api/ops/'))).toEqual(['POST /api/ops/canvas.get', 'POST /api/ops/skill.catalog', 'POST /api/ops/canvas.get']);
     expect(completed()).toEqual(['early-turn-1', 'early-turn-2', 'other-turn', 'late-turn', 'early-turn-3']);
     const history = await api(`/history?canvasId=${canvasId}&sessionId=${encodeURIComponent(sessionId)}`);
     expect(history.payload.active).toBeNull();
@@ -591,4 +659,137 @@ test('真实宿主：运行中按请求停止只停这一条；指向别的请�
     expect((await api(`/history?canvasId=${canvasId}`)).payload.active).toBeNull();
     expect(getModelCalls()).toBe(1);
   }, {}, { canvasId: 'targeted-stop-canvas' });
+}, 35000);
+
+test('真实宿主：Anthropic 协议的可读思考进流式快照、终态与历史，签名不外泄', async () => {
+  await withHost(async ({ api }) => {
+    const canvasId = 'reasoning-canvas';
+    const sessionId = (await api('/sessions', { canvasId })).payload.sessionId;
+    const chat = await api('/chat', { canvasId, sessionId, turnId: 'reasoning-turn', requestId: 'reasoning-req', revisionBefore: 1, message: '先想一下再回答' });
+    expect(chat.status).toBe(200);
+    const lines = chat.text.trim().split('\n').map((line) => JSON.parse(line));
+
+    // 每个思考增量各自成为一次整段替换的快照：只增不减、不重字，也不一次到位。
+    const snapshots = lines.filter((line) => line.type === 'reasoning_snapshot');
+    expect(snapshots.length).toBeGreaterThanOrEqual(3);
+    expect(snapshots[0].segments).toMatchObject([{ text: '先看画布上的两个节点', status: 'streaming' }]);
+    const bodies = snapshots.map((line) => line.segments.map((segment) => segment.text).join('|'));
+    expect(bodies.every((body, index) => index === 0 || body === bodies[index - 1] || body.startsWith(bodies[index - 1]))).toBe(true);
+    expect(bodies.at(-1)).toBe('先看画布上的两个节点，再确认时间线顺序。|现在把结论写下来。');
+    // 第二段思考在同一个回合里追加，前一段那时已经结束。
+    expect(snapshots.some((line) => line.segments.length === 2 && line.segments.at(-1).status === 'streaming')).toBe(true);
+    // 正文开始后，思考块不再显示为进行中，界面据此把标题从「正在思考…」换成「思考过程」。
+    expect(snapshots.at(-1).segments.map((segment) => segment.status)).toEqual(['done', 'done']);
+    // message_end 之后片段身份由官方 entry 接管。
+    expect(snapshots.at(-1).segments.some((segment) => segment.id.startsWith('live-'))).toBe(false);
+
+    // 正文快照只含正文，思考不混进回复；签名不进任何展示字段。
+    const texts = lines.filter((line) => line.type === 'text_snapshot').map((line) => line.text);
+    expect(texts).toContain('第一段正文。');
+    expect(texts.at(-1)).toBe('第一段正文。第二段正文。');
+    expect(texts.every((text) => !text.includes('先看画布'))).toBe(true);
+    expect(chat.text).not.toContain(THINKING_SIGNATURE);
+
+    // 终态与实时流是同一份投影：片段身份由官方 entry 接管，界面重新打开也能显示。
+    const end = lines.find((line) => line.type === 'turn_end');
+    expect(end.reply).toBe('第一段正文。第二段正文。');
+    expect(end.reasoning).toEqual(snapshots.at(-1).segments);
+    expect(end.reasoning.map((segment) => segment.text)).toEqual([
+      '先看画布上的两个节点，再确认时间线顺序。',
+      '现在把结论写下来。',
+    ]);
+
+    // 历史回合保留同一份思考；活动回合结束后不再返回 active。
+    const history = await api(`/history?canvasId=${canvasId}`);
+    expect(history.payload.active).toBeNull();
+    expect(history.payload.turns[0].reasoning).toEqual(end.reasoning);
+    expect(JSON.stringify(history.payload)).not.toContain(THINKING_SIGNATURE);
+  }, {}, { canvasId: 'reasoning-canvas', slowFirstModel: false, anthropicThinking: true });
+}, 35000);
+
+test('真实宿主：跨工具调用的思考在流式、终态和历史里是同一份', async () => {
+  await withHost(async ({ api, getModelCalls, getOpsRequests }) => {
+    const canvasId = 'reasoning-tool-canvas';
+    const sessionId = (await api('/sessions', { canvasId })).payload.sessionId;
+    const chat = await api('/chat', { canvasId, sessionId, turnId: 'reasoning-tool-turn', requestId: 'reasoning-tool-req', revisionBefore: 1, message: '先读画布再回答' });
+    expect(chat.status).toBe(200);
+    const lines = chat.text.trim().split('\n').map((line) => JSON.parse(line));
+    // 第一段思考 → canvas_get 工具调用 → 第二段思考 → 正文：恰好两次本地模型请求。
+    expect(getModelCalls()).toBe(2);
+    expect(getOpsRequests()).toContain('POST /api/ops/canvas.get');
+
+    const snapshots = lines.filter((line) => line.type === 'reasoning_snapshot');
+    const last = snapshots.at(-1).segments;
+    // 工具调用前的那段思考没有丢，思考正文原样送达。
+    expect(last.map((segment) => segment.text)).toEqual(['先读画布上的两个节点。',
+      '再确认时间线顺序，然后给出结论。']);
+    expect(last.map((segment) => segment.status)).toEqual(['done', 'done']);
+    // 两段来自不同的官方 entry：片段身份带 entry 与内容下标。
+    expect(new Set(last.map((segment) => segment.id)).size).toBe(2);
+    expect(last.every((segment) => segment.id.endsWith(':0'))).toBe(true);
+
+    // 终态与实时流是同一份；重新读取历史也一致。
+    const end = lines.find((line) => line.type === 'turn_end');
+    expect(end.reply).toBe('两段都看过了。');
+    expect(end.reasoning).toEqual(last);
+    const history = await api(`/history?canvasId=${canvasId}`);
+    expect(history.payload.active).toBeNull();
+    expect(history.payload.turns[0].reasoning).toEqual(last);
+  }, {}, { canvasId: 'reasoning-tool-canvas', slowFirstModel: false, anthropicScript: anthropicToolThenAnswer });
+}, 35000);
+
+/**
+ * 进行中回合的轮询回归：投影已经初始化、可读思考为空时，历史响应必须带空数组，
+ * 之后思考再变化时也要跟着更新——轮询才能撤掉旧内容，而不是一直显示上一次读到的思考。
+ * 假模型先回一个不可读的 redacted 思考块和正文，挂住这一轮；测试读到空数组后再放行一段可读思考。
+ */
+test('真实宿主：进行中的历史带空思考数组，轮询跟着思考变化', async () => {
+  let releaseModel;
+  let releaseThinking;
+  const heldModel = new Promise((resolve) => { releaseModel = resolve; });
+  const nextThinking = new Promise((resolve) => { releaseThinking = resolve; });
+  const redactedThenThinking = async (call, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    const send = async (type, data) => { res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`); await delay(60); };
+    await send('message_start', { type: 'message_start', message: { id: 'msg_synthetic_redacted', type: 'message', role: 'assistant', model: 'synthetic',
+      content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } } });
+    await send('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'redacted_thinking', data: 'opaque-synthetic-payload' } });
+    await send('content_block_stop', { type: 'content_block_stop', index: 0 });
+    await send('content_block_start', { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } });
+    await send('content_block_delta', { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '已经重新看过画布。' } });
+    await send('content_block_stop', { type: 'content_block_stop', index: 1 });
+    await nextThinking;
+    await send('content_block_start', { type: 'content_block_start', index: 2, content_block: { type: 'thinking', thinking: '', signature: '' } });
+    await send('content_block_delta', { type: 'content_block_delta', index: 2, delta: { type: 'thinking_delta', thinking: '再确认时间线顺序' } });
+    await send('content_block_stop', { type: 'content_block_stop', index: 2 });
+    await heldModel;
+    try { await send('message_stop', { type: 'message_stop' }); res.end(); } catch { /* 宿主已退出：连接已断开 */ }
+  };
+  try {
+    await withHost(async ({ api, waitFor, getModelCalls }) => {
+      const canvasId = 'reasoning-clear-canvas';
+      const sessionId = (await api('/sessions', { canvasId })).payload.sessionId;
+      const chat = api('/chat', { canvasId, sessionId, turnId: 'reasoning-clear-turn', requestId: 'reasoning-clear-request', revisionBefore: 1, message: '先想再回答' });
+      await waitFor(() => getModelCalls() >= 1, 8000);
+      // 这一轮仍在进行中：正文已经进面板，可读思考为空。
+      await waitFor(async () => (await api(`/history?canvasId=${canvasId}`)).payload.active?.streamed === '已经重新看过画布。', 8000);
+      const active = (await api(`/history?canvasId=${canvasId}`)).payload.active;
+      expect(active).toMatchObject({ turnId: 'reasoning-clear-turn', status: 'running' });
+      // 投影已经初始化，空思考必须是空数组而不是缺字段：轮询据此撤掉上一次读到的旧思考。
+      expect(active.reasoning).toEqual([]);
+      // redacted 载荷本身不进任何展示字段。
+      expect(JSON.stringify(active)).not.toContain('opaque-synthetic-payload');
+
+      // 思考再变化时，进行中的历史跟着更新，不把空数组当成终态。
+      releaseThinking();
+      await waitFor(async () => (await api(`/history?canvasId=${canvasId}`)).payload.active?.reasoning?.length === 1, 8000);
+      const grown = (await api(`/history?canvasId=${canvasId}`)).payload.active;
+      expect(grown.reasoning.map((segment) => segment.text)).toEqual(['再确认时间线顺序']);
+      expect(grown.reasoning.map((segment) => segment.status)).toEqual(['streaming']);
+
+      await api('/cancel', { canvasId });
+      const end = (await chat).text.trim().split('\n').map((line) => JSON.parse(line)).find((line) => line.type === 'turn_end');
+      expect(end.cancelled).toBe(true);
+    }, {}, { canvasId: 'reasoning-clear-canvas', slowFirstModel: false, anthropicScript: redactedThenThinking });
+  } finally { releaseThinking(); releaseModel(); }
 }, 35000);

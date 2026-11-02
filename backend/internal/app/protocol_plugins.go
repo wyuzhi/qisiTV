@@ -39,6 +39,20 @@ func newPluginRuntimeWithStore(dataDir string, store plugins.Store) (*pluginRunt
 	return &pluginRuntime{Runtime: runtime}, nil
 }
 
+// newPluginRuntimeWithReferences adds the startup retention audit. The service
+// always constructs its runtime this way so a release cannot delete an official
+// protocol that saved configuration or unfinished tasks still execute with.
+func newPluginRuntimeWithReferences(dataDir string, store plugins.Store, references plugins.ReferenceSource) (*pluginRuntime, error) {
+	if store == nil {
+		return nil, fmt.Errorf("插件状态存储未初始化")
+	}
+	runtime, err := plugins.NewRuntimeWithReferences(dataDir, store, references)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginRuntime{Runtime: runtime}, nil
+}
+
 func pluginRuntimeFromRecords(records map[string]pluginRecord) *pluginRuntime {
 	return &pluginRuntime{Runtime: plugins.RuntimeForTest(records)}
 }
@@ -77,6 +91,9 @@ func (c *pluginRuntime) uninstall(id string) error {
 	}
 	return c.Runtime.Uninstall(id)
 }
+
+// PluginDomain exposes the domain service to the HTTP composition layer.
+func (s *Service) PluginDomain() *plugins.Service { return s.pluginDomain() }
 
 func (s *Service) pluginDomain() *plugins.Service {
 	var runtime *plugins.Runtime

@@ -32,5 +32,8 @@ describe("inline canvas mask editing", () => {
         expect(editor).toContain("items-center gap-1.5");
         expect(editor).toContain('aria-label="局部重绘设置"');
         expect(editor).toContain('aria-label={isSubmitting ? "正在修改" : "AI 修改"}');
+        expect(editor).toContain("theme.toolbar.panel");
+        expect(editor).toContain("theme.spatial.elevated");
+        expect(editor).not.toContain("#242424");
     });
 });

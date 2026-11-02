@@ -13,7 +13,8 @@ for (const fixture of fixtures) {
         ];
         for (const input of inputs) {
             const first = explainGenerationError(input);
-            const persisted = explainGenerationError(generationFailureMetadata(input, "private prompt").errorDetails);
+            const metadata = generationFailureMetadata(input, "private prompt");
+            const persisted = explainGenerationError({ code: metadata.generationErrorCode, message: metadata.errorDetails });
             for (const f of [first, persisted]) {
                 expect(f.category).toBe(fixture.category);
                 expect(f.reason).toBe(fixture.reason);
@@ -27,7 +28,6 @@ for (const fixture of fixtures) {
             expect(shouldBlockAutomaticRetry(input)).toBe(true);
         }
         const emitted = `${fixture.reason}。${fixture.action}。排查编号：请求 req_moderation_123。`;
-        expect(explainGenerationError(emitted).message).toBe(emitted);
         expect(explainGenerationError({ code: fixture.category, message: emitted }).message).toBe(emitted);
         expect(explainGenerationError(fixture.message + " Request id: req_moderation_123").requestId).toBe(requestId);
     });

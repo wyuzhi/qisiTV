@@ -17,7 +17,8 @@ import { formatTaskKind, operationOptions, statusLabel } from "@/lib/generation-
 import { buildVideoOperationPrompt } from "@/lib/prompts";
 import { backendProviderConfig, logicalModelIDForConfig } from "@/services/api/generation-task";
 
-import { createGenerationTask, formatTaskLog, listGenerationTasks, listTaskLogs, queryFailedVideoProviderTask, queryGenerationTask, retryGenerationTask, type CreateTaskInput, type GenerationTask, type TaskLog } from "@/services/api/task-center";
+import { createGenerationTask, formatTaskLog, listGenerationTasks, listTaskLogs, queryGenerationTask, recoverTask, retryGenerationTask, type CreateTaskInput, type GenerationTask, type TaskLog } from "@/services/api/task-center";
+import { canRecoverTaskOutcome, isRegenerateConfirm, isTaskRegenerateBlocked, readTaskOutcome, taskOutcomeCopy } from "@/lib/task-outcome";
 import { syncGenerationTaskToCanvasStore } from "@/lib/canvas/canvas-generation-task-sync";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { resolveModelRequestConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -26,7 +27,7 @@ import { listProjects, type ProjectSummary } from "@/services/api/projects";
 import { TaskGridCard } from "./task-grid-card";
 import { TaskGroupHeader, type TaskGroup } from "./task-group-header";
 import { TaskListRow } from "./task-list-row";
-import { formatModelName, getTaskCanvasContext, isTaskFailed, providerCancelStatusLabel, taskMediaKind, taskRetryBlocked } from "./task-shared";
+import { formatModelName, getTaskCanvasContext, isTaskFailed, providerCancelStatusLabel, taskMediaKind } from "./task-shared";
 import { TaskStatusFilterBar, type TaskStatusFilter } from "./task-status-filter";
 import { localTaskHistoryFromProjects } from "@/lib/local-task-history";
 import { workspaceCapabilities } from "@/services/workspace-mode";
@@ -162,7 +163,7 @@ export default function TasksPage() {
     };
 
     const retryGroupTasks = async (key: string, items: GenerationTask[]) => {
-        const retryable = items.filter((task) => isTaskFailed(task) && !taskRetryBlocked(task));
+        const retryable = items.filter((task) => isTaskFailed(task) && !isTaskRegenerateBlocked(task));
         if (!retryable.length) return;
         setRetryingGroup(key);
         try {
@@ -332,8 +333,8 @@ export default function TasksPage() {
             return;
         }
         const currentTask = tasksRef.current.find((task) => task.id === id);
-        if (currentTask && taskRetryBlocked(currentTask)) {
-            message.warning("请先查看失败原因，不要立即重新提交");
+        if (currentTask && isTaskRegenerateBlocked(currentTask)) {
+            message.warning(taskOutcomeCopy(readTaskOutcome(currentTask)).message);
             return;
         }
         setActingId(id);
@@ -341,9 +342,26 @@ export default function TasksPage() {
             // List summaries intentionally omit inputJson. Read the sanitized
             // detail before any paid retry rather than treating absent input as consent.
             const detail = await queryGenerationTask(id);
-            if (taskRetryBlocked(detail)) {
-                message.warning("请先查看失败原因，不要立即重新提交");
+            const detailOutcome = readTaskOutcome(detail);
+            if (isTaskRegenerateBlocked(detail)) {
+                message.warning(taskOutcomeCopy(detailOutcome).message);
                 return;
+            }
+            if (isRegenerateConfirm(detailOutcome)) {
+                const copy = taskOutcomeCopy(detailOutcome);
+                const confirmed = await new Promise<boolean>((resolve) => {
+                    modal.confirm({
+                        title: copy.confirmTitle || "确认重新生成？",
+                        content: copy.confirmContent || copy.message,
+                        okText: "继续重新生成",
+                        cancelText: "取消",
+                        centered: true,
+                        onOk: () => resolve(true),
+                        onCancel: () => resolve(false),
+                        afterClose: () => resolve(false),
+                    });
+                });
+                if (!confirmed) return;
             }
             const portraitError = portraitTaskRetryError(detail.inputJson, detail.model);
             if (portraitError) throw new Error(portraitError);
@@ -368,8 +386,11 @@ export default function TasksPage() {
         const request = detailRequestRef.current;
         setActingId(task.id);
         try {
-            const result = await queryFailedVideoProviderTask(task.id);
-            if (!result.recovered) {
+            const recoveredTask = await recoverTask(task.id);
+            const outcome = readTaskOutcome(recoveredTask);
+            if (outcome?.phase !== "ready" && recoveredTask.status !== "succeeded") {
+                if (request === detailRequestRef.current) setDetailTask(recoveredTask);
+                setTasks((items) => items.map((item) => (item.id === task.id ? { ...item, ...recoveredTask } : item)));
                 const logs = await listTaskLogs(task.id);
                 if (request === detailRequestRef.current) {
                     setTaskLogs(logs);
@@ -377,14 +398,14 @@ export default function TasksPage() {
                 }
                 return;
             }
-            if (request === detailRequestRef.current) setDetailTask(result.task);
-            setTasks((items) => items.map((item) => (item.id === task.id ? { ...item, ...result.task } : item)));
-            await syncGenerationTaskToCanvasStore(result.task);
+            if (request === detailRequestRef.current) setDetailTask(recoveredTask);
+            setTasks((items) => items.map((item) => (item.id === task.id ? { ...item, ...recoveredTask } : item)));
+            await syncGenerationTaskToCanvasStore(recoveredTask);
             const logs = await listTaskLogs(task.id).catch(() => undefined);
             if (logs && request === detailRequestRef.current) setTaskLogs(logs);
             if (!localMode) window.dispatchEvent(new CustomEvent("wallet:updated"));
             void loadTasks(false);
-            if (request === detailRequestRef.current) message.success("视频已取回，未重新生成");
+            if (request === detailRequestRef.current) message.success("生成结果已取回，未重新生成");
         } catch (error) {
             if (request === detailRequestRef.current) message.error(error instanceof Error ? error.message : "查询上游任务失败");
         } finally {
@@ -604,7 +625,8 @@ export default function TasksPage() {
 }
 
 function canQueryProviderTask(task: GenerationTask) {
-    return task.status === "failed" && (task.type.startsWith("canvas_video") || task.type.startsWith("video_")) && Boolean(task.providerRequestId);
+    if (task.outcome) return canRecoverTaskOutcome(readTaskOutcome(task));
+    return canRecoverTaskOutcome(readTaskOutcome(task)) || (task.status === "failed" && (task.type.startsWith("canvas_video") || task.type.startsWith("video_")) && Boolean(task.providerRequestId));
 }
 
 function TaskResultMedia({ value, taskType }: { value?: string; taskType: string }) {

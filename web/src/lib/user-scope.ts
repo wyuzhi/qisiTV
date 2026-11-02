@@ -2,14 +2,10 @@ const ACTIVE_USER_SCOPE_KEY = "infinite-canvas:active-user-scope";
 const GUEST_SCOPE = "guest";
 
 let memoryScope: string | undefined;
-let activeUserScopeEpoch = 1;
 
-export type UserScopeEpoch = {
-    scope: string;
-    generation: number;
-};
-
-const userScopeListeners = new Set<(epoch: UserScopeEpoch) => void>();
+// BeefTV has one local workspace per backend. The workspace id only namespaces
+// local persistence; it changes once at startup (guest -> workspace id).
+const namespaceListeners = new Set<() => void>();
 
 function readStoredUserScope() {
     if (typeof window === "undefined") return "";
@@ -28,35 +24,18 @@ export function getActiveUserScope() {
     return readStoredUserScope() || GUEST_SCOPE;
 }
 
-export function getActiveUserScopeEpoch() {
-    return activeUserScopeEpoch;
-}
-
-// Conversation subscribers and media guards share one identity clock.
-export function getUserScopeGeneration() {
-    return getActiveUserScopeEpoch();
-}
-
-export function captureUserScopeEpoch(scope = getActiveUserScope()): UserScopeEpoch {
-    return { scope, generation: getActiveUserScopeEpoch() };
-}
-
-export function userScopeEpochMatches(epoch: UserScopeEpoch, live = captureUserScopeEpoch()) {
-    return epoch.scope === live.scope && epoch.generation === live.generation;
-}
-
-export function subscribeUserScope(listener: (epoch: UserScopeEpoch) => void) {
-    userScopeListeners.add(listener);
+/** Re-read namespaced local storage after the workspace namespace is selected at startup. */
+export function onStorageNamespaceChange(listener: () => void) {
+    namespaceListeners.add(listener);
     return () => {
-        userScopeListeners.delete(listener);
+        namespaceListeners.delete(listener);
     };
 }
 
 export function setActiveUserScope(userId?: string | null) {
     const next = userId || GUEST_SCOPE;
+    const changed = next !== getActiveUserScope();
     memoryScope = next;
-    // Bump even when the scope string repeats so A→B→A cannot reuse a captured identity.
-    activeUserScopeEpoch += 1;
     if (typeof window !== "undefined") {
         try {
             window.localStorage?.setItem(ACTIVE_USER_SCOPE_KEY, next);
@@ -64,10 +43,10 @@ export function setActiveUserScope(userId?: string | null) {
             // Scope persistence is best effort; callers can continue in guest mode.
         }
     }
-    const epoch = captureUserScopeEpoch(next);
-    for (const listener of userScopeListeners) {
-        try { listener(epoch); }
-        catch (error) { console.warn("账号切换订阅处理失败", error); }
+    if (!changed) return;
+    for (const listener of namespaceListeners) {
+        try { listener(); }
+        catch (error) { console.warn("本地存储命名空间切换后重读失败", error); }
     }
 }
 

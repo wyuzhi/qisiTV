@@ -54,4 +54,31 @@ func TestNormalizeCatalogVideoCapabilityKeepsExplicitZerosAndOmitsMissing(t *tes
 	if _, present := video["durationSupported"]; present {
 		t.Fatal("optional durationSupported invented")
 	}
+	if _, valid := NormalizeVersionedVideoCapability(partial, "v1"); valid {
+		t.Fatal("managed catalog must explicitly declare each reference count")
+	}
+}
+
+func TestNormalizeVideoOperationReferencesPreservesZeroAndRejectsInvalid(t *testing.T) {
+	var video map[string]any
+	if err := json.Unmarshal(sampleCatalogVideo(t, 3, 1), &video); err != nil {
+		t.Fatal(err)
+	}
+	video["operationReferences"] = map[string]any{"image_to_video": map[string]any{"maxImages": 2, "maxVideos": 0, "maxAudios": 0}}
+	body, _ := json.Marshal(video)
+	got, ok := NormalizeVersionedVideoCapability(body, "v1")
+	if !ok {
+		t.Fatal("valid operation limits rejected")
+	}
+	counts := got["operationReferences"].(map[string]any)["image_to_video"].(map[string]any)
+	if counts["maxVideos"] != 0 || counts["maxImages"] != 2 {
+		t.Fatal("operation limits lost")
+	}
+	for _, invalid := range []any{[]any{}, map[string]any{"missing_operation": map[string]any{}}, map[string]any{"image_to_video": map[string]any{"maxImages": 2.5}}, map[string]any{"image_to_video": map[string]any{"minImages": 3, "maxImages": 2}}} {
+		video["operationReferences"] = invalid
+		body, _ := json.Marshal(video)
+		if _, ok := NormalizeVersionedVideoCapability(body, "v2"); ok {
+			t.Fatalf("invalid operation limits accepted: %s", body)
+		}
+	}
 }

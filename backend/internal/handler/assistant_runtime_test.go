@@ -30,6 +30,15 @@ func TestRuntimeLifecycleRequiresHostAndFencesStoppedTurn(t *testing.T) {
 	if got := env.callWithHeaders(t, http.MethodGet, "/assistant/runtime/turns/deadbeef", "", headers); got.Code != http.StatusForbidden {
 		t.Fatalf("unknown task admitted %d", got.Code)
 	}
+	const wakeTurnID = "11223344556677889900aabb"
+	wakeBody := `{"turnId":"` + wakeTurnID + `","canvasId":"` + env.canvasID + `","permissionMode":"canvas","sessionId":"durable:00000000-0000-4000-8000-000000000001"}`
+	if got := env.call(t, http.MethodPost, "/assistant/runtime/turns", wakeBody); got.Code != http.StatusForbidden {
+		t.Fatalf("UI opened runtime turn: %d", got.Code)
+	}
+	opened := decodeEnvelope(t, env.callWithHeaders(t, http.MethodPost, "/assistant/runtime/turns", wakeBody, headers))
+	if opened["open"] != true || opened["canvasId"] != env.canvasID || opened["turnId"] != wakeTurnID {
+		t.Fatalf("host runtime turn open failed: %#v", opened)
+	}
 }
 
 func TestTerminalLineRequiresMatchingBusinessTurn(t *testing.T) {

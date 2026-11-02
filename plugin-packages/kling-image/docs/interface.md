@@ -5,8 +5,8 @@
 - 插件 ID：`kling-image`。
 - Provider ID：`kling-image`。
 - 能力：`image`。
-- 默认 Base URL：`https://api.klingai.com`。
-- 鉴权驱动：`bearer`。
+- 默认 Base URL：`https://api-beijing.klingai.com`。
+- 鉴权驱动：`jwt-hs256`。
 - 创建：`POST /v1/images/generations`。
 - 查询：`GET /v1/images/generations/{{taskId}}`。
 
@@ -14,7 +14,8 @@
 
 | 字段 | 类型 | 必填 | 含义 |
 | --- | --- | --- | --- |
-| `apiKey` | secret | 是 | API Key |
+| `apiKey` | secret | 是 | Access Key / API Key |
+| `secretKey` | secret | 否 | Secret Key |
 
 ## 统一字段映射
 
@@ -93,8 +94,14 @@
       {
         "name": "apiKey",
         "type": "secret",
-        "label": "API Key",
+        "label": "Access Key / API Key",
         "required": true
+      },
+      {
+        "name": "secretKey",
+        "type": "secret",
+        "label": "Secret Key",
+        "required": false
       }
     ]
   },
@@ -113,11 +120,12 @@
           "creation",
           "agent"
         ],
-        "baseUrl": "https://api.klingai.com",
+        "baseUrl": "https://api-beijing.klingai.com",
         "requiresPublicMediaUrls": false,
         "auth": {
-          "type": "bearer",
-          "field": "apiKey"
+          "type": "jwt-hs256",
+          "field": "apiKey",
+          "secretField": "secretKey"
         },
         "parameters": [
           {
@@ -184,23 +192,55 @@
           "body": {
             "$merge": [
               {
-                "model": {
+                "model_name": {
                   "$ref": "request.model"
                 },
                 "prompt": {
                   "$ref": "request.prompt"
                 },
-                "images": {
+                "image": {
                   "$omitEmpty": {
-                    "$map": {
-                      "from": {
-                        "$ref": "request.images"
-                      },
-                      "as": "media",
-                      "in": {
-                        "$ref": "media.value"
+                    "$first": {
+                      "$map": {
+                        "from": {
+                          "$sortByOrder": {
+                            "$ref": "request.images"
+                          }
+                        },
+                        "as": "media",
+                        "in": {
+                          "$ref": "media.value"
+                        }
                       }
                     }
+                  }
+                },
+                "n": {
+                  "$omitEmpty": {
+                    "$if": {
+                      "condition": {
+                        "$gt": [
+                          {
+                            "$ref": "request.imageCount"
+                          },
+                          0
+                        ]
+                      },
+                      "then": {
+                        "$ref": "request.imageCount"
+                      },
+                      "else": null
+                    }
+                  }
+                },
+                "aspect_ratio": {
+                  "$omitEmpty": {
+                    "$ref": "request.aspectRatio"
+                  }
+                },
+                "resolution": {
+                  "$omitEmpty": {
+                    "$ref": "request.resolution"
                   }
                 },
                 "parameters": {
@@ -231,6 +271,9 @@
           "taskId": {
             "$coalesce": [
               {
+                "$ref": "response.data.task_id"
+              },
+              {
                 "$ref": "response.id"
               },
               {
@@ -250,6 +293,9 @@
           "status": {
             "$coalesce": [
               {
+                "$ref": "response.data.task_status"
+              },
+              {
                 "$ref": "response.status"
               },
               {
@@ -264,6 +310,9 @@
           "message": {
             "$coalesce": [
               {
+                "$ref": "response.data.task_status_msg"
+              },
+              {
                 "$ref": "response.error.message"
               },
               {
@@ -276,6 +325,9 @@
           },
           "images": {
             "$coalesce": [
+              {
+                "$ref": "response.data.task_result.images"
+              },
               {
                 "$ref": "response.image_url"
               },
@@ -297,6 +349,7 @@
             ]
           },
           "errorPaths": [
+            "code",
             "error.code"
           ],
           "resultEphemeral": true

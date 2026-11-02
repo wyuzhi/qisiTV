@@ -34,7 +34,12 @@ type RunRequest struct {
 	AlternatePayloadHash string
 	TurnID               string
 	CanvasID             string
+	CallerKind           string
+	ClientID             string
+	ClientLabel          string
 	TurnGuard            TurnGuard
+	AfterCommitInTx      func(tx *gorm.DB) error
+	OnErrorInTx          func(tx *gorm.DB, err error) error
 }
 
 // TurnGuard closes the preflight/settlement race on the same connection as
@@ -108,7 +113,9 @@ func (s *Store) Run(ctx context.Context, req RunRequest, fn func(tx *gorm.DB) ([
 	var outcome RunOutcome
 	err := db.Transaction(func(tx *gorm.DB) error {
 		record := model.AgentOpRecord{OpID: req.OpID, UserID: req.UserID, Op: req.Op,
-			PayloadHash: req.PayloadHash, Status: "running", TurnID: strings.TrimSpace(req.TurnID)}
+			PayloadHash: req.PayloadHash, Status: "running", TurnID: strings.TrimSpace(req.TurnID),
+			CallerKind: strings.TrimSpace(req.CallerKind), ClientID: strings.TrimSpace(req.ClientID),
+			ClientLabel: strings.TrimSpace(req.ClientLabel)}
 		if err := tx.Create(&record).Error; err != nil {
 			if !isDuplicateKey(err) {
 				return AsError(err)
@@ -139,11 +146,19 @@ func (s *Store) Run(ctx context.Context, req RunRequest, fn func(tx *gorm.DB) ([
 		}
 		out, runErr := fn(tx)
 		if runErr != nil {
+			if req.OnErrorInTx != nil {
+				runErr = req.OnErrorInTx(tx, runErr)
+			}
 			return runErr
 		}
 		if err := tx.Model(&model.AgentOpRecord{}).Where("user_id = ? AND op_id = ?", req.UserID, req.OpID).
 			Updates(map[string]any{"status": "succeeded", "result_json": string(out), "turn_id": strings.TrimSpace(req.TurnID)}).Error; err != nil {
 			return AsError(err)
+		}
+		if req.AfterCommitInTx != nil {
+			if err := req.AfterCommitInTx(tx); err != nil {
+				return AsError(err)
+			}
 		}
 		outcome = RunOutcome{Result: out}
 		return nil

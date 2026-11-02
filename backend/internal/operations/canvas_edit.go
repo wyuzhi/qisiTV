@@ -8,13 +8,13 @@ import (
 
 func registerCanvasEditOps(r *Registry) {
 	for _, action := range []struct{ id, summary, properties, required string }{
-		{"canvas.node.move", "移动一个节点，保留节点内容、参数和素材", `"nodeId":{"type":"string"},"position":{"type":"object","properties":{"x":{"type":"number"},"y":{"type":"number"}},"required":["x","y"],"additionalProperties":false}`, `"nodeId","position"`},
-		{"canvas.node.delete", "移除一个画布节点及连接；保留素材库原件和任务", `"nodeId":{"type":"string"}`, `"nodeId"`},
-		{"canvas.edge.delete", "移除指定连接，保留两个节点及素材", `"edgeId":{"type":"string"}`, `"edgeId"`},
+		{"canvas.node.move", "移动节点位置", `"nodeId":{"type":"string"},"position":{"type":"object","properties":{"x":{"type":"number"},"y":{"type":"number"}},"required":["x","y"]}`, `"nodeId","position"`},
+		{"canvas.node.delete", "移除画布节点及连线", `"nodeId":{"type":"string"}`, `"nodeId"`},
+		{"canvas.edge.delete", "移除指定连线", `"edgeId":{"type":"string"}`, `"edgeId"`},
 	} {
 		id := action.id
 		r.Register(Op{ReplaySafe: true, AssistantCanvas: true, ID: id, Summary: action.summary, Scope: ScopeCanvas,
-			Params:  json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"expectedRevision":{"type":"integer","minimum":0},` + action.properties + `},"required":["canvasId","expectedRevision",` + action.required + `],"additionalProperties":false}`),
+			Params:  json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"expectedRevision":{"type":"integer"},` + action.properties + `},"required":["canvasId","expectedRevision",` + action.required + `]}`),
 			Handler: func(ctx *Context, params json.RawMessage) (any, error) { return editCanvas(ctx, params, id) },
 		})
 	}

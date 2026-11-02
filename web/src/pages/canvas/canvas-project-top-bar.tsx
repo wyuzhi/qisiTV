@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link } from "react-router";
 import { Check, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Columns2, CopyPlus, Focus, FolderKanban, Gauge, History, Home, LayoutGrid, MoreHorizontal, Pencil, Plus, Redo2, Save, Search, Sparkles, Trash2, Undo2, Upload, Workflow, X } from "lucide-react";
-import { Button, Dropdown, Tooltip } from "antd";
+import { App, Button, Dropdown, Tooltip } from "antd";
 
 import { BrandLogoFrame } from "@/components/brand/brand-logo";
 import { canvasDockStyle } from "@/lib/canvas/canvas-aceternity-style";
 import type { CanvasContextSummary } from "@/lib/canvas/canvas-context-summary";
 import type { CanvasShortDramaProgress } from "@/lib/canvas/canvas-short-drama";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { exportCanvasProjectsByIds } from "@/lib/canvas/canvas-export";
+import { resolveWorkspaceExportCanvasIds } from "@/lib/canvas/canvas-workspace-project";
+import { loadCanvasProjectForEditing } from "@/services/local-workspace-sync";
+import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useCanvasThemeStore } from "@/stores/canvas/use-canvas-theme-store";
 import type { CanvasMediaPerformanceMode } from "@/types/canvas";
 
@@ -104,6 +108,7 @@ export function CanvasTopBar({
     onDuplicateProject,
     libtvReadonlyChrome = false,
 }: CanvasTopBarProps) {
+    const { message } = App.useApp();
     const theme = canvasThemes[useCanvasThemeStore((state) => state.theme)];
     const dockStyle = canvasDockStyle(theme, theme.node.text);
     const currentCanvasIndex = Math.max(0, projectCanvases.findIndex((canvas) => canvas.id === currentCanvasId));
@@ -127,6 +132,26 @@ export function CanvasTopBar({
     };
 
     const cancelCanvasRename = () => setRenameCanvas(null);
+
+    const runExport = async (canvasId: string | undefined, singleCanvasOnly: boolean) => {
+        if (!canvasId) return;
+        try {
+            const store = useCanvasStore.getState();
+            const ids = resolveWorkspaceExportCanvasIds(store.projects, [canvasId], { singleCanvasOnly });
+            await exportCanvasProjectsByIds(
+                ids,
+                async (id) => (await loadCanvasProjectForEditing(id).catch(() => undefined)) || store.openProject(id),
+                {
+                    singleCanvasOnly,
+                    folders: store.folders,
+                    allowMissingMedia: true,
+                    onSkipped: (count) => message?.warning?.(`已导出备份，已自动跳过 ${count} 个缺失或无法读取的素材`),
+                },
+            );
+        } catch (error) {
+            message?.error?.(error instanceof Error ? error.message : "导出失败，请重试");
+        }
+    };
 
 
     useEffect(() => {
@@ -182,6 +207,10 @@ export function CanvasTopBar({
                                     { key: "projects", label: <Link to="/canvas">全部项目</Link> },
                                     { type: "divider" },
                                     { key: "new", label: <Link to="/canvas?mode=new">创建新项目</Link> },
+                                    ...(currentCanvasId ? [
+                                        { key: "export-project", label: "导出项目（全部画布）", onClick: () => void runExport(currentCanvasId, false) },
+                                        { key: "export-canvas", label: "导出当前画布", onClick: () => void runExport(currentCanvasId, true) },
+                                    ] : []),
                                     { key: "delete", danger: true, label: "删除当前画布", onClick: onDeleteProject },
                                 ],
                             }}
@@ -309,6 +338,7 @@ export function CanvasTopBar({
                                                                 { key: "new-window", label: "在新窗口打开", onClick: () => onOpenCanvasInNewWindow?.(canvas.id) },
                                                                 { key: "rename", label: "重命名画布", onClick: () => { setCanvasMenuOpen(true); setRenameCanvas({ id: canvas.id, title: canvasLabel }); } },
                                                                 { key: "duplicate", label: "复制画布", onClick: () => void onDuplicateCanvas?.(canvas.id) },
+                                                                { key: "export", label: "导出画布", onClick: () => void runExport(canvas.id, true) },
                                                                 { key: "delete", danger: true, label: "删除画布", onClick: () => void onDeleteCanvas?.(canvas.id) },
                                                             ],
                                                         }}

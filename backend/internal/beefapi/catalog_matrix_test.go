@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"qisitv/backend/internal/workspace"
 )
 
 func TestFetchedBeefAPICatalogEveryModelHasTheCorrectGenerationFamily(t *testing.T) {
@@ -38,5 +40,38 @@ func TestFetchedBeefAPICatalogEveryModelHasTheCorrectGenerationFamily(t *testing
 		if capability != want || (want != "" && protocol == "") {
 			t.Fatalf("%s: capability=%s protocol=%s expected=%s", model.ID, capability, protocol, want)
 		}
+	}
+}
+
+// Media catalog authorization leaves the independent assistant choice unchanged.
+func TestFetchedBeefAPICatalogPreservesMissingAssistantSelection(t *testing.T) {
+	raw, err := os.ReadFile("../../../fixtures/model-catalog/beefapi-20261013.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire []struct {
+		ID        string   `json:"id"`
+		Endpoints []string `json:"supported_endpoint_types"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	models := make([]CatalogModel, 0, len(wire))
+	for _, model := range wire {
+		models = append(models, CatalogModel{ID: model.ID, SupportedEndpointTypes: model.Endpoints})
+	}
+	store, err := workspace.NewProviderConfig(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := applyCatalog(store, models, "", "42", "9001"); err != nil {
+		t.Fatal(err)
+	}
+	current, _, err := store.LoadEffectiveModelConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, selected := current.Config["assistantModel"]; selected {
+		t.Fatalf("catalog connection implicitly chose an assistant: %v", current.Config["assistantModel"])
 	}
 }

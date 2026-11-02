@@ -72,7 +72,9 @@ description: 签名清单、打包布局、密钥、发布工作流、回滚和�
 }
 ```
 
-平台键为 `darwin-arm64`、`darwin-amd64`、`windows-amd64`。版本只接受稳定的 `vMAJOR.MINOR.PATCH`。应用会拒绝相同或更低的版本。
+平台键为 `darwin-arm64`、`darwin-amd64`、`windows-amd64`、`linux-amd64`。版本只接受稳定的 `vMAJOR.MINOR.PATCH`。应用会拒绝相同或更低的版本。
+
+`v2.0.6` 及更早版本读取 `desktop-update.json`（`schema: 1`）；`v2.1.0` 起读取 `desktop-update-v2.json`（`schema: 2`），每个平台支持多源 `urls`（国内 CNB 源与 R2 源按区域优先选择并支持跨源断点续传）以及可选的 `deltas[fromVersion]` 增量包。当存在匹配当前运行版本的 `deltas[currentVersion]` 时，客户端优先下载 `BeefTV-vX.Y.Z-<platform>-from-vA.B.C.delta.zip`，从本机安装目录复用未变文件并对主程序执行二进制差分补丁，逐文件校验 SHA-256；若本机文件缺失/被修改或增量包校验失败，会自动回退下载完整平台 `.zip`。
 
 现有 macOS 发布脚本使用 ad hoc 签名，没有 Developer ID 身份或 Apple 公证。更新器可以独立验签，但这不保证首次下载的应用能通过 Gatekeeper。要让用户无需手动放行，需要 Developer ID Application 签名及 Apple 公证；此前用户可按 [Apple 的说明](https://support.apple.com/zh-cn/102445)，在确认应用来源后于「隐私与安全性」中选择「仍要打开」。不要关闭整个系统的安全检查。
 
@@ -103,6 +105,10 @@ go run ./cmd/update-release gen-key \
 生产密钥由仓库负责人保管。本仓库的工具不会生成生产密钥，也不会改 `VERSION`。
 
 ## 发布流水线
+
+正式发版默认在 R2 更新源激活后调用 `mirror-desktop.yml`，立即触发 CNB `beeftv-downloads/desktop` 仓库的 `api_trigger_release`，并等待四个平台原安装包的公开验证记录。CNB 在每个安装包完成匿名断开续传、大小和完整 SHA-256 校验后才发布记录；官网服务按官方摘要接纳记录，下次页面刷新即可显示入口，服务端最多缓存 60 秒，不必等待每小时部署。定时任务只补偿遗漏或失败。
+
+GitHub 仓库需配置 `BEEFTV_CNB_TRIGGER_TOKEN`，仅授权 `beeftv-downloads/desktop` 的 `repo-cnb-trigger:rw`，不要授予代码或 Release 写权限。发版预检会拒绝缺少该 Secret 的配置；令牌只用于触发固定仓库流水线，CNB 上传仍使用任务自己的临时令牌。镜像失败会使镜像任务报告失败，已发布的 R2/GitHub 安装包继续可用，官网不展示未验证入口。只重跑失败的镜像任务，或手动运行 `Mirror desktop installers to CNB` 并填写已发布版本；不要因此重跑整套发版。
 
 在 `glanderness/BeefTV` 的 `main` 上手动运行 `Release desktop`。`confirm_version` 必须等于 `VERSION`。`CHANGELOG.md` 里对应的 `## vX.Y.Z` 会同时成为 GitHub Release 说明和清单 `notes`。
 

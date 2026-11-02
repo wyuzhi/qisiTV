@@ -32,7 +32,8 @@ test('bundled runtime, locked dependencies, and paths with spaces', () => {
     expect(existsSync(bundled)).toBe(true);
     expect(existsSync(path.join(destination, 'model-stream-idle.mjs'))).toBe(true);
     expect(existsSync(path.join(destination, 'model-transport-error.mjs'))).toBe(true);
-    expect(existsSync(path.join(destination, 'durable-stream-text.mjs'))).toBe(true);
+    expect(existsSync(path.join(destination, 'durable-turn-projection.mjs'))).toBe(true);
+    expect(existsSync(path.join(destination, 'durable-extensions.mjs'))).toBe(true);
     expect(existsSync(path.join(destination, 'business-progress.mjs'))).toBe(true);
     expect(existsSync(path.join(destination, 'canvas-write-view.mjs'))).toBe(true);
     expect(existsSync(path.join(destination, 'node_modules/@earendil-works/pi-coding-agent/package.json'))).toBe(true);

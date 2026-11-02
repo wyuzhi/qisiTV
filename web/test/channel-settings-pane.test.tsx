@@ -14,7 +14,7 @@ test("removing a channel clears its legacy and assistant selections", () => {
 
 test("connection actions render immediate progress and a retry after network failure", () => {
     const noop = () => {};
-    const props = { busy: false, onConnect: noop, onCancel: noop, onRetry: noop, onDisconnect: noop, onWallet: noop };
+    const props = { busy: false, onConnect: noop, onCancel: noop, onRetry: noop, onDisconnect: noop };
     const connecting = renderToStaticMarkup(<BeefAPIConnectionActions {...props} connection={{ state: "connecting", hasCredential: false }} />);
     expect(connecting).toContain("正在连接");
     expect(connecting).toContain("disabled");
@@ -22,6 +22,12 @@ test("connection actions render immediate progress and a retry after network fai
     const failed = renderToStaticMarkup(<BeefAPIConnectionActions {...props} connection={{ state: "connection_error", hasCredential: false }} />);
     expect(failed).toContain("重新连接");
     expect(failed).not.toContain("disabled");
+    const disconnected = renderToStaticMarkup(<BeefAPIConnectionActions {...props} connection={null} />);
+    expect(disconnected).toContain("连接 Topaz 算力");
+    const connected = renderToStaticMarkup(<BeefAPIConnectionActions {...props} connection={{ state: "connected", hasCredential: true }} />);
+    expect(connected).toContain("断开连接");
+    expect(connected).not.toContain("账户");
+    expect(connected).not.toContain("充值");
 });
 
 test("pinned BeefAPI is visible and cannot be deleted before models are fetched", () => {

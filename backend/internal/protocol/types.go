@@ -112,15 +112,16 @@ type PollContext struct {
 }
 
 type RequestSpec struct {
-	Method      string              `json:"method"`
-	Path        string              `json:"path"`
-	OriginPath  bool                `json:"originPath,omitempty"`
-	ContentType string              `json:"contentType"`
-	Headers     map[string]string   `json:"headers,omitempty"`
-	Query       map[string][]string `json:"query,omitempty"`
-	Body        any                 `json:"body,omitempty"`
-	Files       []RequestFilePart   `json:"files,omitempty"`
-	Auth        ManifestAuth        `json:"auth,omitempty"`
+	DefaultPathPrefix string              `json:"defaultPathPrefix,omitempty"`
+	Method            string              `json:"method"`
+	Path              string              `json:"path"`
+	OriginPath        bool                `json:"originPath,omitempty"`
+	ContentType       string              `json:"contentType"`
+	Headers           map[string]string   `json:"headers,omitempty"`
+	Query             map[string][]string `json:"query,omitempty"`
+	Body              any                 `json:"body,omitempty"`
+	Files             []RequestFilePart   `json:"files,omitempty"`
+	Auth              ManifestAuth        `json:"auth,omitempty"`
 }
 
 type RequestFilePart struct {
@@ -210,6 +211,7 @@ type Manifest struct {
 	AgentResponse   *ManifestAgentResponse `json:"-"`
 	Auth            ManifestAuth           `json:"-"`
 	Validations     []ManifestValidation   `json:"-"`
+	Variables       []ManifestVariable     `json:"-"`
 }
 
 // Manifest JSON is the public plugin contract. Metadata is an internal
@@ -301,6 +303,7 @@ type ManifestContributions struct {
 }
 
 type ManifestProvider struct {
+	Variables               []ManifestVariable     `json:"variables,omitempty"`
 	ID                      string                 `json:"id"`
 	Label                   string                 `json:"label"`
 	Capabilities            []Capability           `json:"capabilities"`
@@ -335,6 +338,13 @@ type ManifestAuth struct {
 type ManifestValidation struct {
 	Assert  any    `json:"assert"`
 	Message string `json:"message"`
+}
+
+// Variables are ordered pure expressions shared by request validation and
+// construction. They are scoped to one provider call and never mutate input.
+type ManifestVariable struct {
+	Name  string `json:"name"`
+	Value any    `json:"value"`
 }
 
 type ManifestWorkflow struct {

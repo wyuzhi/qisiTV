@@ -31,9 +31,6 @@ func (s *operationSession) AgentSkillFile(userID string, pin skills.Pin, path st
 	}
 	return s.service.skillDomain().AgentFile(userID, pin, path)
 }
-func (s *Service) AgentSkillCatalog(userID string) ([]skills.AgentCatalogItem, error) {
-	return s.skillDomain().AgentCatalog(userID)
-}
 func (s *operationSession) AgentSkillCatalog(userID string) ([]skills.AgentCatalogItem, error) {
 	return s.service.skillDomain().AgentCatalog(userID)
 }

@@ -1,9 +1,8 @@
 import { sanitizeChannelModelCatalogItem, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
-import { captureUserScope, isUserScopeAbandonedError, UserScopeAbandonedError } from "@/lib/user-scope-guard";
-import { getBeefAPIConnectionEpoch } from "@/services/api/beefapi-connection";
 import { createChannelTransport } from "@/services/api/channel-transport";
 import { readAxiosError, validateGeminiPayload } from "@/services/api/image-response";
 import { geminiApiUrl, geminiHeaders } from "@/services/api/image-transport";
+import { BeefAPIConnectionChangedError, getBeefAPIConnectionEpoch } from "@/services/api/beefapi-connection";
 import { ApiError, http } from "@/services/api/request";
 import { buildApiUrl, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 
@@ -23,8 +22,12 @@ type OpenAIModelRecord = {
     model_type?: string;
     supported_endpoint_types?: string[];
     video_capabilities?: unknown;
+    image_capabilities?: unknown;
+    image_capabilities_version?: string;
     video_capabilities_version?: string;
     video_pricing?: unknown;
+    media_capabilities?: unknown;
+    media_capabilities_version?: string;
 };
 type OpenAIModelPayload = { data?: OpenAIModelRecord[]; error?: { message?: string } };
 
@@ -37,9 +40,13 @@ async function fetchOpenAIModelCatalog(config: Pick<ModelChannel, "baseUrl" | "a
                 displayName: model.display_name || model.name,
                 modelType: model.model_type,
                 supportedEndpointTypes: model.supported_endpoint_types,
+                imageCapabilities: model.image_capabilities,
+                imageCapabilitiesVersion: model.image_capabilities_version,
                 videoCapabilities: model.video_capabilities,
                 videoCapabilitiesVersion: model.video_capabilities_version,
                 videoPricing: model.video_pricing,
+                mediaCapabilities: model.media_capabilities,
+                mediaCapabilitiesVersion: model.media_capabilities_version,
             }),
         )
         .filter((item): item is ChannelModelCatalogItem => Boolean(item));
@@ -66,9 +73,8 @@ export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKe
 export type ChannelModelFetchResult = { models: string[]; catalog: ChannelModelCatalogItem[] };
 
 export async function fetchChannelModels(channel: ModelChannel, viaBackend = false, signal?: AbortSignal): Promise<ChannelModelFetchResult> {
-    const expectedScope = captureUserScope();
-    const connectionEpoch = getBeefAPIConnectionEpoch();
     const managed = channel.id === "beefapi" && (channel.pinned || Boolean(channel.credentialRef));
+    const connectionEpoch = getBeefAPIConnectionEpoch();
     if (managed || channel.apiFormat === "likeai") {
         viaBackend = true;
     }
@@ -89,8 +95,8 @@ export async function fetchChannelModels(channel: ModelChannel, viaBackend = fal
             headers: channel.headers,
             channelId: managed ? channel.id : undefined,
             credentialRef: managed ? "beefapi-enterprise" : undefined,
-        }, { timeout: 30_000, expectedScope, signal });
-        if (managed && connectionEpoch !== getBeefAPIConnectionEpoch()) throw new UserScopeAbandonedError();
+        }, { timeout: 30_000, signal });
+        if (managed && connectionEpoch !== getBeefAPIConnectionEpoch()) throw new BeefAPIConnectionChangedError();
         const catalog = new Map<string, ChannelModelCatalogItem>();
         for (const item of result.models || []) {
             const entry = typeof item === "string" ? sanitizeChannelModelCatalogItem({ id: item }) : sanitizeChannelModelCatalogItem(item);
@@ -105,7 +111,7 @@ export async function fetchChannelModels(channel: ModelChannel, viaBackend = fal
         // The backend has already classified and sanitized catalogue errors.
         // Running generation-error classification again turns a precise 502
         // auth/unsupported-catalog message into a generic unavailable message.
-        if (error instanceof ApiError || isUserScopeAbandonedError(error) || (error instanceof DOMException && error.name === "AbortError")) throw error;
+        if (error instanceof ApiError || error instanceof BeefAPIConnectionChangedError || (error instanceof DOMException && error.name === "AbortError")) throw error;
         throw new Error(readAxiosError(error, "读取模型失败"));
     }
 }

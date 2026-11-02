@@ -129,6 +129,11 @@
         ],
         "baseUrl": "https://apihub.agnes-ai.com/v1",
         "requiresPublicMediaUrls": true,
+        "mediaTransport": {
+          "image": "inline",
+          "video": "url",
+          "audio": "url"
+        },
         "auth": {
           "type": "bearer",
           "field": "apiKey"
@@ -226,29 +231,6 @@
               ]
             },
             "message": "Agnes 2.5 插件仅支持 agnes-video-2.5 与 agnes-video-2.5-flash"
-          },
-          {
-            "assert": {
-              "$and": [
-                {
-                  "$gte": [
-                    {
-                      "$ref": "request.duration"
-                    },
-                    4
-                  ]
-                },
-                {
-                  "$lte": [
-                    {
-                      "$ref": "request.duration"
-                    },
-                    12
-                  ]
-                }
-              ]
-            },
-            "message": "Agnes Video 2.5 时长必须在 4–12 秒之间"
           },
           {
             "assert": {

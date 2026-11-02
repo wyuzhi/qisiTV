@@ -90,6 +90,6 @@ func (s *Service) Prepare(resource *model.Resource) error {
 		resource.PlaybackStatus = model.PlaybackStatusNone
 		resource.PlaybackObjectKey = ""
 	}
-	s.maybeStart(resource)
+	s.maybeStart(resource, true)
 	return nil
 }

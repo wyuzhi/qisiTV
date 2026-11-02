@@ -47,7 +47,7 @@ func TestNewStoryboardPreparationAtomicReplayAndUndo(t *testing.T) {
 	if err != nil || state.Change == nil || len(state.Change.CreatedNodeIDs) != 3 {
 		t.Fatal("missing script effects", err)
 	}
-	if _, err := h.service.UndoAssistantTurn(h.userID, h.canvasID, turn); err != nil {
+	if _, err := h.service.AssistantTurns().Undo(h.userID, h.canvasID, turn); err != nil {
 		t.Fatal(err)
 	}
 	restored := h.canvas(t)

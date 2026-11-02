@@ -100,7 +100,7 @@ func TestCanvasRenderAtomicAdmissionReplayAndNativeOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	taskID := first.Result.(map[string]any)["taskId"].(string)
-	scope, ok, err := svc.AssistantTurnScopeForHost("owner", turnID)
+	scope, ok, err := svc.AssistantTurns().ScopeForHost("owner", turnID)
 	if err != nil || !ok || len(scope.TaskIDs) != 1 || scope.TaskIDs[0] != taskID {
 		t.Fatalf("render receipt not in trusted taskscope: %+v %v", scope, err)
 	}
@@ -185,7 +185,7 @@ func TestCanvasRenderAtomicAdmissionReplayAndNativeOutput(t *testing.T) {
 	// membership for each read, rather than granting the rendered asset in a fixture.
 	readMedia := func(t *testing.T, params map[string]any) (operations.Result, error) {
 		t.Helper()
-		current, open, scopeErr := svc.AssistantTurnScopeForHost("owner", turnID)
+		current, open, scopeErr := svc.AssistantTurns().ScopeForHost("owner", turnID)
 		if scopeErr != nil || !open {
 			t.Fatalf("render turn no longer open: %v", scopeErr)
 		}
@@ -293,7 +293,7 @@ func TestCanvasRenderAtomicAdmissionReplayAndNativeOutput(t *testing.T) {
 	if err := svc.FinalizeAssistantTurn(turnID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.UndoAssistantTurn("owner", "canvas", turnID); err != nil {
+	if _, err := svc.AssistantTurns().Undo("owner", "canvas", turnID); err != nil {
 		t.Fatalf("render/edit/bind undo failed: %v", err)
 	}
 	restored, err := svc.UserCanvasProject("owner", "canvas")

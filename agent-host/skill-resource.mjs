@@ -177,17 +177,22 @@ export function formatSkillCatalog(items,{total=items?.length || 0}={}) {
   return lines.join('\n');
 }
 
-// One stable catalog section per conversation. A failed refresh keeps the last
-// good text so a transient error never removes and re-adds the section.
+// One stable catalog section per conversation. Once the first successful read
+// settles cache.settled, cache.text stays frozen (including undefined when the
+// initial catalog was empty) so mid-session skill installs/removals never mutate
+// the leading system header, while cache.items still refreshes for skill_load.
 export function createSkillCatalogSection({ readCatalog, cache = {} }) {
   if (typeof readCatalog !== 'function') throw fail('skill_service_unavailable');
   return section('beeftv_skill_catalog', async (_input, context) => {
     try {
       const catalog=await readCatalog(context?.signal);
       cache.items = normalizeSkillCatalog(catalog);
-      cache.text = formatSkillCatalog(cache.items,{total:Number(catalog?.total) || cache.items.length});
+      if (!cache.settled) {
+        cache.text = formatSkillCatalog(cache.items,{total:Number(catalog?.total) || cache.items.length});
+        cache.settled = true;
+      }
     } catch (error) {
-      if (cache.text === undefined) cache.items = [];
+      if (!cache.settled) cache.items = [];
       console.error(`agent-host: 技能目录读取失败 ${error?.reason || error?.message || error}`);
     }
     return cache.text;

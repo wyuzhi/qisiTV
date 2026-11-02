@@ -27,7 +27,7 @@ describe("asset upload entry points", () => {
         const handler = readFileSync(resolve(import.meta.dir, "../src/services/workspace-asset-upload.ts"), "utf8");
         expect(page).toContain("<AssetsEmptyState onImport={() => assetUploadInputRef.current?.click()} />");
         expect(page).toContain('accept="image/*,video/*"');
-        expect(page).toContain("await uploadWorkspaceAssetFiles(files, folderId, entryScope)");
+        expect(page).toContain("await uploadWorkspaceAssetFiles(files, folderId)");
         expect(page).toContain('label: "上传资产"');
         expect(handler).toContain("uploadMediaFile(file, \"video\"");
         expect(handler).toContain("请选择图片或视频文件");

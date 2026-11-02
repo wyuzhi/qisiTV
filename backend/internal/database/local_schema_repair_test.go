@@ -109,7 +109,7 @@ func TestSchemaRepairV8MissingDiagnosticsAndRecovery(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			db, path := brokenV8Fixture(t, damage)
 			if name == "diagnostics" {
-				err := db.Create(&model.Task{ID: "must-fail-before-repair"}).Error
+				err := db.Omit("RecoveryOutcome").Create(&model.Task{ID: "must-fail-before-repair"}).Error
 				if err == nil || !strings.Contains(err.Error(), "no column named failure_diagnostics") {
 					t.Fatalf("missing-column incident not reproduced: %v", err)
 				}

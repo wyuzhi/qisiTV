@@ -82,8 +82,8 @@ test('active rules survive restart; fresh reselect re-reads while the same reque
     const one = fixture.payloads.at(-1);
     assert.match(userText(one), /<skill name="短剧资产分批" version="1" skillId="batches"/);
     assert.match(userText(one), /第一步：只做 4 张竖版角色图[\s\S]*<\/skill>\n\n按技能做角色图/);
-    assert.match(systemText(one), /beeftv_active_skills[\s\S]*第一步/, 'official section carries active rules');
-    assert.match(systemText(one), /<available_skills>[\s\S]*<id>catalog-only<\/id>/);
+    assert.doesNotMatch(systemText(one), /beeftv_active_skills/, 'system header must not carry active_skills');
+    assert.match(systemText(one), /<instructions>[\s\S]*<beeftv_skill_catalog>[\s\S]*<available_skills>[\s\S]*<id>catalog-only<\/id>/);
     assert(fixture.reads.length>=3,'selection, section and dispatch each validate the pin');
     const beforeRetry=fixture.reads.length;
     const retry=await fixture.store.submit(entry,{turnId:'turn-1',content:'按技能做角色图',userText:'按技能做角色图',skills:[batches]});
@@ -204,7 +204,7 @@ test('lossy official compaction keeps active rules; clear retains history and ne
     await turn('two','padding '.repeat(800));await turn('three','more '.repeat(800));
     const task=await entry.root.compact(undefined,CTX);
     assert.equal((await entry.harness.waitForTask(task,CTX)).state.outcome.status,'completed');
-    const after=await turn('four','继续');assert.match(systemText(after),/第一步：只做 4 张竖版角色图/);
+    const after=await turn('four','继续');assert.match(userText(after),/第一步：只做 4 张竖版角色图/);assert.match(userText(after),/OLD_SCOPE_CASTLE/);
     let current=await fixture.store.skillContext(entry);
     const cleared=await fixture.store.changeSkillContext(entry,{action:'clear',expectedRevision:current.revision,requestId:'clear'});
     assert.equal(cleared.activePins.length,0);assert.equal(cleared.scopeId,current.scopeId);
@@ -217,7 +217,7 @@ test('lossy official compaction keeps active rules; clear retains history and ne
     const fresh=await fixture.store.changeSkillContext(entry,request);
     assert.notEqual(fresh.scopeId,current.scopeId);assert.equal(fresh.lifecycle,'active');
     const clean=await turn('seven','独立任务只说你好');assert.doesNotMatch(JSON.stringify(clean.messages),/第一步：只做 4 张竖版角色图/);
-    assert.doesNotMatch(systemText(clean),/OLD_SCOPE_CASTLE/);
+    assert.doesNotMatch(JSON.stringify(clean.messages),/OLD_SCOPE_CASTLE/);
     assert.equal((await fixture.store.history('canvas',entry.sessionId)).plan,undefined,'independent task has no previous plan');
     assert.equal((await fixture.store.history('canvas',entry.sessionId)).turns.length,7,'reset must preserve display history');
     // Replaying an old reset request must not cut the new task's later messages.
@@ -238,8 +238,8 @@ test('Stop during skill loading leaves the previous active choice intact', {time
     assert.equal(await pending,null);assert.equal(fixture.payloads.length,0);
     assert.deepEqual((await fixture.store.skillContext(entry)).activePins,[landscape]);
     const next=await fixture.store.submit(entry,{turnId:'next',content:'继续'});await fixture.store.wait(entry,next);
-    assert.match(systemText(fixture.payloads.at(-1)),/16:9 横版/);
-    assert.doesNotMatch(systemText(fixture.payloads.at(-1)),/第一步：只做 4 张竖版角色图/);
+    assert.match(userText(fixture.payloads.at(-1)),/16:9 横版/);
+    assert.doesNotMatch(JSON.stringify(fixture.payloads.at(-1).messages),/第一步：只做 4 张竖版角色图/);
   } finally {release?.();await fixture?.close();fs.rmSync(directory,{recursive:true,force:true});}
 });
 

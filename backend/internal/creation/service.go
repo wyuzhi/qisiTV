@@ -151,6 +151,41 @@ func (s *Service) Change(userID, id, action string, cmd Command) (any, error) {
 	return out, MapError(err)
 }
 
+func (s *Service) Dispatch(userID, id, action string, cmd Command) (any, error) {
+	lockStorage := action == "create" || action == "prepare" || action == "execute" || action == "canvas" || action == "commit" ||
+		action == "save" || action == "proposal-approve" || action == "proposal-invalidate"
+	if lockStorage && s.deps.StorageLock != nil {
+		s.deps.StorageLock.Lock()
+		defer s.deps.StorageLock.Unlock()
+	}
+	switch action {
+	case "create":
+		return s.CreateRun(userID, cmd)
+	case "prepare":
+		return s.Prepare(userID, id, cmd)
+	case "approve":
+		return s.Approve(userID, id, cmd)
+	case "execute":
+		task, err := s.Execute(userID, id, cmd)
+		if err != nil || task == nil || s.deps.FormatTask == nil {
+			return task, err
+		}
+		return s.deps.FormatTask(*task), nil
+	case "canvas":
+		return s.CreateCanvas(userID, id, cmd)
+	case "commit":
+		return s.CommitCanvas(userID, id, cmd)
+	default:
+		return s.Change(userID, id, action, cmd)
+	}
+}
+
+func (s *Service) ExecuteSubmission(userID, id string, cmd Command) (*model.Task, error) {
+	out, err := s.Dispatch(userID, id, "execute", cmd)
+	task, _ := out.(*model.Task)
+	return task, err
+}
+
 func (s *Service) validateRunQuota(userID string, repo *repository.Repository, creating bool, delta int64) error {
 	if s.deps.Quota == nil {
 		return kernel.NewAppError(kernel.CodeInternal, "创作配额服务不可用")

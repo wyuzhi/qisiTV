@@ -2,10 +2,10 @@
   "apiVersion": "qisitv.plugin/v2",
   "id": "luma-dream-machine",
   "name": "Luma Dream Machine",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": "BeefTV Contributors",
   "description": "Luma Dream Machine 独立请求协议插件。",
-  "documentation": "# Luma Dream Machine\n\n该目录是 qisiTV 声明式协议插件源码。后端从生成的 `luma-dream-machine.qisitv-plugin` 包加载，不依赖系统内置 `host:` 适配器。\n\n本插件源自 BeefTV Contributors 的开源实现，由 qisiTV 分支维护，用于适配 Luma AI 相关服务接口；不表示 qisiTV 与该服务商存在隶属、授权或合作关系。\n\n完整接口见 [docs/interface.md](docs/interface.md)。\n\n---\n\n# Luma Dream Machine 接口字段\n\n## 协议身份\n\n- 插件 ID：`luma-dream-machine`。\n- Provider ID：`luma-dream-machine`。\n- 能力：`video`。\n- 默认 Base URL：`https://api.lumalabs.ai`。\n- 鉴权驱动：`bearer`。\n- 创建：`POST /dream-machine/v1/generations`。\n- 查询：`GET /dream-machine/v1/generations/{{taskId}}`。\n\n## 配置字段\n\n| 字段 | 类型 | 必填 | 含义 |\n| --- | --- | --- | --- |\n| `apiKey` | secret | 是 | API Key |\n\n## 统一字段映射\n\n| 统一字段 | 类型 | 必填 | 上游映射 | 说明 |\n| --- | --- | --- | --- | --- |\n| `model` | string | 是 | `model` | 视频模型 ID。 |\n| `prompt` | string | 是 | `prompt/content/input` | 视频提示词。 |\n| `images` | media[] | 否 | `first/last/reference image` | 显式 role 图片输入。 |\n| `videos` | media[] | 否 | `reference video` | 参考视频。 |\n| `audios` | media[] | 否 | `reference audio/voice` | 参考音频或音色。 |\n| `duration` | integer | 否 | `duration/seconds` | 时长秒数。 |\n| `aspectRatio` | string | 否 | `ratio/aspect_ratio/size` | 画幅比例或尺寸。 |\n| `resolution` | string | 否 | `resolution` | 分辨率档位。 |\n| `generateAudio` | boolean | 否 | `generate_audio` | 是否生成音频。 |\n| `watermark` | boolean | 否 | `watermark` | 水印开关。 |\n| `providerOptions` | object | 否 | `provider-specific fields` | 插件命名空间内的厂商扩展字段。 |\n\n## 上游请求模板逐字段清单\n\n下表由插件请求模板生成，覆盖 body、query、headers 和 multipart 文件声明中的每个字段。\n\n| 上游位置 | 值或转换表达式 |\n| --- | --- |\n| `create.method` | `\"POST\"` |\n| `create.path` | `\"/dream-machine/v1/generations\"` |\n| `create.contentType` | `\"application/json\"` |\n| `create.body` | `{\"$merge\":[{\"model\":{\"$ref\":\"request.model\"},\"prompt\":{\"$ref\":\"request.prompt\"},\"images\":{\"$omitEmpty\":{\"$map\":{\"from\":{\"$ref\":\"request.images\"},\"as\":\"media\",\"in\":{\"$ref\":\"media.value\"}}}},\"videos\":{\"$omitEmpty\":{\"$map\":{\"from\":{\"$ref\":\"request.videos\"},\"as\":\"media\",\"in\":{\"$ref\":\"media.value\"}}}},\"audios\":{\"$omitEmpty\":{\"$map\":{\"from\":{\"$ref\":\"request.audios\"},\"as\":\"media\",\"in\":{\"$ref\":\"media.value\"}}}},\"duration\":{\"$omitEmpty\":{\"$ref\":\"request.duration\"}},\"aspect_ratio\":{\"$omitEmpty\":{\"$ref\":\"request.aspectRatio\"}},\"resolution\":{\"$omitEmpty\":{\"$ref\":\"request.resolution\"}},\"parameters\":{\"$omitEmpty\":{\"$ref\":\"request.providerOptions.luma-dream-machine.parameters\"}}},{\"$coalesce\":[{\"$ref\":\"request.providerOptions.luma-dream-machine.body\"},{\"$ref\":\"request.providerOptions.luma-dream-machine.extra_body\"},{}]}]}` |\n| `poll.method` | `\"GET\"` |\n| `poll.path` | `\"/dream-machine/v1/generations/{{taskId}}\"` |\n| `poll.contentType` | `\"application/json\"` |\n\n## Provider 扩展键\n\n- `providerOptions.luma-dream-machine.body`\n- `providerOptions.luma-dream-machine.extra_body`\n- `providerOptions.luma-dream-machine.parameters`\n\n动态模型或工作流允许使用文档声明的完整 `parameters/input/extra_body` 对象；该对象是协议本身的开放 schema，不会被宿主裁剪。\n\n## 响应映射逐字段清单\n\n| 映射位置 | 上游路径或转换表达式 |\n| --- | --- |\n| `response.taskId` | `{\"$coalesce\":[{\"$ref\":\"response.id\"},{\"$ref\":\"response.task_id\"},{\"$ref\":\"response.taskId\"},{\"$ref\":\"response.data.id\"},{\"$ref\":\"taskId\"}]}` |\n| `response.status` | `{\"$coalesce\":[{\"$ref\":\"response.status\"},{\"$ref\":\"response.state\"},{\"$ref\":\"response.data.status\"},\"pending\"]}` |\n| `response.message` | `{\"$coalesce\":[{\"$ref\":\"response.error.message\"},{\"$ref\":\"response.message\"},{\"$ref\":\"response.fail_reason\"}]}` |\n| `response.videos` | `{\"$coalesce\":[{\"$ref\":\"response.video_url\"},{\"$ref\":\"response.videoUrl\"},{\"$ref\":\"response.result_url\"},{\"$ref\":\"response.url\"},{\"$ref\":\"response.data.video_url\"},{\"$ref\":\"response.output.url\"}]}` |\n| `response.errorPaths[0]` | `\"error.code\"` |\n| `response.resultEphemeral` | `true` |\n\n## 响应与错误\n\n插件把上游 task/status/text/media/usage 映射为统一结果。临时媒体 URL 标记为 ephemeral，由宿主立即下载持久化。HTTP 错误、业务 code 和 error object 保持失败语义，不包装成成功。\n\n## 兼容边界\n\n该协议的模型级字段变化快或依赖云资源配置。插件固定线协议入口和统一字段，完整厂商对象通过 providerOptions.luma-dream-machine 的 parameters/input/extra_body 传入；prompt+keyframes。云签名型入口在未配置对应鉴权驱动时会明确失败，不会伪装成 Bearer 成功。\n\n<!-- QISITV_PLUGIN_MANIFEST_START -->\n## Manifest 完整接口定义\n\n以下 JSON 与插件包内实际 `manifest.json` 逐字段一致，覆盖插件身份、权限、配置、鉴权、参数、校验、创建、Agent、查询、取消、结果下载、响应和 Agent 响应映射。`documentation` 字段的值就是当前完整文档；为避免文档在自身内部无限递归，JSON 中仅用等义占位文本表示正文。\n\n```json\n{\n  \"apiVersion\": \"qisitv.plugin/v2\",\n  \"id\": \"luma-dream-machine\",\n  \"name\": \"Luma Dream Machine\",\n  \"version\": \"2.0.0\",\n  \"author\": \"BeefTV Contributors\",\n  \"description\": \"Luma Dream Machine 独立请求协议插件。\",\n  \"documentation\": \"<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>\",\n  \"permissions\": [\n    \"generation.run\",\n    \"media.read\"\n  ],\n  \"configuration\": {\n    \"fields\": [\n      {\n        \"name\": \"apiKey\",\n        \"type\": \"secret\",\n        \"label\": \"API Key\",\n        \"required\": true\n      }\n    ]\n  },\n  \"contributes\": {\n    \"providers\": [\n      {\n        \"id\": \"luma-dream-machine\",\n        \"label\": \"Luma Dream Machine\",\n        \"capabilities\": [\n          \"video\"\n        ],\n        \"scopes\": [\n          \"admin.system-channel\",\n          \"user.custom-channel\",\n          \"canvas\",\n          \"creation\",\n          \"agent\"\n        ],\n        \"baseUrl\": \"https://api.lumalabs.ai\",\n        \"requiresPublicMediaUrls\": false,\n        \"auth\": {\n          \"type\": \"bearer\",\n          \"field\": \"apiKey\"\n        },\n        \"parameters\": [\n          {\n            \"name\": \"model\",\n            \"type\": \"string\",\n            \"required\": true,\n            \"mapping\": \"model\",\n            \"description\": \"视频模型 ID。\"\n          },\n          {\n            \"name\": \"prompt\",\n            \"type\": \"string\",\n            \"required\": true,\n            \"mapping\": \"prompt/content/input\",\n            \"description\": \"视频提示词。\"\n          },\n          {\n            \"name\": \"images\",\n            \"type\": \"media[]\",\n            \"required\": false,\n            \"mapping\": \"first/last/reference image\",\n            \"description\": \"显式 role 图片输入。\"\n          },\n          {\n            \"name\": \"videos\",\n            \"type\": \"media[]\",\n            \"required\": false,\n            \"mapping\": \"reference video\",\n            \"description\": \"参考视频。\"\n          },\n          {\n            \"name\": \"audios\",\n            \"type\": \"media[]\",\n            \"required\": false,\n            \"mapping\": \"reference audio/voice\",\n            \"description\": \"参考音频或音色。\"\n          },\n          {\n            \"name\": \"duration\",\n            \"type\": \"integer\",\n            \"required\": false,\n            \"mapping\": \"duration/seconds\",\n            \"description\": \"时长秒数。\"\n          },\n          {\n            \"name\": \"aspectRatio\",\n            \"type\": \"string\",\n            \"required\": false,\n            \"mapping\": \"ratio/aspect_ratio/size\",\n            \"description\": \"画幅比例或尺寸。\"\n          },\n          {\n            \"name\": \"resolution\",\n            \"type\": \"string\",\n            \"required\": false,\n            \"mapping\": \"resolution\",\n            \"description\": \"分辨率档位。\"\n          },\n          {\n            \"name\": \"generateAudio\",\n            \"type\": \"boolean\",\n            \"required\": false,\n            \"mapping\": \"generate_audio\",\n            \"description\": \"是否生成音频。\"\n          },\n          {\n            \"name\": \"watermark\",\n            \"type\": \"boolean\",\n            \"required\": false,\n            \"mapping\": \"watermark\",\n            \"description\": \"水印开关。\"\n          },\n          {\n            \"name\": \"providerOptions\",\n            \"type\": \"object\",\n            \"required\": false,\n            \"mapping\": \"provider-specific fields\",\n            \"description\": \"插件命名空间内的厂商扩展字段。\"\n          }\n        ],\n        \"create\": {\n          \"method\": \"POST\",\n          \"path\": \"/dream-machine/v1/generations\",\n          \"contentType\": \"application/json\",\n          \"body\": {\n            \"$merge\": [\n              {\n                \"model\": {\n                  \"$ref\": \"request.model\"\n                },\n                \"prompt\": {\n                  \"$ref\": \"request.prompt\"\n                },\n                \"images\": {\n                  \"$omitEmpty\": {\n                    \"$map\": {\n                      \"from\": {\n                        \"$ref\": \"request.images\"\n                      },\n                      \"as\": \"media\",\n                      \"in\": {\n                        \"$ref\": \"media.value\"\n                      }\n                    }\n                  }\n                },\n                \"videos\": {\n                  \"$omitEmpty\": {\n                    \"$map\": {\n                      \"from\": {\n                        \"$ref\": \"request.videos\"\n                      },\n                      \"as\": \"media\",\n                      \"in\": {\n                        \"$ref\": \"media.value\"\n                      }\n                    }\n                  }\n                },\n                \"audios\": {\n                  \"$omitEmpty\": {\n                    \"$map\": {\n                      \"from\": {\n                        \"$ref\": \"request.audios\"\n                      },\n                      \"as\": \"media\",\n                      \"in\": {\n                        \"$ref\": \"media.value\"\n                      }\n                    }\n                  }\n                },\n                \"duration\": {\n                  \"$omitEmpty\": {\n                    \"$ref\": \"request.duration\"\n                  }\n                },\n                \"aspect_ratio\": {\n                  \"$omitEmpty\": {\n                    \"$ref\": \"request.aspectRatio\"\n                  }\n                },\n                \"resolution\": {\n                  \"$omitEmpty\": {\n                    \"$ref\": \"request.resolution\"\n                  }\n                },\n                \"parameters\": {\n                  \"$omitEmpty\": {\n                    \"$ref\": \"request.providerOptions.luma-dream-machine.parameters\"\n                  }\n                }\n              },\n              {\n                \"$coalesce\": [\n                  {\n                    \"$ref\": \"request.providerOptions.luma-dream-machine.body\"\n                  },\n                  {\n                    \"$ref\": \"request.providerOptions.luma-dream-machine.extra_body\"\n                  },\n                  {}\n                ]\n              }\n            ]\n          }\n        },\n        \"poll\": {\n          \"method\": \"GET\",\n          \"path\": \"/dream-machine/v1/generations/{{taskId}}\"\n        },\n        \"response\": {\n          \"taskId\": {\n            \"$coalesce\": [\n              {\n                \"$ref\": \"response.id\"\n              },\n              {\n                \"$ref\": \"response.task_id\"\n              },\n              {\n                \"$ref\": \"response.taskId\"\n              },\n              {\n                \"$ref\": \"response.data.id\"\n              },\n              {\n                \"$ref\": \"taskId\"\n              }\n            ]\n          },\n          \"status\": {\n            \"$coalesce\": [\n              {\n                \"$ref\": \"response.status\"\n              },\n              {\n                \"$ref\": \"response.state\"\n              },\n              {\n                \"$ref\": \"response.data.status\"\n              },\n              \"pending\"\n            ]\n          },\n          \"message\": {\n            \"$coalesce\": [\n              {\n                \"$ref\": \"response.error.message\"\n              },\n              {\n                \"$ref\": \"response.message\"\n              },\n              {\n                \"$ref\": \"response.fail_reason\"\n              }\n            ]\n          },\n          \"videos\": {\n            \"$coalesce\": [\n              {\n                \"$ref\": \"response.video_url\"\n              },\n              {\n                \"$ref\": \"response.videoUrl\"\n              },\n              {\n                \"$ref\": \"response.result_url\"\n              },\n              {\n                \"$ref\": \"response.url\"\n              },\n              {\n                \"$ref\": \"response.data.video_url\"\n              },\n              {\n                \"$ref\": \"response.output.url\"\n              }\n            ]\n          },\n          \"errorPaths\": [\n            \"error.code\"\n          ],\n          \"resultEphemeral\": true\n        }\n      }\n    ]\n  }\n}\n```\n<!-- QISITV_PLUGIN_MANIFEST_END -->\n",
+  "documentation": "# Luma Dream Machine\n\n该目录是 qisiTV 声明式协议插件源码。后端从生成的 `luma-dream-machine.qisitv-plugin` 包加载，不依赖系统内置 `host:` 适配器。\n\n本插件源自 BeefTV Contributors 的开源实现，由 qisiTV 分支维护，用于适配 Luma AI 相关服务接口；不表示 qisiTV 与该服务商存在隶属、授权或合作关系。\n\n完整接口见 [docs/interface.md](docs/interface.md)。\n\n---\n\n# Luma Dream Machine 接口字段\n\n## 协议身份\n\n- 插件 ID：`luma-dream-machine`。\n- Provider ID：`luma-dream-machine`。\n- 能力：`video`。\n- 默认 Base URL：`https://api.lumalabs.ai`。\n- 鉴权驱动：`bearer`。\n- 创建：`POST /dream-machine/v1/generations`。\n- 查询：`GET /dream-machine/v1/generations/{{taskId}}`。\n- 路径拼接：官方路径本身已带 `/dream-machine/v1`，两个操作都按根路径替换（`originPath`），宿主不再补 `/v1` 前缀；否则会请求到 `/v1/dream-machine/...`。也正因如此，服务地址应填主机根地址（默认 `https://api.lumalabs.ai`）；中转若挂在子路径下，需要它能直接响应 `/dream-machine/v1/generations`。\n- 状态：官方 `state` 取 `queued` / `dreaming` / `completed` / `failed`，其中 `dreaming` 映射为处理中。\n- 结果：官方 `assets.video`。\n- 旧回执兼容：继续读取 `video_url`、`videoUrl`、`result_url`、`url`、`data.video_url`、`output.url`；错误信息保留 `fail_reason`。\n\n## 配置字段\n\n| 字段 | 类型 | 必填 | 含义 |\n| --- | --- | --- | --- |\n| `apiKey` | secret | 是 | API Key |\n\n## 统一字段映射\n\n| 统一字段 | 类型 | 必填 | 上游映射 | 说明 |\n| --- | --- | --- | --- | --- |\n| `model` | string | 是 | `model` | 视频模型 ID。 |\n| `prompt` | string | 是 | `prompt` | 视频提示词。 |\n| `images` | media[] | 否 | `keyframes.frame0 / frame1` | 首帧与尾帧；官方只接受在线图片地址，本地图片先上传到对象存储再发送。 |\n| `duration` | integer | 否 | `duration（如 5s）` | 时长秒数，按官方字符串格式发送。 |\n| `aspectRatio` | string | 否 | `aspect_ratio` | 画幅比例。 |\n| `resolution` | string | 否 | `resolution` | 分辨率档位，小写后发送，2160p 按官方写法转成 4k。 |\n| `providerOptions` | object | 否 | `provider-specific fields` | 插件命名空间内的厂商扩展字段。 |\n\n## 上游请求模板逐字段清单\n\n下表由插件请求模板生成，覆盖 body、query、headers 和 multipart 文件声明中的每个字段。\n\n| 上游位置 | 值或转换表达式 |\n| --- | --- |\n| `create.method` | `\"POST\"` |\n| `create.path` | `\"/dream-machine/v1/generations\"` |\n| `create.contentType` | `\"application/json\"` |\n| `create.body` | `{\"$merge\":[{\"model\":{\"$ref\":\"request.model\"},\"prompt\":{\"$ref\":\"request.prompt\"},\"aspect_ratio\":{\"$omitEmpty\":{\"$if\":{\"condition\":{\"$in\":[{\"$lower\":{\"$trim\":{\"$ref\":\"request.aspectRatio\"}}},[\"\",\"auto\"]]},\"then\":null,\"else\":{\"$trim\":{\"$ref\":\"request.aspectRatio\"}}}}},\"resolution\":{\"$omitEmpty\":{\"$switch\":{\"cases\":[{\"when\":{\"$in\":[{\"$lower\":{\"$trim\":{\"$ref\":\"request.resolution\"}}},[\"2160p\",\"4k\",\"2160\"]]},\"then\":\"4k\"}],\"default\":{\"$lower\":{\"$trim\":{\"$ref\":\"request.resolution\"}}}}}},\"duration\":{\"$omitEmpty\":{\"$if\":{\"condition\":{\"$gt\":[{\"$ref\":\"request.duration\"},0]},\"then\":{\"$concat\":[{\"$ref\":\"request.duration\"},\"s\"]},\"else\":null}}},\"keyframes\":{\"$if\":{\"condition\":{\"$gt\":[{\"$len\":{\"$coalesce\":[{\"$ref\":\"request.images\"},[]]}},0]},\"then\":{\"$merge\":[{\"frame0\":{\"$if\":{\"condition\":{\"$gt\":[{\"$len\":{\"$filter\":{\"from\":{\"$sortByOrder\":{\"$ref\":\"request.images\"}},\"as\":\"media\",\"where\":{\"$in\":[{\"$ref\":\"media.role\"},[\"first_frame\",\"\"]]}}}},0]},\"then\":{\"type\":\"image\",\"url\":{\"$first\":{\"$map\":{\"from\":{\"$filter\":{\"from\":{\"$sortByOrder\":{\"$ref\":\"request.images\"}},\"as\":\"media\",\"where\":{\"$in\":[{\"$ref\":\"media.role\"},[\"first_frame\",\"\"]]}}},\"as\":\"media\",\"in\":{\"$ref\":\"media.value\"}}}}},\"else\":null}}},{\"frame1\":{\"$if\":{\"condition\":{\"$gt\":[{\"$len\":{\"$filter\":{\"from\":{\"$sortByOrder\":{\"$ref\":\"request.images\"}},\"as\":\"media\",\"where\":{\"$in\":[{\"$ref\":\"media.role\"},[\"last_frame\"]]}}}},0]},\"then\":{\"type\":\"image\",\"url\":{\"$first\":{\"$map\":{\"from\":{\"$filter\":{\"from\":{\"$sortByOrder\":{\"$ref\":\"request.images\"}},\"as\":\"media\",\"where\":{\"$in\":[{\"$ref\":\"media.role\"},[\"last_frame\"]]}}},\"as\":\"media\",\"in\":{\"$ref\":\"media.value\"}}}}},\"else\":null}}}]},\"else\":null}}},{\"$coalesce\":[{\"$ref\":\"request.providerOptions.luma-dream-machine.body\"},{\"$ref\":\"request.providerOptions.luma-dream-machine.extra_body\"},{}]}]}` |\n| `poll.method` | `\"GET\"` |\n| `poll.path` | `\"/dream-machine/v1/generations/{{taskId}}\"` |\n\n## Provider 扩展键\n\n- `providerOptions.luma-dream-machine.body`\n- `providerOptions.luma-dream-machine.extra_body`\n\n`body` / `extra_body` 会合并进创建请求体并覆盖同名官方字段，用于仍提供同名接口、但要求额外字段的第三方中转；宿主不裁剪其中内容。\n\n## 响应映射逐字段清单\n\n| 映射位置 | 上游路径或转换表达式 |\n| --- | --- |\n| `response.taskId` | `{\"$coalesce\":[{\"$ref\":\"response.id\"},{\"$ref\":\"response.task_id\"},{\"$ref\":\"response.taskId\"},{\"$ref\":\"response.data.id\"},{\"$ref\":\"taskId\"}]}` |\n| `response.status` | `{\"$if\":{\"condition\":{\"$eq\":[{\"$lower\":{\"$trim\":{\"$ref\":\"response.state\"}}},\"dreaming\"]},\"then\":\"processing\",\"else\":{\"$coalesce\":[{\"$ref\":\"response.state\"},{\"$ref\":\"response.status\"},{\"$ref\":\"response.data.status\"},\"pending\"]}}}` |\n| `response.message` | `{\"$coalesce\":[{\"$ref\":\"response.failure_reason\"},{\"$ref\":\"response.error.message\"},{\"$ref\":\"response.message\"}]}` |\n| `response.videos` | `{\"$coalesce\":[{\"$ref\":\"response.assets.video\"},{\"$ref\":\"response.video_url\"},{\"$ref\":\"response.videoUrl\"},{\"$ref\":\"response.result_url\"},{\"$ref\":\"response.url\"},{\"$ref\":\"response.data.video_url\"},{\"$ref\":\"response.output.url\"}]}` |\n| `response.errorPaths` | `[\"error.code\"]` |\n| `response.resultEphemeral` | `true` |\n\n## 响应与错误\n\n插件把上游 task/status/text/media/usage 映射为统一结果。临时媒体 URL 标记为 ephemeral，由宿主立即下载持久化。HTTP 错误、业务 code 和 error object 保持失败语义，不包装成成功。\n\n## 兼容边界\n\n该 profile 对应 Dream Machine API 的 `POST /dream-machine/v1/generations` 与 `GET /dream-machine/v1/generations/{id}`。创建请求按官方字段发送 `model`、`prompt`、`aspect_ratio`、`resolution`、`duration` 与 `keyframes`：`duration` 写成官方要求的字符串（例如 `5s`；官方 schema 允许任意字符串，常见取值为 `5s` / `9s`），`resolution` 统一小写、2160p 转成官方写法 `4k`，首帧与尾帧写成 `keyframes.frame0` / `frame1` 的 `image` 类型；角色或风格参考图、参考视频、参考音频在提交前报错，不会静默丢弃。官方文档把在线图片地址写成唯一传递方式，因此本 profile 声明 `requiresPublicMediaUrls: true` 且 `mediaTransport.image` 为 `url`：本地图片由宿主先上传到对象存储换成在线地址，拿不到在线地址时在提交前返回 `reference_media_requires_url`，不会把 data URL 写进只接受在线地址的 `keyframes.frame0.url` / `frame1.url`。结果从官方 `assets.video` 取回。\n\n<!-- QISITV_PLUGIN_MANIFEST_START -->\n## Manifest 完整接口定义\n\n以下 JSON 与插件包内实际 `manifest.json` 逐字段一致，覆盖插件身份、权限、配置、鉴权、参数、校验、创建、Agent、查询、取消、结果下载、响应和 Agent 响应映射。`documentation` 字段的值就是当前完整文档；为避免文档在自身内部无限递归，JSON 中仅用等义占位文本表示正文。\n\n```json\n{\n  \"apiVersion\": \"qisitv.plugin/v2\",\n  \"id\": \"luma-dream-machine\",\n  \"name\": \"Luma Dream Machine\",\n  \"version\": \"2.0.1\",\n  \"author\": \"BeefTV Contributors\",\n  \"description\": \"Luma Dream Machine 独立请求协议插件。\",\n  \"documentation\": \"<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>\",\n  \"permissions\": [\n    \"generation.run\",\n    \"media.read\"\n  ],\n  \"configuration\": {\n    \"fields\": [\n      {\n        \"name\": \"apiKey\",\n        \"type\": \"secret\",\n        \"label\": \"API Key\",\n        \"required\": true\n      }\n    ]\n  },\n  \"contributes\": {\n    \"providers\": [\n      {\n        \"id\": \"luma-dream-machine\",\n        \"label\": \"Luma Dream Machine\",\n        \"capabilities\": [\n          \"video\"\n        ],\n        \"scopes\": [\n          \"admin.system-channel\",\n          \"user.custom-channel\",\n          \"canvas\",\n          \"creation\",\n          \"agent\"\n        ],\n        \"baseUrl\": \"https://api.lumalabs.ai\",\n        \"requiresPublicMediaUrls\": true,\n        \"mediaTransport\": {\n          \"image\": \"url\"\n        },\n        \"auth\": {\n          \"type\": \"bearer\",\n          \"field\": \"apiKey\"\n        },\n        \"parameters\": [\n          {\n            \"name\": \"model\",\n            \"type\": \"string\",\n            \"required\": true,\n            \"mapping\": \"model\",\n            \"description\": \"视频模型 ID。\"\n          },\n          {\n            \"name\": \"prompt\",\n            \"type\": \"string\",\n            \"required\": true,\n            \"mapping\": \"prompt\",\n            \"description\": \"视频提示词。\"\n          },\n          {\n            \"name\": \"images\",\n            \"type\": \"media[]\",\n            \"required\": false,\n            \"mapping\": \"keyframes.frame0 / frame1\",\n            \"description\": \"首帧与尾帧；官方服务建议传公网图片地址。\"\n          },\n          {\n            \"name\": \"duration\",\n            \"type\": \"integer\",\n            \"required\": false,\n            \"mapping\": \"duration（如 5s）\",\n            \"description\": \"时长秒数，按官方字符串格式发送。\"\n          },\n          {\n            \"name\": \"aspectRatio\",\n            \"type\": \"string\",\n            \"required\": false,\n            \"mapping\": \"aspect_ratio\",\n            \"description\": \"画幅比例。\"\n          },\n          {\n            \"name\": \"resolution\",\n            \"type\": \"string\",\n            \"required\": false,\n            \"mapping\": \"resolution\",\n            \"description\": \"分辨率档位，小写后发送，2160p 按官方写法转成 4k。\"\n          },\n          {\n            \"name\": \"providerOptions\",\n            \"type\": \"object\",\n            \"required\": false,\n            \"mapping\": \"provider-specific fields\",\n            \"description\": \"插件命名空间内的厂商扩展字段。\"\n          }\n        ],\n        \"create\": {\n          \"method\": \"POST\",\n          \"path\": \"/dream-machine/v1/generations\",\n          \"originPath\": true,\n          \"contentType\": \"application/json\",\n          \"body\": {\n            \"$merge\": [\n              {\n                \"model\": {\n                  \"$ref\": \"request.model\"\n                },\n                \"prompt\": {\n                  \"$ref\": \"request.prompt\"\n                },\n                \"aspect_ratio\": {\n                  \"$omitEmpty\": {\n                    \"$if\": {\n                      \"condition\": {\n                        \"$in\": [\n                          {\n                            \"$lower\": {\n                              \"$trim\": {\n                                \"$ref\": \"request.aspectRatio\"\n                              }\n                            }\n                          },\n                          [\n                            \"\",\n                            \"auto\"\n                          ]\n                        ]\n                      },\n                      \"then\": null,\n                      \"else\": {\n                        \"$trim\": {\n                          \"$ref\": \"request.aspectRatio\"\n                        }\n                      }\n                    }\n                  }\n                },\n                \"resolution\": {\n                  \"$omitEmpty\": {\n                    \"$switch\": {\n                      \"cases\": [\n                        {\n                          \"when\": {\n                            \"$in\": [\n                              {\n                                \"$lower\": {\n                                  \"$trim\": {\n                                    \"$ref\": \"request.resolution\"\n                                  }\n                                }\n                              },\n                              [\n                                \"2160p\",\n                                \"4k\",\n                                \"2160\"\n                              ]\n                            ]\n                          },\n                          \"then\": \"4k\"\n                        }\n                      ],\n                      \"default\": {\n                        \"$lower\": {\n                          \"$trim\": {\n                            \"$ref\": \"request.resolution\"\n                          }\n                        }\n                      }\n                    }\n                  }\n                },\n                \"duration\": {\n                  \"$omitEmpty\": {\n                    \"$if\": {\n                      \"condition\": {\n                        \"$gt\": [\n                          {\n                            \"$ref\": \"request.duration\"\n                          },\n                          0\n                        ]\n                      },\n                      \"then\": {\n                        \"$concat\": [\n                          {\n                            \"$ref\": \"request.duration\"\n                          },\n                          \"s\"\n                        ]\n                      },\n                      \"else\": null\n                    }\n                  }\n                },\n                \"keyframes\": {\n                  \"$if\": {\n                    \"condition\": {\n                      \"$gt\": [\n                        {\n                          \"$len\": {\n                            \"$coalesce\": [\n                              {\n                                \"$ref\": \"request.images\"\n                              },\n                              []\n                            ]\n                          }\n                        },\n                        0\n                      ]\n                    },\n                    \"then\": {\n                      \"$merge\": [\n                        {\n                          \"frame0\": {\n                            \"$if\": {\n                              \"condition\": {\n                                \"$gt\": [\n                                  {\n                                    \"$len\": {\n                                      \"$filter\": {\n                                        \"from\": {\n                                          \"$sortByOrder\": {\n                                            \"$ref\": \"request.images\"\n                                          }\n                                        },\n                                        \"as\": \"media\",\n                                        \"where\": {\n                                          \"$in\": [\n                                            {\n                                              \"$ref\": \"media.role\"\n                                            },\n                                            [\n                                              \"first_frame\",\n                                              \"\"\n                                            ]\n                                          ]\n                                        }\n                                      }\n                                    }\n                                  },\n                                  0\n                                ]\n                              },\n                              \"then\": {\n                                \"type\": \"image\",\n                                \"url\": {\n                                  \"$first\": {\n                                    \"$map\": {\n                                      \"from\": {\n                                        \"$filter\": {\n                                          \"from\": {\n                                            \"$sortByOrder\": {\n                                              \"$ref\": \"request.images\"\n                                            }\n                                          },\n                                          \"as\": \"media\",\n                                          \"where\": {\n                                            \"$in\": [\n                                              {\n                                                \"$ref\": \"media.role\"\n                                              },\n                                              [\n                                                \"first_frame\",\n                                                \"\"\n                                              ]\n                                            ]\n                                          }\n                                        }\n                                      },\n                                      \"as\": \"media\",\n                                      \"in\": {\n                                        \"$ref\": \"media.value\"\n                                      }\n                                    }\n                                  }\n                                }\n                              },\n                              \"else\": null\n                            }\n                          }\n                        },\n                        {\n                          \"frame1\": {\n                            \"$if\": {\n                              \"condition\": {\n                                \"$gt\": [\n                                  {\n                                    \"$len\": {\n                                      \"$filter\": {\n                                        \"from\": {\n                                          \"$sortByOrder\": {\n                                            \"$ref\": \"request.images\"\n                                          }\n                                        },\n                                        \"as\": \"media\",\n                                        \"where\": {\n                                          \"$in\": [\n                                            {\n                                              \"$ref\": \"media.role\"\n                                            },\n                                            [\n                                              \"last_frame\"\n                                            ]\n                                          ]\n                                        }\n                                      }\n                                    }\n                                  },\n                                  0\n                                ]\n                              },\n                              \"then\": {\n                                \"type\": \"image\",\n                                \"url\": {\n                                  \"$first\": {\n                                    \"$map\": {\n                                      \"from\": {\n                                        \"$filter\": {\n                                          \"from\": {\n                                            \"$sortByOrder\": {\n                                              \"$ref\": \"request.images\"\n                                            }\n                                          },\n                                          \"as\": \"media\",\n                                          \"where\": {\n                                            \"$in\": [\n                                              {\n                                                \"$ref\": \"media.role\"\n                                              },\n                                              [\n                                                \"last_frame\"\n                                              ]\n                                            ]\n                                          }\n                                        }\n                                      },\n                                      \"as\": \"media\",\n                                      \"in\": {\n                                        \"$ref\": \"media.value\"\n                                      }\n                                    }\n                                  }\n                                }\n                              },\n                              \"else\": null\n                            }\n                          }\n                        }\n                      ]\n                    },\n                    \"else\": null\n                  }\n                }\n              },\n              {\n                \"$coalesce\": [\n                  {\n                    \"$ref\": \"request.providerOptions.luma-dream-machine.body\"\n                  },\n                  {\n                    \"$ref\": \"request.providerOptions.luma-dream-machine.extra_body\"\n                  },\n                  {}\n                ]\n              }\n            ]\n          }\n        },\n        \"poll\": {\n          \"method\": \"GET\",\n          \"path\": \"/dream-machine/v1/generations/{{taskId}}\",\n          \"originPath\": true\n        },\n        \"response\": {\n          \"taskId\": {\n            \"$coalesce\": [\n              {\n                \"$ref\": \"response.id\"\n              },\n              {\n                \"$ref\": \"response.task_id\"\n              },\n              {\n                \"$ref\": \"response.taskId\"\n              },\n              {\n                \"$ref\": \"response.data.id\"\n              },\n              {\n                \"$ref\": \"taskId\"\n              }\n            ]\n          },\n          \"status\": {\n            \"$if\": {\n              \"condition\": {\n                \"$eq\": [\n                  {\n                    \"$lower\": {\n                      \"$trim\": {\n                        \"$ref\": \"response.state\"\n                      }\n                    }\n                  },\n                  \"dreaming\"\n                ]\n              },\n              \"then\": \"processing\",\n              \"else\": {\n                \"$coalesce\": [\n                  {\n                    \"$ref\": \"response.state\"\n                  },\n                  {\n                    \"$ref\": \"response.status\"\n                  },\n                  {\n                    \"$ref\": \"response.data.status\"\n                  },\n                  \"pending\"\n                ]\n              }\n            }\n          },\n          \"message\": {\n            \"$coalesce\": [\n              {\n                \"$ref\": \"response.failure_reason\"\n              },\n              {\n                \"$ref\": \"response.error.message\"\n              },\n              {\n                \"$ref\": \"response.message\"\n              },\n              {\n                \"$ref\": \"response.fail_reason\"\n              }\n            ]\n          },\n          \"videos\": {\n            \"$coalesce\": [\n              {\n                \"$ref\": \"response.assets.video\"\n              },\n              {\n                \"$ref\": \"response.video_url\"\n              },\n              {\n                \"$ref\": \"response.videoUrl\"\n              },\n              {\n                \"$ref\": \"response.result_url\"\n              },\n              {\n                \"$ref\": \"response.url\"\n              },\n              {\n                \"$ref\": \"response.data.video_url\"\n              },\n              {\n                \"$ref\": \"response.output.url\"\n              }\n            ]\n          },\n          \"errorPaths\": [\n            \"error.code\"\n          ],\n          \"resultEphemeral\": true\n        },\n        \"validations\": [\n          {\n            \"assert\": {\n              \"$eq\": [\n                {\n                  \"$len\": {\n                    \"$filter\": {\n                      \"from\": {\n                        \"$ref\": \"request.images\"\n                      },\n                      \"as\": \"media\",\n                      \"where\": {\n                        \"$in\": [\n                          {\n                            \"$ref\": \"media.role\"\n                          },\n                          [\n                            \"reference_image\",\n                            \"subject_reference\",\n                            \"style_reference\"\n                          ]\n                        ]\n                      }\n                    }\n                  }\n                },\n                0\n              ]\n            },\n            \"message\": \"Luma Dream Machine 当前 profile 只发送首帧和尾帧，角色或风格参考图请改用支持参考图的协议\"\n          },\n          {\n            \"assert\": {\n              \"$lte\": [\n                {\n                  \"$len\": {\n                    \"$filter\": {\n                      \"from\": {\n                        \"$ref\": \"request.images\"\n                      },\n                      \"as\": \"media\",\n                      \"where\": {\n                        \"$in\": [\n                          {\n                            \"$ref\": \"media.role\"\n                          },\n                          [\n                            \"first_frame\",\n                            \"\"\n                          ]\n                        ]\n                      }\n                    }\n                  }\n                },\n                1\n              ]\n            },\n            \"message\": \"Luma Dream Machine 最多接收一张首帧图片\"\n          },\n          {\n            \"assert\": {\n              \"$lte\": [\n                {\n                  \"$len\": {\n                    \"$filter\": {\n                      \"from\": {\n                        \"$ref\": \"request.images\"\n                      },\n                      \"as\": \"media\",\n                      \"where\": {\n                        \"$in\": [\n                          {\n                            \"$ref\": \"media.role\"\n                          },\n                          [\n                            \"last_frame\"\n                          ]\n                        ]\n                      }\n                    }\n                  }\n                },\n                1\n              ]\n            },\n            \"message\": \"Luma Dream Machine 最多接收一张尾帧图片\"\n          },\n          {\n            \"assert\": {\n              \"$eq\": [\n                {\n                  \"$len\": {\n                    \"$coalesce\": [\n                      {\n                        \"$ref\": \"request.videos\"\n                      },\n                      []\n                    ]\n                  }\n                },\n                0\n              ]\n            },\n            \"message\": \"Luma Dream Machine 当前 profile 不发送参考视频，请改用支持参考视频的协议\"\n          },\n          {\n            \"assert\": {\n              \"$eq\": [\n                {\n                  \"$len\": {\n                    \"$coalesce\": [\n                      {\n                        \"$ref\": \"request.audios\"\n                      },\n                      []\n                    ]\n                  }\n                },\n                0\n              ]\n            },\n            \"message\": \"Luma Dream Machine 当前 profile 不发送参考音频，请改用支持参考音频的协议\"\n          }\n        ]\n      }\n    ]\n  }\n}\n```\n<!-- QISITV_PLUGIN_MANIFEST_END -->\n",
   "permissions": [
     "generation.run",
     "media.read"
@@ -36,7 +36,10 @@
           "agent"
         ],
         "baseUrl": "https://api.lumalabs.ai",
-        "requiresPublicMediaUrls": false,
+        "requiresPublicMediaUrls": true,
+        "mediaTransport": {
+          "image": "url"
+        },
         "auth": {
           "type": "bearer",
           "field": "apiKey"
@@ -53,64 +56,36 @@
             "name": "prompt",
             "type": "string",
             "required": true,
-            "mapping": "prompt/content/input",
+            "mapping": "prompt",
             "description": "视频提示词。"
           },
           {
             "name": "images",
             "type": "media[]",
             "required": false,
-            "mapping": "first/last/reference image",
-            "description": "显式 role 图片输入。"
-          },
-          {
-            "name": "videos",
-            "type": "media[]",
-            "required": false,
-            "mapping": "reference video",
-            "description": "参考视频。"
-          },
-          {
-            "name": "audios",
-            "type": "media[]",
-            "required": false,
-            "mapping": "reference audio/voice",
-            "description": "参考音频或音色。"
+            "mapping": "keyframes.frame0 / frame1",
+            "description": "首帧与尾帧；官方服务建议传公网图片地址。"
           },
           {
             "name": "duration",
             "type": "integer",
             "required": false,
-            "mapping": "duration/seconds",
-            "description": "时长秒数。"
+            "mapping": "duration（如 5s）",
+            "description": "时长秒数，按官方字符串格式发送。"
           },
           {
             "name": "aspectRatio",
             "type": "string",
             "required": false,
-            "mapping": "ratio/aspect_ratio/size",
-            "description": "画幅比例或尺寸。"
+            "mapping": "aspect_ratio",
+            "description": "画幅比例。"
           },
           {
             "name": "resolution",
             "type": "string",
             "required": false,
             "mapping": "resolution",
-            "description": "分辨率档位。"
-          },
-          {
-            "name": "generateAudio",
-            "type": "boolean",
-            "required": false,
-            "mapping": "generate_audio",
-            "description": "是否生成音频。"
-          },
-          {
-            "name": "watermark",
-            "type": "boolean",
-            "required": false,
-            "mapping": "watermark",
-            "description": "水印开关。"
+            "description": "分辨率档位，小写后发送，2160p 按官方写法转成 4k。"
           },
           {
             "name": "providerOptions",
@@ -123,6 +98,7 @@
         "create": {
           "method": "POST",
           "path": "/dream-machine/v1/generations",
+          "originPath": true,
           "contentType": "application/json",
           "body": {
             "$merge": [
@@ -133,63 +109,248 @@
                 "prompt": {
                   "$ref": "request.prompt"
                 },
-                "images": {
+                "aspect_ratio": {
                   "$omitEmpty": {
-                    "$map": {
-                      "from": {
-                        "$ref": "request.images"
+                    "$if": {
+                      "condition": {
+                        "$in": [
+                          {
+                            "$lower": {
+                              "$trim": {
+                                "$ref": "request.aspectRatio"
+                              }
+                            }
+                          },
+                          [
+                            "",
+                            "auto"
+                          ]
+                        ]
                       },
-                      "as": "media",
-                      "in": {
-                        "$ref": "media.value"
+                      "then": null,
+                      "else": {
+                        "$trim": {
+                          "$ref": "request.aspectRatio"
+                        }
                       }
                     }
                   }
                 },
-                "videos": {
+                "resolution": {
                   "$omitEmpty": {
-                    "$map": {
-                      "from": {
-                        "$ref": "request.videos"
-                      },
-                      "as": "media",
-                      "in": {
-                        "$ref": "media.value"
-                      }
-                    }
-                  }
-                },
-                "audios": {
-                  "$omitEmpty": {
-                    "$map": {
-                      "from": {
-                        "$ref": "request.audios"
-                      },
-                      "as": "media",
-                      "in": {
-                        "$ref": "media.value"
+                    "$switch": {
+                      "cases": [
+                        {
+                          "when": {
+                            "$in": [
+                              {
+                                "$lower": {
+                                  "$trim": {
+                                    "$ref": "request.resolution"
+                                  }
+                                }
+                              },
+                              [
+                                "2160p",
+                                "4k",
+                                "2160"
+                              ]
+                            ]
+                          },
+                          "then": "4k"
+                        }
+                      ],
+                      "default": {
+                        "$lower": {
+                          "$trim": {
+                            "$ref": "request.resolution"
+                          }
+                        }
                       }
                     }
                   }
                 },
                 "duration": {
                   "$omitEmpty": {
-                    "$ref": "request.duration"
+                    "$if": {
+                      "condition": {
+                        "$gt": [
+                          {
+                            "$ref": "request.duration"
+                          },
+                          0
+                        ]
+                      },
+                      "then": {
+                        "$concat": [
+                          {
+                            "$ref": "request.duration"
+                          },
+                          "s"
+                        ]
+                      },
+                      "else": null
+                    }
                   }
                 },
-                "aspect_ratio": {
-                  "$omitEmpty": {
-                    "$ref": "request.aspectRatio"
-                  }
-                },
-                "resolution": {
-                  "$omitEmpty": {
-                    "$ref": "request.resolution"
-                  }
-                },
-                "parameters": {
-                  "$omitEmpty": {
-                    "$ref": "request.providerOptions.luma-dream-machine.parameters"
+                "keyframes": {
+                  "$if": {
+                    "condition": {
+                      "$gt": [
+                        {
+                          "$len": {
+                            "$coalesce": [
+                              {
+                                "$ref": "request.images"
+                              },
+                              []
+                            ]
+                          }
+                        },
+                        0
+                      ]
+                    },
+                    "then": {
+                      "$merge": [
+                        {
+                          "frame0": {
+                            "$if": {
+                              "condition": {
+                                "$gt": [
+                                  {
+                                    "$len": {
+                                      "$filter": {
+                                        "from": {
+                                          "$sortByOrder": {
+                                            "$ref": "request.images"
+                                          }
+                                        },
+                                        "as": "media",
+                                        "where": {
+                                          "$in": [
+                                            {
+                                              "$ref": "media.role"
+                                            },
+                                            [
+                                              "first_frame",
+                                              ""
+                                            ]
+                                          ]
+                                        }
+                                      }
+                                    }
+                                  },
+                                  0
+                                ]
+                              },
+                              "then": {
+                                "type": "image",
+                                "url": {
+                                  "$first": {
+                                    "$map": {
+                                      "from": {
+                                        "$filter": {
+                                          "from": {
+                                            "$sortByOrder": {
+                                              "$ref": "request.images"
+                                            }
+                                          },
+                                          "as": "media",
+                                          "where": {
+                                            "$in": [
+                                              {
+                                                "$ref": "media.role"
+                                              },
+                                              [
+                                                "first_frame",
+                                                ""
+                                              ]
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      "as": "media",
+                                      "in": {
+                                        "$ref": "media.value"
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              "else": null
+                            }
+                          }
+                        },
+                        {
+                          "frame1": {
+                            "$if": {
+                              "condition": {
+                                "$gt": [
+                                  {
+                                    "$len": {
+                                      "$filter": {
+                                        "from": {
+                                          "$sortByOrder": {
+                                            "$ref": "request.images"
+                                          }
+                                        },
+                                        "as": "media",
+                                        "where": {
+                                          "$in": [
+                                            {
+                                              "$ref": "media.role"
+                                            },
+                                            [
+                                              "last_frame"
+                                            ]
+                                          ]
+                                        }
+                                      }
+                                    }
+                                  },
+                                  0
+                                ]
+                              },
+                              "then": {
+                                "type": "image",
+                                "url": {
+                                  "$first": {
+                                    "$map": {
+                                      "from": {
+                                        "$filter": {
+                                          "from": {
+                                            "$sortByOrder": {
+                                              "$ref": "request.images"
+                                            }
+                                          },
+                                          "as": "media",
+                                          "where": {
+                                            "$in": [
+                                              {
+                                                "$ref": "media.role"
+                                              },
+                                              [
+                                                "last_frame"
+                                              ]
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      "as": "media",
+                                      "in": {
+                                        "$ref": "media.value"
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              "else": null
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "else": null
                   }
                 }
               },
@@ -209,7 +370,8 @@
         },
         "poll": {
           "method": "GET",
-          "path": "/dream-machine/v1/generations/{{taskId}}"
+          "path": "/dream-machine/v1/generations/{{taskId}}",
+          "originPath": true
         },
         "response": {
           "taskId": {
@@ -232,21 +394,41 @@
             ]
           },
           "status": {
-            "$coalesce": [
-              {
-                "$ref": "response.status"
+            "$if": {
+              "condition": {
+                "$eq": [
+                  {
+                    "$lower": {
+                      "$trim": {
+                        "$ref": "response.state"
+                      }
+                    }
+                  },
+                  "dreaming"
+                ]
               },
-              {
-                "$ref": "response.state"
-              },
-              {
-                "$ref": "response.data.status"
-              },
-              "pending"
-            ]
+              "then": "processing",
+              "else": {
+                "$coalesce": [
+                  {
+                    "$ref": "response.state"
+                  },
+                  {
+                    "$ref": "response.status"
+                  },
+                  {
+                    "$ref": "response.data.status"
+                  },
+                  "pending"
+                ]
+              }
+            }
           },
           "message": {
             "$coalesce": [
+              {
+                "$ref": "response.failure_reason"
+              },
               {
                 "$ref": "response.error.message"
               },
@@ -260,6 +442,9 @@
           },
           "videos": {
             "$coalesce": [
+              {
+                "$ref": "response.assets.video"
+              },
               {
                 "$ref": "response.video_url"
               },
@@ -284,7 +469,132 @@
             "error.code"
           ],
           "resultEphemeral": true
-        }
+        },
+        "validations": [
+          {
+            "assert": {
+              "$eq": [
+                {
+                  "$len": {
+                    "$filter": {
+                      "from": {
+                        "$ref": "request.images"
+                      },
+                      "as": "media",
+                      "where": {
+                        "$in": [
+                          {
+                            "$ref": "media.role"
+                          },
+                          [
+                            "reference_image",
+                            "subject_reference",
+                            "style_reference"
+                          ]
+                        ]
+                      }
+                    }
+                  }
+                },
+                0
+              ]
+            },
+            "message": "Luma Dream Machine 当前 profile 只发送首帧和尾帧，角色或风格参考图请改用支持参考图的协议"
+          },
+          {
+            "assert": {
+              "$lte": [
+                {
+                  "$len": {
+                    "$filter": {
+                      "from": {
+                        "$ref": "request.images"
+                      },
+                      "as": "media",
+                      "where": {
+                        "$in": [
+                          {
+                            "$ref": "media.role"
+                          },
+                          [
+                            "first_frame",
+                            ""
+                          ]
+                        ]
+                      }
+                    }
+                  }
+                },
+                1
+              ]
+            },
+            "message": "Luma Dream Machine 最多接收一张首帧图片"
+          },
+          {
+            "assert": {
+              "$lte": [
+                {
+                  "$len": {
+                    "$filter": {
+                      "from": {
+                        "$ref": "request.images"
+                      },
+                      "as": "media",
+                      "where": {
+                        "$in": [
+                          {
+                            "$ref": "media.role"
+                          },
+                          [
+                            "last_frame"
+                          ]
+                        ]
+                      }
+                    }
+                  }
+                },
+                1
+              ]
+            },
+            "message": "Luma Dream Machine 最多接收一张尾帧图片"
+          },
+          {
+            "assert": {
+              "$eq": [
+                {
+                  "$len": {
+                    "$coalesce": [
+                      {
+                        "$ref": "request.videos"
+                      },
+                      []
+                    ]
+                  }
+                },
+                0
+              ]
+            },
+            "message": "Luma Dream Machine 当前 profile 不发送参考视频，请改用支持参考视频的协议"
+          },
+          {
+            "assert": {
+              "$eq": [
+                {
+                  "$len": {
+                    "$coalesce": [
+                      {
+                        "$ref": "request.audios"
+                      },
+                      []
+                    ]
+                  }
+                },
+                0
+              ]
+            },
+            "message": "Luma Dream Machine 当前 profile 不发送参考音频，请改用支持参考音频的协议"
+          }
+        ]
       }
     ]
   }

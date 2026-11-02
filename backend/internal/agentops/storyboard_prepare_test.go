@@ -53,7 +53,7 @@ func TestStoryboardPreparationReplayScopeAndUndo(t *testing.T) {
 	if err != nil || state == nil || state.Change == nil || len(state.Change.CreatedNodeIDs) != 4 || len(state.Change.CreatedEdgeIDs) != 8 || !reflect.DeepEqual(state.Change.UpdatedNodeIDs, []string{"n1"}) {
 		t.Fatalf("missing effects: %+v %v", state, err)
 	}
-	if _, err := h.service.UndoAssistantTurn(h.userID, h.canvasID, turn); err != nil {
+	if _, err := h.service.AssistantTurns().Undo(h.userID, h.canvasID, turn); err != nil {
 		t.Fatal(err)
 	}
 	restored := h.canvas(t)

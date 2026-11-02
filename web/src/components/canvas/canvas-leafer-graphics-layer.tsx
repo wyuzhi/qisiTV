@@ -47,6 +47,7 @@ export function CanvasLeaferGraphicsLayer(props: CanvasLeaferGraphicsLayerProps)
     const overlayRef = useRef<OverlayScene | null>(null);
     const viewportRef = useRef(props.viewport);
     const rasterViewportRef = useRef(props.viewport);
+    const viewportSizeRef = useRef({ width: 1, height: 1 });
     const propsRef = useRef(props);
     propsRef.current = props;
 
@@ -61,6 +62,7 @@ export function CanvasLeaferGraphicsLayer(props: CanvasLeaferGraphicsLayerProps)
         const resize = () => {
             const rect = container.getBoundingClientRect();
             const size = { width: Math.max(1, rect.width), height: Math.max(1, rect.height), pixelRatio: canvasPixelRatio() };
+            viewportSizeRef.current = size;
             overlay.leafer.resize(size);
             syncViewport(rasterViewportRef.current, size.width, size.height, overlay, propsRef.current);
             if (isViewportPreview(container, viewportRef.current, rasterViewportRef.current)) {
@@ -72,10 +74,16 @@ export function CanvasLeaferGraphicsLayer(props: CanvasLeaferGraphicsLayerProps)
         window.addEventListener("resize", resize);
         const unsubscribe = subscribeCanvasGraphicsViewportPreview(container, (next) => {
             viewportRef.current = next;
-            const rect = container.getBoundingClientRect();
+            if (!hasVisibleOverlayContent(overlay)) {
+                if (hasScenePreview(overlay)) resetScenePreview(overlay);
+                return;
+            }
+            // The container does not move with the camera. Reading layout here
+            // would flush the world-layer style writes on every preview frame.
+            const size = viewportSizeRef.current;
             if (isViewportPreview(container, next, rasterViewportRef.current)) {
                 if (shouldRebaseCanvasRaster(next, rasterViewportRef.current)) {
-                    syncViewport(next, rect.width, rect.height, overlay, propsRef.current);
+                    syncViewport(next, size.width, size.height, overlay, propsRef.current);
                     rasterViewportRef.current = next;
                     forceSceneRender(overlay);
                     resetScenePreview(overlay);
@@ -86,10 +94,15 @@ export function CanvasLeaferGraphicsLayer(props: CanvasLeaferGraphicsLayerProps)
             }
             resetScenePreview(overlay);
             if (sameCanvasViewport(next, rasterViewportRef.current)) return;
-            syncViewport(next, rect.width, rect.height, overlay, propsRef.current);
+            syncViewport(next, size.width, size.height, overlay, propsRef.current);
             rasterViewportRef.current = next;
         });
         const unsubscribeSelection = subscribeCanvasSelectionPreview(container, (selection) => {
+            if (!sameCanvasViewport(viewportRef.current, rasterViewportRef.current)) {
+                const size = viewportSizeRef.current;
+                syncViewport(viewportRef.current, size.width, size.height, overlay, propsRef.current);
+                rasterViewportRef.current = viewportRef.current;
+            }
             syncSelection(overlay.selection, selection, propsRef.current.theme);
         });
         const unsubscribeNodeDrag = subscribeCanvasNodeDragPreview(container, (preview) => {
@@ -113,6 +126,11 @@ export function CanvasLeaferGraphicsLayer(props: CanvasLeaferGraphicsLayerProps)
         const overlay = overlayRef.current;
         if (!overlay) return;
         syncOverlayContent(overlay, props, viewportRef.current.k);
+        if (hasVisibleOverlayContent(overlay) && !sameCanvasViewport(viewportRef.current, rasterViewportRef.current)) {
+            const size = viewportSizeRef.current;
+            syncViewport(viewportRef.current, size.width, size.height, overlay, props);
+            rasterViewportRef.current = viewportRef.current;
+        }
     }, [props.batchConnectionPreview, props.connectingParams, props.connectionTargetAnchorRatio, props.connectionTargetNodeId, props.mouseWorld, props.nodeById, props.scriptScrollTopById, props.selectedNodeBounds, props.selectionBox, props.theme]);
 
     useLayoutEffect(() => {
@@ -120,23 +138,25 @@ export function CanvasLeaferGraphicsLayer(props: CanvasLeaferGraphicsLayerProps)
         const container = props.containerRef.current;
         if (!overlay || !container) return;
         viewportRef.current = props.viewport;
-        const rect = container.getBoundingClientRect();
+        const size = viewportSizeRef.current;
         const hadPreview = hasScenePreview(overlay);
         if (hadPreview || !sameCanvasViewport(props.viewport, rasterViewportRef.current)) {
-            syncViewport(props.viewport, rect.width, rect.height, overlay, props);
+            syncViewport(props.viewport, size.width, size.height, overlay, props);
         }
         rasterViewportRef.current = props.viewport;
         // 新视口先同步到真实 DPR backing store，再撤销交互期的合成变换，避免出现跳帧。
-        if (hadPreview) forceSceneRender(overlay);
-        resetScenePreview(overlay);
+        if (hadPreview) {
+            forceSceneRender(overlay);
+            resetScenePreview(overlay);
+        }
     }, [props.containerRef, props.viewport]);
 
     useLayoutEffect(() => {
         const overlay = overlayRef.current;
         const container = props.containerRef.current;
         if (!overlay || !container) return;
-        const rect = container.getBoundingClientRect();
-        syncViewport(rasterViewportRef.current, rect.width, rect.height, overlay, props);
+        const size = viewportSizeRef.current;
+        syncViewport(rasterViewportRef.current, size.width, size.height, overlay, props);
         if (isViewportPreview(container, viewportRef.current, rasterViewportRef.current)) {
             applyScenePreview(viewportRef.current, rasterViewportRef.current, overlay);
         }
@@ -261,6 +281,16 @@ function syncViewport(viewport: ViewportTransform, width: number, height: number
 
 function isViewportPreview(container: HTMLDivElement, viewport: ViewportTransform, rasterViewport: ViewportTransform) {
     return container.dataset.canvasViewportInteracting === "true" && !sameCanvasViewport(viewport, rasterViewport);
+}
+
+function hasVisibleOverlayContent(overlay: OverlayScene) {
+    return Boolean(
+        overlay.selection.visible
+        || overlay.selectionBounds.visible
+        || overlay.guides.visible
+        || overlay.draft.visible
+        || overlay.batchDrafts.visible
+    );
 }
 
 function applyScenePreview(viewport: ViewportTransform, rasterViewport: ViewportTransform, ...scenes: LeaferScene[]) {

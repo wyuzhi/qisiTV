@@ -20,7 +20,7 @@ func TestUserCanvasLibraryPageIsBoundedAndScoped(t *testing.T) {
 	if err := db.Create(&model.CanvasProject{ID: "foreign", UserID: "other", Title: "Foreign", PayloadJSON: `{}`}).Error; err != nil {
 		t.Fatal(err)
 	}
-	page, err := service.UserCanvasProjectsPage("owner", 1, 999, "", "", "name")
+	page, err := service.CanvasService().UserCanvasProjectsPage("owner", 1, 999, "", "", "name")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,11 +34,11 @@ func TestUserCanvasLibraryPageIsBoundedAndScoped(t *testing.T) {
 	if strings.Contains(string(encoded), "secret") || strings.Contains(string(encoded), "foreign") {
 		t.Fatal("page exposed full payload or another account")
 	}
-	last, err := service.UserCanvasProjectsPage("owner", 2, 50, "", "", "name")
+	last, err := service.CanvasService().UserCanvasProjectsPage("owner", 2, 50, "", "", "name")
 	if err != nil || len(last.Projects) != 5 || last.HasMore {
 		t.Fatalf("last page: %+v %v", last, err)
 	}
-	filtered, err := service.UserCanvasProjectsPage("owner", 1, 40, "", "Title 04", "name")
+	filtered, err := service.CanvasService().UserCanvasProjectsPage("owner", 1, 40, "", "Title 04", "name")
 	if err != nil || filtered.Total != 1 || filtered.Projects[0].NodeCount != 1 {
 		t.Fatalf("filter: %+v %v", filtered, err)
 	}
@@ -51,7 +51,7 @@ func TestUserAssetsBatchIsBoundedAndScoped(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	assets, err := service.UserAssetsByIDs("owner", []string{"owner", "owner", "other", "missing"})
+	assets, err := service.CanvasService().UserAssetsByIDs("owner", []string{"owner", "owner", "other", "missing"})
 	if err != nil || len(assets) != 1 {
 		t.Fatalf("unexpected assets: %s %v", assets, err)
 	}
@@ -62,14 +62,14 @@ func TestUserAssetsBatchIsBoundedAndScoped(t *testing.T) {
 	if _, ok := payload["tags"]; !ok {
 		t.Fatalf("client payload missing tags: %s", assets[0])
 	}
-	empty, err := service.UserAssetsByIDs("owner", nil)
+	empty, err := service.CanvasService().UserAssetsByIDs("owner", nil)
 	if err != nil || len(empty) != 0 {
 		t.Fatalf("empty IDs must not list account: %s %v", empty, err)
 	}
-	if _, err := service.UserAssetsByIDs("owner", make([]string, 101)); err == nil {
+	if _, err := service.CanvasService().UserAssetsByIDs("owner", make([]string, 101)); err == nil {
 		t.Fatal("expected batch limit")
 	}
-	if _, err := service.UserAssetsByIDs("owner", []string{" "}); err == nil {
+	if _, err := service.CanvasService().UserAssetsByIDs("owner", []string{" "}); err == nil {
 		t.Fatal("expected invalid ID error")
 	}
 }

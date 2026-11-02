@@ -33,14 +33,14 @@ func TestPermissionModePersistenceFreezeAndReadOnlyTransactionGuard(t *testing.T
 	if _, err := h.service.BeginAssistantTurn(h.userID, h.canvasID, turn, app.AssistantTurnInput{PermissionMode: "read-only"}); err != nil {
 		t.Fatal(err)
 	}
-	runtime, err := h.service.AssistantTurnRuntimeState(h.userID, turn)
+	runtime, err := h.service.AssistantTurns().RuntimeState(h.userID, turn)
 	if err != nil || runtime.PermissionMode != "read-only" {
 		t.Fatalf("runtime=%+v err=%v", runtime, err)
 	}
 	if _, err := h.service.BeginAssistantTurn(h.userID, h.canvasID, turn, app.AssistantTurnInput{PermissionMode: "full-access"}); err == nil {
 		t.Fatal("begin upgraded existing turn")
 	}
-	if err := h.service.ExtendAssistantTurn(h.userID, h.canvasID, turn, app.AssistantTurnInput{PermissionMode: "full-access"}); err == nil {
+	if err := h.service.AssistantTurns().Extend(h.userID, h.canvasID, turn, app.AssistantTurnInput{PermissionMode: "full-access"}); err == nil {
 		t.Fatal("steer upgraded existing turn")
 	}
 	before := mustJSON(t, h.canvas(t))
@@ -106,7 +106,7 @@ func TestFullAccessCrossCanvasReceiptsAndAtomicUndo(t *testing.T) {
 				}
 			}
 			writtenA, writtenB := mustJSON(t, accessCanvas(t, h, h.canvasID)), mustJSON(t, accessCanvas(t, h, other))
-			_, err = h.service.UndoAssistantTurn(h.userID, h.canvasID, turn)
+			_, err = h.service.AssistantTurns().Undo(h.userID, h.canvasID, turn)
 			if manual {
 				if err == nil {
 					t.Fatal("manual changes erased")
@@ -153,7 +153,7 @@ func TestFullAccessWholeDocumentCommitHasActualDiffAndSafeUndo(t *testing.T) {
 	if err != nil || !state.Change.DocumentUpdated || state.Change.DocumentHash == "" || !reflect.DeepEqual(state.Change.DeletedNodeIDs, []string{"n1"}) {
 		t.Fatalf("diff=%+v err=%v", state, err)
 	}
-	if _, err := h.service.UndoAssistantTurn(h.userID, h.canvasID, turn); err != nil {
+	if _, err := h.service.AssistantTurns().Undo(h.userID, h.canvasID, turn); err != nil {
 		t.Fatal(err)
 	}
 	after := h.canvas(t)

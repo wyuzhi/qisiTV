@@ -27,9 +27,16 @@ const REBASABLE_WRITES = new Set([
   'canvas.script.row.remove',
 ]);
 
-function assertToolGeneration(generation, descriptor, signal) {
+const canvasMutation = descriptor => descriptor.id.startsWith('canvas.') &&
+  (!descriptor.readOnly || descriptor.id === 'canvas.generation.propose');
+
+function assertToolGeneration(generation, descriptor, signal, turn) {
   if (generation.aborted || signal?.aborted) throw new Error('aborted');
   if (generation.permissionMode === 'read-only' && (!descriptor.readOnly || descriptor.id === 'canvas.generation.propose')) throw new Error('scope_denied: 本轮助手只能读取');
+  if (canvasMutation(descriptor)) {
+    if (turn.studioReadAvailable === false) throw new Error('canvas_snapshot_unavailable: 无法读取当前画布，已暂停写入，请先恢复现场读取');
+    if (turn.canvasContextChanged) throw new Error('canvas_context_changed: 画布已变化，同批剩余写入已暂停；先依据最新现场重新决策，不要重放旧操作');
+  }
   if ((!descriptor.readOnly || descriptor.id === 'canvas.generation.propose') &&
       (generation.pendingInput?.state === 'pending' || generation.pendingInputError || generation.modelEpoch !== generation.intentEpoch)) {
     throw new Error('turn_intent_changed: 已收到新的要求，先读取新要求再修改');
@@ -39,11 +46,10 @@ function assertToolGeneration(generation, descriptor, signal) {
 export const ASSISTANT_CANVAS_NODE_UPDATE_PATCH = {
   title: {
     type: 'string',
-    description: '节点名称。只在要改名时提交。',
   },
   content: {
     type: 'string',
-    description: '媒体节点的下次生成提示词草稿，或文本节点的正文。只提交要改的字段；省略的字段保持原样。',
+    description: '文本节点的正文或下次生成提示词草稿（省略的字段保持原样）',
   },
 };
 
@@ -93,18 +99,23 @@ export function createOperationBridge({
 
   function buildTools(canvasId, log, generation, turn, identityPrefix) {
     const mode = generation.permissionMode || 'canvas';
-    const tools = [...descriptors.entries()].filter(([,d]) => Array.isArray(d.assistantModes) && d.assistantModes.includes(mode)).map(([toolName, descriptor]) => ({
+    const tools = [...descriptors.entries()].filter(([,d]) =>
+      Array.isArray(d.assistantModes) &&
+      d.assistantModes.includes(mode)
+    ).map(([toolName, descriptor]) => ({
       name: toolName,
       label: descriptor.id,
       readOnly: descriptor.readOnly === true,
       replay: descriptor.replay === 'safe' ? 'safe' : 'unsafe',
-      description: descriptor.summary + (descriptor.id === 'canvas.get'
-        ? '。返回有界只读视图：revision 与真实节点/连线；readView 标明完整或部分。沿 nextOffset 分页，长字段按 nodeId/fieldPath/textOffset 读取，不把 preview 当完整原文；后续读取带 expectedRevision。'
-        : canvasWriteViewDescription(descriptor.id)),
+      description: descriptor.summary + canvasWriteViewDescription(descriptor.id),
       parameters: scopedSchema(descriptor.params, mode !== 'canvas' || descriptor.id === 'canvas.get', descriptor.id),
       ...(descriptor.readOnly ? {} : { executionMode: 'sequential' }),
       execute: async (toolCallId, args, signal, api = {}) => {
-        assertToolGeneration(generation, descriptor, signal);
+        try { assertToolGeneration(generation, descriptor, signal, turn); }
+        catch (error) {
+          log.push({ toolCallId: toolCallId || null, tool: descriptor.id, args: args || {}, isError: true, error: error.message });
+          throw error;
+        }
         const budget = turnBudgetContext.getStore();
         const step = spendToolStep(budget);
         if (!step.allowed) {
@@ -171,7 +182,7 @@ export function createOperationBridge({
           // Persist the first wire revision before Go can commit. A resumed
           // tool must reuse that revision, even after this turn's chain advances.
           if (chainWrite && generation.persistEffects) await generation.persistEffects();
-          assertToolGeneration(generation, descriptor, signal);
+          assertToolGeneration(generation, descriptor, signal, turn);
           let data = await opsRequest('POST', `/ops/${descriptor.id}`, { opId, params }, signal, turn.turnId);
           if (descriptor.id === 'canvas.generation.submit' || descriptor.id === 'canvas.timeline.render') {
             data = await awaitBusinessTasks(data, { opsRequest, turnId: turn.turnId, signal, canvasId: params.canvasId,
@@ -206,6 +217,19 @@ export function createOperationBridge({
           return converted;
         } catch (error) {
           log.push({ toolCallId: toolCallId || null, tool: descriptor.id, args: params, isError: true, error: error.message, ms: Date.now() - started, ...rebaseNote });
+          if (canvasMutation(descriptor) && typeof params.canvasId === 'string' && ['stale_revision', 'revision_conflict'].includes(error.reason)) {
+            turn.canvasContextChanged = true;
+            const content = [{ type: 'text', text: `${error.reason}: 本次写入明确被拒绝，没有提交成功。画布已变化，同批剩余写入已暂停。请核对最新内容与已有结果，再决定下一步；不要只替换版本号重放旧操作。` }];
+            try {
+              const current = await opsRequest('POST', '/ops/canvas.get', { params: { canvasId: params.canvasId } }, signal, turn.turnId);
+              if (current?.result?.canvasId !== params.canvasId) throw new Error('invalid_canvas_read_result');
+              content.push({ type: 'text', text: JSON.stringify(canvasReadView(current)) });
+            } catch {
+              turn.studioReadAvailable = false;
+              content.push({ type: 'text', text: '最新画布读取失败，状态未知。不要把历史画布当成当前状态；等待读取恢复后再继续。' });
+            }
+            error.message = content.map(part => part.text).join('\n\n');
+          }
           throw error;
         }
       },

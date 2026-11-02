@@ -74,11 +74,14 @@ func (s *Service) bindTaskOutputOnce(userID string, patch TaskOutputBind) (TaskO
 	if err != nil {
 		return TaskOutputBindResult{}, err
 	}
+	// Refusals carry the revision this read observed, so a caller can tell
+	// whether the canvas changed since the refusal without re-reading it.
+	refusal := map[string]any{"revision": canvasRevisionValue(doc)}
 	node := findCanvasNode(doc, patch.NodeID)
 	if node == nil {
 		return TaskOutputBindResult{}, &kernel.AppError{
 			Status: http.StatusNotFound, Reason: kernel.ErrorReason("node_deleted"),
-			Message: "原任务节点已删除，未重新创建节点",
+			Message: "原任务节点已删除，未重新创建节点", Details: refusal,
 		}
 	}
 	if got := nodeString(nodeMetadata(node), "taskId"); got != strings.TrimSpace(patch.TaskID) && !canBindEmptyRenderNode(node, patch) && !canBindPendingVideoNode(node, patch) {
@@ -88,7 +91,7 @@ func (s *Service) bindTaskOutputOnce(userID string, patch TaskOutputBind) (TaskO
 		}
 		return TaskOutputBindResult{}, &kernel.AppError{
 			Status: http.StatusConflict, Reason: kernel.ErrorReason("node_task_mismatch"),
-			Message: message,
+			Message: message, Details: refusal,
 		}
 	}
 	metadata := nodeMetadata(node)
@@ -415,7 +418,28 @@ func alreadyBound(metadata map[string]any, patch TaskOutputBind) bool {
 	if patch.Storyboard != nil && nodeString(metadata, "status") != "success" {
 		return false
 	}
+	if hasStaleGenerationOutcome(metadata) {
+		return false
+	}
 	return nodeString(metadata, "status") == "success" && nodeString(metadata, "taskId") == strings.TrimSpace(patch.TaskID)
+}
+
+// hasStaleGenerationOutcome reports whether an already-bound node still carries
+// an explicit non-ready taskOutcome or failure marker from a prior run. Nodes
+// saved before taskOutcome existed omit the field and remain idempotent.
+func hasStaleGenerationOutcome(metadata map[string]any) bool {
+	if raw, exists := metadata["taskOutcome"]; exists && raw != nil {
+		outcome, ok := raw.(map[string]any)
+		if !ok || nodeString(outcome, "phase") != "ready" || nodeString(outcome, "regenerate") != "allowed" {
+			return true
+		}
+	}
+	for _, key := range []string{"taskOutcomeSource", "generationFailure", "generationPreflightError"} {
+		if _, exists := metadata[key]; exists {
+			return true
+		}
+	}
+	return false
 }
 
 func applyGenerationBindMetadata(metadata map[string]any, patch TaskOutputBind) {
@@ -474,6 +498,14 @@ func applyGenerationBindMetadata(metadata map[string]any, patch TaskOutputBind) 
 	metadata["taskStatus"] = "succeeded"
 	metadata["taskProgress"] = 100
 	metadata["taskStage"] = nil
+	metadata["taskOutcome"] = map[string]any{
+		"phase":      "ready",
+		"regenerate": "allowed",
+		"reason":     "result_ready",
+	}
+	delete(metadata, "taskOutcomeSource")
+	delete(metadata, "generationFailure")
+	delete(metadata, "generationPreflightError")
 	metadata["errorDetails"] = nil
 	metadata["generationErrorCode"] = nil
 	metadata["resourceReloadAvailable"] = nil

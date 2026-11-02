@@ -23,7 +23,7 @@ func missingAssistantHost(c *gin.Context, host *assistantruntime.Host) bool {
 
 // RegisterAgentHostLifecycleRoutes 暴露宿主配置与启停：全部需要 owner 凭据 + 本机同源。
 // host 必须是本次路由注册持有的实例；缺失时明确失败，绝不在请求里 new 一个随后被丢掉的监督器。
-func RegisterAgentHostLifecycleRoutes(r gin.IRouter, svc *app.Service, host *assistantruntime.Host) {
+func RegisterAgentHostLifecycleRoutes(r gin.IRouter, svc ownerCredentialDirs, host *assistantruntime.Host) {
 	ownerGuard := func(c *gin.Context) bool { return requireOwner(c, svc) }
 
 	r.GET("/assistant/host/config", func(c *gin.Context) {

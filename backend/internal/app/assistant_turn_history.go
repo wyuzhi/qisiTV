@@ -21,6 +21,7 @@ func (s *Service) ReadAssistantTurnHistoryState(userID, canvasID, turnID string)
 }
 
 // CheckAssistantProposalRunnable rejects undone rounds and invalidated intents.
+
 func (s *Service) CheckAssistantProposalRunnable(userID, canvasID, turnID string) error {
 	return s.assistantTurnsOrInit().CheckProposalRunnable(userID, canvasID, turnID)
 }

@@ -12,20 +12,20 @@ import (
 
 func TestCanvasProductionHTTPReadsWithoutMutationAndRegistersOnlyExactReadyOutput(t *testing.T) {
 	env := newAssistantTestEnv(t, nil)
-	RegisterProjectRoutes(env.router.Group("/api"), env.service)
+	registerShortDramaRoutes(env.router.Group("/api"), env.service)
 	owner, err := env.service.LocalWorkspaceOwner()
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, err := env.service.CreateProject(owner.ID, app.CreateProjectRequest{Name: "画布制作"})
+	project, err := env.service.ProjectService().CreateProject(owner.ID, app.CreateProjectRequest{Name: "画布制作"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	unit, err := env.service.CreateProjectUnit(owner.ID, project.ID, app.CreateProjectUnitRequest{Title: "第一章", SourceText: "两人对谈"})
+	unit, err := env.service.ProjectService().CreateProjectUnit(owner.ID, project.ID, app.CreateProjectUnitRequest{Title: "第一章", SourceText: "两人对谈"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	shot, err := env.service.CreateProjectShot(owner.ID, project.ID, app.CreateProjectShotRequest{UnitID: unit.ID, Title: "对谈镜头", Description: "人物全景"})
+	shot, err := env.service.ProjectService().CreateProjectShot(owner.ID, project.ID, app.CreateProjectShotRequest{UnitID: unit.ID, Title: "对谈镜头", Description: "人物全景"})
 	if err != nil {
 		t.Fatal(err)
 	}

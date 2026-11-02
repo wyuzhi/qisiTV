@@ -50,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--low-percentile", type=float, default=2.0)
     parser.add_argument("--high-percentile", type=float, default=98.0)
     parser.add_argument("--gamma", type=float, default=1.25)
+    parser.add_argument("--min-output-fps", type=float, default=30.0, help="输出预览视频最低帧率，默认 30fps")
     parser.add_argument("--save-raw", action="store_true", help="额外保存 float32 NPZ 深度数据")
     return parser
 
@@ -83,6 +84,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         near_is_high=True,
         gamma=args.gamma,
     )
+    min_output_fps = float(getattr(args, "min_output_fps", 30.0) or 0.0)
+    encoded_fps = max(output_fps, min_output_fps) if min_output_fps > 0 else output_fps
     print(f"[3/3] 编码 {output_width}x{output_height} 灰度预览")
     encode_depth_preview(
         preview_frames,
@@ -90,6 +93,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         fps=output_fps,
         width=output_width,
         height=output_height,
+        min_output_fps=min_output_fps if min_output_fps > 0 else None,
     )
     if args.save_raw:
         raw_path.parent.mkdir(parents=True, exist_ok=True)
@@ -100,7 +104,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         "raw": str(raw_path) if args.save_raw else None,
         "device": device,
         "frames": int(depths.shape[0]),
-        "fps": output_fps,
+        "fps": encoded_fps,
         "seconds": round(time.monotonic() - started, 3),
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))

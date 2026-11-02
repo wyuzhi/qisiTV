@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"qisitv/backend/internal/app"
 	"net/http"
 	"sort"
 	"strings"
@@ -123,11 +122,11 @@ func (c *BusinessCatalog) Match(method, p string) (BusinessTool, bool) {
 	return BusinessTool{}, false
 }
 
-func RegisterBusinessDiscovery(api *gin.RouterGroup, catalog *BusinessCatalog, svc *app.Service) {
+func RegisterBusinessDiscovery(api *gin.RouterGroup, catalog *BusinessCatalog, owners ownerCredentialDirs) {
 	api.GET("/business/tools", func(c *gin.Context) {
 		principal, authorized := externalBusiness(c)
 		if !authorized {
-			if c.GetHeader("X-Beeftv-Client") != "" || !requireOwner(c, svc) {
+			if c.GetHeader("X-Beeftv-Client") != "" || !requireOwner(c, owners) {
 				return
 			}
 		}

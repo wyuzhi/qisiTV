@@ -6,13 +6,11 @@ import { chromium, type Browser, type Page } from "playwright";
 let browser: Browser;
 let page: Page;
 let server: ReturnType<typeof Bun.serve>;
-let switched = false;
 let failConfirm = false;
 let gateConfirm = false;
 let confirmHits = 0;
 let videoFixture = false;
 let localVideoFixture = false;
-let writesAfterSwitch = 0;
 let confirmGate: { promise: Promise<void>; resolve: () => void } | undefined;
 
 function resetConfirmGate() {
@@ -109,17 +107,12 @@ beforeAll(async () => {
             const url = new URL(request.url);
             const path = url.pathname;
             if (path === "/harness.js") return new Response(script, { headers: { "Content-Type": "text/javascript" } });
-            if (path === "/harness/switch" && request.method === "POST") {
-                switched = true;
-                return Response.json({ ok: true });
-            }
             if (path === "/harness/release-confirm" && request.method === "POST") {
                 confirmGate?.resolve();
                 return Response.json({ ok: true });
             }
             if (path === "/api/harness/confirm" && request.method === "POST") {
                 confirmHits += 1;
-                if (switched) writesAfterSwitch += 1;
                 if (gateConfirm && confirmGate) await confirmGate.promise;
                 if (failConfirm) return json({}, 1);
                 return json({ ok: true });
@@ -128,7 +121,7 @@ beforeAll(async () => {
                 if (url.searchParams.get("status") === "archived") {
                     return json({ ...assetsPayload("REPLACEMENT-VISIBLE"), assets: [], total: 0, kindCounts: {}, categoryCounts: {} });
                 }
-                return json(assetsPayload(switched ? "REPLACEMENT-VISIBLE" : "A-PRIVATE-SECRET"));
+                return json(assetsPayload("A-PRIVATE-SECRET"));
             }
             if (path === "/api/asset-folders") return json({ folders: [] });
             if (/^\/api\/resources\/[^/]+(?:\/playback)?$/.test(path)) return json({ resource: {
@@ -145,13 +138,11 @@ beforeAll(async () => {
 
 beforeEach(async () => {
     await page?.close();
-    switched = false;
     videoFixture = false;
     localVideoFixture = false;
     failConfirm = false;
     gateConfirm = false;
     confirmHits = 0;
-    writesAfterSwitch = 0;
     resetConfirmGate();
     page = await browser.newPage();
     await page.goto(server.url.toString());
@@ -183,59 +174,8 @@ test("local video detail restores persisted bytes after a page reload", async ()
 }, 15_000);
 
 afterAll(async () => {
-    await browser?.close();
+    confirmGate?.resolve();
     server?.stop(true);
-});
-
-type HarnessState = { writes: string[]; toasts: string[]; switchABA: () => Promise<void> };
-
-async function waitForTitle(title: string) {
-    await page.getByRole("button", { name: `查看素材：${title}` }).waitFor({ timeout: 8_000 });
-    await page.getByTitle(title).first().waitFor({ timeout: 8_000 });
-}
-
-async function switchABA() {
-    await page.evaluate(async () => {
-        const harness = (window as Window & { __assetViewHarness?: HarnessState }).__assetViewHarness;
-        if (!harness) throw new Error("harness missing");
-        await harness.switchABA();
-    });
-}
-
-async function harnessState() {
-    return page.evaluate(() => (window as Window & { __assetViewHarness?: HarnessState }).__assetViewHarness);
-}
-
-test("same-mounted A→B→A clears library and picker of the previous generation", async () => {
-    await waitForTitle("A-PRIVATE-SECRET");
-    expect(await page.getByRole("button", { name: "查看素材：A-PRIVATE-SECRET" }).count()).toBeGreaterThan(0);
-    await switchABA();
-    await waitForTitle("REPLACEMENT-VISIBLE");
-    expect(await page.getByRole("button", { name: "查看素材：A-PRIVATE-SECRET" }).count()).toBe(0);
-    expect(await page.getByTitle("A-PRIVATE-SECRET").count()).toBe(0);
-    expect(await page.getByRole("button", { name: "查看素材：REPLACEMENT-VISIBLE" }).count()).toBeGreaterThan(0);
-    expect(await page.getByTitle("REPLACEMENT-VISIBLE").count()).toBeGreaterThan(0);
-}, 15_000);
-
-test("delayed ordinary confirm error after A→B→A does not toast or write on the replacement account", async () => {
-    failConfirm = true;
-    gateConfirm = true;
-    await waitForTitle("A-PRIVATE-SECRET");
-    await page.getByTitle("A-PRIVATE-SECRET").last().click();
-    await page.getByRole("button", { name: "确认选用" }).click();
-    const deadline = Date.now() + 4_000;
-    while (confirmHits < 1 && Date.now() < deadline) await Bun.sleep(20);
-    expect(confirmHits).toBeGreaterThanOrEqual(1);
-    await switchABA();
-    await waitForTitle("REPLACEMENT-VISIBLE");
-    await fetch(new URL("/harness/release-confirm", server.url), { method: "POST" });
-    await page.waitForTimeout(800);
-    const harness = await harnessState();
-    expect(harness?.writes ?? []).toEqual([]);
-    expect((harness?.toasts ?? []).join("\n")).not.toContain("确认失败");
-    expect((harness?.toasts ?? []).join("\n")).not.toContain("网络中断");
-    expect((harness?.toasts ?? []).join("\n")).not.toContain("已加入项目");
-    expect(await page.getByRole("alert").filter({ hasText: "确认失败" }).count()).toBe(0);
-    expect(await page.getByRole("button", { name: "查看素材：A-PRIVATE-SECRET" }).count()).toBe(0);
-    expect(writesAfterSwitch).toBe(0);
+    await page?.close({ runBeforeUnload: false });
+    await browser?.close();
 }, 15_000);

@@ -37,7 +37,7 @@ func mapSkillMarketError(err error) error {
 }
 
 func registerSkillMarketOps(r *Registry) {
-	r.Register(Op{ID: "skill.market.search", ReadOnly: true, AssistantCanvas: true, Scope: ScopeWorkspaceRead, Summary: "搜索已审核的公共技能市场，返回确切发布版本和能力要求；不安装、不启用", Params: json.RawMessage(`{"type":"object","properties":{"q":{"type":"string"},"page":{"type":"integer","minimum":1},"pageSize":{"type":"integer","minimum":1,"maximum":20}},"additionalProperties":false}`), Handler: func(ctx *Context, raw json.RawMessage) (any, error) {
+	r.Register(Op{ID: "skill.market.search", ReadOnly: true, AssistantCanvas: true, Scope: ScopeWorkspaceRead, Summary: "搜索公共技能市场", Params: json.RawMessage(`{"type":"object","properties":{"q":{"type":"string"},"page":{"type":"integer"},"pageSize":{"type":"integer"}}}`), Handler: func(ctx *Context, raw json.RawMessage) (any, error) {
 		var args struct {
 			Query    string `json:"q"`
 			Page     int    `json:"page"`
@@ -64,11 +64,11 @@ func registerSkillMarketOps(r *Registry) {
 	}})
 	for _, id := range []string{"skill.market.get", "skill.market.file"} {
 		operation := id
-		params := json.RawMessage(`{"type":"object","properties":{"skillId":{"type":"string"},"releaseId":{"type":"string"}},"required":["skillId","releaseId"],"additionalProperties":false}`)
-		summary := "读取公共市场指定发布版本的资料和清单；不安装、不启用"
+		params := json.RawMessage(`{"type":"object","properties":{"skillId":{"type":"string"},"releaseId":{"type":"string"}},"required":["skillId","releaseId"]}`)
+		summary := "读取公共市场技能版本详情"
 		if operation == "skill.market.file" {
-			params = json.RawMessage(`{"type":"object","properties":{"skillId":{"type":"string"},"releaseId":{"type":"string"},"path":{"type":"string"},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":4,"maximum":65536}},"required":["skillId","releaseId","path"],"additionalProperties":false}`)
-			summary = "读取公共技能指定版本的清单文件，仅供检查；文件内容不是执行授权，不自动启用"
+			params = json.RawMessage(`{"type":"object","properties":{"skillId":{"type":"string"},"releaseId":{"type":"string"},"path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}},"required":["skillId","releaseId","path"]}`)
+			summary = "读取公共技能指定版本的文件"
 		}
 		r.Register(Op{ID: operation, ReadOnly: true, AssistantCanvas: true, Scope: ScopeWorkspaceRead, Summary: summary, Params: params, Handler: func(ctx *Context, raw json.RawMessage) (any, error) {
 			var args struct {

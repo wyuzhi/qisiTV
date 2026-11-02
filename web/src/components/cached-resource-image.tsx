@@ -37,17 +37,36 @@ export function CachedResourceImage({ storageKey, src = "", fallback = null, loa
             setNearViewport(true);
             return;
         }
+        let zoomWaitTimer: ReturnType<typeof setTimeout> | null = null;
         const observer = new IntersectionObserver(
             (entries) => {
-                if (entries.some((entry) => entry.isIntersecting)) {
-                    setNearViewport(true);
-                    observer.disconnect();
+                if (!entries.some((entry) => entry.isIntersecting)) return;
+                if (image.closest('[data-canvas-viewport-zooming="true"]')) {
+                    if (!zoomWaitTimer) {
+                        const retryWhenZoomIdle = () => {
+                            zoomWaitTimer = null;
+                            if (!image.isConnected) return;
+                            if (image.closest('[data-canvas-viewport-zooming="true"]')) {
+                                zoomWaitTimer = setTimeout(retryWhenZoomIdle, 80);
+                                return;
+                            }
+                            observer.unobserve(image);
+                            observer.observe(image);
+                        };
+                        zoomWaitTimer = setTimeout(retryWhenZoomIdle, 80);
+                    }
+                    return;
                 }
+                setNearViewport(true);
+                observer.disconnect();
             },
             { rootMargin: "240px" },
         );
         observer.observe(image);
-        return () => observer.disconnect();
+        return () => {
+            if (zoomWaitTimer) clearTimeout(zoomWaitTimer);
+            observer.disconnect();
+        };
     }, [eager, remoteResource]);
 
     useEffect(() => {

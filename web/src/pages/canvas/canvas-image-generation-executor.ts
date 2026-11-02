@@ -4,23 +4,23 @@ import { projectCanvasGenerationSubmission, rebaseCanvasGenerationTarget } from 
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { canGenerateImageInPlace, findAvailableGenerationGroupPosition, imageGenerationChildPosition, generationFailureNodeStatus, imageGenerationGroupSize } from "@/lib/canvas/canvas-generation-layout";
 import { cancelIncompleteImageBatch, retireImageBatchChildren } from "@/lib/canvas/canvas-image-batch-retry";
-import { buildImageGenerationNodeTitle } from "@/lib/canvas/canvas-generation-title";
+import { buildImageGenerationNodeTitle, promptNodeTitle } from "@/lib/canvas/canvas-generation-title";
 import { nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
-import { canvasImageReferenceLimitError, buildImageGenerationMetadata, clearInPlaceMediaOutputMetadata, getGenerationCount, isGenerationCanceled, resetGenerationTaskMetadata, runCanvasGenerationTaskToConsumer } from "@/lib/canvas/canvas-project-generation";
+import { buildImageGenerationMetadata, clearInPlaceMediaOutputMetadata, getGenerationCount, isGenerationCanceled, resetGenerationTaskMetadata, runCanvasGenerationTaskToConsumer } from "@/lib/canvas/canvas-project-generation";
 import { imageGenerationReferenceConnections } from "@/lib/canvas/canvas-resource-references";
 import { canvasGenerationPromptMetadata } from "@/lib/canvas/canvas-generation-submission";
 import { mediaResultMetadata } from "@/lib/canvas/canvas-node-semantics";
 import { CONTENT_MODERATION_ERROR_CODE, type GenerationFailureMetadata } from "@/lib/generation-error";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
-import { assertUserScope, captureUserScope, isUserScopeAbandonedError, userScopeMatches } from "@/lib/user-scope-guard";
 import { CanvasGenerationTargetSaveError } from "@/services/canvas-generation-errors";
 import { normalizeImageValue } from "@/lib/model-capabilities";
 import { mergedImageCapabilityConfig } from "@/lib/model-selection";
 import type { GenerationTask } from "@/services/api/task-center";
 
 import type { CanvasGenerationExecution } from "./canvas-generation-executor-types";
-import { canvasGenerationFailureMetadata, canvasImageGenerationHasPendingResult, canvasImagePendingResultMessage, isKeptGenerationResultCode } from "./canvas-generation-failure";
+import { canvasGenerationFailureMetadata, canvasImagePendingResultMessage } from "./canvas-generation-failure";
+import { canvasNodeHasPendingOutcomeResult, readNodeTaskOutcome } from "@/lib/task-outcome";
 
 const NODE_STATUS_LOADING = "loading" as const;
 const NODE_STATUS_SUCCESS = "success" as const;
@@ -28,6 +28,7 @@ const NODE_STATUS_ERROR = "error" as const;
 const NODE_STATUS_IDLE = "idle" as const;
 
 export async function executeImageGeneration({
+    pageUi,
     resolveReferenceLinks,
     nodeId,
     sourceNode,
@@ -42,9 +43,6 @@ export async function executeImageGeneration({
     nodesRef,
     setNodes,
     setConnections,
-    setSelectedNodeIds,
-    setSelectedConnectionId,
-    setDialogNodeId,
     startGenerationRequest,
     finishGenerationRequest,
     bindGenerationTask,
@@ -58,17 +56,11 @@ export async function executeImageGeneration({
     showError,
     registerPendingNodeIds,
 }: CanvasGenerationExecution) {
-    if (canvasImageGenerationHasPendingResult(sourceNode, canvasNodes)) {
+    if (canvasNodeHasPendingOutcomeResult(sourceNode, canvasNodes)) {
         showError(canvasImagePendingResultMessage(sourceNode, canvasNodes));
         return;
     }
-    const expectedScope = captureUserScope();
-    const isCurrent = () => userScopeMatches(expectedScope) && !controller.signal.aborted;
-    const referenceLimitError = canvasImageReferenceLimitError(generationConfig, generationContext.referenceImages);
-    if (referenceLimitError) {
-        showError(referenceLimitError);
-        return;
-    }
+    const isCurrent = () => !controller.signal.aborted;
     const profile = mergedImageCapabilityConfig(generationConfig, generationConfig.model || generationConfig.imageModel);
     const nativeOutputCount = profile.fixedOutputs || 0;
     const count = nativeOutputCount ? Number(normalizeImageValue(profile, generationConfig).count) : getGenerationCount(generationConfig.count);
@@ -104,7 +96,6 @@ export async function executeImageGeneration({
     if (onSubmissionPlan) {
         if (!clientOperationId) throw new Error("生成提交缺少确认标识");
         await onSubmissionPlan({ sourceNodeId: nodeId, submissions: submissions.map(submission => ({ ...submission, operationId: submission.operationId! })) });
-        assertUserScope(expectedScope);
         controller.signal.throwIfAborted();
         canvasNodes = nodesRef?.current || canvasNodes;
         canvasConnections = useCanvasStore.getState().projects.find(project => project.id === projectId)?.connections || canvasConnections;
@@ -152,7 +143,10 @@ export async function executeImageGeneration({
             ...skillMetadata,
             imageBatchExpanded: count > 1 ? true : undefined,
             generationErrorCode: undefined,
-            resourceReloadAvailable: undefined,
+            generationErrorSummary: undefined,
+            generationProviderCode: undefined,
+            taskFailureDiagnostics: undefined,
+            taskOutcome: undefined,
             failedPromptFingerprint: undefined,
             failedInputFingerprint: undefined,
             generatedFromNodeId: nodeId,
@@ -175,7 +169,10 @@ export async function executeImageGeneration({
             ...styleMetadata,
             ...skillMetadata,
             generationErrorCode: undefined,
-            resourceReloadAvailable: undefined,
+            generationErrorSummary: undefined,
+            generationProviderCode: undefined,
+            taskFailureDiagnostics: undefined,
+            taskOutcome: undefined,
             failedPromptFingerprint: undefined,
             failedInputFingerprint: undefined,
             generatedFromNodeId: nodeId,
@@ -197,7 +194,7 @@ export async function executeImageGeneration({
             return {
                 ...node,
                 type: CanvasNodeType.Text,
-                title: prompt.slice(0, 32) || "Prompt",
+                title: promptNodeTitle(node, prompt),
                 width: parentConfig.width,
                 height: parentConfig.height,
                 metadata: { ...node.metadata, content: prompt, richText: undefined, prompt, composerContent: prompt, status: NODE_STATUS_SUCCESS, fontSize: 14, errorDetails: undefined },
@@ -214,9 +211,9 @@ export async function executeImageGeneration({
     nodesRef.current = nextNodes;
     setNodes(nextNodes);
     setConnections(nextConnections);
-    setSelectedNodeIds(new Set([nodeId]));
-    setSelectedConnectionId(null);
-    setDialogNodeId(nodeId);
+    pageUi.getState().setSelectedNodeIds(new Set([nodeId]));
+    pageUi.getState().setSelectedConnectionId(null);
+    pageUi.getState().setDialogNodeId(nodeId);
 
     targetIds.forEach((targetId) => startGenerationRequest(targetId, nodeId, nodeId, controller));
     if (count > 1) startGenerationRequest(rootId, nodeId, nodeId, controller);
@@ -241,7 +238,7 @@ export async function executeImageGeneration({
                         let completed: GenerationTask | undefined;
                         await runCanvasGenerationTaskToConsumer(
                             {
-                                projectId, nodeId: batchTargets[0], expectedScope, ...retryContext,
+                                projectId, nodeId: batchTargets[0], ...retryContext,
                                 ...(operationId ? { clientOperationId: operationId } : {}),
                                 mode: "image", resolveReferenceLinks, prompt: effectivePrompt,
                                 config: { ...generationConfig, count: String(nativeOutputCount) }, referenceImages,
@@ -272,7 +269,6 @@ export async function executeImageGeneration({
                         {
                             projectId,
                             nodeId: targetId,
-                            expectedScope,
                             ...retryContext,
                             ...(operationId ? { clientOperationId: operationId } : {}),
                             mode: "image",
@@ -341,7 +337,7 @@ export async function executeImageGeneration({
                 if (isConfigNode) setNodes((current) => current.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)));
                 return true;
             } catch (error) {
-                if (isUserScopeAbandonedError(error) || (!controller.signal.aborted && isGenerationCanceled(error))) {
+                if ((!controller.signal.aborted && isGenerationCanceled(error))) {
                     abandoned = true;
                     return false;
                 }
@@ -363,7 +359,7 @@ export async function executeImageGeneration({
         }),
     );
     if (count > 1) finishGenerationRequest(rootId, controller);
-    if (abandoned || !userScopeMatches(expectedScope)) return;
+    if (abandoned) return;
     if (controller.signal.aborted) {
         setNodes((current) => {
             const ids = new Set([rootId, ...childIds]);
@@ -373,8 +369,7 @@ export async function executeImageGeneration({
                     metadata: {
                         ...node.metadata,
                         status: node.metadata?.content ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR,
-                        resourceReloadAvailable: true,
-                        generationSubmissionState: node.metadata?.taskId ? "accepted" as const : "unknown" as const,
+                        taskOutcome: { phase: "retrievable" as const, regenerate: "blocked" as const, reason: "delivery_pending" },
                         errorDetails: "已停止等待，任务已保留，请继续查询原任务",
                     },
                 } : node);
@@ -390,7 +385,8 @@ export async function executeImageGeneration({
         });
         return;
     }
-    if (hasFailure) showError(isKeptGenerationResultCode(representativeFailure?.generationErrorCode) ? representativeFailure?.errorDetails || "生成结果已保留，请点击「继续取回」" : saveFailureMessage || (hasSuccess ? "部分图片生成失败" : "全部图片生成失败"));
+    const representativeOutcome = readNodeTaskOutcome(representativeFailure);
+    if (hasFailure) showError(representativeOutcome?.phase === "retrievable" || representativeOutcome?.reason === "result_target_unavailable" ? representativeFailure?.errorDetails || "生成结果已保留，请点击「继续取回」" : saveFailureMessage || (hasSuccess ? "部分图片生成失败" : "全部图片生成失败"));
     setNodes((current) => {
         const next = current.map((node) => {
             if (node.id === nodeId && isConfigNode) {
@@ -399,7 +395,7 @@ export async function executeImageGeneration({
                     metadata: {
                         ...node.metadata,
                         status: hasSuccess ? NODE_STATUS_SUCCESS : generationFailureNodeStatus(isExistingImageNode),
-                        ...(hasSuccess ? { errorDetails: undefined, generationErrorCode: undefined, failedPromptFingerprint: undefined, failedInputFingerprint: undefined } : representativeFailure || { errorDetails: "全部图片生成失败" }),
+                        ...(hasSuccess ? { errorDetails: undefined, generationErrorCode: undefined, generationErrorSummary: undefined, generationProviderCode: undefined, failedPromptFingerprint: undefined, failedInputFingerprint: undefined } : representativeFailure || { errorDetails: "全部图片生成失败" }),
                     },
                 };
             }
@@ -410,7 +406,7 @@ export async function executeImageGeneration({
                         ...node.metadata,
                         status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR,
                         batchFailedCount: count > 1 ? failureCount : undefined,
-                        ...(hasSuccess ? { errorDetails: undefined, generationErrorCode: undefined, failedPromptFingerprint: undefined, failedInputFingerprint: undefined } : representativeFailure || { errorDetails: "全部图片生成失败" }),
+                        ...(hasSuccess ? { errorDetails: undefined, generationErrorCode: undefined, generationErrorSummary: undefined, generationProviderCode: undefined, failedPromptFingerprint: undefined, failedInputFingerprint: undefined } : representativeFailure || { errorDetails: "全部图片生成失败" }),
                     },
                 };
             }

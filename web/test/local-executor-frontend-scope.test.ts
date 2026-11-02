@@ -15,7 +15,6 @@ import {
     type LocalExecutorIntentState,
 } from "@/lib/plugins/builtin/editor/local-executor-session";
 import { getActiveUserScope, setActiveUserScope } from "@/lib/user-scope";
-import { captureUserScope, UserScopeAbandonedError } from "@/lib/user-scope-guard";
 import { apiClient, ApiError } from "@/services/api/request";
 import { createDepthCaptureTask } from "@/services/api/depth-capture";
 import { createTimelineRenderTask, createTimelineTranscriptionTask } from "@/services/api/timeline-tasks";
@@ -173,18 +172,17 @@ describe("local-executor clientOperationId intent", () => {
 });
 
 describe("local-executor typed HTTP contract", () => {
-    test("forwards clientOperationId and expectedScope on all three creates", async () => {
+    test("forwards clientOperationId on all three creates", async () => {
         const restore = switchScope("owner-a");
-        const expectedScope = captureUserScope();
         const posts: Array<{ path: string; body: unknown }> = [];
         try {
             await withAdapter(async (config) => {
                 posts.push({ path: requestPath(config), body: config.data });
                 return envelope(generationTask({ id: "created", clientOperationId: (config.data as { clientOperationId?: string }).clientOperationId, status: "queued" }));
             }, async () => {
-                await createTimelineRenderTask({ projectId: "proj-a", timeline, clientOperationId: "op-render" }, { expectedScope });
-                await createTimelineTranscriptionTask({ resourceId: "res-1", projectId: "proj-a", clientOperationId: "op-transcribe" }, { expectedScope });
-                await createDepthCaptureTask({ projectId: "proj-a", resourceId: "res-2", clientOperationId: "op-depth" }, { expectedScope });
+                await createTimelineRenderTask({ projectId: "proj-a", timeline, clientOperationId: "op-render" });
+                await createTimelineTranscriptionTask({ resourceId: "res-1", projectId: "proj-a", clientOperationId: "op-transcribe" });
+                await createDepthCaptureTask({ projectId: "proj-a", resourceId: "res-2", clientOperationId: "op-depth" });
             });
             expect(posts.map((item) => item.path)).toEqual(["/timeline/renders", "/timeline/transcriptions", "/depth-captures"]);
             expect(posts.map((item) => requestBody({ data: item.body })?.clientOperationId)).toEqual(["op-render", "op-transcribe", "op-depth"]);
@@ -195,7 +193,6 @@ describe("local-executor typed HTTP contract", () => {
 
     test("handles a durable replay response by observing the returned task id", async () => {
         const restore = switchScope("owner-a");
-        const expectedScope = captureUserScope();
         const seen: string[] = [];
         try {
             await withAdapter(async (config) => {
@@ -222,7 +219,6 @@ describe("local-executor typed HTTP contract", () => {
                 const session = beginLocalExecutorSession("proj-a", {
                     controller: new AbortController(),
                     getLiveProjectId: () => "proj-a",
-                    expectedScope,
                 });
                 const owned = await runOwnedTimelineRender({
                     session,
@@ -244,54 +240,8 @@ describe("local-executor typed HTTP contract", () => {
 });
 
 describe("local-executor submit and attach ownership", () => {
-    test("deferred submit plus A to B to A does not attach a result", async () => {
-        const restore = switchScope("owner-a");
-        const expectedScope = captureUserScope();
-        const entered = deferred();
-        const gate = deferred();
-        let attached = 0;
-        let created = 0;
-        try {
-            await withAdapter(async (config) => {
-                entered.resolve();
-                await gate.promise;
-                created += 1;
-                return envelope(generationTask({ id: "late-create", status: "succeeded", resultJson: JSON.stringify({ resourceId: "out" }) }));
-            }, async () => {
-                const session = beginLocalExecutorSession("proj-a", {
-                    controller: new AbortController(),
-                    getLiveProjectId: () => "proj-a",
-                    expectedScope,
-                });
-                const pending = runOwnedTimelineRender({
-                    session,
-                    projectId: "proj-a",
-                    timeline,
-                    clientOperationId: "op-aba",
-                    intervalMs: 1,
-                    timeoutMs: 1000,
-                }).then(async (owned) => {
-                    await attachLocalExecutorResult(session, () => {
-                        attached += 1;
-                        return owned.result;
-                    });
-                });
-                await entered.promise;
-                setActiveUserScope("owner-b");
-                setActiveUserScope("owner-a");
-                gate.resolve();
-                await expect(pending).rejects.toBeInstanceOf(UserScopeAbandonedError);
-                expect(attached).toBe(0);
-                expect(created).toBe(1);
-            });
-        } finally {
-            restore();
-        }
-    });
-
     test("late task completion after project switch does not write the replacement canvas", async () => {
         const restore = switchScope("owner-a");
-        const expectedScope = captureUserScope();
         const pollEntered = deferred();
         const pollGate = deferred();
         let liveProject = "proj-a";
@@ -325,7 +275,6 @@ describe("local-executor submit and attach ownership", () => {
                 const session = beginLocalExecutorSession("proj-a", {
                     controller,
                     getLiveProjectId: () => liveProject,
-                    expectedScope,
                 });
                 const pending = runOwnedDepthCapture({
                     session,
@@ -361,7 +310,6 @@ describe("local-executor submit and attach ownership", () => {
 
     test("late transcription completion after unmount does not dispatch subtitles", async () => {
         const restore = switchScope("owner-a");
-        const expectedScope = captureUserScope();
         const pollEntered = deferred();
         const pollGate = deferred();
         const controller = new AbortController();
@@ -387,7 +335,6 @@ describe("local-executor submit and attach ownership", () => {
                 const session = beginLocalExecutorSession("proj-a", {
                     controller,
                     getLiveProjectId: () => "proj-a",
-                    expectedScope,
                 });
                 const pending = runOwnedTimelineTranscription({
                     session,
@@ -416,7 +363,6 @@ describe("local-executor submit and attach ownership", () => {
 
     test("same intent unknown-submit retry posts the same clientOperationId; terminal retry posts a new one", async () => {
         const restore = switchScope("owner-a");
-        const expectedScope = captureUserScope();
         const posts: string[] = [];
         let renderPosts = 0;
         try {
@@ -461,7 +407,6 @@ describe("local-executor submit and attach ownership", () => {
                 const sessionOf = () => beginLocalExecutorSession("proj-a", {
                     controller: new AbortController(),
                     getLiveProjectId: () => "proj-a",
-                    expectedScope,
                 });
                 await expect(runOwnedTimelineRender({
                     session: sessionOf(),
@@ -506,7 +451,6 @@ describe("local-executor submit and attach ownership", () => {
 
     test("explicit 4xx before taskId posts a new clientOperationId for the same frozen input", async () => {
         const restore = switchScope("owner-a");
-        const expectedScope = captureUserScope();
         const posts: string[] = [];
         const frozenInputKey = localExecutorFrozenInputKey(["timeline_render", "proj-a", timeline]);
         try {
@@ -536,7 +480,6 @@ describe("local-executor submit and attach ownership", () => {
                 const sessionOf = () => beginLocalExecutorSession("proj-a", {
                     controller: new AbortController(),
                     getLiveProjectId: () => "proj-a",
-                    expectedScope,
                 });
                 await expect(runOwnedTimelineRender({
                     session: sessionOf(),
@@ -567,7 +510,6 @@ describe("local-executor submit and attach ownership", () => {
 
     test("uncertain retry of an edited timeline posts a new clientOperationId", async () => {
         const restore = switchScope("owner-a");
-        const expectedScope = captureUserScope();
         const posts: Array<{ id: string; durationMs: number }> = [];
         const originalKey = localExecutorFrozenInputKey(["timeline_render", "proj-a", timeline]);
         const editedTimeline = { ...timeline, durationMs: 2400 };
@@ -602,7 +544,6 @@ describe("local-executor submit and attach ownership", () => {
                 const sessionOf = () => beginLocalExecutorSession("proj-a", {
                     controller: new AbortController(),
                     getLiveProjectId: () => "proj-a",
-                    expectedScope,
                 });
                 await expect(runOwnedTimelineRender({
                     session: sessionOf(),
@@ -635,68 +576,4 @@ describe("local-executor submit and attach ownership", () => {
         }
     });
 
-    test("owned depth getResource after A to B to A does not attach", async () => {
-        const restore = switchScope("owner-a");
-        const expectedScope = captureUserScope();
-        const entered = deferred();
-        const gate = deferred();
-        let attached = 0;
-        const urls: string[] = [];
-        try {
-            await withAdapter(async (config) => {
-                const path = requestPath(config);
-                urls.push(path);
-                if (path === "/depth-captures") {
-                    return envelope(generationTask({
-                        id: "depth-lookup",
-                        type: "depth_capture",
-                        clientOperationId: "op-depth-lookup",
-                        status: "succeeded",
-                        resultJson: JSON.stringify({ resourceId: "depth-lookup-out", fileName: "depth.mp4", size: 1, durationMs: 1000, width: 16, height: 9 }),
-                    }));
-                }
-                if (path === "/tasks/depth-lookup") {
-                    return envelope(generationTask({
-                        id: "depth-lookup",
-                        type: "depth_capture",
-                        status: "succeeded",
-                        resultJson: JSON.stringify({ resourceId: "depth-lookup-out", fileName: "depth.mp4", size: 1, durationMs: 1000, width: 16, height: 9 }),
-                    }));
-                }
-                if (path === "/resources/depth-lookup-out") {
-                    entered.resolve();
-                    await gate.promise;
-                    return envelope({ resource: { id: "depth-lookup-out", mimeType: "video/mp4", size: 1, width: 16, height: 9, durationMs: 1000 } });
-                }
-                throw new Error(`unexpected ${path}`);
-            }, async () => {
-                const session = beginLocalExecutorSession("proj-a", {
-                    controller: new AbortController(),
-                    getLiveProjectId: () => "proj-a",
-                    expectedScope,
-                });
-                const pending = runOwnedDepthCapture({
-                    session,
-                    projectId: "proj-a",
-                    resourceId: "src-1",
-                    clientOperationId: "op-depth-lookup",
-                    intervalMs: 1,
-                    timeoutMs: 1000,
-                }).then(async (owned) => {
-                    await attachLocalExecutorResult(session, () => {
-                        attached += 1;
-                        return owned.capture;
-                    });
-                });
-                await entered.promise;
-                setActiveUserScope("owner-b");
-                setActiveUserScope("owner-a");
-                gate.resolve();
-                await expect(pending).rejects.toBeInstanceOf(UserScopeAbandonedError);
-                expect(attached).toBe(0);
-            });
-        } finally {
-            restore();
-        }
-    });
 });

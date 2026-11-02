@@ -362,6 +362,20 @@ func TestAgnesVideo25UsesRequestedReferenceOperationForSingleImage(t *testing.T)
 	}
 }
 
+func TestAgnesVideo25AllowsCustomDuration(t *testing.T) {
+	adapter, _ := Builtins().Get("agnes-video")
+	spec, err := adapter.BuildCreate(context.Background(), RequestContext{Request: GenerationRequest{
+		Model: "agnes-video-2.5", Prompt: "long clip", Duration: 30, Resolution: "720P", AspectRatio: "16:9",
+	}})
+	if err != nil {
+		t.Fatalf("BuildCreate() error = %v", err)
+	}
+	body := spec.Body.(map[string]any)
+	if body["seconds"] != "30" {
+		t.Fatalf("Agnes seconds = %#v, want \"30\"", body["seconds"])
+	}
+}
+
 func TestDeclarativeManifestMapsFieldsAndResponses(t *testing.T) {
 	manifest := []byte(`{
 			"apiVersion":"qisitv.plugin/v1",

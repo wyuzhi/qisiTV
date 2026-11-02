@@ -63,7 +63,10 @@ func Load(dir string) (Config, error) {
 func Save(dir string, config Config) (PublicConfig, error) {
 	previous, err := Load(dir)
 	if err != nil {
-		return PublicConfig{}, err
+		if config.Enabled && strings.TrimSpace(config.SecretAccessKey) == "" {
+			return PublicConfig{}, errors.New("原对象存储配置无法读取，请重新填写 Secret Key 后保存")
+		}
+		previous = Config{Region: "auto"}
 	}
 	if config.SecretAccessKey == "" {
 		if previous.AccessKeyID != config.AccessKeyID && previous.SecretAccessKey != "" {

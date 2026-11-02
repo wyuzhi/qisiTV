@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Alert, Button, Input, type App } from "antd";
 import { navigateToSettings } from "@/lib/settings-navigation";
-import { isUserScopeAbandonedError } from "@/lib/user-scope-guard";
 import { startOperation } from "@/stores/use-operation-progress";
 import { isReferenceHTTPSLink, uploadReferenceLinks, type ReferenceLinkRequest, type ResolveReferenceLinks } from "@/services/api/reference-link-replacement";
 
@@ -57,7 +56,6 @@ export function createReferenceLinkResolver(modal: ModalAPI): ResolveReferenceLi
             try {
                 uploaded = await uploadReferenceLinks(references, signal, target);
             } catch (error) {
-                if (isUserScopeAbandonedError(error)) throw error;
                 if (signal?.aborted) return null;
                 uploadError = error instanceof Error ? error.message : String(error);
             }

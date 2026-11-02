@@ -12,7 +12,7 @@
         "build:desktop": "QISITV_FULL_MEDIA_RESOURCES=1 vite build",
         "pretest": "bun test test/local-only-source-boundary.test.ts test/local-workspace-bootstrap.test.ts test/local-asset-repository-boundary.test.ts test/local-task-events.test.ts test/channel-model-catalog.test.ts && bun test test/canvas-grid-viewport.test.tsx",
         "typecheck": "tsc --noEmit",
-        "test:canvas": "bun test test/canvas-media-performance.test.ts test/canvas-node-title-interaction.test.ts test/canvas-spatial-index.test.ts",
+        "test:canvas": "bun test test/canvas-media-performance.test.ts test/canvas-node-title-interaction.test.ts test/canvas-generation-node-title.test.ts test/canvas-spatial-index.test.ts",
         "test": "bun run scripts/run-test-suite.mjs",
         "test:director:e2e": "bun scripts/director-p0-chrome-e2e.mjs",
         "start": "vite preview --host 0.0.0.0 --port 3000",

@@ -25,7 +25,6 @@ describe("qisiTV native assistant panel contract", () => {
         expect(panel).toContain('还没有已安装的技能。');
         expect(panel).toContain('versionId: skill.versionId, contentHash: skill.contentHash');
         expect(panel).toContain('!skill.versionId || !/^[a-f0-9]{64}$/i.test(skill.contentHash)');
-        expect(panel).toContain('inputGeneration.current || !userScopeMatches(inputScope.current)');
         expect(panel).toContain('<SkillInstallModal');
         expect(panel).not.toContain('fallbackCards');
         expect(panel).not.toContain('cloud-agent');

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { serviceConnectionError, serviceModelProfile, modelCatalogRequestURL } from "../src/lib/model-service-presets";
+import { MODEL_SERVICE_PRESETS, serviceConnectionError, serviceModelProfile, modelCatalogRequestURL } from "../src/lib/model-service-presets";
 import { modelConnectionResultDetail, testChannelModelConnection } from "../src/lib/model-connection-test";
 import { applyFetchedChannelModelCatalog, modelConfigChannelStatusLabel } from "../src/pages/settings/channel-settings-pane";
 import { backendProviderConfig } from "../src/services/api/generation-task";
@@ -185,4 +185,15 @@ test("video test uses configured range defaults and ranks K resolutions above or
         expect(config.vquality).toBe("768P");
         return { video: { storageKey: "fixture", dataUrl: "" } };
     });
+});
+
+test("official OpenAI and Gemini presets stop advertising discontinued video APIs", () => {
+    const presets = new Map(MODEL_SERVICE_PRESETS.map((preset) => [preset.id, preset.subtitle]));
+    for (const id of ["openai", "gemini"]) {
+        const subtitle = presets.get(id as "openai" | "gemini") || "";
+        expect(subtitle).toContain("已停用");
+        expect(subtitle).not.toMatch(/·\s*(Veo\s*)?视频\s*$/);
+    }
+    expect(presets.get("compatible")).toContain("中转");
+    expect(presets.get("ark")).toContain("Seedance 视频");
 });

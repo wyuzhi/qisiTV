@@ -1,6 +1,5 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import { setActiveUserScope } from "@/lib/user-scope";
-import { captureUserScope, UserScopeAbandonedError } from "@/lib/user-scope-guard";
 
 const writes: Array<{ title: string; folderId: string }> = [];
 let uploads: string[] = [];
@@ -26,11 +25,10 @@ afterEach(() => { writes.length = 0; uploads = []; persistCount = 0; persistErro
 
 test("six-file batch settles exactly once while another picker batch starts", async () => {
     setActiveUserScope("upload-owner");
-    const scope = captureUserScope();
-    const first = uploadWorkspaceAssetFiles(files("first", 6), "folder-a", scope);
+    const first = uploadWorkspaceAssetFiles(files("first", 6), "folder-a");
     expect(uploads.length).toBe(4);
     // A new picker submission has its own cursor; neither submission needs a mounted view.
-    const second = uploadWorkspaceAssetFiles(files("second", 2), "folder-b", scope);
+    const second = uploadWorkspaceAssetFiles(files("second", 2), "folder-b");
     release();
     expect(await first).toMatchObject({ completed: 6, failed: 0 });
     expect(await second).toMatchObject({ completed: 2, failed: 0 });
@@ -40,22 +38,10 @@ test("six-file batch settles exactly once while another picker batch starts", as
     expect(persistCount).toBe(2);
 });
 
-test("A to B to A abandons in-flight completion and queued files", async () => {
-    setActiveUserScope("upload-a");
-    const pending = uploadWorkspaceAssetFiles(files("old", 6), "", captureUserScope());
-    setActiveUserScope("upload-b");
-    setActiveUserScope("upload-a");
-    release();
-    await expect(pending).rejects.toBeInstanceOf(UserScopeAbandonedError);
-    expect(uploads.length).toBe(4);
-    expect(writes.length).toBe(0);
-    expect(persistCount).toBe(0);
-});
-
 test("one upload failure does not discard the remaining queue or successful settlement", async () => {
     setActiveUserScope("upload-partial");
     failedName = "partial0.mp4";
-    const pending = uploadWorkspaceAssetFiles(files("partial", 6), "", captureUserScope());
+    const pending = uploadWorkspaceAssetFiles(files("partial", 6), "");
     release();
     expect(await pending).toMatchObject({ completed: 5, failed: 1 });
     expect(writes.length).toBe(5);
@@ -65,7 +51,7 @@ test("one upload failure does not discard the remaining queue or successful sett
 test("persistence failure is reported separately from completed uploads", async () => {
     setActiveUserScope("upload-persist");
     persistError = new Error("disk unavailable");
-    const pending = uploadWorkspaceAssetFiles(files("saved", 1), "", captureUserScope());
+    const pending = uploadWorkspaceAssetFiles(files("saved", 1), "");
     release();
     expect(await pending).toEqual({ completed: 1, failed: 0, persistenceError: persistError });
 });

@@ -192,7 +192,10 @@ func TestMissingImageMetadataHydratesHeaderAndRejectsTooSmallBeforeProvider(t *t
 	if input.ReferenceImages[1].Width != 800 || input.ReferenceImages[1].Height != 800 {
 		t.Fatalf("large image metadata = %#v", input.ReferenceImages[1])
 	}
-	err := svc.validateResolvedVideoCapability(&input)
+	if err := svc.resolveVideoCapability(context.Background(), &input); err != nil {
+		t.Fatal(err)
+	}
+	err := validateVideoTask(input.VideoCapability, input)
 	if err == nil || !strings.Contains(err.Error(), "216") || !strings.Contains(err.Error(), "调整尺寸或更换") {
 		t.Fatalf("missing-metadata 384x216 error = %v", err)
 	}
@@ -251,8 +254,8 @@ func TestBeefAPILocalVideoReferenceHydratesInlineForFlatRequest(t *testing.T) {
 	if fmt.Sprint(image["url"]) != "https://example.com/reference.png" {
 		t.Fatalf("image = %#v, want URL-only reference", image)
 	}
-	if content[0]["role"] != "first_frame" || body["metadata"].(map[string]interface{})["ratio"] != "adaptive" {
-		t.Fatal("hydration lost frame constraints")
+	if content[0]["role"] != "reference_image" || body["metadata"].(map[string]interface{})["operation"] != "image_to_video" {
+		t.Fatal("hydration changed the reference role or user operation")
 	}
 }
 

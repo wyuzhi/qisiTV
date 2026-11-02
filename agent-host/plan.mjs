@@ -8,17 +8,16 @@ const LABEL = { todo: '待做', doing: '进行中', done: '完成', needs_user: 
 export const PLAN_UPDATE_PARAMETERS = {
   type: 'object',
   properties: {
-    goal: { type: 'string', description: '这件事最终要做成什么，一句话。省略则保持原样。' },
+    goal: { type: 'string' },
     items: {
       type: 'array', maxItems: PLAN_MAX_ITEMS,
-      description: '完整的步骤清单（整体替换）。按执行顺序排列，每步是用户能看懂的一件事。',
       items: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: '步骤的稳定编号，如 s1。更新状态时沿用原编号。' },
-          title: { type: 'string', description: '这一步做什么，例如“角色设定”“镜 1–4 首帧”。' },
-          status: { type: 'string', enum: PLAN_STATUSES, description: 'todo 待做 / doing 进行中 / done 完成 / needs_user 需要用户确认或回答后才能继续 / blocked 出错无法继续。' },
-          note: { type: 'string', description: '可选：简短备注，如等待什么、为什么卡住。' },
+          id: { type: 'string' },
+          title: { type: 'string' },
+          status: { type: 'string', enum: PLAN_STATUSES },
+          note: { type: 'string' },
         },
         required: ['id', 'title', 'status'],
         additionalProperties: false,

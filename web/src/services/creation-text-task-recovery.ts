@@ -1,3 +1,4 @@
+import { explainGenerationError, generationErrorCode, type GenerationFailureDiagnostics } from "@/lib/generation-error";
 import { parseBackendGenerationResult } from "@/services/api/generation-task";
 import type { GenerationTask } from "@/services/api/task-center";
 
@@ -6,6 +7,10 @@ export type RecoverableCreationTextMessage = {
     status?: string;
     content: string;
     error?: string;
+    generationErrorSummary?: string;
+    generationErrorCode?: string;
+    generationProviderCode?: string;
+    taskFailureDiagnostics?: GenerationFailureDiagnostics;
     taskIds?: string[];
 };
 
@@ -13,6 +18,10 @@ export type CreationTextTaskRecovery = {
     status: "done" | "error" | "cancelled";
     content: string;
     error?: string;
+    generationErrorSummary?: string;
+    generationErrorCode?: string;
+    generationProviderCode?: string;
+    taskFailureDiagnostics?: GenerationFailureDiagnostics;
     taskIds: string[];
 };
 
@@ -30,14 +39,35 @@ export function recoverCreationTextTask(message: RecoverableCreationTextMessage,
         try {
             const text = parseBackendGenerationResult(succeeded).text;
             if (!text?.trim()) throw new Error("后端任务没有返回文本");
-            return { status: "done", content: text, error: undefined, taskIds: nextTaskIds };
+            return { status: "done", content: text, error: undefined, generationErrorSummary: undefined, generationErrorCode: undefined, generationProviderCode: undefined, taskFailureDiagnostics: undefined, taskIds: nextTaskIds };
         } catch (error) {
-            return { status: "error", content: "生成失败", error: error instanceof Error ? error.message : "文本任务结果格式错误", taskIds: nextTaskIds };
+            const explained = explainGenerationError(error);
+            return {
+                status: "error",
+                content: "生成失败",
+                error: error instanceof Error ? error.message : "文本任务结果格式错误",
+                generationErrorSummary: explained.summary,
+                generationErrorCode: generationErrorCode(error),
+                ...(explained.providerCode ? { generationProviderCode: explained.providerCode } : {}),
+                taskFailureDiagnostics: undefined,
+                taskIds: nextTaskIds,
+            };
         }
     }
     if (matches.every((task) => task.status === "cancelled")) {
-        return { status: "cancelled", content: "已停止", error: undefined, taskIds: nextTaskIds };
+        return { status: "cancelled", content: "已停止", error: undefined, generationErrorSummary: undefined, generationErrorCode: undefined, generationProviderCode: undefined, taskFailureDiagnostics: undefined, taskIds: nextTaskIds };
     }
     const failed = matches.find((task) => task.status === "failed");
-    return { status: "error", content: "生成失败", error: failed?.error || "文本任务已失败", taskIds: nextTaskIds };
+    const errorMessage = failed?.error || "文本任务已失败";
+    const explained = explainGenerationError(failed?.errorCode ? { code: failed.errorCode, message: errorMessage } : errorMessage);
+    return {
+        status: "error",
+        content: "生成失败",
+        error: errorMessage,
+        generationErrorSummary: explained.summary,
+        generationErrorCode: failed?.errorCode || generationErrorCode(errorMessage),
+        ...(explained.providerCode ? { generationProviderCode: explained.providerCode } : {}),
+        taskFailureDiagnostics: failed?.failureDiagnostics,
+        taskIds: nextTaskIds,
+    };
 }

@@ -1,5 +1,5 @@
-import { assertUserScope, captureUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { localForageStorageForScope } from "@/lib/localforage-storage";
+import { getActiveUserScope } from "@/lib/user-scope";
 import {
     createAssetFolder,
     deleteAssetFolder,
@@ -42,63 +42,50 @@ function newLocalFolderId() {
     return `asset-folder-${typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 }
 
-export async function listWorkspaceAssetFolders(expectedScope?: CapturedUserScope) {
-    const expected = expectedScope ?? captureUserScope();
-    assertUserScope(expected);
+export async function listWorkspaceAssetFolders() {
     const folders = !usesWorkspaceAssetFolderApi()
-        ? await readLocalFolders(expected.userScope)
-        : (await listAssetFolders({ expectedScope: expected })).folders;
-    assertUserScope(expected);
+        ? await readLocalFolders(getActiveUserScope())
+        : (await listAssetFolders()).folders;
     return folders;
 }
 
-export async function createWorkspaceAssetFolder(name: string, expectedScope?: CapturedUserScope) {
-    const expected = expectedScope ?? captureUserScope();
-    assertUserScope(expected);
+export async function createWorkspaceAssetFolder(name: string) {
     const trimmed = name.trim();
     if (!trimmed) throw new Error("请输入分类名称");
     if (!usesWorkspaceAssetFolderApi()) {
-        const folders = await readLocalFolders(expected.userScope);
-        assertUserScope(expected);
+        const folders = await readLocalFolders(getActiveUserScope());
         const now = new Date().toISOString();
         const folder: AssetFolder = { id: newLocalFolderId(), name: trimmed, position: folders.length, createdAt: now, updatedAt: now };
-        await writeLocalFolders(expected.userScope, [...folders, folder]);
+        await writeLocalFolders(getActiveUserScope(), [...folders, folder]);
         return folder;
     }
-    return (await createAssetFolder(trimmed, { expectedScope: expected })).folder;
+    return (await createAssetFolder(trimmed)).folder;
 }
 
-export async function renameWorkspaceAssetFolder(id: string, name: string, expectedScope?: CapturedUserScope) {
-    const expected = expectedScope ?? captureUserScope();
-    assertUserScope(expected);
+export async function renameWorkspaceAssetFolder(id: string, name: string) {
     const folderId = id.trim();
     const trimmed = name.trim();
     if (!folderId) throw new Error("素材分类 ID 不能为空");
     if (!trimmed) throw new Error("请输入分类名称");
     if (!usesWorkspaceAssetFolderApi()) {
-        const folders = await readLocalFolders(expected.userScope);
-        assertUserScope(expected);
+        const folders = await readLocalFolders(getActiveUserScope());
         const now = new Date().toISOString();
         const next = folders.map((folder) => (folder.id === folderId ? { ...folder, name: trimmed, updatedAt: now } : folder));
-        await writeLocalFolders(expected.userScope, next);
+        await writeLocalFolders(getActiveUserScope(), next);
         return next.find((folder) => folder.id === folderId);
     }
-    return (await updateAssetFolder(folderId, trimmed, { expectedScope: expected })).folder;
+    return (await updateAssetFolder(folderId, trimmed)).folder;
 }
 
-export async function deleteWorkspaceAssetFolder(id: string, expectedScope?: CapturedUserScope) {
-    const expected = expectedScope ?? captureUserScope();
-    assertUserScope(expected);
+export async function deleteWorkspaceAssetFolder(id: string) {
     const folderId = id.trim();
     if (!folderId) throw new Error("素材分类 ID 不能为空");
     if (!usesWorkspaceAssetFolderApi()) {
-        const folders = await readLocalFolders(expected.userScope);
-        assertUserScope(expected);
-        await writeLocalFolders(expected.userScope, folders.filter((folder) => folder.id !== folderId));
+        const folders = await readLocalFolders(getActiveUserScope());
+        await writeLocalFolders(getActiveUserScope(), folders.filter((folder) => folder.id !== folderId));
     } else {
-        await deleteAssetFolder(folderId, { expectedScope: expected });
+        await deleteAssetFolder(folderId);
     }
-    assertUserScope(expected);
     runAssetStoreProjection(() => {
         const store = useAssetStore.getState();
         for (const asset of store.assets) {
@@ -107,15 +94,12 @@ export async function deleteWorkspaceAssetFolder(id: string, expectedScope?: Cap
     });
 }
 
-export async function assignWorkspaceAssetsFolder(assetIds: string[], folderId = "", expectedScope?: CapturedUserScope) {
-    const expected = expectedScope ?? captureUserScope();
-    assertUserScope(expected);
+export async function assignWorkspaceAssetsFolder(assetIds: string[], folderId = "") {
     const ids = assetIds.map((id) => id.trim()).filter(Boolean);
     if (!ids.length) return;
     const nextFolderId = folderId.trim();
     if (usesWorkspaceAssetFolderApi()) {
-        await moveAssetsToFolder(ids, nextFolderId, { expectedScope: expected });
-        assertUserScope(expected);
+        await moveAssetsToFolder(ids, nextFolderId);
         runAssetStoreProjection(() => {
             const store = useAssetStore.getState();
             for (const id of ids) store.updateAsset(id, { folderId: nextFolderId || undefined });
@@ -124,5 +108,5 @@ export async function assignWorkspaceAssetsFolder(assetIds: string[], folderId =
     }
     const store = useAssetStore.getState();
     for (const id of ids) store.updateAsset(id, { folderId: nextFolderId || undefined });
-    await flushAssetStorePersistence(expected);
+    await flushAssetStorePersistence();
 }

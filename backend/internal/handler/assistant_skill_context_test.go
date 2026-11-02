@@ -41,7 +41,7 @@ func TestSkillContextHTTPRequiresHostAndExactBoundSession(t *testing.T) {
 	}
 	turnID := "abcdabcd11112222"
 	env.beginTurn(t, turnID, app.AssistantTurnInput{})
-	if err := env.service.BindAssistantDurableSession(owner.ID, turnID, skillSessionOne, false); err != nil {
+	if err := env.service.AssistantTurns().BindDurableSession(owner.ID, turnID, skillSessionOne, false); err != nil {
 		t.Fatal(err)
 	}
 	response = env.callWithHeaders(t, http.MethodGet, path+"?sessionId="+skillSessionTwo+"&turnId="+turnID, "", headers)

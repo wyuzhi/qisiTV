@@ -121,10 +121,19 @@ func PublicSystemChannelCatalog(channels []model.ModelChannel, modelsForChannel 
 	return result, nil
 }
 
+// SystemChannelIDFromBaseURL recognizes the deployment's own system-channel
+// proxy URLs. `/api/ai/system/<id>` is unambiguous anywhere; the short
+// `/api/<id>` form is only accepted as a relative path, because absolute
+// third-party base URLs such as https://open.bigmodel.cn/api/paas end the same
+// way and must stay ordinary user channels.
 func SystemChannelIDFromBaseURL(baseURL string) string {
 	value := strings.TrimSpace(baseURL)
 	lowerValue := strings.ToLower(value)
-	for _, marker := range []string{"/api/ai/system/", "/api/"} {
+	markers := []string{"/api/ai/system/"}
+	if strings.HasPrefix(value, "/") && !strings.HasPrefix(value, "//") {
+		markers = append(markers, "/api/")
+	}
+	for _, marker := range markers {
 		index := strings.LastIndex(lowerValue, marker)
 		if index < 0 {
 			continue
@@ -133,7 +142,7 @@ func SystemChannelIDFromBaseURL(baseURL string) string {
 		if queryIndex := strings.IndexAny(id, "?#"); queryIndex >= 0 {
 			id = id[:queryIndex]
 		}
-		if slash := strings.Index(id, "/"); slash >= 0 {
+		if strings.Contains(id, "/") {
 			continue
 		}
 		id = strings.TrimSpace(id)

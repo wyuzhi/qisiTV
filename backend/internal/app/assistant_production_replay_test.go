@@ -33,7 +33,7 @@ func TestAssistantProductionConfirmationReplayAfterClaim(t *testing.T) {
 	if _, err = svc.BeginAssistantTurn("local", canvasID, source, AssistantTurnInput{}); err != nil {
 		t.Fatal(err)
 	}
-	if err = svc.BindAssistantDurableSession("local", source, backgroundContinuationSession, false); err != nil {
+	if err = svc.AssistantTurns().BindDurableSession("local", source, backgroundContinuationSession, false); err != nil {
 		t.Fatal(err)
 	}
 	if err = svc.FinalizeAssistantTurn(source); err != nil {
@@ -83,7 +83,7 @@ func TestAssistantProductionConfirmationReplayAfterClaim(t *testing.T) {
 			}
 			changed := manifest
 			changed.Submissions = []assistantturns.ContinuationSubmission{{OperationID: manifest.Submissions[0].OperationID, OutputNodeIDs: []string{"another-node"}}}
-			if err := svc.RegisterAssistantContinuationManifest("local", continuationID, changed); err == nil {
+			if err := svc.AssistantTurns().RegisterContinuationManifest("local", continuationID, changed); err == nil {
 				t.Fatal("claimed manifest was changed")
 			}
 			var after model.AssistantContinuation
@@ -95,7 +95,7 @@ func TestAssistantProductionConfirmationReplayAfterClaim(t *testing.T) {
 			}
 		})
 	}
-	if err := svc.CancelAssistantContinuations("local", canvasID, backgroundContinuationSession, false); err != nil {
+	if err := svc.AssistantTurns().CancelContinuations("local", canvasID, backgroundContinuationSession, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.ConfirmAssistantProduction("local", source, request); err == nil {

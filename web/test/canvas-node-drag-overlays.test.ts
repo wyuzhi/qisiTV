@@ -26,7 +26,8 @@ describe("canvas node drag overlays", () => {
             "node={isCanvasNodeMoving || nodeImageSettingsOpen || annotationNodeId || maskEditNodeId || emotionNodeId || angleNodeId || (dialogNode && !isCanvasMediaResultNode(dialogNode)) || textEditorNodeId ? null : toolbarNode}",
         );
         expect(projectSource).toContain("onNodeDragEnd: handleNodeDragEnd");
-        expect(projectSource).toContain("setDialogNodeId(node.id);");
+        const nodeClickSource = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/use-canvas-node-click.ts"), "utf8");
+        expect(nodeClickSource).toContain("setDialogNodeId(node.id);");
         expect(selectionControllerSource).toContain("if (clickedNodeId) onNodeDragEnd?.(clickedNodeId);");
     });
 });

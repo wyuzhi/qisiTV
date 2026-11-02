@@ -2,64 +2,40 @@ package app
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"strings"
 
 	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/modelcatalog"
+	localtask "qisitv/backend/internal/task"
 )
 
-// processTask 是任务执行阶段唯一的类型分派入口。
-// 任务已经在 CreateTask 阶段完成 admission；这里不把无效视频任务降级成内部工作流成功。
-func (s *Service) processTask(ctx context.Context, task model.Task) (result map[string]interface{}, canvasOps []map[string]interface{}, err error) {
-	ctx, finishTrace := s.SupportTrace().Start(taskSupportContext(ctx, task), "generation.execute", taskSupportFields(task))
-	defer func() { finishTrace(supportFailureReason(err)) }()
-	if err := validateTaskType(task.Type); err != nil {
-		return nil, nil, err
-	}
-	decryptedInput, err := s.decryptTaskInputJSON(task.InputJSON)
-	if err != nil {
-		return nil, nil, err
-	}
-	task.InputJSON = decryptedInput
-	ctx = withTaskExecutionID(ctx, task.ID)
-	ctx = withProviderAnalytics(ctx, s, task)
-	runtime, _ := generation.RuntimeFromContext(ctx)
-	runtime.Stages = appTaskStagePort{service: s, task: task}
-	runtime.Delivery = appTaskDeliveryPort{service: s, taskID: task.ID}
-	runtime.ReferenceProgress = s.newReferenceProgressPort(task.ID)
-	defer runtime.ReferenceProgress.ClearReference()
-	ctx = generation.WithRuntime(ctx, runtime)
-	ctx = context.WithValue(ctx, imageTaskContext{}, task)
-	if result, recovered, err := s.recoverImageSubmission(ctx, task); recovered {
-		return result, nil, err
-	}
-
-	if task.Type == "canvas_text" || task.Type == "canvas_image" || task.Type == "canvas_video" || task.Type == "canvas_audio" {
-		result, err := s.processCanvasGenerationTask(ctx, task.UserID, task.ProjectID, task.Type, task.Prompt, task.InputJSON)
-		return result, nil, err
-	}
-	if strings.HasPrefix(task.Type, "video_") {
-		if !canRunProviderTask(task) {
-			return nil, nil, errors.New("视频任务缺少可执行的模型配置")
-		}
-		result, err := s.processCanvasGenerationTask(ctx, task.UserID, task.ProjectID, task.Type, task.Prompt, task.InputJSON)
-		return result, nil, err
-	}
-	return nil, nil, errors.New("任务类型没有可用的执行分支")
+func (s *Service) processTask(ctx context.Context, task model.Task) (map[string]interface{}, []map[string]interface{}, error) {
+	return localtask.ProcessGenerationTask(
+		ctx, task,
+		func(parent context.Context, t model.Task) (context.Context, func(string)) {
+			return s.SupportTrace().Start(taskSupportContext(parent, t), "generation.execute", taskSupportFields(t))
+		},
+		supportFailureReason,
+		s.decryptTaskInputJSON,
+		func(parent context.Context, t model.Task) (context.Context, func()) {
+			execCtx := withTaskExecutionID(parent, t.ID)
+			execCtx = withProviderAnalytics(execCtx, s, t)
+			runtime, _ := generation.RuntimeFromContext(execCtx)
+			runtime.Stages = appTaskStagePort{service: s, task: t}
+			runtime.Delivery = appTaskDeliveryPort{service: s, taskID: t.ID}
+			refPort := s.newReferenceProgressPort(t.ID)
+			runtime.ReferenceProgress = refPort
+			execCtx = generation.WithRuntime(execCtx, runtime)
+			execCtx = context.WithValue(execCtx, imageTaskContext{}, t)
+			return execCtx, refPort.ClearReference
+		},
+		s.recoverImageSubmission,
+		s.processCanvasGenerationTask,
+	)
 }
 
 func canRunProviderTask(task model.Task) bool {
-	if !strings.HasPrefix(task.Type, "video_") || strings.TrimSpace(task.InputJSON) == "" {
-		return false
-	}
-	var input map[string]any
-	if err := json.Unmarshal([]byte(task.InputJSON), &input); err != nil {
-		return false
-	}
-	return hasExecutableProviderVideoConfig(input)
+	return localtask.CanRunProviderTask(task)
 }
 
 func hasExecutableProviderVideoConfig(input map[string]any) bool {

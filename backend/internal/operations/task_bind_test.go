@@ -345,8 +345,20 @@ func TestCanvasTaskBindRejectsDeletedWrongOwnerAndNewerTaskNode(t *testing.T) {
 	if !ok || evidence["nodeTaskId"] != "task-newer" || evidence["nodeId"] != "node-stale" || evidence["source"] != "server" {
 		t.Fatalf("binding refusal lost the actual server node: %+v", evidence)
 	}
+	if evidence["revision"] != h.revisionNow(t) {
+		t.Fatalf("binding refusal revision = %#v want %d", evidence["revision"], h.revisionNow(t))
+	}
 	if h.nodeMetaString(t, "node-stale", "taskId") != "task-newer" {
 		t.Fatal("stale bind overwrote the newer task node")
+	}
+	h.deleteNode(t, "node-stale")
+	_, err = h.bindTask(t, stale.ID, "node-stale", 0)
+	if got := opErr(t, err); got.Reason != "node_deleted" {
+		t.Fatalf("deleted node = %v", err)
+	}
+	deletedEvidence, ok := opErr(t, err).Details["canvasBinding"].(map[string]any)
+	if !ok || deletedEvidence["nodePresent"] != false || deletedEvidence["revision"] != h.revisionNow(t) {
+		t.Fatalf("deleted-node refusal lost its revision: %+v", deletedEvidence)
 	}
 }
 

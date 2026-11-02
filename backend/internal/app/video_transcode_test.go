@@ -155,7 +155,7 @@ func TestOpenResourcePlaybackRangeUsesPlaybackDomain(t *testing.T) {
 	if err := db.Create(&res).Error; err != nil {
 		t.Fatal(err)
 	}
-	stream, err := service.OpenResourcePlaybackRange("user-1", "range-1")
+	stream, err := service.PlaybackService().OpenRange("user-1", "range-1")
 	if err != nil {
 		t.Fatal(err)
 	}

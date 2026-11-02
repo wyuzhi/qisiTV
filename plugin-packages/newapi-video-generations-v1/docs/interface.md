@@ -47,6 +47,8 @@
 | `create.body.aspect_ratio` | `{"$coalesce":[{"$ref":"request.aspectRatio"},"16:9"]}` |
 | `create.body.resolution` | `{"$omitEmpty":{"$ref":"request.resolution"}}` |
 | `create.body.generate_audio` | `{"$ref":"request.generateAudio"}` |
+| `create.body.image` | `{"$omitEmpty":{"$coalesce":[{"$first":{"$map":{"from":{"$filter":{"from":{"$sortByOrder":{"$ref":"request.images"}},"as":"media","where":{"$in":[{"$ref":"media.role"},["first_frame"]]}}},"as":"media","in":{"$ref":"media.value"}}}},{"$first":{"$map":{"from":{"$sortByOrder":{"$ref":"request.images"}},"as":"media","in":{"$ref":"media.value"}}}}]}}` |
+| `create.body.image_url` | `{"$omitEmpty":{"$coalesce":[{"$first":{"$map":{"from":{"$filter":{"from":{"$sortByOrder":{"$ref":"request.images"}},"as":"media","where":{"$in":[{"$ref":"media.role"},["first_frame"]]}}},"as":"media","in":{"$ref":"media.value"}}}},{"$first":{"$map":{"from":{"$sortByOrder":{"$ref":"request.images"}},"as":"media","in":{"$ref":"media.value"}}}}]}}` |
 | `create.body.image_urls` | `{"$omitEmpty":{"$map":{"from":{"$sortByOrder":{"$ref":"request.images"}},"as":"media","in":{"$ref":"media.value"}}}}` |
 | `create.body.video_urls` | `{"$omitEmpty":{"$map":{"from":{"$sortByOrder":{"$ref":"request.videos"}},"as":"media","in":{"$ref":"media.value"}}}}` |
 | `create.body.audio_urls` | `{"$omitEmpty":{"$map":{"from":{"$sortByOrder":{"$ref":"request.audios"}},"as":"media","in":{"$ref":"media.value"}}}}` |
@@ -238,6 +240,108 @@
             },
             "generate_audio": {
               "$ref": "request.generateAudio"
+            },
+            "image": {
+              "$omitEmpty": {
+                "$coalesce": [
+                  {
+                    "$first": {
+                      "$map": {
+                        "from": {
+                          "$filter": {
+                            "from": {
+                              "$sortByOrder": {
+                                "$ref": "request.images"
+                              }
+                            },
+                            "as": "media",
+                            "where": {
+                              "$in": [
+                                {
+                                  "$ref": "media.role"
+                                },
+                                [
+                                  "first_frame"
+                                ]
+                              ]
+                            }
+                          }
+                        },
+                        "as": "media",
+                        "in": {
+                          "$ref": "media.value"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "$first": {
+                      "$map": {
+                        "from": {
+                          "$sortByOrder": {
+                            "$ref": "request.images"
+                          }
+                        },
+                        "as": "media",
+                        "in": {
+                          "$ref": "media.value"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            "image_url": {
+              "$omitEmpty": {
+                "$coalesce": [
+                  {
+                    "$first": {
+                      "$map": {
+                        "from": {
+                          "$filter": {
+                            "from": {
+                              "$sortByOrder": {
+                                "$ref": "request.images"
+                              }
+                            },
+                            "as": "media",
+                            "where": {
+                              "$in": [
+                                {
+                                  "$ref": "media.role"
+                                },
+                                [
+                                  "first_frame"
+                                ]
+                              ]
+                            }
+                          }
+                        },
+                        "as": "media",
+                        "in": {
+                          "$ref": "media.value"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "$first": {
+                      "$map": {
+                        "from": {
+                          "$sortByOrder": {
+                            "$ref": "request.images"
+                          }
+                        },
+                        "as": "media",
+                        "in": {
+                          "$ref": "media.value"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
             },
             "image_urls": {
               "$omitEmpty": {

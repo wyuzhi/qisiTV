@@ -1,5 +1,8 @@
 # OpenAI Videos / Sora 接口字段
 
+> 官方服务状态：OpenAI 已于 2026-09-24 关闭 Sora 2 模型与 Videos API，且没有一对一的替代接口；官方文档保留仅为历史记录。
+> 这条协议因此只在仍提供同名 `/v1/videos` 合同的第三方中转上可用，用普通 OpenAI Key 直接生成视频不保证可用。原样保留是为了不打断这些中转，不代表官方链路仍在服务。
+
 本协议最多发送一张参考图，不发送参考视频、参考音频、尾帧或蒙版。超出协议能力时在提交前报错，不会静默忽略素材。第三方服务的多图视频接口请按其文档选择对应的 JSON 或原生协议。
 
 ## 协议身份
@@ -97,7 +100,7 @@
 
 ```json
 {
-  "apiVersion": "beeftv.plugin/v2",
+  "apiVersion": "qisitv.plugin/v2",
   "id": "openai-videos",
   "name": "OpenAI Videos / Sora",
   "version": "2.0.1",

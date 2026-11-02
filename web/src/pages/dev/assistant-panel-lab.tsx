@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router";
 import { CanvasAssistantSidebar } from "@/pages/canvas/canvas-assistant-sidebar";
 import type { CanvasAssistantController } from "@/pages/canvas/use-canvas-assistant";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
-import type { AgentHostStatus, AssistantTurn } from "@/services/api/agent-assistant";
+import type { AgentHostStatus, AssistantReasoningSegment, AssistantTurn } from "@/services/api/agent-assistant";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasNodeType } from "@/types/canvas";
 
@@ -12,7 +12,7 @@ import { CanvasNodeType } from "@/types/canvas";
  * DEV 实验室：只为验收助手停靠栏的视觉与状态分支。
  *
  * 不连后端、不调模型：所有数据都是本页写死的样例，用查询参数切换场景
- * （?state=ready|unavailable|starting&narrow=1&dark=1）。生产构建不含此路由。
+ * （?state=ready|unavailable|starting|no-model|streaming|thinking|interrupted&narrow=1&dark=1&readonly=1）。生产构建不含此路由。
  */
 const REFERENCES: CanvasResourceReference[] = [
     { id: "n1", nodeId: "n1", kind: "text", label: "镜头1", title: "镜头1-开场", active: true, sourceType: CanvasNodeType.Text, mentionToken: "@[node:n1]" },
@@ -30,12 +30,21 @@ const TURNS: AssistantTurn[] = [
             { toolCallId: "t2", tool: "canvas.edge.create" },
             { toolCallId: "t3", tool: "canvas.node.update", isError: true, error: "conflict" },
         ],
+        reasoning: [
+            { id: "12:0", text: "先确认三个镜头要覆盖的剧情节点：开场、冲突、收尾。\n用户已经给了两张参考图，可以直接沿用它们的构图和光线。", status: "done" },
+            { id: "12:1", text: "连接顺序按时间线排，不新增多余节点。", status: "done" },
+        ],
         change: { revisionBefore: 12, revisionAfter: 13, createdNodeIds: ["n3", "n4", "n5"], updatedNodeIds: [], createdEdgeIds: ["e1", "e2"] },
         proposals: [{ proposalId: "p1", kind: "image", nodeIds: ["n3", "n4", "n5"], model: "seedream-4", modelKey: "beefapi::seedream-4" }],
         error: null,
         cancelled: false,
         createdAt: new Date("2026-09-29T10:00:00Z").toISOString(),
     },
+];
+
+/** 正在生成的那一轮的思考片段：只在 ?state=thinking 下挂到面板上。 */
+const LIVE_REASONING: AssistantReasoningSegment[] = [
+    { id: "live-1:0", text: "先确认这段参考视频的时长和声道，再定位中间黑屏的位置。", status: "streaming" },
 ];
 
 function stubController(open: boolean, setOpen: (next: boolean) => void, width: number, setWidth: (next: number) => void, status: AgentHostStatus | null): CanvasAssistantController {
@@ -70,6 +79,9 @@ function stubController(open: boolean, setOpen: (next: boolean) => void, width: 
         permissionLocked: false,
         setPermissionMode: noop,
         streamed: "",
+        reasoning: [],
+        reasoningOpen: {},
+        setReasoningOpen: noop,
         streaming: false,
         awaitingReceipt: false,
         supplements: [],
@@ -100,6 +112,7 @@ export default function AssistantPanelLab() {
     const dark = params.get("dark") === "1";
     const [open, setOpen] = useState(true);
     const [width, setWidth] = useState(380);
+    const [reasoningOpen, setReasoningOpenState] = useState<Record<string, boolean>>({});
 
     // CSS 变量和 antd 主题必须同时切：只切一边会让按钮文字和底色撞在一起。
     useEffect(() => {
@@ -114,9 +127,19 @@ export default function AssistantPanelLab() {
               ? { available: false, reason: "host_starting" }
               : state === "no-model"
                 ? { available: false, reason: "model_not_configured" }
-                : { available: true, model: { id: "deepseek-v3", channelId: "beefapi", channelName: "BeefAPI" } };
+                : { available: true, model: { id: "deepseek-v3", channelId: "beefapi", channelName: "BeefTV" } };
 
     const assistant = stubController(open, setOpen, width, setWidth, status);
+    // 实验室里让思考抽屉真的能点开，才能验收展开后的样子。
+    assistant.reasoningOpen = reasoningOpen;
+    assistant.setReasoningOpen = (key, next) => setReasoningOpenState((current) => ({ ...current, [key]: next }));
+    if (state === "thinking") {
+        assistant.streaming = true;
+        assistant.canSupplement = true;
+        assistant.pendingUserText = "检查参考视频的声音，去掉中间黑屏，保留咖啡和蛋糕的结尾";
+        assistant.reasoning = LIVE_REASONING;
+        assistant.lifecycleNotice = "正在检查媒体";
+    }
     if (state === "interrupted") {
         assistant.turns = [{ ...TURNS[0], proposals: [], error: "本轮达到等待上限", errorReason: "turn_timeout", change: { ...TURNS[0].change!, timelineUpdated: true } }];
     }

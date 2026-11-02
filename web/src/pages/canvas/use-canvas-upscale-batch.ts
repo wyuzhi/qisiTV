@@ -6,22 +6,22 @@ import { CanvasNodeType, type CanvasNodeData, type CanvasConnection } from "@/ty
 import { createDefaultUpscaleSettings, deriveUpscaleBatchState, getUpscaleInputNodes, getUpscaleOutputPosition, upscaleParamsForNode, type CanvasUpscaleBatchItem } from "@/lib/canvas/canvas-upscale";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { mediaResultMetadata } from "@/lib/canvas/canvas-node-semantics";
-import { captureUserScope, assertUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { createUpscaleTask, estimateUpscale } from "@/services/api/media-upscale";
 import { findGenerationTaskByOperation, queryGenerationTask, type GenerationTask } from "@/services/api/task-center";
 import { syncLocalCanvasSnapshot } from "@/services/local-workspace-sync";
 import { flushCanvasStorePersistence, useCanvasStore } from "@/stores/canvas/use-canvas-store";
+import type { CanvasPageUiStoreHook } from "@/stores/canvas/use-canvas-page-ui-store";
 
 type Dependencies = {
+    pageUi: CanvasPageUiStoreHook;
     projectId: string; nodesRef: { current: CanvasNodeData[] }; connectionsRef: { current: CanvasConnection[] };
     setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>; setConnections: Dispatch<SetStateAction<CanvasConnection[]>>;
-    setSelectedNodeIds: Dispatch<SetStateAction<Set<string>>>;
     prepareResource: (node: CanvasNodeData) => Promise<string>;
-    observeTask: (task: GenerationTask, nodeId: string, scope: CapturedUserScope) => void;
+    observeTask: (task: GenerationTask, nodeId: string) => void;
     bindTask?: (task: GenerationTask, nodeId: string) => void;
 };
 
-export function useCanvasUpscaleBatch({ projectId, nodesRef, connectionsRef, setNodes, setConnections, setSelectedNodeIds, prepareResource, observeTask, bindTask }: Dependencies) {
+export function useCanvasUpscaleBatch({pageUi,  projectId, nodesRef, connectionsRef, setNodes, setConnections, prepareResource, observeTask, bindTask }: Dependencies) {
     const { modal } = App.useApp();
     const locks = useRef(new Set<string>());
     const mounted = useRef(true);
@@ -34,11 +34,9 @@ export function useCanvasUpscaleBatch({ projectId, nodesRef, connectionsRef, set
     const startUpscaleBatch = useCallback(async (processor: CanvasNodeData) => {
         if (locks.current.has(processor.id)) return;
         locks.current.add(processor.id);
-        const scope = captureUserScope();
         const capturedLifetime = lifetime.current;
         let expectedBatchId = nodesRef.current.find(n => n.id === processor.id)?.metadata?.upscaleBatch?.id;
         const assertCurrent = () => {
-            assertUserScope(scope);
             if (!mounted.current || lifetime.current !== capturedLifetime) throw new Error("画布已关闭，停止提交超分任务");
             if (liveProject.current !== projectId) throw new Error("画布已切换，停止提交超分任务");
             const live = nodesRef.current.find(n => n.id === processor.id);
@@ -90,7 +88,7 @@ export function useCanvasUpscaleBatch({ projectId, nodesRef, connectionsRef, set
                     assertCurrent();
                     if (task) {
                         item.status = "accepted"; item.taskId = task.id; foundReceipt = true;
-                        bindTask?.(task, item.outputNodeId); observeTask(task, item.outputNodeId, scope);
+                        bindTask?.(task, item.outputNodeId); observeTask(task, item.outputNodeId);
                         continue;
                     }
                     const source = nodesRef.current.find(n => n.id === item.sourceNodeId);
@@ -112,7 +110,7 @@ export function useCanvasUpscaleBatch({ projectId, nodesRef, connectionsRef, set
                         return item ? { ...n, metadata: { ...n.metadata, status: "loading", taskType: `canvas_${item.mediaType}`, generationSubmissionState: undefined, errorDetails: undefined, processingLabel: "等待超分提交", workflowOperation: { id: `${item.mediaType}.ai-upscale`, version: 1, config: { ...item.params }, inputs: [{ nodeId: item.sourceNodeId, port: item.mediaType }, { nodeId: current.id, port: "processor" }] } } } : n;
                     }));
                     await save();
-                    await syncLocalCanvasSnapshot(projectId, { nodes: nodesRef.current, connections: connectionsRef.current }, scope);
+                    await syncLocalCanvasSnapshot(projectId, { nodes: nodesRef.current, connections: connectionsRef.current });
                     assertCurrent();
                 } else {
                     const reconciled = { ...batch, items: batch.items.map(i => {
@@ -172,7 +170,7 @@ export function useCanvasUpscaleBatch({ projectId, nodesRef, connectionsRef, set
                 patch(nodes => [...nodes.filter(n => !outputs.some(o => o.id === n.id)).map(n => n.id === current.id ? { ...n, metadata: { ...n.metadata, upscaleBatch: frozen } } : n), ...outputs]);
                 expectedBatchId = frozen.id;
                 await save();
-                setSelectedNodeIds(new Set(items.map(i => i.outputNodeId)));
+                pageUi.getState().setSelectedNodeIds(new Set(items.map(i => i.outputNodeId)));
             }
             // Retry a failed initial save only after verifying that no operation
             // has been admitted. Once any receipt exists, task.bind owns results.
@@ -180,7 +178,7 @@ export function useCanvasUpscaleBatch({ projectId, nodesRef, connectionsRef, set
                 const receipts = await Promise.all(batch.items.filter(i => i.status === "waiting").map(i => findGenerationTaskByOperation(i.clientOperationId, projectId)));
                 assertCurrent();
                 if (receipts.every(task => !task)) {
-                    await syncLocalCanvasSnapshot(projectId, { nodes: nodesRef.current, connections: connectionsRef.current }, scope);
+                    await syncLocalCanvasSnapshot(projectId, { nodes: nodesRef.current, connections: connectionsRef.current });
                     assertCurrent();
                 }
             }
@@ -196,9 +194,9 @@ export function useCanvasUpscaleBatch({ projectId, nodesRef, connectionsRef, set
                 if (item.status === "rejected") continue;
                 if (item.status !== "waiting") {
                     try {
-                        const task = item.taskId ? await queryGenerationTask(item.taskId, { expectedScope: scope }) : await findGenerationTaskByOperation(item.clientOperationId, projectId);
+                        const task = item.taskId ? await queryGenerationTask(item.taskId) : await findGenerationTaskByOperation(item.clientOperationId, projectId);
                         assertCurrent();
-                        if (task) { update(item, { status: "accepted", taskId: task.id, error: undefined }); bindTask?.(task, item.outputNodeId); observeTask(task, item.outputNodeId, scope); }
+                        if (task) { update(item, { status: "accepted", taskId: task.id, error: undefined }); bindTask?.(task, item.outputNodeId); observeTask(task, item.outputNodeId); }
                     } catch { /* Unknown receipts remain blocked; never infer permission to resubmit. */ }
                     assertCurrent();
                     continue;
@@ -216,7 +214,7 @@ export function useCanvasUpscaleBatch({ projectId, nodesRef, connectionsRef, set
                 }
                 if (existing) {
                     update(item, { status: "accepted", taskId: existing.id, error: undefined });
-                    bindTask?.(existing, item.outputNodeId); observeTask(existing, item.outputNodeId, scope);
+                    bindTask?.(existing, item.outputNodeId); observeTask(existing, item.outputNodeId);
                     continue;
                 }
                 if (!item.params) { update(item, { status: "rejected", error: "缺少已冻结的提交参数，请重新配置新批次" }); continue; }
@@ -239,15 +237,15 @@ export function useCanvasUpscaleBatch({ projectId, nodesRef, connectionsRef, set
                     const task = await createUpscaleTask({ ...item.params, clientOperationId: item.clientOperationId, projectId, nodeId: item.outputNodeId });
                     assertCurrent(); update(item, { status: "accepted", taskId: task.id, error: undefined });
                     patch(nodes => nodes.map(n => n.id === item.outputNodeId ? { ...n, metadata: { ...n.metadata, taskId: task.id, taskStatus: task.status, generationSubmissionState: "accepted" } } : n));
-                    bindTask?.(task, item.outputNodeId); observeTask(task, item.outputNodeId, scope);
+                    bindTask?.(task, item.outputNodeId); observeTask(task, item.outputNodeId);
                 } catch (cause) {
                     assertCurrent(); update(item, { status: "unknown", error: cause instanceof Error ? cause.message : "提交回执待确认" });
-                    patch(nodes => nodes.map(n => n.id === item.outputNodeId ? { ...n, metadata: { ...n.metadata, generationSubmissionState: "unknown", errorDetails: "提交状态待确认，请查询原任务，暂勿重复提交" } } : n));
+                    patch(nodes => nodes.map(n => n.id === item.outputNodeId ? { ...n, metadata: { ...n.metadata, taskOutcome: { phase: "retrievable", regenerate: "blocked", reason: "submission_unknown" }, errorDetails: "提交状态待确认，请查询原任务，暂勿重复提交" } } : n));
                 }
                 await save();
             }
             if (rejectedRetryBlocked) throw new Error("等待其他项完成后重试未提交项");
         } finally { locks.current.delete(processor.id); }
-    }, [projectId, nodesRef, connectionsRef, setNodes, setConnections, setSelectedNodeIds, prepareResource, observeTask, bindTask, modal]);
+    }, [pageUi, projectId, nodesRef, connectionsRef, setNodes, setConnections, prepareResource, observeTask, bindTask, modal]);
     return { startUpscaleBatch, resumeUpscaleBatch: startUpscaleBatch };
 }

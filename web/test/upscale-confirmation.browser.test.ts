@@ -47,7 +47,7 @@ test("official-only account can cancel CNY confirmation without creating a task"
     const start = page.getByRole("button", { name: "开始批量超分", exact: true });
     await start.click();
     const dialog = page.getByRole("dialog");
-    await dialog.getByText("共 1 个素材，预计预留 ¥1.25。完成后按实际费用结算。", { exact: true }).waitFor();
+    await dialog.getByText("共 1 个素材，先扣 ¥1.25。账单核对完成后按实际费用结算，多扣的退回。", { exact: true }).waitFor();
     expect(creates).toHaveLength(0);
     await dialog.getByRole("button", { name: /取\s*消/ }).click();
     await dialog.waitFor({ state: "hidden" });

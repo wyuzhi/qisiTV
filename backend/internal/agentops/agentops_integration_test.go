@@ -172,8 +172,11 @@ func TestLocalUpdateKeepsNonTargetDataAndBlocksStaleRevision(t *testing.T) {
 	afterNodes := after["nodes"].([]any)
 	target := afterNodes[0].(map[string]any)
 	metadata := target["metadata"].(map[string]any)
-	if metadata["prompt"] != "改成夜景" {
-		t.Fatalf("目标字段未写入: %v", metadata["prompt"])
+	if metadata["composerContent"] != "改成夜景" {
+		t.Fatalf("目标草稿字段未写入: %v", metadata["composerContent"])
+	}
+	if metadata["prompt"] != "原始1" {
+		t.Fatalf("历史已提交提示词不应被覆盖: %v", metadata["prompt"])
 	}
 	if metadata["tag"] != "keep" {
 		t.Fatalf("非目标字段被破坏: %v", metadata)
@@ -197,9 +200,9 @@ func TestLocalUpdateKeepsNonTargetDataAndBlocksStaleRevision(t *testing.T) {
 		t.Fatalf("陈旧 revision 的 reason 应为 stale_revision，得到 %q", staleErr.Reason)
 	}
 	final := h.canvas(t)
-	finalPrompt := final["nodes"].([]any)[0].(map[string]any)["metadata"].(map[string]any)["prompt"]
-	if finalPrompt != "改成夜景" {
-		t.Fatalf("陈旧写入不应覆盖，得到 %v", finalPrompt)
+	finalDraft := final["nodes"].([]any)[0].(map[string]any)["metadata"].(map[string]any)["composerContent"]
+	if finalDraft != "改成夜景" {
+		t.Fatalf("陈旧写入不应覆盖，得到 %v", finalDraft)
 	}
 }
 

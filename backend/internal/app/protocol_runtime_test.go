@@ -212,7 +212,7 @@ func TestBundledProviderCatalogExposesUpstreamOperation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog := (&Service{pluginRuntime: center}).PluginProviderCatalog(string(protocol.SurfaceAdminSystemChannel), string(protocol.CapabilityVideo), false)
+	catalog := (&Service{pluginRuntime: center}).PluginDomain().ProviderCatalog(string(protocol.SurfaceAdminSystemChannel), string(protocol.CapabilityVideo), false)
 	for _, item := range catalog {
 		if item.ID != "xai-video" {
 			continue
@@ -365,7 +365,7 @@ func TestAutoDLPluginPackageLoadsAsOfficialRuntime(t *testing.T) {
 	if !center.registrySnapshot().IsCapability("autodl-comfyui", protocol.CapabilityVideo) {
 		t.Fatal("AutoDL package provider was not registered")
 	}
-	catalog := (&Service{pluginRuntime: center}).PluginProviderCatalog(string(protocol.SurfaceAdminSystemChannel), string(protocol.CapabilityVideo), false)
+	catalog := (&Service{pluginRuntime: center}).PluginDomain().ProviderCatalog(string(protocol.SurfaceAdminSystemChannel), string(protocol.CapabilityVideo), false)
 	var autoDL *PluginProviderCatalogItem
 	for index := range catalog {
 		if catalog[index].ID == "autodl-comfyui" {

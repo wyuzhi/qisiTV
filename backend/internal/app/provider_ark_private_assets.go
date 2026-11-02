@@ -33,11 +33,14 @@ func (s *Service) prepareArkPrivateAssetReferences(ctx context.Context, userID s
 	if s.IsLocalMode() {
 		return nil
 	}
+	var collections = []*[]providerMedia{&input.ReferenceImages, &input.ReferenceVideos, &input.ReferenceAudios}
 	hasOwnedReference := false
-	for _, reference := range input.ReferenceImages {
-		if arkPrivateAssetResourceID(reference) != "" {
-			hasOwnedReference = true
-			break
+	for _, list := range collections {
+		for _, reference := range *list {
+			if arkPrivateAssetResourceID(reference) != "" {
+				hasOwnedReference = true
+				break
+			}
 		}
 	}
 	if !hasOwnedReference {
@@ -48,40 +51,39 @@ func (s *Service) prepareArkPrivateAssetReferences(ctx context.Context, userID s
 		return err
 	}
 	automaticSyncEnabled, err := arkPrivateAssetAutomaticSyncEnabled(setting)
-	if err != nil {
+	if err != nil || !automaticSyncEnabled {
 		return err
-	}
-	if !automaticSyncEnabled {
-		return nil
 	}
 	if taskID := taskExecutionID(ctx); taskID != "" {
 		_ = s.repo.UpdateTaskProgress(taskID, "同步方舟可信素材", 36)
 	}
-	for index := range input.ReferenceImages {
-		reference := &input.ReferenceImages[index]
-		if strings.HasPrefix(strings.TrimSpace(reference.URL), "asset://") {
-			continue
+	for _, list := range collections {
+		for index := range *list {
+			reference := &(*list)[index]
+			if strings.HasPrefix(strings.TrimSpace(reference.URL), "asset://") {
+				continue
+			}
+			resourceID := arkPrivateAssetResourceID(*reference)
+			if resourceID == "" {
+				continue
+			}
+			resource, err := s.Resource(userID, resourceID)
+			if err != nil {
+				return fmt.Errorf("读取方舟参考素材失败：%w", err)
+			}
+			if resource.Status != model.ResourceStatusReady {
+				return errors.New("方舟参考素材尚未上传完成")
+			}
+			if arkPrivateAssetTypeForMime(resource.MimeType) == "" {
+				return errors.New("方舟可信素材库仅支持上传图片、视频或音频参考素材")
+			}
+			assetID, err := s.ensureArkPrivateAsset(ctx, userID, resource, settingRecord, &setting)
+			if err != nil {
+				return err
+			}
+			reference.URL = "asset://" + assetID
+			reference.DataURL = ""
 		}
-		resourceID := arkPrivateAssetResourceID(*reference)
-		if resourceID == "" {
-			continue
-		}
-		resource, err := s.Resource(userID, resourceID)
-		if err != nil {
-			return fmt.Errorf("读取方舟参考素材失败：%w", err)
-		}
-		if resource.Status != model.ResourceStatusReady {
-			return errors.New("方舟参考素材尚未上传完成")
-		}
-		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(resource.MimeType)), "image/") {
-			return errors.New("方舟可信素材库当前只支持上传图片参考素材")
-		}
-		assetID, err := s.ensureArkPrivateAsset(ctx, userID, resource, settingRecord, &setting)
-		if err != nil {
-			return err
-		}
-		reference.URL = "asset://" + assetID
-		reference.DataURL = ""
 	}
 	if taskID := taskExecutionID(ctx); taskID != "" {
 		_ = s.repo.UpdateTaskProgress(taskID, "调用生成模型", 40)
@@ -89,13 +91,7 @@ func (s *Service) prepareArkPrivateAssetReferences(ctx context.Context, userID s
 	return nil
 }
 
-// Agent Plan 图片与视频共用 /api/plan/v3；图片协议不得进入可信素材同步。
-
-// 可信素材同步是可选增强能力。管理员未启用时保持原始参考 URL，
-// 继续执行常规火山方舟视频请求。
-
-// SyncResourceToArkPrivateAsset 是用户显式触发的参考图预同步入口。
-// 它与任务 worker 共用团队资源归属、就绪状态和审核规则，客户端不能借此向方舟提交任意 URL。
+// SyncResourceToArkPrivateAsset 是用户显式触发的参考素材预同步入口。
 func (s *Service) SyncResourceToArkPrivateAsset(ctx context.Context, actor *model.User, resourceID string) (*ArkPrivateAssetSyncResult, error) {
 	if s.IsLocalMode() {
 		return nil, BadAuthRequest("本地工作区不支持将素材同步到云端可信素材库")
@@ -114,8 +110,8 @@ func (s *Service) SyncResourceToArkPrivateAsset(ctx context.Context, actor *mode
 	if resource.Status != model.ResourceStatusReady {
 		return nil, BadAuthRequest("图片素材尚未上传完成")
 	}
-	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(resource.MimeType)), "image/") {
-		return nil, BadAuthRequest("方舟可信素材库当前只支持上传图片素材")
+	if arkPrivateAssetTypeForMime(resource.MimeType) == "" {
+		return nil, BadAuthRequest("方舟可信素材库仅支持上传图片、视频或音频素材")
 	}
 	settingRecord, setting, err := s.readArkPrivateAssetSetting()
 	if err != nil {
@@ -191,13 +187,16 @@ func (s *Service) ensureArkPrivateAsset(ctx context.Context, userID string, reso
 	if err != nil {
 		return "", s.failArkPrivateAssetBinding(binding, fmt.Errorf("生成方舟素材临时地址失败：%w", err))
 	}
-	response, err := callArkPrivateAssetAPI(ctx, *setting, "CreateAsset", map[string]interface{}{
-		"GroupId":     groupID,
-		"URL":         resourceURL,
-		"AssetType":   "Image",
-		"Name":        "ark-private-asset-" + resource.ID,
-		"ProjectName": setting.ProjectName,
-	})
+	assetType := arkPrivateAssetTypeForMime(resource.MimeType)
+	if assetType == "" {
+		assetType = "Image"
+	}
+	payload := map[string]interface{}{"GroupId": groupID, "URL": resourceURL, "AssetType": assetType, "Name": "ark-private-asset-" + resource.ID, "ProjectName": setting.ProjectName, "Moderation": map[string]interface{}{"Strategy": "Skip"}}
+	response, err := callArkPrivateAssetAPI(ctx, *setting, "CreateAsset", payload)
+	if isUnsupportedArkModerationParamError(err) {
+		delete(payload, "Moderation")
+		response, err = callArkPrivateAssetAPI(ctx, *setting, "CreateAsset", payload)
+	}
 	if err != nil {
 		return "", s.failArkPrivateAssetBinding(binding, fmt.Errorf("上传方舟可信素材失败：%w", err))
 	}
@@ -240,12 +239,6 @@ func (s *Service) ensureArkPrivateAssetGroup(ctx context.Context, settingRecord 
 	}
 	return groupID, nil
 }
-
-// shouldRetryArkPrivateAssetBinding 判断失败的素材绑定能否安全重试。
-// 素材组尚未建成（两个 ID 均为空）时任何失败都可重试：网络中断、区域配错、
-// 套餐未开通都发生在建组之前，且绝无重复上传风险。素材组已建、素材未建时仅重试
-// 创建素材阶段的失败，最坏情况是组内多出一份素材。审核拒绝发生在拿到素材 ID 之后，
-// ArkAssetID 非空，天然不会进入重试路径。
 
 func (s *Service) waitForArkPrivateAsset(ctx context.Context, binding *model.ArkPrivateAssetBinding, setting *arkPrivateAssetSettingValue) (string, error) {
 	deadline := time.Now().Add(arkPrivateAssetPollLimit)
@@ -298,6 +291,21 @@ func (s *Service) waitForArkPrivateAsset(ctx context.Context, binding *model.Ark
 		binding = latest
 	}
 	return "", errors.New("方舟可信素材审核超时，请稍后重新提交视频任务")
+}
+
+func isUnsupportedArkModerationParamError(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	if !strings.Contains(lower, "moderation") {
+		return false
+	}
+	return strings.Contains(lower, "invalidparameter") ||
+		strings.Contains(lower, "unknownparameter") ||
+		strings.Contains(lower, "unsupported") ||
+		strings.Contains(lower, "unrecognized") ||
+		strings.Contains(lower, "not support")
 }
 
 func (s *Service) failArkPrivateAssetBinding(binding *model.ArkPrivateAssetBinding, reason error) error {

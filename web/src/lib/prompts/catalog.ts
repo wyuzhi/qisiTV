@@ -68,6 +68,13 @@ export const IMAGE_PROMPT_REVERSE = `请根据参考图片反推一段适合用�
 2. 覆盖主体、构图、风格、光线、色彩、材质、镜头和氛围。
 3. 尽量写成可直接用于生图模型的完整提示词。`;
 
+export const VIDEO_PROMPT_REVERSE = `请根据参考视频拆解并反推一段适合用于 AI 视频生成的结构化提示词。
+
+要求：
+1. 只输出提示词正文，不要解释。
+2. 按时间顺序覆盖开场画面、主体动作与神态、景别与运镜变化、光影色彩、环境氛围与声音细节。
+3. 写成可直接用于视频生成模型的完整提示词。`;
+
 export function workflowStarterPrompt(kind: "character_cards" | "character_three_view" | "storyboard_video", title: string, workflowTitle: string) {
     if (kind === "character_cards") return `请基于「${workflowTitle}」拆分主要角色，并为每个角色生成可用于后续创作的角色图片卡片：外观、服饰、身份、性格和视觉辨识点。`;
     if (kind === "character_three_view") return `请基于上游角色卡片生成「${title}」：同一角色的正面、侧面、背面三视图，保持服饰、发型、道具和比例一致。`;

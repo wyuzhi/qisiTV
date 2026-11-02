@@ -14,7 +14,7 @@ beforeAll(async () => {
             builder.onResolve({ filter: /\?url$/ }, args => ({ path: args.path, namespace: "unused-media-url" }));
             builder.onLoad({ filter: /.*/, namespace: "unused-media-url" }, () => ({ contents: 'export default "unused-test-media";', loader: "js" }));
             builder.onResolve({ filter: /^(?:@\/|antd$)/ }, args => {
-                if (args.importer.endsWith("use-canvas-media-tools.ts") && mocked.has(args.path)) return { path: import.meta.dir + "/fixtures/canvas-audio-dependencies.ts" };
+                if (/\/use-canvas-(?:media|video|image)-tools\.ts$/.test(args.importer) && mocked.has(args.path)) return { path: import.meta.dir + "/fixtures/canvas-audio-dependencies.ts" };
                 if (args.path.startsWith("@/")) return { path: Bun.resolveSync("../src/" + args.path.slice(2), import.meta.dir) };
             });
         } }] });

@@ -6,7 +6,6 @@ import { resourceIdFromStorageKey, resourceStorageKey, uploadResourceFile } from
 import { createGenerationTask, findGenerationTaskByOperation, waitForGenerationTask, type GenerationTask, type CreateTaskInput } from "@/services/api/task-center";
 import { submitGenerationCommand } from "./generation-submission";
 import { modelCapabilityConfigFor } from "@/lib/model-capabilities";
-import { grokImagePromptLimitError } from "@/lib/grok-image-prompt-limit";
 import { resolveGenerationWorkflowExecution, type GenerationWorkflowExecution } from "@/lib/generation-workflow-execution";
 import { isArkPlanBaseUrl } from "@/lib/seedance-video";
 import { portraitGenerationError, resolveVideoOperation } from "@/lib/model-selection";
@@ -15,9 +14,7 @@ import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { buildBackendToolRequests, type ResponseFunctionTool, type ResponseInputMessage, type ToolChoice, type ToolResponseResult } from "@/services/api/image";
 import { assertAgentExchangeBudget } from "@/lib/canvas/agent-context-budget";
-import { assertVideoCapability } from "@/services/api/video-validation";
 import { ApiError } from "@/services/api/request";
-import { assertUserScope, captureUserScope } from "@/lib/user-scope-guard";
 import { isReferenceHTTPSLink, uploadReferenceLinks, type ResolveReferenceLinks, type ReferenceLinkRequest } from "./reference-link-replacement";
 
 export { logicalModelIDForConfig };
@@ -27,7 +24,7 @@ export type BackendGenerationMode = "text" | "image" | "video" | "audio";
 export type BackendGenerationResult = {
     mode?: BackendGenerationMode;
     images?: Array<{ dataUrl: string; url?: string; storageKey?: string; width?: number; height?: number; bytes?: number; mimeType?: string }>;
-    video?: { dataUrl: string; url?: string; storageKey?: string; previewUrl?: string; width?: number; height?: number; durationMs?: number; bytes?: number; mimeType?: string };
+    video?: { dataUrl: string; url?: string; storageKey?: string; previewUrl?: string; width?: number; height?: number; durationMs?: number; bytes?: number; mimeType?: string; lastFrame?: { dataUrl: string; url?: string; storageKey?: string; width?: number; height?: number; bytes?: number; mimeType?: string } };
     audio?: { dataUrl: string; url?: string; storageKey?: string; durationMs?: number; bytes?: number; mimeType?: string; format?: string };
     text?: string;
     toolCalls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string }; thoughtSignature?: string }>;
@@ -55,7 +52,6 @@ type BackendGenerationTaskOptions = {
     retryOf?: string;
     retryContextsByBatchIndex?: Array<{ retryOf: string; attemptGroupId: string; clientOperationId: string }>;
     attemptGroupId?: string;
-    expectedScope?: import("@/lib/user-scope-guard").CapturedUserScope;
 };
 
 export type GenerationTaskDependencies = {
@@ -100,19 +96,16 @@ export async function runBackendGenerationTask(
         clientOperationId,
         retryOf,
         attemptGroupId,
-        expectedScope = captureUserScope(),
         resolveReferenceLinks,
     }: BackendGenerationTaskOptions,
     dependencies: GenerationTaskDependencies = defaultDependencies,
 ) {
     throwIfAborted(signal);
-    assertClientPromptLimit(mode, prompt, config, metadata);
     assertBackendRuntimeConfigured(config, mode);
     const prepared = await prepareGenerationReferences({ config, mode, referenceImages, referenceVideos, referenceAudios, mask });
     throwIfAborted(signal);
-    assertPreparedVideoCapability(mode, config, prepared);
     return createAndWaitGenerationTask(
-        { projectId, mode, prompt, config, referenceImages, referenceVideos, referenceAudios, textHistory, signal, metadata, onTaskUpdate, onTextDelta, streamText, enableThinking, clientOperationId, retryOf, attemptGroupId, expectedScope, resolveReferenceLinks },
+        { projectId, mode, prompt, config, referenceImages, referenceVideos, referenceAudios, textHistory, signal, metadata, onTaskUpdate, onTextDelta, streamText, enableThinking, clientOperationId, retryOf, attemptGroupId, resolveReferenceLinks },
         prepared,
         dependencies,
     );
@@ -122,11 +115,9 @@ export async function runBackendGenerationTask(
 // 后端自动回填负责，不能让页面 mutation 一直等待供应商完成。
 export async function submitBackendGenerationTask(options: BackendGenerationTaskOptions, dependencies: GenerationTaskDependencies = defaultDependencies): Promise<GenerationTask> {
     throwIfAborted(options.signal);
-    assertClientPromptLimit(options.mode, options.prompt, options.config, options.metadata);
     assertBackendRuntimeConfigured(options.config, options.mode);
     const prepared = await prepareGenerationReferences(options);
     throwIfAborted(options.signal);
-    assertPreparedVideoCapability(options.mode, options.config, prepared);
     return createBackendGenerationTask(options, prepared, dependencies);
 }
 
@@ -196,7 +187,6 @@ export async function runBackendToolGenerationTask(options: BackendToolGeneratio
 export async function runBackendGenerationTaskBatch(options: BackendGenerationTaskOptions & { count: number }, dependencies: GenerationTaskDependencies = defaultDependencies) {
     const count = Math.max(1, Math.min(15, Math.floor(Number(options.count)) || 1));
     throwIfAborted(options.signal);
-    assertClientPromptLimit(options.mode, options.prompt, options.config, options.metadata);
     if (options.retryContextsByBatchIndex && options.retryContextsByBatchIndex.length !== count) throw new Error("生成重试批次任务数量不匹配");
     const prepared = await prepareGenerationReferences(options);
     throwIfAborted(options.signal);
@@ -243,13 +233,6 @@ function throwIfAborted(signal?: AbortSignal) {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 }
 
-function assertClientPromptLimit(mode: BackendGenerationMode, prompt: string, config: AiConfig, metadata?: Record<string, unknown>) {
-    if (mode !== "image" || metadata?.promptTemplateOperation || (config.taskWorkflowProvider || "model") !== "model") return;
-    const requestConfig = resolveModelRequestConfig(config, config.model);
-    const promptLimitError = grokImagePromptLimitError(prompt, requestConfig.interfaceType, requestConfig.model);
-    if (promptLimitError) throw new Error(promptLimitError);
-}
-
 async function prepareGenerationReferences({
     config,
     mode,
@@ -281,20 +264,18 @@ function usesArkVideoAssetReference(config: AiConfig) {
 async function createAndWaitGenerationTask(options: BackendGenerationTaskOptions, prepared: PreparedGenerationReferences, dependencies: GenerationTaskDependencies) {
     const task = await createBackendGenerationTask(options, prepared, dependencies);
     const { signal, onTaskUpdate, onTextDelta } = options;
-    const completed = await dependencies.waitTask(task.id, { signal, initialTask: task, onTaskUpdate, onTextDelta, expectedScope: options.expectedScope });
+    const completed = await dependencies.waitTask(task.id, { signal, initialTask: task, onTaskUpdate, onTextDelta });
     return parseBackendGenerationResult(completed);
 }
 
 async function createBackendGenerationTask(options: BackendGenerationTaskOptions, prepared: PreparedGenerationReferences, dependencies: GenerationTaskDependencies) {
-    const expectedScope = options.expectedScope ?? captureUserScope();
     const operationId = options.clientOperationId || dependencies.createId();
     options = { ...options, clientOperationId: operationId };
     const submit = () => {
         throwIfAborted(options.signal);
-        assertUserScope(expectedScope);
         return submitGenerationCommand(backendGenerationTaskInput(options, prepared), operationId,
-            (input) => { assertUserScope(expectedScope); return dependencies.createTask(input, { expectedScope }); },
-            dependencies.findTask && options.projectId ? () => { assertUserScope(expectedScope); return dependencies.findTask!(operationId, options.projectId!); } : undefined,
+            (input) => dependencies.createTask(input),
+            dependencies.findTask && options.projectId ? () => dependencies.findTask!(operationId, options.projectId!) : undefined,
             () => !options.signal?.aborted);
     };
     let task: GenerationTask;
@@ -321,7 +302,6 @@ async function createBackendGenerationTask(options: BackendGenerationTaskOptions
             ? await options.resolveReferenceLinks(references, options.signal, target)
             : await uploadReferenceLinks(references, options.signal, target);
         throwIfAborted(options.signal);
-        assertUserScope(expectedScope);
         if (!links || references.some((reference) => !links[reference.key])) throw error;
         for (const reference of references) {
             if (!isReferenceHTTPSLink(links[reference.key] || "")) throw new Error(`${reference.label}需要有效的 HTTPS 链接`);
@@ -336,7 +316,6 @@ async function createBackendGenerationTask(options: BackendGenerationTaskOptions
         prepared.referenceVideos = replace(prepared.referenceVideos, "referenceVideos");
         prepared.referenceAudios = replace(prepared.referenceAudios, "referenceAudios");
         if (prepared.mask) prepared.mask = replace([prepared.mask], "mask")[0];
-        assertPreparedVideoCapability(options.mode, options.config, prepared);
         task = await submit();
     }
     options.onTaskUpdate?.(task);
@@ -345,21 +324,10 @@ async function createBackendGenerationTask(options: BackendGenerationTaskOptions
 
 export async function prepareBackendGenerationTask(options: BackendGenerationTaskOptions): Promise<CreateTaskInput> {
     throwIfAborted(options.signal);
-    assertClientPromptLimit(options.mode, options.prompt, options.config, options.metadata);
     assertBackendRuntimeConfigured(options.config, options.mode);
     const prepared = await prepareGenerationReferences(options);
     throwIfAborted(options.signal);
-    assertPreparedVideoCapability(options.mode, options.config, prepared);
     return backendGenerationTaskInput(options, prepared);
-}
-
-function assertPreparedVideoCapability(mode: BackendGenerationMode, config: AiConfig, prepared: PreparedGenerationReferences) {
-    if (mode !== "video") return;
-    const profile = modelCapabilityConfigFor(config, config.model).video;
-    if (!profile) return;
-    // Owned workflow resources can carry only a key; the backend reads their
-    // authoritative metadata and validates it before contacting the provider.
-    assertVideoCapability(profile, prepared.referenceImages, prepared.referenceVideos, prepared.referenceAudios, config.videoSeconds, { deferResourceMetadataToBackend: true });
 }
 
 function backendGenerationTaskInput(options: BackendGenerationTaskOptions, prepared: PreparedGenerationReferences): CreateTaskInput {
@@ -486,9 +454,11 @@ export function backendProviderConfig(config: AiConfig, mode: BackendGenerationM
         seedreamWatermark: config.seedreamWatermark,
         count: config.count,
         videoSeconds: config.videoSeconds,
-        vquality: config.vquality,
+        vquality: config.videoDraft === "true" ? "480p" : config.vquality,
         videoGenerateAudio: config.videoGenerateAudio == null ? undefined : String(config.videoGenerateAudio),
         videoWatermark: config.videoWatermark == null ? undefined : String(config.videoWatermark),
+        videoDraft: config.videoDraft == null ? undefined : String(config.videoDraft),
+        videoReturnLastFrame: config.videoReturnLastFrame == null ? undefined : String(config.videoReturnLastFrame),
         videoArkPrivateAssetUpload: config.videoArkPrivateAssetUpload == null ? undefined : String(config.videoArkPrivateAssetUpload),
         audioVoice: config.audioVoice,
         audioFormat: config.audioFormat,
@@ -499,6 +469,8 @@ export function backendProviderConfig(config: AiConfig, mode: BackendGenerationM
         systemPrompt: config.systemPrompt,
     };
     if (logicalModelIDForConfig(config)) return generationOptions;
+    const modelProfile = resolveModelChannel(config, config.model).modelProfiles?.find((item) => item.model === requestConfig.model);
+    const hasDeclaredCapability = Boolean(modelProfile?.capabilityConfig || modelProfile?.imageCapabilitiesVersion || modelProfile?.videoCapabilitiesVersion);
     return {
         channelId: requestConfig.channelId,
         apiFormat: requestConfig.apiFormat,
@@ -512,8 +484,9 @@ export function backendProviderConfig(config: AiConfig, mode: BackendGenerationM
         credentialRef: requestConfig.credentialRef,
         model: requestConfig.model,
         ...generationOptions,
-        capabilityConfig: modelCapabilityConfigFor(config, requestConfig.model),
-        videoCapabilitiesVersion: resolveModelChannel(config, config.model).modelProfiles?.find((item) => item.model === requestConfig.model)?.videoCapabilitiesVersion,
+        capabilityConfig: hasDeclaredCapability ? modelCapabilityConfigFor(config, config.model) : undefined,
+        imageCapabilitiesVersion: modelProfile?.imageCapabilitiesVersion,
+        videoCapabilitiesVersion: modelProfile?.videoCapabilitiesVersion,
         systemPrompt: config.systemPrompt,
     };
 }
@@ -576,7 +549,7 @@ function logicalCapabilityOptions(config: AiConfig, mode: BackendGenerationMode)
         mode === "image"
             ? { size: config.size, quality: omittedImageQuality(config.quality, resolveModelRequestConfig(config, config.model)), transparentBackground: config.transparentBackground === "true", count: Number(config.count) }
             : mode === "video"
-              ? { size: config.size, videoSeconds: Number(config.videoSeconds), vquality: config.vquality, videoGenerateAudio: config.videoGenerateAudio === "true", videoWatermark: config.videoWatermark === "true" }
+              ? { size: config.size, videoSeconds: Number(config.videoSeconds), vquality: config.videoDraft === "true" ? "480p" : config.vquality, videoGenerateAudio: config.videoGenerateAudio === "true", videoWatermark: config.videoWatermark === "true" }
               : mode === "audio"
                 ? { audioVoice: config.audioVoice, audioFormat: config.audioFormat, audioSpeed: Number(config.audioSpeed), audioPitch: Number(config.audioPitch), audioVolume: Number(config.audioVolume) }
                 : {};

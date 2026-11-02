@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 
-import { getActiveUserScopeEpoch, subscribeUserScope } from "@/lib/user-scope";
 import { resolveResourceVideoPlayback } from "@/services/resource-video-playback";
 
 // All video surfaces share request ownership, decode fallback and Blob URL disposal.
@@ -12,10 +11,8 @@ export function useResourceVideoPlayback(storageKey: string, fallback: string, a
     const [compatibleTarget, setCompatibleTarget] = useState("");
     const [loadedIdentity, setLoadedIdentity] = useState("");
     const [retryEpoch, setRetryEpoch] = useState(0);
-    const [scopeEpoch, setScopeEpoch] = useState(getActiveUserScopeEpoch);
-    const identity = JSON.stringify([storageKey, fallback, scopeEpoch]);
+    const identity = JSON.stringify([storageKey, fallback]);
     const needsCompatible = compatibleTarget === identity;
-    useEffect(() => subscribeUserScope((epoch) => setScopeEpoch(epoch.generation)), []);
     useEffect(() => { if (!active) setCompatibleTarget(""); }, [active]);
 
     useEffect(() => {

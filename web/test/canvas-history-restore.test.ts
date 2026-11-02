@@ -3,16 +3,6 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 type Stored = Map<string, string>;
 const stored: Stored = new Map();
 let activeScope = "guest";
-let activeEpoch = 1;
-
-function assertMockExpectedScope(config?: { expectedScope?: { userScope: string; epoch: number } }) {
-    if (!config?.expectedScope) return;
-    if (config.expectedScope.userScope !== activeScope || config.expectedScope.epoch !== activeEpoch) {
-        const error = new Error("账号已切换，本次操作已停止");
-        error.name = "UserScopeAbandonedError";
-        throw error;
-    }
-}
 
 class ApiError extends Error {
     status?: number;
@@ -55,15 +45,10 @@ mock.module("@/lib/localforage-storage", () => ({
 
 mock.module("@/lib/user-scope", () => ({
     getActiveUserScope: () => activeScope,
-    getActiveUserScopeEpoch: () => activeEpoch,
-    getUserScopeGeneration: () => activeEpoch,
-    captureUserScopeEpoch: (scope = activeScope) => ({ scope, generation: activeEpoch }),
-    userScopeEpochMatches: (epoch: { scope: string; generation: number }) => epoch.scope === activeScope && epoch.generation === activeEpoch,
     setActiveUserScope: (userId?: string | null) => {
         activeScope = userId || "guest";
-        activeEpoch += 1;
     },
-    subscribeUserScope: () => () => {},
+    onStorageNamespaceChange: () => () => {},
     scopedStorageKey: (name: string, scope = activeScope) => `${name}:user:${scope}`,
     scopedLocalStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
 }));
@@ -75,16 +60,13 @@ mock.module("@/services/api/request", () => ({
     apiBaseURL: "/api",
     compactApiParams: (params: Record<string, unknown>) => params,
     http: {
-        get: async (path: string, config?: { expectedScope?: { userScope: string; epoch: number } }) => {
-            assertMockExpectedScope(config);
+        get: async (path: string) => {
             server.gets.push(path);
             return { project: server.getAfterRestore ?? server.document };
         },
-        post: async (path: string, body: { revision?: number }, config?: { expectedScope?: { userScope: string; epoch: number } }) => {
-            assertMockExpectedScope(config);
+        post: async (path: string, body: { revision?: number }) => {
             server.postStarted += 1;
             if (server.hold) await server.hold;
-            assertMockExpectedScope(config);
             server.posts.push({ path, revision: body?.revision });
             if (server.restore?.transport) throw new TypeError("Failed to fetch");
             if (server.restore?.status) {
@@ -123,7 +105,6 @@ mock.module("@/services/api/resources", () => ({
 const { restoreLocalCanvasProjectFromHistory, openLocalCanvasProjectFromBackend, resetLocalCanvasBackendSaveState, setCanvasProjectionStoreFlushForTest } = await import("@/services/local-workspace-repository");
 const { useCanvasStore, recordCanvasDocumentBase, canvasDocumentBase, clearCanvasExternalRevisionConflict } = await import("@/stores/canvas/use-canvas-store");
 const { loadCanvasOperationJournal, peekCanvasOperationJournal, resetCanvasOperationJournalMemory, saveCanvasOperationJournal, setCanvasJournalStorageDelay } = await import("@/services/canvas-operation-journal");
-const { setActiveUserScope } = await import("@/lib/user-scope");
 const { canvasBackendSubmitPaused, pauseCanvasBackendSubmit } = await import("@/services/canvas-revision-conflict");
 const { useSyncProgressStore } = await import("@/stores/use-sync-progress-store");
 
@@ -166,30 +147,6 @@ async function seedLive(doc: ReturnType<typeof canvas>, inFlight = false) {
     server.document = doc;
 }
 
-async function holdJournalWrite() {
-    let release = () => {};
-    let waiting = false;
-    let held = false;
-    setCanvasJournalStorageDelay({
-        beforeSet: async () => {
-            if (held) return;
-            held = true;
-            waiting = true;
-            await new Promise<void>((resolve) => { release = resolve; });
-        },
-    });
-    return {
-        wait: async () => {
-            for (let i = 0; i < 80 && !waiting; i += 1) await Promise.resolve();
-            expect(waiting).toBe(true);
-        },
-        resume: () => {
-            setCanvasJournalStorageDelay(null);
-            release();
-        },
-    };
-}
-
 beforeEach(() => {
     stored.clear();
     resetCanvasOperationJournalMemory();
@@ -197,7 +154,6 @@ beforeEach(() => {
     setCanvasJournalStorageDelay(null);
     setCanvasProjectionStoreFlushForTest(async () => {});
     activeScope = "guest";
-    activeEpoch = 1;
     server.revision = 21;
     server.document = canvas("当前稿", 21);
     server.posts = [];
@@ -298,58 +254,6 @@ describe("restoreLocalCanvasProjectFromHistory", () => {
         expect(server.gets).toEqual(["/canvas-projects/c1"]);
         expect(useCanvasStore.getState().projects[0].title).toBe("当前稿");
         expect(peekCanvasOperationJournal("c1")?.confirmedRevision).toBe(21);
-    });
-
-    test("账号切换后拒绝把恢复写进新账号", async () => {
-        await seedLive(canvas("当前稿", 21));
-        let release = () => {};
-        server.hold = new Promise<void>((resolve) => { release = resolve; });
-        const pending = restoreLocalCanvasProjectFromHistory("c1", { snapshotId: "snap-14", revision: 21 });
-        for (let i = 0; i < 50 && server.postStarted === 0; i += 1) await Promise.resolve();
-        expect(server.postStarted).toBe(1);
-        setActiveUserScope("user-b");
-        release();
-        await expect(pending).rejects.toMatchObject({ name: "CanvasStaleScopeError" });
-        expect(useCanvasStore.getState().projects[0].title).toBe("当前稿");
-    });
-
-    test("journal 写入等待期间切账号：不 applyLive、不清新账号状态", async () => {
-        const current = canvas("当前稿", 21);
-        await seedLive(current, true);
-        server.getAfterRestore = canvas("三节点", 22);
-        const hold = await holdJournalWrite();
-        const pending = restoreLocalCanvasProjectFromHistory("c1", { snapshotId: "snap-14", revision: 21 });
-        await hold.wait();
-
-        setActiveUserScope("user-b");
-        const other = canvas("新账号稿", 3);
-        await saveCanvasOperationJournal({
-            userScope: "user-b",
-            canvasId: "c1",
-            confirmedRevision: 3,
-            confirmedSnapshot: other,
-            inFlight: {
-                operationId: "op-b",
-                expectedRevision: 3,
-                payload: { canvasId: "c1", expectedRevision: 3, document: other },
-            },
-        });
-        recordCanvasDocumentBase(other as never, "user-b");
-        useCanvasStore.setState({ projects: [other as never] });
-        pauseCanvasBackendSubmit("c1", "user-b");
-
-        hold.resume();
-        await expect(pending).rejects.toMatchObject({ name: "CanvasStaleScopeError" });
-
-        expect(useCanvasStore.getState().projects[0].title).toBe("新账号稿");
-        expect(useCanvasStore.getState().projects[0].revision).toBe(3);
-        const otherJournal = await loadCanvasOperationJournal("c1", "user-b");
-        expect(otherJournal.confirmedRevision).toBe(3);
-        expect(otherJournal.confirmedSnapshot?.title).toBe("新账号稿");
-        expect(otherJournal.inFlight?.operationId).toBe("op-b");
-        expect(canvasDocumentBase("c1", "user-b")?.snapshot.title).toBe("新账号稿");
-        expect(canvasBackendSubmitPaused("c1", "user-b")).toBe(true);
-        expect(peekCanvasOperationJournal("c1", "guest")?.confirmedRevision).toBe(22);
     });
 
     test("openLocalCanvasProjectFromBackend 失败时仍可能退回当前稿；恢复路径不得走这条", async () => {

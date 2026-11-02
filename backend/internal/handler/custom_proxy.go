@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/platform"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,23 +21,36 @@ const maxCustomRelayErrorResponseBytes int64 = 64 << 10
 
 var customRelayClient = app.CustomRelayHTTPClient
 
-func RegisterCustomRelayRoutes(r *gin.RouterGroup, svc *app.Service) {
+// customRelays is the composition-root slice used by the custom channel proxy.
+// Nil is still accepted: key resolution and response projection then stay raw.
+type customRelays interface {
+	workspaceOwners
+	runtimePolicies
+	RequireFeature(feature string) error
+	AcquireCustomRelaySlot(ctx context.Context, userID string, limit int, ttl time.Duration) (func(), bool, error)
+	ResolveCustomRelayAPIKey(targetURL, incoming string) (string, error)
+	UserFacingProviderHTTPError(status int, statusText string, body string) string
+	UserFacingErrorMessage(err error) string
+	InterceptResponseText(raw string) string
+}
+
+func RegisterCustomRelayRoutes(r *gin.RouterGroup, relays customRelays) {
 	r.Any("/ai/custom", func(c *gin.Context) {
-		user, err := currentUser(c, svc)
+		user, err := currentUser(c, relays)
 		if err != nil {
 			failService(c, err)
 			return
 		}
-		if err := svc.RequireFeature(app.FeatureCustomChannels); err != nil {
+		if err := relays.RequireFeature(platform.FeatureCustomChannels); err != nil {
 			failService(c, err)
 			return
 		}
-		policy, available := loadRuntimePolicy(c, svc)
+		policy, available := loadRuntimePolicy(c, relays)
 		if !available || !enforceRateLimit(c, "custom-relay:"+user.ID, policy.Request.CustomRelayPerMinute, time.Minute) {
 			return
 		}
 		ttl := time.Duration(policy.Request.CustomRelayTimeoutMinutes+1) * time.Minute
-		release, acquired, err := svc.AcquireCustomRelaySlot(c.Request.Context(), user.ID, policy.Request.CustomRelayConcurrency, ttl)
+		release, acquired, err := relays.AcquireCustomRelaySlot(c.Request.Context(), user.ID, policy.Request.CustomRelayConcurrency, ttl)
 		if err != nil {
 			fail(c, http.StatusServiceUnavailable, errors.New("自定义渠道并发协调服务不可用"))
 			return
@@ -45,7 +60,7 @@ func RegisterCustomRelayRoutes(r *gin.RouterGroup, svc *app.Service) {
 			return
 		}
 		defer release()
-		proxyCustomRelayRequestWithService(c, policy.Request, svc)
+		proxyCustomRelayRequestWithService(c, policy.Request, relays)
 	})
 }
 
@@ -53,7 +68,7 @@ func proxyCustomRelayRequest(c *gin.Context, policy app.RuntimeRequestPolicy) {
 	proxyCustomRelayRequestWithService(c, policy, nil)
 }
 
-func proxyCustomRelayRequestWithService(c *gin.Context, policy app.RuntimeRequestPolicy, svc *app.Service) {
+func proxyCustomRelayRequestWithService(c *gin.Context, policy app.RuntimeRequestPolicy, relays customRelays) {
 	target, err := app.ValidateCustomRelayURL(c.GetHeader("X-Canvas-Upstream-URL"))
 	if err != nil {
 		failService(c, err)
@@ -70,7 +85,7 @@ func proxyCustomRelayRequestWithService(c *gin.Context, policy app.RuntimeReques
 	apiKey := ""
 	if header := strings.TrimSpace(c.GetHeader("Authorization")); header != "" {
 		parsed, keyErr := customRelayAPIKey(header)
-		if keyErr != nil && svc == nil {
+		if keyErr != nil && relays == nil {
 			fail(c, http.StatusUnauthorized, keyErr)
 			return
 		}
@@ -78,8 +93,8 @@ func proxyCustomRelayRequestWithService(c *gin.Context, policy app.RuntimeReques
 			apiKey = parsed
 		}
 	}
-	if svc != nil {
-		resolved, resolveErr := svc.ResolveCustomRelayAPIKey(target.String(), apiKey)
+	if relays != nil {
+		resolved, resolveErr := relays.ResolveCustomRelayAPIKey(target.String(), apiKey)
 		if resolveErr != nil {
 			failService(c, resolveErr)
 			return
@@ -143,20 +158,20 @@ func proxyCustomRelayRequestWithService(c *gin.Context, policy app.RuntimeReques
 
 	resp, err := customRelayClient(time.Duration(policy.CustomRelayTimeoutMinutes) * time.Minute).Do(upstreamReq)
 	if err != nil {
-		fail(c, http.StatusBadGateway, errors.New(userFacingRelayError(svc, errors.New("自定义渠道上游连接失败"))))
+		fail(c, http.StatusBadGateway, errors.New(userFacingRelayError(relays, errors.New("自定义渠道上游连接失败"))))
 		return
 	}
 	defer resp.Body.Close()
 	allowBinary := customVideoContentPath.MatchString(target.EscapedPath()) || strings.HasSuffix(target.Path, "/audio/speech")
-	writeCustomRelayResponse(c, svc, resp, apiKey, policy.CustomRelayResponseMB<<20, allowBinary)
+	writeCustomRelayResponse(c, relays, resp, apiKey, policy.CustomRelayResponseMB<<20, allowBinary)
 }
 
-func writeCustomRelayResponse(c *gin.Context, svc *app.Service, resp *http.Response, apiKey string, responseLimit int64, allowBinary bool) {
+func writeCustomRelayResponse(c *gin.Context, relays customRelays, resp *http.Response, apiKey string, responseLimit int64, allowBinary bool) {
 	c.Header("Cache-Control", "no-store")
 	c.Header("X-Content-Type-Options", "nosniff")
 	mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		writeCustomRelayError(c, svc, resp, apiKey, mediaType)
+		writeCustomRelayError(c, relays, resp, apiKey, mediaType)
 		return
 	}
 	if mediaType == "text/event-stream" {
@@ -170,35 +185,35 @@ func writeCustomRelayResponse(c *gin.Context, svc *app.Service, resp *http.Respo
 	if allowBinary && (strings.HasPrefix(mediaType, "video/") || strings.HasPrefix(mediaType, "audio/") || mediaType == "application/octet-stream") {
 		body, err := readLimitedRelayBody(resp.Body, responseLimit)
 		if err != nil {
-			fail(c, http.StatusBadGateway, errors.New(userFacingRelayError(svc, errors.New("自定义渠道上游返回了过大的媒体文件"))))
+			fail(c, http.StatusBadGateway, errors.New(userFacingRelayError(relays, errors.New("自定义渠道上游返回了过大的媒体文件"))))
 			return
 		}
 		c.Data(resp.StatusCode, mediaType, body)
 		return
 	}
 	if mediaType != "application/json" && !strings.HasSuffix(mediaType, "+json") {
-		fail(c, http.StatusBadGateway, errors.New(userFacingRelayError(svc, errors.New("自定义渠道上游返回了不支持的内容类型"))))
+		fail(c, http.StatusBadGateway, errors.New(userFacingRelayError(relays, errors.New("自定义渠道上游返回了不支持的内容类型"))))
 		return
 	}
 	limit := responseLimit
 	body, err := readLimitedRelayBody(resp.Body, limit)
 	if err != nil || !json.Valid(body) {
-		fail(c, http.StatusBadGateway, errors.New(userFacingRelayError(svc, errors.New("自定义渠道上游返回无效或过大的 JSON"))))
+		fail(c, http.StatusBadGateway, errors.New(userFacingRelayError(relays, errors.New("自定义渠道上游返回无效或过大的 JSON"))))
 		return
 	}
 	body = redactRelaySecret(body, apiKey)
 	c.Data(resp.StatusCode, "application/json; charset=utf-8", body)
 }
 
-func writeCustomRelayError(c *gin.Context, svc *app.Service, resp *http.Response, apiKey string, mediaType string) {
+func writeCustomRelayError(c *gin.Context, relays customRelays, resp *http.Response, apiKey string, mediaType string) {
 	body, err := readLimitedRelayBody(resp.Body, maxCustomRelayErrorResponseBytes)
 	if err != nil {
-		fail(c, http.StatusBadGateway, errors.New(userFacingRelayError(svc, errors.New("自定义渠道上游请求失败"))))
+		fail(c, http.StatusBadGateway, errors.New(userFacingRelayError(relays, errors.New("自定义渠道上游请求失败"))))
 		return
 	}
 	body = redactRelaySecret(body, apiKey)
 	rawMessage := strings.TrimSpace(string(body))
-	if intercepted := interceptedRelayText(svc, rawMessage); intercepted != rawMessage {
+	if intercepted := interceptedRelayText(relays, rawMessage); intercepted != rawMessage {
 		fail(c, resp.StatusCode, errors.New(intercepted))
 		return
 	}
@@ -206,21 +221,21 @@ func writeCustomRelayError(c *gin.Context, svc *app.Service, resp *http.Response
 		c.Data(resp.StatusCode, "application/json; charset=utf-8", body)
 		return
 	}
-	fail(c, resp.StatusCode, errors.New(svc.UserFacingProviderHTTPError(resp.StatusCode, resp.Status, string(body))))
+	fail(c, resp.StatusCode, errors.New(relays.UserFacingProviderHTTPError(resp.StatusCode, resp.Status, string(body))))
 }
 
-func userFacingRelayError(svc *app.Service, err error) string {
-	if svc == nil {
+func userFacingRelayError(relays customRelays, err error) string {
+	if relays == nil {
 		return err.Error()
 	}
-	return svc.UserFacingErrorMessage(err)
+	return relays.UserFacingErrorMessage(err)
 }
 
-func interceptedRelayText(svc *app.Service, raw string) string {
-	if svc == nil {
+func interceptedRelayText(relays customRelays, raw string) string {
+	if relays == nil {
 		return raw
 	}
-	return svc.InterceptResponseText(raw)
+	return relays.InterceptResponseText(raw)
 }
 
 func copyCustomRelayStream(c *gin.Context, source io.Reader, apiKey string, maxBytes int64) {

@@ -17,7 +17,7 @@ import { RecycleBinDialog } from "@/components/canvas/recycle-bin-dialog";
 import { LibraryCardShell } from "@/components/canvas/library-card-shell";
 import { flushCanvasStorePersistence, useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
-import { awaitCanvasExportStep, canvasExportProgressLabel, exportCanvasProjects, type CanvasExportProgress } from "@/lib/canvas/canvas-export";
+import { canvasExportProgressLabel, exportCanvasProjectsByIds, type CanvasExportProgress } from "@/lib/canvas/canvas-export";
 import { restoreCanvasArchive } from "@/lib/canvas/canvas-archive-restore";
 import { createCanvasLibraryFolder, deleteCanvasLibraryFolder, hydrateCanvasLibraryFolders, persistCanvasFolderCover, renameCanvasLibraryFolder } from "@/lib/canvas/canvas-folder-storage";
 import { isWailsNativeShell } from "@/services/desktop-media-save";
@@ -33,9 +33,8 @@ import { loadCanvasProjectPage } from "@/lib/workspace-route-modules";
 import { useSyncProgressStore } from "@/stores/use-sync-progress-store";
 import { useAppearanceStore } from "@/stores/use-appearance-store";
 import { cn } from "@/lib/utils";
-import { assertUserScope, captureUserScope, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { recordDiagnosticEvent } from "@/services/diagnostics/client-diagnostics";
-import { canvasIdsForWorkspaceProjects, canvasWorkspaceProjectId, listCanvasWorkspaceProjectCanvases, listCanvasWorkspaceProjectRoots, previewNodesForWorkspaceProject } from "@/lib/canvas/canvas-workspace-project";
+import { canvasIdsForWorkspaceProjects, canvasWorkspaceProjectId, listCanvasWorkspaceProjectCanvases, listCanvasWorkspaceProjectRoots, previewNodesForWorkspaceProject, resolveWorkspaceExportCanvasIds } from "@/lib/canvas/canvas-workspace-project";
 
 const CanvasDeleteProjectsDialog = lazy(() => import("@/components/canvas/canvas-delete-projects-dialog").then((module) => ({ default: module.CanvasDeleteProjectsDialog })));
 
@@ -54,7 +53,7 @@ export default function CanvasPage() {
     const [folderDialogOpen, setFolderDialogOpen] = useState(false);
     const [folderName, setFolderName] = useState("");
     const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
-    const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string; scope: CapturedUserScope } | null>(null);
+    const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string } | null>(null);
     const loadMoreRef = useRef<HTMLDivElement>(null);
     const [loadedProjectCount, setLoadedProjectCount] = useState(50);
     const [creationError, setCreationError] = useState(false);
@@ -228,24 +227,30 @@ export default function CanvasPage() {
             message.error(error instanceof Error ? `画布关系保存失败：${error.message}` : "画布关系保存失败");
         }
     };
-    const exportSelected = async () => {
-        if (exportController.current) return;
+    const exportCanvasByIds = async (canvasIds: readonly string[], archiveTitle?: string) => {
+        if (exportController.current || !canvasIds.length) return;
         const controller = new AbortController();
         exportController.current = controller;
-        const scope = captureUserScope();
         setExportError("");
         setExportProgress({ phase: "loading" });
         try {
-            const selected = [];
-            for (const id of selectedCanvasIds) {
-                const project = await awaitCanvasExportStep(loadCanvasProjectForEditing(id), controller.signal);
-                controller.signal.throwIfAborted();
-                assertUserScope(scope);
-                if (!project) throw new Error("画布不存在，无法导出");
-                selected.push(project);
+            let skippedCount = 0;
+            const saved = await exportCanvasProjectsByIds(
+                canvasIds,
+                (id) => loadCanvasProjectForEditing(id),
+                {
+                    archiveTitle: archiveTitle || `${brandName}画布-${canvasIds.length}个画布`,
+                    folders,
+                    allowMissingMedia: true,
+                    signal: controller.signal,
+                    onProgress: setExportProgress,
+                    onSkipped: (count) => { skippedCount = count; },
+                },
+            );
+            if (saved !== "cancelled") {
+                if (skippedCount > 0) message.warning(`已导出备份，已自动跳过 ${skippedCount} 个缺失或无法读取的素材`);
+                else if (saved === "saved" && isWailsNativeShell()) message.success("已保存到所选位置");
             }
-            const saved = await exportCanvasProjects(selected, `${brandName}画布-${selected.length}个画布`, { folders, signal: controller.signal, onProgress: setExportProgress });
-            if (saved === "saved" && isWailsNativeShell()) message.success("已保存到所选位置");
         } catch (error) {
             if (controller.signal.aborted) {
                 recordDiagnosticEvent({ category: "action", level: "info", code: "canvas_export_cancelled", message: "已取消画布导出" });
@@ -257,6 +262,20 @@ export default function CanvasPage() {
             exportController.current = null;
             setExportProgress(null);
         }
+    };
+    const exportSelected = () => exportCanvasByIds(remoteMode ? selectedIds : resolveWorkspaceExportCanvasIds(localProjects, selectedIds));
+    const exportWorkspaceProject = (project: CanvasLibrarySummary) => {
+        const ids = remoteMode ? [project.id] : resolveWorkspaceExportCanvasIds(localProjects, [project.id]);
+        return exportCanvasByIds(ids, `${project.title || brandName}-${ids.length}个画布`);
+    };
+    const exportFolderProjects = (folder: { id: string; name: string }) => {
+        const folderProjectIds = projects.filter((project) => project.folderId === folder.id).map((project) => project.id);
+        const ids = remoteMode ? folderProjectIds : resolveWorkspaceExportCanvasIds(localProjects, folderProjectIds);
+        if (!ids.length) {
+            message.info("当前文件夹暂无可导出的项目");
+            return Promise.resolve();
+        }
+        return exportCanvasByIds(ids, `${folder.name}-${ids.length}个画布`);
     };
     const importCanvas = async (file?: File) => {
         if (!file) return;
@@ -380,7 +399,7 @@ export default function CanvasPage() {
                             </article>
                             <p className="libtv-create-project-subtitle">创建新的视频项目</p>
                         </div>
-                        {visibleFolders.map((folder) => <CanvasLibraryFolderTile key={folder.id} folder={folder} onOpen={() => setFolderFilter(folder.id)} onRename={() => { setFolderName(folder.name); setEditingFolderId(folder.id); setFolderDialogOpen(true); }} onDelete={() => setDeletingFolder({ id: folder.id, name: folder.name, scope: captureUserScope() })} onCoverChange={(dataUrl) => {
+                        {visibleFolders.map((folder) => <CanvasLibraryFolderTile key={folder.id} folder={folder} onOpen={() => setFolderFilter(folder.id)} onRename={() => { setFolderName(folder.name); setEditingFolderId(folder.id); setFolderDialogOpen(true); } } onExport={() => void exportFolderProjects(folder)} onDelete={() => setDeletingFolder({ id: folder.id, name: folder.name })} onCoverChange={(dataUrl) => {
                             void persistCanvasFolderCover(folder.id, dataUrl).then(() => {
                                 message.success("文件夹封面已更新");
                             }).catch((error) => {
@@ -418,6 +437,7 @@ export default function CanvasPage() {
                                     }
                                 }}
                                 onDuplicate={() => duplicateCanvasProject(project)}
+                                onExport={() => exportWorkspaceProject(project)}
                                 onDelete={() => {
                                     setDeleteIds([project.id]);
                                 }}
@@ -469,15 +489,13 @@ export default function CanvasPage() {
                 />
             </Modal>
             <RecycleBinDialog open={historyOpen} onClose={() => setHistoryOpen(false)} />
-            {deletingFolder ? <CanvasDeleteConfirmation scope={deletingFolder.scope} title={`删除文件夹「${deletingFolder.name}」？`}
+            {deletingFolder ? <CanvasDeleteConfirmation title={`删除文件夹「${deletingFolder.name}」？`}
                 description={`将删除此文件夹及其中 ${localProjects.filter((project) => project.folderId === deletingFolder.id).length} 个画布，画布里的节点和连线也会一起移除。`}
-                onCancel={() => setDeletingFolder(null)} onConfirm={async (assertCurrent) => {
+                onCancel={() => setDeletingFolder(null)} onConfirm={async () => {
                     const folderId = deletingFolder.id;
                     const ids = useCanvasStore.getState().projects.filter((project) => project.folderId === folderId).map((project) => project.id);
                     if (ids.length) await deleteLocalCanvasProjects(ids);
-                    assertCurrent();
                     await deleteCanvasLibraryFolder(folderId);
-                    assertCurrent();
                     message.success(ids.length ? `已删除文件夹及其中 ${ids.length} 个画布` : "文件夹已删除");
                 }} /> : null}
             {deleteDialogOpen ? <Suspense fallback={null}><CanvasDeleteProjectsDialog /></Suspense> : null}
@@ -485,7 +503,7 @@ export default function CanvasPage() {
     );
 }
 
-function CanvasLibraryFolderTile({ folder, onOpen, onRename, onDelete, onCoverChange }: { folder: { id: string; name: string; updatedAt: string; coverDataUrl?: string; unsaved?: boolean; saveError?: string }; onOpen: () => void; onRename: () => void; onDelete: () => void; onCoverChange: (dataUrl: string) => void }) {
+function CanvasLibraryFolderTile({ folder, onOpen, onRename, onExport, onDelete, onCoverChange }: { folder: { id: string; name: string; updatedAt: string; coverDataUrl?: string; unsaved?: boolean; saveError?: string }; onOpen: () => void; onRename: () => void; onExport: () => void; onDelete: () => void; onCoverChange: (dataUrl: string) => void }) {
     const { message } = App.useApp();
     const coverInputRef = useRef<HTMLInputElement>(null);
     const chooseCover = (event: ChangeEvent<HTMLInputElement>) => {
@@ -530,6 +548,7 @@ function CanvasLibraryFolderTile({ folder, onOpen, onRename, onDelete, onCoverCh
                         { key: "open", label: "打开", onClick: onOpen },
                         { key: "rename", label: "重命名", onClick: onRename },
                         { key: "cover", label: "更换封面", onClick: () => coverInputRef.current?.click() },
+                        { key: "export", label: "导出文件夹", onClick: onExport },
                         { type: "divider" },
                         { key: "delete", danger: true, label: "删除文件夹", onClick: onDelete },
                     ],

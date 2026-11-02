@@ -5,6 +5,8 @@ import { resolve } from "node:path";
 import { bringCanvasNodeToFront, sortCanvasNodesByStackOrder } from "../src/lib/canvas/canvas-node-stack-order";
 
 const projectSource = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/project.tsx"), "utf8");
+const documentStateSource = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/use-canvas-document-state.ts"), "utf8");
+const nodeClickSource = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/use-canvas-node-click.ts"), "utf8");
 const worldLayersSource = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/canvas-project-world-layers.tsx"), "utf8");
 const selectionControllerSource = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/use-canvas-selection-controller.ts"), "utf8");
 
@@ -22,10 +24,11 @@ describe("canvas node stack order", () => {
     });
 
     test("keeps stack state separate from transient canvas selection", () => {
-        expect(projectSource).toContain("const [nodeStackOrder, setNodeStackOrder]");
-        expect(projectSource).toContain("bringNodeToFront(node.id)");
+        expect(documentStateSource).toContain("const [nodeStackOrder, setNodeStackOrder]");
+        expect(projectSource).toContain("useCanvasDocumentState(projectId)");
+        expect(nodeClickSource).toContain("bringNodeToFront(node.id)");
         expect(projectSource).toContain("onNodeBringToFront: handleNodeBringToFront");
-        expect(projectSource).toContain("const handleNodeBringToFront = useCallback");
+        expect(nodeClickSource).toContain("const handleNodeBringToFront = useCallback");
         expect(selectionControllerSource).toContain("onNodeBringToFront?.(nodeId)");
         expect(selectionControllerSource).toContain("so dragging also survives deselection");
         expect(projectSource).toContain("onDeselect: handleCanvasDeselect");

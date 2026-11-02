@@ -7,14 +7,14 @@ const noisy = new Set(['taskFailureDiagnostics', 'generationFailureDiagnostics']
 
 export const CANVAS_READ_VIEW_SCHEMA = {
   type: 'object', additionalProperties: false,
-  description: '只读分页。默认返回节点与连线紧凑视图；complete=false 的字段通过 nodeId + fieldPath 读取原文。每页核对 revision，后续页带 expectedRevision；不改变业务画布。',
+  description: '只读分页或按 nodeId+fieldPath 读取完整长字段。',
   properties: {
     section: { type: 'string', enum: ['nodes', 'connections', 'canvas'] },
-    nodeId: { type: 'string', description: '按真实节点 ID 定位；可搭配 fieldPath 读取完整字段' },
-    fieldPath: { type: 'string', description: 'JSON Pointer，例如 /metadata/prompt、/metadata/taskFailureDiagnostics；相对于指定节点或 section=canvas 的画布' },
-    offset: { type: 'integer', minimum: 0, description: '数组或对象字段分页起点' },
+    nodeId: { type: 'string' },
+    fieldPath: { type: 'string', description: 'JSON Pointer（如 /metadata/prompt）' },
+    offset: { type: 'integer', minimum: 0 },
     limit: { type: 'integer', minimum: 1, maximum: MAX_ITEMS },
-    textOffset: { type: 'integer', minimum: 0, description: '长字符串原文字符起点，沿 nextTextOffset 续读' },
+    textOffset: { type: 'integer', minimum: 0 },
     expectedRevision: { type: 'integer', minimum: 0 },
   },
 };

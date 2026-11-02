@@ -71,11 +71,11 @@ beforeAll(async () => {
                 if (id === "a") await Bun.sleep(700);
                 return Response.json({ code: 0, data: path.endsWith("/logs") ? [] : { id, type: "canvas_video", status: "failed", providerRequestId: `provider-${id}`, prompt: `detail ${id}`, attempts: 1, createdAt: "2026-10-01", updatedAt: "2026-10-01" } });
             }
-            if (path.endsWith("/query-provider")) {
+            if (path.endsWith("/recover")) {
                 await Bun.sleep(300);
                 if (fail) return Response.json({ code: 1, msg: "连接中断，请稍后取回" }, { status: 503 });
-                if (recovered) return Response.json({ code: 0, data: { recovered: true, providerStatus: "completed", task: { id: "original", status: "succeeded", type: "canvas_video", outputs: [{ outputIndex: 0, mediaType: "video", materializedAssetId: recoveredAsset.id }], resultJson: JSON.stringify({ mode: "video", video: { storageKey: "resource:test-video", url: "/api/resources/test-video/file", mimeType: "video/mp4", width: 320, height: 180 } }) } } });
-                return Response.json({ code: 0, data: { recovered: false, providerStatus: "processing", task: { id: "original", status: "failed", type: "canvas_video" } } });
+                if (recovered) return Response.json({ code: 0, data: { id: "original", status: "succeeded", type: "canvas_video", outcome: { phase: "ready", regenerate: "allowed", reason: "result_ready" }, outputs: [{ outputIndex: 0, mediaType: "video", materializedAssetId: recoveredAsset.id }], resultJson: JSON.stringify({ mode: "video", video: { storageKey: "resource:test-video", url: "/api/resources/test-video/file", mimeType: "video/mp4", width: 320, height: 180 } }) } });
+                return Response.json({ code: 0, data: { id: "original", status: "failed", type: "canvas_video", providerRequestId: "upstream-original", outcome: { phase: "retrievable", regenerate: "blocked", reason: "provider_result_pending" } } });
             }
             return Response.json({ code: 0, data: [] });
         }
@@ -94,11 +94,11 @@ beforeEach(async () => {
 afterAll(async () => { await browser?.close(); server?.stop(true); });
 
 test("canvas recovery explains query-only behavior and prevents duplicate requests", async () => {
-    expect(await page.getByText("查询原任务并取回视频，不会重新生成。").count()).toBe(1);
+    expect(await page.getByText("查询原任务并取回生成结果，不会重新生成。").count()).toBe(1);
     expect(await page.getByText("视频下载中断，请取回结果").count()).toBe(1);
     await page.getByRole("button", { name: "double retrieve" }).evaluate((button: HTMLButtonElement) => button.click());
     await page.getByText("原任务仍在处理中，请稍后再取回结果").waitFor();
-    expect(requests.filter((request) => request.startsWith("POST"))).toEqual(["POST /api/tasks/original/query-provider"]);
+    expect(requests.filter((request) => request.startsWith("POST"))).toEqual(["POST /api/tasks/original/recover"]);
 });
 
 test("a failed retrieval remains retryable without creating a generation", async () => {
@@ -108,7 +108,7 @@ test("a failed retrieval remains retryable without creating a generation", async
     fail = false;
     await page.getByRole("button", { name: "取回结果", exact: true }).click();
     await page.getByText("原任务仍在处理中，请稍后再取回结果").waitFor();
-    expect(requests.filter((request) => request.startsWith("POST"))).toEqual(Array(2).fill("POST /api/tasks/original/query-provider"));
+    expect(requests.filter((request) => request.startsWith("POST"))).toEqual(Array(2).fill("POST /api/tasks/original/recover"));
 });
 
 test("missing provider receipt hides retrieval and switching canvas suppresses stale feedback", async () => {
@@ -144,7 +144,7 @@ test("retrieved original result is applied and persisted onto the canvas", async
     expect(snapshot.nodes[0].metadata.taskId).toBe("original");
     expect(canonicalCanvas?.nodes[0].metadata.storageKey).toBe("resource:test-video");
     expect(requests.filter((request) => request === "POST /api/ops/canvas.task.bind")).toHaveLength(1);
-    expect(requests.filter((request) => request.startsWith("POST /api/tasks"))).toEqual(["POST /api/tasks/original/query-provider"]);
+    expect(requests.filter((request) => request.startsWith("POST /api/tasks"))).toEqual(["POST /api/tasks/original/recover"]);
 }, 15_000);
 
 for (const change of ["replace node task", "delete node", "switch project"]) {

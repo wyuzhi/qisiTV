@@ -10,9 +10,6 @@ import (
 	"io"
 )
 
-func (s *Service) BindAssistantDurableSession(userID, turnID, sessionID string, historical bool) error {
-	return s.assistantTurnsOrInit().BindDurableSession(userID, turnID, sessionID, historical)
-}
 func (s *Service) RevalidateAssistantNativeSource(ctx context.Context, userID, currentTurnID, originTurnID, sessionID string, source operations.MediaSource) (any, error) {
 	pin, _ := json.Marshal(source)
 	if !s.assistantTurnsOrInit().HasNativeSource(userID, originTurnID, sessionID, string(pin)) {

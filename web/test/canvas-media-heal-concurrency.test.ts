@@ -1,5 +1,4 @@
 import { beforeEach, expect, test } from "bun:test";
-import { captureUserScope } from "@/lib/user-scope-guard";
 import { ApiError } from "@/services/api/request";
 import type { GenerationTask } from "@/services/api/task-center";
 import { bindBackendCanvasGenerationResult } from "@/services/canvas-generation-consumer";
@@ -41,7 +40,7 @@ test("media heal preserves concurrent node and timeline edits, additions, deleti
     const nodesRef = { current: initial.nodes };
     const started = gate(), release = gate();
     const pending = healCanvasProjectMediaAssets(initial, {
-        expectedScope: captureUserScope(), isCurrent: () => true, nodesRef,
+        isCurrent: () => true, nodesRef,
         setNodes: (value) => { nodesRef.current = typeof value === "function" ? value(nodesRef.current) : value; },
         ensureNodeAsset: async ({ node }) => { started.resolve(); await release.promise; return ensured(node.id); },
     });
@@ -87,7 +86,7 @@ test("heal starts from the latest store even if the failed save supplied an olde
     const latest = { ...old, nodes: [media("current")], timeline: timeline([clip("current-clip")]) };
     useCanvasStore.setState({ projects: [latest] });
     const ensuredIds: string[] = [];
-    await healCanvasProjectMediaAssets(old, { expectedScope: captureUserScope(), ensureNodeAsset: async ({ node }) => { ensuredIds.push(node.id); return ensured(node.id); } });
+    await healCanvasProjectMediaAssets(old, { ensureNodeAsset: async ({ node }) => { ensuredIds.push(node.id); return ensured(node.id); } });
     expect(ensuredIds).toEqual(["current", "media-current-clip"]);
     expect(useCanvasStore.getState().openProject(old.id)?.nodes.map((node) => node.id)).toEqual(["current"]);
 });
@@ -99,7 +98,7 @@ test("healing projects store bindings into a lagging page without overwriting it
     useCanvasStore.setState({ projects: [initial] });
     const nodesRef = { current: [node, { ...selected, metadata: { ...selected.metadata, assetId: "asset-page-choice" } }] };
     const result = await healCanvasProjectMediaAssets(initial, {
-        expectedScope: captureUserScope(), nodesRef,
+        nodesRef,
         setNodes: (value) => { nodesRef.current = typeof value === "function" ? value(nodesRef.current) : value; },
         ensureNodeAsset: async ({ node }) => {
             nodesRef.current = nodesRef.current.map((item) => item.id === "reference" ? { ...item, title: "page edit" } : item);
@@ -115,7 +114,7 @@ test("deleting a canvas or its entire timeline during registration does not rest
     for (const deleteCanvas of [false, true]) {
         const initial = project([media("reference")], timeline([clip("clip")]));
         useCanvasStore.setState({ projects: [initial] });
-        const result = await healCanvasProjectMediaAssets(initial, { expectedScope: captureUserScope(), ensureNodeAsset: async ({ node }) => {
+        const result = await healCanvasProjectMediaAssets(initial, { ensureNodeAsset: async ({ node }) => {
             if (deleteCanvas) useCanvasStore.setState({ projects: [] });
             else useCanvasStore.getState().updateProject(initial.id, { timeline: undefined });
             return ensured(node.id);
@@ -133,7 +132,7 @@ test("target save persists concurrent edits and deleted targets stay deleted bef
     const patches: Array<{ nodes?: CanvasNodeData[]; connections?: CanvasProject["connections"] }> = [];
     const connections = [{ id: "new-link", fromNodeId: "reference", toNodeId: "added" }];
     await expect(persistCanvasGenerationTarget({
-        projectId: initial.id, nodeId: target.id, expectedScope: captureUserScope(), isCurrent: () => true,
+        projectId: initial.id, nodeId: target.id, isCurrent: () => true,
         ensureNodeAsset: async ({ node }) => {
             useCanvasStore.getState().updateProject(initial.id, { nodes: [media("reference"), media("added")], connections });
             return ensured(node.id);

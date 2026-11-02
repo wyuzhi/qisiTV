@@ -117,7 +117,7 @@ func (c *Runtime) stageInstallLocked(data []byte, fileName string) (stagedMutati
 	} else {
 		stored = append(stored, newRecord)
 	}
-	plugins, registry, err := materializeRecords(stored)
+	plugins, registry, err := c.build(stored)
 	if err != nil {
 		if createdBlob {
 			c.discardBlobIfUnreferenced(blobName)
@@ -230,7 +230,7 @@ func (c *Runtime) stageSetEnabledLocked(id string, enabled bool) (stagedMutation
 			stored[index].UpdatedAt = time.Now().UTC()
 		}
 	}
-	plugins, registry, err := materializeRecords(stored)
+	plugins, registry, err := c.build(stored)
 	if err != nil {
 		return stagedMutation{}, err
 	}
@@ -292,7 +292,7 @@ func (c *Runtime) stageUninstallLocked(id string) (stagedMutation, error) {
 			filtered = append(filtered, item)
 		}
 	}
-	plugins, registry, err := materializeRecords(filtered)
+	plugins, registry, err := c.build(filtered)
 	if err != nil {
 		return stagedMutation{}, err
 	}

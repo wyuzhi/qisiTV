@@ -1,11 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import type LocalForage from "localforage";
-import { installLocalForageStoreFactoryForTests } from "../src/lib/localforage-storage";
-import { getActiveUserScope, setActiveUserScope } from "../src/lib/user-scope";
-import { UserScopeAbandonedError } from "../src/lib/user-scope-guard";
+import { installLocalForageStoreFactoryForTests, RESOURCE_BLOBS_STORE_NAME } from "../src/lib/localforage-storage";
 import { apiClient } from "../src/services/api/request";
-import { getResourcePlaybackBlob } from "../src/services/api/resources";
-import { cacheResourceObjectUrl, getCachedResourceBlob } from "../src/services/resource-blob-cache";
+import { cacheResourceObjectUrl, getCachedResourceBlob, getCachedResourceObjectUrl } from "../src/services/resource-blob-cache";
 
 const originalAdapter = apiClient.defaults.adapter;
 afterEach(() => { apiClient.defaults.adapter = originalAdapter; installLocalForageStoreFactoryForTests(); });
@@ -67,78 +64,32 @@ function deferred<T>() {
     return { promise, resolve };
 }
 
-function emptyStore() {
-    installLocalForageStoreFactoryForTests(() => ({
-        ready: async () => undefined, getItem: async () => null,
-        setItem: async (_key: string, value: unknown) => value,
-        keys: async () => [], iterate: async () => undefined,
-    }) as unknown as LocalForage);
-}
-
-test("切换工作区后不发布旧下载，也不让 A→B→A 的新读取复用旧请求", async () => {
-    emptyStore();
-    const previous = getActiveUserScope();
-    setActiveUserScope("blob-owner-a");
-    const started = deferred<void>();
-    const gate = deferred<void>();
-    let requests = 0;
-    apiClient.defaults.adapter = async (config) => {
-        const number = ++requests;
-        expect((config as typeof config & { expectedScope: { userScope: string } }).expectedScope.userScope).toBe("blob-owner-a");
-        if (number === 1) { started.resolve(); await gate.promise; }
-        return { data: new Blob([number === 1 ? "old" : "current"]), status: 200, statusText: "OK", headers: {}, config };
-    };
-    try {
-        const old = cacheResourceObjectUrl("resource:epoch-preview");
-        const rejected = old.catch((error) => error);
-        await started.promise;
-        setActiveUserScope("blob-owner-b");
-        setActiveUserScope("blob-owner-a");
-        const current = await cacheResourceObjectUrl("resource:epoch-preview");
-        expect(await (await fetch(current)).text()).toBe("current");
-        gate.resolve();
-        expect(await rejected).toBeInstanceOf(UserScopeAbandonedError);
-        expect(await cacheResourceObjectUrl("resource:epoch-preview")).toBe(current);
-        expect(requests).toBe(2);
-    } finally { gate.resolve(); setActiveUserScope(previous); }
-});
-
-test("持久缓存读取期间切换工作区后，不返回旧 Blob", async () => {
-    const previous = getActiveUserScope();
-    setActiveUserScope("persisted-blob-owner-a");
-    const started = deferred<void>();
-    const gate = deferred<void>();
-    installLocalForageStoreFactoryForTests(() => ({
+test("多节点同时恢复同一大素材时，只从 IndexedDB 读取一次原始 Blob", async () => {
+    const gate = deferred<Blob>();
+    const blob = new Blob(["unchanged-original-media"], { type: "image/png" });
+    let reads = 0;
+    installLocalForageStoreFactoryForTests((name) => ({
         ready: async () => undefined,
-        getItem: async () => { started.resolve(); await gate.promise; return new Blob(["old"]); },
+        getItem: async () => {
+            if (name !== RESOURCE_BLOBS_STORE_NAME) return null;
+            reads++;
+            return gate.promise;
+        },
+        setItem: async (_key: string, value: unknown) => value,
     }) as unknown as LocalForage);
+    const key = "resource:concurrent-persisted-original";
+    const urls = Array.from({ length: 20 }, (_, i) => i % 2 ? cacheResourceObjectUrl(key) : getCachedResourceObjectUrl(key));
+    const references = Array.from({ length: 10 }, () => getCachedResourceBlob(key));
+    let observedReads = 0;
     try {
-        const pending = getCachedResourceBlob("resource:persisted-scope-preview");
-        const rejected = pending.catch((error) => error);
-        await started.promise;
-        setActiveUserScope("persisted-blob-owner-b");
-        gate.resolve();
-        expect(await rejected).toBeInstanceOf(UserScopeAbandonedError);
-    } finally { gate.resolve(); setActiveUserScope(previous); }
-});
-
-test("兼容视频下载也由统一请求层拒绝切换后的响应", async () => {
-    const previous = getActiveUserScope();
-    setActiveUserScope("playback-owner-a");
-    const started = deferred<void>();
-    const gate = deferred<void>();
-    apiClient.defaults.adapter = async (config) => {
-        started.resolve(); await gate.promise;
-        return { data: new Blob(["old-video"]), status: 200, statusText: "OK", headers: {}, config };
-    };
-    try {
-        const pending = getResourcePlaybackBlob("resource:playback-scope-preview");
-        const rejected = pending.catch((error) => error);
-        await started.promise;
-        setActiveUserScope("playback-owner-b");
-        gate.resolve();
-        expect(await rejected).toBeInstanceOf(UserScopeAbandonedError);
-    } finally { gate.resolve(); setActiveUserScope(previous); }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        observedReads = reads;
+    } finally { gate.resolve(blob); }
+    const resolved = await Promise.all(urls);
+    expect(observedReads).toBe(1);
+    expect(new Set(resolved).size).toBe(1);
+    expect(await (await fetch(resolved[0])).text()).toBe("unchanged-original-media");
+    expect((await Promise.all(references)).every((value) => value === blob)).toBe(true);
 });
 
 test("IndexedDB 写入挂起不阻塞下载槽位，且生成前 getCachedResourceBlob 优先于排队中的画布缩略图下载", async () => {

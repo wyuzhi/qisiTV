@@ -156,7 +156,7 @@ test("Create durably correlates failures that happen before the first Runtime re
     expect(source).toContain("generationOperation?: string");
     expect(source).toContain("generationOperation: task.operation");
     expect(source).toContain("generationErrorCode: task.errorCode");
-    expect(source).toContain("generationErrorCode(error)");
+    expect(source).toContain('generationErrorCode: item.generationErrorCode || failedTask?.errorCode || (explained.category === "unknown" ? undefined : explained.errorCode)');
     expect(source).toContain("createdAt: assistantMessage.createdAt");
 });
 
@@ -376,14 +376,12 @@ test("Create forwards owned result assets through one new canvas and the project
     expect(workspace).toContain("onContinueCanvas(resultAssetIds)");
     expect(createPage).toContain("continueCreationConversationOnCanvas(source)");
     expect(createPage).toContain("if (ids.length !== item.resultUrls.length) throw new Error");
-    expect(createPage).toContain("await saveCreationConversations(next, scope)");
-    expect(createPage.indexOf("await saveCreationConversations(next, scope)")).toBeLessThan(createPage.indexOf("navigate(`/canvas/${result.id}?${params.toString()}`)"));
-    expect(createPage).toContain("await deleteCreationConversation(conversation.id, scope)");
+    expect(createPage).toContain("await saveCreationConversations(next)");
+    expect(createPage.indexOf("await saveCreationConversations(next)")).toBeLessThan(createPage.indexOf("navigate(`/canvas/${result.id}?${params.toString()}`)"));
+    expect(createPage).toContain("await deleteCreationConversation(conversation.id)");
     expect(createPage).toContain("toastRef.current.error(error instanceof Error ? error.message : \"对话保存失败\")");
-    expect(createPage).toContain("const loadEpoch = captureUserScopeEpoch()");
-    expect(createPage).toContain("loadLocalCreationConversationDrafts<CreationConversation>(loadEpoch.scope)");
+    expect(createPage).toContain("loadLocalCreationConversationDrafts<CreationConversation>()");
     expect(createPage).toContain("CreationConflictBanner");
-    expect(createPage).toContain("userScopeEpochMatches(epoch)");
     expect(canvasIndex).toContain('const handoffMode = mode === "handoff"');
     expect(canvasIndex).toContain('mode !== "new" && mode !== "recent" && mode !== "handoff"');
     expect(canvasIndex).toContain("void saved.then(() => enterProject(id)).catch((error) => {");

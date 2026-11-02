@@ -144,7 +144,7 @@ func TestUndoAssistantTurnRestoresPreTurnDocumentAsNewRevision(t *testing.T) {
 		map[string]any{"canvasId": canvasID, "revision": after, "created": []any{map[string]any{"id": "n2", "title": "n2"}}})
 	settleTurn(t, service, turnID)
 
-	restored, err := service.UndoAssistantTurn("local", canvasID, turnID)
+	restored, err := service.AssistantTurns().Undo("local", canvasID, turnID)
 	if err != nil {
 		t.Fatalf("撤销失败: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestUndoAssistantTurnRestoresPreTurnDocumentAsNewRevision(t *testing.T) {
 		t.Fatalf("撤销后应回到轮前节点集合，得到 %v", ids)
 	}
 
-	if _, err := service.UndoAssistantTurn("local", canvasID, turnID); err == nil {
+	if _, err := service.AssistantTurns().Undo("local", canvasID, turnID); err == nil {
 		t.Fatal("重复撤销应被拒")
 	} else if turnErr, isTurnErr := err.(*AssistantTurnError); !isTurnErr || turnErr.Reason != AssistantTurnReasonAlreadyUndone {
 		t.Fatalf("重复撤销原因应为 %s，得到 %v", AssistantTurnReasonAlreadyUndone, err)
@@ -185,7 +185,7 @@ func TestUndoAssistantTurnRejectsLaterCanvasChanges(t *testing.T) {
 	// 用户在这轮之后又自己改了画布：撤销会吞掉用户的编辑，必须停下来。
 	appendNode(t, service, canvasID, "n3")
 
-	_, err = service.UndoAssistantTurn("local", canvasID, turnID)
+	_, err = service.AssistantTurns().Undo("local", canvasID, turnID)
 	turnErr, isTurnErr := err.(*AssistantTurnError)
 	if !isTurnErr || turnErr.Reason != AssistantTurnReasonCanvasChanged {
 		t.Fatalf("原因应为 %s，得到 %v", AssistantTurnReasonCanvasChanged, err)
@@ -205,7 +205,7 @@ func TestUndoAssistantTurnPreservesExternalWriteDuringTurn(t *testing.T) {
 	recordTurnReceipt(t, service, turnID, "op-create-T", "canvas.nodes.create",
 		map[string]any{"canvasId": canvasID, "revision": after, "created": []any{map[string]any{"id": "T", "title": "T"}}})
 	settleTurn(t, service, turnID)
-	_, err = service.UndoAssistantTurn("local", canvasID, turnID)
+	_, err = service.AssistantTurns().Undo("local", canvasID, turnID)
 	if got := nodeIDs(t, service, canvasID); !reflect.DeepEqual(got, []string{"n1", "S", "T"}) {
 		t.Fatalf("unsafe undo erased external S: nodes=%v err=%v", got, err)
 	}
@@ -237,7 +237,7 @@ func TestUndoAssistantTurnRejectsSameNodeExternalEdit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.UndoAssistantTurn("local", canvasID, turnID); err == nil {
+	if _, err := service.AssistantTurns().Undo("local", canvasID, turnID); err == nil {
 		t.Fatal("same-node external edit must block undo")
 	}
 	got, err := service.UserCanvasProject("local", canvasID)
@@ -283,7 +283,7 @@ func TestUndoAssistantTurnRejectsUnreportedSingleWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.UndoAssistantTurn("local", canvasID, turnID); err == nil {
+	if _, err := service.AssistantTurns().Undo("local", canvasID, turnID); err == nil {
 		t.Fatal("unreported node edit must block undo")
 	}
 	got, err := service.UserCanvasProject("local", canvasID)
@@ -298,14 +298,14 @@ func TestUndoAssistantTurnRejectsUnreportedSingleWrite(t *testing.T) {
 func TestUndoAssistantTurnReasonsForMissingAndUnchangedTurns(t *testing.T) {
 	service, canvasID, _ := newAssistantTurnService(t)
 
-	if _, err := service.UndoAssistantTurn("local", canvasID, "0011223344556677"); err == nil {
+	if _, err := service.AssistantTurns().Undo("local", canvasID, "0011223344556677"); err == nil {
 		t.Fatal("不存在的轮次应被拒")
 	} else if turnErr, isTurnErr := err.(*AssistantTurnError); !isTurnErr || turnErr.Reason != AssistantTurnReasonNotFound {
 		t.Fatalf("原因应为 %s，得到 %v", AssistantTurnReasonNotFound, err)
 	}
 
 	// 非十六进制轮次标识不能变成路径片段。
-	if _, err := service.UndoAssistantTurn("local", canvasID, "../../etc/passwd"); err == nil {
+	if _, err := service.AssistantTurns().Undo("local", canvasID, "../../etc/passwd"); err == nil {
 		t.Fatal("非法轮次标识应被拒")
 	}
 
@@ -315,7 +315,7 @@ func TestUndoAssistantTurnReasonsForMissingAndUnchangedTurns(t *testing.T) {
 	}
 	// 这一轮没写画布：轮记录要留下，撤销按「没有改动」拒绝，而不是说轮次不存在。
 	settleTurn(t, service, turnID)
-	if _, err := service.UndoAssistantTurn("local", canvasID, turnID); err == nil {
+	if _, err := service.AssistantTurns().Undo("local", canvasID, turnID); err == nil {
 		t.Fatal("没有改动的轮次应被拒")
 	} else if turnErr, isTurnErr := err.(*AssistantTurnError); !isTurnErr || turnErr.Reason != AssistantTurnReasonNoChange {
 		t.Fatalf("原因应为 %s，得到 %v", AssistantTurnReasonNoChange, err)
@@ -334,10 +334,10 @@ func TestUndoAssistantTurnIsScopedToOwnerAndCanvas(t *testing.T) {
 	recordTurnReceipt(t, service, turnID, "op-create-n2", "canvas.nodes.create",
 		map[string]any{"canvasId": canvasID, "revision": after, "created": []any{map[string]any{"id": "n2", "title": "n2"}}})
 	settleTurn(t, service, turnID)
-	if _, err := service.UndoAssistantTurn("other-user", canvasID, turnID); err == nil {
+	if _, err := service.AssistantTurns().Undo("other-user", canvasID, turnID); err == nil {
 		t.Fatal("其他用户不应能撤销这一轮")
 	}
-	if _, err := service.UndoAssistantTurn("local", "canvas-other", turnID); err == nil {
+	if _, err := service.AssistantTurns().Undo("local", "canvas-other", turnID); err == nil {
 		t.Fatal("其他画布不应能撤销这一轮")
 	}
 }

@@ -5,7 +5,9 @@ import { Button } from "antd";
 
 import { VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { canvasPopoverLayer } from "@/lib/canvas/canvas-popover-layer";
 import { modelCapabilityConfigFor, resolveVideoRatioValue, resolveVideoResolutionValue } from "@/lib/model-capabilities";
+import { isVideoResolutionMatch } from "@/lib/video-generation-options";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { VideoSettingsConstraints } from "@/lib/video-settings-constraints";
@@ -26,13 +28,16 @@ export function CanvasVideoSettingsPopover({ config, onConfigChange, buttonClass
     const panelRef = useRef<HTMLDivElement>(null);
     const [open, setOpen] = useState(false);
     const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
-    const videoProfile = modelCapabilityConfigFor(config, config.model).video;
+    const capabilityConfig = modelCapabilityConfigFor(config, config.model);
+    const videoProfile = capabilityConfig.video;
     const resolutionSupported = Boolean(videoProfile?.resolutions.length);
     const sizeSupported = Boolean(videoProfile?.ratios.length);
     const resolution = videoProfile ? resolveVideoResolutionValue(videoProfile, config.vquality) : "";
     const size = videoProfile ? resolveVideoRatioValue(videoProfile, config.size) : "";
+    const draftActive = Boolean(videoProfile?.draft?.supported && config.videoDraft === "true" && (!resolution || isVideoResolutionMatch(resolution, "480p")));
     const summary = [
         ...(resolutionSupported ? [videoResolutionLabel(resolution)] : []),
+        ...(draftActive ? ["样片"] : []),
         ...(sizeSupported ? [taskConstraints?.ratioLabel || videoSizeLabel(size)] : []),
         taskConstraints?.durationLocked ? "随原视频时长" : videoSecondsLabel(config.videoSeconds, videoProfile),
     ].join(" · ");
@@ -60,7 +65,7 @@ export function CanvasVideoSettingsPopover({ config, onConfigChange, buttonClass
         };
     }, [open]);
 
-    const panel = open && buttonRect ? <VideoSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} taskConstraints={taskConstraints}>{children}</VideoSettingsPortal> : null;
+    const panel = open && buttonRect ? <VideoSettingsPortal layer={canvasPopoverLayer(buttonRef.current)} buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} taskConstraints={taskConstraints}>{children}</VideoSettingsPortal> : null;
 
     return (
         <>
@@ -75,6 +80,7 @@ export function CanvasVideoSettingsPopover({ config, onConfigChange, buttonClass
 }
 
 function VideoSettingsPortal({
+    layer,
     buttonRect,
     panelRef,
     placement,
@@ -84,6 +90,7 @@ function VideoSettingsPortal({
     taskConstraints,
     children,
 }: {
+    layer: number | string;
     children?: ReactNode;
     taskConstraints?: VideoSettingsConstraints;
     buttonRect: DOMRect;
@@ -106,7 +113,7 @@ function VideoSettingsPortal({
     const placeAbove = topPlacement ? topSpace >= estimatedHeight || topSpace >= bottomSpace : bottomSpace < estimatedHeight && topSpace > bottomSpace;
     const style = {
         position: "fixed",
-        zIndex: "var(--z-dialog-popover)",
+        zIndex: layer,
         width,
         left: Math.max(margin, Math.min(window.innerWidth - width - margin, left)),
         ...(placeAbove ? { bottom: window.innerHeight - buttonRect.top + gap, maxHeight: Math.max(260, topSpace) } : { top: buttonRect.bottom + gap, maxHeight: Math.max(260, bottomSpace) }),

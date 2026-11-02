@@ -4,13 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
-	"unicode/utf8"
-
 	"qisitv/backend/internal/appearance"
 	localasset "qisitv/backend/internal/asset"
 	"qisitv/backend/internal/assistantturns"
@@ -19,6 +12,7 @@ import (
 	"qisitv/backend/internal/depthcapture"
 	"qisitv/backend/internal/diagnostics"
 	"qisitv/backend/internal/kernel"
+	"qisitv/backend/internal/mediaattempt"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/modelcatalog"
 	"qisitv/backend/internal/operations"
@@ -33,6 +27,12 @@ import (
 	localtask "qisitv/backend/internal/task"
 	"qisitv/backend/internal/taskdelivery"
 	"qisitv/backend/internal/textreplay"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+	"unicode/utf8"
 )
 
 type Service struct {
@@ -46,9 +46,11 @@ type Service struct {
 	workerRuntimeMu          sync.Mutex
 	characterTaskMu          sync.Mutex
 	activeCancels            map[string]context.CancelFunc
-	pendingStorage           map[string]int64
+	fileQuotaService         *localasset.FileQuota
+	fileQuotaOnce            sync.Once
 	coordinator              *platform.Coordinator
 	platform                 *platform.Service
+	platformOnce             sync.Once
 	taskTerminalCoordinator  *taskTerminalCoordinator
 	taskRouteExecutor        *taskRouteExecutor
 	taskWorkerCoordinator    *taskWorkerCoordinator
@@ -103,6 +105,10 @@ type Service struct {
 	tasksOnce                sync.Once
 	workspaceOps             *operations.Registry
 	workspaceOpsMu           sync.Mutex
+	mediaAttemptService      *mediaattempt.Service
+	mediaAttemptOnce         sync.Once
+	videoRecoveryActive      atomic.Bool
+	videoRecoveryAfterID     string
 	bindAfterID              string
 	bindCursorMu             sync.Mutex
 }
@@ -164,7 +170,7 @@ func newService(repo *repository.Repository, dataDir string, options serviceOpti
 	if repo == nil {
 		pluginRuntimeErr = fmt.Errorf("插件状态存储未初始化")
 	} else {
-		pluginRuntime, pluginRuntimeErr = newPluginRuntimeWithStore(dataDir, plugins.NewRepositoryStore(repo))
+		pluginRuntime, pluginRuntimeErr = newPluginRuntimeWithReferences(dataDir, plugins.NewRepositoryStore(repo), newPluginReferences(dataDir, repo))
 	}
 	service := &Service{repo: repo, dataDir: dataDir, mode: options.mode, activeCancels: make(map[string]context.CancelFunc), coordinator: coordinator, localResourceStorage: localResourceStorage, pluginRuntime: pluginRuntime, pluginRuntimeErr: pluginRuntimeErr, workerID: newID(), routeCatalogTTL: 30 * time.Second, routeCatalogMaxStale: 5 * time.Minute}
 	service.taskTerminalCoordinator = newTaskTerminalCoordinator(service)
@@ -180,7 +186,7 @@ func newService(repo *repository.Repository, dataDir string, options serviceOpti
 		DataDir:      dataDir,
 		Repository:   localasset.NewRepository(repo),
 		Blobs:        localasset.NewFileStore(dataDir),
-		Quota:        resourceQuota{svc: service},
+		Quota:        service.fileQuota(),
 		Lifecycle:    resourceLifecycle{svc: service},
 		LocalStorage: localResourceStorage,
 	})
@@ -275,6 +281,18 @@ func (s *Service) refreshTaskProviderState(task *model.Task) error {
 	}
 	if latest.ProviderRequestID != "" {
 		task.ProviderRequestID = latest.ProviderRequestID
+	}
+	if latest.ImageJobID != "" {
+		task.ImageJobID = latest.ImageJobID
+	}
+	if latest.BeefUsageState != nil {
+		task.BeefUsageState = latest.BeefUsageState
+	}
+	if latest.BeefBillingState != nil {
+		task.BeefBillingState = latest.BeefBillingState
+	}
+	if latest.BeefReconcileDeadline != nil {
+		task.BeefReconcileDeadline = latest.BeefReconcileDeadline
 	}
 	task.Stage, task.Progress = latest.Stage, latest.Progress
 	task.PollStage = latest.PollStage
@@ -446,4 +464,8 @@ func defaultString(value string, fallback string) string {
 
 func newID() string {
 	return kernel.NewID()
+}
+
+func (s *Service) RecoverTask(ctx context.Context, userID, id string) (*model.Task, error) {
+	return s.taskDomain().RecoverTask(ctx, userID, id)
 }

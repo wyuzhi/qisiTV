@@ -101,4 +101,5 @@ func TestCLIAndMCPAgainstIsolatedIntegratedRuntime(t *testing.T) {
 		t.Fatalf("duplicate nodes after restart: %d", len(nodes))
 	}
 	t.Run("official-MCP-client", TestMCPClientLoop)
+	t.Run("MCP-media-image-content", func(t *testing.T) { mcpMediaReturnsImageContent(t, bin, runtime.BaseURL()) })
 }

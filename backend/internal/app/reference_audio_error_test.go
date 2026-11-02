@@ -33,7 +33,7 @@ func TestReferenceAudioFailurePersistsThroughTaskOutput(t *testing.T) {
 			upstreamErr := providerHTTPError{StatusCode: 400, Body: string(body) + " (request id: " + requestID + ")"}
 			// Exercise the same terminal coordinator and SQLite write used by a
 			// failed provider request, rather than manually persisting a test string.
-			_ = svc.terminalCoordinator().handleExecutionFailure(task, upstreamErr, false, false)
+			_ = svc.terminalCoordinator().HandleExecutionFailure(task, upstreamErr, false, false)
 			var stored model.Task
 			if err := db.First(&stored, "id = ?", task.ID).Error; err != nil {
 				t.Fatal(err)

@@ -1,8 +1,22 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
+const srcRoot = resolve(root, "src");
+
+function walkSourceFiles(dir: string): string[] {
+    const files: string[] = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) {
+            files.push(...walkSourceFiles(path));
+            continue;
+        }
+        if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(entry.name)) files.push(path);
+    }
+    return files;
+}
 
 describe("local-only source boundary", () => {
     test("hosted UI and API entrypoints are physically absent", () => {
@@ -68,5 +82,23 @@ describe("local-only source boundary", () => {
 			const source = readFileSync(resolve(root, file), "utf8");
 			expect(source).not.toMatch(/\/admin\//);
 		}
+	});
+
+	test("frontend source files do not import across into backend/", () => {
+		const offenders = walkSourceFiles(srcRoot)
+			.filter((file) => /(?:from|import)\s*["'\(][^"'\)]*backend\//.test(readFileSync(file, "utf8")))
+			.map((file) => relative(srcRoot, file));
+		expect(offenders).toEqual([]);
+	});
+
+	test("frontend source files do not display BeefAPI brand in user-facing string literals", () => {
+		const offenders: string[] = [];
+		for (const file of walkSourceFiles(srcRoot)) {
+			const literals = readFileSync(file, "utf8").match(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g) ?? [];
+			if (literals.some((lit) => /BeefAPI/.test(lit.replace(/\$\{[^}]*\}/g, "")) && !lit.includes("BeefAPIConnectionChangedError"))) {
+				offenders.push(relative(srcRoot, file));
+			}
+		}
+		expect(offenders).toEqual([]);
 	});
 });

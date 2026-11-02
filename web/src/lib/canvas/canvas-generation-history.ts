@@ -1,5 +1,4 @@
 import { generationTaskMode } from "@/lib/canvas/canvas-generation-task-sync";
-import { userScopeEpochMatches, type UserScopeEpoch } from "@/lib/user-scope";
 import type { GenerationTask } from "@/services/api/task-center";
 
 const INSERTABLE_HISTORY_MODES = new Set(["image", "video", "audio"]);
@@ -7,7 +6,6 @@ const INSERTABLE_HISTORY_MODES = new Set(["image", "video", "audio"]);
 export type CanvasGenerationHistorySelectGate = {
     open: boolean;
     projectId: string;
-    epoch: UserScopeEpoch;
     mounted: boolean;
     selectionEpoch: number;
 };
@@ -28,7 +26,7 @@ export function insertableCanvasGenerationHistoryTasks(
         .slice(0, 60);
 }
 
-/** Close / canvas switch / user-scope / unmount after await must not apply the old detail. */
+/** Close / canvas switch / unmount after await must not apply the old detail. */
 export function canvasGenerationHistorySelectStillValid(
     captured: CanvasGenerationHistorySelectGate,
     live: CanvasGenerationHistorySelectGate,
@@ -39,7 +37,7 @@ export function canvasGenerationHistorySelectStillValid(
     const capturedProjectId = captured.projectId.trim();
     const liveProjectId = live.projectId.trim();
     if (!capturedProjectId || capturedProjectId !== liveProjectId) return false;
-    return userScopeEpochMatches(captured.epoch, live.epoch);
+    return true;
 }
 
 /** Pure detail check: strict id + non-empty project match, success, and usable media. */

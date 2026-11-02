@@ -4,12 +4,11 @@ import (
 	"strings"
 
 	"qisitv/backend/internal/kernel"
-	"qisitv/backend/internal/model"
 )
 
 // ValidateConfiguredTask applies stored channel capability to a task. Workflow
 // providers are handled by the caller. lookup may be nil when no channel is
-// selected; the function then validates against request-declared capability.
+// selected; direct/BYOK tasks delegate capability validation to the upstream server.
 func ValidateConfiguredTask(input TaskInput, lookup ChannelModelLookup) (TaskInput, error) {
 	if input.Mode != "image" && input.Mode != "video" && input.Mode != "audio" {
 		return input, nil
@@ -22,25 +21,14 @@ func ValidateConfiguredTask(input TaskInput, lookup ChannelModelLookup) (TaskInp
 		channelID = SystemChannelIDFromBaseURL(input.Config.BaseURL)
 	}
 	if channelID == "" {
-		if input.Mode == "image" {
-			profile := DefaultImageCapabilityConfig(input.Config.InterfaceType, input.Config.Model)
-			if input.Config.CapabilityConfig != nil && input.Config.CapabilityConfig.Image != nil {
-				profile = input.Config.CapabilityConfig.Image
+		if input.Mode == "video" && input.Config.CapabilityConfig != nil && input.Config.CapabilityConfig.Video != nil {
+			if normalized, err := NormalizeModelCapabilityConfigForModel("video", input.Config.InterfaceType, input.Config.Model, input.Config.CapabilityConfig); err == nil && normalized != nil && normalized.Video != nil {
+				applyFixedVideoResolution(&input, normalized.Video)
+			} else {
+				applyFixedVideoResolution(&input, input.Config.CapabilityConfig.Video)
 			}
-			return input, validateImageTask(profile, input)
 		}
-		profile := input.Config.CapabilityConfig
-		if profile == nil || profile.Video == nil {
-			if input.Config.InterfaceType != string(model.ChannelInterfaceAgnesVideo) {
-				return input, nil
-			}
-			profile = DefaultModelCapabilityConfigForModel(input.Config.InterfaceType, input.Config.Model)
-		}
-		normalized, normalizeErr := NormalizeModelCapabilityConfigForModel("video", input.Config.InterfaceType, input.Config.Model, profile)
-		if normalizeErr != nil || normalized == nil || normalized.Video == nil {
-			return input, kernel.BadAuthRequest("当前视频模型能力参数无效")
-		}
-		return input, validateVideoTask(normalized.Video, input)
+		return input, nil
 	}
 	if lookup == nil {
 		return input, kernel.BadAuthRequest("当前系统渠道模型未配置或已停用")
@@ -69,12 +57,4 @@ func ValidateConfiguredTask(input TaskInput, lookup ChannelModelLookup) (TaskInp
 	}
 	applyFixedVideoResolution(&input, normalized.Video)
 	return input, validateVideoTask(normalized.Video, input)
-}
-
-func ValidateWorkflowProviderPromptLength(input TaskInput) error {
-	profile := input.Config.CapabilityConfig
-	if input.Mode != "video" || profile == nil || profile.Video == nil {
-		return nil
-	}
-	return validateVideoPromptLength(input.Prompt, profile.Video.References)
 }

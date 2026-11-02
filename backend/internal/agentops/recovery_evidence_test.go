@@ -51,7 +51,7 @@ func TestRecoveryNoOpReceiptNeverClaimsExternalEdit(t *testing.T) {
 	if err != nil || state == nil || state.Change != nil {
 		t.Fatalf("no-op became a canvas change: %#v %v", state, err)
 	}
-	_, err = h.service.UndoAssistantTurn(h.userID, h.canvasID, turnID)
+	_, err = h.service.AssistantTurns().Undo(h.userID, h.canvasID, turnID)
 	var turnErr *app.AssistantTurnError
 	if !errors.As(err, &turnErr) || turnErr.Reason != app.AssistantTurnReasonNoChange {
 		t.Fatalf("expected no-change, got %v", err)
@@ -104,13 +104,13 @@ func TestRecoveryHistoryProjectsDurableReceiptsAfterRestartWithoutSettling(t *te
 	if err != nil || state == nil || state.Change == nil || state.Change.RevisionAfter != h.revision+1 {
 		t.Fatalf("durable change missing: %#v %v", state, err)
 	}
-	if _, open, err := restarted.AssistantTurnScopeForHost(h.userID, turnID); err != nil || !open {
+	if _, open, err := restarted.AssistantTurns().ScopeForHost(h.userID, turnID); err != nil || !open {
 		t.Fatalf("reading history unexpectedly settled a live turn: %v", err)
 	}
 	if foreign, err := restarted.ReadAssistantTurnHistoryState("foreign-user", h.canvasID, turnID); err != nil || foreign != nil {
 		t.Fatal("history state leaked outside owner scope")
 	}
-	if _, err = restarted.UndoAssistantTurn(h.userID, h.canvasID, turnID); err != nil {
+	if _, err = restarted.AssistantTurns().Undo(h.userID, h.canvasID, turnID); err != nil {
 		t.Fatal(err)
 	}
 }

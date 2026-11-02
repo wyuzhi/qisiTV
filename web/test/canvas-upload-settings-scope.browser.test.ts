@@ -6,7 +6,6 @@ import { chromium, type Browser, type Page } from "playwright";
 let browser: Browser;
 let page: Page;
 let server: ReturnType<typeof Bun.serve>;
-let switched = false;
 let failEnsure = false;
 let failSave = false;
 let unconfirmed = false;
@@ -14,7 +13,6 @@ let gateEnsure = false;
 let gateSave = false;
 let ensureHits = 0;
 let saveHits = 0;
-let writesAfterSwitch = 0;
 let ensureGate: { promise: Promise<void>; resolve: () => void } | undefined;
 let saveGate: { promise: Promise<void>; resolve: () => void } | undefined;
 
@@ -67,10 +65,6 @@ beforeAll(async () => {
             const url = new URL(request.url);
             const path = url.pathname;
             if (path === "/harness.js") return new Response(script, { headers: { "Content-Type": "text/javascript" } });
-            if (path === "/harness/switch" && request.method === "POST") {
-                switched = true;
-                return Response.json({ ok: true });
-            }
             if (path === "/harness/release-ensure" && request.method === "POST") {
                 ensureGate?.resolve();
                 return Response.json({ ok: true });
@@ -81,14 +75,12 @@ beforeAll(async () => {
             }
             if (path === "/api/harness/ensure" && request.method === "POST") {
                 ensureHits += 1;
-                if (switched) writesAfterSwitch += 1;
                 if (gateEnsure && ensureGate) await ensureGate.promise;
                 if (failEnsure) return Response.json({ error: "网络中断" });
                 return Response.json({ confirmed: !unconfirmed });
             }
             if (path === "/api/harness/save" && request.method === "POST") {
                 saveHits += 1;
-                if (switched) writesAfterSwitch += 1;
                 if (gateSave && saveGate) await saveGate.promise;
                 if (failSave) return Response.json({ error: "保存失败：网络中断" });
                 return Response.json({ ok: true });
@@ -103,7 +95,6 @@ beforeAll(async () => {
 
 beforeEach(async () => {
     await page?.close();
-    switched = false;
     failEnsure = false;
     failSave = false;
     unconfirmed = false;
@@ -111,7 +102,6 @@ beforeEach(async () => {
     gateSave = false;
     ensureHits = 0;
     saveHits = 0;
-    writesAfterSwitch = 0;
     resetGate("ensure");
     resetGate("save");
     page = await browser.newPage();
@@ -124,38 +114,11 @@ afterAll(async () => {
     server?.stop(true);
 });
 
-type HarnessState = { writes: string[]; toasts: string[]; switchABA: () => Promise<void>; switchProject: () => void };
-
-async function switchABA() {
-    await page.evaluate(async () => {
-        const harness = (window as Window & { __uploadSettingsHarness?: HarnessState }).__uploadSettingsHarness;
-        if (!harness) throw new Error("harness missing");
-        await harness.switchABA();
-    });
-}
+type HarnessState = { writes: string[]; toasts: string[]; switchProject: () => void };
 
 async function harnessState() {
     return page.evaluate(() => (window as Window & { __uploadSettingsHarness?: HarnessState }).__uploadSettingsHarness);
 }
-
-test("delayed ordinary persist error after A→B→A does not write or toast on the replacement generation", async () => {
-    failEnsure = true;
-    gateEnsure = true;
-    await page.getByRole("button", { name: "persist-upload" }).click();
-    const deadline = Date.now() + 4_000;
-    while (ensureHits < 1 && Date.now() < deadline) await Bun.sleep(20);
-    expect(ensureHits).toBeGreaterThanOrEqual(1);
-    await switchABA();
-    await fetch(new URL("/harness/release-ensure", server.url), { method: "POST" });
-    await page.waitForTimeout(800);
-    const harness = await harnessState();
-    expect(await page.getByTestId("persist-state").textContent()).toBe("idle");
-    expect(await page.getByTestId("node-asset").textContent()).toBe("");
-    expect(harness?.writes ?? []).toEqual([]);
-    expect((harness?.toasts ?? []).join("\n")).not.toContain("网络中断");
-    expect((harness?.toasts ?? []).join("\n")).not.toContain("文件已添加到画布");
-    expect(writesAfterSwitch).toBe(0);
-}, 15_000);
 
 test("unconfirmed persist keeps a recoverable draft and does not claim saved", async () => {
     unconfirmed = true;
@@ -181,21 +144,4 @@ test("delayed settings save after project change does not toast the new page", a
     expect(await page.getByTestId("settings-state").textContent()).toBe("idle");
     expect(harness?.writes ?? []).toEqual([]);
     expect((harness?.toasts ?? []).join("\n")).not.toContain("项目设置已保存");
-}, 15_000);
-
-test("delayed ordinary settings error after A→B→A does not toast the replacement generation", async () => {
-    failSave = true;
-    gateSave = true;
-    await page.getByRole("button", { name: "save-settings" }).click();
-    const deadline = Date.now() + 4_000;
-    while (saveHits < 1 && Date.now() < deadline) await Bun.sleep(20);
-    expect(saveHits).toBeGreaterThanOrEqual(1);
-    await switchABA();
-    await fetch(new URL("/harness/release-save", server.url), { method: "POST" });
-    await page.waitForTimeout(800);
-    const harness = await harnessState();
-    expect(await page.getByTestId("settings-state").textContent()).toBe("idle");
-    expect((harness?.toasts ?? []).join("\n")).not.toContain("保存失败");
-    expect((harness?.toasts ?? []).join("\n")).not.toContain("网络中断");
-    expect(writesAfterSwitch).toBe(0);
 }, 15_000);

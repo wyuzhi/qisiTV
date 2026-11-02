@@ -16,10 +16,6 @@ func (s *Service) WorkflowPluginStatuses() map[string]string {
 	return s.pluginDomain().WorkflowStatuses()
 }
 
-func (s *Service) WorkflowPluginStatusesForUser(userID string) (map[string]string, error) {
-	return s.pluginDomain().WorkflowStatusesForUser(userID)
-}
-
 func (s *Service) RequireWorkflowPluginForInterface(interfaceType string) error {
 	return mapPluginAccessError(s.pluginDomain().RequireWorkflowForInterface(interfaceType))
 }

@@ -412,6 +412,11 @@ async function withCasBridge(run, { revision = 9 } = {}) {
       return;
     }
     const op = req.url.slice('/ops/'.length);
+    if (op === 'canvas.get') {
+      res.end(JSON.stringify({ code: 0, data: { result: { canvasId: parsed.params.canvasId,
+        canvas: { revision: state.revision, nodes: [], connections: [] } } } }));
+      return;
+    }
     state.seen.push({ op, expectedRevision: parsed.params?.expectedRevision });
     if (parsed.params?.expectedRevision !== state.revision) {
       res.writeHead(409);
@@ -476,9 +481,9 @@ describe('同一轮的并行写入', () => {
       state.revision += 1; // foreign write: 10 -> 11
       await expect(call('canvas_edge_create', 'c2', { fromNodeId: 'a', toNodeId: 'c', expectedRevision: 9 })).rejects.toThrow('stale_revision');
       expect(state.seen.at(-1).expectedRevision).toBe(10);
-      // A revision outside this turn's own chain is never rewritten.
-      await expect(call('canvas_edge_create', 'c3', { fromNodeId: 'a', toNodeId: 'd', expectedRevision: 8 })).rejects.toThrow('stale_revision');
-      expect(state.seen.at(-1).expectedRevision).toBe(8);
+      // Remaining queued writes wait for a new model decision, without HTTP dispatch.
+      await expect(call('canvas_edge_create', 'c3', { fromNodeId: 'a', toNodeId: 'd', expectedRevision: 8 })).rejects.toThrow('canvas_context_changed');
+      expect(state.seen.map(item => item.expectedRevision)).toEqual([9, 10]);
       expect(log.at(-1).rebasedFrom).toBeUndefined();
       expect(state.revision).toBe(11);
     });

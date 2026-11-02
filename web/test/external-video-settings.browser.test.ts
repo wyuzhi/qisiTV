@@ -71,7 +71,8 @@ for (const [width, dark] of [[1280, false], [390, true]] as const) {
             await page.getByRole("button", { name: "保存并使用", exact: true }).click();
             await page.getByText("seedance-2.5 还需要选择请求协议，请打开高级模型设置", { exact: true }).waitFor();
             expect(await page.getByTestId("saved-profile").textContent()).toBe("unsaved");
-            await page.getByRole("button", { name: "配置使用", exact: true }).click();
+            // 保存时缺协议，会直接打开这个模型的协议设置，不需要再点「配置使用」。
+            await page.locator(".choice-browser").waitFor();
             expect(await page.getByRole("button", { name: "生成测试", exact: true }).isDisabled()).toBe(true);
             expect(await page.locator('.choice-browser input[type="radio"]:checked').count()).toBe(0);
             await page.locator('input[type="radio"][value="video-generations-json"]').check();

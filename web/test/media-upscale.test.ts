@@ -10,6 +10,21 @@ import type { GenerationTask } from "../src/services/api/task-center";
 
 const task = (patch: Partial<GenerationTask>): GenerationTask => ({ id: "topaz", type: "canvas_image", model: "topaz-standard-v2", status: "succeeded", prompt: "", attempts: 1, createdAt: "", updatedAt: "", ...patch });
 describe("Topaz upscale contract", () => {
+    test("estimate survives reference preparation longer than the local API deadline", async () => {
+        const server = Bun.serve({ port: 0, hostname: "127.0.0.1", async fetch(request) {
+            expect(new URL(request.url).pathname).toBe("/media-upscale/estimate");
+            await Bun.sleep(4_200);
+            return Response.json({ code: 0, data: { mediaType: "video", source: { width: 714, height: 1280 }, output: { width: 1428, height: 2560 }, reservation: 1.25, currency: "CNY", generationSubmitted: false, cloudProcessing: true } });
+        } });
+        const baseURL = apiClient.defaults.baseURL;
+        apiClient.defaults.baseURL = server.url.toString();
+        try {
+            const quote = await estimateUpscale({ resourceId: "source", channelId: "beefapi", mode: "precision", model: "Proteus", scale: 2 });
+            expect(quote.reservation).toBe(1.25);
+            expect(quote.generationSubmitted).toBe(false);
+            expect(apiClient.defaults.timeout).toBe(4_000);
+        } finally { apiClient.defaults.baseURL = baseURL; await server.stop(true); }
+    }, 10_000);
     test("recovery recognizes the four official models with matching task types", () => {
         for (const model of ["topaz-standard-v2", "topaz-wonder-3.5"]) expect(isAIUpscaleTask(task({ model }))).toBe(true);
         for (const model of ["topaz-proteus", "topaz-starlight-fast-2"]) expect(isAIUpscaleTask(task({ type: "canvas_video", model }))).toBe(true);

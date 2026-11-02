@@ -1,0 +1,332 @@
+---
+title: beeftv 命令行基础使用
+description: 不经助手直接批量调用本地工作区的随包 CLI：连接工作区、读取画布与素材、批量本地修改与脚本化约定
+---
+
+`beeftv` 是随 BeefTV 安装包一起发布的命令行工具。它直接调用本机工作区已有的业务接口，不经过模型助手，也不需要启动 MCP 服务，适合用 shell 脚本批量读取和整理画布、素材与任务。
+
+除 `beeftv skills` 与 `beeftv diagnostics analyze` 外，所有命令都要求 BeefTV 正在运行。
+
+本页只写已经实现并逐条核对过的用法。付费批量生成和自动重跑不在本页范围，原因见文末「现在还不提供」。
+
+## 1. 找到随包 CLI
+
+| 平台 | 路径 |
+| --- | --- |
+| macOS | `/Applications/BeefTV.app/Contents/MacOS/cli/beeftv` |
+| Windows | `BeefTV.exe` 同级的 `cli\beeftv.exe` |
+| Linux | `BeefTV-linux/cli/beeftv`（deb 安装后 `/usr/bin/beeftv` 指向它） |
+
+侧栏的「BeefTV MCP」页底部有「命令行工具」，点「复制安装命令」拿到的就是接到 PATH 的命令；页面上的连接配置里也会带上随包 CLI 的绝对路径，以那里显示的为准。macOS 也可以直接接到 PATH：
+
+```bash
+ln -sf '/Applications/BeefTV.app/Contents/MacOS/cli/beeftv' /usr/local/bin/beeftv
+beeftv --help
+```
+
+CLI 与主程序分开放在 `cli` 子目录，是因为 macOS 和 Windows 的文件名都不区分大小写，`beeftv` 和 `BeefTV` 放在同一层会互相覆盖。CLI 缺失时不会回退到 PATH 里的同名程序。
+
+`beeftv --help` 打印全部子命令、环境变量和退出码；每个子命令也支持 `-h`，例如 `beeftv canvas get -h`。
+
+## 2. 连上正确的工作区
+
+桌面应用监听的是动态端口，CLI 不猜端口：不设 `BEEFTV_BASE_URL` 时，它读取正在运行的桌面后端写下的运行描述文件。
+
+| 变量 | 作用 |
+| --- | --- |
+| `BEEFTV_BASE_URL` | 显式指定工作区地址；只接受回环 `http`/`https`，拒绝带凭据的 URL 和非本机主机 |
+| `BEEFTV_DATA_DIR` | 指定非默认数据目录，CLI 到该目录找运行描述文件 |
+| `BEEFTV_CLIENT_ID` / `BEEFTV_CLIENT_TOKEN` | 已登记客户端凭据；能力模式由服务端登记决定，不能自我提升 |
+| `BEEFTV_OWNER_TOKEN` | owner 可信通道，只用于登记或吊销客户端等管理操作，不要交给外部脚本或模型 |
+| `BEEFTV_DESKTOP_TOKEN` | 桌面自身调用使用，不要用于外部脚本 |
+
+运行描述文件的位置：macOS 是 `~/Library/Application Support/BeefTV/runtime.json`，Windows 是 `%USERPROFILE%\.beeftv\runtime\` 下按数据目录哈希命名的文件。它是正在运行的进程写的，进程退出后视为不存在，所以升级或重装后请重新打开 BeefTV。
+
+找不到工作区时退出码是 9：
+
+```text
+beeftv: runtime_not_found: 未发现运行中的 BeefTV 工作区。请先打开 BeefTV；若使用自定义目录，请检查 BEEFTV_DATA_DIR；独立服务请显式设置 BEEFTV_BASE_URL
+```
+
+独立部署（容器或单独跑后端）时显式给出地址：
+
+```bash
+export BEEFTV_BASE_URL=http://127.0.0.1:8080/api
+```
+
+## 3. 凭据：生成一份连接配置
+
+凭据在侧栏的「BeefTV MCP」页生成：选一个工具（Codex、Claude Code、Claude Desktop、Cursor、其他 MCP 客户端），点「连接」→「生成连接配置」。生成的内容是一段可直接粘贴的接入命令或 MCP 配置，里面已经包含三个变量：
+
+```bash
+export BEEFTV_DATA_DIR=<工作区数据目录>
+export BEEFTV_CLIENT_ID=client-xxxxxxxxxxxxxxxx
+export BEEFTV_CLIENT_TOKEN=<连接配置里给出的 token>
+```
+
+把这三项从那段配置里抽出来放进 shell 就行。token 只显示这一次（服务端只保存哈希，之后取不回来），关掉面板就要重新生成；界面上不会单独展示 token。
+
+**不需要启动 MCP**：这三个变量对 `beeftv` 的子命令同样有效，纯脚本批量跑不会拉起任何 MCP 服务。
+
+模式分两种：新连接默认「全部创作工具」（`read-write`，可读写）；`read-only` 只能读，任何写操作都会被拒绝，`ops` 也只列只读操作。界面不提供只读选项，只读是历史连接的模式，也可以用 `beeftv client register --mode read-only` 显式登记（需要 owner 凭据）。
+
+```bash
+# 登记需要 owner 凭据；外部客户端凭据不能登记或吊销客户端
+beeftv client register --label "批量脚本" --kind other --mode read-only
+```
+
+没有可用身份时退出码 6：
+
+```text
+beeftv: forbidden: 缺少可信身份：需要已登记的客户端凭据、owner 凭据或受信任的桌面界面
+```
+
+不要把 owner 凭据或桌面令牌写进脚本、CI 或模型上下文：客户端凭据只够操作工作区，owner 凭据还能签发和吊销其他客户端。
+
+## 4. 先看清有哪些能力
+
+```bash
+beeftv ops                 # 操作清单：ID、读写、作用域、说明
+beeftv ops --read-only     # 只看只读操作
+beeftv ops --json          # 机器可读，含每个操作的 JSON 参数结构
+beeftv business discover   # 已挂载的业务 REST 接口清单，含 path/query/body 结构
+```
+
+`ops` 是助手、MCP 与脚本共用的操作面；`business` 是底层业务接口面。数量随版本变化，以实际输出为准。
+
+## 5. 读取画布与素材
+
+默认输出是缩进 JSON，方便人看；`--json` 输出单行紧凑 JSON，方便管道处理。业务结果走 stdout，诊断信息走 stderr。
+
+```bash
+beeftv canvas search --query "末日" --page 1 --page-size 10
+beeftv canvas get --canvas <canvasId> --json
+beeftv asset list --kind image --page-size 20 --json
+beeftv asset get --asset <assetId> --json
+beeftv task get --task <taskId> --json
+```
+
+读取结果的形状（`canvas search`）：
+
+```json
+{"op":"canvas.search","replayed":false,"result":{"projects":[{"id":"cli-doc-canvas","title":"CLI 文档验证画布","revision":1,"nodeCount":0}],"page":1,"pageSize":5,"total":1,"hasMore":false},"caller":"external"}
+```
+
+`canvas get` 的 `result.canvas` 里是节点、连线和 `revision`；`asset get` 返回素材文档；`task get` 返回任务状态与产物引用。写操作的回执里会多出 `opId` 和 `revision`。
+
+## 6. 批量本地修改
+
+### 6.1 先读 revision，再写
+
+画布写入带版本校验（CAS）：写入必须给出读到的 `revision`，过期就整批拒绝，不会覆盖别人刚保存的内容。
+
+```bash
+rev=$(beeftv canvas get --canvas "$CANVAS" --json \
+  | python3 -c 'import json,sys;print(json.load(sys.stdin)["result"]["canvas"]["revision"])')
+beeftv canvas nodes create --canvas "$CANVAS" --expected-revision "$rev" \
+  --node "镜头1:image:水塔配给点，清晨薄雾" --op-id batch-shots-1
+```
+
+装了 `jq` 的话，取 `revision` 也可以写成：
+
+```bash
+rev=$(beeftv canvas get --canvas "$CANVAS" --json | jq -r '.result.canvas.revision')
+```
+
+版本过期时退出码 4：
+
+```text
+beeftv: stale_revision: 云端画布已有更新，已停止覆盖；请保留本地草稿并加载最新版本
+```
+
+正确处理是重新 `canvas get` 拿新 `revision` 再改，不是原样重试。
+
+### 6.2 写操作必须带幂等键
+
+`--op-id` 是幂等键。重试同一个操作时复用同一个值，服务端回读原结果，不会重复创建：
+
+```bash
+# 改标题：用刚读到的 revision
+beeftv canvas node update --canvas "$CANVAS" --node "$NODE" --expected-revision "$rev" \
+  --title "镜头1（已确认）" --prompt "水塔配给点，清晨薄雾，广角" --op-id batch-shot1-title
+
+# 连边：上一次写入已经让 revision 前进，所以重新读一次
+rev=$(beeftv canvas get --canvas "$CANVAS" --json | jq -r '.result.canvas.revision')
+beeftv canvas edge create --canvas "$CANVAS" --from "$IMG_NODE" --to "$VIDEO_NODE" \
+  --expected-revision "$rev" --op-id batch-shot1-edge
+```
+
+复用同一个 `--op-id` 时，回执里 `replayed` 为 `true`，`revision` 不再变化。反过来，同一个 `--op-id` 不能换内容重发：只要参数（含 `expectedRevision`）变了，服务端就按「同一操作 ID 换了请求内容」拒绝，退出码 4：
+
+```text
+beeftv: operation_id_reused_with_different_payload: 同一操作 ID 已用于不同的请求内容；请换用新的操作 ID
+```
+
+所以重试要用**原来那次请求**（同一个 `opId`、同一个 `expectedRevision`）；要按新的 revision 重做，就得换一个新的操作 ID。
+
+缺幂等键也会被拒绝，但两条路径的退出码不同：`canvas` 子命令在 CLI 参数检查阶段就结束，退出码 2；`ops call` 到服务端才被拒，退出码 8。
+
+```text
+# beeftv canvas nodes create / node update / edge create 缺 --op-id
+beeftv: missing_flag: --canvas/--op-id/--expected-revision/--node 必填
+
+# beeftv ops call 缺幂等键
+beeftv: missing_op_id: 写操作必须提供 opId 作为幂等键
+```
+
+### 6.3 子命令没覆盖的操作走 ops call
+
+专门子命令只覆盖最常用的画布读写；其余操作（移动或删除节点、绑定素材、分镜行、时间线、导出等）用 `ops call`：
+
+```bash
+beeftv ops call canvas.node.move --operation-id batch-move-1 \
+  --params '{"canvasId":"<canvasId>","expectedRevision":6,"nodeId":"<nodeId>","position":{"x":1400,"y":260}}'
+
+beeftv ops call canvas.script.rows.append --operation-id batch-rows-1 \
+  --params '{"canvasId":"<canvasId>","nodeId":"<scriptNodeId>","expectedRevision":7,"rows":[{"narrativeIntent":"开场建立环境","dialogue":"（风声）","durationSeconds":6,"imageGenerationPrompt":"黄昏的水塔剪影，广角"}]}'
+```
+
+`ops call` 的幂等键既可以给 `--operation-id`，也可以写在 `--params` 的 `operationId` 字段里。参数结构用 `beeftv ops --json` 查看，不要凭记忆拼字段。
+
+### 6.4 用 shell 循环批量跑，并把进度落盘
+
+把要处理的清单放进一个文件。脚本要满足三点：同一批次用同一个批次标识（决定幂等键）、已完成项要跳过、任何失败都要让脚本以非 0 退出。计划里首次发送用的 `expectedRevision` 必须记下来复用，否则重试会因为换了请求内容被拒：
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+CANVAS=<canvasId>
+# 新批次换一个新值；续跑时传入与上次相同的值，才能复用同一个幂等键
+BATCH=${BATCH:-batch-$(date +%Y%m%d-%H%M%S)}
+PLAN="plan-$BATCH.jsonl"   # 已发送过的原请求：opId 与当时的 expectedRevision
+DONE="done-$BATCH.jsonl"   # 已成功的项
+touch "$PLAN" "$DONE"
+failed=0
+
+# 重试必须复用首次的原 revision，否则服务端按「同一操作 ID 换内容」拒绝
+planned_revision() {
+  grep -o "{\"opId\":\"$1\"[^}]*}" "$PLAN" 2>/dev/null | sed -n 's/.*"expectedRevision":\([0-9]*\).*/\1/p' | head -1 || true
+}
+
+i=0
+while IFS= read -r prompt; do
+  [ -z "$prompt" ] && continue
+  i=$((i + 1))
+  opid="$BATCH-$i"
+  if grep -q "{\"opId\":\"$opid\"" "$DONE"; then continue; fi
+  rev=$(planned_revision "$opid")
+  if [ -z "$rev" ]; then
+    rev=$(beeftv canvas get --canvas "$CANVAS" --json | jq -r '.result.canvas.revision')
+    printf '{"opId":"%s","expectedRevision":%s}\n' "$opid" "$rev" >> "$PLAN"
+  fi
+  if beeftv canvas nodes create --canvas "$CANVAS" --expected-revision "$rev" \
+       --node "镜头$i:image:$prompt" --op-id "$opid" --json > last.json 2> last.err; then
+    python3 -c "import json;d=json.load(open('last.json'));n=d['result']['created'][0];print(json.dumps({'opId':'$opid','nodeId':n['id'],'title':n['title']},ensure_ascii=False,separators=(',',':')))" >> "$DONE"
+  else
+    echo "失败：$opid $(cat last.err)" >&2
+    failed=$((failed + 1))
+  fi
+done < shots.txt
+
+[ "$failed" -eq 0 ] || { echo "本次有 $failed 个镜头写入失败" >&2; exit 1; }
+```
+
+跑完 `done-$BATCH.jsonl` 每行一条：
+
+```json
+{"opId":"fb2-batch-1-1","nodeId":"node-dmf8m0pus7c8-b384577949","title":"镜头1"}
+```
+
+几个要点：
+
+- **续跑用同一个 `BATCH`**：`BATCH=fb2-batch-1 ./batch.sh` 再跑一次，已完成的三项直接跳过，不会重复创建，也不会改动画布。
+- **结果未知时按原请求重试**：删掉某一条成功记录再跑，脚本会用 `PLAN` 里记的 `expectedRevision` 和同一个 `opId` 重发，服务端回放原回执（`replayed: true`），节点不会多出来。
+- **失败必须让脚本非 0 退出**：写入失败被 `if` 捕获，`set -e` 不会介入，所以脚本自己数失败项并在最后 `exit 1`；否则全部写入失败时脚本仍退出 0，调用方会误判成批处理成功。
+- **`stale_revision` 不能靠改 payload 绕过**：某项因为画布已被改动而失败时，它不会自动变成功；要么保留失败状态人工处理，要么换一个新的 `BATCH` 重新计划这一项（新 `opId`），不要拿旧 `opId` 配新 `revision`。
+- 示例用 POSIX shell 写成，`bash` 和 `zsh` 都能直接跑；在 Windows 的 PowerShell 里需要自己改写循环，命令本身不变。
+
+一次调用可以传多个 `--node`（单次最多 8 个），比逐个调用快；但整批要么全成功要么整批拒绝，所以批量失败时要整批重来。`ops call` 一次也只处理一个操作。
+
+### 6.5 把本地文件放进工作区
+
+```bash
+beeftv business upload --file ./ref.png --target resource
+```
+
+`business call` 和 `business upload` 都可以用 `--operation-id <id>` 提供幂等键，重试同一操作时复用同一个值；`business call` 提交生成（会扣费）时这个参数必填，并会写进任务的 `clientOperationId`，重试不会重复扣费。
+
+CLI 自己读取本地文件再提交资源接口，服务端不接受任意宿主路径；单个文件上限 64 MiB，更大的文件走分片上传（见 `beeftv business discover` 里的 `business_post_resources_uploads`）。`--target` 还支持 `skill` 和 `plugin`，用来安装本地技能包或插件包，文件类型不符时由服务端拒绝。
+
+## 7. 脚本化约定
+
+- stdout 只放业务结果，诊断和错误在 stderr，可以分开重定向。
+- 失败时加 `--json` 会在 stdout 给出机器可读结构，人话仍在 stderr：
+
+  ```json
+  {"code":3,"exitCode":3,"message":"资源不存在","reason":"not_found"}
+  ```
+
+- 判断成败请用退出码和 `reason`，不要解析中文 `msg`。
+
+退出码：
+
+| 码 | 含义 |
+| --- | --- |
+| 0 | 成功 |
+| 2 | 用法或必填参数缺失 |
+| 3 | 未找到（对象不存在、未知操作） |
+| 4 | 冲突，例如 `stale_revision` |
+| 5 | 前置条件不满足 |
+| 6 | 只读凭据或未授权 |
+| 7 | 不支持 |
+| 8 | 请求参数错误 |
+| 9 | 连接失败或未发现运行中的工作区 |
+| 1 | 内部错误 |
+
+## 8. 不用助手的 MCP（可选）
+
+只想省 token 的话，本页的子命令比 MCP 更直接；需要把工作区能力交给 Codex、Claude Code、Claude Desktop、Cursor 等模型客户端时，完整接入步骤见 [外部 Agent 接入](./external-agents.mdx)：
+
+```bash
+beeftv mcp serve                       # 画布、素材、媒体、技能操作 + 底层接口的两个入口
+beeftv mcp serve --read-only           # 只暴露只读工具
+beeftv mcp serve --all-business-tools  # 把每个底层业务接口单独列成工具
+```
+
+默认只列出画布、素材、媒体与技能这组操作（和内置助手用的是同一套），再加两个入口：`business.list` 按关键字查找底层业务接口（素材库、文件夹、项目、任务、时间线等），`business.call` 按查到的接口 ID 调用。这样模型客户端一开始读到的工具说明少很多，也不容易选错工具。确实需要把每个底层接口单独列出来时，加 `--all-business-tools`，或设置环境变量 `BEEFTV_MCP_ALL_BUSINESS_TOOLS=1`。
+
+启动时 stderr 会打印工具数量和连接的工作区，例如：
+
+```text
+beeftv mcp serve: 40 个工具，base=http://127.0.0.1:<动态端口>/api（运行中的桌面工作区），client=client-xxxxxxxx
+```
+
+`media.overview`、`media.inspect` 读到的图片会作为 MCP 图片内容返回，音频作为音频内容返回，客户端可以直接看图；文字部分只保留时长、来源和校验值。MCP 没有视频内容类型，视频片段不随结果附带：看画面用 `mode=frames`，看连续动作或听声音用 `media.review`。
+
+MCP 的写工具（包括 `business.call` 调用写接口）要求在参数里带 `operationId`，重试必须复用同一个值；通过 `business.call` 提交生成任务时，它同时作为任务的 `clientOperationId`，同一次提交重试不会重复扣费。`business.call` 读到的图片、音频文件也按 MCP 图片、音频内容返回。
+
+## 9. 不需要工作区的命令
+
+```bash
+beeftv skills help
+beeftv skills search 分镜 --target beeftv
+beeftv skills show <skillId> --release <releaseId>
+beeftv skills fetch <skillId> --release <releaseId> --output ./skills
+beeftv diagnostics analyze --file ./diagnostics.zip
+```
+
+`skills` 的公共查询免登录；投稿要浏览器授权，上传和送审分别确认，完整子命令见 `beeftv skills help`。`diagnostics analyze` 完全离线，只接受 schema 3 的诊断包，旧格式会明确拒绝，退出码 8：
+
+```text
+beeftv: diagnostics_bundle_invalid: 诊断包损坏或格式不受支持，需要 schema 3 诊断包
+```
+
+## 10. 现在还不提供
+
+- **付费批量生成与成片重跑示例**：等外部客户端付费许可、报价确认和持久操作回执的合同落地后再补。`canvas.generation.submit` 已经存在，但计费与审批口径未定，所以本页不给示例，也不把原始写入口包装成「安全自动重跑」。
+- **没有 `--yes`、费用上限参数或 dry-run**。需要「先预览再执行」时，只能由脚本自己用只读命令实现。
+- **CLI 侧的粗糙处**（本页如实记录，未改代码）：`ops call` 的 `--params` 不是合法 JSON 时按内部错误退出（1），不是用法错误（2）；`business call` 传未知 `--tool` 也退出 1；`business discover` 的读写标注按 HTTP 方法推断，`POST /assets/batch`（按 ID 批量读素材）被标成写；项目、资源、分镜行、时间线等没有专门子命令，只能拼 `ops call` 或 `business call` 的 JSON；`beeftv --help` 里写的「在 BeefTV 的设置里新建一个客户端」与实际入口（侧栏「BeefTV MCP」页）不一致，以本页第 3 节为准。
+
+## 本页命令的核对方式
+
+所有命令都用随包 CLI 在一个隔离的本地工作区（独立数据目录、单独登记的客户端凭据）实际执行过，命令形式、输出字段与退出码取自真实运行。隔离工作区里没有生成任务，因此 `task get` 只核对了参数校验与失败回执；全程没有执行任何付费生成命令。

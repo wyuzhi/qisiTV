@@ -406,7 +406,7 @@ func assertWorkflowUnknownTerminalBlocksRetry(t *testing.T, s *Service, task *mo
 	if failure.Category != generation.CategorySubmissionUncertain || failure.Retryable {
 		t.Fatalf("classification = %#v", failure)
 	}
-	if err := s.terminalCoordinator().handleExecutionFailure(task, cause, false, false); err == nil {
+	if err := s.terminalCoordinator().HandleExecutionFailure(task, cause, false, false); err == nil {
 		t.Fatal("missing terminal failure")
 	}
 	stored, err := s.repo.Task(task.ID)

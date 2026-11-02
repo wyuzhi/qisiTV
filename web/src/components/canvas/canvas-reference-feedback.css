@@ -1,0 +1,14 @@
+.canvas-reference-feedback { color: var(--cn-text, var(--foreground)); font-size: var(--fs-label); }
+.canvas-reference-feedback:empty { display: none; }
+.canvas-reference-feedback p { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 8px 10px; line-height: 1.6; }
+.canvas-reference-feedback [role="alert"] { color: var(--palette-status-error); }
+.canvas-reference-feedback ul { margin: 0 10px 10px; padding: 0; list-style: none; }
+.canvas-reference-feedback li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 0; border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent); }
+.canvas-reference-feedback strong, .canvas-reference-feedback li span { display: block; overflow-wrap: anywhere; }
+.canvas-reference-feedback strong { font-weight: 500; }
+.canvas-reference-feedback li span { opacity: 0.65; line-height: 1.6; }
+.canvas-reference-feedback-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.canvas-reference-feedback button { min-height: 40px; min-width: 40px; padding: 4px 0; font-size: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.canvas-reference-feedback button:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.canvas-resource-inline-mention.is-invalid { color: var(--palette-status-error); background: color-mix(in srgb, var(--palette-status-error) 10%, transparent); outline: 1px solid color-mix(in srgb, var(--palette-status-error) 55%, transparent); text-decoration: underline wavy; text-underline-offset: 3px; }
+.canvas-resource-inline-mention[data-reference-located] { outline: 2px solid currentColor; outline-offset: 2px; }

@@ -235,6 +235,62 @@ func TestPrepareRejudgesLegacyNoneMPEG4(t *testing.T) {
 	}
 }
 
+func TestPrepareForcesCompatibleTranscodeWhenBrowserDecodeFails(t *testing.T) {
+	dataDir := t.TempDir()
+	store := &memStore{}
+	for _, item := range []struct {
+		id     string
+		fourcc string
+		raw    []byte
+	}{
+		{id: "vp9-none", fourcc: "vp09"},
+		{id: "h264-10bit-none", fourcc: "avc1"},
+		{id: "non-mp4-container", raw: []byte("WEBM-OR-MOV-BYTES")},
+	} {
+		rel := filepath.Join("clips", item.id+".mp4")
+		fullPath := filepath.Join(dataDir, "resources", rel)
+		if len(item.raw) > 0 {
+			if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(fullPath, item.raw, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			writeCodecMP4(t, fullPath, item.fourcc)
+		}
+		store.put(model.Resource{
+			ID: item.id, UserID: "user-1", Kind: "video", Status: model.ResourceStatusReady,
+			Provider: "local", ObjectKey: rel, PlaybackStatus: model.PlaybackStatusNone,
+		})
+	}
+
+	svc := New(Deps{
+		DataDir: dataDir,
+		Store:   store,
+		Runner:  syncRunner{},
+		LookPath: func(string) (string, error) {
+			return "ffmpeg", nil
+		},
+		Transcode: func(ctx context.Context, src, dst string) error {
+			writeCodecMP4(t, dst, "avc1")
+			return nil
+		},
+	})
+	for _, id := range []string{"vp9-none", "h264-10bit-none", "non-mp4-container"} {
+		if err := svc.Prepare(store.get(id)); err != nil {
+			t.Fatalf("%s prepare err = %v", id, err)
+		}
+		got := store.get(id)
+		if got.PlaybackStatus != model.PlaybackStatusReady {
+			t.Fatalf("%s status = %q, want ready", id, got.PlaybackStatus)
+		}
+		if got.PlaybackObjectKey != id+".mp4" {
+			t.Fatalf("%s object key = %q", id, got.PlaybackObjectKey)
+		}
+	}
+}
+
 func TestMaybeStartClaimsOnce(t *testing.T) {
 	dataDir := t.TempDir()
 	store := &memStore{}

@@ -3,21 +3,10 @@ import axios from "axios";
 
 import * as runtimeMode from "@/lib/runtime-mode";
 import { getActiveUserScope, setActiveUserScope } from "@/lib/user-scope";
-import { captureUserScope } from "@/lib/user-scope-guard";
 import { apiClient } from "@/services/api/request";
 import * as localWorkspaceSync from "@/services/local-workspace-sync";
 import { persistWorkspaceAssetChanges, persistWorkspaceAssetLink, deleteWorkspaceAsset, resetWorkspaceAssetCommitStateForTests } from "@/services/workspace-asset-repository";
 import { resetAssetStoreDraftsForTests, useAssetStore, type Asset } from "@/stores/use-asset-store";
-
-function deferred<T = void>() {
-    let resolve!: (value: T | PromiseLike<T>) => void;
-    let reject!: (error: unknown) => void;
-    const promise = new Promise<T>((res, rej) => {
-        resolve = res;
-        reject = rej;
-    });
-    return { promise, resolve, reject };
-}
 
 function switchScope(userId: string) {
     const previous = getActiveUserScope();
@@ -96,7 +85,7 @@ describe("workspace asset repository runtime boundary", () => {
                     return envelope({ id: asset.id });
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
-            }, () => deleteWorkspaceAsset(asset.id, captureUserScope(), { expectedStatus: "archived" }));
+            }, () => deleteWorkspaceAsset(asset.id, { expectedStatus: "archived" }));
             expect(deletes).toBe(1);
             expect(useAssetStore.getState().assets).toEqual([]);
         } finally { restore(); }
@@ -113,7 +102,7 @@ describe("workspace asset repository runtime boundary", () => {
                 writes++;
                 throw new Error("unexpected write");
             }, async () => {
-                await expect(deleteWorkspaceAsset(asset.id, captureUserScope(), { expectedStatus: "archived" })).rejects.toMatchObject({ status: 409 });
+                await expect(deleteWorkspaceAsset(asset.id, { expectedStatus: "archived" })).rejects.toMatchObject({ status: 409 });
             });
             expect(writes).toBe(0);
             expect(useAssetStore.getState().assets).toEqual([asset]);
@@ -135,10 +124,9 @@ describe("workspace asset repository runtime boundary", () => {
                 }
                 throw new Error(`unexpected ${config.method} ${config.url}`);
             }, async () => {
-                const scope = captureUserScope();
-                await expect(deleteWorkspaceAsset(asset.id, scope, { expectedStatus: "archived" })).rejects.toThrow("offline");
+                await expect(deleteWorkspaceAsset(asset.id, { expectedStatus: "archived" })).rejects.toThrow("offline");
                 expect(useAssetStore.getState().assets.find((item) => item.id === asset.id)?.status).toBe("archived");
-                await deleteWorkspaceAsset(asset.id, scope, { expectedStatus: "archived" });
+                await deleteWorkspaceAsset(asset.id, { expectedStatus: "archived" });
             });
             expect(attempts).toBe(2);
             expect(useAssetStore.getState().assets).toEqual([]);
@@ -307,7 +295,7 @@ describe("workspace asset repository runtime boundary", () => {
                 urls.push(`${String(config.method || "get").toLowerCase()} ${String(config.url || "")}`);
                 return envelope({ asset: { id, title: "草稿", createdAt: "2026-10-02T00:00:00.000Z", updatedAt: "2026-10-02T00:00:00.000Z" } });
             }, async () => {
-                await persistWorkspaceAssetChanges(captureUserScope());
+                await persistWorkspaceAssetChanges();
             });
             expect(urls).toEqual([`put /assets/${id}`]);
             expect(remote).not.toHaveBeenCalled();
@@ -317,32 +305,6 @@ describe("workspace asset repository runtime boundary", () => {
         }
     });
 
-    test("deferred desktop PUT that is abandoned after an account change never starts the project link", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        const entered = deferred();
-        const gate = deferred();
-        const urls: string[] = [];
-        const asset = sampleAsset();
-        useAssetStore.setState({ assets: [asset] });
-        try {
-            await withAdapter(async (config) => {
-                urls.push(`${String(config.method || "get").toLowerCase()} ${String(config.url || "")}`);
-                entered.resolve();
-                await gate.promise;
-                return envelope({ asset: { id: "asset-1", title: "画布图片", createdAt: asset.createdAt, updatedAt: asset.updatedAt } });
-            }, async () => {
-                const pending = persistWorkspaceAssetLink({ asset, domainProjectId: "project-1", expectedScope: captureUserScope() });
-                await entered.promise;
-                setActiveUserScope("owner-b");
-                gate.resolve();
-                await expect(pending).rejects.toMatchObject({ name: "UserScopeAbandonedError" });
-                expect(urls).toEqual(["put /assets/asset-1"]);
-            });
-        } finally {
-            restore();
-        }
-    });
 });
 
 test("desktop deletes all selected media without browser cleanup blocking the next item", async () => {
@@ -358,8 +320,7 @@ test("desktop deletes all selected media without browser cleanup blocking the ne
             deleted.push(String(config.url));
             return envelope({});
         }, async () => {
-            const scope = captureUserScope();
-            for (const asset of assets) await deleteWorkspaceAsset(asset.id, scope);
+            for (const asset of assets) await deleteWorkspaceAsset(asset.id);
         });
         expect(deleted).toEqual(["/assets/batch-1", "/assets/batch-2", "/assets/batch-3"]);
         expect(useAssetStore.getState().assets).toEqual([]);

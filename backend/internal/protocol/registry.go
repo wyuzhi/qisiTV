@@ -73,22 +73,50 @@ func (r *Registry) Resolve(id string) (Adapter, bool) {
 	if adapter, ok := r.Get(id); ok {
 		return adapter, true
 	}
-	// Older BeefAPI catalogs stored the package name instead of its provider ID.
-	if strings.TrimSpace(id) == "google-gemini-generate-content" {
-		if adapter, ok := r.Get("gemini-generate-content"); ok {
-			return adapter, true
-		}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, false
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, adapter := range r.adapters {
-		for _, alias := range adapter.Metadata().LegacyAliases {
-			if strings.TrimSpace(alias) == strings.TrimSpace(id) {
+		for _, candidate := range ResolvableIDs(adapter.Metadata()) {
+			if candidate == id {
 				return adapter, true
 			}
 		}
 	}
 	return nil, false
+}
+
+// ResolvableIDs lists every ID Registry.Resolve maps onto an adapter with this
+// metadata: its own ID, its legacy aliases and the old package name BeefAPI
+// catalogs stored for Gemini. Callers that must agree with Resolve about which
+// saved IDs still reach a protocol (plugin retention, for example) use this
+// instead of re-deriving the rules.
+func ResolvableIDs(metadata Metadata) []string {
+	ids := make([]string, 0, len(metadata.LegacyAliases)+2)
+	seen := make(map[string]struct{}, cap(ids))
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return
+		}
+		if _, exists := seen[id]; exists {
+			return
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	add(metadata.ID)
+	// Older BeefAPI catalogs stored the package name instead of its provider ID.
+	if strings.TrimSpace(metadata.ID) == "gemini-generate-content" {
+		add("google-gemini-generate-content")
+	}
+	for _, alias := range metadata.LegacyAliases {
+		add(alias)
+	}
+	return ids
 }
 
 func (r *Registry) List(surface Surface, capability Capability, includeUnavailable bool) []Metadata {

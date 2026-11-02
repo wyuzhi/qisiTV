@@ -34,6 +34,7 @@ export function CanvasZoomControls({ scale, onScaleChange, onFitContent, onAutoA
     const theme = canvasThemes[useActiveTheme()];
     const rootRef = useRef<HTMLDivElement>(null);
     const liveScaleRef = useRef(scale);
+    const lastPercentRef = useRef("");
     const inputRef = useRef<HTMLInputElement>(null);
     const dockLabelRef = useRef<HTMLSpanElement>(null);
     const [precisionOpen, setPrecisionOpen] = useState(false);
@@ -98,8 +99,12 @@ export function CanvasZoomControls({ scale, onScaleChange, onFitContent, onAutoA
     function updateScaleDisplay(nextScale: number) {
         liveScaleRef.current = nextScale;
         const percent = String(Math.round(nextScale * 100));
+        if (lastPercentRef.current === percent) return;
+        lastPercentRef.current = percent;
         if (inputRef.current && document.activeElement !== inputRef.current) inputRef.current.value = percent;
-        if (dockLabelRef.current) dockLabelRef.current.textContent = percent;
+        const textNode = dockLabelRef.current?.firstChild;
+        if (textNode && textNode.nodeType === Node.TEXT_NODE) textNode.nodeValue = percent;
+        else if (dockLabelRef.current) dockLabelRef.current.textContent = percent;
     }
 
     function commitScale(nextScale: number) {

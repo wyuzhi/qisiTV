@@ -2,9 +2,11 @@ import { engineRequest, pairEngine, restoreEngineSession, type EngineStatus } fr
 import { engineInstallerUrl, ENGINE_INSTALLER_BETA_NOTICE, ENGINE_INSTALLER_PLATFORM } from "@/services/engine-installer";
 import { ENGINE_UPGRADE_HELP_STEPS, ENGINE_UPGRADE_HELP_TITLE } from "@/services/engine-upgrade-help";
 import { publicAssetUrl } from "@/lib/public-asset";
+import { engineCompatibilityError } from "@/services/engine-compatibility";
 
 /** Runs before stores hydrate, so a disconnected engine never creates a second workspace. */
 export async function requireEngineConnection(): Promise<void> {
+    let compatibilityMessage: string | undefined;
     const invitation = new URLSearchParams(location.hash.split("?")[1] || "").get("pair") || "";
     if (invitation) {
         const route = location.hash.split("?")[0] || "#/";
@@ -15,10 +17,11 @@ export async function requireEngineConnection(): Promise<void> {
     if (!invitation && restoreEngineSession()) {
         try {
             const status = await engineRequest<EngineStatus>("/engine/status");
-            if (status.ready && status.workspaceConfigured) return;
+            compatibilityMessage = engineCompatibilityError(status.version);
+            if (!compatibilityMessage && status.ready && status.workspaceConfigured) return;
         } catch { /* Keep drafts untouched and present an explicit reconnection screen. */ }
     }
-    await showConnectionGate(invitation);
+    await showConnectionGate(invitation, compatibilityMessage);
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) {
@@ -27,7 +30,7 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) {
     return result;
 }
 
-async function showConnectionGate(invitation: string): Promise<void> {
+async function showConnectionGate(invitation: string, compatibilityMessage?: string): Promise<void> {
     const root = document.getElementById("root");
     if (!root) throw new Error("画布页面缺少挂载点");
     const style = element("style");
@@ -37,7 +40,7 @@ async function showConnectionGate(invitation: string): Promise<void> {
     panel.append(logo, element("h1", "连接这台电脑的 qisiTV"), element("p", "在网页里使用创作助手、工作流、导演台和媒体工具。项目与素材保存在你选择的本机文件夹。"));
     const launchRow = element("div"); launchRow.className = "row";
     const launch = element("a", "打开本机引擎"); launch.className = "primary"; launch.href = "qisitv://open";
-    const install = element("a", "首次安装 · 下载 Mac 引擎"); install.href = engineInstallerUrl(); install.setAttribute("download", "");
+    const install = element("a", "安装 / 更新 Mac 引擎"); install.href = engineInstallerUrl(); install.setAttribute("download", "");
     launchRow.append(launch, install); panel.append(launchRow);
     panel.append(element("p", `${ENGINE_INSTALLER_PLATFORM}。${ENGINE_INSTALLER_BETA_NOTICE}`));
     panel.append(element("small", "首次安装后，点击打开本机引擎。引擎会给出连接链接或连接码；浏览器询问访问本地网络时请选择允许。"));
@@ -50,7 +53,7 @@ async function showConnectionGate(invitation: string): Promise<void> {
     const code = element("input"); code.value = invitation; code.placeholder = "输入本机引擎的连接码"; code.autocomplete = "off"; code.setAttribute("aria-label", "本机连接码");
     const connect = element("button", "确认连接"); connect.className = "primary";
     row.append(code, connect); panel.append(row);
-    const feedback = element("p"); feedback.className = "feedback"; feedback.setAttribute("role", "status"); panel.append(feedback);
+    const feedback = element("p", compatibilityMessage); feedback.className = "feedback"; feedback.setAttribute("role", "status"); panel.append(feedback);
     const folderBox = element("section"); folderBox.hidden = true;
     folderBox.append(element("h2", "项目文件夹"), element("p", "选择项目的保存位置。已有项目会先核对完整性，确认导入后保留原文件备份。"));
     const folderRow = element("div"); folderRow.className = "row";
@@ -71,6 +74,8 @@ async function showConnectionGate(invitation: string): Promise<void> {
         const finish = () => { root.replaceChildren(); resolve(); };
         const check = async () => {
             const status = await engineRequest<EngineStatus>("/engine/status");
+            const incompatible = engineCompatibilityError(status.version);
+            if (incompatible) { folderBox.hidden = true; throw new Error(incompatible); }
             if (!status.ready) throw new Error("本机引擎正在准备，请稍后再连接");
             if (status.workspaceConfigured) { finish(); return; }
             folderBox.hidden = false; directory.value = status.projectDirectory || "";

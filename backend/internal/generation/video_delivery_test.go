@@ -33,12 +33,15 @@ func TestSeedanceDispatchUsesGatewayDeliveryFallback(t *testing.T) {
 					}
 					_ = json.NewEncoder(w).Encode(state)
 				case r.Method == http.MethodGet && r.URL.Path == "/v1/videos/original/content":
-					if r.URL.Query().Get("delivery") != "backup" {
-						direct++
+					if r.URL.Query().Get("delivery") != "" {
+						proxy++
+						t.Error("client selected a recovery route")
+					}
+					direct++
+					if direct == 1 {
 						w.WriteHeader(http.StatusServiceUnavailable)
 						return
 					}
-					proxy++
 					w.Header().Set("Content-Type", "video/mp4")
 					_, _ = w.Write([]byte("original video"))
 				default:
@@ -48,6 +51,7 @@ func TestSeedanceDispatchUsesGatewayDeliveryFallback(t *testing.T) {
 			}))
 			defer server.Close()
 			ctx := WithEndpoints(context.Background(), Endpoints{BeefAPIVideoBaseURL: server.URL})
+			ctx = WithSubmissionKey(ctx, "stable-video-attempt")
 			policy := DefaultVideoPollPolicy()
 			policy.Sleep = func(context.Context, time.Duration) error { return nil }
 			result, err := RunVideoTaskWithPolicy(ctx, Input{Mode: "video", Prompt: "pottery", Config: Config{BaseURL: server.URL, APIKey: "test-key", InterfaceType: "newapi", Model: "seedance-2.0-fast", VideoSeconds: "5", VQuality: "720P", Size: "16:9"}}, policy)
@@ -56,7 +60,7 @@ func TestSeedanceDispatchUsesGatewayDeliveryFallback(t *testing.T) {
 			}
 			video, _ := result["video"].(map[string]interface{})
 			_, data, err := DecodeProviderDataURL(stringField(video, "dataUrl"))
-			if err != nil || string(data) != "original video" || creates != 1 || polls != 1 || direct != 1 || proxy != 1 {
+			if err != nil || string(data) != "original video" || creates != 1 || polls != 1 || direct != 2 || proxy != 0 {
 				t.Fatalf("result=%v creates=%d polls=%d direct=%d proxy=%d error=%v", result, creates, polls, direct, proxy, err)
 			}
 		})

@@ -7,6 +7,8 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"image"
+	"image/png"
 	"io"
 	"os"
 	"os/exec"
@@ -90,6 +92,9 @@ func TestMediaResourceLocatorsUseStrictOwnedReferences(t *testing.T) {
 		`{"metadata":{"storageKey":"resource:resource"}}`,
 		`{"metadata":{"content":"resource:resource"}}`,
 		`{"data":{"storageKey":"resource:resource"}}`,
+		`{"metadata":{"content":"/api/resources/resource/file"}}`,
+		`{"metadata":{"content":"http://127.0.0.1:8080/api/resources/resource/file?download=1#preview"}}`,
+		`{"metadata":{"content":"wails://wails.localhost/api/resources/resource/file"}}`,
 	} {
 		var target any
 		_ = json.Unmarshal([]byte(raw), &target)
@@ -105,6 +110,54 @@ func TestMediaResourceLocatorsUseStrictOwnedReferences(t *testing.T) {
 		if len(ids) != 0 {
 			t.Fatalf("accepted unsafe locator %q", value)
 		}
+	}
+}
+
+func TestNativeImageURLLocatorsPreserveContentAndOwnership(t *testing.T) {
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 32, 24))); err != nil {
+		t.Fatal(err)
+	}
+	d := &mediaDomain{
+		owner: "owner", data: encoded.Bytes(), mimeType: "image/png",
+		document:     json.RawMessage(`{"nodes":[{"id":"node","type":"image","metadata":{"content":"/api/resources/resource/file","assetId":"asset"}}]}`),
+		assetPayload: `{"data":{"content":"/api/resources/resource/file"}}`,
+	}
+	for _, target := range []mediaArgs{
+		{CanvasID: "canvas", NodeID: "node"},
+		{CanvasID: "canvas", NodeID: "node", ResourceID: "resource"},
+		{CanvasID: "canvas", AssetID: "asset"},
+	} {
+		overview, err := mediaTestCall(t, d, "media.overview", target)
+		if err != nil {
+			t.Fatalf("overview %+v: %v", target, err)
+		}
+		target.ExpectedVersion, target.Mode = overview.Source.Version, "frames"
+		inspected, err := mediaTestCall(t, d, "media.inspect", target)
+		if err != nil {
+			t.Fatalf("inspect %+v: %v", target, err)
+		}
+		for _, result := range []MediaResult{overview, inspected} {
+			if result.Source.ResourceID != "resource" || result.Source.Version == "" || len(result.Content) != 1 {
+				t.Fatalf("missing image evidence: %+v", result)
+			}
+			part := result.Content[0]
+			data, err := base64.StdEncoding.DecodeString(part.Data)
+			if err != nil || part.Type != "image" || part.MimeType != "image/png" || !bytes.Equal(data, encoded.Bytes()) {
+				t.Fatal("URL locator did not return actual image bytes")
+			}
+		}
+	}
+	opens := d.opens
+	if _, err := mediaTestCall(t, d, "media.overview", mediaArgs{CanvasID: "canvas", NodeID: "node", ResourceID: "foreign"}); AsError(err).Reason != "media_not_referenced" {
+		t.Fatalf("unreferenced resource accepted: %v", err)
+	}
+	d.document = json.RawMessage(`{"nodes":[{"id":"node","metadata":{"content":"/api/resources/foreign/file"}}]}`)
+	if _, err := mediaTestCall(t, d, "media.overview", mediaArgs{CanvasID: "canvas", NodeID: "node"}); AsError(err).Reason != "foreign_resource" {
+		t.Fatalf("foreign resource URL accepted: %v", err)
+	}
+	if d.opens != opens {
+		t.Fatal("unauthorized URL reference opened media bytes")
 	}
 }
 

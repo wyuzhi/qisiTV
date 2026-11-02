@@ -102,7 +102,7 @@ func TestCreationModelCannotSelfConfirm(t *testing.T) {
 	if _, err := s.ChangeCreationRun("user", id, "claim", CreationRequest{ExpectedEpoch: 1, CreationGuard: CreationGuard{Owner: "assistant"}}); err != nil {
 		t.Fatal(err)
 	}
-	run, err := s.GetCreationRun("user", id)
+	run, err := s.Creation().Get("user", id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestCreationModelCannotSelfConfirm(t *testing.T) {
 
 func TestCreationRunOwnershipCASAndFence(t *testing.T) {
 	s, _, id, guard := creationTestService(t)
-	if _, err := s.GetCreationRun("other", id); err == nil {
+	if _, err := s.Creation().Get("other", id); err == nil {
 		t.Fatal("cross-user read accepted")
 	}
 	if _, err := s.ChangeCreationRun("user", id, "save", CreationRequest{CreationGuard: guard, Revision: 1, Status: "running", State: map[string]any{}}); err == nil {
@@ -256,7 +256,7 @@ func TestCreationCanvasScopeAndStableCreate(t *testing.T) {
 	if err != nil || one["canvasId"] != two["canvasId"] {
 		t.Fatal("canvas creation not stable")
 	}
-	snapshot, err := s.CreationCanvasSnapshot("user", id)
+	snapshot, err := s.Creation().CanvasSnapshot("user", id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestCreationCanvasScopeAndStableCreate(t *testing.T) {
 	if _, err = s.CommitCreationCanvas("user", id, CreationRequest{CreationGuard: guard, ExpectedSnapshotHash: snapshot["snapshotHash"].(string), Document: raw}); err == nil {
 		t.Fatal("stale canvas hash accepted")
 	}
-	snapshot, _ = s.CreationCanvasSnapshot("user", id)
+	snapshot, _ = s.Creation().CanvasSnapshot("user", id)
 	doc = snapshot["document"].(map[string]any)
 	doc["title"] = "unauthorized"
 	raw, _ = json.Marshal(doc)

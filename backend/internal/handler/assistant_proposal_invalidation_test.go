@@ -27,7 +27,7 @@ func TestAssistantProposalInvalidationUsesDurableIntentOnHistoryTerminalAndRun(t
 				id := body["turnId"].(string)
 				ids = append(ids, id)
 				owner, _ := env.service.LocalWorkspaceOwner()
-				if err := env.service.BindAssistantDurableSession(owner.ID, id, session, false); err != nil {
+				if err := env.service.AssistantTurns().BindDurableSession(owner.ID, id, session, false); err != nil {
 					t.Error(err)
 				}
 				w.Header().Set("Content-Type", "application/x-ndjson")

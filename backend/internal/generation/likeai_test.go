@@ -103,13 +103,13 @@ func TestLikeAIUpscaleExecutesUploadSubmitPollDownloadAndResumesOriginal(t *test
 			if err != nil || result == nil {
 				t.Fatalf("upscale result: %v", err)
 			}
-			// Image URLs are durably handed to the separate delivery worker;
-			// video bytes are downloaded here by the unified video delivery path.
+			// Ephemeral provider URLs are downloaded immediately for durable delivery.
 			wantDownloads := 2
 			if kind == "image" {
-				wantDownloads = 0
-				if result["images"].([]any)[0].(map[string]any)["url"] != server.URL+"/result" {
-					t.Fatal("lost image delivery URL")
+				dataURL, _ := result["images"].([]any)[0].(map[string]any)["dataUrl"].(string)
+				gotMime, gotBytes, decodeErr := DecodeProviderDataURL(dataURL)
+				if decodeErr != nil || gotMime != mime || !bytes.Equal(gotBytes, payload) {
+					t.Fatal("lost ephemeral image bytes", decodeErr)
 				}
 			}
 			if err := ValidateUpscaleInput(input); err != nil {

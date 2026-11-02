@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -61,7 +62,7 @@ func upload(ctx context.Context, config Config, path string, client *http.Client
 		return "", err
 	}
 	key := "beeftv/references/" + digest
-	endpoint, err := url.JoinPath(config.Endpoint, config.Bucket, key)
+	endpoint, err := objectEndpointURL(config, key)
 	if err != nil {
 		return "", err
 	}
@@ -133,4 +134,29 @@ func (r *uploadReader) Read(p []byte) (int, error) {
 		r.observe(r.loaded, phase)
 	}
 	return n, err
+}
+
+func objectEndpointURL(config Config, key string) (string, error) {
+	parsed, err := url.Parse(config.Endpoint)
+	if err != nil {
+		return "", err
+	}
+	host := strings.ToLower(parsed.Hostname())
+	bucketPrefix := strings.ToLower(config.Bucket) + "."
+	if strings.HasPrefix(host, bucketPrefix) {
+		return url.JoinPath(config.Endpoint, key)
+	}
+	if isVirtualHostedOnlyS3Provider(host) && (parsed.Path == "" || parsed.Path == "/") {
+		if port := parsed.Port(); port != "" {
+			parsed.Host = config.Bucket + "." + parsed.Hostname() + ":" + port
+		} else {
+			parsed.Host = config.Bucket + "." + parsed.Hostname()
+		}
+		return url.JoinPath(parsed.String(), key)
+	}
+	return url.JoinPath(config.Endpoint, config.Bucket, key)
+}
+
+func isVirtualHostedOnlyS3Provider(host string) bool {
+	return strings.HasSuffix(host, ".myqcloud.com") || strings.HasSuffix(host, ".aliyuncs.com")
 }

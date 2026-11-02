@@ -1,9 +1,12 @@
 package handler
 
 import (
-	"qisitv/backend/internal/app"
 	"qisitv/backend/internal/skills"
 )
+
+type assistantSkillLabelService interface {
+	SkillsDomain() *skills.Service
+}
 
 // labelAssistantSkills fills skill display labels on host turn records from
 // the pins Go validated for that round. The host only echoes pin identity.
@@ -64,7 +67,7 @@ func labelAssistantSkills(turn map[string]any, pins []skills.Pin, installed func
 
 // installedSkillLabels lazily reads the caller's installed skills once per
 // response, only when an unlabeled pin needs a name.
-func installedSkillLabels(svc *app.Service, userID string) func() []skills.Pin {
+func installedSkillLabels(svc assistantSkillLabelService, userID string) func() []skills.Pin {
 	loaded := false
 	var pins []skills.Pin
 	return func() []skills.Pin {
@@ -72,7 +75,7 @@ func installedSkillLabels(svc *app.Service, userID string) func() []skills.Pin {
 			return pins
 		}
 		loaded = true
-		catalog, err := svc.AgentSkillCatalog(userID)
+		catalog, err := svc.SkillsDomain().AgentCatalog(userID)
 		if err != nil {
 			return nil
 		}

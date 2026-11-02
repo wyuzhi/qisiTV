@@ -1,7 +1,7 @@
 import axios from "axios";
 
 import { createClientId } from "@/lib/client-id";
-import { explainGenerationError } from "@/lib/generation-error";
+import { explainGenerationError, preserveGenerationFailure } from "@/lib/generation-error";
 import { channelRequest } from "@/services/api/custom-channel-relay";
 import { isSystemProxyBaseUrl } from "@/stores/use-config-store";
 
@@ -19,6 +19,7 @@ export class ChannelResponseError extends Error {
     constructor(payload: unknown, status?: number) {
         const explanation = explainGenerationError(status ? { status, data: payload } : payload);
         super(explanation.message);
+        preserveGenerationFailure(this, explanation);
         this.name = "ChannelResponseError";
         this.code = explanation.providerCode || explanation.errorCode;
         this.status = status;

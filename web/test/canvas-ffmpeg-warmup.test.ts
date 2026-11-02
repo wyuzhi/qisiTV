@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 test("video trim and crop warm the shared FFmpeg worker before confirmation", async () => {
-    const tools = await Bun.file(new URL("../src/pages/canvas/use-canvas-media-tools.ts", import.meta.url)).text();
+    const tools = await Bun.file(new URL("../src/pages/canvas/use-canvas-video-tools.ts", import.meta.url)).text();
     const worker = await Bun.file(new URL("../src/lib/canvas/canvas-video-merge.ts", import.meta.url)).text();
     const segment = await Bun.file(new URL("../src/lib/canvas/canvas-video-segment.ts", import.meta.url)).text();
 

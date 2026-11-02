@@ -1,4 +1,3 @@
-import { assertUserScope, captureUserScope, isUserScopeAbandonedError, UserScopeAbandonedError, userScopeMatches, type CapturedUserScope } from "@/lib/user-scope-guard";
 import { attachConversationMessage, type ConversationMessageAttachReceipt } from "@/services/api/operations";
 import type { GenerationTask } from "@/services/api/task-center";
 import type { StoredCreationConversation } from "@/services/creation-conversation-store";
@@ -15,14 +14,11 @@ export type AdoptServerConfirmedConversation = (
     conversationId: string,
     document: StoredCreationConversation,
     revision: number,
-    entryCapturedScope: CapturedUserScope,
 ) => Promise<StoredCreationConversation>;
 
 export type BindBackendConversationMessageRuntime = {
     attachMessage?: typeof attachConversationMessage;
     adoptConfirmedConversation?: AdoptServerConfirmedConversation;
-    captureScope?: () => CapturedUserScope;
-    liveScope?: () => CapturedUserScope;
 };
 
 export type BoundConversationMessage = {
@@ -43,13 +39,10 @@ export async function bindBackendConversationMessageResult(input: {
 }): Promise<BoundConversationMessage> {
     if (input.task.status !== "succeeded") throw new Error("只有成功的任务才能绑定到消息");
     const runtime = input.runtime ?? {};
-    const liveScope = runtime.liveScope ?? captureUserScope;
-    const capturedScope = (runtime.captureScope ?? captureUserScope)();
     const outputIndex = input.outputIndex ?? 0;
     const attachMessage = runtime.attachMessage ?? attachConversationMessage;
     const adoptConfirmedConversation = runtime.adoptConfirmedConversation ?? defaultAdoptConfirmedConversation;
 
-    assertBindDispatchScope(capturedScope, liveScope);
     const response = await attachMessage({
         operationId: attachMessageEffectKey(input.task.id, input.messageId, outputIndex),
         conversationId: input.conversationId,
@@ -57,9 +50,7 @@ export async function bindBackendConversationMessageResult(input: {
         messageId: input.messageId,
         outputIndex,
         signal: input.signal,
-        expectedScope: capturedScope,
     });
-    assertBindDispatchScope(capturedScope, liveScope);
 
     const receipt = response.result ?? {};
     const effectKey = typeof receipt.effectKey === "string" && receipt.effectKey
@@ -69,26 +60,19 @@ export async function bindBackendConversationMessageResult(input: {
         return { receipt, resultUrls: [], content: "", effectKey };
     }
     const canonical = canonicalConversationFromReceipt(input.conversationId, receipt);
-    const adopted = await adoptConfirmedConversation(input.conversationId, canonical, receipt.revision as number, capturedScope);
-    assertBindDispatchScope(capturedScope, liveScope);
+    const adopted = await adoptConfirmedConversation(input.conversationId, canonical, receipt.revision as number);
     const resultUrls = Array.isArray(receipt.resultUrls) ? receipt.resultUrls.filter((item): item is string => typeof item === "string" && item.trim() !== "") : [];
     const content = typeof receipt.content === "string" ? receipt.content : "";
     return { receipt, conversation: adopted, resultUrls, content, effectKey };
-}
-
-function assertBindDispatchScope(expected: CapturedUserScope, live: () => CapturedUserScope) {
-    if (!userScopeMatches(expected, live())) throw new UserScopeAbandonedError();
 }
 
 async function defaultAdoptConfirmedConversation(
     conversationId: string,
     document: StoredCreationConversation,
     revision: number,
-    entryCapturedScope: CapturedUserScope,
 ) {
     const { adoptServerConfirmedConversationDocument: adopt } = await import("@/services/creation-conversation-store");
-    assertUserScope(entryCapturedScope);
-    return adopt(conversationId, document, revision, entryCapturedScope);
+    return adopt(conversationId, document, revision);
 }
 
 function canonicalConversationFromReceipt(conversationId: string, receipt: ConversationMessageAttachReceipt): StoredCreationConversation {
@@ -105,8 +89,4 @@ function canonicalConversationFromReceipt(conversationId: string, receipt: Conve
     }
     if (!Array.isArray(document.messages)) throw new ConversationBindProjectionAdoptionError();
     return { ...document, id: conversationId };
-}
-
-export function isUserScopeAbandonedConversationBindError(error: unknown) {
-    return isUserScopeAbandonedError(error);
 }

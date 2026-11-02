@@ -103,7 +103,7 @@ func TestProjectOverviewUsesAggregatesWithoutLoadingProjectCollections(t *testin
 			}
 		}
 	}
-	overview, err := service.ProjectOverview("user-1", project.ID)
+	overview, err := service.ProjectService().ProjectOverview("user-1", project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestProjectOverviewCountsSucceededTimelineRenders(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	overview, err := service.ProjectOverview("user-1", project.ID)
+	overview, err := service.ProjectService().ProjectOverview("user-1", project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestProjectCanvasesPageReturnsLinksOnlyForCurrentPage(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	page, err := service.ProjectCanvasesPage("user-1", project.ID, 2, 2)
+	page, err := service.ProjectService().ProjectCanvasesPage("user-1", project.ID, 2, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestProjectCanvasesPageReturnsLinksOnlyForCurrentPage(t *testing.T) {
 			t.Fatalf("link %s does not belong to the current canvas page", link.CanvasID)
 		}
 	}
-	units, err := service.ProjectUnitSummaries("user-1", project.ID)
+	units, err := service.ProjectService().ProjectUnitSummaries("user-1", project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestProjectAssetsPagePaginatesAndReturnsFacets(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	page, err := service.ProjectAssetsPage("user-1", project.ID, 2, 2, "prop", "image", "", nil, "")
+	page, err := service.ProjectService().ProjectAssetsPage("user-1", project.ID, 2, 2, "prop", "image", "", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestProjectAssetCandidatesPageSearchesNamesWithinFilters(t *testing.T) {
 	if err := db.Create(&candidates).Error; err != nil {
 		t.Fatal(err)
 	}
-	page, err := service.ProjectAssetCandidatesPage("user-1", project.ID, 1, 20, "unit-1", "pending_confirmation", "prop", "雨伞")
+	page, err := service.ProjectService().ProjectAssetCandidatesPage("user-1", project.ID, 1, 20, "unit-1", "pending_confirmation", "prop", "雨伞")
 	if err != nil {
 		t.Fatal(err)
 	}

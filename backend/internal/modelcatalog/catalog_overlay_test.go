@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	"qisitv/backend/internal/beefapi"
 )
 
 func officialCatalogVideo(t *testing.T) json.RawMessage {
@@ -30,7 +28,7 @@ func TestOverlayCatalogVideoCapabilitiesMatchesOfficialBeefAPIContract(t *testin
 	if len(items) != 1 || items[0].VideoCapabilitiesVersion == nil || *items[0].VideoCapabilitiesVersion != "1" {
 		t.Fatalf("overlay version = %#v", items)
 	}
-	want, ok := beefapi.NormalizeCatalogVideoCapability(raw)
+	want, ok := NormalizeCatalogVideoCapability(raw)
 	if !ok {
 		t.Fatal("official contract rejected the fixture")
 	}
@@ -117,7 +115,7 @@ func TestLoadChannelModelCatalogCustomGeminiAndBeefAPI(t *testing.T) {
 	if err != nil || len(beef) != 1 || beef[0].ID != "doubao-seedance-2-0" || beef[0].VideoCapabilitiesVersion == nil || *beef[0].VideoCapabilitiesVersion != "gateway-1" {
 		t.Fatalf("beefapi catalog = %#v %v", beef, err)
 	}
-	want, ok := beefapi.NormalizeCatalogVideoCapability(raw)
+	want, ok := NormalizeCatalogVideoCapability(raw)
 	if !ok {
 		t.Fatal("official contract rejected BeefAPI fixture")
 	}

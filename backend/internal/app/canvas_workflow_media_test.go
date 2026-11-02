@@ -21,7 +21,7 @@ func TestCanvasWorkflowLocalMediaAdmission(t *testing.T) {
 		"a": {Status: "succeeded", ResourceID: "video-a"},
 		"b": {Status: "succeeded", ResourceID: "video-b"},
 	}
-	task, err := svc.executeCanvasWorkflowMedia("owner", "merge-op", cw.Node{ID: "merge", OperationID: "video.merge"}, []cw.Edge{
+	task, err := executeWorkflowTimeline(svc, "owner", "merge-op", cw.Node{ID: "merge", OperationID: "video.merge"}, []cw.Edge{
 		{From: "a", To: "merge", Order: 2}, {From: "b", To: "merge", Order: 1},
 	}, steps)
 	if err != nil {
@@ -41,7 +41,7 @@ func TestCanvasWorkflowLocalMediaAdmission(t *testing.T) {
 		t.Fatalf("merge input order not preserved: %+v", input.Timeline.Clips)
 	}
 	trim := cw.Node{ID: "trim", OperationID: "video.trim", Config: map[string]any{"startSeconds": 1.25, "endSeconds": 3.5}}
-	task, err = svc.executeCanvasWorkflowMedia("owner", "trim-operation", trim, []cw.Edge{{From: "a", To: "trim"}}, steps)
+	task, err = executeWorkflowTimeline(svc, "owner", "trim-operation", trim, []cw.Edge{{From: "a", To: "trim"}}, steps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,21 +56,30 @@ func TestCanvasWorkflowLocalMediaAdmission(t *testing.T) {
 		t.Fatalf("unexpected trim input: %+v", input)
 	}
 	trim.Config["endSeconds"] = 6.0
-	if _, err := svc.executeCanvasWorkflowMedia("owner", "invalid-trim", trim, []cw.Edge{{From: "a", To: "trim"}}, steps); err == nil {
+	if _, err := executeWorkflowTimeline(svc, "owner", "invalid-trim", trim, []cw.Edge{{From: "a", To: "trim"}}, steps); err == nil {
 		t.Fatal("accepted a trim beyond the video duration")
 	}
-	if _, err := svc.executeCanvasWorkflowMedia("another-user", "foreign-trim", trim, []cw.Edge{{From: "a", To: "trim"}}, steps); err == nil {
+	if _, err := executeWorkflowTimeline(svc, "another-user", "foreign-trim", trim, []cw.Edge{{From: "a", To: "trim"}}, steps); err == nil {
 		t.Fatal("accepted another user's resource")
 	}
 }
 
 func TestCanvasWorkflowSecondsRejectsInvalidValues(t *testing.T) {
 	for _, value := range []any{nil, "1", -1.0, math.NaN(), math.Inf(1), 43201.0} {
-		if _, err := canvasWorkflowSeconds(value); err == nil {
+		if _, err := cw.Seconds(value); err == nil {
 			t.Fatalf("accepted invalid time %v", value)
 		}
 	}
-	if got, err := canvasWorkflowSeconds(json.Number("1.125")); err != nil || got != 1125 {
+	if got, err := cw.Seconds(json.Number("1.125")); err != nil || got != 1125 {
 		t.Fatalf("milliseconds = %d, error = %v", got, err)
 	}
+}
+
+// executeWorkflowTimeline runs a trim or merge step the way the run scheduler does.
+func executeWorkflowTimeline(svc *Service, user, operation string, n cw.Node, edges []cw.Edge, steps map[string]*cw.Step) (*model.Task, error) {
+	project, options, err := cw.TimelineProject(func(id string) (*model.Resource, error) { return svc.workflowResource(user, id, "video") }, n, edges, steps)
+	if err != nil {
+		return nil, err
+	}
+	return workflowRunHost{svc}.TimelineRender(user, operation, project, options)
 }

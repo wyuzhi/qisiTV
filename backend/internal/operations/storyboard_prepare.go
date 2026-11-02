@@ -5,41 +5,24 @@ import (
 	"strings"
 
 	"qisitv/backend/internal/canvas"
-	"qisitv/backend/internal/canvas/capability"
 )
 
 func registerStoryboardPreparation(r *Registry) {
 	properties := map[string]any{
-		"canvasId": map[string]any{"type": "string"}, "nodeId": map[string]any{"type": "string", "description": "已有分镜脚本节点"},
+		"canvasId": map[string]any{"type": "string"}, "nodeId": map[string]any{"type": "string"},
 		"expectedRevision": map[string]any{"type": "integer", "minimum": 1},
 		"rowIds":           map[string]any{"type": "array", "minItems": 1, "maxItems": 8, "items": map[string]any{"type": "string"}},
 		"script": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"title", "rows"}, "properties": map[string]any{
 			"title": map[string]any{"type": "string", "minLength": 1},
-			"rows":  map[string]any{"type": "array", "minItems": 1, "maxItems": 8, "items": map[string]any{"type": "object", "additionalProperties": false, "properties": storyboardRowFieldSchemas}},
-		}, "description": "新作品可直接提交分镜正文，一次创建脚本、分镜行与配置好的首帧/视频节点；与 nodeId/rowIds 二选一，失败全部回滚"},
-		"referenceNodeIds": map[string]any{"type": "array", "maxItems": 4, "items": map[string]any{"type": "string"}, "description": "同画布角色或风格图片，仅连接到各首帧图片节点；视频只连接自己的首帧"},
-	}
-	for _, kind := range []string{"image", "video"} {
-		descriptor, _ := capability.BuiltinRegistry().Resolve(kind)
-		fields := map[string]any{}
-		for name, field := range descriptor.PatchFields {
-			if name == "title" || name == "content" || name == "seconds" || name == "count" {
-				continue
-			}
-			fields[name] = map[string]any{"type": field.Kind, "description": field.Description}
-		}
-		if kind == "video" {
-			fields["generateAudio"].(map[string]any)["enum"] = []string{"true", "false"}
-		}
-		required := []string{"model"}
-		if kind == "video" {
-			required = append(required, "generateAudio")
-		}
-		properties[kind] = map[string]any{"type": "object", "additionalProperties": false, "properties": fields, "required": required, "description": "本批节点共同生成参数；省略则不创建该类型。视频时长采用每行 durationSeconds，提示词直接采用分镜原文；视频必须明确是否生成声音"}
+			"rows":  map[string]any{"type": "array", "minItems": 1, "maxItems": 8, "items": map[string]any{"type": "object", "description": "行ID与镜号由服务端分配", "properties": storyboardRowFieldSchemas}},
+		}, "description": "新建分镜（省略 image/video 只建分镜）"},
+		"referenceNodeIds": map[string]any{"type": "array", "maxItems": 4, "items": map[string]any{"type": "string"}},
+		"image":            map[string]any{"type": "object", "properties": map[string]any{"model": map[string]any{"type": "string"}, "size": map[string]any{"type": "string"}}, "required": []string{"model"}},
+		"video":            map[string]any{"type": "object", "properties": map[string]any{"model": map[string]any{"type": "string"}, "size": map[string]any{"type": "string"}, "generateAudio": map[string]any{"type": "string", "enum": []string{"true", "false"}}}, "required": []string{"model", "generateAudio"}},
 	}
 	params, _ := json.Marshal(map[string]any{"type": "object", "additionalProperties": false, "properties": properties,
 		"required": []string{"canvasId", "expectedRevision"}})
-	r.Register(Op{ID: "canvas.script.prepare", Summary: "一次准备分镜与配置好的首帧/视频草稿；新作品直接传 script 正文，已有分镜传 nodeId/rowIds。绑定分镜、连接参考图并按镜头排布，不开始生成；已有绑定拒绝覆盖", Scope: ScopeCanvas, ReplaySafe: true, AssistantCanvas: true, Params: params, Handler: opStoryboardPrepare})
+	r.Register(Op{ID: "canvas.script.prepare", Summary: "准备分镜脚本与可选首帧/视频草稿（传 script 或 nodeId/rowIds；不开始生成）", Scope: ScopeCanvas, ReplaySafe: true, AssistantCanvas: true, Params: params, Handler: opStoryboardPrepare})
 }
 
 func opStoryboardPrepare(ctx *Context, raw json.RawMessage) (any, error) {
@@ -75,6 +58,9 @@ func opStoryboardPrepare(ctx *Context, raw json.RawMessage) (any, error) {
 		if json.Unmarshal(item.raw["model"], &selected) != nil || strings.TrimSpace(selected) == "" {
 			return nil, InvalidArg("invalid_parameter", "请选择明确的生成模型")
 		}
+		if _, exists := item.raw["prompt"]; exists {
+			return nil, InvalidArg("invalid_parameter", "分镜提示词请填写在对应分镜行")
+		}
 		if _, exists := item.raw["seconds"]; exists {
 			return nil, InvalidArg("invalid_parameter", "视频时长请修改对应分镜行")
 		}
@@ -86,7 +72,7 @@ func opStoryboardPrepare(ctx *Context, raw json.RawMessage) (any, error) {
 				return nil, InvalidArg("invalid_parameter", "请根据作品需要明确选择是否生成声音")
 			}
 		}
-		patch, err := resolveGenerationDraft(ctx, item.kind, item.raw)
+		patch, err := resolveGenerationDraft(ctx, item.kind, item.raw, nil)
 		if err != nil {
 			return nil, err
 		}

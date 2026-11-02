@@ -1,4 +1,3 @@
-import type { CapturedUserScope } from "@/lib/user-scope-guard";
 import { http } from "@/services/api/request";
 import { taskDiagnosticHeaders } from "@/services/diagnostics/client-diagnostics";
 
@@ -24,10 +23,9 @@ export async function executeWorkspaceOperation<T>(
     op: string,
     body: { opId?: string; params: unknown },
     signal?: AbortSignal,
-    expectedScope?: CapturedUserScope,
     headers?: Record<string, string>,
 ) {
-    return http.post<WorkspaceOperationResult<T>>(`/ops/${encodeURIComponent(op)}`, body, { signal, expectedScope, headers });
+    return http.post<WorkspaceOperationResult<T>>(`/ops/${encodeURIComponent(op)}`, body, { signal, headers });
 }
 
 export async function commitCanvasDocument(input: {
@@ -35,7 +33,6 @@ export async function commitCanvasDocument(input: {
     canvasId: string;
     expectedRevision: number;
     document: Record<string, unknown>;
-    expectedScope?: CapturedUserScope;
 }) {
     return executeWorkspaceOperation<CanvasDocumentCommitResult>("canvas.document.commit", {
         opId: input.operationId,
@@ -44,7 +41,7 @@ export async function commitCanvasDocument(input: {
             expectedRevision: input.expectedRevision,
             document: input.document,
         },
-    }, undefined, input.expectedScope);
+    });
 }
 
 export type CanvasTaskBindReceipt = {
@@ -119,7 +116,6 @@ export async function attachConversationMessage(input: {
     messageId: string;
     outputIndex?: number;
     signal?: AbortSignal;
-    expectedScope?: CapturedUserScope;
 }) {
     return executeWorkspaceOperation<ConversationMessageAttachReceipt>(
         "conversation.message.attach",
@@ -133,7 +129,6 @@ export async function attachConversationMessage(input: {
             },
         },
         input.signal,
-        input.expectedScope,
     );
 }
 
@@ -144,7 +139,6 @@ export async function bindCanvasTaskOutput(input: {
     nodeId: string;
     outputIndex?: number;
     signal?: AbortSignal;
-    expectedScope?: CapturedUserScope;
     traceId?: string;
 }) {
     return executeWorkspaceOperation<CanvasTaskBindReceipt>(
@@ -159,7 +153,6 @@ export async function bindCanvasTaskOutput(input: {
             },
         },
         input.signal,
-        input.expectedScope,
         taskDiagnosticHeaders(input.taskId, input.traceId),
     );
 }

@@ -31,6 +31,7 @@ Wails / local dev
 | 生成结果交付 | `backend/internal/taskdelivery` | 第一段把生成 dataURL/字节写入本地资源并改写 ResultJSON；第二段在任务成功后物化素材。不发起新的上游生成。远端产物经 `outbound.DownloadResumable` 断点续传下载：无总超时，只有头部与空闲超时，半成品在 `<data>/cache/artifact-downloads` 下按身份复用 |
 | 生成结果绑定 | `backend/internal/taskbinding` | 将已交付产物绑定到原先指定的画布节点；多张图片按创建前记录的 `outputNodeIds` 与输出序号逐项核对，不新建上游任务 |
 | 生成域 | `backend/internal/generation` | 统一生成输入、引用、能力、registry 协议调度和失败归类 |
+| Seedream 图片结果 | `backend/internal/generation/image_seedream.go` | 专用协议请求 URL，保留原来的组图、图层和透明 PNG 参数；BeefAPI 可经 CF 转存到 COS。返回的 URL 下载成原始图片后交给本地资源保存，仍接受旧 Base64 响应。媒体下载只在同 origin 携带供应商请求头，跨 origin 重定向后清除且不恢复；Agent Plan 插件与通用图片协议不受此默认值影响 |
 | 视频结果取回 | `backend/internal/generation/video_delivery.go` | 所有视频入口共用下载重试、10 秒无进展检测和原任务结果刷新；BeefAPI 取备用存储，自接供应商只查询自己的原任务。认证由所选协议提供，跨域媒体请求清除供应商凭据 |
 | 供应商适配 | `backend/internal/provider`, `protocol`, `outbound` | 外部模型 API、自定义渠道和插件协议 |
 | 模型目录 | `backend/internal/modelcatalog` | 能力合同、渠道目录校验/解析/合并与 BeefAPI/WhatsToken overlay；出站 HTTP 仍走 outbound |
@@ -42,9 +43,9 @@ Wails / local dev
 | 视频预览与工具 | `backend/internal/playback`、`backend/internal/mediatools` | 按需 H.264 预览、单任务转码、用户预览缓存清理；播放和剪辑共用随包 FFmpeg 解析，显式路径优先于随包工具，最后查 PATH |
 | HTTP | `backend/internal/handler` | 本地 `/api` 合同、输入限制和响应封装 |
 | 企业连接 | `backend/internal/beefapi` | 设备授权、本机密钥和连接状态 |
-| 本机 MCP | `backend/cmd/beeftv` | `beeftv mcp serve` 使用官方 MCP SDK，经 `/api/ops` 访问本机工作区 |
+| 本机 MCP | `backend/cmd/beeftv` | `beeftv mcp serve` 使用官方 MCP SDK，经 `/api/ops` 访问本机工作区；底层业务接口默认经 `business.list` / `business.call` 两个入口调用（`business.go`），媒体读取结果按 MCP 图片、音频内容返回（`mcp_content.go`） |
 | 远程 Skill 市场 | `backend/internal/skillhub`、`skillhubcli` | `beeftv skills` 直接访问统一市场，不发现或连接本地运行时；共享版本清单、完整性校验与专用投稿授权 |
-| 内置 Skill 接入 | `backend/internal/skills/market*.go`、`operations/skill*.go`、`assistantturns/skill_context.go` | Go 管理本地安装、确切版本、活动上下文和投稿确认；模型只获得查询、草稿和准备操作。详见 [接口交接](../../../refactor/skill-market-agent-access.md) |
+| 内置 Skill 接入 | `backend/internal/skills/market*.go`、`operations/skill*.go`、`assistantturns/skill_context.go` | Go 管理本地安装、确切版本、活动上下文和投稿确认；模型只获得查询、草稿和准备操作 |
 | 桌面更新发布 | `backend/cmd/update-release` | 生成更新密钥、打包 zip、签署 `desktop-update.json` |
 | 前端 | `web/src` | React 画布、项目、素材、模型配置与插件 UI |
 

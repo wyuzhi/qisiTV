@@ -23,9 +23,12 @@ describe("storyboard prompt panel boundaries", () => {
 
     test("click and overlay guards remain while the storyboard editor stays available", () => {
         const project = source("project.tsx");
-        expect(project).toMatch(/else if \(node.type === CanvasNodeType.Script\) \{\s*setDialogNodeId\(null\)/);
+        const nodeClick = source("use-canvas-node-click.ts");
+        const editorDialogs = source("canvas-project-editor-dialogs.tsx");
+        expect(nodeClick).toMatch(/else if \(node.type === CanvasNodeType.Script\) \{\s*setDialogNodeId\(null\)/);
         expect(project).toContain("dialogNode.type !== CanvasNodeType.Script");
-        expect(project).toContain("onOpen={() => setScriptEditorNodeId(contentNode.id)}");
-        expect(project).toContain("onGenerateScript={(prompt) => void generateScriptRows(contentNode.id, prompt)}");
+        expect(editorDialogs).toContain("setScriptEditorNodeId");
+        const nodeContent = source("canvas-project-node-content.tsx");
+        expect(nodeContent).toContain("generateScriptRows");
     });
 });

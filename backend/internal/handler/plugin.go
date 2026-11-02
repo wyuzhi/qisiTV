@@ -6,41 +6,58 @@ import (
 	"strconv"
 	"strings"
 
-	"qisitv/backend/internal/app"
 	"qisitv/backend/internal/eagle"
+	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/platform"
+	"qisitv/backend/internal/plugins"
 	"qisitv/backend/internal/protocol"
 
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) {
+// pluginCenter is the handler-facing slice of plugin administration. Permission
+// checks, audit rows, and feature gates stay in the composition root.
+type pluginCenter interface {
+	workspaceOwners
+	PluginDomain() *plugins.Service
+	PluginsForUser(actor *model.User) ([]plugins.View, error)
+	RequireAdmin(user *model.User) error
+	InstallPluginForAdmin(actor *model.User, data []byte, fileName string) (plugins.View, error)
+	SetUserPluginEnabled(actor *model.User, pluginID string, enabled bool) (plugins.StateView, error)
+	UninstallPluginForAdmin(actor *model.User, id string) error
+	RequireFeature(feature string) error
+	SetPluginPlatformAvailability(actor *model.User, pluginID string, available bool) (plugins.AdminStateView, error)
+	RequirePluginForUser(userID string, pluginID string) error
+}
+
+func RegisterPluginRoutes(r *gin.RouterGroup, center pluginCenter, hosted ...bool) {
 	// Protocol metadata is required by the local desktop model editor. It is
 	// read-only and must remain available even when the full plugin center is
 	// disabled in the desktop profile.
 	catalogRoutes := r.Group("/plugins")
 	catalogRoutes.GET("/catalog", func(c *gin.Context) {
-		if _, err := currentUser(c, svc); err != nil {
+		if _, err := currentUser(c, center); err != nil {
 			failService(c, err)
 			return
 		}
 		scope := strings.TrimSpace(c.DefaultQuery("scope", "user.custom-channel"))
 		capability := strings.TrimSpace(c.Query("capability"))
-		ok(c, gin.H{"providers": svc.PluginProviderCatalog(scope, capability, false)})
+		ok(c, gin.H{"providers": center.PluginDomain().ProviderCatalog(scope, capability, false)})
 	})
 	statusRoutes := r.Group("/plugins")
 	statusRoutes.GET("/status", func(c *gin.Context) {
-		user, err := currentUser(c, svc)
+		user, err := currentUser(c, center)
 		if err != nil {
 			failService(c, err)
 			return
 		}
-		states, err := svc.PluginStatesForUser(user)
+		states, err := center.PluginDomain().StatesForUser(user)
 		if err != nil {
 			failService(c, err)
 			return
 		}
-		statuses, err := svc.WorkflowPluginStatusesForUser(user.ID)
+		statuses, err := center.PluginDomain().WorkflowStatusesForUser(user.ID)
 		if err != nil {
 			failService(c, err)
 			return
@@ -48,34 +65,34 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 		ok(c, gin.H{"statuses": statuses, "states": states})
 	})
 	pluginRoutes := r.Group("/plugins")
-	pluginRoutes.Use(requirePluginCenterAccess(svc))
+	pluginRoutes.Use(requirePluginCenterAccess(center))
 	// The frontend plugin center is the single management surface. Protocol
 	// plugins are returned as kind=protocol records alongside UI plugins.
 	pluginRoutes.GET("", func(c *gin.Context) {
-		user, err := currentUser(c, svc)
+		user, err := currentUser(c, center)
 		if err != nil {
 			failService(c, err)
 			return
 		}
-		plugins, err := svc.PluginsForUser(user)
+		listed, err := center.PluginsForUser(user)
 		if err != nil {
 			failService(c, err)
 			return
 		}
-		states, err := svc.PluginStatesForUser(user)
+		states, err := center.PluginDomain().StatesForUser(user)
 		if err != nil {
 			failService(c, err)
 			return
 		}
-		ok(c, gin.H{"plugins": plugins, "states": states})
+		ok(c, gin.H{"plugins": listed, "states": states})
 	})
 	pluginRoutes.POST("", func(c *gin.Context) {
-		user, err := currentUser(c, svc)
+		user, err := currentUser(c, center)
 		if err != nil {
 			failService(c, err)
 			return
 		}
-		if err := svc.RequireAdmin(user); err != nil {
+		if err := center.RequireAdmin(user); err != nil {
 			failService(c, err)
 			return
 		}
@@ -98,7 +115,7 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 			fail(c, http.StatusBadRequest, err)
 			return
 		}
-		plugin, err := svc.InstallPluginForAdmin(user, data, fileName)
+		plugin, err := center.InstallPluginForAdmin(user, data, fileName)
 		if err != nil {
 			failService(c, err)
 			return
@@ -106,12 +123,12 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 		ok(c, gin.H{"plugin": plugin})
 	})
 	pluginRoutes.GET("/:id/package", func(c *gin.Context) {
-		user, err := currentUser(c, svc)
+		user, err := currentUser(c, center)
 		if err != nil {
 			failService(c, err)
 			return
 		}
-		visiblePlugins, err := svc.PluginsForUser(user)
+		visiblePlugins, err := center.PluginsForUser(user)
 		if err != nil {
 			failService(c, err)
 			return
@@ -124,10 +141,10 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 			}
 		}
 		if !visible {
-			failService(c, app.Forbidden("无权访问该插件包"))
+			failService(c, kernel.Forbidden("无权访问该插件包"))
 			return
 		}
-		data, fileName, err := svc.PluginPackage(c.Param("id"))
+		data, fileName, err := center.PluginDomain().Package(c.Param("id"))
 		if err != nil {
 			failService(c, err)
 			return
@@ -139,10 +156,10 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 		c.Header("Content-Disposition", "attachment; filename=\""+strings.ReplaceAll(fileName, "\"", "")+"\"")
 		c.Data(http.StatusOK, "application/zip", data)
 	})
-	pluginRoutes.POST("/:id/enable", pluginToggle(svc, true))
-	pluginRoutes.POST("/:id/disable", pluginToggle(svc, false))
+	pluginRoutes.POST("/:id/enable", pluginToggle(center, true))
+	pluginRoutes.POST("/:id/disable", pluginToggle(center, false))
 	pluginRoutes.PUT("/:id/activation", func(c *gin.Context) {
-		user, err := currentUser(c, svc)
+		user, err := currentUser(c, center)
 		if err != nil {
 			failService(c, err)
 			return
@@ -154,7 +171,7 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 			fail(c, http.StatusBadRequest, err)
 			return
 		}
-		state, err := svc.SetUserPluginEnabled(user, c.Param("id"), request.Enabled)
+		state, err := center.SetUserPluginEnabled(user, c.Param("id"), request.Enabled)
 		if err != nil {
 			failService(c, err)
 			return
@@ -162,16 +179,16 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 		ok(c, gin.H{"state": state})
 	})
 	pluginRoutes.DELETE("/:id", func(c *gin.Context) {
-		user, err := currentUser(c, svc)
+		user, err := currentUser(c, center)
 		if err != nil {
 			failService(c, err)
 			return
 		}
-		if err := svc.RequireAdmin(user); err != nil {
+		if err := center.RequireAdmin(user); err != nil {
 			failService(c, err)
 			return
 		}
-		if err := svc.UninstallPluginForAdmin(user, c.Param("id")); err != nil {
+		if err := center.UninstallPluginForAdmin(user, c.Param("id")); err != nil {
 			failService(c, err)
 			return
 		}
@@ -179,7 +196,7 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 	})
 
 	pluginRoutes.GET("/eagle/library", func(c *gin.Context) {
-		if _, allowed := requireEnabledPlugin(c, svc, app.PluginEagleAssetConnector); !allowed {
+		if _, allowed := requireEnabledPlugin(c, center, plugins.EagleAssetConnector); !allowed {
 			return
 		}
 		library, err := requestEagle(c).Library(c.Query("baseUrl"))
@@ -191,7 +208,7 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 		ok(c, gin.H{"library": library})
 	})
 	pluginRoutes.GET("/eagle/items", func(c *gin.Context) {
-		if _, allowed := requireEnabledPlugin(c, svc, app.PluginEagleAssetConnector); !allowed {
+		if _, allowed := requireEnabledPlugin(c, center, plugins.EagleAssetConnector); !allowed {
 			return
 		}
 		limit, _ := strconv.Atoi(c.DefaultQuery("limit", "60"))
@@ -204,7 +221,7 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 		ok(c, gin.H{"items": items})
 	})
 	pluginRoutes.GET("/eagle/items/:itemId/file", func(c *gin.Context) {
-		if _, allowed := requireEnabledPlugin(c, svc, app.PluginEagleAssetConnector); !allowed {
+		if _, allowed := requireEnabledPlugin(c, center, plugins.EagleAssetConnector); !allowed {
 			return
 		}
 		file, err := requestEagle(c).OpenFile(c.Query("baseUrl"), c.Param("itemId"))
@@ -219,7 +236,7 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 		c.DataFromReader(http.StatusOK, file.Size, file.MimeType, file.Body, nil)
 	})
 	pluginRoutes.GET("/eagle/items/:itemId/thumbnail", func(c *gin.Context) {
-		if _, allowed := requireEnabledPlugin(c, svc, app.PluginEagleAssetConnector); !allowed {
+		if _, allowed := requireEnabledPlugin(c, center, plugins.EagleAssetConnector); !allowed {
 			return
 		}
 		file, err := requestEagle(c).OpenThumbnail(c.Query("baseUrl"), c.Param("itemId"))
@@ -233,7 +250,7 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 		c.DataFromReader(http.StatusOK, file.Size, file.MimeType, file.Body, nil)
 	})
 	pluginRoutes.POST("/eagle/items", func(c *gin.Context) {
-		if _, allowed := requireEnabledPlugin(c, svc, app.PluginEagleAssetConnector); !allowed {
+		if _, allowed := requireEnabledPlugin(c, center, plugins.EagleAssetConnector); !allowed {
 			return
 		}
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 160<<20)
@@ -250,7 +267,7 @@ func RegisterPluginRoutes(r *gin.RouterGroup, svc *app.Service, hosted ...bool) 
 		ok(c, gin.H{"item": item})
 	})
 	pluginRoutes.POST("/eagle/folders", func(c *gin.Context) {
-		if _, allowed := requireEnabledPlugin(c, svc, app.PluginEagleAssetConnector); !allowed {
+		if _, allowed := requireEnabledPlugin(c, center, plugins.EagleAssetConnector); !allowed {
 			return
 		}
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<10)
@@ -277,9 +294,9 @@ func requestEagle(c *gin.Context) *eagle.Client {
 	return eagle.New()
 }
 
-func requirePluginCenterAccess(svc *app.Service) gin.HandlerFunc {
+func requirePluginCenterAccess(center pluginCenter) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		user, err := currentUser(c, svc)
+		user, err := currentUser(c, center)
 		if err != nil {
 			failService(c, err)
 			c.Abort()
@@ -289,7 +306,7 @@ func requirePluginCenterAccess(svc *app.Service) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		if err := svc.RequireFeature(app.FeaturePluginCenter); err != nil {
+		if err := center.RequireFeature(platform.FeaturePluginCenter); err != nil {
 			failService(c, err)
 			c.Abort()
 			return
@@ -298,18 +315,18 @@ func requirePluginCenterAccess(svc *app.Service) gin.HandlerFunc {
 	}
 }
 
-func pluginToggle(svc *app.Service, enabled bool) gin.HandlerFunc {
+func pluginToggle(center pluginCenter, enabled bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		user, err := currentUser(c, svc)
+		user, err := currentUser(c, center)
 		if err != nil {
 			failService(c, err)
 			return
 		}
-		if err := svc.RequireAdmin(user); err != nil {
+		if err := center.RequireAdmin(user); err != nil {
 			failService(c, err)
 			return
 		}
-		state, err := svc.SetPluginPlatformAvailability(user, c.Param("id"), enabled)
+		state, err := center.SetPluginPlatformAvailability(user, c.Param("id"), enabled)
 		if err != nil {
 			failService(c, err)
 			return
@@ -318,10 +335,10 @@ func pluginToggle(svc *app.Service, enabled bool) gin.HandlerFunc {
 	}
 }
 
-func requireEnabledPlugin(c *gin.Context, svc *app.Service, pluginID string) (*model.User, bool) {
-	user, err := currentUser(c, svc)
+func requireEnabledPlugin(c *gin.Context, center pluginCenter, pluginID string) (*model.User, bool) {
+	user, err := currentUser(c, center)
 	if err == nil {
-		err = svc.RequirePluginForUser(user.ID, pluginID)
+		err = center.RequirePluginForUser(user.ID, pluginID)
 	}
 	if err != nil {
 		failService(c, err)

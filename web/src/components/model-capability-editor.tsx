@@ -5,11 +5,12 @@ import { Switch } from "@/components/ui/base/switch";
 import { SegmentedControl } from "@/components/ui/base/segmented-control";
 import type { ReactNode } from "react";
 
-import { defaultImageCapabilityConfig, defaultModelCapabilityConfig, normalizeModelCapabilityConfig, type ImageCapabilityConfig, type ModelCapabilityConfig, type TextCapabilityConfig, type VideoCapabilityConfig } from "@/lib/model-capabilities";
+import { defaultImageCapabilityConfig, defaultModelCapabilityConfig, imageResponseFormatSelectable, normalizeModelCapabilityConfig, type ImageCapabilityConfig, type ImageResponseFormatConfig, type ModelCapabilityConfig, type TextCapabilityConfig, type VideoCapabilityConfig } from "@/lib/model-capabilities";
 import type { ModelProtocol } from "@/lib/model-protocols";
 import { VIDEO_RESOLUTION_CAPABILITY_OPTIONS } from "@/lib/video-generation-options";
 
-const ratioOptions = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
+const ratioOptions = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"];
+const ratioOptionLabel = (item: string) => (item === "adaptive" ? "自适应 (adaptive)" : item);
 const operationOptions = [
     { label: "文生视频", value: "text_to_video" },
     { label: "图生视频", value: "image_to_video" },
@@ -20,6 +21,7 @@ const operationOptions = [
     { label: "运镜调整", value: "camera_motion" },
     { label: "风格迁移", value: "style_transfer" },
     { label: "音频生视频", value: "audio_to_video" },
+    { label: "样片转成片", value: "draft_to_final" },
 ];
 
 function ImageSizeHelp() {
@@ -48,6 +50,12 @@ export function ModelCapabilityEditor({ value, onChange, protocol, capability = 
     const update = (patch: Partial<VideoCapabilityConfig>) => onChange?.({ version: 1, video: { ...profile, ...patch } });
     const updateReferences = (patch: Partial<VideoCapabilityConfig["references"]>) => update({ references: { ...profile.references, ...patch } });
     const updateDuration = (patch: Partial<VideoCapabilityConfig["duration"]>) => update({ duration: { ...profile.duration, ...patch } });
+    const updateDraft = (draft: { supported: boolean; default: boolean }) => {
+        const operations = draft.supported
+            ? Array.from(new Set([...profile.operations, "draft_to_final"]))
+            : profile.operations.filter((item) => item !== "draft_to_final");
+        update({ draft, operations });
+    };
     const durationValues = (profile.duration.values || []).join(",");
     const resolutionOptions = Array.from(new Set([...VIDEO_RESOLUTION_CAPABILITY_OPTIONS, ...profile.resolutions]));
 
@@ -83,6 +91,8 @@ export function ModelCapabilityEditor({ value, onChange, protocol, capability = 
                     <ReferenceCard title="通用限制" description="所有视频请求共用的基础约束">
                         <VideoPromptLimitFields references={profile.references} defaults={defaults.references} disabled={disabled} onChange={updateReferences} />
                         <BooleanField label="水印" value={profile.watermark} disabled={disabled} onChange={(watermark) => update({ watermark })} />
+                        <BooleanField label="样片预览 (480P)" value={profile.draft || { supported: false, default: false }} disabled={disabled} onChange={updateDraft} />
+                        <BooleanField label="返回无损尾帧" value={profile.returnLastFrame || { supported: false, default: false }} disabled={disabled} onChange={(returnLastFrame) => update({ returnLastFrame })} />
                     </ReferenceCard>
                 </div>
             </div>
@@ -157,12 +167,12 @@ export function ModelCapabilityEditor({ value, onChange, protocol, capability = 
                                     className="w-full"
                                     disabled={disabled}
                                     value={profile.ratios}
-                                    options={ratioOptions.map((item) => ({ label: item, value: item }))}
+                                    options={ratioOptions.map((item) => ({ label: ratioOptionLabel(item), value: item }))}
                                     onChange={(ratios) => update({ ratios, defaultRatio: ratios.includes(profile.defaultRatio) ? profile.defaultRatio : ratios[0] || "16:9" })}
                                 />
                             </Field>
                             <Field label="默认比例">
-                                <Select className="w-full" disabled={disabled} value={profile.defaultRatio} options={profile.ratios.map((item) => ({ label: item, value: item }))} onChange={(defaultRatio) => update({ defaultRatio })} />
+                                <Select className="w-full" disabled={disabled} value={profile.defaultRatio} options={profile.ratios.map((item) => ({ label: ratioOptionLabel(item), value: item }))} onChange={(defaultRatio) => update({ defaultRatio })} />
                             </Field>
                             <Field label="输出分辨率">
                                 <Select
@@ -269,12 +279,12 @@ export function ModelCapabilityEditor({ value, onChange, protocol, capability = 
                                 className="w-full"
                                 disabled={disabled}
                                 value={profile.ratios}
-                                options={ratioOptions.map((item) => ({ label: item, value: item }))}
+                                options={ratioOptions.map((item) => ({ label: ratioOptionLabel(item), value: item }))}
                                 onChange={(ratios) => update({ ratios, defaultRatio: ratios.includes(profile.defaultRatio) ? profile.defaultRatio : ratios[0] || "16:9" })}
                             />
                         </Field>
                         <Field label="默认比例">
-                            <Select className="w-full" disabled={disabled} value={profile.defaultRatio} options={profile.ratios.map((item) => ({ label: item, value: item }))} onChange={(defaultRatio) => update({ defaultRatio })} />
+                            <Select className="w-full" disabled={disabled} value={profile.defaultRatio} options={profile.ratios.map((item) => ({ label: ratioOptionLabel(item), value: item }))} onChange={(defaultRatio) => update({ defaultRatio })} />
                         </Field>
                         <Field label="输出分辨率">
                             <Select
@@ -342,6 +352,8 @@ export function ModelCapabilityEditor({ value, onChange, protocol, capability = 
                         <div className="grid gap-3 sm:grid-cols-2">
                             <VideoPromptLimitFields references={profile.references} defaults={defaults.references} disabled={disabled} onChange={updateReferences} />
                             <BooleanField label="水印" value={profile.watermark} disabled={disabled} onChange={(watermark) => update({ watermark })} />
+                            <BooleanField label="样片预览 (480P)" value={profile.draft || { supported: false, default: false }} disabled={disabled} onChange={updateDraft} />
+                            <BooleanField label="返回无损尾帧" value={profile.returnLastFrame || { supported: false, default: false }} disabled={disabled} onChange={(returnLastFrame) => update({ returnLastFrame })} />
                         </div>
                     </CapabilityGroup>
                 </>
@@ -434,6 +446,7 @@ function ImageCapabilityEditor({ value, onChange, protocol, model, disabled, sec
     const updateReferences = (patch: Partial<ImageCapabilityConfig["references"]>) => update({ references: { ...profile.references, ...patch } });
     const updateSize = (patch: Partial<ImageCapabilityConfig["size"]>) => update({ size: { ...profile.size, ...patch } });
     const updateQuality = (patch: Partial<ImageCapabilityConfig["quality"]>) => update({ quality: { ...profile.quality, ...patch } });
+    const responseFormatSelectable = imageResponseFormatSelectable(protocol, model);
 
     if (section === "references") {
         return (
@@ -515,7 +528,8 @@ function ImageCapabilityEditor({ value, onChange, protocol, model, disabled, sec
                             </div>
                         ) : null}
                         <BooleanField label="透明背景" value={profile.transparentBackground} disabled={disabled} onChange={(transparentBackground) => update({ transparentBackground })} />
-                        <ParameterField label="response_format" description="发送 b64_json 响应格式" supported={profile.responseFormat.supported} disabled={disabled} onChange={(supported) => update({ responseFormat: { supported } })} />
+                        <BooleanField label="关联组图" value={profile.sequentialGeneration || { supported: false, default: false }} disabled={disabled} onChange={(sequentialGeneration) => update({ sequentialGeneration })} />
+                        <ResponseFormatField label="response_format" value={profile.responseFormat} disabled={disabled} selectable={responseFormatSelectable} onChange={(patch) => update({ responseFormat: { ...profile.responseFormat, ...patch } })} />
                         <ParameterField label="output_format" description="发送 PNG 输出格式" supported={profile.outputFormat.supported} disabled={disabled} onChange={(supported) => update({ outputFormat: { supported } })} />
                     </ProtocolParameterCard>
                 </div>
@@ -599,8 +613,9 @@ function ImageCapabilityEditor({ value, onChange, protocol, model, disabled, sec
                     </div>
                 ) : null}
                 <BooleanField label="透明背景" value={profile.transparentBackground} disabled={disabled} onChange={(transparentBackground) => update({ transparentBackground })} />
+                <BooleanField label="关联组图" value={profile.sequentialGeneration || { supported: false, default: false }} disabled={disabled} onChange={(sequentialGeneration) => update({ sequentialGeneration })} />
                 <div className="grid gap-3 sm:grid-cols-2">
-                    <ParameterField label="response_format" description="发送 b64_json 响应格式" supported={profile.responseFormat.supported} disabled={disabled} onChange={(supported) => update({ responseFormat: { supported } })} />
+                    <ResponseFormatField label="response_format" value={profile.responseFormat} disabled={disabled} selectable={responseFormatSelectable} onChange={(patch) => update({ responseFormat: { ...profile.responseFormat, ...patch } })} />
                     <ParameterField label="output_format" description="发送 PNG 输出格式" supported={profile.outputFormat.supported} disabled={disabled} onChange={(supported) => update({ outputFormat: { supported } })} />
                 </div>
             </CapabilityGroup>
@@ -710,6 +725,40 @@ function ParameterField({ label, description, supported, disabled, onChange }: {
                 <span>支持</span>
                 <Switch aria-label={`${label}支持`} size="sm" disabled={disabled} checked={supported} onChange={onChange} />
             </label>
+        </div>
+    );
+}
+
+function ResponseFormatField({ label, value, disabled, selectable, onChange }: { label: string; value: ImageResponseFormatConfig; disabled: boolean; selectable: boolean; onChange: (patch: Partial<ImageResponseFormatConfig>) => void }) {
+    const showSelect = selectable && value.supported;
+    return (
+        <div className="admin-capability-parameter-field flex min-h-12 flex-wrap items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-2.5">
+            <div className="min-w-0">
+                <div className="break-all text-xs font-medium">{label}</div>
+                <div className="mt-0.5 text-[var(--fs-tiny)] leading-5 text-foreground/45">
+                    {showSelect ? "b64_json 由渠道内联返回；url 由渠道返回图片链接，BeefTV 下载后存回画布" : "发送 b64_json 响应格式"}
+                </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+                {showSelect ? (
+                    <Select
+                        className="w-28"
+                        size="small"
+                        disabled={disabled}
+                        aria-label={`${label}取值`}
+                        value={value.value || "b64_json"}
+                        options={[
+                            { label: "b64_json", value: "b64_json" },
+                            { label: "url", value: "url" },
+                        ]}
+                        onChange={(next) => onChange({ value: next === "url" ? "url" : "b64_json" })}
+                    />
+                ) : null}
+                <label className="grid shrink-0 justify-items-center gap-1 text-[var(--fs-tiny)] text-foreground/45">
+                    <span>支持</span>
+                    <Switch aria-label={`${label}支持`} size="sm" disabled={disabled} checked={value.supported} onChange={(supported) => onChange({ supported })} />
+                </label>
+            </div>
         </div>
     );
 }

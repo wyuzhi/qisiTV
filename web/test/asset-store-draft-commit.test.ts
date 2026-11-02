@@ -4,9 +4,8 @@ import localforage from "localforage";
 
 import * as runtimeMode from "@/lib/runtime-mode";
 import { getActiveUserScope, setActiveUserScope } from "@/lib/user-scope";
-import { captureUserScope, UserScopeAbandonedError } from "@/lib/user-scope-guard";
 import { apiClient } from "@/services/api/request";
-import { deleteWorkspaceAsset, persistWorkspaceAssetChanges, persistWorkspaceAssetLink, resetWorkspaceAssetCommitStateForTests } from "@/services/workspace-asset-repository";
+import { persistWorkspaceAssetChanges, persistWorkspaceAssetLink, resetWorkspaceAssetCommitStateForTests } from "@/services/workspace-asset-repository";
 import {
     flushAssetStorePersistence,
     hydrateAssetStoreDrafts,
@@ -107,7 +106,7 @@ describe("asset store draft commit identity", () => {
             try {
                 useAssetStore.getState().updateAsset("asset-receipt", { title: "保留修改" });
                 await withAdapter(async () => envelope(receipt), async () => {
-                    await expect(persistWorkspaceAssetChanges(captureUserScope())).rejects.toThrow("素材保存回执无效");
+                    await expect(persistWorkspaceAssetChanges()).rejects.toThrow("素材保存回执无效");
                 });
                 expect(peekAssetStoreDraft("owner-a", "asset-receipt")?.kind).toBe("upsert");
                 expect(useAssetStore.getState().assets[0].title).toBe("保留修改");
@@ -127,7 +126,7 @@ describe("asset store draft commit identity", () => {
                 urls.push(requestKey(config));
                 return envelope({ id: "asset-1" });
             }, async () => {
-                await persistWorkspaceAssetChanges(captureUserScope());
+                await persistWorkspaceAssetChanges();
             });
             expect(urls).toEqual(["delete /assets/asset-1"]);
             expect(useAssetStore.getState().assets.map((item) => item.id)).toEqual([]);
@@ -164,10 +163,10 @@ describe("asset store draft commit identity", () => {
                 }
                 return envelope({ asset: { id, title: payload?.asset?.title, createdAt: "2026-10-02T00:00:00.000Z", updatedAt: "2026-10-02T00:00:00.000Z" } });
             }, async () => {
-                const first = persistWorkspaceAssetChanges(captureUserScope());
+                const first = persistWorkspaceAssetChanges();
                 await entered.promise;
                 useAssetStore.getState().updateAsset(id, { title: "第二版" });
-                const second = persistWorkspaceAssetChanges(captureUserScope());
+                const second = persistWorkspaceAssetChanges();
                 gate.resolve();
                 await Promise.all([first, second]);
             });
@@ -205,51 +204,17 @@ describe("asset store draft commit identity", () => {
                 }
                 return envelope({ id });
             }, async () => {
-                const first = persistWorkspaceAssetChanges(captureUserScope());
+                const first = persistWorkspaceAssetChanges();
                 await entered.promise;
                 await useAssetStore.getState().removeAsset(id);
                 gate.resolve();
                 await first;
                 expect(useAssetStore.getState().assets.map((item) => item.id)).toEqual([]);
                 expect(urls).toEqual([`put /assets/${id}`]);
-                await persistWorkspaceAssetChanges(captureUserScope());
+                await persistWorkspaceAssetChanges();
             });
             expect(urls).toEqual([`put /assets/${id}`, `delete /assets/${id}`]);
             expect(useAssetStore.getState().assets.map((item) => item.id)).toEqual([]);
-        } finally {
-            restore();
-        }
-    });
-
-    test("account switch keeps uncommitted drafts and does not auto-dispatch until a new epoch action", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        const urls: string[] = [];
-        try {
-            const id = useAssetStore.getState().addAsset({
-                kind: "text",
-                title: "未提交",
-                coverUrl: "",
-                tags: [],
-                category: "other",
-                status: "confirmed",
-                source: "手动添加",
-                data: { content: "draft" },
-            });
-            const firstEpoch = captureUserScope();
-            setActiveUserScope("owner-b");
-            setActiveUserScope("owner-a");
-            const secondEpoch = captureUserScope();
-            expect(secondEpoch.epoch).not.toBe(firstEpoch.epoch);
-            expect(peekAssetStoreDraft("owner-a", id)?.kind).toBe("upsert");
-            expect(urls).toEqual([]);
-            await withAdapter(async (config) => {
-                urls.push(requestKey(config));
-                return envelope({ asset: { id, title: "未提交", createdAt: "2026-10-02T00:00:00.000Z", updatedAt: "2026-10-02T00:00:00.000Z" } });
-            }, async () => {
-                await persistWorkspaceAssetChanges(secondEpoch);
-            });
-            expect(urls).toEqual([`put /assets/${id}`]);
         } finally {
             restore();
         }
@@ -283,7 +248,7 @@ describe("asset store draft commit identity", () => {
             });
             const asset = useAssetStore.getState().assets.find((item) => item.id === id);
             if (!asset) throw new Error("missing asset");
-            await flushAssetStorePersistence(captureUserScope());
+            await flushAssetStorePersistence();
             unloadAssetStoreDraftsForTests();
             expect(peekAssetStoreDraft("owner-a", id)).toBeUndefined();
             useAssetStore.setState({ assets: [asset] });
@@ -293,7 +258,7 @@ describe("asset store draft commit identity", () => {
                 urls.push(requestKey(config));
                 return envelope({ asset: { id, title: asset.title, createdAt: asset.createdAt, updatedAt: asset.updatedAt } });
             }, async () => {
-                await persistWorkspaceAssetChanges(captureUserScope());
+                await persistWorkspaceAssetChanges();
             });
             expect(urls).toEqual([`put /assets/${id}`]);
         } finally {
@@ -319,7 +284,7 @@ describe("asset store draft commit identity", () => {
                 await gate.promise;
                 return envelope({ asset: { id: "asset-live", title: "服务端旧名", category: "other", status: "confirmed", createdAt: asset.createdAt, updatedAt: asset.updatedAt } });
             }, async () => {
-                const pending = persistWorkspaceAssetLink({ asset: { ...asset, title: "提交中" }, expectedScope: captureUserScope() });
+                const pending = persistWorkspaceAssetLink({ asset: { ...asset, title: "提交中" } });
                 await entered.promise;
                 useAssetStore.getState().updateAsset("asset-live", { title: "本地新名" });
                 gate.resolve();
@@ -331,7 +296,7 @@ describe("asset store draft commit identity", () => {
         }
     });
 
-    test("deferred cache write then edit then A/B switch then restart restores the edited snapshot and submits it", async () => {
+    test("deferred cache write then edit then restart restores the edited snapshot and submits it", async () => {
         const restore = switchScope("owner-a");
         desktopBackend();
         const originalWindow = globalThis.window;
@@ -373,14 +338,8 @@ describe("asset store draft commit identity", () => {
             useAssetStore.getState().updateAsset(id, { title: "编辑后" });
             await waitFor(() => [...memory.entries()].some(([key, value]) => isDraftsKey(key) && value.includes("编辑后")), "edited draft snapshot");
 
-            const firstEpoch = captureUserScope();
-            setActiveUserScope("owner-b");
-            setActiveUserScope("owner-a");
-            const secondEpoch = captureUserScope();
-            expect(secondEpoch.epoch).not.toBe(firstEpoch.epoch);
             cacheGate.resolve();
             await new Promise((resolve) => setTimeout(resolve, 20));
-            expect([...memory.entries()].some(([key, value]) => isAssetCacheKey(key) && value.includes("编辑后"))).toBe(false);
 
             unloadAssetStoreDraftsForTests();
             useAssetStore.setState({ assets: [] });
@@ -398,7 +357,7 @@ describe("asset store draft commit identity", () => {
                 if (payload?.asset?.title) titles.push(payload.asset.title);
                 return envelope({ asset: { id, title: payload?.asset?.title, createdAt: "2026-10-02T00:00:00.000Z", updatedAt: "2026-10-02T00:00:00.000Z" } });
             }, async () => {
-                await persistWorkspaceAssetChanges(secondEpoch);
+                await persistWorkspaceAssetChanges();
             });
             expect(urls).toEqual([`put /assets/${id}`]);
             expect(titles).toEqual(["编辑后"]);
@@ -412,89 +371,4 @@ describe("asset store draft commit identity", () => {
         }
     });
 
-    test("persistWorkspaceAssetChanges reasserts the original scope after hydrate awaits", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        const originalWindow = globalThis.window;
-        globalThis.window = originalWindow ?? ({ localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} } } as never);
-        const entered = deferred();
-        const gate = deferred();
-        const urls: string[] = [];
-        const getItem = spyOn(localforage, "getItem").mockImplementation(async (key) => {
-            if (isDraftsKey(key)) {
-                entered.resolve();
-                await gate.promise;
-            }
-            return null;
-        });
-        const setItem = spyOn(localforage, "setItem").mockImplementation(async (_key, value) => value);
-        const removeItem = spyOn(localforage, "removeItem").mockImplementation(async () => undefined);
-
-        try {
-            unloadAssetStoreDraftsForTests();
-            const expected = captureUserScope();
-            await withAdapter(async (config) => {
-                urls.push(requestKey(config));
-                return envelope({ asset: { id: "x" } });
-            }, async () => {
-                const pending = persistWorkspaceAssetChanges(expected);
-                await entered.promise;
-                setActiveUserScope("owner-b");
-                gate.resolve();
-                await expect(pending).rejects.toBeInstanceOf(UserScopeAbandonedError);
-            });
-            expect(urls).toEqual([]);
-        } finally {
-            gate.resolve();
-            getItem.mockRestore();
-            setItem.mockRestore();
-            removeItem.mockRestore();
-            if (!originalWindow) delete (globalThis as { window?: unknown }).window;
-            restore();
-        }
-    });
-
-    test("deleteWorkspaceAsset does not recapture a new account after hydrate awaits", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        const originalWindow = globalThis.window;
-        globalThis.window = originalWindow ?? ({ localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} } } as never);
-        const entered = deferred();
-        const gate = deferred();
-        const urls: string[] = [];
-        const getItem = spyOn(localforage, "getItem").mockImplementation(async (key) => {
-            if (isDraftsKey(key)) {
-                entered.resolve();
-                await gate.promise;
-            }
-            return null;
-        });
-        const setItem = spyOn(localforage, "setItem").mockImplementation(async (_key, value) => value);
-        const removeItem = spyOn(localforage, "removeItem").mockImplementation(async () => undefined);
-
-        try {
-            unloadAssetStoreDraftsForTests();
-            const expected = captureUserScope();
-            await withAdapter(async (config) => {
-                urls.push(requestKey(config));
-                return envelope({ id: "asset-1" });
-            }, async () => {
-                const pending = deleteWorkspaceAsset("asset-1", expected);
-                await entered.promise;
-                setActiveUserScope("owner-b");
-                gate.resolve();
-                await expect(pending).rejects.toBeInstanceOf(UserScopeAbandonedError);
-            });
-            expect(urls).toEqual([]);
-            expect(peekAssetStoreDraft("owner-b", "asset-1")).toBeUndefined();
-            expect(peekAssetStoreDraft("owner-a", "asset-1")).toBeUndefined();
-        } finally {
-            gate.resolve();
-            getItem.mockRestore();
-            setItem.mockRestore();
-            removeItem.mockRestore();
-            if (!originalWindow) delete (globalThis as { window?: unknown }).window;
-            restore();
-        }
-    });
 });

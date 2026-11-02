@@ -1,4 +1,3 @@
-import type { CapturedUserScope } from "@/lib/user-scope-guard";
 import { http } from "@/services/api/request";
 import { normalizeAssetCategory, type AssetCategory } from "@/lib/asset-category";
 import type { GenerationTask } from "@/services/api/task-center";
@@ -444,8 +443,8 @@ export function createProject(input: { name: string; type: string; aspectRatio: 
     return http.post<{ project: Project }>("/projects", input);
 }
 
-export function updateProject(projectId: string, input: Partial<Pick<Project, "name" | "type" | "aspectRatio" | "sourceType" | "description" | "coverResourceId" | "stylePresetId" | "styleProfileJson" | "defaultImageModel" | "defaultVideoModel" | "status">>, expectedScope?: CapturedUserScope) {
-    return http.patch<{ project: Project }>(`/projects/${encodeURIComponent(projectId)}`, input, { expectedScope });
+export function updateProject(projectId: string, input: Partial<Pick<Project, "name" | "type" | "aspectRatio" | "sourceType" | "description" | "coverResourceId" | "stylePresetId" | "styleProfileJson" | "defaultImageModel" | "defaultVideoModel" | "status">>) {
+    return http.patch<{ project: Project }>(`/projects/${encodeURIComponent(projectId)}`, input);
 }
 
 export function deleteProject(projectId: string) {
@@ -456,8 +455,8 @@ export function createProjectUnit(projectId: string, input: { kind: string; titl
     return http.post<{ unit: ProjectUnit }>(`/projects/${encodeURIComponent(projectId)}/units`, input);
 }
 
-export function getProjectUnit(projectId: string, unitId: string, expectedScope?: CapturedUserScope, signal?: AbortSignal) {
-    return http.get<{ unit: ProjectUnit }>(`/projects/${encodeURIComponent(projectId)}/units/${encodeURIComponent(unitId)}`, { expectedScope, signal });
+export function getProjectUnit(projectId: string, unitId: string, signal?: AbortSignal) {
+    return http.get<{ unit: ProjectUnit }>(`/projects/${encodeURIComponent(projectId)}/units/${encodeURIComponent(unitId)}`, { signal });
 }
 
 export function importProjectUnits(projectId: string, units: Array<{ kind: string; title: string; sourceText?: string }>) {
@@ -488,20 +487,20 @@ export function unlinkCanvasProject(projectId: string, canvasId: string) {
     return http.delete<{ canvasId: string }>(`/projects/${encodeURIComponent(projectId)}/canvases/${encodeURIComponent(canvasId)}`);
 }
 
-export function linkProjectAsset(projectId: string, input: { assetId: string; category: AssetCategory; folderId?: string; title?: string; source?: "uploaded" | "canvas" }, signal?: AbortSignal, expectedScope?: CapturedUserScope) {
-    return http.post<{ asset: ProjectAsset }>(`/projects/${encodeURIComponent(projectId)}/assets`, input, { signal, expectedScope });
+export function linkProjectAsset(projectId: string, input: { assetId: string; category: AssetCategory; folderId?: string; title?: string; source?: "uploaded" | "canvas" }, signal?: AbortSignal) {
+    return http.post<{ asset: ProjectAsset }>(`/projects/${encodeURIComponent(projectId)}/assets`, input, { signal });
 }
 
-export function unlinkProjectAsset(projectId: string, assetId: string, signal?: AbortSignal, expectedScope?: CapturedUserScope) {
-    return http.delete<{ id: string }>(`/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`, { signal, expectedScope });
+export function unlinkProjectAsset(projectId: string, assetId: string, signal?: AbortSignal) {
+    return http.delete<{ id: string }>(`/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`, { signal });
 }
 
-export function updateProjectAssetCategory(projectId: string, assetId: string, category: AssetCategory, signal?: AbortSignal, expectedScope?: CapturedUserScope) {
-    return http.patch<{ asset: ProjectAsset }>(`/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`, { category }, { signal, expectedScope });
+export function updateProjectAssetCategory(projectId: string, assetId: string, category: AssetCategory, signal?: AbortSignal) {
+    return http.patch<{ asset: ProjectAsset }>(`/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`, { category }, { signal });
 }
 
-export function moveProjectAsset(projectId: string, assetId: string, folderId: string, signal?: AbortSignal, expectedScope?: CapturedUserScope) {
-    return http.patch<{ asset: ProjectAsset }>(`/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`, { folderId }, { signal, expectedScope });
+export function moveProjectAsset(projectId: string, assetId: string, folderId: string, signal?: AbortSignal) {
+    return http.patch<{ asset: ProjectAsset }>(`/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`, { folderId }, { signal });
 }
 
 export function listProjectAssetFolders(projectId: string, signal?: AbortSignal) {
@@ -540,12 +539,12 @@ export function updateProjectCharacter(projectId: string, assetId: string, input
     return http.patch<ProjectCharacterDetail>(`/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(assetId)}`, input);
 }
 
-export function replaceProjectCharacterRepresentations(projectId: string, assetId: string, representations: Array<{ role: string; resourceId: string; metadata?: Record<string, unknown> }>, expectedScope?: CapturedUserScope) {
-    return http.put<ProjectCharacterDetail>(`/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(assetId)}/representations`, { representations }, { expectedScope });
+export function replaceProjectCharacterRepresentations(projectId: string, assetId: string, representations: Array<{ role: string; resourceId: string; metadata?: Record<string, unknown> }>) {
+    return http.put<ProjectCharacterDetail>(`/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(assetId)}/representations`, { representations });
 }
 
-export function bindProjectCharacterVoice(projectId: string, assetId: string, input: { voiceProfileId?: string; sampleResourceId?: string; voiceName?: string; instructions?: string }, expectedScope?: CapturedUserScope) {
-    return http.put<ProjectCharacterDetail>(`/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(assetId)}/voice`, input, { expectedScope });
+export function bindProjectCharacterVoice(projectId: string, assetId: string, input: { voiceProfileId?: string; sampleResourceId?: string; voiceName?: string; instructions?: string }) {
+    return http.put<ProjectCharacterDetail>(`/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(assetId)}/voice`, input);
 }
 
 export function unbindProjectCharacterVoice(projectId: string, assetId: string) {
@@ -570,14 +569,14 @@ export function replaceProjectUnitShots(
     shots: Array<{ title: string; description: string; durationMs: number; revision?: Partial<ShotRevisionInput>; assetVersionIds?: string[] }>,
     expectedShotIds: string[],
     expectedRevision: number,
-    options?: { sourceTaskId?: string; expectedScope?: CapturedUserScope },
+    options?: { sourceTaskId?: string },
 ) {
     return http.put<{ shots: ProjectShot[] }>(`/projects/${encodeURIComponent(projectId)}/units/${encodeURIComponent(unitId)}/shots`, {
         shots,
         expectedShotIds,
         expectedRevision,
         ...(options?.sourceTaskId ? { sourceTaskId: options.sourceTaskId } : {}),
-    }, { expectedScope: options?.expectedScope });
+    });
 }
 
 export function linkShotAsset(projectId: string, shotId: string, input: { assetVersionId: string; role: ShotAssetReference["role"] }) {
@@ -596,13 +595,13 @@ export function createProjectAssetCandidates(
     projectId: string,
     candidates: Array<{ unitId?: string; shotId?: string; name: string; category: AssetCategory; details?: Record<string, unknown> }>,
     source?: "chapter_character_extract" | "agent",
-    options?: { sourceTaskId?: string; expectedScope?: CapturedUserScope },
+    options?: { sourceTaskId?: string },
 ) {
     return http.post<{ candidates: ProjectAssetCandidate[] }>(`/projects/${encodeURIComponent(projectId)}/asset-candidates`, {
         candidates,
         source,
         ...(options?.sourceTaskId ? { sourceTaskId: options.sourceTaskId } : {}),
-    }, { expectedScope: options?.expectedScope });
+    });
 }
 
 export type ChapterApplyReceipt = {
@@ -612,10 +611,9 @@ export type ChapterApplyReceipt = {
     applied: boolean;
 };
 
-export function listChapterApplyReceipts(projectId: string, taskIds: string[], options?: { expectedScope?: CapturedUserScope }) {
+export function listChapterApplyReceipts(projectId: string, taskIds: string[]) {
     return http.get<{ receipts: ChapterApplyReceipt[] }>(`/projects/${encodeURIComponent(projectId)}/chapter-apply-receipts`, {
         params: { taskIds: taskIds.filter(Boolean).join(",") },
-        expectedScope: options?.expectedScope,
     });
 }
 

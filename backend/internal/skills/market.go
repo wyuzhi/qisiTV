@@ -35,17 +35,55 @@ func marketClient() (*skillhub.Client, error) {
 	return skillhub.New(base)
 }
 func (s *Service) MarketCatalog(ctx context.Context, q string, page, size int) (*skillhub.Catalog, error) {
+	builtins := s.matchingBuiltinMarketReleases(q)
 	c, e := marketClient()
 	if e != nil {
 		return nil, e
 	}
 	var result skillhub.Catalog
 	e = c.JSON(ctx, "GET", fmt.Sprintf("catalog?q=%s&page=%d&pageSize=%d", url.QueryEscape(q), page, size), "", "", nil, &result)
-	return &result, e
+	if len(builtins) == 0 {
+		return &result, e
+	}
+	if e != nil {
+		if page == 1 {
+			return &skillhub.Catalog{Items: builtins, Total: int64(len(builtins)), Page: page, PageSize: size}, nil
+		}
+		return nil, e
+	}
+	builtinBySkillID := make(map[string]bool, len(builtins))
+	for _, rel := range builtins {
+		builtinBySkillID[rel.SkillID] = true
+	}
+	filtered := make([]skillhub.Release, 0, len(result.Items))
+	var removed int64
+	for _, item := range result.Items {
+		if builtinBySkillID[item.SkillID] {
+			removed++
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	if page == 1 {
+		combined := make([]skillhub.Release, 0, len(builtins)+len(filtered))
+		combined = append(combined, builtins...)
+		combined = append(combined, filtered...)
+		if size > 0 && len(combined) > size {
+			combined = combined[:size]
+		}
+		result.Items = combined
+	} else {
+		result.Items = filtered
+	}
+	result.Total = result.Total - removed + int64(len(builtins))
+	return &result, nil
 }
 func (s *Service) MarketRelease(ctx context.Context, id, version string) (*skillhub.Release, error) {
 	if !marketResourceID.MatchString(id) || !marketResourceID.MatchString(version) {
 		return nil, kernel.BadAuthRequest("技能版本地址无效")
+	}
+	if rel, _, ok := s.findBuiltinMarketRelease(id, version); ok {
+		return rel, nil
 	}
 	c, e := marketClient()
 	if e != nil {
@@ -64,6 +102,9 @@ func (s *Service) MarketRelease(ctx context.Context, id, version string) (*skill
 func (s *Service) InstallMarket(ctx context.Context, user, id, version string) (*SkillItem, error) {
 	unlock := s.lockMarket(user)
 	defer unlock()
+	if _, _, ok := s.findBuiltinMarketRelease(id, version); ok {
+		return s.SetSkillAdded(user, id, true)
+	}
 	r, e := s.MarketRelease(ctx, id, version)
 	if e != nil {
 		return nil, e

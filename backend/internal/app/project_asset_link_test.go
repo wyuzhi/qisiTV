@@ -55,7 +55,7 @@ func TestLinkProjectAssetCreatesAssetFromUploadedResource(t *testing.T) {
 		}
 	}
 
-	summary, err := service.LinkProjectAsset("user-1", "project-1", LinkProjectAssetRequest{
+	summary, err := service.ProjectService().LinkProjectAsset("user-1", "project-1", LinkProjectAssetRequest{
 		AssetID:  "resource-1",
 		Category: "",
 		Title:    "开场.mp4",
@@ -103,7 +103,7 @@ func TestLinkProjectAssetMissingResourceKeepsFailingClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := service.LinkProjectAsset("user-2", "project-2", LinkProjectAssetRequest{
+	if _, err := service.ProjectService().LinkProjectAsset("user-2", "project-2", LinkProjectAssetRequest{
 		AssetID: "no-such-resource",
 	}); err == nil {
 		t.Fatal("LinkProjectAsset succeeded for missing resource, want error")

@@ -20,7 +20,7 @@ func TestUpdateUserCanvasNodeFieldsFollowsDescriptorPaths(t *testing.T) {
 	created, err := svc.UpsertUserCanvasProject(actor, json.RawMessage(`{
 		"id":"canvas-patch-paths","revision":0,"title":"补丁路径",
 		"nodes":[
-			{"id":"img","type":"image","title":"镜头","metadata":{"content":"","prompt":"已提交提示词","composerContent":"原始草稿","status":"idle"}},
+			{"id":"img","type":"image","title":"镜头","metadata":{"content":"","prompt":"已提交提示词","composerContent":"原始草稿","promptTemplateOperation":"storyboard-image","promptTemplateVariables":{"shot":"1"},"status":"idle"}},
 			{"id":"txt","type":"text","title":"文本","metadata":{"content":"正文","status":"idle"}}
 		],"connections":[]}`))
 	if err != nil {
@@ -47,6 +47,9 @@ func TestUpdateUserCanvasNodeFieldsFollowsDescriptorPaths(t *testing.T) {
 	if image.Metadata["composerContent"] != "夜景：雨夜巷口对峙" {
 		t.Fatalf("生成节点 content 补丁应落到 composerContent，实际 %#v", image.Metadata)
 	}
+	if image.Metadata["promptTemplateOperation"] != nil || image.Metadata["promptTemplateVariables"] != nil {
+		t.Fatalf("修改草稿提示词时应清理旧模板变量，实际 %#v", image.Metadata)
+	}
 	if image.Metadata["prompt"] != "已提交提示词" {
 		t.Fatalf("content 补丁不得改写已提交提示词，实际 %#v", image.Metadata["prompt"])
 	}
@@ -57,7 +60,7 @@ func TestUpdateUserCanvasNodeFieldsFollowsDescriptorPaths(t *testing.T) {
 	if _, err := svc.UpdateUserCanvasNodeFields(actor, canvasID, "txt", map[string]any{"content": "新的正文"}, created.Revision+1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.UpdateUserCanvasNodeFields(actor, canvasID, "img", map[string]any{"prompt": "重新提交的提示词"}, created.Revision+2); err != nil {
+	if _, err := svc.UpdateUserCanvasNodeFields(actor, canvasID, "img", map[string]any{"prompt": "下一版提示词草稿"}, created.Revision+2); err != nil {
 		t.Fatal(err)
 	}
 	raw, err = svc.UserCanvasProject(actor, canvasID)
@@ -70,11 +73,14 @@ func TestUpdateUserCanvasNodeFieldsFollowsDescriptorPaths(t *testing.T) {
 	if doc.Nodes[1].Metadata["content"] != "新的正文" {
 		t.Fatalf("文本节点 content 补丁应落到 content，实际 %#v", doc.Nodes[1].Metadata)
 	}
-	if doc.Nodes[0].Metadata["prompt"] != "重新提交的提示词" {
-		t.Fatalf("prompt 补丁应仍写入 metadata.prompt，实际 %#v", doc.Nodes[0].Metadata["prompt"])
+	if doc.Nodes[0].Metadata["composerContent"] != "下一版提示词草稿" {
+		t.Fatalf("prompt 补丁应写入 metadata.composerContent，实际 %#v", doc.Nodes[0].Metadata["composerContent"])
 	}
-	if doc.Nodes[0].Metadata["composerContent"] != "夜景：雨夜巷口对峙" {
-		t.Fatalf("prompt 补丁不得改写编辑器草稿，实际 %#v", doc.Nodes[0].Metadata["composerContent"])
+	if doc.Nodes[0].Metadata["prompt"] != "已提交提示词" {
+		t.Fatalf("prompt 补丁不得覆盖历史已提交提示词，实际 %#v", doc.Nodes[0].Metadata["prompt"])
+	}
+	if _, err := svc.UpdateUserCanvasNodeFields(actor, canvasID, "img", map[string]any{"prompt": "草稿A", "content": "草稿B"}, created.Revision+3); err == nil {
+		t.Fatal("同时提交不同内容的 prompt 与 content 应被拒绝")
 	}
 }
 

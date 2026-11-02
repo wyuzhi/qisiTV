@@ -24,7 +24,7 @@ export function canvasUnconfirmedReason(state: CanvasUnconfirmedState): CanvasUn
 }
 
 const documentFields = ["title", "canvasTitle", "workspaceProjectId", "projectId", "folderId", "starterMode", "nodes", "connections", "chatSessions", "activeChatId", "directorScenes", "timeline"] as const;
-const metadataFields = ["prompt", "composerContent", "content", "storageKey", "assetId", "mimeType", "bytes", "naturalWidth", "naturalHeight", "durationMs", "nodeRole", "resultOrigin", "status", "taskId", "taskStatus", "taskStage", "taskProgress", "taskUpdatedAt", "taskCompletedAt", "taskFailureDiagnostics", "generationEffectKeys", "model", "size", "count", "quality", "videoSeconds", "references", "resourceReloadAvailable", "videoPreview", "hasAudio", "generateAudio", "watermark"] as const;
+const metadataFields = ["prompt", "composerContent", "content", "storageKey", "assetId", "mimeType", "bytes", "naturalWidth", "naturalHeight", "durationMs", "nodeRole", "resultOrigin", "status", "taskId", "taskOutcome", "taskStatus", "taskStage", "taskProgress", "taskUpdatedAt", "taskCompletedAt", "taskFailureDiagnostics", "generationEffectKeys", "model", "size", "count", "quality", "videoSeconds", "references", "videoPreview", "hasAudio", "generateAudio", "watermark"] as const;
 
 const nodeFields = ["createdAt", "updatedAt", "type", "title", "width", "height", "position", "parentId"] as const;
 

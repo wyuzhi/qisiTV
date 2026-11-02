@@ -1,0 +1,1 @@
+{"task_ref":"persisted-attempt","media_type":"image","status":"failed","task_id":"task_121704.727","outputs":[],"billing_state":"refunded","quota":0,"reserved_quota":0,"charged_quota":0,"adjustment_quota":0,"usage_state":"failed","error":{"code":"media_generation_failed","category":"upstream","message":"The original media task failed."}}

@@ -6,7 +6,6 @@ import { Check, Maximize2, X } from "lucide-react";
 import type { CanvasDrawingEditorHandle } from "@/components/canvas/canvas-drawing-editor-types";
 import { drawingEngineForNode, drawingEngineLabel } from "@/lib/canvas/canvas-drawing-engine";
 import { loadCanvasDrawing, saveCanvasDrawing, type CanvasDrawingSnapshot } from "@/lib/canvas/canvas-drawing-storage";
-import { captureUserScope, isUserScopeAbandonedError } from "@/lib/user-scope-guard";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import type { CanvasNodeData } from "@/types/canvas";
 
@@ -36,14 +35,13 @@ export function CanvasDrawingEditorModal({ open, projectId, node, onClose, onSav
     useEffect(() => {
         if (!open || !node?.metadata?.drawingId) return;
         let cancelled = false;
-        const expected = captureUserScope();
         setLoaded(false);
         setReady(false);
         setLoadError("");
         setDraftHint("");
         setSnapshot(null);
         currentRef.current = null;
-        void loadCanvasDrawing(projectId, node.metadata.drawingId, expected).then((saved) => {
+        void loadCanvasDrawing(projectId, node.metadata.drawingId).then((saved) => {
             if (cancelled) return;
             if (saved && saved.engine !== engine) throw new Error(`绘图节点标记为 ${drawingEngineLabel(engine)}，但文档属于 ${drawingEngineLabel(saved.engine)}`);
             currentRef.current = saved;
@@ -52,9 +50,7 @@ export function CanvasDrawingEditorModal({ open, projectId, node, onClose, onSav
             setLoaded(true);
         }).catch((error) => {
             if (cancelled) return;
-            const detail = isUserScopeAbandonedError(error)
-                ? error.message
-                : error instanceof Error ? error.message : "绘图文档无法读取";
+            const detail = error instanceof Error ? error.message : "绘图文档无法读取";
             setLoadError(detail);
             message.error(`绘图加载失败：${detail}`);
         });
@@ -64,10 +60,9 @@ export function CanvasDrawingEditorModal({ open, projectId, node, onClose, onSav
     const handleSave = async () => {
         if (!node?.metadata?.drawingId || !ready || !editorRef.current) return false;
         setSaving(true);
-        const expected = captureUserScope();
         try {
             const draft = await editorRef.current.createSave();
-            const saved = await saveCanvasDrawing(projectId, node.metadata.drawingId, engine, draft.snapshot, currentRef.current, draft.preview, draft.render, expected);
+            const saved = await saveCanvasDrawing(projectId, node.metadata.drawingId, engine, draft.snapshot, currentRef.current, draft.preview, draft.render);
             currentRef.current = saved;
             setDraftHint(saved.canonicalMissing ? "工作区里没有这份绘图，草稿已留在本机" : "");
             onSaved(node.id, saved);

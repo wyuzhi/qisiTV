@@ -59,6 +59,59 @@ func newService(repo *repository.Repository, coordinator *Coordinator, host Host
 	}
 }
 
+type HostConfig struct {
+	Repo         *repository.Repository
+	RequireAdmin func(*model.User) error
+	AppendAudit  func(*model.User, string, string, string, string, any) error
+}
+
+type configHost struct {
+	cfg HostConfig
+}
+
+func NewHost(cfg HostConfig) Host {
+	return configHost{cfg: cfg}
+}
+
+func (h configHost) RequireAdmin(user *model.User) error {
+	if h.cfg.RequireAdmin == nil {
+		return nil
+	}
+	return h.cfg.RequireAdmin(user)
+}
+
+func (h configHost) AppendAudit(actor *model.User, action, targetType, targetID, summary string, metadata any) error {
+	if h.cfg.AppendAudit == nil {
+		return nil
+	}
+	return h.cfg.AppendAudit(actor, action, targetType, targetID, summary, metadata)
+}
+
+func (h configHost) ChannelConcurrencyLimit(channelID string) (int, error) {
+	if h.cfg.Repo == nil {
+		return 0, nil
+	}
+	channel, err := h.cfg.Repo.SystemChannel(channelID)
+	if err != nil {
+		return 0, err
+	}
+	return channel.ConcurrencyLimit, nil
+}
+
+func NewForMode(repo *repository.Repository, coordinator *Coordinator, host Host, localMode bool) *Service {
+	if localMode {
+		return NewLocal(repo, coordinator, host)
+	}
+	return New(repo, coordinator, host)
+}
+
+func RuntimePolicyWithRepo(repo *repository.Repository, localMode bool) (RuntimePolicySetting, error) {
+	if localMode {
+		return SelfUseRuntimePolicy(), nil
+	}
+	return New(repo, nil, nil).RuntimePolicy()
+}
+
 func (s *Service) requireAdmin(user *model.User) error {
 	if s == nil || s.host == nil {
 		return kernel.Unauthorized("请先登录")

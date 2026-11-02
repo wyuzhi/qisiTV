@@ -185,6 +185,67 @@ func TestProtocolGrokImagesPluginPayloadKeepsAspectRatio(t *testing.T) {
 	}
 }
 
+func TestProtocolOpenAIImagesPluginSendsSelectedResponseFormat(t *testing.T) {
+	adapter := officialSourceProviderAdapter(t, "openai-images", "openai-image")
+	profile := DefaultImageCapabilityConfig("openai-image", "gpt-image-2")
+	profile.ResponseFormat.Supported = true
+	profile.ResponseFormat.Value = "url"
+
+	cases := []struct {
+		name   string
+		images []providerMedia
+		path   string
+	}{
+		{name: "generation", path: "/v1/images/generations"},
+		{
+			name:   "edit",
+			images: []providerMedia{{MimeType: "image/png", DataURL: "data:image/png;base64,iVBORw0KGgo="}},
+			path:   "/v1/images/edits",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			request := protocolRequestFromInput(canvasGenerationInput{
+				Mode:            "image",
+				Prompt:          "a landscape",
+				Config:          providerConfig{Model: "gpt-image-2", InterfaceType: "openai-image"},
+				ReferenceImages: tc.images,
+				ImageCapability: profile,
+			})
+			spec, err := adapter.BuildCreate(context.Background(), protocol.RequestContext{Request: request})
+			if err != nil {
+				t.Fatalf("build request: %v", err)
+			}
+			if spec.Path != tc.path {
+				t.Fatalf("path = %q, want %q", spec.Path, tc.path)
+			}
+			body := marshalProtocolBody(t, spec.Body)
+			if body["response_format"] != "url" {
+				t.Fatalf("openai-images response_format = %#v, want %q", body["response_format"], "url")
+			}
+		})
+	}
+}
+
+func TestProtocolOpenAIImagesPluginLeavesUnsetResponseFormatAlone(t *testing.T) {
+	adapter := officialSourceProviderAdapter(t, "openai-images", "openai-image")
+	profile := DefaultImageCapabilityConfig("openai-image", "gpt-image-2")
+	request := protocolRequestFromInput(canvasGenerationInput{
+		Mode:            "image",
+		Prompt:          "a landscape",
+		Config:          providerConfig{Model: "gpt-image-2", InterfaceType: "openai-image"},
+		ImageCapability: profile,
+	})
+	spec, err := adapter.BuildCreate(context.Background(), protocol.RequestContext{Request: request})
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	body := marshalProtocolBody(t, spec.Body)
+	if value, exists := body["response_format"]; exists {
+		t.Fatalf("response_format = %#v, want it left to the channel providerOptions", value)
+	}
+}
+
 func officialSourceProviderAdapter(t *testing.T, pluginID, providerID string) protocol.Adapter {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("..", "..", "..", "plugin-packages", pluginID, "manifest.json"))

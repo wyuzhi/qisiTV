@@ -28,7 +28,7 @@ func TestDomesticGatewayVideoContractDoesNotGrantHostedCredentials(t *testing.T)
 	}
 	meta := body["metadata"].(map[string]interface{})
 	content := body["content"].([]map[string]interface{})
-	if len(content) != 1 || content[0]["type"] != "video_url" || content[0]["role"] != "reference_video" || body["seconds"] != "-1" || meta["ratio"] != "adaptive" || meta["omni_reference_task_type"] != "edit" || meta["generate_audio"] != false || meta["watermark"] != false {
+	if len(content) != 1 || content[0]["type"] != "video_url" || content[0]["role"] != "reference_video" || body["seconds"] != "4" || body["aspect_ratio"] != "16:9" || meta["operation"] != "inpaint" || meta["generate_audio"] != false || meta["watermark"] != false {
 		t.Fatalf("edit controls were lost: %#v", body)
 	}
 }
@@ -39,7 +39,7 @@ func TestBeefAPITextVideoPreservesWatermarkSwitch(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if body["watermark"] != (enabled == "true") {
+		if body["metadata"].(map[string]any)["watermark"] != (enabled == "true") {
 			t.Fatalf("watermark=%s was lost: %#v", enabled, body)
 		}
 	}

@@ -422,10 +422,10 @@ func normalizeSkillMutationRequest(req SkillMutationRequest, requireInstruction 
 	req.Tag = strings.TrimSpace(req.Tag)
 	req.MarkdownURL = strings.TrimSpace(req.MarkdownURL)
 	req.ExtraInfo = strings.TrimSpace(req.ExtraInfo)
-	if req.SkillName == "" || utf8.RuneCountInString(req.SkillName) > 80 {
+	if req.SkillName == "" || utf8.RuneCountInString(req.SkillName) > maxSkillNameRunes {
 		return req, "", kernel.BadAuthRequest("技能名称必须为 1-80 个字符")
 	}
-	if req.Description == "" || utf8.RuneCountInString(req.Description) > 500 {
+	if req.Description == "" || utf8.RuneCountInString(req.Description) > maxSkillDescriptionRunes {
 		return req, "", kernel.BadAuthRequest("技能简介必须为 1-500 个字符")
 	}
 	if (requireInstruction && req.Instruction == "") || utf8.RuneCountInString(req.Instruction) > 100000 {

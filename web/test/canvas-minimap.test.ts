@@ -6,9 +6,9 @@ const root = resolve(import.meta.dir, "..");
 
 describe("LibTV canvas minimap contract", () => {
     test("persists the minimap preference in the scoped canvas store", () => {
-        const project = readFileSync(resolve(root, "src/pages/canvas/project.tsx"), "utf8");
-        expect(project).toContain('scopedLocalStorage.getItem("canvas:minimap")');
-        expect(project).toContain('scopedLocalStorage.setItem("canvas:minimap", next ? "1" : "0")');
+        const prefs = readFileSync(resolve(root, "src/pages/canvas/use-canvas-preferences.ts"), "utf8");
+        expect(prefs).toContain('scopedLocalStorage.getItem("canvas:minimap")');
+        expect(prefs).toContain('scopedLocalStorage.setItem("canvas:minimap",');
     });
 
     test("exposes a stable accessible minimap surface", () => {

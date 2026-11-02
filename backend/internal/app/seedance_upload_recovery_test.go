@@ -16,7 +16,7 @@ func TestSeedanceUploadRecoveryBeforeSingleGeneration(t *testing.T) {
 		name    string
 		status  int
 		recover bool
-	}{{"storage_signature_rejected", 403, true}, {"storage_unavailable", 503, true}, {"connection_reset", 0, true}, {"invalid_upload", 400, false}} {
+	}{{"storage_signature_rejected", 403, false}, {"storage_unavailable", 503, true}, {"connection_reset", 0, true}, {"invalid_upload", 400, false}} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newBeefAPISeedanceUploadHarness(t)
 			h.putHook = func(w http.ResponseWriter, r *http.Request) {
@@ -66,7 +66,7 @@ func TestSeedanceUploadRecoveryBeforeSingleGeneration(t *testing.T) {
 				task := model.Task{FailureDiagnostics: d}
 				captureTaskFailureDiagnostics(&task, err, "unknown")
 				d = task.FailureDiagnostics
-				if d.Source != "reference_upload" || d.ProviderCode != "SignatureDoesNotMatch" || d.RequestID != "storage-request-123456" || d.HTTPStatus != 400 || !strings.Contains(d.Stage, "参考图 2") {
+				if d.Source != "reference_upload" || d.ProviderCode != "SignatureDoesNotMatch" || d.RequestID != "storage-request-123456" || d.HTTPStatus != tc.status || !strings.Contains(d.Stage, "参考图 2") {
 					t.Fatalf("terminal evidence lost: %+v", d)
 				}
 				return

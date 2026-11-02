@@ -22,7 +22,6 @@ const axiosAllowed = new Set([
     "services/api/request.ts",
     "services/api/channel-transport.ts",
     "services/api/image-response.ts",
-    "services/api/video-response.ts",
     "services/diagnostics/client-diagnostics.ts",
 ]);
 

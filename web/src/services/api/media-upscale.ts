@@ -1,4 +1,3 @@
-import type { CapturedUserScope } from "@/lib/user-scope-guard";
 import { http } from "./request";
 import type { GenerationTask } from "./task-center";
 
@@ -23,8 +22,8 @@ export function createUpscaleTask(params: UpscaleParams & { clientOperationId: s
         return task;
     });
 }
-export function recoverUpscaleTask(taskId: string, expectedScope?: CapturedUserScope) {
-    return http.post<GenerationTask>(`/media-upscale/tasks/${encodeURIComponent(taskId)}/recover`, {}, { expectedScope, timeout: UPSCALE_RECOVER_TIMEOUT_MS }).then(task => {
+export function recoverUpscaleTask(taskId: string) {
+    return http.post<GenerationTask>(`/media-upscale/tasks/${encodeURIComponent(taskId)}/recover`, {}, { timeout: UPSCALE_RECOVER_TIMEOUT_MS }).then(task => {
         if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("canvas:task-updated", { detail: { task } }));
         return task;
     });

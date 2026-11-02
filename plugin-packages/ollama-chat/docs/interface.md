@@ -86,7 +86,7 @@
 
 ```json
 {
-  "apiVersion": "beeftv.plugin/v2",
+  "apiVersion": "qisitv.plugin/v2",
   "id": "ollama-chat",
   "name": "Ollama Chat",
   "version": "2.0.0",

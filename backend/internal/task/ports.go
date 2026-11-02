@@ -131,6 +131,16 @@ type ProviderControl interface {
 	RequestCancel(ctx context.Context, task *model.Task) error
 }
 
+// Recovery performs free result recovery (delivery resume, accepted image replay,
+// or upstream video/upscale status query) without ever creating a new task or
+// issuing a paid retry.
+type Recovery interface {
+	ResetBackoff(userID, taskID string) error
+	ResumeDelivery(ctx context.Context, userID, taskID string) (*model.Task, error)
+	RecoverImage(ctx context.Context, userID, taskID string) (*model.Task, error)
+	RecoverVideoOrUpscale(ctx context.Context, userID, taskID string) (*model.Task, error)
+}
+
 // Presenter projects durable rows onto the public read model.
 type Presenter interface {
 	Task(model.Task) *model.Task
@@ -158,6 +168,7 @@ type Activity interface {
 //	admit specialized: Store, Projects, Policy, Runtime, Persist, Present
 //	  transcription also needs OwnedMedia and Features; depth also needs OwnedMedia
 //	retry: Store, Runtime, Images, Failures, Secrets, Catalog, Policy, Projects, Present
+//	recover: Store, Runtime, Recovery, Present
 //	cancel: Store, Runtime, Present; Provider and TextReplay are optional
 //	reads: Store, Present
 //
@@ -177,6 +188,7 @@ type Dependencies struct {
 	Failures               Failures
 	TextReplay             TextReplay
 	Provider               ProviderControl
+	Recovery               Recovery
 	Present                Presenter
 	Logs                   Logger
 	Activity               Activity

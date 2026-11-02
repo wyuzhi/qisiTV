@@ -15,7 +15,6 @@ type HarnessWindow = Window & {
         refreshCount: number;
         strictSetups: number;
         strictCleanups: number;
-        switchABA: () => Promise<void>;
         switchProjectABA: () => void;
     };
 };
@@ -96,18 +95,11 @@ function watchToasts() {
     observer.observe(document.body, { childList: true, subtree: true });
 }
 
-async function switchABA() {
-    await fetch("/harness/switch", { method: "POST" });
-    setActiveUserScope("owner-b");
-    setActiveUserScope("owner-a");
-}
-
 harnessWindow.__projectSettingsHarness = {
     toasts: [],
     refreshCount: 0,
     strictSetups: 0,
     strictCleanups: 0,
-    switchABA,
     switchProjectABA: () => {},
 };
 

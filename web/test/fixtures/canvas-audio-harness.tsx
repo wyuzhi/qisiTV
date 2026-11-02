@@ -1,6 +1,7 @@
 import { StrictMode, useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { useCanvasMediaTools } from "../../src/pages/canvas/use-canvas-media-tools";
+import { createCanvasPageUiStore } from "../../src/stores/canvas/use-canvas-page-ui-store";
 import { CanvasNodeType, type CanvasNodeData, type CanvasConnection } from "../../src/types/canvas";
 import { state } from "./canvas-audio-dependencies";
 
@@ -13,10 +14,10 @@ function Harness() {
     const [nodes, setNodes] = useState([original, sibling]);
     const [connections, setConnections] = useState<CanvasConnection[]>([]);
     const [status, setStatus] = useState("idle");
+    const [pageUi] = useState(createCanvasPageUiStore);
     const nodesRef = useRef(nodes), connectionsRef = useRef(connections), selectedNodeIdsRef = useRef(new Set<string>());
-    const media = useCanvasMediaTools({ projectId, nodesRef, connectionsRef, selectedNodeIdsRef, setNodes, setConnections,
-        setSelectedNodeIds: noop, setSelectedConnectionId: noop, setDialogNodeId: noop, setContextMenu: noop,
-        setHoveredNodeId: noop, setToolbarNodeId: noop, setRunningNodeId: noop,
+    const media = useCanvasMediaTools({ pageUi, projectId, nodesRef, connectionsRef, selectedNodeIdsRef, setNodes, setConnections,
+        setRunningNodeId: noop,
         startUploadStatus: (() => ({ update: noop, done: () => setStatus("done"), fail: () => setStatus("failed") })) as any,
         startGenerationRequest: () => new AbortController(), finishGenerationRequest: noop, bindGenerationTask: noop });
     useLayoutEffect(() => { nodesRef.current = nodes; connectionsRef.current = connections; }, [nodes, connections]);

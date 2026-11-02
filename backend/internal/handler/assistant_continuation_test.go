@@ -10,27 +10,8 @@ import (
 	"testing"
 )
 
-func TestAssistantContinuationHTTPReusesTrustedTurnAndExcludesComposerInputs(t *testing.T) {
-	var forwarded []map[string]any
-	env := newAssistantTestEnv(t, func(env *assistantTestEnv) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/chat" {
-				w.Write([]byte(`{}`))
-				return
-			}
-			var input map[string]any
-			json.NewDecoder(r.Body).Decode(&input)
-			forwarded = append(forwarded, input)
-			if len(forwarded) == 1 {
-				w.WriteHeader(http.StatusServiceUnavailable)
-				w.Write([]byte(`{"reason":"temporary_database_error"}`))
-				return
-			}
-			// Observer ends without turn_end: a retry must reuse the claimed Go turn.
-			w.Header().Set("Content-Type", "application/x-ndjson")
-			json.NewEncoder(w).Encode(map[string]any{"type": "session", "sessionId": input["sessionId"], "turnId": input["turnId"]})
-		})
-	})
+func TestAssistantContinuationHTTPHasNoBrowserClaimAndKeepsTrustedTurn(t *testing.T) {
+	env := newAssistantTestEnv(t, nil)
 	owner, err := env.service.LocalWorkspaceOwner()
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +33,7 @@ func TestAssistantContinuationHTTPReusesTrustedTurnAndExcludesComposerInputs(t *
 	if _, err = env.service.BeginAssistantTurn(owner.ID, env.canvasID, source, app.AssistantTurnInput{PermissionMode: assistantturns.PermissionCanvas}); err != nil {
 		t.Fatal(err)
 	}
-	if err = env.service.BindAssistantDurableSession(owner.ID, source, session, false); err != nil {
+	if err = env.service.AssistantTurns().BindDurableSession(owner.ID, source, session, false); err != nil {
 		t.Fatal(err)
 	}
 	if err = env.service.FinalizeAssistantTurn(source); err != nil {
@@ -76,33 +57,17 @@ func TestAssistantContinuationHTTPReusesTrustedTurnAndExcludesComposerInputs(t *
 	if err = env.service.Database().Create(&model.Task{ID: "failed-task", UserID: owner.ID, ProjectID: env.canvasID, ClientOperationID: &operation, Type: "canvas_image", Status: model.TaskStatusFailed, InputJSON: `{"metadata":{"sourceNodeId":"n1","nodeId":"n1"}}`}).Error; err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 2; i++ {
-		request, _ := json.Marshal(map[string]any{"canvasId": env.canvasID, "sessionId": session, "continuationId": id, "message": "do not send draft", "permissionMode": "full-access", "requestId": "client-request", "selectedNodeIds": []string{"foreign"}, "skills": []any{map[string]any{"skillId": "bad"}}, "references": []any{map[string]any{"kind": "asset", "id": "foreign"}}})
-		response := env.call(t, http.MethodPost, "/assistant/chat", string(request))
-		want := 200
-		if i == 0 {
-			want = http.StatusServiceUnavailable
-		}
-		if response.Code != want {
-			t.Fatal(response.Code, response.Body.String())
-		}
+	// The browser has no claim endpoint: only the backend worker claims a receipt.
+	if env.call(t, http.MethodPost, "/assistant/continuations/"+id+"/claim", `{}`).Code != http.StatusNotFound {
+		t.Fatal("frontend claim route still exists")
 	}
-	if len(forwarded) != 2 {
-		t.Fatal("host calls", len(forwarded))
+	claimed, err := env.service.ClaimAssistantContinuation(owner.ID, id)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, input := range forwarded {
-		if input["continuationId"] != id || input["turnId"] != data["turnId"] || input["requestId"] != data["requestId"] || input["message"] != assistantturns.ContinuationMessage || input["permissionMode"] != "canvas" {
-			t.Fatalf("untrusted continuation %+v", input)
-		}
-		ids := input["selectedNodeIds"].([]any)
-		if len(ids) != 1 || ids[0] != "n1" {
-			t.Fatal("wrong actual results", input)
-		}
-		for _, key := range []string{"skills", "attachments", "references"} {
-			if values, ok := input[key].([]any); ok && len(values) > 0 {
-				t.Fatal("composer leaked", key, input)
-			}
-		}
+	if claimed.TurnID != data["turnId"] || claimed.RequestID != data["requestId"] || claimed.Message != assistantturns.ContinuationMessage || claimed.PermissionMode != "canvas" ||
+		len(claimed.SelectedNodeIDs) != 1 || claimed.SelectedNodeIDs[0] != "n1" {
+		t.Fatalf("untrusted continuation %+v", claimed)
 	}
 	var count int64
 	env.service.Database().Model(&model.AssistantTurn{}).Count(&count)
@@ -128,8 +93,7 @@ func TestAssistantContinuationHTTPReusesTrustedTurnAndExcludesComposerInputs(t *
 	if completed.Code != 200 || state["open"] != false || state["continuationRevoked"] != true {
 		t.Fatalf("cancelled host ack %d %s", completed.Code, completed.Body.String())
 	}
-	rejected := env.call(t, http.MethodPost, "/assistant/continuations/"+id+"/claim", `{}`)
-	if rejected.Code == 200 {
+	if _, err = env.service.ClaimAssistantContinuation(owner.ID, id); err == nil {
 		t.Fatal("cancelled claim revived")
 	}
 }
@@ -161,10 +125,12 @@ func TestAssistantContinuationDisplayIdentityCannotBeSuppliedByManualTextOrJSON(
 			t.Fatalf("manual message acquired automatic display identity: %+v", input)
 		}
 	}
-	invalid := fmt.Sprintf(`{"canvasId":%q,"sessionId":"manual","message":%s,"permissionMode":"canvas","continuationId":"not-a-receipt"}`, env.canvasID, message)
-	response := env.call(t, http.MethodPost, "/assistant/chat", invalid)
-	if response.Code == 200 || len(forwarded) != 2 {
-		t.Fatal("unverified continuation reached host", response.Code, len(forwarded))
+	// The chat endpoint no longer reads continuationId at all: a receipt id is
+	// neither claimed nor forwarded, so the browser cannot start a continuation.
+	spoof := fmt.Sprintf(`{"canvasId":%q,"sessionId":"manual","message":%s,"permissionMode":"canvas","continuationId":"not-a-receipt"}`, env.canvasID, message)
+	response := env.call(t, http.MethodPost, "/assistant/chat", spoof)
+	if response.Code != 200 || len(forwarded) != 3 || forwarded[2]["continuationId"] != nil {
+		t.Fatal("client continuationId reached host", response.Code, len(forwarded))
 	}
 }
 
@@ -190,18 +156,18 @@ func TestAssistantContinuationSkillLoadKeepsItsBoundTurnAuthorized(t *testing.T)
 	}
 	source := "aabbccddffee"
 	env.beginTurn(t, source, app.AssistantTurnInput{})
-	if err = env.service.BindAssistantDurableSession(owner.ID, source, skillSessionOne, false); err != nil {
+	if err = env.service.AssistantTurns().BindDurableSession(owner.ID, source, skillSessionOne, false); err != nil {
 		t.Fatal(err)
 	}
 	if err = env.service.FinalizeAssistantTurn(source); err != nil {
 		t.Fatal(err)
 	}
-	row, err := env.service.ArmAssistantContinuation(owner.ID, assistantturns.ContinuationInput{CanvasID: env.canvasID, SessionID: skillSessionOne, SourceTurnID: source, ProposalID: "gp-load", Kind: "image", NodeIDs: []string{"n1"}})
+	row, err := env.service.AssistantTurns().ArmContinuation(owner.ID, assistantturns.ContinuationInput{CanvasID: env.canvasID, SessionID: skillSessionOne, SourceTurnID: source, ProposalID: "gp-load", Kind: "image", NodeIDs: []string{"n1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	operation := "proposal:gp-load:n1"
-	if err = env.service.RegisterAssistantContinuationManifest(owner.ID, row.ID, assistantturns.ContinuationManifest{SourceNodeID: "n1", Submissions: []assistantturns.ContinuationSubmission{{OperationID: operation, OutputNodeIDs: []string{"n1"}}}}); err != nil {
+	if err = env.service.AssistantTurns().RegisterContinuationManifest(owner.ID, row.ID, assistantturns.ContinuationManifest{SourceNodeID: "n1", Submissions: []assistantturns.ContinuationSubmission{{OperationID: operation, OutputNodeIDs: []string{"n1"}}}}); err != nil {
 		t.Fatal(err)
 	}
 	if err = env.service.Database().Create(&model.Task{ID: "skill-load-task", UserID: owner.ID, ProjectID: env.canvasID, ClientOperationID: &operation, Type: "canvas_image", Status: model.TaskStatusFailed, InputJSON: `{"metadata":{"sourceNodeId":"n1","nodeId":"n1"}}`}).Error; err != nil {
@@ -210,21 +176,21 @@ func TestAssistantContinuationSkillLoadKeepsItsBoundTurnAuthorized(t *testing.T)
 	if _, err = env.service.ClaimAssistantContinuation(owner.ID, row.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err = env.service.VerifyAssistantContinuation(owner.ID, row.ID, row.TurnID, skillSessionOne); err != nil {
+	if err = env.service.AssistantTurns().VerifyContinuation(owner.ID, row.ID, row.TurnID, skillSessionOne); err != nil {
 		t.Fatal(err)
 	}
-	companion, err := env.service.ArmAssistantContinuation(owner.ID, assistantturns.ContinuationInput{CanvasID: env.canvasID, SessionID: skillSessionOne, SourceTurnID: source, ProposalID: "gp-companion", Kind: "image", NodeIDs: []string{"n2"}})
+	companion, err := env.service.AssistantTurns().ArmContinuation(owner.ID, assistantturns.ContinuationInput{CanvasID: env.canvasID, SessionID: skillSessionOne, SourceTurnID: source, ProposalID: "gp-companion", Kind: "image", NodeIDs: []string{"n2"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	companionOperation := "proposal:gp-companion:n2"
-	if err = env.service.RegisterAssistantContinuationManifest(owner.ID, companion.ID, assistantturns.ContinuationManifest{SourceNodeID: "n2", Submissions: []assistantturns.ContinuationSubmission{{OperationID: companionOperation, OutputNodeIDs: []string{"n2"}}}}); err != nil {
+	if err = env.service.AssistantTurns().RegisterContinuationManifest(owner.ID, companion.ID, assistantturns.ContinuationManifest{SourceNodeID: "n2", Submissions: []assistantturns.ContinuationSubmission{{OperationID: companionOperation, OutputNodeIDs: []string{"n2"}}}}); err != nil {
 		t.Fatal(err)
 	}
 	if err = env.service.Database().Create(&model.Task{ID: "companion-task", UserID: owner.ID, ProjectID: env.canvasID, ClientOperationID: &companionOperation, Type: "canvas_image", Status: model.TaskStatusFailed, InputJSON: `{"metadata":{"sourceNodeId":"n2","nodeId":"n2"}}`}).Error; err != nil {
 		t.Fatal(err)
 	}
-	cancelled, err := env.service.ArmAssistantContinuation(owner.ID, assistantturns.ContinuationInput{CanvasID: env.canvasID, SessionID: skillSessionOne, SourceTurnID: source, ProposalID: "gp-cancelled", Kind: "image", NodeIDs: []string{"n2"}})
+	cancelled, err := env.service.AssistantTurns().ArmContinuation(owner.ID, assistantturns.ContinuationInput{CanvasID: env.canvasID, SessionID: skillSessionOne, SourceTurnID: source, ProposalID: "gp-cancelled", Kind: "image", NodeIDs: []string{"n2"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +209,7 @@ func TestAssistantContinuationSkillLoadKeepsItsBoundTurnAuthorized(t *testing.T)
 		}
 	}
 	for index := 0; index < 2; index++ {
-		ctx, err := env.service.AssistantSkillContext(owner.ID, env.canvasID, skillSessionOne)
+		ctx, err := env.service.AssistantTurns().SkillContext(owner.ID, env.canvasID, skillSessionOne)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -260,10 +226,10 @@ func TestAssistantContinuationSkillLoadKeepsItsBoundTurnAuthorized(t *testing.T)
 		if replay.Code != 200 {
 			t.Fatal(replay.Code, replay.Body.String())
 		}
-		if _, err = env.service.BoundAssistantSkillContext(owner.ID, row.TurnID, skillSessionOne); err != nil {
+		if _, err = env.service.AssistantTurns().BoundSkillContext(owner.ID, row.TurnID, skillSessionOne); err != nil {
 			t.Fatal("skill_load closed its own turn", err)
 		}
-		if _, allowed, scopeErr := env.service.AssistantTurnScopeForHost(owner.ID, row.TurnID); scopeErr != nil || !allowed {
+		if _, allowed, scopeErr := env.service.AssistantTurns().ScopeForHost(owner.ID, row.TurnID); scopeErr != nil || !allowed {
 			t.Fatal("skill_load revoked operation authorization", scopeErr)
 		}
 		var stored model.AssistantContinuation
@@ -296,14 +262,14 @@ func TestAssistantContinuationSkillLoadKeepsItsBoundTurnAuthorized(t *testing.T)
 	if _, err = env.service.ClaimAssistantContinuation(owner.ID, cancelled.ID); err == nil {
 		t.Fatal("cancelled result revived")
 	}
-	ctx, _ := env.service.AssistantSkillContext(owner.ID, env.canvasID, skillSessionOne)
+	ctx, _ := env.service.AssistantTurns().SkillContext(owner.ID, env.canvasID, skillSessionOne)
 	// An explicit user/session selection is not a runtime skill load.
 	body, _ := json.Marshal(map[string]any{"sessionId": skillSessionOne, "action": "activate", "requestId": "user-selection", "expectedRevision": ctx.Revision, "pins": []any{pin}})
 	response := env.callWithHeaders(t, http.MethodPost, path, string(body), headers)
 	if response.Code != 200 {
 		t.Fatal(response.Code, response.Body.String())
 	}
-	if _, err = env.service.BoundAssistantSkillContext(owner.ID, row.TurnID, skillSessionOne); err == nil {
+	if _, err = env.service.AssistantTurns().BoundSkillContext(owner.ID, row.TurnID, skillSessionOne); err == nil {
 		t.Fatal("user selection did not revoke automatic turn")
 	}
 	if _, err = env.service.ClaimAssistantContinuation(owner.ID, companion.ID); err == nil {
@@ -312,10 +278,10 @@ func TestAssistantContinuationSkillLoadKeepsItsBoundTurnAuthorized(t *testing.T)
 	// A new normal user turn's own explicit initial selection is valid new intent.
 	fresh := "aabbccddffaa"
 	env.beginTurn(t, fresh, app.AssistantTurnInput{})
-	if err = env.service.BindAssistantDurableSession(owner.ID, fresh, skillSessionOne, false); err != nil {
+	if err = env.service.AssistantTurns().BindDurableSession(owner.ID, fresh, skillSessionOne, false); err != nil {
 		t.Fatal(err)
 	}
-	ctx, _ = env.service.AssistantSkillContext(owner.ID, env.canvasID, skillSessionOne)
+	ctx, _ = env.service.AssistantTurns().SkillContext(owner.ID, env.canvasID, skillSessionOne)
 	body, _ = json.Marshal(map[string]any{"sessionId": skillSessionOne, "turnId": fresh, "action": "activate", "requestId": "select:new-user", "expectedRevision": ctx.Revision, "pins": []any{pin}})
 	response = env.callWithHeaders(t, http.MethodPost, path, string(body), headers)
 	if response.Code != 200 {
@@ -324,7 +290,7 @@ func TestAssistantContinuationSkillLoadKeepsItsBoundTurnAuthorized(t *testing.T)
 	if err = env.service.FinalizeAssistantTurn(fresh); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = env.service.ArmAssistantContinuation(owner.ID, assistantturns.ContinuationInput{CanvasID: env.canvasID, SessionID: skillSessionOne, SourceTurnID: fresh, ProposalID: "gp-fresh", Kind: "image", NodeIDs: []string{"n1"}}); err != nil {
+	if _, err = env.service.AssistantTurns().ArmContinuation(owner.ID, assistantturns.ContinuationInput{CanvasID: env.canvasID, SessionID: skillSessionOne, SourceTurnID: fresh, ProposalID: "gp-fresh", Kind: "image", NodeIDs: []string{"n1"}}); err != nil {
 		t.Fatal("initial user selection invalidated its new proposals", err)
 	}
 }

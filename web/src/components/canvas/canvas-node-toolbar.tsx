@@ -43,6 +43,8 @@ type CanvasNodeToolbarProps = {
     onSplit: (node: CanvasNodeData, params: ImageSplitParams) => void;
     onUpscale: (node: CanvasNodeData) => void;
     onSuperResolve: (node: CanvasNodeData) => void;
+    onDraftToFinal?: (node: CanvasNodeData, resolution: "720p" | "1080p") => void;
+    onVideoEditOperation?: (node: CanvasNodeData, operation: "extend" | "inpaint") => void;
     onAngle: (node: CanvasNodeData) => void;
     onLighting: (node: CanvasNodeData) => void;
     onPanorama: (node: CanvasNodeData) => void;
@@ -105,6 +107,8 @@ export function CanvasNodeToolbar({
     onSplit,
     onUpscale,
     onSuperResolve,
+    onDraftToFinal,
+    onVideoEditOperation,
     onAngle,
     onLighting,
     onPanorama,
@@ -221,6 +225,7 @@ export function CanvasNodeToolbar({
     const isVideo = node.type === CanvasNodeType.Video;
     const isAudio = node.type === CanvasNodeType.Audio;
     const hasImage = isImage && Boolean(node.metadata?.content);
+    const canDraftToFinal = isVideo && Boolean(node.metadata?.content) && node.metadata?.draft === "true" && Boolean(node.metadata?.taskProviderRequestId?.trim());
     const copyImagePrompt = (target: CanvasNodeData) => {
         const prompt = target.metadata?.prompt?.trim();
         if (!prompt) {
@@ -336,9 +341,9 @@ export function CanvasNodeToolbar({
     const viewpointLightingTools = compact ? [] : isImage ? [...inGroup("viewpoint"), ...inGroup("lighting")].filter((tool) => tool.id === "angle" || tool.id === "lighting") : [...inGroup("viewpoint"), ...inGroup("lighting")];
     const panoramaTools = compact || isImage ? [] : inGroup("panorama");
     const processTools = compact
-        ? [...inGroup("portrait"), ...inGroup("viewpoint"), ...inGroup("lighting"), ...inGroup("panorama"), ...inGroup("process")]
+        ? [...inGroup("portrait"), ...inGroup("viewpoint"), ...inGroup("lighting"), ...inGroup("panorama"), ...inGroup("process"), ...(isImage ? allTools.filter((tool) => tool.id === "reversePrompt") : [])]
         : isImage
-          ? inGroup("process").filter((tool) => tool.id === "crop" || tool.id === "split" || tool.id === "annotation")
+          ? [...inGroup("process").filter((tool) => tool.id === "crop" || tool.id === "split" || tool.id === "annotation"), ...allTools.filter((tool) => tool.id === "reversePrompt")]
           : inGroup("process");
     const workspaceTools = narrow ? [] : inGroup("workspace");
     const utilityTools = inGroup("utility");
@@ -400,7 +405,38 @@ export function CanvasNodeToolbar({
             <div role="toolbar" aria-label="节点快捷工具" className="flex h-10 max-w-full items-center gap-0.5 overflow-visible rounded-[var(--dock-radius-tight)] px-1.5 backdrop-blur-2xl" style={{ ...dockStyle, border: 0 }}>
                 {isVideo ? (
                     <>
+                        {canDraftToFinal && onDraftToFinal ? (
+                            <NodeDockMenuButton
+                                menuId="video-draft-to-final"
+                                label="转高清成片"
+                                icon={<UpscaleToolbarIcon />}
+                                tools={[
+                                    { id: "draft-to-final-720p", label: "转 720P 成片", icon: null, group: "process", order: 1, onClick: () => onDraftToFinal(node, "720p") },
+                                    { id: "draft-to-final-1080p", label: "转 1080P 成片", icon: null, group: "process", order: 2, onClick: () => onDraftToFinal(node, "1080p") },
+                                ]}
+                                openMenuId={openMenuId}
+                                onOpenChange={handleMenuOpenChange}
+                                placement="bottomLeft"
+                            />
+                        ) : null}
                         <NodeDockToolButton tool={{ id: "ai-upscale", label: "AI超分", icon: <UpscaleToolbarIcon />, group: "process", order: 1, onClick: () => onSuperResolve(node) }} showTooltip={false} />
+                        {(node.metadata?.content || node.metadata?.storageKey) ? (
+                            <NodeDockMenuButton
+                                menuId="video-ai-remix"
+                                label="视频二创"
+                                icon={null}
+                                tools={[
+                                    ...(onVideoEditOperation ? [
+                                        { id: "video-extend", label: "视频续写", icon: null, group: "process" as const, order: 1, onClick: () => onVideoEditOperation(node, "extend") },
+                                        { id: "video-inpaint", label: "视频局部修改", icon: null, group: "process" as const, order: 2, onClick: () => onVideoEditOperation(node, "inpaint") },
+                                    ] : []),
+                                    { id: "video-reverse-prompt", label: "反推提示词", icon: null, group: "process" as const, order: 3, onClick: () => onReversePrompt(node) },
+                                ]}
+                                openMenuId={openMenuId}
+                                onOpenChange={handleMenuOpenChange}
+                                placement="bottomLeft"
+                            />
+                        ) : null}
                         {videoProcessingTools.length ? <NodeDockMenuButton menuId="video-processing" label="视频处理" icon={null} tools={videoProcessingTools} openMenuId={openMenuId} onOpenChange={handleMenuOpenChange} placement="bottomLeft" /> : null}
                         {videoAudioTool ? <NodeDockToolButton tool={videoAudioTool} showTooltip={false} /> : null}
                         {videoSubtitleTool ? <NodeDockToolButton tool={videoSubtitleTool} showTooltip={false} /> : null}
@@ -833,7 +869,7 @@ export function CanvasNodeInfoModal({
                                         { code: node.metadata.generationErrorCode || node.metadata.taskErrorCode, message: node.metadata.errorDetails },
                                         { taskId: node.metadata.taskId, model: node.metadata.model, createdAt: node.metadata.taskCreatedAt, stage: node.metadata.taskStage },
                                     )}
-                                    context={{ ...canvasNodeDiagnosticContext(node), model: node.metadata.model, createdAt: node.metadata.taskCreatedAt, stage: node.metadata.taskStage, providerRequestId: node.metadata.taskProviderRequestId, failureDiagnostics: node.metadata.taskFailureDiagnostics, errorSummary: node.metadata.generationErrorSummary, completedAt: node.metadata.taskCompletedAt, updatedAt: node.metadata.taskUpdatedAt }}
+                                    context={{ ...canvasNodeDiagnosticContext(node), model: node.metadata.model, createdAt: node.metadata.taskCreatedAt, stage: node.metadata.taskStage, providerRequestId: node.metadata.taskProviderRequestId, failureDiagnostics: node.metadata.taskFailureDiagnostics, errorSummary: node.metadata.generationErrorSummary, providerCode: node.metadata.generationProviderCode, completedAt: node.metadata.taskCompletedAt, updatedAt: node.metadata.taskUpdatedAt }}
                                 />
                             </section>
                         ) : null}

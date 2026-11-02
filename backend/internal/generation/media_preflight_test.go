@@ -246,3 +246,38 @@ func TestWanInlineImageNeverUploadsEvenWhenStorageIsEnabled(t *testing.T) {
 		t.Fatal("inline image was uploaded instead")
 	}
 }
+
+// Luma 官方的 keyframes.frame0.url 只接受在线图片地址。本地图片必须先换成在线
+// 地址；换不到时在提交前拦截，不能把 data URL 发上去。
+func TestLumaBlocksLocalFirstFrameUntilItHasAPublicURL(t *testing.T) {
+	ctx := WithProtocolRegistry(context.Background(), LoadOfficialFallbackRegistry())
+	base := Input{Mode: "video", Config: Config{InterfaceType: "luma-dream-machine", Model: "ray-2", BaseURL: "https://api.lumalabs.ai"}}
+
+	for _, tc := range []struct {
+		name  string
+		media Media
+	}{
+		{"local resource", Media{StorageKey: "resource:private-frame"}},
+		{"inline data URL", Media{DataURL: "data:image/png;base64,YQ=="}},
+		{"blob URL", Media{URL: "blob:local"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := base
+			input.ReferenceImages = []Media{tc.media}
+			err := ValidateMediaTransport(ctx, input)
+			var appErr *kernel.AppError
+			if !errors.As(err, &appErr) || appErr.Reason != "reference_media_requires_url" || !strings.Contains(err.Error(), "参考图片 1") {
+				t.Fatalf("本地首帧必须带可操作的拦截原因，实际 error = %v", err)
+			}
+		})
+	}
+
+	withURL := base
+	withURL.ReferenceImages = []Media{{URL: "https://cdn.example/first.png"}}
+	if err := ValidateMediaTransport(ctx, withURL); err != nil {
+		t.Fatalf("在线首帧被挡住: %v", err)
+	}
+	if err := ValidateMediaTransport(ctx, base); err != nil {
+		t.Fatalf("纯文本请求被挡住: %v", err)
+	}
+}

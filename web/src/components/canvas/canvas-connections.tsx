@@ -103,7 +103,9 @@ export const ConnectionPath = React.memo(function ConnectionPath({
                 strokeDasharray={denseReadonlyWire ? "2 12" : undefined}
                 style={{ pointerEvents: "none" }}
             /> : null}
+            {/* 主线。平移、缩放期间连线组里只保留这一条（见 globals.css），其余几层手势结束后再画。 */}
             {showVisual ? <path
+                className="canvas-connection-line"
                 d={pathD}
                 stroke={emphasized ? theme.accent.primary : theme.node.muted}
                 strokeWidth={denseReadonlyWire ? 0.75 : emphasized ? 2.8 : 1.5}

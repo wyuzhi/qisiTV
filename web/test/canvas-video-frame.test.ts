@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { buildVideoFrameNodes } from "../src/lib/canvas/canvas-video-frame-nodes";
-import { normalizeVideoFrameTimes, resolveVideoFramePresetTimeMs, videoFrameFetchCredentials, videoFrameSeekSeconds, waitForPresentedVideoFrame } from "../src/lib/canvas/canvas-video-frame";
+import { captureVideoFrames, normalizeVideoFrameTimes, resolveVideoFramePresetTimeMs, videoFrameFetchCredentials, videoFrameSeekSeconds, waitForPresentedVideoFrame } from "../src/lib/canvas/canvas-video-frame";
 import { CanvasNodeType, type CanvasNodeData } from "../src/types/canvas";
 
 const sourceNode: CanvasNodeData = {
@@ -132,6 +132,174 @@ describe("waitForPresentedVideoFrame", () => {
 
         expect(paused).toBe(true);
         expect(framePresented).toBe(true);
+    });
+
+    test("seek 到最后一帧后播放直接触发 ended 且无后续新帧时，若画面已解码则完成取帧", async () => {
+        const events = new EventTarget();
+        let paused = false;
+        const video = {
+            duration: 15,
+            currentTime: 14.9,
+            readyState: 2,
+            videoWidth: 1280,
+            videoHeight: 720,
+            addEventListener: events.addEventListener.bind(events),
+            removeEventListener: events.removeEventListener.bind(events),
+            requestVideoFrameCallback: () => 1,
+            cancelVideoFrameCallback: () => undefined,
+            play: async () => {
+                queueMicrotask(() => events.dispatchEvent(new Event("ended")));
+            },
+            pause: () => { paused = true; },
+        } as unknown as HTMLVideoElement;
+
+        await waitForPresentedVideoFrame(video, 100);
+
+        expect(paused).toBe(true);
+    });
+
+    test("已解码视频若播放推进但未触发呈现回调或 ended，不把偏移时间点的画面当作成功", async () => {
+        const events = new EventTarget();
+        const video = {
+            duration: 15,
+            currentTime: 2.0,
+            readyState: 2,
+            videoWidth: 1280,
+            videoHeight: 720,
+            addEventListener: events.addEventListener.bind(events),
+            removeEventListener: events.removeEventListener.bind(events),
+            requestVideoFrameCallback: () => 1,
+            cancelVideoFrameCallback: () => undefined,
+            play: async () => {
+                video.currentTime = 3.5;
+            },
+            pause: () => undefined,
+        } as unknown as HTMLVideoElement;
+
+        await expect(waitForPresentedVideoFrame(video, 5)).rejects.toThrow("视频画面解码超时");
+    });
+
+    test("非尾帧时间点（如距结尾 1s）在呈现回调未触发时即便播放到 ended 也不把尾帧冒充为目标帧", async () => {
+        const events = new EventTarget();
+        const video = {
+            duration: 10,
+            currentTime: 9.0,
+            readyState: 2,
+            videoWidth: 1280,
+            videoHeight: 720,
+            addEventListener: events.addEventListener.bind(events),
+            removeEventListener: events.removeEventListener.bind(events),
+            requestVideoFrameCallback: () => 1,
+            cancelVideoFrameCallback: () => undefined,
+            play: async () => {
+                video.currentTime = 10;
+                queueMicrotask(() => events.dispatchEvent(new Event("ended")));
+            },
+            pause: () => undefined,
+        } as unknown as HTMLVideoElement;
+
+        await expect(waitForPresentedVideoFrame(video, 20)).rejects.toThrow("视频画面解码超时");
+    });
+});
+
+describe("captureVideoFrames", () => {
+    test("连续截取多个时间点时忽略旧 mediaTime 回调并在结束后移除临时节点", async () => {
+        const originalDocument = globalThis.document;
+        const originalCreateObjectURL = URL.createObjectURL;
+        const originalRevokeObjectURL = URL.revokeObjectURL;
+
+        const appendedNodes: unknown[] = [];
+        let removedCount = 0;
+        let revokedUrl = "";
+        const drawnTimes: number[] = [];
+        const events = new EventTarget();
+
+        let currentTime = 0;
+        let nextHandle = 1;
+        let latestCallback: ((now: number, meta: { mediaTime: number }) => void) | undefined;
+
+        const fakeVideo = {
+            muted: false,
+            playsInline: false,
+            preload: "",
+            src: "",
+            style: {} as Record<string, string>,
+            duration: 5,
+            readyState: 2,
+            videoWidth: 640,
+            videoHeight: 360,
+            get currentTime() {
+                return currentTime;
+            },
+            set currentTime(val: number) {
+                if (val > 1) {
+                    // Simulate stale queued callback from previous frame firing before seek completes
+                    latestCallback?.(16, { mediaTime: 0.001 });
+                }
+                currentTime = val;
+                queueMicrotask(() => {
+                    if (val < 1) {
+                        latestCallback?.(16, { mediaTime: val });
+                    }
+                    events.dispatchEvent(new Event("seeked"));
+                });
+            },
+            load: () => {
+                if (fakeVideo.src) {
+                    queueMicrotask(() => events.dispatchEvent(new Event("loadeddata")));
+                }
+            },
+            play: async () => {
+                queueMicrotask(() => latestCallback?.(32, { mediaTime: currentTime }));
+            },
+            pause: () => undefined,
+            removeAttribute: () => { fakeVideo.src = ""; },
+            remove: () => { removedCount += 1; },
+            addEventListener: events.addEventListener.bind(events),
+            removeEventListener: events.removeEventListener.bind(events),
+            requestVideoFrameCallback: (cb: (now: number, meta: { mediaTime: number }) => void) => {
+                latestCallback = cb;
+                return nextHandle++;
+            },
+            cancelVideoFrameCallback: () => undefined,
+        };
+
+        const fakeCanvas = {
+            width: 0,
+            height: 0,
+            getContext: () => ({
+                drawImage: () => {
+                    drawnTimes.push(currentTime);
+                },
+            }),
+            toBlob: (cb: (blob: Blob | null) => void) => cb(new Blob(["png"], { type: "image/png" })),
+        };
+
+        URL.createObjectURL = () => "blob:test-video";
+        URL.revokeObjectURL = (url: string) => { revokedUrl = url; };
+        Object.defineProperty(globalThis, "document", {
+            configurable: true,
+            value: {
+                body: {
+                    appendChild: (node: unknown) => appendedNodes.push(node),
+                },
+                createElement: (tag: string) => (tag === "video" ? fakeVideo : fakeCanvas),
+            },
+        });
+
+        try {
+            const result = await captureVideoFrames(new Blob(["mp4"], { type: "video/mp4" }), [0, 2000]);
+            expect(result.failures).toEqual([]);
+            expect(result.frames.map((f) => f.timeMs)).toEqual([0, 2000]);
+            expect(drawnTimes).toEqual([0.001, 2]);
+            expect(appendedNodes).toHaveLength(1);
+            expect(removedCount).toBe(1);
+            expect(revokedUrl).toBe("blob:test-video");
+        } finally {
+            Object.defineProperty(globalThis, "document", { configurable: true, value: originalDocument });
+            URL.createObjectURL = originalCreateObjectURL;
+            URL.revokeObjectURL = originalRevokeObjectURL;
+        }
     });
 });
 

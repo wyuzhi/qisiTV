@@ -1,7 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
 import { assetResourceId, bindCanvasNodeResourceAsset, canvasNodeResourceId, extractOwnedResourceId } from "@/lib/canvas/canvas-resource-id";
-import { assertUserScope, isUserScopeAbandonedError, type CapturedUserScope } from "@/lib/user-scope-guard";
-import { CanvasStaleScopeError } from "@/services/canvas-revision-conflict";
 import { persistCanvasDocument } from "@/services/local-workspace-repository";
 import type { ensureCanvasNodeAsset } from "@/services/project-asset-sync";
 import { useAssetStore } from "@/stores/use-asset-store";
@@ -86,8 +84,6 @@ export async function healCanvasProjectMediaAssets(
     options: {
         ensureNodeAsset?: typeof ensureCanvasNodeAsset;
         signal?: AbortSignal;
-        expectedScope: CapturedUserScope;
-        liveScope?: () => CapturedUserScope;
         isCurrent?: () => boolean;
         nodesRef?: { current: CanvasNodeData[] };
         setNodes?: Dispatch<SetStateAction<CanvasNodeData[]>>;
@@ -95,7 +91,6 @@ export async function healCanvasProjectMediaAssets(
 ): Promise<HealCanvasProjectMediaAssetsResult> {
     const assertScopeActive = () => {
         if (options.signal?.aborted) throw new DOMException("The operation was aborted", "AbortError");
-        assertUserScope(options.expectedScope, options.liveScope?.());
     };
     const isScopeCurrent = () => (options.isCurrent ? options.isCurrent() : true);
 
@@ -155,7 +150,6 @@ export async function healCanvasProjectMediaAssets(
                 node,
                 source: "canvas-manual",
                 signal: options.signal,
-                expectedScope: options.expectedScope,
             });
             assertScopeActive();
             if (result.assetId) {
@@ -212,7 +206,6 @@ export async function healCanvasProjectMediaAssets(
                     node: timelineDirectMediaToNode({ ...media, assetId: effectiveClipAssetId }),
                     source: "canvas-manual",
                     signal: options.signal,
-                    expectedScope: options.expectedScope,
                 });
                 assertScopeActive();
                 if (result.assetId) {
@@ -291,17 +284,15 @@ export async function persistCanvasGenerationTarget(input: {
     nodeId: string;
     clientOperationId?: string;
     signal?: AbortSignal;
-    expectedScope: CapturedUserScope;
     ensureNodeAsset?: typeof ensureCanvasNodeAsset;
     isCurrent?: () => boolean;
 }, persist: typeof persistCanvasDocument = persistCanvasDocument) {
     const assertCurrent = () => {
         if (input.signal?.aborted) throw new DOMException("The operation was aborted", "AbortError");
-        assertUserScope(input.expectedScope);
         if (input.isCurrent && !input.isCurrent()) throw new DOMException("The canvas operation was abandoned", "AbortError");
     };
     const rethrowIfControlError = (error: unknown) => {
-        if (isUserScopeAbandonedError(error) || error instanceof CanvasStaleScopeError || (error instanceof Error && error.name === "AbortError")) throw error;
+        if (error instanceof Error && error.name === "AbortError") throw error;
     };
     assertCurrent();
     const project = useCanvasStore.getState().openProject(input.projectId);
@@ -312,7 +303,7 @@ export async function persistCanvasGenerationTarget(input: {
     }
     syncInMemoryCanvasProjectMediaAssets(project);
     try {
-        await persist(input.projectId, { nodes: project.nodes, connections: project.connections }, input.expectedScope);
+        await persist(input.projectId, { nodes: project.nodes, connections: project.connections });
     } catch (error) {
         rethrowIfControlError(error);
         if (isCanvasMediaAssetGuardError(error)) {
@@ -320,7 +311,6 @@ export async function persistCanvasGenerationTarget(input: {
                 const healed = await healCanvasProjectMediaAssets(project, {
                     ensureNodeAsset: input.ensureNodeAsset,
                     signal: input.signal,
-                    expectedScope: input.expectedScope,
                     isCurrent: input.isCurrent,
                 });
                 if (!healed.current) throw new DOMException("The canvas operation was abandoned", "AbortError");
@@ -334,7 +324,6 @@ export async function persistCanvasGenerationTarget(input: {
                         connections: current.connections,
                         ...(current.timeline ? { timeline: current.timeline } : {}),
                     },
-                    input.expectedScope,
                 );
             } catch (retryError) {
                 rethrowIfControlError(retryError);
@@ -348,7 +337,7 @@ export async function persistCanvasGenerationTarget(input: {
     const current = useCanvasStore.getState().openProject(input.projectId);
     if (!current?.nodes.some((node) => node.id === input.nodeId)) {
         // 保存期间的删除也必须提交；旧快照的回执不能让节点在下次打开时重现。
-        if (current) await persist(input.projectId, { nodes: current.nodes, connections: current.connections }, input.expectedScope);
+        if (current) await persist(input.projectId, { nodes: current.nodes, connections: current.connections });
         throw new CanvasGenerationTargetSaveError(undefined, "生成节点已不存在，未开始生成");
     }
 }

@@ -3,14 +3,23 @@ package handler
 import (
 	"fmt"
 	"github.com/gin-gonic/gin"
-	"qisitv/backend/internal/app"
 	cw "qisitv/backend/internal/canvasworkflow"
 	"net/http"
 	"strconv"
 	"time"
 )
 
-func registerCanvasWorkflowRoutes(r *gin.RouterGroup, svc *app.Service) {
+type canvasWorkflowService interface {
+	workspaceOwners
+	runtimePolicies
+	CanvasWorkflowOperations() []cw.Operation
+	CanvasWorkflowTemplates() *cw.Templates
+	CanvasWorkflowRunService() *cw.Runs
+}
+
+func registerCanvasWorkflowRoutes(r *gin.RouterGroup, svc canvasWorkflowService) {
+	templates := svc.CanvasWorkflowTemplates()
+	runs := svc.CanvasWorkflowRunService()
 	// Every route resolves the current desktop owner; mutations additionally
 	// require the same trusted UI principal as manual generation.
 	owner := func(c *gin.Context, write bool) string {
@@ -51,7 +60,7 @@ func registerCanvasWorkflowRoutes(r *gin.RouterGroup, svc *app.Service) {
 			fail(c, http.StatusBadRequest, e)
 			return
 		}
-		prepared, e := svc.PrepareCanvasWorkflow(user, req.Definition, req.TemplateID, req.TemplateRevision)
+		prepared, e := templates.Prepare(user, req.Definition, req.TemplateID, req.TemplateRevision)
 		if e != nil {
 			failService(c, e)
 			return
@@ -72,7 +81,7 @@ func registerCanvasWorkflowRoutes(r *gin.RouterGroup, svc *app.Service) {
 			}
 			revision = n
 		}
-		v, e := svc.CanvasWorkflowEditor(user, c.Param("id"), revision)
+		v, e := templates.Editor(user, c.Param("id"), revision)
 		if e != nil {
 			failService(c, e)
 			return
@@ -90,7 +99,7 @@ func registerCanvasWorkflowRoutes(r *gin.RouterGroup, svc *app.Service) {
 			fail(c, http.StatusBadRequest, e)
 			return
 		}
-		v, e := svc.UpdateCanvasWorkflow(user, c.Param("id"), req)
+		v, e := templates.Update(user, c.Param("id"), req)
 		if e != nil {
 			failService(c, e)
 			return
@@ -102,7 +111,7 @@ func registerCanvasWorkflowRoutes(r *gin.RouterGroup, svc *app.Service) {
 		if user == "" {
 			return
 		}
-		v, e := svc.CanvasWorkflows(user)
+		v, e := templates.List(user)
 		if e != nil {
 			failService(c, e)
 			return
@@ -120,7 +129,7 @@ func registerCanvasWorkflowRoutes(r *gin.RouterGroup, svc *app.Service) {
 			fail(c, http.StatusBadRequest, e)
 			return
 		}
-		v, e := svc.CreateCanvasWorkflow(user, req)
+		v, e := templates.Create(user, req)
 		if e != nil {
 			failService(c, e)
 			return
@@ -132,7 +141,7 @@ func registerCanvasWorkflowRoutes(r *gin.RouterGroup, svc *app.Service) {
 		if user == "" {
 			return
 		}
-		v, e := svc.CanvasWorkflow(user, c.Param("id"))
+		v, e := templates.Get(user, c.Param("id"))
 		if e != nil {
 			failService(c, e)
 			return
@@ -144,7 +153,7 @@ func registerCanvasWorkflowRoutes(r *gin.RouterGroup, svc *app.Service) {
 		if user == "" {
 			return
 		}
-		if e := svc.DeleteCanvasWorkflow(user, c.Param("id")); e != nil {
+		if e := templates.Delete(user, c.Param("id")); e != nil {
 			failService(c, e)
 			return
 		}
@@ -155,7 +164,7 @@ func registerCanvasWorkflowRoutes(r *gin.RouterGroup, svc *app.Service) {
 		if user == "" {
 			return
 		}
-		v, e := svc.CanvasWorkflowRuns(user, c.Param("id"))
+		v, e := runs.List(user, c.Param("id"))
 		if e != nil {
 			failService(c, e)
 			return
@@ -173,7 +182,7 @@ func registerCanvasWorkflowRoutes(r *gin.RouterGroup, svc *app.Service) {
 			fail(c, http.StatusBadRequest, e)
 			return
 		}
-		v, e := svc.StartCanvasWorkflow(user, c.Param("id"), req)
+		v, e := runs.Start(user, c.Param("id"), req)
 		if e != nil {
 			failService(c, e)
 			return
@@ -185,7 +194,7 @@ func registerCanvasWorkflowRoutes(r *gin.RouterGroup, svc *app.Service) {
 		if user == "" {
 			return
 		}
-		v, e := svc.CanvasWorkflowRun(user, c.Param("id"))
+		v, e := runs.Get(user, c.Param("id"))
 		if e != nil {
 			failService(c, e)
 			return
@@ -197,7 +206,7 @@ func registerCanvasWorkflowRoutes(r *gin.RouterGroup, svc *app.Service) {
 		if user == "" {
 			return
 		}
-		v, e := svc.RetryCanvasWorkflow(user, c.Param("id"))
+		v, e := runs.Retry(user, c.Param("id"))
 		if e != nil {
 			failService(c, e)
 			return
@@ -217,7 +226,7 @@ func registerCanvasWorkflowRoutes(r *gin.RouterGroup, svc *app.Service) {
 			fail(c, http.StatusBadRequest, fmt.Errorf("请选择图片"))
 			return
 		}
-		value, err := svc.SelectCanvasWorkflowImage(user, c.Param("id"), request.NodeID, request.ResourceID)
+		value, err := runs.Select(user, c.Param("id"), request.NodeID, request.ResourceID)
 		if err != nil {
 			failService(c, err)
 			return
@@ -229,7 +238,7 @@ func registerCanvasWorkflowRoutes(r *gin.RouterGroup, svc *app.Service) {
 		if user == "" {
 			return
 		}
-		v, e := svc.CancelCanvasWorkflow(c.Request.Context(), user, c.Param("id"))
+		v, e := runs.Cancel(c.Request.Context(), user, c.Param("id"))
 		if e != nil {
 			failService(c, e)
 			return

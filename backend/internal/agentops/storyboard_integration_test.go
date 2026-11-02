@@ -132,7 +132,7 @@ func TestStoryboardRowUpdateBindsOutputNodesAndUndoRestores(t *testing.T) {
 	if !reflect.DeepEqual(state.Change.UpdatedNodeIDs, []string{"n1"}) || !reflect.DeepEqual(state.Change.CreatedEdgeIDs, created) || !reflect.DeepEqual(state.Change.DeletedEdgeIDs, wantDeleted) {
 		t.Fatalf("change accounting: %+v", state.Change)
 	}
-	if _, err := h.service.UndoAssistantTurn(h.userID, h.canvasID, turn); err != nil {
+	if _, err := h.service.AssistantTurns().Undo(h.userID, h.canvasID, turn); err != nil {
 		t.Fatal(err)
 	}
 	restored := h.canvas(t)
@@ -203,7 +203,7 @@ func TestStoryboardOperationsReceiptReplayAndUndo(t *testing.T) {
 					t.Fatal("removed row left dangling edges or deleted unrelated edges")
 				}
 			}
-			if _, err := h.service.UndoAssistantTurn(h.userID, h.canvasID, turn); err != nil {
+			if _, err := h.service.AssistantTurns().Undo(h.userID, h.canvasID, turn); err != nil {
 				t.Fatal(err)
 			}
 			if !reflect.DeepEqual(before["nodes"], h.canvas(t)["nodes"]) {
@@ -213,5 +213,59 @@ func TestStoryboardOperationsReceiptReplayAndUndo(t *testing.T) {
 				t.Fatal("undo did not restore row connections")
 			}
 		})
+	}
+}
+
+func TestStoryboardRowPromptSyncTurnChangeAndUndo(t *testing.T) {
+	h := newHarness(t)
+	doc := h.canvas(t)
+	node := doc["nodes"].([]any)[0].(map[string]any)
+	node["type"] = "script"
+	node["metadata"] = map[string]any{
+		"storyboard": map[string]any{
+			"rows": []any{
+				map[string]any{
+					"id":                    "shot-1",
+					"shotNumber":            1,
+					"imageGenerationPrompt": "旧首帧提示词",
+					"imageNodeId":           "img-bound",
+				},
+			},
+		},
+	}
+	doc["nodes"] = append(doc["nodes"].([]any), map[string]any{
+		"id":       "img-bound",
+		"type":     "image",
+		"position": map[string]any{"x": 100, "y": 100},
+		"metadata": map[string]any{"content": "", "taskId": "task-1", "prompt": "旧首帧提示词", "composerContent": "旧首帧提示词"},
+	})
+	if _, err := h.service.UpsertUserCanvasProject(h.userID, mustRaw(t, doc)); err != nil {
+		t.Fatal(err)
+	}
+	before := h.canvas(t)
+	const turn = "abcd9989"
+	if _, err := h.service.BeginAssistantTurn(h.userID, h.canvasID, turn, app.AssistantTurnInput{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := accessWrite(t, h, turn, "canvas", "canvas.script.row.update", "sync-row-1", map[string]any{
+		"canvasId":         h.canvasID,
+		"nodeId":           "n1",
+		"expectedRevision": before["revision"],
+		"patches":          []any{map[string]any{"rowId": "shot-1", "imageGenerationPrompt": "新首帧提示词"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.service.FinalizeAssistantTurn(turn); err != nil {
+		t.Fatal(err)
+	}
+	state, err := h.service.ReadAssistantTurnHistoryState(h.userID, h.canvasID, turn)
+	if err != nil || state == nil || state.Change == nil || !reflect.DeepEqual(state.Change.UpdatedNodeIDs, []string{"img-bound", "n1"}) {
+		t.Fatalf("expected UpdatedNodeIDs to include synced node and script node, got %+v err=%v", state, err)
+	}
+	if _, err := h.service.AssistantTurns().Undo(h.userID, h.canvasID, turn); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before["nodes"], h.canvas(t)["nodes"]) {
+		t.Fatal("undo did not restore both storyboard row and synced bound node draft")
 	}
 }

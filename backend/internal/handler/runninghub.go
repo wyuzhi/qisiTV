@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 
 	"qisitv/backend/internal/app"
@@ -8,18 +9,27 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// runningHubWorkflows reads RunningHub workflow metadata. The fetch itself
+// stays in the composition root.
+type runningHubWorkflows interface {
+	workspaceOwners
+	RequireWorkflowPluginForUser(userID string, interfaceType string) error
+	FetchRunningHubAppInfo(ctx context.Context, req app.RunningHubWorkflowFetchRequest) (map[string]any, error)
+	FetchRunningHubWorkflowInfo(ctx context.Context, req app.RunningHubWorkflowFetchRequest) (map[string]any, error)
+}
+
 // RegisterRunningHubRoutes 是独立工作流 Provider 的管理代理，不复用 ModelChannel。
-func RegisterRunningHubRoutes(r *gin.RouterGroup, svc *app.Service, hostedProfile ...bool) {
+func RegisterRunningHubRoutes(r *gin.RouterGroup, workflows runningHubWorkflows, hostedProfile ...bool) {
 	if len(hostedProfile) > 0 && !hostedProfile[0] {
 		return
 	}
 	fetch := func(c *gin.Context, isApp bool) {
-		user, err := currentUser(c, svc)
+		user, err := currentUser(c, workflows)
 		if err != nil {
 			failService(c, err)
 			return
 		}
-		if err := svc.RequireWorkflowPluginForUser(user.ID, "runninghub-workflow-image"); err != nil {
+		if err := workflows.RequireWorkflowPluginForUser(user.ID, "runninghub-workflow-image"); err != nil {
 			failService(c, err)
 			return
 		}
@@ -31,9 +41,9 @@ func RegisterRunningHubRoutes(r *gin.RouterGroup, svc *app.Service, hostedProfil
 		}
 		var result map[string]any
 		if isApp {
-			result, err = svc.FetchRunningHubAppInfo(c.Request.Context(), req)
+			result, err = workflows.FetchRunningHubAppInfo(c.Request.Context(), req)
 		} else {
-			result, err = svc.FetchRunningHubWorkflowInfo(c.Request.Context(), req)
+			result, err = workflows.FetchRunningHubWorkflowInfo(c.Request.Context(), req)
 		}
 		if err != nil {
 			failService(c, err)

@@ -69,6 +69,20 @@ func ArkPrivateAssetResourceID(reference Media) string {
 	return strings.TrimSpace(strings.TrimPrefix(reference.StorageKey, "resource:"))
 }
 
+func ArkPrivateAssetTypeForMime(mimeType string) string {
+	lower := strings.ToLower(strings.TrimSpace(mimeType))
+	switch {
+	case strings.HasPrefix(lower, "image/"):
+		return "Image"
+	case strings.HasPrefix(lower, "video/"):
+		return "Video"
+	case strings.HasPrefix(lower, "audio/"):
+		return "Audio"
+	default:
+		return ""
+	}
+}
+
 type ArkPrivateAssetSyncResult struct {
 	ResourceID string `json:"resourceId"`
 	Status     string `json:"status"`
@@ -133,10 +147,14 @@ func CallArkPrivateAssetAPI(ctx context.Context, setting ArkPrivateAssetSettingV
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	signRegion := strings.ToLower(strings.TrimSpace(setting.Region))
+	if signRegion == "ap-southeast" {
+		signRegion = "ap-southeast-1"
+	}
 	credentials := base.Credentials{
 		AccessKeyID:     setting.AccessKeyID,
 		SecretAccessKey: setting.AccessKeySecret,
-		Region:          setting.Region,
+		Region:          signRegion,
 		Service:         "ark",
 	}
 	var response map[string]interface{}
@@ -187,6 +205,9 @@ func ArkPrivateAssetControlPlaneURL(ctx context.Context, region string) (string,
 		}
 	}
 	region = strings.ToLower(strings.TrimSpace(region))
+	if region == "ap-southeast" {
+		region = "ap-southeast-1"
+	}
 	if region == "" {
 		return "", errors.New("方舟素材库未配置 Region")
 	}
@@ -194,6 +215,9 @@ func ArkPrivateAssetControlPlaneURL(ctx context.Context, region string) (string,
 		if !(char >= 'a' && char <= 'z') && !(char >= '0' && char <= '9') && char != '-' {
 			return "", errors.New("方舟素材库 Region 格式无效")
 		}
+	}
+	if strings.HasPrefix(region, "ap-") {
+		return "https://ark." + region + ".byteplusapi.com", nil
 	}
 	return "https://ark." + region + ".volcengineapi.com", nil
 }

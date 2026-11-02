@@ -34,7 +34,7 @@ func registerAssistantSkillContextRoutes(r gin.IRouter, svc *app.Service, guard 
 		if !guard(c, false) {
 			return
 		}
-		if _, err := svc.UserCanvasProject(c.GetString("agentUserId"), c.Param("canvasId")); err != nil {
+		if _, err := svc.CanvasService().UserCanvasProject(c.GetString("agentUserId"), c.Param("canvasId")); err != nil {
 			failService(c, err)
 			return
 		}
@@ -44,7 +44,7 @@ func registerAssistantSkillContextRoutes(r gin.IRouter, svc *app.Service, guard 
 		if !guard(c, true) {
 			return
 		}
-		if _, err := svc.UserCanvasProject(c.GetString("agentUserId"), c.Param("canvasId")); err != nil {
+		if _, err := svc.CanvasService().UserCanvasProject(c.GetString("agentUserId"), c.Param("canvasId")); err != nil {
 			failService(c, err)
 			return
 		}
@@ -75,12 +75,12 @@ func registerAssistantRuntimeSkillContextRoutes(r gin.IRouter, svc *app.Service)
 		if c.Request.Method == http.MethodGet {
 			var result *assistantturns.SkillContext
 			if turnID := c.Query("turnId"); turnID != "" {
-				result, err = svc.BoundAssistantSkillContext(user.ID, turnID, c.Query("sessionId"))
+				result, err = svc.AssistantTurns().BoundSkillContext(user.ID, turnID, c.Query("sessionId"))
 				if err == nil && result.CanvasID != canvasID {
 					err = app.Forbidden("画布不匹配")
 				}
 			} else {
-				result, err = svc.AssistantSkillContext(user.ID, canvasID, c.Query("sessionId"))
+				result, err = svc.AssistantTurns().SkillContext(user.ID, canvasID, c.Query("sessionId"))
 			}
 			if err != nil {
 				skillContextFailure(c, err)
@@ -106,7 +106,7 @@ func registerAssistantRuntimeSkillContextRoutes(r gin.IRouter, svc *app.Service)
 			return
 		}
 		if body.TurnID != "" {
-			current, boundErr := svc.BoundAssistantSkillContext(user.ID, body.TurnID, body.SessionID)
+			current, boundErr := svc.AssistantTurns().BoundSkillContext(user.ID, body.TurnID, body.SessionID)
 			if boundErr != nil {
 				skillContextFailure(c, boundErr)
 				return
@@ -119,7 +119,7 @@ func registerAssistantRuntimeSkillContextRoutes(r gin.IRouter, svc *app.Service)
 		}
 		var result *assistantturns.SkillContext
 		if body.Action == "ack_reset" {
-			result, err = svc.AcknowledgeAssistantSkillScope(user.ID, canvasID, body.SessionID, body.ScopeID, body.ExpectedRevision)
+			result, err = svc.AssistantTurns().AcknowledgeSkillScope(user.ID, canvasID, body.SessionID, body.ScopeID, body.ExpectedRevision)
 		} else if body.Origin == "skill_load" {
 			result, err = svc.LoadAssistantTurnSkillContext(user.ID, canvasID, body.TurnID, body.SkillContextChange)
 		} else {

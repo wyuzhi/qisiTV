@@ -1,6 +1,7 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 
-import { CANVAS_VIDEO_PREVIEW_VERSION, canvasVideoPreviewNeedsHydration } from "../src/services/canvas-video-preview";
+import { acquireCanvasVideoPreview, CANVAS_VIDEO_PREVIEW_VERSION, canvasVideoPreviewNeedsHydration } from "../src/services/canvas-video-preview";
+import * as canvasVideoSourceModule from "../src/services/canvas-video-source";
 import { capturePresentedVideoPoster } from "../src/lib/video-poster";
 import { CanvasNodeType, type CanvasNodeData } from "../src/types/canvas";
 
@@ -81,6 +82,88 @@ test("poster capture waits for a presented video frame before drawing", async ()
     expect(result.width).toBe(1920);
     expect(result.height).toBe(1080);
     expect(result.poster?.type).toBe("image/jpeg");
+});
+
+test("video preview retries with compatible playback when first poster capture resolves without a poster", async () => {
+    const originalWindow = globalThis.window;
+    const originalDocument = globalThis.document;
+    let videoCalls = 0;
+    const acquireCalls: boolean[] = [];
+    const acquireSpy = spyOn(canvasVideoSourceModule, "acquireCanvasVideoSource").mockImplementation(async (_storageKey, _fallback, _signal, needsCompatible = false) => {
+        acquireCalls.push(needsCompatible);
+        return {
+            url: needsCompatible ? "blob:compatible-video" : "blob:original-video",
+            release: () => {},
+        };
+    });
+    Object.assign(globalThis, {
+        window: {
+            requestIdleCallback: (cb: () => void) => { cb(); return 1; },
+            cancelIdleCallback: () => {},
+            setTimeout: globalThis.setTimeout.bind(globalThis),
+            clearTimeout: globalThis.clearTimeout.bind(globalThis),
+        },
+        document: {
+            createElement(tag: string) {
+                if (tag === "video") {
+                    const attempt = ++videoCalls;
+                    const el = Object.assign(new EventTarget(), {
+                        videoWidth: 1280,
+                        videoHeight: 720,
+                        duration: 10,
+                        currentTime: 0.001,
+                        readyState: 4,
+                        preload: "",
+                        muted: false,
+                        playsInline: false,
+                        src: "",
+                        onloadedmetadata: null as ((ev: Event) => void) | null,
+                        onloadeddata: null as ((ev: Event) => void) | null,
+                        onerror: null as ((ev: Event) => void) | null,
+                        requestVideoFrameCallback(cb: () => void) { cb(); return 1; },
+                        async play() {},
+                        pause() {},
+                        removeAttribute() {},
+                        load() {
+                            if (!this.src) return;
+                            queueMicrotask(() => {
+                                if (attempt === 1) {
+                                    this.onerror?.(new Event("error"));
+                                } else {
+                                    this.onloadeddata?.(new Event("loadeddata"));
+                                }
+                            });
+                        },
+                    });
+                    return el;
+                }
+                return {
+                    width: 0,
+                    height: 0,
+                    getContext: () => ({ fillStyle: "", fillRect() {}, drawImage() {} }),
+                    toBlob(cb: BlobCallback) { cb(new Blob(["compatible-poster"], { type: "image/jpeg" })); },
+                };
+            },
+        },
+    });
+    try {
+        const lease = acquireCanvasVideoPreview({
+            metadata: {
+                storageKey: "resource:decode-fail-video",
+                content: "/api/resources/decode-fail-video/file",
+            },
+        });
+        const preview = await lease.promise;
+        lease.release();
+        expect(acquireCalls).toEqual([false, true]);
+        expect(preview).not.toBeNull();
+        expect(preview?.width).toBe(1280);
+        expect(preview?.height).toBe(720);
+    } finally {
+        acquireSpy.mockRestore();
+        globalThis.window = originalWindow;
+        globalThis.document = originalDocument;
+    }
 });
 
 afterEach(() => {

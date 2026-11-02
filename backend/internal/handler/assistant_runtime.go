@@ -22,7 +22,7 @@ func registerAssistantRuntimeRoutes(r gin.IRouter, svc *app.Service) {
 			failService(c, err)
 			return
 		}
-		state, err := svc.AssistantTurnRuntimeState(user.ID, c.Param("turnId"))
+		state, err := svc.AssistantTurns().RuntimeState(user.ID, c.Param("turnId"))
 		if err != nil {
 			fail(c, http.StatusForbidden, app.Forbidden("任务不可恢复"))
 			return
@@ -59,7 +59,7 @@ func registerAssistantRuntimeRoutes(r gin.IRouter, svc *app.Service) {
 			fail(c, http.StatusBadRequest, app.BadAuthRequest("会话绑定参数无效"))
 			return
 		}
-		if err := svc.BindAssistantDurableSession(user.ID, c.Param("turnId"), body.SessionID, body.Historical); err != nil {
+		if err := svc.AssistantTurns().BindDurableSession(user.ID, c.Param("turnId"), body.SessionID, body.Historical); err != nil {
 			failService(c, err)
 			return
 		}
@@ -98,6 +98,49 @@ func registerAssistantRuntimeRoutes(r gin.IRouter, svc *app.Service) {
 			return
 		}
 		ok(c, result)
+	})
+	r.POST("/assistant/runtime/turns", func(c *gin.Context) {
+		if !isLoopbackRequest(c.Request) || !isAssistantHostRequest(c, svc) {
+			fail(c, http.StatusForbidden, app.Forbidden("仅内置助手宿主可以开启任务"))
+			return
+		}
+		user, err := currentUser(c, svc)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		var body struct {
+			TurnID         string `json:"turnId"`
+			CanvasID       string `json:"canvasId"`
+			PermissionMode string `json:"permissionMode"`
+			SessionID      string `json:"sessionId"`
+		}
+		decoder := json.NewDecoder(io.LimitReader(c.Request.Body, 8192))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&body) != nil || body.TurnID == "" || body.CanvasID == "" {
+			fail(c, http.StatusBadRequest, app.BadAuthRequest("任务启动参数无效"))
+			return
+		}
+		mode := body.PermissionMode
+		if mode == "" {
+			mode = "canvas"
+		}
+		if _, err := svc.BeginAssistantTurn(user.ID, body.CanvasID, body.TurnID, app.AssistantTurnInput{PermissionMode: mode}); err != nil {
+			failService(c, err)
+			return
+		}
+		if body.SessionID != "" {
+			if err := svc.AssistantTurns().BindDurableSession(user.ID, body.TurnID, body.SessionID, false); err != nil {
+				failService(c, err)
+				return
+			}
+		}
+		state, err := svc.AssistantTurns().RuntimeState(user.ID, body.TurnID)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, state)
 	})
 	r.GET("/assistant/runtime/turns/:turnId", handle)
 	r.POST("/assistant/runtime/turns/:turnId/complete", handle)

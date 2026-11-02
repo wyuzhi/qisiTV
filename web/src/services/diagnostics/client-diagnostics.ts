@@ -136,9 +136,10 @@ export function initializeClientDiagnostics() {
         },
         (error: AxiosError) => {
             const config = error.config;
+            if (isCanceledRequestError(error, config)) return Promise.reject(error);
             const meta = config ? requestMeta.get(config) : undefined;
             const response = error.response;
-            const body = response?.data && typeof response.data === "object" ? (response.data as { code?: number; msg?: string; reason?: string }) : undefined;
+            const body = response?.data && typeof response.data === "object" && !(typeof Blob !== "undefined" && response.data instanceof Blob) ? (response.data as { code?: number; msg?: string; reason?: string }) : undefined;
             const route = appPathnameFrom(config?.url);
             if (isDiagnosticRoute(route) || (meta && meta.epoch !== scopeEpoch)) return Promise.reject(error);
             recordDiagnosticEvent({
@@ -251,6 +252,13 @@ export function safeDiagnosticId(value?: string) {
 function safeOperationId(value?: string) { return typeof value === "string" && /^[A-Za-z0-9:_-]{1,128}$/.test(value) && !/^(?:sk-|eyJ)|bearer|password|api[_-]?key|secret|token/i.test(value) ? value : undefined; }
 
 function isDiagnosticRoute(route: string) { return route.startsWith("/diagnostics"); }
+
+function isCanceledRequestError(error: AxiosError, config?: AxiosRequestConfig) {
+    if (config?.signal && "aborted" in config.signal && config.signal.aborted) return true;
+    const code = (error as { code?: string })?.code;
+    const name = (error as { name?: string })?.name;
+    return code === "ERR_CANCELED" || name === "CanceledError" || name === "AbortError";
+}
 
 function requestContext(config: AxiosRequestConfig): Partial<ClientDiagnosticEvent> {
     const route = appPathnameFrom(config.url);

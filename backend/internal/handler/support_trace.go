@@ -5,21 +5,27 @@ import (
 	"strconv"
 	"strings"
 
-	"qisitv/backend/internal/app"
 	"qisitv/backend/internal/supporttrace"
 
 	"github.com/gin-gonic/gin"
 )
 
+// supportTraces starts a support span. A nil recorder skips tracing, matching
+// the previous nil-service short circuit.
+type supportTraces interface {
+	workspaceOwners
+	SupportTrace() *supporttrace.Recorder
+}
+
 // SupportTracingMiddleware records business mutations, not successful polling.
 // It reads neither request nor response bodies and does not alter auth/errors.
-func SupportTracingMiddleware(svc *app.Service) gin.HandlerFunc {
+func SupportTracingMiddleware(traces supportTraces) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if svc == nil || c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead || c.Request.Method == http.MethodOptions || strings.Contains(c.FullPath(), "/diagnostics/") {
+		if traces == nil || c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead || c.Request.Method == http.MethodOptions || strings.Contains(c.FullPath(), "/diagnostics/") {
 			c.Next()
 			return
 		}
-		user, err := currentUser(c, svc)
+		user, err := currentUser(c, traces)
 		if err != nil || user == nil {
 			c.Next()
 			return
@@ -37,7 +43,7 @@ func SupportTracingMiddleware(svc *app.Service) gin.HandlerFunc {
 			fields.TurnID = c.Param("turnId")
 			name = "assistant.request"
 		}
-		ctx, finish := svc.SupportTrace().Start(c.Request.Context(), name, fields)
+		ctx, finish := traces.SupportTrace().Start(c.Request.Context(), name, fields)
 		c.Request = c.Request.WithContext(ctx)
 		if traceID := supporttrace.TraceID(ctx); traceID != "" {
 			c.Set(traceIDKey, traceID)

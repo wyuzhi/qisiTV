@@ -40,7 +40,7 @@ func TestMissingPermissionModeKeepsLegacyCanvasAuthority(t *testing.T) {
 	const turn = "abcdef0055667788"
 	env.beginTurn(t, turn, app.AssistantTurnInput{})
 	owner, _ := env.service.LocalWorkspaceOwner()
-	state, err := env.service.AssistantTurnRuntimeState(owner.ID, turn)
+	state, err := env.service.AssistantTurns().RuntimeState(owner.ID, turn)
 	if err != nil || state.PermissionMode != "canvas" {
 		t.Fatalf("runtime %+v %v", state, err)
 	}

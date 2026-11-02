@@ -41,7 +41,7 @@ description: BeefTV后端核心持久化表与状态边界
 
 旧版本不能读取这个加密封装。降级前须停止所有工作区写入者，恢复升级前的完整工作区备份；不能只替换可执行文件后继续写入新配置。自动更新器的二进制回滚与工作区数据恢复是不同操作。
 
-当前本地候选的结构版本为 v25。正式 v1.6.21 的结构版本为 v3，历史 Agent 候选曾使用 v3–v6，另有图片恢复预览分支使用 v3 或 v7；这些预览编号不能当作正式版本已发布的证据。
+当前本地候选的结构版本为 v28。正式 v1.6.21 的结构版本为 v3，历史 Agent 候选曾使用 v3–v6，另有图片恢复预览分支使用 v3 或 v7；这些预览编号不能当作正式版本已发布的证据。
 
 v14 `assistant-skill-version-pins` 为 `assistant_turns` 追加文本列 `skill_pins_json`。保存用户明确选定的技能、版本和内容摘要；旧回合留空。迁移保留未知字段、旧历史和回合快照。恢复时重新校验安装授权与包文件校验和，不自动切换新版。
 
@@ -51,7 +51,7 @@ v16 `assistant-durable-session-binding` 追加 `durable_session_id` 与 `durable
 
 v17 `assistant-active-skill-context` 追加 `assistant_skill_contexts` 与 `assistant_skill_context_mutations`。上下文以 `(user_id, canvas_id, durable_session_id)` 为主键，只保存范围、revision、活动版本 pin 与生命周期，不保存另一份技能正文；变更回执再以 `request_id` 去重。恢复会话时按活动 pin 重新读安装文件，缺失或校验失败时停止本轮请求，不静默沿用历史正文。清除当前选择和开始独立任务是显式上下文变更。
 
-v18 `assistant-generation-continuations` 在既有 v17 活动技能上下文之后追加 `assistant_continuations`。一条用户确认记录固定原回合、提议、画布/会话/scope revision、原权限、全部提交 operationId/输出节点集合，以及接续 requestId/turnId；真实 task IDs 从原提交回读。认领与业务回合快照同事务提交，撤销/范围变化/停止使授权失效，不取消或重发收费媒体任务。结构检查包含完整字段、主键与 turnId 唯一索引；不改写旧表和历史 ledger。详见仓库 `docs/refactor/assistant-generation-continuation.md`。
+v18 `assistant-generation-continuations` 在既有 v17 活动技能上下文之后追加 `assistant_continuations`。一条用户确认记录固定原回合、提议、画布/会话/scope revision、原权限、全部提交 operationId/输出节点集合，以及接续 requestId/turnId；真实 task IDs 从原提交回读。认领与业务回合快照同事务提交，撤销/范围变化/停止使授权失效，不取消或重发收费媒体任务。结构检查包含完整字段、主键与 turnId 唯一索引；不改写旧表和历史 ledger。
 
 v19 `assistant-continuation-intent-fence` 为 `assistant_turns` 追加 `continuation_invalidated`，默认 false。停止、新用户输入或用户范围变化在取消已有回执的同事务标记旧源回合，阻止仍在准备中的旧确认稍后重新登记接续；普通回合保存不得清除此标记。宿主当前轮的正常 `skill_load` 不代表新用户意图，在同事务同步同用户、画布、会话和原 scope/version 下仍有效的接续回执；已取消或失效的记录不恢复。旧历史、未知列与迁移记录保留，缺列阻止 Ready。
 
@@ -64,6 +64,12 @@ v22 `canvas-reusable-workflows` 增加 `canvas_workflows`、`canvas_workflow_run
 v23 `canvas-workflow-source-snapshots` 为任务追加私有文本列 `workflow_source_cipher`。任务成功时，在完整输入被公共投影清理前，将原 canonical 命令整体加密，并与成功结果在同一事务保存；图片后续交付清理保留该列。文本、图片、视频和音频共用此完成路径。快照不进入任务 JSON 或导出，不单独占用素材引用，随任务删除；创建模板时再校验素材可用性并建立引用保护。历史已清理完整参数的任务保留原状，封装时提示手动重新运行，不从模型名或现有连线猜测原请求。
 
 v24 为工作流增加不可变模板版本快照。v25 在保留历史迁移记录的前提下补齐预览版曾占用 v17–v19 导致缺失的助手技能上下文与生成接续结构。既有模板保留原定义与密文作为第 1 版；保存采用预期版本比较，运行记录所选版本。资源引用覆盖仍保留的版本，删除模板时事务清理版本，已存在运行的引用继续保护素材。
+
+v26 `task-recovery-outcome` 只给 `tasks` 追加无默认值的可空 `recovery_outcome TEXT`，不回填旧任务、不改历史迁移记录、不重建任务表。`no_result` 表示确认没有结果，不能据此认定没有扣费；`unrecoverable` 表示无法取回，上游可能已生成并计费。暂时的网络、数据库、配额或租约错误不写这两个结论，仅通过既有 `next_poll_at` 退避。列不进入任务 JSON；公共 `outcome` 每次读取时计算，不持久化。迁移及 ledger 同事务，缺列拒绝 Ready。回退须恢复升级前完整工作区备份，不能删列或降 ledger。当前数据库实现只有 SQLite，没有需要同步变更的 PostgreSQL 迁移。
+
+v27 `task-beefapi-settlement` 给 `tasks` 追加 BeefAPI 结算原值：可空的 `beef_usage_state`、`beef_billing_state`、`beef_reconcile_deadline`（均为 TEXT），以及 `image_job_id TEXT NOT NULL DEFAULT ''`。v26 已随 v2.0.5 发布，已升级的库不会重跑 v26，所以这些列必须放在新版本里。迁移只加列，不回填旧任务；缺列拒绝 Ready。字段缺失（NULL）表示没读到结算事实，与 BeefAPI 明确返回的空值不同，投影时分开处理。
+
+v28 `managed-media-query-identity` 只给 `image_submissions` 追加可空 `query_cipher TEXT`，不改 v26/v27 或旧行。它使用已有工作区密钥保存内置 BeefAPI 原任务查询必需的小型身份，不含原生成 body 或素材；不进入任务 API。清理 24 小时前大请求前先为仍可解密的历史内置请求提取查询身份，然后清空 `request_cipher`，保留原发送次数。新版请求在第一次 POST 前同时保存发送记录和查询身份。已被旧版本清空、无法证明原编号的记录保持未知，禁止重新 POST。v27 与已发布 v2.0.5 的 v26 库均通过顺序迁移升级；缺列拒绝 Ready。
 
 
 v13 `upload-reservation-witness` 追加 `user_upload_reservations`，以 `(user_id, identity)` 唯一索引记录未完成上传预留的日期和字节数。日额仍由 `user_daily_upload_usages` 记账，预留索引与日额增加在同一事务内完成。资源进入 READY 时与状态保存在同一事务清除索引并保留日额；进入 FAILED 或放弃时与状态保存在同一事务按索引金额和日期释放。FAILED 准入只把状态改成 PENDING，不退日额。未结算资源写成 READY 前必须持有见证，缺见证时再预留；残留 FAILED 若仍持有原见证则沿用，不二次扣额。已结算 READY 丢失物理文件时，恢复不重新预留；物理写入或最终保存失败保留原 READY 状态并返回错误，下一次恢复仍复用原资源身份及已消费额度。启动恢复：无对应资源则释放一次；PENDING 保留索引；FAILED 释放；READY 清索引且保留日额。删除 READY 资源只清索引，不把已计入日额当成孤儿退还。重复清理不再扣减其他上传的日额。分片会话文件不是配额账；查询失败时保留恢复证据并记录恢复错误。同一身份的进行中重复预留映射为上传进行中。
@@ -98,22 +104,7 @@ go test -race ./internal/app -run 'TestImageSubmission|TestCreateTaskReplaysSame
 
 Agent 宿主在安装仓库锁定的依赖后，可从仓库根目录执行 `bun test agent-host/*.test.mjs`；其中运行探针使用真实 Node/pi SDK 和本机模型、操作端点替身。该结果不代表真实供应商、用户工作区或桌面安装链已经验收。任何真实升级都必须先停止所有工作区写入者，创建完整工作区备份（包括 SQLite、资源文件和设置加密密钥），验证备份可读取，再只对独立副本升级并核验结果。正式安装、发布及真实数据库迁移还需用户单独授权。
 
-回滚只允许停止新程序后，将升级前完整备份恢复到新的隔离目录，由与该备份版本匹配的二进制打开；不得把旧程序指向已升级数据库，不得删除 v8/v9 ledger、降低版本号或删列模拟回滚。升级后产生的新数据不在旧备份中，应保留升级后目录并由 owner 决定如何迁回。本实验没有执行任何真实数据备份、升级、回滚或应用安装。
-
-### Lucas 统一候选测试入口
-
-待测远端分支为 `codex/pr41-sr-repair-20260930`。从干净的独立 checkout 拉取该分支并记录完整 commit；不要把其他会话的未提交修改覆盖到候选。上面的 Go 命令可先验证合成数据迁移和 CLI/MCP 合同。前端可在已有依赖和 FFmpeg/Chromium 环境执行 `BEEFTV_NATIVE_FFMPEG_TEST=1 BEEFTV_BROWSER_WORKER_TEST=1 bun run test`（工作目录 `web`），启用真实媒体和浏览器 Worker 用例；缺少工具不得记作通过。
-
-人工桌面验收须另行取得按候选 commit 构建的完整包。先关闭所有使用源工作区的程序，复制整个工作区到备份目录，再从备份复制一个测试目录；保留未打开过的备份。启动候选时显式设置 `CANVAS_DESKTOP_DATA_DIR` 为测试目录的绝对路径，核对启动日志及工作区内容后再操作。不得省略此变量而误用默认工作区。Windows PowerShell 示例（路径必须替换为实际独立目录）：
-
-```powershell
-$env:CANVAS_DESKTOP_DATA_DIR = 'D:\BeefTV-tests\candidate-workspace'
-& 'D:\BeefTV-tests\candidate-app\BeefTV.exe'
-```
-
-测试包应解压到新目录，保留 `BeefTV.exe`、`plugins`、`cli`、`agent-host` 完整布局，并按提供方的签名清单核对签名、大小及 SHA-256；本轮没有发布可下载包。旧 Windows 升级器不能直接接受这个布局，过渡升级器的本地方案在 `codex/product-windows-bridge-20260930`，尚未完成 Windows 真机验收或更新源部署。不要把新包只覆盖到旧目录、绕过验签或运行正式发布工作流来代替测试。
-
-人工检查画布与任务历史、失败诊断、重启后输出找回、CLI/MCP 操作回放、独立音轨和字幕成片、ZIP 在空工作区导入。生成类上游调用须另行获得预算授权。回滚时退出候选，把未升级的完整备份复制到另一个新目录，再使用匹配该备份的旧包显式指向该目录；禁止旧 Agent v6 或旧整合 v8 程序打开升级后的 v9 目录。
+回滚只允许停止新程序后，将升级前完整备份恢复到新的隔离目录，由与该备份版本匹配的二进制打开；不得把旧程序指向已升级数据库，不得删除 v8/v9 ledger、降低版本号或删列模拟回滚。升级后产生的新数据不在旧备份中，应保留升级后目录并由用户决定如何迁回。
 
 ### 桌面本地任务诊断
 
@@ -121,7 +112,7 @@ $env:CANVAS_DESKTOP_DATA_DIR = 'D:\BeefTV-tests\candidate-workspace'
 
 `failure_diagnostics.source=local_network` 表示本机访问外部服务时的网络故障。DNS 底层 cause 只用于运行时的取消与重试判断；持久化内容仅包含安全摘要、`transportPhase=dns` 和实际操作阶段，不包含解析目标或 DNS 服务器地址。
 
-本地 SQLite 使用 `local_schema_migrations` 记录版本。本地候选目前为 v25，正式 v1.6.21 为 v3；历史图片恢复预览曾使用 v7。正式 v3 为 `tasks` 新增可空文本列 `failure_diagnostics`，存储有界、脱敏的执行证据和失败摘要；旧任务保留空值。失败诊断与任务终态在同一次带租约校验的更新中保存，成功任务也保留执行证据，主动重试时清除上一轮诊断。任务列表和详情均读取该列，字段说明见 [HTTP API](./http-api)。整合 v8 同时补齐历史分支可能缺失的产品与 Agent 结构，v9 修复已标 v8 的已知结构缺损并强化完整性检查，v10 追加助手业务回合表，v11 追加创作对话表，v12 追加画布文件夹与画板，v13 追加上传预留恢复索引，v14 追加固定技能版本，v15 追加内置权限和跨画布快照，v16 追加助手持久会话绑定，保留原迁移记录、Agent 表和任务扩展列。v17–v21 的活动技能、生成接续、意图撤销、制作授权和市场版本元数据见本文前述迁移说明。
+本地 SQLite 使用 `local_schema_migrations` 记录版本。本地候选目前为 v28，正式 v1.6.21 为 v3；历史图片恢复预览曾使用 v7。正式 v3 为 `tasks` 新增可空文本列 `failure_diagnostics`，存储有界、脱敏的执行证据和失败摘要；旧任务保留空值。失败诊断与任务终态在同一次带租约校验的更新中保存，成功任务也保留执行证据，主动重试时清除上一轮诊断。任务列表和详情均读取该列，字段说明见 [HTTP API](./http-api)。整合 v8 同时补齐历史分支可能缺失的产品与 Agent 结构，v9 修复已标 v8 的已知结构缺损并强化完整性检查，v10 追加助手业务回合表，v11 追加创作对话表，v12 追加画布文件夹与画板，v13 追加上传预留恢复索引，v14 追加固定技能版本，v15 追加内置权限和跨画布快照，v16 追加助手持久会话绑定，保留原迁移记录、Agent 表和任务扩展列。v17–v21 的活动技能、生成接续、意图撤销、制作授权和市场版本元数据见本文前述迁移说明。
 
 部分预览版曾将 v3–v6 用于其他迁移。启动时还会按实际表结构检查并补齐 `failure_diagnostics`，不覆盖迁移记录、不删除预览版字段或旧任务；就绪检查同时要求最低版本和该字段存在。任务入库失败返回 HTTP 500、`reason=local_storage_failed`，界面明确显示本地保存失败、尚未提交生成。内部错误链保留数据库原因，HTTP 响应不包含 SQL 原文；handler 日志记录错误类型。
 
@@ -129,7 +120,7 @@ $env:CANVAS_DESKTOP_DATA_DIR = 'D:\BeefTV-tests\candidate-workspace'
 
 实验 Agent 的 v3–v6 与正式版本使用过重叠编号，迁移执行器按最大已应用版本推进。图片恢复预览 v7 不创建 Agent 运行时结构。本分支通过 v8 追加迁移显式补齐 `agent_op_records`（包含 `turn_id` 及其索引）、`tasks.client_operation_id`、`tasks.client_operation_hash` 和 `(user_id, client_operation_id)` 唯一索引；不依赖旧 v3–v6 再次执行。历史 Agent v6 程序不能直接连接升级后的 v7/v8 数据库。
 
-本地完整重构候选以正式 v1.6.21 与 Agent 开发分支为整合起点，当前验收状态见仓库 `docs/refactor/progress.md`。原生桌面完整交互、Windows 真机升级和用户数据副本验收仍是新候选的发布门槛；旧候选或正式版的验收回执不能替代这些验证。历史候选及旧数据备份独立保留，更新开发分支不触发真实工作区迁移。
+本地完整重构候选以正式 v1.6.21 与 Agent 开发分支为整合起点。原生桌面完整交互、Windows 真机升级和用户数据副本验收仍是新候选的发布门槛；旧候选或正式版的验收回执不能替代这些验证。历史候选及旧数据备份独立保留，更新开发分支不触发真实工作区迁移。
 
 历史图片恢复预览 v7 拒绝同为 v7 但缺少 `image_submissions` 或 `tasks.failure_diagnostics` 的数据库；本候选通过追加 v8/v9 显式补齐这些历史结构，再以 v10 追加业务回合表，v11 追加创作对话表。同为当前版本但结构缺损仍拒绝 Ready，版本号本身不构成结构完备证明。不能改历史记录伪造兼容。回滚只能停止所有写入者后，恢复升级前完整工作区备份到独立目录，再用匹配该备份的旧二进制打开；禁止旧程序直接打开新数据库。
 
@@ -145,7 +136,11 @@ HTTPS 图片提交前读取同源 `/models` 元数据，仅成功响应明确声
 
 图片生成成功后先保存原始结果 URL，再交给现有断点下载流程保存资源和绑定画布。待下载任务的 `input_json.imageDeliveryCipher` 仅保存工作区密钥加密的下载配置，不含参考图或提示词，任务 API 不返回该字段；所有产物保存后清除。鉴权头只发送给原渠道同源地址，重定向离开原站后不再恢复。桌面下载复用账号连接的静态系统代理和排除地址规则，显式环境代理优先，目标地址仍须通过统一出站校验：默认允许本机与局域网，仍拒绝链路本地、未指定、组播和带账号密码的 URL。
 
-旧版图片任务若仅有一条完整、成功的 OpenAI 图片创建回执，任务重试先恢复该回执中的原图 URL，再继续下载，不创建新生成任务。多次创建回执、失败响应或不完整正文不作为成功恢复的依据；原任务和诊断记录继续保留。
+旧版图片任务若仅有一条完整、成功的 OpenAI 图片创建回执，任务重试先恢复该回执中的原图 URL，再继续下载，不创建新生成任务。这条 `/retry` 分支继续保留。
+
+后台现有交付定时器还会自动扫描可能已接纳的失败图片：当前轮派发为 `accepted/submission_unknown`、阶段为 `submission_unknown`，或者存在同用户图片创建回执，任一满足即可，不要求有路由记录。每轮最多 8 条，独立批次使用 15 秒的上下文预算，不等待它完成才继续现有下载循环；按任务 ID 游标前进，避免争用或暂时失败一直占据队头。恢复成功沿用原任务、原轮次和现有下载、画布绑定流程。
+
+完整历史回执优先直接重建结果；不能用旧轮次回执覆盖当前轮次。多条日志不能随意选取其中一个成功结果；若当前轮有可验证的冻结请求，仍可用原键取回确切回执，否则写 `unrecoverable`。后台单次同键发送最长 5 秒，不再以原 worker 的 12 次发送上限判定结果丢失，仍严格受首次保存后 23 小时的窗口限制。请求正文、端点、Header 与幂等键从原加密记录恢复，不用修改后的输入重建请求。原 route attempt 渠道优先，新冻结记录在原加密 JSON 内补存 `ChannelID`；发送前及实际发送准入时检查原渠道仍启用、同源地址和原鉴权身份一致，当前配置只用于比对，绝不替换原凭据。停用、删除、换源或换 token 时不改走备用渠道，写入 `unrecoverable` 并要求确认；渠道/凭据读取错误仍只退避。只接受保存时已声明幂等协议的 HTTPS 图片端点，禁止 POST 跟随重定向。网络错误退避 30 秒至 15 分钟后再试，未知结果不换键、不换路由、不创建新任务。视频与超分没有新增自动查询或提交路径。
 
 ### 旧内置 Agent 运行时（已退场，数据保留）
 
@@ -162,7 +157,7 @@ HTTPS 图片提交前读取同源 `/models` 元数据，仅成功响应明确声
 
 ### 本地工作区结构（桌面形态）
 
-桌面形态使用由 `local_schema_migrations` 管理的本地结构版本（当前候选为 21，见 `backend/internal/database/local_schema.go`），
+桌面形态使用由 `local_schema_migrations` 管理的本地结构版本（当前候选为 27，见 `backend/internal/database/local_schema.go`），
 与上面的托管版本序列相互独立。版本 11 由会话工作单独占用，本序列从 10 直接进入 12。
 
 版本 3 `agent-operation-records` 为既有版本 2 工作区创建 `agent_op_records` 及用户、操作 ID 联合主键；版本 4/5 为任务的客户端操作编号补充结构；版本 6 `agent-operation-turn-attribution` 为 `agent_op_records` 增加可空的 `turn_id` 与索引，用于把内置助手一轮对话的写入回执归到该轮上。迁移只新增结构，不重写画布、项目或任务数据；结构创建与迁移记录在同一事务中提交。重复启动不会重复迁移，已成功操作的幂等结果在重启后继续回放。
@@ -246,6 +241,9 @@ HTTPS 图片提交前读取同源 `/models` 元数据，仅成功响应明确声
 | `creation_submissions` | 保存创作提案中每个生成项的请求、报价签名、审批和任务绑定 | `(run_id, item_key)` 与 `task_id` 分别唯一；相同提交只允许创建一个任务，过期、撤销或提案哈希不一致时拒绝执行 |
 | `tasks.creation_submission_id` | 将生成任务反向绑定到已批准的创作提交 | 字段可空以兼容普通任务和旧数据；非空值唯一，阻止同一提交产生多个任务 |
 | `tasks.client_operation_id` / `client_operation_hash` | 保存普通生成确认的稳定编号和原始请求 SHA-256 摘要 | 编号可空；`(user_id, client_operation_id)` 唯一。重放必须匹配完整原始生成请求，模型、参考素材或参数不同返回 409；摘要不对外返回。旧记录没有摘要时拒绝重放，不自动补单 |
+| `tasks.recovery_outcome` | 保存后台或手动恢复对失败生成任务记录的内部结论（`no_result` \| `unrecoverable`）；成功任务上另存后台画布绑定扫描的私有标记（`canvas_bind:` 前缀，格式版本 4） | 恢复结论仅由恢复流程在确认上游失败/未建单（`no_result`）或回执缺失/冲突/过保（`unrecoverable`）时写入；暂时性网络或读库错误保持为空以便下一轮继续取回。画布绑定标记只在成功任务上写入，记录被拒的目标（节点已删除、节点已换任务时附带被拒那次读到的画布 revision），画布 revision 变化后重试，绑定成功或目标不再存在时清除；写入只替换空值或旧的 `canvas_bind:` 标记，不覆盖恢复结论，也不改 `updated_at`。两者都不直接对外暴露，恢复结论仅通过 `task.ComputeOutcome` 投影为 `outcome` |
+| `tasks.beef_usage_state` / `beef_billing_state` / `beef_reconcile_deadline` | 保存 BeefAPI 返回的本轮结算原值和核对截止时间 | 由提交与恢复流程写入，NULL 表示未读到结算事实；不直接对外暴露，仅通过 `task.ComputeOutcome` 投影为 `outcome`（`pending` 时暂不允许重新生成并返回截止时间） |
+| `tasks.image_job_id` | 保存 BeefAPI 图片任务编号，用于后台查询已提交图片的结果与结算 | 默认空串；只用于恢复查询，不用于重新提交 |
 | `workflow_template_versions` / `workflow_instances` / `workflow_step_instances` | 保存短剧生产模板和项目、章节实例 | 短剧分镜工作流 v2 顺序为剧情、资产、分镜、动作预演、视频、交付 |
 
 短剧项目状态以这些领域表为准。自由画布可以承载探索节点，但画布 metadata 不作为生产完成度、镜头版本或交付可用性的真相源。

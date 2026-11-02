@@ -7,7 +7,7 @@ const lifecycle = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/use
 
 test("desktop local canvas creation starts durable sync without waiting for cache flush", () => {
     const begin = repository.indexOf("export function beginLocalCanvasProject(");
-    const sync = repository.indexOf("const saved = syncLocalCanvasProject(id, expected);", begin);
+    const sync = repository.indexOf("const saved = syncLocalCanvasProject(id);", begin);
     const returned = repository.indexOf("return { id, saved };", sync);
     expect(begin).toBeGreaterThan(-1);
     expect(sync).toBeGreaterThan(begin);
@@ -31,5 +31,5 @@ test("canvas save summary never replaces the full node document", () => {
 });
 
 test("local canvas deletion removes the canonical backend record", () => {
-    expect(repository).toContain("await http.delete(`/canvas-projects/${encodeURIComponent(id)}`, { expectedScope: expected })");
+    expect(repository).toContain("await http.delete(`/canvas-projects/${encodeURIComponent(id)}`)");
 });

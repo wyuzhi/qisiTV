@@ -15,7 +15,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const CurrentSchemaVersion int64 = 25
+const CurrentSchemaVersion int64 = 28
 
 type localSchemaMigration struct {
 	Version   int64 `gorm:"primaryKey;autoIncrement:false"`
@@ -122,6 +122,26 @@ func canonicalLocalMigrations() []localMigration {
 			}
 			return migrateAssistantContinuationIntentFence(tx)
 		}},
+		{version: 26, name: "task-recovery-outcome", apply: func(tx *gorm.DB) error {
+			return ensureSQLiteColumn(tx, "tasks", "recovery_outcome", "TEXT")
+		}},
+		// v26 已随 v2.0.5 发布，已升级的库不会再执行它；结算原值列必须放在新版本里。
+		{version: 27, name: "task-beefapi-settlement", apply: func(tx *gorm.DB) error {
+			for _, col := range []struct{ name, def string }{
+				{"beef_usage_state", "TEXT"},
+				{"beef_billing_state", "TEXT"},
+				{"beef_reconcile_deadline", "TEXT"},
+				{"image_job_id", "TEXT NOT NULL DEFAULT ''"},
+			} {
+				if err := ensureSQLiteColumn(tx, "tasks", col.name, col.def); err != nil {
+					return err
+				}
+			}
+			return nil
+		}},
+		{version: 28, name: "managed-media-query-identity", apply: func(tx *gorm.DB) error {
+			return ensureSQLiteColumn(tx, "image_submissions", "query_cipher", "TEXT")
+		}},
 	}
 }
 
@@ -184,6 +204,11 @@ func migrateLocalSchema(db *gorm.DB, beforeApply func(int64) error) error {
 	}
 	if err := assertLedgerImmutable(db, frozen); err != nil {
 		return err
+	}
+	if current >= 6 && db.Migrator().HasColumn("agent_op_records", "payload_hash") {
+		if err := ensureAgentOpRecordsTable(db); err != nil {
+			return fmt.Errorf("补齐 Agent 操作记录字段: %w", err)
+		}
 	}
 	if current >= 11 {
 		if err := ensureCreationConversationsIndexes(db); err != nil {
@@ -433,6 +458,13 @@ func RequireLocalSchema(db *gorm.DB) error {
 	}
 	if version != CurrentSchemaVersion {
 		return fmt.Errorf("本地工作区数据库版本为 %d，期望 %d，请启用自动迁移", version, CurrentSchemaVersion)
+	}
+	for _, col := range []string{"recovery_outcome", "beef_usage_state", "beef_billing_state", "beef_reconcile_deadline", "image_job_id"} {
+		if has, err := sqliteHasColumn(db, "tasks", col); err != nil {
+			return err
+		} else if !has {
+			return fmt.Errorf("本地任务结构缺失列 %s", col)
+		}
 	}
 	if err := requireAssistantContinuations(db); err != nil {
 		return err
