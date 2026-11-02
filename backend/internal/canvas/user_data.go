@@ -77,8 +77,11 @@ func (s *Service) hydrateCanvasDocumentLimitFromDB() {
 
 func (s *Service) CanvasDocumentLimitMB() int64 {
 	if s.hasSystemSettingsTable() {
+		canvasLimitMu.Lock()
+		defer canvasLimitMu.Unlock()
 		if setting, err := s.repo.SystemSetting(canvasDocumentLimitSettingKey); err == nil && setting != nil {
 			if parsed, parseErr := strconv.ParseInt(strings.TrimSpace(setting.ValueJSON), 10, 64); parseErr == nil && parsed >= 0 && parsed <= MaxCanvasDocumentLimitMB {
+				effectiveCanvasDocumentLimitMB.Store(parsed)
 				return parsed
 			}
 		}
@@ -87,8 +90,15 @@ func (s *Service) CanvasDocumentLimitMB() int64 {
 }
 
 func (s *Service) UpdateCanvasDocumentLimitMB(limitMB int64) (int64, error) {
+	return s.UpdateCanvasDocumentLimitMBBy("owner", limitMB)
+}
+
+func (s *Service) UpdateCanvasDocumentLimitMBBy(actorID string, limitMB int64) (int64, error) {
 	if limitMB < 0 || limitMB > MaxCanvasDocumentLimitMB {
 		return 0, kernel.BadAuthRequest("单画布容量上限必须是 0-512 MB 的整数（0 表示不限制）")
+	}
+	if strings.TrimSpace(actorID) == "" {
+		actorID = "owner"
 	}
 	canvasLimitMu.Lock()
 	defer canvasLimitMu.Unlock()
@@ -101,7 +111,7 @@ func (s *Service) UpdateCanvasDocumentLimitMB(limitMB int64) (int64, error) {
 		setting := model.SystemSetting{
 			Key:       canvasDocumentLimitSettingKey,
 			ValueJSON: strconv.FormatInt(limitMB, 10),
-			UpdatedBy: "user",
+			UpdatedBy: actorID,
 		}
 		if existing, err := s.repo.SystemSetting(canvasDocumentLimitSettingKey); err == nil && existing != nil {
 			setting.CreatedAt = existing.CreatedAt

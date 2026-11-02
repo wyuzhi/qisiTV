@@ -150,7 +150,7 @@ function retryAfterMilliseconds(headers: unknown) {
 
 export type HttpRequestConfig = Omit<AxiosRequestConfig, "method" | "url" | "data" | "baseURL">;
 
-const HEAVY_CANVAS_DOCUMENT_TIMEOUT_MS = 20_000;
+const HEAVY_CANVAS_DOCUMENT_TIMEOUT_MS = 180_000;
 
 function isHeavyCanvasDocumentWrite(method: string, url: string) {
     if (method === "get" || method === "delete") return false;

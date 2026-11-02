@@ -167,14 +167,20 @@ func TestCanvasDocumentCustomCapacityLimit(t *testing.T) {
 		t.Fatalf("expected 1MB limit rejection, got: %v", err)
 	}
 
-	if _, err := svc.UpdateCanvasDocumentLimitMB(128); err != nil {
-		t.Fatalf("UpdateCanvasDocumentLimitMB(128): %v", err)
+	if _, err := svc.UpdateCanvasDocumentLimitMBBy("owner-42", 128); err != nil {
+		t.Fatalf("UpdateCanvasDocumentLimitMBBy(128): %v", err)
+	}
+	if setting, err := svc.repo.SystemSetting("canvas_document_limit_mb"); err != nil || setting == nil || setting.UpdatedBy != "owner-42" {
+		t.Fatalf("expected SystemSetting.UpdatedBy = owner-42, got %+v (err=%v)", setting, err)
 	}
 	if got := svc.CanvasDocumentLimitMB(); got != 128 {
 		t.Fatalf("CanvasDocumentLimitMB after 128 = %d", got)
 	}
 	if _, err := svc.UpsertUserCanvasProject("owner", payload2MB); err != nil {
 		t.Fatalf("expected 2MB canvas to succeed under 128MB limit: %v", err)
+	}
+	if _, err := svc.UpdateCanvasDocumentLimitMB(513); err == nil {
+		t.Fatal("expected 513MB (> MaxCanvasDocumentLimitMB) to be rejected")
 	}
 
 	if _, err := svc.UpdateCanvasDocumentLimitMB(0); err != nil {

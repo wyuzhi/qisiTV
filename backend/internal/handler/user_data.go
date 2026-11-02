@@ -146,13 +146,11 @@ func registerUserDataRoutes(r *gin.RouterGroup, owners workspaceOwners, canvasDa
 			failService(c, err)
 			return
 		}
-		ok(c, gin.H{
-			"usage":            usage,
-			"canvasDocumentMB": canvasData.CanvasDocumentLimitMB(),
-		})
+		ok(c, gin.H{"usage": usage, "canvasDocumentMB": canvasData.CanvasDocumentLimitMB()})
 	})
 	r.PATCH("/resources/storage-usage", func(c *gin.Context) {
-		if _, err := currentUser(c, owners); err != nil {
+		user, err := currentUser(c, owners)
+		if err != nil {
 			failService(c, err)
 			return
 		}
@@ -164,7 +162,7 @@ func registerUserDataRoutes(r *gin.RouterGroup, owners workspaceOwners, canvasDa
 			fail(c, http.StatusBadRequest, kernel.BadAuthRequest("请填写有效的单画布容量上限"))
 			return
 		}
-		limitMB, err := canvasData.UpdateCanvasDocumentLimitMB(*req.CanvasDocumentMB)
+		limitMB, err := canvasData.UpdateCanvasDocumentLimitMBBy(user.ID, *req.CanvasDocumentMB)
 		if err != nil {
 			failService(c, err)
 			return

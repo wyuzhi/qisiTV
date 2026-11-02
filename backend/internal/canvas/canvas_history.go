@@ -56,10 +56,14 @@ func SaveDocumentWithHistoryAndAssets(repo *repository.Repository, before *model
 		}
 		restoredIDs = assets.SortedIDs(refs)
 	}
-	if len(items) > 0 {
-		return repo.SaveAssetsAndCanvasWithSnapshot(items, after, snapshot, resourceIDs, restoredIDs, cutoff, canvasHistoryLimit, force)
+	historyLimit := canvasHistoryLimit
+	if before != nil && len(before.PayloadJSON) > (8<<20) {
+		historyLimit = max(1, min(canvasHistoryLimit, (128<<20)/len(before.PayloadJSON)))
 	}
-	return repo.SaveCanvasWithSnapshot(after, snapshot, resourceIDs, restoredIDs, cutoff, canvasHistoryLimit, force)
+	if len(items) > 0 {
+		return repo.SaveAssetsAndCanvasWithSnapshot(items, after, snapshot, resourceIDs, restoredIDs, cutoff, historyLimit, force)
+	}
+	return repo.SaveCanvasWithSnapshot(after, snapshot, resourceIDs, restoredIDs, cutoff, historyLimit, force)
 }
 
 func canvasRevisionConflict() error {
