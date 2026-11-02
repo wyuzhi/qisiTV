@@ -3,6 +3,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { accountStorageMeter } from "../src/lib/account-storage-usage";
+import { http } from "../src/services/api/request";
+import {
+    DEFAULT_CANVAS_DOCUMENT_LIMIT_MB,
+    readLocalCanvasDocumentLimitMB,
+    updateCanvasDocumentLimitMB,
+} from "../src/services/api/resources";
 
 const GB = 1024 ** 3;
 
@@ -66,5 +72,44 @@ describe("workspace sidebar storage meter", () => {
         expect(css).toContain(".app-workspace-sidebar-storage.is-warn");
         expect(css).toContain(".app-workspace-sidebar-storage.is-critical");
         expect(productCss).toContain(".app-user-workspace.app-product-workspace .app-workspace-sidebar-storage { display:none; }");
+    });
+
+    test("persists custom single-canvas capacity limit only after backend PATCH succeeds", async () => {
+        const store = new Map<string, string>();
+        const prevLocalStorage = globalThis.localStorage;
+        const prevPatch = http.patch;
+        let failPatch = false;
+        Object.defineProperty(globalThis, "localStorage", {
+            configurable: true,
+            value: {
+                getItem: (key: string) => store.get(key) ?? null,
+                setItem: (key: string, value: string) => { store.set(key, value); },
+                removeItem: (key: string) => { store.delete(key); },
+            },
+        });
+        http.patch = (async (_url: string, body?: unknown) => {
+            if (failPatch) throw new Error("后端保存失败");
+            const payload = body as { canvasDocumentMB: number };
+            return { canvasDocumentMB: payload.canvasDocumentMB } as never;
+        }) as typeof http.patch;
+        try {
+            expect(readLocalCanvasDocumentLimitMB()).toBe(DEFAULT_CANVAS_DOCUMENT_LIMIT_MB);
+            expect(await updateCanvasDocumentLimitMB(256)).toBe(256);
+            expect(readLocalCanvasDocumentLimitMB()).toBe(256);
+            failPatch = true;
+            await expect(updateCanvasDocumentLimitMB(128)).rejects.toThrow("后端保存失败");
+            expect(readLocalCanvasDocumentLimitMB()).toBe(256);
+            failPatch = false;
+            expect(await updateCanvasDocumentLimitMB(0)).toBe(0);
+            expect(readLocalCanvasDocumentLimitMB()).toBe(0);
+            await expect(updateCanvasDocumentLimitMB(-1)).rejects.toThrow("单画布容量上限");
+            await expect(updateCanvasDocumentLimitMB(9999)).rejects.toThrow("单画布容量上限");
+        } finally {
+            http.patch = prevPatch;
+            Object.defineProperty(globalThis, "localStorage", {
+                configurable: true,
+                value: prevLocalStorage,
+            });
+        }
     });
 });

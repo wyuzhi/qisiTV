@@ -1,6 +1,9 @@
 package canvas
 
 import (
+	"strconv"
+	"strings"
+
 	"infinite-canvas/backend/internal/asset"
 	"infinite-canvas/backend/internal/assets"
 	"infinite-canvas/backend/internal/model"
@@ -169,6 +172,26 @@ func (h configHost) WithStorageLock(fn func() error) error {
 	return h.cfg.LockStorage(fn)
 }
 
+func ApplyDocumentLimitToPolicy(repo *repository.Repository, policy platform.RuntimeResourcePolicy) platform.RuntimeResourcePolicy {
+	if repo == nil || repo.DB() == nil || !repo.DB().Migrator().HasTable(&model.SystemSetting{}) {
+		return policy
+	}
+	setting, err := repo.SystemSetting(canvasDocumentLimitSettingKey)
+	if err != nil || setting == nil {
+		return policy
+	}
+	parsed, parseErr := strconv.ParseInt(strings.TrimSpace(setting.ValueJSON), 10, 64)
+	if parseErr != nil || parsed < 0 || parsed > MaxCanvasDocumentLimitMB {
+		return policy
+	}
+	if parsed == 0 {
+		policy.StructuredDataMB = max(policy.StructuredDataMB, MaxCanvasDocumentLimitMB+64)
+	} else if parsed+64 > policy.StructuredDataMB && parsed > DefaultCanvasDocumentLimitMB {
+		policy.StructuredDataMB = parsed + 64
+	}
+	return policy
+}
+
 func (h configHost) StructuredQuota(userID, kind string, creating bool, deltaBytes int64) error {
 	if h.cfg.ResourcePolicy == nil || h.cfg.Repo == nil {
 		return nil
@@ -177,6 +200,7 @@ func (h configHost) StructuredQuota(userID, kind string, creating bool, deltaByt
 	if err != nil {
 		return err
 	}
+	policy = ApplyDocumentLimitToPolicy(h.cfg.Repo, policy)
 	usage, err := h.cfg.Repo.UserStorageUsage(userID)
 	if err != nil {
 		return err
@@ -192,6 +216,7 @@ func (h configHost) StructuredBatchQuota(userID, kind string, createdCount int, 
 	if err != nil {
 		return err
 	}
+	policy = ApplyDocumentLimitToPolicy(h.cfg.Repo, policy)
 	usage, err := h.cfg.Repo.UserStorageUsage(userID)
 	if err != nil {
 		return err
@@ -207,6 +232,7 @@ func (h configHost) AdmitStructuredQuota(usage repository.UserStorageUsage, kind
 	if err != nil {
 		return err
 	}
+	policy = ApplyDocumentLimitToPolicy(h.cfg.Repo, policy)
 	return resource.ValidateStructuredStorageQuota(usage, kind, creating, deltaBytes, policy)
 }
 
@@ -218,6 +244,7 @@ func (h configHost) StructuredReplacementQuota(userID, kind string, count int, b
 	if err != nil {
 		return err
 	}
+	policy = ApplyDocumentLimitToPolicy(h.cfg.Repo, policy)
 	usage, err := h.cfg.Repo.UserStorageUsage(userID)
 	if err != nil {
 		return err
@@ -244,6 +271,9 @@ func New(repo *repository.Repository, host Host) *Service {
 		host = nopHost{}
 	}
 	s := &Service{repo: repo, host: host}
+	if repo != nil && !repo.HoldsTransaction() {
+		s.hydrateCanvasDocumentLimitFromDB()
+	}
 	s.library = asset.NewLibrary(repo, &canvasLibraryHost{service: s})
 	return s
 }

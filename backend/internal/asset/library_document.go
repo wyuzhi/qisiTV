@@ -284,10 +284,7 @@ func ValidateSyncedPayload(raw json.RawMessage, label string) error {
 }
 
 func ValidateSyncedPayloadWithLimit(raw json.RawMessage, label string, maxMB int) error {
-	if maxMB <= 0 {
-		maxMB = 4
-	}
-	if len(raw) > maxMB<<20 {
+	if maxMB > 0 && int64(len(raw)) > int64(maxMB)<<20 {
 		return kernel.BadAuthRequest(label + "数据超过 " + strconv.Itoa(maxMB) + "MB，请先把媒体文件保存到资源存储")
 	}
 	if !mayContainInlineMediaDataURL(raw) {

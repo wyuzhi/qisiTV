@@ -664,6 +664,33 @@ paths:
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
+  /resources/storage-usage:
+    get:
+      tags: [resources]
+      summary: 查询账号已用字节、配额总容量与单画布容量上限（MB，0 表示不限制）
+      responses:
+        "200":
+          $ref: "#/components/responses/Envelope"
+    patch:
+      tags: [resources]
+      summary: 更新单画布文档容量上限（0 表示不限制，范围 0-512 MB）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [canvasDocumentMB]
+              properties:
+                canvasDocumentMB:
+                  type: integer
+                  minimum: 0
+                  maximum: 512
+      responses:
+        "200":
+          $ref: "#/components/responses/Envelope"
+        "400":
+          $ref: "#/components/responses/Error"
   /resources/playback-cache:
     delete:
       tags: [resources]

@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"infinite-canvas/backend/internal/canvas"
 	"infinite-canvas/backend/internal/kernel"
 	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/platform"
@@ -143,7 +144,7 @@ func ValidateCanvasWithPolicy(u string, repo *repository.Repository, creating bo
 	if err != nil {
 		return err
 	}
-	return resource.ValidateStructuredStorageQuota(usage, "canvas", creating, delta, p.Resource)
+	return resource.ValidateStructuredStorageQuota(usage, "canvas", creating, delta, canvas.ApplyDocumentLimitToPolicy(repo, p.Resource))
 }
 func (h configHost) ValidateDocument(u string, repo *repository.Repository, raw json.RawMessage) error {
 	if repo == nil {

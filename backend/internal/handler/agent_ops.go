@@ -14,13 +14,14 @@ import (
 	"infinite-canvas/backend/internal/agentops"
 	"infinite-canvas/backend/internal/app"
 	"infinite-canvas/backend/internal/assistantturns"
+	"infinite-canvas/backend/internal/canvas"
 	"infinite-canvas/backend/internal/operations"
 	"infinite-canvas/backend/internal/skills"
 	httptransport "infinite-canvas/backend/internal/transport/http"
 )
 
-// agentOpsMaxBody 与画布 PUT 上限对齐：文档提交会带上整份画布，1MB 不够。
-const agentOpsMaxBody = 20 << 20
+// agentOpsMaxBody 与画布默认 PUT 上限对齐：文档提交会带上整份画布，运行时若用户放宽单画布上限则自动跟随放大。
+const agentOpsMaxBody = 68 << 20
 
 type agentOpsService interface {
 	operations.DomainBinder
@@ -253,13 +254,14 @@ func RegisterAgentOpsRoutes(r gin.IRouter, svc agentOpsService, store *agentops.
 			failService(c, err)
 			return
 		}
-		body, err := io.ReadAll(io.LimitReader(c.Request.Body, agentOpsMaxBody+1))
+		maxBody := max(int64(agentOpsMaxBody), canvas.EffectiveRequestMaxBodyBytes())
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBody+1))
 		if err != nil {
 			fail(c, http.StatusBadRequest, app.BadAuthRequest("请求体读取失败"))
 			return
 		}
-		if int64(len(body)) > agentOpsMaxBody {
-			fail(c, http.StatusRequestEntityTooLarge, app.BadAuthRequest("请求体超过 20MB 限制"))
+		if int64(len(body)) > maxBody {
+			fail(c, http.StatusRequestEntityTooLarge, app.BadAuthRequest("请求体超过容量上限"))
 			return
 		}
 		// 只读能力只由客户端身份（登记模式）决定：请求体不接受 readOnly，

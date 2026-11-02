@@ -159,6 +159,7 @@ func newCanvasHistoryTestService(t *testing.T) *Service {
 		&model.ProjectAssetCandidate{}, &model.ProjectAssetLink{},
 		&model.WorkflowInstance{}, &model.WorkflowStepInstance{},
 		&model.CharacterVoiceBinding{}, &model.ArkPrivateAssetBinding{},
+		&model.SystemSetting{},
 	); err != nil {
 		t.Fatal(err)
 	}

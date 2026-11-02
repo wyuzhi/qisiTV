@@ -27,7 +27,8 @@ Windows 安装包自带视频处理工具，无需另外安装 FFmpeg。预览�
 
 - `web/src/components/layout/workspace-sidebar-storage-meter.tsx`：侧栏容量进度。
 - `web/src/pages/assets/asset-storage-usage.tsx`：资产页同一查询。
-- `GET /api/resources/storage-usage`：账号已用字节与配额总容量。
+- `GET /api/resources/storage-usage`：账号已用字节、配额总容量与单画布文档容量上限（`canvasDocumentMB`，默认 `64` MB，`0` 表示不限制）。
+- `PATCH /api/resources/storage-usage`：更新单画布文档容量上限（`0-512` MB，`0` 表示不限制）。
 
 ## BeefTV Agent：创作助手
 

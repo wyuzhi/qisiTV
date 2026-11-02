@@ -114,7 +114,11 @@ function writeCanvasFolders(folders: CanvasFolder[]) {
             ...folder,
             coverDataUrl: folder.coverDataUrl?.startsWith("data:") ? undefined : folder.coverDataUrl,
         }));
-    scopedLocalStorage.setItem(CANVAS_FOLDERS_KEY, JSON.stringify(persistable));
+    try {
+        scopedLocalStorage.setItem(CANVAS_FOLDERS_KEY, JSON.stringify(persistable));
+    } catch {
+        // Pending folder intents and covers live in IndexedDB (canvas_folder_pending).
+    }
 }
 
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };

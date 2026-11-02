@@ -146,7 +146,30 @@ func registerUserDataRoutes(r *gin.RouterGroup, owners workspaceOwners, canvasDa
 			failService(c, err)
 			return
 		}
-		ok(c, gin.H{"usage": usage})
+		ok(c, gin.H{
+			"usage":            usage,
+			"canvasDocumentMB": canvasData.CanvasDocumentLimitMB(),
+		})
+	})
+	r.PATCH("/resources/storage-usage", func(c *gin.Context) {
+		if _, err := currentUser(c, owners); err != nil {
+			failService(c, err)
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4<<10)
+		var req struct {
+			CanvasDocumentMB *int64 `json:"canvasDocumentMB"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || req.CanvasDocumentMB == nil {
+			fail(c, http.StatusBadRequest, kernel.BadAuthRequest("请填写有效的单画布容量上限"))
+			return
+		}
+		limitMB, err := canvasData.UpdateCanvasDocumentLimitMB(*req.CanvasDocumentMB)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"canvasDocumentMB": limitMB})
 	})
 	r.DELETE("/resources/playback-cache", func(c *gin.Context) {
 		user, err := currentUser(c, owners)
@@ -663,7 +686,7 @@ func registerUserDataRoutes(r *gin.RouterGroup, owners workspaceOwners, canvasDa
 		if !available || !enforceRateLimit(c, "canvas-write:"+user.ID, policy.Request.CanvasWritePerMinute, time.Minute) {
 			return
 		}
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, agentOpsMaxBody)
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, canvasData.RequestMaxBodyBytes())
 		var req struct {
 			Project json.RawMessage `json:"project"`
 		}

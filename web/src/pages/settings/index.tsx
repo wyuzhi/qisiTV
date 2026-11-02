@@ -33,15 +33,15 @@ export default function SettingsPage() {
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const shouldPromptContinue = searchParams.get("continue") === "1";
     const userChannels = config.channels.filter((channel) => channel.scope !== "system");
-    const nativeStorage = Boolean(getDesktopAppBinding()?.StorageSettings);
+    const hasDepthComponents = Boolean(getDesktopAppBinding()?.DepthComponentStatus);
     useLayoutEffect(() => {
         document.body.classList.add("app-user-overlays");
         return () => document.body.classList.remove("app-user-overlays");
     }, []);
 
     useEffect(() => {
-        setActiveTab(isConfigSection(requestedSection) && (requestedSection !== "storage" || nativeStorage) ? requestedSection : "channels");
-    }, [requestedSection, nativeStorage]);
+        setActiveTab(isConfigSection(requestedSection) ? requestedSection : "channels");
+    }, [requestedSection]);
 
     const selectSection = (section: ConfigSectionKey) => {
         setActiveTab(section);
@@ -87,10 +87,12 @@ export default function SettingsPage() {
                 <div className="storage-settings-sections">
                     <StorageSettingsPane />
                     <ReferenceStoragePane />
-                    <section className="settings-section storage-settings-block space-y-4" aria-label="深度捕捉组件">
-                        <div className="settings-pane-header"><h2>深度捕捉组件</h2></div>
-                        <DepthComponentsPanel />
-                    </section>
+                    {hasDepthComponents ? (
+                        <section className="settings-section storage-settings-block space-y-4" aria-label="深度捕捉组件">
+                            <div className="settings-pane-header"><h2>深度捕捉组件</h2></div>
+                            <DepthComponentsPanel />
+                        </section>
+                    ) : null}
                 </div>
             </SettingsPane>
         ),

@@ -139,12 +139,64 @@ func TestCommitUserCanvasDocumentHealsOwnedMediaAndAllowsEditsWithLegacyReferenc
 		t.Fatal("expected duplicate broken legacy reference on new node to be rejected")
 	}
 
-	// ValidateSyncedPayload allows >4MB canvas payloads (up to 16MB) while keeping 4MB limit for assets.
+	// ValidateSyncedPayload allows >4MB canvas payloads (up to default 64MB) while keeping 4MB limit for assets.
 	largeCanvas := json.RawMessage(`{"id":"big","nodes":[{"id":"t","type":"text","content":"` + strings.Repeat("a", 5<<20) + `"}]}`)
 	if err := ValidateSyncedPayload(largeCanvas, "画布"); err != nil {
 		t.Fatalf("ValidateSyncedPayload rejected 5MB canvas: %v", err)
 	}
 	if err := asset.ValidateSyncedPayload(largeCanvas, "素材"); err == nil {
 		t.Fatal("asset.ValidateSyncedPayload accepted 5MB asset")
+	}
+}
+
+func TestCanvasDocumentCustomCapacityLimit(t *testing.T) {
+	svc := newCanvasHistoryTestService(t)
+	t.Cleanup(func() {
+		SetEffectiveCanvasDocumentLimitMB(DefaultCanvasDocumentLimitMB)
+	})
+	if got := svc.CanvasDocumentLimitMB(); got != DefaultCanvasDocumentLimitMB {
+		t.Fatalf("default CanvasDocumentLimitMB = %d, want %d", got, DefaultCanvasDocumentLimitMB)
+	}
+
+	payload2MB := json.RawMessage(`{"id":"custom-limit-canvas","revision":0,"title":"容量测试","nodes":[{"id":"t","type":"text","content":"` + strings.Repeat("x", (1<<20)+512*1024) + `"}],"connections":[]}`)
+
+	if _, err := svc.UpdateCanvasDocumentLimitMB(1); err != nil {
+		t.Fatalf("UpdateCanvasDocumentLimitMB(1): %v", err)
+	}
+	if _, err := svc.UpsertUserCanvasProject("owner", payload2MB); err == nil || !strings.Contains(err.Error(), "1MB") {
+		t.Fatalf("expected 1MB limit rejection, got: %v", err)
+	}
+
+	if _, err := svc.UpdateCanvasDocumentLimitMB(128); err != nil {
+		t.Fatalf("UpdateCanvasDocumentLimitMB(128): %v", err)
+	}
+	if got := svc.CanvasDocumentLimitMB(); got != 128 {
+		t.Fatalf("CanvasDocumentLimitMB after 128 = %d", got)
+	}
+	if _, err := svc.UpsertUserCanvasProject("owner", payload2MB); err != nil {
+		t.Fatalf("expected 2MB canvas to succeed under 128MB limit: %v", err)
+	}
+
+	if _, err := svc.UpdateCanvasDocumentLimitMB(0); err != nil {
+		t.Fatalf("UpdateCanvasDocumentLimitMB(0): %v", err)
+	}
+	if got := svc.CanvasDocumentLimitMB(); got != 0 {
+		t.Fatalf("CanvasDocumentLimitMB after 0 (unlimited) = %d", got)
+	}
+	if svc.RequestMaxBodyBytes() != HardRequestMaxBodyBytes {
+		t.Fatalf("expected 0 (unlimited) RequestMaxBodyBytes = %d, got %d", HardRequestMaxBodyBytes, svc.RequestMaxBodyBytes())
+	}
+	// Reset global atomic to 1MB and verify a newly constructed Service hydrates 0 from SQLite.
+	SetEffectiveCanvasDocumentLimitMB(1)
+	reloaded := New(svc.repo, nil)
+	if got := reloaded.CanvasDocumentLimitMB(); got != 0 || EffectiveCanvasDocumentLimitMB() != 0 {
+		t.Fatalf("expected New(repo) to hydrate persisted 0 from DB, got %d / %d", got, EffectiveCanvasDocumentLimitMB())
+	}
+	if err := ValidateSyncedPayload(payload2MB, "画布"); err != nil {
+		t.Fatalf("expected unlimited ValidateSyncedPayload to accept payload: %v", err)
+	}
+	inlineMedia := json.RawMessage(`{"id":"inline","nodes":[{"id":"img","type":"image","content":"data:image/png;base64,iVBORw0KGgo="}]}`)
+	if err := ValidateSyncedPayload(inlineMedia, "画布"); err == nil {
+		t.Fatal("expected inline media data URL to remain rejected even when canvas size is unlimited")
 	}
 }

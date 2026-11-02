@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"infinite-canvas/backend/internal/canvas"
 	"infinite-canvas/backend/internal/creation"
 )
 
@@ -46,7 +47,7 @@ func RegisterCreationRoutes(r *gin.RouterGroup, svc creationRouteService) {
 				failService(c, err)
 				return
 			}
-			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, agentOpsMaxBody)
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, max(int64(agentOpsMaxBody), canvas.EffectiveRequestMaxBodyBytes()))
 			var req creation.Command
 			if err = c.ShouldBindJSON(&req); err != nil {
 				fail(c, http.StatusBadRequest, err)

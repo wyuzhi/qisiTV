@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"infinite-canvas/backend/internal/asset"
@@ -14,6 +17,110 @@ import (
 
 	"gorm.io/gorm"
 )
+
+const (
+	DefaultCanvasDocumentLimitMB  int64 = 64
+	MaxCanvasDocumentLimitMB      int64 = 512
+	HardRequestMaxBodyBytes       int64 = (MaxCanvasDocumentLimitMB << 20) + (4 << 20)
+	canvasDocumentLimitSettingKey       = "canvas_document_limit_mb"
+)
+
+var (
+	canvasLimitMu                  sync.Mutex
+	effectiveCanvasDocumentLimitMB atomic.Int64
+)
+
+func init() {
+	effectiveCanvasDocumentLimitMB.Store(DefaultCanvasDocumentLimitMB)
+}
+
+func EffectiveCanvasDocumentLimitMB() int64 {
+	return effectiveCanvasDocumentLimitMB.Load()
+}
+
+func SetEffectiveCanvasDocumentLimitMB(limitMB int64) {
+	canvasLimitMu.Lock()
+	defer canvasLimitMu.Unlock()
+	if limitMB < 0 {
+		limitMB = DefaultCanvasDocumentLimitMB
+	}
+	if limitMB > MaxCanvasDocumentLimitMB {
+		limitMB = MaxCanvasDocumentLimitMB
+	}
+	effectiveCanvasDocumentLimitMB.Store(limitMB)
+}
+
+func EffectiveRequestMaxBodyBytes() int64 {
+	limitMB := EffectiveCanvasDocumentLimitMB()
+	if limitMB <= 0 {
+		return HardRequestMaxBodyBytes
+	}
+	return min(HardRequestMaxBodyBytes, (max(limitMB, DefaultCanvasDocumentLimitMB)<<20)+(4<<20))
+}
+
+func (s *Service) hasSystemSettingsTable() bool {
+	return s != nil && s.repo != nil && s.repo.DB() != nil && s.repo.DB().Migrator().HasTable(&model.SystemSetting{})
+}
+
+func (s *Service) hydrateCanvasDocumentLimitFromDB() {
+	if !s.hasSystemSettingsTable() {
+		return
+	}
+	canvasLimitMu.Lock()
+	defer canvasLimitMu.Unlock()
+	if setting, err := s.repo.SystemSetting(canvasDocumentLimitSettingKey); err == nil && setting != nil {
+		if parsed, parseErr := strconv.ParseInt(strings.TrimSpace(setting.ValueJSON), 10, 64); parseErr == nil && parsed >= 0 && parsed <= MaxCanvasDocumentLimitMB {
+			effectiveCanvasDocumentLimitMB.Store(parsed)
+		}
+	}
+}
+
+func (s *Service) CanvasDocumentLimitMB() int64 {
+	if s.hasSystemSettingsTable() {
+		if setting, err := s.repo.SystemSetting(canvasDocumentLimitSettingKey); err == nil && setting != nil {
+			if parsed, parseErr := strconv.ParseInt(strings.TrimSpace(setting.ValueJSON), 10, 64); parseErr == nil && parsed >= 0 && parsed <= MaxCanvasDocumentLimitMB {
+				return parsed
+			}
+		}
+	}
+	return EffectiveCanvasDocumentLimitMB()
+}
+
+func (s *Service) UpdateCanvasDocumentLimitMB(limitMB int64) (int64, error) {
+	if limitMB < 0 || limitMB > MaxCanvasDocumentLimitMB {
+		return 0, kernel.BadAuthRequest("单画布容量上限必须是 0-512 MB 的整数（0 表示不限制）")
+	}
+	canvasLimitMu.Lock()
+	defer canvasLimitMu.Unlock()
+	if s != nil && s.repo != nil && s.repo.DB() != nil {
+		if !s.hasSystemSettingsTable() {
+			if err := s.repo.DB().AutoMigrate(&model.SystemSetting{}); err != nil {
+				return 0, err
+			}
+		}
+		setting := model.SystemSetting{
+			Key:       canvasDocumentLimitSettingKey,
+			ValueJSON: strconv.FormatInt(limitMB, 10),
+			UpdatedBy: "user",
+		}
+		if existing, err := s.repo.SystemSetting(canvasDocumentLimitSettingKey); err == nil && existing != nil {
+			setting.CreatedAt = existing.CreatedAt
+		}
+		if err := s.repo.SaveSystemSetting(&setting); err != nil {
+			return 0, err
+		}
+	}
+	effectiveCanvasDocumentLimitMB.Store(limitMB)
+	return limitMB, nil
+}
+
+func (s *Service) RequestMaxBodyBytes() int64 {
+	limitMB := s.CanvasDocumentLimitMB()
+	if limitMB <= 0 {
+		return HardRequestMaxBodyBytes
+	}
+	return min(HardRequestMaxBodyBytes, (max(limitMB, DefaultCanvasDocumentLimitMB)<<20)+(4<<20))
+}
 
 type AssetsSyncRequest = asset.AssetsSyncRequest
 
@@ -169,6 +276,7 @@ func (s *Service) upsertUserCanvasProjectAndPayload(userID string, raw json.RawM
 	if *version.Revision < 0 || *version.Revision >= 9007199254740991 {
 		return UserDataSummary{}, nil, kernel.BadAuthRequest("画布版本无效")
 	}
+	_ = s.CanvasDocumentLimitMB()
 	project, err := canvasProjectFromJSON(userID, raw)
 	if err != nil {
 		return UserDataSummary{}, nil, err
@@ -334,7 +442,7 @@ func canvasProjectFromJSON(userID string, raw json.RawMessage) (model.CanvasProj
 }
 
 func ValidateSyncedPayload(raw json.RawMessage, label string) error {
-	return asset.ValidateSyncedPayloadWithLimit(raw, label, 16)
+	return asset.ValidateSyncedPayloadWithLimit(raw, label, int(EffectiveCanvasDocumentLimitMB()))
 }
 
 func ContainsInlineMediaDataURL(value interface{}) bool {
