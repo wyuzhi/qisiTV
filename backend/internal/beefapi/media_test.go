@@ -254,3 +254,38 @@ func TestConfirmUploadRetriesStalledControlAttempt(t *testing.T) {
 		t.Fatalf("uploaded=%+v attempts=%d", uploaded, attempts)
 	}
 }
+
+func TestMediaDiscoverRetriesTransientEOF(t *testing.T) {
+	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "true")
+	var mu sync.Mutex
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		mu.Lock()
+		attempts++
+		current := attempts
+		mu.Unlock()
+		if current == 1 {
+			if hijacker, ok := w.(http.Hijacker); ok {
+				if conn, _, err := hijacker.Hijack(); err == nil {
+					_ = conn.Close()
+					return
+				}
+			}
+		}
+		writeMediaDiscovery(w)
+	}))
+	defer server.Close()
+
+	client := &MediaClient{BaseURL: server.URL, APIKey: "fixture", AllowHTTPTest: true}
+	discovery, err := client.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("Discover failed after transient EOF: %v", err)
+	}
+	if discovery.Version != MediaProtocolVersion || attempts != 2 {
+		t.Fatalf("discovery=%+v attempts=%d", discovery, attempts)
+	}
+}

@@ -313,11 +313,23 @@ func (c *MediaClient) Discover(ctx context.Context) (MediaDiscovery, error) {
 	if c.discovery != nil {
 		return *c.discovery, nil
 	}
-	req, err := c.request(ctx, http.MethodGet, "/models", nil)
-	if err != nil {
-		return MediaDiscovery{}, err
+	var data []byte
+	var header http.Header
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		var req *http.Request
+		req, err = c.request(ctx, http.MethodGet, "/models", nil)
+		if err != nil {
+			return MediaDiscovery{}, err
+		}
+		data, header, err = c.send(req, 4<<20)
+		if err == nil || ctx.Err() != nil || !retryUploadControl(err) || attempt == 2 {
+			break
+		}
+		if err = uploadPause(ctx, attempt); err != nil {
+			return MediaDiscovery{}, err
+		}
 	}
-	data, header, err := c.send(req, 4<<20)
 	if err != nil {
 		return MediaDiscovery{}, err
 	}

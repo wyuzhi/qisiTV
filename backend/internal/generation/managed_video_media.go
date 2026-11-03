@@ -36,7 +36,7 @@ func useManagedMediaEnvelope(ctx context.Context, config Config, mediaType strin
 	}
 	discovery, err := client.Discover(ctx)
 	if err != nil {
-		return nil, false, RequestPreparationError{Cause: err}
+		return nil, false, wrapManagedDiscoveryError(err)
 	}
 	return client, slices.Contains(discovery.SupportedMediaTypes, mediaType), nil
 }

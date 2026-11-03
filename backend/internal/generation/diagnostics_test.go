@@ -13,3 +13,23 @@ func TestDiagnosticSummaryHidesMountedAndNetworkPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestDiagnosticSummaryDoesNotMangleHTTPURLsAsLocalPaths(t *testing.T) {
+	for _, msg := range []string{
+		`本次请求准备失败：Get "https://enterprise.beefapi.com/v1/models": EOF`,
+		`Post "https://enterprise.beefapi.com/v1/media/tasks": connection reset by peer`,
+		`Put "https://storage.example.com/media/uploads/part1?X-Amz-Signature=secret": unexpected EOF`,
+	} {
+		got := DiagnosticSummary(msg)
+		if strings.Contains(got, "[路径已隐藏]") || strings.Contains(got, "http[") || strings.Contains(got, "enterprise.beefapi.com") || strings.Contains(got, "secret") {
+			t.Fatalf("HTTP URL mangled as local path or leaked: %q -> %q", msg, got)
+		}
+		if !strings.Contains(got, "EOF") && !strings.Contains(got, "connection reset by peer") {
+			t.Fatalf("transport cause lost: %q -> %q", msg, got)
+		}
+	}
+	combined := DiagnosticSummary(`cannot read C:\Users\PRIVATE\image.png https://host/file?token=PRIVATE Authorization: Bearer PRIVATE multi word`)
+	if strings.Contains(combined, "PRIVATE") || !strings.Contains(combined, "[路径已隐藏]") {
+		t.Fatalf("combined path+url+credential summary leaked: %q", combined)
+	}
+}

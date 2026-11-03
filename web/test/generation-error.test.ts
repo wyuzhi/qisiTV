@@ -375,6 +375,25 @@ describe("generation error classification", () => {
         expect(explained.requestId).toBeUndefined();
     });
 
+    test("http urls in transport summaries are stripped without mangling as local paths or dropping trailing causes", () => {
+        for (const msg of [
+            '本次请求准备失败：Get "https://enterprise.beefapi.com/v1/models": EOF',
+            'Post "https://enterprise.beefapi.com/v1/media/tasks": connection reset by peer',
+            'Put "https://storage.example.com/media/uploads/part1?X-Amz-Signature=secret": unexpected EOF',
+        ]) {
+            const text = formatGenerationDiagnostics(explainGenerationError({ code: "request_not_sent" }), {
+                failureDiagnostics: {
+                    source: "local_network",
+                    summary: msg,
+                },
+            });
+            expect(text).not.toContain("[路径已隐藏]");
+            expect(text).not.toContain("enterprise.beefapi.com");
+            expect(text).not.toContain("secret");
+            expect(text).toMatch(/EOF|connection reset by peer/);
+        }
+    });
+
     test("numbers in messages are not http codes", () => {
         const explained = explainGenerationError({ data: { error: { message: "task 402 failed internally", code: "internal_error" }, request_id: "req_safe_1" } });
         expect(explained.category).not.toBe("quota_unknown");
