@@ -4,6 +4,14 @@ All notable public changes to BeefTV are documented in this file.
 
 ## Unreleased
 
+## v2.1.4
+
+- 插件市场随包上线与角色替换插件：桌面安装包内置插件市场与 LL2 自定义渠道视频协议插件，支持国内镜像加速浏览、查看说明与一键在线安装；插件市场精选新增「角色替换（Character Replacement）」插件，支持两阶段视频角色替换工作台与时间线拼接。
+- BeefTV 官方算力预计费用显示：刷新模型目录时自动同步公开价格表，内置助手确认卡、普通生成提案与分镜批量生成确认框统一显示逐项预计费用与合计（支持按张、按秒、按 Token 折算及先扣后结说明，自带 Key 渠道按实际渠道计费）；修复部分图片模型未出现在助手模型列表的问题。
+- 生成稳定性、报错脱敏与界面优化：修复媒体上传探测偶发中断未重试、报错中的网页链接被误截断，以及旧版系统 WebView 下报错信息残留密钥的问题；技能市场滚动时固定顶部分类栏并在单页时隐藏翻页按钮。
+
+注意：部分影音理解、字幕和助手成片排版仍需结合原素材人工核对。
+
 ## v2.1.3
 
 - 插件市场与扩展生态首版上线：内置官方插件市场（支持精选推荐浏览与 npm 插件搜索），支持从市场一键安装、从本地目录或压缩包导入插件；开放画布自定义节点、添加节点菜单、独立页面与内置助手工具扩展，启用或停用插件即时生效无需重启。
@@ -179,7 +187,7 @@ All notable public changes to BeefTV are documented in this file.
 
 ## v1.7.22
 
-- 所有视频渠道统一优先取回上游结果；下载中断或链接失效时刷新原任务链接，内置 BeefAPI 还可切换备用文件，无需重新生成。
+- 所有视频渠道统一优先取回上游结果；下载中断或链接失效时刷新原任务链接，BeefTV 官方算力还可切换备用文件，无需重新生成。
 - 修复工作流多个结果在链接更新后取错素材的问题，并按实际文件识别视频、图片和音频。
 - H3 Max、Max Turbo 的时长输入支持小数秒，H3 Max 支持中间帧与参考顺序设置；修复高级设置菜单被弹层遮挡的问题。
 
@@ -214,8 +222,8 @@ All notable public changes to BeefTV are documented in this file.
 - 结果下载完成后才放回画布，并且只更新相关节点，不会覆盖其他编辑。
 - 结果长时间无法写入画布时会结束等待并提示继续取回，不再一直转圈；已生成结果的后台下载支持停止与继续。
 - 批量出图时，排队等待不再消耗自动重试次数，只有真正发出的请求才计数。
-- 修复 BeefAPI 视频模型被当作文本模型调用而报错的问题；模型很多时设置页和下拉不再卡顿。
-- 修复部分 BeefAPI 图片模型因旧协议配置从出图列表消失的问题。
+- 修复 BeefTV 官方算力视频模型被当作文本模型调用而报错的问题；模型很多时设置页和下拉不再卡顿。
+- 修复部分 BeefTV 官方算力图片模型因旧协议配置从出图列表消失的问题。
 - 诊断包补齐漏掉的任务记录，并附带脱敏的模型配置摘要，便于排查默认模型和渠道删除问题。
 - 画布列表、编辑器和文件夹中的删除操作都会先确认。
 - 首页新增新手引导，创作入口增加「3D 导演台」和「Beef Agent」。
@@ -350,7 +358,7 @@ Windows v1.6.20–v1.6.22 的旧更新器无法识别新版目录结构，请关
 ## v1.7.1
 
 - Choose the canvas assistant model directly beside the message input.
-- Start with GPT 6 Astra after connecting BeefAPI, and keep your chosen model when refreshing the catalog.
+- Start with GPT 6 Astra after connecting BeefTV Official Compute, and keep your chosen model when refreshing the catalog.
 - Offer Astra, Opus 5.5, DeepSeek V4.1 Flash, and GLM 5.3 when available on the connected account.
 - Save model changes before starting the next assistant request.
 
@@ -394,7 +402,7 @@ Windows v1.6.20–v1.6.22 的旧更新器无法识别新版目录结构，请关
 
 ## v1.6.17
 
-- Restore the audio toggle for BeefAPI Seedance models so silent video requests explicitly disable audio.
+- Restore the audio toggle for BeefTV Official Compute Seedance models so silent video requests explicitly disable audio.
 - Repair missing task diagnostics columns when upgrading from preview databases that reused migration numbers, preserving existing projects and tasks.
 - Distinguish local task storage failures from model parameter errors and explain when generation has not been submitted.
 - Require two complete rounds of real generation acceptance across six image and video paths before publishing desktop updates.
@@ -439,7 +447,7 @@ Windows v1.6.20–v1.6.22 的旧更新器无法识别新版目录结构，请关
 
 ## v1.6.11
 
-- Fix local reference images being rejected before submitting Wan 3.0 video tasks through BeefAPI.
+- Fix local reference images being rejected before submitting Wan 3.0 video tasks through BeefTV Official Compute.
 - Share verified enterprise video contracts across the model catalog, reference validation, and request preparation; preserve explicit protocols for other models.
 - Reject unsupported reference types and counts before submission, and retain actionable media guidance in task history.
 - Honor installed protocol media declarations and include the shared contracts in container builds.
@@ -452,7 +460,7 @@ Windows v1.6.20–v1.6.22 的旧更新器无法识别新版目录结构，请关
 
 ## v1.6.9
 
-- Fix built-in BeefAPI Seedance profiles selecting a package name instead of the installed video provider ID, which caused false "interface not installed" failures before submission.
+- Fix built-in BeefTV Official Compute Seedance profiles selecting a package name instead of the installed video provider ID, which caused false "interface not installed" failures before submission.
 - Repair existing enterprise profiles automatically and accept previously saved OpenAI Videos protocol aliases without bypassing disabled plugins.
 - Verify imported and restored Seedance profiles against the shipped provider catalog and test legacy aliases through the installed plugin runtime.
 
@@ -479,13 +487,13 @@ Windows v1.6.20–v1.6.22 的旧更新器无法识别新版目录结构，请关
 
 ## v1.6.4
 
-- Restore Seedance image, video and audio references for built-in BeefAPI models after catalog import and configuration reload.
+- Restore Seedance image, video and audio references for built-in BeefTV Official Compute models after catalog import and configuration reload.
 - Migrate the old built-in zero-reference profile while preserving unrelated custom limits, and align Seedance submission with the Videos API.
 - Recognize Seedance capabilities for OpenAI Videos model profiles in both frontend and backend validation.
 
 ## v1.6.3
 
-- Preserve explicit first/last-frame roles and adaptive aspect ratios for Seedance 2.5, including official model aliases and BeefAPI Enterprise requests.
+- Preserve explicit first/last-frame roles and adaptive aspect ratios for Seedance 2.5, including official model aliases and BeefTV Official Compute requests.
 - Keep reference generation distinct from frame, edit and extension constraints; retain explicitly selected reference and extension modes.
 - Add a supported-mode selector to the professional video canvas and explain when output parameters follow input media.
 - Explain nested TaskTypeConstraint failures with actionable guidance and retain the same message and diagnostic IDs after task reload.
@@ -495,7 +503,7 @@ Windows v1.6.20–v1.6.22 的旧更新器无法识别新版目录结构，请关
 - Retire the unfinished built-in Agent product surface: the canvas dock, creation entry, home capability card, Agent query parameters, Agent settings and the `/agent/*` API are no longer reachable, so partially working Agent flows can no longer be entered by mistake.
 - Enforce the retirement at the product boundary: generic task creation, task retry and the task worker refuse `cloud_agent`, `cloud_agent_step` and `agent_memory_compact` work instead of executing it as an ordinary paid text generation, and the periodic Agent memory compaction no longer runs in the background.
 - Keep historical Agent runs, profiles, memories and tasks in place with no destructive migration.
-- Manual creation and generation keep their existing authorization, quoting, approval, idempotency and cancellation behaviour on the canvas and in the creation workspace; canvas editing and connections, projects, assets, local storage, model channels, the built-in BeefAPI connection and the v1.6.0 depth workflow are unchanged. The retired Agent approval and memory endpoints are removed together with the rest of `/agent/*`.
+- Manual creation and generation keep their existing authorization, quoting, approval, idempotency and cancellation behaviour on the canvas and in the creation workspace; canvas editing and connections, projects, assets, local storage, model channels, the built-in BeefTV Official Compute connection and the v1.6.0 depth workflow are unchanged. The retired Agent approval and memory endpoints are removed together with the rest of `/agent/*`.
 - Remove the unused local `AgentPort` wiring, the test-only `generation.Engine`/`Deps` wrapper that had no production caller, and the unreferenced experimental `cmd/mcp` stdio entry.
 - Simplify the core CI gates to the checks that guard the local product surface.
 ## v1.6.1
@@ -516,7 +524,7 @@ Windows v1.6.20–v1.6.22 的旧更新器无法识别新版目录结构，请关
 
 - Validate reference image dimensions, aspect ratios, file sizes and audio/video duration using each model's configured capabilities before submitting.
 - Preserve supported reference counts, resolutions and durations instead of silently dropping media or downgrading requested settings.
-- Support local and inline reference audio for BeefAPI and native Ark channels, while retaining provider-specific audio-only rules.
+- Support local and inline reference audio for BeefTV Official Compute and native Ark channels, while retaining provider-specific audio-only rules.
 - Show actionable reference conversion and request-size errors in both canvas nodes and task history, with safe diagnostics and no unsafe unchanged retries.
 
 ## v1.5.8
@@ -549,7 +557,7 @@ Windows v1.6.20–v1.6.22 的旧更新器无法识别新版目录结构，请关
 - Distinguish content moderation, account quota, provider billing, invalid parameters, rate limits, uncertain submissions and failed result downloads without guessing refunds or the offending input.
 - Preserve safe error codes and request identifiers for support, including business errors returned with HTTP 200 and JSON errors inside media downloads.
 - Prevent unsafe unchanged batch retries; edited prompts and reference media can be submitted as new attempts after moderation failures.
-- Cover all 42 currently declared BeefAPI error codes with a shared frontend and backend regression contract.
+- Cover all 42 currently declared BeefTV Official Compute error codes with a shared frontend and backend regression contract.
 - Improved the shared model picker with a viewport-safe, internally scrollable layout and consistent single-line model options.
 - Removed redundant model icons, secondary descriptions, and stale option backgrounds from model selection UI.
 - Restored native right-click paste behavior in canvas prompt editors and added regression coverage.
@@ -574,4 +582,4 @@ Windows v1.6.20–v1.6.22 的旧更新器无法识别新版目录结构，请关
 
 - Initial public BeefTV snapshot.
 - Local-first AI video workspace with image, video, audio, text, asset, canvas, and model-channel workflows.
-- BeefAPI remains a built-in local channel while its model catalog is discovered dynamically.
+- BeefTV Official Compute remains a built-in local channel while its model catalog is discovered dynamically.

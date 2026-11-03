@@ -1,4 +1,4 @@
-// Package pricing turns BeefAPI's published price rows into estimates before a
+// Package pricing turns BeefTV official compute's published price rows into estimates before a
 // generation is submitted. It is the only place BeefTV computes a price; the
 // bill stays authoritative.
 package pricing
@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Table keeps the field names of one row in BeefAPI's public price catalog
+// Table keeps the field names of one row in BeefTV official compute's public price catalog
 // (/api/enterprise/catalog), so a stored model profile reads like its source.
 type Table struct {
 	Mode                string             `json:"mode"`
@@ -36,7 +36,7 @@ type ImageTable struct {
 	AutoQuality    string                        `json:"auto_quality,omitempty"`
 }
 
-// VideoSecondRate is BeefAPI's per-second conversion of a video token price.
+// VideoSecondRate is BeefTV official compute's per-second conversion of a video token price.
 type VideoSecondRate struct {
 	Resolution string  `json:"resolution"`
 	Output     float64 `json:"output_per_second_cny"`

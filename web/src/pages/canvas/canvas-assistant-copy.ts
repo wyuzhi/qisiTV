@@ -199,7 +199,7 @@ export function assistantProductionProposalParts(
     return { header, targetLines, footer };
 }
 
-/** 提议可能来自自建渠道，不能把所有费用都归到 BeefAPI。没有后端估算的旧提议仍显示渠道单价。 */
+/** 提议可能来自自建渠道，不能把所有费用都归到 BeefTV 官方算力。没有后端估算的旧提议仍显示渠道单价。 */
 export function assistantProposalText(
     proposal: AssistantGenerationProposal,
     priceLines: string[] = [],

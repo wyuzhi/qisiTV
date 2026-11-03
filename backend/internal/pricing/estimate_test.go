@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// testdata/enterprise-catalog.json holds the media rows BeefAPI published at
+// testdata/enterprise-catalog.json holds the media rows BeefTV 官方算力 published at
 // /api/enterprise/catalog on 2026-11-03.
 func catalogTable(t *testing.T, model string) *Table {
 	t.Helper()

@@ -11,7 +11,7 @@ title: 本地 HTTP API
 档位或像素尺寸；`transparentBackground` 在 Pro/Flash 上保留单张透明源图的
 Alpha 通道。Pro/Flash 的图层拆分需要一张源图，返回普通图片资源及
 `result.imageLayers` 中的 `imageIndex`、`z_index`、`bounding_box`、名称和描述。
-托管连接仍经 BeefAPI 的 `/v1/images/generations`；供应商密钥不交给客户端。
+托管连接仍经 BeefTV 官方算力的 `/v1/images/generations`；供应商密钥不交给客户端。
 
 Seedream 单次任务的实际输出数可以多于提交时的画布目标数。输出 0 保留
 原节点，其余已保存图片按任务 ID 和输出序号生成独立节点；各图层的元数据
@@ -28,7 +28,7 @@ Wails 和浏览器开发模式共用同一套 `127.0.0.1` HTTP 合同。路由�
 - 写入接口限制 body 大小并校验资源归属；不信任前端提供的文件路径、模型能力或 provider 状态。
 - 外部模型密钥由本地 provider config 管理，不在 API 日志或任务列表中返回。
 
-自定义模型服务的配置仍由受保护的工作区配置接口提供给当前界面；运行时内存和生成请求可能包含凭据。浏览器持久配置缓存不保存 API Key、Secret Key 或自定义 Header，启动后从后端加载。内置 BeefAPI 继续使用后端凭据引用。配置导出会遮盖密钥和 Header 值；回填脱敏标记时必须匹配原渠道与 Header 名称，不能借用其他渠道的密钥。
+自定义模型服务的配置仍由受保护的工作区配置接口提供给当前界面；运行时内存和生成请求可能包含凭据。浏览器持久配置缓存不保存 API Key、Secret Key 或自定义 Header，启动后从后端加载。BeefTV 官方算力继续使用后端凭据引用。配置导出会遮盖密钥和 Header 值；回填脱敏标记时必须匹配原渠道与 Header 名称，不能借用其他渠道的密钥。
 
 模型目录通过本地后端读取。模型测试使用正常任务入口，等待最终文本或媒体结果才显示通过；测试会产生供应商费用，须先确认。测试结果不证明画布回填、媒体解码或最终账务结算。
 
@@ -56,7 +56,7 @@ Wails 和浏览器开发模式共用同一套 `127.0.0.1` HTTP 合同。路由�
 
 `model.catalog` 可用 `capability`（`text`、`image`、`video`、`audio`）只查询所需类型。桌面视频模型的 `videoPricing` 只投影已保存、通过格式校验的渠道目录报价，不包含连接地址或凭据；缺失表示价格未知。这不是实时计费保证，也不会自动执行预算上限。
 
-官方 BeefAPI 渠道刷新目录时，从同一连接地址的公开价格目录 `GET /api/enterprise/catalog` 读取各模型价格并随模型保存，不携带凭据；读不到时目录照常刷新，价格留空。估算只采用官方渠道保存的价格，其他渠道即使配置里写了价格也不采用。`model.catalog` 不返回这些价格明细，费用通过下面的估算获取。
+BeefTV 官方算力渠道刷新目录时，从同一连接地址的公开价格目录 `GET /api/enterprise/catalog` 读取各模型价格并随模型保存，不携带凭据；读不到时目录照常刷新，价格留空。估算只采用官方渠道保存的价格，其他渠道即使配置里写了价格也不采用。`model.catalog` 不返回这些价格明细，费用通过下面的估算获取。
 
 只读操作 `generation.estimate` 接收 1 至 200 个 `targets:[{ modelKey, kind, parameters?, referenceImages?, referenceVideos?, text? }]`，`kind` 为 `image`、`video` 或 `audio`，`parameters` 与生成节点参数同名（如 `size`、`quality`、`count`、`vquality`、`seconds`），配音传台词 `text`。返回 `items[{ amount, approx?, basis, text, reserve? }]` 与 `summary{ amount, priced, unknown, approx?, text }`：`amount=null` 表示暂无价格，原因写在 `text`，不按 0 计入合计；`approx=true` 表示按 Token 或字数折算；`reserve` 是先扣、出账后结算的金额，同样不计入合计。`canvas.generation.propose` 的 `targets[].estimate`、`estimate` 与 `production.estimate` 用同一套计算。估算只读已保存的价格，不联网、不建任务、不扣费；内置助手的画布模式不提供这个操作，直接使用提案里的估算。
 
@@ -67,7 +67,7 @@ MiniMax speech 的 OpenAI 音频兼容目录通过 `audioOptions` 提供官方�
 | 路由组 | 用途 |
 | --- | --- |
 | `/workspace/*` | 本地工作区启动、模型配置与 `POST /workspace/model-config/capability` 模型能力草稿规范化（含未保存自定义配置、Seedance 文档化时长/音频/像素下限收紧与 `thinking` 开关） |
-| `/beefapi/connection*` | 内置 BeefAPI 企业连接：开始、状态、取消、断开；`POST /beefapi/connection/models` 使用已保存凭据刷新并持久化模型目录与报价，成功后移除当前账号目录中已不存在的模型（其他自定义渠道不受影响）；不接受客户端报价，页面收不到密钥 |
+| `/beefapi/connection*` | BeefTV 官方算力连接：开始、状态、取消、断开；`POST /beefapi/connection/models` 使用已保存凭据刷新并持久化模型目录与报价，成功后移除当前账号目录中已不存在的模型（其他自定义渠道不受影响）；不接受客户端报价，页面收不到密钥 |
 | `/canvas-projects/*`, `/projects/*` | 画布、项目、章节、分镜与快照 |
 | `/resources/*` | 本地素材、分片上传和媒体读取 |
 | `/timeline/render-plan` | 只读编译时间线语义渲染计划：不排队、不落盘、不计费 |
@@ -103,19 +103,19 @@ MiniMax speech 的 OpenAI 音频兼容目录通过 `audioOptions` 提供官方�
 
 ### 内置连接的媒体协议
 
-内置 BeefAPI 新图片任务在读取本地参考图之前，向配置的 API origin 查询 `/v1/models`。响应头 `X-BeefAPI-Media-Protocol: managed-media-v1` 与正文 `media_protocol.version` 必须一致；缺少或不识别的版本会在上传和生成前失败。目录声明 `supported_media_types`、`task_submit_url`、`task_query_url_template` 和 `uploads_url`，本批只启用图片任务。图片能力仍使用 `image_capabilities` 和 `image_capabilities_version`；文件大小 `0` 表示没有额外的本地文件上限。连接验证成功后复用现有目录刷新一次；离线、请求失败或声明无效时保留最后一份有效目录。
+BeefTV 官方算力新图片任务在读取本地参考图之前，向配置的 API origin 查询 `/v1/models`。响应头 `X-BeefAPI-Media-Protocol: managed-media-v1` 与正文 `media_protocol.version` 必须一致；缺少或不识别的版本会在上传和生成前失败。目录声明 `supported_media_types`、`task_submit_url`、`task_query_url_template` 和 `uploads_url`，本批只启用图片任务。图片能力仍使用 `image_capabilities` 和 `image_capabilities_version`；文件大小 `0` 表示没有额外的本地文件上限。连接验证成功后复用现有目录刷新一次；离线、请求失败或声明无效时保留最后一份有效目录。
 
 本地参考图和蒙版通过 `/v1/media/uploads` 申请票据，直接 PUT 到存储，再以原票据 `/complete` 确认。生成只向 `/v1/media/tasks` 发送小 JSON：`task_ref` 是一次授权 attempt 的稳定编号，另有 `media_type`、`model`、`operation`、`input.prompt`、`input.references[{kind,role,url}]` 和业务 `options`。参考图角色为 `reference`，蒙版为 `mask`。`response_format` 和协议覆盖字段不会进入最终请求。API 决定供应商协议和结果转存；客户端不按模型名称选择传输。
 
 首次 POST 前持久化原 attempt 和发送记录。POST 结果丢失、明确 429、404、超时或应用重启均只查询 `GET /v1/media/tasks/{task_ref}`，不自动换键或重发。状态为 `queued`、`in_progress`、`completed`、`failed` 或 `unknown`；缺失的扣费字段不能解释为未扣费。`reconcile_deadline` 只接受 API 已有期限，不在本地计算。v28 的小型加密 `query_cipher` 保留原查询身份，24 小时后清理包含素材的大请求；升级前已经清空且无法找回的查询身份保持未知，不重建生成请求。
 
-新图片结果只接收 `outputs` 的 URL，逐项元数据、顺序、层信息与 `usage` 一并保存。历史任务可由 API 返回 `result_receipt:{format:"openai-image-response",url,expires_at}`；唯一 BeefAPI 适配层直接从存储读取最多 64MiB 的原 JSON，识别实际图片 MIME，保留旧层。该读取不携带 API 或第三方 Header/Cookie，跳转也不携带。存储目标及每次跳转必须为公网 HTTPS；直连只拨已验证 IP，用户显式配置的代理仍作为网络路由使用，代理内部 DNS 不由客户端固定。第三方连接与 BYOK 保留各自协议。
+新图片结果只接收 `outputs` 的 URL，逐项元数据、顺序、层信息与 `usage` 一并保存。历史任务可由 API 返回 `result_receipt:{format:"openai-image-response",url,expires_at}`；唯一 BeefTV 官方算力适配层直接从存储读取最多 64MiB 的原 JSON，识别实际图片 MIME，保留旧层。该读取不携带 API 或第三方 Header/Cookie，跳转也不携带。存储目标及每次跳转必须为公网 HTTPS；直连只拨已验证 IP，用户显式配置的代理仍作为网络路由使用，代理内部 DNS 不由客户端固定。第三方连接与 BYOK 保留各自协议。
 
-现有视频和超分请求也集中到同一 BeefAPI 适配层，恢复只 GET 原任务，供应商参数由 API 根据通用参考角色与用户操作转换。这批尚未将视频、超分和音频迁入新的通用任务引擎；音频保留既有 speech/music 兼容行为，历史视频与超分内容接口仍可能由主 API 返回文件。
+现有视频和超分请求也集中到同一 BeefTV 官方算力适配层，恢复只 GET 原任务，供应商参数由 API 根据通用参考角色与用户操作转换。这批尚未将视频、超分和音频迁入新的通用任务引擎；音频保留既有 speech/music 兼容行为，历史视频与超分内容接口仍可能由主 API 返回文件。
 
-内置 BeefAPI 视频模型的控件与校验使用 `/v1/models` 下发的 `video_capabilities` 和非空 `video_capabilities_version`。显式 `0` 引用数量和 `false` 开关会保留，字节上限 `0` 表示没有额外的本地上限；客户端不再按 Seedance 等模型名或主机地址补充视频能力。有效声明中的陌生模型 ID 同样可使用现有视频控件。
+BeefTV 官方算力视频模型的控件与校验使用 `/v1/models` 下发的 `video_capabilities` 和非空 `video_capabilities_version`。显式 `0` 引用数量和 `false` 开关会保留，字节上限 `0` 表示没有额外的本地上限；客户端不再按 Seedance 等模型名或主机地址补充视频能力。有效声明中的陌生模型 ID 同样可使用现有视频控件。
 
-可选 `operationReferences` 在请求显式指定 `metadata.videoEditOperation` 时覆盖该操作的 `minImages`、`maxImages`、`maxVideos` 和 `maxAudios`，未声明的数量继承模型总限制。省略操作时只校验模型总限制，实际生成模式由 BeefAPI 决定。例如参考生成可允许 10 张图，而图生视频只允许 2 张；选择后者提交时会明确报错，不会自动删除已有素材。目录 `default` 是表单初值，已选择且受支持的输出参数仍会显式发送，包括 `false`。
+可选 `operationReferences` 在请求显式指定 `metadata.videoEditOperation` 时覆盖该操作的 `minImages`、`maxImages`、`maxVideos` 和 `maxAudios`，未声明的数量继承模型总限制。省略操作时只校验模型总限制，实际生成模式由 BeefTV 官方算力决定。例如参考生成可允许 10 张图，而图生视频只允许 2 张；选择后者提交时会明确报错，不会自动删除已有素材。目录 `default` 是表单初值，已选择且受支持的输出参数仍会显式发送，包括 `false`。
 
 同一账户刷新得到缺失或无效的视频声明时，保留该账户最近一次有效目录；切换账户不会继承旧账户目录。没有有效声明时，创建页和画布设置显示刷新模型列表的提示，保留用户的提示词、参考素材与已选参数，阻止新生成。服务端实际执行时再次读取当前账户保存的目录，不信任请求自行携带的版本或能力。原任务的状态查询与结果取回不要求重新加载新建能力目录，视频超分也不按视频生成模型校验。
 
@@ -141,7 +141,7 @@ MiniMax speech 的 OpenAI 音频兼容目录通过 `audioOptions` 提供官方�
 
 `POST /media-upscale/tasks` 增加 `clientOperationId,projectId?,nodeId?`，创建标准 `canvas_image` 或 `canvas_video` 任务。`channelId` 固定为 `beefapi`；图片支持 Standard V2、Wonder 3.5，视频支持 Proteus、Starlight Fast 2，分别映射到四个 `topaz-*` 官方模型。倍率为一至四的整数，图片输出 PNG 或 JPEG。素材必须属于当前用户且已就绪；视频最长五分钟。
 
-复用已连接的官方算力账号，客户端无需配置供应商 Key；任务输入中的凭据由现有密钥保护层加密。素材上传、估价、生成和结果查询均经 BeefAPI。任务复用标准生成队列、稳定操作 ID 与回执恢复；提交状态不确定时禁止自动重提。结果保存为用户自有资源并回填新节点，保留原素材。取消不保证云端停止或退款；普通生成接口拒绝直接供应商端点。
+复用已连接的官方算力账号，客户端无需配置供应商 Key；任务输入中的凭据由现有密钥保护层加密。素材上传、估价、生成和结果查询均经 BeefTV 官方算力。任务复用标准生成队列、稳定操作 ID 与回执恢复；提交状态不确定时禁止自动重提。结果保存为用户自有资源并回填新节点，保留原素材。取消不保证云端停止或退款；普通生成接口拒绝直接供应商端点。
 
 `POST /media-upscale/tasks/:id/recover` 校验归属和官方超分模型，优先取回原任务结果。已失败且有回执的任务只查询原云端任务；没有回执的任务仅在现有队列能证明尚未受理时允许沿用原操作 ID 重试，不确定提交仍被阻止。已取消任务要求先核对状态。源视频有音轨而云端结果缺失时，落库前尝试无重编码补回；不能安全保留则明确失败。
 
@@ -196,7 +196,7 @@ MiniMax speech 的 OpenAI 音频兼容目录通过 `audioOptions` 提供官方�
 
 音乐生成默认保存 MP3（44.1 kHz、256 kbps）。音乐设置只提供 MP3，旧画布保存的 WAV/FLAC 等设置会归一为 MP3；语音合成模型仍保留各自的格式选项。
 
-通过 BeefAPI 生成音乐时，宿主使用 `/v1/audio/speech` 的 `stream_format: "sse"`，接收等待心跳、音频片段和完成事件，随后保存真实音频。心跳或提前断流不算成功。上游通过完成事件给出音频地址时，下载使用独立请求，不携带模型凭据。兼容旧网关返回的二进制音频；旧网关的长同步请求仍需升级网关后才能避免公网静默连接超时。
+通过 BeefTV 官方算力生成音乐时，宿主使用 `/v1/audio/speech` 的 `stream_format: "sse"`，接收等待心跳、音频片段和完成事件，随后保存真实音频。心跳或提前断流不算成功。上游通过完成事件给出音频地址时，下载使用独立请求，不携带模型凭据。兼容旧网关返回的二进制音频；旧网关的长同步请求仍需升级网关后才能避免公网静默连接超时。
 
 ### 视频预览
 
@@ -261,7 +261,7 @@ MiniMax speech 的 OpenAI 音频兼容目录通过 `audioOptions` 提供官方�
 
 `media.review` 将已关联影音的指定区间交给独立多模态模型观察，参数为 `canvasId`、`nodeId` 或 `assetId`、`expectedVersion`、`startMs`、`endMs`、`question`，可选 `mode: "video" | "audio"` 和 `resourceId`。目标节点或素材关联多个资源时，必须用 `resourceId` 选择其中一个；未关联或不属于当前用户的资源会在调用审片模型前拒绝。省略 `mode` 仍检查视频，发送真实 MP4 及原音轨；独立 WAV/MP3 音频使用 `mode: "audio"`，复用 `media.inspect` 切片并归一化为 24 kHz 单声道 WAV，以 `input_audio: {data: "<纯 base64>", format: "wav"}` 发送。两种模式均遵守素材归属、版本、15 秒区间与内容大小限制，不接受任意 URL 或本机路径。主模型只接收来源、片段哈希、观察、请求编号与用量，不接收该工具的影音字节。观察中的时间从片段起点计，需加上 `source.startMs` 才是原素材位置。观察可能遗漏，不表示听音或成片验收通过，也不写入主模型已观看影音的检查记录。
 
-用户在设置的“默认模型”中选择“默认多模态模型”，保存为可选 `mediaReviewModel: "channelId::modelId"`，复用所选渠道的凭据。当前适配 `wand-vega-vl-1.0-flash`、`chat-completion` 协议，支持托管 BeefAPI 和自定义渠道中实际存在的模型及其配置别名；实际识别准确度取决于所选服务，不能由协议适配推断。它与助手模型分别选择，不受主助手模型名单限制；连接或刷新目录不自动替用户选择。清空表示不使用独立多模态模型，失效选择返回不可用，不静默改用其他模型。此操作不修改画布，但调用可能收费，因此描述符为 `readOnly: true, replay: "unsafe"`：官方 Durable 不自动重放中断的付费检查。一次操作只发起一次供应商请求；空回复、截断及请求失败不能作为通过依据。它没有工具权限或独立 Agent 循环。
+用户在设置的“默认模型”中选择“默认多模态模型”，保存为可选 `mediaReviewModel: "channelId::modelId"`，复用所选渠道的凭据。当前适配 `wand-vega-vl-1.0-flash`、`chat-completion` 协议，支持BeefTV 官方算力和自定义渠道中实际存在的模型及其配置别名；实际识别准确度取决于所选服务，不能由协议适配推断。它与助手模型分别选择，不受主助手模型名单限制；连接或刷新目录不自动替用户选择。清空表示不使用独立多模态模型，失效选择返回不可用，不静默改用其他模型。此操作不修改画布，但调用可能收费，因此描述符为 `readOnly: true, replay: "unsafe"`：官方 Durable 不自动重放中断的付费检查。一次操作只发起一次供应商请求；空回复、截断及请求失败不能作为通过依据。它没有工具权限或独立 Agent 循环。
 
 宿主对模型请求与工具步骤各自有单轮上限（`BEEFTV_AGENT_MAX_REQUESTS_PER_TURN`、
 `BEEFTV_AGENT_MAX_TOOL_STEPS_PER_TURN`），按轮独立计数、下一轮从零开始；总预算
@@ -352,13 +352,13 @@ schema 3 另包含以下证据：
 
 `POST /tasks/:id/query-provider` 用于取回失败视频任务的原有结果：校验归属、持久化的供应商任务 ID 和协议支持后，只查询状态及下载，不重新提交生成。恢复成功会保存任务结果并登记产物；正在处理时返回 `recovered=false`。没有原任务 ID 的记录不能凭本地 ID 自动找回。已发出但未取得回执的提交标记为 `submission_unknown`，阻止付费重试；明确限流、鉴权拒绝或尚未发送的请求保留对应错误类别。
 
-视频结果优先下载供应商返回的地址并保存到本地。实际传输开始后，连续 10 秒没有收到数据会结束当前下载；持续传输的大文件不受 10 秒总时长限制。内置 BeefAPI 使用原任务的备用内容接口刷新存储链接；自接供应商使用已知原任务的查询协议获取新地址，不请求 BeefAPI 备用接口，也不重新生成。同源下载保留该协议的认证方式，外部媒体和跨域重定向不携带供应商密钥。可信 BeefAPI 视频状态默认每 5 秒查询一次；其他供应商及显式配置的周期不变，继续尊重 `Retry-After`。
+视频结果优先下载供应商返回的地址并保存到本地。实际传输开始后，连续 10 秒没有收到数据会结束当前下载；持续传输的大文件不受 10 秒总时长限制。BeefTV 官方算力使用原任务的备用内容接口刷新存储链接；自接供应商使用已知原任务的查询协议获取新地址，不请求 BeefTV 官方算力备用接口，也不重新生成。同源下载保留该协议的认证方式，外部媒体和跨域重定向不携带供应商密钥。BeefTV 官方算力视频状态默认每 5 秒查询一次；其他供应商及显式配置的周期不变，继续尊重 `Retry-After`。
 
 支持原请求幂等恢复的图片渠道，只在通过本地检查和渠道并发限制、即将发出 HTTP 请求时消耗恢复发送次数。熔断或等待并发配额不消耗发送次数，但仍受任务取消、截止时间和恢复窗口约束；请求交给传输后发生的未知网络错误仍计入次数。此规则不为普通自定义渠道新增自动重发能力。
 
 图片创建请求完整返回 HTTP 400 或 422，且错误确认是输入参数、输入素材或输入内容审核拒绝时，保留实际错误类别，不标记为 `submission_unknown`，也不自动重发。若已经获得供应商任务 ID、接受回执，或此前发送结果不确定，仍阻止重复提交。历史 `submission_unknown` 任务的诊断摘要未保留完整响应及重放标志，不能据此解锁重试或修改其失败状态。内容审核失败须调整输入后重新生成，不能原样重试。
 
-视频暂时下载断连会保留原任务 ID 并继续查询。内置 BeefAPI 不用本地 24 小时或查询 404 判定任务无法取回、未扣费；BYOK 保留原恢复窗口。任务日志接口提供脱敏的 `summary`，不返回原始 `message` / `payload` 内容；摘要不写回数据库。
+视频暂时下载断连会保留原任务 ID 并继续查询。BeefTV 官方算力不用本地 24 小时或查询 404 判定任务无法取回、未扣费；BYOK 保留原恢复窗口。任务日志接口提供脱敏的 `summary`，不返回原始 `message` / `payload` 内容；摘要不写回数据库。
 
 任务列表与详情中的 `errorCode` 是 BeefTV 归类后的错误类别，不能当作上游原始代码。已识别的 SQLite 缺表/列、锁定、只读、I/O 和约束失败使用 `local_storage`，提示本地数据库无法读写、不自动重试；不能因为外层 HTTP 400 把它归为模型参数错误。判断只读取实际错误消息，不读取请求或提示词回显。新记录的失败任务可包含 `failureDiagnostics`：`source` 区分本地校验、上游 HTTP / 业务响应、本地结果处理及未知来源；`summary` 保存脱敏后的错误摘要，另带实际记录到的 `providerCode`、`httpStatus`、`param`、`requestId`、`providerTaskId`、`stage` 和 `capturedAt`。缺失信息不推断或补造。`createdAt` 是任务创建时间，`completedAt` 是结束时间，均不等于错误记录时间。
 
@@ -366,17 +366,17 @@ schema 3 另包含以下证据：
 
 `failureDiagnostics` 同时保留本轮执行证据：运行版本和平台、任务配置中的模型/尺寸/质量/数量、提示词长度、参考素材数量与图片大小、本地参考图限制，以及最多 8 次请求（首次及最近 7 次，省略数量另计）的发起状态、HTTP 状态、请求 ID、开始时间、耗时和字节数。任务配置不等于最终出站参数；协议可能转换或省略字段，核对实际发送值须凭请求 ID 关联请求日志。HTTP 200 仅表示收到响应；`executionResult=completed` 才表示生成处理完成。转后台回查时状态为 `pending`，同一次任务继续累积有界轨迹并保留首次请求。成功任务也保存这些证据，以便区分后续本地保存失败或画布应用失败（复制内容来源为 `client_result`）。请求轨迹覆盖统一 Provider HTTP 客户端；旧记录、未经过该客户端的插件请求或上游未提供的 ID 仍可能缺失，不能仅凭空轨迹推断未发送。
 
-持久化图片任务收到公开媒体地址后，先保存原结果，再由结果交付流程下载；下载失败不会重放图片生成请求。BeefAPI 的签名图片代理地址也走此流程。需要供应商鉴权的同源媒体接口与非持久化调用仍先读取字节，保持原有鉴权方式。结果交付会校验图片内容，不把 HTTP 200 返回的错误文档保存为图片。下载响应头等待和传输停滞属于超时，不归为用户取消。
+持久化图片任务收到公开媒体地址后，先保存原结果，再由结果交付流程下载；下载失败不会重放图片生成请求。BeefTV 官方算力的签名图片代理地址也走此流程。需要供应商鉴权的同源媒体接口与非持久化调用仍先读取字节，保持原有鉴权方式。结果交付会校验图片内容，不把 HTTP 200 返回的错误文档保存为图片。下载响应头等待和传输停滞属于超时，不归为用户取消。
 
-内置 BeefAPI 素材上传分为申请地址、上传文件（PUT）和确认上传，轨迹分别记录为 `reference_create`、`reference_put`、`reference_complete`。上传失败的 `source=reference_upload`；摘要包含素材类型、从 1 开始的序号和失败阶段，并保留实际采集到的 HTTP 状态、连接阶段、存储错误代码和请求 ID。存储错误正文只提取代码与请求 ID，不保存签名地址、签名头、素材内容或原始 XML。
+BeefTV 官方算力素材上传分为申请地址、上传文件（PUT）和确认上传，轨迹分别记录为 `reference_create`、`reference_put`、`reference_complete`。上传失败的 `source=reference_upload`；摘要包含素材类型、从 1 开始的序号和失败阶段，并保留实际采集到的 HTTP 状态、连接阶段、存储错误代码和请求 ID。存储错误正文只提取代码与请求 ID，不保存签名地址、签名头、素材内容或原始 XML。
 
 单文件 PUT 的临时连接或传输失败最多尝试 3 次。可能已经传完但回执丢失时，先用原票据确认；只有服务端明确返回未完成才重传相同文件。确认回执丢失只重试同票据确认，不重新上传，也不创建新票据。证书校验失败、地址安全拒绝、单文件存储 403 和确定的网关鉴权/参数错误不自动重试。分片按原收件回执跳过已确认部分，任务取消仍受原执行上下文控制。
 
 网络阶段从实际请求被动采集，不用额外探测请求阻塞上传。`requests[].attempt` 保存当前操作的尝试序号，摘要同时标注次数；仍只保留首次和最近 7 条请求，超出条数以 `omittedRequests` 说明。素材准备失败还保存 `failedOperation` 和已采集到的 `transportPhase`，避免把最后一次恢复查询误当作原失败。导出的 schema 3 ZIP 和离线分析可识别素材准备失败及已记录的连接阶段；阶段定位不等于网络责任归属，也不能恢复旧记录没有采集到的证据。
 
-视频原任务查询保留 DNS 错误的网络类型：临时故障或超时在原查询循环中重试，永久域名不存在、取消和安全地址拒绝不重试；此机制不重发生成 POST。已持有 BeefAPI 任务 ID 时，后台恢复继续使用原 ID，仍受取消与租约控制；本地时钟不会把内置任务判定为无法取回。诊断使用提交、查询、上游素材读取、本机结果下载等实际阶段；DNS 故障的 `source=local_network`、`transportPhase=dns`，只导出安全文案，不保存底层错误中的域名、DNS 服务器或签名地址。HTTP 200 内的业务失败与本机网络失败分别分析。
+视频原任务查询保留 DNS 错误的网络类型：临时故障或超时在原查询循环中重试，永久域名不存在、取消和安全地址拒绝不重试；此机制不重发生成 POST。已持有 BeefTV 官方算力任务 ID 时，后台恢复继续使用原 ID，仍受取消与租约控制；本地时钟不会把内置任务判定为无法取回。诊断使用提交、查询、上游素材读取、本机结果下载等实际阶段；DNS 故障的 `source=local_network`、`transportPhase=dns`，只导出安全文案，不保存底层错误中的域名、DNS 服务器或签名地址。HTTP 200 内的业务失败与本机网络失败分别分析。
 
-内置 BeefAPI 素材上传失败时恢复原上传票据，或在生成提交前停止。Seedance 不再回退到内嵌 Base64，也不会为上传失败重发生成任务。
+BeefTV 官方算力素材上传失败时恢复原上传票据，或在生成提交前停止。Seedance 不再回退到内嵌 Base64，也不会为上传失败重发生成任务。
 
 生成结果正在取回时，任务详情与列表的 `delivery.outputs[]` 给出该任务每个输出的 `downloadedBytes`、`totalBytes`（未知为 -1）、`bytesPerSecond`、`updatedAt`（Unix 毫秒采样时间）和 `state`（`downloading` / `retrying` / `waiting`），供页面显示进度。页面在采样超过 3 秒后隐藏速度与剩余时间。它只存在进程内存中，不写数据库，取回结束即消失，重启后不保留；没有取回中的下载时该字段省略。
 
@@ -398,9 +398,9 @@ schema 3 另包含以下证据：
 
 旧内置 Agent 的 `/agent/*` 端点已随该功能退场，历史运行、偏好和记忆数据仍保留在本地数据库中。通用任务接口会按产品边界拒绝 `cloud_agent`、`cloud_agent_step` 和 `agent_memory_compact`，不会把它们当作普通生成任务执行。
 
-内置 BeefAPI 连接成功后，同一份企业凭证用于渠道请求和模型目录。企业连接、模型目录、Provider/Protocol 与自定义渠道不受 Agent 退场影响。
+BeefTV 官方算力连接成功后，同一份企业凭证用于渠道请求和模型目录。企业连接、模型目录、Provider/Protocol 与自定义渠道不受 Agent 退场影响。
 
-内置 BeefAPI 的 Seedance 视频任务由本机后端上传参考素材后再向上游提交链接；浏览器不直接访问该上传接口，也不把整份参考文件放进本地 `/tasks` 请求。本机已保存的参考文件即使工作区已有公开访问地址，也仍由本机后端上传后再提交链接。失败时不会自动重提生成。
+BeefTV 官方算力的 Seedance 视频任务由本机后端上传参考素材后再向上游提交链接；浏览器不直接访问该上传接口，也不把整份参考文件放进本地 `/tasks` 请求。本机已保存的参考文件即使工作区已有公开访问地址，也仍由本机后端上传后再提交链接。失败时不会自动重提生成。
 
 本地素材分片上传以 `X-Idempotency-Key` 复用当前用户的上传会话。`POST /api/resources/uploads` 返回 `uploadId`、`chunkSize`、`chunkCount` 和 `received`（已完整保存的分片索引）；客户端重试时查询同一会话并跳过这些分片，最后仍须调用 `complete` 确认资源保存成功。此恢复只适用于仍有效的会话，不保证应用重启或会话过期后继续上传。
 

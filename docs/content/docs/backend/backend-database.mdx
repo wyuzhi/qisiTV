@@ -43,9 +43,9 @@ v24 为工作流增加不可变模板版本快照。v25 在保留历史迁移记
 
 v26 `task-recovery-outcome` 只给 `tasks` 追加无默认值的可空 `recovery_outcome TEXT`，不回填旧任务、不改历史迁移记录、不重建任务表。`no_result` 表示确认没有结果，不能据此认定没有扣费；`unrecoverable` 表示无法取回，上游可能已生成并计费。暂时的网络、数据库、配额或租约错误不写这两个结论，仅通过既有 `next_poll_at` 退避。列不进入任务 JSON；公共 `outcome` 每次读取时计算，不持久化。迁移及 ledger 同事务，缺列拒绝 Ready。回退须恢复升级前完整工作区备份，不能删列或降 ledger。当前数据库实现只有 SQLite，没有需要同步变更的 PostgreSQL 迁移。
 
-v27 `task-beefapi-settlement` 给 `tasks` 追加 BeefAPI 结算原值：可空的 `beef_usage_state`、`beef_billing_state`、`beef_reconcile_deadline`（均为 TEXT），以及 `image_job_id TEXT NOT NULL DEFAULT ''`。v26 已随 v2.0.5 发布，已升级的库不会重跑 v26，所以这些列必须放在新版本里。迁移只加列，不回填旧任务；缺列拒绝 Ready。字段缺失（NULL）表示没读到结算事实，与 BeefAPI 明确返回的空值不同，投影时分开处理。
+v27 `task-beefapi-settlement` 给 `tasks` 追加 BeefTV 官方算力结算原值：可空的 `beef_usage_state`、`beef_billing_state`、`beef_reconcile_deadline`（均为 TEXT），以及 `image_job_id TEXT NOT NULL DEFAULT ''`。v26 已随 v2.0.5 发布，已升级的库不会重跑 v26，所以这些列必须放在新版本里。迁移只加列，不回填旧任务；缺列拒绝 Ready。字段缺失（NULL）表示没读到结算事实，与 BeefTV 官方算力明确返回的空值不同，投影时分开处理。
 
-v28 `managed-media-query-identity` 只给 `image_submissions` 追加可空 `query_cipher TEXT`，不改 v26/v27 或旧行。它使用已有工作区密钥保存内置 BeefAPI 原任务查询必需的小型身份，不含原生成 body 或素材；不进入任务 API。清理 24 小时前大请求前先为仍可解密的历史内置请求提取查询身份，然后清空 `request_cipher`，保留原发送次数。新版请求在第一次 POST 前同时保存发送记录和查询身份。已被旧版本清空、无法证明原编号的记录保持未知，禁止重新 POST。v27 与已发布 v2.0.5 的 v26 库均通过顺序迁移升级；缺列拒绝 Ready。
+v28 `managed-media-query-identity` 只给 `image_submissions` 追加可空 `query_cipher TEXT`，不改 v26/v27 或旧行。它使用已有工作区密钥保存BeefTV 官方算力原任务查询必需的小型身份，不含原生成 body 或素材；不进入任务 API。清理 24 小时前大请求前先为仍可解密的历史内置请求提取查询身份，然后清空 `request_cipher`，保留原发送次数。新版请求在第一次 POST 前同时保存发送记录和查询身份。已被旧版本清空、无法证明原编号的记录保持未知，禁止重新 POST。v27 与已发布 v2.0.5 的 v26 库均通过顺序迁移升级；缺列拒绝 Ready。
 
 
 v13 `upload-reservation-witness` 追加 `user_upload_reservations`，以 `(user_id, identity)` 唯一索引记录未完成上传预留的日期和字节数。日额仍由 `user_daily_upload_usages` 记账，预留索引与日额增加在同一事务内完成。资源进入 READY 时与状态保存在同一事务清除索引并保留日额；进入 FAILED 或放弃时与状态保存在同一事务按索引金额和日期释放。FAILED 准入只把状态改成 PENDING，不退日额。未结算资源写成 READY 前必须持有见证，缺见证时再预留；残留 FAILED 若仍持有原见证则沿用，不二次扣额。已结算 READY 丢失物理文件时，恢复不重新预留；物理写入或最终保存失败保留原 READY 状态并返回错误，下一次恢复仍复用原资源身份及已消费额度。启动恢复：无对应资源则释放一次；PENDING 保留索引；FAILED 释放；READY 清索引且保留日额。删除 READY 资源只清索引，不把已计入日额当成孤儿退还。重复清理不再扣减其他上传的日额。分片会话文件不是配额账；查询失败时保留恢复证据并记录恢复错误。同一身份的进行中重复预留映射为上传进行中。
@@ -218,8 +218,8 @@ HTTPS 图片提交前读取同源 `/models` 元数据，仅成功响应明确声
 | `tasks.creation_submission_id` | 将生成任务反向绑定到已批准的创作提交 | 字段可空以兼容普通任务和旧数据；非空值唯一，阻止同一提交产生多个任务 |
 | `tasks.client_operation_id` / `client_operation_hash` | 保存普通生成确认的稳定编号和原始请求 SHA-256 摘要 | 编号可空；`(user_id, client_operation_id)` 唯一。重放必须匹配完整原始生成请求，模型、参考素材或参数不同返回 409；摘要不对外返回。旧记录没有摘要时拒绝重放，不自动补单 |
 | `tasks.recovery_outcome` | 保存后台或手动恢复对失败生成任务记录的内部结论（`no_result` \| `unrecoverable`）；成功任务上另存后台画布绑定扫描的私有标记（`canvas_bind:` 前缀，格式版本 4） | 恢复结论仅由恢复流程在确认上游失败/未建单（`no_result`）或回执缺失/冲突/过保（`unrecoverable`）时写入；暂时性网络或读库错误保持为空以便下一轮继续取回。画布绑定标记只在成功任务上写入，记录被拒的目标（节点已删除、节点已换任务时附带被拒那次读到的画布 revision），画布 revision 变化后重试，绑定成功或目标不再存在时清除；写入只替换空值或旧的 `canvas_bind:` 标记，不覆盖恢复结论，也不改 `updated_at`。两者都不直接对外暴露，恢复结论仅通过 `task.ComputeOutcome` 投影为 `outcome` |
-| `tasks.beef_usage_state` / `beef_billing_state` / `beef_reconcile_deadline` | 保存 BeefAPI 返回的本轮结算原值和核对截止时间 | 由提交与恢复流程写入，NULL 表示未读到结算事实；不直接对外暴露，仅通过 `task.ComputeOutcome` 投影为 `outcome`（`pending` 时暂不允许重新生成并返回截止时间） |
-| `tasks.image_job_id` | 保存 BeefAPI 图片任务编号，用于后台查询已提交图片的结果与结算 | 默认空串；只用于恢复查询，不用于重新提交 |
+| `tasks.beef_usage_state` / `beef_billing_state` / `beef_reconcile_deadline` | 保存 BeefTV 官方算力返回的本轮结算原值和核对截止时间 | 由提交与恢复流程写入，NULL 表示未读到结算事实；不直接对外暴露，仅通过 `task.ComputeOutcome` 投影为 `outcome`（`pending` 时暂不允许重新生成并返回截止时间） |
+| `tasks.image_job_id` | 保存 BeefTV 官方算力图片任务编号，用于后台查询已提交图片的结果与结算 | 默认空串；只用于恢复查询，不用于重新提交 |
 | `workflow_template_versions` / `workflow_instances` / `workflow_step_instances` | 保存短剧生产模板和项目、章节实例 | 短剧分镜工作流 v2 顺序为剧情、资产、分镜、动作预演、视频、交付 |
 
 短剧项目状态以这些领域表为准。自由画布可以承载探索节点，但画布 metadata 不作为生产完成度、镜头版本或交付可用性的真相源。

@@ -97,7 +97,7 @@ func Summarize(items []Estimate) Summary {
 
 func quoteImage(table *Table, target Target, count int) Estimate {
 	if image := table.Image; image != nil {
-		// BeefAPI publishes Seedream rows with standard/layers qualities. Those
+		// BeefTV 官方算力 publishes Seedream rows with standard/layers qualities. Those
 		// rows tier by pixel area and include the first reference image.
 		seedream := image.Output["standard"] != nil
 		tier := imageTier(image, target.Size, seedream)
@@ -210,7 +210,7 @@ func imageQuality(image *ImageTable, quality string) string {
 	return quality
 }
 
-// imageTier mirrors how BeefAPI picks the billed tier from the sent size.
+// imageTier mirrors how BeefTV 官方算力 picks the billed tier from the sent size.
 func imageTier(image *ImageTable, size string, seedream bool) string {
 	size = strings.ToUpper(strings.TrimSpace(strings.ReplaceAll(size, "×", "x")))
 	if size == "" || size == "AUTO" {

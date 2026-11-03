@@ -1,6 +1,6 @@
 import { executeWorkspaceOperation } from "@/services/api/operations";
 
-/** 后端按 BeefAPI 价格目录算出的单项费用；amount 为 null 表示暂无价格，text 写明原因。 */
+/** 后端按 BeefTV 官方算力价格目录算出的单项费用；amount 为 null 表示暂无价格，text 写明原因。 */
 export type CostEstimate = {
     amount: number | null;
     approx?: boolean;
