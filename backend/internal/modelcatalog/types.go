@@ -1,6 +1,9 @@
 package modelcatalog
 
-import "infinite-canvas/backend/internal/model"
+import (
+	"infinite-canvas/backend/internal/model"
+	"infinite-canvas/backend/internal/pricing"
+)
 
 // ModelCapabilityConfig 是模型能力声明，不包含供应商字段名；协议适配器负责把统一参数映射到上游请求。
 type ModelCapabilityConfig struct {
@@ -245,8 +248,10 @@ type PublicChannelModel struct {
 	Protocol         model.ChannelInterfaceType `json:"protocol"`
 	CapabilityConfig map[string]any             `json:"capabilityConfig,omitempty"`
 	VideoPricing     map[string]any             `json:"videoPricing,omitempty"`
-	AudioOptions     *AudioGenerationOptions    `json:"audioOptions,omitempty"`
-	Available        bool                       `json:"available"`
+	// Pricing is the managed channel's published price row; other channels have none.
+	Pricing      *pricing.Table          `json:"pricing,omitempty"`
+	AudioOptions *AudioGenerationOptions `json:"audioOptions,omitempty"`
+	Available    bool                    `json:"available"`
 }
 
 type ChannelModelRequest struct {

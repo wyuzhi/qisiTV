@@ -19,6 +19,7 @@ func RegisterDefaultOps(r *Registry) {
 	registerCanvasEditOps(r)
 	registerCanvasNodeBindAsset(r)
 	registerModelCatalogOp(r)
+	registerGenerationEstimateOp(r)
 	registerMediaOps(r)
 	registerSkillOps(r)
 	registerSkillMarketOps(r)
@@ -208,10 +209,15 @@ func opCanvasGenerationPropose(ctx *Context, params json.RawMessage) (any, error
 			ReferenceNodeIDs: refs,
 		})
 	}
+	orderEstimate := EstimateGenerationCost(ctx.Domain, estimateGenerationTargets(owned, fallbackTargets))
+	for i := range targetsSummary {
+		targetsSummary[i]["estimate"] = orderEstimate.Items[i]
+	}
 	approvalMode := ctx.Caller.EffectiveApprovalMode()
 	result := map[string]any{
 		"proposalId": proposalID, "orderId": proposalID, "kind": args.Kind, "nodeIds": nodeIDs,
 		"model": resolved.Display, "modelKey": resolved.ModelKey, "pricing": pricing,
+		"estimate":     orderEstimate.Summary,
 		"approvalMode": string(approvalMode), "status": string(GenerationOrderPending),
 		"note": strings.TrimSpace(args.Note), "targets": targetsSummary,
 		"source": map[string]any{"canvasId": args.CanvasID, "canvasRevision": doc["revision"], "modelConfigRevision": resolved.Revision},
@@ -232,7 +238,12 @@ func opCanvasGenerationPropose(ctx *Context, params json.RawMessage) (any, error
 			}
 		}
 		proposedTargets = targets
-		result["production"] = map[string]any{"targets": targets}
+		productionEstimate := EstimateGenerationCost(ctx.Domain, estimateGenerationTargets(owned, targets))
+		estimated := make([]estimatedGenerationTarget, len(targets))
+		for i, target := range targets {
+			estimated[i] = estimatedGenerationTarget{GenerationTarget: target, Estimate: productionEstimate.Items[i]}
+		}
+		result["production"] = map[string]any{"targets": estimated, "estimate": productionEstimate.Summary}
 	}
 	_, hasOrderRecorder := ctx.Domain.(GenerationOrderRecorder)
 	if len(proposedTargets) == 0 {

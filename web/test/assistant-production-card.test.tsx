@@ -3,14 +3,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CanvasAssistantTurnView } from "@/pages/canvas/canvas-assistant-turn";
 import { assistantProposalProgress, assistantProposalText } from "@/pages/canvas/canvas-assistant-copy";
 import type { AssistantGenerationProposal, AssistantTurn } from "@/services/api/agent-assistant";
-import { defaultConfig, type AiConfig } from "@/stores/use-config-store";
 
 const proposal: AssistantGenerationProposal = {
     proposalId:"gp-film",kind:"image",nodeIds:["frame"],model:"image",modelKey:"custom::image",
     production:{targets:[
         {nodeId:"frame",title:"首帧",kind:"image",modelKey:"custom::image",prompt:"晨光洒进花店",parameters:{size:"9:16",count:"1"},referenceNodeIds:[]},
         {nodeId:"speech",title:"中文旁白",kind:"audio",modelKey:"custom::speech",prompt:"把春天带回家。",parameters:{audioVoice:"female-tianmei",audioSpeed:"1",audioFormat:"mp3"},referenceNodeIds:[]},
-    ]},source:{canvasId:"canvas",canvasRevision:1,modelConfigRevision:1},
+    ],estimate:{amount:0,priced:0,unknown:2,text:"预计费用：暂无价格，按所选渠道实际计费"}},source:{canvasId:"canvas",canvasRevision:1,modelConfigRevision:1},
 };
 test("confirmation shows the paid text, voice, aspect ratio and quantity",()=>{
     const text=assistantProposalText(proposal);
@@ -19,50 +18,32 @@ test("confirmation shows the paid text, voice, aspect ratio and quantity",()=>{
     expect(progress.ready).toBe(false);
     expect(progress.text).toContain("0/2");
 });
-test("production confirmation estimates per-shot and total video price from catalog quotes",()=>{
-    const config: AiConfig = {
-        ...defaultConfig,
-        channels: [{
-            id: "beefapi",
-            name: "BeefAPI",
-            apiFormat: "openai",
-            baseUrl: "https://beefapi.com",
-            apiKey: "",
-            models: ["minimax-h3-max-turbo", "gpt-image-1.5", "speech-2.8-hd"],
-            modelProfiles: [{
-                model: "minimax-h3-max-turbo",
-                capability: "video",
-                protocol: "newapi",
-                videoPricing: {
-                    currency: "CNY",
-                    mode: "seconds",
-                    rates: { "1080p": { output: 0.43, reference_video: 0 } },
-                    reference_image: 0.215,
-                    free_reference_images: 5,
-                },
-            }],
-        }],
-    };
+test("production confirmation shows the backend estimate for each shot and the total",()=>{
     const fullProposal: AssistantGenerationProposal = {
         proposalId: "gp-h3",
         kind: "image",
-        nodeIds: ["img-1", "img-2"],
-        model: "gpt-image-1.5",
-        modelKey: "beefapi::gpt-image-1.5",
+        nodeIds: ["img-1"],
+        model: "gpt-image-2",
+        modelKey: "beefapi::gpt-image-2",
         production: {
             targets: [
-                { nodeId: "img-1", title: "分镜1-首帧图", kind: "image", modelKey: "beefapi::gpt-image-1.5", prompt: "镜头1首帧", parameters: { size: "16:9", count: "1" }, referenceNodeIds: [] },
-                { nodeId: "vid-1", title: "分镜1-6s视频", kind: "video", modelKey: "beefapi::minimax-h3-max-turbo", prompt: "镜头1视频", parameters: { size: "16:9", vquality: "1080p", seconds: "6", count: "1" }, referenceNodeIds: ["img-1"] },
-                { nodeId: "vid-2", title: "分镜2-5s视频", kind: "video", modelKey: "beefapi::minimax-h3-max-turbo", prompt: "镜头2视频", parameters: { size: "16:9", vquality: "1080p", seconds: "5", count: "1" }, referenceNodeIds: ["img-1"] },
-                { nodeId: "tts-1", title: "旁白1", kind: "audio", modelKey: "beefapi::speech-2.8-hd", prompt: "旁白台词", parameters: { audioVoice: "male-qn-qingse", count: "1" }, referenceNodeIds: [] },
+                { nodeId: "img-1", title: "分镜1-首帧图", kind: "image", modelKey: "beefapi::gpt-image-2", prompt: "镜头1首帧", parameters: { size: "16:9", count: "1" }, referenceNodeIds: [],
+                    estimate: { amount: 0.35, basis: "1K 低质量 ¥0.35/张 × 1 张", text: "预计 ¥0.35（1K 低质量 ¥0.35/张 × 1 张）" } },
+                { nodeId: "vid-1", title: "分镜1-6s视频", kind: "video", modelKey: "beefapi::seedance-2.0", prompt: "镜头1视频", parameters: { vquality: "720p", seconds: "6", count: "1" }, referenceNodeIds: ["img-1"],
+                    estimate: { amount: 5.9616, approx: true, basis: "720p ¥0.9936/秒 × 6 秒，按 Token 折算", text: "约 ¥5.96（720p ¥0.9936/秒 × 6 秒，按 Token 折算）" } },
+                { nodeId: "tts-1", title: "旁白1", kind: "audio", modelKey: "byok::speech", prompt: "旁白台词", parameters: { count: "1" }, referenceNodeIds: [],
+                    estimate: { amount: null, basis: "自带 Key 的渠道暂无价格，按该渠道实际计费", text: "自带 Key 的渠道暂无价格，按该渠道实际计费" } },
             ],
+            estimate: { amount: 6.3116, priced: 2, unknown: 1, approx: true, text: "预计费用：已知部分约 ¥6.31，另有 1 项暂无价格" },
         },
         source: { canvasId: "canvas", canvasRevision: 1, modelConfigRevision: 1 },
     };
-    const text = assistantProposalText(fullProposal, [], true, config);
-    expect(text).toContain("预计费用：视频 2 段（共 11 秒）约 ¥4.73；1 张图片、1 段配音按所选渠道单价结算");
-    expect(text).toContain("预计费用：¥2.58（1080p ¥0.43/秒 × 6秒）");
-    expect(text).toContain("预计费用：¥2.15（1080p ¥0.43/秒 × 5秒）");
+    const text = assistantProposalText(fullProposal);
+    expect(text).toContain("整片制作方案：1 张图片、1 段视频、1 段配音\n预计费用：已知部分约 ¥6.31，另有 1 项暂无价格");
+    expect(text).toContain("费用：约 ¥5.96（720p ¥0.9936/秒 × 6 秒，按 Token 折算）");
+    expect(text).toContain("费用：自带 Key 的渠道暂无价格，按该渠道实际计费");
+    const submitted = assistantProposalText(fullProposal, [], false);
+    expect(submitted).not.toContain("费用");
 });
 test("proposal card reflects started progress when Pi confirms and admits tasks on canvas nodes",()=>{
     const turn: AssistantTurn = {
@@ -285,6 +266,7 @@ test("ordinary proposal with generation order targets renders collapsible order 
         model: "gpt-image-1.5",
         modelKey: "beefapi::gpt-image-1.5",
         pricing: "unknown",
+        estimate: { amount: 0, priced: 0, unknown: 1, text: "预计费用：暂无价格，按所选渠道实际计费" },
         approvalMode: "ask",
         status: "pending",
         targets: [{
@@ -294,6 +276,7 @@ test("ordinary proposal with generation order targets renders collapsible order 
             model: "gpt-image-1.5",
             modelKey: "beefapi::gpt-image-1.5",
             pricing: "unknown",
+            estimate: { amount: null, basis: "自带 Key 的渠道暂无价格，按该渠道实际计费", text: "自带 Key 的渠道暂无价格，按该渠道实际计费" },
             prompt: "雨夜霓虹街角，主角回头",
             parameters: { size: "16:9", count: "1" },
             referenceNodeIds: [],
@@ -324,5 +307,6 @@ test("ordinary proposal with generation order targets renders collapsible order 
     );
     expect(html).toContain("<details class=\"canvas-assistant-proposal-details\"><summary>查看 1 项生成单明细</summary>");
     expect(html).toContain("雨夜霓虹街角，主角回头");
-    expect(html).toContain("报价：未知（按所选渠道实际标准计费）");
+    expect(html).toContain("预计费用：暂无价格，按所选渠道实际计费");
+    expect(html).toContain("费用：自带 Key 的渠道暂无价格，按该渠道实际计费");
 });

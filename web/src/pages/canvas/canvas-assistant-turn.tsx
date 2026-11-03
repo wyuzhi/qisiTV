@@ -190,7 +190,7 @@ export function CanvasAssistantTurnView({ turn, canvasId, sessionId, status, han
                 const running = Boolean(runningProposalIds?.has(proposal.proposalId));
                 const progress = started && nodes ? assistantProposalProgress(proposal, nodes) : null;
                 const awaitingConfirmation = !started && !skipped && !undone && !turn.proposalsInvalidated;
-                const productionParts = assistantProductionProposalParts(proposal, awaitingConfirmation, config);
+                const productionParts = assistantProductionProposalParts(proposal, awaitingConfirmation);
                 const orderTargetLines = assistantOrderTargetLines(proposal);
                 const legacyProposalNote = !assistantVisibleReply(turn.reply || "") && proposal.note?.trim() ? proposal.note.trim() : "";
                 return (
@@ -215,7 +215,7 @@ export function CanvasAssistantTurnView({ turn, canvasId, sessionId, status, han
                             </>
                         ) : (
                             <>
-                                <span style={{ whiteSpace: "pre-line", overflowWrap: "anywhere" }}>{assistantProposalText(proposal, portraitPriceLines(profile?.videoPricing), awaitingConfirmation, config)}</span>
+                                <span style={{ whiteSpace: "pre-line", overflowWrap: "anywhere" }}>{assistantProposalText(proposal, portraitPriceLines(profile?.videoPricing), awaitingConfirmation)}</span>
                                 {orderTargetLines.length > 0 ? (
                                     <details className="canvas-assistant-proposal-details">
                                         <summary>查看 {orderTargetLines.length} 项生成单明细</summary>

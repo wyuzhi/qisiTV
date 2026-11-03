@@ -56,6 +56,10 @@ Wails 和浏览器开发模式共用同一套 `127.0.0.1` HTTP 合同。路由�
 
 `model.catalog` 可用 `capability`（`text`、`image`、`video`、`audio`）只查询所需类型。桌面视频模型的 `videoPricing` 只投影已保存、通过格式校验的渠道目录报价，不包含连接地址或凭据；缺失表示价格未知。这不是实时计费保证，也不会自动执行预算上限。
 
+官方 BeefAPI 渠道刷新目录时，从同一连接地址的公开价格目录 `GET /api/enterprise/catalog` 读取各模型价格并随模型保存，不携带凭据；读不到时目录照常刷新，价格留空。估算只采用官方渠道保存的价格，其他渠道即使配置里写了价格也不采用。`model.catalog` 不返回这些价格明细，费用通过下面的估算获取。
+
+只读操作 `generation.estimate` 接收 1 至 200 个 `targets:[{ modelKey, kind, parameters?, referenceImages?, referenceVideos?, text? }]`，`kind` 为 `image`、`video` 或 `audio`，`parameters` 与生成节点参数同名（如 `size`、`quality`、`count`、`vquality`、`seconds`），配音传台词 `text`。返回 `items[{ amount, approx?, basis, text, reserve? }]` 与 `summary{ amount, priced, unknown, approx?, text }`：`amount=null` 表示暂无价格，原因写在 `text`，不按 0 计入合计；`approx=true` 表示按 Token 或字数折算；`reserve` 是先扣、出账后结算的金额，同样不计入合计。`canvas.generation.propose` 的 `targets[].estimate`、`estimate` 与 `production.estimate` 用同一套计算。估算只读已保存的价格，不联网、不建任务、不扣费；内置助手的画布模式不提供这个操作，直接使用提案里的估算。
+
 MiniMax speech 的 OpenAI 音频兼容目录通过 `audioOptions` 提供官方中文男女音色建议、默认音色及语速范围，仍允许用户的有效自定义音色 ID。当前路径未接入自由朗读指令，`instructionsSupported=false`；旁白 prompt 只放台词，不能用编造的音色名或指令承诺情绪效果。
 
 首次确认同时核对这两个持久版本、未保存的编辑和确认期间的变化。旧历史中没有 `source` 的提案需要重新提出。通过核对后，生成沿用已有模型解析规则，并使用确认时复制的提示词、节点、连线和全局参数。此版本合同不包含素材库独立更新、hydrate 时解析的动态角色版本或任意远端 URL 的内容字节变化。

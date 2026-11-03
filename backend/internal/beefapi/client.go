@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"infinite-canvas/backend/internal/pricing"
 )
 
 type deviceCodeRequest struct {
@@ -319,7 +321,33 @@ func (s *Service) fetchModels(apiKey string) ([]CatalogModel, error) {
 			MediaCapabilitiesVersion: strings.TrimSpace(item.MediaCapabilitiesVersion),
 		})
 	}
+	if rows := s.fetchPriceCatalog(); rows != nil {
+		for i := range models {
+			models[i].Pricing = rows[models[i].ID]
+		}
+	}
 	return models, nil
+}
+
+// fetchPriceCatalog reads the same site's public price catalog. A failed read
+// only leaves estimates unknown; it never fails the model refresh.
+func (s *Service) fetchPriceCatalog() map[string]json.RawMessage {
+	request, err := http.NewRequestWithContext(s.lifecycle, http.MethodGet, ProviderBaseURL(s.Origin())+"/api/enterprise/catalog", nil)
+	if err != nil {
+		return nil
+	}
+	request.Header.Set("Accept", "application/json")
+	response, err := s.httpClient.Do(request)
+	if err != nil {
+		return nil
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
+	if err != nil || response.StatusCode != http.StatusOK {
+		return nil
+	}
+	rows, _ := pricing.ParseCatalog(raw)
+	return rows
 }
 
 func parseOAuthError(raw []byte) string {

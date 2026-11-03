@@ -1,0 +1,619 @@
+{
+ "data": {
+  "currency": "CNY",
+  "models": [
+   {
+    "display_kind": "image",
+    "image_price_table": {
+     "currency": "CNY",
+     "default_quality": "standard",
+     "default_size": "2K",
+     "output": {
+      "layers": {
+       "1K": 0.03661956,
+       "2K": 0.03661956
+      },
+      "standard": {
+       "1K": 0.03661956,
+       "2K": 0.03661956
+      }
+     },
+     "pricebook_id": "enterprise_cny_v1",
+     "reference": 0
+    },
+    "mode": "per_request",
+    "model_name": "dola-seedream-5-0-flash-260915",
+    "official_price_ratios": {
+     "每张图像": 0.30000000000000004
+    },
+    "official_source": "https://docs.byteplus.com/en/docs/ModelArk/model-pricing",
+    "per_request_cny": 0.03661956,
+    "pricing_note": "支持 1K、1.5K、2K 和自定义尺寸，普通出图、图层拆分同价；图层拆分按每张基底和图层计费，参考图免费。"
+   },
+   {
+    "display_kind": "image",
+    "image_price_table": {
+     "currency": "CNY",
+     "default_quality": "standard",
+     "default_size": "2K",
+     "output": {
+      "layers": {
+       "1K": 0.04577445,
+       "2K": 0.0915489
+      },
+      "standard": {
+       "1K": 0.0915489,
+       "2K": 0.1830978
+      }
+     },
+     "pricebook_id": "enterprise_cny_v1",
+     "reference": 0.00610326
+    },
+    "mode": "per_request",
+    "model_name": "dola-seedream-5-0-pro-260628",
+    "official_price_ratios": {
+     "每张图像": 0.30000000000000004
+    },
+    "official_source": "https://docs.byteplus.com/en/docs/ModelArk/model-pricing",
+    "per_request_cny": 0.1830978,
+    "pricing_note": "按每张输出的实际像素计费：不超过 261 万像素与更高像素分档；默认 2K 为高像素档。图层拆分按每张基底和图层计费；第一张参考图免费，第二张起按张另计，参考图费用不随输出图片数重复收取。"
+   },
+   {
+    "display_kind": "image",
+    "image_price_table": {
+     "currency": "CNY",
+     "default_quality": "low",
+     "default_size": "1K",
+     "output": {
+      "high": {
+       "1K": 2.2,
+       "2K": 4.4,
+       "4K": 7.3
+      },
+      "low": {
+       "1K": 0.35,
+       "2K": 0.7,
+       "4K": 1
+      },
+      "medium": {
+       "1K": 0.6,
+       "2K": 1.1,
+       "4K": 1.9
+      }
+     },
+     "pricebook_id": "enterprise_cny_v1",
+     "reference": 0.15
+    },
+    "mode": "per_request",
+    "model_name": "gpt-image-2",
+    "per_request_cny": 0.35,
+    "pricing_note": "按质量和分辨率计费，参考图费用另列。"
+   },
+   {
+    "display_kind": "image",
+    "image_price_table": {
+     "auto_quality": "medium",
+     "currency": "CNY",
+     "default_quality": "auto",
+     "default_size": "1K",
+     "output": {
+      "high": {
+       "1K": 0.6,
+       "2K": 1.2,
+       "4K": 1.8
+      },
+      "low": {
+       "1K": 0.4,
+       "2K": 0.8,
+       "4K": 1.2
+      },
+      "max": {
+       "1K": 1.7,
+       "2K": 3.9,
+       "4K": 4.9
+      },
+      "medium": {
+       "1K": 0.4,
+       "2K": 0.9,
+       "4K": 1.4
+      },
+      "xhigh": {
+       "1K": 0.8,
+       "2K": 1.8,
+       "4K": 2.4
+      }
+     },
+     "pricebook_id": "enterprise_cny_v1",
+     "reference": 0.15
+    },
+    "mode": "per_request",
+    "model_name": "gpt-image-2.5",
+    "per_request_cny": 0.4,
+    "pricing_note": "按质量和分辨率计费，参考图费用另列。"
+   },
+   {
+    "display_kind": "image",
+    "image_price_table": {
+     "auto_quality": "medium",
+     "currency": "CNY",
+     "default_quality": "auto",
+     "default_size": "1K",
+     "output": {
+      "high": {
+       "1K": 0.6,
+       "2K": 1.2,
+       "4K": 1.8
+      },
+      "low": {
+       "1K": 0.4,
+       "2K": 0.8,
+       "4K": 1.2
+      },
+      "max": {
+       "1K": 1.7,
+       "2K": 3.9,
+       "4K": 4.9
+      },
+      "medium": {
+       "1K": 0.4,
+       "2K": 0.9,
+       "4K": 1.4
+      },
+      "xhigh": {
+       "1K": 0.8,
+       "2K": 1.8,
+       "4K": 2.4
+      }
+     },
+     "pricebook_id": "enterprise_cny_v1",
+     "reference": 0.15
+    },
+    "mode": "per_request",
+    "model_name": "gpt-image-2.5-flare",
+    "per_request_cny": 0.4,
+    "pricing_note": "按质量和分辨率计费，参考图费用另列。"
+   },
+   {
+    "display_kind": "image",
+    "image_price_table": {
+     "auto_quality": "medium",
+     "currency": "CNY",
+     "default_quality": "auto",
+     "default_size": "1K",
+     "output": {
+      "high": {
+       "1K": 0.85,
+       "2K": 1.65,
+       "4K": 2.5
+      },
+      "low": {
+       "1K": 0.55,
+       "2K": 1.1,
+       "4K": 1.65
+      },
+      "max": {
+       "1K": 1.7,
+       "2K": 3.9,
+       "4K": 4.9
+      },
+      "medium": {
+       "1K": 0.55,
+       "2K": 1.25,
+       "4K": 1.95
+      },
+      "xhigh": {
+       "1K": 1.1,
+       "2K": 2.2,
+       "4K": 3.3
+      }
+     },
+     "pricebook_id": "enterprise_cny_v1",
+     "reference": 0.15
+    },
+    "mode": "per_request",
+    "model_name": "gpt-image-2.5-sunburst",
+    "per_request_cny": 0.55,
+    "pricing_note": "按质量和分辨率计费，参考图费用另列。"
+   },
+   {
+    "cache_read_cny": 0,
+    "cache_write_cny": 0,
+    "display_kind": "audio",
+    "input_cny": 13.2,
+    "mode": "tokens",
+    "model_name": "hy-asr-3.0-preview",
+    "output_cny": 0
+   },
+   {
+    "display_kind": "image",
+    "mode": "per_request",
+    "model_name": "hy-image-v3",
+    "per_request_cny": 0.2
+   },
+   {
+    "display_kind": "video",
+    "mode": "per_request",
+    "model_name": "kling-video-v3",
+    "per_second_cny": {
+     "720p": 0.9
+    },
+    "reference_image_cny": 0,
+    "video_input_per_second_cny": {
+     "720p": 0
+    }
+   },
+   {
+    "display_kind": "image",
+    "mode": "per_request",
+    "model_name": "midjourney-v8.2",
+    "per_request_cny": 0.405
+   },
+   {
+    "display_kind": "video",
+    "free_reference_images": 5,
+    "mode": "per_request",
+    "model_name": "minimax-h3",
+    "per_second_cny": {
+     "2k": 1.322373,
+     "480p": 0.508605,
+     "4k": 1.627536,
+     "768p": 0.610326
+    },
+    "reference_image_cny": 0.813768,
+    "video_input_per_second_cny": {
+     "2k": 0,
+     "480p": 0,
+     "4k": 0,
+     "768p": 0
+    }
+   },
+   {
+    "display_kind": "video",
+    "mode": "per_request",
+    "model_name": "minimax-h3-max",
+    "per_second_cny": {
+     "1080p": 0.9765216,
+     "480p": 0.305163,
+     "768p": 0.4882608
+    },
+    "reference_image_cny": 0,
+    "video_input_per_second_cny": {
+     "1080p": 0,
+     "480p": 0,
+     "768p": 0
+    }
+   },
+   {
+    "display_kind": "video",
+    "mode": "per_request",
+    "model_name": "minimax-h3-max-turbo",
+    "per_second_cny": {
+     "1080p": 0.4882608,
+     "480p": 0.1525815,
+     "768p": 0.2441304
+    },
+    "reference_image_cny": 0,
+    "video_input_per_second_cny": {
+     "1080p": 0,
+     "480p": 0,
+     "768p": 0
+    }
+   },
+   {
+    "display_kind": "audio",
+    "mode": "per_request",
+    "model_name": "minimax-music-v2.6",
+    "per_request_cny": 1.9
+   },
+   {
+    "display_kind": "audio",
+    "mode": "per_request",
+    "model_name": "minimax-music-v3.0",
+    "per_request_cny": 1
+   },
+   {
+    "cache_read_cny": 0,
+    "cache_write_cny": 0,
+    "display_kind": "audio",
+    "input_cny": 350,
+    "mode": "tokens",
+    "model_name": "minimax-speech-2.8-hd",
+    "output_cny": 0
+   },
+   {
+    "cache_read_cny": 0,
+    "cache_write_cny": 0,
+    "display_kind": "audio",
+    "input_cny": 200,
+    "mode": "tokens",
+    "model_name": "minimax-speech-2.8-turbo",
+    "output_cny": 0
+   },
+   {
+    "display_kind": "audio",
+    "mode": "per_request",
+    "model_name": "mureka-music-v8",
+    "per_request_cny": 0.66
+   },
+   {
+    "display_kind": "video",
+    "mode": "video_tokens",
+    "model_name": "seedance-2.0",
+    "official_source": "https://docs.volcengine.com/docs/ark/model-pricing?lang=zh",
+    "video_official": [
+     {
+      "input_per_second_cny": 0.6048,
+      "input_ratio": 1,
+      "output_per_second_cny": 0.9936,
+      "output_ratio": 1,
+      "resolution": "720p"
+     },
+     {
+      "input_per_second_cny": 0.281232,
+      "input_ratio": 1,
+      "output_per_second_cny": 0.462024,
+      "output_ratio": 1,
+      "resolution": "480p"
+     },
+     {
+      "input_per_second_cny": 1.5066,
+      "input_ratio": 1,
+      "output_per_second_cny": 2.4786,
+      "output_ratio": 1,
+      "resolution": "1080p"
+     },
+     {
+      "input_per_second_cny": 3.1104,
+      "input_ratio": 1,
+      "output_per_second_cny": 5.0544,
+      "output_ratio": 1,
+      "resolution": "4k"
+     }
+    ],
+    "video_token_rates": [
+     {
+      "input_cny": 28,
+      "output_cny": 46,
+      "resolution": "720p"
+     },
+     {
+      "input_cny": 28,
+      "output_cny": 46,
+      "resolution": "480p"
+     },
+     {
+      "input_cny": 31,
+      "output_cny": 51,
+      "resolution": "1080p"
+     },
+     {
+      "input_cny": 16,
+      "output_cny": 26,
+      "resolution": "4k"
+     }
+    ]
+   },
+   {
+    "display_kind": "video",
+    "mode": "video_tokens",
+    "model_name": "seedance-2.0-fast",
+    "official_source": "https://www.whatstoken.ai/home/models (list USD x 6.7814; Lucas 2026-09-11)",
+    "video_official": [
+     {
+      "input_per_second_cny": 0.140616,
+      "input_ratio": 0.6255585344057194,
+      "output_per_second_cny": 0.220968,
+      "output_ratio": 0.5792522380200106,
+      "resolution": "480p"
+     },
+     {
+      "input_per_second_cny": 0.3024,
+      "input_ratio": 0.6255585344057194,
+      "output_per_second_cny": 0.4752,
+      "output_ratio": 0.5792522380200106,
+      "resolution": "720p"
+     }
+    ],
+    "video_token_rates": [
+     {
+      "input_cny": 14,
+      "output_cny": 22,
+      "resolution": "480p"
+     },
+     {
+      "input_cny": 14,
+      "output_cny": 22,
+      "resolution": "720p"
+     }
+    ]
+   },
+   {
+    "display_kind": "video",
+    "mode": "video_tokens",
+    "model_name": "seedance-2.0-mini",
+    "official_source": "https://www.whatstoken.ai/home/models (list USD x 6.7814; Lucas 2026-09-11)",
+    "video_official": [
+     {
+      "input_per_second_cny": 0.080352,
+      "input_ratio": 0.5617977528089888,
+      "output_per_second_cny": 0.120528,
+      "output_ratio": 0.5056890012642224,
+      "resolution": "480p"
+     },
+     {
+      "input_per_second_cny": 0.1728,
+      "input_ratio": 0.5617977528089888,
+      "output_per_second_cny": 0.2592,
+      "output_ratio": 0.5056890012642224,
+      "resolution": "720p"
+     }
+    ],
+    "video_token_rates": [
+     {
+      "input_cny": 8,
+      "output_cny": 12,
+      "resolution": "480p"
+     },
+     {
+      "input_cny": 8,
+      "output_cny": 12,
+      "resolution": "720p"
+     }
+    ]
+   },
+   {
+    "display_kind": "video",
+    "mode": "video_tokens",
+    "model_name": "seedance-2.0-portrait",
+    "video_token_rates": [
+     {
+      "input_cny": 30.85537,
+      "output_cny": 47.4698,
+      "resolution": "720p"
+     },
+     {
+      "input_cny": 29.16002,
+      "output_cny": 47.4698,
+      "resolution": "480p"
+     }
+    ]
+   },
+   {
+    "display_kind": "video",
+    "mode": "video_tokens",
+    "model_name": "seedance-2.5",
+    "official_source": "https://docs.volcengine.com/docs/ark/model-pricing?lang=zh",
+    "video_official": [
+     {
+      "input_per_second_cny": 0.9072,
+      "input_ratio": 1,
+      "output_per_second_cny": 1.512,
+      "output_ratio": 1,
+      "resolution": "720p"
+     },
+     {
+      "input_per_second_cny": 0.421848,
+      "input_ratio": 1,
+      "output_per_second_cny": 0.70308,
+      "output_ratio": 1,
+      "resolution": "480p"
+     },
+     {
+      "input_per_second_cny": 2.2356,
+      "input_ratio": 1,
+      "output_per_second_cny": 3.7422,
+      "output_ratio": 1,
+      "resolution": "1080p"
+     }
+    ],
+    "video_token_rates": [
+     {
+      "input_cny": 42,
+      "output_cny": 70,
+      "resolution": "720p"
+     },
+     {
+      "input_cny": 42,
+      "output_cny": 70,
+      "resolution": "480p"
+     },
+     {
+      "input_cny": 46,
+      "output_cny": 77,
+      "resolution": "1080p"
+     }
+    ]
+   },
+   {
+    "display_kind": "video",
+    "mode": "video_tokens",
+    "model_name": "seedance-2.5-portrait",
+    "video_token_rates": [
+     {
+      "input_cny": 54.115572,
+      "output_cny": 88.022572,
+      "resolution": "720p"
+     },
+     {
+      "input_cny": 54.115572,
+      "output_cny": 88.022572,
+      "resolution": "480p"
+     }
+    ]
+   },
+   {
+    "display_kind": "image",
+    "image_price_table": {
+     "currency": "CNY",
+     "default_quality": "standard",
+     "default_size": "2K",
+     "output": {
+      "standard": {
+       "1K": 0.0712047,
+       "2K": 0.0712047
+      }
+     },
+     "pricebook_id": "enterprise_cny_v1",
+     "reference": 0
+    },
+    "mode": "per_request",
+    "model_name": "seedream-5-0-260128",
+    "official_price_ratios": {
+     "每张图像": 0.3
+    },
+    "official_source": "https://docs.byteplus.com/en/docs/ModelArk/model-pricing",
+    "per_request_cny": 0.0712047,
+    "pricing_note": "按实际成功输出的图片张数计费，参考图免费。"
+   },
+   {
+    "display_kind": "upscale",
+    "invoice_billing": {
+     "media_type": "video",
+     "reservation_cny": 27.1256
+    },
+    "mode": "per_request",
+    "model_name": "topaz-proteus"
+   },
+   {
+    "display_kind": "upscale",
+    "invoice_billing": {
+     "media_type": "image",
+     "reservation_cny": 27.1256
+    },
+    "mode": "per_request",
+    "model_name": "topaz-standard-v2"
+   },
+   {
+    "display_kind": "upscale",
+    "invoice_billing": {
+     "media_type": "video",
+     "reservation_cny": 27.1256
+    },
+    "mode": "per_request",
+    "model_name": "topaz-starlight-fast-2"
+   },
+   {
+    "display_kind": "upscale",
+    "invoice_billing": {
+     "media_type": "image",
+     "reservation_cny": 27.1256
+    },
+    "mode": "per_request",
+    "model_name": "topaz-wonder-3.5"
+   },
+   {
+    "display_kind": "video",
+    "mode": "per_request",
+    "model_name": "wan3.0-video",
+    "per_second_cny": {
+     "1080p": 1.62,
+     "480p": 0.405,
+     "720p": 0.81
+    },
+    "pricing_note": "按生成与参考视频合计秒数计费"
+   }
+  ]
+ },
+ "message": "",
+ "success": true
+}
