@@ -10,7 +10,7 @@ setActiveUserScope("owner-a");
 };
 function Harness() {
     const ids = useCanvasUiStore(state => state.deleteProjectIds);
-    return <ConfigProvider button={{ autoInsertSpace: false }}><App><button onClick={() => useCanvasUiStore.getState().setDeleteProjectIds(["c1"])}>删除单个</button>
+    return <ConfigProvider theme={{ token: { motion: false } }} button={{ autoInsertSpace: false }}><App><button onClick={() => useCanvasUiStore.getState().setDeleteProjectIds(["c1"])}>删除单个</button>
         <button onClick={() => useCanvasUiStore.getState().setDeleteProjectIds(["c1", "c2"])}>批量删除</button>
         {ids.length ? <CanvasDeleteProjectsDialog /> : null}</App></ConfigProvider>;
 }
