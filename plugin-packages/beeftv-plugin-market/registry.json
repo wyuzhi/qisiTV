@@ -18,36 +18,6 @@
         "助手工具",
         "技能"
       ]
-    },
-    {
-      "id": "beeftv-plugin-ecommerce-hero",
-      "packageName": "beeftv-plugin-ecommerce-hero",
-      "name": "一键商品主图",
-      "version": "0.1.0",
-      "description": "上传商品图并选择场景图数量，自动编排电商主图画布节点、助手工具与生成技能。",
-      "author": "BeefTV",
-      "category": "电商创作",
-      "recommended": true,
-      "tags": [
-        "画布节点",
-        "助手工具",
-        "技能",
-        "电商"
-      ]
-    },
-    {
-      "id": "beeftv-plugin-sticky-note",
-      "packageName": "beeftv-plugin-sticky-note",
-      "name": "画布便签",
-      "version": "0.1.0",
-      "description": "在画布上放置可换色、可编辑的便签卡片，并支持创作助手直接创建和修改便签。",
-      "author": "BeefTV",
-      "category": "画布效率",
-      "recommended": true,
-      "tags": [
-        "画布节点",
-        "助手工具"
-      ]
     }
   ]
 }

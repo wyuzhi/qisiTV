@@ -2,10 +2,18 @@
   "name": "beeftv-plugin-character-replacement",
   "version": "0.1.0",
   "description": "AI 角色替换工作室：支持单人/多人精准角色替换、5 档替换范围控制、定位框 SVG 辅助、两阶段关键帧+视频动作替换（Seedream + Seedance 2.5 元素替换）与全片时间线无损回插。",
+  "author": "BeefTV",
   "type": "module",
   "license": "Apache-2.0",
+  "homepage": "https://github.com/Sunnyender-org/beeftv-plugins/tree/main/plugins/beeftv-plugin-character-replacement",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sunnyender-org/beeftv-plugins.git",
+    "directory": "plugins/beeftv-plugin-character-replacement"
+  },
   "keywords": [
     "beeftv-plugin",
+    "pi-package",
     "character-replacement",
     "person-replacement",
     "short-drama",
