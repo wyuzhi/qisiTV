@@ -68,11 +68,26 @@ export function useCanvasNodeReferences({ projectId, document, pageUi, uploads }
             if (!removedConnectionIds.size) return;
             const nextConnections = previousConnections.filter((connection) => !removedConnectionIds.has(connection.id));
             const promptSyncedNodes = applyCanvasConnectionPromptSync(previousNodes, previousConnections, previousNodes, nextConnections);
-            const targetNode = promptSyncedNodes.find((node) => node.id === targetNodeId);
-            const referenceAssetNodeIds = targetNode?.metadata?.referenceAssetNodeIds;
-            const nextNodes = targetNode?.metadata?.workflowKind === "shot" && referenceAssetNodeIds?.includes(referenceNodeId)
-                ? promptSyncedNodes.map((node) => node.id === targetNodeId ? { ...node, metadata: { ...node.metadata, referenceAssetNodeIds: referenceAssetNodeIds.filter((id) => id !== referenceNodeId) } } : node)
-                : promptSyncedNodes;
+            const nextNodes = promptSyncedNodes.map((node) => {
+                if (node.id !== targetNodeId && node.id !== configNodeId) return node;
+                const metadata = node.metadata;
+                if (!metadata) return node;
+                const clearShotAsset = node.id === targetNodeId && metadata.workflowKind === "shot" && metadata.referenceAssetNodeIds?.includes(referenceNodeId);
+                const clearStart = metadata.videoStartFrameNodeId === referenceNodeId;
+                const clearEnd = metadata.videoEndFrameNodeId === referenceNodeId;
+                const clearMiddle = metadata.videoMiddleFrameNodeId === referenceNodeId;
+                if (!clearShotAsset && !clearStart && !clearEnd && !clearMiddle) return node;
+                return {
+                    ...node,
+                    metadata: {
+                        ...metadata,
+                        ...(clearShotAsset ? { referenceAssetNodeIds: metadata.referenceAssetNodeIds?.filter((id) => id !== referenceNodeId) } : null),
+                        ...(clearStart ? { videoStartFrameNodeId: undefined } : null),
+                        ...(clearEnd ? { videoEndFrameNodeId: undefined } : null),
+                        ...(clearMiddle ? { videoMiddleFrameNodeId: undefined } : null),
+                    },
+                };
+            });
             if (nextNodes !== previousNodes) {
                 nodesRef.current = nextNodes;
                 setNodes(nextNodes);

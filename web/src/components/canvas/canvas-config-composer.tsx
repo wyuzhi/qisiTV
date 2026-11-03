@@ -14,6 +14,8 @@ import type { CanvasGenerationMode, CanvasNodeMetadata, CanvasWorkspaceMode } fr
 import { CanvasH3ReferenceOrder } from "./canvas-h3-reference-order";
 import { h3VideoOperation, isH3MaxModel, isH3Model, isH3Style } from "@/lib/h3-video";
 import { resolveVideoOperation } from "@/lib/model-selection";
+import { findPromptFirstFrameNodeId, resolveVideoReferenceModeState, stripPromptFirstFrameClauses } from "@/lib/canvas/video-reference-mode";
+import { VideoReferenceModeSwitch } from "./canvas-node-reference-shelf";
 import { CanvasPromptFontControl } from "./canvas-prompt-font-control";
 import { DEFAULT_PROMPT_FONT_SIZE, useCreationPreferencesStore } from "@/stores/use-creation-preferences-store";
 
@@ -186,7 +188,32 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
                 </div>
             </div>
             {generationMode === "video" && onMetadataChange && !simpleMode ? (
-                <div className="mb-3 rounded-lg px-2 py-2" style={{ background: theme.node.fill }}>
+                <div className="mb-3 space-y-2 rounded-lg px-2 py-2" style={{ background: theme.node.fill }}>
+                    {!workflowVideoReferenceMode && inputs.some((input) => input.type === "image" || input.type === "character" || input.type === "video") ? (
+                        <VideoReferenceModeSwitch
+                            state={resolveVideoReferenceModeState({
+                                metadata,
+                                references: inputs.map((input, index) => ({
+                                    nodeId: input.nodeId,
+                                    kind: input.type,
+                                    label: resourceLabel(input, inputs) || `素材${index + 1}`,
+                                    title: input.title,
+                                    active: true,
+                                })),
+                                endFrameSupported: !isH3Style(model),
+                                h3Model: isH3Model(model),
+                                h3Style: isH3Style(model),
+                                prompt: value,
+                            })}
+                            theme={theme}
+                            onSelectMode={(nextMode) => {
+                                if (nextMode === "frames" && findPromptFirstFrameNodeId(value, inputs.map((input, index) => ({ nodeId: input.nodeId, kind: input.type, label: resourceLabel(input, inputs) || `素材${index + 1}`, active: true })))) {
+                                    onChange(stripPromptFirstFrameClauses(value));
+                                }
+                            }}
+                            onChange={onMetadataChange}
+                        />
+                    ) : null}
                     <CanvasVideoPromptTools
                         metadata={metadata}
                         endFrameSupported={!isH3Style(model)}

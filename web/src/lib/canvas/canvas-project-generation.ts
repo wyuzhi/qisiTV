@@ -6,7 +6,7 @@ import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { resourceIdFromStorageKey } from "@/services/api/resources";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
-import { isH3Model, isH3MaxModel, h3VideoOperation, h3ResolvedReferenceOrder } from "@/lib/h3-video";
+import { isH3MaxModel, isH3Model, h3VideoOperation, h3ResolvedReferenceOrder } from "@/lib/h3-video";
 import { isSeedanceVideoConfig } from "@/lib/seedance-video";
 import { modelCapabilityConfigFor } from "@/lib/model-capabilities";
 import { resolveVideoOperation } from "@/lib/model-selection";
@@ -449,8 +449,37 @@ export function buildVideoGenerationMetadata(
     const workflowVideo = node?.type === CanvasNodeType.Config && (config?.taskWorkflowProvider === "runninghub" || isCanvasWorkflowProvider(metadata));
     const h3Max = isH3MaxModel(effectiveModel);
     const ignoreFrameSelection = workflowVideo || videoEditOperation === "draft_to_final" || (videoEditOperation === "reference_to_video" && !h3Max);
-    const startFrame = ignoreFrameSelection ? undefined : requireConnectedVideoFrame(metadata?.videoStartFrameNodeId, "首帧", referenceImageIds);
-    const endFrame = ignoreFrameSelection ? undefined : requireConnectedVideoFrame(metadata?.videoEndFrameNodeId, "尾帧", referenceImageIds);
+    const connectedImages = context?.referenceImages || [];
+    const h3 = isH3Model(effectiveModel);
+    const storedStartFrame = !h3 && metadata?.videoStartFrameNodeId && !referenceImageIds.has(metadata.videoStartFrameNodeId)
+        ? undefined
+        : metadata?.videoStartFrameNodeId;
+    const storedEndFrame = !h3 && metadata?.videoEndFrameNodeId && !referenceImageIds.has(metadata.videoEndFrameNodeId)
+        ? undefined
+        : metadata?.videoEndFrameNodeId;
+    const allDirectImageNodes =
+        connectedImages.length > 0 &&
+        connectedImages.length <= 2 &&
+        connectedImages.every((image) => !image.sourceNodeId && !image.id.startsWith("character-reference-") && !image.id.startsWith("asset:"));
+    const defaultFrames =
+        !ignoreFrameSelection &&
+        !h3 &&
+        videoEditOperation === "image_to_video" &&
+        !storedStartFrame &&
+        !storedEndFrame &&
+        (context?.referenceVideos.length || 0) === 0 &&
+        (context?.referenceAudios.length || 0) === 0 &&
+        allDirectImageNodes;
+    const startFrame = ignoreFrameSelection
+        ? undefined
+        : defaultFrames
+          ? connectedImages[0]?.id
+          : requireConnectedVideoFrame(storedStartFrame, "首帧", referenceImageIds);
+    const endFrame = ignoreFrameSelection
+        ? undefined
+        : defaultFrames && connectedImages.length === 2
+          ? connectedImages[1]?.id
+          : requireConnectedVideoFrame(storedEndFrame, "尾帧", referenceImageIds);
     const middleFrame = ignoreFrameSelection || !metadata?.videoMiddleFrameNodeId ? undefined : requireConnectedVideoFrame(metadata.videoMiddleFrameNodeId, "中间帧", referenceImageIds);
     return {
         ...(config ? generationWorkflowMetadata(config) : {}),
