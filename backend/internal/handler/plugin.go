@@ -17,7 +17,7 @@ import (
 )
 
 // pluginCenter is the handler-facing slice of plugin administration. Permission
-// checks, audit rows, and feature gates stay in the composition root.
+// checks and feature gates stay in the composition root.
 type pluginCenter interface {
 	workspaceOwners
 	PluginDomain() *plugins.Service

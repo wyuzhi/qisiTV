@@ -276,7 +276,3 @@ func validateReferenceDuration(kind string, index int, durationMs int64, minimum
 func enabledLogicalRouteSpecs(routes []cachedLogicalRoute) []CapabilitySpec {
 	return modelcatalog.EnabledLogicalRouteSpecs(routes)
 }
-
-func logicalModelConfigurationError(product CapabilitySpec, routeSpecs []CapabilitySpec) string {
-	return modelcatalog.LogicalModelConfigurationError(product, routeSpecs)
-}
