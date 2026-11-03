@@ -94,7 +94,7 @@ func TestManagedMediaRestartQueriesAndPersistsOriginal(t *testing.T) {
 				svc, db := newManagedImageDirectService(t, path, dir)
 				input := generation.Input{Mode: kind, Prompt: "fixture", Config: generation.Config{CredentialRef: beefapi.CredentialRef, MediaProtocolVersion: beefapi.MediaProtocolVersion, APIKey: "fixture", BaseURL: server.URL, Model: "opaque-" + kind + "-2030", InterfaceType: "stale-plugin", VideoSeconds: "4", VideoGenerateAudio: "false", AudioVoice: "speaker", AudioSpeed: "1", AudioFormat: "mp3"}}
 				if kind == "video" {
-					input.ReferenceImages = []generation.Media{{ID: "frame", URL: "https://media.example.invalid/frame.png"}}
+					input.ReferenceImages = []generation.Media{{ID: "frame", URL: "https://93.184.216.34/frame.png"}}
 					input.Metadata = map[string]any{"videoStartFrameNodeId": "frame"}
 				}
 				raw, _ := json.Marshal(input)
