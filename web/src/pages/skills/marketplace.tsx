@@ -14,6 +14,8 @@ import { MarketReviewSummary } from "./market-review-summary";
 import { capabilityOptions, requirementLabel } from "./market-copy";
 import "./marketplace.css";
 
+const SKILL_PAGE_SIZE = 20;
+
 export default function SkillMarketplace() {
     const { message, modal } = App.useApp();
     const [params, setParams] = useSearchParams();
@@ -41,9 +43,15 @@ export default function SkillMarketplace() {
         let stale = false;
         setLoading(true); setError("");
         const timer = setTimeout(() => {
+            const clampPage = (nextTotal: number) => {
+                setTotal(nextTotal);
+                const maxPage = Math.max(1, Math.ceil(nextTotal / SKILL_PAGE_SIZE));
+                if (page > maxPage) { setPage(maxPage); return false; }
+                return true;
+            };
             const work = tab === "market"
-                ? searchSkillMarket(query, page).then(value => { if (!stale) { setItems(value.items || []); setTotal(value.total); } })
-                : listSkills({ scope: "mine", page, pageSize: 20, search: query }).then(value => { if (!stale) { setLocal(value.skills); setTotal(value.totalCount); } });
+                ? searchSkillMarket(query, page).then(value => { if (!stale && clampPage(value.total)) setItems(value.items || []); })
+                : listSkills({ scope: "mine", page, pageSize: SKILL_PAGE_SIZE, search: query }).then(value => { if (!stale && clampPage(value.totalCount)) setLocal(value.skills); });
             void work.catch(e => { if (!stale) setError(e.message || "暂时无法读取技能"); }).finally(() => { if (!stale) setLoading(false); });
         }, 200);
         return () => { stale = true; clearTimeout(timer); };
@@ -69,8 +77,10 @@ export default function SkillMarketplace() {
     const showVersions = async (skill: Skill) => action(async () => { const value = await getInstalledVersions(skill.skillId); setVersions({ skill, items: value.versions }); setVersionId(skill.versionId); }, "已读取本机版本");
     const install = () => { if (release) void action(async () => { await installMarketRelease(release.skillId, release.releaseId); setRelease(null); changeTab("mine"); }, "已安装，可在画布助手中选择使用"); };
     return <WorkspacePage className="skill-market-page">
-        <PageHeader title="技能" description="把创作方法带进助手。安装和私人改写无需审核，公开分享时再投稿。" actions={<><Button onClick={() => openEditor()}>创建技能</Button><Button onClick={() => setInstallOpen(true)}>导入文件</Button></>} />
-        <Tabs activeKey={tab} onChange={changeTab} items={[{ key: "market", label: "技能市场" }, { key: "mine", label: "我的技能" }, { key: "publish", label: "我的投稿" }]} />
+        <div className="skill-market-header">
+            <PageHeader title="技能" description="把创作方法带进助手。安装和私人改写无需审核，公开分享时再投稿。" actions={<><Button onClick={() => openEditor()}>创建技能</Button><Button onClick={() => setInstallOpen(true)}>导入文件</Button></>} />
+            <Tabs activeKey={tab} onChange={changeTab} items={[{ key: "market", label: "技能市场" }, { key: "mine", label: "我的技能" }, { key: "publish", label: "我的投稿" }]} />
+        </div>
         {tab === "publish" ? <SkillPublishingPanel planId={params.get("planId") || undefined} /> : <>
             <div className="skill-market-toolbar"><Input.Search aria-label="搜索技能" placeholder="搜索名称或用途" allowClear value={query} onChange={e => { setQuery(e.target.value); setPage(1); }} /><Button onClick={reload}>刷新</Button></div>
             {error ? <Alert type="error" showIcon title={error} action={<Button size="small" onClick={reload}>重试</Button>} /> : loading ? <Skeleton active paragraph={{ rows: 6 }} /> : <>
@@ -85,7 +95,7 @@ export default function SkillMarketplace() {
                     </div>
                 </article>)}
                 {total === 0 ? <p className="skill-market-empty">{tab === "mine" ? "还没有技能。可以从市场安装，或导入自己的 SKILL.md。" : "没有找到匹配的技能。"}</p> : null}
-                <div className="skill-market-actions"><Button disabled={page <= 1} onClick={() => setPage(n => n - 1)}>上一页</Button><span>第 {page} 页 · 共 {total} 项</span><Button disabled={page * 20 >= total} onClick={() => setPage(n => n + 1)}>下一页</Button></div>
+                {total > SKILL_PAGE_SIZE || page > 1 ? <div className="skill-market-actions" role="navigation" aria-label="技能列表分页"><Button disabled={page <= 1} onClick={() => setPage(n => n - 1)}>上一页</Button><span>第 {page} / {Math.max(1, Math.ceil(total / SKILL_PAGE_SIZE))} 页 · 共 {total} 项</span><Button disabled={page * SKILL_PAGE_SIZE >= total} onClick={() => setPage(n => n + 1)}>下一页</Button></div> : null}
                 {tab === "mine" ? <p className="skill-market-help">打开项目画布，在助手输入框选择“技能”，再选本次要用的版本。使用过程中产生的模型费用按你的模型配置计费。<Link to="/project">打开项目</Link></p> : null}
             </>}
         </>}
