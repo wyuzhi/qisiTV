@@ -1,35 +1,28 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02",
+  "updatedAt": "2026-11-03",
   "plugins": [
     {
-      "id": "beeftv-plugin-ecommerce-hero",
-      "packageName": "beeftv-plugin-ecommerce-hero",
-      "name": "一键商品主图",
+      "id": "beeftv-plugin-character-replacement",
+      "packageName": "beeftv-plugin-character-replacement",
+      "npm": "beeftv-plugin-character-replacement",
+      "name": "AI 角色替换工作室",
       "version": "0.1.0",
-      "description": "上传商品图并选择场景图数量，自动编排电商主图画布节点、助手工具与生成技能。",
+      "description": "面向短剧与漫剧的二阶段角色替换插件：关键帧角色替换（含 SVG 框位图引导）+ 视频角色替换（replace_element）+ 全片时间轴回插。",
       "author": "BeefTV",
-      "category": "电商创作",
+      "category": "短剧与视频创作",
       "recommended": true,
+      "repo": "https://github.com/Sunnyender-org/beeftv-plugins/tree/main/plugins/beeftv-plugin-character-replacement",
+      "readme": "https://raw.githubusercontent.com/Sunnyender-org/beeftv-plugins/main/plugins/beeftv-plugin-character-replacement/README.md",
+      "tarball": "https://github.com/Sunnyender-org/beeftv-plugins/releases/download/v0.1.0/beeftv-plugin-character-replacement-0.1.0.tgz",
+      "mirrorTarball": "https://cdn.jsdelivr.net/gh/Sunnyender-org/beeftv-plugins@main/packages/beeftv-plugin-character-replacement-0.1.0.tgz",
+      "sha256": "cd79a1c09d872c78f212220681f02bb08c54f46bed7d838194f35e239eb3ae37",
       "tags": [
         "画布节点",
+        "角色替换",
+        "时间轴回插",
         "助手工具",
-        "技能",
-        "电商"
-      ]
-    },
-    {
-      "id": "beeftv-plugin-sticky-note",
-      "packageName": "beeftv-plugin-sticky-note",
-      "name": "画布便签",
-      "version": "0.1.0",
-      "description": "在画布上放置可换色、可编辑的便签卡片，并支持创作助手直接创建和修改便签。",
-      "author": "BeefTV",
-      "category": "画布效率",
-      "recommended": true,
-      "tags": [
-        "画布节点",
-        "助手工具"
+        "技能"
       ]
     }
   ]

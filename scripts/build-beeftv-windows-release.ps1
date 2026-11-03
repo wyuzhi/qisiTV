@@ -125,6 +125,42 @@ function Get-OfficialPluginPackages([string]$Directory) {
     return @(Get-ChildItem -LiteralPath $Directory -File -Filter "*.beeftv-plugin")
 }
 
+function Get-BundledPluginDirectoryNames {
+    $manifestPath = Join-Path $pluginSourceDir "bundled-plugin-dirs.txt"
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "Bundled plugin manifest is missing: $manifestPath"
+    }
+    $names = @(
+        Get-Content -LiteralPath $manifestPath | ForEach-Object {
+            ($_.Split("#")[0]).Trim()
+        } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+    if ($names.Count -eq 0) {
+        throw "No bundled plugin directories listed in $manifestPath"
+    }
+    return $names
+}
+
+function Copy-BundledPluginDirectories([string]$DestinationRoot) {
+    if (Test-Path -LiteralPath $DestinationRoot) {
+        Remove-Item -LiteralPath $DestinationRoot -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $DestinationRoot | Out-Null
+    foreach ($name in Get-BundledPluginDirectoryNames) {
+        $sourceDir = Join-Path $pluginSourceDir $name
+        $sourcePkgJson = Join-Path $sourceDir "package.json"
+        if (-not (Test-Path -LiteralPath $sourcePkgJson -PathType Leaf)) {
+            throw "Bundled plugin source is missing package.json: $sourceDir"
+        }
+        $destDir = Join-Path $DestinationRoot $name
+        Copy-Item -LiteralPath $sourceDir -Destination $destDir -Recurse -Force
+        $destPkgJson = Join-Path $destDir "package.json"
+        if (-not (Test-Path -LiteralPath $destPkgJson -PathType Leaf)) {
+            throw "Bundled plugin copy is missing package.json: $destDir"
+        }
+    }
+}
+
 function Find-CgoCompiler {
     if (-not [string]::IsNullOrWhiteSpace($env:CC) -and (Test-Path -LiteralPath $env:CC -PathType Leaf)) {
         return $env:CC
@@ -437,6 +473,7 @@ if ($copied.Count -eq 0) {
 }
 
 Invoke-NativeExecutable -FilePath "bun" -ArgumentList @((Join-Path $repoRoot "scripts\package-agent-host.mjs"), "windows/amd64", (Join-Path $binDir "agent-host")) -FailureMessage "Agent host packaging failed" | Out-Null
+Copy-BundledPluginDirectories -DestinationRoot (Join-Path $binDir "agent-host\bundled-plugins")
 
 # Keep media inside the sidecar tree accepted by already released updaters.
 & (Join-Path $repoRoot "scripts\package-media-runtime-windows.ps1") -Destination (Join-Path $binDir "agent-host\media-runtime")

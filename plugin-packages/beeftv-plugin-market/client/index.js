@@ -7,16 +7,31 @@ const REGISTRY_MIRRORS = [
   { value: "https://registry.npmjs.org", label: "npm 官方源（npmjs.org）" },
 ];
 
-async function fetchMarket(query) {
-  const response = await fetch(`/api/plugins/market/search?q=${encodeURIComponent(String(query || "").trim())}`);
+async function fetchMarket(query, registry) {
+  const q = encodeURIComponent(String(query || "").trim());
+  const reg = registry ? `&registry=${encodeURIComponent(String(registry).trim())}` : "";
+  const response = await fetch(`/api/plugins/market/search?q=${q}${reg}`);
   const body = await response.json().catch(() => null);
   if (!response.ok || !body || body.code !== 0) throw new Error(body?.msg || `插件市场暂时打不开（HTTP ${response.status}）`);
   return Array.isArray(body.data?.items) ? body.data.items : [];
 }
 
-async function fetchReadme(pluginId) {
-  const response = await fetch(`/api/plugins/${encodeURIComponent(pluginId)}/files/README.md`);
-  return response.ok ? response.text() : "";
+async function fetchReadme(item, registry) {
+  const pluginId = String(item?.id || item?.packageName || "").trim();
+  const remoteKey = String(item?.packageName || item?.id || "").trim();
+  if (!pluginId && !remoteKey) return "";
+  if (pluginId && (item?.installed || item?.bundled)) {
+    const localResp = await fetch(`/api/plugins/${encodeURIComponent(pluginId)}/files/README.md`);
+    if (localResp.ok) {
+      const text = await localResp.text();
+      if (text && text.trim()) return text;
+    }
+  }
+  const reg = registry ? `&registry=${encodeURIComponent(String(registry).trim())}` : "";
+  const response = await fetch(`/api/plugins/market/readme?id=${encodeURIComponent(remoteKey || pluginId)}${reg}`);
+  if (!response.ok) return "";
+  const body = await response.json().catch(() => null);
+  return typeof body?.data?.readme === "string" ? body.data.readme : "";
 }
 
 export function activate(host) {
@@ -39,6 +54,13 @@ export function activate(host) {
     const [selectedPlugin, setSelectedPlugin] = React.useState(null);
     const [detailReadme, setDetailReadme] = React.useState("");
     const [loadingReadme, setLoadingReadme] = React.useState(false);
+    const readmeReqIdRef = React.useRef(0);
+
+    const closeDetailModal = React.useCallback(() => {
+      readmeReqIdRef.current += 1;
+      setSelectedPlugin(null);
+      setLoadingReadme(false);
+    }, []);
 
     const installedMap = React.useMemo(() => {
       const map = new Map();
@@ -56,7 +78,7 @@ export function activate(host) {
     React.useEffect(() => {
       let cancelled = false;
       setLoadingCurated(true);
-      fetchMarket("")
+      fetchMarket("", registryMirror)
         .then((items) => {
           if (!cancelled) setCuratedPlugins(items.filter((item) => item.recommended));
         })
@@ -69,7 +91,7 @@ export function activate(host) {
       return () => {
         cancelled = true;
       };
-    }, []);
+    }, [registryMirror]);
 
     const handleSearch = React.useCallback(
       async (event) => {
@@ -77,7 +99,7 @@ export function activate(host) {
         setSearching(true);
         setSearchError("");
         try {
-          const items = await fetchMarket(searchQuery);
+          const items = await fetchMarket(searchQuery, registryMirror);
           setSearchResults(items);
         } catch (err) {
           setSearchError(
@@ -87,21 +109,37 @@ export function activate(host) {
           setSearching(false);
         }
       },
-      [searchQuery],
+      [searchQuery, registryMirror],
     );
 
-    const handleOpenDetail = React.useCallback((item) => {
-      setSelectedPlugin(item);
-      setDetailReadme("");
-      if (!item?.id || !(item.installed || item.bundled)) return;
-      setLoadingReadme(true);
-      fetchReadme(item.id)
-        .then((text) => setDetailReadme(text))
-        .catch(() => {
-          // 未安装时使用包描述展示
-        })
-        .finally(() => setLoadingReadme(false));
-    }, []);
+    const handleOpenDetail = React.useCallback(
+      (item) => {
+        const reqId = readmeReqIdRef.current + 1;
+        readmeReqIdRef.current = reqId;
+        setSelectedPlugin(item);
+        setDetailReadme("");
+        if (!item?.id && !item?.packageName) {
+          setLoadingReadme(false);
+          return;
+        }
+        setLoadingReadme(true);
+        fetchReadme(item, registryMirror)
+          .then((text) => {
+            if (readmeReqIdRef.current === reqId) {
+              setDetailReadme(text);
+            }
+          })
+          .catch(() => {
+            // 未能读取远程 README 时回退使用包描述展示
+          })
+          .finally(() => {
+            if (readmeReqIdRef.current === reqId) {
+              setLoadingReadme(false);
+            }
+          });
+      },
+      [registryMirror],
+    );
 
     const triggerInstall = React.useCallback(
       (item, isUpdate = false) => {
@@ -486,7 +524,7 @@ export function activate(host) {
             "div",
             {
               "data-testid": "market-plugin-detail-modal",
-              onClick: () => setSelectedPlugin(null),
+              onClick: closeDetailModal,
               style: {
                 position: "fixed",
                 inset: 0,
@@ -545,7 +583,7 @@ export function activate(host) {
                   "button",
                   {
                     type: "button",
-                    onClick: () => setSelectedPlugin(null),
+                    onClick: closeDetailModal,
                     style: {
                       padding: "4px 10px",
                       borderRadius: 6,

@@ -36,7 +36,7 @@ func configureFixture(t *testing.T, kind string) *configureProbe {
 func TestConfigurePreservesExistingMediaAndValidatesModelSelection(t *testing.T) {
 	for kind, patch := range map[string]map[string]any{
 		"image": {"model": "chosen", "size": "16:9", "quality": "high", "count": 2, "transparentBackground": "false"},
-		"video": {"model": "chosen", "size": "16:9", "seconds": "10", "vquality": "720p", "generateAudio": "true", "watermark": "false"},
+		"video": {"model": "chosen", "size": "16:9", "seconds": "10", "vquality": "720p", "generateAudio": "true", "watermark": "false", "videoEditOperation": "replace_element"},
 		"audio": {"model": "chosen", "audioVoice": "narrator", "audioFormat": "wav", "audioSpeed": "1.25", "audioPitch": "-2", "audioVolume": "0", "audioInstructions": "warm"},
 	} {
 		t.Run(kind, func(t *testing.T) {

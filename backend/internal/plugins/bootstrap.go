@@ -120,17 +120,14 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 		}
 		byID[id] = next
 	}
-	for _, entry := range entries {
-		if !entry.IsDir() || (entry.Name() != "beeftv-plugin-market" && entry.Name() != "beeftv-plugin-ll2") {
-			continue
-		}
-		pkgRoot := filepath.Join(officialDir, entry.Name())
-		if _, err := os.Stat(filepath.Join(pkgRoot, "package.json")); err != nil {
+	for _, builtinName := range BundledBuiltinPluginNames {
+		pkgRoot, ok := BundledSampleDir(builtinName)
+		if !ok {
 			continue
 		}
 		pkg, err := protocol.ParsePluginPackageDir(pkgRoot)
 		if err != nil {
-			return nil, fmt.Errorf("校验官方插件目录 %s：%w", entry.Name(), err)
+			return nil, fmt.Errorf("校验官方插件目录 %s：%w", builtinName, err)
 		}
 		if _, err := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil); err != nil {
 			return nil, fmt.Errorf("加载官方插件 %q：%w", pkg.Manifest.Metadata.ID, err)

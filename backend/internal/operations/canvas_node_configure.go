@@ -12,12 +12,13 @@ import (
 
 func registerCanvasNodeConfigureOps(r *Registry) {
 	properties := map[string]any{
-		"model":         map[string]any{"type": "string"},
-		"prompt":        map[string]any{"type": "string"},
-		"size":          map[string]any{"type": "string"},
-		"seconds":       map[string]any{"type": "string"},
-		"generateAudio": map[string]any{"type": "string", "enum": []string{"true", "false"}},
-		"audioVoice":    map[string]any{"type": "string"},
+		"model":              map[string]any{"type": "string"},
+		"prompt":             map[string]any{"type": "string"},
+		"size":               map[string]any{"type": "string"},
+		"seconds":            map[string]any{"type": "string"},
+		"generateAudio":      map[string]any{"type": "string", "enum": []string{"true", "false"}},
+		"audioVoice":         map[string]any{"type": "string"},
+		"videoEditOperation": map[string]any{"type": "string", "enum": []string{"text_to_video", "image_to_video", "reference_to_video", "extend", "inpaint", "replace_element", "camera_motion", "style_transfer", "audio_to_video", "compare_versions", "concat", "draft_to_final"}},
 	}
 	params, _ := json.Marshal(map[string]any{"type": "object", "additionalProperties": false,
 		"properties": map[string]any{"canvasId": map[string]any{"type": "string"}, "nodeId": map[string]any{"type": "string"},
@@ -190,6 +191,10 @@ func validateDraftValue(name, value string) error {
 		}
 	case "audioFormat":
 		if !strings.Contains("|mp3|wav|pcm|flac|aac|opus|ogg|m4a|", "|"+value+"|") {
+			return invalid()
+		}
+	case "videoEditOperation":
+		if !strings.Contains("|text_to_video|image_to_video|reference_to_video|extend|inpaint|replace_element|camera_motion|style_transfer|audio_to_video|compare_versions|concat|draft_to_final|", "|"+value+"|") {
 			return invalid()
 		}
 	case "size", "quality", "vquality", "audioVoice":

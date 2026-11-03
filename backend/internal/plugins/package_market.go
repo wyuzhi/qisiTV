@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,8 +13,10 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"infinite-canvas/backend/internal/outbound"
 	"infinite-canvas/backend/internal/protocol"
 )
 
@@ -34,12 +37,9 @@ func (c *Runtime) ResolvePackageFile(id string, filePath string) (string, string
 	c.mu.RUnlock()
 	pkgDir := strings.TrimSpace(record.PackageDir)
 	if !ok || pkgDir == "" {
-		if officialDir, err := officialPluginPackageDir(); err == nil && trimmedID != "" && !strings.ContainsAny(trimmedID, `/\..`) {
-			candidate := filepath.Join(officialDir, trimmedID)
-			if info, statErr := os.Stat(filepath.Join(candidate, "package.json")); statErr == nil && !info.IsDir() {
-				pkgDir = candidate
-				ok = true
-			}
+		if candidate, found := BundledSampleDir(trimmedID); found {
+			pkgDir = candidate
+			ok = true
 		}
 	}
 	if !ok {
@@ -108,10 +108,20 @@ func (c *Runtime) ResolvePackageFile(id string, filePath string) (string, string
 	return absTarget, contentType, nil
 }
 
-func (s *Service) SearchMarket(ctx context.Context, query string) ([]MarketPluginItem, error) {
+func (s *Service) SearchMarket(ctx context.Context, query string, registry ...string) ([]MarketPluginItem, error) {
+	selectedRegistry := NpmMirrorRegistry
+	if len(registry) > 0 && strings.TrimSpace(registry[0]) != "" {
+		if normalized, err := NormalizeNpmRegistry(registry[0]); err == nil {
+			selectedRegistry = normalized
+		}
+	}
 	installedByID := map[string]View{}
 	var localItems []MarketPluginItem
+	cachePath := ""
 	if s != nil {
+		if s.runtime != nil && strings.TrimSpace(s.runtime.dataDir) != "" {
+			cachePath = filepath.Join(s.runtime.dataDir, "plugins", "market-registry-cache.json")
+		}
 		for _, item := range s.List() {
 			installedByID[item.Manifest.ID] = item
 			if item.PackageDir == "" && item.Source != OriginPackage {
@@ -137,8 +147,21 @@ func (s *Service) SearchMarket(ctx context.Context, query string) ([]MarketPlugi
 			})
 		}
 	}
-	remoteItems := fetchNpmMarketPlugins(ctx, query, installedByID)
-	curatedItems := loadCuratedRegistryItems(ctx, query, installedByID)
+	var (
+		remoteItems  []MarketPluginItem
+		curatedItems []MarketPluginItem
+		wg           sync.WaitGroup
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		remoteItems = fetchNpmMarketPluginsWithRegistry(ctx, query, selectedRegistry, installedByID)
+	}()
+	go func() {
+		defer wg.Done()
+		curatedItems = loadCuratedRegistryItemsWithCache(ctx, query, selectedRegistry, cachePath, installedByID)
+	}()
+	wg.Wait()
 	return mergeMarketItems(curatedItems, remoteItems, localItems), nil
 }
 
@@ -161,49 +184,231 @@ func mergeMarketItems(groups ...[]MarketPluginItem) []MarketPluginItem {
 	return merged
 }
 
-// CuratedRegistryURL is the public recommendation list; authors add a line by
-// pull request. The copy shipped with the market plugin covers offline use.
-const CuratedRegistryURL = "https://raw.githubusercontent.com/Sunnyender-org/beeftv-plugins/main/registry.json"
+// CuratedRegistryURL and CuratedRegistryMirrorCDN are the authenticated public
+// recommendation list endpoints for Sunnyender-org/beeftv-plugins. Only these
+// two official repository origins are trusted for registry.json so the SHA-256
+// pins inside registry.json cannot be tampered with by third-party proxies.
+const (
+	CuratedRegistryURL       = "https://raw.githubusercontent.com/Sunnyender-org/beeftv-plugins/main/registry.json"
+	CuratedRegistryMirrorCDN = "https://cdn.jsdelivr.net/gh/Sunnyender-org/beeftv-plugins@main/registry.json"
+	CuratedCatalogPackage    = "beeftv-plugin-catalog"
+
+	curatedRegistryMemTTL = 2 * time.Minute
+)
+
+var (
+	chinaGitHubProxies = []string{
+		"https://gh-proxy.com",
+		"https://ghfast.top",
+	}
+	allowedMarketPublicHosts = map[string]bool{
+		"cdn.jsdelivr.net":                     true,
+		"raw.githubusercontent.com":            true,
+		"github.com":                           true,
+		"objects.githubusercontent.com":        true,
+		"release-assets.githubusercontent.com": true,
+		"codeload.github.com":                  true,
+		"gh-proxy.com":                         true,
+		"ghfast.top":                           true,
+		"registry.npmmirror.com":               true,
+		"cdn.npmmirror.com":                    true,
+		"registry.npmjs.org":                   true,
+	}
+	allowLoopbackMarketURLsForTest bool
+
+	curatedRegistryMemCache = struct {
+		sync.Mutex
+		raw       []byte
+		fetchedAt time.Time
+	}{}
+	curatedRegistryFileMu sync.Mutex
+)
+
+func validateMarketOutboundURL(ctx context.Context, rawURL string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil {
+		return nil, fmt.Errorf("无效的市场资源地址")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if allowLoopbackMarketURLsForTest && (host == "127.0.0.1" || host == "localhost") && (parsed.Scheme == "http" || parsed.Scheme == "https") {
+		return parsed, nil
+	}
+	if parsed.Scheme != "https" {
+		return nil, fmt.Errorf("市场远程地址必须使用 HTTPS")
+	}
+	if !allowedMarketPublicHosts[host] {
+		return nil, fmt.Errorf("不允许访问未授权的市场域名 %q", host)
+	}
+	cleanURL := *parsed
+	cleanURL.Fragment = ""
+	if _, err := outbound.ValidatePublicHTTPSURLContext(ctx, cleanURL.String()); err != nil {
+		return nil, err
+	}
+	return parsed, nil
+}
+
+func doMarketGetRequest(ctx context.Context, targetURL string, timeout time.Duration, accept string) (*http.Response, error) {
+	if _, err := validateMarketOutboundURL(ctx, targetURL); err != nil {
+		return nil, err
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
+	client := &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(redirectReq *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("重定向次数过多")
+			}
+			_, err := validateMarketOutboundURL(redirectReq.Context(), redirectReq.URL.String())
+			return err
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	resp.Body = &contextClosingReadCloser{ReadCloser: resp.Body, cancel: cancel}
+	return resp, nil
+}
+
+type contextClosingReadCloser struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (c *contextClosingReadCloser) Close() error {
+	defer c.cancel()
+	return c.ReadCloser.Close()
+}
+
+type curatedRegistryEntry struct {
+	ID            string   `json:"id"`
+	PackageName   string   `json:"packageName"`
+	Npm           string   `json:"npm"`
+	Name          string   `json:"name"`
+	Version       string   `json:"version"`
+	Description   string   `json:"description"`
+	Author        string   `json:"author"`
+	Category      string   `json:"category"`
+	Recommended   bool     `json:"recommended"`
+	Repo          string   `json:"repo"`
+	Homepage      string   `json:"homepage"`
+	Readme        string   `json:"readme"`
+	Tarball       string   `json:"tarball"`
+	MirrorTarball string   `json:"mirrorTarball"`
+	SHA256        string   `json:"sha256"`
+	Tags          []string `json:"tags"`
+}
+
+type curatedRegistryPayload struct {
+	Plugins []curatedRegistryEntry `json:"plugins"`
+}
+
+func validCuratedRegistryPayload(raw []byte) bool {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return false
+	}
+	var payload curatedRegistryPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return false
+	}
+	return payload.Plugins != nil
+}
+
+func curatedRegistryCandidateURLs(registry string) []string {
+	isChina := strings.TrimSpace(registry) == "" || strings.Contains(registry, "npmmirror.com")
+	if isChina {
+		return []string{
+			CuratedRegistryMirrorCDN,
+			CuratedRegistryURL,
+		}
+	}
+	return []string{
+		CuratedRegistryURL,
+		CuratedRegistryMirrorCDN,
+	}
+}
 
 func readCuratedRegistry(ctx context.Context) []byte {
-	reqCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	if req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, CuratedRegistryURL, nil); err == nil {
-		if resp, err := http.DefaultClient.Do(req); err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				if raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)); err == nil && json.Valid(raw) {
-					return raw
-				}
+	return readCuratedRegistryWithCache(ctx, NpmMirrorRegistry, "")
+}
+
+func readCuratedRegistryWithCache(ctx context.Context, registry, cachePath string) []byte {
+	if ctx != nil && ctx.Err() == nil {
+		curatedRegistryMemCache.Lock()
+		if len(curatedRegistryMemCache.raw) > 0 && time.Since(curatedRegistryMemCache.fetchedAt) < curatedRegistryMemTTL {
+			cached := append([]byte(nil), curatedRegistryMemCache.raw...)
+			curatedRegistryMemCache.Unlock()
+			return cached
+		}
+		curatedRegistryMemCache.Unlock()
+
+		for _, candidateURL := range curatedRegistryCandidateURLs(registry) {
+			if ctx.Err() != nil {
+				break
+			}
+			resp, err := doMarketGetRequest(ctx, candidateURL, 2500*time.Millisecond, "application/json")
+			if err != nil {
+				continue
+			}
+			raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK && readErr == nil && validCuratedRegistryPayload(raw) {
+				curatedRegistryMemCache.Lock()
+				curatedRegistryMemCache.raw = append([]byte(nil), raw...)
+				curatedRegistryMemCache.fetchedAt = time.Now()
+				curatedRegistryMemCache.Unlock()
+				saveCuratedRegistryCache(cachePath, raw)
+				return raw
 			}
 		}
 	}
-	officialDir, err := officialPluginPackageDir()
-	if err != nil {
+	if strings.TrimSpace(cachePath) != "" {
+		curatedRegistryFileMu.Lock()
+		cached, err := os.ReadFile(cachePath)
+		curatedRegistryFileMu.Unlock()
+		if err == nil && validCuratedRegistryPayload(cached) {
+			return cached
+		}
+	}
+	marketDir, ok := BundledSampleDir("beeftv-plugin-market")
+	if !ok {
 		return nil
 	}
-	raw, _ := os.ReadFile(filepath.Join(officialDir, "beeftv-plugin-market", "registry.json"))
+	raw, _ := os.ReadFile(filepath.Join(marketDir, "registry.json"))
 	return raw
 }
 
+func saveCuratedRegistryCache(cachePath string, raw []byte) {
+	if strings.TrimSpace(cachePath) == "" || !validCuratedRegistryPayload(raw) {
+		return
+	}
+	curatedRegistryFileMu.Lock()
+	defer curatedRegistryFileMu.Unlock()
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
+		return
+	}
+	_ = writePluginFile(cachePath, raw)
+}
+
 func loadCuratedRegistryItems(ctx context.Context, query string, installed map[string]View) []MarketPluginItem {
-	raw := readCuratedRegistry(ctx)
+	return loadCuratedRegistryItemsWithCache(ctx, query, NpmMirrorRegistry, "", installed)
+}
+
+func loadCuratedRegistryItemsWithCache(ctx context.Context, query, registry, cachePath string, installed map[string]View) []MarketPluginItem {
+	raw := readCuratedRegistryWithCache(ctx, registry, cachePath)
 	if len(raw) == 0 {
 		return nil
 	}
-	var payload struct {
-		Plugins []struct {
-			ID          string   `json:"id"`
-			PackageName string   `json:"packageName"`
-			Name        string   `json:"name"`
-			Version     string   `json:"version"`
-			Description string   `json:"description"`
-			Author      string   `json:"author"`
-			Category    string   `json:"category"`
-			Recommended bool     `json:"recommended"`
-			Tags        []string `json:"tags"`
-		} `json:"plugins"`
-	}
+	var payload curatedRegistryPayload
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil
 	}
@@ -218,27 +423,63 @@ func loadCuratedRegistryItems(ctx context.Context, query string, installed map[s
 			continue
 		}
 		inst, isInstalled := installed[item.ID]
-		pkgName := item.PackageName
+		pkgName := strings.TrimSpace(item.PackageName)
+		if pkgName == "" {
+			pkgName = strings.TrimSpace(item.Npm)
+		}
 		if pkgName == "" {
 			pkgName = item.ID
 		}
 		_, bundled := BundledSampleDir(pkgName)
+		repo := strings.TrimSpace(item.Repo)
+		homepage := strings.TrimSpace(item.Homepage)
+		if homepage == "" {
+			homepage = repo
+		}
 		out = append(out, MarketPluginItem{
-			ID:          item.ID,
-			Name:        item.Name,
-			PackageName: pkgName,
-			Version:     item.Version,
-			Description: item.Description,
-			Author:      item.Author,
-			Keywords:    item.Tags,
-			Installed:   isInstalled,
-			Enabled:     isInstalled && inst.Status == StatusEnabled,
-			Recommended: item.Recommended,
-			Category:    item.Category,
-			Bundled:     bundled,
+			ID:            item.ID,
+			Name:          item.Name,
+			PackageName:   pkgName,
+			Version:       item.Version,
+			Description:   item.Description,
+			Author:        item.Author,
+			Keywords:      item.Tags,
+			Tags:          item.Tags,
+			Repository:    repo,
+			Homepage:      homepage,
+			ReadmeURL:     strings.TrimSpace(item.Readme),
+			TarballURL:    strings.TrimSpace(item.Tarball),
+			MirrorTarball: strings.TrimSpace(item.MirrorTarball),
+			SHA256:        strings.TrimSpace(item.SHA256),
+			Installed:     isInstalled,
+			Enabled:       isInstalled && inst.Status == StatusEnabled,
+			Recommended:   item.Recommended,
+			Category:      item.Category,
+			Bundled:       bundled,
 		})
 	}
 	return out
+}
+
+func lookupCuratedPluginEntry(ctx context.Context, idOrSpec, registry, cachePath string) (curatedRegistryEntry, bool) {
+	target := strings.TrimSpace(idOrSpec)
+	if target == "" {
+		return curatedRegistryEntry{}, false
+	}
+	raw := readCuratedRegistryWithCache(ctx, registry, cachePath)
+	if len(raw) == 0 {
+		return curatedRegistryEntry{}, false
+	}
+	var payload curatedRegistryPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return curatedRegistryEntry{}, false
+	}
+	for _, entry := range payload.Plugins {
+		if entry.ID == target || entry.PackageName == target || entry.Npm == target {
+			return entry, true
+		}
+	}
+	return curatedRegistryEntry{}, false
 }
 
 func matchesMarketQuery(item View, query string) bool {
@@ -253,24 +494,47 @@ func matchesMarketQuery(item View, query string) bool {
 }
 
 func fetchNpmMarketPlugins(ctx context.Context, query string, installed map[string]View) []MarketPluginItem {
-	searchTerm := "keywords:beeftv-plugin"
-	if trimmed := strings.TrimSpace(query); trimmed != "" {
-		searchTerm = trimmed + " keywords:beeftv-plugin"
+	return fetchNpmMarketPluginsWithRegistry(ctx, query, NpmMirrorRegistry, installed)
+}
+
+func fetchNpmMarketPluginsWithRegistry(ctx context.Context, query, registry string, installed map[string]View) []MarketPluginItem {
+	registries := []string{NpmMirrorRegistry, NpmjsRegistry}
+	if strings.TrimRight(strings.TrimSpace(registry), "/") == NpmjsRegistry {
+		registries = []string{NpmjsRegistry, NpmMirrorRegistry}
 	}
-	reqCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-	defer cancel()
-	endpoint := "https://registry.npmjs.org/-/v1/search?text=" + url.QueryEscape(searchTerm) + "&size=20"
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil
+	for _, reg := range registries {
+		if ctx != nil && ctx.Err() != nil {
+			return nil
+		}
+		items, ok := searchSingleNpmRegistry(ctx, reg, query, installed)
+		if ok && len(items) > 0 {
+			return items
+		}
 	}
-	resp, err := http.DefaultClient.Do(req)
+	return nil
+}
+
+func searchSingleNpmRegistry(ctx context.Context, registry, query string, installed map[string]View) ([]MarketPluginItem, bool) {
+	base := strings.TrimRight(strings.TrimSpace(registry), "/")
+	trimmedQuery := strings.TrimSpace(query)
+	// npmmirror's /-/v1/search returns 0 objects when given the "keywords:"
+	// qualifier, so use plain text "beeftv-plugin" on npmmirror and filter in Go
+	// (same strategy as Magpie internal/plugin/market.go searchNPM).
+	searchTerm := "beeftv-plugin"
+	if !strings.Contains(base, "npmmirror.com") {
+		searchTerm = "keywords:beeftv-plugin"
+	}
+	if trimmedQuery != "" {
+		searchTerm = trimmedQuery + " " + searchTerm
+	}
+	endpoint := base + "/-/v1/search?text=" + url.QueryEscape(searchTerm) + "&size=30"
+	resp, err := doMarketGetRequest(ctx, endpoint, 3500*time.Millisecond, "application/json")
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil
+		return nil, false
 	}
 	var payload struct {
 		Objects []struct {
@@ -279,18 +543,33 @@ func fetchNpmMarketPlugins(ctx context.Context, query string, installed map[stri
 				Version     string   `json:"version"`
 				Description string   `json:"description"`
 				Keywords    []string `json:"keywords"`
-				Publisher   struct {
+				Links       struct {
+					Homepage   string `json:"homepage"`
+					Repository string `json:"repository"`
+				} `json:"links"`
+				Publisher struct {
 					Username string `json:"username"`
 				} `json:"publisher"`
 			} `json:"package"`
 		} `json:"objects"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
-		return nil
+		return nil, false
 	}
 	out := make([]MarketPluginItem, 0, len(payload.Objects))
 	for _, obj := range payload.Objects {
 		pkg := obj.Package
+		if !isBeefTVMarketNpmPackage(pkg.Name, pkg.Keywords) {
+			continue
+		}
+		if trimmedQuery != "" {
+			q := strings.ToLower(trimmedQuery)
+			if !strings.Contains(strings.ToLower(pkg.Name), q) &&
+				!strings.Contains(strings.ToLower(pkg.Description), q) &&
+				!keywordsContainQuery(pkg.Keywords, q) {
+				continue
+			}
+		}
 		id := protocol.PackageIDFromName(pkg.Name)
 		inst, isInstalled := installed[id]
 		out = append(out, MarketPluginItem{
@@ -301,9 +580,198 @@ func fetchNpmMarketPlugins(ctx context.Context, query string, installed map[stri
 			Description: pkg.Description,
 			Author:      pkg.Publisher.Username,
 			Keywords:    pkg.Keywords,
+			Tags:        pkg.Keywords,
+			Repository:  pkg.Links.Repository,
+			Homepage:    pkg.Links.Homepage,
 			Installed:   isInstalled,
 			Enabled:     isInstalled && inst.Status == StatusEnabled,
 		})
 	}
+	return out, true
+}
+
+func isBeefTVMarketNpmPackage(name string, keywords []string) bool {
+	lowerName := strings.ToLower(strings.TrimSpace(name))
+	if strings.Contains(lowerName, "beeftv-plugin") && lowerName != CuratedCatalogPackage {
+		return true
+	}
+	for _, kw := range keywords {
+		lowerKW := strings.ToLower(strings.TrimSpace(kw))
+		if lowerKW == "beeftv-plugin" || lowerKW == "pi-package" {
+			return true
+		}
+	}
+	return false
+}
+
+func keywordsContainQuery(keywords []string, q string) bool {
+	for _, kw := range keywords {
+		if strings.Contains(strings.ToLower(kw), q) {
+			return true
+		}
+	}
+	return false
+}
+
+// FetchMarketReadme resolves README.md for a market plugin even before it is
+// installed locally: it checks installed/bundled files first, then curated
+// README URLs through the China mirror chain, and finally the npm packument.
+func (s *Service) FetchMarketReadme(ctx context.Context, pluginID string, registry ...string) (string, error) {
+	trimmed := strings.TrimSpace(pluginID)
+	if trimmed == "" {
+		return "", packageError(http.StatusBadRequest, "plugin_id_required", "插件 ID 不能为空")
+	}
+	if s != nil {
+		for _, candidateID := range []string{trimmed, protocol.PackageIDFromName(trimmed)} {
+			if candidateID == "" {
+				continue
+			}
+			if targetPath, _, err := s.ResolvePackageFile(candidateID, "README.md"); err == nil {
+				if data, readErr := os.ReadFile(targetPath); readErr == nil && len(bytes.TrimSpace(data)) > 0 {
+					return string(data), nil
+				}
+			}
+		}
+	}
+	selectedRegistry := NpmMirrorRegistry
+	if len(registry) > 0 && strings.TrimSpace(registry[0]) != "" {
+		if normalized, err := NormalizeNpmRegistry(registry[0]); err == nil {
+			selectedRegistry = normalized
+		}
+	}
+	cachePath := ""
+	if s != nil && s.runtime != nil && strings.TrimSpace(s.runtime.dataDir) != "" {
+		cachePath = filepath.Join(s.runtime.dataDir, "plugins", "market-registry-cache.json")
+	}
+	if entry, ok := lookupCuratedPluginEntry(ctx, trimmed, selectedRegistry, cachePath); ok {
+		for _, candidate := range expandReadmeMirrorURLs(entry.Readme, entry.Repo, selectedRegistry) {
+			if text, ok := fetchRemoteMarkdownText(ctx, candidate); ok {
+				return text, nil
+			}
+		}
+	}
+	if text, ok := fetchNpmPackumentReadme(ctx, trimmed, selectedRegistry); ok {
+		return text, nil
+	}
+	return "", packageError(http.StatusNotFound, "plugin_readme_not_found", fmt.Sprintf("未找到插件 %q 的说明文档", trimmed))
+}
+
+func expandReadmeMirrorURLs(readmeURL, repoURL, registry string) []string {
+	rawURL := strings.TrimSpace(readmeURL)
+	if rawURL == "" && strings.TrimSpace(repoURL) != "" {
+		rawURL = githubTreeURLToRawReadme(repoURL)
+	}
+	if rawURL == "" {
+		return nil
+	}
+	isChina := strings.TrimSpace(registry) == "" || strings.Contains(registry, "npmmirror.com")
+	var out []string
+	if jsd := githubRawToJsDelivrURL(rawURL); jsd != "" && isChina {
+		out = append(out, jsd)
+	}
+	out = append(out, rawURL)
+	if jsd := githubRawToJsDelivrURL(rawURL); jsd != "" && !isChina {
+		out = append(out, jsd)
+	}
 	return out
+}
+
+func githubTreeURLToRawReadme(repoURL string) string {
+	trimmed := strings.TrimSuffix(strings.TrimSpace(repoURL), ".git")
+	const prefix = "https://github.com/"
+	if !strings.HasPrefix(trimmed, prefix) {
+		return ""
+	}
+	rest := strings.TrimPrefix(trimmed, prefix)
+	parts := strings.Split(rest, "/")
+	if len(parts) >= 4 && parts[2] == "tree" {
+		owner, repo, branch := parts[0], parts[1], parts[3]
+		subPath := strings.Join(parts[4:], "/")
+		if subPath != "" {
+			return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s/README.md", owner, repo, branch, subPath)
+		}
+		return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/README.md", owner, repo, branch)
+	}
+	if len(parts) >= 2 {
+		return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/main/README.md", parts[0], parts[1])
+	}
+	return ""
+}
+
+func githubRawToJsDelivrURL(rawURL string) string {
+	const prefix = "https://raw.githubusercontent.com/"
+	if !strings.HasPrefix(rawURL, prefix) {
+		return ""
+	}
+	rest := strings.TrimPrefix(rawURL, prefix)
+	parts := strings.Split(rest, "/")
+	if len(parts) < 4 {
+		return ""
+	}
+	owner, repo, branch := parts[0], parts[1], parts[2]
+	filePath := strings.Join(parts[3:], "/")
+	return fmt.Sprintf("https://cdn.jsdelivr.net/gh/%s/%s@%s/%s", owner, repo, branch, filePath)
+}
+
+func fetchRemoteMarkdownText(ctx context.Context, targetURL string) (string, bool) {
+	if ctx != nil && ctx.Err() != nil {
+		return "", false
+	}
+	resp, err := doMarketGetRequest(ctx, targetURL, 2500*time.Millisecond, "text/markdown, text/plain;q=0.9")
+	if err != nil {
+		return "", false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", false
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
+	if err != nil {
+		return "", false
+	}
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || strings.HasPrefix(strings.ToLower(trimmed), "<!doctype html") || strings.HasPrefix(strings.ToLower(trimmed), "<html") {
+		return "", false
+	}
+	return string(data), true
+}
+
+func fetchNpmPackumentReadme(ctx context.Context, pkgName, registry string) (string, bool) {
+	registries := []string{NpmMirrorRegistry, NpmjsRegistry}
+	if strings.TrimRight(strings.TrimSpace(registry), "/") == NpmjsRegistry {
+		registries = []string{NpmjsRegistry, NpmMirrorRegistry}
+	}
+	trimmed := strings.TrimSpace(pkgName)
+	escapedSlash := strings.ReplaceAll(url.PathEscape(trimmed), "%40", "@")
+	unencodedSlash := escapedSlash
+	if strings.HasPrefix(trimmed, "@") {
+		if parts := strings.SplitN(trimmed[1:], "/", 2); len(parts) == 2 {
+			unencodedSlash = "@" + url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1])
+		}
+	}
+	suffixes := []string{"/" + unencodedSlash + "/latest", "/" + unencodedSlash}
+	if escapedSlash != unencodedSlash {
+		suffixes = append(suffixes, "/"+escapedSlash)
+	}
+	for _, reg := range registries {
+		base := strings.TrimRight(reg, "/")
+		for _, suffix := range suffixes {
+			if ctx != nil && ctx.Err() != nil {
+				return "", false
+			}
+			resp, err := doMarketGetRequest(ctx, base+suffix, 2500*time.Millisecond, "application/json")
+			if err != nil {
+				continue
+			}
+			var doc struct {
+				Readme string `json:"readme"`
+			}
+			decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&doc)
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK && decodeErr == nil && strings.TrimSpace(doc.Readme) != "" && doc.Readme != "ERROR: No README data found!" {
+				return doc.Readme, true
+			}
+		}
+	}
+	return "", false
 }

@@ -379,8 +379,16 @@ func validateArchive(platform, zipPath string) error {
 			}
 		case name == windowsExecutable:
 			hasWinExec = true
-		case strings.HasPrefix(name, pluginDirName+"/") && strings.HasSuffix(name, pluginSuffix) && file.Mode().IsRegular():
-			pluginCount++
+		case strings.HasPrefix(name, pluginDirName+"/"):
+			rel := strings.TrimPrefix(name, pluginDirName+"/")
+			if rel != "" {
+				if platform == platformWindowsAMD64 && (file.FileInfo().IsDir() || strings.Contains(rel, "/") || !strings.HasSuffix(strings.ToLower(rel), pluginSuffix)) {
+					return fmt.Errorf("Windows archive %s must contain only flat *%s files: %s", pluginDirName, pluginSuffix, name)
+				}
+				if strings.HasSuffix(name, pluginSuffix) && file.Mode().IsRegular() {
+					pluginCount++
+				}
+			}
 		case strings.HasPrefix(name, "BeefTV.app/Contents/Resources/"+pluginDirName+"/") && strings.HasSuffix(name, pluginSuffix) && file.Mode().IsRegular():
 			pluginCount++
 		}

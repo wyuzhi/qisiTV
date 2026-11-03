@@ -149,7 +149,7 @@ func generatedDraftFields(kind string) map[string]PatchField {
 		names = append(names, "size", "quality", "transparentBackground")
 		fields["count"] = PatchField{Path: "metadata.count", Kind: patchKindNumber, Label: "生成数量", Order: 30}
 	case "video":
-		names = append(names, "size", "seconds", "vquality", "generateAudio", "watermark")
+		names = append(names, "size", "seconds", "vquality", "generateAudio", "watermark", "videoEditOperation")
 	case "audio":
 		names = append(names, "audioVoice", "audioFormat", "audioSpeed", "audioPitch", "audioVolume", "audioInstructions")
 	}
