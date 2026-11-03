@@ -267,10 +267,28 @@ func (s *Service) revokeRemote(apiKey string) error {
 	return nil
 }
 
+// fetchModels reads the model list, through the runtime's catalog reader when
+// one is injected, and attaches the site's published price rows either way.
 func (s *Service) fetchModels(apiKey string) ([]CatalogModel, error) {
+	var models []CatalogModel
+	var err error
 	if s.fetchCatalog != nil {
-		return s.fetchCatalog(apiKey, ProviderBaseURL(s.Origin()))
+		models, err = s.fetchCatalog(apiKey, ProviderBaseURL(s.Origin()))
+	} else {
+		models, err = s.fetchModelList(apiKey)
 	}
+	if err != nil {
+		return nil, err
+	}
+	if rows := s.fetchPriceCatalog(); rows != nil {
+		for i := range models {
+			models[i].Pricing = rows[models[i].ID]
+		}
+	}
+	return models, nil
+}
+
+func (s *Service) fetchModelList(apiKey string) ([]CatalogModel, error) {
 	request, err := http.NewRequestWithContext(s.lifecycle, http.MethodGet, TokenBaseURL(s.Origin())+"/models", nil)
 	if err != nil {
 		return nil, err
@@ -320,11 +338,6 @@ func (s *Service) fetchModels(apiKey string) ([]CatalogModel, error) {
 			MediaCapabilities:        item.MediaCapabilities,
 			MediaCapabilitiesVersion: strings.TrimSpace(item.MediaCapabilitiesVersion),
 		})
-	}
-	if rows := s.fetchPriceCatalog(); rows != nil {
-		for i := range models {
-			models[i].Pricing = rows[models[i].ID]
-		}
 	}
 	return models, nil
 }

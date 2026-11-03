@@ -304,10 +304,13 @@
 .canvas-assistant-proposal-target {
     font-size: 12px;
     line-height: 1.65;
-    white-space: pre-line;
     overflow-wrap: anywhere;
     padding-left: 8px;
     border-left: 2px solid var(--border);
+}
+/* 每行单独均衡折行，费用行和提示词行的末行不会只剩一两个字。 */
+.canvas-assistant-proposal-target > div {
+    text-wrap: balance;
 }
 .canvas-assistant-plan { display: block; overflow-wrap: anywhere; }
 .canvas-assistant-plan summary { cursor: pointer; font-weight: 500; }

@@ -137,6 +137,30 @@ func TestAgentModelCatalogDesktopUsesActualSnapshotWithoutCredentials(t *testing
 		t.Fatalf("refresh=%#v %v", refreshed, err)
 	}
 }
+// BeefAPI publishes image models without a prompt limit as promptMaxChars 0.
+func TestAgentModelCatalogKeepsUnlimitedPromptImageModelsPriced(t *testing.T) {
+	svc, _ := newModelCatalogTestService(t)
+	svc.mode = serviceModeLocal
+	body := []byte(`{"channels":[{"id":"beefapi","name":"BeefTV","credentialRef":"beefapi-enterprise","enabled":true,"models":["gpt-image-2"],"modelProfiles":[{"model":"gpt-image-2","capability":"image","protocol":"openai-image",` +
+		`"capabilityConfig":{"version":1,"image":{"references":{"promptMaxChars":0,"maxImages":16,"maxImageBytes":0,"maskSupported":true},"size":{"parameter":"size","values":["1024x1024","2048x2048"],"default":"1024x1024","allowCustom":true},"quality":{"supported":true,"values":["low","high"],"default":"low"},"transparentBackground":{"supported":false},"responseFormat":{"supported":false},"outputFormat":{"supported":true},"maxOutputs":4}},` +
+		`"pricing":{"mode":"per_request","per_request_cny":0.35,"display_kind":"image","image_price_table":{"output":{"low":{"1K":0.35,"2K":0.7}},"reference":0.15,"default_quality":"low","default_size":"1K"}}}]}]}`)
+	if err := svc.SaveLocalModelConfig(body); err != nil {
+		t.Fatal(err)
+	}
+	session := &operationSession{service: svc}
+	catalog, err := session.AgentModelCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.Channels) != 1 || len(catalog.Channels[0].Models) != 1 || catalog.Channels[0].Models[0].ModelKey != "gpt-image-2" {
+		t.Fatalf("the image model left the assistant catalog: %#v", catalog)
+	}
+	got := operations.EstimateGenerationCost(session, []operations.EstimateTarget{{ModelKey: "beefapi::gpt-image-2", Kind: "image", Parameters: map[string]string{"count": "2"}}})
+	if got.Items[0].Amount == nil || *got.Items[0].Amount != 0.7 {
+		t.Fatalf("estimate: %+v", got.Items[0])
+	}
+}
+
 func TestAgentModelCatalogHostedIgnoresDesktopSnapshot(t *testing.T) {
 	svc, db := newModelCatalogTestService(t)
 	if err := svc.SaveLocalModelConfig([]byte(`{"channels":[{"id":"private","models":["private-model"]}]}`)); err != nil {

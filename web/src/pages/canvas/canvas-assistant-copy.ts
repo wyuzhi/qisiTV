@@ -148,7 +148,7 @@ const PROPOSAL_PARAMETER_LABELS: Record<string, string> = {
 };
 
 /** 拆出普通生成单的逐项明细（提示词、模型、参数、参考与报价状态），供卡片折叠展开。 */
-export function assistantOrderTargetLines(proposal: AssistantGenerationProposal): string[] {
+export function assistantOrderTargetLines(proposal: AssistantGenerationProposal, awaitingConfirmation = true): string[] {
     if (proposal.production) return [];
     const targets = proposal.targets?.length ? proposal.targets : proposal.order?.targetViews || [];
     if (!targets.length) return [];
@@ -165,7 +165,7 @@ export function assistantOrderTargetLines(proposal: AssistantGenerationProposal)
             `${t.title || t.nodeId} · ${modelLabel} · ${t.parameters?.count || "1"} 个`,
             ...(params ? [params] : []),
             ...(refs.length ? [`参考：${refs.join("、")}`] : []),
-            ...(t.estimate?.text ? [`费用：${t.estimate.text}`] : []),
+            ...(awaitingConfirmation && t.estimate?.text ? [`费用：${t.estimate.text}`] : []),
             `${t.kind === "audio" ? "台词" : "提示词"}：${t.prompt}`,
         ].join("\n");
     });

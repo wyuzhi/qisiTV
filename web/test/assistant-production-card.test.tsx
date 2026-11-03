@@ -309,4 +309,17 @@ test("ordinary proposal with generation order targets renders collapsible order 
     expect(html).toContain("雨夜霓虹街角，主角回头");
     expect(html).toContain("预计费用：暂无价格，按所选渠道实际计费");
     expect(html).toContain("费用：自带 Key 的渠道暂无价格，按该渠道实际计费");
+    const invalidated = renderToStaticMarkup(
+        <CanvasAssistantTurnView
+            turn={{ ...turn, proposalsInvalidated: true }}
+            handledProposals={new Set()}
+            nodes={[]}
+            onLocate={() => {}}
+            onUndo={() => {}}
+            onRunProposal={() => {}}
+            onDismissProposal={() => {}}
+        />,
+    );
+    expect(invalidated).toContain("雨夜霓虹街角，主角回头");
+    expect(invalidated).not.toContain("费用：");
 });

@@ -180,6 +180,23 @@ func refreshTestProfile(channel map[string]any, id string) map[string]any {
 	return nil
 }
 
+// The desktop runtime reads the model list through an injected catalog reader.
+func TestInjectedCatalogReaderStillReceivesPublishedPrices(t *testing.T) {
+	fake := &fakeEnterprise{prices: `{"success":true,"data":{"currency":"CNY","models":[{"model_name":"gpt-image-2","mode":"per_request","per_request_cny":0.35,"display_kind":"image","image_price_table":{"output":{"low":{"1K":0.35}},"default_quality":"low","default_size":"1K"}}]}}`}
+	svc, store, _ := testService(t, fake, func(options *Options) {
+		options.FetchCatalog = func(string, string) ([]CatalogModel, error) {
+			return []CatalogModel{{ID: "gpt-image-2", ModelType: "image", SupportedEndpointTypes: []string{"image-generation"}}}, nil
+		}
+	})
+	if _, err := svc.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, svc, StateConnected)
+	if table, ok := catalogProfile(t, store, "gpt-image-2")["pricing"].(map[string]any); !ok || table["mode"] != "per_request" {
+		t.Fatalf("price row was not stored: %#v", catalogProfile(t, store, "gpt-image-2"))
+	}
+}
+
 func TestRefreshCatalogStoresPublishedPriceRows(t *testing.T) {
 	fake := &fakeEnterprise{prices: `{"success":true,"data":{"currency":"CNY","models":[{"model_name":"gpt-image-2","mode":"per_request","per_request_cny":0.35,"display_kind":"image","image_price_table":{"output":{"low":{"1K":0.35}},"reference":0.15,"default_quality":"low","default_size":"1K"}}]}}`}
 	svc, store, _ := testService(t, fake)

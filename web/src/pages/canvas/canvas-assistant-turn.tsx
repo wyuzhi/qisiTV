@@ -191,7 +191,7 @@ export function CanvasAssistantTurnView({ turn, canvasId, sessionId, status, han
                 const progress = started && nodes ? assistantProposalProgress(proposal, nodes) : null;
                 const awaitingConfirmation = !started && !skipped && !undone && !turn.proposalsInvalidated;
                 const productionParts = assistantProductionProposalParts(proposal, awaitingConfirmation);
-                const orderTargetLines = assistantOrderTargetLines(proposal);
+                const orderTargetLines = assistantOrderTargetLines(proposal, awaitingConfirmation);
                 const legacyProposalNote = !assistantVisibleReply(turn.reply || "") && proposal.note?.trim() ? proposal.note.trim() : "";
                 return (
                     <div key={proposal.proposalId} className="canvas-assistant-card">
@@ -205,7 +205,7 @@ export function CanvasAssistantTurnView({ turn, canvasId, sessionId, status, han
                                         <div className="canvas-assistant-proposal-targets">
                                             {productionParts.targetLines.map((line, index) => (
                                                 <div key={proposal.production?.targets[index]?.nodeId || index} className="canvas-assistant-proposal-target">
-                                                    {line}
+                                                    {line.split("\n").map((part, partIndex) => <div key={partIndex}>{part}</div>)}
                                                 </div>
                                             ))}
                                         </div>
@@ -222,7 +222,7 @@ export function CanvasAssistantTurnView({ turn, canvasId, sessionId, status, han
                                         <div className="canvas-assistant-proposal-targets">
                                             {orderTargetLines.map((line, index) => (
                                                 <div key={proposal.targets?.[index]?.nodeId || index} className="canvas-assistant-proposal-target">
-                                                    {line}
+                                                    {line.split("\n").map((part, partIndex) => <div key={partIndex}>{part}</div>)}
                                                 </div>
                                             ))}
                                         </div>
