@@ -403,6 +403,23 @@
             },
             "size": {
               "type": "string"
+            },
+            "videoEditOperation": {
+              "enum": [
+                "text_to_video",
+                "image_to_video",
+                "reference_to_video",
+                "extend",
+                "inpaint",
+                "replace_element",
+                "camera_motion",
+                "style_transfer",
+                "audio_to_video",
+                "compare_versions",
+                "concat",
+                "draft_to_final"
+              ],
+              "type": "string"
             }
           },
           "type": "object"

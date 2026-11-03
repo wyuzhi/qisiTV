@@ -1,7 +1,24 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02",
+  "updatedAt": "2026-11-03",
   "plugins": [
+    {
+      "id": "beeftv-plugin-character-replacement",
+      "packageName": "beeftv-plugin-character-replacement",
+      "name": "AI 角色替换工作室",
+      "version": "0.1.0",
+      "description": "面向短剧与漫剧的二阶段角色替换插件：关键帧角色替换（含 SVG 框位图引导）+ 视频角色替换（replace_element）+ 全片时间轴回插。",
+      "author": "BeefTV",
+      "category": "短剧与视频创作",
+      "recommended": true,
+      "tags": [
+        "画布节点",
+        "角色替换",
+        "时间轴回插",
+        "助手工具",
+        "技能"
+      ]
+    },
     {
       "id": "beeftv-plugin-ecommerce-hero",
       "packageName": "beeftv-plugin-ecommerce-hero",

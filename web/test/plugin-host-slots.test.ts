@@ -360,6 +360,7 @@ describe("plugin host slots, events, and lifecycle", () => {
         const ll2Mod = await import("../../plugin-packages/beeftv-plugin-ll2/client/index.js");
         const stickyMod = await import("../../plugin-packages/beeftv-plugin-sticky-note/client/index.js");
         const ecommerceMod = await import("../../plugin-packages/beeftv-plugin-ecommerce-hero/client/index.js");
+        const charReplaceMod = await import("../../plugin-packages/beeftv-plugin-character-replacement/client/index.js");
         const slotTestMod = await import("../../plugin-packages/beeftv-plugin-slot-test/client/index.js");
 
         const packages = [
@@ -367,6 +368,7 @@ describe("plugin host slots, events, and lifecycle", () => {
             { id: "beeftv-plugin-ll2", name: "LL2 算力与视频渠道", mod: ll2Mod },
             { id: "beeftv-plugin-sticky-note", name: "便签节点", mod: stickyMod },
             { id: "beeftv-plugin-ecommerce-hero", name: "一键商品主图", mod: ecommerceMod },
+            { id: "beeftv-plugin-character-replacement", name: "AI 角色替换工作室", mod: charReplaceMod },
             { id: "beeftv-plugin-slot-test", name: "挂点测试套件", mod: slotTestMod },
         ];
 
@@ -435,6 +437,31 @@ describe("plugin host slots, events, and lifecycle", () => {
         expect(getPluginCanvasNodeRenderer("ecommerce-hero")?.pluginId).toBe("beeftv-plugin-ecommerce-hero");
         expect(
             getPluginSlotEntries("assistant.toolCard").some((e) => e.pluginId === "beeftv-plugin-ecommerce-hero"),
+        ).toBe(true);
+
+        // Character replacement contributes canvas.node (character-replacement), canvas.addNodeMenu, canvas.toolbar.main, canvas.sidePanel, app.page, app.sidebar, assistant.toolCard
+        expect(getPluginCanvasNodeRenderer("character-replacement")?.pluginId).toBe("beeftv-plugin-character-replacement");
+        expect(
+            getAddNodeMenuCommands().some((t) => t.id === "plugin:beeftv-plugin-character-replacement:addNodeMenu:character-replacement-add"),
+        ).toBe(true);
+        expect(
+            getToolbarTools("main").some((t) => t.id === "plugin:beeftv-plugin-character-replacement:main:character-replacement-toolbar"),
+        ).toBe(true);
+        expect(
+            getPluginSlotEntries("canvas.sidePanel").some((e) => e.pluginId === "beeftv-plugin-character-replacement"),
+        ).toBe(true);
+        expect(
+            getPluginSlotEntries("app.page").some(
+                (e) => e.pluginId === "beeftv-plugin-character-replacement" && e.payload.path === "/p/beeftv-plugin-character-replacement",
+            ),
+        ).toBe(true);
+        expect(
+            getPluginSlotEntries("assistant.toolCard").filter((e) => e.pluginId === "beeftv-plugin-character-replacement"),
+        ).toHaveLength(2);
+        expect(
+            getPluginSlotEntries("app.sidebar").some(
+                (e) => e.pluginId === "beeftv-plugin-character-replacement" && e.payload.path === "/p/beeftv-plugin-character-replacement",
+            ),
         ).toBe(true);
 
         // Slot test plugin contributes to every slot and listens to every event

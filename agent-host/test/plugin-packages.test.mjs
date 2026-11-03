@@ -786,3 +786,159 @@ test('server.mjs loads enabled plugins from Go on startup, reports load-error, a
     await new Promise((resolve) => opsServer.close(resolve));
   }
 });
+
+test('loads bundled beeftv-plugin-character-replacement extension tools and skill, and executes arrange + timeline splice', async () => {
+  const pkgDir = path.resolve(
+    path.dirname(new URL(import.meta.url).pathname),
+    '../../plugin-packages/beeftv-plugin-character-replacement',
+  );
+  const errors = [];
+  const result = await loadPluginExtensionsFromPackages({
+    packages: [{ id: 'beeftv-plugin-character-replacement', packageDir: pkgDir }],
+    onLoadError: (id, err) => errors.push({ id, err }),
+  });
+
+  assert.deepEqual(errors, []);
+  assert.deepEqual(
+    result.tools.map((t) => t.name),
+    ['character_replacement_arrange', 'character_replacement_splice_timeline'],
+  );
+  assert(result.skills.some((s) => s.path.includes('character-replacement')));
+
+  const arrangeTool = result.tools.find((t) => t.name === 'character_replacement_arrange');
+  const spliceTool = result.tools.find((t) => t.name === 'character_replacement_splice_timeline');
+
+  const executedOps = [];
+  let rev = 1;
+  let createdCount = 0;
+  const canvasNodes = [
+    {
+      id: 'node-full-video',
+      title: '全片视频',
+      prompt: 'some text containing "revision": 999 to test structuredContent priority',
+      metadata: { durationMs: 12000 },
+    },
+  ];
+  const mockCtx = {
+    async executeTool(toolName, params) {
+      executedOps.push({ toolName, params });
+      if (toolName === 'canvas_get') {
+        return {
+          structuredContent: {
+            canvas: {
+              revision: rev,
+              nodes: canvasNodes,
+              connections: [],
+              timeline: {
+                version: 2,
+                durationMs: 12000,
+                tracks: [{ id: 'track-sub', kind: 'subtitle', label: '字幕轨', order: 2, visible: true, muted: false }],
+                clips: [{ id: 'sub-1', kind: 'subtitle', trackId: 'track-sub', nodeId: 'node-full-video', startMs: 500, durationMs: 2000, text: '字幕保留测试' }],
+              },
+            },
+          },
+          result: {
+            content: [{ type: 'text', text: JSON.stringify({ canvas: { nodes: canvasNodes, revision: rev } }) }],
+            structuredContent: {
+              canvas: {
+                revision: rev,
+                nodes: canvasNodes,
+                connections: [],
+                timeline: {
+                  version: 2,
+                  durationMs: 12000,
+                  tracks: [{ id: 'track-sub', kind: 'subtitle', label: '字幕轨', order: 2, visible: true, muted: false }],
+                  clips: [{ id: 'sub-1', kind: 'subtitle', trackId: 'track-sub', nodeId: 'node-full-video', startMs: 500, durationMs: 2000, text: '字幕保留测试' }],
+                },
+              },
+            },
+          },
+        };
+      }
+      if (toolName === 'canvas_nodes_create') {
+        rev += 1;
+        const created = params.nodes.map((n) => {
+          createdCount += 1;
+          const item = { id: `created-${createdCount}`, type: n.type, title: n.title };
+          canvasNodes.push(item);
+          return item;
+        });
+        return {
+          structuredContent: { revision: rev, created },
+          result: { structuredContent: { revision: rev, created } },
+        };
+      }
+      if (toolName === 'canvas_node_configure' || toolName === 'canvas_edge_create') {
+        rev += 1;
+        return {
+          structuredContent: { revision: rev },
+          result: { structuredContent: { revision: rev } },
+        };
+      }
+      if (toolName === 'canvas_timeline_update') {
+        rev += 1;
+        return {
+          structuredContent: { revision: rev, updated: true },
+          result: { structuredContent: { revision: rev, updated: true } },
+        };
+      }
+      return { structuredContent: {}, result: {} };
+    },
+  };
+
+  const arrangeRes = await arrangeTool.execute(
+    {
+      shotTitle: '镜头 3',
+      sourceDescription: '右边的蓝衣女侠',
+      targetDescription: '红衣女刺客林婉',
+      position: 'right',
+      genderHint: 'female',
+      replacementScope: 'full-person',
+      promptMode: 'positioning',
+      sourceKeyframeNodeId: 'src-kf-1',
+      targetCharacterNodeId: 'target-char-1',
+      locationGuideNodeId: 'guide-1',
+      sourceVideoNodeId: 'src-vid-1',
+    },
+    mockCtx,
+    {},
+  );
+  assert.equal(arrangeRes.details.controlNodeId, 'created-1');
+  assert.equal(arrangeRes.details.keyframeNodeId, 'created-2');
+  assert.equal(arrangeRes.details.videoNodeId, 'created-3');
+  assert(arrangeRes.details.keyframePrompt.includes('图3为人物定位图'));
+  const videoCfg = executedOps.find(
+    (c) => c.toolName === 'canvas_node_configure' && c.params.nodeId === 'created-3',
+  );
+  assert.equal(videoCfg.params.patch.videoEditOperation, 'replace_element');
+
+  // Re-running arrange for the same shotTitle deduplicates node titles with #2
+  const arrangeRes2 = await arrangeTool.execute(
+    {
+      shotTitle: '镜头 3',
+      sourceDescription: '右边的蓝衣女侠',
+      targetDescription: '红衣女刺客林婉',
+    },
+    mockCtx,
+    {},
+  );
+  const secondCreateCall = executedOps.filter((c) => c.toolName === 'canvas_nodes_create')[1];
+  assert.equal(secondCreateCall.params.nodes[0].title, '镜头 3 · 角色替换配置 #2');
+  assert.equal(arrangeRes2.details.missingReferences.length, 3);
+
+  const spliceRes = await spliceTool.execute(
+    {
+      fullVideoNodeId: 'node-full-video',
+      keepOriginalAudio: true,
+      replacements: [{ nodeId: 'created-3', startMs: 3000, endMs: 6500 }],
+    },
+    mockCtx,
+    {},
+  );
+  assert.equal(spliceRes.details.fullDurationMs, 12000);
+  assert.equal(spliceRes.details.clipCount, 5); // 3 video segments + 1 full audio clip + 1 preserved subtitle clip
+  const timelineCall = executedOps.find((c) => c.toolName === 'canvas_timeline_update');
+  assert.equal(timelineCall.params.timeline.version, 2);
+  assert.equal(timelineCall.params.timeline.tracks.length, 3);
+});
+
