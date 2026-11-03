@@ -126,7 +126,7 @@ export const LL2_PRESET_MODELS = [
       video: {
         references: {
           ...DEFAULT_VIDEO_REFERENCES,
-          maxImages: 7,
+          maxImages: 2,
           maxVideos: 0,
           maxAudios: 0,
         },
@@ -137,7 +137,7 @@ export const LL2_PRESET_MODELS = [
         defaultResolution: "720p",
         generateAudio: { supported: true, default: true },
         watermark: { supported: true, default: false },
-        operations: ["text_to_video", "image_to_video", "reference_to_video"],
+        operations: ["text_to_video", "image_to_video"],
         defaultOperation: "text_to_video",
       },
     },
@@ -154,7 +154,7 @@ export const LL2_PRESET_MODELS = [
       video: {
         references: {
           ...DEFAULT_VIDEO_REFERENCES,
-          maxImages: 7,
+          maxImages: 2,
           maxVideos: 0,
           maxAudios: 0,
         },
@@ -165,7 +165,7 @@ export const LL2_PRESET_MODELS = [
         defaultResolution: "720p",
         generateAudio: { supported: true, default: true },
         watermark: { supported: true, default: false },
-        operations: ["text_to_video", "image_to_video", "reference_to_video"],
+        operations: ["text_to_video", "image_to_video"],
         defaultOperation: "text_to_video",
       },
     },
@@ -376,6 +376,9 @@ function createLL2SettingsPanel(host) {
     const [catalogChecking, setCatalogChecking] = React.useState(false);
     const [saving, setSaving] = React.useState(false);
     const [onlineModels, setOnlineModels] = React.useState([]);
+    const [synced, setSynced] = React.useState(
+      Boolean(existingChannel?.hasApiKey || existingChannel?.apiKey),
+    );
     const [statusMessage, setStatusMessage] = React.useState(
       existingChannel?.hasApiKey || existingChannel?.apiKey
         ? `已连接「${existingChannel.name}」渠道（已启用 ${existingChannel.models?.length || 0} 个模型）`
@@ -472,6 +475,7 @@ function createLL2SettingsPanel(host) {
           throw new Error("当前宿主版本不支持同步模型渠道");
         }
         await host.channels.upsert(channel);
+        setSynced(true);
         setStatusMessage(
           `已将「${LL2_CHANNEL_NAME}」与 ${channel.models.length} 个模型同步至「设置 -> 模型服务」！`,
         );
@@ -838,25 +842,27 @@ function createLL2SettingsPanel(host) {
               },
             },
             h("span", null, statusMessage),
-            h(
-              "button",
-              {
-                type: "button",
-                onClick: () => host?.ui?.navigate?.("/settings"),
-                style: {
-                  padding: "4px 10px",
-                  borderRadius: "6px",
-                  border: "1px solid rgba(16, 185, 129, 0.4)",
-                  background: "rgba(16, 185, 129, 0.12)",
-                  color: "#047857",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                },
-              },
-              "前往模型服务查看与测试 →",
-            ),
+            synced
+              ? h(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => host?.ui?.navigate?.("/settings?section=channels"),
+                    style: {
+                      padding: "4px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid rgba(16, 185, 129, 0.4)",
+                      background: "rgba(16, 185, 129, 0.12)",
+                      color: "#047857",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    },
+                  },
+                  "前往模型服务查看与测试 →",
+                )
+              : null,
           )
         : null,
 

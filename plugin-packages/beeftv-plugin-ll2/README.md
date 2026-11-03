@@ -3,7 +3,7 @@
 BeefTV 官方内置插件，提供 **LL2 (DMC) (`https://api.ll2.cn`)** 的一键 BYOK 渠道配置面板以及 5 套异步视频生成/超分协议：
 
 - `ll2-seedance-video`：Seedance 2.0 / 2.0 Fast（`/seedance/api/v3/contents/generations/tasks`）
-- `ll2-vidu-video`：Vidu Q3 Pro / Turbo（`/vidu/ent/v2/text2video`、`img2video`、`start-end2video`、`reference2video` + `/vidu/ent/v2/tasks/{taskId}/creations`）
+- `ll2-vidu-video`：Vidu Q3 Pro / Turbo（`/vidu/ent/v2/text2video`、`img2video`、`start-end2video` + `/vidu/ent/v2/tasks/{taskId}/creations`）
 - `ll2-minimax-video`：MiniMax H3（`/v2/video_generation` + `/v2/query/video_generation/{taskId}`）
 - `ll2-super-vega-video`：Super Vega 1.0 Pro Mini / 1.0 Lite（`/super-vega/tasks` + `/super-vega/tasks/{taskId}`）
 - `ll2-auto-hd-video`：Auto HD 异步视频超分（`/hd/tasks` + `/hd/tasks/{taskId}`）

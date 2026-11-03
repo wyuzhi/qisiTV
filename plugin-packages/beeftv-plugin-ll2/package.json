@@ -465,36 +465,8 @@
             "pathTemplate": {
               "$if": {
                 "condition": {
-                  "$gt": [
+                  "$or": [
                     {
-                      "$len": {
-                        "$filter": {
-                          "from": {
-                            "$ref": "request.images"
-                          },
-                          "as": "image",
-                          "where": {
-                            "$in": [
-                              {
-                                "$ref": "image.role"
-                              },
-                              [
-                                "reference_image",
-                                "subject_reference",
-                                "style_reference"
-                              ]
-                            ]
-                          }
-                        }
-                      }
-                    },
-                    0
-                  ]
-                },
-                "then": "/vidu/ent/v2/reference2video",
-                "else": {
-                  "$if": {
-                    "condition": {
                       "$gt": [
                         {
                           "$len": {
@@ -517,23 +489,33 @@
                         0
                       ]
                     },
-                    "then": "/vidu/ent/v2/start-end2video",
-                    "else": {
-                      "$if": {
-                        "condition": {
-                          "$gt": [
-                            {
-                              "$len": {
-                                "$ref": "request.images"
-                              }
-                            },
-                            0
-                          ]
+                    {
+                      "$gte": [
+                        {
+                          "$len": {
+                            "$ref": "request.images"
+                          }
                         },
-                        "then": "/vidu/ent/v2/img2video",
-                        "else": "/vidu/ent/v2/text2video"
-                      }
+                        2
+                      ]
                     }
+                  ]
+                },
+                "then": "/vidu/ent/v2/start-end2video",
+                "else": {
+                  "$if": {
+                    "condition": {
+                      "$gt": [
+                        {
+                          "$len": {
+                            "$ref": "request.images"
+                          }
+                        },
+                        0
+                      ]
+                    },
+                    "then": "/vidu/ent/v2/img2video",
+                    "else": "/vidu/ent/v2/text2video"
                   }
                 }
               }

@@ -427,6 +427,9 @@ describe("plugin host slots, events, and lifecycle", () => {
         });
         expect(Array.isArray(trustedHost.channels?.list())).toBe(true);
         await expect(
+            trustedHost.channels?.upsert({ id: "ll2", baseUrl: "ftp://invalid" }),
+        ).rejects.toThrow("渠道接口地址必须以 http:// 或 https:// 开头");
+        await expect(
             trustedHost.channels?.upsert({ id: "other-user-channel", baseUrl: "https://api.ll2.cn" }),
         ).rejects.toThrow("仅允许写入自身命名空间下的模型渠道");
 

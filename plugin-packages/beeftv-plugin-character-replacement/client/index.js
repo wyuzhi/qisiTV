@@ -37,24 +37,58 @@ export {
   uniqueNodeTitle,
 };
 
+let lastKnownCanvasId = "";
+
+function rememberCanvasId(host, canvasId) {
+  const clean = String(canvasId || "").trim();
+  if (!clean || clean === "[object Promise]") return;
+  lastKnownCanvasId = clean;
+  host?.storage?.set?.("lastCanvasId", clean);
+}
+
 function resolveActiveCanvasId(host, explicitCanvasId) {
   const explicit = String(explicitCanvasId || "").trim();
-  if (explicit) return explicit;
+  if (explicit && explicit !== "[object Promise]") return explicit;
   const fromContext = String(host?.context?.getCanvasId?.() || "").trim();
-  if (fromContext) {
-    host?.storage?.set?.("lastCanvasId", fromContext);
+  if (fromContext && fromContext !== "[object Promise]") {
+    rememberCanvasId(host, fromContext);
     return fromContext;
   }
-  const fromStorage = String(host?.storage?.get?.("lastCanvasId") || "").trim();
-  return fromStorage;
+  const rawStorage = host?.storage?.get?.("lastCanvasId");
+  if (typeof rawStorage === "string") {
+    const clean = rawStorage.trim();
+    if (clean && clean !== "[object Promise]") {
+      lastKnownCanvasId = clean;
+      return clean;
+    }
+  }
+  return lastKnownCanvasId;
+}
+
+async function resolveActiveCanvasIdAsync(host, explicitCanvasId) {
+  const syncId = resolveActiveCanvasId(host, explicitCanvasId);
+  if (syncId) return syncId;
+  try {
+    const stored = await host?.storage?.get?.("lastCanvasId");
+    if (typeof stored === "string") {
+      const clean = stored.trim();
+      if (clean && clean !== "[object Promise]") {
+        lastKnownCanvasId = clean;
+        return clean;
+      }
+    }
+  } catch {
+    // ignore storage read error
+  }
+  return "";
 }
 
 export async function arrangeCharacterReplacementOnCanvas(host, config = {}) {
-  const canvasId = resolveActiveCanvasId(host, config.canvasId);
+  const canvasId = await resolveActiveCanvasIdAsync(host, config.canvasId);
   if (!canvasId) {
     throw new Error("请先打开一个画布或在替换工作室填写目标画布 ID 后再执行角色替换编排");
   }
-  host?.storage?.set?.("lastCanvasId", canvasId);
+  rememberCanvasId(host, canvasId);
 
   const sourceKeyframeNodeId = String(config.sourceKeyframeNodeId || "").trim();
   const targetCharacterNodeId = String(config.targetCharacterNodeId || "").trim();
@@ -185,11 +219,11 @@ export async function arrangeCharacterReplacementOnCanvas(host, config = {}) {
 }
 
 export async function spliceReplacedShotsIntoTimeline(host, params = {}) {
-  const canvasId = resolveActiveCanvasId(host, params.canvasId);
+  const canvasId = await resolveActiveCanvasIdAsync(host, params.canvasId);
   if (!canvasId) {
     throw new Error("请先打开目标画布或在替换工作室填写目标画布 ID 后再执行全片时间线回插");
   }
-  host?.storage?.set?.("lastCanvasId", canvasId);
+  rememberCanvasId(host, canvasId);
 
   const snap = await host.ops.call("canvas.get", { canvasId });
   const revision = Number(snap?.revision ?? snap?.canvas?.revision ?? 1);
@@ -697,6 +731,17 @@ export function activate(host) {
     const [targetCanvasId, setTargetCanvasId] = React.useState(() =>
       resolveActiveCanvasId(host, ""),
     );
+    React.useEffect(() => {
+      let active = true;
+      resolveActiveCanvasIdAsync(host, "").then((resolved) => {
+        if (active && resolved) {
+          setTargetCanvasId((prev) => prev || resolved);
+        }
+      });
+      return () => {
+        active = false;
+      };
+    }, []);
     const [activeStep, setActiveStep] = React.useState(1);
     const [shotTitle, setShotTitle] = React.useState("镜头 1");
     const [position, setPosition] = React.useState("left");
@@ -715,10 +760,10 @@ export function activate(host) {
 
     // Step 4: 全片时间线区间回插状态
     const [fullVideoNodeId, setFullVideoNodeId] = React.useState("");
-    const [fullDurationSec, setFullDurationSec] = React.useState("15");
+    const [fullDurationSec, setFullDurationSec] = React.useState("");
     const [replacedVideoNodeId, setReplacedVideoNodeId] = React.useState("");
-    const [rangeStartSec, setRangeStartSec] = React.useState("3");
-    const [rangeEndSec, setRangeEndSec] = React.useState("8");
+    const [rangeStartSec, setRangeStartSec] = React.useState("1");
+    const [rangeEndSec, setRangeEndSec] = React.useState("3");
     const [keepOriginalAudio, setKeepOriginalAudio] = React.useState(true);
     const [studioMessage, setStudioMessage] = React.useState("");
     const [studioMessageTone, setStudioMessageTone] = React.useState("success");
@@ -1407,12 +1452,12 @@ export function activate(host) {
     defaultOrder: 48,
     onClick: () => {
       const currentCanvasId = host.context?.getCanvasId?.();
-      if (currentCanvasId) host.storage?.set?.("lastCanvasId", currentCanvasId);
+      if (currentCanvasId) rememberCanvasId(host, currentCanvasId);
       host.ui?.navigate?.("/p/beeftv-plugin-character-replacement");
     },
     run: () => {
       const currentCanvasId = host.context?.getCanvasId?.();
-      if (currentCanvasId) host.storage?.set?.("lastCanvasId", currentCanvasId);
+      if (currentCanvasId) rememberCanvasId(host, currentCanvasId);
       host.ui?.navigate?.("/p/beeftv-plugin-character-replacement");
     },
   });
