@@ -378,13 +378,13 @@ jobs:
               echo "::warning::Previous release ${PREVIOUS_VERSION} ${PLATFORM} zip unavailable; skipping delta archive."
             fi
           fi
-          python ../scripts/smoke-packaged-cli_test.py
-          python ../scripts/smoke-packaged-cli.py --archive "../dist/BeefTV-${VERSION}-${PLATFORM}.zip" --platform "$PLATFORM"
           if ! wait "$installer_pid"; then
             echo "::error::Native installer packaging failed"
             exit 1
           fi
           trap - EXIT
+          python ../scripts/smoke-packaged-cli_test.py
+          python ../scripts/smoke-packaged-cli.py --archive "../dist/BeefTV-${VERSION}-${PLATFORM}.zip" --platform "$PLATFORM"
 
       - name: Verify native installer lifecycle
         shell: bash
