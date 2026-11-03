@@ -88,6 +88,46 @@ describe('node write receipts keep their identity within official tool output li
     expect(canvasWriteView(missingNode, 'canvas.node.update')).toBe(missingNode);
   });
 
+  test('model catalog and generation propose omit raw pricing tables so the assistant only reports proposal estimates', () => {
+    const catalogData = {
+      result: {
+        source: 'local',
+        channels: [{
+          id: 'beefapi',
+          models: [{
+            id: 'seedance-2.0',
+            modelKey: 'seedance-2.0',
+            capability: 'video',
+            videoPricing: { currency: 'CNY', mode: 'tokens', rates: { '720p': { output: 28 }, '1080p': { output: 31.104 } } },
+          }],
+        }],
+      },
+    };
+    const projectedCatalog = canvasWriteView(catalogData, 'model.catalog');
+    expect(projectedCatalog.result.channels[0].models[0].videoPricing).toBeUndefined();
+    expect(catalogData.result.channels[0].models[0].videoPricing).toBeDefined();
+
+    const proposeData = {
+      result: {
+        proposalId: 'gp-1',
+        modelKey: 'beefapi::seedance-2.0',
+        pricing: { currency: 'CNY', mode: 'tokens', rates: { '720p': { output: 28 } } },
+        estimate: { amount: 4.968, approx: true, text: '预计费用：约 ¥4.97' },
+        targets: [{
+          nodeId: 'v1',
+          pricing: { currency: 'CNY', mode: 'tokens', rates: { '720p': { output: 28 } } },
+          estimate: { amount: 4.968, approx: true, text: '约 ¥4.97' },
+        }],
+      },
+    };
+    const projectedPropose = canvasWriteView(proposeData, 'canvas.generation.propose');
+    expect(projectedPropose.result.pricing).toBeUndefined();
+    expect(projectedPropose.result.targets[0].pricing).toBeUndefined();
+    expect(projectedPropose.result.estimate).toEqual(proposeData.result.estimate);
+    expect(projectedPropose.result.targets[0].estimate).toEqual(proposeData.result.targets[0].estimate);
+    expect(proposeData.result.pricing).toBeDefined();
+  });
+
   test.each(['canvas.node.configure', 'canvas.node.update', 'canvas.node.bind_asset'])('%s omits unrelated node data without changing the write, effects or replay', async operation => {
     await fixture(async ({ call, turn, requests }) => {
       const patch = operation.endsWith('configure') ? { model: 'display-model', size: '9:16' } : { title: '首帧' };

@@ -322,4 +322,6 @@ test("ordinary proposal with generation order targets renders collapsible order 
     );
     expect(invalidated).toContain("雨夜霓虹街角，主角回头");
     expect(invalidated).not.toContain("费用：");
+    expect(html).toContain("canvas-assistant-proposal-lines");
+    expect(html).not.toContain("white-space:pre-line");
 });

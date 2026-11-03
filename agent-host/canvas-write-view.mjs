@@ -4,6 +4,23 @@ const MEDIA_KINDS = new Set(['image', 'video', 'audio']);
 // Only the model-facing receipt is reduced. Business receipts and turn effects
 // retain the original node; omitted fields remain accessible through canvas_get.
 export function canvasWriteView(data, operation, params = {}) {
+  if (operation === 'model.catalog' && Array.isArray(data?.result?.channels)) {
+    // 助手只读提案里的 estimate，不直接读取单价表自行换算其他方案费用。
+    const channels = data.result.channels.map(channel => Array.isArray(channel?.models)
+      ? { ...channel, models: channel.models.map(({ pricing: _pricing, videoPricing: _videoPricing, ...model }) => model) }
+      : channel);
+    return { ...data, result: { ...data.result, channels } };
+  }
+  if (operation === 'canvas.generation.propose' && data?.result && typeof data.result === 'object' && !Array.isArray(data.result)) {
+    const { pricing: _pricing, targets, ...rest } = data.result;
+    return {
+      ...data,
+      result: {
+        ...rest,
+        ...(Array.isArray(targets) ? { targets: targets.map(({ pricing: _targetPricing, ...target }) => target) } : {}),
+      },
+    };
+  }
   if (operation === 'canvas.task.bind' && typeof data?.result?.bindingStatus === 'string') {
     // Go retains the full document for replay and undo. Model/nested callers
     // only need this binding receipt, not every source prompt on the canvas.
