@@ -150,7 +150,6 @@ export function createBeefTVPluginHost(pluginId: string, manifest?: PluginManife
                         scope: "user",
                         credentialRef: undefined,
                         headers: existing?.headers,
-                        notes: typeof incoming.notes === "string" ? incoming.notes : existing?.notes,
                         models: Array.isArray(incoming.models) ? incoming.models.filter((m): m is string => typeof m === "string" && Boolean(m.trim())) : (existing?.models ?? []),
                         modelProfiles: Array.isArray(incoming.modelProfiles) ? incoming.modelProfiles : existing?.modelProfiles,
                     };
