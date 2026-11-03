@@ -6,9 +6,7 @@ import (
 	"errors"
 	"io"
 	"math"
-	"net"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -76,15 +74,6 @@ func executeManagedMedia(ctx context.Context, client *beefapi.MediaClient, reque
 	if runtime.ManagedMedia == nil || request.TaskRef == "" {
 		return nil, RequestPreparationError{Cause: errors.New("媒体请求缺少持久化提交标识")}
 	}
-	sent, err := runtime.ManagedMedia.Sent(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if !sent {
-		if _, err := client.Discover(ctx); err != nil {
-			return nil, wrapManagedDiscoveryError(err)
-		}
-	}
 	result, err := client.Execute(ctx, request, refs)
 	if err != nil {
 		var task *beefapi.MediaTaskError
@@ -103,19 +92,6 @@ func executeManagedMedia(ctx context.Context, client *beefapi.MediaClient, reque
 		return nil, RequestPreparationError{Cause: err}
 	}
 	return result, nil
-}
-
-func wrapManagedDiscoveryError(err error) error {
-	var httpErr *beefapi.MediaHTTPError
-	var uploadErr *beefapi.UploadError
-	var refUpload *ReferenceUploadError
-	var urlErr *url.Error
-	var netErr net.Error
-	if !errors.As(err, &httpErr) && !errors.As(err, &uploadErr) && !errors.As(err, &refUpload) &&
-		(errors.As(err, &urlErr) || errors.As(err, &netErr) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)) {
-		return RequestPreparationError{Cause: RequestNotSentError{Cause: err}}
-	}
-	return RequestPreparationError{Cause: err}
 }
 
 func managedReference(media Media, role string) beefapi.LocalMediaReference {

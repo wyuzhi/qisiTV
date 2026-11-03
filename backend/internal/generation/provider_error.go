@@ -344,7 +344,7 @@ func ClassifyError(err error) Failure {
 		return failure
 	}
 	var notSent RequestNotSentError
-	if errors.As(err, &notSent) {
+	if errors.As(err, &notSent) || beefapi.IsDiscoveryTransportError(err) {
 		return normalizeFailure(Failure{Category: CategoryRequestNotSent})
 	}
 	var preparation RequestPreparationError

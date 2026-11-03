@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -309,6 +310,28 @@ type MediaHTTPError struct {
 
 func (e *MediaHTTPError) Error() string { return e.TaskError.Message }
 
+// MediaDiscoveryTransportError 表示 /v1/models 协议探测在收到 HTTP 响应前因网络传输失败，
+// 本次业务请求尚未发出。判断探测是否属于未发出的传输层失败只看这里。
+type MediaDiscoveryTransportError struct{ Cause error }
+
+func (e MediaDiscoveryTransportError) Error() string { return e.Cause.Error() }
+func (e MediaDiscoveryTransportError) Unwrap() error { return e.Cause }
+
+func IsDiscoveryTransportError(err error) bool {
+	var target MediaDiscoveryTransportError
+	return errors.As(err, &target)
+}
+
+func wrapDiscoveryTransportError(err error) error {
+	var httpErr *MediaHTTPError
+	var urlErr *url.Error
+	var netErr net.Error
+	if !errors.As(err, &httpErr) && (errors.As(err, &urlErr) || errors.As(err, &netErr) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)) {
+		return MediaDiscoveryTransportError{Cause: err}
+	}
+	return err
+}
+
 func (c *MediaClient) Discover(ctx context.Context) (MediaDiscovery, error) {
 	if c.discovery != nil {
 		return *c.discovery, nil
@@ -327,11 +350,11 @@ func (c *MediaClient) Discover(ctx context.Context) (MediaDiscovery, error) {
 			break
 		}
 		if err = uploadPause(ctx, attempt); err != nil {
-			return MediaDiscovery{}, err
+			return MediaDiscovery{}, wrapDiscoveryTransportError(err)
 		}
 	}
 	if err != nil {
-		return MediaDiscovery{}, err
+		return MediaDiscovery{}, wrapDiscoveryTransportError(err)
 	}
 	var payload struct {
 		MediaProtocol MediaDiscovery `json:"media_protocol"`

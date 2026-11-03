@@ -497,6 +497,7 @@ func sanitizeProviderText(value string) string {
 	value = credentialHeaderPattern.ReplaceAllString(value, "[已隐藏]")
 	value = secretPattern.ReplaceAllString(value, "")
 	value = promptEchoPattern.ReplaceAllString(value, "[已隐藏]")
+	value = diagnosticLocalPath.ReplaceAllString(value, "[路径已隐藏]")
 	value = strings.Join(strings.Fields(value), " ")
 	if strings.HasPrefix(value, "{") || strings.HasPrefix(value, "<") {
 		return ""

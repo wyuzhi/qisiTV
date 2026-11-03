@@ -24,7 +24,7 @@ func runManagedAudioTask(ctx context.Context, client *beefapi.MediaClient, input
 	}
 	discovery, err := client.Discover(ctx)
 	if err != nil {
-		return nil, wrapManagedDiscoveryError(err)
+		return nil, RequestPreparationError{Cause: err}
 	}
 	model := discovery.Models[input.Config.Model]
 	capability, ok := model.Capabilities["audio"]

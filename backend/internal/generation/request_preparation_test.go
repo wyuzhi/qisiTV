@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"testing"
 
+	"infinite-canvas/backend/internal/beefapi"
 	"infinite-canvas/backend/internal/protocol"
 )
 
@@ -30,10 +31,9 @@ func TestManagedDiscoveryTransportFailureClassifiesAsRequestNotSent(t *testing.T
 		&url.Error{Op: "Get", URL: "https://enterprise.beefapi.com/v1/models", Err: x509.UnknownAuthorityError{}},
 		&net.DNSError{Err: "no such host", Name: "enterprise.beefapi.com"},
 	} {
-		err := wrapManagedDiscoveryError(cause)
+		err := RequestPreparationError{Cause: beefapi.MediaDiscoveryTransportError{Cause: cause}}
 		var preparation RequestPreparationError
-		var notSent RequestNotSentError
-		if !errors.As(err, &preparation) || !errors.As(err, &notSent) || !SafeRouteRejection(err) {
+		if !errors.As(err, &preparation) || !beefapi.IsDiscoveryTransportError(err) || !SafeRouteRejection(err) {
 			t.Fatalf("expected unsent preparation error for %T: %#v", cause, err)
 		}
 		classified := ClassifyError(UncertainVideoSubmission(context.Background(), err))

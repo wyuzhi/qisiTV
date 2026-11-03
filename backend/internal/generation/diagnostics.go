@@ -25,10 +25,7 @@ func DiagnosticSummary(message string) string {
 	if strings.HasPrefix(strings.TrimSpace(message), "[") {
 		return ""
 	}
-	cleaned := urlPattern.ReplaceAllString(message, "")
-	cleaned = credentialHeaderPattern.ReplaceAllString(cleaned, "[已隐藏]")
-	cleaned = promptEchoPattern.ReplaceAllString(cleaned, "[已隐藏]")
-	return sanitizeProviderText(diagnosticLocalPath.ReplaceAllString(cleaned, "[路径已隐藏]"))
+	return sanitizeProviderText(message)
 }
 
 func SanitizeTaskDiagnostics(input *model.TaskFailureDiagnostics) *model.TaskFailureDiagnostics {
