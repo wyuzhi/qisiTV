@@ -3,9 +3,6 @@ import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
 import { channelHasGenerationCredential, defaultConfig, encodeChannelModel, isBuiltinBeefAPIChannel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 import type { ModelProtocol } from "@/lib/model-protocols";
 
-const DEFAULT_REFERENCE_TEST_VIDEO_URL =
-    "https://h3-gz-public-1483601991.cos.ap-guangzhou.myqcloud.com/outputs/f1303d6f8190c0dbc697b30b65c0eae1b648d4efa166e81689b4af735dbf6a6d.mp4";
-
 export async function testChannelModelConnection(channel: ModelChannel, model: string, capability: ModelCapability, protocol: ModelProtocol, runTask = runBackendGenerationTask) {
     if (!channel.baseUrl.trim()) throw new Error("请先填写 Base URL");
     if (!channelHasGenerationCredential(channel, model)) {
@@ -67,9 +64,10 @@ export async function testChannelModelConnection(channel: ModelChannel, model: s
         videoOps.includes("reference_to_video") &&
         (limits?.video?.references?.maxVideos ?? 0) > 0;
     const customTestVideoUrl =
-        typeof modelProfile?.defaultOptions?.testVideoUrl === "string" && modelProfile.defaultOptions.testVideoUrl.trim()
-            ? modelProfile.defaultOptions.testVideoUrl.trim()
-            : DEFAULT_REFERENCE_TEST_VIDEO_URL;
+        typeof modelProfile?.defaultOptions?.testVideoUrl === "string" ? modelProfile.defaultOptions.testVideoUrl.trim() : "";
+    if (needsReferenceVideo && !customTestVideoUrl) {
+        throw new Error("该参考视频模型需要先在模型配置中提供测试参考视频地址（defaultOptions.testVideoUrl）");
+    }
     const referenceVideos = needsReferenceVideo
         ? [{ id: "connection-test-video", name: "test.mp4", type: "video/mp4", url: customTestVideoUrl, durationMs: 4000, width: 1280, height: 720 }]
         : undefined;

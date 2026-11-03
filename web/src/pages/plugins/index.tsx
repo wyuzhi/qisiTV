@@ -852,7 +852,7 @@ function providerCapabilitiesFor(manifest: PluginManifest | PluginManifestV2) {
 
 function pluginMatchesCategory(manifest: PluginManifest | PluginManifestV2, category: string) {
     const providerCapabilities = providerCapabilitiesFor(manifest);
-    if (category === "other") return providerCapabilities.length === 0 || Boolean(manifest.client);
+    if (category === "other") return providerCapabilities.length === 0;
     return providerCapabilities.includes(category as "text" | "image" | "video" | "audio");
 }
 

@@ -132,6 +132,9 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 		if err != nil {
 			return nil, fmt.Errorf("校验官方插件目录 %s：%w", entry.Name(), err)
 		}
+		if _, err := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil); err != nil {
+			return nil, fmt.Errorf("加载官方插件 %q：%w", pkg.Manifest.Metadata.ID, err)
+		}
 		id := pkg.Manifest.Metadata.ID
 		if _, duplicate := builtInIDs[id]; duplicate {
 			return nil, fmt.Errorf("官方插件 ID %q 重复", id)

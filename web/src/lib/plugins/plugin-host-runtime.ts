@@ -106,6 +106,7 @@ export function createBeefTVPluginHost(pluginId: string, manifest?: PluginManife
                     ...item,
                     apiKey: "",
                     secretKey: "",
+                    headers: undefined,
                     hasApiKey: Boolean(item.apiKey || item.hasApiKey),
                 })) as unknown as Array<Record<string, unknown>>;
             },
@@ -114,40 +115,65 @@ export function createBeefTVPluginHost(pluginId: string, manifest?: PluginManife
                 if (!perms.includes("settings.write") || !resolvedManifest.trusted) {
                     throw new Error(`插件 ${pluginId} 缺少可信 settings.write 权限，无法修改模型渠道`);
                 }
-                const incoming = rawChannel as unknown as ModelChannel;
+                const incoming = rawChannel as unknown as Partial<ModelChannel>;
                 const targetId = String(incoming.id || "").trim();
-                if (!targetId || targetId === "beefapi") {
-                    throw new Error("不允许覆盖系统内置模型渠道");
+                const allowedPrefix = pluginId.replace(/^beeftv-plugin-/, "");
+                const isPluginOwnedId =
+                    Boolean(targetId) &&
+                    targetId !== "beefapi" &&
+                    (targetId === `${allowedPrefix}-channel` || targetId.startsWith(`${pluginId}:`));
+                if (!isPluginOwnedId) {
+                    throw new Error(`插件 ${pluginId} 仅允许写入自身命名空间下的模型渠道`);
                 }
                 const baseUrl = String(incoming.baseUrl || "").trim();
                 if (!/^https?:\/\//i.test(baseUrl)) {
                     throw new Error("渠道接口地址必须以 http:// 或 https:// 开头");
                 }
-                const state = useConfigStore.getState();
-                const latest = state.config;
-                const existing = latest.channels.find((item) => item.id === targetId);
-                if (existing?.scope === "system") {
-                    throw new Error("不允许覆盖系统内置模型渠道");
-                }
-                const channel: ModelChannel = existing
-                    ? { ...existing, ...incoming, id: targetId, baseUrl, scope: "user" }
-                    : { ...incoming, id: targetId, baseUrl, scope: "user" };
-                const { withChannels } = await import("@/pages/settings/channel-settings-pane");
-                const nextChannels = existing
-                    ? latest.channels.map((item) => (item.id === targetId ? channel : item))
-                    : [...latest.channels, channel];
-                const nextConfig = withChannels(latest, nextChannels);
+                const buildNextConfig = async () => {
+                    const latest = useConfigStore.getState().config;
+                    const existing = latest.channels.find((item) => item.id === targetId);
+                    if (existing?.scope === "system" || existing?.pinned || existing?.credentialRef) {
+                        throw new Error("不允许覆盖系统内置或受管凭证渠道");
+                    }
+                    const nextApiKey = typeof incoming.apiKey === "string" && incoming.apiKey.trim()
+                        ? incoming.apiKey.trim()
+                        : existing?.apiKey ?? "";
+                    const channel: ModelChannel = {
+                        id: targetId,
+                        name: String(incoming.name || existing?.name || targetId).trim(),
+                        baseUrl,
+                        apiKey: nextApiKey,
+                        hasApiKey: Boolean(nextApiKey || existing?.hasApiKey),
+                        apiFormat: incoming.apiFormat || existing?.apiFormat || "openai",
+                        enabled: typeof incoming.enabled === "boolean" ? incoming.enabled : (existing?.enabled ?? true),
+                        pinned: false,
+                        scope: "user",
+                        credentialRef: undefined,
+                        headers: existing?.headers,
+                        notes: typeof incoming.notes === "string" ? incoming.notes : existing?.notes,
+                        models: Array.isArray(incoming.models) ? incoming.models.filter((m): m is string => typeof m === "string" && Boolean(m.trim())) : (existing?.models ?? []),
+                        modelProfiles: Array.isArray(incoming.modelProfiles) ? incoming.modelProfiles : existing?.modelProfiles,
+                    };
+                    const { withChannels } = await import("@/pages/settings/channel-settings-pane");
+                    const nextChannels = existing
+                        ? latest.channels.map((item) => (item.id === targetId ? channel : item))
+                        : [...latest.channels, channel];
+                    return { channel, nextConfig: withChannels(latest, nextChannels) };
+                };
+                const { channel, nextConfig } = await buildNextConfig();
                 await commitModelConfig(nextConfig);
                 await flushModelConfig();
                 const persistence = getModelConfigPersistenceState();
                 if (persistence.status === "error") {
                     throw new Error(persistence.error || "保存模型配置失败");
                 }
-                state.replaceConfig(nextConfig);
+                const refreshed = await buildNextConfig();
+                useConfigStore.getState().replaceConfig(refreshed.nextConfig);
                 return {
                     ...channel,
                     apiKey: "",
                     secretKey: "",
+                    headers: undefined,
                     hasApiKey: Boolean(channel.apiKey || channel.hasApiKey),
                 } as unknown as Record<string, unknown>;
             },

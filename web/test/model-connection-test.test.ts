@@ -53,4 +53,10 @@ test("reference_to_video-only video models attach a reference test video automat
         return { video: { storageKey: "test-video", dataUrl: "" } };
     });
     expect(result).toContain("已完成视频生成");
+
+    const missingVideoUrl = {
+        ...configured,
+        modelProfiles: [{ ...configured.modelProfiles[0], defaultOptions: undefined }],
+    };
+    await expect(testChannelModelConnection(missingVideoUrl, "auto-hd", "video", "ll2-auto-hd-video", async () => ({}))).rejects.toThrow("defaultOptions.testVideoUrl");
 });

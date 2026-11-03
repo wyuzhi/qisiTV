@@ -394,8 +394,8 @@ func TestBuiltinLL2PluginPreinstalledAndRegistersProviders(t *testing.T) {
 	if view.Status != StatusEnabled || view.Source != OriginOfficial {
 		t.Fatalf("unexpected beeftv-plugin-ll2 view: status=%q source=%q", view.Status, view.Source)
 	}
-	if view.Management.ConfigurationScope != ConfigurationUser || view.Management.ActivationScope != ScopeUser {
-		t.Fatalf("expected ScopeUser/ConfigurationUser for beeftv-plugin-ll2, got activation=%q config=%q", view.Management.ActivationScope, view.Management.ConfigurationScope)
+	if view.Management.ConfigurationScope != ConfigurationUser || view.Management.ActivationScope != ScopeSystem {
+		t.Fatalf("expected ScopeSystem/ConfigurationUser for beeftv-plugin-ll2, got activation=%q config=%q", view.Management.ActivationScope, view.Management.ConfigurationScope)
 	}
 
 	reg := svc.Registry()
@@ -404,41 +404,53 @@ func TestBuiltinLL2PluginPreinstalledAndRegistersProviders(t *testing.T) {
 		req          protocol.GenerationRequest
 		wantPath     string
 		wantPollPath string
+		createJSON   string
+		wantTaskID   string
 		pollJSON     string
 	}{
 		{
 			providerID:   "ll2-seedance-video",
 			req:          protocol.GenerationRequest{Model: "doubao-seedance-2-0-fast", Prompt: "hello", Duration: 4, AspectRatio: "16:9", Resolution: "720p"},
 			wantPath:     "/seedance/api/v3/contents/generations/tasks",
-			wantPollPath: "/seedance/api/v3/contents/generations/tasks/task-1",
+			wantPollPath: "/seedance/api/v3/contents/generations/tasks/cgt-1",
+			createJSON:   `{"id":"cgt-1","status":"queued"}`,
+			wantTaskID:   "cgt-1",
 			pollJSON:     `{"id":"cgt-1","status":"succeeded","content":{"video_url":"https://cdn.example.com/a.mp4"}}`,
 		},
 		{
 			providerID:   "ll2-vidu-video",
 			req:          protocol.GenerationRequest{Model: "viduq3-turbo", Prompt: "hello", Duration: 5, AspectRatio: "16:9", Resolution: "720p"},
 			wantPath:     "/vidu/ent/v2/text2video",
-			wantPollPath: "/vidu/ent/v2/tasks/task-1/creations",
+			wantPollPath: "/vidu/ent/v2/tasks/vidu-1/creations",
+			createJSON:   `{"task_id":"vidu-1","state":"created"}`,
+			wantTaskID:   "vidu-1",
 			pollJSON:     `{"id":"vidu-1","state":"success","creations":[{"url":"https://cdn.example.com/b.mp4"}]}`,
 		},
 		{
 			providerID:   "ll2-minimax-video",
 			req:          protocol.GenerationRequest{Model: "MiniMax-H3", Prompt: "hello", Duration: 5, AspectRatio: "16:9", Resolution: "720P"},
 			wantPath:     "/v2/video_generation",
-			wantPollPath: "/v2/query/video_generation/task-1",
+			wantPollPath: "/v2/query/video_generation/mm-1",
+			createJSON:   `{"task_id":"mm-1","base_resp":{"status_code":0,"status_msg":"success"}}`,
+			wantTaskID:   "mm-1",
 			pollJSON:     `{"task_id":"mm-1","status":"Success","video_url":"https://cdn.example.com/c.mp4"}`,
 		},
 		{
 			providerID:   "ll2-super-vega-video",
 			req:          protocol.GenerationRequest{Model: "1.0-pro-mini", Prompt: "hello", Duration: 4, AspectRatio: "16:9", Resolution: "720P"},
 			wantPath:     "/super-vega/tasks",
-			wantPollPath: "/super-vega/tasks/task-1",
+			wantPollPath: "/super-vega/tasks/sv-1",
+			createJSON:   `{"Response":{"TaskId":"sv-1","RequestId":"req-1"}}`,
+			wantTaskID:   "sv-1",
 			pollJSON:     `{"Response":{"Status":"FINISH","AigcVideoTask":{"TaskId":"sv-1","Output":{"FileInfos":[{"FileUrl":"https://cdn.example.com/d.mp4"}]}}}}`,
 		},
 		{
 			providerID:   "ll2-auto-hd-video",
 			req:          protocol.GenerationRequest{Model: "auto-hd", Videos: []protocol.MediaReference{{URL: "https://cdn.example.com/src.mp4"}}, Resolution: "1080p"},
 			wantPath:     "/hd/tasks",
-			wantPollPath: "/hd/tasks/task-1",
+			wantPollPath: "/hd/tasks/hd-1",
+			createJSON:   `{"task_id":"hd-1","status":"created"}`,
+			wantTaskID:   "hd-1",
 			pollJSON:     `{"task_id":"hd-1","status":"finished","url":"https://cdn.example.com/e.mp4"}`,
 		},
 	}
@@ -447,36 +459,46 @@ func TestBuiltinLL2PluginPreinstalledAndRegistersProviders(t *testing.T) {
 		if !resolved {
 			t.Fatalf("expected provider %q from beeftv-plugin-ll2 to be registered in protocol registry", tc.providerID)
 		}
-		spec, err := adapter.BuildCreate(context.Background(), protocol.RequestContext{
+		reqCtx := protocol.RequestContext{
 			BaseURL: "https://api.ll2.cn",
 			Request: tc.req,
-		})
+		}
+		spec, err := adapter.BuildCreate(context.Background(), reqCtx)
 		if err != nil {
 			t.Fatalf("BuildCreate(%s) failed: %v", tc.providerID, err)
 		}
 		if spec.Path != tc.wantPath {
 			t.Fatalf("BuildCreate(%s) path = %q, want %q", tc.providerID, spec.Path, tc.wantPath)
 		}
-		pollSpec, err := adapter.BuildPoll(context.Background(), protocol.PollContext{
+		if spec.Body == nil {
+			t.Fatalf("BuildCreate(%s) produced nil body", tc.providerID)
+		}
+		created, err := adapter.ParseCreate(context.Background(), []byte(tc.createJSON))
+		if err != nil {
+			t.Fatalf("ParseCreate(%s) failed: %v", tc.providerID, err)
+		}
+		if created.TaskID != tc.wantTaskID {
+			t.Fatalf("ParseCreate(%s) TaskID = %q, want %q", tc.providerID, created.TaskID, tc.wantTaskID)
+		}
+		pollCtx := protocol.PollContext{
 			BaseURL: "https://api.ll2.cn",
 			Model:   tc.req.Model,
 			Request: tc.req,
-			TaskID:  "task-1",
-		})
+			TaskID:  created.TaskID,
+		}
+		pollSpec, err := adapter.BuildPoll(context.Background(), pollCtx)
 		if err != nil {
 			t.Fatalf("BuildPoll(%s) failed: %v", tc.providerID, err)
 		}
 		if pollSpec.Path != tc.wantPollPath {
 			t.Fatalf("BuildPoll(%s) path = %q, want %q", tc.providerID, pollSpec.Path, tc.wantPollPath)
 		}
-		polled, err := adapter.ParsePoll(context.Background(), protocol.PollContext{
-			BaseURL: "https://api.ll2.cn",
-			Model:   tc.req.Model,
-			Request: tc.req,
-			TaskID:  "task-1",
-		}, []byte(tc.pollJSON))
+		polled, err := adapter.ParsePoll(context.Background(), pollCtx, []byte(tc.pollJSON))
 		if err != nil {
 			t.Fatalf("ParsePoll(%s) failed: %v", tc.providerID, err)
+		}
+		if polled.TaskID != tc.wantTaskID {
+			t.Fatalf("ParsePoll(%s) TaskID = %q, want %q", tc.providerID, polled.TaskID, tc.wantTaskID)
 		}
 		if polled.Status != protocol.StatusSucceeded || len(polled.Result.Videos) != 1 {
 			t.Fatalf("ParsePoll(%s) unexpected result: status=%q videos=%v", tc.providerID, polled.Status, polled.Result.Videos)

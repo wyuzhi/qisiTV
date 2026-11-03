@@ -1330,6 +1330,9 @@
                   "$ref": "response.Response.TaskId"
                 },
                 {
+                  "$ref": "response.Response.AigcVideoTask.TaskId"
+                },
+                {
                   "$ref": "response.TaskId"
                 },
                 {

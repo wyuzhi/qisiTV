@@ -424,6 +424,9 @@ describe("plugin host slots, events, and lifecycle", () => {
             contributes: {},
         });
         expect(Array.isArray(trustedHost.channels?.list())).toBe(true);
+        await expect(
+            trustedHost.channels?.upsert({ id: "other-user-channel", baseUrl: "https://api.ll2.cn" }),
+        ).rejects.toThrow("仅允许写入自身命名空间下的模型渠道");
 
         // Sticky note plugin contributes canvas.node (sticky-note) and canvas.addNodeMenu
         expect(getPluginCanvasNodeRenderer("sticky-note")?.pluginId).toBe("beeftv-plugin-sticky-note");

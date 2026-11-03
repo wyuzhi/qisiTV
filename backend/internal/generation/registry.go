@@ -158,11 +158,14 @@ func LoadOfficialFallbackRegistry() *protocol.Registry {
 			if entry.IsDir() {
 				if entry.Name() == "beeftv-plugin-ll2" {
 					pkg, err := protocol.ParsePluginPackageDir(filepath.Join(directory, entry.Name()))
-					if err == nil {
-						if providers, err := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil); err == nil {
-							adapters = append(adapters, providers...)
-						}
+					if err != nil {
+						return
 					}
+					providers, err := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil)
+					if err != nil {
+						return
+					}
+					adapters = append(adapters, providers...)
 				}
 				continue
 			}
