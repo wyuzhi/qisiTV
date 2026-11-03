@@ -258,6 +258,7 @@ jobs:
           node -e 'const fs=require("fs"),p=require("path"); const bin=p.dirname(process.execPath); fs.appendFileSync(process.env.GITHUB_ENV, `BEEFTV_NODE_RUNTIME=${process.platform==="win32"?bin:p.dirname(bin)}\n`);'
 
       - name: Verify agent host packaging contract
+        if: runner.os == 'Linux'
         shell: bash
         run: bun test scripts/package-agent-host.test.mjs
 
@@ -305,7 +306,12 @@ jobs:
           BEEFTV_EXTRA_LDFLAGS: -X infinite-canvas/backend/internal/app.depthWindowsManifestPublicKeyBase64=${{ vars.BEEFTV_UPDATER_PUBLIC_KEY }}
           CGO_ENABLED: "1"
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-beeftv-windows-release.ps1
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-beeftv-windows-release.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($p in @('backend\cmd\desktop\build\bin\agent-host\runtime\node.exe', 'backend\cmd\desktop\build\bin\agent-host\runtime\npm.cmd', 'backend\cmd\desktop\build\bin\agent-host\runtime\node_modules\npm\bin\npm-cli.js')) {
+            if (!(Test-Path -LiteralPath $p -PathType Leaf)) { throw "Missing bundled Windows agent-host file: $p" }
+          }
 
       - name: Verify Windows video disconnect recovery
         if: runner.os == 'Windows'
@@ -317,7 +323,17 @@ jobs:
           go test ./internal/app -run 'TestWindowsVideoConnectionResetRecovery|TestVideoRecoverySocketResetNeverResubmits|TestVideoRecoveryLostReceiptNeverResubmits|TestVideoRecoveryBeefAPIQueryUsesOnlyGet' -count=1 -timeout=120s
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Package updater zip and incremental delta
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install NSIS
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'C:\Program Files (x86)\NSIS\makensis.exe')) { choco install nsis --no-progress -y; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
+
+      - name: Package updater zip, incremental delta, and native installer
         working-directory: backend
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
@@ -328,6 +344,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ../dist
+          python ../scripts/package-desktop-installer.py --platform "$PLATFORM" &
+          installer_pid=$!
+          trap 'kill "$installer_pid" 2>/dev/null || true' EXIT
           input="cmd/desktop/build/bin"
           if [[ "$PLATFORM" == darwin-* ]]; then
             input="$input/BeefTV.app"
@@ -338,7 +357,7 @@ jobs:
             --platform "$PLATFORM" \
             --input "$input" \
             --output "../dist/BeefTV-${VERSION}-${PLATFORM}.zip"
-          if [[ -n "${PREVIOUS_VERSION:-}" ]] && python3 -c 'import os, re, sys; m = re.match(r"^v(\d+)\.(\d+)\.(\d+)$", os.environ["VERSION"]); sys.exit(0 if m and (int(m[1]), int(m[2]), int(m[3])) >= (2, 1, 0) else 1)'; then
+          if [[ -n "${PREVIOUS_VERSION:-}" ]] && python -c 'import os, re, sys; m = re.match(r"^v(\d+)\.(\d+)\.(\d+)$", os.environ["VERSION"]); sys.exit(0 if m and (int(m[1]), int(m[2]), int(m[3])) >= (2, 1, 0) else 1)'; then
             if curl --fail --silent --show-error --location --retry 3 --max-time 60 \
               "${UPDATER_DOWNLOAD_BASE}/${PREVIOUS_VERSION}/desktop-update.json" \
               -o "$RUNNER_TEMP/prev-desktop-update.json" && \
@@ -359,20 +378,13 @@ jobs:
               echo "::warning::Previous release ${PREVIOUS_VERSION} ${PLATFORM} zip unavailable; skipping delta archive."
             fi
           fi
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install NSIS
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          if (!(Test-Path 'C:\Program Files (x86)\NSIS\makensis.exe')) { choco install nsis --no-progress -y; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
-
-      - name: Package native installer
-        shell: bash
-        run: python scripts/package-desktop-installer.py --platform '${{ matrix.platform }}'
+          python ../scripts/smoke-packaged-cli_test.py
+          python ../scripts/smoke-packaged-cli.py --archive "../dist/BeefTV-${VERSION}-${PLATFORM}.zip" --platform "$PLATFORM"
+          if ! wait "$installer_pid"; then
+            echo "::error::Native installer packaging failed"
+            exit 1
+          fi
+          trap - EXIT
 
       - name: Verify native installer lifecycle
         shell: bash
@@ -387,15 +399,6 @@ jobs:
           if [[ "$PLATFORM" == linux-* ]]; then payload="$payload/BeefTV-linux"; suffix='.deb'; fi
           command=(python scripts/smoke-desktop-installer.py --platform "$PLATFORM" --installer "dist/BeefTV-${VERSION}-${PLATFORM}${suffix}" --payload "$payload")
           if [[ "$PLATFORM" == linux-* ]]; then xvfb-run -a dbus-run-session -- "${command[@]}"; else "${command[@]}"; fi
-
-      - name: Verify MCP from final packaged CLI
-        shell: bash
-        env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-          PLATFORM: ${{ matrix.platform }}
-        run: |
-          python scripts/smoke-packaged-cli_test.py
-          python scripts/smoke-packaged-cli.py --archive "dist/BeefTV-${VERSION}-${PLATFORM}.zip" --platform "$PLATFORM"
 
       - name: Verify upgrades from released Windows clients
         if: runner.os == 'Windows'

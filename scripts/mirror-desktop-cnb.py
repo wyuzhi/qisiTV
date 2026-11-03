@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Trigger the CNB mirror and wait for its public verification record."""
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import datetime
 import hashlib
 import json
@@ -133,41 +134,57 @@ def expected_assets(release, version):
     return installers
 
 
-def verify_cnb_zips(version, zips, opener=None):
+def _verify_single_cnb_zip(version, item, opener=None):
     if opener is None:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), HTTPSOnlyRedirect()).open
-    for item in zips:
-        url = f"{PUBLIC}{version}/{item['name']}"
-        total = item["size"]
-        prefix = min(RESUME_PREFIX_BYTES, max(1, total // 2))
-        digest = hashlib.sha256()
-        received = 0
-        for range_header, expected_range, expected_len in [
-            (f"bytes=0-{prefix - 1}", f"bytes 0-{prefix - 1}/{total}", prefix),
-            (f"bytes={prefix}-", f"bytes {prefix}-{total - 1}/{total}", total - prefix),
-        ]:
-            req = urllib.request.Request(url, headers={
-                "User-Agent": f"BeefTV-Desktop-Updater/{version}",
-                "Range": range_header,
-                "Cache-Control": "no-cache",
-            })
-            try:
-                with opener(req, timeout=180) as response:
-                    if response.status != 206 or response.headers.get("Content-Range") != expected_range:
-                        raise RuntimeError(f"CNB updater zip failed Range check: {item['name']}")
-                    part = 0
-                    while chunk := response.read(1024 * 1024):
-                        part += len(chunk)
-                        if part > expected_len:
-                            raise RuntimeError(f"CNB updater zip exceeded expected Range size: {item['name']}")
-                        digest.update(chunk)
-                    if part != expected_len:
-                        raise RuntimeError(f"CNB updater zip Range truncated: {item['name']}")
-                    received += part
-            except (urllib.error.URLError, TimeoutError, OSError) as err:
-                raise RuntimeError(f"CNB updater zip transfer failed: {item['name']}") from err
-        if received != total or digest.hexdigest() != item["sha256"]:
-            raise RuntimeError(f"CNB updater zip SHA-256 mismatch: {item['name']}")
+    url = f"{PUBLIC}{version}/{item['name']}"
+    total = item["size"]
+    prefix = min(RESUME_PREFIX_BYTES, max(1, total // 2))
+    digest = hashlib.sha256()
+    received = 0
+    for range_header, expected_range, expected_len in [
+        (f"bytes=0-{prefix - 1}", f"bytes 0-{prefix - 1}/{total}", prefix),
+        (f"bytes={prefix}-", f"bytes {prefix}-{total - 1}/{total}", total - prefix),
+    ]:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": f"BeefTV-Desktop-Updater/{version}",
+            "Range": range_header,
+            "Cache-Control": "no-cache",
+        })
+        try:
+            with opener(req, timeout=180) as response:
+                if response.status != 206 or response.headers.get("Content-Range") != expected_range:
+                    raise RuntimeError(f"CNB updater zip failed Range check: {item['name']}")
+                part = 0
+                while chunk := response.read(1024 * 1024):
+                    part += len(chunk)
+                    if part > expected_len:
+                        raise RuntimeError(f"CNB updater zip exceeded expected Range size: {item['name']}")
+                    digest.update(chunk)
+                if part != expected_len:
+                    raise RuntimeError(f"CNB updater zip Range truncated: {item['name']}")
+                received += part
+        except (urllib.error.URLError, TimeoutError, OSError) as err:
+            raise RuntimeError(f"CNB updater zip transfer failed: {item['name']}") from err
+    if received != total or digest.hexdigest() != item["sha256"]:
+        raise RuntimeError(f"CNB updater zip SHA-256 mismatch: {item['name']}")
+
+
+def verify_cnb_zips(version, zips, opener=None):
+    if len(zips) <= 1:
+        for item in zips:
+            _verify_single_cnb_zip(version, item, opener)
+        return
+    pool = ThreadPoolExecutor(max_workers=min(4, len(zips)))
+    try:
+        futures = [pool.submit(_verify_single_cnb_zip, version, item, opener) for item in zips]
+        for future in as_completed(futures):
+            future.result()
+    except BaseException:
+        pool.shutdown(wait=True, cancel_futures=True)
+        raise
+    else:
+        pool.shutdown(wait=True)
 
 
 def record_matches(record, release, expected):
