@@ -359,23 +359,27 @@ func TestMultiSourceSwitchesOnIdleTimeoutAndSustainedLowSpeed(t *testing.T) {
 			locale:              "zh-CN",
 			timezone:            "Asia/Shanghai",
 			idleTimeout:         2 * time.Second,
-			minSpeedBytesPerSec: 256 * 1024, // require 256 KiB/s
+			minSpeedBytesPerSec: 64 * 1024, // require 64 KiB/s (~5.1 KiB per 80ms)
 			slowSpeedWindow:     80 * time.Millisecond,
 			serveAsset: func(w http.ResponseWriter, r *http.Request, zip []byte, call int) {
 				w.Header().Set("Content-Length", strconv.Itoa(len(zip)))
 				w.WriteHeader(http.StatusOK)
-				// Drip 1 KiB every 20ms (~50 KiB/s): keeps idle timer alive, but
-				// stays well below the 256 KiB/s threshold over 80ms.
-				for offset := 0; offset < len(zip); offset += 1024 {
+				// Flush an initial 2 KiB prefix immediately so partial progress is
+				// guaranteed before the slow window elapses, then drip 64 B every
+				// 15ms (~4.2 KiB/s): keeps idle timer alive while staying well
+				// below 64 KiB/s over 80ms.
+				const initialPrefix = 2048
+				_, _ = w.Write(zip[:initialPrefix])
+				w.(http.Flusher).Flush()
+				for offset := initialPrefix; offset < len(zip); offset += 64 {
 					select {
 					case <-r.Context().Done():
 						return
-					default:
+					case <-time.After(15 * time.Millisecond):
 					}
-					end := min(offset+1024, len(zip))
+					end := min(offset+64, len(zip))
 					_, _ = w.Write(zip[offset:end])
 					w.(http.Flusher).Flush()
-					time.Sleep(20 * time.Millisecond)
 				}
 			},
 		})
