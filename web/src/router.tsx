@@ -1,7 +1,10 @@
-import { lazy, Suspense, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { Navigate, Outlet, useLocation, useParams } from "react-router";
 
 import { createWorkspaceRouter } from "@/lib/app-routing";
+import "@/lib/plugins/builtin";
+import { syncActiveClientPlugins } from "@/lib/plugins/plugin-client-loader";
+import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { FullScreenLoader, WorkspaceRouteLoader } from "@/components/ui/aceternity/full-screen-loader";
 import { loadAgentsPage, loadAssetsPage, loadCanvasPage, loadCanvasProjectPage, loadCreatePage, loadHomePage, loadProjectDetailPage } from "@/lib/workspace-route-modules";
 import { CanvasRefreshShell } from "@/pages/canvas/canvas-refresh-shell";
@@ -15,8 +18,8 @@ const CanvasPage = lazy(loadCanvasPage);
 const CanvasProjectPage = lazy(loadCanvasProjectPage);
 const CreatePage = lazy(loadCreatePage);
 const NotFound = lazy(() => import("@/pages/not-found"));
-const PluginsPage = lazy(() => import("@/pages/plugins"));
 const EagleLibraryPage = lazy(() => import("@/pages/plugins/eagle"));
+const PluginsPage = lazy(() => import("@/pages/plugins"));
 const ProjectDetailPage = lazy(loadProjectDetailPage);
 const SettingsPage = lazy(() => import("@/pages/settings"));
 const SkillsPage = lazy(() => import("@/pages/skills/marketplace"));
@@ -49,6 +52,30 @@ function LocalAwareProjectRoute() {
 function LegacyProjectAliasRoute() {
     const { projectId, "*": rest } = useParams();
     return <Navigate to={`/projects/${projectId}${rest ? `/${rest}` : ""}`} replace />;
+}
+
+function PluginHostPageRoute() {
+    const { pluginId = "", "*": subpath = "" } = useParams();
+    useEffect(() => {
+        syncActiveClientPlugins();
+    }, [pluginId]);
+    const pageEntries = usePluginSlot("app.page");
+    const normalizedSubpath = subpath.replace(/^\/+|\/+$/g, "");
+    const matched =
+        pageEntries.find(
+            (entry) =>
+                entry.pluginId === pluginId &&
+                (entry.payload.path || "").replace(/^\/+|\/+$/g, "") === normalizedSubpath,
+        ) ?? pageEntries.find((entry) => entry.pluginId === pluginId);
+
+    if (!matched) {
+        if (pluginId === "eagle-asset-connector") {
+            return deferred(<EagleLibraryPage />);
+        }
+        return deferred(<NotFound />);
+    }
+    const PageComp = matched.payload.component;
+    return deferred(<PageComp pluginId={pluginId} subpath={normalizedSubpath} />);
 }
 
 /**
@@ -93,7 +120,15 @@ export const router = createWorkspaceRouter([
             },
             {
                 path: "/plugins/eagle",
-                element: <RequireFeature feature="pluginCenterEnabled">{deferred(<EagleLibraryPage />)}</RequireFeature>,
+                element: <Navigate to="/p/eagle-asset-connector" replace />,
+            },
+            {
+                path: "/p/:pluginId",
+                element: <RequireFeature feature="pluginCenterEnabled"><PluginHostPageRoute /></RequireFeature>,
+            },
+            {
+                path: "/p/:pluginId/*",
+                element: <RequireFeature feature="pluginCenterEnabled"><PluginHostPageRoute /></RequireFeature>,
             },
             { path: "/settings", element: deferred(<SettingsPage />) },
             { path: "/agents", element: deferred(<AgentsPage />) },

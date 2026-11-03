@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { serveEmptySkillContext } from './skill-context-fixture.mjs';
+import { serveEmptyHostState } from './skill-context-fixture.mjs';
 
 const root = path.resolve(process.argv[2] || '.');
 const destination = process.argv[3];
@@ -62,7 +62,7 @@ const provider = createServer(async (req, res) => {
 const ops = createServer(async (req, res) => {
   res.setHeader('content-type', 'application/json');
   if (req.headers['x-beeftv-agent-token'] !== credential) return res.writeHead(403).end(JSON.stringify({ code: 403 }));
-  if (serveEmptySkillContext(req, res)) return;
+  if (serveEmptyHostState(req, res)) return;
   if (req.url === '/api/ops') return res.end(JSON.stringify({ code: 0, data: { ops: descriptors } }));
   if (req.url.startsWith('/api/assistant/runtime/turns/')) {
     const turnId = decodeURIComponent(req.url.split('/')[5]);

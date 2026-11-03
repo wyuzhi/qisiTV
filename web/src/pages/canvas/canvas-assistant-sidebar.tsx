@@ -19,6 +19,7 @@ import { ASSISTANT_CONTINUE_PROMPT, ASSISTANT_CHECK_RESULTS_PROMPT, ASSISTANT_ST
 import { CanvasAssistantComposer } from "./canvas-assistant-composer";
 import { CanvasAssistantReply, CanvasAssistantTurnView, CanvasAssistantUserMessage } from "./canvas-assistant-turn";
 import { AssistantReasoning } from "@/components/ai/message-reasoning";
+import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { ASSISTANT_LIVE_TURN_KEY, ASSISTANT_MAX_WIDTH, ASSISTANT_MIN_WIDTH, type CanvasAssistantController } from "./use-canvas-assistant";
 import "./canvas-assistant-sidebar.css";
 
@@ -190,6 +191,11 @@ export function CanvasAssistantSidebar(props: Props) {
           }))
         : [{ key: "empty", label: "还没有别的对话", disabled: true }];
 
+    const sidePanelEntries = usePluginSlot("canvas.sidePanel");
+    const [activeSidePanelId, setActiveSidePanelId] = useState<string>("assistant");
+    const activePluginPanel = sidePanelEntries.find((entry) => entry.payload.id === activeSidePanelId);
+    const ActivePluginPanelComp = activePluginPanel?.payload.component;
+
     const content = (
         <div className="canvas-assistant-panel" data-canvas-no-zoom>
             <header className="canvas-assistant-header">
@@ -214,6 +220,35 @@ export function CanvasAssistantSidebar(props: Props) {
                 </Tooltip>
             </header>
 
+            {sidePanelEntries.length > 0 ? (
+                <div className="flex items-center gap-1 border-b border-[var(--border)] px-3 py-1.5 text-xs">
+                    <button
+                        type="button"
+                        className={`rounded-md px-2 py-1 font-medium ${!activePluginPanel ? "bg-[var(--muted)] text-[var(--foreground)]" : "text-[var(--muted-foreground)]"}`}
+                        onClick={() => setActiveSidePanelId("assistant")}
+                    >
+                        创作助手
+                    </button>
+                    {sidePanelEntries.map((entry) => (
+                        <button
+                            key={entry.entryId}
+                            type="button"
+                            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 font-medium ${activePluginPanel?.entryId === entry.entryId ? "bg-[var(--muted)] text-[var(--foreground)]" : "text-[var(--muted-foreground)]"}`}
+                            onClick={() => setActiveSidePanelId(entry.payload.id)}
+                        >
+                            {entry.payload.icon}
+                            <span>{entry.payload.title}</span>
+                        </button>
+                    ))}
+                </div>
+            ) : null}
+
+            {ActivePluginPanelComp ? (
+                <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                    <ActivePluginPanelComp canvasId={assistant.canvasId ?? undefined} selectedNodeIds={selectedNodeIds} />
+                </div>
+            ) : (
+                <>
             {notice ? (
                 <div className="canvas-assistant-notice" role="status">
                     <span>{notice.text}</span>
@@ -361,6 +396,8 @@ export function CanvasAssistantSidebar(props: Props) {
                 setSkillsOpen(true);
                 void loadSkills();
             }} />
+                </>
+            )}
         </div>
     );
 

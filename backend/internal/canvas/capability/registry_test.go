@@ -305,3 +305,31 @@ func TestRegistryResolveUnknownTypeFailsClosed(t *testing.T) {
 		t.Fatal("unknown generation mode resolved")
 	}
 }
+
+func TestRegistryDynamicPluginDescriptors(t *testing.T) {
+	registry := SharedRegistry()
+	defer registry.ResetPluginDescriptors()
+
+	err := registry.SetPluginDescriptors("storyboard-grid", []Descriptor{
+		{
+			Type:          "storyboard-grid",
+			Label:         "分镜九宫格",
+			DefaultWidth:  520,
+			DefaultHeight: 420,
+		},
+	})
+	if err != nil {
+		t.Fatalf("SetPluginDescriptors failed: %v", err)
+	}
+	resolved, ok := registry.Resolve("storyboard-grid")
+	if !ok || resolved.Label != "分镜九宫格" || resolved.DefaultWidth != 520 || resolved.DefaultHeight != 420 {
+		t.Fatalf("resolved plugin descriptor = %#v, ok=%v", resolved, ok)
+	}
+	if err := registry.SetPluginDescriptors("other-plugin", []Descriptor{{Type: "text", Label: "冲突"}}); err == nil {
+		t.Fatal("expected collision with built-in type to fail")
+	}
+	registry.RemovePluginDescriptors("storyboard-grid")
+	if _, ok := registry.Resolve("storyboard-grid"); ok {
+		t.Fatal("expected storyboard-grid to be removed after RemovePluginDescriptors")
+	}
+}

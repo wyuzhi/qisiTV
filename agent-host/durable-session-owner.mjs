@@ -180,6 +180,11 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
     if (active) {
       if (agent.model?.provider !== modelRef.provider || agent.model?.modelId !== modelRef.modelId) throw fail('turn_model_frozen');
     } else {
+      if (entry.pendingPluginExtensions && typeof entry.reloadPluginExtensions === 'function') {
+        const pending = entry.pendingPluginExtensions;
+        entry.pendingPluginExtensions = null;
+        await entry.reloadPluginExtensions(pending);
+      }
       // Existing conversations pick up the host's current reasoning level on
       // their next new round, as they pick up the model.
       await entry.root.configure({ model: modelRef, thinkingLevel }, CTX);
@@ -764,6 +769,11 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
     });
     forgetStop(entry.canvasId, entry.sessionId, active.requestId);
     entry.busy = false;
+    if (entry.pendingPluginExtensions && typeof entry.reloadPluginExtensions === 'function') {
+      const pending = entry.pendingPluginExtensions;
+      entry.pendingPluginExtensions = null;
+      await entry.reloadPluginExtensions(pending);
+    }
   }
   async function fenceStop(entry, requestId = entry.input?.requestId) {
     if (!requestId) return null;
@@ -876,6 +886,13 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
     }
     return out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
+  async function reloadPluginExtensions(newExtensions) {
+    for (const entry of sessions.values()) {
+      if (typeof entry.reloadPluginExtensions === 'function') {
+        await entry.reloadPluginExtensions(newExtensions);
+      }
+    }
+  }
   async function disposeAll() {
     closed = true;
     await Promise.allSettled([...locks.values()]);
@@ -884,5 +901,5 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
     return entries.length;
   }
   return { sessions, createSession, handoffSession, activateSession, ensureSession, ensureCurrentSession, submit, recover, supplement, beginPendingInput, fenceStop, wait,
-    stop, cancelRequest, hasSession, history, status, recordEvent, listCanvasSessions, disposeAll, skillContext, changeSkillContext };
+    stop, cancelRequest, hasSession, history, status, recordEvent, listCanvasSessions, reloadPluginExtensions, disposeAll, skillContext, changeSkillContext };
 }

@@ -11,12 +11,9 @@ import { WorkspaceErrorState, WorkspaceLoadingState, WorkspaceState } from "@/co
 import { AssetMediaPreview } from "@/components/asset-media-preview";
 import { CachedResourceImage } from "@/components/cached-resource-image";
 import { AssetLibraryCard, AssetLibraryCardMedia } from "@/components/assets/asset-library-card";
-import {
-    assetFolderQueryKey,
-    assetLibraryQueryKey,
-    assetPickerQueryKey,
-    mergeHistoryLibraryAssets,
-} from "@/components/assets/asset-view-session";
+import { assetFolderQueryKey, assetLibraryQueryKey, assetPickerQueryKey, mergeHistoryLibraryAssets } from "@/components/assets/asset-view-session";
+import { emitPluginEvent } from "@/lib/plugins/plugin-events";
+import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { Switch } from "@/components/ui/base/switch";
 import { ownedResourceIdFromMediaRef } from "@/services/api/resources";
 import { useResourceVideoPlayback } from "@/hooks/use-resource-video-playback";
@@ -669,6 +666,7 @@ export default function AssetsPage() {
                 message.warning(localSavedRemotePendingMessage("素材已在本地导入", error));
             }
             message.success(`已导入 ${imported} 个素材`);
+            emitPluginEvent("assets.imported", { assets: importedAssets.map((item) => ({ id: item.id, name: item.title, type: item.kind, url: item.coverUrl || "" })) });
             progress.done("已导入 " + imported + " 个素材");
         } catch (error) {
             progress.fail("素材包导入未完成，请查看错误后重试");
@@ -1295,21 +1293,15 @@ function AssetCard({
         finally { renameInFlight.current = false; }
     };
     const deleteConfirmRequested = useRef(false);
-    const openDeleteConfirm = () => {
-        deleteConfirmRequested.current = true;
-        setMenuOpen(true);
-        onDelete();
-    };
-    const closeDeleteConfirm = () => {
-        if (deletePending) return;
-        deleteConfirmRequested.current = false;
-        onCancelDelete();
-    };
+    const pluginItemActions = usePluginSlot("assets.itemActions").filter((entry) => entry.payload.when ? entry.payload.when({ asset: asset as Asset }) : true);
+    const openDeleteConfirm = () => { deleteConfirmRequested.current = true; setMenuOpen(true); onDelete(); };
+    const closeDeleteConfirm = () => { if (deletePending) return; deleteConfirmRequested.current = false; onCancelDelete(); };
     const menuItems: MenuProps["items"] = [
         { key: "rename", icon: <PencilLine className="size-3.5" />, label: "重命名", onClick: () => { setRenameDraft(asset.title); setRenaming(true); } },
         ...(asset.kind === "text" ? [{ key: "copy", icon: <Copy className="size-3.5" />, label: "复制文本", onClick: () => void onCopy(asset) }] : []),
         ...(asset.kind === "image" || asset.kind === "video" || asset.kind === "audio" || asset.kind === "model" ? [{ key: "download", icon: <Download className="size-3.5" />, label: "下载", onClick: () => onDownload(asset) }] : []),
         { key: "move", icon: <FolderOpen className="size-3.5" />, label: "移动到分类", children: folderOptions.map((folder) => ({ key: folder.value || "uncategorized", label: folder.label, onClick: () => onMoveToFolder(folder.value) })) },
+        ...pluginItemActions.map((entry) => ({ key: `plugin:${entry.entryId}`, icon: entry.payload.icon, label: entry.payload.label, onClick: () => void entry.payload.onSelect({ asset: asset as Asset }) })),
         { type: "divider" as const },
         { key: "delete", danger: true, icon: <Trash2 className="size-3.5" />, label: (
             <Popover

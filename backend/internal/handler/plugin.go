@@ -45,6 +45,37 @@ func RegisterPluginRoutes(r *gin.RouterGroup, center pluginCenter, hosted ...boo
 		capability := strings.TrimSpace(c.Query("capability"))
 		ok(c, gin.H{"providers": center.PluginDomain().ProviderCatalog(scope, capability, false)})
 	})
+	catalogRoutes.GET("/packages/enabled", func(c *gin.Context) {
+		ok(c, gin.H{"packages": center.PluginDomain().EnabledPackages()})
+	})
+	catalogRoutes.GET("/:id/files/*filepath", func(c *gin.Context) {
+		targetPath, contentType, err := center.PluginDomain().ResolvePackageFile(c.Param("id"), c.Param("filepath"))
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		c.Header("X-Content-Type-Options", "nosniff")
+		if contentType != "" {
+			c.Header("Content-Type", contentType)
+		}
+		c.File(targetPath)
+	})
+	catalogRoutes.POST("/:id/load-error", func(c *gin.Context) {
+		var request struct {
+			Error string `json:"error"`
+		}
+		if err := c.ShouldBindJSON(&request); err != nil {
+			fail(c, http.StatusBadRequest, err)
+			return
+		}
+		plugin, err := center.PluginDomain().SetLoadError(c.Param("id"), strings.TrimSpace(request.Error))
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"plugin": plugin})
+	})
 	statusRoutes := r.Group("/plugins")
 	statusRoutes.GET("/status", func(c *gin.Context) {
 		user, err := currentUser(c, center)
@@ -86,6 +117,51 @@ func RegisterPluginRoutes(r *gin.RouterGroup, center pluginCenter, hosted ...boo
 		}
 		ok(c, gin.H{"plugins": listed, "states": states})
 	})
+	pluginRoutes.GET("/market/search", func(c *gin.Context) {
+		items, err := center.PluginDomain().SearchMarket(c.Request.Context(), c.Query("q"))
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"items": items})
+	})
+	pluginRoutes.POST("/install", func(c *gin.Context) {
+		if _, ok := requirePluginAdmin(c, center); !ok {
+			return
+		}
+		var request struct {
+			Source   string `json:"source"`
+			Registry string `json:"registry"`
+		}
+		if err := c.ShouldBindJSON(&request); err != nil {
+			fail(c, http.StatusBadRequest, err)
+			return
+		}
+		plugin, err := center.PluginDomain().InstallPackage(request.Source, request.Registry)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"plugin": plugin})
+	})
+	pluginRoutes.POST("/:id/update", func(c *gin.Context) {
+		if _, ok := requirePluginAdmin(c, center); !ok {
+			return
+		}
+		var request struct {
+			Registry string `json:"registry"`
+		}
+		if err := c.ShouldBindJSON(&request); err != nil {
+			fail(c, http.StatusBadRequest, err)
+			return
+		}
+		plugin, err := center.PluginDomain().UpdatePackage(c.Param("id"), request.Registry)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"plugin": plugin})
+	})
 	pluginRoutes.POST("", func(c *gin.Context) {
 		user, err := currentUser(c, center)
 		if err != nil {
@@ -113,6 +189,16 @@ func RegisterPluginRoutes(r *gin.RouterGroup, center pluginCenter, hosted ...boo
 		}
 		if err != nil {
 			fail(c, http.StatusBadRequest, err)
+			return
+		}
+		lowerName := strings.ToLower(strings.TrimSpace(fileName))
+		if strings.HasSuffix(lowerName, ".tgz") {
+			plugin, err := center.PluginDomain().InstallPackageArchive(data, c.PostForm("registry"))
+			if err != nil {
+				failService(c, err)
+				return
+			}
+			ok(c, gin.H{"plugin": plugin})
 			return
 		}
 		plugin, err := center.InstallPluginForAdmin(user, data, fileName)
@@ -339,6 +425,18 @@ func requireEnabledPlugin(c *gin.Context, center pluginCenter, pluginID string) 
 	user, err := currentUser(c, center)
 	if err == nil {
 		err = center.RequirePluginForUser(user.ID, pluginID)
+	}
+	if err != nil {
+		failService(c, err)
+		return nil, false
+	}
+	return user, true
+}
+
+func requirePluginAdmin(c *gin.Context, center pluginCenter) (*model.User, bool) {
+	user, err := currentUser(c, center)
+	if err == nil {
+		err = center.RequireAdmin(user)
 	}
 	if err != nil {
 		failService(c, err)

@@ -1,7 +1,7 @@
 import { CollectionToolbar } from "@/components/layout/collection-toolbar";
-import { App, Button, Input, Modal, Select, Typography } from "antd";
+import { App, Button, Input, InputNumber, Modal, Select, Typography } from "antd";
 import { Switch } from "@/components/ui/base/switch";
-import { AudioLines, CalendarDays, CheckCircle2, Clock3, ExternalLink, Film, FolderOpen, Image as ImageIcon, MessageSquareText, PlugZap, RefreshCw, Search, Settings2, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { ArrowUpCircle, AudioLines, CalendarDays, CheckCircle2, Clock3, ExternalLink, Film, Image as ImageIcon, MessageSquareText, Plus, PlugZap, RefreshCw, Search, Settings2, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
@@ -13,16 +13,28 @@ import { EAGLE_PLUGIN_ID } from "@/lib/plugins/builtin/eagle";
 import { PROMPT_OPTIMIZER_PLUGIN_ID } from "@/lib/plugins/builtin/prompt-optimizer";
 import { RUNNINGHUB_PLUGIN_ID } from "@/lib/plugins/builtin/workflows";
 import { isOfficialApplicationPluginId } from "@/lib/plugins/official-applications";
-import type { PluginManifest, PluginManifestV2, RegisteredPlugin } from "@/lib/plugins/plugin-types";
-import { getEagleLibrary, type EagleFolder } from "@/services/api/eagle";
-import { fetchPlugins, setUserPluginEnabled, type BackendPlugin, type PluginState } from "@/services/api/plugins";
-import { useAppearanceStore } from "@/stores/use-appearance-store";
+import { deactivateClientPlugin, syncActiveClientPlugins } from "@/lib/plugins/plugin-client-loader";
+import { PLUGIN_INSTALL_REQUEST_EVENT } from "@/lib/plugins/plugin-host-runtime";
+import type { PluginField, PluginInstallConfirmRequest, PluginManifest, PluginManifestV2, RegisteredPlugin } from "@/lib/plugins/plugin-types";
+import { usePluginSlot } from "@/lib/plugins/slot-registry";
+import { EaglePluginSettingsPanel } from "@/pages/plugins/eagle";
+import {
+    installPluginPackage,
+    setPluginPlatformEnabled,
+    setUserPluginEnabled,
+    uninstallPlugin,
+    updatePluginPackage,
+    type BackendPlugin,
+    type PluginState,
+} from "@/services/api/plugins";
+import { syncPluginsFromBackend } from "@/services/plugin-sync";
 import { usePluginStore } from "@/stores/use-plugin-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { isLocalRuntimeMode } from "@/lib/runtime-mode";
 import { workspaceCapabilities } from "@/services/workspace-mode";
 
 import { PluginDetailsModal } from "./plugin-documentation-modals";
+import { PluginInstallConfirmModal } from "./plugin-install-confirm-modal";
 import "./plugins.css";
 
 const categoryLabels: Record<string, string> = {
@@ -69,7 +81,6 @@ const protocolSectionMeta = [
 export default function PluginsPage() {
     const { message } = App.useApp();
     const navigate = useNavigate();
-    const brandName = useAppearanceStore((state) => state.appearance.brandName);
     const user = useUserStore((state) => state.user);
     const features = useUserStore((state) => state.features);
     const localRuntime = isLocalRuntimeMode() || workspaceCapabilities().local;
@@ -77,45 +88,58 @@ export default function PluginsPage() {
     const installations = usePluginStore((state) => state.installations);
     const ensurePlugin = usePluginStore((state) => state.ensurePlugin);
     const setEnabled = usePluginStore((state) => state.setEnabled);
+    const removePlugin = usePluginStore((state) => state.removePlugin);
     const setRuntimeStatuses = usePluginStore((state) => state.setRuntimeStatuses);
     const setPluginStates = usePluginStore((state) => state.setPluginStates);
     const pluginStates = usePluginStore((state) => state.pluginStates);
     const updateConfig = usePluginStore((state) => state.updateConfig);
     const builtinPlugins = useMemo(() => listRegisteredPlugins(), []);
+    const pluginCenterSections = usePluginSlot("pluginCenter.section");
+    const appSettingsEntries = usePluginSlot("app.settings");
     const [backendPlugins, setBackendPlugins] = useState<BackendPlugin[]>([]);
     const [backendPluginsLoading, setBackendPluginsLoading] = useState(false);
     const [settingsPluginId, setSettingsPluginId] = useState<string | null>(null);
     const [detailsPluginId, setDetailsPluginId] = useState<string | null>(null);
     const [detailsRestoreFocus, setDetailsRestoreFocus] = useState(false);
+    const [installModalOpen, setInstallModalOpen] = useState(false);
+    const [installPendingRequest, setInstallPendingRequest] = useState<PluginInstallConfirmRequest | null>(null);
+    const [installing, setInstalling] = useState(false);
+    const [updatingPluginId, setUpdatingPluginId] = useState<string | null>(null);
     const [search, setSearch] = useState("");
     const [categoryFilter, setCategoryFilter] = useState("all");
     const [statusFilter, setStatusFilter] = useState<"all" | "enabled" | "disabled">("all");
     const [trustFilter, setTrustFilter] = useState<"all" | "trusted">("all");
-    const [eagleBaseUrl, setEagleBaseUrl] = useState("http://localhost:41595");
-    const [eagleAutoUploadGenerated, setEagleAutoUploadGenerated] = useState(true);
-    const [eagleGeneratedFolderId, setEagleGeneratedFolderId] = useState("");
-    const [eagleFolders, setEagleFolders] = useState<EagleFolder[]>([]);
-    const [eagleFoldersLoading, setEagleFoldersLoading] = useState(false);
-    const [eagleFoldersError, setEagleFoldersError] = useState("");
 
     useEffect(() => {
         for (const plugin of builtinPlugins) ensurePlugin(plugin.manifest);
+        syncActiveClientPlugins();
     }, [builtinPlugins, ensurePlugin]);
 
+    useEffect(() => {
+        const handleRequest = (event: Event) => {
+            const custom = event as CustomEvent<PluginInstallConfirmRequest>;
+            if (custom.detail) {
+                setInstallPendingRequest(custom.detail);
+                setInstallModalOpen(true);
+            }
+        };
+        window.addEventListener(PLUGIN_INSTALL_REQUEST_EVENT, handleRequest);
+        return () => window.removeEventListener(PLUGIN_INSTALL_REQUEST_EVENT, handleRequest);
+    }, []);
+
     const reloadBackendPlugins = async () => {
-        if (localRuntime) {
-            setBackendPlugins([]);
-            setPluginStates({});
-            return;
-        }
         setBackendPluginsLoading(true);
         try {
-            const result = await fetchPlugins();
-            setBackendPlugins(result.plugins);
-            setPluginStates(result.states);
+            const result = await syncPluginsFromBackend();
+            setBackendPlugins(result.plugins || []);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "读取插件中心失败");
+            if (!localRuntime) {
+                message.error(error instanceof Error ? error.message : "读取插件中心失败");
+            }
             setBackendPlugins([]);
+            if (localRuntime) {
+                setPluginStates({});
+            }
         } finally {
             setBackendPluginsLoading(false);
         }
@@ -132,17 +156,6 @@ export default function PluginsPage() {
         return [...byId.values()];
     }, [builtinPlugins, remotePlugins]);
     const backendPluginById = useMemo(() => new Map(backendPlugins.map((plugin) => [plugin.manifest.id, plugin])), [backendPlugins]);
-
-    const eagle = installations.find((item) => item.manifest.id === EAGLE_PLUGIN_ID);
-
-    useEffect(() => {
-        const configured = eagle?.config.baseUrl;
-        if (typeof configured === "string" && configured.trim()) setEagleBaseUrl(configured);
-        const autoUpload = eagle?.config.autoUploadGenerated;
-        setEagleAutoUploadGenerated(autoUpload !== false && autoUpload !== "false");
-        const folderId = eagle?.config.generatedFolderId;
-        setEagleGeneratedFolderId(typeof folderId === "string" ? folderId : "");
-    }, [eagle?.config.baseUrl, eagle?.config.autoUploadGenerated, eagle?.config.generatedFolderId]);
 
     const filteredPlugins = useMemo(() => {
         const normalizedSearch = search.trim().toLocaleLowerCase();
@@ -200,56 +213,96 @@ export default function PluginsPage() {
 
     const settingsPlugin = settingsPluginId ? registeredPlugins.find((plugin) => plugin.manifest.id === settingsPluginId) : undefined;
     const settingsInstallation = settingsPlugin ? installations.find((item) => item.manifest.id === settingsPlugin.manifest.id) : undefined;
-    const settingsEnabled = settingsPlugin ? (pluginStates[settingsPlugin.manifest.id]?.effectiveEnabled ?? Boolean(settingsInstallation?.enabled)) : false;
     const detailsPlugin = detailsPluginId ? registeredPlugins.find((plugin) => plugin.manifest.id === detailsPluginId) : undefined;
 
-    const hasPluginConfiguration = (plugin: RegisteredPlugin) => Boolean(plugin.manifest.configuration?.fields?.length);
-    const canConfigurePlugin = (plugin: RegisteredPlugin) => localRuntime ? hasPluginConfiguration(plugin) : Boolean(pluginStates[plugin.manifest.id]?.canConfigure) && (hasPluginConfiguration(plugin) || plugin.manifest.id === RUNNINGHUB_PLUGIN_ID);
+    const hasPluginConfiguration = (plugin: RegisteredPlugin) =>
+        Boolean(plugin.manifest.configuration?.fields?.length) ||
+        appSettingsEntries.some((entry) => entry.pluginId === plugin.manifest.id);
+    const canConfigurePlugin = (plugin: RegisteredPlugin) =>
+        localRuntime
+            ? hasPluginConfiguration(plugin)
+            : Boolean(pluginStates[plugin.manifest.id]?.canConfigure) &&
+              (hasPluginConfiguration(plugin) || plugin.manifest.id === RUNNINGHUB_PLUGIN_ID);
 
     const isPluginEnabled = (plugin: RegisteredPlugin, installation = installations.find((item) => item.manifest.id === plugin.manifest.id)) => pluginStates[plugin.manifest.id]?.effectiveEnabled ?? Boolean(installation?.enabled);
 
     const togglePlugin = async (plugin: RegisteredPlugin, enabled: boolean) => {
         try {
-            if (localRuntime) {
+            const remote = backendPluginById.get(plugin.manifest.id);
+            if (localRuntime && !remote && !(plugin.manifest.id in pluginStates)) {
                 setEnabled(plugin.manifest.id, enabled);
                 message.success(`${plugin.manifest.name}${enabled ? "已启用" : "已停用"}`);
                 return;
             }
-            const next = await setUserPluginEnabled(plugin.manifest.id, enabled);
-            setEnabled(plugin.manifest.id, enabled);
+            const next = remote?.management.activationScope === "system"
+                ? await setPluginPlatformEnabled(plugin.manifest.id, enabled)
+                : await setUserPluginEnabled(plugin.manifest.id, enabled);
+            setEnabled(plugin.manifest.id, next.effectiveEnabled ?? enabled);
             setPluginStates({ ...usePluginStore.getState().pluginStates, [next.pluginId]: next });
             if (next.pluginId === RUNNINGHUB_PLUGIN_ID) {
                 setRuntimeStatuses({ ...usePluginStore.getState().runtimeStatuses, [next.pluginId]: next.effectiveEnabled ? "enabled" : "disabled" });
             }
             message.success(`${plugin.manifest.name}${enabled ? "已启用" : "已停用"}`);
         } catch (error) {
+            if (localRuntime) {
+                setEnabled(plugin.manifest.id, enabled);
+                message.success(`${plugin.manifest.name}${enabled ? "已启用" : "已停用"}`);
+                return;
+            }
             message.error(error instanceof Error ? error.message : "更新插件状态失败");
         }
     };
 
-    const loadEagleFolders = async (url = eagleBaseUrl) => {
-        setEagleFoldersLoading(true);
-        setEagleFoldersError("");
+    const handleInstallConfirm = async (request: PluginInstallConfirmRequest) => {
+        setInstalling(true);
         try {
-            const result = await getEagleLibrary(url.trim().replace(/\/$/, ""));
-            setEagleFolders(result.library.folders || []);
-        } catch (reason) {
-            setEagleFoldersError(reason instanceof Error ? reason.message : "读取 Eagle 文件夹失败");
-            setEagleFolders([]);
+            const installed = await installPluginPackage({ source: request.source, registry: request.registry });
+            deactivateClientPlugin(installed.manifest.id);
+            setInstallModalOpen(false);
+            setInstallPendingRequest(null);
+            message.success(`已安装插件「${installed.manifest.name}」`);
+            await reloadBackendPlugins();
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "安装插件失败");
         } finally {
-            setEagleFoldersLoading(false);
+            setInstalling(false);
         }
     };
 
-    const saveEagleConfig = () => {
-        const baseUrl = eagleBaseUrl.trim().replace(/\/$/, "");
-        if (!/^https?:\/\//i.test(baseUrl)) {
-            message.error("Eagle 地址必须以 http:// 或 https:// 开头");
-            return;
+    const handleUpdatePlugin = async (pluginId: string) => {
+        setUpdatingPluginId(pluginId);
+        try {
+            const updated = await updatePluginPackage(pluginId);
+            deactivateClientPlugin(updated.manifest.id);
+            message.success(`插件「${updated.manifest.name}」已更新到 v${updated.manifest.version}`);
+            await reloadBackendPlugins();
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "更新插件失败");
+        } finally {
+            setUpdatingPluginId(null);
         }
-        updateConfig(EAGLE_PLUGIN_ID, { baseUrl, autoUploadGenerated: eagleAutoUploadGenerated, generatedFolderId: eagleGeneratedFolderId });
-        message.success("Eagle 插件配置已保存");
     };
+
+    const handleUninstallPlugin = async (plugin: RegisteredPlugin) => {
+        try {
+            if (!localRuntime || backendPluginById.has(plugin.manifest.id)) {
+                await uninstallPlugin(plugin.manifest.id);
+            }
+            deactivateClientPlugin(plugin.manifest.id);
+            removePlugin(plugin.manifest.id);
+            message.success(`已卸载插件「${plugin.manifest.name}」`);
+            await reloadBackendPlugins();
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "卸载插件失败");
+        }
+    };
+
+    const activeCustomSection = categoryFilter.startsWith("slot:")
+        ? pluginCenterSections.find((entry) => `slot:${entry.pluginId}:${entry.payload.id}` === categoryFilter)
+        : undefined;
+    const matchedSettingsSlot = settingsPlugin
+        ? appSettingsEntries.find((entry) => entry.pluginId === settingsPlugin.manifest.id)
+        : undefined;
 
     return (
         <main className="app-workspace-page plugins-page flex h-full min-h-0 flex-col text-foreground">
@@ -292,10 +345,37 @@ export default function PluginsPage() {
                                 </span>
                                 <span>{categoryCounts.other}</span>
                             </button>
+                            {pluginCenterSections.map((entry) => {
+                                const slotKey = `slot:${entry.pluginId}:${entry.payload.id}`;
+                                return (
+                                    <button
+                                        key={slotKey}
+                                        type="button"
+                                        className={`plugins-sidebar-item${categoryFilter === slotKey ? " is-active" : ""}`}
+                                        aria-current={categoryFilter === slotKey ? "page" : undefined}
+                                        onClick={() => selectCategory(slotKey)}
+                                    >
+                                        <span className="plugins-sidebar-item-label">
+                                            {entry.payload.icon ?? <PlugZap className="size-4" />}
+                                            {entry.payload.label}
+                                        </span>
+                                    </button>
+                                );
+                            })}
                         </nav>
                     </aside>
                     <div className="plugins-page-content">
-                        <CollectionToolbar label="插件筛选" trailing={<div className="plugins-toolbar-actions">
+                        <CollectionToolbar label="插件筛选" trailing={<div className="plugins-toolbar-actions flex items-center gap-2">
+                                <Button
+                                    type="primary"
+                                    icon={<Plus className="size-4" />}
+                                    onClick={() => {
+                                        setInstallPendingRequest(null);
+                                        setInstallModalOpen(true);
+                                    }}
+                                >
+                                    安装插件
+                                </Button>
                                 <Button icon={<RefreshCw className="size-4" />} loading={backendPluginsLoading} onClick={() => void reloadBackendPlugins()}>
                                     刷新插件
                                 </Button>
@@ -331,7 +411,20 @@ export default function PluginsPage() {
                             />
                         </CollectionToolbar>
 
-                        {filteredPlugins.length ? (
+                        {activeCustomSection ? (
+                            <section className="plugin-section">
+                                <activeCustomSection.payload.component
+                                    pluginId={activeCustomSection.pluginId}
+                                    installedPlugins={registeredPlugins}
+                                    pluginStates={pluginStates}
+                                    reloadPlugins={reloadBackendPlugins}
+                                    requestInstallPlugin={(req) => {
+                                        setInstallPendingRequest(req);
+                                        setInstallModalOpen(true);
+                                    }}
+                                />
+                            </section>
+                        ) : filteredPlugins.length ? (
                             <div className="plugins-sections">
                                 {pluginSections.map((section) => {
                                     const SectionIcon = section.icon;
@@ -362,7 +455,8 @@ export default function PluginsPage() {
                                                         const state = pluginStates[plugin.manifest.id];
                                                         const sourceLabel = pluginSourceLabel(plugin, state);
                                                         const canConfigure = canConfigurePlugin(plugin);
-                                                        const canToggle = localRuntime ? true : Boolean(state?.canToggle);
+                                                        const canToggle = localRuntime || user?.role === "admin" ? true : Boolean(state?.canToggle);
+                                                        const canUninstall = Boolean(remote && remote.source !== "bundled" && remote.source !== "system" && remote.source !== "official");
                                                         return (
                                                             <section key={plugin.manifest.id} className={`product-collection-card plugin-card library-card-surface${trusted ? " is-trusted" : ""}`}>
                                                                 <button
@@ -440,6 +534,16 @@ export default function PluginsPage() {
                                                                         title={state?.blockedReason}
                                                                         onChange={(checked) => void togglePlugin(plugin, checked)}
                                                                     />
+                                                                    {remote?.source === "package" && remote.packageSpec ? (
+                                                                        <Button
+                                                                            className="plugin-settings-button"
+                                                                            icon={<ArrowUpCircle className="size-4" />}
+                                                                            loading={updatingPluginId === plugin.manifest.id}
+                                                                            onClick={() => void handleUpdatePlugin(plugin.manifest.id)}
+                                                                        >
+                                                                            更新
+                                                                        </Button>
+                                                                    ) : null}
                                                                     {canConfigure ? (
                                                                         <Button
                                                                             className="plugin-settings-button"
@@ -449,6 +553,16 @@ export default function PluginsPage() {
                                                                             onClick={() => setSettingsPluginId(plugin.manifest.id)}
                                                                         >
                                                                             设置
+                                                                        </Button>
+                                                                    ) : null}
+                                                                    {canUninstall ? (
+                                                                        <Button
+                                                                            className="plugin-settings-button"
+                                                                            danger
+                                                                            icon={<Trash2 className="size-4" />}
+                                                                            onClick={() => void handleUninstallPlugin(plugin)}
+                                                                        >
+                                                                            卸载
                                                                         </Button>
                                                                     ) : null}
                                                                 </div>
@@ -518,54 +632,29 @@ export default function PluginsPage() {
                                         )}
                                     </div>
 
-                                    {settingsPlugin.manifest.id === EAGLE_PLUGIN_ID ? (
-                                        <>
-                                            <div className="plugin-settings-fields">
-                                                <div className="min-w-0">
-                                                    <label htmlFor="eagle-base-url">Eagle 本地 API 地址</label>
-                                                    <Input id="eagle-base-url" aria-label="Eagle 本地 API 地址" value={eagleBaseUrl} onChange={(event) => setEagleBaseUrl(event.target.value)} placeholder="http://localhost:41595" />
-                                                    <p>Eagle 必须在本机运行；{brandName}通过插件直接读取和写入 Eagle 原始文件。</p>
-                                                </div>
-                                                <div className="min-w-0">
-                                                    <div className="plugin-setting-label-row">
-                                                        <label htmlFor="eagle-auto-upload-generated">自动归档生成结果</label>
-                                                        <Switch id="eagle-auto-upload-generated" checked={eagleAutoUploadGenerated} onChange={setEagleAutoUploadGenerated} aria-label="自动归档生成结果到 Eagle" />
-                                                    </div>
-                                                    <p>图片、视频和音频生成成功后，自动写入 Eagle；{brandName}本地素材仍会保留。</p>
-                                                </div>
-                                                <div className="min-w-0">
-                                                    <div className="plugin-setting-label-row">
-                                                        <label htmlFor="eagle-generated-folder">生成结果写入文件夹</label>
-                                                        <Button type="link" size="small" loading={eagleFoldersLoading} onClick={() => void loadEagleFolders()}>
-                                                            读取文件夹
-                                                        </Button>
-                                                    </div>
-                                                    <Select
-                                                        id="eagle-generated-folder"
-                                                        aria-label="生成结果写入文件夹"
-                                                        showSearch
-                                                        allowClear
-                                                        value={eagleGeneratedFolderId || undefined}
-                                                        placeholder="Eagle 根目录"
-                                                        optionFilterProp="label"
-                                                        options={[{ value: "__root__", label: "Eagle 根目录" }, ...eagleFolderOptions(eagleFolders)]}
-                                                        onChange={(value) => setEagleGeneratedFolderId(value === "__root__" || !value ? "" : value)}
-                                                    />
-                                                    <p>{eagleFoldersError || "默认写入 Eagle 根目录；选择文件夹后按 Eagle 原始目录归档。"}</p>
-                                                </div>
-                                            </div>
-                                            <div className="plugin-settings-actions">
-                                                <Button type="primary" icon={<CheckCircle2 className="size-4" />} onClick={saveEagleConfig}>
-                                                    保存配置
-                                                </Button>
-                                                <Button icon={<FolderOpen className="size-4" />} disabled={!settingsEnabled} onClick={() => navigate("/plugins/eagle")}>
-                                                    打开 Eagle 素材库
-                                                </Button>
-                                                <Button icon={<ExternalLink className="size-4" />} href="https://api.eagle.cool/" target="_blank">
-                                                    查看 API
-                                                </Button>
-                                            </div>
-                                        </>
+                                    {matchedSettingsSlot ? (
+                                        (() => {
+                                            const SettingsComp = matchedSettingsSlot.payload.component as React.ComponentType<Record<string, unknown>>;
+                                            const handleSave = async (patch: Record<string, string | number | boolean>) => {
+                                                updateConfig(settingsPlugin.manifest.id, patch);
+                                            };
+                                            return (
+                                                <SettingsComp
+                                                    pluginId={settingsPlugin.manifest.id}
+                                                    config={settingsInstallation?.config || {}}
+                                                    updateConfig={handleSave}
+                                                    onChange={handleSave}
+                                                />
+                                            );
+                                        })()
+                                    ) : settingsPlugin.manifest.id === EAGLE_PLUGIN_ID ? (
+                                        <EaglePluginSettingsPanel
+                                            pluginId={EAGLE_PLUGIN_ID}
+                                            config={settingsInstallation?.config || {}}
+                                            updateConfig={async (patch) => {
+                                                updateConfig(EAGLE_PLUGIN_ID, patch);
+                                            }}
+                                        />
                                     ) : settingsPlugin.manifest.id === PROMPT_OPTIMIZER_PLUGIN_ID ? (
                                         <div className="rounded-[var(--r-md)] border border-border/60 bg-muted/25 px-3 py-3 text-[var(--fs-body)] leading-6 text-foreground/70">
                                             <p>在创作页或图片、视频节点的提示词编辑器中使用“优化”按钮，即可让当前文本模型整理提示词。</p>
@@ -585,6 +674,15 @@ export default function PluginsPage() {
                                                 打开工作流设置
                                             </Button>
                                         </div>
+                                    ) : settingsPlugin.manifest.configuration?.fields?.length ? (
+                                        <PluginFieldsConfigForm
+                                            fields={settingsPlugin.manifest.configuration.fields}
+                                            initialValues={settingsInstallation?.config || {}}
+                                            onSave={(values) => {
+                                                updateConfig(settingsPlugin.manifest.id, values as Record<string, string | number | boolean>);
+                                                message.success(`${settingsPlugin.manifest.name}配置已保存`);
+                                            }}
+                                        />
                                     ) : (
                                         <div className="plugin-settings-empty">
                                             {`贡献能力：${
@@ -609,10 +707,105 @@ export default function PluginsPage() {
                             ) : null}
                         </Modal>
                         <PluginDetailsModal plugin={detailsPlugin} restoreFocus={detailsRestoreFocus} onClose={() => setDetailsPluginId(null)} />
+                        <PluginInstallConfirmModal
+                            open={installModalOpen}
+                            initialRequest={installPendingRequest}
+                            loading={installing}
+                            onCancel={() => {
+                                setInstallModalOpen(false);
+                                setInstallPendingRequest(null);
+                            }}
+                            onConfirm={(req) => void handleInstallConfirm(req)}
+                        />
                     </div>
                 </div>
             </div>
         </main>
+    );
+}
+
+function PluginFieldsConfigForm({
+    fields,
+    initialValues,
+    onSave,
+}: {
+    fields: PluginField[];
+    initialValues: Record<string, unknown>;
+    onSave: (values: Record<string, unknown>) => void;
+}) {
+    const [values, setValues] = useState<Record<string, unknown>>(() => {
+        const defaults: Record<string, unknown> = {};
+        for (const field of fields) {
+            defaults[field.name] = initialValues[field.name] !== undefined ? initialValues[field.name] : field.default;
+        }
+        return defaults;
+    });
+
+    return (
+        <>
+            <div className="plugin-settings-fields">
+                {fields.map((field) => {
+                    const currentValue = values[field.name];
+                    const labelText = field.label || field.name;
+                    return (
+                        <div key={field.name} className="min-w-0">
+                            {field.type === "boolean" ? (
+                                <div className="plugin-setting-label-row">
+                                    <label htmlFor={`plugin-field-${field.name}`}>{labelText}</label>
+                                    <Switch
+                                        id={`plugin-field-${field.name}`}
+                                        checked={Boolean(currentValue)}
+                                        onChange={(checked) => setValues((prev) => ({ ...prev, [field.name]: checked }))}
+                                        aria-label={labelText}
+                                    />
+                                </div>
+                            ) : (
+                                <>
+                                    <label htmlFor={`plugin-field-${field.name}`}>{labelText}</label>
+                                    {field.type === "select" ? (
+                                        <Select
+                                            id={`plugin-field-${field.name}`}
+                                            aria-label={labelText}
+                                            value={typeof currentValue === "string" ? currentValue : undefined}
+                                            options={(field.values || []).map((val) => ({ value: val, label: val }))}
+                                            onChange={(next) => setValues((prev) => ({ ...prev, [field.name]: next }))}
+                                        />
+                                    ) : field.type === "number" ? (
+                                        <InputNumber
+                                            id={`plugin-field-${field.name}`}
+                                            aria-label={labelText}
+                                            className="w-full"
+                                            value={typeof currentValue === "number" ? currentValue : undefined}
+                                            onChange={(next) => setValues((prev) => ({ ...prev, [field.name]: next }))}
+                                        />
+                                    ) : field.type === "secret" ? (
+                                        <Input.Password
+                                            id={`plugin-field-${field.name}`}
+                                            aria-label={labelText}
+                                            value={typeof currentValue === "string" ? currentValue : ""}
+                                            onChange={(e) => setValues((prev) => ({ ...prev, [field.name]: e.target.value }))}
+                                        />
+                                    ) : (
+                                        <Input
+                                            id={`plugin-field-${field.name}`}
+                                            aria-label={labelText}
+                                            value={typeof currentValue === "string" ? currentValue : ""}
+                                            onChange={(e) => setValues((prev) => ({ ...prev, [field.name]: e.target.value }))}
+                                        />
+                                    )}
+                                </>
+                            )}
+                            {field.description ? <p>{field.description}</p> : null}
+                        </div>
+                    );
+                })}
+            </div>
+            <div className="plugin-settings-actions">
+                <Button type="primary" icon={<CheckCircle2 className="size-4" />} onClick={() => onSave(values)}>
+                    保存配置
+                </Button>
+            </div>
+        </>
     );
 }
 
@@ -660,20 +853,4 @@ function pluginMatchesCategory(manifest: PluginManifest | PluginManifestV2, cate
 
 function capabilityLabel(value: string) {
     return ({ text: "文本", image: "图片", video: "视频", audio: "音频" } as Record<string, string>)[value] || value;
-}
-
-function eagleFolderOptions(folders: EagleFolder[]) {
-    const byId = new Map(folders.map((folder) => [folder.id, folder]));
-    const pathFor = (folder: EagleFolder) => {
-        const path: string[] = [];
-        const seen = new Set<string>();
-        let current: EagleFolder | undefined = folder;
-        while (current && !seen.has(current.id)) {
-            seen.add(current.id);
-            path.unshift(current.name);
-            current = current.parentId ? byId.get(current.parentId) : undefined;
-        }
-        return path.join(" / ");
-    };
-    return folders.map((folder) => ({ value: folder.id, label: pathFor(folder) })).sort((left, right) => left.label.localeCompare(right.label, "zh-CN"));
 }

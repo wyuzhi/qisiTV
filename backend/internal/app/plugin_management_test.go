@@ -16,7 +16,7 @@ func TestApplicationPluginUsesUserStateUnderPlatformAvailability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.SystemSetting{}, &model.PluginPlatformState{}, &model.UserPluginState{}, &model.AdminAuditEvent{}); err != nil {
+	if err := db.AutoMigrate(&model.SystemSetting{}, &model.PluginPlatformState{}, &model.UserPluginState{}); err != nil {
 		t.Fatal(err)
 	}
 	repo := repository.New(db)
@@ -94,7 +94,7 @@ func TestEditorShellReportsPlatformAvailableWithoutPlatformState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.SystemSetting{}, &model.PluginPlatformState{}, &model.UserPluginState{}, &model.AdminAuditEvent{}); err != nil {
+	if err := db.AutoMigrate(&model.SystemSetting{}, &model.PluginPlatformState{}, &model.UserPluginState{}); err != nil {
 		t.Fatal(err)
 	}
 	repo := repository.New(db)

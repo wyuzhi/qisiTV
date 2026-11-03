@@ -7,7 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -385,4 +387,49 @@ func skillZip(t *testing.T, files map[string]string) []byte {
 		t.Fatal(err)
 	}
 	return buffer.Bytes()
+}
+
+func TestSyncAndRemovePluginSkillsLifecycle(t *testing.T) {
+	svc, db := agentSkillFixture(t)
+	if err := db.AutoMigrate(&model.Workspace{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.Workspace{ID: "tester", Name: "测试工作区"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	pluginSkillsRoot := filepath.Join(t.TempDir(), "skills")
+	skillDir := filepath.Join(pluginSkillsRoot, "storyboard-grid")
+	if err := os.MkdirAll(filepath.Join(skillDir, "references"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: 分镜九宫格拆解\ndescription: 把剧本拆解为九宫格分镜\n---\n# 分镜九宫格拆解\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "references", "guide.md"), []byte("# Guide\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.SyncPluginSkills("storyboard-grid", "分镜九宫格", "1.0.0", []string{pluginSkillsRoot}); err != nil {
+		t.Fatalf("SyncPluginSkills failed: %v", err)
+	}
+
+	added, err := svc.AddedSkills("tester")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(added) != 1 || added[0].SourceType != "plugin" || added[0].SkillName != "分镜九宫格拆解" {
+		t.Fatalf("unexpected added skills: %#v", added)
+	}
+
+	if err := svc.RemovePluginSkills("storyboard-grid"); err != nil {
+		t.Fatalf("RemovePluginSkills failed: %v", err)
+	}
+	afterRemove, err := svc.AddedSkills("tester")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(afterRemove) != 0 {
+		t.Fatalf("expected 0 skills after RemovePluginSkills, got %#v", afterRemove)
+	}
 }

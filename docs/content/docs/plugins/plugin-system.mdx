@@ -1,133 +1,92 @@
 ---
 title: 插件系统设计
-description: BeefTV统一插件系统的扩展边界、Manifest 合同与 Eagle 外部素材来源方案
+description: BeefTV 统一插件系统的扩展边界、Manifest 合同、宿主挂点表与官方 pi 复用机制
 ---
 
 # 插件系统设计
 
-> 状态：已实现首版（Eagle 外部素材来源 + AI 提示词优化器）
+> 状态：已实现统一插件底座（一个插件 = 一个 pi 包 + `package.json` 的 `beeftv` 字段）
 >
-> 当前版本已经包含 Eagle 专属素材管理页面、后端本地桥接、原始文件树浏览、文件读取和写入，以及内置 `prompt-optimizer` AI 能力插件。第三方包统一使用 `.beeftv-plugin`；远程 Web 入口仍必须经过沙箱运行时和宿主 RPC。
+> BeefTV 采用单一插件系统：无论是声明式模型协议包（`.beeftv-plugin`）、预装的官方插件市场（`beeftv-plugin-market`），还是从 npm、本地目录或 `.tgz` 安装的社区插件，都汇入同一套注册表（Go `internal/plugins`）、同一套画布节点目录（`capability.BuiltinRegistry()`）、同一套业务操作（`/api/ops`）与同一套技能列表（`internal/skills`）。
 
-## 1. 背景与范围
+## 1. 核心架构与单源原则
 
-当前项目包含 Codex App 的 MCP 包和BeefTV网页插件贡献。它们可以使用不同的运行时，但安装、权限、版本和能力发现都遵循同一个BeefTV插件 Manifest；MCP 连接本身仍受独立的工具安全边界约束。
+1. **一份清单（`PluginManifest`）**：插件包既可以是包含 `manifest.json` 的 `.beeftv-plugin` 归档，也可以是标准 npm / pi 包（在 `package.json` 中声明 `beeftv` 字段、`pi.extensions` 与 `pi.skills`）。插件 ID 与版本直接取自 `package.json` 的 `name` 与 `version`（或 `manifest.json`），由 Go `internal/plugins` 使用同一个校验器校验。
+2. **一份登记表（`plugin_registry`）**：装了哪些插件、是否启用、是否加载失败（`StatusInvalid` 及错误原因），唯一权威保存在 Go `internal/plugins`。安装来源包含 `official`、`system`、`uploaded` 和 `package`（npm、本地目录或 `.tgz`）。`agent-host` 和前端（`use-plugin-store`）只从 Go 读取启用列表。
+3. **一个画布节点目录（`capability.BuiltinRegistry()`）**：画布节点类型定义集中在一个共享目录实例中。已启用插件声明的 `canvasNodes` 动态注册进该共享实例，确保手动添加节点与创作助手调用 `canvas_nodes_create` 遵循同一份尺寸、连线和字段校验；节点业务数据保存在 `metadata.pluginData`。
+4. **一条业务写入路径**：插件在助手工具中通过 `ctx.executeTool("canvas_nodes_create", ...)`、在浏览器端通过 `host.ops.call("canvas.nodes.create", ...)` 调用 Go 业务操作。权限模式（只读 / 当前画布 / 完全访问）、付费生成确认与整组撤销全部由 Go 统一把关。
+5. **一份技能列表（`internal/skills`）**：插件包的 `pi.skills` 目录登记进 `internal/skills` 的安装包体系，来源标记为对应插件；停用或卸载插件时同步移除，助手原有的技能版本固定与 `skill_load` 机制原样复用。
+6. **官方 pi 组件复用**：
+   - 包下载由 Go 完成：用桌面包自带的 node 与 npm 执行 `npm install --prefix`（下载源只允许 npmmirror 或 npmjs），依赖一起安装到暂存目录，经 Go 校验清单并事务提交后才替换旧版本；`agent-host` 只用 pi 官方 `DefaultPackageManager` 按单个包目录解析和加载扩展，不下载。
+   - 扩展加载复用官方 `discoverAndLoadExtensions`（仅按 Go 下发的已启用插件包目录加载，不扫描宿主机用户主目录 `~/.agents/skills`，防止宿主机资源混入）。
+   - 助手执行内核保持官方 `@earendil-works/pi-durable`，插件工具经 `agent-host/plugin-packages.mjs` 转换为 Durable 工具并在下一轮会话生效。
 
-网页插件的第一目标不是开放所有页面代码，而是提供稳定、可审计、可逐步扩展的宿主 API，让第三方开发者能够在不修改主应用源码的情况下接入能力。
+## 2. 信任模型与运行边界
 
-## 2. 设计目标
+- **显式安装确认**：无论从插件市场、npm 包名、本地目录还是压缩包安装插件，都由宿主页面弹出统一的安装确认框，展示插件名称、版本、来源与风险说明，第三方插件需勾选「我了解风险」；用户点取消则不执行安装。
+- **直接客户端渲染（`renderer: "client"`）**：已启用插件的前端入口（`beeftv.client`）由浏览器动态加载并调用 `activate(host)`，与宿主共享同一份 React、Ant Design 与明暗主题 token。单个插件加载失败或超时（3 秒）仅将该插件标为异常，不阻塞主应用或其他插件。
+- **推荐列表免责声明**：公开推荐仓库 `Sunnyender-org/beeftv-plugins` 收录社区提 PR 的插件列表，插件市场页面固定提示“被推荐列表收录不代表我们为它担保；请仅安装你信任来源的插件”。
+- **静态资源路径隔离**：Go 插件文件服务仅暴露登记表内该插件包目录下的静态与模块文件，路径校验位于 `internal/plugins`，任何越界或访问 `node_modules` 的请求一律返回 404。
 
-- 第三方开发者可以独立开发、构建和发布插件。
-- 普通用户可以查看并启用官方应用插件；管理员统一安装、更新、停用和卸载系统协议及自定义插件。
-- 插件不直接依赖页面内部 React 组件和 Zustand store。
-- 宿主可以通过 `apiVersion` 和权限声明控制兼容性与风险。
-- 插件的错误、超时、权限拒绝和版本不兼容必须可见，不能静默降级。
-- 插件产生的本地数据必须按插件 ID 隔离，并在卸载时可清理。
-- 未来可以加入官方注册表，也可以使用组织内部或本地插件源。
+## 3. 插件包结构与清单
 
-## 3. 非目标
-
-第一阶段不开放以下能力：
-
-- 任意修改宿主路由、全局布局和认证流程。
-- 任意访问用户 Cookie、API Key、数据库或后端数据目录。
-- 插件自行注册 Gin 路由、GORM model 或后台 Worker。
-- 插件在没有用户确认的情况下上传、删除或覆盖资源。
-- 用插件机制替代现有 AI 渠道、资源存储和权限服务合同。
-
-需要服务端能力的插件，应通过明确的后端集成接口或独立服务完成，而不是让远程 JavaScript 直接访问敏感数据。
-
-## 4. 插件分类
-
-插件分类用于权限、市场筛选和能力发现，不直接决定代码目录结构。
-
-### 4.0 管理分类与权限
-
-插件的管理分类由宿主根据插件 ID 和安装来源计算，不能由上传包自行声明：
-
-| 分类 | 典型插件 | 平台可用性 | 用户启用状态 | 配置范围 |
-| --- | --- | --- | --- | --- |
-| 系统插件 | OpenAI、Gemini、即梦等协议 Provider | 管理员 | 不适用 | 管理员 |
-| 官方插件 | RunningHub、ComfyUI Bridge、Eagle、提示词优化器、肖像排查 | 管理员作为硬上限 | 每个用户独立 | 按插件为用户级或无配置 |
-| 自定义插件 | 管理员上传的 `.beeftv-plugin` | 管理员 | 不适用 | 管理员 |
-
-`/plugins` 是用户发现、个人启用和个人配置入口；`/admin/plugins` 是平台可用性、上传、卸载和启用人数入口。普通用户是否能看到只读的系统/自定义插件由“向普通用户显示系统插件”功能开关控制，但官方应用插件始终保留个人开关。
-
-### 4.1 画布节点插件
-
-新增自定义节点类型、节点内容渲染、节点详情面板、节点工具栏和节点输入输出资源。
-
-适合：角色卡、场景卡、分镜卡、Markdown、SVG、HTML、提示词、素材引用和分析结果节点。
-
-### 4.2 工作流插件
-
-在用户确认后创建节点、连接节点、批量处理、触发生成、执行重试或进行结果整理。
-
-适合：`剧本 → 角色 → 场景 → 分镜 → 提示词 → 生图` 等可复用流程。
-
-### 4.3 AI 能力插件
-
-提供提示词处理、图片分析、批量生成、结果评分或模型能力适配。涉及真实 API Key 的请求必须经过宿主现有渠道中转合同或受控后端服务。
-
-当前内置的 `prompt-optimizer` 插件用于在创作页和图片、视频节点的提示词编辑器中优化用户输入。它通过宿主的 `ai.text` 服务调用已配置的文本模型，不直接读取 API Key；结果先以可编辑内容展示，用户点击“采用”后才回填当前输入框。
-
-### 4.4 素材与数据连接器
-
-连接外部素材库、提示词库、知识库、云盘或项目管理工具，提供搜索、导入、上传、同步和来源追踪。
-
-Eagle 插件属于此类，具体方案见第 8 节。
-
-### 4.5 导入导出插件
-
-扩展剧本、分镜、提示词、素材包、JSON、Markdown、PDF 等格式的导入或导出。
-
-### 4.6 画布工具能力（旧内置 Agent 宿主已退场）
-
-旧内置 Agent 的宿主已从产品运行面退场，因此当前没有运行时读取这些画布工具声明。插件仍然只能通过版本化的宿主贡献点提供技能或能力声明，不能注入本地进程、MCP 连接或浏览器私有状态；替换内核落地时按同一合同接入。
-
-## 5. 插件包与清单
-
-插件以一个统一的 `.beeftv-plugin` 包作为入口。包内固定包含 `manifest.json`，也可以包含受沙箱约束的 Web 入口和静态资源。Manifest 负责描述插件能力、权限和运行时；包文件负责承载对应版本的实现，不能再把“协议 JSON”和“UI 插件源码”拆成两套安装系统。
-
-建议的最小包结构：
+一个完整的 npm / pi 格式插件包结构如下：
 
 ```text
-eagle-asset-connector.beeftv-plugin
-├── manifest.json
-├── web/entry.js       # 有 UI/功能代码时声明
-└── web/assets/...     # 可选静态资源
+beeftv-plugin-sticky-note/
+├── package.json
+├── extensions/
+│   └── index.ts          # 可选：注册 pi 助手工具（调用 ctx.executeTool）
+├── skills/
+│   └── sticky-note/
+│       └── SKILL.md      # 可选：注册助手技能
+├── client/
+│   └── index.js          # 可选：浏览器界面入口，导出 activate(host)
+└── README.md
 ```
 
-`manifest.json` 建议从以下最小清单开始：
+`package.json` 示例：
 
 ```json
 {
-  "apiVersion": "beeftv.plugin/v1",
-  "id": "eagle-asset-connector",
-  "name": "Eagle 素材库",
-  "version": "0.3.0",
-  "author": "BeefTV Contributors",
-  "permissions": ["asset.read", "asset.search", "asset.upload"],
-  "configuration": { "fields": [{ "name": "baseUrl", "type": "url", "required": true }] },
-  "contributes": { "assetSources": ["eagle"] }
+  "name": "beeftv-plugin-sticky-note",
+  "version": "0.1.0",
+  "type": "module",
+  "keywords": ["beeftv-plugin"],
+  "pi": {
+    "extensions": ["./extensions/index.ts"],
+    "skills": ["./skills"]
+  },
+  "beeftv": {
+    "apiVersion": "beeftv.plugin/v2",
+    "schemaVersion": 2,
+    "name": "画布便签",
+    "description": "在画布上放置可换色、可编辑的便签卡片，并支持创作助手直接创建和修改便签。",
+    "author": "BeefTV",
+    "client": "./client/index.js",
+    "permissions": ["canvas.read", "canvas.write"],
+    "canvasNodes": [
+      {
+        "id": "sticky-note",
+        "type": "sticky-note",
+        "label": "画布便签",
+        "title": "画布便签",
+        "defaultTitle": "便签",
+        "renderer": "client",
+        "defaultWidth": 240,
+        "defaultHeight": 180,
+        "defaultSize": { "width": 240, "height": 180 }
+      }
+    ]
+  }
 }
 ```
 
-带 Web 功能的包增加 `entry: "web/entry.js"`、`runtime.web: "sandbox"` 或 `"worker"`。上传入口只接受 `.beeftv-plugin`，服务端会校验 ZIP 路径、大小、重复文件、Manifest 和入口文件，不执行包内 JavaScript；当前版本先完成包校验、存储和入口合同，未授权的 Web 代码不会自动进入主页面。Provider 仍由后端声明式运行时执行；UI/功能代码通过隔离运行时和权限化宿主 API 接入。
-
-字段约束：
-
-- `id`：全局唯一，使用小写 kebab-case；安装后不能随意变更。
-- `version`：遵循 SemVer，用于更新和回滚判断。
-- `apiVersion`：支持 `beeftv.plugin/v1`、`v2` 和 `v3`。v2 增加编辑器插槽；v3 保留 v2 的 UI 结构，并要求宿主支持 provider 变量、默认路径前缀及图片流响应。使用这些新字段必须声明 v3，旧宿主会在加载时拒绝该清单，避免忽略字段后错误提交。已有 v1/v2 插件继续读取。
-- `contributes`：声明 provider、workflow、canvasNodes、transforms、assetSources、agents 等能力。
-- `permissions`：最小权限集合，宿主在安装和首次使用时展示。
-- `dependencies`：插件依赖的其他插件或宿主能力。
-- `integrity`：用于校验远程产物是否被替换。
+同时，传统 `.beeftv-plugin` ZIP 包（含根目录 `manifest.json`）继续受支持，并与 npm 插件包共用同一套清单校验逻辑。
 
 ### Provider 的 v3 请求与图片响应
 
-`contributes.providers[]` 可在 v3 清单中声明 `variables`：按数组顺序计算的纯表达式，输入为 `request`，前面的变量通过 `vars.<name>` 读取。变量仅在当前请求内存在，不共享状态。重复名称、前向引用，以及请求模板或参数校验中不存在的变量会在加载时拒绝。
+`contributes.providers[]` 可在 `beeftv.plugin/v3` 清单中声明 `variables`：按数组顺序计算的纯表达式，输入为 `request`，前面的变量通过 `vars.<name>` 读取。变量仅在当前请求内存在，不共享状态。重复名称、前向引用，以及请求模板或参数校验中不存在的变量会在加载时拒绝。
 
 ```json
 {
@@ -141,225 +100,81 @@ eagle-asset-connector.beeftv-plugin
 }
 ```
 
-`defaultPathPrefix` 是连接地址没有路径时使用的默认前缀；连接地址已有 `/v1` 等路径时保留该路径。它只接受相对路径，不能包含查询参数、片段或上级目录。
+`defaultPathPrefix` 是连接地址没有路径时使用的默认前缀；连接地址已有 `/v1` 等路径时保留该路径。图片响应可声明 `response.detectImageMime: true`，按实际 PNG、JPEG 或 WebP 字节确定内联图片类型；`response.stream` 指定图片 SSE 流解析规则。
 
-图片响应可声明 `response.detectImageMime: true`，按实际 PNG、JPEG 或 WebP 字节确定内联图片类型。`response.stream` 指定事件类型路径、完成事件、错误事件、图片表达式和可选的非负整数索引路径；只有声明了此字段才读取图片 SSE。网关错标 Content-Type 时，仍可识别明确的 `data:` / `event:` 流。重复索引以第一张有效图片为准；坏事件不占用索引，部分成功保留已收到的图片，`[DONE]` 后不再接收。图层的名称、描述、边界框和层次顺序随图片结果保留。
+## 4. 宿主接口（`activate(host)`）与挂点表
 
-这些字段必须使用 `beeftv.plugin/v3`；旧宿主拒绝加载该版本，避免忽略字段后发送错误请求。
+插件的 `client` 入口导出 `activate(host)`。`host` 提供的核心接口如下：
 
-## 6. 宿主 API 边界
-
-插件不得直接导入页面组件、store 或内部 API 文件。宿主通过版本化 SDK 提供能力。
-
-建议第一版 SDK 包含以下能力：
-
-```ts
-export interface CanvasPluginManifest {
-  apiVersion: "beeftv.plugin/v1";
-  id: string;
-  name: string;
-  version: string;
-  permissions: string[];
-  contributes: Record<string, unknown>;
-}
-
-export interface PluginSetupApi {
-  canvas: CanvasApi;
-  commands: CommandRegistry;
-  events: PluginEventBus;
-  storage: PluginStorage;
-  assets: AssetApi;
-  permissions: PermissionApi;
-}
-```
-
-第一阶段的能力合同：
-
-| 能力 | 说明 |
+| 接口 | 作用 |
 | --- | --- |
-| 节点注册 | 注册节点类型、标题、图标、默认尺寸和渲染组件 |
-| 节点面板 | 编辑节点 metadata，展示插件自己的控制项 |
-| 工具栏命令 | 在节点工具栏、画布工具栏或上下文菜单增加动作 |
-| 画布读写 | 读取节点和连线；在用户确认后应用结构化操作 |
-| 资源读写 | 通过资源服务获取、导入和上传媒体，不在插件中拼接资源 URL |
-| 事件订阅 | 监听节点、项目、生成任务和插件生命周期事件 |
-| 插件存储 | 使用带插件命名空间的轻量配置和索引数据 |
-| 清理函数 | 停用或卸载时移除事件、样式、命令和临时资源 |
+| `host.contribute(slot, payload)` | 向指定挂点注册界面扩展，返回卸载函数；插件停用或卸载时宿主按插件 ID 自动撤销全部挂载 |
+| `host.ops.call(operation, params)` | 调用后端 `/api/ops` 业务操作，遵循统一权限、付费确认与撤销规则 |
+| `host.events.on(event, handler)` | 订阅宿主状态变化事件，返回取消订阅函数 |
+| `host.React` | 与宿主共用的 React |
+| `host.ui` | `notify` 提示、`navigate` 跳转与 `requestInstallPlugin` 安装确认触发器 |
+| `host.storage` / `host.config` | 插件命名空间下的键值存储与用户在插件中心填写的配置项 |
+| `host.context.getCanvasId()` | 当前打开的画布 ID；画布 revision 用 `canvas.get` 操作读取 |
 
-写操作必须通过结构化指令进入宿主，不能直接修改 React 状态。所有写操作都要保留失败原因和用户可见反馈。
+### 4.1 界面扩展位（挂点表）
 
-### 6.1 内置 AI 文本服务
+| 区域 | 挂点名称 | 插件可贡献内容 |
+| --- | --- | --- |
+| 画布 | `canvas.node` | 自定义画布节点类型（渲染组件 `render`、默认尺寸、可接受的上游输入类型） |
+| 画布 | `canvas.addNodeMenu` | 画布「添加节点」菜单中的条目 |
+| 画布 | `canvas.toolbar.main` | 画布底部主工具栏按钮 |
+| 画布 | `canvas.toolbar.selection` | 画布多选节点时的浮动工具栏按钮 |
+| 画布 | `canvas.toolbar.nodeHover` | 单个节点悬停工具栏按钮 |
+| 画布 | `canvas.contextMenu` | 画布空白处与节点上的右键菜单项 |
+| 画布 | `canvas.nodePanel` | 节点配置面板中的自定义扩展区域 |
+| 画布 | `canvas.promptActions` | 节点提示词输入框旁的操作按钮（内置提示词优化器同走此挂点） |
+| 画布 | `canvas.sidePanel` | 画布右侧边栏面板页，与创作助手面板并列切换 |
+| 生成 | `generation.beforeSubmit` | 提交生成前改写提示词，并提示用户是哪个插件改的；模型参数保持用户的设置 |
+| 剪辑 | `editor.timeline-panel` | 剪辑工作台时间线面板扩展 |
+| 剪辑 | `editor.preview-renderer` | 剪辑工作台预览渲染区扩展 |
+| 剪辑 | `editor.inspector` | 剪辑工作台右侧属性检查器扩展 |
+| 剪辑 | `editor.asset-ingest` | 剪辑工作台素材导入面板扩展 |
+| 剪辑 | `editor.subtitle-tool` | 剪辑工作台字幕工具扩展 |
+| 剪辑 | `editor.transcription-provider` | 剪辑工作台语音转写扩展 |
+| 剪辑 | `editor.export-renderer` | 剪辑工作台导出面板扩展 |
+| 剪辑 | `editor.ai-assistant` | 剪辑工作台 AI 助手面板扩展 |
+| 素材 | `assets.source` | 外部素材库连接器（如 Eagle 素材源） |
+| 素材 | `assets.itemActions` | 素材卡片与素材详情弹窗上的扩展操作按钮 |
+| 全局 | `app.page` | 插件独立全屏页面，路由固定为 `/p/<pluginId>/...` |
+| 全局 | `app.sidebar` | 工作区左侧全局导航入口 |
+| 全局 | `app.command` | 全局命令面板（`Cmd/Ctrl+K`）命令项与快捷键 |
+| 全局 | `app.settings` | 插件中心里该插件的自定义设置组件 |
+| 全局 | `pluginCenter.section` | 插件中心左侧分区栏（官方插件市场即通过此挂点挂载） |
+| 项目 | `project.view` | 短剧项目详情页顶部分页视图（与概览、章节、素材、剪辑并列） |
+| 助手 | `assistant.toolCard` | 插件工具调用结果在创作助手对话流中的专属展示卡片 |
 
-声明 `ai.text` 权限的插件可以使用宿主提供的文本模型服务。请求包含消息、可选的工具定义、工具选择、取消信号和流式增量回调；宿主负责选择当前配置的模型、经过现有渠道中转并返回结构化工具调用结果。插件不得自行创建平行的 HTTP 客户端或把密钥写入请求正文、日志和 URL。
+此外，插件还可通过 `pi.extensions` 与 `pi.skills` 向创作助手贡献工具与技能，并通过 `beeftv.contributes.providers` 与 `workflows` 向后台贡献模型渠道与工作流模板。
 
-提示词优化器使用 `optimize_prompt` 工具返回以下结构：优化后的提示词、规避项、变化说明、假设和最多两个备选版本。`model-adapt` 模式会根据目标生成模型和协议选择适配策略，但不会臆造未确认的模型参数。
+### 4.2 宿主事件表
 
-## 7. 生命周期
+| 事件名称 | 触发时机 | 回调参数 |
+| --- | --- | --- |
+| `generation.submitted` | 画布节点的生成任务已提交 | `{ nodeId, nodeType, model?, prompt, taskId? }` |
+| `generation.completed` | 生成任务完成 | `{ nodeId, nodeType }` |
+| `generation.failed` | 生成任务失败 | `{ nodeId, nodeType, error, taskId? }` |
+| `assets.imported` | 素材导入完成 | `{ assets: [{ id, name, type, url }] }` |
+| `assistant.turnCompleted` | 创作助手一轮对话执行结束 | `{ canvasId?, sessionId?, turnId?, status }` |
 
-```text
-发现 → 查看清单 → 安装 → 校验兼容性和权限 → 启用 → 使用
-                         ↓                       ↓
-                 拒绝 / 失败                  停用 → 卸载
-                         ↑                       ↓
-                  更新 / 回滚 ← 版本检查 ← 清理
-```
+画布打开、画布内容变化、选中变化三类事件尚未接入。
 
-生命周期要求：
+## 5. 内置功能与样板插件
 
-1. 发现阶段只读取清单，不执行插件代码。
-2. 安装阶段下载入口和依赖，校验 HTTPS、版本、完整性和权限。
-3. 启用阶段先申请权限，再执行 `setup`。
-4. 停用阶段禁止新请求进入，等待可取消任务结束后调用清理函数。
-5. 卸载阶段清理插件存储、事件订阅、注册命令和可选的插件节点数据。
-6. 更新失败时保留旧版本，不能留下半启用状态。
-7. 官方协议插件随发行包撤下时不会立即删除：启动先盘点本地模型配置、系统渠道模型和未取回结果的任务，仍有引用就保留执行能力，并在插件中心和协议目录接口里带上“已撤下”标记；没有任何引用时才清理。目前前端还不读这个标记，新建模型时把已撤下的协议过滤掉，要等以后前端接入后才生效。
+- **内置能力统一走挂点**：提示词优化器（`canvas.promptActions`）、Eagle 素材库页面与设置（`app.page`、`assets.source`、`app.settings`）、AI 审美批改节点（`canvas.node`）均通过统一挂点机制接入。
+- **官方插件市场（`beeftv-plugin-market`）**：唯一随桌面包预装的插件，挂载于 `pluginCenter.section`，支持从 `Sunnyender-org/beeftv-plugins` 读取推荐列表（含内置离线兜底 `registry.json`）及按 `keywords:beeftv-plugin` 搜索 npm 社区插件。
+- **开发模板与样板插件**：
+  - `beeftv-plugin-slot-test`：往每个挂点各挂一项、订阅全部事件的开发自检插件，不在推荐列表里。
+  - `beeftv-plugin-sticky-note`：画布便签模板插件（含自定义节点、助手工具与技能）。
+  - `beeftv-plugin-ecommerce-hero`：「一键商品主图」电商样板插件。
 
-平台状态与用户状态分开保存：`effectiveEnabled = platformAvailable && userEnabled`。协议和自定义插件只有平台状态。用户停用工作流插件后禁止新任务进入，但已经接收的任务和 Bridge 结果回传继续完成；管理员停用属于平台硬上限，同样不强行破坏已进入执行阶段的任务。
+## 6. Eagle 外部素材来源方案
 
-## 8. Eagle 外部素材来源方案
-
-Eagle 插件的主分类是“素材与数据连接器”，可以附带一个 `EagleAsset` 画布节点。
-
-### 8.1 连接器职责
+Eagle 插件的主分类是“素材与数据连接器”，通过 `assets.source`、`app.page`（`/p/eagle-asset-connector`）和 `app.settings` 挂点接入：
 
 - 使用 Eagle 本地 API（默认 `http://127.0.0.1:41595`）检查服务并读取当前素材库。
-- 在BeefTV素材页进入 Eagle 专属素材管理页面，按 Eagle 的父子文件树浏览和搜索文件。
-- Eagle 文件仍由 Eagle 管理，BeefTV只通过外部素材来源读取、下载和使用，不要求逐个选择或复制成本地素材。
-- 在当前 Eagle 文件夹中新建文件夹，并把本地图片、视频和音频直接写入 Eagle。
-- 返回 Eagle 素材 ID、文件夹 ID、完整文件夹路径和来源信息，供BeefTV项目保存外部引用。
-- 通过BeefTV后端本地桥接读取 Eagle 文件，避免浏览器直接打开 Eagle 的本机文件路径。
-
-### 8.2 画布节点
-
-`EagleAsset` 节点只保存可迁移的引用信息和展示 metadata，不把 Eagle 的完整文件内容塞进画布 JSON：
-
-```ts
-type EagleAssetMetadata = {
-  assetId: string;
-  libraryId?: string;
-  folderId?: string;
-  title: string;
-  tags: string[];
-  sourceUrl?: string;
-  syncedAt?: string;
-};
-```
-
-节点可以提供：
-
-- 预览缩略图。
-- 标签、尺寸和来源展示。
-- 导入本地资源副本。
-- 在 Eagle 中打开。
-- 更新节点中的 Eagle metadata。
-- 将当前生成结果上传到 Eagle。
-
-### 8.3 Eagle 权限
-
-第一版建议只申请：
-
-```text
-asset.read
-asset.search
-asset.upload
-external.open
-```
-
-删除 Eagle 资源、批量覆盖和修改原始文件属于高风险权限，应单独申请并逐次确认，不能包含在普通 `asset.write` 中。
-
-### 8.4 推荐交互
-
-首版提供外部素材库浏览和双向写入：
-
-```text
-Eagle 文件树 / 搜索 → 打开素材 → 在BeefTV中使用外部引用
-BeefTV上传图片、视频或音频 → 选择 Eagle 目标文件夹 → 写入 Eagle
-BeefTV生成图片、视频或音频 → 插件自动归档到 Eagle 目标文件夹
-```
-
-### 8.5 当前实现边界
-
-- 素材页的“Eagle 素材库”进入插件专属页面，不使用抽屉，也不要求选择素材。
-- 左侧文件树直接继承 Eagle 的父子层级；BeefTV保存外部引用时保留 Eagle 素材 ID、文件夹 ID 和路径信息。
-- 图片、视频、音频和模型可以从 Eagle 直接浏览、搜索和读取；当前不把文本类内容转换成BeefTV文本素材。
-- 当前支持将本地图片、视频和音频写入 Eagle 当前文件夹；生成结果可以在插件设置中开启自动归档并指定 Eagle 文件夹。BeefTV仍保留本地素材记录，外部写入成功或失败会记录到素材 metadata。实际可写入格式由本机 Eagle 版本/API 决定；如果 Eagle 拒绝某种媒体，BeefTV保留本地结果并记录失败状态。删除、批量覆盖和冲突解决仍需后续权限设计。
-- Eagle 地址只允许本机默认端口，后端会校验本机地址和文件路径，避免把连接器变成任意内网访问代理。
-- Eagle 文件夹不会复制成BeefTV项目中的独立资产文件夹；页面以 Eagle 原始文件树作为外部来源视图。自动归档默认使用 Eagle 根目录，用户可以在插件设置中关闭或改用具体文件夹。
-
-## 9. 安全边界
-
-当前远程 JavaScript 插件如果直接在页面上下文执行，可能接触页面可见数据和本地配置。因此正式开放第三方插件前必须完成以下事项：
-
-- 插件默认无权限，按能力逐项授权。
-- API Key、登录 Cookie 和后端会话不得通过通用插件 API 暴露。
-- 外部请求优先经过宿主服务或明确的连接器 API。
-- 远程产物支持完整性校验、版本锁定和撤销。
-- 插件错误不能吞掉，必须记录插件 ID、版本和可读错误。
-- 公开市场只允许可信来源；组织内部插件可使用私有注册表。
-- 高风险写入、上传、删除和外部同步必须有用户确认。
-
-长期方向是将不可信插件放入 iframe、Worker 或 Capability 沙箱，避免插件默认拥有宿主页面权限。
-
-## 10. 开发者接入流程
-
-后续应提供一个独立 SDK 和模板，使开发者可以：
-
-1. 创建插件模板。
-2. 安装 SDK 和类型定义。
-3. 在本地启动 watch 构建。
-4. 使用宿主提供的模拟画布和测试数据验证插件。
-5. 生成插件清单和构建产物。
-6. 发布到静态地址或组织注册表。
-7. 在BeefTV的插件管理器中通过 URL 安装。
-
-推荐目录：
-
-```text
-plugins/
-  eagle-asset-connector/
-    plugin.json
-    package.json
-    src/
-      index.ts
-      eagle-client.ts
-      eagle-node.tsx
-    README.md
-    dist/
-```
-
-## 11. 实施顺序
-
-### Phase 1：稳定插件核心
-
-- 插件清单和 `apiVersion`。
-- 本地插件发现。
-- 安装、启用、停用、更新和卸载。
-- 节点注册、工具栏命令、事件和插件存储。
-- Eagle 外部素材来源页面、媒体写入和生成结果自动归档。
-
-### Phase 2：连接器和工作流
-
-- 资源连接器合同。
-- 上传回写和标签同步。
-- 批量处理和工作流触发器。
-- 插件配置页面和错误诊断。
-- 插件 SDK、模板和本地测试工具。
-
-### Phase 3：生态安全
-
-- 官方和私有注册表。
-- 完整性校验、签名和版本回滚。
-- 权限审核和风险分级。
-- 不可信插件沙箱。
-- 插件兼容性测试和自动化发布。
-
-## 12. 第一版验收标准
-
-- 第三方开发者可以只依赖 SDK 新增一个画布节点。
-- 插件可以通过 URL 安装，不需要修改宿主业务代码。
-- 用户能看到插件名称、版本、来源和权限。
-- 插件停用后不再响应事件，也不残留工具栏命令。
-- 插件更新失败时旧版本仍可用。
-- Eagle 插件可以浏览原始文件树、搜索和读取素材，并将图片、视频和音频写入 Eagle；用户可以配置生成结果是否自动归档及目标文件夹。
-- Eagle Token 不进入画布节点、任务正文、日志或 URL。
-- 插件错误和权限拒绝能够显示给用户。
+- 在素材页或独立插件页按 Eagle 的父子文件树浏览和搜索文件，通过后端本地桥接安全读取媒体字节。
+- 支持在当前 Eagle 文件夹中新建文件夹，将本地图片、视频和音频写入 Eagle，或在插件设置中开启生成结果自动归档。

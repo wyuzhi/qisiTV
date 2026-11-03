@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,6 +26,7 @@ import (
 	canvasHandler "infinite-canvas/backend/internal/handler"
 	"infinite-canvas/backend/internal/localapp"
 	"infinite-canvas/backend/internal/modelcatalog"
+	"infinite-canvas/backend/internal/plugins"
 	"infinite-canvas/backend/internal/repository"
 	"infinite-canvas/backend/internal/runtimeinfo"
 	httptransport "infinite-canvas/backend/internal/transport/http"
@@ -123,6 +125,7 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 		cleanupService()
 		return nil, err
 	}
+	wirePluginPackages(svc)
 	providerConfig, configErr := workspace.NewProviderConfig(cfg.DataDir)
 	if configErr != nil {
 		cleanupService()
@@ -321,6 +324,15 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 		assistantHost:    assistantHost,
 		serveErr:         make(chan error, 1),
 	}, nil
+}
+
+// wirePluginPackages connects installed plugin packages to the skill catalog
+// and installs them with the npm shipped in the desktop runtime.
+func wirePluginPackages(svc *app.Service) {
+	executable, _ := os.Executable()
+	domain := svc.PluginDomain()
+	domain.SetPackageFetcher(plugins.NpmPackageFetcher(assistantruntime.BundledNpmCommand(executable, goruntime.GOOS)))
+	domain.SetSkillSyncHook(svc.SkillsDomain().ApplyPluginSkills)
 }
 
 func initializeService(svc *app.Service) error {

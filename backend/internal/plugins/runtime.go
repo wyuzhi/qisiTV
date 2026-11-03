@@ -24,12 +24,15 @@ type Runtime struct {
 	mu                    sync.RWMutex
 	mutationMu            sync.Mutex
 	store                 Store
+	dataDir               string
 	registryPath          string
 	packageDir            string
 	plugins               map[string]Record
 	registry              *protocol.Registry
 	references            ReferenceSource
 	retained              map[string]*RetentionView
+	skillSyncHook         func(pluginID string, pluginName string, version string, skillDirs []string, enabled bool)
+	packageFetcher        PackageFetcher
 	testBeforeMutation    func()
 	testFailCommit        func() error
 	testFailWriteRegistry func() error
@@ -78,6 +81,7 @@ func newRuntime(dataDir string, store Store, references ReferenceSource) (*Runti
 	}
 	center := &Runtime{
 		store:        store,
+		dataDir:      dataDir,
 		registryPath: filepath.Join(dataDir, "plugin_registry.json"),
 		packageDir:   packageDir,
 		plugins:      make(map[string]Record),
@@ -208,9 +212,15 @@ func (c *Runtime) restoreLive(snap liveSnapshot) {
 
 func (c *Runtime) publishLive(plugins map[string]Record, registry *protocol.Registry) {
 	c.mu.Lock()
+	previous := c.plugins
 	c.plugins = plugins
 	c.registry = registry
+	hook := c.skillSyncHook
 	c.mu.Unlock()
+	syncPluginCanvasCapabilities(plugins)
+	if hook != nil {
+		dispatchPluginSkillSync(hook, previous, plugins)
+	}
 }
 
 func (c *Runtime) failNextCommit(err error) {

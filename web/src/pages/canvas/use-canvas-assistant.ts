@@ -2,6 +2,7 @@ import { Grid } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { createClientId } from "@/lib/client-id";
+import { emitPluginEvent } from "@/lib/plugins/plugin-events";
 import { ApiError } from "@/services/api/request";
 import { scopedLocalStorage } from "@/lib/user-scope";
 import { flushModelConfig, getModelConfigPersistenceState } from "@/services/model-config-repository";
@@ -496,6 +497,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
                     if (current.reasoningOpen[ASSISTANT_LIVE_TURN_KEY]) current.reasoningOpen[turnId] = true;
                     delete current.reasoningOpen[ASSISTANT_LIVE_TURN_KEY];
                     recordDiagnosticEvent({ category: "task", level: turn.error ? "warning" : "info", code: "assistant_turn_settled", reason: turn.errorReason || undefined, message: "助手执行回执已记录", requestId, canvasId: targetCanvas, assistantSessionId: end.sessionId || current.sessionId || undefined, assistantTurnId: turn.turnId });
+                    emitPluginEvent("assistant.turnCompleted", { canvasId: targetCanvas ?? undefined, sessionId: end.sessionId || current.sessionId || undefined, turnId: turn.turnId, status: turn.cancelled ? "cancelled" : turn.error ? "failed" : "completed" });
                     current.plan = end.plan ?? null;
                     current.recovery = null;
                     // 旧 JSONL 会话首次发消息会交接给新的 Durable 会话：后续回合都走它。

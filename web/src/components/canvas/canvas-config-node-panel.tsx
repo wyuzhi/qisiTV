@@ -42,6 +42,7 @@ import { resolveCanvasWorkflowProvider } from "@/lib/canvas/canvas-workflow";
 import type { CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { workflowProviderPluginEnabled } from "@/lib/plugins/builtin/workflows";
+import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { usePluginStore } from "@/stores/use-plugin-store";
 import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata, CanvasVideoEditOperation, CanvasWorkspaceMode } from "@/types/canvas";
 
@@ -373,6 +374,8 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
 
             {dynamicWorkflowFields.length ? <WorkflowParameterControls fields={dynamicWorkflowFields} node={node} theme={theme} onConfigChange={onConfigChange} /> : null}
 
+            <PluginNodePanelsSection node={node} onConfigChange={onConfigChange} />
+
             {capabilityError ? (
                 <div className="rounded-lg px-3 py-2 text-[var(--fs-tiny)]" style={{ background: theme.accent.danger + "18", color: theme.accent.danger }}>
                     {capabilityError}
@@ -395,6 +398,43 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                     )}
                 </span>
             </Button>
+        </div>
+    );
+}
+
+function PluginNodePanelsSection({
+    node,
+    onConfigChange,
+}: {
+    node: CanvasNodeData;
+    onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void;
+}) {
+    const entries = usePluginSlot("canvas.nodePanel");
+    const matching = entries.filter(
+        (entry) => !entry.payload.nodeTypes?.length || entry.payload.nodeTypes.includes(node.type),
+    );
+    if (matching.length === 0) return null;
+    return (
+        <div className="flex flex-col gap-2">
+            {matching.map((entry) => {
+                const Comp = entry.payload.component;
+                return (
+                    <div key={entry.entryId} className="rounded-lg border border-border/50 p-2.5 text-xs">
+                        {entry.payload.title ? (
+                            <div className="mb-1.5 font-medium opacity-75">{entry.payload.title}</div>
+                        ) : null}
+                        <Comp
+                            node={node}
+                            updateNode={(patch) => {
+                                if (patch.metadata) {
+                                    onConfigChange(node.id, patch.metadata);
+                                }
+                            }}
+                            updateMetadata={(patch) => onConfigChange(node.id, patch as Partial<CanvasNodeMetadata>)}
+                        />
+                    </div>
+                );
+            })}
         </div>
     );
 }

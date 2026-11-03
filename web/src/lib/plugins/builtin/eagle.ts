@@ -1,3 +1,4 @@
+import { createElement, lazy, Suspense } from "react";
 import { nanoid } from "nanoid";
 
 import { addEagleItem, createEagleFolder, downloadEagleItem, eagleItemFileUrl, eagleItemThumbnailUrl, getEagleLibrary, listEagleItems, type EagleFolder, type EagleItem } from "@/services/api/eagle";
@@ -5,7 +6,20 @@ import { getMediaBlob, uploadMediaFile } from "@/services/file-storage";
 import { imageToDataUrl, uploadImage } from "@/services/image-storage";
 import type { Asset } from "@/stores/use-asset-store";
 import { registerPlugin } from "../plugin-registry";
-import type { AssetSourceProvider, ExternalAssetItem, PluginHostContext, RegisteredPlugin } from "../plugin-types";
+import type { AssetSourceProvider, ExternalAssetItem, PluginAppPageProps, PluginAppSettingsProps, PluginHostContext, RegisteredPlugin } from "../plugin-types";
+
+const LazyEagleLibraryPage = lazy(() => import("@/pages/plugins/eagle"));
+const LazyEagleSettingsPanel = lazy(() =>
+    import("@/pages/plugins/eagle").then((mod) => ({ default: mod.EaglePluginSettingsPanel })),
+);
+
+function EaglePageSlotWrapper(_props: PluginAppPageProps) {
+    return createElement(Suspense, { fallback: null }, createElement(LazyEagleLibraryPage));
+}
+
+function EagleSettingsSlotWrapper(props: PluginAppSettingsProps) {
+    return createElement(Suspense, { fallback: null }, createElement(LazyEagleSettingsPanel, props));
+}
 
 export const EAGLE_PLUGIN_ID = "eagle-asset-connector";
 export const EAGLE_DEFAULT_BASE_URL = "http://127.0.0.1:41595";
@@ -115,6 +129,64 @@ export const eagleAssetPlugin: RegisteredPlugin = {
     createAssetSource: ({ config }: PluginHostContext) => {
         const configuredBaseUrl = config.baseUrl;
         return createEagleAssetSource(typeof configuredBaseUrl === "string" && configuredBaseUrl.trim() ? configuredBaseUrl.trim() : undefined);
+    },
+    setup(host) {
+        const disposePage = host.contribute("app.page", {
+            path: "",
+            title: "Eagle 素材库",
+            component: EaglePageSlotWrapper,
+        });
+        const disposeSidebar = host.contribute("app.sidebar", {
+            id: EAGLE_PLUGIN_ID,
+            label: "Eagle 素材库",
+            path: "/p/eagle-asset-connector",
+            order: 50,
+        });
+        const disposeSettings = host.contribute("app.settings", {
+            title: "Eagle 素材库设置",
+            component: EagleSettingsSlotWrapper,
+        });
+        const disposeAssetSource = host.contribute("assets.source", {
+            id: EAGLE_PLUGIN_ID,
+            name: "Eagle 素材库",
+            description: "把 Eagle 作为站点的外部素材来源，直接浏览原始文件夹并读写 Eagle 文件。",
+            provider: {
+                listFolders: (signal) => {
+                    const baseUrl = host.config.get<string>("baseUrl", EAGLE_DEFAULT_BASE_URL) || EAGLE_DEFAULT_BASE_URL;
+                    return createEagleAssetSource(baseUrl.trim()).listFolders!(signal);
+                },
+                list: (query) => {
+                    const baseUrl = host.config.get<string>("baseUrl", EAGLE_DEFAULT_BASE_URL) || EAGLE_DEFAULT_BASE_URL;
+                    return createEagleAssetSource(baseUrl.trim()).list!(query);
+                },
+                importAsset: (item, signal) => {
+                    const baseUrl = host.config.get<string>("baseUrl", EAGLE_DEFAULT_BASE_URL) || EAGLE_DEFAULT_BASE_URL;
+                    return createEagleAssetSource(baseUrl.trim()).importAsset!(item, signal);
+                },
+                uploadAsset: (asset, signal) => {
+                    const baseUrl = host.config.get<string>("baseUrl", EAGLE_DEFAULT_BASE_URL) || EAGLE_DEFAULT_BASE_URL;
+                    return createEagleAssetSource(baseUrl.trim()).uploadAsset!(asset, signal);
+                },
+                uploadAssetToFolder: (asset, folderId, signal) => {
+                    const baseUrl = host.config.get<string>("baseUrl", EAGLE_DEFAULT_BASE_URL) || EAGLE_DEFAULT_BASE_URL;
+                    return createEagleAssetSource(baseUrl.trim()).uploadAssetToFolder!(asset, folderId, signal);
+                },
+                uploadFile: (file, folderId, signal) => {
+                    const baseUrl = host.config.get<string>("baseUrl", EAGLE_DEFAULT_BASE_URL) || EAGLE_DEFAULT_BASE_URL;
+                    return createEagleAssetSource(baseUrl.trim()).uploadFile!(file, folderId, signal);
+                },
+                createFolder: (name, parentId) => {
+                    const baseUrl = host.config.get<string>("baseUrl", EAGLE_DEFAULT_BASE_URL) || EAGLE_DEFAULT_BASE_URL;
+                    return createEagleAssetSource(baseUrl.trim()).createFolder!(name, parentId);
+                },
+            },
+        });
+        return () => {
+            disposePage();
+            disposeSidebar();
+            disposeSettings();
+            disposeAssetSource();
+        };
     },
 };
 

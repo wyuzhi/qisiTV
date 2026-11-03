@@ -16,6 +16,9 @@ type View struct {
 	Source      string         `json:"source"`
 	FileName    string         `json:"fileName"`
 	Package     string         `json:"package"`
+	PackageDir  string         `json:"packageDir,omitempty"`
+	PackageSpec string         `json:"packageSpec,omitempty"`
+	SkillDirs   []string       `json:"skillDirs,omitempty"`
 	SHA256      string         `json:"sha256"`
 	InstalledAt time.Time      `json:"installedAt"`
 	UpdatedAt   time.Time      `json:"updatedAt"`
@@ -33,6 +36,7 @@ type ManifestView struct {
 	Name          string                         `json:"name"`
 	Version       string                         `json:"version"`
 	Entry         string                         `json:"entry,omitempty"`
+	Client        string                         `json:"client,omitempty"`
 	Surfaces      []string                       `json:"surfaces,omitempty"`
 	Description   string                         `json:"description,omitempty"`
 	Documentation string                         `json:"documentation,omitempty"`
@@ -77,6 +81,9 @@ type Record struct {
 	FileName      string
 	PackagePath   string
 	PackageSHA256 string
+	PackageDir    string
+	PackageSpec   string
+	SkillDirs     []string
 	SHA256        string
 	InstalledAt   time.Time
 	UpdatedAt     time.Time
@@ -95,6 +102,10 @@ type RegistryRecord struct {
 	FileName      string          `json:"fileName,omitempty"`
 	PackagePath   string          `json:"packagePath,omitempty"`
 	PackageSHA256 string          `json:"packageSha256,omitempty"`
+	PackageDir    string          `json:"packageDir,omitempty"`
+	PackageSpec   string          `json:"packageSpec,omitempty"`
+	SkillDirs     []string        `json:"skillDirs,omitempty"`
+	LoadError     string          `json:"loadError,omitempty"`
 	InstalledAt   time.Time       `json:"installedAt"`
 	UpdatedAt     time.Time       `json:"updatedAt"`
 }
@@ -109,10 +120,15 @@ func manifestView(raw []byte, metadata protocol.Metadata, source string) Manifes
 	if apiVersion == "" {
 		apiVersion = "beeftv.plugin/v1"
 	}
+	permissions := manifest.Permissions
+	if permissions == nil {
+		// A plain pi package declares none; clients read this field as a list.
+		permissions = []string{}
+	}
 	return ManifestView{
-		ID: metadata.ID, Name: metadata.Name, Version: metadata.Version, APIVersion: apiVersion, Entry: manifest.Entry, Surfaces: manifest.Surfaces,
+		ID: metadata.ID, Name: metadata.Name, Version: metadata.Version, APIVersion: apiVersion, Entry: manifest.Entry, Client: manifest.Client, Surfaces: manifest.Surfaces,
 		Description: metadata.Description, Documentation: metadata.Documentation, Author: metadata.Vendor,
-		Permissions: manifest.Permissions, Trusted: IsBuiltInSource(source), Runtime: manifest.Runtime,
+		Permissions: permissions, Trusted: IsBuiltInSource(source), Runtime: manifest.Runtime,
 		Configuration: manifest.Configuration, Contributes: manifest.Contributes,
 	}
 }
@@ -123,6 +139,9 @@ func viewFromRecord(item Record) View {
 		Source:      item.Source,
 		FileName:    item.FileName,
 		Package:     protocol.PluginPackageFormat,
+		PackageDir:  item.PackageDir,
+		PackageSpec: item.PackageSpec,
+		SkillDirs:   cloneStringSlice(item.SkillDirs),
 		SHA256:      item.SHA256,
 		InstalledAt: item.InstalledAt,
 		UpdatedAt:   item.UpdatedAt,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { Component, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ErrorInfo, type ReactNode, type RefObject } from "react";
 import { AlertCircle, BookOpenCheck, Download, Image as ImageIcon, LoaderCircle, Music2, Pencil, Play, RefreshCw, Video } from "lucide-react";
 
 import { VideoPlayer } from "@/components/video-player";
@@ -33,6 +33,9 @@ import { acquireCanvasVideoPreview, canvasDerivedPreviewSourceKey, canvasVideoPr
 import { acquireCanvasVideoSource } from "@/services/canvas-video-source";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
+import { getRegisteredPlugin } from "@/lib/plugins/plugin-registry";
+import { getPluginCanvasNodeOwner, getPluginCanvasNodeRenderer, usePluginSlot } from "@/lib/plugins/slot-registry";
+import { isPluginEffectivelyEnabled, usePluginStore } from "@/stores/use-plugin-store";
 import { ART_CRITIQUE_NODE_TYPE } from "@/lib/art-critique/contracts";
 import { createDefaultSubtitleStyle } from "@/types/timeline";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
@@ -52,6 +55,30 @@ import { ArtCritiqueNodeContent } from "./nodes/ai-art-critique-node";
 import { MediaConversionNodeContent } from "./nodes/media-conversion-node";
 import { UpscaleNodeContent } from "./nodes/upscale-node";
 import { MEDIA_CONVERSION_NODE_TYPE } from "@/lib/media-conversion/contracts";
+
+class PluginCanvasNodeErrorBoundary extends Component<
+    { pluginId: string; children: ReactNode },
+    { error: string | null }
+> {
+    state = { error: null as string | null };
+    static getDerivedStateFromError(err: unknown) {
+        return { error: err instanceof Error ? err.message : String(err) };
+    }
+    componentDidCatch(err: unknown, _info: ErrorInfo) {
+        console.warn(`[canvas.node] Error rendering plugin node (${this.props.pluginId}):`, err);
+    }
+    render() {
+        if (this.state.error) {
+            return (
+                <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-4 text-center text-xs text-red-400">
+                    <span>插件节点渲染异常（{this.props.pluginId}）</span>
+                    <span className="opacity-70">{this.state.error}</span>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
 
 export type CanvasNodeContentProps = {
     node: CanvasNodeData;
@@ -82,30 +109,75 @@ export type CanvasNodeContentProps = {
 };
 
 export function CanvasNodeContent(props: CanvasNodeContentProps) {
+    usePluginSlot("canvas.node");
+    const { updateMetadata } = useCanvasNodeActions();
+    const pluginInstallations = usePluginStore((state) => state.installations);
+    const pluginStates = usePluginStore((state) => state.pluginStates);
+    const runtimeStatuses = usePluginStore((state) => state.runtimeStatuses);
     const operation = useOperationProgress(state => canvasNodeOperation(state.entries, props.projectId, props.node.id, props.node.metadata?.taskId));
     if (props.node.type === CanvasNodeType.Upscale) return <UpscaleNodeContent node={props.node} theme={props.theme} />;
     if (props.node.metadata?.fileUpload) return <CanvasFileUploadContent node={props.node} theme={props.theme} reduceMotion={props.reduceMediaEffects} />;
     if (operation) return <CanvasNodeGenerationProgress node={props.node} theme={props.theme} operation={operation} onOpenTaskDetails={props.onOpenTaskDetails} onCancelTask={props.onCancelTask} />;
     const hasCustomContent = usesCanvasCustomNodeContent(props.node, props.isEditingContent);
     if (hasCustomContent && props.renderNodeContent) return props.renderNodeContent(props.node);
+
+    const slotRenderer = getPluginCanvasNodeRenderer(props.node.type);
+    const pluginDefinition = getNodeDefinition(props.node.type)?.plugin;
+    const ownerPluginId =
+        slotRenderer?.pluginId ?? pluginDefinition?.pluginId ?? getPluginCanvasNodeOwner(props.node.type);
+    if (ownerPluginId) {
+        const inst = pluginInstallations.find((item) => item.manifest.id === ownerPluginId);
+        const explicitlyConfigured = Boolean(inst) || ownerPluginId in pluginStates || ownerPluginId in runtimeStatuses;
+        if (explicitlyConfigured && !isPluginEffectivelyEnabled(ownerPluginId, inst?.enabled)) {
+            const pluginName = inst?.manifest.name || getRegisteredPlugin(ownerPluginId)?.manifest.name || ownerPluginId;
+            return (
+                <div
+                    data-testid="canvas-disabled-plugin-node"
+                    className="flex h-full w-full items-center justify-center p-4 text-center text-xs"
+                    style={{ color: props.theme.node.placeholder }}
+                >
+                    需要启用 {pluginName} 插件
+                </div>
+            );
+        }
+        const CustomComp = slotRenderer?.contribution.component as ComponentType<Record<string, unknown>> | undefined;
+        if (CustomComp) {
+            const handleUpdatePluginData = (patch: Record<string, unknown>) => {
+                updateMetadata?.(props.node.id, {
+                    pluginData: { ...(props.node.metadata?.pluginData ?? {}), ...patch },
+                });
+            };
+            return (
+                <PluginCanvasNodeErrorBoundary pluginId={ownerPluginId}>
+                    <CustomComp
+                        node={props.node}
+                        nodeId={props.node.id}
+                        projectId={props.projectId}
+                        selected={false}
+                        theme={props.theme.canvas.background === "#f0f0f0" ? "light" : "dark"}
+                        data={props.node.metadata?.pluginData ?? {}}
+                        updateData={handleUpdatePluginData}
+                        updateNodeData={handleUpdatePluginData}
+                        onContentChange={props.onContentChange}
+                        updateContent={(next: string) => props.onContentChange(props.node.id, next)}
+                    />
+                </PluginCanvasNodeErrorBoundary>
+            );
+        }
+    }
+
     if (props.node.type === ART_CRITIQUE_NODE_TYPE) return <ArtCritiqueNodeContent node={props.node} />;
     if (props.node.type === MEDIA_CONVERSION_NODE_TYPE) return <MediaConversionNodeContent node={props.node} theme={props.theme} />;
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading") return <CanvasNodeGenerationProgress node={props.node} theme={props.theme} onOpenTaskDetails={props.onOpenTaskDetails} onCancelTask={props.onCancelTask} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} onReloadResource={props.onReloadResource} onOpenTaskDetails={props.onOpenTaskDetails} />;
 
-    const pluginDefinition = getNodeDefinition(props.node.type)?.plugin;
-    if (pluginDefinition) return <PluginCanvasNodeContent {...props} renderer={pluginDefinition.renderer} schema={pluginDefinition.schema} />;
+    if (pluginDefinition) return <PluginCanvasNodeContent {...props} schema={pluginDefinition.schema} />;
     const Renderer = nodeContentRenderers[props.node.type];
     return Renderer ? <Renderer {...props} /> : <UnknownNodeContent theme={props.theme} />;
 }
 
-function PluginCanvasNodeContent({ node, theme, renderer, schema }: CanvasNodeContentProps & { renderer: "declarative" | "sandbox"; schema: Record<string, unknown> }) {
-    if (renderer === "sandbox") {
-        return <div className="flex h-full w-full items-center justify-center p-4 text-center text-xs" style={{ color: theme.node.placeholder }}>
-            插件节点等待隔离运行时
-        </div>;
-    }
+function PluginCanvasNodeContent({ node, theme, schema }: CanvasNodeContentProps & { schema: Record<string, unknown> }) {
     const data = node.metadata?.pluginData || {};
     const fields = Object.keys(schema.properties && typeof schema.properties === "object" ? schema.properties as Record<string, unknown> : schema);
     return <div className="flex h-full w-full flex-col gap-3 overflow-auto p-4 pt-10 text-xs" style={{ color: theme.node.text }}>

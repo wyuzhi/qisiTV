@@ -15,6 +15,7 @@ import { CanvasAssistantAttachments } from "./canvas-assistant-attachments";
 import { CanvasAssistantOutputs } from "./canvas-assistant-outputs";
 import { CanvasAssistantMediaFacts } from "./canvas-assistant-media-facts";
 import { AssistantReasoning } from "@/components/ai/message-reasoning";
+import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { formatAssistantDiagnostics } from "@/services/diagnostics/assistant-diagnostics";
 
 type Props = {
@@ -71,6 +72,7 @@ export function CanvasAssistantUserMessage({ text, selectedCount, continuationId
 export function CanvasAssistantTurnView({ turn, canvasId, sessionId, status, handledProposals, proposalFeedback, runningProposalIds, generationDisabled, onLocate, onUndo, onRunProposal, onDismissProposal, onContinue, nodes, onCheckResults, reasoningOpen, onReasoningOpenChange }: Props) {
     const { message } = App.useApp();
     const config = useEffectiveConfig();
+    const toolCardEntries = usePluginSlot("assistant.toolCard");
     const summary = assistantChangeSummary(turn.change);
     const changedNodeIds = assistantChangedNodeIds(turn.change);
     const changedCanvasCount = new Set(turn.change?.canvasChanges?.map(item => item.canvasId) || []).size;
@@ -99,6 +101,24 @@ export function CanvasAssistantTurnView({ turn, canvasId, sessionId, status, han
                 {(input.skills || []).map(skill => <span className="canvas-assistant-chip" key={skill.skillId}>{assistantSkillLabel(skill)}</span>)}
             </div>) : (turn.supplements || []).map((text, index) => <div key={`supplement:${index}`} className="canvas-assistant-supplement"><CanvasAssistantUserMessage text={text} selectedCount={0} /></div>)}
             <CanvasAssistantMediaFacts calls={turn.toolCalls || []} nodes={nodes} />
+            {(turn.toolCalls || []).map((call: AgentToolCall, idx: number) => {
+                const match = toolCardEntries.find((entry) => entry.payload.toolName === call.tool);
+                if (!match) return null;
+                const CardComp = match.payload.component as React.ComponentType<Record<string, unknown>>;
+                return (
+                    <div key={`${call.toolCallId || call.tool}:${idx}`} className="canvas-assistant-card">
+                        <CardComp
+                            toolName={call.tool}
+                            status={call.isError ? "failed" : "completed"}
+                            input={call.args}
+                            args={call.args}
+                            output={call.mediaFacts}
+                            result={call.mediaFacts ?? call.error}
+                            error={call.error}
+                        />
+                    </div>
+                );
+            })}
             {turn.outputs?.length ? <CanvasAssistantOutputs outputs={turn.outputs} /> : null}
             {turn.cancelled && stoppedWithChanges ? (
                 <div className="canvas-assistant-incomplete" role="status">
