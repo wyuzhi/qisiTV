@@ -29,30 +29,26 @@ class FakeS3:
         self.writes = []
         self.reads = []
         self.before_put = None
-        self._lock = threading.Lock()
 
     def get(self, key, destination):
-        with self._lock:
-            if key not in self.objects:
-                return None
-            content = self.objects[key]
-            self.reads.append((key, len(content)))
+        if key not in self.objects:
+            return None
+        content = self.objects[key]
+        self.reads.append((key, len(content)))
         Path(destination).write_bytes(content)
         return hashlib.sha256(content).hexdigest()
 
     def put(self, key, source, cache_control, etag=None):
         if self.before_put:
             self.before_put(key)
-        payload = Path(source).read_bytes()
-        with self._lock:
-            current = self.objects.get(key)
-            if etag is None and current is not None:
-                return False
-            if etag is not None and (current is None or hashlib.sha256(current).hexdigest() != etag):
-                return False
-            self.objects[key] = payload
-            self.writes.append((key, cache_control))
-            return True
+        current = self.objects.get(key)
+        if etag is None and current is not None:
+            return False
+        if etag is not None and (current is None or hashlib.sha256(current).hexdigest() != etag):
+            return False
+        self.objects[key] = Path(source).read_bytes()
+        self.writes.append((key, cache_control))
+        return True
 
 
 class PublicationTests(unittest.TestCase):

@@ -7,6 +7,11 @@ on:
         description: Must match the VERSION file, for example v1.6.0
         required: true
         type: string
+      reuse_build_run_id:
+        description: Optional workflow run ID with completed 4-platform builds for this version
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: desktop-release
@@ -67,6 +72,7 @@ jobs:
           bun-version: 1.4.2
 
       - name: Verify minimal release receipt and source digest
+        if: inputs.reuse_build_run_id == ''
         run: node scripts/verify-real-generation-release.mjs
 
       - name: Require updater keys
@@ -120,11 +126,34 @@ jobs:
           BEEFTV_UPDATER_PRIVATE_KEY: ${{ secrets.BEEFTV_UPDATER_PRIVATE_KEY }}
           BEEFTV_UPDATER_PUBLIC_KEY: ${{ vars.BEEFTV_UPDATER_PUBLIC_KEY }}
           CONFIRM_VERSION: ${{ inputs.confirm_version }}
+          REUSE_BUILD_RUN_ID: ${{ inputs.reuse_build_run_id }}
         working-directory: backend
         run: |
           set -euo pipefail
           version="$(tr -d '[:space:]' < ../VERSION)"
           commit="$(git -C .. rev-parse HEAD)"
+          if [[ -n "${REUSE_BUILD_RUN_ID:-}" ]]; then
+            if [[ ! "$REUSE_BUILD_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+              echo "Invalid reuse_build_run_id: $REUSE_BUILD_RUN_ID"
+              exit 1
+            fi
+            run_meta="$(gh api "repos/glanderness/BeefTV/actions/runs/$REUSE_BUILD_RUN_ID")"
+            run_branch="$(jq -r '.head_branch' <<< "$run_meta")"
+            run_commit="$(jq -r '.head_sha' <<< "$run_meta")"
+            if [[ "$run_branch" != "main" || -z "$run_commit" || "$run_commit" == "null" ]]; then
+              echo "Reused build run $REUSE_BUILD_RUN_ID must come from main."
+              exit 1
+            fi
+            jobs_meta="$(gh api "repos/glanderness/BeefTV/actions/runs/$REUSE_BUILD_RUN_ID/jobs?per_page=100")"
+            for required_job in "Validate and open draft" "Build darwin-arm64" "Build darwin-amd64" "Build windows-amd64" "Build linux-amd64"; do
+              job_conclusion="$(jq -r --arg name "$required_job" '[.jobs[] | select(.name == $name)][0].conclusion // ""' <<< "$jobs_meta")"
+              if [[ "$job_conclusion" != "success" ]]; then
+                echo "Reused build run $REUSE_BUILD_RUN_ID job '$required_job' did not succeed (conclusion: '$job_conclusion')."
+                exit 1
+              fi
+            done
+            commit="$run_commit"
+          fi
           go test ./cmd/update-release
 
           curl --fail --location --retry 3 --max-time 60 \
@@ -162,10 +191,21 @@ jobs:
             exit 1
           fi
 
+          reuse_existing_draft="false"
           if gh release view "$version" >/dev/null 2>&1; then
-            echo "GitHub release $version already exists. Updater version assets are immutable and cannot be overwritten."
-            echo "If a failed draft was never published, delete it and its tag only after confirming it was never public."
-            exit 1
+            if [[ -n "${REUSE_BUILD_RUN_ID:-}" ]]; then
+              rel_meta="$(gh release view "$version" --json isDraft,targetCommitish)"
+              if [[ "$(jq -r '.isDraft' <<< "$rel_meta")" == "true" && "$(jq -r '.targetCommitish' <<< "$rel_meta")" == "$commit" ]]; then
+                reuse_existing_draft="true"
+              else
+                echo "GitHub release $version already exists and is not a matching draft for $commit."
+                exit 1
+              fi
+            else
+              echo "GitHub release $version already exists. Updater version assets are immutable and cannot be overwritten."
+              echo "If a failed draft was never published, delete it and its tag only after confirming it was never public."
+              exit 1
+            fi
           fi
           if git ls-remote --exit-code origin "refs/tags/$version" >/dev/null 2>&1; then
             echo "Git tag $version already exists. Choose a new VERSION; published tags are not reused."
@@ -175,23 +215,28 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
           echo "previous_version=$latest" >> "$GITHUB_OUTPUT"
+          echo "reuse_existing_draft=$reuse_existing_draft" >> "$GITHUB_OUTPUT"
 
       - name: Prepare release gate dependencies
+        if: inputs.reuse_build_run_id == ''
         run: |
           sh plugin-packages/build-packages.sh
           cd web
           bun install --frozen-lockfile
 
       - name: Local release contract gate
+        if: inputs.reuse_build_run_id == ''
         run: ./scripts/verify-beeftv-local-release.sh
 
       - name: Package corresponding WASM source
+        if: inputs.reuse_build_run_id == ''
         run: |
           python3 scripts/package-wasm-sources.py \
             --version "${{ steps.meta.outputs.version }}" \
             --binary-dir web/node_modules/@ffmpeg/core/dist/esm
 
       - uses: actions/upload-artifact@v4
+        if: inputs.reuse_build_run_id == ''
         with:
           name: media-wasm-source
           path: dist/BeefTV-${{ steps.meta.outputs.version }}-ffmpeg-wasm-sources.tar.gz
@@ -199,6 +244,7 @@ jobs:
           compression-level: 0
 
       - name: Create draft GitHub release
+        if: steps.meta.outputs.reuse_existing_draft != 'true'
         env:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
@@ -207,11 +253,12 @@ jobs:
             --draft \
             --title "BeefTV $VERSION" \
             --notes-file "$RUNNER_TEMP/release-notes.md" \
-            --target "${{ github.sha }}"
+            --target "${{ steps.meta.outputs.commit }}"
 
   build:
     name: Build ${{ matrix.platform }}
     needs: preflight
+    if: inputs.reuse_build_run_id == ''
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
@@ -344,9 +391,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ../dist
-          python ../scripts/package-desktop-installer.py --platform "$PLATFORM" &
-          installer_pid=$!
-          trap 'kill "$installer_pid" 2>/dev/null || true' EXIT
           input="cmd/desktop/build/bin"
           if [[ "$PLATFORM" == darwin-* ]]; then
             input="$input/BeefTV.app"
@@ -378,11 +422,7 @@ jobs:
               echo "::warning::Previous release ${PREVIOUS_VERSION} ${PLATFORM} zip unavailable; skipping delta archive."
             fi
           fi
-          if ! wait "$installer_pid"; then
-            echo "::error::Native installer packaging failed"
-            exit 1
-          fi
-          trap - EXIT
+          python ../scripts/package-desktop-installer.py --platform "$PLATFORM"
           python ../scripts/smoke-packaged-cli_test.py
           python ../scripts/smoke-packaged-cli.py --archive "../dist/BeefTV-${VERSION}-${PLATFORM}.zip" --platform "$PLATFORM"
 
@@ -429,10 +469,11 @@ jobs:
   publish:
     name: Sign feed and publish
     needs: [preflight, build]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.reuse_build_run_id != '')) }}
     outputs:
       activated: ${{ steps.activate.outcome == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     permissions:
       contents: write
     env:
@@ -463,12 +504,16 @@ jobs:
           pattern: desktop-*
           merge-multiple: true
           path: dist
+          run-id: ${{ inputs.reuse_build_run_id || github.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Retrieve corresponding WASM source
         uses: actions/download-artifact@v4
         with:
           name: media-wasm-source
           path: dist
+          run-id: ${{ inputs.reuse_build_run_id || github.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Check release publisher tooling
         run: |
@@ -559,7 +604,7 @@ jobs:
       - name: Publish signed GitHub release
         run: |
           set -euo pipefail
-          gh release upload "$VERSION" "dist/desktop-update.json" dist/BeefTV-"$VERSION"-*.zip dist/BeefTV-"$VERSION"-*.dmg dist/BeefTV-"$VERSION"-*-setup.exe dist/BeefTV-"$VERSION"-*.deb dist/BeefTV-"$VERSION"-ffprobe-darwin-*-sources.tar.gz dist/BeefTV-"$VERSION"-ffmpeg-wasm-sources.tar.gz
+          gh release upload "$VERSION" --clobber "dist/desktop-update.json" dist/BeefTV-"$VERSION"-*.zip dist/BeefTV-"$VERSION"-*.dmg dist/BeefTV-"$VERSION"-*-setup.exe dist/BeefTV-"$VERSION"-*.deb dist/BeefTV-"$VERSION"-ffprobe-darwin-*-sources.tar.gz dist/BeefTV-"$VERSION"-ffmpeg-wasm-sources.tar.gz
           gh release edit "$VERSION" --draft=false --latest
 
       - name: Activate verified R2 update feed

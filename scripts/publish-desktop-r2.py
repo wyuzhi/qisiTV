@@ -8,7 +8,6 @@ in AWS environment variables. No bucket configuration or permissions are changed
 
 import argparse
 import base64
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import http.client
 import json
@@ -18,7 +17,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import threading
 import urllib.request
 import urllib.error
 from urllib.parse import urlsplit
@@ -149,7 +147,6 @@ class PublicHTTP:
     def __init__(self, opener=urllib.request.urlopen, verified=None):
         self.opener = opener
         self.verified = verified
-        self._lock = threading.Lock()
 
     def check(self, url, expected_size, expected_hash, *, version):
         version_tuple(version)
@@ -158,8 +155,7 @@ class PublicHTTP:
         prefix = b""
         # Mutable feeds are always read in full, even if a receipt names them.
         reusable = expected_size > PROBE_BYTES and not urlsplit(url).path.endswith(".json")
-        with self._lock:
-            prior = self.verified.get(url) if reusable and self.verified is not None else None
+        prior = self.verified.get(url) if reusable and self.verified is not None else None
         try:
             headers = {"Cache-Control": "no-cache", "User-Agent": f"BeefTV-Desktop-Updater/{version}"}
             if prior is not None:
@@ -208,26 +204,8 @@ class PublicHTTP:
         if size != expected_size or digest.hexdigest() != expected_hash:
             raise PublishError("Public object size/hash mismatch")
         if reusable and self.verified is not None and re.fullmatch(r'"[^"\x00-\x20\x7f]+"', etag):
-            with self._lock:
-                self.verified[url] = {"size": size, "sha256": expected_hash, "etag": etag,
-                                      "prefixSHA256": hashlib.sha256(prefix).hexdigest()}
-
-
-def _run_parallel(tasks, max_workers=4):
-    if len(tasks) <= 1:
-        for fn in tasks:
-            fn()
-        return
-    pool = ThreadPoolExecutor(max_workers=min(max_workers, len(tasks)))
-    try:
-        futures = [pool.submit(fn) for fn in tasks]
-        for future in as_completed(futures):
-            future.result()
-    except BaseException:
-        pool.shutdown(wait=True, cancel_futures=True)
-        raise
-    else:
-        pool.shutdown(wait=True)
+            self.verified[url] = {"size": size, "sha256": expected_hash, "etag": etag,
+                                  "prefixSHA256": hashlib.sha256(prefix).hexdigest()}
 
 
 def verification_binding(manifest, args):
@@ -396,10 +374,8 @@ class Publisher:
                 raise PublishError(f"Immutable version object already differs: {key}")
 
     def public_check(self, payload, manifest):
-        _run_parallel([
-            lambda a=asset: self.public.check(a["url"], a["size"], a["sha256"], version=payload["version"])
-            for asset in payload["platforms"].values()
-        ])
+        for asset in payload["platforms"].values():
+            self.public.check(asset["url"], asset["size"], asset["sha256"], version=payload["version"])
         size, sha = fingerprint(manifest)
         self.public.check(f"{self.public_base}/{payload['version']}/desktop-update.json", size, sha, version=payload["version"])
 
@@ -416,11 +392,9 @@ class Publisher:
         return sources
 
     def check_installers(self, payload, sources):
-        _run_parallel([
-            lambda s=source: self.public.check(f"{self.public_base}/{payload['version']}/{s.name}",
-                                               *fingerprint(s), version=payload['version'])
-            for _, source in sources
-        ])
+        for key, source in sources:
+            self.public.check(f"{self.public_base}/{payload['version']}/{source.name}",
+                              *fingerprint(source), version=payload['version'])
 
     def stage(self, manifest, assets_dir, with_installers=False, manifest_v2=None):
         payload = self.load(manifest)
@@ -444,17 +418,12 @@ class Publisher:
                         raise PublishError(f"Local delta archive missing or size/hash mismatch: {d_name}")
                     delta_sources.append((f"{PREFIX}/{payload['version']}/{d_name}", d_source, delta))
         installers = self.installer_sources(payload, assets_dir) if with_installers else []
-        _run_parallel([
-            lambda k=key, s=source: self.immutable_put(k, s)
-            for key, source in sources + [(k, s) for k, s, _ in delta_sources] + installers
-        ])
+        for key, source in sources + [(k, s) for k, s, _ in delta_sources] + installers:
+            self.immutable_put(key, source)
         self.check_installers(payload, installers)
-        _run_parallel([
-            lambda ds=d_source, d=delta: self.public.check(
-                f"{self.public_base}/{payload['version']}/{ds.name}",
-                d["size"], d["sha256"], version=payload["version"])
-            for _, d_source, delta in delta_sources
-        ])
+        for _, d_source, delta in delta_sources:
+            self.public.check(f"{self.public_base}/{payload['version']}/{d_source.name}",
+                              delta["size"], delta["sha256"], version=payload["version"])
         self.immutable_put(f"{PREFIX}/{payload['version']}/desktop-update.json", manifest)
         self.public_check(payload, manifest)
         return payload["version"]
@@ -510,14 +479,12 @@ class Publisher:
                     raise PublishError(f"Manifest v2 digest/size mismatch against active v1 feed: {platform}")
             self.public.check(f"{self.public_base}/desktop-update.json", *fingerprint(active_v1),
                               version=payload["version"])
-            v2_checks = []
             for asset in payload["platforms"].values():
                 for url in asset["urls"]:
-                    v2_checks.append(lambda u=url, s=asset["size"], h=asset["sha256"]: self.public.check(u, s, h, version=payload["version"]))
+                    self.public.check(url, asset["size"], asset["sha256"], version=payload["version"])
                 for delta in (asset.get("deltas") or {}).values():
                     for url in delta["urls"]:
-                        v2_checks.append(lambda u=url, s=delta["size"], h=delta["sha256"]: self.public.check(u, s, h, version=payload["version"]))
-            _run_parallel(v2_checks)
+                        self.public.check(url, delta["size"], delta["sha256"], version=payload["version"])
             has_domestic = any(len(a["urls"]) == 2 for a in payload["platforms"].values())
             version_manifest_name = "desktop-update-v2.json" if has_domestic else "desktop-update-v2-r2.json"
             self.immutable_put(f"{PREFIX}/{payload['version']}/{version_manifest_name}", manifest)
