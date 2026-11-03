@@ -138,6 +138,15 @@ describe("付费生成提议", () => {
         expect(turn.proposals[0].source).toEqual({ canvasId: "canvas", canvasRevision: 7, modelConfigRevision: 3 });
         expect(turnChange(turn)).toBeNull();
     });
+    test("普通提议带上逐项明细和预计费用，确认卡才能显示费用", () => {
+        const turn = resetTurnAccumulator(newTurnAccumulator(), 4);
+        const targets = [{ nodeId: "n1", title: "镜头1", kind: "image", modelKey: "beefapi::gpt-image-2", prompt: "雨夜", parameters: { count: "1" },
+            estimate: { amount: 0.35, basis: "1K 低质量 ¥0.35/张 × 1 张", text: "预计 ¥0.35（1K 低质量 ¥0.35/张 × 1 张）" } }];
+        const estimate = { amount: 0.35, priced: 1, unknown: 0, text: "预计费用：¥0.35" };
+        collectTurnEffects(turn, "canvas.generation.propose", { proposalId: "gp-cost", kind: "image", nodeIds: ["n1"], model: "gpt-image-2", modelKey: "beefapi::gpt-image-2", targets, estimate });
+        expect(turn.proposals[0].targets).toEqual(targets);
+        expect(turn.proposals[0].estimate).toEqual(estimate);
+    });
     test("提议只被记录，不进变更摘要（它不写画布、不扣费）", () => {
         const turn = resetTurnAccumulator(newTurnAccumulator(), 4);
 

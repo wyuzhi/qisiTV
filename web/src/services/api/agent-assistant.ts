@@ -1,5 +1,6 @@
 // 内置创作助手：浏览器只与同源 Go 代理通信，宿主/owner/模型凭据都不进入页面。
 // 三个端点的真实路径都在 /api/assistant/* 下；写错路径会让面板永远拿不到回复。
+import type { CostEstimate, CostSummary } from "./cost-estimate";
 import { ApiError, apiBaseURL, http } from "./request";
 
 /** 后端给出的不可用原因（穷举，见契约 A1）；未知值一律走兜底文案。 */
@@ -88,6 +89,7 @@ export type GenerationOrderTargetView = {
     model?: string;
     modelKey: string;
     pricing?: unknown;
+    estimate?: CostEstimate;
     prompt: string;
     parameters: Record<string, string>;
     metadata?: Record<string, unknown>;
@@ -130,12 +132,14 @@ export type AssistantGenerationProposal = {
     model: string;
     modelKey: string;
     pricing?: unknown;
+    /** 后端按价格目录算出的合计，nodeIds 这一批的费用。 */
+    estimate?: CostSummary;
     approvalMode?: "ask" | "caller" | "auto";
     status?: "pending" | "approved" | "submitted" | "rejected";
     note?: string;
     targets?: GenerationOrderTargetView[];
     order?: GenerationOrder;
-    production?: { targets: { nodeId: string; title: string; kind: "image" | "video" | "audio"; modelKey: string; prompt: string; parameters: Record<string,string>; metadata?: Record<string, unknown>; referenceNodeIds: string[] }[] };
+    production?: { targets: { nodeId: string; title: string; kind: "image" | "video" | "audio"; modelKey: string; prompt: string; parameters: Record<string,string>; metadata?: Record<string, unknown>; referenceNodeIds: string[]; estimate?: CostEstimate }[]; estimate?: CostSummary };
     source?: { canvasId: string; canvasRevision: number; modelConfigRevision: number };
 };
 

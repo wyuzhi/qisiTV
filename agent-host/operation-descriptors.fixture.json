@@ -1300,6 +1300,69 @@
     "replay": "unsafe"
   },
   {
+    "id": "generation.estimate",
+    "summary": "按已保存的价格目录估算一组生成的费用；不联网、不写入、不建任务，没有价格的项目会写明原因",
+    "readOnly": true,
+    "scope": "workspace_read",
+    "params": {
+      "type": "object",
+      "properties": {
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "properties": {
+              "modelKey": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "image",
+                  "video",
+                  "audio"
+                ]
+              },
+              "parameters": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "与节点相同的生成参数，如 size、quality、count、vquality、seconds"
+              },
+              "referenceImages": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "referenceVideos": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "text": {
+                "type": "string",
+                "description": "配音台词"
+              }
+            },
+            "required": [
+              "modelKey",
+              "kind"
+            ]
+          }
+        }
+      },
+      "required": [
+        "targets"
+      ]
+    },
+    "assistantModes": [
+      "full-access",
+      "read-only"
+    ],
+    "replay": "safe"
+  },
+  {
     "id": "media.check",
     "summary": "客观测量黑屏、音量与静音停顿；不能判断声音内容，不能替代实际听看",
     "readOnly": true,

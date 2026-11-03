@@ -31,6 +31,7 @@ type fakeEnterprise struct {
 	completeMode string
 	catalogFail  bool
 	models       []map[string]any
+	prices       string
 	opened       []string
 }
 
@@ -124,6 +125,16 @@ func newEnterpriseServer(t *testing.T, fake *fakeEnterprise) *httptest.Server {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": models})
 	})
+	mux.HandleFunc("/api/enterprise/catalog", func(w http.ResponseWriter, r *http.Request) {
+		fake.mu.Lock()
+		prices := fake.prices
+		fake.mu.Unlock()
+		if prices == "" {
+			http.NotFound(w, r)
+			return
+		}
+		io.WriteString(w, prices)
+	})
 	mux.HandleFunc("/desktop-auth", func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "ok")
 	})
@@ -191,7 +202,7 @@ func previewClient(server *httptest.Server) (origin string, client *http.Client)
 	return origin, client
 }
 
-func testService(t *testing.T, fake *fakeEnterprise) (*Service, *workspace.ProviderConfig, string) {
+func testService(t *testing.T, fake *fakeEnterprise, configure ...func(*Options)) (*Service, *workspace.ProviderConfig, string) {
 	t.Helper()
 	server := newEnterpriseServer(t, fake)
 	origin, client := previewClient(server)
@@ -200,7 +211,7 @@ func testService(t *testing.T, fake *fakeEnterprise) (*Service, *workspace.Provi
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc, err := New(Options{
+	options := Options{
 		DataDir: dir, Origin: origin, Provider: store, ClientVersion: "test", Hostname: "testhost",
 		HTTPClient: client,
 		OpenURL: func(raw string) error {
@@ -208,7 +219,11 @@ func testService(t *testing.T, fake *fakeEnterprise) (*Service, *workspace.Provi
 			return nil
 		},
 		Sleep: func(time.Duration) {},
-	})
+	}
+	for _, apply := range configure {
+		apply(&options)
+	}
+	svc, err := New(options)
 	if err != nil {
 		t.Fatal(err)
 	}

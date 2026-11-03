@@ -5,6 +5,7 @@ import (
 	"strings"
 	"unicode"
 
+	"infinite-canvas/backend/internal/pricing"
 	"infinite-canvas/backend/internal/providerpreset"
 	"infinite-canvas/backend/internal/workspace"
 )
@@ -57,8 +58,12 @@ func applyCatalog(store *workspace.ProviderConfig, models []CatalogModel, previo
 		// A refreshed catalog owns this quote. Clear a stale quote when the
 		// current account/model no longer supplies one.
 		profile["videoPricing"] = nil
-		if pricing, ok := NormalizeCatalogVideoPricing(model.VideoPricing); ok {
-			profile["videoPricing"] = pricing
+		if quote, ok := NormalizeCatalogVideoPricing(model.VideoPricing); ok {
+			profile["videoPricing"] = quote
+		}
+		profile["pricing"] = nil
+		if table, ok := pricing.Normalize(model.Pricing); ok {
+			profile["pricing"] = table
 		}
 		if model.DisplayName != "" {
 			profile["displayName"] = model.DisplayName

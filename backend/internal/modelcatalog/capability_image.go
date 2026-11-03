@@ -242,8 +242,8 @@ func capabilityImageSizeFromConfig(size ImageSizeConfig) *CapabilityImageSize {
 }
 
 func validateImageCapabilityConfig(value *ImageCapabilityConfig) error {
-	if value.References.PromptMaxChars < 1 || value.References.PromptMaxChars > 1000000 {
-		return kernel.BadAuthRequest("提示词最大字符数必须在 1-1000000 之间")
+	if value.References.PromptMaxChars < 0 || value.References.PromptMaxChars > 1000000 {
+		return kernel.BadAuthRequest("提示词最大字符数必须在 0-1000000 之间，0 表示交由服务商校验")
 	}
 	if value.References.MaxImages < 0 || value.References.MaxImages > 100 || value.References.MaxImageBytes < 0 {
 		return kernel.BadAuthRequest("图片引用限制无效")

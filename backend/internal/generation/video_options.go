@@ -122,12 +122,17 @@ func ImageTransparentBackgroundSupported(profile *ImageCapabilityConfig) bool {
 }
 
 func sequentialMaxImagesForInput(input Input) int {
-	maxImages, err := strconv.Atoi(strings.TrimSpace(input.Config.SeedreamMaxImages))
+	return SequentialMaxImages(input.Config.SeedreamMaxImages, len(input.ReferenceImages))
+}
+
+// SequentialMaxImages 是组图请求的输出上限：参考图和输出合计不超过 15 张。
+func SequentialMaxImages(raw string, references int) int {
+	maxImages, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || maxImages <= 1 {
 		return 0
 	}
 	limit := 15
-	if remaining := limit - len(input.ReferenceImages); remaining < limit {
+	if remaining := limit - references; remaining < limit {
 		limit = remaining
 	}
 	if maxImages > limit {

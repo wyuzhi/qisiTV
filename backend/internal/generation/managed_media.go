@@ -147,6 +147,11 @@ func managedImageOptions(input Input) map[string]any {
 	return options
 }
 
+// ManagedImageSizeAndQuality 返回托管图片请求实际发送的尺寸和画质，费用估算据此取同一个计费档位。
+func ManagedImageSizeAndQuality(profile *ImageCapabilityConfig, size, quality string) (string, string) {
+	return managedImageSize(profile, size), managedImageQuality(profile, quality)
+}
+
 // managedImageQuality 只发送模型目录声明支持的画质；不支持或不在可选值里时交给服务端默认值。
 func managedImageQuality(profile *ImageCapabilityConfig, raw string) string {
 	value := strings.TrimSpace(raw)
