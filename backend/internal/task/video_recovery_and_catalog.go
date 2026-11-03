@@ -317,47 +317,6 @@ func RecoverFailedVideoOrUpscaleForUser(
 	return repo.TaskForUser(userID, taskID)
 }
 
-func AdminQueryFailedVideoTask(
-	ctx context.Context,
-	repo *repository.Repository,
-	requireAdmin func(*model.User) error,
-	queryTask func(context.Context, *model.Task, string) (*ProviderTaskQueryResult, error),
-	appendAudit func(actor *model.User, action, targetType, targetID, summary string, detail any) error,
-	actor *model.User,
-	logID string,
-) (*ProviderTaskQueryResult, error) {
-	if err := requireAdmin(actor); err != nil {
-		return nil, err
-	}
-	logRow, err := repo.APICallLog(strings.TrimSpace(logID))
-	if err != nil {
-		return nil, err
-	}
-	if logRow.Capability != "video" || strings.TrimSpace(logRow.TaskID) == "" {
-		return nil, kernel.BadAuthRequest("该请求没有可查询的视频任务")
-	}
-	task, err := repo.Task(logRow.TaskID)
-	if err != nil {
-		return nil, err
-	}
-	if task.UserID != logRow.UserID {
-		return nil, kernel.BadAuthRequest("请求与任务归属不一致")
-	}
-	if task.ProviderRequestID == "" {
-		task.ProviderRequestID = strings.TrimSpace(logRow.ProviderRequestID)
-	}
-	result, err := queryTask(ctx, task, "")
-	if err != nil {
-		return nil, err
-	}
-	if err := appendAudit(actor, "api_log.query_provider_task", "task", task.ID, "人工查询失败视频任务", map[string]any{
-		"apiCallLogId": logRow.ID, "providerRequestId": task.ProviderRequestID, "providerStatus": result.ProviderStatus, "recovered": result.Recovered,
-	}); err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
 type VideoTaskRecoveryDeps struct {
 	Repo                  *repository.Repository
 	Registry              *protocol.Registry

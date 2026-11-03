@@ -3,7 +3,6 @@ package appearance
 import (
 	"os"
 	"path/filepath"
-	"sync"
 
 	"infinite-canvas/backend/internal/kernel"
 	"infinite-canvas/backend/internal/model"
@@ -11,8 +10,6 @@ import (
 
 type SettingsStore interface {
 	SystemSetting(key string) (*model.SystemSetting, error)
-	SaveSystemSetting(*model.SystemSetting) error
-	DeleteSystemSetting(key string) error
 }
 
 type Resources interface {
@@ -25,11 +22,6 @@ type LocalFiles interface {
 
 type AdminGate interface {
 	RequireAdmin(user *model.User) error
-	AppendAudit(actor *model.User, action, targetType, targetID, summary string, metadata any) error
-}
-
-type StorageLock interface {
-	WithLock(func() error) error
 }
 
 type Dependencies struct {
@@ -37,7 +29,6 @@ type Dependencies struct {
 	Resources Resources
 	Files     LocalFiles
 	Admin     AdminGate
-	Lock      StorageLock
 }
 
 type HostConfig struct {
@@ -45,8 +36,6 @@ type HostConfig struct {
 	Resources    Resources
 	DataDir      string
 	RequireAdmin func(*model.User) error
-	AppendAudit  func(*model.User, string, string, string, string, any) error
-	Mutex        *sync.Mutex
 }
 
 func NewFromHost(cfg HostConfig) *Service {
@@ -54,14 +43,12 @@ func NewFromHost(cfg HostConfig) *Service {
 		Settings:  cfg.Settings,
 		Resources: cfg.Resources,
 		Files:     dataDirFiles{dataDir: cfg.DataDir},
-		Admin:     funcAdminGate{requireAdmin: cfg.RequireAdmin, appendAudit: cfg.AppendAudit},
-		Lock:      mutexLock{mu: cfg.Mutex},
+		Admin:     funcAdminGate{requireAdmin: cfg.RequireAdmin},
 	})
 }
 
 type funcAdminGate struct {
 	requireAdmin func(*model.User) error
-	appendAudit  func(*model.User, string, string, string, string, any) error
 }
 
 func (g funcAdminGate) RequireAdmin(user *model.User) error {
@@ -69,13 +56,6 @@ func (g funcAdminGate) RequireAdmin(user *model.User) error {
 		return kernel.Unauthorized("请先登录")
 	}
 	return g.requireAdmin(user)
-}
-
-func (g funcAdminGate) AppendAudit(actor *model.User, action, targetType, targetID, summary string, metadata any) error {
-	if g.appendAudit == nil {
-		return kernel.Unauthorized("请先登录")
-	}
-	return g.appendAudit(actor, action, targetType, targetID, summary, metadata)
 }
 
 type dataDirFiles struct {
@@ -88,20 +68,4 @@ func (f dataDirFiles) Exists(objectKey string) bool {
 	}
 	info, err := os.Stat(filepath.Join(f.dataDir, "resources", filepath.FromSlash(objectKey)))
 	return err == nil && !info.IsDir()
-}
-
-type mutexLock struct {
-	mu *sync.Mutex
-}
-
-func (l mutexLock) WithLock(fn func() error) error {
-	if fn == nil {
-		return nil
-	}
-	if l.mu == nil {
-		return fn()
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return fn()
 }

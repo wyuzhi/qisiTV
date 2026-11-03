@@ -15,18 +15,6 @@ func TestPrepareLogicalModelBundleRejectsBadCode(t *testing.T) {
 	}
 }
 
-func TestArchiveLogicalModelGuard(t *testing.T) {
-	if err := ArchiveLogicalModelGuard(nil); err == nil {
-		t.Fatal("nil model accepted")
-	}
-	if err := ArchiveLogicalModelGuard(&model.LogicalModel{ID: "lm", SourceChannelModelID: "cm"}); err == nil {
-		t.Fatal("synced model archive accepted")
-	}
-	if err := ArchiveLogicalModelGuard(&model.LogicalModel{ID: "lm"}); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestPrepareLogicalModelBundleRequiresEnabledRoute(t *testing.T) {
 	deps := LogicalBundleDeps{
 		Now:     time.Now(),

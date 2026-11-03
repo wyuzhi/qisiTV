@@ -1,9 +1,5 @@
 package model
 
-import (
-	"time"
-)
-
 type TaskStatus string
 type ProviderCancelStatus string
 type UserRole string
@@ -20,18 +16,6 @@ type AssetCategory string
 type AssetVersionStatus string
 type WorkflowStatus string
 type WorkflowStepStatus string
-
-// AdminAuditEvent 只允许追加，用于还原管理员写操作，禁止作为可编辑业务状态使用。
-type AdminAuditEvent struct {
-	ID           string    `json:"id" gorm:"primaryKey;size:36"`
-	ActorUserID  string    `json:"actorUserId" gorm:"index;size:36"`
-	Action       string    `json:"action" gorm:"index;size:80"`
-	TargetType   string    `json:"targetType" gorm:"index;size:40"`
-	TargetID     string    `json:"targetId" gorm:"index;size:160"`
-	Summary      string    `json:"summary" gorm:"size:500"`
-	MetadataJSON string    `json:"metadataJson" gorm:"type:text"`
-	CreatedAt    time.Time `json:"createdAt" gorm:"index"`
-}
 
 const (
 	TaskStatusQueued    TaskStatus = "queued"

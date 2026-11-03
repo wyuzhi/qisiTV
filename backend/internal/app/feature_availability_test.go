@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -40,17 +41,17 @@ func TestFeatureAvailabilityLegacySettingKeepsCustomChannelsEnabled(t *testing.T
 	}
 }
 
-func TestUpdateFeatureAvailabilityPersistsAndAudits(t *testing.T) {
-	svc, db := newFeatureAvailabilityTestService(t)
-	actor := &model.User{ID: "admin-1", Role: model.UserRoleAdmin}
+func TestFeatureAvailabilityReadsConfiguredSettingAndEnforcesGates(t *testing.T) {
+	svc, _ := newFeatureAvailabilityTestService(t)
 	want := FeatureAvailability{ShortDramaEnabled: false, TaskCenterEnabled: true, CustomChannelsEnabled: true, PluginCenterEnabled: false, SystemPluginsVisibleToUsers: false}
+	saveFeatureAvailabilityForTest(t, svc, want)
 
-	setting, err := svc.UpdateFeatureAvailability(actor, want)
+	setting, err := svc.FeatureAvailability()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !setting.Configured || setting.ShortDramaEnabled || !setting.TaskCenterEnabled || !setting.CustomChannelsEnabled || setting.PluginCenterEnabled || setting.SystemPluginsVisibleToUsers {
-		t.Fatalf("UpdateFeatureAvailability() = %#v", setting)
+		t.Fatalf("FeatureAvailability() = %#v", setting)
 	}
 	if enabled, err := svc.FeatureEnabled(FeaturePluginCenter); err != nil || enabled {
 		t.Fatalf("FeatureEnabled(pluginCenter) = %v, %v", enabled, err)
@@ -63,24 +64,15 @@ func TestUpdateFeatureAvailabilityPersistsAndAudits(t *testing.T) {
 			t.Fatalf("RequireFeature(shortDrama) error = %#v", err)
 		}
 	}
-	var auditCount int64
-	if err := db.Model(&model.AdminAuditEvent{}).Where("action = ?", "feature_availability.update").Count(&auditCount).Error; err != nil {
-		t.Fatal(err)
-	}
-	if auditCount != 1 {
-		t.Fatalf("audit count = %d, want 1", auditCount)
-	}
 }
 
 func TestPluginsForUserKeepsOfficialApplicationsAndHidesManagedPlugins(t *testing.T) {
 	svc, _ := newFeatureAvailabilityTestService(t)
 	admin := &model.User{ID: "admin-1", Role: model.UserRoleAdmin}
-	if _, err := svc.UpdateFeatureAvailability(admin, FeatureAvailability{
+	saveFeatureAvailabilityForTest(t, svc, FeatureAvailability{
 		ShortDramaEnabled: true, TaskCenterEnabled: true,
 		CustomChannelsEnabled: true, PluginCenterEnabled: true, SystemPluginsVisibleToUsers: false,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 	svc.pluginRuntime = pluginRuntimeFromRecords(map[string]pluginRecord{
 		"bundled":  {Source: "bundled", Metadata: protocol.Metadata{ID: "bundled", Name: "系统协议", Version: "1"}},
 		"uploaded": {Source: "uploaded", Metadata: protocol.Metadata{ID: "uploaded", Name: "自定义协议", Version: "1"}},
@@ -105,10 +97,7 @@ func TestPluginsForUserKeepsOfficialApplicationsAndHidesManagedPlugins(t *testin
 
 func TestCustomChannelTaskInputRequiresFeature(t *testing.T) {
 	svc, _ := newFeatureAvailabilityTestService(t)
-	actor := &model.User{ID: "admin-1", Role: model.UserRoleAdmin}
-	if _, err := svc.UpdateFeatureAvailability(actor, FeatureAvailability{ShortDramaEnabled: true, TaskCenterEnabled: true, CustomChannelsEnabled: false}); err != nil {
-		t.Fatal(err)
-	}
+	saveFeatureAvailabilityForTest(t, svc, FeatureAvailability{ShortDramaEnabled: true, TaskCenterEnabled: true, CustomChannelsEnabled: false})
 
 	customInput, err := normalizeTaskInput(map[string]any{"config": providerConfig{BaseURL: "https://example.com", APIKey: "private-key", Model: "text-model"}})
 	if err != nil {
@@ -135,10 +124,7 @@ func TestCustomChannelTaskInputRequiresFeature(t *testing.T) {
 
 func TestCreateTaskDoesNotClassifyCustomChannelAsMissingSystemModel(t *testing.T) {
 	svc, _ := newFeatureAvailabilityTestService(t)
-	actor := &model.User{ID: "admin-1", Role: model.UserRoleAdmin}
-	if _, err := svc.UpdateFeatureAvailability(actor, FeatureAvailability{ShortDramaEnabled: true, TaskCenterEnabled: true, CustomChannelsEnabled: false, FrontendModelsEnabled: true}); err != nil {
-		t.Fatal(err)
-	}
+	saveFeatureAvailabilityForTest(t, svc, FeatureAvailability{ShortDramaEnabled: true, TaskCenterEnabled: true, CustomChannelsEnabled: false, FrontendModelsEnabled: true})
 
 	_, err := svc.CreateTask("user-1", CreateTaskRequest{
 		Type:   "canvas_text",
@@ -157,6 +143,17 @@ func TestCreateTaskDoesNotClassifyCustomChannelAsMissingSystemModel(t *testing.T
 	}
 }
 
+func saveFeatureAvailabilityForTest(t *testing.T, svc *Service, value FeatureAvailability) {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.repo.SaveSystemSetting(&model.SystemSetting{Key: featureAvailabilitySettingKey, ValueJSON: string(encoded)}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func newLocalFeatureAvailabilityTestService(t *testing.T) (*Service, *gorm.DB) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -166,7 +163,7 @@ func newLocalFeatureAvailabilityTestService(t *testing.T) (*Service, *gorm.DB) {
 	if sqlDB, err := db.DB(); err == nil {
 		sqlDB.SetMaxOpenConns(1)
 	}
-	if err := db.AutoMigrate(&model.SystemSetting{}, &model.AdminAuditEvent{}); err != nil {
+	if err := db.AutoMigrate(&model.SystemSetting{}); err != nil {
 		t.Fatal(err)
 	}
 	return NewLocal(repository.New(db), t.TempDir()), db
@@ -181,7 +178,7 @@ func newFeatureAvailabilityTestService(t *testing.T) (*Service, *gorm.DB) {
 	if sqlDB, err := db.DB(); err == nil {
 		sqlDB.SetMaxOpenConns(1)
 	}
-	if err := db.AutoMigrate(&model.SystemSetting{}, &model.AdminAuditEvent{}); err != nil {
+	if err := db.AutoMigrate(&model.SystemSetting{}); err != nil {
 		t.Fatal(err)
 	}
 	return New(repository.New(db), t.TempDir()), db

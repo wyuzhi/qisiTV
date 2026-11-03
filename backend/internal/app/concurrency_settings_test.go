@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -23,15 +24,21 @@ func TestRuntimeConcurrencySettingPersistsAndChannelOverrideWins(t *testing.T) {
 	if sqlDB, err := db.DB(); err == nil {
 		sqlDB.SetMaxOpenConns(1)
 	}
-	if err := db.AutoMigrate(&model.SystemSetting{}, &model.AdminAuditEvent{}, &model.ModelChannel{}); err != nil {
+	if err := db.AutoMigrate(&model.SystemSetting{}, &model.ModelChannel{}); err != nil {
 		t.Fatal(err)
 	}
 	svc := New(repository.New(db), t.TempDir())
-	actor := &model.User{ID: "admin-1", Role: model.UserRoleAdmin}
 	policy := defaultRuntimePolicy()
 	policy.Task.WorkerConcurrency = 8
 	policy.Task.ChannelConcurrency = 6
-	setting, err := svc.UpdateRuntimePolicySetting(actor, policy)
+	encoded, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.repo.SaveSystemSetting(&model.SystemSetting{Key: runtimePolicySettingKey, ValueJSON: string(encoded)}); err != nil {
+		t.Fatal(err)
+	}
+	setting, err := svc.RuntimePolicy()
 	if err != nil {
 		t.Fatal(err)
 	}

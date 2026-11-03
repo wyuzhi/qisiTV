@@ -69,38 +69,6 @@ func (s *Service) hostedFeatureAvailability() (*PublicFeatureAvailability, error
 	return publicFeatureAvailability(setting, value), nil
 }
 
-func (s *Service) AdminFeatureAvailability(actor *model.User) (*PublicFeatureAvailability, error) {
-	if err := s.requireAdmin(actor); err != nil {
-		return nil, err
-	}
-	return s.hostedFeatureAvailability()
-}
-
-func (s *Service) UpdateFeatureAvailability(actor *model.User, value FeatureAvailability) (*PublicFeatureAvailability, error) {
-	if err := s.requireAdmin(actor); err != nil {
-		return nil, err
-	}
-	current, before, err := s.readFeatureAvailability()
-	if err != nil {
-		return nil, err
-	}
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	setting := model.SystemSetting{Key: featureAvailabilitySettingKey, ValueJSON: string(encoded), UpdatedBy: actor.ID}
-	if current != nil {
-		setting.CreatedAt = current.CreatedAt
-	}
-	if err := s.repo.SaveSystemSetting(&setting); err != nil {
-		return nil, err
-	}
-	if err := s.appendAdminAudit(actor, "feature_availability.update", "system_setting", featureAvailabilitySettingKey, "更新功能开放配置", map[string]any{"before": before, "after": value}); err != nil {
-		return nil, err
-	}
-	return publicFeatureAvailability(&setting, value), nil
-}
-
 func (s *Service) FeatureEnabled(feature string) (bool, error) {
 	if s != nil && s.localMode {
 		switch feature {

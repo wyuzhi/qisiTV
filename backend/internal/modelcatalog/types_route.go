@@ -88,30 +88,6 @@ type PublicLogicalModel struct {
 	Available          bool             `json:"available"`
 }
 
-type AdminLogicalRoute struct {
-	ID                    string         `json:"id"`
-	ChannelModelID        string         `json:"channelModelId"`
-	ChannelID             string         `json:"channelId"`
-	ChannelModelKey       string         `json:"channelModelKey"`
-	ChannelModelName      string         `json:"channelModelName"`
-	Enabled               bool           `json:"enabled"`
-	Priority              int            `json:"priority"`
-	Weight                int            `json:"weight"`
-	Available             bool           `json:"available"`
-	StructurallyAvailable bool           `json:"-"`
-	CapabilitySpec        CapabilitySpec `json:"capabilitySpec"`
-}
-
-type AdminLogicalModel struct {
-	PublicLogicalModel
-	Enabled            bool                `json:"enabled"`
-	ActiveRevisionID   string              `json:"activeRevisionId"`
-	RevisionVersion    int                 `json:"revisionVersion"`
-	ConfigurationError string              `json:"configurationError,omitempty"`
-	AvailabilityError  string              `json:"availabilityError,omitempty"`
-	Routes             []AdminLogicalRoute `json:"routes"`
-}
-
 type RouteSimulationCandidate struct {
 	RouteID          string   `json:"routeId"`
 	ChannelModelID   string   `json:"channelModelId"`
