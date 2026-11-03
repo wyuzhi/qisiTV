@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { MODEL_SERVICE_PRESETS, serviceConnectionError, serviceModelProfile, modelCatalogRequestURL } from "../src/lib/model-service-presets";
+import { MODEL_SERVICE_PRESETS, createServicePresetChannel, ll2ProtocolsAvailable, presetCatalogFor, serviceConnectionError, serviceModelProfile, servicePresetFor, modelCatalogRequestURL } from "../src/lib/model-service-presets";
 import { modelConnectionResultDetail, testChannelModelConnection } from "../src/lib/model-connection-test";
 import { applyFetchedChannelModelCatalog, modelConfigChannelStatusLabel } from "../src/pages/settings/channel-settings-pane";
 import { backendProviderConfig } from "../src/services/api/generation-task";
@@ -195,5 +195,49 @@ test("official OpenAI and Gemini presets stop advertising discontinued video API
         expect(subtitle).not.toMatch(/·\s*(Veo\s*)?视频\s*$/);
     }
     expect(presets.get("compatible")).toContain("中转");
+    expect(presets.get("ll2")).toContain("视频");
     expect(presets.get("ark")).toContain("Seedance 视频");
+});
+
+test("LL2 service preset resolves all 6 LL2 protocols when plugin is enabled and fails closed when disabled", () => {
+    const ll2Protocols = [
+        ...protocols,
+        ...["ll2-seedance-video", "ll2-vidu-video", "ll2-minimax-video", "ll2-super-vega-video", "ll2-auto-hd-video"].map(
+            (value) => ({ value, capability: "video", authType: "bearer", enabled: true } as ModelProtocolDefinition),
+        ),
+    ];
+    expect(ll2ProtocolsAvailable(ll2Protocols)).toBe(true);
+    expect(ll2ProtocolsAvailable(protocols)).toBe(false);
+
+    const channel = createServicePresetChannel("ll2", "ll2-test", ll2Protocols);
+    const catalog = presetCatalogFor("ll2");
+    expect(servicePresetFor(channel)).toBe("ll2");
+    expect(channel.name).toBe("LL2 (DMC)");
+    expect(channel.baseUrl).toBe("https://api.ll2.cn");
+    expect(channel.models).toHaveLength(9);
+    expect(catalog).toHaveLength(9);
+
+    const resolvedProtocols = new Set(
+        catalog.map((item) => serviceModelProfile(channel, item, ll2Protocols).protocol),
+    );
+    expect([...resolvedProtocols].sort()).toEqual([
+        "chat-completion",
+        "ll2-auto-hd-video",
+        "ll2-minimax-video",
+        "ll2-seedance-video",
+        "ll2-super-vega-video",
+        "ll2-vidu-video",
+    ]);
+
+    // When the LL2 plugin is disabled/missing, video models must not resolve to unavailable ll2-* protocols.
+    const withoutPlugin = catalog.map((item) => serviceModelProfile(channel, item, protocols));
+    expect(withoutPlugin.find((profile) => profile.capability === "text")?.protocol).toBe("chat-completion");
+    for (const videoProfile of withoutPlugin.filter((profile) => profile.capability === "video")) {
+        expect(videoProfile.protocol).toBeUndefined();
+    }
+
+    // Switching back to another preset clears LL2 preset models.
+    const switched = createServicePresetChannel("compatible", "ll2-test", ll2Protocols);
+    expect(switched.models).toEqual([]);
+    expect(presetCatalogFor("compatible")).toEqual([]);
 });

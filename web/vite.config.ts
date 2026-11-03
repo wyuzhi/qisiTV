@@ -82,7 +82,7 @@ export default defineConfig({
     },
     server: {
         // The in-app plugin guide renders the docs site page, the single source.
-        fs: { allow: [searchForWorkspaceRoot(webDir), resolve(webDir, "../docs/content/docs/plugins")] },
+        fs: { allow: [searchForWorkspaceRoot(webDir), resolve(webDir, "../docs/content/docs/plugins"), resolve(webDir, "../plugin-packages")] },
         proxy: {
             "/api/ops": {
                 target: apiProxyTarget,

@@ -1,9 +1,9 @@
 // BeefTV 内置插件：LL2 (DMC) 算力与视频渠道（beeftv-plugin-ll2）
 // 通过 app.settings 插槽提供一键 BYOK 配置面板，将 LL2 API Key 与预置协议模型一键同步至宿主「设置 -> 模型服务」。
 
-const DEFAULT_BASE_URL = "https://api.ll2.cn";
-const LL2_CHANNEL_ID = "ll2";
-const LL2_CHANNEL_NAME = "LL2 (DMC)";
+export const DEFAULT_BASE_URL = "https://api.ll2.cn";
+export const LL2_CHANNEL_ID = "ll2";
+export const LL2_CHANNEL_NAME = "LL2 (DMC)";
 
 const DEFAULT_VIDEO_REFERENCES = {
   promptMaxChars: 2000,

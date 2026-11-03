@@ -6,6 +6,7 @@ import { navigationTools } from "@/constant/navigation-tools";
 import { Kbd } from "@/components/ui/base/kbd";
 import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { cn } from "@/lib/utils";
+import { useUserStore } from "@/stores/use-user-store";
 
 type PaletteEntry = {
     id: string;
@@ -24,6 +25,7 @@ export function WorkspaceCommandPalette({ open, onClose }: { open: boolean; onCl
     const [highlight, setHighlight] = useState(0);
     const inputRef = useRef<HTMLInputElement>(null);
     const pluginCommandEntries = usePluginSlot("app.command");
+    const pluginCenterEnabled = useUserStore((state) => state.features.pluginCenterEnabled);
 
     const entries = useMemo<PaletteEntry[]>(() => {
         const toolEntry = (slug: string, to?: string): PaletteEntry => {
@@ -46,10 +48,11 @@ export function WorkspaceCommandPalette({ open, onClose }: { open: boolean; onCl
             toolEntry("canvas", "/canvas"),
             toolEntry("assets", "/assets"),
             toolEntry("skills", "/skills"),
+            ...(pluginCenterEnabled ? [toolEntry("plugins", "/plugins")] : []),
             toolEntry("settings", "/settings"),
             ...pluginEntries,
         ];
-    }, [pluginCommandEntries]);
+    }, [pluginCenterEnabled, pluginCommandEntries]);
 
     const filtered = useMemo(() => {
         const keyword = query.trim().toLowerCase();

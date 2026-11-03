@@ -1,12 +1,14 @@
 import type { ModelChannel, ModelCapability } from "@/stores/use-config-store";
-import { buildApiUrl } from "@/stores/use-config-store";
+import { buildApiUrl, createModelChannel } from "@/stores/use-config-store";
 import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
 import { inferProtocolCapabilityFromModel, type ModelProtocolDefinition } from "@/lib/model-protocols";
 import { catalogEndpointCapability, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
 import { serviceCredentialGuide } from "@/lib/service-credentials";
+import { DEFAULT_BASE_URL as LL2_DEFAULT_BASE_URL, LL2_CHANNEL_ID, LL2_CHANNEL_NAME, LL2_PRESET_MODELS, buildLL2ModelChannel } from "../../../plugin-packages/beeftv-plugin-ll2/client/index.js";
 
 export const MODEL_SERVICE_PRESETS = [
     { id: "compatible", name: "第三方模型服务", subtitle: "OpenAI 兼容 API · 中转服务", icon: "OpenAI", baseUrl: "", apiFormat: "openai" },
+    { id: LL2_CHANNEL_ID, name: LL2_CHANNEL_NAME, subtitle: "文本 · 多款主流视频 · 视频超分", icon: "OpenAI", baseUrl: LL2_DEFAULT_BASE_URL, apiFormat: "openai" },
     { id: "openai", name: "OpenAI", subtitle: "文本 · 图片（Sora 已停用）", icon: "OpenAI", baseUrl: "https://api.openai.com/v1", apiFormat: "openai" },
     { id: "gemini", name: "Google Gemini", subtitle: "文本 · 图片（Veo 已停用）", icon: "Gemini", baseUrl: "https://generativelanguage.googleapis.com", apiFormat: "gemini" },
     { id: "ark", name: "火山方舟", subtitle: "文本 · 即梦图片 · Seedance 视频", icon: "Volcengine", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", apiFormat: "openai" },
@@ -19,13 +21,59 @@ export function isTopazUpscaleChannel(channel: Pick<ModelChannel, "id" | "models
 }
 
 export function servicePresetFor(channel: ModelChannel): ModelServicePresetId {
+    if (channel.id === LL2_CHANNEL_ID) return LL2_CHANNEL_ID;
     try {
         const host = new URL(channel.baseUrl).hostname;
+        const ll2Host = new URL(LL2_DEFAULT_BASE_URL).hostname;
+        if (host === ll2Host || host.endsWith(".ll2.cn")) return LL2_CHANNEL_ID;
         if (host === "api.openai.com") return "openai";
         if (host === "generativelanguage.googleapis.com") return "gemini";
         if (/^ark\.[a-z0-9-]+\.(?:volces|bytepluses)\.com$/.test(host)) return "ark";
     } catch { /* An unfinished connection has no provider identity yet. */ }
     return "compatible";
+}
+
+export function presetCatalogFor(id: ModelServicePresetId): ChannelModelCatalogItem[] {
+    if (id !== LL2_CHANNEL_ID) return [];
+    return LL2_PRESET_MODELS.map((item) => ({
+        id: item.model,
+        displayName: item.displayName,
+        modelType: item.capability as ModelCapability,
+    }));
+}
+
+export function ll2ProtocolsAvailable(protocols: ModelProtocolDefinition[]): boolean {
+    return LL2_PRESET_MODELS.every((item) =>
+        protocols.some((protocol) => protocol.value === item.protocol && protocol.capability === item.capability && protocol.enabled !== false),
+    );
+}
+
+export function createServicePresetChannel(id: ModelServicePresetId, channelId: string, protocols?: ModelProtocolDefinition[]): ModelChannel {
+    const preset = MODEL_SERVICE_PRESETS.find((item) => item.id === id)!;
+    if (id === LL2_CHANNEL_ID) {
+        const built = buildLL2ModelChannel({ apiKey: "", baseUrl: preset.baseUrl, selectedModels: undefined });
+        return {
+            ...createModelChannel({ id: channelId, apiFormat: preset.apiFormat }),
+            name: preset.name,
+            baseUrl: preset.baseUrl,
+            models: built.models,
+            modelProfiles: built.modelProfiles.map((profile) => {
+                const definition = protocols?.find((p) => p.value === profile.protocol && p.capability === profile.capability && p.enabled !== false);
+                return {
+                    ...profile,
+                    capability: profile.capability as ModelCapability,
+                    protocol: definition?.value,
+                    authType: definition?.authType,
+                    capabilityConfig: profile.capabilityConfig as NonNullable<ModelChannel["modelProfiles"]>[number]["capabilityConfig"],
+                };
+            }),
+        };
+    }
+    return {
+        ...createModelChannel({ id: channelId, apiFormat: preset.apiFormat }),
+        name: id === "compatible" ? "" : preset.name,
+        baseUrl: preset.baseUrl,
+    };
 }
 
 // Endpoint metadata is a hint, only resolve to protocols the host actually offers.
@@ -34,13 +82,31 @@ export function serviceModelProfile(channel: ModelChannel, item: ChannelModelCat
     if (existing?.protocol && !explicitCapability) {
         const definition = protocols.find((protocol) => protocol.value === existing.protocol && protocol.enabled !== false);
         if (definition && definition.authType !== existing.authType) return { ...existing, authType: definition.authType };
-        return existing;
+        if (definition || !existing.protocol.startsWith("ll2-")) return existing;
+    }
+    const preset = channel.apiFormat === "gemini" ? "gemini" : servicePresetFor(channel);
+    const ll2Preset = preset === LL2_CHANNEL_ID ? LL2_PRESET_MODELS.find((presetItem) => presetItem.model === item.id) : undefined;
+    if (ll2Preset && (!explicitCapability || explicitCapability === ll2Preset.capability)) {
+        const definition = protocols.find((protocol) => protocol.value === ll2Preset.protocol && protocol.capability === ll2Preset.capability && protocol.enabled !== false);
+        return {
+            ...existing,
+            model: ll2Preset.model,
+            displayName: existing?.displayName || ll2Preset.displayName,
+            capability: ll2Preset.capability as ModelCapability,
+            protocol: definition?.value,
+            authType: definition ? definition.authType : existing?.authType,
+            ...(ll2Preset.defaultOptions ? { defaultOptions: ll2Preset.defaultOptions } : {}),
+            capabilityConfig: existing?.capability === ll2Preset.capability && existing?.capabilityConfig
+                ? existing.capabilityConfig
+                : ll2Preset.capabilityConfig as NonNullable<ModelChannel["modelProfiles"]>[number]["capabilityConfig"],
+        };
     }
     const fullvideoFull = ["sd-native-full-2.0", "sd-native-full-2.5", "原生不卡人脸-全参2.0", "原生不卡人脸-全参2.5"].includes(item.id);
     const capability = explicitCapability || existing?.capability || item.modelType || catalogEndpointCapability(item) || (fullvideoFull ? "video" : inferProtocolCapabilityFromModel(item.id));
-    const preset = channel.apiFormat === "gemini" ? "gemini" : servicePresetFor(channel);
+    const compatibleCandidates: Partial<Record<ModelCapability, string>> = { text: "chat-completion", image: "openai-image", audio: "openai-audio" };
     const candidates: Record<ModelServicePresetId, Partial<Record<ModelCapability, string>>> = {
-        compatible: { text: "chat-completion", image: "openai-image", audio: "openai-audio" },
+        compatible: compatibleCandidates,
+        ll2: compatibleCandidates,
         openai: { text: "openai-response", image: "openai-image", video: "newapi" },
         gemini: { text: "gemini-generate-content", image: "gemini-image", video: "gemini-veo" },
         ark: { text: "chat-completion", image: "volcengine-ark-image", video: "volcengine-ark-video" },
