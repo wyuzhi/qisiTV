@@ -153,20 +153,25 @@ func LoadOfficialFallbackRegistry() *protocol.Registry {
 		if err != nil {
 			return
 		}
-		adapters := make([]protocol.Adapter, 0, len(entries))
+		adapters := make([]protocol.Adapter, 0, len(entries)+1)
+		for _, ll2Dir := range officialBundledPluginDirCandidates(directory, "beeftv-plugin-ll2") {
+			info, statErr := os.Stat(ll2Dir)
+			if statErr != nil || !info.IsDir() {
+				continue
+			}
+			pkg, parseErr := protocol.ParsePluginPackageDir(ll2Dir)
+			if parseErr != nil {
+				return
+			}
+			providers, loadErr := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil)
+			if loadErr != nil {
+				return
+			}
+			adapters = append(adapters, providers...)
+			break
+		}
 		for _, entry := range entries {
 			if entry.IsDir() {
-				if entry.Name() == "beeftv-plugin-ll2" {
-					pkg, err := protocol.ParsePluginPackageDir(filepath.Join(directory, entry.Name()))
-					if err != nil {
-						return
-					}
-					providers, err := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil)
-					if err != nil {
-						return
-					}
-					adapters = append(adapters, providers...)
-				}
 				continue
 			}
 			if !strings.HasSuffix(strings.ToLower(entry.Name()), protocol.PluginPackageExtension) {
@@ -250,6 +255,39 @@ func resolveOfficialPluginPackageDir(candidates []string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("未找到官方插件目录 plugin-packages；请设置 CANVAS_OFFICIAL_PLUGIN_DIR")
+}
+
+func officialBundledPluginDirCandidates(officialPackageDir, pluginName string) []string {
+	candidates := []string{
+		filepath.Join(officialPackageDir, "..", "agent-host", "bundled-plugins", pluginName),
+		filepath.Join(officialPackageDir, pluginName),
+		filepath.Join("/app/agent-host/bundled-plugins", pluginName),
+	}
+	if executable, err := os.Executable(); err == nil && strings.TrimSpace(executable) != "" {
+		execDir := filepath.Dir(executable)
+		candidates = append(candidates,
+			filepath.Join(execDir, "agent-host", "bundled-plugins", pluginName),
+			filepath.Join(execDir, "..", "Resources", "agent-host", "bundled-plugins", pluginName),
+		)
+	}
+	if workingDir, err := os.Getwd(); err == nil {
+		current := workingDir
+		for range 8 {
+			if current == "" {
+				break
+			}
+			candidates = append(candidates,
+				filepath.Join(current, "agent-host", "bundled-plugins", pluginName),
+				filepath.Join(current, "plugin-packages", pluginName),
+			)
+			parent := filepath.Dir(current)
+			if parent == current {
+				break
+			}
+			current = parent
+		}
+	}
+	return candidates
 }
 
 // 兼容包内未导出旧名（service 薄包装与未改调用点）。

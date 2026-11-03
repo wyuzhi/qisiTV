@@ -120,7 +120,7 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 		}
 		byID[id] = next
 	}
-	for _, builtinName := range []string{"beeftv-plugin-market", "beeftv-plugin-ll2"} {
+	for _, builtinName := range BundledBuiltinPluginNames {
 		pkgRoot, ok := BundledSampleDir(builtinName)
 		if !ok {
 			continue

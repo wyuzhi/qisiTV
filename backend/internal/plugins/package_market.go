@@ -1,9 +1,7 @@
 package plugins
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,8 +13,10 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"infinite-canvas/backend/internal/outbound"
 	"infinite-canvas/backend/internal/protocol"
 )
 
@@ -147,8 +147,21 @@ func (s *Service) SearchMarket(ctx context.Context, query string, registry ...st
 			})
 		}
 	}
-	remoteItems := fetchNpmMarketPluginsWithRegistry(ctx, query, selectedRegistry, installedByID)
-	curatedItems := loadCuratedRegistryItemsWithCache(ctx, query, selectedRegistry, cachePath, installedByID)
+	var (
+		remoteItems  []MarketPluginItem
+		curatedItems []MarketPluginItem
+		wg           sync.WaitGroup
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		remoteItems = fetchNpmMarketPluginsWithRegistry(ctx, query, selectedRegistry, installedByID)
+	}()
+	go func() {
+		defer wg.Done()
+		curatedItems = loadCuratedRegistryItemsWithCache(ctx, query, selectedRegistry, cachePath, installedByID)
+	}()
+	wg.Wait()
 	return mergeMarketItems(curatedItems, remoteItems, localItems), nil
 }
 
@@ -171,14 +184,16 @@ func mergeMarketItems(groups ...[]MarketPluginItem) []MarketPluginItem {
 	return merged
 }
 
-// CuratedRegistryURL is the public recommendation list; authors add a line by
-// pull request. China mirrors (jsDelivr CDN, gh-proxy, ghfast.top, and the
-// beeftv-plugin-catalog npm package on npmmirror) are tried first when the
-// China mirror registry is selected.
+// CuratedRegistryURL and CuratedRegistryMirrorCDN are the authenticated public
+// recommendation list endpoints for Sunnyender-org/beeftv-plugins. Only these
+// two official repository origins are trusted for registry.json so the SHA-256
+// pins inside registry.json cannot be tampered with by third-party proxies.
 const (
 	CuratedRegistryURL       = "https://raw.githubusercontent.com/Sunnyender-org/beeftv-plugins/main/registry.json"
 	CuratedRegistryMirrorCDN = "https://cdn.jsdelivr.net/gh/Sunnyender-org/beeftv-plugins@main/registry.json"
 	CuratedCatalogPackage    = "beeftv-plugin-catalog"
+
+	curatedRegistryMemTTL = 2 * time.Minute
 )
 
 var (
@@ -186,8 +201,93 @@ var (
 		"https://gh-proxy.com",
 		"https://ghfast.top",
 	}
-	curatedRegistryHTTPClient = &http.Client{Timeout: 3500 * time.Millisecond}
+	allowedMarketPublicHosts = map[string]bool{
+		"cdn.jsdelivr.net":                     true,
+		"raw.githubusercontent.com":            true,
+		"github.com":                           true,
+		"objects.githubusercontent.com":        true,
+		"release-assets.githubusercontent.com": true,
+		"codeload.github.com":                  true,
+		"gh-proxy.com":                         true,
+		"ghfast.top":                           true,
+		"registry.npmmirror.com":               true,
+		"cdn.npmmirror.com":                    true,
+		"registry.npmjs.org":                   true,
+	}
+	allowLoopbackMarketURLsForTest bool
+
+	curatedRegistryMemCache = struct {
+		sync.Mutex
+		raw       []byte
+		fetchedAt time.Time
+	}{}
+	curatedRegistryFileMu sync.Mutex
 )
+
+func validateMarketOutboundURL(ctx context.Context, rawURL string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil {
+		return nil, fmt.Errorf("无效的市场资源地址")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if allowLoopbackMarketURLsForTest && (host == "127.0.0.1" || host == "localhost") && (parsed.Scheme == "http" || parsed.Scheme == "https") {
+		return parsed, nil
+	}
+	if parsed.Scheme != "https" {
+		return nil, fmt.Errorf("市场远程地址必须使用 HTTPS")
+	}
+	if !allowedMarketPublicHosts[host] {
+		return nil, fmt.Errorf("不允许访问未授权的市场域名 %q", host)
+	}
+	cleanURL := *parsed
+	cleanURL.Fragment = ""
+	if _, err := outbound.ValidatePublicHTTPSURLContext(ctx, cleanURL.String()); err != nil {
+		return nil, err
+	}
+	return parsed, nil
+}
+
+func doMarketGetRequest(ctx context.Context, targetURL string, timeout time.Duration, accept string) (*http.Response, error) {
+	if _, err := validateMarketOutboundURL(ctx, targetURL); err != nil {
+		return nil, err
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
+	client := &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(redirectReq *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("重定向次数过多")
+			}
+			_, err := validateMarketOutboundURL(redirectReq.Context(), redirectReq.URL.String())
+			return err
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	resp.Body = &contextClosingReadCloser{ReadCloser: resp.Body, cancel: cancel}
+	return resp, nil
+}
+
+type contextClosingReadCloser struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (c *contextClosingReadCloser) Close() error {
+	defer c.cancel()
+	return c.ReadCloser.Close()
+}
 
 type curatedRegistryEntry struct {
 	ID            string   `json:"id"`
@@ -226,89 +326,15 @@ func validCuratedRegistryPayload(raw []byte) bool {
 func curatedRegistryCandidateURLs(registry string) []string {
 	isChina := strings.TrimSpace(registry) == "" || strings.Contains(registry, "npmmirror.com")
 	if isChina {
-		urls := []string{CuratedRegistryMirrorCDN}
-		for _, proxy := range chinaGitHubProxies {
-			urls = append(urls, strings.TrimRight(proxy, "/")+"/"+CuratedRegistryURL)
+		return []string{
+			CuratedRegistryMirrorCDN,
+			CuratedRegistryURL,
 		}
-		urls = append(urls, CuratedRegistryURL)
-		return urls
 	}
 	return []string{
 		CuratedRegistryURL,
 		CuratedRegistryMirrorCDN,
 	}
-}
-
-// fetchCatalogRegistryFromNpm reads registry.json from the beeftv-plugin-catalog
-// npm package on the active npm registry (modeled on DSH catalog-npm.ts).
-func fetchCatalogRegistryFromNpm(ctx context.Context, registry string) []byte {
-	if err := ctx.Err(); err != nil {
-		return nil
-	}
-	base := strings.TrimRight(strings.TrimSpace(registry), "/")
-	if base == "" {
-		base = NpmMirrorRegistry
-	}
-	reqCtx, cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
-	defer cancel()
-	metaURL := base + "/" + CuratedCatalogPackage + "/latest"
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, metaURL, nil)
-	if err != nil {
-		return nil
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := curatedRegistryHTTPClient.Do(req)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil
-	}
-	var meta struct {
-		Dist struct {
-			Tarball string `json:"tarball"`
-		} `json:"dist"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 512<<10)).Decode(&meta); err != nil || strings.TrimSpace(meta.Dist.Tarball) == "" {
-		return nil
-	}
-	tgzReq, err := http.NewRequestWithContext(reqCtx, http.MethodGet, meta.Dist.Tarball, nil)
-	if err != nil {
-		return nil
-	}
-	tgzResp, err := curatedRegistryHTTPClient.Do(tgzReq)
-	if err != nil {
-		return nil
-	}
-	defer tgzResp.Body.Close()
-	if tgzResp.StatusCode != http.StatusOK {
-		return nil
-	}
-	tgzBytes, err := io.ReadAll(io.LimitReader(tgzResp.Body, 2<<20))
-	if err != nil {
-		return nil
-	}
-	gz, err := gzip.NewReader(bytes.NewReader(tgzBytes))
-	if err != nil {
-		return nil
-	}
-	defer gz.Close()
-	tr := tar.NewReader(gz)
-	for {
-		hdr, err := tr.Next()
-		if err != nil {
-			break
-		}
-		cleanName := path.Clean(strings.TrimPrefix(hdr.Name, "./"))
-		if cleanName == "package/registry.json" || cleanName == "registry.json" {
-			data, err := io.ReadAll(io.LimitReader(tr, 1<<20))
-			if err == nil && validCuratedRegistryPayload(data) {
-				return data
-			}
-		}
-	}
-	return nil
 }
 
 func readCuratedRegistry(ctx context.Context) []byte {
@@ -317,36 +343,39 @@ func readCuratedRegistry(ctx context.Context) []byte {
 
 func readCuratedRegistryWithCache(ctx context.Context, registry, cachePath string) []byte {
 	if ctx != nil && ctx.Err() == nil {
-		if raw := fetchCatalogRegistryFromNpm(ctx, registry); len(raw) > 0 {
-			saveCuratedRegistryCache(cachePath, raw)
-			return raw
+		curatedRegistryMemCache.Lock()
+		if len(curatedRegistryMemCache.raw) > 0 && time.Since(curatedRegistryMemCache.fetchedAt) < curatedRegistryMemTTL {
+			cached := append([]byte(nil), curatedRegistryMemCache.raw...)
+			curatedRegistryMemCache.Unlock()
+			return cached
 		}
+		curatedRegistryMemCache.Unlock()
+
 		for _, candidateURL := range curatedRegistryCandidateURLs(registry) {
 			if ctx.Err() != nil {
 				break
 			}
-			reqCtx, cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
-			req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, candidateURL, nil)
+			resp, err := doMarketGetRequest(ctx, candidateURL, 2500*time.Millisecond, "application/json")
 			if err != nil {
-				cancel()
-				continue
-			}
-			resp, err := curatedRegistryHTTPClient.Do(req)
-			if err != nil {
-				cancel()
 				continue
 			}
 			raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			resp.Body.Close()
-			cancel()
 			if resp.StatusCode == http.StatusOK && readErr == nil && validCuratedRegistryPayload(raw) {
+				curatedRegistryMemCache.Lock()
+				curatedRegistryMemCache.raw = append([]byte(nil), raw...)
+				curatedRegistryMemCache.fetchedAt = time.Now()
+				curatedRegistryMemCache.Unlock()
 				saveCuratedRegistryCache(cachePath, raw)
 				return raw
 			}
 		}
 	}
 	if strings.TrimSpace(cachePath) != "" {
-		if cached, err := os.ReadFile(cachePath); err == nil && validCuratedRegistryPayload(cached) {
+		curatedRegistryFileMu.Lock()
+		cached, err := os.ReadFile(cachePath)
+		curatedRegistryFileMu.Unlock()
+		if err == nil && validCuratedRegistryPayload(cached) {
 			return cached
 		}
 	}
@@ -359,13 +388,15 @@ func readCuratedRegistryWithCache(ctx context.Context, registry, cachePath strin
 }
 
 func saveCuratedRegistryCache(cachePath string, raw []byte) {
-	if strings.TrimSpace(cachePath) == "" || len(raw) == 0 {
+	if strings.TrimSpace(cachePath) == "" || !validCuratedRegistryPayload(raw) {
 		return
 	}
+	curatedRegistryFileMu.Lock()
+	defer curatedRegistryFileMu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
 		return
 	}
-	_ = os.WriteFile(cachePath, raw, 0o644)
+	_ = writePluginFile(cachePath, raw)
 }
 
 func loadCuratedRegistryItems(ctx context.Context, query string, installed map[string]View) []MarketPluginItem {
@@ -496,14 +527,8 @@ func searchSingleNpmRegistry(ctx context.Context, registry, query string, instal
 	if trimmedQuery != "" {
 		searchTerm = trimmedQuery + " " + searchTerm
 	}
-	reqCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-	defer cancel()
 	endpoint := base + "/-/v1/search?text=" + url.QueryEscape(searchTerm) + "&size=30"
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, false
-	}
-	resp, err := curatedRegistryHTTPClient.Do(req)
+	resp, err := doMarketGetRequest(ctx, endpoint, 3500*time.Millisecond, "application/json")
 	if err != nil {
 		return nil, false
 	}
@@ -597,9 +622,14 @@ func (s *Service) FetchMarketReadme(ctx context.Context, pluginID string, regist
 		return "", packageError(http.StatusBadRequest, "plugin_id_required", "插件 ID 不能为空")
 	}
 	if s != nil {
-		if targetPath, _, err := s.ResolvePackageFile(trimmed, "README.md"); err == nil {
-			if data, readErr := os.ReadFile(targetPath); readErr == nil && len(bytes.TrimSpace(data)) > 0 {
-				return string(data), nil
+		for _, candidateID := range []string{trimmed, protocol.PackageIDFromName(trimmed)} {
+			if candidateID == "" {
+				continue
+			}
+			if targetPath, _, err := s.ResolvePackageFile(candidateID, "README.md"); err == nil {
+				if data, readErr := os.ReadFile(targetPath); readErr == nil && len(bytes.TrimSpace(data)) > 0 {
+					return string(data), nil
+				}
 			}
 		}
 	}
@@ -638,11 +668,6 @@ func expandReadmeMirrorURLs(readmeURL, repoURL, registry string) []string {
 	var out []string
 	if jsd := githubRawToJsDelivrURL(rawURL); jsd != "" && isChina {
 		out = append(out, jsd)
-	}
-	if isChina && strings.HasPrefix(rawURL, "https://raw.githubusercontent.com/") {
-		for _, proxy := range chinaGitHubProxies {
-			out = append(out, strings.TrimRight(proxy, "/")+"/"+rawURL)
-		}
 	}
 	out = append(out, rawURL)
 	if jsd := githubRawToJsDelivrURL(rawURL); jsd != "" && !isChina {
@@ -692,13 +717,7 @@ func fetchRemoteMarkdownText(ctx context.Context, targetURL string) (string, boo
 	if ctx != nil && ctx.Err() != nil {
 		return "", false
 	}
-	reqCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, targetURL, nil)
-	if err != nil {
-		return "", false
-	}
-	resp, err := curatedRegistryHTTPClient.Do(req)
+	resp, err := doMarketGetRequest(ctx, targetURL, 2500*time.Millisecond, "text/markdown, text/plain;q=0.9")
 	if err != nil {
 		return "", false
 	}
@@ -711,7 +730,7 @@ func fetchRemoteMarkdownText(ctx context.Context, targetURL string) (string, boo
 		return "", false
 	}
 	trimmed := strings.TrimSpace(string(data))
-	if trimmed == "" || strings.HasPrefix(strings.ToLower(trimmed), "<!doctype html") {
+	if trimmed == "" || strings.HasPrefix(strings.ToLower(trimmed), "<!doctype html") || strings.HasPrefix(strings.ToLower(trimmed), "<html") {
 		return "", false
 	}
 	return string(data), true
@@ -722,31 +741,36 @@ func fetchNpmPackumentReadme(ctx context.Context, pkgName, registry string) (str
 	if strings.TrimRight(strings.TrimSpace(registry), "/") == NpmjsRegistry {
 		registries = []string{NpmjsRegistry, NpmMirrorRegistry}
 	}
-	escaped := strings.ReplaceAll(url.PathEscape(strings.TrimSpace(pkgName)), "%40", "@")
+	trimmed := strings.TrimSpace(pkgName)
+	escapedSlash := strings.ReplaceAll(url.PathEscape(trimmed), "%40", "@")
+	unencodedSlash := escapedSlash
+	if strings.HasPrefix(trimmed, "@") {
+		if parts := strings.SplitN(trimmed[1:], "/", 2); len(parts) == 2 {
+			unencodedSlash = "@" + url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1])
+		}
+	}
+	suffixes := []string{"/" + unencodedSlash + "/latest", "/" + unencodedSlash}
+	if escapedSlash != unencodedSlash {
+		suffixes = append(suffixes, "/"+escapedSlash)
+	}
 	for _, reg := range registries {
-		if ctx != nil && ctx.Err() != nil {
-			return "", false
-		}
-		reqCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, strings.TrimRight(reg, "/")+"/"+escaped, nil)
-		if err != nil {
-			cancel()
-			continue
-		}
-		req.Header.Set("Accept", "application/json")
-		resp, err := curatedRegistryHTTPClient.Do(req)
-		if err != nil {
-			cancel()
-			continue
-		}
-		var doc struct {
-			Readme string `json:"readme"`
-		}
-		decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&doc)
-		resp.Body.Close()
-		cancel()
-		if resp.StatusCode == http.StatusOK && decodeErr == nil && strings.TrimSpace(doc.Readme) != "" && doc.Readme != "ERROR: No README data found!" {
-			return doc.Readme, true
+		base := strings.TrimRight(reg, "/")
+		for _, suffix := range suffixes {
+			if ctx != nil && ctx.Err() != nil {
+				return "", false
+			}
+			resp, err := doMarketGetRequest(ctx, base+suffix, 2500*time.Millisecond, "application/json")
+			if err != nil {
+				continue
+			}
+			var doc struct {
+				Readme string `json:"readme"`
+			}
+			decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&doc)
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK && decodeErr == nil && strings.TrimSpace(doc.Readme) != "" && doc.Readme != "ERROR: No README data found!" {
+				return doc.Readme, true
+			}
 		}
 	}
 	return "", false

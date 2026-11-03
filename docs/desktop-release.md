@@ -39,7 +39,7 @@ BEEFTV_GO_DIR=/tmp/beeftv-go.rpIfVN/go ./scripts/build-beeftv-release.sh
 ```text
 backend/cmd/desktop/build/bin/BeefTV.app
 backend/cmd/desktop/build/bin/BeefTV.app/Contents/Resources/plugin-packages/*.beeftv-plugin
-backend/cmd/desktop/build/bin/BeefTV.app/Contents/Resources/agent-host/bundled-plugins/{beeftv-plugin-market,beeftv-plugin-ll2,beeftv-plugin-sticky-note,beeftv-plugin-ecommerce-hero}
+backend/cmd/desktop/build/bin/BeefTV.app/Contents/Resources/agent-host/bundled-plugins/{beeftv-plugin-market,beeftv-plugin-ll2}
 ```
 
 验收重点：
@@ -63,7 +63,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-beeftv-windo
 ```text
 backend\cmd\desktop\build\bin\BeefTV.exe
 backend\cmd\desktop\build\bin\plugin-packages\*.beeftv-plugin
-backend\cmd\desktop\build\bin\agent-host\bundled-plugins\{beeftv-plugin-market,beeftv-plugin-ll2,beeftv-plugin-sticky-note,beeftv-plugin-ecommerce-hero}
+backend\cmd\desktop\build\bin\agent-host\bundled-plugins\{beeftv-plugin-market,beeftv-plugin-ll2}
 ```
 
 官方协议插件归档（`*.beeftv-plugin`）必须和 `BeefTV.exe` 放在同一目录下的 `plugin-packages\`（不能在 `plugin-packages\` 下放子目录，否则已发布客户端的应用内更新校验会拒绝）；随包 pi 插件目录（按 `plugin-packages/bundled-plugin-dirs.txt` 清单）统一放在 `agent-host\bundled-plugins\` 下，随 `agent-host` 整树更新。从开始菜单、快捷方式或资源管理器启动时，工作目录不一定是仓库或 exe 所在目录；应用按可执行文件位置查找官方插件与随包插件目录，不依赖当前工作目录。

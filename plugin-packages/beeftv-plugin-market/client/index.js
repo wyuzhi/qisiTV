@@ -18,8 +18,9 @@ async function fetchMarket(query, registry) {
 
 async function fetchReadme(item, registry) {
   const pluginId = String(item?.id || item?.packageName || "").trim();
-  if (!pluginId) return "";
-  if (item?.installed || item?.bundled) {
+  const remoteKey = String(item?.packageName || item?.id || "").trim();
+  if (!pluginId && !remoteKey) return "";
+  if (pluginId && (item?.installed || item?.bundled)) {
     const localResp = await fetch(`/api/plugins/${encodeURIComponent(pluginId)}/files/README.md`);
     if (localResp.ok) {
       const text = await localResp.text();
@@ -27,7 +28,7 @@ async function fetchReadme(item, registry) {
     }
   }
   const reg = registry ? `&registry=${encodeURIComponent(String(registry).trim())}` : "";
-  const response = await fetch(`/api/plugins/market/readme?id=${encodeURIComponent(pluginId)}${reg}`);
+  const response = await fetch(`/api/plugins/market/readme?id=${encodeURIComponent(remoteKey || pluginId)}${reg}`);
   if (!response.ok) return "";
   const body = await response.json().catch(() => null);
   return typeof body?.data?.readme === "string" ? body.data.readme : "";
@@ -53,6 +54,13 @@ export function activate(host) {
     const [selectedPlugin, setSelectedPlugin] = React.useState(null);
     const [detailReadme, setDetailReadme] = React.useState("");
     const [loadingReadme, setLoadingReadme] = React.useState(false);
+    const readmeReqIdRef = React.useRef(0);
+
+    const closeDetailModal = React.useCallback(() => {
+      readmeReqIdRef.current += 1;
+      setSelectedPlugin(null);
+      setLoadingReadme(false);
+    }, []);
 
     const installedMap = React.useMemo(() => {
       const map = new Map();
@@ -106,16 +114,29 @@ export function activate(host) {
 
     const handleOpenDetail = React.useCallback(
       (item) => {
+        const reqId = readmeReqIdRef.current + 1;
+        readmeReqIdRef.current = reqId;
         setSelectedPlugin(item);
         setDetailReadme("");
-        if (!item?.id && !item?.packageName) return;
+        if (!item?.id && !item?.packageName) {
+          setLoadingReadme(false);
+          return;
+        }
         setLoadingReadme(true);
         fetchReadme(item, registryMirror)
-          .then((text) => setDetailReadme(text))
+          .then((text) => {
+            if (readmeReqIdRef.current === reqId) {
+              setDetailReadme(text);
+            }
+          })
           .catch(() => {
             // 未能读取远程 README 时回退使用包描述展示
           })
-          .finally(() => setLoadingReadme(false));
+          .finally(() => {
+            if (readmeReqIdRef.current === reqId) {
+              setLoadingReadme(false);
+            }
+          });
       },
       [registryMirror],
     );
@@ -503,7 +524,7 @@ export function activate(host) {
             "div",
             {
               "data-testid": "market-plugin-detail-modal",
-              onClick: () => setSelectedPlugin(null),
+              onClick: closeDetailModal,
               style: {
                 position: "fixed",
                 inset: 0,
@@ -562,7 +583,7 @@ export function activate(host) {
                   "button",
                   {
                     type: "button",
-                    onClick: () => setSelectedPlugin(null),
+                    onClick: closeDetailModal,
                     style: {
                       padding: "4px 10px",
                       borderRadius: 6,

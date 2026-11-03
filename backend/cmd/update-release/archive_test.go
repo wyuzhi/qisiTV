@@ -376,7 +376,7 @@ func TestPackageRejectsMissingAgentRuntime(t *testing.T) {
 
 func TestPackageWindowsAcceptsBundledPluginsInAgentHostAndRejectsSubdirInPluginPackages(t *testing.T) {
 	bin := writeFakeWindowsBin(t, t.TempDir())
-	for _, dirName := range []string{"beeftv-plugin-market", "beeftv-plugin-sticky-note", "beeftv-plugin-ecommerce-hero"} {
+	for _, dirName := range []string{"beeftv-plugin-market", "beeftv-plugin-ll2"} {
 		pkgFile := filepath.Join(bin, "agent-host", "bundled-plugins", dirName, "package.json")
 		if err := os.MkdirAll(filepath.Dir(pkgFile), 0o755); err != nil {
 			t.Fatal(err)
@@ -390,7 +390,7 @@ func TestPackageWindowsAcceptsBundledPluginsInAgentHostAndRejectsSubdirInPluginP
 		t.Fatalf("packageBundle with agent-host/bundled-plugins failed: %v", err)
 	}
 	entries := zipNames(t, out)
-	for _, dirName := range []string{"beeftv-plugin-market", "beeftv-plugin-sticky-note", "beeftv-plugin-ecommerce-hero"} {
+	for _, dirName := range []string{"beeftv-plugin-market", "beeftv-plugin-ll2"} {
 		want := "agent-host/bundled-plugins/" + dirName + "/package.json"
 		if !entries[want] {
 			t.Fatalf("missing %s in packaged Windows zip", want)

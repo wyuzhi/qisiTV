@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"infinite-canvas/backend/internal/canvas/capability"
 	"infinite-canvas/backend/internal/protocol"
@@ -162,9 +163,17 @@ func TestPackageInstallLifecycleCanvasSyncAndSkillHook(t *testing.T) {
 }
 
 // copyPackageFetcher stands in for npm: it lays the package out exactly where
-// `npm install --prefix` would.
+// `npm install --prefix` would, supporting both directories and .tgz archives.
 func copyPackageFetcher(_ context.Context, spec, _ string, prefixDir string) (string, error) {
-	raw, err := os.ReadFile(filepath.Join(spec, "package.json"))
+	srcDir := spec
+	if strings.HasSuffix(strings.ToLower(spec), ".tgz") || strings.HasSuffix(strings.ToLower(spec), ".tar.gz") {
+		unpacked, err := unpackTarballToDir(spec, prefixDir)
+		if err != nil {
+			return "", err
+		}
+		srcDir = unpacked
+	}
+	raw, err := os.ReadFile(filepath.Join(srcDir, "package.json"))
 	if err != nil {
 		return "", err
 	}
@@ -175,7 +184,7 @@ func copyPackageFetcher(_ context.Context, spec, _ string, prefixDir string) (st
 		return "", err
 	}
 	root := filepath.Join(prefixDir, "node_modules", filepath.FromSlash(pkg.Name))
-	if err := os.CopyFS(root, os.DirFS(spec)); err != nil {
+	if err := os.CopyFS(root, os.DirFS(srcDir)); err != nil {
 		return "", err
 	}
 	return root, nil
@@ -736,6 +745,52 @@ func packDirectoryToTarGzForTest(t *testing.T, srcDir string) ([]byte, string) {
 }
 
 func TestMarketChinaMirrorSearchReadmeAndOnlineTarballInstall(t *testing.T) {
+	prevAllowLoopback := allowLoopbackMarketURLsForTest
+	allowLoopbackMarketURLsForTest = true
+	t.Cleanup(func() {
+		allowLoopbackMarketURLsForTest = prevAllowLoopback
+		curatedRegistryMemCache.Lock()
+		curatedRegistryMemCache.raw = nil
+		curatedRegistryMemCache.fetchedAt = time.Time{}
+		curatedRegistryMemCache.Unlock()
+	})
+
+	// Verify SSRF / outbound host allowlist blocks unauthorized hosts and metadata IPs.
+	if _, err := validateMarketOutboundURL(context.Background(), "http://169.254.169.254/latest/meta-data/"); err == nil {
+		t.Fatal("expected metadata IP to be rejected by validateMarketOutboundURL")
+	}
+	if _, err := validateMarketOutboundURL(context.Background(), "https://evil.example.com/plugin.tgz"); err == nil {
+		t.Fatal("expected non-allowlisted host to be rejected by validateMarketOutboundURL")
+	}
+
+	// Verify tar-slip and symlink entries are rejected by unpackTarballToDir.
+	for _, badTarCase := range []struct {
+		name string
+		hdr  *tar.Header
+	}{
+		{name: "tar-slip", hdr: &tar.Header{Name: "../escape.js", Typeflag: tar.TypeReg, Mode: 0o644, Size: 2}},
+		{name: "symlink", hdr: &tar.Header{Name: "package/link.js", Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd"}},
+	} {
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		tw := tar.NewWriter(gz)
+		if err := tw.WriteHeader(badTarCase.hdr); err != nil {
+			t.Fatal(err)
+		}
+		if badTarCase.hdr.Size > 0 {
+			_, _ = tw.Write([]byte("hi"))
+		}
+		_ = tw.Close()
+		_ = gz.Close()
+		badTgz := filepath.Join(t.TempDir(), "bad.tgz")
+		if err := os.WriteFile(badTgz, buf.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := unpackTarballToDir(badTgz, t.TempDir()); err == nil {
+			t.Fatalf("expected unpackTarballToDir to reject %s archive", badTarCase.name)
+		}
+	}
+
 	repoPluginPackages, err := filepath.Abs(filepath.Join("..", "..", "..", "plugin-packages"))
 	if err != nil {
 		t.Fatal(err)
@@ -747,8 +802,6 @@ func TestMarketChinaMirrorSearchReadmeAndOnlineTarballInstall(t *testing.T) {
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/-/v1/search"):
-			// Simulate npmmirror: returns 0 results if "keywords:" qualifier is used,
-			// returns objects when plain text "beeftv-plugin" is queried.
 			text := r.URL.Query().Get("text")
 			if strings.Contains(text, "keywords:") {
 				w.Header().Set("Content-Type", "application/json")
@@ -799,30 +852,34 @@ func TestMarketChinaMirrorSearchReadmeAndOnlineTarballInstall(t *testing.T) {
 	svc := New(rt, nil)
 	svc.SetPackageFetcher(copyPackageFetcher)
 
-	// Seed the local market registry cache with our test server URLs so we test
-	// the full China mirror tarball & README pipeline deterministically.
 	cachePath := filepath.Join(dataDir, "plugins", "market-registry-cache.json")
-	customRegistry := fmt.Sprintf(`{
-		"schemaVersion": 1,
-		"plugins": [
-			{
-				"id": "beeftv-plugin-character-replacement",
-				"packageName": "beeftv-plugin-character-replacement",
-				"name": "AI 角色替换工作室",
-				"version": "0.1.0",
-				"description": "二阶段角色替换",
-				"author": "BeefTV",
-				"category": "短剧与视频创作",
-				"recommended": true,
-				"repo": "https://github.com/Sunnyender-org/beeftv-plugins/tree/main/plugins/beeftv-plugin-character-replacement",
-				"readme": %q,
-				"mirrorTarball": %q,
-				"sha256": %q,
-				"tags": ["角色替换"]
-			}
-		]
-	}`, server.URL+"/readme/README.md", server.URL+"/packages/beeftv-plugin-character-replacement-0.1.0.tgz", tgzSHA256)
-	saveCuratedRegistryCache(cachePath, []byte(customRegistry))
+	writeRegistryCacheWithSHA := func(sha string) {
+		raw := fmt.Sprintf(`{
+			"schemaVersion": 1,
+			"plugins": [
+				{
+					"id": "beeftv-plugin-character-replacement",
+					"packageName": "beeftv-plugin-character-replacement",
+					"name": "AI 角色替换工作室",
+					"version": "0.1.0",
+					"description": "二阶段角色替换",
+					"author": "BeefTV",
+					"category": "短剧与视频创作",
+					"recommended": true,
+					"repo": "https://github.com/Sunnyender-org/beeftv-plugins/tree/main/plugins/beeftv-plugin-character-replacement",
+					"readme": %q,
+					"mirrorTarball": %q,
+					"sha256": %q,
+					"tags": ["角色替换"]
+				}
+			]
+		}`, server.URL+"/readme/README.md", server.URL+"/packages/beeftv-plugin-character-replacement-0.1.0.tgz", sha)
+		saveCuratedRegistryCache(cachePath, []byte(raw))
+		curatedRegistryMemCache.Lock()
+		curatedRegistryMemCache.raw = []byte(raw)
+		curatedRegistryMemCache.fetchedAt = time.Now()
+		curatedRegistryMemCache.Unlock()
+	}
 
 	// 1. Test npmmirror plain-text search & Go-side keyword filtering
 	npmHits, ok := searchSingleNpmRegistry(context.Background(), server.URL+"/npmmirror.com", "角色", map[string]View{})
@@ -830,29 +887,48 @@ func TestMarketChinaMirrorSearchReadmeAndOnlineTarballInstall(t *testing.T) {
 		t.Fatalf("expected npmmirror search to return beeftv-plugin-character-replacement and filter out unrelated-package, got ok=%v hits=%+v", ok, npmHits)
 	}
 
-	// 2. Test remote README fetching before plugin is installed
-	offlineCtx, cancel := context.WithCancel(context.Background())
-	cancel()
-	curatedItems := loadCuratedRegistryItemsWithCache(offlineCtx, "", NpmMirrorRegistry, cachePath, map[string]View{})
-	if len(curatedItems) != 1 || curatedItems[0].ReadmeURL == "" || curatedItems[0].MirrorTarball == "" {
-		t.Fatalf("unexpected curated items from cache: %+v", curatedItems)
-	}
-	readmeText, ok := fetchRemoteMarkdownText(context.Background(), curatedItems[0].ReadmeURL)
-	if !ok || !strings.Contains(readmeText, "远程镜像 README") {
-		t.Fatalf("expected remote README text, got ok=%v text=%q", ok, readmeText)
+	// 2. Test remote README fetching via FetchMarketReadme before plugin is installed
+	writeRegistryCacheWithSHA(tgzSHA256)
+	readmeText, err := svc.FetchMarketReadme(context.Background(), "beeftv-plugin-character-replacement", NpmMirrorRegistry)
+	if err != nil || !strings.Contains(readmeText, "远程镜像 README") {
+		t.Fatalf("expected FetchMarketReadme to return remote README text, got err=%v text=%q", err, readmeText)
 	}
 
-	// 3. Test online tarball download & SHA-256 verification
-	stageDir := t.TempDir()
-	if _, err := downloadMirroredTarball(context.Background(), "", curatedItems[0].MirrorTarball, "0000000000000000000000000000000000000000000000000000000000000000", NpmMirrorRegistry, stageDir); err == nil {
-		t.Fatal("expected mismatched SHA-256 tarball to be rejected")
+	// 3. Test curated-ID install rejects mismatched SHA-256
+	writeRegistryCacheWithSHA("0000000000000000000000000000000000000000000000000000000000000000")
+	if _, err := svc.InstallPackage("beeftv-plugin-character-replacement", NpmMirrorRegistry); err == nil {
+		t.Fatal("expected curated install with mismatched SHA-256 to fail")
 	}
-	installedView, err := svc.InstallPackage(curatedItems[0].MirrorTarball, NpmMirrorRegistry)
+
+	// 4. Test curated-ID install succeeds when SHA-256 matches
+	writeRegistryCacheWithSHA(tgzSHA256)
+	installedView, err := svc.InstallPackage("beeftv-plugin-character-replacement", NpmMirrorRegistry)
 	if err != nil {
-		t.Fatalf("online MirrorTarball install failed: %v", err)
+		t.Fatalf("curated online install by ID failed: %v", err)
 	}
 	if installedView.Manifest.ID != "beeftv-plugin-character-replacement" || installedView.Status != StatusEnabled {
 		t.Fatalf("unexpected installed plugin view: %+v", installedView)
+	}
+
+	// 5. Test direct URL with query parameters (&) and #sha256= fragment
+	presignedURL := server.URL + "/packages/beeftv-plugin-character-replacement-0.1.0.tgz?X-Amz-Credential=abc&X-Amz-Signature=def#sha256=" + tgzSHA256
+	reinstalledView, err := svc.InstallPackage(presignedURL, NpmMirrorRegistry)
+	if err != nil || reinstalledView.Manifest.ID != "beeftv-plugin-character-replacement" {
+		t.Fatalf("presigned URL with '&' and #sha256= failed: %v", err)
+	}
+
+	// 6. Test versioned curated spec cannot bypass SHA-256 or install unapproved version
+	if _, err := svc.InstallPackage("beeftv-plugin-character-replacement@9.9.9", NpmMirrorRegistry); err == nil {
+		t.Fatal("expected unapproved versioned curated spec to be rejected")
+	}
+	if _, err := svc.InstallPackage("beeftv-plugin-character-replacement@0.1.0", NpmMirrorRegistry); err != nil {
+		t.Fatalf("expected matching versioned curated spec to succeed: %v", err)
+	}
+
+	// 7. Test failing presigned download redacts query credentials from error
+	failingPresigned := server.URL + "/not-found.tgz?X-Amz-Credential=secret123&X-Amz-Signature=sig456"
+	if _, err := svc.InstallPackage(failingPresigned, NpmMirrorRegistry); err == nil || strings.Contains(err.Error(), "secret123") || strings.Contains(err.Error(), "sig456") {
+		t.Fatalf("expected failing presigned URL error to redact query parameters, got err=%v", err)
 	}
 }
 

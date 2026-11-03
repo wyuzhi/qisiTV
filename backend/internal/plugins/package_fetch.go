@@ -31,6 +31,9 @@ const (
 
 	packageInstallTimeout = 3 * time.Minute
 	maxRemoteTarballBytes = 64 << 20
+	maxTarEntries         = 2048
+	maxTarSingleFileBytes = 16 << 20
+	maxTarTotalBytes      = 64 << 20
 )
 
 // PackageFetcher installs one npm package (registry spec, local directory or
@@ -245,25 +248,17 @@ func fetchPackageWithMirrorFallback(
 	if fetch == nil {
 		fetch = NpmPackageFetcher(nil)
 	}
-	runFetchOnArchiveOrDir := func(archivePath string) (string, error) {
-		if customFetcher != nil {
-			unpackedDir, unpackErr := unpackTarballToDir(archivePath, stageDir)
-			if unpackErr == nil {
-				return fetch(ctx, unpackedDir, registry, stageDir)
-			}
-		}
-		return fetch(ctx, archivePath, registry, stageDir)
-	}
 
 	if isLocalPath {
 		return fetch(ctx, spec, registry, stageDir)
 	}
 	if strings.HasPrefix(spec, "https://") || strings.HasPrefix(spec, "http://") {
-		tgzPath, err := downloadMirroredTarball(ctx, spec, "", "", registry, stageDir)
+		cleanURL, fragmentSHA := splitURLSHA256Fragment(spec)
+		tgzPath, err := downloadMirroredTarball(ctx, cleanURL, "", fragmentSHA, registry, stageDir)
 		if err != nil {
 			return "", err
 		}
-		return runFetchOnArchiveOrDir(tgzPath)
+		return fetch(ctx, tgzPath, registry, stageDir)
 	}
 	if strings.HasPrefix(spec, "github:") {
 		extractedDir, err := downloadGitHubSourceDir(ctx, spec, registry, stageDir)
@@ -273,64 +268,80 @@ func fetchPackageWithMirrorFallback(
 		return fetch(ctx, extractedDir, registry, stageDir)
 	}
 
-	// If a custom test fetcher is set, let it handle the spec first; only fall
-	// back to curated mirror tarballs if the custom fetcher fails.
-	if customFetcher != nil {
-		root, err := fetch(ctx, spec, registry, stageDir)
-		if err == nil {
-			return root, nil
+	// Curated plugins that declare a SHA-256-pinned tarball in registry.json
+	// MUST be installed from the digest-verified tarball first so an unclaimed
+	// or squatted npm package name cannot bypass the curated SHA-256 pin.
+	basePkgName, requestedVersion := splitNpmPackageSpec(spec)
+	if entry, isCurated := lookupCuratedPluginEntry(ctx, basePkgName, registry, cachePath); isCurated &&
+		(strings.TrimSpace(entry.MirrorTarball) != "" || strings.TrimSpace(entry.Tarball) != "") {
+		if requestedVersion != "" && requestedVersion != "latest" && strings.TrimSpace(entry.Version) != "" && requestedVersion != strings.TrimSpace(entry.Version) {
+			return "", packageError(http.StatusBadRequest, "plugin_source_invalid",
+				fmt.Sprintf("精选插件 %q 仅支持安装已校验的官方版本 %s", basePkgName, strings.TrimSpace(entry.Version)))
 		}
-		if entry, ok := lookupCuratedPluginEntry(ctx, spec, registry, cachePath); ok && (entry.MirrorTarball != "" || entry.Tarball != "") {
-			if tgzPath, dlErr := downloadMirroredTarball(ctx, entry.Tarball, entry.MirrorTarball, entry.SHA256, registry, stageDir); dlErr == nil {
-				return runFetchOnArchiveOrDir(tgzPath)
-			}
-		}
-		return "", err
-	}
-
-	entry, isCurated := lookupCuratedPluginEntry(ctx, spec, registry, cachePath)
-	hasCuratedTarball := isCurated && (strings.TrimSpace(entry.MirrorTarball) != "" || strings.TrimSpace(entry.Tarball) != "")
-	if hasCuratedTarball {
-		if npmPackageExistsOnRegistry(ctx, spec, registry) {
-			if root, err := fetch(ctx, spec, registry, stageDir); err == nil {
-				return root, nil
-			}
+		if !validPackageSHA256(strings.ToLower(strings.TrimSpace(entry.SHA256))) {
+			return "", packageError(http.StatusBadGateway, "plugin_download_failed",
+				fmt.Sprintf("精选插件 %q 缺少有效的 SHA-256 校验值", basePkgName))
 		}
 		tgzPath, err := downloadMirroredTarball(ctx, entry.Tarball, entry.MirrorTarball, entry.SHA256, registry, stageDir)
-		if err == nil {
-			return fetch(ctx, tgzPath, registry, stageDir)
+		if err != nil {
+			return "", err
 		}
+		return fetch(ctx, tgzPath, registry, stageDir)
 	}
+
 	return fetch(ctx, spec, registry, stageDir)
 }
 
-func npmPackageExistsOnRegistry(ctx context.Context, pkgSpec, registry string) bool {
-	base := strings.TrimRight(strings.TrimSpace(registry), "/")
-	if base == "" {
-		base = NpmMirrorRegistry
+func splitNpmPackageSpec(spec string) (name string, version string) {
+	trimmed := strings.TrimSpace(spec)
+	if trimmed == "" {
+		return "", ""
 	}
-	pkgName := strings.TrimSpace(pkgSpec)
-	if idx := strings.LastIndex(pkgName, "@"); idx > 0 {
-		pkgName = pkgName[:idx]
+	if strings.HasPrefix(trimmed, "@") {
+		slashIdx := strings.IndexByte(trimmed, '/')
+		if slashIdx < 0 {
+			return trimmed, ""
+		}
+		if atIdx := strings.IndexByte(trimmed[slashIdx+1:], '@'); atIdx >= 0 {
+			pos := slashIdx + 1 + atIdx
+			return trimmed[:pos], strings.TrimSpace(trimmed[pos+1:])
+		}
+		return trimmed, ""
 	}
-	escaped := strings.ReplaceAll(url.PathEscape(pkgName), "%40", "@")
-	reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, base+"/"+escaped+"/latest", nil)
-	if err != nil {
-		return false
+	if atIdx := strings.IndexByte(trimmed, '@'); atIdx > 0 {
+		return trimmed[:atIdx], strings.TrimSpace(trimmed[atIdx+1:])
 	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := curatedRegistryHTTPClient.Do(req)
-	if err != nil {
-		return false
-	}
-	resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+	return trimmed, ""
 }
 
-func expandTarballMirrorURLs(tarballURL, mirrorTarballURL, registry string) []string {
+func redactMarketURL(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Host == "" {
+		return "<redacted-url>"
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
+}
+
+func splitURLSHA256Fragment(rawURL string) (string, string) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return rawURL, ""
+	}
+	frag := strings.TrimSpace(parsed.Fragment)
+	parsed.Fragment = ""
+	if strings.HasPrefix(strings.ToLower(frag), "sha256=") {
+		sum := strings.ToLower(strings.TrimSpace(frag[len("sha256="):]))
+		return parsed.String(), sum
+	}
+	return parsed.String(), ""
+}
+
+func expandTarballMirrorURLs(tarballURL, mirrorTarballURL, expectedSHA256, registry string) []string {
 	isChina := strings.TrimSpace(registry) == "" || strings.Contains(registry, "npmmirror.com")
+	hasVerifiedDigest := validPackageSHA256(strings.ToLower(strings.TrimSpace(expectedSHA256)))
 	var urls []string
 	addUnique := func(u string) {
 		u = strings.TrimSpace(u)
@@ -346,7 +357,9 @@ func expandTarballMirrorURLs(tarballURL, mirrorTarballURL, registry string) []st
 	}
 	if isChina {
 		addUnique(mirrorTarballURL)
-		if strings.HasPrefix(tarballURL, "https://github.com/") || strings.HasPrefix(tarballURL, "https://raw.githubusercontent.com/") {
+		// Third-party GitHub proxies are ONLY included when the caller has a
+		// pinned SHA-256 digest that will be verified before extraction.
+		if hasVerifiedDigest && (strings.HasPrefix(tarballURL, "https://github.com/") || strings.HasPrefix(tarballURL, "https://raw.githubusercontent.com/")) {
 			for _, proxy := range chinaGitHubProxies {
 				addUnique(strings.TrimRight(proxy, "/") + "/" + strings.TrimSpace(tarballURL))
 			}
@@ -360,7 +373,11 @@ func expandTarballMirrorURLs(tarballURL, mirrorTarballURL, registry string) []st
 }
 
 func downloadMirroredTarball(ctx context.Context, tarballURL, mirrorTarballURL, expectedSHA256, registry, stageDir string) (string, error) {
-	candidates := expandTarballMirrorURLs(tarballURL, mirrorTarballURL, registry)
+	wantSHA := strings.ToLower(strings.TrimSpace(expectedSHA256))
+	if wantSHA != "" && !validPackageSHA256(wantSHA) {
+		return "", packageError(http.StatusBadRequest, "plugin_source_invalid", fmt.Sprintf("无效的插件包 SHA-256 校验值 %q", expectedSHA256))
+	}
+	candidates := expandTarballMirrorURLs(tarballURL, mirrorTarballURL, wantSHA, registry)
 	if len(candidates) == 0 {
 		return "", packageError(http.StatusBadGateway, "plugin_download_failed", "未配置可用的插件包下载地址")
 	}
@@ -369,28 +386,18 @@ func downloadMirroredTarball(ctx context.Context, tarballURL, mirrorTarballURL, 
 		if ctx.Err() != nil {
 			break
 		}
-		reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, candidate, nil)
+		resp, err := doMarketGetRequest(ctx, candidate, 30*time.Second, "application/octet-stream, application/gzip")
 		if err != nil {
-			cancel()
-			lastErr = err
-			continue
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			cancel()
-			lastErr = err
+			lastErr = fmt.Errorf("request %s failed", redactMarketURL(candidate))
 			continue
 		}
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close()
-			cancel()
-			lastErr = fmt.Errorf("HTTP %d from %s", resp.StatusCode, candidate)
+			lastErr = fmt.Errorf("HTTP %d from %s", resp.StatusCode, redactMarketURL(candidate))
 			continue
 		}
 		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxRemoteTarballBytes+1))
 		resp.Body.Close()
-		cancel()
 		if readErr != nil {
 			lastErr = readErr
 			continue
@@ -399,11 +406,11 @@ func downloadMirroredTarball(ctx context.Context, tarballURL, mirrorTarballURL, 
 			lastErr = fmt.Errorf("插件安装包超过大小限制（%d MB）", maxRemoteTarballBytes>>20)
 			continue
 		}
-		if want := strings.ToLower(strings.TrimSpace(expectedSHA256)); want != "" {
+		if wantSHA != "" {
 			sum := sha256.Sum256(data)
 			got := hex.EncodeToString(sum[:])
-			if got != want {
-				lastErr = fmt.Errorf("插件包 SHA-256 校验失败（期望 %s，实际 %s）", want, got)
+			if got != wantSHA {
+				lastErr = fmt.Errorf("插件包 SHA-256 校验失败（期望 %s，实际 %s）", wantSHA, got)
 				continue
 			}
 		}
@@ -417,10 +424,15 @@ func downloadMirroredTarball(ctx context.Context, tarballURL, mirrorTarballURL, 
 		fmt.Sprintf("从镜像源下载插件包失败：%v", lastErr))
 }
 
-// downloadGitHubSourceDir downloads a github:<owner>/<repo>[@ref][#path:/subpath]
-// repository archive through the China mirror chain and extracts the target directory.
+// downloadGitHubSourceDir downloads a github:<owner>/<repo>[@ref][#path:/subpath][#sha256=<hex>]
+// repository archive and extracts the target directory with strict size bounds.
 func downloadGitHubSourceDir(ctx context.Context, spec, registry, stageDir string) (string, error) {
 	trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(spec), "github:"))
+	expectedSHA := ""
+	if shaIdx := strings.Index(trimmed, "#sha256="); shaIdx >= 0 {
+		expectedSHA = strings.TrimSpace(trimmed[shaIdx+len("#sha256="):])
+		trimmed = trimmed[:shaIdx]
+	}
 	subPath := ""
 	if hashIdx := strings.Index(trimmed, "#path:"); hashIdx >= 0 {
 		subPath = strings.Trim(strings.TrimSpace(trimmed[hashIdx+len("#path:"):]), "/")
@@ -432,11 +444,11 @@ func downloadGitHubSourceDir(ctx context.Context, spec, registry, stageDir strin
 		trimmed = trimmed[:atIdx]
 	}
 	parts := strings.Split(strings.Trim(trimmed, "/"), "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || strings.ContainsAny(ref, `/\`) {
 		return "", packageError(http.StatusBadRequest, "plugin_source_invalid", fmt.Sprintf("无效的 GitHub 插件来源 %q", spec))
 	}
-	archiveURL := fmt.Sprintf("https://github.com/%s/%s/archive/%s.tar.gz", parts[0], parts[1], ref)
-	tgzPath, err := downloadMirroredTarball(ctx, archiveURL, "", "", registry, stageDir)
+	archiveURL := fmt.Sprintf("https://github.com/%s/%s/archive/%s.tar.gz", parts[0], parts[1], url.PathEscape(ref))
+	tgzPath, err := downloadMirroredTarball(ctx, archiveURL, "", expectedSHA, registry, stageDir)
 	if err != nil {
 		return "", err
 	}
@@ -446,10 +458,13 @@ func downloadGitHubSourceDir(ctx context.Context, spec, registry, stageDir strin
 	}
 	if subPath != "" {
 		cleanSub := path.Clean(subPath)
-		if strings.HasPrefix(cleanSub, "..") || path.IsAbs(cleanSub) {
+		if cleanSub == "." || cleanSub == ".." || strings.HasPrefix(cleanSub, "../") || path.IsAbs(cleanSub) {
 			return "", packageError(http.StatusBadRequest, "plugin_source_invalid", fmt.Sprintf("无效的插件子目录 %q", subPath))
 		}
 		candidate := filepath.Join(unpackedRoot, filepath.FromSlash(cleanSub))
+		if relCheck, relErr := filepath.Rel(unpackedRoot, candidate); relErr != nil || strings.HasPrefix(relCheck, "..") {
+			return "", packageError(http.StatusBadRequest, "plugin_source_invalid", fmt.Sprintf("插件子目录越界 %q", subPath))
+		}
 		if info, statErr := os.Stat(filepath.Join(candidate, "package.json")); statErr == nil && info.Mode().IsRegular() {
 			return candidate, nil
 		}
@@ -473,6 +488,10 @@ func unpackTarballToDir(tgzPath, stageDir string) (string, error) {
 		return "", err
 	}
 	tr := tar.NewReader(gz)
+	var (
+		entryCount int
+		totalBytes int64
+	)
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -481,30 +500,63 @@ func unpackTarballToDir(tgzPath, stageDir string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
-			continue
+		entryCount++
+		if entryCount > maxTarEntries {
+			return "", fmt.Errorf("压缩包条目数超过上限（%d）", maxTarEntries)
 		}
-		cleanRel := path.Clean(strings.TrimPrefix(hdr.Name, "./"))
-		if idx := strings.IndexByte(cleanRel, '/'); idx > 0 {
-			cleanRel = cleanRel[idx+1:]
-		}
-		if cleanRel == "." || cleanRel == ".." || strings.HasPrefix(cleanRel, "../") || path.IsAbs(cleanRel) {
+		switch hdr.Typeflag {
+		case tar.TypeDir, tar.TypeXHeader, tar.TypeXGlobalHeader:
 			continue
+		case tar.TypeReg, tar.TypeRegA:
+		default:
+			return "", fmt.Errorf("压缩包包含不支持的条目类型 %q (%s)", hdr.Typeflag, hdr.Name)
+		}
+		rawName := strings.TrimPrefix(strings.TrimSpace(hdr.Name), "./")
+		if rawName == "" || strings.ContainsRune(rawName, '\\') || path.IsAbs(rawName) {
+			return "", fmt.Errorf("压缩包包含非法路径 %q", hdr.Name)
+		}
+		cleanRel := path.Clean(rawName)
+		if cleanRel == "." || cleanRel == ".." || strings.HasPrefix(cleanRel, "../") || strings.Contains(cleanRel, "..") {
+			return "", fmt.Errorf("压缩包路径越界 %q", hdr.Name)
+		}
+		if hdr.Size < 0 || hdr.Size > maxTarSingleFileBytes {
+			return "", fmt.Errorf("压缩包单文件 %q 超过大小上限（%d MB）", hdr.Name, maxTarSingleFileBytes>>20)
+		}
+		content, err := io.ReadAll(io.LimitReader(tr, maxTarSingleFileBytes+1))
+		if err != nil {
+			return "", err
+		}
+		if int64(len(content)) > maxTarSingleFileBytes {
+			return "", fmt.Errorf("压缩包单文件 %q 超过大小上限（%d MB）", hdr.Name, maxTarSingleFileBytes>>20)
+		}
+		totalBytes += int64(len(content))
+		if totalBytes > maxTarTotalBytes {
+			return "", fmt.Errorf("压缩包解压总大小超过上限（%d MB）", maxTarTotalBytes>>20)
 		}
 		targetPath := filepath.Join(destDir, filepath.FromSlash(cleanRel))
 		if relCheck, relErr := filepath.Rel(destDir, targetPath); relErr != nil || strings.HasPrefix(relCheck, "..") {
-			continue
+			return "", fmt.Errorf("压缩包路径越界 %q", hdr.Name)
 		}
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 			return "", err
 		}
-		content, err := io.ReadAll(io.LimitReader(tr, 16<<20))
-		if err != nil {
+		fileMode := os.FileMode(0o644)
+		if hdr.Mode&0o111 != 0 {
+			fileMode = 0o755
+		}
+		if err := os.WriteFile(targetPath, content, fileMode); err != nil {
 			return "", err
 		}
-		if err := os.WriteFile(targetPath, content, 0o644); err != nil {
-			return "", err
-		}
+	}
+	// If package.json is at the archive root, return destDir directly; if all
+	// files were nested under a single top-level directory (such as "package/"
+	// or "<repo>-<ref>/"), unwrap that single directory.
+	if info, err := os.Stat(filepath.Join(destDir, "package.json")); err == nil && info.Mode().IsRegular() {
+		return destDir, nil
+	}
+	entries, err := os.ReadDir(destDir)
+	if err == nil && len(entries) == 1 && entries[0].IsDir() {
+		return filepath.Join(destDir, entries[0].Name()), nil
 	}
 	return destDir, nil
 }
@@ -591,6 +643,16 @@ func resolvePackageSource(source string) (string, string, bool, error) {
 	if dir, ok := BundledSampleDir(source); ok {
 		return dir, source, true, nil
 	}
+	if strings.HasPrefix(source, "https://") || strings.HasPrefix(source, "http://") {
+		if strings.ContainsAny(source, " \t\r\n") {
+			return "", "", false, packageError(http.StatusBadRequest, "plugin_source_invalid", fmt.Sprintf("无效的插件地址 %q", source))
+		}
+		parsed, err := url.Parse(source)
+		if err != nil || parsed.Hostname() == "" || parsed.User != nil {
+			return "", "", false, packageError(http.StatusBadRequest, "plugin_source_invalid", fmt.Sprintf("无效的插件地址 %q", source))
+		}
+		return source, source, false, nil
+	}
 	if strings.HasPrefix(source, "-") || strings.ContainsAny(source, " \t\r\n;|&$`<>") {
 		return "", "", false, packageError(http.StatusBadRequest, "plugin_source_invalid", fmt.Sprintf("无效的插件来源 %q", source))
 	}
@@ -637,15 +699,26 @@ func (c *Runtime) cleanupUninstalledPackageDir(previous map[string]Record, next 
 
 const bundledPluginsSubdir = "bundled-plugins"
 
+// BundledBuiltinPluginNames is the single source of truth for default built-in
+// plugin directories shipped inside the BeefTV desktop app (agent-host/bundled-plugins).
+var BundledBuiltinPluginNames = []string{
+	"beeftv-plugin-market",
+	"beeftv-plugin-ll2",
+}
+
 var (
 	runtimeExecutable = os.Executable
 	runtimeGOOS       = goruntime.GOOS
-
-	bundledBuiltinPlugins = map[string]bool{
-		"beeftv-plugin-market": true,
-		"beeftv-plugin-ll2":    true,
-	}
 )
+
+func isBundledBuiltinPlugin(name string) bool {
+	for _, builtin := range BundledBuiltinPluginNames {
+		if name == builtin {
+			return true
+		}
+	}
+	return false
+}
 
 // BundledSampleDir resolves a built-in plugin package directory shipped with
 // BeefTV (only beeftv-plugin-market and beeftv-plugin-ll2). Market plugins are
@@ -656,7 +729,7 @@ func BundledSampleDir(name string) (string, bool) {
 }
 
 func bundledPluginPackageDir(name, executable, goos string) (string, bool) {
-	if name == "" || !bundledBuiltinPlugins[name] || strings.ContainsAny(name, `/\.@`) {
+	if name == "" || !isBundledBuiltinPlugin(name) || strings.ContainsAny(name, `/\.@`) {
 		return "", false
 	}
 	for _, root := range bundledPluginSearchRoots(executable, goos) {
