@@ -25,10 +25,6 @@ func (s *Service) QueryFailedVideoTask(ctx context.Context, userID string, taskI
 	return s.queryFailedVideoTask(ctx, task, strings.TrimSpace(userID))
 }
 
-func (s *Service) AdminQueryFailedVideoTask(ctx context.Context, actor *model.User, logID string) (*ProviderTaskQueryResult, error) {
-	return localtask.AdminQueryFailedVideoTask(ctx, s.repo, s.RequireAdmin, s.queryFailedVideoTask, s.appendAdminAudit, actor, logID)
-}
-
 func (s *Service) queryFailedVideoTask(ctx context.Context, task *model.Task, claimUserID string) (*ProviderTaskQueryResult, error) {
 	return localtask.QueryFailedVideoTaskWithDeps(ctx, localtask.VideoTaskRecoveryDeps{
 		Repo:                  s.repo,

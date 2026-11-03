@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"infinite-canvas/backend/internal/model"
-
 	"gorm.io/gorm"
 )
 
@@ -31,50 +29,6 @@ type ResponseInterceptionSetting struct {
 
 func defaultResponseInterceptionSetting() ResponseInterceptionSetting {
 	return ResponseInterceptionSetting{Rules: []ResponseInterceptionRule{}}
-}
-
-func (s *Service) AdminResponseInterceptionSetting(actor *model.User) (*ResponseInterceptionSetting, error) {
-	if err := s.RequireAdmin(actor); err != nil {
-		return nil, err
-	}
-	value, err := s.responseInterceptionSetting()
-	if err != nil {
-		return nil, err
-	}
-	return &value, nil
-}
-
-func (s *Service) UpdateResponseInterceptionSetting(actor *model.User, value ResponseInterceptionSetting) (*ResponseInterceptionSetting, error) {
-	if err := s.RequireAdmin(actor); err != nil {
-		return nil, err
-	}
-	value = normalizeResponseInterceptionSetting(value)
-	if err := validateResponseInterceptionSetting(value); err != nil {
-		return nil, err
-	}
-	before, err := s.responseInterceptionSetting()
-	if err != nil {
-		return nil, err
-	}
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	current, err := s.repo.SystemSetting(responseInterceptionSettingKey)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-	setting := &model.SystemSetting{Key: responseInterceptionSettingKey, ValueJSON: string(encoded), UpdatedBy: actor.ID}
-	if current != nil {
-		setting.CreatedAt = current.CreatedAt
-	}
-	if err := s.repo.SaveSystemSetting(setting); err != nil {
-		return nil, err
-	}
-	if err := s.appendAdminAudit(actor, "response_interception.update", "system_setting", responseInterceptionSettingKey, "更新模型响应拦截", map[string]any{"before": before, "after": value}); err != nil {
-		return nil, err
-	}
-	return &value, nil
 }
 
 // InterceptResponseText 只投影用户可见文案，不修改上游响应或请求明细中的原始内容。

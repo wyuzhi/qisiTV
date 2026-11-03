@@ -1,11 +1,11 @@
 {
-  "appLines": 9902,
+  "appLines": 9760,
   "largeFiles": {
     "backend/internal/handler/project.go": 1029,
     "backend/internal/protocol/manifest.go": 1624,
     "backend/internal/provider/workflow/mapping.go": 1049,
     "backend/internal/repository/project_mutate.go": 1348,
-    "backend/internal/repository/repository.go": 2317,
+    "backend/internal/repository/repository.go": 2293,
     "web/src/components/canvas/canvas-timeline-dialog.tsx": 1010,
     "web/src/components/canvas/director/canvas-director-workbench.tsx": 2217,
     "web/src/components/canvas/director/director-viewport.tsx": 2102,

@@ -156,21 +156,24 @@ func TestRuntimePolicySaveAndResetTakeEffectImmediately(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.SystemSetting{}, &model.AdminAuditEvent{}); err != nil {
+	if err := db.AutoMigrate(&model.SystemSetting{}); err != nil {
 		t.Fatal(err)
 	}
 	svc := New(repository.New(db), t.TempDir())
-	actor := &model.User{ID: "admin", Role: model.UserRoleAdmin}
 	policy := defaultRuntimePolicy()
 	policy.Task.ActiveTaskLimit = 17
-	if _, err := svc.UpdateRuntimePolicySetting(actor, policy); err != nil {
+	encoded, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.repo.SaveSystemSetting(&model.SystemSetting{Key: runtimePolicySettingKey, ValueJSON: string(encoded)}); err != nil {
 		t.Fatal(err)
 	}
 	effective, err := svc.RuntimePolicy()
 	if err != nil || effective.Task.ActiveTaskLimit != 17 {
 		t.Fatalf("effective active task limit = %d, error = %v", effective.Task.ActiveTaskLimit, err)
 	}
-	if _, err := svc.ResetRuntimePolicySetting(actor); err != nil {
+	if err := svc.repo.DeleteSystemSetting(runtimePolicySettingKey); err != nil {
 		t.Fatal(err)
 	}
 	effective, err = svc.RuntimePolicy()

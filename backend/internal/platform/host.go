@@ -3,8 +3,6 @@ package platform
 import (
 	"time"
 
-	"infinite-canvas/backend/internal/kernel"
-	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/repository"
 )
 
@@ -12,17 +10,11 @@ const TaskWorkerConcurrency = 3
 
 // Host 由组合根注入，避免 platform → app 回环。
 type Host interface {
-	RequireAdmin(user *model.User) error
-	AppendAudit(actor *model.User, action, targetType, targetID, summary string, metadata any) error
 	ChannelConcurrencyLimit(channelID string) (int, error)
 }
 
 type nopHost struct{}
 
-func (nopHost) RequireAdmin(*model.User) error { return nil }
-func (nopHost) AppendAudit(*model.User, string, string, string, string, any) error {
-	return nil
-}
 func (nopHost) ChannelConcurrencyLimit(string) (int, error) {
 	return 0, nil
 }
@@ -60,9 +52,7 @@ func newService(repo *repository.Repository, coordinator *Coordinator, host Host
 }
 
 type HostConfig struct {
-	Repo         *repository.Repository
-	RequireAdmin func(*model.User) error
-	AppendAudit  func(*model.User, string, string, string, string, any) error
+	Repo *repository.Repository
 }
 
 type configHost struct {
@@ -71,20 +61,6 @@ type configHost struct {
 
 func NewHost(cfg HostConfig) Host {
 	return configHost{cfg: cfg}
-}
-
-func (h configHost) RequireAdmin(user *model.User) error {
-	if h.cfg.RequireAdmin == nil {
-		return nil
-	}
-	return h.cfg.RequireAdmin(user)
-}
-
-func (h configHost) AppendAudit(actor *model.User, action, targetType, targetID, summary string, metadata any) error {
-	if h.cfg.AppendAudit == nil {
-		return nil
-	}
-	return h.cfg.AppendAudit(actor, action, targetType, targetID, summary, metadata)
 }
 
 func (h configHost) ChannelConcurrencyLimit(channelID string) (int, error) {
@@ -110,18 +86,4 @@ func RuntimePolicyWithRepo(repo *repository.Repository, localMode bool) (Runtime
 		return SelfUseRuntimePolicy(), nil
 	}
 	return New(repo, nil, nil).RuntimePolicy()
-}
-
-func (s *Service) requireAdmin(user *model.User) error {
-	if s == nil || s.host == nil {
-		return kernel.Unauthorized("请先登录")
-	}
-	return s.host.RequireAdmin(user)
-}
-
-func (s *Service) appendAdminAudit(actor *model.User, action, targetType, targetID, summary string, metadata any) error {
-	if s == nil || s.host == nil {
-		return nil
-	}
-	return s.host.AppendAudit(actor, action, targetType, targetID, summary, metadata)
 }

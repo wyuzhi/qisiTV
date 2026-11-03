@@ -273,7 +273,7 @@ HTTPS 图片提交前读取同源 `/models` 元数据，仅成功响应明确声
 | 表 | 用途 | 关键边界 |
 | --- | --- | --- |
 | `system_settings` (`key = "plugin_registry"`) | 保存全局唯一插件登记表 JSON（`RegistryRecord[]`） | 记录插件 ID、版本、来源（`official`、`system`、`uploaded`、`OriginPackage` `"package"`）、包目录 `PackageDir`、安装包规格 `PackageSpec`、客户端入口与状态（`enabled`、`disabled`、`invalid` 及失败原因）；与平台/用户启停状态在同一事务提交 |
-| `plugin_platform_states` | 保存管理员设置的平台可用状态 | `plugin_id` 为主键；平台停用是所有用户的硬上限，管理员变更写入审计日志 |
+| `plugin_platform_states` | 保存管理员设置的平台可用状态 | `plugin_id` 为主键；平台停用是所有用户的硬上限 |
 | `user_plugin_states` | 保存用户对官方应用插件与已安装插件包的个人启用状态 | `(user_id, plugin_id)` 唯一；系统协议和管理员上传插件不得写入用户级状态 |
 
 有效状态由服务端计算为 `platform_available AND user_enabled`。官方应用插件没有平台状态记录时默认可用；用户没有个人记录时默认停用，历史上全局启用的工作流插件在用户首次保存个人选择前沿用旧状态。从 npm、本地目录或归档包安装的插件（`OriginPackage = "package"`）同样只登记在 `plugin_registry` 中，由 `agent-host/plugin-packages.mjs` 与前端按启用列表加载，并将已启用插件声明的 `canvasNodes` 同步注册进全局共享的 `capability.BuiltinRegistry()`。管理员上传包的来源和作用域由宿主覆盖，不能通过 Manifest 提权。
