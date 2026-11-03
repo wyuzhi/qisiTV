@@ -127,18 +127,35 @@ cp "$ROOT_DIR/assets/app-icon.png" "$DESKTOP_DIR/build/appicon.png"
   fi
 )
 
+copy_bundled_plugin_dirs() {
+  local dest_root="$1"
+  local manifest_file="$ROOT_DIR/plugin-packages/bundled-plugin-dirs.txt"
+  [[ -f "$manifest_file" ]] || { echo "Bundled plugin manifest missing: $manifest_file" >&2; exit 1; }
+  rm -rf "$dest_root"
+  mkdir -p "$dest_root"
+  local copied=0
+  local dir_name
+  while IFS= read -r dir_name || [[ -n "$dir_name" ]]; do
+    dir_name="${dir_name%%#*}"
+    dir_name="$(printf '%s' "$dir_name" | tr -d '[:space:]')"
+    [[ -n "$dir_name" ]] || continue
+    local src_dir="$ROOT_DIR/plugin-packages/$dir_name"
+    [[ -f "$src_dir/package.json" ]] || { echo "Bundled plugin source missing package.json: $src_dir" >&2; exit 1; }
+    cp -R "$src_dir" "$dest_root/$dir_name"
+    [[ -f "$dest_root/$dir_name/package.json" ]] || { echo "Bundled plugin copy missing package.json: $dest_root/$dir_name" >&2; exit 1; }
+    copied=$((copied + 1))
+  done < "$manifest_file"
+  [[ "$copied" -gt 0 ]] || { echo "No bundled plugin directories listed in $manifest_file" >&2; exit 1; }
+}
+
 if [[ "$AGENT_TARGET" == linux/amd64 ]]; then
   LINUX_BUNDLE="$DESKTOP_DIR/build/bin/BeefTV-linux"
   mkdir -p "$LINUX_BUNDLE/plugin-packages" "$LINUX_BUNDLE/cli"
   mv "$DESKTOP_DIR/build/bin/BeefTV" "$LINUX_BUNDLE/BeefTV"
   cp "$ROOT_DIR/plugin-packages/"*.beeftv-plugin "$LINUX_BUNDLE/plugin-packages/"
-  for builtin_dir in beeftv-plugin-market beeftv-plugin-ll2 beeftv-plugin-character-replacement; do
-    if [[ -d "$ROOT_DIR/plugin-packages/$builtin_dir" ]]; then
-      cp -R "$ROOT_DIR/plugin-packages/$builtin_dir" "$LINUX_BUNDLE/plugin-packages/"
-    fi
-  done
   cp "$ROOT_DIR/docs/linux-install.md" "$LINUX_BUNDLE/README.md"
   bun "$ROOT_DIR/scripts/package-agent-host.mjs" "$AGENT_TARGET" "$LINUX_BUNDLE/agent-host"
+  copy_bundled_plugin_dirs "$LINUX_BUNDLE/agent-host/bundled-plugins"
   bun "$ROOT_DIR/scripts/distribution-notices.mjs" "${AGENT_TARGET/\//-}" "$LINUX_BUNDLE/agent-host/licenses" "$VERSION_VALUE"
   (
     cd "$ROOT_DIR/backend"
@@ -155,14 +172,10 @@ APP_BUNDLE="$DESKTOP_DIR/build/bin/BeefTV.app"
 PLUGIN_RESOURCE_DIR="$APP_BUNDLE/Contents/Resources/plugin-packages"
 mkdir -p "$PLUGIN_RESOURCE_DIR"
 cp "$ROOT_DIR/plugin-packages/"*.beeftv-plugin "$PLUGIN_RESOURCE_DIR/"
-for builtin_dir in beeftv-plugin-market beeftv-plugin-ll2 beeftv-plugin-character-replacement; do
-  if [[ -d "$ROOT_DIR/plugin-packages/$builtin_dir" ]]; then
-    cp -R "$ROOT_DIR/plugin-packages/$builtin_dir" "$PLUGIN_RESOURCE_DIR/"
-  fi
-done
 
 bun "$ROOT_DIR/scripts/package-agent-host.mjs" "$AGENT_TARGET" \
   "$APP_BUNDLE/Contents/Resources/agent-host"
+copy_bundled_plugin_dirs "$APP_BUNDLE/Contents/Resources/agent-host/bundled-plugins"
 cp -R "$MEDIA_RUNTIME_STAGE/media-runtime" "$APP_BUNDLE/Contents/Resources/agent-host/media-runtime"
 bun "$ROOT_DIR/scripts/distribution-notices.mjs" "${AGENT_TARGET/\//-}" \
   "$APP_BUNDLE/Contents/Resources/agent-host/licenses" "$VERSION_VALUE"

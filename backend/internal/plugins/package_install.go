@@ -19,18 +19,25 @@ type EnabledPackageView struct {
 }
 
 type MarketPluginItem struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	PackageName string   `json:"packageName"`
-	Version     string   `json:"version"`
-	Description string   `json:"description"`
-	Author      string   `json:"author,omitempty"`
-	Keywords    []string `json:"keywords,omitempty"`
-	Installed   bool     `json:"installed"`
-	Enabled     bool     `json:"enabled"`
-	Recommended bool     `json:"recommended,omitempty"`
-	Category    string   `json:"category,omitempty"`
-	// Bundled marks a sample shipped inside BeefTV; it installs without network.
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	PackageName   string   `json:"packageName"`
+	Version       string   `json:"version"`
+	Description   string   `json:"description"`
+	Author        string   `json:"author,omitempty"`
+	Keywords      []string `json:"keywords,omitempty"`
+	Tags          []string `json:"tags,omitempty"`
+	Repository    string   `json:"repository,omitempty"`
+	Homepage      string   `json:"homepage,omitempty"`
+	ReadmeURL     string   `json:"readmeUrl,omitempty"`
+	TarballURL    string   `json:"tarballUrl,omitempty"`
+	MirrorTarball string   `json:"mirrorTarball,omitempty"`
+	SHA256        string   `json:"sha256,omitempty"`
+	Installed     bool     `json:"installed"`
+	Enabled       bool     `json:"enabled"`
+	Recommended   bool     `json:"recommended,omitempty"`
+	Category      string   `json:"category,omitempty"`
+	// Bundled marks a built-in package shipped inside BeefTV.
 	Bundled bool `json:"bundled,omitempty"`
 }
 

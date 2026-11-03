@@ -165,12 +165,12 @@ beeftv-plugin-sticky-note/
 ## 5. 内置功能与样板插件
 
 - **内置能力统一走挂点**：提示词优化器（`canvas.promptActions`）、Eagle 素材库页面与设置（`app.page`、`assets.source`、`app.settings`）、AI 审美批改节点（`canvas.node`）均通过统一挂点机制接入。
-- **官方插件市场（`beeftv-plugin-market`）**：唯一随桌面包预装的插件，挂载于 `pluginCenter.section`，支持从 `Sunnyender-org/beeftv-plugins` 读取推荐列表（含内置离线兜底 `registry.json`）及按 `keywords:beeftv-plugin` 搜索 npm 社区插件。
-- **开发模板与样板插件**：
-  - `beeftv-plugin-slot-test`：往每个挂点各挂一项、订阅全部事件的开发自检插件，不在推荐列表里。
-  - `beeftv-plugin-sticky-note`：画布便签模板插件（含自定义节点、助手工具与技能）。
-  - `beeftv-plugin-ecommerce-hero`：「一键商品主图」电商样板插件。
-  - `beeftv-plugin-character-replacement`：「AI 角色替换工作室」短剧二阶段角色替换与全片时间轴回插样板插件。
+- **官方插件市场（`beeftv-plugin-market`）与内置渠道插件（`beeftv-plugin-ll2`）**：随桌面包预装并默认启用（通过 `plugin-packages/bundled-plugin-dirs.txt` 打包进 `agent-host/bundled-plugins/`）；插件市场挂载于 `pluginCenter.section`，支持从 `Sunnyender-org/beeftv-plugins`（含国内 jsDelivr / GitHub 镜像加速链与本地离线缓存）读取推荐列表、预览远程 `README.md`、按 `beeftv-plugin` 检索 npm 社区插件并在线安装。
+- **官方与社区扩展插件（按需在线安装，不随桌面客户端捆绑）**：
+  - `beeftv-plugin-character-replacement`：「AI 角色替换工作室」短剧二阶段角色替换与全片时间轴回插官方插件，作为插件市场精选推荐插件提供在线下载安装。
+  - `beeftv-plugin-sticky-note`：画布便签开发模板插件（含自定义节点、助手工具与技能）。
+  - `beeftv-plugin-ecommerce-hero`：「一键商品主图」电商开发样板插件。
+  - `beeftv-plugin-slot-test`：往每个挂点各挂一项、订阅全部事件的开发自检插件，不在推荐列表里，也不随桌面发布包附带。
 
 ## 6. Eagle 外部素材来源方案
 

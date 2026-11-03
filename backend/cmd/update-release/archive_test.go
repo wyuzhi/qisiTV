@@ -374,6 +374,41 @@ func TestPackageRejectsMissingAgentRuntime(t *testing.T) {
 	}
 }
 
+func TestPackageWindowsAcceptsBundledPluginsInAgentHostAndRejectsSubdirInPluginPackages(t *testing.T) {
+	bin := writeFakeWindowsBin(t, t.TempDir())
+	for _, dirName := range []string{"beeftv-plugin-market", "beeftv-plugin-sticky-note", "beeftv-plugin-ecommerce-hero"} {
+		pkgFile := filepath.Join(bin, "agent-host", "bundled-plugins", dirName, "package.json")
+		if err := os.MkdirAll(filepath.Dir(pkgFile), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(pkgFile, []byte(`{"name":"`+dirName+`"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := filepath.Join(t.TempDir(), "ok.zip")
+	if err := packageBundle(platformWindowsAMD64, bin, out); err != nil {
+		t.Fatalf("packageBundle with agent-host/bundled-plugins failed: %v", err)
+	}
+	entries := zipNames(t, out)
+	for _, dirName := range []string{"beeftv-plugin-market", "beeftv-plugin-sticky-note", "beeftv-plugin-ecommerce-hero"} {
+		want := "agent-host/bundled-plugins/" + dirName + "/package.json"
+		if !entries[want] {
+			t.Fatalf("missing %s in packaged Windows zip", want)
+		}
+	}
+
+	badSubdirFile := filepath.Join(bin, "plugin-packages", "beeftv-plugin-market", "package.json")
+	if err := os.MkdirAll(filepath.Dir(badSubdirFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(badSubdirFile, []byte(`{"name":"beeftv-plugin-market"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := packageBundle(platformWindowsAMD64, bin, filepath.Join(t.TempDir(), "bad.zip")); err == nil || !strings.Contains(err.Error(), "plugin-packages") {
+		t.Fatalf("expected subdirectory inside Windows plugin-packages to fail packaging, got %v", err)
+	}
+}
+
 func zipNames(t *testing.T, path string) map[string]bool {
 	t.Helper()
 	reader, err := zip.OpenReader(path)

@@ -118,12 +118,20 @@ func RegisterPluginRoutes(r *gin.RouterGroup, center pluginCenter, hosted ...boo
 		ok(c, gin.H{"plugins": listed, "states": states})
 	})
 	pluginRoutes.GET("/market/search", func(c *gin.Context) {
-		items, err := center.PluginDomain().SearchMarket(c.Request.Context(), c.Query("q"))
+		items, err := center.PluginDomain().SearchMarket(c.Request.Context(), c.Query("q"), c.Query("registry"))
 		if err != nil {
 			failService(c, err)
 			return
 		}
 		ok(c, gin.H{"items": items})
+	})
+	pluginRoutes.GET("/market/readme", func(c *gin.Context) {
+		readme, err := center.PluginDomain().FetchMarketReadme(c.Request.Context(), c.Query("id"), c.Query("registry"))
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"readme": readme})
 	})
 	pluginRoutes.POST("/install", func(c *gin.Context) {
 		if _, ok := requirePluginAdmin(c, center); !ok {

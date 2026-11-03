@@ -506,3 +506,353 @@ func TestBuiltinLL2PluginPreinstalledAndRegistersProviders(t *testing.T) {
 	}
 }
 
+func readBundledPluginManifestForTest(t *testing.T, repoPluginPackages string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(repoPluginPackages, "bundled-plugin-dirs.txt"))
+	if err != nil {
+		t.Fatalf("read bundled-plugin-dirs.txt: %v", err)
+	}
+	var names []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if idx := strings.IndexByte(line, '#'); idx >= 0 {
+			line = line[:idx]
+		}
+		line = strings.TrimSpace(line)
+		if line != "" {
+			names = append(names, line)
+		}
+	}
+	return names
+}
+
+func copyTreeForTest(t *testing.T, src, dst string) {
+	t.Helper()
+	err := filepath.WalkDir(src, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
+	if err != nil {
+		t.Fatalf("copy %s -> %s: %v", src, dst, err)
+	}
+}
+
+func TestBundledPluginDirsManifestAndDesktopAgentHostResolution(t *testing.T) {
+	repoPluginPackages, err := filepath.Abs(filepath.Join("..", "..", "..", "plugin-packages"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := readBundledPluginManifestForTest(t, repoPluginPackages)
+	wantNames := map[string]bool{
+		"beeftv-plugin-market": false,
+		"beeftv-plugin-ll2":    false,
+	}
+	for _, name := range names {
+		if !wantNames[name] && name != "beeftv-plugin-market" && name != "beeftv-plugin-ll2" {
+			t.Fatalf("bundled-plugin-dirs.txt must only contain built-in default plugins, got unexpected %q", name)
+		}
+		wantNames[name] = true
+		if _, err := protocol.ParsePluginPackageDir(filepath.Join(repoPluginPackages, name)); err != nil {
+			t.Fatalf("bundled plugin %s invalid: %v", name, err)
+		}
+	}
+	for name, seen := range wantNames {
+		if !seen {
+			t.Fatalf("bundled-plugin-dirs.txt missing required directory %s (got %v)", name, names)
+		}
+	}
+
+	for _, tc := range []struct {
+		gp        string
+		execRel   string
+		agentHost string
+		nodeRel   string
+	}{
+		{gp: "windows", execRel: "BeefTV.exe", agentHost: "agent-host", nodeRel: filepath.Join("runtime", "node.exe")},
+		{gp: "linux", execRel: "BeefTV", agentHost: "agent-host", nodeRel: filepath.Join("runtime", "bin", "node")},
+		{gp: "darwin", execRel: filepath.Join("BeefTV.app", "Contents", "MacOS", "BeefTV"), agentHost: filepath.Join("BeefTV.app", "Contents", "Resources", "agent-host"), nodeRel: filepath.Join("runtime", "bin", "node")},
+	} {
+		t.Run(tc.gp, func(t *testing.T) {
+			bundleRoot := t.TempDir()
+			execPath := filepath.Join(bundleRoot, tc.execRel)
+			if err := os.MkdirAll(filepath.Dir(execPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(execPath, []byte("exe"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			agentHostDir := filepath.Join(bundleRoot, tc.agentHost)
+			for _, hostFile := range []string{"server.mjs", tc.nodeRel} {
+				full := filepath.Join(agentHostDir, hostFile)
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte("fixture"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bundledPluginsRoot := filepath.Join(agentHostDir, "bundled-plugins")
+			for _, name := range names {
+				copyTreeForTest(t, filepath.Join(repoPluginPackages, name), filepath.Join(bundledPluginsRoot, name))
+			}
+
+			// Simulate a desktop install where plugin-packages contains only flat *.beeftv-plugin files.
+			flatOfficialDir := t.TempDir()
+			entries, err := os.ReadDir(repoPluginPackages)
+			if err != nil {
+				t.Fatal(err)
+			}
+			copiedArchive := false
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.HasSuffix(entry.Name(), protocol.PluginPackageExtension) {
+					data, err := os.ReadFile(filepath.Join(repoPluginPackages, entry.Name()))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(flatOfficialDir, entry.Name()), data, 0o644); err != nil {
+						t.Fatal(err)
+					}
+					copiedArchive = true
+					break
+				}
+			}
+			if !copiedArchive {
+				t.Fatal("no *.beeftv-plugin archive found in plugin-packages")
+			}
+			t.Setenv("CANVAS_OFFICIAL_PLUGIN_DIR", flatOfficialDir)
+
+			prevExec, prevGOOS := runtimeExecutable, runtimeGOOS
+			runtimeExecutable = func() (string, error) { return execPath, nil }
+			runtimeGOOS = tc.gp
+			t.Cleanup(func() {
+				runtimeExecutable = prevExec
+				runtimeGOOS = prevGOOS
+			})
+
+			for _, nonBundled := range []string{
+				"beeftv-plugin-slot-test",
+				"beeftv-plugin-character-replacement",
+				"beeftv-plugin-sticky-note",
+				"beeftv-plugin-ecommerce-hero",
+			} {
+				if _, ok := BundledSampleDir(nonBundled); ok {
+					t.Fatalf("%s must not resolve as a bundled desktop plugin", nonBundled)
+				}
+			}
+
+			dataDir := t.TempDir()
+			rt, err := NewRuntime(dataDir)
+			if err != nil {
+				t.Fatalf("NewRuntime: %v", err)
+			}
+			defer capability.BuiltinRegistry().ResetPluginDescriptors()
+			svc := New(rt, nil)
+			svc.SetPackageFetcher(copyPackageFetcher)
+
+			for _, builtinID := range []string{"beeftv-plugin-market", "beeftv-plugin-ll2"} {
+				builtinView, found := ByID(svc.List(), builtinID)
+				if !found {
+					t.Fatalf("%s was not loaded from agent-host/bundled-plugins", builtinID)
+				}
+				if builtinView.Status != StatusEnabled || builtinView.Source != OriginOfficial {
+					t.Fatalf("unexpected %s view: %+v", builtinID, builtinView)
+				}
+				clientFile, contentType, err := svc.ResolvePackageFile(builtinID, "client/index.js")
+				if err != nil {
+					t.Fatalf("ResolvePackageFile for %s failed: %v", builtinID, err)
+				}
+				if !strings.HasPrefix(clientFile, bundledPluginsRoot) || !strings.Contains(contentType, "javascript") {
+					t.Fatalf("unexpected resolved %s file %s (%s)", builtinID, clientFile, contentType)
+				}
+			}
+
+			// Cancel context so readCuratedRegistry immediately uses the bundled offline registry.json.
+			offlineCtx, cancel := context.WithCancel(context.Background())
+			cancel()
+			curated := loadCuratedRegistryItems(offlineCtx, "", map[string]View{})
+			if len(curated) != 1 || curated[0].ID != "beeftv-plugin-character-replacement" {
+				t.Fatalf("expected curated registry to list only beeftv-plugin-character-replacement, got %+v", curated)
+			}
+			if curated[0].Bundled {
+				t.Fatalf("market plugin %s must not be marked Bundled=true", curated[0].ID)
+			}
+		})
+	}
+}
+
+func packDirectoryToTarGzForTest(t *testing.T, srcDir string) ([]byte, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	err := filepath.WalkDir(srcDir, func(fullPath string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() {
+			return walkErr
+		}
+		rel, err := filepath.Rel(srcDir, fullPath)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			return err
+		}
+		hdr := &tar.Header{
+			Name: "package/" + filepath.ToSlash(rel),
+			Mode: 0o644,
+			Size: int64(len(data)),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		_, err = tw.Write(data)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw := buf.Bytes()
+	sum := pluginHash(raw)
+	return raw, sum
+}
+
+func TestMarketChinaMirrorSearchReadmeAndOnlineTarballInstall(t *testing.T) {
+	repoPluginPackages, err := filepath.Abs(filepath.Join("..", "..", "..", "plugin-packages"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	charPluginDir := filepath.Join(repoPluginPackages, "beeftv-plugin-character-replacement")
+	tgzBytes, tgzSHA256 := packDirectoryToTarGzForTest(t, charPluginDir)
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/-/v1/search"):
+			// Simulate npmmirror: returns 0 results if "keywords:" qualifier is used,
+			// returns objects when plain text "beeftv-plugin" is queried.
+			text := r.URL.Query().Get("text")
+			if strings.Contains(text, "keywords:") {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"objects":[],"total":0}`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"objects": [
+					{
+						"package": {
+							"name": "beeftv-plugin-character-replacement",
+							"version": "0.1.0",
+							"description": "AI 角色替换工作室",
+							"keywords": ["beeftv-plugin", "pi-package", "character-replacement"],
+							"links": {"repository": "https://github.com/Sunnyender-org/beeftv-plugins"},
+							"publisher": {"username": "beeftv"}
+						}
+					},
+					{
+						"package": {
+							"name": "unrelated-package",
+							"version": "1.0.0",
+							"description": "not a plugin",
+							"keywords": ["other"]
+						}
+					}
+				]
+			}`))
+		case r.URL.Path == "/packages/beeftv-plugin-character-replacement-0.1.0.tgz":
+			w.Header().Set("Content-Type", "application/gzip")
+			_, _ = w.Write(tgzBytes)
+		case r.URL.Path == "/readme/README.md":
+			w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+			_, _ = w.Write([]byte("# AI 角色替换工作室（远程镜像 README）\n\n支持双阶段角色替换与时间轴回插。"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	dataDir := t.TempDir()
+	rt, err := NewRuntime(dataDir)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	defer capability.BuiltinRegistry().ResetPluginDescriptors()
+	svc := New(rt, nil)
+	svc.SetPackageFetcher(copyPackageFetcher)
+
+	// Seed the local market registry cache with our test server URLs so we test
+	// the full China mirror tarball & README pipeline deterministically.
+	cachePath := filepath.Join(dataDir, "plugins", "market-registry-cache.json")
+	customRegistry := fmt.Sprintf(`{
+		"schemaVersion": 1,
+		"plugins": [
+			{
+				"id": "beeftv-plugin-character-replacement",
+				"packageName": "beeftv-plugin-character-replacement",
+				"name": "AI 角色替换工作室",
+				"version": "0.1.0",
+				"description": "二阶段角色替换",
+				"author": "BeefTV",
+				"category": "短剧与视频创作",
+				"recommended": true,
+				"repo": "https://github.com/Sunnyender-org/beeftv-plugins/tree/main/plugins/beeftv-plugin-character-replacement",
+				"readme": %q,
+				"mirrorTarball": %q,
+				"sha256": %q,
+				"tags": ["角色替换"]
+			}
+		]
+	}`, server.URL+"/readme/README.md", server.URL+"/packages/beeftv-plugin-character-replacement-0.1.0.tgz", tgzSHA256)
+	saveCuratedRegistryCache(cachePath, []byte(customRegistry))
+
+	// 1. Test npmmirror plain-text search & Go-side keyword filtering
+	npmHits, ok := searchSingleNpmRegistry(context.Background(), server.URL+"/npmmirror.com", "角色", map[string]View{})
+	if !ok || len(npmHits) != 1 || npmHits[0].ID != "beeftv-plugin-character-replacement" {
+		t.Fatalf("expected npmmirror search to return beeftv-plugin-character-replacement and filter out unrelated-package, got ok=%v hits=%+v", ok, npmHits)
+	}
+
+	// 2. Test remote README fetching before plugin is installed
+	offlineCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	curatedItems := loadCuratedRegistryItemsWithCache(offlineCtx, "", NpmMirrorRegistry, cachePath, map[string]View{})
+	if len(curatedItems) != 1 || curatedItems[0].ReadmeURL == "" || curatedItems[0].MirrorTarball == "" {
+		t.Fatalf("unexpected curated items from cache: %+v", curatedItems)
+	}
+	readmeText, ok := fetchRemoteMarkdownText(context.Background(), curatedItems[0].ReadmeURL)
+	if !ok || !strings.Contains(readmeText, "远程镜像 README") {
+		t.Fatalf("expected remote README text, got ok=%v text=%q", ok, readmeText)
+	}
+
+	// 3. Test online tarball download & SHA-256 verification
+	stageDir := t.TempDir()
+	if _, err := downloadMirroredTarball(context.Background(), "", curatedItems[0].MirrorTarball, "0000000000000000000000000000000000000000000000000000000000000000", NpmMirrorRegistry, stageDir); err == nil {
+		t.Fatal("expected mismatched SHA-256 tarball to be rejected")
+	}
+	installedView, err := svc.InstallPackage(curatedItems[0].MirrorTarball, NpmMirrorRegistry)
+	if err != nil {
+		t.Fatalf("online MirrorTarball install failed: %v", err)
+	}
+	if installedView.Manifest.ID != "beeftv-plugin-character-replacement" || installedView.Status != StatusEnabled {
+		t.Fatalf("unexpected installed plugin view: %+v", installedView)
+	}
+}
+

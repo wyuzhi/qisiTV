@@ -39,6 +39,7 @@ BEEFTV_GO_DIR=/tmp/beeftv-go.rpIfVN/go ./scripts/build-beeftv-release.sh
 ```text
 backend/cmd/desktop/build/bin/BeefTV.app
 backend/cmd/desktop/build/bin/BeefTV.app/Contents/Resources/plugin-packages/*.beeftv-plugin
+backend/cmd/desktop/build/bin/BeefTV.app/Contents/Resources/agent-host/bundled-plugins/{beeftv-plugin-market,beeftv-plugin-ll2,beeftv-plugin-sticky-note,beeftv-plugin-ecommerce-hero}
 ```
 
 验收重点：
@@ -62,9 +63,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-beeftv-windo
 ```text
 backend\cmd\desktop\build\bin\BeefTV.exe
 backend\cmd\desktop\build\bin\plugin-packages\*.beeftv-plugin
+backend\cmd\desktop\build\bin\agent-host\bundled-plugins\{beeftv-plugin-market,beeftv-plugin-ll2,beeftv-plugin-sticky-note,beeftv-plugin-ecommerce-hero}
 ```
 
-官方插件必须和 `BeefTV.exe` 放在同一目录下的 `plugin-packages\`。从开始菜单、快捷方式或资源管理器启动时，工作目录不一定是仓库或 exe 所在目录；应用按可执行文件位置查找官方插件，不依赖当前工作目录。
+官方协议插件归档（`*.beeftv-plugin`）必须和 `BeefTV.exe` 放在同一目录下的 `plugin-packages\`（不能在 `plugin-packages\` 下放子目录，否则已发布客户端的应用内更新校验会拒绝）；随包 pi 插件目录（按 `plugin-packages/bundled-plugin-dirs.txt` 清单）统一放在 `agent-host\bundled-plugins\` 下，随 `agent-host` 整树更新。从开始菜单、快捷方式或资源管理器启动时，工作目录不一定是仓库或 exe 所在目录；应用按可执行文件位置查找官方插件与随包插件目录，不依赖当前工作目录。
 
 ### 本机前提
 
@@ -218,9 +220,9 @@ Actions 中的 `desktop-*` 临时安装包保留 7 天，用于发布任务之�
 
 zip 里的布局：
 
-- macOS：`BeefTV.app/...`，保留可执行权限；内部安全符号链接会被解成普通文件，不会写成 zip 符号链接项。
-- Windows：根目录的 `BeefTV.exe` 和 `plugin-packages/*.beeftv-plugin`。
-- Linux x64：`BeefTV-linux/` 内包含 `BeefTV`、`cli/beeftv`、`agent-host/` 和 `plugin-packages/`。在 Ubuntu 24.04 原生构建，使用 GTK3 和 WebKitGTK 4.1；安装依赖和启动方法见 [Linux 安装说明](linux-install.md)。更新和回滚替换整个程序目录，用户数据留在配置目录。
+- macOS：`BeefTV.app/...`，保留可执行权限；内部安全符号链接会被解成普通文件，不会写成 zip 符号链接项。随包插件目录位于 `Contents/Resources/agent-host/bundled-plugins/`。
+- Windows：根目录的 `BeefTV.exe`、`plugin-packages/*.beeftv-plugin`（仅扁平文件）与 `agent-host/`（含 `agent-host/bundled-plugins/` 随包插件目录）。
+- Linux x64：`BeefTV-linux/` 内包含 `BeefTV`、`cli/beeftv`、`agent-host/`（含 `agent-host/bundled-plugins/` 随包插件目录）和 `plugin-packages/`。在 Ubuntu 24.04 原生构建，使用 GTK3 和 WebKitGTK 4.1；安装依赖和启动方法见 [Linux 安装说明](linux-install.md)。更新和回滚替换整个程序目录，用户数据留在配置目录。
 
 新版本更新清单和安装包使用 Cloudflare R2（国内源镜像同步至 CNB `https://cnb.cool/beeftv-downloads/desktop`）：
 
