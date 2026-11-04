@@ -31,10 +31,70 @@ export function connectCanvasResourceMention(nodes: CanvasNodeData[], connection
 
 export const connectCanvasTextMention = connectCanvasResourceMention;
 
-export function appendCanvasResourceMentionToPrompt(prompt: string, reference: CanvasResourceReference) {
-    const insertText = `${canvasResourceMentionToken(reference)} `;
+export type CanvasPromptSelectionRange = {
+    start: number;
+    end: number;
+};
+
+const promptSelectionByNodeId = new Map<string, CanvasPromptSelectionRange>();
+
+export function setCanvasNodePromptSelection(nodeId: string, range: CanvasPromptSelectionRange | null) {
+    if (!range) {
+        promptSelectionByNodeId.delete(nodeId);
+        return;
+    }
+    promptSelectionByNodeId.set(nodeId, range);
+}
+
+export function getCanvasNodePromptSelection(nodeId: string): CanvasPromptSelectionRange | null {
+    return promptSelectionByNodeId.get(nodeId) ?? null;
+}
+
+function clampSelectionOutsideMentionTokens(prompt: string, offset: number) {
+    const clamped = Math.max(0, Math.min(prompt.length, offset));
+    for (const match of prompt.matchAll(/@\[[^\]]+\]/g)) {
+        const start = match.index ?? 0;
+        const end = start + match[0].length;
+        if (clamped > start && clamped < end) return end;
+    }
+    return clamped;
+}
+
+export function insertCanvasResourceMentionAtSelection(
+    prompt: string,
+    reference: CanvasResourceReference,
+    selection?: CanvasPromptSelectionRange | null,
+): { prompt: string; cursor: number } {
+    const token = canvasResourceMentionToken(reference);
+    const insertText = `${token} `;
+    if (selection && selection.start >= 0 && selection.start < prompt.length) {
+        const start = clampSelectionOutsideMentionTokens(prompt, selection.start);
+        const end = Math.max(start, clampSelectionOutsideMentionTokens(prompt, selection.end));
+        if (start < prompt.length) {
+            const rawBefore = prompt.slice(0, start);
+            const after = prompt.slice(end);
+            const pendingBeforeMatch = /@[^\s@，。！？、,.!?;:\[\]]*$/.exec(rawBefore);
+            const before = pendingBeforeMatch ? rawBefore.slice(0, pendingBeforeMatch.index) : rawBefore;
+            const leadingSpace = before.length > 0 && /[A-Za-z0-9_\]]$/.test(before) ? " " : "";
+            const inserted = `${leadingSpace}${insertText}`;
+            const normalizedAfter = after.startsWith(" ") ? after.slice(1) : after;
+            const nextPrompt = `${before}${inserted}${normalizedAfter}`;
+            return { prompt: nextPrompt, cursor: before.length + inserted.length };
+        }
+    }
+    const pendingMentionMatch = /@[^\s@，。！？、,.!?;:]*\s*$/.exec(prompt);
+    if (pendingMentionMatch) {
+        const prefix = prompt.slice(0, pendingMentionMatch.index).replace(/\s*$/, "");
+        const nextPrompt = prefix ? `${prefix} ${insertText}` : insertText;
+        return { prompt: nextPrompt, cursor: nextPrompt.length };
+    }
     const basePrompt = prompt.replace(/\s*$/, "");
-    return basePrompt ? `${basePrompt} ${insertText}` : insertText;
+    const nextPrompt = basePrompt ? `${basePrompt} ${insertText}` : insertText;
+    return { prompt: nextPrompt, cursor: nextPrompt.length };
+}
+
+export function appendCanvasResourceMentionToPrompt(prompt: string, reference: CanvasResourceReference, selection?: CanvasPromptSelectionRange | null) {
+    return insertCanvasResourceMentionAtSelection(prompt, reference, selection).prompt;
 }
 
 export function connectAndAppendCanvasResourceMention(nodes: CanvasNodeData[], connections: CanvasConnection[], targetId: string, sourceId: string, connectionId: string) {
@@ -42,7 +102,9 @@ export function connectAndAppendCanvasResourceMention(nodes: CanvasNodeData[], c
     const nextNodes = linked.nodes.map((node) => {
         if (node.id !== targetId) return node;
         const currentPrompt = node.metadata?.composerContent ?? node.metadata?.prompt ?? "";
-        return writeCanvasNodePrompt(node, appendCanvasResourceMentionToPrompt(currentPrompt, linked.reference));
+        const inserted = insertCanvasResourceMentionAtSelection(currentPrompt, linked.reference, getCanvasNodePromptSelection(targetId));
+        setCanvasNodePromptSelection(targetId, { start: inserted.cursor, end: inserted.cursor });
+        return writeCanvasNodePrompt(node, inserted.prompt);
     });
     return { nodes: nextNodes, connections: linked.connections, reference: linked.reference };
 }

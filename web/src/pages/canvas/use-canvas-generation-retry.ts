@@ -107,58 +107,52 @@ export function useCanvasGenerationRetry({
                     surfaceRetryFailure(node.id, reason, setNodes);
                     return;
                 }
-                const taskId = node.metadata.taskId;
-                if (retryingVideos.current.has(taskId)) return;
-                retryingVideos.current.add(taskId);
-                const requestProjectId = projectId;
-                const controller = startGenerationRequest(node.id, node.id);
-                setRunningNodeId(node.id);
-                let taskUpdated = false;
-                try {
-                    if (isRegenerateConfirm(outcome) && modal?.confirm) {
-                        const copy = taskOutcomeCopy(outcome);
-                        const confirmed = await confirmCanvasGeneration(
-                            (callbacks) =>
-                                modal.confirm({
-                                    title: copy.confirmTitle || "确认重新生成？",
-                                    content: copy.confirmContent || copy.message,
-                                    okText: "确认重新生成",
-                                    cancelText: "取消",
-                                    centered: true,
-                                    ...callbacks,
-                                }),
-                            controller.signal,
-                        );
-                        if (!confirmed) return;
-                        confirmedStoredVideoRetry = true;
-                    }
-                    const task = await retryStoredCanvasVideo(taskId, controller.signal, (update) => {
-                        taskUpdated = true;
-                        if (projectIdRef.current === requestProjectId) bindGenerationTask(node.id, update);
-                    });
-                    if (projectIdRef.current === requestProjectId && !controller.signal.aborted) await applyGenerationTaskResult(node.id, task);
-                    return;
-                } catch (error) {
-                    if (isGenerationCanceled(error) || projectIdRef.current !== requestProjectId) return;
-                    if (!taskUpdated) {
-                        storedVideoFallbackError = error;
-                    } else {
-                        const reason = error instanceof Error ? error.message : "原视频任务重试失败";
-                        const failure = canvasGenerationFailureMetadata(error, { mode: "video", prompt: node.metadata?.prompt || "" });
-                        message?.error?.(reason);
-                        setNodes((current) => current.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, ...failure, generationErrorSummary: failure.generationErrorSummary || reason, generationFailure: undefined } } : item)));
+                if (!isRegenerateConfirm(outcome)) {
+                    const taskId = node.metadata.taskId;
+                    if (retryingVideos.current.has(taskId)) return;
+                    retryingVideos.current.add(taskId);
+                    const requestProjectId = projectId;
+                    const controller = startGenerationRequest(node.id, node.id);
+                    setRunningNodeId(node.id);
+                    let taskUpdated = false;
+                    try {
+                        const task = await retryStoredCanvasVideo(taskId, controller.signal, (update) => {
+                            taskUpdated = true;
+                            if (projectIdRef.current === requestProjectId) bindGenerationTask(node.id, update);
+                        });
+                        if (projectIdRef.current === requestProjectId && !controller.signal.aborted) await applyGenerationTaskResult(node.id, task);
                         return;
+                    } catch (error) {
+                        if (isGenerationCanceled(error) || projectIdRef.current !== requestProjectId) return;
+                        if (!taskUpdated) {
+                            storedVideoFallbackError = error;
+                        } else {
+                            const reason = error instanceof Error ? error.message : "原视频任务重试失败";
+                            const failure = canvasGenerationFailureMetadata(error, { mode: "video", prompt: node.metadata?.prompt || "" });
+                            message?.error?.(reason);
+                            setNodes((current) => current.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, ...failure, generationErrorSummary: failure.generationErrorSummary || reason, generationFailure: undefined } } : item)));
+                            return;
+                        }
+                    } finally {
+                        retryingVideos.current.delete(taskId);
+                        finishGenerationRequest(node.id, controller);
+                        if (projectIdRef.current === requestProjectId) setRunningNodeId(null);
                     }
-                } finally {
-                    retryingVideos.current.delete(taskId);
-                    finishGenerationRequest(node.id, controller);
-                    if (projectIdRef.current === requestProjectId) setRunningNodeId(null);
                 }
             }
             const batchRoot = node.metadata?.batchRootId ? nodesRef.current.find((item) => item.id === node.metadata?.batchRootId) : null;
             const originalSourceId = node.metadata?.generatedFromNodeId || batchRoot?.metadata?.generatedFromNodeId;
             const originalSource = nodesRef.current.find((item) => item.id === originalSourceId);
-            const sourceNode = originalSource || findRetrySourceNode(node.id, nodesRef.current, connectionsRef.current) || batchRoot || node;
+            const hasOwnMediaGenerationSetup = Boolean(
+                node.type !== CanvasNodeType.Config &&
+                    !batchRoot &&
+                    (node.metadata?.composerContent || node.metadata?.prompt || connectionsRef.current.some((connection) => connection.toNodeId === node.id)),
+            );
+            const sourceNode =
+                (originalSource?.type === CanvasNodeType.Config || !hasOwnMediaGenerationSetup ? originalSource : undefined) ||
+                findRetrySourceNode(node.id, nodesRef.current, connectionsRef.current) ||
+                batchRoot ||
+                node;
             const savedImageMetadata = node.type === CanvasNodeType.Image ? { ...batchRoot?.metadata, ...node.metadata } : undefined;
             const hasSavedImageMetadata = Boolean(savedImageMetadata?.generationType);
             const useStoredSource = hasSavedImageMetadata && !connectionsRef.current.some((connection) => connection.toNodeId === sourceNode.id) && (!originalSourceId || !originalSource);
@@ -352,7 +346,7 @@ export function useCanvasGenerationRetry({
                     : node.metadata?.taskClientOperationId && !node.metadata?.taskId
                       ? { clientOperationId: node.metadata.taskClientOperationId }
                       : { clientOperationId: createClientId() };
-                setNodes((current) => current.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined, generationErrorCode: undefined, generationErrorSummary: undefined, generationProviderCode: undefined, taskFailureDiagnostics: undefined, taskOutcome: undefined, failedPromptFingerprint: undefined, failedInputFingerprint: undefined } } : item)));
+                setNodes((current) => current.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined, generationErrorCode: undefined, generationErrorSummary: undefined, generationProviderCode: undefined, taskFailureDiagnostics: undefined, taskOutcome: undefined, taskOutcomeSource: undefined, generationFailure: undefined, failedPromptFingerprint: undefined, failedInputFingerprint: undefined } } : item)));
                 const targetIds = nativeRetryTargets.length ? nativeRetryTargets.map((item) => item.id) : [node.id];
                 await runCanvasGenerationTaskToConsumer(
                     { ...input, ...(nativeRetryTargets.length ? { config: { ...input.config, count: String(nativeOutputs) }, metadata: { ...input.metadata, outputNodeIds: targetIds } } : {}), ...retryContext },

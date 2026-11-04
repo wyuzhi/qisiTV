@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, App, Button, Popconfirm, Segmented, Tag } from "antd";
+import { Alert, App, Button, Popconfirm, Segmented, Tag, Tooltip } from "antd";
 import { ReferenceMediaTransportFields } from "./reference-media-transport-fields";
 import { ChevronRight, FlaskConical, Settings2 } from "lucide-react";
 
@@ -151,6 +151,13 @@ export function ChannelModelSettings({
     const activeProtocol = activeModelProfile ? activeModelProfile.protocol || resolveChannelProtocol(activeInferredCapability) || "" : inferredProtocol;
     const activeCapability = activeModelProfile?.capability || modelProtocolCapability(activeProtocol, availableProtocols) || activeInferredCapability;
     const signatureHint = signatureCredentialHint(modelProtocolDefinition(activeProtocol, availableProtocols)?.authType);
+    const testDisabledReason = !activeProtocol
+        ? "请先在「基本信息」中选择请求协议"
+        : protocolError
+          ? `协议目录异常：${protocolError}`
+          : protocolLoading
+            ? "正在加载协议目录..."
+            : undefined;
 
     return (
         <div className="mt-4">
@@ -207,14 +214,16 @@ export function ChannelModelSettings({
                     <div className="model-editor-footer">
                         <span className="text-xs text-foreground/50">{draft ? "完成后，点击「保存并使用」保存更改" : "更改实时保存到本地工作区"}</span>
                         <div className="model-editor-footer-actions">
-                            <Popconfirm title="生成一次测试结果？" description="会向当前服务商提交真实生成任务，费用由服务商收取。结果可在任务中心查看。" okText="开始生成" cancelText="取消" onConfirm={() => { if (activeModel && activeProtocol) void testModel(activeModel, activeCapability, activeProtocol); }}>
-                            <Button
-                                icon={<FlaskConical className="size-4" />}
-                                loading={Boolean(testingModel)}
-                                disabled={!activeProtocol || protocolLoading || Boolean(protocolError)}
-                            >
-                                生成测试
-                            </Button>
+                            <Popconfirm title="生成一次测试结果？" description="会向当前服务商提交真实生成任务，费用由服务商收取。结果可在任务中心查看。" okText="开始生成" cancelText="取消" disabled={Boolean(testDisabledReason)} onConfirm={() => { if (activeModel && activeProtocol) void testModel(activeModel, activeCapability, activeProtocol); }}>
+                            <Tooltip title={testDisabledReason}>
+                                <Button
+                                    icon={<FlaskConical className="size-4" />}
+                                    loading={Boolean(testingModel)}
+                                    disabled={Boolean(testDisabledReason)}
+                                >
+                                    生成测试
+                                </Button>
+                            </Tooltip>
                             </Popconfirm>
                             <Button disabled={Boolean(testingModel)} onClick={() => setActiveModel(null)}>完成</Button>
                         </div>

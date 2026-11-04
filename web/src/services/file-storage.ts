@@ -65,7 +65,7 @@ export async function uploadMediaFile(input: Blob, prefix = "file", onProgress?:
         let meta: { width?: number; height?: number; durationMs?: number; hasAudio?: boolean };
         if (captured) {
             meta = { width: captured.poster ? captured.width : undefined, height: captured.poster ? captured.height : undefined, durationMs: captured.durationMs, hasAudio: resolvedHasAudio };
-        } else if (blob.type.startsWith("audio/")) {
+        } else if (prefix === "audio" || blob.type.startsWith("audio/")) {
             try {
                 meta = await readAudioMeta(previewUrl);
             } catch (error) {
@@ -250,9 +250,27 @@ export function collectMediaStorageKeys(value: unknown, keys = new Set<string>()
 function readAudioMeta(url: string) {
     return new Promise<{ durationMs?: number }>((resolve) => {
         const audio = document.createElement("audio");
-        const done = () => resolve({ durationMs: Number.isFinite(audio.duration) ? Math.round(audio.duration * 1000) : undefined });
+        audio.preload = "metadata";
+        audio.muted = true;
+        let settled = false;
+        const finish = (durationMs?: number) => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            audio.onloadedmetadata = null;
+            audio.onerror = null;
+            try {
+                audio.removeAttribute("src");
+                audio.load();
+            } catch {
+                // Ignore cleanup errors on mocked or detached elements.
+            }
+            resolve({ durationMs });
+        };
+        const done = () => finish(Number.isFinite(audio.duration) && audio.duration > 0 ? Math.round(audio.duration * 1000) : undefined);
+        const timer = window.setTimeout(() => finish(undefined), 5000);
         audio.onloadedmetadata = done;
-        audio.onerror = done;
+        audio.onerror = () => finish(undefined);
         audio.src = url;
     });
 }

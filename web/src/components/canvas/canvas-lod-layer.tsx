@@ -250,10 +250,41 @@ export function CanvasLodLayer(props: CanvasLodLayerProps) {
             if (!isOverviewTarget(event.target)) return null;
             return canvasLodHitTest(orderedRef.current, worldPoint(event), dragRef.current);
         };
+        let hoverTimer: number | null = null;
+        let pendingHoverId: string | null = null;
+        const clearHoverTimer = () => {
+            if (hoverTimer !== null) {
+                window.clearTimeout(hoverTimer);
+                hoverTimer = null;
+            }
+            pendingHoverId = null;
+        };
         const setHover = (nodeId: string | null) => {
+            clearHoverTimer();
             if (hoverRef.current === nodeId) return;
             hoverRef.current = nodeId;
             propsRef.current.onHoverNodeChange(nodeId);
+        };
+        const scheduleHover = (nodeId: string | null) => {
+            if (nodeId === null) {
+                setHover(null);
+                return;
+            }
+            if (hoverRef.current === nodeId) {
+                clearHoverTimer();
+                return;
+            }
+            if (pendingHoverId === nodeId && hoverTimer !== null) return;
+            clearHoverTimer();
+            pendingHoverId = nodeId;
+            hoverTimer = window.setTimeout(() => {
+                hoverTimer = null;
+                const nextId = pendingHoverId;
+                pendingHoverId = null;
+                if (hoverRef.current === nextId) return;
+                hoverRef.current = nextId;
+                propsRef.current.onHoverNodeChange(nextId);
+            }, 80);
         };
         const handlePointerDown = (event: PointerEvent) => {
             if (event.button !== 0 || event.pointerType === "touch") return;
@@ -293,7 +324,7 @@ export function CanvasLodLayer(props: CanvasLodLayerProps) {
                 // The promoted DOM card handles its own hover state.
                 const domNode = target?.closest("[data-node-id]");
                 if (domNode && domNode.getAttribute("data-canvas-node-type") !== CanvasNodeType.Frame) return;
-                setHover(hitNode(move)?.id ?? null);
+                scheduleHover(hitNode(move)?.id ?? null);
             });
         };
         const handlePointerLeave = () => setHover(null);
@@ -309,6 +340,7 @@ export function CanvasLodLayer(props: CanvasLodLayerProps) {
             container.removeEventListener("pointermove", handlePointerMove);
             container.removeEventListener("pointerleave", handlePointerLeave);
             if (moveFrame !== null) cancelAnimationFrame(moveFrame);
+            clearHoverTimer();
             setHover(null);
         };
     }, [props.active, props.interactive, resolveContainer]);

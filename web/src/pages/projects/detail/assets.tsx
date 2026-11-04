@@ -231,9 +231,10 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
     const done = (content: string) => { refreshProject(); message.success(content); };
     const failed = (fallback: string) => (error: unknown) => message.error(error instanceof Error ? error.message : fallback);
     const addMutation = useMutation({
-        mutationFn: async ({ ids, nextFolderId }: { ids: string[]; nextFolderId?: string }) => {
+        mutationFn: async ({ ids, selectedItems, nextFolderId }: { ids: string[]; selectedItems?: AssetLibraryPickerItem[]; nextFolderId?: string }) => {
+            const selectedById = new Map((selectedItems || []).map((item) => [item.id, item]));
             const result = await linkSelectedProjectAssets(ids, async (id) => {
-                const pickerItem = availablePickerItems.find((item) => item.id === id);
+                const pickerItem = selectedById.get(id) || availablePickerItems.find((item) => item.id === id);
                 if (pickerItem?.external) {
                     const imported = await externalAssetSources.importExternalAsset(pickerItem.external);
                     const assetId = addAsset(imported);
@@ -337,12 +338,12 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
         onError: failed("三视图生成失败"),
     });
     const bindImagesMutation = useMutation({
-        mutationFn: async ({ selectedAssetId }: { selectedAssetId: string }) => {
+        mutationFn: async ({ selectedAssetId, selectedItem }: { selectedAssetId: string; selectedItem?: AssetLibraryPickerItem }) => {
             if (!imageAsset) throw new Error("未选择角色");
             if (hasRemoteUserDataSyncSession()) await saveRemoteUserDataNow();
             const latest = useAssetStore.getState().assets;
-            const pickerItem = imagePickerItems.find((item) => item.id === selectedAssetId);
-            const selected = latest.find((asset) => asset.id === selectedAssetId) || (pickerItem?.external ? await externalAssetSources.importExternalAsset(pickerItem.external) : undefined);
+            const pickerItem = selectedItem || imagePickerItems.find((item) => item.id === selectedAssetId);
+            const selected = pickerItem?.asset || latest.find((asset) => asset.id === selectedAssetId) || (pickerItem?.external ? await externalAssetSources.importExternalAsset(pickerItem.external) : undefined);
             if (selected?.kind !== "image") throw new Error("请选择一张包含正面、侧面和背面的三视图设定图");
             const resourceId = resourceIdFromStorageKey((selected as ImageAsset).data.storageKey);
             if (!resourceId) throw new Error(localMode ? "浏览器本地素材尚未写入桌面资源目录，请在 BeefTV APP 中完成绑定" : "所选图片尚未同步到后端资源库");
@@ -513,8 +514,8 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
                 emptyTitle="没有可引用的素材"
                 emptyDescription="本地素材已全部加入项目，或切换到插件来源选择外部素材。"
                 onClose={() => setAddOpen(false)}
-                onConfirm={async (ids) => {
-                    await addMutation.mutateAsync({ ids, nextFolderId: folderId === ALL_FOLDERS ? undefined : folderId });
+                onConfirm={async (ids, selectedItems) => {
+                    await addMutation.mutateAsync({ ids, selectedItems, nextFolderId: folderId === ALL_FOLDERS ? undefined : folderId });
                 }}
             />
             <ProjectAssetPreviewModal asset={previewAsset} personalAsset={previewAsset ? personalAssets.find((item) => item.id === previewAsset.id) : undefined} onClose={() => setPreviewAsset(null)} onDownload={() => previewAsset && downloadPreviewAsset(previewAsset)} onReplaceImage={() => { if (!previewAsset || previewAsset.category !== "character") return; setPreviewAsset(null); openImages(previewAsset); }} />
@@ -537,9 +538,9 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
                 emptyTitle="没有可绑定的图片"
                 emptyDescription="需要一张包含正面、侧面、背面的角色设定图。"
                 onClose={() => setImageAsset(null)}
-                onConfirm={async (ids) => {
+                onConfirm={async (ids, selectedItems) => {
                     if (!ids[0]) throw new Error("请选择一张三视图设定图");
-                    await bindImagesMutation.mutateAsync({ selectedAssetId: ids[0] });
+                    await bindImagesMutation.mutateAsync({ selectedAssetId: ids[0], selectedItem: selectedItems[0] });
                 }}
             />
             <AssetLibraryPickerModal
@@ -567,11 +568,13 @@ export default function ProjectAssetsView({ detail, refreshProject }: ProjectDet
                     return ids;
                 } }}
                 onClose={() => setVoicePickerOpen(false)}
-                onConfirm={(ids) => {
+                onConfirm={(ids, selectedItems) => {
                     const id = ids[0];
-                    const resourceId = id ? audioResourceByItemId.get(id) : "";
+                    const selectedItem = selectedItems[0];
+                    const remoteResourceId = selectedItem?.asset?.kind === "audio" ? resourceIdFromStorageKey(selectedItem.asset.data.storageKey) : "";
+                    const resourceId = (id ? audioResourceByItemId.get(id) : "") || remoteResourceId;
                     if (!resourceId) throw new Error(localMode ? "浏览器本地声音已保存，但角色绑定需要 BeefTV APP 的本地资源目录" : "所选声音素材尚未同步到服务端资源库");
-                    const item = audioPickerItems.find((entry) => entry.id === id);
+                    const item = selectedItem || audioPickerItems.find((entry) => entry.id === id);
                     setVoiceSample({ resourceId, name: item?.title || "角色声音", url: resourceFileUrl(resourceId) });
                     setVoicePickerOpen(false);
                 }}

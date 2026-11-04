@@ -102,16 +102,20 @@ export function CanvasProjectAssetModal({
                     : undefined
             }
             onClose={onClose}
-            onConfirm={async (ids) => {
+            onConfirm={async (ids, selectedItems) => {
+                const selectedById = new Map(selectedItems.map((entry) => [entry.id, entry]));
                 const payloads = await Promise.all(
                     ids.map(async (id) => {
-                        const external = externalAssetSources.items.find((item) => item.id === id)?.external;
+                        const external = externalAssetSources.items.find((item) => item.id === id)?.external || selectedById.get(id)?.external;
                         if (external) return externalAssetToInsertPayload(external);
                         const item = items.find((candidate) => candidate.id === id);
-                        if (!item) throw new Error("所选资产已不存在，请重新选择");
-                        if (item.media || item.character || !item.project) return toInsertPayload(item);
-                        const { asset } = await getWorkspaceAsset(item.project.id);
-                        return toInsertPayload({ ...item, media: asset });
+                        if (item) {
+                            if (item.media || item.character || !item.project) return toInsertPayload(item);
+                            const { asset } = await getWorkspaceAsset(item.project.id);
+                            return toInsertPayload({ ...item, media: asset });
+                        }
+                        const remoteAsset = selectedById.get(id)?.asset || (await getWorkspaceAsset(id)).asset;
+                        return toInsertPayload({ id, category: normalizeAssetCategory(remoteAsset.category), media: remoteAsset });
                     }),
                 );
                 if (!payloads.length) return;
