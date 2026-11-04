@@ -807,7 +807,7 @@ export default function AssetsPage() {
             <input
                 ref={assetUploadInputRef}
                 type="file"
-                accept="image/*,video/*"
+                accept="image/*,video/*,audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg"
                 multiple
                 className="hidden"
                 onChange={(event) => {
