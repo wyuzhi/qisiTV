@@ -113,6 +113,8 @@ export function ReferenceToolsPopover({
     autoLinkEnabled,
     onAutoMention,
     onAutoLinkEnabledChange,
+    pickConnectActive = false,
+    onTogglePickConnect,
     accent,
     compact,
     label = "引用",
@@ -121,6 +123,8 @@ export function ReferenceToolsPopover({
     autoLinkEnabled: boolean;
     onAutoMention: () => void;
     onAutoLinkEnabledChange: (enabled: boolean) => void;
+    pickConnectActive?: boolean;
+    onTogglePickConnect?: () => void;
     accent: string;
     compact: boolean;
     label?: string;
@@ -137,7 +141,7 @@ export function ReferenceToolsPopover({
                 <div className="space-y-1.5">
                     <div>
                         <div className="text-sm font-medium leading-5">智能引用</div>
-                        <div className="mt-0.5 text-xs leading-4 text-black/50 dark:text-white/50">输入素材序号或名称后按 Tab，可快速引用</div>
+                        <div className="mt-0.5 text-xs leading-4 text-black/50 dark:text-white/50">输入素材序号或名称后按 Tab，可快速引用；按住 Option/Alt 点击节点或开启「点选连线」可快速连线并插入 @引用</div>
                     </div>
                     <div className="flex min-h-6 items-center justify-between gap-3">
                         <div className="flex items-center gap-2 text-sm"><Link2 className="size-3.5" />AutoLink</div>
@@ -153,6 +157,19 @@ export function ReferenceToolsPopover({
                             <span className={`size-3.5 rounded-full shadow-sm transition-transform ${autoLinkEnabled ? "translate-x-[18px]" : "translate-x-0.5"}`} style={{ background: autoLinkEnabled ? accent : "currentColor" }} />
                         </button>
                     </div>
+                    {onTogglePickConnect ? (
+                        <button
+                            type="button"
+                            aria-pressed={pickConnectActive}
+                            aria-label={pickConnectActive ? "退出点选连线引用" : "点选连线引用"}
+                            className="canvas-reference-tools-pick-connect-button flex h-7 w-full items-center justify-center gap-1.5 rounded-md border px-2.5 text-sm transition-colors"
+                            style={{ borderColor: accent, color: pickConnectActive ? "#fff" : accent, background: pickConnectActive ? accent : "transparent" }}
+                            onClick={onTogglePickConnect}
+                        >
+                            <Link2 className="size-3.5" />
+                            {pickConnectActive ? "正在点选连线（按 Esc 退出）" : "点选连线引用"}
+                        </button>
+                    ) : null}
                     <button
                         type="button"
                         className="canvas-reference-tools-mention-button flex h-7 w-full items-center justify-center gap-1.5 rounded-md border px-2.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-45"
@@ -477,13 +494,28 @@ export function ConnectedReferenceShelf({
                                         type="button"
                                         className="canvas-node-reference-preview"
                                         style={{ background: theme.toolbar.itemHover, color: theme.node.text, outlineColor: theme.node.activeStroke }}
-                                        title={canPreview ? `预览 ${reference.title}` : `插入 @${displayName}`}
-                                        aria-label={canPreview ? `预览 ${reference.title}` : `插入 @${displayName}`}
-                                        onClick={() => (canPreview ? setImagePreview(reference) : onInsert(reference))}
+                                        title={canPreview ? `点击插入 @${displayName}（双击预览大图）` : `点击插入 @${displayName}`}
+                                        aria-label={canPreview ? `点击插入 @${displayName}（双击预览大图）` : `点击插入 @${displayName}`}
+                                        onClick={(event) => {
+                                            event.stopPropagation();
+                                            onInsert(reference);
+                                        }}
+                                        onDoubleClick={(event) => {
+                                            event.stopPropagation();
+                                            return canPreview ? setImagePreview(reference) : onInsert(reference);
+                                        }}
                                     >
                                         <ReferenceThumbnail reference={reference} />
                                         {canPreview ? (
-                                            <span className="canvas-node-reference-preview-hint" aria-hidden="true">
+                                            <span
+                                                className="canvas-node-reference-preview-hint"
+                                                aria-hidden="true"
+                                                title={`预览 ${reference.title}`}
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    setImagePreview(reference);
+                                                }}
+                                            >
                                                 <Maximize2 className="size-3" />
                                             </span>
                                         ) : null}

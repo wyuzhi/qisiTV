@@ -1,6 +1,17 @@
 import { expect, test } from "bun:test";
-import { connectCanvasTextMention } from "@/lib/canvas/canvas-text-mention";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import {
+    appendCanvasResourceMentionToPrompt,
+    connectAndAppendCanvasResourceMention,
+    connectCanvasResourceMention,
+    connectCanvasTextMention,
+    registerCanvasPickConnectHandler,
+    useCanvasPickConnectStore,
+} from "@/lib/canvas/canvas-text-mention";
 import { buildNodeGenerationContext } from "@/components/canvas/canvas-node-generation";
+import { ConnectedReferenceShelf } from "@/components/canvas/canvas-node-reference-shelf";
+import { canvasThemes } from "@/lib/canvas-theme";
 import { canvasResourceMentionToken } from "@/lib/canvas/canvas-resource-references";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
@@ -42,3 +53,85 @@ test("appending a text reference preserves existing mention numbering with an em
     expect(context.prompt).toContain("原有文本");
     expect(context.prompt).toContain("清晨，人物推开木门");
 });
+
+test("connects unconnected image, video, audio, and character resource nodes and appends mention token", () => {
+    const imageNode: CanvasNodeData = {
+        id: "img-1",
+        type: CanvasNodeType.Image,
+        title: "参考海报",
+        position: { x: 0, y: 200 },
+        width: 240,
+        height: 240,
+        metadata: { content: "https://example.com/poster.png" },
+    };
+    const audioNode: CanvasNodeData = {
+        id: "aud-1",
+        type: CanvasNodeType.Audio,
+        title: "环境音",
+        position: { x: 0, y: 460 },
+        width: 240,
+        height: 120,
+        metadata: { content: "https://example.com/bgm.mp3" },
+    };
+    const targetVideo: CanvasNodeData = {
+        id: "vid-target",
+        type: CanvasNodeType.Video,
+        title: "分镜1",
+        position: { x: 500, y: 200 },
+        width: 300,
+        height: 200,
+        metadata: { prompt: "主角转身", composerContent: "主角转身" },
+    };
+    const allNodes = [imageNode, audioNode, targetVideo];
+    const first = connectAndAppendCanvasResourceMention(allNodes, [], "vid-target", "img-1", "edge-img");
+    expect(first.connections).toEqual([{ id: "edge-img", fromNodeId: "img-1", toNodeId: "vid-target" }]);
+    expect(first.reference.kind).toBe("image");
+    expect(first.reference.label).toBe("图片1");
+    const updatedTarget1 = first.nodes.find((n) => n.id === "vid-target")!;
+    expect(updatedTarget1.metadata?.composerContent).toBe("主角转身 @[node:img-1] ");
+
+    const second = connectCanvasResourceMention(first.nodes, first.connections, "vid-target", "aud-1", "edge-aud");
+    expect(second.connections).toHaveLength(2);
+    expect(second.reference.kind).toBe("audio");
+    expect(second.reference.label).toBe("音频1");
+    expect(appendCanvasResourceMentionToPrompt(updatedTarget1.metadata?.composerContent || "", second.reference)).toBe("主角转身 @[node:img-1] @[node:aud-1] ");
+});
+
+test("pick-connect store and handler registration toggle target node cleanly", () => {
+    useCanvasPickConnectStore.getState().setPickConnectTargetNodeId(null);
+    expect(useCanvasPickConnectStore.getState().pickConnectTargetNodeId).toBeNull();
+    useCanvasPickConnectStore.getState().togglePickConnectTargetNodeId("node-a");
+    expect(useCanvasPickConnectStore.getState().pickConnectTargetNodeId).toBe("node-a");
+    useCanvasPickConnectStore.getState().togglePickConnectTargetNodeId("node-a");
+    expect(useCanvasPickConnectStore.getState().pickConnectTargetNodeId).toBeNull();
+
+    const calls: Array<[string, string]> = [];
+    const unregister = registerCanvasPickConnectHandler("proj-1", (targetId, sourceId) => {
+        calls.push([targetId, sourceId]);
+        return undefined;
+    });
+    unregister();
+    expect(calls).toEqual([]);
+});
+
+test("ConnectedReferenceShelf preview thumbnail uses single-click insert label with double-click preview hint", () => {
+    const html = renderToStaticMarkup(
+        React.createElement(ConnectedReferenceShelf, {
+            references: [
+                {
+                    id: "img-1",
+                    nodeId: "img-1",
+                    kind: "image",
+                    label: "图片1",
+                    title: "赛博街景",
+                    active: true,
+                    previewUrl: "https://example.com/img-1.png",
+                },
+            ],
+            theme: canvasThemes.dark,
+            onInsert: () => {},
+        }),
+    );
+    expect(html).toContain("点击插入 @赛博街景（双击预览大图）");
+});
+
