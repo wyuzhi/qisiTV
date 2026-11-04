@@ -1,4 +1,8 @@
+import { App } from "antd";
+import { useMemo } from "react";
+
 import { CanvasNodeContextMenu } from "@/components/canvas/canvas-context-menu";
+import { batchDownloadCanvasMediaNodes, collectDownloadableMediaNodes } from "@/lib/canvas/canvas-batch-download";
 import { isFrameNode } from "@/lib/canvas/canvas-frame";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeTypeId, type CanvasWorkspaceMode, type ContextMenuState, type Position } from "@/types/canvas";
 
@@ -7,12 +11,15 @@ type CanvasAssetCategory = NonNullable<NonNullable<CanvasNodeData["metadata"]>["
 type CanvasProjectContextMenuProps = {
     menu: ContextMenuState | null;
     node: CanvasNodeData | null;
+    nodes?: CanvasNodeData[];
+    selectedNodeIds?: Iterable<string>;
     workspaceMode: CanvasWorkspaceMode;
     isProjectLinked: boolean;
     canUndo: boolean;
     canRedo: boolean;
     canPaste: boolean;
     selectedCount: number;
+    downloadableSelectionCount?: number;
     screenToCanvas: (clientX: number, clientY: number) => Position;
     onClose: () => void;
     onAddNode: (type: CanvasNodeTypeId, position: Position) => void;
@@ -44,10 +51,32 @@ type CanvasProjectContextMenuProps = {
     onSpreadSelection: () => void;
     onCopySelection: () => void;
     onDeleteSelection: () => void;
+    onBatchDownloadSelection?: () => void;
 };
 
 export function CanvasProjectContextMenu({ menu, node, screenToCanvas, ...props }: CanvasProjectContextMenuProps) {
+    const { message } = App.useApp();
+    const downloadableNodes = useMemo(
+        () => (props.nodes && props.selectedNodeIds ? collectDownloadableMediaNodes(props.nodes, props.selectedNodeIds) : []),
+        [props.nodes, props.selectedNodeIds],
+    );
     if (!menu) return null;
+    const downloadableSelectionCount = props.downloadableSelectionCount ?? downloadableNodes.length;
+    const handleBatchDownloadSelection = props.onBatchDownloadSelection ?? (() => {
+        if (!downloadableNodes.length) {
+            message.warning("所选节点中没有可下载的媒体素材");
+            return;
+        }
+        void batchDownloadCanvasMediaNodes(downloadableNodes).then(({ downloaded, failed }) => {
+            if (failed === 0) {
+                message.success(`已批量下载 ${downloaded} 个素材`);
+            } else if (downloaded > 0) {
+                message.warning(`已下载 ${downloaded} 个素材，${failed} 个下载失败`);
+            } else {
+                message.warning("素材下载失败，请稍后重试");
+            }
+        });
+    });
     const menuPosition = () => menu.type === "canvas" ? menu.position : screenToCanvas(menu.x, menu.y);
     return (
         <CanvasNodeContextMenu
@@ -59,6 +88,7 @@ export function CanvasProjectContextMenu({ menu, node, screenToCanvas, ...props 
             canRedo={props.canRedo}
             canPaste={props.canPaste}
             selectedCount={props.selectedCount}
+            downloadableSelectionCount={downloadableSelectionCount}
             onClose={props.onClose}
             onAddNode={(type) => {
                 if (menu.type === "canvas") props.onAddNode(type, menu.position);
@@ -117,6 +147,7 @@ export function CanvasProjectContextMenu({ menu, node, screenToCanvas, ...props 
             onSpreadSelection={props.onSpreadSelection}
             onCopySelection={props.onCopySelection}
             onDeleteSelection={props.onDeleteSelection}
+            onBatchDownloadSelection={handleBatchDownloadSelection}
         />
     );
 }
