@@ -265,7 +265,7 @@ export const LL2_PRESET_MODELS = [
     endpoint: "POST /hd/tasks",
     defaultOptions: {
       testVideoUrl:
-        "https://h3-gz-public-1483601991.cos.ap-guangzhou.myqcloud.com/outputs/f1303d6f8190c0dbc697b30b65c0eae1b648d4efa166e81689b4af735dbf6a6d.mp4",
+        "https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20241115/cqqkru/1.mp4",
     },
     capabilityConfig: {
       version: 1,
@@ -282,7 +282,7 @@ export const LL2_PRESET_MODELS = [
         duration: { selection: "enum", values: [5], default: 5 },
         ratios: [],
         defaultRatio: "",
-        resolutions: ["720p", "1080p", "2k", "4k"],
+        resolutions: ["1080p", "2k", "4k"],
         defaultResolution: "1080p",
         generateAudio: { supported: false, default: false },
         watermark: { supported: false, default: false },
@@ -300,6 +300,50 @@ function getReact(host) {
     return window.__BEEFTV_REACT__ || window.React || null;
   }
   return null;
+}
+
+export function upgradeLL2ModelProfile(profile) {
+  if (!profile || typeof profile !== "object") return profile;
+  if (!String(profile.protocol || "").startsWith("ll2-")) return profile;
+  const preset = LL2_PRESET_MODELS.find((item) => item.model === profile.model);
+  if (!preset) return profile;
+  let next = profile;
+  if (preset.defaultOptions?.testVideoUrl) {
+    const currentUrl = String(next.defaultOptions?.testVideoUrl || "");
+    if (!currentUrl || currentUrl.includes("cos.ap-guangzhou.myqcloud.com")) {
+      next = {
+        ...next,
+        defaultOptions: {
+          ...(next.defaultOptions || {}),
+          ...preset.defaultOptions,
+        },
+      };
+    }
+  }
+  const presetRes = preset.capabilityConfig?.video?.resolutions;
+  const currentRes = next.capabilityConfig?.video?.resolutions;
+  if (Array.isArray(presetRes) && Array.isArray(currentRes)) {
+    const validSet = new Set(presetRes);
+    if (currentRes.some((r) => !validSet.has(r))) {
+      const filtered = currentRes.filter((r) => validSet.has(r));
+      const resolutions = filtered.length > 0 ? filtered : [...presetRes];
+      const defaultResolution = validSet.has(next.capabilityConfig.video.defaultResolution)
+        ? next.capabilityConfig.video.defaultResolution
+        : preset.capabilityConfig.video.defaultResolution;
+      next = {
+        ...next,
+        capabilityConfig: {
+          ...next.capabilityConfig,
+          video: {
+            ...next.capabilityConfig.video,
+            resolutions,
+            defaultResolution,
+          },
+        },
+      };
+    }
+  }
+  return next;
 }
 
 export function buildLL2ModelChannel({ apiKey, baseUrl, selectedModels }) {

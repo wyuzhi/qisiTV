@@ -216,11 +216,12 @@ export function contributeSlot<K extends PluginSlotName>(
             syncPluginCanvasNodeDefinitions(pluginId);
         });
     } else if (slot === "canvas.addNodeMenu") {
-        const menuPayload = payload as PluginSlotMap["canvas.addNodeMenu"];
+        const menuPayload = payload as PluginSlotMap["canvas.addNodeMenu"] & { nodeType?: string };
         registerAddNodeMenuCommands([
             {
                 id: `plugin:${pluginId}:addNodeMenu:${menuPayload.id}`,
                 label: menuPayload.label,
+                targetNodeType: typeof menuPayload.nodeType === "string" ? menuPayload.nodeType : undefined,
                 icon: menuPayload.icon ?? createElement(Blocks, { className: "h-4 w-4", "aria-hidden": true }),
                 section: "node",
                 defaultOrder: menuPayload.order ?? 1100,

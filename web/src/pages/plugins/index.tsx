@@ -356,6 +356,7 @@ export default function PluginsPage() {
                                     <button
                                         key={slotKey}
                                         type="button"
+                                        data-testid={`plugins-sidebar-slot-${entry.pluginId}-${entry.payload.id}`}
                                         className={`plugins-sidebar-item${categoryFilter === slotKey ? " is-active" : ""}`}
                                         aria-current={categoryFilter === slotKey ? "page" : undefined}
                                         onClick={() => selectCategory(slotKey)}

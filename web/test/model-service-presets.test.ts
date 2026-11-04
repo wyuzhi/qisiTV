@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { MODEL_SERVICE_PRESETS, createServicePresetChannel, ll2ProtocolsAvailable, presetCatalogFor, serviceConnectionError, serviceModelProfile, servicePresetFor, modelCatalogRequestURL } from "../src/lib/model-service-presets";
+import { MODEL_SERVICE_PRESETS, createServicePresetChannel, ll2ProtocolsAvailable, mergeSavedServiceChannel, presetCatalogFor, serviceConnectionError, serviceModelProfile, servicePresetFor, modelCatalogRequestURL } from "../src/lib/model-service-presets";
 import { modelConnectionResultDetail, testChannelModelConnection } from "../src/lib/model-connection-test";
 import { applyFetchedChannelModelCatalog, modelConfigChannelStatusLabel } from "../src/pages/settings/channel-settings-pane";
 import { backendProviderConfig } from "../src/services/api/generation-task";
-import { configWithoutCachedSecrets, createModelChannel, defaultConfig } from "../src/stores/use-config-store";
+import { configWithoutCachedSecrets, createModelChannel, defaultConfig, normalizeConfigSnapshot } from "../src/stores/use-config-store";
 import { defaultModelCapabilityConfig } from "../src/lib/model-capabilities";
 import type { ModelProtocolDefinition } from "../src/lib/model-protocols";
 import { currentModelConnectionReceipt, useModelConnectionTests } from "../src/stores/use-model-connection-tests";
@@ -240,4 +240,110 @@ test("LL2 service preset resolves all 6 LL2 protocols when plugin is enabled and
     const switched = createServicePresetChannel("compatible", "ll2-test", ll2Protocols);
     expect(switched.models).toEqual([]);
     expect(presetCatalogFor("compatible")).toEqual([]);
+});
+
+test("mergeSavedServiceChannel prioritizes exact channel id, collapses duplicate LL2 channels, and remaps model selections", () => {
+    const ch1 = createModelChannel({ id: "ll2-first", name: "LL2 (DMC)", baseUrl: "https://api.ll2.cn", apiKey: "k1", models: ["deepseek-v4.1-flash"] });
+    const ch2 = createModelChannel({ id: "ll2-second", name: "LL2 (DMC) #2", baseUrl: "https://api.ll2.cn", apiKey: "k2", models: ["viduq3-pro"] });
+    const latest = {
+        ...defaultConfig,
+        channels: [ch1, ch2],
+        model: "ll2-first::deepseek-v4.1-flash",
+        videoModel: "ll2-second::viduq3-pro",
+        assistantModel: "ll2-first::deepseek-v4.1-flash",
+        mediaReviewModel: "ll2-second::viduq3-pro",
+    };
+
+    // Editing ch2 (exact match on id="ll2-second") keeps "ll2-second", collapses "ll2-first",
+    // remaps models supported by ch2, and clears selections not offered by ch2
+    const editedCh2 = { ...ch2, models: ["deepseek-v4.1-flash", "viduq3-pro"], apiKey: "k2-updated" };
+    const mergedFromEdit = mergeSavedServiceChannel(latest, editedCh2);
+    expect(mergedFromEdit.channels).toHaveLength(1);
+    expect(mergedFromEdit.channels[0].id).toBe("ll2-second");
+    expect(mergedFromEdit.channels[0].apiKey).toBe("k2-updated");
+    expect(mergedFromEdit.baseConfig.model).toBe("ll2-second::deepseek-v4.1-flash");
+    expect(mergedFromEdit.baseConfig.assistantModel).toBe("ll2-second::deepseek-v4.1-flash");
+    expect(mergedFromEdit.baseConfig.videoModel).toBe("ll2-second::viduq3-pro");
+
+    // When the surviving channel does NOT offer the removed channel's model, remapModel clears it instead of pointing to a missing model
+    const mergedNarrow = mergeSavedServiceChannel(latest, { ...ch2, models: ["viduq3-pro"] });
+    expect(mergedNarrow.baseConfig.assistantModel).toBe("");
+    expect(mergedNarrow.baseConfig.videoModel).toBe("ll2-second::viduq3-pro");
+
+    // Adding a brand new LL2 channel (no exact id match) collapses into existing "ll2-first"
+    const brandNew = createModelChannel({ id: "ll2-brand-new", name: "LL2 (DMC)", baseUrl: "https://api.ll2.cn", apiKey: "k3", models: ["MiniMax-H3"] });
+    const mergedFromNew = mergeSavedServiceChannel({ ...latest, channels: [ch1] }, brandNew);
+    expect(mergedFromNew.channels).toHaveLength(1);
+    expect(mergedFromNew.channels[0].id).toBe("ll2-first");
+    expect(mergedFromNew.channels[0].apiKey).toBe("k3");
+});
+
+test("legacy LL2 auto-hd profile upgrades expired testVideoUrl and removes unsupported 720p resolution", () => {
+    const ll2Protocols = [
+        ...protocols,
+        { value: "ll2-auto-hd-video", capability: "video", authType: "bearer", enabled: true } as ModelProtocolDefinition,
+    ];
+    const legacyChannel = createModelChannel({
+        id: "ll2",
+        baseUrl: "https://api.ll2.cn",
+        models: ["auto-hd"],
+        modelProfiles: [
+            {
+                model: "auto-hd",
+                capability: "video",
+                protocol: "ll2-auto-hd-video",
+                defaultOptions: {
+                    testVideoUrl: "https://h3-gz-public-1483601991.cos.ap-guangzhou.myqcloud.com/outputs/expired.mp4",
+                },
+                capabilityConfig: {
+                    version: 1,
+                    video: {
+                        duration: { selection: "enum", values: [5], default: 5 },
+                        ratios: [],
+                        defaultRatio: "",
+                        resolutions: ["720p", "1080p", "2k", "4k"],
+                        defaultResolution: "720p",
+                        generateAudio: { supported: false, default: false },
+                        watermark: { supported: false, default: false },
+                        operations: ["reference_to_video"],
+                        defaultOperation: "reference_to_video",
+                    },
+                },
+            },
+        ],
+    });
+    const upgraded = serviceModelProfile(legacyChannel, { id: "auto-hd", modelType: "video" }, ll2Protocols);
+    expect(upgraded.defaultOptions?.testVideoUrl).toContain("help-static-aliyun-doc.aliyuncs.com");
+    expect(upgraded.capabilityConfig?.video?.resolutions).toEqual(["1080p", "2k", "4k"]);
+    expect(upgraded.capabilityConfig?.video?.defaultResolution).toBe("1080p");
+
+    // Non-LL2 channel sharing a model name must not have its resolutions rewritten on config hydration
+    const nonLL2Channel = createModelChannel({
+        id: "ark-custom",
+        baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+        models: ["doubao-seedance-2-0"],
+        modelProfiles: [
+            {
+                model: "doubao-seedance-2-0",
+                capability: "video",
+                protocol: "volcengine-ark-video",
+                capabilityConfig: {
+                    version: 1,
+                    video: {
+                        duration: { selection: "range", min: 4, max: 15, step: 1, default: 5 },
+                        ratios: ["16:9"],
+                        defaultRatio: "16:9",
+                        resolutions: ["480p", "720p", "1080p"],
+                        defaultResolution: "1080p",
+                        generateAudio: { supported: true, default: true },
+                        watermark: { supported: true, default: false },
+                        operations: ["text_to_video"],
+                        defaultOperation: "text_to_video",
+                    },
+                },
+            },
+        ],
+    });
+    const hydrated = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [nonLL2Channel] } }).config;
+    expect(hydrated.channels[0].modelProfiles?.[0]?.capabilityConfig?.video?.resolutions).toEqual(["480p", "720p", "1080p"]);
 });

@@ -16,7 +16,7 @@ import { ModelServiceEditor } from "./model-service-editor";
 import { currentModelConnectionReceipt, useModelConnectionTests } from "@/stores/use-model-connection-tests";
 import { ModelLogo } from "@/components/model-logo";
 import beefTVAppIcon from "../../../../assets/app-icon.png";
-import { MODEL_SERVICE_PRESETS, isTopazUpscaleChannel, channelAllowsEmptyAPIKey, modelCatalogRequestURL, servicePresetFor } from "@/lib/model-service-presets";
+import { MODEL_SERVICE_PRESETS, isTopazUpscaleChannel, channelAllowsEmptyAPIKey, mergeSavedServiceChannel, modelCatalogRequestURL, servicePresetFor } from "@/lib/model-service-presets";
 import { workspaceCapabilities } from "@/services/workspace-mode";
 import { localWorkspaceConfig } from "@/lib/user-session";
 import { getLocalModelConfig } from "@/services/api/workspace";
@@ -181,10 +181,8 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
     const saveService = async (channel: ModelChannel) => {
         cancelCatalog(channel.id);
         const latest = useConfigStore.getState().config;
-        const channels = latest.channels.some((item) => item.id === channel.id)
-            ? latest.channels.map((item) => item.id === channel.id ? channel : item)
-            : [...latest.channels, channel];
-        updateChannels(channels, latest);
+        const { channels, baseConfig } = mergeSavedServiceChannel(latest, channel);
+        updateChannels(channels, baseConfig);
         await flushModelConfig();
         const saved = getModelConfigPersistenceState();
         if (saved.status === "error" || saved.dirty) throw new Error(saved.error || "模型服务尚未保存，请重试");

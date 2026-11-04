@@ -1,6 +1,6 @@
 {
   "name": "beeftv-plugin-character-replacement",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "description": "AI 角色替换工作室：支持单人/多人精准角色替换、5 档替换范围控制、定位框 SVG 辅助、两阶段关键帧+视频动作替换（Seedream + Seedance 2.5 元素替换）与全片时间线无损回插。",
   "author": "BeefTV",
   "type": "module",
@@ -36,7 +36,7 @@
     "apiVersion": "beeftv.plugin/v2",
     "schemaVersion": 2,
     "name": "AI 角色替换工作室",
-    "version": "0.1.0",
+    "version": "0.1.4",
     "description": "AI 角色替换工作室：支持单人/多人精准角色替换、5 档替换范围控制、定位框 SVG 辅助、两阶段关键帧+视频动作替换（Seedream + Seedance 2.5 元素替换）与全片时间线无损回插。",
     "author": "BeefTV",
     "surfaces": [

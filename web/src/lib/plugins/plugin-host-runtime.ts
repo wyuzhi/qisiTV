@@ -122,14 +122,40 @@ export function createBeefTVPluginHost(pluginId: string, manifest?: PluginManife
                       (typeof rawParams.operationId === "string" && rawParams.operationId.trim()
                           ? undefined
                           : `plugin-${pluginId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
-                const res = await executeWorkspaceOperation<T>(op, { ...(opId ? { opId } : {}), params: rawParams });
                 const targetCanvasId = typeof rawParams.canvasId === "string" ? rawParams.canvasId.trim() : "";
+                let result: T;
+                try {
+                    const res = await executeWorkspaceOperation<T>(op, { ...(opId ? { opId } : {}), params: rawParams });
+                    result = res.result;
+                } catch (err) {
+                    const isInitialCommit =
+                        op === "canvas.document.commit" &&
+                        rawParams.expectedRevision === 0 &&
+                        Boolean(targetCanvasId) &&
+                        Boolean(rawParams.document && typeof rawParams.document === "object");
+                    const isNotFound =
+                        (typeof (err as { status?: number })?.status === "number" && (err as { status: number }).status === 404) ||
+                        String((err as Error)?.message || "").includes("画布不存在");
+                    if (!isInitialCommit || !isNotFound) throw err;
+                    const created = await http.put<{
+                        project?: { id?: string; revision?: number; title?: string; updatedAt?: string };
+                    }>(`/canvas-projects/${encodeURIComponent(targetCanvasId)}`, {
+                        project: rawParams.document,
+                    });
+                    const docObj = rawParams.document as { title?: string; updatedAt?: string };
+                    result = {
+                        canvasId: created?.project?.id || targetCanvasId,
+                        revision: created?.project?.revision ?? 1,
+                        title: created?.project?.title ?? docObj.title ?? "",
+                        updatedAt: created?.project?.updatedAt ?? docObj.updatedAt ?? new Date().toISOString(),
+                    } as unknown as T;
+                }
                 if (!isReadOnly && targetCanvasId) {
                     void import("@/services/local-workspace-repository").then(({ refreshLocalCanvasProjectIfChanged }) =>
                         refreshLocalCanvasProjectIfChanged(targetCanvasId),
                     );
                 }
-                return res.result;
+                return result;
             },
         },
         context: {

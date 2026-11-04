@@ -54,13 +54,16 @@ function resolveActiveCanvasId(host, explicitCanvasId) {
     rememberCanvasId(host, fromContext);
     return fromContext;
   }
-  const rawStorage = host?.storage?.get?.("lastCanvasId");
-  if (typeof rawStorage === "string") {
-    const clean = rawStorage.trim();
-    if (clean && clean !== "[object Promise]") {
-      lastKnownCanvasId = clean;
-      return clean;
+  if (typeof host?.storage?.get === "function") {
+    const rawStorage = host.storage.get("lastCanvasId");
+    if (typeof rawStorage === "string") {
+      const clean = rawStorage.trim();
+      if (clean && clean !== "[object Promise]") {
+        lastKnownCanvasId = clean;
+        return clean;
+      }
     }
+    return "";
   }
   return lastKnownCanvasId;
 }
@@ -83,17 +86,35 @@ async function resolveActiveCanvasIdAsync(host, explicitCanvasId) {
   return "";
 }
 
-export async function arrangeCharacterReplacementOnCanvas(host, config = {}) {
-  const canvasId = await resolveActiveCanvasIdAsync(host, config.canvasId);
-  if (!canvasId) {
-    throw new Error("请先打开一个画布或在替换工作室填写目标画布 ID 后再执行角色替换编排");
-  }
-  rememberCanvasId(host, canvasId);
+async function createInitialCanvasDocument(host, canvasId, title) {
+  const now = new Date().toISOString();
+  const doc = {
+    id: canvasId,
+    title,
+    revision: 0,
+    createdAt: now,
+    updatedAt: now,
+    nodes: [],
+    connections: [],
+    chatSessions: [],
+    activeChatId: null,
+    backgroundMode: "grid",
+    showImageInfo: true,
+    viewport: { x: 120, y: 120, zoom: 1 },
+    directorScenes: [],
+  };
+  return host.ops.call("canvas.document.commit", {
+    canvasId,
+    expectedRevision: 0,
+    document: doc,
+  });
+}
 
-  const sourceKeyframeNodeId = String(config.sourceKeyframeNodeId || "").trim();
-  const targetCharacterNodeId = String(config.targetCharacterNodeId || "").trim();
-  const locationGuideNodeId = String(config.locationGuideNodeId || "").trim();
-  const sourceVideoNodeId = String(config.sourceVideoNodeId || "").trim();
+export async function arrangeCharacterReplacementOnCanvas(host, config = {}) {
+  let sourceKeyframeNodeId = String(config.sourceKeyframeNodeId || "").trim();
+  let targetCharacterNodeId = String(config.targetCharacterNodeId || "").trim();
+  let locationGuideNodeId = String(config.locationGuideNodeId || "").trim();
+  let sourceVideoNodeId = String(config.sourceVideoNodeId || "").trim();
   const controlNodeId = String(config.controlNodeId || "").trim();
 
   const missingReferences = [];
@@ -104,7 +125,28 @@ export async function arrangeCharacterReplacementOnCanvas(host, config = {}) {
     throw new Error(`缺少必需的上游参考节点：${missingReferences.join("、")}`);
   }
 
-  const snap = await host.ops.call("canvas.get", { canvasId });
+  const shotTitle = String(config.shotTitle || "镜头 1").trim() || "镜头 1";
+  let canvasId = await resolveActiveCanvasIdAsync(host, config.canvasId);
+  if (!canvasId && config.autoCreateCanvas) {
+    canvasId = `canvas-char-${Date.now().toString(36)}`;
+    await createInitialCanvasDocument(host, canvasId, `${shotTitle} · AI 角色替换画布`);
+  }
+  if (!canvasId) {
+    throw new Error("请先打开一个画布或在替换工作室填写目标画布 ID 后再执行角色替换编排");
+  }
+  rememberCanvasId(host, canvasId);
+
+  let snap;
+  try {
+    snap = await host.ops.call("canvas.get", { canvasId });
+  } catch (err) {
+    if (config.autoCreateCanvas) {
+      await createInitialCanvasDocument(host, canvasId, `${shotTitle} · AI 角色替换画布`);
+      snap = await host.ops.call("canvas.get", { canvasId });
+    } else {
+      throw err;
+    }
+  }
   let revision = Number(snap?.revision ?? snap?.canvas?.revision ?? 1);
   const existingNodes = Array.isArray(snap?.nodes)
     ? snap.nodes
@@ -117,7 +159,64 @@ export async function arrangeCharacterReplacementOnCanvas(host, config = {}) {
       .filter(Boolean),
   );
 
-  const shotTitle = String(config.shotTitle || "镜头 1").trim() || "镜头 1";
+  if (config.autoCreateInputNodes) {
+    const inputDrafts = [];
+    const inputSlotOrder = [];
+    if (!sourceKeyframeNodeId) {
+      inputSlotOrder.push("sourceKeyframe");
+      inputDrafts.push({
+        title: uniqueNodeTitle(`${shotTitle} · 原视频关键帧（图1）`, existingTitles),
+        type: "image",
+        prompt: `原视频被替换人物关键帧：${String(config.sourceDescription || "原镜头人物").trim()}`,
+      });
+    }
+    if (!targetCharacterNodeId) {
+      inputSlotOrder.push("targetCharacter");
+      inputDrafts.push({
+        title: uniqueNodeTitle(`${shotTitle} · 目标角色参考图（图2）`, existingTitles),
+        type: "image",
+        prompt: `目标替换角色正面清晰参考图：${String(config.targetDescription || "目标角色").trim()}`,
+      });
+    }
+    if (config.promptMode === "positioning" && !locationGuideNodeId) {
+      inputSlotOrder.push("locationGuide");
+      inputDrafts.push({
+        title: uniqueNodeTitle(`${shotTitle} · 人物框选定位图（图3）`, existingTitles),
+        type: "image",
+        prompt: "多人场景人物红框定位辅助图（A框标识待替换人物区域）",
+      });
+    }
+    if (!sourceVideoNodeId) {
+      inputSlotOrder.push("sourceVideo");
+      inputDrafts.push({
+        title: uniqueNodeTitle(`${shotTitle} · 原镜头视频（视频1）`, existingTitles),
+        type: "video",
+        prompt: `原镜头待替换视频片段：${String(config.sourceDescription || "原镜头人物动作与运镜").trim()}`,
+      });
+    }
+    if (inputDrafts.length > 0) {
+      const createdInputs = await host.ops.call("canvas.nodes.create", {
+        canvasId,
+        expectedRevision: revision,
+        nodes: inputDrafts,
+      });
+      revision = Number(createdInputs?.revision ?? revision + 1);
+      const createdInputList = Array.isArray(createdInputs?.created) ? createdInputs.created : [];
+      inputSlotOrder.forEach((slot, idx) => {
+        const createdId = createdInputList[idx]?.id || "";
+        if (!createdId) return;
+        if (slot === "sourceKeyframe") sourceKeyframeNodeId = createdId;
+        if (slot === "targetCharacter") targetCharacterNodeId = createdId;
+        if (slot === "locationGuide") locationGuideNodeId = createdId;
+        if (slot === "sourceVideo") sourceVideoNodeId = createdId;
+      });
+      missingReferences.length = 0;
+      if (!sourceKeyframeNodeId) missingReferences.push("sourceKeyframeNodeId（原关键帧图节点）");
+      if (!targetCharacterNodeId) missingReferences.push("targetCharacterNodeId（目标角色参考图节点）");
+      if (!sourceVideoNodeId) missingReferences.push("sourceVideoNodeId（原镜头视频节点）");
+    }
+  }
+
   const hasLocationGuideImage =
     config.hasLocationGuideImage !== undefined
       ? Boolean(config.hasLocationGuideImage)
@@ -211,6 +310,10 @@ export async function arrangeCharacterReplacementOnCanvas(host, config = {}) {
     revision,
     keyframeNodeId,
     videoNodeId,
+    sourceKeyframeNodeId,
+    targetCharacterNodeId,
+    locationGuideNodeId,
+    sourceVideoNodeId,
     keyframePrompt: compiled.prompt,
     videoPrompt: compiled.videoPrompt,
     locationGuide: compiled.locationGuide,
@@ -812,7 +915,14 @@ export function activate(host) {
           targetCharacterNodeId,
           locationGuideNodeId,
           sourceVideoNodeId,
+          autoCreateCanvas: true,
+          autoCreateInputNodes: true,
         });
+        if (res.canvasId) setTargetCanvasId(res.canvasId);
+        if (res.sourceKeyframeNodeId) setSourceKeyframeNodeId(res.sourceKeyframeNodeId);
+        if (res.targetCharacterNodeId) setTargetCharacterNodeId(res.targetCharacterNodeId);
+        if (res.locationGuideNodeId) setLocationGuideNodeId(res.locationGuideNodeId);
+        if (res.sourceVideoNodeId) setSourceVideoNodeId(res.sourceVideoNodeId);
         setReplacedVideoNodeId(res.videoNodeId);
         const hasMissing = res.missingReferences?.length > 0;
         const warnText = hasMissing
@@ -963,9 +1073,30 @@ export function activate(host) {
                 host.storage?.set?.("lastCanvasId", e.target.value.trim());
               }
             },
-            placeholder: "目标画布 ID（自动读取当前画布）",
+            placeholder: "目标画布 ID（留空自动绑定或新建）",
             style: { ...inputStyle, width: compact ? 160 : 210 },
           }),
+          targetCanvasId
+            ? h(
+                "button",
+                {
+                  type: "button",
+                  "data-testid": "studio-open-canvas-btn",
+                  onClick: () => host.ui?.navigate?.(`/canvas/${encodeURIComponent(targetCanvasId)}`),
+                  style: {
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    border: "1px solid rgba(16, 185, 129, 0.55)",
+                    background: "rgba(16, 185, 129, 0.16)",
+                    color: "#10b981",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  },
+                },
+                "打开目标画布 →",
+              )
+            : null,
           [
             { step: 1, label: "1. 角色与范围绑定" },
             { step: 2, label: "2. 关键帧提示词与定位框" },

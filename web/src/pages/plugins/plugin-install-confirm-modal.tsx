@@ -102,7 +102,7 @@ export function PluginInstallConfirmModal({ open, initialRequest, loading = fals
                     </div>
 
                     <div className="rounded-lg border border-border/70 bg-muted/15 px-3 py-2.5">
-                        <Checkbox checked={riskAccepted} onChange={(e) => setRiskAccepted(e.target.checked)}>
+                        <Checkbox data-testid="plugin-install-confirm-checkbox" checked={riskAccepted} onChange={(e) => setRiskAccepted(e.target.checked)}>
                             <span className="text-xs font-medium text-foreground">我了解风险，确认安装</span>
                         </Checkbox>
                     </div>
@@ -116,7 +116,7 @@ export function PluginInstallConfirmModal({ open, initialRequest, loading = fals
                         <Button onClick={onCancel} disabled={loading}>
                             取消
                         </Button>
-                        <Button type="primary" icon={<CheckCircle2 className="size-4" />} loading={loading} disabled={!canConfirm} onClick={() => void onConfirm(draftRequest)}>
+                        <Button data-testid="plugin-install-submit" type="primary" icon={<CheckCircle2 className="size-4" />} loading={loading} disabled={!canConfirm} onClick={() => void onConfirm(draftRequest)}>
                             {draftRequest.isUpdate ? "确认更新" : "确认安装"}
                         </Button>
                     </div>

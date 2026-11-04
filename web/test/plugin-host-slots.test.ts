@@ -133,7 +133,7 @@ describe("plugin host slots, events, and lifecycle", () => {
         // 2. canvas.addNodeMenu
         host.contribute("canvas.addNodeMenu", {
             id: "probe-add-node",
-            label: "新建便签",
+            label: "便签节点",
             onSelect: () => {},
         });
         expect(getAddNodeMenuCommands().some((t) => t.id === `plugin:${pluginId}:addNodeMenu:probe-add-node`)).toBe(true);
@@ -142,6 +142,17 @@ describe("plugin host slots, events, and lifecycle", () => {
                 (t) => t.id === `plugin:${pluginId}:addNodeMenu:probe-add-node`,
             ),
         ).toBe(true);
+        expect(resolveAddNodeMenuCommands(emptyMenuContext).some((t) => t.id === "plugin:slot-probe:sticky")).toBe(false);
+
+        // Multi-node plugin retains non-matched node types even when labels share a substring
+        const disposeSecondNode = host.contribute("canvas.node", {
+            type: "plugin:slot-probe:secondary",
+            label: "便签",
+            component: DummyComponent,
+        });
+        expect(resolveAddNodeMenuCommands(emptyMenuContext).some((t) => t.id === "plugin:slot-probe:sticky")).toBe(false);
+        expect(resolveAddNodeMenuCommands(emptyMenuContext).some((t) => t.id === "plugin:slot-probe:secondary")).toBe(true);
+        disposeSecondNode();
 
         // 3-5. canvas.toolbar.main, canvas.toolbar.selection, canvas.toolbar.nodeHover
         host.contribute("canvas.toolbar.main", { id: "probe-tb-main", label: "主工具栏动作", onClick: () => {} });

@@ -307,4 +307,75 @@ describe("beeftv-plugin-character-replacement compiler & pipeline", () => {
         expect(timelinePayload.timeline.durationMs).toBe(12000);
         expect(timelinePayload.timeline.clips).toHaveLength(4);
     });
+
+    test("auto-creates canvas and input nodes when requested and preserves missingReferences on partial input creation", async () => {
+        const calls: Array<{ opId: string; params: Record<string, any> }> = [];
+        let createdCanvasId = "";
+        let partialInputs = false;
+        const fakeHost = {
+            context: {
+                getCanvasId: () => undefined,
+            },
+            storage: {
+                get: () => undefined,
+                set: () => {},
+            },
+            ops: {
+                async call(opId: string, params: Record<string, any>) {
+                    calls.push({ opId, params });
+                    if (opId === "canvas.document.commit") {
+                        createdCanvasId = params.canvasId;
+                        return { revision: 1 };
+                    }
+                    if (opId === "canvas.get") {
+                        return { revision: 1, nodes: [] };
+                    }
+                    if (opId === "canvas.nodes.create") {
+                        if (params.nodes.length >= 3) {
+                            if (partialInputs) {
+                                return {
+                                    revision: 2,
+                                    created: [{ id: "node-kf-in" }, { id: "node-char-in" }],
+                                };
+                            }
+                            return {
+                                revision: 2,
+                                created: [{ id: "node-kf-in" }, { id: "node-char-in" }, { id: "node-vid-in" }],
+                            };
+                        }
+                        return {
+                            revision: 3,
+                            created: [{ id: "node-kf-out" }, { id: "node-vid-out" }],
+                        };
+                    }
+                    if (opId === "canvas.edge.create") {
+                        return { revision: 4 };
+                    }
+                    return {};
+                },
+            },
+        };
+
+        const fullRes = await arrangeCharacterReplacementOnCanvas(fakeHost, {
+            shotTitle: "镜头 A",
+            autoCreateCanvas: true,
+            autoCreateInputNodes: true,
+        });
+        expect(fullRes.canvasId).toBe(createdCanvasId);
+        expect(fullRes.sourceKeyframeNodeId).toBe("node-kf-in");
+        expect(fullRes.targetCharacterNodeId).toBe("node-char-in");
+        expect(fullRes.sourceVideoNodeId).toBe("node-vid-in");
+        expect(fullRes.missingReferences).toEqual([]);
+
+        partialInputs = true;
+        const partialRes = await arrangeCharacterReplacementOnCanvas(fakeHost, {
+            canvasId: "canvas-existing",
+            shotTitle: "镜头 B",
+            autoCreateInputNodes: true,
+        });
+        expect(partialRes.sourceKeyframeNodeId).toBe("node-kf-in");
+        expect(partialRes.targetCharacterNodeId).toBe("node-char-in");
+        expect(partialRes.sourceVideoNodeId).toBe("");
+        expect(partialRes.missingReferences).toEqual(["sourceVideoNodeId（原镜头视频节点）"]);
+    });
 });

@@ -1,10 +1,10 @@
-import type { ModelChannel, ModelCapability } from "@/stores/use-config-store";
+import type { AiConfig, ModelChannel, ModelCapability } from "@/stores/use-config-store";
 import { buildApiUrl, createModelChannel } from "@/stores/use-config-store";
 import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
 import { inferProtocolCapabilityFromModel, type ModelProtocolDefinition } from "@/lib/model-protocols";
 import { catalogEndpointCapability, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
 import { serviceCredentialGuide } from "@/lib/service-credentials";
-import { DEFAULT_BASE_URL as LL2_DEFAULT_BASE_URL, LL2_CHANNEL_ID, LL2_CHANNEL_NAME, LL2_PRESET_MODELS, buildLL2ModelChannel } from "../../../plugin-packages/beeftv-plugin-ll2/client/index.js";
+import { DEFAULT_BASE_URL as LL2_DEFAULT_BASE_URL, LL2_CHANNEL_ID, LL2_CHANNEL_NAME, LL2_PRESET_MODELS, buildLL2ModelChannel, upgradeLL2ModelProfile } from "../../../plugin-packages/beeftv-plugin-ll2/client/index.js";
 
 export const MODEL_SERVICE_PRESETS = [
     { id: "compatible", name: "第三方模型服务", subtitle: "OpenAI 兼容 API · 中转服务", icon: "OpenAI", baseUrl: "", apiFormat: "openai" },
@@ -78,13 +78,14 @@ export function createServicePresetChannel(id: ModelServicePresetId, channelId: 
 
 // Endpoint metadata is a hint, only resolve to protocols the host actually offers.
 export function serviceModelProfile(channel: ModelChannel, item: ChannelModelCatalogItem, protocols: ModelProtocolDefinition[], explicitCapability?: ModelCapability): NonNullable<ModelChannel["modelProfiles"]>[number] {
-    const existing = channel.modelProfiles?.find((profile) => profile.model === item.id);
+    const preset = channel.apiFormat === "gemini" ? "gemini" : servicePresetFor(channel);
+    const rawExisting = channel.modelProfiles?.find((profile) => profile.model === item.id);
+    const existing = rawExisting && preset === LL2_CHANNEL_ID ? (upgradeLL2ModelProfile(rawExisting) as typeof rawExisting) : rawExisting;
     if (existing?.protocol && !explicitCapability) {
         const definition = protocols.find((protocol) => protocol.value === existing.protocol && protocol.enabled !== false);
         if (definition && definition.authType !== existing.authType) return { ...existing, authType: definition.authType };
         if (definition || !existing.protocol.startsWith("ll2-")) return existing;
     }
-    const preset = channel.apiFormat === "gemini" ? "gemini" : servicePresetFor(channel);
     const ll2Preset = preset === LL2_CHANNEL_ID ? LL2_PRESET_MODELS.find((presetItem) => presetItem.model === item.id) : undefined;
     if (ll2Preset && (!explicitCapability || explicitCapability === ll2Preset.capability)) {
         const definition = protocols.find((protocol) => protocol.value === ll2Preset.protocol && protocol.capability === ll2Preset.capability && protocol.enabled !== false);
@@ -158,6 +159,53 @@ export function serviceConnectionError(channel: ModelChannel, options?: { protoc
         if (credential.secretKeyRequired && !channel.secretKey?.trim() && channel.hasSecretKey !== true) return `请填写 ${credential.secretKeyLabel}：这个请求协议要两个密钥，缺一个会签名失败`;
     }
     return "";
+}
+
+export function mergeSavedServiceChannel<T extends Pick<AiConfig, "channels" | "model" | "imageModel" | "videoModel" | "textModel" | "audioModel" | "assistantModel" | "mediaReviewModel">>(
+    latest: T,
+    channel: ModelChannel,
+): { channels: ModelChannel[]; baseConfig: T; mergedChannel: ModelChannel } {
+    const isLL2 = servicePresetFor(channel) === LL2_CHANNEL_ID;
+    const exact = latest.channels.find((item) => item.id === channel.id);
+    const existing = exact ?? (isLL2 ? latest.channels.find((item) => servicePresetFor(item) === LL2_CHANNEL_ID) : undefined);
+    const mergedChannel = existing ? { ...channel, id: existing.id } : channel;
+    const removedIds = new Set<string>();
+    if (existing && isLL2) {
+        for (const item of latest.channels) {
+            if (item.id !== existing.id && servicePresetFor(item) === LL2_CHANNEL_ID) {
+                removedIds.add(item.id);
+            }
+        }
+    }
+    const channels = existing
+        ? latest.channels
+            .filter((item) => !removedIds.has(item.id))
+            .map((item) => item.id === existing.id ? mergedChannel : item)
+        : [...latest.channels, mergedChannel];
+    const allowedModels = new Set(mergedChannel.models);
+    const remapModel = (val?: string) => {
+        if (!val || !existing || removedIds.size === 0) return val || "";
+        for (const removedId of removedIds) {
+            if (val.startsWith(`${removedId}::`)) {
+                const modelName = val.slice(removedId.length + 2);
+                return allowedModels.has(modelName) ? `${existing.id}::${modelName}` : "";
+            }
+        }
+        return val;
+    };
+    const baseConfig = removedIds.size > 0
+        ? {
+            ...latest,
+            model: remapModel(latest.model),
+            imageModel: remapModel(latest.imageModel),
+            videoModel: remapModel(latest.videoModel),
+            textModel: remapModel(latest.textModel),
+            audioModel: remapModel(latest.audioModel),
+            assistantModel: remapModel(latest.assistantModel),
+            mediaReviewModel: remapModel(latest.mediaReviewModel),
+        }
+        : latest;
+    return { channels, baseConfig, mergedChannel };
 }
 
 export function modelCatalogRequestURL(channel: ModelChannel) {

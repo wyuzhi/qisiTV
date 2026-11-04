@@ -2,6 +2,7 @@ import { runBackendGenerationTask, type BackendGenerationResult } from "@/servic
 import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
 import { channelHasGenerationCredential, defaultConfig, encodeChannelModel, isBuiltinBeefAPIChannel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 import type { ModelProtocol } from "@/lib/model-protocols";
+import { upgradeLL2ModelProfile } from "../../../plugin-packages/beeftv-plugin-ll2/client/index.js";
 
 export async function testChannelModelConnection(channel: ModelChannel, model: string, capability: ModelCapability, protocol: ModelProtocol, runTask = runBackendGenerationTask) {
     if (!channel.baseUrl.trim()) throw new Error("请先填写 Base URL");
@@ -9,7 +10,8 @@ export async function testChannelModelConnection(channel: ModelChannel, model: s
         throw new Error(isBuiltinBeefAPIChannel(channel) ? "请先连接 BeefTV" : "请先填写 API Key");
     }
     const selectedModel = encodeChannelModel(channel.id, model);
-    const modelProfile = channel.modelProfiles?.find((item) => item.model === model);
+    const rawProfile = channel.modelProfiles?.find((item) => item.model === model);
+    const modelProfile = rawProfile ? (upgradeLL2ModelProfile(rawProfile) as typeof rawProfile) : undefined;
     const limits = modelProfile?.capabilityConfig || defaultModelCapabilityConfig(protocol, model);
     const duration = limits?.video?.duration;
     const durations = duration?.values?.filter((value) => Number.isFinite(value) && value > 0) || [];
