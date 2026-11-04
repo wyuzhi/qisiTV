@@ -340,16 +340,18 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
                 </div>
             )}
             <div className="ml-auto flex shrink-0 items-center justify-end gap-1">
-                <CanvasPresetPicker
-                    mode={mode}
-                    skillReferences={skillReferences}
-                    open={expanded ? expandedPresetOpen : presetOpen}
-                    onOpenChange={expanded ? setExpandedPresetOpen : setPresetOpen}
-                    onSelect={applyPreset}
-                    currentPrompt={prompt}
-                    appearance="quiet"
-                    dense
-                />
+                {expanded ? (
+                    <CanvasPresetPicker
+                        mode={mode}
+                        skillReferences={skillReferences}
+                        open={expandedPresetOpen}
+                        onOpenChange={setExpandedPresetOpen}
+                        onSelect={applyPreset}
+                        currentPrompt={prompt}
+                        appearance="quiet"
+                        dense
+                    />
+                ) : null}
                 {expanded ? <CanvasPromptFontControl /> : null}
                 {promptActionEntries
                     .filter((entry) => entry.pluginId !== PROMPT_OPTIMIZER_PLUGIN_ID && entry.payload.id !== "prompt-optimizer")
@@ -735,6 +737,7 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
                         <VideoReferenceModeSwitch state={videoModeState} theme={theme} onSelectMode={handleSelectVideoReferenceMode} onChange={(patch) => onConfigChange(node.id, patch)} />
                     </div>
                 ) : null}
+                <CanvasPresetPicker mode={mode} skillReferences={skillReferences} open={presetOpen} onOpenChange={setPresetOpen} onSelect={applyPreset} currentPrompt={prompt} appearance="quiet" dense />
                 <Tooltip title={pickConnectActive ? "正在点选连线引用（点击画布节点自动连线并插入 @引用，按 Esc 退出）" : "点选连线引用（或按住 Option/Alt 点击画布节点）"}>
                     <button
                         type="button"
