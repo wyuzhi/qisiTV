@@ -47,7 +47,7 @@ export function CanvasPresetPicker({
         setInternalOpen(next);
         onOpenChange?.(next);
     };
-    const presets = useMemo(() => {
+    const presets = useMemo<PresetItem[]>(() => {
         const userPresets: PresetItem[] = (customPresets || [])
             .filter((preset) => preset.modes.includes(mode))
             .map((preset) => ({

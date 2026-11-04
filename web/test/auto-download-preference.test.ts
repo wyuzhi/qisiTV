@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
 import {
     copyPromptToClipboard,
@@ -17,7 +17,7 @@ import {
     resetAutoDownloadedTasksForTests,
     setAutoDownloadGeneratedMedia,
     triggerAutoDownloadForCompletedTask,
-} from "./auto-download-preference";
+} from "@/lib/auto-download-preference";
 
 function createMemoryStorage(): Storage {
     const store = new Map<string, string>();
@@ -44,6 +44,8 @@ function createMemoryStorage(): Storage {
 }
 
 describe("auto-download-preference", () => {
+    const originalWindow = (globalThis as Record<string, unknown>).window;
+
     beforeEach(() => {
         const localStorage = createMemoryStorage();
         const sessionStorage = createMemoryStorage();
@@ -56,6 +58,14 @@ describe("auto-download-preference", () => {
         });
         setActiveUserScope("workspace-test");
         resetAutoDownloadedTasksForTests();
+    });
+
+    afterEach(() => {
+        if (originalWindow === undefined) {
+            delete (globalThis as Record<string, unknown>).window;
+        } else {
+            (globalThis as Record<string, unknown>).window = originalWindow;
+        }
     });
 
     it("reads and persists boolean preference in scopedLocalStorage", () => {

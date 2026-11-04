@@ -6,7 +6,7 @@ import {
     getVoicePreviewProfile,
     previewAudioVoice,
     stopAudioVoicePreview,
-} from "./voice-preview-player";
+} from "@/lib/voice-preview-player";
 
 describe("voice-preview-player", () => {
     const originalSpeechSynthesis = (globalThis as Record<string, unknown>).speechSynthesis;

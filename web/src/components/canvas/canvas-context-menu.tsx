@@ -520,7 +520,7 @@ function MenuDivider() {
 }
 
 function getContextMenuPosition(menu: ContextMenuState, hasMultiSelection = false) {
-    if (typeof window === "undefined") return { left: menu.x, top: menu.y };
+    if (typeof window === "undefined" || typeof document === "undefined") return { left: menu.x, top: menu.y };
     const width = 224;
     // Text/media node menus contain several action groups. Reserve enough
     // vertical space before clamping so the destructive action stays inside

@@ -7,10 +7,10 @@ import {
     isDocxDocumentFile,
     isScriptDocumentFile,
     stripScriptDocumentExtension,
-} from "./script-document-import";
+} from "@/lib/canvas/script-document-import";
 
 async function deflateRawBytes(input: Uint8Array): Promise<Uint8Array> {
-    const stream = new Blob([input]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+    const stream = new Blob([new Uint8Array(input)]).stream().pipeThrough(new CompressionStream("deflate-raw"));
     return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
@@ -71,7 +71,7 @@ async function buildSynthesizedDocxBuffer(
     }
 
     if (options.omitCentralDirectory) {
-        return new Blob(localParts).arrayBuffer();
+        return new Blob(localParts as BlobPart[]).arrayBuffer();
     }
 
     const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
@@ -83,7 +83,7 @@ async function buildSynthesizedDocxBuffer(
     eocdView.setUint32(12, centralSize, true);
     eocdView.setUint32(16, offset, true);
 
-    return new Blob([...localParts, ...centralParts, eocd]).arrayBuffer();
+    return new Blob([...localParts, ...centralParts, eocd] as BlobPart[]).arrayBuffer();
 }
 
 describe("script-document-import", () => {

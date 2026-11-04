@@ -44,7 +44,7 @@ export function resolveAssetGenerationAspectRatio(asset: LibraryAsset | null | u
 export async function copyPromptToClipboard(
     promptText: string,
     message?: { success?: (content: string) => unknown; error?: (content: string) => unknown },
-    fallbackCopy?: (value: string, successText?: string) => Promise<boolean>,
+    fallbackCopy?: (value: string, successText?: string) => Promise<boolean> | void,
 ): Promise<boolean> {
     const trimmed = promptText.trim();
     if (!trimmed) return false;
@@ -58,7 +58,8 @@ export async function copyPromptToClipboard(
         // Fall through to fallback copy helper
     }
     if (fallbackCopy) {
-        return fallbackCopy(trimmed, "已复制生成提示词");
+        const result = await fallbackCopy(trimmed, "已复制生成提示词");
+        return typeof result === "boolean" ? result : true;
     }
     message?.error?.("当前环境不支持复制，请手动选择复制");
     return false;

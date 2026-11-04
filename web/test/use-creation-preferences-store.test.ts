@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CanvasPresetPicker } from "@/components/canvas/canvas-preset-picker";
-import { normalizeCreationComposerPreferences, useCreationPreferencesStore } from "./use-creation-preferences-store";
+import { normalizeCreationComposerPreferences, useCreationPreferencesStore } from "@/stores/use-creation-preferences-store";
 
 describe("useCreationPreferencesStore (#091)", () => {
     const initialPreferences = useCreationPreferencesStore.getState().preferences;

@@ -206,7 +206,7 @@ async function decompressZipEntry(entry: ZipEntrySlice): Promise<Uint8Array> {
         if (typeof DecompressionStream === "undefined") {
             throw new Error("当前环境不支持解压 DOCX 文档");
         }
-        const stream = new Blob([entry.compressedData]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+        const stream = new Blob([new Uint8Array(entry.compressedData)]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
         return new Uint8Array(await new Response(stream).arrayBuffer());
     }
     throw new Error(`不支持的 DOCX 压缩算法（method=${entry.compressionMethod}）`);
