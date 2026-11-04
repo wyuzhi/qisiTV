@@ -1865,7 +1865,7 @@ function InfiniteCanvasPage() {
                             canUndo={historyState.canUndo}
                             canRedo={historyState.canRedo}
                             canPaste={hasCopiedNodes || Boolean(navigator.clipboard)}
-                            selectedCount={selectedNodeIds.size}
+                            selectedCount={selectedNodeIds.size} nodes={nodes} selectedNodeIds={selectedNodeIds}
                             screenToCanvas={screenToCanvas}
                             onClose={() => setContextMenu(null)}
                             onAddNode={(type, position) => createNode(type, position)}

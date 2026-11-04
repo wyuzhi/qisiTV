@@ -100,6 +100,8 @@ function stubController(open: boolean, setOpen: (next: boolean) => void, width: 
         dismissError: noop,
         startNewSession: asyncNoop,
         activateSession: asyncNoop,
+        deleteSession: async () => true,
+        handleDeleteSession: async () => true,
         undoTurn: asyncNoop,
         restartHost: asyncNoop,
     };

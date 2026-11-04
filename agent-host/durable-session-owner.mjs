@@ -886,6 +886,35 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
     }
     return out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
+  async function deleteSession(canvasId, sessionId) {
+    return lock(canvasId, async () => {
+      if (!isDurableSessionId(sessionId) || !hasSession(canvasId, sessionId)) throw fail('session_not_found');
+      const current = sessions.get(canvasId);
+      if (current?.busy) throw fail('session_busy');
+      const uuid = idPattern.exec(sessionId)[1];
+      const dir = durableDirectory(canvasId);
+      if (current?.sessionId === sessionId) {
+        sessions.delete(canvasId);
+        await current.harness.close(CTX);
+      }
+      for (const suffix of ['.json', '.sqlite', '.sqlite-wal', '.sqlite-shm', '.budget']) {
+        fs.rmSync(path.join(dir, `${uuid}${suffix}`), { recursive: true, force: true });
+      }
+      let currentPointer = '';
+      try { currentPointer = JSON.parse(fs.readFileSync(currentPath(canvasId), 'utf8')).sessionId || ''; }
+      catch { currentPointer = ''; }
+      if (currentPointer === sessionId) {
+        const remaining = await listCanvasSessions(canvasId);
+        if (remaining.length > 0) {
+          const next = await open(canvasId, remaining[0].sessionId);
+          await install(next);
+        } else {
+          fs.rmSync(currentPath(canvasId), { force: true });
+        }
+      }
+      return { deleted: true, sessionId };
+    });
+  }
   async function reloadPluginExtensions(newExtensions) {
     for (const entry of sessions.values()) {
       if (typeof entry.reloadPluginExtensions === 'function') {
@@ -900,6 +929,6 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
     for (const entry of entries) await entry.harness.close(CTX);
     return entries.length;
   }
-  return { sessions, createSession, handoffSession, activateSession, ensureSession, ensureCurrentSession, submit, recover, supplement, beginPendingInput, fenceStop, wait,
+  return { sessions, createSession, handoffSession, activateSession, ensureSession, ensureCurrentSession, deleteSession, submit, recover, supplement, beginPendingInput, fenceStop, wait,
     stop, cancelRequest, hasSession, history, status, recordEvent, listCanvasSessions, reloadPluginExtensions, disposeAll, skillContext, changeSkillContext };
 }

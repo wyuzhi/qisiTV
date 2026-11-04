@@ -1,6 +1,6 @@
 import { createClientId } from "@/lib/client-id";
 import { Button, Dropdown, Tooltip } from "antd";
-import { History, MessageSquarePlus, X, ArrowUpRight } from "lucide-react";
+import { History, MessageSquarePlus, Trash2, X, ArrowUpRight } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { AppDrawer } from "@/components/ui/product/app-drawer";
@@ -195,11 +195,32 @@ export function CanvasAssistantSidebar(props: Props) {
     }, [assistant]);
 
     const sessionItems = assistant.sessions.length
-        ? assistant.sessions.map((session) => ({
-              key: session.sessionId,
-              label: session.title || "还没有内容的对话",
-              onClick: () => void assistant.activateSession(session.sessionId),
-          }))
+        ? assistant.sessions.map((item) => {
+              const displayTitle = item.title || "还没有内容的对话";
+              const deleteTitle = item.title || "新对话";
+              return {
+                  key: item.sessionId,
+                  label: (
+                      <div className="flex items-center justify-between gap-2">
+                          <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
+                          <button
+                              type="button"
+                              className="inline-flex size-6 shrink-0 items-center justify-center rounded text-[var(--muted-foreground)] transition hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
+                              aria-label={`删除会话 ${deleteTitle}`}
+                              title="删除对话"
+                              onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  void assistant.deleteSession(item.sessionId);
+                              }}
+                          >
+                              <Trash2 className="size-3.5" aria-hidden="true" />
+                          </button>
+                      </div>
+                  ),
+                  onClick: () => void assistant.activateSession(item.sessionId),
+              };
+          })
         : [{ key: "empty", label: "还没有别的对话", disabled: true }];
 
     const sidePanelEntries = usePluginSlot("canvas.sidePanel");

@@ -1,7 +1,7 @@
 import { Button, InputNumber, Modal, Popover } from "antd";
 import { Tooltip } from "@/components/ui/base/tooltip";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { ArrowLeftRight, ArrowUp, Boxes, Camera, ChevronDown, FileText, ImagePlus, LoaderCircle, Maximize2, Music2, SlidersHorizontal, Video, WandSparkles, X } from "lucide-react";
+import { ArrowLeftRight, ArrowUp, Boxes, Camera, ChevronDown, FileText, ImagePlus, Link2, LoaderCircle, Maximize2, Music2, SlidersHorizontal, Video, WandSparkles, X } from "lucide-react";
 
 import { ModelPicker } from "@/components/model-picker";
 import { modelCapabilityConfigFor, videoReferencesForOperation } from "@/lib/model-capabilities";
@@ -30,7 +30,8 @@ import { CanvasPresetPicker, type CanvasPromptPreset } from "./canvas-preset-pic
 import { CanvasPortraitTexturePopover } from "./canvas-portrait-texture-popover";
 import { CanvasPromptOptimizerDrawer } from "./canvas-prompt-optimizer-drawer";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata, type CanvasWorkspaceMode } from "@/types/canvas";
-import { autoMentionCanvasResourceReferences, canvasResourceMentionToken, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { autoMentionCanvasResourceReferences, buildCanvasResourceReferences, canvasResourceMentionToken, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { useCanvasPickConnectStore } from "@/lib/canvas/canvas-text-mention";
 import { resolveVideoReferenceModeState, stripPromptFirstFrameClauses, togglePromptFirstFrameMention } from "@/lib/canvas/video-reference-mode";
 import { promptOptimizerPlugin, PROMPT_OPTIMIZER_PLUGIN_ID } from "@/lib/plugins/builtin/prompt-optimizer";
 import { syncActiveClientPlugins } from "@/lib/plugins/plugin-client-loader";
@@ -114,7 +115,18 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
     const [paramsExpanded, setParamsExpanded] = useState(false); // #98 决策2：B区参数区折叠状态（手风琴）
     const [promptOptimizerOpen, setPromptOptimizerOpen] = useState(false);
     const [autoLinkEnabled, setAutoLinkEnabled] = useState(true);
-    const resolvedMentionReferences = useResolvedCanvasResourceReferences(mentionReferences, { projectId });
+    const pickConnectTargetNodeId = useCanvasPickConnectStore((state) => state.pickConnectTargetNodeId);
+    const togglePickConnectTargetNodeId = useCanvasPickConnectStore((state) => state.togglePickConnectTargetNodeId);
+    const pickConnectActive = pickConnectTargetNodeId === node.id;
+    const allMentionReferences = useMemo(() => {
+        if (referenceNodes.length <= 1) return mentionReferences;
+        const existingNodeIds = new Set(mentionReferences.map((item) => item.nodeId).filter(Boolean));
+        const unconnected = buildCanvasResourceReferences(referenceNodes, referenceConnections).filter(
+            (item) => item.kind !== "skill" && item.nodeId && item.nodeId !== node.id && !existingNodeIds.has(item.nodeId),
+        );
+        return unconnected.length ? [...mentionReferences, ...unconnected] : mentionReferences;
+    }, [mentionReferences, node.id, referenceConnections, referenceNodes]);
+    const resolvedMentionReferences = useResolvedCanvasResourceReferences(allMentionReferences, { projectId });
     const referenceCheck = useCanvasReferenceCheck(node.id, prompt, resolvedMentionReferences, referenceNodes, referenceConnections);
     const [referenceAction, setReferenceAction] = useState<CanvasReferenceAction | null>(null);
     const missingSubmissionIdentity = ["submitting", "unknown"].includes(node.metadata?.generationSubmissionState || "") && !node.metadata?.taskId && !node.metadata?.taskClientOperationId?.trim();
@@ -230,6 +242,11 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
         setPromptContentHeight(estimatePromptContentHeight(savedPrompt, false));
         setExpandedPromptContentHeight(estimatePromptContentHeight(savedPrompt, true));
         setManualPromptHeight(null);
+        return () => {
+            if (useCanvasPickConnectStore.getState().pickConnectTargetNodeId === node.id) {
+                useCanvasPickConnectStore.getState().setPickConnectTargetNodeId(null);
+            }
+        };
     }, [node.id]);
 
     useEffect(() => {
@@ -323,6 +340,18 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
                 </div>
             )}
             <div className="ml-auto flex shrink-0 items-center justify-end gap-1">
+                {expanded ? (
+                    <CanvasPresetPicker
+                        mode={mode}
+                        skillReferences={skillReferences}
+                        open={expandedPresetOpen}
+                        onOpenChange={setExpandedPresetOpen}
+                        onSelect={applyPreset}
+                        currentPrompt={prompt}
+                        appearance="quiet"
+                        dense
+                    />
+                ) : null}
                 {expanded ? <CanvasPromptFontControl /> : null}
                 {promptActionEntries
                     .filter((entry) => entry.pluginId !== PROMPT_OPTIMIZER_PLUGIN_ID && entry.payload.id !== "prompt-optimizer")
@@ -432,6 +461,8 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
                     autoLinkEnabled={autoLinkEnabled}
                     onAutoMention={() => updatePrompt(autoMentionedPrompt)}
                     onAutoLinkEnabledChange={setAutoLinkEnabled}
+                    pickConnectActive={pickConnectActive}
+                    onTogglePickConnect={() => togglePickConnectTargetNodeId(node.id)}
                     accent={monochromeAccent}
                     compact
                     label={autoLinkLabel}
@@ -480,6 +511,8 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
                         autoLinkEnabled={autoLinkEnabled}
                         onAutoMention={() => updatePrompt(autoMentionedPrompt)}
                         onAutoLinkEnabledChange={setAutoLinkEnabled}
+                        pickConnectActive={pickConnectActive}
+                        onTogglePickConnect={() => togglePickConnectTargetNodeId(node.id)}
                         accent={monochromeAccent}
                         compact={!expanded}
                         label={autoLinkLabel}
@@ -704,6 +737,20 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
                         <VideoReferenceModeSwitch state={videoModeState} theme={theme} onSelectMode={handleSelectVideoReferenceMode} onChange={(patch) => onConfigChange(node.id, patch)} />
                     </div>
                 ) : null}
+                <CanvasPresetPicker mode={mode} skillReferences={skillReferences} open={presetOpen} onOpenChange={setPresetOpen} onSelect={applyPreset} currentPrompt={prompt} appearance="quiet" dense />
+                <Tooltip title={pickConnectActive ? "正在点选连线引用（点击画布节点自动连线并插入 @引用，按 Esc 退出）" : "点选连线引用（或按住 Option/Alt 点击画布节点）"}>
+                    <button
+                        type="button"
+                        aria-pressed={pickConnectActive}
+                        aria-label="点选连线引用"
+                        className="canvas-node-composer-header-action inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5"
+                        style={pickConnectActive ? { background: monochromeAccent, color: theme.canvas.background } : undefined}
+                        onClick={() => togglePickConnectTargetNodeId(node.id)}
+                    >
+                        <Link2 className="size-3" />
+                        <span className="text-[var(--fs-tiny)] font-medium">点选连线</span>
+                    </button>
+                </Tooltip>
                 <CanvasPromptFontControl />
                 {canExpandPrompt ? <button type="button" className="canvas-node-composer-header-action grid size-6 place-items-center rounded-md" onClick={() => setExpandedPromptOpen(true)} aria-label="放大编辑提示词" title="放大编辑提示词"><Maximize2 className="size-3" /></button> : null}
             </div>

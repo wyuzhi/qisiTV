@@ -92,6 +92,22 @@ describe('旧 JSONL 会话只读历史', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  test('deleteSession 删除旧会话文件并清理 current.json，找不到时抛 session_not_found', async () => {
+    const { root, legacy } = scratchHistory();
+    try {
+      writeLegacySession(legacy, 'delete-canvas', 'legacy-del-session', [{ role: 'user', text: '要删的会话' }, { role: 'assistant', text: '回执' }]);
+      legacy.writeCurrentSessionId('delete-canvas', 'legacy-del-session');
+      const result = legacy.deleteSession('delete-canvas', 'legacy-del-session');
+      expect(result.deleted).toBe(true);
+      expect(result.sessionId).toBe('legacy-del-session');
+      expect(legacy.readCurrentSessionId('delete-canvas')).toBe('');
+      expect(await legacy.listCanvasSessions('delete-canvas')).toHaveLength(0);
+      expect(() => legacy.deleteSession('delete-canvas', 'legacy-del-session')).toThrow(/session_not_found/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('旧会话 → Durable 交接说明', () => {

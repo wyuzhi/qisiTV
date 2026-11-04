@@ -341,6 +341,35 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 		hostJSON(c, http.MethodPost, "/sessions/activate", body)
 	})
 
+	r.DELETE("/assistant/sessions/:sessionId", func(c *gin.Context) {
+		if !guard(c, true) {
+			return
+		}
+		canvasID := strings.TrimSpace(c.Query("canvasId"))
+		sessionID := strings.TrimSpace(c.Param("sessionId"))
+		if canvasID == "" {
+			_, payload, valid := readAssistantBody(c, struct {
+				CanvasID string `json:"canvasId"`
+			}{})
+			if !valid {
+				return
+			}
+			canvasID = strings.TrimSpace(payload.CanvasID)
+		}
+		if !assistantSessionIDPattern.MatchString(sessionID) {
+			fail(c, http.StatusBadRequest, app.BadAuthRequest("sessionId 无效"))
+			return
+		}
+		if _, allowed := requireOwnedCanvas(c, canvasID); !allowed {
+			return
+		}
+		if !stopAssistantContinuationsForIntent(c, svc, host, canvasID, sessionID) {
+			return
+		}
+		body, _ := json.Marshal(map[string]string{"canvasId": canvasID, "sessionId": sessionID})
+		hostJSON(c, http.MethodDelete, "/sessions", body)
+	})
+
 	r.GET("/assistant/history", func(c *gin.Context) {
 		if !guard(c, false) {
 			return

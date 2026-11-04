@@ -8,6 +8,7 @@ import {
     Clipboard,
     CloudUpload,
     Copy,
+    Download,
     FolderOpen,
     FolderPlus,
     Image as ImageIcon,
@@ -82,6 +83,8 @@ type CanvasNodeContextMenuProps = {
     onSpreadSelection?: () => void;
     onCopySelection?: () => void;
     onDeleteSelection?: () => void;
+    downloadableSelectionCount?: number;
+    onBatchDownloadSelection?: () => void;
 };
 
 export function CanvasNodeContextMenu({
@@ -122,6 +125,8 @@ export function CanvasNodeContextMenu({
     onSpreadSelection,
     onCopySelection,
     onDeleteSelection,
+    downloadableSelectionCount = 0,
+    onBatchDownloadSelection,
 }: CanvasNodeContextMenuProps) {
     const theme = canvasThemes[useActiveTheme()];
     const [addOpen, setAddOpen] = useState(false);
@@ -218,6 +223,7 @@ export function CanvasNodeContextMenu({
                             {hasMultiSelection ? (
                                 <>
                                     <MenuButton icon={<LayoutTemplate className="size-4" />} label="自适应整理画布" detail="保持相对布局并加大边距" disabled={!onSpreadSelection} onClick={() => onSpreadSelection && runAction(onSpreadSelection)} />
+                                    <MenuButton icon={<Download className="size-4" />} label={downloadableSelectionCount ? `批量下载素材 (${downloadableSelectionCount})` : "批量下载素材"} disabled={!downloadableSelectionCount || !onBatchDownloadSelection} onClick={() => onBatchDownloadSelection && runAction(onBatchDownloadSelection)} />
                                     <MenuDivider />
                                 </>
                             ) : null}
@@ -235,6 +241,7 @@ export function CanvasNodeContextMenu({
                             <MenuHeader title={`已选 ${selectedCount} 个节点`} />
                             <MenuSection label="选区" />
                             <MenuButton icon={<LayoutTemplate />} label="自适应整理画布" detail="保持相对布局并加大边距" disabled={!onSpreadSelection} onClick={() => onSpreadSelection && runAction(onSpreadSelection)} />
+                            <MenuButton icon={<Download />} label={downloadableSelectionCount ? `批量下载素材 (${downloadableSelectionCount})` : "批量下载素材"} disabled={!downloadableSelectionCount || !onBatchDownloadSelection} onClick={() => onBatchDownloadSelection && runAction(onBatchDownloadSelection)} />
                             <MenuDivider />
                             <MenuButton icon={<Copy />} label={`复制 ${selectedCount} 个节点`} shortcut="⌘C" disabled={!onCopySelection} onClick={() => onCopySelection && runAction(onCopySelection)} />
                             <MenuButton icon={<Trash2 />} label={`删除 ${selectedCount} 个节点`} danger disabled={!onDeleteSelection} onClick={() => onDeleteSelection && runAction(onDeleteSelection)} />
@@ -513,7 +520,7 @@ function MenuDivider() {
 }
 
 function getContextMenuPosition(menu: ContextMenuState, hasMultiSelection = false) {
-    if (typeof window === "undefined") return { left: menu.x, top: menu.y };
+    if (typeof window === "undefined" || typeof document === "undefined") return { left: menu.x, top: menu.y };
     const width = 224;
     // Text/media node menus contain several action groups. Reserve enough
     // vertical space before clamping so the destructive action stays inside

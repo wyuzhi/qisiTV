@@ -291,6 +291,8 @@ export function agentAssistantFailureText(reason: string | undefined, fallback =
             return "当前页面无法使用创作助手，请重新打开画布";
         case "session_busy":
             return "上一条消息还在处理中，请等它结束";
+        case "session_not_found":
+            return "没找到这条对话记录，可能已经被删除";
         case "session_not_current":
             return "你已经换到别的对话了，请重新发送这条消息";
         case "session_not_running":
@@ -331,6 +333,17 @@ export async function activateAssistantSession(canvasId: string, sessionId: stri
     const data = await http.post<{ sessionId: string }>("/assistant/sessions/activate", { canvasId, sessionId }, await uiSessionConfig());
     if (!data?.sessionId) throw new Error("没能切换对话，请重试");
     return data.sessionId;
+}
+
+export async function deleteAssistantSession(canvasIdOrSessionId: string, maybeSessionId?: string): Promise<{ deleted: boolean; sessionId: string; currentSessionId: string | null }> {
+    const hasCanvas = typeof maybeSessionId === "string";
+    const canvasId = hasCanvas ? canvasIdOrSessionId : "";
+    const sessionId = hasCanvas ? maybeSessionId : canvasIdOrSessionId;
+    const query = canvasId ? `?canvasId=${encodeURIComponent(canvasId)}` : "";
+    return http.delete<{ deleted: boolean; sessionId: string; currentSessionId: string | null }>(
+        `/assistant/sessions/${encodeURIComponent(sessionId)}${query}`,
+        await uiSessionConfig(),
+    );
 }
 
 export async function getAssistantHistory(canvasId: string, sessionId?: string): Promise<AssistantHistory> {
