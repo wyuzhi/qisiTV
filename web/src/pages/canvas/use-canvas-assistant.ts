@@ -17,6 +17,7 @@ import {
     AgentStreamDetachedError,
     cancelAgentChat,
     createAssistantSession,
+    deleteAssistantSession,
     getAgentHostStatus,
     getAssistantHistory,
     listAssistantSessions,
@@ -690,6 +691,47 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
         }
     }, [loadHistory, rerenderIfActive, runFor]);
 
+    const deleteSession = useCallback(async (sessionId: string) => {
+        const targetCanvas = activeCanvasRef.current;
+        const run = runFor(targetCanvas);
+        if (run.streaming || run.sessionBusy || !sessionId) return false;
+        run.sessionBusy = true;
+        ++run.historyRequest;
+        rerenderIfActive(targetCanvas);
+        try {
+            const result = await deleteAssistantSession(targetCanvas, sessionId);
+            run.sessions = run.sessions.filter((item) => item.sessionId !== sessionId);
+            if (run.sessionId === sessionId) {
+                const nextSessionId = result?.currentSessionId ?? run.sessions[0]?.sessionId ?? null;
+                run.sessionId = nextSessionId;
+                run.recovery = null;
+                run.turns = [];
+                run.reasoning = [];
+                run.reasoningOpen = {};
+                run.plan = null;
+                run.error = null;
+                run.pendingUserText = null;
+                run.pendingContinuationId = null;
+                run.lastSent = null;
+                run.turnStatus = {};
+                if (nextSessionId) {
+                    run.historyLoaded = false;
+                    await loadHistory(targetCanvas, nextSessionId);
+                } else {
+                    run.historyLoaded = true;
+                    run.historyError = null;
+                }
+            }
+            return true;
+        } catch {
+            run.error = "没能删除对话，当前对话仍然保留。请重试。";
+            return false;
+        } finally {
+            run.sessionBusy = false;
+            rerenderIfActive(targetCanvas);
+        }
+    }, [loadHistory, rerenderIfActive, runFor]);
+
     const undoTurn = useCallback(async (turnId: string) => {
         const targetCanvas = activeCanvasRef.current;
         const run = runFor(targetCanvas);
@@ -781,6 +823,8 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
         dismissError,
         startNewSession,
         activateSession,
+        deleteSession,
+        handleDeleteSession: deleteSession,
         undoTurn,
         restartHost,
     };

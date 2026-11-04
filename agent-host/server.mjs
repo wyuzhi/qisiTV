@@ -475,6 +475,37 @@ const server = http.createServer(async (req, res) => {
       respond(res, 200, { sessionId });
       return;
     }
+    if (req.method === 'DELETE' && (url.pathname === '/sessions' || url.pathname.startsWith('/sessions/'))) {
+      const rawBody = await readBody(req);
+      const body = rawBody ? JSON.parse(rawBody) : {};
+      const pathSessionId = url.pathname.startsWith('/sessions/') ? decodeURIComponent(url.pathname.slice('/sessions/'.length)) : '';
+      const canvasId = String(body.canvasId || url.searchParams.get('canvasId') || '').trim();
+      const sessionId = String(body.sessionId || pathSessionId || url.searchParams.get('sessionId') || '').trim();
+      if (!canvasId || !sessionId) { respond(res, 400, { code: 400, reason: 'invalid_request' }); return; }
+      if (liveEntry(canvasId)?.busy) { respond(res, 409, { code: 409, reason: 'session_busy' }); return; }
+      if (isDurableSessionId(sessionId)) {
+        await durable.deleteSession(canvasId, sessionId);
+      } else {
+        legacy.deleteSession(canvasId, sessionId);
+      }
+      let nextActive = currentId(canvasId) || null;
+      if (!nextActive) {
+        const list = [...await legacy.listCanvasSessions(canvasId), ...await durable.listCanvasSessions(canvasId)]
+          .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+        if (list.length > 0) {
+          const nextId = list[0].sessionId;
+          if (isDurableSessionId(nextId)) {
+            const entry = await durable.activateSession(canvasId, nextId);
+            nextActive = entry.sessionId;
+          } else {
+            legacy.writeCurrentSessionId(canvasId, nextId);
+            nextActive = nextId;
+          }
+        }
+      }
+      respond(res, 200, { deleted: true, sessionId, currentSessionId: nextActive });
+      return;
+    }
     if (req.method === 'GET' && url.pathname === '/history') {
       const canvasId = String(url.searchParams.get('canvasId') || '').trim();
       const requested = String(url.searchParams.get('sessionId') || '').trim();
