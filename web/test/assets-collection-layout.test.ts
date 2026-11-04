@@ -22,15 +22,16 @@ describe("asset library category sidebar", () => {
 });
 
 describe("asset upload entry points", () => {
-    test("empty state opens the native image/video picker and uploads without an intermediate modal", () => {
+    test("empty state opens the native image/video/audio picker and uploads without an intermediate modal", () => {
         const page = readFileSync(resolve(import.meta.dir, "../src/pages/assets/index.tsx"), "utf8");
         const handler = readFileSync(resolve(import.meta.dir, "../src/services/workspace-asset-upload.ts"), "utf8");
         expect(page).toContain("<AssetsEmptyState onImport={() => assetUploadInputRef.current?.click()} />");
-        expect(page).toContain('accept="image/*,video/*"');
+        expect(page).toContain('accept="image/*,video/*,audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg"');
         expect(page).toContain("await uploadWorkspaceAssetFiles(files, folderId)");
         expect(page).toContain('label: "上传资产"');
         expect(handler).toContain("uploadMediaFile(file, \"video\"");
-        expect(handler).toContain("请选择图片或视频文件");
+        expect(handler).toContain("uploadMediaFile(file, \"audio\"");
+        expect(handler).toContain("请选择图片、视频或音频文件");
         expect(page).not.toContain("AssetBatchUploadModal");
         expect(page).not.toContain("batchUploadOpen");
     });
