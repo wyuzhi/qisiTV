@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { App, Button, Input } from "antd";
+import { App, Button, Input, Switch } from "antd";
 import { FolderOpen } from "lucide-react";
+import { getAutoDownloadGeneratedMedia, setAutoDownloadGeneratedMedia } from "@/lib/auto-download-preference";
+import { onStorageNamespaceChange } from "@/lib/user-scope";
 import { getDesktopAppBinding, type DesktopStorageUsage } from "@/services/desktop-runtime";
 import {
     DEFAULT_CANVAS_DOCUMENT_LIMIT_MB,
@@ -29,7 +31,9 @@ export function StorageSettingsPane() {
     const [canvasLimitInput, setCanvasLimitInput] = useState<string>(() => String(readLocalCanvasDocumentLimitMB()));
     const [savingCanvasLimit, setSavingCanvasLimit] = useState(false);
     const [canvasLimitError, setCanvasLimitError] = useState("");
+    const [autoDownloadGeneratedMedia, setAutoDownloadGeneratedMediaState] = useState<boolean>(() => getAutoDownloadGeneratedMedia());
     const [errorSummary, ...errorDetails] = error.split("\n\n");
+    useEffect(() => onStorageNamespaceChange(() => setAutoDownloadGeneratedMediaState(getAutoDownloadGeneratedMedia())), []);
     useEffect(() => {
         let active = true;
         void getCanvasDocumentLimitMB().then((limitMB) => {
@@ -157,6 +161,30 @@ export function StorageSettingsPane() {
         });
     return (
         <>
+            <section className="settings-section storage-settings-block space-y-4" aria-label="生成结果保存设置">
+                <div className="settings-pane-header">
+                    <div className="min-w-0">
+                        <h2>生成结果保存</h2>
+                    </div>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0 space-y-1">
+                        <div className="text-sm font-medium">生成完成后自动下载到本地</div>
+                        <p className="text-sm leading-6 text-foreground/60">
+                            画布生图、生视频、生音频任务完成后，自动将结果文件保存到浏览器默认下载目录
+                        </p>
+                    </div>
+                    <Switch
+                        checked={autoDownloadGeneratedMedia}
+                        aria-label="生成完成后自动下载到本地"
+                        onChange={(checked) => {
+                            setAutoDownloadGeneratedMedia(checked);
+                            setAutoDownloadGeneratedMediaState(checked);
+                            message.success(checked ? "已开启生成完成后自动下载" : "已关闭生成完成后自动下载");
+                        }}
+                    />
+                </div>
+            </section>
             <section className="settings-section storage-settings-block space-y-4" aria-label="画布容量设置">
                 <div className="settings-pane-header">
                     <div className="min-w-0">
