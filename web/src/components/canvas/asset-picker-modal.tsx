@@ -72,8 +72,8 @@ export function AssetPickerModal({ open, multiple = true, onInsert, onClose }: P
             confirmLabel={(count) => `插入已选素材${count ? `（${count}）` : ""}`}
             emptyDescription="先在素材库中添加图片、视频、音频或文本。"
             onClose={onClose}
-            onConfirm={async (ids) => {
-                await onInsert(assetPickerItemsToInsertPayloads(ids, items));
+            onConfirm={async (ids, selectedItems) => {
+                await onInsert(assetPickerItemsToInsertPayloads(ids, [...items, ...selectedItems]));
                 onClose();
             }}
         />

@@ -88,8 +88,17 @@ function captureVideoPosterNow(source: string, options: CaptureVideoPosterOption
                 fail(abortError());
                 return;
             }
-            void prepareVideoPosterFrame(video, signal)
-                .then(() => capturePresentedVideoPoster(video, document.createElement("canvas"), options))
+            void prepareVideoPosterFrame(video, 0, signal)
+                .then(async () => {
+                    const canvas = document.createElement("canvas");
+                    const first = await capturePresentedVideoPoster(video, canvas, options);
+                    if (first.poster && isMostlyBlackCanvas(canvas) && Number.isFinite(video.duration) && video.duration > 0.25) {
+                        const fallbackMs = Math.min(350, Math.max(120, Math.round(video.duration * 1000 * 0.15)));
+                        await prepareVideoPosterFrame(video, fallbackMs, signal);
+                        return capturePresentedVideoPoster(video, canvas, options);
+                    }
+                    return first;
+                })
                 .then((captured) => finish({ ...metadata, ...captured }))
                 .catch((error) => {
                     if (error instanceof DOMException && error.name === "AbortError") fail(error);
@@ -101,8 +110,8 @@ function captureVideoPosterNow(source: string, options: CaptureVideoPosterOption
     });
 }
 
-async function prepareVideoPosterFrame(video: HTMLVideoElement, signal?: AbortSignal) {
-    const targetSeconds = videoFrameSeekSeconds(0, video.duration * 1000);
+async function prepareVideoPosterFrame(video: HTMLVideoElement, targetMs = 0, signal?: AbortSignal) {
+    const targetSeconds = videoFrameSeekSeconds(targetMs, video.duration * 1000);
     if (Math.abs(video.currentTime - targetSeconds) <= 0.0005) return;
     await new Promise<void>((resolve, reject) => {
         const cleanup = () => {
@@ -123,6 +132,34 @@ async function prepareVideoPosterFrame(video: HTMLVideoElement, signal?: AbortSi
         signal?.addEventListener("abort", handleAbort, { once: true });
         video.currentTime = targetSeconds;
     });
+}
+
+export function isMostlyBlackCanvas(canvas: HTMLCanvasElement): boolean {
+    try {
+        const context = canvas.getContext("2d");
+        if (!context || typeof context.getImageData !== "function" || canvas.width <= 0 || canvas.height <= 0) return false;
+        const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
+        if (!data || !data.length) return false;
+        const cols = Math.min(8, width);
+        const rows = Math.min(8, height);
+        let luminanceSum = 0;
+        let maxLuminance = 0;
+        let samples = 0;
+        for (let r = 0; r < rows; r += 1) {
+            const y = Math.min(height - 1, Math.floor(((r + 0.5) * height) / rows));
+            for (let c = 0; c < cols; c += 1) {
+                const x = Math.min(width - 1, Math.floor(((c + 0.5) * width) / cols));
+                const idx = (y * width + x) * 4;
+                const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+                luminanceSum += lum;
+                if (lum > maxLuminance) maxLuminance = lum;
+                samples += 1;
+            }
+        }
+        return samples > 0 && luminanceSum / samples < 6 && maxLuminance < 16;
+    } catch {
+        return false;
+    }
 }
 
 export async function capturePresentedVideoPoster(

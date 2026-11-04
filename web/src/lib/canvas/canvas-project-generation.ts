@@ -270,6 +270,9 @@ export function resetGenerationTaskMetadata(metadata: CanvasNodeMetadata | undef
     delete next.taskReceiptRecorded;
     delete next.taskCreatedAt;
     delete next.taskUpdatedAt;
+    delete next.generationFailure;
+    delete next.taskOutcomeSource;
+    delete next.processingLabel;
     return next;
 }
 
@@ -667,5 +670,5 @@ export function sourceNodeReferenceImages(node: CanvasNodeData | null) {
 }
 
 export function isAudioFile(file: File) {
-    return file.type.startsWith("audio/") || /\.(mp3|wav)$/i.test(file.name);
+    return file.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|flac|ogg|opus)$/i.test(file.name);
 }

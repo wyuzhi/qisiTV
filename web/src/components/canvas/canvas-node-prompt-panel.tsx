@@ -31,7 +31,7 @@ import { CanvasPortraitTexturePopover } from "./canvas-portrait-texture-popover"
 import { CanvasPromptOptimizerDrawer } from "./canvas-prompt-optimizer-drawer";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata, type CanvasWorkspaceMode } from "@/types/canvas";
 import { autoMentionCanvasResourceReferences, buildCanvasResourceReferences, canvasResourceMentionToken, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
-import { useCanvasPickConnectStore } from "@/lib/canvas/canvas-text-mention";
+import { getCanvasNodePromptSelection, insertCanvasResourceMentionAtSelection, setCanvasNodePromptSelection, useCanvasPickConnectStore } from "@/lib/canvas/canvas-text-mention";
 import { resolveVideoReferenceModeState, stripPromptFirstFrameClauses, togglePromptFirstFrameMention } from "@/lib/canvas/video-reference-mode";
 import { promptOptimizerPlugin, PROMPT_OPTIMIZER_PLUGIN_ID } from "@/lib/plugins/builtin/prompt-optimizer";
 import { syncActiveClientPlugins } from "@/lib/plugins/plugin-client-loader";
@@ -129,6 +129,8 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
     const resolvedMentionReferences = useResolvedCanvasResourceReferences(allMentionReferences, { projectId });
     const referenceCheck = useCanvasReferenceCheck(node.id, prompt, resolvedMentionReferences, referenceNodes, referenceConnections);
     const [referenceAction, setReferenceAction] = useState<CanvasReferenceAction | null>(null);
+    const [caretRequest, setCaretRequest] = useState<{ offset: number; key: number } | null>(null);
+    const promptSelectionRef = useRef<{ start: number; end: number } | null>(null);
     const missingSubmissionIdentity = ["submitting", "unknown"].includes(node.metadata?.generationSubmissionState || "") && !node.metadata?.taskId && !node.metadata?.taskClientOperationId?.trim();
     const needsRecoverySection = missingSubmissionIdentity || (!isRunning && isNodeRegenerateBlocked(node.metadata));
     const activeReferences = useMemo(() => resolvedMentionReferences.filter((item) => item.active && item.kind !== "skill"), [resolvedMentionReferences]);
@@ -236,6 +238,9 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
 
     useEffect(() => {
         setReferenceAction(null);
+        setCaretRequest(null);
+        promptSelectionRef.current = null;
+        setCanvasNodePromptSelection(node.id, null);
         setExpandedPromptOpen(false);
         setExpandedPresetOpen(false);
         setExpandedModalSize(null);
@@ -243,6 +248,7 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
         setExpandedPromptContentHeight(estimatePromptContentHeight(savedPrompt, true));
         setManualPromptHeight(null);
         return () => {
+            setCanvasNodePromptSelection(node.id, null);
             if (useCanvasPickConnectStore.getState().pickConnectTargetNodeId === node.id) {
                 useCanvasPickConnectStore.getState().setPickConnectTargetNodeId(null);
             }
@@ -279,15 +285,13 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
     };
 
     const insertPromptReference = (reference: CanvasResourceReference) => {
-        const insertText = `${canvasResourceMentionToken(reference)} `;
-        const pendingMentionMatch = /@[^\s@，。！？、,.!?;:]*\s*$/.exec(prompt);
-        if (pendingMentionMatch) {
-            const prefix = prompt.slice(0, pendingMentionMatch.index).replace(/\s*$/, "");
-            updatePrompt(prefix ? `${prefix} ${insertText}` : insertText);
-            return;
-        }
-        const basePrompt = prompt.replace(/\s*$/, "");
-        updatePrompt(basePrompt ? `${basePrompt} ${insertText}` : insertText);
+        const selection = promptSelectionRef.current ?? getCanvasNodePromptSelection(node.id);
+        const inserted = insertCanvasResourceMentionAtSelection(prompt, reference, selection);
+        const nextSelection = { start: inserted.cursor, end: inserted.cursor };
+        promptSelectionRef.current = nextSelection;
+        setCanvasNodePromptSelection(node.id, nextSelection);
+        updatePrompt(inserted.prompt);
+        setCaretRequest({ offset: inserted.cursor, key: Date.now() });
     };
 
     const submit = () => {
@@ -640,6 +644,11 @@ export function CanvasNodePromptPanel({ projectId, node, isRunning, onPromptChan
                         referenceIssues={referenceCheck.issues}
                         referenceAction={expanded === expandedPromptOpen ? referenceAction : null}
                         onReferenceActionHandled={() => setReferenceAction(null)}
+                        caretRequest={expanded === expandedPromptOpen ? caretRequest : null}
+                        onSelectionRangeChange={(range) => {
+                            promptSelectionRef.current = range;
+                            setCanvasNodePromptSelection(node.id, range);
+                        }}
                         onSelectReference={onAddReference ? (reference) => onAddReference(node.id, reference) : undefined}
                         includeAssetLibrary
                         onChange={updatePrompt}

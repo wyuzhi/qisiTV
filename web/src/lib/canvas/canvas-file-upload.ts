@@ -2,14 +2,14 @@ import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { CanvasNodeType, type CanvasNodeData, type Position } from "@/types/canvas";
 
-export const CANVAS_UPLOAD_ACCEPT = "image/*,video/*,.mp4,.mov,.m4v,.mkv,.webm,.avi,audio/*,.mp3,.wav,text/plain,text/markdown,.txt,.md,.markdown";
+export const CANVAS_UPLOAD_ACCEPT = "image/*,video/*,.mp4,.mov,.m4v,.mkv,.webm,.avi,audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,text/plain,text/markdown,.txt,.md,.markdown,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 export function isTextUploadFile(file: Pick<File, "name" | "type">) {
     return /\.(txt|md|markdown)$/i.test(file.name) || file.type === "text/plain" || file.type === "text/markdown";
 }
 export function uploadNodeType(file: Pick<File, "name" | "type">) {
     if (file.type.startsWith("image/")) return CanvasNodeType.Image;
     if (file.type.startsWith("video/") || /\.(mp4|mov|m4v|mkv|webm|avi)$/i.test(file.name)) return CanvasNodeType.Video;
-    if (file.type.startsWith("audio/") || /\.(mp3|wav)$/i.test(file.name)) return CanvasNodeType.Audio;
+    if (file.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|flac|ogg|opus)$/i.test(file.name)) return CanvasNodeType.Audio;
     if (isTextUploadFile(file)) return CanvasNodeType.Text;
     return null;
 }
