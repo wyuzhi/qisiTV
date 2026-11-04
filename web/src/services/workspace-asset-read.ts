@@ -534,6 +534,16 @@ export function isWorkspaceGeneratedHistoryAsset(asset: Pick<Asset, "kind" | "so
     return asset.source === "生成任务" || typeof asset.metadata?.generationEffectKey === "string";
 }
 
+export function isWorkspacePersonalLibraryAsset(asset: Pick<Asset, "kind" | "source" | "folderId" | "metadata">): boolean {
+    if (!isWorkspaceGeneratedHistoryAsset(asset)) return true;
+    return Boolean(
+        asset.metadata?.savedToLibrary === true ||
+        asset.metadata?.source === "canvas-manual" ||
+        asset.folderId ||
+        asset.metadata?.favorite === true,
+    );
+}
+
 export function workspaceAssetProjectLabel(asset: Pick<Asset, "metadata">) {
     const projectName = asset.metadata?.projectName;
     if (typeof projectName === "string" && projectName.trim()) return projectName.trim();

@@ -603,22 +603,12 @@ export function useCanvasNodeOperations({
         copyNodesToClipboard(new Set(selectedNodeIdsRef.current));
     }, [copyNodesToClipboard, selectedNodeIdsRef]);
 
-    const pasteCopiedNodes = useCallback((position?: Position) => {
-        const clipboard = clipboardRef.current;
-        if (!clipboard?.nodes.length) return false;
-        const center = position || getCanvasCenter();
-        const bounds = clipboard.nodes.reduce((current, node) => ({
-            left: Math.min(current.left, node.position.x),
-            top: Math.min(current.top, node.position.y),
-            right: Math.max(current.right, node.position.x + node.width),
-            bottom: Math.max(current.bottom, node.position.y + node.height),
-        }), { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
-        const dx = center.x - (bounds.left + bounds.right) / 2;
-        const dy = center.y - (bounds.top + bounds.bottom) / 2;
-        const idMap = new Map(clipboard.nodes.map((node, index) => [node.id, `${node.type}-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`]));
-        const copiedSourceIds = new Set(clipboard.nodes.map((node) => node.id));
+    const cloneNodesWithOffset = useCallback((sources: CanvasNodeData[], sourceConnections: CanvasConnection[], dx: number, dy: number, sourceScenes?: DirectorScene[]): string[] => {
+        if (!sources.length) return [];
+        const idMap = new Map(sources.map((node, index) => [node.id, `${node.type}-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`]));
+        const copiedSourceIds = new Set(sources.map((node) => node.id));
         const reservedTitles = new Set(nodesRef.current.map((node) => node.title));
-        const nextNodes = isolateDirectorCopies(clipboard.nodes.map((node) => {
+        const nextNodes = isolateDirectorCopies(sources.map((node) => {
             const metadata = isolateCopiedNodeMetadata(node, idMap);
             const title = nextCopiedNodeTitle(node.title, reservedTitles);
             reservedTitles.add(title);
@@ -637,9 +627,9 @@ export function useCanvasNodeOperations({
                 parentId: node.parentId ? idMap.get(node.parentId) : undefined,
                 metadata,
             };
-        }), idMap, clipboard.directorScenes);
-        // 1) 剪贴板内部连线；2) 仍保留到画布上未复制参考节点的入边（只复制结果节点时常见）。
-        const nextConnections = clipboard.connections.flatMap((connection, index) => {
+        }), idMap, sourceScenes);
+        // 1) 内部连线；2) 仍保留到画布上未复制参考节点的入边（只复制结果节点时常见）。
+        const nextConnections = sourceConnections.flatMap((connection, index) => {
             const fromNodeId = idMap.get(connection.fromNodeId);
             const toNodeId = idMap.get(connection.toNodeId);
             return fromNodeId && toNodeId ? [{ ...connection, id: `conn-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`, fromNodeId, toNodeId }] : [];
@@ -654,7 +644,7 @@ export function useCanvasNodeOperations({
         });
         commitNodes([...nodesRef.current, ...nextNodes]);
         commitConnections([...connectionsRef.current, ...nextConnections]);
-        const sourceByTargetId = new Map(clipboard.nodes.map((sourceNode) => [idMap.get(sourceNode.id), sourceNode]));
+        const sourceByTargetId = new Map(sources.map((sourceNode) => [idMap.get(sourceNode.id), sourceNode]));
         nextNodes.filter((node) => node.type === CanvasNodeType.Drawing).forEach((targetNode) => {
             const sourceNode = sourceByTargetId.get(targetNode.id);
             if (sourceNode) cloneDrawingForNode(sourceNode, targetNode, "绘图副本保存失败，请重新粘贴");
@@ -665,8 +655,40 @@ export function useCanvasNodeOperations({
         ui.setContextMenu(null);
         const primaryNode = nextNodes.find((node) => !node.parentId);
         ui.setDialogNodeId(canOpenCanvasNodePromptPanel(primaryNode) ? primaryNode!.id : null);
-        return true;
-    }, [pageUi, cloneDrawingForNode, commitConnections, commitNodes, connectionsRef, getCanvasCenter, isolateDirectorCopies, nodesRef, projectId, selectNodes]);
+        return Array.from(topLevelIds);
+    }, [pageUi, cloneDrawingForNode, commitConnections, commitNodes, connectionsRef, isolateDirectorCopies, nodesRef, selectNodes]);
+
+    const duplicateNodesByDelta = useCallback((sourceIds: string[], delta: Position): string[] => {
+        if (!sourceIds.length || (delta.x === 0 && delta.y === 0)) return [];
+        const copyIds = new Set(nodesRef.current.filter((node) => sourceIds.includes(node.id) && !node.metadata?.locked).map((node) => node.id));
+        if (!copyIds.size) return [];
+        nodesRef.current.forEach((node) => {
+            if (copyIds.has(node.id) && isFrameNode(node)) {
+                getFrameChildIds(node.id, nodesRef.current).forEach((childId) => {
+                    const child = nodesRef.current.find((item) => item.id === childId);
+                    if (child && !child.metadata?.locked) copyIds.add(childId);
+                });
+            }
+        });
+        const sources = nodesRef.current.filter((node) => copyIds.has(node.id));
+        const sourceConnections = connectionsRef.current.filter((conn) => copyIds.has(conn.fromNodeId) && copyIds.has(conn.toNodeId));
+        return cloneNodesWithOffset(sources, sourceConnections, delta.x, delta.y);
+    }, [cloneNodesWithOffset, connectionsRef, nodesRef]);
+
+    const pasteCopiedNodes = useCallback((position?: Position) => {
+        const clipboard = clipboardRef.current;
+        if (!clipboard?.nodes.length) return false;
+        const center = position || getCanvasCenter();
+        const bounds = clipboard.nodes.reduce((current, node) => ({
+            left: Math.min(current.left, node.position.x),
+            top: Math.min(current.top, node.position.y),
+            right: Math.max(current.right, node.position.x + node.width),
+            bottom: Math.max(current.bottom, node.position.y + node.height),
+        }), { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
+        const dx = center.x - (bounds.left + bounds.right) / 2;
+        const dy = center.y - (bounds.top + bounds.bottom) / 2;
+        return cloneNodesWithOffset(clipboard.nodes, clipboard.connections, dx, dy, clipboard.directorScenes).length > 0;
+    }, [cloneNodesWithOffset, getCanvasCenter]);
 
     const restoreCopiedNodesFromText = useCallback((value: string) => {
         const isMarker = value.startsWith(CANVAS_NODES_CLIPBOARD_PREFIX);
@@ -702,6 +724,7 @@ export function useCanvasNodeOperations({
         deleteConnection,
         deleteNodes,
         duplicateNode,
+        duplicateNodesByDelta,
         hasCopiedNodes,
         pasteCopiedNodes,
         restoreCopiedNodesFromText,

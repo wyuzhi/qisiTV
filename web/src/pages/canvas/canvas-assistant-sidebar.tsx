@@ -139,6 +139,17 @@ export function CanvasAssistantSidebar(props: Props) {
         setSelectionAttached(true);
     }, [selectedNodeIds.join(",")]);
 
+    const [slowStreamingHint, setSlowStreamingHint] = useState(false);
+    useEffect(() => {
+        if (!assistant.streaming || Boolean(assistant.streamed)) {
+            setSlowStreamingHint(false);
+            return;
+        }
+        setSlowStreamingHint(false);
+        const timer = setTimeout(() => setSlowStreamingHint(true), 12_000);
+        return () => clearTimeout(timer);
+    }, [assistant.streaming, assistant.streamed]);
+
     const turnCount = assistant.turns.length;
     useLayoutEffect(() => {
         const node = logRef.current;
@@ -321,14 +332,17 @@ export function CanvasAssistantSidebar(props: Props) {
                             <p className="canvas-assistant-meta" role="status">{item.status === "accepted" ? "助手已收到补充要求。" : item.status === "sending" ? "正在发送补充要求…" : "未能确认收到补充要求。请查看最新回复后再决定是否发送。"}</p>
                         </div>)}
                         {assistant.streaming ? (
-                            <div className="canvas-assistant-working" role="status" aria-live="polite">
-                                <span className="canvas-assistant-working-dots" aria-hidden="true">
-                                    <span />
-                                    <span />
-                                    <span />
-                                </span>
-                                <span className="canvas-assistant-working-text">{assistant.lifecycleNotice || "助手正在处理…"}</span>
-                            </div>
+                            <>
+                                <div className="canvas-assistant-working" role="status" aria-live="polite">
+                                    <span className="canvas-assistant-working-dots" aria-hidden="true">
+                                        <span />
+                                        <span />
+                                        <span />
+                                    </span>
+                                    <span className="canvas-assistant-working-text">{assistant.lifecycleNotice || "助手正在处理…"}</span>
+                                </div>
+                                {slowStreamingHint ? <p className="canvas-assistant-meta" role="status">思考耗时较长，若开启了系统代理或 VPN 请检查网络连通性，也可点击下方停止后重试。</p> : null}
+                            </>
                         ) : null}
                     </div>
                 ) : null}

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { isWorkspaceGeneratedHistoryAsset, isWorkspacePersonalLibraryAsset } from "@/services/workspace-asset-read";
 
 describe("asset library category sidebar", () => {
     test("keeps type, business and folder filters in the product asset workspace", () => {
@@ -184,5 +185,16 @@ describe("generation history card actions", () => {
         expect(page).toContain("selectedHistoryIds");
         expect(css).toContain(".generation-history-select");
         expect(css).toContain(".generation-history-batch-bar");
+    });
+
+    test("supports saving generation history items into personal asset library", () => {
+        const page = readFileSync(resolve(import.meta.dir, "../src/pages/assets/index.tsx"), "utf8");
+        expect(page).toContain("isWorkspacePersonalLibraryAsset");
+        expect(page).toContain("存入资产库");
+        expect(page).toContain("已存资产库");
+        expect(page).toContain('message.success("已存入个人资产库")');
+        expect(isWorkspaceGeneratedHistoryAsset({ kind: "image", source: "生成任务", metadata: { generationEffectKey: "eff-1" } })).toBe(true);
+        expect(isWorkspacePersonalLibraryAsset({ kind: "image", source: "生成任务", metadata: { generationEffectKey: "eff-1" } })).toBe(false);
+        expect(isWorkspacePersonalLibraryAsset({ kind: "image", source: "生成任务", metadata: { generationEffectKey: "eff-1", savedToLibrary: true } })).toBe(true);
     });
 });

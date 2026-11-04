@@ -7,9 +7,11 @@ import { getActiveUserScope, setActiveUserScope } from "@/lib/user-scope";
 import { apiClient } from "@/services/api/request";
 import { resourceFileUrl } from "@/services/api/resources";
 import { loadAssetLibraryPage } from "@/services/local-workspace-sync";
+import { ensureCanvasNodeAsset } from "@/services/project-asset-sync";
 import {
     isUnsavedWorkspaceAsset,
     isWorkspaceGeneratedHistoryAsset,
+    isWorkspacePersonalLibraryAsset,
     loadWorkspaceAssetLibraryPage,
     loadWorkspaceAssetsForUse,
     preserveLegacyCacheOnlyAssetDrafts,
@@ -958,6 +960,52 @@ describe("workspace asset canonical reads", () => {
             expect(page.generatedTotal).toBe(1);
             expect(page.generatedKindCounts.image).toBe(1);
             expect(isWorkspaceGeneratedHistoryAsset(page.assets[0]!)).toBe(true);
+        } finally {
+            restore();
+        }
+    });
+
+    test("decouples uncollected generated history from personal library and promotes on manual save", async () => {
+        const restore = switchScope("owner-a");
+        browserLocal();
+        const generated = {
+            ...sampleAsset("gen-1", "生成过程图"),
+            source: "生成任务",
+            metadata: { source: "generation-task", generationEffectKey: "eff-1", canvasId: "canvas-1", nodeId: "node-1" },
+        } satisfies Asset;
+        const uploaded = sampleAsset("upload-1", "手动上传图");
+        expect(isWorkspaceGeneratedHistoryAsset(generated)).toBe(true);
+        expect(isWorkspacePersonalLibraryAsset(generated)).toBe(false);
+        expect(isWorkspacePersonalLibraryAsset(uploaded)).toBe(true);
+        expect(isWorkspacePersonalLibraryAsset({ ...generated, metadata: { ...generated.metadata, savedToLibrary: true } })).toBe(true);
+        expect(isWorkspacePersonalLibraryAsset({ ...generated, metadata: { ...generated.metadata, source: "canvas-manual" } })).toBe(true);
+        expect(isWorkspacePersonalLibraryAsset({ ...generated, folderId: "folder-1" })).toBe(true);
+        expect(isWorkspacePersonalLibraryAsset({ ...generated, metadata: { ...generated.metadata, favorite: true } })).toBe(true);
+
+        useAssetStore.setState({ assets: [generated] });
+        try {
+            const saved = await withAdapter(
+                async () => envelope({ asset: { id: "gen-1", title: "生成过程图", createdAt: "2026-10-02T00:00:00.000Z", updatedAt: "2026-10-02T00:00:00.000Z" } }),
+                async () => ensureCanvasNodeAsset({
+                    canvasId: "canvas-1",
+                    node: {
+                        id: "node-1",
+                        type: "image" as never,
+                        title: "生成过程图",
+                        position: { x: 0, y: 0 },
+                        width: 8,
+                        height: 8,
+                        metadata: { assetId: "gen-1", content: "/api/resources/res-1/file", storageKey: "resource:res-1" },
+                    },
+                    source: "canvas-manual",
+                }),
+            );
+            expect(saved.assetId).toBe("gen-1");
+            const promoted = useAssetStore.getState().assets.find((item) => item.id === "gen-1")!;
+            expect(promoted.metadata?.savedToLibrary).toBe(true);
+            expect(promoted.metadata?.source).toBe("canvas-manual");
+            expect(isWorkspaceGeneratedHistoryAsset(promoted)).toBe(true);
+            expect(isWorkspacePersonalLibraryAsset(promoted)).toBe(true);
         } finally {
             restore();
         }

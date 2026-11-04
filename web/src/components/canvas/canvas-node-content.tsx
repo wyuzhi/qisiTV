@@ -491,8 +491,24 @@ function VideoNodeContent({ node, theme, mediaActive = false, onMediaPlayRequest
             if (video.videoWidth <= 0 || video.videoHeight <= 0) return;
             recordCanvasVideoDiagnostic(node, "metadata_loaded", video);
             setVideoSize({ width: video.videoWidth, height: video.videoHeight });
-            if (!compatible && fitImageNodeToDecodedSize(node, video.videoWidth, video.videoHeight) !== node) {
-                updateMediaNode?.(node.id, (current) => fitImageNodeToDecodedSize(current, video.videoWidth, video.videoHeight));
+            const actualDurationMs = Number.isFinite(video.duration) && video.duration > 0 ? Math.round(video.duration * 1000) : undefined;
+            const needsDurationUpdate = actualDurationMs !== undefined && (!node.metadata?.durationMs || Math.abs(node.metadata.durationMs - actualDurationMs) > 200);
+            const needsSizeUpdate = !compatible && fitImageNodeToDecodedSize(node, video.videoWidth, video.videoHeight) !== node;
+            if (needsSizeUpdate || needsDurationUpdate) {
+                updateMediaNode?.(node.id, (current) => {
+                    const next = !compatible ? fitImageNodeToDecodedSize(current, video.videoWidth, video.videoHeight) : current;
+                    const currentDuration = next.metadata?.durationMs;
+                    if (actualDurationMs === undefined || (currentDuration && Math.abs(currentDuration - actualDurationMs) <= 200)) {
+                        return next;
+                    }
+                    return {
+                        ...next,
+                        metadata: {
+                            ...next.metadata,
+                            durationMs: actualDurationMs,
+                        },
+                    };
+                });
             }
         };
         video.addEventListener("loadedmetadata", handleLoadedMetadata);
@@ -504,7 +520,7 @@ function VideoNodeContent({ node, theme, mediaActive = false, onMediaPlayRequest
             video.removeEventListener("timeupdate", handleTimeUpdate);
             video.removeEventListener("loadedmetadata", handleLoadedMetadata);
         };
-    }, [node.id, node.width, node.height, node.metadata?.naturalHeight, node.metadata?.naturalWidth, subtitleEntries.length, updateMediaNode, url, compatible]);
+    }, [node.id, node.width, node.height, node.metadata?.durationMs, node.metadata?.naturalHeight, node.metadata?.naturalWidth, subtitleEntries.length, updateMediaNode, url, compatible]);
 
     if (!node.metadata?.content) return <EmptyVideoContent theme={theme} />;
 

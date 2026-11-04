@@ -55,6 +55,7 @@ const instances: FakeFFmpeg[] = [];
 class FakeFFmpeg {
     terminated = false;
     written: string[] = [];
+    commands: string[][] = [];
     execCount = 0;
     readonly started = deferred();
     private blocked: { resolve: (code: number) => void; reject: (error: unknown) => void }[] = [];
@@ -64,8 +65,9 @@ class FakeFFmpeg {
     async writeFile(name: string) { this.written.push(name); }
     async readFile() { return videoBytes; }
     async deleteFile() {}
-    async exec() {
+    async exec(args: string[] = []) {
         this.execCount += 1;
+        this.commands.push(args);
         this.started.resolve();
         return new Promise<number>((resolve, reject) => {
             if (this.terminated) {
@@ -176,4 +178,22 @@ test("warmFFmpeg parks an idle worker that merge can steal", async () => {
     instances[0].finish(0);
     await merging;
     expect(await loadFFmpeg()).toBe(instances[0]);
+});
+
+test("mergeVideos regenerates PTS on concat copy and bounds fallback re-encode with -shortest", async () => {
+    const merging = mergeVideos(inputs);
+    const activeWorker = await worker(0);
+    expect(activeWorker.commands[0]).toEqual([
+        "-fflags", "+genpts", "-f", "concat", "-safe", "0", "-i", "s1_concat.txt",
+        "-c", "copy", "-movflags", "+faststart", "s1_merged.mp4",
+    ]);
+    activeWorker.finish(1);
+    for (let attempt = 0; attempt < 10 && activeWorker.commands.length < 2; attempt += 1) await Promise.resolve();
+    expect(activeWorker.commands[1]).toEqual([
+        "-fflags", "+genpts", "-f", "concat", "-safe", "0", "-i", "s1_concat.txt",
+        "-c:v", "libx264", "-c:a", "aac", "-shortest", "-movflags", "+faststart", "s1_merged.mp4",
+    ]);
+    activeWorker.finish(0);
+    const blob = await merging;
+    expect(blob.type).toBe("video/mp4");
 });

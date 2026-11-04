@@ -33,7 +33,7 @@ import { exportAssets, readAssetPackage } from "./asset-transfer";
 import { startOperation } from "@/stores/use-operation-progress";
 import { assetStorageUsageQueryKey } from "./asset-storage-usage";
 import { loadAssetLibraryPage, localSavedRemotePendingMessage } from "@/services/local-workspace-sync";
-import { isUnsavedWorkspaceAsset, isWorkspaceGeneratedHistoryAsset, usesWorkspaceAssetLibraryApi, WORKSPACE_ASSET_UNLINKED_PROJECT, workspaceAssetAllProjectsCount, workspaceAssetCountSum, workspaceAssetProjectLabel, workspaceAssetProjectOptions, workspaceAssetTraversalTotal } from "@/services/workspace-asset-read";
+import { isUnsavedWorkspaceAsset, isWorkspaceGeneratedHistoryAsset, isWorkspacePersonalLibraryAsset, usesWorkspaceAssetLibraryApi, WORKSPACE_ASSET_UNLINKED_PROJECT, workspaceAssetAllProjectsCount, workspaceAssetCountSum, workspaceAssetProjectLabel, workspaceAssetProjectOptions, workspaceAssetTraversalTotal } from "@/services/workspace-asset-read";
 import { deleteWorkspaceAsset, persistWorkspaceAssetChanges, persistWorkspaceAssetLink } from "@/services/workspace-asset-repository";
 import {
     assignWorkspaceAssetsFolder,
@@ -196,19 +196,19 @@ export default function AssetsPage() {
     const allLibraryAssets = useMemo(() => assets.filter((asset): asset is LibraryAsset => asset.kind !== "entity"), [assets]);
     const activeAssets = useMemo(() => allLibraryAssets.filter((asset) => asset.status !== "archived"), [allLibraryAssets]);
     const localGenerationHistoryCount = useMemo(() => activeAssets.filter(isWorkspaceGeneratedHistoryAsset).length, [activeAssets]);
-    const validAssets = activeAssets;
+    const validAssets = useMemo(() => activeAssets.filter(isWorkspacePersonalLibraryAsset), [activeAssets]);
     const selectedAssets = useMemo(() => validAssets.filter((asset) => selectedIds.includes(asset.id)), [selectedIds, validAssets]);
     useEffect(() => {
         if (batchDeleteOpen && !deletePending && selectedAssets.length === 0) setBatchDeleteOpen(false);
     }, [batchDeleteOpen, deletePending, selectedAssets.length]);
     const localProjectOptions = useMemo(() => {
         const names = new Set<string>();
-        for (const asset of activeAssets) {
+        for (const asset of validAssets) {
             const label = workspaceAssetProjectLabel(asset);
             if (label !== WORKSPACE_ASSET_UNLINKED_PROJECT) names.add(label);
         }
         return Array.from(names).sort((left, right) => left.localeCompare(right, "zh-CN"));
-    }, [activeAssets]);
+    }, [validAssets]);
     const filteredAssets = useMemo(() => {
         const query = keyword.trim().toLowerCase();
         const recentCutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
@@ -287,8 +287,9 @@ export default function AssetsPage() {
         const start = (page - 1) * pageSize;
         return filteredAssets.slice(start, start + pageSize);
     }, [filteredAssets, page, pageSize]);
-    const remotePageAssets = useMemo(() => (assetPageQuery.data?.assets || []).filter((asset): asset is LibraryAsset => asset.kind !== "entity"), [assetPageQuery.data?.assets]);
-    const remoteTotal = assetPageQuery.data?.total ?? 0;
+    const remotePageAssets = useMemo(() => (assetPageQuery.data?.assets || []).filter((asset): asset is LibraryAsset => asset.kind !== "entity" && (sourceTab !== "personal" || isWorkspacePersonalLibraryAsset(asset))), [assetPageQuery.data?.assets, sourceTab]);
+    const remoteFilteredOut = useMemo(() => (assetPageQuery.data?.assets || []).filter((asset) => asset.kind !== "entity" && sourceTab === "personal" && !isWorkspacePersonalLibraryAsset(asset)).length, [assetPageQuery.data?.assets, sourceTab]);
+    const remoteTotal = Math.max(0, (assetPageQuery.data?.total ?? 0) - remoteFilteredOut);
     const remoteReady = canonicalReads && assetPageQuery.isSuccess && assetPageQuery.data !== undefined;
     const visibleAssets = useMemo(() => remoteReady ? remotePageAssets : localVisibleAssets, [remoteReady, remotePageAssets, localVisibleAssets]);
     const orderedVisibleAssets = useMemo(() => {
@@ -676,6 +677,22 @@ export default function AssetsPage() {
         }
     };
 
+    const saveHistoryAssetToLibrary = async (asset: LibraryAsset) => {
+        if (isWorkspacePersonalLibraryAsset(asset)) return;
+        const metadata = { ...asset.metadata, savedToLibrary: true };
+        const nextAsset = { ...asset, metadata } as LibraryAsset;
+        try {
+            updateAsset(asset.id, { metadata });
+            await persistWorkspaceAssetLink({ asset: nextAsset as Asset });
+            setHistoryAssets((current) => current.map((item) => (item.id === asset.id ? nextAsset : item)));
+            queryClient.setQueriesData<Awaited<ReturnType<typeof loadAssetLibraryPage>>>({ queryKey: assetLibraryQueryKey() }, (current) => current && Array.isArray(current.assets) ? { ...current, assets: current.assets.map((item) => (item.id === asset.id ? { ...item, metadata } : item)) } : current);
+            await Promise.all([invalidateAssetLibrary(), queryClient.invalidateQueries({ queryKey: assetPickerQueryKey() })]);
+            message.success("已存入个人资产库");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "存入个人资产库失败");
+        }
+    };
+
     const deleteHistoryAsset = async (asset: LibraryAsset) => {
         try {
             await deleteWorkspaceAsset(asset.id);
@@ -796,6 +813,7 @@ export default function AssetsPage() {
                     setHistoryPage((current) => current + 1);
                 } : undefined}
                 onSelectPersonal={() => navigate("/assets?tab=personal")}
+                onSaveToLibrary={saveHistoryAssetToLibrary}
                 onDownload={downloadImage}
                 onDelete={deleteHistoryAsset}
             />
@@ -1481,33 +1499,10 @@ function AssetsBatchBar({
 }
 
 function GenerationHistorySurface({
-    assets,
-    generatedTotal,
-    generatedKindCounts,
-    libraryTotal,
-    kind,
-    hasMore = false,
-    loadingMore = false,
-    loadMoreError = false,
-    onKindChange,
-    onLoadMore,
-    onSelectPersonal,
-    onDownload,
-    onDelete,
+    assets, generatedTotal, generatedKindCounts, libraryTotal, kind, hasMore = false, loadingMore = false, loadMoreError = false, onKindChange, onLoadMore, onSelectPersonal, onSaveToLibrary, onDownload, onDelete,
 }: {
-    assets: LibraryAsset[];
-    generatedTotal: number;
-    generatedKindCounts: Record<string, number>;
-    libraryTotal: number;
-    kind?: GenerationHistoryKind;
-    hasMore?: boolean;
-    loadingMore?: boolean;
-    loadMoreError?: boolean;
-    onKindChange?: (kind: GenerationHistoryKind) => void;
-    onLoadMore?: () => void;
-    onSelectPersonal: () => void;
-    onDownload: (asset: LibraryAsset) => void;
-    onDelete: (asset: LibraryAsset) => Promise<boolean | undefined>;
+    assets: LibraryAsset[]; generatedTotal: number; generatedKindCounts: Record<string, number>; libraryTotal: number; kind?: GenerationHistoryKind; hasMore?: boolean; loadingMore?: boolean; loadMoreError?: boolean;
+    onKindChange?: (kind: GenerationHistoryKind) => void; onLoadMore?: () => void; onSelectPersonal: () => void; onSaveToLibrary: (asset: LibraryAsset) => Promise<void> | void; onDownload: (asset: LibraryAsset) => void; onDelete: (asset: LibraryAsset) => Promise<boolean | undefined>;
 }) {
     const [localKind, setLocalKind] = useState<GenerationHistoryKind>("all");
     const [sortDescending, setSortDescending] = useState(true);
@@ -1584,6 +1579,7 @@ function GenerationHistorySurface({
             <div className="generation-history-content">
                 {selectedHistoryAssets.length ? <div className="generation-history-batch-bar" role="toolbar" aria-label="生成历史批量操作">
                     <span>已选择 {selectedHistoryAssets.length} 项</span>
+                    <button type="button" onClick={() => selectedHistoryAssets.forEach((asset) => void onSaveToLibrary(asset))}><FolderPlus className="size-3.5" />存入资产库</button>
                     <button type="button" onClick={() => selectedHistoryAssets.forEach(onDownload)}><Download className="size-3.5" />下载</button>
                     <button type="button" className="is-danger" onClick={() => setPendingDelete(selectedHistoryAssets)}><Trash2 className="size-3.5" />永久删除</button>
                     <button type="button" className="is-clear" onClick={clearHistorySelection}>取消选择</button>
@@ -1592,7 +1588,9 @@ function GenerationHistorySurface({
                     <section key={date} className="generation-history-group">
                         <h2>{date}</h2>
                         <div className="generation-history-grid">
-                            {visibleHistoryAssets.filter((asset) => historyDay(asset.updatedAt) === date).map((asset) => (
+                            {visibleHistoryAssets.filter((asset) => historyDay(asset.updatedAt) === date).map((asset) => {
+                                const savedToLibrary = isWorkspacePersonalLibraryAsset(asset);
+                                return (
                                 <article key={asset.id} data-onboarding-task-id={asset.metadata?.taskId} className="generation-history-card" title={asset.title} aria-label={`查看生成结果：${asset.title}`} role="button" tabIndex={0} onClick={() => setPreviewAsset(asset)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setPreviewAsset(asset); } }}>
                                     <div className="generation-history-thumb">
                                         <AssetMediaPreview asset={asset} alt={asset.title} className="size-full object-cover" hoverPlayDelayMs={100} fallback={<GenerationHistoryMissingPreview asset={asset} />} />
@@ -1600,13 +1598,15 @@ function GenerationHistorySurface({
                                         {asset.kind === "video" || asset.kind === "audio" ? <span className={cn("generation-history-duration", asset.kind === "video" && "is-video-duration")}>{formatAssetClock(asset.data.durationMs)}</span> : null}
                                         <button type="button" className={cn("generation-history-select", selectedHistoryIds.has(asset.id) && "is-selected")} aria-label={`选择 ${asset.title}`} aria-pressed={selectedHistoryIds.has(asset.id)} onClick={(event) => { event.stopPropagation(); toggleHistorySelection(asset.id); }}>{selectedHistoryIds.has(asset.id) ? <Check className="size-4" /> : null}</button>
                                         <div className="generation-history-hover-actions" aria-label="生成结果操作">
+                                            <button type="button" disabled={savedToLibrary} aria-label={`${savedToLibrary ? "已存资产库" : "存入资产库"} ${asset.title}`} title={savedToLibrary ? "已存资产库" : "存入资产库"} onClick={(event) => { event.stopPropagation(); void onSaveToLibrary(asset); }}>{savedToLibrary ? <Check className="size-4" /> : <FolderPlus className="size-4" />}<span className="sr-only">{savedToLibrary ? "已存资产库" : "存入资产库"}</span></button>
                                             <button type="button" aria-label={`下载 ${asset.title}`} title="下载" onClick={(event) => { event.stopPropagation(); onDownload(asset); }}><Download className="size-4" /></button>
                                             <button type="button" aria-label={`永久删除 ${asset.title}`} title="永久删除" onClick={(event) => { event.stopPropagation(); setPendingDelete([asset]); }}><Trash2 className="size-4" /></button>
                                         </div>
                                     </div>
                                     <div className="generation-history-card-meta"><strong>{asset.title}</strong><span>{asset.kind === "video" ? "视频" : asset.kind === "audio" ? "音频" : "图片"} · 本地</span></div>
                                 </article>
-                            ))}
+                                );
+                            })}
                         </div>
                     </section>
                 )) : <WorkspaceState icon="assets" compact title={historyAssets.length ? "没有匹配的生成结果" : "暂无生成历史"} description={historyAssets.length ? "切换类型后再试。" : "本地生成结果会自动出现在这里。"} />}

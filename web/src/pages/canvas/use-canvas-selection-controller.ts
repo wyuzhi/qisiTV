@@ -26,6 +26,7 @@ type UseCanvasSelectionControllerOptions = {
     onNodeBringToFront?: (nodeId: string) => void;
     onNodeClick: (node: CanvasNodeData) => void;
     onNodeDragEnd?: (nodeId: string) => void;
+    onAltDragDuplicate?: (nodeIds: string[], delta: Position) => void;
     onBatchConnectionTarget?: (event: ReactMouseEvent | ReactPointerEvent, nodeId: string) => boolean;
     onLinkedFolderDrop?: (folder: CanvasNodeData, nodes: CanvasNodeData[]) => void;
     onNodeDrop?: (nodeIds: string[], point: Position) => boolean;
@@ -37,6 +38,7 @@ type UseCanvasSelectionControllerOptions = {
 type DragState = {
     isDraggingNode: boolean;
     hasMoved: boolean;
+    altDuplicate?: boolean;
     openPanelOnClick: boolean;
     startX: number;
     startY: number;
@@ -53,6 +55,7 @@ type SelectionGestureState =
 const EMPTY_DRAG_STATE: DragState = {
     isDraggingNode: false,
     hasMoved: false,
+    altDuplicate: false,
     openPanelOnClick: true,
     startX: 0,
     startY: 0,
@@ -85,6 +88,7 @@ export function useCanvasSelectionController({
     onNodeBringToFront,
     onNodeClick,
     onNodeDragEnd,
+    onAltDragDuplicate,
     onBatchConnectionTarget,
     onLinkedFolderDrop,
     onNodeDrop,
@@ -173,8 +177,10 @@ export function useCanvasSelectionController({
         onNodeBringToFront?.(nodeId);
         pageUi.getState().setSelectedConnectionId(null);
         const currentNodes = nodesRef.current;
+        const clickedNode = currentNodes.find((node) => node.id === nodeId);
         const nextSelected = new Set(selectedNodeIdsRef.current);
-        const isSubtractClick = event.altKey;
+        const isAltDuplicate = event.altKey && !event.shiftKey && !event.metaKey && !event.ctrlKey && !clickedNode?.metadata?.locked;
+        const isSubtractClick = event.altKey && !isAltDuplicate;
         const isMultiSelectClick = !isSubtractClick && (event.shiftKey || event.metaKey || event.ctrlKey);
         const isSelectionModifier = isSubtractClick || isMultiSelectClick;
         onNodeInteractionStart(isSelectionModifier);
@@ -195,7 +201,6 @@ export function useCanvasSelectionController({
             return;
         }
 
-        const clickedNode = currentNodes.find((node) => node.id === nodeId);
         if (clickedNode?.metadata?.locked) {
             dragRef.current = { ...EMPTY_DRAG_STATE };
             onNodeClick(clickedNode);
@@ -218,7 +223,7 @@ export function useCanvasSelectionController({
         draggedNodesRef.current = currentNodes.filter((node) => dragIds.has(node.id) && !node.metadata?.locked);
         const draggedRenderNodeIds = initialSelectedNodes.map((item) => item.id);
         const draggedRenderNodeIdSet = new Set(draggedRenderNodeIds);
-        dragRef.current = { isDraggingNode: true, hasMoved: false, openPanelOnClick: !isMultiSelectClick, startX: event.clientX, startY: event.clientY, draggedNodeIds, draggedRenderNodeIds, draggedRenderNodeIdSet, initialSelectedNodes };
+        dragRef.current = { isDraggingNode: true, hasMoved: false, altDuplicate: isAltDuplicate, openPanelOnClick: !isMultiSelectClick, startX: event.clientX, startY: event.clientY, draggedNodeIds, draggedRenderNodeIds, draggedRenderNodeIdSet, initialSelectedNodes };
         historyPausedRef.current = true;
         nodeDraggingRef.current = true;
         pendingNodeDragRef.current = { x: 0, y: 0 };
@@ -256,20 +261,30 @@ export function useCanvasSelectionController({
         setIsNodeDragging(false);
         setDragPreview(null);
         setAlignmentGuides({});
-        const consumed = dragRef.current.hasMoved && clientX != null && clientY != null && onNodeDrop?.(dragRef.current.draggedNodeIds, screenToCanvas(clientX, clientY));
+        const consumed = !dragRef.current.altDuplicate && dragRef.current.hasMoved && clientX != null && clientY != null && onNodeDrop?.(dragRef.current.draggedNodeIds, screenToCanvas(clientX, clientY));
         if (dragRef.current.hasMoved && !consumed) {
-            const draggedNodeIds = new Set(dragRef.current.draggedNodeIds);
-            const positioned = clientX == null || clientY == null ? nodesRef.current : nodesRef.current.map((node) => {
-                const initial = initialById.get(node.id);
-                return initial ? { ...node, position: { x: initial.x + dx, y: initial.y + dy } } : node;
-            });
-            const targetId = findFrameDropTargetFromIndex(frameDropIndexRef.current, draggedNodesRef.current, draggedNodeIds, { x: dx, y: dy });
-            const target = targetId ? positioned.find((node) => node.id === targetId) : undefined;
-            const linkedFolder = target?.metadata?.folder?.assetFolderId ? target : undefined;
-            // 素材库文件夹只建立归档关系，不把画布节点变成其本地子节点。
-            setNodes(linkedFolder ? positioned : applyFrameDrop(positioned, draggedNodeIds, targetId));
-            if (linkedFolder) onLinkedFolderDrop?.(linkedFolder, positioned.filter((node) => draggedNodeIds.has(node.id)));
-            if (clickedNodeId) onNodeDragEnd?.(clickedNodeId);
+            if (dragRef.current.altDuplicate && onAltDragDuplicate && clientX != null && clientY != null) {
+                const restored = nodesRef.current.map((node) => {
+                    const initial = initialById.get(node.id);
+                    return initial && (node.position.x !== initial.x || node.position.y !== initial.y) ? { ...node, position: { x: initial.x, y: initial.y } } : node;
+                });
+                nodesRef.current = restored;
+                setNodes(restored);
+                onAltDragDuplicate(dragRef.current.draggedNodeIds, { x: dx, y: dy });
+            } else {
+                const draggedNodeIds = new Set(dragRef.current.draggedNodeIds);
+                const positioned = clientX == null || clientY == null ? nodesRef.current : nodesRef.current.map((node) => {
+                    const initial = initialById.get(node.id);
+                    return initial ? { ...node, position: { x: initial.x + dx, y: initial.y + dy } } : node;
+                });
+                const targetId = findFrameDropTargetFromIndex(frameDropIndexRef.current, draggedNodesRef.current, draggedNodeIds, { x: dx, y: dy });
+                const target = targetId ? positioned.find((node) => node.id === targetId) : undefined;
+                const linkedFolder = target?.metadata?.folder?.assetFolderId ? target : undefined;
+                // 素材库文件夹只建立归档关系，不把画布节点变成其本地子节点。
+                setNodes(linkedFolder ? positioned : applyFrameDrop(positioned, draggedNodeIds, targetId));
+                if (linkedFolder) onLinkedFolderDrop?.(linkedFolder, positioned.filter((node) => draggedNodeIds.has(node.id)));
+                if (clickedNodeId) onNodeDragEnd?.(clickedNodeId);
+            }
         }
         setFrameDropTargetId(null);
         setNodeDropTargetId(undefined);
@@ -280,7 +295,7 @@ export function useCanvasSelectionController({
             const clickedNode = nodesRef.current.find((node) => node.id === clickedNodeId);
             if (clickedNode) onNodeClick(clickedNode);
         }
-    }, [historyPausedRef, nodesRef, onLinkedFolderDrop, onNodeClick, onNodeDragEnd, onNodeDrop, screenToCanvas, setNodes, snapToGrid, viewportRef]);
+    }, [containerRef, historyPausedRef, nodesRef, onAltDragDuplicate, onLinkedFolderDrop, onNodeClick, onNodeDragEnd, onNodeDrop, screenToCanvas, setNodes, snapToGrid, viewportRef]);
 
     const handleNodeDragMove = useCallback((event: MouseEvent | PointerEvent) => {
         if (!dragRef.current.isDraggingNode) return;

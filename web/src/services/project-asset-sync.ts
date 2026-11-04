@@ -144,7 +144,10 @@ async function persistCanvasNodeAsset(options: EnsureCanvasNodeAssetOptions): Pr
     if (!asset) {
         const input = canvasNodeToAsset(options.node, { canvasId: options.canvasId, source: options.source, taskId: options.taskId });
         if (!input) throw new Error("当前节点没有可保存的素材内容");
-        const assetId = store.addAsset(options.category ? { ...input, category: options.category } : input);
+        const nextInput = options.source === "canvas-manual"
+            ? { ...input, metadata: { ...input.metadata, savedToLibrary: true, source: "canvas-manual" } }
+            : input;
+        const assetId = store.addAsset(options.category ? { ...nextInput, category: options.category } : nextInput);
         asset = useAssetStore.getState().assets.find((item) => item.id === assetId);
         created = true;
     }
@@ -152,17 +155,24 @@ async function persistCanvasNodeAsset(options: EnsureCanvasNodeAssetOptions): Pr
     const inferredResourceId = canvasNodeResourceId(options.node) || assetResourceId(asset);
     const canonicalStorageKey = inferredResourceId ? `resource:${inferredResourceId}` : undefined;
     const currentStorageKey = "storageKey" in asset.data ? asset.data.storageKey : undefined;
+    const promoteToLibrary = options.source === "canvas-manual" && (asset.metadata?.savedToLibrary !== true || asset.metadata?.source !== "canvas-manual");
+    const nextMetadata = promoteToLibrary
+        ? { ...asset.metadata, savedToLibrary: true, source: "canvas-manual" }
+        : asset.metadata;
     if (canonicalStorageKey && asset.kind !== "text" && asset.kind !== "entity" && (!resourceIdFromStorageKey(currentStorageKey) || asset.pendingRemoteUpload)) {
         store.updateAsset(asset.id, {
             ...(declaredCategory && asset.category !== declaredCategory ? { category: declaredCategory } : {}),
             pendingRemoteUpload: false,
             remoteUploadError: undefined,
             data: { ...asset.data, storageKey: canonicalStorageKey } as Asset["data"],
-            metadata: { ...asset.metadata, resourceKey: canonicalStorageKey },
+            metadata: { ...nextMetadata, resourceKey: canonicalStorageKey },
         });
         asset = useAssetStore.getState().assets.find((item) => item.id === asset?.id) || asset;
-    } else if (declaredCategory && asset.category !== declaredCategory) {
-        store.updateAsset(asset.id, { category: declaredCategory });
+    } else if ((declaredCategory && asset.category !== declaredCategory) || promoteToLibrary) {
+        store.updateAsset(asset.id, {
+            ...(declaredCategory && asset.category !== declaredCategory ? { category: declaredCategory } : {}),
+            ...(promoteToLibrary ? { metadata: nextMetadata } : {}),
+        });
         asset = useAssetStore.getState().assets.find((item) => item.id === asset?.id) || asset;
     }
     const storageKey = "storageKey" in asset.data ? asset.data.storageKey : undefined;

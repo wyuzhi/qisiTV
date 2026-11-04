@@ -187,7 +187,7 @@ function lowerVisual(segment: CanonicalSegment, index: number, fileName: string,
         : ["-i", fileName, "-f", "lavfi", "-i", anullsrc, "-ss", String((segment.sourceStartMs || 0) / 1000), "-t", String(durationSec), "-map", "0:v:0", "-map", audioMap];
     args.push(
         "-vf", `scale=${cfg.width}:${cfg.height}:force_original_aspect_ratio=decrease,pad=${cfg.width}:${cfg.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${cfg.fps},format=yuv420p`,
-        "-af", `aresample=${cfg.sampleRate},aformat=channel_layouts=stereo,volume=${volume}${audioFadeFilter(segment)},apad`,
+        "-af", `aresample=${cfg.sampleRate},aformat=channel_layouts=stereo,volume=${volume}${audioFadeFilter(segment)},apad=whole_dur=${durationSec}`,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-b:a", "128k", output,
     );
     return {
@@ -201,7 +201,7 @@ function lowerVisual(segment: CanonicalSegment, index: number, fileName: string,
 function lowerMix(plan: CanonicalTimelinePlan, concatOutput: string, files: Map<string, string>, audioClips: CanonicalAudioClip[], cfg: TimelineRenderContext): TimelineRenderStep {
     const durationSec = plan.durationMs / 1000;
     const args = ["-i", concatOutput];
-    const filters = ["[0:v]null[v]", "[0:a]apad[base]"];
+    const filters = ["[0:a]apad[base]"];
     audioClips.forEach((clip, index) => {
         args.push("-i", fileForSource(clip.sourceId, files));
         const duration = clip.durationMs / 1000;
@@ -209,7 +209,7 @@ function lowerMix(plan: CanonicalTimelinePlan, concatOutput: string, files: Map<
         filters.push(`[${index + 1}:a]atrim=start=${(clip.sourceStartMs || 0) / 1000}:duration=${duration},asetpts=PTS-STARTPTS,aresample=${cfg.sampleRate},aformat=channel_layouts=stereo,volume=${volume}${audioFadeFilter(clip)},adelay=${clip.startMs}:all=1[a${index}]`);
     });
     filters.push(`[base]${audioClips.map((_, index) => `[a${index}]`).join("")}amix=inputs=${audioClips.length + 1}:normalize=0:duration=first[a]`);
-    args.push("-filter_complex", filters.join(";"), "-map", "[v]", "-map", "[a]", "-t", String(durationSec), "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", "timeline-mixed.mp4");
+    args.push("-filter_complex", filters.join(";"), "-map", "0:v:0", "-map", "[a]", "-t", String(durationSec), "-c:v", "copy", "-c:a", "aac", "-ar", String(cfg.sampleRate), "-ac", "2", "-movflags", "+faststart", "timeline-mixed.mp4");
     return { kind: "mix", output: "timeline-mixed.mp4", args, description: "混合配音与背景音乐" };
 }
 
@@ -241,7 +241,7 @@ export function lowerCanonicalPlan(plan: CanonicalTimelinePlan, sources: Timelin
         steps.push({
             kind: "concat",
             output: concatOutput,
-            args: ["-f", "concat", "-safe", "0", "-i", "concat.txt", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", concatOutput],
+            args: ["-fflags", "+genpts", "-f", "concat", "-safe", "0", "-i", "concat.txt", "-c", "copy", "-movflags", "+faststart", concatOutput],
             description: "拼接视频轨",
         });
     }

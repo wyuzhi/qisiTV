@@ -23,7 +23,7 @@ export const addNodeMenuCommands: AddNodeMenuCommand[] = [
     { id: "director", label: "导演台", icon: <Layers3 />, section: "node", defaultOrder: 50, applicable: (ctx) => ctx.workspaceMode !== "simple", run: (ctx) => ctx.handlers.onOpenDirector() },
     { ...nodeCommand(CanvasNodeType.MediaConversion, { defaultOrder: 60, run: (ctx) => ctx.handlers.onAddExtensionNode(CanvasNodeType.MediaConversion) }), label: "智能剪辑", badge: CANVAS_DEVELOPING_LABEL, disabledReason: getCanvasNodeCreationDisabledReason(CanvasNodeType.MediaConversion) },
     { ...nodeCommand(CanvasNodeType.Frame, { defaultOrder: 70, applicable: (ctx) => ctx.workspaceMode !== "simple", run: (ctx) => ctx.handlers.onAddFrame() }), label: "逐帧拉片", badge: CANVAS_DEVELOPING_LABEL, disabledReason: getCanvasNodeCreationDisabledReason(CanvasNodeType.Frame) },
-    { ...nodeCommand(CanvasNodeType.Script, { defaultOrder: 80, run: (ctx) => ctx.handlers.onAddScript() }), label: "脚本", badge: CANVAS_DEVELOPING_LABEL, disabledReason: getCanvasNodeCreationDisabledReason(CanvasNodeType.Script) },
+    nodeCommand(CanvasNodeType.Script, { defaultOrder: 80, run: (ctx) => ctx.handlers.onAddScript() }),
     nodeCommand(CanvasNodeType.Drawing, { defaultOrder: 90, run: (ctx) => ctx.handlers.onAddDrawing() }),
     { id: "folder", label: "文件夹", icon: <Folder />, badge: "6 款", section: "node", defaultOrder: 95, run: (ctx) => ctx.handlers.onAddFolder() },
     nodeCommand(CanvasNodeType.BatchTable, { defaultOrder: 100, run: (ctx) => ctx.handlers.onAddExtensionNode(CanvasNodeType.BatchTable) }),

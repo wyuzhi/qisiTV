@@ -50,9 +50,9 @@ export async function mergeVideos(inputs: MergeVideoInput[], onProgress?: (progr
             await ffmpeg.writeFile(concatName, concatList);
             onProgress?.({ phase: "encoding", progress: 55 });
             // 先尝试无损拼接；不同模型输出的编码参数不一致时再回退到统一转码。
-            let exitCode = await ffmpeg.exec(["-f", "concat", "-safe", "0", "-i", concatName, "-c", "copy", mergedName]);
+            let exitCode = await ffmpeg.exec(["-fflags", "+genpts", "-f", "concat", "-safe", "0", "-i", concatName, "-c", "copy", "-movflags", "+faststart", mergedName]);
             if (exitCode !== 0) {
-                exitCode = await ffmpeg.exec(["-f", "concat", "-safe", "0", "-i", concatName, "-c:v", "libx264", "-c:a", "aac", "-movflags", "+faststart", mergedName]);
+                exitCode = await ffmpeg.exec(["-fflags", "+genpts", "-f", "concat", "-safe", "0", "-i", concatName, "-c:v", "libx264", "-c:a", "aac", "-shortest", "-movflags", "+faststart", mergedName]);
             }
             if (exitCode !== 0) throw new Error("视频编码失败，请确认视频编码格式兼容");
             signal?.throwIfAborted();
