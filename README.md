@@ -43,11 +43,11 @@
 
 ## 最近更新
 
-- **[v2.0.5](https://github.com/glanderness/BeefTV/releases/tag/v2.0.5)** — 新增助手思考折叠展示，提升 Mac 画布流畅度，修复视频取回并支持部分失败图片恢复。
-- **[v2.0.4](https://github.com/glanderness/BeefTV/releases/tag/v2.0.4)** — 优化大画布缩放与拖动，完善参考素材校验、生成状态同步及助手操作的保存与授权检查。
-- **[v2.0.3](https://github.com/glanderness/BeefTV/releases/tag/v2.0.3)** — 优化视频提示词与素材引用校验，修复重试参数恢复，并改善超分请求稳定性。
-- **[v2.0.2](https://github.com/glanderness/BeefTV/releases/tag/v2.0.2)** — 新增 Seedream 图层拆分与关联组图，改进 Agent 多图检查、任务恢复与素材上传。
-- **[v2.0.1](https://github.com/glanderness/BeefTV/releases/tag/v2.0.1)** — 新增可复用工作流与 Topaz 超分，完善技能的固定版本安装、回退和私人改写。
+- **[v2.1.5](https://github.com/glanderness/BeefTV/releases/tag/v2.1.5)** — 新增插件快捷入口与 LL2 模型服务一键连接。
+- **[v2.1.4](https://github.com/glanderness/BeefTV/releases/tag/v2.1.4)** — 上线随包插件市场与角色替换插件，新增生成费用预估并优化视频参考操作。
+- **[v2.1.3](https://github.com/glanderness/BeefTV/releases/tag/v2.1.3)** — 开放插件扩展生态，提升大画布保存性能，完善生成报错与代理兼容。
+- **[v2.1.2](https://github.com/glanderness/BeefTV/releases/tag/v2.1.2)** — 新增项目与画布备份导出，改善视频预览、分镜工作流与跨端同步。
+- **[v2.1.1](https://github.com/glanderness/BeefTV/releases/tag/v2.1.1)** — 新增 Seedance 2.5 样片转高清及视频编辑能力，优化助手缓存与外部 Agent 接入。
 
 [查看全部版本与详细说明](https://github.com/glanderness/BeefTV/releases)
 

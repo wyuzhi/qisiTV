@@ -43,11 +43,11 @@
 
 ## Recent updates
 
-- **[v2.0.5](https://github.com/glanderness/BeefTV/releases/tag/v2.0.5)** — Add collapsible assistant reasoning, improve Mac canvas performance, fix video retrieval, and recover results from some failed image tasks.
-- **[v2.0.4](https://github.com/glanderness/BeefTV/releases/tag/v2.0.4)** — Optimize large-canvas zooming and dragging; improve reference validation, generation status synchronization, and save and authorization checks for assistant actions.
-- **[v2.0.3](https://github.com/glanderness/BeefTV/releases/tag/v2.0.3)** — Improve video prompt and reference validation, restore saved parameters on retry, and improve upscaling request reliability.
-- **[v2.0.2](https://github.com/glanderness/BeefTV/releases/tag/v2.0.2)** — Add Seedream layer splitting and related image sets; improve Agent multi-image checks, task recovery, and reference uploads.
-- **[v2.0.1](https://github.com/glanderness/BeefTV/releases/tag/v2.0.1)** — Add reusable workflows and Topaz upscaling, with fixed-version skill installation, rollback, and private adaptations.
+- **[v2.1.5](https://github.com/glanderness/BeefTV/releases/tag/v2.1.5)** — Add quick access to plugins and one-click LL2 model service setup.
+- **[v2.1.4](https://github.com/glanderness/BeefTV/releases/tag/v2.1.4)** — Bundle the plugin marketplace and character replacement plugin; add generation cost estimates and improve video reference controls.
+- **[v2.1.3](https://github.com/glanderness/BeefTV/releases/tag/v2.1.3)** — Launch plugin extensions, improve large-canvas saving, and refine generation errors and proxy compatibility.
+- **[v2.1.2](https://github.com/glanderness/BeefTV/releases/tag/v2.1.2)** — Add project and canvas backup exports; improve video previews, storyboard workflows, and cross-client synchronization.
+- **[v2.1.1](https://github.com/glanderness/BeefTV/releases/tag/v2.1.1)** — Add Seedance 2.5 preview-to-HD generation and video editing; improve assistant caching and external Agent integration.
 
 [All releases and detailed notes](https://github.com/glanderness/BeefTV/releases)
 
