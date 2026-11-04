@@ -1509,7 +1509,6 @@
     }
 
 
-
     /* 工作区保留滚轮与触控板滚动，只隐藏会形成额外竖向分割的浏览器轨道。 */
     .app-spatial-workspace .app-workspace-scroll {
         scrollbar-width: none;
@@ -1956,8 +1955,8 @@
     /* LibTV's project menu is intentionally sparse: four text-only rows at
        the same scale as the compact 32px top bar, with one structural divider. */
     .canvas-project-primary-menu.ant-dropdown .ant-dropdown-menu {
-        width: 144px;
-        min-width: 144px;
+        width: max-content;
+        min-width: 176px;
         padding: 4px !important;
         border: 1px solid rgba(255, 255, 255, .12) !important;
         border-radius: 15px !important;
@@ -1974,6 +1973,7 @@
         font-size: var(--fs-body) !important;
         font-weight: 400;
         line-height: 40px !important;
+        white-space: nowrap;
     }
 
     .canvas-project-primary-menu.ant-dropdown .ant-dropdown-menu-item:hover {
@@ -2102,7 +2102,7 @@
 
     .canvas-topbar-canvas-menu-add:hover,
     .canvas-topbar-canvas-menu-more:hover {
-        background: color-mix(in srgb, currentColor 10%, transparent);
+        background: rgba(128, 128, 128, 0.14);
     }
 
     .canvas-topbar-canvas-menu-list {
@@ -2127,7 +2127,7 @@
 
     .canvas-topbar-canvas-menu-row:hover,
     .canvas-topbar-canvas-menu-row.is-actions-open {
-        background: color-mix(in srgb, currentColor 10%, transparent);
+        background: rgba(128, 128, 128, 0.14);
     }
 
     .canvas-topbar-canvas-menu-select {
@@ -2152,7 +2152,7 @@
         border-radius: 7px;
         padding: 0 7px;
         color: inherit;
-        background: color-mix(in srgb, currentColor 7%, transparent);
+        background: rgba(128, 128, 128, 0.1);
         font: inherit;
         outline: none;
     }
@@ -7611,7 +7611,7 @@ html:not(.dark) .creation-studio-control:hover,
     }
 
     .aceternity-dock-separator {
-        background: color-mix(in srgb, currentColor 13%, transparent);
+        background: rgba(128, 128, 128, 0.2);
     }
 
     .aceternity-dock-switch-track {
@@ -7737,7 +7737,7 @@ html:not(.dark) .creation-studio-control:hover,
     .aceternity-zoom-range {
         appearance: none;
         border-radius: 999px;
-        background: color-mix(in srgb, currentColor 12%, transparent);
+        background: rgba(128, 128, 128, 0.18);
         cursor: ew-resize;
         outline: none;
     }
@@ -7783,8 +7783,8 @@ html:not(.dark) .creation-studio-control:hover,
 
     .aceternity-drop-grid {
         background-image:
-            linear-gradient(color-mix(in srgb, currentColor 14%, transparent) 1px, transparent 1px),
-            linear-gradient(90deg, color-mix(in srgb, currentColor 14%, transparent) 1px, transparent 1px);
+            linear-gradient(rgba(128, 128, 128, 0.18) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(128, 128, 128, 0.18) 1px, transparent 1px);
         background-position: center;
         background-size: 34px 34px;
         mask-image: radial-gradient(circle at center, black 12%, transparent 72%);
@@ -10738,7 +10738,7 @@ html:not(.dark) .creation-studio-control:hover,
     .canvas-node-composer-prompt-tools { display: flex; justify-content: flex-end; align-items: center; gap: var(--space-1); margin-bottom: var(--space-1); }
     .canvas-prompt-font-control { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 2px; color: inherit; font-size: var(--fs-tiny); }
     .canvas-prompt-font-control button { display: grid; place-items: center; width: 24px; height: 24px; border: 0; padding: 0; border-radius: var(--r-sm); background: transparent; color: inherit; }
-    .canvas-prompt-font-control button:hover:not(:disabled) { background: color-mix(in srgb, currentColor 8%, transparent); }
+    .canvas-prompt-font-control button:hover:not(:disabled) { background: rgba(128, 128, 128, 0.12); }
     .canvas-prompt-font-control button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
     .canvas-prompt-font-control button:disabled { opacity: .35; cursor: default; }
     .canvas-prompt-font-control output { min-width: 20px; text-align: center; font-size: var(--fs-tiny); line-height: 1; font-variant-numeric: tabular-nums; }
@@ -10823,7 +10823,7 @@ html:not(.dark) .creation-studio-control:hover,
 
     .canvas-node-camera-apply:hover,
     .canvas-node-camera-apply:focus-visible {
-        background: color-mix(in srgb, currentColor 10%, transparent) !important;
+        background: rgba(128, 128, 128, 0.14) !important;
     }
 
     .canvas-reference-autolink-switch:hover,
@@ -10839,7 +10839,7 @@ html:not(.dark) .creation-studio-control:hover,
 
     .canvas-reference-tools-mention-button:hover,
     .canvas-reference-tools-mention-button:focus-visible {
-        background: color-mix(in srgb, currentColor 9%, transparent) !important;
+        background: rgba(128, 128, 128, 0.12) !important;
     }
 
     @media (max-width: 640px) {
@@ -11267,7 +11267,7 @@ html:not(.dark) .creation-studio-control:hover,
     .canvas-resource-inline-preview.is-fallback {
         display: grid;
         place-items: center;
-        background: color-mix(in srgb, currentColor 10%, transparent);
+        background: rgba(128, 128, 128, 0.14);
     }
 
     .canvas-resource-mention-menu {
@@ -11706,19 +11706,19 @@ html:not(.dark) .creation-studio-control:hover,
     .canvas-node-inspector-section-heading { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
     .canvas-node-inspector-section-heading span, .canvas-node-inspector-subheading { font-size: var(--fs-label); font-weight: 650; }
     .canvas-node-inspector-section-heading p { margin-top: 3px; color: color-mix(in srgb, currentColor 43%, transparent); font-size: var(--fs-micro); font-weight: 400; }
-    .canvas-node-inspector-section-heading em { flex-shrink: 0; border-radius: var(--r-full); background: color-mix(in srgb, currentColor 7%, transparent); padding: 3px 8px; color: color-mix(in srgb, currentColor 48%, transparent); font-size: var(--fs-micro); font-style: normal; font-weight: 560; }
+    .canvas-node-inspector-section-heading em { flex-shrink: 0; border-radius: var(--r-full); background: rgba(128, 128, 128, 0.1); padding: 3px 8px; color: color-mix(in srgb, currentColor 48%, transparent); font-size: var(--fs-micro); font-style: normal; font-weight: 560; }
     .canvas-node-inspector-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; }
     .canvas-node-inspector-fact { min-width: 0; padding: 6px 0; }
     .canvas-node-inspector-fact > div { margin-bottom: 4px; color: color-mix(in srgb, currentColor 42%, transparent); font-size: var(--fs-micro); }
     .canvas-node-inspector-fact strong { display: block; min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-body); font-weight: 580; line-height: 1.45; }
     .canvas-node-inspector-options { display: flex; flex-wrap: wrap; gap: 6px; }
-    .canvas-node-inspector-options button { height: 30px; border: 0; border-radius: var(--r-sm); background: color-mix(in srgb, currentColor 6%, transparent); padding: 0 10px; color: color-mix(in srgb, currentColor 56%, transparent); font-size: var(--fs-label); font-weight: 560; transition: background-color var(--motion-state) ease, color var(--motion-state) ease; }
-    .canvas-node-inspector-options button:hover:not(:disabled) { background: color-mix(in srgb, currentColor 10%, transparent); color: currentColor; }
+    .canvas-node-inspector-options button { height: 30px; border: 0; border-radius: var(--r-sm); background: rgba(128, 128, 128, 0.09); padding: 0 10px; color: color-mix(in srgb, currentColor 56%, transparent); font-size: var(--fs-label); font-weight: 560; transition: background-color var(--motion-state) ease, color var(--motion-state) ease; }
+    .canvas-node-inspector-options button:hover:not(:disabled) { background: rgba(128, 128, 128, 0.14); color: currentColor; }
     .canvas-node-inspector-options button.is-active { background: var(--control-selected-bg); color: var(--control-selected-fg); }
     .canvas-node-inspector-options button:disabled:not(.is-active) { cursor: not-allowed; background: var(--control-disabled-bg); color: var(--control-disabled-fg); opacity: 1; }
     .canvas-node-inspector-options button.is-active:disabled { cursor: not-allowed; opacity: 1; }
     .canvas-node-inspector-help { margin-top: 8px; color: color-mix(in srgb, currentColor 43%, transparent); font-size: var(--fs-micro); line-height: 1.55; }
-    .canvas-node-inspector-copy, .canvas-node-inspector-json, .canvas-node-inspector-notice { border: 0; border-radius: var(--r-md); background: color-mix(in srgb, currentColor 4%, transparent); }
+    .canvas-node-inspector-copy, .canvas-node-inspector-json, .canvas-node-inspector-notice { border: 0; border-radius: var(--r-md); background: rgba(128, 128, 128, 0.07); }
     .canvas-node-inspector-copy { padding: 12px 14px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
     .canvas-node-info-modal { width: min(920px, calc(100vw - 32px)) !important; }
     .canvas-node-inspector-prompt { height: min(220px, 32vh); min-height: 120px; overflow: auto; }
@@ -11733,8 +11733,8 @@ html:not(.dark) .creation-studio-control:hover,
     .generation-failure-reason, .generation-failure-action, .generation-failure-upstream { margin: 0; overflow-wrap: anywhere; font-size: var(--fs-tiny); line-height: 1.55; }
     .generation-failure-action { color: color-mix(in srgb, currentColor 72%, transparent); } .generation-failure-upstream { color: color-mix(in srgb, currentColor 62%, transparent); font-size: var(--fs-label); }
     .generation-failure-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
-    .generation-failure-button { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; border: 0; border-radius: var(--r-md); background: color-mix(in srgb, currentColor 8%, transparent); padding: 0 10px; color: inherit; font-size: var(--fs-label); line-height: 1.3; }
-    .generation-failure-button:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+    .generation-failure-button { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; border: 0; border-radius: var(--r-md); background: rgba(255, 115, 115, 0.12); padding: 0 10px; color: inherit; font-size: var(--fs-label); line-height: 1.3; }
+    .generation-failure-button:hover:not(:disabled) { background: rgba(255, 115, 115, 0.2); }
     .canvas-node-error-content .generation-failure-reason,
     .canvas-node-error-content .generation-failure-action { font-size: 13px; }
     .canvas-node-error-content .generation-failure-upstream, .canvas-node-error-content .generation-failure-button { font-size: 12px; }
@@ -16802,7 +16802,7 @@ button.ant-btn-primary:not(.ant-btn-dangerous):not(.ant-btn-background-ghost):no
 .ai-message-markdown-code {
     padding: 0.12em 0.34em;
     border-radius: var(--r-sm);
-    background: color-mix(in srgb, currentColor 9%, transparent);
+    background: rgba(128, 128, 128, 0.12);
     color: inherit;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.88em;
@@ -16850,7 +16850,7 @@ button.ant-btn-primary:not(.ant-btn-dangerous):not(.ant-btn-background-ghost):no
     transition: background-color 150ms ease, color 150ms ease;
 }
 .ai-message-codeblock-copy svg { width: 13px; height: 13px; }
-.ai-message-codeblock-copy:hover { background: color-mix(in srgb, currentColor 10%, transparent); color: inherit; }
+.ai-message-codeblock-copy:hover { background: rgba(128, 128, 128, 0.14); color: inherit; }
 .ai-message-codeblock-copy:focus-visible { outline: 2px solid color-mix(in srgb, var(--primary) 60%, transparent); outline-offset: -1px; }
 .ai-message-codeblock-pre {
     margin: 0;
@@ -16912,7 +16912,7 @@ html.dark .ai-message-codeblock-pre .shiki span { color: var(--shiki-dark) !impo
 .ai-message-markdown-table-header {
     color: color-mix(in srgb, currentColor 82%, transparent);
     font-weight: 620;
-    background: color-mix(in srgb, currentColor 5%, transparent);
+    background: rgba(128, 128, 128, 0.08);
 }
 .ai-message-markdown-task {
     width: 0.9em;

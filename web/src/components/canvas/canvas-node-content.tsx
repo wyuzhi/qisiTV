@@ -491,8 +491,8 @@ function VideoNodeContent({ node, theme, mediaActive = false, onMediaPlayRequest
             if (video.videoWidth <= 0 || video.videoHeight <= 0) return;
             recordCanvasVideoDiagnostic(node, "metadata_loaded", video);
             setVideoSize({ width: video.videoWidth, height: video.videoHeight });
-            if (!compatible && (node.metadata?.naturalWidth !== video.videoWidth || node.metadata?.naturalHeight !== video.videoHeight)) {
-                updateMediaNode?.(node.id, (current) => ({ ...current, metadata: { ...current.metadata, naturalWidth: video.videoWidth, naturalHeight: video.videoHeight } }));
+            if (!compatible && fitImageNodeToDecodedSize(node, video.videoWidth, video.videoHeight) !== node) {
+                updateMediaNode?.(node.id, (current) => fitImageNodeToDecodedSize(current, video.videoWidth, video.videoHeight));
             }
         };
         video.addEventListener("loadedmetadata", handleLoadedMetadata);
@@ -504,7 +504,7 @@ function VideoNodeContent({ node, theme, mediaActive = false, onMediaPlayRequest
             video.removeEventListener("timeupdate", handleTimeUpdate);
             video.removeEventListener("loadedmetadata", handleLoadedMetadata);
         };
-    }, [node.id, node.metadata?.naturalHeight, node.metadata?.naturalWidth, subtitleEntries.length, updateMediaNode, url, compatible]);
+    }, [node.id, node.width, node.height, node.metadata?.naturalHeight, node.metadata?.naturalWidth, subtitleEntries.length, updateMediaNode, url, compatible]);
 
     if (!node.metadata?.content) return <EmptyVideoContent theme={theme} />;
 

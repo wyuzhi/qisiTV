@@ -80,8 +80,7 @@ export function canvasMediaNodeSemanticLabel(node: CanvasNodeData | null | undef
 export function canOpenCanvasNodePromptPanel(node: CanvasNodeData | null | undefined): boolean {
     if (!node || node.metadata?.reusableWorkflow || node.metadata?.workflowSlot) return false;
     if (isCanvasMediaNode(node)) {
-        return canvasMediaNodeRole(node) === "generator"
-            || (canvasMediaNodeOrigin(node) === "generated" && Boolean((node.metadata?.composerContent || node.metadata?.prompt)?.trim()));
+        return canvasMediaNodeRole(node) === "generator" || canvasMediaNodeOrigin(node) === "generated";
     }
     // Generation is opt-in; viewers and containers never inherit a composer.
     return node.type === CanvasNodeType.Config || node.type === CanvasNodeType.Text || node.type === CanvasNodeType.Skill;

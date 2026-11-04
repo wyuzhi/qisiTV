@@ -19,4 +19,18 @@ describe("canvas loading node actions", () => {
         expect(content.includes('aria-label="取消生成任务"')).toBe(taskStatus === "queued" || taskStatus === "running");
         expect(content.includes('aria-label="停止取回结果"')).toBe(taskStatus === "succeeded");
     });
+
+    test("allows canceling a loading node before a backend taskId is assigned", () => {
+        const node: CanvasNodeData = {
+            id: "video-local", type: CanvasNodeType.Video, title: "镜头", position: { x: 0, y: 0 }, width: 320, height: 220,
+            metadata: { status: "loading", taskStage: "正在准备生成任务" },
+        };
+        const content = renderToStaticMarkup(createElement(CanvasNodeContent, {
+            node, theme: canvasThemes.dark, isEditingContent: false, textareaRef: createRef<HTMLTextAreaElement>(),
+            isBatchRoot: false, batchCount: 0, batchExpanded: false, batchOpening: false, batchRecovering: false,
+            onContentChange: () => {}, onStopEditing: () => {}, onCancelTask: () => {}, mentionReferences: [],
+        }));
+        expect(content).toContain("刚刚开始");
+        expect(content).toContain('aria-label="取消生成任务"');
+    });
 });

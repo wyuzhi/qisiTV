@@ -20,8 +20,9 @@ export function CanvasNodeGenerationProgress({ node, theme, operation, onOpenTas
     const taskId = node.metadata?.taskId;
     // Before task creation, old task controls must not act on a previous result.
     const hasTaskIdentity = operation ? Boolean(operation.target?.taskId) : Boolean(taskId) || node.metadata?.fixture === "libtv-generating";
-    const displayTask = { status: (node.metadata?.taskStatus || "running") as GenerationTask["status"], stage: node.metadata?.taskStage };
-    const now = useSecondTick(hasTaskIdentity || Boolean(operation));
+    const canCancelLocalLoading = !operation && !taskId && Boolean(onCancelTask) && node.metadata?.status === "loading";
+    const displayTask = { status: ((hasTaskIdentity ? node.metadata?.taskStatus : undefined) || "running") as GenerationTask["status"], stage: node.metadata?.taskStage };
+    const now = useSecondTick(hasTaskIdentity || Boolean(operation) || canCancelLocalLoading);
     const createdAt = operation?.startedAt ?? new Date(node.metadata?.taskCreatedAt || "").getTime();
     const elapsed = Number.isFinite(createdAt) ? `已用 ${formatGenerationElapsed(now - createdAt)}` : "刚刚开始";
     const progress = generationTaskShowsProgress(displayTask) && taskId && typeof node.metadata?.taskProgress === "number" ? Math.max(0, Math.min(100, Math.round(node.metadata.taskProgress))) : null;
@@ -44,7 +45,7 @@ export function CanvasNodeGenerationProgress({ node, theme, operation, onOpenTas
     return <div role="status" aria-label={title} className="flex h-full w-full flex-col items-center justify-center gap-3 px-5 text-center" style={{ background: theme.node.fill, color: theme.node.activeStroke }}>
         {uncertain ? <AlertCircle className="size-10" /> : <div className="size-10 animate-spin rounded-full border-2 motion-reduce:animate-none" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />}
         <span className="max-w-full text-xs font-semibold leading-5 break-words">{title}</span>
-        {hasTaskIdentity || operation ? <div className="flex w-full max-w-[260px] flex-col items-center gap-2">
+        {hasTaskIdentity || operation || canCancelLocalLoading ? <div className="flex w-full max-w-[260px] flex-col items-center gap-2">
             {percent !== null ? <span className="text-[var(--fs-label)] font-medium tabular-nums" style={{ color: theme.node.text }}>{percent}%</span> : null}
             {bar !== "none" ? <div role="progressbar" aria-label={title} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined} className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: theme.node.stroke }}>
                 <div className={bar === "indeterminate" ? "canvas-node-progress-indeterminate h-full rounded-full" : "h-full rounded-full transition-[width]"} style={{ width: percent === null ? undefined : `${percent}%`, background: theme.node.activeStroke }} />
@@ -55,9 +56,9 @@ export function CanvasNodeGenerationProgress({ node, theme, operation, onOpenTas
                 {fileMetrics?.count ? <span className="whitespace-nowrap">{fileMetrics.count}</span> : null}
             </div> : null}
             {timing ? <span className="whitespace-nowrap text-[var(--fs-tiny)] tabular-nums" style={{ color: theme.node.muted }}>{timing.startsWith("已用") ? <Clock3 className="mr-1 inline size-3 align-[-2px]" /> : null}{timing}</span> : null}
-            {controls ? <div className="mt-0.5 flex items-center gap-1.5">
-                <button type="button" className="inline-flex h-7 items-center gap-1 rounded-[var(--r-sm)] px-2 text-[var(--fs-tiny)] font-medium" style={{ background: theme.toolbar.itemHover, color: theme.node.text }} onMouseDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); onOpenTaskDetails?.(node); }}><FileText className="size-3" />详情</button>
-                {onCancelTask && ["queued", "running", "succeeded"].includes(displayTask.status) ? <button type="button" className="inline-flex h-7 items-center gap-1 rounded-[var(--r-sm)] px-2 text-[var(--fs-tiny)] font-medium" style={{ background: theme.toolbar.itemHover, color: theme.node.muted }} onMouseDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); onCancelTask(node); }} aria-label={displayTask.status === "succeeded" ? "停止取回结果" : "取消生成任务"}><Square className="size-3" />{displayTask.status === "succeeded" ? "停止取回" : "取消"}</button> : null}
+            {controls || canCancelLocalLoading ? <div className="mt-0.5 flex items-center gap-1.5">
+                {controls ? <button type="button" className="inline-flex h-7 items-center gap-1 rounded-[var(--r-sm)] px-2 text-[var(--fs-tiny)] font-medium" style={{ background: theme.toolbar.itemHover, color: theme.node.text }} onMouseDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); onOpenTaskDetails?.(node); }}><FileText className="size-3" />详情</button> : null}
+                {onCancelTask && (canCancelLocalLoading || (controls && ["queued", "running", "succeeded"].includes(displayTask.status))) ? <button type="button" className="inline-flex h-7 items-center gap-1 rounded-[var(--r-sm)] px-2 text-[var(--fs-tiny)] font-medium" style={{ background: theme.toolbar.itemHover, color: theme.node.muted }} onMouseDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); onCancelTask(node); }} aria-label={controls && displayTask.status === "succeeded" ? "停止取回结果" : "取消生成任务"}><Square className="size-3" />{controls && displayTask.status === "succeeded" ? "停止取回" : "取消"}</button> : null}
             </div> : null}
         </div> : null}
     </div>;
