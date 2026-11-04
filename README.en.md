@@ -51,6 +51,30 @@
 
 [All releases and detailed notes](https://github.com/glanderness/BeefTV/releases)
 
+## Special thanks
+
+Thank you to the partners, sponsors, and customers supporting BeefTV's continued development.
+
+<table>
+  <tr><th width="26%" align="center">Acknowledgements</th><th align="center">About</th></tr>
+  <tr>
+    <td align="center" valign="middle"><img src="assets/readme/partner-tencent-cloud.png" width="32" height="32" alt="Tencent Cloud icon"><br><strong>Tencent Cloud</strong></td>
+    <td><a href="https://cloud.tencent.com/">Tencent Cloud</a> provides cloud computing, AI, and audio and video services, including media storage, processing, and delivery, for developers and enterprises. Special thanks to Tencent Cloud for its compute resources and ecosystem support for this project.</td>
+  </tr>
+  <tr>
+    <td align="center" valign="middle"><img src="assets/readme/partner-byteplus.png" width="32" height="32" alt="BytePlus icon"><br><strong>BytePlus</strong></td>
+    <td><a href="https://www.byteplus.com/en">BytePlus</a> draws on ByteDance's technology to offer generative AI, cloud infrastructure, and audio and video solutions to enterprises worldwide. Special thanks to the BytePlus Overseas Incubator for its compute resources and ecosystem support for this project.</td>
+  </tr>
+  <tr>
+    <td align="center" valign="middle"><img src="assets/readme/partner-ll2.png" width="32" height="32" alt="ll2.cn icon"><br><strong>ll2.cn</strong></td>
+    <td><a href="https://hub.ll2.cn?p=rw6t">ll2.cn</a> | Self-operated compute infrastructure · Direct official contracts at wholesale rates. MiniMax-H3 at CNY 0.05/second (self-hosted, full-capability 768P); deepseek-v4.1-flash at 40% of the official price; Seedance series from 30% off; super-resolution at CNY 0.018/second; Vega series from 40% off.</td>
+  </tr>
+  <tr>
+    <td align="center" valign="middle"><img src="assets/readme/partner-pccooler.png" width="120" alt="PCCOOLER logo"><br><strong>PCCOOLER</strong></td>
+    <td><a href="https://www.cpspccooler.cn/">PCCOOLER</a> is a publicly listed company specializing in high-performance computing hardware and cooling systems, with products including modular AI PCs and AI workstations. Combining PCCOOLER's hardware R&amp;D capabilities with BeefTV's AIGC software ecosystem, the two teams will explore integrated hardware and software solutions for local AI creation.</td>
+  </tr>
+</table>
+
 ## Product demo
 
 <div>
@@ -164,30 +188,6 @@ The repository uses licenses with different scopes. Original content added under
 The new license permits self-hosting, internal customization, and creating and selling works with BeefTV. Written authorization is required for commercial resale, rebranding and resale, paid deployment or custom delivery of covered software, and providing hosted features to third parties, whether free or paid. Independent tutorials, training, and general technical consulting may be paid services, but must not be used to deliver the software system indirectly. Contact us about authorization at [lucas@bf-labs.cn](mailto:lucas@bf-labs.cn).
 
 The new restrictions do not apply retroactively to historical MIT content or override independently licensed third-party materials. This is a source-available license; the entire repository should not be treated as standard MIT or as an open source project under the OSI definition. See the [license guide](docs/content/docs/overview/licensing.mdx) for covered scenarios and boundaries, and [`NOTICE`](NOTICE) for upstream sources and third-party attributions.
-
-## Special thanks
-
-Thank you to the partners, sponsors, and customers supporting BeefTV's continued development.
-
-<table>
-  <tr><th width="26%" align="center">Acknowledgements</th><th align="center">About</th></tr>
-  <tr>
-    <td align="center" valign="middle"><img src="assets/readme/partner-tencent-cloud.png" width="32" height="32" alt="Tencent Cloud icon"><br><strong>Tencent Cloud</strong></td>
-    <td><a href="https://cloud.tencent.com/">Tencent Cloud</a> provides cloud computing, AI, and audio and video services, including media storage, processing, and delivery, for developers and enterprises. Special thanks to Tencent Cloud for its compute resources and ecosystem support for this project.</td>
-  </tr>
-  <tr>
-    <td align="center" valign="middle"><img src="assets/readme/partner-byteplus.png" width="32" height="32" alt="BytePlus icon"><br><strong>BytePlus</strong></td>
-    <td><a href="https://www.byteplus.com/en">BytePlus</a> draws on ByteDance's technology to offer generative AI, cloud infrastructure, and audio and video solutions to enterprises worldwide. Special thanks to the BytePlus Overseas Incubator for its compute resources and ecosystem support for this project.</td>
-  </tr>
-  <tr>
-    <td align="center" valign="middle"><img src="assets/readme/partner-ll2.png" width="32" height="32" alt="ll2.cn icon"><br><strong>ll2.cn</strong></td>
-    <td><a href="https://hub.ll2.cn?p=rw6t">ll2.cn</a> | Self-operated compute infrastructure · Direct official contracts at wholesale rates. MiniMax-H3 at CNY 0.05/second (self-hosted, full-capability 768P); deepseek-v4.1-flash at 40% of the official price; Seedance series from 30% off; super-resolution at CNY 0.018/second; Vega series from 40% off.</td>
-  </tr>
-  <tr>
-    <td align="center" valign="middle"><img src="assets/readme/partner-pccooler.png" width="120" alt="PCCOOLER logo"><br><strong>PCCOOLER</strong></td>
-    <td><a href="https://www.cpspccooler.cn/">PCCOOLER</a> is a publicly listed company specializing in high-performance computing hardware and cooling systems, with products including modular AI PCs and AI workstations. Combining PCCOOLER's hardware R&amp;D capabilities with BeefTV's AIGC software ecosystem, the two teams will explore integrated hardware and software solutions for local AI creation.</td>
-  </tr>
-</table>
 
 ## ⭐ Star History
 
