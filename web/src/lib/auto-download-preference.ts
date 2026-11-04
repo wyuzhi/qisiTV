@@ -1,7 +1,7 @@
+import { saveAs } from "file-saver";
 import { mediaFileExtension, sanitizeDownloadFileName } from "@/lib/canvas/canvas-media-download";
 import { scopedLocalStorage } from "@/lib/user-scope";
 import { ownedResourceIdFromMediaRef } from "@/services/api/resources";
-import { downloadOwnedOrBrowserMedia } from "@/services/desktop-media-save";
 
 export const AUTO_DOWNLOAD_GENERATED_MEDIA_KEY = "beeftv.autoDownloadGeneratedMedia";
 export const AUTO_DOWNLOADED_TASK_IDS_SESSION_KEY = "beeftv.autoDownloadedTaskIds";
@@ -103,6 +103,21 @@ export function buildAutoDownloadFileName(input: {
     return sanitizeDownloadFileName(`${stem}.${ext}`, `${fallbackTitle}.${ext}`);
 }
 
+function unmarkTaskAutoDownloaded(taskId: string): void {
+    const normalized = String(taskId || "").trim();
+    if (!normalized) return;
+    const ids = readSessionDownloadedTaskIds();
+    ids.delete(normalized);
+    writeSessionDownloadedTaskIds(ids);
+}
+
+async function silentBrowserAutoDownload(options: { fileName: string; resourceId?: string; browserUrl?: string }): Promise<"saved"> {
+    const browserUrl = options.browserUrl?.trim();
+    if (!browserUrl) throw new Error("没有可自动下载的文件地址");
+    saveAs(browserUrl, sanitizeDownloadFileName(options.fileName));
+    return "saved";
+}
+
 export async function triggerAutoDownloadForCompletedTask(input: {
     taskId: string;
     url: string;
@@ -123,16 +138,21 @@ export async function triggerAutoDownloadForCompletedTask(input: {
 
     const fileName = buildAutoDownloadFileName(input);
     const resourceId = ownedResourceIdFromMediaRef(input.storageKey, url);
-    const downloader = input.download ?? downloadOwnedOrBrowserMedia;
+    const downloader = input.download ?? silentBrowserAutoDownload;
 
     try {
-        await downloader({
+        const result = await downloader({
             fileName,
             resourceId,
             browserUrl: url,
         });
+        if (result === "cancelled" || result === false) {
+            unmarkTaskAutoDownloaded(taskId);
+            return false;
+        }
         return true;
     } catch {
+        unmarkTaskAutoDownloaded(taskId);
         return false;
     }
 }
