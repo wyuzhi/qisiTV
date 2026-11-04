@@ -56,7 +56,8 @@ test("reference_to_video-only video models attach a reference test video automat
 
     const missingVideoUrl = {
         ...configured,
-        modelProfiles: [{ ...configured.modelProfiles[0], defaultOptions: undefined }],
+        models: ["custom-ref-video"],
+        modelProfiles: [{ ...configured.modelProfiles[0], model: "custom-ref-video", protocol: "openai-videos" as const, defaultOptions: undefined }],
     };
-    await expect(testChannelModelConnection(missingVideoUrl, "auto-hd", "video", "ll2-auto-hd-video", async () => ({}))).rejects.toThrow("defaultOptions.testVideoUrl");
+    await expect(testChannelModelConnection(missingVideoUrl, "custom-ref-video", "video", "openai-videos", async () => ({}))).rejects.toThrow("defaultOptions.testVideoUrl");
 });
