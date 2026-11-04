@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -26,8 +25,8 @@ const (
 )
 
 var (
-	canvasLimitMu                  sync.Mutex
 	effectiveCanvasDocumentLimitMB atomic.Int64
+	canvasDocumentLimitGeneration  atomic.Uint64
 )
 
 func init() {
@@ -39,14 +38,13 @@ func EffectiveCanvasDocumentLimitMB() int64 {
 }
 
 func SetEffectiveCanvasDocumentLimitMB(limitMB int64) {
-	canvasLimitMu.Lock()
-	defer canvasLimitMu.Unlock()
 	if limitMB < 0 {
 		limitMB = DefaultCanvasDocumentLimitMB
 	}
 	if limitMB > MaxCanvasDocumentLimitMB {
 		limitMB = MaxCanvasDocumentLimitMB
 	}
+	canvasDocumentLimitGeneration.Add(1)
 	effectiveCanvasDocumentLimitMB.Store(limitMB)
 }
 
@@ -66,22 +64,24 @@ func (s *Service) hydrateCanvasDocumentLimitFromDB() {
 	if !s.hasSystemSettingsTable() {
 		return
 	}
-	canvasLimitMu.Lock()
-	defer canvasLimitMu.Unlock()
+	gen := canvasDocumentLimitGeneration.Load()
 	if setting, err := s.repo.SystemSetting(canvasDocumentLimitSettingKey); err == nil && setting != nil {
 		if parsed, parseErr := strconv.ParseInt(strings.TrimSpace(setting.ValueJSON), 10, 64); parseErr == nil && parsed >= 0 && parsed <= MaxCanvasDocumentLimitMB {
-			effectiveCanvasDocumentLimitMB.Store(parsed)
+			if canvasDocumentLimitGeneration.Load() == gen {
+				effectiveCanvasDocumentLimitMB.Store(parsed)
+			}
 		}
 	}
 }
 
 func (s *Service) CanvasDocumentLimitMB() int64 {
 	if s.hasSystemSettingsTable() {
-		canvasLimitMu.Lock()
-		defer canvasLimitMu.Unlock()
+		gen := canvasDocumentLimitGeneration.Load()
 		if setting, err := s.repo.SystemSetting(canvasDocumentLimitSettingKey); err == nil && setting != nil {
 			if parsed, parseErr := strconv.ParseInt(strings.TrimSpace(setting.ValueJSON), 10, 64); parseErr == nil && parsed >= 0 && parsed <= MaxCanvasDocumentLimitMB {
-				effectiveCanvasDocumentLimitMB.Store(parsed)
+				if canvasDocumentLimitGeneration.Load() == gen {
+					effectiveCanvasDocumentLimitMB.Store(parsed)
+				}
 				return parsed
 			}
 		}
@@ -100,8 +100,6 @@ func (s *Service) UpdateCanvasDocumentLimitMBBy(actorID string, limitMB int64) (
 	if strings.TrimSpace(actorID) == "" {
 		actorID = "owner"
 	}
-	canvasLimitMu.Lock()
-	defer canvasLimitMu.Unlock()
 	if s != nil && s.repo != nil && s.repo.DB() != nil {
 		if !s.hasSystemSettingsTable() {
 			if err := s.repo.DB().AutoMigrate(&model.SystemSetting{}); err != nil {
@@ -120,6 +118,7 @@ func (s *Service) UpdateCanvasDocumentLimitMBBy(actorID string, limitMB int64) (
 			return 0, err
 		}
 	}
+	canvasDocumentLimitGeneration.Add(1)
 	effectiveCanvasDocumentLimitMB.Store(limitMB)
 	return limitMB, nil
 }

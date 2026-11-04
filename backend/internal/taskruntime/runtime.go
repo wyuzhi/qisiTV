@@ -320,21 +320,47 @@ func (r *Runtime) renewLoop(ctx context.Context, cancel context.CancelFunc, task
 	ticker := time.NewTicker(r.cfg.RenewInterval)
 	defer ticker.Stop()
 	taskID, owner := task.ID, task.LeaseOwner
+	leaseDeadline := time.Now().Add(r.cfg.TaskLeaseTTL)
+	if task != nil && task.LeaseExpiresAt != nil && !task.LeaseExpiresAt.IsZero() {
+		leaseDeadline = *task.LeaseExpiresAt
+	}
+	var retryCh <-chan time.Time
+	renewOnce := func() bool {
+		timeout := 5 * time.Second
+		if remaining := time.Until(leaseDeadline); remaining > 0 && remaining < timeout {
+			timeout = remaining
+		}
+		renewCtx, cancelRenew := context.WithTimeout(ctx, timeout)
+		var err error
+		if slot != nil {
+			err = slot.Renew(renewCtx)
+		}
+		if err == nil && r.repo != nil {
+			err = r.repo.RenewLease(renewCtx, taskID, owner, r.cfg.TaskLeaseTTL)
+		}
+		cancelRenew()
+		if err == nil {
+			leaseDeadline = time.Now().Add(r.cfg.TaskLeaseTTL)
+			retryCh = nil
+			return true
+		}
+		if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, ErrLeaseLost) && time.Now().Before(leaseDeadline) {
+			retryDelay := min(r.cfg.RenewInterval, max(5*time.Millisecond, time.Until(leaseDeadline)/3))
+			retryCh = time.After(retryDelay)
+			return true
+		}
+		session.markLost(err)
+		cancel()
+		return false
+	}
 	for {
 		select {
 		case <-ticker.C:
-			renewCtx, cancelRenew := context.WithTimeout(ctx, 5*time.Second)
-			var err error
-			if slot != nil {
-				err = slot.Renew(renewCtx)
+			if !renewOnce() {
+				return
 			}
-			if err == nil && r.repo != nil {
-				err = r.repo.RenewLease(renewCtx, taskID, owner, r.cfg.TaskLeaseTTL)
-			}
-			cancelRenew()
-			if err != nil {
-				session.markLost(err)
-				cancel()
+		case <-retryCh:
+			if !renewOnce() {
 				return
 			}
 		case <-stop:

@@ -375,3 +375,52 @@ func TestWindowsLayoutRejectsSubdirectoriesInsidePluginPackages(t *testing.T) {
 		t.Fatalf("existing install was modified after rejected layout: %q %v", got, err)
 	}
 }
+
+func TestWindowsRestoreExecutablePreservesTargetWithoutDeletingFirst(t *testing.T) {
+	root := t.TempDir()
+	targetDir := filepath.Join(root, "installed")
+	backupDir := filepath.Join(root, "backup")
+	if err := WriteWindowsLayout(targetDir, "NEW"); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteWindowsLayout(backupDir, "OLD"); err != nil {
+		t.Fatal(err)
+	}
+	targetExe := filepath.Join(targetDir, windowsExeName)
+	backupExe := filepath.Join(backupDir, windowsExeName)
+	if err := os.Remove(backupExe); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(backupExe, "corrupt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	req := HelperRequest{
+		Platform:   "windows-amd64",
+		TargetPath: targetExe,
+		BackupPath: backupDir,
+	}
+	if err := RestoreBackup(req); err == nil {
+		t.Fatal("expected RestoreBackup to fail when backup executable is a directory")
+	}
+	got, err := os.ReadFile(targetExe)
+	if err != nil || string(got) != "MZ-NEW" {
+		t.Fatalf("failed restore lost existing executable: got=%q err=%v", got, err)
+	}
+
+	if err := os.RemoveAll(backupExe); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(backupExe, []byte("MZ-OLD"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := RestoreBackup(req); err != nil {
+		t.Fatalf("RestoreBackup failed: %v", err)
+	}
+	got, err = os.ReadFile(targetExe)
+	if err != nil || string(got) != "MZ-OLD" {
+		t.Fatalf("restored exe = %q, err = %v", got, err)
+	}
+	if pathExists(targetExe + ".beeftv-failed") {
+		t.Fatal("stale .beeftv-failed file was not cleaned up")
+	}
+}

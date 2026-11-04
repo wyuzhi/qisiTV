@@ -145,7 +145,7 @@ func RunHelperRequest(req HelperRequest) error {
 	writeRecovery()
 	if err := relaunchInstall(req); err != nil {
 		result.Error = err.Error()
-		if restoreErr := RestoreBackup(req); restoreErr == nil {
+		if restoreErr := RestoreBackup(req); restoreErr == nil && pathExists(req.TargetPath) {
 			result.Restored = true
 			result.Status = "rolled_back"
 			_ = relaunchInstall(req)

@@ -980,3 +980,78 @@ func TestProcessOnePreservesOwnerAndDoesNotNeedSlot(t *testing.T) {
 		t.Fatalf("owner=%q", owner)
 	}
 }
+
+type transientDeadlineRepo struct {
+	*memoryRepo
+	transientFailures atomic.Int32
+	attempts          atomic.Int32
+}
+
+func (r *transientDeadlineRepo) RenewLease(ctx context.Context, taskID, owner string, ttl time.Duration) error {
+	r.attempts.Add(1)
+	for {
+		remaining := r.transientFailures.Load()
+		if remaining <= 0 {
+			break
+		}
+		if r.transientFailures.CompareAndSwap(remaining, remaining-1) {
+			return context.DeadlineExceeded
+		}
+	}
+	return r.memoryRepo.RenewLease(ctx, taskID, owner, ttl)
+}
+
+func TestRenewLeaseRetriesTransientDeadlineExceededBeforeTTL(t *testing.T) {
+	t.Run("transient timeout recovers before lease TTL expires", func(t *testing.T) {
+		base := &memoryRepo{task: queuedTask("transient-renew")}
+		repo := &transientDeadlineRepo{memoryRepo: base}
+		repo.transientFailures.Store(2)
+		exec := fnExec(func(session Session) Outcome {
+			waitUntil(t, time.Second, func() bool { return repo.attempts.Load() >= 3 })
+			if session.Lost() {
+				t.Fatalf("session marked lost despite recovery before TTL: %v", session.LostErr())
+			}
+			return persist(base, session, Outcome{Kind: KindCompleted, ProviderAccepted: true})
+		})
+		rt := testRuntime(t, Deps{
+			Repository: repo,
+			Executor:   exec,
+			Config: Config{
+				TaskLeaseTTL:  250 * time.Millisecond,
+				RenewInterval: 10 * time.Millisecond,
+			},
+		})
+		outcome := rt.ProcessOne(context.Background())
+		if outcome.Kind != KindCompleted || !outcome.Applied {
+			t.Fatalf("expected task to complete after transient renewal timeout, got %+v", outcome)
+		}
+	})
+
+	t.Run("sustained timeout past lease TTL aborts execution", func(t *testing.T) {
+		base := &memoryRepo{task: queuedTask("expired-renew")}
+		repo := &transientDeadlineRepo{memoryRepo: base}
+		repo.transientFailures.Store(1000)
+		exec := fnExec(func(session Session) Outcome {
+			<-session.Context().Done()
+			if session.Lost() {
+				return Outcome{Kind: KindLeaseLost, Err: session.LostErr(), ProviderAccepted: true}
+			}
+			return persist(base, session, Outcome{Kind: KindCompleted, ProviderAccepted: true})
+		})
+		rt := testRuntime(t, Deps{
+			Repository: repo,
+			Executor:   exec,
+			Config: Config{
+				TaskLeaseTTL:  40 * time.Millisecond,
+				RenewInterval: 10 * time.Millisecond,
+			},
+		})
+		outcome := rt.ProcessOne(context.Background())
+		if outcome.Kind != KindLeaseLost {
+			t.Fatalf("expected KindLeaseLost after TTL expiry, got %+v", outcome)
+		}
+		if !errors.Is(outcome.Err, ErrLeaseLost) {
+			t.Fatalf("expected ErrLeaseLost, got %v", outcome.Err)
+		}
+	})
+}
