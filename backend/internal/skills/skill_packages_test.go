@@ -328,7 +328,7 @@ func TestBuiltinSeedSkillsIncludeLuckyPlusOnePackagesAndAuxiliaryFiles(t *testin
 }
 
 func TestNormalizeBuiltinSkillFilesRejectsTotalSizeOverflow(t *testing.T) {
-	chunk := strings.Repeat("a", 7<<20)
+	chunk := strings.Repeat("a", 70<<20)
 	if _, err := normalizeBuiltinSkillFiles(map[string]string{
 		"references/one.md":   chunk,
 		"references/two.md":   chunk,

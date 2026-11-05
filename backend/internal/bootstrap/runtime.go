@@ -343,6 +343,7 @@ func initializeService(svc *app.Service) error {
 		svc.EnsureDefaultPromptTemplates,
 		svc.EnsureBuiltinProjectWorkflowTemplate,
 		svc.EnsureBuiltinSkills,
+		svc.SkillsDomain().SyncLocalSkillsAtStartup,
 		svc.EnsureSkillPackages,
 	}
 	for _, initialize := range initializers {

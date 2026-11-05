@@ -130,8 +130,8 @@ export function SkillEditorDrawer({ open, skill, onClose, onSaved }: { open: boo
                     </Form.Item>
                 </div>
 
-                <Form.Item name="description" label="技能简介" rules={[{ required: true, message: "请填写技能简介" }, { max: 500, message: "最多 500 个字符" }]}>
-                    <Input.TextArea autoSize={{ minRows: 3, maxRows: 6 }} maxLength={500} showCount placeholder="说明适用场景、输入条件和最终产出" />
+                <Form.Item name="description" label="技能简介" rules={[{ required: true, message: "请填写技能简介" }, { max: 1024, message: "最多 1024 个字符" }]}>
+                    <Input.TextArea autoSize={{ minRows: 3, maxRows: 6 }} maxLength={1024} showCount placeholder="说明适用场景、输入条件和最终产出" />
                 </Form.Item>
 
                 {!isPackageSkill ? <Form.Item name="instruction" label="技能指令" rules={[{ required: true, message: "请填写技能指令" }, { max: 100000, message: "最多 100000 个字符" }]} extra="单文件技能会作为 SKILL.md 安装，Agent 按任务需要读取。">

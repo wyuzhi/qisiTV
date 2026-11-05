@@ -15,7 +15,7 @@ import (
 // 技能名称和简介的长度上限；解析截断、打包校验、显示名推断和手动改名共用。
 const (
 	maxSkillNameRunes        = 80
-	maxSkillDescriptionRunes = 500
+	maxSkillDescriptionRunes = 1024
 )
 
 // skillDisplayNamesRepairedKey 标记早先导入的技能已按中文标题修复过显示名；只修一次。
