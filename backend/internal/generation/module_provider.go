@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"infinite-canvas/backend/internal/modelcatalog"
 	"infinite-canvas/backend/internal/pluginhost"
 	"infinite-canvas/backend/internal/protocol"
 
@@ -80,17 +82,76 @@ func queryModuleProviderOnce(ctx context.Context, input Input, provider protocol
 	}
 }
 
-func callModuleProvider(ctx context.Context, input Input, provider protocol.ModuleProvider, method string, request protocol.GenerationRequest, taskID string, out any) error {
-	if !filepath.IsAbs(provider.Module) {
-		return fmt.Errorf("插件 %s 的生成接口没有安装目录", provider.Plugin)
+// ListModuleProviderModels 让插件列出渠道能用的模型，给「读取模型」用。插件没写 models 时提示手动添加。
+func ListModuleProviderModels(ctx context.Context, provider protocol.ModuleProvider, baseURL, apiKey string) ([]modelcatalog.ChannelModelCatalogItem, error) {
+	call, err := moduleHostCall(provider, "models", map[string]any{"config": moduleConfig(baseURL, apiKey)})
+	if err != nil {
+		return nil, err
 	}
-	args := map[string]any{"request": request, "config": map[string]any{"baseUrl": input.Config.BaseURL, "apiKey": input.Config.APIKey}}
+	var raw json.RawMessage
+	if err := pluginhost.Do(ctx, call, &raw); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, CatalogError(http.StatusGatewayTimeout, "catalog_timeout", "插件读取模型超时，请检查服务地址后重试", err)
+		}
+		return nil, CatalogError(http.StatusBadGateway, "catalog_upstream_failed", "插件读取模型失败："+err.Error(), err)
+	}
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, CatalogError(http.StatusBadGateway, "catalog_unsupported", "这个插件不提供模型列表，请手动添加模型", nil)
+	}
+	var listed []struct {
+		ID          string `json:"id"`
+		DisplayName string `json:"displayName"`
+		Capability  string `json:"capability"`
+	}
+	if err := json.Unmarshal(raw, &listed); err != nil {
+		return nil, CatalogError(http.StatusBadGateway, "catalog_response_invalid", "插件返回的模型列表格式不对", err)
+	}
+	// 只接一种能力的插件可以不写 capability。
+	fallback := ""
+	if len(provider.Info.Categories) == 1 {
+		fallback = string(provider.Info.Categories[0])
+	}
+	seen := make(map[string]bool, len(listed))
+	items := make([]modelcatalog.ChannelModelCatalogItem, 0, len(listed))
+	for _, item := range listed {
+		id := strings.TrimSpace(item.ID)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		items = append(items, modelcatalog.ChannelModelCatalogItem{
+			ID:          id,
+			DisplayName: strings.TrimSpace(item.DisplayName),
+			ModelType:   modelcatalog.NormalizeCatalogModelType(firstNonEmpty(item.Capability, fallback)),
+		})
+	}
+	return items, nil
+}
+
+// moduleHostCall 组装一次插件宿主调用。进程按安装包指纹区分，从文件夹重新加载后换上新代码。
+func moduleHostCall(provider protocol.ModuleProvider, method string, args map[string]any) (pluginhost.Call, error) {
+	if !filepath.IsAbs(provider.Module) {
+		return pluginhost.Call{}, fmt.Errorf("插件 %s 的生成接口没有安装目录", provider.Plugin)
+	}
+	return pluginhost.Call{Plugin: provider.Plugin, Version: firstNonEmpty(provider.Revision, provider.Info.Version), Module: provider.Module, Method: method, Args: args}, nil
+}
+
+func moduleConfig(baseURL, apiKey string) map[string]any {
+	return map[string]any{"baseUrl": baseURL, "apiKey": apiKey}
+}
+
+func callModuleProvider(ctx context.Context, input Input, provider protocol.ModuleProvider, method string, request protocol.GenerationRequest, taskID string, out any) error {
+	args := map[string]any{"request": request, "config": moduleConfig(input.Config.BaseURL, input.Config.APIKey)}
 	if taskID != "" {
 		args["taskId"] = taskID
 	}
+	call, err := moduleHostCall(provider, method, args)
+	if err != nil {
+		return err
+	}
 	var raw json.RawMessage
 	startedAt := time.Now()
-	err := pluginhost.Do(ctx, pluginhost.Call{Plugin: provider.Plugin, Version: firstNonEmpty(provider.Revision, provider.Info.Version), Module: provider.Module, Method: method, Args: args}, &raw)
+	err = pluginhost.Do(ctx, call, &raw)
 	observeModuleCall(ctx, provider, method, taskID, startedAt, raw, err)
 	if err != nil {
 		return err

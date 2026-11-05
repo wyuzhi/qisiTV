@@ -204,6 +204,13 @@ export type ProviderModuleContext = {
   log(message: string): void;
 };
 
+/** One entry of `ProviderModule.models`. `capability` may be left out when the provider has only one. */
+export type ProviderModel = {
+  id: string;
+  displayName?: string;
+  capability?: Exclude<ProtocolCapability, "text">;
+};
+
 /**
  * The file a `module` provider points to. It runs in a Node process next to the BeefTV
  * backend, so it can use fetch and Node built-ins.
@@ -212,12 +219,16 @@ export type ProviderModuleContext = {
  *   answers at once. If `submit` throws, BeefTV cannot tell whether the task was created
  *   and does not retry.
  * - `query` is called until the task finishes, including after BeefTV restarts.
+ * - `models` is optional. When the user adds this service under model services and clicks
+ *   "读取模型", BeefTV calls it with the address and key they entered. Without it, users
+ *   type model IDs by hand.
  *
  * BeefTV does not ask the service to cancel a task; cancelling only stops BeefTV waiting.
  */
 export type ProviderModule = {
   submit(request: GenerationRequest, ctx: ProviderModuleContext): GenerationTaskState | Promise<GenerationTaskState>;
   query(taskId: string, request: GenerationRequest, ctx: ProviderModuleContext): GenerationTaskState | Promise<GenerationTaskState>;
+  models?(ctx: ProviderModuleContext): ProviderModel[] | Promise<ProviderModel[]>;
 };
 
 export type PluginStorage = {

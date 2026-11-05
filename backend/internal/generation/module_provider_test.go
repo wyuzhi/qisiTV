@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"infinite-canvas/backend/internal/kernel"
 	"infinite-canvas/backend/internal/model"
+	"infinite-canvas/backend/internal/modelcatalog"
 	"infinite-canvas/backend/internal/pluginhost"
 	"infinite-canvas/backend/internal/protocol"
 )
@@ -25,6 +27,10 @@ export async function submit(request, ctx) {
 export async function query(taskId, request, ctx) {
   if (!['task-1', 'resumed-1'].includes(taskId)) throw new Error('unknown task ' + taskId);
   return { status: 'succeeded', result: { images: [{ dataUrl: 'data:image/png;base64,iVBORw0KGgo=' }] } };
+}
+export async function models(ctx) {
+  if (ctx.config.baseUrl !== 'http://127.0.0.1:8188') throw new Error('wrong address ' + ctx.config.baseUrl);
+  return [{ id: 'portrait.app.json', displayName: '人像' }, { id: ' ' }, { id: 'portrait.app.json' }, { id: 'clip.app.json', capability: 'video' }];
 }
 `
 
@@ -120,5 +126,51 @@ func TestModuleProviderSubmitErrorIsUnknownNotRetried(t *testing.T) {
 	}
 	if len(receipts.snapshot()) != 1 {
 		t.Fatalf("submit was called %d times", len(receipts.snapshot()))
+	}
+}
+
+func TestReadingModelsOfAPluginChannelAsksThePlugin(t *testing.T) {
+	registry := moduleProviderRegistry(t)
+	actor := &model.User{ID: "user-1"}
+	fetched := false
+	fetch := func(context.Context, string, string, string, []modelcatalog.ChannelHeader) ([]byte, error) {
+		fetched = true
+		return nil, errors.New("plugin channels must not request /models")
+	}
+	items, err := FetchChannelModelCatalog(context.Background(), actor, ChannelModelsRequest{BaseURL: "http://127.0.0.1:8188", Protocol: "module-image"}, nil, fetch, nil, registry.Resolve)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fetched {
+		t.Fatal("plugin channel requested /models")
+	}
+	got := make([]string, 0, len(items))
+	for _, item := range items {
+		got = append(got, item.ID+"|"+item.DisplayName+"|"+item.ModelType)
+	}
+	if strings.Join(got, ",") != "portrait.app.json|人像|image,clip.app.json||video" {
+		t.Fatalf("items = %v", got)
+	}
+
+	_, err = FetchChannelModelCatalog(context.Background(), actor, ChannelModelsRequest{BaseURL: "http://other:8188", Protocol: "module-image"}, nil, fetch, nil, registry.Resolve)
+	var appErr *kernel.AppError
+	if !errors.As(err, &appErr) || appErr.Reason != "catalog_upstream_failed" || !strings.Contains(appErr.Message, "wrong address http://other:8188") {
+		t.Fatalf("plugin failure = %#v", err)
+	}
+}
+
+func TestPluginWithoutModelListAsksForManualModels(t *testing.T) {
+	registry := moduleProviderRegistry(t)
+	adapter, _ := registry.Resolve("module-image")
+	provider := adapter.(protocol.ModuleProvider)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "provider.mjs"), []byte("export async function submit() {}\nexport async function query() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider.Module, provider.Revision = filepath.Join(dir, "provider.mjs"), "no-models"
+	_, err := ListModuleProviderModels(context.Background(), provider, "http://127.0.0.1:8188", "")
+	var appErr *kernel.AppError
+	if !errors.As(err, &appErr) || appErr.Reason != "catalog_unsupported" {
+		t.Fatalf("missing models() = %#v", err)
 	}
 }

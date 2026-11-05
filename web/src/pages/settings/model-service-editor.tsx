@@ -7,7 +7,7 @@ import { ChannelHeadersEditor, validateChannelHeaders } from "@/components/chann
 import { fetchChannelModels, type ChannelModelFetchResult } from "@/services/api/image-models";
 import { fetchPluginProviderCatalog } from "@/services/api/plugin-catalog";
 import { mergeFetchedChannelModelProfiles, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
-import { CAPABILITY_LABELS, MODEL_SERVICE_PRESETS, createServicePresetChannel, isTopazUpscaleChannel, ll2ProtocolsAvailable, modelCatalogRequestURL, presetCatalogFor, serviceConnectionError, serviceModelProfile, servicePresetFor, type ModelServicePresetId } from "@/lib/model-service-presets";
+import { CAPABILITY_LABELS, MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, isTopazUpscaleChannel, ll2ProtocolsAvailable, modelCatalogRequestURL, pluginServices, presetCatalogFor, serviceConnectionError, serviceModelProfile, servicePresetFor, type ModelServicePresetId } from "@/lib/model-service-presets";
 import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
 import { serviceCredentialGuide } from "@/lib/service-credentials";
 import type { ModelProtocolDefinition } from "@/lib/model-protocols";
@@ -83,15 +83,17 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         setError("");
         setCatalogRead(false);
     };
-    const choosePreset = (id: ModelServicePresetId) => {
+    const startService = (id: ModelServicePresetId, channel: ModelChannel) => {
         setPresetId(id);
-        setDraft(createServicePresetChannel(id, draft.id, protocols));
+        setDraft(channel);
         setCatalog(presetCatalogFor(id));
         setCatalogRead(false);
         setAdvanced(false);
         setError("");
         setNotice("");
     };
+    const choosePreset = (id: ModelServicePresetId) => startService(id, createServicePresetChannel(id, draft.id, protocols));
+    const choosePluginService = (service: ModelProtocolDefinition) => startService("compatible", createPluginServiceChannel(service, draft.id));
     const validateConnection = (requireCredential = true, channel: ModelChannel = draft) => {
         const problem = serviceConnectionError(channel, { protocols, requireCredential }) || validateChannelHeaders(channel.headers);
         if (problem) setError(problem);
@@ -239,6 +241,8 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         </Form>
     </AppModal>;
     const selectedPreset = MODEL_SERVICE_PRESETS.find((item) => item.id === presetId)!;
+    const pluginServiceList = pluginServices(protocols);
+    const pluginService = pluginServiceList.find((item) => item.value === draft.interfaceType);
     const ll2Ready = presetId !== "ll2" || ll2ProtocolsAvailable(protocols);
     const ll2PluginWarning = presetId === "ll2" && !protocolLoading && !ll2Ready
         ? "请先在左侧「插件」中心启用 LL2 (DMC) 插件，再使用预置视频协议。"
@@ -256,23 +260,34 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
             {step === 0 ? <div className="model-service-connection">
                 <aside className="model-service-providers" aria-label="选择服务商">
                     <p className="model-service-label">选择服务商</p>
-                    {MODEL_SERVICE_PRESETS.map((preset) => <button key={preset.id} type="button" disabled={busy || Boolean(initial)} aria-pressed={presetId === preset.id} className="model-service-provider" onClick={() => choosePreset(preset.id)}>
-                        <ModelLogo icon={preset.icon} size={24} />
-                        <span><strong>{preset.name}</strong><small>{preset.subtitle}</small></span>
-                        {presetId === preset.id && <Check size={15} />}
-                    </button>)}
+                    {MODEL_SERVICE_PRESETS.map((preset) => {
+                        const selected = !pluginService && presetId === preset.id;
+                        return <button key={preset.id} type="button" disabled={busy || Boolean(initial)} aria-pressed={selected} className="model-service-provider" onClick={() => choosePreset(preset.id)}>
+                            <ModelLogo icon={preset.icon} size={24} />
+                            <span><strong>{preset.name}</strong><small>{preset.subtitle}</small></span>
+                            {selected && <Check size={15} />}
+                        </button>;
+                    })}
+                    {pluginServiceList.map((service) => {
+                        const selected = pluginService?.value === service.value;
+                        return <button key={service.value} type="button" disabled={busy || Boolean(initial)} aria-pressed={selected} className="model-service-provider" onClick={() => choosePluginService(service)}>
+                            <ModelLogo size={24} />
+                            <span><strong>{service.label}</strong><small>插件提供</small></span>
+                            {selected && <Check size={15} />}
+                        </button>;
+                    })}
                     <div className="model-service-note"><ShieldCheck size={16} /><p>密钥保存在这台设备上。<br />生成费用由服务商结算。</p></div>
                 </aside>
                 <Form layout="vertical" requiredMark={false} className="model-service-fields" disabled={busy} onFinish={() => void fetchModels()}>
-                    <div className="model-service-form-title"><ModelLogo icon={selectedPreset.icon} size={28} /><div><h3>{selectedPreset.name}</h3>{presetId === "compatible" && <p>用户可以自行添加第三方模型服务，但是 BeefTV 无法确保所有第三方模型服务的兼容性</p>}{presetId === "ll2" && <p>已预置 9 款文本、视频与超分模型及协议，填写 API Key 后可直接「一键保存并启用」，或点「读取模型」拉取在线目录</p>}</div></div>
+                    <div className="model-service-form-title">{pluginService ? <><ModelLogo size={28} /><div><h3>{pluginService.label}</h3><p>由插件接入。填好服务地址后点「读取模型」，列出这个服务能用的模型。</p></div></> : <><ModelLogo icon={selectedPreset.icon} size={28} /><div><h3>{selectedPreset.name}</h3>{presetId === "compatible" && <p>用户可以自行添加第三方模型服务，但是 BeefTV 无法确保所有第三方模型服务的兼容性</p>}{presetId === "ll2" && <p>已预置 9 款文本、视频与超分模型及协议，填写 API Key 后可直接「一键保存并启用」，或点「读取模型」拉取在线目录</p>}</div></>}</div>
                     <Form.Item label="连接名称"><Input aria-label="连接名称" placeholder="例如：我的创作账号" value={draft.name} onChange={(event) => patch({ name: event.target.value })} /></Form.Item>
                     <Form.Item label={credential.apiKeyLabel} help={credential.apiKeyHelp}><Input.Password prefix={<KeyRound size={15} />} aria-label={credential.apiKeyLabel} autoComplete="new-password" placeholder={credential.apiKeyPlaceholder} value={draft.apiKey} onChange={(event) => patch({ apiKey: event.target.value })} /></Form.Item>
                     <Form.Item label="服务地址"><Input aria-label="服务地址" inputMode="url" placeholder="https://api.example.com/v1" value={draft.baseUrl} onChange={(event) => patch({ baseUrl: event.target.value })} /></Form.Item>
-                    {modelCatalogRequestURL(draft) && <div className="model-service-url"><span>模型目录地址</span><code>{modelCatalogRequestURL(draft).split("/").map((part, index) => <Fragment key={index}>{index > 0 && <>/<wbr /></>}{part}</Fragment>)}</code></div>}
+                    {!pluginService && modelCatalogRequestURL(draft) && <div className="model-service-url"><span>模型目录地址</span><code>{modelCatalogRequestURL(draft).split("/").map((part, index) => <Fragment key={index}>{index > 0 && <>/<wbr /></>}{part}</Fragment>)}</code></div>}
                     <button type="button" className="model-service-advanced" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}><Settings2 size={15} />高级设置<ChevronDown size={14} /></button>
                     {advanced && <div className="model-service-advanced-fields">
                         <Form.Item label="素材服务地址（可选）" help="公网素材域名使用 HTTPS。本机、局域网或 CGNAT 可填写 HTTP，并可带端口。留空时只接受与 API 同主机的素材。"><Input aria-label="素材服务地址" inputMode="url" placeholder="https://assets.example.com" value={draft.referenceAssetOrigin || ""} onChange={(event) => patch({ referenceAssetOrigin: event.target.value })} /></Form.Item>
-                        <Form.Item label="目录接口格式"><Select aria-label="目录接口格式" value={draft.apiFormat} options={[{ value: "openai", label: "OpenAI 兼容" }, { value: "gemini", label: "Gemini 原生" }]} onChange={(apiFormat) => patch({ apiFormat })} /></Form.Item>
+                        {!pluginService && <Form.Item label="目录接口格式"><Select aria-label="目录接口格式" value={draft.apiFormat} options={[{ value: "openai", label: "OpenAI 兼容" }, { value: "gemini", label: "Gemini 原生" }]} onChange={(apiFormat) => patch({ apiFormat })} /></Form.Item>}
                         <Form.Item label={credential.secretKeyRequired ? `${credential.secretKeyLabel} · 必填` : "Secret Key（按需填写）"} help={credential.secretKeyHelp}><Input.Password aria-label={credential.secretKeyLabel} autoComplete="new-password" placeholder={credential.secretKeyRequired ? "粘贴 Secret Key" : ""} value={draft.secretKey} onChange={(event) => patch({ secretKey: event.target.value })} /></Form.Item>
                         <ChannelHeadersEditor value={draft.headers} onChange={(headers) => patch({ headers })} />
                     </div>}

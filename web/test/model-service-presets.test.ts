@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test";
-import { MODEL_SERVICE_PRESETS, createServicePresetChannel, ll2ProtocolsAvailable, mergeSavedServiceChannel, presetCatalogFor, serviceConnectionError, serviceModelProfile, servicePresetFor, modelCatalogRequestURL } from "../src/lib/model-service-presets";
+import { MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, ll2ProtocolsAvailable, pluginServices, mergeSavedServiceChannel, presetCatalogFor, serviceConnectionError, serviceModelProfile, servicePresetFor, modelCatalogRequestURL } from "../src/lib/model-service-presets";
 import { modelConnectionResultDetail, testChannelModelConnection } from "../src/lib/model-connection-test";
 import { applyFetchedChannelModelCatalog, modelConfigChannelStatusLabel } from "../src/pages/settings/channel-settings-pane";
 import { backendProviderConfig } from "../src/services/api/generation-task";
 import { configWithoutCachedSecrets, createModelChannel, defaultConfig, normalizeConfigSnapshot } from "../src/stores/use-config-store";
 import { defaultModelCapabilityConfig } from "../src/lib/model-capabilities";
 import type { ModelProtocolDefinition } from "../src/lib/model-protocols";
+import { serviceCredentialGuide } from "../src/lib/service-credentials";
 import { currentModelConnectionReceipt, useModelConnectionTests } from "../src/stores/use-model-connection-tests";
 
 const protocols = [
@@ -106,6 +107,21 @@ test("refresh keeps selected/manual models and user capability limits", () => {
     const next = applyFetchedChannelModelCatalog(channel, { models: ["video-manual", "new-model"], catalog: [{ id: "video-manual", modelType: "text" }, { id: "new-model" }] });
     expect(next.models).toEqual(["video-manual"]);
     expect(next.modelProfiles?.find((p) => p.model === "video-manual")).toEqual(channel.modelProfiles![0]);
+});
+
+test("a plugin service becomes one provider choice whose listed models use the plugin interface", () => {
+    const comfy = { value: "comfyui-app", label: "ComfyUI", capability: "image", enabled: true, module: true, authType: "none", baseUrl: "http://127.0.0.1:8188" } as ModelProtocolDefinition;
+    const services = pluginServices([...protocols, comfy, { ...comfy }, { ...comfy, value: "off", enabled: false }]);
+    expect(services.map((item) => item.value)).toEqual(["comfyui-app"]);
+
+    const channel = createPluginServiceChannel(comfy, "comfy");
+    expect(channel).toMatchObject({ id: "comfy", name: "ComfyUI", baseUrl: "http://127.0.0.1:8188", interfaceType: "comfyui-app" });
+    // 本机 ComfyUI 不要密钥：还没选模型时也能直接读取模型。
+    expect(serviceConnectionError(channel, { protocols: [comfy] })).toBe("");
+    expect(serviceCredentialGuide(channel, [comfy]).apiKeyHelp).toBe("这个服务不用密钥，可以留空。");
+    expect(serviceConnectionError(createPluginServiceChannel({ ...comfy, authType: "bearer" }, "keyed"), { protocols: [{ ...comfy, authType: "bearer" }] })).toBe("请填写 API Key");
+
+    expect(serviceModelProfile(channel, { id: "portrait.app.json", modelType: "image" }, [...protocols, comfy])).toMatchObject({ capability: "image", protocol: "comfyui-app" });
 });
 
 test("connection validation rejects full endpoints and embedded credentials", () => {

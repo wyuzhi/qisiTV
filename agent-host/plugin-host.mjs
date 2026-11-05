@@ -1,4 +1,4 @@
-// 插件宿主：在一个子进程里运行插件的 JS 生成接口（submit / query / cancel）。
+// 插件宿主：在一个子进程里运行插件的 JS 生成接口（submit / query，可选 models）。
 // 按行收发 JSON，Go 端按 id 配对；stdin 关闭且手上没有调用时退出。
 // stdout 只留给协议，插件里的 console 输出改写到 stderr，由后端记日志。
 import readline from 'node:readline';
@@ -20,8 +20,11 @@ function load(file) {
 async function run({ module, fn, args = {} }, signal) {
   const exports = await load(module);
   const impl = exports[fn] ?? exports.default?.[fn];
+  // models 可以不写；返回 null 让后端提示用户手动添加模型。
+  if (typeof impl !== 'function' && fn === 'models') return null;
   if (typeof impl !== 'function') throw new Error(`插件没有实现 ${fn}`);
   const ctx = { config: args.config ?? {}, signal, log: (message) => send({ event: 'log', level: 'info', message: String(message) }) };
+  if (fn === 'models') return impl(ctx);
   return fn === 'submit' ? impl(args.request, ctx) : impl(args.taskId, args.request, ctx);
 }
 

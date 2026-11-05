@@ -25,7 +25,7 @@ import (
 const scriptName = "plugin-host.mjs"
 
 // 单次调用的上限，覆盖插件自己的网络超时；轮询节奏由调用方决定。
-var methodTimeouts = map[string]time.Duration{"submit": 5 * time.Minute, "query": time.Minute, "cancel": 30 * time.Second}
+var methodTimeouts = map[string]time.Duration{"submit": 5 * time.Minute, "query": time.Minute, "models": 25 * time.Second}
 
 // Call 描述一次插件函数调用。Version 变化会让该插件进入新的宿主进程。
 type Call struct {

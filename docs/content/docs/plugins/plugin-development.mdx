@@ -249,6 +249,17 @@ export async function query(taskId, request, ctx) {
 - **`submit` 要返回 `taskId`**。BeefTV 先记下任务号再查询；应用重启或任务恢复时只调用 `query`，不会再次调用 `submit`。
 - 结果里的 `url` 或 `dataUrl` 由 BeefTV 下载并保存到画布，插件不用自己存文件。
 - 用户取消任务时，BeefTV 停止查询，并通过 `ctx.signal` 中断正在进行的调用；目前不会去服务商那边取消任务。
+- **可以再导出 `models(ctx)` 列出模型**。用 `module` 写的服务会出现在「设置 → 模型服务 → 选择服务商」里，标着「插件提供」。用户选中它、填好服务地址（和 Key），点「读取模型」时，BeefTV 调用 `models(ctx)`，`ctx.config` 就是用户刚填的地址和 Key：
+
+  ```js
+  export async function models(ctx) {
+    const res = await fetch(`${ctx.config.baseUrl}/apps`, { signal: ctx.signal });
+    if (!res.ok) throw new Error(`服务返回 HTTP ${res.status}`);
+    return (await res.json()).map((app) => ({ id: app.id, displayName: app.name, capability: "image" }));
+  }
+  ```
+
+  只接一种能力的服务可以不写 `capability`。不导出 `models` 时，用户要手动填模型 ID。服务本身不要密钥（比如本机的服务）时，在 provider 里写 `"auth": { "type": "none" }`，用户就可以不填 Key。
 - 插件代码运行在 BeefTV 自带 Node 的独立后台进程里，不经过浏览器；`console.log` 会写进 BeefTV 日志。只有从 npm、本地目录或 `.tgz` 安装的插件可以使用 `module`，`.beeftv-plugin` 归档不能带代码。
 
 ---

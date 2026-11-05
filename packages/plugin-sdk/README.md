@@ -74,4 +74,6 @@ export async function query(taskId, request, ctx) {
 }
 ```
 
+还可以导出 `models(ctx)`，返回 `[{ id, displayName, capability }]`。装好插件后，这个服务会出现在「模型服务 → 选择服务商」里，用户填好地址后点「读取模型」，BeefTV 就调用它列出模型；不写的话，用户要手动填模型 ID。
+
 这个文件跑在 BeefTV 后端旁边的 Node 进程里。BeefTV 负责记任务、重启后继续查询、把结果下载进工作区；插件只管跟服务商说话。

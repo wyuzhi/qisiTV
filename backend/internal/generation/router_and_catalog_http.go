@@ -26,6 +26,8 @@ type ChannelModelsRequest struct {
 	Headers       []outbound.OutboundHeader `json:"headers"`
 	ChannelID     string                    `json:"channelId"`
 	CredentialRef string                    `json:"credentialRef"`
+	// Protocol 是渠道默认的生成接口。它由插件 JS 实现时，模型列表交给插件，不请求 /models。
+	Protocol string `json:"protocol,omitempty"`
 }
 
 func isImageRecoveryError(err error) bool {
@@ -514,6 +516,7 @@ func FetchChannelModelCatalog(
 	resolveReq func(*ChannelModelsRequest) error,
 	fetchBytes func(context.Context, string, string, string, []modelcatalog.ChannelHeader) ([]byte, error),
 	extra modelcatalog.CatalogExtraSource,
+	resolveProtocol func(string) (protocol.Adapter, bool),
 ) ([]modelcatalog.ChannelModelCatalogItem, error) {
 	if actor == nil || strings.TrimSpace(actor.ID) == "" {
 		return nil, kernel.Unauthorized("请先登录")
@@ -521,6 +524,13 @@ func FetchChannelModelCatalog(
 	if resolveReq != nil {
 		if err := resolveReq(&input); err != nil {
 			return nil, err
+		}
+	}
+	if id := strings.TrimSpace(input.Protocol); id != "" && resolveProtocol != nil {
+		if adapter, ok := resolveProtocol(id); ok {
+			if provider, ok := adapter.(protocol.ModuleProvider); ok {
+				return ListModuleProviderModels(ctx, provider, strings.TrimSpace(input.BaseURL), strings.TrimSpace(input.APIKey))
+			}
 		}
 	}
 	headers, err := outbound.NormalizeOutboundHeaders(input.Headers)
