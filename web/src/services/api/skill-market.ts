@@ -9,6 +9,7 @@ export type PublishPreview = { revision: number; previewDigest: string; author: 
 export type PublicationTarget = { publicationTarget: "new" | "existing"; marketSkillId?: string };
 export type PublishPlan = { planId: string; skillId: string; versionId: string; canvasId?: string; publicationTarget?: PublicationTarget["publicationTarget"]; marketSkillId?: string; archiveSha256: string; instruction: string; metadata: SkillMetadata; files: SkillPackageFile[]; status: string; submissionId?: string; revision?: number; preview?: PublishPreview; reviewReason?: string; createdAt: string };
 export type MarketAuthorization = { connected?: boolean; pending?: boolean; userCode?: string; verificationUrl?: string; websiteUrl?: string; interval?: number; expiresIn?: number };
+export type MarketSubmission = { submissionId: string; metadata: SkillMetadata; status: string; reviewReason?: string; files?: SkillPackageFile[]; createdAt?: string; updatedAt?: string };
 export type InstalledVersion = { id: string; versionLabel: string; contentHash: string; createdAt: string };
 const root = "/skills/market";
 const id = encodeURIComponent;
@@ -25,6 +26,7 @@ export const getMarketAuthorization = () => http.get<MarketAuthorization>(`${roo
 export const startMarketAuthorization = () => http.post<MarketAuthorization>(`${root}/authorization/start`);
 export const disconnectMarketAuthorization = () => http.delete<MarketAuthorization>(`${root}/authorization`);
 export const listPublishPlans = () => http.get<{ items: PublishPlan[] }>(`${root}/publish-plans`);
+export const listMarketSubmissions = () => http.get<{ items: MarketSubmission[] }>(`${root}/submissions`);
 export const preparePublication = (skillId: string, metadata: SkillMetadata, target: PublicationTarget, sourcePlanId?: string) => http.post<PublishPlan>(`${root}/publish-plans`, { skillId, metadata, ...target, sourcePlanId });
 export const refreshPublication = (planId: string) => http.post<PublishPlan>(`${root}/publish-plans/${id(planId)}/refresh`);
 // These two calls are used only by user confirmation controls, never by the model tool surface.

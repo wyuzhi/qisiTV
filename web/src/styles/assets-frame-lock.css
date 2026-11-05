@@ -23,8 +23,6 @@
 .canvas-history-drawer .ant-drawer-content-wrapper { width: 460px !important; }
 .assets-generation-preview-drawer .ant-drawer-content-wrapper { width: 440px !important; }
 .assets-header-compact-button[aria-label="筛选资产"] { width: 38px; margin-left: -2px; }
-.assets-new-button, .assets-new-button.ant-btn { background: #fff !important; background-color: #fff !important; color: #171717 !important; border-color: rgba(255,255,255,.82) !important; }
-.assets-new-button:hover { background: var(--user-ink) !important; color: #111 !important; }
 @media (max-width: 720px) {
     .assets-library-source-rail { display: none; }
     .assets-library-page > div:first-child { width: 100% !important; padding-right: 16px !important; padding-left: 16px !important; }

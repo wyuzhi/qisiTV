@@ -1,0 +1,18 @@
+.skill-editor-shell { display: flex; flex-direction: column; height: 100%; min-height: 0; color: var(--foreground); background: var(--background); }
+.skill-editor-content { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 20px 24px; }
+.skill-editor-disclosure { margin-bottom: 24px; }
+.skill-editor-disclosure > summary { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: var(--r-md); background: var(--muted); font-size: var(--fs-caption); cursor: pointer; }
+.skill-editor-disclosure > summary::after { content: "+"; margin-left: auto; color: var(--user-ink-muted); }
+.skill-editor-disclosure[open] > summary::after { content: "−"; }
+.skill-editor-disclosure > summary::-webkit-details-marker { display: none; }
+.skill-editor-disclosure > summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.skill-editor-draft, .skill-editor-advanced-content { padding-top: 16px; }
+.skill-editor-draft-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.skill-editor-draft-actions > span, .skill-editor-note { font-size: var(--fs-caption); line-height: 1.6; color: var(--user-ink-muted); }
+.skill-editor-note { margin-bottom: 20px; }
+.skill-editor-advanced { margin: 4px 0 0; }
+@media (max-width: 480px) { .skill-editor-draft-actions { align-items: flex-start; flex-direction: column; } .skill-editor-draft-actions > .ant-btn { align-self: flex-end; } }
+
+.skill-editor-shell .workspace-panel-header { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 20px; }
+.skill-editor-shell .workspace-panel-header h2 { font-size: var(--fs-heading); font-weight: 500; line-height: 22px; letter-spacing: 0; color: var(--user-ink); }
+.skill-editor-shell .workspace-panel-footer { display: flex; flex-shrink: 0; align-items: center; justify-content: flex-end; gap: 16px; padding: 16px 20px; }

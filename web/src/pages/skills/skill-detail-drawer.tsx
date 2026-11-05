@@ -1,6 +1,5 @@
-import { Button, Input, Skeleton, Tree } from "antd";
+import { Button, Input, Skeleton, Tree, Tooltip } from "antd";
 import { AppModal } from "@/components/ui/product/app-modal";
-import { Tooltip } from "@/components/ui/base/tooltip";
 
 import { SegmentedControl } from "@/components/ui/base/segmented-control";
 import type { DataNode } from "antd/es/tree";
@@ -8,6 +7,8 @@ import { Check, ChevronRight, Code2, ExternalLink, File, FileArchive, FileCode2,
 import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { skillMarkdownBody } from "./skill-document";
+import { skillFailureMessage } from "./skill-feedback";
 
 import { formatSkillCount, formatSkillDate, skillCategoryLabel } from "@/pages/skills/skill-catalog";
 import { isLocalRuntimeMode } from "@/lib/runtime-mode";
@@ -47,7 +48,7 @@ export function SkillDetailModal({ skill, loading, mutating, categories, onClose
             .catch((error) => {
                 if (cancelled) return;
                 setFiles([]);
-                setFilesError(error instanceof Error ? error.message : "技能文件加载失败");
+                setFilesError(skillFailureMessage(error, "技能文件加载失败", "请关闭详情后重新打开。"));
             })
             .finally(() => {
                 if (!cancelled) setFilesLoading(false);
@@ -68,7 +69,7 @@ export function SkillDetailModal({ skill, loading, mutating, categories, onClose
             .catch((error) => {
                 if (cancelled) return;
                 setContent(null);
-                setContentError(error instanceof Error ? error.message : "文件读取失败");
+                setContentError(skillFailureMessage(error, "文件读取失败", "请重新选择文件，或关闭详情后重试。"));
             })
             .finally(() => { if (!cancelled) setContentLoading(false); });
         return () => { cancelled = true; };
@@ -197,7 +198,7 @@ function SkillMarkdown({ source, currentPath, filePaths, onNavigate }: { source:
                         return <span className="skill-package-inline-missing">{alt || src || "图片"}</span>;
                     },
                 }}
-            >{source}</ReactMarkdown>
+            >{skillMarkdownBody(source)}</ReactMarkdown>
         </article>
     );
 }
