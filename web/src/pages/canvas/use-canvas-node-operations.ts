@@ -18,8 +18,6 @@ import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import { syncLocalCanvasSnapshot } from "@/services/local-workspace-sync";
 import type { CanvasDrawingEngine } from "@/lib/canvas/canvas-drawing-engine";
 import { useEffectiveConfig } from "@/stores/use-config-store";
-import { workflowProviderPluginEnabled } from "@/lib/plugins/builtin/workflows";
-import { usePluginStore } from "@/stores/use-plugin-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import type { DirectorScene } from "@/types/director";
 import { hasCancellableCanvasNodeTask } from "@/lib/canvas/canvas-node-task-state";
@@ -86,7 +84,6 @@ export function useCanvasNodeOperations({
         };
     }, [projectId]);
     const effectiveConfig = useEffectiveConfig();
-    const runtimeStatuses = usePluginStore((state) => state.runtimeStatuses);
     const clipboardRef = useRef<CanvasClipboard | null>(null);
     const preferCopiedNodesRef = useRef(false);
     const markerWritePendingRef = useRef(false);
@@ -163,24 +160,16 @@ export function useCanvasNodeOperations({
         ui.setSelectedConnectionId(null);
     }, [pageUi, projectId, selectedNodeIdsRef]);
 
-    const createNode = useCallback((type: CanvasNodeTypeId, position?: Position, workflowProvider?: "runninghub") => {
+    const createNode = useCallback((type: CanvasNodeTypeId, position?: Position) => {
         const disabledReason = getCanvasNodeCreationDisabledReason(type);
         if (disabledReason) {
             message.info(disabledReason);
             return;
         }
-        const selectedWorkflowProvider = type === CanvasNodeType.Config
-            ? workflowProvider || (workflowProviderPluginEnabled(runtimeStatuses, "runninghub") ? "runninghub" : undefined)
-            : undefined;
-        if (selectedWorkflowProvider && !workflowProviderPluginEnabled(runtimeStatuses, selectedWorkflowProvider)) {
-            message.error("RunningHub 工作流插件未启用");
-            return;
-        }
-        const workflowTitle = type === CanvasNodeType.Config && selectedWorkflowProvider === "runninghub" ? "RunningHub 工作流" : undefined;
         const metadata: CanvasNodeMetadata | undefined = type === CanvasNodeType.Drawing
             ? { drawingEngine: defaultDrawingEngine }
             : type === CanvasNodeType.Config
-                ? { generationMode: "image", workflowProvider: selectedWorkflowProvider || "model" }
+                ? { generationMode: "image", workflowProvider: "model" }
                 : type === CanvasNodeType.Image || type === CanvasNodeType.Video || type === CanvasNodeType.Audio
                     ? preferredMediaGeneratorMetadata(effectiveConfig, type === CanvasNodeType.Image ? "image" : type === CanvasNodeType.Video ? "video" : "audio")
                 : undefined;
@@ -201,13 +190,12 @@ export function useCanvasNodeOperations({
             node.title = `${label} ${nextNumber}`;
         }
         if (type === CanvasNodeType.MediaConversion) node.title = "智能剪辑";
-        if (workflowTitle) node.title = workflowTitle;
         commitNodes([...nodesRef.current, node]);
         selectNodes(new Set([node.id]));
         const { setDialogNodeId } = pageUi.getState();
         if (type === CanvasNodeType.Script) setDialogNodeId(null);
         if (canOpenCanvasNodePromptPanel(node) && type !== CanvasNodeType.Text) setDialogNodeId(node.id);
-    }, [pageUi, commitNodes, defaultDrawingEngine, effectiveConfig, getCanvasCenter, message, nodesRef, projectId, runtimeStatuses, selectNodes, viewportScale]);
+    }, [pageUi, commitNodes, defaultDrawingEngine, effectiveConfig, getCanvasCenter, message, nodesRef, projectId, selectNodes, viewportScale]);
 
     const createFolder = useCallback((position?: Position, linked?: { id: string; projectId: string; title: string; style: CanvasFolderStyle; theme: CanvasFolderTheme; createdAt: string }) => {
         const folder = createCanvasNode(CanvasNodeType.Frame, position || getCanvasCenter(), {

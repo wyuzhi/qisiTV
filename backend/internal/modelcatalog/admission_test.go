@@ -10,30 +10,6 @@ import (
 	"infinite-canvas/backend/internal/model"
 )
 
-func TestTaskInputUsesWorkflowProvider(t *testing.T) {
-	tests := []struct {
-		name  string
-		input map[string]any
-		want  bool
-	}{
-		{name: "runninghub workflow", input: map[string]any{"config": map[string]any{"interfaceType": "runninghub-workflow-video"}}, want: true},
-		{name: "case insensitive", input: map[string]any{"config": map[string]any{"interfaceType": "RunningHub-Workflow-Audio"}}, want: true},
-		{name: "ordinary model", input: map[string]any{"config": map[string]any{"interfaceType": "openai-image", "channelId": "system-1", "model": "image-model"}}, want: false},
-		{name: "system channel cannot forge workflow", input: map[string]any{"config": map[string]any{"interfaceType": "runninghub-workflow-image", "channelId": "system-1"}}, want: false},
-		{name: "missing config", input: map[string]any{}, want: false},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := TaskInputUsesWorkflowProvider(test.input); got != test.want {
-				t.Fatalf("TaskInputUsesWorkflowProvider() = %v, want %v", got, test.want)
-			}
-			if test.want && TaskInputUsesCustomChannel(test.input) {
-				t.Fatal("workflow input must not be classified as a custom channel")
-			}
-		})
-	}
-}
-
 func TestTaskInputUsesCustomChannelManagedBeefAPI(t *testing.T) {
 	withCreds := map[string]any{"config": map[string]any{
 		"credentialRef": managedCredentialRef,
@@ -129,7 +105,7 @@ func TestSelectTaskModelRebuildsAuthoritativeExecutionSpec(t *testing.T) {
 			"quality":          "2k",
 			"variantId":        "client-tier",
 			"providerModelKey": "client-provider-model",
-			"interfaceType":    "runninghub-workflow-image",
+			"interfaceType":    "client-interface",
 			"apiFormat":        "client-format",
 			"baseUrl":          "https://attacker.invalid/v1",
 			"apiKey":           "client-api-key",
@@ -352,14 +328,12 @@ func TestHasExecutableVideoConfig(t *testing.T) {
 		t.Fatal("system channel video config must be executable")
 	}
 	if !HasExecutableVideoConfig(map[string]any{"mode": "video", "config": map[string]any{
-		"interfaceType": "runninghub-workflow-video", "workflowId": "wf", "baseUrl": "https://rh.example", "apiKey": "k",
+		"model": "x", "baseUrl": "https://upstream.example", "apiKey": "k",
 	}}) {
-		t.Fatal("workflow video config with credentials must be executable")
+		t.Fatal("custom channel video config with credentials must be executable")
 	}
-	if HasExecutableVideoConfig(map[string]any{"mode": "video", "config": map[string]any{
-		"interfaceType": "runninghub-workflow-video", "workflowId": "wf",
-	}}) {
-		t.Fatal("workflow video config without credentials must not be executable")
+	if HasExecutableVideoConfig(map[string]any{"mode": "video", "config": map[string]any{"model": "x"}}) {
+		t.Fatal("custom channel video config without credentials must not be executable")
 	}
 }
 

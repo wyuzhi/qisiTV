@@ -13,7 +13,6 @@ import (
 	"infinite-canvas/backend/internal/modelcatalog"
 	"infinite-canvas/backend/internal/outbound"
 	"infinite-canvas/backend/internal/prompts"
-	"infinite-canvas/backend/internal/provider/workflow"
 	"infinite-canvas/backend/internal/repository"
 
 	"gorm.io/gorm"
@@ -386,9 +385,6 @@ func ResolveProviderConfig(repo *repository.Repository, localMode bool, systemCh
 	config.Headers = headers
 	if localMode && strings.TrimSpace(config.ChannelID) != "" {
 		return Config{}, errors.New("本地工作区不支持系统渠道配置")
-	}
-	if workflow.IsRunningHubInterface(config.InterfaceType) && strings.TrimSpace(config.BaseURL) == "" {
-		config.BaseURL = "https://www.runninghub.cn"
 	}
 	channelID := strings.TrimSpace(config.ChannelID)
 	if channelID == "" {

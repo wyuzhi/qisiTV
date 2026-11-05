@@ -102,12 +102,6 @@ type ImageSubmissionPort interface {
 	Intercept(req *http.Request) (handled bool, data []byte, mimeType string, err error)
 }
 
-// WorkflowPort is the typed seam for RunningHub / cloud workflow execution.
-// The workflow slice owns the implementation; this package only dispatches.
-type WorkflowPort interface {
-	Execute(ctx context.Context, input Input) (map[string]interface{}, error)
-}
-
 // PromptPort compiles user prompt templates and checks their structured result.
 // Video tasks never call Compile: the node prompt is the final prompt.
 type PromptPort interface {
@@ -120,7 +114,6 @@ type PromptPort interface {
 type ConfigPort interface {
 	Resolve(config Config) (Config, error)
 	ApplyCapabilities(ctx context.Context, input *Input) error
-	RequireWorkflow(interfaceType string) error
 	SyncArkPrivateAssets(ctx context.Context, userID string, input *Input) error
 }
 
@@ -185,7 +178,6 @@ type Runtime struct {
 	ReferenceProgress ReferenceProgressPort
 	Images            ImageSubmissionPort
 	ManagedMedia      beefapi.MediaStatePort
-	Workflow          WorkflowPort
 	Prompt            PromptPort
 	Config            ConfigPort
 	Style             StylePort

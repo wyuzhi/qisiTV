@@ -260,7 +260,7 @@ func ValidateManifest(manifest Manifest) error {
 	if err := validateManifestPackageExtensions(manifest); err != nil {
 		return err
 	}
-	if backend := strings.TrimSpace(manifest.Runtime.Backend); backend != "" && backend != "declarative" && backend != "trusted-backend" {
+	if backend := strings.TrimSpace(manifest.Runtime.Backend); backend != "" && backend != "declarative" {
 		return fmt.Errorf("unsupported plugin backend %q", backend)
 	}
 	if len(manifest.Contributes.Providers) == 0 {

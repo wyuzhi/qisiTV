@@ -30,7 +30,7 @@ test("persisted boolean video options are normalized without turning false back 
     const channel = createModelChannel({ id: "custom", models: ["seedance-2.0-mini"], modelProfiles: [{ model: "seedance-2.0-mini", capability: "video", protocol: "newapi" }] });
     for (const enabled of [true, false]) {
         const persisted = JSON.parse(JSON.stringify({ ...defaultConfig, channels: [channel], model: "custom::seedance-2.0-mini", videoGenerateAudio: enabled, videoWatermark: false, videoArkPrivateAssetUpload: true }));
-        expect(backendProviderConfig(persisted, "video")).toMatchObject({ videoGenerateAudio: String(enabled), videoWatermark: "false", videoArkPrivateAssetUpload: "true" });
+        expect(backendProviderConfig(persisted)).toMatchObject({ videoGenerateAudio: String(enabled), videoWatermark: "false", videoArkPrivateAssetUpload: "true" });
     }
 });
 
@@ -172,7 +172,7 @@ test("explicit asset origin survives channel creation and generation request ass
     const channel = createModelChannel({ id: "custom", baseUrl: "https://api.example.com/v1", referenceAssetOrigin: " https://assets.example.com ", models: ["sd-native-full-2.5"], modelProfiles: [{ model: "sd-native-full-2.5", capability: "video", protocol: "full-video" }] });
     const config = { ...defaultConfig, channels: [channel], model: "custom::sd-native-full-2.5" };
     expect(channel.referenceAssetOrigin).toBe("https://assets.example.com");
-    expect(backendProviderConfig(config, "video")).toMatchObject({ referenceAssetOrigin: channel.referenceAssetOrigin, interfaceType: "full-video" });
+    expect(backendProviderConfig(config)).toMatchObject({ referenceAssetOrigin: channel.referenceAssetOrigin, interfaceType: "full-video" });
 });
 
 test("saved credentials do not imply tested generation and browser cache omits all credential copies", () => {
@@ -194,7 +194,7 @@ test("generation test uses production config including headers and waits for a f
     const testResult = testChannelModelConnection(channel, "test-video", "video", "newapi", async (options) => {
         expect(options.config.videoSeconds).toBe("4");
         expect(options.config.vquality).toBe("720");
-        const request = backendProviderConfig(options.config, "video");
+        const request = backendProviderConfig(options.config);
         expect(request).toMatchObject({ headers: channel.headers, model: "test-video", apiKey: "synthetic-key", interfaceType: "newapi" });
         return completion;
     }).then((value) => { done = true; return value; });

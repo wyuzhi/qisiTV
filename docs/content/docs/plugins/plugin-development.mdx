@@ -260,8 +260,9 @@ export async function query(taskId, request, ctx) {
   }
   ```
 
-  只接一种能力的服务可以不写 `capability`。不导出 `models` 时，用户要手动填模型 ID。服务本身不要密钥（比如本机的服务）时，在 provider 里写 `"auth": { "type": "none" }`，用户就可以不填 Key。
+  只接一种能力的服务可以不写 `capability`。不导出 `models` 时，用户要手动填模型 ID。服务本身没有列模型的接口，而模型 ID 又有固定写法时，可以在 `models` 里抛错，写清楚该填什么，这句话会显示在添加模型的窗口里。服务本身不要密钥（比如本机的服务）时，在 provider 里写 `"auth": { "type": "none" }`，用户就可以不填 Key。
 - **一个服务可以同时出图、出视频、出音频**：`capabilities` 里写上几种，`models` 给每个模型标上 `capability`。用户在「选择服务商」里只看到一项，读到的图片模型、视频模型都会用这个接口生成。
+- 没有模型列表、要手动填编号的例子见 `plugin-packages/beeftv-plugin-runninghub/`。
 - 完整的例子见仓库里的 `plugin-packages/beeftv-plugin-comfyui/`：它把 ComfyUI 里保存的每个工作流列成一个模型，提交前上传参考素材、改写工作流节点，再查 ComfyUI 的队列取结果。
 - 插件代码运行在 BeefTV 自带 Node 的独立后台进程里，不经过浏览器；`console.log` 会写进 BeefTV 日志。只有从 npm、本地目录或 `.tgz` 安装的插件可以使用 `module`，`.beeftv-plugin` 归档不能带代码。
 

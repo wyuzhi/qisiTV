@@ -197,7 +197,7 @@ export function useCanvasStoryboard({
                     characters: storyboardContext.characters,
                     shotDurationSeconds,
                     shotCount: requestedShotCount,
-                    config: backendProviderConfig(generationConfig, "text"),
+                    config: backendProviderConfig(generationConfig),
                     metadata: { nodeId, ...skillExecution.metadata },
                 },
             };

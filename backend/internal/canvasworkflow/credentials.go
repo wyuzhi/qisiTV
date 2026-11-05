@@ -78,7 +78,7 @@ func PrepareRetryCredentials(host CompileHost, run model.CanvasWorkflowRun, node
 func CredentialFingerprint(input map[string]any) string {
 	config, _ := input["config"].(map[string]any)
 	credentials := map[string]any{}
-	for _, key := range []string{"apiKey", "secretKey", "headers", "baseUrl", "credentialRef", "runningHubUploadApiKey"} {
+	for _, key := range []string{"apiKey", "secretKey", "headers", "baseUrl", "credentialRef"} {
 		if value, ok := config[key]; ok {
 			credentials[key] = value
 		}
@@ -94,9 +94,6 @@ func ChannelID(host CompileHost, input map[string]any, logical string) (string, 
 	config, _ := input["config"].(map[string]any)
 	if config == nil {
 		return "", BadRequest("原生成步骤缺少模型配置")
-	}
-	if modelcatalog.TaskInputUsesWorkflowProvider(input) {
-		return "@runninghub", nil
 	}
 	if beefapi.IsManagedChannel(stringValue(config["channelId"]), stringValue(config["credentialRef"]), stringValue(config["baseUrl"])) {
 		return "@beefapi", nil
@@ -151,19 +148,6 @@ func RefreshCredentials(host CompileHost, input map[string]any, channelID string
 	snapshot, e := host.ProviderConfig()
 	if e != nil {
 		return e
-	}
-	if channelID == "@runninghub" {
-		current, _ := snapshot["runningHub"].(map[string]any)
-		enabled, _ := current["enabled"].(bool)
-		if !enabled || strings.TrimSpace(stringValue(current["apiKey"])) == "" {
-			return BadRequest("RunningHub 工作流配置已停用或缺少密钥，请在设置中恢复")
-		}
-		config["apiKey"] = current["apiKey"]
-		config["baseUrl"] = current["baseUrl"]
-		config["runningHubUploadApiKey"] = stringValue(current["uploadApiKey"])
-		config["secretKey"] = ""
-		config["headers"] = []any{}
-		return nil
 	}
 	channels, _ := snapshot["channels"].([]any)
 	var current map[string]any

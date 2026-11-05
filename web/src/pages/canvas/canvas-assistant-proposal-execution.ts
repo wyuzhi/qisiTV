@@ -36,7 +36,7 @@ export function buildConfirmedGenerationConfig(
     confirmedModelKey?: string,
 ) {
     const result = buildGenerationConfig(config, node, mode, requirements);
-    if (confirmedModelKey !== undefined && (!confirmedModelKey.trim() || result.model !== confirmedModelKey || result.taskWorkflowProvider !== "model")) {
+    if (confirmedModelKey !== undefined && (!confirmedModelKey.trim() || result.model !== confirmedModelKey)) {
         throw new Error("当前模型与生成提案不一致。请让助手重新提出生成方案，核对模型后再确认。");
     }
     return result;

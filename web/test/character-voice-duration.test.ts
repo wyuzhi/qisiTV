@@ -124,7 +124,6 @@ test("character binding does not alter TTS, images, H3 ordering, frames or workf
         const hydrated = await hydrateNodeGenerationContext(base, "canvas", "project", "video", false, false);
         expect(hydrated.prompt).toBe("你好");
         for (const config of [
-            { ...seedanceConfig, taskWorkflowProvider: "workflow" },
             { ...seedanceConfig, model: "fal::minimax/h3-max", channels: [{ id: "fal", models: ["minimax/h3-max"], modelProfiles: [{ model: "minimax/h3-max", protocol: "newapi" }] }] },
         ]) expect(compileNodeGenerationReferences(hydrated, config as AiConfig, "reference_to_video").prompt).toBe("你好");
         expect(compileNodeGenerationReferences(hydrated, seedanceConfig, "image_to_video").prompt).toBe("你好");

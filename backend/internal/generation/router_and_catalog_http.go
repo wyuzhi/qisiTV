@@ -633,7 +633,6 @@ func CatalogError(status int, reason kernel.ErrorReason, message string, cause e
 func ValidateTaskCapability(
 	input map[string]any,
 	resolveVideoCapability func(context.Context, *Input) error,
-	validateWorkflow func(mode string, config Config) (bool, error),
 	lookup modelcatalog.ChannelModelLookup,
 ) error {
 	encoded, err := json.Marshal(input)
@@ -661,11 +660,6 @@ func ValidateTaskCapability(
 		if config, ok := input["config"].(map[string]any); ok {
 			config["capabilityConfig"] = taskInput.Config.CapabilityConfig
 			config["videoCapabilitiesVersion"] = taskInput.Config.VideoCapabilitiesVersion
-		}
-	}
-	if validateWorkflow != nil {
-		if handled, err := validateWorkflow(taskInput.Mode, taskInput.Config); handled {
-			return err
 		}
 	}
 	validated, err := modelcatalog.ValidateConfiguredTask(TaskInputFromCanvas(taskInput), lookup)

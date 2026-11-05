@@ -15,7 +15,6 @@ export type BackendPlugin = {
     management: PluginManagement;
 };
 
-export type WorkflowPluginStatus = "enabled" | "disabled" | "invalid" | string;
 
 export type PluginManagement = {
     origin: "official" | "system" | "uploaded" | "package";
@@ -40,7 +39,7 @@ export async function fetchPlugins() {
 }
 
 export async function fetchPluginRuntimeState() {
-    return http.get<{ statuses: Record<string, WorkflowPluginStatus>; states: Record<string, PluginState> }>("/plugins/status");
+    return http.get<{ states: Record<string, PluginState> }>("/plugins/status");
 }
 
 // npm downloads a package and its dependencies; the backend allows up to three minutes.

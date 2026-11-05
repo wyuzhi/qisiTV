@@ -1,9 +1,8 @@
 import { CollectionToolbar } from "@/components/layout/collection-toolbar";
 import { App, Button, Input, InputNumber, Modal, Select, Typography } from "antd";
 import { Switch } from "@/components/ui/base/switch";
-import { ArrowUpCircle, AudioLines, CalendarDays, CheckCircle2, Clock3, ExternalLink, Film, Image as ImageIcon, MessageSquareText, Plus, PlugZap, RefreshCw, Search, Settings2, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
+import { ArrowUpCircle, AudioLines, CalendarDays, CheckCircle2, Clock3, Film, Image as ImageIcon, MessageSquareText, Plus, PlugZap, RefreshCw, Search, Settings2, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router";
 
 import { EmptyState } from "@/components/ui/product/empty-state";
 import { PageHeader } from "@/components/layout/workspace-page";
@@ -11,7 +10,6 @@ import { listRegisteredPlugins } from "@/lib/plugins/plugin-registry";
 import "@/lib/plugins/builtin";
 import { EAGLE_PLUGIN_ID } from "@/lib/plugins/builtin/eagle";
 import { PROMPT_OPTIMIZER_PLUGIN_ID } from "@/lib/plugins/builtin/prompt-optimizer";
-import { RUNNINGHUB_PLUGIN_ID } from "@/lib/plugins/builtin/workflows";
 import { isOfficialApplicationPluginId } from "@/lib/plugins/official-applications";
 import { deactivateClientPlugin, syncActiveClientPlugins } from "@/lib/plugins/plugin-client-loader";
 import { PLUGIN_INSTALL_REQUEST_EVENT } from "@/lib/plugins/plugin-host-runtime";
@@ -74,7 +72,6 @@ const protocolSectionMeta = [
 
 export default function PluginsPage() {
     const { message } = App.useApp();
-    const navigate = useNavigate();
     const user = useUserStore((state) => state.user);
     const features = useUserStore((state) => state.features);
     const localRuntime = isLocalRuntimeMode() || workspaceCapabilities().local;
@@ -83,7 +80,6 @@ export default function PluginsPage() {
     const ensurePlugin = usePluginStore((state) => state.ensurePlugin);
     const setEnabled = usePluginStore((state) => state.setEnabled);
     const removePlugin = usePluginStore((state) => state.removePlugin);
-    const setRuntimeStatuses = usePluginStore((state) => state.setRuntimeStatuses);
     const setPluginStates = usePluginStore((state) => state.setPluginStates);
     const pluginStates = usePluginStore((state) => state.pluginStates);
     const updateConfig = usePluginStore((state) => state.updateConfig);
@@ -160,7 +156,6 @@ export default function PluginsPage() {
             const installation = installations.find((item) => item.manifest.id === plugin.manifest.id);
             const enabled = state?.effectiveEnabled ?? Boolean(installation?.enabled);
             const manifest = plugin.manifest;
-            if (localRuntime && manifest.id === RUNNINGHUB_PLUGIN_ID) return false;
             const contributionKinds = contributionKindsFor(manifest);
             const searchableText = [manifest.name, manifest.description, manifest.author, manifest.id, ...contributionKinds.map((kind) => categoryLabels[kind] || kind)].filter(Boolean).join(" ").toLocaleLowerCase();
             if (normalizedSearch && !searchableText.includes(normalizedSearch)) return false;
@@ -192,7 +187,6 @@ export default function PluginsPage() {
 
     const categoryCounts = useMemo(() => {
         const visiblePlugins = registeredPlugins.filter((plugin) => {
-            if (localRuntime && plugin.manifest.id === RUNNINGHUB_PLUGIN_ID) return false;
             const isApplicationPlugin =
                 backendPluginById.get(plugin.manifest.id)?.management.kind === "application" ||
                 isOfficialApplicationPluginId(plugin.manifest.id);
@@ -220,8 +214,7 @@ export default function PluginsPage() {
     const canConfigurePlugin = (plugin: RegisteredPlugin) =>
         localRuntime || hasCustomAppSettings(plugin)
             ? hasPluginConfiguration(plugin)
-            : Boolean(pluginStates[plugin.manifest.id]?.canConfigure) &&
-              (hasPluginConfiguration(plugin) || plugin.manifest.id === RUNNINGHUB_PLUGIN_ID);
+            : Boolean(pluginStates[plugin.manifest.id]?.canConfigure) && hasPluginConfiguration(plugin);
 
     const isPluginEnabled = (plugin: RegisteredPlugin, installation = installations.find((item) => item.manifest.id === plugin.manifest.id)) => pluginStates[plugin.manifest.id]?.effectiveEnabled ?? Boolean(installation?.enabled);
 
@@ -238,9 +231,6 @@ export default function PluginsPage() {
                 : await setUserPluginEnabled(plugin.manifest.id, enabled);
             setEnabled(plugin.manifest.id, next.effectiveEnabled ?? enabled);
             setPluginStates({ ...usePluginStore.getState().pluginStates, [next.pluginId]: next });
-            if (next.pluginId === RUNNINGHUB_PLUGIN_ID) {
-                setRuntimeStatuses({ ...usePluginStore.getState().runtimeStatuses, [next.pluginId]: next.effectiveEnabled ? "enabled" : "disabled" });
-            }
             message.success(`${plugin.manifest.name}${enabled ? "已启用" : "已停用"}`);
         } catch (error) {
             if (localRuntime) {
@@ -665,20 +655,6 @@ export default function PluginsPage() {
                                         <div className="rounded-[var(--r-md)] border border-border/60 bg-muted/25 px-3 py-3 text-[var(--fs-body)] leading-6 text-foreground/70">
                                             <p>在创作页或图片、视频节点的提示词编辑器中使用“优化”按钮，即可让当前文本模型整理提示词。</p>
                                             <p className="mt-2 text-[var(--fs-micro)] text-foreground/50">插件不会自动覆盖原提示词，只有点击“采用”后才会回填到当前输入框。</p>
-                                        </div>
-                                    ) : settingsPlugin.manifest.id === RUNNINGHUB_PLUGIN_ID ? (
-                                        <div className="plugin-settings-empty">
-                                            <p>RunningHub 的 API Key、Workflow / App 和字段映射在宿主设置页维护。</p>
-                                            <Button
-                                                type="primary"
-                                                icon={<ExternalLink className="size-4" />}
-                                                onClick={() => {
-                                                    setSettingsPluginId(null);
-                                                    navigate("/settings?section=runninghub");
-                                                }}
-                                            >
-                                                打开工作流设置
-                                            </Button>
                                         </div>
                                     ) : settingsPlugin.manifest.configuration?.fields?.length ? (
                                         <PluginFieldsConfigForm

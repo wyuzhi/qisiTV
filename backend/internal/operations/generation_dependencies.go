@@ -117,14 +117,13 @@ func (g generationDependencyGraph) references(target, kind string) []string {
 			}
 		}
 	}
-	workflow := dependencyString(meta, "workflowProvider") == "runninghub" || (dependencyString(meta, "workflowProvider") == "" && dependencyString(meta, "runningHubWorkflowId") != "")
-	// Ordinary video and workflow inputs include all connected media. Image
+	// Ordinary video inputs include all connected media. Image
 	// prompts with explicit references select only those references.
 	composerOnly := dependencyString(g.nodes[target], "type") == "config" && strings.TrimSpace(dependencyString(meta, "composerContent")) != ""
-	if (!explicit && !composerOnly) || kind == "video" || workflow {
+	if (!explicit && !composerOnly) || kind == "video" {
 		selected = append(selected, inputs...)
 	}
-	if kind == "video" && !workflow {
+	if kind == "video" {
 		for _, field := range []string{"videoStartFrameNodeId", "videoEndFrameNodeId", "videoMiddleFrameNodeId"} {
 			if id := dependencyString(meta, field); id != "" {
 				selected = append(selected, id)
