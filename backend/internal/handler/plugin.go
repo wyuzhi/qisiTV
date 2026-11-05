@@ -120,6 +120,9 @@ func RegisterPluginRoutes(r *gin.RouterGroup, center pluginCenter, hosted ...boo
 		}
 		ok(c, gin.H{"items": items})
 	})
+	pluginRoutes.GET("/updates", func(c *gin.Context) {
+		ok(c, center.PluginDomain().CheckUpdates(c.Request.Context(), c.Query("registry")))
+	})
 	pluginRoutes.GET("/market/readme", func(c *gin.Context) {
 		readme, err := center.PluginDomain().FetchMarketReadme(c.Request.Context(), c.Query("id"), c.Query("registry"))
 		if err != nil {

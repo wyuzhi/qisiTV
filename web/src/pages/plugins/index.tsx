@@ -1,7 +1,7 @@
 import { CollectionToolbar } from "@/components/layout/collection-toolbar";
-import { App, Button, Input, InputNumber, Modal, Select, Typography } from "antd";
+import { App, Button, Input, Modal, Select, Typography } from "antd";
 import { Switch } from "@/components/ui/base/switch";
-import { ArrowUpCircle, AudioLines, CalendarDays, CheckCircle2, Clock3, Film, Image as ImageIcon, MessageSquareText, Plus, PlugZap, RefreshCw, Search, Settings2, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
+import { AudioLines, CalendarDays, Clock3, Film, Image as ImageIcon, MessageSquareText, Plus, PlugZap, RefreshCw, Search, Settings2, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { EmptyState } from "@/components/ui/product/empty-state";
@@ -13,10 +13,11 @@ import { PROMPT_OPTIMIZER_PLUGIN_ID } from "@/lib/plugins/builtin/prompt-optimiz
 import { isOfficialApplicationPluginId } from "@/lib/plugins/official-applications";
 import { deactivateClientPlugin, syncActiveClientPlugins } from "@/lib/plugins/plugin-client-loader";
 import { PLUGIN_INSTALL_REQUEST_EVENT } from "@/lib/plugins/plugin-host-runtime";
-import type { PluginField, PluginInstallConfirmRequest, PluginManifest, PluginManifestV2, RegisteredPlugin } from "@/lib/plugins/plugin-types";
+import type { PluginInstallConfirmRequest, PluginManifest, PluginManifestV2, RegisteredPlugin } from "@/lib/plugins/plugin-types";
 import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { EaglePluginSettingsPanel } from "@/pages/plugins/eagle";
 import {
+    fetchPluginUpdates,
     installPluginPackage,
     setPluginPlatformEnabled,
     setUserPluginEnabled,
@@ -24,6 +25,7 @@ import {
     updatePluginPackage,
     type BackendPlugin,
     type PluginState,
+    type PluginUpdateCheck,
 } from "@/services/api/plugins";
 import { syncPluginsFromBackend } from "@/services/plugin-sync";
 import { usePluginStore } from "@/stores/use-plugin-store";
@@ -33,6 +35,8 @@ import { workspaceCapabilities } from "@/services/workspace-mode";
 
 import { PluginDetailsModal } from "./plugin-documentation-modals";
 import { isLocalFolderSource, PluginInstallConfirmModal } from "./plugin-install-confirm-modal";
+import { PluginFieldsConfigForm } from "./plugin-fields-config-form";
+import { PluginUpdateButton } from "./plugin-update-button";
 import "./plugins.css";
 
 const categoryLabels: Record<string, string> = {
@@ -95,6 +99,7 @@ export default function PluginsPage() {
     const [installPendingRequest, setInstallPendingRequest] = useState<PluginInstallConfirmRequest | null>(null);
     const [installing, setInstalling] = useState(false);
     const [updatingPluginId, setUpdatingPluginId] = useState<string | null>(null);
+    const [updateCheck, setUpdateCheck] = useState<PluginUpdateCheck>();
     const [search, setSearch] = useState("");
     const [categoryFilter, setCategoryFilter] = useState("all");
     const [statusFilter, setStatusFilter] = useState<"all" | "enabled" | "disabled">("all");
@@ -130,6 +135,8 @@ export default function PluginsPage() {
         } finally {
             setBackendPluginsLoading(false);
         }
+        // 查新版本要问 npm，慢且可能失败；失败时按钮照旧显示「更新」。
+        fetchPluginUpdates().then(setUpdateCheck, () => setUpdateCheck(undefined));
     };
 
     useEffect(() => {
@@ -528,14 +535,13 @@ export default function PluginsPage() {
                                                                         onChange={(checked) => void togglePlugin(plugin, checked)}
                                                                     />
                                                                     {remote?.source === "package" && remote.packageSpec ? (
-                                                                        <Button
-                                                                            className="plugin-settings-button"
-                                                                            icon={isLocalFolderSource(remote.packageSpec) ? <RefreshCw className="size-4" /> : <ArrowUpCircle className="size-4" />}
+                                                                        <PluginUpdateButton
+                                                                            pluginId={plugin.manifest.id}
+                                                                            packageSpec={remote.packageSpec}
+                                                                            check={updateCheck}
                                                                             loading={updatingPluginId === plugin.manifest.id}
-                                                                            onClick={() => void handleUpdatePlugin(plugin.manifest.id)}
-                                                                        >
-                                                                            {isLocalFolderSource(remote.packageSpec) ? "重新加载" : "更新"}
-                                                                        </Button>
+                                                                            onUpdate={() => void handleUpdatePlugin(plugin.manifest.id)}
+                                                                        />
                                                                     ) : null}
                                                                     {canConfigure ? (
                                                                         <Button
@@ -700,91 +706,6 @@ export default function PluginsPage() {
                 </div>
             </div>
         </main>
-    );
-}
-
-function PluginFieldsConfigForm({
-    fields,
-    initialValues,
-    onSave,
-}: {
-    fields: PluginField[];
-    initialValues: Record<string, unknown>;
-    onSave: (values: Record<string, unknown>) => void;
-}) {
-    const [values, setValues] = useState<Record<string, unknown>>(() => {
-        const defaults: Record<string, unknown> = {};
-        for (const field of fields) {
-            defaults[field.name] = initialValues[field.name] !== undefined ? initialValues[field.name] : field.default;
-        }
-        return defaults;
-    });
-
-    return (
-        <>
-            <div className="plugin-settings-fields">
-                {fields.map((field) => {
-                    const currentValue = values[field.name];
-                    const labelText = field.label || field.name;
-                    return (
-                        <div key={field.name} className="min-w-0">
-                            {field.type === "boolean" ? (
-                                <div className="plugin-setting-label-row">
-                                    <label htmlFor={`plugin-field-${field.name}`}>{labelText}</label>
-                                    <Switch
-                                        id={`plugin-field-${field.name}`}
-                                        checked={Boolean(currentValue)}
-                                        onChange={(checked) => setValues((prev) => ({ ...prev, [field.name]: checked }))}
-                                        aria-label={labelText}
-                                    />
-                                </div>
-                            ) : (
-                                <>
-                                    <label htmlFor={`plugin-field-${field.name}`}>{labelText}</label>
-                                    {field.type === "select" ? (
-                                        <Select
-                                            id={`plugin-field-${field.name}`}
-                                            aria-label={labelText}
-                                            value={typeof currentValue === "string" ? currentValue : undefined}
-                                            options={(field.values || []).map((val) => ({ value: val, label: val }))}
-                                            onChange={(next) => setValues((prev) => ({ ...prev, [field.name]: next }))}
-                                        />
-                                    ) : field.type === "number" ? (
-                                        <InputNumber
-                                            id={`plugin-field-${field.name}`}
-                                            aria-label={labelText}
-                                            className="w-full"
-                                            value={typeof currentValue === "number" ? currentValue : undefined}
-                                            onChange={(next) => setValues((prev) => ({ ...prev, [field.name]: next }))}
-                                        />
-                                    ) : field.type === "secret" ? (
-                                        <Input.Password
-                                            id={`plugin-field-${field.name}`}
-                                            aria-label={labelText}
-                                            value={typeof currentValue === "string" ? currentValue : ""}
-                                            onChange={(e) => setValues((prev) => ({ ...prev, [field.name]: e.target.value }))}
-                                        />
-                                    ) : (
-                                        <Input
-                                            id={`plugin-field-${field.name}`}
-                                            aria-label={labelText}
-                                            value={typeof currentValue === "string" ? currentValue : ""}
-                                            onChange={(e) => setValues((prev) => ({ ...prev, [field.name]: e.target.value }))}
-                                        />
-                                    )}
-                                </>
-                            )}
-                            {field.description ? <p>{field.description}</p> : null}
-                        </div>
-                    );
-                })}
-            </div>
-            <div className="plugin-settings-actions">
-                <Button type="primary" icon={<CheckCircle2 className="size-4" />} onClick={() => onSave(values)}>
-                    保存配置
-                </Button>
-            </div>
-        </>
     );
 }
 

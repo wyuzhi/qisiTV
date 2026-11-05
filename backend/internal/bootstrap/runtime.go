@@ -386,6 +386,8 @@ func (r *Runtime) Start() error {
 		defer close(r.backgroundDone)
 		r.service.RecoverPlaybackTranscodes()
 	}()
+	// 精选插件跟着精选列表自动更新；HTTP 服务关闭时一起停下。
+	go r.service.PluginDomain().RunOfficialUpdates(httpContext)
 	// The assistant loads its operation catalog from this server before becoming
 	// healthy. Accept requests before synchronously waiting for child readiness.
 	go func() {
