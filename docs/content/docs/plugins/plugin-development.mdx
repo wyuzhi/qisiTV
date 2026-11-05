@@ -347,5 +347,8 @@ export async function query(taskId, request, ctx) {
 
 ## 8. 发布到 npm 与上架推荐列表
 
-1. 确保 `package.json` 的 `keywords` 包含 `"beeftv-plugin"`，运行 `npm publish --access public` 发布到 npm。发布后，所有用户即可在插件市场的「npm 社区搜索」中搜到并安装你的插件。
-2. 若希望进入「精选推荐」列表，向公开仓库 `https://github.com/Sunnyender-org/beeftv-plugins` 的 `registry.json` 提交 Pull Request，补充插件的 `id`、`packageName`、`name`、`version`、`description`、`author`、`category` 与 `tags`。
+1. `package.json` 的 `keywords` 里写上 `"beeftv-plugin"`，运行 `npm publish --access public`。发布后，用户在插件市场的「npm 社区搜索」里就能搜到并安装。
+2. 想进「精选推荐」，向公开仓库 `https://github.com/Sunnyender-org/beeftv-plugins` 提一个 Pull Request，在 `registry.json` 的 `packages` 里加一行包名，例如 `"beeftv-plugin-sticky-note"`。名称、说明、版本和作者都从 npm 读，不用另外填。
+3. 发新版本只要再运行一次 `npm publish`。用户的插件中心会在这个插件上显示「更新到 v新版本」，由用户自己点。
+
+`registry.json` 的 `plugins` 里带 `tarball` 和 `sha256` 的条目由 BeefTV 维护：安装时按 `sha256` 校验下载的内容；BeefTV 启动后和之后每 6 小时检查一次，有新登记的版本就自动更新。

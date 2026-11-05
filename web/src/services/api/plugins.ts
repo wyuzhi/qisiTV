@@ -64,6 +64,14 @@ export async function updatePluginPackage(id: string, registry?: string) {
     return result.plugin;
 }
 
+export type PluginUpdateNotice = { id: string; version: string; latest: string; official?: boolean };
+/** updates 是有新版本的插件，upToDate 是确认已是最新的插件；两边都不在的插件没法比较版本。 */
+export type PluginUpdateCheck = { updates: PluginUpdateNotice[]; upToDate: string[] };
+
+export async function fetchPluginUpdates(signal?: AbortSignal) {
+    return http.get<PluginUpdateCheck>("/plugins/updates", { signal, timeout: 15_000 });
+}
+
 export async function reportPluginLoadError(id: string, error: string) {
     return http.post<{ status?: string }>(`/plugins/${encodeURIComponent(id)}/load-error`, { error });
 }
