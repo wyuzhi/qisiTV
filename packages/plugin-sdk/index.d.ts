@@ -54,6 +54,18 @@ export type PluginProviderOperation = {
   headers?: Record<string, string>;
 };
 
+/** How BeefTV sends the key. `none` is for services without one; users can leave the key empty. */
+export type PluginProviderAuth = {
+  type: "none" | "bearer" | "header" | "api-key" | "query" | "basic";
+  /** Which key to send: `apiKey` or `secretKey`. */
+  field?: string;
+  secretField?: string;
+  header?: string;
+  prefix?: string;
+  query?: string;
+  username?: string;
+};
+
 type PluginProviderBase = {
   id: string;
   label: string;
@@ -61,7 +73,7 @@ type PluginProviderBase = {
   scopes: ProtocolScope[];
   baseUrl?: string;
   requiresPublicMediaUrls?: boolean;
-  auth?: { type: "bearer" | "api-key" | "custom"; field: string; header?: string };
+  auth?: PluginProviderAuth;
   parameters?: PluginParameter[];
 };
 
@@ -218,7 +230,8 @@ export type ProviderModel = {
  * - `submit` starts a task and returns its `taskId`, or the final result when the service
  *   answers at once. If `submit` throws, BeefTV cannot tell whether the task was created
  *   and does not retry.
- * - `query` is called until the task finishes, including after BeefTV restarts.
+ * - `query` is called until the task finishes, including after BeefTV restarts. If it throws,
+ *   BeefTV tries again later; three throws in a row fail the task with the last error's message.
  * - `models` is optional. When the user adds this service under model services and clicks
  *   "读取模型", BeefTV calls it with the address and key they entered. Without it, users
  *   type model IDs by hand.

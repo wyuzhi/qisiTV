@@ -28,12 +28,15 @@ function notifyLifecycle(pluginId?: string): void {
     }
 }
 
+type BackendPluginEntry = { manifest: PluginManifest | PluginManifestV2; enabled: boolean };
+
 type PluginStore = {
     hydrated: boolean;
     installations: PluginInstallation[];
     runtimeStatuses: Record<string, string>;
     pluginStates: Record<string, PluginState>;
     ensurePlugin: (manifest: PluginManifest | PluginManifestV2) => void;
+    syncBackendPlugins: (plugins: BackendPluginEntry[], states: Record<string, PluginState>) => void;
     setRuntimeStatuses: (statuses: Record<string, string>) => void;
     setPluginStates: (states: Record<string, PluginState>) => void;
     setEnabled: (pluginId: string, enabled: boolean) => void;
@@ -44,6 +47,10 @@ type PluginStore = {
 
 function now() {
     return new Date().toISOString();
+}
+
+function sameManifestRevision(a: PluginManifest | PluginManifestV2, b: PluginManifest | PluginManifestV2) {
+    return a.version === b.version && a.revision === b.revision && a.trusted === b.trusted;
 }
 
 function fallbackManifest(pluginId: string): PluginManifest | PluginManifestV2 {
@@ -70,7 +77,7 @@ export const usePluginStore = create<PluginStore>()(
             ensurePlugin: (manifest) => {
                 set((state) => {
                     const current = state.installations.find((item) => item.manifest.id === manifest.id);
-                    if (current && current.manifest.version === manifest.version && current.manifest.revision === manifest.revision && current.manifest.trusted === manifest.trusted) return { hydrated: true };
+                    if (current && sameManifestRevision(current.manifest, manifest)) return { hydrated: true };
                     const timestamp = now();
                     const next: PluginInstallation = current
                         ? { ...current, manifest, updatedAt: timestamp }
@@ -78,6 +85,24 @@ export const usePluginStore = create<PluginStore>()(
                     return { hydrated: true, installations: [...state.installations.filter((item) => item.manifest.id !== manifest.id), next] };
                 });
                 notifyLifecycle(manifest.id);
+            },
+            // 整张表一次写完。每次写入都会把所有清单存一遍，逐个插件写会让页面卡住好几秒。
+            syncBackendPlugins: (plugins, states) => {
+                set((state) => {
+                    const installations = new Map(state.installations.map((item) => [item.manifest.id, item]));
+                    const timestamp = now();
+                    for (const { manifest, enabled } of plugins) {
+                        const current = installations.get(manifest.id);
+                        installations.set(
+                            manifest.id,
+                            current
+                                ? { ...current, manifest: sameManifestRevision(current.manifest, manifest) ? current.manifest : manifest, enabled, updatedAt: timestamp, lastError: undefined }
+                                : { manifest, enabled, config: {}, installedAt: timestamp, updatedAt: timestamp },
+                        );
+                    }
+                    return { hydrated: true, pluginStates: states, installations: [...installations.values()] };
+                });
+                notifyLifecycle();
             },
             setEnabled: (pluginId, enabled) => {
                 set((state) => {

@@ -52,6 +52,10 @@ function resolveModuleDeactivator(mod: ClientPluginModule): (() => Promise<void>
     return null;
 }
 
+// 只用来发现永远不返回的插件；加载本身是异步的，不会挡住应用。计时从 import() 开始，
+// 页面忙着渲染时计时器照走，太短会把正常的插件记成异常。
+const CLIENT_ENTRY_TIMEOUT_MS = 15_000;
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, pluginId: string): Promise<T> {
     return new Promise<T>((resolve, reject) => {
         const timer = setTimeout(() => {
@@ -83,7 +87,7 @@ export async function activateClientPluginModule(
         deactivateClientPlugin(pluginId);
     }
 
-    const timeoutMs = options?.timeoutMs ?? 3000;
+    const timeoutMs = options?.timeoutMs ?? CLIENT_ENTRY_TIMEOUT_MS;
     const host = createBeefTVPluginHost(pluginId, options?.manifest);
     const activator = resolveModuleActivator(mod);
     const deactivator = resolveModuleDeactivator(mod);
@@ -162,7 +166,7 @@ export async function loadAndActivateClientPlugin(
         }
 
         try {
-            const timeoutMs = options?.timeoutMs ?? 3000;
+            const timeoutMs = options?.timeoutMs ?? CLIENT_ENTRY_TIMEOUT_MS;
             const mod = await withTimeout(
                 import(/* @vite-ignore */ clientEntry) as Promise<ClientPluginModule>,
                 timeoutMs,

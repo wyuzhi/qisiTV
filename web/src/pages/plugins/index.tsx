@@ -123,12 +123,9 @@ export default function PluginsPage() {
             const result = await syncPluginsFromBackend();
             setBackendPlugins(result.plugins || []);
         } catch (error) {
+            // 读取失败不清空列表：同时发出的另一次读取可能已经成功。
             if (!localRuntime) {
                 message.error(error instanceof Error ? error.message : "读取插件中心失败");
-            }
-            setBackendPlugins([]);
-            if (localRuntime) {
-                setPluginStates({});
             }
         } finally {
             setBackendPluginsLoading(false);
