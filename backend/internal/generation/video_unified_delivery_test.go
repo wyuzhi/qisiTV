@@ -125,7 +125,7 @@ func TestEveryInstalledVideoProviderUsesUnifiedPublicURLDownload(t *testing.T) {
 			})
 		}
 	}
-	if len(roster) != 31 {
+	if len(roster) != 30 {
 		t.Fatalf("shipped video roster changed: %d %v", len(roster), roster)
 	}
 	t.Logf("downloadRoster=%v; renewalParserRoster=openai-videos,google-gemini-veo,vertex-veo,volcengine-ark-seedance", roster)

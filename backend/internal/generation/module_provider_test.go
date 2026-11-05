@@ -169,7 +169,8 @@ func TestModuleProviderKeepsQueryingThroughThrownErrors(t *testing.T) {
 		t.Fatal("module-image is not registered")
 	}
 	queries := 0
-	policy := DefaultVideoPollPolicy()
+	// 图片任务的查询规则最严：声明式协议在这里一出错就失败。
+	policy := DeclarativeProtocolPollPolicy("image")
 	policy.Sleep = func(context.Context, time.Duration) error { return nil }
 	policy.Notify = func(_ context.Context, _ string, event VideoPollEvent, _ error) {
 		if event == VideoPollEventRetrying {

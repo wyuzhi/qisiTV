@@ -22,6 +22,9 @@ import (
 // 恢复的任务只查询、不再提交；提交抛错时无法证明没发出，按"提交结果不明"处理、不重试；
 // 每次调用像上游请求一样记入调用日志，任务号由同一条回执规则记下；成功后由宿主下载结果。
 func runModuleProviderTask(ctx context.Context, input Input, provider protocol.ModuleProvider, policy VideoPollPolicy) (map[string]interface{}, error) {
+	// 插件的任务都在服务商那边跑，图片也可能跑几分钟，所以图片和视频用同一条重试规则。
+	policy.RetryTransient = true
+	policy.MaxNotFoundMisses = moduleQueryMisses
 	request := ProtocolRequestFromInput(input)
 	taskID := ResumedProviderRequestID(ctx)
 	if taskID == "" {
@@ -65,6 +68,9 @@ func runModuleProviderTask(ctx context.Context, input Input, provider protocol.M
 		return VideoPollOutcome{}, nil
 	})
 }
+
+// moduleQueryMisses 是插件 query 连续抛错多少次后任务才算失败。
+const moduleQueryMisses = 3
 
 // moduleQueryError 是插件 query 抛出的错误。任务已经在服务商那边跑着，插件抛错分不清是
 // 网络抖动还是真的查不了，所以和"查不到任务"一样处理：连续几次才算失败。
