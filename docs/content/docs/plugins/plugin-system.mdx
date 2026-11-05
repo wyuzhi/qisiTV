@@ -59,25 +59,20 @@ beeftv-plugin-sticky-note/
   },
   "beeftv": {
     "apiVersion": "beeftv.plugin/v2",
-    "schemaVersion": 2,
     "name": "画布便签",
-    "description": "在画布上放置可换色、可编辑的便签卡片，并支持创作助手直接创建和修改便签。",
-    "author": "BeefTV",
     "client": "./client/index.js",
     "permissions": ["canvas.read", "canvas.write"],
-    "canvasNodes": [
-      {
-        "id": "sticky-note",
-        "type": "sticky-note",
-        "label": "画布便签",
-        "title": "画布便签",
-        "defaultTitle": "便签",
-        "renderer": "client",
-        "defaultWidth": 240,
-        "defaultHeight": 180,
-        "defaultSize": { "width": 240, "height": 180 }
-      }
-    ]
+    "contributes": {
+      "canvasNodes": [
+        {
+          "id": "sticky-note",
+          "label": "画布便签",
+          "defaultTitle": "便签",
+          "renderer": "client",
+          "defaultSize": { "width": 240, "height": 180 }
+        }
+      ]
+    }
   }
 }
 ```

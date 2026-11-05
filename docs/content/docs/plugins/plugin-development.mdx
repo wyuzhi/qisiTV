@@ -53,33 +53,26 @@ beeftv-plugin-sticky-note/
     "skills": ["./skills"]
   },
   "beeftv": {
-    "id": "beeftv-plugin-sticky-note",
     "apiVersion": "beeftv.plugin/v2",
-    "schemaVersion": 2,
     "name": "画布便签",
-    "version": "0.1.0",
-    "description": "在画布上放置可换色、可编辑的便签卡片，并支持创作助手直接创建和修改便签。",
-    "author": "BeefTV",
     "client": "./client/index.js",
     "permissions": ["canvas.read", "canvas.write"],
-    "canvasNodes": [
-      {
-        "id": "sticky-note",
-        "type": "sticky-note",
-        "label": "画布便签",
-        "title": "画布便签",
-        "defaultTitle": "便签",
-        "renderer": "client",
-        "defaultWidth": 240,
-        "defaultHeight": 180,
-        "defaultSize": { "width": 240, "height": 180 }
-      }
-    ]
+    "contributes": {
+      "canvasNodes": [
+        {
+          "id": "sticky-note",
+          "label": "画布便签",
+          "defaultTitle": "便签",
+          "renderer": "client",
+          "defaultSize": { "width": 240, "height": 180 }
+        }
+      ]
+    }
   }
 }
 ```
 
-可安装 `@beeftv/plugin-sdk` 获取完整的 TypeScript 类型提示（`packages/plugin-sdk`）。
+`beeftv.name` 是插件在 BeefTV 里显示的名字；不写时用 `package.json` 的 `name`。插件说明和作者取自 `package.json` 的 `description` 和 `author`。画布节点、生成服务等能力都写在 `beeftv.contributes` 里，写在别处的不会生效。
 
 ---
 
