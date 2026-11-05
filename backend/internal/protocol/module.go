@@ -12,7 +12,7 @@ import (
 // ExecutionModule 标记由插件 JS 执行的生成接口。
 const ExecutionModule = "module"
 
-// ModuleProvider 是用插件 JS 实现 submit/query/cancel 的生成接口。插件代码在插件宿主
+// ModuleProvider 是用插件 JS 实现 submit/query（可选 models）的生成接口。插件代码在插件宿主
 // 进程里自己发请求；任务号记录、轮询节奏、结果下载与恢复仍由宿主负责，所以它不构造
 // HTTP 请求，Build*/Parse* 一律失败，误走声明式路径时不会发出任何请求。
 type ModuleProvider struct {

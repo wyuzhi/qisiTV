@@ -7,6 +7,7 @@ import { configWithoutCachedSecrets, createModelChannel, defaultConfig, normaliz
 import { defaultModelCapabilityConfig } from "../src/lib/model-capabilities";
 import type { ModelProtocolDefinition } from "../src/lib/model-protocols";
 import { serviceCredentialGuide } from "../src/lib/service-credentials";
+import { toProviderDefinitions } from "../src/services/api/plugin-catalog";
 import { currentModelConnectionReceipt, useModelConnectionTests } from "../src/stores/use-model-connection-tests";
 
 const protocols = [
@@ -122,6 +123,20 @@ test("a plugin service becomes one provider choice whose listed models use the p
     expect(serviceConnectionError(createPluginServiceChannel({ ...comfy, authType: "bearer" }, "keyed"), { protocols: [{ ...comfy, authType: "bearer" }] })).toBe("请填写 API Key");
 
     expect(serviceModelProfile(channel, { id: "portrait.app.json", modelType: "image" }, [...protocols, comfy])).toMatchObject({ capability: "image", protocol: "comfyui-app" });
+});
+
+test("a plugin interface that makes images and videos is one service, and both kinds of model use it", () => {
+    const item = { id: "comfyui", version: "0.1.0", name: "ComfyUI", vendor: "ComfyUI", categories: ["image", "video"], scopes: ["user.custom-channel"], enabled: true, module: true, authType: "none", baseUrl: "http://127.0.0.1:8188" };
+    expect(toProviderDefinitions(item).map((definition) => `${definition.value}:${definition.capability}`)).toEqual(["comfyui:image", "comfyui:video"]);
+    expect(toProviderDefinitions(item, "video").map((definition) => definition.capability)).toEqual(["video"]);
+    expect(toProviderDefinitions(item, "audio")).toEqual([]);
+
+    const available = [...protocols, ...toProviderDefinitions(item)];
+    const services = pluginServices(available);
+    expect(services.map((service) => service.value)).toEqual(["comfyui"]);
+    const channel = createPluginServiceChannel(services[0], "comfy");
+    expect(serviceModelProfile(channel, { id: "invert.app.json", modelType: "image" }, available)).toMatchObject({ capability: "image", protocol: "comfyui" });
+    expect(serviceModelProfile(channel, { id: "clip.json", modelType: "video" }, available)).toMatchObject({ capability: "video", protocol: "comfyui" });
 });
 
 test("connection validation rejects full endpoints and embedded credentials", () => {

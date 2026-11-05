@@ -249,7 +249,7 @@ export async function query(taskId, request, ctx) {
 - **`submit` 要返回 `taskId`**。BeefTV 先记下任务号再查询；应用重启或任务恢复时只调用 `query`，不会再次调用 `submit`。
 - 结果里的 `url` 或 `dataUrl` 由 BeefTV 下载并保存到画布，插件不用自己存文件。
 - 用户取消任务时，BeefTV 停止查询，并通过 `ctx.signal` 中断正在进行的调用；目前不会去服务商那边取消任务。
-- **可以再导出 `models(ctx)` 列出模型**。用 `module` 写的服务会出现在「设置 → 模型服务 → 选择服务商」里，标着「插件提供」。用户选中它、填好服务地址（和 Key），点「读取模型」时，BeefTV 调用 `models(ctx)`，`ctx.config` 就是用户刚填的地址和 Key：
+- **可以再导出 `models(ctx)` 列出模型**。用 `module` 写的服务会出现在「模型配置 → 添加模型服务 → 选择服务商」里，标着「插件提供」。用户选中它、填好服务地址（和 Key），点「读取模型」时，BeefTV 调用 `models(ctx)`，`ctx.config` 就是用户刚填的地址和 Key：
 
   ```js
   export async function models(ctx) {
@@ -260,6 +260,8 @@ export async function query(taskId, request, ctx) {
   ```
 
   只接一种能力的服务可以不写 `capability`。不导出 `models` 时，用户要手动填模型 ID。服务本身不要密钥（比如本机的服务）时，在 provider 里写 `"auth": { "type": "none" }`，用户就可以不填 Key。
+- **一个服务可以同时出图、出视频、出音频**：`capabilities` 里写上几种，`models` 给每个模型标上 `capability`。用户在「选择服务商」里只看到一项，读到的图片模型、视频模型都会用这个接口生成。
+- 完整的例子见仓库里的 `plugin-packages/beeftv-plugin-comfyui/`：它把 ComfyUI 里保存的每个工作流列成一个模型，提交前上传参考素材、改写工作流节点，再查 ComfyUI 的队列取结果。
 - 插件代码运行在 BeefTV 自带 Node 的独立后台进程里，不经过浏览器；`console.log` 会写进 BeefTV 日志。只有从 npm、本地目录或 `.tgz` 安装的插件可以使用 `module`，`.beeftv-plugin` 归档不能带代码。
 
 ---
