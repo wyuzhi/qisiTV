@@ -58,7 +58,6 @@ beeftv-plugin-sticky-note/
     "skills": ["./skills"]
   },
   "beeftv": {
-    "apiVersion": "beeftv.plugin/v2",
     "name": "画布便签",
     "client": "./client/index.js",
     "permissions": ["canvas.read", "canvas.write"],
@@ -81,7 +80,7 @@ beeftv-plugin-sticky-note/
 
 ### Provider 的 v3 请求与图片响应
 
-`contributes.providers[]` 可在 `beeftv.plugin/v3` 清单中声明 `variables`：按数组顺序计算的纯表达式，输入为 `request`，前面的变量通过 `vars.<name>` 读取。变量仅在当前请求内存在，不共享状态。重复名称、前向引用，以及请求模板或参数校验中不存在的变量会在加载时拒绝。
+`contributes.providers[]` 可以声明 `variables`（npm 插件总按 v3 规则读取；`.beeftv-plugin` 归档要在 `manifest.json` 里写 `"apiVersion": "beeftv.plugin/v3"`）：按数组顺序计算的纯表达式，输入为 `request`，前面的变量通过 `vars.<name>` 读取。变量仅在当前请求内存在，不共享状态。重复名称、前向引用，以及请求模板或参数校验中不存在的变量会在加载时拒绝。
 
 ```json
 {

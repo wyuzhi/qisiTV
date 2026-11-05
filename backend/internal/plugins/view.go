@@ -45,6 +45,8 @@ type ManifestView struct {
 	Runtime       protocol.ManifestRuntime       `json:"runtime,omitempty"`
 	Configuration protocol.ManifestConfiguration `json:"configuration,omitempty"`
 	Contributes   protocol.ManifestContributions `json:"contributes"`
+	// Revision 是 npm 插件安装内容的指纹。同版本从文件夹重新安装后它会变，浏览器据此重新加载插件界面代码。
+	Revision string `json:"revision,omitempty"`
 }
 
 // ManagementView is computed by the host. Uploaded manifests cannot choose
@@ -133,8 +135,10 @@ func manifestView(raw []byte, metadata protocol.Metadata, source string) Manifes
 }
 
 func viewFromRecord(item Record) View {
+	manifest := manifestView(item.Raw, item.Metadata, item.Source)
+	manifest.Revision = item.PackageSHA256
 	return View{
-		Manifest:    manifestView(item.Raw, item.Metadata, item.Source),
+		Manifest:    manifest,
 		Source:      item.Source,
 		FileName:    item.FileName,
 		Package:     protocol.PluginPackageFormat,

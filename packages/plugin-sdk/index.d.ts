@@ -1,27 +1,3 @@
-export declare const PLUGIN_API_VERSION = "beeftv.plugin/v1";
-export declare const PLUGIN_API_VERSION_V2 = "beeftv.plugin/v2";
-export declare const PLUGIN_API_VERSION_V3 = "beeftv.plugin/v3";
-
-export type PluginApiVersion =
-  | typeof PLUGIN_API_VERSION
-  | typeof PLUGIN_API_VERSION_V2
-  | typeof PLUGIN_API_VERSION_V3;
-
-export type EditorSlotKind =
-  | "timeline-panel"
-  | "preview-renderer"
-  | "inspector"
-  | "asset-ingest"
-  | "subtitle-tool"
-  | "transcription-provider"
-  | "export-renderer"
-  | "ai-assistant";
-
-export type EditorSlotContribution = {
-  slot: EditorSlotKind;
-  priority?: number;
-};
-
 export type PluginPermission =
   | "canvas.read"
   | "canvas.write"
@@ -45,19 +21,18 @@ export type AnyPluginPermission = PluginPermission | EditorPluginPermission;
 export type PluginSurface = "node" | "fullscreen" | "hybrid" | "asset-source" | "settings";
 export type ProtocolCapability = "text" | "image" | "video" | "audio";
 export type ProtocolScope = "admin.system-channel" | "user.custom-channel" | "canvas" | "creation" | "agent" | string;
-export type PluginRuntime = "declarative" | "client" | "sandbox" | "worker" | "trusted-backend";
 
+/** One settings field. The settings form shows it; read the saved value with `host.config.get(name)`. */
 export type PluginField = {
-  name?: string;
-  key?: string;
-  type: "string" | "text" | "number" | "boolean" | "secret" | "url" | "select" | "json";
+  name: string;
+  type: "string" | "number" | "boolean" | "secret" | "url" | "select" | "json";
   label?: string;
   required?: boolean;
+  secret?: boolean;
   default?: string | number | boolean;
-  defaultValue?: string | number | boolean;
   description?: string;
+  /** Choices for `type: "select"`. */
   values?: string[];
-  options?: Array<{ label: string; value: string }>;
 };
 
 export type PluginParameter = {
@@ -79,7 +54,7 @@ export type PluginProviderOperation = {
   headers?: Record<string, string>;
 };
 
-export type PluginProviderContribution = {
+type PluginProviderBase = {
   id: string;
   label: string;
   capabilities: ProtocolCapability[];
@@ -88,6 +63,10 @@ export type PluginProviderContribution = {
   requiresPublicMediaUrls?: boolean;
   auth?: { type: "bearer" | "api-key" | "custom"; field: string; header?: string };
   parameters?: PluginParameter[];
+};
+
+/** A generation service described as HTTP requests; BeefTV sends them. */
+export type PluginHttpProviderContribution = PluginProviderBase & {
   variables?: Array<{ name: string; value: unknown }>;
   validations?: Array<{ assert: unknown; message: string }>;
   create: PluginProviderOperation;
@@ -96,6 +75,18 @@ export type PluginProviderContribution = {
   cancel?: PluginProviderOperation;
   response: Record<string, unknown>;
 };
+
+/**
+ * A generation service implemented in JavaScript. `module` is a `.js` or `.mjs` path inside
+ * the package to a file that exports `submit` and `query` (see `ProviderModule`).
+ * Only image, video and audio are supported.
+ */
+export type PluginModuleProviderContribution = Omit<PluginProviderBase, "capabilities"> & {
+  capabilities: Array<Exclude<ProtocolCapability, "text">>;
+  module: string;
+};
+
+export type PluginProviderContribution = PluginHttpProviderContribution | PluginModuleProviderContribution;
 
 export type PluginWorkflowContribution = {
   id: string;
@@ -109,63 +100,124 @@ export type PluginWorkflowContribution = {
 export type PluginCanvasNodeInputKind = "image" | "video" | "audio" | "text";
 
 export type PluginCanvasNodeContribution = {
-  id?: string;
-  type?: string;
-  label?: string;
-  title?: string;
-  defaultTitle?: string;
+  /** Node type; unique within the plugin. */
+  id: string;
+  /** Name in the add-node menu. */
+  label: string;
+  /** Title of a newly added node. */
+  defaultTitle: string;
   description?: string;
   defaultSize?: { width: number; height: number };
-  defaultWidth?: number;
-  defaultHeight?: number;
   schema?: Record<string, unknown>;
-  renderer?: "declarative" | "client" | "sandbox";
+  fields?: PluginField[];
+  /** `"client"` draws the node with the `canvas.node` slot from the plugin's client code. */
+  renderer?: "declarative" | "client";
   acceptsInputKind?: PluginCanvasNodeInputKind | PluginCanvasNodeInputKind[];
   maxInputCount?: number;
   showOutputConnection?: boolean;
-};
-
-export type PluginTransformContribution = {
-  id: string;
-  input: "media" | "generation";
-  output: "provider-request" | "media";
-  runtime: PluginRuntime;
 };
 
 export type PluginContributions = {
   providers?: PluginProviderContribution[];
   workflows?: PluginWorkflowContribution[];
   canvasNodes?: PluginCanvasNodeContribution[];
-  editorSlots?: EditorSlotContribution[];
-  transforms?: PluginTransformContribution[];
-  commands?: Array<{ id: string; label: string; shortcut?: string }>;
-  assetSources?: string[];
-  usageObservers?: string[];
-  aiCapabilities?: string[];
-  agents?: string[];
-  importExport?: string[];
 };
 
+/**
+ * The `beeftv` block of package.json. The plugin ID, version, description and author come
+ * from package.json's own `name`, `version`, `description` and `author`. Assistant skills
+ * and extensions go in package.json's `pi` block. BeefTV refuses to install a package whose
+ * `beeftv` block has keys other than these and says how to fix each one.
+ */
 export type PluginManifest = {
-  apiVersion?: PluginApiVersion;
-  schemaVersion?: number;
-  id?: string;
-  name: string;
-  version?: string;
-  publishedAt?: string;
-  updatedAt?: string;
-  description: string;
-  documentation?: string;
-  author?: string;
-  entry?: string;
+  /** Name shown in BeefTV; defaults to package.json's `name`. */
+  name?: string;
+  /** Browser entry, a relative path such as `./client/index.js`. */
   client?: string;
   surfaces?: PluginSurface[];
   permissions?: AnyPluginPermission[];
-  trusted?: boolean;
   configuration?: { fields: PluginField[] };
-  runtime?: { backend?: PluginRuntime; web?: PluginRuntime };
-  canvasNodes?: PluginCanvasNodeContribution[];
   contributes?: PluginContributions;
+};
+
+export type MediaReference = {
+  id?: string;
+  url?: string;
+  dataUrl?: string;
+  kind?: string;
+  role?: string;
+  mimeType?: string;
+  name?: string;
+  order?: number;
+  weight?: number;
+  metadata?: Record<string, unknown>;
+};
+
+/** What BeefTV passes to `submit` and `query`. Provider-specific values are in `extra`. */
+export type GenerationRequest = {
+  capability?: ProtocolCapability;
+  model: string;
+  prompt?: string;
+  instructions?: string;
+  messages?: Array<{ role: string; content: unknown }>;
+  inputs?: MediaReference[];
+  images?: MediaReference[];
+  videos?: MediaReference[];
+  audios?: MediaReference[];
+  duration?: number;
+  aspectRatio?: string;
+  resolution?: string;
+  quality?: string;
+  generateAudio?: boolean;
+  watermark?: boolean;
+  imageCount?: number;
+  operation?: string;
+  output?: Record<string, unknown>;
+  providerOptions?: Record<string, Record<string, unknown>>;
+  /** `extra.idempotencyKey` stays the same if BeefTV has to submit the same task again. */
+  extra?: Record<string, unknown>;
+};
+
+export type GenerationResult = {
+  images?: MediaReference[];
+  videos?: MediaReference[];
+  audios?: MediaReference[];
+  text?: string;
+  usage?: Record<string, unknown>;
+};
+
+export type GenerationTaskState = {
+  taskId?: string;
+  status: "pending" | "processing" | "succeeded" | "failed" | "cancelled";
+  /** Required once `status` is `"succeeded"`. BeefTV downloads the media URLs into the workspace. */
+  result?: GenerationResult;
+  /** Shown to the user when the task failed. */
+  message?: string;
+};
+
+export type ProviderModuleContext = {
+  /** The channel the user picked: its base URL and API key. */
+  config: { baseUrl?: string; apiKey?: string };
+  /** Aborted when BeefTV stops this call, for example when the user cancels the task. */
+  signal: AbortSignal;
+  /** Writes a line to the BeefTV backend log. Do not log keys. */
+  log(message: string): void;
+};
+
+/**
+ * The file a `module` provider points to. It runs in a Node process next to the BeefTV
+ * backend, so it can use fetch and Node built-ins.
+ *
+ * - `submit` starts a task and returns its `taskId`, or the final result when the service
+ *   answers at once. If `submit` throws, BeefTV cannot tell whether the task was created
+ *   and does not retry.
+ * - `query` is called until the task finishes, including after BeefTV restarts.
+ *
+ * BeefTV does not ask the service to cancel a task; cancelling only stops BeefTV waiting.
+ */
+export type ProviderModule = {
+  submit(request: GenerationRequest, ctx: ProviderModuleContext): GenerationTaskState | Promise<GenerationTaskState>;
+  query(taskId: string, request: GenerationRequest, ctx: ProviderModuleContext): GenerationTaskState | Promise<GenerationTaskState>;
 };
 
 export type PluginStorage = {
@@ -543,6 +595,8 @@ export declare const BEEFTV_EVENTS: readonly BeefTVEventName[];
 export declare function definePlugin(
   activate: (host: BeefTVPluginHost) => void | (() => void) | Promise<void | (() => void)>
 ): (host: BeefTVPluginHost) => void | (() => void) | Promise<void | (() => void)>;
+
+export declare function defineProvider<T extends ProviderModule>(module: T): T;
 
 export declare function definePiExtension(
   register: (pi: PiExtensionAPI) => void | Promise<void>

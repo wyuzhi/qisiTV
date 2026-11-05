@@ -53,7 +53,6 @@ beeftv-plugin-sticky-note/
     "skills": ["./skills"]
   },
   "beeftv": {
-    "apiVersion": "beeftv.plugin/v2",
     "name": "画布便签",
     "client": "./client/index.js",
     "permissions": ["canvas.read", "canvas.write"],
@@ -72,7 +71,15 @@ beeftv-plugin-sticky-note/
 }
 ```
 
-`beeftv.name` 是插件在 BeefTV 里显示的名字；不写时用 `package.json` 的 `name`。插件说明和作者取自 `package.json` 的 `description` 和 `author`。画布节点、生成服务等能力都写在 `beeftv.contributes` 里，写在别处的不会生效。
+`beeftv` 里只写 BeefTV 自己的东西，可以写的只有这几项：
+
+- `name`：插件在 BeefTV 里显示的名字；不写时用 `package.json` 的 `name`。
+- `client`：浏览器端入口文件。
+- `permissions`、`surfaces`：插件中心里展示给用户看的权限和使用位置。
+- `configuration.fields`：插件设置页的表单，每项写 `name`、`type`、`label`，可选 `default`、`required`、`description`；下拉选项写在 `values` 里。
+- `contributes`：插件提供的画布节点（`canvasNodes`）、生成服务（`providers`）和工作流（`workflows`）。
+
+插件 ID、版本、说明和作者取自 `package.json` 的 `name`、`version`、`description`、`author`；助手扩展和技能写在 `pi` 里。写了别的键，比如 `beeftv.id`、`beeftv.apiVersion`、顶层的 `canvasNodes`、节点的 `type` 或 `defaultWidth`，BeefTV 会拒绝安装，并逐项说明该怎么改。
 
 ---
 
@@ -209,7 +216,6 @@ export default activate;
 ```json
 {
   "beeftv": {
-    "apiVersion": "beeftv.plugin/v2",
     "contributes": {
       "providers": [
         { "id": "my-workflow", "label": "我的工作流", "module": "./provider.mjs", "capabilities": ["image"], "scopes": ["canvas", "user.custom-channel"] }
@@ -219,7 +225,7 @@ export default activate;
 }
 ```
 
-`provider.mjs` 导出三个函数，网络请求由插件自己发：
+`provider.mjs` 导出 `submit` 和 `query` 两个函数，网络请求由插件自己发。`module` 方式只支持图片、视频和音频：
 
 ```js
 // request：与声明式插件里的 request.* 相同（prompt、images、videos、audios、model、output 等）
@@ -235,7 +241,6 @@ export async function query(taskId, request, ctx) {
   return { status: "succeeded", result: { images: [{ url: "https://example.com/out.png" }] } };
 }
 
-export async function cancel(taskId, request, ctx) {}
 ```
 
 几条约定：
@@ -243,6 +248,7 @@ export async function cancel(taskId, request, ctx) {}
 - **能确定失败就返回 `{ status: "failed", message }`**，例如缺少 Key、上游明确拒绝。`submit` 抛出异常时，BeefTV 无法判断请求是否已经发出，会把任务标为"提交结果不明"，不会自动重试，避免重复扣费。
 - **`submit` 要返回 `taskId`**。BeefTV 先记下任务号再查询；应用重启或任务恢复时只调用 `query`，不会再次调用 `submit`。
 - 结果里的 `url` 或 `dataUrl` 由 BeefTV 下载并保存到画布，插件不用自己存文件。
+- 用户取消任务时，BeefTV 停止查询，并通过 `ctx.signal` 中断正在进行的调用；目前不会去服务商那边取消任务。
 - 插件代码运行在 BeefTV 自带 Node 的独立后台进程里，不经过浏览器；`console.log` 会写进 BeefTV 日志。只有从 npm、本地目录或 `.tgz` 安装的插件可以使用 `module`，`.beeftv-plugin` 归档不能带代码。
 
 ---
@@ -323,6 +329,8 @@ export async function cancel(taskId, request, ctx) {}
    - 画布「添加节点」菜单会立即出现新节点类型；
    - 创作助手下一轮对话即可调用插件注册的工具和技能；
    - 在插件中心关闭插件开关后，插件挂载的所有界面项、工具和技能会立即卸载清理。
+
+改代码时不用每次打包或改版本号：从本地目录安装后，插件卡片上的按钮会显示 **重新加载**。改完点一下，BeefTV 会重新复制这个目录，浏览器端代码和 JS 生成接口随即换成新代码，不用重启应用。清单写法有问题时，重新加载会失败并列出要改的地方，原来装好的版本照常可用。
 
 ---
 

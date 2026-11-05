@@ -1,7 +1,3 @@
-export const PLUGIN_API_VERSION = "beeftv.plugin/v1";
-export const PLUGIN_API_VERSION_V2 = "beeftv.plugin/v2";
-export const PLUGIN_API_VERSION_V3 = "beeftv.plugin/v3";
-
 export const BEEFTV_SLOTS = Object.freeze([
   "canvas.node",
   "canvas.addNodeMenu",
@@ -46,6 +42,16 @@ export const BEEFTV_EVENTS = Object.freeze([
  */
 export function definePlugin(activate) {
   return activate;
+}
+
+/**
+ * 定义插件的 JS 生成接口（submit / query），给清单里 providers[].module 指向的文件用。
+ * @template {import("./index.d.ts").ProviderModule} T
+ * @param {T} module
+ * @returns {T}
+ */
+export function defineProvider(module) {
+  return module;
 }
 
 /**

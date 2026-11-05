@@ -225,7 +225,7 @@ func ParsePluginPackageDir(rootDir string) (PluginPackage, error) {
 	_ = json.Unmarshal(beeftvRaw, &beeftvExtra)
 
 	if strings.TrimSpace(manifest.APIVersion) == "" {
-		manifest.APIVersion = "beeftv.plugin/v1"
+		manifest.APIVersion = "beeftv.plugin/v3"
 	}
 	if strings.TrimSpace(manifest.Metadata.ID) == "" {
 		manifest.Metadata.ID = PackageIDFromName(pkgJSON.Name)

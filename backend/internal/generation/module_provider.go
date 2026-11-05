@@ -90,7 +90,7 @@ func callModuleProvider(ctx context.Context, input Input, provider protocol.Modu
 	}
 	var raw json.RawMessage
 	startedAt := time.Now()
-	err := pluginhost.Do(ctx, pluginhost.Call{Plugin: provider.Plugin, Version: provider.Info.Version, Module: provider.Module, Method: method, Args: args}, &raw)
+	err := pluginhost.Do(ctx, pluginhost.Call{Plugin: provider.Plugin, Version: firstNonEmpty(provider.Revision, provider.Info.Version), Module: provider.Module, Method: method, Args: args}, &raw)
 	observeModuleCall(ctx, provider, method, taskID, startedAt, raw, err)
 	if err != nil {
 		return err

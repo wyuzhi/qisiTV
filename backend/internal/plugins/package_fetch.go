@@ -181,6 +181,9 @@ func (c *Runtime) InstallPackage(source, registry string) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
+	if err := protocol.CheckPackageManifestWriting(stagedRoot); err != nil {
+		return View{}, packageError(http.StatusBadRequest, "plugin_package_invalid", err.Error())
+	}
 	staged, err := protocol.ParsePluginPackageDir(stagedRoot)
 	if err != nil {
 		return View{}, packageError(http.StatusBadRequest, "plugin_package_invalid", err.Error())

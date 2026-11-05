@@ -48,7 +48,7 @@ func moduleProviderRegistry(t *testing.T) *protocol.Registry {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := protocol.NewRegistry(protocol.BindModuleProviders(adapters, dir)...)
+	registry, err := protocol.NewRegistry(protocol.BindModuleProviders(adapters, dir, "rev-1")...)
 	if err != nil {
 		t.Fatal(err)
 	}

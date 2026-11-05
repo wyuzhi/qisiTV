@@ -20,6 +20,8 @@ type ModuleProvider struct {
 	Plugin string
 	// Module 在清单里是包内相对路径，BindModuleProviders 之后是绝对路径。
 	Module string
+	// Revision 是安装包内容的指纹：同版本从文件夹重新安装后也会变，插件宿主据此换进程加载新代码。
+	Revision string
 }
 
 var errModuleProvider = errors.New("JS 生成接口由插件宿主执行，不构造 HTTP 请求")
@@ -48,7 +50,7 @@ func (m ModuleProvider) BuildCancel(context.Context, PollContext) (RequestSpec, 
 
 // BindModuleProviders 把 JS 生成接口的入口解析到插件包目录。.beeftv-plugin 归档没有
 // 包目录、也不能带代码，其中的 JS 接口标为不可用。
-func BindModuleProviders(adapters []Adapter, dir string) []Adapter {
+func BindModuleProviders(adapters []Adapter, dir, revision string) []Adapter {
 	for index, adapter := range adapters {
 		module, ok := adapter.(ModuleProvider)
 		if !ok {
@@ -62,6 +64,7 @@ func BindModuleProviders(adapters []Adapter, dir string) []Adapter {
 			continue
 		}
 		module.Module = filepath.Join(dir, filepath.FromSlash(module.Module))
+		module.Revision = revision
 		adapters[index] = module
 	}
 	return adapters

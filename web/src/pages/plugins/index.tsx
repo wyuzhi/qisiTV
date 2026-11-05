@@ -34,7 +34,7 @@ import { isLocalRuntimeMode } from "@/lib/runtime-mode";
 import { workspaceCapabilities } from "@/services/workspace-mode";
 
 import { PluginDetailsModal } from "./plugin-documentation-modals";
-import { PluginInstallConfirmModal } from "./plugin-install-confirm-modal";
+import { isLocalFolderSource, PluginInstallConfirmModal } from "./plugin-install-confirm-modal";
 import "./plugins.css";
 
 const categoryLabels: Record<string, string> = {
@@ -273,7 +273,11 @@ export default function PluginsPage() {
         try {
             const updated = await updatePluginPackage(pluginId);
             deactivateClientPlugin(updated.manifest.id);
-            message.success(`插件「${updated.manifest.name}」已更新到 v${updated.manifest.version}`);
+            message.success(
+                isLocalFolderSource(updated.packageSpec)
+                    ? `已从文件夹重新加载插件「${updated.manifest.name}」`
+                    : `插件「${updated.manifest.name}」已更新到 v${updated.manifest.version}`,
+            );
             await reloadBackendPlugins();
         } catch (error) {
             message.error(error instanceof Error ? error.message : "更新插件失败");
@@ -539,11 +543,11 @@ export default function PluginsPage() {
                                                                     {remote?.source === "package" && remote.packageSpec ? (
                                                                         <Button
                                                                             className="plugin-settings-button"
-                                                                            icon={<ArrowUpCircle className="size-4" />}
+                                                                            icon={isLocalFolderSource(remote.packageSpec) ? <RefreshCw className="size-4" /> : <ArrowUpCircle className="size-4" />}
                                                                             loading={updatingPluginId === plugin.manifest.id}
                                                                             onClick={() => void handleUpdatePlugin(plugin.manifest.id)}
                                                                         >
-                                                                            更新
+                                                                            {isLocalFolderSource(remote.packageSpec) ? "重新加载" : "更新"}
                                                                         </Button>
                                                                     ) : null}
                                                                     {canConfigure ? (

@@ -372,6 +372,11 @@ type ManifestCanvasNode struct {
 	Fields        []ManifestField `json:"fields,omitempty"`
 	Schema        map[string]any  `json:"schema,omitempty"`
 	Renderer      string          `json:"renderer,omitempty"`
+	Description   string          `json:"description,omitempty"`
+	// AcceptsInputKind 是 "image"、"video"、"audio"、"text" 之一或它们的数组，原样交给画布。
+	AcceptsInputKind     any   `json:"acceptsInputKind,omitempty"`
+	MaxInputCount        int   `json:"maxInputCount,omitempty"`
+	ShowOutputConnection *bool `json:"showOutputConnection,omitempty"`
 }
 
 func (n *ManifestCanvasNode) Normalize() {

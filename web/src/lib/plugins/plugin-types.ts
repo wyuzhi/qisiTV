@@ -142,6 +142,8 @@ export type PluginManifest = {
     surfaces?: PluginSurface[];
     permissions: PluginPermission[];
     trusted?: boolean;
+    /** npm 插件安装内容的指纹，由后端给出；同版本重新安装后也会变。 */
+    revision?: string;
     configuration?: { fields: PluginField[] };
     contributes: PluginContributions;
 };

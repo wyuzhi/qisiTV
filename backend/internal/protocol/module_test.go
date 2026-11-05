@@ -29,7 +29,7 @@ func TestModuleProviderLoadsAndBindsToPackageDir(t *testing.T) {
 		t.Fatal("module provider built an HTTP request")
 	}
 	dir := t.TempDir()
-	bound := BindModuleProviders(adapters, dir)[0].(ModuleProvider)
+	bound := BindModuleProviders(adapters, dir, "rev-1")[0].(ModuleProvider)
 	if bound.Module != filepath.Join(dir, "provider.mjs") {
 		t.Fatalf("module = %q", bound.Module)
 	}
@@ -40,7 +40,7 @@ func TestModuleProviderFromArchiveIsUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	info := BindModuleProviders(adapters, "")[0].Metadata()
+	info := BindModuleProviders(adapters, "", "")[0].Metadata()
 	if info.Enabled || !strings.Contains(info.UnavailableReason, "npm") {
 		t.Fatalf("metadata = %#v", info)
 	}

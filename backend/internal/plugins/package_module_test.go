@@ -16,7 +16,7 @@ func TestPackageModuleProviderResolvesInsideInstalledPackage(t *testing.T) {
 	svc := New(rt, nil)
 	svc.SetPackageFetcher(copyPackageFetcher)
 	src := t.TempDir()
-	pkgJSON := `{"name":"beeftv-plugin-module-test","version":"1.0.0","description":"module provider","beeftv":{"apiVersion":"beeftv.plugin/v2","contributes":{"providers":[{"id":"module-test","label":"Module Test","module":"./provider.mjs","capabilities":["image"],"scopes":["canvas"]}]}}}`
+	pkgJSON := `{"name":"beeftv-plugin-module-test","version":"1.0.0","description":"module provider","beeftv":{"contributes":{"providers":[{"id":"module-test","label":"Module Test","module":"./provider.mjs","capabilities":["image"],"scopes":["canvas"]}]}}}`
 	for name, content := range map[string]string{"package.json": pkgJSON, "provider.mjs": "export async function submit() {}\n"} {
 		if err := os.WriteFile(filepath.Join(src, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
