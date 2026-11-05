@@ -52,6 +52,26 @@ func TestTaskInputUsesCustomChannelManagedBeefAPI(t *testing.T) {
 	}
 }
 
+func TestSelectTaskModelAcceptsKeylessCustomChannel(t *testing.T) {
+	input := map[string]any{"mode": "image", "config": map[string]any{
+		"interfaceType": "comfyui",
+		"baseUrl":       "http://127.0.0.1:8188",
+		"apiKey":        "",
+		"model":         "invert.app.json",
+	}}
+	result, err := SelectTaskModel(TaskSelectRequest{Input: input, Type: "canvas_image", Operation: "image"}, TaskSelectLookup{})
+	if err != nil {
+		t.Fatalf("a service that needs no key must be accepted as the user's own service: %v", err)
+	}
+	if result.Input["config"].(map[string]any)["baseUrl"] != "http://127.0.0.1:8188" {
+		t.Fatalf("custom channel input must pass through unchanged: %#v", result.Input)
+	}
+	systemURL := map[string]any{"config": map[string]any{"baseUrl": "/api/ai/system/system-1", "model": "x"}}
+	if TaskInputUsesCustomChannel(systemURL) {
+		t.Fatal("a system channel address is never the user's own service")
+	}
+}
+
 func TestSelectTaskModelRequiresLogicalModelWithoutExplicitChannel(t *testing.T) {
 	_, err := SelectTaskModel(TaskSelectRequest{
 		Input:           map[string]any{"mode": "video", "config": map[string]any{"model": "agnes-video-2.5"}},

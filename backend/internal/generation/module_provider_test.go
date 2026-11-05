@@ -21,7 +21,8 @@ let submits = 0;
 export async function submit(request, ctx) {
   submits++;
   if (request.prompt === 'boom') throw new Error('connection reset');
-  if (ctx.config.apiKey !== 'fixture') return { status: 'failed', message: 'missing key' };
+  if (request.prompt === 'refused') return { status: 'failed', message: '工作流不接收图片' };
+  if (ctx.config.apiKey !== 'fixture' && request.model !== 'keyless') return { status: 'failed', message: 'missing key' };
   return { taskId: 'task-' + submits, status: 'processing' };
 }
 export async function query(taskId, request, ctx) {
@@ -49,7 +50,7 @@ func moduleProviderRegistry(t *testing.T) *protocol.Registry {
 	if err := os.WriteFile(filepath.Join(dir, "provider.mjs"), []byte(testModuleProvider), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `{"apiVersion":"beeftv.plugin/v2","id":"module-fixture","name":"Fixture","version":"1.0.0","contributes":{"providers":[{"id":"module-image","label":"Module Image","module":"./provider.mjs","capabilities":["image"],"scopes":["canvas"]}]}}`
+	manifest := `{"apiVersion":"beeftv.plugin/v2","id":"module-fixture","name":"Fixture","version":"1.0.0","contributes":{"providers":[{"id":"module-image","label":"Module Image","module":"./provider.mjs","capabilities":["image"],"scopes":["canvas"]},{"id":"module-keyless","label":"Module Keyless","module":"./provider.mjs","capabilities":["image"],"scopes":["canvas"],"auth":{"type":"none"}}]}}`
 	adapters, err := protocol.LoadInstalledProviders([]byte(manifest))
 	if err != nil {
 		t.Fatal(err)
@@ -100,6 +101,34 @@ func TestModuleProviderSubmitsQueriesAndRecordsTheTask(t *testing.T) {
 	RecordProviderRequest(nil, capture, created.Request, created.StartedAt, created.StatusCode, created.Body, created.Err)
 	if len(logged) != 1 || logged[0].RequestKind != "create" || logged[0].Status != model.ApiCallStatusSucceeded || logged[0].ProviderRequestID != "task-1" {
 		t.Fatalf("call log = %#v", logged)
+	}
+}
+
+func TestModuleProviderFailureWithoutTaskIsNotSubmissionUnknown(t *testing.T) {
+	registry := moduleProviderRegistry(t)
+	_, _, err := runModuleFixture(t, registry, "refused", "")
+	var rejected SubmissionRejectedError
+	if !errors.As(err, &rejected) {
+		t.Fatalf("a plugin that says it created nothing must read as rejected, got %#v", err)
+	}
+	if !SafeCatalogRouteRejection(err) {
+		t.Fatalf("no job exists, so the attempt must not stay unknown: %v", err)
+	}
+	if failure := ClassifyError(err); failure.Uncertain {
+		t.Fatalf("must not be reported as uncertain: %#v", failure)
+	}
+}
+
+func TestModuleProviderDeclaredKeylessRunsWithoutAKey(t *testing.T) {
+	registry := moduleProviderRegistry(t)
+	ctx := WithProtocolRegistry(WithRuntime(context.Background(), taskRuntime(func(*Runtime) {})), registry)
+	input := Input{Mode: "image", Prompt: "draw", Config: Config{InterfaceType: "module-keyless", Model: "keyless", BaseURL: "http://127.0.0.1:8188"}}
+	if _, err := Execute(ctx, input); err != nil {
+		t.Fatalf("a provider that declares no auth must run without a key: %v", err)
+	}
+	input.Config.InterfaceType = "module-image"
+	if _, err := Execute(ctx, input); err == nil || !strings.Contains(err.Error(), "API Key") {
+		t.Fatalf("a provider that needs a key must still be stopped before submit, got %v", err)
 	}
 }
 

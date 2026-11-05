@@ -22,11 +22,14 @@ type ModuleProvider struct {
 	Module string
 	// Revision 是安装包内容的指纹：同版本从文件夹重新安装后也会变，插件宿主据此换进程加载新代码。
 	Revision string
+	Auth     ManifestAuth
 }
 
 var errModuleProvider = errors.New("JS 生成接口由插件宿主执行，不构造 HTTP 请求")
 
 func (m ModuleProvider) Metadata() Metadata { return m.Info }
+
+func (m ModuleProvider) MediaAuth() ManifestAuth { return m.Auth }
 
 func (m ModuleProvider) BuildCreate(context.Context, RequestContext) (RequestSpec, error) {
 	return RequestSpec{}, errModuleProvider

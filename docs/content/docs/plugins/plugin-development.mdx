@@ -245,7 +245,8 @@ export async function query(taskId, request, ctx) {
 
 几条约定：
 
-- **能确定失败就返回 `{ status: "failed", message }`**，例如缺少 Key、上游明确拒绝。`submit` 抛出异常时，BeefTV 无法判断请求是否已经发出，会把任务标为"提交结果不明"，不会自动重试，避免重复扣费。
+- **能确定失败就返回 `{ status: "failed", message }`**，例如缺少 Key、上游明确拒绝，或者还没提交就连不上服务、传素材失败。`submit` 抛出异常时，BeefTV 无法判断请求是否已经发出，会把任务标为"提交结果不明"，不会自动重试，避免重复扣费。
+- **`message` 会显示给用户**，写清原因和怎么办。不要带网址或错误码：网址会被过滤掉，错误码可能让提示变成通用文案。
 - **`submit` 要返回 `taskId`**。BeefTV 先记下任务号再查询；应用重启或任务恢复时只调用 `query`，不会再次调用 `submit`。
 - 结果里的 `url` 或 `dataUrl` 由 BeefTV 下载并保存到画布，插件不用自己存文件。
 - 用户取消任务时，BeefTV 停止查询，并通过 `ctx.signal` 中断正在进行的调用；目前不会去服务商那边取消任务。

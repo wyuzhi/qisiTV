@@ -277,7 +277,8 @@ func TaskInputUsesCustomChannel(input map[string]any) bool {
 	if strings.TrimSpace(channelID) != "" || SystemChannelIDFromBaseURL(baseURL) != "" {
 		return false
 	}
-	return strings.TrimSpace(baseURL) != "" && strings.TrimSpace(apiKey) != ""
+	// 自己加的服务不一定要密钥（如本机 ComfyUI）。要不要密钥在执行前按插件声明检查，这里只分渠道归属。
+	return strings.TrimSpace(baseURL) != ""
 }
 
 func TaskInputUsesSystemChannel(input map[string]any) bool {

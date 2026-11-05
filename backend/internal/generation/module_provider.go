@@ -37,7 +37,12 @@ func runModuleProviderTask(ctx context.Context, input Input, provider protocol.M
 		taskID = created.TaskID
 		switch created.Status {
 		case protocol.StatusFailed, protocol.StatusCancelled:
-			return nil, ProtocolResultError(created.Message, taskID)
+			err := ProtocolResultError(created.Message, taskID)
+			if taskID == "" {
+				// 插件明确说失败又没有任务号，就是没建任务：用户看到原因，可以直接重新生成。
+				return nil, SubmissionRejectedError{Cause: err}
+			}
+			return nil, err
 		case protocol.StatusSucceeded:
 			return FinishProtocolAdapterResult(ctx, input, provider, request, taskID, created.Result, policy)
 		}

@@ -233,7 +233,7 @@ func loadDeclarativeManifestProvider(manifest Manifest, index int) (Adapter, err
 		return nil, err
 	}
 	if module != "" {
-		return ModuleProvider{Info: manifest.Metadata, Plugin: pluginID, Module: module}, nil
+		return ModuleProvider{Info: manifest.Metadata, Plugin: pluginID, Module: module, Auth: manifest.Auth}, nil
 	}
 	return manifestAdapter{manifest: manifest}, nil
 }

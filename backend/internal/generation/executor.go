@@ -8,6 +8,7 @@ import (
 
 	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/outbound"
+	"infinite-canvas/backend/internal/protocol"
 	"infinite-canvas/backend/internal/provider/workflow"
 )
 
@@ -254,7 +255,8 @@ func validatePreparedInput(ctx context.Context, input Input) error {
 			return errors.New("后端任务队列暂不支持该 Gemini 调用格式，请选择已安装的 Gemini 协议插件")
 		}
 	}
-	if strings.TrimSpace(input.Config.BaseURL) == "" || strings.TrimSpace(input.Config.APIKey) == "" || strings.TrimSpace(input.Config.Model) == "" {
+	missingKey := strings.TrimSpace(input.Config.APIKey) == "" && !interfaceNeedsNoKey(ctx, input.Config.InterfaceType)
+	if strings.TrimSpace(input.Config.BaseURL) == "" || missingKey || strings.TrimSpace(input.Config.Model) == "" {
 		return errors.New("后端生成任务缺少 Base URL、API Key 或模型名")
 	}
 	if err := validateInterfaceForContext(ctx, input.Mode, input.Config.InterfaceType); err != nil {
@@ -266,6 +268,20 @@ func validatePreparedInput(ctx context.Context, input Input) error {
 		return err
 	}
 	return nil
+}
+
+// interfaceNeedsNoKey 看插件清单是否声明 auth.type 为 none，比如本机的 ComfyUI。
+func interfaceNeedsNoKey(ctx context.Context, interfaceType string) bool {
+	registry, ok := ProtocolRegistryFromContext(ctx)
+	if !ok {
+		return false
+	}
+	adapter, found := registry.Resolve(interfaceType)
+	if !found {
+		return false
+	}
+	auth, ok := adapter.(protocol.MediaAuthAdapter)
+	return ok && strings.EqualFold(strings.TrimSpace(auth.MediaAuth().Type), "none")
 }
 
 func validateInterfaceForContext(ctx context.Context, mode, interfaceType string) error {

@@ -21,7 +21,7 @@ const MISSING_LIMIT = 3;
 /** @param {import("@beeftv/plugin-sdk").ProviderModuleContext} ctx */
 function baseUrl(ctx) {
   const raw = String(ctx.config?.baseUrl ?? "").trim().replace(/\/+$/, "");
-  if (!raw) throw new Error("请先在模型服务里填写 ComfyUI 的地址，比如 http://127.0.0.1:8188");
+  if (!raw) throw new Error("请先在模型服务里填写 ComfyUI 的服务地址");
   return raw.replace(/\/api$/, "");
 }
 
@@ -32,7 +32,7 @@ async function comfy(ctx, path, init = {}) {
     response = await fetch(url, { ...init, signal: ctx.signal });
   } catch (error) {
     if (ctx.signal?.aborted) throw error;
-    throw new Error(`连不上 ComfyUI（${baseUrl(ctx)}）：${error?.cause?.code ?? error.message}。请确认 ComfyUI 已经启动、地址填对了`);
+    throw new Error("连不上 ComfyUI。请确认 ComfyUI 已经启动，服务地址也填对了");
   }
   return response;
 }
@@ -156,8 +156,8 @@ function nodeErrorMessage(body) {
   return lines.length > 0 ? `${head}：${lines.slice(0, 3).join("；")}` : head;
 }
 
-/** @type {import("@beeftv/plugin-sdk").ProviderModule["submit"]} */
-export async function submit(request, ctx) {
+/** 读工作流、填输入、传素材。全部成功才有东西可提交；这里出错时 ComfyUI 还没有这个任务。 */
+async function preparePrompt(request, ctx) {
   const prepared = await prepare(ctx, await readWorkflow(ctx, request.model));
   const targets = inputTargets(prepared);
 
@@ -183,6 +183,17 @@ export async function submit(request, ctx) {
   randomizeSeeds(prepared);
   const outputs = outputNodeIds(prepared);
   if (outputs.length === 0) return { status: "failed", message: "这个工作流没有保存图片、视频或音频的节点" };
+  return { graph: prepared.graph, outputs };
+}
+
+/** @type {import("@beeftv/plugin-sdk").ProviderModule["submit"]} */
+export async function submit(request, ctx) {
+  // 没提交就出错是确定的失败，要把原因告诉用户；抛出去会被当成「提交结果不明」。
+  const ready = await preparePrompt(request, ctx).catch((error) => {
+    if (ctx.signal?.aborted) throw error;
+    return { status: "failed", message: error.message };
+  });
+  if (ready.status === "failed") return ready;
 
   let queued;
   try {
@@ -190,7 +201,7 @@ export async function submit(request, ctx) {
       method: "POST",
       headers: { "content-type": "application/json" },
       // 要取的输出节点存在 extra_data 里，查询时从 /history 读回来，不用再读一遍工作流。
-      body: JSON.stringify({ prompt: prepared.graph, client_id: "beeftv", extra_data: { beeftv: { outputs } } }),
+      body: JSON.stringify({ prompt: ready.graph, client_id: "beeftv", extra_data: { beeftv: { outputs: ready.outputs } } }),
     });
   } catch (error) {
     // 400 是 ComfyUI 校验没过，任务肯定没建；别的错误说不准，交给 BeefTV 按提交结果不明处理。

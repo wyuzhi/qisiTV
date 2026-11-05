@@ -189,8 +189,20 @@ describe("ComfyUI provider against a ComfyUI server", () => {
         workflows["too-many-steps.json"] = { "3": { class_type: "KSampler", inputs: { steps: 999 } }, "9": { class_type: "SaveImage", inputs: {} } };
         const rejected = await provider.submit({ model: "too-many-steps.json" }, ctx);
         expect(rejected).toEqual({ status: "failed", message: "Prompt outputs failed validation：节点 3（KSampler）：steps: 999 > 100" });
-        await expect(provider.submit({ model: "deleted.json" }, ctx)).rejects.toThrow("ComfyUI 里找不到工作流「deleted.json」");
         delete workflows["too-many-steps.json"];
+    });
+
+    test("a failure before anything is queued says why, instead of leaving the outcome unknown", async () => {
+        const deleted = await provider.submit({ model: "deleted.json" }, ctx);
+        expect(deleted.status).toBe("failed");
+        expect(deleted.message).toContain("ComfyUI 里找不到工作流「deleted.json」");
+
+        const stopped = Bun.serve({ port: 0, fetch: () => new Response("") });
+        const baseUrl = `http://127.0.0.1:${stopped.port}`;
+        stopped.stop(true);
+        const unreachable = await provider.submit({ model: "invert.app.json" }, { ...ctx, config: { baseUrl } });
+        expect(unreachable.status).toBe("failed");
+        expect(unreachable.message).toContain("连不上 ComfyUI");
     });
 
     test("query follows the queue, then returns only the outputs the workflow picked", async () => {
