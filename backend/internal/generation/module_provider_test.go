@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"infinite-canvas/backend/internal/kernel"
 	"infinite-canvas/backend/internal/model"
@@ -18,7 +19,9 @@ import (
 
 const testModuleProvider = `
 let submits = 0;
+let flakyQueries = 0;
 export async function submit(request, ctx) {
+  if (request.prompt === 'flaky' || request.prompt === 'broken') return { taskId: request.prompt, status: 'processing' };
   submits++;
   if (request.prompt === 'boom') throw new Error('connection reset');
   if (request.prompt === 'refused') return { status: 'failed', message: '工作流不接收图片' };
@@ -26,7 +29,8 @@ export async function submit(request, ctx) {
   return { taskId: 'task-' + submits, status: 'processing' };
 }
 export async function query(taskId, request, ctx) {
-  if (!['task-1', 'resumed-1'].includes(taskId)) throw new Error('unknown task ' + taskId);
+  if (taskId === 'flaky' && ++flakyQueries < 3) throw new Error('fetch failed');
+  if (!['task-1', 'resumed-1', 'flaky'].includes(taskId)) throw new Error('unknown task ' + taskId);
   return { status: 'succeeded', result: { images: [{ dataUrl: 'data:image/png;base64,iVBORw0KGgo=' }] } };
 }
 export async function models(ctx) {
@@ -155,6 +159,37 @@ func TestModuleProviderSubmitErrorIsUnknownNotRetried(t *testing.T) {
 	}
 	if len(receipts.snapshot()) != 1 {
 		t.Fatalf("submit was called %d times", len(receipts.snapshot()))
+	}
+}
+
+func TestModuleProviderKeepsQueryingThroughThrownErrors(t *testing.T) {
+	registry := moduleProviderRegistry(t)
+	adapter, ok := registry.Resolve("module-image")
+	if !ok {
+		t.Fatal("module-image is not registered")
+	}
+	queries := 0
+	policy := DefaultVideoPollPolicy()
+	policy.Sleep = func(context.Context, time.Duration) error { return nil }
+	policy.Notify = func(_ context.Context, _ string, event VideoPollEvent, _ error) {
+		if event == VideoPollEventRetrying {
+			queries++
+		}
+	}
+	run := func(prompt string) (map[string]any, error) {
+		ctx := WithProtocolRegistry(WithRuntime(context.Background(), taskRuntime(func(*Runtime) {})), registry)
+		input := Input{Mode: "image", Prompt: prompt, Config: Config{InterfaceType: "module-image", Model: "any", BaseURL: "http://127.0.0.1:8188", APIKey: "fixture"}}
+		return runModuleProviderTask(ctx, input, adapter.(protocol.ModuleProvider), policy)
+	}
+	result, err := run("flaky")
+	if err != nil || result["mode"] != "image" {
+		t.Fatalf("a running task must survive a failed query: result = %#v err = %v", result, err)
+	}
+	if queries != 1 {
+		t.Fatalf("retrying notices = %d", queries)
+	}
+	if _, err := run("broken"); err == nil || !strings.Contains(err.Error(), "unknown task broken") {
+		t.Fatalf("a query that keeps failing must end the task with the plugin's message, got %v", err)
 	}
 }
 

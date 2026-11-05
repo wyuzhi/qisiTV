@@ -53,7 +53,7 @@ func runModuleProviderTask(ctx context.Context, input Input, provider protocol.M
 	return RunVideoPollLoop(ctx, taskID, policy, func(ctx context.Context) (VideoPollOutcome, error) {
 		var state protocol.PollResult
 		if err := callModuleProvider(WithRequestKind(ctx, "poll"), input, provider, "query", request, taskID, &state); err != nil {
-			return VideoPollOutcome{}, err
+			return VideoPollOutcome{}, moduleQueryError{Cause: err}
 		}
 		switch state.Status {
 		case protocol.StatusSucceeded:
@@ -65,6 +65,13 @@ func runModuleProviderTask(ctx context.Context, input Input, provider protocol.M
 		return VideoPollOutcome{}, nil
 	})
 }
+
+// moduleQueryError 是插件 query 抛出的错误。任务已经在服务商那边跑着，插件抛错分不清是
+// 网络抖动还是真的查不了，所以和"查不到任务"一样处理：连续几次才算失败。
+type moduleQueryError struct{ Cause error }
+
+func (e moduleQueryError) Error() string { return e.Cause.Error() }
+func (e moduleQueryError) Unwrap() error { return e.Cause }
 
 // queryModuleProviderOnce 只查询一次已有任务，供人工核对失败任务使用。
 func queryModuleProviderOnce(ctx context.Context, input Input, provider protocol.ModuleProvider, taskID string) (map[string]interface{}, string, error) {
