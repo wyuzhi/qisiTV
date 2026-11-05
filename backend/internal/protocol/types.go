@@ -323,6 +323,8 @@ type ManifestProvider struct {
 	Result                  *ManifestOperation     `json:"result,omitempty"`
 	Response                ManifestResponse       `json:"response"`
 	AgentResponse           *ManifestAgentResponse `json:"agentResponse,omitempty"`
+	// Module 指向插件包内实现 submit/query/cancel 的 JS 文件；写了它就不写 create/poll。
+	Module string `json:"module,omitempty"`
 }
 
 type ManifestAuth struct {

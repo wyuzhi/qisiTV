@@ -223,9 +223,17 @@ func loadDeclarativeManifest(manifest Manifest) (Adapter, error) {
 }
 
 func loadDeclarativeManifestProvider(manifest Manifest, index int) (Adapter, error) {
+	pluginID := manifest.Metadata.ID
+	module := strings.TrimSpace(manifest.Contributes.Providers[index].Module)
 	manifest.Runtime.Backend = "declarative"
+	if module != "" {
+		manifest.Runtime.Backend = ExecutionModule
+	}
 	if err := normalizeManifestForProvider(&manifest, index); err != nil {
 		return nil, err
+	}
+	if module != "" {
+		return ModuleProvider{Info: manifest.Metadata, Plugin: pluginID, Module: module}, nil
 	}
 	return manifestAdapter{manifest: manifest}, nil
 }
@@ -267,6 +275,15 @@ func ValidateManifest(manifest Manifest) error {
 			return fmt.Errorf("duplicate provider contribution %q", provider.ID)
 		}
 		providerIDs[provider.ID] = struct{}{}
+		if err := validateProviderSurface(provider); err != nil {
+			return err
+		}
+		if strings.TrimSpace(provider.Module) != "" {
+			if err := validateModuleProvider(provider); err != nil {
+				return fmt.Errorf("provider %q: %w", provider.ID, err)
+			}
+			continue
+		}
 		requiresV3 := len(provider.Variables) > 0 || provider.Response.Stream != nil || provider.Response.DetectImageMIME
 		for _, operation := range []*ManifestOperation{&provider.Create, provider.Poll, provider.Cancel, provider.Result, provider.Agent} {
 			requiresV3 = requiresV3 || (operation != nil && operation.DefaultPathPrefix != "")
@@ -289,21 +306,6 @@ func ValidateManifest(manifest Manifest) error {
 		if stream := provider.Response.Stream; stream != nil {
 			if strings.TrimSpace(stream.TypePath) == "" || len(stream.ItemEvents) == 0 || stream.Images == nil || provider.Response.BinaryPayload {
 				return fmt.Errorf("provider %q image stream requires typePath, itemEvents and images, without binaryPayload", provider.ID)
-			}
-		}
-		if len(provider.Capabilities) == 0 || len(provider.Scopes) == 0 {
-			return fmt.Errorf("provider contribution %q requires capabilities and scopes", provider.ID)
-		}
-		for _, capability := range provider.Capabilities {
-			if capability != CapabilityText && capability != CapabilityImage && capability != CapabilityVideo && capability != CapabilityAudio {
-				return fmt.Errorf("unsupported protocol capability %q", capability)
-			}
-		}
-		for _, scope := range provider.Scopes {
-			switch scope {
-			case SurfaceAdminSystemChannel, SurfaceUserCustomChannel, SurfaceCanvas, SurfaceCreation, SurfaceAgent:
-			default:
-				return fmt.Errorf("unsupported protocol scope %q", scope)
 			}
 		}
 		if err := validateManifestOperation(provider.Create); err != nil {
@@ -336,6 +338,25 @@ func ValidateManifest(manifest Manifest) error {
 			if rule.Assert == nil || strings.TrimSpace(rule.Message) == "" {
 				return fmt.Errorf("provider %q validation %d requires assert and message", provider.ID, ruleIndex)
 			}
+		}
+	}
+	return nil
+}
+
+func validateProviderSurface(provider ManifestProvider) error {
+	if len(provider.Capabilities) == 0 || len(provider.Scopes) == 0 {
+		return fmt.Errorf("provider contribution %q requires capabilities and scopes", provider.ID)
+	}
+	for _, capability := range provider.Capabilities {
+		if capability != CapabilityText && capability != CapabilityImage && capability != CapabilityVideo && capability != CapabilityAudio {
+			return fmt.Errorf("unsupported protocol capability %q", capability)
+		}
+	}
+	for _, scope := range provider.Scopes {
+		switch scope {
+		case SurfaceAdminSystemChannel, SurfaceUserCustomChannel, SurfaceCanvas, SurfaceCreation, SurfaceAgent:
+		default:
+			return fmt.Errorf("unsupported protocol scope %q", scope)
 		}
 	}
 	return nil

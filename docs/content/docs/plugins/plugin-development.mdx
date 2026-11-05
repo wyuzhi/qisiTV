@@ -11,6 +11,7 @@ description: 从零编写、本地调试并发布一个 BeefTV 插件包（画�
 2. **创作助手工具（`pi.extensions`）**：用 TypeScript 编写助手工具，通过 `ctx.executeTool` 调用 BeefTV 的画布与生成业务操作。
 3. **创作助手技能（`pi.skills`）**：附带 `SKILL.md`，让创作助手掌握特定领域的编排步骤。
 4. **模型协议与工作流（`beeftv.contributes.providers`）**：以声明式 JSON 接入新的图片、视频、音频或文本模型渠道。
+5. **用 JS 接入生成服务（`providers[].module`）**：上游需要先传素材、改工作流或多步调用时，用三个 JS 函数实现提交、查询和取消。
 
 ---
 
@@ -208,11 +209,56 @@ export default activate;
 
 ---
 
-## 5. 宿主挂点与事件完整参考
+## 5. 用 JS 接入生成服务（`providers[].module`）
+
+声明式 JSON 只能描述"发一个请求、读一个结果"。上游需要先上传素材、修改工作流节点或分几步调用时，在 provider 里写 `module`，指向包内的一个 JS 文件，不再写 `create`、`poll`：
+
+```json
+{
+  "beeftv": {
+    "apiVersion": "beeftv.plugin/v2",
+    "contributes": {
+      "providers": [
+        { "id": "my-workflow", "label": "我的工作流", "module": "./provider.mjs", "capabilities": ["image"], "scopes": ["canvas", "user.custom-channel"] }
+      ]
+    }
+  }
+}
+```
+
+`provider.mjs` 导出三个函数，网络请求由插件自己发：
+
+```js
+// request：与声明式插件里的 request.* 相同（prompt、images、videos、audios、model、output 等）
+// ctx.config：用户在渠道里填的 { baseUrl, apiKey }；ctx.signal：任务取消时触发
+export async function submit(request, ctx) {
+  const res = await fetch(`${ctx.config.baseUrl}/prompt`, { method: "POST", body: JSON.stringify({ prompt: request.prompt }), signal: ctx.signal });
+  if (!res.ok) return { status: "failed", message: `上游 HTTP ${res.status}` };
+  return { taskId: (await res.json()).id, status: "processing" };
+}
+
+export async function query(taskId, request, ctx) {
+  // 返回 pending / processing / succeeded / failed；成功时给出结果地址
+  return { status: "succeeded", result: { images: [{ url: "https://example.com/out.png" }] } };
+}
+
+export async function cancel(taskId, request, ctx) {}
+```
+
+几条约定：
+
+- **能确定失败就返回 `{ status: "failed", message }`**，例如缺少 Key、上游明确拒绝。`submit` 抛出异常时，BeefTV 无法判断请求是否已经发出，会把任务标为"提交结果不明"，不会自动重试，避免重复扣费。
+- **`submit` 要返回 `taskId`**。BeefTV 先记下任务号再查询；应用重启或任务恢复时只调用 `query`，不会再次调用 `submit`。
+- 结果里的 `url` 或 `dataUrl` 由 BeefTV 下载并保存到画布，插件不用自己存文件。
+- 插件代码运行在 BeefTV 自带 Node 的独立后台进程里，不经过浏览器；`console.log` 会写进 BeefTV 日志。只有从 npm、本地目录或 `.tgz` 安装的插件可以使用 `module`，`.beeftv-plugin` 归档不能带代码。
+
+---
+
+## 6. 宿主挂点与事件完整参考
 
 完整演示代码可直接查看仓库内的 `plugin-packages/beeftv-plugin-slot-test/`。
 
-### 5.1 界面挂点（`host.contribute(slot, payload)`）
+### 6.1 界面挂点（`host.contribute(slot, payload)`）
 
 | 区域 | 挂点名称 | 载荷关键字段 | 说明 |
 | --- | --- | --- | --- |
@@ -244,7 +290,7 @@ export default activate;
 | 项目 | `project.view` | `{ id, label, title, render }` | 项目详情页分页视图 |
 | 助手 | `assistant.toolCard` | `{ toolName, label, render }` | 助手面板中该工具调用结果的自定义卡片 |
 
-### 5.2 宿主事件（`host.events.on(event, callback)`）
+### 6.2 宿主事件（`host.events.on(event, callback)`）
 
 | 事件名称 | 说明 | 回调参数 |
 | --- | --- | --- |
@@ -256,7 +302,7 @@ export default activate;
 
 画布打开、画布内容变化、选中变化这三类事件还没有接入，接入前不会触发。
 
-### 5.3 宿主接口
+### 6.3 宿主接口
 
 `activate(host)` 拿到的 `host` 只提供这些能力：
 
@@ -275,7 +321,7 @@ export default activate;
 
 ---
 
-## 6. 本地安装与调试
+## 7. 本地安装与调试
 
 1. 打开 BeefTV 左下角或侧栏的 **插件中心（`/plugins`）**。
 2. 点击右上角 **从本地目录或包安装**，输入 npm 包名、GitHub 仓库（如 `github:owner/repo`）、远程 `.tgz` 地址，或本地插件目录的完整路径；也可以上传 `.tgz` / `.beeftv-plugin` 文件。BeefTV 用自带的 npm 安装，插件的依赖会一起装好。
@@ -287,7 +333,7 @@ export default activate;
 
 ---
 
-## 7. 发布到 npm 与上架推荐列表
+## 8. 发布到 npm 与上架推荐列表
 
 1. 确保 `package.json` 的 `keywords` 包含 `"beeftv-plugin"`，运行 `npm publish --access public` 发布到 npm。发布后，所有用户即可在插件市场的「npm 社区搜索」中搜到并安装你的插件。
 2. 若希望进入「精选推荐」列表，向公开仓库 `https://github.com/Sunnyender-org/beeftv-plugins` 的 `registry.json` 提交 Pull Request，补充插件的 `id`、`packageName`、`name`、`version`、`description`、`author`、`category` 与 `tags`。
