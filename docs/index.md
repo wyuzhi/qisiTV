@@ -33,8 +33,11 @@ BeefTV 是一个本地优先、轻量、AI Native 的视频工作台。本页只
 - [后端数据库](content/docs/backend/backend-database.mdx)
 - [任务运行时稳定性](content/docs/backend/task-runtime-stability.mdx)
 - [生成失败归类](content/docs/backend/generation-errors.mdx)
-- [插件系统](content/docs/plugins/plugin-system.mdx)
-- [插件界面扩展](content/docs/plugins/plugin-surfaces.mdx)
+- [开发一个插件](content/docs/plugins/plugin-development.mdx)
+- [插件参考](content/docs/plugins/plugin-reference.mdx)
+- [接入生成服务](content/docs/plugins/plugin-generation.mdx)
+- [写一个技能](content/docs/plugins/skills.mdx)
+- [插件系统怎么运转](content/docs/plugins/plugin-system.mdx)
 - [AI 审美批改插件](content/docs/plugins/ai-art-critique.mdx)
 
 ## 项目治理
