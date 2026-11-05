@@ -32,7 +32,7 @@ func grokPluginRegistry(t *testing.T, packaged bool) *protocol.Registry {
 		}
 		raw = pkg.ManifestRaw
 	}
-	adapters, err := protocol.LoadInstalledProviders(raw, nil)
+	adapters, err := protocol.LoadInstalledProviders(raw)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -178,7 +178,6 @@ func (h compileHost) LocalMode() bool                                           
 func (h compileHost) ManagedCredential() (string, string, error)                     { return h.cfg.ManagedCredential() }
 func (h compileHost) ManagedCredentialRef() string                                   { return h.cfg.ManagedCredRef }
 func (h compileHost) UpscaleAvailable(name string) error                             { return h.cfg.UpscaleAvailable(name) }
-func (h compileHost) ValidateProviderCapability(in map[string]any) error             { return h.cfg.ValidateCapability(in) }
 func (h compileHost) ValidateTaskShape(in map[string]any) (string, bool, error) {
 	encoded, err := json.Marshal(in)
 	if err != nil {

@@ -142,7 +142,7 @@ export async function generateChapterStoryboard(input: ChapterStoryboardGenerati
             characters: input.characters,
             shotDurationSeconds: 0,
             shotCount: 0,
-            config: backendProviderConfig(config, "text"),
+            config: backendProviderConfig(config),
             metadata: {
                 domainProjectId: input.projectId,
                 chapterId: input.chapterId,

@@ -97,7 +97,7 @@ func TestBindGenerationRuntimeAlwaysBindsTypedPorts(t *testing.T) {
 	if !ok {
 		t.Fatal("runtime missing")
 	}
-	if runtime.Limits == nil || runtime.Prompt == nil || runtime.Config == nil || runtime.Style == nil || runtime.Images == nil || runtime.Receipts == nil || runtime.Workflow == nil || runtime.Probe == nil {
+	if runtime.Limits == nil || runtime.Prompt == nil || runtime.Config == nil || runtime.Style == nil || runtime.Images == nil || runtime.Receipts == nil || runtime.Probe == nil {
 		t.Fatalf("typed ports missing on empty Service: %#v", runtime)
 	}
 	if runtime.Call.ProjectID != "project-1" || runtime.Call.TaskType != "canvas_image" {

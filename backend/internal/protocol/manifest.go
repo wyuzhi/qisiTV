@@ -79,13 +79,8 @@ type ManifestAgentResponse struct {
 	ToolCallSignaturePaths []string `json:"toolCallThoughtSignaturePaths,omitempty"`
 }
 
-// AdapterResolver is used by the host to bind a shipped execution engine to a
-// manifest. Uploaded plugins must use the declarative path; host bindings are
-// reserved for manifests shipped with the application.
-type AdapterResolver func(string) (Adapter, bool)
-
-func LoadInstalledPlugin(data []byte, resolve AdapterResolver) (Adapter, error) {
-	adapters, err := LoadInstalledProviders(data, resolve)
+func LoadInstalledPlugin(data []byte) (Adapter, error) {
+	adapters, err := LoadInstalledProviders(data)
 	if err != nil {
 		return nil, err
 	}
@@ -98,30 +93,10 @@ func LoadInstalledPlugin(data []byte, resolve AdapterResolver) (Adapter, error) 
 // LoadInstalledProviders loads every provider contribution from one plugin
 // package. The package remains the lifecycle and permission unit; providers
 // are separate execution entries in the runtime index.
-func LoadInstalledProviders(data []byte, resolve AdapterResolver) ([]Adapter, error) {
+func LoadInstalledProviders(data []byte) ([]Adapter, error) {
 	manifest, err := decodeManifest(data)
 	if err != nil {
 		return nil, err
-	}
-	if strings.HasPrefix(strings.TrimSpace(manifest.Runtime.Backend), "host:") {
-		if len(manifest.Contributes.Providers) != 1 {
-			return nil, fmt.Errorf("host-backed plugin must declare exactly one provider")
-		}
-		if resolve == nil {
-			return nil, fmt.Errorf("plugin %q requires a host execution engine", manifest.Metadata.ID)
-		}
-		name := strings.TrimPrefix(strings.TrimSpace(manifest.Runtime.Backend), "host:")
-		adapter, ok := resolve(name)
-		if !ok {
-			return nil, fmt.Errorf("plugin host execution %q is unavailable", name)
-		}
-		if err := ValidateManifest(manifest); err != nil {
-			return nil, err
-		}
-		if err := normalizeManifest(&manifest); err != nil {
-			return nil, err
-		}
-		return []Adapter{metadataAdapter{metadata: manifest.Metadata, delegate: adapter}}, nil
 	}
 	if len(manifest.Contributes.Providers) == 0 {
 		adapter, err := loadDeclarativeManifest(manifest)
@@ -248,9 +223,17 @@ func loadDeclarativeManifest(manifest Manifest) (Adapter, error) {
 }
 
 func loadDeclarativeManifestProvider(manifest Manifest, index int) (Adapter, error) {
+	pluginID := manifest.Metadata.ID
+	module := strings.TrimSpace(manifest.Contributes.Providers[index].Module)
 	manifest.Runtime.Backend = "declarative"
+	if module != "" {
+		manifest.Runtime.Backend = ExecutionModule
+	}
 	if err := normalizeManifestForProvider(&manifest, index); err != nil {
 		return nil, err
+	}
+	if module != "" {
+		return ModuleProvider{Info: manifest.Metadata, Plugin: pluginID, Module: module, Auth: manifest.Auth}, nil
 	}
 	return manifestAdapter{manifest: manifest}, nil
 }
@@ -277,7 +260,7 @@ func ValidateManifest(manifest Manifest) error {
 	if err := validateManifestPackageExtensions(manifest); err != nil {
 		return err
 	}
-	if backend := strings.TrimSpace(manifest.Runtime.Backend); backend != "" && backend != "declarative" && backend != "rpc" && backend != "wasm" && backend != "trusted-backend" && !strings.HasPrefix(backend, "host:") {
+	if backend := strings.TrimSpace(manifest.Runtime.Backend); backend != "" && backend != "declarative" {
 		return fmt.Errorf("unsupported plugin backend %q", backend)
 	}
 	if len(manifest.Contributes.Providers) == 0 {
@@ -292,6 +275,15 @@ func ValidateManifest(manifest Manifest) error {
 			return fmt.Errorf("duplicate provider contribution %q", provider.ID)
 		}
 		providerIDs[provider.ID] = struct{}{}
+		if err := validateProviderSurface(provider); err != nil {
+			return err
+		}
+		if strings.TrimSpace(provider.Module) != "" {
+			if err := validateModuleProvider(provider); err != nil {
+				return fmt.Errorf("provider %q: %w", provider.ID, err)
+			}
+			continue
+		}
 		requiresV3 := len(provider.Variables) > 0 || provider.Response.Stream != nil || provider.Response.DetectImageMIME
 		for _, operation := range []*ManifestOperation{&provider.Create, provider.Poll, provider.Cancel, provider.Result, provider.Agent} {
 			requiresV3 = requiresV3 || (operation != nil && operation.DefaultPathPrefix != "")
@@ -314,21 +306,6 @@ func ValidateManifest(manifest Manifest) error {
 		if stream := provider.Response.Stream; stream != nil {
 			if strings.TrimSpace(stream.TypePath) == "" || len(stream.ItemEvents) == 0 || stream.Images == nil || provider.Response.BinaryPayload {
 				return fmt.Errorf("provider %q image stream requires typePath, itemEvents and images, without binaryPayload", provider.ID)
-			}
-		}
-		if len(provider.Capabilities) == 0 || len(provider.Scopes) == 0 {
-			return fmt.Errorf("provider contribution %q requires capabilities and scopes", provider.ID)
-		}
-		for _, capability := range provider.Capabilities {
-			if capability != CapabilityText && capability != CapabilityImage && capability != CapabilityVideo && capability != CapabilityAudio {
-				return fmt.Errorf("unsupported protocol capability %q", capability)
-			}
-		}
-		for _, scope := range provider.Scopes {
-			switch scope {
-			case SurfaceAdminSystemChannel, SurfaceUserCustomChannel, SurfaceCanvas, SurfaceCreation, SurfaceAgent:
-			default:
-				return fmt.Errorf("unsupported protocol scope %q", scope)
 			}
 		}
 		if err := validateManifestOperation(provider.Create); err != nil {
@@ -361,6 +338,25 @@ func ValidateManifest(manifest Manifest) error {
 			if rule.Assert == nil || strings.TrimSpace(rule.Message) == "" {
 				return fmt.Errorf("provider %q validation %d requires assert and message", provider.ID, ruleIndex)
 			}
+		}
+	}
+	return nil
+}
+
+func validateProviderSurface(provider ManifestProvider) error {
+	if len(provider.Capabilities) == 0 || len(provider.Scopes) == 0 {
+		return fmt.Errorf("provider contribution %q requires capabilities and scopes", provider.ID)
+	}
+	for _, capability := range provider.Capabilities {
+		if capability != CapabilityText && capability != CapabilityImage && capability != CapabilityVideo && capability != CapabilityAudio {
+			return fmt.Errorf("unsupported protocol capability %q", capability)
+		}
+	}
+	for _, scope := range provider.Scopes {
+		switch scope {
+		case SurfaceAdminSystemChannel, SurfaceUserCustomChannel, SurfaceCanvas, SurfaceCreation, SurfaceAgent:
+		default:
+			return fmt.Errorf("unsupported protocol scope %q", scope)
 		}
 	}
 	return nil
@@ -417,7 +413,7 @@ func normalizeManifestForProvider(manifest *Manifest, index int) error {
 }
 
 func hasNonProviderContribution(contributes ManifestContributions) bool {
-	return len(contributes.Workflows) > 0 || len(contributes.CanvasNodes) > 0 || len(contributes.Transforms) > 0 || len(contributes.Commands) > 0 || len(contributes.AssetSources) > 0 || len(contributes.UsageObservers) > 0 || len(contributes.AICapabilities) > 0 || len(contributes.Agents) > 0 || len(contributes.Skills) > 0 || len(contributes.Extensions) > 0 || len(contributes.ImportExport) > 0
+	return len(contributes.Workflows) > 0 || len(contributes.CanvasNodes) > 0 || len(contributes.Skills) > 0 || len(contributes.Extensions) > 0
 }
 
 func operationSummary(operation ManifestOperation) string {

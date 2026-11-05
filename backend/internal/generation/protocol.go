@@ -47,6 +47,9 @@ func RunProtocolAdapterTaskWithPolicy(ctx context.Context, input Input, adapter 
 	if input.Mode == "video" {
 		policy = videoPollPolicyForConfig(ctx, input.Config, policy)
 	}
+	if provider, ok := adapter.(protocol.ModuleProvider); ok {
+		return runModuleProviderTask(ctx, input, provider, policy)
+	}
 	// create、poll、download 是同一个外部任务的三个阶段：任一阶段失败都向上返回真实错误，
 	// 不把“已提交但结果未知”伪装成成功，也不把下载失败降级成空结果。
 	request := ProtocolRequestFromInput(input)
@@ -184,6 +187,9 @@ func ExtractProviderTaskID(body []byte) (string, error) {
 // queryProtocolAdapterVideoTask 只读取一次已有的声明式 Provider 任务。
 // 人工恢复走此路径，因此检查本地失败任务时绝不会创建第二个上游任务。
 func QueryProtocolAdapterVideoTask(ctx context.Context, input Input, adapter protocol.Adapter, taskID string) (map[string]interface{}, string, error) {
+	if provider, ok := adapter.(protocol.ModuleProvider); ok {
+		return queryModuleProviderOnce(ctx, input, provider, taskID)
+	}
 	request := ProtocolRequestFromInput(input)
 	pollContext := protocol.PollContext{BaseURL: input.Config.BaseURL, Model: request.Model, Request: request, TaskID: taskID}
 	spec, err := adapter.BuildPoll(ctx, pollContext)

@@ -8,7 +8,7 @@ import { CanvasVideoSettingsPopover } from "../src/components/canvas/canvas-vide
 import { VideoSettingsPanel } from "../src/components/video-settings-panel";
 import { canvasThemes } from "../src/lib/canvas-theme";
 import { mergeFetchedChannelModelProfiles, type ChannelModelCatalogItem } from "../src/lib/channel-model-catalog";
-import { defaultModelCapabilityConfig, modelCapabilityConfigFor, pluginWorkflowCapabilityConfig } from "../src/lib/model-capabilities";
+import { defaultModelCapabilityConfig, modelCapabilityConfigFor } from "../src/lib/model-capabilities";
 import { ChannelModelSettings } from "../src/pages/settings/channel-model-settings";
 import { applyFetchedChannelModelCatalog } from "../src/pages/settings/channel-settings-pane";
 import { fetchChannelModels } from "../src/services/api/image";
@@ -274,27 +274,6 @@ describe("public channel model catalog", () => {
             expect.objectContaining({ model: "custom-text-model", capability: "text", protocol: "openai-response" }),
         ]));
         expect(resolveModelRequestConfig(normalized, "beefapi::custom-text-model").interfaceType).toBe("openai-response");
-    });
-
-    test("projects Manifest video workflow parameters without inventing a size capability", () => {
-        const profile = pluginWorkflowCapabilityConfig("autodl-comfyui", {
-            id: "minimax_h3_lightx2v_no_pic",
-            label: "MiniMax H3 文生视频",
-            providerId: "autodl-comfyui",
-            capability: "video",
-            parameters: [
-                { name: "prompt", type: "string", required: true, mapping: "prompt" },
-                { name: "duration", type: "integer", mapping: "duration" },
-                { name: "resolution", type: "string", mapping: "resolution", values: ["480p竖", "480p横"] },
-            ],
-            defaults: { duration: 5, resolution: "480p竖" },
-        })!.video!;
-
-        expect(profile.ratios).toEqual([]);
-        expect(profile.defaultRatio).toBe("");
-        expect(profile.resolutions).toEqual(["480p竖", "480p横"]);
-        expect(profile.defaultResolution).toBe("480p竖");
-        expect(profile.duration).toEqual({ selection: "enum", values: [5], default: 5 });
     });
 
     test("preserves six public capabilities without expanding compatibility IDs", async () => {

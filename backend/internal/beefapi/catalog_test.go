@@ -71,7 +71,7 @@ func TestGeminiAppliedCatalogResolvesBundledProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapters, err := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil)
+	adapters, err := protocol.LoadInstalledProviders(pkg.ManifestRaw)
 	if err != nil {
 		t.Fatal(err)
 	}

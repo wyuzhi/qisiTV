@@ -91,11 +91,11 @@ func TestForUserHidesSystemPluginsWhenFeatureDisabled(t *testing.T) {
 	svc := New(RuntimeForTest(map[string]Record{
 		"bundled":  {Source: "bundled", Metadata: protocol.Metadata{ID: "bundled", Name: "系统协议", Version: "1"}},
 		"uploaded": {Source: OriginUploaded, Metadata: protocol.Metadata{ID: "uploaded", Name: "自定义协议", Version: "1"}},
-		"app":      {Source: "bundled", Metadata: protocol.Metadata{ID: WorkflowRunningHub, Name: "官方应用", Version: "1"}},
+		"app":      {Source: "bundled", Metadata: protocol.Metadata{ID: AIArtCritique, Name: "官方应用", Version: "1"}},
 	}), nil)
 	user := &model.User{ID: "user-1", Role: model.UserRoleUser}
 	visible := svc.ForUser(user, false)
-	if len(visible) != 1 || visible[0].Manifest.ID != WorkflowRunningHub {
+	if len(visible) != 1 || visible[0].Manifest.ID != AIArtCritique {
 		t.Fatalf("ForUser(user, hidden) = %#v", visible)
 	}
 	admin := svc.ForUser(&model.User{ID: "admin-1", Role: model.UserRoleAdmin}, false)

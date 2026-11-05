@@ -88,12 +88,7 @@ func RegisterPluginRoutes(r *gin.RouterGroup, center pluginCenter, hosted ...boo
 			failService(c, err)
 			return
 		}
-		statuses, err := center.PluginDomain().WorkflowStatusesForUser(user.ID)
-		if err != nil {
-			failService(c, err)
-			return
-		}
-		ok(c, gin.H{"statuses": statuses, "states": states})
+		ok(c, gin.H{"states": states})
 	})
 	pluginRoutes := r.Group("/plugins")
 	pluginRoutes.Use(requirePluginCenterAccess(center))

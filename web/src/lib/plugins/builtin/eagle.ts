@@ -123,8 +123,7 @@ export const eagleAssetPlugin: RegisteredPlugin = {
                 { name: "generatedFolderId", type: "string", label: "生成结果文件夹" },
             ],
         },
-        runtime: { web: "trusted-backend" },
-        contributes: { assetSources: ["eagle"] },
+        contributes: {},
     },
     createAssetSource: ({ config }: PluginHostContext) => {
         const configuredBaseUrl = config.baseUrl;

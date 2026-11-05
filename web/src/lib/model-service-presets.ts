@@ -42,6 +42,21 @@ export function presetCatalogFor(id: ModelServicePresetId): ChannelModelCatalogI
     }));
 }
 
+// 插件用 JS 接入的生成服务，在「选择服务商」里各占一项。
+export function pluginServices(protocols: ModelProtocolDefinition[]): ModelProtocolDefinition[] {
+    const seen = new Set<string>();
+    return protocols.filter((item) => item.module && item.enabled !== false && !seen.has(item.value) && seen.add(item.value));
+}
+
+export function createPluginServiceChannel(service: ModelProtocolDefinition, channelId: string): ModelChannel {
+    return {
+        ...createModelChannel({ id: channelId, apiFormat: "openai" }),
+        name: service.label,
+        baseUrl: service.baseUrl || "",
+        interfaceType: service.value,
+    };
+}
+
 export function ll2ProtocolsAvailable(protocols: ModelProtocolDefinition[]): boolean {
     return LL2_PRESET_MODELS.every((item) =>
         protocols.some((protocol) => protocol.value === item.protocol && protocol.capability === item.capability && protocol.enabled !== false),
@@ -126,7 +141,8 @@ export function serviceModelProfile(channel: ModelChannel, item: ChannelModelCat
 
 export function channelAllowsEmptyAPIKey(channel: Pick<ModelChannel, "models" | "modelProfiles" | "interfaceType">, protocols?: ModelProtocolDefinition[]) {
     const models = (channel.models || []).map((model) => model.trim()).filter(Boolean);
-    if (!models.length) return false;
+    // 还没选模型时，按渠道默认接口判断；插件服务（如本机 ComfyUI）可能不需要密钥。
+    if (!models.length) return Boolean(channel.interfaceType) && protocols?.find((item) => item.value === channel.interfaceType)?.authType === "none";
     return models.every((model) => {
         const profile = channel.modelProfiles?.find((item) => item.model === model);
         const protocolId = profile?.protocol || channel.interfaceType;

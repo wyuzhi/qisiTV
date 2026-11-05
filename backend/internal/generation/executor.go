@@ -7,8 +7,7 @@ import (
 	"strings"
 
 	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/outbound"
-	"infinite-canvas/backend/internal/provider/workflow"
+	"infinite-canvas/backend/internal/protocol"
 )
 
 // Execute owns paid-generation orchestration: prompt templates, config,
@@ -51,10 +50,6 @@ func Execute(ctx context.Context, input Input) (map[string]any, error) {
 			return nil, err
 		}
 		return RunUpscaleTask(ctx, input)
-	}
-
-	if workflow.IsProviderInterface(input.Config.InterfaceType) {
-		return executeWorkflow(ctx, runtime, userID, input)
 	}
 
 	if input.Mode == "image" && input.Metadata != nil && strings.TrimSpace(metadataString(input.Metadata, "styleProfileJson")) != "" {
@@ -187,37 +182,6 @@ func dispatch(ctx context.Context, input Input) (map[string]any, error) {
 	}
 }
 
-func executeWorkflow(ctx context.Context, runtime Runtime, userID string, input Input) (map[string]any, error) {
-	if runtime.Config != nil {
-		if err := runtime.Config.RequireWorkflow(input.Config.InterfaceType); err != nil {
-			return nil, err
-		}
-	}
-	if err := mapWorkflowConfigError(workflow.ValidateConfig(input.Mode, workflowConfig(input.Config))); err != nil {
-		return nil, err
-	}
-	preparing := ResumedProviderRequestID(ctx) == "" && hasReferenceMedia(input)
-	if preparing {
-		if err := setExecutionStage(ctx, runtime, "正在准备参考素材"); err != nil {
-			return nil, err
-		}
-	}
-	if ResumedProviderRequestID(ctx) == "" {
-		if err := HydrateMedia(ctx, userID, &input, MediaHydrationPolicy{}); err != nil {
-			return nil, err
-		}
-	}
-	if runtime.Workflow == nil {
-		return nil, errors.New("无法执行工作流任务，请重试")
-	}
-	if preparing || (input.Mode == "video" && ResumedProviderRequestID(ctx) == "") {
-		if err := setExecutionStage(ctx, runtime, "正在提交生成任务"); err != nil {
-			return nil, err
-		}
-	}
-	return runtime.Workflow.Execute(ctx, input)
-}
-
 func hasReferenceMedia(input Input) bool {
 	return len(input.ReferenceImages)+len(input.ReferenceVideos)+len(input.ReferenceAudios) > 0 || input.Mask != nil
 }
@@ -254,7 +218,8 @@ func validatePreparedInput(ctx context.Context, input Input) error {
 			return errors.New("后端任务队列暂不支持该 Gemini 调用格式，请选择已安装的 Gemini 协议插件")
 		}
 	}
-	if strings.TrimSpace(input.Config.BaseURL) == "" || strings.TrimSpace(input.Config.APIKey) == "" || strings.TrimSpace(input.Config.Model) == "" {
+	missingKey := strings.TrimSpace(input.Config.APIKey) == "" && !interfaceNeedsNoKey(ctx, input.Config.InterfaceType)
+	if strings.TrimSpace(input.Config.BaseURL) == "" || missingKey || strings.TrimSpace(input.Config.Model) == "" {
 		return errors.New("后端生成任务缺少 Base URL、API Key 或模型名")
 	}
 	if err := validateInterfaceForContext(ctx, input.Mode, input.Config.InterfaceType); err != nil {
@@ -268,6 +233,20 @@ func validatePreparedInput(ctx context.Context, input Input) error {
 	return nil
 }
 
+// interfaceNeedsNoKey 看插件清单是否声明 auth.type 为 none，比如本机的 ComfyUI。
+func interfaceNeedsNoKey(ctx context.Context, interfaceType string) bool {
+	registry, ok := ProtocolRegistryFromContext(ctx)
+	if !ok {
+		return false
+	}
+	adapter, found := registry.Resolve(interfaceType)
+	if !found {
+		return false
+	}
+	auth, ok := adapter.(protocol.MediaAuthAdapter)
+	return ok && strings.EqualFold(strings.TrimSpace(auth.MediaAuth().Type), "none")
+}
+
 func validateInterfaceForContext(ctx context.Context, mode, interfaceType string) error {
 	interfaceType = strings.TrimSpace(interfaceType)
 	if interfaceType == "" {
@@ -279,45 +258,6 @@ func validateInterfaceForContext(ctx context.Context, mode, interfaceType string
 		}
 	}
 	return ValidateGenerationInterface(mode, interfaceType)
-}
-
-func workflowConfig(config Config) workflow.Config {
-	return workflow.Config{
-		InterfaceType:         config.InterfaceType,
-		BaseURL:               config.BaseURL,
-		APIKey:                config.APIKey,
-		Headers:               config.Headers,
-		Model:                 config.Model,
-		Size:                  config.Size,
-		Quality:               config.Quality,
-		TransparentBackground: config.TransparentBackground,
-		Count:                 config.Count,
-		VideoSeconds:          config.VideoSeconds,
-		VQuality:              config.VQuality,
-		VideoGenerateAudio:    config.VideoGenerateAudio,
-		VideoWatermark:        config.VideoWatermark,
-		AudioVoice:            config.AudioVoice,
-		AudioFormat:           config.AudioFormat,
-		AudioSpeed:            config.AudioSpeed,
-		AudioInstructions:     config.AudioInstructions,
-		SystemPrompt:          config.SystemPrompt,
-		WorkflowID:            config.WorkflowID,
-		WebappID:              config.WebappID,
-		WorkflowJSON:          config.WorkflowJSON,
-		WorkflowFields:        config.WorkflowFields,
-		RunningHubUploadKey:   config.RunningHubUploadKey,
-	}
-}
-
-func mapWorkflowConfigError(err error) error {
-	if err == nil {
-		return nil
-	}
-	var req *outbound.BadRequestError
-	if errors.As(err, &req) {
-		return BadAuthRequest(req.Message)
-	}
-	return err
 }
 
 func requireTaskRuntime(ctx context.Context) error {

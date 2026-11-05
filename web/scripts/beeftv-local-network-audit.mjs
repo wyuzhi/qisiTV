@@ -45,7 +45,7 @@ try {
         await page.waitForTimeout(500);
         if (route.startsWith("/settings")) {
             const bodyText = await page.locator("body").innerText();
-            const forbiddenLocalLabels = ["RunningHub", "我的对象存储", "支付充值", "积分运营", "积分超市", "充值 / 兑换"];
+            const forbiddenLocalLabels = ["我的对象存储", "支付充值", "积分运营", "积分超市", "充值 / 兑换"];
             const visibleForbiddenLabels = forbiddenLocalLabels.filter((label) => bodyText.includes(label));
             if (visibleForbiddenLabels.length) {
                 failures.push(`${route}: local settings rendered hosted/commercial labels: ${visibleForbiddenLabels.join(", ")}`);

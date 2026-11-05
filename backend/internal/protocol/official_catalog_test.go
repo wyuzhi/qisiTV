@@ -41,9 +41,6 @@ func TestOfficialProtocolPackagesAreSelfContainedDeclarativePlugins(t *testing.T
 		if pkg.Manifest.APIVersion != "beeftv.plugin/v2" && pkg.Manifest.APIVersion != "beeftv.plugin/v3" {
 			t.Fatalf("%s apiVersion = %q", filepath.Base(path), pkg.Manifest.APIVersion)
 		}
-		if strings.HasPrefix(strings.TrimSpace(pkg.Manifest.Runtime.Backend), "host:") {
-			t.Fatalf("%s depends on host runtime", filepath.Base(path))
-		}
 		if len(pkg.Files["README.md"]) == 0 || len(pkg.Files["docs/interface.md"]) == 0 {
 			t.Fatalf("%s must contain README.md and docs/interface.md", filepath.Base(path))
 		}
@@ -61,7 +58,7 @@ func TestOfficialProtocolPackagesAreSelfContainedDeclarativePlugins(t *testing.T
 				t.Fatalf("%s interface documentation is missing configuration field %q", filepath.Base(path), field.Name)
 			}
 		}
-		adapters, err := LoadInstalledProviders(pkg.ManifestRaw, nil)
+		adapters, err := LoadInstalledProviders(pkg.ManifestRaw)
 		if err != nil {
 			t.Fatalf("load %s: %v", filepath.Base(path), err)
 		}
@@ -602,7 +599,7 @@ func officialPackageAdapter(t *testing.T, packageName, providerID string) Adapte
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapters, err := LoadInstalledProviders(pkg.ManifestRaw, nil)
+	adapters, err := LoadInstalledProviders(pkg.ManifestRaw)
 	if err != nil {
 		t.Fatal(err)
 	}

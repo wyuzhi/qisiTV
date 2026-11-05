@@ -9,7 +9,6 @@ type canonicalAgentRequest = generation.CanonicalAgentRequest
 type providerTextMessage = generation.TextMessage
 type providerConfig = generation.Config
 type providerMedia = generation.Media
-type WorkflowField = generation.WorkflowField
 type imageResponse = generation.ImageResponse
 type providerError = generation.UpstreamError
 type providerPayloadError = generation.PayloadError

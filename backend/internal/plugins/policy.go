@@ -3,10 +3,6 @@ package plugins
 import "strings"
 
 var officialApplicationPolicies = map[string]ManagementView{
-	WorkflowRunningHub: {
-		Origin: OriginOfficial, Kind: KindApplication,
-		ActivationScope: ScopeUser, ConfigurationScope: ConfigurationUser,
-	},
 	EagleAssetConnector: {
 		Origin: OriginOfficial, Kind: KindApplication,
 		ActivationScope: ScopeUser, ConfigurationScope: ConfigurationUser,

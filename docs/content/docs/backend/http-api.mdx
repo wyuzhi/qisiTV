@@ -32,7 +32,7 @@ Wails 和浏览器开发模式共用同一套 `127.0.0.1` HTTP 合同。路由�
 
 模型目录通过本地后端读取。模型测试使用正常任务入口，等待最终文本或媒体结果才显示通过；测试会产生供应商费用，须先确认。测试结果不证明画布回填、媒体解码或最终账务结算。
 
-`POST /ai/models` 支持 OpenAI 的 `data` 数组和 Gemini 的 `models` 数组；空数组表示有效的空目录，缺少数组或结构不匹配会返回 `catalog_response_invalid`。目录出站请求最长 25 秒，前端请求最长 30 秒，可主动取消。失败响应的 `reason` 区分 `catalog_address_invalid`、`catalog_auth_failed`、`catalog_unsupported`、`catalog_timeout`、`catalog_network_failed`、`catalog_rate_limited`、`catalog_upstream_rejected` 和 `catalog_upstream_failed`。目录不支持不代表生成接口不可用，用户仍可手动添加模型 ID。
+`POST /ai/models` 支持 OpenAI 的 `data` 数组和 Gemini 的 `models` 数组；空数组表示有效的空目录，缺少数组或结构不匹配会返回 `catalog_response_invalid`。目录出站请求最长 25 秒，前端请求最长 30 秒，可主动取消。失败响应的 `reason` 区分 `catalog_address_invalid`、`catalog_auth_failed`、`catalog_unsupported`、`catalog_timeout`、`catalog_network_failed`、`catalog_rate_limited`、`catalog_upstream_rejected` 和 `catalog_upstream_failed`。目录不支持不代表生成接口不可用，用户仍可手动添加模型 ID。请求带 `protocol` 且它是插件用 JS 实现的生成接口时，后端不请求 `/models`，改由插件的 `models()` 列出模型，这时不要求 API Key；插件没有实现 `models()` 时返回 `catalog_unsupported`。
 
 `POST /assistant/ui-session` 返回仅驻留内存、绑定当前 owner 的 `token` 与 `expiresAt`。界面在到期前 30 秒重新签发凭据，同一身份的并发请求共用签发结果；重置或切换身份后旧响应不能恢复旧凭据。签发仍要求原有本机同源与 owner/桌面引导校验。
 

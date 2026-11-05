@@ -784,8 +784,8 @@ func TestProviderConfigSaveIgnoresNonRedactedWorkflowArraysWithNumericIDs(t *tes
 			{"id":"beefapi","apiKey":"real-secret"},
 			{"id":"header-only","headers":[{"name":"Authorization","value":"Bearer header-secret"}]}
 		],
-		"runningHub":{
-			"apiKey":"rh-secret",
+		"extension":{
+			"apiKey":"extension-secret",
 			"workflows":[
 				{
 					"id":"wf-1",
@@ -803,7 +803,7 @@ func TestProviderConfigSaveIgnoresNonRedactedWorkflowArraysWithNumericIDs(t *tes
 			{"id":"beefapi","apiKey":"real-secret"},
 			{"id":"header-only","headers":[{"name":"Authorization","value":"` + RedactedSecret + `"}]}
 		],
-		"runningHub":{
+		"extension":{
 			"apiKey":"` + RedactedSecret + `",
 			"workflows":[
 				{
@@ -831,8 +831,8 @@ func TestProviderConfigSaveIgnoresNonRedactedWorkflowArraysWithNumericIDs(t *tes
 	if firstHeader["value"] != "Bearer header-secret" {
 		t.Fatalf("header-only Authorization = %v, want Bearer header-secret", firstHeader["value"])
 	}
-	rh, _ := effective.Config["runningHub"].(map[string]any)
-	if rh["apiKey"] != "rh-secret" {
-		t.Fatalf("runningHub apiKey = %v, want rh-secret", rh["apiKey"])
+	extension, _ := effective.Config["extension"].(map[string]any)
+	if extension["apiKey"] != "extension-secret" {
+		t.Fatalf("extension apiKey = %v, want extension-secret", extension["apiKey"])
 	}
 }

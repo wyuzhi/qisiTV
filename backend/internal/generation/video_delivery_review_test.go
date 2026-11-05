@@ -86,7 +86,7 @@ func TestVideoCredentialRemovalPreservesSignedRawQuery(t *testing.T) {
 func reviewVideoOutputAdapter(t *testing.T) protocol.Adapter {
 	t.Helper()
 	manifest := []byte(`{"apiVersion":"beeftv.plugin/v2","id":"video-output-identity-fixture","name":"Fixture","version":"1.0.0","contributes":{"providers":[{"id":"video-output-identity-fixture","label":"Fixture","capabilities":["video"],"scopes":["canvas"],"auth":{"type":"bearer","field":"apiKey"},"create":{"method":"POST","path":"/v1/tasks"},"poll":{"method":"GET","path":"/v1/tasks/{{taskId}}"},"result":{"method":"GET","path":"/v1/tasks/{{taskId}}/result"},"response":{"taskId":{"$ref":"response.id"},"status":{"$ref":"response.status"},"videos":{"$ref":"response.videos"}}}]}}`)
-	adapter, err := protocol.LoadInstalledPlugin(manifest, nil)
+	adapter, err := protocol.LoadInstalledPlugin(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}

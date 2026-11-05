@@ -1,6 +1,6 @@
 {
   "name": "beeftv-plugin-sticky-note",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "在画布上放置可换色、可编辑的便签卡片，并支持创作助手直接创建和修改便签。",
   "type": "module",
   "license": "Apache-2.0",
@@ -23,14 +23,7 @@
     ]
   },
   "beeftv": {
-    "id": "beeftv-plugin-sticky-note",
-    "apiVersion": "beeftv.plugin/v2",
-    "schemaVersion": 2,
     "name": "画布便签",
-    "version": "0.1.0",
-    "description": "在画布上放置可换色、可编辑的便签卡片，并支持创作助手直接创建和修改便签。",
-    "author": "BeefTV",
-    "renderer": "client",
     "client": "./client/index.js",
     "surfaces": [
       "node"
@@ -39,46 +32,12 @@
       "canvas.read",
       "canvas.write"
     ],
-    "canvasNodes": [
-      {
-        "id": "sticky-note",
-        "type": "sticky-note",
-        "label": "画布便签",
-        "title": "画布便签",
-        "defaultTitle": "便签",
-        "description": "可切换配色的画布便签卡片",
-        "renderer": "client",
-        "defaultWidth": 240,
-        "defaultHeight": 180,
-        "defaultSize": {
-          "width": 240,
-          "height": 180
-        },
-        "schema": {
-          "type": "object",
-          "properties": {
-            "content": {
-              "type": "string"
-            },
-            "color": {
-              "type": "string"
-            }
-          }
-        }
-      }
-    ],
     "contributes": {
       "canvasNodes": [
         {
           "id": "sticky-note",
-          "type": "sticky-note",
           "label": "画布便签",
-          "title": "画布便签",
           "defaultTitle": "便签",
-          "description": "可切换配色的画布便签卡片",
-          "renderer": "client",
-          "defaultWidth": 240,
-          "defaultHeight": 180,
           "defaultSize": {
             "width": 240,
             "height": 180
@@ -93,7 +52,9 @@
                 "type": "string"
               }
             }
-          }
+          },
+          "renderer": "client",
+          "description": "可切换配色的画布便签卡片"
         }
       ]
     }
@@ -103,5 +64,6 @@
     "skills",
     "client",
     "README.md"
-  ]
+  ],
+  "author": "BeefTV"
 }

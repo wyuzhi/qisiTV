@@ -3,9 +3,14 @@ import { useEffect, useState } from "react";
 import { Button, Checkbox, Input, Modal, Radio, Tag } from "antd";
 import type { PluginInstallConfirmRequest } from "@/lib/plugins/plugin-types";
 
+/** 本地文件夹的绝对路径；其余来源是 npm 包名、地址或仓库。 */
+export function isLocalFolderSource(source: string | undefined): boolean {
+    return Boolean(source && /^([a-zA-Z]:)?[\\/]/.test(source));
+}
+
 // Requests come from plugins too, so nothing in them can waive the risk confirmation.
 export function installSourceLabel(request: PluginInstallConfirmRequest): string {
-    return /^([a-zA-Z]:)?[\\/]/.test(request.source) ? "本地目录" : "npm 包";
+    return isLocalFolderSource(request.source) ? "本地目录" : "npm 包";
 }
 
 type PluginInstallConfirmModalProps = {

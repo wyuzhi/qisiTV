@@ -50,11 +50,6 @@ func TestPluginViewIncludesDocumentationForEveryOfficialProtocol(t *testing.T) {
 		packageIDs[pkg.Manifest.Metadata.ID] = true
 	}
 	expectedCount := localPackages
-	for _, manifest := range bundledWorkflowPluginManifests() {
-		if !packageIDs[manifest.Metadata.ID] {
-			expectedCount++
-		}
-	}
 	// The plugin market and built-in LL2 channel plugin ship next to the protocol packages as preinstalled npm-format packages.
 	for _, builtinDir := range []string{"beeftv-plugin-market", "beeftv-plugin-ll2"} {
 		if _, err := os.Stat(filepath.Join("..", "..", "..", "plugin-packages", builtinDir, "package.json")); err == nil {
@@ -184,32 +179,6 @@ func TestPluginRuntimeUpgradesInstalledWanMediaTransport(t *testing.T) {
 	metadata := adapter.Metadata()
 	if metadata.Version != "2.0.1" || metadata.MediaTransport["image"] != "inline" || metadata.MediaTransport["audio"] != "url" {
 		t.Fatalf("installed provider retained stale transport: %#v", metadata)
-	}
-}
-
-func TestBundledWorkflowPluginsControlAvailability(t *testing.T) {
-	center, err := newPluginRuntime(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	svc := &Service{pluginRuntime: center}
-	if err := svc.RequireWorkflowPluginForInterface("runninghub-workflow-image"); err == nil {
-		t.Fatal("bundled RunningHub plugin was enabled by default")
-	}
-	if _, err := center.setEnabled(WorkflowPluginRunningHub, true); err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.RequireWorkflowPluginForInterface("runninghub-workflow-image"); err != nil {
-		t.Fatalf("enabled RunningHub plugin rejected: %v", err)
-	}
-	if _, err := center.setEnabled(WorkflowPluginRunningHub, false); err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.RequireWorkflowPluginForInterface("runninghub-workflow-video"); err == nil {
-		t.Fatal("disabled RunningHub plugin remained available")
-	}
-	if got := svc.WorkflowPluginStatuses()[WorkflowPluginRunningHub]; got != "disabled" {
-		t.Fatalf("RunningHub status = %q, want disabled", got)
 	}
 }
 

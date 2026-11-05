@@ -15,7 +15,7 @@ func (s *Service) creationDomain() *creation.Service {
 		ValidateDocument: func(u string, repo *repository.Repository, raw json.RawMessage) error {
 			return canvas.New(repo, newCanvasHostWithRepo(s, repo)).ValidateCanvasMediaAssets(u, raw)
 		},
-		UsesWorkflow: taskInputUsesWorkflowProvider, UsesTextReplay: isTextReplayTaskRequest, FormatTask: taskForOutput,
+		UsesTextReplay: isTextReplayTaskRequest, FormatTask: taskForOutput,
 	})
 }
 func toCreationCommand(req CreationRequest) creation.Command {

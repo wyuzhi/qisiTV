@@ -21,7 +21,6 @@ import (
 	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/outbound"
 	"infinite-canvas/backend/internal/protocol"
-	"infinite-canvas/backend/internal/provider/workflow"
 )
 
 func recoveryTestAdapter(t *testing.T) protocol.Adapter {
@@ -403,77 +402,6 @@ func TestFailedThirdPartyVideoRecoveryRenewsOriginalTaskAndMaterializes(t *testi
 	}
 }
 
-func TestFailedRunningHubVideoRecoveryRenewsOriginalTaskAndMaterializes(t *testing.T) {
-	allowLoopbackProviderTest(t)
-	payload, err := os.ReadFile("testdata/reference-fragmented-30fps.mp4")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var polls, reads atomic.Int32
-	media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := reads.Add(1)
-		if r.Header.Get("Authorization") != "" || r.Header.Get("X-Private-Channel") != "" || r.URL.Query().Get("apiKey") != "" {
-			t.Error("workflow credentials leaked to media")
-		}
-		if n == 1 {
-			w.WriteHeader(http.StatusForbidden)
-			return
-		}
-		w.Header().Set("Content-Type", "application/octet-stream")
-		_, _ = w.Write(payload)
-	}))
-	defer media.Close()
-	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/task/openapi/outputs" || r.URL.Query().Get("delivery") != "" {
-			t.Error("manual recovery entered a generation/schema/BeefAPI backup path")
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		var body map[string]interface{}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body["taskId"] != "original" || body["apiKey"] != "provider-key" {
-			t.Error("original workflow query identity/auth lost")
-		}
-		polls.Add(1)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"code": 0, "data": []interface{}{map[string]interface{}{"fileUrl": media.URL + "/video?apiKey=provider-key&signature=media-signature"}}})
-	}))
-	defer provider.Close()
-	svc, db := openDBRuntimeMatrix(t, t.TempDir())
-	defer closeDBRuntimeMatrix(t, svc, db)
-	center, err := newPluginRuntime(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := center.setEnabled(WorkflowPluginRunningHub, true); err != nil {
-		t.Fatal(err)
-	}
-	svc.pluginRuntime = center
-	inputJSON, err := json.Marshal(canvasGenerationInput{Mode: "video", Config: providerConfig{BaseURL: provider.URL, APIKey: "provider-key", InterfaceType: "runninghub-workflow-video", Headers: []outbound.OutboundHeader{{Name: "X-Private-Channel", Value: "private-fixture"}}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now()
-	task := model.Task{ID: "failed-original-workflow", UserID: "local", Type: "canvas_video", Status: model.TaskStatusFailed, ProviderRequestID: "original", InputJSON: string(inputJSON), CreatedAt: now, UpdatedAt: now}
-	if err := db.Create(&task).Error; err != nil {
-		t.Fatal(err)
-	}
-	result, err := svc.QueryFailedVideoTask(context.Background(), task.UserID, task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.Recovered || result.Task.ID != task.ID || result.Task.ProviderRequestID != "original" || result.Task.ResultState != "READY" || len(result.Task.Outputs) != 1 || result.Task.Outputs[0].MaterializedAssetID == "" || polls.Load() != 2 || reads.Load() != 2 {
-		t.Fatalf("recovered=%v state=%s polls=%d reads=%d", result.Recovered, result.Task.ResultState, polls.Load(), reads.Load())
-	}
-	var resource model.Resource
-	if err := db.First(&resource, "id = ?", result.Task.Outputs[0].ResourceID).Error; err != nil || resource.Kind != "video" || resource.MimeType != "video/mp4" {
-		t.Fatalf("resource kind=%s mime=%s err=%v", resource.Kind, resource.MimeType, err)
-	}
-	data, err := os.ReadFile(filepath.Join(svc.dataDir, "resources", filepath.FromSlash(resource.ObjectKey)))
-	if err != nil || !bytes.Equal(data, payload) {
-		t.Fatalf("saved video differs: bytes=%d err=%v", len(data), err)
-	}
-}
-
 func TestFailedHandwrittenVideoRecoveryQueriesOriginalTaskWithoutCreating(t *testing.T) {
 	allowLoopbackProviderTest(t)
 	payload, err := os.ReadFile("testdata/reference-fragmented-30fps.mp4")
@@ -614,7 +542,7 @@ func TestFailedHandwrittenVideoRecoveryQueriesOriginalTaskWithoutCreating(t *tes
 
 func TestVideoRequestReceiptPreservesOriginalIdentityExceptCreate(t *testing.T) {
 	allowLoopbackProviderTest(t)
-	for _, kind := range []string{"create", "poll", "workflow-poll", "download"} {
+	for _, kind := range []string{"create", "poll", "download"} {
 		t.Run(kind, func(t *testing.T) {
 			var requests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -650,8 +578,6 @@ func TestVideoRequestReceiptPreservesOriginalIdentityExceptCreate(t *testing.T) 
 				requestErr = generation.PostJSON(ctx, config, "/videos", map[string]interface{}{"model": "fixture"}, &state)
 			case "poll":
 				_, requestErr = generation.ExecuteProtocolRequest(generation.WithRequestKind(ctx, "poll"), config, protocol.RequestSpec{Method: http.MethodGet, Path: "/v1/videos/original"})
-			case "workflow-poll":
-				_, _, requestErr = (workflowRequestExecutor{}).Execute(withProviderRequestKind(ctx, "poll"), workflow.Request{Kind: "poll", Method: http.MethodPost, URL: server.URL + "/task/openapi/outputs", ContentType: "application/json", Body: []byte(`{"taskId":"original"}`)})
 			case "download":
 				_, _, requestErr = generation.GetProviderExternalBinary(generation.WithRequestKind(ctx, "download"), config, server.URL+"/v1/videos/original/content")
 			}
@@ -661,8 +587,6 @@ func TestVideoRequestReceiptPreservesOriginalIdentityExceptCreate(t *testing.T) 
 			wantID, wantKind := "original", kind
 			if kind == "create" {
 				wantID = "created-original-task"
-			} else if kind == "workflow-poll" {
-				wantKind = "poll"
 			}
 			var savedTask model.Task
 			if err := db.First(&savedTask, "id = ?", task.ID).Error; err != nil || savedTask.ProviderRequestID != wantID {

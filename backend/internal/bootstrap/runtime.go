@@ -26,6 +26,7 @@ import (
 	canvasHandler "infinite-canvas/backend/internal/handler"
 	"infinite-canvas/backend/internal/localapp"
 	"infinite-canvas/backend/internal/modelcatalog"
+	"infinite-canvas/backend/internal/pluginhost"
 	"infinite-canvas/backend/internal/plugins"
 	"infinite-canvas/backend/internal/repository"
 	"infinite-canvas/backend/internal/runtimeinfo"
@@ -469,6 +470,7 @@ func (r *Runtime) Close(ctx context.Context) error {
 		if r.beefAPI != nil {
 			r.beefAPI.Close()
 		}
+		pluginhost.Close()
 		if err := r.DepthComponents().CloseComponents(ctx); err != nil {
 			failures = append(failures, fmt.Errorf("暂停组件下载：%w", err))
 		}
