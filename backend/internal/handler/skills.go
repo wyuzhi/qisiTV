@@ -89,6 +89,36 @@ func registerSkillRoutes(r *gin.RouterGroup, owners workspaceOwners, skillsDomai
 		})
 	}
 
+	r.GET("/skills/local-source", func(c *gin.Context) {
+		source, err := skillsDomain.LocalSkillSource()
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, source)
+	})
+	r.PUT("/skills/local-source", func(c *gin.Context) {
+		var req struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			fail(c, http.StatusBadRequest, err)
+			return
+		}
+		source, err := skillsDomain.SetLocalSkillSource(req.Enabled)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, source)
+	})
+	r.POST("/skills/local-source/sync", func(c *gin.Context) {
+		if err := skillsDomain.SyncLocalSkills(); err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"synced": true})
+	})
 	r.GET("/skills", func(c *gin.Context) {
 		user, err := currentUser(c, owners)
 		if err != nil {

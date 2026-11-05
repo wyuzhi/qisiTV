@@ -116,8 +116,8 @@ export function SkillInstallModal({ open, onClose, onInstalled, onManualCreate }
                             maxCount={1}
                             fileList={fileList}
                             beforeUpload={(file) => {
-                                if (file.size > 20 * 1024 * 1024) {
-                                    message.error("技能文件不能超过 20MB");
+                                if (file.size > 200 * 1024 * 1024) {
+                                    message.error("技能文件不能超过 200MB");
                                     return Upload.LIST_IGNORE;
                                 }
                                 return false;

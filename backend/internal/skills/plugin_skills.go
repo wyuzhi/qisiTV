@@ -38,7 +38,38 @@ func (s *Service) SyncPluginSkills(pluginID string, pluginName string, version s
 	if pluginID == "" {
 		return nil
 	}
-	sourceURL := "plugin://" + pluginID
+	authorName := strings.TrimSpace(pluginName)
+	if authorName == "" {
+		authorName = pluginID
+	}
+	return s.syncDirectorySkills(skillDirSource{
+		sourceType: skillSourceTypePlugin, sourceURL: "plugin://" + pluginID, idPrefix: "plugin-" + sanitizePluginSkillSlug(pluginID) + "-",
+		ownerFallback: "plugin:" + pluginID, authorName: authorName, version: version, fallbackDescription: authorName + " 插件技能",
+	}, skillDirs)
+}
+
+const (
+	skillSourceTypePlugin = "plugin"
+	skillSourceTypeLocal  = "local"
+)
+
+// skillDirSource 说明一批文件夹技能从哪来。插件包和本机技能目录走同一条登记路径，只有这些字段不同。
+type skillDirSource struct {
+	sourceType          string
+	sourceURL           string
+	idPrefix            string
+	ownerFallback       string
+	authorName          string
+	version             string
+	fallbackDescription string
+	// private 表示技能只在这台电脑上，不算公开内容。
+	private bool
+	// skipBroken 让读不出来的技能只跳过它自己。本机目录里的内容不归 BeefTV 管，一个坏技能不能拖累别的。
+	skipBroken bool
+}
+
+// syncDirectorySkills 把文件夹里的技能登记进技能库，并删掉这个来源下已经不存在的技能。
+func (s *Service) syncDirectorySkills(source skillDirSource, skillDirs []string) error {
 	discovered, err := discoverPluginSkillDirectories(skillDirs)
 	if err != nil {
 		return err
@@ -47,96 +78,19 @@ func (s *Service) SyncPluginSkills(pluginID string, pluginName string, version s
 	if ws, wsErr := s.repo.DefaultWorkspace(); wsErr == nil && ws != nil {
 		userID = strings.TrimSpace(ws.ID)
 	}
-	authorName := strings.TrimSpace(pluginName)
-	if authorName == "" {
-		authorName = pluginID
-	}
 	seenIDs := make(map[string]struct{}, len(discovered))
 	for _, entry := range discovered {
-		files, err := readSkillDirectoryFiles(entry.dir)
-		if err != nil {
-			return err
-		}
-		meta := parseSkillPackageMetadata(files["SKILL.md"])
-		if meta.Name == "" {
-			meta.Name = entry.slug
-		}
-		if meta.Description == "" {
-			meta.Description = authorName + " 插件技能"
-		}
-		if strings.TrimSpace(version) != "" {
-			meta.Version = strings.TrimSpace(version)
-		}
-		archive, err := finalizeSkillArchive(files, meta)
-		if err != nil {
-			return err
-		}
-		skillID := "plugin-" + sanitizePluginSkillSlug(pluginID) + "-" + sanitizePluginSkillSlug(entry.slug)
+		skillID := source.idPrefix + sanitizePluginSkillSlug(entry.slug)
 		seenIDs[skillID] = struct{}{}
-		versionLabel := archive.Metadata.Version
-		if versionLabel == "" {
-			versionLabel = "1.0.0"
-		}
-		existing, err := s.repo.Skill(skillID)
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			versionID := kernel.NewID()
-			packageKey, versionModel, fileModels, err := s.persistSkillArchive(skillID, versionID, archive, "")
-			if err != nil {
+		if err := s.syncDirectorySkill(source, userID, skillID, entry); err != nil {
+			if !source.skipBroken {
 				return err
 			}
-			versionModel.VersionLabel = versionLabel
-			now := time.Now()
-			ownerID := userID
-			if ownerID == "" {
-				ownerID = "plugin:" + pluginID
-			}
-			skill := &model.Skill{
-				ID: skillID, OwnerID: ownerID, AuthorName: authorName, Name: archive.Metadata.Name,
-				Description: archive.Metadata.Description, Instruction: string(archive.Files["SKILL.md"]),
-				CurrentVersionID: versionID, VersionLabel: versionLabel, ContentHash: archive.ContentHash,
-				FileCount: len(archive.Files), TotalBytes: archive.TotalBytes, SourceType: "plugin",
-				SourceURL: sourceURL, SourceRef: versionLabel, SourceSubdir: entry.slug, SyncStatus: "synced",
-				LastCheckedAt: &now, LastSyncedAt: &now, Status: skillStatusEnabled, Source: 3, Tag: "others",
-				ShowcaseMediaJSON: "[]",
-			}
-			var state *model.UserSkillState
-			if userID != "" {
-				state = &model.UserSkillState{ID: kernel.NewID(), UserID: userID, SkillID: skillID, Added: true, InstalledVersionID: versionID}
-			}
-			if err := s.repo.CreateSkillWithPackage(skill, versionModel, fileModels, state); err != nil {
-				_ = os.Remove(filepath.Join(s.dataDir, "skill-packages", filepath.FromSlash(packageKey)))
-				return err
-			}
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		existing.Name, existing.Description = archive.Metadata.Name, archive.Metadata.Description
-		existing.Instruction, existing.AuthorName = string(archive.Files["SKILL.md"]), authorName
-		if existing.ContentHash != archive.ContentHash || existing.CurrentVersionID == "" {
-			if err := s.addSkillArchiveVersion(existing, archive, "plugin", sourceURL, versionLabel, entry.slug, "", false); err != nil {
-				return err
-			}
-		} else {
-			existing.VersionLabel, existing.SourceRef = versionLabel, versionLabel
-			if err := s.repo.SaveSkill(existing); err != nil {
-				return err
-			}
-		}
-		if userID != "" {
-			state, err := s.skillState(userID, skillID)
-			if err != nil {
-				return err
-			}
-			state.Added, state.InstalledVersionID = true, existing.CurrentVersionID
-			if err := s.repo.SetUserSkillAdded(state); err != nil {
-				return err
-			}
+			log.Printf("跳过技能 %s：%v", entry.slug, err)
 		}
 	}
 	var existingRows []model.Skill
-	if err := s.repo.DB().Where("source_type = ? AND source_url = ?", "plugin", sourceURL).Find(&existingRows).Error; err != nil {
+	if err := s.repo.DB().Where("source_type = ? AND source_url = ?", source.sourceType, source.sourceURL).Find(&existingRows).Error; err != nil {
 		return err
 	}
 	for _, row := range existingRows {
@@ -145,6 +99,93 @@ func (s *Service) SyncPluginSkills(pluginID string, pluginName string, version s
 				return err
 			}
 			_ = os.RemoveAll(filepath.Join(s.dataDir, "skill-packages", row.ID))
+		}
+	}
+	return nil
+}
+
+func (s *Service) syncDirectorySkill(source skillDirSource, userID, skillID string, entry discoveredPluginSkillDir) error {
+	files, err := readSkillDirectoryFiles(entry.dir)
+	if err != nil {
+		return err
+	}
+	meta := parseSkillPackageMetadata(files["SKILL.md"])
+	if meta.Name == "" {
+		meta.Name = entry.slug
+	}
+	if meta.Description == "" {
+		meta.Description = source.fallbackDescription
+	}
+	if strings.TrimSpace(source.version) != "" {
+		meta.Version = strings.TrimSpace(source.version)
+	}
+	archive, err := finalizeSkillArchive(files, meta)
+	if err != nil {
+		return err
+	}
+	versionLabel := archive.Metadata.Version
+	if versionLabel == "" {
+		versionLabel = "1.0.0"
+	}
+	existing, err := s.repo.Skill(skillID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		versionID := kernel.NewID()
+		packageKey, versionModel, fileModels, err := s.persistSkillArchive(skillID, versionID, archive, "")
+		if err != nil {
+			return err
+		}
+		versionModel.VersionLabel = versionLabel
+		now := time.Now()
+		ownerID := userID
+		if ownerID == "" {
+			ownerID = source.ownerFallback
+		}
+		skill := &model.Skill{
+			ID: skillID, OwnerID: ownerID, AuthorName: source.authorName, Name: archive.Metadata.Name,
+			Description: archive.Metadata.Description, Instruction: string(archive.Files["SKILL.md"]),
+			CurrentVersionID: versionID, VersionLabel: versionLabel, ContentHash: archive.ContentHash,
+			FileCount: len(archive.Files), TotalBytes: archive.TotalBytes, SourceType: source.sourceType,
+			SourceURL: source.sourceURL, SourceRef: versionLabel, SourceSubdir: entry.slug, SyncStatus: "synced",
+			LastCheckedAt: &now, LastSyncedAt: &now, Status: skillStatusEnabled, Source: 3, Tag: "others",
+			ShowcaseMediaJSON: "[]", IsPrivate: source.private,
+		}
+		var state *model.UserSkillState
+		if userID != "" {
+			state = &model.UserSkillState{ID: kernel.NewID(), UserID: userID, SkillID: skillID, Added: true, InstalledVersionID: versionID}
+		}
+		if err := s.repo.CreateSkillWithPackage(skill, versionModel, fileModels, state); err != nil {
+			_ = os.Remove(filepath.Join(s.dataDir, "skill-packages", filepath.FromSlash(packageKey)))
+			return err
+		}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	existing.Name, existing.Description = archive.Metadata.Name, archive.Metadata.Description
+	existing.Instruction, existing.AuthorName = string(archive.Files["SKILL.md"]), source.authorName
+	if existing.ContentHash != archive.ContentHash || existing.CurrentVersionID == "" {
+		if err := s.addSkillArchiveVersion(existing, archive, source.sourceType, source.sourceURL, versionLabel, entry.slug, "", false); err != nil {
+			return err
+		}
+	} else {
+		existing.VersionLabel, existing.SourceRef = versionLabel, versionLabel
+		if err := s.repo.SaveSkill(existing); err != nil {
+			return err
+		}
+	}
+	if userID != "" {
+		state, err := s.repo.UserSkillState(userID, skillID)
+		if err != nil {
+			return err
+		}
+		if state == nil {
+			state = &model.UserSkillState{ID: kernel.NewID(), UserID: userID, SkillID: skillID, Added: true}
+		}
+		// 同步只换版本。用户停用过的技能，不能被同步重新打开。
+		state.InstalledVersionID = existing.CurrentVersionID
+		if err := s.repo.SetUserSkillAdded(state); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -233,21 +274,15 @@ func readSkillDirectoryFiles(rootDir string) (map[string][]byte, error) {
 		if err != nil {
 			return err
 		}
-		if len(content) > maxSkillFileBytes {
-			return kernel.BadAuthRequest("技能包中单个文件不能超过 8MB")
-		}
 		total += int64(len(content))
 		if total > maxSkillPackageBytes {
-			return kernel.BadAuthRequest("技能包解压后不能超过 20MB")
+			return errSkillPackageTooLarge()
 		}
 		files[normPath] = content
 		return nil
 	})
 	if err != nil {
 		return nil, err
-	}
-	if len(files) > maxSkillPackageFiles {
-		return nil, kernel.BadAuthRequest("技能包文件数量不能超过 512 个")
 	}
 	return files, nil
 }

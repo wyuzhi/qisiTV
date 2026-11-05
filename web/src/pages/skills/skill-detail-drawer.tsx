@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "r
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { formatSkillCount, formatSkillDate, skillCategoryLabel } from "@/pages/skills/skill-catalog";
+import { formatSkillCount, formatSkillDate, isLocalSkill, LOCAL_SKILL_LABEL, SKILL_SCRIPTS_NOTE, skillCategoryLabel } from "@/pages/skills/skill-catalog";
 import { isLocalRuntimeMode } from "@/lib/runtime-mode";
 import { getSkillFile, listSkillFiles, skillFileRawURL, type Skill, type SkillCategory, type SkillPackageFile, type SkillPackageFileContent } from "@/services/api/skills";
 
@@ -106,10 +106,11 @@ export function SkillDetailModal({ skill, loading, mutating, categories, onClose
                             </div>
                             <h1 className="mt-1 truncate text-[var(--fs-heading-lg)] font-semibold text-foreground">{skill.skillName}</h1>
                             <p className="mt-1 line-clamp-2 max-w-4xl text-sm leading-5 text-foreground/58">{skill.description}</p>
+                            {skill.hasScripts ? <p className="mt-1 text-[var(--fs-label)] text-foreground/45">含脚本：{SKILL_SCRIPTS_NOTE}。</p> : null}
                         </div>
                         {!fileOnly ? <div className="skill-package-actions">
                             {!localRuntime && skill.sourceType === "github" && skill.isOwner ? <Tooltip title={skill.syncError || "从 GitHub 检查并同步最新提交"}><Button loading={mutating} icon={<RefreshCw className="size-4" />} onClick={() => onSync(skill)}>同步</Button></Tooltip> : null}
-                            {skill.isOwner ? <Button icon={<Pencil className="size-4" />} onClick={() => onEdit(skill)}>编辑</Button> : null}
+                            {skill.isOwner && !isLocalSkill(skill) ? <Button icon={<Pencil className="size-4" />} onClick={() => onEdit(skill)}>编辑</Button> : null}
                             <Button loading={mutating} icon={<Heart className={`size-4 ${skill.isLike ? "fill-current text-rose-500" : ""}`} />} onClick={() => onLike(skill)}>{skill.isLike ? "已收藏" : "收藏"}</Button>
                             <Button type={skill.isAdded ? "default" : "primary"} loading={mutating} disabled={skill.isOwner} icon={skill.isAdded ? <Check className="size-4" /> : <Plus className="size-4" />} onClick={() => onAdd(skill)}>{skill.isOwner ? "我的技能" : skill.isAdded ? "已加入" : "加入技能"}</Button>
                         </div> : null}
@@ -271,6 +272,8 @@ function sourceLabel(source: string) {
     if (source === "github") return "GitHub";
     if (source === "zip") return "ZIP 技能包";
     if (source === "builtin") return "内置技能";
+    if (source === "local") return LOCAL_SKILL_LABEL;
+    if (source === "plugin") return "插件";
     return "Markdown";
 }
 
