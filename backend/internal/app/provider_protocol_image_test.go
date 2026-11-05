@@ -252,7 +252,7 @@ func officialSourceProviderAdapter(t *testing.T, pluginID, providerID string) pr
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapters, err := protocol.LoadInstalledProviders(data, nil)
+	adapters, err := protocol.LoadInstalledProviders(data)
 	if err != nil {
 		t.Fatal(err)
 	}

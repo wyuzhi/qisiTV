@@ -104,9 +104,6 @@ func ParsePluginPackage(data []byte) (PluginPackage, error) {
 	if err := ValidateManifest(manifest); err != nil {
 		return PluginPackage{}, err
 	}
-	if err := validatePluginPackageRuntime(manifest, files); err != nil {
-		return PluginPackage{}, err
-	}
 	return PluginPackage{Manifest: manifest, ManifestRaw: manifestRaw, Files: files}, nil
 }
 
@@ -115,85 +112,10 @@ func validatePluginPackagePath(name string) (string, error) {
 	if name == "" || strings.ContainsRune(name, '\\') || strings.HasPrefix(name, "/") || path.IsAbs(name) || path.Clean(name) != name || strings.HasPrefix(name, "../") || name == ".." {
 		return "", fmt.Errorf("invalid plugin package path %q", name)
 	}
-	if name == "manifest.json" || strings.HasPrefix(name, "web/") || strings.HasPrefix(name, "backend/") || strings.HasPrefix(name, "assets/") || strings.HasPrefix(name, "docs/") || name == "README.md" || name == "LICENSE" {
+	if name == "manifest.json" || strings.HasPrefix(name, "assets/") || strings.HasPrefix(name, "docs/") || name == "README.md" || name == "LICENSE" {
 		return name, nil
 	}
 	return "", fmt.Errorf("plugin package path %q is outside the allowed package roots", name)
-}
-
-func validatePluginPackageRuntime(manifest Manifest, files map[string][]byte) error {
-	backend := strings.TrimSpace(manifest.Runtime.Backend)
-	if backend == "rpc" || backend == "wasm" {
-		entry := strings.TrimSpace(manifest.Runtime.BackendEntry)
-		if !strings.HasPrefix(entry, "backend/") || path.Clean(entry) != entry {
-			return fmt.Errorf("manifest.runtime.backendEntry must point inside backend/")
-		}
-		if backend == "rpc" {
-			if !hasAnyRPCBackend(entry, files) {
-				return fmt.Errorf("manifest runtime backend entry %q is missing a host-executable artifact", entry)
-			}
-		} else if _, ok := files[entry]; !ok {
-			return fmt.Errorf("manifest runtime backend entry %q is missing from package", entry)
-		}
-		if backend == "wasm" && !strings.HasSuffix(strings.ToLower(entry), ".wasm") {
-			return fmt.Errorf("wasm backend entry must have .wasm extension")
-		}
-	}
-	if strings.TrimSpace(manifest.Entry) == "" {
-		if strings.TrimSpace(manifest.Runtime.Web) != "" {
-			return fmt.Errorf("manifest.runtime.web requires manifest.entry")
-		}
-		for name := range files {
-			if strings.HasPrefix(name, "web/") {
-				return fmt.Errorf("plugin package web files require manifest.entry")
-			}
-		}
-		return nil
-	}
-	entry := strings.TrimSpace(manifest.Entry)
-	if !strings.HasPrefix(entry, "web/") || path.Clean(entry) != entry {
-		return fmt.Errorf("plugin manifest entry must point inside web/")
-	}
-	if _, ok := files[entry]; !ok {
-		return fmt.Errorf("plugin manifest entry %q is missing from package", entry)
-	}
-	if manifest.Runtime.Web != "sandbox" && manifest.Runtime.Web != "worker" {
-		return fmt.Errorf("uploaded web plugins require runtime.web sandbox or worker")
-	}
-	return nil
-}
-
-func hasAnyRPCBackend(entry string, files map[string][]byte) bool {
-	entry = strings.TrimSuffix(strings.TrimSpace(entry), ".exe")
-	if entry == "" {
-		return false
-	}
-	if _, ok := files[entry]; ok {
-		return true
-	}
-	if _, ok := files[entry+".exe"]; ok {
-		return true
-	}
-	prefix := entry + "-"
-	nestedRoot := path.Dir(entry) + "/"
-	base := path.Base(entry)
-	for name := range files {
-		if strings.HasPrefix(name, prefix) {
-			return true
-		}
-		rest, ok := strings.CutPrefix(name, nestedRoot)
-		if !ok {
-			continue
-		}
-		slash := strings.IndexByte(rest, '/')
-		if slash > 0 {
-			leaf := rest[slash+1:]
-			if leaf == base || leaf == base+".exe" {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func validateManifestPackageExtensions(manifest Manifest) error {

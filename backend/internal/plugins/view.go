@@ -35,7 +35,6 @@ type ManifestView struct {
 	ID            string                         `json:"id"`
 	Name          string                         `json:"name"`
 	Version       string                         `json:"version"`
-	Entry         string                         `json:"entry,omitempty"`
 	Client        string                         `json:"client,omitempty"`
 	Surfaces      []string                       `json:"surfaces,omitempty"`
 	Description   string                         `json:"description,omitempty"`
@@ -126,7 +125,7 @@ func manifestView(raw []byte, metadata protocol.Metadata, source string) Manifes
 		permissions = []string{}
 	}
 	return ManifestView{
-		ID: metadata.ID, Name: metadata.Name, Version: metadata.Version, APIVersion: apiVersion, Entry: manifest.Entry, Client: manifest.Client, Surfaces: manifest.Surfaces,
+		ID: metadata.ID, Name: metadata.Name, Version: metadata.Version, APIVersion: apiVersion, Client: manifest.Client, Surfaces: manifest.Surfaces,
 		Description: metadata.Description, Documentation: metadata.Documentation, Author: metadata.Vendor,
 		Permissions: permissions, Trusted: IsBuiltInSource(source), Runtime: manifest.Runtime,
 		Configuration: manifest.Configuration, Contributes: manifest.Contributes,

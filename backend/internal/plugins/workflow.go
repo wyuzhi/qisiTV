@@ -37,7 +37,7 @@ func workflowPluginManifest(id, name, description string) protocol.Manifest {
 			Installable:   true,
 		},
 		Surfaces:    []string{"node", "settings"},
-		Runtime:     protocol.ManifestRuntime{Backend: "trusted-backend", Web: "trusted-backend"},
+		Runtime:     protocol.ManifestRuntime{Backend: "trusted-backend"},
 		Permissions: []string{"generation.run", "external.open"},
 		Contributes: protocol.ManifestContributions{Workflows: workflows},
 	}

@@ -37,7 +37,6 @@ const runningHubManifest: PluginManifest = {
         surfaces: ["node", "settings"],
         permissions: ["generation.run", "external.open"],
         trusted: true,
-        runtime: { backend: "trusted-backend", web: "trusted-backend" },
         contributes: { workflows: workflowContributions(RUNNINGHUB_PLUGIN_ID, "RunningHub") },
 };
 

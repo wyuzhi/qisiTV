@@ -73,10 +73,7 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 		if err != nil {
 			return nil, fmt.Errorf("校验官方插件包 %s：%w", entry.Name(), err)
 		}
-		if strings.HasPrefix(strings.TrimSpace(pkg.Manifest.Runtime.Backend), "host:") {
-			return nil, fmt.Errorf("官方插件 %q 不能依赖 host 执行器", pkg.Manifest.Metadata.ID)
-		}
-		if _, err := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil); err != nil {
+		if _, err := protocol.LoadInstalledProviders(pkg.ManifestRaw); err != nil {
 			return nil, fmt.Errorf("加载官方插件 %q：%w", pkg.Manifest.Metadata.ID, err)
 		}
 		id := pkg.Manifest.Metadata.ID
@@ -129,7 +126,7 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 		if err != nil {
 			return nil, fmt.Errorf("校验官方插件目录 %s：%w", builtinName, err)
 		}
-		if _, err := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil); err != nil {
+		if _, err := protocol.LoadInstalledProviders(pkg.ManifestRaw); err != nil {
 			return nil, fmt.Errorf("加载官方插件 %q：%w", pkg.Manifest.Metadata.ID, err)
 		}
 		id := pkg.Manifest.Metadata.ID

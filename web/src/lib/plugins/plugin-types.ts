@@ -35,11 +35,10 @@ export type PluginManifestV2 = Omit<PluginManifest, "apiVersion" | "contributes"
     contributes: PluginContributionsV2;
 };
 
-export type PluginContributionKind = "provider" | "workflow" | "canvas-node" | "transform" | "command" | "asset-source" | "usage-observer" | "ai-capability" | "agent" | "import-export";
+export type PluginContributionKind = "provider" | "workflow" | "canvas-node";
 export type PluginSurface = "node" | "fullscreen" | "hybrid" | "asset-source" | "settings";
 export type ProtocolCapability = "text" | "image" | "video" | "audio";
 export type ProtocolScope = "admin.system-channel" | "user.custom-channel" | "canvas" | "creation" | "agent" | string;
-export type PluginRuntime = "declarative" | "sandbox" | "worker" | "trusted-backend";
 export type PluginField = {
     name: string;
     type: "string" | "number" | "boolean" | "secret" | "url" | "select" | "json";
@@ -109,23 +108,10 @@ export type PluginCanvasNodeContribution = {
     /** Analysis/sink nodes can hide the right-side output connection. */
     showOutputConnection?: boolean;
 };
-export type PluginTransformContribution = {
-    id: string;
-    input: "media" | "generation";
-    output: "provider-request" | "media";
-    runtime: PluginRuntime;
-};
 export type PluginContributions = {
     providers?: PluginProviderContribution[];
     workflows?: PluginWorkflowContribution[];
     canvasNodes?: PluginCanvasNodeContribution[];
-    transforms?: PluginTransformContribution[];
-    commands?: Array<{ id: string; label: string }>;
-    assetSources?: string[];
-    usageObservers?: string[];
-    aiCapabilities?: string[];
-    agents?: string[];
-    importExport?: string[];
 };
 export type PluginPermission =
     | "canvas.read"
@@ -152,13 +138,11 @@ export type PluginManifest = {
     description: string;
     documentation?: string;
     author?: string;
-    entry?: string;
     client?: string;
     surfaces?: PluginSurface[];
     permissions: PluginPermission[];
     trusted?: boolean;
     configuration?: { fields: PluginField[] };
-    runtime?: { backend?: PluginRuntime; web?: PluginRuntime };
     contributes: PluginContributions;
 };
 

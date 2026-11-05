@@ -14,7 +14,6 @@ const manifest: PluginManifest = {
     surfaces: ["node", "fullscreen"],
     permissions: ["canvas.read", "canvas.write", "media.read", "ai.text"],
     trusted: true,
-    runtime: { backend: "trusted-backend", web: "declarative" },
     contributes: {
         canvasNodes: [
             {

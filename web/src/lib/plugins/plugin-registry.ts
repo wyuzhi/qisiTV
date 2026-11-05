@@ -24,13 +24,6 @@ function assertManifest(manifest: PluginManifest | PluginManifestV2) {
     }
     if (new Set(manifest.permissions).size !== manifest.permissions.length) throw new Error("插件权限不能重复");
     if (manifest.apiVersion !== "beeftv.plugin/v1") assertManifestV2(manifest);
-    else assertManifestV1Contributions(manifest.contributes);
-}
-
-function assertManifestV1Contributions(contributes: PluginManifest["contributes"]) {
-    if (!contributes || Object.values(contributes).every((value) => !value || value.length === 0)) {
-        throw new Error("插件至少需要声明一种贡献能力");
-    }
 }
 
 function assertManifestV2(manifest: PluginManifestV2) {
@@ -41,11 +34,6 @@ function assertManifestV2(manifest: PluginManifestV2) {
                 throw new Error(`编辑器插槽 ${slot.slot} 的 priority 必须是数字`);
             }
         }
-    }
-    // 贡献检查：v1 贡献字段或 editorSlots 至少声明一项（editorSlots 是合法的 v2 独立贡献）。
-    const { editorSlots, ...v1Contributions } = manifest.contributes;
-    if (Object.values(v1Contributions).every((value) => !value || value.length === 0) && !editorSlots?.length) {
-        throw new Error("插件至少需要声明一种贡献能力");
     }
 }
 

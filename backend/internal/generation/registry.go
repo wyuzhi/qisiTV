@@ -163,7 +163,7 @@ func LoadOfficialFallbackRegistry() *protocol.Registry {
 			if parseErr != nil {
 				return
 			}
-			providers, loadErr := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil)
+			providers, loadErr := protocol.LoadInstalledProviders(pkg.ManifestRaw)
 			if loadErr != nil {
 				return
 			}
@@ -185,7 +185,7 @@ func LoadOfficialFallbackRegistry() *protocol.Registry {
 			if err != nil {
 				return
 			}
-			providers, err := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil)
+			providers, err := protocol.LoadInstalledProviders(pkg.ManifestRaw)
 			if err != nil {
 				return
 			}

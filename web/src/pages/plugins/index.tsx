@@ -41,12 +41,6 @@ const categoryLabels: Record<string, string> = {
     provider: "模型渠道",
     "canvas-node": "画布节点",
     workflow: "工作流",
-    transform: "媒体转换",
-    "asset-source": "素材来源",
-    "ai-capability": "AI 能力",
-    "usage-observer": "用量观察",
-    agent: "智能体",
-    "import-export": "导入导出",
 };
 
 const surfaceLabels: Record<string, string> = {
@@ -493,11 +487,13 @@ export default function PluginsPage() {
                                                                                         可信插件
                                                                                     </span>
                                                                                 ) : null}
-                                                                                <span className="plugin-category-label">
-                                                                                    {contributionKindsFor(plugin.manifest)
-                                                                                        .map((kind) => categoryLabels[kind] ?? kind)
-                                                                                        .join(" · ")}
-                                                                                </span>
+                                                                                {contributionKindsFor(plugin.manifest).length ? (
+                                                                                    <span className="plugin-category-label">
+                                                                                        {contributionKindsFor(plugin.manifest)
+                                                                                            .map((kind) => categoryLabels[kind] ?? kind)
+                                                                                            .join(" · ")}
+                                                                                    </span>
+                                                                                ) : null}
                                                                             </div>
                                                                         </div>
                                                                     </div>
@@ -838,12 +834,6 @@ function contributionKindsFor(manifest: PluginManifest | PluginManifestV2): stri
     if (contributions.providers?.length) kinds.push("provider");
     if (contributions.workflows?.length) kinds.push("workflow");
     if (contributions.canvasNodes?.length) kinds.push("canvas-node");
-    if (contributions.transforms?.length) kinds.push("transform");
-    if (contributions.assetSources?.length) kinds.push("asset-source");
-    if (contributions.aiCapabilities?.length) kinds.push("ai-capability");
-    if (contributions.usageObservers?.length) kinds.push("usage-observer");
-    if (contributions.agents?.length) kinds.push("agent");
-    if (contributions.importExport?.length) kinds.push("import-export");
     return kinds;
 }
 

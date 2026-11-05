@@ -258,7 +258,7 @@ func materializeRecords(stored []RegistryRecord) (map[string]Record, *protocol.R
 			plugins[id] = record
 			continue
 		}
-		adapters, loadErr := protocol.LoadInstalledProviders(record.Raw, nil)
+		adapters, loadErr := protocol.LoadInstalledProviders(record.Raw)
 		if loadErr != nil {
 			record.Metadata.Enabled = false
 			record.Metadata.UnavailableReason = loadErr.Error()

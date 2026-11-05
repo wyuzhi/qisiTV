@@ -26,7 +26,7 @@ func unifiedVideoAdapter(t *testing.T, name string) protocol.Adapter {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapters, err := protocol.LoadInstalledProviders(raw, nil)
+	adapters, err := protocol.LoadInstalledProviders(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestEveryInstalledVideoProviderUsesUnifiedPublicURLDownload(t *testing.T) {
 		if !hasVideo {
 			continue
 		}
-		adapters, err := protocol.LoadInstalledProviders(raw, nil)
+		adapters, err := protocol.LoadInstalledProviders(raw)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -243,7 +243,7 @@ func TestVideoProtocolAuthSurvivesRelativeURLAndStopsAtRedirect(t *testing.T) {
 	}))
 	defer provider.Close()
 	manifest := []byte(`{"apiVersion":"beeftv.plugin/v2","id":"video-query-fixture","name":"Fixture","version":"1.0.0","contributes":{"providers":[{"id":"video-query-fixture","label":"Fixture","capabilities":["video"],"scopes":["canvas"],"auth":{"type":"query","field":"apiKey","query":"credential"},"create":{"method":"POST","path":"/v1/videos"},"poll":{"method":"GET","path":"/v1/task/{{taskId}}"},"response":{"status":{"$ref":"response.status"},"videos":{"$ref":"response.video_url"}}}]}}`)
-	adapter, err := protocol.LoadInstalledPlugin(manifest, nil)
+	adapter, err := protocol.LoadInstalledPlugin(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -522,7 +522,7 @@ func TestVideoBinaryResultPreservesMethodAuthAndOriginalTaskRenewal(t *testing.T
 	}))
 	defer server.Close()
 	manifest := []byte(`{"apiVersion":"beeftv.plugin/v2","id":"video-binary-fixture","name":"Fixture","version":"1.0.0","contributes":{"providers":[{"id":"video-binary-fixture","label":"Fixture","capabilities":["video"],"scopes":["canvas"],"auth":{"type":"header","field":"apiKey","header":"X-Video-Api-Key"},"create":{"method":"POST","path":"/v1/videos"},"poll":{"method":"GET","path":"/v1/tasks/{{taskId}}"},"result":{"method":"POST","path":"/v1/tasks/{{taskId}}/result","headers":{"X-Result-Mode":"binary"}},"response":{"status":{"$ref":"response.status"}}}]}}`)
-	adapter, err := protocol.LoadInstalledPlugin(manifest, nil)
+	adapter, err := protocol.LoadInstalledPlugin(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}

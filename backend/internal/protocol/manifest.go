@@ -79,13 +79,8 @@ type ManifestAgentResponse struct {
 	ToolCallSignaturePaths []string `json:"toolCallThoughtSignaturePaths,omitempty"`
 }
 
-// AdapterResolver is used by the host to bind a shipped execution engine to a
-// manifest. Uploaded plugins must use the declarative path; host bindings are
-// reserved for manifests shipped with the application.
-type AdapterResolver func(string) (Adapter, bool)
-
-func LoadInstalledPlugin(data []byte, resolve AdapterResolver) (Adapter, error) {
-	adapters, err := LoadInstalledProviders(data, resolve)
+func LoadInstalledPlugin(data []byte) (Adapter, error) {
+	adapters, err := LoadInstalledProviders(data)
 	if err != nil {
 		return nil, err
 	}
@@ -98,30 +93,10 @@ func LoadInstalledPlugin(data []byte, resolve AdapterResolver) (Adapter, error) 
 // LoadInstalledProviders loads every provider contribution from one plugin
 // package. The package remains the lifecycle and permission unit; providers
 // are separate execution entries in the runtime index.
-func LoadInstalledProviders(data []byte, resolve AdapterResolver) ([]Adapter, error) {
+func LoadInstalledProviders(data []byte) ([]Adapter, error) {
 	manifest, err := decodeManifest(data)
 	if err != nil {
 		return nil, err
-	}
-	if strings.HasPrefix(strings.TrimSpace(manifest.Runtime.Backend), "host:") {
-		if len(manifest.Contributes.Providers) != 1 {
-			return nil, fmt.Errorf("host-backed plugin must declare exactly one provider")
-		}
-		if resolve == nil {
-			return nil, fmt.Errorf("plugin %q requires a host execution engine", manifest.Metadata.ID)
-		}
-		name := strings.TrimPrefix(strings.TrimSpace(manifest.Runtime.Backend), "host:")
-		adapter, ok := resolve(name)
-		if !ok {
-			return nil, fmt.Errorf("plugin host execution %q is unavailable", name)
-		}
-		if err := ValidateManifest(manifest); err != nil {
-			return nil, err
-		}
-		if err := normalizeManifest(&manifest); err != nil {
-			return nil, err
-		}
-		return []Adapter{metadataAdapter{metadata: manifest.Metadata, delegate: adapter}}, nil
 	}
 	if len(manifest.Contributes.Providers) == 0 {
 		adapter, err := loadDeclarativeManifest(manifest)
@@ -277,7 +252,7 @@ func ValidateManifest(manifest Manifest) error {
 	if err := validateManifestPackageExtensions(manifest); err != nil {
 		return err
 	}
-	if backend := strings.TrimSpace(manifest.Runtime.Backend); backend != "" && backend != "declarative" && backend != "rpc" && backend != "wasm" && backend != "trusted-backend" && !strings.HasPrefix(backend, "host:") {
+	if backend := strings.TrimSpace(manifest.Runtime.Backend); backend != "" && backend != "declarative" && backend != "trusted-backend" {
 		return fmt.Errorf("unsupported plugin backend %q", backend)
 	}
 	if len(manifest.Contributes.Providers) == 0 {
@@ -417,7 +392,7 @@ func normalizeManifestForProvider(manifest *Manifest, index int) error {
 }
 
 func hasNonProviderContribution(contributes ManifestContributions) bool {
-	return len(contributes.Workflows) > 0 || len(contributes.CanvasNodes) > 0 || len(contributes.Transforms) > 0 || len(contributes.Commands) > 0 || len(contributes.AssetSources) > 0 || len(contributes.UsageObservers) > 0 || len(contributes.AICapabilities) > 0 || len(contributes.Agents) > 0 || len(contributes.Skills) > 0 || len(contributes.Extensions) > 0 || len(contributes.ImportExport) > 0
+	return len(contributes.Workflows) > 0 || len(contributes.CanvasNodes) > 0 || len(contributes.Skills) > 0 || len(contributes.Extensions) > 0
 }
 
 func operationSummary(operation ManifestOperation) string {
