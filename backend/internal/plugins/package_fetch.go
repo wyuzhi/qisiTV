@@ -181,6 +181,9 @@ func (c *Runtime) InstallPackage(source, registry string) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
+	if err := protocol.CheckPackageManifestWriting(stagedRoot); err != nil {
+		return View{}, packageError(http.StatusBadRequest, "plugin_package_invalid", err.Error())
+	}
 	staged, err := protocol.ParsePluginPackageDir(stagedRoot)
 	if err != nil {
 		return View{}, packageError(http.StatusBadRequest, "plugin_package_invalid", err.Error())
@@ -671,6 +674,10 @@ func (s *Service) UpdatePackage(id, registry string) (View, error) {
 	}
 	if record.Source != OriginPackage || strings.TrimSpace(record.PackageSpec) == "" {
 		return View{}, packageError(http.StatusConflict, "plugin_update_unsupported", fmt.Sprintf("插件 %q 不能在线更新", id))
+	}
+	// 用户点更新就是要最新版，所以不带安装时写的版本号。否则会重装旧版本，精选插件还会被拒绝。
+	if name, ok := npmPackageName(record.PackageSpec); ok {
+		return s.InstallPackage(name, registry)
 	}
 	return s.InstallPackage(record.PackageSpec, registry)
 }

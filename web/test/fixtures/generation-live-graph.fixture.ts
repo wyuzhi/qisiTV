@@ -19,7 +19,7 @@ mock.module("@/lib/canvas/canvas-resource-references", () => ({ referencedAssetI
 mock.module("@/services/workspace-asset-read", () => ({ loadWorkspaceAssetsForUse: async () => { throw new Error("unexpected library lookup in live-graph-only fixture"); } }));
 mock.module("@/stores/use-asset-store", () => ({ useAssetStore: { getState: () => ({ assets: [] }) } }));
 mock.module("@/components/canvas/canvas-node-generation", () => ({ buildNodeGenerationContext: (_nodes: any, _edges: any, _id: any, prompt: string) => ({ prompt, referenceImages: [], referenceVideos: [], referenceAudios: [], characterReferences: [], resolvedCharacterVoices: [] }), hydrateNodeGenerationContext: async (context: any) => context, compileNodeGenerationReferences: (context: any) => context }));
-mock.module("@/pages/canvas/canvas-assistant-proposal-execution", () => ({ buildConfirmedGenerationConfig: () => ({ model: "fixture", taskWorkflowProvider: "model", size: "1:1" }) }));
+mock.module("@/pages/canvas/canvas-assistant-proposal-execution", () => ({ buildConfirmedGenerationConfig: () => ({ model: "fixture", size: "1:1" }) }));
 const submission = await import("@/lib/canvas/canvas-generation-submission");
 mock.module("@/lib/canvas/canvas-generation-submission", () => ({ ...submission, canvasGenerationRequestFingerprint: () => "repeat" }));
 mock.module("@/lib/canvas/canvas-project-generation", () => ({ MISSING_GENERATION_TASK_IDENTITY_DETAILS: "missing task identity", isGenerationCanceled: () => false, buildVideoGenerationMetadata: () => ({ videoEditOperation: "text_to_video" }) }));

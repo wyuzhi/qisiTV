@@ -9,7 +9,6 @@ import (
 	"infinite-canvas/backend/internal/beefapi"
 	"infinite-canvas/backend/internal/generation"
 	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/provider/workflow"
 	localtask "infinite-canvas/backend/internal/task"
 )
 
@@ -85,9 +84,6 @@ func (s *Service) queryFailedVideoTask(ctx context.Context, task *model.Task, cl
 				}
 				return res, projection.Status, nil, qErr
 			}, nil
-		},
-		QueryWorkflowVideo: func(c context.Context, cfg generation.Config, reqID string) (map[string]interface{}, string, error) {
-			return s.workflowClient(nil).QueryVideo(c, workflowConfigFromProvider(cfg), workflow.RootURL(cfg.BaseURL), reqID)
 		},
 		RecordMissing:         s.recordMissingVideoReceiptOutcome,
 		RecordUnrecoverable:   s.recordUnrecoverableVideoOutcome,

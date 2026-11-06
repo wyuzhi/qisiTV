@@ -2812,7 +2812,7 @@ func TestProcessResumedSeedanceVideoDoesNotRevalidateDeletedReferences(t *testin
 	defer server.Close()
 	input := canvasGenerationInput{Mode: "video", Prompt: "test", Config: providerConfig{BaseURL: server.URL, APIKey: "key", Model: "seedance-2.5", InterfaceType: "newapi-channel-2"}, ReferenceAudios: []providerMedia{{StorageKey: "resource:deleted-voice"}}}
 	raw, _ := json.Marshal(input)
-	service, task := workflowPaidTaskFixture(t)
+	service, task := runningVideoTaskFixture(t)
 	task.ProviderRequestID = "existing-provider-task"
 	ctx := withProviderAnalytics(context.Background(), service, task)
 	result, err := service.processCanvasGenerationTask(ctx, task.UserID, "", "canvas_video", "", string(raw))

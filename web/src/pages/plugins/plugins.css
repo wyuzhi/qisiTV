@@ -600,7 +600,7 @@
 .plugin-upload-notice svg {
     flex: 0 0 auto;
     margin-top: 2px;
-    color: var(--status-success);
+    color: var(--status-warning);
 }
 
 .plugin-markdown {

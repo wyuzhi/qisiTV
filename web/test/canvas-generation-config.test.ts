@@ -58,10 +58,6 @@ test("image preview uses canvas count and transparent background instead of unre
     expect(buildCanvasGenerationRequirements(global, imageNode, "image", input).options).toMatchObject({ count: 4, transparentBackground: false });
 });
 
-test("workflow requirements do not apply model-only request options", () => {
-    expect(buildCanvasGenerationRequirements({ ...config(), taskWorkflowProvider: "runninghub" }, node, "video", input).options).toBeUndefined();
-});
-
 test("resolved requirements retain admitted defaults rather than restoring raw node or canvas values", () => {
     const resolved = { ...defaultConfig, count: "2", canvasImageCount: "4", size: "3:2" };
     const imageNode = { ...node, type: CanvasNodeType.Image, metadata: { count: 9, size: "1:1" } };

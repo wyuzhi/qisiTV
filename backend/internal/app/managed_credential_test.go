@@ -18,7 +18,7 @@ func TestManagedGeminiCatalogCredentialProviderChain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapters, err := protocol.LoadInstalledProviders(manifest, nil)
+	adapters, err := protocol.LoadInstalledProviders(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}

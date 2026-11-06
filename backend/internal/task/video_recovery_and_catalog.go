@@ -15,7 +15,6 @@ import (
 	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/modelcatalog"
 	"infinite-canvas/backend/internal/protocol"
-	"infinite-canvas/backend/internal/provider/workflow"
 	"infinite-canvas/backend/internal/repository"
 )
 
@@ -328,7 +327,6 @@ type VideoTaskRecoveryDeps struct {
 	DeclarativeAdapter    func(context.Context, string) (protocol.Adapter, bool)
 	BindAnalytics         func(context.Context, model.Task) context.Context
 	ManagedQuery          func(ctx context.Context, task *model.Task) (unified bool, kind string, execute func(queryCtx context.Context) (result map[string]interface{}, providerStatus string, earlyResult *ProviderTaskQueryResult, err error), err error)
-	QueryWorkflowVideo    func(ctx context.Context, config generation.Config, providerRequestID string) (map[string]interface{}, string, error)
 	RecordMissing         func(*model.Task, string)
 	RecordUnrecoverable   func(*model.Task, string)
 	ClassifyOutcome       func(model.Task, string, error) string
@@ -370,7 +368,7 @@ func QueryFailedVideoTaskWithDeps(ctx context.Context, deps VideoTaskRecoveryDep
 	}
 	var input generation.Input
 	var adapter protocol.Adapter
-	var declarative, beefVideo, workflowVideo, legacyVideo bool
+	var declarative, beefVideo, legacyVideo bool
 	var err error
 	if !unified {
 		decryptedInput, err := deps.DecryptTaskInput(task.InputJSON)
@@ -388,10 +386,9 @@ func QueryFailedVideoTaskWithDeps(ctx context.Context, deps VideoTaskRecoveryDep
 		ctx = deps.EnsureOfficialAdapter(ctx, config.InterfaceType)
 		adapter, declarative = deps.DeclarativeAdapter(ctx, config.InterfaceType)
 		beefVideo = generation.IsBeefAPIVideoConfig(ctx, config)
-		workflowVideo = workflow.IsProviderInterface(config.InterfaceType)
 		_, officialVideo := generation.OfficialDeclarativeVideoInterface(config.InterfaceType)
 		legacyVideo = !officialVideo && (strings.TrimSpace(config.InterfaceType) == "" || generation.IsArkPlanVideoConfig(config))
-		if !declarative && !beefVideo && !workflowVideo && !legacyVideo && !upscale {
+		if !declarative && !beefVideo && !legacyVideo && !upscale {
 			deps.RecordUnrecoverable(task, claimUserID)
 			return nil, kernel.BadAuthRequest("该任务的请求协议不支持安全查询上游状态")
 		}
@@ -448,8 +445,6 @@ func QueryFailedVideoTaskWithDeps(ctx context.Context, deps VideoTaskRecoveryDep
 		if settlement.UsageState != nil || settlement.ReconcileDeadline != nil {
 			_ = deps.Repo.UpdateTaskBeefVideoSettlement(task.ID, task.BeefUsageState, task.BeefReconcileDeadline)
 		}
-	} else if workflowVideo {
-		result, providerStatus, err = deps.QueryWorkflowVideo(queryCtx, input.Config, providerRequestID)
 	} else if !declarative && legacyVideo {
 		result, providerStatus, err = generation.QueryHandwrittenVideoTask(queryCtx, input, providerRequestID)
 	} else {
@@ -523,7 +518,6 @@ func SelectCatalogTask(
 	userID string,
 	req SelectRequest,
 	upscaleConfig func(string) (generation.Config, error),
-	requireWorkflowPlugin func(userID, interfaceType string) error,
 	frontendEnabled func() (bool, error),
 	lookup modelcatalog.TaskSelectLookup,
 ) (SelectResult, error) {
@@ -551,13 +545,6 @@ func SelectCatalogTask(
 		if kernel.StringValue(config["credentialRef"]) != beefapi.CredentialRef || kernel.StringValue(config["apiKey"]) != managed.APIKey || kernel.StringValue(config["baseUrl"]) != managed.BaseURL {
 			return SelectResult{}, kernel.BadAuthRequest("AI 超分需要使用已连接的官方算力账号")
 		}
-	}
-	if modelcatalog.TaskInputUsesWorkflowProvider(input) {
-		config, _ := input["config"].(map[string]any)
-		if err := requireWorkflowPlugin(userID, strings.TrimSpace(fmt.Sprint(config["interfaceType"]))); err != nil {
-			return SelectResult{}, err
-		}
-		return SelectResult{Input: input, Workflow: true}, nil
 	}
 	enabled, err := frontendEnabled()
 	if err != nil {
@@ -617,7 +604,6 @@ func ValidateCatalogCapability(
 func ValidateTaskMediaTransport(
 	userID string,
 	input map[string]any,
-	isWorkflow func(string) bool,
 	resolveConfig func(generation.Config) (generation.Config, error),
 	bindRuntime func(context.Context, generation.CallMeta) context.Context,
 	registry *protocol.Registry,
@@ -631,9 +617,6 @@ func ValidateTaskMediaTransport(
 		return kernel.BadAuthRequest("任务参数格式无效，请检查模型设置后重新提交")
 	}
 	if len(prepared.ReferenceImages)+len(prepared.ReferenceVideos)+len(prepared.ReferenceAudios) == 0 && prepared.Mask == nil {
-		return nil
-	}
-	if isWorkflow != nil && isWorkflow(prepared.Config.InterfaceType) {
 		return nil
 	}
 	if prepared.Config.ChannelID != "" || modelcatalog.SystemChannelIDFromBaseURL(prepared.Config.BaseURL) != "" {

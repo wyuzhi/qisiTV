@@ -5,14 +5,35 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"infinite-canvas/backend/internal/generation"
 	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/provider/workflow"
+	"infinite-canvas/backend/internal/platform"
 )
 
+func runningVideoTaskFixture(t *testing.T) (*Service, model.Task) {
+	t.Helper()
+	s, db := newTimelineTaskTestService(t)
+	s.coordinator = platform.NewLocalCoordinator()
+	expires := time.Now().Add(time.Hour)
+	task := model.Task{
+		ID:             "paid-video-task",
+		UserID:         "user",
+		Type:           "canvas_video",
+		Status:         model.TaskStatusRunning,
+		LeaseOwner:     "owner",
+		LeaseExpiresAt: &expires,
+		InputJSON:      `{"mode":"video"}`,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	return s, task
+}
+
 func TestRejectedModelSubmissionSurvivesPersistenceWithoutRetryLock(t *testing.T) {
-	s, task := workflowPaidTaskFixture(t)
+	s, task := runningVideoTaskFixture(t)
 	cause := generation.UncertainVideoSubmission(context.Background(), generation.HTTPError{
 		StatusCode: http.StatusServiceUnavailable,
 		Body:       `{"error":{"code":"model_not_found","message":"分组 企业 下模型 grok-imagine-video-1.5 无可用渠道（distributor）"}}`,
@@ -31,7 +52,7 @@ func TestRejectedModelSubmissionSurvivesPersistenceWithoutRetryLock(t *testing.T
 }
 
 func TestUnsentVideoFailureSurvivesPersistenceWithoutRetryLock(t *testing.T) {
-	s, task := workflowPaidTaskFixture(t)
+	s, task := runningVideoTaskFixture(t)
 	task.FailureDiagnostics = &model.TaskFailureDiagnostics{Requests: []model.TaskRequestEvidence{{
 		Operation: "submit", Method: "POST", Outcome: "not_dispatched", TransportPhase: "tls", TransportRoute: "direct",
 	}}}
@@ -65,13 +86,3 @@ func TestLegacyUnknownSubmissionStillRequiresProof(t *testing.T) {
 	}
 }
 
-func TestWorkflowPreservesConfirmedUnsentCreate(t *testing.T) {
-	err := (&Service{}).fenceWorkflowSubmission(context.Background(), workflow.Input{}, workflow.CreateUncertain{
-		Err: generation.RequestNotSentError{Cause: context.DeadlineExceeded},
-	})
-	failure := generation.ClassifyError(err)
-	var unknown generation.SubmissionUnknownError
-	if errors.As(err, &unknown) || failure.Category != generation.CategoryRequestNotSent || failure.BlocksAutomaticRetry() {
-		t.Fatalf("workflow lost unsent evidence: err=%v failure=%+v", err, failure)
-	}
-}

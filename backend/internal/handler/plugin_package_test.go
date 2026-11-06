@@ -104,7 +104,7 @@ func createSampleHandlerPluginPackage(t *testing.T, root string, id string, vers
 		t.Fatalf("write client entry: %v", err)
 	}
 	pkgJSON := `{
-  "name": "@beeftv/plugin-` + id + `",
+  "name": "` + id + `",
   "version": "` + version + `",
   "description": "Handler test plugin",
   "keywords": ["beeftv-plugin", "pi-package"],
@@ -113,19 +113,16 @@ func createSampleHandlerPluginPackage(t *testing.T, root string, id string, vers
     "skills": ["./skills"]
   },
   "beeftv": {
-    "schemaVersion": 1,
-    "id": "` + id + `",
-    "displayName": "Story Card Plugin",
-    "category": "canvas",
+    "name": "Story Card Plugin",
     "client": "./client/index.js",
     "contributes": {
       "canvasNodes": [
         {
-          "type": "` + id + `.card",
-          "title": "Story Card",
+          "id": "` + id + `.card",
+          "label": "Story Card",
+          "defaultTitle": "Story Card",
           "renderer": "client",
-          "defaultWidth": 400,
-          "defaultHeight": 280
+          "defaultSize": { "width": 400, "height": 280 }
         }
       ]
     }

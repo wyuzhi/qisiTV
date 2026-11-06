@@ -15,10 +15,8 @@ import type { CanvasDrawingEngine } from "@/lib/canvas/canvas-drawing-engine";
 import { isFrameNode, isNodeHiddenByCollapsedFrame } from "@/lib/canvas/canvas-frame";
 import { preferredMediaGeneratorMetadata } from "@/lib/canvas/canvas-generation-config";
 import { canOpenCanvasNodePromptPanel } from "@/lib/canvas/canvas-node-semantics";
-import { normalizeRunningHubCapability, type AiConfig } from "@/stores/use-config-store";
+import type { AiConfig } from "@/stores/use-config-store";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata, type ConnectionHandle, type Position, type ViewportTransform } from "@/types/canvas";
-import { workflowProviderPluginEnabled } from "@/lib/plugins/builtin/workflows";
-import { usePluginStore } from "@/stores/use-plugin-store";
 import type { CanvasPageUiStoreHook } from "@/stores/canvas/use-canvas-page-ui-store";
 
 type UseCanvasConnectionControllerOptions = {
@@ -102,14 +100,6 @@ function placeConnectedNodeWithoutOverlap(
     return { x: left + size.width / 2, y: top + size.height / 2 };
 }
 
-function selectRunningHubWorkflow(config: AiConfig) {
-    const capability = normalizeRunningHubCapability(config.runningHub.capability);
-    return config.runningHub.workflows.find((item) => item.workflowId.trim() === config.runningHub.workflowId.trim()
-        && (item.kind === "app" ? "app" : "workflow") === config.runningHub.selectedKind)
-        || config.runningHub.workflows.find((item) => normalizeRunningHubCapability(item.capability, capability) === capability)
-        || config.runningHub.workflows[0];
-}
-
 export function useCanvasConnectionController({
     pageUi,
     projectId,
@@ -127,7 +117,6 @@ export function useCanvasConnectionController({
     onReplaceReference,
 }: UseCanvasConnectionControllerOptions) {
     const { message } = App.useApp();
-    const runtimeStatuses = usePluginStore((state) => state.runtimeStatuses);
     const [connectingParams, setConnectingParams] = useState<ConnectionHandle | null>(null);
     const [connectionTargetNodeId, setConnectionTargetNodeId] = useState<string | null>(null);
     const [connectionApproach, setConnectionApproach] = useState<CanvasConnectionApproach>(null);
@@ -267,7 +256,7 @@ export function useCanvasConnectionController({
         pageUi.getState().setContextMenu(null);
     }, [pageUi, projectId, config, connectionsRef, message, nodesRef, setConnections, setNodes]);
 
-    const createConnectedNode = useCallback(async (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Script | CanvasNodeType.BatchTable | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.Drawing | CanvasNodeType.Config | CanvasNodeType.MediaConversion, pending: PendingConnectionCreate, workflowProvider?: "runninghub") => {
+    const createConnectedNode = useCallback(async (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Script | CanvasNodeType.BatchTable | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.Drawing | CanvasNodeType.Config | CanvasNodeType.MediaConversion, pending: PendingConnectionCreate) => {
         const nodeType = type;
         const batchSourceNodeIds = pending.batchSourceNodeIds?.length ? Array.from(new Set(pending.batchSourceNodeIds)) : [];
         const batchSourceNodes = batchSourceNodeIds
@@ -284,26 +273,11 @@ export function useCanvasConnectionController({
         const scriptPrompt = nodeType === CanvasNodeType.Script
             ? batchSourceNodeIds.length ? batchScriptPrompt : sourceNode?.type === CanvasNodeType.Text ? (sourceNode.metadata?.content || sourceNode.metadata?.prompt || "").trim() : ""
             : "";
-        const selectedWorkflowProvider = nodeType === CanvasNodeType.Config
-            ? workflowProvider || (workflowProviderPluginEnabled(runtimeStatuses, "runninghub") ? "runninghub" : undefined)
-            : undefined;
-        if (selectedWorkflowProvider && !workflowProviderPluginEnabled(runtimeStatuses, selectedWorkflowProvider)) {
-            message.error("RunningHub 工作流插件未启用");
-            closeConnectionCreateMenu();
-            setConnecting(null);
-            return;
-        }
-        const runningHubWorkflow = selectedWorkflowProvider === "runninghub" ? selectRunningHubWorkflow(config) : undefined;
-        const workflowCapability = normalizeRunningHubCapability(runningHubWorkflow?.capability, normalizeRunningHubCapability(config.runningHub.capability));
         const metadata: CanvasNodeMetadata | undefined = nodeType === CanvasNodeType.Config
             ? {
-                generationMode: selectedWorkflowProvider ? workflowCapability === "video" ? "video" as const : workflowCapability === "audio" ? "audio" as const : "image" as const : "image" as const,
-                workflowProvider: selectedWorkflowProvider || "model",
+                generationMode: "image" as const,
+                workflowProvider: "model" as const,
                 status: NODE_STATUS_IDLE,
-                ...(selectedWorkflowProvider === "runninghub" ? {
-                    workflowTitle: "RunningHub 工作流",
-                    ...(runningHubWorkflow ? { runningHubWorkflowId: runningHubWorkflow.workflowId, runningHubWorkflowKind: runningHubWorkflow.kind === "app" ? "app" as const : "workflow" as const } : {}),
-                } : {})
               }
             : nodeType === CanvasNodeType.Drawing
             ? { drawingEngine: defaultDrawingEngine }
@@ -331,7 +305,6 @@ export function useCanvasConnectionController({
               ? pending.position
               : connectedNodeCenterFromEdgeDrop(pending.position, spec, pending.connection.handleType);
         const newNode = createCanvasNode(nodeType, position, metadata);
-        if (nodeType === CanvasNodeType.Config && selectedWorkflowProvider) newNode.title = "RunningHub 工作流";
         if (storyboardRow) newNode.title = `镜头 ${storyboardRow.shotNumber} · 视频`;
         if (batchSourceNodeIds.length && nodeType === CanvasNodeType.Drawing) {
             message.error("批量连接暂不支持创建绘图，请先连接到普通节点");
@@ -429,13 +402,10 @@ export function useCanvasConnectionController({
         pageUi.getState().setDialogNodeId(nodeType !== CanvasNodeType.Text && nodeType !== CanvasNodeType.BatchTable && nodeType !== CanvasNodeType.MediaConversion && canOpenCanvasNodePromptPanel(newNode) ? newNode.id : null);
         closeConnectionCreateMenu();
         setConnecting(null);
-    }, [closeConnectionCreateMenu, config, connectionsRef, defaultDrawingEngine, message, nodesRef, onConnectedNodeCreated, projectId, runtimeStatuses, setConnecting, setConnections, setDrawingNodeId, setNodes]);
+    }, [closeConnectionCreateMenu, config, connectionsRef, defaultDrawingEngine, message, nodesRef, onConnectedNodeCreated, projectId, setConnecting, setConnections, setDrawingNodeId, setNodes]);
 
-    const getConnectionCreateDisabledReason = useCallback((type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Script | CanvasNodeType.BatchTable | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.Drawing | CanvasNodeType.Config | CanvasNodeType.MediaConversion, pending: PendingConnectionCreate, workflowProvider?: "runninghub") => {
+    const getConnectionCreateDisabledReason = useCallback((type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Script | CanvasNodeType.BatchTable | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.Drawing | CanvasNodeType.Config | CanvasNodeType.MediaConversion, pending: PendingConnectionCreate) => {
         const nodeType = type;
-        if (nodeType === CanvasNodeType.Config) {
-            if (workflowProvider && !workflowProviderPluginEnabled(runtimeStatuses, workflowProvider)) return "RunningHub 工作流插件未启用";
-        }
         if (pending.batchSourceNodeIds?.length) {
             if (nodeType === CanvasNodeType.Drawing || nodeType === CanvasNodeType.Config) return "批量连接暂不支持此节点类型";
             const pendingNode: CanvasNodeData = { id: "__pending-connection-node__", type: nodeType, title: "", position: pending.position, width: getNodeSpec(nodeType).width, height: getNodeSpec(nodeType).height };
@@ -448,7 +418,7 @@ export function useCanvasConnectionController({
         const connection = normalizeConnection(pending.connection.nodeId, pendingNode.id, pendingNodes, pending.connection.handleType);
         if (!connection) return "当前节点类型不能这样连接";
         return canvasConnectionError(config, pendingNodes, connectionsRef.current, connection);
-    }, [config, connectionsRef, nodesRef, runtimeStatuses]);
+    }, [config, connectionsRef, nodesRef]);
 
     const getConnectionDropTarget = useCallback((clientX: number, clientY: number, current: ConnectionHandle): ConnectionDropTarget => {
         const world = screenToCanvas(clientX, clientY);

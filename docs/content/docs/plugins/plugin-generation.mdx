@@ -1,0 +1,341 @@
+---
+title: 接入生成服务
+description: 用 JSON 或 JS 把图片、视频、音频和文本服务接进 BeefTV。
+---
+
+# 接入生成服务
+
+插件可以把一个模型服务接进 BeefTV，有两种写法：
+
+| 写法 | 适合 | 能力 |
+| --- | --- | --- |
+| [JSON](#用-json-接入) | 发一个请求，拿到结果，或者拿到任务号再查进度 | 文本、图片、视频、音频 |
+| [JS](#用-js-接入) | 要先上传素材、改写工作流，或者分几步调用 | 图片、视频、音频 |
+
+能用 JSON 写就用 JSON：BeefTV 替你发请求，不用运行插件代码。
+
+两种写法里，任务记录、重启后继续查询、不重复提交、把结果下载进工作区，都由 BeefTV 负责。
+
+## 用 JSON 接入
+
+假设服务收到提示词后直接返回图片地址。把下面这段写进 `package.json`，就是一个完整的插件：
+
+```json
+{
+  "name": "beeftv-plugin-my-image",
+  "version": "0.1.0",
+  "description": "接入我的生图服务",
+  "type": "module",
+  "keywords": ["beeftv-plugin"],
+  "beeftv": {
+    "name": "我的生图服务",
+    "contributes": {
+      "providers": [
+        {
+          "id": "my-image",
+          "label": "我的生图服务",
+          "capabilities": ["image"],
+          "scopes": ["user.custom-channel", "canvas", "creation", "agent"],
+          "baseUrl": "https://api.example.com",
+          "auth": { "type": "bearer", "field": "apiKey" },
+          "create": {
+            "method": "POST",
+            "path": "/v1/images",
+            "contentType": "application/json",
+            "body": {
+              "model": { "$ref": "request.model" },
+              "prompt": { "$ref": "request.prompt" },
+              "ratio": { "$omitEmpty": { "$ref": "request.aspectRatio" } }
+            }
+          },
+          "response": {
+            "status": "succeeded",
+            "images": { "$ref": "response.data" },
+            "errorPaths": ["error.code"],
+            "messagePaths": ["error.message"]
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+`create` 描述要发的请求，`response` 描述怎么读返回内容。`{ "$ref": "request.prompt" }` 表示取这次生成的提示词。
+
+用户这样用上它：在「模型配置」里点「添加模型服务」，选「第三方模型服务」，填地址和 Key，手动添加模型 ID 后，打开「高级模型设置与测试」，点这个模型的「配置使用」，把请求协议选成“我的生图服务”。
+
+### 要查进度的服务
+
+服务先返回任务号时，加一个 `poll`，再从返回内容里读出任务号和状态：
+
+```json
+{
+  "create": {
+    "method": "POST",
+    "path": "/v1/videos",
+    "contentType": "application/json",
+    "body": { "model": { "$ref": "request.model" }, "prompt": { "$ref": "request.prompt" } }
+  },
+  "poll": { "method": "GET", "path": "/v1/videos/{{taskId}}" },
+  "response": {
+    "taskId": { "$ref": "response.id" },
+    "status": { "$ref": "response.status" },
+    "message": { "$ref": "response.error" },
+    "videos": { "$ref": "response.url" }
+  }
+}
+```
+
+`status` 的值按下表归类，大小写不限。读不出来或者不在表里的，都算还在排队。
+
+| BeefTV 的状态 | 服务返回的文字 |
+| --- | --- |
+| 排队中 | `queued`、`pending`、`created`、`submitted`、`in_queue`、`preparing`、`queueing` |
+| 运行中 | `running`、`processing`、`in_progress`、`executing` |
+| 成功 | `succeeded`、`success`、`completed`、`complete`、`done`、`finish`、`finished` |
+| 失败 | `failed`、`fail`、`failure`、`error`、`expired` |
+| 已取消 | `cancelled`、`canceled`、`aborted` |
+
+### 生成服务的字段
+
+| 字段 | 用途 |
+| --- | --- |
+| `id`、`label` | 协议 ID 和显示名 |
+| `capabilities` | `text`、`image`、`video`、`audio` |
+| `scopes` | 哪些地方能用。`user.custom-channel` 让用户能在模型服务里选到它；`canvas`、`creation`、`agent` 分别是画布、创作流程和助手。一般照上面的例子全写 |
+| `baseUrl` | 默认服务地址，用户可以改 |
+| `auth` | 怎么带密钥，见下表 |
+| `create` | 提交请求 |
+| `poll` | 查进度 |
+| `result` | 任务完成后，结果要单独请求时写 |
+| `response` | 怎么读返回内容 |
+| `variables` | 请求里要反复用到的值，见[变量](#变量) |
+| `validations` | 提交前的检查，见[提交前检查](#提交前检查) |
+| `parameters` | 这个协议支持哪些参数的说明，写给读插件的人看，BeefTV 不读取 |
+| `requiresPublicMediaUrls` | 服务只接受公网素材地址时写 `true` |
+
+也可以写 `cancel`，但 BeefTV 目前不会发这个请求。
+
+`auth.field` 选用哪把密钥：`apiKey` 或 `secretKey`。
+
+| `auth.type` | 怎么带 |
+| --- | --- |
+| `bearer` | `Authorization: Bearer <密钥>`。可用 `header` 和 `prefix` 改请求头和前缀 |
+| `header` 或 `api-key` | 写进 `header` 指定的请求头，可加 `prefix` |
+| `query` | 写进地址参数，参数名在 `query` |
+| `basic` | HTTP Basic，`username` 或 `field` 是用户名，`secretField` 是密码 |
+| `none` | 服务不要密钥，用户可以不填 |
+
+### 请求的字段
+
+`create`、`poll`、`result` 的写法相同。
+
+| 字段 | 用途 |
+| --- | --- |
+| `method` | `GET`、`POST`、`PUT`、`DELETE` |
+| `path` | 请求路径，可以用 `{{model}}` 和 `{{taskId}}` |
+| `pathTemplate` | 路径要按条件变化时用表达式算出来 |
+| `defaultPathPrefix` | 服务地址没有路径时加上的前缀。地址已有 `/v1` 这样的路径时不加 |
+| `originPath` | 写 `true` 时路径从域名开始算，忽略服务地址里的路径 |
+| `contentType` | `application/json`、`multipart/form-data` 或 `application/x-www-form-urlencoded` |
+| `headers`、`query`、`body` | 请求头、地址参数和请求体，里面都可以写表达式 |
+| `fields`、`files` | 表单字段和要上传的文件，配合 `multipart/form-data` |
+
+### 返回内容的字段
+
+| 字段 | 用途 |
+| --- | --- |
+| `taskId`、`status`、`message` | 任务号、状态和失败原因 |
+| `text`、`images`、`videos`、`audios` | 结果。媒体可以是地址字符串、`data:` 地址，或者含 `url`、`b64_json` 的对象，也可以是它们的数组 |
+| `usage` | 用量 |
+| `errorPaths` | 这些路径上有非零的值就算失败，比如 `["error.code"]` |
+| `successCodes` | 服务用非零的码表示成功时写在这里，比如 `[10000]` |
+| `messagePaths` | 失败时依次找这些路径上的文字，和 `message` 二选一即可 |
+| `resultEphemeral` | 结果地址很快失效时写 `true`，BeefTV 会在任务结束前下载 |
+| `binaryPayload` | 返回内容本身就是媒体文件时写 `true`，比如语音合成 |
+| `detectImageMime` | 按实际字节判断图片类型 |
+| `stream` | 图片用 SSE 流返回时的解析规则 |
+
+服务返回错误时，用户看到的是 BeefTV 按错误类型给出的提示，比如“模型服务鉴权失败”，`message` 不一定原样显示。想让用户看到自己写的原因，用 JS 接入。
+
+### 表达式
+
+JSON 里任何一个值都可以写成表达式。能读到的数据：
+
+| 名字 | 内容 |
+| --- | --- |
+| `request.*` | 这次生成的内容：`model`、`prompt`、`messages`、`images`、`videos`、`audios`、`aspectRatio`、`resolution`、`duration`、`output`、`providerOptions`、`extra` 等 |
+| `vars.*` | 上面定义的变量 |
+| `response.*` | 返回内容，只在 `response` 里可用 |
+| `taskId` | 任务号，在 `poll`、`result` 和 `response` 里可用 |
+
+`request.images` 里每一项有 `value`（地址或 `data:` 内容）、`role`（比如 `first_frame`）、`mimeType`、`name` 和 `order`。
+
+全部运算符：
+
+| 类别 | 运算符 | 写法 |
+| --- | --- | --- |
+| 取值 | `$ref` | `{ "$ref": "request.prompt" }` |
+| 取值 | `$literal` | 原样返回，不计算里面的内容 |
+| 取值 | `$coalesce`、`$default` | `[a, b, c]`，取第一个非空的值 |
+| 取值 | `$omitEmpty` | 值为空时不发这个字段 |
+| 条件 | `$if` | `{ "condition": ..., "then": ..., "else": ... }` |
+| 条件 | `$switch` | `{ "cases": [{ "when": ..., "then": ... }], "default": ... }` |
+| 比较 | `$eq`、`$ne`、`$gt`、`$gte`、`$lt`、`$lte` | `[a, b]` |
+| 比较 | `$in` | `[值, 列表]` |
+| 比较 | `$and`、`$or` | `[a, b, ...]` |
+| 比较 | `$not` | 单个值 |
+| 数组 | `$map`、`$filter`、`$flatMap` | `{ "from": ..., "as": "media", "in": ... }`，`$filter` 用 `where` 代替 `in` |
+| 数组 | `$first`、`$last`、`$len` | 单个值 |
+| 数组 | `$at` | `[数组, 下标]` |
+| 数组 | `$concatArrays` | `[数组, 数组, ...]` |
+| 数组 | `$sortByOrder` | 按 `order` 排序 |
+| 数组 | `$indexObject` | `{ "from": ..., "as": ..., "prefix": "image", "value": ... }`，把数组变成 `image0`、`image1` 这样的键 |
+| 对象 | `$merge` | `[对象, 对象, ...]`，只合并一层 |
+| 文字 | `$concat` | `[a, b, ...]` |
+| 文字 | `$split` | `[文字, 分隔符]` |
+| 文字 | `$lower`、`$upper`、`$trim` | 单个值 |
+| 数字 | `$add`、`$multiply`、`$divide`、`$min`、`$max` | `[a, b, ...]` |
+| 数字 | `$ceilStep` | `[值, 步长]`，向上取整到步长的倍数 |
+| 转换 | `$toString`、`$toInt`、`$toFloat`、`$toBool` | 单个值 |
+| 转换 | `$dataMime`、`$dataPayload` | 从 `data:` 地址取出类型或内容 |
+
+### 变量
+
+`variables` 按顺序计算，后面的可以用前面的，通过 `vars.<name>` 读取。变量只在这次请求里存在。
+
+```json
+{
+  "variables": [
+    { "name": "size", "value": { "$coalesce": [{ "$ref": "request.aspectRatio" }, "1:1"] } }
+  ],
+  "create": {
+    "method": "POST",
+    "path": "/v1/images",
+    "contentType": "application/json",
+    "body": { "size": { "$ref": "vars.size" } }
+  }
+}
+```
+
+### 提交前检查
+
+`validations` 在发请求之前运行。`assert` 不成立时任务不会提交，用户看到 `message`。
+
+```json
+{
+  "validations": [
+    { "assert": { "$lte": [{ "$len": { "$ref": "request.images" } }, 2] }, "message": "这个模型最多接受 2 张参考图" }
+  ]
+}
+```
+
+### 更多例子
+
+`plugin-packages/` 下有 80 多个现成的协议，`zhipu-cogview` 是直接返回结果的例子，`bfl-flux` 是查进度的例子。它们是 BeefTV 自带的，用 `manifest.json` 打包成 `.beeftv-plugin`。写新插件时，把 `contributes.providers` 里的内容照搬进 `package.json` 的 `beeftv` 即可。
+
+## 用 JS 接入
+
+在 provider 里写 `module`，指向包里的一个 JS 文件，不再写 `create` 和 `poll`：
+
+```json
+{
+  "name": "beeftv-plugin-my-workflow",
+  "version": "0.1.0",
+  "description": "接入我的工作流服务",
+  "type": "module",
+  "keywords": ["beeftv-plugin"],
+  "beeftv": {
+    "name": "我的工作流",
+    "contributes": {
+      "providers": [
+        {
+          "id": "my-workflow",
+          "label": "我的工作流",
+          "module": "./provider.mjs",
+          "capabilities": ["image"],
+          "scopes": ["user.custom-channel", "canvas", "creation", "agent"],
+          "baseUrl": "https://api.example.com",
+          "auth": { "type": "bearer", "field": "apiKey" }
+        }
+      ]
+    }
+  }
+}
+```
+
+`provider.mjs` 导出 `submit` 和 `query`，网络请求由插件自己发：
+
+```js
+export async function submit(request, ctx) {
+  const response = await fetch(`${ctx.config.baseUrl}/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${ctx.config.apiKey}` },
+    body: JSON.stringify({ model: request.model, prompt: request.prompt }),
+    signal: ctx.signal,
+  });
+  if (!response.ok) return { status: "failed", message: `服务拒绝了这个任务（${response.status}）` };
+  return { taskId: (await response.json()).id, status: "processing" };
+}
+
+export async function query(taskId, request, ctx) {
+  const response = await fetch(`${ctx.config.baseUrl}/tasks/${taskId}`, {
+    headers: { Authorization: `Bearer ${ctx.config.apiKey}` },
+    signal: ctx.signal,
+  });
+  if (!response.ok) throw new Error(`查询失败（${response.status}）`);
+  const task = await response.json();
+  if (task.state === "done") return { taskId, status: "succeeded", result: { images: [{ url: task.imageUrl }] } };
+  if (task.state === "error") return { taskId, status: "failed", message: task.reason };
+  return { taskId, status: "processing" };
+}
+```
+
+`ctx` 里有三样东西：
+
+| 字段 | 内容 |
+| --- | --- |
+| `ctx.config` | 用户在模型服务里填的 `{ baseUrl, apiKey }` |
+| `ctx.signal` | 用户取消任务时触发，传给 `fetch` 就能中断请求 |
+| `ctx.log(message)` | 写进 BeefTV 日志。不要写密钥 |
+
+用户这样用上它：在「模型配置」点「添加模型服务」，「选择服务商」里会多一项，标着「插件提供」。填好地址和 Key，点「读取模型」或手动添加模型 ID。
+
+### 几条约定
+
+- **能确定失败就返回 `{ status: "failed", message }`**，比如缺 Key、服务明确拒绝，或者还没提交就连不上服务。`submit` 抛异常时，BeefTV 无法判断任务是否已经发出，会标为“提交结果不明”，不会自动重试，以免重复扣费。
+- **`message` 会显示给用户**，写清原因和怎么办。不要带网址或错误码：网址会被过滤掉，错误码可能让提示变成通用文案。
+- **`submit` 要返回 `taskId`**。BeefTV 先记下任务号再查询。应用重启后只调用 `query`，不会再次调用 `submit`。服务同步出结果时，也可以直接返回 `{ status: "succeeded", result }`。
+- **`query` 抛异常表示这次没查到**，BeefTV 过一会儿再查，连续 3 次才算失败，失败原因是最后一次异常的文字。任务确定失败时返回 `{ status: "failed", message }`。
+- **结果里写 `url` 或 `dataUrl` 就够了**，BeefTV 负责下载和保存。结果地址和服务地址同源时，下载会带上用户的密钥；其他地址不带。
+- **取消任务时**，BeefTV 停止查询并触发 `ctx.signal`，不会去服务那边取消任务。调用要在 5 秒内结束，否则 BeefTV 会结束运行插件的进程，下一次调用启动新的。
+- **一个服务可以同时出图、视频和音频**：`capabilities` 写上几种，`models` 给每个模型标上 `capability`。用户在「选择服务商」里只看到一项。
+
+### 列出模型
+
+再导出一个 `models(ctx)`，用户点「读取模型」时 BeefTV 就会调用它，`ctx.config` 是用户刚填的地址和 Key：
+
+```js
+export async function models(ctx) {
+  const response = await fetch(`${ctx.config.baseUrl}/apps`, { signal: ctx.signal });
+  if (!response.ok) throw new Error(`服务返回 ${response.status}`);
+  return (await response.json()).map((app) => ({ id: app.id, displayName: app.name, capability: "image" }));
+}
+```
+
+- 只接一种能力的服务可以不写 `capability`。
+- 不导出 `models` 时，用户要手动填模型 ID。
+- 服务没有列模型的接口，而模型 ID 又有固定写法时，可以在 `models` 里抛错，写清该填什么，这句话会显示在添加模型的窗口里。
+- 服务不要密钥（比如本机服务）时，在 provider 里写 `"auth": { "type": "none" }`。
+
+### 运行环境
+
+插件代码运行在 BeefTV 自带 Node 的一个后台进程里，不经过浏览器，可以用 `fetch` 和 Node 内置模块。第一次用到时启动，`package.json` 的 `dependencies` 在安装时一起装好。
+
+改了代码，从本地目录安装的插件点「重新加载」就会换成新代码，不用重启 BeefTV。
+
+### 更多例子
+
+- `plugin-packages/beeftv-plugin-comfyui/`：把 ComfyUI 里保存的每个工作流列成一个模型，提交前上传素材、改写工作流节点。
+- `plugin-packages/beeftv-plugin-runninghub/`：没有模型列表，用户手动填工作流编号。

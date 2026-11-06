@@ -33,6 +33,8 @@ type ProviderCatalogItem struct {
 	// deferred, which stays selectable because the release still ships it.
 	Retired       bool   `json:"retired,omitempty"`
 	RetiredReason string `json:"retiredReason,omitempty"`
+	// Module 表示生成接口由插件 JS 实现：模型服务里把它列成一个服务商，「读取模型」交给插件。
+	Module bool `json:"module,omitempty"`
 }
 
 // ProviderCatalog projects provider and workflow contributions from this
@@ -61,6 +63,7 @@ func (s *Service) ProviderCatalog(scope, capability string, includeUnavailable b
 				if adapter, ok := registry.Resolve(provider.ID); ok {
 					metadata := adapter.Metadata()
 					item.Create, item.Poll, item.ContentType = metadata.Create, metadata.Poll, metadata.ContentType
+					_, item.Module = adapter.(protocol.ModuleProvider)
 				}
 			}
 			if includeUnavailable || item.Enabled {

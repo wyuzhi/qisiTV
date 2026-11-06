@@ -6,14 +6,13 @@ import { usePluginStore } from "@/stores/use-plugin-store";
 // when the plugin center was never opened in this window.
 export async function syncPluginsFromBackend() {
     const result = await fetchPlugins();
-    const store = usePluginStore.getState();
-    store.setPluginStates(result.states || {});
-    for (const item of result.plugins || []) {
-        store.ensurePlugin({
+    const plugins = (result.plugins || []).map((item) => ({
+        manifest: {
             ...item.manifest,
             trusted: item.manifest.trusted ?? (item.source === "official" || item.source === "bundled" || item.source === "system"),
-        });
-        store.setEnabled(item.manifest.id, result.states?.[item.manifest.id]?.effectiveEnabled ?? item.status === "enabled");
-    }
+        },
+        enabled: result.states?.[item.manifest.id]?.effectiveEnabled ?? item.status === "enabled",
+    }));
+    usePluginStore.getState().syncBackendPlugins(plugins, result.states || {});
     return result;
 }

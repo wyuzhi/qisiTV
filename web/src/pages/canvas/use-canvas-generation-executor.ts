@@ -264,11 +264,8 @@ export function useCanvasGenerationExecutor({
                             ? { ...node, metadata: { ...node.metadata, generationPreflightError: undefined } }
                             : node));
                         diagnostic("generation_preflight_stage");
-                        // AutoDL/其他声明式视频协议需要结构化参考素材；只有普通
-                        // 模型视频接口才把提示词视为纯文本输入。
-                        const usesWorkflowProvider = Boolean(mode !== "text" && generationConfig.taskWorkflowProvider && generationConfig.taskWorkflowProvider !== "model");
-                        // 普通视频协议只保留输入框文本（显式 @文本 引用仍会展开为真实内容）；声明式工作流还要保留连接媒体。
-                        const promptOnly = mode === "video" && !usesWorkflowProvider;
+                        // 视频协议只保留输入框文本（显式 @文本 引用仍会展开为真实内容）。
+                        const promptOnly = mode === "video";
                         try {
                             // 素材库列表按需加载，显式引用不能仅凭是否出现在列表中判断失效。
                             const missingAssetIds = referencedAssetIdsInPrompt(generationPrompt).filter((id) => !inputAssets.some((asset) => asset.id === id));
@@ -293,7 +290,7 @@ export function useCanvasGenerationExecutor({
                             }
                             generationConfig = buildConfirmedGenerationConfig(inputConfig, sourceNode, mode, requirements, options?.confirmedModelKey);
                             selectedModel = generationConfig.model;
-                            const referenceLimits = usesWorkflowProvider ? undefined : modelGroupReferenceLimits(inputConfig, generationConfig.model, mode, requirements);
+                            const referenceLimits = modelGroupReferenceLimits(inputConfig, generationConfig.model, mode, requirements);
                             rawGenerationContext = await waitForCanvasPreparation(() => hydrateNodeGenerationContext(baseContext, projectId, domainProjectId, mode, mode === "video" && Boolean(referenceLimits?.maxAudios), !promptOnly, referenceLimits), controller.signal);
                             const hydratedRequirements = generationModelRequirements(mode, rawGenerationContext, sourceNode, generationConfig);
                             if (hydratedRequirements?.input) {
@@ -402,15 +399,6 @@ export function useCanvasGenerationExecutor({
                             prompt: effectivePrompt,
                             model: generationConfig.model,
                             options: modelRequestOptions(generationConfig, mode),
-                            workflow:
-                                generationConfig.taskWorkflowProvider && generationConfig.taskWorkflowProvider !== "model"
-                                    ? {
-                                          provider: generationConfig.taskWorkflowProvider,
-                                          workflowId: generationConfig.runningHub.workflowId,
-                                          workflowKind: generationConfig.runningHub.selectedKind,
-                                          parameters: sourceNode?.metadata?.workflowParameters,
-                                      }
-                                    : undefined,
                             operation: sourceNode?.metadata?.videoEditOperation,
                             audioInstructions: generationConfig.audioInstructions,
                             promptTemplateOperation: sourceNode?.metadata?.promptTemplateOperation,
@@ -428,7 +416,7 @@ export function useCanvasGenerationExecutor({
                             }
                         }
 
-                        const ratioWarning = mode === "video" && !usesWorkflowProvider ? seedanceReferenceRatioWarning({
+                        const ratioWarning = mode === "video" ? seedanceReferenceRatioWarning({
                             ...resolveModelRequestConfig(generationConfig, generationConfig.model),
                             videoCount: generationContext.referenceVideos.length,
                             ratio: generationConfig.size,

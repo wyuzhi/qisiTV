@@ -82,6 +82,7 @@ type SkillItem struct {
 	ExtraInfo       string               `json:"extraInfo"`
 	IsAdded         bool                 `json:"isAdded"`
 	IsOwner         bool                 `json:"isOwner"`
+	HasScripts      bool                 `json:"hasScripts"`
 	MarketRelease   *skillhub.Release    `json:"marketRelease,omitempty"`
 }
 
@@ -296,6 +297,10 @@ func (s *Service) skillItems(userID string, skills []model.Skill, includeInstruc
 		}
 		releases[version.ID] = release
 	}
+	withScripts, err := s.repo.SkillVersionsWithScripts(versionIDs)
+	if err != nil {
+		return nil, err
+	}
 	states, err := s.repo.UserSkillStatesBySkillIDs(userID, ids)
 	if err != nil {
 		return nil, err
@@ -338,7 +343,7 @@ func (s *Service) skillItems(userID string, skills []model.Skill, includeInstruc
 			LikeCount: metric.LikeCount, IsLike: state.Liked, OwnerUID: skill.OwnerID,
 			EffectiveUser: SkillEffectiveUser{Name: ownerName, AvatarURL: ownerAvatarURL, UID: skill.OwnerID}, ShowcaseMedia: showcaseMedia,
 			AddedCount: metric.AddedCount, ExtraInfo: skill.ExtraInfo, IsAdded: state.Added, IsOwner: skill.OwnerID == userID,
-			MarketRelease: release,
+			HasScripts: withScripts[skill.CurrentVersionID], MarketRelease: release,
 		})
 	}
 	return items, nil
@@ -426,7 +431,7 @@ func normalizeSkillMutationRequest(req SkillMutationRequest, requireInstruction 
 		return req, "", kernel.BadAuthRequest("技能名称必须为 1-80 个字符")
 	}
 	if req.Description == "" || utf8.RuneCountInString(req.Description) > maxSkillDescriptionRunes {
-		return req, "", kernel.BadAuthRequest("技能简介必须为 1-500 个字符")
+		return req, "", kernel.BadAuthRequest("技能简介必须为 1-1024 个字符")
 	}
 	if (requireInstruction && req.Instruction == "") || utf8.RuneCountInString(req.Instruction) > 100000 {
 		return req, "", kernel.BadAuthRequest("技能指令必须为 1-100000 个字符")

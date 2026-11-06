@@ -1,9 +1,8 @@
 import { CollectionToolbar } from "@/components/layout/collection-toolbar";
-import { App, Button, Input, InputNumber, Modal, Select, Typography } from "antd";
+import { App, Button, Input, Modal, Select, Typography } from "antd";
 import { Switch } from "@/components/ui/base/switch";
-import { ArrowUpCircle, AudioLines, CalendarDays, CheckCircle2, Clock3, ExternalLink, Film, Image as ImageIcon, MessageSquareText, Plus, PlugZap, RefreshCw, Search, Settings2, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
+import { AudioLines, CalendarDays, Clock3, Film, Image as ImageIcon, MessageSquareText, Plus, PlugZap, RefreshCw, Search, Settings2, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router";
 
 import { EmptyState } from "@/components/ui/product/empty-state";
 import { PageHeader } from "@/components/layout/workspace-page";
@@ -11,14 +10,14 @@ import { listRegisteredPlugins } from "@/lib/plugins/plugin-registry";
 import "@/lib/plugins/builtin";
 import { EAGLE_PLUGIN_ID } from "@/lib/plugins/builtin/eagle";
 import { PROMPT_OPTIMIZER_PLUGIN_ID } from "@/lib/plugins/builtin/prompt-optimizer";
-import { RUNNINGHUB_PLUGIN_ID } from "@/lib/plugins/builtin/workflows";
 import { isOfficialApplicationPluginId } from "@/lib/plugins/official-applications";
 import { deactivateClientPlugin, syncActiveClientPlugins } from "@/lib/plugins/plugin-client-loader";
 import { PLUGIN_INSTALL_REQUEST_EVENT } from "@/lib/plugins/plugin-host-runtime";
-import type { PluginField, PluginInstallConfirmRequest, PluginManifest, PluginManifestV2, RegisteredPlugin } from "@/lib/plugins/plugin-types";
+import type { PluginInstallConfirmRequest, PluginManifest, PluginManifestV2, RegisteredPlugin } from "@/lib/plugins/plugin-types";
 import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { EaglePluginSettingsPanel } from "@/pages/plugins/eagle";
 import {
+    fetchPluginUpdates,
     installPluginPackage,
     setPluginPlatformEnabled,
     setUserPluginEnabled,
@@ -26,6 +25,7 @@ import {
     updatePluginPackage,
     type BackendPlugin,
     type PluginState,
+    type PluginUpdateCheck,
 } from "@/services/api/plugins";
 import { syncPluginsFromBackend } from "@/services/plugin-sync";
 import { usePluginStore } from "@/stores/use-plugin-store";
@@ -34,19 +34,15 @@ import { isLocalRuntimeMode } from "@/lib/runtime-mode";
 import { workspaceCapabilities } from "@/services/workspace-mode";
 
 import { PluginDetailsModal } from "./plugin-documentation-modals";
-import { PluginInstallConfirmModal } from "./plugin-install-confirm-modal";
+import { isLocalFolderSource, PluginInstallConfirmModal, pluginUpdateRequest } from "./plugin-install-confirm-modal";
+import { PluginFieldsConfigForm } from "./plugin-fields-config-form";
+import { PluginUpdateButton } from "./plugin-update-button";
 import "./plugins.css";
 
 const categoryLabels: Record<string, string> = {
     provider: "模型渠道",
     "canvas-node": "画布节点",
     workflow: "工作流",
-    transform: "媒体转换",
-    "asset-source": "素材来源",
-    "ai-capability": "AI 能力",
-    "usage-observer": "用量观察",
-    agent: "智能体",
-    "import-export": "导入导出",
 };
 
 const surfaceLabels: Record<string, string> = {
@@ -80,7 +76,6 @@ const protocolSectionMeta = [
 
 export default function PluginsPage() {
     const { message } = App.useApp();
-    const navigate = useNavigate();
     const user = useUserStore((state) => state.user);
     const features = useUserStore((state) => state.features);
     const localRuntime = isLocalRuntimeMode() || workspaceCapabilities().local;
@@ -89,7 +84,6 @@ export default function PluginsPage() {
     const ensurePlugin = usePluginStore((state) => state.ensurePlugin);
     const setEnabled = usePluginStore((state) => state.setEnabled);
     const removePlugin = usePluginStore((state) => state.removePlugin);
-    const setRuntimeStatuses = usePluginStore((state) => state.setRuntimeStatuses);
     const setPluginStates = usePluginStore((state) => state.setPluginStates);
     const pluginStates = usePluginStore((state) => state.pluginStates);
     const updateConfig = usePluginStore((state) => state.updateConfig);
@@ -105,6 +99,7 @@ export default function PluginsPage() {
     const [installPendingRequest, setInstallPendingRequest] = useState<PluginInstallConfirmRequest | null>(null);
     const [installing, setInstalling] = useState(false);
     const [updatingPluginId, setUpdatingPluginId] = useState<string | null>(null);
+    const [updateCheck, setUpdateCheck] = useState<PluginUpdateCheck>();
     const [search, setSearch] = useState("");
     const [categoryFilter, setCategoryFilter] = useState("all");
     const [statusFilter, setStatusFilter] = useState<"all" | "enabled" | "disabled">("all");
@@ -133,16 +128,15 @@ export default function PluginsPage() {
             const result = await syncPluginsFromBackend();
             setBackendPlugins(result.plugins || []);
         } catch (error) {
+            // 读取失败不清空列表：同时发出的另一次读取可能已经成功。
             if (!localRuntime) {
                 message.error(error instanceof Error ? error.message : "读取插件中心失败");
-            }
-            setBackendPlugins([]);
-            if (localRuntime) {
-                setPluginStates({});
             }
         } finally {
             setBackendPluginsLoading(false);
         }
+        // 查新版本要问 npm，慢且可能失败；失败时按钮照旧显示「更新」。
+        fetchPluginUpdates().then(setUpdateCheck, () => setUpdateCheck(undefined));
     };
 
     useEffect(() => {
@@ -166,7 +160,6 @@ export default function PluginsPage() {
             const installation = installations.find((item) => item.manifest.id === plugin.manifest.id);
             const enabled = state?.effectiveEnabled ?? Boolean(installation?.enabled);
             const manifest = plugin.manifest;
-            if (localRuntime && manifest.id === RUNNINGHUB_PLUGIN_ID) return false;
             const contributionKinds = contributionKindsFor(manifest);
             const searchableText = [manifest.name, manifest.description, manifest.author, manifest.id, ...contributionKinds.map((kind) => categoryLabels[kind] || kind)].filter(Boolean).join(" ").toLocaleLowerCase();
             if (normalizedSearch && !searchableText.includes(normalizedSearch)) return false;
@@ -198,7 +191,6 @@ export default function PluginsPage() {
 
     const categoryCounts = useMemo(() => {
         const visiblePlugins = registeredPlugins.filter((plugin) => {
-            if (localRuntime && plugin.manifest.id === RUNNINGHUB_PLUGIN_ID) return false;
             const isApplicationPlugin =
                 backendPluginById.get(plugin.manifest.id)?.management.kind === "application" ||
                 isOfficialApplicationPluginId(plugin.manifest.id);
@@ -226,8 +218,7 @@ export default function PluginsPage() {
     const canConfigurePlugin = (plugin: RegisteredPlugin) =>
         localRuntime || hasCustomAppSettings(plugin)
             ? hasPluginConfiguration(plugin)
-            : Boolean(pluginStates[plugin.manifest.id]?.canConfigure) &&
-              (hasPluginConfiguration(plugin) || plugin.manifest.id === RUNNINGHUB_PLUGIN_ID);
+            : Boolean(pluginStates[plugin.manifest.id]?.canConfigure) && hasPluginConfiguration(plugin);
 
     const isPluginEnabled = (plugin: RegisteredPlugin, installation = installations.find((item) => item.manifest.id === plugin.manifest.id)) => pluginStates[plugin.manifest.id]?.effectiveEnabled ?? Boolean(installation?.enabled);
 
@@ -244,9 +235,6 @@ export default function PluginsPage() {
                 : await setUserPluginEnabled(plugin.manifest.id, enabled);
             setEnabled(plugin.manifest.id, next.effectiveEnabled ?? enabled);
             setPluginStates({ ...usePluginStore.getState().pluginStates, [next.pluginId]: next });
-            if (next.pluginId === RUNNINGHUB_PLUGIN_ID) {
-                setRuntimeStatuses({ ...usePluginStore.getState().runtimeStatuses, [next.pluginId]: next.effectiveEnabled ? "enabled" : "disabled" });
-            }
             message.success(`${plugin.manifest.name}${enabled ? "已启用" : "已停用"}`);
         } catch (error) {
             if (localRuntime) {
@@ -274,17 +262,48 @@ export default function PluginsPage() {
         }
     };
 
-    const handleUpdatePlugin = async (pluginId: string) => {
+    const updateInstalledPlugin = async (pluginId: string) => {
         setUpdatingPluginId(pluginId);
         try {
             const updated = await updatePluginPackage(pluginId);
             deactivateClientPlugin(updated.manifest.id);
-            message.success(`插件「${updated.manifest.name}」已更新到 v${updated.manifest.version}`);
+            message.success(
+                isLocalFolderSource(updated.packageSpec)
+                    ? `已从文件夹重新加载插件「${updated.manifest.name}」`
+                    : `插件「${updated.manifest.name}」已更新到 v${updated.manifest.version}`,
+            );
             await reloadBackendPlugins();
+            return true;
         } catch (error) {
             message.error(error instanceof Error ? error.message : "更新插件失败");
+            return false;
         } finally {
             setUpdatingPluginId(null);
+        }
+    };
+
+    // 文件夹里是用户自己的代码，「重新加载」不用确认；其他来源换的是别人发布的新代码。
+    const handleUpdatePlugin = (plugin: BackendPlugin) => {
+        if (isLocalFolderSource(plugin.packageSpec)) {
+            void updateInstalledPlugin(plugin.manifest.id);
+            return;
+        }
+        setInstallPendingRequest(pluginUpdateRequest(plugin, updateCheck));
+        setInstallModalOpen(true);
+    };
+
+    const handleUpdateConfirm = async (request: PluginInstallConfirmRequest) => {
+        const target = backendPlugins.find((plugin) => plugin.packageSpec === request.source);
+        if (!target) {
+            message.error("这个插件已经不在了，刷新后再试");
+            return;
+        }
+        setInstalling(true);
+        const updated = await updateInstalledPlugin(target.manifest.id);
+        setInstalling(false);
+        if (updated) {
+            setInstallModalOpen(false);
+            setInstallPendingRequest(null);
         }
     };
 
@@ -493,11 +512,13 @@ export default function PluginsPage() {
                                                                                         可信插件
                                                                                     </span>
                                                                                 ) : null}
-                                                                                <span className="plugin-category-label">
-                                                                                    {contributionKindsFor(plugin.manifest)
-                                                                                        .map((kind) => categoryLabels[kind] ?? kind)
-                                                                                        .join(" · ")}
-                                                                                </span>
+                                                                                {contributionKindsFor(plugin.manifest).length ? (
+                                                                                    <span className="plugin-category-label">
+                                                                                        {contributionKindsFor(plugin.manifest)
+                                                                                            .map((kind) => categoryLabels[kind] ?? kind)
+                                                                                            .join(" · ")}
+                                                                                    </span>
+                                                                                ) : null}
                                                                             </div>
                                                                         </div>
                                                                     </div>
@@ -541,14 +562,13 @@ export default function PluginsPage() {
                                                                         onChange={(checked) => void togglePlugin(plugin, checked)}
                                                                     />
                                                                     {remote?.source === "package" && remote.packageSpec ? (
-                                                                        <Button
-                                                                            className="plugin-settings-button"
-                                                                            icon={<ArrowUpCircle className="size-4" />}
+                                                                        <PluginUpdateButton
+                                                                            pluginId={plugin.manifest.id}
+                                                                            packageSpec={remote.packageSpec}
+                                                                            check={updateCheck}
                                                                             loading={updatingPluginId === plugin.manifest.id}
-                                                                            onClick={() => void handleUpdatePlugin(plugin.manifest.id)}
-                                                                        >
-                                                                            更新
-                                                                        </Button>
+                                                                            onUpdate={() => handleUpdatePlugin(remote)}
+                                                                        />
                                                                     ) : null}
                                                                     {canConfigure ? (
                                                                         <Button
@@ -666,20 +686,6 @@ export default function PluginsPage() {
                                             <p>在创作页或图片、视频节点的提示词编辑器中使用“优化”按钮，即可让当前文本模型整理提示词。</p>
                                             <p className="mt-2 text-[var(--fs-micro)] text-foreground/50">插件不会自动覆盖原提示词，只有点击“采用”后才会回填到当前输入框。</p>
                                         </div>
-                                    ) : settingsPlugin.manifest.id === RUNNINGHUB_PLUGIN_ID ? (
-                                        <div className="plugin-settings-empty">
-                                            <p>RunningHub 的 API Key、Workflow / App 和字段映射在宿主设置页维护。</p>
-                                            <Button
-                                                type="primary"
-                                                icon={<ExternalLink className="size-4" />}
-                                                onClick={() => {
-                                                    setSettingsPluginId(null);
-                                                    navigate("/settings?section=runninghub");
-                                                }}
-                                            >
-                                                打开工作流设置
-                                            </Button>
-                                        </div>
                                     ) : settingsPlugin.manifest.configuration?.fields?.length ? (
                                         <PluginFieldsConfigForm
                                             fields={settingsPlugin.manifest.configuration.fields}
@@ -721,97 +727,12 @@ export default function PluginsPage() {
                                 setInstallModalOpen(false);
                                 setInstallPendingRequest(null);
                             }}
-                            onConfirm={(req) => void handleInstallConfirm(req)}
+                            onConfirm={(req) => void (req.isUpdate ? handleUpdateConfirm(req) : handleInstallConfirm(req))}
                         />
                     </div>
                 </div>
             </div>
         </main>
-    );
-}
-
-function PluginFieldsConfigForm({
-    fields,
-    initialValues,
-    onSave,
-}: {
-    fields: PluginField[];
-    initialValues: Record<string, unknown>;
-    onSave: (values: Record<string, unknown>) => void;
-}) {
-    const [values, setValues] = useState<Record<string, unknown>>(() => {
-        const defaults: Record<string, unknown> = {};
-        for (const field of fields) {
-            defaults[field.name] = initialValues[field.name] !== undefined ? initialValues[field.name] : field.default;
-        }
-        return defaults;
-    });
-
-    return (
-        <>
-            <div className="plugin-settings-fields">
-                {fields.map((field) => {
-                    const currentValue = values[field.name];
-                    const labelText = field.label || field.name;
-                    return (
-                        <div key={field.name} className="min-w-0">
-                            {field.type === "boolean" ? (
-                                <div className="plugin-setting-label-row">
-                                    <label htmlFor={`plugin-field-${field.name}`}>{labelText}</label>
-                                    <Switch
-                                        id={`plugin-field-${field.name}`}
-                                        checked={Boolean(currentValue)}
-                                        onChange={(checked) => setValues((prev) => ({ ...prev, [field.name]: checked }))}
-                                        aria-label={labelText}
-                                    />
-                                </div>
-                            ) : (
-                                <>
-                                    <label htmlFor={`plugin-field-${field.name}`}>{labelText}</label>
-                                    {field.type === "select" ? (
-                                        <Select
-                                            id={`plugin-field-${field.name}`}
-                                            aria-label={labelText}
-                                            value={typeof currentValue === "string" ? currentValue : undefined}
-                                            options={(field.values || []).map((val) => ({ value: val, label: val }))}
-                                            onChange={(next) => setValues((prev) => ({ ...prev, [field.name]: next }))}
-                                        />
-                                    ) : field.type === "number" ? (
-                                        <InputNumber
-                                            id={`plugin-field-${field.name}`}
-                                            aria-label={labelText}
-                                            className="w-full"
-                                            value={typeof currentValue === "number" ? currentValue : undefined}
-                                            onChange={(next) => setValues((prev) => ({ ...prev, [field.name]: next }))}
-                                        />
-                                    ) : field.type === "secret" ? (
-                                        <Input.Password
-                                            id={`plugin-field-${field.name}`}
-                                            aria-label={labelText}
-                                            value={typeof currentValue === "string" ? currentValue : ""}
-                                            onChange={(e) => setValues((prev) => ({ ...prev, [field.name]: e.target.value }))}
-                                        />
-                                    ) : (
-                                        <Input
-                                            id={`plugin-field-${field.name}`}
-                                            aria-label={labelText}
-                                            value={typeof currentValue === "string" ? currentValue : ""}
-                                            onChange={(e) => setValues((prev) => ({ ...prev, [field.name]: e.target.value }))}
-                                        />
-                                    )}
-                                </>
-                            )}
-                            {field.description ? <p>{field.description}</p> : null}
-                        </div>
-                    );
-                })}
-            </div>
-            <div className="plugin-settings-actions">
-                <Button type="primary" icon={<CheckCircle2 className="size-4" />} onClick={() => onSave(values)}>
-                    保存配置
-                </Button>
-            </div>
-        </>
     );
 }
 
@@ -838,12 +759,6 @@ function contributionKindsFor(manifest: PluginManifest | PluginManifestV2): stri
     if (contributions.providers?.length) kinds.push("provider");
     if (contributions.workflows?.length) kinds.push("workflow");
     if (contributions.canvasNodes?.length) kinds.push("canvas-node");
-    if (contributions.transforms?.length) kinds.push("transform");
-    if (contributions.assetSources?.length) kinds.push("asset-source");
-    if (contributions.aiCapabilities?.length) kinds.push("ai-capability");
-    if (contributions.usageObservers?.length) kinds.push("usage-observer");
-    if (contributions.agents?.length) kinds.push("agent");
-    if (contributions.importExport?.length) kinds.push("import-export");
     return kinds;
 }
 

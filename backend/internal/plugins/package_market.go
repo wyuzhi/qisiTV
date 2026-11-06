@@ -310,6 +310,9 @@ type curatedRegistryEntry struct {
 
 type curatedRegistryPayload struct {
 	Plugins []curatedRegistryEntry `json:"plugins"`
+	// Packages 只写 npm 包名，名称、说明和版本从 npm 读，上架只需加一行。
+	// 已发布的旧版 BeefTV 不认这个键，会直接忽略，不会出现缺信息的卡片。
+	Packages []string `json:"packages"`
 }
 
 func validCuratedRegistryPayload(raw []byte) bool {
@@ -413,7 +416,11 @@ func loadCuratedRegistryItemsWithCache(ctx context.Context, query, registry, cac
 		return nil
 	}
 	q := strings.ToLower(strings.TrimSpace(query))
-	out := make([]MarketPluginItem, 0, len(payload.Plugins))
+	out := make([]MarketPluginItem, 0, len(payload.Plugins)+len(payload.Packages))
+	listed := map[string]bool{}
+	for _, item := range payload.Plugins {
+		listed[strings.TrimSpace(item.PackageName)], listed[strings.TrimSpace(item.Npm)], listed[strings.TrimSpace(item.ID)] = true, true, true
+	}
 	for _, item := range payload.Plugins {
 		if q != "" &&
 			!strings.Contains(strings.ToLower(item.ID), q) &&
@@ -458,6 +465,39 @@ func loadCuratedRegistryItemsWithCache(ctx context.Context, query, registry, cac
 			Bundled:       bundled,
 		})
 	}
+	return append(out, listedPackageItems(ctx, payload.Packages, listed, q, registry, installed)...)
+}
+
+// listedPackageItems 把精选列表里只写包名的条目补全成市场卡片，查不到 npm 的跳过。
+func listedPackageItems(ctx context.Context, names []string, listed map[string]bool, query, registry string, installed map[string]View) []MarketPluginItem {
+	items := make([]MarketPluginItem, len(names))
+	found := make([]bool, len(names))
+	var wg sync.WaitGroup
+	for index, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" || listed[name] {
+			continue
+		}
+		listed[name] = true
+		wg.Add(1)
+		go func(index int, name string) {
+			defer wg.Done()
+			items[index], found[index] = fetchNpmPackageSummary(ctx, name, registry)
+		}(index, name)
+	}
+	wg.Wait()
+	out := make([]MarketPluginItem, 0, len(names))
+	for index, item := range items {
+		if !found[index] {
+			continue
+		}
+		if query != "" && !strings.Contains(strings.ToLower(item.PackageName), query) && !strings.Contains(strings.ToLower(item.Name), query) && !strings.Contains(strings.ToLower(item.Description), query) {
+			continue
+		}
+		inst, isInstalled := installed[item.ID]
+		item.Installed, item.Enabled, item.Recommended = isInstalled, isInstalled && inst.Status == StatusEnabled, true
+		out = append(out, item)
+	}
 	return out
 }
 
@@ -498,11 +538,7 @@ func fetchNpmMarketPlugins(ctx context.Context, query string, installed map[stri
 }
 
 func fetchNpmMarketPluginsWithRegistry(ctx context.Context, query, registry string, installed map[string]View) []MarketPluginItem {
-	registries := []string{NpmMirrorRegistry, NpmjsRegistry}
-	if strings.TrimRight(strings.TrimSpace(registry), "/") == NpmjsRegistry {
-		registries = []string{NpmjsRegistry, NpmMirrorRegistry}
-	}
-	for _, reg := range registries {
+	for _, reg := range npmRegistryOrder(registry) {
 		if ctx != nil && ctx.Err() != nil {
 			return nil
 		}
@@ -737,10 +773,7 @@ func fetchRemoteMarkdownText(ctx context.Context, targetURL string) (string, boo
 }
 
 func fetchNpmPackumentReadme(ctx context.Context, pkgName, registry string) (string, bool) {
-	registries := []string{NpmMirrorRegistry, NpmjsRegistry}
-	if strings.TrimRight(strings.TrimSpace(registry), "/") == NpmjsRegistry {
-		registries = []string{NpmjsRegistry, NpmMirrorRegistry}
-	}
+	registries := npmRegistryOrder(registry)
 	trimmed := strings.TrimSpace(pkgName)
 	escapedSlash := strings.ReplaceAll(url.PathEscape(trimmed), "%40", "@")
 	unencodedSlash := escapedSlash

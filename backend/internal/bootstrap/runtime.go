@@ -26,6 +26,7 @@ import (
 	canvasHandler "infinite-canvas/backend/internal/handler"
 	"infinite-canvas/backend/internal/localapp"
 	"infinite-canvas/backend/internal/modelcatalog"
+	"infinite-canvas/backend/internal/pluginhost"
 	"infinite-canvas/backend/internal/plugins"
 	"infinite-canvas/backend/internal/repository"
 	"infinite-canvas/backend/internal/runtimeinfo"
@@ -343,6 +344,7 @@ func initializeService(svc *app.Service) error {
 		svc.EnsureDefaultPromptTemplates,
 		svc.EnsureBuiltinProjectWorkflowTemplate,
 		svc.EnsureBuiltinSkills,
+		svc.SkillsDomain().SyncLocalSkillsAtStartup,
 		svc.EnsureSkillPackages,
 	}
 	for _, initialize := range initializers {
@@ -384,6 +386,8 @@ func (r *Runtime) Start() error {
 		defer close(r.backgroundDone)
 		r.service.RecoverPlaybackTranscodes()
 	}()
+	// 精选插件跟着精选列表自动更新；HTTP 服务关闭时一起停下。
+	go r.service.PluginDomain().RunOfficialUpdates(httpContext)
 	// The assistant loads its operation catalog from this server before becoming
 	// healthy. Accept requests before synchronously waiting for child readiness.
 	go func() {
@@ -507,6 +511,8 @@ func (r *Runtime) Close(ctx context.Context) error {
 				}
 			}
 		}
+		// 生成任务和 HTTP 请求都停了才关插件宿主：早关会杀掉还在提交的调用，后来的调用又会拉起新进程。
+		pluginhost.Close()
 		var serviceErr error
 		if r.localApp != nil {
 			serviceErr = r.localApp.Close()

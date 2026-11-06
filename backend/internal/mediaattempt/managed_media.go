@@ -367,7 +367,7 @@ func isUnrecoverableVideoQueryError(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "该任务的请求协议不支持安全查询上游状态") || strings.Contains(msg, "上游返回的任务 ID 与原视频任务不一致") ||
-		strings.Contains(msg, "RunningHub 返回的任务 ID 与原请求不一致") || strings.Contains(msg, "超分回执与原任务不一致") || strings.Contains(msg, "任务输入解析失败") || strings.Contains(msg, "该任务没有可恢复的上游任务 ID")
+		strings.Contains(msg, "超分回执与原任务不一致") || strings.Contains(msg, "任务输入解析失败") || strings.Contains(msg, "该任务没有可恢复的上游任务 ID")
 }
 
 func VideoTaskPastRetentionWindow(task model.Task, now time.Time) bool {

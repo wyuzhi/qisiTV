@@ -1,4 +1,3 @@
-import { MEDIA_CONVERSION_NODE_TYPE } from "@/lib/media-conversion/contracts";
 
 import { registerPlugin } from "../plugin-registry";
 import { PLUGIN_API_VERSION, type PluginManifest, type RegisteredPlugin } from "../plugin-types";
@@ -19,17 +18,7 @@ const manifest: PluginManifest = {
     surfaces: ["node"],
     permissions: ["canvas.read", "canvas.write", "media.read"],
     trusted: true,
-    runtime: { web: "declarative" },
-    contributes: {
-        transforms: [
-            {
-                id: MEDIA_CONVERSION_NODE_TYPE,
-                input: "media",
-                output: "media",
-                runtime: "declarative",
-            },
-        ],
-    },
+    contributes: {},
 };
 
 export const mediaConversionPlugin: RegisteredPlugin = { manifest };

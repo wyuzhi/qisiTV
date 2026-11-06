@@ -46,7 +46,7 @@ func writeSamplePluginDir(t *testing.T, version string) string {
 		t.Fatal(err)
 	}
 	pkgJSON := `{
-		"name": "@beeftv/plugin-storyboard-grid-test",
+		"name": "storyboard-grid-test",
 		"version": "` + version + `",
 		"description": "测试分镜九宫格插件",
 		"author": "BeefTV",
@@ -55,16 +55,15 @@ func writeSamplePluginDir(t *testing.T, version string) string {
 			"skills": ["./skills"]
 		},
 		"beeftv": {
-			"id": "storyboard-grid-test",
-			"displayName": "分镜九宫格测试",
+			"name": "分镜九宫格测试",
 			"client": "./dist/client.js",
 			"contributes": {
 				"canvasNodes": [
 					{
-						"type": "storyboard-grid-test",
-						"title": "分镜九宫格测试",
-						"defaultWidth": 520,
-						"defaultHeight": 420,
+						"id": "storyboard-grid-test",
+						"label": "分镜九宫格测试",
+						"defaultTitle": "分镜九宫格测试",
+						"defaultSize": { "width": 520, "height": 420 },
 						"renderer": "client"
 					}
 				]

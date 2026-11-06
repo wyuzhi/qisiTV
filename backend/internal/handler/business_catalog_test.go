@@ -47,11 +47,11 @@ func TestBusinessCatalogProjectsQueriesAndTrustedTaskFields(t *testing.T) {
 
 func TestBusinessCatalogOutboundPostsRequireWriteClient(t *testing.T) {
 	routes := gin.RoutesInfo{}
-	for _, path := range []string{"/ai/models", "/runninghub/workflow-info", "/runninghub/app-info"} {
+	for _, path := range []string{"/ai/models"} {
 		routes = append(routes, gin.RouteInfo{Method: "POST", Path: "/api" + path})
 	}
 	catalog := NewBusinessCatalog(routes)
-	if len(catalog.Tools) != 3 {
+	if len(catalog.Tools) != 1 {
 		t.Fatal("outbound tools missing")
 	}
 	for _, tool := range catalog.Tools {

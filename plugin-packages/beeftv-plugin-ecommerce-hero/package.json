@@ -1,6 +1,6 @@
 {
   "name": "beeftv-plugin-ecommerce-hero",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "上传商品图并选择需要生成的场景图张数，一键创建电商主图生成节点或由创作助手自动编排。",
   "type": "module",
   "license": "Apache-2.0",
@@ -22,13 +22,8 @@
     ]
   },
   "beeftv": {
-    "id": "beeftv-plugin-ecommerce-hero",
-    "apiVersion": "beeftv.plugin/v2",
-    "schemaVersion": 2,
     "name": "一键商品主图",
-    "version": "0.1.0",
-    "description": "上传商品图并选择需要生成的场景图张数，一键创建电商主图生成节点或由创作助手自动编排。",
-    "author": "BeefTV",
+    "client": "./client/index.js",
     "surfaces": [
       "node",
       "hybrid"
@@ -38,59 +33,16 @@
       "canvas.write",
       "generation.run"
     ],
-    "client": "./client/index.js",
-    "canvasNodes": [
-      {
-        "id": "ecommerce-hero",
-        "type": "ecommerce-hero",
-        "label": "一键商品主图",
-        "title": "一键商品主图",
-        "defaultTitle": "商品主图",
-        "description": "上传商品白底图/实拍图，选择场景张数并生成电商主图",
-        "renderer": "client",
-        "defaultWidth": 320,
-        "defaultHeight": 280,
-        "defaultSize": {
-          "width": 320,
-          "height": 280
-        },
-        "acceptsInputKind": "image",
-        "schema": {
-          "type": "object",
-          "properties": {
-            "productTitle": {
-              "type": "string"
-            },
-            "imageUrl": {
-              "type": "string"
-            },
-            "sceneStyle": {
-              "type": "string"
-            },
-            "sceneCount": {
-              "type": "number"
-            }
-          }
-        }
-      }
-    ],
     "contributes": {
       "canvasNodes": [
         {
           "id": "ecommerce-hero",
-          "type": "ecommerce-hero",
           "label": "一键商品主图",
-          "title": "一键商品主图",
           "defaultTitle": "商品主图",
-          "description": "上传商品白底图/实拍图，选择场景张数并生成电商主图",
-          "renderer": "client",
-          "defaultWidth": 320,
-          "defaultHeight": 280,
           "defaultSize": {
             "width": 320,
             "height": 280
           },
-          "acceptsInputKind": "image",
           "schema": {
             "type": "object",
             "properties": {
@@ -107,7 +59,10 @@
                 "type": "number"
               }
             }
-          }
+          },
+          "renderer": "client",
+          "description": "上传商品白底图/实拍图，选择场景张数并生成电商主图",
+          "acceptsInputKind": "image"
         }
       ]
     }
@@ -117,5 +72,6 @@
     "skills",
     "client",
     "README.md"
-  ]
+  ],
+  "author": "BeefTV"
 }

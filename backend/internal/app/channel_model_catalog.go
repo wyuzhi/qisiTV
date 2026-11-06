@@ -20,7 +20,7 @@ func (s *Service) FetchChannelModels(ctx context.Context, actor *model.User, inp
 }
 
 func (s *Service) FetchChannelModelCatalog(ctx context.Context, actor *model.User, input ChannelModelsRequest) ([]ChannelModelCatalogItem, error) {
-	return generation.FetchChannelModelCatalog(ctx, actor, input, s.resolveChannelModelsRequest, s.fetchChannelModelCatalogBytes, s.catalogExtraSource())
+	return generation.FetchChannelModelCatalog(ctx, actor, input, s.resolveChannelModelsRequest, s.fetchChannelModelCatalogBytes, s.catalogExtraSource(), s.protocolRegistry().Resolve)
 }
 
 func (s *Service) fetchChannelModelCatalogBytes(ctx context.Context, baseURL, apiFormat, apiKey string, headers []modelcatalog.ChannelHeader) ([]byte, error) {

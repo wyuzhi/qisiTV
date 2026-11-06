@@ -26,4 +26,4 @@
 .skill-publish-status { padding: 16px 0; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
 .skill-publish-status p { margin-bottom: 10px; }
 @media (max-width: 720px) { .app-section-page.skill-market-page .skill-market-header .app-section-page-header { min-height: 44px; padding-block: 6px; } .skill-market-page .skill-market-header .app-section-page-header p { display: none; } }
-@media (max-width: 640px) { .skill-market-row { flex-direction: column; gap: 12px; } .skill-publish-layout { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 640px) { .skill-market-page .skill-market-toolbar { flex-wrap: wrap; } .skill-market-page .skill-market-toolbar .ant-input-search { flex: 1 1 100%; max-width: none; } .skill-market-row { flex-direction: column; gap: 12px; } .skill-publish-layout { grid-template-columns: minmax(0, 1fr); } }

@@ -73,10 +73,7 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 		if err != nil {
 			return nil, fmt.Errorf("校验官方插件包 %s：%w", entry.Name(), err)
 		}
-		if strings.HasPrefix(strings.TrimSpace(pkg.Manifest.Runtime.Backend), "host:") {
-			return nil, fmt.Errorf("官方插件 %q 不能依赖 host 执行器", pkg.Manifest.Metadata.ID)
-		}
-		if _, err := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil); err != nil {
+		if _, err := protocol.LoadInstalledProviders(pkg.ManifestRaw); err != nil {
 			return nil, fmt.Errorf("加载官方插件 %q：%w", pkg.Manifest.Metadata.ID, err)
 		}
 		id := pkg.Manifest.Metadata.ID
@@ -129,7 +126,7 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 		if err != nil {
 			return nil, fmt.Errorf("校验官方插件目录 %s：%w", builtinName, err)
 		}
-		if _, err := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil); err != nil {
+		if _, err := protocol.LoadInstalledProviders(pkg.ManifestRaw); err != nil {
 			return nil, fmt.Errorf("加载官方插件 %q：%w", pkg.Manifest.Metadata.ID, err)
 		}
 		id := pkg.Manifest.Metadata.ID
@@ -169,38 +166,6 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 			next.UpdatedAt = record.UpdatedAt
 		}
 		byID[id] = next
-	}
-	bundledManifests := BundledWorkflowManifests()
-	for _, bundled := range bundledManifests {
-		builtInIDs[bundled.Metadata.ID] = struct{}{}
-		data, err := json.Marshal(bundled)
-		if err != nil {
-			return nil, fmt.Errorf("encode built-in plugin %s: %w", bundled.Metadata.ID, err)
-		}
-		record := byID[bundled.Metadata.ID]
-		if len(record.Raw) > 0 {
-			var installed protocol.Manifest
-			if err := json.Unmarshal(record.Raw, &installed); err != nil {
-				return nil, fmt.Errorf("decode built-in plugin %s: %w", bundled.Metadata.ID, err)
-			}
-			bundled.Metadata.Enabled = installed.Metadata.Enabled
-			data, err = json.Marshal(bundled)
-			if err != nil {
-				return nil, fmt.Errorf("encode built-in plugin %s: %w", bundled.Metadata.ID, err)
-			}
-		}
-		now := time.Now().UTC()
-		next := RegistryRecord{
-			ID: bundled.Metadata.ID, Raw: data, Source: OriginOfficial,
-			InstalledAt: now, UpdatedAt: now,
-		}
-		if !record.InstalledAt.IsZero() {
-			next.InstalledAt = record.InstalledAt
-		}
-		if !registryRecordContentChanged(record, next) {
-			next.UpdatedAt = record.UpdatedAt
-		}
-		byID[bundled.Metadata.ID] = next
 	}
 	missing := make([]RegistryRecord, 0, len(byID))
 	for _, record := range byID {

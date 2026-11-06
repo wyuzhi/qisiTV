@@ -114,7 +114,7 @@ func (s TaskCodec) DecryptValue(value interface{}) error {
 
 func isTaskSecretField(key string) bool {
 	switch key {
-	case "apiKey", "secretKey", "runningHubWalletApiKey", "runningHubUploadApiKey":
+	case "apiKey", "secretKey":
 		return true
 	default:
 		return false

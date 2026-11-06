@@ -88,12 +88,7 @@ func RegisterPluginRoutes(r *gin.RouterGroup, center pluginCenter, hosted ...boo
 			failService(c, err)
 			return
 		}
-		statuses, err := center.PluginDomain().WorkflowStatusesForUser(user.ID)
-		if err != nil {
-			failService(c, err)
-			return
-		}
-		ok(c, gin.H{"statuses": statuses, "states": states})
+		ok(c, gin.H{"states": states})
 	})
 	pluginRoutes := r.Group("/plugins")
 	pluginRoutes.Use(requirePluginCenterAccess(center))
@@ -124,6 +119,9 @@ func RegisterPluginRoutes(r *gin.RouterGroup, center pluginCenter, hosted ...boo
 			return
 		}
 		ok(c, gin.H{"items": items})
+	})
+	pluginRoutes.GET("/updates", func(c *gin.Context) {
+		ok(c, center.PluginDomain().CheckUpdates(c.Request.Context(), c.Query("registry")))
 	})
 	pluginRoutes.GET("/market/readme", func(c *gin.Context) {
 		readme, err := center.PluginDomain().FetchMarketReadme(c.Request.Context(), c.Query("id"), c.Query("registry"))

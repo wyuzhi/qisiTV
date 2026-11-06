@@ -15,7 +15,6 @@ export type BackendPlugin = {
     management: PluginManagement;
 };
 
-export type WorkflowPluginStatus = "enabled" | "disabled" | "invalid" | string;
 
 export type PluginManagement = {
     origin: "official" | "system" | "uploaded" | "package";
@@ -40,7 +39,7 @@ export async function fetchPlugins() {
 }
 
 export async function fetchPluginRuntimeState() {
-    return http.get<{ statuses: Record<string, WorkflowPluginStatus>; states: Record<string, PluginState> }>("/plugins/status");
+    return http.get<{ states: Record<string, PluginState> }>("/plugins/status");
 }
 
 // npm downloads a package and its dependencies; the backend allows up to three minutes.
@@ -62,6 +61,14 @@ export async function installPluginPackage(payload: { source: string; registry?:
 export async function updatePluginPackage(id: string, registry?: string) {
     const result = await http.post<{ plugin: BackendPlugin }>(`/plugins/${encodeURIComponent(id)}/update`, { registry }, { timeout: PACKAGE_INSTALL_TIMEOUT_MS });
     return result.plugin;
+}
+
+export type PluginUpdateNotice = { id: string; version: string; latest: string; official?: boolean };
+/** updates 是有新版本的插件，upToDate 是确认已是最新的插件；两边都不在的插件没法比较版本。 */
+export type PluginUpdateCheck = { updates: PluginUpdateNotice[]; upToDate: string[] };
+
+export async function fetchPluginUpdates(signal?: AbortSignal) {
+    return http.get<PluginUpdateCheck>("/plugins/updates", { signal, timeout: 15_000 });
 }
 
 export async function reportPluginLoadError(id: string, error: string) {

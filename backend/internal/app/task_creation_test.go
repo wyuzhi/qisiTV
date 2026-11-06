@@ -15,30 +15,6 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestTaskInputUsesWorkflowProvider(t *testing.T) {
-	tests := []struct {
-		name  string
-		input map[string]any
-		want  bool
-	}{
-		{name: "runninghub workflow", input: map[string]any{"config": map[string]any{"interfaceType": "runninghub-workflow-video"}}, want: true},
-		{name: "case insensitive", input: map[string]any{"config": map[string]any{"interfaceType": "RunningHub-Workflow-Audio"}}, want: true},
-		{name: "ordinary model", input: map[string]any{"config": map[string]any{"interfaceType": "openai-image", "channelId": "system-1", "model": "image-model"}}, want: false},
-		{name: "missing config", input: map[string]any{}, want: false},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := taskInputUsesWorkflowProvider(test.input); got != test.want {
-				t.Fatalf("taskInputUsesWorkflowProvider() = %v, want %v", got, test.want)
-			}
-			if test.want && taskInputUsesCustomChannel(test.input) {
-				t.Fatal("workflow input must not be classified as a custom channel")
-			}
-		})
-	}
-}
-
 func TestCreateTaskReplaysSameClientOperationAndRejectsDifferentContent(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+newID()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -254,7 +230,7 @@ func TestCreateTaskPersistsAuthoritativeSystemChannelSelection(t *testing.T) {
 				"quality":          "2k",
 				"variantId":        "client-tier",
 				"providerModelKey": "client-provider-model",
-				"interfaceType":    "runninghub-workflow-image",
+				"interfaceType":    "client-interface",
 				"apiFormat":        "client-format",
 				"baseUrl":          "https://attacker.invalid/v1",
 				"apiKey":           "client-api-key",
@@ -318,7 +294,7 @@ func TestResolveSystemChannelModelSelectionRebuildsAuthoritativeExecutionSpec(t 
 			"quality":          "2k",
 			"variantId":        "client-tier",
 			"providerModelKey": "client-provider-model",
-			"interfaceType":    "runninghub-workflow-image",
+			"interfaceType":    "client-interface",
 			"apiFormat":        "client-format",
 			"baseUrl":          "https://attacker.invalid/v1",
 			"apiKey":           "client-api-key",
