@@ -4,6 +4,12 @@
   "description": "上传商品图并选择需要生成的场景图张数，一键创建电商主图生成节点或由创作助手自动编排。",
   "type": "module",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sunnyender-org/beeftv-plugins.git",
+    "directory": "plugins/beeftv-plugin-ecommerce-hero"
+  },
+  "homepage": "https://github.com/Sunnyender-org/beeftv-plugins/tree/main/plugins/beeftv-plugin-ecommerce-hero",
   "keywords": [
     "beeftv-plugin",
     "ecommerce",

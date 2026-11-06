@@ -4,6 +4,12 @@
   "description": "在画布上放置可换色、可编辑的便签卡片，并支持创作助手直接创建和修改便签。",
   "type": "module",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sunnyender-org/beeftv-plugins.git",
+    "directory": "plugins/beeftv-plugin-sticky-note"
+  },
+  "homepage": "https://github.com/Sunnyender-org/beeftv-plugins/tree/main/plugins/beeftv-plugin-sticky-note",
   "keywords": [
     "beeftv-plugin",
     "sticky-note",

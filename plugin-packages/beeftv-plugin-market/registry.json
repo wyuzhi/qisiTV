@@ -1,28 +1,74 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-04",
+  "updatedAt": "2026-11-06",
   "plugins": [
     {
       "id": "beeftv-plugin-character-replacement",
       "packageName": "beeftv-plugin-character-replacement",
       "npm": "beeftv-plugin-character-replacement",
       "name": "AI 角色替换工作室",
-      "version": "0.1.4",
+      "version": "0.1.5",
       "description": "面向短剧与漫剧的二阶段角色替换插件：关键帧角色替换（含 SVG 框位图引导）+ 视频角色替换（replace_element）+ 全片时间轴回插。",
       "author": "BeefTV",
       "category": "短剧与视频创作",
       "recommended": true,
       "repo": "https://github.com/Sunnyender-org/beeftv-plugins/tree/main/plugins/beeftv-plugin-character-replacement",
       "readme": "https://raw.githubusercontent.com/Sunnyender-org/beeftv-plugins/main/plugins/beeftv-plugin-character-replacement/README.md",
-      "tarball": "https://github.com/Sunnyender-org/beeftv-plugins/releases/download/v0.1.4/beeftv-plugin-character-replacement-0.1.4.tgz",
-      "mirrorTarball": "https://cdn.jsdelivr.net/gh/Sunnyender-org/beeftv-plugins@v0.1.4/dist/beeftv-plugin-character-replacement-0.1.4.tgz",
-      "sha256": "f827406e25ab586933624b36d657ffccbc16bf74a6eb554039217f62fd4e0db1",
+      "tarball": "https://github.com/Sunnyender-org/beeftv-plugins/releases/download/v0.2.0/beeftv-plugin-character-replacement-0.1.5.tgz",
+      "mirrorTarball": "https://cdn.jsdelivr.net/gh/Sunnyender-org/beeftv-plugins@v0.2.0/dist/beeftv-plugin-character-replacement-0.1.5.tgz",
+      "sha256": "4d541a59a769cbdbf82a857a02173f3fce7aee34418559817efebf8d8b15aff5",
       "tags": [
         "画布节点",
         "角色替换",
         "时间轴回插",
         "助手工具",
         "技能"
+      ]
+    },
+    {
+      "id": "beeftv-plugin-comfyui",
+      "packageName": "beeftv-plugin-comfyui",
+      "npm": "beeftv-plugin-comfyui",
+      "name": "ComfyUI",
+      "version": "0.1.0",
+      "description": "把本机或局域网里的 ComfyUI 接进 BeefTV：在 ComfyUI 里保存的工作流就是模型，画布上直接用它出图、出视频、出音频。",
+      "author": "BeefTV",
+      "category": "生成服务",
+      "recommended": true,
+      "repo": "https://github.com/Sunnyender-org/beeftv-plugins/tree/main/plugins/beeftv-plugin-comfyui",
+      "readme": "https://raw.githubusercontent.com/Sunnyender-org/beeftv-plugins/main/plugins/beeftv-plugin-comfyui/README.md",
+      "tarball": "https://github.com/Sunnyender-org/beeftv-plugins/releases/download/v0.2.0/beeftv-plugin-comfyui-0.1.0.tgz",
+      "mirrorTarball": "https://cdn.jsdelivr.net/gh/Sunnyender-org/beeftv-plugins@v0.2.0/dist/beeftv-plugin-comfyui-0.1.0.tgz",
+      "sha256": "81a9897c56f3b1c5b8208b8544c34741fa28f2653106c34dca7dc1e39311b2e7",
+      "tags": [
+        "ComfyUI",
+        "工作流",
+        "图片",
+        "视频",
+        "音频"
+      ]
+    },
+    {
+      "id": "beeftv-plugin-runninghub",
+      "packageName": "beeftv-plugin-runninghub",
+      "npm": "beeftv-plugin-runninghub",
+      "name": "RunningHub",
+      "version": "0.1.0",
+      "description": "把 RunningHub 接进 BeefTV：你的工作流和 AI 应用就是模型，画布上直接用它们生成图片、视频和音频。",
+      "author": "BeefTV",
+      "category": "生成服务",
+      "recommended": true,
+      "repo": "https://github.com/Sunnyender-org/beeftv-plugins/tree/main/plugins/beeftv-plugin-runninghub",
+      "readme": "https://raw.githubusercontent.com/Sunnyender-org/beeftv-plugins/main/plugins/beeftv-plugin-runninghub/README.md",
+      "tarball": "https://github.com/Sunnyender-org/beeftv-plugins/releases/download/v0.2.0/beeftv-plugin-runninghub-0.1.0.tgz",
+      "mirrorTarball": "https://cdn.jsdelivr.net/gh/Sunnyender-org/beeftv-plugins@v0.2.0/dist/beeftv-plugin-runninghub-0.1.0.tgz",
+      "sha256": "be8647b6a624d41c004784448c7ac2f66ae2ed0ea3f7bb897cc74ef27a9c6dd7",
+      "tags": [
+        "RunningHub",
+        "工作流",
+        "图片",
+        "视频",
+        "音频"
       ]
     }
   ]

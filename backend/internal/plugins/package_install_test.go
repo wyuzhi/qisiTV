@@ -691,11 +691,14 @@ func TestBundledPluginDirsManifestAndDesktopAgentHostResolution(t *testing.T) {
 			offlineCtx, cancel := context.WithCancel(context.Background())
 			cancel()
 			curated := loadCuratedRegistryItems(offlineCtx, "", map[string]View{})
-			if len(curated) != 1 || curated[0].ID != "beeftv-plugin-character-replacement" {
-				t.Fatalf("expected curated registry to list only beeftv-plugin-character-replacement, got %+v", curated)
+			want := []string{"beeftv-plugin-character-replacement", "beeftv-plugin-comfyui", "beeftv-plugin-runninghub"}
+			if len(curated) != len(want) {
+				t.Fatalf("expected curated registry to list %v, got %+v", want, curated)
 			}
-			if curated[0].Bundled {
-				t.Fatalf("market plugin %s must not be marked Bundled=true", curated[0].ID)
+			for i, item := range curated {
+				if item.ID != want[i] || item.Bundled {
+					t.Fatalf("curated[%d] = %+v, want %s and not bundled", i, item, want[i])
+				}
 			}
 		})
 	}
