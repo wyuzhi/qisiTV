@@ -1,6 +1,7 @@
 // Package pluginhost 在一个 Node 子进程里运行插件的 JS 生成接口。做法照 Magpie 的插件
 // 宿主：按行收发 JSON，后端按 id 配对请求与回复，取消时发 abort；插件代码自己发请求。
 // 同一插件换了版本时，新调用进新进程，旧进程等手上的调用结束后随 stdin 关闭退出。
+// 进程卡死（abort 没回话）时直接结束，下一次调用启动新进程。
 package pluginhost
 
 import (
@@ -15,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -22,7 +24,11 @@ import (
 	"infinite-canvas/backend/internal/assistantruntime"
 )
 
-const scriptName = "plugin-host.mjs"
+const (
+	scriptName = "plugin-host.mjs"
+	// Node 只要事件循环没卡住就会马上回 abort。等这么久还没回，就当进程已经卡死。
+	abortAckTimeout = 5 * time.Second
+)
 
 // 单次调用的上限，覆盖插件自己的网络超时；轮询节奏由调用方决定。
 var methodTimeouts = map[string]time.Duration{"submit": 5 * time.Minute, "query": time.Minute, "models": 25 * time.Second}
@@ -40,6 +46,8 @@ type Host struct {
 	mu      sync.Mutex
 	resolve func() (string, string, error)
 	current *process
+	// retired 是换下来但手上还有调用的进程，退出应用时要一起结束。
+	retired []*process
 }
 
 var defaultHost = &Host{resolve: resolveCommand}
@@ -71,6 +79,10 @@ func (h *Host) Do(ctx context.Context, call Call, out any) error {
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
+	// 已取消的调用不能发给插件：submit 一发出，上游就可能开始生成并收费。
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	p, err := h.acquire(call)
 	if err != nil {
 		return err
@@ -85,20 +97,31 @@ func (h *Host) Do(ctx context.Context, call Call, out any) error {
 
 func (h *Host) Close() {
 	h.mu.Lock()
-	p := h.current
-	h.current = nil
-	h.mu.Unlock()
-	if p != nil {
-		p.kill()
+	running := h.retired
+	if h.current != nil {
+		running = append(running, h.current)
 	}
+	h.current, h.retired = nil, nil
+	h.mu.Unlock()
+	var wg sync.WaitGroup
+	for _, p := range running {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p.kill()
+		}()
+	}
+	wg.Wait()
 }
 
 func (h *Host) acquire(call Call) (*process, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.retired = slices.DeleteFunc(h.retired, (*process).exited)
 	p := h.current
-	if p != nil && (p.exited() || p.loadsOtherVersion(call.Plugin, call.Version)) {
+	if p != nil && !p.accepts(call.Plugin, call.Version) {
 		p.retire()
+		h.retired = append(h.retired, p)
 		p = nil
 	}
 	if p == nil {
@@ -146,6 +169,7 @@ func start(node, script string) (*process, error) {
 	cmd.Dir = filepath.Dir(script)
 	cmd.Env = childEnv()
 	cmd.Stderr = logWriter{}
+	assistantruntime.ConfigureHostProcess(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -194,19 +218,17 @@ func (p *process) read(stdout io.Reader) {
 }
 
 func (p *process) call(ctx context.Context, params map[string]any) (json.RawMessage, error) {
-	ch := make(chan reply, 1)
-	p.mu.Lock()
-	if p.failure != nil {
-		err := p.failure
-		p.mu.Unlock()
+	id, ch, err := p.register()
+	if err != nil {
 		return nil, err
 	}
-	p.nextID++
-	id := p.nextID
-	p.waiting[id] = ch
-	p.mu.Unlock()
-	if err := p.write(map[string]any{"id": id, "method": "call", "params": params}); err != nil {
+	if err := p.write(ctx, map[string]any{"id": id, "method": "call", "params": params}); err != nil {
+		if ctx.Err() != nil {
+			p.abort(id)
+			return nil, ctx.Err()
+		}
 		p.forget(id)
+		p.stop()
 		return nil, err
 	}
 	select {
@@ -219,21 +241,69 @@ func (p *process) call(ctx context.Context, params map[string]any) (json.RawMess
 		}
 		return message.Result, nil
 	case <-ctx.Done():
-		p.forget(id)
-		_ = p.write(map[string]any{"method": "abort", "params": map[string]any{"id": id}})
+		p.abort(id)
 		return nil, ctx.Err()
 	}
 }
 
-func (p *process) write(message any) error {
+func (p *process) register() (int64, chan reply, error) {
+	ch := make(chan reply, 1)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.failure != nil {
+		return 0, nil, p.failure
+	}
+	p.nextID++
+	p.waiting[p.nextID] = ch
+	return p.nextID, ch, nil
+}
+
+// abort 让插件停下这次调用，并等 Node 回话。没回话说明事件循环卡死了，留着它后面的
+// 调用都会一直等到超时，所以结束这个进程，下一次调用启动新的。
+func (p *process) abort(id int64) {
+	p.forget(id)
+	ackID, ack, err := p.register()
+	if err != nil {
+		return
+	}
+	defer p.forget(ackID)
+	ctx, cancel := context.WithTimeout(context.Background(), abortAckTimeout)
+	defer cancel()
+	if err := p.write(ctx, map[string]any{"id": ackID, "method": "abort", "params": map[string]any{"id": id}}); err != nil {
+		p.stop()
+		return
+	}
+	select {
+	case <-ack:
+	case <-ctx.Done():
+		p.stop()
+	}
+}
+
+// write 另开 goroutine 写 stdin：进程卡住时管道写满，Write 不会返回，调用方不能跟着等。
+// 排队等写锁期间取消的消息不再发出。
+func (p *process) write(ctx context.Context, message any) error {
 	line, err := json.Marshal(message)
 	if err != nil {
 		return err
 	}
-	p.writeMu.Lock()
-	defer p.writeMu.Unlock()
-	_, err = p.stdin.Write(append(line, '\n'))
-	return err
+	done := make(chan error, 1)
+	go func() {
+		p.writeMu.Lock()
+		defer p.writeMu.Unlock()
+		if err := ctx.Err(); err != nil {
+			done <- err
+			return
+		}
+		_, err := p.stdin.Write(append(line, '\n'))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (p *process) forget(id int64) {
@@ -260,11 +330,15 @@ func (p *process) exited() bool {
 	}
 }
 
-func (p *process) loadsOtherVersion(plugin, version string) bool {
+// accepts 判断这个进程还能不能接这次调用：进程还在、没被换下，也没加载过这个插件的别的版本。
+func (p *process) accepts(plugin, version string) bool {
+	if p.exited() {
+		return false
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	loaded, ok := p.loaded[plugin]
-	return ok && loaded != version
+	return !p.retired && (!ok || loaded == version)
 }
 
 func (p *process) hold(plugin, version string) {
@@ -277,22 +351,30 @@ func (p *process) hold(plugin, version string) {
 func (p *process) release() {
 	p.mu.Lock()
 	p.active--
-	closeNow := p.retired && p.active == 0
+	idle := p.retired && p.active == 0
 	p.mu.Unlock()
-	if closeNow {
-		_ = p.stdin.Close()
+	if idle {
+		go p.kill()
 	}
 }
 
-// retire 让旧进程不再接新调用；手上的调用结束后关闭 stdin，Node 端随之退出。
+// retire 让旧进程不再接新调用；手上的调用结束后结束进程。
 func (p *process) retire() {
 	p.mu.Lock()
 	p.retired = true
-	closeNow := p.active == 0
+	idle := p.active == 0
 	p.mu.Unlock()
-	if closeNow {
-		_ = p.stdin.Close()
+	if idle {
+		go p.kill()
 	}
+}
+
+// stop 立刻结束不再响应的进程，手上的调用随之失败。
+func (p *process) stop() {
+	p.mu.Lock()
+	p.retired = true
+	p.mu.Unlock()
+	_ = p.cmd.Process.Kill()
 }
 
 func (p *process) kill() {

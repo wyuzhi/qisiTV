@@ -253,3 +253,62 @@ func TestSkillPackageOnlyLimitsTotalSize(t *testing.T) {
 		t.Fatalf("expected the total limit, got %v", err)
 	}
 }
+
+func TestLocalSkillsStayWhenTheirFolderIsTemporarilyMissing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	drive := filepath.Join(home, "drive")
+	writeLocalSkill(t, filepath.Join(drive, "linked"), map[string]string{"SKILL.md": "---\nname: linked\ndescription: 软链接技能\n---\n正文"})
+	writeLocalSkill(t, filepath.Join(drive, "skills", "held"), map[string]string{"SKILL.md": "---\nname: held\ndescription: 目录技能\n---\n正文"})
+	root := filepath.Join(home, ".agents", "skills")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(drive, "linked"), filepath.Join(root, "linked")); err != nil {
+		t.Skip(err)
+	}
+	writeLocalSkill(t, filepath.Join(root, "local"), map[string]string{"SKILL.md": "---\nname: local\ndescription: 普通技能\n---\n正文"})
+	s := localSkillFixture(t)
+	if err := s.SyncLocalSkills(); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(localSkillIDs(t, s), ","); got != "local-linked,local-local" {
+		t.Fatalf("skills = %s", got)
+	}
+
+	// 外接硬盘拔掉后软链接断了，技能记录要留着，插回来才能接着用。
+	if err := os.Rename(drive, drive+"-away"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SyncLocalSkills(); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(localSkillIDs(t, s), ","); got != "local-linked,local-local" {
+		t.Fatalf("skills after the link broke = %s", got)
+	}
+
+	// 整个技能目录都是软链接时同理。
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(drive, "skills"), root); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SyncLocalSkills(); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(localSkillIDs(t, s), ","); got != "local-linked,local-local" {
+		t.Fatalf("skills after the root link broke = %s", got)
+	}
+
+	// 目录真的没有了，才算技能被删掉。
+	if err := os.Remove(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SyncLocalSkills(); err != nil {
+		t.Fatal(err)
+	}
+	if got := localSkillIDs(t, s); len(got) != 0 {
+		t.Fatalf("skills after the folder was removed = %v", got)
+	}
+}

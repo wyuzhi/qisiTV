@@ -2,6 +2,7 @@ import { AlertTriangle, CheckCircle2, FolderGit2, Package } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button, Checkbox, Input, Modal, Radio, Tag } from "antd";
 import type { PluginInstallConfirmRequest } from "@/lib/plugins/plugin-types";
+import type { BackendPlugin, PluginUpdateCheck } from "@/services/api/plugins";
 
 /** 本地文件夹的绝对路径；其余来源是 npm 包名、地址或仓库。 */
 export function isLocalFolderSource(source: string | undefined): boolean {
@@ -11,6 +12,19 @@ export function isLocalFolderSource(source: string | undefined): boolean {
 // Requests come from plugins too, so nothing in them can waive the risk confirmation.
 export function installSourceLabel(request: PluginInstallConfirmRequest): string {
     return isLocalFolderSource(request.source) ? "本地目录" : "npm 包";
+}
+
+/** 更新换的是另一份代码，和安装一样要确认。 */
+export function pluginUpdateRequest(plugin: BackendPlugin, check?: PluginUpdateCheck): PluginInstallConfirmRequest {
+    const notice = check?.updates.find((item) => item.id === plugin.manifest.id);
+    return {
+        source: plugin.packageSpec ?? plugin.manifest.id,
+        name: plugin.manifest.name,
+        version: notice ? `${notice.version} → ${notice.latest}` : plugin.manifest.version,
+        author: plugin.manifest.author,
+        description: plugin.manifest.description,
+        isUpdate: true,
+    };
 }
 
 type PluginInstallConfirmModalProps = {
@@ -102,13 +116,13 @@ export function PluginInstallConfirmModal({ open, initialRequest, loading = fals
                             <span>这是第三方插件，BeefTV 没有审核过它的代码</span>
                         </div>
                         <p className="m-0 leading-relaxed text-foreground/85">
-                            安装后，它能读取 BeefTV 里的数据，包括你在本机保存的 API Key，也能调用付费生成，费用从你的账户扣。请只安装你信任的插件。
+                            {draftRequest.isUpdate ? "更新后" : "安装后"}，它能读取 BeefTV 里的数据，包括你在本机保存的 API Key，也能调用付费生成，费用从你的账户扣。请只{draftRequest.isUpdate ? "更新" : "安装"}你信任的插件。
                         </p>
                     </div>
 
                     <div className="rounded-lg border border-border/70 bg-muted/15 px-3 py-2.5">
                         <Checkbox data-testid="plugin-install-confirm-checkbox" checked={riskAccepted} onChange={(e) => setRiskAccepted(e.target.checked)}>
-                            <span className="text-xs font-medium text-foreground">我了解风险，确认安装</span>
+                            <span className="text-xs font-medium text-foreground">我了解风险，确认{draftRequest.isUpdate ? "更新" : "安装"}</span>
                         </Checkbox>
                     </div>
 

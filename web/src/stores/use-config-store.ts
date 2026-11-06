@@ -391,15 +391,22 @@ export const useConfigStore = create<ConfigStore>()(
 // storage only caches presentation/preferences, never an extra plaintext copy.
 export function configWithoutCachedSecrets(config: AiConfig): AiConfig {
     return {
-        ...config,
+        ...withoutRemovedSettings(config),
         apiKey: "",
         channels: config.channels.map((channel) => ({ ...channel, apiKey: "", secretKey: "", headers: [] })),
     };
 }
 
+// 旧版把 RunningHub 的 Key 存在 config.runningHub。这个能力搬进插件后没有代码再读它，
+// 但对象展开会把它带回本地缓存和工作区配置，所以读写时都去掉。
+function withoutRemovedSettings<T extends Partial<AiConfig>>(config: T): T {
+    const { runningHub: _removed, ...rest } = config as T & { runningHub?: unknown };
+    return rest as T;
+}
+
 export function normalizeConfigSnapshot(snapshot: ConfigStoreSnapshot | undefined = {}) {
     // 坏存储/旧版本快照可能是 undefined 或缺 config，兜底为 defaultConfig，保证渲染不崩溃
-    const persistedConfig = (snapshot?.config || {}) as Partial<AiConfig>;
+    const persistedConfig = withoutRemovedSettings((snapshot?.config || {}) as Partial<AiConfig>);
     const config = {
         ...defaultConfig,
         ...persistedConfig,

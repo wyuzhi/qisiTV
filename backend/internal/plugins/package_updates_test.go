@@ -143,3 +143,44 @@ func TestOneLineRegistryEntriesAreFilledFromNpm(t *testing.T) {
 		t.Fatalf("query hits = %+v", hits)
 	}
 }
+
+func TestVersionedInstallUpdatesToLatestByHandOnly(t *testing.T) {
+	npmFixture(t, map[string]string{"beeftv-plugin-held": "0.2.0"})
+	rt, err := NewRuntime(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(rt, nil)
+	folder := func(version string) string {
+		dir := t.TempDir()
+		writePluginFolder(t, dir, map[string]string{
+			"package.json":    `{"name":"beeftv-plugin-held","version":"` + version + `","beeftv":{"client":"./client/index.js"}}`,
+			"client/index.js": "export function activate() {}\n",
+		})
+		return dir
+	}
+	dirs := map[string]string{"beeftv-plugin-held@0.1.0": folder("0.1.0"), "beeftv-plugin-held": folder("0.2.0")}
+	svc.SetPackageFetcher(func(ctx context.Context, spec, registry, prefixDir string) (string, error) {
+		return copyPackageFetcher(ctx, dirs[spec], registry, prefixDir)
+	})
+	if _, err := svc.InstallPackage("beeftv-plugin-held@0.1.0", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// 精选列表有新版本时只提示，不算自动更新。
+	setCuratedRegistryForTest(`{"plugins":[{"id":"beeftv-plugin-held","packageName":"beeftv-plugin-held","version":"0.2.0",
+		"tarball":"https://github.com/example/releases/held-0.2.0.tgz","sha256":"` + strings.Repeat("a", 64) + `"}]}`)
+	got := svc.CheckUpdates(context.Background(), "")
+	if len(got.Updates) != 1 || got.Updates[0].Latest != "0.2.0" || got.Updates[0].Official {
+		t.Fatalf("updates = %+v", got.Updates)
+	}
+
+	setCuratedRegistryForTest(`{"plugins":[]}`)
+	updated, err := svc.UpdatePackage("beeftv-plugin-held", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Manifest.Version != "0.2.0" || updated.PackageSpec != "beeftv-plugin-held" {
+		t.Fatalf("updated = %s from %q", updated.Manifest.Version, updated.PackageSpec)
+	}
+}

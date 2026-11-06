@@ -25,7 +25,7 @@ type UpdateNotice struct {
 	ID      string `json:"id"`
 	Version string `json:"version"`
 	Latest  string `json:"latest"`
-	// Official 表示精选列表里带校验值的插件，BeefTV 会自动把它更新到登记的版本。
+	// Official 表示 BeefTV 会自动把它更新到精选列表登记的版本。用户安装时写明版本的不算。
 	Official bool `json:"official,omitempty"`
 }
 
@@ -67,7 +67,7 @@ func (s *Service) CheckUpdates(ctx context.Context, registry string) UpdateCheck
 			defer wg.Done()
 			notice := UpdateNotice{ID: item.Manifest.ID, Version: item.Manifest.Version}
 			if entry, found := pinned[name]; found {
-				notice.Latest, notice.Official = strings.TrimSpace(entry.Version), true
+				notice.Latest, notice.Official = strings.TrimSpace(entry.Version), !specNamesVersion(item.PackageSpec)
 			} else if summary, found := fetchNpmPackageSummary(ctx, name, registry); found {
 				notice.Latest = summary.Version
 			}
@@ -165,6 +165,12 @@ func npmPackageName(spec string) (string, bool) {
 	}
 	name, _ := splitNpmPackageSpec(spec)
 	return name, name != ""
+}
+
+// specNamesVersion 判断用户安装时是否写明了版本。写明版本的插件不自动更新。
+func specNamesVersion(spec string) bool {
+	_, version := splitNpmPackageSpec(spec)
+	return version != "" && version != "latest"
 }
 
 // newerVersion 只比较 x.y.z 三段数字；任何一边读不懂时不提示更新。

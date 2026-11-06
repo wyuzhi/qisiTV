@@ -66,6 +66,8 @@ type skillDirSource struct {
 	private bool
 	// skipBroken 让读不出来的技能只跳过它自己。本机目录里的内容不归 BeefTV 管，一个坏技能不能拖累别的。
 	skipBroken bool
+	// keepUnseen 表示这次没读全目录，只更新读到的技能，不删记录。
+	keepUnseen bool
 }
 
 // syncDirectorySkills 把文件夹里的技能登记进技能库，并删掉这个来源下已经不存在的技能。
@@ -88,6 +90,9 @@ func (s *Service) syncDirectorySkills(source skillDirSource, skillDirs []string)
 			}
 			log.Printf("跳过技能 %s：%v", entry.slug, err)
 		}
+	}
+	if source.keepUnseen {
+		return nil
 	}
 	var existingRows []model.Skill
 	if err := s.repo.DB().Where("source_type = ? AND source_url = ?", source.sourceType, source.sourceURL).Find(&existingRows).Error; err != nil {

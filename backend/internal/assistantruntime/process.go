@@ -171,7 +171,7 @@ func (s *supervisor) startOwned(config HostConfig, fingerprint string, timeout t
 	}
 
 	cmd := exec.Command(parts[0], parts[1:]...)
-	configureHostProcess(cmd)
+	ConfigureHostProcess(cmd)
 	cmd.Env = envFor(port, nonce, listenFD)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr

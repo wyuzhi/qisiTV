@@ -34,7 +34,7 @@ import { isLocalRuntimeMode } from "@/lib/runtime-mode";
 import { workspaceCapabilities } from "@/services/workspace-mode";
 
 import { PluginDetailsModal } from "./plugin-documentation-modals";
-import { isLocalFolderSource, PluginInstallConfirmModal } from "./plugin-install-confirm-modal";
+import { isLocalFolderSource, PluginInstallConfirmModal, pluginUpdateRequest } from "./plugin-install-confirm-modal";
 import { PluginFieldsConfigForm } from "./plugin-fields-config-form";
 import { PluginUpdateButton } from "./plugin-update-button";
 import "./plugins.css";
@@ -262,7 +262,7 @@ export default function PluginsPage() {
         }
     };
 
-    const handleUpdatePlugin = async (pluginId: string) => {
+    const updateInstalledPlugin = async (pluginId: string) => {
         setUpdatingPluginId(pluginId);
         try {
             const updated = await updatePluginPackage(pluginId);
@@ -273,10 +273,37 @@ export default function PluginsPage() {
                     : `插件「${updated.manifest.name}」已更新到 v${updated.manifest.version}`,
             );
             await reloadBackendPlugins();
+            return true;
         } catch (error) {
             message.error(error instanceof Error ? error.message : "更新插件失败");
+            return false;
         } finally {
             setUpdatingPluginId(null);
+        }
+    };
+
+    // 文件夹里是用户自己的代码，「重新加载」不用确认；其他来源换的是别人发布的新代码。
+    const handleUpdatePlugin = (plugin: BackendPlugin) => {
+        if (isLocalFolderSource(plugin.packageSpec)) {
+            void updateInstalledPlugin(plugin.manifest.id);
+            return;
+        }
+        setInstallPendingRequest(pluginUpdateRequest(plugin, updateCheck));
+        setInstallModalOpen(true);
+    };
+
+    const handleUpdateConfirm = async (request: PluginInstallConfirmRequest) => {
+        const target = backendPlugins.find((plugin) => plugin.packageSpec === request.source);
+        if (!target) {
+            message.error("这个插件已经不在了，刷新后再试");
+            return;
+        }
+        setInstalling(true);
+        const updated = await updateInstalledPlugin(target.manifest.id);
+        setInstalling(false);
+        if (updated) {
+            setInstallModalOpen(false);
+            setInstallPendingRequest(null);
         }
     };
 
@@ -540,7 +567,7 @@ export default function PluginsPage() {
                                                                             packageSpec={remote.packageSpec}
                                                                             check={updateCheck}
                                                                             loading={updatingPluginId === plugin.manifest.id}
-                                                                            onUpdate={() => void handleUpdatePlugin(plugin.manifest.id)}
+                                                                            onUpdate={() => handleUpdatePlugin(remote)}
                                                                         />
                                                                     ) : null}
                                                                     {canConfigure ? (
@@ -700,7 +727,7 @@ export default function PluginsPage() {
                                 setInstallModalOpen(false);
                                 setInstallPendingRequest(null);
                             }}
-                            onConfirm={(req) => void handleInstallConfirm(req)}
+                            onConfirm={(req) => void (req.isUpdate ? handleUpdateConfirm(req) : handleInstallConfirm(req))}
                         />
                     </div>
                 </div>

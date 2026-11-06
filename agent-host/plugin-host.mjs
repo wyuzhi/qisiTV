@@ -42,6 +42,8 @@ lines.on('line', (line) => {
   }
   if (message.method === 'abort') {
     inflight.get(message.params?.id)?.abort(new Error('调用已取消'));
+    // 回一句，后端靠它判断事件循环有没有卡死。
+    send({ id: message.id, result: null });
     return;
   }
   pending++;

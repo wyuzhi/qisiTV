@@ -69,16 +69,17 @@ func (s *Service) SyncLocalSkills() error {
 		return err
 	}
 	var dirs []string
+	complete := true
 	if enabled {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return errors.New("找不到本机用户目录")
 		}
-		dirs = localSkillDirs(filepath.Join(home, ".agents", "skills"))
+		dirs, complete = localSkillDirs(filepath.Join(home, ".agents", "skills"))
 	}
 	return s.syncDirectorySkills(skillDirSource{
 		sourceType: skillSourceTypeLocal, sourceURL: localSkillsSourceURL, idPrefix: "local-", ownerFallback: "local",
-		authorName: "本机", fallbackDescription: "本机技能", private: true, skipBroken: true,
+		authorName: "本机", fallbackDescription: "本机技能", private: true, skipBroken: true, keepUnseen: !complete,
 	}, dirs)
 }
 
@@ -91,19 +92,24 @@ func (s *Service) SyncLocalSkillsAtStartup() error {
 }
 
 // localSkillDirs 列出目录下的每个技能。技能管理工具常用软链接把技能放进来，这里跟着链接读真实目录。
-func localSkillDirs(root string) []string {
+func localSkillDirs(root string) ([]string, bool) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		return nil
+		_, statErr := os.Lstat(root)
+		return nil, errors.Is(statErr, os.ErrNotExist)
 	}
+	complete := true
 	dirs := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
-		if dir, err := filepath.EvalSymlinks(filepath.Join(root, entry.Name())); err == nil {
-			dirs = append(dirs, dir)
+		dir, err := filepath.EvalSymlinks(filepath.Join(root, entry.Name()))
+		if err != nil {
+			complete = false
+			continue
 		}
+		dirs = append(dirs, dir)
 	}
-	return dirs
+	return dirs, complete
 }
