@@ -5,6 +5,7 @@ import { getDesktopAppBinding } from "@/services/desktop-runtime";
 import { getSkill, listSkills, type Skill } from "@/services/api/skills";
 import { disconnectMarketAuthorization, getMarketAuthorization, listPublishPlans, preparePublication, refreshPublication, startMarketAuthorization, submitPublication, uploadPublication, type MarketAuthorization, type PublishPlan, type SkillMetadata, type PublicationTarget } from "@/services/api/skill-market";
 import { canSubmitPublication, capabilityOptions, needsPublicationTargetCorrection, publicationStatus, requirementLabel, unsupportedRequirements } from "./market-copy";
+import { hasSkillScripts, SKILL_SCRIPTS_NOTE } from "./skill-catalog";
 
 export async function openSkillWebsite(url: string) {
     const binding = getDesktopAppBinding()?.OpenSkillMarketURL;
@@ -104,7 +105,7 @@ export function SkillPublishingPanel({ planId }: { planId?: string }) {
             <Form.Item name="publicationTarget" label="投稿目标" rules={[{ required: true, message: "请明确选择这次投稿的目标" }]} extra="改写他人的技能请选择新技能，并填写来源链接。"><Select options={[{ value: "new", label: "发布新技能" }, { value: "existing", label: "为我的市场技能发布新版本" }]} /></Form.Item>
             {publicationTarget === "existing" ? <Form.Item name="marketSkillId" label="已有市场技能编号" extra="在官网打开自己已发布的技能，从页面链接中复制技能编号。请勿填写本机技能编号。" rules={[{ required: true, message: "请填写你已发布的市场技能编号" }, { validator: (_, value) => value === form.getFieldValue("localSkillId") ? Promise.reject(new Error("这是本机技能编号；首次投稿请选择发布新技能。")) : Promise.resolve() }]}><Input /></Form.Item> : null}
             <Form.Item name="name" label="公开名称" rules={[{ required: true, message: "请填写公开名称" }]}><Input maxLength={80} /></Form.Item>
-            <Form.Item name="description" label="用途和输入输出" rules={[{ required: true, message: "请说明输入、输出和使用场景" }]}><Input.TextArea rows={4} maxLength={500} /></Form.Item>
+            <Form.Item name="description" label="用途和输入输出" rules={[{ required: true, message: "请说明输入、输出和使用场景" }]}><Input.TextArea rows={4} maxLength={1024} /></Form.Item>
             <div className="grid gap-4 sm:grid-cols-2"><Form.Item name="versionLabel" label="版本" rules={[{ required: true, message: "请填写版本" }]}><Input maxLength={64} /></Form.Item><Form.Item name="license" label="许可证" rules={[{ required: true, message: "请选择你有权采用的许可证" }]}><Select options={["MIT", "Apache-2.0", "CC-BY-4.0", "CC-BY-SA-4.0", "CC0-1.0"].map(value => ({ value, label: value }))} /></Form.Item></div>
             <Form.Item name="sourceUrl" label="来源链接（改写他人内容时请填写）" rules={[{ type: "url", message: "请填写完整链接" }]}><Input /></Form.Item>
             <Form.Item name="requirements" label="必需工具与理解能力" extra="纯文字技能留空。请移除任何未确认的选项；具体使用条件写在下方。" rules={[{ validator: (_, value: string[] = []) => unsupportedRequirements(value).length ? Promise.reject(new Error("请移除未确认的能力；纯文字技能留空即可。")) : Promise.resolve() }]}><Select mode="multiple" allowClear options={[...capabilityOptions, ...unsupportedRequirements(formRequirements).map(value => ({ value, label: requirementLabel(value) }))]} /></Form.Item>
@@ -117,7 +118,7 @@ export function SkillPublishingPanel({ planId }: { planId?: string }) {
                 {needsPublicationTargetCorrection(current) ? <Alert type="warning" title="请修改信息并明确选择投稿目标，再重新准备。原稿和文件会继续保留。" /> : null}
                 {unsupportedRequirements(current.metadata.requirements).length ? <Alert type="warning" title="这份草稿包含未确认的使用条件，请修改信息后重新准备。纯文字技能无需额外理解能力。" /> : null}
                 {!current.submissionId && current.status === "awaiting_upload_confirmation" ? <Button disabled={busy} onClick={() => void reprepare(current)}>修改信息并重新准备</Button> : null}
-                <h3>文件清单</h3><ul>{current.files.map(file => <li key={file.path}>{file.path} · {file.size} 字节</li>)}</ul>
+                <h3>文件清单</h3>{hasSkillScripts(current.files) ? <p>含脚本：{SKILL_SCRIPTS_NOTE}。</p> : null}<ul>{current.files.map(file => <li key={file.path}>{file.path} · {file.size} 字节</li>)}</ul>
                 {current.instruction ? <><h3>SKILL.md 正文</h3><pre>{current.instruction}</pre></> : null}
                 {current.preview?.warnings?.map(value => <Alert key={value} type="warning" title={value} />)}
                 {current.reviewReason ? <Alert type="info" title="审核意见" description={current.reviewReason} /> : null}

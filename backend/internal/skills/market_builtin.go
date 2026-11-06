@@ -170,7 +170,7 @@ func (s *Service) readBuiltinMarketFile(rel *skillhub.Release, ver *model.SkillV
 	if file == nil {
 		return nil, &skillhub.Error{Status: 404, Reason: "not_found", Message: "文件不在此发布版本清单中"}
 	}
-	if file.Size < 0 || file.Size > 2<<20 {
+	if file.Size < 0 || file.Size > maxSkillPackageBytes {
 		return nil, &skillhub.Error{Status: 502, Reason: "file_integrity", Message: "文件大小无效"}
 	}
 	data, err := s.readSkillArchiveEntry(ver, name)

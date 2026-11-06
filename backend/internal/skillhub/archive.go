@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/goccy/go-yaml"
 )
+
+var privateLiteral = regexp.MustCompile(`btvpub_[A-Za-z0-9_-]{20,}|-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----`)
 
 func Digest(data []byte) string {
 	sum := sha256.Sum256(data)
@@ -40,29 +43,25 @@ func SafeFilePath(name string) bool {
 	return true
 }
 
-// DataFilePath is the first market version's package boundary. Reading a
-// reviewed manifest must not make scripts eligible for host installation.
+// DataFilePath validates package paths and rejects node_modules and secret files.
 func DataFilePath(name string) bool {
 	if !SafeFilePath(name) {
 		return false
 	}
 	for _, part := range strings.Split(strings.ToLower(name), "/") {
-		if part == "scripts" || part == "node_modules" {
+		if part == "node_modules" {
 			return false
 		}
 	}
 	base := strings.ToLower(path.Base(name))
-	if base == "credentials.json" || base == "tokens.json" || base == "secrets.json" || base == "auth.json" {
+	if base == "credentials.json" || base == "tokens.json" || base == "secrets.json" || base == "auth.json" || base == ".env" || strings.HasPrefix(base, ".env.") || strings.Contains(base, "private_key") || base == "id_rsa" || base == "id_ed25519" || strings.HasSuffix(base, ".pem") || strings.HasSuffix(base, ".key") {
 		return false
 	}
-	if base == "license" || base == "notice" || base == "copying" {
-		return true
-	}
-	switch strings.ToLower(path.Ext(name)) {
-	case ".md", ".txt", ".json", ".yaml", ".yml", ".csv", ".png", ".jpg", ".jpeg", ".webp", ".gif":
-		return true
-	}
-	return false
+	return true
+}
+
+func ContainsPrivateData(data []byte) bool {
+	return privateLiteral.Match(data) || (bytes.Contains(data, []byte(`"market"`)) && bytes.Contains(data, []byte(`"deviceCode"`)))
 }
 
 func SkillName(markdown []byte) (string, error) {
@@ -79,7 +78,7 @@ func SkillName(markdown []byte) (string, error) {
 		return "", fmt.Errorf("SKILL.md 元信息无效")
 	}
 	name := metadata.Name
-	if name == "" || utf8.RuneCountInString(name) > 64 || name != strings.ToLower(name) || strings.HasPrefix(name, "-") || strings.HasSuffix(name, "-") || strings.Contains(name, "--") || !SafeFilePath(name) || strings.TrimSpace(metadata.Description) == "" || utf8.RuneCountInString(metadata.Description) > 1024 {
+	if name == "" || utf8.RuneCountInString(name) > 64 || name != strings.ToLower(name) || strings.HasPrefix(name, "-") || strings.HasSuffix(name, "-") || strings.Contains(name, "--") || !SafeFilePath(name) || strings.TrimSpace(metadata.Description) == "" || utf8.RuneCountInString(metadata.Description) > MaxDescriptionRunes {
 		return "", fmt.Errorf("SKILL.md 名称或简介不符合 Agent Skills 格式")
 	}
 	for _, char := range name {
@@ -111,23 +110,20 @@ func VerifyArchive(raw []byte, release *Release) (map[string][]byte, error) {
 	if len(raw) > MaxArchiveBytes || int64(len(raw)) != release.ArchiveBytes || Digest(raw) != release.ArchiveSHA256 {
 		return nil, fmt.Errorf("下载包大小或 SHA-256 与指定发布版本不符")
 	}
-	if len(release.Files) == 0 || len(release.Files) > 256 {
+	if len(release.Files) == 0 {
 		return nil, fmt.Errorf("发布文件清单无效")
 	}
 	manifest := map[string]File{}
 	caseNames := map[string]bool{}
-	var total int64
+	var manifestTotal int64
 	for _, file := range release.Files {
 		key := strings.ToLower(file.Path)
-		if !DataFilePath(file.Path) || caseNames[key] || file.Size < 0 || file.Size > 2<<20 {
+		if !DataFilePath(file.Path) || caseNames[key] || file.Size < 0 || file.Size > MaxPackageBytes-manifestTotal {
 			return nil, fmt.Errorf("发布文件路径、数量或大小无效")
 		}
 		caseNames[key] = true
 		manifest[file.Path] = file
-		total += file.Size
-	}
-	if total > 20<<20 {
-		return nil, fmt.Errorf("发布文件总大小超过20 MiB")
+		manifestTotal += file.Size
 	}
 	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
 	if err != nil {
@@ -138,9 +134,10 @@ func VerifyArchive(raw []byte, release *Release) (map[string][]byte, error) {
 	}
 	files := map[string][]byte{}
 	seen := map[string]bool{}
+	var total int64
 	for _, entry := range zr.File {
 		file, ok := manifest[entry.Name]
-		if !ok || seen[entry.Name] || !entry.Mode().IsRegular() || entry.Mode()&0111 != 0 || entry.Flags&1 != 0 || entry.UncompressedSize64 != uint64(file.Size) {
+		if !ok || seen[entry.Name] || !entry.Mode().IsRegular() || entry.Flags&1 != 0 || entry.UncompressedSize64 != uint64(file.Size) {
 			return nil, fmt.Errorf("ZIP 含不在清单中的文件、链接或重复条目")
 		}
 		seen[entry.Name] = true
@@ -148,14 +145,21 @@ func VerifyArchive(raw []byte, release *Release) (map[string][]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("无法读取 ZIP 文件")
 		}
-		data, err := io.ReadAll(io.LimitReader(reader, file.Size+1))
+		data, err := io.ReadAll(io.LimitReader(reader, MaxPackageBytes-total+1))
 		reader.Close()
+		total += int64(len(data))
+		if total > MaxPackageBytes {
+			return nil, fmt.Errorf("发布文件总大小超过200 MiB")
+		}
 		if err != nil || int64(len(data)) != file.Size || Digest(data) != file.SHA256 {
 			return nil, fmt.Errorf("发布文件 %s 校验失败", file.Path)
 		}
+		if ContainsPrivateData(data) {
+			return nil, fmt.Errorf("发布文件 %s 含敏感凭据或私钥", file.Path)
+		}
 		files[entry.Name] = data
 	}
-	if len(files["SKILL.md"]) == 0 || len(files["SKILL.md"]) > 256<<10 || !utf8.Valid(files["SKILL.md"]) || ContentDigest(files) != release.ContentHash {
+	if len(files["SKILL.md"]) == 0 || !utf8.Valid(files["SKILL.md"]) || ContentDigest(files) != release.ContentHash {
 		return nil, fmt.Errorf("技能正文或内容摘要无效")
 	}
 	if _, err := SkillName(files["SKILL.md"]); err != nil {

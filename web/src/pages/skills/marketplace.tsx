@@ -13,7 +13,7 @@ import { MarketFilePreview } from "./market-file-preview";
 import { MarketReviewSummary } from "./market-review-summary";
 import { capabilityOptions, requirementLabel } from "./market-copy";
 import { LocalSkillSourceButton } from "./local-skill-source";
-import { isLocalSkill, LOCAL_SKILL_LABEL, SKILL_SCRIPTS_NOTE } from "./skill-catalog";
+import { hasSkillScripts, isLocalSkill, LOCAL_SKILL_LABEL, SKILL_SCRIPTS_NOTE } from "./skill-catalog";
 import "./marketplace.css";
 
 const SKILL_PAGE_SIZE = 20;
@@ -110,7 +110,7 @@ export default function SkillMarketplace() {
                 <p>使用条件：{release.requirements.length ? release.requirements.map(requirementLabel).join("、") : "没有额外工具要求"}</p>{release.requirementNotes ? <p>{release.requirementNotes}</p> : null}
                 {release.requirements.some(value => value.startsWith("model.")) ? <Alert type="info" title="使用前需要在模型配置中选择支持所需理解能力的模型。安装不代表这些条件已满足。" /> : null}
                 <p>模型与费用请按技能说明确认。安装只保存文件，使用时由你选择模型。</p><p>安装后不会自动运行，也不会替你切换模型。后续更新需要再次确认。</p>
-                <h3>包含的文件</h3><ul>{release.files.map(file => <li key={file.path}>{file.path} · {file.size} 字节</li>)}</ul><p className="skill-market-meta">内容摘要：{release.contentHash}</p>
+                <h3>包含的文件</h3>{hasSkillScripts(release.files) ? <p>含脚本：{SKILL_SCRIPTS_NOTE}。</p> : null}<ul>{release.files.map(file => <li key={file.path}>{file.path} · {file.size} 字节</li>)}</ul><p className="skill-market-meta">内容摘要：{release.contentHash}</p>
                 <MarketReviewSummary review={release.review} /><MarketFilePreview key={release.releaseId} skillId={release.skillId} releaseId={release.releaseId} />
             </div> : null}
         </AppModal>

@@ -30,7 +30,7 @@ import (
 
 const (
 	// 只防压缩炸弹，不限单个文件大小和文件数：技能标准没有这些限制。
-	maxSkillPackageBytes       = 200 << 20
+	maxSkillPackageBytes       = skillhub.MaxPackageBytes
 	maxSkillPreviewBytes       = 512 << 10
 	SkillPackageUploadMaxBytes = maxSkillPackageBytes + (1 << 20)
 )

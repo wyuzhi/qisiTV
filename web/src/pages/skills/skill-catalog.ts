@@ -14,7 +14,12 @@ export function isLocalSkill(skill: Pick<Skill, "sourceType">) {
 }
 
 export const LOCAL_SKILL_LABEL = "其他工具安装";
+export const SKILL_SCRIPTS_PREFIX = "scripts/";
 export const SKILL_SCRIPTS_NOTE = "助手会按说明工作，但不会运行里面的脚本";
+
+export function hasSkillScripts(files: ReadonlyArray<{ path: string }>) {
+    return files.some((file) => file.path.startsWith(SKILL_SCRIPTS_PREFIX));
+}
 
 export function skillCategoryLabel(value: string, categories: SkillCategory[] = fallbackSkillCategories) {
     return categories.find((item) => item.value === value)?.label || "其他";

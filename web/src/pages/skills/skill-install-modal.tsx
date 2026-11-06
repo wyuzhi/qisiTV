@@ -131,7 +131,7 @@ export function SkillInstallModal({ open, onClose, onInstalled, onManualCreate }
                         </Upload.Dragger>
                         <div className="mt-4 grid gap-x-3 sm:grid-cols-2">
                             <Form.Item name="name" label="覆盖名称" extra="可选，留空时自动读取"><Input maxLength={80} autoComplete="off" /></Form.Item>
-                            <Form.Item name="description" label="覆盖简介" extra="可选，留空时自动读取"><Input maxLength={500} autoComplete="off" /></Form.Item>
+                            <Form.Item name="description" label="覆盖简介" extra="可选，留空时自动读取"><Input maxLength={1024} autoComplete="off" /></Form.Item>
                         </div>
                     </>
                 )}
