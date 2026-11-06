@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Trigger the CNB mirror and wait for its public verification record."""
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import datetime
 import hashlib
 import json
@@ -21,6 +22,9 @@ PLATFORMS = {
     "windows-amd64": "-setup.exe", "linux-amd64": ".deb",
 }
 RESUME_PREFIX_BYTES = 16 * 1024 * 1024
+ZIP_VERIFY_WORKERS = 4
+# The hourly CNB job retries a failed sync, so waiting must outlast one full retry.
+MIRROR_WAIT_SECONDS = 75 * 60
 
 
 def version_tuple(version):
@@ -133,41 +137,51 @@ def expected_assets(release, version):
     return installers
 
 
-def verify_cnb_zips(version, zips, opener=None):
+def _verify_cnb_zip(version, item, opener=None):
     if opener is None:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), HTTPSOnlyRedirect()).open
-    for item in zips:
-        url = f"{PUBLIC}{version}/{item['name']}"
-        total = item["size"]
-        prefix = min(RESUME_PREFIX_BYTES, max(1, total // 2))
-        digest = hashlib.sha256()
-        received = 0
-        for range_header, expected_range, expected_len in [
-            (f"bytes=0-{prefix - 1}", f"bytes 0-{prefix - 1}/{total}", prefix),
-            (f"bytes={prefix}-", f"bytes {prefix}-{total - 1}/{total}", total - prefix),
-        ]:
-            req = urllib.request.Request(url, headers={
-                "User-Agent": f"BeefTV-Desktop-Updater/{version}",
-                "Range": range_header,
-                "Cache-Control": "no-cache",
-            })
-            try:
-                with opener(req, timeout=180) as response:
-                    if response.status != 206 or response.headers.get("Content-Range") != expected_range:
-                        raise RuntimeError(f"CNB updater zip failed Range check: {item['name']}")
-                    part = 0
-                    while chunk := response.read(1024 * 1024):
-                        part += len(chunk)
-                        if part > expected_len:
-                            raise RuntimeError(f"CNB updater zip exceeded expected Range size: {item['name']}")
-                        digest.update(chunk)
-                    if part != expected_len:
-                        raise RuntimeError(f"CNB updater zip Range truncated: {item['name']}")
-                    received += part
-            except (urllib.error.URLError, TimeoutError, OSError) as err:
-                raise RuntimeError(f"CNB updater zip transfer failed: {item['name']}") from err
-        if received != total or digest.hexdigest() != item["sha256"]:
-            raise RuntimeError(f"CNB updater zip SHA-256 mismatch: {item['name']}")
+    url = f"{PUBLIC}{version}/{item['name']}"
+    total = item["size"]
+    prefix = min(RESUME_PREFIX_BYTES, max(1, total // 2))
+    digest = hashlib.sha256()
+    received = 0
+    for range_header, expected_range, expected_len in [
+        (f"bytes=0-{prefix - 1}", f"bytes 0-{prefix - 1}/{total}", prefix),
+        (f"bytes={prefix}-", f"bytes {prefix}-{total - 1}/{total}", total - prefix),
+    ]:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": f"BeefTV-Desktop-Updater/{version}",
+            "Range": range_header,
+            "Cache-Control": "no-cache",
+        })
+        try:
+            with opener(req, timeout=180) as response:
+                if response.status != 206 or response.headers.get("Content-Range") != expected_range:
+                    raise RuntimeError(f"CNB updater zip failed Range check: {item['name']}")
+                part = 0
+                while chunk := response.read(1024 * 1024):
+                    part += len(chunk)
+                    if part > expected_len:
+                        raise RuntimeError(f"CNB updater zip exceeded expected Range size: {item['name']}")
+                    digest.update(chunk)
+                if part != expected_len:
+                    raise RuntimeError(f"CNB updater zip Range truncated: {item['name']}")
+                received += part
+        except (urllib.error.URLError, TimeoutError, OSError) as err:
+            raise RuntimeError(f"CNB updater zip transfer failed: {item['name']}") from err
+    if received != total or digest.hexdigest() != item["sha256"]:
+        raise RuntimeError(f"CNB updater zip SHA-256 mismatch: {item['name']}")
+
+
+def verify_cnb_zips(version, zips, opener=None):
+    with ThreadPoolExecutor(max_workers=ZIP_VERIFY_WORKERS) as pool:
+        futures = [pool.submit(_verify_cnb_zip, version, item, opener) for item in zips]
+        try:
+            for future in as_completed(futures):
+                future.result()
+        except BaseException:
+            pool.shutdown(wait=True, cancel_futures=True)
+            raise
 
 
 def record_matches(record, release, expected):
@@ -185,7 +199,7 @@ def record_matches(record, release, expected):
         return False
 
 
-def mirror(version, token, fetch=request_json, sleep=time.sleep, now=time.monotonic, timeout=2400, verify_zips=verify_cnb_zips):
+def mirror(version, token, fetch=request_json, sleep=time.sleep, now=time.monotonic, timeout=MIRROR_WAIT_SECONDS, verify_zips=verify_cnb_zips):
     vtuple = version_tuple(version)
     if vtuple < (2, 0, 3):
         raise RuntimeError("Expected a version at or after v2.0.3")
