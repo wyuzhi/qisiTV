@@ -66,6 +66,7 @@ type Release struct {
 	PublishedAt   string         `json:"publishedAt"`
 	Signature     string         `json:"signature,omitempty"`
 	Attestation   *Attestation   `json:"attestation,omitempty"`
+	Compatibility *Compatibility `json:"compatibility,omitempty"`
 }
 type ReviewSummary struct {
 	ReviewedAt    string        `json:"reviewedAt"`

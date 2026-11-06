@@ -4,6 +4,8 @@ import { SkillFileDetails } from "../src/pages/skills/skill-file-details";
 import { skillFailureMessage } from "../src/pages/skills/skill-feedback";
 import { PublicationDetailContent } from "../src/pages/skills/publication-detail-content";
 import { SkillReleaseMarkdown } from "../src/pages/skills/market-file-preview";
+import { SkillPackageAbout, sourceLabel } from "../src/pages/skills/skill-detail-drawer";
+import { skillCategoryLabel } from "../src/pages/skills/skill-catalog";
 
 test("file bytes and diagnostic IDs remain available in a closed disclosure", () => {
     const html = renderToStaticMarkup(<SkillFileDetails files={[{ path: "SKILL.md", size: 2193, kind: "markdown", mimeType: "text/markdown", sha256: "hash" }]} info={[{ label: "内容哈希", value: "a".repeat(64) }, { label: "本机草稿编号", value: "draft-one" }, { label: "未提供", value: undefined }, { label: "空值", value: "" }]} />);
@@ -40,4 +42,25 @@ test("publication instructions share market Markdown formatting", () => {
     expect(html).toContain("<li>完整内容</li>");
     expect(html).not.toContain("name: skill");
     expect(html).toContain('rel="noreferrer"');
+});
+
+test("installed skill about section retains version, author, market source and category fallback", () => {
+    expect(sourceLabel("market")).toBe("技能市场");
+    expect(skillCategoryLabel("drama", [])).toBe("短剧影视");
+    const html = renderToStaticMarkup(
+        <SkillPackageAbout
+            skill={{
+                description: "漫剧拆分与参考图设定",
+                version: "2.1.0",
+                effectiveUser: { name: "BeefTV 官方", avatarUrl: "", uid: "official" },
+                sourceType: "market",
+                tag: "drama",
+                updatedAt: "2026-11-06T00:00:00Z",
+            }}
+            categories={[]}
+        />,
+    );
+    for (const value of ["技能介绍", "漫剧拆分与参考图设定", "2.1.0", "BeefTV 官方", "技能市场", "短剧影视"]) {
+        expect(html).toContain(value);
+    }
 });

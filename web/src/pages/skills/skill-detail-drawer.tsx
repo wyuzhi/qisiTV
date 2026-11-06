@@ -103,15 +103,7 @@ export function SkillDetailModal({ skill, loading, mutating, categories, onClose
                     <header className="skill-package-header">
                         <div className="skill-package-heading">
                             <h1>{skill.skillName}</h1>
-                            <details className="skill-package-about">
-                                <summary>技能介绍</summary>
-                                {skill.description ? <p>{skill.description}</p> : null}
-                                <dl>
-                                    <div><dt>来源</dt><dd>{sourceLabel(skill.sourceType)}</dd></div>
-                                    <div><dt>分类</dt><dd>{skillCategoryLabel(skill.tag, categories)}</dd></div>
-                                    <div><dt>更新于</dt><dd>{formatSkillDate(skill.updatedAt)}</dd></div>
-                                </dl>
-                            </details>
+                            <SkillPackageAbout skill={skill} categories={categories} />
                         </div>
                         {!fileOnly ? <div className="skill-package-actions">
                             {!localRuntime && skill.sourceType === "github" && skill.isOwner ? <Tooltip title={skill.syncError || "从 GitHub 检查并同步最新提交"}><Button loading={mutating} icon={<RefreshCw className="size-4" />} onClick={() => onSync(skill)}>同步</Button></Tooltip> : null}
@@ -273,7 +265,24 @@ function isExternalURL(value?: string) {
     return Boolean(value && /^(https?:|mailto:|data:)/i.test(value));
 }
 
-function sourceLabel(source: string) {
+export function SkillPackageAbout({ skill, categories }: { skill: Pick<Skill, "description" | "version" | "effectiveUser" | "sourceType" | "tag" | "updatedAt">; categories: SkillCategory[] }) {
+    return (
+        <details className="skill-package-about">
+            <summary>技能介绍</summary>
+            {skill.description ? <p>{skill.description}</p> : null}
+            <dl>
+                <div><dt>版本</dt><dd>{skill.version || "1.0.0"}</dd></div>
+                {skill.effectiveUser?.name ? <div><dt>作者</dt><dd>{skill.effectiveUser.name}</dd></div> : null}
+                <div><dt>来源</dt><dd>{sourceLabel(skill.sourceType)}</dd></div>
+                <div><dt>分类</dt><dd>{skillCategoryLabel(skill.tag, categories)}</dd></div>
+                <div><dt>更新于</dt><dd>{formatSkillDate(skill.updatedAt)}</dd></div>
+            </dl>
+        </details>
+    );
+}
+
+export function sourceLabel(source: string) {
+    if (source === "market") return "技能市场";
     if (source === "github") return "GitHub";
     if (source === "zip") return "ZIP 技能包";
     if (source === "builtin") return "内置技能";

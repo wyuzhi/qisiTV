@@ -17,7 +17,8 @@ export function skillOrigin(skill: Pick<Skill, "sourceType" | "isOwner">) {
 }
 
 export function skillCategoryLabel(value: string, categories: SkillCategory[] = fallbackSkillCategories) {
-    return categories.find((item) => item.value === value)?.label || "其他";
+    const list = categories.length ? categories : fallbackSkillCategories;
+    return list.find((item) => item.value === value)?.label || "其他";
 }
 
 export function groupSkills(skills: Skill[], categories: SkillCategory[]) {

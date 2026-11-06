@@ -5,6 +5,42 @@ export function requirementLabel(value: string) {
 export function unsupportedRequirements(values: string[]) {
     return values.filter(value => !capabilityOptions.some(option => option.value === value));
 }
+export function releaseUnsupportedReasons(
+    release: { requirements?: string[]; compatibility?: { status: string; reasons: string[] } },
+    itemCompatibility?: { status: string; reasons: string[] },
+): string[] {
+    const reasons: string[] = [];
+    const addReason = (value: string) => {
+        const trimmed = value.trim();
+        if (trimmed && !reasons.includes(trimmed)) reasons.push(trimmed);
+    };
+    for (const source of [release.compatibility, itemCompatibility]) {
+        if (source?.status === "unsupported") {
+            for (const item of source.reasons || []) addReason(item);
+        }
+    }
+    for (const req of unsupportedRequirements(release.requirements || [])) {
+        const label = requirementLabel(req);
+        if (!reasons.some(reason => reason.includes(req))) addReason(label);
+    }
+    if ((release.compatibility?.status === "unsupported" || itemCompatibility?.status === "unsupported") && reasons.length === 0) {
+        addReason("当前环境暂不支持此版本");
+    }
+    return reasons;
+}
+export function canInstallMarketRelease(options: {
+    busy?: boolean;
+    installedLoading: boolean;
+    installedError?: string;
+    installation: "install" | "update" | "installed";
+    unsupportedReasons: string[];
+}) {
+    return !options.busy
+        && !options.installedLoading
+        && !options.installedError
+        && options.installation !== "installed"
+        && options.unsupportedReasons.length === 0;
+}
 export function publicationStatus(status: string) {
     return ({ draft: "草稿", validated: "等待确认送审", ready_to_submit: "等待确认送审", awaiting_upload_confirmation: "等待确认上传", uploading: "上传结果待核对", needs_preview: "需要刷新预览", awaiting_submit_confirmation: "等待确认送审", submitted: "等待审核", pending: "审核中", in_review: "审核中", approved: "已发布", published: "已发布", rejected: "需要修改", withdrawn: "已撤回" } as Record<string, string>)[status] || "状态待刷新";
 }

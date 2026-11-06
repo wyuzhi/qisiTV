@@ -3,7 +3,7 @@ import { invalidateAddedSkillsCache, type Skill, type SkillPackageFile } from ".
 
 export type SkillMetadata = { skillId?: string; name: string; description: string; versionLabel: string; license: string; sourceUrl: string; requirements: string[]; requirementNotes?: string; minClientVersion?: string; showcase: Array<{ url: string; type: string; caption: string }> };
 export type SkillReviewSummary = { reviewedAt: string; revision: number; contentHash: string; archiveSha256: string; previewDigest: string; trials: Array<{ scenario: string; target: string; runtimeVersion: string; model: string; conclusion: string; testedAt: string }> };
-export type MarketRelease = SkillMetadata & { skillId: string; releaseId: string; author: string; archiveBytes: number; contentHash: string; archiveSha256: string; files: SkillPackageFile[]; publishedAt: string; review?: SkillReviewSummary };
+export type MarketRelease = SkillMetadata & { skillId: string; releaseId: string; author: string; archiveBytes: number; contentHash: string; archiveSha256: string; files: SkillPackageFile[]; publishedAt: string; review?: SkillReviewSummary; compatibility?: { status: string; reasons: string[] } };
 export type MarketItem = SkillMetadata & { skillId: string; releaseId: string; author: string; compatibility: { status: string; reasons: string[] }; verification: string };
 export type PublishPreview = { revision: number; previewDigest: string; author: string; metadata: SkillMetadata; files: SkillPackageFile[]; warnings: string[] };
 export type PublicationTarget = { publicationTarget: "new" | "existing"; marketSkillId?: string };

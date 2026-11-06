@@ -21,8 +21,10 @@ func TestStartupDoesNotImportExternalSkillDirectories(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := s.RetireExternalSkills(); err != nil {
-				t.Fatal(err)
+			for _, step := range []func() error{s.EnsureBuiltinSkills, s.RetireExternalSkills, s.EnsureSkillPackages} {
+				if err := step(); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if ids := localSkillIDs(t, s); len(ids) != 0 {
 				t.Fatalf("external skills entered the library: %v", ids)

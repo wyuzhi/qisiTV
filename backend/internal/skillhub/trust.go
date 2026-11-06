@@ -45,6 +45,8 @@ func VerifyRelease(r *Release) error {
 	}
 	actual := *r
 	actual.Attestation = nil
+	actual.Compatibility = nil
+	signed.Compatibility = nil
 	if !reflect.DeepEqual(signed, actual) {
 		return fmt.Errorf("技能版本内容与签名不符")
 	}

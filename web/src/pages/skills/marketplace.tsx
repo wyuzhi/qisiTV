@@ -13,10 +13,10 @@ import { SkillPublishingPanel } from "./publishing-panel";
 import { MarketFilePreview } from "./market-file-preview";
 import { SkillFileDetails } from "./skill-file-details";
 import { skillFailureMessage } from "./skill-feedback";
-import { capabilityOptions, marketInstallationState, requirementLabel } from "./market-copy";
+import { canInstallMarketRelease, marketInstallationState, releaseUnsupportedReasons, requirementLabel } from "./market-copy";
 import { MoreHorizontal, RefreshCw } from "lucide-react";
 import { Switch } from "@/components/ui/base/switch";
-import { skillOrigin } from "./skill-catalog";
+import { fallbackSkillCategories, skillOrigin } from "./skill-catalog";
 import "./marketplace.css";
 
 const SKILL_PAGE_SIZE = 20;
@@ -28,6 +28,7 @@ export default function SkillMarketplace() {
     const [items, setItems] = useState<MarketItem[]>([]);
     const [installed, setInstalled] = useState<Skill[]>([]);
     const [installedLoading, setInstalledLoading] = useState(true);
+    const [installedError, setInstalledError] = useState("");
     const [installingRelease, setInstallingRelease] = useState("");
     const installing = useRef(false);
     const [local, setLocal] = useState<Skill[]>([]);
@@ -69,6 +70,7 @@ export default function SkillMarketplace() {
         if (tab !== "market") return;
         let stale = false;
         setInstalledLoading(true);
+        setInstalledError("");
         void (async () => {
             const skills: Skill[] = [];
             for (let page = 1; ; page++) {
@@ -78,7 +80,7 @@ export default function SkillMarketplace() {
                 if (!result.hasMore) break;
             }
             if (!stale) setInstalled(skills);
-        })().catch(error => { if (!stale) setError(skillFailureMessage(error, "无法读取安装状态", "请刷新技能市场后重试。")); })
+        })().catch(error => { if (!stale) setInstalledError(skillFailureMessage(error, "无法读取安装状态", "请刷新技能市场后重试。")); })
             .finally(() => { if (!stale) setInstalledLoading(false); });
         return () => { stale = true; };
     }, [tab, revision]);
@@ -113,6 +115,8 @@ export default function SkillMarketplace() {
             .finally(() => { installing.current = false; setInstallingRelease(""); });
     };
     const releaseInstallation = release ? marketInstallationState(release, installed) : "install";
+    const releaseItem = release ? items.find(item => item.skillId === release.skillId && item.releaseId === release.releaseId) : undefined;
+    const releaseUnsupported = release ? releaseUnsupportedReasons(release, releaseItem?.compatibility) : [];
     const headerProps = {
         title: "技能",
         navigationLabel: "技能分类",
@@ -133,16 +137,18 @@ export default function SkillMarketplace() {
             />
             <div className="skill-market-content">
             {error ? <Alert type="error" showIcon title={error} action={<Button size="small" onClick={reload}>重试</Button>} /> : loading ? <Skeleton active paragraph={{ rows: 6 }} /> : <>
+                {tab === "market" && installedError ? <Alert type="warning" showIcon title={installedError} className="mb-4" action={<Button size="small" onClick={reload}>重试</Button>} /> : null}
                 {tab === "market" ? items.map(item => {
                     const installation = marketInstallationState(item, installed);
                     const installLabel = installation === "installed" ? "已安装" : installation === "update" ? "更新" : "安装";
+                    const itemUnsupported = releaseUnsupportedReasons(item, item.compatibility);
                     return <article className="workspace-list-row" key={`${item.skillId}/${item.releaseId}`}>
                         <div className="workspace-list-copy">
                             <h2><button type="button" className="workspace-item-title" onClick={() => openRelease(item.skillId, item.releaseId)}>{item.name}</button></h2>
                         </div>
                         <div className="workspace-list-controls">
                             <Button size="small" onClick={() => openRelease(item.skillId, item.releaseId)} disabled={busy}>查看详情</Button>
-                            <Button type="primary" size="small" className="min-w-16" aria-label={`${installLabel}${item.name}`} loading={installingRelease === item.releaseId} disabled={busy || installedLoading || installation === "installed" || item.compatibility?.status === "unsupported"} onClick={() => install(item, false)}>{installLabel}</Button>
+                            <Button type="primary" size="small" className="min-w-16" aria-label={`${installLabel}${item.name}`} loading={installingRelease === item.releaseId} disabled={!canInstallMarketRelease({ busy, installedLoading, installedError, installation, unsupportedReasons: itemUnsupported })} onClick={() => install(item, false)}>{installLabel}</Button>
                         </div>
                     </article>;
                 }) : local.map(skill => {
@@ -175,7 +181,7 @@ export default function SkillMarketplace() {
             </div>
             {!loading && !error && (total > SKILL_PAGE_SIZE || page > 1) ? <nav className="skill-market-pagination" aria-label="技能分页"><Button disabled={page <= 1} onClick={() => setPage(n => n - 1)}>上一页</Button><span>第 {page} / {Math.max(1, Math.ceil(total / SKILL_PAGE_SIZE))} 页 · 共 {total} 项</span><Button disabled={page * SKILL_PAGE_SIZE >= total} onClick={() => setPage(n => n + 1)}>下一页</Button></nav> : null}
         </>}
-        <AppModal flush scrollBody className="skill-release-dialog" wrapClassName="skill-release-wrap" open={Boolean(release)} title={release?.name || "技能详情"} onCancel={() => { setRelease(null); setParams({ tab: "market" }); }} footer={<Button type="primary" loading={busy} disabled={installedLoading || releaseInstallation === "installed" || release?.requirements.some(value => !capabilityOptions.some(item => item.value === value))} onClick={() => { if (release) install(release, true); }}>{releaseInstallation === "installed" ? "已安装" : releaseInstallation === "update" ? "更新此版本" : "安装此版本"}</Button>} width="min(760px, calc(100vw - 32px))">
+        <AppModal flush scrollBody className="skill-release-dialog" wrapClassName="skill-release-wrap" open={Boolean(release)} title={release?.name || "技能详情"} onCancel={() => { setRelease(null); setParams({ tab: "market" }); }} footer={<Button type="primary" loading={busy} disabled={!canInstallMarketRelease({ busy, installedLoading, installedError, installation: releaseInstallation, unsupportedReasons: releaseUnsupported })} onClick={() => { if (release) install(release, true); }}>{releaseInstallation === "installed" ? "已安装" : releaseInstallation === "update" ? "更新此版本" : "安装此版本"}</Button>} width="min(760px, calc(100vw - 32px))">
             {release ? <div className="skill-market-preview" tabIndex={0} role="region" aria-label="技能详情内容">
                 <div className="skill-release-overview">
                     <dl className="skill-release-metadata">
@@ -187,9 +193,10 @@ export default function SkillMarketplace() {
                 </div>
                 <div className="skill-release-sections">
                     <section className="skill-release-section" aria-label="使用条件">
-                        <details><summary>使用条件</summary>
+                        <details open={releaseUnsupported.length > 0}><summary>使用条件</summary>
                             <p>{release.requirements.length ? release.requirements.map(requirementLabel).join("、") : "没有额外工具要求"}</p>
                             {release.requirementNotes ? <p>{release.requirementNotes}</p> : null}
+                            {releaseUnsupported.length ? <p className="skill-market-warning">当前环境不满足：{releaseUnsupported.join("、")}</p> : null}
                             {release.requirements.some(value => value.startsWith("model.")) ? <Alert type="info" title="使用前需要在模型配置中选择支持所需理解能力的模型。安装不代表这些条件已满足。" /> : null}
                         </details>
                     </section>
@@ -208,7 +215,7 @@ export default function SkillMarketplace() {
         <AppModal scrollBody open={Boolean(versions)} title="恢复本机历史版本" onCancel={() => setVersions(null)} onOk={() => { if (versions) void action(async () => { await rollbackSkill(versions.skill.skillId, versionId); setVersions(null); }, "已恢复指定版本"); }} okText="恢复此版本" okButtonProps={{ disabled: !versions || versionId === versions.skill.versionId, loading: busy }}>
             <p>恢复后新对话可选择此版本。已有对话保留原先选定的版本。</p><Select className="w-full" value={versionId} onChange={setVersionId} options={versions?.items.map(v => ({ value: v.id, label: `${v.versionLabel} · ${v.createdAt.slice(0, 10)}${v.id === versions.skill.versionId ? "（当前）" : ""}` }))} />
         </AppModal>
-        <SkillDetailModal fileOnly skill={detail} loading={false} mutating={busy} categories={[]} onClose={() => setDetail(null)} onEdit={openEditor} onAdd={() => {}} onLike={() => {}} onSync={() => {}} />
+        <SkillDetailModal fileOnly skill={detail} loading={false} mutating={busy} categories={fallbackSkillCategories} onClose={() => setDetail(null)} onEdit={openEditor} onAdd={() => {}} onLike={() => {}} onSync={() => {}} />
         <SkillEditorDrawer open={editorOpen} skill={edit} onClose={() => setEditorOpen(false)} onSaved={() => { setEditorOpen(false); changeTab("mine"); reload(); }} />
         <SkillInstallModal open={installOpen} onClose={() => setInstallOpen(false)} onManualCreate={() => { setInstallOpen(false); openEditor(); }} onInstalled={() => { setInstallOpen(false); changeTab("mine"); reload(); }} />
     </WorkspacePage>;

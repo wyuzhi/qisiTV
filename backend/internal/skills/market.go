@@ -83,6 +83,7 @@ func (s *Service) MarketRelease(ctx context.Context, id, version string) (*skill
 		return nil, kernel.BadAuthRequest("技能版本地址无效")
 	}
 	if rel, _, ok := s.findBuiltinMarketRelease(id, version); ok {
+		populateReleaseCompatibility(rel)
 		return rel, nil
 	}
 	c, e := marketClient()
@@ -97,7 +98,46 @@ func (s *Service) MarketRelease(ctx context.Context, id, version string) (*skill
 	if e == nil {
 		e = skillhub.VerifyRelease(&result)
 	}
+	if e == nil {
+		populateReleaseCompatibility(&result)
+	}
 	return &result, e
+}
+
+func populateReleaseCompatibility(r *skillhub.Release) {
+	if r == nil {
+		return
+	}
+	reasons := make([]string, 0)
+	status := "supported"
+	if r.Compatibility != nil {
+		if r.Compatibility.Status != "" {
+			status = r.Compatibility.Status
+		}
+		reasons = append(reasons, r.Compatibility.Reasons...)
+	}
+	for _, required := range r.Requirements {
+		if required != "beeftv.canvas" && required != "model.image" && required != "model.video" && required != "model.audio" {
+			status = "unsupported"
+			reasons = appendUniqueReason(reasons, "当前工作区尚未验证技能要求的能力："+required)
+		}
+	}
+	if !marketClientCompatible(buildinfo.Current().Version, r.MinClientVersion) {
+		status = "unsupported"
+		reasons = appendUniqueReason(reasons, "请先更新 BeefTV，再安装这个技能")
+	}
+	if status == "unsupported" || len(reasons) > 0 || r.Compatibility != nil {
+		r.Compatibility = &skillhub.Compatibility{Status: status, Reasons: reasons}
+	}
+}
+
+func appendUniqueReason(items []string, value string) []string {
+	for _, existing := range items {
+		if existing == value {
+			return items
+		}
+	}
+	return append(items, value)
 }
 func (s *Service) InstallMarket(ctx context.Context, user, id, version string) (*SkillItem, error) {
 	unlock := s.lockMarket(user)

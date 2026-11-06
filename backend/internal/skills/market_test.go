@@ -188,6 +188,11 @@ func TestMarketMinimumClientVersion(t *testing.T) {
 			t.Fatalf("%+v got %v", c, got)
 		}
 	}
+	rel := skillhub.Release{Metadata: skillhub.Metadata{SkillID: "test-market", MinClientVersion: "99.0.0", Requirements: []string{"custom.tool"}}}
+	populateReleaseCompatibility(&rel)
+	if rel.Compatibility == nil || rel.Compatibility.Status != "unsupported" || len(rel.Compatibility.Reasons) != 2 {
+		t.Fatalf("expected unsupported release compatibility reasons, got %+v", rel.Compatibility)
+	}
 }
 func TestPrivateForkKeepsReferencesWhenEdited(t *testing.T) {
 	s, _ := agentSkillFixture(t)
