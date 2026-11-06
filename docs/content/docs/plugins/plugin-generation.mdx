@@ -309,7 +309,7 @@ export async function query(taskId, request, ctx) {
 - **`submit` 要返回 `taskId`**。BeefTV 先记下任务号再查询。应用重启后只调用 `query`，不会再次调用 `submit`。服务同步出结果时，也可以直接返回 `{ status: "succeeded", result }`。
 - **`query` 抛异常表示这次没查到**，BeefTV 过一会儿再查，连续 3 次才算失败，失败原因是最后一次异常的文字。任务确定失败时返回 `{ status: "failed", message }`。
 - **结果里写 `url` 或 `dataUrl` 就够了**，BeefTV 负责下载和保存。结果地址和服务地址同源时，下载会带上用户的密钥；其他地址不带。
-- **取消任务时**，BeefTV 停止查询并触发 `ctx.signal`，不会去服务那边取消任务。
+- **取消任务时**，BeefTV 停止查询并触发 `ctx.signal`，不会去服务那边取消任务。调用要在 5 秒内结束，否则 BeefTV 会结束运行插件的进程，下一次调用启动新的。
 - **一个服务可以同时出图、视频和音频**：`capabilities` 写上几种，`models` 给每个模型标上 `capability`。用户在「选择服务商」里只看到一项。
 
 ### 列出模型

@@ -72,7 +72,7 @@ type skillDirSource struct {
 
 // syncDirectorySkills 把文件夹里的技能登记进技能库，并删掉这个来源下已经不存在的技能。
 func (s *Service) syncDirectorySkills(source skillDirSource, skillDirs []string) error {
-	discovered, err := discoverPluginSkillDirectories(skillDirs)
+	discovered, complete, err := discoverPluginSkillDirectories(skillDirs)
 	if err != nil {
 		return err
 	}
@@ -91,7 +91,7 @@ func (s *Service) syncDirectorySkills(source skillDirSource, skillDirs []string)
 			log.Printf("跳过技能 %s：%v", entry.slug, err)
 		}
 	}
-	if source.keepUnseen {
+	if source.keepUnseen || !complete {
 		return nil
 	}
 	var existingRows []model.Skill
@@ -206,19 +206,28 @@ type discoveredPluginSkillDir struct {
 	dir  string
 }
 
-func discoverPluginSkillDirectories(skillDirs []string) ([]discoveredPluginSkillDir, error) {
+// discoverPluginSkillDirectories 还返回这次是否读全：文件确实不存在才算没有，其他读取失败可能只是暂时的。
+func discoverPluginSkillDirectories(skillDirs []string) ([]discoveredPluginSkillDir, bool, error) {
 	var result []discoveredPluginSkillDir
 	seenDirs := map[string]struct{}{}
+	complete := true
+	stat := func(path string) (os.FileInfo, error) {
+		info, err := os.Stat(path)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			complete = false
+		}
+		return info, err
+	}
 	for _, rawDir := range skillDirs {
 		cleaned := filepath.Clean(strings.TrimSpace(rawDir))
 		if cleaned == "" || cleaned == "." {
 			continue
 		}
-		info, err := os.Stat(cleaned)
+		info, err := stat(cleaned)
 		if err != nil || !info.IsDir() {
 			continue
 		}
-		if mdInfo, err := os.Stat(filepath.Join(cleaned, "SKILL.md")); err == nil && mdInfo.Mode().IsRegular() {
+		if mdInfo, err := stat(filepath.Join(cleaned, "SKILL.md")); err == nil && mdInfo.Mode().IsRegular() {
 			if _, dup := seenDirs[cleaned]; !dup {
 				seenDirs[cleaned] = struct{}{}
 				result = append(result, discoveredPluginSkillDir{slug: filepath.Base(cleaned), dir: cleaned})
@@ -227,14 +236,14 @@ func discoverPluginSkillDirectories(skillDirs []string) ([]discoveredPluginSkill
 		}
 		entries, err := os.ReadDir(cleaned)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		for _, entry := range entries {
 			if !entry.IsDir() {
 				continue
 			}
 			subDir := filepath.Join(cleaned, entry.Name())
-			mdInfo, err := os.Stat(filepath.Join(subDir, "SKILL.md"))
+			mdInfo, err := stat(filepath.Join(subDir, "SKILL.md"))
 			if err != nil || !mdInfo.Mode().IsRegular() {
 				continue
 			}
@@ -245,7 +254,7 @@ func discoverPluginSkillDirectories(skillDirs []string) ([]discoveredPluginSkill
 			result = append(result, discoveredPluginSkillDir{slug: entry.Name(), dir: subDir})
 		}
 	}
-	return result, nil
+	return result, complete, nil
 }
 
 func readSkillDirectoryFiles(rootDir string) (map[string][]byte, error) {

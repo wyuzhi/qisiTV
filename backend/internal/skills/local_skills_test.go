@@ -312,3 +312,37 @@ func TestLocalSkillsStayWhenTheirFolderIsTemporarilyMissing(t *testing.T) {
 		t.Fatalf("skills after the folder was removed = %v", got)
 	}
 }
+
+func TestLocalSkillStaysWhenItsSkillFileCannotBeRead(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	root := filepath.Join(home, ".agents", "skills")
+	writeLocalSkill(t, filepath.Join(root, "flaky"), map[string]string{"SKILL.md": "---\nname: flaky\ndescription: 读取出错的技能\n---\n正文"})
+	s := localSkillFixture(t)
+	if err := s.SyncLocalSkills(); err != nil {
+		t.Fatal(err)
+	}
+	// 指向自己的链接读取时会报错，但不是“文件不存在”。
+	skillFile := filepath.Join(root, "flaky", "SKILL.md")
+	if err := os.Remove(skillFile); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(skillFile, skillFile); err != nil {
+		t.Skip(err)
+	}
+	if err := s.SyncLocalSkills(); err != nil {
+		t.Fatal(err)
+	}
+	if got := localSkillIDs(t, s); len(got) != 1 {
+		t.Fatalf("a read error should not delete the skill: %v", got)
+	}
+	if err := os.Remove(skillFile); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SyncLocalSkills(); err != nil {
+		t.Fatal(err)
+	}
+	if got := localSkillIDs(t, s); len(got) != 0 {
+		t.Fatalf("a removed SKILL.md should delete the skill: %v", got)
+	}
+}

@@ -1,7 +1,7 @@
 // Package pluginhost 在一个 Node 子进程里运行插件的 JS 生成接口。做法照 Magpie 的插件
 // 宿主：按行收发 JSON，后端按 id 配对请求与回复，取消时发 abort；插件代码自己发请求。
 // 同一插件换了版本时，新调用进新进程，旧进程等手上的调用结束后随 stdin 关闭退出。
-// 进程卡死（abort 没回话）时直接结束，下一次调用启动新进程。
+// 取消后插件停不下来时换掉进程，见 process.abort。
 package pluginhost
 
 import (
@@ -26,8 +26,8 @@ import (
 
 const (
 	scriptName = "plugin-host.mjs"
-	// Node 只要事件循环没卡住就会马上回 abort。等这么久还没回，就当进程已经卡死。
-	abortAckTimeout = 5 * time.Second
+	// 取消一次调用后，最多等这么久让它结束。
+	abortTimeout = 5 * time.Second
 )
 
 // 单次调用的上限，覆盖插件自己的网络超时；轮询节奏由调用方决定。
@@ -218,13 +218,16 @@ func (p *process) read(stdout io.Reader) {
 }
 
 func (p *process) call(ctx context.Context, params map[string]any) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	id, ch, err := p.register()
 	if err != nil {
 		return nil, err
 	}
 	if err := p.write(ctx, map[string]any{"id": id, "method": "call", "params": params}); err != nil {
 		if ctx.Err() != nil {
-			p.abort(id)
+			p.abort(id, ch)
 			return nil, ctx.Err()
 		}
 		p.forget(id)
@@ -241,7 +244,7 @@ func (p *process) call(ctx context.Context, params map[string]any) (json.RawMess
 		}
 		return message.Result, nil
 	case <-ctx.Done():
-		p.abort(id)
+		p.abort(id, ch)
 		return nil, ctx.Err()
 	}
 }
@@ -258,16 +261,17 @@ func (p *process) register() (int64, chan reply, error) {
 	return p.nextID, ch, nil
 }
 
-// abort 让插件停下这次调用，并等 Node 回话。没回话说明事件循环卡死了，留着它后面的
-// 调用都会一直等到超时，所以结束这个进程，下一次调用启动新的。
-func (p *process) abort(id int64) {
-	p.forget(id)
+// abort 让插件停下这次调用，并等它结束。Node 没回话说明事件循环卡死了，留着它后面的
+// 调用都会等到超时，所以马上结束进程。Node 回了话但调用没结束，说明插件没理会取消：
+// 这时不影响其他插件手上的调用，只换下进程，等它们结束后一起结束。
+func (p *process) abort(id int64, done <-chan reply) {
+	defer p.forget(id)
 	ackID, ack, err := p.register()
 	if err != nil {
 		return
 	}
 	defer p.forget(ackID)
-	ctx, cancel := context.WithTimeout(context.Background(), abortAckTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), abortTimeout)
 	defer cancel()
 	if err := p.write(ctx, map[string]any{"id": ackID, "method": "abort", "params": map[string]any{"id": id}}); err != nil {
 		p.stop()
@@ -277,6 +281,12 @@ func (p *process) abort(id int64) {
 	case <-ack:
 	case <-ctx.Done():
 		p.stop()
+		return
+	}
+	select {
+	case <-done:
+	case <-ctx.Done():
+		p.retire()
 	}
 }
 
@@ -375,6 +385,7 @@ func (p *process) stop() {
 	p.retired = true
 	p.mu.Unlock()
 	_ = p.cmd.Process.Kill()
+	_ = p.stdin.Close()
 }
 
 func (p *process) kill() {

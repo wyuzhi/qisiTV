@@ -472,7 +472,6 @@ func (r *Runtime) Close(ctx context.Context) error {
 		if r.beefAPI != nil {
 			r.beefAPI.Close()
 		}
-		pluginhost.Close()
 		if err := r.DepthComponents().CloseComponents(ctx); err != nil {
 			failures = append(failures, fmt.Errorf("暂停组件下载：%w", err))
 		}
@@ -512,6 +511,8 @@ func (r *Runtime) Close(ctx context.Context) error {
 				}
 			}
 		}
+		// 生成任务和 HTTP 请求都停了才关插件宿主：早关会杀掉还在提交的调用，后来的调用又会拉起新进程。
+		pluginhost.Close()
 		var serviceErr error
 		if r.localApp != nil {
 			serviceErr = r.localApp.Close()

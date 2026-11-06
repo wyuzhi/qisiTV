@@ -20,6 +20,9 @@ export async function submit(request) {
 }
 
 export async function query(taskId, request, ctx) {
+  if (taskId === 'ignore') {
+    await new Promise((resolve) => setTimeout(resolve, 60000));
+  }
   if (taskId === 'spin') {
     appendFileSync(request.marker, 'spin');
     for (;;) {}
@@ -132,6 +135,30 @@ func expectFreshProcess(t *testing.T, host *Host, module string) {
 	}
 }
 
+// 插件不理会取消时事件循环还活着，但调用停不下来，这个进程也要换掉。
+func TestPluginThatIgnoresCancelIsReplaced(t *testing.T) {
+	host, module := testHost(t)
+	var first answer
+	if err := host.Do(context.Background(), Call{Plugin: "p", Version: "1", Module: module, Method: "query", Args: map[string]any{"taskId": "now"}}, &first); err != nil {
+		t.Fatal(err)
+	}
+	old := host.current
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err := host.Do(ctx, Call{Plugin: "p", Version: "1", Module: module, Method: "query", Args: map[string]any{"taskId": "ignore"}}, nil); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v", err)
+	}
+	expectFreshProcess(t, host, module)
+	if host.current == old {
+		t.Fatal("the process kept running a cancelled call")
+	}
+	select {
+	case <-old.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("old process kept running the cancelled call")
+	}
+}
+
 // 插件写了死循环时 Node 不再回消息，调用超时后要换掉进程，不然后面的调用都等到超时。
 func TestPluginThatStopsRespondingIsReplaced(t *testing.T) {
 	host, module := testHost(t)
@@ -169,7 +196,7 @@ func TestWriteToAStuckPluginCanBeCancelled(t *testing.T) {
 	if err := host.Do(ctx, Call{Plugin: "p", Version: "1", Module: module, Method: "query", Args: larger}, nil); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err = %v", err)
 	}
-	if elapsed := time.Since(started); elapsed > abortAckTimeout+5*time.Second {
+	if elapsed := time.Since(started); elapsed > abortTimeout+5*time.Second {
 		t.Fatalf("cancelled call returned after %s", elapsed)
 	}
 	select {
