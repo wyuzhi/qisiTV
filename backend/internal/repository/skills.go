@@ -86,6 +86,25 @@ func (r *Repository) Skill(id string) (*model.Skill, error) {
 	return &skill, nil
 }
 
+// RetireExternalSkills deactivates imports from the retired shared-directory
+// source atomically, preserving BeefTV installations and historical packages.
+func (r *Repository) RetireExternalSkills() error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		externalIDs := tx.Model(&model.Skill{}).Select("id").Where("source_type = ?", "local")
+		if err := tx.Model(&model.UserSkillState{}).
+			Where("skill_id IN (?) AND (added = ? OR auto_update = ?)", externalIDs, true, true).
+			Updates(map[string]any{"added": false, "auto_update": false}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.Skill{}).
+			Where("source_type = ? AND (status <> ? OR auto_update = ?)", "local", 0, true).
+			Updates(map[string]any{"status": 0, "auto_update": false}).Error; err != nil {
+			return err
+		}
+		return tx.Where("key = ?", "local_skills_directory").Delete(&model.SystemSetting{}).Error
+	})
+}
+
 func (r *Repository) CreateSkill(skill *model.Skill, ownerState *model.UserSkillState) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(skill).Error; err != nil {

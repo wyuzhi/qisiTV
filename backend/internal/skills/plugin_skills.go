@@ -53,7 +53,7 @@ const (
 	skillSourceTypeLocal  = "local"
 )
 
-// skillDirSource 说明一批文件夹技能从哪来。插件包和本机技能目录走同一条登记路径，只有这些字段不同。
+// skillDirSource describes skills contributed by a BeefTV plugin package.
 type skillDirSource struct {
 	sourceType          string
 	sourceURL           string
@@ -62,12 +62,6 @@ type skillDirSource struct {
 	authorName          string
 	version             string
 	fallbackDescription string
-	// private 表示技能只在这台电脑上，不算公开内容。
-	private bool
-	// skipBroken 让读不出来的技能只跳过它自己。本机目录里的内容不归 BeefTV 管，一个坏技能不能拖累别的。
-	skipBroken bool
-	// keepUnseen 表示这次没读全目录，只更新读到的技能，不删记录。
-	keepUnseen bool
 }
 
 // syncDirectorySkills 把文件夹里的技能登记进技能库，并删掉这个来源下已经不存在的技能。
@@ -85,13 +79,10 @@ func (s *Service) syncDirectorySkills(source skillDirSource, skillDirs []string)
 		skillID := source.idPrefix + sanitizePluginSkillSlug(entry.slug)
 		seenIDs[skillID] = struct{}{}
 		if err := s.syncDirectorySkill(source, userID, skillID, entry); err != nil {
-			if !source.skipBroken {
-				return err
-			}
-			log.Printf("跳过技能 %s：%v", entry.slug, err)
+			return err
 		}
 	}
-	if source.keepUnseen || !complete {
+	if !complete {
 		return nil
 	}
 	var existingRows []model.Skill
@@ -152,7 +143,7 @@ func (s *Service) syncDirectorySkill(source skillDirSource, userID, skillID stri
 			FileCount: len(archive.Files), TotalBytes: archive.TotalBytes, SourceType: source.sourceType,
 			SourceURL: source.sourceURL, SourceRef: versionLabel, SourceSubdir: entry.slug, SyncStatus: "synced",
 			LastCheckedAt: &now, LastSyncedAt: &now, Status: skillStatusEnabled, Source: 3, Tag: "others",
-			ShowcaseMediaJSON: "[]", IsPrivate: source.private,
+			ShowcaseMediaJSON: "[]",
 		}
 		var state *model.UserSkillState
 		if userID != "" {

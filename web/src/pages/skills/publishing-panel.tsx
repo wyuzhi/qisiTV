@@ -11,6 +11,8 @@ import { canSubmitPublication, capabilityOptions, needsPublicationTargetCorrecti
 import { SkillFileDetails } from "./skill-file-details";
 import { skillFailureMessage } from "./skill-feedback";
 import { loadPublicationHistory, mergePublications } from "./skill-publications";
+import { PublicationDetailContent } from "./publication-detail-content";
+import { SkillReleaseMarkdown } from "./market-file-preview";
 
 type PublicationFormValues = Omit<SkillMetadata, "skillId"> & PublicationTarget & { localSkillId: string };
 type PublishingPanelProps = {
@@ -39,6 +41,7 @@ export function SkillPublishingPanel({ planId, renderHeader }: PublishingPanelPr
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [confirmed, setConfirmed] = useState(false);
+    const [authorizationRequired, setAuthorizationRequired] = useState(false);
     const [creating, setCreating] = useState(false);
     const [preparingFrom, setPreparingFrom] = useState<PublishPlan | null>(null);
     const [form] = Form.useForm<PublicationFormValues>();
@@ -90,7 +93,7 @@ export function SkillPublishingPanel({ planId, renderHeader }: PublishingPanelPr
             setCreating(true);
         }
     }, [params, form, skills]);
-    useEffect(() => { setConfirmed(false); }, [selected, current?.preview?.previewDigest]);
+    useEffect(() => { setConfirmed(false); setAuthorizationRequired(false); }, [selected, current?.preview?.previewDigest]);
     const run = async (work: () => Promise<unknown>) => {
         setBusy(true); setError("");
         try { await work(); } catch (e) { setError(skillFailureMessage(e, "投稿操作未完成", "请保留草稿，检查连接或提示中的使用条件后重试。")); } finally { setBusy(false); }
@@ -139,11 +142,10 @@ export function SkillPublishingPanel({ planId, renderHeader }: PublishingPanelPr
                 <button type="button" className="assets-header-compact-button" aria-label="刷新投稿" title="刷新投稿" disabled={loading || busy} aria-busy={loading} onClick={() => void reload()}><RefreshCw className={loading ? "size-4 animate-spin" : "size-4"} /></button>
                 <Dropdown trigger={["click"]} menu={{ items: [
                     { key: "status", label: auth.connected ? "账号已连接" : "账号未连接", disabled: true },
-                    ...(!auth.connected ? [{ key: "connect", label: "连接投稿账号", onClick: () => void connectAuthorization() }] : []),
                     { key: "authorization", label: "检查连接状态", onClick: reload },
                     { key: "website", label: "在官网查看投稿", onClick: () => void run(() => openSkillWebsite(`${website}/mine`)) },
                     ...(auth.connected ? [{ type: "divider" as const }, { key: "disconnect", label: "断开账号", onClick: () => void run(async () => { await disconnectMarketAuthorization(); setAuth({ connected: false }); setSubmissions([]); }) }] : []),
-                ] }}><button type="button" className="assets-header-compact-button" aria-label="投稿账号与更多操作" title={auth.connected ? "投稿账号已连接" : "连接投稿账号"} disabled={busy}><CircleUserRound className="size-4" /></button></Dropdown>
+                ] }}><button type="button" className="assets-header-compact-button" aria-label="投稿账号与更多操作" title="投稿账号与更多操作" disabled={busy}><CircleUserRound className="size-4" /></button></Dropdown>
             </>,
         })}
         <section className="skill-market-content" aria-label="技能投稿">
@@ -175,36 +177,40 @@ export function SkillPublishingPanel({ planId, renderHeader }: PublishingPanelPr
                 <div className="workspace-list-controls"><span className="skill-market-state">{publicationStatus(item.status)}</span><Button size="small" onClick={() => setSelected(item.plan?.planId || item.key)}>查看详情</Button></div>
             </article>)}
         </div> : !error && !remoteError ? <p className="skill-market-empty">{keyword ? "没有匹配的投稿" : auth.connected ? "还没有投稿，可从右上角新建。" : "本机暂无投稿草稿。"}</p> : null : null}
-        <AppModal scrollBody open={Boolean(currentSubmission) && !creating} title="投稿详情" onCancel={() => { setSelected(""); setParams({ tab: "publish" }); }} footer={null} width={800}>
-            {currentSubmission ? <article className="skill-publish-detail">
-                <h2>{currentSubmission.metadata.name} · {currentSubmission.metadata.versionLabel}</h2>
-                <p className="skill-publish-detail-status">{publicationStatus(currentSubmission.status)}</p>
-                <p>{currentSubmission.metadata.description}</p>
-                <p>许可：{currentSubmission.metadata.license}</p>
-                <p>使用条件：{(currentSubmission.metadata.requirements || []).map(requirementLabel).join("、") || "没有额外工具要求"}</p>
-                {currentSubmission.metadata.requirementNotes ? <p>{currentSubmission.metadata.requirementNotes}</p> : null}
-                {currentSubmission.reviewReason ? <Alert type="info" title="审核意见" description={currentSubmission.reviewReason} /> : null}
-                <SkillFileDetails files={currentSubmission.files || []} info={[{ label: "投稿编号", value: currentSubmission.submissionId }]} />
-                <div className="skill-market-actions"><Button onClick={() => void run(() => openSkillWebsite(`${website}/submissions/${encodeURIComponent(currentSubmission.submissionId)}`))}>在官网查看稿件</Button></div>
-            </article> : null}
+        <AppModal flush scrollBody className="skill-release-dialog" wrapClassName="skill-release-wrap" open={Boolean(currentSubmission) && !creating} title={currentSubmission?.metadata.name || "投稿详情"} onCancel={() => { setSelected(""); setParams({ tab: "publish" }); }} footer={currentSubmission ? <div className="skill-publish-footer">{error ? <Alert type="error" showIcon title={error} /> : null}<Button onClick={() => void run(() => openSkillWebsite(`${website}/submissions/${encodeURIComponent(currentSubmission.submissionId)}`))}>在官网查看稿件</Button></div> : null} width="min(760px, calc(100vw - 32px))">
+            {currentSubmission ? <PublicationDetailContent key={currentSubmission.submissionId} metadata={currentSubmission.metadata} status={currentSubmission.status} notices={currentSubmission.reviewReason ? <Alert type="info" title="审核意见" description={currentSubmission.reviewReason} /> : null}>
+                <section className="skill-release-section"><SkillFileDetails files={currentSubmission.files || []} info={[{ label: "投稿编号", value: currentSubmission.submissionId }]} /></section>
+            </PublicationDetailContent> : null}
         </AppModal>
-        <AppModal scrollBody open={Boolean(current) && !creating} title="投稿详情" onCancel={() => { setSelected(""); setParams({ tab: "publish" }); }} footer={null} width={800}>
-            {current ? <article className="skill-publish-detail" key={current.planId}>{error ? <Alert type="error" showIcon title={error} /> : null}<h2>{current.metadata.name} · {current.metadata.versionLabel}</h2><p className="skill-publish-detail-status">{publicationStatus(current.status)}</p><p>{current.metadata.description}</p><p>许可：{current.metadata.license}</p><p>使用条件：{current.metadata.requirements.map(requirementLabel).join("、") || "没有额外工具要求"}</p>{current.metadata.requirementNotes ? <p>{current.metadata.requirementNotes}</p> : null}
-                <p>投稿目标：{current.publicationTarget === "existing" ? "已有市场技能的新版本" : needsPublicationTargetCorrection(current) ? "需要确认" : "发布新技能"}</p>
+        <AppModal flush scrollBody className="skill-release-dialog" wrapClassName="skill-release-wrap" open={Boolean(current) && !creating} title={current?.metadata.name || "投稿详情"} onCancel={() => { setSelected(""); setParams({ tab: "publish" }); }} width="min(760px, calc(100vw - 32px))" footer={current ? <div className="skill-publish-footer">
+                {authorizationRequired && !auth.connected ? <Alert type="warning" showIcon title="请先关闭详情并连接投稿账号。" /> : null}
+                {current.status === "awaiting_upload_confirmation" || current.status === "uploading" ? <Checkbox checked={confirmed} onChange={e => setConfirmed(e.target.checked)}>我已核对文件和分享权限，确认上传为私有草稿。</Checkbox> : null}
+                {current.status === "awaiting_submit_confirmation" ? <Checkbox checked={confirmed} onChange={e => setConfirmed(e.target.checked)}>我已确认公开这份 skill，提交审核</Checkbox> : null}
+                {current.status === "rejected" ? <p>请在官网按审核意见修改，保存后回到这里刷新预览，再次确认送审。</p> : null}
+                <div className="skill-market-actions">
+                    {!current.submissionId && current.status === "awaiting_upload_confirmation" ? <Button disabled={busy} onClick={() => void reprepare(current)}>修改信息并重新准备</Button> : null}
+                    {current.submissionId ? <><Button loading={busy} onClick={() => void run(async () => replace(await refreshPublication(current.planId)))}>刷新预览与审核状态</Button><Button onClick={() => void run(() => openSkillWebsite(`${website}/submissions/${encodeURIComponent(current.submissionId!)}`))}>在官网修改稿件</Button></> : null}
+                    {current.status === "awaiting_upload_confirmation" || current.status === "uploading" ? <Button type="primary" disabled={!confirmed || !auth.connected || needsPublicationTargetCorrection(current) || unsupportedRequirements(current.metadata.requirements).length > 0} loading={busy} onClick={() => void run(async () => { replace(await uploadPublication(current)); message.success("私有草稿已上传，请核对预览后再送审"); })}>确认上传私有草稿</Button> : null}
+                    {current.status === "awaiting_submit_confirmation" ? <Button type="primary" disabled={!canSubmitPublication(current, confirmed)} loading={busy} onClick={() => {
+                        if (!auth.connected) { setAuthorizationRequired(true); return; }
+                        void run(async () => { replace(await submitPublication(current)); message.success("已送审，可在官网查看结果和修改意见"); });
+                    }}>确认送审</Button> : null}
+                </div>
+            </div> : null}>
+            {current ? <PublicationDetailContent key={current.planId} metadata={current.metadata} status={current.status} author={current.preview?.author} notices={<>
+                {error ? <Alert type="error" showIcon title={error} /> : null}
                 {needsPublicationTargetCorrection(current) ? <Alert type="warning" title="请修改信息并明确选择投稿目标，再重新准备。原稿和文件会继续保留。" /> : null}
                 {unsupportedRequirements(current.metadata.requirements).length ? <Alert type="warning" title="这份草稿包含未确认的使用条件，请修改信息后重新准备。纯文字技能无需额外理解能力。" /> : null}
-                {!current.submissionId && current.status === "awaiting_upload_confirmation" ? <Button disabled={busy} onClick={() => void reprepare(current)}>修改信息并重新准备</Button> : null}
-                <h3>文件预览</h3><ul>{current.files.map(file => <li key={file.path}>{file.path}</li>)}</ul>
-                <SkillFileDetails files={current.files} info={[{ label: "压缩包 SHA-256", value: current.archiveSha256 }, { label: "本机草稿编号", value: current.planId }, { label: "本机技能编号", value: current.skillId }, { label: "本机版本编号", value: current.versionId }, { label: "市场技能编号", value: current.marketSkillId }, { label: "投稿编号", value: current.submissionId }, { label: "预览摘要", value: current.preview?.previewDigest }]} />
-                {current.instruction ? <details className="skill-publish-source"><summary>查看 SKILL.md 正文</summary><pre>{current.instruction}</pre></details> : null}
                 {current.preview?.warnings?.map(value => <Alert key={value} type="warning" title={value} />)}
                 {current.reviewReason ? <Alert type="info" title="审核意见" description={current.reviewReason} /> : null}
-                {!auth.connected && ["awaiting_upload_confirmation", "uploading", "awaiting_submit_confirmation"].includes(current.status) ? <p className="skill-publish-note">上传前，请先关闭详情并连接投稿账号。</p> : null}
-                {current.status === "awaiting_upload_confirmation" || current.status === "uploading" ? <><Checkbox checked={confirmed} onChange={e => setConfirmed(e.target.checked)}>我已核对文件和分享权限，确认上传为私有草稿。</Checkbox><div className="skill-market-actions"><Button type="primary" disabled={!confirmed || !auth.connected || needsPublicationTargetCorrection(current) || unsupportedRequirements(current.metadata.requirements).length > 0} loading={busy} onClick={() => void run(async () => { replace(await uploadPublication(current)); message.success("私有草稿已上传，请核对预览后再送审"); })}>确认上传私有草稿</Button></div></> : null}
-                {current.status === "awaiting_submit_confirmation" ? <><p>通过审核后，以上内容和文件将公开。此预览对应作者：{current.preview?.author}。</p><Checkbox checked={confirmed} onChange={e => setConfirmed(e.target.checked)}>我已检查这份公开预览，确认提交审核。</Checkbox><div className="skill-market-actions"><Button type="primary" disabled={!auth.connected || !canSubmitPublication(current, confirmed)} loading={busy} onClick={() => void run(async () => { replace(await submitPublication(current)); message.success("已送审，可在官网查看结果和修改意见"); })}>确认送审</Button></div></> : null}
-                {current.submissionId ? <div className="skill-market-actions"><Button loading={busy} onClick={() => void run(async () => replace(await refreshPublication(current.planId)))}>刷新预览与审核状态</Button><Button onClick={() => void run(() => openSkillWebsite(`${website}/submissions/${encodeURIComponent(current.submissionId!)}`))}>在官网修改稿件</Button></div> : null}
-                {current.status === "rejected" ? <p>请在官网按审核意见修改，保存后回到这里刷新预览，再次确认送审。</p> : null}
-            </article> : null}
+            </>}>
+                <section className="skill-release-section"><details><summary>投稿信息</summary>
+                    <p>投稿目标为{current.publicationTarget === "existing" ? "已有市场技能的新版本" : needsPublicationTargetCorrection(current) ? "需要确认" : "发布新技能"}</p>
+                    {current.metadata.sourceUrl ? <p>来源链接 {current.metadata.sourceUrl}</p> : null}
+                </details></section>
+                {current.instruction ? <section className="skill-release-section"><details className="skill-release-instructions"><summary>使用说明</summary><SkillReleaseMarkdown content={current.instruction} /></details></section> : null}
+                <section className="skill-release-section"><SkillFileDetails files={current.files} info={[{ label: "压缩包 SHA-256", value: current.archiveSha256 }, { label: "本机草稿编号", value: current.planId }, { label: "本机技能编号", value: current.skillId }, { label: "本机版本编号", value: current.versionId }, { label: "市场技能编号", value: current.marketSkillId }, { label: "投稿编号", value: current.submissionId }, { label: "预览摘要", value: current.preview?.previewDigest }]} /></section>
+            </PublicationDetailContent> : null}
         </AppModal>
         </section>
     </>;

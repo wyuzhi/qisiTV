@@ -109,6 +109,12 @@ BeefTV（`glanderness/BeefTV`）是面向 AI 影视与短剧创作的工作台�
 
 ## 7. 本地开发、部署和数据目录
 
+### 技能列表展示硬约束
+
+- 技能市场、我的技能和我的投稿的列表名称区只展示技能名称。描述、作者、版本、文件数量、脚本提示、兼容性说明、使用条件和其他详情统一放在对应的详情视图中，禁止在列表恢复副标题、摘要或“含脚本”等说明文字。
+- 右侧仅保留用户认可的简短灰色来源标识及必要的操作、启用状态和投稿进度。来源标识使用“官方”“我的”“市场”“插件”等短文案，具体来源和权限说明放在提示或详情中，禁止扩展成第二行说明。
+- 新增技能信息时先接入详情视图。交付前检查三个子页面的列表，确认名称区没有附加说明，且详情入口能够读取完整信息。
+
 - 先阅读 `.env.example` 和对应 Compose 文件。宿主机后端开发必须使用 Git 忽略的 `.local/project-workbench-debug`，通过 `CANVAS_BACKEND_DATA_DIR` 显式指定；不要把 `backend/data` 当作开发账号数据库。
 - 本地缓存放 `.local/cache`；不要提交数据库、上传文件、`.env`、真实密钥、构建产物或编辑器配置。
 - 宿主机开发：`backend/` 运行 `CANVAS_BACKEND_DATA_DIR=../.local/project-workbench-debug go run ./cmd/server`，`web/` 使用 Bun 和 Vite；不要用 pnpm/npm 覆盖同一套 `node_modules`，也不要提交 `pnpm-lock.yaml` 或 `package-lock.json`。Docker 热更新使用 `docker-compose.dev.yml`；本地构建运行使用 `docker-compose.local.yml`。

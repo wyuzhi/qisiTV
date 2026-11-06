@@ -11,7 +11,16 @@ export function publicationStatus(status: string) {
 export function canSubmitPublication(plan: { status: string; preview?: unknown }, confirmed: boolean) {
     return confirmed && plan.status === "awaiting_submit_confirmation" && Boolean(plan.preview);
 }
-import type { PublishPlan } from "@/services/api/skill-market";
+import type { MarketItem, PublishPlan } from "@/services/api/skill-market";
+import type { Skill } from "@/services/api/skills";
+
+export function marketInstallationState(release: Pick<MarketItem, "skillId" | "releaseId" | "versionLabel">, skills: Array<Pick<Skill, "skillId" | "sourceType" | "sourceRef" | "sourceCommit" | "version" | "isAdded">>): "install" | "update" | "installed" {
+    const installed = skills.find(skill => (skill.sourceType === "market" && skill.sourceRef === release.skillId)
+        || (skill.sourceType === "builtin" && skill.skillId === release.skillId && skill.isAdded));
+    if (!installed) return "install";
+    const current = installed.sourceType === "builtin" ? installed.version === release.versionLabel : installed.sourceCommit === release.releaseId;
+    return current ? "installed" : "update";
+}
 
 export function needsPublicationTargetCorrection(plan: Pick<PublishPlan, "submissionId" | "publicationTarget" | "marketSkillId" | "skillId" | "metadata">) {
     if (plan.submissionId) return false;

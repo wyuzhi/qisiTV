@@ -1,16 +1,72 @@
 .skill-market-toggle { display: flex; align-items: center; gap: 8px; }
+.skill-package-heading { flex: 1; min-width: 0; }
+.skill-package-heading h1 { margin: 0; font-size: var(--fs-title); font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; color: var(--user-ink, var(--foreground)); }
+.skill-package-about { margin-top: 12px; font-size: var(--fs-body); line-height: 1.7; color: var(--user-ink-muted, var(--muted-foreground)); max-height: 24dvh; overflow: auto; scrollbar-width: none; }
+.skill-package-about::-webkit-scrollbar { display: none; }
+.skill-package-about summary { width: fit-content; cursor: pointer; }
+.skill-package-about summary:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.skill-package-about p { margin: 12px 0; max-width: 80ch; overflow-wrap: anywhere; }
+.skill-package-about dl { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 12px 0 0; }
+.skill-package-about dl > div { display: flex; gap: 8px; }
+.skill-package-about dd { margin: 0; color: var(--user-ink, var(--foreground)); }
+.skill-package-modal .skill-package-tree, .skill-package-modal .skill-package-preview-body { scrollbar-width: none; }
+.skill-package-modal .skill-package-tree::-webkit-scrollbar, .skill-package-modal .skill-package-preview-body::-webkit-scrollbar { display: none; }
+.skill-origin-label { padding: 2px 8px; border-radius: var(--r-sm); background: var(--user-surface-hover, var(--muted)); color: var(--user-ink-muted); font-size: var(--fs-caption); line-height: 20px; white-space: nowrap; }
 .skill-market-toggle > span, .skill-market-state { font-size: var(--fs-caption); color: var(--user-ink-muted); white-space: nowrap; }
-.skill-market-preview p { margin: 8px 0; line-height: 1.65; overflow-wrap: anywhere; }
+.skill-market-preview p { margin: 8px 0 0; line-height: 1.8; overflow-wrap: anywhere; }
 .skill-market-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: var(--fs-caption); color: var(--user-ink-muted); overflow-wrap: anywhere; }
 .skill-market-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .skill-market-help, .skill-market-empty { margin: 24px 0; line-height: 1.8; color: var(--user-ink-muted); }
 .skill-market-help a { margin-left: 8px; text-decoration: underline; }
 .skill-market-warning { color: var(--user-ink-muted); }
 .skill-market-preview { overflow-wrap: anywhere; }
-.skill-market-preview h3 { font-weight: 600; margin: 16px 0 8px; }
-.skill-market-preview ul { padding-left: 20px; list-style: disc; }
-.skill-market-preview .skill-market-trials li { margin-bottom: 16px; }
-.skill-market-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: var(--muted); border-radius: var(--r-sm); max-height: 300px; overflow: auto; }
+.skill-release-wrap { display: flex; align-items: center; justify-content: center; padding: 16px; overflow: hidden; }
+.skill-release-wrap::before { display: none; }
+.skill-release-wrap .skill-release-dialog { display: block; flex: 0 1 760px; min-width: 0; max-width: 100%; margin: 0; }
+.skill-release-dialog .ant-modal-container { display: flex; flex-direction: column; max-height: calc(100dvh - 32px); background: var(--user-surface, var(--background)); }
+.skill-release-dialog .ant-modal-header { margin: 0; padding: 24px 60px 12px 28px; border: 0; background: transparent; }
+.skill-release-dialog .ant-modal-title { font-size: var(--fs-title); font-weight: 500; line-height: 1.4; color: var(--user-ink, var(--foreground)); overflow-wrap: anywhere; }
+.skill-release-dialog .ant-modal-close { top: 20px; right: 20px; }
+.skill-release-dialog .ant-modal-header, .skill-release-dialog .ant-modal-footer { flex-shrink: 0; }
+.skill-release-dialog .ant-modal-body { flex: 1 1 auto; min-height: 0; scrollbar-width: none; }
+.skill-release-dialog .ant-modal-body::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.skill-release-dialog .ant-modal-footer { margin: 0; padding: 16px 28px 20px; border-top: 1px solid var(--user-border, var(--border)); }
+.skill-release-dialog .skill-market-preview { padding: 0 28px 8px; color: var(--user-ink, var(--foreground)); font-size: var(--fs-body); }
+.skill-market-preview:focus-visible { outline: 1px solid var(--user-border-strong, var(--border)); outline-offset: -1px; border-radius: var(--r-sm); }
+.skill-release-metadata { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0 0 20px; line-height: 1.6; }
+.skill-release-metadata > div { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.skill-release-metadata dt { flex-shrink: 0; color: var(--user-ink-muted, var(--muted-foreground)); }
+.skill-release-metadata dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.skill-market-preview .skill-release-description { margin: 0; line-height: 1.75; color: var(--user-ink-muted, var(--muted-foreground)); text-wrap: pretty; }
+.skill-release-overview { padding-bottom: 20px; border-bottom: 1px solid var(--user-border, var(--border)); }
+.skill-release-sections { display: grid; gap: 24px; padding-block: 24px; }
+.skill-release-section { min-width: 0; }
+.skill-release-section > details > summary { cursor: pointer; width: fit-content; font-size: var(--fs-body); line-height: 24px; color: var(--user-ink-muted, var(--muted-foreground)); }
+.skill-release-section > details > summary:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
+.skill-release-instructions > .skill-release-markdown, .skill-release-instructions > .ant-alert { margin-top: 16px; }
+.skill-release-notes { color: var(--user-ink-muted, var(--muted-foreground)); }
+.skill-release-dialog .skill-file-details { margin: 0; }
+.skill-release-markdown { margin-bottom: 16px; line-height: 1.8; overflow-wrap: anywhere; }
+.skill-release-markdown h1, .skill-release-markdown h2, .skill-release-markdown h3, .skill-release-markdown h4 { margin: 24px 0 10px; font-size: var(--fs-heading); font-weight: 500; line-height: 1.5; }
+.skill-release-markdown h1 { font-size: var(--fs-heading-lg); }
+.skill-release-markdown > :first-child { margin-top: 0; }
+.skill-release-markdown ul, .skill-release-markdown ol { padding-left: 22px; margin: 10px 0; list-style: revert; }
+.skill-release-markdown li + li { margin-top: 6px; }
+.skill-release-markdown a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.skill-release-markdown blockquote { border-left: 2px solid var(--user-border-strong, var(--border)); padding-left: 16px; margin: 16px 0; color: var(--user-ink-muted, var(--muted-foreground)); }
+.skill-release-markdown pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 14px 16px; background: var(--user-surface-muted, var(--muted)); border-radius: var(--r-sm); font-size: var(--fs-caption); }
+.skill-release-table { overflow-x: auto; scrollbar-width: none; margin: 16px 0; }
+.skill-release-table::-webkit-scrollbar { display: none; }
+.skill-release-table table { width: 100%; border-collapse: collapse; font-size: var(--fs-caption); }
+.skill-release-table th, .skill-release-table td { padding: 10px 12px; border-bottom: 1px solid var(--user-border, var(--border)); text-align: start; vertical-align: top; min-width: 80px; }
+.skill-release-table th { font-weight: 500; }
+@media (max-width: 640px) {
+    .skill-release-dialog .ant-modal-header { padding: 20px 52px 16px 20px; }
+    .skill-release-dialog .ant-modal-title { font-size: var(--fs-heading-lg); }
+    .skill-release-dialog .skill-market-preview { padding-inline: 20px; }
+    .skill-release-dialog .ant-modal-footer { padding: 16px 20px 20px; }
+    .skill-release-metadata { gap: 8px 20px; }
+}
 .skill-file-details { min-width: 0; margin-block: 12px; font-size: var(--fs-caption); line-height: 1.65; }
 .skill-file-details summary { cursor: pointer; color: var(--user-ink-muted); }
 .skill-file-details summary:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
@@ -31,15 +87,13 @@
 .skill-publish-intro { margin-bottom: 24px; }
 .skill-publish-form .ant-form-item { margin-bottom: 20px; }
 .skill-publish-note { margin-top: 16px; }
-.skill-publish-detail { display: flex; flex-direction: column; gap: 12px; min-width: 0; overflow-wrap: anywhere; }
-.skill-publish-detail h2 { font-size: var(--fs-body); font-weight: 600; }
-.skill-publish-detail h3 { margin-top: 12px; font-size: var(--fs-body); font-weight: 500; }
-.skill-publish-detail > p { font-size: var(--fs-caption); line-height: 1.65; }
-.skill-publish-detail-status { color: var(--user-ink-muted); }
-.skill-publish-detail ul { padding-left: 20px; list-style: disc; font-size: var(--fs-caption); line-height: 1.8; }
-.skill-publish-source { margin: 4px 0 12px; }
-.skill-publish-source summary { cursor: pointer; font-size: var(--fs-caption); color: var(--user-ink-muted); }
-.skill-publish-source pre { max-height: 280px; overflow: auto; margin-top: 12px; padding: 16px; white-space: pre-wrap; font-size: var(--fs-caption); line-height: 1.65; border-radius: var(--r-sm); background: var(--muted); }
+.skill-publish-notices { display: grid; gap: 12px; }
+.skill-publish-notices:not(:empty) { margin-top: 20px; }
+.skill-publish-footer { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; max-height: 40dvh; overflow: auto; scrollbar-width: none; text-align: start; font-size: var(--fs-body); line-height: 1.65; overflow-wrap: anywhere; }
+.skill-publish-footer::-webkit-scrollbar { display: none; }
+.skill-release-dialog .ant-modal-footer:has(.skill-publish-footer) { border-top: 0; }
+.skill-publish-footer p, .skill-publish-footer .skill-market-actions { margin: 0; }
+.skill-publish-footer .skill-market-actions { width: 100%; justify-content: flex-end; }
 
 /* Recovered list roles stay within the skills workspace. */
 :where(.skill-market-page) .workspace-list-row { display: flex; align-items: center; gap: 24px; padding: 22px 0; border-bottom: 1px solid var(--user-border); }

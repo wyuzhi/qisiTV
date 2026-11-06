@@ -10,7 +10,7 @@ import remarkGfm from "remark-gfm";
 import { skillMarkdownBody } from "./skill-document";
 import { skillFailureMessage } from "./skill-feedback";
 
-import { formatSkillCount, formatSkillDate, isLocalSkill, LOCAL_SKILL_LABEL, SKILL_SCRIPTS_NOTE, skillCategoryLabel } from "@/pages/skills/skill-catalog";
+import { formatSkillCount, formatSkillDate, skillCategoryLabel } from "@/pages/skills/skill-catalog";
 import { isLocalRuntimeMode } from "@/lib/runtime-mode";
 import { getSkillFile, listSkillFiles, skillFileRawURL, type Skill, type SkillCategory, type SkillPackageFile, type SkillPackageFileContent } from "@/services/api/skills";
 
@@ -101,17 +101,21 @@ export function SkillDetailModal({ skill, loading, mutating, categories, onClose
             {skill ? (
                 <div className="skill-package-shell">
                     <header className="skill-package-header">
-                        <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2 text-[var(--fs-label)] text-foreground/45">
-                                <span>{skillCategoryLabel(skill.tag, categories)}</span><span aria-hidden="true">/</span><span>{sourceLabel(skill.sourceType)}</span><span aria-hidden="true">/</span><span>v{skill.version || "1"}</span>{skill.effectiveUser?.name ? <><span aria-hidden="true">/</span><span>作者：{skill.effectiveUser.name}</span></> : null}<span aria-hidden="true">/</span><span>更新于 {formatSkillDate(skill.updatedAt)}</span>
-                            </div>
-                            <h1 className="mt-1 truncate text-[var(--fs-heading-lg)] font-semibold text-foreground">{skill.skillName}</h1>
-                            <p className="mt-1 line-clamp-2 max-w-4xl text-sm leading-5 text-foreground/58">{skill.description}</p>
-                            {skill.hasScripts ? <p className="mt-1 text-[var(--fs-label)] text-foreground/45">含脚本：{SKILL_SCRIPTS_NOTE}。</p> : null}
+                        <div className="skill-package-heading">
+                            <h1>{skill.skillName}</h1>
+                            <details className="skill-package-about">
+                                <summary>技能介绍</summary>
+                                {skill.description ? <p>{skill.description}</p> : null}
+                                <dl>
+                                    <div><dt>来源</dt><dd>{sourceLabel(skill.sourceType)}</dd></div>
+                                    <div><dt>分类</dt><dd>{skillCategoryLabel(skill.tag, categories)}</dd></div>
+                                    <div><dt>更新于</dt><dd>{formatSkillDate(skill.updatedAt)}</dd></div>
+                                </dl>
+                            </details>
                         </div>
                         {!fileOnly ? <div className="skill-package-actions">
                             {!localRuntime && skill.sourceType === "github" && skill.isOwner ? <Tooltip title={skill.syncError || "从 GitHub 检查并同步最新提交"}><Button loading={mutating} icon={<RefreshCw className="size-4" />} onClick={() => onSync(skill)}>同步</Button></Tooltip> : null}
-                            {skill.isOwner && !isLocalSkill(skill) ? <Button icon={<Pencil className="size-4" />} onClick={() => onEdit(skill)}>编辑</Button> : null}
+                            {skill.isOwner ? <Button icon={<Pencil className="size-4" />} onClick={() => onEdit(skill)}>编辑</Button> : null}
                             <Button loading={mutating} icon={<Heart className={`size-4 ${skill.isLike ? "fill-current text-rose-500" : ""}`} />} onClick={() => onLike(skill)}>{skill.isLike ? "已收藏" : "收藏"}</Button>
                             <Button type={skill.isAdded ? "default" : "primary"} loading={mutating} disabled={skill.isOwner} icon={skill.isAdded ? <Check className="size-4" /> : <Plus className="size-4" />} onClick={() => onAdd(skill)}>{skill.isOwner ? "我的技能" : skill.isAdded ? "已加入" : "加入技能"}</Button>
                         </div> : null}
@@ -139,10 +143,10 @@ export function SkillDetailModal({ skill, loading, mutating, categories, onClose
                                     />
                                 ) : <div className="skill-package-empty">没有匹配文件</div>}
                             </div>
-                            <div className="skill-package-sidebar-footer">
+                            {!fileOnly ? <div className="skill-package-sidebar-footer">
                                 <span className="inline-flex items-center gap-1"><Users className="size-3.5" />{formatSkillCount(skill.addedCount)} 人加入</span>
                                 <span>{skill.isPrivate ? "仅自己可见" : "公开"}</span>
-                            </div>
+                            </div> : null}
                         </aside>
 
                         <main className="skill-package-preview">
@@ -273,7 +277,6 @@ function sourceLabel(source: string) {
     if (source === "github") return "GitHub";
     if (source === "zip") return "ZIP 技能包";
     if (source === "builtin") return "内置技能";
-    if (source === "local") return LOCAL_SKILL_LABEL;
     if (source === "plugin") return "插件";
     return "Markdown";
 }
