@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
 import io
+import threading
 import unittest
 from pathlib import Path
 import urllib.request
@@ -155,6 +156,23 @@ class MirrorTest(unittest.TestCase):
         bad_zips = [{**z, "sha256": "0" * 64} for z in cnb.expected_zips(source, "v2.1.0")]
         with self.assertRaisesRegex(RuntimeError, "SHA-256 mismatch"):
             cnb.verify_cnb_zips("v2.1.0", bad_zips, opener=fake_opener)
+
+        # Updater zips are checked at the same time, and a failure still stops the mirror
+        two_at_once = threading.Barrier(2, timeout=10)
+
+        def concurrent_opener(req, timeout=180):
+            if req.headers.get("Range") == f"bytes=0-{len(payload_bytes) // 2 - 1}":
+                try:
+                    two_at_once.wait()
+                except threading.BrokenBarrierError:
+                    pass
+            return fake_opener(req, timeout)
+
+        zips = cnb.expected_zips(source, "v2.1.0")
+        cnb.verify_cnb_zips("v2.1.0", zips, opener=concurrent_opener)
+        self.assertFalse(two_at_once.broken)
+        with self.assertRaisesRegex(RuntimeError, "SHA-256 mismatch"):
+            cnb.verify_cnb_zips("v2.1.0", [zips[0], {**zips[1], "sha256": "0" * 64}, *zips[2:]], opener=fake_opener)
 
         # Also verify delta zips when present on the GitHub Release
         delta_assets = []

@@ -10,7 +10,7 @@ const targets = { 'darwin/arm64': ['darwin', 'arm64'], 'darwin/amd64': ['darwin'
 const runtimeModules = ['session-identity.mjs', 'canvas-turn.mjs', 'request-budget.mjs', 'durable-request-budget.mjs',
   'durable-session-owner.mjs', 'durable-turn-projection.mjs', 'durable-extensions.mjs', 'business-progress.mjs', 'durable-turn-budget.mjs', 'media-content.mjs', 'native-part-store.mjs', 'native-history.mjs', 'skill-resource.mjs', 'active-skills.mjs',
   'operation-bridge.mjs', 'await-business-tasks.mjs', 'timeline-delivery.mjs', 'canvas-read-view.mjs', 'canvas-write-view.mjs', 'session-owner.mjs', 'system-prompt.mjs', 'model-stream-idle.mjs', 'model-transport-error.mjs', 'plan.mjs', 'studio-digest.mjs', 'dispatch-diagnostics.mjs', 'plugin-packages.mjs'];
-const sourceFiles = ['server.mjs', ...runtimeModules, 'package.json', 'bun.lock'];
+const sourceFiles = ['server.mjs', 'plugin-host.mjs', ...runtimeModules, 'package.json', 'bun.lock'];
 
 function run(command, args, cwd) {
   const result = spawnSync(command, args, { cwd, encoding: 'utf8', timeout: 180000 });
@@ -103,6 +103,7 @@ export function packageAgentHost({ runtime, target, destination, source = path.j
     run(bundledNode, ['--input-type=module', '-e',
       imports.map(name => `await import(${JSON.stringify(name)});`).join('\n')], stage);
     run(bundledNode, ['--check', 'server.mjs'], stage);
+    run(bundledNode, ['--check', 'plugin-host.mjs'], stage);
     if (existsSync(destination)) throw new Error(`Refusing to overwrite existing agent-host: ${destination}`);
     cpSync(stage, destination, { recursive: true, dereference: true });
     console.log(`Packaged agent-host with Node ${NODE_VERSION} for ${target}: ${destination}`);

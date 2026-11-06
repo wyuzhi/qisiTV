@@ -46,7 +46,7 @@ func writeSamplePluginDir(t *testing.T, version string) string {
 		t.Fatal(err)
 	}
 	pkgJSON := `{
-		"name": "@beeftv/plugin-storyboard-grid-test",
+		"name": "storyboard-grid-test",
 		"version": "` + version + `",
 		"description": "测试分镜九宫格插件",
 		"author": "BeefTV",
@@ -55,16 +55,15 @@ func writeSamplePluginDir(t *testing.T, version string) string {
 			"skills": ["./skills"]
 		},
 		"beeftv": {
-			"id": "storyboard-grid-test",
-			"displayName": "分镜九宫格测试",
+			"name": "分镜九宫格测试",
 			"client": "./dist/client.js",
 			"contributes": {
 				"canvasNodes": [
 					{
-						"type": "storyboard-grid-test",
-						"title": "分镜九宫格测试",
-						"defaultWidth": 520,
-						"defaultHeight": 420,
+						"id": "storyboard-grid-test",
+						"label": "分镜九宫格测试",
+						"defaultTitle": "分镜九宫格测试",
+						"defaultSize": { "width": 520, "height": 420 },
 						"renderer": "client"
 					}
 				]
@@ -692,11 +691,14 @@ func TestBundledPluginDirsManifestAndDesktopAgentHostResolution(t *testing.T) {
 			offlineCtx, cancel := context.WithCancel(context.Background())
 			cancel()
 			curated := loadCuratedRegistryItems(offlineCtx, "", map[string]View{})
-			if len(curated) != 1 || curated[0].ID != "beeftv-plugin-character-replacement" {
-				t.Fatalf("expected curated registry to list only beeftv-plugin-character-replacement, got %+v", curated)
+			want := []string{"beeftv-plugin-character-replacement", "beeftv-plugin-comfyui", "beeftv-plugin-runninghub"}
+			if len(curated) != len(want) {
+				t.Fatalf("expected curated registry to list %v, got %+v", want, curated)
 			}
-			if curated[0].Bundled {
-				t.Fatalf("market plugin %s must not be marked Bundled=true", curated[0].ID)
+			for i, item := range curated {
+				if item.ID != want[i] || item.Bundled {
+					t.Fatalf("curated[%d] = %+v, want %s and not bundled", i, item, want[i])
+				}
 			}
 		})
 	}

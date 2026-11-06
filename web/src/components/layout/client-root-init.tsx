@@ -91,7 +91,6 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         void appQueryClient.fetchQuery({ queryKey: ["plugin-runtime", userId], queryFn: fetchPluginRuntimeState, staleTime: 30_000 })
             .then(async (runtime) => {
                 if (cancelled || useUserStore.getState().user?.id !== userId) return;
-                const statuses = { ...runtime.statuses };
                 const states = { ...runtime.states };
                 const legacyEnabledIds = usePluginStore
                     .getState()
@@ -101,13 +100,12 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     try {
                         const migrated = await Promise.all(legacyEnabledIds.map((pluginId) => setUserPluginEnabled(pluginId, true)));
                         for (const state of migrated) states[state.pluginId] = state;
-                        for (const pluginId of legacyEnabledIds) statuses[pluginId] = states[pluginId]?.effectiveEnabled ? "enabled" : "disabled";
                     } catch (error) {
                         console.warn("迁移用户插件启用状态失败，已保留服务端状态", error);
                     }
                 }
                 if (!cancelled && useUserStore.getState().user?.id === userId) {
-                    setRuntimeStatuses(statuses);
+                    setRuntimeStatuses({});
                     setPluginStates(states);
                 }
             })

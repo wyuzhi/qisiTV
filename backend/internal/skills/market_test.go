@@ -161,6 +161,22 @@ func TestPublicationRequiresTwoSpecificUserConfirmations(t *testing.T) {
 	if _, e = s.PublishPlan("other-owner", plan.ID); e == nil {
 		t.Fatal("leaked another author's private plan")
 	}
+	scriptPin := installAgentSkill(t, s, map[string]string{
+		"SKILL.md":        "---\nname: Script skill\ndescription: Includes scripts and large asset\n---\nUse scripts/run.py.",
+		"scripts/run.py":  "print('ok')",
+		"assets/large.md": strings.Repeat("a", (2<<20)+1024),
+	})
+	scriptPlan, e := s.PublishPrepare("owner", scriptPin.SkillID, skillhub.Metadata{License: "MIT"}, PublicationTarget{Kind: "new"})
+	if e != nil || !skillhub.HasScripts(scriptPlan.Files) {
+		t.Fatalf("expected publication preparation to accept scripts/ and >2 MiB file: plan=%+v err=%v", scriptPlan, e)
+	}
+	secretPin := installAgentSkill(t, s, map[string]string{
+		"SKILL.md":         "---\nname: Secret skill\ndescription: Has credentials\n---\nBody",
+		"credentials.json": `{"secret":"1"}`,
+	})
+	if _, e = s.PublishPrepare("owner", secretPin.SkillID, skillhub.Metadata{License: "MIT"}, PublicationTarget{Kind: "new"}); e == nil {
+		t.Fatal("expected publication preparation to reject credentials.json")
+	}
 }
 
 func TestMarketMinimumClientVersion(t *testing.T) {

@@ -8,6 +8,19 @@ export const fallbackSkillCategories: SkillCategory[] = [
     { value: "others", label: "其他" },
 ];
 
+/** 其他工具装的技能跟着本机目录走，在这里改了下次同步就会被覆盖，所以不给编辑和删除。 */
+export function isLocalSkill(skill: Pick<Skill, "sourceType">) {
+    return skill.sourceType === "local";
+}
+
+export const LOCAL_SKILL_LABEL = "其他工具安装";
+export const SKILL_SCRIPTS_PREFIX = "scripts/";
+export const SKILL_SCRIPTS_NOTE = "助手会按说明工作，但不会运行里面的脚本";
+
+export function hasSkillScripts(files: ReadonlyArray<{ path: string }>) {
+    return files.some((file) => file.path.startsWith(SKILL_SCRIPTS_PREFIX));
+}
+
 export function skillCategoryLabel(value: string, categories: SkillCategory[] = fallbackSkillCategories) {
     return categories.find((item) => item.value === value)?.label || "其他";
 }

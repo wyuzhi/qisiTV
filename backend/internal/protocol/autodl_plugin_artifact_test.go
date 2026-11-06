@@ -17,7 +17,7 @@ func TestAutoDLPluginArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapters, err := LoadInstalledProviders(pkg.ManifestRaw, nil)
+	adapters, err := LoadInstalledProviders(pkg.ManifestRaw)
 	if err != nil {
 		t.Fatal(err)
 	}

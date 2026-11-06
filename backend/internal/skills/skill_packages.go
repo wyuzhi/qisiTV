@@ -29,9 +29,8 @@ import (
 )
 
 const (
-	maxSkillPackageBytes       = 20 << 20
-	maxSkillFileBytes          = 8 << 20
-	maxSkillPackageFiles       = 512
+	// 只防压缩炸弹，不限单个文件大小和文件数：技能标准没有这些限制。
+	maxSkillPackageBytes       = skillhub.MaxPackageBytes
 	maxSkillPreviewBytes       = 512 << 10
 	SkillPackageUploadMaxBytes = maxSkillPackageBytes + (1 << 20)
 )
@@ -114,6 +113,10 @@ func (s *Service) EnsureSkillPackages() error {
 	}
 	for index := range skills {
 		skill := &skills[index]
+		// 插件和本机技能的文件在各自的目录里，由同步负责。这里手上只有 SKILL.md，重建会丢掉其余文件。
+		if skill.SourceType == skillSourceTypePlugin || skill.SourceType == skillSourceTypeLocal {
+			continue
+		}
 		var extraFiles map[string][]byte
 		if skill.Source != skillSourceUser {
 			extraFiles = builtinFiles[skill.ID]
@@ -207,7 +210,7 @@ func (s *Service) InstallSkillUpload(userID string, sourceType string, header *m
 		return nil, kernel.BadAuthRequest("技能文件仅支持 Markdown 或 ZIP")
 	}
 	if header == nil || header.Size <= 0 || header.Size > maxSkillPackageBytes {
-		return nil, kernel.BadAuthRequest("技能文件大小必须在 1B-20MB 之间")
+		return nil, kernel.BadAuthRequest("技能文件大小必须在 1B-200MB 之间")
 	}
 	file, err := header.Open()
 	if err != nil {
@@ -219,7 +222,7 @@ func (s *Service) InstallSkillUpload(userID string, sourceType string, header *m
 		return nil, err
 	}
 	if len(data) > maxSkillPackageBytes {
-		return nil, kernel.BadAuthRequest("技能文件不能超过 20MB")
+		return nil, errSkillPackageTooLarge()
 	}
 	var archive skillPackageArchive
 	if sourceType == "markdown" {
@@ -381,9 +384,10 @@ func (s *Service) createSkillFromArchive(userID string, archive skillPackageArch
 	if utf8.RuneCountInString(name) == 0 || utf8.RuneCountInString(name) > maxSkillNameRunes {
 		return nil, kernel.BadAuthRequest("技能名称必须为 1-80 个字符")
 	}
-	if utf8.RuneCountInString(description) == 0 || utf8.RuneCountInString(description) > maxSkillDescriptionRunes {
-		return nil, kernel.BadAuthRequest("技能简介必须为 1-500 个字符")
+	if utf8.RuneCountInString(description) == 0 {
+		return nil, kernel.BadAuthRequest("技能简介不能为空")
 	}
+	description = fitRunes(description, maxSkillDescriptionRunes)
 	tag := strings.TrimSpace(req.Tag)
 	if _, ok := skillCategoryLabels[tag]; !ok {
 		tag = "others"
@@ -663,7 +667,7 @@ func (s *Service) readSkillArchiveEntry(version *model.SkillVersion, filePath st
 			return nil, err
 		}
 		defer file.Close()
-		return io.ReadAll(io.LimitReader(file, maxSkillFileBytes+1))
+		return io.ReadAll(io.LimitReader(file, maxSkillPackageBytes+1))
 	}
 	return nil, kernel.BadAuthRequest("技能文件不存在")
 }

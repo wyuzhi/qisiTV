@@ -41,8 +41,8 @@ export function SkillInstallForm({ form, id, initialValues, onFinish, mode, inst
             <Upload.Dragger disabled={installing} accept={mode === "zip" ? ".zip,application/zip" : ".md,.markdown,text/markdown"}
                 maxCount={1}
                 beforeUpload={(file) => {
-                    if (file.size > 20 * 1024 * 1024) {
-                        form?.setFields([{ name: "files", errors: ["技能文件超过 20MB，请精简后重新选择。"] }]);
+                    if (file.size > 200 * 1024 * 1024) {
+                        form?.setFields([{ name: "files", errors: ["技能文件超过 200MB，请精简后重新选择。"] }]);
                         return Upload.LIST_IGNORE;
                     }
                     return false;
@@ -54,7 +54,7 @@ export function SkillInstallForm({ form, id, initialValues, onFinish, mode, inst
             </Form.Item>
             <div className="grid gap-x-3 sm:grid-cols-2">
                 <Form.Item name="name" label="覆盖名称" extra="可选，留空时自动读取"><Input maxLength={80} autoComplete="off" /></Form.Item>
-                <Form.Item name="description" label="覆盖简介" extra="可选，留空时自动读取"><Input maxLength={500} autoComplete="off" /></Form.Item>
+                <Form.Item name="description" label="覆盖简介" extra="可选，留空时自动读取"><Input maxLength={1024} autoComplete="off" /></Form.Item>
             </div>
         </>}
         <div className="grid gap-x-3 sm:grid-cols-2">

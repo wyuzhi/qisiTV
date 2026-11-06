@@ -270,11 +270,8 @@ export type CanvasNodeMetadata = {
     generationMode?: CanvasGenerationMode;
     generationType?: CanvasImageGenerationType;
     model?: string;
-    workflowProvider?: "model" | "runninghub";
-    runningHubWorkflowId?: string;
-    runningHubWorkflowKind?: "workflow" | "app";
-    /** 当前画布节点覆盖的工作流动态字段，键为 source:* 或 field:nodeId:fieldName。 */
-    workflowParameters?: Record<string, unknown>;
+    /** 节点带着自己的模型设置：重试时以节点本身为来源，而不是回到上游配置节点。 */
+    workflowProvider?: "model";
     size?: string;
     quality?: string;
     transparentBackground?: string;

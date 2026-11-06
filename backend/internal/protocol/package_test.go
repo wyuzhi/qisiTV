@@ -14,33 +14,21 @@ func TestParsePluginPackageRejectsBareManifest(t *testing.T) {
 	}
 }
 
-func TestParsePluginPackageValidatesWebEntry(t *testing.T) {
+func TestParsePluginPackageRejectsFilesOutsidePackageRoots(t *testing.T) {
 	manifest := []byte(`{
 		"apiVersion":"beeftv.plugin/v1",
         "id":"ui-extension",
         "name":"UI Extension",
         "version":"1.0.0",
-        "entry":"web/entry.js",
-        "surfaces":["fullscreen"],
-        "runtime":{"web":"sandbox"},
-        "contributes":{"commands":[{"id":"ui-extension/open","label":"Open UI"}]}
+        "contributes":{"canvasNodes":[{"id":"note","type":"note","label":"Note"}]}
     }`)
-	pkg, err := ParsePluginPackage(zipPluginPackage(t, map[string][]byte{"manifest.json": manifest, "web/entry.js": []byte("self.postMessage({type:'ready'})")}))
-	if err != nil {
+	if _, err := ParsePluginPackage(zipPluginPackage(t, map[string][]byte{"manifest.json": manifest, "docs/interface.md": []byte("# Note")})); err != nil {
 		t.Fatal(err)
 	}
-	if pkg.Manifest.Entry != "web/entry.js" || len(pkg.Files["web/entry.js"]) == 0 {
-		t.Fatalf("package = %#v", pkg)
-	}
-
-	missingEntry := zipPluginPackage(t, map[string][]byte{"manifest.json": manifest})
-	if _, err := ParsePluginPackage(missingEntry); err == nil {
-		t.Fatal("missing web entry was accepted")
-	}
-
-	forbidden := zipPluginPackage(t, map[string][]byte{"manifest.json": manifest, "web/entry.js": []byte("ready"), "server/entry.js": []byte("unsafe")})
-	if _, err := ParsePluginPackage(forbidden); err == nil {
-		t.Fatal("forbidden package path was accepted")
+	for _, name := range []string{"web/entry.js", "backend/engine", "server/entry.js"} {
+		if _, err := ParsePluginPackage(zipPluginPackage(t, map[string][]byte{"manifest.json": manifest, name: []byte("code")})); err == nil {
+			t.Fatalf("package file %s was accepted", name)
+		}
 	}
 }
 

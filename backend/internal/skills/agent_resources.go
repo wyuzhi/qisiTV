@@ -12,6 +12,7 @@ import (
 
 	"infinite-canvas/backend/internal/kernel"
 	"infinite-canvas/backend/internal/model"
+	"infinite-canvas/backend/internal/repository"
 )
 
 // Pin is the exact installed package selected by the user for a business round.
@@ -116,7 +117,7 @@ func (s *Service) AgentVersion(userID string, pin Pin) (*AgentResource, error) {
 	result := &AgentResource{Pin: pin, Name: skill.Name, Description: skill.Description, Version: version.VersionLabel, Files: []SkillPackageFileItem{}, UnsupportedCapabilities: []string{}}
 	for _, file := range files {
 		result.Files = append(result.Files, skillFileItem(file))
-		if strings.HasPrefix(file.Path, "scripts/") {
+		if strings.HasPrefix(file.Path, repository.SkillScriptsPrefix) {
 			result.UnsupportedCapabilities = []string{"script_execution"}
 		}
 	}

@@ -64,10 +64,7 @@ func (c *Runtime) stageInstallLocked(data []byte, fileName string) (stagedMutati
 		return stagedMutation{}, err
 	}
 	manifest := pkg.Manifest
-	if strings.HasPrefix(strings.TrimSpace(manifest.Runtime.Backend), "host:") {
-		return stagedMutation{}, errors.New("上传插件不能使用宿主内置执行器")
-	}
-	if _, err := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil); err != nil {
+	if _, err := protocol.LoadInstalledProviders(pkg.ManifestRaw); err != nil {
 		return stagedMutation{}, err
 	}
 	c.mu.RLock()

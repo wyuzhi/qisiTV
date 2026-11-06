@@ -64,8 +64,7 @@ const manifest: PluginManifest = {
     author: "内置工具",
     permissions: ["canvas.read", "canvas.write", "ai.text"],
     trusted: true,
-    runtime: { web: "trusted-backend" },
-    contributes: { aiCapabilities: ["prompt-optimizer"] },
+    contributes: {},
 };
 
 const systemPrompt = [

@@ -496,25 +496,6 @@ func TestDefaultVideoPromptMaxCharsAllowsComposedCanvasPrompt(t *testing.T) {
 	}
 }
 
-func TestValidateTaskCapabilityRejectsWorkflowPromptAboveConfiguredLimit(t *testing.T) {
-	profile := DefaultModelCapabilityConfigForModel("runninghub-workflow-video", "workflow-video")
-	profile.Video.References.PromptMaxChars = 10_000
-	input := map[string]any{
-		"mode":   "video",
-		"prompt": strings.Repeat("镜", 10_001),
-		"config": map[string]any{
-			"interfaceType":    "runninghub-workflow-video",
-			"apiKey":           "rh-key",
-			"workflowId":       "wf-1",
-			"capabilityConfig": profile,
-		},
-	}
-
-	if err := (&Service{}).ValidateTaskCapability(input); err != nil {
-		t.Fatalf("ValidateTaskCapability() should delegate workflow prompt length to upstream, got error = %v", err)
-	}
-}
-
 func TestValidateImageTaskEnforcesGPTImage2CustomSizeLimits(t *testing.T) {
 	profile := DefaultImageCapabilityConfig("openai-image", "gpt-image-2")
 	profile.Size.AllowCustom = true

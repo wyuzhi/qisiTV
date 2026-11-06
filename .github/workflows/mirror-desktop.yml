@@ -41,7 +41,7 @@ jobs:
   mirror:
     if: github.repository == 'glanderness/BeefTV' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 

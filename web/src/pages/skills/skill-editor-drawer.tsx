@@ -120,8 +120,8 @@ export function SkillEditorDrawer({ open, skill, onClose, onSaved }: { open: boo
                     <Input maxLength={80} placeholder="为技能起一个清晰的名称" autoComplete="off" />
                 </Form.Item>
 
-                <Form.Item name="description" label="简介" rules={[{ required: true, message: "请填写技能简介" }, { max: 500, message: "最多 500 个字符" }]}>
-                    <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} maxLength={500} placeholder="说明适用场景、输入条件和最终产出" />
+                <Form.Item name="description" label="简介" rules={[{ required: true, message: "请填写技能简介" }, { max: 1024, message: "最多 1024 个字符" }]}>
+                    <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} maxLength={1024} placeholder="说明适用场景、输入条件和最终产出" />
                 </Form.Item>
 
                 {!isPackageSkill ? <Form.Item name="instruction" label="指令" rules={[{ required: true, message: "请填写技能指令" }, { max: 100000, message: "最多 100000 个字符" }]}>

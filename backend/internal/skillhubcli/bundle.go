@@ -10,7 +10,6 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -26,8 +25,6 @@ type bundle struct {
 	ArchiveBytes  int               `json:"archiveBytes"`
 	Archive       []byte            `json:"-"`
 }
-
-var privateLiteral = regexp.MustCompile(`btvpub_[A-Za-z0-9_-]{20,}|-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----`)
 
 func inspectBundle(directory, metadataFile string) (*bundle, error) {
 	if directory == "" || metadataFile == "" {
@@ -46,6 +43,9 @@ func inspectBundle(directory, metadataFile string) (*bundle, error) {
 	}
 	if metadata.Name == "" || metadata.Description == "" || metadata.License == "" || metadata.VersionLabel == "" {
 		return nil, fail("invalid_metadata", "投稿元信息需要名称、简介、许可证和版本")
+	}
+	if utf8.RuneCountInString(metadata.Description) > skillhub.MaxDescriptionRunes {
+		return nil, fail("invalid_metadata", "投稿元信息简介不能超过 1024 字")
 	}
 	if metadata.Requirements == nil {
 		metadata.Requirements = []string{}
@@ -80,7 +80,7 @@ func inspectBundle(directory, metadataFile string) (*bundle, error) {
 		}
 		rel = filepath.ToSlash(rel)
 		for _, part := range strings.Split(rel, "/") {
-			if strings.HasPrefix(part, ".") || part == "__MACOSX" {
+			if (strings.HasPrefix(part, ".") && part != ".env" && !strings.HasPrefix(strings.ToLower(part), ".env.")) || part == "__MACOSX" || strings.EqualFold(part, "node_modules") {
 				if entry.IsDir() {
 					return filepath.SkipDir
 				}
@@ -91,57 +91,48 @@ func inspectBundle(directory, metadataFile string) (*bundle, error) {
 			return fail("invalid_package", "技能包不能包含软链接")
 		}
 		if entry.IsDir() {
-			if strings.EqualFold(entry.Name(), "scripts") || strings.EqualFold(entry.Name(), "node_modules") {
-				return fail("scripts_unsupported", "首版不接收脚本或依赖目录；请保留原技能并使用支持脚本的环境")
-			}
 			return nil
 		}
 		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
-		if !info.Mode().IsRegular() || info.Mode()&0111 != 0 || !skillhub.DataFilePath(rel) || caseNames[strings.ToLower(rel)] {
-			return fail("invalid_package", "技能包包含不安全路径、重复名称或可执行文件")
+		base := strings.ToLower(filepath.Base(rel))
+		if base == ".env" || strings.HasPrefix(base, ".env.") || base == "credentials.json" || base == "tokens.json" || base == "secrets.json" || base == "auth.json" || strings.Contains(base, "private_key") || base == "id_rsa" || base == "id_ed25519" || strings.HasSuffix(base, ".pem") || strings.HasSuffix(base, ".key") {
+			return fail("private_file", "文件疑似含投稿凭据或私钥，请先移除")
 		}
-		ext := strings.ToLower(filepath.Ext(rel))
-		name := strings.ToUpper(filepath.Base(rel))
-		if ext == "" && (name == "LICENSE" || name == "NOTICE" || name == "COPYING") {
-			ext = ".txt"
+		if !info.Mode().IsRegular() || !skillhub.DataFilePath(rel) || caseNames[strings.ToLower(rel)] {
+			return fail("invalid_package", "技能包包含不安全路径或重复名称")
 		}
-		limit := int64(2 << 20)
-		if rel == "SKILL.md" {
-			limit = 256 << 10
-		}
-		if info.Size() > limit || len(files) >= 256 || total+info.Size() > 20<<20 {
+		remaining := int64(skillhub.MaxPackageBytes) - total
+		if info.Size() > remaining {
 			return fail("package_too_large", "技能文件超过发布大小限制")
 		}
 		input, err := os.Open(file)
 		if err != nil {
 			return err
 		}
-		data, err := io.ReadAll(io.LimitReader(input, limit+1))
+		data, err := io.ReadAll(io.LimitReader(input, remaining+1))
 		input.Close()
 		if err != nil {
 			return err
 		}
-		var stateShape map[string]json.RawMessage
-		_ = json.Unmarshal(data, &stateShape)
-		if privateLiteral.Match(data) || (stateShape["market"] != nil && stateShape["deviceCode"] != nil) {
+		if skillhub.ContainsPrivateData(data) {
 			return fail("private_file", "文件疑似含投稿凭据或私钥，请先移除")
 		}
-		if int64(len(data)) > limit {
-			return fail("package_too_large", "技能文件过大")
-		}
-		if ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".webp" && ext != ".gif" && !utf8.Valid(data) {
-			return fail("invalid_package", "说明和数据文件必须为 UTF-8")
+		total += int64(len(data))
+		if total > skillhub.MaxPackageBytes {
+			return fail("package_too_large", "技能文件超过发布大小限制")
 		}
 		files[rel] = data
 		caseNames[strings.ToLower(rel)] = true
-		total += int64(len(data))
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	if !utf8.Valid(files["SKILL.md"]) {
+		return nil, fail("invalid_package", "SKILL.md 必须为 UTF-8")
 	}
 	if _, err = skillhub.SkillName(files["SKILL.md"]); err != nil {
 		return nil, err
@@ -174,7 +165,7 @@ func inspectBundle(directory, metadataFile string) (*bundle, error) {
 		return nil, err
 	}
 	if archive.Len() > skillhub.MaxArchiveBytes {
-		return nil, fail("package_too_large", "压缩包超过10 MiB")
+		return nil, fail("package_too_large", "压缩包超过100 MiB")
 	}
 	result.Archive = archive.Bytes()
 	result.ArchiveBytes = archive.Len()

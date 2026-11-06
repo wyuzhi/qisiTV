@@ -1,11 +1,13 @@
 import { expect, test } from "bun:test";
-import { MODEL_SERVICE_PRESETS, createServicePresetChannel, ll2ProtocolsAvailable, mergeSavedServiceChannel, presetCatalogFor, serviceConnectionError, serviceModelProfile, servicePresetFor, modelCatalogRequestURL } from "../src/lib/model-service-presets";
+import { MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, ll2ProtocolsAvailable, pluginServices, mergeSavedServiceChannel, presetCatalogFor, serviceConnectionError, serviceModelProfile, servicePresetFor, modelCatalogRequestURL } from "../src/lib/model-service-presets";
 import { modelConnectionResultDetail, testChannelModelConnection } from "../src/lib/model-connection-test";
 import { applyFetchedChannelModelCatalog, modelConfigChannelStatusLabel } from "../src/pages/settings/channel-settings-pane";
 import { backendProviderConfig } from "../src/services/api/generation-task";
 import { configWithoutCachedSecrets, createModelChannel, defaultConfig, normalizeConfigSnapshot } from "../src/stores/use-config-store";
 import { defaultModelCapabilityConfig } from "../src/lib/model-capabilities";
 import type { ModelProtocolDefinition } from "../src/lib/model-protocols";
+import { serviceCredentialGuide } from "../src/lib/service-credentials";
+import { toProviderDefinitions } from "../src/services/api/plugin-catalog";
 import { currentModelConnectionReceipt, useModelConnectionTests } from "../src/stores/use-model-connection-tests";
 
 const protocols = [
@@ -28,7 +30,7 @@ test("persisted boolean video options are normalized without turning false back 
     const channel = createModelChannel({ id: "custom", models: ["seedance-2.0-mini"], modelProfiles: [{ model: "seedance-2.0-mini", capability: "video", protocol: "newapi" }] });
     for (const enabled of [true, false]) {
         const persisted = JSON.parse(JSON.stringify({ ...defaultConfig, channels: [channel], model: "custom::seedance-2.0-mini", videoGenerateAudio: enabled, videoWatermark: false, videoArkPrivateAssetUpload: true }));
-        expect(backendProviderConfig(persisted, "video")).toMatchObject({ videoGenerateAudio: String(enabled), videoWatermark: "false", videoArkPrivateAssetUpload: "true" });
+        expect(backendProviderConfig(persisted)).toMatchObject({ videoGenerateAudio: String(enabled), videoWatermark: "false", videoArkPrivateAssetUpload: "true" });
     }
 });
 
@@ -108,6 +110,35 @@ test("refresh keeps selected/manual models and user capability limits", () => {
     expect(next.modelProfiles?.find((p) => p.model === "video-manual")).toEqual(channel.modelProfiles![0]);
 });
 
+test("a plugin service becomes one provider choice whose listed models use the plugin interface", () => {
+    const comfy = { value: "comfyui-app", label: "ComfyUI", capability: "image", enabled: true, module: true, authType: "none", baseUrl: "http://127.0.0.1:8188" } as ModelProtocolDefinition;
+    const services = pluginServices([...protocols, comfy, { ...comfy }, { ...comfy, value: "off", enabled: false }]);
+    expect(services.map((item) => item.value)).toEqual(["comfyui-app"]);
+
+    const channel = createPluginServiceChannel(comfy, "comfy");
+    expect(channel).toMatchObject({ id: "comfy", name: "ComfyUI", baseUrl: "http://127.0.0.1:8188", interfaceType: "comfyui-app" });
+    // 本机 ComfyUI 不要密钥：还没选模型时也能直接读取模型。
+    expect(serviceConnectionError(channel, { protocols: [comfy] })).toBe("");
+    expect(serviceCredentialGuide(channel, [comfy]).apiKeyHelp).toBe("这个服务不用密钥，可以留空。");
+    expect(serviceConnectionError(createPluginServiceChannel({ ...comfy, authType: "bearer" }, "keyed"), { protocols: [{ ...comfy, authType: "bearer" }] })).toBe("请填写 API Key");
+
+    expect(serviceModelProfile(channel, { id: "portrait.app.json", modelType: "image" }, [...protocols, comfy])).toMatchObject({ capability: "image", protocol: "comfyui-app" });
+});
+
+test("a plugin interface that makes images and videos is one service, and both kinds of model use it", () => {
+    const item = { id: "comfyui", version: "0.1.0", name: "ComfyUI", vendor: "ComfyUI", categories: ["image", "video"], scopes: ["user.custom-channel"], enabled: true, module: true, authType: "none", baseUrl: "http://127.0.0.1:8188" };
+    expect(toProviderDefinitions(item).map((definition) => `${definition.value}:${definition.capability}`)).toEqual(["comfyui:image", "comfyui:video"]);
+    expect(toProviderDefinitions(item, "video").map((definition) => definition.capability)).toEqual(["video"]);
+    expect(toProviderDefinitions(item, "audio")).toEqual([]);
+
+    const available = [...protocols, ...toProviderDefinitions(item)];
+    const services = pluginServices(available);
+    expect(services.map((service) => service.value)).toEqual(["comfyui"]);
+    const channel = createPluginServiceChannel(services[0], "comfy");
+    expect(serviceModelProfile(channel, { id: "invert.app.json", modelType: "image" }, available)).toMatchObject({ capability: "image", protocol: "comfyui" });
+    expect(serviceModelProfile(channel, { id: "clip.json", modelType: "video" }, available)).toMatchObject({ capability: "video", protocol: "comfyui" });
+});
+
 test("connection validation rejects full endpoints and embedded credentials", () => {
     const channel = createModelChannel({ baseUrl: "https://api.example.com/v1", apiKey: "synthetic-key" });
     expect(serviceConnectionError(channel)).toBe("");
@@ -141,7 +172,7 @@ test("explicit asset origin survives channel creation and generation request ass
     const channel = createModelChannel({ id: "custom", baseUrl: "https://api.example.com/v1", referenceAssetOrigin: " https://assets.example.com ", models: ["sd-native-full-2.5"], modelProfiles: [{ model: "sd-native-full-2.5", capability: "video", protocol: "full-video" }] });
     const config = { ...defaultConfig, channels: [channel], model: "custom::sd-native-full-2.5" };
     expect(channel.referenceAssetOrigin).toBe("https://assets.example.com");
-    expect(backendProviderConfig(config, "video")).toMatchObject({ referenceAssetOrigin: channel.referenceAssetOrigin, interfaceType: "full-video" });
+    expect(backendProviderConfig(config)).toMatchObject({ referenceAssetOrigin: channel.referenceAssetOrigin, interfaceType: "full-video" });
 });
 
 test("saved credentials do not imply tested generation and browser cache omits all credential copies", () => {
@@ -163,7 +194,7 @@ test("generation test uses production config including headers and waits for a f
     const testResult = testChannelModelConnection(channel, "test-video", "video", "newapi", async (options) => {
         expect(options.config.videoSeconds).toBe("4");
         expect(options.config.vquality).toBe("720");
-        const request = backendProviderConfig(options.config, "video");
+        const request = backendProviderConfig(options.config);
         expect(request).toMatchObject({ headers: channel.headers, model: "test-video", apiKey: "synthetic-key", interfaceType: "newapi" });
         return completion;
     }).then((value) => { done = true; return value; });

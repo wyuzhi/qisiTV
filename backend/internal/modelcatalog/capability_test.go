@@ -58,7 +58,7 @@ func TestGPTImageQualityTiersValidateAll39Selections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"} {
+	for _, name := range []string{"gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2.6", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst"} {
 		profile := DefaultImageCapabilityConfig("openai-image", name)
 		for _, quality := range profile.Quality.Values {
 			if quality == "auto" {
@@ -80,8 +80,8 @@ func TestGPTImageQualityTiersValidateAll39Selections(t *testing.T) {
 			}
 		}
 	}
-	if count != 39 {
-		t.Fatalf("expected 39 quality/size combinations, got %d", count)
+	if count != 84 {
+		t.Fatalf("expected 84 quality/size combinations, got %d", count)
 	}
 	if containsCapabilityString(DefaultImageCapabilityConfig("openai-image", "gpt-image-2").Quality.Values, "max") || containsCapabilityString(DefaultImageCapabilityConfig("openai-image", "custom-doodle").Quality.Values, "xhigh") {
 		t.Fatal("unverified models must not inherit the 2.5 quality tiers")

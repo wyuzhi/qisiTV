@@ -260,9 +260,6 @@ func CapabilityOptionsFromConfig(capability string, config map[string]any, decla
 }
 
 func TaskInputUsesCustomChannel(input map[string]any) bool {
-	if TaskInputUsesWorkflowProvider(input) {
-		return false
-	}
 	config, ok := input["config"].(map[string]any)
 	if !ok {
 		return false
@@ -277,7 +274,8 @@ func TaskInputUsesCustomChannel(input map[string]any) bool {
 	if strings.TrimSpace(channelID) != "" || SystemChannelIDFromBaseURL(baseURL) != "" {
 		return false
 	}
-	return strings.TrimSpace(baseURL) != "" && strings.TrimSpace(apiKey) != ""
+	// 自己加的服务不一定要密钥（如本机 ComfyUI）。要不要密钥在执行前按插件声明检查，这里只分渠道归属。
+	return strings.TrimSpace(baseURL) != ""
 }
 
 func TaskInputUsesSystemChannel(input map[string]any) bool {
@@ -289,39 +287,11 @@ func TaskInputUsesSystemChannel(input map[string]any) bool {
 	return strings.TrimSpace(channelID) != ""
 }
 
-func TaskInputUsesWorkflowProvider(input map[string]any) bool {
-	config, ok := input["config"].(map[string]any)
-	if !ok {
-		return false
-	}
-	// 系统渠道的 interfaceType 是客户端缓存，不是授权事实；必须先走系统模型 admission。
-	if strings.TrimSpace(admissionString(config["channelId"])) != "" {
-		return false
-	}
-	return IsWorkflowInterfaceType(admissionString(config["interfaceType"]))
-}
-
-func IsWorkflowInterfaceType(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case string(model.ChannelInterfaceRunningHubImage), string(model.ChannelInterfaceRunningHubVideo), string(model.ChannelInterfaceRunningHubAudio):
-		return true
-	default:
-		return false
-	}
-}
-
 func HasExecutableVideoConfig(input map[string]any) bool {
 	mode, _ := input["mode"].(string)
 	config, ok := input["config"].(map[string]any)
 	if mode != "video" || !ok {
 		return false
-	}
-	interfaceType := admissionString(config["interfaceType"])
-	if IsWorkflowInterfaceType(interfaceType) {
-		if admissionString(config["workflowId"]) == "" && admissionString(config["webappId"]) == "" && admissionString(config["model"]) == "" {
-			return false
-		}
-		return admissionString(config["baseUrl"]) != "" && admissionString(config["apiKey"]) != ""
 	}
 	if admissionString(config["model"]) == "" {
 		return false

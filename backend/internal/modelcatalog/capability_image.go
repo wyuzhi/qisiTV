@@ -78,7 +78,7 @@ func DefaultImageCapabilityConfig(protocol string, modelName string) *ImageCapab
 		OutputFormat:          ParameterSupport{Supported: true},
 		MaxOutputs:            15,
 	}
-	if name := strings.ToLower(strings.TrimSpace(modelName)); protocol == "openai-image" && (name == "gpt-image-2.5-flare" || name == "gpt-image-2.5-sunburst") {
+	if isExtendedGPTImageModel(protocol, modelName) {
 		image.Quality.Values = []string{"auto", "low", "medium", "high", "xhigh", "max"}
 	}
 	if protocol == "openai-image" && strings.EqualFold(strings.TrimSpace(modelName), "gpt-image-2") {
@@ -336,13 +336,22 @@ func validateImageCapabilityConfig(value *ImageCapabilityConfig) error {
 	return nil
 }
 
+func isExtendedGPTImageModel(protocol, modelName string) bool {
+	name := strings.ToLower(strings.TrimSpace(modelName))
+	if protocol != "openai-image" || !strings.HasPrefix(name, "gpt-image-") {
+		return false
+	}
+	suffix := strings.TrimPrefix(name, "gpt-image-")
+	return suffix == "2.5" || suffix == "2.5-flare" || suffix == "2.5-sunburst" || suffix == "2.6" || suffix == "2.6-flare" || suffix == "2.6-sunburst"
+}
+
 // Upgrade only the old built-in GPT image choices; keep other stored limits.
 func applyModelSpecificImageCapability(profile *ImageCapabilityConfig, protocol string, modelName string, _ string) *ImageCapabilityConfig {
 	if providerpreset.SeedreamFamily(modelName) != "" || isMossImageModel(modelName) {
 		return DefaultImageCapabilityConfig(protocol, modelName)
 	}
 	name := strings.ToLower(strings.TrimSpace(modelName))
-	if profile == nil || protocol != "openai-image" || (name != "gpt-image-2" && name != "gpt-image-2.5-flare" && name != "gpt-image-2.5-sunburst") {
+	if profile == nil || protocol != "openai-image" || (name != "gpt-image-2" && !isExtendedGPTImageModel(protocol, name)) {
 		return profile
 	}
 	result := *profile

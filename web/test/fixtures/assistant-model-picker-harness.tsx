@@ -22,7 +22,7 @@ function Harness() {
     </App></ConfigProvider>;
     return <ConfigProvider theme={{ algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm }}><App>
         <main style={{ width: "100%", maxWidth: 380, background: dark ? "#141414" : "#fff" }}>
-            {location.pathname === "/settings" ? <ChannelSettingsPane onOpenModels={() => {}} onOpenRunningHub={() => {}} /> : null}
+            {location.pathname === "/settings" ? <ChannelSettingsPane onOpenModels={() => {}} /> : null}
             <div className="canvas-assistant-composer-footer"><CanvasAssistantModelPicker busy={busy || assistant.modelBusy} /><button onClick={() => void assistant.send("synthetic", [])}>发送测试消息</button></div>
             <button onClick={() => setBusy(!busy)}>切换忙碌</button><button onClick={() => setDark(!dark)}>切换主题</button>
             <output>{assistant.error || ""}</output>

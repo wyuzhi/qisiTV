@@ -146,5 +146,9 @@ export function serviceCredentialGuide(channel: CredentialChannel, protocols: Mo
     }
     if (kinds.has("ark-agent-plan")) return { kind: "ark-agent-plan", apiKeyLabel: "Agent Plan 专属 Key", apiKeyPlaceholder: "粘贴 Agent Plan 专属 Key", apiKeyHelp: ARK_AGENT_PLAN_HELP, secretKeyLabel: "Secret Key（SK）", secretKeyRequired: false };
     if (kinds.has("ark-native")) return { kind: "ark-native", apiKeyLabel: "方舟 API Key", apiKeyPlaceholder: "粘贴方舟 API Key", apiKeyHelp: ARK_NATIVE_HELP, secretKeyLabel: "Secret Key（SK）", secretKeyRequired: false };
-    return { kind: "standard", apiKeyLabel: "API Key", apiKeyPlaceholder: "粘贴你的 API Key", apiKeyHelp: isArkHost(channel.baseUrl) ? ARK_KEY_HELP : STANDARD_KEY_HELP, secretKeyLabel: "Secret Key（SK）", secretKeyRequired: false };
+    // 插件接入的服务由插件读取模型，「目录仍需要密钥」那句对它不成立。
+    const pluginService = protocols.find((item) => item.module && item.value === channel.interfaceType);
+    const apiKeyHelp = pluginService ? (pluginService.authType === "none" ? "这个服务不用密钥，可以留空。" : "")
+        : isArkHost(channel.baseUrl) ? ARK_KEY_HELP : STANDARD_KEY_HELP;
+    return { kind: "standard", apiKeyLabel: "API Key", apiKeyPlaceholder: "粘贴你的 API Key", apiKeyHelp, secretKeyLabel: "Secret Key（SK）", secretKeyRequired: false };
 }

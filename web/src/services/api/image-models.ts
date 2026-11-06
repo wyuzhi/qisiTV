@@ -95,6 +95,8 @@ export async function fetchChannelModels(channel: ModelChannel, viaBackend = fal
             headers: channel.headers,
             channelId: managed ? channel.id : undefined,
             credentialRef: managed ? "beefapi-enterprise" : undefined,
+            // 渠道用插件 JS 接口时，后端改由插件列出模型。
+            protocol: channel.interfaceType || undefined,
         }, { timeout: 30_000, signal });
         if (managed && connectionEpoch !== getBeefAPIConnectionEpoch()) throw new BeefAPIConnectionChangedError();
         const catalog = new Map<string, ChannelModelCatalogItem>();

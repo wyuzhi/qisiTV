@@ -6,7 +6,6 @@ import { resourceIdFromStorageKey, resourceStorageKey, uploadResourceFile } from
 import { createGenerationTask, findGenerationTaskByOperation, waitForGenerationTask, type GenerationTask, type CreateTaskInput } from "@/services/api/task-center";
 import { submitGenerationCommand } from "./generation-submission";
 import { modelCapabilityConfigFor } from "@/lib/model-capabilities";
-import { resolveGenerationWorkflowExecution, type GenerationWorkflowExecution } from "@/lib/generation-workflow-execution";
 import { isArkPlanBaseUrl } from "@/lib/seedance-video";
 import { seedreamFamily } from "@/lib/seedream-image";
 import { portraitGenerationError, resolveVideoOperation } from "@/lib/model-selection";
@@ -102,7 +101,7 @@ export async function runBackendGenerationTask(
     dependencies: GenerationTaskDependencies = defaultDependencies,
 ) {
     throwIfAborted(signal);
-    assertBackendRuntimeConfigured(config, mode);
+    assertBackendRuntimeConfigured(config);
     const prepared = await prepareGenerationReferences({ config, mode, referenceImages, referenceVideos, referenceAudios, mask });
     throwIfAborted(signal);
     return createAndWaitGenerationTask(
@@ -116,7 +115,7 @@ export async function runBackendGenerationTask(
 // 后端自动回填负责，不能让页面 mutation 一直等待供应商完成。
 export async function submitBackendGenerationTask(options: BackendGenerationTaskOptions, dependencies: GenerationTaskDependencies = defaultDependencies): Promise<GenerationTask> {
     throwIfAborted(options.signal);
-    assertBackendRuntimeConfigured(options.config, options.mode);
+    assertBackendRuntimeConfigured(options.config);
     const prepared = await prepareGenerationReferences(options);
     throwIfAborted(options.signal);
     return createBackendGenerationTask(options, prepared, dependencies);
@@ -160,7 +159,7 @@ export function prepareBackendToolGenerationTask(options: BackendToolGenerationO
         input: {
             mode: "text",
             prompt: options.prompt,
-            config: backendProviderConfig(options.config, "text"),
+            config: backendProviderConfig(options.config),
             agentRequests: buildBackendToolRequests(options.messages, options.tools, options.toolChoice, options.config),
             textOptions: { stream: modelCapabilityConfigFor(options.config, requestConfig.model).text?.streaming !== false },
             referenceImages: [...imageKeys].map((storageKey) => ({ storageKey })),
@@ -223,8 +222,7 @@ export function isGenerationTaskCancelled(error: unknown, signal?: AbortSignal) 
     return signal?.aborted === true || (error instanceof Error && error.name === "AbortError");
 }
 
-function assertBackendRuntimeConfigured(config: AiConfig, mode: BackendGenerationMode) {
-    if (resolveGenerationWorkflowExecution(config, mode)) return;
+function assertBackendRuntimeConfigured(config: AiConfig) {
     if (logicalModelIDForConfig(config)) return;
     const requestConfig = resolveModelRequestConfig(config, config.model);
     if (!requestConfig.channelId && !requestConfig.interfaceType) throw new Error("当前模型未选择可用请求协议，请先在模型设置中选择协议插件");
@@ -325,7 +323,7 @@ async function createBackendGenerationTask(options: BackendGenerationTaskOptions
 
 export async function prepareBackendGenerationTask(options: BackendGenerationTaskOptions): Promise<CreateTaskInput> {
     throwIfAborted(options.signal);
-    assertBackendRuntimeConfigured(options.config, options.mode);
+    assertBackendRuntimeConfigured(options.config);
     const prepared = await prepareGenerationReferences(options);
     throwIfAborted(options.signal);
     return backendGenerationTaskInput(options, prepared);
@@ -334,21 +332,18 @@ export async function prepareBackendGenerationTask(options: BackendGenerationTas
 function backendGenerationTaskInput(options: BackendGenerationTaskOptions, prepared: PreparedGenerationReferences): CreateTaskInput {
     const { projectId, mode, prompt, config, metadata } = options;
     const videoOperation = generationOperation(options);
-    const workflow = resolveGenerationWorkflowExecution(config, mode);
-    const logicalModelId = workflow ? "" : logicalModelIDForConfig(config);
+    const logicalModelId = logicalModelIDForConfig(config);
     return {
         ...(projectId ? { projectId } : {}),
         type: `canvas_${mode}`,
         operation: mode === "video" ? videoOperation : mode,
         prompt,
-        ...(workflow ? { provider: workflow.provider } : {}),
-        model: workflow?.taskModel || config.model,
+        model: config.model,
         ...(logicalModelId ? { logicalModelId } : {}),
         input: {
             mode,
             prompt,
-            ...(workflow ? { execution: workflowPublicExecution(workflow) } : {}),
-            config: backendProviderConfig(config, mode),
+            config: backendProviderConfig(config),
             capabilityOptions: logicalModelId ? logicalCapabilityOptions(config, mode) : undefined,
             textHistory: options.textHistory,
             ...(mode === "text" ? { textOptions: { stream: options.streamText !== false, thinking: options.enableThinking === true } } : {}),
@@ -440,10 +435,8 @@ function backendMediaReference<T extends ReferenceVideo | ReferenceAudio>(media:
     } as T;
 }
 
-export function backendProviderConfig(config: AiConfig, mode: BackendGenerationMode = "image") {
+export function backendProviderConfig(config: AiConfig) {
     const requestConfig = resolveModelRequestConfig(config, config.model);
-    const workflow = resolveGenerationWorkflowExecution(config, mode);
-    if (workflow) return workflowProviderConfig(config, requestConfig, workflow);
     const seedream = Boolean(seedreamFamily(requestConfig.model || config.model));
     const generationOptions = {
         size: config.size,
@@ -490,57 +483,6 @@ export function backendProviderConfig(config: AiConfig, mode: BackendGenerationM
         imageCapabilitiesVersion: modelProfile?.imageCapabilitiesVersion,
         videoCapabilitiesVersion: modelProfile?.videoCapabilitiesVersion,
         systemPrompt: config.systemPrompt,
-    };
-}
-
-function workflowProviderConfig(config: AiConfig, requestConfig: ReturnType<typeof resolveModelRequestConfig>, workflow: GenerationWorkflowExecution) {
-    const runningHubActive = workflow.provider === "runninghub";
-    return {
-        channelId: "",
-        apiFormat: requestConfig.apiFormat,
-        interfaceType: workflow.interfaceType,
-        baseUrl: config.runningHub.baseUrl,
-        apiKey: runningHubActive ? config.runningHub.apiKey : "",
-        // 工作流是独立 Provider，不能继承普通模型渠道的密钥和自定义头。
-        secretKey: "",
-        headers: [],
-        model: workflow.providerModel,
-        size: config.size,
-        quality: config.quality,
-        transparentBackground: config.transparentBackground,
-        count: config.count,
-        videoSeconds: config.videoSeconds,
-        vquality: config.vquality,
-        videoGenerateAudio: config.videoGenerateAudio,
-        videoWatermark: config.videoWatermark,
-        videoArkPrivateAssetUpload: config.videoArkPrivateAssetUpload,
-        audioVoice: config.audioVoice,
-        audioFormat: config.audioFormat,
-        audioSpeed: config.audioSpeed,
-        audioPitch: config.audioPitch,
-        audioVolume: config.audioVolume,
-        audioInstructions: config.audioInstructions,
-        workflowId: workflow.workflowId,
-        webappId: workflow.webappId,
-        workflowJson: workflow.workflowJson,
-        workflowFields: workflow.workflowFields,
-        runningHubUseWallet: false,
-        runningHubWalletApiKey: "",
-        runningHubUploadApiKey: runningHubActive ? config.runningHub.uploadApiKey || "" : "",
-        capabilityConfig: modelCapabilityConfigFor(config, requestConfig.model),
-        videoCapabilitiesVersion: resolveModelChannel(config, config.model).modelProfiles?.find((item) => item.model === requestConfig.model)?.videoCapabilitiesVersion,
-        systemPrompt: config.systemPrompt,
-    };
-}
-
-function workflowPublicExecution(workflow: GenerationWorkflowExecution) {
-    return {
-        provider: workflow.provider,
-        kind: workflow.kind,
-        interfaceType: workflow.interfaceType,
-        name: workflow.name,
-        ...(workflow.workflowId ? { workflowId: workflow.workflowId } : {}),
-        ...(workflow.webappId ? { webappId: workflow.webappId } : {}),
     };
 }
 

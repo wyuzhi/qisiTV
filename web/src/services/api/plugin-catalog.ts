@@ -15,6 +15,7 @@ type PluginProviderCatalogItem = {
     unavailableReason?: string;
     baseUrl?: string;
     authType?: string;
+    module?: boolean;
     workflows?: Array<{
         id: string;
         label: string;
@@ -28,7 +29,7 @@ type PluginProviderCatalogItem = {
 export async function fetchPluginProviderCatalog(scope: string, capability?: ProtocolCapability) {
     try {
         const result = await http.get<{ providers: PluginProviderCatalogItem[] }>("/plugins/catalog", { params: { scope, capability } });
-        return result.providers.filter((item) => item.enabled && !item.unavailableReason).map(toProviderDefinition);
+        return result.providers.filter((item) => item.enabled && !item.unavailableReason).flatMap((item) => toProviderDefinitions(item, capability));
     } catch (error) {
         // The local desktop profile can run without the optional plugin center.
         // Keep the built-in OpenAI-compatible protocols available so a custom
@@ -48,12 +49,19 @@ const BUILTIN_OPENAI_PROTOCOLS: ModelProtocolDefinition[] = [
     { value: "newapi", label: "OpenAI Videos", vendor: "OpenAI compatible", capability: "video", create: "POST /v1/videos", poll: "GET /v1/videos/{task_id}", contentType: "multipart/form-data", media: "内置协议", enabled: true },
 ];
 
-function toProviderDefinition(item: PluginProviderCatalogItem): ModelProtocolDefinition {
+// 一个接口能做几种生成（比如 ComfyUI 同时出图、视频、音频），就按能力各列一项：
+// 选协议和给模型配协议时，都是一项对应一种能力。
+export function toProviderDefinitions(item: PluginProviderCatalogItem, capability?: ProtocolCapability): ModelProtocolDefinition[] {
+    const capabilities = (item.categories.length ? item.categories : ["text"]) as ProtocolCapability[];
+    return capabilities.filter((value) => !capability || value === capability).map((value) => toProviderDefinition(item, value));
+}
+
+function toProviderDefinition(item: PluginProviderCatalogItem, capability: ProtocolCapability): ModelProtocolDefinition {
     return {
         value: item.id,
         label: item.name,
         vendor: item.vendor,
-        capability: (item.categories[0] || "text") as ProtocolCapability,
+        capability,
         create: item.create || "",
         poll: item.poll,
         contentType: item.contentType || "application/json",
@@ -62,5 +70,6 @@ function toProviderDefinition(item: PluginProviderCatalogItem): ModelProtocolDef
         baseUrl: item.baseUrl,
         authType: item.authType,
         workflows: item.workflows || [],
+        module: item.module,
     };
 }

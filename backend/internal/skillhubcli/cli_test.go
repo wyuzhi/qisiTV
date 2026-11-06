@@ -138,21 +138,57 @@ func TestRemoteUnavailableIsNotAnEmptyCatalog(t *testing.T) {
 	}
 }
 
-func TestSkillBundleDeterministicAndRejectsScriptsPrivateStateAndLinks(t *testing.T) {
+func TestSkillBundleAcceptsScriptsExecutablesAndLargeFilesWhileRejectingSecretsAndLinks(t *testing.T) {
 	directory, metadata, b := testBundle(t)
 	again, err := inspectBundle(directory, metadata)
 	if err != nil || again.ArchiveSHA256 != b.ArchiveSHA256 {
 		t.Fatalf("bundle changed: %v", err)
 	}
-	if err = os.Mkdir(filepath.Join(directory, "scripts"), 0700); err != nil {
+	if err = os.MkdirAll(filepath.Join(directory, "scripts"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(directory, "scripts", "run.py"), []byte("#!/usr/bin/env python3\nprint('ok')\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(directory, "large.bin"), bytes.Repeat([]byte{0x89, 0x50, 0x4e, 0x47}, (2<<20)/4+256), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Join(directory, "node_modules", "ignored"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(directory, "node_modules", "ignored", "index.js"), []byte("ignored"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	withScripts, err := inspectBundle(directory, metadata)
+	if err != nil {
+		t.Fatalf("expected scripts, executable, and >2 MiB file to be accepted: %v", err)
+	}
+	if !skillhub.HasScripts(withScripts.Files) || len(withScripts.Files) != 3 {
+		t.Fatalf("unexpected bundle files: %+v", withScripts.Files)
+	}
+
+	envPath := filepath.Join(directory, ".env")
+	if err = os.WriteFile(envPath, []byte("API_KEY=secret\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = inspectBundle(directory, metadata); err == nil {
-		t.Fatal("script directory accepted")
+		t.Fatal(".env file accepted")
 	}
-	if err = os.Remove(filepath.Join(directory, "scripts")); err != nil {
+	if err = os.Remove(envPath); err != nil {
 		t.Fatal(err)
 	}
+
+	credPath := filepath.Join(directory, "credentials.json")
+	if err = os.WriteFile(credPath, []byte(`{"token":"x"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = inspectBundle(directory, metadata); err == nil {
+		t.Fatal("credentials.json accepted")
+	}
+	if err = os.Remove(credPath); err != nil {
+		t.Fatal(err)
+	}
+
 	if err = os.Symlink(metadata, filepath.Join(directory, "external.json")); err != nil {
 		t.Fatal(err)
 	}

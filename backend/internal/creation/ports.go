@@ -43,7 +43,6 @@ type Media interface {
 
 // TaskKinds identifies generation modes that creation refuses to quote.
 type TaskKinds interface {
-	UsesWorkflow(input map[string]any) bool
 	UsesTextReplay(input map[string]any) bool
 }
 
@@ -66,7 +65,6 @@ type Host interface {
 	Protect(input map[string]any) error
 	ValidateCanvas(userID string, repo *repository.Repository, creating bool, delta int64) error
 	ValidateDocument(userID string, repo *repository.Repository, raw json.RawMessage) error
-	UsesWorkflow(input map[string]any) bool
 	UsesTextReplay(input map[string]any) bool
 	StorageLock() sync.Locker
 	FormatTask(model.Task) *model.Task
@@ -110,7 +108,6 @@ type HostConfig struct {
 	RuntimePolicy    func(repo *repository.Repository) (platform.RuntimePolicySetting, error)
 	ProtectSecrets   func(input any) error
 	ValidateDocument func(userID string, repo *repository.Repository, raw json.RawMessage) error
-	UsesWorkflow     func(input map[string]any) bool
 	UsesTextReplay   func(input map[string]any) bool
 	FormatTask       func(model.Task) *model.Task
 }
@@ -152,7 +149,6 @@ func (h configHost) ValidateDocument(u string, repo *repository.Repository, raw 
 	}
 	return h.cfg.ValidateDocument(u, repo, raw)
 }
-func (h configHost) UsesWorkflow(input map[string]any) bool   { return h.cfg.UsesWorkflow(input) }
 func (h configHost) UsesTextReplay(input map[string]any) bool { return h.cfg.UsesTextReplay(input) }
 func (h configHost) StorageLock() sync.Locker                 { return h.cfg.StorageLock }
 func (h configHost) FormatTask(t model.Task) *model.Task      { return h.cfg.FormatTask(t) }

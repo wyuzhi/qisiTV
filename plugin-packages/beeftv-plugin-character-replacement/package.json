@@ -1,6 +1,6 @@
 {
   "name": "beeftv-plugin-character-replacement",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "AI 角色替换工作室：支持单人/多人精准角色替换、5 档替换范围控制、定位框 SVG 辅助、两阶段关键帧+视频动作替换（Seedream + Seedance 2.5 元素替换）与全片时间线无损回插。",
   "author": "BeefTV",
   "type": "module",
@@ -32,13 +32,8 @@
     ]
   },
   "beeftv": {
-    "id": "beeftv-plugin-character-replacement",
-    "apiVersion": "beeftv.plugin/v2",
-    "schemaVersion": 2,
     "name": "AI 角色替换工作室",
-    "version": "0.1.4",
-    "description": "AI 角色替换工作室：支持单人/多人精准角色替换、5 档替换范围控制、定位框 SVG 辅助、两阶段关键帧+视频动作替换（Seedream + Seedance 2.5 元素替换）与全片时间线无损回插。",
-    "author": "BeefTV",
+    "client": "./client/index.js",
     "surfaces": [
       "node",
       "fullscreen",
@@ -49,92 +44,12 @@
       "canvas.write",
       "timeline.command"
     ],
-    "client": "./client/index.js",
-    "canvasNodes": [
-      {
-        "id": "character-replacement",
-        "type": "character-replacement",
-        "label": "角色替换",
-        "title": "AI 角色替换",
-        "defaultTitle": "AI 角色替换",
-        "renderer": "client",
-        "defaultWidth": 380,
-        "defaultHeight": 460,
-        "defaultSize": {
-          "width": 380,
-          "height": 460
-        },
-        "schema": {
-          "type": "object",
-          "properties": {
-            "shotTitle": {
-              "type": "string"
-            },
-            "position": {
-              "type": "string",
-              "enum": [
-                "single",
-                "left",
-                "center",
-                "right"
-              ]
-            },
-            "genderHint": {
-              "type": "string",
-              "enum": [
-                "person",
-                "male",
-                "female"
-              ]
-            },
-            "sourceDescription": {
-              "type": "string"
-            },
-            "targetDescription": {
-              "type": "string"
-            },
-            "replacementScope": {
-              "type": "string",
-              "enum": [
-                "full-person",
-                "visible-part",
-                "face-hair",
-                "clothing",
-                "arm-hand"
-              ]
-            },
-            "promptMode": {
-              "type": "string",
-              "enum": [
-                "regular",
-                "positioning",
-                "manual"
-              ]
-            },
-            "sourceKeyframeNodeId": {
-              "type": "string"
-            },
-            "targetCharacterNodeId": {
-              "type": "string"
-            },
-            "sourceVideoNodeId": {
-              "type": "string"
-            }
-          }
-        }
-      }
-    ],
     "contributes": {
       "canvasNodes": [
         {
           "id": "character-replacement",
-          "type": "character-replacement",
           "label": "角色替换",
-          "title": "AI 角色替换",
           "defaultTitle": "AI 角色替换",
-          "renderer": "client",
-          "defaultWidth": 380,
-          "defaultHeight": 460,
           "defaultSize": {
             "width": 380,
             "height": 460
@@ -196,7 +111,8 @@
                 "type": "string"
               }
             }
-          }
+          },
+          "renderer": "client"
         }
       ]
     }

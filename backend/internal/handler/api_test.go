@@ -108,7 +108,6 @@ func TestRegisterDesktopCanvasAPIExcludesHostedOnlyRoutes(t *testing.T) {
 			"GET /api/admin/settings/response-interception", "PATCH /api/admin/settings/response-interception",
 			"GET /api/admin/text-replay-stats",
 			"POST /api/canvas-projects/:id/import/libtv", "POST /api/canvas-projects/:id/import/tapnow",
-			"POST /api/runninghub/workflow-info", "POST /api/runninghub/app-info",
 			"GET /api/public/resources/:id/file", "GET /api/public/resources/:id/file/:filename":
 			t.Fatalf("desktop API must not expose hosted storage route %s", key)
 		}
@@ -127,7 +126,7 @@ func TestRegisterDesktopCanvasAPIExcludesHostedOnlyRoutes(t *testing.T) {
 		"/api/login", "/api/register", "/api/auth/", "/api/oauth/",
 		"/api/finance", "/api/payments", "/api/admin", "/api/announcements",
 		"/api/canvas-shares", "/api/model-catalog", "/api/models",
-		"/api/ai/system/", "/api/settings/oss", "/api/runninghub/",
+		"/api/ai/system/", "/api/settings/oss",
 		"/api/resources/import", "/api/resources/", // filtered below for local resource routes
 	}
 	for _, route := range router.Routes() {

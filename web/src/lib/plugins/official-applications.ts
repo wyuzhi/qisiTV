@@ -1,7 +1,6 @@
 import { ART_CRITIQUE_PLUGIN_ID } from "@/lib/art-critique/contracts";
 import { EAGLE_PLUGIN_ID } from "@/lib/plugins/builtin/eagle";
 import { PROMPT_OPTIMIZER_PLUGIN_ID } from "@/lib/plugins/builtin/prompt-optimizer";
-import { RUNNINGHUB_PLUGIN_ID } from "@/lib/plugins/builtin/workflows";
 
 import { EDITOR_SHELL_PLUGIN_ID } from "./builtin/editor/editor-shell";
 
@@ -12,7 +11,6 @@ import { EDITOR_SHELL_PLUGIN_ID } from "./builtin/editor/editor-shell";
  * 工作台，导致二者被误判为系统协议并在管理页显示“已停用”。这里收敛为唯一来源。
  */
 export const OFFICIAL_APPLICATION_PLUGIN_IDS = [
-    RUNNINGHUB_PLUGIN_ID,
     EAGLE_PLUGIN_ID,
     PROMPT_OPTIMIZER_PLUGIN_ID,
     ART_CRITIQUE_PLUGIN_ID,

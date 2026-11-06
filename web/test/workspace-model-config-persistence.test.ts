@@ -126,16 +126,6 @@ test("local config strips hosted system channels but keeps direct user channels"
     expect(config.channels[0]?.apiKey).toBe("local-key");
 });
 
-test("local config disables legacy RunningHub settings and system catalog refresh", async () => {
-    const config = localWorkspaceConfig({
-        ...defaultConfig,
-        runningHub: { ...defaultConfig.runningHub, enabled: true, apiKey: "legacy-cloud-key", workflowId: "workflow-1" },
-    });
-    expect(config.runningHub.enabled).toBe(false);
-    expect(config.runningHub.apiKey).toBe("");
-    expect(config.runningHub.workflowId).toBe("");
-});
-
 test("model config repository serializes rapid edits and persists the latest snapshot", async () => {
     const writes: string[] = [];
     let releaseFirstWrite: (() => void) | undefined;

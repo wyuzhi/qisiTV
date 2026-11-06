@@ -203,13 +203,6 @@ func (p appConfigPort) ApplyCapabilities(ctx context.Context, input *generation.
 	return generation.ApplyStandardCapabilities(ctx, p.service.repo, p.service.ReadLocalModelConfig, input)
 }
 
-func (p appConfigPort) RequireWorkflow(interfaceType string) error {
-	if p.service == nil {
-		return errors.New("无法执行工作流任务，请重试")
-	}
-	return p.service.RequireWorkflowPluginForInterface(interfaceType)
-}
-
 func (p appConfigPort) SyncArkPrivateAssets(ctx context.Context, userID string, input *generation.Input) error {
 	if p.service == nil || input == nil {
 		return nil
@@ -224,12 +217,6 @@ func (p appStylePort) Apply(userID, projectID string, input *generation.Input) e
 		return errors.New("项目画风执行配置无效：画风端口未接入")
 	}
 	return p.service.applyGenerationStyleProfile(userID, projectID, input)
-}
-
-type appWorkflowPort struct{ service *Service }
-
-func (p appWorkflowPort) Execute(ctx context.Context, input generation.Input) (map[string]interface{}, error) {
-	return p.service.runWorkflowProviderTask(ctx, input)
 }
 
 type appMediaProbe struct{}
@@ -262,7 +249,6 @@ func (s *Service) applyGenerationRuntime(ctx context.Context, meta generation.Ca
 		Receipts:         appReceiptPort{service: s},
 		Images:           appImagePort{service: s},
 		ManagedMedia:     s.mediaAttempts().ManagedPort(),
-		Workflow:         appWorkflowPort{service: s},
 		Prompt:           appPromptPort{service: s},
 		Config:           appConfigPort{service: s},
 		Style:            appStylePort{service: s},

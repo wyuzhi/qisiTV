@@ -4,4 +4,4 @@ package assistantruntime
 
 import "os/exec"
 
-func configureHostProcess(*exec.Cmd) {}
+func ConfigureHostProcess(*exec.Cmd) {}

@@ -42,7 +42,7 @@ test("all task entry points can recover URL admission using the configured deskt
     setActiveUserScope("reference-owner");
     const channel = createModelChannel({ id: "third-party", baseUrl: "https://provider.example", name: "Third party", apiKey: "fixture", interfaceType: "newapi-channel-2", models: ["video"], modelProfiles: [{ model: "video", capability: "video", protocol: "newapi-channel-2", referenceMediaTransport: { image: "url", audio: "link" } }] });
     const config = { ...defaultConfig, channels: [channel], model: encodeChannelModel(channel.id, "video") };
-    expect(backendProviderConfig(config, "video").referenceMediaTransport).toEqual({ image: "url", audio: "link" });
+    expect(backendProviderConfig(config).referenceMediaTransport).toEqual({ image: "url", audio: "link" });
     let uploads = 0;
     globalThis.window = { go: { main: { DesktopApp: {
         ReferenceStorageSettings: async () => ({ enabled: true }),

@@ -13,7 +13,6 @@ import { mediaConversionSourceFingerprint } from "@/lib/media-conversion/contrac
 import { resolveCanvasDrawingReference } from "@/lib/canvas/canvas-drawing-reference";
 import { compileCharacterReferencePrompt } from "@/lib/canvas/canvas-character-reference";
 import { nodeReferenceImage } from "@/lib/canvas/canvas-project-generation";
-import { isCanvasWorkflowProvider } from "@/lib/canvas/canvas-workflow";
 import { audioFileExtension } from "@/lib/character-voice-formats";
 import type { ModelReferenceLimits } from "@/lib/model-selection";
 import type { Asset } from "@/stores/use-asset-store";
@@ -103,14 +102,13 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
     const storyboardInputs = getConnectedStoryboardRows(nodeId, nodes, connections);
     assertResolvableGenerationMentions(prompt, mentionInputs);
     const hasExplicitResourceMention = hasResolvableGenerationMention(prompt, mentionInputs);
-    const isWorkflowSource = sourceNode?.type === CanvasNodeType.Config && isCanvasWorkflowProvider(sourceNode.metadata);
     const hasConnectedMedia = connectedInputs.some((input) => input.type === "image" || input.type === "video" || input.type === "audio" || input.type === "character");
-    if ((promptOnly && hasConnectedMedia) || (Boolean(sourceNode?.metadata?.composerContent?.trim()) && (sourceNode?.type === CanvasNodeType.Config || isWorkflowSource)) || hasExplicitResourceMention) {
-        const includeConnectedMedia = isWorkflowSource || ((promptOnly || sourceNode?.type === CanvasNodeType.Config) && hasConnectedMedia);
+    if ((promptOnly && hasConnectedMedia) || (Boolean(sourceNode?.metadata?.composerContent?.trim()) && sourceNode?.type === CanvasNodeType.Config) || hasExplicitResourceMention) {
+        const includeConnectedMedia = (promptOnly || sourceNode?.type === CanvasNodeType.Config) && hasConnectedMedia;
         const context = buildComposerGenerationContext(
             mentionInputs,
             prompt,
-            // 工作流节点由字段映射接收全部连线媒体；视频节点的历史首尾帧字段不能再额外追加参考图。
+            // 自动带入全部连线媒体时，视频节点的历史首尾帧字段不能再额外追加参考图。
             includeConnectedMedia ? [] : [sourceNode?.metadata?.videoStartFrameNodeId, sourceNode?.metadata?.videoEndFrameNodeId].filter((id): id is string => Boolean(id)),
             promptOnly,
             includeConnectedMedia,
@@ -275,9 +273,8 @@ function buildComposerGenerationContext(
         }
     }
     if (includeConnectedMedia) {
-        // RunningHub/ComfyUI 工作流按保存的字段槽位接收图片、视频和音频；
         // 配置节点不能因为提示词里没有逐个 @ 就丢失已连接媒体。
-        // 先按连线顺序放入媒体，避免用户在提示词里 @图片2 后改变工作流槽位的索引；
+        // 先按连线顺序放入媒体，避免用户在提示词里 @图片2 后改变参考素材的顺序；
         // 素材库中的显式 @ 引用仍保留在后面，不会被自动模式吞掉。
         const explicitInputs = selectedInputs.splice(0);
         const selectedNodeIds = new Set<string>();
@@ -672,7 +669,6 @@ export async function hydrateNodeGenerationContext(context: NodeGenerationContex
 export function compileNodeGenerationReferences<T extends NodeGenerationContext>(context: T, config: AiConfig, operation?: string): T {
     const videoCapability = modelCapabilityConfigFor(config, config.model).video;
     const omniVideoReferences = operation === "reference_to_video"
-        && (!config.taskWorkflowProvider || config.taskWorkflowProvider === "model")
         && Boolean(videoCapability?.operations.includes("reference_to_video") && ((videoCapability.references.maxVideos ?? 0) > 0 || (videoCapability.references.maxAudios ?? 0) > 0));
     const compiled = compileBoundMediaReferences(context, omniVideoReferences);
     return omniVideoReferences && context.characterReferenceBindings?.length

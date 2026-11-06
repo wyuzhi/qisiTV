@@ -194,7 +194,6 @@ type Metadata struct {
 type Manifest struct {
 	APIVersion    string                `json:"apiVersion"`
 	Metadata      Metadata              `json:"-"`
-	Entry         string                `json:"entry,omitempty"`
 	Client        string                `json:"client,omitempty"`
 	Surfaces      []string              `json:"surfaces,omitempty"`
 	Runtime       ManifestRuntime       `json:"runtime,omitempty"`
@@ -227,7 +226,6 @@ func (m Manifest) MarshalJSON() ([]byte, error) {
 		Author        string                `json:"author,omitempty"`
 		Description   string                `json:"description,omitempty"`
 		Documentation string                `json:"documentation,omitempty"`
-		Entry         string                `json:"entry,omitempty"`
 		Client        string                `json:"client,omitempty"`
 		Surfaces      []string              `json:"surfaces,omitempty"`
 		Enabled       bool                  `json:"enabled"`
@@ -237,7 +235,7 @@ func (m Manifest) MarshalJSON() ([]byte, error) {
 		Configuration ManifestConfiguration `json:"configuration,omitempty"`
 		Contributes   ManifestContributions `json:"contributes"`
 	}
-	return json.Marshal(wire{APIVersion: m.APIVersion, ID: m.Metadata.ID, Name: m.Metadata.Name, Version: m.Metadata.Version, Author: m.Metadata.Vendor, Description: m.Metadata.Description, Documentation: m.Metadata.Documentation, Entry: m.Entry, Client: m.Client, Surfaces: m.Surfaces, Enabled: m.Metadata.Enabled, Installable: m.Metadata.Installable, Runtime: m.Runtime, Permissions: m.Permissions, Configuration: m.Configuration, Contributes: m.Contributes})
+	return json.Marshal(wire{APIVersion: m.APIVersion, ID: m.Metadata.ID, Name: m.Metadata.Name, Version: m.Metadata.Version, Author: m.Metadata.Vendor, Description: m.Metadata.Description, Documentation: m.Metadata.Documentation, Client: m.Client, Surfaces: m.Surfaces, Enabled: m.Metadata.Enabled, Installable: m.Metadata.Installable, Runtime: m.Runtime, Permissions: m.Permissions, Configuration: m.Configuration, Contributes: m.Contributes})
 }
 
 func (m *Manifest) UnmarshalJSON(data []byte) error {
@@ -250,7 +248,6 @@ func (m *Manifest) UnmarshalJSON(data []byte) error {
 		Author        string                `json:"author"`
 		Description   string                `json:"description"`
 		Documentation string                `json:"documentation"`
-		Entry         string                `json:"entry"`
 		Client        string                `json:"client"`
 		Surfaces      []string              `json:"surfaces"`
 		Enabled       *bool                 `json:"enabled"`
@@ -275,15 +272,13 @@ func (m *Manifest) UnmarshalJSON(data []byte) error {
 	for index := range value.Contributes.CanvasNodes {
 		value.Contributes.CanvasNodes[index].Normalize()
 	}
-	m.APIVersion, m.Entry, m.Client, m.Surfaces, m.Runtime, m.Permissions, m.Configuration, m.Contributes = value.APIVersion, value.Entry, value.Client, value.Surfaces, value.Runtime, value.Permissions, value.Configuration, value.Contributes
+	m.APIVersion, m.Client, m.Surfaces, m.Runtime, m.Permissions, m.Configuration, m.Contributes = value.APIVersion, value.Client, value.Surfaces, value.Runtime, value.Permissions, value.Configuration, value.Contributes
 	m.Metadata = Metadata{ID: value.ID, Name: name, Version: value.Version, Vendor: value.Author, Description: value.Description, Documentation: value.Documentation, Enabled: enabled, Installable: value.Installable}
 	return nil
 }
 
 type ManifestRuntime struct {
-	Backend      string `json:"backend,omitempty"`
-	BackendEntry string `json:"backendEntry,omitempty"`
-	Web          string `json:"web,omitempty"`
+	Backend string `json:"backend,omitempty"`
 }
 
 type ManifestConfiguration struct {
@@ -302,18 +297,11 @@ type ManifestField struct {
 }
 
 type ManifestContributions struct {
-	Providers      []ManifestProvider   `json:"providers,omitempty"`
-	Workflows      []ManifestWorkflow   `json:"workflows,omitempty"`
-	CanvasNodes    []ManifestCanvasNode `json:"canvasNodes,omitempty"`
-	Transforms     []ManifestTransform  `json:"transforms,omitempty"`
-	Commands       []ManifestCommand    `json:"commands,omitempty"`
-	AssetSources   []string             `json:"assetSources,omitempty"`
-	UsageObservers []string             `json:"usageObservers,omitempty"`
-	AICapabilities []string             `json:"aiCapabilities,omitempty"`
-	Agents         []string             `json:"agents,omitempty"`
-	Skills         []string             `json:"skills,omitempty"`
-	Extensions     []string             `json:"extensions,omitempty"`
-	ImportExport   []string             `json:"importExport,omitempty"`
+	Providers   []ManifestProvider   `json:"providers,omitempty"`
+	Workflows   []ManifestWorkflow   `json:"workflows,omitempty"`
+	CanvasNodes []ManifestCanvasNode `json:"canvasNodes,omitempty"`
+	Skills      []string             `json:"skills,omitempty"`
+	Extensions  []string             `json:"extensions,omitempty"`
 }
 
 type ManifestProvider struct {
@@ -335,6 +323,8 @@ type ManifestProvider struct {
 	Result                  *ManifestOperation     `json:"result,omitempty"`
 	Response                ManifestResponse       `json:"response"`
 	AgentResponse           *ManifestAgentResponse `json:"agentResponse,omitempty"`
+	// Module 指向插件包内实现 submit/query 的 JS 文件；写了它就不写 create/poll。
+	Module string `json:"module,omitempty"`
 }
 
 type ManifestAuth struct {
@@ -382,6 +372,11 @@ type ManifestCanvasNode struct {
 	Fields        []ManifestField `json:"fields,omitempty"`
 	Schema        map[string]any  `json:"schema,omitempty"`
 	Renderer      string          `json:"renderer,omitempty"`
+	Description   string          `json:"description,omitempty"`
+	// AcceptsInputKind 是 "image"、"video"、"audio"、"text" 之一或它们的数组，原样交给画布。
+	AcceptsInputKind     any   `json:"acceptsInputKind,omitempty"`
+	MaxInputCount        int   `json:"maxInputCount,omitempty"`
+	ShowOutputConnection *bool `json:"showOutputConnection,omitempty"`
 }
 
 func (n *ManifestCanvasNode) Normalize() {
@@ -438,18 +433,6 @@ func firstNonEmptyText(values ...string) string {
 		}
 	}
 	return ""
-}
-
-type ManifestTransform struct {
-	ID      string `json:"id"`
-	Input   string `json:"input"`
-	Output  string `json:"output"`
-	Runtime string `json:"runtime"`
-}
-
-type ManifestCommand struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
 }
 
 func (r RequestSpec) Validate() error {

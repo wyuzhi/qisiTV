@@ -22,6 +22,16 @@ export type ClientPluginModule = {
 
 const activeCleanups = new Map<string, () => void>();
 const activatingPromises = new Map<string, Promise<boolean>>();
+/** 每个已激活插件加载的入口地址；从文件夹重新安装后地址变了，就要换成新代码。 */
+const loadedEntries = new Map<string, string>();
+
+/** 地址带上安装内容的指纹（没有时用版本号），同版本重新安装也会加载新模块而不是浏览器缓存里的旧模块。 */
+function clientEntryFor(pluginId: string, manifest?: PluginManifest | PluginManifestV2): string | undefined {
+    const cleanClient = manifest?.client ? manifest.client.replace(/^\.\//, "").replace(/^\/+/, "") : "";
+    if (!cleanClient) return undefined;
+    const revision = manifest?.revision || manifest?.version || "";
+    return `/api/plugins/${encodeURIComponent(pluginId)}/files/${cleanClient}?v=${encodeURIComponent(revision)}`;
+}
 
 function resolveModuleActivator(
     mod: ClientPluginModule,
@@ -41,6 +51,10 @@ function resolveModuleDeactivator(mod: ClientPluginModule): (() => Promise<void>
     }
     return null;
 }
+
+// 只用来发现永远不返回的插件；加载本身是异步的，不会挡住应用。计时从 import() 开始，
+// 页面忙着渲染时计时器照走，太短会把正常的插件记成异常。
+const CLIENT_ENTRY_TIMEOUT_MS = 15_000;
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, pluginId: string): Promise<T> {
     return new Promise<T>((resolve, reject) => {
@@ -73,7 +87,7 @@ export async function activateClientPluginModule(
         deactivateClientPlugin(pluginId);
     }
 
-    const timeoutMs = options?.timeoutMs ?? 3000;
+    const timeoutMs = options?.timeoutMs ?? CLIENT_ENTRY_TIMEOUT_MS;
     const host = createBeefTVPluginHost(pluginId, options?.manifest);
     const activator = resolveModuleActivator(mod);
     const deactivator = resolveModuleDeactivator(mod);
@@ -146,27 +160,25 @@ export async function loadAndActivateClientPlugin(
             );
         }
 
-        const cleanClient = manifest?.client ? manifest.client.replace(/^\.\//, "").replace(/^\/+/, "") : "";
-        // The version in the query makes an updated package load its new module instead of the cached one.
-        const clientEntry = cleanClient
-            ? `/api/plugins/${encodeURIComponent(pluginId)}/files/${cleanClient}?v=${encodeURIComponent(manifest?.version ?? "")}`
-            : undefined;
+        const clientEntry = clientEntryFor(pluginId, manifest);
         if (!clientEntry) {
             return false;
         }
 
         try {
-            const timeoutMs = options?.timeoutMs ?? 3000;
+            const timeoutMs = options?.timeoutMs ?? CLIENT_ENTRY_TIMEOUT_MS;
             const mod = await withTimeout(
                 import(/* @vite-ignore */ clientEntry) as Promise<ClientPluginModule>,
                 timeoutMs,
                 pluginId,
             );
-            return await activateClientPluginModule(pluginId, mod, {
+            const activated = await activateClientPluginModule(pluginId, mod, {
                 manifest,
                 timeoutMs,
                 reportBackendError: true,
             });
+            if (activated) loadedEntries.set(pluginId, clientEntry);
+            return activated;
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             disposePluginContributions(pluginId);
@@ -192,6 +204,7 @@ export async function loadAndActivateClientPlugin(
 export function deactivateClientPlugin(pluginId: string): void {
     const cleanup = activeCleanups.get(pluginId);
     activeCleanups.delete(pluginId);
+    loadedEntries.delete(pluginId);
     if (cleanup) {
         cleanup();
     } else {
@@ -289,6 +302,10 @@ export function syncActiveClientPlugins(changedPluginId?: string): void {
         const effective = isPluginEffectivelyEnabled(pluginId, localEnabled);
 
         if (effective) {
+            const loadedEntry = loadedEntries.get(pluginId);
+            if (loadedEntry && !plugin?.setup && loadedEntry !== clientEntryFor(pluginId, manifest)) {
+                deactivateClientPlugin(pluginId);
+            }
             if (!activeCleanups.has(pluginId)) {
                 if (plugin?.setup) {
                     activateRegisteredSetupSync(pluginId);

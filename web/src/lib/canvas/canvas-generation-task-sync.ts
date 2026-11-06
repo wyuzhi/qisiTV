@@ -100,21 +100,12 @@ export function audioMetadata(audio: UploadedFile): CanvasNodeMetadata {
     };
 }
 
-function workflowMetadataForResultNode(): Partial<CanvasNodeMetadata> {
-    return {
-        workflowProvider: undefined,
-        runningHubWorkflowId: undefined,
-        runningHubWorkflowKind: undefined,
-        workflowParameters: undefined,
-    };
-}
-
 // 原地重生会换 storageKey 但继承旧 assetId，形成「旧素材 + 新资源」配对，云端校验会永久拒绝。
 // 新媒体结果必须清掉旧绑定，交给入库/修复路径按新资源重绑。
 export function applyGeneratedMediaResultMetadata(node: CanvasNodeData, media: CanvasNodeMetadata, extra: Partial<CanvasNodeMetadata> = {}): CanvasNodeMetadata {
     return mediaResultMetadata("generated", {
         ...node.metadata,
-        ...workflowMetadataForResultNode(),
+        workflowProvider: undefined,
         ...media,
         ...extra,
         errorDetails: undefined,

@@ -21,7 +21,7 @@ test("Kling server capability preserves profile defaults and explicit canvas aud
             const config = resolveModelRequestConfig(buildGenerationConfig(snapshot, node, "video"), `beefapi::${model}`);
             const expected = selected === undefined ? audioDefault : selected === "true";
             expect(config.videoGenerateAudio).toBe(String(expected));
-            expect(backendProviderConfig(config, "video")).toMatchObject({ videoGenerateAudio: String(expected), videoSeconds: "5", model });
+            expect(backendProviderConfig(config)).toMatchObject({ videoGenerateAudio: String(expected), videoSeconds: "5", model });
         }
     }
 });

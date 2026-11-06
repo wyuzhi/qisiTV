@@ -1,10 +1,10 @@
-import { App, Alert, Button, Dropdown, Select, Skeleton } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { App, Alert, Button, Dropdown, Select, Skeleton, Tooltip } from "antd";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { WorkspacePage } from "@/components/layout/workspace-page";
 import { CollectionHeader } from "@/components/layout/collection-header";
 import { AppModal } from "@/components/ui/product/app-modal";
-import { addSkill, deleteSkill, getSkill, listSkills, removeSkill, type Skill } from "@/services/api/skills";
+import { addSkill, deleteSkill, getSkill, listSkills, removeSkill, syncLocalSkills, type Skill } from "@/services/api/skills";
 import { forkSkill, getInstalledVersions, getMarketRelease, installMarketRelease, rollbackSkill, searchSkillMarket, type InstalledVersion, type MarketItem, type MarketRelease } from "@/services/api/skill-market";
 import { SkillEditorDrawer } from "./skill-editor-drawer";
 import { SkillInstallModal } from "./skill-install-modal";
@@ -17,6 +17,8 @@ import { skillFailureMessage } from "./skill-feedback";
 import { capabilityOptions, requirementLabel } from "./market-copy";
 import { MoreHorizontal, RefreshCw } from "lucide-react";
 import { Switch } from "@/components/ui/base/switch";
+import { LocalSkillSourceButton } from "./local-skill-source";
+import { isLocalSkill, SKILL_SCRIPTS_NOTE } from "./skill-catalog";
 import "./marketplace.css";
 
 const SKILL_PAGE_SIZE = 20;
@@ -43,6 +45,9 @@ export default function SkillMarketplace() {
     const [versions, setVersions] = useState<{ skill: Skill; items: InstalledVersion[] } | null>(null);
     const [versionId, setVersionId] = useState("");
     const reload = useCallback(() => setRevision(n => n + 1), []);
+    // 别的工具刚装的技能，打开「我的技能」就能看到。读不到本机目录时列表照常显示。
+    const localSkillSync = useRef<Promise<unknown> | null>(null);
+    const refresh = () => { localSkillSync.current = null; reload(); };
     const changeTab = (next: string) => { setParams({ tab: next }); setPage(1); setQuery(""); };
     useEffect(() => {
         if (tab === "publish") return;
@@ -57,7 +62,7 @@ export default function SkillMarketplace() {
             };
             const work = tab === "market"
                 ? searchSkillMarket(query, page).then(value => { if (!stale && clampPage(value.total)) setItems(value.items || []); })
-                : listSkills({ scope: "mine", page, pageSize: SKILL_PAGE_SIZE, search: query }).then(value => { if (!stale && clampPage(value.totalCount)) setLocal(value.skills); });
+                : (localSkillSync.current ??= syncLocalSkills().catch(() => undefined)).then(() => listSkills({ scope: "mine", page, pageSize: SKILL_PAGE_SIZE, search: query })).then(value => { if (!stale && clampPage(value.totalCount)) setLocal(value.skills); });
             void work.catch(e => { if (!stale) setError(e.message || "暂时无法读取技能"); }).finally(() => { if (!stale) setLoading(false); });
         }, 200);
         return () => { stale = true; clearTimeout(timer); };
@@ -109,7 +114,7 @@ export default function SkillMarketplace() {
             <CollectionHeader
                 {...headerProps}
                 search={{ value: query, placeholder: "搜索技能", onChange: (value) => { setQuery(value); setPage(1); } }}
-                actions={<button type="button" className="assets-header-compact-button" aria-label="刷新技能" title="刷新技能" disabled={loading} aria-busy={loading} onClick={reload}><RefreshCw className={loading ? "size-4 animate-spin" : "size-4"} /></button>}
+                actions={<><button type="button" className="assets-header-compact-button" aria-label="刷新技能" title="刷新技能" disabled={loading} aria-busy={loading} onClick={refresh}><RefreshCw className={loading ? "size-4 animate-spin" : "size-4"} /></button>{tab === "mine" ? <LocalSkillSourceButton compact onChanged={reload} /> : null}</>}
                 createItems={[
                     { key: "create", label: "创建技能", onClick: () => openEditor() },
                     { key: "import", label: "导入文件", onClick: () => setInstallOpen(true) },
@@ -132,11 +137,12 @@ export default function SkillMarketplace() {
                 }) : local.map(skill => <article className="workspace-list-row" key={skill.skillId}>
                     <div className="workspace-list-copy">
                         <h2><button type="button" className="workspace-item-title" onClick={() => void openLocal(skill)}>{skill.skillName}</button></h2>
+                        {skill.hasScripts ? <Tooltip title={SKILL_SCRIPTS_NOTE}><span className="skill-market-state">含脚本</span></Tooltip> : null}
                     </div>
                     <div className="workspace-list-controls">
                         <Button size="small" onClick={() => void openLocal(skill)} disabled={busy}>查看详情</Button>
                         <label className="skill-market-toggle"><span>{skill.isAdded ? "已启用" : "已停用"}</span><Switch size="sm" aria-label={`启用${skill.skillName}`} checked={skill.isAdded} disabled={busy} onChange={() => void action(() => skill.isAdded ? removeSkill(skill.skillId) : addSkill(skill.skillId), skill.isAdded ? "已停用，不再供助手选择" : "已启用")} /></label>
-                        <Dropdown trigger={["click"]} menu={{ items: [
+                        {!isLocalSkill(skill) ? <Dropdown trigger={["click"]} menu={{ items: [
                             ...(skill.sourceType === "market" ? [
                                 { key: "updates", label: "检查更新", onClick: () => { changeTab("market"); setQuery(skill.skillName); } },
                                 { key: "versions", label: "历史版本", onClick: () => void showVersions(skill) },
@@ -148,7 +154,7 @@ export default function SkillMarketplace() {
                                 { key: "publish", label: "分享投稿", onClick: () => setParams({ tab: "publish", skillId: skill.skillId }) },
                             ]),
                             ...(skill.isOwner ? [{ type: "divider" as const }, { key: "delete", label: "删除技能", danger: true, onClick: () => deleteLocal(skill) }] : []),
-                        ] }}><Button type="text" size="small" aria-label={`管理${skill.skillName}`} disabled={busy} icon={<MoreHorizontal className="size-4" />} /></Dropdown>
+                        ] }}><Button type="text" size="small" aria-label={`管理${skill.skillName}`} disabled={busy} icon={<MoreHorizontal className="size-4" />} /></Dropdown> : null}
                     </div>
                 </article>)}
                 {total === 0 ? <p className="skill-market-empty">{tab === "mine" ? "还没有技能。可以从市场安装，或导入自己的 SKILL.md。" : "没有找到匹配的技能。"}</p> : null}

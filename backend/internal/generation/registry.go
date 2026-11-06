@@ -113,9 +113,10 @@ func OfficialDeclarativeAudioInterface(interfaceType string) (string, bool) {
 	}
 }
 
+// DeclarativeProtocolAdapterForContext 返回插件清单声明的生成接口：JSON 描述的，或插件 JS 实现的。
 func DeclarativeProtocolAdapterForContext(ctx context.Context, id string) (protocol.Adapter, bool) {
 	adapter, ok := ProtocolAdapterForContext(ctx, id)
-	if !ok || adapter.Metadata().Execution != "declarative" {
+	if !ok || (adapter.Metadata().Execution != "declarative" && adapter.Metadata().Execution != protocol.ExecutionModule) {
 		return nil, false
 	}
 	return adapter, true
@@ -163,7 +164,7 @@ func LoadOfficialFallbackRegistry() *protocol.Registry {
 			if parseErr != nil {
 				return
 			}
-			providers, loadErr := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil)
+			providers, loadErr := protocol.LoadInstalledProviders(pkg.ManifestRaw)
 			if loadErr != nil {
 				return
 			}
@@ -185,7 +186,7 @@ func LoadOfficialFallbackRegistry() *protocol.Registry {
 			if err != nil {
 				return
 			}
-			providers, err := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil)
+			providers, err := protocol.LoadInstalledProviders(pkg.ManifestRaw)
 			if err != nil {
 				return
 			}

@@ -10,19 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-
-	"infinite-canvas/backend/internal/model"
 )
-
-type stubWorkflowPort struct{ calls atomic.Int32 }
-
-func (s *stubWorkflowPort) Execute(ctx context.Context, input Input) (map[string]interface{}, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	s.calls.Add(1)
-	return map[string]interface{}{"mode": input.Mode, "workflow": true}, nil
-}
 
 type countingPrompt struct{ compiles atomic.Int32 }
 
@@ -75,20 +63,6 @@ func TestExecuteTextImageAudioAndWorkflow(t *testing.T) {
 	images, _ := image["images"].([]map[string]string)
 	if len(images) != 1 {
 		t.Fatalf("image Execute payload = %#v", image)
-	}
-
-	workflowPort := &stubWorkflowPort{}
-	workflow, err := Execute(WithRuntime(context.Background(), taskRuntime(func(runtime *Runtime) {
-		runtime.Workflow = workflowPort
-	})), Input{
-		Mode: "image", Prompt: "draw",
-		Config: Config{
-			BaseURL: "https://www.runninghub.cn", APIKey: "key", Model: "wf",
-			InterfaceType: string(model.ChannelInterfaceRunningHubImage), WorkflowID: "wf-1",
-		},
-	})
-	if err != nil || workflow["workflow"] != true || workflowPort.calls.Load() != 1 {
-		t.Fatalf("workflow Execute: %#v err=%v calls=%d", workflow, err, workflowPort.calls.Load())
 	}
 
 	agent, err := Execute(WithRuntime(context.Background(), taskRuntime()), Input{
@@ -146,7 +120,6 @@ func (p *countingResolvePort) Resolve(config Config) (Config, error) {
 	return out, nil
 }
 func (p *countingResolvePort) ApplyCapabilities(context.Context, *Input) error { return nil }
-func (p *countingResolvePort) RequireWorkflow(string) error                    { return nil }
 func (p *countingResolvePort) SyncArkPrivateAssets(context.Context, string, *Input) error {
 	return nil
 }

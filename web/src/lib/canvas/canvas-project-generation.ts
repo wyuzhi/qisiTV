@@ -15,7 +15,6 @@ import { ensureMediaNodeMinimumSize } from "@/lib/canvas/canvas-node-size";
 import { repairOverlappingImageBatches } from "@/lib/canvas/canvas-generation-layout";
 import { interruptFileUpload } from "@/lib/canvas/canvas-file-upload";
 import { canvasNodeFailureView } from "@/lib/canvas/canvas-node-failure-view";
-import { isCanvasWorkflowProvider } from "@/lib/canvas/canvas-workflow";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import { CanvasNodeType, type CanvasAssistantSession, type CanvasConnection, type CanvasImageGenerationType, type CanvasNodeData, type CanvasNodeMetadata, type CanvasVideoEditOperation } from "@/types/canvas";
 import type { ReferenceImage } from "@/types/image";
@@ -317,7 +316,7 @@ export function audioExtension(mimeType?: string) {
 
 export function buildImageGenerationMetadata(type: CanvasImageGenerationType, config: AiConfig, count: number, references: ReferenceImage[]): CanvasNodeMetadata {
     return {
-        ...generationWorkflowMetadata(config),
+        workflowProvider: "model",
         generationType: type,
         model: config.model,
         size: config.size,
@@ -359,7 +358,7 @@ export function nodeReferenceImage(node: CanvasNodeData): ReferenceImage | null 
 
 export function buildAudioGenerationMetadata(config: AiConfig): CanvasNodeMetadata {
     return {
-        ...generationWorkflowMetadata(config),
+        workflowProvider: "model",
         model: config.model,
         audioVoice: config.audioVoice,
         audioFormat: config.audioFormat,
@@ -448,10 +447,9 @@ export function buildVideoGenerationMetadata(
         : effectiveModel && isH3Model(effectiveModel)
           ? h3VideoOperation(effectiveModel, { imageCount: context?.referenceImages.length || 0, videoCount: context?.referenceVideos.length || 0, audioCount: context?.referenceAudios.length || 0 }, metadata?.videoEditOperation)
           : resolveVideoEditOperation(node, context);
-    // 工作流视频与非 H3 Max 的全模态参考生成不消费首尾帧/中间帧槽位，不再把历史帧选择当成硬约束或透传给后端。
-    const workflowVideo = node?.type === CanvasNodeType.Config && (config?.taskWorkflowProvider === "runninghub" || isCanvasWorkflowProvider(metadata));
+    // 非 H3 Max 的全模态参考生成不消费首尾帧/中间帧槽位，不再把历史帧选择当成硬约束或透传给后端。
     const h3Max = isH3MaxModel(effectiveModel);
-    const ignoreFrameSelection = workflowVideo || videoEditOperation === "draft_to_final" || (videoEditOperation === "reference_to_video" && !h3Max);
+    const ignoreFrameSelection = videoEditOperation === "draft_to_final" || (videoEditOperation === "reference_to_video" && !h3Max);
     const connectedImages = context?.referenceImages || [];
     const h3 = isH3Model(effectiveModel);
     const storedStartFrame = !h3 && metadata?.videoStartFrameNodeId && !referenceImageIds.has(metadata.videoStartFrameNodeId)
@@ -485,7 +483,7 @@ export function buildVideoGenerationMetadata(
           : requireConnectedVideoFrame(storedEndFrame, "尾帧", referenceImageIds);
     const middleFrame = ignoreFrameSelection || !metadata?.videoMiddleFrameNodeId ? undefined : requireConnectedVideoFrame(metadata.videoMiddleFrameNodeId, "中间帧", referenceImageIds);
     return {
-        ...(config ? generationWorkflowMetadata(config) : {}),
+        ...(config ? { workflowProvider: "model" as const } : {}),
         videoEditOperation,
         videoDraftTaskId: draftTaskId,
         returnLastFrame: metadata?.returnLastFrame ?? config?.videoReturnLastFrame,
@@ -554,15 +552,6 @@ export async function hydrateAssistantImages(sessions: CanvasAssistantSession[])
 
 export function getGenerationCount(count: string) {
     return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(count)) || 1)));
-}
-
-export function generationWorkflowMetadata(config: AiConfig): Pick<CanvasNodeMetadata, "workflowProvider" | "runningHubWorkflowId" | "runningHubWorkflowKind"> {
-    const provider = config.taskWorkflowProvider || "model";
-    return {
-        workflowProvider: provider,
-        runningHubWorkflowId: provider === "runninghub" ? config.runningHub.workflowId : undefined,
-        runningHubWorkflowKind: provider === "runninghub" ? config.runningHub.selectedKind : undefined,
-    };
 }
 
 export { buildGenerationConfig, resolveCanvasGenerationModel } from "./canvas-generation-config";
