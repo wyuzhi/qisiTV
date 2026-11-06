@@ -124,11 +124,18 @@ function mossImageCapability(): ImageCapabilityConfig {
     };
 }
 
+function isExtendedGPTImageModel(protocol: ModelProtocol | undefined, model: string): boolean {
+    const normalized = model.trim().toLowerCase();
+    if (protocol !== "openai-image" || !normalized.startsWith("gpt-image-")) return false;
+    const suffix = normalized.slice(10);
+    return ["2.5", "2.5-flare", "2.5-sunburst", "2.6", "2.6-flare", "2.6-sunburst"].includes(suffix);
+}
+
 export function upgradeGPTImageCapability(profile: ImageCapabilityConfig, protocol: ModelProtocol | undefined, model: string): ImageCapabilityConfig {
     if (isMossImageModel(model)) return mossImageCapability();
     const seedream = seedreamImageCapability(model);
     if (seedream) return seedream;
-    if (protocol !== "openai-image" || !["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"].includes(model.trim().toLowerCase())) return profile;
+    if (protocol !== "openai-image" || (model.trim().toLowerCase() !== "gpt-image-2" && !isExtendedGPTImageModel(protocol, model))) return profile;
     if (!Array.isArray(profile.quality?.values) || !Array.isArray(profile.size?.values)) return profile;
     const defaults = defaultImageCapabilityConfig(protocol, model);
     const legacyQuality = profile.quality.supported && profile.quality.default === "auto" && profile.quality.values.length === 4 && ["auto", "low", "medium", "high"].every((value) => profile.quality.values.includes(value));
@@ -152,7 +159,7 @@ export function defaultImageCapabilityConfig(protocol?: ModelProtocol, model = "
         outputFormat: { supported: true },
         maxOutputs: 15,
     };
-    if (protocol === "openai-image" && ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"].includes(model.trim().toLowerCase())) {
+    if (isExtendedGPTImageModel(protocol, model)) {
         image.quality.values = ["auto", "low", "medium", "high", "xhigh", "max"];
     }
     if (protocol === "openai-image" && model.trim().toLowerCase() === "gpt-image-2") {

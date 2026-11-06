@@ -20,7 +20,7 @@ test("image2缺省与旧auto统一显示并提交low，显式质量和尺寸保�
     }
     const custom = { ...legacy, quality: { supported:true, values:["medium", "high"], default:"medium" } };
     expect(upgradeGPTImageCapability(custom, "openai-image", "gpt-image-2").quality).toEqual(custom.quality);
-    for (const model of ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]) {
+    for (const model of ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2.6", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst"]) {
         expect(defaultImageCapabilityConfig("openai-image", model).quality.default).toBe("auto");
         expect(defaultImageCapabilityConfig("openai-image", model).quality.values).toContain("max");
     }
