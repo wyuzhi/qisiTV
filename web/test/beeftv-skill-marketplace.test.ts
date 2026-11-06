@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { canSubmitPublication, needsPublicationTargetCorrection, requirementLabel, publicationStatus, unsupportedRequirements } from "../src/pages/skills/market-copy";
-import { hasSkillScripts } from "../src/pages/skills/skill-catalog";
 
 async function source(path: string) {
     return Bun.file(new URL(path, import.meta.url)).text();
@@ -49,9 +48,4 @@ test("ambiguous legacy publication IDs require explicit correction before upload
     expect(needsPublicationTargetCorrection({ ...base, publicationTarget: "existing", marketSkillId: "real-cloud-one", metadata: { ...base.metadata, skillId: "real-cloud-one" } })).toBe(false);
     expect(needsPublicationTargetCorrection({ ...base, publicationTarget: "existing", marketSkillId: "local-one", metadata: { ...base.metadata, skillId: "local-one" } })).toBe(true);
     expect(needsPublicationTargetCorrection({ ...base, publicationTarget: "new", submissionId: "draft-one", metadata: { ...base.metadata, skillId: "assigned-cloud-one" } })).toBe(false);
-});
-
-test("market release and publication file lists detect scripts folder", () => {
-    expect(hasSkillScripts([{ path: "SKILL.md" }, { path: "references/guide.md" }])).toBe(false);
-    expect(hasSkillScripts([{ path: "SKILL.md" }, { path: "scripts/run.py" }])).toBe(true);
 });

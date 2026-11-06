@@ -6,7 +6,7 @@ import type { MenuProps } from "antd";
 import { useNavigate, useSearchParams } from "react-router";
 
 import { CollectionGrid, PageHeader, PaginationBar, WorkspacePage } from "@/components/layout/workspace-page";
-import { ExpandableSearch } from "@/components/layout/expandable-search";
+import { CollectionHeader } from "@/components/layout/collection-header";
 import { WorkspaceErrorState, WorkspaceLoadingState, WorkspaceState } from "@/components/layout/workspace-state";
 import { AssetMediaPreview } from "@/components/asset-media-preview";
 import { CachedResourceImage } from "@/components/cached-resource-image";
@@ -159,14 +159,6 @@ export default function AssetsPage() {
         document.addEventListener("pointerdown", dismiss);
         return () => document.removeEventListener("pointerdown", dismiss);
     }, [folderDeleteConfirmId]);
-
-    useEffect(() => {
-        const button = document.querySelector<HTMLElement>(".assets-new-button");
-        if (!button) return;
-        button.style.setProperty("background-color", "#fff", "important");
-        button.style.setProperty("color", "#171717", "important");
-        button.style.setProperty("border-color", "rgba(255,255,255,.82)", "important");
-    });
 
     const [formKind, setFormKind] = useState<AssetKind>("text");
     const [imageDraft, setImageDraft] = useState<ImageDraft>(null);
@@ -837,63 +829,32 @@ export default function AssetsPage() {
                     void uploadFiles(files, folderFilter !== "all" && folderFilter !== "uncategorized" ? folderFilter : "");
                 }}
             />
-            <WorkspacePage grid className="library-page assets-library-page canvas-library-page">
-                <div className="studio-band assets-library-hero">
-                    <PageHeader
-                        title="个人资产库"
-                        actions={
-                            <div className="assets-header-actions">
-                                <div className="assets-header-action-buttons">
-                                    <div className="assets-header-compact-actions">
-                                        <ExpandableSearch value={keyword} placeholder="搜索资产" onChange={(value) => { setPage(1); setKeyword(value); }} />
-                                        <button type="button" className={cn("assets-header-compact-button", filtersOpen && "is-active")} aria-label="筛选资产" title="筛选资产" aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><SlidersHorizontal className="size-4" /></button>
-                                    </div>
-                                    <Dropdown trigger={["click"]} menu={{ items: [
-                                        { key: "image", label: "上传资产", onClick: () => assetUploadInputRef.current?.click() },
-                                        { key: "folder", label: "新建文件夹", onClick: () => { setFolderName(""); setFolderEditor("new"); } },
-                                    ] }}>
-                                        <Button className="assets-new-button" style={{ backgroundColor: "#fff", color: "#171717", borderColor: "rgba(255,255,255,.82)" }} icon={<Plus />}>新建</Button>
-                                    </Dropdown>
-                                </div>
-                            </div>
-                        }
-                    />
-                    <div className="assets-secondary-controls is-open">
-                        <div className="assets-kind-row">
-                            <nav className="assets-kind-tabs" aria-label="资产类型">
-                                {kindOptions.map((option) => (
-                                    <button
-                                        key={option.value}
-                                        type="button"
-                                        className={cn("assets-kind-tab", kindFilter === option.value && "is-active")}
-                                        onClick={() => {
-                                            setKindFilter(option.value as AssetKind | "all");
-                                            setPage(1);
-                                        }}
-                                    >
-                                        {option.label}
-                                        <span>{kindCounts.get(option.value) ?? 0}</span>
-                                    </button>
-                                ))}
-                            </nav>
-                            <div className="assets-kind-actions">
-                            <div className="assets-view-toggle" role="group" aria-label="资产视图">
-                                <button type="button" className={assetViewMode === "grid" ? "is-active" : ""} aria-pressed={assetViewMode === "grid"} title="网格视图" onClick={() => setAssetViewMode("grid")}><LayoutGrid className="size-3.5" /><span className="sr-only">网格视图</span></button>
-                                <button type="button" className={assetViewMode === "list" ? "is-active" : ""} aria-pressed={assetViewMode === "list"} title="列表视图" onClick={() => setAssetViewMode("list")}><List className="size-3.5" /><span className="sr-only">列表视图</span></button>
-                            </div>
-                            <label className="assets-sort-control">
-                                <Select
-                                    value={sortOrder}
-                                    className="w-full sm:w-32"
-                                    aria-label="排序"
-                                    options={[{ label: "时间倒序", value: "updated_desc" }, { label: "时间正序", value: "updated_asc" }, { label: "名称排序", value: "name_asc" }]}
-                                    onChange={(value) => setSortOrder(value as AssetSortOrder)}
-                                />
-                            </label>
-                            </div>
+            <WorkspacePage grid className="library-page assets-library-page canvas-library-page collection-page">
+                <CollectionHeader
+                    className="assets-library-hero"
+                    title="个人资产库"
+                    search={{ value: keyword, placeholder: "搜索资产", onChange: (value) => { setPage(1); setKeyword(value); } }}
+                    actions={<button type="button" className={cn("assets-header-compact-button", filtersOpen && "is-active")} aria-label="筛选资产" title="筛选资产" aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><SlidersHorizontal className="size-4" /></button>}
+                    createItems={[
+                        { key: "image", label: "上传资产", onClick: () => assetUploadInputRef.current?.click() },
+                        { key: "folder", label: "新建文件夹", onClick: () => { setFolderName(""); setFolderEditor("new"); } },
+                    ]}
+                    navigationLabel="资产类型"
+                    tabs={kindOptions.map((option) => ({ ...option, count: kindCounts.get(option.value) ?? 0 }))}
+                    value={kindFilter}
+                    onChange={(value) => { setKindFilter(value as AssetKind | "all"); setPage(1); }}
+                    trailing={<>
+                        <div className="assets-view-toggle" role="group" aria-label="资产视图">
+                            <button type="button" className={assetViewMode === "grid" ? "is-active" : ""} aria-pressed={assetViewMode === "grid"} title="网格视图" onClick={() => setAssetViewMode("grid")}><LayoutGrid className="size-3.5" /><span className="sr-only">网格视图</span></button>
+                            <button type="button" className={assetViewMode === "list" ? "is-active" : ""} aria-pressed={assetViewMode === "list"} title="列表视图" onClick={() => setAssetViewMode("list")}><List className="size-3.5" /><span className="sr-only">列表视图</span></button>
                         </div>
-                    </div>
-                </div>
+                        <label className="assets-sort-control">
+                            <Select value={sortOrder} className="w-full sm:w-32" aria-label="排序"
+                                options={[{ label: "时间倒序", value: "updated_desc" }, { label: "时间正序", value: "updated_asc" }, { label: "名称排序", value: "name_asc" }]}
+                                onChange={(value) => setSortOrder(value as AssetSortOrder)} />
+                        </label>
+                    </>}
+                />
 
                 <div className="collection-content assets-collection-content">
                     <div className={cn("assets-collection-layout", filtersOpen && "is-filters-open")}>

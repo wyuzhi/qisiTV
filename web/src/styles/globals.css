@@ -14860,11 +14860,11 @@ button.ant-btn-primary:not(.ant-btn-dangerous):not(.ant-btn-background-ghost):no
 .skill-install-modal .ant-upload-wrapper .ant-upload-drag:hover { border-color: color-mix(in srgb, var(--foreground) 28%, transparent); }
 .skill-install-modal .skill-install-form { margin-top: 16px; }
 
-.skill-package-modal .ant-modal-container { border: 1px solid color-mix(in srgb, var(--foreground) 11%, transparent); border-radius: var(--r-xl); background: var(--popover); box-shadow: var(--elevation-panel); }
+.skill-package-modal .ant-modal-container { border: 1px solid color-mix(in srgb, var(--foreground) 11%, transparent); border-radius: var(--r-xl); background: var(--user-surface, var(--popover)); box-shadow: var(--elevation-panel); }
 .skill-package-modal .ant-modal-close { top: 17px; inset-inline-end: 18px; z-index: 3; border-radius: var(--r-full); color: color-mix(in srgb, var(--foreground) 45%, transparent); }
 .skill-package-modal .ant-modal-close:hover { background: color-mix(in srgb, var(--foreground) 7%, transparent); color: var(--foreground); }
 .skill-package-shell { display: flex; height: 100%; min-height: 0; flex-direction: column; }
-.skill-package-header { display: flex; flex: 0 0 auto; align-items: center; gap: 24px; min-height: 112px; border-bottom: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent); padding: 18px 68px 18px 24px; }
+.skill-package-header { display: flex; flex: 0 0 auto; align-items: flex-start; gap: 24px; border-bottom: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent); padding: 24px 68px 24px 28px; }
 .skill-package-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .skill-package-workspace { display: grid; min-height: 0; flex: 1 1 auto; grid-template-columns: minmax(220px, 26%) minmax(0, 1fr); }
 .skill-package-sidebar { display: flex; min-width: 0; min-height: 0; flex-direction: column; gap: 10px; border-right: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent); background: color-mix(in srgb, var(--foreground) 2%, transparent); padding: 14px 12px 10px; }

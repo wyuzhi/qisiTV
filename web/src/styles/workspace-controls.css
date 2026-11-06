@@ -1,0 +1,16 @@
+/* Opt-in form adapter. Shared AntD geometry and colors remain in app-theme.ts. */
+.workspace-controls-form .ant-form-item { margin-bottom: var(--workspace-field-gap); }
+.workspace-controls-form .ant-form-item-label { padding-bottom: var(--workspace-label-gap); }
+.workspace-controls-form :where(input.ant-input, textarea.ant-input:not(.font-mono)) {
+    font-size: var(--workspace-control-font);
+    line-height: var(--workspace-control-line);
+}
+.workspace-controls-form .ant-form-item-explain-error { overflow-wrap: anywhere; }
+/* Portal buttons previously inherited normal height even when size="small". */
+.app-product-overlays .workspace-controls-form .ant-btn-sm {
+    height: var(--workspace-small-height);
+    border-radius: var(--workspace-small-radius);
+    font-size: var(--workspace-small-font);
+}
+
+.workspace-controls-form .ant-form-item-label > label { font-size: var(--fs-caption); line-height: 18px; font-weight: 500; color: var(--user-ink-muted); }

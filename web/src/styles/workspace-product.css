@@ -378,9 +378,6 @@
 .assets-header-compact-button:hover,
 .assets-header-compact-button.is-active { background: var(--user-surface-muted); color: var(--user-ink); }
 .assets-header-action-buttons { height: 36px; transform: translateY(0); }
-.assets-new-button.ant-btn { height: 36px !important; border-color: #fff !important; border-radius: 8px !important; background: #fff !important; color: #171717 !important; }
-.assets-new-button.ant-btn:hover,
-.assets-new-button.ant-btn:focus { border-color: #f1f1f1 !important; background: #f1f1f1 !important; color: #111 !important; }
 .workspace-expandable-search { flex: 0 0 auto; }
 .workspace-expandable-search-button { display: grid; width: 36px; height: 36px; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--user-ink-muted); cursor: pointer; }
 .workspace-expandable-search-button:hover,
@@ -1419,7 +1416,7 @@
     line-height: 18px;
 }
 
-.app-product-workspace .app-section-page .app-section-page-content .assets-library-hero > .app-section-page-header {
+.app-product-workspace .generation-history-page .app-section-page-content .assets-library-hero > .app-section-page-header {
     min-height: 64px;
     height: 64px;
     padding: 0;
@@ -1477,7 +1474,7 @@
         margin-left: 0;
     }
 
-    .app-product-workspace .app-section-page .app-section-page-content .assets-library-hero > .app-section-page-header {
+    .app-product-workspace .generation-history-page .app-section-page-content .assets-library-hero > .app-section-page-header {
         height: auto;
         min-height: 64px;
     }

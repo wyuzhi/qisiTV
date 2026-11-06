@@ -191,7 +191,7 @@ HTTPS 图片提交前读取同源 `/models` 元数据，仅成功响应明确声
 
 规范化技能包保存在后端数据目录的 `skill-packages/<skill-id>/<version-id>.zip`，数据库只保存索引和版本指针。上传 ZIP 时强制校验 `SKILL.md`、路径越界、软链接、重复路径和解压后总大小（200MB 以内），不限制文件数量；GitHub 技能保存公开仓库、分支、子目录和提交 SHA，后台每 6 小时检查一次开启自动更新的技能，并记录最近检查、同步时间及失败状态。
 
-本机技能来自 `~/.agents/skills` 目录，`source_type` 为 `local`，内容随目录同步，不在 BeefTV 内编辑。是否读取这个目录保存在 `system_settings` 的 `local_skills_directory` 键，没有这条记录时默认读取。
+技能来源包括官方内置、用户通过 BeefTV 创建或导入、市场安装及 BeefTV 插件。启动时将旧版外部目录自动导入的 `source_type=local` 记录置为非活动状态，并在同一事务中停用其用户状态、移除旧的 `local_skills_directory` 设置。这些记录退出技能列表及助手目录；历史版本包和文件索引继续保存。
 
 ## 提示词模板
 
