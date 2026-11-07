@@ -9,6 +9,7 @@ import (
 	"infinite-canvas/backend/internal/assets"
 	"infinite-canvas/backend/internal/kernel"
 	"infinite-canvas/backend/internal/repository"
+	"infinite-canvas/backend/internal/writechange"
 )
 
 const bindRevisionAttempts = 4
@@ -41,9 +42,12 @@ type TaskOutputBind struct {
 }
 
 // TaskOutputBindResult is the canvas write outcome after a generation bind.
+// AlsoChanged lists other media nodes whose assetId was reconciled so their
+// stored media references stay linked to the same owned asset.
 type TaskOutputBindResult struct {
-	Revision int64
-	Node     map[string]any
+	Revision    int64
+	Node        map[string]any
+	AlsoChanged []writechange.Node
 }
 
 // BindTaskOutputToExistingNode writes generation result fields onto the original
@@ -100,7 +104,7 @@ func (s *Service) bindTaskOutputOnce(userID string, patch TaskOutputBind) (TaskO
 	}
 	applyGenerationBindMetadata(metadata, patch)
 	node["metadata"] = metadata
-	s.reconcileBoundCanvasDocMediaAssets(userID, doc)
+	alsoChanged := s.reconcileBoundCanvasDocMediaAssets(userID, doc, patch.NodeID)
 	expected := canvasRevisionValue(doc)
 	if expected <= 0 {
 		expected = 1
@@ -109,12 +113,29 @@ func (s *Service) bindTaskOutputOnce(userID string, patch TaskOutputBind) (TaskO
 	if err != nil {
 		return TaskOutputBindResult{}, err
 	}
-	return TaskOutputBindResult{Revision: summary.Revision, Node: cloneNode(node)}, nil
+	return TaskOutputBindResult{Revision: summary.Revision, Node: cloneNode(node), AlsoChanged: alsoChanged}, nil
 }
 
-func (s *Service) reconcileBoundCanvasDocMediaAssets(userID string, doc map[string]any) {
+// reconcileBoundCanvasDocMediaAssets links stored media references back to the
+// single owned asset that contains them. It returns only the other nodes whose
+// assetId actually changed, so the bind receipt can report side effects.
+func (s *Service) reconcileBoundCanvasDocMediaAssets(userID string, doc map[string]any, excludeNodeID string) []writechange.Node {
 	if s == nil || s.repo == nil || doc == nil {
-		return
+		return nil
+	}
+	changes := []writechange.Node{}
+	setAssetID := func(item map[string]any, meta map[string]any, assetID string) {
+		if assetID == "" || nodeString(meta, "assetId") == assetID {
+			return
+		}
+		meta["assetId"] = assetID
+		item["metadata"] = meta
+		id, _ := item["id"].(string)
+		if id == "" || id == excludeNodeID {
+			return
+		}
+		title, _ := item["title"].(string)
+		changes = writechange.Add(changes, id, title, "assetId")
 	}
 	nodes := canvasDocNodes(doc)
 	nodeByID := make(map[string]map[string]any, len(nodes))
@@ -148,8 +169,7 @@ func (s *Service) reconcileBoundCanvasDocMediaAssets(userID string, doc map[stri
 			rootResID := firstDocResourceID(nodeString(meta, "storageKey"), nodeString(meta, "content"))
 			primaryResID := firstDocResourceID(nodeString(primaryMeta, "storageKey"), nodeString(primaryMeta, "content"))
 			if rootResID != "" && rootResID == primaryResID {
-				meta["assetId"] = primaryAssetID
-				item["metadata"] = meta
+				setAssetID(item, meta, primaryAssetID)
 			}
 		}
 	}
@@ -200,7 +220,7 @@ func (s *Service) reconcileBoundCanvasDocMediaAssets(userID string, doc map[stri
 		}
 	}
 	if len(resourceSet) == 0 {
-		return
+		return changes
 	}
 
 	declaredAssetRefs := make(map[string]map[string]struct{}, len(declaredAssetIDSet))
@@ -263,12 +283,12 @@ func (s *Service) reconcileBoundCanvasDocMediaAssets(userID string, doc map[stri
 		}
 	}
 	if !needsFallbackScan {
-		return
+		return changes
 	}
 
 	ownedAssets, err := s.repo.Assets(userID)
 	if err != nil || len(ownedAssets) == 0 {
-		return
+		return changes
 	}
 	uniqueAssetIDByResource := make(map[string]string, len(resourceSet))
 	resourceMatchCount := make(map[string]int, len(resourceSet))
@@ -305,8 +325,7 @@ func (s *Service) reconcileBoundCanvasDocMediaAssets(userID string, doc map[stri
 			continue
 		}
 		if fallbackID := uniqueAssetIDByResource[resID]; fallbackID != "" {
-			meta["assetId"] = fallbackID
-			item["metadata"] = meta
+			setAssetID(item, meta, fallbackID)
 		}
 	}
 	propagateBatchRoots()
@@ -336,6 +355,7 @@ func (s *Service) reconcileBoundCanvasDocMediaAssets(userID string, doc map[stri
 			}
 		}
 	}
+	return changes
 }
 
 func assetPrimaryResourceID(payloadJSON string) string {

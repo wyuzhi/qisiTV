@@ -135,6 +135,14 @@ func changeFromReceipts(record Record, receipts []model.AgentOpRecord) (*Change,
 						change.CreatedEdgeIDs = append(change.CreatedEdgeIDs, id)
 					}
 				}
+			}
+			for _, id := range alsoChangedNodeIDs(item.payload) {
+				if id != "" && !slices.Contains(change.UpdatedNodeIDs, id) {
+					change.UpdatedNodeIDs = append(change.UpdatedNodeIDs, id)
+				}
+			}
+			if item.op == "canvas.script.row.update" {
+				// 旧回执只有 syncedNodeIds；新回执的 alsoChanged 带字段，两者都算本轮改过的节点。
 				for _, id := range stringItems(item.payload["syncedNodeIds"]) {
 					if id != "" && !slices.Contains(change.UpdatedNodeIDs, id) {
 						change.UpdatedNodeIDs = append(change.UpdatedNodeIDs, id)
@@ -277,6 +285,22 @@ func stringItems(raw any) []string {
 	var result []string
 	for _, item := range anyItems(raw) {
 		if id, ok := item.(string); ok {
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
+// alsoChangedNodeIDs reads the shared side-effect receipt shape. It is the one
+// reader for every operation that reports indirectly changed nodes.
+func alsoChangedNodeIDs(payload map[string]any) []string {
+	var result []string
+	for _, raw := range anyItems(payload["alsoChanged"]) {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if id, _ := item["nodeId"].(string); id != "" {
 			result = append(result, id)
 		}
 	}

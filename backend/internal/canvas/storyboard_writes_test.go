@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
 	"infinite-canvas/backend/internal/kernel"
+	"infinite-canvas/backend/internal/writechange"
 )
 
 func TestStoryboardPromptEditClearsOnlyChangedTemplate(t *testing.T) {
@@ -370,6 +372,23 @@ func TestStoryboardRowsRejectOversizedBatch(t *testing.T) {
 	}
 }
 
+func TestUpdateUserCanvasStoryboardRowsWithoutSyncedPromptReportsNoAlsoChanged(t *testing.T) {
+	svc, canvasID, nodeID, revision := storyboardFixture(t)
+	appended, created, err := svc.AppendUserCanvasStoryboardRows("owner", canvasID, nodeID, []StoryboardRowDraft{{}}, revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, update, err := svc.UpdateUserCanvasStoryboardRows("owner", canvasID, nodeID, []StoryboardRowPatch{{
+		RowID: created[0].ID, StoryboardRowDraft: StoryboardRowDraft{Dialogue: strPtr("新台词")},
+	}}, appended.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(update.SyncedNodeIDs) != 0 || len(update.AlsoChanged) != 0 {
+		t.Fatalf("没有绑定节点时不应有连带改动: %#v", update)
+	}
+}
+
 func TestUpdateUserCanvasStoryboardRowsAutoSyncsBoundNodeDrafts(t *testing.T) {
 	svc := newCanvasHistoryTestService(t)
 	created, err := svc.UpsertUserCanvasProject("owner", json.RawMessage(`{
@@ -379,10 +398,10 @@ func TestUpdateUserCanvasStoryboardRowsAutoSyncsBoundNodeDrafts(t *testing.T) {
 				{"id":"r1","shotNumber":1,"imageGenerationPrompt":"旧首帧1","videoMotionPrompt":"旧视频1","imageNodeId":"img-1","videoNodeId":"vid-1"},
 				{"id":"r2","shotNumber":2,"plotDescription":"旧剧情2","imageGenerationPrompt":"","videoMotionPrompt":"旧视频2","imageNodeId":"img-2","videoNodeId":"vid-2"}
 			]}}},
-			{"id":"img-1","type":"image","metadata":{"content":"","taskId":"task-1","prompt":"已提交首帧1","composerContent":"参考资产：@角色1\n旧首帧1","status":"success"}},
-			{"id":"vid-1","type":"video","metadata":{"content":"","prompt":"旧视频1","composerContent":"用户单独手改过的视频草稿","status":"idle"}},
-			{"id":"img-2","type":"image","metadata":{"content":"","storageKey":"canvas/image/r2.png","prompt":"已提交首帧2","composerContent":"旧剧情2","status":"success"}},
-			{"id":"vid-2","type":"video","metadata":{"content":"","prompt":"旧视频2","composerContent":"旧视频2","status":"idle"}}
+			{"id":"img-1","type":"image","title":"镜1首帧","metadata":{"content":"","taskId":"task-1","prompt":"已提交首帧1","composerContent":"参考资产：@角色1\n旧首帧1","status":"success"}},
+			{"id":"vid-1","type":"video","title":"镜1视频","metadata":{"content":"","prompt":"旧视频1","composerContent":"用户单独手改过的视频草稿","status":"idle"}},
+			{"id":"img-2","type":"image","title":"镜2首帧","metadata":{"content":"","storageKey":"canvas/image/r2.png","prompt":"已提交首帧2","composerContent":"旧剧情2","status":"success"}},
+			{"id":"vid-2","type":"video","title":"镜2视频","metadata":{"content":"","prompt":"旧视频2","composerContent":"旧视频2","status":"idle"}}
 		],"connections":[]}`))
 	if err != nil {
 		t.Fatal(err)
@@ -408,6 +427,14 @@ func TestUpdateUserCanvasStoryboardRowsAutoSyncsBoundNodeDrafts(t *testing.T) {
 	}
 	if strings.Join(update.SyncedNodeIDs, ",") != "img-1,img-2,vid-2" || strings.Join(update.SkippedNodeIDs, ",") != "vid-1" {
 		t.Fatalf("synced/skipped receipt = %#v", update)
+	}
+	wantChanged := []writechange.Node{
+		{NodeID: "img-1", Title: "镜1首帧", Fields: []string{"composerContent"}},
+		{NodeID: "img-2", Title: "镜2首帧", Fields: []string{"composerContent"}},
+		{NodeID: "vid-2", Title: "镜2视频", Fields: []string{"composerContent", "prompt"}},
+	}
+	if !reflect.DeepEqual(update.AlsoChanged, wantChanged) {
+		t.Fatalf("alsoChanged = %#v, want %#v", update.AlsoChanged, wantChanged)
 	}
 	doc, err := svc.loadCanvasDoc("owner", "canvas-sync")
 	if err != nil {

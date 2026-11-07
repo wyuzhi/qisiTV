@@ -190,6 +190,199 @@ describe('sim-go 内存版 Go 业务权威模拟器测试', () => {
     expect(remainingRows[0].shotNumber).toBe(1);
   });
 
+  test('分镜提示词同步回执列出连带节点与字段，手改过的节点不列出', () => {
+    const sim = createSimGo();
+    const canvasId = 'canvas-sync-receipt';
+    sim.ensureCanvas(canvasId, {
+      id: canvasId,
+      revision: 1,
+      nodes: [
+        {
+          id: 'script', type: 'script', title: '分镜',
+          metadata: { storyboard: { rows: [
+            { id: 'r1', shotNumber: 1, imageGenerationPrompt: '旧首帧', imageNodeId: 'img-1' },
+            { id: 'r2', shotNumber: 2, videoMotionPrompt: '旧视频', videoNodeId: 'vid-1' },
+          ] } },
+        },
+        { id: 'img-1', type: 'image', title: '首帧', metadata: { composerContent: '旧首帧', prompt: '旧首帧', status: 'idle' } },
+        { id: 'vid-1', type: 'video', title: '视频', metadata: { composerContent: '用户手改', prompt: '用户手改', status: 'idle' } },
+      ],
+      connections: [],
+    });
+    const result = sim.executeOp('canvas.script.row.update', {
+      canvasId, nodeId: 'script', expectedRevision: 1,
+      patches: [
+        { rowId: 'r1', imageGenerationPrompt: '新首帧' },
+        { rowId: 'r2', videoMotionPrompt: '新视频' },
+      ],
+    }, 'op-sync-receipt').result;
+    expect(result.syncedNodeIds).toEqual(['img-1']);
+    expect(result.skippedNodeIds).toEqual(['vid-1']);
+    expect(result.alsoChanged).toEqual([
+      { nodeId: 'img-1', title: '首帧', fields: ['composerContent', 'prompt'] },
+    ]);
+  });
+
+  test('绑定产物回收其他节点 assetId 时回执列出连带节点', () => {
+    const sim = createSimGo();
+    sim.assets.set('asset-ref', {
+      id: 'asset-ref', resourceId: 'res-ref',
+      payloadJson: JSON.stringify({ data: { storageKey: 'resource:res-ref' } }),
+    });
+    sim.ensureCanvas('canvas-bind-receipt', {
+      id: 'canvas-bind-receipt', revision: 1,
+      nodes: [
+        { id: 'slot', type: 'image', metadata: { storageKey: 'resource:res-ref', content: '/api/resources/res-ref/file' } },
+        { id: 'root', type: 'image', metadata: { isBatchRoot: true, primaryImageId: 'slot', storageKey: 'resource:res-ref' } },
+        { id: 'video', type: 'video', metadata: { taskId: 'task-1' } },
+      ],
+      connections: [],
+    });
+    sim.tasks.set('task-1', {
+      id: 'task-1', type: 'video', status: 'succeeded', progress: 100, canvasId: 'canvas-bind-receipt',
+      outputs: [{ index: 0, assetId: 'asset-video', resourceId: 'res-video', storageKey: 'resource:res-video', mimeType: 'video/mp4' }],
+    });
+    const result = sim.executeOp('canvas.task.bind', {
+      canvasId: 'canvas-bind-receipt', taskId: 'task-1', nodeId: 'video', outputIndex: 0,
+    }, 'op-bind-receipt').result;
+    expect(result.alsoChanged).toEqual([
+      { nodeId: 'slot', fields: ['assetId'] },
+      { nodeId: 'root', fields: ['assetId'] },
+    ]);
+    expect(result.alsoChanged.some((item) => item.nodeId === 'video')).toBe(false);
+  });
+
+  test('素材正文没有主资源时不回填 assetId，也不报告变更', () => {
+    const sim = createSimGo();
+    sim.assets.set('asset-empty', { id: 'asset-empty', resourceId: 'res-ref', payloadJson: '{}' });
+    sim.ensureCanvas('canvas-empty-asset', {
+      id: 'canvas-empty-asset', revision: 1,
+      nodes: [
+        { id: 'slot', type: 'image', title: '缺绑定', metadata: {
+          storageKey: 'resource:res-ref',
+          content: '/api/resources/res-ref/file',
+        } },
+        { id: 'video', type: 'video', metadata: { taskId: 'task-1' } },
+      ],
+      connections: [],
+    });
+    sim.tasks.set('task-1', {
+      id: 'task-1', type: 'video', status: 'succeeded', progress: 100, canvasId: 'canvas-empty-asset',
+      outputs: [{ index: 0, assetId: 'asset-video', resourceId: 'res-video', storageKey: 'resource:res-video', mimeType: 'video/mp4' }],
+    });
+    const result = sim.executeOp('canvas.task.bind', {
+      canvasId: 'canvas-empty-asset', taskId: 'task-1', nodeId: 'video', outputIndex: 0,
+    }, 'op-empty-asset').result;
+    expect(result.alsoChanged).toBeUndefined();
+    const doc = sim.ensureCanvas('canvas-empty-asset');
+    expect(doc.nodes.find((node) => node.id === 'slot').metadata.assetId).toBeUndefined();
+  });
+
+  test('资源回填逐项解析 storageKey 与 content，旧路径不遮蔽有效资源', () => {
+    const sim = createSimGo();
+    sim.assets.set('asset-legacy', {
+      id: 'asset-legacy', resourceId: 'res-legacy',
+      payloadJson: JSON.stringify({ data: { storageKey: 'resource:res-legacy' } }),
+    });
+    sim.ensureCanvas('canvas-legacy-resource', {
+      id: 'canvas-legacy-resource', revision: 1,
+      nodes: [
+        { id: 'legacy', type: 'image', title: '旧路径节点', metadata: {
+          storageKey: 'legacy/path/not-a-resource',
+          content: '/api/resources/res-legacy/file?token=1',
+        } },
+        { id: 'video', type: 'video', metadata: { taskId: 'task-1' } },
+      ],
+      connections: [],
+    });
+    sim.tasks.set('task-1', {
+      id: 'task-1', type: 'video', status: 'succeeded', progress: 100, canvasId: 'canvas-legacy-resource',
+      outputs: [{ index: 0, assetId: 'asset-video', resourceId: 'res-video', storageKey: 'resource:res-video', mimeType: 'video/mp4' }],
+    });
+    const result = sim.executeOp('canvas.task.bind', {
+      canvasId: 'canvas-legacy-resource', taskId: 'task-1', nodeId: 'video', outputIndex: 0,
+    }, 'op-legacy-resource').result;
+    expect(result.alsoChanged).toEqual([
+      { nodeId: 'legacy', title: '旧路径节点', fields: ['assetId'] },
+    ]);
+    const doc = sim.ensureCanvas('canvas-legacy-resource');
+    expect(doc.nodes.find((node) => node.id === 'legacy').metadata.assetId).toBe('asset-legacy');
+  });
+
+  test('时间线媒体也逐项解析资源来源并回填 assetId', () => {
+    const sim = createSimGo();
+    sim.assets.set('asset-timeline', {
+      id: 'asset-timeline', resourceId: 'res-timeline',
+      payloadJson: JSON.stringify({ data: { storageKey: 'resource:res-timeline' } }),
+    });
+    sim.ensureCanvas('canvas-legacy-timeline', {
+      id: 'canvas-legacy-timeline', revision: 1,
+      nodes: [{ id: 'video', type: 'video', metadata: { taskId: 'task-1' } }],
+      connections: [],
+      timeline: {
+        version: 2, durationMs: 1000, tracks: [{ id: 'track-1', kind: 'video' }],
+        clips: [{ id: 'clip-1', kind: 'video', trackId: 'track-1', startMs: 0, durationMs: 1000,
+          directMedia: { kind: 'video', storageKey: 'legacy/path', url: '/api/resources/res-timeline/file?x=1' } }],
+      },
+    });
+    sim.tasks.set('task-1', {
+      id: 'task-1', type: 'video', status: 'succeeded', progress: 100, canvasId: 'canvas-legacy-timeline',
+      outputs: [{ index: 0, assetId: 'asset-video', resourceId: 'res-video', storageKey: 'resource:res-video', mimeType: 'video/mp4' }],
+    });
+    sim.executeOp('canvas.task.bind', {
+      canvasId: 'canvas-legacy-timeline', taskId: 'task-1', nodeId: 'video', outputIndex: 0,
+    }, 'op-legacy-timeline');
+    const doc = sim.ensureCanvas('canvas-legacy-timeline');
+    expect(doc.timeline.clips[0].directMedia.assetId).toBe('asset-timeline');
+  });
+
+  test('已有素材正文合法引用次级资源时不被替换，也不进入 alsoChanged', () => {
+    const sim = createSimGo();
+    sim.assets.set('asset-declared', {
+      id: 'asset-declared', resourceId: 'res-main',
+      payloadJson: JSON.stringify({
+        data: { storageKey: 'resource:res-main' },
+        metadata: { referenceUrl: '/api/resources/res-secondary/file' },
+      }),
+    });
+    sim.assets.set('asset-primary', {
+      id: 'asset-primary', resourceId: 'res-secondary',
+      payloadJson: JSON.stringify({ data: { storageKey: 'resource:res-secondary' } }),
+    });
+    sim.assets.set('asset-other', {
+      id: 'asset-other', resourceId: 'res-other',
+      payloadJson: JSON.stringify({ data: { storageKey: 'resource:res-other' } }),
+    });
+    sim.ensureCanvas('canvas-secondary-ref', {
+      id: 'canvas-secondary-ref', revision: 1,
+      nodes: [
+        { id: 'slot', type: 'image', title: '合法次级引用', metadata: {
+          assetId: 'asset-declared',
+          storageKey: 'resource:res-secondary',
+          content: '/api/resources/res-secondary/file',
+        } },
+        { id: 'missing', type: 'image', title: '待回填', metadata: {
+          storageKey: 'resource:res-other',
+          content: '/api/resources/res-other/file',
+        } },
+        { id: 'video', type: 'video', metadata: { taskId: 'task-1' } },
+      ],
+      connections: [],
+    });
+    sim.tasks.set('task-1', {
+      id: 'task-1', type: 'video', status: 'succeeded', progress: 100, canvasId: 'canvas-secondary-ref',
+      outputs: [{ index: 0, assetId: 'asset-video', resourceId: 'res-video', storageKey: 'resource:res-video', mimeType: 'video/mp4' }],
+    });
+    const result = sim.executeOp('canvas.task.bind', {
+      canvasId: 'canvas-secondary-ref', taskId: 'task-1', nodeId: 'video', outputIndex: 0,
+    }, 'op-secondary-ref').result;
+    expect(result.alsoChanged).toEqual([
+      { nodeId: 'missing', title: '待回填', fields: ['assetId'] },
+    ]);
+    const doc = sim.ensureCanvas('canvas-secondary-ref');
+    expect(doc.nodes.find((node) => node.id === 'slot').metadata.assetId).toBe('asset-declared');
+  });
+
   test('绑定和解绑首帧保留同一分镜行的动作演示板连线', () => {
     const sim = createSimGo();
     const canvasId = 'canvas-action-board';

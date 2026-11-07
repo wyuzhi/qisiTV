@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"infinite-canvas/backend/internal/kernel"
+	"infinite-canvas/backend/internal/writechange"
 )
 
 // maxStoryboardRowsPerCall 是单次分镜行写入的批量上限。一次拆完一集的常见规模远低于此；
@@ -67,12 +68,14 @@ func (p StoryboardRowPatch) IsZero() bool {
 
 // StoryboardRowUpdate 是行更新的领域回执；连线 ID 是本次绑定实际新增和删除的产出连线，
 // SyncedNodeIDs 与 SkippedNodeIDs 记录分镜提示词更新时自动同步或因节点草稿已单独手改而跳过同步的绑定节点。
+// AlsoChanged 只列本次实际写入的字段，不把「判断为可同步」却值未变的节点算作连带改动。
 type StoryboardRowUpdate struct {
 	Updated        []StoryboardRowIdentity
 	CreatedEdgeIDs []string
 	DeletedEdgeIDs []string
 	SyncedNodeIDs  []string
 	SkippedNodeIDs []string
+	AlsoChanged    []writechange.Node
 }
 
 // StoryboardRowIdentity 是写入成功后由领域返回的行身份；
@@ -126,6 +129,7 @@ func (s *Service) UpdateUserCanvasStoryboardRows(userID, canvasID, nodeID string
 		DeletedEdgeIDs: []string{},
 		SyncedNodeIDs:  []string{},
 		SkippedNodeIDs: []string{},
+		AlsoChanged:    []writechange.Node{},
 	}
 	seen := map[string]bool{}
 	for _, patch := range patches {
@@ -174,8 +178,10 @@ func (s *Service) UpdateUserCanvasStoryboardRows(userID, canvasID, nodeID string
 			if target == nil || canvasNodeType(target) != syncSpec.kind {
 				continue
 			}
-			if syncBoundStoryboardNodeDraft(target, syncSpec.oldPrompt, oldPlot, *syncSpec.nextPrompt) {
+			if synced, fields := syncBoundStoryboardNodeDraft(target, syncSpec.oldPrompt, oldPlot, *syncSpec.nextPrompt); synced {
 				result.SyncedNodeIDs = appendUniqueStoryboardID(result.SyncedNodeIDs, boundID)
+				title, _ := target["title"].(string)
+				result.AlsoChanged = writechange.Add(result.AlsoChanged, boundID, title, fields...)
 			} else {
 				result.SkippedNodeIDs = appendUniqueStoryboardID(result.SkippedNodeIDs, boundID)
 			}
@@ -253,7 +259,9 @@ func isStoryboardRowOutput(edge map[string]any, scriptID, rowID string) bool {
 
 // syncBoundStoryboardNodeDraft 在分镜行提示词更新时，把未单独手改过的绑定媒体节点草稿一并更新。
 // 若节点草稿已被单独改为不同于原分镜提示词的内容，则保留节点手改稿并返回 false。
-func syncBoundStoryboardNodeDraft(target map[string]any, oldPrompt, oldPlot, nextPrompt string) bool {
+// 返回值 second 是本次调用实际改到的草稿字段，按写入顺序去重；模板缓存等内部键的清理
+// 不列进回执，模型只需要知道用户可编辑的草稿字段变了。
+func syncBoundStoryboardNodeDraft(target map[string]any, oldPrompt, oldPlot, nextPrompt string) (bool, []string) {
 	meta, _ := target["metadata"].(map[string]any)
 	if meta == nil {
 		meta = map[string]any{}
@@ -269,19 +277,28 @@ func syncBoundStoryboardNodeDraft(target map[string]any, oldPrompt, oldPlot, nex
 	oldFallback := strings.TrimSpace(oldPlot)
 	nextTrimmed := strings.TrimSpace(nextPrompt)
 	if trimmedBody != "" && trimmedBody != oldTrimmed && trimmedBody != oldFallback && trimmedBody != nextTrimmed {
-		return false
+		return false, nil
 	}
+	changed := []string{}
+	previousComposer, hadComposer := meta["composerContent"]
 	if refPrefix != "" {
 		meta["composerContent"] = joinStoryboardReferencePrefix(refPrefix, nextPrompt)
 	} else {
 		meta["composerContent"] = nextPrompt
 	}
+	if !hadComposer || previousComposer != meta["composerContent"] {
+		changed = append(changed, "composerContent")
+	}
 	if !nodeHasCommittedOutput(meta) {
+		previousPrompt, hadPrompt := meta["prompt"]
 		meta["prompt"] = nextPrompt
+		if !hadPrompt || previousPrompt != nextPrompt {
+			changed = append(changed, "prompt")
+		}
 	}
 	delete(meta, "promptTemplateOperation")
 	delete(meta, "promptTemplateVariables")
-	return true
+	return true, changed
 }
 
 func splitStoryboardReferencePrefix(draft string) (string, string) {

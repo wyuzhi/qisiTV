@@ -63,13 +63,15 @@ describe('node write receipts keep their identity within official tool output li
   test('task binding keeps current identity/status and omits the large canvas without mutating Go receipts', () => {
     const data = { replayed: true, result: { canvasId: 'canvas', revision: 99, nodeId: 'film', taskId: 'render',
       bindingStatus: 'replaced', assetId: 'asset', resourceId: 'resource', storageKey: 'resource:resource',
+      alsoChanged: [{ nodeId: 'batch-root', fields: ['assetId'] }],
       canvas: { nodes: [{ metadata: { prompt: longPrompt.repeat(10) } }] }, node: { metadata: { prompt: longPrompt } },
       historical: { revision: 3, node: { metadata: { prompt: longPrompt } } } } };
     const original = JSON.stringify(data);
     const view = canvasWriteView(data, 'canvas.task.bind');
     const projected = retainedJSON({ content: [{ type: 'text', text: JSON.stringify(view) }] });
     expect(projected.result).toMatchObject({ canvasId: 'canvas', revision: 99, nodeId: 'film', taskId: 'render', bindingStatus: 'replaced',
-      assetId: 'asset', resourceId: 'resource', storageKey: 'resource:resource' });
+      assetId: 'asset', resourceId: 'resource', storageKey: 'resource:resource',
+      alsoChanged: [{ nodeId: 'batch-root', fields: ['assetId'] }] });
     expect(projected.result.canvas).toBeUndefined();
     expect(projected.result.historical).toBeUndefined();
     expect(JSON.stringify(data)).toBe(original);

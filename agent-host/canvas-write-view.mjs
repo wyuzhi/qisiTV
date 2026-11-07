@@ -26,7 +26,7 @@ export function canvasWriteView(data, operation, params = {}) {
     // only need this binding receipt, not every source prompt on the canvas.
     const result = {};
     for (const key of ['canvasId', 'revision', 'nodeId', 'taskId', 'outputIndex', 'effectKey', 'mediaType',
-      'bindingStatus', 'applied', 'alreadyBound', 'assetId', 'resourceId', 'storageKey']) {
+      'bindingStatus', 'applied', 'alreadyBound', 'assetId', 'resourceId', 'storageKey', 'alsoChanged']) {
       if (data.result[key] !== undefined) result[key] = data.result[key];
     }
     result.writeView = { complete: false, omittedNodeFields: true,

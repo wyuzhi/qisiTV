@@ -502,6 +502,212 @@ export function createSimGo(options = {}) {
     return { created, deleted };
   }
 
+  // 绑定产物时，Go 会把已存媒体引用回收到唯一所属素材；回执只列出实际改了 assetId 的其他节点。
+  function reconcileBoundMediaAssets(doc, excludeNodeId) {
+    const changes = [];
+    const setAssetID = (item, meta, assetID) => {
+      if (!assetID || String(meta.assetId || '') === assetID) return;
+      meta.assetId = assetID;
+      item.metadata = meta;
+      const id = String(item.id || '');
+      if (!id || id === excludeNodeId) return;
+      const existing = changes.find((change) => change.nodeId === id);
+      if (existing) {
+        if (!existing.fields.includes('assetId')) existing.fields.push('assetId');
+        return;
+      }
+      changes.push({ nodeId: id, ...(String(item.title || '') ? { title: String(item.title) } : {}), fields: ['assetId'] });
+    };
+    const validResourceID = (value) => {
+      const text = String(value ?? '').trim();
+      if (!text || text.length > 80 || !/^[A-Za-z0-9_-]+$/.test(text)) return '';
+      return text;
+    };
+    // 对齐 assets.ResourceID：resource: 前缀取有效 ID；否则在任意位置找
+    // /api/resources/，按 Go 的 /?# 边界截断，再做字符与长度校验。
+    const resourceID = (value) => {
+      const text = String(value ?? '').trim();
+      if (text.startsWith('resource:')) return validResourceID(text.slice('resource:'.length));
+      const prefix = '/api/resources/';
+      const index = text.indexOf(prefix);
+      if (index < 0) return '';
+      let remainder = text.slice(index + prefix.length);
+      if (!remainder) return '';
+      const end = remainder.search(/[/?#]/);
+      if (end >= 0) remainder = remainder.slice(0, end);
+      return validResourceID(remainder);
+    };
+    // 对齐 firstDocResourceID：逐项解析，前一项不是有效资源时继续看下一项。
+    const firstResourceID = (...values) => {
+      for (const value of values) {
+        const id = resourceID(value);
+        if (id) return id;
+      }
+      return '';
+    };
+    const nodeResourceId = (node) => firstResourceID(node?.metadata?.storageKey, node?.metadata?.content);
+    const clipResourceId = (media) => firstResourceID(media?.storageKey, media?.url, media?.dataUrl, media?.content);
+    const RESOURCE_LOCATOR_FIELDS = new Set(['storageKey', 'content', 'previewContent', 'drawingPreviewStorageKey',
+      'drawingPreviewUrl', 'url', 'dataUrl', 'coverUrl', 'imageUrl', 'videoUrl', 'audioUrl', 'referenceUrl',
+      'referenceUrls', 'artifactRef', 'providerArtifactRef']);
+    const BARE_RESOURCE_ID_FIELDS = new Set(['resourceId', 'resourceIds', 'sampleResourceId',
+      'referenceResourceId', 'referenceResourceIds']);
+    // 对齐 assets.CollectOwnedDocumentReferences：素材正文里所有资源定位字段
+    // 和裸资源 ID 字段都算引用，不能只看顶层 resourceId。
+    const assetResourceRefs = (asset) => {
+      const refs = new Set();
+      const raw = String(asset?.payloadJson || '').trim();
+      if (!raw) return refs;
+      let value;
+      try { value = JSON.parse(raw); } catch { return refs; }
+      if (typeof value === 'string') {
+        const id = resourceID(value);
+        if (id) refs.add(id);
+        return refs;
+      }
+      const walk = (node, parentKey) => {
+        if (Array.isArray(node)) {
+          for (const child of node) walk(child, parentKey);
+          return;
+        }
+        if (node && typeof node === 'object') {
+          for (const [key, child] of Object.entries(node)) walk(child, key);
+          return;
+        }
+        if (typeof node !== 'string') return;
+        if (RESOURCE_LOCATOR_FIELDS.has(parentKey)) {
+          const id = resourceID(node);
+          if (id) refs.add(id);
+        }
+        if (BARE_RESOURCE_ID_FIELDS.has(parentKey)) {
+          const id = validResourceID(node);
+          if (id) refs.add(id);
+        }
+      };
+      walk(value, '');
+      return refs;
+    };
+    const assetPrimaryResourceID = (asset) => {
+      const raw = String(asset?.payloadJson || '').trim();
+      if (!raw) return '';
+      let payload;
+      try { payload = JSON.parse(raw); } catch { return ''; }
+      const data = payload?.data && typeof payload.data === 'object' ? payload.data : {};
+      const metadata = payload?.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
+      return firstResourceID(data.storageKey, data.url, data.dataUrl, metadata.resourceKey, payload?.coverUrl);
+    };
+    const propagateBatchRoots = () => {
+      for (const node of doc.nodes || []) {
+        const meta = node.metadata || {};
+        if (!meta.isBatchRoot || meta.assetId) continue;
+        const primary = (doc.nodes || []).find((item) => item.id === meta.primaryImageId);
+        if (!primary?.metadata?.assetId) continue;
+        if (nodeResourceId(node) && nodeResourceId(node) === nodeResourceId(primary)) {
+          setAssetID(node, meta, String(primary.metadata.assetId));
+        }
+      }
+    };
+    propagateBatchRoots();
+    const resourceSet = new Set();
+    const declaredAssetIDs = new Set();
+    let hasMissingAssetID = false;
+    const collectResource = (resID, assetID) => {
+      if (!resID) return;
+      resourceSet.add(resID);
+      if (assetID) declaredAssetIDs.add(assetID);
+      else hasMissingAssetID = true;
+    };
+    for (const node of doc.nodes || []) {
+      if (!['image', 'video', 'audio'].includes(String(node.type || '').toLowerCase())) continue;
+      const meta = node.metadata || {};
+      collectResource(nodeResourceId(node), String(meta.assetId || ''));
+    }
+    for (const clip of doc.timeline?.clips || []) {
+      const media = clip?.directMedia;
+      if (!media || typeof media !== 'object' || !['image', 'video', 'audio'].includes(String(media.kind || '').toLowerCase())) continue;
+      collectResource(clipResourceId(media), String(media.assetId || ''));
+    }
+    if (resourceSet.size === 0) return changes;
+
+    const declaredAssetRefs = new Map();
+    for (const assetID of declaredAssetIDs) {
+      const asset = assets.get(assetID);
+      if (asset) declaredAssetRefs.set(assetID, assetResourceRefs(asset));
+    }
+    // 只有素材正文确实加载到引用、且都不含当前资源时才判定为不匹配；
+    // 缺少素材或引用为空时保持原值，和 Go 一致。
+    const isDeclaredAssetPositivelyMismatched = (assetID, resID) => {
+      if (!assetID || !resID) return false;
+      const refs = declaredAssetRefs.get(assetID);
+      if (!refs || refs.size === 0) return false;
+      return !refs.has(resID);
+    };
+
+    let needsFallbackScan = hasMissingAssetID;
+    if (!needsFallbackScan) {
+      for (const node of doc.nodes || []) {
+        if (!['image', 'video', 'audio'].includes(String(node.type || '').toLowerCase())) continue;
+        const meta = node.metadata || {};
+        const resID = nodeResourceId(node);
+        if (resID && isDeclaredAssetPositivelyMismatched(String(meta.assetId || ''), resID)) {
+          needsFallbackScan = true;
+          break;
+        }
+      }
+    }
+    if (!needsFallbackScan) {
+      for (const clip of doc.timeline?.clips || []) {
+        const media = clip?.directMedia;
+        if (!media || typeof media !== 'object' || !['image', 'video', 'audio'].includes(String(media.kind || '').toLowerCase())) continue;
+        const resID = clipResourceId(media);
+        if (resID && isDeclaredAssetPositivelyMismatched(String(media.assetId || ''), resID)) {
+          needsFallbackScan = true;
+          break;
+        }
+      }
+    }
+    if (!needsFallbackScan) return changes;
+
+    const ownedAssets = [...assets.values()];
+    if (ownedAssets.length === 0) return changes;
+    const uniqueAssetIDByResource = new Map();
+    const resourceMatchCount = new Map();
+    for (const asset of ownedAssets) {
+      declaredAssetRefs.set(String(asset.id), assetResourceRefs(asset));
+      const primaryResID = assetPrimaryResourceID(asset);
+      if (!primaryResID || !resourceSet.has(primaryResID)) continue;
+      const count = (resourceMatchCount.get(primaryResID) || 0) + 1;
+      resourceMatchCount.set(primaryResID, count);
+      if (count === 1) uniqueAssetIDByResource.set(primaryResID, String(asset.id));
+      else uniqueAssetIDByResource.delete(primaryResID);
+    }
+    for (const node of doc.nodes || []) {
+      if (!['image', 'video', 'audio'].includes(String(node.type || '').toLowerCase())) continue;
+      const resID = nodeResourceId(node);
+      if (!resID) continue;
+      const meta = node.metadata || {};
+      const currentAssetID = String(meta.assetId || '');
+      if (currentAssetID && !isDeclaredAssetPositivelyMismatched(currentAssetID, resID)) continue;
+      const next = uniqueAssetIDByResource.get(resID);
+      if (next) setAssetID(node, meta, next);
+    }
+    propagateBatchRoots();
+    for (const clip of doc.timeline?.clips || []) {
+      const media = clip?.directMedia;
+      if (!media || typeof media !== 'object' || !['image', 'video', 'audio'].includes(String(media.kind || '').toLowerCase())) continue;
+      const resID = clipResourceId(media);
+      if (!resID) continue;
+      const currentAssetID = String(media.assetId || '');
+      if (currentAssetID && !isDeclaredAssetPositivelyMismatched(currentAssetID, resID)) continue;
+      const next = uniqueAssetIDByResource.get(resID);
+      if (next) {
+        media.assetId = next;
+        clip.directMedia = media;
+      }
+    }
+    return changes;
+  }
+
   function resolveGenerationModel(kind, requestedModel = '') {
     const trimmed = String(requestedModel || '').trim();
     if (trimmed) {
@@ -1022,6 +1228,19 @@ export function createSimGo(options = {}) {
         const deletedEdgeIds = [];
         const syncedNodeIds = [];
         const skippedNodeIds = [];
+        const alsoChanged = [];
+        const mergeAlsoChanged = (id, title, fields) => {
+          const changed = fields.filter((field, index) => field && fields.indexOf(field) === index);
+          if (!changed.length) return;
+          const existing = alsoChanged.find((item) => item.nodeId === id);
+          if (existing) {
+            for (const field of changed) {
+              if (!existing.fields.includes(field)) existing.fields.push(field);
+            }
+            return;
+          }
+          alsoChanged.push({ nodeId: id, ...(title ? { title } : {}), fields: changed });
+        };
         for (const patch of patches) {
           const rowId = String(patch?.rowId || '').trim();
           if (!rowId) throw invalidArg('invalid_params', '每个 patch 都需要 rowId');
@@ -1074,14 +1293,25 @@ export function createSimGo(options = {}) {
             const oldFallback = oldPlot.trim();
             const nextTrimmed = nextText.trim();
             if (!bodyDraft || bodyDraft === oldTrimmed || bodyDraft === oldFallback || bodyDraft === nextTrimmed) {
-              target.metadata.composerContent = refPrefix
+              const hadComposer = Object.prototype.hasOwnProperty.call(target.metadata, 'composerContent');
+              const previousComposer = target.metadata.composerContent;
+              const nextComposer = refPrefix
                 ? (nextTrimmed ? `${refPrefix}\n${nextTrimmed}` : refPrefix)
                 : nextText;
+              target.metadata.composerContent = nextComposer;
+              const changedFields = [];
+              if (!hadComposer || previousComposer !== nextComposer) changedFields.push('composerContent');
               const hasOutput = ['content', 'storageKey', 'assetId', 'resourceId', 'taskId'].some((k) => String(target.metadata[k] || '').trim() !== '');
-              if (!hasOutput) target.metadata.prompt = nextText;
+              if (!hasOutput) {
+                const hadPrompt = Object.prototype.hasOwnProperty.call(target.metadata, 'prompt');
+                const previousPrompt = target.metadata.prompt;
+                target.metadata.prompt = nextText;
+                if (!hadPrompt || previousPrompt !== nextText) changedFields.push('prompt');
+              }
               delete target.metadata.promptTemplateOperation;
               delete target.metadata.promptTemplateVariables;
               if (!syncedNodeIds.includes(boundId)) syncedNodeIds.push(boundId);
+              mergeAlsoChanged(boundId, String(target.title || ''), changedFields);
             } else if (!skippedNodeIds.includes(boundId)) {
               skippedNodeIds.push(boundId);
             }
@@ -1099,6 +1329,7 @@ export function createSimGo(options = {}) {
           deletedEdgeIds,
           syncedNodeIds,
           skippedNodeIds,
+          ...(alsoChanged.length ? { alsoChanged } : {}),
         };
         break;
       }
@@ -1450,6 +1681,7 @@ export function createSimGo(options = {}) {
           content: `/api/resources/${output.resourceId}/file`,
           mimeType: output.mimeType,
         });
+        const alsoChanged = alreadyBound ? [] : reconcileBoundMediaAssets(doc, nodeId);
         const saved = alreadyBound ? doc : saveCanvas(canvasId, doc, doc.revision, 'canvas.task.bind', turnId);
         result = {
           applied: !alreadyBound,
@@ -1464,6 +1696,7 @@ export function createSimGo(options = {}) {
           content: node.metadata.content,
           storageKey: node.metadata.storageKey,
           assetId: node.metadata.assetId,
+          ...(alsoChanged.length ? { alsoChanged } : {}),
         };
         break;
       }
@@ -1864,7 +2097,11 @@ export function createSimGo(options = {}) {
         prompt: promptText,
         reviewNote: queuedDefect?.defectNote || '',
         generated: true,
-        payloadJson: JSON.stringify({ resourceId, storageKey: `resource:${resourceId}` }),
+        payloadJson: JSON.stringify({
+          resourceId,
+          storageKey: `resource:${resourceId}`,
+          data: { storageKey: `resource:${resourceId}`, url: `/api/resources/${resourceId}/file`, mimeType, width: dims.width, height: dims.height },
+        }),
         createdAt: new Date().toISOString(),
       };
       assets.set(assetId, asset);

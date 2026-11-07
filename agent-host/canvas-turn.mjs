@@ -95,6 +95,19 @@ function asStringList(value) {
   return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : [];
 }
 
+// 统一回执里的连带节点：操作显式改了别的节点时，模型和撤销都必须知道。
+function alsoChangedNodeIds(result) {
+  return Array.isArray(result?.alsoChanged)
+    ? result.alsoChanged.map((item) => String(item?.nodeId || '')).filter(Boolean)
+    : [];
+}
+
+function pushUpdatedNodeIds(turn, ids) {
+  for (const id of ids) {
+    if (!turn.updatedNodeIds.includes(id)) turn.updatedNodeIds.push(id);
+  }
+}
+
 export function collectTurnEffects(turn, opID, result, operationId) {
   if (!turn || !result || typeof result !== 'object') return turn;
   if (opID==='canvas.timeline.render') return turn;
@@ -128,6 +141,7 @@ export function collectTurnEffects(turn, opID, result, operationId) {
     case 'canvas.node.move':
     case 'canvas.task.bind':
       if (result.nodeId) turn.updatedNodeIds.push(String(result.nodeId));
+      pushUpdatedNodeIds(turn, alsoChangedNodeIds(result));
       break;
     case 'canvas.node.delete':
     case 'canvas.edge.delete':
@@ -139,9 +153,9 @@ export function collectTurnEffects(turn, opID, result, operationId) {
     case 'canvas.script.row.remove':
       // 行绑定会改写产出连线；回执里的连线增删与 Go 撤销用的变更摘要保持一致。
       if (result.nodeId) turn.updatedNodeIds.push(String(result.nodeId));
-      for (const syncedId of asStringList(result.syncedNodeIds)) {
-        if (!turn.updatedNodeIds.includes(syncedId)) turn.updatedNodeIds.push(syncedId);
-      }
+      pushUpdatedNodeIds(turn, alsoChangedNodeIds(result));
+      // 旧回执兼容：syncedNodeIds 只给 ID；新回执 alsoChanged 带字段。
+      pushUpdatedNodeIds(turn, asStringList(result.syncedNodeIds));
       turn.createdEdgeIds.push(...asStringList(result.createdEdgeIds));
       turn.deletedEdgeIds=[...new Set([...(turn.deletedEdgeIds || []),...asStringList(result.deletedEdgeIds)])];
       break;

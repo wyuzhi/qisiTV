@@ -2,10 +2,12 @@ package canvas
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
 	"infinite-canvas/backend/internal/model"
+	"infinite-canvas/backend/internal/writechange"
 )
 
 func TestEmptyRenderBindingRequiresTrustedFlagAndEmptyVideo(t *testing.T) {
@@ -107,6 +109,13 @@ func TestBindTaskOutputReconcilesUnboundStoredMediaNodes(t *testing.T) {
 	}
 	if result.Revision != 2 {
 		t.Fatalf("expected revision 2, got %d", result.Revision)
+	}
+	wantChanged := []writechange.Node{
+		{NodeID: "ref-slot", Fields: []string{"assetId"}},
+		{NodeID: "batch-root", Fields: []string{"assetId"}},
+	}
+	if !reflect.DeepEqual(result.AlsoChanged, wantChanged) {
+		t.Fatalf("alsoChanged = %#v, want %#v", result.AlsoChanged, wantChanged)
 	}
 	meta := nodeMetadata(result.Node)
 	if nodeString(meta, "storageKey") != "resource:res-video" || nodeString(meta, "content") != "/api/resources/res-video/file" {
@@ -276,7 +285,7 @@ func TestBindTaskOutputPreservesDistinctAssetsSharingResource(t *testing.T) {
 			},
 		},
 	}
-	svc.reconcileBoundCanvasDocMediaAssets("owner", secondaryDoc)
+	svc.reconcileBoundCanvasDocMediaAssets("owner", secondaryDoc, "")
 	secondaryNode := findCanvasNode(secondaryDoc, "node-secondary")
 	if got := nodeString(nodeMetadata(secondaryNode), "assetId"); got != "" {
 		t.Fatalf("secondary resource node assetId = %q, want empty", got)

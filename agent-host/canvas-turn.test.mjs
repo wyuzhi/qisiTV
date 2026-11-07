@@ -56,6 +56,17 @@ describe("本轮画布变更", () => {
             deletedEdgeIds: ["edge-old", "edge-vid"], operationIds: ["append-op", "bind-op", "unbind-op"] });
     });
 
+    test("alsoChanged 回执把连带改动的节点计入本轮改动", () => {
+        const turn = resetTurnAccumulator(newTurnAccumulator(), 3);
+        collectTurnEffects(turn, "canvas.script.row.update", { canvasId: "c1", revision: 4, nodeId: "script",
+            syncedNodeIds: ["img-1"], alsoChanged: [{ nodeId: "img-1", title: "首帧", fields: ["composerContent"] }] }, "sync-op");
+        collectTurnEffects(turn, "canvas.task.bind", { canvasId: "c1", revision: 5, nodeId: "vid-1",
+            alsoChanged: [{ nodeId: "batch-root", fields: ["assetId"] }] }, "bind-op");
+        expect(turnChange(turn)).toEqual({ revisionBefore: 3, revisionAfter: 5,
+            createdNodeIds: [], updatedNodeIds: ["script", "img-1", "vid-1", "batch-root"], createdEdgeIds: [],
+            operationIds: ["sync-op", "bind-op"] });
+    });
+
     test("未落盘的当前会话按空历史读取，别的会话仍然缺失", () => {
         expect(unflushedSessionHistory("s1", "s1")).toEqual({ sessionId: "s1", turns: [] });
         expect(unflushedSessionHistory("", "s1")).toEqual({ sessionId: null, turns: [] });

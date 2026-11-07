@@ -113,9 +113,13 @@ func opStoryboardRowUpdate(ctx *Context, params json.RawMessage) (any, error) {
 		return nil, mapDomainError(err)
 	}
 	return canvasWriteResult(ctx, args.CanvasID, func(doc map[string]any) map[string]any {
-		return map[string]any{"canvasId": args.CanvasID, "nodeId": args.NodeID, "updated": update.Updated, "rowCount": len(docStoryboardRows(doc, args.NodeID)),
+		result := map[string]any{"canvasId": args.CanvasID, "nodeId": args.NodeID, "updated": update.Updated, "rowCount": len(docStoryboardRows(doc, args.NodeID)),
 			"createdEdgeIds": update.CreatedEdgeIDs, "deletedEdgeIds": update.DeletedEdgeIDs,
 			"syncedNodeIds": update.SyncedNodeIDs, "skippedNodeIds": update.SkippedNodeIDs}
+		if len(update.AlsoChanged) > 0 {
+			result["alsoChanged"] = update.AlsoChanged
+		}
+		return result
 	})
 }
 

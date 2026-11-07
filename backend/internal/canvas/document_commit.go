@@ -57,7 +57,7 @@ func (s *Service) reconcileCanvasRawMediaAssetsIfNeeded(userID string, existing 
 	if err := decoder.Decode(&doc); err != nil || doc == nil {
 		return raw
 	}
-	s.reconcileBoundCanvasDocMediaAssets(userID, doc)
+	s.reconcileBoundCanvasDocMediaAssets(userID, doc, "")
 	healed, err := json.Marshal(doc)
 	if err != nil {
 		return raw
