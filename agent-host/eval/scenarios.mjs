@@ -1345,7 +1345,8 @@ export const SCENARIOS = [
         id: 'turn-s5-1',
         message: '创建一个特写人像首帧图节点并提交生成任务，生成完成后帮我检查画面是否有手部畸形，有问题就重写提示词重新生成。',
         confirmProposalsAfterTurn: true,
-        awaitAutoWakeMs: 1000,
+        // 上限而非固定等待：真实模型被唤醒后要几次请求才复查完，看到复查且助手停下就结束。
+        awaitAutoWakeMs: 120_000,
       },
     ],
     evaluate({ simGo, canvasId, wakeResult }) {
@@ -1357,7 +1358,9 @@ export const SCENARIOS = [
       const firstProposalConfirmed = canvasProposals.length >= 1 && canvasProposals[0].confirmed === true;
       const taskDelivered = canvasTasks.length >= 1 && canvasTasks[0].status === 'succeeded';
       const autoWoken = Boolean(wakeResult?.autoWoken);
-      const mediaInspected = snap.counts.mediaInspections > 0;
+      // 只算本画布上的复查；全局计数会把同一轮评测里其他场景的复查也算进来。
+      const mediaInspected = snap.opLog.some((op) =>
+        op.status === 'ok' && ['media.inspect', 'media.overview'].includes(op.op) && op.params?.canvasId === canvasId);
       const reProposed = canvasProposals.length >= 2;
 
       const checks = [
@@ -1451,11 +1454,13 @@ export const SCENARIOS = [
         new Set(rows.map((row) => row.imageNodeId)).size === 2;
       const proposalCreated = snap.proposals.some((p) => p.canvasId === canvasId && p.kind === 'image' && p.nodeIds.length >= 2);
 
+      const owned = requestEvidence.filter((entry) => entry.attribution === 'session');
       const checks = [
         {
           name: 'active_skill_present_in_every_turn_request',
-          passed: new Set(requestEvidence.map((entry) => entry.turnId)).size === 4 && requestEvidence.every((entry) => entry.activeSkillPresent),
-          detail: `活动技能进入非系统请求上下文=${requestEvidence.filter((entry) => entry.activeSkillPresent).length}/${requestEvidence.length} 次模型请求`,
+          // 只用能按会话确认属于本场景的请求作证据；归属未知的单列，不算通过也不算失败。
+          passed: new Set(owned.map((entry) => entry.turnId)).size === 4 && owned.every((entry) => entry.activeSkillPresent),
+          detail: `活动技能进入非系统请求上下文=${owned.filter((entry) => entry.activeSkillPresent).length}/${owned.length} 次模型请求，归属未知 ${requestEvidence.length - owned.length} 次`,
         },
         {
           name: 'four_turns_completed_in_same_session',
@@ -1516,7 +1521,12 @@ export const SCENARIOS = [
       const nodes = snap.canvases[canvasId]?.nodes || [];
       const reviewOps = snap.opLog.filter((operation) => operation.turnId === turnRecords[1]?.turnId && operation.status === 'ok');
       const inspectedAt = reviewOps.findIndex((operation) => operation.op === 'media.inspect');
-      const correctedAt = reviewOps.findIndex((operation) => operation.op === 'canvas.node.update');
+      // 媒体节点的提示词由 canvas.node.configure 设置（canvas.node.update 的 prompt/content 也是草稿别名），
+      // 两者改提示词都算修正；只改标题或其他参数不算。
+      const promptEdited = ({ op, params }) =>
+        (op === 'canvas.node.configure' && typeof params?.patch?.prompt === 'string') ||
+        (op === 'canvas.node.update' && ['prompt', 'content'].some((key) => typeof params?.patch?.[key] === 'string'));
+      const correctedAt = reviewOps.findIndex(promptEdited);
       const proposedAt = reviewOps.findIndex((operation) => operation.op === 'canvas.generation.propose');
       const checks = [
         {

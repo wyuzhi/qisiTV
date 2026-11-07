@@ -60,7 +60,9 @@ bun eval/run-eval.mjs --model real --scenario all --runs 3 --max-requests 25 --b
 | `--runs <N>` | `1` | 每个场景重复运行次数（`1..50`） |
 | `--max-requests <N>` | `25` | 注入 `BEEFTV_AGENT_MAX_REQUESTS_PER_TURN` 的单轮最大模型请求上限 |
 | `--budget-cny <number>` | `25` | 按返回的 usage 累计费用，达到阈值后停止后续请求并标记 `aborted_budget`；当前请求可能使费用超过阈值 |
-| `--out <dir>` | 临时目录 | 输出 `report.json`、`report.md` 与 `ledger.jsonl` 的目录路径 |
+| `--out <dir>` | 临时目录 | 输出 `report.json`、`report.md`、`ledger.jsonl` 与 `requests/` 的目录路径 |
+
+`requests/` 按发出顺序保存每次模型请求的原文（`0001.json` 起，密钥脱敏、内联图片只留长度），与账本的 `seq` 对应。账本按请求发出时归属场景与回合，并用请求里的会话键（`prompt_cache_key` 或 `metadata.user_id`）把上一个场景迟到的请求归回原场景，标记 `late`。每个场景收尾前会等宿主没有进行中的回合和在途请求（假模型最多 10 秒，真实模型最多 120 秒），结果记在报告的 `settle`。
 
 ### 环境变量（`--model real` 必填）
 - `BEEFTV_EVAL_PRICE_IN`：输入价格（人民币元 / 百万 token，必须 `> 0`）
@@ -101,8 +103,8 @@ bun eval/run-eval.mjs --model real --scenario all --runs 3 --max-requests 25 --b
 ## 6. 已知限制与扩展方式
 
 - **费用阈值不是支付硬限额**：费用在请求返回 usage 后计算，未预留当前请求的最大成本。真实模型验收前仍需授权预算，并结合请求数量及模型输出上限控制支出，不能把 `--budget-cny` 当作绝不会超出的扣费上限。
-- **S5 自动唤醒复查 (`wake-on-generation`)**：模拟器完成任务后，向 `/events` 投递 `task_completed` 通知并观察宿主自动唤醒复查、修改原节点提示词并重新登记生成单（`expectedBaselinePass: true`）。如果期望基线通过的场景回退为 `baseline_gap`，整体报告会判定为 `failed` 并以非 0 状态码退出。观察窗口内通过证明宿主自动唤醒链路工作正常，生产任务完成事件的实际投递仍需配合后端续做测试验收。
-- **S7 是用户主动复查**：用户再发一条消息发起检查，与 S5 自动唤醒分别计分，不能用 S7 通过宣称自动续做已实现。图片和缺陷说明由模拟器提供；真实模型模式也使用模拟产物及缺陷说明，不是对真实图片视觉判断准确率的测量。
+- **S5 自动唤醒复查 (`wake-on-generation`)**：模拟器完成任务后，向 `/events` 投递 `task_completed` 通知并观察宿主自动唤醒复查、修改原节点提示词并重新登记生成单（`expectedBaselinePass: true`）。如果期望基线通过的场景回退为 `baseline_gap`，整体报告会判定为 `failed` 并以非 0 状态码退出。观察窗口最长 120 秒，看到本画布的复查且宿主停下即结束；真实模型被唤醒后要几次请求才完成复查，固定等 1 秒会把迟到的复查误判为能力缺口。观察窗口内通过证明宿主自动唤醒链路工作正常，生产任务完成事件的实际投递仍需配合后端续做测试验收。
+- **S7 是用户主动复查**：用户再发一条消息发起检查，与 S5 自动唤醒分别计分，不能用 S7 通过宣称自动续做已实现。修正提示词既可以是 `canvas.node.configure` 的 `patch.prompt`（媒体节点的标准做法），也可以是 `canvas.node.update` 的 `prompt`/`content`；只改其他参数不算。图片和缺陷说明由模拟器提供；真实模型模式也使用模拟产物及缺陷说明，不是对真实图片视觉判断准确率的测量。
 - **S6 不测试压缩**：场景已从 `skill-after-compaction` 更名为 `skill-across-turns`。真实调用 Durable 压缩、故意使用有损摘要并验证技能重新注入的测试在 `../durable-skills-cases.mjs`，由 `bun test durable-skills.test.mjs` 运行；这份评测报告不继承其结论。
 - **新增场景**：在 `scenarios.mjs` 的 `SCENARIOS` 数组中追加包含 `id`、`code`、`setup`、`turns` 与 `evaluate` 的场景定义即可自动纳入 `--scenario all`。
 

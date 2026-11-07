@@ -14,7 +14,13 @@ import {
   computeScenarioMetrics,
   buildEvalSummary,
   runEval,
+  requestSessionKey,
+  elideDataUrls,
+  waitForCanvasIdle,
+  createRequestTracker,
+  runOwnRequestHooks,
 } from './run-eval.mjs';
+import http from 'node:http';
 
 describe('sim-go 内存版 Go 业务权威模拟器测试', () => {
   test('支持 /api/ops、画布 CRUD、CAS revision 冲突检测与 opId 幂等重放', async () => {
@@ -614,4 +620,125 @@ describe('预算门禁、密钥脱敏与评测配置校验测试', () => {
       fs.rmSync(outDir, { recursive: true, force: true });
     }
   }, 30_000);
+});
+
+describe('请求归属、原文落盘与场景收尾', () => {
+  test('按缓存亲和键识别请求所属会话', () => {
+    expect(requestSessionKey({ prompt_cache_key: 'durable:a' })).toBe('durable:a');
+    expect(requestSessionKey({ metadata: { user_id: 'durable:b' } })).toBe('durable:b');
+    expect(requestSessionKey({ messages: [] })).toBe('');
+  });
+
+  test('落盘原文只去掉长的内联图片', () => {
+    const long = `data:image/png;base64,${'A'.repeat(400)}`;
+    const out = elideDataUrls({ messages: [{ content: [{ image_url: { url: long } }, { text: 'data:short' }] }] });
+    expect(out.messages[0].content[0].image_url.url).toBe(`data:image/png;base64,<${long.length} chars elided>`);
+    expect(out.messages[0].content[1].text).toBe('data:short');
+  });
+
+  test('助手停下且条件满足才算收尾，否则到上限返回未停下', async () => {
+    let polls = 0;
+    const server = http.createServer((req, res) => {
+      polls += 1;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ active: polls <= 2 ? { turnId: 't' } : null, turns: [] }));
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const hostBaseUrl = `http://127.0.0.1:${server.address().port}`;
+    try {
+      const settled = await waitForCanvasIdle({ hostBaseUrl, hostToken: 'x', canvasId: 'c', timeoutMs: 5000 });
+      expect(settled.idle).toBe(true);
+      expect(polls).toBeGreaterThanOrEqual(4);
+      const waiting = await waitForCanvasIdle({ hostBaseUrl, hostToken: 'x', canvasId: 'c', timeoutMs: 600, until: () => false });
+      expect(waiting.idle).toBe(false);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test('宿主不回应时等待也在上限内返回', async () => {
+    const server = http.createServer(() => {}); // 接受连接但永不响应
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const startedAt = Date.now();
+    try {
+      const result = await waitForCanvasIdle({ hostBaseUrl: `http://127.0.0.1:${server.address().port}`, hostToken: 'x', canvasId: 'c', timeoutMs: 500 });
+      expect(result.idle).toBe(false);
+      expect(Date.now() - startedAt).toBeLessThan(2000);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test('请求登记：迟到归回原场景、未知会话单列、在途计数准确、落盘脱敏', () => {
+    const requestsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'beeftv-tracker-'));
+    let context = { runIndex: 1, scenarioId: 'S5', turnId: 's5-1' };
+    const tracker = createRequestTracker({ requestsDir, getContext: () => context, secrets: ['sk-secret-value-123'] });
+    try {
+      tracker.register('durable:s5', { runIndex: 1, scenarioId: 'S5', turnId: 's5-1' });
+      context = { runIndex: 1, scenarioId: 'S6', turnId: 's6-1' };
+      tracker.register('durable:s6', context);
+      const late = tracker.begin({ prompt_cache_key: 'durable:s5', messages: [{ content: 'key sk-secret-value-123' }] });
+      const own = tracker.begin({ prompt_cache_key: 'durable:s6' });
+      const unknown = tracker.begin({ messages: [] });
+      expect(late).toMatchObject({ scenarioId: 'S5', turnId: 's5-1', attribution: 'session', late: true, seq: 1 });
+      expect(own).toMatchObject({ scenarioId: 'S6', attribution: 'session', late: false, seq: 2 });
+      expect(unknown).toMatchObject({ scenarioId: 'S6', attribution: 'unknown', late: false, seq: 3 });
+      expect(tracker.inflight).toBe(3);
+      tracker.end(late);
+      tracker.end(late);
+      tracker.end(null);
+      expect(tracker.inflight).toBe(2);
+      tracker.end(own);
+      tracker.end(unknown);
+      expect(tracker.inflight).toBe(0);
+      const dumped = fs.readFileSync(path.join(requestsDir, '0001.json'), 'utf8');
+      expect(dumped).not.toContain('sk-secret-value-123');
+      expect(tracker.dispatchOf({})).toBeUndefined();
+    } finally {
+      fs.rmSync(requestsDir, { recursive: true, force: true });
+    }
+    const broken = createRequestTracker({ requestsDir: path.join(os.tmpdir(), `missing-${crypto.randomUUID()}`), getContext: () => context });
+    expect(() => broken.begin({ prompt_cache_key: 'durable:x' })).toThrow();
+    expect(broken.inflight).toBe(0);
+  });
+
+  test('迟到请求不进当前场景证据，也不消费下一场景的改向钩子', async () => {
+    const observed = [];
+    const steered = [];
+    let hook = async ({ reqIndex }) => { steered.push(reqIndex); };
+    const hooks = {
+      observe: (_body, dispatch) => observed.push(dispatch.seq),
+      takeSteerHook: () => { const taken = hook; hook = null; return taken; },
+    };
+    await runOwnRequestHooks({}, { seq: 1, late: true }, 1, hooks);
+    expect(observed).toEqual([]);
+    expect(steered).toEqual([]);
+    expect(hook).not.toBeNull();
+    await runOwnRequestHooks({}, { seq: 2, late: false }, 2, hooks);
+    await runOwnRequestHooks({}, { seq: 3, late: false }, 3, hooks);
+    expect(observed).toEqual([2, 3]);
+    expect(steered).toEqual([2]);
+  });
+
+  test('S7 用节点配置改提示词也算修正，只改其他参数不算', () => {
+    const s7 = SCENARIOS.find((scenario) => scenario.code === 'S7');
+    const turnRecords = [{ turnId: 't1' }, { turnId: 't2' }];
+    const evaluateWith = (correction) => s7.evaluate({
+      canvasId: 'c',
+      turnRecords,
+      simGo: { snapshot: () => ({
+        proposals: [{ canvasId: 'c', confirmed: true }, { canvasId: 'c', confirmed: false }],
+        tasks: [{ canvasId: 'c', status: 'succeeded' }],
+        canvases: { c: { nodes: [{ id: 'n1' }] } },
+        opLog: [
+          { op: 'media.inspect', status: 'ok', turnId: 't2', params: { canvasId: 'c' } },
+          { op: 'canvas.node.configure', status: 'ok', turnId: 't2', params: { canvasId: 'c', nodeId: 'n1', patch: correction } },
+          { op: 'canvas.generation.propose', status: 'ok', turnId: 't2', params: { canvasId: 'c' } },
+        ],
+      }) },
+    }).checks.find((check) => check.name === 'result_inspected_and_prompt_corrected').passed;
+    expect(evaluateWith({ prompt: '手部自然，五根手指' })).toBe(true);
+    expect(evaluateWith({ size: '1024x1024' })).toBe(false);
+  });
 });
