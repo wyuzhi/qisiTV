@@ -188,7 +188,7 @@ export function createBeefTVPluginHost(pluginId: string, manifest?: PluginManife
                 const allowedPrefix = pluginId.replace(/^beeftv-plugin-/, "");
                 const isPluginOwnedId =
                     Boolean(targetId) &&
-                    targetId !== "beefapi" &&
+                    targetId !== "beeftv" &&
                     (targetId === allowedPrefix ||
                         targetId === `${allowedPrefix}-channel` ||
                         targetId.startsWith(`${pluginId}:`));

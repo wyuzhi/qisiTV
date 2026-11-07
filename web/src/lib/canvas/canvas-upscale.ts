@@ -17,7 +17,7 @@ export type CanvasUpscaleBatchItem = {
     params?: UpscaleParams;
 };
 export type CanvasUpscaleBatch = { id: string; createdAt: number; items: CanvasUpscaleBatchItem[] };
-export function createDefaultUpscaleSettings(channelId = "beefapi"): CanvasUpscaleSettings {
+export function createDefaultUpscaleSettings(channelId = "beeftv"): CanvasUpscaleSettings {
     return { channelId, scale: 2, image: { mode: "precision", model: "Standard V2", outputFormat: "png" }, video: { mode: "precision", model: "Proteus" } };
 }
 export function getUpscaleInputNodes(processorId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]): CanvasNodeData[] {

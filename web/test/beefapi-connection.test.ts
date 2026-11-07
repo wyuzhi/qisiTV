@@ -31,7 +31,7 @@ test("starting authorization waits beyond the backend connection budget and pres
     const post = spyOn(http, "post").mockResolvedValue({ state: "pending", hasCredential: false });
     try {
         await startBeefAPIConnection(controller.signal);
-        expect(post).toHaveBeenCalledWith("/beefapi/connection/start", {}, { signal: controller.signal, timeout: 35_000 });
+        expect(post).toHaveBeenCalledWith("/beeftv/connection/start", {}, { signal: controller.signal, timeout: 35_000 });
     } finally {
         post.mockRestore();
     }

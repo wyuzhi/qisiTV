@@ -18,10 +18,10 @@ function beefAPIConfig(connected: boolean): AiConfig {
     const image = "gpt-image-2";
     const video = "seedance-2.0";
     const channel = createModelChannel({
-        id: "beefapi",
-        name: "BeefAPI",
+        id: "beeftv",
+        name: "BeefTV",
         pinned: true,
-        baseUrl: "https://enterprise.beefapi.com",
+        baseUrl: "https://beeftv.app",
         apiKey: "",
         models: [image, video],
         credentialRef: connected ? MANAGED_BEEFAPI_CREDENTIAL_REF : undefined,
@@ -34,9 +34,9 @@ function beefAPIConfig(connected: boolean): AiConfig {
     return {
         ...defaultConfig,
         channels: [channel],
-        imageModel: encodeChannelModel("beefapi", image),
-        videoModel: encodeChannelModel("beefapi", video),
-        model: encodeChannelModel("beefapi", image),
+        imageModel: encodeChannelModel("beeftv", image),
+        videoModel: encodeChannelModel("beeftv", video),
+        model: encodeChannelModel("beeftv", image),
     };
 }
 
@@ -117,10 +117,10 @@ describe("managed BeefAPI generation readiness", () => {
                 apiKey: "manual-secret",
             });
             const managed = createModelChannel({
-                id: "beefapi",
-                name: "BeefAPI",
+                id: "beeftv",
+                name: "BeefTV",
                 pinned: true,
-                baseUrl: "https://enterprise.beefapi.com",
+                baseUrl: "https://beeftv.app",
                 apiKey: "",
                 credentialRef: MANAGED_BEEFAPI_CREDENTIAL_REF,
                 hasApiKey: true,
@@ -130,9 +130,9 @@ describe("managed BeefAPI generation readiness", () => {
             const arrange = (manual: typeof manualEmpty): AiConfig => ({
                 ...defaultConfig,
                 channels: order === "manual-first" ? [manual, managed] : [managed, manual],
-                videoModel: encodeChannelModel("beefapi", sharedVideo),
-                audioModel: encodeChannelModel("beefapi", sharedAudio),
-                model: encodeChannelModel("beefapi", sharedVideo),
+                videoModel: encodeChannelModel("beeftv", sharedVideo),
+                audioModel: encodeChannelModel("beeftv", sharedAudio),
+                model: encodeChannelModel("beeftv", sharedVideo),
             });
             const selectedManaged = arrange(manualEmpty);
             expect(ready(selectedManaged, selectedManaged.videoModel)).toBe(true);

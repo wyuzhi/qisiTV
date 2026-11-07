@@ -41,27 +41,27 @@ export type BeefAPIConnectionSummary = {
 };
 
 export function getBeefAPIConnection(signal?: AbortSignal) {
-    return http.get<BeefAPIConnectionSummary>("/beefapi/connection", { signal });
+    return http.get<BeefAPIConnectionSummary>("/beeftv/connection", { signal });
 }
 
 export function startBeefAPIConnection(signal?: AbortSignal) {
     connectionEpoch++;
     // Authorization may need a proxy handshake and one safe direct attempt.
-    return http.post<BeefAPIConnectionSummary>("/beefapi/connection/start", {}, { signal, timeout: 35_000 });
+    return http.post<BeefAPIConnectionSummary>("/beeftv/connection/start", {}, { signal, timeout: 35_000 });
 }
 
 export function cancelBeefAPIConnection(signal?: AbortSignal) {
     connectionEpoch++;
-    return http.post<BeefAPIConnectionSummary>("/beefapi/connection/cancel", {}, { signal });
+    return http.post<BeefAPIConnectionSummary>("/beeftv/connection/cancel", {}, { signal });
 }
 
 export function disconnectBeefAPIConnection(signal?: AbortSignal) {
     connectionEpoch++;
-    return http.post<BeefAPIConnectionSummary>("/beefapi/connection/disconnect", {}, { signal });
+    return http.post<BeefAPIConnectionSummary>("/beeftv/connection/disconnect", {}, { signal });
 }
 
 export function openBeefAPIWallet(signal?: AbortSignal) {
-    return http.post<{ opened: boolean }>("/beefapi/connection/open-wallet", {}, { signal });
+    return http.post<{ opened: boolean }>("/beeftv/connection/open-wallet", {}, { signal });
 }
 
 export function beefAPIConnectionLabel(summary: BeefAPIConnectionSummary | null | undefined) {

@@ -73,7 +73,7 @@ export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKe
 export type ChannelModelFetchResult = { models: string[]; catalog: ChannelModelCatalogItem[] };
 
 export async function fetchChannelModels(channel: ModelChannel, viaBackend = false, signal?: AbortSignal): Promise<ChannelModelFetchResult> {
-    const managed = channel.id === "beefapi" && (channel.pinned || Boolean(channel.credentialRef));
+    const managed = channel.id === "beeftv" && (channel.pinned || Boolean(channel.credentialRef));
     const connectionEpoch = getBeefAPIConnectionEpoch();
     if (managed) {
         viaBackend = true;
@@ -88,13 +88,13 @@ export async function fetchChannelModels(channel: ModelChannel, viaBackend = fal
     }
     try {
         // 登录态由同源后端代取模型目录，避免每个 OpenAI 兼容服务分别维护浏览器 CORS 白名单。
-        const result = await http.post<{ models?: Array<string | ChannelModelCatalogItem> }>(managed ? "/beefapi/connection/models" : "/ai/models", managed ? {} : {
+        const result = await http.post<{ models?: Array<string | ChannelModelCatalogItem> }>(managed ? "/beeftv/connection/models" : "/ai/models", managed ? {} : {
             baseUrl: channel.baseUrl,
             apiKey: managed ? "" : channel.apiKey,
             apiFormat: channel.apiFormat,
             headers: channel.headers,
             channelId: managed ? channel.id : undefined,
-            credentialRef: managed ? "beefapi-enterprise" : undefined,
+            credentialRef: managed ? "beeftv" : undefined,
             // 渠道用插件 JS 接口时，后端改由插件列出模型。
             protocol: channel.interfaceType || undefined,
         }, { timeout: 30_000, signal });

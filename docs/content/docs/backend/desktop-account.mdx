@@ -1,15 +1,13 @@
 ---
 title: 桌面账号与钱包
-description: BeefTV 桌面授权入口、凭据保管与旧连接兼容
+description: BeefTV 桌面授权入口与凭据保管
 ---
 
 在设置的模型渠道中选择内置 **BeefTV**，点击 **连接 BeefTV**，按浏览器提示完成授权后返回应用。已连接账号优先显示邮箱；**管理钱包** 打开 BeefTV 的钱包页面。
 
-新连接的授权、账号与钱包入口使用 `https://beeftv.app`。原企业主站继续管理企业账号和企业钱包，原 `https://enterprise.beefapi.com` 继续服务 BeefTV 官方算力与旧版桌面客户端。
+连接的授权、账号与钱包入口统一使用 `https://beeftv.app`。
 
-升级不会将旧凭据发送到新域名：已保存的加密凭据、未完成的授权及其模型目录请求保持原授权源。断开旧连接后，重新连接使用 BeefTV。钱包入口使用 BeefTV。授权域名切换不代表新老账号余额自动合并，旧连接继续使用原签发源。
-
-内置渠道 ID `beefapi`、凭据引用 `beefapi-enterprise` 与客户端 ID `beeftv-enterprise-v1` 保持不变，已有模型引用无需修改。托管 Key 只在本地后端解密，前端接收脱敏状态和模型目录。恢复连接只信任两个明确的生产源；本地联调源必须显式配置。
+内置渠道 ID `beeftv`、凭据引用 `beeftv` 与客户端 ID `beeftv-enterprise-v1` 固定使用官方算力连接配置。托管 Key 只在本地后端解密，前端接收脱敏状态和模型目录。恢复连接只信任明确的生产源 `https://beeftv.app`；本地联调源必须显式配置。
 
 ## 连接网络与失败提示
 

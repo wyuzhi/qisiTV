@@ -67,11 +67,11 @@ test("local-mode startup restores the local model config after the session", asy
         },
         restoreModelConfig: async () => {
             state.restoreCalls += 1;
-            state.videoModels = ["beefapi::seedance-2.0-fast"];
+            state.videoModels = ["beeftv::seedance-2.0-fast"];
         },
     });
 
-    expect(state).toEqual({ session: "local", videoModels: ["beefapi::seedance-2.0-fast"], restoreCalls: 1 });
+    expect(state).toEqual({ session: "local", videoModels: ["beeftv::seedance-2.0-fast"], restoreCalls: 1 });
 });
 
 test("local-mode startup still restores the canonical model config when browser session hydration fails", async () => {
@@ -159,7 +159,7 @@ test("model config repository keeps failed edits dirty and retries them on flush
         },
     });
     await repository.hydrate();
-    await repository.commit({ ...defaultConfig, textModel: "beefapi::gpt-5.6-sol" });
+    await repository.commit({ ...defaultConfig, textModel: "beeftv::gpt-5.6-sol" });
     expect(repository.getState()).toMatchObject({ status: "error", dirty: true });
     await repository.flush();
     expect(attempts).toBe(2);
@@ -181,7 +181,7 @@ test("model config repository refreshes revision after conflict and retries the 
         },
     });
     await repository.hydrate();
-    await repository.commit({ ...defaultConfig, videoModel: "beefapi::seedance-new" });
+    await repository.commit({ ...defaultConfig, videoModel: "beeftv::seedance-new" });
 
     expect(expectedRevisions).toEqual([2, 7]);
     expect(repository.getState()).toMatchObject({ status: "saved", revision: 8, dirty: false });
@@ -197,9 +197,9 @@ test("catalog refresh keeps pending manual provider edits across delayed read an
         ...defaultConfig,
         channels: [
             createModelChannel({
-                id: "beefapi",
+                id: "beeftv",
                 pinned: true,
-                credentialRef: "beefapi-enterprise",
+                credentialRef: "beeftv",
                 models: ["enterprise-image"],
                 modelProfiles: [{ model: "enterprise-image", capability: "image", protocol: "openai-image" }],
             }),
@@ -219,7 +219,7 @@ test("catalog refresh keeps pending manual provider edits across delayed read an
         ...defaultConfig,
         imageModel: "manual::draft-image",
         channels: [
-            createModelChannel({ id: "beefapi", pinned: true, models: ["stale-image"] }),
+            createModelChannel({ id: "beeftv", pinned: true, models: ["stale-image"] }),
             createModelChannel({ id: "manual", name: "第一次改名", apiKey: "manual-key", models: ["draft-image"] }),
         ],
     };
@@ -243,11 +243,11 @@ test("catalog refresh keeps pending manual provider edits across delayed read an
 
     expect(merged.channels.find((channel) => channel.id === "manual")?.name).toBe("连接过程中的改名");
     expect(merged.channels.find((channel) => channel.id === "manual")?.models).toEqual(["draft-image", "extra-image"]);
-    expect(merged.channels.find((channel) => channel.id === "beefapi")?.models).toEqual(["enterprise-image"]);
+    expect(merged.channels.find((channel) => channel.id === "beeftv")?.models).toEqual(["enterprise-image"]);
     const lastWrite = writes[writes.length - 1];
     expect(lastWrite?.channels.find((channel) => channel.id === "manual")?.name).toBe("连接过程中的改名");
     expect(lastWrite?.channels.find((channel) => channel.id === "manual")?.models).toEqual(["draft-image", "extra-image"]);
-    expect(lastWrite?.channels.find((channel) => channel.id === "beefapi")?.models).toEqual(["enterprise-image"]);
+    expect(lastWrite?.channels.find((channel) => channel.id === "beeftv")?.models).toEqual(["enterprise-image"]);
     expect(writes.some((config) => config.channels.find((channel) => channel.id === "manual")?.name === "第一次改名")).toBe(true);
     expect(repository.getState()).toMatchObject({ dirty: false });
 });

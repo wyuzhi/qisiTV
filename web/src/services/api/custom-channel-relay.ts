@@ -1,4 +1,3 @@
-import { isBeefAPIEndpoint } from "@/lib/beefapi-video-contracts";
 import { apiBaseURL } from "@/services/api/request";
 import { isSystemProxyBaseUrl, MANAGED_BEEFAPI_CREDENTIAL_REF, type AiConfig, type ChannelHeader } from "@/stores/use-config-store";
 
@@ -11,12 +10,7 @@ export type ChannelRequest = {
 };
 
 function isManagedEnterpriseRelay(config: Pick<RelayConfig, "baseUrl" | "credentialRef">) {
-    if (config.credentialRef === MANAGED_BEEFAPI_CREDENTIAL_REF) return true;
-    try {
-        return isBeefAPIEndpoint(config.baseUrl || "");
-    } catch {
-        return false;
-    }
+    return config.credentialRef === MANAGED_BEEFAPI_CREDENTIAL_REF;
 }
 
 /** 自定义渠道统一经登录态后端中转，避免依赖第三方服务的浏览器 CORS。 */

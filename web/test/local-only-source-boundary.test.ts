@@ -101,4 +101,19 @@ describe("local-only source boundary", () => {
 		}
 		expect(offenders).toEqual([]);
 	});
+
+	test("frontend source files do not contain legacy beefapi enterprise channel identifiers or routes", () => {
+		const offenders: string[] = [];
+		for (const file of walkSourceFiles(srcRoot)) {
+			const source = readFileSync(file, "utf8");
+			if (
+				source.includes("beefapi-enterprise") ||
+				source.includes("enterprise.beefapi.com") ||
+				source.includes("/beefapi/connection")
+			) {
+				offenders.push(relative(srcRoot, file));
+			}
+		}
+		expect(offenders).toEqual([]);
+	});
 });

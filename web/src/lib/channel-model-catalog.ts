@@ -139,7 +139,7 @@ function catalogIsSpeechOrMusic(id: string) {
 }
 
 function isBeefAPICatalogChannel(channel: ModelChannel) {
-    if (channel.id === "beefapi" || channel.credentialRef === "beefapi-enterprise") return true;
+    if (channel.id === "beeftv" || channel.credentialRef === "beeftv") return true;
     try {
         return isBeefAPIEndpoint(channel.baseUrl || "");
     } catch {
@@ -152,7 +152,7 @@ export function mergeFetchedChannelModelProfiles(channel: ModelChannel, catalog:
     const next: ChannelModelProfile[] = [];
     for (const item of catalog) {
         const existing = existingByModel.get(item.id);
-        const managed = channel.id === "beefapi" || channel.credentialRef === "beefapi-enterprise";
+        const managed = channel.id === "beeftv" || channel.credentialRef === "beeftv";
         const mapped = catalogModelMapping(item, { providerNameFallback: isBeefAPICatalogChannel(channel) });
         const catalogVideo = versionedVideoCapability(item.videoCapabilities, item.videoCapabilitiesVersion);
         const catalogImage = item.imageCapabilitiesVersion ? sanitizeServerImageCapability(item.imageCapabilities) : null;
@@ -227,7 +227,7 @@ export function mergeFetchedChannelModelProfiles(channel: ModelChannel, catalog:
             ...(sourcedVideo ? { videoCapabilitiesVersion: item.videoCapabilitiesVersion ?? "" } : {}),
         });
     }
-    if (channel.id !== "beefapi" && channel.credentialRef !== "beefapi-enterprise") return next;
+    if (channel.id !== "beeftv" && channel.credentialRef !== "beeftv") return next;
     const byModel = new Map(catalog.map(item => [item.id, item]));
     return next.map(profile => {
         const fields = catalogMediaFields(byModel.get(profile.model) as Record<string, unknown> | undefined);

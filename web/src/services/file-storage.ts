@@ -174,7 +174,7 @@ export async function resolveMediaUrl(storageKey?: string, fallback = "") {
 // resulting local/blob resource. This also makes old canvases self-healing.
 const externalMediaInflight = new Map<string, Promise<string>>();
 async function materializeExternalMedia(url: string) {
-    if (!/^https?:\/\//i.test(url) || !/enterprise\.beefapi\.com/i.test(url)) return url;
+    if (!/^https?:\/\//i.test(url) || !/beeftv\.app/i.test(url)) return url;
     const existing = externalMediaInflight.get(url);
     if (existing) return existing;
     const pending = (async () => {
@@ -186,7 +186,7 @@ async function materializeExternalMedia(url: string) {
                 } catch {
                     return false;
                 }
-            }) || config.channels.find((item) => /beefapi/i.test(`${item.id} ${item.name} ${item.baseUrl}`));
+            }) || config.channels.find((item) => /beeftv/i.test(`${item.id} ${item.name} ${item.baseUrl}`));
         if (!channel) return url;
         const blob = await createChannelTransport(
             {
@@ -194,7 +194,7 @@ async function materializeExternalMedia(url: string) {
                 apiKey: channel.credentialRef ? "" : channel.apiKey,
                 apiFormat: channel.apiFormat,
                 headers: channel.headers,
-                credentialRef: channel.credentialRef || (channel.id === "beefapi" ? "beefapi-enterprise" : undefined),
+                credentialRef: channel.credentialRef || (channel.id === "beeftv" ? "beeftv" : undefined),
             },
             "video",
         ).getBlob(url);

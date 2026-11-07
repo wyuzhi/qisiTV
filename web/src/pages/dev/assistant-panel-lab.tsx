@@ -35,7 +35,7 @@ const TURNS: AssistantTurn[] = [
             { id: "12:1", text: "连接顺序按时间线排，不新增多余节点。", status: "done" },
         ],
         change: { revisionBefore: 12, revisionAfter: 13, createdNodeIds: ["n3", "n4", "n5"], updatedNodeIds: [], createdEdgeIds: ["e1", "e2"] },
-        proposals: [{ proposalId: "p1", kind: "image", nodeIds: ["n3", "n4", "n5"], model: "seedream-4", modelKey: "beefapi::seedream-4" }],
+        proposals: [{ proposalId: "p1", kind: "image", nodeIds: ["n3", "n4", "n5"], model: "seedream-4", modelKey: "beeftv::seedream-4" }],
         error: null,
         cancelled: false,
         createdAt: new Date("2026-09-29T10:00:00Z").toISOString(),
@@ -132,7 +132,7 @@ export default function AssistantPanelLab() {
               ? { available: false, reason: "host_starting" }
               : state === "no-model"
                 ? { available: false, reason: "model_not_configured" }
-                : { available: true, model: { id: "deepseek-v3", channelId: "beefapi", channelName: "BeefTV" } };
+                : { available: true, model: { id: "deepseek-v3", channelId: "beeftv", channelName: "BeefTV" } };
 
     const assistant = stubController(open, setOpen, width, setWidth, status);
     // 实验室里让思考抽屉真的能点开，才能验收展开后的样子。

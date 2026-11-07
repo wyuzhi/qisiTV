@@ -67,7 +67,7 @@ MiniMax speech 的 OpenAI 音频兼容目录通过 `audioOptions` 提供官方�
 | 路由组 | 用途 |
 | --- | --- |
 | `/workspace/*` | 本地工作区启动、模型配置与 `POST /workspace/model-config/capability` 模型能力草稿规范化（含未保存自定义配置、Seedance 文档化时长/音频/像素下限收紧与 `thinking` 开关） |
-| `/beefapi/connection*` | BeefTV 官方算力连接：开始、状态、取消、断开；`POST /beefapi/connection/models` 使用已保存凭据刷新并持久化模型目录与报价，成功后移除当前账号目录中已不存在的模型（其他自定义渠道不受影响）；不接受客户端报价，页面收不到密钥 |
+| `/beeftv/connection*` | BeefTV 官方算力连接：开始、状态、取消、断开；`POST /beeftv/connection/models` 使用已保存凭据刷新并持久化模型目录与报价，成功后移除当前账号目录中已不存在的模型（其他自定义渠道不受影响）；不接受客户端报价，页面收不到密钥 |
 | `/canvas-projects/*`, `/projects/*` | 画布、项目、章节、分镜与快照 |
 | `/resources/*` | 本地素材、分片上传和媒体读取 |
 | `/timeline/render-plan` | 只读编译时间线语义渲染计划：不排队、不落盘、不计费 |
@@ -139,7 +139,7 @@ BeefTV 官方算力视频模型的控件与校验使用 `/v1/models` 下发的 `
 
 `GET /media-upscale/capabilities` 返回图片和视频支持的模式、模型、倍率和格式。`POST /media-upscale/estimate` 接收 `resourceId,channelId,mode,model,scale,outputFormat?,enhancementStrength?`，通过官方算力返回源与输出规格及人民币预留费用 `reservation,currency=CNY,generationSubmitted=false`。估价不提交生成；未取得有效报价时禁止提交。
 
-`POST /media-upscale/tasks` 增加 `clientOperationId,projectId?,nodeId?`，创建标准 `canvas_image` 或 `canvas_video` 任务。`channelId` 固定为 `beefapi`；图片支持 Standard V2、Wonder 3.5，视频支持 Proteus、Starlight Fast 2，分别映射到四个 `topaz-*` 官方模型。倍率为一至四的整数，图片输出 PNG 或 JPEG。素材必须属于当前用户且已就绪；视频最长五分钟。
+`POST /media-upscale/tasks` 增加 `clientOperationId,projectId?,nodeId?`，创建标准 `canvas_image` 或 `canvas_video` 任务。`channelId` 固定为 `beeftv`；图片支持 Standard V2、Wonder 3.5，视频支持 Proteus、Starlight Fast 2，分别映射到四个 `topaz-*` 官方模型。倍率为一至四的整数，图片输出 PNG 或 JPEG。素材必须属于当前用户且已就绪；视频最长五分钟。
 
 复用已连接的官方算力账号，客户端无需配置供应商 Key；任务输入中的凭据由现有密钥保护层加密。素材上传、估价、生成和结果查询均经 BeefTV 官方算力。任务复用标准生成队列、稳定操作 ID 与回执恢复；提交状态不确定时禁止自动重提。结果保存为用户自有资源并回填新节点，保留原素材。取消不保证云端停止或退款；普通生成接口拒绝直接供应商端点。
 

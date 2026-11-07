@@ -40,7 +40,7 @@ export function UpscaleNodeContent({ node, theme }: { node: CanvasNodeData; them
         : batchState.succeeded === batchState.total ? "开始新批次"
         : batch.items.some(item => item.status === "rejected" && !item.taskId) ? "重试未提交项"
         : "查询原批次";
-    const channelId = officialConnected ? "beefapi" : "";
+    const channelId = officialConnected ? "beeftv" : "";
     const patch = (change: Partial<typeof settings>) => actions.updateMetadata?.(node.id, { upscale: { ...settings, channelId, ...change } });
     useEffect(() => {
         let active = true;
@@ -123,7 +123,7 @@ export function UpscaleNodeContent({ node, theme }: { node: CanvasNodeData; them
             </> : "提交前获取费用"}</div> : null}
             {Object.keys(estimates).length ? <details><summary className="cursor-pointer" style={{ color: theme.node.muted }}>超分后的分辨率</summary><div className="mt-2 space-y-1">{inputs.map(input => { const estimate = estimates[input.id]; return estimate ? <div key={input.id} className="flex gap-2"><span className="min-w-0 flex-1 truncate">{input.title}</span><span className="shrink-0 tabular-nums">{estimate.output.width} × {estimate.output.height}</span></div> : null; })}</div></details> : null}
             <div className="space-y-3">
-                <Select getPopupContainer={trigger => trigger.parentElement || document.body} className="w-full" aria-label="超分模型" placeholder="暂无可用超分模型" disabled={!officialConnected} value={channelId || undefined} options={officialConnected ? [{ label: "BeefTV超分模型", value: "beefapi" }] : []} onChange={channelId => patch({ channelId })} />
+                <Select getPopupContainer={trigger => trigger.parentElement || document.body} className="w-full" aria-label="超分模型" placeholder="暂无可用超分模型" disabled={!officialConnected} value={channelId || undefined} options={officialConnected ? [{ label: "BeefTV超分模型", value: "beeftv" }] : []} onChange={channelId => patch({ channelId })} />
                 {!officialConnected ? <p role="status" style={{ color: theme.node.muted }}>暂无可用超分模型，请连接 BeefTV 内置的官方算力。<a href="#/settings?section=channels" className="ml-1 underline">连接官方算力</a></p> : null}
             </div>
             {notice ? <p role="alert" className="break-words" style={{ color: "var(--status-error)" }}>{notice}</p> : null}

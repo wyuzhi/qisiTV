@@ -26,9 +26,9 @@ test("connection actions render immediate progress and a retry after network fai
 
 test("pinned BeefAPI is visible and cannot be deleted before models are fetched", () => {
     const channel = createModelChannel({
-        id: "beefapi",
-        name: "BeefAPI",
-        baseUrl: "https://enterprise.beefapi.com",
+        id: "beeftv",
+        name: "BeefTV",
+        baseUrl: "https://beeftv.app",
         apiKey: "",
         models: [],
         pinned: true,
@@ -39,7 +39,7 @@ test("pinned BeefAPI is visible and cannot be deleted before models are fetched"
 });
 
 test("BeefAPI status copy reflects enterprise connection state", () => {
-    const channel = createModelChannel({ id: "beefapi", apiKey: "", pinned: true, presetVersion: 1 });
+    const channel = createModelChannel({ id: "beeftv", apiKey: "", pinned: true, presetVersion: 1 });
     expect(modelConfigChannelStatusLabel(channel, { status: "idle", revision: 1, dirty: false, error: "" }, { state: "pending", userCode: "ABCD-EFGH", hasCredential: false })).toBe("请在浏览器中确认 ABCD-EFGH");
     expect(modelConfigChannelStatusLabel(channel, { status: "idle", revision: 2, dirty: false, error: "" }, { state: "connected", account: { id: "acct-1", display_name: "Ender" }, hasCredential: true })).toBe("已连接 Ender");
     expect(modelConfigChannelStatusLabel(channel, { status: "idle", revision: 2, dirty: false, error: "" }, { state: "revoked", hasCredential: true })).toBe("连接已失效，请重新连接");
@@ -61,8 +61,8 @@ test("BeefAPI catalog merge keeps manual providers and user-owned BeefAPI fields
         imageModel: "manual::local-image",
         channels: [
             createModelChannel({
-                id: "beefapi",
-                name: "BeefAPI",
+                id: "beeftv",
+                name: "BeefTV",
                 pinned: true,
                 enabled: false,
                 models: ["stale-image"],
@@ -75,10 +75,10 @@ test("BeefAPI catalog merge keeps manual providers and user-owned BeefAPI fields
         ...defaultConfig,
         channels: [
             createModelChannel({
-                id: "beefapi",
-                name: "BeefAPI",
+                id: "beeftv",
+                name: "BeefTV",
                 pinned: true,
-                credentialRef: "beefapi-enterprise",
+                credentialRef: "beeftv",
                 hasApiKey: true,
                 models: ["enterprise-image"],
                 modelProfiles: [{ model: "enterprise-image", capability: "image", protocol: "openai-image" }],
@@ -87,11 +87,11 @@ test("BeefAPI catalog merge keeps manual providers and user-owned BeefAPI fields
         ],
     };
     const merged = mergeManagedBeefAPICatalog(current, server);
-    const beef = merged.channels.find((channel) => channel.id === "beefapi");
+    const beef = merged.channels.find((channel) => channel.id === "beeftv");
     const manual = merged.channels.find((channel) => channel.id === "manual");
     expect(beef?.models).toEqual(["enterprise-image"]);
     expect(beef?.modelProfiles?.[0]?.protocol).toBe("openai-image");
-    expect(beef?.credentialRef).toBe("beefapi-enterprise");
+    expect(beef?.credentialRef).toBe("beeftv");
     expect(beef?.enabled).toBe(false);
     expect(beef?.apiKey).toBe("");
     expect(manual?.name).toBe("工作室渠道");

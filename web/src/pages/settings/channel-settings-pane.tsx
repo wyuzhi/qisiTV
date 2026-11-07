@@ -584,7 +584,7 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels }: Channel
 
 export function applyFetchedChannelModelCatalog(channel: ModelChannel, result: ChannelModelFetchResult): ModelChannel {
     const profiles = mergeFetchedChannelModelProfiles(channel, result.catalog);
-    if (channel.id === "beefapi") return { ...channel, models: uniqueModels(result.models), modelProfiles: profiles };
+    if (channel.id === "beeftv") return { ...channel, models: uniqueModels(result.models), modelProfiles: profiles };
     const existing = new Map((channel.modelProfiles || []).map((profile) => [profile.model, profile]));
     // Refresh updates the catalog without silently enabling new models or removing manual ones.
     return {
@@ -640,10 +640,10 @@ export function shouldRefreshBeefAPICatalog(previous: string | undefined, next: 
 }
 
 export function mergeManagedBeefAPICatalog(current: AiConfig, server: AiConfig, adoptAuthorizedAssistant = false): AiConfig {
-    const serverBeef = server.channels.find((channel) => channel.id === "beefapi");
+    const serverBeef = server.channels.find((channel) => channel.id === "beeftv");
     let found = false;
     const channels = current.channels.map((channel) => {
-        if (channel.id !== "beefapi") return channel;
+        if (channel.id !== "beeftv") return channel;
         found = true;
         if (!serverBeef) {
             return { ...channel, models: [], modelProfiles: [], apiKey: "", secretKey: "", credentialRef: undefined, hasApiKey: false, hasSecretKey: false };

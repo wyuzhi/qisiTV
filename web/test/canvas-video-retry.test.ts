@@ -46,7 +46,7 @@ test("accepted or completed original videos are recovered instead of resubmitted
 test("useCanvasGenerationRetry falls back to canvas video generation when stored task is not canvas_video, and surfaces error summary when prompt is missing", async () => {
     const readyChannel = {
         ...defaultConfig.channels[0]!,
-        id: "beefapi",
+        id: "beeftv",
         pinned: true,
         baseUrl: "https://api.example.com",
         apiKey: "test-key",

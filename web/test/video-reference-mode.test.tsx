@@ -133,7 +133,7 @@ describe("buildVideoGenerationMetadata default frame roles", () => {
                 position: { x: 0, y: 100 },
                 width: 100,
                 height: 100,
-                metadata: { model: "beefapi::seedance-2.5" },
+                metadata: { model: "beeftv::seedance-2.5" },
             },
             { referenceImages: twoImageNodes, referenceVideos: [], referenceAudios: [] },
         );
@@ -149,7 +149,7 @@ describe("buildVideoGenerationMetadata default frame roles", () => {
                 position: { x: 0, y: 100 },
                 width: 100,
                 height: 100,
-                metadata: { model: "beefapi::seedance-2.5", videoEndFrameNodeId: "img-1" },
+                metadata: { model: "beeftv::seedance-2.5", videoEndFrameNodeId: "img-1" },
             },
             { referenceImages: [twoImageNodes[0]!], referenceVideos: [], referenceAudios: [] },
         );
@@ -165,7 +165,7 @@ describe("buildVideoGenerationMetadata default frame roles", () => {
                 position: { x: 0, y: 100 },
                 width: 100,
                 height: 100,
-                metadata: { model: "beefapi::seedance-2.5", videoStartFrameNodeId: "removed-img", videoEndFrameNodeId: "img-1" },
+                metadata: { model: "beeftv::seedance-2.5", videoStartFrameNodeId: "removed-img", videoEndFrameNodeId: "img-1" },
             },
             { referenceImages: [twoImageNodes[0]!], referenceVideos: [], referenceAudios: [] },
         );
@@ -180,7 +180,7 @@ describe("buildVideoGenerationMetadata default frame roles", () => {
                 position: { x: 0, y: 100 },
                 width: 100,
                 height: 100,
-                metadata: { model: "beefapi::seedance-2.5" },
+                metadata: { model: "beeftv::seedance-2.5" },
             },
             { referenceImages: [twoImageNodes[0]!], referenceVideos: [], referenceAudios: [{ id: "aud-1", name: "a.mp3", type: "audio/mpeg", dataUrl: "" }] },
         );
@@ -194,7 +194,7 @@ describe("buildVideoGenerationMetadata default frame roles", () => {
                 position: { x: 0, y: 100 },
                 width: 100,
                 height: 100,
-                metadata: { model: "beefapi::seedance-2.5" },
+                metadata: { model: "beeftv::seedance-2.5" },
             },
             {
                 referenceImages: [

@@ -163,7 +163,7 @@ export function modelCapabilityConfigFor(
     const fallback = defaultModelCapabilityConfig(protocol, modelName);
     // Official gateway contracts also upgrade capabilities cached by older installs.
     try {
-        if (protocol === "openai-image" && beefAPIImageContract(modelName)?.fixedOutputs && ["beeftv.app", "beefapi.com", "enterprise.beefapi.com", "whatstoken.ai", "www.whatstoken.ai"].includes(new URL(channel?.baseUrl || "").hostname.toLowerCase())) return fallback;
+        if (protocol === "openai-image" && beefAPIImageContract(modelName)?.fixedOutputs && ["beeftv.app", "whatstoken.ai", "www.whatstoken.ai"].includes(new URL(channel?.baseUrl || "").hostname.toLowerCase())) return fallback;
     } catch { /* Config without a public endpoint uses its stored capabilities. */ }
     if (!profile?.capabilityConfig) {
         alignDocumentedVideoRouteLimits(fallback.video, protocol, modelName, channel);

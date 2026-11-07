@@ -23,7 +23,7 @@ function transcriptionTransportError(error: unknown, submitting: boolean): unkno
 export async function getTranscriptionModels(config?: HttpRequestConfig) {
     const connectionEpoch = getBeefAPIConnectionEpoch();
     try {
-        const result = await http.post<{ models: ChannelModelCatalogItem[] }>("/beefapi/connection/models", {}, { timeout: TRANSCRIPTION_ADMISSION_TIMEOUT_MS, ...config });
+        const result = await http.post<{ models: ChannelModelCatalogItem[] }>("/beeftv/connection/models", {}, { timeout: TRANSCRIPTION_ADMISSION_TIMEOUT_MS, ...config });
         if (connectionEpoch !== getBeefAPIConnectionEpoch()) throw new BeefAPIConnectionChangedError();
         return result.models.filter(item => item.supportedEndpointTypes?.includes("audio.transcriptions"));
     } catch (error) { throw transcriptionTransportError(error, false); }

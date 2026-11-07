@@ -7,23 +7,23 @@ import { createModelChannel, defaultConfig, normalizeConfigSnapshot, resolveMode
 
 for (const model of ["seedance-2.0", "seedance-2.0-fast", "seedance-2.0-mini", "seedance-2.5", "seedance-2.5-portrait"]) {
     test(`${model} enterprise catalog needs no manual protocol selection`, () => {
-        const channel = createModelChannel({ id: "beefapi", baseUrl: "https://enterprise.beefapi.com", models: [model] });
+        const channel = createModelChannel({ id: "beeftv", baseUrl: "https://beeftv.app", models: [model] });
         channel.modelProfiles = mergeFetchedChannelModelProfiles(channel, [managedVideoCatalogItem(model)]);
         const config = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [channel] } }).config;
-        expect(resolveModelRequestConfig(config, `beefapi::${model}`).interfaceType).toBe("openai-videos");
+        expect(resolveModelRequestConfig(config, `beeftv::${model}`).interfaceType).toBe("openai-videos");
     });
     for (const legacy of [false, true]) {
         test(`${model} keeps server mixed-reference capabilities after ${legacy ? "legacy restore" : "catalog import"} and reload`, () => {
             const capabilityConfig = defaultModelCapabilityConfig("newapi-channel-2", model);
             capabilityConfig.video!.operations = ["text_to_video", "image_to_video"];
             Object.assign(capabilityConfig.video!.references, { maxImages: 9, maxVideos: 0, maxAudios: 0, maxVideoDurationSeconds: 0, maxAudioDurationSeconds: 0 });
-            const channel = createModelChannel({ id: "beefapi", baseUrl: "https://enterprise.beefapi.com", models: [model], modelProfiles: [{ model, capability: "video", protocol: "openai-videos", ...(legacy ? { capabilityConfig } : {}) }] });
-            expect(modelCapabilityConfigFor({ channels: [channel] }, `beefapi::${model}`).videoCapabilitiesUnavailable).toBeUndefined();
+            const channel = createModelChannel({ id: "beeftv", baseUrl: "https://beeftv.app", models: [model], modelProfiles: [{ model, capability: "video", protocol: "openai-videos", ...(legacy ? { capabilityConfig } : {}) }] });
+            expect(modelCapabilityConfigFor({ channels: [channel] }, `beeftv::${model}`).videoCapabilitiesUnavailable).toBeUndefined();
             channel.modelProfiles = mergeFetchedChannelModelProfiles(channel, [managedVideoCatalogItem(model)]);
             let config = { ...defaultConfig, channels: [channel] };
             for (let reload = 0; reload < 2; reload++) {
                 config = normalizeConfigSnapshot({ config }).config;
-                const selected = `beefapi::${model}`;
+                const selected = `beeftv::${model}`;
                 expect(config.channels[0].modelProfiles?.find((item) => item.model === model)?.protocol).toBe("openai-videos");
                 const request = resolveModelRequestConfig(config, selected);
                 expect(request.interfaceType).toBe("openai-videos");
@@ -56,10 +56,10 @@ test("server declaration replaces legacy model-name repairs and user limits", ()
     capabilityConfig.video!.operations = ["text_to_video", "image_to_video"];
     Object.assign(capabilityConfig.video!.references, { maxImages: 9, maxVideos: 0, maxAudios: 0, maxVideoDurationSeconds: 0, maxAudioDurationSeconds: 0, maxImageBytes: 1234 });
     capabilityConfig.video!.resolutions = ["720P"];
-    const channel = createModelChannel({ id: "beefapi", baseUrl: "https://enterprise.beefapi.com", models: [model], modelProfiles: [{ model, capability: "video", protocol: "newapi-channel-2", capabilityConfig }] });
+    const channel = createModelChannel({ id: "beeftv", baseUrl: "https://beeftv.app", models: [model], modelProfiles: [{ model, capability: "video", protocol: "newapi-channel-2", capabilityConfig }] });
     channel.modelProfiles = mergeFetchedChannelModelProfiles(channel, [managedVideoCatalogItem(model)]);
     const config = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [channel] } }).config;
-    const video = modelCapabilityConfigFor(config, `beefapi::${model}`).video!;
+    const video = modelCapabilityConfigFor(config, `beeftv::${model}`).video!;
     expect(video.references.maxVideos).toBe(10);
     expect(video).toEqual(managedVideoCatalogItem(model).videoCapabilities);
 });

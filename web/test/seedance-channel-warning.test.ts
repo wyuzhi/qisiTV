@@ -3,7 +3,7 @@ import { seedanceReferenceRatioWarning } from "../src/lib/seedance-channel-warni
 import { seedanceSettingsConstraints } from "../src/lib/seedance-task-constraints";
 import { explainGenerationError } from "../src/lib/generation-error";
 
-const request = { model: "seedance-2.5", credentialRef: "beefapi-enterprise", videoCount: 1, ratio: "16:9", operation: "reference_to_video" };
+const request = { model: "seedance-2.5", credentialRef: "beeftv", videoCount: 1, ratio: "16:9", operation: "reference_to_video" };
 test("only affected routes and reference-video requests require informed consent", () => {
     expect(seedanceReferenceRatioWarning(request)?.content).toContain("不会自动退款");
     expect(seedanceReferenceRatioWarning({ ...request, model: "seedance-2.0" })?.okText).toBe("接受风险并生成");

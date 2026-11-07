@@ -10,7 +10,7 @@ import { seedanceTaskOptions, seedanceOmniTaskType } from "../src/lib/seedance-t
 test("image transport does not depend on model names and server capabilities replace local defaults", () => {
     for (const model of ["opaque-future-2030", "gpt-image-2", "gpt-image-2.5-flare"]) {
         const stored = defaultModelCapabilityConfig("openai-image", model);
-        for (const baseUrl of ["https://beeftv.app", "https://enterprise.beefapi.com/v1", "https://beefapi.com", "https://third-party.example", "http://beeftv.app", "https://beeftv.app.evil.example"]) {
+        for (const baseUrl of ["https://beeftv.app", "https://third-party.example", "http://beeftv.app", "https://beeftv.app.evil.example"]) {
             for (const cached of [false, true]) {
                 const config = { channels: [{ id: "selected", baseUrl, models: [model], interfaceType: "openai-image", ...(cached ? { modelProfiles: [{ model, protocol: "openai-image", capabilityConfig: stored }] } : {}) }] } as AiConfig;
                 const image = modelCapabilityConfigFor(config, `selected::${model}`).image!;
@@ -25,12 +25,12 @@ test("image transport does not depend on model names and server capabilities rep
         sourced.image!.references.maxImages = 7;
         sourced.image!.quality = { supported: true, values: ["ultra"], default: "ultra" };
         sourced.image!.fixedOutputs = 4;
-        const config = { channels: [{ id: "beefapi", baseUrl: "https://beeftv.app", models: [model], modelProfiles: [{ model, protocol: "openai-image", capabilityConfig: sourced, imageCapabilitiesVersion: "server-v2" }] }] } as AiConfig;
-        assert.deepEqual(modelCapabilityConfigFor(config, `beefapi::${model}`), sourced);
+        const config = { channels: [{ id: "beeftv", baseUrl: "https://beeftv.app", models: [model], modelProfiles: [{ model, protocol: "openai-image", capabilityConfig: sourced, imageCapabilitiesVersion: "server-v2" }] }] } as AiConfig;
+        assert.deepEqual(modelCapabilityConfigFor(config, `beeftv::${model}`), sourced);
     }
     const model = "dola-seedream-5-0-pro-260628";
-    const config = { channels: [{ id: "beefapi", baseUrl: "https://beeftv.app", models: [model], interfaceType: "openai-image" }] } as AiConfig;
-    assert.equal(modelCapabilityConfigFor(config, `beefapi::${model}`).image!.references.maxImageBytes, 30 * 1024 * 1024);
+    const config = { channels: [{ id: "beeftv", baseUrl: "https://beeftv.app", models: [model], interfaceType: "openai-image" }] } as AiConfig;
+    assert.equal(modelCapabilityConfigFor(config, `beeftv::${model}`).image!.references.maxImageBytes, 30 * 1024 * 1024);
 });
 
 test("backend-normalized Dreamina profile preserves editing, duration choices, and taskTypeConstraints", () => {
@@ -158,16 +158,16 @@ test("APIMart NewAPI channel exposes Seedance multimodal reference operations", 
 });
 
 test("BeefAPI generic newapi Seedance accepts mixed image and video references when backend capability profile is present", () => {
-    const model = "beefapi::seedance-2.0-fast";
+    const model = "beeftv::seedance-2.0-fast";
     const base = defaultModelCapabilityConfig("newapi", "seedance-2.0-fast");
     base.video!.operations = ["text_to_video", "image_to_video", "reference_to_video"];
     base.video!.references.maxVideos = 3;
     base.video!.references.maxAudios = 3;
     const config = {
         channels: [{
-            id: "beefapi",
-            name: "BeefAPI",
-            baseUrl: "https://enterprise.beefapi.com",
+            id: "beeftv",
+            name: "BeefTV",
+            baseUrl: "https://beeftv.app",
             apiKey: "test",
             apiFormat: "openai",
             models: ["seedance-2.0-fast"],

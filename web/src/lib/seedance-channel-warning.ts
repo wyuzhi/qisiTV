@@ -5,7 +5,7 @@ export function seedanceTaskRetryWarning(inputJson?: string, model?: string) {
         const input = JSON.parse(inputJson || "{}");
         const p = input.videoParameters;
         if (!p?.affectedChannel) return undefined;
-        return seedanceReferenceRatioWarning({ model: p.model || model || "", credentialRef: "beefapi-enterprise", videoCount: p.videoCount, ratio: p.size, operation: input.metadata?.videoEditOperation });
+        return seedanceReferenceRatioWarning({ model: p.model || model || "", credentialRef: "beeftv", videoCount: p.videoCount, ratio: p.size, operation: input.metadata?.videoEditOperation });
     } catch { return undefined; }
 }
 
@@ -15,7 +15,7 @@ export function seedanceReferenceRatioWarning(input: { model: string; baseUrl?: 
     if (!input.ratio || ["adaptive", "auto"].includes(input.ratio)) return undefined;
     let host = "";
     try { host = new URL(input.baseUrl || "").hostname.toLowerCase(); } catch { /* Managed credentials may not expose a URL. */ }
-    if (input.credentialRef !== "beefapi-enterprise" && !["beeftv.app", "beefapi.com", "enterprise.beefapi.com", "whatstoken.ai", "www.whatstoken.ai"].includes(host)) return undefined;
+    if (input.credentialRef !== "beeftv" && !["beeftv.app", "whatstoken.ai", "www.whatstoken.ai"].includes(host)) return undefined;
     return {
         title: "输出比例可能与设置不一致",
         content: `当前模型带参考视频生成时，可能不会按设置的 ${input.ratio} 输出。继续生成仍会计费，比例不符不会自动退款。你也可以更换模型，或移除参考视频后再生成。`,

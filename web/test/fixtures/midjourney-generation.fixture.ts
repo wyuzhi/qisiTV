@@ -59,7 +59,7 @@ for (scenario of ["success", "bind-failed", "unknown", "cancel-after-accept", "c
         nodesRef.current = typeof next === "function" ? next(nodesRef.current) : next;
         useCanvasStore.getState().updateProject(project.id, { nodes: nodesRef.current });
     };
-    const config = { ...defaultConfig, model: "beefapi::midjourney-v8.2", imageModel: "beefapi::midjourney-v8.2", count: String(total), channels: [{ id: "beefapi", name: "BeefTV", baseUrl: "https://beeftv.app/v1", models: ["midjourney-v8.2"], modelProfiles: [{ model: "midjourney-v8.2", capability: "image", protocol: "openai-image" }] }] } as typeof defaultConfig;
+    const config = { ...defaultConfig, model: "beeftv::midjourney-v8.2", imageModel: "beeftv::midjourney-v8.2", count: String(total), channels: [{ id: "beeftv", name: "BeefTV", baseUrl: "https://beeftv.app/v1", models: ["midjourney-v8.2"], modelProfiles: [{ model: "midjourney-v8.2", capability: "image", protocol: "openai-image" }] }] } as typeof defaultConfig;
     const boundIndices: number[] = [];
     let binding = false;
     activeController = new AbortController();

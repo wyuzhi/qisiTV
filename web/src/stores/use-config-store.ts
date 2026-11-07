@@ -323,10 +323,10 @@ export function configuredModelMatchesCapability(config: AiConfig, model: string
     return selectableModelsByCapability(config, capability).includes(normalized);
 }
 
-export const MANAGED_BEEFAPI_CREDENTIAL_REF = "beefapi-enterprise";
+export const MANAGED_BEEFAPI_CREDENTIAL_REF = "beeftv";
 
 export function isBuiltinBeefAPIChannel(channel: Pick<ModelChannel, "id" | "pinned">) {
-    return channel.id === "beefapi" && channel.pinned === true;
+    return channel.id === "beeftv" && channel.pinned === true;
 }
 
 export function channelHasManagedBeefAPICredential(channel: Pick<ModelChannel, "id" | "pinned" | "credentialRef" | "hasApiKey">) {
@@ -589,7 +589,7 @@ function enrichBeefApiMediaChannel(channel: ModelChannel): ModelChannel {
         existing.delete(model);
     }
     for (const model of models.filter((model) => isVideoModelName(model) || Boolean(beefAPIVideoContract(model)))) {
-        if (channel.id === "beefapi" || channel.credentialRef === MANAGED_BEEFAPI_CREDENTIAL_REF) continue;
+        if (channel.id === "beeftv" || channel.credentialRef === MANAGED_BEEFAPI_CREDENTIAL_REF) continue;
         const current = existing.get(model);
         if (current?.videoCapabilitiesVersion?.trim() && current.capabilityConfig?.video) continue;
         // Repair known routes using the shared contract; preserve catalog and

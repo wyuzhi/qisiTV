@@ -203,7 +203,7 @@ describe("rebaseInsertedCanvasNode", () => {
 
 
 test("Midjourney history inserts all four indexed images and preserves concurrent nodes", async () => {
-    const task = { id: "mj-history", type: "canvas_image", model: "beefapi::midjourney-v8.2", prompt: "red cube", status: "succeeded" } as GenerationTask;
+    const task = { id: "mj-history", type: "canvas_image", model: "beeftv::midjourney-v8.2", prompt: "red cube", status: "succeeded" } as GenerationTask;
     const indices: number[] = [];
     let persisted: CanvasNodeData[] = [];
     const result = await insertCanvasGenerationHistoryTask({

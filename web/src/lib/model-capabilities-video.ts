@@ -472,7 +472,7 @@ export function alignDocumentedVideoRouteLimits(video: VideoCapabilityConfig | u
     if (!isSeedance2Family(protocol, modelName)) return;
     let host = "";
     try { host = new URL(channel?.baseUrl || "").hostname.toLowerCase(); } catch { /* no public URL */ }
-    const materialHost = ["beeftv.app", "enterprise.beefapi.com", "beefapi.com", "whatstoken.ai", "www.whatstoken.ai"].includes(host) || channel?.id === "beefapi";
+    const materialHost = ["beeftv.app", "whatstoken.ai", "www.whatstoken.ai"].includes(host) || channel?.id === "beeftv";
     if ((isVolcengineArkVideoProtocol(protocol) || materialHost) && video.references.minVideoPixels === 409600 && video.references.maxVideoPixels === 8295044) video.references.minVideoPixels = 407696;
     // 输出时长下限官方 4 秒：区间、连续（fractionalMin）和枚举三种配置都要收紧，枚举里的 -1（自动）保留。
     video.duration = tightenDocumentedOutputDuration(video.duration);
