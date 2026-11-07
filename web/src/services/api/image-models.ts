@@ -2,7 +2,7 @@ import { sanitizeChannelModelCatalogItem, type ChannelModelCatalogItem } from "@
 import { createChannelTransport } from "@/services/api/channel-transport";
 import { readAxiosError, validateGeminiPayload } from "@/services/api/image-response";
 import { geminiApiUrl, geminiHeaders } from "@/services/api/image-transport";
-import { BeefAPIConnectionChangedError, getBeefAPIConnectionEpoch } from "@/services/api/beefapi-connection";
+import { BeefTVConnectionChangedError, getBeefTVConnectionEpoch } from "@/services/api/beeftv-connection";
 import { ApiError, http } from "@/services/api/request";
 import { buildApiUrl, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 
@@ -74,7 +74,7 @@ export type ChannelModelFetchResult = { models: string[]; catalog: ChannelModelC
 
 export async function fetchChannelModels(channel: ModelChannel, viaBackend = false, signal?: AbortSignal): Promise<ChannelModelFetchResult> {
     const managed = channel.id === "beeftv" && (channel.pinned || Boolean(channel.credentialRef));
-    const connectionEpoch = getBeefAPIConnectionEpoch();
+    const connectionEpoch = getBeefTVConnectionEpoch();
     if (managed) {
         viaBackend = true;
     }
@@ -98,7 +98,7 @@ export async function fetchChannelModels(channel: ModelChannel, viaBackend = fal
             // 渠道用插件 JS 接口时，后端改由插件列出模型。
             protocol: channel.interfaceType || undefined,
         }, { timeout: 30_000, signal });
-        if (managed && connectionEpoch !== getBeefAPIConnectionEpoch()) throw new BeefAPIConnectionChangedError();
+        if (managed && connectionEpoch !== getBeefTVConnectionEpoch()) throw new BeefTVConnectionChangedError();
         const catalog = new Map<string, ChannelModelCatalogItem>();
         for (const item of result.models || []) {
             const entry = typeof item === "string" ? sanitizeChannelModelCatalogItem({ id: item }) : sanitizeChannelModelCatalogItem(item);
@@ -113,7 +113,7 @@ export async function fetchChannelModels(channel: ModelChannel, viaBackend = fal
         // The backend has already classified and sanitized catalogue errors.
         // Running generation-error classification again turns a precise 502
         // auth/unsupported-catalog message into a generic unavailable message.
-        if (error instanceof ApiError || error instanceof BeefAPIConnectionChangedError || (error instanceof DOMException && error.name === "AbortError")) throw error;
+        if (error instanceof ApiError || error instanceof BeefTVConnectionChangedError || (error instanceof DOMException && error.name === "AbortError")) throw error;
         throw new Error(readAxiosError(error, "读取模型失败"));
     }
 }

@@ -3,7 +3,7 @@ import axios from "axios";
 
 import { mergeFetchedChannelModelProfiles, sanitizeChannelModelCatalogItem } from "../src/lib/channel-model-catalog";
 import { modelCapabilityConfigFor, sanitizeServerVideoCapability, type VideoCapabilityConfig } from "../src/lib/model-capabilities";
-import { applyFetchedChannelModelCatalog, mergeManagedBeefAPICatalog } from "../src/pages/settings/channel-settings-pane";
+import { applyFetchedChannelModelCatalog, mergeManagedBeefTVCatalog } from "../src/pages/settings/channel-settings-pane";
 import { modelCompatibilityError, portraitGenerationError } from "../src/lib/model-selection";
 import { fetchChannelModels } from "../src/services/api/image-models";
 import { createModelChannel, defaultConfig, normalizeConfigSnapshot } from "../src/stores/use-config-store";
@@ -128,7 +128,7 @@ test("refresh replaces managed capabilities and keeps the new version", () => {
     expect(profiles[0]?.capabilityConfig?.video?.references.maxAudios).toBe(1);
 });
 
-test("explicit zero limits stay zero for a server-sourced BeefAPI capability", () => {
+test("explicit zero limits stay zero for a server-sourced BeefTV capability", () => {
     const model = "seedance-2.0";
     const capabilityConfig = {
         version: 1,
@@ -158,7 +158,7 @@ test("explicit zero limits stay zero for a server-sourced BeefAPI capability", (
     expect(modelCapabilityConfigFor(config, `beeftv::${model}`).video!.references.maxAudios).toBe(0);
 });
 
-test("legacy BeefAPI Seedance waits for a versioned server declaration", () => {
+test("legacy BeefTV Seedance waits for a versioned server declaration", () => {
     const model = "seedance-2.0";
     const repaired = legacyZeroVideo(model);
     repaired.modelProfiles![0]!.capabilityConfig = {
@@ -216,7 +216,7 @@ test("custom channels adopt only server-declared versioned video capabilities", 
     expect(undeclared[0]?.capabilityConfig?.video?.references.maxAudios).toBe(0);
 });
 
-test("mergeManagedBeefAPICatalog copies sourced capabilities from the backend snapshot", () => {
+test("mergeManagedBeefTVCatalog copies sourced capabilities from the backend snapshot", () => {
     const current = { ...defaultConfig, channels: [createModelChannel({ id: "beeftv", pinned: true, models: ["stale"] })] };
     const server = {
         ...defaultConfig,
@@ -229,7 +229,7 @@ test("mergeManagedBeefAPICatalog copies sourced capabilities from the backend sn
             }),
         ],
     };
-    const merged = mergeManagedBeefAPICatalog(current, server);
+    const merged = mergeManagedBeefTVCatalog(current, server);
     const profile = merged.channels.find((channel) => channel.id === "beeftv")?.modelProfiles?.[0];
     expect(profile?.videoCapabilitiesVersion).toBe("from-server");
     expect(profile?.capabilityConfig?.video?.references.maxVideos).toBe(0);
@@ -285,7 +285,7 @@ test("custom pixel restrictions stay in place for non-Ark channels", () => {
     const video = (width: number, height: number) => ({ id: "vid", name: "视频", type: "video/mp4", url: "https://example.com/v.mp4", width, height, durationMs: 3000, bytes: 1 });
 });
 
-test("direct OpenAI catalog fetch keeps BeefAPI video capability fields", async () => {
+test("direct OpenAI catalog fetch keeps BeefTV video capability fields", async () => {
     const original = axios.request;
     axios.request = (async () => ({
         data: {

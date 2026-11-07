@@ -1,4 +1,4 @@
-import { beefAPIImageContract } from "@/lib/beefapi-image-contracts";
+import { beefTVImageContract } from "@/lib/beeftv-image-contracts";
 import type { ImageResolutionOption, ImageResolutionTier } from "@/lib/image-resolution-tiers";
 import type { ModelProtocol } from "@/lib/model-protocols";
 import { seedreamFamily, seedreamImageCapability } from "@/lib/seedream-image";
@@ -165,7 +165,7 @@ export function defaultImageCapabilityConfig(protocol?: ModelProtocol, model = "
     if (protocol === "openai-image" && model.trim().toLowerCase() === "gpt-image-2") {
         image.quality = { supported: true, values: ["low", "medium", "high"], default: "low" };
     }
-    const contract = protocol === "openai-image" ? beefAPIImageContract(model) : undefined;
+    const contract = protocol === "openai-image" ? beefTVImageContract(model) : undefined;
     if (contract) {
         const presets = "presets" in contract ? contract.presets as ImageResolutionOption[] : undefined;
         return {
@@ -273,11 +273,11 @@ export function resolveImageResponseFormat(profile: ImageCapabilityConfig | unde
 /**
  * 能力编辑器里是否允许选择 response_format 的取值。
  * 只有走通用 OpenAI 兼容图片请求的渠道会按配置发出这个参数：
- * 本体自营的 BeefAPI 图片契约固定接受内联 base64，grok / seedream / 火山等协议各自写死请求体，
+ * 本体自营的 BeefTV 图片契约固定接受内联 base64，grok / seedream / 火山等协议各自写死请求体，
  * 给出选项却发不出去，等于又造一个「设置了不生效」。
  */
 export function imageResponseFormatSelectable(protocol: ModelProtocol | undefined, model: string) {
-    if (protocol !== "openai-image" || beefAPIImageContract(model)) return false;
+    if (protocol !== "openai-image" || beefTVImageContract(model)) return false;
     // Seedream 走专用请求体，单图分支写死 b64_json，选了 url 也发不出去。
     return !seedreamFamily(model);
 }

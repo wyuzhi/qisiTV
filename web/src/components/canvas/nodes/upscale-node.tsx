@@ -5,7 +5,7 @@ import type { CanvasTheme } from "@/lib/canvas-theme";
 import { createDefaultUpscaleSettings, deriveUpscaleBatchState } from "@/lib/canvas/canvas-upscale";
 import { canRecoverUpscaleNode } from "@/lib/canvas/canvas-ai-upscale-task";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
-import { channelHasGenerationCredential, isBuiltinBeefAPIChannel, useEffectiveConfig } from "@/stores/use-config-store";
+import { channelHasGenerationCredential, isBuiltinBeefTVChannel, useEffectiveConfig } from "@/stores/use-config-store";
 import { ownedResourceIdFromMediaRef } from "@/services/api/resources";
 import { estimateUpscale, getUpscaleCapabilities, type UpscaleCapabilities, type UpscaleEstimate, type UpscaleMode } from "@/services/api/media-upscale";
 import { useCanvasNodeActions } from "../canvas-node-action-context";
@@ -22,7 +22,7 @@ export function UpscaleNodeContent({ node, theme }: { node: CanvasNodeData; them
     const imageCount = inputs.filter(item => item.type === CanvasNodeType.Image).length;
     const videoCount = inputs.length - imageCount;
     const config = useEffectiveConfig();
-    const officialConnected = config.channels.some(channel => channel.enabled !== false && isBuiltinBeefAPIChannel(channel) && channelHasGenerationCredential(channel));
+    const officialConnected = config.channels.some(channel => channel.enabled !== false && isBuiltinBeefTVChannel(channel) && channelHasGenerationCredential(channel));
     const savedSettings = node.metadata?.upscale || createDefaultUpscaleSettings();
     const settings = savedSettings.image.mode === "transparent"
         ? { ...savedSettings, image: { ...savedSettings.image, mode: "precision" as const, model: createDefaultUpscaleSettings().image.model } }

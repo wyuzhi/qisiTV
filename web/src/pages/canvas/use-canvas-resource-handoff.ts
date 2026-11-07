@@ -302,7 +302,7 @@ export function useCanvasResourceHandoff({
             // 继续取回登记为画布上的进行中请求：切换画布、同一节点上发起新请求时随之取消。
             const controller = startGenerationRequest(targetNodeId, targetNodeId, targetNodeId);
             const isCurrent = () => lifetime.matches(owner, projectIdRef.current) && !controller.signal.aborted;
-            // 继续取回不会产生第二笔费用：先查询原任务；BeefAPI 没收到原请求时，这次点击会让后端用原编号补交一次（BeefAPI 按编号去重）。
+            // 继续取回不会产生第二笔费用：先查询原任务；BeefTV 没收到原请求时，这次点击会让后端用原编号补交一次（BeefTV 按编号去重）。
             // 等待期间节点显示取回进度；失败后仍保留「继续取回」。
             setNodes((current) =>
                 current.map((item) => (item.id === targetNodeId ? { ...item, metadata: { ...item.metadata, status: "loading", errorDetails: undefined, generationErrorCode: undefined, generationPreflightError: undefined, taskOutcome: undefined } } : item)),

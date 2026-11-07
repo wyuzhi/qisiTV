@@ -103,7 +103,7 @@ MiniMax speech 的 OpenAI 音频兼容目录通过 `audioOptions` 提供官方�
 
 ### 内置连接的媒体协议
 
-BeefTV 官方算力新图片任务在读取本地参考图之前，向配置的 API origin 查询 `/v1/models`。响应头 `X-BeefAPI-Media-Protocol: managed-media-v1` 与正文 `media_protocol.version` 必须一致；缺少或不识别的版本会在上传和生成前失败。目录声明 `supported_media_types`、`task_submit_url`、`task_query_url_template` 和 `uploads_url`，本批只启用图片任务。图片能力仍使用 `image_capabilities` 和 `image_capabilities_version`；文件大小 `0` 表示没有额外的本地文件上限。连接验证成功后复用现有目录刷新一次；离线、请求失败或声明无效时保留最后一份有效目录。
+BeefTV 官方算力新图片任务在读取本地参考图之前，向配置的 API origin 查询 `/v1/models`。响应头 `X-BeefTV-Media-Protocol: managed-media-v1` 与正文 `media_protocol.version` 必须一致；缺少或不识别的版本会在上传和生成前失败。目录声明 `supported_media_types`、`task_submit_url`、`task_query_url_template` 和 `uploads_url`，本批只启用图片任务。图片能力仍使用 `image_capabilities` 和 `image_capabilities_version`；文件大小 `0` 表示没有额外的本地文件上限。连接验证成功后复用现有目录刷新一次；离线、请求失败或声明无效时保留最后一份有效目录。
 
 本地参考图和蒙版通过 `/v1/media/uploads` 申请票据，直接 PUT 到存储，再以原票据 `/complete` 确认。生成只向 `/v1/media/tasks` 发送小 JSON：`task_ref` 是一次授权 attempt 的稳定编号，另有 `media_type`、`model`、`operation`、`input.prompt`、`input.references[{kind,role,url}]` 和业务 `options`。参考图角色为 `reference`，蒙版为 `mask`。`response_format` 和协议覆盖字段不会进入最终请求。API 决定供应商协议和结果转存；客户端不按模型名称选择传输。
 

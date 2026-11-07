@@ -3,7 +3,7 @@ import { defaultImageCapabilityConfig } from "../src/lib/model-capabilities";
 import { mergeFetchedChannelModelProfiles } from "../src/lib/channel-model-catalog";
 import { createModelChannel, defaultConfig, normalizeConfigSnapshot, resolveModelRequestConfig } from "../src/stores/use-config-store";
 
-test("known BeefAPI Hy image repairs stale text profiles and capability limits on reload", () => {
+test("known BeefTV Hy image repairs stale text profiles and capability limits on reload", () => {
     const channel = createModelChannel({ id: "beeftv", baseUrl: "https://beeftv.app", models: ["hy-image-v3"], modelProfiles: [{ model: "hy-image-v3", capability: "image", protocol: "chat-completion" }] });
     const config = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [channel], imageModel: "beeftv::hy-image-v3" } }).config;
     const resolved = resolveModelRequestConfig(config, "beeftv::hy-image-v3");

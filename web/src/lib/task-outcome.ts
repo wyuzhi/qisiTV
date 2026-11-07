@@ -333,7 +333,7 @@ export function formatReconcileDeadlineCopy(reconcileDeadline?: string, nowMs = 
 
 /**
  * 根据 `TaskOutcome` 生成面向用户的中文状态、提示与确认弹窗文案。
- * 严格遵守不泄露上游平台内部名（如 BeefAPI）、渠道 ID 或内部字段名。
+ * 严格遵守不泄露上游平台内部名、渠道 ID 或内部字段名。
  */
 export function taskOutcomeCopy(outcome?: TaskOutcome | null, nowMs = Date.now()): TaskOutcomeCopy {
     if (!outcome) {

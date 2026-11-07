@@ -1,9 +1,9 @@
 import { expect, spyOn, test } from "bun:test";
-import { beefAPIConnectionLabel, startBeefAPIConnection, type BeefAPIConnectionSummary } from "../src/services/api/beefapi-connection";
+import { beefTVConnectionLabel, startBeefTVConnection, type BeefTVConnectionSummary } from "../src/services/api/beeftv-connection";
 import { http } from "../src/services/api/request";
 
 test("connection labels stay user-facing and distinct", () => {
-    const cases: Array<[BeefAPIConnectionSummary, string]> = [
+    const cases: Array<[BeefTVConnectionSummary, string]> = [
         [{ state: "disconnected", hasCredential: false }, "未连接"],
         [{ state: "connecting", hasCredential: false }, "正在连接 BeefTV"],
         [{ state: "connecting", errorReason: "正在尝试其他连接方式", hasCredential: false }, "正在尝试其他连接方式"],
@@ -22,7 +22,7 @@ test("connection labels stay user-facing and distinct", () => {
         [{ state: "revoked", hasCredential: true }, "连接已失效，请重新连接"],
     ];
     for (const [summary, label] of cases) {
-        expect(beefAPIConnectionLabel(summary)).toBe(label);
+        expect(beefTVConnectionLabel(summary)).toBe(label);
     }
 });
 
@@ -30,7 +30,7 @@ test("starting authorization waits beyond the backend connection budget and pres
     const controller = new AbortController();
     const post = spyOn(http, "post").mockResolvedValue({ state: "pending", hasCredential: false });
     try {
-        await startBeefAPIConnection(controller.signal);
+        await startBeefTVConnection(controller.signal);
         expect(post).toHaveBeenCalledWith("/beeftv/connection/start", {}, { signal: controller.signal, timeout: 35_000 });
     } finally {
         post.mockRestore();

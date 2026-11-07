@@ -95,23 +95,20 @@ describe("local-only source boundary", () => {
 		const offenders: string[] = [];
 		for (const file of walkSourceFiles(srcRoot)) {
 			const literals = readFileSync(file, "utf8").match(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g) ?? [];
-			if (literals.some((lit) => /BeefAPI/.test(lit.replace(/\$\{[^}]*\}/g, "")) && !lit.includes("BeefAPIConnectionChangedError"))) {
+			if (literals.some((lit) => /BeefAPI/.test(lit.replace(/\$\{[^}]*\}/g, "")))) {
 				offenders.push(relative(srcRoot, file));
 			}
 		}
 		expect(offenders).toEqual([]);
 	});
 
-	test("frontend source files do not contain legacy beefapi enterprise channel identifiers or routes", () => {
+	test("frontend source files do not contain beefapi in filenames or file content", () => {
 		const offenders: string[] = [];
 		for (const file of walkSourceFiles(srcRoot)) {
+			const rel = relative(srcRoot, file);
 			const source = readFileSync(file, "utf8");
-			if (
-				source.includes("beefapi-enterprise") ||
-				source.includes("enterprise.beefapi.com") ||
-				source.includes("/beefapi/connection")
-			) {
-				offenders.push(relative(srcRoot, file));
+			if (/beefapi/i.test(rel) || /beefapi/i.test(source)) {
+				offenders.push(rel);
 			}
 		}
 		expect(offenders).toEqual([]);

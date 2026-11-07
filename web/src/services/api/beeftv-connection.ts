@@ -1,33 +1,33 @@
 import { http } from "@/services/api/request";
 
 let connectionEpoch = 0;
-export function getBeefAPIConnectionEpoch() {
+export function getBeefTVConnectionEpoch() {
     return connectionEpoch;
 }
 
-/** 请求期间 BeefAPI 连接被重连或断开：丢弃旧连接的结果，不能当成新连接的数据。 */
-export class BeefAPIConnectionChangedError extends Error {
+/** 请求期间 BeefTV 连接被重连或断开：丢弃旧连接的结果，不能当成新连接的数据。 */
+export class BeefTVConnectionChangedError extends Error {
     constructor() {
         super("BeefTV 连接已变更，请重新读取");
-        this.name = "BeefAPIConnectionChangedError";
+        this.name = "BeefTVConnectionChangedError";
     }
 }
 
-export type BeefAPIAccount = {
+export type BeefTVAccount = {
     id: string;
     username?: string;
     display_name?: string;
     email?: string;
 };
 
-export type BeefAPIConnectionState = "disconnected" | "connecting" | "connection_error" | "pending" | "connected" | "expired" | "cancelled" | "rejected" | "store_error" | "catalog_failed" | "revoked";
+export type BeefTVConnectionState = "disconnected" | "connecting" | "connection_error" | "pending" | "connected" | "expired" | "cancelled" | "rejected" | "store_error" | "catalog_failed" | "revoked";
 
-export type BeefAPIConnectionSummary = {
-    state: BeefAPIConnectionState | string;
+export type BeefTVConnectionSummary = {
+    state: BeefTVConnectionState | string;
     userCode?: string;
     verificationUri?: string;
     expiresAt?: string;
-    account?: BeefAPIAccount | null;
+    account?: BeefTVAccount | null;
     keyName?: string;
     tokenId?: string;
     market?: string;
@@ -40,31 +40,31 @@ export type BeefAPIConnectionSummary = {
     hasCredential?: boolean;
 };
 
-export function getBeefAPIConnection(signal?: AbortSignal) {
-    return http.get<BeefAPIConnectionSummary>("/beeftv/connection", { signal });
+export function getBeefTVConnection(signal?: AbortSignal) {
+    return http.get<BeefTVConnectionSummary>("/beeftv/connection", { signal });
 }
 
-export function startBeefAPIConnection(signal?: AbortSignal) {
+export function startBeefTVConnection(signal?: AbortSignal) {
     connectionEpoch++;
     // Authorization may need a proxy handshake and one safe direct attempt.
-    return http.post<BeefAPIConnectionSummary>("/beeftv/connection/start", {}, { signal, timeout: 35_000 });
+    return http.post<BeefTVConnectionSummary>("/beeftv/connection/start", {}, { signal, timeout: 35_000 });
 }
 
-export function cancelBeefAPIConnection(signal?: AbortSignal) {
+export function cancelBeefTVConnection(signal?: AbortSignal) {
     connectionEpoch++;
-    return http.post<BeefAPIConnectionSummary>("/beeftv/connection/cancel", {}, { signal });
+    return http.post<BeefTVConnectionSummary>("/beeftv/connection/cancel", {}, { signal });
 }
 
-export function disconnectBeefAPIConnection(signal?: AbortSignal) {
+export function disconnectBeefTVConnection(signal?: AbortSignal) {
     connectionEpoch++;
-    return http.post<BeefAPIConnectionSummary>("/beeftv/connection/disconnect", {}, { signal });
+    return http.post<BeefTVConnectionSummary>("/beeftv/connection/disconnect", {}, { signal });
 }
 
-export function openBeefAPIWallet(signal?: AbortSignal) {
+export function openBeefTVWallet(signal?: AbortSignal) {
     return http.post<{ opened: boolean }>("/beeftv/connection/open-wallet", {}, { signal });
 }
 
-export function beefAPIConnectionLabel(summary: BeefAPIConnectionSummary | null | undefined) {
+export function beefTVConnectionLabel(summary: BeefTVConnectionSummary | null | undefined) {
     const state = summary?.state || "disconnected";
     switch (state) {
         case "connecting":
@@ -92,7 +92,7 @@ export function beefAPIConnectionLabel(summary: BeefAPIConnectionSummary | null 
     }
 }
 
-function connectedAccountLabel(summary: BeefAPIConnectionSummary | null | undefined) {
+function connectedAccountLabel(summary: BeefTVConnectionSummary | null | undefined) {
     const account = summary?.account;
     const name = account?.email || account?.display_name || account?.username;
     if (name && summary?.balance === "zero") return `已连接 ${name}，余额为 0`;

@@ -149,8 +149,9 @@ for (const file of files) {
 
   if (!/\.(?:md|mdx)$/i.test(file)) continue;
   const prose = source.replace(/```[\s\S]*?```/g, "").replace(/`[^`\r\n]*`/g, "");
+  const legacyUpstreamBrandRegex = new RegExp(`\\b${"Beef" + "API"}\\b`, "i");
   prose.split(/\r?\n/).forEach((line, idx) => {
-    if (/\bBeefAPI\b/i.test(line)) {
+    if (legacyUpstreamBrandRegex.test(line)) {
       patternFailures.push(`${file}:${idx + 1}: [upstream brand name (use BeefTV 官方算力)] ${line.trim()}`);
     }
   });

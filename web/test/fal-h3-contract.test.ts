@@ -1,14 +1,14 @@
 import fs from "node:fs";
 import { expect, test } from "bun:test";
-import { beefAPIVideoContract } from "../src/lib/beefapi-video-contracts";
+import { beefTVVideoContract } from "../src/lib/beeftv-video-contracts";
 import { portraitPriceLines, sanitizeVideoPriceQuote } from "../src/lib/seedance-portrait";
 import { SYSTEM_PROMPT } from "../../agent-host/system-prompt.mjs";
 
 test("H3 preserves CNY seconds and 768p without accepting unverified model aliases", () => {
-    expect(beefAPIVideoContract("minimax-h3-max-turbo")?.protocol).toBe("newapi-channel-2");
-    expect(beefAPIVideoContract("minimax-h3-max")?.protocol).toBe("newapi-channel-2");
-    expect(beefAPIVideoContract("minimax-h3")?.maxReferences).toEqual({image: 9, video: 3, audio: 3});
-    expect(beefAPIVideoContract("minimax-h3-max-turbo-other")).toBeUndefined();
+    expect(beefTVVideoContract("minimax-h3-max-turbo")?.protocol).toBe("newapi-channel-2");
+    expect(beefTVVideoContract("minimax-h3-max")?.protocol).toBe("newapi-channel-2");
+    expect(beefTVVideoContract("minimax-h3")?.maxReferences).toEqual({image: 9, video: 3, audio: 3});
+    expect(beefTVVideoContract("minimax-h3-max-turbo-other")).toBeUndefined();
     const price = {currency: "CNY", mode: "seconds", rates: {"768p": {output: 0.2441304, reference_video: 0}}};
     expect(sanitizeVideoPriceQuote(price)).toEqual(price);
     expect(portraitPriceLines(price)).toEqual(["768p：¥0.2441 / 秒"]);

@@ -157,7 +157,7 @@ test("APIMart NewAPI channel exposes Seedance multimodal reference operations", 
     assert.ok(!profile.operations.includes("audio_to_video"));
 });
 
-test("BeefAPI generic newapi Seedance accepts mixed image and video references when backend capability profile is present", () => {
+test("BeefTV generic newapi Seedance accepts mixed image and video references when backend capability profile is present", () => {
     const model = "beeftv::seedance-2.0-fast";
     const base = defaultModelCapabilityConfig("newapi", "seedance-2.0-fast");
     base.video!.operations = ["text_to_video", "image_to_video", "reference_to_video"];

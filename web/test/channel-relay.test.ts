@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 
 import { channelRequest } from "../src/services/api/custom-channel-relay";
-import { MANAGED_BEEFAPI_CREDENTIAL_REF } from "../src/stores/use-config-store";
+import { MANAGED_BEEFTV_CREDENTIAL_REF } from "../src/stores/use-config-store";
 
 const originalWindow = globalThis.window;
 
@@ -30,7 +30,7 @@ const managedEnterprise = {
     baseUrl: "https://beeftv.app",
     apiKey: "",
     apiFormat: "openai" as const,
-    credentialRef: MANAGED_BEEFAPI_CREDENTIAL_REF,
+    credentialRef: MANAGED_BEEFTV_CREDENTIAL_REF,
 };
 
 function expectBackendRelay(request: ReturnType<typeof channelRequest>, upstreamUrl: string, baseUrl: string) {

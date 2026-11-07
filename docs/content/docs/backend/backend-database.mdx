@@ -43,7 +43,7 @@ v24 为工作流增加不可变模板版本快照。v25 在保留历史迁移记
 
 v26 `task-recovery-outcome` 只给 `tasks` 追加无默认值的可空 `recovery_outcome TEXT`，不回填旧任务、不改历史迁移记录、不重建任务表。`no_result` 表示确认没有结果，不能据此认定没有扣费；`unrecoverable` 表示无法取回，上游可能已生成并计费。暂时的网络、数据库、配额或租约错误不写这两个结论，仅通过既有 `next_poll_at` 退避。列不进入任务 JSON；公共 `outcome` 每次读取时计算，不持久化。迁移及 ledger 同事务，缺列拒绝 Ready。回退须恢复升级前完整工作区备份，不能删列或降 ledger。当前数据库实现只有 SQLite，没有需要同步变更的 PostgreSQL 迁移。
 
-v27 `task-beefapi-settlement` 给 `tasks` 追加 BeefTV 官方算力结算原值：可空的 `beef_usage_state`、`beef_billing_state`、`beef_reconcile_deadline`（均为 TEXT），以及 `image_job_id TEXT NOT NULL DEFAULT ''`。v26 已随 v2.0.5 发布，已升级的库不会重跑 v26，所以这些列必须放在新版本里。迁移只加列，不回填旧任务；缺列拒绝 Ready。字段缺失（NULL）表示没读到结算事实，与 BeefTV 官方算力明确返回的空值不同，投影时分开处理。
+v27 `task-beeftv-settlement` 给 `tasks` 追加 BeefTV 官方算力结算原值：可空的 `beef_usage_state`、`beef_billing_state`、`beef_reconcile_deadline`（均为 TEXT），以及 `image_job_id TEXT NOT NULL DEFAULT ''`。v26 已随 v2.0.5 发布，已升级的库不会重跑 v26，所以这些列必须放在新版本里。迁移只加列，不回填旧任务；缺列拒绝 Ready。字段缺失（NULL）表示没读到结算事实，与 BeefTV 官方算力明确返回的空值不同，投影时分开处理。
 
 v28 `managed-media-query-identity` 只给 `image_submissions` 追加可空 `query_cipher TEXT`，不改 v26/v27 或旧行。它使用已有工作区密钥保存BeefTV 官方算力原任务查询必需的小型身份，不含原生成 body 或素材；不进入任务 API。清理 24 小时前大请求前先为仍可解密的历史内置请求提取查询身份，然后清空 `request_cipher`，保留原发送次数。新版请求在第一次 POST 前同时保存发送记录和查询身份。已被旧版本清空、无法证明原编号的记录保持未知，禁止重新 POST。v27 与已发布 v2.0.5 的 v26 库均通过顺序迁移升级；缺列拒绝 Ready。
 

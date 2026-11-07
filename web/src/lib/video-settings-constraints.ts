@@ -1,4 +1,4 @@
-import { beefAPIVideoContract, isBeefAPIEndpoint } from "./beefapi-video-contracts";
+import { beefTVVideoContract, isBeefTVEndpoint } from "./beeftv-video-contracts";
 import { h3ReferenceMode, h3VideoOperation, isH3MaxModel, isH3Model, isH3Style } from "./h3-video";
 import { modelCapabilityConfigFor } from "./model-capabilities";
 import { seedanceSettingsConstraints, type SeedanceSettingsConstraints } from "./seedance-task-constraints";
@@ -19,7 +19,7 @@ export function videoSettingsConstraints(
     const first = metadata?.videoStartFrameNodeId;
     const last = metadata?.videoEndFrameNodeId;
     const resolved = resolveModelRequestConfig(config, config.model);
-    const h3 = isBeefAPIEndpoint(resolved.baseUrl) && beefAPIVideoContract(model) && isH3Model(model);
+    const h3 = isBeefTVEndpoint(resolved.baseUrl) && beefTVVideoContract(model) && isH3Model(model);
     if (h3) {
         // Canvas submission resolves the operation before building the provider payload.
         const counts = { imageCount, videoCount, audioCount };

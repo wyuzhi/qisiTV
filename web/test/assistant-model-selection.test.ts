@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { assistantModelOptions, MANAGED_ASSISTANT_MODELS, resolveAssistantModel } from "@/lib/assistant-model";
 import { createModelChannel, defaultConfig } from "@/stores/use-config-store";
-import { mergeManagedBeefAPICatalog } from "@/pages/settings/channel-settings-pane";
+import { mergeManagedBeefTVCatalog } from "@/pages/settings/channel-settings-pane";
 
 const models = [...MANAGED_ASSISTANT_MODELS, "gpt-6.1-sol", "qwen3.8-flash"];
 const channel = createModelChannel({ id: "beeftv", pinned: true, models, modelProfiles: models.map(model => ({ model, capability: "text", protocol: "chat-completion" })) });
@@ -64,6 +64,6 @@ test("managed Gemini can follow the default text model without replacing an expl
 test("authorization adopts server default once while ordinary refresh preserves user choice", () => {
     const current = { ...config, assistantModel: "beeftv::claude-opus-5-5" };
     const server = { ...config, assistantModel: "beeftv::gpt-6-astra" };
-    expect(mergeManagedBeefAPICatalog(current, server, true).assistantModel).toBe(server.assistantModel);
-    expect(mergeManagedBeefAPICatalog(current, server).assistantModel).toBe(current.assistantModel);
+    expect(mergeManagedBeefTVCatalog(current, server, true).assistantModel).toBe(server.assistantModel);
+    expect(mergeManagedBeefTVCatalog(current, server).assistantModel).toBe(current.assistantModel);
 });

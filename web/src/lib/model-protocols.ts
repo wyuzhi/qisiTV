@@ -59,7 +59,7 @@ export function protocolForModelCatalog(_endpointTypes: string[] = []): ModelPro
     // plugin or an explicit model configuration must supply it.
     return undefined;
 }
-export function protocolForBeefAPICatalog(endpointTypes: string[] = []): ModelProtocol | undefined {
+export function protocolForBeefTVCatalog(endpointTypes: string[] = []): ModelProtocol | undefined {
     // Only explicit wire contracts map to host protocol IDs; generic "openai"
     // metadata cannot replace a user's configured protocol.
     const endpoints = endpointTypes.map((value) => value.trim().toLowerCase());

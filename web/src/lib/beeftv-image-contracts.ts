@@ -47,6 +47,6 @@ const contracts = [
     },
 ];
 
-export function beefAPIImageContract(model: string) {
+export function beefTVImageContract(model: string) {
     return contracts.find((contract) => contract.model === (model.split("::").pop() || "").trim().toLowerCase());
 }

@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { listVideoReferenceModels } from "../src/lib/canvas/canvas-video-regeneration";
 import { defaultModelCapabilityConfig } from "../src/lib/model-capabilities";
 import { assertAudioConfig } from "../src/services/api/audio";
-import { channelHasGenerationCredential, createModelChannel, defaultConfig, encodeChannelModel, MANAGED_BEEFAPI_CREDENTIAL_REF, resolveModelRequestConfig, useConfigStore, type AiConfig } from "../src/stores/use-config-store";
+import { channelHasGenerationCredential, createModelChannel, defaultConfig, encodeChannelModel, MANAGED_BEEFTV_CREDENTIAL_REF, resolveModelRequestConfig, useConfigStore, type AiConfig } from "../src/stores/use-config-store";
 
 function videoCapability(model: string) {
     const capability = defaultModelCapabilityConfig("newapi-channel-2", model);
@@ -14,7 +14,7 @@ function videoCapability(model: string) {
     return capability;
 }
 
-function beefAPIConfig(connected: boolean): AiConfig {
+function beefTVConfig(connected: boolean): AiConfig {
     const image = "gpt-image-2";
     const video = "seedance-2.0";
     const channel = createModelChannel({
@@ -24,7 +24,7 @@ function beefAPIConfig(connected: boolean): AiConfig {
         baseUrl: "https://beeftv.app",
         apiKey: "",
         models: [image, video],
-        credentialRef: connected ? MANAGED_BEEFAPI_CREDENTIAL_REF : undefined,
+        credentialRef: connected ? MANAGED_BEEFTV_CREDENTIAL_REF : undefined,
         hasApiKey: connected,
         modelProfiles: [
             { model: image, capability: "image", protocol: "openai-image" },
@@ -61,9 +61,9 @@ function manualConfig(apiKey: string): AiConfig {
     };
 }
 
-describe("managed BeefAPI generation readiness", () => {
+describe("managed BeefTV generation readiness", () => {
     test("connected empty-key enterprise channel is canvas-ready for image and video", () => {
-        const config = beefAPIConfig(true);
+        const config = beefTVConfig(true);
         const ready = useConfigStore.getState().isAiConfigReady;
         expect(channelHasGenerationCredential(config.channels[0])).toBe(true);
         expect(ready(config, config.imageModel)).toBe(true);
@@ -72,7 +72,7 @@ describe("managed BeefAPI generation readiness", () => {
     });
 
     test("disconnected empty-key enterprise channel is not canvas-ready", () => {
-        const config = beefAPIConfig(false);
+        const config = beefTVConfig(false);
         const ready = useConfigStore.getState().isAiConfigReady;
         expect(channelHasGenerationCredential(config.channels[0])).toBe(false);
         expect(ready(config, config.imageModel)).toBe(false);
@@ -91,7 +91,7 @@ describe("managed BeefAPI generation readiness", () => {
         expect(listVideoReferenceModels(withoutKey)).toEqual([]);
 
         const spoofed = manualConfig("");
-        spoofed.channels[0].credentialRef = MANAGED_BEEFAPI_CREDENTIAL_REF;
+        spoofed.channels[0].credentialRef = MANAGED_BEEFTV_CREDENTIAL_REF;
         spoofed.channels[0].hasApiKey = true;
         expect(ready(spoofed, spoofed.imageModel)).toBe(false);
         expect(listVideoReferenceModels(spoofed)).toEqual([]);
@@ -122,7 +122,7 @@ describe("managed BeefAPI generation readiness", () => {
                 pinned: true,
                 baseUrl: "https://beeftv.app",
                 apiKey: "",
-                credentialRef: MANAGED_BEEFAPI_CREDENTIAL_REF,
+                credentialRef: MANAGED_BEEFTV_CREDENTIAL_REF,
                 hasApiKey: true,
                 models: [sharedVideo, sharedAudio],
                 modelProfiles: [videoProfile, audioProfile],
@@ -162,12 +162,12 @@ describe("managed BeefAPI generation readiness", () => {
     });
 
     test("connected managed request config never exports the enterprise key", () => {
-        const config = beefAPIConfig(true);
+        const config = beefTVConfig(true);
         config.channels[0].apiKey = "must-not-export";
         const resolved = resolveModelRequestConfig(config, config.imageModel);
         expect(resolved.apiKey).toBe("");
         expect(resolved.secretKey).toBe("");
-        expect(resolved.credentialRef).toBe(MANAGED_BEEFAPI_CREDENTIAL_REF);
+        expect(resolved.credentialRef).toBe(MANAGED_BEEFTV_CREDENTIAL_REF);
         expect(useConfigStore.getState().isAiConfigReady(config, config.imageModel)).toBe(true);
     });
 });

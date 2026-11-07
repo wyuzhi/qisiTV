@@ -12,7 +12,7 @@ import { defaultModelCapabilityConfig, modelCapabilityConfigFor } from "../src/l
 import { ChannelModelSettings } from "../src/pages/settings/channel-model-settings";
 import { applyFetchedChannelModelCatalog } from "../src/pages/settings/channel-settings-pane";
 import { fetchChannelModels } from "../src/services/api/image";
-import { disconnectBeefAPIConnection } from "../src/services/api/beefapi-connection";
+import { disconnectBeefTVConnection } from "../src/services/api/beeftv-connection";
 import { apiClient } from "../src/services/api/request";
 import { createModelChannel, defaultConfig, modelDisplayName, normalizeConfigSnapshot, resolveModelRequestConfig, selectableModelsByCapability, type AiConfig } from "../src/stores/use-config-store";
 
@@ -127,9 +127,9 @@ describe("public channel model catalog", () => {
         }) as typeof apiClient.request;
         const pending = fetchChannelModels(createModelChannel({ id: "beeftv", credentialRef: "beeftv" }), true);
         const outcome = pending.catch((error) => error);
-        await disconnectBeefAPIConnection();
+        await disconnectBeefTVConnection();
         release();
-        expect(await outcome).toMatchObject({ name: "BeefAPIConnectionChangedError" });
+        expect(await outcome).toMatchObject({ name: "BeefTVConnectionChangedError" });
     });
     test("managed catalog refresh persists through the trusted endpoint without accepting client credentials or prices", async () => {
         const requests: Array<{ url?: string; data?: unknown }> = [];
@@ -163,7 +163,7 @@ describe("public channel model catalog", () => {
             expect(JSON.parse(atob(headers["x-canvas-upstream-headers"]))).toEqual([{ name: "X-Project-Key", value: "synthetic-header" }]);
         }
     });
-    test("keeps the fetched BeefAPI catalog dynamic while normalizing discovered image profiles", () => {
+    test("keeps the fetched BeefTV catalog dynamic while normalizing discovered image profiles", () => {
         const channel = createModelChannel({
             id: "beeftv",
             name: "BeefTV",
@@ -186,7 +186,7 @@ describe("public channel model catalog", () => {
         expect(resolveModelRequestConfig(normalized, "beeftv::gpt-5.6-sol").interfaceType).toBe("chat-completion");
     });
 
-    test("repairs stale chat protocols on known BeefAPI image models without changing custom routes", () => {
+    test("repairs stale chat protocols on known BeefTV image models without changing custom routes", () => {
         const make = (baseUrl: string) => createModelChannel({ id: "test", baseUrl, apiKey: "synthetic-key", models: ["gpt-image-2"], modelProfiles: [{ model: "gpt-image-2", capability: "text", protocol: "chat-completion" }] });
         const official = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [make("https://beeftv.app")] } }).config;
         expect(selectableModelsByCapability(official, "image")).toEqual(["test::gpt-image-2"]);
@@ -195,7 +195,7 @@ describe("public channel model catalog", () => {
         expect(resolveModelRequestConfig(custom, "test::gpt-image-2").interfaceType).toBe("chat-completion");
     });
 
-    test("maps BeefAPI speech and music to audio without treating ASR as chat or TTS", () => {
+    test("maps BeefTV speech and music to audio without treating ASR as chat or TTS", () => {
         const catalog: ChannelModelCatalogItem[] = [
             { id: "gpt-5.6-sol", modelType: "text", supportedEndpointTypes: ["openai"] },
             { id: "gpt-image-2", modelType: "image", supportedEndpointTypes: ["image-generation"] },
@@ -260,7 +260,7 @@ describe("public channel model catalog", () => {
         ]));
     });
 
-    test("preserves an explicitly configured BeefAPI text protocol", () => {
+    test("preserves an explicitly configured BeefTV text protocol", () => {
         const channel = createModelChannel({
             id: "beeftv",
             name: "BeefTV",

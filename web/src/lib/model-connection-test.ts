@@ -1,13 +1,13 @@
 import { runBackendGenerationTask, type BackendGenerationResult } from "@/services/api/generation-task";
 import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
-import { channelHasGenerationCredential, defaultConfig, encodeChannelModel, isBuiltinBeefAPIChannel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { channelHasGenerationCredential, defaultConfig, encodeChannelModel, isBuiltinBeefTVChannel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 import type { ModelProtocol } from "@/lib/model-protocols";
 import { upgradeLL2ModelProfile } from "../../../plugin-packages/beeftv-plugin-ll2/client/index.js";
 
 export async function testChannelModelConnection(channel: ModelChannel, model: string, capability: ModelCapability, protocol: ModelProtocol, runTask = runBackendGenerationTask) {
     if (!channel.baseUrl.trim()) throw new Error("请先填写 Base URL");
     if (!channelHasGenerationCredential(channel, model)) {
-        throw new Error(isBuiltinBeefAPIChannel(channel) ? "请先连接 BeefTV" : "请先填写 API Key");
+        throw new Error(isBuiltinBeefTVChannel(channel) ? "请先连接 BeefTV" : "请先填写 API Key");
     }
     const selectedModel = encodeChannelModel(channel.id, model);
     const rawProfile = channel.modelProfiles?.find((item) => item.model === model);

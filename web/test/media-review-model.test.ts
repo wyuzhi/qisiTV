@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { mediaReviewModelOptions, normalizeMediaReviewModel } from "@/lib/media-review-model";
 import { createModelChannel, defaultConfig, normalizeConfigSnapshot } from "@/stores/use-config-store";
-import { mergeManagedBeefAPICatalog, withChannels } from "@/pages/settings/channel-settings-pane";
+import { mergeManagedBeefTVCatalog, withChannels } from "@/pages/settings/channel-settings-pane";
 
 const model = "wand-vega-vl-1.0-flash";
 const managed = createModelChannel({ id: "beeftv", pinned: true, models: [model, "gpt-6-astra"], modelProfiles: [
@@ -26,8 +26,8 @@ test("saved media choice and explicit off survive normalization, reconnect and c
         const saved = normalizeConfigSnapshot({ config: { ...config, mediaReviewModel: selection } }).config;
         expect(saved.mediaReviewModel).toBe(selection);
         const server = { ...config, mediaReviewModel: `beeftv::${model}` };
-        expect(mergeManagedBeefAPICatalog(saved, server, true).mediaReviewModel).toBe(selection);
-        expect(mergeManagedBeefAPICatalog(saved, server).mediaReviewModel).toBe(selection);
+        expect(mergeManagedBeefTVCatalog(saved, server, true).mediaReviewModel).toBe(selection);
+        expect(mergeManagedBeefTVCatalog(saved, server).mediaReviewModel).toBe(selection);
     }
     const selected = { ...config, mediaReviewModel: `custom::${model}` };
     expect(withChannels(selected, [managed]).mediaReviewModel).toBe("");

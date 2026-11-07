@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import * as workspaceBootstrap from "../src/components/workspace/workspace-bootstrap-hydrator";
 import { localWorkspaceConfig } from "../src/lib/user-session";
-import { mergeManagedBeefAPICatalog } from "../src/pages/settings/channel-settings-pane";
+import { mergeManagedBeefTVCatalog } from "../src/pages/settings/channel-settings-pane";
 import { createModelChannel, defaultConfig, type AiConfig } from "../src/stores/use-config-store";
 import { createModelConfigRepository } from "../src/services/model-config-repository";
 
@@ -226,7 +226,7 @@ test("catalog refresh keeps pending manual provider edits across delayed read an
     const first = repository.commit(current);
     const catalogRefresh = (async () => {
         await catalogRead;
-        return mergeManagedBeefAPICatalog(current, serverCatalog);
+        return mergeManagedBeefTVCatalog(current, serverCatalog);
     })();
     current = {
         ...current,

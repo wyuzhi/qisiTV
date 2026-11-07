@@ -86,14 +86,14 @@ const contracts: VideoContract[] = [
     },
 ];
 
-export function isBeefAPIEndpoint(baseUrl: string): boolean {
+export function isBeefTVEndpoint(baseUrl: string): boolean {
     try {
         const url = new URL(baseUrl.trim());
         return url.protocol === "https:" && url.hostname === "beeftv.app" && !url.username && !url.password && (!url.port || url.port === "443");
     } catch { return false; }
 }
 
-export function beefAPIVideoContract(model: string): VideoContract | undefined {
+export function beefTVVideoContract(model: string): VideoContract | undefined {
     const name = model.trim().toLowerCase();
     return contracts.find((contract) => contract.models.some((prefix) => name === prefix || (contract.allowSuffix && name.startsWith(`${prefix}-`))));
 }

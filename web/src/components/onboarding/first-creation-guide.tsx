@@ -4,7 +4,7 @@ import { Button } from "antd";
 import { AppModal } from "@/components/ui/product/app-modal";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, GripVertical, HelpCircle, X } from "lucide-react";
 import { useOnboardingStore, onboardingSteps } from "@/stores/use-onboarding-store";
-import { channelHasGenerationCredential, filterModelsByCapability, isBuiltinBeefAPIChannel, modelOptionsFromChannels, useConfigStore } from "@/stores/use-config-store";
+import { channelHasGenerationCredential, filterModelsByCapability, isBuiltinBeefTVChannel, modelOptionsFromChannels, useConfigStore } from "@/stores/use-config-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import "./first-creation-guide.css";
 
@@ -46,7 +46,7 @@ export function FirstCreationGuide() {
     const project = projects.find((item) => item.id === guide.projectId);
     const node = project?.nodes.find((item) => item.id === guide.nodeId);
     const result = project?.nodes.find((item) => item.type === "image" && item.metadata?.content && (item.id === guide.nodeId || item.metadata?.generatedFromNodeId === guide.nodeId) && (item.metadata?.resultOrigin === "generated" || Boolean(item.metadata?.taskId)));
-    const official = config.channels.find(isBuiltinBeefAPIChannel);
+    const official = config.channels.find(isBuiltinBeefTVChannel);
     const connected = Boolean(official && channelHasGenerationCredential(official) && filterModelsByCapability(modelOptionsFromChannels([official]), "image", [official]).length);
     const ready = step === "official" ? connected : step === "project" ? Boolean(project) : step === "node" ? Boolean(node) : step === "generate" ? Boolean(result) : step === "assets" ? pathname === "/assets" && new URLSearchParams(search).get("tab") === "history" && Boolean(result) : guide.visitedLibrary && Boolean(project) && pathname === `/canvas/${project?.id}`;
 

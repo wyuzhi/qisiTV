@@ -1,8 +1,8 @@
 import { defaultModelCapabilityConfig, sanitizeServerImageCapability, versionedVideoCapability, type ModelCapabilityConfig, type VideoCapabilityConfig, type ImageCapabilityConfig } from "@/lib/model-capabilities";
-import { modelProtocolCapability, protocolForModelCatalog, protocolForBeefAPICatalog, type ModelProtocol } from "@/lib/model-protocols";
+import { modelProtocolCapability, protocolForModelCatalog, protocolForBeefTVCatalog, type ModelProtocol } from "@/lib/model-protocols";
 import type { ModelChannel } from "@/stores/use-config-store";
-import { isBeefAPIEndpoint } from "@/lib/beefapi-video-contracts";
-import { beefAPIImageContract } from "@/lib/beefapi-image-contracts";
+import { isBeefTVEndpoint } from "@/lib/beeftv-video-contracts";
+import { beefTVImageContract } from "@/lib/beeftv-image-contracts";
 import { sanitizeVideoPriceQuote, seedancePortraitModel, type VideoPriceQuote } from "@/lib/seedance-portrait";
 import { sanitizeMediaCapabilities, type MediaCapabilities } from "@/lib/media-capabilities";
 
@@ -91,7 +91,7 @@ export function catalogModelMapping(
         .toLowerCase();
     const endpoints = (item.supportedEndpointTypes || []).map((value) => value.trim().toLowerCase()).filter(Boolean);
     if (item.mediaCapabilitiesVersion && item.mediaCapabilities?.audio) return { capability: "audio", protocol: "openai-audio" };
-    const imageContract = options.providerNameFallback ? beefAPIImageContract(id) : undefined;
+    const imageContract = options.providerNameFallback ? beefTVImageContract(id) : undefined;
     if (imageContract) return { capability: "image", protocol: imageContract.protocol };
     if (endpoints.some((endpoint) => endpoint === "audio.transcriptions" || endpoint === "audio-transcriptions" || endpoint === "transcriptions")) {
         return { skipGeneration: true };
@@ -138,10 +138,10 @@ function catalogIsSpeechOrMusic(id: string) {
     return catalogHasNameToken(id, ["speech", "tts", "music"]);
 }
 
-function isBeefAPICatalogChannel(channel: ModelChannel) {
+function isBeefTVCatalogChannel(channel: ModelChannel) {
     if (channel.id === "beeftv" || channel.credentialRef === "beeftv") return true;
     try {
-        return isBeefAPIEndpoint(channel.baseUrl || "");
+        return isBeefTVEndpoint(channel.baseUrl || "");
     } catch {
         return false;
     }
@@ -153,11 +153,11 @@ export function mergeFetchedChannelModelProfiles(channel: ModelChannel, catalog:
     for (const item of catalog) {
         const existing = existingByModel.get(item.id);
         const managed = channel.id === "beeftv" || channel.credentialRef === "beeftv";
-        const mapped = catalogModelMapping(item, { providerNameFallback: isBeefAPICatalogChannel(channel) });
+        const mapped = catalogModelMapping(item, { providerNameFallback: isBeefTVCatalogChannel(channel) });
         const catalogVideo = versionedVideoCapability(item.videoCapabilities, item.videoCapabilitiesVersion);
         const catalogImage = item.imageCapabilitiesVersion ? sanitizeServerImageCapability(item.imageCapabilities) : null;
-        const inferredProtocol = catalogVideo && managed ? "openai-videos" : mapped.protocol || (isBeefAPICatalogChannel(channel) ? protocolForBeefAPICatalog(item.supportedEndpointTypes) : protocolForModelCatalog(item.supportedEndpointTypes));
-        // BeefAPI and compatible gateways may advertise generic OpenAI endpoints without modelType.
+        const inferredProtocol = catalogVideo && managed ? "openai-videos" : mapped.protocol || (isBeefTVCatalogChannel(channel) ? protocolForBeefTVCatalog(item.supportedEndpointTypes) : protocolForModelCatalog(item.supportedEndpointTypes));
+        // BeefTV and compatible gateways may advertise generic OpenAI endpoints without modelType.
         // An explicit versioned contract still identifies the profile and its quote.
         const inferredCapability = (catalogVideo ? "video" : catalogImage ? "image" : undefined) || mapped.capability || item.modelType || modelProtocolCapability(inferredProtocol);
         const sourcedImage = inferredCapability === "image" ? catalogImage : null;

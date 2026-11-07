@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
 import { managedVideoCatalogItem } from "./managed-video-fixture";
 import { modelCapabilityConfigFor } from "../src/lib/model-capabilities";
-import catalog from "../../fixtures/model-catalog/beefapi-20261013.json";
+import catalog from "../../fixtures/model-catalog/beeftv-20261013.json";
 import { mergeFetchedChannelModelProfiles } from "../src/lib/channel-model-catalog";
 import { createModelChannel, defaultConfig, normalizeConfigSnapshot, resolveModelRequestConfig } from "../src/stores/use-config-store";
 
-test("the fetched BeefAPI catalog routes every generation family after refresh and reload", () => {
+test("the fetched BeefTV catalog routes every generation family after refresh and reload", () => {
     const channel = createModelChannel({ id: "beeftv", baseUrl: "https://beeftv.app", models: catalog.map(m => m.id) });
     const fetched = catalog.map(m => {
         try { return managedVideoCatalogItem(m.id); } catch { return { id: m.id, supportedEndpointTypes: m.supported_endpoint_types }; }

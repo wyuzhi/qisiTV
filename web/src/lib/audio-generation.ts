@@ -27,7 +27,7 @@ export const audioFormatOptions = [
 // TokenHub will forward it, but MiniMax does not declare a content type for it.
 export const minimaxAudioFormatOptions = audioFormatOptions.filter((item) => item.value !== "opus");
 
-// BeefAPI MiniMax speech: voice is a MiniMax system/cloned ID, not OpenAI alloy.
+// BeefTV MiniMax speech: voice is a MiniMax system/cloned ID, not OpenAI alloy.
 // Documented example is male-qn-qingse; these are the T2A 系统音色.
 export const minimaxSpeechVoiceOptions = [
     { value: "male-qn-qingse", label: "青涩青年" },

@@ -11,7 +11,7 @@ import { prepareBackendGenerationTask } from "../src/services/api/generation-tas
 import { creationReferenceLimitsFor, reconcileCreationAttachmentLimit } from "../src/pages/create/creation-references";
 import { createModelChannel, defaultConfig, normalizeConfigSnapshot, type ModelChannel } from "../src/stores/use-config-store";
 
-const catalog = ["managed-video-catalog.json", "managed-video-catalog-live.json"].flatMap((name) => JSON.parse(readFileSync(new URL(`../../backend/internal/beefapi/testdata/${name}`, import.meta.url), "utf8")).data) as Array<{ id: string; video_capabilities: unknown; video_capabilities_version?: string }>;
+const catalog = ["managed-video-catalog.json", "managed-video-catalog-live.json"].flatMap((name) => JSON.parse(readFileSync(new URL(`../../backend/internal/beeftv/testdata/${name}`, import.meta.url), "utf8")).data) as Array<{ id: string; video_capabilities: unknown; video_capabilities_version?: string }>;
 const supplied = catalog.filter((item) => item.video_capabilities_version && item.video_capabilities);
 
 function configured(channel: ModelChannel, model: string) {

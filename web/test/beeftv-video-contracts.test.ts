@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { managedVideoCatalogItem } from "./managed-video-fixture";
 import { mergeFetchedChannelModelProfiles } from "../src/lib/channel-model-catalog";
-import { beefAPIVideoContract, isBeefAPIEndpoint } from "../src/lib/beefapi-video-contracts";
+import { beefTVVideoContract, isBeefTVEndpoint } from "../src/lib/beeftv-video-contracts";
 import { createModelChannel, defaultConfig, normalizeConfigSnapshot, resolveModelRequestConfig } from "../src/stores/use-config-store";
 import { defaultModelCapabilityConfig, modelCapabilityConfigFor } from "../src/lib/model-capabilities";
 import { buildGenerationConfig } from "../src/lib/canvas/canvas-generation-config";
@@ -44,8 +44,8 @@ test("new models preserve their catalog protocol without inheriting unverified i
     const channel = createModelChannel({id: "beeftv", baseUrl: "https://beeftv.app", models: [model], modelProfiles: [{model, capability: "video", protocol: "minimax-video"}]});
     const config = normalizeConfigSnapshot({config: {...defaultConfig, channels: [channel]}}).config;
     expect(resolveModelRequestConfig(config, `beeftv::${model}`).interfaceType).toBe("minimax-video");
-    expect(beefAPIVideoContract(model)).toBeUndefined();
-    expect(beefAPIVideoContract("wan3.0-video-prime")).toBeUndefined();
+    expect(beefTVVideoContract(model)).toBeUndefined();
+    expect(beefTVVideoContract("wan3.0-video-prime")).toBeUndefined();
 });
 
 test("refresh replaces stale text profiles with the server-declared video protocol", () => {
@@ -59,13 +59,13 @@ test("refresh replaces stale text profiles with the server-declared video protoc
 });
 
 test("media contract overrides require the exact enterprise HTTPS endpoint", () => {
-    for (const base of ["https://enterprise.beefapi.com", "https://beeftv.app.evil.test", "https://evil.test/beeftv.app", "http://beeftv.app", "https://user@beeftv.app", "https://beeftv.app:444"]) expect(isBeefAPIEndpoint(base)).toBe(false);
-    expect(isBeefAPIEndpoint("https://beeftv.app/v1")).toBe(true);
+    for (const base of ["https://legacy-enterprise.example.com", "https://beeftv.app.evil.test", "https://evil.test/beeftv.app", "http://beeftv.app", "https://user@beeftv.app", "https://beeftv.app:444"]) expect(isBeefTVEndpoint(base)).toBe(false);
+    expect(isBeefTVEndpoint("https://beeftv.app/v1")).toBe(true);
 });
 
 test("BYOK partial reference contracts preserve the limits of unspecified media kinds", () => {
     const model = "wan3.0-video";
-    const contract = beefAPIVideoContract(model)!;
+    const contract = beefTVVideoContract(model)!;
     const original = contract.maxReferences;
     try {
         contract.maxReferences = {image: 1};
