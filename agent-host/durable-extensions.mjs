@@ -236,11 +236,14 @@ export async function installDurableExtensions({
 
   const baseHostTools = [...buildTools(canvasId, entry.log, entry.generation, entry.turn, sessionId), ...hostTools()];
   entry.readOnlyToolNames = new Set(
-    baseHostTools.filter((tool) => tool.readOnly === true && tool.label !== 'canvas.generation.propose').map((tool) => tool.name),
+    baseHostTools.filter((tool) => tool.readOnly === true && tool.label !== 'canvas.generation.propose' && tool.label !== 'skill.script.run').map((tool) => tool.name),
   );
   const tools = baseHostTools.map((tool) => defineTool({
     name: tool.name, description: tool.description + (tool.label === 'canvas.generation.propose'
-      ? '。成功提案会结束本轮；plan_update 与本调用同一次响应发出。' : ''), parameters: tool.parameters,
+      ? '。成功提案会结束本轮；plan_update 与本调用同一次响应发出。'
+      : tool.label === 'skill.script.run'
+        ? '。首次运行需用户确认并结束本轮；plan_update 可与本调用同一次响应发出。'
+        : ''), parameters: tool.parameters,
     replay: durableToolReplay(tool), executionMode: 'sequential',
     ...(['media.overview', 'media.inspect', 'media.check', 'media.review'].includes(tool.label) ? { outputLimits: { maxBytes: 64 * 1024 * 1024, maxLines: 100000 } } : {}),
     execute: async (args, api, context) => {
@@ -250,6 +253,7 @@ export async function installDurableExtensions({
       await authorization(entry, entry.turn.turnId);
       try {
         const proposalCount = entry.turn.proposals.length;
+        const pendingScriptProposalCount = (entry.turn.scriptProposals || []).filter((item) => item?.status === 'pending').length;
         // Bridge tools return {content}; Durable's ToolExecutionResult names it output.
         const { content, ...result } = await runWithBudget(entry, () => tool.execute(String(api.taskId), args, context.abortSignal,
           { executeTool: (name, params, options) => api.executeTool(name, params, context, options),
@@ -262,8 +266,10 @@ export async function installDurableExtensions({
         // termination. Mixed/failed rounds keep their normal model continuation.
         // 提方案失败时它自己不请求结束，整轮仍按官方规则继续，所以同批计划更新请求结束是安全的。
         const proposed = tool.label === 'canvas.generation.propose' && result.isError !== true && entry.turn.proposals.length > proposalCount;
+        const scriptProposed = tool.label === 'skill.script.run' && result.isError !== true &&
+          (entry.turn.scriptProposals || []).filter((item) => item?.status === 'pending').length > pendingScriptProposalCount;
         const planWithProposal = tool.label === 'plan.update' && result.isError !== true && (await state(entry))?.roundProposes === true;
-        return { ...result, output: content, ...(proposed || planWithProposal ? { control: { ...result.control, terminate: true } } : {}) };
+        return { ...result, output: content, ...(proposed || scriptProposed || planWithProposal ? { control: { ...result.control, terminate: true } } : {}) };
       } finally { await persistEffects(entry); }
     },
   }));
@@ -367,7 +373,7 @@ export async function installDurableExtensions({
         // 「不是所有调用都请求结束」而多发一轮只为总结的请求。写进 Durable 文档而不是内存，
         // 重启后从工具阶段接着跑时（不会再触发本钩子）仍然生效；每次响应都会重新写。
         const proposes = Array.isArray(message?.content)
-          && message.content.some((part) => part?.type === 'toolCall' && part.name === 'canvas_generation_propose');
+          && message.content.some((part) => part?.type === 'toolCall' && (part.name === 'canvas_generation_propose' || part.name === 'skill_script_run'));
         if (((await state(entry))?.roundProposes === true) !== proposes) await update(entry, (doc) => { doc.roundProposes = proposes; });
       },
       beforeRequest: async (request, _runtime, context) => {
@@ -443,7 +449,7 @@ export async function installDurableExtensions({
       },
       onYield: async () => {
         if (entry.generation.aborted || entry.generation.pendingInput?.state === 'pending' || entry.generation.pendingInputError) return;
-        if (entry.turn.proposals?.length) return;
+        if (entry.turn.proposals?.length || (entry.turn.scriptProposals || []).some((item) => item?.status === 'pending')) return;
         const doc = await state(entry);
         if (doc?.active?.stopped || (doc?.active?.supplementIds?.length || 0) > 0) return;
         if (!entry.generation.unboundReminderSent && entry.turn.createdNodeIds?.length > 0 && typeof readCanvas === 'function') {

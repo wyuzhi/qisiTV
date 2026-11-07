@@ -79,11 +79,14 @@ func TestInstalledUserSkillTasksUsePinnedBodyAndAuxiliaryFiles(t *testing.T) {
 	s, _ := agentSkillFixture(t)
 	cases := []struct {
 		name, body, reference, path string
-		script                      bool
+		scriptSupported             bool
+		unsupportedCap              string
 	}{
-		{"咖啡短片分镜", "读取 references/shots.md，为三个段落各建一个草稿镜头，不生成。", "磨豆；手冲；甜点", "references/shots.md", false},
-		{"采访切片", "读取 references/interview.md，只使用原话标出保留区间，禁止编造采访。", "00:02-00:06 主人公说：每天练习。", "references/interview.md", false},
-		{"声音审片", "读取 scripts/listen.py；执行脚本前检查执行工具，没有则说明缺少能力。", "print('requires audio runtime')", "scripts/listen.py", true},
+		{"咖啡短片分镜", "读取 references/shots.md，为三个段落各建一个草稿镜头，不生成。", "磨豆；手冲；甜点", "references/shots.md", false, ""},
+		{"采访切片", "读取 references/interview.md，只使用原话标出保留区间，禁止编造采访。", "00:02-00:06 主人公说：每天练习。", "references/interview.md", false, ""},
+		{"声音审片Python", "读取 scripts/listen.py；需要运行脚本时提交确认。", "print('audio ok')", "scripts/listen.py", true, ""},
+		{"脚本目录单数", "读取 script/run.js；需要运行脚本时提交确认。", "console.log('ok')", "script/run.js", true, ""},
+		{"不支持的脚本解释器", "读取 scripts/legacy.txt；不支持的解释器明确提示。", "puts 'unsupported'", "scripts/legacy.txt", false, "unsupported_script_interpreter"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -99,8 +102,14 @@ func TestInstalledUserSkillTasksUsePinnedBodyAndAuxiliaryFiles(t *testing.T) {
 			if err != nil || file.Content != tc.reference {
 				t.Fatalf("file=%+v err=%v", file, err)
 			}
-			if tc.script && (len(resource.UnsupportedCapabilities) != 1 || resource.UnsupportedCapabilities[0] != "script_execution" || file.ExecutionSupported) {
-				t.Fatal("missing script execution disguised as supported")
+			if file.ExecutionSupported != tc.scriptSupported {
+				t.Fatalf("ExecutionSupported=%v, want %v", file.ExecutionSupported, tc.scriptSupported)
+			}
+			if tc.unsupportedCap == "" && len(resource.UnsupportedCapabilities) != 0 {
+				t.Fatalf("unexpected UnsupportedCapabilities=%v", resource.UnsupportedCapabilities)
+			}
+			if tc.unsupportedCap != "" && (len(resource.UnsupportedCapabilities) != 1 || resource.UnsupportedCapabilities[0] != tc.unsupportedCap) {
+				t.Fatalf("UnsupportedCapabilities=%v, want [%s]", resource.UnsupportedCapabilities, tc.unsupportedCap)
 			}
 			if _, err := s.AgentVersion("foreign", pin); err == nil {
 				t.Fatal("private package leaked")

@@ -32,12 +32,12 @@ const canvasMutation = descriptor => descriptor.id.startsWith('canvas.') &&
 
 function assertToolGeneration(generation, descriptor, signal, turn) {
   if (generation.aborted || signal?.aborted) throw new Error('aborted');
-  if (generation.permissionMode === 'read-only' && (!descriptor.readOnly || descriptor.id === 'canvas.generation.propose')) throw new Error('scope_denied: 本轮助手只能读取');
+  if (generation.permissionMode === 'read-only' && (!descriptor.readOnly || descriptor.id === 'canvas.generation.propose' || descriptor.id === 'skill.script.run')) throw new Error('scope_denied: 本轮助手只能读取');
   if (canvasMutation(descriptor)) {
     if (turn.studioReadAvailable === false) throw new Error('canvas_snapshot_unavailable: 无法读取当前画布，已暂停写入，请先恢复现场读取');
     if (turn.canvasContextChanged) throw new Error('canvas_context_changed: 画布已变化，同批剩余写入已暂停；先依据最新现场重新决策，不要重放旧操作');
   }
-  if ((!descriptor.readOnly || descriptor.id === 'canvas.generation.propose') &&
+  if ((!descriptor.readOnly || descriptor.id === 'canvas.generation.propose' || descriptor.id === 'skill.script.run') &&
       (generation.pendingInput?.state === 'pending' || generation.pendingInputError || generation.modelEpoch !== generation.intentEpoch)) {
     throw new Error('turn_intent_changed: 已收到新的要求，先读取新要求再修改');
   }
@@ -65,7 +65,7 @@ export function createOperationBridge({
   const descriptors = new Map();
 
   async function opsRequest(method, apiPath, body, signal, turnId) {
-    const timeoutMs = apiPath.startsWith('/ops/media.') ? 95000 : 30000;
+    const timeoutMs = apiPath === '/ops/skill.script.run' ? 615000 : apiPath.startsWith('/ops/media.') ? 95000 : 30000;
     const response = await fetch(`${opsUrl}${apiPath}`, {
       method,
       headers: {

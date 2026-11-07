@@ -607,15 +607,16 @@ const server = http.createServer(async (req, res) => {
       const body = JSON.parse((await readBody(req)) || '{}');
       const canvasId = String(body.canvasId || '').trim();
       const message = String(body.message || '').trim();
-      if (!canvasId || !message || message.length > 8000) {
+      const cleanKind = String(body.kind || 'event').replace(/[^a-z0-9_-]/gi, '_');
+      const maxEventMessageLen = cleanKind === 'skill_script_completed' ? 48000 : 8000;
+      if (!canvasId || !message || message.length > maxEventMessageLen) {
         respond(res, 400, { code: 400, reason: 'invalid_request' }); return;
       }
       const requestedSessionId = String(body.sessionId || '').trim();
       const currentSessionId = currentId(canvasId);
       const targetSessionId = requestedSessionId || currentSessionId;
-      const cleanKind = String(body.kind || 'event').replace(/[^a-z0-9_-]/gi, '_');
       if (
-        cleanKind === 'task_completed' &&
+        (cleanKind === 'task_completed' || cleanKind === 'skill_script_completed') &&
         !providerReason &&
         !READ_ONLY_MODE &&
         currentSessionId &&
@@ -647,7 +648,7 @@ const server = http.createServer(async (req, res) => {
               turnId,
               requestId: `event:${requestId}`,
               content,
-              userText: message,
+              userText: String(body.userText || message).trim() || message,
               revisionBefore: Number(body.revisionBefore || 0),
               permissionMode: 'canvas',
             });

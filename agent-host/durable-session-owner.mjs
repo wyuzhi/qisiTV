@@ -480,7 +480,7 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
   async function stopBeforeSubmit(entry, active) {
     await undoUnsubmittedSkills(entry, active);
     const record = { ...publicDurableTurn(active), reply: '', cancelled: true, error: null, errorReason: null,
-      toolCalls: [], change: null, proposals: [], status: 'unanswered', sessionId: entry.sessionId };
+      toolCalls: [], change: null, proposals: [], scriptProposals: [], status: 'unanswered', sessionId: entry.sessionId };
     let pending = null;
     // Use the same acknowledgement ordering as a submitted turn. A crash or failed
     // Go completion leaves active.result available to recovery, even without a submission.
@@ -759,6 +759,7 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
     const reasoning = durableReasoningSegments(turnEntries);
     return { ...publicDurableTurn(active), ...completion, reasoning,
       toolCalls: [...entry.log], change: turnChange(entry.turn), proposals: [...entry.turn.proposals],
+      scriptProposals: [...(entry.turn.scriptProposals || [])],
       ...(planView ? { plan: planView } : {}),
       status: settled.status, sessionId: entry.sessionId };
   }

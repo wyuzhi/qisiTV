@@ -61,10 +61,10 @@ func (s *AssistantScope) Allows(op *operations.Op, params json.RawMessage) error
 	}
 	// Broad modes rely on each shared domain handler's current ownership check.
 	// Skills remain pinned rather than discovering filesystem instructions.
-	if assistantturns.Mode(s.PermissionMode) != assistantturns.PermissionCanvas && op.ID != "skill.get" && op.ID != "skill.file" && op.ID != "skill.catalog" {
+	if assistantturns.Mode(s.PermissionMode) != assistantturns.PermissionCanvas && op.ID != "skill.get" && op.ID != "skill.file" && op.ID != "skill.catalog" && op.ID != "skill.script.run" {
 		return nil
 	}
-	if !op.ReadOnly && op.Scope == operations.ScopeCanvas {
+	if !op.ReadOnly && op.Scope == operations.ScopeCanvas && op.ID != "skill.script.run" {
 		if args.CanvasID == s.CanvasID {
 			return nil
 		}
@@ -91,6 +91,18 @@ func (s *AssistantScope) Allows(op *operations.Op, params json.RawMessage) error
 			return nil
 		}
 		return denied("只能读取本对话选择或已安装的技能版本")
+	case "skill.script.run":
+		if assistantturns.Mode(s.PermissionMode) == assistantturns.PermissionReadOnly {
+			return denied("本轮助手只能读取，不能运行技能脚本")
+		}
+		if assistantturns.Mode(s.PermissionMode) == assistantturns.PermissionCanvas && args.CanvasID != s.CanvasID {
+			return denied("只能在当前画布运行技能脚本")
+		}
+		pin := skills.Pin{SkillID: args.SkillID, VersionID: args.VersionID, ContentHash: args.ContentHash}.Identity()
+		if s.SkillPins[pin] {
+			return nil
+		}
+		return denied("请先加载或选用该技能，再运行它的脚本")
 	case "canvas.get":
 		if s.canvasAllowed(args.CanvasID) || s.projectReferenceAllowed("canvas", args.CanvasID) {
 			return nil

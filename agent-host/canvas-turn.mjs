@@ -17,7 +17,7 @@ export function toolCallCapabilityContext({ api, modelId }) {
 
 export function newTurnAccumulator() {
   return { turnId: '', seq: 0, toolSeq: 0, revisionBefore: 0, revisionAfter: 0,
-    createdNodeIds: [], updatedNodeIds: [], createdEdgeIds: [], operationIds: [], proposals: [],
+    createdNodeIds: [], updatedNodeIds: [], createdEdgeIds: [], operationIds: [], proposals: [], scriptProposals: [],
     timelineUpdated: false, writeChains: [], writeRequests: [] };
 }
 
@@ -32,6 +32,7 @@ export function resetTurnAccumulator(turn, revisionBefore, turnId = '') {
   turn.createdEdgeIds.length = 0;
   turn.operationIds.length = 0;
   turn.proposals.length = 0;
+  turn.scriptProposals = [];
   turn.timelineUpdated = false;
   turn.deletedNodeIds=[];
   turn.deletedEdgeIds=[];
@@ -143,6 +144,14 @@ export function collectTurnEffects(turn, opID, result, operationId) {
           ...(result.production ? { production: result.production } : {}),
           ...(result.source ? { source: { canvasId: result.source.canvasId,
             canvasRevision: result.source.canvasRevision, modelConfigRevision: result.source.modelConfigRevision } } : {}) });
+      }
+      break;
+    case 'skill.script.run':
+      if (result.proposal?.proposalId) {
+        turn.scriptProposals ||= [];
+        const index = turn.scriptProposals.findIndex((item) => item?.proposalId === result.proposal.proposalId);
+        if (index >= 0) turn.scriptProposals[index] = result.proposal;
+        else turn.scriptProposals.push(result.proposal);
       }
       break;
     default:

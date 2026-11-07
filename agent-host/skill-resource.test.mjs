@@ -50,22 +50,32 @@ test('update does not replace a pinned version and uninstall cannot silently use
   await assert.rejects(loadPinnedSkills({ pins: [pin], readVersion: async () => { throw Error('skill_uninstalled'); } }), /skill_uninstalled/);
 });
 
-test('auxiliary files require selected version and package relative path; scripts remain read only', async () => {
-  const readFile = async (selected, path) => ({ pin: selected, file: { path }, content: '原话来自采访素材', executionSupported: false });
+test('auxiliary files require selected version and package relative path; supported scripts expose executionSupported', async () => {
+  const readFile = async (selected, path) => ({
+    pin: selected,
+    file: { path },
+    content: path.startsWith('scripts/') ? 'console.log("ok")' : '原话来自采访素材',
+    executionSupported: path.startsWith('scripts/'),
+  });
   const result = await readPinnedSkillFile({ pins: [pin], pin, path: 'references/interview.md', readFile });
   assert.equal(result.content, '原话来自采访素材');
+  assert.equal(result.executionSupported, false);
+  const scriptResult = await readPinnedSkillFile({ pins: [pin], pin, path: 'scripts/run.js', readFile });
+  assert.equal(scriptResult.executionSupported, true);
   for (const path of ['../secrets', '/etc/passwd', 'https://example.com', 'scripts\\run.js']) {
     await assert.rejects(readPinnedSkillFile({ pins: [pin], pin, path, readFile }), /invalid_skill_path/);
   }
   await assert.rejects(readPinnedSkillFile({ pins: [], pin, path: 'SKILL.md', readFile }), /skill_not_selected/);
 });
 
-test('no selection performs no package discovery; script dependent skill exposes missing execution explicitly', async () => {
+test('no selection performs no package discovery; skill block advertises skill_script_run and unsupported capabilities', async () => {
   let called = false;
   assert.deepEqual(await loadPinnedSkills({ pins: [], readVersion: async () => { called = true; } }), []);
   assert.equal(called, false);
-  const block = formatSkillBlock({ ...resource, unsupportedCapabilities: ['script_execution'] });
-  assert.match(block, /script_execution/);
+  const supportedBlock = formatSkillBlock(resource);
+  assert.match(supportedBlock, /skill_script_run/);
+  const block = formatSkillBlock({ ...resource, unsupportedCapabilities: ['unsupported_script_interpreter'] });
+  assert.match(block, /unsupported_script_interpreter/);
   assert.match(block, /不把未执行的步骤说成完成/);
 });
 

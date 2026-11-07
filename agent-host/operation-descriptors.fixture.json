@@ -2057,6 +2057,78 @@
     "replay": "safe"
   },
   {
+    "id": "skill.script.run",
+    "summary": "运行已选用技能的脚本（用户确认后执行）",
+    "readOnly": false,
+    "scope": "canvas",
+    "params": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "items": {
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "canvasId": {
+          "type": "string"
+        },
+        "contentHash": {
+          "type": "string"
+        },
+        "note": {
+          "description": "告诉用户为什么运行",
+          "maxLength": 500,
+          "type": "string"
+        },
+        "operationId": {
+          "description": "调用方生成的稳定幂等键；重试同一操作必须复用同一个值，服务端据此回读原结果",
+          "type": "string"
+        },
+        "scriptPath": {
+          "description": "scripts/ 或 script/ 下的相对路径",
+          "type": "string"
+        },
+        "skillId": {
+          "type": "string"
+        },
+        "stdin": {
+          "maxLength": 65536,
+          "type": "string"
+        },
+        "timeoutSec": {
+          "description": "默认 120",
+          "maximum": 600,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "useWorkspaceOutputDir": {
+          "description": "输出目录经 BEEFTV_OUTPUT_DIR 传入",
+          "type": "boolean"
+        },
+        "versionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "canvasId",
+        "skillId",
+        "versionId",
+        "contentHash",
+        "scriptPath",
+        "operationId"
+      ],
+      "type": "object"
+    },
+    "assistantModes": [
+      "full-access",
+      "canvas"
+    ],
+    "replay": "safe"
+  },
+  {
     "id": "task.get",
     "summary": "查询任务状态与产物",
     "readOnly": true,

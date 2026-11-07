@@ -143,6 +143,66 @@ export type AssistantGenerationProposal = {
     source?: { canvasId: string; canvasRevision: number; modelConfigRevision: number };
 };
 
+export type AssistantScriptOutputFile = {
+    path: string;
+    size: number;
+};
+
+export type AssistantScriptRunResult = {
+    exitCode: number;
+    timedOut: boolean;
+    cancelled: boolean;
+    durationMs: number;
+    stdout: string;
+    stderr: string;
+    stdoutTruncated?: boolean;
+    stderrTruncated?: boolean;
+    outputFiles?: AssistantScriptOutputFile[];
+};
+
+export type AssistantScriptProposal = {
+    proposalId: string;
+    turnId: string;
+    canvasId: string;
+    sessionId?: string;
+    skillId: string;
+    skillName: string;
+    versionId: string;
+    version: string;
+    contentHash: string;
+    scriptPath: string;
+    interpreter: "python3" | "bash" | "node";
+    args: string[];
+    stdinPreview?: string;
+    hasStdin?: boolean;
+    timeoutSec: number;
+    useWorkspaceOutputDir?: boolean;
+    note?: string;
+    status: "pending" | "running" | "completed" | "failed" | "cancelled" | "skipped";
+    result?: AssistantScriptRunResult;
+};
+
+const SKILL_SCRIPT_CONFIRM_TIMEOUT_MS = 630_000;
+
+export async function confirmAssistantScriptProposal(
+    canvasId: string,
+    turnId: string,
+    proposalId: string,
+    alwaysAllowSession = false,
+) {
+    const sessionConfig = await uiSessionConfig();
+    return http.post<{
+        proposal: AssistantScriptProposal;
+        result: AssistantScriptRunResult;
+        woken?: boolean;
+        continuationMessage?: string;
+    }>(
+        `/assistant/turns/${encodeURIComponent(turnId)}/script-proposals/${encodeURIComponent(proposalId)}/run`,
+        { canvasId, alwaysAllowSession },
+        { ...sessionConfig, timeout: SKILL_SCRIPT_CONFIRM_TIMEOUT_MS },
+    );
+}
+
 export async function confirmAssistantProduction(canvasId: string, turnId: string, proposal: AssistantGenerationProposal, continuePlan = false) {
     return http.post<{ taskIds: string[]; continuationId: string; orderId?: string; order?: GenerationOrder }>(`/assistant/turns/${encodeURIComponent(turnId)}/proposals/${encodeURIComponent(proposal.proposalId)}/production`, {
         canvasId, kind: proposal.kind, nodeIds: proposal.nodeIds, targets: proposal.production?.targets, continuePlan,
@@ -181,6 +241,7 @@ export type AgentTurnEnd = {
     reasoning?: AssistantReasoningSegment[];
     change?: AssistantTurnChange | null;
     proposals?: AssistantGenerationProposal[];
+    scriptProposals?: AssistantScriptProposal[];
     outputs?: AssistantTurnOutput[];
     plan?: AssistantPlan | null;
     error: string | null;
@@ -207,6 +268,7 @@ export type AssistantTurn = {
     reasoning?: AssistantReasoningSegment[];
     change: AssistantTurnChange | null;
     proposals: AssistantGenerationProposal[];
+    scriptProposals?: AssistantScriptProposal[];
     outputs?: AssistantTurnOutput[];
     plan?: AssistantPlan | null;
     error: string | null;

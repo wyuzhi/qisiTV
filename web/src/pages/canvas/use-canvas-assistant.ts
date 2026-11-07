@@ -16,6 +16,7 @@ import {
     AgentChatNotAdmittedError,
     AgentStreamDetachedError,
     cancelAgentChat,
+    confirmAssistantScriptProposal,
     createAssistantSession,
     deleteAssistantSession,
     getAgentHostStatus,
@@ -27,6 +28,7 @@ import {
     undoAssistantTurn,
     type AgentChatReference,
     type AssistantAttachment,
+    type AssistantScriptProposal,
     type AssistantSkillSelection,
     type AssistantPermissionMode,
     type AgentHostStatus,
@@ -481,6 +483,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
                         reasoning: end.reasoning === undefined ? current.reasoning.map(segment => ({ ...segment, status: "done" as const })) : end.reasoning,
                         change: end.change ?? null,
                         proposals: end.proposals || [],
+                        scriptProposals: end.scriptProposals || [],
                         proposalsInvalidated: end.proposalsInvalidated,
                         outputs: end.outputs || [],
                         plan: end.plan ?? null,
@@ -761,6 +764,9 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
         }
     }, []);
 
+    const [runningScriptProposalIds, setRunningScriptProposalIds] = useState<ReadonlySet<string>>(() => new Set());
+    const [scriptProposalFeedback, setScriptProposalFeedback] = useState<Record<string, string>>({});
+
     const rememberProposal = useCallback((key: string) => {
         setHandledProposals((current) => {
             if (current.has(key)) return current;
@@ -773,6 +779,47 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
     }, []);
     const markProposalHandled = useCallback((proposalId: string) => rememberProposal(proposalId), [rememberProposal]);
     const markProposalDismissed = useCallback((proposalId: string) => rememberProposal(dismissedProposalKey(proposalId)), [rememberProposal]);
+
+    const runScriptProposal = useCallback(async (proposal: AssistantScriptProposal, turnId: string, alwaysAllowSession = false) => {
+        const targetCanvas = activeCanvasRef.current;
+        setRunningScriptProposalIds((prev) => {
+            const next = new Set(prev);
+            next.add(proposal.proposalId);
+            return next;
+        });
+        setScriptProposalFeedback((prev) => {
+            if (!prev[proposal.proposalId]) return prev;
+            const next = { ...prev };
+            delete next[proposal.proposalId];
+            return next;
+        });
+        try {
+            const res = await confirmAssistantScriptProposal(targetCanvas, turnId, proposal.proposalId, alwaysAllowSession);
+            rememberProposal(proposal.proposalId);
+            const current = runFor(targetCanvas);
+            current.turns = current.turns.map((turn) =>
+                turn.turnId === turnId
+                    ? {
+                          ...turn,
+                          scriptProposals: (turn.scriptProposals || []).map((item) =>
+                              item.proposalId === proposal.proposalId ? res.proposal : item,
+                          ),
+                      }
+                    : turn,
+            );
+            rerenderIfActive(targetCanvas);
+            await loadHistory(targetCanvas, current.sessionId ?? undefined);
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : "脚本运行失败，请稍后重试。";
+            setScriptProposalFeedback((prev) => ({ ...prev, [proposal.proposalId]: msg }));
+        } finally {
+            setRunningScriptProposalIds((prev) => {
+                const next = new Set(prev);
+                next.delete(proposal.proposalId);
+                return next;
+            });
+        }
+    }, [loadHistory, rememberProposal, rerenderIfActive, runFor]);
 
     const run = runFor(canvasId);
 
@@ -817,6 +864,9 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
         handledProposals,
         markProposalHandled,
         markProposalDismissed,
+        runScriptProposal,
+        runningScriptProposalIds,
+        scriptProposalFeedback,
         send,
         stop,
         retryLast,

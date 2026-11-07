@@ -160,6 +160,17 @@ describe("付费生成提议", () => {
             model: "wan3.0-video", modelKey: "beefapi::wan3.0-video", note: "两段镜头" }]);
     });
 
+    test("技能脚本提议在需确认与本对话始终允许自动完成时均记入 turn.scriptProposals 且按 proposalId 去重", () => {
+        const turn = resetTurnAccumulator(newTurnAccumulator(), 4);
+        const pendingProposal = { proposalId: "sp-1", status: "pending", scriptPath: "scripts/a.js" };
+        const autoProposal = { proposalId: "sp-2", status: "completed", scriptPath: "scripts/b.js", result: { exitCode: 0, stdout: "ok" } };
+        collectTurnEffects(turn, "skill.script.run", { status: "requires_confirmation", proposal: pendingProposal }, "op-sp-1");
+        collectTurnEffects(turn, "skill.script.run", { status: "completed", proposal: autoProposal }, "op-sp-2");
+        collectTurnEffects(turn, "skill.script.run", { status: "completed", proposal: { ...autoProposal, note: "replayed" } }, "op-sp-2");
+        expect(turn.scriptProposals).toEqual([pendingProposal, { ...autoProposal, note: "replayed" }]);
+        expect(turnChange(turn)).toBeNull();
+    });
+
     test("系统提示词必须禁止宣称已生成，并指向提议工具", () => {
         expect(SYSTEM_PROMPT).toContain("canvas_generation_propose");
         expect(SYSTEM_PROMPT).toContain("只有用户实际确认过的制作方案才能付费生成");

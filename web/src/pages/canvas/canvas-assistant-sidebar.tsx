@@ -319,6 +319,9 @@ export function CanvasAssistantSidebar(props: Props) {
                         onLocate={onLocateNodes}
                         onUndo={(turnId) => void assistant.undoTurn(turnId)}
                         onRunProposal={onRunProposal}
+                        onRunScriptProposal={(proposal, turnId, alwaysAllow) => void assistant.runScriptProposal(proposal, turnId, alwaysAllow)}
+                        runningScriptProposalIds={assistant.runningScriptProposalIds}
+                        scriptProposalFeedback={assistant.scriptProposalFeedback}
                         onDismissProposal={assistant.markProposalDismissed}
                         nodes={props.nodes}
                         onCheckResults={!readOnly && inputReady && !assistant.streaming && !assistant.sessionBusy ? prepareResultCheck : undefined}

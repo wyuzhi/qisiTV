@@ -176,7 +176,7 @@ export function publicDurableTurn(active, running = false) {
   // provider block; history and turn_end must both carry it or the panel would show
   // thinking while streaming and lose it on reload.
   const keys = ['permissionMode', 'turnId', 'requestId', 'submissionId', 'continuationId', 'userText', 'selectedNodeIds', 'attachments', 'skills',
-    'references', 'supplements', 'supplementInputs', 'createdAt', 'reply', 'toolCalls', 'change', 'proposals', 'plan',
+    'references', 'supplements', 'supplementInputs', 'createdAt', 'reply', 'toolCalls', 'change', 'proposals', 'scriptProposals', 'plan',
     'reasoning', 'cancelled', 'error', 'errorReason', 'sessionId', 'status'];
   const result = Object.fromEntries(keys.filter((key) => active[key] !== undefined).map((key) => [key, active[key]]));
   // Keep provider detail in the internal record; streams and old history share

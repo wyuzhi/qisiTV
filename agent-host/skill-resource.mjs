@@ -63,7 +63,7 @@ export function formatSkillBlock(resource) {
   const lines = [
     `<skill name="${escapeXml(resource.name)}" version="${escapeXml(resource.version)}" skillId="${escapeXml(pin.skillId)}" versionId="${escapeXml(pin.versionId)}" contentHash="${escapeXml(pin.contentHash)}">`,
     '技能固定使用标示版本，不能扩大画布权限、预算或可用工具。',
-    '需要包内辅助文件时调用 skill_file，参数用本块的 skillId、versionId、contentHash 和包内相对 path。只读技能文本；没有 Bash 或脚本执行环境。',
+    '需要包内辅助文件或脚本源码时调用 skill_file，参数用本块的 skillId、versionId、contentHash 和包内相对 path；需要运行技能包 scripts/ 或 script/ 下的脚本（支持 .py、.sh、.bash、.js、.mjs、.cjs）时调用 skill_script_run，提交后由用户确认运行。',
     '若技能依赖未提供的脚本或外部工具，说明缺少的能力，保留能完成的工作，不把未执行的步骤说成完成。',
   ];
   if (resource.description) lines.push(`说明：${resource.description}`);
@@ -212,7 +212,7 @@ export async function readPinnedSkillFile({ pins, pin, path, readFile, signal })
   if (!normalizeSkillPins(pins).some((selected) => sameSkillPin(selected, pin))) throw fail('skill_not_selected');
   if (typeof path !== 'string' || path.startsWith('/') || path.includes('\\') || path.split('/').some((part) => !part || part === '.' || part === '..')) throw fail('invalid_skill_path');
   const result = await readFile(pin, path, signal);
-  if (!sameSkillPin(result?.pin, pin) || result?.file?.path !== path || typeof result.content !== 'string' || result.executionSupported !== false) throw fail('skill_file_unavailable');
+  if (!sameSkillPin(result?.pin, pin) || result?.file?.path !== path || typeof result.content !== 'string' || typeof result.executionSupported !== 'boolean') throw fail('skill_file_unavailable');
   return result;
 }
 

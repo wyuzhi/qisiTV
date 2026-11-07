@@ -1,6 +1,6 @@
 // 助手面板里所有用户可见文案的唯一来源：机器可读原因、操作名和改动摘要都在这里
 // 翻译成用户语。组件只负责排版，不自己拼文案，避免同一种状态在两处写出两句话。
-import type { AgentLifecycleEvent, AgentToolCall, AssistantGenerationProposal, AssistantSkillSelection, AssistantTurnChange, AssistantUndoFailure } from "@/services/api/agent-assistant";
+import type { AgentLifecycleEvent, AgentToolCall, AssistantGenerationProposal, AssistantScriptProposal, AssistantSkillSelection, AssistantTurnChange, AssistantUndoFailure } from "@/services/api/agent-assistant";
 import { seedancePortraitLabel } from "@/lib/seedance-portrait";
 import type { CanvasNodeData } from "@/types/canvas";
 import { authoritativeNodeOutcome } from "@/lib/canvas/canvas-node-failure-state";
@@ -66,6 +66,9 @@ export function assistantActionLabel(tool: string | undefined): string {
             return "生成素材";
         case "canvas.project.export":
             return "导出工程";
+        case "skill.script.run":
+        case "skill_script_run":
+            return "运行技能脚本";
         default:
             return "改动画布";
     }
@@ -314,6 +317,7 @@ const ASSISTANT_TOOL_ACTIVITY: Record<string, [string, string]> = {
     canvas_timeline_render: ["正在提交成片合成。", "已提交成片合成"],
     canvas_timeline_deliver: ["正在合成视频并保存可编辑工程。", "已完成交付操作"],
     canvas_generation_propose: ["正在准备生成方案。", "已准备生成方案"],
+    skill_script_run: ["正在准备技能脚本。", "已完成技能脚本操作"],
 };
 
 /** 只显示官方活动和已核对的操作回执，不把工具完成等同于创作质量验收。 */
@@ -475,4 +479,53 @@ export function assistantSkillLabel(skill: Pick<AssistantSkillSelection, "skillN
     if (!name) return "技能：已移除的技能";
     const version = skill.version?.trim();
     return version ? `技能：${name} · ${version}` : `技能：${name}`;
+}
+
+export function assistantScriptInterpreterLabel(interpreter: AssistantScriptProposal["interpreter"]): string {
+    switch (interpreter) {
+        case "python3":
+            return "Python 3";
+        case "bash":
+            return "Bash";
+        case "node":
+            return "内置 Node.js";
+        default:
+            return String(interpreter || "");
+    }
+}
+
+export function assistantScriptProposalLines(proposal: AssistantScriptProposal, awaitingConfirmation = true): string[] {
+    const skillTitle = proposal.version ? `${proposal.skillName}（${proposal.version}）` : proposal.skillName;
+    const lines = [
+        `运行技能脚本 · ${skillTitle}`,
+        `脚本路径：${proposal.scriptPath}`,
+        `运行方式：${assistantScriptInterpreterLabel(proposal.interpreter)}`,
+        `启动参数：${proposal.args?.length ? proposal.args.join(" ") : "无"}`,
+    ];
+    if (proposal.hasStdin && proposal.stdinPreview) {
+        lines.push(`标准输入：${proposal.stdinPreview}`);
+    }
+    if (proposal.note?.trim()) {
+        lines.push(`说明：${proposal.note.trim()}`);
+    }
+    if (awaitingConfirmation) {
+        lines.push(`在独立临时目录中运行，限时 ${proposal.timeoutSec || 120} 秒，不会修改已安装的技能文件，也不会读取你的模型密钥。`);
+    }
+    return lines;
+}
+
+export function assistantScriptResultStatusText(proposal: AssistantScriptProposal): string {
+    const result = proposal.result;
+    if (!result) {
+        if (proposal.status === "running") return "正在运行脚本…";
+        if (proposal.status === "cancelled") return "已停止运行";
+        if (proposal.status === "failed") return "运行未成功";
+        if (proposal.status === "completed") return "已完成";
+        return "待确认";
+    }
+    const seconds = Math.max(0.1, Math.round((result.durationMs || 0) / 100) / 10);
+    if (result.cancelled || proposal.status === "cancelled") return `已停止运行（耗时 ${seconds} 秒）`;
+    if (result.timedOut) return `运行超时（限时 ${proposal.timeoutSec || 120} 秒）`;
+    if (result.exitCode === 0 && proposal.status === "completed") return `已完成（耗时 ${seconds} 秒）`;
+    return `运行未成功（退出码 ${result.exitCode}，耗时 ${seconds} 秒）`;
 }

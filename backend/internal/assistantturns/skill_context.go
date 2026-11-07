@@ -228,6 +228,9 @@ func (s *Service) changeSkillContext(userID, canvasID string, change SkillContex
 			pins = SortedSkillPins(change.Pins)
 		case "clear":
 			pins = []skills.Pin{}
+			if err := tx.Where("user_id = ? AND op = ? AND payload_hash = ? AND client_id = ?", userID, "skill.script.session_allow", canvasID, change.SessionID).Delete(&model.AgentOpRecord{}).Error; err != nil {
+				return err
+			}
 		case "new_scope":
 			pins = SortedSkillPins(change.Pins)
 			row.ScopeID, err = newScopeID()
@@ -235,6 +238,9 @@ func (s *Service) changeSkillContext(userID, canvasID string, change SkillContex
 				return err
 			}
 			row.Lifecycle = "reset_pending"
+			if err := tx.Where("user_id = ? AND op = ? AND payload_hash = ? AND client_id = ?", userID, "skill.script.session_allow", canvasID, change.SessionID).Delete(&model.AgentOpRecord{}).Error; err != nil {
+				return err
+			}
 		}
 		if validate != nil && change.Action != "clear" {
 			pins, err = validate(tx, pins)

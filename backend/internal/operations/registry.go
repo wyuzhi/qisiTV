@@ -313,7 +313,8 @@ func (r *Registry) Execute(req Request) (Result, error) {
 	}
 	outcome, err := r.store.RunDomain(runCtx, runReq, r.binder, func(domain Domain) ([]byte, error) {
 		activeDomain = domain
-		if !op.ReadOnly && strings.TrimSpace(target.CanvasID) != "" {
+		trackCanvasWrite := !op.ReadOnly && op.ID != "skill.script.run" && strings.TrimSpace(target.CanvasID) != ""
+		if trackCanvasWrite {
 			beforeCanvasRaw, _ = domain.UserCanvasProject(req.UserID, target.CanvasID)
 		}
 		execCtx := &Context{Context: runCtx, UserID: req.UserID, Caller: caller, Domain: domain, OperationID: opID, TurnID: req.TurnID}
@@ -321,7 +322,7 @@ func (r *Registry) Execute(req Request) (Result, error) {
 		if runErr != nil {
 			return nil, AsError(runErr)
 		}
-		if !op.ReadOnly && strings.TrimSpace(target.CanvasID) != "" && len(beforeCanvasRaw) > 0 {
+		if trackCanvasWrite && len(beforeCanvasRaw) > 0 {
 			if afterCanvasRaw, afterErr := domain.UserCanvasProject(req.UserID, target.CanvasID); afterErr == nil {
 				if write, changed := BuildCanvasWriteRecord(opID, op.ID, target.CanvasID, req.TurnID, caller, beforeCanvasRaw, afterCanvasRaw); changed {
 					pendingWrite = write

@@ -59,6 +59,7 @@ func TestMCPClientLoop(t *testing.T) {
 		"conversation.message.attach": true,
 		"skill.publish.prepare":       true,
 		"skill.publish.status":        true,
+		"skill.script.run":            true,
 	}
 	var expected []operations.Descriptor
 	for _, op := range registry.List(operations.ManualCaller(false)) {

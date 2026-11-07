@@ -953,7 +953,7 @@ func runMCP(c *client, args []string) error {
 }
 
 func isDefaultMCPOperation(id string) bool {
-	return !strings.HasPrefix(id, "conversation.") && !strings.HasPrefix(id, "skill.publish.")
+	return !strings.HasPrefix(id, "conversation.") && !strings.HasPrefix(id, "skill.publish.") && id != "skill.script.run"
 }
 
 func orNone(value string) string {

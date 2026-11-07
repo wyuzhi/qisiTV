@@ -4,8 +4,8 @@ import { Crosshair, Undo2 } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { ASSISTANT_PROPOSAL_INVALIDATED_TEXT, ASSISTANT_PROPOSAL_UNDONE_TEXT, agentAssistantFailureText, type AgentToolCall, type AssistantGenerationProposal, type AssistantTurn } from "@/services/api/agent-assistant";
-import { ASSISTANT_UNDONE_INCOMPLETE_TEXT, assistantChangeSummary, assistantSkillLabel, assistantChangedNodeIds, assistantOrderTargetLines, assistantProductionProposalParts, assistantProposalText, assistantProposalProgress, assistantTurnCanContinue, assistantUnresolvedFailures, assistantUndoFailureText, assistantVisibleReply } from "./canvas-assistant-copy";
+import { ASSISTANT_PROPOSAL_INVALIDATED_TEXT, ASSISTANT_PROPOSAL_UNDONE_TEXT, agentAssistantFailureText, type AgentToolCall, type AssistantGenerationProposal, type AssistantScriptProposal, type AssistantTurn } from "@/services/api/agent-assistant";
+import { ASSISTANT_UNDONE_INCOMPLETE_TEXT, assistantChangeSummary, assistantSkillLabel, assistantChangedNodeIds, assistantOrderTargetLines, assistantProductionProposalParts, assistantProposalText, assistantProposalProgress, assistantScriptProposalLines, assistantScriptResultStatusText, assistantTurnCanContinue, assistantUnresolvedFailures, assistantUndoFailureText, assistantVisibleReply } from "./canvas-assistant-copy";
 import type { CanvasNodeData } from "@/types/canvas";
 import { dismissedProposalKey, type AssistantTurnStatus } from "./use-canvas-assistant";
 import { modelOptionName, resolveModelChannel, useEffectiveConfig } from "@/stores/use-config-store";
@@ -31,6 +31,9 @@ type Props = {
     onLocate: (nodeIds: string[]) => void;
     onUndo: (turnId: string) => void;
     onRunProposal: (proposal: AssistantGenerationProposal, turnId: string) => void;
+    onRunScriptProposal?: (proposal: AssistantScriptProposal, turnId: string, alwaysAllowSession: boolean) => void;
+    runningScriptProposalIds?: ReadonlySet<string>;
+    scriptProposalFeedback?: Record<string, string>;
     onDismissProposal: (proposalId: string) => void;
     onContinue?: () => void;
     nodes?: CanvasNodeData[];
@@ -69,7 +72,7 @@ export function CanvasAssistantUserMessage({ text, selectedCount, continuationId
     );
 }
 
-export function CanvasAssistantTurnView({ turn, canvasId, sessionId, status, handledProposals, proposalFeedback, runningProposalIds, generationDisabled, onLocate, onUndo, onRunProposal, onDismissProposal, onContinue, nodes, onCheckResults, reasoningOpen, onReasoningOpenChange }: Props) {
+export function CanvasAssistantTurnView({ turn, canvasId, sessionId, status, handledProposals, proposalFeedback, runningProposalIds, generationDisabled, onLocate, onUndo, onRunProposal, onRunScriptProposal, runningScriptProposalIds, scriptProposalFeedback, onDismissProposal, onContinue, nodes, onCheckResults, reasoningOpen, onReasoningOpenChange }: Props) {
     const { message } = App.useApp();
     const config = useEffectiveConfig();
     const toolCardEntries = usePluginSlot("assistant.toolCard");
@@ -262,6 +265,70 @@ export function CanvasAssistantTurnView({ turn, canvasId, sessionId, status, han
                             <div className="canvas-assistant-card-actions">
                                 <Button size="small" type="primary" autoInsertSpace={false} loading={running} disabled={generationDisabled || Boolean(priceError)} onClick={() => onRunProposal(proposal, turn.turnId)}>
                                     {proposal.production ? "确认并制作整片" : "生成"}
+                                </Button>
+                                <Button size="small" disabled={running} onClick={() => onDismissProposal(proposal.proposalId)}>
+                                    先不用
+                                </Button>
+                            </div>
+                        )}
+                    </div>
+                );
+            })}
+
+            {(turn.scriptProposals || []).map((proposal) => {
+                const running = Boolean(runningScriptProposalIds?.has(proposal.proposalId)) || proposal.status === "running";
+                const finished = proposal.status === "completed" || proposal.status === "failed" || proposal.status === "cancelled" || Boolean(proposal.result);
+                const skipped = handledProposals.has(dismissedProposalKey(proposal.proposalId)) || proposal.status === "skipped";
+                const awaitingConfirmation = !finished && !running && !skipped && !undone && !turn.proposalsInvalidated;
+                const lines = assistantScriptProposalLines(proposal, awaitingConfirmation);
+                const feedback = scriptProposalFeedback?.[proposal.proposalId] || proposalFeedback?.[proposal.proposalId];
+                const hasOutput = Boolean(proposal.result && (proposal.result.stdout || proposal.result.stderr));
+                return (
+                    <div key={proposal.proposalId} className="canvas-assistant-card">
+                        <div className="canvas-assistant-proposal-lines">
+                            {lines.map((line, index) => (
+                                <div key={index} className={line.length > 80 ? "canvas-assistant-pretty-line" : undefined}>{line}</div>
+                            ))}
+                        </div>
+                        {feedback ? <span className="canvas-assistant-meta" role="status" style={{ overflowWrap: "anywhere" }}>{feedback}</span> : null}
+                        {finished ? (
+                            <>
+                                <span className="canvas-assistant-meta" role="status">{assistantScriptResultStatusText(proposal)}</span>
+                                {hasOutput ? (
+                                    <details className="canvas-assistant-proposal-details">
+                                        <summary>查看脚本输出</summary>
+                                        <div className="canvas-assistant-proposal-targets">
+                                            {proposal.result?.stdout ? (
+                                                <div className="canvas-assistant-proposal-target">
+                                                    <div className="canvas-assistant-meta">标准输出：</div>
+                                                    <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", margin: 0 }}>{proposal.result.stdout}</pre>
+                                                </div>
+                                            ) : null}
+                                            {proposal.result?.stderr ? (
+                                                <div className="canvas-assistant-proposal-target">
+                                                    <div className="canvas-assistant-meta">错误输出：</div>
+                                                    <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", margin: 0 }}>{proposal.result.stderr}</pre>
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    </details>
+                                ) : null}
+                            </>
+                        ) : running ? (
+                            <span className="canvas-assistant-meta" role="status">正在运行脚本…</span>
+                        ) : undone ? (
+                            <span className="canvas-assistant-meta">这一轮已撤销，不会运行脚本。</span>
+                        ) : skipped ? (
+                            <span className="canvas-assistant-meta">这次没有运行脚本</span>
+                        ) : turn.proposalsInvalidated ? (
+                            <span className="canvas-assistant-meta" role="status">已失效，请让助手重新提出脚本运行请求。</span>
+                        ) : (
+                            <div className="canvas-assistant-card-actions">
+                                <Button size="small" type="primary" autoInsertSpace={false} loading={running} disabled={generationDisabled} onClick={() => onRunScriptProposal?.(proposal, turn.turnId, false)}>
+                                    运行脚本
+                                </Button>
+                                <Button size="small" disabled={generationDisabled || running} onClick={() => onRunScriptProposal?.(proposal, turn.turnId, true)}>
+                                    本对话始终允许
                                 </Button>
                                 <Button size="small" disabled={running} onClick={() => onDismissProposal(proposal.proposalId)}>
                                     先不用

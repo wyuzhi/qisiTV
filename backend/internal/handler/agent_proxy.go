@@ -21,6 +21,7 @@ import (
 	"infinite-canvas/backend/internal/app"
 	"infinite-canvas/backend/internal/assistantruntime"
 	"infinite-canvas/backend/internal/assistantturns"
+	"infinite-canvas/backend/internal/operations"
 	"infinite-canvas/backend/internal/skills"
 	httptransport "infinite-canvas/backend/internal/transport/http"
 )
@@ -254,6 +255,9 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 							turn["permissionMode"] = state.PermissionMode
 							pins = state.SkillPins
 						}
+						if scriptProposals, spErr := operations.ListTurnSkillScriptProposals(svc.Database(), c.GetString("agentUserId"), strings.TrimSpace(c.Query("canvasId")), turnID); spErr == nil && len(scriptProposals) > 0 {
+							turn["scriptProposals"] = scriptProposals
+						}
 						labelAssistantSkills(turn, pins, installed)
 					}
 				}
@@ -291,6 +295,7 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 
 	registerAssistantSkillContextRoutes(r, svc, guard, hostJSON)
 	registerAssistantContinuationRoutes(r, svc, guard)
+	registerAssistantSkillScriptRoutes(r, svc, host, guard, requireOwnedCanvas)
 	r.GET("/assistant/sessions", func(c *gin.Context) {
 		if !guard(c, false) {
 			return
@@ -366,6 +371,8 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 		if !stopAssistantContinuationsForIntent(c, svc, host, canvasID, sessionID) {
 			return
 		}
+		_ = operations.RevokeSessionScriptAllows(svc.Database(), c.GetString("agentUserId"), canvasID, sessionID)
+		svc.SkillsDomain().CancelScriptRuns(canvasID, sessionID, "")
 		body, _ := json.Marshal(map[string]string{"canvasId": canvasID, "sessionId": sessionID})
 		hostJSON(c, http.MethodDelete, "/sessions", body)
 	})
@@ -412,6 +419,7 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 			failService(c, err)
 			return
 		}
+		svc.SkillsDomain().CancelScriptRuns(payload.CanvasID, "", c.Param("turnId"))
 		ok(c, gin.H{"revision": revision})
 	})
 
@@ -755,6 +763,7 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 			target["sessionId"] = *payload.SessionID
 			target["requestId"] = *payload.RequestID
 		}
+		svc.SkillsDomain().CancelScriptRuns(payload.CanvasID, cancelSession, "")
 		if err := svc.AssistantTurns().CancelContinuations(c.GetString("agentUserId"), payload.CanvasID, cancelSession, false); err != nil {
 			failService(c, err)
 			return
