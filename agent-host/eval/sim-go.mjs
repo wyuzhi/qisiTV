@@ -1165,6 +1165,22 @@ export function createSimGo(options = {}) {
         if (!imageCfg && referenceNodeIds.length > 0) {
           throw invalidArg('invalid_params', '角色或风格参考用于首帧图片；视频沿用各分镜自己的首帧');
         }
+        const titleTemplates = {};
+        for (const [kind, cfg] of [['image', imageCfg], ['video', videoCfg]]) {
+          if (!cfg || cfg.title === undefined) continue;
+          if (typeof cfg.title !== 'string') {
+            throw invalidArg('invalid_parameter', '草稿标题必须是字符串');
+          }
+          const template = cfg.title.trim();
+          if (!template) continue;
+          if (!template.includes('{n}')) {
+            throw invalidArg('invalid_parameter', '草稿标题模板必须包含 {n} 以代表镜号，例如「镜 {n} 首帧」');
+          }
+          if ([...template].length > 40) {
+            throw invalidArg('invalid_parameter', '草稿标题模板最多 40 个字');
+          }
+          titleTemplates[kind] = template;
+        }
         const doc = clone(ensureCanvas(canvasId));
         if (doc.revision !== expectedRevision) {
           counts.revisionConflicts += 1;
@@ -1215,6 +1231,28 @@ export function createSimGo(options = {}) {
           if (!scriptNode) throw notFound('node_not_found', `目标节点不存在: ${nodeId}`);
         }
         const rows = scriptNode.metadata?.storyboard?.rows || [];
+        // 与后端一致：建节点前比较本批全部最终标题，模板标题不能与本批任何标题（含默认标题）
+        // 或画布已有标题重复；不带模板的批次保持原行为。
+        if (titleTemplates.image || titleTemplates.video) {
+          const batch = [];
+          for (const rId of rowIds) {
+            const row = rows.find((r) => r.id === rId);
+            if (!row) continue;
+            for (const [kind, cfg, label] of [['image', imageCfg, '首帧'], ['video', videoCfg, '视频']]) {
+              if (!cfg) continue;
+              const template = titleTemplates[kind];
+              const title = (template ? template.replaceAll('{n}', String(row.shotNumber)) : `镜头 ${row.shotNumber} · ${label}`).trim();
+              batch.push({ title, templated: Boolean(template) });
+            }
+          }
+          const existing = new Set((doc.nodes || []).map((n) => String(n.title || '').trim()).filter(Boolean));
+          for (const item of batch.filter((entry) => entry.templated)) {
+            if (batch.filter((entry) => entry.title === item.title).length > 1) {
+              throw invalidArg('invalid_params', `同一批次内标题重复: ${item.title}`);
+            }
+            if (existing.has(item.title)) throw conflict('duplicate_node_title', `标题已存在: ${item.title}`);
+          }
+        }
         let x = 120;
         for (const n of doc.nodes || []) {
           const right = Number(n.position?.x || 0) + Number(n.width || 320) + 60;
@@ -1245,13 +1283,15 @@ export function createSimGo(options = {}) {
             }
             nodeSeq += 1;
             const mId = `node-${nodeSeq}`;
-            const title = `镜头 ${row.shotNumber} · ${label}`;
+            const title = titleTemplates[kind]
+              ? titleTemplates[kind].replaceAll('{n}', String(row.shotNumber))
+              : `镜头 ${row.shotNumber} · ${label}`;
             const meta = buildDefaultMetadata(kind, promptText);
             meta.workflowKind = 'shot';
             meta.shotIndex = row.shotNumber;
             meta.model = choice.modelKey;
             for (const [k, v] of Object.entries(cfg)) {
-              if (k !== 'model') meta[k] = v;
+              if (k !== 'model' && k !== 'title') meta[k] = v;
             }
             if (kind === 'video') {
               meta.seconds = String(row.durationSeconds || 6);

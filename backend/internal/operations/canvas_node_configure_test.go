@@ -105,10 +105,12 @@ func TestConfigureRejectsForeignKindUnknownFieldsAndMalformedValues(t *testing.T
 type prepareProbe struct {
 	*configureProbe
 	prepared bool
+	input    canvas.StoryboardPreparation
 }
 
-func (p *prepareProbe) PrepareUserCanvasStoryboard(_ string, _ string, _ string, _ canvas.StoryboardPreparation, expected int64) (canvas.UserDataSummary, canvas.StoryboardPreparationResult, error) {
+func (p *prepareProbe) PrepareUserCanvasStoryboard(_ string, _ string, _ string, input canvas.StoryboardPreparation, expected int64) (canvas.UserDataSummary, canvas.StoryboardPreparationResult, error) {
 	p.prepared = true
+	p.input = input
 	return canvas.UserDataSummary{Revision: expected + 1}, canvas.StoryboardPreparationResult{}, nil
 }
 

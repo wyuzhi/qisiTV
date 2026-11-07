@@ -705,6 +705,11 @@
             },
             "size": {
               "type": "string"
+            },
+            "title": {
+              "description": "标题模板，{n} 为镜号，如「镜 {n} 首帧」；省略默认「镜头 {n} · 首帧」",
+              "maxLength": 40,
+              "type": "string"
             }
           },
           "required": [
@@ -788,6 +793,11 @@
               "type": "string"
             },
             "size": {
+              "type": "string"
+            },
+            "title": {
+              "description": "标题模板，{n} 为镜号，如「镜 {n} 视频」；省略默认「镜头 {n} · 视频」",
+              "maxLength": 40,
               "type": "string"
             }
           },

@@ -742,3 +742,39 @@ describe('请求归属、原文落盘与场景收尾', () => {
     expect(evaluateWith({ size: '1024x1024' })).toBe(false);
   });
 });
+
+describe('模拟器分镜准备的标题模板与真实后端一致', () => {
+  const prepare = (simGo, canvasId, extra) => simGo.executeOp('canvas.script.prepare', {
+    canvasId,
+    expectedRevision: simGo.ensureCanvas(canvasId).revision,
+    script: { title: `分镜-${crypto.randomUUID()}`, rows: [
+      { plotDescription: '一', imageGenerationPrompt: '一', videoMotionPrompt: '一', durationSeconds: 5 },
+      { plotDescription: '二', imageGenerationPrompt: '二', videoMotionPrompt: '二', durationSeconds: 5 },
+    ] },
+    ...extra,
+  }, crypto.randomUUID(), 'turn-t');
+
+  test('按模板命名，非法模板与重名整批拒绝', () => {
+    const simGo = createSimGo({ hostToken: 't' });
+    const canvasId = 'c-title';
+    simGo.ensureCanvas(canvasId);
+    prepare(simGo, canvasId, { image: { model: 'seedream-3.0', title: '镜 {n} 首帧' } });
+    const imageTitles = simGo.ensureCanvas(canvasId).nodes.filter((node) => node.type === 'image').map((node) => node.title);
+    expect(imageTitles).toEqual(['镜 1 首帧', '镜 2 首帧']);
+    for (const title of [null, '镜 首帧', `${'镜'.repeat(38)}{n}`]) {
+      expect(() => prepare(simGo, canvasId, { image: { model: 'seedream-3.0', title } })).toThrow();
+    }
+    const nodesBefore = simGo.ensureCanvas(canvasId).nodes.length;
+    expect(() => prepare(simGo, canvasId, { image: { model: 'seedream-3.0', title: '镜 {n} 首帧' } })).toThrow();
+    expect(() => prepare(simGo, canvasId, {
+      image: { model: 'seedream-3.0', title: '镜 {n}' }, video: { model: 'seedance-1.0', generateAudio: 'false', title: '镜 {n}' },
+    })).toThrow();
+    for (const [image, video] of [
+      [{ model: 'seedream-3.0' }, { model: 'seedance-1.0', generateAudio: 'false', title: '镜头 {n} · 首帧' }],
+      [{ model: 'seedream-3.0', title: '镜头 {n} · 视频' }, { model: 'seedance-1.0', generateAudio: 'false' }],
+    ]) {
+      expect(() => prepare(simGo, canvasId, { image, video })).toThrow();
+    }
+    expect(simGo.ensureCanvas(canvasId).nodes.length).toBe(nodesBefore);
+  });
+});
