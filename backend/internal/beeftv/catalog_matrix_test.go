@@ -9,8 +9,8 @@ import (
 	"infinite-canvas/backend/internal/workspace"
 )
 
-func TestFetchedBeefAPICatalogEveryModelHasTheCorrectGenerationFamily(t *testing.T) {
-	raw, err := os.ReadFile("../../../fixtures/model-catalog/beefapi-20261013.json")
+func TestFetchedBeefTVCatalogEveryModelHasTheCorrectGenerationFamily(t *testing.T) {
+	raw, err := os.ReadFile("../../../fixtures/model-catalog/beeftv-20261013.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,8 +44,8 @@ func TestFetchedBeefAPICatalogEveryModelHasTheCorrectGenerationFamily(t *testing
 }
 
 // 默认值必须落在真实目录里的对话模型上，否则新用户连上后没有可用的助手模型。
-func TestFetchedBeefAPICatalogInitializesDeepSeekAssistantDefault(t *testing.T) {
-	raw, err := os.ReadFile("../../../fixtures/model-catalog/beefapi-20261013.json")
+func TestFetchedBeefTVCatalogInitializesDeepSeekAssistantDefault(t *testing.T) {
+	raw, err := os.ReadFile("../../../fixtures/model-catalog/beeftv-20261013.json")
 	if err != nil {
 		t.Fatal(err)
 	}

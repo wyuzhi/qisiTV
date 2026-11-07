@@ -54,7 +54,7 @@ func TestUnversionedBYOKVideoRetainsItsDocumentedLimits(t *testing.T) {
 }
 
 func TestServerVideoOperationReferencesUseExplicitOperation(t *testing.T) {
-	body, err := os.ReadFile("../beefapi/testdata/managed-video-catalog.json")
+	body, err := os.ReadFile("../beeftv/testdata/managed-video-catalog.json")
 	if err != nil {
 		t.Fatal(err)
 	}

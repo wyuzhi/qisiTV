@@ -97,7 +97,7 @@ func TestGeminiAppliedCatalogResolvesBundledProvider(t *testing.T) {
 	}
 }
 
-func TestCatalogCapabilityMapsBeefAPIEndpointTypes(t *testing.T) {
+func TestCatalogCapabilityMapsBeefTVEndpointTypes(t *testing.T) {
 	cases := []struct {
 		id        string
 		modelType string

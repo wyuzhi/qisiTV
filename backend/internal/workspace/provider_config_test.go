@@ -14,10 +14,10 @@ import (
 	"time"
 )
 
-func TestProviderConfigMigratesLegacyBeefAPIStateWithoutLosingLocalChoices(t *testing.T) {
+func TestProviderConfigMigratesLegacyBeefTVStateWithoutLosingLocalChoices(t *testing.T) {
 	dir := t.TempDir()
 	legacy := `{
-        "channels":[{"id":"beeftv","name":"BeefAPI old","baseUrl":"https://old.invalid","apiKey":"local-secret","headers":[{"name":"X-Site","value":"desktop"}],"enabled":false,"models":["legacy-model"],"modelProfiles":[{"model":"seedance-2.0-fast","protocol":"newapi-channel-1","capability":"video"}]}],
+        "channels":[{"id":"beeftv","name":"BeefTV old","baseUrl":"https://old.invalid","apiKey":"local-secret","headers":[{"name":"X-Site","value":"desktop"}],"enabled":false,"models":["legacy-model"],"modelProfiles":[{"model":"seedance-2.0-fast","protocol":"newapi-channel-1","capability":"video"}]}],
         "imageModel":"beeftv::gpt-image-2","videoModel":"beeftv::seedance-2.0-fast","textModel":"beeftv::gpt-5.6-sol","audioModel":"beeftv::minimax-music-v3.0"
     }`
 	if err := os.WriteFile(filepath.Join(dir, LocalProviderConfigFile), []byte(legacy), 0o600); err != nil {
@@ -64,7 +64,7 @@ func TestProviderConfigMigratesLegacyBeefAPIStateWithoutLosingLocalChoices(t *te
 	}
 }
 
-func TestProviderConfigSeedsBeefAPIWhenLocalStateIsMissing(t *testing.T) {
+func TestProviderConfigSeedsBeefTVWhenLocalStateIsMissing(t *testing.T) {
 	store, err := NewProviderConfig(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

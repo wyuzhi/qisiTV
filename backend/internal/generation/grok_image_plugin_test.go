@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/protocol"
 )
 
@@ -192,7 +192,7 @@ func TestGrokImagePluginFailuresRemainFailures(t *testing.T) {
 func TestGrokImageManagedConnectionRetainsPriority(t *testing.T) {
 	registry, _ := protocol.NewRegistry()
 	ctx := WithProtocolRegistry(context.Background(), registry)
-	_, err := RunImageTask(ctx, Input{Mode: "image", Config: Config{CredentialRef: beefapi.CredentialRef, InterfaceType: "grok-image", Model: "grok-imagine-image"}})
+	_, err := RunImageTask(ctx, Input{Mode: "image", Config: Config{CredentialRef: beeftv.CredentialRef, InterfaceType: "grok-image", Model: "grok-imagine-image"}})
 	if err == nil || !strings.Contains(err.Error(), "持久化提交标识") {
 		t.Fatalf("managed image must reach its own persistence guard before Grok routing: %v", err)
 	}

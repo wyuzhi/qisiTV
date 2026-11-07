@@ -10,7 +10,7 @@ import (
 	"infinite-canvas/backend/internal/model"
 )
 
-func TestTaskInputUsesCustomChannelManagedBeefAPI(t *testing.T) {
+func TestTaskInputUsesCustomChannelManagedBeefTV(t *testing.T) {
 	withCreds := map[string]any{"config": map[string]any{
 		"credentialRef": managedCredentialRef,
 		"baseUrl":       "https://beeftv.app/v1",

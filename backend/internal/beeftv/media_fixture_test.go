@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// Fixtures are serialized by BeefAPI ResolveManagedImageTask, not reconstructed
+// Fixtures are serialized by BeefTV ResolveManagedImageTask, not reconstructed
 // client-side DTO examples. Synthetic signatures are used for parsing only.
 func TestManagedMediaServerProjectionFixtures(t *testing.T) {
 	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "true")

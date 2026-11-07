@@ -19,7 +19,7 @@ import (
 	"infinite-canvas/backend/internal/skillhub"
 )
 
-// Opt-in integration against BeefAPI's isolated TestSkillHubLocalIntegrationServer.
+// Opt-in integration against BeefTV's isolated TestSkillHubLocalIntegrationServer.
 // It accepts only that synthetic loopback fixture, never a real account or host.
 func TestPublicationRealSkillHubCanonicalRoundTrip(t *testing.T) {
 	path := os.Getenv("BEEFTV_SKILLHUB_TEST_RECEIPT")

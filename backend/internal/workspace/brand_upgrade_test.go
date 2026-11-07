@@ -6,8 +6,8 @@ import (
 )
 
 func TestBrandPresetPreservesLegacyOriginAndReferences(t *testing.T) {
-	for _, origin := range []string{"", "https://enterprise.beefapi.com", "https://beeftv.app"} {
-		channel, err := presetChannelMap(providerpreset.BeefAPI(), map[string]any{"baseUrl": origin, "apiKey": "stored", "models": []any{"custom-model"}})
+	for _, origin := range []string{"", "https://legacy-enterprise.example.com", "https://beeftv.app"} {
+		channel, err := presetChannelMap(providerpreset.BeefTV(), map[string]any{"baseUrl": origin, "apiKey": "stored", "models": []any{"custom-model"}})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -22,8 +22,8 @@ func (p *captureImagePort) Intercept(req *http.Request) (bool, []byte, string, e
 	return true, []byte(`{"data":[{"b64_json":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR1sAAAAASUVORK5CYII="}]}`), "application/json", nil
 }
 
-func TestBeefAPIHyImageRatioSizesMeetGatewayLimits(t *testing.T) {
-	contract, _ := providerpreset.BeefAPIImageContract("hy-image-v3")
+func TestBeefTVHyImageRatioSizesMeetGatewayLimits(t *testing.T) {
+	contract, _ := providerpreset.BeefTVImageContract("hy-image-v3")
 	for ratio, want := range contract.Sizes {
 		if size, err := contract.PixelSize(ratio); err != nil || size != want {
 			t.Fatalf("%s: size=%s err=%v", ratio, size, err)

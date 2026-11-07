@@ -48,15 +48,15 @@ func TestChannelAPIURLForProtocolUsesAgnesOriginPollPath(t *testing.T) {
 	}
 }
 
-func TestProviderDownloadURLNormalizesBeefAPIResultToConfiguredOrigin(t *testing.T) {
+func TestProviderDownloadURLNormalizesBeefTVResultToConfiguredOrigin(t *testing.T) {
 	tests := []struct {
 		name, baseURL, resultURL, want string
 	}{
 		{name: "same origin", baseURL: "https://provider.example", resultURL: "https://provider.example/files/video.mp4", want: "https://provider.example/files/video.mp4"},
 		{name: "BeefTV uses configured origin", baseURL: "https://beeftv.app", resultURL: "https://beeftv.app/v1/videos/task-1/content", want: "https://beeftv.app/v1/videos/task-1/content"},
 		{name: "BeefTV lookalike stays external", baseURL: "https://beeftv.app", resultURL: "https://beeftv.app.attacker.example/video.mp4", want: "https://beeftv.app.attacker.example/video.mp4"},
-		{name: "legacy beef domain stays external", baseURL: "https://beeftv.app", resultURL: "https://beefapi.com/v1/videos/task-1/content", want: "https://beefapi.com/v1/videos/task-1/content"},
-		{name: "legacy enterprise domain stays external", baseURL: "https://enterprise.beefapi.com", resultURL: "https://beeftv.app/v1/videos/task-1/content", want: "https://beeftv.app/v1/videos/task-1/content"},
+		{name: "legacy beef domain stays external", baseURL: "https://beeftv.app", resultURL: "https://legacy.example.com/v1/videos/task-1/content", want: "https://legacy.example.com/v1/videos/task-1/content"},
+		{name: "legacy enterprise domain stays external", baseURL: "https://legacy-enterprise.example.com", resultURL: "https://beeftv.app/v1/videos/task-1/content", want: "https://beeftv.app/v1/videos/task-1/content"},
 		{name: "custom provider does not rewrite BeefTV", baseURL: "https://provider.example", resultURL: "https://beeftv.app/video.mp4", want: "https://beeftv.app/video.mp4"},
 		{name: "insecure cross origin stays external", baseURL: "https://beeftv.app", resultURL: "http://beeftv.app/video.mp4", want: "http://beeftv.app/video.mp4"},
 	}

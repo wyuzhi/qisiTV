@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-func TestBeefAPIH3LiveCanary(t *testing.T) {
+func TestBeefTVH3LiveCanary(t *testing.T) {
 	infoPath := os.Getenv("FAL_H3_LIVE_GATEWAY_INFO")
 	if infoPath == "" {
 		t.Skip("explicit paid canary opt-in required")
@@ -33,7 +33,7 @@ func TestBeefAPIH3LiveCanary(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "1")
-	ctx := WithEndpoints(context.Background(), Endpoints{BeefAPIVideoBaseURL: info.BaseURL})
+	ctx := WithEndpoints(context.Background(), Endpoints{BeefTVVideoBaseURL: info.BaseURL})
 	first, last := h3SyntheticFrame(t, false), h3SyntheticFrame(t, true)
 	audio := h3SyntheticAudio()
 	cases := []struct {

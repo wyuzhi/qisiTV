@@ -16,7 +16,7 @@ import (
 // submit once. Base 2K keyframes are reserved for installed-client acceptance.
 // Intent files prevent reruns from creating another paid request after an
 // unknown response; accepted IDs can instead resume the original task.
-func TestBeefAPIH3FamilyProductionCanary(t *testing.T) {
+func TestBeefTVH3FamilyProductionCanary(t *testing.T) {
 	key, dir := os.Getenv("FAL_H3_FAMILY_LIVE_TOKEN"), os.Getenv("FAL_H3_FAMILY_LIVE_DIR")
 	if key == "" || dir == "" {
 		t.Skip("explicit paid family acceptance opt-in required")

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,8 +44,8 @@ func TestRunMusicNormalizesOldFormatAndSendsSSE(t *testing.T) {
 	defer server.Close()
 	t.Setenv("BEEFTV_ENTERPRISE_TEST_ORIGIN", server.URL)
 	for _, withPlugin := range []bool{false, true} {
-		ctx := WithEndpoints(context.Background(), Endpoints{BeefAPIVideoBaseURL: server.URL})
-		config := Config{CredentialRef: beefapi.CredentialRef, Model: "minimax-music-v3.0", BaseURL: server.URL, AudioFormat: "flac"}
+		ctx := WithEndpoints(context.Background(), Endpoints{BeefTVVideoBaseURL: server.URL})
+		config := Config{CredentialRef: beeftv.CredentialRef, Model: "minimax-music-v3.0", BaseURL: server.URL, AudioFormat: "flac"}
 		if withPlugin {
 			config.InterfaceType = "openai-audio"
 			registry := LoadOfficialFallbackRegistry()
@@ -68,17 +68,17 @@ func TestRunMusicNormalizesOldFormatAndSendsSSE(t *testing.T) {
 func TestMusicSSEEndpointUsesExactProductionOrExplicitLoopback(t *testing.T) {
 	t.Setenv("BEEFTV_ENTERPRISE_TEST_ORIGIN", "http://127.0.0.1:33419")
 	for _, endpoint := range []string{"https://beeftv.app", "https://beeftv.app/v1", "http://127.0.0.1:33419/v1"} {
-		if !isBeefAPIHostFromURL(endpoint) {
+		if !isBeefTVHostFromURL(endpoint) {
 			t.Errorf("rejected endpoint %s", endpoint)
 		}
 	}
-	for _, endpoint := range []string{"http://127.0.0.1:33418", "https://beeftv.app.attacker.example", "https://user@beeftv.app", "https://beeftv.app:444", "https://enterprise.beefapi.com/v1", "https://api.beefapi.com", "http://192.168.1.4:33419"} {
-		if isBeefAPIHostFromURL(endpoint) {
+	for _, endpoint := range []string{"http://127.0.0.1:33418", "https://beeftv.app.attacker.example", "https://user@beeftv.app", "https://beeftv.app:444", "https://legacy-enterprise.example.com/v1", "https://api.legacy.example.com", "http://192.168.1.4:33419"} {
+		if isBeefTVHostFromURL(endpoint) {
 			t.Errorf("accepted endpoint %s", endpoint)
 		}
 	}
 	t.Setenv("BEEFTV_ENTERPRISE_TEST_ORIGIN", "https://attacker.example")
-	if isBeefAPIHostFromURL("https://attacker.example") {
+	if isBeefTVHostFromURL("https://attacker.example") {
 		t.Fatal("accepted invalid test origin")
 	}
 }

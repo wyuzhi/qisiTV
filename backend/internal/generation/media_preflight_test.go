@@ -22,7 +22,7 @@ func TestMediaTransportUsesSelectedContractBeforeReadingFiles(t *testing.T) {
 		{"URL only HTTPS", "newapi-channel-2", "seedance_v2.5", "https://custom.example", Media{URL: "https://cdn.example/image.png"}, false},
 		{"full video upload", "full-video", "seedance-2.5", "https://custom.example", Media{StorageKey: "resource:local"}, false},
 		{"inline protocol", "newapi-channel-1", "video", "https://custom.example", Media{StorageKey: "resource:local"}, false},
-		{"BeefAPI upload", "newapi", "seedance-2.0-mini", "https://beeftv.app", Media{StorageKey: "resource:local"}, false},
+		{"BeefTV upload", "newapi", "seedance-2.0-mini", "https://beeftv.app", Media{StorageKey: "resource:local"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			input := Input{Mode: "video", Config: Config{InterfaceType: tc.protocol, Model: tc.model, BaseURL: tc.host}, ReferenceImages: []Media{tc.media}}

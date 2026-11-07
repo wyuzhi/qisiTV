@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/protocol"
 )
 
@@ -77,14 +77,14 @@ func TestExecuteWanReferenceUpload(t *testing.T) {
 						w.WriteHeader(501)
 						return
 					}
-					var body BeefAPISeedanceUploadRequest
+					var body BeefTVSeedanceUploadRequest
 					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 						t.Error(err)
 					}
 					if body.Kind != "image" || body.Bytes != int64(len(payload)) || body.SHA256 != hex.EncodeToString(digest[:]) {
 						t.Errorf("wrong upload manifest: %#v", body)
 					}
-					_ = json.NewEncoder(w).Encode(BeefAPISeedanceUploadSession{UploadURL: server.URL + "/put", UploadMethod: "PUT", Ticket: "fixture", RequiredHeaders: map[string]string{"Content-Type": "image/png"}})
+					_ = json.NewEncoder(w).Encode(BeefTVSeedanceUploadSession{UploadURL: server.URL + "/put", UploadMethod: "PUT", Ticket: "fixture", RequiredHeaders: map[string]string{"Content-Type": "image/png"}})
 				case "/put":
 					puts++
 					data, _ := io.ReadAll(r.Body)
@@ -97,7 +97,7 @@ func TestExecuteWanReferenceUpload(t *testing.T) {
 					if name == "invalid-receipt" {
 						sum = "invalid"
 					}
-					_ = json.NewEncoder(w).Encode(BeefAPISeedanceUploadComplete{URL: server.URL + "/named/first-frame", Kind: "image", Mime: "image/png", Bytes: int64(len(payload)), SHA256: sum})
+					_ = json.NewEncoder(w).Encode(BeefTVSeedanceUploadComplete{URL: server.URL + "/named/first-frame", Kind: "image", Mime: "image/png", Bytes: int64(len(payload)), SHA256: sum})
 				case "/v1/video/generations", "/v1/videos":
 					generates++
 					if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
@@ -113,7 +113,7 @@ func TestExecuteWanReferenceUpload(t *testing.T) {
 			}))
 			defer server.Close()
 			runtime := taskRuntime(func(r *Runtime) {
-				r.Endpoints.BeefAPIVideoBaseURL = server.URL
+				r.Endpoints.BeefTVVideoBaseURL = server.URL
 				r.Resources = wanReferenceResources{t: t, data: payload}
 			})
 			input := Input{Mode: "video", Prompt: "fixture", Config: Config{BaseURL: server.URL, APIKey: "synthetic", Model: "wan3.0-video", InterfaceType: "newapi-channel-2", VideoSeconds: "6", Size: "9:16", VQuality: "720p", VideoGenerateAudio: "true"}, ReferenceImages: []Media{{ID: "first", StorageKey: "resource:first-frame"}}}
@@ -135,7 +135,7 @@ func TestExecuteWanReferenceUpload(t *testing.T) {
 				input.ReferenceImages = nil
 			}
 			if name == "custom-inline" {
-				runtime.Endpoints.BeefAPIVideoBaseURL = server.URL + "/different-gateway"
+				runtime.Endpoints.BeefTVVideoBaseURL = server.URL + "/different-gateway"
 				input.Config.ReferenceMediaTransport = map[string]string{"image": "inline"}
 				wantURL = input.ReferenceImages[0].DataURL
 			}
@@ -145,7 +145,7 @@ func TestExecuteWanReferenceUpload(t *testing.T) {
 				input.Config.VideoGenerateAudio = "false"
 			}
 			if name != "custom-inline" {
-				input.Config.CredentialRef = beefapi.CredentialRef
+				input.Config.CredentialRef = beeftv.CredentialRef
 			}
 			_, err := Execute(WithSubmissionKey(WithProtocolRegistry(WithRuntime(context.Background(), runtime), registry), "stable-wan-attempt"), input)
 			blocked := name == "missing-upload" || name == "unsupported-upload" || name == "invalid-receipt" || name == "asset"

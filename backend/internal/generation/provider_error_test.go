@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/generation"
 )
 
@@ -341,7 +341,7 @@ func TestThinkingModeToolChoice(t *testing.T) {
 	}
 }
 
-func TestBeefAPIErrorCodeInventory(t *testing.T) {
+func TestBeefTVErrorCodeInventory(t *testing.T) {
 	data, err := os.ReadFile("../../../fixtures/generation-error-codes.json")
 	if err != nil {
 		t.Fatal(err)
@@ -351,7 +351,7 @@ func TestBeefAPIErrorCodeInventory(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(inventory) != 53 {
-		t.Fatalf("BeefAPI error code inventory has %d entries, want 53", len(inventory))
+		t.Fatalf("BeefTV error code inventory has %d entries, want 53", len(inventory))
 	}
 	for code, category := range inventory {
 		t.Run(code, func(t *testing.T) {
@@ -617,7 +617,7 @@ func TestThirdPartyGatewayChannelExcludedAndWrapperParity(t *testing.T) {
 }
 
 func TestClassifyManagedMediaTaskErrorRefinesSanitizedMessage(t *testing.T) {
-	modErr := &beefapi.MediaTaskError{
+	modErr := &beeftv.MediaTaskError{
 		TaskID:  "med_mod_123456",
 		Code:    "media_generation_failed",
 		Message: "OutputVideoSensitiveContentDetected: The output video may contain sensitive information.",
@@ -627,7 +627,7 @@ func TestClassifyManagedMediaTaskErrorRefinesSanitizedMessage(t *testing.T) {
 		t.Fatalf("moderation media task error misclassified: %+v", modFailure)
 	}
 
-	heightErr := &beefapi.MediaTaskError{
+	heightErr := &beeftv.MediaTaskError{
 		TaskID:  "med_height_123456",
 		Code:    "media_submission_rejected",
 		Message: "Height must be between 300px and 6000px",
@@ -637,7 +637,7 @@ func TestClassifyManagedMediaTaskErrorRefinesSanitizedMessage(t *testing.T) {
 		t.Fatalf("height media task error lost range guidance: %+v", heightFailure)
 	}
 
-	chineseErr := &beefapi.MediaTaskError{
+	chineseErr := &beeftv.MediaTaskError{
 		TaskID:  "med_cn_123456",
 		Code:    "media_submission_rejected",
 		Message: "第 1 张参考图高度为 200 像素，需要 300–6000 像素；请调整尺寸或更换后再提交",
@@ -647,7 +647,7 @@ func TestClassifyManagedMediaTaskErrorRefinesSanitizedMessage(t *testing.T) {
 		t.Fatalf("chinese media task error lost message: %+v", chineseFailure)
 	}
 
-	fallbackErr := &beefapi.MediaTaskError{
+	fallbackErr := &beeftv.MediaTaskError{
 		TaskID:   "med_fallback_123456",
 		Code:     "media_task_failed",
 		Category: "unknown",

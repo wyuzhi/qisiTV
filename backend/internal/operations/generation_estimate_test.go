@@ -27,7 +27,7 @@ func priceRow(t *testing.T, raw string) *pricing.Table {
 	return table
 }
 
-// The rows are copied from BeefAPI's 2026-11-03 price catalog.
+// The rows are copied from BeefTV's 2026-11-03 price catalog.
 func estimateCatalog(t *testing.T) *modelcatalog.CatalogResponse {
 	t.Helper()
 	var h3Quote map[string]any

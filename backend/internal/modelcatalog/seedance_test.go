@@ -220,8 +220,8 @@ func TestSeedanceReferenceMinimumsAndRouteIdentification(t *testing.T) {
 		if got := pixels("newapi-channel-2", "https://beeftv.app/v1"); got != documentedSeedanceVideoMinPixels {
 			t.Errorf("material host = %d", got)
 		}
-		if got := pixels("newapi-channel-2", "https://beefapi.com/v1"); got != OfficialSeedanceVideoMinPixels {
-			t.Errorf("legacy beefapi host = %d", got)
+		if got := pixels("newapi-channel-2", "https://legacy.example.com/v1"); got != OfficialSeedanceVideoMinPixels {
+			t.Errorf("legacy beeftv host = %d", got)
 		}
 		if got := pixels("newapi-channel-2", "https://relay.example.com/v1"); got != OfficialSeedanceVideoMinPixels {
 			t.Errorf("custom host = %d", got)
@@ -370,7 +370,7 @@ func TestSeedanceProFlashResolutionAndReferenceRolesTable(t *testing.T) {
 			wantTaskTypeConst: false,
 		},
 		{
-			name:      "legacy zero-reference BeefAPI profile repairs omni reference slots",
+			name:      "legacy zero-reference BeefTV profile repairs omni reference slots",
 			protocol:  "newapi-channel-2",
 			model:     "doubao-seedance-2-0-260128",
 			channelID: "beeftv",

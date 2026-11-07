@@ -31,9 +31,9 @@ func TestReferenceUploadTLSDeadlineIsRecordedBeforeGeneration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 	receipts := &recordingReceipts{}
-	ctx = WithRuntime(ctx, Runtime{Receipts: receipts, Endpoints: Endpoints{BeefAPIVideoBaseURL: address}})
+	ctx = WithRuntime(ctx, Runtime{Receipts: receipts, Endpoints: Endpoints{BeefTVVideoBaseURL: address}})
 	ctx = withReferenceUpload(ctx, ReferenceUploadMeta{Kind: "image", Index: 2})
-	err := PutBeefAPISeedanceBytes(ctx, BeefAPISeedanceUploadSession{UploadURL: address + "/?X-Amz-Signature=PRIVATE"}, []byte("owned-fixture"))
+	err := PutBeefTVSeedanceBytes(ctx, BeefTVSeedanceUploadSession{UploadURL: address + "/?X-Amz-Signature=PRIVATE"}, []byte("owned-fixture"))
 	var upload *ReferenceUploadError
 	if !errors.As(err, &upload) || !errors.Is(err, context.DeadlineExceeded) || upload.Meta.Index != 2 || strings.Contains(err.Error(), "PRIVATE") {
 		t.Fatalf("upload cause lost or unsafe: %v", err)
@@ -52,11 +52,11 @@ func TestReferenceUploadTLSDeadlineIsRecordedBeforeGeneration(t *testing.T) {
 }
 
 func TestReferenceUpload400PrependsReferenceIndexAndSupportsTIFF(t *testing.T) {
-	mime, err := CanonicalBeefAPISeedanceMime("image", "application/octet-stream", []byte{'I', 'I', '*', 0, 8, 0, 0, 0})
+	mime, err := CanonicalBeefTVSeedanceMime("image", "application/octet-stream", []byte{'I', 'I', '*', 0, 8, 0, 0, 0})
 	if err != nil || mime != "image/tiff" {
 		t.Fatalf("TIFF detection = %q, %v", mime, err)
 	}
-	if _, err := CanonicalBeefAPISeedanceMime("image", "image/png", []byte{0, 0, 0, 28, 'f', 't', 'y', 'p', 'a', 'v', 'i', 'f'}); err == nil {
+	if _, err := CanonicalBeefTVSeedanceMime("image", "image/png", []byte{0, 0, 0, 28, 'f', 't', 'y', 'p', 'a', 'v', 'i', 'f'}); err == nil {
 		t.Fatal("raw AVIF masquerading as image/png was accepted without conversion")
 	}
 	cause := HTTPError{

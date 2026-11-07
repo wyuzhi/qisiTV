@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/modelcatalog"
 	"infinite-canvas/backend/internal/providerpreset"
 )
@@ -92,7 +92,7 @@ type auditLiveResult struct {
 // Explicit opt-in only: reads an existing managed credential, exercises the
 // production generation adapters and checks the live ledger before each call.
 // No account, credential, channel, workspace or production state is modified.
-func TestBeefAPIModelAdapterLiveMatrix(t *testing.T) {
+func TestBeefTVModelAdapterLiveMatrix(t *testing.T) {
 	if os.Getenv("BEEFTV_MODEL_AUDIT_LIVE") != "1" {
 		t.Skip("explicit paid model audit opt-in required")
 	}
@@ -112,7 +112,7 @@ func TestBeefAPIModelAdapterLiveMatrix(t *testing.T) {
 	if info, err := os.Stat(credentialDir); err != nil || !info.IsDir() {
 		t.Fatal("explicit existing credential directory required")
 	}
-	svc, err := beefapi.New(beefapi.Options{DataDir: credentialDir})
+	svc, err := beeftv.New(beeftv.Options{DataDir: credentialDir})
 	if err != nil {
 		t.Fatal("managed connection could not be opened")
 	}
@@ -152,7 +152,7 @@ func TestBeefAPIModelAdapterLiveMatrix(t *testing.T) {
 		t.Fatal(err)
 	}
 	ledger := func() (float64, error) {
-		command := fmt.Sprintf("docker exec beefapi-postgres psql -U beefapi -d beefapi -At -c \"SELECT coalesce(sum(quota),0) FROM logs WHERE token_id=%s AND created_at>=%d AND type=2 AND quota>0;\"", credential.TokenID, start)
+		command := fmt.Sprintf("docker exec beeftv-postgres psql -U beeftv -d beeftv -At -c \"SELECT coalesce(sum(quota),0) FROM logs WHERE token_id=%s AND created_at>=%d AND type=2 AND quota>0;\"", credential.TokenID, start)
 		out, err := exec.Command(executorPath, command).Output()
 		if err != nil {
 			return 0, fmt.Errorf("billing ledger unavailable")
@@ -232,10 +232,10 @@ func TestBeefAPIModelAdapterLiveMatrix(t *testing.T) {
 			if mode == "text" && hasResponse {
 				protocol = "openai-response"
 			}
-			if _, ok := providerpreset.BeefAPIImageContract(id); ok {
+			if _, ok := providerpreset.BeefTVImageContract(id); ok {
 				mode, protocol = "image", "openai-image"
 			}
-			if contract, ok := providerpreset.BeefAPIVideoContract(id); ok {
+			if contract, ok := providerpreset.BeefTVVideoContract(id); ok {
 				mode, protocol = "video", contract.Protocol
 			}
 			if id == "grok-imagine-video-1.5" || id == "kling-video-v3" {
@@ -319,7 +319,7 @@ func TestBeefAPIModelAdapterLiveMatrix(t *testing.T) {
 					input.Config.VideoSeconds = "1"
 				}
 				input.ReferenceImages = []Media{{DataURL: frame, Width: 768, Height: 512}}
-				if v, ok := beefapi.NormalizeCatalogVideoCapability(videoRaw); ok {
+				if v, ok := beeftv.NormalizeCatalogVideoCapability(videoRaw); ok {
 					raw, _ := json.Marshal(v)
 					var profile modelcatalog.VideoCapabilityConfig
 					_ = json.Unmarshal(raw, &profile)

@@ -51,8 +51,8 @@ func TestCanonicalOriginRejectsLookalikePreviewHosts(t *testing.T) {
 	for _, raw := range []string{
 		"http://enterprise.localhost.evil.com",
 		"http://evil.enterprise.localhost",
-		"https://enterprise.beefapi.com",
-		"https://beefapi.com",
+		"https://legacy-enterprise.example.com",
+		"https://legacy.example.com",
 		"https://example.com",
 		"http://10.0.0.8:35184",
 	} {

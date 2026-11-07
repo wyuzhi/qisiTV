@@ -13,7 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func TestWorkspaceModelConfigReturnsBuiltinBeefAPIAndPersistenceMetadata(t *testing.T) {
+func TestWorkspaceModelConfigReturnsBuiltinBeefTVAndPersistenceMetadata(t *testing.T) {
 	router, _ := newModelConfigTestRouter(t)
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/workspace/model-config", nil))
@@ -27,14 +27,14 @@ func TestWorkspaceModelConfigReturnsBuiltinBeefAPIAndPersistenceMetadata(t *test
 	config, _ := data["config"].(map[string]any)
 	channels, _ := config["channels"].([]any)
 	if len(channels) != 1 || channels[0].(map[string]any)["id"] != "beeftv" {
-		t.Fatalf("builtin BeefAPI missing: %#v", channels)
+		t.Fatalf("builtin BeefTV missing: %#v", channels)
 	}
 	if models, _ := channels[0].(map[string]any)["models"].([]any); len(models) != 0 {
 		t.Fatalf("model catalog must remain dynamic: %#v", models)
 	}
 }
 
-func TestWorkspaceModelConfigGETRedactsBeefAPIKey(t *testing.T) {
+func TestWorkspaceModelConfigGETRedactsBeefTVKey(t *testing.T) {
 	router, _ := newModelConfigTestRouter(t)
 	first := putModelConfig(t, router, 0, "local-secret-key")
 	if first.Code != http.StatusOK {

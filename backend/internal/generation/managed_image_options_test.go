@@ -5,12 +5,12 @@ import (
 	"os"
 	"testing"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 )
 
 func mustNormalizeImageProfile(t *testing.T, raw string) *ImageCapabilityConfig {
 	t.Helper()
-	normalized, ok := beefapi.NormalizeCatalogImageCapability(json.RawMessage(raw))
+	normalized, ok := beeftv.NormalizeCatalogImageCapability(json.RawMessage(raw))
 	if !ok {
 		t.Fatalf("NormalizeCatalogImageCapability rejected %s", raw)
 	}
@@ -25,9 +25,9 @@ func mustNormalizeImageProfile(t *testing.T, raw string) *ImageCapabilityConfig 
 	return &profile
 }
 
-// 能力直接经由 beefapi.NormalizeCatalogImageCapability 解析自服务端 /v1/models 录制快照与线上目录声明。
+// 能力直接经由 beeftv.NormalizeCatalogImageCapability 解析自服务端 /v1/models 录制快照与线上目录声明。
 func TestManagedImageOptionsFollowCatalogCapability(t *testing.T) {
-	fixtureBytes, err := os.ReadFile("../beefapi/testdata/managed-media/models-enterprise-priced-authenticated.json")
+	fixtureBytes, err := os.ReadFile("../beeftv/testdata/managed-media/models-enterprise-priced-authenticated.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestManagedImageOptionsFollowCatalogCapability(t *testing.T) {
 	if seedreamFlash == nil || seedreamLite == nil {
 		t.Fatalf("missing recorded seedream profiles: %#v", recordedByID)
 	}
-	// BeefAPI service/image_catalog_capability.go nativeImageCatalogCapability for vod/OG/v2.5 (gpt-image-2.5).
+	// BeefTV service/image_catalog_capability.go nativeImageCatalogCapability for vod/OG/v2.5 (gpt-image-2.5).
 	gptImage25 := mustNormalizeImageProfile(t, `{"references":{"promptMaxChars":32000,"maxImages":16,"maxImageBytes":0,"maskSupported":true},"size":{"parameter":"size","values":["1024x1024","1536x1024","1024x1536","2048x2048","2880x2880"],"default":"1024x1024","allowCustom":true},"quality":{"supported":true,"values":["low","medium","high","xhigh","max"],"default":"medium"},"transparentBackground":{"supported":true,"default":false},"responseFormat":{"supported":false},"outputFormat":{"supported":true},"maxOutputs":8}`)
 	fixedPixelModel := mustNormalizeImageProfile(t, `{"references":{"promptMaxChars":32000,"maxImages":1,"maxImageBytes":0,"maskSupported":false},"size":{"parameter":"size","values":["1024x1024"],"default":"1024x1024","allowCustom":false},"quality":{"supported":false,"values":[],"default":"auto"},"transparentBackground":{"supported":false,"default":false},"responseFormat":{"supported":false},"outputFormat":{"supported":false},"maxOutputs":4}`)
 	tierOnlyFixedModel := mustNormalizeImageProfile(t, `{"references":{"promptMaxChars":32000,"maxImages":0,"maxImageBytes":0,"maskSupported":false},"size":{"parameter":"size","values":["1K","2K"],"default":"2K","allowCustom":false},"quality":{"supported":false,"values":[],"default":"auto"},"transparentBackground":{"supported":false,"default":false},"responseFormat":{"supported":false},"outputFormat":{"supported":false},"maxOutputs":1}`)

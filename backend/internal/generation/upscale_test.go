@@ -143,7 +143,7 @@ func TestUpscaleExecuteFourModelsUsesOwnedUploadAndOriginalResult(t *testing.T) 
 				switch r.URL.Path {
 				case "/v1/media/uploads":
 					uploads.Add(1)
-					_ = json.NewEncoder(w).Encode(BeefAPISeedanceUploadSession{Ticket: "ticket", UploadURL: server.URL + "/put", UploadMethod: "PUT", RequiredHeaders: map[string]string{"Content-Type": mime}})
+					_ = json.NewEncoder(w).Encode(BeefTVSeedanceUploadSession{Ticket: "ticket", UploadURL: server.URL + "/put", UploadMethod: "PUT", RequiredHeaders: map[string]string{"Content-Type": mime}})
 				case "/put":
 					data, _ := io.ReadAll(r.Body)
 					if !bytes.Equal(data, source) || r.Header.Get("Authorization") != "" {
@@ -151,7 +151,7 @@ func TestUpscaleExecuteFourModelsUsesOwnedUploadAndOriginalResult(t *testing.T) 
 					}
 				case "/v1/media/uploads/complete":
 					sum := sha256.Sum256(source)
-					_ = json.NewEncoder(w).Encode(BeefAPISeedanceUploadComplete{URL: server.URL + "/source", Kind: kind, Mime: mime, Bytes: int64(len(source)), SHA256: hex.EncodeToString(sum[:])})
+					_ = json.NewEncoder(w).Encode(BeefTVSeedanceUploadComplete{URL: server.URL + "/source", Kind: kind, Mime: mime, Bytes: int64(len(source)), SHA256: hex.EncodeToString(sum[:])})
 				case "/v1/media-upscale/estimate":
 					estimates.Add(1)
 					_ = json.NewEncoder(w).Encode(UpscaleEstimate{Model: model, Currency: "CNY", Reservation: 1.25})
@@ -181,7 +181,7 @@ func TestUpscaleExecuteFourModelsUsesOwnedUploadAndOriginalResult(t *testing.T) 
 			}))
 			defer server.Close()
 			runtime := taskRuntime(func(r *Runtime) {
-				r.Endpoints.BeefAPIVideoBaseURL = server.URL
+				r.Endpoints.BeefTVVideoBaseURL = server.URL
 				r.Resources = upscaleResources{data: source, kind: kind}
 				r.ReferenceProgress = progress
 				r.Stages = progress
@@ -285,7 +285,7 @@ func TestUpscaleOriginalStatusIdentityAndCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 	config := Config{BaseURL: server.URL, APIKey: "synthetic", Model: "topaz-standard-v2"}
-	ctx := WithRuntime(context.Background(), taskRuntime(func(r *Runtime) { r.Endpoints.BeefAPIVideoBaseURL = server.URL }))
+	ctx := WithRuntime(context.Background(), taskRuntime(func(r *Runtime) { r.Endpoints.BeefTVVideoBaseURL = server.URL }))
 	result, observed, err := QueryUpscaleResult(ctx, Input{Mode: "image", Config: config}, "original-task")
 	if err != nil || result != nil || observed != "unknown" {
 		t.Fatalf("unknown result=%v status=%s err=%v", result, observed, err)
@@ -378,7 +378,7 @@ func TestUpscalePreflightRejectsExternalReferencesAndOversizedDelivery(t *testin
 	defer server.Close()
 	runtime := taskRuntime(func(r *Runtime) {
 		r.Call.UserID = "user-1"
-		r.Endpoints.BeefAPIVideoBaseURL = server.URL
+		r.Endpoints.BeefTVVideoBaseURL = server.URL
 		r.Resources = upscaleResources{kind: "image", data: upscalePNG(t, 64, 48)}
 		r.Limits = upscaleBudget{}
 	})

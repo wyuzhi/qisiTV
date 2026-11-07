@@ -9,20 +9,20 @@ import (
 	"time"
 
 	"infinite-canvas/backend/internal/app"
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/workspace"
 
 	"github.com/gin-gonic/gin"
 )
 
-func TestBeefAPIConnectionRoutesRequireWorkspaceAndHideSecrets(t *testing.T) {
+func TestBeefTVConnectionRoutesRequireWorkspaceAndHideSecrets(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	dir := t.TempDir()
 	store, err := workspace.NewProviderConfig(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	connection, err := beefapi.New(beefapi.Options{
+	connection, err := beeftv.New(beeftv.Options{
 		DataDir: dir, Origin: "http://127.0.0.1:9", Provider: store, ClientVersion: "test", Hostname: "test",
 		HTTPClient: http.DefaultClient, OpenURL: func(string) error { return nil }, Sleep: func(time.Duration) {},
 	})
@@ -31,16 +31,16 @@ func TestBeefAPIConnectionRoutesRequireWorkspaceAndHideSecrets(t *testing.T) {
 	}
 	t.Cleanup(connection.Close)
 	service := app.NewLocal(nil, dir)
-	service.SetBeefAPI(connection)
+	service.SetBeefTV(connection)
 	router := gin.New()
 	router.Use(WorkspaceMiddleware(workspace.Context{ID: "local", DataDir: dir}))
 	router.Use(RuntimeDependenciesMiddleware(RuntimeDependencies{
 		RequestCoordinator: &stubRequestCoordinator{allowed: true},
 		ProviderConfig:     store,
-		BeefAPI:            connection,
+		BeefTV:            connection,
 	}))
 	RegisterWorkspaceRoutes(router.Group("/api"), service)
-	RegisterBeefAPIConnectionRoutes(router.Group("/api"), service)
+	RegisterBeefTVConnectionRoutes(router.Group("/api"), service)
 
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/beeftv/connection", nil))
@@ -53,7 +53,7 @@ func TestBeefAPIConnectionRoutesRequireWorkspaceAndHideSecrets(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.Data["state"] != beefapi.StateDisconnected {
+	if envelope.Data["state"] != beeftv.StateDisconnected {
 		t.Fatalf("state = %#v", envelope.Data["state"])
 	}
 	if _, exists := envelope.Data["apiKey"]; exists {

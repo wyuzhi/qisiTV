@@ -9,23 +9,23 @@ import (
 
 func TestDomesticGatewayVideoContractDoesNotGrantHostedCredentials(t *testing.T) {
 	for _, base := range []string{"https://beeftv.app", "https://beeftv.app/v1"} {
-		if !IsBeefAPIVideoConfig(context.Background(), Config{BaseURL: base}) {
+		if !IsBeefTVVideoConfig(context.Background(), Config{BaseURL: base}) {
 			t.Fatalf("official video gateway rejected: %s", base)
 		}
-		if !providerpreset.IsBeefAPIEndpoint(base) {
+		if !providerpreset.IsBeefTVEndpoint(base) {
 			t.Fatalf("official endpoint rejected: %s", base)
 		}
 	}
-	for _, base := range []string{"https://beefapi.com/v1", "https://BEEFAPI.COM:443/v1", "https://enterprise.beefapi.com/v1", "http://beeftv.app/v1", "https://beeftv.app.attacker.test/v1", "https://attacker.test/beeftv.app", "https://user@beeftv.app/v1", "https://beeftv.app:444/v1"} {
-		if IsBeefAPIVideoConfig(context.Background(), Config{BaseURL: base}) {
+	for _, base := range []string{"https://legacy.example.com/v1", "https://LEGACY.EXAMPLE.COM:443/v1", "https://legacy-enterprise.example.com/v1", "http://beeftv.app/v1", "https://beeftv.app.attacker.test/v1", "https://attacker.test/beeftv.app", "https://user@beeftv.app/v1", "https://beeftv.app:444/v1"} {
+		if IsBeefTVVideoConfig(context.Background(), Config{BaseURL: base}) {
 			t.Fatalf("unexpected video gateway: %s", base)
 		}
-		if providerpreset.IsBeefAPIEndpoint(base) {
+		if providerpreset.IsBeefTVEndpoint(base) {
 			t.Fatalf("unexpected hosted-account endpoint: %s", base)
 		}
 	}
 	input := Input{Prompt: "change the ball", Config: Config{BaseURL: "https://beeftv.app/v1", InterfaceType: "newapi", Model: "seedance-2.5", VideoSeconds: "4", VQuality: "480", Size: "16:9", VideoGenerateAudio: "false", VideoWatermark: "false"}, Metadata: map[string]any{"videoEditOperation": "inpaint"}, ReferenceVideos: []Media{{URL: "https://example.com/ref.mp4"}}}
-	body, err := BeefAPIVideoRequestBody(input)
+	body, err := BeefTVVideoRequestBody(input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,9 +36,9 @@ func TestDomesticGatewayVideoContractDoesNotGrantHostedCredentials(t *testing.T)
 	}
 }
 
-func TestBeefAPITextVideoPreservesWatermarkSwitch(t *testing.T) {
+func TestBeefTVTextVideoPreservesWatermarkSwitch(t *testing.T) {
 	for _, enabled := range []string{"true", "false"} {
-		body, err := BeefAPIVideoRequestBody(Input{Config: Config{Model: "seedance-2.5", VideoSeconds: "4", VQuality: "480", Size: "16:9", VideoWatermark: enabled}})
+		body, err := BeefTVVideoRequestBody(Input{Config: Config{Model: "seedance-2.5", VideoSeconds: "4", VQuality: "480", Size: "16:9", VideoWatermark: enabled}})
 		if err != nil {
 			t.Fatal(err)
 		}
