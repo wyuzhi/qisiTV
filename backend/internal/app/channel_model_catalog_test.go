@@ -45,7 +45,7 @@ func TestFetchChannelModelCatalogRejectsCredentialsWithoutNetwork(t *testing.T) 
 		t.Fatalf("empty key error = %v", err)
 	}
 	if _, err := svc.FetchChannelModelCatalog(ctx, actor, ChannelModelsRequest{
-		BaseURL: "https://enterprise.beefapi.com/v1", ChannelID: beefapi.ChannelID, CredentialRef: beefapi.CredentialRef,
+		BaseURL: "https://beeftv.app/v1", ChannelID: beefapi.ChannelID, CredentialRef: beefapi.CredentialRef,
 	}); err == nil || !strings.Contains(err.Error(), "API Key") {
 		t.Fatalf("missing BeefAPI credential error = %v", err)
 	}

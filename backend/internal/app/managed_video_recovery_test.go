@@ -10,7 +10,7 @@ import (
 )
 
 func TestManagedVideoDoesNotInferSettlementOrExpiry(t *testing.T) {
-	task := model.Task{ID: "managed-no-receipt", UserID: "user", Type: "canvas_video", Status: model.TaskStatusFailed, CreatedAt: time.Now().Add(-48 * time.Hour), InputJSON: `{"mode":"video","config":{"credentialRef":"beefapi-enterprise","apiKey":"enc:unread"}}`}
+	task := model.Task{ID: "managed-no-receipt", UserID: "user", Type: "canvas_video", Status: model.TaskStatusFailed, CreatedAt: time.Now().Add(-48 * time.Hour), InputJSON: `{"mode":"video","config":{"credentialRef":"beeftv","apiKey":"enc:unread"}}`}
 	if videoTaskPastRetentionWindow(task, time.Now()) {
 		t.Fatal("local clock expired an API task")
 	}
@@ -31,11 +31,11 @@ func TestManagedVideoDoesNotInferSettlementOrExpiry(t *testing.T) {
 	if err != nil || stored.RecoveryOutcome != nil || stored.NextPollAt == nil {
 		t.Fatalf("unknown receipt was closed: %+v err=%v", stored, err)
 	}
-	task.InputJSON = `{"mode":"video","config":{"channelId":"beefapi","apiKey":"enc:unread"}}`
+	task.InputJSON = `{"mode":"video","config":{"channelId":"beeftv","apiKey":"enc:unread"}}`
 	if videoTaskPastRetentionWindow(task, time.Now()) {
 		t.Fatal("historical built-in channel expired locally")
 	}
-	task.InputJSON = `{"mode":"video","config":{"baseUrl":"https://enterprise.beefapi.com","apiKey":"enc:third-party-key"}}`
+	task.InputJSON = `{"mode":"video","config":{"baseUrl":"https://beeftv.app","apiKey":"enc:third-party-key"}}`
 	if !videoTaskPastRetentionWindow(task, time.Now()) {
 		t.Fatal("BYOK retention behavior changed")
 	}
@@ -44,7 +44,7 @@ func TestManagedVideoDoesNotInferSettlementOrExpiry(t *testing.T) {
 // 重构前的托管视频任务从未收到结算状态；一个月后 BeefAPI 和上游都不会再给结果，
 // 本地应结束它，允许确认后重新生成，而不是每 2 分钟查一次、永远停在「继续取回」。
 func TestManagedVideoUnreportedForAWeekEndsLocally(t *testing.T) {
-	old := model.Task{ID: "managed-september", UserID: "user", Type: "canvas_video", Status: model.TaskStatusFailed, CreatedAt: time.Now().Add(-30 * 24 * time.Hour), ProviderRequestID: "task_old", InputJSON: `{"mode":"video","config":{"channelId":"beefapi","apiKey":"enc:unread"}}`}
+	old := model.Task{ID: "managed-september", UserID: "user", Type: "canvas_video", Status: model.TaskStatusFailed, CreatedAt: time.Now().Add(-30 * 24 * time.Hour), ProviderRequestID: "task_old", InputJSON: `{"mode":"video","config":{"channelId":"beeftv","apiKey":"enc:unread"}}`}
 	if !videoTaskPastRetentionWindow(old, time.Now()) {
 		t.Fatal("month-old unreported task never expires")
 	}

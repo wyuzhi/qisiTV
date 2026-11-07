@@ -21,7 +21,7 @@ func TestManagedFailedImagePendingBillingKeepsQueryingUntilRefunded(t *testing.T
 			svc, db, task, row, _ := imageSubmissionFixture(t, false)
 			noResult := localtask.RecoveryNoResult
 			task.Status, task.RecoveryOutcome, task.BeefBillingState = model.TaskStatusFailed, &noResult, &pending
-			task.InputJSON = `{"mode":"image","config":{"credentialRef":"beefapi-enterprise"}}`
+			task.InputJSON = `{"mode":"image","config":{"credentialRef":"beeftv"}}`
 			if err := db.Save(&task).Error; err != nil {
 				t.Fatal(err)
 			}

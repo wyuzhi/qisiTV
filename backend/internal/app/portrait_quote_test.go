@@ -30,7 +30,7 @@ func savePortraitTestCatalog(t *testing.T, s *Service, id, modelID, quote string
 		profile["videoCapabilitiesVersion"] = "fixture-v1"
 	}
 	body, err := json.Marshal(map[string]any{"channels": []any{map[string]any{
-		"id": id, "enabled": true, "baseUrl": "https://enterprise.beefapi.com", "apiKey": "synthetic-key",
+		"id": id, "enabled": true, "baseUrl": "https://beeftv.app", "apiKey": "synthetic-key",
 		"models": []string{modelID}, "modelProfiles": []any{profile},
 	}}})
 	if err != nil {
@@ -44,7 +44,7 @@ func savePortraitTestCatalog(t *testing.T, s *Service, id, modelID, quote string
 func portraitTestRequest(modelID string) CreateTaskRequest {
 	return CreateTaskRequest{Type: "canvas_video", Model: modelID, Prompt: "move", Input: map[string]any{
 		"mode": "video", "prompt": "move", "config": map[string]any{
-			"model": modelID, "baseUrl": "https://enterprise.beefapi.com", "apiKey": "synthetic-key", "interfaceType": "newapi", "vquality": "720p", "videoSeconds": "5", "size": "16:9",
+			"model": modelID, "baseUrl": "https://beeftv.app", "apiKey": "synthetic-key", "interfaceType": "newapi", "vquality": "720p", "videoSeconds": "5", "size": "16:9",
 			"videoPricing": json.RawMessage(portraitTestQuote),
 		},
 	}}

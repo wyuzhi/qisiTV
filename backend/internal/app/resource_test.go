@@ -112,7 +112,7 @@ func TestBeefAPIPrefersHTTPSResourceURLWhenPublicBaseConfigured(t *testing.T) {
 		Mode:   "video",
 		Prompt: "follow the soundtrack",
 		Config: providerConfig{
-			BaseURL: "https://enterprise.beefapi.com", InterfaceType: string(model.ChannelInterfaceNewAPIVideo), Model: "seedance-2.5",
+			BaseURL: "https://beeftv.app", InterfaceType: string(model.ChannelInterfaceNewAPIVideo), Model: "seedance-2.5",
 		},
 		ReferenceAudios: []providerMedia{{ID: "audio-1", StorageKey: "resource:beefapi-https-audio", URL: "https://example.com/stale-reference.mp3", DataURL: "data:audio/mpeg;base64,c3RhbGU=", MimeType: "audio/mpeg", DurationMs: 3000}},
 		Metadata:        map[string]interface{}{"videoEditOperation": "audio_to_video"},
@@ -230,7 +230,7 @@ func TestBeefAPILocalVideoReferenceHydratesInlineForFlatRequest(t *testing.T) {
 		Mode:   "video",
 		Prompt: "make the character walk",
 		Config: providerConfig{
-			BaseURL: "https://enterprise.beefapi.com", InterfaceType: string(model.ChannelInterfaceNewAPIVideo), Model: "seedance-2.5",
+			BaseURL: "https://beeftv.app", InterfaceType: string(model.ChannelInterfaceNewAPIVideo), Model: "seedance-2.5",
 		},
 		ReferenceImages: []providerMedia{{ID: "image-1", StorageKey: "resource:beefapi-local-reference", MimeType: "image/png"}},
 		Metadata:        map[string]interface{}{"videoEditOperation": "image_to_video"},

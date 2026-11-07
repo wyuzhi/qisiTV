@@ -288,7 +288,7 @@ func TestNilServiceAnalyticsRecordsHTTPEvidenceAndKeepsImageFailClosed(t *testin
 
 	expired, cancel := context.WithTimeout(generation.WithImageReplayProtocol(ctx, generation.ImageReplayProtocol), 0)
 	cancel()
-	beef, err := http.NewRequestWithContext(expired, http.MethodPost, "https://beefapi.com/v1/images/generations", strings.NewReader(`{"prompt":"draw"}`))
+	beef, err := http.NewRequestWithContext(expired, http.MethodPost, "https://beeftv.app/v1/images/generations", strings.NewReader(`{"prompt":"draw"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

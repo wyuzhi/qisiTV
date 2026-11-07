@@ -208,7 +208,7 @@ func TestManagedImageDirectReferencesPersistAndReopen(t *testing.T) {
 			if tc.largeReference {
 				capability.References.MaxImageBytes = 0
 			}
-			input := generation.Input{Mode: "image", Prompt: "synthetic fixture", Config: generation.Config{BaseURL: gateway.URL, CredentialRef: "beefapi-enterprise", APIKey: "synthetic-key", Model: tc.model, InterfaceType: "openai-image", Size: tc.size, SeedreamMode: tc.mode, ImageCapabilitiesVersion: &version, CapabilityConfig: &generation.ModelCapabilityConfig{Version: 1, Image: capability}}}
+			input := generation.Input{Mode: "image", Prompt: "synthetic fixture", Config: generation.Config{BaseURL: gateway.URL, CredentialRef: "beeftv", APIKey: "synthetic-key", Model: tc.model, InterfaceType: "openai-image", Size: tc.size, SeedreamMode: tc.mode, ImageCapabilitiesVersion: &version, CapabilityConfig: &generation.ModelCapabilityConfig{Version: 1, Image: capability}}}
 			if tc.oldBase64 {
 				input.Metadata = map[string]any{"providerOptions": map[string]any{"openai-image": map[string]any{"response_format": "b64_json"}}}
 				capability.ResponseFormat.Value = "b64_json"
@@ -312,13 +312,13 @@ func TestManagedImageCapabilityUsesSavedServerCatalog(t *testing.T) {
 	server := modelcatalog.DefaultImageCapabilityConfig("openai-image", name)
 	server.References.MaxImageBytes = 0
 	server.Quality = modelcatalog.ImageQualityConfig{Supported: true, Values: []string{"ultra"}, Default: "ultra"}
-	body, _ := json.Marshal(map[string]any{"channels": []any{map[string]any{"id": "beefapi", "baseUrl": "https://beeftv.app", "apiKey": "fixture", "models": []string{name}, "modelProfiles": []any{map[string]any{"model": name, "capability": "image", "protocol": "openai-image", "capabilityConfig": map[string]any{"version": 1, "image": server}, "imageCapabilitiesVersion": "server-v2"}}}}})
+	body, _ := json.Marshal(map[string]any{"channels": []any{map[string]any{"id": "beeftv", "baseUrl": "https://beeftv.app", "apiKey": "fixture", "models": []string{name}, "modelProfiles": []any{map[string]any{"model": name, "capability": "image", "protocol": "openai-image", "capabilityConfig": map[string]any{"version": 1, "image": server}, "imageCapabilitiesVersion": "server-v2"}}}}})
 	if err := svc.SaveLocalModelConfig(body); err != nil {
 		t.Fatal(err)
 	}
 	stale := modelcatalog.DefaultImageCapabilityConfig("openai-image", name)
 	stale.References.MaxImageBytes = 1
-	input := generation.Input{Mode: "image", Prompt: "draw", Config: generation.Config{CredentialRef: "beefapi-enterprise", Model: name, InterfaceType: "openai-image", BaseURL: "https://beeftv.app", Size: "1024x1024", Quality: "ultra", CapabilityConfig: &generation.ModelCapabilityConfig{Version: 1, Image: stale}}, ReferenceImages: []generation.Media{{Bytes: 48 << 20}}}
+	input := generation.Input{Mode: "image", Prompt: "draw", Config: generation.Config{CredentialRef: "beeftv", Model: name, InterfaceType: "openai-image", BaseURL: "https://beeftv.app", Size: "1024x1024", Quality: "ultra", CapabilityConfig: &generation.ModelCapabilityConfig{Version: 1, Image: stale}}, ReferenceImages: []generation.Media{{Bytes: 48 << 20}}}
 	if err := svc.validateResolvedImageCapability(&input); err != nil {
 		t.Fatal(err)
 	}

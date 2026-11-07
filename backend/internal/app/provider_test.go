@@ -107,11 +107,11 @@ func TestProviderDownloadURLNormalizesBeefAPIResultToConfiguredOrigin(t *testing
 		want                     string
 	}{
 		{name: "same origin", baseURL: "https://provider.example", resultURL: "https://provider.example/files/video.mp4", want: "https://provider.example/files/video.mp4"},
-		{name: "beef enterprise uses configured origin", baseURL: "https://enterprise.beefapi.com", resultURL: "https://beefapi.com/v1/videos/task-1/content", want: "https://enterprise.beefapi.com/v1/videos/task-1/content"},
-		{name: "beef subdomain uses configured origin", baseURL: "https://api.beefapi.com", resultURL: "https://cdn.beefapi.com/video.mp4?token=result", want: "https://api.beefapi.com/video.mp4?token=result"},
-		{name: "lookalike host stays external", baseURL: "https://enterprise.beefapi.com", resultURL: "https://beefapi.com.attacker.example/video.mp4", want: "https://beefapi.com.attacker.example/video.mp4"},
-		{name: "custom provider does not rewrite beef", baseURL: "https://provider.example", resultURL: "https://beefapi.com/video.mp4", want: "https://beefapi.com/video.mp4"},
-		{name: "insecure cross origin stays external", baseURL: "https://enterprise.beefapi.com", resultURL: "http://beefapi.com/video.mp4", want: "http://beefapi.com/video.mp4"},
+		{name: "official origin normalizes relative path", baseURL: "https://beeftv.app/v1", resultURL: "/v1/videos/task-1/content", want: "https://beeftv.app/v1/videos/task-1/content"},
+		{name: "official origin normalizes same host", baseURL: "https://beeftv.app/v1", resultURL: "https://beeftv.app:443/v1/videos/task-1/content?token=result", want: "https://beeftv.app/v1/videos/task-1/content?token=result"},
+		{name: "lookalike host stays external", baseURL: "https://beeftv.app", resultURL: "https://beeftv.app.attacker.example/video.mp4", want: "https://beeftv.app.attacker.example/video.mp4"},
+		{name: "custom provider does not rewrite official host", baseURL: "https://provider.example", resultURL: "https://beeftv.app/video.mp4", want: "https://beeftv.app/video.mp4"},
+		{name: "insecure cross origin stays external", baseURL: "https://beeftv.app", resultURL: "http://beeftv.app/video.mp4", want: "http://beeftv.app/video.mp4"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1704,10 +1704,10 @@ func TestSeedancePollStatusUsesBeefAPINestedGenerationState(t *testing.T) {
 		"metadata": map[string]interface{}{
 			"generation_status": "completed",
 			"stage":             "saving",
-			"url":               "https://beefapi.com/v1/videos/task/content",
+			"url":               "https://beeftv.app/v1/videos/task/content",
 		},
 	})
-	if status != "completed" || videoURL != "https://beefapi.com/v1/videos/task/content" {
+	if status != "completed" || videoURL != "https://beeftv.app/v1/videos/task/content" {
 		t.Fatalf("status/url = %q/%q", status, videoURL)
 	}
 }
@@ -2541,7 +2541,7 @@ func TestOfficialAudioPluginMapsMiniMaxSpeechControls(t *testing.T) {
 	kept := officialPluginCreateBody(t, canvasGenerationInput{
 		Mode: "audio",
 		Config: providerConfig{InterfaceType: "openai-audio",
-			Model:       "beefapi::minimax-speech-2.8-hd",
+			Model:       "beeftv::minimax-speech-2.8-hd",
 			AudioVoice:  "male-qn-jingying",
 			AudioFormat: "wav",
 			AudioSpeed:  "0.8",

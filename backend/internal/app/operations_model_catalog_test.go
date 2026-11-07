@@ -18,10 +18,10 @@ func TestAgentModelCatalogBeefAPIVideoContractAndAudioPayload(t *testing.T) {
 		configured, audioDefault, sourced bool
 	}{
 		{name: "missing profile", baseURL: "https://beeftv.app"},
-		{name: "saved false", baseURL: "https://enterprise.beefapi.com/v1", configured: true},
-		{name: "saved true", baseURL: "https://enterprise.beefapi.com/v1", configured: true, audioDefault: true},
+		{name: "saved false", baseURL: "https://beeftv.app/v1", configured: true},
+		{name: "saved true", baseURL: "https://beeftv.app/v1", configured: true, audioDefault: true},
 		{name: "custom endpoint", baseURL: "https://custom.example", configured: true},
-		{name: "versioned gateway contract", baseURL: "https://enterprise.beefapi.com/v1", configured: true, sourced: true},
+		{name: "versioned gateway contract", baseURL: "https://beeftv.app/v1", configured: true, sourced: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, _ := newModelCatalogTestService(t)
@@ -35,7 +35,7 @@ func TestAgentModelCatalogBeefAPIVideoContractAndAudioPayload(t *testing.T) {
 			if tc.sourced {
 				profile["videoCapabilitiesVersion"] = "gateway-v2"
 			}
-			channelID := "beefapi"
+			channelID := "beeftv"
 			if tc.name == "custom endpoint" {
 				channelID = "custom"
 			}
@@ -91,7 +91,7 @@ func TestAgentModelCatalogBeefAPIVideoContractAndAudioPayload(t *testing.T) {
 func TestAgentModelCatalogDesktopUsesActualSnapshotWithoutCredentials(t *testing.T) {
 	svc, _ := newModelCatalogTestService(t)
 	svc.mode = serviceModeLocal
-	body := []byte(`{"channels":[{"id":"beefapi","name":"BeefTV","credentialRef":"beefapi-enterprise","apiKey":"private-key","baseUrl":"https://private-provider.test/v1","headers":[{"name":"Authorization","value":"private-header"}],"enabled":true,"models":["gemini-native","image-model"],"modelProfiles":[{"model":"gemini-native","displayName":"Native Gemini","capability":"text","protocol":"chat-completion"},{"model":"image-model","displayName":"Reference Image","capability":"image","protocol":"openai-image"}]},{"id":"disabled","enabled":false,"models":["hidden"]}]}`)
+	body := []byte(`{"channels":[{"id":"beeftv","name":"BeefTV","credentialRef":"beeftv","apiKey":"private-key","baseUrl":"https://private-provider.test/v1","headers":[{"name":"Authorization","value":"private-header"}],"enabled":true,"models":["gemini-native","image-model"],"modelProfiles":[{"model":"gemini-native","displayName":"Native Gemini","capability":"text","protocol":"chat-completion"},{"model":"image-model","displayName":"Reference Image","capability":"image","protocol":"openai-image"}]},{"id":"disabled","enabled":false,"models":["hidden"]}]}`)
 	if err := svc.SaveLocalModelConfig(body); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestAgentModelCatalogDesktopUsesActualSnapshotWithoutCredentials(t *testing
 		t.Fatalf("catalog=%#v", catalog)
 	}
 	ch := catalog.Channels[0]
-	if ch.ID != "beefapi" || ch.Name != "BeefTV" || len(ch.Models) != 2 || ch.Models[0].ModelKey != "gemini-native" || !ch.Models[0].Available || ch.Models[1].Capability != "image" {
+	if ch.ID != "beeftv" || ch.Name != "BeefTV" || len(ch.Models) != 2 || ch.Models[0].ModelKey != "gemini-native" || !ch.Models[0].Available || ch.Models[1].Capability != "image" {
 		t.Fatalf("channel=%#v", ch)
 	}
 	registry := operations.NewRegistry(svc, operations.NewStore(svc.repo.DB()))
@@ -141,7 +141,7 @@ func TestAgentModelCatalogDesktopUsesActualSnapshotWithoutCredentials(t *testing
 func TestAgentModelCatalogKeepsUnlimitedPromptImageModelsPriced(t *testing.T) {
 	svc, _ := newModelCatalogTestService(t)
 	svc.mode = serviceModeLocal
-	body := []byte(`{"channels":[{"id":"beefapi","name":"BeefTV","credentialRef":"beefapi-enterprise","enabled":true,"models":["gpt-image-2"],"modelProfiles":[{"model":"gpt-image-2","capability":"image","protocol":"openai-image",` +
+	body := []byte(`{"channels":[{"id":"beeftv","name":"BeefTV","credentialRef":"beeftv","enabled":true,"models":["gpt-image-2"],"modelProfiles":[{"model":"gpt-image-2","capability":"image","protocol":"openai-image",` +
 		`"capabilityConfig":{"version":1,"image":{"references":{"promptMaxChars":0,"maxImages":16,"maxImageBytes":0,"maskSupported":true},"size":{"parameter":"size","values":["1024x1024","2048x2048"],"default":"1024x1024","allowCustom":true},"quality":{"supported":true,"values":["low","high"],"default":"low"},"transparentBackground":{"supported":false},"responseFormat":{"supported":false},"outputFormat":{"supported":true},"maxOutputs":4}},` +
 		`"pricing":{"mode":"per_request","per_request_cny":0.35,"display_kind":"image","image_price_table":{"output":{"low":{"1K":0.35,"2K":0.7}},"reference":0.15,"default_quality":"low","default_size":"1K"}}}]}]}`)
 	if err := svc.SaveLocalModelConfig(body); err != nil {
@@ -155,7 +155,7 @@ func TestAgentModelCatalogKeepsUnlimitedPromptImageModelsPriced(t *testing.T) {
 	if len(catalog.Channels) != 1 || len(catalog.Channels[0].Models) != 1 || catalog.Channels[0].Models[0].ModelKey != "gpt-image-2" {
 		t.Fatalf("the image model left the assistant catalog: %#v", catalog)
 	}
-	got := operations.EstimateGenerationCost(session, []operations.EstimateTarget{{ModelKey: "beefapi::gpt-image-2", Kind: "image", Parameters: map[string]string{"count": "2"}}})
+	got := operations.EstimateGenerationCost(session, []operations.EstimateTarget{{ModelKey: "beeftv::gpt-image-2", Kind: "image", Parameters: map[string]string{"count": "2"}}})
 	if got.Items[0].Amount == nil || *got.Items[0].Amount != 0.7 {
 		t.Fatalf("estimate: %+v", got.Items[0])
 	}
@@ -194,7 +194,7 @@ func TestAgentModelCatalogPreservesDesktopGenerationProfiles(t *testing.T) {
 	profile := func(name, kind, protocol string, config any) map[string]any {
 		return map[string]any{"model": name, "displayName": name, "capability": kind, "protocol": protocol, "capabilityConfig": config}
 	}
-	body, err := json.Marshal(map[string]any{"channels": []any{map[string]any{"id": "beefapi", "name": "BeefTV", "enabled": true, "models": []string{"seedance-2.0-fast", "gpt-image-2.5"}, "modelProfiles": []any{profile("seedance-2.0-fast", "video", "new-api-channel-2", video), profile("gpt-image-2.5", "image", "openai-image", image)}}}})
+	body, err := json.Marshal(map[string]any{"channels": []any{map[string]any{"id": "beeftv", "name": "BeefTV", "enabled": true, "models": []string{"seedance-2.0-fast", "gpt-image-2.5"}, "modelProfiles": []any{profile("seedance-2.0-fast", "video", "new-api-channel-2", video), profile("gpt-image-2.5", "image", "openai-image", image)}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestAgentModelCatalogPreservesDesktopGenerationProfiles(t *testing.T) {
 func TestAgentCatalogFiltersCapabilityAndExposesOnlyValidatedQuote(t *testing.T) {
 	svc, _ := newModelCatalogTestService(t)
 	svc.mode = serviceModeLocal
-	body := []byte(`{"channels":[{"id":"beefapi","enabled":true,"models":["text-model","video-model","unknown-price"],"modelProfiles":[{"model":"text-model","capability":"text","protocol":"chat-completion"},{"model":"video-model","capability":"video","protocol":"openai-videos","videoPricing":{"currency":"CNY","mode":"seconds","rates":{"720p":{"output":0.25,"reference_video":0,"apiKey":"private-rate"}},"token":"private-quote"}},{"model":"unknown-price","capability":"video","protocol":"openai-videos","videoPricing":{"currency":"USD","mode":"seconds","rates":{"720p":{"output":1,"reference_video":0}}}}]}]}`)
+	body := []byte(`{"channels":[{"id":"beeftv","enabled":true,"models":["text-model","video-model","unknown-price"],"modelProfiles":[{"model":"text-model","capability":"text","protocol":"chat-completion"},{"model":"video-model","capability":"video","protocol":"openai-videos","videoPricing":{"currency":"CNY","mode":"seconds","rates":{"720p":{"output":0.25,"reference_video":0,"apiKey":"private-rate"}},"token":"private-quote"}},{"model":"unknown-price","capability":"video","protocol":"openai-videos","videoPricing":{"currency":"USD","mode":"seconds","rates":{"720p":{"output":1,"reference_video":0}}}}]}]}`)
 	if err := svc.SaveLocalModelConfig(body); err != nil {
 		t.Fatal(err)
 	}

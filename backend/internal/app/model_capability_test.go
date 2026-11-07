@@ -13,7 +13,7 @@ func TestSourcedSeedanceGenerationKeepsServerLimitsAndAudio(t *testing.T) {
 	profile := DefaultModelCapabilityConfigForModel("newapi", "seedance-2.0")
 	profile.Video.References.MaxImages = 12
 	profile.Video.GenerateAudio.Supported = false
-	input := canvasGenerationInput{Mode: "video", Prompt: "test", Config: providerConfig{InterfaceType: "newapi", BaseURL: "https://enterprise.beefapi.com", Model: "seedance-2.0", VideoSeconds: "5", Size: "16:9", VQuality: "720p", CapabilityConfig: profile, VideoCapabilitiesVersion: &version}}
+	input := canvasGenerationInput{Mode: "video", Prompt: "test", Config: providerConfig{InterfaceType: "newapi", BaseURL: "https://beeftv.app", Model: "seedance-2.0", VideoSeconds: "5", Size: "16:9", VQuality: "720p", CapabilityConfig: profile, VideoCapabilitiesVersion: &version}}
 	for i := 0; i < 10; i++ {
 		input.ReferenceImages = append(input.ReferenceImages, providerMedia{URL: "asset://test", Width: 640, Height: 640, Bytes: 10})
 	}
@@ -342,7 +342,7 @@ func TestSeedanceDocumentedOutputDurationFloor(t *testing.T) {
 	profile := DefaultModelCapabilityConfigForModel("newapi", "seedance-2.0").Video
 	for _, seconds := range []string{"3", "4"} {
 		input := canvasGenerationInput{
-			Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://enterprise.beefapi.com", VideoSeconds: seconds},
+			Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://beeftv.app", VideoSeconds: seconds},
 			ReferenceImages: []providerMedia{{Width: 512, Height: 512, Bytes: 1000}},
 		}
 		err := validateVideoTask(profile, input)
@@ -362,7 +362,7 @@ func TestSeedanceReferenceAudioMessageNamesItemAndFix(t *testing.T) {
 	// 提示要说清哪一段、现在多少、要改到多少，用户才知道下一步做什么。
 	profile := DefaultModelCapabilityConfigForModel("newapi", "seedance-2.0").Video
 	input := canvasGenerationInput{
-		Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://enterprise.beefapi.com", VideoSeconds: "5"},
+		Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://beeftv.app", VideoSeconds: "5"},
 		ReferenceImages: []providerMedia{{Width: 512, Height: 512, Bytes: 1000}},
 		ReferenceAudios: []providerMedia{{DurationMs: 1900, Bytes: 1000}},
 	}
@@ -380,7 +380,7 @@ func TestSeedanceSavedEnumAndContinuousDurationsRespectDocumentedFloor(t *testin
 	for label, profile := range map[string]*VideoCapabilityConfig{"enum": enumProfile, "continuous": continuous} {
 		for seconds, wantRejected := range map[string]bool{"1": true, "3": true, "4": false, "5": false} {
 			input := canvasGenerationInput{
-				Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://enterprise.beefapi.com", VideoSeconds: seconds},
+				Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://beeftv.app", VideoSeconds: seconds},
 				ReferenceImages: []providerMedia{{Width: 512, Height: 512, Bytes: 1000}},
 			}
 			err := validateVideoTask(profile, input)
@@ -403,7 +403,7 @@ func TestSeedanceEnumWithoutLegalDurationRejectsSubmission(t *testing.T) {
 		profile.Duration = VideoDurationConfig{Selection: "enum", Values: slices.Clone(values), Default: 1}
 		for _, seconds := range []string{"1", "2", "3", "4"} {
 			input := canvasGenerationInput{
-				Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://enterprise.beefapi.com", VideoSeconds: seconds},
+				Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://beeftv.app", VideoSeconds: seconds},
 				ReferenceImages: []providerMedia{{Width: 512, Height: 512, Bytes: 1000}},
 			}
 			if err := validateVideoTask(profile, input); err == nil {

@@ -49,7 +49,7 @@ func writeAssistantConfig(t *testing.T, body string) *Service {
 
 func TestResolveAssistantProviderUsesChannelCredential(t *testing.T) {
 	service := writeAssistantConfig(t, `{"schemaVersion":1,"revision":1,"config":{
-		"apiKey":"","baseUrl":"https://enterprise.beefapi.com","textModel":"custom::my-text",
+		"apiKey":"","baseUrl":"https://beeftv.app","textModel":"custom::my-text",
 		"channels":[{"id":"custom","name":"自建","enabled":true,"apiKey":"channel-secret",
 			"baseUrl":"https://relay.example.com/v1",
 			"modelProfiles":[{"capability":"text","model":"my-text","protocol":"chat-completion"}]}]}}`)
@@ -163,14 +163,14 @@ func TestResolveAssistantProviderReasons(t *testing.T) {
 
 // 付费生成提议要把画布默认模型原样告诉用户：展示名去掉渠道前缀，modelKey 保留原值。
 func TestAssistantGenerationModelStripsChannelPrefix(t *testing.T) {
-	service := writeAssistantConfig(t, `{"schemaVersion":1,"revision":1,"config":{"imageModel":"beefapi::gpt-image-2","videoModel":"beefapi::wan3.0-video"}}`)
+	service := writeAssistantConfig(t, `{"schemaVersion":1,"revision":1,"config":{"imageModel":"beeftv::gpt-image-2","videoModel":"beeftv::wan3.0-video"}}`)
 
 	display, modelKey := service.AssistantGenerationModel("image")
-	if display != "gpt-image-2" || modelKey != "beefapi::gpt-image-2" {
+	if display != "gpt-image-2" || modelKey != "beeftv::gpt-image-2" {
 		t.Fatalf("图片模型解析错误: display=%q modelKey=%q", display, modelKey)
 	}
 	display, modelKey = service.AssistantGenerationModel("video")
-	if display != "wan3.0-video" || modelKey != "beefapi::wan3.0-video" {
+	if display != "wan3.0-video" || modelKey != "beeftv::wan3.0-video" {
 		t.Fatalf("视频模型解析错误: display=%q modelKey=%q", display, modelKey)
 	}
 	if display, _ := service.AssistantGenerationModel("audio"); display != "" {

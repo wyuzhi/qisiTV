@@ -52,7 +52,7 @@ func managedMissingImageFixture(t *testing.T, serverURL string) (*Service, *gorm
 	t.Helper()
 	svc, db, task, row, _ := imageSubmissionFixture(t, false)
 	task.Status, task.Stage, task.LeaseOwner, task.LeaseExpiresAt = model.TaskStatusFailed, "submission_unknown", "", nil
-	task.InputJSON = `{"mode":"image","config":{"channelId":"beefapi"}}`
+	task.InputJSON = `{"mode":"image","config":{"channelId":"beeftv"}}`
 	if err := db.Save(&task).Error; err != nil {
 		t.Fatal(err)
 	}

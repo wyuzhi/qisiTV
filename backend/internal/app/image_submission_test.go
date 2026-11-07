@@ -31,7 +31,7 @@ func imageSubmissionFixture(t *testing.T, multipartBody bool) (*Service, *gorm.D
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Model(&model.ModelChannel{}).Where("id = ?", "channel").Updates(map[string]any{"base_url": "https://enterprise.beefapi.com", "api_key": key}).Error; err != nil {
+	if err := db.Model(&model.ModelChannel{}).Where("id = ?", "channel").Updates(map[string]any{"base_url": "https://beeftv.app", "api_key": key}).Error; err != nil {
 		t.Fatal(err)
 	}
 	task := model.Task{ID: "image-task", UserID: "user", Type: "canvas_image", Status: model.TaskStatusRunning, LeaseOwner: "owner", InputJSON: `{"mode":"image"}`}
@@ -57,7 +57,7 @@ func imageSubmissionFixture(t *testing.T, multipartBody bool) (*Service, *gorm.D
 	ctx := withProviderSubmissionKey(withProviderAnalytics(context.Background(), s, task), attempt)
 	ctx = generation.WithImageReplayProtocol(ctx, generation.ImageReplayProtocol)
 	ctx = context.WithValue(ctx, imageTaskContext{}, task)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://enterprise.beefapi.com"+path, bytes.NewReader(body))
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://beeftv.app"+path, bytes.NewReader(body))
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", "Bearer private-test-key")
 	req.Header.Set("X-Idempotency-Key", "must-not-override-owner")
@@ -530,12 +530,12 @@ func TestImageSubmissionRequiresProtocolAndPersistence(t *testing.T) {
 	ctx := withProviderSubmissionKey(withProviderAnalytics(context.Background(), s, task), &model.RouteAttempt{ID: row.AttemptID, TaskID: task.ID})
 	ctx = generation.WithImageReplayProtocol(ctx, generation.ImageReplayProtocol)
 	ctx = context.WithValue(ctx, imageTaskContext{}, task)
-	req, _ := http.NewRequestWithContext(ctx, "POST", "https://enterprise.beefapi.com/v1/images/generations", strings.NewReader(`{}`))
+	req, _ := http.NewRequestWithContext(ctx, "POST", "https://beeftv.app/v1/images/generations", strings.NewReader(`{}`))
 	_, handled, err := prepareImageSubmission(s, req)
 	if !handled || err == nil {
 		t.Fatal("storage failure did not fail closed")
 	}
-	for _, url := range []string{"http://enterprise.beefapi.com/v1/images/generations", "https://evil.beefapi.com/v1/images/generations", "https://beefapi.com.evil.test/v1/images/generations", "https://api.openai.com/v1/images/generations", "https://beefapi.com/v1/responses", "https://beefapi.com:8443/v1/images/edits"} {
+	for _, url := range []string{"http://beeftv.app/v1/images/generations", "https://evil.beeftv.app/v1/images/generations", "https://beeftv.app.evil.test/v1/images/generations", "https://api.openai.com/v1/images/generations", "https://beeftv.app/v1/responses", "https://beeftv.app:8443/v1/images/edits", "https://enterprise.beefapi.com/v1/images/generations"} {
 		r, _ := http.NewRequest("POST", url, nil)
 		if recoverableImageEndpoint(r) {
 			t.Fatalf("unverified contract enabled: %s", url)
@@ -814,7 +814,7 @@ func TestRecoverableImageMissingOwnerSendsZeroUpstream(t *testing.T) {
 	runtime.Images = appImagePort{}
 	ctx = generation.WithRuntime(ctx, runtime)
 	ctx = context.WithValue(ctx, imageTaskContext{}, task)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://beefapi.com/v1/images/generations", strings.NewReader(`{"prompt":"draw"}`))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://beeftv.app/v1/images/generations", strings.NewReader(`{"prompt":"draw"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -825,7 +825,7 @@ func TestRecoverableImageMissingOwnerSendsZeroUpstream(t *testing.T) {
 
 	ctx = generation.WithImageReplayProtocol(withProviderAnalytics(context.Background(), s, task), generation.ImageReplayProtocol)
 	ctx = context.WithValue(ctx, imageTaskContext{}, task)
-	req, _ = http.NewRequestWithContext(ctx, http.MethodPost, "https://enterprise.beefapi.com/v1/images/generations", strings.NewReader(`{}`))
+	req, _ = http.NewRequestWithContext(ctx, http.MethodPost, "https://beeftv.app/v1/images/generations", strings.NewReader(`{}`))
 	_, handled, err := prepareImageSubmission(s, req)
 	if !handled || !errors.Is(err, generation.ErrImageOwnerMissing) {
 		t.Fatalf("missing attempt: handled=%v err=%v", handled, err)
@@ -849,7 +849,7 @@ func TestTwoImagePortsCannotStealOwner(t *testing.T) {
 	ctx1 := withProviderSubmissionKey(withProviderAnalytics(context.Background(), s1, task1), &model.RouteAttempt{ID: row1.AttemptID, TaskID: task1.ID})
 	ctx1 = generation.WithImageReplayProtocol(ctx1, generation.ImageReplayProtocol)
 	ctx1 = context.WithValue(ctx1, imageTaskContext{}, task1)
-	req1, _ := http.NewRequestWithContext(ctx1, http.MethodPost, "https://enterprise.beefapi.com/v1/images/generations", strings.NewReader(`{"prompt":"owner-one"}`))
+	req1, _ := http.NewRequestWithContext(ctx1, http.MethodPost, "https://beeftv.app/v1/images/generations", strings.NewReader(`{"prompt":"owner-one"}`))
 	got, handled, err := prepareImageSubmission(port2.service, req1)
 	if err != nil || !handled || got == nil {
 		t.Fatalf("cross prepare: handled=%v err=%v", handled, err)

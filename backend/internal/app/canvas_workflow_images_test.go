@@ -83,7 +83,7 @@ func TestCanvasWorkflowUpscaleConfiguration(t *testing.T) {
 		if kind == "video" {
 			modelName, format = "Proteus", "mp4"
 		}
-		node := cw.Node{ID: "upscale", Title: "AI超分", Role: "operation", MediaType: kind, OperationID: kind + ".ai-upscale", OperationVersion: 1, Config: map[string]any{"channelId": "beefapi", "preset": "precision|" + modelName, "scale": 2, "outputFormat": format}}
+		node := cw.Node{ID: "upscale", Title: "AI超分", Role: "operation", MediaType: kind, OperationID: kind + ".ai-upscale", OperationVersion: 1, Config: map[string]any{"channelId": "beeftv", "preset": "precision|" + modelName, "scale": 2, "outputFormat": format}}
 		if err := cw.ValidateOperation(node); err != nil {
 			t.Fatal(err)
 		}
@@ -101,7 +101,7 @@ func TestCanvasWorkflowUpscaleConfiguration(t *testing.T) {
 func TestCanvasWorkflowDescribeAndUpscaleTemplateRoundTrip(t *testing.T) {
 	s, _, _ := workflowFixture(t)
 	s.mode = serviceModeLocal
-	config := `{"channels":[{"id":"vision","baseUrl":"https://example.test/v1","apiKey":"private-key","enabled":true,"models":["vision-model"],"modelProfiles":[{"model":"vision-model","protocol":"chat-completion","capability":"text","capabilityConfig":{"version":1,"text":{"references":{"promptMaxChars":32000,"maxImages":4,"maxImageBytes":10485760}}}}]},{"id":"beefapi","name":"官方算力","baseUrl":"https://enterprise.beefapi.com","apiKey":"official-private-key","enabled":true,"models":[]}]}`
+	config := `{"channels":[{"id":"vision","baseUrl":"https://example.test/v1","apiKey":"private-key","enabled":true,"models":["vision-model"],"modelProfiles":[{"model":"vision-model","protocol":"chat-completion","capability":"text","capabilityConfig":{"version":1,"text":{"references":{"promptMaxChars":32000,"maxImages":4,"maxImageBytes":10485760}}}}]},{"id":"beeftv","name":"官方算力","baseUrl":"https://beeftv.app","apiKey":"official-private-key","enabled":true,"models":[]}]}`
 	if err := s.SaveLocalModelConfig([]byte(config)); err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestCanvasWorkflowDescribeAndUpscaleTemplateRoundTrip(t *testing.T) {
 			t.Fatalf("missing configured selector: %s", id)
 		}
 	}
-	d := cw.Definition{Version: 1, PresentationVersion: 1, Nodes: []cw.Node{{ID: "input", Title: "图片输入", Role: "input", MediaType: "image"}, {ID: "describe", Title: "提示词反推", Role: "operation", OperationID: "image.describe", OperationVersion: 1, MediaType: "text", Config: map[string]any{"modelOption": "vision::vision-model", "prompt": "描述画面"}}, {ID: "upscale", Title: "图片AI超分", Role: "operation", OperationID: "image.ai-upscale", OperationVersion: 1, MediaType: "image", Config: map[string]any{"channelId": "beefapi", "preset": "precision|Standard V2", "scale": 2, "outputFormat": "png"}}}, Edges: []cw.Edge{{From: "input", To: "describe", FromPort: "output", ToPort: "image"}, {From: "input", To: "upscale", FromPort: "output", ToPort: "image"}}, OutputNodeIDs: []string{"describe", "upscale"}}
+	d := cw.Definition{Version: 1, PresentationVersion: 1, Nodes: []cw.Node{{ID: "input", Title: "图片输入", Role: "input", MediaType: "image"}, {ID: "describe", Title: "提示词反推", Role: "operation", OperationID: "image.describe", OperationVersion: 1, MediaType: "text", Config: map[string]any{"modelOption": "vision::vision-model", "prompt": "描述画面"}}, {ID: "upscale", Title: "图片AI超分", Role: "operation", OperationID: "image.ai-upscale", OperationVersion: 1, MediaType: "image", Config: map[string]any{"channelId": "beeftv", "preset": "precision|Standard V2", "scale": 2, "outputFormat": "png"}}}, Edges: []cw.Edge{{From: "input", To: "describe", FromPort: "output", ToPort: "image"}, {From: "input", To: "upscale", FromPort: "output", ToPort: "image"}}, OutputNodeIDs: []string{"describe", "upscale"}}
 	template, err := s.workflowTemplates().Create("owner", cw.CreateRequest{Name: "图片处理", Definition: d})
 	if err != nil {
 		t.Fatal(err)
