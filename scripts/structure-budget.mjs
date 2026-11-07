@@ -8,7 +8,7 @@ import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const LARGE_FILE_LINES = 1000;
-// BeefTV 不应按模型或厂商写规则（模型规则归 BeefAPI，第三方协议归插件）。这里统计源码里以模型系列名或厂商名开头的字符串字面量。
+// BeefTV 不应按模型或厂商写规则（模型规则归服务端 API，第三方协议归插件）。这里统计源码里以模型系列名或厂商名开头的字符串字面量。
 // 单独的通用接口格式名（如 "openai"）不算，带厂商前缀的协议名（如 "openai-videos"、"volcengine-jimeng-video"）算。
 // 系列名后面必须紧跟分隔符、数字或引号，避免 "Pikachu"、"h3-title"、"ray-trace" 这类普通字符串被误算。
 const MODEL_FAMILY = "seedance|seedream|kling|veo|sora|grok|jimeng|hailuo|vidu|topaz|minimax|wan\\d|wan|imagen|nano-banana|gemini|claude|qwen|deepseek|glm|cogvideox?|cogview|luma|runway|pika|pixverse|happyhorse|midjourney";
