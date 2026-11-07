@@ -2,6 +2,12 @@
 // 实时、终态与重开历史共用这里的形状，界面不另建只会拼字符串的 reasoning reducer。
 import { businessLifecycle } from './business-progress.mjs';
 
+const COMPACTION_ENTRY_KIND = 'pi.compaction';
+const isUserInputEntry = (entry) => Boolean(
+  entry && entry.kind !== COMPACTION_ENTRY_KIND
+  && (entry.role === 'user' || (entry.model || []).some((message) => message?.role === 'user')),
+);
+
 const visibleTextOf = (message) => message?.role === 'assistant' && message.stopReason !== 'error'
   ? (message.content || []).filter((block) => block?.type === 'text').map((block) => block.text || '').join('') : '';
 
@@ -26,8 +32,8 @@ function projectMessage(message) {
 export function durableTurnReplyText(entries, liveMessage = null) {
   const byId = new Map();
   for (const entry of entries || []) {
-    if (!entry || entry.id === undefined) continue;
-    if (entry.role === 'user' || (entry.model || []).some((message) => message?.role === 'user')) {
+    if (!entry || entry.id === undefined || entry.kind === COMPACTION_ENTRY_KIND) continue;
+    if (isUserInputEntry(entry)) {
       byId.clear();
       continue;
     }
@@ -98,20 +104,23 @@ export function createDurableTurnProjection() {
     get initialized() { return initialized; },
     accept(event) {
       switch (event?.type) {
-        case 'snapshot':
+        case 'snapshot': {
+          const live = event.docs?.['pi.live'] || event;
           if (event.afterEntry !== undefined) afterEntry = event.afterEntry;
           completed = new Map();
           for (const entry of (event.entries || []).filter((item) => item.id > afterEntry)) {
-            if ((entry.model || []).some((item) => item?.role === 'user')) {
+            if (entry.kind === COMPACTION_ENTRY_KIND) continue;
+            if (isUserInputEntry(entry)) {
               completed.clear();
               continue;
             }
             const projected = projectMessage(entry.model?.[0]);
             if (projected) completed.set(entry.id, projected);
           }
-          message = projectMessage(event.generation?.message);
+          message = projectMessage(live.generation?.message);
           if (message) messageSerial += 1;
           break;
+        }
         case 'message_start':
           if (event.message?.role !== 'assistant') return [];
           message = projectMessage(event.message);
@@ -140,8 +149,8 @@ export function createDurableTurnProjection() {
           }
           break;
         case 'message_end':
-          if (!event.entry || event.entry.id <= afterEntry) return [];
-          if ((event.entry.model || []).some((item) => item?.role === 'user')) {
+          if (!event.entry || event.entry.id <= afterEntry || event.entry.kind === COMPACTION_ENTRY_KIND) return [];
+          if (isUserInputEntry(event.entry)) {
             completed.clear();
             message = null;
             break;
@@ -183,6 +192,8 @@ export function publicDurableTurn(active, running = false) {
   // the same public projection so an upstream body cannot become UI copy.
   if (result.error && ['model_error', 'provider_error'].includes(result.errorReason)) {
     result.error = '模型没有完成回复。已经完成的操作会保留，请检查结果后再继续。';
+  } else if (result.error && result.errorReason === 'turn_interrupted') {
+    result.error = '上一轮执行中断，请核对已落地的改动。';
   }
   if (running) { delete result.toolCalls; result.status = 'running'; }
   return result;
@@ -193,9 +204,16 @@ export function durableCompletion(settled, assistant, budgetFailure, stopped = f
   const fallbackText = assistant?.stopReason === 'error' ? '' : (assistant?.content?.filter((block) => block.type === 'text').map((block) => block.text).join('') || '');
   const text = replyText !== undefined ? replyText : fallbackText;
   if (cancelled) return { reply: text, cancelled, error: null, errorReason: null };
-  if (settled.status !== 'done') return { reply: '', cancelled: false,
-    error: String(budgetFailure?.message || settled.detail || settled.reason || 'agent_run_failed'),
-    errorReason: budgetFailure?.reason || settled.reason || 'agent_run_failed' };
+  if (settled.status !== 'done') {
+    const interrupted = !budgetFailure && ['interrupted', 'restart_limit'].includes(settled.reason);
+    const interruptedReply = replyText !== undefined ? replyText : (assistant?.stopReason === 'aborted' ? fallbackText : '');
+    return {
+      reply: interrupted ? interruptedReply : '',
+      cancelled: false,
+      error: String(budgetFailure?.message || settled.detail || (interrupted ? '上一轮执行中断，请核对已落地的改动。' : settled.reason) || 'agent_run_failed'),
+      errorReason: budgetFailure?.reason || (interrupted ? 'turn_interrupted' : settled.reason) || 'agent_run_failed',
+    };
+  }
   if (!assistant || ['error', 'aborted'].includes(assistant.stopReason)) return { reply: '', cancelled: false,
     error: assistant?.errorMessage || 'agent_answer_missing', errorReason: 'provider_error' };
   return { reply: text,
@@ -218,15 +236,18 @@ export function durableRetryReason(message) {
 const retryLifecycle = (attempt, error) => ({ type: 'lifecycle', phase: 'retry', attempt, reason: durableRetryReason(error) });
 
 function snapshotLifecycle(event) {
-  const compaction = (event.compactions || []).find((item) => item.blocking);
+  const live = event.docs?.['pi.live'] || event;
+  const compaction = (live.compactions || []).find((item) => item.blocking);
   if (compaction) return { type: 'lifecycle', phase: 'compaction', taskId: compaction.taskId };
-  if (event.generation?.retry) return retryLifecycle(event.generation.attempt, event.generation.retry.error);
-  for (const slot of [...(event.nestedTools || []), ...(event.tools || [])]) {
+  if (live.generation?.retry) return retryLifecycle(live.generation.attempt, live.generation.retry.error);
+  for (const slot of [...(live.nestedTools || []), ...(live.tools || [])]) {
     if (slot.status !== 'running') continue;
     const progress = businessLifecycle(slot.name, slot.details);
     if (progress) return progress;
   }
-  const tool = (event.tools || []).find((slot) => slot.status === 'running');
+  const nestedTool = (live.nestedTools || []).find((slot) => slot.status === 'running');
+  if (nestedTool) return { type: 'lifecycle', phase: 'tool', toolName: nestedTool.name };
+  const tool = (live.tools || []).find((slot) => slot.status === 'running');
   return tool ? { type: 'lifecycle', phase: 'tool', toolName: tool.name } : null;
 }
 
@@ -241,8 +262,9 @@ export function durableStreamEvents(event, current = null) {
     }
     case 'tool_execution_end': {
       const result = event.entry?.model?.find((message) => message.role === 'toolResult' && message.toolCallId === event.toolCallId && message.toolName === event.toolName);
+      const isError = typeof result?.isError === 'boolean' ? result.isError : typeof event.isError === 'boolean' ? event.isError : undefined;
       return [{ type: 'lifecycle', phase: 'tool_end', toolName: event.toolName,
-        ...(typeof result?.isError === 'boolean' ? { success: !result.isError } : {}) }];
+        ...(typeof isError === 'boolean' ? { success: !isError } : {}) }];
     }
     case 'compaction_start': return event.blocking ? [{ type: 'lifecycle', phase: 'compaction', taskId: event.taskId }] : [];
     case 'compaction_end': return current?.phase === 'compaction' && current.taskId === event.taskId
@@ -263,7 +285,11 @@ export function durableLifecycleState(current, event) {
     case 'compaction_start': return durableStreamEvents(event, current)[0] || current;
     case 'compaction_end': return durableStreamEvents(event, current).length ? null : current;
     case 'auto_retry_end': return current?.phase === 'retry' ? null : current;
-    case 'tool_execution_end': return ['tool', 'business'].includes(current?.phase) && current.toolName === event.toolName ? durableStreamEvents(event)[0] : current;
+    case 'tool_execution_end': {
+      if (!['tool', 'business'].includes(current?.phase)) return current;
+      if (current.toolName === event.toolName) return durableStreamEvents(event)[0];
+      return current;
+    }
     default: return current;
   }
 }

@@ -37,8 +37,29 @@ export async function modelFixture(directory, selected, available, onRequest = (
 
 if (process.argv[2] === 'crash') {
   const directory = process.argv[3];
-  const fixture = await modelFixture(directory, 'astra', ['astra'], () => {
-    fs.writeFileSync(path.join(directory, 'checkpoint.json'), JSON.stringify({ actualModel: 'astra', pid: process.pid }));
+  const fixture = await modelFixture(
+    directory,
+    'astra',
+    ['astra'],
+    (body) => {
+      fs.writeFileSync(path.join(directory, 'checkpoint.json'), JSON.stringify({ actualModel: body.model, pid: process.pid }));
+      return { toolCalls: [{ id: 'call-1', name: 'plan_update', args: { items: [{ id: 'one', title: 'Frozen model step', status: 'done' }] } }] };
+    },
+    {
+      runWithBudget: async (_entry, fn) => {
+        const result = await fn();
+        process.kill(process.pid, 'SIGKILL');
+        return result;
+      },
+    },
+  );
+  const entry = await fixture.store.createSession('canvas');
+  fs.writeFileSync(path.join(directory, 'session.json'), JSON.stringify({ sessionId: entry.sessionId }));
+  await fixture.store.submit(entry, { turnId: 'interrupted', content: 'Original frozen request' });
+} else if (process.argv[2] === 'request-crash') {
+  const directory = process.argv[3];
+  const fixture = await modelFixture(directory, 'astra', ['astra'], (body) => {
+    fs.writeFileSync(path.join(directory, 'checkpoint.json'), JSON.stringify({ actualModel: body.model, pid: process.pid }));
     process.kill(process.pid, 'SIGKILL');
   });
   const entry = await fixture.store.createSession('canvas');

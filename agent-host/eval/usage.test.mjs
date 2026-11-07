@@ -30,6 +30,35 @@ test('没有 usage 时显式标记缺失，而不是当作 0 悄悄通过', () =
   expect(extractUsage('').missing).toBe(true);
 });
 
+test('Anthropic 流式：message_start 的输入与 message_delta 的缓存字段合并', () => {
+  const u = extractUsage([
+    'event: message_start',
+    'data: ' + JSON.stringify({ type: 'message_start', message: { usage: { input_tokens: 120, cache_read_input_tokens: 0, cache_creation_input_tokens: 900, output_tokens: 1 } } }),
+    'event: message_delta',
+    'data: ' + JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { cache_read_input_tokens: 900, output_tokens: 30 } }),
+    '',
+  ].join('\n'));
+  expect(u).toMatchObject({ promptTokens: 1920, completionTokens: 30, cachedTokens: 900, cacheKnown: true, cacheCreationTokens: 900, missing: false });
+});
+
+test('Anthropic 流式：message_start 只有 input_tokens，message_delta 才带缓存字段也按总输入计算', () => {
+  const u = extractUsage([
+    'event: message_start',
+    'data: ' + JSON.stringify({ type: 'message_start', message: { usage: { input_tokens: 120, output_tokens: 1 } } }),
+    'event: message_delta',
+    'data: ' + JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { cache_read_input_tokens: 900, cache_creation_input_tokens: 80, output_tokens: 30 } }),
+    '',
+  ].join('\n'));
+  expect(u).toMatchObject({ promptTokens: 1100, completionTokens: 30, cachedTokens: 900, cacheCreationTokens: 80, cacheKnown: true, missing: false });
+  expect(((u.cachedTokens / u.promptTokens) * 100).toFixed(1)).toBe('81.8');
+});
+
+test('Anthropic 命中率分母是总输入量：未命中 + 缓存读取 + 缓存创建', () => {
+  const u = extractUsage('data: ' + JSON.stringify({ type: 'message_start', message: { usage: { input_tokens: 120, cache_read_input_tokens: 900, cache_creation_input_tokens: 0, output_tokens: 1 } } }) + '\n');
+  expect(u).toMatchObject({ promptTokens: 1020, cachedTokens: 900, cacheCreationTokens: 0, cacheKnown: true });
+  expect(((u.cachedTokens / u.promptTokens) * 100).toFixed(1)).toBe('88.2');
+});
+
 test('回合结果以 turn_end 为准：HTTP 200 里的错误和取消都能识别', () => {
   const line = (row) => JSON.stringify(row);
   expect(parseTurnEnd([line({ type: 'session' }), line({ type: 'turn_end', reply: '完成', proposals: [1] })].join('\n'))).toMatchObject({ status: 'done', reply: '完成', proposals: 1 });

@@ -147,9 +147,10 @@ test('attachmentContent uses media.inspect when preview is marked inspectable an
   expect(oversizeContent.filter(part => part.type === 'image')).toEqual([{ type: 'image', data: 'PREVIEW_ONLY', mimeType: 'image/jpeg' }]);
 });
 
-test('Anthropic adapter strips cross-channel thinking signatures and ephemeral cache_control on dispatch', () => {
+test('Anthropic adapter preserves signed thinking blocks and ephemeral cache_control when pinned, and downgrades unpinned pre-upgrade signatures', () => {
   const payload = {
     model: 'claude-opus-5-5',
+    metadata: { user_id: 'durable:00000000-0000-0000-0000-000000000001' },
     system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral' } }],
     tools: [{ name: 'canvas_get', cache_control: { type: 'ephemeral' } }],
     thinking: { type: 'enabled', budget_tokens: 1024 },
@@ -167,13 +168,29 @@ test('Anthropic adapter strips cross-channel thinking signatures and ephemeral c
     ],
   };
   const adapted = adaptMediaRequest(payload, { api: 'anthropic-messages', modelId: 'claude-opus-5-5' });
-  expect(adapted.system).toEqual([{ type: 'text', text: 'sys' }]);
-  expect(adapted.tools).toEqual([{ name: 'canvas_get' }]);
-  expect(adapted.thinking).toEqual({ type: 'enabled', budget_tokens: 1024 });
-  expect(adapted.messages[1].content).toEqual([
+  expect(adapted).toBe(payload);
+  expect(adapted.metadata).toEqual({ user_id: 'durable:00000000-0000-0000-0000-000000000001' });
+  expect(adapted.system).toEqual([{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral' } }]);
+  expect(adapted.tools).toEqual([{ name: 'canvas_get', cache_control: { type: 'ephemeral' } }]);
+  expect(adapted.messages[1].content[0]).toEqual({ type: 'thinking', thinking: '先读取画布。', signature: 'sig-bedrock-channel-a' });
+
+  // Selective downgrade for pre-upgrade signatures in a now-pinned session:
+  const mixed = adaptMediaRequest(payload, {
+    api: 'anthropic-messages',
+    modelId: 'claude-opus-5-5',
+    unpinnedSignatures: new Set(['sig-bedrock-channel-a', 'opaque']),
+  });
+  expect(mixed.system).toEqual([{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral' } }]);
+  expect(mixed.messages[1].content).toEqual([
     { type: 'text', text: '先读取画布。' },
-    { type: 'tool_use', id: 'toolu_1', name: 'canvas_get', input: { canvasId: 'c1' } },
+    { type: 'tool_use', id: 'toolu_1', name: 'canvas_get', input: { canvasId: 'c1' }, cache_control: { type: 'ephemeral' } },
   ]);
-  expect(JSON.stringify(adapted)).not.toContain('sig-bedrock-channel-a');
-  expect(JSON.stringify(adapted)).not.toContain('cache_control');
+
+  // Fallback when metadata.user_id is absent:
+  const { metadata: _omitted, ...unpinnedPayload } = payload;
+  const unpinned = adaptMediaRequest(unpinnedPayload, { api: 'anthropic-messages', modelId: 'claude-opus-5-5' });
+  expect(unpinned.system).toEqual([{ type: 'text', text: 'sys' }]);
+  expect(unpinned.tools).toEqual([{ name: 'canvas_get' }]);
+  expect(JSON.stringify(unpinned)).not.toContain('sig-bedrock-channel-a');
+  expect(JSON.stringify(unpinned)).not.toContain('cache_control');
 });

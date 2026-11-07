@@ -1,12 +1,22 @@
 // 一轮对话的变更摘要、付费生成提议与供应商定义：确定性用例，不需要模型也不需要真实会话。
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import { createServer } from "node:http";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { DatabaseSync } from "node:sqlite";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { createModels } from "@earendil-works/pi-ai/models";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { AssistantEntry, CompactionEntry, defineDoc } from "@earendil-works/pi-durable";
 
-import { collectTurnEffects, extendWriteChain, newTurnAccumulator, rebaseOntoWriteChain, providerRegistration, providerUnavailableReason,
+import { collectTurnEffects, extendWriteChain, modelTurnCompletion, newTurnAccumulator, rebaseOntoWriteChain, providerRegistration, providerUnavailableReason,
   resetTurnAccumulator, sessionTitle, turnChange, turnContextPrefix, unflushedSessionHistory } from "./canvas-turn.mjs";
+import { createDurableSessionStore, HOST_STATE_CHECKPOINT_DELTAS } from "./durable-session-owner.mjs";
+import { createDurableTurnProjection } from "./durable-turn-projection.mjs";
 import { SYSTEM_PROMPT } from "./system-prompt.mjs";
-
-const serverSource = readFileSync(new URL("./server.mjs", import.meta.url), "utf8");
 
 describe("本轮画布变更", () => {
     test("真实素材绑定回执保留改动节点与撤销操作身份", () => {
@@ -205,34 +215,98 @@ describe("供应商定义", () => {
         expect(providerUnavailableReason({ modelId: "m", baseUrl: "https://x/v1", apiKey: "k", api: "newapi-channel-1" })).toBe("model_protocol_unsupported");
     });
 
-    test("密钥以环境变量引用登记，不落进供应商定义正文", () => {
+    test("密钥以环境变量引用登记，内置目录模型继承能力与网关缓存兼容配置", () => {
         const registration = providerRegistration({ api: "anthropic-messages", baseUrl: "https://enterprise.example.com",
             modelId: "claude-fable-5", maxTokens: 4096, contextWindow: 200000 });
 
         expect(registration.apiKey).toBe("$BEEFTV_AGENT_API_KEY");
         expect(registration.api).toBe("anthropic-messages");
         expect(registration.baseUrl).toBe("https://enterprise.example.com");
-        expect(registration.models).toEqual([{ id: "claude-fable-5", name: "claude-fable-5", reasoning: true,
+        expect(registration.models[0]).toMatchObject({ id: "claude-fable-5", name: "claude-fable-5", reasoning: true,
             input: ["text", "image"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-            contextWindow: 200000, maxTokens: 4096 }]);
+            contextWindow: 200000, maxTokens: 4096 });
+        const deepseek = providerRegistration({ api: "openai-completions", baseUrl: "https://relay.example.com/v1",
+            modelId: "deepseek-v4.1-flash", maxTokens: 16384, contextWindow: 200000 }).models[0];
+        expect(deepseek.reasoning).toBe(true);
+        expect(deepseek.compat).toMatchObject({
+            thinkingFormat: "deepseek",
+            requiresReasoningContentOnAssistantMessages: true,
+            promptCacheKeyMode: "enabled",
+        });
         for (const api of ["openai-completions", "openai-responses"]) {
-            expect(providerRegistration({ api, baseUrl: "https://relay.example.com/v1", modelId: "m", maxTokens: 16384, contextWindow: 200000 }).models[0].reasoning).toBe(false);
+            const unknown = providerRegistration({ api, baseUrl: "https://relay.example.com/v1", modelId: "m", maxTokens: 16384, contextWindow: 200000 }).models[0];
+            expect(unknown.reasoning).toBe(false);
+            if (api === "openai-completions") {
+                expect(unknown.compat).toEqual({ promptCacheKeyMode: "enabled" });
+            }
         }
     });
 
-    test("宿主不再硬编码 OpenAI 目录，模型与协议只来自后端下发的环境变量", () => {
-        expect(serverSource).not.toContain("openaiProvider");
-        // Durable 的官方 registry 工厂可以使用；供应商与模型仍只登记 Go 下发的配置。
-        expect(serverSource).toContain("const models = createModels(); const provider = modelRuntime.getProvider(PROVIDER_ID)");
-        expect(serverSource).toContain("getModelRef: () => ({ provider: PROVIDER_ID, modelId: MODEL_ID })");
-        expect(serverSource).toContain("BEEFTV_AGENT_API");
+    test("宿主模型目录只包含登记的后端供应商，不内置默认 OpenAI 供应商", async () => {
+        const directory = fs.mkdtempSync(path.join(os.tmpdir(), "beeftv-models-only-"));
+        try {
+            const runtime = await ModelRuntime.create({
+                authPath: path.join(directory, "auth.json"),
+                modelsPath: null,
+                refreshOnCreate: false,
+            });
+            runtime.registerProvider("beeftv", providerRegistration({
+                api: "anthropic-messages",
+                baseUrl: "https://enterprise.example.com",
+                modelId: "claude-opus-5-5",
+                maxTokens: 4096,
+                contextWindow: 200000,
+            }));
+            const models = createModels();
+            models.setProvider(runtime.getProvider("beeftv"));
+            expect(models.getProviders().map((p) => p.id)).toEqual(["beeftv"]);
+            expect(models.getModel("openai", "gpt-5")).toBeUndefined();
+            expect(models.getModel("beeftv", "claude-opus-5-5")?.api).toBe("anthropic-messages");
+        } finally {
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
     });
 
-    test("缺少模型或密钥时宿主仍然监听，只在 /health 里说明原因", () => {
-        // 以前这里是 process.exit(2)：宿主静默退出，界面只会看到「助手不可用」。
-        expect(serverSource).toContain("BEEFTV_AGENT_HOST_TOKEN: HOST_TOKEN");
-        expect(serverSource).not.toContain("BEEFTV_AGENT_API_KEY: API_KEY");
-        expect(serverSource).toContain("ok: !providerReason");
+    test("缺少模型或密钥时宿主仍然监听，只在 /health 里说明原因", async () => {
+        const directory = fs.mkdtempSync(path.join(os.tmpdir(), "beeftv-health-nokey-"));
+        const reservation = createServer();
+        await new Promise((resolve) => reservation.listen(0, "127.0.0.1", resolve));
+        const port = reservation.address().port;
+        await new Promise((resolve) => reservation.close(resolve));
+        const serverPath = fileURLToPath(new URL("./server.mjs", import.meta.url));
+        const child = spawn(process.execPath, [serverPath], {
+            env: {
+                ...process.env,
+                BEEFTV_AGENT_DATA_DIR: directory,
+                BEEFTV_AGENT_HOST_TOKEN: "test-host-token",
+                BEEFTV_AGENT_PORT: String(port),
+                BEEFTV_AGENT_MODEL: "deepseek-v4.1-flash",
+                BEEFTV_AGENT_API: "openai-completions",
+                BEEFTV_AGENT_BASE_URL: "http://127.0.0.1:9/v1",
+                BEEFTV_AGENT_API_KEY: "",
+            },
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+        try {
+            let health = null;
+            const deadline = Date.now() + 8000;
+            while (Date.now() < deadline) {
+                if (child.exitCode !== null) throw new Error(`server exited early: ${child.exitCode}`);
+                try {
+                    const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(500) });
+                    if (res.ok) {
+                        health = await res.json();
+                        break;
+                    }
+                } catch { /* wait for listen */ }
+                await new Promise((resolve) => setTimeout(resolve, 40));
+            }
+            expect(health).toMatchObject({ ok: false, reason: "model_not_configured" });
+        } finally {
+            child.kill("SIGTERM");
+            await new Promise((resolve) => child.once("close", resolve));
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
     });
 });
 
@@ -255,7 +329,447 @@ describe("回合上下文", () => {
     });
 });
 
-import { modelTurnCompletion } from './canvas-turn.mjs';
+describe('会话亲和性透传与升级恢复', () => {
+  test('OpenAI 兼容请求携带 prompt_cache_key===entry.sessionId，Anthropic 请求携带 metadata.user_id===entry.sessionId 且保留 cache_control', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'beeftv-affinity-'));
+    const openaiPayloads = [];
+    const anthropicPayloads = [];
+    const server = createServer(async (req, res) => {
+      let raw = '';
+      for await (const chunk of req) raw += chunk;
+      const body = JSON.parse(raw);
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      const pathname = new URL(req.url || '/', 'http://127.0.0.1').pathname;
+      if (pathname.endsWith('/messages')) {
+        anthropicPayloads.push(body);
+        res.write('event: message_start\ndata: ' + JSON.stringify({ type: 'message_start', message: { id: 'msg_1', type: 'message', role: 'assistant', model: body.model, content: [], stop_reason: null, usage: { input_tokens: 10, output_tokens: 1 } } }) + '\n\n');
+        res.write('event: content_block_start\ndata: ' + JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }) + '\n\n');
+        res.write('event: content_block_delta\ndata: ' + JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'ok' } }) + '\n\n');
+        res.write('event: content_block_stop\ndata: ' + JSON.stringify({ type: 'content_block_stop', index: 0 }) + '\n\n');
+        res.write('event: message_delta\ndata: ' + JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } }) + '\n\n');
+        res.end('event: message_stop\ndata: {"type":"message_stop"}\n\n');
+        return;
+      }
+      openaiPayloads.push(body);
+      res.write('data: ' + JSON.stringify({ id: 'c1', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content: 'ok' }, finish_reason: null }] }) + '\n\n');
+      res.write('data: ' + JSON.stringify({ id: 'c1', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }) + '\n\n');
+      res.end('data: [DONE]\n\n');
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+    const prevKey = process.env.BEEFTV_AGENT_API_KEY;
+    process.env.BEEFTV_AGENT_API_KEY = 'sk-test-affinity';
+    try {
+      for (const [api, modelId, baseUrl] of [
+        ['openai-completions', 'deepseek-v4.1-flash', `http://127.0.0.1:${port}/v1`],
+        ['anthropic-messages', 'claude-opus-5-5', `http://127.0.0.1:${port}`],
+      ]) {
+        const runtime = await ModelRuntime.create({ authPath: path.join(directory, `${api}-auth.json`), modelsPath: null, refreshOnCreate: false });
+        runtime.registerProvider('beeftv', providerRegistration({ api, baseUrl, modelId, maxTokens: 4096, contextWindow: 200000 }));
+        const models = createModels();
+        models.setProvider(runtime.getProvider('beeftv'));
+        const store = createDurableSessionStore({
+          sessionRoot: path.join(directory, `${api}-sessions`),
+          workspaceRoot: path.join(directory, `${api}-workspace`),
+          getModels: () => models,
+          getModelRef: () => ({ provider: 'beeftv', modelId }),
+          buildTools: () => [],
+          authorizeTurn: async () => ({ open: true, canvasId: 'c1', permissionMode: 'canvas' }),
+          settings: { retry: { maxRetries: 0 } },
+        });
+        try {
+          const entry = await store.ensureSession('c1');
+          const sub = await store.submit(entry, { turnId: 't1', requestId: 'r1', content: 'hello', userText: 'hello', revisionBefore: 1 });
+          await store.wait(entry, sub);
+          if (api === 'openai-completions') {
+            expect(openaiPayloads[0]?.prompt_cache_key).toBe(entry.sessionId);
+          } else {
+            expect(anthropicPayloads[0]?.metadata).toEqual({ user_id: entry.sessionId });
+            expect(JSON.stringify(anthropicPayloads[0])).toContain('cache_control');
+          }
+        } finally {
+          await store.disposeAll();
+        }
+      }
+    } finally {
+      if (prevKey === undefined) delete process.env.BEEFTV_AGENT_API_KEY;
+      else process.env.BEEFTV_AGENT_API_KEY = prevKey;
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('升级前未固定渠道亲和性的已有 Claude 会话恢复时降级旧 thinking 签名，新回合条目保留签名', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'beeftv-legacy-claude-'));
+    const anthropicPayloads = [];
+    let callCount = 0;
+    const server = createServer(async (req, res) => {
+      let raw = '';
+      for await (const chunk of req) raw += chunk;
+      const body = JSON.parse(raw);
+      anthropicPayloads.push(body);
+      callCount += 1;
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      const writeSse = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      writeSse('message_start', {
+        type: 'message_start',
+        message: { id: `msg_${callCount}`, type: 'message', role: 'assistant', model: body.model, content: [], stop_reason: null, usage: { input_tokens: 10, output_tokens: 1 } },
+      });
+      if (callCount === 1) {
+        writeSse('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '', signature: '' } });
+        writeSse('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: '旧会话未固定渠道的思考。' } });
+        writeSse('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'sig-unpinned-old-channel' } });
+        writeSse('content_block_stop', { type: 'content_block_stop', index: 0 });
+        writeSse('content_block_start', { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } });
+        writeSse('content_block_delta', { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '第一轮答复' } });
+        writeSse('content_block_stop', { type: 'content_block_stop', index: 1 });
+        writeSse('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } });
+        res.end('event: message_stop\ndata: {"type":"message_stop"}\n\n');
+        return;
+      }
+      if (callCount === 2) {
+        writeSse('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '', signature: '' } });
+        writeSse('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: '升级后固定渠道的思考。' } });
+        writeSse('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'sig-pinned-new-channel' } });
+        writeSse('content_block_stop', { type: 'content_block_stop', index: 0 });
+        writeSse('content_block_start', { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'toolu_new_1', name: 'plan_update', input: {} } });
+        writeSse('content_block_delta', { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: JSON.stringify({ explanation: '计划', steps: [{ step: '步骤一', status: 'completed' }] }) } });
+        writeSse('content_block_stop', { type: 'content_block_stop', index: 1 });
+        writeSse('message_delta', { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } });
+        res.end('event: message_stop\ndata: {"type":"message_stop"}\n\n');
+        return;
+      }
+      writeSse('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+      writeSse('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '第二轮答复' } });
+      writeSse('content_block_stop', { type: 'content_block_stop', index: 0 });
+      writeSse('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } });
+      res.end('event: message_stop\ndata: {"type":"message_stop"}\n\n');
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+    const prevKey = process.env.BEEFTV_AGENT_API_KEY;
+    process.env.BEEFTV_AGENT_API_KEY = 'sk-test-legacy-claude';
+    const hostStateDoc = defineDoc({
+      kind: 'beeftv.host',
+      version: 1,
+      scope: 'session',
+      initial: () => ({}),
+      checkpointWhen: (value, _ops, { deltasSinceBase }) => value.active === null || deltasSinceBase >= HOST_STATE_CHECKPOINT_DELTAS,
+    });
+    try {
+      const runtime = await ModelRuntime.create({ authPath: path.join(directory, 'auth.json'), modelsPath: null, refreshOnCreate: false });
+      runtime.registerProvider('beeftv', providerRegistration({
+        api: 'anthropic-messages',
+        baseUrl: `http://127.0.0.1:${port}`,
+        modelId: 'claude-opus-5-5',
+        maxTokens: 4096,
+        contextWindow: 200000,
+      }));
+      const models = createModels();
+      models.setProvider(runtime.getProvider('beeftv'));
+      const storeOptions = {
+        sessionRoot: path.join(directory, 'sessions'),
+        workspaceRoot: path.join(directory, 'workspace'),
+        getModels: () => models,
+        getModelRef: () => ({ provider: 'beeftv', modelId: 'claude-opus-5-5' }),
+        buildTools: () => [],
+        authorizeTurn: async () => ({ open: true, canvasId: 'c1', permissionMode: 'canvas' }),
+        settings: { retry: { maxRetries: 0 } },
+      };
+      const store1 = createDurableSessionStore(storeOptions);
+      let sessionId;
+      try {
+        const entry = await store1.ensureSession('c1');
+        sessionId = entry.sessionId;
+        const sub1 = await store1.submit(entry, { turnId: 't1', requestId: 'r1', content: '第一句', userText: '第一句', revisionBefore: 1 });
+        await store1.wait(entry, sub1);
+        // 模拟升级前持久化的会话状态（没有 affinityMinEntryId）
+        await entry.harness.commit(async (tx) => {
+          const doc = await tx.doc(hostStateDoc);
+          delete doc.affinityMinEntryId;
+        }, BACKGROUND_CONTEXT);
+      } finally {
+        await store1.disposeAll();
+      }
+
+      // 升级后重新打开同一 Durable 会话并继续对话
+      const store2 = createDurableSessionStore(storeOptions);
+      try {
+        const reopened = await store2.ensureSession('c1', sessionId);
+        const migratedState = await reopened.harness.snapshot(hostStateDoc, BACKGROUND_CONTEXT);
+        expect(migratedState.affinityMinEntryId).toBeGreaterThan(1);
+        const sub2 = await store2.submit(reopened, { turnId: 't2', requestId: 'r2', content: '第二句', userText: '第二句', revisionBefore: 1 });
+        await store2.wait(reopened, sub2);
+        // 第 3 次请求包含升级前第 1 轮历史 + 升级后第 2 轮刚刚产生的带签名 thinking 条目
+        const finalPayload = anthropicPayloads[2];
+        expect(finalPayload.metadata).toEqual({ user_id: sessionId });
+        expect(JSON.stringify(finalPayload)).not.toContain('sig-unpinned-old-channel');
+        expect(JSON.stringify(finalPayload)).toContain('旧会话未固定渠道的思考。');
+        expect(JSON.stringify(finalPayload)).toContain('sig-pinned-new-channel');
+      } finally {
+        await store2.disposeAll();
+      }
+    } finally {
+      if (prevKey === undefined) delete process.env.BEEFTV_AGENT_API_KEY;
+      else process.env.BEEFTV_AGENT_API_KEY = prevKey;
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('长轮次超过默认 100 条观察窗口时，恢复快照会补读前半段正文与思考；宿主状态在轮次结束或达到增量阈值时写完整快照', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'beeftv-long-watch-'));
+    const server = createServer(async (_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.write('data: ' + JSON.stringify({ id: 'c1', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content: '尾段正文。' }, finish_reason: null }] }) + '\n\n');
+      res.write('data: ' + JSON.stringify({ id: 'c1', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }) + '\n\n');
+      res.end('data: [DONE]\n\n');
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+    const prevKey = process.env.BEEFTV_AGENT_API_KEY;
+    process.env.BEEFTV_AGENT_API_KEY = 'sk-test-long-watch';
+    try {
+      const runtime = await ModelRuntime.create({ authPath: path.join(directory, 'auth.json'), modelsPath: null, refreshOnCreate: false });
+      runtime.registerProvider('beeftv', providerRegistration({
+        api: 'openai-completions',
+        baseUrl: `http://127.0.0.1:${port}/v1`,
+        modelId: 'deepseek-v4.1-flash',
+        maxTokens: 4096,
+        contextWindow: 200000,
+      }));
+      const models = createModels();
+      models.setProvider(runtime.getProvider('beeftv'));
+      const sessionRoot = path.join(directory, 'sessions');
+      const store = createDurableSessionStore({
+        sessionRoot,
+        workspaceRoot: path.join(directory, 'workspace'),
+        getModels: () => models,
+        getModelRef: () => ({ provider: 'beeftv', modelId: 'deepseek-v4.1-flash' }),
+        buildTools: () => [],
+        authorizeTurn: async () => ({ open: true, canvasId: 'c1', permissionMode: 'canvas' }),
+        settings: { retry: { maxRetries: 0 } },
+      });
+      let sqliteFile;
+      try {
+        const entry = await store.ensureSession('c1');
+        const uuid = entry.sessionId.slice('durable:'.length);
+        sqliteFile = fs.readdirSync(sessionRoot, { recursive: true })
+          .map((rel) => path.join(sessionRoot, String(rel)))
+          .find((full) => full.endsWith(`${uuid}.sqlite`));
+        const sub = await store.submit(entry, { turnId: 't-long', requestId: 'r-long', content: '开始长轮次', userText: '开始长轮次', revisionBefore: 1 });
+        // 在本轮已完成后再向同一对话追加 110 条条目（首条带早期的正文与思考，随后超过 100 条默认窗口上限），
+        // 再通过 wait(entry, sub) 重新挂载观察器，验证初始 snapshot 补齐了窗口外的早期条目。
+        await store.wait(entry, sub);
+        const status = await sub.status(BACKGROUND_CONTEXT);
+        await entry.root.commit(async (tx) => {
+          await tx.appendEntry(AssistantEntry, entry.root.id, {
+            model: [{
+              role: 'assistant',
+              content: [
+                { type: 'thinking', thinking: '最早期思考片段' },
+                { type: 'text', text: '最早期正文片段。' },
+              ],
+              api: 'openai-completions',
+              provider: 'beeftv',
+              model: 'deepseek-v4.1-flash',
+              usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+              stopReason: 'toolUse',
+              timestamp: Date.now(),
+            }],
+          });
+          for (let i = 0; i < 110; i += 1) {
+            await tx.appendEntry(entry.root.id, { kind: 'beeftv.progress', data: { step: i } });
+          }
+        }, BACKGROUND_CONTEXT);
+        // 确认直接 watch({ from: status.entry + 1 }) 会因为超过 100 条而截断并产生 before
+        const rawWatch = await entry.root.watch(BACKGROUND_CONTEXT, { from: status.entry + 1 });
+        expect(rawWatch.value.before).toBeGreaterThanOrEqual(status.entry + 1);
+        await rawWatch.stop();
+
+        const projection = createDurableTurnProjection();
+        const events = [];
+        await store.wait(entry, sub, {
+          onEvent: async (event) => {
+            events.push(event);
+            projection.accept(event);
+          },
+        });
+        const snapshotEvent = events.find((e) => e.type === 'snapshot');
+        expect(snapshotEvent.entries.length).toBeGreaterThan(105);
+        expect(projection.text).toContain('最早期正文片段。');
+        expect(projection.reasoning.map((r) => r.text)).toContain('最早期思考片段');
+      } finally {
+        await store.disposeAll();
+      }
+
+      // 检查 SQLite 中 beeftv.host 文档的快照基线（轮次结束 active===null 时写 base 并裁掉历史 delta）
+      const db = new DatabaseSync(sqliteFile, { readOnly: true });
+      try {
+        const docRow = db.prepare('SELECT id FROM documents WHERE kind = ?').get(JSON.stringify('beeftv.host'));
+        expect(docRow).toBeDefined();
+        const revisions = db.prepare('SELECT seq, kind FROM document_revisions WHERE document_id = ? ORDER BY seq ASC').all(docRow.id);
+        expect(revisions).toHaveLength(1);
+        expect(revisions[0].kind).toBe('base');
+      } finally {
+        db.close();
+      }
+    } finally {
+      if (prevKey === undefined) delete process.env.BEEFTV_AGENT_API_KEY;
+      else process.env.BEEFTV_AGENT_API_KEY = prevKey;
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('本轮中途发生压缩时，实时流、重连快照与终态历史均保留压缩前后的完整回复与思考', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'beeftv-midturn-compaction-'));
+    let requestCount = 0;
+    const server = createServer(async (_req, res) => {
+      requestCount += 1;
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      if (requestCount === 1) {
+        res.write('data: ' + JSON.stringify({
+          id: 'c-step1',
+          object: 'chat.completion.chunk',
+          choices: [{
+            index: 0,
+            delta: {
+              role: 'assistant',
+              reasoning_content: '压缩前思考。',
+              content: '压缩前回复 A。',
+              tool_calls: [{ index: 0, id: 'call_mid_1', type: 'function', function: { name: 'canvas_probe', arguments: '{}' } }],
+            },
+            finish_reason: null,
+          }],
+        }) + '\n\n');
+        res.write('data: ' + JSON.stringify({
+          id: 'c-step1',
+          object: 'chat.completion.chunk',
+          choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+        }) + '\n\n');
+      } else {
+        res.write('data: ' + JSON.stringify({
+          id: 'c-step2',
+          object: 'chat.completion.chunk',
+          choices: [{
+            index: 0,
+            delta: {
+              role: 'assistant',
+              reasoning_content: '压缩后思考。',
+              content: '压缩后回复 B。',
+            },
+            finish_reason: null,
+          }],
+        }) + '\n\n');
+        res.write('data: ' + JSON.stringify({
+          id: 'c-step2',
+          object: 'chat.completion.chunk',
+          choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+        }) + '\n\n');
+      }
+      res.end('data: [DONE]\n\n');
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+    const prevKey = process.env.BEEFTV_AGENT_API_KEY;
+    process.env.BEEFTV_AGENT_API_KEY = 'sk-test-midturn-compaction';
+    try {
+      const runtime = await ModelRuntime.create({ authPath: path.join(directory, 'auth.json'), modelsPath: null, refreshOnCreate: false });
+      runtime.registerProvider('beeftv', providerRegistration({
+        api: 'openai-completions',
+        baseUrl: `http://127.0.0.1:${port}/v1`,
+        modelId: 'deepseek-v4.1-flash',
+        maxTokens: 4096,
+        contextWindow: 200000,
+      }));
+      const models = createModels();
+      models.setProvider(runtime.getProvider('beeftv'));
+      let sessionEntry;
+      const store = createDurableSessionStore({
+        sessionRoot: path.join(directory, 'sessions'),
+        workspaceRoot: path.join(directory, 'workspace'),
+        getModels: () => models,
+        getModelRef: () => ({ provider: 'beeftv', modelId: 'deepseek-v4.1-flash' }),
+        buildTools: () => [{
+          name: 'canvas_probe',
+          label: 'Probe',
+          description: 'probe canvas',
+          parameters: { type: 'object', properties: {} },
+          async execute() {
+            // 在工具执行期间向当前对话写入一条官方 CompactionEntry（其 model 角色为 user，且 head 指向压缩点之后），
+            // 模拟「回复 A → 压缩 → 回复 B」的跨压缩轮次。
+            await sessionEntry.root.commit(async (tx) => {
+              const latestId = await tx.latestEntryId(sessionEntry.root.id);
+              await tx.appendEntry(CompactionEntry, sessionEntry.root.id, {
+                head: latestId,
+                model: [{
+                  role: 'user',
+                  content: [{ type: 'text', text: '<summary>早先步骤摘要</summary>' }],
+                  timestamp: Date.now(),
+                }],
+                data: { reason: 'threshold', beforeTokens: 1000 },
+              });
+            }, BACKGROUND_CONTEXT);
+            return { content: [{ type: 'text', text: 'ok' }] };
+          },
+        }],
+        authorizeTurn: async () => ({ open: true, canvasId: 'c1', permissionMode: 'canvas' }),
+        settings: { retry: { maxRetries: 0 } },
+      });
+      try {
+        sessionEntry = await store.ensureSession('c1');
+        const sub = await store.submit(sessionEntry, {
+          turnId: 't-compact',
+          requestId: 'r-compact',
+          content: '执行跨压缩回合',
+          userText: '执行跨压缩回合',
+          revisionBefore: 1,
+        });
+        const liveProjection = createDurableTurnProjection();
+        const record = await store.wait(sessionEntry, sub, {
+          onEvent: async (event) => {
+            liveProjection.accept(event);
+          },
+        });
+        expect(liveProjection.text).toBe('压缩前回复 A。\n\n压缩后回复 B。');
+        expect(liveProjection.reasoning.map((r) => r.text)).toEqual(['压缩前思考。', '压缩后思考。']);
+        expect(record.reply).toBe('压缩前回复 A。\n\n压缩后回复 B。');
+        expect(record.reasoning.map((r) => r.text)).toEqual(['压缩前思考。', '压缩后思考。']);
+
+        const history = await store.history('c1', sessionEntry.sessionId);
+        expect(history.turns).toHaveLength(1);
+        expect(history.turns[0].reply).toBe('压缩前回复 A。\n\n压缩后回复 B。');
+        expect(history.turns[0].reasoning.map((r) => r.text)).toEqual(['压缩前思考。', '压缩后思考。']);
+
+        // 重新挂载观察器获取恢复快照，确认快照不混入 CompactionEntry 且还原完整的前后段正文与思考
+        const reconnectProjection = createDurableTurnProjection();
+        const reconnectEvents = [];
+        await store.wait(sessionEntry, sub, {
+          onEvent: async (event) => {
+            reconnectEvents.push(event);
+            reconnectProjection.accept(event);
+          },
+        });
+        const snapshotEvent = reconnectEvents.find((e) => e.type === 'snapshot');
+        expect(snapshotEvent.entries.some((e) => e.kind === CompactionEntry.kind)).toBe(false);
+        expect(reconnectProjection.text).toBe('压缩前回复 A。\n\n压缩后回复 B。');
+        expect(reconnectProjection.reasoning.map((r) => r.text)).toEqual(['压缩前思考。', '压缩后思考。']);
+      } finally {
+        await store.disposeAll();
+      }
+    } finally {
+      if (prevKey === undefined) delete process.env.BEEFTV_AGENT_API_KEY;
+      else process.env.BEEFTV_AGENT_API_KEY = prevKey;
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('模型终态投影', () => {
   test('用户停止不变成模型失败，超时保留独立原因', () => {

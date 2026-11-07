@@ -117,7 +117,7 @@ globalThis.fetch = async (input, options = {}) => {
     try {
     if (options.body) {
       const payload = JSON.parse(options.body);
-      const mediaOptions = {api:MODEL_API,modelId:MODEL_ID,nativePartStore};
+      const mediaOptions = {api:MODEL_API,modelId:MODEL_ID,nativePartStore,unpinnedSignatures:budget?.unpinnedSignatures};
       for (const source of trustedMediaSources(payload,mediaOptions)) {
         historicalKind=source.mediaKind;
         if (!budget?.turnId || !budget.canvasId) throw new Error('media_authorization_missing');

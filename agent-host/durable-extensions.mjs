@@ -2,8 +2,10 @@
 // 与模型请求前后的钩子装配进官方 Durable Registry。
 import crypto from 'node:crypto';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
+import { createModels } from '@earendil-works/pi-ai/models';
 import { defineExtension, defineTool, GenerationTask, hook } from '@earendil-works/pi-durable';
 import { officialNativeHistory } from './native-history.mjs';
+import { downgradeUnpinnedAssistantMessages } from './media-content.mjs';
 import { SYSTEM_PROMPT } from './system-prompt.mjs';
 import { SKILL_LOAD_PARAMETERS, createSkillCatalogSection, expandSkillContent, loadPinnedSkills, loadedSkillRecord,
   normalizeSkillCatalog, sameSkillPin, skillsToLoad, activeSkillProjection, guardSkillModelRequests } from './skill-resource.mjs';
@@ -401,6 +403,31 @@ export async function installDurableExtensions({
           // inputs through the official request hook; the queue still owns their
           // transcript placement. This prevents replaying a stale prepared intent.
           let baseMessages = request.messages;
+          // 新会话的条目从固定渠道亲和性之后开始，签名与 cache_control 可以原样复用；
+          // 升级前未固定的旧条目签名来自随机上游节点，继续重发会触发 Invalid signature。
+          const affinityMinEntryId = typeof nativeDoc?.affinityMinEntryId === 'number' ? nativeDoc.affinityMinEntryId : Infinity;
+          if (affinityMinEntryId > 1) {
+            const contextView = await _runtime.context(_runtime.conversationId, context);
+            const unpinnedAssistants = new Set();
+            const unpinnedSignatures = new Set();
+            for (let index = 0; index < contextView.entries.length; index += 1) {
+              const item = contextView.entries[index];
+              if (item.id >= affinityMinEntryId) continue;
+              for (const msg of contextView.contributions?.[index] || item.model || []) {
+                if (msg?.role !== 'assistant') continue;
+                unpinnedAssistants.add(msg);
+                for (const block of msg.content || []) {
+                  if (block?.type === 'thinking' && typeof block.thinkingSignature === 'string' && block.thinkingSignature) {
+                    unpinnedSignatures.add(block.thinkingSignature);
+                  }
+                }
+              }
+            }
+            if (entry.budget) entry.budget.unpinnedSignatures = unpinnedSignatures;
+            baseMessages = downgradeUnpinnedAssistantMessages(baseMessages, unpinnedAssistants);
+          } else if (entry.budget) {
+            entry.budget.unpinnedSignatures = undefined;
+          }
           for (const input of active?.supplementContents || []) {
             if (!JSON.stringify(baseMessages).includes(supplementMarker(input.requestId))) {
               baseMessages = [...baseMessages, { role: 'user', content: supplementContent(input.requestId, input.content), timestamp: Date.now() }];
@@ -552,6 +579,38 @@ export async function installDurableExtensions({
   applyPluginExtensionsToRegistry(await extensions(entry));
 
   let models = await getModels(entry);
+  // 渠道缓存亲和性：把 Durable 会话 ID 作为上游缓存路由键。
+  // Anthropic 走 metadata.user_id；OpenAI 兼容网关走 prompt_cache_key（仅在模型 compat 开启时）。
+  if (models && typeof models.getProviders === 'function') {
+    const bound = createModels();
+    for (const provider of models.getProviders()) {
+      const wrap = (fn) => (model, context, options) => {
+        const callerOnPayload = options?.onPayload;
+        const nextOptions = {
+          ...options,
+          sessionId: entry.sessionId,
+          ...(model?.api === 'anthropic-messages' ? { metadata: { ...options?.metadata, user_id: entry.sessionId } } : {}),
+          onPayload: async (payload, currentModel) => {
+            let next = callerOnPayload ? (await callerOnPayload(payload, currentModel)) ?? payload : payload;
+            if (
+              (currentModel || model)?.api === 'openai-completions' &&
+              (currentModel || model)?.compat?.promptCacheKeyMode === 'enabled' &&
+              options?.cacheRetention !== 'none' &&
+              next &&
+              typeof next === 'object' &&
+              !next.prompt_cache_key
+            ) {
+              next = { ...next, prompt_cache_key: entry.sessionId };
+            }
+            return next;
+          },
+        };
+        return fn.call(provider, model, context, nextOptions);
+      };
+      bound.setProvider({ ...provider, stream: wrap(provider.stream), streamSimple: wrap(provider.streamSimple) });
+    }
+    models = bound;
+  }
   if (skills) {
     models = guardSkillModelRequests(models, async (model, request, signal) => {
       await authorization(entry, entry.turn.turnId);

@@ -144,17 +144,47 @@ function stripCacheControl(item) {
   return rest;
 }
 
-// 多通道 Anthropic/Bedrock 网关在跨步工具调用时会把请求分发到不同上游节点：
-// 历史 assistant 消息里的 thinking 签名属于前一个节点，原样重发会触发 Invalid signature in thinking block；
-// 同时跨节点 ephemeral cache_control 会触发代理层虚报 9x cache_read_input_tokens 导致提前 compaction。
-// 这里在派发边界把历史 thinking 块转为普通 text（实时流与 SQLite 已在接收端完整落盘），并移除跨通道 cache_control。
-function adaptAnthropicRequest(payload) {
+// 升级前未固定渠道亲和性（metadata.user_id）的会话条目：其 thinking 签名来自随机上游节点，
+// 继续会话时降级为普通文本并省略 redacted 载荷；已固定亲和性的新条目原样保留签名与 cache_control。
+export function downgradeUnpinnedAssistantMessages(messages, unpinnedAssistants) {
+  if (!Array.isArray(messages) || !unpinnedAssistants?.size) return messages;
+  let changed = false;
+  const next = messages.flatMap((message) => {
+    if (!message || message.role !== 'assistant' || !unpinnedAssistants.has(message) || !Array.isArray(message.content)) {
+      return [message];
+    }
+    let messageChanged = false;
+    const content = [];
+    for (const block of message.content) {
+      if (block?.type === 'thinking') {
+        messageChanged = true;
+        if (!block.redacted && typeof block.thinking === 'string' && block.thinking.trim().length > 0) {
+          content.push({ type: 'text', text: block.thinking });
+        }
+        continue;
+      }
+      content.push(block);
+    }
+    if (!messageChanged) return [message];
+    changed = true;
+    return content.length > 0 ? [{ ...message, content }] : [];
+  });
+  return changed ? next : messages;
+}
+
+function adaptAnthropicRequest(payload, unpinnedSignatures) {
   if (!payload || typeof payload !== 'object') return payload;
+  // 新会话固定了渠道亲和性：签名与 cache_control 原样保留，交给上游缓存。
+  // 只有升级前未固定的历史签名（unpinnedSignatures）需要降级。
+  const pinned = typeof payload.metadata?.user_id === 'string' && payload.metadata.user_id.trim().length > 0;
+  const hasUnpinned = unpinnedSignatures instanceof Set && unpinnedSignatures.size > 0;
+  if (pinned && !hasUnpinned) return payload;
+  const maybeStrip = pinned ? (item) => item : stripCacheControl;
   const next = { ...payload };
-  if (Array.isArray(payload.system)) {
+  if (!pinned && Array.isArray(payload.system)) {
     next.system = payload.system.map(stripCacheControl);
   }
-  if (Array.isArray(payload.tools)) {
+  if (!pinned && Array.isArray(payload.tools)) {
     next.tools = payload.tools.map(stripCacheControl);
   }
   if (Array.isArray(payload.messages)) {
@@ -163,9 +193,16 @@ function adaptAnthropicRequest(payload) {
       if (message.role === 'assistant') {
         const blocks = [];
         for (const rawBlock of message.content) {
-          const block = stripCacheControl(rawBlock);
-          if (block?.type === 'redacted_thinking') continue;
+          const block = maybeStrip(rawBlock);
+          if (block?.type === 'redacted_thinking') {
+            if (pinned && !unpinnedSignatures.has(block.data)) blocks.push(block);
+            continue;
+          }
           if (block?.type === 'thinking') {
+            if (pinned && !unpinnedSignatures.has(block.signature)) {
+              blocks.push(block);
+              continue;
+            }
             if (typeof block.thinking === 'string' && block.thinking.trim().length > 0) {
               blocks.push({ type: 'text', text: block.thinking });
             }
@@ -175,15 +212,16 @@ function adaptAnthropicRequest(payload) {
         }
         return blocks.length > 0 ? [{ ...message, content: blocks }] : [];
       }
-      return [{ ...message, content: message.content.map(stripCacheControl) }];
+      return pinned ? [message] : [{ ...message, content: message.content.map(stripCacheControl) }];
     });
   }
   return next;
 }
 
-export function adaptMediaRequest(payload, { api, modelId, nativePartStore }, extra = {}) {
+export function adaptMediaRequest(payload, { api, modelId, nativePartStore, unpinnedSignatures }, extra = {}) {
   nativePartStore ||= extra.nativePartStore || (typeof extra.read === 'function' ? extra : undefined);
-  if (api === 'anthropic-messages') return adaptAnthropicRequest(payload);
+  unpinnedSignatures ||= extra.unpinnedSignatures;
+  if (api === 'anthropic-messages') return adaptAnthropicRequest(payload, unpinnedSignatures);
   if (api !== 'openai-completions') return payload;
   const toolNames = new Map();
   const messages = [];
