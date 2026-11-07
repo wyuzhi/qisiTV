@@ -243,6 +243,7 @@ export function createSimGo(options = {}) {
   const opLog = [];
   const nextTaskFailures = [];
   const nextTaskDefects = [];
+  const nextMediaInspectErrors = [];
   const pendingTimers = new Set();
 
   const counts = {
@@ -1728,6 +1729,7 @@ export function createSimGo(options = {}) {
         const offset = Math.max(0, Number(rawParams.offset || 0));
         const limit = Math.min(50, Math.max(1, Number(rawParams.limit || 50)));
         const allItems = [...skills.values()]
+          .filter((s) => s.catalogVisible !== false)
           .filter((s) => (!idFilter || s.pin.skillId === idFilter) && (!qFilter || `${s.name}\n${s.description}`.toLowerCase().includes(qFilter)))
           .map((s) => ({
             pin: clone(s.pin),
@@ -1829,18 +1831,37 @@ export function createSimGo(options = {}) {
         if (!resourceId) {
           throw notFound('media_not_found', '目标节点尚未生成或绑定媒体资源');
         }
+        // 与真实操作层一致：除 media.overview 外必须先读 overview 再带版本，
+        // 版本不一致要明确报 stale_media_version，不能让助手把缺参当成素材问题。
+        const expectedVersion = String(rawParams.expectedVersion || '').trim();
         const resource = resources.get(resourceId);
         if (resource) {
           promptText = resource.prompt || promptText;
           defectNote = resource.reviewNote || defectNote;
           durationMs = resource.durationMs || durationMs;
         }
+        const version = resource?.version || 'v1';
+        if (opIdName === 'media.inspect') {
+          const armedIndex = nextMediaInspectErrors.findIndex((item) =>
+            item.canvasId === canvasId &&
+            (item.nodeId === nodeId || (item.assetId && item.assetId === assetId)));
+          if (armedIndex >= 0) {
+            const armed = nextMediaInspectErrors.splice(armedIndex, 1)[0];
+            throw conflict(armed.reason, armed.message, { currentVersion: version, ...(armed.details || {}) });
+          }
+        }
+        if (opIdName !== 'media.overview' && !expectedVersion) {
+          throw invalidArg('media_version_required', '先读取 overview，再提供 expectedVersion');
+        }
+        if (expectedVersion && expectedVersion !== version) {
+          throw conflict('stale_media_version', '素材内容已变化，请重新读取 overview', { currentVersion: version });
+        }
         counts.mediaInspections += 1;
         const source = {
           canvasId,
           ...(nodeId ? { nodeId } : { assetId }),
           resourceId,
-          version: resource?.version || 'v1',
+          version,
           startMs: Number(rawParams.startMs || 0),
           endMs: Number(rawParams.endMs || durationMs),
         };
@@ -1960,6 +1981,21 @@ export function createSimGo(options = {}) {
 
   function flagNextTaskDefect(defectNote = '内容与提示词不符', nodeId = null) {
     nextTaskDefects.push({ defectNote: String(defectNote), nodeId: nodeId ? String(nodeId) : null });
+  }
+
+  // 评测用：让下一次针对指定画布节点的 media.inspect 返回一次真实后端存在的可恢复错误。
+  function armNextMediaInspectError(canvasId, nodeId, options = {}) {
+    const doc = ensureCanvas(String(canvasId));
+    const node = (doc.nodes || []).find((item) => item.id === String(nodeId));
+    nextMediaInspectErrors.push({
+      canvasId: String(canvasId),
+      nodeId: String(nodeId),
+      assetId: node?.metadata?.assetId ? String(node.metadata.assetId) : null,
+      reason: String(options.reason || 'stale_media_version'),
+      message: String(options.message || '素材内容已变化，请重新读取 overview 获取当前版本'),
+      details: options.details || null,
+    });
+    return true;
   }
 
   function takeQueuedFailure(nodeId) {
@@ -2298,6 +2334,8 @@ export function createSimGo(options = {}) {
       instruction: String(skillDef.instruction || ''),
       files: Array.isArray(skillDef.files) ? clone(skillDef.files) : [],
       unsupportedCapabilities: Array.isArray(skillDef.unsupportedCapabilities) ? clone(skillDef.unsupportedCapabilities) : [],
+      // 测评专用技能可以只按 pin 加载正文、不进入系统提示词的技能目录，避免撑大普通会话的头部预算。
+      catalogVisible: skillDef.catalogVisible !== false,
     };
     skills.set(pin.skillId, record);
     return clone(record);
@@ -2356,6 +2394,29 @@ export function createSimGo(options = {}) {
     sendEnvelope(res, 500, 500, null, String(error?.message || error), error?.reason || 'internal_error');
   }
 
+  // 失败的调用也落进操作日志：评测要判断助手有没有用同样的错误参数反复重试。
+  function logOpFailure(opIdName, rawParams, opKey, turnId, error) {
+    opLog.push({
+      op: opIdName,
+      opId: opKey,
+      params: clone(rawParams),
+      turnId,
+      status: 'error',
+      reason: error?.reason || 'internal_error',
+      message: String(error?.message || error),
+      at: new Date().toISOString(),
+    });
+  }
+
+  function executeHttpOp(opIdName, rawParams, opKey, turnId) {
+    try {
+      return executeOp(opIdName, rawParams, opKey, turnId);
+    } catch (error) {
+      logOpFailure(opIdName, rawParams, opKey, turnId, error);
+      throw error;
+    }
+  }
+
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
@@ -2381,7 +2442,7 @@ export function createSimGo(options = {}) {
         const turnId = String(req.headers['x-beeftv-agent-turn'] || body.turnId || '').trim();
         const opKey = String(body.opId || body.operationId || body.params?.operationId || '').trim();
         const params = body.params !== undefined ? body.params : body;
-        const data = executeOp(opIdName, params, opKey, turnId);
+        const data = executeHttpOp(opIdName, params, opKey, turnId);
         sendOk(res, data);
         return;
       }
@@ -2392,7 +2453,7 @@ export function createSimGo(options = {}) {
         const turnId = String(req.headers['x-beeftv-agent-turn'] || body.turnId || '').trim();
         const opKey = String(body.opId || body.operationId || body.params?.operationId || '').trim();
         const params = body.params !== undefined ? body.params : body;
-        const data = executeOp(opIdName, params, opKey, turnId);
+        const data = executeHttpOp(opIdName, params, opKey, turnId);
         sendOk(res, data);
         return;
       }
@@ -2638,6 +2699,7 @@ export function createSimGo(options = {}) {
     confirmProposals,
     failNextTask,
     flagNextTaskDefect,
+    armNextMediaInspectError,
     userEditNode,
     undoTurn,
     registerSkill,

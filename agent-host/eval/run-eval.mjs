@@ -330,12 +330,13 @@ export function extractModelRequestTrace(reqBody = {}, respText = '', priorTurnR
       idx -= 1;
     }
     const prevAssistant = idx >= 0 && stableMessages[idx]?.role === 'assistant' ? stableMessages[idx] : null;
-    const nameById = new Map();
+    const callById = new Map();
     for (const tc of prevAssistant?.tool_calls || []) {
-      if (tc?.id) nameById.set(tc.id, tc.function?.name || 'unknown_tool');
+      if (tc?.id) callById.set(tc.id, { name: tc.function?.name || 'unknown_tool', args: tc.function?.arguments || '' });
     }
     for (const tm of trailingToolMsgs) {
-      const toolName = nameById.get(tm.tool_call_id) || tm.name || 'unknown_tool';
+      const call = callById.get(tm.tool_call_id) || { name: tm.name || 'unknown_tool', args: '' };
+      const toolName = call.name;
       const raw = extractMsgText(tm).trim();
       let parsed = null;
       try {
@@ -347,20 +348,23 @@ export function extractModelRequestTrace(reqBody = {}, respText = '', priorTurnR
         parsed?.isError === true ||
           parsed?.error ||
           (typeof parsed?.code === 'number' && parsed.code >= 400) ||
-          /unsupported_operation|revision_conflict|invalid_params|invalid_argument|not_found|permission_denied|模拟器未实现操作|未知操作|画布已变化|必填/.test(
+          /unsupported_operation|revision_conflict|invalid_params|invalid_argument|not_found|permission_denied|模拟器未实现操作|未知操作|画布已变化|必填|Validation failed for tool|: missing/.test(
             raw,
           ),
       );
       const errorReason = isError
         ? parsed?.reason ||
           parsed?.error?.code ||
-          (raw.includes('模拟器未实现操作')
-            ? 'unsupported_operation'
-            : raw.includes('画布已变化')
-              ? 'revision_conflict'
-              : 'tool_error')
+          (/Validation failed for tool/.test(raw)
+            ? 'tool_arguments_invalid'
+            : raw.includes('模拟器未实现操作')
+              ? 'unsupported_operation'
+              : raw.includes('画布已变化')
+                ? 'revision_conflict'
+                : 'tool_error')
         : null;
-      prevTools.push({ name: toolName, isError, errorReason });
+      // 报错时保留原始参数，评测才能判断是否用同一组错误参数反复重试。
+      prevTools.push({ name: toolName, isError, errorReason, ...(isError && call.args ? { args: call.args } : {}) });
     }
   };
 
@@ -1387,6 +1391,8 @@ export async function runEval(rawOptions = {}) {
         const turnRecords = [];
         const steerResults = [];
         const requestEvidence = [];
+        // 工具报错证据：模型侧参数校验失败不会进模拟器操作日志，单独从请求体里收集。
+        const toolErrorEvidence = [];
         let wakeResult = { autoWoken: false };
         let sessionId = '';
         let abortedThisScenario = false;
@@ -1421,6 +1427,18 @@ export async function runEval(rawOptions = {}) {
               sessionId,
               body,
             });
+            // 每一次调用前的请求体里，紧邻末尾的工具结果就是上一次工具调用的真实结果。
+            const trace = extractModelRequestTrace(body, '', []);
+            for (const tool of trace.prevTools) {
+              if (!tool.isError) continue;
+              toolErrorEvidence.push({
+                turnId,
+                tool: tool.name,
+                reason: tool.errorReason,
+                args: tool.args || '',
+                attribution: dispatch.attribution,
+              });
+            }
             if (!setupState?.skillPin) return;
             const pin = setupState.skillPin;
             const nonSystemMessages = (body.messages || []).filter(
@@ -1595,6 +1613,7 @@ export async function runEval(rawOptions = {}) {
             steerResults,
             wakeResult,
             requestEvidence,
+            toolErrorEvidence,
           });
         }
         if (!settle.idle && !meter.getState().abortedBudget) {
@@ -1731,7 +1750,7 @@ if (isMain) {
       console.log(
         [
           '用法: bun eval/run-eval.mjs [选项]',
-          '  --scenario <id|all>      指定场景 ID（如 S1..S7 或 shortdrama-2shot）或 all（默认 all）',
+          '  --scenario <id|all>      指定场景 ID（如 S1..S11 或 shortdrama-2shot）或 all（默认 all）',
           '  --model <fake|real>      模型模式：fake（默认零成本本地桩）或 real（真实模型，需显式配置单价）',
           '  --runs <N>               每个场景重复运行次数（默认 1）',
           '  --max-requests <N>       单回合最大模型请求数（默认 25）',

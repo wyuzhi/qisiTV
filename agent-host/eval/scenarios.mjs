@@ -1,13 +1,12 @@
-// 助手评测尺子：7 个固定评测场景（S1–S7）定义、确定性检查项与本地 Fake OpenAI SSE 模型服务。
+// 助手评测尺子：11 个固定评测场景（S1–S11）定义、确定性检查项与本地 Fake OpenAI SSE 模型服务。
 // 覆盖：短剧 2 镜开场、8 镜分镜表且仅物化前 2 镜首帧、单镜局部修改、同轮中途补充改向、
-// 生成后自动唤醒复查（wake-on-generation）、长对话多轮后技能规则保持。
+// 生成后自动唤醒复查（wake-on-generation）、长对话多轮后技能规则保持，
+// 以及单张需求不被技能带偏、技能分批上限、方案参数以节点为准、工具缺参后的正确恢复。
 
 import http from 'node:http';
 import { isTransientStudioTailMessage } from '../studio-digest.mjs';
-
-function clone(val) {
-  return val === undefined ? undefined : JSON.parse(JSON.stringify(val));
-}
+import { clone, isPortrait916 } from './scenarios/shared.mjs';
+import { REAL_FAILURE_SCENARIOS } from './scenarios/real-failures.mjs';
 
 function extractMessageText(msg) {
   if (!msg) return '';
@@ -447,6 +446,157 @@ export function createFakeModelServer(options = {}) {
           res,
           body.model,
           '已只将第 3 个镜头的分镜描述与「镜 3 首帧」图片节点的提示词更新为「清晨薄雾森林」主题，其余第 1、2、4 镜头及对应节点、连线均保持原样未动。',
+        );
+        return;
+      }
+
+      // S8: 用户只要一张首帧，已选技能不能把流程带成整套分镜
+      if (allText.includes('放学后的天台') || allText.includes('这次只做一张竖屏日系动漫风的首帧图')) {
+        if (toolResults.length === 0) {
+          sendToolCall(res, body.model, 'canvas_get', {});
+          return;
+        }
+        const created = toolResults.find((t) => t.name === 'canvas_nodes_create');
+        if (!created) {
+          sendToolCall(res, body.model, 'canvas_nodes_create', {
+            expectedRevision: rev,
+            nodes: [
+              {
+                type: 'image',
+                title: '放学后的天台 首帧',
+                prompt: '日系动漫风格，放学后的天台，少女回头，夕光与微风，竖屏 9:16',
+              },
+            ],
+          });
+          return;
+        }
+        const imgNode = created.data?.result?.created?.[0] || { id: 'node-1' };
+        const configured = toolResults.find((t) => t.name === 'canvas_node_configure');
+        if (!configured) {
+          sendToolCall(res, body.model, 'canvas_node_configure', {
+            expectedRevision: rev,
+            nodeId: imgNode.id,
+            kind: 'image',
+            patch: { size: '9:16', count: 1 },
+          });
+          return;
+        }
+        const proposed = toolResults.find((t) => t.name === 'canvas_generation_propose');
+        if (!proposed) {
+          sendToolCall(res, body.model, 'canvas_generation_propose', {
+            kind: 'image',
+            nodeIds: [imgNode.id],
+            note: '按你的要求只做这一张竖屏首帧，确认后开始生成',
+          });
+          return;
+        }
+        sendTextReply(
+          res,
+          body.model,
+          '已按你的要求只建了 1 张竖屏首帧图节点，画幅 9:16、数量 1，并提交了生成方案。在面板里确认后才会开始生成。',
+        );
+        return;
+      }
+
+      // S9: 选了「资产分批制作」技能，第 1 批只能做角色且最多 4 张
+      if (allText.includes('资产分批制作技能')) {
+        if (toolResults.length === 0) {
+          sendToolCall(res, body.model, 'canvas_get', {});
+          return;
+        }
+        const created = toolResults.find((t) => t.name === 'canvas_nodes_create');
+        if (!created) {
+          const characters = ['林晞', '陈野', '江陌', '苏未'];
+          sendToolCall(res, body.model, 'canvas_nodes_create', {
+            expectedRevision: rev,
+            nodes: characters.map((name, idx) => ({
+              type: 'image',
+              title: `角色 ${idx + 1} 定稿`,
+              prompt: `校园科幻短剧主角 ${name} 的角色确认稿，全身设定图，干净背景，便于后续统一造型`,
+            })),
+          });
+          return;
+        }
+        const imgNodes = (created.data?.result?.created || []).filter((n) => n.type === 'image');
+        const proposed = toolResults.find((t) => t.name === 'canvas_generation_propose');
+        if (!proposed && imgNodes.length > 0) {
+          sendToolCall(res, body.model, 'canvas_generation_propose', {
+            kind: 'image',
+            nodeIds: imgNodes.map((n) => n.id),
+            note: '第 1 批只提交这 4 个角色确认稿，请确认后再做下一批',
+          });
+          return;
+        }
+        sendTextReply(
+          res,
+          body.model,
+          '已按「资产分批制作」技能做完第 1 批：4 个主角的角色确认稿，没有混入道具或场景。确认造型后，我再做下一批。',
+        );
+        return;
+      }
+
+      // S10: 参数以节点当前值为准，不改节点，只按现有设置重提方案
+      if (allText.includes('改成方形了')) {
+        if (toolResults.length === 0) {
+          sendToolCall(res, body.model, 'canvas_get', {});
+          return;
+        }
+        const getRes = toolResults.find((t) => t.name === 'canvas_get');
+        const nodes = getRes.data?.result?.canvas?.nodes || getRes.data?.canvas?.nodes || [];
+        const imgNode = nodes.find((n) => n.type === 'image') || { id: 'node-s10-image' };
+        const proposed = toolResults.find((t) => t.name === 'canvas_generation_propose');
+        if (!proposed) {
+          sendToolCall(res, body.model, 'canvas_generation_propose', {
+            kind: 'image',
+            nodeIds: [imgNode.id],
+            note: '按节点当前的 1:1 方形设置和数量 1 重新提交生成方案，未改动节点',
+          });
+          return;
+        }
+        sendTextReply(
+          res,
+          body.model,
+          '已按节点现在的设置（1:1 方形、1 张）重新提交生成方案，没有改动节点。请在面板里确认后再生成。',
+        );
+        return;
+      }
+
+      // S11: 第一次 media.inspect 漏了 expectedVersion，读取错误后先 overview 再带版本复查
+      if (allText.includes('人物的手有没有问题')) {
+        if (toolResults.length === 0) {
+          sendToolCall(res, body.model, 'canvas_get', {});
+          return;
+        }
+        const getRes = toolResults.find((t) => t.name === 'canvas_get');
+        const nodes = getRes.data?.result?.canvas?.nodes || getRes.data?.canvas?.nodes || [];
+        const imgNode = nodes.find((n) => n.type === 'image') || { id: 'node-s11-image' };
+        const inspectCalls = toolResults.filter((t) => t.name === 'media_inspect');
+        if (inspectCalls.length === 0) {
+          // 故意先漏掉必填参数，等工具参数校验拒绝后再按提示恢复。
+          sendToolCall(res, body.model, 'media_inspect', { nodeId: imgNode.id, mode: 'frames' });
+          return;
+        }
+        const overview = toolResults.find((t) => t.name === 'media_overview');
+        if (!overview) {
+          sendToolCall(res, body.model, 'media_overview', { nodeId: imgNode.id });
+          return;
+        }
+        const version = overview.data?.result?.source?.version;
+        const successfulInspect = inspectCalls.some(
+          (t) => t.data?.result?.source?.version && !String(t.rawText || '').includes('media_version_required'),
+        );
+        if (!successfulInspect) {
+          sendToolCall(res, body.model, 'media_inspect', {
+            nodeId: imgNode.id,
+            expectedVersion: version,
+            mode: 'frames',
+          });
+          return;
+        }
+        sendTextReply(
+          res,
+          body.model,
+          '我看过这张图的画面了：人物的手部结构和手指数量看起来正常，没有明显畸形。',
         );
         return;
       }
@@ -1000,8 +1150,7 @@ export function buildS3SeedCanvas(canvasId = 'canvas-s3') {
     updatedAt: new Date().toISOString(),
   };
 }
-
-// 7 个固定场景定义
+// 11 个固定场景定义
 export const SCENARIOS = [
   {
     id: 'shortdrama-2shot',
@@ -1441,10 +1590,6 @@ export const SCENARIOS = [
       const titlesFollowSkill =
         imgNodes.some((n) => /镜\s*1\s*首帧/.test(String(n.title || ''))) &&
         imgNodes.some((n) => /镜\s*2\s*首帧/.test(String(n.title || '')));
-      const isPortrait916 = (sizeVal) => {
-        const s = String(sizeVal || '').trim().toLowerCase();
-        return s.includes('9:16') || ['720x1280', '1080x1920', '1024x1792', '576x1024', 'portrait'].includes(s);
-      };
       const configured916 =
         imgNodes.length >= 2 &&
         imgNodes.every((n) => isPortrait916(n.metadata?.size) && Number(n.metadata?.count ?? 1) === 1);
@@ -1548,6 +1693,8 @@ export const SCENARIOS = [
       return { passed: checks.every((check) => check.passed), status: checks.every((check) => check.passed) ? 'passed' : 'failed', checks };
     },
   },
+
+  ...REAL_FAILURE_SCENARIOS,
 ];
 
 export function resolveScenarioList(selector = 'all') {

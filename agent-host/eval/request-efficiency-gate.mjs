@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // 请求效率门禁（Request Efficiency Gate）
-// 用评测台假模型抓包运行 S1–S7，断言：
-// 1. 完整覆盖 S1–S7 共 7 个场景（每个场景至少 1 对相邻请求，且场景业务检查无失败）；
+// 用评测台假模型抓包运行 S1–S11，断言：
+// 1. 完整覆盖 S1–S11 共 11 个场景（每个场景至少 1 对相邻请求，且场景业务检查无失败）；
 // 2. 一个会话内头部 system 文本逐字节不变，且仅含稳定内容（<instructions> 在前、<beeftv_skill_catalog> 在后，无其他段落）；
 // 3. 每次请求末尾均带有非 system 的瞬态上下文（含 <beeftv_studio>）；
-// 4. S1–S7 中至少 95% 的相邻请求对公共前缀覆盖前一次请求除末尾瞬态上下文外的全部内容（100% 字节一致）；
+// 4. S1–S11 中至少 95% 的相邻请求对公共前缀覆盖前一次请求除末尾瞬态上下文外的全部内容（100% 字节一致）；
 // 5. 记录头部 system + 工具定义的字符数并设只降不升上限（--update 仅允许收紧，不允许调高）。
 
 import fs from 'node:fs';
@@ -15,7 +15,7 @@ import { isTransientStudioTailMessage } from '../studio-digest.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_BUDGET_PATH = path.join(__dirname, 'request-efficiency-budget.json');
-export const DEFAULT_EXPECTED_SCENARIOS = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'];
+export const DEFAULT_EXPECTED_SCENARIOS = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11'];
 
 export function extractMessageText(msg) {
   if (!msg) return '';
@@ -304,7 +304,7 @@ export function analyzeCapturedRequests(
 
   if (overallPrefixHitRatio < minPrefixHitRatio) {
     violations.push(
-      `S1–S7 相邻请求公共前缀完整覆盖率 ${(overallPrefixHitRatio * 100).toFixed(1)}% (${fullPrefixHitPairs}/${totalAdjacentPairs}) 低于门禁阈值 ${(minPrefixHitRatio * 100).toFixed(1)}%`,
+      `S1–S11 相邻请求公共前缀完整覆盖率 ${(overallPrefixHitRatio * 100).toFixed(1)}% (${fullPrefixHitPairs}/${totalAdjacentPairs}) 低于门禁阈值 ${(minPrefixHitRatio * 100).toFixed(1)}%`,
     );
   }
 

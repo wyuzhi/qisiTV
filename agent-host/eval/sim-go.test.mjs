@@ -458,13 +458,60 @@ describe('sim-go 内存版 Go 业务权威模拟器测试', () => {
       expect(tasks[0].status).toBe('succeeded');
       expect(tasks[1].status).toBe('failed');
 
-      // media.inspect 读取第 1 个节点，返回合法 PNG 与缺陷说明
-      const inspectRes = sim.executeOp('media.inspect', {
+      // media.inspect 必须先读 overview 取得版本；缺版本按真实后端的 media_version_required 拒绝
+      const overviewRes = sim.executeOp('media.overview', {
         canvasId: 'canvas-1',
         nodeId: created[0].id,
       }).result;
+      expect(() => sim.executeOp('media.inspect', {
+        canvasId: 'canvas-1',
+        nodeId: created[0].id,
+      })).toThrow(/expectedVersion/);
+      expect(() => sim.executeOp('media.inspect', {
+        canvasId: 'canvas-1',
+        nodeId: created[0].id,
+        expectedVersion: 'stale-version',
+      })).toThrow(/素材内容已变化/);
+      const inspectRes = sim.executeOp('media.inspect', {
+        canvasId: 'canvas-1',
+        nodeId: created[0].id,
+        expectedVersion: overviewRes.source.version,
+      }).result;
       expect(inspectRes.note).toContain('右手六指畸形');
       expect(inspectRes.content.length).toBe(1);
+
+      // 受控可恢复错误：即使这次也漏了 expectedVersion，第一次针对目标节点的 inspect 仍返回 stale_media_version
+      sim.armNextMediaInspectError('canvas-1', created[0].id);
+      expect(() => sim.executeOp('media.inspect', {
+        canvasId: 'canvas-1',
+        nodeId: created[0].id,
+      })).toThrow(/素材内容已变化/);
+      const inspectAfterRecovery = sim.executeOp('media.inspect', {
+        canvasId: 'canvas-1',
+        nodeId: created[0].id,
+        expectedVersion: overviewRes.source.version,
+      }).result;
+      expect(inspectAfterRecovery.content.length).toBe(1);
+
+      // 用素材 ID 读取同样能命中受控错误并恢复；节点声明的 assetId 与素材表必须一致。
+      const assetId = tasks[0].outputs[0].assetId;
+      sim.armNextMediaInspectError('canvas-1', created[0].id);
+      const assetOverview = sim.executeOp('media.overview', {
+        canvasId: 'canvas-1',
+        assetId,
+      }).result;
+      expect(assetOverview.source.version).toBe(overviewRes.source.version);
+      expect(() => sim.executeOp('media.inspect', {
+        canvasId: 'canvas-1',
+        assetId,
+      })).toThrow(/素材内容已变化/);
+      const assetInspect = sim.executeOp('media.inspect', {
+        canvasId: 'canvas-1',
+        assetId,
+        expectedVersion: assetOverview.source.version,
+      }).result;
+      expect(assetInspect.content.length).toBe(1);
+
       const pngBytes = Buffer.from(inspectRes.content[0].data, 'base64');
       const sha = crypto.createHash('sha256').update(pngBytes).digest('hex');
       expect(sha).toBe(inspectRes.content[0].sha256);
@@ -563,7 +610,7 @@ describe('预算门禁、密钥脱敏与评测配置校验测试', () => {
   });
 
   test('场景选择器与端到端单场景 fake 评测运行通过', async () => {
-    expect(resolveScenarioList('all').length).toBe(7);
+    expect(resolveScenarioList('all').length).toBe(11);
     expect(resolveScenarioList('S1,S3').map((s) => s.code)).toEqual(['S1', 'S3']);
     expect(buildS3SeedCanvas('c-s3').nodes.length).toBe(9);
 

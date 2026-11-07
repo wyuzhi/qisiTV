@@ -1,6 +1,6 @@
 # BeefTV 内置创作助手评测台 (`agent-host/eval/`)
 
-本目录提供内置创作助手评测台（Evaluation Harness）。通过内存版 Go 业务权威模拟器（`sim-go.mjs`）与 7 个固定创作场景（`scenarios.mjs`），驱动真实的 `agent-host/server.mjs`（Durable SQLite 会话、操作桥、画布 CAS 与技能加载）执行回归评测。`fake` 模式使用写好工具调用的本地模型桩，零外部扣费；通过只证明宿主和模拟业务链路可运行，不能证明真实模型的创作质量或实际 Go 后端、桌面交互已验收。
+本目录提供内置创作助手评测台（Evaluation Harness）。通过内存版 Go 业务权威模拟器（`sim-go.mjs`）与 11 个固定创作场景（`scenarios.mjs`），驱动真实的 `agent-host/server.mjs`（Durable SQLite 会话、操作桥、画布 CAS 与技能加载）执行回归评测。`fake` 模式使用写好工具调用的本地模型桩，零外部扣费；通过只证明宿主和模拟业务链路可运行，不能证明真实模型的创作质量或实际 Go 后端、桌面交互已验收。
 
 实际 Go 回归由 `backend/internal/handler/timeline_delivery_integration_test.go` 运行：官方 Durable、SQLite、FFmpeg、节点绑定与含素材的工程导出；还会在 Go 已接受渲染但宿主未收到回执时杀死 Node，再用原会话恢复，断言只有一个渲染任务。模型为本地脚本，不购买媒体。
 
@@ -11,7 +11,7 @@
 ## 1. 目录结构
 
 - `sim-go.mjs`：内存版 Go 业务权威模拟器（`createSimGo`）。加载真实的 `operation-descriptors.fixture.json`，支持 `/api/ops`、`/api/ops/:id`、`/api/canvas`、`/api/canvas/operations`、`/api/assistant/runtime/turns/:id`、`/api/assistant/turns`、`/api/assistant/skills`、`/api/assistant/skills/active`、`/api/assistant/runtime/canvases/:id/skill-context` 与 `/api/generation-tasks`。
-- `scenarios.mjs`（及 `scenarios/index.mjs`）：7 个固定评测场景定义、确定性检查项（`checks`）与本地 Fake OpenAI Chat Completions SSE 模型桩（`createFakeModelServer`）。
+- `scenarios.mjs`（及 `scenarios/index.mjs`）：11 个固定评测场景定义、确定性检查项（`checks`）与本地 Fake OpenAI Chat Completions SSE 模型桩（`createFakeModelServer`）。S8–S11 的场景定义与检查项在 `scenarios/real-failures.mjs`，共用纯函数在 `scenarios/shared.mjs`。
 - `run-eval.mjs`：CLI 评测运行器、预算门禁与成本计量器（`createCostMeter`）、密钥脱敏器（`redactSecrets`）与 JSON/Markdown 报告生成器。
 - `sim-go.test.mjs`：针对 `sim-go`、CAS 冲突、分镜行产出连线绑定、生成提议与撤销、预算熔断及脱敏的单测与端到端套件。
 
@@ -25,7 +25,7 @@ cd agent-host
 bun test eval/sim-go.test.mjs
 ```
 
-### 运行全量 7 场景确定性评测（默认 `--model fake`，零付费调用）
+### 运行全量 11 场景确定性评测（默认 `--model fake`，零付费调用）
 ```bash
 cd agent-host
 bun eval/run-eval.mjs --model fake
@@ -55,7 +55,7 @@ bun eval/run-eval.mjs --model real --scenario all --runs 3 --max-requests 25 --b
 ### CLI 参数
 | 参数 | 默认值 | 说明 |
 | :--- | :--- | :--- |
-| `--scenario <id\|all>` | `all` | 场景标识（支持 `S1`..`S7` 或 `shortdrama-2shot` 等名称，支持逗号分隔） |
+| `--scenario <id\|all>` | `all` | 场景标识（支持 `S1`..`S11` 或 `shortdrama-2shot` 等名称，支持逗号分隔） |
 | `--model <fake\|real>` | `fake` | `fake` 使用本地确定性 SSE 模型服务；`real` 连接真实模型并启用本地计量代理 |
 | `--runs <N>` | `1` | 每个场景重复运行次数（`1..50`） |
 | `--max-requests <N>` | `25` | 注入 `BEEFTV_AGENT_MAX_REQUESTS_PER_TURN` 的单轮最大模型请求上限 |
@@ -74,7 +74,9 @@ bun eval/run-eval.mjs --model real --scenario all --runs 3 --max-requests 25 --b
 
 ---
 
-## 4. 固定评测场景一览（S1–S7）
+## 4. 固定评测场景一览（S1–S11）
+
+S8–S11 的计分只使用结构化数据：画布节点、生成方案、`opLog` 操作记录和回合记录。回复原文只写进 `detail` 作诊断信息，不参与关键词判定。
 
 | 编号 | 场景 ID | 核心验证目标 | 基线预期 |
 | :--- | :--- | :--- | :--- |
@@ -85,6 +87,10 @@ bun eval/run-eval.mjs --model real --scenario all --runs 3 --max-requests 25 --b
 | **S5** | `post-generation-review` | 提交生成提议后模拟器交付带六指缺陷的图片，检验自动唤醒复查能力（`wake-on-generation`） | `PASS` |
 | **S6** | `skill-across-turns` | 仅首轮激活「短剧分镜到首帧」技能；后续自然补充和确认，检查每次请求仍带活动技能、首帧命名与画幅、有效 `imageNodeId` 回填和提议门禁；不触发压缩 | `PASS` |
 | **S7** | `user-requested-generation-review` | 首轮提议经用户确认并交付后，用户主动发起第二轮复查，助手检查产物、在原节点修正提示词并重提；重提仍等待确认 | `PASS` |
+| **S8** | `single-image-against-skill` | 已选「短剧分镜到首帧」技能，但用户只要一张 9:16 竖屏首帧：只建 1 个 image 节点、无其他节点；方案提交时该节点必须是 9:16、count=1，且提交后本轮不再写该节点 | `PASS` |
+| **S9** | `skill-batch-limit` | 选中「资产分批制作」技能后点名主角林晞、陈野、江陌、苏未，道具旧怀表、能量手环，场景天台、实验室、操场：按点名实体判定最终节点和方案提交时的 targets 都必须是角色；各份方案按提交时的目标与 count 累加不超过 4 张 | `PASS` |
+| **S10** | `proposal-follows-node-settings` | 用户在界面把草稿图尺寸从 16:9 改成 1:1 后要求重提方案：本轮除只读操作和生成方案外，任何引用该节点 ID 的成功操作都判失败；节点快照（含媒体字段）必须与 setup 一致，方案参数与节点当前值一致 | `PASS` |
+| **S11** | `recover-from-tool-error` | 画布上有已生成图片；本轮第一次针对该图片的 `media.inspect` 返回可恢复的 `stale_media_version`，要求之后带正确当前版本复查成功（只读 overview 不算完成）；同一组规范化错误参数不重复，回合无错误完成 | `PASS` |
 
 ---
 
@@ -105,6 +111,7 @@ bun eval/run-eval.mjs --model real --scenario all --runs 3 --max-requests 25 --b
 - **费用阈值不是支付硬限额**：费用在请求返回 usage 后计算，未预留当前请求的最大成本。真实模型验收前仍需授权预算，并结合请求数量及模型输出上限控制支出，不能把 `--budget-cny` 当作绝不会超出的扣费上限。
 - **S5 自动唤醒复查 (`wake-on-generation`)**：模拟器完成任务后，向 `/events` 投递 `task_completed` 通知并观察宿主自动唤醒复查、修改原节点提示词并重新登记生成单（`expectedBaselinePass: true`）。如果期望基线通过的场景回退为 `baseline_gap`，整体报告会判定为 `failed` 并以非 0 状态码退出。观察窗口最长 120 秒，看到本画布的复查且宿主停下即结束；真实模型被唤醒后要几次请求才完成复查，固定等 1 秒会把迟到的复查误判为能力缺口。观察窗口内通过证明宿主自动唤醒链路工作正常，生产任务完成事件的实际投递仍需配合后端续做测试验收。
 - **S7 是用户主动复查**：用户再发一条消息发起检查，与 S5 自动唤醒分别计分，不能用 S7 通过宣称自动续做已实现。修正提示词既可以是 `canvas.node.configure` 的 `patch.prompt`（媒体节点的标准做法），也可以是 `canvas.node.update` 的 `prompt`/`content`；只改其他参数不算。图片和缺陷说明由模拟器提供；真实模型模式也使用模拟产物及缺陷说明，不是对真实图片视觉判断准确率的测量。
+- **S11 的受控错误**：模型工具参数 schema 会先拒绝缺少 `expectedVersion` 的 `media.inspect`（错误文本为 `Validation failed ... missing`），不会到达模拟器；直接调用操作层时模拟器按真实后端的 `media_version_required` 拒绝。场景另外用 `armNextMediaInspectError` 让本轮第一次针对目标图片的 `media.inspect` 返回可恢复的 `stale_media_version`，并提示重新读取 overview 取得当前版本；节点声明的 `asset-s11-seed` 与 `res-s11-seed` 都已注册，按 nodeId 或 assetId 读取都会进入同一条受控错误流程。只有随后带正确版本的 `media.inspect` 成功才算完成复查。评测同时统计模型侧与模拟器侧的同参数重试；回复原文只作诊断，不参与计分。
 - **S6 不测试压缩**：场景已从 `skill-after-compaction` 更名为 `skill-across-turns`。真实调用 Durable 压缩、故意使用有损摘要并验证技能重新注入的测试在 `../durable-skills-cases.mjs`，由 `bun test durable-skills.test.mjs` 运行；这份评测报告不继承其结论。
 - **新增场景**：在 `scenarios.mjs` 的 `SCENARIOS` 数组中追加包含 `id`、`code`、`setup`、`turns` 与 `evaluate` 的场景定义即可自动纳入 `--scenario all`。
 
