@@ -14,7 +14,7 @@ type brandTransport func(*http.Request) (*http.Response, error)
 func (f brandTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestBrandUpgradePreservesEncryptedIssuerAndRedactsUI(t *testing.T) {
-	for _, origin := range []string{LegacyOrigin, ProductionOrigin} {
+	for _, origin := range []string{ProductionOrigin} {
 		t.Run(origin, func(t *testing.T) {
 			t.Setenv(TestOriginEnv, "")
 			dir := t.TempDir()
@@ -86,7 +86,7 @@ func TestBrandUpgradePreservesEncryptedIssuerAndRedactsUI(t *testing.T) {
 }
 
 func TestSavedOriginsRejectCrossOriginAndRestoreLegacyPending(t *testing.T) {
-	for _, origin := range []string{ProductionOrigin, LegacyOrigin} {
+	for _, origin := range []string{ProductionOrigin} {
 		if got, err := savedOrigin(persistedState{Device: &persistedDevice{VerificationURI: origin + "/desktop-auth"}}, ProductionOrigin); err != nil || got != origin {
 			t.Fatalf("pending origin = %s %v", got, err)
 		}
@@ -94,12 +94,12 @@ func TestSavedOriginsRejectCrossOriginAndRestoreLegacyPending(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, origin := range []string{"https://beeftv.app.evil.test", "http://beeftv.app", "https://beeftv.app:8443", "https://evil.test", "https://user@beeftv.app"} {
+	for _, origin := range []string{"https://enterprise.beefapi.com", "https://beefapi.com", "https://beeftv.app.evil.test", "http://beeftv.app", "https://beeftv.app:8443", "https://evil.test", "https://user@beeftv.app"} {
 		if _, err := savedOrigin(persistedState{ProviderBaseURL: origin}, ProductionOrigin); err == nil {
 			t.Fatalf("trusted saved origin %s", origin)
 		}
-		if IsEnterpriseBaseURL(origin) {
-			t.Fatalf("trusted endpoint %s", origin)
+		if _, err := CanonicalOrigin(origin); err == nil {
+			t.Fatalf("trusted canonical origin %s", origin)
 		}
 	}
 	if _, err := savedOrigin(persistedState{AuthorizationOrigin: ProductionOrigin, ProviderBaseURL: "https://evil.test"}, ProductionOrigin); err == nil {

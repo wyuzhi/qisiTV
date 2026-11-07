@@ -11,7 +11,7 @@ import (
 )
 
 func testProvider() assistant.Provider {
-	return assistant.Provider{Model: "gpt-5.5", BaseURL: "https://beefapi.com/v1", APIKey: "test-key", Protocol: "chat-completion"}
+	return assistant.Provider{Model: "gpt-5.5", BaseURL: "https://beeftv.app/v1", APIKey: "test-key", Protocol: "chat-completion"}
 }
 
 func testPin(opsURL, desktop string) childPin {
@@ -79,11 +79,11 @@ func TestAssistantHostEnvCarriesProtocolAndBaseURLShape(t *testing.T) {
 		wantAPI  string
 		wantBase string
 	}{
-		{"chat-completion", "https://enterprise.beefapi.com", "openai-completions", "https://enterprise.beefapi.com/v1"},
-		{"chat-completion", "https://enterprise.beefapi.com/v1/", "openai-completions", "https://enterprise.beefapi.com/v1"},
-		{"responses", "https://enterprise.beefapi.com", "openai-responses", "https://enterprise.beefapi.com/v1"},
-		{"claude-api", "https://enterprise.beefapi.com/v1", "anthropic-messages", "https://enterprise.beefapi.com"},
-		{"claude-api", "https://enterprise.beefapi.com", "anthropic-messages", "https://enterprise.beefapi.com"},
+		{"chat-completion", "https://beeftv.app", "openai-completions", "https://beeftv.app/v1"},
+		{"chat-completion", "https://beeftv.app/v1/", "openai-completions", "https://beeftv.app/v1"},
+		{"responses", "https://beeftv.app", "openai-responses", "https://beeftv.app/v1"},
+		{"claude-api", "https://beeftv.app/v1", "anthropic-messages", "https://beeftv.app"},
+		{"claude-api", "https://beeftv.app", "anthropic-messages", "https://beeftv.app"},
 	}
 	for _, item := range cases {
 		env := host.buildEnv(assistant.Provider{Model: "m", BaseURL: item.baseURL, APIKey: "k", Protocol: item.protocol},

@@ -4,7 +4,7 @@ import "testing"
 
 func TestBeefAPIPresetIsPinnedWithoutFreezingRemoteModelCatalog(t *testing.T) {
 	preset := BeefAPI()
-	if preset.ID != "beefapi" {
+	if preset.ID != "beeftv" {
 		t.Fatalf("preset id = %q", preset.ID)
 	}
 	if preset.DisplayName != "BeefTV" || preset.BaseURL != "https://beeftv.app" {

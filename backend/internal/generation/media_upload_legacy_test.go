@@ -16,7 +16,7 @@ func retrySeedanceUpload(ctx context.Context, err error, _ bool) bool {
 
 func TestPrepareBeefAPIVideoReferencesSkipsTextAndAudioTasks(t *testing.T) {
 	cfg := Config{
-		BaseURL:       "https://enterprise.beefapi.com/v1",
+		BaseURL:       "https://beeftv.app/v1",
 		APIKey:        "test-key",
 		Model:         "claude-fable-5",
 		CredentialRef: beefapi.CredentialRef,

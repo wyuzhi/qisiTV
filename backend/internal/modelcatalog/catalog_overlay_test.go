@@ -111,9 +111,9 @@ func TestLoadChannelModelCatalogCustomGeminiAndBeefAPI(t *testing.T) {
 
 	beef, err := LoadChannelModelCatalog(context.Background(), func(context.Context, string, string, string, []ChannelHeader) ([]byte, error) {
 		return beefAPIBody, nil
-	}, "https://enterprise.beefapi.com/v1", "openai", "k", nil, nil)
+	}, "https://beeftv.app/v1", "openai", "k", nil, nil)
 	if err != nil || len(beef) != 1 || beef[0].ID != "doubao-seedance-2-0" || beef[0].VideoCapabilitiesVersion == nil || *beef[0].VideoCapabilitiesVersion != "gateway-1" {
-		t.Fatalf("beefapi catalog = %#v %v", beef, err)
+		t.Fatalf("beeftv catalog = %#v %v", beef, err)
 	}
 	want, ok := NormalizeCatalogVideoCapability(raw)
 	if !ok {

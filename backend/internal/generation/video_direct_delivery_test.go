@@ -196,13 +196,13 @@ func TestBeefAPIVideoPollPolicyDoesNotDependOnModelName(t *testing.T) {
 		config   Config
 		interval time.Duration
 	}{
-		{"cached Seedance", Config{BaseURL: "https://enterprise.beefapi.com/v1", Model: "seedance-2.0-mini"}, 5 * time.Second},
-		{"case-normalized Seedance", Config{BaseURL: "https://enterprise.beefapi.com/v1", Model: "DOUBAO-SEEDANCE-2.5"}, 5 * time.Second},
-		{"managed Gemini", Config{BaseURL: "https://enterprise.beefapi.com/v1", Model: "veo-3.1", APIFormat: "gemini", InterfaceType: "gemini-veo", ChannelModelKey: "seedance-2.0-mini"}, 5 * time.Second},
-		{"managed Vertex", Config{BaseURL: "https://enterprise.beefapi.com/v1", Model: "veo-3.1-fast", APIFormat: "gemini", InterfaceType: "gemini-veo", ProviderModelKey: "seedance-2.0-mini"}, 5 * time.Second},
-		{"other BeefAPI video", Config{BaseURL: "https://enterprise.beefapi.com/v1", Model: "sora-2"}, 5 * time.Second},
-		{"unknown model", Config{BaseURL: "https://enterprise.beefapi.com/v1", Model: "arbitrary-future-video"}, 5 * time.Second},
-		{"empty model", Config{BaseURL: "https://enterprise.beefapi.com/v1"}, 5 * time.Second},
+		{"cached Seedance", Config{BaseURL: "https://beeftv.app/v1", Model: "seedance-2.0-mini"}, 5 * time.Second},
+		{"case-normalized Seedance", Config{BaseURL: "https://beeftv.app/v1", Model: "DOUBAO-SEEDANCE-2.5"}, 5 * time.Second},
+		{"managed Gemini", Config{BaseURL: "https://beeftv.app/v1", Model: "veo-3.1", APIFormat: "gemini", InterfaceType: "gemini-veo", ChannelModelKey: "seedance-2.0-mini"}, 5 * time.Second},
+		{"managed Vertex", Config{BaseURL: "https://beeftv.app/v1", Model: "veo-3.1-fast", APIFormat: "gemini", InterfaceType: "gemini-veo", ProviderModelKey: "seedance-2.0-mini"}, 5 * time.Second},
+		{"other BeefAPI video", Config{BaseURL: "https://beeftv.app/v1", Model: "sora-2"}, 5 * time.Second},
+		{"unknown model", Config{BaseURL: "https://beeftv.app/v1", Model: "arbitrary-future-video"}, 5 * time.Second},
+		{"empty model", Config{BaseURL: "https://beeftv.app/v1"}, 5 * time.Second},
 		{"custom Seedance provider", Config{BaseURL: "https://provider.example/v1", Model: "seedance-2.0-mini"}, 30 * time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

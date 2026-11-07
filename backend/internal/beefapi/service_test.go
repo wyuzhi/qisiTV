@@ -296,7 +296,7 @@ func TestConnectionHappyPathSavesBeforeAckAndHidesKey(t *testing.T) {
 	if strings.Contains(mustJSON(t, redacted), "ent-secret-key") {
 		t.Fatal("model config presentation leaked key")
 	}
-	channel := findChannel(effective.Config["channels"].([]any), "beefapi")
+	channel := findChannel(effective.Config["channels"].([]any), "beeftv")
 	if channel["apiKey"] != "" {
 		t.Fatalf("managed key stored in model config: %#v", channel["apiKey"])
 	}
@@ -682,10 +682,10 @@ func TestSaveStateFailureIsDistinct(t *testing.T) {
 }
 
 func TestFrontendWriteCannotClobberManagedFields(t *testing.T) {
-	incoming := map[string]any{"channels": []any{map[string]any{"id": "beefapi", "apiKey": "from-ui", "deviceCode": "leak", "models": []any{}}}}
-	existing := map[string]any{"channels": []any{map[string]any{"id": "beefapi", "apiKey": "disk-secret", "models": []any{"gpt-image-2"}, "modelProfiles": []any{map[string]any{"model": "gpt-image-2", "capability": "image"}}}}}
+	incoming := map[string]any{"channels": []any{map[string]any{"id": "beeftv", "apiKey": "from-ui", "deviceCode": "leak", "models": []any{}}}}
+	existing := map[string]any{"channels": []any{map[string]any{"id": "beeftv", "apiKey": "disk-secret", "models": []any{"gpt-image-2"}, "modelProfiles": []any{map[string]any{"model": "gpt-image-2", "capability": "image"}}}}}
 	PreserveManagedChannel(incoming, existing, true)
-	channel := findChannel(incoming["channels"].([]any), "beefapi")
+	channel := findChannel(incoming["channels"].([]any), "beeftv")
 	if channel["apiKey"] != "" || channel["deviceCode"] != nil {
 		t.Fatalf("managed fields leaked into write: %#v", channel)
 	}
@@ -696,15 +696,15 @@ func TestFrontendWriteCannotClobberManagedFields(t *testing.T) {
 
 func TestPreserveManagedChannelKeepsServerInventoryAndManualProviders(t *testing.T) {
 	incoming := map[string]any{"channels": []any{
-		map[string]any{"id": "beefapi", "enabled": false, "apiKey": "from-ui", "models": []any{"stale-a", "stale-b"}, "modelProfiles": []any{map[string]any{"model": "stale-a"}}},
+		map[string]any{"id": "beeftv", "enabled": false, "apiKey": "from-ui", "models": []any{"stale-a", "stale-b"}, "modelProfiles": []any{map[string]any{"model": "stale-a"}}},
 		map[string]any{"id": "manual", "name": "工作室渠道", "apiKey": "keep-me", "models": []any{"local-image"}},
 	}}
 	existing := map[string]any{"channels": []any{
-		map[string]any{"id": "beefapi", "apiKey": "disk-secret", "baseUrl": "https://enterprise.beefapi.com", "models": []any{"enterprise-image"}, "modelProfiles": []any{map[string]any{"model": "enterprise-image", "capability": "image", "protocol": "openai-image"}}},
+		map[string]any{"id": "beeftv", "apiKey": "disk-secret", "baseUrl": "https://beeftv.app", "models": []any{"enterprise-image"}, "modelProfiles": []any{map[string]any{"model": "enterprise-image", "capability": "image", "protocol": "openai-image"}}},
 		map[string]any{"id": "manual", "name": "旧名称", "apiKey": "disk-manual", "models": []any{"old-image"}},
 	}}
 	PreserveManagedChannel(incoming, existing, true)
-	beef := findChannel(incoming["channels"].([]any), "beefapi")
+	beef := findChannel(incoming["channels"].([]any), "beeftv")
 	manual := findChannel(incoming["channels"].([]any), "manual")
 	if catalogSize(beef["models"]) != 1 || beef["models"].([]any)[0] != "enterprise-image" {
 		t.Fatalf("stale nonempty inventory replaced catalog: %#v", beef["models"])
@@ -712,7 +712,7 @@ func TestPreserveManagedChannelKeepsServerInventoryAndManualProviders(t *testing
 	if beef["apiKey"] != "" || beef["credentialRef"] != CredentialRef || beef["enabled"] != false {
 		t.Fatalf("managed credential/user fields: %#v", beef)
 	}
-	if beef["baseUrl"] != "https://enterprise.beefapi.com" {
+	if beef["baseUrl"] != "https://beeftv.app" {
 		t.Fatalf("managed base URL dropped: %#v", beef["baseUrl"])
 	}
 	if manual["name"] != "工作室渠道" || manual["apiKey"] != "keep-me" || catalogSize(manual["models"]) != 1 {
@@ -721,10 +721,10 @@ func TestPreserveManagedChannelKeepsServerInventoryAndManualProviders(t *testing
 }
 
 func TestPreserveManagedChannelClearsStaleInventoryAfterDisconnect(t *testing.T) {
-	incoming := map[string]any{"channels": []any{map[string]any{"id": "beefapi", "models": []any{"stale-a", "stale-b"}}}}
-	existing := map[string]any{"channels": []any{map[string]any{"id": "beefapi", "models": []any{}, "modelProfiles": []any{}}}}
+	incoming := map[string]any{"channels": []any{map[string]any{"id": "beeftv", "models": []any{"stale-a", "stale-b"}}}}
+	existing := map[string]any{"channels": []any{map[string]any{"id": "beeftv", "models": []any{}, "modelProfiles": []any{}}}}
 	PreserveManagedChannel(incoming, existing, false)
-	channel := findChannel(incoming["channels"].([]any), "beefapi")
+	channel := findChannel(incoming["channels"].([]any), "beeftv")
 	if catalogSize(channel["models"]) != 0 {
 		t.Fatalf("disconnected catalog restored from stale frontend: %#v", channel["models"])
 	}

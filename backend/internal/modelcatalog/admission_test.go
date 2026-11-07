@@ -13,18 +13,18 @@ import (
 func TestTaskInputUsesCustomChannelManagedBeefAPI(t *testing.T) {
 	withCreds := map[string]any{"config": map[string]any{
 		"credentialRef": managedCredentialRef,
-		"baseUrl":       "https://api.beefapi.example/v1",
+		"baseUrl":       "https://beeftv.app/v1",
 		"apiKey":        "managed-key",
 	}}
 	if !TaskInputUsesCustomChannel(withCreds) {
-		t.Fatal("managed BeefAPI with live credentials must be classified as a custom channel")
+		t.Fatal("managed BeefTV with live credentials must be classified as a custom channel")
 	}
 	channelIDOnly := map[string]any{"config": map[string]any{"channelId": managedChannelID, "model": "x"}}
 	if TaskInputUsesCustomChannel(channelIDOnly) {
-		t.Fatal("beefapi channel id without credentials is not a custom channel")
+		t.Fatal("beeftv channel id without credentials is not a custom channel")
 	}
 	if !TaskInputUsesSystemChannel(channelIDOnly) {
-		t.Fatal("beefapi channel id without credentials still names a system channel")
+		t.Fatal("beeftv channel id without credentials still names a system channel")
 	}
 }
 

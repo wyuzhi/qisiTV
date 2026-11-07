@@ -67,12 +67,12 @@ func TestRunMusicNormalizesOldFormatAndSendsSSE(t *testing.T) {
 
 func TestMusicSSEEndpointUsesExactProductionOrExplicitLoopback(t *testing.T) {
 	t.Setenv("BEEFTV_ENTERPRISE_TEST_ORIGIN", "http://127.0.0.1:33419")
-	for _, endpoint := range []string{"https://beeftv.app", "https://enterprise.beefapi.com/v1", "http://127.0.0.1:33419/v1"} {
+	for _, endpoint := range []string{"https://beeftv.app", "https://beeftv.app/v1", "http://127.0.0.1:33419/v1"} {
 		if !isBeefAPIHostFromURL(endpoint) {
 			t.Errorf("rejected endpoint %s", endpoint)
 		}
 	}
-	for _, endpoint := range []string{"http://127.0.0.1:33418", "https://beeftv.app.attacker.example", "https://user@beeftv.app", "https://beeftv.app:444", "https://api.beefapi.com", "http://192.168.1.4:33419"} {
+	for _, endpoint := range []string{"http://127.0.0.1:33418", "https://beeftv.app.attacker.example", "https://user@beeftv.app", "https://beeftv.app:444", "https://enterprise.beefapi.com/v1", "https://api.beefapi.com", "http://192.168.1.4:33419"} {
 		if isBeefAPIHostFromURL(endpoint) {
 			t.Errorf("accepted endpoint %s", endpoint)
 		}
@@ -126,7 +126,7 @@ func TestMusicChannelNameDoesNotEnableSSEForCustomOrigin(t *testing.T) {
 	defer server.Close()
 	for _, withPlugin := range []bool{false, true} {
 		ctx := context.Background()
-		config := Config{ChannelID: "beefapi", Model: "minimax-music-v3.0", BaseURL: server.URL}
+		config := Config{ChannelID: "beeftv", Model: "minimax-music-v3.0", BaseURL: server.URL}
 		if withPlugin {
 			config.InterfaceType = "openai-audio"
 			ctx = WithProtocolRegistry(ctx, LoadOfficialFallbackRegistry())

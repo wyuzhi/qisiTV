@@ -69,7 +69,7 @@ func TestGPTImageQualityTiersValidateAll39Selections(t *testing.T) {
 				if err := validateImageTask(profile, input); err != nil {
 					t.Fatalf("%s/%s/%s: %v", name, quality, size, err)
 				}
-				input.Mode, input.Config.ChannelID = "image", "beefapi"
+				input.Mode, input.Config.ChannelID = "image", "beeftv"
 				_, err := ValidateConfiguredTask(input, func(_, _ string) (*model.ChannelModel, error) {
 					return &model.ChannelModel{ModelKey: name, Protocol: "openai-image", CapabilityConfigJSON: string(legacyJSON)}, nil
 				})

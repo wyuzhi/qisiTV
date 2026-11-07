@@ -28,8 +28,8 @@ func TestMultipartPreparationCannotBeAnUncertainPaidSubmission(t *testing.T) {
 func TestManagedDiscoveryTransportFailureClassifiesAsRequestNotSent(t *testing.T) {
 	for _, cause := range []error{
 		io.EOF,
-		&url.Error{Op: "Get", URL: "https://enterprise.beefapi.com/v1/models", Err: x509.UnknownAuthorityError{}},
-		&net.DNSError{Err: "no such host", Name: "enterprise.beefapi.com"},
+		&url.Error{Op: "Get", URL: "https://beeftv.app/v1/models", Err: x509.UnknownAuthorityError{}},
+		&net.DNSError{Err: "no such host", Name: "beeftv.app"},
 	} {
 		err := RequestPreparationError{Cause: beefapi.MediaDiscoveryTransportError{Cause: cause}}
 		var preparation RequestPreparationError

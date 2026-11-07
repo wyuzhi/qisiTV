@@ -27,7 +27,7 @@ func (p taggedImagePort) Intercept(*http.Request) (bool, []byte, string, error) 
 
 func beefAPIImageRequest(ctx context.Context) *http.Request {
 	ctx = WithImageReplayProtocol(ctx, ImageReplayProtocol)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://beefapi.com/v1/images/generations", strings.NewReader(`{"prompt":"draw"}`))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://beeftv.app/v1/images/generations", strings.NewReader(`{"prompt":"draw"}`))
 	if err != nil {
 		panic(err)
 	}

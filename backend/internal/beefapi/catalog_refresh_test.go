@@ -17,7 +17,7 @@ func TestRefreshCatalogPersistsTrustedPortraitPricesAcrossRestart(t *testing.T) 
 	}
 	waitState(t, svc, StateConnected)
 	before, _, _ := store.LoadEffectiveModelConfig()
-	before.Config["assistantModel"] = "beefapi::chosen-assistant"
+	before.Config["assistantModel"] = "beeftv::chosen-assistant"
 	before.Config["model"] = "custom::chosen-image"
 	before.Config["videoModel"] = "custom::chosen-video"
 	before.Config["textModel"] = "custom::chosen-text"
@@ -48,7 +48,7 @@ func TestRefreshCatalogPersistsTrustedPortraitPricesAcrossRestart(t *testing.T) 
 	}
 	reopened, _ := workspace.NewProviderConfig(dir)
 	current, _, err := reopened.LoadEffectiveModelConfig()
-	if err != nil || current.Config["assistantModel"] != "beefapi::chosen-assistant" {
+	if err != nil || current.Config["assistantModel"] != "beeftv::chosen-assistant" {
 		t.Fatal("refresh did not preserve the chosen assistant", err)
 	}
 	for _, field := range []string{"model", "videoModel", "textModel"} {

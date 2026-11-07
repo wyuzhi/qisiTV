@@ -26,7 +26,7 @@ func TestWorkspaceModelConfigReturnsBuiltinBeefAPIAndPersistenceMetadata(t *test
 	}
 	config, _ := data["config"].(map[string]any)
 	channels, _ := config["channels"].([]any)
-	if len(channels) != 1 || channels[0].(map[string]any)["id"] != "beefapi" {
+	if len(channels) != 1 || channels[0].(map[string]any)["id"] != "beeftv" {
 		t.Fatalf("builtin BeefAPI missing: %#v", channels)
 	}
 	if models, _ := channels[0].(map[string]any)["models"].([]any); len(models) != 0 {
@@ -93,7 +93,7 @@ func putModelConfig(t *testing.T, router *gin.Engine, expectedRevision int64, ap
 	t.Helper()
 	body, err := json.Marshal(map[string]any{
 		"expectedRevision": expectedRevision,
-		"config":           map[string]any{"channels": []any{map[string]any{"id": "beefapi", "apiKey": apiKey, "enabled": true}}},
+		"config":           map[string]any{"channels": []any{map[string]any{"id": "beeftv", "apiKey": apiKey, "enabled": true}}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +131,7 @@ func TestWorkspaceModelConfigCapabilityNormalizesDrafts(t *testing.T) {
 				"type":          "video",
 				"interfaceType": "newapi-channel-2",
 				"model":         "bytedance/dreamina-seedance-2-5-flash",
-				"baseUrl":       "https://beefapi.com/v1",
+				"baseUrl":       "https://beeftv.app/v1",
 				"capabilityConfig": map[string]any{
 					"version": 1,
 					"video": map[string]any{

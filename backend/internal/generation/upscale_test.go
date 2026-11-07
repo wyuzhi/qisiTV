@@ -245,7 +245,7 @@ func TestUpscaleExecuteFourModelsUsesOwnedUploadAndOriginalResult(t *testing.T) 
 }
 
 func TestUpscaleRejectsOwnerAndInvalidInputBeforePaidSubmit(t *testing.T) {
-	input := Input{Mode: "image", Prompt: "AI 超分", Config: Config{BaseURL: "https://enterprise.beefapi.com/v1", Model: "topaz-standard-v2"}, Upscale: &UpscaleOptions{Factor: 2}, ReferenceImages: []Media{{StorageKey: "resource:source"}}}
+	input := Input{Mode: "image", Prompt: "AI 超分", Config: Config{BaseURL: "https://beeftv.app/v1", Model: "topaz-standard-v2"}, Upscale: &UpscaleOptions{Factor: 2}, ReferenceImages: []Media{{StorageKey: "resource:source"}}}
 	for _, factor := range []int{0, 5} {
 		changed := input
 		changed.Upscale = &UpscaleOptions{Factor: factor}

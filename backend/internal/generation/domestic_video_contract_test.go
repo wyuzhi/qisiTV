@@ -8,20 +8,23 @@ import (
 )
 
 func TestDomesticGatewayVideoContractDoesNotGrantHostedCredentials(t *testing.T) {
-	for _, base := range []string{"https://beefapi.com/v1", "https://BEEFAPI.COM:443/v1"} {
+	for _, base := range []string{"https://beeftv.app", "https://beeftv.app/v1"} {
 		if !IsBeefAPIVideoConfig(context.Background(), Config{BaseURL: base}) {
-			t.Fatalf("domestic video gateway rejected: %s", base)
+			t.Fatalf("official video gateway rejected: %s", base)
 		}
-		if providerpreset.IsBeefAPIEndpoint(base) {
-			t.Fatal("domestic custom channel must not become a hosted-account endpoint")
+		if !providerpreset.IsBeefAPIEndpoint(base) {
+			t.Fatalf("official endpoint rejected: %s", base)
 		}
 	}
-	for _, base := range []string{"http://beefapi.com/v1", "https://beefapi.com.attacker.test/v1", "https://attacker.test/beefapi.com", "https://user@beefapi.com/v1", "https://beefapi.com:444/v1"} {
+	for _, base := range []string{"https://beefapi.com/v1", "https://BEEFAPI.COM:443/v1", "https://enterprise.beefapi.com/v1", "http://beeftv.app/v1", "https://beeftv.app.attacker.test/v1", "https://attacker.test/beeftv.app", "https://user@beeftv.app/v1", "https://beeftv.app:444/v1"} {
 		if IsBeefAPIVideoConfig(context.Background(), Config{BaseURL: base}) {
 			t.Fatalf("unexpected video gateway: %s", base)
 		}
+		if providerpreset.IsBeefAPIEndpoint(base) {
+			t.Fatalf("unexpected hosted-account endpoint: %s", base)
+		}
 	}
-	input := Input{Prompt: "change the ball", Config: Config{BaseURL: "https://beefapi.com/v1", InterfaceType: "newapi", Model: "seedance-2.5", VideoSeconds: "4", VQuality: "480", Size: "16:9", VideoGenerateAudio: "false", VideoWatermark: "false"}, Metadata: map[string]any{"videoEditOperation": "inpaint"}, ReferenceVideos: []Media{{URL: "https://example.com/ref.mp4"}}}
+	input := Input{Prompt: "change the ball", Config: Config{BaseURL: "https://beeftv.app/v1", InterfaceType: "newapi", Model: "seedance-2.5", VideoSeconds: "4", VQuality: "480", Size: "16:9", VideoGenerateAudio: "false", VideoWatermark: "false"}, Metadata: map[string]any{"videoEditOperation": "inpaint"}, ReferenceVideos: []Media{{URL: "https://example.com/ref.mp4"}}}
 	body, err := BeefAPIVideoRequestBody(input)
 	if err != nil {
 		t.Fatal(err)

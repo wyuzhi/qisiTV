@@ -38,23 +38,23 @@ func TestVideoContractBoundaries(t *testing.T) {
 			t.Fatalf("unverified model matched: %s", name)
 		}
 	}
-	for _, base := range []string{"https://enterprise.beefapi.com.evil.test", "https://evil.test/enterprise.beefapi.com", "http://enterprise.beefapi.com", "https://user@enterprise.beefapi.com", "https://enterprise.beefapi.com:444"} {
+	for _, base := range []string{"https://beeftv.app.evil.test", "https://evil.test/beeftv.app", "http://beeftv.app", "https://user@beeftv.app", "https://beeftv.app:444", "https://enterprise.beefapi.com", "https://beefapi.com"} {
 		if IsBeefAPIEndpoint(base) {
 			t.Fatalf("untrusted endpoint: %s", base)
 		}
 	}
-	if !IsBeefAPIEndpoint("https://enterprise.beefapi.com/v1") {
+	if !IsBeefAPIEndpoint("https://beeftv.app/v1") {
 		t.Fatal("canonical endpoint rejected")
 	}
 
-	capability, protocol, ok := HostedBeefAPIVideoProfile("https://enterprise.beefapi.com", "seedance-2.0-fast")
+	capability, protocol, ok := HostedBeefAPIVideoProfile("https://beeftv.app", "seedance-2.0-fast")
 	if !ok || capability != "video" || protocol != "newapi" {
 		t.Fatalf("hosted Fast overlay: cap=%q proto=%q ok=%v", capability, protocol, ok)
 	}
 	if _, _, ok := HostedBeefAPIVideoProfile("https://example.invalid/v1", "seedance-2.0-fast"); ok {
 		t.Fatal("custom gateway must keep its stored capability")
 	}
-	if _, _, ok := HostedBeefAPIVideoProfile("https://enterprise.beefapi.com", "gpt-image-2"); ok {
+	if _, _, ok := HostedBeefAPIVideoProfile("https://beeftv.app", "gpt-image-2"); ok {
 		t.Fatal("hosted image SKU must not be rewritten as video")
 	}
 	if got := InferModelCapability("MiniMax-H3"); got != "video" {

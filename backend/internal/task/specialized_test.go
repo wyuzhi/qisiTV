@@ -368,7 +368,7 @@ func TestCloudTranscriptionAdmissionBindsModelAndPreservesOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if task.Model != req.Model || task.Provider != "beefapi" || !strings.Contains(task.InputJSON, `"managedTokenId":"token-fixture"`) {
+	if task.Model != req.Model || task.Provider != "beeftv" || !strings.Contains(task.InputJSON, `"managedTokenId":"token-fixture"`) {
 		t.Fatalf("bad task binding: %+v", task)
 	}
 	replay, err := svc.CreateTimelineTranscriptionTask("owner", req)

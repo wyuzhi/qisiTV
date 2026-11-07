@@ -16,7 +16,7 @@ func TestNewStoryboardPreparationAtomicReplayAndUndo(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := []any{map[string]any{"durationSeconds": 5, "imageGenerationPrompt": "a warm cafe", "videoMotionPrompt": "open door with bell"}}
-	params := map[string]any{"canvasId": h.canvasID, "expectedRevision": before["revision"], "script": map[string]any{"title": "雨后开门", "rows": rows}, "image": map[string]any{"model": "beefapi::gpt-image-2", "size": "9:16"}, "video": map[string]any{"model": "beefapi::wan3.0-video", "generateAudio": "true"}}
+	params := map[string]any{"canvasId": h.canvasID, "expectedRevision": before["revision"], "script": map[string]any{"title": "雨后开门", "rows": rows}, "image": map[string]any{"model": "beeftv::gpt-image-2", "size": "9:16"}, "video": map[string]any{"model": "beeftv::wan3.0-video", "generateAudio": "true"}}
 	// Fail after creating the script and rows. The real single-connection
 	// transaction must discard those intermediate writes with the receipt.
 	rows[0].(map[string]any)["videoMotionPrompt"] = ""

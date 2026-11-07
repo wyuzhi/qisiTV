@@ -270,7 +270,7 @@ func TestDesktopProfileStartupChain(t *testing.T) {
 	}
 
 	// 最小文字读写（默认跳过，避免测试依赖真实模型）：设置 BEEFTV_TEST_REAL_TURN=1
-	// 与 BEEFTV_TEST_CREDENTIALS=<beefapi 凭据 json> 时，用真实模型走一次
+	// 与 BEEFTV_TEST_CREDENTIALS=<beeftv 凭据 json> 时，用真实模型走一次
 	// 「读画布 + 改一个节点字段」，证明发行形态下的助手链路真的能读写。
 	if os.Getenv("BEEFTV_TEST_REAL_TURN") == "1" {
 		fixture := "desktop-chain-fixture"

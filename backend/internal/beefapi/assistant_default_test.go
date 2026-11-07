@@ -9,7 +9,7 @@ import (
 )
 
 // 助手默认值是 DeepSeek Flash，老用户已保存的选择不能被它改写。
-const assistantDefaultKey = "beefapi::deepseek-v4.1-flash"
+const assistantDefaultKey = "beeftv::deepseek-v4.1-flash"
 
 func assistantDefaultCatalog() []map[string]any {
 	return []map[string]any{
@@ -63,7 +63,7 @@ func TestAssistantDefaultSurvivesStateWriteFailureAndColdRecovery(t *testing.T) 
 	if selection := loadAssistantSelection(t, store); selection != assistantDefaultKey {
 		t.Fatalf("catalog default = %q, want %q", selection, assistantDefaultKey)
 	}
-	saveAssistantSelection(t, store, "beefapi::claude-opus-5-5")
+	saveAssistantSelection(t, store, "beeftv::claude-opus-5-5")
 	reopened, err := workspace.NewProviderConfig(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestAssistantDefaultSurvivesStateWriteFailureAndColdRecovery(t *testing.T) 
 	if err := cold.Recover(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if selection := loadAssistantSelection(t, reopened); selection != "beefapi::claude-opus-5-5" {
+	if selection := loadAssistantSelection(t, reopened); selection != "beeftv::claude-opus-5-5" {
 		t.Fatalf("cold recovery overwrote manual choice: %q", selection)
 	}
 	// 同一账号重新授权：目录里仍有用户选的模型，就继续用它。
@@ -84,14 +84,14 @@ func TestAssistantDefaultSurvivesStateWriteFailureAndColdRecovery(t *testing.T) 
 	if err := applyCatalog(reopened, fresh, "42", "42", "9002"); err != nil {
 		t.Fatal(err)
 	}
-	if selection := loadAssistantSelection(t, reopened); selection != "beefapi::claude-opus-5-5" {
+	if selection := loadAssistantSelection(t, reopened); selection != "beeftv::claude-opus-5-5" {
 		t.Fatalf("new authorization overwrote saved choice: %q", selection)
 	}
 	// 新目录不再提供该模型时也保留原选择，由界面提示重新选择；不自动换模型。
 	if err := applyCatalog(reopened, []CatalogModel{{ID: "deepseek-v4.1-flash", ModelType: "text"}}, "42", "42", "9003"); err != nil {
 		t.Fatal(err)
 	}
-	if selection := loadAssistantSelection(t, reopened); selection != "beefapi::claude-opus-5-5" {
+	if selection := loadAssistantSelection(t, reopened); selection != "beeftv::claude-opus-5-5" {
 		t.Fatalf("authorization replaced an unavailable saved choice: %q", selection)
 	}
 }
@@ -106,7 +106,7 @@ func TestCatalogFailureRecoveryPreservesSelectedAssistant(t *testing.T) {
 	if selection := loadAssistantSelection(t, store); selection != assistantDefaultKey {
 		t.Fatalf("fresh authorization default = %q, want %q", selection, assistantDefaultKey)
 	}
-	saveAssistantSelection(t, store, "beefapi::claude-opus-5-5")
+	saveAssistantSelection(t, store, "beeftv::claude-opus-5-5")
 	fake.mu.Lock()
 	fake.catalogFail = true
 	fake.mu.Unlock()
@@ -119,7 +119,7 @@ func TestCatalogFailureRecoveryPreservesSelectedAssistant(t *testing.T) {
 	if err := svc.finalizeSavedCredential(context.Background(), ""); err != nil {
 		t.Fatal(err)
 	}
-	if selection := loadAssistantSelection(t, store); selection != "beefapi::claude-opus-5-5" {
+	if selection := loadAssistantSelection(t, store); selection != "beeftv::claude-opus-5-5" {
 		t.Fatalf("catalog recovery overwrote user choice: %q", selection)
 	}
 }
@@ -140,17 +140,17 @@ func TestAuthorizationAssistantDefaultAndCatalogRefresh(t *testing.T) {
 	if selection := loadAssistantSelection(t, store); selection != assistantDefaultKey {
 		t.Fatalf("authorization did not choose DeepSeek Flash: %q", selection)
 	}
-	saveAssistantSelection(t, store, "beefapi::claude-opus-5-5")
+	saveAssistantSelection(t, store, "beeftv::claude-opus-5-5")
 	if err := applyCatalog(store, models, "42", "42", ""); err != nil {
 		t.Fatal(err)
 	}
-	if selection := loadAssistantSelection(t, store); selection != "beefapi::claude-opus-5-5" {
+	if selection := loadAssistantSelection(t, store); selection != "beeftv::claude-opus-5-5" {
 		t.Fatalf("refresh overwrote user choice: %q", selection)
 	}
 	if err := applyCatalog(store, models[:1], "42", "42", "9001"); err != nil {
 		t.Fatal(err)
 	}
-	if selection := loadAssistantSelection(t, store); selection != "beefapi::claude-opus-5-5" {
+	if selection := loadAssistantSelection(t, store); selection != "beeftv::claude-opus-5-5" {
 		t.Fatalf("repeated authorization reused a cached catalog: %q", selection)
 	}
 }
@@ -168,7 +168,7 @@ func TestFreshAuthorizationOnlyFillsMissingAssistantSelection(t *testing.T) {
 	if selection := loadAssistantSelection(t, store); selection != assistantDefaultKey {
 		t.Fatalf("first authorization default = %q", selection)
 	}
-	saveAssistantSelection(t, store, "beefapi::claude-opus-5-5")
+	saveAssistantSelection(t, store, "beeftv::claude-opus-5-5")
 	for _, tc := range []struct {
 		name                  string
 		previousAccount, next string
@@ -181,7 +181,7 @@ func TestFreshAuthorizationOnlyFillsMissingAssistantSelection(t *testing.T) {
 			if err := applyCatalog(store, full, tc.previousAccount, tc.next, tc.authorization); err != nil {
 				t.Fatal(err)
 			}
-			if selection := loadAssistantSelection(t, store); selection != "beefapi::claude-opus-5-5" {
+			if selection := loadAssistantSelection(t, store); selection != "beeftv::claude-opus-5-5" {
 				t.Fatalf("saved choice replaced by default: %q", selection)
 			}
 		})
@@ -190,7 +190,7 @@ func TestFreshAuthorizationOnlyFillsMissingAssistantSelection(t *testing.T) {
 	if err := applyCatalog(store, []CatalogModel{{ID: "deepseek-v4.1-flash", ModelType: "text"}}, "99", "77", "9004"); err != nil {
 		t.Fatal(err)
 	}
-	if selection := loadAssistantSelection(t, store); selection != "beefapi::claude-opus-5-5" {
+	if selection := loadAssistantSelection(t, store); selection != "beeftv::claude-opus-5-5" {
 		t.Fatalf("unavailable saved choice was replaced: %q", selection)
 	}
 }
@@ -212,11 +212,11 @@ func TestAuthorizationDefaultRequiresCatalogModel(t *testing.T) {
 	if _, exists := current.Config["assistantModel"]; exists {
 		t.Fatalf("fabricated assistant default without catalog model: %v", current.Config["assistantModel"])
 	}
-	saveAssistantSelection(t, store, "beefapi::claude-opus-5-5")
+	saveAssistantSelection(t, store, "beeftv::claude-opus-5-5")
 	if err := applyCatalog(store, models, "", "42", "9002"); err != nil {
 		t.Fatal(err)
 	}
-	if selection := loadAssistantSelection(t, store); selection != "beefapi::claude-opus-5-5" {
+	if selection := loadAssistantSelection(t, store); selection != "beeftv::claude-opus-5-5" {
 		t.Fatalf("missing default cleared a saved choice: %q", selection)
 	}
 }

@@ -43,7 +43,7 @@ func TestBeefAPIConnectionRoutesRequireWorkspaceAndHideSecrets(t *testing.T) {
 	RegisterBeefAPIConnectionRoutes(router.Group("/api"), service)
 
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/beefapi/connection", nil))
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/beeftv/connection", nil))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -60,7 +60,7 @@ func TestBeefAPIConnectionRoutesRequireWorkspaceAndHideSecrets(t *testing.T) {
 		t.Fatalf("connection summary leaked apiKey: %#v", envelope.Data)
 	}
 	recorder = httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/beefapi/connection/models", strings.NewReader(`{"apiKey":"client-forged","models":[{"id":"seedance-2.0-portrait"}]}`)))
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/beeftv/connection/models", strings.NewReader(`{"apiKey":"client-forged","models":[{"id":"seedance-2.0-portrait"}]}`)))
 	if recorder.Code == http.StatusOK || strings.Contains(recorder.Body.String(), "client-forged") {
 		t.Fatal("disconnected catalog endpoint accepted or exposed client credentials")
 	}
