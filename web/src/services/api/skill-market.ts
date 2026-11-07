@@ -5,6 +5,8 @@ export type SkillMetadata = { skillId?: string; name: string; description: strin
 export type SkillReviewSummary = { reviewedAt: string; revision: number; contentHash: string; archiveSha256: string; previewDigest: string; trials: Array<{ scenario: string; target: string; runtimeVersion: string; model: string; conclusion: string; testedAt: string }> };
 export type MarketRelease = SkillMetadata & { skillId: string; releaseId: string; author: string; archiveBytes: number; contentHash: string; archiveSha256: string; files: SkillPackageFile[]; publishedAt: string; review?: SkillReviewSummary; compatibility?: { status: string; reasons: string[] } };
 export type MarketItem = SkillMetadata & { skillId: string; releaseId: string; author: string; compatibility: { status: string; reasons: string[] }; verification: string };
+export type PublicMarketSkill = { id: string; source: string; skillId: string; name: string; installs: number; isOfficial?: boolean; description?: string; sourceUrl: string };
+export type PublicMarketSearchResult = { items: PublicMarketSkill[]; total: number; fallback?: boolean; notice?: string };
 export type PublishPreview = { revision: number; previewDigest: string; author: string; metadata: SkillMetadata; files: SkillPackageFile[]; warnings: string[] };
 export type PublicationTarget = { publicationTarget: "new" | "existing"; marketSkillId?: string };
 export type PublishPlan = { planId: string; skillId: string; versionId: string; canvasId?: string; publicationTarget?: PublicationTarget["publicationTarget"]; marketSkillId?: string; archiveSha256: string; instruction: string; metadata: SkillMetadata; files: SkillPackageFile[]; status: string; submissionId?: string; revision?: number; preview?: PublishPreview; reviewReason?: string; createdAt: string };
@@ -16,6 +18,8 @@ const id = encodeURIComponent;
 const changed = <T>(promise: Promise<T>) => promise.finally(invalidateAddedSkillsCache);
 
 export const searchSkillMarket = (q: string, page = 1) => http.get<{ items: MarketItem[]; total: number }>(`${root}/search`, { params: { q, page, pageSize: 20 } });
+export const searchPublicSkillMarket = (q = "") => http.get<PublicMarketSearchResult>(`${root}/public`, { params: { q } });
+export const getPublicSkillsAbout = (ids: string[]) => http.post<{ about: Record<string, string> }>(`${root}/public/about`, { ids });
 export const getMarketRelease = (skillId: string, releaseId: string) => http.get<MarketRelease>(`${root}/releases/${id(skillId)}/${id(releaseId)}`);
 export const getMarketFile = (skillId: string, releaseId: string, path: string, offset = 0) => http.get<{ content: string; encoding: string; eof: boolean; nextOffset: number }>(`${root}/releases/${id(skillId)}/${id(releaseId)}/file`, { params: { path, offset } });
 export const installMarketRelease = (skillId: string, releaseId: string) => changed(http.post<{ skill: Skill }>(`${root}/install`, { skillId, releaseId }));

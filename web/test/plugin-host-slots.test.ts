@@ -107,13 +107,13 @@ describe("plugin host slots, events, and lifecycle", () => {
         expect(getPluginSlotEntries("app.sidebar").some((entry) => entry.pluginId === EAGLE_PLUGIN_ID)).toBe(true);
     });
 
-    test("supports all 21 UI slots and bridges canvas/editor registries with automatic disposal", () => {
+    test("supports all 27 UI slots and bridges canvas/editor registries with automatic disposal", () => {
         const pluginId = "slot-probe-plugin";
         usePluginStore.getState().ensurePlugin({
             id: pluginId,
             name: "挂点测试插件",
             version: "1.0.0",
-            description: "测试全部 21 个挂点",
+            description: "测试全部 27 个挂点",
             permissions: [],
             contributes: {},
         });

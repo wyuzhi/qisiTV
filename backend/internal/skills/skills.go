@@ -82,7 +82,6 @@ type SkillItem struct {
 	ExtraInfo       string               `json:"extraInfo"`
 	IsAdded         bool                 `json:"isAdded"`
 	IsOwner         bool                 `json:"isOwner"`
-	HasScripts      bool                 `json:"hasScripts"`
 	MarketRelease   *skillhub.Release    `json:"marketRelease,omitempty"`
 }
 
@@ -253,7 +252,11 @@ func (s *Service) SetSkillAdded(userID string, id string, added bool) (*SkillIte
 		return nil, err
 	}
 	state.Added = added
-	state.InstalledVersionID = skill.CurrentVersionID
+	if strings.TrimSpace(skill.CurrentVersionID) != "" {
+		state.InstalledVersionID = skill.CurrentVersionID
+	} else if strings.TrimSpace(state.InstalledVersionID) == "" {
+		state.InstalledVersionID = skill.ID
+	}
 	state.AutoUpdate = skill.AutoUpdate
 	if err := s.repo.SetUserSkillAdded(state); err != nil {
 		return nil, err
@@ -297,10 +300,6 @@ func (s *Service) skillItems(userID string, skills []model.Skill, includeInstruc
 		}
 		releases[version.ID] = release
 	}
-	withScripts, err := s.repo.SkillVersionsWithScripts(versionIDs)
-	if err != nil {
-		return nil, err
-	}
 	states, err := s.repo.UserSkillStatesBySkillIDs(userID, ids)
 	if err != nil {
 		return nil, err
@@ -343,7 +342,7 @@ func (s *Service) skillItems(userID string, skills []model.Skill, includeInstruc
 			LikeCount: metric.LikeCount, IsLike: state.Liked, OwnerUID: skill.OwnerID,
 			EffectiveUser: SkillEffectiveUser{Name: ownerName, AvatarURL: ownerAvatarURL, UID: skill.OwnerID}, ShowcaseMedia: showcaseMedia,
 			AddedCount: metric.AddedCount, ExtraInfo: skill.ExtraInfo, IsAdded: state.Added, IsOwner: skill.OwnerID == userID,
-			HasScripts: withScripts[skill.CurrentVersionID], MarketRelease: release,
+			MarketRelease: release,
 		})
 	}
 	return items, nil
@@ -355,6 +354,9 @@ func (s *Service) visibleSkill(userID string, id string) (*model.Skill, error) {
 	if id == "" {
 		return nil, kernel.BadAuthRequest("技能 ID 不能为空")
 	}
+	if s == nil || s.repo == nil {
+		return nil, kernel.BadAuthRequest("技能不存在或已删除")
+	}
 	skill, err := s.repo.Skill(id)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, kernel.BadAuthRequest("技能不存在或已删除")
@@ -363,7 +365,9 @@ func (s *Service) visibleSkill(userID string, id string) (*model.Skill, error) {
 		return nil, err
 	}
 	if skill.IsPrivate && skill.OwnerID != userID {
-		return nil, kernel.Forbidden("该技能未公开")
+		if state, err := s.repo.UserSkillState(userID, id); err != nil || state == nil || (!state.Added && strings.TrimSpace(state.InstalledVersionID) == "") {
+			return nil, kernel.Forbidden("该技能未公开")
+		}
 	}
 	return skill, nil
 }

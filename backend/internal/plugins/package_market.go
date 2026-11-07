@@ -197,10 +197,6 @@ const (
 )
 
 var (
-	chinaGitHubProxies = []string{
-		"https://gh-proxy.com",
-		"https://ghfast.top",
-	}
 	allowedMarketPublicHosts = map[string]bool{
 		"cdn.jsdelivr.net":                     true,
 		"raw.githubusercontent.com":            true,

@@ -44,9 +44,6 @@ func (s *Service) EnsureSkillPackages() error {
 }
 
 func (s *Service) SyncGitHubSkill(userID string, skillID string) (*SkillItem, error) {
-	if s.IsLocalMode() {
-		return nil, BadAuthRequest("本地工作区不支持从 GitHub 同步技能")
-	}
 	return s.skillDomain().SyncGitHubSkill(userID, skillID)
 }
 

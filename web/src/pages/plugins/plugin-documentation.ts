@@ -1,6 +1,6 @@
 import type { PluginManifest, PluginManifestV2 } from "@/lib/plugins/plugin-types";
 
-const permissionLabels: Record<string, string> = {
+export const PLUGIN_PERMISSION_LABELS: Record<string, string> = {
     "canvas.read": "读取画布",
     "canvas.write": "修改画布",
     "asset.read": "读取素材",
@@ -9,13 +9,20 @@ const permissionLabels: Record<string, string> = {
     "asset.upload": "上传素材",
     "generation.run": "调用生成",
     "ai.text": "调用已配置的文本/视觉理解模型",
+    "media.read": "读取输入媒体",
+    "usage.read": "读取用量",
     "external.open": "打开外部详情",
+    "ui.slot": "挂载界面扩展位",
+    "settings.write": "写入插件模型渠道设置",
+    "timeline.read": "读取时间线",
+    "timeline.command": "修改时间线",
+    "export.run": "导出",
 };
 
 export function getPluginDocumentation(manifest: PluginManifest | PluginManifestV2) {
     if (manifest.documentation?.trim()) return manifest.documentation.trim();
 
-    const capabilities = manifest.permissions.map((permission) => permissionLabels[permission] || permission);
+    const capabilities = manifest.permissions.map((permission) => PLUGIN_PERMISSION_LABELS[permission] || permission);
     return [
         `# ${manifest.name}`,
         "",

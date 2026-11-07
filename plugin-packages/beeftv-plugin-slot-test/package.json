@@ -1,7 +1,7 @@
 {
   "name": "beeftv-plugin-slot-test",
   "version": "0.1.1",
-  "description": "完整演示 BeefTV 全部 21 个界面扩展位与 8 类宿主事件的标准参考插件。",
+  "description": "完整演示 BeefTV 全部 27 个界面扩展位与 5 类宿主事件的标准参考插件。",
   "type": "module",
   "license": "Apache-2.0",
   "keywords": [

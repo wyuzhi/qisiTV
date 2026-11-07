@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"infinite-canvas/backend/internal/skillhub"
 )
@@ -37,6 +38,9 @@ func installDestination(a arguments, r *skillhub.Release, files map[string][]byt
 	name, err := skillhub.SkillName(files["SKILL.md"])
 	if err != nil {
 		return "", err
+	}
+	if !skillhub.SafeFilePath(name) || strings.Contains(name, "/") {
+		name = r.SkillID
 	}
 	var root string
 	if a.options["scope"] == "project" {

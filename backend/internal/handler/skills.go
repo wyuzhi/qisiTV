@@ -23,11 +23,11 @@ func RegisterSkillRoutes(r *gin.RouterGroup, owners workspaceOwners, domain *ski
 	registerSkillRoutes(r, owners, domain, syncs, true)
 }
 
-// RegisterDesktopSkillRoutes keeps local skill files available while removing
-// GitHub-backed installation and synchronization from the desktop API.
+// RegisterDesktopSkillRoutes registers local, market, and GitHub skill routes
+// for the desktop workspace API.
 func RegisterDesktopSkillRoutes(r *gin.RouterGroup, owners workspaceOwners, domain *skills.Service) {
 	registerSkillMarketRoutes(r, owners, domain)
-	registerSkillRoutes(r, owners, domain, nil, false)
+	registerSkillRoutes(r, owners, domain, domain, true)
 }
 
 func registerSkillRoutes(r *gin.RouterGroup, owners workspaceOwners, skillsDomain *skills.Service, syncs skillSyncs, includeRemote bool) {

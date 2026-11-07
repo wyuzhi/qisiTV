@@ -11,7 +11,6 @@ import { skillMarkdownBody } from "./skill-document";
 import { skillFailureMessage } from "./skill-feedback";
 
 import { formatSkillCount, formatSkillDate, skillCategoryLabel } from "@/pages/skills/skill-catalog";
-import { isLocalRuntimeMode } from "@/lib/runtime-mode";
 import { getSkillFile, listSkillFiles, skillFileRawURL, type Skill, type SkillCategory, type SkillPackageFile, type SkillPackageFileContent } from "@/services/api/skills";
 
 type PreviewMode = "preview" | "source";
@@ -26,7 +25,6 @@ export function SkillDetailModal({ skill, loading, mutating, categories, onClose
     const [contentError, setContentError] = useState("");
     const [previewMode, setPreviewMode] = useState<PreviewMode>("preview");
     const [pathFilter, setPathFilter] = useState("");
-    const localRuntime = isLocalRuntimeMode();
 
     useEffect(() => {
         if (!skill) {
@@ -106,10 +104,10 @@ export function SkillDetailModal({ skill, loading, mutating, categories, onClose
                             <SkillPackageAbout skill={skill} categories={categories} />
                         </div>
                         {!fileOnly ? <div className="skill-package-actions">
-                            {!localRuntime && skill.sourceType === "github" && skill.isOwner ? <Tooltip title={skill.syncError || "从 GitHub 检查并同步最新提交"}><Button loading={mutating} icon={<RefreshCw className="size-4" />} onClick={() => onSync(skill)}>同步</Button></Tooltip> : null}
+                            {skill.sourceType === "github" && skill.isOwner ? <Tooltip title={skill.syncError || "从 GitHub 检查并同步最新提交"}><Button loading={mutating} icon={<RefreshCw className="size-4" />} onClick={() => onSync(skill)}>同步</Button></Tooltip> : null}
                             {skill.isOwner ? <Button icon={<Pencil className="size-4" />} onClick={() => onEdit(skill)}>编辑</Button> : null}
                             <Button loading={mutating} icon={<Heart className={`size-4 ${skill.isLike ? "fill-current text-rose-500" : ""}`} />} onClick={() => onLike(skill)}>{skill.isLike ? "已收藏" : "收藏"}</Button>
-                            <Button type={skill.isAdded ? "default" : "primary"} loading={mutating} disabled={skill.isOwner} icon={skill.isAdded ? <Check className="size-4" /> : <Plus className="size-4" />} onClick={() => onAdd(skill)}>{skill.isOwner ? "我的技能" : skill.isAdded ? "已加入" : "加入技能"}</Button>
+                            <Button type={skill.isAdded ? "default" : "primary"} loading={mutating} icon={skill.isAdded ? <Check className="size-4" /> : <Plus className="size-4" />} onClick={() => onAdd(skill)}>{skill.isAdded ? "已启用" : "启用技能"}</Button>
                         </div> : null}
                     </header>
 

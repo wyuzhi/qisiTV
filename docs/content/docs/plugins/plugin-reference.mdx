@@ -68,7 +68,7 @@ description: 插件的 package.json 字段、权限、界面挂点、宿主事�
 
 BeefTV 不做沙箱。`permissions` 用来告诉用户插件会做什么，显示在插件设置里，不会限制插件代码。插件和 BeefTV 运行在同一个页面和同一台电脑上，所以用户只应该安装信任的插件。
 
-唯一的例外是剪辑工作台：缺少下表里的权限时，对应挂点不会显示。
+唯一的例外是剪辑工作台和模型渠道写入：缺少下表里的权限时，对应剪辑挂点不会显示，插件也不能通过 `host.channels` 读写模型渠道。
 
 | 权限 | 含义 |
 | --- | --- |
@@ -83,6 +83,8 @@ BeefTV 不做沙箱。`permissions` 用来告诉用户插件会做什么，显�
 | `media.read` | 读取输入媒体 |
 | `usage.read` | 读取用量 |
 | `external.open` | 打开外部详情 |
+| `ui.slot` | 挂载界面扩展位 |
+| `settings.write` | 读写插件自身命名空间下的模型渠道设置（仅可信内置插件生效） |
 | `timeline.read` | 读取时间线（`editor.preview-renderer`、`editor.ai-assistant` 需要） |
 | `timeline.command` | 修改时间线（`editor.timeline-panel`、`editor.inspector`、`editor.asset-ingest`、`editor.subtitle-tool`、`editor.transcription-provider` 需要） |
 | `export.run` | 导出（`editor.export-renderer` 需要） |

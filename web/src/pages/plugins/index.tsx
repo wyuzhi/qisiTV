@@ -33,6 +33,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import { isLocalRuntimeMode } from "@/lib/runtime-mode";
 import { workspaceCapabilities } from "@/services/workspace-mode";
 
+import { PLUGIN_PERMISSION_LABELS } from "./plugin-documentation";
 import { PluginDetailsModal } from "./plugin-documentation-modals";
 import { isLocalFolderSource, PluginInstallConfirmModal, pluginUpdateRequest } from "./plugin-install-confirm-modal";
 import { PluginFieldsConfigForm } from "./plugin-fields-config-form";
@@ -52,18 +53,7 @@ const surfaceLabels: Record<string, string> = {
     "asset-source": "素材库",
 };
 
-const permissionLabels: Record<string, string> = {
-    "canvas.read": "读取画布",
-    "canvas.write": "修改画布",
-    "asset.read": "读取素材",
-    "asset.search": "搜索素材",
-    "asset.import": "导入素材",
-    "asset.upload": "上传素材",
-    "generation.run": "调用生成",
-    "ai.text": "调用已配置的文本/视觉理解模型",
-    "media.read": "读取输入媒体",
-    "external.open": "打开外部详情",
-};
+const permissionLabels = PLUGIN_PERMISSION_LABELS;
 
 const pluginDateFormatter = new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "short", day: "numeric" });
 

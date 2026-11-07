@@ -113,8 +113,8 @@ func (s *Service) EnsureSkillPackages() error {
 	}
 	for index := range skills {
 		skill := &skills[index]
-		// 插件和本机技能的文件在各自的目录里，由同步负责。这里手上只有 SKILL.md，重建会丢掉其余文件。
-		if skill.SourceType == skillSourceTypePlugin || skill.SourceType == skillSourceTypeLocal {
+		// 插件技能的文件在插件目录里，由同步负责。这里手上只有 SKILL.md，重建会丢掉其余文件。
+		if skill.SourceType == skillSourceTypePlugin {
 			continue
 		}
 		var extraFiles map[string][]byte

@@ -119,7 +119,7 @@ func TestPublicationRequiresTwoSpecificUserConfirmations(t *testing.T) {
 			return
 		case strings.HasSuffix(r.URL.Path, "/submit"):
 			submits++
-			data = skillhub.Draft{SubmissionID: "submission-one", Revision: revision, Status: "submitted"}
+			data = skillhub.Draft{SubmissionID: "submission-one", Revision: revision, Status: "published"}
 		}
 		json.NewEncoder(w).Encode(map[string]any{"success": true, "data": data})
 	}))
@@ -155,7 +155,7 @@ func TestPublicationRequiresTwoSpecificUserConfirmations(t *testing.T) {
 		t.Fatal("submit accepted changed preview")
 	}
 	done, e := s.PublishSubmit(context.Background(), "owner", plan.ID, revision, "preview-one")
-	if e != nil || done.Status != "submitted" || submits != 1 {
+	if e != nil || done.Status != "published" || submits != 1 {
 		t.Fatal("confirmed submit failed", e)
 	}
 	if _, e = s.PublishPlan("other-owner", plan.ID); e == nil {

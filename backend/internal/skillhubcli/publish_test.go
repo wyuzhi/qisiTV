@@ -75,7 +75,7 @@ func TestPublishingConfirmationRetryAndPrivateCredentials(t *testing.T) {
 			envelope(w, skillhub.Preview{SubmissionID: draft.SubmissionID, Revision: draft.Revision, PreviewDigest: previewDigest, Metadata: b.Metadata, Files: b.Files})
 		case "/submissions/d_fixture/submit":
 			submitKeys = append(submitKeys, r.Header.Get("Idempotency-Key"))
-			draft.Status = "submitted"
+			draft.Status = "published"
 			envelope(w, draft)
 		case "/authorizations/revoke":
 			envelope(w, map[string]bool{"revoked": true})

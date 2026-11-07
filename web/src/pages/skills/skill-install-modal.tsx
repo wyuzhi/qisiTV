@@ -24,7 +24,6 @@ export function SkillInstallModal({ open, onClose, onInstalled, onManualCreate }
     const submitting = useRef(false);
     const formId = useId();
     const localRuntime = isLocalRuntimeMode();
-    const availableModeOptions = localRuntime ? modeOptions.filter((option) => option.value !== "github") : modeOptions;
 
     useEffect(() => {
         if (!open) return;
@@ -91,7 +90,7 @@ export function SkillInstallModal({ open, onClose, onInstalled, onManualCreate }
             )}
         >
             <p className="mb-4 text-sm leading-6 text-foreground/55">支持标准 <code>SKILL.md</code> 或包含多层目录的 ZIP 技能包。名称和简介会优先从技能入口自动读取。</p>
-            <SegmentedControl className="skill-install-mode" block disabled={installing} options={availableModeOptions} value={mode}
+            <SegmentedControl className="skill-install-mode" block disabled={installing} options={modeOptions} value={mode}
                 onChange={(value) => {
                     if (submitting.current) return;
                     setMode(value as InstallMode);

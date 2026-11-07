@@ -4,7 +4,6 @@ import (
 	"errors"
 	"gorm.io/gorm"
 	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/skillhub"
 )
 
 func (r *Repository) MarketSkill(userID, remoteID string) (*model.Skill, error) {
@@ -27,23 +26,6 @@ func (r *Repository) SkillVersionsByIDs(ids []string) ([]model.SkillVersion, err
 	var rows []model.SkillVersion
 	err := r.db.Where("id IN ?", ids).Find(&rows).Error
 	return rows, err
-}
-
-// SkillScriptsPrefix 是技能标准里放可执行脚本的目录。
-const SkillScriptsPrefix = skillhub.ScriptsPrefix
-
-// SkillVersionsWithScripts 返回这些版本里带脚本的版本。
-func (r *Repository) SkillVersionsWithScripts(ids []string) (map[string]bool, error) {
-	result := make(map[string]bool, len(ids))
-	if len(ids) == 0 {
-		return result, nil
-	}
-	var rows []string
-	err := r.db.Model(&model.SkillFile{}).Distinct("skill_version_id").Where("skill_version_id IN ? AND path LIKE ?", ids, SkillScriptsPrefix+"%").Pluck("skill_version_id", &rows).Error
-	for _, id := range rows {
-		result[id] = true
-	}
-	return result, err
 }
 
 func (r *Repository) SwitchSkillVersion(userID, skillID, versionID, instruction, name, description, sourceURL string) error {

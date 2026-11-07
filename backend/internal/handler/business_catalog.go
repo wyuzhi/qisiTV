@@ -43,7 +43,7 @@ func businessRouteAllowed(method, p string) bool {
 			return false
 		}
 		switch p {
-		case "/skills/market/search", "/skills/market/catalog", "/skills/market/releases/:skillId/:releaseId", "/skills/market/versions/:skillId":
+		case "/skills/market/search", "/skills/market/public", "/skills/market/catalog", "/skills/market/releases/:skillId/:releaseId", "/skills/market/versions/:skillId":
 			return true
 		default:
 			return false

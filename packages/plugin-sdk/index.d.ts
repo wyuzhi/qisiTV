@@ -9,7 +9,9 @@ export type PluginPermission =
   | "ai.text"
   | "media.read"
   | "usage.read"
-  | "external.open";
+  | "external.open"
+  | "ui.slot"
+  | "settings.write";
 
 export type EditorPluginPermission =
   | "timeline.read"
@@ -568,6 +570,11 @@ export interface BeefTVPluginHost {
   };
   assets: {
     list(): unknown[];
+  };
+  channels?: {
+    list(): Array<Record<string, unknown>>;
+    upsert(channel: Record<string, unknown>): Promise<Record<string, unknown>>;
+    fetchCatalog?(params: { baseUrl: string; apiKey: string; apiFormat?: string }): Promise<{ models: string[] }>;
   };
 }
 

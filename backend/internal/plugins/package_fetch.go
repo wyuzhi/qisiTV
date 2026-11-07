@@ -22,6 +22,7 @@ import (
 
 	"infinite-canvas/backend/internal/assistantruntime"
 	"infinite-canvas/backend/internal/model"
+	"infinite-canvas/backend/internal/outbound"
 	"infinite-canvas/backend/internal/protocol"
 )
 
@@ -343,36 +344,11 @@ func splitURLSHA256Fragment(rawURL string) (string, string) {
 }
 
 func expandTarballMirrorURLs(tarballURL, mirrorTarballURL, expectedSHA256, registry string) []string {
-	isChina := strings.TrimSpace(registry) == "" || strings.Contains(registry, "npmmirror.com")
-	hasVerifiedDigest := validPackageSHA256(strings.ToLower(strings.TrimSpace(expectedSHA256)))
-	var urls []string
-	addUnique := func(u string) {
-		u = strings.TrimSpace(u)
-		if u == "" {
-			return
-		}
-		for _, existing := range urls {
-			if existing == u {
-				return
-			}
-		}
-		urls = append(urls, u)
+	want := strings.ToLower(strings.TrimSpace(expectedSHA256))
+	if !validPackageSHA256(want) {
+		want = ""
 	}
-	if isChina {
-		addUnique(mirrorTarballURL)
-		// Third-party GitHub proxies are ONLY included when the caller has a
-		// pinned SHA-256 digest that will be verified before extraction.
-		if hasVerifiedDigest && (strings.HasPrefix(tarballURL, "https://github.com/") || strings.HasPrefix(tarballURL, "https://raw.githubusercontent.com/")) {
-			for _, proxy := range chinaGitHubProxies {
-				addUnique(strings.TrimRight(proxy, "/") + "/" + strings.TrimSpace(tarballURL))
-			}
-		}
-		addUnique(tarballURL)
-		return urls
-	}
-	addUnique(tarballURL)
-	addUnique(mirrorTarballURL)
-	return urls
+	return outbound.ExpandGitHubMirrorURLs(tarballURL, mirrorTarballURL, want, registry)
 }
 
 func downloadMirroredTarball(ctx context.Context, tarballURL, mirrorTarballURL, expectedSHA256, registry, stageDir string) (string, error) {

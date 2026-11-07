@@ -31,7 +31,7 @@ func (r *Repository) Skills(filter SkillListFilter) ([]model.Skill, int64, error
 	switch filter.Scope {
 	case "mine":
 		query = query.Joins("LEFT JOIN user_skill_states ON user_skill_states.skill_id = skills.id AND user_skill_states.user_id = ?", filter.UserID).
-			Where("skills.owner_id = ? OR (user_skill_states.added = ? AND skills.is_private = ?)", filter.UserID, true, false)
+			Where("skills.owner_id = ? OR user_skill_states.added = ? OR COALESCE(user_skill_states.installed_version_id, '') <> ''", filter.UserID, true)
 	case "created":
 		query = query.Where("skills.owner_id = ?", filter.UserID)
 	case "favorites":

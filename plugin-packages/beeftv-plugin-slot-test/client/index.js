@@ -1,5 +1,5 @@
-// 全插槽演示插件：挂载第 5.2 节全部 21 类界面扩展位（含剪辑工作台 8 个子插槽），
-// 并订阅第 5.3 节全部 8 类宿主事件。插件停用或卸载时由宿主自动撤销全部挂载。
+// 全插槽演示插件：挂载全部 27 个界面扩展位（含剪辑工作台 8 个子插槽），
+// 并订阅全部 5 类宿主事件。插件停用或卸载时由宿主自动撤销全部挂载。
 
 const EDITOR_SLOTS = [
   { slot: "editor.timeline-panel", label: "时间线面板扩展" },
@@ -25,7 +25,7 @@ export function activate(host) {
   const h = React ? React.createElement : () => null;
   const eventLog = [];
 
-  // 订阅全部 8 类宿主事件（5.3 节）
+  // 订阅全部 5 类宿主事件
   for (const eventName of HOST_EVENTS) {
     host.events?.on?.(eventName, (payload) => {
       eventLog.unshift({
@@ -333,7 +333,7 @@ export function activate(host) {
   host.contribute("pluginCenter.section", {
     id: "slot-test-section",
     label: "插槽诊断",
-    description: "查看 21 个扩展插槽与 8 类宿主事件的挂载状态",
+    description: "查看 27 个扩展插槽与 5 类宿主事件的挂载状态",
     order: 95,
     render: () =>
       h(
@@ -342,7 +342,7 @@ export function activate(host) {
           "data-testid": "slot-test-plugin-center-section",
           style: { padding: 16, fontSize: 13 },
         },
-        "全部 21 个界面扩展位与 8 类事件监听均已激活。",
+        "全部 27 个界面扩展位与 5 类事件监听均已激活。",
       ),
   });
 

@@ -156,7 +156,7 @@ export function SkillPublishingPanel({ planId, renderHeader }: PublishingPanelPr
         {loading ? <Skeleton active paragraph={{ rows: 6 }} /> : null}
         <AppModal scrollBody open={creating} title={preparingFrom ? "修改投稿" : "新建投稿"} onCancel={closeForm} footer={null} width={720}>
         {error ? <Alert type="error" showIcon title={error} className="mb-4" /> : null}
-        <p className="skill-publish-intro">先准备本机草稿，核对文件后再确认上传和送审。</p>
+        <p className="skill-publish-intro">先准备本机草稿，核对文件后再确认上传和公开发布。</p>
         <Form form={form} layout="vertical" className="skill-publish-form workspace-form" onFinish={makePlan} scrollToFirstError={{ focus: true, block: "center" }} initialValues={{ versionLabel: "1.0.0", requirements: [], sourceUrl: "", publicationTarget: "new" }}>
             {preparingFrom ? <Alert type="info" title="沿用原稿的文件与版本。修改后生成新的本机草稿，原稿继续保留；请重新检查并确认上传。" className="mb-4" /> : null}
             <Form.Item name="localSkillId" label="选择本机技能" rules={[{ required: true, message: "请选择一个技能" }]}><Select disabled={Boolean(preparingFrom)} onChange={selectSkill} options={skills.filter(skill => skill.sourceType !== "market").map(skill => ({ value: skill.skillId, label: skill.skillName }))} /></Form.Item>
@@ -178,23 +178,22 @@ export function SkillPublishingPanel({ planId, renderHeader }: PublishingPanelPr
             </article>)}
         </div> : !error && !remoteError ? <p className="skill-market-empty">{keyword ? "没有匹配的投稿" : auth.connected ? "还没有投稿，可从右上角新建。" : "本机暂无投稿草稿。"}</p> : null : null}
         <AppModal flush scrollBody className="skill-release-dialog" wrapClassName="skill-release-wrap" open={Boolean(currentSubmission) && !creating} title={currentSubmission?.metadata.name || "投稿详情"} onCancel={() => { setSelected(""); setParams({ tab: "publish" }); }} footer={currentSubmission ? <div className="skill-publish-footer">{error ? <Alert type="error" showIcon title={error} /> : null}<Button onClick={() => void run(() => openSkillWebsite(`${website}/submissions/${encodeURIComponent(currentSubmission.submissionId)}`))}>在官网查看稿件</Button></div> : null} width="min(760px, calc(100vw - 32px))">
-            {currentSubmission ? <PublicationDetailContent key={currentSubmission.submissionId} metadata={currentSubmission.metadata} status={currentSubmission.status} notices={currentSubmission.reviewReason ? <Alert type="info" title="审核意见" description={currentSubmission.reviewReason} /> : null}>
+            {currentSubmission ? <PublicationDetailContent key={currentSubmission.submissionId} metadata={currentSubmission.metadata} status={currentSubmission.status} notices={currentSubmission.reviewReason ? <Alert type="info" title="历史说明" description={currentSubmission.reviewReason} /> : null}>
                 <section className="skill-release-section"><SkillFileDetails files={currentSubmission.files || []} info={[{ label: "投稿编号", value: currentSubmission.submissionId }]} /></section>
             </PublicationDetailContent> : null}
         </AppModal>
         <AppModal flush scrollBody className="skill-release-dialog" wrapClassName="skill-release-wrap" open={Boolean(current) && !creating} title={current?.metadata.name || "投稿详情"} onCancel={() => { setSelected(""); setParams({ tab: "publish" }); }} width="min(760px, calc(100vw - 32px))" footer={current ? <div className="skill-publish-footer">
                 {authorizationRequired && !auth.connected ? <Alert type="warning" showIcon title="请先关闭详情并连接投稿账号。" /> : null}
                 {current.status === "awaiting_upload_confirmation" || current.status === "uploading" ? <Checkbox checked={confirmed} onChange={e => setConfirmed(e.target.checked)}>我已核对文件和分享权限，确认上传为私有草稿。</Checkbox> : null}
-                {current.status === "awaiting_submit_confirmation" ? <Checkbox checked={confirmed} onChange={e => setConfirmed(e.target.checked)}>我已确认公开这份 skill，提交审核</Checkbox> : null}
-                {current.status === "rejected" ? <p>请在官网按审核意见修改，保存后回到这里刷新预览，再次确认送审。</p> : null}
+                {current.status === "awaiting_submit_confirmation" ? <Checkbox checked={confirmed} onChange={e => setConfirmed(e.target.checked)}>我已核对以上内容，确认公开发布这份技能。</Checkbox> : null}
                 <div className="skill-market-actions">
                     {!current.submissionId && current.status === "awaiting_upload_confirmation" ? <Button disabled={busy} onClick={() => void reprepare(current)}>修改信息并重新准备</Button> : null}
-                    {current.submissionId ? <><Button loading={busy} onClick={() => void run(async () => replace(await refreshPublication(current.planId)))}>刷新预览与审核状态</Button><Button onClick={() => void run(() => openSkillWebsite(`${website}/submissions/${encodeURIComponent(current.submissionId!)}`))}>在官网修改稿件</Button></> : null}
-                    {current.status === "awaiting_upload_confirmation" || current.status === "uploading" ? <Button type="primary" disabled={!confirmed || !auth.connected || needsPublicationTargetCorrection(current) || unsupportedRequirements(current.metadata.requirements).length > 0} loading={busy} onClick={() => void run(async () => { replace(await uploadPublication(current)); message.success("私有草稿已上传，请核对预览后再送审"); })}>确认上传私有草稿</Button> : null}
+                    {current.submissionId ? <><Button loading={busy} onClick={() => void run(async () => replace(await refreshPublication(current.planId)))}>刷新预览与发布状态</Button><Button onClick={() => void run(() => openSkillWebsite(`${website}/submissions/${encodeURIComponent(current.submissionId!)}`))}>在官网修改稿件</Button></> : null}
+                    {current.status === "awaiting_upload_confirmation" || current.status === "uploading" ? <Button type="primary" disabled={!confirmed || !auth.connected || needsPublicationTargetCorrection(current) || unsupportedRequirements(current.metadata.requirements).length > 0} loading={busy} onClick={() => void run(async () => { replace(await uploadPublication(current)); message.success("私有草稿已上传，请核对预览后确认发布"); })}>确认上传私有草稿</Button> : null}
                     {current.status === "awaiting_submit_confirmation" ? <Button type="primary" disabled={!canSubmitPublication(current, confirmed)} loading={busy} onClick={() => {
                         if (!auth.connected) { setAuthorizationRequired(true); return; }
-                        void run(async () => { replace(await submitPublication(current)); message.success("已送审，可在官网查看结果和修改意见"); });
-                    }}>确认送审</Button> : null}
+                        void run(async () => { replace(await submitPublication(current)); message.success("已发布到技能市场"); });
+                    }}>确认发布</Button> : null}
                 </div>
             </div> : null}>
             {current ? <PublicationDetailContent key={current.planId} metadata={current.metadata} status={current.status} author={current.preview?.author} notices={<>
@@ -202,7 +201,7 @@ export function SkillPublishingPanel({ planId, renderHeader }: PublishingPanelPr
                 {needsPublicationTargetCorrection(current) ? <Alert type="warning" title="请修改信息并明确选择投稿目标，再重新准备。原稿和文件会继续保留。" /> : null}
                 {unsupportedRequirements(current.metadata.requirements).length ? <Alert type="warning" title="这份草稿包含未确认的使用条件，请修改信息后重新准备。纯文字技能无需额外理解能力。" /> : null}
                 {current.preview?.warnings?.map(value => <Alert key={value} type="warning" title={value} />)}
-                {current.reviewReason ? <Alert type="info" title="审核意见" description={current.reviewReason} /> : null}
+                {current.reviewReason ? <Alert type="info" title="历史说明" description={current.reviewReason} /> : null}
             </>}>
                 <section className="skill-release-section"><details><summary>投稿信息</summary>
                     <p>投稿目标为{current.publicationTarget === "existing" ? "已有市场技能的新版本" : needsPublicationTargetCorrection(current) ? "需要确认" : "发布新技能"}</p>

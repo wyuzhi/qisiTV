@@ -21,7 +21,7 @@ func runPublishing(ctx context.Context, c *skillhub.Client, a arguments, out io.
 		if err != nil {
 			return err
 		}
-		return emit(out, map[string]any{"bundle": b, "uploaded": false, "submitted": false, "next": "请让用户确认文件清单和摘要，再 authorize、poll、upload；公开送审另行 preview 和 submit。"})
+		return emit(out, map[string]any{"bundle": b, "uploaded": false, "submitted": false, "next": "请让用户确认文件清单和摘要，再 authorize、poll、upload；公开发布另行 preview 和 submit。"})
 	}
 	stateFile := a.options["state"]
 	unlock, err := lockState(stateFile)

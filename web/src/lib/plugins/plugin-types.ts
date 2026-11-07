@@ -334,7 +334,7 @@ export type PluginInstallation = {
     lastError?: string;
 };
 
-// ── Section 5.2: 21 Frontend UI Extension Slots ──────────────────────────────
+// ── Section 5.2: 27 Frontend UI Extension Slots ──────────────────────────────
 
 export type PluginCanvasNodeProps = {
     node: CanvasNodeData;
@@ -649,7 +649,7 @@ export type PluginSlotMap = {
 
 export type PluginSlotName = keyof PluginSlotMap;
 
-// ── Section 5.3: 8 Frontend Plugin Events ────────────────────────────────────
+// ── Section 5.3: 5 Frontend Plugin Events ────────────────────────────────────
 
 export type PluginEventMap = {
     "generation.submitted": { nodeId: string; nodeType: string; model?: string; prompt: string; taskId?: string };

@@ -48,10 +48,7 @@ func (s *Service) SyncPluginSkills(pluginID string, pluginName string, version s
 	}, skillDirs)
 }
 
-const (
-	skillSourceTypePlugin = "plugin"
-	skillSourceTypeLocal  = "local"
-)
+const skillSourceTypePlugin = "plugin"
 
 // skillDirSource describes skills contributed by a BeefTV plugin package.
 type skillDirSource struct {

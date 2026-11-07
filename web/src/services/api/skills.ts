@@ -26,7 +26,7 @@ export type Skill = {
     contentHash: string;
     fileCount: number;
     totalBytes: number;
-    sourceType: "builtin" | "markdown" | "zip" | "github" | "plugin" | "local" | string;
+    sourceType: "builtin" | "markdown" | "zip" | "github" | "plugin" | "market" | string;
     sourceUrl: string;
     sourceRef: string;
     sourceSubdir: string;
@@ -56,7 +56,6 @@ export type Skill = {
     extraInfo: string;
     isAdded: boolean;
     isOwner: boolean;
-    hasScripts: boolean;
 };
 
 export type SkillCategory = { value: string; label: string };

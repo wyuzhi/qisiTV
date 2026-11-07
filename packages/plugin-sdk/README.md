@@ -34,7 +34,7 @@ BeefTV 插件开发 SDK，提供：
 
 ## 怎么用
 
-BeefTV 直接加载插件里的 JS 文件，不经过打包，所以文件里不能 `import "@beeftv/plugin-sdk"`。把 SDK 装成开发依赖（`npm i -D @beeftv/plugin-sdk`），用 JSDoc 拿到编辑器提示；用 TypeScript 或打包工具的插件也可以直接用 `definePlugin`、`defineProvider`，打包后发布。
+BeefTV 直接加载插件里的 JS 文件，不经过打包，所以文件里不能 `import "@beeftv/plugin-sdk"`。把仓库内的 `packages/plugin-sdk` 装成开发依赖（例如 `npm i -D <BeefTV仓库路径>/packages/plugin-sdk`），用 JSDoc 拿到编辑器提示；用 TypeScript 或打包工具的插件也可以直接用 `definePlugin`、`defineProvider`，打包后发布。
 
 ## 界面插件
 
