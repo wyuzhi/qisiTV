@@ -96,11 +96,8 @@ func (s *Service) ManagedImageNeedsRecheck(task model.Task) bool {
 	if err != nil || attempt == nil || attempt.RouteRun != task.RouteRun {
 		return false
 	}
-	if attempt.ChannelID == beefapi.ChannelID {
-		return true
-	}
-	row, err := s.repo.ImageSubmission(attempt.ID, task.ID, task.UserID)
-	return err == nil && row.QueryCipher != ""
+	row, _ := s.repo.ImageSubmission(attempt.ID, task.ID, task.UserID)
+	return s.isManagedImageSubmission(task, attempt, row)
 }
 
 func (s *Service) RecoverFailedImage(ctx context.Context, candidate model.Task) error {

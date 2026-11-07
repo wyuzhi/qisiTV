@@ -21,13 +21,7 @@ import (
 type managedMediaPort struct{ service *Service }
 
 func ManagedTaskConnection(task model.Task) bool {
-	var input struct {
-		Config struct {
-			CredentialRef string `json:"credentialRef"`
-			ChannelID     string `json:"channelId"`
-		} `json:"config"`
-	}
-	return json.Unmarshal([]byte(task.InputJSON), &input) == nil && (input.Config.CredentialRef == beefapi.CredentialRef || input.Config.ChannelID == beefapi.ChannelID)
+	return beefapi.IsManagedTaskInput(task.InputJSON)
 }
 
 func (p managedMediaPort) Project(ctx context.Context, projection beefapi.MediaTask) {
@@ -104,10 +98,32 @@ func isManagedMediaRequest(req *http.Request) bool {
 	return req != nil && req.URL != nil && req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/media/tasks") && req.Header.Get(beefapi.MediaProtocolHeader) == beefapi.MediaProtocolVersion
 }
 func managedFrozenImage(task model.Task, wire WireRequest) bool {
-	if wire.ReplayProtocol == beefapi.MediaProtocolVersion || wire.ChannelID == beefapi.ChannelID {
+	if wire.ReplayProtocol == beefapi.MediaProtocolVersion || ManagedTaskConnection(task) {
 		return true
 	}
-	return ManagedTaskConnection(task)
+	if beefapi.IsExplicitBYOKTaskInput(task.InputJSON) {
+		return false
+	}
+	return wire.ChannelID == beefapi.ChannelID
+}
+
+func (s *Service) isManagedImageSubmission(task model.Task, attempt *model.RouteAttempt, row *model.ImageSubmission) bool {
+	if ManagedTaskConnection(task) || (attempt != nil && attempt.ID != "" && (row == nil || attempt.ID == row.AttemptID) && attempt.ChannelID == beefapi.ChannelID) {
+		return true
+	}
+	if row == nil {
+		return false
+	}
+	if row.QueryCipher != "" {
+		plain, err := s.secrets.Decrypt(row.QueryCipher)
+		var wire WireRequest
+		if err != nil || json.Unmarshal([]byte(plain), &wire) != nil {
+			return !beefapi.IsExplicitBYOKTaskInput(task.InputJSON)
+		}
+		return managedFrozenImage(task, wire)
+	}
+	wire, err := s.ImageSubmissionWire(row)
+	return err == nil && managedFrozenImage(task, wire)
 }
 
 func (s *Service) ManagedImageQueryCipher(task model.Task, wire WireRequest) (string, error) {
@@ -168,7 +184,7 @@ type Query struct {
 }
 
 func (s *Service) ManagedTaskQuery(ctx context.Context, task model.Task, row *model.ImageSubmission) (Query, bool, error) {
-	managed := ManagedTaskConnection(task) || row.QueryCipher != ""
+	managed := ManagedTaskConnection(task)
 	if attempt, err := s.repo.LatestRouteAttempt(task.ID); err == nil && attempt != nil && attempt.ID == row.AttemptID && attempt.ChannelID == beefapi.ChannelID {
 		managed = true
 	}
@@ -184,7 +200,7 @@ func (s *Service) ManagedTaskQuery(ctx context.Context, task model.Task, row *mo
 		wire, err = s.ImageSubmissionWire(row)
 	}
 	if err != nil {
-		return Query{}, managed, imageRecoveryError{errors.New("原任务查询信息暂不可用，尚未确认结果")}
+		return Query{}, managed || (row.QueryCipher != "" && !beefapi.IsExplicitBYOKTaskInput(task.InputJSON)), imageRecoveryError{errors.New("原任务查询信息暂不可用，尚未确认结果")}
 	}
 	managed = managed || managedFrozenImage(task, wire)
 	if !managed {

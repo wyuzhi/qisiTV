@@ -1,6 +1,7 @@
 package beefapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -134,10 +135,44 @@ func IsManagedChannel(channelID, credentialRef, baseURL string) bool {
 	if strings.TrimSpace(credentialRef) == CredentialRef {
 		return true
 	}
-	if strings.TrimSpace(channelID) == ChannelID {
+	id := strings.TrimSpace(channelID)
+	if id == ChannelID {
 		return true
 	}
+	if id != "" {
+		return false
+	}
 	return IsEnterpriseBaseURL(baseURL)
+}
+
+func IsManagedTaskInput(inputJSON string) bool {
+	var input struct {
+		Config struct {
+			CredentialRef string `json:"credentialRef"`
+			ChannelID     string `json:"channelId"`
+		} `json:"config"`
+	}
+	return json.Unmarshal([]byte(inputJSON), &input) == nil &&
+		(strings.TrimSpace(input.Config.CredentialRef) == CredentialRef || strings.TrimSpace(input.Config.ChannelID) == ChannelID)
+}
+
+func IsExplicitBYOKTaskInput(inputJSON string) bool {
+	if IsManagedTaskInput(inputJSON) {
+		return false
+	}
+	var input struct {
+		Config struct {
+			CredentialRef string `json:"credentialRef"`
+			ChannelID     string `json:"channelId"`
+			BaseURL       string `json:"baseUrl"`
+			APIKey        string `json:"apiKey"`
+		} `json:"config"`
+	}
+	if json.Unmarshal([]byte(inputJSON), &input) != nil {
+		return false
+	}
+	id := strings.TrimSpace(input.Config.ChannelID)
+	return (id != "" && id != ChannelID) || strings.TrimSpace(input.Config.BaseURL) != "" || strings.TrimSpace(input.Config.APIKey) != ""
 }
 
 func IsEnterpriseBaseURL(baseURL string) bool {

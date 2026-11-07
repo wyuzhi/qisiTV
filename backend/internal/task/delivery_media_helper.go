@@ -195,13 +195,7 @@ func DecodeGenerationArtifact(deps DeliveryMediaDeps, userID, identity, mediaTyp
 }
 
 func isManagedTaskConnection(task model.Task) bool {
-	var input struct {
-		Config struct {
-			CredentialRef string `json:"credentialRef"`
-			ChannelID     string `json:"channelId"`
-		} `json:"config"`
-	}
-	return json.Unmarshal([]byte(task.InputJSON), &input) == nil && (input.Config.CredentialRef == beefapi.CredentialRef || input.Config.ChannelID == beefapi.ChannelID)
+	return beefapi.IsManagedTaskInput(task.InputJSON)
 }
 
 func ImageDownloadHeaders(
@@ -323,12 +317,15 @@ func ManagedDeliveryArtifact(repo *repository.Repository, decryptSetting func(st
 		if config.CredentialRef == beefapi.CredentialRef || config.ChannelID == beefapi.ChannelID {
 			return true, nil
 		}
+		if strings.TrimSpace(config.BaseURL) != "" || strings.TrimSpace(config.APIKey) != "" || strings.TrimSpace(config.ChannelID) != "" {
+			return false, nil
+		}
 	}
 	if attempt, err := repo.LatestRouteAttempt(task.ID); err == nil && attempt != nil {
 		if attempt.ChannelID == beefapi.ChannelID {
 			return true, nil
 		}
-		if row, err := repo.ImageSubmission(attempt.ID, task.ID, task.UserID); err == nil && row.QueryCipher != "" {
+		if row, err := repo.ImageSubmission(attempt.ID, task.ID, task.UserID); err == nil && row.QueryCipher != "" && !beefapi.IsExplicitBYOKTaskInput(task.InputJSON) {
 			return true, nil
 		}
 	}

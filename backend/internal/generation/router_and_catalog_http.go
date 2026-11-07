@@ -215,13 +215,7 @@ func CreateDirectTaskAttempt(repo *repository.Repository, task *model.Task) (*mo
 }
 
 func managedTaskConnection(task model.Task) bool {
-	var input struct {
-		Config struct {
-			CredentialRef string `json:"credentialRef"`
-			ChannelID     string `json:"channelId"`
-		} `json:"config"`
-	}
-	return json.Unmarshal([]byte(task.InputJSON), &input) == nil && (input.Config.CredentialRef == beefapi.CredentialRef || input.Config.ChannelID == beefapi.ChannelID)
+	return beefapi.IsManagedTaskInput(task.InputJSON)
 }
 
 func BeginTaskRouteAttempt(

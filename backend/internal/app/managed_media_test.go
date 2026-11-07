@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -118,9 +120,15 @@ func TestManagedImageManualAndCredentialOnlyOldConclusionQueriesOriginalTask(t *
 			defer server.Close()
 			wire, _ := svc.imageSubmissionWire(row)
 			wire.URL, wire.ChannelID = server.URL+"/v1/images/generations", ""
+			if mode == "third-party-same-host" {
+				wire.ChannelID = beefapi.ChannelID
+			}
 			raw, _ := json.Marshal(wire)
 			row.RequestCipher, _ = svc.encryptSettingSecret(string(raw))
 			row.QueryCipher, row.SendCount = "", 1
+			if mode == "third-party-same-host" {
+				row.QueryCipher = row.RequestCipher
+			}
 			if err := db.Save(row).Error; err != nil {
 				t.Fatal(err)
 			}
@@ -463,5 +471,132 @@ func TestManagedImageEndedTaskDoesNotEnterRecovery(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCustomBYOKOnEnterpriseOriginSendsImageGenerationAndReplaysSameKey(t *testing.T) {
+	s, db, _, _ := creationTestService(t)
+	s.workerID = newID()
+	localCfg, _ := json.Marshal(map[string]any{
+		"channels": []any{
+			map[string]any{"id": beefapi.ChannelID, "enabled": true, "baseUrl": "https://beeftv.app/v1", "apiKey": "disk-managed-secret"},
+			map[string]any{"id": "custom-byok", "enabled": true, "baseUrl": "https://enterprise.beefapi.com/v1", "apiKey": "sk-custom-byok"},
+		},
+	})
+	if err := s.SaveLocalModelConfig(localCfg); err != nil {
+		t.Fatal(err)
+	}
+	rawInput := map[string]any{
+		"mode": "image",
+		"config": map[string]any{
+			"baseUrl":       "https://enterprise.beefapi.com/v1",
+			"apiKey":        "sk-custom-byok",
+			"model":         "gpt-image-2",
+			"interfaceType": "openai-image",
+		},
+	}
+	resolved, err := s.resolveManagedBeefAPISecrets(rawInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolvedCfg := resolved["config"].(map[string]any)
+	if resolvedCfg["apiKey"] != "sk-custom-byok" || resolvedCfg["baseUrl"] != "https://enterprise.beefapi.com/v1" || resolvedCfg["credentialRef"] != nil {
+		t.Fatalf("BYOK config was rewritten to managed credential: %#v", resolvedCfg)
+	}
+	catalogReq := ChannelModelsRequest{ChannelID: "custom-byok", BaseURL: "https://enterprise.beefapi.com/v1", APIKey: "sk-custom-byok"}
+	if err := s.resolveChannelModelsRequest(&catalogReq); err != nil {
+		t.Fatal(err)
+	}
+	if catalogReq.APIKey != "sk-custom-byok" || catalogReq.BaseURL != "https://enterprise.beefapi.com/v1" || catalogReq.CredentialRef != "" {
+		t.Fatalf("BYOK channel catalog request was rewritten: %+v", catalogReq)
+	}
+	inputBytes, _ := json.Marshal(resolved)
+	expires := time.Now().Add(time.Hour)
+	task := model.Task{
+		ID:             "byok-enterprise-image",
+		UserID:         "user",
+		Type:           "canvas_image",
+		Status:         model.TaskStatusRunning,
+		LeaseOwner:     "owner",
+		LeaseExpiresAt: &expires,
+		InputJSON:      string(inputBytes),
+	}
+	attempt := &model.RouteAttempt{ID: "byok-attempt", TaskID: task.ID, Status: "dispatching", DispatchState: "submission_unknown", StartedAt: time.Now()}
+	for _, row := range []any{&task, attempt} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := `{"model":"gpt-image-2","prompt":"draw a cat","n":1}`
+	ctx := withProviderSubmissionKey(withProviderAnalytics(context.Background(), s, task), attempt)
+	ctx = generation.WithImageReplayProtocol(ctx, generation.ImageReplayProtocol)
+	ctx = context.WithValue(ctx, imageTaskContext{}, task)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://enterprise.beefapi.com/v1/images/generations", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer sk-custom-byok")
+	row, handled, err := prepareImageSubmission(s, req)
+	if err != nil || !handled {
+		t.Fatalf("prepare: handled=%v err=%v", handled, err)
+	}
+	if row.QueryCipher != "" {
+		t.Fatalf("BYOK request acquired managed QueryCipher: %q", row.QueryCipher)
+	}
+	wire, err := s.imageSubmissionWire(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wire.ChannelID != "custom-byok" {
+		t.Fatalf("wire.ChannelID=%q, want custom-byok", wire.ChannelID)
+	}
+	sends := 0
+	firstKey := ""
+	data, _, err := s.sendImageSubmissionWith(context.Background(), task, row, func(r *http.Request, admit func() error) ([]byte, string, error) {
+		if err := admit(); err != nil {
+			return nil, "", err
+		}
+		sends++
+		sentBody, readErr := io.ReadAll(r.Body)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		key := r.Header.Get("Idempotency-Key")
+		if sends == 1 {
+			firstKey = key
+		}
+		if key == "" || key != firstKey || r.URL.String() != "https://enterprise.beefapi.com/v1/images/generations" || r.Header.Get("Authorization") != "Bearer sk-custom-byok" || string(sentBody) != body {
+			t.Fatalf("send %d altered identity: url=%q auth=%q key=%q body=%q", sends, r.URL.String(), r.Header.Get("Authorization"), key, string(sentBody))
+		}
+		if sends == 1 {
+			return nil, "", io.ErrUnexpectedEOF
+		}
+		return []byte(`{"data":[{"url":"https://example.invalid/cat.png"}]}`), "application/json", nil
+	}, noImageWait)
+	if err != nil || sends != 2 || len(data) == 0 {
+		t.Fatalf("sends=%d len=%d err=%v", sends, len(data), err)
+	}
+	disabledCfg, _ := json.Marshal(map[string]any{
+		"channels": []any{
+			map[string]any{"id": "custom-byok", "enabled": false, "baseUrl": "https://enterprise.beefapi.com/v1", "apiKey": "sk-custom-byok"},
+		},
+	})
+	if err := s.SaveLocalModelConfig(disabledCfg); err != nil {
+		t.Fatal(err)
+	}
+	row.ResponseAccepted = false
+	if err := db.Save(row).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = s.sendImageSubmissionWith(context.Background(), task, row, func(_ *http.Request, admit func() error) ([]byte, string, error) {
+		if err := admit(); err != nil {
+			return nil, "", err
+		}
+		sends++
+		return []byte(`{"data":[{"url":"https://example.invalid/cat.png"}]}`), "application/json", nil
+	}, noImageWait)
+	if !errors.Is(err, errImageRecoveryIdentityUnavailable) || sends != 2 {
+		t.Fatalf("disabled custom channel still replayed: sends=%d err=%v", sends, err)
 	}
 }

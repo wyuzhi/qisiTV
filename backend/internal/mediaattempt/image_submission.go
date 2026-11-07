@@ -188,7 +188,7 @@ func (s *Service) ShouldDeferImageRecovery(task model.Task, taskErr error, provi
 		return false
 	}
 	row, err := s.repo.ImageSubmission(attempt.ID, task.ID, task.UserID)
-	if err == nil && (ManagedTaskConnection(task) || attempt.ChannelID == beefapi.ChannelID || row.QueryCipher != "") {
+	if err == nil && s.isManagedImageSubmission(task, attempt, row) {
 		return true
 	}
 	if err != nil || FrozenRequestExpired(row) {
@@ -297,10 +297,7 @@ func PrepareImageSubmission(s *Service, req *http.Request) (*model.ImageSubmissi
 	if original.ID != attemptID {
 		return nil, true, generation.ErrImageOwnerMissing
 	}
-	channelID := kernel.FirstNonEmpty(original.ChannelID, call.ChannelID)
-	if channelID == "" && beefapi.IsEnterpriseBaseURL(req.URL.String()) {
-		channelID = beefapi.ChannelID
-	}
+	channelID := s.resolveFrozenChannelID(task, original, call, req.URL.String(), header)
 	protocol := generation.ImageReplayProtocol
 	mediaType := ""
 	if isManagedMediaRequest(req) {
