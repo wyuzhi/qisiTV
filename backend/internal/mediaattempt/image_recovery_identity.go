@@ -94,8 +94,8 @@ func (s *Service) ImageRecoveryChannelAvailable(attempt *model.RouteAttempt, wir
 	}
 
 	channelID := wire.ChannelID
-	// 历史直连记录没有 channel ID；只对可明确识别的托管源核对原 Bearer 身份。
-	if (channelID == beefapi.ChannelID || (channelID == "" && beefapi.IsEnterpriseBaseURL(wire.URL))) && s.connections.HasManagedCredential() {
+	// 只对可明确识别的托管渠道核对原 Bearer 身份。
+	if channelID == beefapi.ChannelID && s.connections.HasManagedCredential() {
 		key, base, _, _, err := s.connections.LookupManagedCredential()
 		if err != nil {
 			var appErr *kernel.AppError

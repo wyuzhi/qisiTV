@@ -124,7 +124,7 @@ func resolveChannelModel(snapshot AssistantConfigSnapshot, modelKey string, look
 	if !assistantChannelHasModel(channel, modelID) {
 		return assistant.Provider{}, AssistantReasonModelNotConfigured
 	}
-	if channel.ID == "beefapi" && (channel.Pinned || channel.CredentialRef == "beefapi-enterprise") {
+	if channel.ID == "beeftv" && (channel.Pinned || channel.CredentialRef == "beeftv") {
 		allowed := false
 		for _, candidate := range managedModels {
 			if assistantModelAlias(channel, candidate) == modelID {

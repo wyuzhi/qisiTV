@@ -45,7 +45,7 @@ var videoContracts = func() []VideoContract {
 
 func IsBeefAPIEndpoint(baseURL string) bool {
 	u, err := url.Parse(strings.TrimSpace(baseURL))
-	return err == nil && u.Scheme == "https" && (strings.EqualFold(u.Hostname(), "enterprise.beefapi.com") || strings.EqualFold(u.Hostname(), "beeftv.app")) && u.User == nil && (u.Port() == "" || u.Port() == "443")
+	return err == nil && u.Scheme == "https" && strings.EqualFold(u.Hostname(), "beeftv.app") && u.User == nil && (u.Port() == "" || u.Port() == "443")
 }
 
 func BeefAPIVideoContract(model string) (VideoContract, bool) {

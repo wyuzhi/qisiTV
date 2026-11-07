@@ -167,7 +167,7 @@ func NormalizeModelCapabilityDraft(draft ModelCapabilityDraft) (*ModelCapability
 	baseURL := strings.TrimSpace(draft.BaseURL)
 	channelID := strings.TrimSpace(draft.ChannelID)
 
-	isBeefRoute := providerpreset.IsBeefAPIEndpoint(baseURL) || (baseURL == "" && strings.EqualFold(channelID, "beefapi"))
+	isBeefRoute := providerpreset.IsBeefAPIEndpoint(baseURL) || (baseURL == "" && strings.EqualFold(channelID, "beeftv"))
 	if isBeefRoute {
 		if contract, ok := providerpreset.BeefAPIVideoContract(modelName); ok {
 			protocol = contract.Protocol

@@ -52,7 +52,7 @@ func DescribeRequest(host CompileHost, n Node, resource, operation string) (Reci
 		input := map[string]any{"mode": "text", "config": config}
 		channelID := candidate.ChannelID
 		if beefapi.IsManagedChannel(candidate.ChannelID, "", candidate.BaseURL) {
-			channelID = "@beefapi"
+			channelID = "@beeftv"
 		}
 		if err := RefreshCredentials(host, input, channelID); err != nil {
 			return RecipeRequest{}, err

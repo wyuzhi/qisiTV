@@ -27,7 +27,7 @@ func (s *Service) CreateMediaUpscale(ctx context.Context, user string, request t
 	if err != nil {
 		return nil, err
 	}
-	return s.CreateTask(user, CreateTaskRequest{ProjectID: request.ProjectID, Type: "canvas_" + input.Mode, Operation: "media.upscale.topaz", Prompt: "AI 超分", Model: input.Config.Model, Provider: "beefapi", Input: payload})
+	return s.CreateTask(user, CreateTaskRequest{ProjectID: request.ProjectID, Type: "canvas_" + input.Mode, Operation: "media.upscale.topaz", Prompt: "AI 超分", Model: input.Config.Model, Provider: "beeftv", Input: payload})
 }
 
 func (s *Service) RecoverMediaUpscale(ctx context.Context, user, id string) (*model.Task, error) {

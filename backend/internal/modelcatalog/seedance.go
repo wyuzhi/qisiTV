@@ -89,7 +89,7 @@ func applySeedanceDocumentedVideoPixelFloor(config TaskConfig, refs *VideoRefere
 	if !isSeedance2Family(config.InterfaceType, config.Model) {
 		return
 	}
-	if model.IsVolcengineArkVideoProtocol(model.ChannelInterfaceType(config.InterfaceType)) || seedanceMaterialLibraryHost(config.BaseURL) || strings.EqualFold(strings.TrimSpace(config.ChannelID), "beefapi") {
+	if model.IsVolcengineArkVideoProtocol(model.ChannelInterfaceType(config.InterfaceType)) || seedanceMaterialLibraryHost(config.BaseURL) || strings.EqualFold(strings.TrimSpace(config.ChannelID), "beeftv") {
 		refs.MinVideoPixels = documentedSeedanceVideoMinPixels
 	}
 }
@@ -100,7 +100,7 @@ func seedanceMaterialLibraryHost(baseURL string) bool {
 		return false
 	}
 	switch strings.ToLower(u.Hostname()) {
-	case "beeftv.app", "enterprise.beefapi.com", "beefapi.com", "www.whatstoken.ai", "whatstoken.ai":
+	case "beeftv.app", "www.whatstoken.ai", "whatstoken.ai":
 		return true
 	default:
 		return false

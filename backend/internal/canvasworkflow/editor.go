@@ -50,8 +50,8 @@ func EditorDefinition(d Definition, recipes RecipesByNode) Definition {
 		}
 		config, _ := recipe.Request.Input["config"].(map[string]any)
 		channel := recipe.ChannelID
-		if channel == "@beefapi" {
-			channel = "beefapi"
+		if channel == "@beeftv" {
+			channel = "beeftv"
 		}
 		if channel != "" && stringValue(config["model"]) != "" {
 			n.Config["modelOption"] = channel + "::" + stringValue(config["model"])
@@ -88,7 +88,7 @@ func PresentOperations(host CompileHost) []Operation {
 	if snapshot, err := host.ProviderConfig(); err == nil {
 		upscaleChannels := []FieldOption{}
 		if host.UpscaleAvailable("") == nil {
-			upscaleChannels = append(upscaleChannels, FieldOption{Label: "官方算力", Value: "beefapi"})
+			upscaleChannels = append(upscaleChannels, FieldOption{Label: "官方算力", Value: "beeftv"})
 		}
 		textModels := []FieldOption{}
 		for _, model := range DescribeModels(snapshot) {

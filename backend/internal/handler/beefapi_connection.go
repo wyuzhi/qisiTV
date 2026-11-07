@@ -19,12 +19,12 @@ type beefAPIConnections interface {
 }
 
 func RegisterBeefAPIConnectionRoutes(r *gin.RouterGroup, connections beefAPIConnections) {
-	r.POST("/beefapi/connection/models", func(c *gin.Context) {
+	r.POST("/beeftv/connection/models", func(c *gin.Context) {
 		if _, err := workspaceForLocalRequest(c, connections); err != nil {
 			fail(c, http.StatusUnauthorized, err)
 			return
 		}
-		if !enforceRateLimit(c, "beefapi-models", 30, time.Minute) {
+		if !enforceRateLimit(c, "beeftv-models", 30, time.Minute) {
 			return
 		}
 		connection, err := requestBeefAPI(c, connections)
@@ -39,7 +39,7 @@ func RegisterBeefAPIConnectionRoutes(r *gin.RouterGroup, connections beefAPIConn
 		}
 		ok(c, gin.H{"models": models})
 	})
-	r.GET("/beefapi/connection", func(c *gin.Context) {
+	r.GET("/beeftv/connection", func(c *gin.Context) {
 		if _, err := workspaceForLocalRequest(c, connections); err != nil {
 			fail(c, http.StatusUnauthorized, err)
 			return
@@ -51,12 +51,12 @@ func RegisterBeefAPIConnectionRoutes(r *gin.RouterGroup, connections beefAPIConn
 		}
 		ok(c, connection.Status())
 	})
-	r.POST("/beefapi/connection/start", func(c *gin.Context) {
+	r.POST("/beeftv/connection/start", func(c *gin.Context) {
 		if _, err := workspaceForLocalRequest(c, connections); err != nil {
 			fail(c, http.StatusUnauthorized, err)
 			return
 		}
-		if !enforceRateLimit(c, "beefapi-start", 10, time.Minute) {
+		if !enforceRateLimit(c, "beeftv-start", 10, time.Minute) {
 			return
 		}
 		connection, err := requestBeefAPI(c, connections)
@@ -71,7 +71,7 @@ func RegisterBeefAPIConnectionRoutes(r *gin.RouterGroup, connections beefAPIConn
 		}
 		ok(c, summary)
 	})
-	r.POST("/beefapi/connection/cancel", func(c *gin.Context) {
+	r.POST("/beeftv/connection/cancel", func(c *gin.Context) {
 		if _, err := workspaceForLocalRequest(c, connections); err != nil {
 			fail(c, http.StatusUnauthorized, err)
 			return
@@ -88,7 +88,7 @@ func RegisterBeefAPIConnectionRoutes(r *gin.RouterGroup, connections beefAPIConn
 		}
 		ok(c, summary)
 	})
-	r.POST("/beefapi/connection/disconnect", func(c *gin.Context) {
+	r.POST("/beeftv/connection/disconnect", func(c *gin.Context) {
 		if _, err := workspaceForLocalRequest(c, connections); err != nil {
 			fail(c, http.StatusUnauthorized, err)
 			return
@@ -105,7 +105,7 @@ func RegisterBeefAPIConnectionRoutes(r *gin.RouterGroup, connections beefAPIConn
 		}
 		ok(c, summary)
 	})
-	r.POST("/beefapi/connection/open-wallet", func(c *gin.Context) {
+	r.POST("/beeftv/connection/open-wallet", func(c *gin.Context) {
 		if _, err := workspaceForLocalRequest(c, connections); err != nil {
 			fail(c, http.StatusUnauthorized, err)
 			return

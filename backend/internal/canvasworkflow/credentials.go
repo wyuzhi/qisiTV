@@ -96,7 +96,7 @@ func ChannelID(host CompileHost, input map[string]any, logical string) (string, 
 		return "", BadRequest("原生成步骤缺少模型配置")
 	}
 	if beefapi.IsManagedChannel(stringValue(config["channelId"]), stringValue(config["credentialRef"]), stringValue(config["baseUrl"])) {
-		return "@beefapi", nil
+		return "@beeftv", nil
 	}
 	snapshot, e := host.ProviderConfig()
 	if e != nil {
@@ -129,7 +129,7 @@ func RefreshCredentials(host CompileHost, input map[string]any, channelID string
 	if config == nil {
 		return BadRequest("生成步骤的模型配置缺失")
 	}
-	if channelID == "@beefapi" {
+	if channelID == "@beeftv" {
 		key, base, e := host.ManagedCredential()
 		if e != nil {
 			return e

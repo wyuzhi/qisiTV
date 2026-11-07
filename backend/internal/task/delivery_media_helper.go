@@ -325,7 +325,7 @@ func ManagedDeliveryArtifact(repo *repository.Repository, decryptSetting func(st
 		if attempt.ChannelID == beefapi.ChannelID {
 			return true, nil
 		}
-		if row, err := repo.ImageSubmission(attempt.ID, task.ID, task.UserID); err == nil && row.QueryCipher != "" && !beefapi.IsExplicitBYOKTaskInput(task.InputJSON) {
+		if row, err := repo.ImageSubmission(attempt.ID, task.ID, task.UserID); err == nil && row.QueryCipher != "" {
 			return true, nil
 		}
 	}

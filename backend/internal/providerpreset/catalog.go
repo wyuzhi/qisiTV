@@ -42,7 +42,7 @@ func BuiltinChannels() []ChannelPreset {
 
 func BeefAPI() ChannelPreset {
 	for _, preset := range builtins {
-		if preset.ID == "beefapi" {
+		if preset.ID == "beeftv" {
 			return preset.Clone()
 		}
 	}

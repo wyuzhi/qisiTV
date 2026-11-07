@@ -172,14 +172,14 @@ func (s *Service) Origin() string {
 }
 
 // Existing encrypted credentials and pending grants remain bound to their issuer.
-// Only the two production origins or this explicitly configured test origin may be restored.
+// Only the production origin or this explicitly configured test origin may be restored.
 func savedOrigin(state persistedState, fallback string) (string, error) {
 	candidate := state.AuthorizationOrigin
 	if candidate == "" {
 		candidate = state.ProviderBaseURL
 	}
 	if candidate == "" && state.Device != nil {
-		for _, origin := range []string{ProductionOrigin, LegacyOrigin, fallback} {
+		for _, origin := range []string{ProductionOrigin, fallback} {
 			if _, err := ValidateVerificationURL(origin, state.Device.VerificationURI); err == nil {
 				candidate = origin
 				break
@@ -190,12 +190,12 @@ func savedOrigin(state persistedState, fallback string) (string, error) {
 		}
 	}
 	if candidate == "" && state.hasCredential() {
-		candidate = LegacyOrigin
+		candidate = ProductionOrigin
 	}
 	if candidate == "" {
 		candidate = fallback
 	}
-	if candidate != ProductionOrigin && candidate != LegacyOrigin && candidate != fallback {
+	if candidate != ProductionOrigin && candidate != fallback {
 		return "", errStore
 	}
 	if state.ProviderBaseURL != "" && state.ProviderBaseURL != candidate {

@@ -22,7 +22,7 @@ const (
 	BalanceZero          = "zero"
 	BalanceAvailable     = "available"
 	connectionSchema     = 1
-	connectionStoreFile  = "beefapi-connection.json"
+	connectionStoreFile  = "beeftv-connection.json"
 )
 
 type Account struct {

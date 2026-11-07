@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	managedChannelID             = "beefapi"
-	managedCredentialRef         = "beefapi-enterprise"
+	managedChannelID             = "beeftv"
+	managedCredentialRef         = "beeftv"
 	defaultManagedAssistantModel = "deepseek-v4.1-flash"
 )
 

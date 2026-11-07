@@ -28,7 +28,7 @@ func SelectModel(host CompileHost, n Node, recipe *Recipe) (bool, error) {
 		old, _ := recipe.Request.Input["config"].(map[string]any)
 		recipe.ChannelID = candidate.ChannelID
 		if beefapi.IsManagedChannel(candidate.ChannelID, "", candidate.BaseURL) {
-			recipe.ChannelID = "@beefapi"
+			recipe.ChannelID = "@beeftv"
 		}
 		if stringValue(old["model"]) == candidate.Model && stringValue(old["interfaceType"]) == candidate.Protocol && strings.TrimRight(stringValue(old["baseUrl"]), "/") == strings.TrimRight(candidate.BaseURL, "/") {
 			return false, nil

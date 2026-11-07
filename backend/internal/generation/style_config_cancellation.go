@@ -219,7 +219,7 @@ func ResolveImageCapability(repo *repository.Repository, readLocalConfig func() 
 			return err
 		}
 		for _, item := range modelcatalog.ParseLocalChannelModels(body) {
-			if item.ChannelID != "beefapi" || item.Model != input.Config.Model || item.ImageCapabilitiesVersion == nil || strings.TrimSpace(*item.ImageCapabilitiesVersion) == "" {
+			if item.ChannelID != "beeftv" || item.Model != input.Config.Model || item.ImageCapabilitiesVersion == nil || strings.TrimSpace(*item.ImageCapabilitiesVersion) == "" {
 				continue
 			}
 			raw, err := json.Marshal(item.CapabilityConfig)
@@ -305,7 +305,7 @@ func ResolveVideoCapability(ctx context.Context, repo *repository.Repository, re
 		input.Config.VideoCapabilitiesVersion = nil
 		input.Config.CapabilityConfig = nil
 		for _, item := range modelcatalog.ParseLocalChannelModels(body) {
-			if item.ChannelID != "beefapi" || !item.Enabled || item.Model != input.Config.Model || item.VideoCapabilitiesVersion == nil || strings.TrimSpace(*item.VideoCapabilitiesVersion) == "" {
+			if item.ChannelID != "beeftv" || !item.Enabled || item.Model != input.Config.Model || item.VideoCapabilitiesVersion == nil || strings.TrimSpace(*item.VideoCapabilitiesVersion) == "" {
 				continue
 			}
 			config, _ := item.CapabilityConfig.(map[string]any)

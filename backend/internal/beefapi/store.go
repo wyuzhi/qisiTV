@@ -43,7 +43,7 @@ func saveState(dataDir string, state persistedState) error {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return fmt.Errorf("创建企业连接目录失败：%w", err)
 	}
-	tmp, err := os.CreateTemp(dataDir, ".beefapi-connection-*")
+	tmp, err := os.CreateTemp(dataDir, ".beeftv-connection-*")
 	if err != nil {
 		return fmt.Errorf("创建企业连接临时文件失败：%w", err)
 	}

@@ -11,7 +11,7 @@ import (
 // A versioned gateway profile owns its limits. Otherwise, verified route limits
 // repair legacy generic profiles without changing the saved audio default.
 func ApplyLocalVideoContract(item LocalChannelModel, config *ModelCapabilityConfig) *ModelCapabilityConfig {
-	isBeefRoute := providerpreset.IsBeefAPIEndpoint(item.BaseURL) || (strings.TrimSpace(item.BaseURL) == "" && strings.EqualFold(strings.TrimSpace(item.ChannelID), "beefapi"))
+	isBeefRoute := providerpreset.IsBeefAPIEndpoint(item.BaseURL) || (strings.TrimSpace(item.BaseURL) == "" && strings.EqualFold(strings.TrimSpace(item.ChannelID), "beeftv"))
 	if item.Capability != "video" || item.VideoCapabilitiesVersion != nil || !isBeefRoute || config == nil || config.Video == nil {
 		return config
 	}

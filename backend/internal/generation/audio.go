@@ -60,9 +60,6 @@ func runLegacyManagedAudio(ctx context.Context, input Input) (map[string]interfa
 }
 
 func isBeefAPIHostFromURL(raw string) bool {
-	if beefapi.IsEnterpriseBaseURL(raw) {
-		return true
-	}
 	origin, err := beefapi.CanonicalOrigin("")
 	return err == nil && strings.TrimSuffix(strings.TrimRight(raw, "/"), "/v1") == origin
 }

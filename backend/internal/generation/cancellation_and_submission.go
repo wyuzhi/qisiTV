@@ -362,7 +362,7 @@ func ResolveManagedBeefAPISecrets(input map[string]any, beef *beefapi.Service, r
 		delete(next, "channelId")
 	}
 	next["apiKey"] = apiKey
-	if strings.TrimSpace(stringAnyValue(next["baseUrl"])) == "" || beefapi.IsEnterpriseBaseURL(baseURL) || channelID == beefapi.ChannelID || credentialRef == beefapi.CredentialRef {
+	if strings.TrimSpace(stringAnyValue(next["baseUrl"])) == "" || channelID == beefapi.ChannelID || credentialRef == beefapi.CredentialRef {
 		next["baseUrl"] = resolvedBase
 	}
 	next["credentialRef"] = beefapi.CredentialRef
@@ -411,7 +411,7 @@ func LookupBeefAPICredential(beef *beefapi.Service, readLocalConfig func() ([]by
 		if channel.ID == beefapi.ChannelID && strings.TrimSpace(channel.APIKey) != "" {
 			base := strings.TrimSpace(channel.BaseURL)
 			if base == "" {
-				base = beefapi.LegacyOrigin
+				base = beefapi.ProductionOrigin
 			}
 			return channel.APIKey, base, "", "", nil
 		}
