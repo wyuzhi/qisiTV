@@ -409,6 +409,7 @@ func usage() {
   beeftv business discover
   beeftv business call --tool <id> --params '<path/query/body json>' [--operation-id <id>]
   beeftv business upload --file <path> [--target resource|skill|plugin] [--params '<json>'] [--operation-id <id>]
+  beeftv canvas create [--title <title>] [--canvas <id>] [--project <projectId>] [--folder <folderId>] --op-id <id> [--json]
   beeftv canvas get --canvas <id> [--json]
   beeftv canvas search [--query <q>] [--page N] [--page-size N] [--json]
   beeftv canvas node update --canvas <id> --node <id> --expected-revision N [--title T] [--prompt P] [--content C] --op-id <id>
@@ -454,9 +455,11 @@ func emitJSON(value any) error {
 
 func runCanvas(c *client, args []string) error {
 	if len(args) == 0 {
-		return &cliError{code: exitUsage, reason: "missing_subcommand", msg: "canvas 需要 get|search|node|nodes|edge"}
+		return &cliError{code: exitUsage, reason: "missing_subcommand", msg: "canvas 需要 create|get|search|node|nodes|edge"}
 	}
 	switch args[0] {
+	case "create":
+		return runCanvasCreate(c, args[1:])
 	case "get":
 		fs := flag.NewFlagSet("canvas get", flag.ContinueOnError)
 		canvasID := fs.String("canvas", "", "画布 ID")
@@ -526,6 +529,40 @@ func flagError(err error) error {
 		return nil
 	}
 	return &cliError{code: exitUsage, reason: "bad_flags", msg: err.Error()}
+}
+
+func runCanvasCreate(c *client, args []string) error {
+	fs := flag.NewFlagSet("canvas create", flag.ContinueOnError)
+	canvasID := fs.String("canvas", "", "可选自定义画布 ID")
+	title := fs.String("title", "", "画布标题（默认：未命名画布）")
+	projectID := fs.String("project", "", "可选关联项目 ID")
+	folderID := fs.String("folder", "", "可选画布文件夹 ID")
+	opID := fs.String("op-id", "", "幂等键（必填）")
+	jsonOut := fs.Bool("json", false, "输出 JSON")
+	if err := fs.Parse(args); err != nil {
+		return flagError(err)
+	}
+	if *opID == "" {
+		return &cliError{code: exitUsage, reason: "missing_flag", msg: "--op-id 必填"}
+	}
+	params := map[string]any{}
+	if *canvasID != "" {
+		params["canvasId"] = *canvasID
+	}
+	if *title != "" {
+		params["title"] = *title
+	}
+	if *projectID != "" {
+		params["projectId"] = *projectID
+	}
+	if *folderID != "" {
+		params["folderId"] = *folderID
+	}
+	raw, err := c.callOp("canvas.create", *opID, mustJSON(params))
+	if err != nil {
+		return err
+	}
+	return printResult(raw, *jsonOut)
 }
 
 func runCanvasNodeUpdate(c *client, args []string) error {

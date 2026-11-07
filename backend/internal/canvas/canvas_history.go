@@ -104,7 +104,17 @@ func (s *Service) CanvasHistorySnapshot(userID string, canvasID, snapshotID stri
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, kernel.NewAppError(http.StatusNotFound, "历史版本不存在或已过期，请刷新历史列表")
 	}
-	return item, err
+	if err != nil || item == nil {
+		return item, err
+	}
+	var payload map[string]json.RawMessage
+	if json.Unmarshal([]byte(item.PayloadJSON), &payload) == nil && payload != nil {
+		ensureCanvasGraphArrays(payload)
+		if normalized, marshalErr := json.Marshal(payload); marshalErr == nil {
+			item.PayloadJSON = string(normalized)
+		}
+	}
+	return item, nil
 }
 
 func (s *Service) RestoreCanvasHistory(userID string, canvasID, snapshotID string, revision *int64) (UserDataSummary, error) {
@@ -215,6 +225,7 @@ func canvasProjectPayload(project model.CanvasProject) (json.RawMessage, error) 
 	if payload == nil {
 		return nil, kernel.BadAuthRequest("画布数据格式错误")
 	}
+	ensureCanvasGraphArrays(payload)
 	for key, value := range map[string]any{"id": project.ID, "title": project.Title, "projectId": project.ProjectID, "folderId": project.LibraryFolderID, "revision": project.Revision, "createdAt": project.CreatedAt, "updatedAt": project.UpdatedAt} {
 		encoded, err := json.Marshal(value)
 		if err != nil {

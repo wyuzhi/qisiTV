@@ -31,7 +31,6 @@ func newCanvasHost(service *Service) canvas.Host {
 	}
 	return newCanvasHostWithRepo(service, service.repo)
 }
-
 func repoHoldsTransaction(repo *repository.Repository) bool { return repo.HoldsTransaction() }
 
 func newCanvasHostWithRepo(service *Service, repo *repository.Repository) canvas.Host {
@@ -96,6 +95,8 @@ type operationSession struct {
 }
 
 func (s *operationSession) UserCanvasProject(u, id string) (json.RawMessage, error)                                      { return s.canvas.UserCanvasProject(u, id) }
+func (s *operationSession) UpsertUserCanvasProject(u string, raw json.RawMessage) (canvas.UserDataSummary, error)        { return s.canvas.UpsertUserCanvasProject(u, raw) }
+func (s *operationSession) DeleteUserCanvasProject(u, id string) error                                                   { return s.canvas.DeleteUserCanvasProject(u, id) }
 func (s *operationSession) UserCanvasProjectsPage(u string, p, sz int, pid, q, sort string) (canvas.CanvasLibraryPage, error) { return s.canvas.UserCanvasProjectsPage(u, p, sz, pid, q, sort) }
 func (s *operationSession) UserAssetsPage(u string, p, sz int, f canvas.UserAssetPageFilter) (canvas.UserAssetPage, error) { return s.canvas.UserAssetsPage(u, p, sz, f) }
 func (s *operationSession) UserAsset(u, id string) (json.RawMessage, error)                                              { return s.canvas.UserAsset(u, id) }

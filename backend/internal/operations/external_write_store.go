@@ -95,6 +95,45 @@ func (w ExternalCanvasWrite) PublicView() ExternalCanvasWrite {
 	return out
 }
 
+func BuildCanvasCreateWriteRecord(opID, canvasID, turnID string, caller Caller, afterRaw []byte) (*ExternalCanvasWrite, bool) {
+	if strings.TrimSpace(opID) == "" || strings.TrimSpace(canvasID) == "" || len(afterRaw) == 0 {
+		return nil, false
+	}
+	var afterDoc map[string]any
+	if json.Unmarshal(afterRaw, &afterDoc) != nil {
+		return nil, false
+	}
+	revAfter := canvasRevision(afterDoc)
+	if revAfter <= 0 {
+		revAfter = 1
+	}
+	title, _ := afterDoc["title"].(string)
+	title = strings.TrimSpace(title)
+	summary := "新建画布"
+	if title != "" {
+		summary = "新建画布 " + title
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	return &ExternalCanvasWrite{
+		OpID:            strings.TrimSpace(opID),
+		CanvasID:        strings.TrimSpace(canvasID),
+		Op:              "canvas.create",
+		CallerKind:      caller.Kind,
+		ClientID:        strings.TrimSpace(caller.ClientID),
+		ClientLabel:     caller.EffectiveClientLabel(),
+		TurnID:          strings.TrimSpace(turnID),
+		RevisionBefore:  0,
+		RevisionAfter:   revAfter,
+		Summary:         summary,
+		ChangedNodeIDs:  []string{},
+		DocumentUpdated: true,
+		ModifiedNodes:   []CanvasNodeRef{},
+		AfterDocument:   append(json.RawMessage(nil), afterRaw...),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}, true
+}
+
 func BuildCanvasWriteRecord(opID, opName, canvasID, turnID string, caller Caller, beforeRaw, afterRaw []byte) (*ExternalCanvasWrite, bool) {
 	if strings.TrimSpace(opID) == "" || strings.TrimSpace(canvasID) == "" || len(beforeRaw) == 0 || len(afterRaw) == 0 {
 		return nil, false
@@ -395,6 +434,43 @@ func (s *Store) UndoExternalCanvasWrite(ctx context.Context, binder DomainBinder
 			return AsError(err)
 		}
 		currentRev := canvasRevision(currentDoc)
+		if write.Op == "canvas.create" {
+			var createdDoc map[string]any
+			createdInstanceMatch := true
+			if len(write.AfterDocument) > 0 && json.Unmarshal(write.AfterDocument, &createdDoc) == nil {
+				createdInstanceMatch = reflect.DeepEqual(createdDoc, currentDoc)
+			}
+			if currentRev != write.RevisionAfter || !createdInstanceMatch {
+				return Conflict("canvas_changed_since_write", "画布在该次外部创建后又被修改，已停止删除", map[string]any{
+					"currentRevision": currentRev,
+					"writeRevision":   write.RevisionAfter,
+				})
+			}
+			deleter, ok := domain.(CanvasProjectCreator)
+			if !ok {
+				return Unsupported("canvas_delete_unavailable", "当前工作区无法撤销新建画布")
+			}
+			if delErr := deleter.DeleteUserCanvasProject(userID, write.CanvasID); delErr != nil {
+				return mapDomainError(delErr)
+			}
+			write.Undone = true
+			write.UndoneRevision = 0
+			write.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+			if err := UpsertCanvasWriteInTx(tx, userID, *write); err != nil {
+				return AsError(err)
+			}
+			result = &ExternalCanvasWriteUndoResult{
+				CanvasID:        write.CanvasID,
+				OpID:            write.OpID,
+				ClientID:        write.ClientID,
+				ClientLabel:     write.ClientLabel,
+				Revision:        0,
+				RestoredNodeIDs: []string{},
+				Undone:          true,
+				Write:           write.PublicView(),
+			}
+			return nil
+		}
 		restoredDoc, restoreErr := buildRestoredDocumentForExternalUndo(write, currentDoc, currentRev)
 		if restoreErr != nil {
 			return restoreErr

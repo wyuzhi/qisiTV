@@ -12,6 +12,11 @@ import (
 	"infinite-canvas/backend/internal/canvas/capability"
 )
 
+type CanvasProjectCreator interface {
+	UpsertUserCanvasProject(userID string, raw json.RawMessage) (canvas.UserDataSummary, error)
+	DeleteUserCanvasProject(userID string, id string) error
+}
+
 // RegisterDefaultOps 注册全部对外操作（手工 UI、CLI、MCP 与内置助手共用）。
 // 内置助手的付费生成先提议、由界面确认；外部客户端负责自身执行审批。
 // 未经参数与费用风险验收的能力明确不注册，而不是提供 stub 伪成功。
@@ -31,6 +36,9 @@ func RegisterDefaultOps(r *Registry) {
 	registerStoryboardPreparation(r)
 	registerGenerationSubmit(r)
 	registerCanvasProjectExportOps(r)
+	r.Register(Op{ExternalOnly: true, ReplaySafe: true, ID: "canvas.create", Summary: "创建新画布", Scope: ScopeCanvas,
+		Params:  json.RawMessage(`{"type":"object","properties":{"title":{"type":"string","description":"画布名称（默认：未命名画布）"},"canvasId":{"type":"string","description":"可选自定义画布 ID；省略时由服务端生成"},"projectId":{"type":"string","description":"可选关联项目 ID"},"folderId":{"type":"string","description":"可选画布文件夹 ID"}}}`),
+		Handler: opCanvasCreate})
 	r.Register(Op{AssistantCanvas: true, ID: "canvas.get", Summary: "读取画布内容（节点与连线）", ReadOnly: true, Scope: ScopeCanvas,
 		Params:  json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"}},"required":["canvasId"]}`),
 		Handler: opCanvasGet})
@@ -612,6 +620,60 @@ func opCanvasNodesCreate(ctx *Context, params json.RawMessage) (any, error) {
 		}
 		return map[string]any{"canvasId": args.CanvasID, "created": created}
 	})
+}
+
+func opCanvasCreate(ctx *Context, params json.RawMessage) (any, error) {
+	var args struct {
+		CanvasID  string `json:"canvasId"`
+		Title     string `json:"title"`
+		ProjectID string `json:"projectId"`
+		FolderID  string `json:"folderId"`
+	}
+	if err := decodeParams(params, &args); err != nil {
+		return nil, err
+	}
+	creator, ok := ctx.Domain.(CanvasProjectCreator)
+	if !ok {
+		return nil, Unsupported("canvas_create_unavailable", "当前工作区无法创建画布")
+	}
+	title := strings.TrimSpace(args.Title)
+	if title == "" {
+		title = "未命名画布"
+	}
+	doc := map[string]any{
+		"revision":    int64(0),
+		"title":       title,
+		"nodes":       []any{},
+		"connections": []any{},
+		"viewport":    map[string]any{"x": 0, "y": 0, "k": 1},
+	}
+	if id := strings.TrimSpace(args.CanvasID); id != "" {
+		if _, err := ctx.Domain.UserCanvasProject(ctx.UserID, id); err == nil {
+			return nil, Conflict("canvas_already_exists", "画布已存在", nil)
+		}
+		doc["id"] = id
+	}
+	if projectID := strings.TrimSpace(args.ProjectID); projectID != "" {
+		doc["projectId"] = projectID
+	}
+	if folderID := strings.TrimSpace(args.FolderID); folderID != "" {
+		doc["folderId"] = folderID
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return nil, AsError(err)
+	}
+	summary, err := creator.UpsertUserCanvasProject(ctx.UserID, raw)
+	if err != nil {
+		return nil, mapDomainError(err)
+	}
+	return map[string]any{
+		"canvasId":  summary.ID,
+		"title":     summary.Title,
+		"revision":  summary.Revision,
+		"createdAt": summary.CreatedAt,
+		"updatedAt": summary.UpdatedAt,
+	}, nil
 }
 
 func opCanvasDocumentCommit(ctx *Context, params json.RawMessage) (any, error) {

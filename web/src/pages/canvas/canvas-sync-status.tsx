@@ -130,6 +130,13 @@ export function CanvasSyncStatus({ projectId, onLoadLatest, onOpenVersions }: { 
             );
             setExternalWriteOpen(false);
             message.success(`已撤销 ${write.clientLabel} 的改动`);
+            if (write.op === "canvas.create") {
+                useCanvasStore.getState().deleteProjects([projectId]);
+                if (typeof window !== "undefined") {
+                    window.location.assign("/canvas");
+                }
+                return;
+            }
             void refreshLocalCanvasProjectIfChanged(projectId)
                 .then(() => {
                     if (restoredNodeIds.length && typeof document !== "undefined") {

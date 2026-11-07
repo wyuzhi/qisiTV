@@ -26,9 +26,9 @@ description: 通过 BeefTV MCP 将 Codex、Claude Code、Claude Desktop、Cursor
 
 ## 2. 默认提供的工具与 `--all-business-tools`
 
-`beeftv mcp serve` 默认采用精简工具集（共 40 个工具），避免把上百个底层路由一次性塞满外部 Agent 的上下文窗口：
+`beeftv mcp serve` 默认采用精简工具集（共 42 个工具），避免把上百个底层路由一次性塞满外部 Agent 的上下文窗口：
 
-- **创作业务操作（38 个）**：与内置创作助手共用同一套高频操作面（默认省去面向桌面面板的 `conversation.*` 与 `skill.publish.*`），直接覆盖画布读写（`canvas.*`）、素材查询与整理（`asset.*`）、媒体检查（`media.*`）与技能查询（`skill.*`）。
+- **创作业务操作（40 个）**：与内置创作助手共用同一套高频操作面（默认省去面向桌面面板的 `conversation.*`、`skill.publish.*` 与 `skill.script.run`），直接覆盖画布创建与读写（`canvas.create`、`canvas.get`、`canvas.nodes.create` 等 `canvas.*`）、素材查询与整理（`asset.*`）、媒体检查（`media.*`）与技能查询（`skill.*`）。
 - **底层业务接口的两个统一入口（2 个）**：
   - `business.list`：按关键字（`query`，匹配接口 ID、说明或路径，例如 `assets`、`folders`、`timeline`）和读写属性（`readOnly`）检索本地工作区的底层业务接口，返回接口 ID、说明、HTTP 方法、路径和参数结构。
   - `business.call`：按 `business.list` 查到的接口 `tool` ID 调用对应底层接口，参数支持 `path`、`query`、`body`、`filePath`（由本机 CLI 读取本地文件上传，单文件上限 64 MiB）或 `file`（base64 文件内容，与 `filePath` 二选一）以及 `operationId`。

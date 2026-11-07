@@ -181,6 +181,7 @@ func createCanvasNodes(doc map[string]any, drafts []NodeDraft) ([]CreatedNode, e
 	}
 	// 从既有节点最右边缘开始，再按本批节点的累计宽度推进。
 	created := make([]CreatedNode, 0, len(drafts))
+	now := time.Now().UTC().Format(time.RFC3339)
 	for _, draft := range drafts {
 		descriptor, _ := canvasCapabilityRegistry.Resolve(draft.Type)
 		width, height := descriptor.DefaultWidth, descriptor.DefaultHeight
@@ -206,6 +207,7 @@ func createCanvasNodes(doc map[string]any, drafts []NodeDraft) ([]CreatedNode, e
 			"id": nodeID, "type": draft.Type, "title": draft.Title,
 			"position": map[string]any{"x": cursorX, "y": 160},
 			"width":    width, "height": height, "metadata": metadata,
+			"createdAt": now, "updatedAt": now,
 		})
 		created = append(created, CreatedNode{ID: nodeID, Title: draft.Title, Type: draft.Type})
 		cursorX += width + nodePlacementGap
@@ -324,6 +326,7 @@ func (s *Service) UpdateUserCanvasNodeFields(userID, canvasID, nodeID string, pa
 		// 这里把同一个 map 回写一次，保证节点上挂的就是刚改过的那个。
 		node["metadata"] = metadata
 	}
+	node["updatedAt"] = time.Now().UTC().Format(time.RFC3339)
 	return s.saveCanvasDocWithRevision(userID, canvasID, doc, expectedRevision)
 }
 

@@ -9,7 +9,7 @@ import { canvasBackendSubmitPaused, CanvasBackendSubmitPausedError, clearCanvasB
 import { CanvasJournalError, clearCanvasOperationJournal, clearCanvasPendingProjection, loadCanvasOperationJournal, newCanvasCommitOperationId, peekCanvasOperationJournal, recordConfirmedCanvasCommit, updateCanvasOperationJournal } from "@/services/canvas-operation-journal";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import { getActiveUserScope } from "@/lib/user-scope";
-import { sameCanvasDocument } from "@/lib/canvas/canvas-content";
+import { normalizeCanvasProjectGraph, sameCanvasDocument } from "@/lib/canvas/canvas-content";
 import { canvasUnconfirmedReason, canvasUnconfirmedDiagnostic, revertUnchangedCanvasDocumentPatch, type CanvasDocumentPersistPatch, type CanvasUnconfirmedState } from "@/lib/canvas/canvas-unconfirmed-edits";
 import { rebaseCanvasDocumentThreeWay, settleInFlightGenerationOverlay } from "@/lib/canvas/canvas-document-rebase";
 import { traceCanvasGraph } from "@/lib/canvas/canvas-graph-trace";
@@ -716,8 +716,8 @@ export async function persistCanvasTimeline(id: string, timeline: NonNullable<Ca
  * 当前 live：本地删除与未冲突编辑保留，未改动的服务端字段（含生成媒体）采纳。
  * 这里只更新 store/journal；编辑器节点由 bind 调用方在 isCurrent 时 setNodes(adopted.nodes)，不 notifyCanvasRefresh。
  */
-export async function adoptServerConfirmedGenerationPatch(project: CanvasProject): Promise<CanvasProject | undefined> {
-    const journalScope = getActiveUserScope();
+export async function adoptServerConfirmedGenerationPatch(rawProject: CanvasProject): Promise<CanvasProject | undefined> {
+    const project = normalizeCanvasProjectGraph(rawProject), journalScope = getActiveUserScope();
     return withCanvasProjection(journalScope, project.id, async () => {
         const incomingRevision = typeof project.revision === "number" && Number.isInteger(project.revision) && project.revision >= 0
             ? project.revision
@@ -827,7 +827,7 @@ export async function hydrateLocalCanvasProjectsFromBackend() {
         const projects = (await Promise.all(summaries.map(async (summary) => {
             const detail = await http.get<{ project: CanvasProject }>(`/canvas-projects/${encodeURIComponent(summary.id)}`);
             if (!detail.project) throw new Error("项目内容未返回");
-            return detail.project;
+            return normalizeCanvasProjectGraph(detail.project);
         }))).filter((project): project is CanvasProject => Boolean(project));
         if (projects.length === 0) return false;
         const current = useCanvasStore.getState().projects;
@@ -867,7 +867,7 @@ export async function hydrateLocalCanvasProjectsFromBackend() {
 export async function readLocalCanvasProjectFromBackend(id: string): Promise<CanvasProject> {
     const response = await http.get<{ project: CanvasProject }>(`/canvas-projects/${encodeURIComponent(id)}`);
     if (!response.project) throw new Error("画布读取失败，请重试");
-    return response.project;
+    return normalizeCanvasProjectGraph(response.project);
 }
 
 export async function openLocalCanvasProjectFromBackend(id: string) {
@@ -991,8 +991,8 @@ export async function refreshLocalCanvasProjectIfChanged(id: string) {
             return undefined;
         }
         const response = await http.get<{ project: CanvasProject }>(`/canvas-projects/${encodeURIComponent(id)}`);
-        const remote = response.project;
-        if (!remote) return undefined;
+        if (!response.project) return undefined;
+        const remote = normalizeCanvasProjectGraph(response.project);
         if (existed && !openLocalCanvasProject(id)) return undefined;
         return withCanvasProjection(scope, id, async () => {
             if (existed && !openLocalCanvasProject(id)) return undefined;

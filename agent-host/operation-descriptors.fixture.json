@@ -66,6 +66,42 @@
     "replay": "safe"
   },
   {
+    "id": "canvas.create",
+    "summary": "创建新画布",
+    "readOnly": false,
+    "scope": "canvas",
+    "params": {
+      "properties": {
+        "canvasId": {
+          "description": "可选自定义画布 ID；省略时由服务端生成",
+          "type": "string"
+        },
+        "folderId": {
+          "description": "可选画布文件夹 ID",
+          "type": "string"
+        },
+        "operationId": {
+          "description": "调用方生成的稳定幂等键；重试同一操作必须复用同一个值，服务端据此回读原结果",
+          "type": "string"
+        },
+        "projectId": {
+          "description": "可选关联项目 ID",
+          "type": "string"
+        },
+        "title": {
+          "description": "画布名称（默认：未命名画布）",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operationId"
+      ],
+      "type": "object"
+    },
+    "assistantModes": [],
+    "replay": "safe"
+  },
+  {
     "id": "canvas.document.commit",
     "summary": "按 revision 提交整份画布文档",
     "readOnly": false,

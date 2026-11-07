@@ -20,14 +20,14 @@ func TestTypedNilAuthorizerDoesNotFilterOwnerCatalog(t *testing.T) {
 	RegisterDefaultOps(registry)
 
 	listed := registry.List(Caller{Kind: CallerManual, Scope: scope})
-	if len(listed) != 43 {
+	if len(listed) != 44 {
 		t.Fatalf("带类型的空范围不应收窄 owner 目录，得到 %d: %v", len(listed), descriptorIDs(listed))
 	}
 	if !containsOp(listed, "conversation.message.attach") {
 		t.Fatalf("owner 应看到消息绑定: %v", descriptorIDs(listed))
 	}
-	if !containsOp(listed, "canvas.document.commit") {
-		t.Fatalf("owner 应看到文档提交: %v", descriptorIDs(listed))
+	if !containsOp(listed, "canvas.document.commit") || !containsOp(listed, "canvas.create") {
+		t.Fatalf("owner 应看到文档提交与新建画布: %v", descriptorIDs(listed))
 	}
 	if !containsOp(listed, "asset.list") || !containsOp(listed, "canvas.search") {
 		t.Fatalf("owner 应看到工作区级操作: %v", descriptorIDs(listed))
@@ -39,7 +39,7 @@ func TestTypedNilAuthorizerDoesNotFilterOwnerCatalog(t *testing.T) {
 	}
 
 	external := registry.List(ExternalCaller(false))
-	if len(external) != 43 {
+	if len(external) != 44 {
 		t.Fatalf("外部调用方应看到完整目录 %d: %v", len(external), descriptorIDs(external))
 	}
 	for _, descriptor := range external {

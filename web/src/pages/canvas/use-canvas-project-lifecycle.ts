@@ -43,8 +43,13 @@ function isExpectedLocalOnlySyncError(error: unknown) {
 
 type EditorDocument = Pick<CanvasHistorySnapshot, "nodes" | "connections" | "chatSessions" | "activeChatId">;
 
-function editorDocumentOf(source: { nodes: CanvasNodeData[]; connections: CanvasConnection[]; chatSessions?: CanvasAssistantSession[]; activeChatId?: string | null }): EditorDocument {
-    return { nodes: source.nodes, connections: source.connections, chatSessions: source.chatSessions || [], activeChatId: source.activeChatId ?? null };
+function editorDocumentOf(source: { nodes?: CanvasNodeData[]; connections?: CanvasConnection[]; chatSessions?: CanvasAssistantSession[]; activeChatId?: string | null }): EditorDocument {
+    return {
+        nodes: Array.isArray(source.nodes) ? source.nodes : [],
+        connections: Array.isArray(source.connections) ? source.connections : [],
+        chatSessions: Array.isArray(source.chatSessions) ? source.chatSessions : [],
+        activeChatId: source.activeChatId ?? null,
+    };
 }
 
 /** 普通打开画布时对节点做的恢复与规范化：中断的上传和生成、最小尺寸、导演迁移、时间戳、媒体语义。 */
@@ -442,22 +447,24 @@ export function useCanvasProjectLifecycle({
                 : canvasAppearanceForTheme(fallbackTheme);
             const { nodes: initialNodes, migration, hasNodeMigration } = openCanvasNodes(targetProject);
             if (hasNodeMigration) updateProject(targetProject.id, migration);
+            const restoredConnections = Array.isArray(targetProject.connections) ? targetProject.connections : [];
+            const restoredViewport = targetProject.viewport || { x: 0, y: 0, k: 1 };
             const snapshot: CanvasHistorySnapshot = {
                 nodes: initialNodes,
-                connections: targetProject.connections,
-                chatSessions: targetProject.chatSessions || [],
+                connections: restoredConnections,
+                chatSessions: Array.isArray(targetProject.chatSessions) ? targetProject.chatSessions : [],
                 activeChatId: targetProject.activeChatId || null,
                 canvasAppearance: restoredAppearance,
                 backgroundMode: targetProject.backgroundMode || DEFAULT_CANVAS_BACKGROUND_MODE,
                 showImageInfo: targetProject.showImageInfo || false,
             };
-            observedContentRef.current = hasNodeMigration ? { ...snapshot, nodes: targetProject.nodes } : snapshot;
+            observedContentRef.current = hasNodeMigration ? { ...snapshot, nodes: Array.isArray(targetProject.nodes) ? targetProject.nodes : [] } : snapshot;
             observedStoreRef.current = hasNodeMigration ? (storedEditorProject() ?? targetProject) : targetProject;
             chatSessionsRef.current = snapshot.chatSessions;
             activeChatIdRef.current = snapshot.activeChatId;
             nodesRef.current = snapshot.nodes;
             connectionsRef.current = snapshot.connections;
-            viewportRef.current = targetProject.viewport;
+            viewportRef.current = restoredViewport;
             adoptNodes(snapshot.nodes);
             setConnections(snapshot.connections);
             setChatSessions(snapshot.chatSessions);
@@ -466,7 +473,7 @@ export function useCanvasProjectLifecycle({
             useCanvasThemeStore.getState().setAppearance(snapshot.canvasAppearance);
             setBackgroundMode(snapshot.backgroundMode);
             setShowImageInfo(snapshot.showImageInfo);
-            setViewport(targetProject.viewport);
+            setViewport(restoredViewport);
             resetHistory(snapshot);
             editorReadyRef.current = true;
             editorProjectIdRef.current = targetProject.id;

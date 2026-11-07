@@ -97,6 +97,12 @@ writeFileSync(modeStubPath, "export const isLocalWorkspaceMode = () => true;\n")
 writeFileSync(resourcesStubPath, "export const resourceIdFromStorageKey = () => '';\n");
 writeFileSync(userScopeStubPath, "export const getActiveUserScope = () => 'guest';\n");
 writeFileSync(canvasContentStubPath, `
+export const normalizeCanvasProjectGraph = (project) => ({
+  ...project,
+  nodes: Array.isArray(project?.nodes) ? project.nodes : [],
+  connections: Array.isArray(project?.connections) ? project.connections : [],
+  viewport: project?.viewport && typeof project.viewport.k === "number" && project.viewport.k > 0 ? project.viewport : { x: 0, y: 0, k: 1 },
+});
 export const sameCanvasDocument = (left, right) => {
   if (left === right) return true;
   if (!left || !right) return false;

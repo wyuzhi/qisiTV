@@ -1,7 +1,7 @@
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData } from "@/types/canvas";
 import { normalizeAssetCategory } from "@/lib/asset-category";
-import { sameCanvasContent } from "@/lib/canvas/canvas-content";
+import { normalizeCanvasProjectGraph, sameCanvasContent } from "@/lib/canvas/canvas-content";
 
 export type CanvasStorageTombstones = {
     projects: Record<string, number>;
@@ -85,14 +85,10 @@ export function parseCanvasStorageDocument(value: string | null, fallback: Canva
 }
 
 function normalizeProjectAssetCategories(projects: CanvasProject[]) {
-    return projects.map((project) => {
-        let changed = false;
-        // Projects written by earlier desktop builds may contain metadata without
-        // the graph arrays. Keep those records loadable instead of making every
-        // later canvas save fail while normalizing asset categories.
-        const sourceNodes = Array.isArray(project.nodes) ? project.nodes : [];
-        if (sourceNodes !== project.nodes) changed = true;
-        const nodes = sourceNodes.map((node) => {
+    return projects.map((rawProject) => {
+        const project = normalizeCanvasProjectGraph(rawProject);
+        let changed = project !== rawProject;
+        const nodes = project.nodes.map((node) => {
             const category = node.metadata?.assetCategory;
             if (!category) return node;
             const normalized = normalizeAssetCategory(category);
@@ -100,7 +96,7 @@ function normalizeProjectAssetCategories(projects: CanvasProject[]) {
             changed = true;
             return { ...node, metadata: { ...node.metadata, assetCategory: normalized } };
         });
-        return changed ? { ...project, nodes } : project;
+        return changed ? { ...project, nodes } : rawProject;
     });
 }
 
@@ -111,17 +107,16 @@ function normalizeProjectAssetCategories(projects: CanvasProject[]) {
  * chatSessions，会话也可能没有 messages；本地合并按「缺失即空集合」处理，
  * 否则一次外部改动就会让本地持久化整批失败。
  */
-function normalizeProjectGraphArrays(project: CanvasProject): CanvasProject {
-    const nodes = Array.isArray(project.nodes) ? project.nodes : [];
-    const connections = Array.isArray(project.connections) ? project.connections : [];
+function normalizeProjectGraphArrays(rawProject: CanvasProject): CanvasProject {
+    const project = normalizeCanvasProjectGraph(rawProject);
     const sessions = Array.isArray(project.chatSessions) ? project.chatSessions : [];
-    let changed = nodes !== project.nodes || connections !== project.connections || sessions !== project.chatSessions;
+    let changed = project !== rawProject || sessions !== project.chatSessions;
     const chatSessions = sessions.map((session) => {
         if (Array.isArray(session.messages)) return session;
         changed = true;
         return { ...session, messages: [] };
     });
-    return changed ? { ...project, nodes, connections, chatSessions } : project;
+    return changed ? { ...project, chatSessions } : rawProject;
 }
 
 export function serializeCanvasStorageDocument(document: CanvasStorageDocument) {

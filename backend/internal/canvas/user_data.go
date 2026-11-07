@@ -168,6 +168,15 @@ func rawJSONSliceCount(raw json.RawMessage) int {
 	return len(items)
 }
 
+func ensureCanvasGraphArrays(payload map[string]json.RawMessage) {
+	for _, key := range []string{"nodes", "connections"} {
+		var items []json.RawMessage
+		if json.Unmarshal(payload[key], &items) != nil || items == nil {
+			payload[key] = json.RawMessage("[]")
+		}
+	}
+}
+
 type UserDataSnapshot struct {
 	Assets   []json.RawMessage `json:"assets"`
 	Projects []json.RawMessage `json:"projects"`
@@ -328,6 +337,7 @@ func (s *Service) upsertUserCanvasProjectAndPayload(userID string, raw json.RawM
 		}
 		delete(payload, "revision")
 		delete(payload, "remoteContentHash")
+		ensureCanvasGraphArrays(payload)
 		payload["viewport"] = json.RawMessage(`{"x":0,"y":0,"k":1}`)
 		var previous map[string]json.RawMessage
 		if existing != nil {

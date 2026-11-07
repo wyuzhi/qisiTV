@@ -206,3 +206,50 @@ func TestCanvasDocumentCustomCapacityLimit(t *testing.T) {
 		t.Fatal("expected inline media data URL to remain rejected even when canvas size is unlimited")
 	}
 }
+
+func TestUpsertMinimalCanvasNormalizesGraphArraysAndNodeTimestamps(t *testing.T) {
+	svc := newCanvasHistoryTestService(t)
+	created, err := svc.UpsertUserCanvasProject("owner", json.RawMessage(`{"id":"minimal-canvas","revision":0,"title":"极简画布"}`))
+	if err != nil {
+		t.Fatalf("UpsertUserCanvasProject: %v", err)
+	}
+	raw, err := svc.UserCanvasProject("owner", "minimal-canvas")
+	if err != nil {
+		t.Fatalf("UserCanvasProject: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := doc["nodes"].([]any); !ok {
+		t.Fatalf("expected nodes array on minimal canvas, got %#v", doc["nodes"])
+	}
+	if _, ok := doc["connections"].([]any); !ok {
+		t.Fatalf("expected connections array on minimal canvas, got %#v", doc["connections"])
+	}
+
+	summary, createdNodes, err := svc.CreateUserCanvasNodes("owner", "minimal-canvas", []NodeDraft{
+		{Title: "测试节点", Type: "text", Prompt: "初始正文"},
+	}, created.Revision)
+	if err != nil {
+		t.Fatalf("CreateUserCanvasNodes: %v", err)
+	}
+	if len(createdNodes) != 1 {
+		t.Fatalf("createdNodes = %d", len(createdNodes))
+	}
+	if _, err := svc.UpdateUserCanvasNodeFields("owner", "minimal-canvas", createdNodes[0].ID, map[string]any{"title": "已改名"}, summary.Revision); err != nil {
+		t.Fatalf("UpdateUserCanvasNodeFields: %v", err)
+	}
+	afterRaw, err := svc.UserCanvasProject("owner", "minimal-canvas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(afterRaw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	nodes := doc["nodes"].([]any)
+	node := nodes[0].(map[string]any)
+	if strings.TrimSpace(node["createdAt"].(string)) == "" || strings.TrimSpace(node["updatedAt"].(string)) == "" {
+		t.Fatalf("expected createdAt and updatedAt on created/updated node: %+v", node)
+	}
+}

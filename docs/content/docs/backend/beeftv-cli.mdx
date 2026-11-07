@@ -94,11 +94,12 @@ beeftv business discover   # 已挂载的业务 REST 接口清单，含 path/que
 
 `ops` 是助手、MCP 与脚本共用的操作面；`business` 是底层业务接口面。数量随版本变化，以实际输出为准。
 
-## 5. 读取画布与素材
+## 5. 读取与新建画布、读取素材
 
 默认输出是缩进 JSON，方便人看；`--json` 输出单行紧凑 JSON，方便管道处理。业务结果走 stdout，诊断信息走 stderr。
 
 ```bash
+beeftv canvas create --title "第1集分镜" --op-id new-canvas-1 --json
 beeftv canvas search --query "末日" --page 1 --page-size 10
 beeftv canvas get --canvas <canvasId> --json
 beeftv asset list --kind image --page-size 20 --json
@@ -106,7 +107,7 @@ beeftv asset get --asset <assetId> --json
 beeftv task get --task <taskId> --json
 ```
 
-读取结果的形状（`canvas search`）：
+`canvas create` 会创建一张带完整空白画布图结构（`nodes: []`、`connections: []`、`revision: 1`）的新画布，支持可选的 `--canvas <id>`、`--project <projectId>` 和 `--folder <folderId>`。读取结果的形状（`canvas search`）：
 
 ```json
 {"op":"canvas.search","replayed":false,"result":{"projects":[{"id":"cli-doc-canvas","title":"CLI 文档验证画布","revision":1,"nodeCount":0}],"page":1,"pageSize":5,"total":1,"hasMore":false},"caller":"external"}
@@ -257,6 +258,17 @@ beeftv business upload --file ./ref.png --target resource
 
 CLI 自己读取本地文件再提交资源接口，服务端不接受任意宿主路径；单个文件上限 64 MiB，更大的文件走分片上传（见 `beeftv business discover` 里的 `business_post_resources_uploads`）。`--target` 还支持 `skill` 和 `plugin`，用来安装本地技能包或插件包，文件类型不符时由服务端拒绝。
 
+### 6.6 查看与回滚外部写入、批准生成单
+
+本机用户（无需外部客户端凭据，CLI 会自动读取本机数据目录下的 `agent_owner_token`）可以直接查看外部 Agent 的画布写入记录、回滚某次外部写入，或查看并批准待执行的生成单：
+
+```bash
+beeftv writes --canvas <canvasId>            # 查看外部写入记录
+beeftv undo latest --canvas <canvasId>       # 回滚该画布最近一次外部写入（也可指定具体 opId）
+beeftv orders --canvas <canvasId>            # 查看生成单（含费用估算与审批状态）
+beeftv approve <proposalId>                  # 批准指定生成单
+```
+
 ## 7. 脚本化约定
 
 - stdout 只放业务结果，诊断和错误在 stderr，可以分开重定向。
@@ -298,7 +310,7 @@ beeftv mcp serve --all-business-tools  # 把每个底层业务接口单独列成
 启动时 stderr 会打印工具数量和连接的工作区，例如：
 
 ```text
-beeftv mcp serve: 40 个工具，base=http://127.0.0.1:<动态端口>/api（运行中的桌面工作区），client=client-xxxxxxxx
+beeftv mcp serve: 42 个工具，base=http://127.0.0.1:<动态端口>/api（运行中的桌面工作区），client=client-xxxxxxxx
 ```
 
 `media.overview`、`media.inspect` 读到的图片会作为 MCP 图片内容返回，音频作为音频内容返回，客户端可以直接看图；文字部分只保留时长、来源和校验值。MCP 没有视频内容类型，视频片段不随结果附带：看画面用 `mode=frames`，看连续动作或听声音用 `media.review`。

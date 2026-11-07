@@ -50,6 +50,7 @@ func TestAssistantScopeAllowsOnlyVerifiedResources(t *testing.T) {
 		{"无关任务不可读", "task.get", `{"taskId":"task-2"}`, true},
 		{"工作区级列举不可用", "asset.list", `{}`, true},
 		{"整页文档提交不可用", "canvas.document.commit", `{"canvasId":"canvas-a"}`, true},
+		{"外部新建画布对内置助手不可用", "canvas.create", `{"title":"x"}`, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -88,6 +89,9 @@ func registeredScopeOp(t *testing.T, id string) *agentops.Op {
 			hasReadOnly = true
 		}
 	}
+	if len(descriptor.AssistantModes) == 0 && descriptor.Scope != operations.ScopeConversation {
+		op.ExternalOnly = true
+	}
 	if descriptor.ReadOnly && !hasReadOnly {
 		op.AssistantProposal = true
 	}
@@ -116,7 +120,7 @@ func TestAssistantVisibleSetExcludesWorkspaceWideOps(t *testing.T) {
 			t.Fatalf("助手应能看到 %s: %v", id, visible)
 		}
 	}
-	for _, id := range []string{"asset.list", "canvas.search", "canvas.document.commit", "conversation.message.attach"} {
+	for _, id := range []string{"asset.list", "canvas.search", "canvas.create", "canvas.document.commit", "conversation.message.attach"} {
 		if visible[id] {
 			t.Fatalf("工作区级或整页写操作 %s 不应暴露给助手", id)
 		}
@@ -133,7 +137,7 @@ func TestNilAssistantScopeDoesNotFilterCatalog(t *testing.T) {
 	agentops.RegisterDefaultOps(registry)
 	var typedNil *agentops.AssistantScope
 	listed := registry.List(agentops.Caller{Kind: agentops.CallerManual, Scope: typedNil})
-	if len(listed) != 43 {
+	if len(listed) != 44 {
 		t.Fatalf("空指针范围不应收窄目录，得到 %d", len(listed))
 	}
 	empty := registry.List(agentops.AssistantCaller(&agentops.AssistantScope{}, false))

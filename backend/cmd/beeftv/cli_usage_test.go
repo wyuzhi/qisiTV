@@ -338,4 +338,14 @@ func TestApproveOrdersAndClientApprovalFlag(t *testing.T) {
 	if lastOwner != "" || lastClient != "agent-1" {
 		t.Fatalf("agent token must not load owner token: owner=%q client=%q", lastOwner, lastClient)
 	}
+
+	if err := run([]string{"canvas", "create", "--title", "新画布"}); err == nil {
+		t.Fatal("canvas create without --op-id must fail")
+	}
+	if err := run([]string{"canvas", "create", "--title", "新画布", "--canvas", "c-new", "--op-id", "op-create-1", "--json"}); err != nil {
+		t.Fatalf("canvas create failed: %v", err)
+	}
+	if lastPath != "/ops/canvas.create" || lastBody["opId"] != "op-create-1" {
+		t.Fatalf("canvas create request = path:%q body:%+v", lastPath, lastBody)
+	}
 }
