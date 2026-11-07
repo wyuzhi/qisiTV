@@ -131,7 +131,7 @@ func TestSeedreamSizePrecheckCoversConfigurePrepareAndPropose(t *testing.T) {
 		{"dola-seedream-5-0-pro-260628", "4K", false, "Seedream 5.0 Pro 没有 4K 档位，请改选 1K、1.5K、2K，或直接填宽x高像素（例如 1280x720）"},
 		{"doubao-seedream-5-0-pro-260628", "4K", false, "Seedream 5.0 Pro 没有 4K 档位，请改选 1K、1.5K、2K，或直接填宽x高像素（例如 1280x720）"},
 	} {
-		modelKey := "beefapi::" + item.model
+		modelKey := "beeftv::" + item.model
 		resolve := func(string, string) (AssistantGenerationModel, error) {
 			return AssistantGenerationModel{Display: item.model, ModelKey: modelKey, Revision: 1}, nil
 		}
@@ -192,7 +192,7 @@ func TestSeedreamSizePrecheckCoversConfigurePrepareAndPropose(t *testing.T) {
 // seedreamMode，预检必须用节点现状判断这次是不是在拆图层，否则图层节点会放过官方
 // 不支持的显式像素尺寸，普通生图的 auto 也说不清该按哪个场景解释。
 func TestSeedreamSizePrecheckReadsNodeLayerModeWhenPatchOmitsIt(t *testing.T) {
-	const modelKey = "beefapi::doubao-seedream-5-0-pro-260628"
+	const modelKey = "beeftv::doubao-seedream-5-0-pro-260628"
 	for _, item := range []struct {
 		name      string
 		nodeMode  string

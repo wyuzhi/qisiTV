@@ -453,6 +453,9 @@ func ResolveChannelModelsRequest(input *ChannelModelsRequest, beef *beefapi.Serv
 }
 
 func ResolveCustomRelayKey(targetURL, incoming string, beef *beefapi.Service, readLocalConfig func() ([]byte, error)) (string, error) {
+	if strings.TrimSpace(incoming) != "" {
+		return incoming, nil
+	}
 	if beef != nil && beef.HasManagedCredential() && !SameCredentialOrigin(targetURL, beef.Origin()) {
 		return incoming, nil
 	}

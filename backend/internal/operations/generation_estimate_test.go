@@ -38,7 +38,7 @@ func estimateCatalog(t *testing.T) *modelcatalog.CatalogResponse {
 	}}
 	video := map[string]any{"video": map[string]any{"defaultResolution": "720p", "duration": map[string]any{"selection": "list", "values": []any{5, 10}, "default": 5}}}
 	response := modelcatalog.NewCatalogResponse(modelcatalog.CatalogSourceSystem, nil, []modelcatalog.PublicChannelCatalog{
-		{ID: "beefapi", Models: []modelcatalog.PublicChannelModel{
+		{ID: "beeftv", Models: []modelcatalog.PublicChannelModel{
 			{ID: "gpt-image-2", ModelKey: "gpt-image-2", Capability: "image", CapabilityConfig: image,
 				Pricing: priceRow(t, `{"mode":"per_request","per_request_cny":0.35,"display_kind":"image","image_price_table":{"output":{"low":{"1K":0.35,"2K":0.7},"high":{"1K":2.2,"2K":4.4}},"reference":0.15,"default_quality":"low","default_size":"1K"}}`)},
 			{ID: "seedance-2.0", ModelKey: "seedance-2.0", Capability: "video", CapabilityConfig: video,
@@ -55,10 +55,10 @@ func estimateCatalog(t *testing.T) *modelcatalog.CatalogResponse {
 func TestGenerationEstimatePricesTargetsFromSavedCatalog(t *testing.T) {
 	probe := &estimateProbe{catalog: estimateCatalog(t)}
 	got := EstimateGenerationCost(probe, []EstimateTarget{
-		{ModelKey: "beefapi::gpt-image-2", Kind: "image", Parameters: map[string]string{"size": "1024x1024", "quality": "low", "count": "2"}, ReferenceImages: 1},
-		{ModelKey: "beefapi::seedance-2.0", Kind: "video"},
-		{ModelKey: "beefapi::minimax-h3", Kind: "video", Parameters: map[string]string{"vquality": "768p", "seconds": "6"}},
-		{ModelKey: "beefapi::minimax-speech-2.8-hd", Kind: "audio", Text: "你好，欢迎来到牛肉粉"},
+		{ModelKey: "beeftv::gpt-image-2", Kind: "image", Parameters: map[string]string{"size": "1024x1024", "quality": "low", "count": "2"}, ReferenceImages: 1},
+		{ModelKey: "beeftv::seedance-2.0", Kind: "video"},
+		{ModelKey: "beeftv::minimax-h3", Kind: "video", Parameters: map[string]string{"vquality": "768p", "seconds": "6"}},
+		{ModelKey: "beeftv::minimax-speech-2.8-hd", Kind: "audio", Text: "你好，欢迎来到牛肉粉"},
 		{ModelKey: "custom::my-video", Kind: "video", Parameters: map[string]string{"vquality": "720p", "seconds": "5"}},
 	})
 	want := []struct {
@@ -110,7 +110,7 @@ func TestGenerationEstimateOpRejectsUnknownKinds(t *testing.T) {
 	if !ok || !op.ReadOnly {
 		t.Fatal("generation.estimate must be a registered read-only operation")
 	}
-	if _, err := op.Handler(&Context{Domain: &estimateProbe{catalog: estimateCatalog(t)}}, json.RawMessage(`{"targets":[{"modelKey":"beefapi::gpt-image-2","kind":"text"}]}`)); err == nil {
+	if _, err := op.Handler(&Context{Domain: &estimateProbe{catalog: estimateCatalog(t)}}, json.RawMessage(`{"targets":[{"modelKey":"beeftv::gpt-image-2","kind":"text"}]}`)); err == nil {
 		t.Fatal("a text target was accepted")
 	}
 }
@@ -129,7 +129,7 @@ func TestModelCatalogLeavesPriceRowsToTheEstimate(t *testing.T) {
 			t.Fatalf("catalog %s: %s", params, raw)
 		}
 	}
-	got := EstimateGenerationCost(probe, []EstimateTarget{{ModelKey: "beefapi::gpt-image-2", Kind: "image"}})
+	got := EstimateGenerationCost(probe, []EstimateTarget{{ModelKey: "beeftv::gpt-image-2", Kind: "image"}})
 	if got.Items[0].Amount == nil || *got.Items[0].Amount != 0.35 {
 		t.Fatalf("estimate lost the price row: %+v", got.Items[0])
 	}

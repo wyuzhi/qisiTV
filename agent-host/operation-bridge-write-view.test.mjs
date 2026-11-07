@@ -93,7 +93,7 @@ describe('node write receipts keep their identity within official tool output li
       result: {
         source: 'local',
         channels: [{
-          id: 'beefapi',
+          id: 'beeftv',
           models: [{
             id: 'seedance-2.0',
             modelKey: 'seedance-2.0',
@@ -110,7 +110,7 @@ describe('node write receipts keep their identity within official tool output li
     const proposeData = {
       result: {
         proposalId: 'gp-1',
-        modelKey: 'beefapi::seedance-2.0',
+        modelKey: 'beeftv::seedance-2.0',
         pricing: { currency: 'CNY', mode: 'tokens', rates: { '720p': { output: 28 } } },
         estimate: { amount: 4.968, approx: true, text: '预计费用：约 ¥4.97' },
         targets: [{

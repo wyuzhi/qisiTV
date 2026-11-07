@@ -140,10 +140,10 @@ describe("付费生成提议", () => {
     });
     test("普通提议带上逐项明细和预计费用，确认卡才能显示费用", () => {
         const turn = resetTurnAccumulator(newTurnAccumulator(), 4);
-        const targets = [{ nodeId: "n1", title: "镜头1", kind: "image", modelKey: "beefapi::gpt-image-2", prompt: "雨夜", parameters: { count: "1" },
+        const targets = [{ nodeId: "n1", title: "镜头1", kind: "image", modelKey: "beeftv::gpt-image-2", prompt: "雨夜", parameters: { count: "1" },
             estimate: { amount: 0.35, basis: "1K 低质量 ¥0.35/张 × 1 张", text: "预计 ¥0.35（1K 低质量 ¥0.35/张 × 1 张）" } }];
         const estimate = { amount: 0.35, priced: 1, unknown: 0, text: "预计费用：¥0.35" };
-        collectTurnEffects(turn, "canvas.generation.propose", { proposalId: "gp-cost", kind: "image", nodeIds: ["n1"], model: "gpt-image-2", modelKey: "beefapi::gpt-image-2", targets, estimate });
+        collectTurnEffects(turn, "canvas.generation.propose", { proposalId: "gp-cost", kind: "image", nodeIds: ["n1"], model: "gpt-image-2", modelKey: "beeftv::gpt-image-2", targets, estimate });
         expect(turn.proposals[0].targets).toEqual(targets);
         expect(turn.proposals[0].estimate).toEqual(estimate);
     });
@@ -152,12 +152,12 @@ describe("付费生成提议", () => {
 
         collectTurnEffects(turn, "canvas.generation.propose", {
             proposalId: "gp-1", kind: "video", nodeIds: ["n1", "n2"],
-            model: "wan3.0-video", modelKey: "beefapi::wan3.0-video", note: "两段镜头",
+            model: "wan3.0-video", modelKey: "beeftv::wan3.0-video", note: "两段镜头",
         });
 
         expect(turnChange(turn)).toBeNull();
         expect(turn.proposals).toEqual([{ proposalId: "gp-1", kind: "video", nodeIds: ["n1", "n2"],
-            model: "wan3.0-video", modelKey: "beefapi::wan3.0-video", note: "两段镜头" }]);
+            model: "wan3.0-video", modelKey: "beeftv::wan3.0-video", note: "两段镜头" }]);
     });
 
     test("技能脚本提议在需确认与本对话始终允许自动完成时均记入 turn.scriptProposals 且按 proposalId 去重", () => {

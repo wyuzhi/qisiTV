@@ -79,6 +79,10 @@ func TestCustomRelayOnlyInjectsBeefAPIKeyForExactConfiguredOrigin(t *testing.T) 
 	if err != nil || got != "disk-secret" {
 		t.Fatalf("configured origin did not resolve its credential: error=%v", err)
 	}
+	byokGot, err := s.ResolveCustomRelayAPIKey("https://beeftv.app/v1/chat/completions", "custom-byok")
+	if err != nil || byokGot != "custom-byok" {
+		t.Fatalf("same-origin BYOK key was replaced by managed credential: got=%q error=%v", byokGot, err)
+	}
 }
 
 func TestResolveManagedBeefAPISecretsUsesStoredKeyAndDropsClientSentinel(t *testing.T) {
