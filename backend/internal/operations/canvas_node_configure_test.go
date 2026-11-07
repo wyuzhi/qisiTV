@@ -8,6 +8,7 @@ import (
 
 	"infinite-canvas/backend/internal/canvas"
 	"infinite-canvas/backend/internal/canvas/capability"
+	"infinite-canvas/backend/internal/modelcatalog"
 )
 
 type configureProbe struct {
@@ -74,6 +75,96 @@ func TestConfigurePreservesExistingMediaAndValidatesModelSelection(t *testing.T)
 		t.Fatalf("configure prompt should update composerContent and preserve historical prompt: %#v", metadata)
 	}
 }
+
+type configureCatalogProbe struct {
+	*configureProbe
+	catalog *modelcatalog.CatalogResponse
+}
+
+func (p *configureCatalogProbe) AgentModelCatalog() (*modelcatalog.CatalogResponse, error) {
+	return p.catalog, nil
+}
+
+func videoResolutionCatalog(resolutions ...string) *modelcatalog.CatalogResponse {
+	values := make([]any, 0, len(resolutions))
+	for _, value := range resolutions {
+		values = append(values, value)
+	}
+	response := modelcatalog.NewCatalogResponse(modelcatalog.CatalogSourceSystem, nil, []modelcatalog.PublicChannelCatalog{
+		{ID: "custom", Models: []modelcatalog.PublicChannelModel{{ID: "video-model", ModelKey: "video-model", Capability: "video",
+			CapabilityConfig: map[string]any{"video": map[string]any{"resolutions": values, "defaultResolution": resolutions[0]}}}}},
+	})
+	return &response
+}
+
+// 分辨率取值来自模型目录，写进节点 metadata 后还要原样进入生成目标参数；
+// 目录里没有的档位在写草稿前拒绝，不能等到付费提交才被上游打回。
+func TestConfigureVideoResolutionUsesModelCatalogAndReachesGenerationParameters(t *testing.T) {
+	newProbe := func() *configureCatalogProbe {
+		probe := &configureCatalogProbe{configureProbe: configureFixture(t, "video"), catalog: videoResolutionCatalog("480p", "720p")}
+		probe.resolve = func(kind, selected string) (AssistantGenerationModel, error) {
+			if kind != "video" || (selected != "video-model" && selected != "custom::video-model") {
+				t.Fatalf("unexpected model lookup kind=%s selected=%s", kind, selected)
+			}
+			return AssistantGenerationModel{Display: "video-model", ModelKey: "custom::video-model", Revision: 1}, nil
+		}
+		return probe
+	}
+
+	p := newProbe()
+	raw, _ := json.Marshal(map[string]any{"canvasId": "c1", "nodeId": "n", "kind": "video", "expectedRevision": 4,
+		"patch": map[string]any{"model": "video-model", "vquality": "720p", "seconds": "5", "generateAudio": "false"}})
+	result, err := opCanvasNodeConfigure(&Context{UserID: "owner", Domain: p}, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := result.(map[string]any)["node"].(map[string]any)["metadata"].(map[string]any)
+	if metadata["vquality"] != "720p" {
+		t.Fatalf("node metadata lost video resolution: %#v", metadata)
+	}
+	proposal, err := opCanvasGenerationPropose(&Context{UserID: "owner", Domain: p}, json.RawMessage(`{"canvasId":"c1","nodeIds":["n"],"kind":"video"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := proposal.(map[string]any)["targets"].([]map[string]any)
+	parameters := targets[0]["parameters"].(map[string]string)
+	if parameters["vquality"] != "720p" || parameters["generateAudio"] != "false" {
+		t.Fatalf("generation target lost configured parameters: %#v", parameters)
+	}
+
+	invalid := newProbe()
+	raw, _ = json.Marshal(map[string]any{"canvasId": "c1", "nodeId": "n", "kind": "video", "expectedRevision": 4,
+		"patch": map[string]any{"model": "video-model", "vquality": "1080p"}})
+	if _, err := opCanvasNodeConfigure(&Context{UserID: "owner", Domain: invalid}, raw); err == nil {
+		t.Fatal("resolution outside the model catalog was accepted")
+	} else if reason := AsError(err).Reason; reason != "invalid_parameter" {
+		t.Fatalf("reason=%q, want invalid_parameter", reason)
+	}
+	if invalid.writes != 0 {
+		t.Fatal("invalid resolution changed the canvas")
+	}
+}
+
+func TestConfigureKeepsAutomaticVideoResolution(t *testing.T) {
+	for _, patch := range []map[string]any{{"prompt": "next"}, {"generateAudio": "false"}, {"vquality": "auto"}} {
+		p := &configureCatalogProbe{
+			configureProbe: &configureProbe{proposeProbe: proposeProbe{doc: proposeCanvas(t, []map[string]any{{"id": "n", "type": "video", "title": "keep",
+				"metadata": map[string]any{"model": "custom::video-model", "vquality": "auto", "prompt": "submitted"}}})}},
+			catalog: videoResolutionCatalog("480p", "720p"),
+		}
+		p.resolve = func(string, string) (AssistantGenerationModel, error) {
+			return AssistantGenerationModel{Display: "video-model", ModelKey: "custom::video-model", Revision: 1}, nil
+		}
+		raw, _ := json.Marshal(map[string]any{"canvasId": "c1", "nodeId": "n", "kind": "video", "expectedRevision": 4, "patch": patch})
+		if _, err := opCanvasNodeConfigure(&Context{UserID: "owner", Domain: p}, raw); err != nil {
+			t.Fatalf("automatic resolution blocked %+v: %v", patch, err)
+		}
+		if p.writes != 1 {
+			t.Fatalf("patch %+v writes=%d, want 1", patch, p.writes)
+		}
+	}
+}
+
 func TestConfigureRejectsForeignKindUnknownFieldsAndMalformedValues(t *testing.T) {
 	for _, target := range []struct{ nodeID, kind string }{{"n", "audio"}, {"missing", "video"}} {
 		p := configureFixture(t, "video")

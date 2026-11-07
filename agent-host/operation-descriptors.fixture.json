@@ -262,7 +262,7 @@
   },
   {
     "id": "canvas.generation.submit",
-    "summary": "凭已批准生成单执行画布素材生成并按渠道计费（ask 需人工批准、caller 核对版本后自批、auto 自动批准）",
+    "summary": "凭已批准生成单执行画布生成并计费",
     "readOnly": false,
     "scope": "canvas",
     "params": {
@@ -438,6 +438,10 @@
               "type": "string"
             },
             "size": {
+              "type": "string"
+            },
+            "vquality": {
+              "description": "分辨率档位，取自模型目录",
               "type": "string"
             }
           },
@@ -685,7 +689,7 @@
   },
   {
     "id": "canvas.script.prepare",
-    "summary": "准备分镜脚本与可选首帧/视频草稿（传 script 或 nodeId/rowIds；不开始生成）",
+    "summary": "准备分镜脚本与可选首帧/视频草稿（不开始生成）",
     "readOnly": false,
     "scope": "canvas",
     "params": {

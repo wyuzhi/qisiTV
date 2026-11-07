@@ -279,7 +279,7 @@ export function createSimGo(options = {}) {
       kind: 'video',
       revision: 1,
       default: true,
-      capabilities: { sizes: ['9:16', '16:9', '1:1'], durations: ['4', '5', '6', '8', '10'], referenceImages: 2 },
+      capabilities: { sizes: ['9:16', '16:9', '1:1'], durations: ['4', '5', '6', '8', '10'], resolutions: ['480p', '720p', '1080p'], referenceImages: 2 },
       pricePerSecondCny: 0.5,
     },
     {

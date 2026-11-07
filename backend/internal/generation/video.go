@@ -260,6 +260,19 @@ func VideoCapabilitySupportsAudio(input Input) bool {
 	return input.VideoCapability == nil || input.VideoCapability.GenerateAudio.Supported
 }
 
+// explicitVideoGenerateAudio 只接受节点上真正设置过的 true/false。
+// 能力目录不可靠时也不能省略用户明确关掉的声音，否则上游会按默认值重新打开。
+func explicitVideoGenerateAudio(input Input) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(input.Config.VideoGenerateAudio)) {
+	case "true":
+		return true, true
+	case "false":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
 func VideoCapabilitySupportsWatermark(input Input) bool {
 	return input.VideoCapability == nil || input.VideoCapability.Watermark.Supported
 }

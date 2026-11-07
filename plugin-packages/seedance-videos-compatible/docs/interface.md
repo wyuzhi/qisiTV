@@ -41,7 +41,7 @@
 | `create.method` | `"POST"` |
 | `create.path` | `"/v1/videos"` |
 | `create.contentType` | `"application/json"` |
-| `create.body` | `{"$merge":[{"model":{"$ref":"request.model"},"prompt":{"$ref":"request.prompt"},"images":{"$omitEmpty":{"$map":{"from":{"$ref":"request.images"},"as":"media","in":{"$ref":"media.value"}}}},"videos":{"$omitEmpty":{"$map":{"from":{"$ref":"request.videos"},"as":"media","in":{"$ref":"media.value"}}}},"audios":{"$omitEmpty":{"$map":{"from":{"$ref":"request.audios"},"as":"media","in":{"$ref":"media.value"}}}},"duration":{"$omitEmpty":{"$ref":"request.duration"}},"aspect_ratio":{"$omitEmpty":{"$ref":"request.aspectRatio"}},"resolution":{"$omitEmpty":{"$ref":"request.resolution"}},"parameters":{"$omitEmpty":{"$ref":"request.providerOptions.seedance-videos-compatible.parameters"}}},{"$coalesce":[{"$ref":"request.providerOptions.seedance-videos-compatible.body"},{"$ref":"request.providerOptions.seedance-videos-compatible.extra_body"},{}]}]}` |
+| `create.body` | `{"$merge":[{"model":{"$ref":"request.model"},"prompt":{"$ref":"request.prompt"},"images":{"$omitEmpty":{"$map":{"from":{"$ref":"request.images"},"as":"media","in":{"$ref":"media.value"}}}},"videos":{"$omitEmpty":{"$map":{"from":{"$ref":"request.videos"},"as":"media","in":{"$ref":"media.value"}}}},"audios":{"$omitEmpty":{"$map":{"from":{"$ref":"request.audios"},"as":"media","in":{"$ref":"media.value"}}}},"duration":{"$omitEmpty":{"$ref":"request.duration"}},"aspect_ratio":{"$omitEmpty":{"$ref":"request.aspectRatio"}},"resolution":{"$omitEmpty":{"$ref":"request.resolution"}},"generate_audio":{"$ref":"request.extra.generateAudio"},"parameters":{"$omitEmpty":{"$ref":"request.providerOptions.seedance-videos-compatible.parameters"}}},{"$coalesce":[{"$ref":"request.providerOptions.seedance-videos-compatible.body"},{"$ref":"request.providerOptions.seedance-videos-compatible.extra_body"},{}]}]}` |
 | `poll.method` | `"GET"` |
 | `poll.path` | `"/v1/videos/{{taskId}}"` |
 | `poll.contentType` | `"application/json"` |
@@ -83,7 +83,7 @@
   "apiVersion": "beeftv.plugin/v2",
   "id": "seedance-videos-compatible",
   "name": "Seedance Compatible /videos",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": "BeefTV Contributors",
   "description": "Seedance Compatible /videos 独立请求协议插件。",
   "documentation": "<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>",
@@ -267,6 +267,9 @@
                   "$omitEmpty": {
                     "$ref": "request.resolution"
                   }
+                },
+                "generate_audio": {
+                  "$ref": "request.extra.generateAudio"
                 },
                 "parameters": {
                   "$omitEmpty": {

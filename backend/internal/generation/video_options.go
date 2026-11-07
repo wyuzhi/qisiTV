@@ -227,6 +227,27 @@ func NormalizeVideoSize(value string) string {
 	return "1280x720"
 }
 
+// IsVideoAspectRatioLiteral reports W:H or adaptive, the forms that express a
+// frame ratio rather than exact pixels. Pixel sizes stay out of ratio-only
+// upstream fields.
+func IsVideoAspectRatioLiteral(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "adaptive" {
+		return true
+	}
+	parts := strings.Split(value, ":")
+	if len(parts) != 2 {
+		return false
+	}
+	for _, part := range parts {
+		number, err := strconv.ParseFloat(part, 64)
+		if err != nil || number <= 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func NormalizeVideoResolution(value string) string {
 	return modelcatalog.NormalizeVideoResolution(value)
 }

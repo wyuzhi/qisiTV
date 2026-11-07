@@ -203,7 +203,10 @@ func RunSeedanceAgentPlanVideoTask(ctx context.Context, input Input, pollPolicy 
 			body.Ratio, body.Duration = options.AspectRatio, options.Duration
 			body.OmniReferenceTaskType = protocol.SeedanceOmniTaskType(options)
 		}
-		if VideoCapabilitySupportsAudio(input) {
+		// 显式值优先；未设置时沿用能力判断的历史默认。
+		if value, explicit := explicitVideoGenerateAudio(input); explicit {
+			body.GenerateAudio = &value
+		} else if VideoCapabilitySupportsAudio(input) {
 			value := ParseBool(input.Config.VideoGenerateAudio, true)
 			body.GenerateAudio = &value
 		}
@@ -340,7 +343,10 @@ func SeedanceVideosRequestBody(input Input) (SeedanceVideosRequest, error) {
 		body.AspectRatio, body.Duration = options.AspectRatio, options.Duration
 		body.OmniReferenceTaskType = protocol.SeedanceOmniTaskType(options)
 	}
-	if VideoCapabilitySupportsAudio(input) {
+	// 显式值优先；未设置时沿用能力判断的历史默认。
+	if value, explicit := explicitVideoGenerateAudio(input); explicit {
+		body.GenerateAudio = &value
+	} else if VideoCapabilitySupportsAudio(input) {
 		value := ParseBool(input.Config.VideoGenerateAudio, true)
 		body.GenerateAudio = &value
 	}

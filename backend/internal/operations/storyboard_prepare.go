@@ -26,7 +26,7 @@ func registerStoryboardPreparation(r *Registry) {
 	}
 	params, _ := json.Marshal(map[string]any{"type": "object", "additionalProperties": false, "properties": properties,
 		"required": []string{"canvasId", "expectedRevision"}})
-	r.Register(Op{ID: "canvas.script.prepare", Summary: "准备分镜脚本与可选首帧/视频草稿（传 script 或 nodeId/rowIds；不开始生成）", Scope: ScopeCanvas, ReplaySafe: true, AssistantCanvas: true, Params: params, Handler: opStoryboardPrepare})
+	r.Register(Op{ID: "canvas.script.prepare", Summary: "准备分镜脚本与可选首帧/视频草稿（不开始生成）", Scope: ScopeCanvas, ReplaySafe: true, AssistantCanvas: true, Params: params, Handler: opStoryboardPrepare})
 }
 
 func opStoryboardPrepare(ctx *Context, raw json.RawMessage) (any, error) {

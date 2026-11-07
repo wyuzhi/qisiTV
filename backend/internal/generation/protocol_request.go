@@ -54,6 +54,15 @@ func ProtocolRequestFromInput(input Input) protocol.GenerationRequest {
 			"count":        input.Config.Count,
 		},
 	}
+	// 显式 false 与未设置必须区分：插件在未设置时省略声音开关，避免把上游默认值
+	// 当成用户的选择；设置过 true/false 时按原值发出。
+	if value, explicit := explicitVideoGenerateAudio(input); explicit {
+		request.Extra["generateAudio"] = value
+	}
+	// 比例写法额外暴露给只认 aspect_ratio 的上游；像素尺寸不进入比例字段。
+	if value := strings.TrimSpace(input.Config.Size); input.Mode == "video" && IsVideoAspectRatioLiteral(value) {
+		request.Extra["aspectRatio"] = value
+	}
 	for _, message := range input.TextHistory {
 		role := strings.ToLower(strings.TrimSpace(message.Role))
 		if role != "user" && role != "assistant" && role != "system" {

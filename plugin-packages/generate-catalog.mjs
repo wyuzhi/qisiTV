@@ -609,12 +609,21 @@ add({
 
 add({
   id: "openai-videos", providerId: "newapi", name: "OpenAI Videos / Sora", vendor: "OpenAI", capability: "video",
+  version: "2.0.3",
   baseUrl: "https://api.openai.com", auth: bearer, params: videoParams, requiresPublicMediaUrls: false,
+  docsIntro: "> 官方服务状态：OpenAI 已于 2026-09-24 关闭 Sora 2 模型与 Videos API，且没有一对一的替代接口；官方文档保留仅为历史记录。\n> 这条协议因此只在仍提供同名 `/v1/videos` 合同的第三方中转上可用，用普通 OpenAI Key 直接生成视频不保证可用。原样保留是为了不打断这些中转，不代表官方链路仍在服务。\n\n本协议最多发送一张参考图，不发送参考视频、参考音频、尾帧或蒙版。超出协议能力时在提交前报错，不会静默忽略素材。第三方服务的多图视频接口请按其文档选择对应的 JSON 或原生协议。",
+  validations: [
+    { assert: lte(len(ref("request.images")), 1), message: "当前 OpenAI Videos / Sora 协议最多支持一张参考图。请移除多余图片，或按服务商文档选择支持多图的请求协议。" },
+    { assert: eq(len(ref("request.videos")), 0), message: "当前 OpenAI Videos / Sora 协议不支持参考视频，请选择支持该素材的请求协议。" },
+    { assert: eq(len(ref("request.audios")), 0), message: "当前 OpenAI Videos / Sora 协议不支持参考音频，请选择支持该素材的请求协议。" },
+    { assert: eq(len(filter(ref("request.images"), "media", { $in: [ref("media.role"), ["mask", "last_frame"]] })), 0), message: "当前 OpenAI Videos / Sora 协议不支持尾帧或蒙版，请选择支持该素材的请求协议。" }
+  ],
   create: {
     method: "POST", path: "/v1/videos", contentType: "multipart/form-data",
     body: {
       model: ref("request.model"), prompt: ref("request.prompt"), seconds: { $toString: ref("request.duration") },
-      size: omit(ref("request.aspectRatio")), resolution_name: omit(ref("request.resolution")),
+      size: omit(ref("request.aspectRatio")), aspect_ratio: ref("request.extra.aspectRatio"), resolution_name: omit(ref("request.resolution")),
+      generate_audio: ref("request.extra.generateAudio"),
       variants: omit(ref("request.providerOptions.newapi.variants"))
     },
     files: [{ name: "input_reference", source: first(filter(sorted(ref("request.images")), "media", ne(ref("media.role"), "mask"))), filename: "input-reference.png" }]
@@ -1080,7 +1089,7 @@ for (const [id, name, vendor, capability, baseUrl, createPath, pollPath, request
     ? { model: ref("request.model"), messages: ref("request.messages"), input: omit(ref("request.prompt")), parameters: omit(ref(`${optionPath}.parameters`)) }
     : capability === "image"
       ? { model: ref("request.model"), prompt: ref("request.prompt"), images: omit(map(ref("request.images"), "media", ref("media.value"))), parameters: omit(ref(`${optionPath}.parameters`)) }
-      : { model: ref("request.model"), prompt: ref("request.prompt"), images: omit(map(ref("request.images"), "media", ref("media.value"))), videos: omit(map(ref("request.videos"), "media", ref("media.value"))), audios: omit(map(ref("request.audios"), "media", ref("media.value"))), duration: omit(ref("request.duration")), aspect_ratio: omit(ref("request.aspectRatio")), resolution: omit(ref("request.resolution")), parameters: omit(ref(`${optionPath}.parameters`)) };
+      : { model: ref("request.model"), prompt: ref("request.prompt"), images: omit(map(ref("request.images"), "media", ref("media.value"))), videos: omit(map(ref("request.videos"), "media", ref("media.value"))), audios: omit(map(ref("request.audios"), "media", ref("media.value"))), duration: omit(ref("request.duration")), aspect_ratio: omit(ref("request.aspectRatio")), resolution: omit(ref("request.resolution")), ...(id === "seedance-videos-compatible" ? { generate_audio: ref("request.extra.generateAudio") } : {}), parameters: omit(ref(`${optionPath}.parameters`)) };
   const standard = { $merge: [standardFields, coalesce(ref(`${optionPath}.body`), ref(`${optionPath}.extra_body`), {})] };
   let auth = bearer;
   let configuration;
@@ -1098,6 +1107,7 @@ for (const [id, name, vendor, capability, baseUrl, createPath, pollPath, request
   }
   add({
     id, providerId: id, name, vendor, capability, baseUrl, auth, params, configuration,
+    ...(id === "seedance-videos-compatible" ? { version: "2.0.1" } : {}),
     notes: `该协议的模型级字段变化快或依赖云资源配置。插件固定线协议入口和统一字段，完整厂商对象通过 providerOptions.${id} 的 parameters/input/extra_body 传入；${requestShape}。云签名型入口在未配置对应鉴权驱动时会明确失败，不会伪装成 Bearer 成功。`,
     create: jsonCreate(createPath, standard, operationExtra),
     poll: pollPath ? { method: "GET", path: pollPath } : undefined,
@@ -1222,7 +1232,7 @@ function docsFor(spec) {
   const errorSemantics = successCodes.length
     ? `HTTP 错误和 error object 保持失败语义，不包装成成功；业务 code 中 ${successCodes.map((code) => `\`${code}\``).join("、")} 是该协议声明的成功码，不算失败，其他业务码仍然失败。`
     : "HTTP 错误、业务 code 和 error object 保持失败语义，不包装成成功。";
-  return `# ${spec.name} 接口字段\n\n## 协议身份\n\n- 插件 ID：\`${spec.id}\`。\n- Provider ID：\`${spec.providerId}\`。\n- 能力：\`${spec.capability}\`。\n- 默认 Base URL：\`${spec.baseUrl}\`。\n- 鉴权驱动：\`${spec.auth?.type || "默认"}\`。\n- 创建：\`${spec.create.method} ${spec.create.path || "动态路径"}\`。\n${spec.agent ? `- Agent：\`${spec.agent.method} ${spec.agent.path || "动态路径"}\`。\n` : ""}${spec.poll ? `- 查询：\`${spec.poll.method} ${spec.poll.path}\`。\n` : "- 生命周期：同步响应。\n"}${spec.cancel ? `- 取消：\`${spec.cancel.method} ${spec.cancel.path}\`。\n` : ""}\n## 配置字段\n\n| 字段 | 类型 | 必填 | 含义 |\n| --- | --- | --- | --- |\n${configRows}\n\n## 统一字段映射\n\n| 统一字段 | 类型 | 必填 | 上游映射 | 说明 |\n| --- | --- | --- | --- | --- |\n${rows}\n\n## 上游请求模板逐字段清单\n\n下表由插件请求模板生成，覆盖 body、query、headers 和 multipart 文件声明中的每个字段。\n\n| 上游位置 | 值或转换表达式 |\n| --- | --- |\n${operationRows || "| `create` | 无请求字段 |"}\n\n## Provider 扩展键\n\n${optionRows}\n\n动态模型或工作流允许使用文档声明的完整 \`parameters/input/extra_body\` 对象；该对象是协议本身的开放 schema，不会被宿主裁剪。\n\n## 响应映射逐字段清单\n\n| 映射位置 | 上游路径或转换表达式 |\n| --- | --- |\n${mappedResponseRows || "| `response` | 无显式映射 |"}\n\n## 响应与错误\n\n插件把上游 task/status/text/media/usage 映射为统一结果。临时媒体 URL 标记为 ephemeral，由宿主立即下载持久化。${errorSemantics}\n\n## 兼容边界\n\n${spec.notes || "该包只代表上述线协议 profile；同一品牌的其他 endpoint、云区域或网关包装必须使用独立插件，不能根据模型名猜测。"}\n`;
+  return `# ${spec.name} 接口字段\n\n${spec.docsIntro ? `${spec.docsIntro}\n\n` : ""}## 协议身份\n\n- 插件 ID：\`${spec.id}\`。\n- Provider ID：\`${spec.providerId}\`。\n- 能力：\`${spec.capability}\`。\n- 默认 Base URL：\`${spec.baseUrl}\`。\n- 鉴权驱动：\`${spec.auth?.type || "默认"}\`。\n- 创建：\`${spec.create.method} ${spec.create.path || "动态路径"}\`。\n${spec.agent ? `- Agent：\`${spec.agent.method} ${spec.agent.path || "动态路径"}\`。\n` : ""}${spec.poll ? `- 查询：\`${spec.poll.method} ${spec.poll.path}\`。\n` : "- 生命周期：同步响应。\n"}${spec.cancel ? `- 取消：\`${spec.cancel.method} ${spec.cancel.path}\`。\n` : ""}\n## 配置字段\n\n| 字段 | 类型 | 必填 | 含义 |\n| --- | --- | --- | --- |\n${configRows}\n\n## 统一字段映射\n\n| 统一字段 | 类型 | 必填 | 上游映射 | 说明 |\n| --- | --- | --- | --- | --- |\n${rows}\n\n## 上游请求模板逐字段清单\n\n下表由插件请求模板生成，覆盖 body、query、headers 和 multipart 文件声明中的每个字段。\n\n| 上游位置 | 值或转换表达式 |\n| --- | --- |\n${operationRows || "| `create` | 无请求字段 |"}\n\n## Provider 扩展键\n\n${optionRows}\n\n动态模型或工作流允许使用文档声明的完整 \`parameters/input/extra_body\` 对象；该对象是协议本身的开放 schema，不会被宿主裁剪。\n\n## 响应映射逐字段清单\n\n| 映射位置 | 上游路径或转换表达式 |\n| --- | --- |\n${mappedResponseRows || "| `response` | 无显式映射 |"}\n\n## 响应与错误\n\n插件把上游 task/status/text/media/usage 映射为统一结果。临时媒体 URL 标记为 ephemeral，由宿主立即下载持久化。${errorSemantics}\n\n## 兼容边界\n\n${spec.notes || "该包只代表上述线协议 profile；同一品牌的其他 endpoint、云区域或网关包装必须使用独立插件，不能根据模型名猜测。"}\n`;
 }
 
 const requestedPackageIDs = new Set(process.argv.slice(2).map((value) => value.trim()).filter(Boolean));

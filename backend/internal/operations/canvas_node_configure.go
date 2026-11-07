@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"infinite-canvas/backend/internal/canvas/capability"
+	"infinite-canvas/backend/internal/modelcatalog"
 	"infinite-canvas/backend/internal/providerpreset"
 )
 
@@ -16,6 +17,7 @@ func registerCanvasNodeConfigureOps(r *Registry) {
 		"prompt":        map[string]any{"type": "string"},
 		"size":          map[string]any{"type": "string"},
 		"seconds":       map[string]any{"type": "string"},
+		"vquality":      map[string]any{"type": "string", "description": "分辨率档位，取自模型目录"},
 		"generateAudio": map[string]any{"type": "string", "enum": []string{"true", "false"}},
 		"audioVoice":    map[string]any{"type": "string"},
 	}
@@ -71,7 +73,7 @@ func opCanvasNodeConfigure(ctx *Context, raw json.RawMessage) (any, error) {
 	if _, hasModel := patch["model"]; !hasModel {
 		// 只改尺寸这类参数时 patch 里没有 model，用节点当前模型补上再校验，
 		// 否则同一份规则只在换模型时才生效。
-		if err := validateModelGenerationParameters(args.Kind, nodeSelectedModel(node), mergeParameters(base, stringParameters(patch))); err != nil {
+		if err := validateModelGenerationParameters(ctx.Domain, args.Kind, nodeSelectedModel(node), mergeParameters(base, stringParameters(patch))); err != nil {
 			return nil, err
 		}
 	}
@@ -122,7 +124,7 @@ func resolveGenerationDraft(ctx *Context, kind string, raw map[string]json.RawMe
 			return nil, PreconditionFailed("generation_model_unavailable", "所选模型当前不可用", nil)
 		}
 		patch["model"] = choice.ModelKey
-		if err := validateModelGenerationParameters(kind, choice.ModelKey, mergeParameters(base, stringParameters(patch))); err != nil {
+		if err := validateModelGenerationParameters(ctx.Domain, kind, choice.ModelKey, mergeParameters(base, stringParameters(patch))); err != nil {
 			return nil, err
 		}
 	}
@@ -131,7 +133,10 @@ func resolveGenerationDraft(ctx *Context, kind string, raw map[string]json.RawMe
 
 // validateModelGenerationParameters 用与真实请求同一份型号族规则，在写草稿、
 // 准备分镜和提交整片之前拦住模型不接受的尺寸；等上游拒绝时请求已经发出去了。
-func validateModelGenerationParameters(kind, modelKey string, params map[string]string) error {
+func validateModelGenerationParameters(domain Domain, kind, modelKey string, params map[string]string) error {
+	if kind == "video" {
+		return validateVideoResolutionParameter(domain, modelKey, params["vquality"])
+	}
 	if kind != "image" {
 		return nil
 	}
@@ -147,6 +152,39 @@ func validateModelGenerationParameters(kind, modelKey string, params map[string]
 		return InvalidArg("invalid_parameter", err.Error())
 	}
 	return nil
+}
+
+// validateVideoResolutionParameter 的合法取值来自同一份模型目录，避免助手写入
+// 目录里不存在的档位，直到提交生成才被上游拒绝。
+func validateVideoResolutionParameter(domain Domain, modelKey, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	reader, ok := domain.(ModelCatalogReader)
+	if !ok || reader == nil {
+		return nil
+	}
+	catalog, err := reader.AgentModelCatalog()
+	if err != nil || catalog == nil {
+		return nil
+	}
+	_, model, found := findEstimateModel(catalog, modelKey)
+	if !found {
+		return nil
+	}
+	capability := estimateCapability(model.CapabilityConfig)
+	if capability == nil || capability.Video == nil || len(capability.Video.Resolutions) == 0 {
+		return nil
+	}
+	// auto/default/medium/high 是自动档位，不参与明确档位校验。
+	if modelcatalog.IsAutomaticVideoResolution(value) {
+		return nil
+	}
+	if modelcatalog.VideoResolutionNameRequest(capability.Video, value) != "" {
+		return nil
+	}
+	return InvalidArg("invalid_parameter", "当前模型不支持 "+value+" 分辨率，可选 "+strings.Join(capability.Video.Resolutions, "、"))
 }
 
 func stringParameters(values map[string]any) map[string]string {

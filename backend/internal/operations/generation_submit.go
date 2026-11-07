@@ -158,7 +158,7 @@ func BuildGenerationOrderTargetViews(domain Domain, targets []GenerationTarget) 
 }
 
 func registerGenerationSubmit(r *Registry) {
-	r.Register(Op{ReplaySafe: true, AssistantCanvas: true, ID: "canvas.generation.submit", Summary: "凭已批准生成单执行画布素材生成并按渠道计费（ask 需人工批准、caller 核对版本后自批、auto 自动批准）", Scope: ScopeCanvas,
+	r.Register(Op{ReplaySafe: true, AssistantCanvas: true, ID: "canvas.generation.submit", Summary: "凭已批准生成单执行画布生成并计费", Scope: ScopeCanvas,
 		Params: json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"proposalId":{"type":"string"},"orderId":{"type":"string"},"nodeIds":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":8},"kind":{"type":"string","enum":["image","video","audio"]},"expectedRevision":{"type":"integer","minimum":1},"expectedModelConfigRevision":{"type":"integer","minimum":0}},"required":["canvasId","nodeIds"]}`), Handler: opGenerationSubmit})
 }
 
@@ -475,7 +475,7 @@ func GenerationTargets(domain Domain, doc map[string]any, ids []string) ([]Gener
 					return nil, InvalidArg("production_seedream_multiple_outputs", "整片制作暂不支持 Seedream 图层拆分或组图。请先在画布生成图片，再用已有图片继续制作。")
 				}
 			}
-			if err := validateModelGenerationParameters(kind, choice.ModelKey, parameters); err != nil {
+			if err := validateModelGenerationParameters(domain, kind, choice.ModelKey, parameters); err != nil {
 				return nil, err
 			}
 		}
