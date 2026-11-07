@@ -74,7 +74,7 @@ func (e *ReferenceUploadError) Error() string {
 }
 func (e *ReferenceUploadError) Unwrap() error { return e.Cause }
 func (e *ReferenceUploadError) Is(target error) bool {
-	return e.Meta.Stage == "put" && target == errBeefAPISeedanceUploadUnavailable
+	return e.Meta.Stage == "put" && target == errBeefTVSeedanceUploadUnavailable
 }
 
 func referenceUploadError(ctx context.Context, cause error) *ReferenceUploadError {

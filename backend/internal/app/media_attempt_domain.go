@@ -38,10 +38,10 @@ func (p attemptConnections) SystemChannel(id string) (*model.ModelChannel, error
 }
 func (p attemptConnections) ReadLocalModelConfig() ([]byte, error) { return p.s.ReadLocalModelConfig() }
 func (p attemptConnections) HasManagedCredential() bool {
-	return p.s.beefAPI != nil && p.s.beefAPI.HasManagedCredential()
+	return p.s.beefTV != nil && p.s.beefTV.HasManagedCredential()
 }
 func (p attemptConnections) LookupManagedCredential() (string, string, string, string, error) {
-	return p.s.lookupBeefAPICredential()
+	return p.s.lookupBeefTVCredential()
 }
 func (p attemptConnections) ResolveProviderConfig(config generation.Config) (generation.Config, error) {
 	return p.s.resolveProviderConfig(config)

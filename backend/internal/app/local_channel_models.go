@@ -1,7 +1,7 @@
 package app
 
 import (
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/modelcatalog"
 )
 
@@ -28,7 +28,7 @@ func (s *Service) localChannelModel(channelID, modelKey string) (localChannelMod
 }
 
 func (s *Service) localChannelModelListItems(intent *ModelRequestIntent) []map[string]any {
-	return modelcatalog.LocalChannelModelListItems(s.localChannelModels(), intent, beefapi.ChannelID, managedBeefAPIRef)
+	return modelcatalog.LocalChannelModelListItems(s.localChannelModels(), intent, beeftv.ChannelID, managedBeefTVRef)
 }
 
 func catalogModelName(raw any) string                 { return modelcatalog.CatalogModelName(raw) }

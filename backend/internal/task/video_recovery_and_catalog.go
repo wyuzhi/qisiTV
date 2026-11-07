@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/generation"
 	"infinite-canvas/backend/internal/kernel"
 	"infinite-canvas/backend/internal/model"
@@ -385,7 +385,7 @@ func QueryFailedVideoTaskWithDeps(ctx context.Context, deps VideoTaskRecoveryDep
 		}
 		ctx = deps.EnsureOfficialAdapter(ctx, config.InterfaceType)
 		adapter, declarative = deps.DeclarativeAdapter(ctx, config.InterfaceType)
-		beefVideo = generation.IsBeefAPIVideoConfig(ctx, config)
+		beefVideo = generation.IsBeefTVVideoConfig(ctx, config)
 		_, officialVideo := generation.OfficialDeclarativeVideoInterface(config.InterfaceType)
 		legacyVideo = !officialVideo && (strings.TrimSpace(config.InterfaceType) == "" || generation.IsArkPlanVideoConfig(config))
 		if !declarative && !beefVideo && !legacyVideo && !upscale {
@@ -419,7 +419,7 @@ func QueryFailedVideoTaskWithDeps(ctx context.Context, deps VideoTaskRecoveryDep
 	queryCtx := deps.BindAnalytics(recoveryCtx, *task)
 	var result map[string]interface{}
 	var providerStatus string
-	var settlement generation.BeefAPIVideoSettlement
+	var settlement generation.BeefTVVideoSettlement
 	if unified {
 		var early *ProviderTaskQueryResult
 		result, providerStatus, early, err = execManaged(queryCtx)
@@ -542,7 +542,7 @@ func SelectCatalogTask(
 		if err != nil {
 			return SelectResult{}, err
 		}
-		if kernel.StringValue(config["credentialRef"]) != beefapi.CredentialRef || kernel.StringValue(config["apiKey"]) != managed.APIKey || kernel.StringValue(config["baseUrl"]) != managed.BaseURL {
+		if kernel.StringValue(config["credentialRef"]) != beeftv.CredentialRef || kernel.StringValue(config["apiKey"]) != managed.APIKey || kernel.StringValue(config["baseUrl"]) != managed.BaseURL {
 			return SelectResult{}, kernel.BadAuthRequest("AI 超分需要使用已连接的官方算力账号")
 		}
 	}
@@ -582,8 +582,8 @@ func ValidateCatalogCapability(
 ) error {
 	config, _ := input["config"].(map[string]any)
 	if input["upscale"] != nil || generation.UpscaleMediaType(kernel.StringValue(config["model"])) != "" {
-		if kernel.StringValue(config["credentialRef"]) == beefapi.CredentialRef {
-			config["mediaProtocolVersion"] = beefapi.MediaProtocolVersion
+		if kernel.StringValue(config["credentialRef"]) == beeftv.CredentialRef {
+			config["mediaProtocolVersion"] = beeftv.MediaProtocolVersion
 		}
 		raw, err := json.Marshal(input)
 		if err != nil {

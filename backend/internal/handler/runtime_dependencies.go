@@ -8,7 +8,7 @@ import (
 
 	"infinite-canvas/backend/internal/appearance"
 	"infinite-canvas/backend/internal/assistantruntime"
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/conversation"
 	"infinite-canvas/backend/internal/diagnostics"
 	"infinite-canvas/backend/internal/eagle"
@@ -53,7 +53,7 @@ type RuntimeDependencies struct {
 	Conversations      *conversation.Service
 	// TextReplay is the archive owned by the runtime; legacy callers use its app facade.
 	TextReplay  textreplay.API
-	BeefAPI     *beefapi.Service
+	BeefTV     *beeftv.Service
 	Eagle       *eagle.Client
 	Diagnostics *diagnostics.Service
 	Appearance  *appearance.Service

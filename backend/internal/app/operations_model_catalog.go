@@ -42,7 +42,7 @@ func (s *operationSession) AgentModelCatalog() (*modelcatalog.CatalogResponse, e
 		}
 		cm := model.ChannelModel{ID: item.Model, ModelKey: item.Model, DisplayName: item.DisplayName, Capability: item.Capability, Protocol: model.ChannelInterfaceType(item.Protocol), Enabled: true}
 		if item.Capability == "video" {
-			if _, protocol, ok := providerpreset.HostedBeefAPIVideoProfile(item.BaseURL, item.Model); ok {
+			if _, protocol, ok := providerpreset.HostedBeefTVVideoProfile(item.BaseURL, item.Model); ok {
 				cm.Protocol = model.ChannelInterfaceType(protocol)
 			}
 		}

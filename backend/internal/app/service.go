@@ -7,7 +7,7 @@ import (
 	"infinite-canvas/backend/internal/appearance"
 	localasset "infinite-canvas/backend/internal/asset"
 	"infinite-canvas/backend/internal/assistantturns"
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/canvas"
 	"infinite-canvas/backend/internal/depthcapture"
 	"infinite-canvas/backend/internal/diagnostics"
@@ -90,7 +90,7 @@ type Service struct {
 	playbackOnce             sync.Once
 	depthCapture             *depthcapture.Service
 	depthCaptureOnce         sync.Once
-	beefAPI                  *beefapi.Service
+	beefTV                  *beeftv.Service
 	generationDeliveryMedia  taskdelivery.Media
 	generationDelivery       *taskdelivery.Deliverer
 	deliveryMu               sync.Mutex

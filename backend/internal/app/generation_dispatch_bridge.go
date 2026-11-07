@@ -28,10 +28,10 @@ type (
 	videoPollEvent           = generation.VideoPollEvent
 	videoPollOutcome         = generation.VideoPollOutcome
 	videoDownloadError       = generation.VideoDownloadError
-	beefAPISeedanceMediaReader = generation.BeefAPISeedanceMediaReader
-	beefAPISeedanceUploadSession = generation.BeefAPISeedanceUploadSession
-	beefAPISeedanceUploadComplete = generation.BeefAPISeedanceUploadComplete
-	beefAPISeedanceUploadRequest = generation.BeefAPISeedanceUploadRequest
+	beefTVSeedanceMediaReader = generation.BeefTVSeedanceMediaReader
+	beefTVSeedanceUploadSession = generation.BeefTVSeedanceUploadSession
+	beefTVSeedanceUploadComplete = generation.BeefTVSeedanceUploadComplete
+	beefTVSeedanceUploadRequest = generation.BeefTVSeedanceUploadRequest
 	ArkPrivateAssetSyncResult = generation.ArkPrivateAssetSyncResult
 	seedanceVideosRequest    = generation.SeedanceVideosRequest
 	geminiImageRequest       = generation.GeminiImageRequest
@@ -43,8 +43,8 @@ type (
 	seedanceAgentPlanRequest = generation.SeedanceAgentPlanRequest
 )
 
-func restoreBeefAPISeedanceAudioControl(ctx context.Context, config providerConfig, video *VideoCapabilityConfig) {
-	generation.RestoreBeefAPISeedanceAudioControl(ctx, config, video)
+func restoreBeefTVSeedanceAudioControl(ctx context.Context, config providerConfig, video *VideoCapabilityConfig) {
+	generation.RestoreBeefTVSeedanceAudioControl(ctx, config, video)
 }
 func runVideoTask(ctx context.Context, input canvasGenerationInput) (map[string]interface{}, error) {
 	return generation.RunVideoTask(ctx, input)
@@ -74,28 +74,28 @@ func runVideoDownload(ctx context.Context, taskID string, policy videoPollPolicy
 func retryableVideoPollError(ctx context.Context, err error) (bool, bool) {
 	return generation.RetryableVideoPollError(ctx, err)
 }
-func isBeefAPIVideoConfig(ctx context.Context, config providerConfig) bool {
-	return generation.IsBeefAPIVideoConfig(ctx, config)
+func isBeefTVVideoConfig(ctx context.Context, config providerConfig) bool {
+	return generation.IsBeefTVVideoConfig(ctx, config)
 }
-func isBeefAPISeedancePreuploadConfig(ctx context.Context, config providerConfig) bool {
-	return generation.IsBeefAPISeedancePreuploadConfig(ctx, config)
+func isBeefTVSeedancePreuploadConfig(ctx context.Context, config providerConfig) bool {
+	return generation.IsBeefTVSeedancePreuploadConfig(ctx, config)
 }
 func isArkPlanVideoConfig(config providerConfig) bool { return generation.IsArkPlanVideoConfig(config) }
 func parseBool(value string, fallback bool) bool      { return generation.ParseBool(value, fallback) }
 func sleepContext(ctx context.Context, duration time.Duration) error {
 	return generation.SleepContext(ctx, duration)
 }
-func prepareBeefAPISeedanceReferences(ctx context.Context, config providerConfig, input *canvasGenerationInput, read beefAPISeedanceMediaReader) error {
-	return generation.PrepareBeefAPIVideoReferences(ctx, config, input, read)
+func prepareBeefTVSeedanceReferences(ctx context.Context, config providerConfig, input *canvasGenerationInput, read beefTVSeedanceMediaReader) error {
+	return generation.PrepareBeefTVVideoReferences(ctx, config, input, read)
 }
-func skipBeefAPISeedanceMedia(media providerMedia) bool {
-	return generation.SkipBeefAPISeedanceMedia(media)
+func skipBeefTVSeedanceMedia(media providerMedia) bool {
+	return generation.SkipBeefTVSeedanceMedia(media)
 }
-func beefAPISeedanceKindMaxBytes(kind string) int64 {
-	return generation.BeefAPISeedanceKindMaxBytes(kind)
+func beefTVSeedanceKindMaxBytes(kind string) int64 {
+	return generation.BeefTVSeedanceKindMaxBytes(kind)
 }
-func validateBeefAPISeedanceMediaSize(kind string, size int64) error {
-	return generation.ValidateBeefAPISeedanceMediaSize(kind, size)
+func validateBeefTVSeedanceMediaSize(kind string, size int64) error {
+	return generation.ValidateBeefTVSeedanceMediaSize(kind, size)
 }
 func withTaskExecutionID(ctx context.Context, taskID string) context.Context {
 	return generation.WithTaskExecutionID(ctx, taskID)

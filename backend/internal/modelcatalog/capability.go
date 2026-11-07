@@ -167,9 +167,9 @@ func NormalizeModelCapabilityDraft(draft ModelCapabilityDraft) (*ModelCapability
 	baseURL := strings.TrimSpace(draft.BaseURL)
 	channelID := strings.TrimSpace(draft.ChannelID)
 
-	isBeefRoute := providerpreset.IsBeefAPIEndpoint(baseURL) || (baseURL == "" && strings.EqualFold(channelID, "beeftv"))
+	isBeefRoute := providerpreset.IsBeefTVEndpoint(baseURL) || (baseURL == "" && strings.EqualFold(channelID, "beeftv"))
 	if isBeefRoute {
-		if contract, ok := providerpreset.BeefAPIVideoContract(modelName); ok {
+		if contract, ok := providerpreset.BeefTVVideoContract(modelName); ok {
 			protocol = contract.Protocol
 			capability = "video"
 		} else if isSeedance2Family("newapi", modelName) && (protocol == "" || protocol == "openai" || protocol == "openai-response" || protocol == "chat-completion" || protocol == "openai-videos" || protocol == "newapi-channel-1" || protocol == "newapi-channel-2") {
@@ -225,7 +225,7 @@ func NormalizeModelCapabilityDraft(draft ModelCapabilityDraft) (*ModelCapability
 		if input.Image != nil {
 			fixedBeefImage := false
 			if strings.EqualFold(protocol, "openai-image") && isBeefRoute {
-				if contract, ok := providerpreset.BeefAPIImageContract(modelName); ok && contract.FixedOutputs > 0 {
+				if contract, ok := providerpreset.BeefTVImageContract(modelName); ok && contract.FixedOutputs > 0 {
 					fixedBeefImage = true
 				}
 			}

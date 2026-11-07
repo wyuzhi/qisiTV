@@ -47,7 +47,7 @@ func DefaultImageCapabilityConfig(protocol string, modelName string) *ImageCapab
 		}
 		return &ImageCapabilityConfig{References: ImageReferenceConfig{PromptMaxChars: 32000, MaxImages: refs, MaxImageBytes: 30 * 1024 * 1024}, Size: ImageSizeConfig{Parameter: "size", Values: sizes, Default: "2K", AllowCustom: true}, Quality: ImageQualityConfig{Default: "auto"}, TransparentBackground: VideoBooleanConfig{Supported: modern}, SequentialGeneration: VideoBooleanConfig{Supported: !modern}, ResponseFormat: ImageResponseFormat{Supported: true}, OutputFormat: ParameterSupport{Supported: modern || family == "lite"}, MaxOutputs: 15}
 	}
-	if contract, ok := providerpreset.BeefAPIImageContract(modelName); ok && protocol == "openai-image" {
+	if contract, ok := providerpreset.BeefTVImageContract(modelName); ok && protocol == "openai-image" {
 		values := make([]string, 0, len(contract.Sizes))
 		for ratio := range contract.Sizes {
 			values = append(values, ratio)
@@ -382,8 +382,8 @@ func validateImageTask(profile *ImageCapabilityConfig, input TaskInput) error {
 	if !sourced {
 		profile = applyModelSpecificImageCapability(profile, input.Config.InterfaceType, input.Config.Model, input.Config.APIFormat)
 	}
-	if !sourced && providerpreset.IsBeefAPIEndpoint(input.Config.BaseURL) {
-		if contract, ok := providerpreset.BeefAPIImageContract(input.Config.Model); ok {
+	if !sourced && providerpreset.IsBeefTVEndpoint(input.Config.BaseURL) {
+		if contract, ok := providerpreset.BeefTVImageContract(input.Config.Model); ok {
 			profile = DefaultImageCapabilityConfig(contract.Protocol, input.Config.Model)
 			if _, err := contract.PixelSize(input.Config.Size); err != nil {
 				return kernel.BadAuthRequest(err.Error())

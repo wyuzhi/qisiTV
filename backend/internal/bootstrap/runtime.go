@@ -17,7 +17,7 @@ import (
 
 	"infinite-canvas/backend/internal/app"
 	"infinite-canvas/backend/internal/assistantruntime"
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/buildinfo"
 	"infinite-canvas/backend/internal/conversation"
 	"infinite-canvas/backend/internal/database"
@@ -48,7 +48,7 @@ type Runtime struct {
 	status           *systemStatus
 	launchToken      string
 	uiBootstrapToken string
-	beefAPI          *beefapi.Service
+	beefTV          *beeftv.Service
 	assistantHost    *assistantruntime.Host
 	listener         net.Listener
 	httpServer       *http.Server
@@ -132,20 +132,20 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 		cleanupService()
 		return nil, configErr
 	}
-	beefAPIConnection, beefAPIErr := beefapi.New(beefapi.Options{
+	beefTVConnection, beefTVErr := beeftv.New(beeftv.Options{
 		DataDir: cfg.DataDir, Provider: providerConfig, ClientVersion: buildinfo.Current().Version,
-		FetchCatalog: func(apiKey, baseURL string) ([]beefapi.CatalogModel, error) {
+		FetchCatalog: func(apiKey, baseURL string) ([]beeftv.CatalogModel, error) {
 			owner, ownerErr := svc.LocalWorkspaceOwner()
 			if ownerErr != nil {
 				return nil, ownerErr
 			}
 			items, catalogErr := svc.FetchChannelModelCatalog(context.Background(), owner, app.ChannelModelsRequest{
-				BaseURL: baseURL, APIKey: apiKey, APIFormat: "openai", ChannelID: beefapi.ChannelID, CredentialRef: beefapi.CredentialRef,
+				BaseURL: baseURL, APIKey: apiKey, APIFormat: "openai", ChannelID: beeftv.ChannelID, CredentialRef: beeftv.CredentialRef,
 			})
 			if catalogErr != nil {
 				return nil, catalogErr
 			}
-			models := make([]beefapi.CatalogModel, 0, len(items))
+			models := make([]beeftv.CatalogModel, 0, len(items))
 			for _, item := range items {
 				imageVersion := ""
 				if item.ImageCapabilitiesVersion != nil {
@@ -155,7 +155,7 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 				if item.VideoCapabilitiesVersion != nil {
 					version = *item.VideoCapabilitiesVersion
 				}
-				models = append(models, beefapi.CatalogModel{
+				models = append(models, beeftv.CatalogModel{
 					ID: item.ID, DisplayName: item.DisplayName, ModelType: item.ModelType, SupportedEndpointTypes: item.SupportedEndpointTypes,
 					ImageCapabilities: item.ImageCapabilities, ImageCapabilitiesVersion: imageVersion,
 					VideoCapabilities: item.VideoCapabilities, VideoCapabilitiesVersion: version,
@@ -165,11 +165,11 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 			return models, nil
 		},
 	})
-	if beefAPIErr != nil {
+	if beefTVErr != nil {
 		cleanupService()
-		return nil, beefAPIErr
+		return nil, beefTVErr
 	}
-	svc.SetBeefAPI(beefAPIConnection)
+	svc.SetBeefTV(beefTVConnection)
 	localKernel := app.NewLocalKernel(svc)
 	assetService := svc.ResourceService()
 	projectService := svc.ProjectService()
@@ -237,7 +237,7 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 		Projects:           localRoot.Projects,
 		Tasks:              localRoot.Tasks,
 		Generation:         localRoot.Generation,
-		BeefAPI:            beefAPIConnection,
+		BeefTV:            beefTVConnection,
 		AssistantHost:      assistantHost,
 		Conversations:      conversation.New(conversation.NewStore(repo)),
 		TextReplay:         svc.TextReplay(),
@@ -321,7 +321,7 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 		status:           status,
 		launchToken:      launchToken,
 		uiBootstrapToken: uiBootstrapToken,
-		beefAPI:          beefAPIConnection,
+		beefTV:          beefTVConnection,
 		assistantHost:    assistantHost,
 		serveErr:         make(chan error, 1),
 	}, nil
@@ -412,8 +412,8 @@ func (r *Runtime) Start() error {
 			}
 		}
 	}
-	if r.beefAPI != nil {
-		_ = r.beefAPI.Recover(context.Background())
+	if r.beefTV != nil {
+		_ = r.beefTV.Recover(context.Background())
 	}
 	r.status.markStarted()
 	return nil
@@ -469,8 +469,8 @@ func (r *Runtime) Close(ctx context.Context) error {
 				failures = append(failures, err)
 			}
 		}
-		if r.beefAPI != nil {
-			r.beefAPI.Close()
+		if r.beefTV != nil {
+			r.beefTV.Close()
 		}
 		if err := r.DepthComponents().CloseComponents(ctx); err != nil {
 			failures = append(failures, fmt.Errorf("暂停组件下载：%w", err))

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/outbound"
 )
 
@@ -263,7 +263,7 @@ func ClassifyError(err error) Failure {
 	if errors.As(err, &unknown) {
 		return normalizeFailure(Failure{Category: CategorySubmissionUncertain, Uncertain: true, Retryable: false})
 	}
-	var managed *beefapi.MediaTaskError
+	var managed *beeftv.MediaTaskError
 	if errors.As(err, &managed) {
 		category := FailureCategory(managed.Category)
 		switch strings.ToLower(strings.TrimSpace(managed.Category)) {
@@ -306,7 +306,7 @@ func ClassifyError(err error) Failure {
 		}
 		return failure
 	}
-	var managedHTTP *beefapi.MediaHTTPError
+	var managedHTTP *beeftv.MediaHTTPError
 	if errors.As(err, &managedHTTP) {
 		failure := classifyHTTPErrorCause(legacyMediaError(err))
 		failure.RequestID = firstNonEmpty(sanitizeDebugID(managedHTTP.RequestID), failure.RequestID)
@@ -344,7 +344,7 @@ func ClassifyError(err error) Failure {
 		return failure
 	}
 	var notSent RequestNotSentError
-	if errors.As(err, &notSent) || beefapi.IsDiscoveryTransportError(err) {
+	if errors.As(err, &notSent) || beeftv.IsDiscoveryTransportError(err) {
 		return normalizeFailure(Failure{Category: CategoryRequestNotSent})
 	}
 	var preparation RequestPreparationError

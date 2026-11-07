@@ -7,7 +7,7 @@ import (
 	"net/http"
 
 	"infinite-canvas/backend/internal/app"
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/modelcatalog"
 	"infinite-canvas/backend/internal/platform"
@@ -19,7 +19,7 @@ import (
 // workspaceBootstrap is the desktop bootstrap read model. Model config itself
 // still comes from the provider port on the request.
 type workspaceBootstrap interface {
-	beefAPIConnections
+	beefTVConnections
 	WorkspaceOwner(string) (*model.User, error)
 	PublicRuntimeLimits() (*platform.PublicRuntimeLimits, error)
 	FeatureAvailability() (*platform.PublicFeatureAvailability, error)
@@ -180,17 +180,17 @@ func RegisterWorkspaceRoutes(r *gin.RouterGroup, bootstrap workspaceBootstrap) {
 	})
 }
 
-func redactModelConfig(c *gin.Context, connections beefAPIConnections, config map[string]any) map[string]any {
+func redactModelConfig(c *gin.Context, connections beefTVConnections, config map[string]any) map[string]any {
 	if _, external := externalBusiness(c); external {
 		// 标记要在清空密钥之前算出来，否则前端只能看到一对空字符串。
 		config = markExternalCredentialState(redactExternalConfig(config), config)
 	}
 	managed := false
-	if connection, err := requestBeefAPI(c, connections); err == nil && connection != nil {
+	if connection, err := requestBeefTV(c, connections); err == nil && connection != nil {
 		managed = connection.HasManagedCredential()
 		return connection.RedactConfig(config)
 	}
-	return beefapi.RedactConfig(config, managed)
+	return beeftv.RedactConfig(config, managed)
 }
 
 func preserveManagedModelConfig(c *gin.Context, bootstrap workspaceBootstrap, raw json.RawMessage) json.RawMessage {
@@ -209,11 +209,11 @@ func preserveManagedModelConfig(c *gin.Context, bootstrap workspaceBootstrap, ra
 	if _, external := externalBusiness(c); external {
 		preserveExternalConfigSecrets(incoming, existing)
 	}
-	if connection, err := requestBeefAPI(c, bootstrap); err == nil && connection != nil {
+	if connection, err := requestBeefTV(c, bootstrap); err == nil && connection != nil {
 		managed = connection.HasManagedCredential()
 		connection.PreserveWrite(incoming, existing)
 	} else {
-		beefapi.PreserveManagedChannel(incoming, existing, managed)
+		beeftv.PreserveManagedChannel(incoming, existing, managed)
 	}
 	encoded, err := json.Marshal(incoming)
 	if err != nil {
@@ -222,7 +222,7 @@ func preserveManagedModelConfig(c *gin.Context, bootstrap workspaceBootstrap, ra
 	return encoded
 }
 
-func workspaceForLocalRequest(c *gin.Context, connections beefAPIConnections) (workspace.Context, error) {
+func workspaceForLocalRequest(c *gin.Context, connections beefTVConnections) (workspace.Context, error) {
 	if scope, err := CurrentWorkspace(c); err == nil {
 		return scope, nil
 	}

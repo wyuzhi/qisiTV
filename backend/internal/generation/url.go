@@ -163,7 +163,7 @@ func ProviderDownloadURL(baseURL string, rawURL string) string {
 	if baseErr != nil || targetErr != nil || !strings.EqualFold(base.Scheme, "https") || !strings.EqualFold(target.Scheme, "https") {
 		return rawURL
 	}
-	if isBeefAPIHost(base.Hostname()) && isBeefAPIHost(target.Hostname()) {
+	if isBeefTVHost(base.Hostname()) && isBeefTVHost(target.Hostname()) {
 		target.Scheme = base.Scheme
 		target.Host = base.Host
 		return target.String()
@@ -171,11 +171,11 @@ func ProviderDownloadURL(baseURL string, rawURL string) string {
 	return rawURL
 }
 
-func IsBeefAPIHost(host string) bool {
-	return isBeefAPIHost(host)
+func IsBeefTVHost(host string) bool {
+	return isBeefTVHost(host)
 }
 
-func isBeefAPIHost(host string) bool {
+func isBeefTVHost(host string) bool {
 	host = strings.ToLower(strings.TrimSpace(host))
 	return host == "beeftv.app"
 }

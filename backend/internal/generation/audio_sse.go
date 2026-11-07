@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// readSpeechAudioEvents accepts OpenAI speech audio deltas and BeefAPI's
+// readSpeechAudioEvents accepts OpenAI speech audio deltas and BeefTV's
 // signed-result URL extension. A heartbeat or EOF is never a completed song.
 func readSpeechAudioEvents(ctx context.Context, data []byte) ([]byte, string, error) {
 	var audio bytes.Buffer

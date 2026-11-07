@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/generation"
 	"infinite-canvas/backend/internal/model"
 	localtask "infinite-canvas/backend/internal/task"
@@ -43,7 +43,7 @@ func (s *Service) queryFailedVideoTask(ctx context.Context, task *model.Task, cl
 			return true, mq.Kind, func(queryCtx context.Context) (map[string]interface{}, string, *ProviderTaskQueryResult, error) {
 				queryCtx = context.WithValue(queryCtx, imageTaskContext{}, *t)
 				projection, qErr := mq.Client.Query(queryCtx, mq.Key, mq.Kind)
-				if beefapi.IsMediaTaskNotFound(qErr) {
+				if beeftv.IsMediaTaskNotFound(qErr) {
 					outcome, resubmitted, resolveErr := s.mediaAttempts().ResolveMissingManagedSubmission(queryCtx, *t)
 					switch {
 					case outcome != "":
@@ -99,12 +99,12 @@ func (s *Service) queryFailedVideoTask(ctx context.Context, task *model.Task, cl
 	}, task, claimUserID)
 }
 
-func queryBeefAPIVideoResult(ctx context.Context, input canvasGenerationInput, id string) (map[string]interface{}, string, error) {
-	result, status, _, err := queryBeefAPIVideoResultWithSettlement(ctx, input, id)
+func queryBeefTVVideoResult(ctx context.Context, input canvasGenerationInput, id string) (map[string]interface{}, string, error) {
+	result, status, _, err := queryBeefTVVideoResultWithSettlement(ctx, input, id)
 	return result, status, err
 }
 
-func queryBeefAPIVideoResultWithSettlement(ctx context.Context, input canvasGenerationInput, id string) (map[string]interface{}, string, generation.BeefAPIVideoSettlement, error) {
+func queryBeefTVVideoResultWithSettlement(ctx context.Context, input canvasGenerationInput, id string) (map[string]interface{}, string, generation.BeefTVVideoSettlement, error) {
 	return generation.QueryManagedLegacyVideo(ctx, input, id)
 }
 

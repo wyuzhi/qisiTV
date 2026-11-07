@@ -21,7 +21,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/buildinfo"
 	"infinite-canvas/backend/internal/kernel"
 	"infinite-canvas/backend/internal/model"
@@ -536,7 +536,7 @@ func RecordProviderRequest(repo *repository.Repository, logCall func(model.ApiCa
 		SyncProviderTaskProgress(repo, call.TaskID, responseBody)
 	}
 	if call.TaskID != "" && call.Capability == "video" && (requestKind == "create" || requestKind == "poll") && repo != nil {
-		settlement := ExtractBeefAPIVideoSettlementBytes(responseBody)
+		settlement := ExtractBeefTVVideoSettlementBytes(responseBody)
 		if settlement.UsageState != nil || settlement.ReconcileDeadline != nil {
 			_ = repo.UpdateTaskBeefVideoSettlement(call.TaskID, settlement.UsageState, settlement.ReconcileDeadline)
 		}
@@ -624,17 +624,17 @@ func EnsureChatCompletionStreamUsageRequest(data []byte) ([]byte, error) {
 	return json.Marshal(payload)
 }
 
-func PrepareBeefAPISeedanceReferencesForUser(ctx context.Context, userID string, input *Input, openResource func(userID, resourceID string) (*model.Resource, io.ReadCloser, error)) error {
-	if input == nil || input.Mode != "video" || !IsBeefAPISeedancePreuploadConfig(ctx, input.Config) {
+func PrepareBeefTVSeedanceReferencesForUser(ctx context.Context, userID string, input *Input, openResource func(userID, resourceID string) (*model.Resource, io.ReadCloser, error)) error {
+	if input == nil || input.Mode != "video" || !IsBeefTVSeedancePreuploadConfig(ctx, input.Config) {
 		return nil
 	}
-	return PrepareBeefAPIVideoReferences(ctx, input.Config, input, func(kind string, media Media) ([]byte, string, bool, error) {
-		return ReadBeefAPISeedanceMedia(userID, kind, media, openResource)
+	return PrepareBeefTVVideoReferences(ctx, input.Config, input, func(kind string, media Media) ([]byte, string, bool, error) {
+		return ReadBeefTVSeedanceMedia(userID, kind, media, openResource)
 	})
 }
 
-func ReadBeefAPISeedanceMedia(userID string, kind string, media Media, openResource func(userID, resourceID string) (*model.Resource, io.ReadCloser, error)) ([]byte, string, bool, error) {
-	if SkipBeefAPISeedanceMedia(media) {
+func ReadBeefTVSeedanceMedia(userID string, kind string, media Media, openResource func(userID, resourceID string) (*model.Resource, io.ReadCloser, error)) ([]byte, string, bool, error) {
+	if SkipBeefTVSeedanceMedia(media) {
 		return nil, "", true, nil
 	}
 	if raw := firstNonEmpty(media.DataURL, media.URL); strings.HasPrefix(strings.TrimSpace(raw), "data:") {
@@ -648,7 +648,7 @@ func ReadBeefAPISeedanceMedia(userID string, kind string, media Media, openResou
 		return nil, "", true, nil
 	}
 	if media.Bytes > 0 {
-		if err := ValidateBeefAPISeedanceMediaSize(kind, media.Bytes); err != nil {
+		if err := ValidateBeefTVSeedanceMediaSize(kind, media.Bytes); err != nil {
 			return nil, "", false, err
 		}
 	}
@@ -658,7 +658,7 @@ func ReadBeefAPISeedanceMedia(userID string, kind string, media Media, openResou
 		return nil, "", false, fmt.Errorf("读取任务参考资源失败：%w", err)
 	}
 	defer body.Close()
-	limit := BeefAPISeedanceKindMaxBytes(kind)
+	limit := BeefTVSeedanceKindMaxBytes(kind)
 	data, err := io.ReadAll(io.LimitReader(body, limit+1))
 	if err != nil {
 		return nil, "", false, fmt.Errorf("读取任务参考资源失败：%w", err)
@@ -874,8 +874,8 @@ func CaptureTaskFailureDiagnostics(task *model.Task, err error, source string) {
 		d.Source, d.Stage, d.RequestID, d.HTTPStatus = "local_response", "本地响应大小校验", last.RequestID, last.HTTPStatus
 	}
 	var httpErr HTTPError
-	var managedHTTP *beefapi.MediaHTTPError
-	var managedTask *beefapi.MediaTaskError
+	var managedHTTP *beeftv.MediaHTTPError
+	var managedTask *beeftv.MediaTaskError
 	var payload PayloadError
 	var appErr *kernel.AppError
 	var upload *ReferenceUploadError

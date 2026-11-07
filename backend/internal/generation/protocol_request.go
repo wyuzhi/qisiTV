@@ -288,7 +288,7 @@ func ExecuteProtocolBinaryRequestWithConsumer(ctx context.Context, config Config
 			return nil, "", RequestPreparationError{Cause: err}
 		}
 	}
-	applyBeefAPIVideoDeliveryHeader(ctx, config, req)
+	applyBeefTVVideoDeliveryHeader(ctx, config, req)
 	if consume != nil {
 		req.Header.Set("Accept", "text/event-stream")
 		return DoBinaryWithConsumer(req, consume)

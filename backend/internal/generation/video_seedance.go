@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/modelcatalog"
 	"infinite-canvas/backend/internal/outbound"
@@ -15,7 +15,7 @@ import (
 )
 
 func RunSeedanceVideosTask(ctx context.Context, input Input, pollPolicy VideoPollPolicy) (map[string]interface{}, error) {
-	if managedConnection(input.Config) || IsBeefAPIVideoConfig(ctx, input.Config) {
+	if managedConnection(input.Config) || IsBeefTVVideoConfig(ctx, input.Config) {
 		return runManagedLegacyVideo(ctx, input, pollPolicy)
 	}
 	pollPolicy = videoPollPolicyForConfig(ctx, input.Config, pollPolicy)
@@ -90,7 +90,7 @@ func RunSeedanceVideosTask(ctx context.Context, input Input, pollPolicy VideoPol
 	})
 }
 
-// BeefAPI reports the transport task as in_progress while the nested
+// BeefTV reports the transport task as in_progress while the nested
 // generation has completed and the output is being saved. Treat that nested
 // terminal state as authoritative and use its URL for the content download.
 func SeedancePollStatusAndURL(state map[string]interface{}) (string, string) {
@@ -164,10 +164,10 @@ func attachOptionalProviderLastFrame(ctx context.Context, config Config, videoRe
 	videoResult["lastFrame"] = map[string]interface{}{"dataUrl": DataURL(mime, data), "mimeType": mime}
 }
 
-// BeefAPIVideoRequestBody assembles only user intent. The BeefAPI adapter
+// BeefTVVideoRequestBody assembles only user intent. The BeefTV adapter
 // serializes canonical references and the server selects supplier parameters.
-func BeefAPIVideoRequestBody(input Input) (map[string]interface{}, error) {
-	return beefapi.LegacyVideoBody(managedLegacyVideoInput(input))
+func BeefTVVideoRequestBody(input Input) (map[string]interface{}, error) {
+	return beeftv.LegacyVideoBody(managedLegacyVideoInput(input))
 }
 
 func RunSeedanceAgentPlanVideoTask(ctx context.Context, input Input, pollPolicy VideoPollPolicy) (map[string]interface{}, error) {
@@ -531,7 +531,7 @@ func SeedanceVideosMediaURL(media Media) (string, error) {
 	return "", errors.New("Seedance /videos 参考素材需要公网 URL、asset:// 素材 ID 或 data URL")
 }
 
-func BeefAPIAudioURL(media Media) (string, error) {
+func BeefTVAudioURL(media Media) (string, error) {
 	value := strings.TrimSpace(media.URL)
 	if strings.HasPrefix(value, "asset://") || IsPublicMediaURL(value) {
 		return value, nil

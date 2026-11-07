@@ -11,16 +11,16 @@ import (
 	"strings"
 	"time"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/providerpreset"
 )
 
 // Managed connections expose content intent, never a supplier request body.
 // Model discovery/validation is server-owned; BYOK still uses its own plugin.
-func managedConnection(config Config) bool { return config.CredentialRef == beefapi.CredentialRef }
+func managedConnection(config Config) bool { return config.CredentialRef == beeftv.CredentialRef }
 
 func legacyMediaError(err error) error {
-	var upstream *beefapi.MediaHTTPError
+	var upstream *beeftv.MediaHTTPError
 	if errors.As(err, &upstream) {
 		body, _ := json.Marshal(map[string]any{"error": upstream.TaskError})
 		if upstream.Body != "" {
@@ -32,7 +32,7 @@ func legacyMediaError(err error) error {
 }
 
 func referenceMediaUploadError(ctx context.Context, err error) *ReferenceUploadError {
-	var upload *beefapi.UploadError
+	var upload *beeftv.UploadError
 	if errors.As(err, &upload) {
 		ctx = referenceUploadAttempt(referenceUploadStage(ctx, upload.Meta.Stage), upload.Meta.Attempt)
 	}
@@ -49,9 +49,9 @@ func runManagedImageTask(ctx context.Context, input Input) (map[string]any, erro
 	if runtime.ManagedMedia == nil || SubmissionKeyFromContext(ctx) == "" {
 		return nil, RequestPreparationError{Cause: errors.New("图片请求缺少持久化提交标识")}
 	}
-	request := beefapi.MediaRequest{TaskRef: SubmissionKeyFromContext(ctx), MediaType: "image", Model: input.Config.Model, Operation: "generate", Options: managedImageOptions(input)}
+	request := beeftv.MediaRequest{TaskRef: SubmissionKeyFromContext(ctx), MediaType: "image", Model: input.Config.Model, Operation: "generate", Options: managedImageOptions(input)}
 	request.Input.Prompt = WithSystemPrompt(input.Config, input.Prompt)
-	refs := make([]beefapi.LocalMediaReference, 0, len(input.ReferenceImages)+1)
+	refs := make([]beeftv.LocalMediaReference, 0, len(input.ReferenceImages)+1)
 	for _, image := range input.ReferenceImages {
 		refs = append(refs, managedReference(image, "reference"))
 	}
@@ -69,21 +69,21 @@ func runManagedImageTask(ctx context.Context, input Input) (map[string]any, erro
 	return executeManagedMedia(ctx, client, request, refs)
 }
 
-func executeManagedMedia(ctx context.Context, client *beefapi.MediaClient, request beefapi.MediaRequest, refs []beefapi.LocalMediaReference) (map[string]any, error) {
+func executeManagedMedia(ctx context.Context, client *beeftv.MediaClient, request beeftv.MediaRequest, refs []beeftv.LocalMediaReference) (map[string]any, error) {
 	runtime, _ := RuntimeFromContext(ctx)
 	if runtime.ManagedMedia == nil || request.TaskRef == "" {
 		return nil, RequestPreparationError{Cause: errors.New("媒体请求缺少持久化提交标识")}
 	}
 	result, err := client.Execute(ctx, request, refs)
 	if err != nil {
-		var task *beefapi.MediaTaskError
+		var task *beeftv.MediaTaskError
 		if errors.As(err, &task) {
 			if !task.Pending() {
 				return nil, err
 			}
 			return nil, SubmissionUnknownError{Cause: err}
 		}
-		if beefapi.IsDefiniteMediaRejection(err) {
+		if beeftv.IsDefiniteMediaRejection(err) {
 			return nil, err
 		}
 		if sent, lookupErr := runtime.ManagedMedia.Sent(ctx); lookupErr != nil || sent {
@@ -94,8 +94,8 @@ func executeManagedMedia(ctx context.Context, client *beefapi.MediaClient, reque
 	return result, nil
 }
 
-func managedReference(media Media, role string) beefapi.LocalMediaReference {
-	return beefapi.LocalMediaReference{MediaReference: beefapi.MediaReference{Kind: "image", Role: role, URL: media.URL}, StorageKey: media.StorageKey, DataURL: media.DataURL, MIME: media.MimeType, Bytes: media.Bytes}
+func managedReference(media Media, role string) beeftv.LocalMediaReference {
+	return beeftv.LocalMediaReference{MediaReference: beeftv.MediaReference{Kind: "image", Role: role, URL: media.URL}, StorageKey: media.StorageKey, DataURL: media.DataURL, MIME: media.MimeType, Bytes: media.Bytes}
 }
 
 func validateManagedImageReference(input *Input, size int64) error {
@@ -292,11 +292,11 @@ func closestImageSize(values []string, width, height int, fallback string) strin
 	return best
 }
 
-func managedMediaClient(ctx context.Context, config Config) *beefapi.MediaClient {
+func managedMediaClient(ctx context.Context, config Config) *beeftv.MediaClient {
 	runtime, _ := RuntimeFromContext(ctx)
-	client := &beefapi.MediaClient{BaseURL: config.BaseURL, APIKey: config.APIKey, State: runtime.ManagedMedia, AllowHTTPTest: runtime.Endpoints.BeefAPIVideoBaseURL != ""}
+	client := &beeftv.MediaClient{BaseURL: config.BaseURL, APIKey: config.APIKey, State: runtime.ManagedMedia, AllowHTTPTest: runtime.Endpoints.BeefTVVideoBaseURL != ""}
 	client.Headers = make(http.Header)
-	if projection, ok := runtime.ManagedMedia.(beefapi.MediaProjectionPort); ok {
+	if projection, ok := runtime.ManagedMedia.(beeftv.MediaProjectionPort); ok {
 		client.Project = projection.Project
 	}
 	for _, header := range config.Headers {
@@ -337,7 +337,7 @@ func managedMediaClient(ctx context.Context, config Config) *beefapi.MediaClient
 		if runtime.Receipts == nil {
 			return
 		}
-		if meta := beefapi.UploadMetaFromContext(req.Context()); meta.Stage != "" {
+		if meta := beeftv.UploadMetaFromContext(req.Context()); meta.Stage != "" {
 			req = req.WithContext(referenceUploadAttempt(referenceUploadStage(req.Context(), meta.Stage), meta.Attempt))
 		}
 		observation := TransportObservation{Request: req, Body: body, Err: legacyMediaError(err), StartedAt: time.Now(), Dispatched: true, ResponseLimitBytes: 4 << 20, ReceivedBytes: int64(len(body))}
@@ -349,13 +349,13 @@ func managedMediaClient(ctx context.Context, config Config) *beefapi.MediaClient
 		}
 		runtime.Receipts.Observe(observation)
 	}
-	client.StorageObserve = func(observation beefapi.UploadObservation) {
+	client.StorageObserve = func(observation beeftv.UploadObservation) {
 		if runtime.Receipts == nil {
 			return
 		}
 		req := observation.Request.WithContext(referenceUploadStage(observation.Request.Context(), "put"))
 		value := TransportObservation{Request: req, StartedAt: observation.StartedAt, Err: observation.Err, Dispatched: observation.Dispatched, TransportPhase: observation.Phase, TransportRoute: observation.Route, ReceivedBytes: observation.ReceivedBytes, ResponseLimitBytes: 1 << 20}
-		if meta := beefapi.UploadMetaFromContext(req.Context()); meta.Attempt > 0 {
+		if meta := beeftv.UploadMetaFromContext(req.Context()); meta.Attempt > 0 {
 			value.Request = value.Request.WithContext(referenceUploadAttempt(value.Request.Context(), meta.Attempt))
 		}
 		if observation.Response != nil {

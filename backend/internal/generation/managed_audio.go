@@ -6,11 +6,11 @@ import (
 	"strconv"
 	"strings"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 )
 
-func runManagedAudioTask(ctx context.Context, client *beefapi.MediaClient, input Input) (map[string]any, error) {
-	request := beefapi.MediaRequest{TaskRef: SubmissionKeyFromContext(ctx), MediaType: "audio", Model: input.Config.Model}
+func runManagedAudioTask(ctx context.Context, client *beeftv.MediaClient, input Input) (map[string]any, error) {
+	request := beeftv.MediaRequest{TaskRef: SubmissionKeyFromContext(ctx), MediaType: "audio", Model: input.Config.Model}
 	runtime, _ := RuntimeFromContext(ctx)
 	if runtime.ManagedMedia == nil || request.TaskRef == "" {
 		return nil, RequestPreparationError{Cause: errors.New("音频请求缺少持久化提交标识")}

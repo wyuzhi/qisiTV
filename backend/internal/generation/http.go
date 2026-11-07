@@ -83,7 +83,7 @@ func GetJSON(ctx context.Context, config Config, path string, target interface{}
 	}
 	req.Header.Set("Authorization", "Bearer "+config.APIKey)
 	outbound.ApplyOutboundHeaders(req, config.Headers)
-	applyBeefAPIVideoDeliveryHeader(ctx, config, req)
+	applyBeefTVVideoDeliveryHeader(ctx, config, req)
 	return DoJSON(req, target)
 }
 

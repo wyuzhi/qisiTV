@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/outbound"
 )
 
@@ -132,7 +132,7 @@ type MediaProbePort interface {
 // Endpoints holds per-execution test/control-plane URL overrides.
 // Production leaves this empty and derives hosts from config/region.
 type Endpoints struct {
-	BeefAPIVideoBaseURL       string
+	BeefTVVideoBaseURL       string
 	ArkPrivateAssetAPIBaseURL string
 }
 
@@ -177,7 +177,7 @@ type Runtime struct {
 	DownloadCache     VideoDownloadCachePort
 	ReferenceProgress ReferenceProgressPort
 	Images            ImageSubmissionPort
-	ManagedMedia      beefapi.MediaStatePort
+	ManagedMedia      beeftv.MediaStatePort
 	Prompt            PromptPort
 	Config            ConfigPort
 	Style             StylePort

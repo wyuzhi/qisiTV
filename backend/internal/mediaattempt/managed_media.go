@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"gorm.io/gorm"
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/generation"
 	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/outbound"
@@ -16,15 +16,15 @@ import (
 	"time"
 )
 
-// This adapter owns only the existing local send fence. BeefAPI owns the
+// This adapter owns only the existing local send fence. BeefTV owns the
 // asynchronous task, provider retry and recovery after the first write.
 type managedMediaPort struct{ service *Service }
 
 func ManagedTaskConnection(task model.Task) bool {
-	return beefapi.IsManagedTaskInput(task.InputJSON)
+	return beeftv.IsManagedTaskInput(task.InputJSON)
 }
 
-func (p managedMediaPort) Project(ctx context.Context, projection beefapi.MediaTask) {
+func (p managedMediaPort) Project(ctx context.Context, projection beeftv.MediaTask) {
 	task, ok := ctx.Value(TaskContext{}).(model.Task)
 	if !ok || p.service == nil {
 		return
@@ -73,7 +73,7 @@ func (p managedMediaPort) Begin(req *http.Request) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if wire.ReplayProtocol != beefapi.MediaProtocolVersion || wire.Header.Get("Idempotency-Key") != req.Header.Get("Idempotency-Key") || wire.URL != req.URL.String() {
+	if wire.ReplayProtocol != beeftv.MediaProtocolVersion || wire.Header.Get("Idempotency-Key") != req.Header.Get("Idempotency-Key") || wire.URL != req.URL.String() {
 		return false, errors.New("媒体任务原始提交身份不一致")
 	}
 	task := req.Context().Value(TaskContext{}).(model.Task)
@@ -95,14 +95,14 @@ func (memoryReadCloser) Close() error            { return nil }
 func ioReadCloser(data []byte) *memoryReadCloser { return &memoryReadCloser{bytes.NewReader(data)} }
 
 func isManagedMediaRequest(req *http.Request) bool {
-	return req != nil && req.URL != nil && req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/media/tasks") && req.Header.Get(beefapi.MediaProtocolHeader) == beefapi.MediaProtocolVersion
+	return req != nil && req.URL != nil && req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/media/tasks") && req.Header.Get(beeftv.MediaProtocolHeader) == beeftv.MediaProtocolVersion
 }
 func managedFrozenImage(task model.Task, wire WireRequest) bool {
-	return wire.ReplayProtocol == beefapi.MediaProtocolVersion || ManagedTaskConnection(task) || wire.ChannelID == beefapi.ChannelID
+	return wire.ReplayProtocol == beeftv.MediaProtocolVersion || ManagedTaskConnection(task) || wire.ChannelID == beeftv.ChannelID
 }
 
 func (s *Service) isManagedImageSubmission(task model.Task, attempt *model.RouteAttempt, row *model.ImageSubmission) bool {
-	if ManagedTaskConnection(task) || (attempt != nil && attempt.ID != "" && (row == nil || attempt.ID == row.AttemptID) && attempt.ChannelID == beefapi.ChannelID) {
+	if ManagedTaskConnection(task) || (attempt != nil && attempt.ID != "" && (row == nil || attempt.ID == row.AttemptID) && attempt.ChannelID == beeftv.ChannelID) {
 		return true
 	}
 	if row == nil {
@@ -151,8 +151,8 @@ func (s *Service) ExpireImageSubmissionRequests() error {
 				query = row.QueryCipher
 				if wire, err := s.ImageSubmissionWire(&row); query == "" && err == nil {
 					if task, err := s.repo.TaskForUser(row.UserID, row.TaskID); err == nil {
-						if attempt, err := s.repo.LatestRouteAttempt(task.ID); err == nil && attempt.ID == row.AttemptID && attempt.ChannelID == beefapi.ChannelID {
-							wire.ChannelID = beefapi.ChannelID
+						if attempt, err := s.repo.LatestRouteAttempt(task.ID); err == nil && attempt.ID == row.AttemptID && attempt.ChannelID == beeftv.ChannelID {
+							wire.ChannelID = beeftv.ChannelID
 						}
 						query, err = s.ManagedImageQueryCipher(*task, wire)
 						if err != nil {
@@ -172,14 +172,14 @@ func (s *Service) ExpireImageSubmissionRequests() error {
 }
 
 type Query struct {
-	Client    *beefapi.MediaClient
+	Client    *beeftv.MediaClient
 	Key, Kind string
 	Legacy    bool
 }
 
 func (s *Service) ManagedTaskQuery(ctx context.Context, task model.Task, row *model.ImageSubmission) (Query, bool, error) {
 	managed := ManagedTaskConnection(task)
-	if attempt, err := s.repo.LatestRouteAttempt(task.ID); err == nil && attempt != nil && attempt.ID == row.AttemptID && attempt.ChannelID == beefapi.ChannelID {
+	if attempt, err := s.repo.LatestRouteAttempt(task.ID); err == nil && attempt != nil && attempt.ID == row.AttemptID && attempt.ChannelID == beeftv.ChannelID {
 		managed = true
 	}
 	var wire WireRequest
@@ -201,7 +201,7 @@ func (s *Service) ManagedTaskQuery(ctx context.Context, task model.Task, row *mo
 		return Query{}, false, nil
 	}
 	if row.QueryCipher == "" {
-		wire.ChannelID = beefapi.ChannelID
+		wire.ChannelID = beeftv.ChannelID
 		cipher, cipherErr := s.ManagedImageQueryCipher(task, wire)
 		if cipherErr != nil {
 			return Query{}, true, cipherErr
@@ -223,9 +223,9 @@ func (s *Service) ManagedTaskQuery(ctx context.Context, task model.Task, row *mo
 			break
 		}
 	}
-	client := &beefapi.MediaClient{BaseURL: base, APIKey: strings.TrimPrefix(wire.Header.Get("Authorization"), "Bearer "), Headers: wire.Header.Clone()}
+	client := &beeftv.MediaClient{BaseURL: base, APIKey: strings.TrimPrefix(wire.Header.Get("Authorization"), "Bearer "), Headers: wire.Header.Clone()}
 	runtime, _ := generation.RuntimeFromContext(ctx)
-	client.AllowHTTPTest = runtime.Endpoints.BeefAPIVideoBaseURL != ""
+	client.AllowHTTPTest = runtime.Endpoints.BeefTVVideoBaseURL != ""
 	client.Project = managedMediaPort{service: s}.Project
 	startedAt := time.Now()
 	client.Observe = func(req *http.Request, resp *http.Response, body []byte, callErr error) {
@@ -252,7 +252,7 @@ func (s *Service) ManagedTaskQuery(ctx context.Context, task model.Task, row *mo
 			return Query{}, true, errors.New("原超分任务素材类型无效")
 		}
 	}
-	return Query{Client: client, Key: key, Kind: kind, Legacy: wire.ReplayProtocol != beefapi.MediaProtocolVersion}, true, nil
+	return Query{Client: client, Key: key, Kind: kind, Legacy: wire.ReplayProtocol != beeftv.MediaProtocolVersion}, true, nil
 }
 
 // CollectManagedImage 在生成过程中（含重启后接着跟进）等待原任务结果。查不到编号也继续等：
@@ -277,7 +277,7 @@ func (s *Service) RecoverManagedImage(ctx context.Context, task model.Task, row 
 		return nil, managed, err
 	}
 	result, err := query.Client.Collect(ctx, query.Key, query.Kind, query.Legacy)
-	if beefapi.IsMediaTaskNotFound(err) {
+	if beeftv.IsMediaTaskNotFound(err) {
 		return nil, true, err
 	}
 	if err != nil {
@@ -313,12 +313,12 @@ const (
 )
 
 func ManagedFailureInfo(err error) (statusCode int, explicitRejection, terminalFailure bool) {
-	var managedHTTP *beefapi.MediaHTTPError
+	var managedHTTP *beeftv.MediaHTTPError
 	if errors.As(err, &managedHTTP) {
 		statusCode = managedHTTP.StatusCode
-		explicitRejection = beefapi.IsDefiniteMediaRejection(err)
+		explicitRejection = beeftv.IsDefiniteMediaRejection(err)
 	}
-	var managedTask *beefapi.MediaTaskError
+	var managedTask *beeftv.MediaTaskError
 	if errors.As(err, &managedTask) && !managedTask.Pending() {
 		if managedTask.Code == "media_submission_rejected" && strings.TrimSpace(managedTask.TaskID) == "" {
 			explicitRejection = true
@@ -330,10 +330,10 @@ func ManagedFailureInfo(err error) (statusCode int, explicitRejection, terminalF
 }
 
 func ClassifyFailedVideoQueryOutcome(task model.Task, providerStatus string, err error, now time.Time) string {
-	if mediaErr := (*beefapi.MediaTaskError)(nil); (errors.As(err, &mediaErr) && mediaErr.Code == "media_submission_rejected") || isUnreportedManagedInvalidQuery(task, providerStatus, err) {
+	if mediaErr := (*beeftv.MediaTaskError)(nil); (errors.As(err, &mediaErr) && mediaErr.Code == "media_submission_rejected") || isUnreportedManagedInvalidQuery(task, providerStatus, err) {
 		return localtask.RecoveryNoResult
 	}
-	if BeefAPIOwnsVideoConclusion(task, now) {
+	if BeefTVOwnsVideoConclusion(task, now) {
 		if isTerminalVideoProviderStatus(providerStatus) && (task.BeefUsageState != nil || task.BeefBillingState != nil) {
 			return localtask.RecoveryNoResult
 		}
@@ -355,7 +355,7 @@ func isUnreportedManagedInvalidQuery(task model.Task, providerStatus string, err
 	if !ManagedTaskConnection(task) || task.BeefUsageState != nil || task.BeefBillingState != nil || task.BeefReconcileDeadline != nil || (strings.TrimSpace(providerStatus) != "" && !isTerminalVideoProviderStatus(providerStatus)) {
 		return false
 	}
-	httpErr, mediaHTTP := generation.HTTPError{}, (*beefapi.MediaHTTPError)(nil)
+	httpErr, mediaHTTP := generation.HTTPError{}, (*beeftv.MediaHTTPError)(nil)
 	return (errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusBadRequest || httpErr.StatusCode == http.StatusUnprocessableEntity)) ||
 		(errors.As(err, &mediaHTTP) && (mediaHTTP.StatusCode == http.StatusBadRequest || mediaHTTP.StatusCode == http.StatusUnprocessableEntity))
 }
@@ -382,17 +382,17 @@ func isUnrecoverableVideoQueryError(err error) bool {
 
 func VideoTaskPastRetentionWindow(task model.Task, now time.Time) bool {
 	if ManagedTaskConnection(task) {
-		return !BeefAPIOwnsVideoConclusion(task, now)
+		return !BeefTVOwnsVideoConclusion(task, now)
 	}
 	anchor := videoTaskAnchor(task)
 	return !anchor.IsZero() && now.Sub(anchor) >= videoRecoveryRetentionWindow
 }
 
-// 托管视频结论由 BeefAPI 给出；无结算记录的旧任务若回查已被 400/422 拒绝（isUnreportedManagedInvalidQuery）则立即按无结果终结，
+// 托管视频结论由 BeefTV 给出；无结算记录的旧任务若回查已被 400/422 拒绝（isUnreportedManagedInvalidQuery）则立即按无结果终结，
 // 若仅遇 5xx 等暂态或未知响应则保留 7 天（覆盖跨周末异步对账窗口，参见 TestManagedVideoDoesNotInferSettlementOrExpiry），超期再本地终结。
 // 例外：原 Key 查不到原编号（404）且冻结原请求已过 23 小时保存期时，由 ResolveMissingManagedSubmission 先判「无法取回」，
-// 不再等满 7 天（BeefAPI 收到的提交 30 分钟内就会结案，查不到说明它没有这条记录）。
-func BeefAPIOwnsVideoConclusion(task model.Task, now time.Time) bool {
+// 不再等满 7 天（BeefTV 收到的提交 30 分钟内就会结案，查不到说明它没有这条记录）。
+func BeefTVOwnsVideoConclusion(task model.Task, now time.Time) bool {
 	if !ManagedTaskConnection(task) {
 		return false
 	}

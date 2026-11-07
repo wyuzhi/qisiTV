@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/generation"
 	"infinite-canvas/backend/internal/modelcatalog"
 )
@@ -27,7 +27,7 @@ func SelectModel(host CompileHost, n Node, recipe *Recipe) (bool, error) {
 		}
 		old, _ := recipe.Request.Input["config"].(map[string]any)
 		recipe.ChannelID = candidate.ChannelID
-		if beefapi.IsManagedChannel(candidate.ChannelID, "", candidate.BaseURL) {
+		if beeftv.IsManagedChannel(candidate.ChannelID, "", candidate.BaseURL) {
 			recipe.ChannelID = "@beeftv"
 		}
 		if stringValue(old["model"]) == candidate.Model && stringValue(old["interfaceType"]) == candidate.Protocol && strings.TrimRight(stringValue(old["baseUrl"]), "/") == strings.TrimRight(candidate.BaseURL, "/") {

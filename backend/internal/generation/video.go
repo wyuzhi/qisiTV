@@ -15,14 +15,14 @@ import (
 	"infinite-canvas/backend/internal/providerpreset"
 )
 
-func RestoreBeefAPISeedanceAudioControl(ctx context.Context, config Config, video *VideoCapabilityConfig) {
+func RestoreBeefTVSeedanceAudioControl(ctx context.Context, config Config, video *VideoCapabilityConfig) {
 	if config.VideoCapabilitiesVersion != nil {
 		return
 	}
 	// Saved built-in profiles predate the supported audio switch. This is a
-	// BeefAPI contract correction, not an override of custom provider settings.
-	contract, known := providerpreset.BeefAPIVideoContract(config.Model)
-	if IsBeefAPIVideoConfig(ctx, config) && known && contract.Protocol == "newapi" && modelcatalog.IsSeedance2Family("newapi", config.Model) {
+	// BeefTV contract correction, not an override of custom provider settings.
+	contract, known := providerpreset.BeefTVVideoContract(config.Model)
+	if IsBeefTVVideoConfig(ctx, config) && known && contract.Protocol == "newapi" && modelcatalog.IsSeedance2Family("newapi", config.Model) {
 		video.GenerateAudio.Supported = true
 	}
 }
@@ -33,10 +33,10 @@ func RunVideoTask(ctx context.Context, input Input) (map[string]interface{}, err
 
 func RunVideoTaskWithPolicy(ctx context.Context, input Input, pollPolicy VideoPollPolicy) (map[string]interface{}, error) {
 	pollPolicy = videoPollPolicyForConfig(ctx, input.Config, pollPolicy)
-	// BeefAPI exposes its flat /v1/videos contract. Route it before
+	// BeefTV exposes its flat /v1/videos contract. Route it before
 	// protocol adapters so stale persisted channel metadata cannot select an
 	// incompatible legacy multipart or flat request shape.
-	if managedConnection(input.Config) || IsBeefAPIVideoConfig(ctx, input.Config) {
+	if managedConnection(input.Config) || IsBeefTVVideoConfig(ctx, input.Config) {
 		client, unified, err := useManagedMediaEnvelope(ctx, input.Config, "video")
 		if err != nil {
 			return nil, err

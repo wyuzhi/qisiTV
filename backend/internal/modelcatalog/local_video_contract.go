@@ -7,18 +7,18 @@ import (
 	"infinite-canvas/backend/internal/providerpreset"
 )
 
-// ApplyLocalVideoContract matches the desktop configuration's BeefAPI overlay.
+// ApplyLocalVideoContract matches the desktop configuration's BeefTV overlay.
 // A versioned gateway profile owns its limits. Otherwise, verified route limits
 // repair legacy generic profiles without changing the saved audio default.
 func ApplyLocalVideoContract(item LocalChannelModel, config *ModelCapabilityConfig) *ModelCapabilityConfig {
-	isBeefRoute := providerpreset.IsBeefAPIEndpoint(item.BaseURL) || (strings.TrimSpace(item.BaseURL) == "" && strings.EqualFold(strings.TrimSpace(item.ChannelID), "beeftv"))
+	isBeefRoute := providerpreset.IsBeefTVEndpoint(item.BaseURL) || (strings.TrimSpace(item.BaseURL) == "" && strings.EqualFold(strings.TrimSpace(item.ChannelID), "beeftv"))
 	if item.Capability != "video" || item.VideoCapabilitiesVersion != nil || !isBeefRoute || config == nil || config.Video == nil {
 		return config
 	}
 	if isSeedance2Family(item.Protocol, item.Model) {
 		config = repairLegacyEnterpriseSeedanceVideoProfile(item.Protocol, item.Model, config)
 	}
-	contract, ok := providerpreset.BeefAPIVideoContract(item.Model)
+	contract, ok := providerpreset.BeefTVVideoContract(item.Model)
 	if !ok {
 		return config
 	}

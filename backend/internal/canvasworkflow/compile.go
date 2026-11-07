@@ -67,7 +67,7 @@ type CompileHost interface {
 	// ProviderConfig is the effective local model configuration.
 	ProviderConfig() (map[string]any, error)
 	LocalMode() bool
-	// ManagedCredential is the current BeefAPI key and base URL.
+	// ManagedCredential is the current BeefTV key and base URL.
 	ManagedCredential() (apiKey, baseURL string, err error)
 	ManagedCredentialRef() string
 	// UpscaleAvailable reports whether the named upscale model can run.

@@ -88,7 +88,7 @@ func ObserveTransportReceipt(observation TransportObservation, repo *repository.
 			}
 		}
 		if taskID != "" && isImage {
-			if jobID := ExtractBeefAPIImageJobID(observation.Headers, observation.Body); jobID != "" {
+			if jobID := ExtractBeefTVImageJobID(observation.Headers, observation.Body); jobID != "" {
 				_ = repo.UpdateTaskImageJobID(taskID, jobID)
 			}
 		}
@@ -125,7 +125,7 @@ func ApplyStandardCapabilities(ctx context.Context, repo *repository.Repository,
 	case "image":
 		return ValidateResolvedImageCapability(repo, readLocalConfig, input)
 	case "video":
-		if IsBeefAPISeedancePreuploadConfig(ctx, input.Config) {
+		if IsBeefTVSeedancePreuploadConfig(ctx, input.Config) {
 			if err := ResolveVideoCapability(ctx, repo, readLocalConfig, input); err != nil {
 				return err
 			}

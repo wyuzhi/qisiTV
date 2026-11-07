@@ -5,7 +5,7 @@ package mediaattempt
 import (
 	"context"
 	"github.com/google/uuid"
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/generation"
 	"infinite-canvas/backend/internal/localcrypto"
 	"infinite-canvas/backend/internal/model"
@@ -57,7 +57,7 @@ type Service struct {
 func New(deps Dependencies) *Service {
 	return &Service{repo: deps.Repository, secrets: deps.Secrets, connections: deps.Connections, runtime: deps.Runtime, completion: deps.Completion, log: deps.Log}
 }
-func (s *Service) ManagedPort() beefapi.MediaStatePort { return managedMediaPort{service: s} }
+func (s *Service) ManagedPort() beeftv.MediaStatePort { return managedMediaPort{service: s} }
 func (s *Service) ImageRecoveryCursor() string {
 	s.scanMu.Lock()
 	defer s.scanMu.Unlock()

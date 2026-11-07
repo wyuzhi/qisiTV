@@ -9,17 +9,17 @@ import (
 	"strings"
 )
 
-// BeefAPIVideoSettlement holds the raw billing/settlement fields returned by
-// BeefAPI video task endpoints (GET /v1/video/generations/{id} or /v1/videos/{id}).
-type BeefAPIVideoSettlement struct {
+// BeefTVVideoSettlement holds the raw billing/settlement fields returned by
+// BeefTV video task endpoints (GET /v1/video/generations/{id} or /v1/videos/{id}).
+type BeefTVVideoSettlement struct {
 	UsageState        *string
 	ReconcileDeadline *string
 }
 
-// ExtractBeefAPIVideoSettlement extracts BeefAPI's raw usage_state and
+// ExtractBeefTVVideoSettlement extracts BeefTV's raw usage_state and
 // reconcile_deadline from a video task response map (including nested data).
-func ExtractBeefAPIVideoSettlement(state map[string]interface{}) BeefAPIVideoSettlement {
-	var out BeefAPIVideoSettlement
+func ExtractBeefTVVideoSettlement(state map[string]interface{}) BeefTVVideoSettlement {
+	var out BeefTVVideoSettlement
 	curr := state
 	for curr != nil {
 		if out.UsageState == nil {
@@ -47,17 +47,17 @@ func ExtractBeefAPIVideoSettlement(state map[string]interface{}) BeefAPIVideoSet
 	return out
 }
 
-// ExtractBeefAPIVideoSettlementBytes parses a JSON response body and extracts
-// BeefAPI's raw usage_state and reconcile_deadline if present.
-func ExtractBeefAPIVideoSettlementBytes(body []byte) BeefAPIVideoSettlement {
+// ExtractBeefTVVideoSettlementBytes parses a JSON response body and extracts
+// BeefTV's raw usage_state and reconcile_deadline if present.
+func ExtractBeefTVVideoSettlementBytes(body []byte) BeefTVVideoSettlement {
 	if len(body) == 0 {
-		return BeefAPIVideoSettlement{}
+		return BeefTVVideoSettlement{}
 	}
 	var state map[string]interface{}
 	if err := json.Unmarshal(body, &state); err != nil {
-		return BeefAPIVideoSettlement{}
+		return BeefTVVideoSettlement{}
 	}
-	return ExtractBeefAPIVideoSettlement(state)
+	return ExtractBeefTVVideoSettlement(state)
 }
 
 // ValidateVideoTaskState checks every task envelope before exposing its result.

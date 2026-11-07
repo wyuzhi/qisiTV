@@ -1,0 +1,142 @@
+package beeftv
+
+import (
+	"encoding/json"
+	"fmt"
+	"net"
+	"net/url"
+	"os"
+	"strings"
+)
+
+const (
+	ProductionOrigin = "https://beeftv.app"
+	PreviewLocalHost = "enterprise.localhost"
+	ClientID         = "beeftv-enterprise-v1"
+	ClientScope      = "inference"
+	CredentialRef    = "beeftv"
+	ChannelID        = "beeftv"
+	TestOriginEnv    = "BEEFTV_ENTERPRISE_TEST_ORIGIN"
+	WalletPath       = "/console/topup"
+)
+
+// CanonicalOrigin defaults to BeefTV and only accepts an explicit loopback test origin.
+func CanonicalOrigin(explicit string) (string, error) {
+	candidate := strings.TrimRight(strings.TrimSpace(explicit), "/")
+	if candidate == "" {
+		candidate = strings.TrimRight(strings.TrimSpace(os.Getenv(TestOriginEnv)), "/")
+	}
+	if candidate == "" || strings.EqualFold(candidate, ProductionOrigin) {
+		return ProductionOrigin, nil
+	}
+	origin, err := parseSafeTestOrigin(candidate)
+	if err != nil {
+		return "", err
+	}
+	return origin, nil
+}
+
+func parseSafeTestOrigin(raw string) (string, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("测试企业源地址无效")
+	}
+	if parsed.User != nil || parsed.Opaque != "" || strings.Trim(parsed.Path, "/") != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("测试企业源地址只能是企业预览源")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("测试企业源地址只支持 HTTP 或 HTTPS")
+	}
+	host := parsed.Hostname()
+	if !isSafeTestHost(host) {
+		return "", fmt.Errorf("测试企业源地址只允许 enterprise.localhost 或 loopback")
+	}
+	return parsed.Scheme + "://" + parsed.Host, nil
+}
+
+func isSafeTestHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == PreviewLocalHost {
+		return true
+	}
+	return isLoopbackHost(host)
+}
+
+func isLoopbackHost(host string) bool {
+	switch strings.ToLower(strings.TrimSpace(host)) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func ProviderBaseURL(origin string) string {
+	return strings.TrimRight(strings.TrimSpace(origin), "/")
+}
+
+func TokenBaseURL(origin string) string {
+	return ProviderBaseURL(origin) + "/v1"
+}
+
+func WalletURL(origin string) string {
+	return ProviderBaseURL(origin) + WalletPath
+}
+
+func ValidateReturnedBaseURL(origin, baseURL string) error {
+	normalized := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if normalized != TokenBaseURL(origin) {
+		return fmt.Errorf("企业接口返回的服务地址无效")
+	}
+	return nil
+}
+
+func ValidateVerificationURL(origin, raw string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return nil, fmt.Errorf("授权地址无效")
+	}
+	if parsed.User != nil {
+		return nil, fmt.Errorf("授权地址无效")
+	}
+	if !strings.EqualFold(parsed.Scheme+"://"+parsed.Host, origin) {
+		return nil, fmt.Errorf("授权地址不属于当前企业源")
+	}
+	path := parsed.EscapedPath()
+	if path != "/desktop-auth" && !strings.HasPrefix(path, "/desktop-auth/") {
+		return nil, fmt.Errorf("授权地址不在允许的确认页")
+	}
+	return parsed, nil
+}
+
+func ValidateWalletURL(origin, raw string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return nil, fmt.Errorf("钱包地址无效")
+	}
+	if parsed.User != nil {
+		return nil, fmt.Errorf("钱包地址无效")
+	}
+	if !strings.EqualFold(parsed.Scheme+"://"+parsed.Host, origin) {
+		return nil, fmt.Errorf("钱包地址不属于当前企业源")
+	}
+	if parsed.EscapedPath() != WalletPath || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return nil, fmt.Errorf("钱包地址不在允许的充值页")
+	}
+	return parsed, nil
+}
+
+func IsManagedChannel(channelID, credentialRef, _ string) bool {
+	return strings.TrimSpace(credentialRef) == CredentialRef || strings.TrimSpace(channelID) == ChannelID
+}
+
+func IsManagedTaskInput(inputJSON string) bool {
+	var input struct {
+		Config struct {
+			CredentialRef string `json:"credentialRef"`
+			ChannelID     string `json:"channelId"`
+		} `json:"config"`
+	}
+	return json.Unmarshal([]byte(inputJSON), &input) == nil &&
+		IsManagedChannel(input.Config.ChannelID, input.Config.CredentialRef, "")
+}

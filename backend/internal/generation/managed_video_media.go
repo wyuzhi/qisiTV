@@ -6,16 +6,16 @@ import (
 	"slices"
 	"strconv"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 )
 
 type managedClientContextKey struct{}
 
 // A frozen legacy provider ID stays on its original query contract. Tasks
 // already sent through the common media envelope keep it. A new task uses the
-// envelope only when BeefAPI currently lists its media type; otherwise it keeps
-// the existing endpoint (BeefAPI enables audio and upscale separately).
-func useManagedMediaEnvelope(ctx context.Context, config Config, mediaType string) (*beefapi.MediaClient, bool, error) {
+// envelope only when BeefTV currently lists its media type; otherwise it keeps
+// the existing endpoint (BeefTV enables audio and upscale separately).
+func useManagedMediaEnvelope(ctx context.Context, config Config, mediaType string) (*beeftv.MediaClient, bool, error) {
 	if !managedConnection(config) {
 		return nil, false, nil
 	}
@@ -23,7 +23,7 @@ func useManagedMediaEnvelope(ctx context.Context, config Config, mediaType strin
 	if runtime.ManagedMedia == nil {
 		return nil, false, nil
 	}
-	client, _ := ctx.Value(managedClientContextKey{}).(*beefapi.MediaClient)
+	client, _ := ctx.Value(managedClientContextKey{}).(*beeftv.MediaClient)
 	if client == nil {
 		client = managedMediaClient(ctx, config)
 	}
@@ -31,7 +31,7 @@ func useManagedMediaEnvelope(ctx context.Context, config Config, mediaType strin
 	if err != nil || sent {
 		return client, sent, err
 	}
-	if config.MediaProtocolVersion != beefapi.MediaProtocolVersion || ResumedProviderRequestID(ctx) != "" {
+	if config.MediaProtocolVersion != beeftv.MediaProtocolVersion || ResumedProviderRequestID(ctx) != "" {
 		return nil, false, nil
 	}
 	discovery, err := client.Discover(ctx)
@@ -41,13 +41,13 @@ func useManagedMediaEnvelope(ctx context.Context, config Config, mediaType strin
 	return client, slices.Contains(discovery.SupportedMediaTypes, mediaType), nil
 }
 
-func runManagedVideoTask(ctx context.Context, client *beefapi.MediaClient, input Input) (map[string]any, error) {
+func runManagedVideoTask(ctx context.Context, client *beeftv.MediaClient, input Input) (map[string]any, error) {
 	intent := managedLegacyVideoInput(input)
-	ordered, err := beefapi.VideoIntentReferences(intent)
+	ordered, err := beeftv.VideoIntentReferences(intent)
 	if err != nil {
 		return nil, RequestPreparationError{Cause: err}
 	}
-	var sources []beefapi.LocalMediaReference
+	var sources []beeftv.LocalMediaReference
 	runtime, _ := RuntimeFromContext(ctx)
 	var localLimit int64
 	if runtime.Limits != nil {
@@ -56,7 +56,7 @@ func runManagedVideoTask(ctx context.Context, client *beefapi.MediaClient, input
 			return nil, RequestPreparationError{Cause: err}
 		}
 	}
-	for _, group := range BeefAPISeedanceMediaGroups(&input) {
+	for _, group := range BeefTVSeedanceMediaGroups(&input) {
 		for _, media := range group.items {
 			ref := managedReference(media, "reference")
 			ref.Kind = group.kind
@@ -78,7 +78,7 @@ func runManagedVideoTask(ctx context.Context, client *beefapi.MediaClient, input
 			sources = append(sources, ref)
 		}
 	}
-	refs := make([]beefapi.LocalMediaReference, 0, len(ordered))
+	refs := make([]beeftv.LocalMediaReference, 0, len(ordered))
 	for _, selected := range ordered {
 		ref := sources[selected.SourceIndex]
 		ref.Role = selected.Role
@@ -145,7 +145,7 @@ func runManagedVideoTask(ctx context.Context, client *beefapi.MediaClient, input
 	if value, exists := input.Metadata["videoMiddleFrameTime"]; exists {
 		options["middle_frame_time"] = value
 	}
-	request := beefapi.MediaRequest{TaskRef: SubmissionKeyFromContext(ctx), MediaType: "video", Model: input.Config.Model, Operation: operation, Options: options}
+	request := beeftv.MediaRequest{TaskRef: SubmissionKeyFromContext(ctx), MediaType: "video", Model: input.Config.Model, Operation: operation, Options: options}
 	request.Input.Prompt = intent.Prompt
 	return executeManagedMedia(ctx, client, request, refs)
 }

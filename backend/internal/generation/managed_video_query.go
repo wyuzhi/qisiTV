@@ -7,17 +7,17 @@ import (
 	"net/http"
 )
 
-// Only local result delivery remains in generation. The adapter owns BeefAPI
+// Only local result delivery remains in generation. The adapter owns BeefTV
 // routes, task envelopes and query credentials, including historical endpoints.
-func QueryManagedLegacyVideo(ctx context.Context, input Input, id string) (map[string]any, string, BeefAPIVideoSettlement, error) {
+func QueryManagedLegacyVideo(ctx context.Context, input Input, id string) (map[string]any, string, BeefTVVideoSettlement, error) {
 	return queryManagedLegacyVideoWithPolicy(ctx, input, id, videoPollPolicyForConfig(ctx, input.Config, DefaultVideoPollPolicy()))
 }
 
-func queryManagedLegacyVideoWithPolicy(ctx context.Context, input Input, id string, policy VideoPollPolicy) (map[string]any, string, BeefAPIVideoSettlement, error) {
+func queryManagedLegacyVideoWithPolicy(ctx context.Context, input Input, id string, policy VideoPollPolicy) (map[string]any, string, BeefTVVideoSettlement, error) {
 	ctx = WithRequestKind(ctx, "poll")
 	client := managedMediaClient(ctx, input.Config)
 	task, err := client.QueryLegacyVideo(ctx, id)
-	settlement := BeefAPIVideoSettlement{UsageState: task.UsageState, ReconcileDeadline: task.ReconcileDeadline}
+	settlement := BeefTVVideoSettlement{UsageState: task.UsageState, ReconcileDeadline: task.ReconcileDeadline}
 	if err != nil {
 		return nil, task.Status, settlement, legacyMediaError(err)
 	}

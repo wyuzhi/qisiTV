@@ -30,11 +30,11 @@ const defaultVideoPollInterval = generation.DefaultVideoPollInterval
 const videoPollEventRetrying = generation.VideoPollEventRetrying
 const videoPollEventRecovered = generation.VideoPollEventRecovered
 
-type beefAPISeedanceMediaGroup = generation.BeefAPISeedanceMediaGroup
+type beefTVSeedanceMediaGroup = generation.BeefTVSeedanceMediaGroup
 
-const beefAPISeedanceImageMaxBytes = generation.BeefAPISeedanceImageMaxBytes
-const beefAPISeedanceVideoMaxBytes = generation.BeefAPISeedanceVideoMaxBytes
-const beefAPISeedanceUploadTimeout = generation.BeefAPISeedanceUploadTimeout
+const beefTVSeedanceImageMaxBytes = generation.BeefTVSeedanceImageMaxBytes
+const beefTVSeedanceVideoMaxBytes = generation.BeefTVSeedanceVideoMaxBytes
+const beefTVSeedanceUploadTimeout = generation.BeefTVSeedanceUploadTimeout
 
-var errBeefAPISeedanceUploadUnavailable = generation.ErrBeefAPISeedanceUploadUnavailable
-var errBeefAPISeedanceUploadIncomplete = generation.ErrBeefAPISeedanceUploadIncomplete
+var errBeefTVSeedanceUploadUnavailable = generation.ErrBeefTVSeedanceUploadUnavailable
+var errBeefTVSeedanceUploadIncomplete = generation.ErrBeefTVSeedanceUploadIncomplete

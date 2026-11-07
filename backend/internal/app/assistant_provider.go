@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"infinite-canvas/backend/internal/assistant"
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/modelcatalog"
 	"infinite-canvas/backend/internal/workspace"
 )
@@ -57,7 +57,7 @@ func (s *Service) ResolveAssistantProvider() (AssistantProvider, error) {
 		return AssistantProvider{}, err
 	}
 	for index, channel := range snapshot.Channels {
-		if strings.TrimSpace(channel.Name) == "" && channel.ID == beefapi.ChannelID {
+		if strings.TrimSpace(channel.Name) == "" && channel.ID == beeftv.ChannelID {
 			snapshot.Channels[index].Name = "BeefTV"
 		}
 	}
@@ -66,10 +66,10 @@ func (s *Service) ResolveAssistantProvider() (AssistantProvider, error) {
 
 func (s *Service) assistantManagedCredentialLookup() modelcatalog.ManagedCredentialLookup {
 	return func(channelID, credentialRef, baseURL string) (string, string, bool) {
-		if !(beefapi.IsManagedChannel(channelID, credentialRef, baseURL) || channelID == beefapi.ChannelID) {
+		if !(beeftv.IsManagedChannel(channelID, credentialRef, baseURL) || channelID == beeftv.ChannelID) {
 			return "", "", false
 		}
-		apiKey, resolvedBaseURL, _, _, lookupErr := s.lookupBeefAPICredential()
+		apiKey, resolvedBaseURL, _, _, lookupErr := s.lookupBeefTVCredential()
 		if lookupErr != nil || strings.TrimSpace(apiKey) == "" {
 			return "", "", false
 		}
@@ -83,7 +83,7 @@ func assistantReasonMessage(reason string) string {
 
 func (s *Service) resolveAssistantChannelModel(snapshot assistantConfigSnapshot, modelKey string) (AssistantProvider, string) {
 	for index, channel := range snapshot.Channels {
-		if strings.TrimSpace(channel.Name) == "" && channel.ID == beefapi.ChannelID {
+		if strings.TrimSpace(channel.Name) == "" && channel.ID == beeftv.ChannelID {
 			snapshot.Channels[index].Name = "BeefTV"
 		}
 	}
@@ -102,7 +102,7 @@ func assistantChannelName(channel assistantChannel) string {
 	if name := modelcatalog.AssistantChannelName(channel); name != "" && name != channel.ID {
 		return name
 	}
-	if channel.ID == beefapi.ChannelID {
+	if channel.ID == beeftv.ChannelID {
 		return "BeefTV"
 	}
 	return modelcatalog.AssistantChannelName(channel)

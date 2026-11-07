@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/modelcatalog"
 	"infinite-canvas/backend/internal/outbound"
@@ -213,7 +213,7 @@ func ValidateResolvedImageCapability(repo *repository.Repository, readLocalConfi
 }
 
 func ResolveImageCapability(repo *repository.Repository, readLocalConfig func() ([]byte, error), input *Input) error {
-	if input.Config.CredentialRef == beefapi.CredentialRef {
+	if input.Config.CredentialRef == beeftv.CredentialRef {
 		body, err := readLocalConfig()
 		if err != nil {
 			return err
@@ -297,7 +297,7 @@ func ValidateResolvedVideoCapabilityContext(ctx context.Context, repo *repositor
 }
 
 func ResolveVideoCapability(ctx context.Context, repo *repository.Repository, readLocalConfig func() ([]byte, error), input *Input) error {
-	if input.Config.CredentialRef == beefapi.CredentialRef {
+	if input.Config.CredentialRef == beeftv.CredentialRef {
 		body, err := readLocalConfig()
 		if err != nil {
 			return err
@@ -310,7 +310,7 @@ func ResolveVideoCapability(ctx context.Context, repo *repository.Repository, re
 			}
 			config, _ := item.CapabilityConfig.(map[string]any)
 			rawVideo, _ := json.Marshal(config["video"])
-			video, valid := beefapi.NormalizeVersionedVideoCapability(rawVideo, *item.VideoCapabilitiesVersion)
+			video, valid := beeftv.NormalizeVersionedVideoCapability(rawVideo, *item.VideoCapabilitiesVersion)
 			if !valid {
 				continue
 			}
@@ -354,7 +354,7 @@ func ResolveVideoCapability(ctx context.Context, repo *repository.Repository, re
 			return nil
 		}
 		input.Config.CapabilityConfig = normalized
-		RestoreBeefAPISeedanceAudioControl(ctx, input.Config, normalized.Video)
+		RestoreBeefTVSeedanceAudioControl(ctx, input.Config, normalized.Video)
 		input.VideoCapability = normalized.Video
 		applyFixedVideoResolution(input, normalized.Video)
 		return nil
@@ -372,7 +372,7 @@ func ResolveVideoCapability(ctx context.Context, repo *repository.Repository, re
 		return errors.New("当前视频模型能力参数无效")
 	}
 	input.VideoCapability = normalized.Video
-	RestoreBeefAPISeedanceAudioControl(ctx, input.Config, normalized.Video)
+	RestoreBeefTVSeedanceAudioControl(ctx, input.Config, normalized.Video)
 	applyFixedVideoResolution(input, normalized.Video)
 	return nil
 }

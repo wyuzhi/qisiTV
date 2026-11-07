@@ -6,7 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"net/http"
 	"strings"
 )
@@ -41,7 +41,7 @@ func RunAudioTask(ctx context.Context, input Input) (map[string]interface{}, err
 
 // Frozen managed tasks retain their old speech wire; new admissions use media-v1.
 func runLegacyManagedAudio(ctx context.Context, input Input) (map[string]interface{}, error) {
-	body, format := beefapi.LegacySpeechPayload(beefapi.LegacySpeechOptions{Model: input.Config.Model, Prompt: input.Prompt, Voice: input.Config.AudioVoice, Format: input.Config.AudioFormat, Speed: input.Config.AudioSpeed, Instructions: input.Config.AudioInstructions})
+	body, format := beeftv.LegacySpeechPayload(beeftv.LegacySpeechOptions{Model: input.Config.Model, Prompt: input.Prompt, Voice: input.Config.AudioVoice, Format: input.Config.AudioFormat, Speed: input.Config.AudioSpeed, Instructions: input.Config.AudioInstructions})
 	data, mimeType, err := managedMediaClient(ctx, input.Config).LegacySpeech(ctx, body)
 	if err != nil {
 		return nil, err
@@ -59,12 +59,12 @@ func runLegacyManagedAudio(ctx context.Context, input Input) (map[string]interfa
 	return map[string]interface{}{"mode": "audio", "audio": map[string]interface{}{"dataUrl": DataURL(mimeType, data), "mimeType": mimeType, "format": format}}, nil
 }
 
-func isBeefAPIHostFromURL(raw string) bool {
+func isBeefTVHostFromURL(raw string) bool {
 	trimmed := strings.TrimSuffix(strings.TrimRight(raw, "/"), "/v1")
-	if trimmed == beefapi.ProductionOrigin {
+	if trimmed == beeftv.ProductionOrigin {
 		return true
 	}
-	origin, err := beefapi.CanonicalOrigin("")
+	origin, err := beeftv.CanonicalOrigin("")
 	return err == nil && trimmed == origin
 }
 

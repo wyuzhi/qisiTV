@@ -33,7 +33,7 @@ func deferImageArtifactDownload(ctx context.Context, config Config, rawURL strin
 	if !SameProviderOrigin(config.BaseURL, ProviderDownloadURL(config.BaseURL, rawURL)) {
 		return true
 	}
-	// BeefAPI's signed image proxy authorizes with its result token, not the
+	// BeefTV's signed image proxy authorizes with its result token, not the
 	// account key. Preserve the returned URL rather than rewriting its origin.
-	return parsed.Scheme == "https" && isBeefAPIHost(parsed.Hostname()) && parsed.Path == "/v1/images/proxy" && parsed.Query().Get("t") != ""
+	return parsed.Scheme == "https" && isBeefTVHost(parsed.Hostname()) && parsed.Path == "/v1/images/proxy" && parsed.Query().Get("t") != ""
 }

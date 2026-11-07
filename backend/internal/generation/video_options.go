@@ -11,12 +11,12 @@ import (
 	"infinite-canvas/backend/internal/providerpreset"
 )
 
-func beefAPITestBaseURL(ctx context.Context) string {
+func beefTVTestBaseURL(ctx context.Context) string {
 	runtime, ok := RuntimeFromContext(ctx)
 	if !ok {
 		return ""
 	}
-	return strings.TrimSpace(runtime.Endpoints.BeefAPIVideoBaseURL)
+	return strings.TrimSpace(runtime.Endpoints.BeefTVVideoBaseURL)
 }
 
 func IsPublicMediaURL(value string) bool {
@@ -37,25 +37,25 @@ func usesSeedanceTaskOptions(config Config) bool {
 		config.InterfaceType == "seedance-videos-compatible"
 }
 
-func IsBeefAPIVideoConfig(ctx context.Context, config Config) bool {
-	if testBase := beefAPITestBaseURL(ctx); testBase != "" {
+func IsBeefTVVideoConfig(ctx context.Context, config Config) bool {
+	if testBase := beefTVTestBaseURL(ctx); testBase != "" {
 		got := strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
 		want := strings.TrimRight(testBase, "/")
 		return got == want || strings.HasPrefix(got, want+"/")
 	}
-	return providerpreset.IsBeefAPIEndpoint(config.BaseURL)
+	return providerpreset.IsBeefTVEndpoint(config.BaseURL)
 }
 
-func IsBeefAPISeedancePreuploadConfig(ctx context.Context, config Config) bool {
-	return IsBeefAPIVideoConfig(ctx, config) && IsSeedanceVideoConfig(config)
+func IsBeefTVSeedancePreuploadConfig(ctx context.Context, config Config) bool {
+	return IsBeefTVVideoConfig(ctx, config) && IsSeedanceVideoConfig(config)
 }
 
-func requiresBeefAPIHTTPReferences(ctx context.Context, config Config) bool {
+func requiresBeefTVHTTPReferences(ctx context.Context, config Config) bool {
 	if UpscaleMediaType(config.Model) != "" {
-		return IsBeefAPIVideoConfig(ctx, config)
+		return IsBeefTVVideoConfig(ctx, config)
 	}
-	contract, ok := providerpreset.BeefAPIVideoContract(config.Model)
-	return ok && contract.RequiresHTTPReferences && IsBeefAPIVideoConfig(ctx, config)
+	contract, ok := providerpreset.BeefTVVideoContract(config.Model)
+	return ok && contract.RequiresHTTPReferences && IsBeefTVVideoConfig(ctx, config)
 }
 
 func IsGrokVideoConfig(config Config) bool {

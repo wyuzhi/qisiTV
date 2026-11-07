@@ -11,7 +11,7 @@ import (
 type MediaUpscaleRequest = topaz.Request
 
 func (s *Service) upscaleConfig(name string) (generation.Config, error) {
-	return generation.UpscaleConfig(name, s.lookupBeefAPICredential)
+	return generation.UpscaleConfig(name, s.lookupBeefTVCredential)
 }
 
 func (s *Service) MediaUpscaleCapabilities() map[string]any {
@@ -19,11 +19,11 @@ func (s *Service) MediaUpscaleCapabilities() map[string]any {
 }
 
 func (s *Service) EstimateMediaUpscale(ctx context.Context, user string, request topaz.Request) (map[string]any, error) {
-	return generation.EstimateMediaUpscale(ctx, user, request, s.EnsureResourceMediaMetadata, s.lookupBeefAPICredential, s.bindGenerationRuntime)
+	return generation.EstimateMediaUpscale(ctx, user, request, s.EnsureResourceMediaMetadata, s.lookupBeefTVCredential, s.bindGenerationRuntime)
 }
 
 func (s *Service) CreateMediaUpscale(ctx context.Context, user string, request topaz.Request) (*model.Task, error) {
-	input, payload, err := generation.BuildMediaUpscaleTaskPayload(ctx, user, request, s.EnsureResourceMediaMetadata, s.lookupBeefAPICredential)
+	input, payload, err := generation.BuildMediaUpscaleTaskPayload(ctx, user, request, s.EnsureResourceMediaMetadata, s.lookupBeefTVCredential)
 	if err != nil {
 		return nil, err
 	}

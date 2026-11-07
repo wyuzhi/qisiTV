@@ -124,7 +124,7 @@ func Execute(ctx context.Context, input Input) (map[string]any, error) {
 				return nil, err
 			}
 		}
-		if err := PrepareBeefAPIVideoReferences(ctx, input.Config, &input, ownedSeedanceMediaReader(ctx, userID)); err != nil {
+		if err := PrepareBeefTVVideoReferences(ctx, input.Config, &input, ownedSeedanceMediaReader(ctx, userID)); err != nil {
 			return nil, err
 		}
 		if err := prepareFullVideoReferences(ctx, &input, ownedFullVideoMediaReader(ctx, userID)); err != nil {
@@ -206,7 +206,7 @@ func applyCanvasTextStreaming(taskType string, input *Input) {
 }
 
 func validatePreparedInput(ctx context.Context, input Input) error {
-	if ((input.Mode == "image" || input.Mode == "video" || input.Mode == "audio") && managedConnection(input.Config)) || (input.Mode == "video" && IsBeefAPIVideoConfig(ctx, input.Config)) {
+	if ((input.Mode == "image" || input.Mode == "video" || input.Mode == "audio") && managedConnection(input.Config)) || (input.Mode == "video" && IsBeefTVVideoConfig(ctx, input.Config)) {
 		if strings.TrimSpace(input.Config.BaseURL) == "" || strings.TrimSpace(input.Config.APIKey) == "" || strings.TrimSpace(input.Config.Model) == "" {
 			return errors.New("后端生成任务缺少 Base URL、API Key 或模型名")
 		}

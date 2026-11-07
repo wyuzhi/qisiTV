@@ -126,7 +126,7 @@ func canonicalLocalMigrations() []localMigration {
 			return ensureSQLiteColumn(tx, "tasks", "recovery_outcome", "TEXT")
 		}},
 		// v26 已随 v2.0.5 发布，已升级的库不会再执行它；结算原值列必须放在新版本里。
-		{version: 27, name: "task-beefapi-settlement", apply: func(tx *gorm.DB) error {
+		{version: 27, name: "task-beeftv-settlement", apply: func(tx *gorm.DB) error {
 			for _, col := range []struct{ name, def string }{
 				{"beef_usage_state", "TEXT"},
 				{"beef_billing_state", "TEXT"},

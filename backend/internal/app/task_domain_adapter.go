@@ -86,7 +86,7 @@ func (taskCatalogAdapter) HasExecutableVideoConfig(input map[string]any) bool {
 type taskSecretsAdapter struct{ s *Service }
 
 func (a taskSecretsAdapter) ResolveManaged(input map[string]any) (map[string]any, error) {
-	return a.s.resolveManagedBeefAPISecrets(input)
+	return a.s.resolveManagedBeefTVSecrets(input)
 }
 func (a taskSecretsAdapter) Protect(input map[string]any) error { return a.s.protectTaskSecrets(input) }
 func (a taskSecretsAdapter) DecryptInputJSON(raw string) (string, error) {
