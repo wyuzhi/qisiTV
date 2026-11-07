@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/database"
 	"infinite-canvas/backend/internal/generation"
 	"infinite-canvas/backend/internal/model"
@@ -79,7 +79,7 @@ func TestManagedImageDirectReferencesPersistAndReopen(t *testing.T) {
 				}
 			}
 			gatewayBytes, storageBytes, posts, puts, completes, downloads := 0, 0, 0, 0, 0, 0
-			uploads := map[string]generation.BeefAPISeedanceUploadRequest{}
+			uploads := map[string]generation.BeefTVSeedanceUploadRequest{}
 			objects := map[string][]byte{}
 			storage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				mu.Lock()
@@ -111,8 +111,8 @@ func TestManagedImageDirectReferencesPersistAndReopen(t *testing.T) {
 				mu.Lock()
 				defer mu.Unlock()
 				if r.Method == http.MethodGet && r.URL.Path == "/v1/models" {
-					w.Header().Set(beefapi.MediaProtocolHeader, beefapi.MediaProtocolVersion)
-					_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{}, "media_protocol": beefapi.MediaDiscovery{Version: beefapi.MediaProtocolVersion, SupportedMediaTypes: []string{"image"}, TaskSubmitURL: "/v1/media/tasks", TaskQueryURLTemplate: "/v1/media/tasks/{task_ref}", UploadsURL: "/v1/media/uploads"}})
+					w.Header().Set(beeftv.MediaProtocolHeader, beeftv.MediaProtocolVersion)
+					_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{}, "media_protocol": beeftv.MediaDiscovery{Version: beeftv.MediaProtocolVersion, SupportedMediaTypes: []string{"image"}, TaskSubmitURL: "/v1/media/tasks", TaskQueryURLTemplate: "/v1/media/tasks/{task_ref}", UploadsURL: "/v1/media/uploads"}})
 					return
 				}
 				if r.Method == http.MethodGet && r.URL.Path == "/v1/images/proxy" {
@@ -132,7 +132,7 @@ func TestManagedImageDirectReferencesPersistAndReopen(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.Path {
 				case "/v1/media/uploads":
-					var req generation.BeefAPISeedanceUploadRequest
+					var req generation.BeefTVSeedanceUploadRequest
 					if err := json.Unmarshal(data, &req); err != nil {
 						t.Error(err)
 						w.WriteHeader(http.StatusBadRequest)
@@ -144,7 +144,7 @@ func TestManagedImageDirectReferencesPersistAndReopen(t *testing.T) {
 					}
 					ticket := fmt.Sprintf("ticket-%d", len(uploads))
 					uploads[ticket] = req
-					_ = json.NewEncoder(w).Encode(generation.BeefAPISeedanceUploadSession{Ticket: ticket, UploadURL: storage.URL + "/objects/" + ticket, UploadMethod: "PUT", RequiredHeaders: map[string]string{"Content-Type": "image/png"}})
+					_ = json.NewEncoder(w).Encode(generation.BeefTVSeedanceUploadSession{Ticket: ticket, UploadURL: storage.URL + "/objects/" + ticket, UploadMethod: "PUT", RequiredHeaders: map[string]string{"Content-Type": "image/png"}})
 				case "/v1/media/uploads/complete":
 					var req struct {
 						Ticket string `json:"ticket"`
@@ -155,12 +155,12 @@ func TestManagedImageDirectReferencesPersistAndReopen(t *testing.T) {
 						t.Error("complete did not validate original ticket and uploaded bytes")
 					}
 					completes++
-					_ = json.NewEncoder(w).Encode(generation.BeefAPISeedanceUploadComplete{URL: storage.URL + "/objects/" + req.Ticket, Kind: metadata.Kind, Mime: metadata.Mime, Bytes: metadata.Bytes, SHA256: metadata.SHA256})
+					_ = json.NewEncoder(w).Encode(generation.BeefTVSeedanceUploadComplete{URL: storage.URL + "/objects/" + req.Ticket, Kind: metadata.Kind, Mime: metadata.Mime, Bytes: metadata.Bytes, SHA256: metadata.SHA256})
 				case "/v1/media/tasks":
 					posts++
 					var body map[string]any
 					_ = json.Unmarshal(data, &body)
-					if body["response_format"] != nil || body["model"] != tc.model || r.Header.Get(beefapi.MediaProtocolHeader) != beefapi.MediaProtocolVersion || body["task_ref"] != r.Header.Get("Idempotency-Key") {
+					if body["response_format"] != nil || body["model"] != tc.model || r.Header.Get(beeftv.MediaProtocolHeader) != beeftv.MediaProtocolVersion || body["task_ref"] != r.Header.Get("Idempotency-Key") {
 						t.Errorf("URL contract missing: %#v", body)
 					}
 					options := body["options"].(map[string]any)
@@ -230,13 +230,13 @@ func TestManagedImageDirectReferencesPersistAndReopen(t *testing.T) {
 			task := model.Task{ID: "original-task", UserID: "user-1", Type: "canvas_image", Status: model.TaskStatusRunning, LeaseOwner: "test-owner", InputJSON: string(inputJSON)}
 			expires := time.Now().Add(time.Hour)
 			task.LeaseExpiresAt = &expires
-			attempt := &model.RouteAttempt{ID: "original-attempt", TaskID: task.ID, ChannelID: beefapi.ChannelID, Status: "dispatching", DispatchState: "submission_unknown", StartedAt: time.Now()}
+			attempt := &model.RouteAttempt{ID: "original-attempt", TaskID: task.ID, ChannelID: beeftv.ChannelID, Status: "dispatching", DispatchState: "submission_unknown", StartedAt: time.Now()}
 			for _, row := range []any{&task, attempt} {
 				if err := db.Create(row).Error; err != nil {
 					t.Fatal(err)
 				}
 			}
-			ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: gateway.URL})
+			ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: gateway.URL})
 			ctx = svc.bindGenerationRuntime(ctx, generation.CallMeta{UserID: "user-1", TaskID: "original-task", TaskType: "canvas_image"})
 			ctx = withProviderSubmissionKey(ctx, attempt)
 			ctx = context.WithValue(ctx, imageTaskContext{}, task)

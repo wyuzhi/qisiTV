@@ -18,7 +18,7 @@ func TestSeedanceUploadRecoveryBeforeSingleGeneration(t *testing.T) {
 		recover bool
 	}{{"storage_signature_rejected", 403, false}, {"storage_unavailable", 503, true}, {"connection_reset", 0, true}, {"invalid_upload", 400, false}} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newBeefAPISeedanceUploadHarness(t)
+			h := newBeefTVSeedanceUploadHarness(t)
 			h.putHook = func(w http.ResponseWriter, r *http.Request) {
 				if h.puts == 1 {
 					w.WriteHeader(200)
@@ -40,7 +40,7 @@ func TestSeedanceUploadRecoveryBeforeSingleGeneration(t *testing.T) {
 			input := h.testInput(providerMedia{DataURL: dataURL("image/png", []byte("first-image"))}, providerMedia{}, providerMedia{})
 			input.ReferenceImages = append(input.ReferenceImages, providerMedia{DataURL: dataURL("image/png", []byte("second-image"))})
 			ctx, recorder := withTaskRequestEvidence(h.ctx())
-			err := prepareBeefAPISeedanceReferences(ctx, input.Config, &input, nil)
+			err := prepareBeefTVSeedanceReferences(ctx, input.Config, &input, nil)
 			d := recorder.snapshot(false)
 			confirmed := tc.status == 0 || tc.status == 503
 			wantRequests, wantCompletes := 5, 1
@@ -84,7 +84,7 @@ func TestSeedanceUploadRecoveryBeforeSingleGeneration(t *testing.T) {
 			} else if !strings.HasPrefix(input.ReferenceImages[1].DataURL, "data:image/png;base64,") {
 				t.Fatal("inline recovery lost reference")
 			}
-			body, err := beefAPIVideoRequestBody(input)
+			body, err := beefTVVideoRequestBody(input)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -97,12 +97,12 @@ func TestSeedanceUploadRecoveryBeforeSingleGeneration(t *testing.T) {
 }
 
 func TestSeedanceUploadRecoveryRetainsLargeVideoFailure(t *testing.T) {
-	h := newBeefAPISeedanceUploadHarness(t)
+	h := newBeefTVSeedanceUploadHarness(t)
 	h.putHook = func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }
 	h.completeStatus = http.StatusBadRequest
 	input := h.testInput(providerMedia{}, providerMedia{StorageKey: "resource:large-video", MimeType: "video/mp4", Bytes: 50 << 20}, providerMedia{})
 	ctx, recorder := withTaskRequestEvidence(h.ctx())
-	err := prepareBeefAPISeedanceReferences(ctx, input.Config, &input, func(string, providerMedia) ([]byte, string, bool, error) {
+	err := prepareBeefTVSeedanceReferences(ctx, input.Config, &input, func(string, providerMedia) ([]byte, string, bool, error) {
 		return paddedSyntheticVideo(t, 50<<20), "video/mp4", false, nil
 	})
 	var upload *generation.ReferenceUploadError
@@ -118,12 +118,12 @@ func TestSeedanceUploadRecoveryRetainsLargeVideoFailure(t *testing.T) {
 func TestHTTPReferenceUploadFailureDoesNotUseSeedanceInlineRecovery(t *testing.T) {
 	for _, status := range []int{http.StatusForbidden, http.StatusServiceUnavailable} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
-			h := newBeefAPISeedanceUploadHarness(t)
+			h := newBeefTVSeedanceUploadHarness(t)
 			h.putHook = func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) }
 			h.completeStatus = http.StatusBadRequest
 			input := h.testInput(providerMedia{DataURL: dataURL("image/png", []byte("image"))}, providerMedia{}, providerMedia{})
 			input.Config.Model, input.Config.InterfaceType = "wan3.0-video", "newapi-channel-2"
-			err := prepareBeefAPISeedanceReferences(h.ctx(), input.Config, &input, nil)
+			err := prepareBeefTVSeedanceReferences(h.ctx(), input.Config, &input, nil)
 			var preparation generation.RequestPreparationError
 			var upload *generation.ReferenceUploadError
 			if !errors.As(err, &preparation) || !errors.As(err, &upload) || upload.HTTPStatus != status {
@@ -141,12 +141,12 @@ func TestHTTPReferenceUploadFailureDoesNotUseSeedanceInlineRecovery(t *testing.T
 }
 
 func TestSeedanceUploadRecoveryValidatesRemainingInlineReferences(t *testing.T) {
-	h := newBeefAPISeedanceUploadHarness(t)
+	h := newBeefTVSeedanceUploadHarness(t)
 	h.putHook = func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }
 	h.completeStatus = http.StatusBadRequest
 	input := h.testInput(providerMedia{DataURL: dataURL("image/png", []byte("first-image"))}, providerMedia{}, providerMedia{})
 	input.ReferenceImages = append(input.ReferenceImages, providerMedia{DataURL: dataURL("text/html", []byte("not-an-image"))})
-	err := prepareBeefAPISeedanceReferences(h.ctx(), input.Config, &input, nil)
+	err := prepareBeefTVSeedanceReferences(h.ctx(), input.Config, &input, nil)
 	if err == nil || h.generates != 0 || h.completes != 3 || h.puts != 3 {
 		t.Fatalf("recovery skipped validation of a later reference: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestSeedanceUploadGateway4xxKeepsUploadDiagnostics(t *testing.T) {
 }
 
 func TestSeedanceUploadTruncatedStorageErrorRemainsFailure(t *testing.T) {
-	h := newBeefAPISeedanceUploadHarness(t)
+	h := newBeefTVSeedanceUploadHarness(t)
 	h.putHook = func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Length", "10000")
 		w.Header().Set("X-Amz-Request-Id", "storage-request-123456")
@@ -177,7 +177,7 @@ func TestSeedanceUploadTruncatedStorageErrorRemainsFailure(t *testing.T) {
 		_, _ = w.Write([]byte("<Error><Code>"))
 	}
 	input := h.testInput(providerMedia{DataURL: dataURL("image/png", []byte("image"))}, providerMedia{}, providerMedia{})
-	err := prepareBeefAPISeedanceReferences(h.ctx(), input.Config, &input, nil)
+	err := prepareBeefTVSeedanceReferences(h.ctx(), input.Config, &input, nil)
 	var upload *generation.ReferenceUploadError
 	if !errors.As(err, &upload) || upload.HTTPStatus != 400 || upload.RequestID != "storage-request-123456" || h.completes != 0 || h.generates != 0 {
 		t.Fatalf("truncated storage rejection was accepted: %v", err)

@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/modelcatalog"
 )
@@ -25,7 +25,7 @@ func savePortraitTestCatalog(t *testing.T, s *Service, id, modelID, quote string
 		}
 	}
 	profile := map[string]any{"model": modelID, "capability": "video", "protocol": "newapi", "videoPricing": pricing}
-	if id == beefapi.ChannelID {
+	if id == beeftv.ChannelID {
 		profile["capabilityConfig"] = modelcatalog.DefaultModelCapabilityConfigForModel("newapi", modelID)
 		profile["videoCapabilitiesVersion"] = "fixture-v1"
 	}
@@ -103,10 +103,10 @@ func TestPortraitQuoteTaskAdmission(t *testing.T) {
 
 func TestPortraitQuoteManagedAdmission(t *testing.T) {
 	s, _, _, _ := creationTestService(t)
-	savePortraitTestCatalog(t, s, beefapi.ChannelID, "seedance-2.0-portrait", portraitTestQuote)
+	savePortraitTestCatalog(t, s, beeftv.ChannelID, "seedance-2.0-portrait", portraitTestQuote)
 	req := portraitTestRequest("seedance-2.0-portrait")
 	config := req.Input["config"].(map[string]any)
-	config["channelId"], config["credentialRef"], config["apiKey"] = beefapi.ChannelID, beefapi.CredentialRef, ""
+	config["channelId"], config["credentialRef"], config["apiKey"] = beeftv.ChannelID, beeftv.CredentialRef, ""
 	if _, err := s.TaskService().CreateTask("user", toTaskCreateRequest(req)); err != nil {
 		t.Fatal(err)
 	}

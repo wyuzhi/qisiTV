@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/generation"
 	"infinite-canvas/backend/internal/model"
 )
@@ -36,11 +36,11 @@ func TestManagedAudioUsesAdvertisedOperationAndPersistsOriginal(t *testing.T) {
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.URL.Path == "/v1/models":
-					w.Header().Set(beefapi.MediaProtocolHeader, beefapi.MediaProtocolVersion)
-					_ = json.NewEncoder(w).Encode(map[string]any{"media_protocol": beefapi.MediaDiscovery{Version: beefapi.MediaProtocolVersion, SupportedMediaTypes: []string{"audio"}, TaskSubmitURL: "/v1/media/tasks", TaskQueryURLTemplate: "/v1/media/tasks/{task_ref}", UploadsURL: "/v1/media/uploads"}, "data": []any{map[string]any{"id": "opaque-audio-2030", "media_capabilities_version": "server-fixture-v1", "media_capabilities": map[string]any{"audio": beefapi.MediaCapability{Operations: []string{selected}, Options: []string{"voice", "speed", "lyrics", "is_instrumental", "lyrics_optimizer"}, MaxOutputs: 1}}}}})
+					w.Header().Set(beeftv.MediaProtocolHeader, beeftv.MediaProtocolVersion)
+					_ = json.NewEncoder(w).Encode(map[string]any{"media_protocol": beeftv.MediaDiscovery{Version: beeftv.MediaProtocolVersion, SupportedMediaTypes: []string{"audio"}, TaskSubmitURL: "/v1/media/tasks", TaskQueryURLTemplate: "/v1/media/tasks/{task_ref}", UploadsURL: "/v1/media/uploads"}, "data": []any{map[string]any{"id": "opaque-audio-2030", "media_capabilities_version": "server-fixture-v1", "media_capabilities": map[string]any{"audio": beeftv.MediaCapability{Operations: []string{selected}, Options: []string{"voice", "speed", "lyrics", "is_instrumental", "lyrics_optimizer"}, MaxOutputs: 1}}}}})
 				case r.URL.Path == "/v1/media/tasks":
 					posts.Add(1)
-					var request beefapi.MediaRequest
+					var request beeftv.MediaRequest
 					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 						t.Error(err)
 					}
@@ -88,17 +88,17 @@ func TestManagedAudioUsesAdvertisedOperationAndPersistsOriginal(t *testing.T) {
 			path, dir := filepath.Join(t.TempDir(), "workspace.db"), t.TempDir()
 			svc, db := newManagedImageDirectService(t, path, dir)
 			defer closeDB(t, db)
-			input := generation.Input{Mode: "audio", Prompt: "fixture", Config: generation.Config{CredentialRef: beefapi.CredentialRef, MediaProtocolVersion: beefapi.MediaProtocolVersion, APIKey: "fixture", BaseURL: server.URL, Model: "opaque-audio-2030", InterfaceType: "stale-plugin", AudioVoice: "speaker", AudioSpeed: "1", AudioFormat: "mp3"}, Metadata: map[string]any{"audioLyrics": "test lyrics", "audioIsInstrumental": false, "audioLyricsOptimizer": false}}
+			input := generation.Input{Mode: "audio", Prompt: "fixture", Config: generation.Config{CredentialRef: beeftv.CredentialRef, MediaProtocolVersion: beeftv.MediaProtocolVersion, APIKey: "fixture", BaseURL: server.URL, Model: "opaque-audio-2030", InterfaceType: "stale-plugin", AudioVoice: "speaker", AudioSpeed: "1", AudioFormat: "mp3"}, Metadata: map[string]any{"audioLyrics": "test lyrics", "audioIsInstrumental": false, "audioLyricsOptimizer": false}}
 			raw, _ := json.Marshal(input)
 			expires := time.Now().Add(time.Hour)
 			task := model.Task{ID: "audio-original", UserID: "user-1", Type: "canvas_audio", Status: model.TaskStatusRunning, InputJSON: string(raw), LeaseOwner: "worker", LeaseExpiresAt: &expires}
-			attempt := &model.RouteAttempt{ID: "audio-attempt", TaskID: task.ID, ChannelID: beefapi.ChannelID, Status: "dispatching", DispatchState: "submission_unknown", StartedAt: time.Now()}
+			attempt := &model.RouteAttempt{ID: "audio-attempt", TaskID: task.ID, ChannelID: beeftv.ChannelID, Status: "dispatching", DispatchState: "submission_unknown", StartedAt: time.Now()}
 			for _, row := range []any{&task, attempt} {
 				if err := db.Create(row).Error; err != nil {
 					t.Fatal(err)
 				}
 			}
-			ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: server.URL})
+			ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: server.URL})
 			ctx = svc.bindGenerationRuntime(ctx, generation.CallMeta{UserID: task.UserID, TaskID: task.ID, TaskType: task.Type})
 			ctx = context.WithValue(withProviderSubmissionKey(ctx, attempt), imageTaskContext{}, task)
 			result, err := generation.Execute(ctx, input)
@@ -146,7 +146,7 @@ func TestManagedAudioUsesAdvertisedOperationAndPersistsOriginal(t *testing.T) {
 	}
 }
 
-// BeefAPI enables audio on the unified task endpoint separately; until it lists
+// BeefTV enables audio on the unified task endpoint separately; until it lists
 // audio, a new speech task keeps using the existing speech endpoint.
 func TestManagedAudioUsesSpeechEndpointUntilAPIListsAudio(t *testing.T) {
 	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "true")
@@ -158,8 +158,8 @@ func TestManagedAudioUsesSpeechEndpointUntilAPIListsAudio(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/v1/models":
-			w.Header().Set(beefapi.MediaProtocolHeader, beefapi.MediaProtocolVersion)
-			_ = json.NewEncoder(w).Encode(map[string]any{"media_protocol": beefapi.MediaDiscovery{Version: beefapi.MediaProtocolVersion, SupportedMediaTypes: []string{"image", "video"}, TaskSubmitURL: "/v1/media/tasks", TaskQueryURLTemplate: "/v1/media/tasks/{task_ref}", UploadsURL: "/v1/media/uploads"}, "data": []any{}})
+			w.Header().Set(beeftv.MediaProtocolHeader, beeftv.MediaProtocolVersion)
+			_ = json.NewEncoder(w).Encode(map[string]any{"media_protocol": beeftv.MediaDiscovery{Version: beeftv.MediaProtocolVersion, SupportedMediaTypes: []string{"image", "video"}, TaskSubmitURL: "/v1/media/tasks", TaskQueryURLTemplate: "/v1/media/tasks/{task_ref}", UploadsURL: "/v1/media/uploads"}, "data": []any{}})
 		case r.URL.Path == "/v1/audio/speech":
 			speech.Add(1)
 			w.Header().Set("Content-Type", "audio/mpeg")
@@ -176,17 +176,17 @@ func TestManagedAudioUsesSpeechEndpointUntilAPIListsAudio(t *testing.T) {
 	path, dir := filepath.Join(t.TempDir(), "workspace.db"), t.TempDir()
 	svc, db := newManagedImageDirectService(t, path, dir)
 	defer closeDB(t, db)
-	input := generation.Input{Mode: "audio", Prompt: "秋夜鱼灯映古巷", Config: generation.Config{CredentialRef: beefapi.CredentialRef, MediaProtocolVersion: beefapi.MediaProtocolVersion, APIKey: "fixture", BaseURL: server.URL, Model: "minimax-speech-2.8-turbo", AudioVoice: "speaker", AudioFormat: "mp3"}}
+	input := generation.Input{Mode: "audio", Prompt: "秋夜鱼灯映古巷", Config: generation.Config{CredentialRef: beeftv.CredentialRef, MediaProtocolVersion: beeftv.MediaProtocolVersion, APIKey: "fixture", BaseURL: server.URL, Model: "minimax-speech-2.8-turbo", AudioVoice: "speaker", AudioFormat: "mp3"}}
 	raw, _ := json.Marshal(input)
 	expires := time.Now().Add(time.Hour)
 	task := model.Task{ID: "audio-speech", UserID: "user-1", Type: "canvas_audio", Status: model.TaskStatusRunning, InputJSON: string(raw), LeaseOwner: "worker", LeaseExpiresAt: &expires}
-	attempt := &model.RouteAttempt{ID: "audio-speech-attempt", TaskID: task.ID, ChannelID: beefapi.ChannelID, Status: "dispatching", DispatchState: "not_sent", StartedAt: time.Now()}
+	attempt := &model.RouteAttempt{ID: "audio-speech-attempt", TaskID: task.ID, ChannelID: beeftv.ChannelID, Status: "dispatching", DispatchState: "not_sent", StartedAt: time.Now()}
 	for _, row := range []any{&task, attempt} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
-	ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: server.URL})
+	ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: server.URL})
 	ctx = svc.bindGenerationRuntime(ctx, generation.CallMeta{UserID: task.UserID, TaskID: task.ID, TaskType: task.Type})
 	ctx = context.WithValue(withProviderSubmissionKey(ctx, attempt), imageTaskContext{}, task)
 	result, err := generation.Execute(ctx, input)

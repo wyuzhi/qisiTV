@@ -81,7 +81,7 @@ func TestInstalledMediaContractOverridesLegacyGuess(t *testing.T) {
 	}
 }
 
-func TestSavedBeefAPISeedanceAudioControl(t *testing.T) {
+func TestSavedBeefTVSeedanceAudioControl(t *testing.T) {
 	for _, channelID := range []string{"", "saved-channel"} {
 		for _, baseURL := range []string{"https://beeftv.app", "https://custom.example"} {
 			t.Run(channelID+baseURL, func(t *testing.T) {
@@ -99,11 +99,11 @@ func TestSavedBeefAPISeedanceAudioControl(t *testing.T) {
 				if err := svc.validateResolvedVideoCapability(&input); err != nil {
 					t.Fatal(err)
 				}
-				if input.VideoCapability.GenerateAudio.Supported != isBeefAPIVideoConfig(context.Background(), input.Config) || input.VideoCapability.GenerateAudio.Default || input.VideoCapability.References.MaxImages != 2 {
+				if input.VideoCapability.GenerateAudio.Supported != isBeefTVVideoConfig(context.Background(), input.Config) || input.VideoCapability.GenerateAudio.Default || input.VideoCapability.References.MaxImages != 2 {
 					t.Fatalf("unexpected profile: %#v", input.VideoCapability)
 				}
-				if isBeefAPIVideoConfig(context.Background(), input.Config) {
-					body, err := beefAPIVideoRequestBody(input)
+				if isBeefTVVideoConfig(context.Background(), input.Config) {
+					body, err := beefTVVideoRequestBody(input)
 					if err != nil || body["metadata"].(map[string]any)["generate_audio"] != false {
 						t.Fatalf("explicit false lost: %#v, %v", body, err)
 					}

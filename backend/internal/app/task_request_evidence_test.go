@@ -41,9 +41,9 @@ func TestReferenceRecoveryEvidenceSurvivesSQLiteAndDiagnosticZIP(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	ctx := generation.WithRuntime(context.Background(), generation.Runtime{Endpoints: generation.Endpoints{BeefAPIVideoBaseURL: server.URL}})
+	ctx := generation.WithRuntime(context.Background(), generation.Runtime{Endpoints: generation.Endpoints{BeefTVVideoBaseURL: server.URL}})
 	ctx, recorder := withTaskRequestEvidence(ctx)
-	_, uploadErr := generation.CompleteBeefAPISeedanceUpload(ctx, generation.Config{BaseURL: server.URL + "/v1"}, generation.BeefAPISeedanceUploadSession{Ticket: "private-ticket", UploadURL: server.URL + "/storage?X-Amz-Signature=PRIVATE"}, []byte("owned"))
+	_, uploadErr := generation.CompleteBeefTVSeedanceUpload(ctx, generation.Config{BaseURL: server.URL + "/v1"}, generation.BeefTVSeedanceUploadSession{Ticket: "private-ticket", UploadURL: server.URL + "/storage?X-Amz-Signature=PRIVATE"}, []byte("owned"))
 	mu.Lock()
 	defer mu.Unlock()
 	if uploadErr == nil || puts != 3 || confirms != 3 || other != 0 {

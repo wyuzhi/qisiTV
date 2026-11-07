@@ -25,17 +25,17 @@ import (
 	"infinite-canvas/backend/internal/protocol"
 )
 
-func TestBeefAPISeedancePreuploadConvertsInlineRefsAndPreservesOrder(t *testing.T) {
+func TestBeefTVSeedancePreuploadConvertsInlineRefsAndPreservesOrder(t *testing.T) {
 	imagePayload := []byte("small-png-bytes")
 	videoPayload := syntheticVideoMP4(1280, 720, 3200)
 	audioPayload := []byte("id3-audio")
-	harness := newBeefAPISeedanceUploadHarness(t)
+	harness := newBeefTVSeedanceUploadHarness(t)
 	input := harness.testInput(
 		providerMedia{ID: "img-1", DataURL: dataURL("image/png", imagePayload), MimeType: "image/png", Width: 800, Height: 800},
 		providerMedia{ID: "vid-1", DataURL: dataURL("video/mp4", videoPayload), MimeType: "video/mp4", DurationMs: 3200},
 		providerMedia{ID: "aud-1", DataURL: dataURL("audio/mpeg", audioPayload), MimeType: "audio/mpeg", DurationMs: 1800},
 	)
-	if err := prepareBeefAPISeedanceReferences(harness.ctx(), input.Config, &input, nil); err != nil {
+	if err := prepareBeefTVSeedanceReferences(harness.ctx(), input.Config, &input, nil); err != nil {
 		t.Fatal(err)
 	}
 	if harness.generates != 0 {
@@ -91,7 +91,7 @@ func TestBeefAPISeedancePreuploadConvertsInlineRefsAndPreservesOrder(t *testing.
 			t.Fatalf("PUT body mismatch kind=%s len=%d", item.kind, put.length)
 		}
 	}
-	body, err := beefAPIVideoRequestBody(input)
+	body, err := beefTVVideoRequestBody(input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,8 +126,8 @@ func TestBeefAPISeedancePreuploadConvertsInlineRefsAndPreservesOrder(t *testing.
 
 // The shared upload stage preserves order; model reference counts are checked
 // separately, and this does not enable multiple references for Wan.
-func TestBeefAPIWanPreuploadPreservesMixedReferenceOrder(t *testing.T) {
-	harness := newBeefAPISeedanceUploadHarness(t)
+func TestBeefTVWanPreuploadPreservesMixedReferenceOrder(t *testing.T) {
+	harness := newBeefTVSeedanceUploadHarness(t)
 	input := harness.testInput(providerMedia{}, providerMedia{}, providerMedia{})
 	input.Config.Model, input.Config.InterfaceType = "wan3.0-video", "newapi-channel-2"
 	input.ReferenceImages = []providerMedia{
@@ -135,7 +135,7 @@ func TestBeefAPIWanPreuploadPreservesMixedReferenceOrder(t *testing.T) {
 		{ID: "remote", URL: "https://media.example/remote.png"},
 		{ID: "last", DataURL: dataURL("image/png", []byte("last")), Width: 1280, Height: 720},
 	}
-	if err := prepareBeefAPISeedanceReferences(harness.ctx(), input.Config, &input, nil); err != nil {
+	if err := prepareBeefTVSeedanceReferences(harness.ctx(), input.Config, &input, nil); err != nil {
 		t.Fatal(err)
 	}
 	if harness.creates != 2 || harness.puts != 2 || harness.completes != 2 {
@@ -157,14 +157,14 @@ func TestBeefAPIWanPreuploadPreservesMixedReferenceOrder(t *testing.T) {
 	}
 }
 
-func TestBeefAPISeedancePreuploadSkipsPublicAndAssetURLs(t *testing.T) {
-	harness := newBeefAPISeedanceUploadHarness(t)
+func TestBeefTVSeedancePreuploadSkipsPublicAndAssetURLs(t *testing.T) {
+	harness := newBeefTVSeedanceUploadHarness(t)
 	input := harness.testInput(
 		providerMedia{ID: "img-1", URL: "https://example.com/public.png", MimeType: "image/png"},
 		providerMedia{ID: "vid-1", URL: "asset://ark-asset-1", MimeType: "video/mp4"},
 		providerMedia{},
 	)
-	if err := prepareBeefAPISeedanceReferences(harness.ctx(), input.Config, &input, nil); err != nil {
+	if err := prepareBeefTVSeedanceReferences(harness.ctx(), input.Config, &input, nil); err != nil {
 		t.Fatal(err)
 	}
 	if harness.creates != 0 || harness.puts != 0 {
@@ -175,32 +175,32 @@ func TestBeefAPISeedancePreuploadSkipsPublicAndAssetURLs(t *testing.T) {
 	}
 }
 
-func TestBeefAPISeedancePreuploadRejectsMismatchedReceipt(t *testing.T) {
+func TestBeefTVSeedancePreuploadRejectsMismatchedReceipt(t *testing.T) {
 	for field, value := range map[string]interface{}{"kind": "video", "bytes": 1, "sha256": strings.Repeat("0", 64), "mime": "text/html"} {
 		t.Run(field, func(t *testing.T) {
-			harness := newBeefAPISeedanceUploadHarness(t)
+			harness := newBeefTVSeedanceUploadHarness(t)
 			harness.mutateReceipt = func(receipt map[string]interface{}) { receipt[field] = value }
 			input := harness.testInput(providerMedia{DataURL: dataURL("image/png", []byte("image-fixture"))}, providerMedia{}, providerMedia{})
-			err := prepareBeefAPISeedanceReferences(harness.ctx(), input.Config, &input, nil)
-			if !errors.Is(err, errBeefAPISeedanceUploadIncomplete) || input.ReferenceImages[0].URL != "" || harness.generates != 0 {
+			err := prepareBeefTVSeedanceReferences(harness.ctx(), input.Config, &input, nil)
+			if !errors.Is(err, errBeefTVSeedanceUploadIncomplete) || input.ReferenceImages[0].URL != "" || harness.generates != 0 {
 				t.Fatalf("mismatched receipt accepted: err=%v generates=%d", err, harness.generates)
 			}
 		})
 	}
 }
 
-func TestBeefAPISeedancePreuploadLargeLocalReference(t *testing.T) {
-	harness := newBeefAPISeedanceUploadHarness(t)
+func TestBeefTVSeedancePreuploadLargeLocalReference(t *testing.T) {
+	harness := newBeefTVSeedanceUploadHarness(t)
 	const size = 70 << 20
 	payload := paddedSyntheticVideo(t, size)
 	input := harness.testInput(providerMedia{}, providerMedia{StorageKey: "resource:large-video", MimeType: "video/mp4", Bytes: size}, providerMedia{})
-	err := prepareBeefAPISeedanceReferences(harness.ctx(), input.Config, &input, func(string, providerMedia) ([]byte, string, bool, error) {
+	err := prepareBeefTVSeedanceReferences(harness.ctx(), input.Config, &input, func(string, providerMedia) ([]byte, string, bool, error) {
 		return payload, "video/mp4", false, nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := beefAPIVideoRequestBody(input)
+	body, err := beefTVVideoRequestBody(input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,10 +210,10 @@ func TestBeefAPISeedancePreuploadLargeLocalReference(t *testing.T) {
 	}
 }
 
-func TestBeefAPISeedancePreuploadMissingEndpointStopsBeforeGeneration(t *testing.T) {
+func TestBeefTVSeedancePreuploadMissingEndpointStopsBeforeGeneration(t *testing.T) {
 	for _, status := range []int{http.StatusNotFound, http.StatusNotImplemented} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
-			harness := newBeefAPISeedanceUploadHarness(t)
+			harness := newBeefTVSeedanceUploadHarness(t)
 			harness.createStatus = status
 			payload := []byte("tiny-image")
 			input := harness.testInput(
@@ -222,7 +222,7 @@ func TestBeefAPISeedancePreuploadMissingEndpointStopsBeforeGeneration(t *testing
 				providerMedia{},
 			)
 			var preparation generation.RequestPreparationError
-			if err := prepareBeefAPISeedanceReferences(harness.ctx(), input.Config, &input, nil); !errors.As(err, &preparation) {
+			if err := prepareBeefTVSeedanceReferences(harness.ctx(), input.Config, &input, nil); !errors.As(err, &preparation) {
 				t.Fatalf("missing upload endpoint did not stop preparation: %v", err)
 			}
 			if harness.puts != 0 || harness.completes != 0 || harness.generates != 0 {
@@ -235,8 +235,8 @@ func TestBeefAPISeedancePreuploadMissingEndpointStopsBeforeGeneration(t *testing
 	}
 }
 
-func TestBeefAPISeedancePreuploadMissingEndpointDoesNotReadInlineAgain(t *testing.T) {
-	harness := newBeefAPISeedanceUploadHarness(t)
+func TestBeefTVSeedancePreuploadMissingEndpointDoesNotReadInlineAgain(t *testing.T) {
+	harness := newBeefTVSeedanceUploadHarness(t)
 	harness.createStatus = http.StatusNotFound
 	readCalls := 0
 	input := harness.testInput(
@@ -244,7 +244,7 @@ func TestBeefAPISeedancePreuploadMissingEndpointDoesNotReadInlineAgain(t *testin
 		providerMedia{ID: "vid-1", StorageKey: "resource:huge-video", MimeType: "video/mp4", Bytes: 50 << 20},
 		providerMedia{},
 	)
-	err := prepareBeefAPISeedanceReferences(harness.ctx(), input.Config, &input, func(kind string, media providerMedia) ([]byte, string, bool, error) {
+	err := prepareBeefTVSeedanceReferences(harness.ctx(), input.Config, &input, func(kind string, media providerMedia) ([]byte, string, bool, error) {
 		readCalls++
 		return syntheticVideoMP4(1280, 720, 1000), "video/mp4", false, nil
 	})
@@ -260,15 +260,15 @@ func TestBeefAPISeedancePreuploadMissingEndpointDoesNotReadInlineAgain(t *testin
 	}
 }
 
-func TestBeefAPISeedancePreuploadCompleteErrorPreventsGenerate(t *testing.T) {
-	harness := newBeefAPISeedanceUploadHarness(t)
+func TestBeefTVSeedancePreuploadCompleteErrorPreventsGenerate(t *testing.T) {
+	harness := newBeefTVSeedanceUploadHarness(t)
 	harness.completeStatus = http.StatusBadRequest
 	input := harness.testInput(
 		providerMedia{ID: "img-1", DataURL: dataURL("image/png", []byte("png-bytes")), MimeType: "image/png"},
 		providerMedia{},
 		providerMedia{},
 	)
-	err := prepareBeefAPISeedanceReferences(harness.ctx(), input.Config, &input, nil)
+	err := prepareBeefTVSeedanceReferences(harness.ctx(), input.Config, &input, nil)
 	var upload *generation.ReferenceUploadError
 	if !errors.As(err, &upload) || upload.Meta.Stage != "complete" || upload.Meta.Attempt != 1 || !strings.Contains(upload.Detail, "还没有收到文件，请先把文件传完再确认") {
 		t.Fatalf("error = %v, want user-facing complete message", err)
@@ -281,8 +281,8 @@ func TestBeefAPISeedancePreuploadCompleteErrorPreventsGenerate(t *testing.T) {
 	}
 }
 
-func TestBeefAPISeedancePreuploadCompleteUnknown400KeepsDiagnostic(t *testing.T) {
-	harness := newBeefAPISeedanceUploadHarness(t)
+func TestBeefTVSeedancePreuploadCompleteUnknown400KeepsDiagnostic(t *testing.T) {
+	harness := newBeefTVSeedanceUploadHarness(t)
 	harness.completeStatus = http.StatusBadRequest
 	harness.completeBody = []byte(`{"error":{"message":"ticket sha256 mismatch on r2 upload_url"}}`)
 	input := harness.testInput(
@@ -290,7 +290,7 @@ func TestBeefAPISeedancePreuploadCompleteUnknown400KeepsDiagnostic(t *testing.T)
 		providerMedia{},
 		providerMedia{},
 	)
-	err := prepareBeefAPISeedanceReferences(harness.ctx(), input.Config, &input, nil)
+	err := prepareBeefTVSeedanceReferences(harness.ctx(), input.Config, &input, nil)
 	var upload *generation.ReferenceUploadError
 	if !errors.As(err, &upload) || upload.HTTPStatus != 400 || upload.Meta.Stage != "complete" || !strings.Contains(upload.Detail, "sha256 mismatch") {
 		t.Fatalf("error = %v, want structured confirmation error", err)
@@ -300,10 +300,10 @@ func TestBeefAPISeedancePreuploadCompleteUnknown400KeepsDiagnostic(t *testing.T)
 	}
 }
 
-func TestBeefAPISeedancePreuploadCancelSkipsGenerate(t *testing.T) {
+func TestBeefTVSeedancePreuploadCancelSkipsGenerate(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
-	harness := newBeefAPISeedanceUploadHarness(t)
+	harness := newBeefTVSeedanceUploadHarness(t)
 	harness.putHook = func(http.ResponseWriter, *http.Request) {
 		close(started)
 		<-release
@@ -317,7 +317,7 @@ func TestBeefAPISeedancePreuploadCancelSkipsGenerate(t *testing.T) {
 	)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- prepareBeefAPISeedanceReferences(ctx, input.Config, &input, nil)
+		errCh <- prepareBeefTVSeedanceReferences(ctx, input.Config, &input, nil)
 	}()
 	select {
 	case <-started:
@@ -335,15 +335,15 @@ func TestBeefAPISeedancePreuploadCancelSkipsGenerate(t *testing.T) {
 	}
 }
 
-func TestBeefAPISeedancePreuploadRejectsCreateErrorAfterStart(t *testing.T) {
-	harness := newBeefAPISeedanceUploadHarness(t)
+func TestBeefTVSeedancePreuploadRejectsCreateErrorAfterStart(t *testing.T) {
+	harness := newBeefTVSeedanceUploadHarness(t)
 	harness.failCreateAfter = 1
 	input := harness.testInput(
 		providerMedia{ID: "img-1", DataURL: dataURL("image/png", []byte("one")), MimeType: "image/png"},
 		providerMedia{},
 		providerMedia{ID: "aud-1", DataURL: dataURL("audio/mpeg", []byte("two")), MimeType: "audio/mpeg"},
 	)
-	err := prepareBeefAPISeedanceReferences(harness.ctx(), input.Config, &input, nil)
+	err := prepareBeefTVSeedanceReferences(harness.ctx(), input.Config, &input, nil)
 	if err == nil {
 		t.Fatal("later create 404 silently fell back")
 	}
@@ -361,16 +361,16 @@ func TestBeefAPISeedancePreuploadRejectsCreateErrorAfterStart(t *testing.T) {
 	}
 }
 
-func TestBeefAPISeedancePreuploadRejectsRedirect(t *testing.T) {
-	harness := newBeefAPISeedanceUploadHarness(t)
+func TestBeefTVSeedancePreuploadRejectsRedirect(t *testing.T) {
+	harness := newBeefTVSeedanceUploadHarness(t)
 	harness.redirectPut = true
 	input := harness.testInput(
 		providerMedia{ID: "img-1", DataURL: dataURL("image/png", []byte("png-bytes")), MimeType: "image/png"},
 		providerMedia{},
 		providerMedia{},
 	)
-	err := prepareBeefAPISeedanceReferences(harness.ctx(), input.Config, &input, nil)
-	if err == nil || !errors.Is(err, errBeefAPISeedanceUploadUnavailable) {
+	err := prepareBeefTVSeedanceReferences(harness.ctx(), input.Config, &input, nil)
+	if err == nil || !errors.Is(err, errBeefTVSeedanceUploadUnavailable) {
 		t.Fatalf("error = %v, want redirect rejection", err)
 	}
 	if harness.completes != 0 || harness.generates != 0 {
@@ -378,8 +378,8 @@ func TestBeefAPISeedancePreuploadRejectsRedirect(t *testing.T) {
 	}
 }
 
-func TestBeefAPISeedancePreuploadNoAuthOnPut(t *testing.T) {
-	harness := newBeefAPISeedanceUploadHarness(t)
+func TestBeefTVSeedancePreuploadNoAuthOnPut(t *testing.T) {
+	harness := newBeefTVSeedanceUploadHarness(t)
 	payload := []byte("png-bytes")
 	input := harness.testInput(
 		providerMedia{ID: "img-1", DataURL: dataURL("image/png", payload), MimeType: "image/png"},
@@ -388,7 +388,7 @@ func TestBeefAPISeedancePreuploadNoAuthOnPut(t *testing.T) {
 	)
 	input.Config.APIKey = "secret-key-do-not-leak"
 	input.Config.Headers = []OutboundHeader{{Name: "X-Debug-Trace", Value: "should-not-be-on-put"}}
-	if err := prepareBeefAPISeedanceReferences(harness.ctx(), input.Config, &input, nil); err != nil {
+	if err := prepareBeefTVSeedanceReferences(harness.ctx(), input.Config, &input, nil); err != nil {
 		t.Fatal(err)
 	}
 	put := harness.putsByTicket["image"]
@@ -410,8 +410,8 @@ func TestBeefAPISeedancePreuploadNoAuthOnPut(t *testing.T) {
 	}
 }
 
-func TestBeefAPISeedancePreuploadCustomChannelUnchanged(t *testing.T) {
-	harness := newBeefAPISeedanceUploadHarness(t)
+func TestBeefTVSeedancePreuploadCustomChannelUnchanged(t *testing.T) {
+	harness := newBeefTVSeedanceUploadHarness(t)
 	payload := []byte("png-bytes")
 	input := canvasGenerationInput{
 		Mode:   "video",
@@ -428,13 +428,13 @@ func TestBeefAPISeedancePreuploadCustomChannelUnchanged(t *testing.T) {
 		ReferenceImages: []providerMedia{{ID: "img-1", DataURL: dataURL("image/png", payload), MimeType: "image/png"}},
 		Metadata:        map[string]interface{}{"videoEditOperation": "reference_to_video"},
 	}
-	if err := prepareBeefAPISeedanceReferences(context.Background(), input.Config, &input, nil); err != nil {
+	if err := prepareBeefTVSeedanceReferences(context.Background(), input.Config, &input, nil); err != nil {
 		t.Fatal(err)
 	}
 	if harness.creates != 0 {
 		t.Fatalf("custom channel used preupload: %d", harness.creates)
 	}
-	body, err := beefAPIVideoRequestBody(input)
+	body, err := beefTVVideoRequestBody(input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,18 +445,18 @@ func TestBeefAPISeedancePreuploadCustomChannelUnchanged(t *testing.T) {
 	}
 }
 
-func TestBeefAPISeedancePreuploadRejectsOversizedFileBeforeNetwork(t *testing.T) {
-	harness := newBeefAPISeedanceUploadHarness(t)
+func TestBeefTVSeedancePreuploadRejectsOversizedFileBeforeNetwork(t *testing.T) {
+	harness := newBeefTVSeedanceUploadHarness(t)
 	readCalls := 0
 	input := harness.testInput(
-		providerMedia{ID: "img-1", StorageKey: "resource:too-big", MimeType: "image/png", Bytes: beefAPISeedanceImageMaxBytes + 1},
+		providerMedia{ID: "img-1", StorageKey: "resource:too-big", MimeType: "image/png", Bytes: beefTVSeedanceImageMaxBytes + 1},
 		providerMedia{},
 		providerMedia{},
 	)
 	// File limits are directory capabilities, never inferred from the model ID.
 	input.VideoCapability = &generation.VideoCapabilityConfig{}
-	input.VideoCapability.References.MaxImageBytes = beefAPISeedanceImageMaxBytes
-	err := prepareBeefAPISeedanceReferences(harness.ctx(), input.Config, &input, func(kind string, media providerMedia) ([]byte, string, bool, error) {
+	input.VideoCapability.References.MaxImageBytes = beefTVSeedanceImageMaxBytes
+	err := prepareBeefTVSeedanceReferences(harness.ctx(), input.Config, &input, func(kind string, media providerMedia) ([]byte, string, bool, error) {
 		readCalls++
 		return []byte("nope"), "image/png", false, nil
 	})
@@ -468,8 +468,8 @@ func TestBeefAPISeedancePreuploadRejectsOversizedFileBeforeNetwork(t *testing.T)
 	}
 }
 
-func TestBeefAPISeedancePreuploadResolvesLocalResource(t *testing.T) {
-	harness := newBeefAPISeedanceUploadHarness(t)
+func TestBeefTVSeedancePreuploadResolvesLocalResource(t *testing.T) {
+	harness := newBeefTVSeedanceUploadHarness(t)
 	svc := newResourceTestService(t)
 	localDir := filepath.Join(svc.dataDir, "resources", "users", "user-1", "image")
 	if err := os.MkdirAll(localDir, 0o755); err != nil {
@@ -480,14 +480,14 @@ func TestBeefAPISeedancePreuploadResolvesLocalResource(t *testing.T) {
 		t.Fatal(err)
 	}
 	resource := model.Resource{
-		ID: "beefapi-preupload-local", UserID: "user-1", Kind: "image", Status: model.ResourceStatusReady,
+		ID: "beeftv-preupload-local", UserID: "user-1", Kind: "image", Status: model.ResourceStatusReady,
 		Provider: "local", ObjectKey: "users/user-1/image/reference.png", MimeType: "image/png", Size: int64(len(payload)),
 	}
 	if err := svc.repo.CreateResource(&resource); err != nil {
 		t.Fatal(err)
 	}
 	input := harness.testInput(
-		providerMedia{ID: "img-1", StorageKey: "resource:beefapi-preupload-local", MimeType: "image/png"},
+		providerMedia{ID: "img-1", StorageKey: "resource:beeftv-preupload-local", MimeType: "image/png"},
 		providerMedia{},
 		providerMedia{},
 	)
@@ -497,7 +497,7 @@ func TestBeefAPISeedancePreuploadResolvesLocalResource(t *testing.T) {
 	if input.ReferenceImages[0].DataURL != "" {
 		t.Fatalf("keepLocal inlined before upload: %#v", input.ReferenceImages[0])
 	}
-	if err := svc.prepareBeefAPISeedanceReferences(harness.ctx(), "user-1", &input); err != nil {
+	if err := svc.prepareBeefTVSeedanceReferences(harness.ctx(), "user-1", &input); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(input.ReferenceImages[0].URL, harness.server.URL+"/named/") || input.ReferenceImages[0].DataURL != "" || input.ReferenceImages[0].StorageKey != "" {
@@ -508,8 +508,8 @@ func TestBeefAPISeedancePreuploadResolvesLocalResource(t *testing.T) {
 	}
 }
 
-func TestBeefAPISeedanceDirectTaskKeepsInlineWithoutResourceReader(t *testing.T) {
-	harness := newBeefAPISeedanceUploadHarness(t)
+func TestBeefTVSeedanceDirectTaskKeepsInlineWithoutResourceReader(t *testing.T) {
+	harness := newBeefTVSeedanceUploadHarness(t)
 	input := harness.testInput(
 		providerMedia{ID: "img-1", DataURL: dataURL("image/png", []byte("png-bytes")), MimeType: "image/png"},
 		providerMedia{},
@@ -524,24 +524,24 @@ func TestBeefAPISeedanceDirectTaskKeepsInlineWithoutResourceReader(t *testing.T)
 	}
 }
 
-func TestBeefAPISeedancePutTimeoutHonorsTicketAndContext(t *testing.T) {
-	if got := beefAPISeedancePutTimeout(context.Background()); got != beefAPISeedanceUploadTimeout || got == providerHTTPTimeout {
+func TestBeefTVSeedancePutTimeoutHonorsTicketAndContext(t *testing.T) {
+	if got := beefTVSeedancePutTimeout(context.Background()); got != beefTVSeedanceUploadTimeout || got == providerHTTPTimeout {
 		t.Fatalf("timeout = %s, want 15m dedicated upload window", got)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	if got := beefAPISeedancePutTimeout(ctx); got > 90*time.Second || got <= 0 {
+	if got := beefTVSeedancePutTimeout(ctx); got > 90*time.Second || got <= 0 {
 		t.Fatalf("shorter context remaining not honored: %s", got)
 	}
 	long, stop := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer stop()
-	if got := beefAPISeedancePutTimeout(long); got != beefAPISeedanceUploadTimeout {
+	if got := beefTVSeedancePutTimeout(long); got != beefTVSeedanceUploadTimeout {
 		t.Fatalf("long task deadline = %s, want ticket window not generic 5m", got)
 	}
 }
 
-func TestBeefAPISeedancePreuploadOpenResourceLargeLocalVideo(t *testing.T) {
-	harness := newBeefAPISeedanceUploadHarness(t)
+func TestBeefTVSeedancePreuploadOpenResourceLargeLocalVideo(t *testing.T) {
+	harness := newBeefTVSeedanceUploadHarness(t)
 	svc := newResourceTestService(t)
 	const size = 70 << 20
 	localDir := filepath.Join(svc.dataDir, "resources", "users", "user-1", "video")
@@ -563,7 +563,7 @@ func TestBeefAPISeedancePreuploadOpenResourceLargeLocalVideo(t *testing.T) {
 		t.Fatal(err)
 	}
 	resource := model.Resource{
-		ID: "beefapi-preupload-large-video", UserID: "user-1", Kind: "video", Status: model.ResourceStatusReady,
+		ID: "beeftv-preupload-large-video", UserID: "user-1", Kind: "video", Status: model.ResourceStatusReady,
 		Provider: "local", ObjectKey: "users/user-1/video/reference.mp4", MimeType: "video/mp4",
 		Size: size, Width: 1280, Height: 720, DurationMs: 3200,
 	}
@@ -572,7 +572,7 @@ func TestBeefAPISeedancePreuploadOpenResourceLargeLocalVideo(t *testing.T) {
 	}
 	input := harness.testInput(
 		providerMedia{},
-		providerMedia{ID: "vid-1", StorageKey: "resource:beefapi-preupload-large-video", MimeType: "video/mp4"},
+		providerMedia{ID: "vid-1", StorageKey: "resource:beeftv-preupload-large-video", MimeType: "video/mp4"},
 		providerMedia{},
 	)
 	if err := svc.hydrateVideoReferenceMetadata(harness.ctx(), "user-1", &input); err != nil {
@@ -590,10 +590,10 @@ func TestBeefAPISeedancePreuploadOpenResourceLargeLocalVideo(t *testing.T) {
 	if err := svc.hydrateGenerationMedia("user-1", &input, providerMediaHydrationPolicyFor(harness.ctx(), input)); err != nil {
 		t.Fatal(err)
 	}
-	if input.ReferenceVideos[0].DataURL != "" || input.ReferenceVideos[0].URL != "" || input.ReferenceVideos[0].StorageKey != "resource:beefapi-preupload-large-video" {
+	if input.ReferenceVideos[0].DataURL != "" || input.ReferenceVideos[0].URL != "" || input.ReferenceVideos[0].StorageKey != "resource:beeftv-preupload-large-video" {
 		t.Fatalf("keepLocal lost owned video: %#v", input.ReferenceVideos[0])
 	}
-	if err := svc.prepareBeefAPISeedanceReferences(harness.ctx(), "user-1", &input); err != nil {
+	if err := svc.prepareBeefTVSeedanceReferences(harness.ctx(), "user-1", &input); err != nil {
 		t.Fatal(err)
 	}
 	if input.ReferenceVideos[0].Width != 1280 || input.ReferenceVideos[0].Height != 720 || input.ReferenceVideos[0].DurationMs != 3200 {
@@ -605,7 +605,7 @@ func TestBeefAPISeedancePreuploadOpenResourceLargeLocalVideo(t *testing.T) {
 	if !strings.HasPrefix(input.ReferenceVideos[0].URL, harness.server.URL+"/named/") || input.ReferenceVideos[0].DataURL != "" || input.ReferenceVideos[0].StorageKey != "" {
 		t.Fatalf("OpenResource video not rewritten: %#v", input.ReferenceVideos[0])
 	}
-	body, err := beefAPIVideoRequestBody(input)
+	body, err := beefTVVideoRequestBody(input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -615,8 +615,8 @@ func TestBeefAPISeedancePreuploadOpenResourceLargeLocalVideo(t *testing.T) {
 	}
 }
 
-func TestBeefAPISeedancePreuploadRejectsLocalImageWithMissingStoredGeometry(t *testing.T) {
-	harness := newBeefAPISeedanceUploadHarness(t)
+func TestBeefTVSeedancePreuploadRejectsLocalImageWithMissingStoredGeometry(t *testing.T) {
+	harness := newBeefTVSeedanceUploadHarness(t)
 	svc := newResourceTestService(t)
 	var data bytes.Buffer
 	if err := png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 100, 100))); err != nil {
@@ -646,13 +646,13 @@ func TestBeefAPISeedancePreuploadRejectsLocalImageWithMissingStoredGeometry(t *t
 	if input.ReferenceImages[0].Width != 100 || input.ReferenceImages[0].Height != 100 {
 		t.Fatal("header geometry was lost")
 	}
-	err := svc.prepareBeefAPISeedanceReferences(harness.ctx(), "user-1", &input)
+	err := svc.prepareBeefTVSeedanceReferences(harness.ctx(), "user-1", &input)
 	if err == nil || harness.creates != 0 || harness.generates != 0 {
 		t.Fatalf("invalid image reached network: err=%v create=%d generate=%d", err, harness.creates, harness.generates)
 	}
 }
 
-func TestBeefAPISeedancePreuploadRejectsProbedVideoBoundsBeforeUpload(t *testing.T) {
+func TestBeefTVSeedancePreuploadRejectsProbedVideoBoundsBeforeUpload(t *testing.T) {
 	for _, tc := range []struct {
 		name                    string
 		width, height, duration int
@@ -660,13 +660,13 @@ func TestBeefAPISeedancePreuploadRejectsProbedVideoBoundsBeforeUpload(t *testing
 		{"pixels", 100, 100, 3200}, {"duration", 1280, 720, 90000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			harness := newBeefAPISeedanceUploadHarness(t)
+			harness := newBeefTVSeedanceUploadHarness(t)
 			svc := newResourceTestService(t)
 			input := harness.testInput(providerMedia{}, providerMedia{StorageKey: "resource:video"}, providerMedia{})
 			if err := svc.resolveVideoCapability(harness.ctx(), &input); err != nil {
 				t.Fatal(err)
 			}
-			err := prepareBeefAPISeedanceReferences(harness.ctx(), input.Config, &input, func(string, providerMedia) ([]byte, string, bool, error) {
+			err := prepareBeefTVSeedanceReferences(harness.ctx(), input.Config, &input, func(string, providerMedia) ([]byte, string, bool, error) {
 				return syntheticVideoMP4(tc.width, tc.height, int64(tc.duration)), "video/mp4", false, nil
 			})
 			if err == nil || harness.creates != 0 || harness.puts != 0 {
@@ -676,7 +676,7 @@ func TestBeefAPISeedancePreuploadRejectsProbedVideoBoundsBeforeUpload(t *testing
 	}
 }
 
-func TestBeefAPISeedanceJSONLimitStillMatchesArk(t *testing.T) {
+func TestBeefTVSeedanceJSONLimitStillMatchesArk(t *testing.T) {
 	const limit = 64 * 1024 * 1024
 	_, _, err := protocolRequestBody(context.Background(), providerConfig{InterfaceType: "volcengine-ark-video"}, protocol.RequestSpec{
 		ContentType: "application/json",
@@ -687,14 +687,14 @@ func TestBeefAPISeedanceJSONLimitStillMatchesArk(t *testing.T) {
 	}
 }
 
-type beefAPISeedancePutRecord struct {
+type beefTVSeedancePutRecord struct {
 	auth    string
 	headers http.Header
 	body    []byte
 	length  int64
 }
 
-type beefAPISeedanceUploadHarness struct {
+type beefTVSeedanceUploadHarness struct {
 	server          *httptest.Server
 	mu              sync.Mutex
 	creates         int
@@ -708,16 +708,16 @@ type beefAPISeedanceUploadHarness struct {
 	redirectPut     bool
 	createAuth      string
 	completeAuth    string
-	createBodies    []beefAPISeedanceUploadRequest
-	putsByTicket    map[string]beefAPISeedancePutRecord
+	createBodies    []beefTVSeedanceUploadRequest
+	putsByTicket    map[string]beefTVSeedancePutRecord
 	putHook         func(http.ResponseWriter, *http.Request)
 	mutateReceipt   func(map[string]interface{})
 }
 
-func newBeefAPISeedanceUploadHarness(t *testing.T) *beefAPISeedanceUploadHarness {
+func newBeefTVSeedanceUploadHarness(t *testing.T) *beefTVSeedanceUploadHarness {
 	t.Helper()
 	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "true")
-	harness := &beefAPISeedanceUploadHarness{putsByTicket: map[string]beefAPISeedancePutRecord{}}
+	harness := &beefTVSeedanceUploadHarness{putsByTicket: map[string]beefTVSeedancePutRecord{}}
 	harness.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/media/uploads/complete"):
@@ -766,7 +766,7 @@ func newBeefAPISeedanceUploadHarness(t *testing.T) *beefAPISeedanceUploadHarness
 			redirectPut := harness.redirectPut
 			harness.mu.Unlock()
 			body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<16))
-			var req beefAPISeedanceUploadRequest
+			var req beefTVSeedanceUploadRequest
 			if err := json.Unmarshal(body, &req); err != nil {
 				t.Errorf("create JSON: %v", err)
 			}
@@ -802,8 +802,8 @@ func newBeefAPISeedanceUploadHarness(t *testing.T) *beefAPISeedanceUploadHarness
 			http.Redirect(w, r, "/objects/"+strings.TrimPrefix(r.URL.Path, "/redirect/"), http.StatusFound)
 		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/objects/"):
 			ticket := strings.TrimPrefix(r.URL.Path, "/objects/")
-			body, _ := io.ReadAll(io.LimitReader(r.Body, beefAPISeedanceVideoMaxBytes+1))
-			record := beefAPISeedancePutRecord{
+			body, _ := io.ReadAll(io.LimitReader(r.Body, beefTVSeedanceVideoMaxBytes+1))
+			record := beefTVSeedancePutRecord{
 				auth:    r.Header.Get("Authorization"),
 				headers: r.Header.Clone(),
 				body:    append([]byte(nil), body...),
@@ -832,9 +832,9 @@ func newBeefAPISeedanceUploadHarness(t *testing.T) *beefAPISeedanceUploadHarness
 	return harness
 }
 
-func (h *beefAPISeedanceUploadHarness) ctx() context.Context {
+func (h *beefTVSeedanceUploadHarness) ctx() context.Context {
 	return generation.WithRuntime(context.Background(), generation.Runtime{
-		Endpoints: generation.Endpoints{BeefAPIVideoBaseURL: h.server.URL},
+		Endpoints: generation.Endpoints{BeefTVVideoBaseURL: h.server.URL},
 		Probe:     appMediaProbe{},
 	})
 }
@@ -850,7 +850,7 @@ func paddedSyntheticVideo(t *testing.T, size int) []byte {
 	return data
 }
 
-func (h *beefAPISeedanceUploadHarness) testInput(image, video, audio providerMedia) canvasGenerationInput {
+func (h *beefTVSeedanceUploadHarness) testInput(image, video, audio providerMedia) canvasGenerationInput {
 	input := canvasGenerationInput{
 		Mode:   "video",
 		Prompt: "make the character walk",

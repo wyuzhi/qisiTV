@@ -13,7 +13,7 @@ import (
 	"infinite-canvas/backend/internal/model"
 )
 
-func TestBeefAPIVideoSettlementPendingThenFailed(t *testing.T) {
+func TestBeefTVVideoSettlementPendingThenFailed(t *testing.T) {
 	t.Setenv("CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS", "127.0.0.1")
 	svc, db := openDBRuntimeMatrix(t, t.TempDir())
 	defer closeDBRuntimeMatrix(t, svc, db)
@@ -76,7 +76,7 @@ func TestBeefAPIVideoSettlementPendingThenFailed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: gateway.URL})
+	ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: gateway.URL})
 	_ = svc.recoverFailedVideo(ctx, task)
 
 	first, err := svc.Task("local", task.ID)
@@ -113,7 +113,7 @@ func TestBeefAPIVideoSettlementPendingThenFailed(t *testing.T) {
 	}
 }
 
-func TestBeefAPIImageJobSettlementPendingRefundedAndAbsent(t *testing.T) {
+func TestBeefTVImageJobSettlementPendingRefundedAndAbsent(t *testing.T) {
 	t.Setenv("CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS", "127.0.0.1")
 
 	t.Run("pending-to-refunded", func(t *testing.T) {
@@ -165,7 +165,7 @@ func TestBeefAPIImageJobSettlementPendingRefundedAndAbsent(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: gateway.URL})
+		ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: gateway.URL})
 		if err := s.recoverFailedImage(ctx, task); err != nil {
 			t.Fatal(err)
 		}
@@ -234,7 +234,7 @@ func TestBeefAPIImageJobSettlementPendingRefundedAndAbsent(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: gateway.URL})
+		ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: gateway.URL})
 		if err := s.recoverFailedImage(ctx, task); err != nil {
 			t.Fatal(err)
 		}
@@ -279,7 +279,7 @@ func TestBeefAPIImageJobSettlementPendingRefundedAndAbsent(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: gateway.URL})
+		ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: gateway.URL})
 		if err := s.recoverFailedImage(ctx, task); err != nil {
 			t.Fatal(err)
 		}

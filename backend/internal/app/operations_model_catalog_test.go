@@ -12,7 +12,7 @@ import (
 	"infinite-canvas/backend/internal/operations"
 )
 
-func TestAgentModelCatalogBeefAPIVideoContractAndAudioPayload(t *testing.T) {
+func TestAgentModelCatalogBeefTVVideoContractAndAudioPayload(t *testing.T) {
 	for _, tc := range []struct {
 		name, baseURL                     string
 		configured, audioDefault, sourced bool
@@ -76,7 +76,7 @@ func TestAgentModelCatalogBeefAPIVideoContractAndAudioPayload(t *testing.T) {
 				t.Fatalf("does not match generation contract: %#v", video)
 			}
 			for _, audio := range []bool{video.GenerateAudio.Default, true, false} {
-				payload, err := generation.BeefAPIVideoRequestBody(generation.Input{Mode: "video", Prompt: "synthetic scene", Config: generation.Config{Model: "kling-video-v3", VideoSeconds: strconv.Itoa(video.Duration.Default), VQuality: video.DefaultResolution, Size: video.DefaultRatio, VideoGenerateAudio: strconv.FormatBool(audio)}})
+				payload, err := generation.BeefTVVideoRequestBody(generation.Input{Mode: "video", Prompt: "synthetic scene", Config: generation.Config{Model: "kling-video-v3", VideoSeconds: strconv.Itoa(video.Duration.Default), VQuality: video.DefaultResolution, Size: video.DefaultRatio, VideoGenerateAudio: strconv.FormatBool(audio)}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -137,7 +137,7 @@ func TestAgentModelCatalogDesktopUsesActualSnapshotWithoutCredentials(t *testing
 		t.Fatalf("refresh=%#v %v", refreshed, err)
 	}
 }
-// BeefAPI publishes image models without a prompt limit as promptMaxChars 0.
+// BeefTV publishes image models without a prompt limit as promptMaxChars 0.
 func TestAgentModelCatalogKeepsUnlimitedPromptImageModelsPriced(t *testing.T) {
 	svc, _ := newModelCatalogTestService(t)
 	svc.mode = serviceModeLocal

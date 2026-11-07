@@ -101,7 +101,7 @@ func TestProviderMediaHydrationPolicyPrefersObjectURLs(t *testing.T) {
 	}
 }
 
-func TestProviderDownloadURLNormalizesBeefAPIResultToConfiguredOrigin(t *testing.T) {
+func TestProviderDownloadURLNormalizesBeefTVResultToConfiguredOrigin(t *testing.T) {
 	tests := []struct {
 		name, baseURL, resultURL string
 		want                     string
@@ -1612,16 +1612,16 @@ func TestSeedance25AudioOnlyRequestBodyOmitsRequiredImage(t *testing.T) {
 	}
 }
 
-func TestBeefAPIAudioURLAcceptsDataAssetAndHTTPS(t *testing.T) {
-	data, err := beefAPIAudioURL(providerMedia{DataURL: "data:audio/mpeg;base64,AAAA"})
+func TestBeefTVAudioURLAcceptsDataAssetAndHTTPS(t *testing.T) {
+	data, err := beefTVAudioURL(providerMedia{DataURL: "data:audio/mpeg;base64,AAAA"})
 	if err != nil || data != "data:audio/mpeg;base64,AAAA" {
 		t.Fatalf("data audio = %q, %v", data, err)
 	}
-	asset, err := beefAPIAudioURL(providerMedia{URL: "asset://voice"})
+	asset, err := beefTVAudioURL(providerMedia{URL: "asset://voice"})
 	if err != nil || asset != "asset://voice" {
 		t.Fatalf("asset audio = %q, %v", asset, err)
 	}
-	url, err := beefAPIAudioURL(providerMedia{URL: "https://cdn.example.com/a.mp3"})
+	url, err := beefTVAudioURL(providerMedia{URL: "https://cdn.example.com/a.mp3"})
 	if err != nil || url != "https://cdn.example.com/a.mp3" {
 		t.Fatalf("https audio = %q, %v", url, err)
 	}
@@ -1698,7 +1698,7 @@ func TestSeedanceVideosBodyUsesVideosEndpointFields(t *testing.T) {
 	}
 }
 
-func TestSeedancePollStatusUsesBeefAPINestedGenerationState(t *testing.T) {
+func TestSeedancePollStatusUsesBeefTVNestedGenerationState(t *testing.T) {
 	status, videoURL := seedancePollStatusAndURL(map[string]interface{}{
 		"status": "in_progress",
 		"metadata": map[string]interface{}{

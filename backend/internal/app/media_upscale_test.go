@@ -18,7 +18,7 @@ func TestUpscaleAdmissionPinsOfficialCredentialAndPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 	input := map[string]any{"mode": "image", "prompt": "AI 超分", "config": map[string]any{"credentialRef": "beeftv", "apiKey": "forged-client-key", "baseUrl": "https://untrusted.invalid", "model": "topaz-standard-v2", "interfaceType": "newapi"}, "upscale": map[string]any{"factor": 2}, "referenceImages": []any{map[string]any{"storageKey": "resource:owned-source"}}}
-	resolved, err := s.resolveManagedBeefAPISecrets(input)
+	resolved, err := s.resolveManagedBeefTVSecrets(input)
 	if err != nil {
 		t.Fatal(err)
 	}

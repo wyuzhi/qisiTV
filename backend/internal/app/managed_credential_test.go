@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/protocol"
 )
 
@@ -27,7 +27,7 @@ func TestManagedGeminiCatalogCredentialProviderChain(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"gemini-generate-content", "google-gemini-generate-content"} {
-		resolved, err := s.resolveManagedBeefAPISecrets(map[string]any{"config": map[string]any{"channelId": "beeftv", "credentialRef": beefapi.CredentialRef, "interfaceType": id}})
+		resolved, err := s.resolveManagedBeefTVSecrets(map[string]any{"config": map[string]any{"channelId": "beeftv", "credentialRef": beeftv.CredentialRef, "interfaceType": id}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -53,7 +53,7 @@ func TestManagedGeminiCatalogCredentialProviderChain(t *testing.T) {
 	}
 }
 
-func TestCustomRelayOnlyInjectsBeefAPIKeyForExactConfiguredOrigin(t *testing.T) {
+func TestCustomRelayOnlyInjectsBeefTVKeyForExactConfiguredOrigin(t *testing.T) {
 	s, _, _, _ := creationTestService(t)
 	if err := s.SaveLocalModelConfig([]byte(`{"channels":[{"id":"beeftv","baseUrl":"https://beeftv.app","apiKey":"disk-secret"}]}`)); err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestCustomRelayOnlyInjectsBeefAPIKeyForExactConfiguredOrigin(t *testing.T) 
 		"http://localhost:9999/v1/chat/completions",
 		"https://beeftv.app.attacker.example/v1/chat/completions",
 		"https://user@beeftv.app/v1/chat/completions",
-		"https://enterprise.beefapi.com/v1/chat/completions",
+		"https://legacy-enterprise.example.com/v1/chat/completions",
 	} {
 		t.Run(target, func(t *testing.T) {
 			got, err := s.ResolveCustomRelayAPIKey(target, "other-channel-key")
@@ -85,13 +85,13 @@ func TestCustomRelayOnlyInjectsBeefAPIKeyForExactConfiguredOrigin(t *testing.T) 
 	}
 }
 
-func TestResolveManagedBeefAPISecretsUsesStoredKeyAndDropsClientSentinel(t *testing.T) {
+func TestResolveManagedBeefTVSecretsUsesStoredKeyAndDropsClientSentinel(t *testing.T) {
 	s, _, _, _ := creationTestService(t)
 	if err := s.SaveLocalModelConfig([]byte(`{"channels":[{"id":"beeftv","baseUrl":"https://beeftv.app","apiKey":"disk-secret","enabled":true,"models":["text-local"]}]}`)); err != nil {
 		t.Fatal(err)
 	}
-	input := map[string]any{"config": map[string]any{"channelId": "beeftv", "credentialRef": beefapi.CredentialRef, "apiKey": "from-webview", "baseUrl": "https://beeftv.app", "model": "text-local"}}
-	resolved, err := s.resolveManagedBeefAPISecrets(input)
+	input := map[string]any{"config": map[string]any{"channelId": "beeftv", "credentialRef": beeftv.CredentialRef, "apiKey": "from-webview", "baseUrl": "https://beeftv.app", "model": "text-local"}}
+	resolved, err := s.resolveManagedBeefTVSecrets(input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,11 +102,11 @@ func TestResolveManagedBeefAPISecretsUsesStoredKeyAndDropsClientSentinel(t *test
 	if _, exists := config["channelId"]; exists {
 		t.Fatalf("system channel id leaked: %#v", config)
 	}
-	if config["credentialRef"] != beefapi.CredentialRef {
+	if config["credentialRef"] != beeftv.CredentialRef {
 		t.Fatalf("credentialRef = %#v", config["credentialRef"])
 	}
 	unmanaged := map[string]any{"config": map[string]any{"apiKey": "custom-byok", "baseUrl": "https://beeftv.app", "model": "text-local"}}
-	unmanagedResolved, err := s.resolveManagedBeefAPISecrets(unmanaged)
+	unmanagedResolved, err := s.resolveManagedBeefTVSecrets(unmanaged)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,8 +122,8 @@ func TestChannelCatalogManagedCredentialPinsOrigin(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, input := range []ChannelModelsRequest{
-		{CredentialRef: beefapi.CredentialRef, ChannelID: "other", BaseURL: "https://attacker.example/v1"},
-		{ChannelID: beefapi.ChannelID, BaseURL: "https://attacker.example/v1"},
+		{CredentialRef: beeftv.CredentialRef, ChannelID: "other", BaseURL: "https://attacker.example/v1"},
+		{ChannelID: beeftv.ChannelID, BaseURL: "https://attacker.example/v1"},
 	} {
 		if err := s.resolveChannelModelsRequest(&input); err != nil {
 			t.Fatal(err)

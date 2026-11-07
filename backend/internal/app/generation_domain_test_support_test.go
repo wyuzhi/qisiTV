@@ -85,8 +85,8 @@ func seedancePollStatusAndURL(state map[string]interface{}) (string, string) {
 	return generation.SeedancePollStatusAndURL(state)
 }
 
-func beefAPIVideoRequestBody(input canvasGenerationInput) (map[string]interface{}, error) {
-	return generation.BeefAPIVideoRequestBody(input)
+func beefTVVideoRequestBody(input canvasGenerationInput) (map[string]interface{}, error) {
+	return generation.BeefTVVideoRequestBody(input)
 }
 
 func runSeedanceAgentPlanVideoTask(ctx context.Context, input canvasGenerationInput, pollPolicy videoPollPolicy) (map[string]interface{}, error) {
@@ -113,8 +113,8 @@ func seedanceVideosPromptText(input canvasGenerationInput) string {
 	return generation.SeedanceVideosPromptText(input)
 }
 
-func beefAPIAudioURL(media providerMedia) (string, error) {
-	return generation.BeefAPIAudioURL(media)
+func beefTVAudioURL(media providerMedia) (string, error) {
+	return generation.BeefTVAudioURL(media)
 }
 
 func seedanceErrorMessage(state map[string]interface{}) string {
@@ -189,8 +189,8 @@ func normalizeSeedanceResolution(value string, interfaceType string) string {
 	return generation.NormalizeSeedanceResolution(value, interfaceType)
 }
 
-func beefAPISeedancePutTimeout(ctx context.Context) time.Duration {
-	return generation.BeefAPISeedancePutTimeout(ctx)
+func beefTVSeedancePutTimeout(ctx context.Context) time.Duration {
+	return generation.BeefTVSeedancePutTimeout(ctx)
 }
 
 func arkPrivateAssetUpstreamDetail(response map[string]interface{}) string {

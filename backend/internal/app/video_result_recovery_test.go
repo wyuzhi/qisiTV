@@ -176,7 +176,7 @@ func TestVideoRecoveryDownloadDisconnectKeepsOriginalTask(t *testing.T) {
 	}
 }
 
-func TestVideoRecoveryBeefAPIQueryUsesOnlyGet(t *testing.T) {
+func TestVideoRecoveryBeefTVQueryUsesOnlyGet(t *testing.T) {
 	allowLoopbackProviderTest(t)
 	var queries, downloads atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -198,13 +198,13 @@ func TestVideoRecoveryBeefAPIQueryUsesOnlyGet(t *testing.T) {
 		_, _ = io.WriteString(w, `{"data":{"id":"original","status":"completed"}}`)
 	}))
 	defer server.Close()
-	result, _, err := queryBeefAPIVideoResult(generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: server.URL}), canvasGenerationInput{Config: providerConfig{BaseURL: server.URL + "/v1", APIKey: "test-key"}}, "original")
+	result, _, err := queryBeefTVVideoResult(generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: server.URL}), canvasGenerationInput{Config: providerConfig{BaseURL: server.URL + "/v1", APIKey: "test-key"}}, "original")
 	if err != nil || result == nil || queries.Load() != 1 || downloads.Load() != 1 {
 		t.Fatalf("result=%v err=%v queries=%d downloads=%d", result, err, queries.Load(), downloads.Load())
 	}
 }
 
-func TestVideoRecoveryBeefAPIRejectsDifferentTaskBeforeDownload(t *testing.T) {
+func TestVideoRecoveryBeefTVRejectsDifferentTaskBeforeDownload(t *testing.T) {
 	allowLoopbackProviderTest(t)
 	var queries, downloads, creates atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -221,7 +221,7 @@ func TestVideoRecoveryBeefAPIRejectsDifferentTaskBeforeDownload(t *testing.T) {
 		_, _ = io.WriteString(w, `{"id":"original","data":{"task_id":"different","status":"completed"}}`)
 	}))
 	defer server.Close()
-	result, _, err := queryBeefAPIVideoResult(generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: server.URL}), canvasGenerationInput{Config: providerConfig{BaseURL: server.URL + "/v1", APIKey: "test-key"}}, "original")
+	result, _, err := queryBeefTVVideoResult(generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: server.URL}), canvasGenerationInput{Config: providerConfig{BaseURL: server.URL + "/v1", APIKey: "test-key"}}, "original")
 	if err == nil || result != nil || queries.Load() != 1 || downloads.Load() != 0 || creates.Load() != 0 {
 		t.Fatalf("result=%v err=%v queries=%d downloads=%d creates=%d", result, err, queries.Load(), downloads.Load(), creates.Load())
 	}
@@ -246,7 +246,7 @@ func TestVideoRecoveryTaskLogsExplainFailureWithoutRawPayload(t *testing.T) {
 	}
 }
 
-func TestFailedBeefAPIVideoRecoveryQueriesFreshURLAndKeepsOriginalTask(t *testing.T) {
+func TestFailedBeefTVVideoRecoveryQueriesFreshURLAndKeepsOriginalTask(t *testing.T) {
 	allowLoopbackProviderTest(t)
 	payload, err := os.ReadFile("testdata/reference-fragmented-30fps.mp4")
 	if err != nil {
@@ -303,7 +303,7 @@ func TestFailedBeefAPIVideoRecoveryQueriesFreshURLAndKeepsOriginalTask(t *testin
 	if err := db.Create(&task).Error; err != nil {
 		t.Fatal(err)
 	}
-	ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: gateway.URL})
+	ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: gateway.URL})
 	recovered, err := svc.QueryFailedVideoTask(ctx, task.UserID, task.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -353,7 +353,7 @@ func TestFailedThirdPartyVideoRecoveryRenewsOriginalTaskAndMaterializes(t *testi
 	var polls, downloads atomic.Int32
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.Header.Get("x-goog-api-key") != "provider-fixture" || r.Header.Get("Authorization") != "" || r.URL.Query().Get("delivery") != "" || r.Header.Get("X-Beeftv-Video-Delivery") != "" {
-			t.Error("third-party recovery changed auth or attempted generation/BeefAPI backup")
+			t.Error("third-party recovery changed auth or attempted generation/BeefTV backup")
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}

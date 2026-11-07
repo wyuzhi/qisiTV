@@ -207,7 +207,7 @@ func TestImageSubmissionDiskRestartReplaysOneGenerationAndCompletesOnce(t *testi
 		if !bytes.Equal(got, body) {
 			t.Fatal("replay changed request bytes")
 		}
-		if req.Header.Get("X-BeefAPI-Image-Media-Protocol") != "" {
+		if req.Header.Get("X-BeefAPI-Media-Protocol") != "" {
 			t.Fatal("legacy frozen request acquired a new media contract")
 		}
 		if key == "" {
@@ -535,7 +535,7 @@ func TestImageSubmissionRequiresProtocolAndPersistence(t *testing.T) {
 	if !handled || err == nil {
 		t.Fatal("storage failure did not fail closed")
 	}
-	for _, url := range []string{"http://beeftv.app/v1/images/generations", "https://evil.beeftv.app/v1/images/generations", "https://beeftv.app.evil.test/v1/images/generations", "https://api.openai.com/v1/images/generations", "https://beeftv.app/v1/responses", "https://beeftv.app:8443/v1/images/edits", "https://enterprise.beefapi.com/v1/images/generations"} {
+	for _, url := range []string{"http://beeftv.app/v1/images/generations", "https://evil.beeftv.app/v1/images/generations", "https://beeftv.app.evil.test/v1/images/generations", "https://api.openai.com/v1/images/generations", "https://beeftv.app/v1/responses", "https://beeftv.app:8443/v1/images/edits", "https://legacy-enterprise.example.com/v1/images/generations"} {
 		r, _ := http.NewRequest("POST", url, nil)
 		if recoverableImageEndpoint(r) {
 			t.Fatalf("unverified contract enabled: %s", url)

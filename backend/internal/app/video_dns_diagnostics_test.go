@@ -103,7 +103,7 @@ func TestVideoFailureStagesSurviveWorkerRefreshSQLiteAndDiagnosticZIP(t *testing
 	}
 }
 
-func TestOriginalBeefAPITaskDNSDeferralDoesNotNeedHealthyDNS(t *testing.T) {
+func TestOriginalBeefTVTaskDNSDeferralDoesNotNeedHealthyDNS(t *testing.T) {
 	svc := &Service{}
 	started := time.Now()
 	task := model.Task{ID: "owned-task", Type: "canvas_video", ProviderRequestID: "original", StartedAt: &started}

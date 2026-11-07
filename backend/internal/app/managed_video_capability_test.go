@@ -40,7 +40,7 @@ func TestManagedVideoUsesSavedAccountCapabilityInsteadOfRequest(t *testing.T) {
 	}
 	write("server-v2", server)
 	forged := "forged-request-version"
-	input := generation.Input{Mode: "video", Config: generation.Config{CredentialRef: managedBeefAPIRef, Model: name, InterfaceType: "newapi", BaseURL: "https://beeftv.app", VideoSeconds: "1", VideoCapabilitiesVersion: &forged, CapabilityConfig: modelcatalog.DefaultModelCapabilityConfigForModel("newapi", name)}, ReferenceImages: []generation.Media{{Bytes: 100 << 20, Width: 64, Height: 64}}}
+	input := generation.Input{Mode: "video", Config: generation.Config{CredentialRef: managedBeefTVRef, Model: name, InterfaceType: "newapi", BaseURL: "https://beeftv.app", VideoSeconds: "1", VideoCapabilitiesVersion: &forged, CapabilityConfig: modelcatalog.DefaultModelCapabilityConfigForModel("newapi", name)}, ReferenceImages: []generation.Media{{Bytes: 100 << 20, Width: 64, Height: 64}}}
 	if err := validate(&input); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestManagedVideoCreateTaskUsesCurrentAccountCatalog(t *testing.T) {
 			}
 			forged := modelcatalog.DefaultModelCapabilityConfigForModel("newapi", modelName)
 			forged.Video.Duration = modelcatalog.VideoDurationConfig{Selection: "range", Min: 1, Max: 30, Step: 1, Default: 9}
-			request := CreateTaskRequest{Type: "canvas_video", Prompt: "local admission fixture", Model: modelName, Operation: "text_to_video", Input: map[string]any{"mode": "video", "prompt": "local admission fixture", "config": map[string]any{"channelId": "beeftv", "credentialRef": managedBeefAPIRef, "model": modelName, "interfaceType": "newapi", "videoSeconds": tc.seconds, "videoCapabilitiesVersion": "forged-request-version", "capabilityConfig": forged}}}
+			request := CreateTaskRequest{Type: "canvas_video", Prompt: "local admission fixture", Model: modelName, Operation: "text_to_video", Input: map[string]any{"mode": "video", "prompt": "local admission fixture", "config": map[string]any{"channelId": "beeftv", "credentialRef": managedBeefTVRef, "model": modelName, "interfaceType": "newapi", "videoSeconds": tc.seconds, "videoCapabilitiesVersion": "forged-request-version", "capabilityConfig": forged}}}
 			task, err := svc.CreateTask("user", request)
 			if err != nil || task == nil {
 				t.Fatalf("task rejected: %v", err)

@@ -24,7 +24,7 @@ func TestSourcedSeedanceGenerationKeepsServerLimitsAndAudio(t *testing.T) {
 		t.Fatal("catalog audio false was restored by legacy repair")
 	}
 	input.Config.VideoCapabilitiesVersion = nil
-	restoreBeefAPISeedanceAudioControl(context.Background(), input.Config, input.VideoCapability)
+	restoreBeefTVSeedanceAudioControl(context.Background(), input.Config, input.VideoCapability)
 	if !input.VideoCapability.GenerateAudio.Supported {
 		t.Fatal("legacy saved profiles should retain the audio repair")
 	}
@@ -622,10 +622,10 @@ func TestValidateVolcengineArkFullModalReferenceRejectsTextAndAudioOnly(t *testi
 	}
 }
 
-func TestNormalizeBeefAPISeedanceFullModalReferenceCapability(t *testing.T) {
+func TestNormalizeBeefTVSeedanceFullModalReferenceCapability(t *testing.T) {
 	profile := DefaultModelCapabilityConfigForModel("newapi", "seedance-2.0-fast")
 	if profile == nil || profile.Video == nil {
-		t.Fatal("BeefAPI Seedance video profile = nil")
+		t.Fatal("BeefTV Seedance video profile = nil")
 	}
 
 	normalized, err := NormalizeModelCapabilityConfigForModel("video", "newapi", "seedance-2.0-fast", profile)
@@ -636,7 +636,7 @@ func TestNormalizeBeefAPISeedanceFullModalReferenceCapability(t *testing.T) {
 		t.Fatalf("max videos = %d, want at least 3", normalized.Video.References.MaxVideos)
 	}
 	if !normalized.Video.GenerateAudio.Supported {
-		t.Fatal("BeefAPI Seedance must expose the audio toggle")
+		t.Fatal("BeefTV Seedance must expose the audio toggle")
 	}
 	if !containsCapabilityString(normalized.Video.Operations, "reference_to_video") {
 		t.Fatalf("operations = %v, want reference_to_video", normalized.Video.Operations)

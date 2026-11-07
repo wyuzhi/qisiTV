@@ -11,7 +11,7 @@ import (
 func TestSeedance25EnterpriseFirstFrameIsExplicit(t *testing.T) {
 	for _, name := range []string{"seedance-2.5", "seedance-2.5-official"} {
 		input := canvasGenerationInput{Mode: "video", Config: providerConfig{Model: name, Size: "9:16", VideoSeconds: "6", VQuality: "720p"}, ReferenceImages: []providerMedia{{ID: "first", DataURL: testReferenceImageDataURL}}, Metadata: map[string]any{"videoStartFrameNodeId": "first"}}
-		body, err := beefAPIVideoRequestBody(input)
+		body, err := beefTVVideoRequestBody(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -24,7 +24,7 @@ func TestSeedance25EnterpriseFirstFrameIsExplicit(t *testing.T) {
 			t.Fatalf("native request differs: %#v", request)
 		}
 		input.Metadata = map[string]interface{}{"videoEditOperation": "reference_to_video"}
-		body, err = beefAPIVideoRequestBody(input)
+		body, err = beefTVVideoRequestBody(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -36,7 +36,7 @@ func TestSeedance25EnterpriseFirstFrameIsExplicit(t *testing.T) {
 
 func TestSeedance20EnterpriseReferencesUnchanged(t *testing.T) {
 	input := canvasGenerationInput{Config: providerConfig{Model: "seedance-2.0", Size: "9:16", VideoSeconds: "6"}, ReferenceImages: []providerMedia{{ID: "a", URL: "https://example.com/a.png"}, {ID: "b", URL: "https://example.com/b.png"}}}
-	body, err := beefAPIVideoRequestBody(input)
+	body, err := beefTVVideoRequestBody(input)
 	if err != nil {
 		t.Fatal(err)
 	}

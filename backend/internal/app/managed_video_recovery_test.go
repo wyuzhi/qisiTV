@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/model"
 	localtask "infinite-canvas/backend/internal/task"
 	"testing"
@@ -41,7 +41,7 @@ func TestManagedVideoDoesNotInferSettlementOrExpiry(t *testing.T) {
 	}
 }
 
-// 重构前的托管视频任务从未收到结算状态；一个月后 BeefAPI 和上游都不会再给结果，
+// 重构前的托管视频任务从未收到结算状态；一个月后 BeefTV 和上游都不会再给结果，
 // 本地应结束它，允许确认后重新生成，而不是每 2 分钟查一次、永远停在「继续取回」。
 func TestManagedVideoUnreportedForAWeekEndsLocally(t *testing.T) {
 	old := model.Task{ID: "managed-september", UserID: "user", Type: "canvas_video", Status: model.TaskStatusFailed, CreatedAt: time.Now().Add(-30 * 24 * time.Hour), ProviderRequestID: "task_old", InputJSON: `{"mode":"video","config":{"channelId":"beeftv","apiKey":"enc:unread"}}`}
@@ -63,7 +63,7 @@ func TestManagedVideoUnreportedForAWeekEndsLocally(t *testing.T) {
 	if videoTaskPastRetentionWindow(recent, time.Now()) {
 		t.Fatal("recent API task expired on the local clock")
 	}
-	if outcome := classifyFailedVideoQueryOutcome(recent, "failed", &beefapi.MediaTaskError{Code: "media_submission_rejected"}); outcome != localtask.RecoveryNoResult {
+	if outcome := classifyFailedVideoQueryOutcome(recent, "failed", &beeftv.MediaTaskError{Code: "media_submission_rejected"}); outcome != localtask.RecoveryNoResult {
 		t.Fatalf("rejected submission outcome=%q, want %q", outcome, localtask.RecoveryNoResult)
 	}
 	if outcome := classifyFailedVideoQueryOutcome(recent, "", providerHTTPError{StatusCode: 400, Body: `{"error":{"message":"invalid_video_request"}}`}); outcome != localtask.RecoveryNoResult {

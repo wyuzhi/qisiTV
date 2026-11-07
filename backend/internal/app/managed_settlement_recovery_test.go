@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/generation"
 	"infinite-canvas/backend/internal/model"
 	localtask "infinite-canvas/backend/internal/task"
@@ -42,13 +42,13 @@ func TestManagedFailedImagePendingBillingKeepsQueryingUntilRefunded(t *testing.T
 			}))
 			defer server.Close()
 			wire, _ := svc.imageSubmissionWire(row)
-			wire.URL, wire.ReplayProtocol, wire.MediaType, wire.ChannelID = server.URL+"/v1/media/tasks", beefapi.MediaProtocolVersion, "image", beefapi.ChannelID
+			wire.URL, wire.ReplayProtocol, wire.MediaType, wire.ChannelID = server.URL+"/v1/media/tasks", beeftv.MediaProtocolVersion, "image", beeftv.ChannelID
 			row.QueryCipher, _ = svc.managedImageQueryCipher(task, wire)
 			row.SendCount = 1
 			if err := db.Save(row).Error; err != nil {
 				t.Fatal(err)
 			}
-			ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: server.URL})
+			ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: server.URL})
 			candidates, err := svc.repo.FailedImagesForRecovery("", 8)
 			if err != nil || len(candidates) != 1 {
 				t.Fatalf("pending task omitted: %d %v", len(candidates), err)

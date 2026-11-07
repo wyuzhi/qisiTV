@@ -91,7 +91,7 @@ func TestLocalHydrateRejectsLegacyRemoteResourceMetadata(t *testing.T) {
 	}
 }
 
-func TestBeefAPIPrefersHTTPSResourceURLWhenPublicBaseConfigured(t *testing.T) {
+func TestBeefTVPrefersHTTPSResourceURLWhenPublicBaseConfigured(t *testing.T) {
 	svc := newResourceTestService(t)
 	t.Setenv("CANVAS_PUBLIC_BASE_URL", "https://example.com")
 	localDir := filepath.Join(svc.dataDir, "resources", "users", "user-1", "audio")
@@ -102,7 +102,7 @@ func TestBeefAPIPrefersHTTPSResourceURLWhenPublicBaseConfigured(t *testing.T) {
 		t.Fatal(err)
 	}
 	resource := model.Resource{
-		ID: "beefapi-https-audio", UserID: "user-1", Kind: "audio", Status: model.ResourceStatusReady,
+		ID: "beeftv-https-audio", UserID: "user-1", Kind: "audio", Status: model.ResourceStatusReady,
 		Provider: "local", ObjectKey: "users/user-1/audio/voice.mp3", MimeType: "audio/mpeg", Size: 9, DurationMs: 3000,
 	}
 	if err := svc.repo.CreateResource(&resource); err != nil {
@@ -114,13 +114,13 @@ func TestBeefAPIPrefersHTTPSResourceURLWhenPublicBaseConfigured(t *testing.T) {
 		Config: providerConfig{
 			BaseURL: "https://beeftv.app", InterfaceType: string(model.ChannelInterfaceNewAPIVideo), Model: "seedance-2.5",
 		},
-		ReferenceAudios: []providerMedia{{ID: "audio-1", StorageKey: "resource:beefapi-https-audio", URL: "https://example.com/stale-reference.mp3", DataURL: "data:audio/mpeg;base64,c3RhbGU=", MimeType: "audio/mpeg", DurationMs: 3000}},
+		ReferenceAudios: []providerMedia{{ID: "audio-1", StorageKey: "resource:beeftv-https-audio", URL: "https://example.com/stale-reference.mp3", DataURL: "data:audio/mpeg;base64,c3RhbGU=", MimeType: "audio/mpeg", DurationMs: 3000}},
 		Metadata:        map[string]interface{}{"videoEditOperation": "audio_to_video"},
 	}
 	if err := svc.hydrateGenerationMedia("user-1", &input, providerMediaHydrationPolicyFor(context.Background(), input)); err != nil {
 		t.Fatalf("hydrateGenerationMedia() error = %v", err)
 	}
-	if input.ReferenceAudios[0].StorageKey != "resource:beefapi-https-audio" || input.ReferenceAudios[0].URL != "" || strings.HasPrefix(input.ReferenceAudios[0].DataURL, "data:") {
+	if input.ReferenceAudios[0].StorageKey != "resource:beeftv-https-audio" || input.ReferenceAudios[0].URL != "" || strings.HasPrefix(input.ReferenceAudios[0].DataURL, "data:") {
 		t.Fatalf("audio = %#v, want owned local key until preupload", input.ReferenceAudios[0])
 	}
 	if input.ReferenceAudios[0].MimeType != "audio/mpeg" || input.ReferenceAudios[0].Bytes != 9 || input.ReferenceAudios[0].DurationMs != 3000 {
@@ -128,7 +128,7 @@ func TestBeefAPIPrefersHTTPSResourceURLWhenPublicBaseConfigured(t *testing.T) {
 	}
 }
 
-func TestBeefAPILocalAudioWithoutPublicHTTPSUsesDataURL(t *testing.T) {
+func TestBeefTVLocalAudioWithoutPublicHTTPSUsesDataURL(t *testing.T) {
 	svc := newResourceTestService(t)
 	localDir := filepath.Join(svc.dataDir, "resources", "users", "user-1", "audio")
 	if err := os.MkdirAll(localDir, 0o755); err != nil {
@@ -138,13 +138,13 @@ func TestBeefAPILocalAudioWithoutPublicHTTPSUsesDataURL(t *testing.T) {
 		t.Fatal(err)
 	}
 	resource := model.Resource{
-		ID: "beefapi-local-audio", UserID: "user-1", Kind: "audio", Status: model.ResourceStatusReady,
+		ID: "beeftv-local-audio", UserID: "user-1", Kind: "audio", Status: model.ResourceStatusReady,
 		Provider: "local", ObjectKey: "users/user-1/audio/voice.mp3", MimeType: "audio/mpeg", Size: 9, DurationMs: 3000,
 	}
 	if err := svc.repo.CreateResource(&resource); err != nil {
 		t.Fatal(err)
 	}
-	media := &providerMedia{StorageKey: "resource:beefapi-local-audio", MimeType: "audio/mpeg"}
+	media := &providerMedia{StorageKey: "resource:beeftv-local-audio", MimeType: "audio/mpeg"}
 	if err := svc.hydrateProviderMedia("user-1", media, providerMediaHydrationPolicy{PreferHTTPS: true}); err != nil {
 		t.Fatalf("local audio hydrate error = %v", err)
 	}
@@ -210,7 +210,7 @@ func encodeTestPNG(t *testing.T, width, height int) []byte {
 	return buf.Bytes()
 }
 
-func TestBeefAPILocalVideoReferenceHydratesInlineForFlatRequest(t *testing.T) {
+func TestBeefTVLocalVideoReferenceHydratesInlineForFlatRequest(t *testing.T) {
 	svc := newResourceTestService(t)
 	localDir := filepath.Join(svc.dataDir, "resources", "users", "user-1", "image")
 	if err := os.MkdirAll(localDir, 0o755); err != nil {
@@ -220,7 +220,7 @@ func TestBeefAPILocalVideoReferenceHydratesInlineForFlatRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	resource := model.Resource{
-		ID: "beefapi-local-reference", UserID: "user-1", Kind: "image", Status: model.ResourceStatusReady,
+		ID: "beeftv-local-reference", UserID: "user-1", Kind: "image", Status: model.ResourceStatusReady,
 		Provider: "local", ObjectKey: "users/user-1/image/reference.png", MimeType: "image/png",
 	}
 	if err := svc.repo.CreateResource(&resource); err != nil {
@@ -232,20 +232,20 @@ func TestBeefAPILocalVideoReferenceHydratesInlineForFlatRequest(t *testing.T) {
 		Config: providerConfig{
 			BaseURL: "https://beeftv.app", InterfaceType: string(model.ChannelInterfaceNewAPIVideo), Model: "seedance-2.5",
 		},
-		ReferenceImages: []providerMedia{{ID: "image-1", StorageKey: "resource:beefapi-local-reference", MimeType: "image/png"}},
+		ReferenceImages: []providerMedia{{ID: "image-1", StorageKey: "resource:beeftv-local-reference", MimeType: "image/png"}},
 		Metadata:        map[string]interface{}{"videoEditOperation": "image_to_video"},
 	}
 	if err := svc.hydrateGenerationMedia("user-1", &input, providerMediaHydrationPolicyFor(context.Background(), input)); err != nil {
 		t.Fatalf("hydrateGenerationMedia() error = %v", err)
 	}
-	if input.ReferenceImages[0].DataURL != "" || input.ReferenceImages[0].StorageKey != "resource:beefapi-local-reference" {
+	if input.ReferenceImages[0].DataURL != "" || input.ReferenceImages[0].StorageKey != "resource:beeftv-local-reference" {
 		t.Fatalf("keepLocal inlined local Seedance media: %#v", input.ReferenceImages[0])
 	}
 	if input.ReferenceImages[0].MimeType != "image/png" {
 		t.Fatalf("resource mime lost: %#v", input.ReferenceImages[0])
 	}
 	input.ReferenceImages[0].URL = "https://example.com/reference.png"
-	body, err := beefAPIVideoRequestBody(input)
+	body, err := beefTVVideoRequestBody(input)
 	if err != nil {
 		t.Fatal(err)
 	}

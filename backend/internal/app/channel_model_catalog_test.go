@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/model"
 )
 
@@ -45,9 +45,9 @@ func TestFetchChannelModelCatalogRejectsCredentialsWithoutNetwork(t *testing.T) 
 		t.Fatalf("empty key error = %v", err)
 	}
 	if _, err := svc.FetchChannelModelCatalog(ctx, actor, ChannelModelsRequest{
-		BaseURL: "https://beeftv.app/v1", ChannelID: beefapi.ChannelID, CredentialRef: beefapi.CredentialRef,
+		BaseURL: "https://beeftv.app/v1", ChannelID: beeftv.ChannelID, CredentialRef: beeftv.CredentialRef,
 	}); err == nil || !strings.Contains(err.Error(), "API Key") {
-		t.Fatalf("missing BeefAPI credential error = %v", err)
+		t.Fatalf("missing BeefTV credential error = %v", err)
 	}
 	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "false")
 	if _, err := svc.FetchChannelModelCatalog(ctx, actor, ChannelModelsRequest{BaseURL: "http://127.0.0.1/v1", APIKey: "k"}); err == nil {

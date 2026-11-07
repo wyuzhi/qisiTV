@@ -17,7 +17,7 @@ import (
 
 // This consumes already-generated canary files. It never submits inference or
 // requires a provider credential, and is skipped in ordinary test runs.
-func TestBeefAPIH3RealMediaDeliverySurvivesRestart(t *testing.T) {
+func TestBeefTVH3RealMediaDeliverySurvivesRestart(t *testing.T) {
 	dir := os.Getenv("FAL_H3_REAL_MEDIA_DIR")
 	if dir == "" {
 		t.Skip("explicit existing real-media fixture opt-in required")

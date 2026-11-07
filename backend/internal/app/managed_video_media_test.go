@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"infinite-canvas/backend/internal/beefapi"
+	"infinite-canvas/backend/internal/beeftv"
 	"infinite-canvas/backend/internal/generation"
 	"infinite-canvas/backend/internal/model"
 )
@@ -49,11 +49,11 @@ func TestManagedMediaRestartQueriesAndPersistsOriginal(t *testing.T) {
 						_, _ = w.Write(video)
 					case r.URL.Path == "/v1/models":
 						models.Add(1)
-						w.Header().Set(beefapi.MediaProtocolHeader, beefapi.MediaProtocolVersion)
-						_ = json.NewEncoder(w).Encode(map[string]any{"media_protocol": beefapi.MediaDiscovery{Version: beefapi.MediaProtocolVersion, SupportedMediaTypes: []string{kind}, TaskSubmitURL: "/v1/media/tasks", TaskQueryURLTemplate: "/v1/media/tasks/{task_ref}", UploadsURL: "/v1/media/uploads"}, "data": []any{map[string]any{"id": "opaque-" + kind + "-2030", "media_capabilities_version": "fixture-v1", "media_capabilities": map[string]any{"audio": beefapi.MediaCapability{Operations: []string{"synthesize"}, Options: []string{"voice", "speed"}, MaxOutputs: 1}}}}})
+						w.Header().Set(beeftv.MediaProtocolHeader, beeftv.MediaProtocolVersion)
+						_ = json.NewEncoder(w).Encode(map[string]any{"media_protocol": beeftv.MediaDiscovery{Version: beeftv.MediaProtocolVersion, SupportedMediaTypes: []string{kind}, TaskSubmitURL: "/v1/media/tasks", TaskQueryURLTemplate: "/v1/media/tasks/{task_ref}", UploadsURL: "/v1/media/uploads"}, "data": []any{map[string]any{"id": "opaque-" + kind + "-2030", "media_capabilities_version": "fixture-v1", "media_capabilities": map[string]any{"audio": beeftv.MediaCapability{Operations: []string{"synthesize"}, Options: []string{"voice", "speed"}, MaxOutputs: 1}}}}})
 					case r.Method == http.MethodPost && r.URL.Path == "/v1/media/tasks":
 						posts.Add(1)
-						var req beefapi.MediaRequest
+						var req beeftv.MediaRequest
 						if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 							t.Error(err)
 						}
@@ -92,7 +92,7 @@ func TestManagedMediaRestartQueriesAndPersistsOriginal(t *testing.T) {
 				defer server.Close()
 				path, dir := filepath.Join(t.TempDir(), "workspace.db"), t.TempDir()
 				svc, db := newManagedImageDirectService(t, path, dir)
-				input := generation.Input{Mode: kind, Prompt: "fixture", Config: generation.Config{CredentialRef: beefapi.CredentialRef, MediaProtocolVersion: beefapi.MediaProtocolVersion, APIKey: "fixture", BaseURL: server.URL, Model: "opaque-" + kind + "-2030", InterfaceType: "stale-plugin", VideoSeconds: "4", VideoGenerateAudio: "false", AudioVoice: "speaker", AudioSpeed: "1", AudioFormat: "mp3"}}
+				input := generation.Input{Mode: kind, Prompt: "fixture", Config: generation.Config{CredentialRef: beeftv.CredentialRef, MediaProtocolVersion: beeftv.MediaProtocolVersion, APIKey: "fixture", BaseURL: server.URL, Model: "opaque-" + kind + "-2030", InterfaceType: "stale-plugin", VideoSeconds: "4", VideoGenerateAudio: "false", AudioVoice: "speaker", AudioSpeed: "1", AudioFormat: "mp3"}}
 				if kind == "video" {
 					input.ReferenceImages = []generation.Media{{ID: "frame", URL: "https://93.184.216.34/frame.png"}}
 					input.Metadata = map[string]any{"videoStartFrameNodeId": "frame"}
@@ -100,13 +100,13 @@ func TestManagedMediaRestartQueriesAndPersistsOriginal(t *testing.T) {
 				raw, _ := json.Marshal(input)
 				expires := time.Now().Add(time.Hour)
 				task := model.Task{ID: "video-original", UserID: "user-1", Type: "canvas_" + kind, Status: model.TaskStatusRunning, InputJSON: string(raw), LeaseOwner: "worker", LeaseExpiresAt: &expires}
-				attempt := &model.RouteAttempt{ID: "video-attempt", TaskID: task.ID, ChannelID: beefapi.ChannelID, Status: "dispatching", DispatchState: "submission_unknown", StartedAt: time.Now()}
+				attempt := &model.RouteAttempt{ID: "video-attempt", TaskID: task.ID, ChannelID: beeftv.ChannelID, Status: "dispatching", DispatchState: "submission_unknown", StartedAt: time.Now()}
 				for _, row := range []any{&task, attempt} {
 					if err := db.Create(row).Error; err != nil {
 						t.Fatal(err)
 					}
 				}
-				ctx := generation.WithEndpoints(firstCtx, generation.Endpoints{BeefAPIVideoBaseURL: server.URL})
+				ctx := generation.WithEndpoints(firstCtx, generation.Endpoints{BeefTVVideoBaseURL: server.URL})
 				ctx = svc.bindGenerationRuntime(ctx, generation.CallMeta{UserID: task.UserID, TaskID: task.ID, TaskType: task.Type})
 				ctx = context.WithValue(withProviderSubmissionKey(ctx, attempt), imageTaskContext{}, task)
 				if _, err := generation.Execute(ctx, input); err == nil || posts.Load() != 1 {
@@ -137,7 +137,7 @@ func TestManagedMediaRestartQueriesAndPersistsOriginal(t *testing.T) {
 					t.Fatalf("resume original attempt = %+v, %v", resumed, err)
 				}
 				ready.Store(true)
-				result, err := svc.QueryFailedVideoTask(generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: server.URL}), task.UserID, task.ID)
+				result, err := svc.QueryFailedVideoTask(generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: server.URL}), task.UserID, task.ID)
 				if err != nil || result == nil || !result.Recovered || posts.Load() != 1 || models.Load() != 1 || downloads.Load() != 1 {
 					t.Fatalf("result=%+v err=%v posts/models/queries/downloads=%d/%d/%d/%d", result, err, posts.Load(), models.Load(), queries.Load(), downloads.Load())
 				}
