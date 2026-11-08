@@ -1,7 +1,7 @@
 import type { AiConfig, ModelChannel, ModelCapability } from "@/stores/use-config-store";
 import { buildApiUrl, createModelChannel } from "@/stores/use-config-store";
 import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
-import { inferProtocolCapabilityFromModel, type ModelProtocolDefinition } from "@/lib/model-protocols";
+import { inferProtocolCapabilityFromModel, modelProtocolDefinition, modelProtocolDefinitionFor, type ModelProtocolDefinition } from "@/lib/model-protocols";
 import { catalogEndpointCapability, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
 import { serviceCredentialGuide } from "@/lib/service-credentials";
 import { DEFAULT_BASE_URL as LL2_DEFAULT_BASE_URL, LL2_CHANNEL_ID, LL2_CHANNEL_NAME, LL2_PRESET_MODELS, buildLL2ModelChannel, upgradeLL2ModelProfile } from "../../../plugin-packages/beeftv-plugin-ll2/client/index.js";
@@ -40,6 +40,26 @@ export function presetCatalogFor(id: ModelServicePresetId): ChannelModelCatalogI
         displayName: item.displayName,
         modelType: item.capability as ModelCapability,
     }));
+}
+
+// 内置接口自带的服务商预设（DeepSeek、Kimi 等）：同一种接口，只是名字和默认地址不同。
+export type VendorPreset = { id: string; label: string; baseUrl: string; protocol: string };
+export function vendorPresets(protocols: ModelProtocolDefinition[]): VendorPreset[] {
+    const seen = new Set<string>();
+    return protocols.flatMap((protocol) => protocol.enabled === false ? [] : (protocol.presets || []).map((preset) => ({ ...preset, protocol: protocol.value })))
+        .filter((preset) => !seen.has(preset.id) && Boolean(seen.add(preset.id)));
+}
+export function vendorPresetFor(channel: Pick<ModelChannel, "baseUrl">, presets: VendorPreset[]): VendorPreset | undefined {
+    const address = channel.baseUrl.trim().replace(/\/+$/, "").toLowerCase();
+    return address ? presets.find((preset) => preset.baseUrl.replace(/\/+$/, "").toLowerCase() === address) : undefined;
+}
+export function createVendorPresetChannel(preset: VendorPreset, channelId: string): ModelChannel {
+    return {
+        ...createModelChannel({ id: channelId, apiFormat: "openai" }),
+        name: preset.label,
+        baseUrl: preset.baseUrl,
+        interfaceType: preset.protocol,
+    };
 }
 
 // 插件用 JS 接入的生成服务，在「选择服务商」里各占一项。
@@ -97,9 +117,11 @@ export function serviceModelProfile(channel: ModelChannel, item: ChannelModelCat
     const rawExisting = channel.modelProfiles?.find((profile) => profile.model === item.id);
     const existing = rawExisting && preset === LL2_CHANNEL_ID ? (upgradeLL2ModelProfile(rawExisting) as typeof rawExisting) : rawExisting;
     if (existing?.protocol && !explicitCapability) {
-        const definition = protocols.find((protocol) => protocol.value === existing.protocol && protocol.enabled !== false);
-        if (definition && definition.authType !== existing.authType) return { ...existing, authType: definition.authType };
-        if (definition || !existing.protocol.startsWith("ll2-")) return existing;
+        const definition = modelProtocolDefinition(existing.protocol, protocols);
+        const usable = definition && definition.enabled !== false ? definition : undefined;
+        // 旧 ID 落盘时换成现在的 ID，下次打开就是新 ID。
+        if (usable && (usable.value !== existing.protocol || usable.authType !== existing.authType)) return { ...existing, protocol: usable.value, authType: usable.authType };
+        if (usable || !existing.protocol.startsWith("ll2-")) return existing;
     }
     const ll2Preset = preset === LL2_CHANNEL_ID ? LL2_PRESET_MODELS.find((presetItem) => presetItem.model === item.id) : undefined;
     if (ll2Preset && (!explicitCapability || explicitCapability === ll2Preset.capability)) {
@@ -129,7 +151,7 @@ export function serviceModelProfile(channel: ModelChannel, item: ChannelModelCat
     };
     const endpoints: Record<string, string> = { "responses": "openai-response", "openai-responses": "openai-response", "chat.completions": "chat-completion", "chat-completions": "chat-completion", "images.generations": "openai-image", "image-generation": "openai-image", "audio.speech": "openai-audio", "openai-video": "newapi", "openai-videos": "newapi", "video-generations-json": "video-generations-json", "volcengine-ark-video": "volcengine-ark-video" };
     const endpoint = item.supportedEndpointTypes?.map((value) => endpoints[value.trim().toLowerCase()]).find((id) => protocols.some((p) => p.value === id && p.capability === capability && p.enabled !== false));
-    const inherited = protocols.find((p) => p.value === channel.interfaceType && p.capability === capability && p.enabled !== false)?.value;
+    const inherited = modelProtocolDefinitionFor(channel.interfaceType, capability, protocols)?.value;
     let proposed = inherited || endpoint || candidates[preset][capability];
     // Model names identify a family, not a provider's wire protocol. Ask the
     // user to select its contract unless the catalog explicitly declares it.
@@ -142,12 +164,12 @@ export function serviceModelProfile(channel: ModelChannel, item: ChannelModelCat
 export function channelAllowsEmptyAPIKey(channel: Pick<ModelChannel, "models" | "modelProfiles" | "interfaceType">, protocols?: ModelProtocolDefinition[]) {
     const models = (channel.models || []).map((model) => model.trim()).filter(Boolean);
     // 还没选模型时，按渠道默认接口判断；插件服务（如本机 ComfyUI）可能不需要密钥。
-    if (!models.length) return Boolean(channel.interfaceType) && protocols?.find((item) => item.value === channel.interfaceType)?.authType === "none";
+    if (!models.length) return Boolean(channel.interfaceType) && modelProtocolDefinition(channel.interfaceType, protocols)?.authType === "none";
     return models.every((model) => {
         const profile = channel.modelProfiles?.find((item) => item.model === model);
         const protocolId = profile?.protocol || channel.interfaceType;
         if (!protocolId) return false;
-        const listed = protocols?.find((item) => item.value === protocolId);
+        const listed = modelProtocolDefinition(protocolId, protocols);
         const auth = listed ? listed.authType : profile?.authType;
         return auth === "none";
     });
@@ -172,7 +194,7 @@ export function serviceConnectionError(channel: ModelChannel, options?: { protoc
         // 空的 Secret Key 栏有两种意思：还没填，或者后端已经存着一份（回读时被清空）。后端会把
         // 「这份密钥到底存没存」作为 hasApiKey/hasSecretKey 返回，只认这个标记，不靠
         // 「连接已经存在」推断——改协议后旧的空密钥仍然是空，后端沿用不了任何东西。
-        if (credential.secretKeyRequired && !channel.secretKey?.trim() && channel.hasSecretKey !== true) return `请填写 ${credential.secretKeyLabel}：这个请求协议要两个密钥，缺一个会签名失败`;
+        if (credential.secretKeyRequired && !channel.secretKey?.trim() && channel.hasSecretKey !== true) return `请填写 ${credential.secretKeyLabel}：这个接口要两个密钥，缺一个会签名失败`;
     }
     return "";
 }

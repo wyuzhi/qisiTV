@@ -56,6 +56,9 @@ type ManagementView struct {
 	Kind               string `json:"kind"`
 	ActivationScope    string `json:"activationScope"`
 	ConfigurationScope string `json:"configurationScope"`
+	// BuiltInInterface marks a request format shipped with the app as a
+	// declarative archive. It is chosen in model settings, not managed as a plugin.
+	BuiltInInterface bool `json:"builtInInterface,omitempty"`
 }
 
 type StateView struct {

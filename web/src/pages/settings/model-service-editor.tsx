@@ -7,7 +7,7 @@ import { ChannelHeadersEditor, validateChannelHeaders } from "@/components/chann
 import { fetchChannelModels, type ChannelModelFetchResult } from "@/services/api/image-models";
 import { fetchPluginProviderCatalog } from "@/services/api/plugin-catalog";
 import { mergeFetchedChannelModelProfiles, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
-import { CAPABILITY_LABELS, MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, isTopazUpscaleChannel, ll2ProtocolsAvailable, modelCatalogRequestURL, pluginServices, presetCatalogFor, serviceConnectionError, serviceModelProfile, servicePresetFor, type ModelServicePresetId } from "@/lib/model-service-presets";
+import { CAPABILITY_LABELS, MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, createVendorPresetChannel, isTopazUpscaleChannel, ll2ProtocolsAvailable, modelCatalogRequestURL, pluginServices, presetCatalogFor, serviceConnectionError, serviceModelProfile, servicePresetFor, vendorPresetFor, vendorPresets, type ModelServicePresetId, type VendorPreset } from "@/lib/model-service-presets";
 import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
 import { serviceCredentialGuide } from "@/lib/service-credentials";
 import type { ModelProtocolDefinition } from "@/lib/model-protocols";
@@ -23,6 +23,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
     const [presetId, setPresetId] = useState<ModelServicePresetId>(() => initial ? servicePresetFor(initial) : "compatible");
     const [step, setStep] = useState(initial ? 1 : 0);
     const [advanced, setAdvanced] = useState(false);
+    const [moreVendors, setMoreVendors] = useState(false);
     const [catalog, setCatalog] = useState<ChannelModelCatalogItem[]>(() => {
         const presetItems = initial ? presetCatalogFor(servicePresetFor(initial)) : [];
         const byId = new Map(presetItems.map((item) => [item.id, item]));
@@ -94,6 +95,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
     };
     const choosePreset = (id: ModelServicePresetId) => startService(id, createServicePresetChannel(id, draft.id, protocols));
     const choosePluginService = (service: ModelProtocolDefinition) => startService("compatible", createPluginServiceChannel(service, draft.id));
+    const chooseVendor = (preset: VendorPreset) => startService("compatible", createVendorPresetChannel(preset, draft.id));
     const validateConnection = (requireCredential = true, channel: ModelChannel = draft) => {
         const problem = serviceConnectionError(channel, { protocols, requireCredential }) || validateChannelHeaders(channel.headers);
         if (problem) setError(problem);
@@ -135,7 +137,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
                 // 第二步没有「手动添加模型」按钮，只有下方的模型 ID 输入框；提示要跟着当前步骤走。
                 setNotice(servicePresetFor(draft) === "ark"
                     ? `火山方舟不提供 OpenAI 格式的模型目录，${step === 0 ? "点「手动添加模型」" : "在下面填写模型 ID"}手动填写。`
-                    : `读不到模型目录时仍可手动添加模型 ID，${step === 0 ? "点「手动添加模型」" : "在下面填写"}继续；生成仍需要正确的服务地址、凭证和请求协议。`);
+                    : `读不到模型目录时仍可手动添加模型 ID，${step === 0 ? "点「手动添加模型」" : "在下面填写"}继续；生成仍需要正确的服务地址、凭证和接口格式。`);
             }
         } finally { if (alive.current) setBusy(false); }
     };
@@ -168,7 +170,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         setCatalog((current) => current.some((item) => item.id === id) ? current.map((item) => item.id === id ? nextItem : item) : [...current, nextItem]);
         setDraft((current) => ({ ...current, modelProfiles: [...(current.modelProfiles || []).filter((p) => p.model !== id), profile] }));
         if (draft.models.includes(id) && !profile.protocol) {
-            setNotice("请在高级模型设置中，为这个模型选择服务商要求的请求协议。");
+            setNotice("请在高级模型设置中，为这个模型选择服务商要求的接口格式。");
             setEditingCapabilities(true);
         }
         setError("");
@@ -178,7 +180,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         const profile = withSiblingProtocol(draft, serviceModelProfile(draft, item, protocols));
         setDraft((current) => ({ ...current, models: enabled ? [...new Set([...current.models, id])] : current.models.filter((model) => model !== id), modelProfiles: [...(current.modelProfiles || []).filter((p) => p.model !== id), profile] }));
         if (enabled && !profile.protocol) {
-            setNotice("请在高级模型设置中，按服务商文档选择请求协议。视频接口的地址和格式可能不同。");
+            setNotice("请在高级模型设置中，按服务商文档选择接口格式。视频接口的地址和格式可能不同。");
             setEditingCapabilities(true);
         }
         setError("");
@@ -193,7 +195,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         const nextItem: ChannelModelCatalogItem = { ...(existingItem || { id }), modelType: manualCapability };
         const profile = withSiblingProtocol(draft, serviceModelProfile(draft, nextItem, protocols, manualCapability));
         if (!profile.protocol) {
-            setNotice("请在高级模型设置中，为这个模型选择服务商要求的请求协议。");
+            setNotice("请在高级模型设置中，为这个模型选择服务商要求的接口格式。");
             setEditingCapabilities(true);
         }
         setCatalog((current) => current.some((item) => item.id === id) ? current.map((item) => item.id === id ? nextItem : item) : [...current, nextItem]);
@@ -208,7 +210,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         const profiles = isTopazUpscaleChannel(draft) ? draft.modelProfiles || [] : draft.models.map((id) => withSiblingProtocol(draft, serviceModelProfile(draft, catalog.find((item) => item.id === id) || { id }, protocols)));
         const missing = profiles.find((profile) => !profile.protocol);
         if (missing) {
-            setError(`${missing.model} 还需要选择请求协议，请打开高级模型设置`);
+            setError(`${missing.model} 还需要选择接口格式，请打开高级模型设置`);
             setEditingCapabilities(true);
             setFocusModel((current) => ({ model: missing.model, token: (current?.token || 0) + 1 }));
             return;
@@ -243,6 +245,9 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
     const selectedPreset = MODEL_SERVICE_PRESETS.find((item) => item.id === presetId)!;
     const pluginServiceList = pluginServices(protocols);
     const pluginService = pluginServiceList.find((item) => item.value === draft.interfaceType);
+    const vendorList = vendorPresets(protocols);
+    const vendor = !pluginService && presetId === "compatible" ? vendorPresetFor(draft, vendorList) : undefined;
+    const vendorsOpen = moreVendors || Boolean(vendor);
     const ll2Ready = presetId !== "ll2" || ll2ProtocolsAvailable(protocols);
     const ll2PluginWarning = presetId === "ll2" && !protocolLoading && !ll2Ready
         ? "请先在左侧「插件」中心启用 LL2 (DMC) 插件，再使用预置视频协议。"
@@ -261,7 +266,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
                 <aside className="model-service-providers" aria-label="选择服务商">
                     <p className="model-service-label">选择服务商</p>
                     {MODEL_SERVICE_PRESETS.map((preset) => {
-                        const selected = !pluginService && presetId === preset.id;
+                        const selected = !pluginService && !vendor && presetId === preset.id;
                         return <button key={preset.id} type="button" disabled={busy || Boolean(initial)} aria-pressed={selected} className="model-service-provider" onClick={() => choosePreset(preset.id)}>
                             <ModelLogo icon={preset.icon} size={24} />
                             <span><strong>{preset.name}</strong><small>{preset.subtitle}</small></span>
@@ -276,10 +281,21 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
                             {selected && <Check size={15} />}
                         </button>;
                     })}
+                    {vendorList.length > 0 && <div className="model-service-vendors">
+                        <button type="button" className="model-service-more" aria-expanded={vendorsOpen} disabled={Boolean(initial) && !vendor} onClick={() => setMoreVendors(!vendorsOpen)}>更多服务商<ChevronDown size={14} /></button>
+                        {vendorsOpen && <div className="model-service-vendor-list">
+                            {vendorList.map((preset) => {
+                                const selected = vendor?.id === preset.id;
+                                return <button key={preset.id} type="button" disabled={busy || Boolean(initial)} aria-pressed={selected} className="model-service-vendor" onClick={() => chooseVendor(preset)}>
+                                    <span>{preset.label}</span>{selected && <Check size={14} />}
+                                </button>;
+                            })}
+                        </div>}
+                    </div>}
                     <div className="model-service-note"><ShieldCheck size={16} /><p>密钥保存在这台设备上。<br />生成费用由服务商结算。</p></div>
                 </aside>
                 <Form layout="vertical" requiredMark={false} className="model-service-fields" disabled={busy} onFinish={() => void fetchModels()}>
-                    <div className="model-service-form-title">{pluginService ? <><ModelLogo size={28} /><div><h3>{pluginService.label}</h3><p>由插件接入。填好连接信息后，读取或手动添加这个服务能用的模型。</p></div></> : <><ModelLogo icon={selectedPreset.icon} size={28} /><div><h3>{selectedPreset.name}</h3>{presetId === "compatible" && <p>用户可以自行添加第三方模型服务，但是 BeefTV 无法确保所有第三方模型服务的兼容性</p>}{presetId === "ll2" && <p>已预置 9 款文本、视频与超分模型及协议，填写 API Key 后可直接「一键保存并启用」，或点「读取模型」拉取在线目录</p>}</div></>}</div>
+                    <div className="model-service-form-title">{vendor ? <><ModelLogo size={28} /><div><h3>{vendor.label}</h3><p>填写 API Key 后读取模型。</p></div></> : pluginService ? <><ModelLogo size={28} /><div><h3>{pluginService.label}</h3><p>由插件接入。填好连接信息后，读取或手动添加这个服务能用的模型。</p></div></> : <><ModelLogo icon={selectedPreset.icon} size={28} /><div><h3>{selectedPreset.name}</h3>{presetId === "compatible" && <p>用户可以自行添加第三方模型服务，但是 BeefTV 无法确保所有第三方模型服务的兼容性</p>}{presetId === "ll2" && <p>已预置 9 款文本、视频与超分模型及协议，填写 API Key 后可直接「一键保存并启用」，或点「读取模型」拉取在线目录</p>}</div></>}</div>
                     <Form.Item label="连接名称"><Input aria-label="连接名称" placeholder="例如：我的创作账号" value={draft.name} onChange={(event) => patch({ name: event.target.value })} /></Form.Item>
                     <Form.Item label={credential.apiKeyLabel} help={credential.apiKeyHelp}><Input.Password prefix={<KeyRound size={15} />} aria-label={credential.apiKeyLabel} autoComplete="new-password" placeholder={credential.apiKeyPlaceholder} value={draft.apiKey} onChange={(event) => patch({ apiKey: event.target.value })} /></Form.Item>
                     <Form.Item label="服务地址"><Input aria-label="服务地址" inputMode="url" placeholder="https://api.example.com/v1" value={draft.baseUrl} onChange={(event) => patch({ baseUrl: event.target.value })} /></Form.Item>

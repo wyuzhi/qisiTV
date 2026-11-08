@@ -664,3 +664,46 @@ func TestUpgradeDroppingAnAliasOnlyReferenceIsDeferred(t *testing.T) {
 		}
 	})
 }
+
+// A package merged into another through legacyAliases must not be retained as
+// a stale copy: it would keep resolving the old ID ahead of the merged one.
+func TestRemovedPackageMergedByAliasIsDroppedNotRetained(t *testing.T) {
+	release := t.TempDir()
+	t.Setenv("CANVAS_OFFICIAL_PLUGIN_DIR", release)
+	shipPackage(t, release, []byte(`{"apiVersion":"beeftv.plugin/v1","id":"openai-chat-completions","version":"2.0.0","name":"Chat","author":"Test","documentation":"# chat","contributes":{"providers":[{"id":"chat-completion","label":"Chat","legacyAliases":["deepseek-chat"],"capabilities":["text"],"scopes":["user.custom-channel"],"create":{"method":"POST","path":"/v1/chat/completions"},"response":{"statusPaths":["status"]}}]}}`))
+	merged := storedOfficialRecord(t, retentionManifest("deepseek-chat", "deepseek-chat", "2.0.0"), true)
+	unmerged := storedOfficialRecord(t, retentionManifest("old-video", "old-video", "1.0.0"), true)
+	runtime, err := NewRuntimeWithReferences(t.TempDir(), retentionStore(merged, unmerged), staticReferences{"deepseek-chat": {Configured: 3}, "old-video": {Configured: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, kept := ByID(runtime.List(), "deepseek-chat"); kept {
+		t.Fatal("a package merged into a shipped one was kept as a retired copy")
+	}
+	adapter, ok := runtime.Registry().Resolve("deepseek-chat")
+	if !ok || adapter.Metadata().ID != "chat-completion" {
+		t.Fatalf("saved deepseek-chat configuration no longer reaches the merged interface: %v %v", ok, adapter)
+	}
+	if item, kept := ByID(runtime.List(), "old-video"); !kept || item.Retention == nil || !item.Retention.Retired {
+		t.Fatal("a removed package nothing replaced must still be retained while referenced")
+	}
+}
+
+// Merging must not break saved configuration: if the copy a user ran with was
+// enabled, the interface it merged into is enabled too.
+func TestMergedEnabledCopyEnablesTheMergedInterface(t *testing.T) {
+	release := t.TempDir()
+	t.Setenv("CANVAS_OFFICIAL_PLUGIN_DIR", release)
+	chat := []byte(`{"apiVersion":"beeftv.plugin/v1","id":"openai-chat-completions","version":"2.0.0","name":"Chat","author":"Test","documentation":"# chat","contributes":{"providers":[{"id":"chat-completion","label":"Chat","legacyAliases":["deepseek-chat"],"capabilities":["text"],"scopes":["user.custom-channel"],"create":{"method":"POST","path":"/v1/chat/completions"},"response":{"statusPaths":["status"]}}]}}`)
+	shipPackage(t, release, chat)
+	disabledChat := storedOfficialRecord(t, chat, false)
+	enabledCopy := storedOfficialRecord(t, retentionManifest("deepseek-chat", "deepseek-chat", "2.0.0"), true)
+	runtime, err := NewRuntimeWithReferences(t.TempDir(), retentionStore(disabledChat, enabledCopy), staticReferences{"deepseek-chat": {Configured: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, ok := ByID(runtime.List(), "openai-chat-completions")
+	if !ok || item.Status != StatusEnabled {
+		t.Fatalf("merged interface status = %q, want enabled so saved DeepSeek models keep working", item.Status)
+	}
+}

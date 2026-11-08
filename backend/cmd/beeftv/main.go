@@ -357,6 +357,9 @@ func run(args []string) error {
 	if args[0] == "diagnostics" {
 		return runDiagnostics(args[1:])
 	}
+	if args[0] == "plugin" {
+		return runPlugin(args[1:])
+	}
 	c, err := newClient()
 	if err != nil {
 		return err
@@ -418,6 +421,7 @@ func usage() {
 
   beeftv skills help  （远程技能市场，无需运行桌面应用）
   beeftv diagnostics analyze --file <diagnostics.zip>  （离线分析，无需运行桌面应用）
+  beeftv plugin validate|try <插件目录>  （离线检查接口插件、预览将发出的请求，无需运行桌面应用）
   beeftv ops [--read-only] [--json]
   beeftv ops call <operation> --params '<json>' [--operation-id <id>] [--json]
   beeftv business discover

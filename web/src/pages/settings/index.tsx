@@ -108,7 +108,7 @@ export default function SettingsPage() {
                 <div className="settings-pane-header">
                     <div className="min-w-0">
                         <h2>模型选择</h2>
-                        <p>按领域选择默认模型；模型能力与请求协议在渠道“模型与能力”中配置。</p>
+                        <p>按领域选择默认模型；模型能力和接口格式在渠道“模型与能力”中配置。</p>
                     </div>
                 </div>
                 <div className="settings-section">

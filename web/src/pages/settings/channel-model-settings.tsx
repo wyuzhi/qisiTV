@@ -10,7 +10,7 @@ import { seedancePortraitLabel } from "@/lib/seedance-portrait";
 import { ModelCapabilityEditor } from "@/components/model-capability-editor";
 import { type ModelCapabilityChoice } from "@/components/model-protocol-picker";
 import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
-import { defaultProtocolForCapability, defaultProtocolForModel, inferProtocolCapabilityFromModel, modelProtocolCapability, modelProtocolDefinition, type ModelProtocol, type ModelProtocolDefinition } from "@/lib/model-protocols";
+import { canonicalModelProtocol, modelProtocolDefinitionFor, defaultProtocolForCapability, defaultProtocolForModel, inferProtocolCapabilityFromModel, modelProtocolCapability, modelProtocolDefinition, type ModelProtocol, type ModelProtocolDefinition } from "@/lib/model-protocols";
 import { signatureCredentialHint } from "@/lib/service-credentials";
 import { fetchPluginProviderCatalog } from "@/services/api/plugin-catalog";
 import { normalizeModelCapabilityDraft } from "@/services/api/workspace";
@@ -36,6 +36,8 @@ export function ChannelModelSettings({
     const [protocolLoading, setProtocolLoading] = useState(true);
     const [protocolError, setProtocolError] = useState("");
     const [activeModel, setActiveModel] = useState<string | null>(null);
+    // 接口格式是高级项：已经选好时只显示一行，点「更改」才展开；还没选时直接展开。
+    const [interfaceOpen, setInterfaceOpen] = useState(false);
     const [availableProtocols, setAvailableProtocols] = useState<ModelProtocolDefinition[]>([]);
     const { receipts, record } = useModelConnectionTests();
     const testResult = activeModel ? currentModelConnectionReceipt(receipts, channel, activeModel) : undefined;
@@ -43,7 +45,7 @@ export function ChannelModelSettings({
     useEffect(() => {
         let active = true;
         void fetchPluginProviderCatalog("user.custom-channel").then((items) => { if (active) setAvailableProtocols(items); })
-            .catch((error) => { if (active) setProtocolError(error instanceof Error ? error.message : "协议目录读取失败"); })
+            .catch((error) => { if (active) setProtocolError(error instanceof Error ? error.message : "接口列表读取失败"); })
             .finally(() => { if (active) setProtocolLoading(false); });
         return () => { active = false; };
     }, []);
@@ -51,20 +53,20 @@ export function ChannelModelSettings({
     useEffect(() => {
         if (!focusModel?.model || !channel.models.includes(focusModel.model)) return;
         setEditorTab("protocol");
+        setInterfaceOpen(false);
         setActiveModel(focusModel.model);
     }, [focusModel?.model, focusModel?.token]);
 
     if (!channel.models.length) return (
         <div className="mt-4">
-            <div className="text-xs font-medium">模型能力与请求协议</div>
+            <div className="text-xs font-medium">模型能力</div>
             <p className="mt-2 text-xs leading-5 text-foreground/58">
-                先在上方「模型列表」输入模型名并按回车，再为模型选择能力与请求协议。
+                先在上方「模型列表」输入模型名并按回车，再为模型选择能力。
             </p>
         </div>
     );
 
-    const resolveChannelProtocol = (capability: ModelProfile["capability"]) =>
-        availableProtocols.find((item) => item.value === channel.interfaceType && item.capability === capability && item.enabled !== false)?.value;
+    const resolveChannelProtocol = (capability: ModelProfile["capability"]) => modelProtocolDefinitionFor(channel.interfaceType, capability, availableProtocols)?.value;
 
     const buildDefaultProfile = (model: string): ModelProfile => {
         const inferredCapability = inferProtocolCapabilityFromModel(model);
@@ -148,22 +150,22 @@ export function ChannelModelSettings({
     const activeModelProfile = activeModel ? channel.modelProfiles?.find((item) => item.model === activeModel) : undefined;
     const activeInferredCapability = activeModel ? (activeModelProfile?.capability || inferProtocolCapabilityFromModel(activeModel)) : "text";
     const inferredProtocol = activeModel ? (activeInferredCapability === "video" ? resolveChannelProtocol("video") || "" : defaultProtocolForModel(activeModel, availableProtocols)) : "";
-    const activeProtocol = activeModelProfile ? activeModelProfile.protocol || resolveChannelProtocol(activeInferredCapability) || "" : inferredProtocol;
+    const activeProtocol = activeModelProfile ? canonicalModelProtocol(activeModelProfile.protocol, availableProtocols) || resolveChannelProtocol(activeInferredCapability) || "" : inferredProtocol;
     const activeCapability = activeModelProfile?.capability || modelProtocolCapability(activeProtocol, availableProtocols) || activeInferredCapability;
     const signatureHint = signatureCredentialHint(modelProtocolDefinition(activeProtocol, availableProtocols)?.authType);
     const testDisabledReason = !activeProtocol
-        ? "请先在「基本信息」中选择请求协议"
+        ? "请先在「基本信息」中选择接口格式"
         : protocolError
-          ? `协议目录异常：${protocolError}`
+          ? `接口列表读取失败：${protocolError}`
           : protocolLoading
-            ? "正在加载协议目录..."
+            ? "正在读取接口列表..."
             : undefined;
 
     return (
         <div className="mt-4">
             <div className="mb-2 flex items-center justify-between gap-3">
                 <div>
-                    <div className="text-xs font-medium">模型能力与请求协议</div>
+                    <div className="text-xs font-medium">模型能力</div>
                     <div className="mt-0.5 text-[var(--fs-tiny)] text-foreground/42">按服务商要求调整参数，也可以生成一次来验证连接。</div>
                 </div>
                 <span className="text-[var(--fs-tiny)] text-foreground/35">{channel.models.length} 个模型</span>
@@ -173,7 +175,7 @@ export function ChannelModelSettings({
                     const model = modelOptionName(rawModel);
                     const profile = channel.modelProfiles?.find((item) => item.model === model);
                     const inferredCapability = profile?.capability || inferProtocolCapabilityFromModel(model);
-                    const protocol = profile ? profile.protocol || resolveChannelProtocol(inferredCapability) || "" : (inferredCapability === "video" ? resolveChannelProtocol("video") || "" : defaultProtocolForModel(model, availableProtocols));
+                    const protocol = profile ? canonicalModelProtocol(profile.protocol, availableProtocols) || resolveChannelProtocol(inferredCapability) || "" : (inferredCapability === "video" ? resolveChannelProtocol("video") || "" : defaultProtocolForModel(model, availableProtocols));
                     const capability = profile?.capability || modelProtocolCapability(protocol, availableProtocols) || inferredCapability;
                     const displayName = seedancePortraitLabel(model) || profile?.displayName?.trim() || model;
                     return (
@@ -191,11 +193,11 @@ export function ChannelModelSettings({
                                         {capabilityLabel(capability)}
                                     </Tag>
                                     <span className="truncate font-mono text-[var(--fs-tiny)] text-foreground/40" title={modelProtocolDefinition(protocol, availableProtocols)?.create}>
-                                        {modelProtocolDefinition(protocol, availableProtocols)?.create || "待配置请求协议"}
+                                        {modelProtocolDefinition(protocol, availableProtocols)?.create || "还没选接口格式"}
                                     </span>
                                 </div>
                             </div>
-                            <Button type="text" size="small" icon={<ChevronRight className="size-4" />} iconPosition="end" onClick={() => { setEditorTab("protocol"); setActiveModel(model); }}>
+                            <Button type="text" size="small" icon={<ChevronRight className="size-4" />} iconPosition="end" onClick={() => { setEditorTab("protocol"); setInterfaceOpen(false); setActiveModel(model); }}>
                                 配置使用
                             </Button>
                         </div>
@@ -253,25 +255,41 @@ export function ChannelModelSettings({
                             </section>
                             {channel.scope !== "system" && activeCapability !== "text" && activeProtocol !== "full-video" && <ReferenceMediaTransportFields value={activeModelProfile?.referenceMediaTransport} onChange={(referenceMediaTransport) => updateProfile(activeModel, { referenceMediaTransport })} />}
                             <section className="space-y-2">
-                                <div className="text-xs font-medium">请求协议</div>
-                                <ModelProtocolBrowser
-                                    loading={protocolLoading}
-                                    error={protocolError}
-                                    capability={activeCapability}
-                                    value={activeProtocol}
-                                    protocols={availableProtocols}
-                                    onChange={(nextProtocol) => {
-                                        updateProfile(
-                                            activeModel,
-                                            {
-                                                protocol: nextProtocol,
-                                                capabilityConfig: activeCapability === "image" || activeCapability === "video" ? defaultModelCapabilityConfig(nextProtocol, activeModel) : undefined,
-                                            },
-                                            true,
-                                        );
-                                        refreshBackendCapability(activeModel, activeCapability, nextProtocol);
-                                    }}
-                                />
+                                {activeProtocol && !interfaceOpen ? (
+                                    <div className="flex min-w-0 items-center justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <div className="text-xs font-medium">接口格式</div>
+                                            <div className="mt-0.5 truncate text-xs text-foreground/58" title={modelProtocolDefinition(activeProtocol, availableProtocols)?.create}>
+                                                {modelProtocolDefinition(activeProtocol, availableProtocols)?.label || activeProtocol}
+                                            </div>
+                                        </div>
+                                        <Button size="small" onClick={() => setInterfaceOpen(true)}>更改</Button>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="text-xs font-medium">接口格式</div>
+                                        <p className="text-xs leading-5 text-foreground/58">服务商文档里写的请求方式。常见服务选 OpenAI Chat Completions 即可。</p>
+                                        <ModelProtocolBrowser
+                                            loading={protocolLoading}
+                                            error={protocolError}
+                                            capability={activeCapability}
+                                            value={activeProtocol}
+                                            protocols={availableProtocols}
+                                            onChange={(nextProtocol) => {
+                                                setInterfaceOpen(true);
+                                                updateProfile(
+                                                    activeModel,
+                                                    {
+                                                        protocol: nextProtocol,
+                                                        capabilityConfig: activeCapability === "image" || activeCapability === "video" ? defaultModelCapabilityConfig(nextProtocol, activeModel) : undefined,
+                                                    },
+                                                    true,
+                                                );
+                                                refreshBackendCapability(activeModel, activeCapability, nextProtocol);
+                                            }}
+                                        />
+                                    </>
+                                )}
                                 {signatureHint && <p className="text-xs leading-5 text-foreground/58">{signatureHint}</p>}
                             </section>
                         </div>,

@@ -101,9 +101,39 @@ function add(spec) {
   specs.push(spec);
 }
 
+// 各家 OpenAI 兼容服务（DeepSeek、Kimi、智谱、硅基流动、OpenRouter 等）都走这一个接口，
+// 服务商名字和地址只是前端的预设。这些旧 ID 曾各自一份副本，已保存的配置和任务仍可能写着它们。
+const openAICompatibleChatAliases = [
+  "xai-grok-chat", "deepseek-chat", "mistral-chat", "kimi-chat", "zhipu-glm-chat", "baichuan-chat", "yi-chat",
+  "siliconflow-chat", "together-chat", "groq-chat", "fireworks-chat", "nvidia-nim-chat", "openrouter-chat",
+  "atlascloud-chat", "litellm-proxy-chat", "newapi-chat", "vllm-chat", "localai-chat"
+];
+
+// 选「服务商」时一键带出名字和地址；请求格式完全相同，所以只是数据。本机网关的地址按常见默认端口填写。
+const openAICompatibleChatPresets = [
+  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com" },
+  { id: "moonshot", label: "Kimi（月之暗面）", baseUrl: "https://api.moonshot.cn" },
+  { id: "zhipu", label: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4" },
+  { id: "siliconflow", label: "硅基流动", baseUrl: "https://api.siliconflow.cn" },
+  { id: "baichuan", label: "百川", baseUrl: "https://api.baichuan-ai.com" },
+  { id: "lingyiwanwu", label: "零一万物", baseUrl: "https://api.lingyiwanwu.com" },
+  { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api" },
+  { id: "xai", label: "xAI", baseUrl: "https://api.x.ai" },
+  { id: "mistral", label: "Mistral", baseUrl: "https://api.mistral.ai" },
+  { id: "groq", label: "Groq", baseUrl: "https://api.groq.com/openai" },
+  { id: "together", label: "Together AI", baseUrl: "https://api.together.xyz" },
+  { id: "fireworks", label: "Fireworks", baseUrl: "https://api.fireworks.ai/inference" },
+  { id: "nvidia-nim", label: "NVIDIA NIM", baseUrl: "https://integrate.api.nvidia.com" },
+  { id: "atlascloud", label: "Atlas Cloud", baseUrl: "https://api.atlascloud.ai" },
+  { id: "litellm", label: "LiteLLM（本机）", baseUrl: "http://127.0.0.1:4000" },
+  { id: "newapi", label: "NewAPI（本机）", baseUrl: "http://127.0.0.1:3000" },
+  { id: "vllm", label: "vLLM（本机）", baseUrl: "http://127.0.0.1:8000" },
+  { id: "localai", label: "LocalAI（本机）", baseUrl: "http://127.0.0.1:8080" }
+];
+
 add({
   id: "openai-chat-completions", providerId: "chat-completion", name: "OpenAI Chat Completions", vendor: "OpenAI", capability: "text",
-  baseUrl: "https://api.openai.com", auth: bearer, params: textParams,
+  baseUrl: "https://api.openai.com", auth: bearer, params: textParams, legacyAliases: openAICompatibleChatAliases, presets: openAICompatibleChatPresets,
   create: jsonCreate("/chat/completions", {
     model: ref("request.model"), messages: ref("request.messages"),
     temperature: omit(ref("request.providerOptions.chat-completion.temperature")),
@@ -119,7 +149,10 @@ add({
     presence_penalty: omit(ref("request.providerOptions.chat-completion.presence_penalty")),
     logprobs: omit(ref("request.providerOptions.chat-completion.logprobs")),
     top_logprobs: omit(ref("request.providerOptions.chat-completion.top_logprobs")),
-    user: omit(ref("request.providerOptions.chat-completion.user"))
+    user: omit(ref("request.providerOptions.chat-completion.user")),
+    provider: omit(ref("request.providerOptions.chat-completion.provider")),
+    transforms: omit(ref("request.providerOptions.chat-completion.transforms")),
+    extra_body: omit(ref("request.providerOptions.chat-completion.extra_body"))
   }),
   agent: jsonCreate("/chat/completions", { $merge: [ref("request.extra.agent.chatCompletion"), { model: ref("request.model") }] }),
   agentResponse: { textPaths: ["choices.0.message.content", "choices.0.text"], reasoningPaths: ["choices.0.message.reasoning_content"], toolCallsPath: "choices.0.message.tool_calls", toolCallIdPaths: ["id"], toolCallNamePaths: ["function.name"], toolCallArgumentsPaths: ["function.arguments"] },
@@ -217,44 +250,6 @@ add({
   }),
   response: { status: "succeeded", textPaths: ["message.content", "response"], reasoningPaths: ["message.thinking", "thinking"], errorPaths: ["error"], messagePaths: ["error"] }
 });
-
-for (const [id, name, vendor, baseUrl] of [
-  ["xai-grok-chat", "xAI Grok Chat", "xAI", "https://api.x.ai"],
-  ["deepseek-chat", "DeepSeek Chat", "DeepSeek", "https://api.deepseek.com"],
-  ["mistral-chat", "Mistral Chat", "Mistral AI", "https://api.mistral.ai"],
-  ["kimi-chat", "Kimi OpenAI-Compatible", "Moonshot AI", "https://api.moonshot.cn"],
-  ["zhipu-glm-chat", "智谱 GLM Chat", "Zhipu AI", "https://open.bigmodel.cn/api/paas"],
-  ["baichuan-chat", "百川 Chat", "Baichuan", "https://api.baichuan-ai.com"],
-  ["yi-chat", "零一万物 Yi Chat", "01.AI", "https://api.lingyiwanwu.com"],
-  ["siliconflow-chat", "SiliconFlow Chat", "SiliconFlow", "https://api.siliconflow.cn"],
-  ["together-chat", "Together AI Chat", "Together AI", "https://api.together.xyz"],
-  ["groq-chat", "Groq Chat", "Groq", "https://api.groq.com/openai"],
-  ["fireworks-chat", "Fireworks Chat", "Fireworks AI", "https://api.fireworks.ai/inference"],
-  ["nvidia-nim-chat", "NVIDIA NIM Chat", "NVIDIA", "https://integrate.api.nvidia.com"],
-  ["openrouter-chat", "OpenRouter Chat", "OpenRouter", "https://openrouter.ai/api"],
-  ["atlascloud-chat", "Atlas Cloud Chat", "Atlas Cloud", "https://api.atlascloud.ai"],
-  ["litellm-proxy-chat", "LiteLLM Proxy Chat", "LiteLLM", "http://127.0.0.1:4000"],
-  ["newapi-chat", "NewAPI Chat", "NewAPI", "http://127.0.0.1:3000"],
-  ["vllm-chat", "vLLM OpenAI-Compatible", "vLLM", "http://127.0.0.1:8000"],
-  ["localai-chat", "LocalAI Chat", "LocalAI", "http://127.0.0.1:8080"]
-]) {
-  add({
-    id, providerId: id, name, vendor, capability: "text", baseUrl, auth: bearer, params: textParams,
-    notes: "该插件实现该平台公开的 OpenAI Chat Completions 线协议 profile；平台专有字段通过 providerOptions 命名空间透传，未声明支持的 OpenAI 字段仍由模型 capability profile 校验。",
-    create: jsonCreate("/v1/chat/completions", {
-      model: ref("request.model"), messages: ref("request.messages"),
-      temperature: omit(ref(`request.providerOptions.${id}.temperature`)), top_p: omit(ref(`request.providerOptions.${id}.top_p`)),
-      max_tokens: omit(coalesce(ref("request.extra.max_tokens"), ref(`request.providerOptions.${id}.max_tokens`))),
-      tools: omit(ref(`request.providerOptions.${id}.tools`)), tool_choice: omit(ref(`request.providerOptions.${id}.tool_choice`)),
-      response_format: omit(ref(`request.providerOptions.${id}.response_format`)), stream: omit(ref(`request.providerOptions.${id}.stream`)),
-      provider: omit(ref(`request.providerOptions.${id}.provider`)), transforms: omit(ref(`request.providerOptions.${id}.transforms`)),
-      extra_body: omit(ref(`request.providerOptions.${id}.extra_body`))
-    }),
-    agent: jsonCreate("/v1/chat/completions", { $merge: [ref("request.extra.agent.chatCompletion"), { model: ref("request.model") }] }),
-    agentResponse: { textPaths: ["choices.0.message.content", "choices.0.text"], reasoningPaths: ["choices.0.message.reasoning_content"], toolCallsPath: "choices.0.message.tool_calls", toolCallIdPaths: ["id"], toolCallNamePaths: ["function.name"], toolCallArgumentsPaths: ["function.arguments"] },
-    response: { status: "succeeded", textPaths: ["choices.0.message.content", "choices.0.text"], reasoningPaths: ["choices.0.message.reasoning_content"], usage: ref("response.usage"), errorPaths: ["error.code"], messagePaths: ["error.message"] }
-  });
-}
 
 add({
   id: "openai-images", providerId: "openai-image", name: "OpenAI Images", vendor: "OpenAI", capability: "image",
@@ -1157,6 +1152,8 @@ function manifestFor(spec) {
       providers: [{
         id: spec.providerId,
         label: spec.name,
+        ...(spec.legacyAliases ? { legacyAliases: spec.legacyAliases } : {}),
+        ...(spec.presets ? { presets: spec.presets } : {}),
         capabilities: [spec.capability],
         scopes,
         baseUrl: spec.baseUrl,
@@ -1232,7 +1229,7 @@ function docsFor(spec) {
   const errorSemantics = successCodes.length
     ? `HTTP 错误和 error object 保持失败语义，不包装成成功；业务 code 中 ${successCodes.map((code) => `\`${code}\``).join("、")} 是该协议声明的成功码，不算失败，其他业务码仍然失败。`
     : "HTTP 错误、业务 code 和 error object 保持失败语义，不包装成成功。";
-  return `# ${spec.name} 接口字段\n\n${spec.docsIntro ? `${spec.docsIntro}\n\n` : ""}## 协议身份\n\n- 插件 ID：\`${spec.id}\`。\n- Provider ID：\`${spec.providerId}\`。\n- 能力：\`${spec.capability}\`。\n- 默认 Base URL：\`${spec.baseUrl}\`。\n- 鉴权驱动：\`${spec.auth?.type || "默认"}\`。\n- 创建：\`${spec.create.method} ${spec.create.path || "动态路径"}\`。\n${spec.agent ? `- Agent：\`${spec.agent.method} ${spec.agent.path || "动态路径"}\`。\n` : ""}${spec.poll ? `- 查询：\`${spec.poll.method} ${spec.poll.path}\`。\n` : "- 生命周期：同步响应。\n"}${spec.cancel ? `- 取消：\`${spec.cancel.method} ${spec.cancel.path}\`。\n` : ""}\n## 配置字段\n\n| 字段 | 类型 | 必填 | 含义 |\n| --- | --- | --- | --- |\n${configRows}\n\n## 统一字段映射\n\n| 统一字段 | 类型 | 必填 | 上游映射 | 说明 |\n| --- | --- | --- | --- | --- |\n${rows}\n\n## 上游请求模板逐字段清单\n\n下表由插件请求模板生成，覆盖 body、query、headers 和 multipart 文件声明中的每个字段。\n\n| 上游位置 | 值或转换表达式 |\n| --- | --- |\n${operationRows || "| `create` | 无请求字段 |"}\n\n## Provider 扩展键\n\n${optionRows}\n\n动态模型或工作流允许使用文档声明的完整 \`parameters/input/extra_body\` 对象；该对象是协议本身的开放 schema，不会被宿主裁剪。\n\n## 响应映射逐字段清单\n\n| 映射位置 | 上游路径或转换表达式 |\n| --- | --- |\n${mappedResponseRows || "| `response` | 无显式映射 |"}\n\n## 响应与错误\n\n插件把上游 task/status/text/media/usage 映射为统一结果。临时媒体 URL 标记为 ephemeral，由宿主立即下载持久化。${errorSemantics}\n\n## 兼容边界\n\n${spec.notes || "该包只代表上述线协议 profile；同一品牌的其他 endpoint、云区域或网关包装必须使用独立插件，不能根据模型名猜测。"}\n`;
+  return `# ${spec.name} 接口字段\n\n${spec.docsIntro ? `${spec.docsIntro}\n\n` : ""}## 协议身份\n\n- 插件 ID：\`${spec.id}\`。\n- Provider ID：\`${spec.providerId}\`。\n${spec.presets ? `- 服务商预设：${spec.presets.map((preset) => `${preset.label}（\`${preset.baseUrl}\`）`).join("、")}。\n` : ""}${spec.legacyAliases ? `- 旧 ID（仍可解析到本接口）：${spec.legacyAliases.map((alias) => `\`${alias}\``).join("、")}。\n` : ""}- 能力：\`${spec.capability}\`。\n- 默认 Base URL：\`${spec.baseUrl}\`。\n- 鉴权驱动：\`${spec.auth?.type || "默认"}\`。\n- 创建：\`${spec.create.method} ${spec.create.path || "动态路径"}\`。\n${spec.agent ? `- Agent：\`${spec.agent.method} ${spec.agent.path || "动态路径"}\`。\n` : ""}${spec.poll ? `- 查询：\`${spec.poll.method} ${spec.poll.path}\`。\n` : "- 生命周期：同步响应。\n"}${spec.cancel ? `- 取消：\`${spec.cancel.method} ${spec.cancel.path}\`。\n` : ""}\n## 配置字段\n\n| 字段 | 类型 | 必填 | 含义 |\n| --- | --- | --- | --- |\n${configRows}\n\n## 统一字段映射\n\n| 统一字段 | 类型 | 必填 | 上游映射 | 说明 |\n| --- | --- | --- | --- | --- |\n${rows}\n\n## 上游请求模板逐字段清单\n\n下表由插件请求模板生成，覆盖 body、query、headers 和 multipart 文件声明中的每个字段。\n\n| 上游位置 | 值或转换表达式 |\n| --- | --- |\n${operationRows || "| `create` | 无请求字段 |"}\n\n## Provider 扩展键\n\n${optionRows}\n\n动态模型或工作流允许使用文档声明的完整 \`parameters/input/extra_body\` 对象；该对象是协议本身的开放 schema，不会被宿主裁剪。\n\n## 响应映射逐字段清单\n\n| 映射位置 | 上游路径或转换表达式 |\n| --- | --- |\n${mappedResponseRows || "| `response` | 无显式映射 |"}\n\n## 响应与错误\n\n插件把上游 task/status/text/media/usage 映射为统一结果。临时媒体 URL 标记为 ephemeral，由宿主立即下载持久化。${errorSemantics}\n\n## 兼容边界\n\n${spec.notes || "该包只代表上述线协议 profile；同一品牌的其他 endpoint、云区域或网关包装必须使用独立插件，不能根据模型名猜测。"}\n`;
 }
 
 const requestedPackageIDs = new Set(process.argv.slice(2).map((value) => value.trim()).filter(Boolean));

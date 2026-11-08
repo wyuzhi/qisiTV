@@ -1,7 +1,7 @@
 import { CollectionToolbar } from "@/components/layout/collection-toolbar";
 import { App, Button, Input, Modal, Select, Typography } from "antd";
 import { Switch } from "@/components/ui/base/switch";
-import { AudioLines, CalendarDays, Clock3, Film, Image as ImageIcon, MessageSquareText, Plus, PlugZap, RefreshCw, Search, Settings2, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Cable, CalendarDays, Clock3, Plus, PlugZap, RefreshCw, Search, Settings2, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { EmptyState } from "@/components/ui/product/empty-state";
@@ -57,11 +57,10 @@ const permissionLabels = PLUGIN_PERMISSION_LABELS;
 
 const pluginDateFormatter = new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "short", day: "numeric" });
 
-const protocolSectionMeta = [
-    { key: "text", label: "文本协议", description: "对话、推理与流式响应", icon: MessageSquareText },
-    { key: "image", label: "图片协议", description: "生成、编辑与参考图", icon: ImageIcon },
-    { key: "video", label: "视频协议", description: "创建任务、轮询与媒体结果", icon: Film },
-    { key: "audio", label: "音频协议", description: "语音与异步音频任务", icon: AudioLines },
+// 随应用发布的接口（各家模型的请求格式）是内置能力，在模型服务里选择，不在插件中心列出。
+// 用户上传的接口包是他们装的插件；被停用的内置接口也放这里，免得停用后再也找不回来。
+const interfaceSectionMeta = [
+    { key: "interface", label: "接口插件", description: "提供模型接口的插件", icon: Cable },
 ] as const;
 
 export default function PluginsPage() {
@@ -69,7 +68,7 @@ export default function PluginsPage() {
     const user = useUserStore((state) => state.user);
     const features = useUserStore((state) => state.features);
     const localRuntime = isLocalRuntimeMode() || workspaceCapabilities().local;
-    const visibleProtocolSectionMeta = protocolSectionMeta;
+    const visibleProtocolSectionMeta = interfaceSectionMeta;
     const installations = usePluginStore((state) => state.installations);
     const ensurePlugin = usePluginStore((state) => state.ensurePlugin);
     const setEnabled = usePluginStore((state) => state.setEnabled);
@@ -144,6 +143,7 @@ export default function PluginsPage() {
     const filteredPlugins = useMemo(() => {
         const normalizedSearch = search.trim().toLocaleLowerCase();
         return registeredPlugins.filter((plugin) => {
+            if (isBuiltInInterface(backendPluginById.get(plugin.manifest.id))) return false;
             const state = pluginStates[plugin.manifest.id];
             const isApplicationPlugin = backendPluginById.get(plugin.manifest.id)?.management.kind === "application" || isOfficialApplicationPluginId(plugin.manifest.id);
             if (user?.role !== "admin" && !features.systemPluginsVisibleToUsers && !isApplicationPlugin) return false;
@@ -166,7 +166,10 @@ export default function PluginsPage() {
             [
                 ...visibleProtocolSectionMeta.map((section) => ({ ...section, plugins: filteredPlugins.filter((plugin) => pluginMatchesCategory(plugin.manifest, section.key)) })),
                 { key: "other", label: "应用插件", description: "画布、素材与工作流扩展", icon: PlugZap, plugins: filteredPlugins.filter((plugin) => pluginMatchesCategory(plugin.manifest, "other")) },
-            ].filter((section) => categoryFilter === "all" || section.key === categoryFilter),
+            ]
+                .filter((section) => categoryFilter === "all" || section.key === categoryFilter)
+                // 没装接口插件时不摆一个空分组。
+                .filter((section) => section.key !== "interface" || section.plugins.length > 0 || categoryFilter === "interface"),
         [categoryFilter, filteredPlugins, visibleProtocolSectionMeta],
     );
 
@@ -181,12 +184,13 @@ export default function PluginsPage() {
 
     const categoryCounts = useMemo(() => {
         const visiblePlugins = registeredPlugins.filter((plugin) => {
+            if (isBuiltInInterface(backendPluginById.get(plugin.manifest.id))) return false;
             const isApplicationPlugin =
                 backendPluginById.get(plugin.manifest.id)?.management.kind === "application" ||
                 isOfficialApplicationPluginId(plugin.manifest.id);
             return user?.role === "admin" || features.systemPluginsVisibleToUsers || isApplicationPlugin;
         });
-        const counts: Record<string, number> = { all: visiblePlugins.length, text: 0, image: 0, video: 0, audio: 0, other: 0 };
+        const counts: Record<string, number> = { all: visiblePlugins.length, interface: 0, other: 0 };
         for (const plugin of visiblePlugins) {
             for (const section of visibleProtocolSectionMeta) {
                 if (pluginMatchesCategory(plugin.manifest, section.key)) counts[section.key] += 1;
@@ -194,7 +198,7 @@ export default function PluginsPage() {
             if (pluginMatchesCategory(plugin.manifest, "other")) counts.other += 1;
         }
         return counts;
-    }, [features.systemPluginsVisibleToUsers, localRuntime, registeredPlugins, user?.role, visibleProtocolSectionMeta]);
+    }, [backendPluginById, features.systemPluginsVisibleToUsers, localRuntime, registeredPlugins, user?.role, visibleProtocolSectionMeta]);
 
     const settingsPlugin = settingsPluginId ? registeredPlugins.find((plugin) => plugin.manifest.id === settingsPluginId) : undefined;
     const settingsInstallation = settingsPlugin ? installations.find((item) => item.manifest.id === settingsPlugin.manifest.id) : undefined;
@@ -334,7 +338,7 @@ export default function PluginsPage() {
                                 </span>
                                 <span>{categoryCounts.all}</span>
                             </button>
-                            {visibleProtocolSectionMeta.map((section) => {
+                            {visibleProtocolSectionMeta.filter((section) => (categoryCounts[section.key] || 0) > 0 || categoryFilter === section.key).map((section) => {
                                 const SectionIcon = section.icon;
                                 return (
                                     <button
@@ -756,9 +760,14 @@ function providerCapabilitiesFor(manifest: PluginManifest | PluginManifestV2) {
     return [...new Set((manifest.contributes.providers || []).flatMap((provider) => provider.capabilities))];
 }
 
+function isBuiltInInterface(plugin?: BackendPlugin) {
+    return Boolean(plugin?.management.builtInInterface) && plugin?.status === "enabled";
+}
+
 function pluginMatchesCategory(manifest: PluginManifest | PluginManifestV2, category: string) {
     const providerCapabilities = providerCapabilitiesFor(manifest);
     if (category === "other") return providerCapabilities.length === 0;
+    if (category === "interface") return providerCapabilities.length > 0;
     return providerCapabilities.includes(category as "text" | "image" | "video" | "audio");
 }
 

@@ -182,7 +182,7 @@ test("a Jimeng connection needs the paired Secret Key, and saves both keys once 
         await page.locator('input[aria-label="Access Key（AK）"]').fill("synthetic-ak");
         await page.getByRole("button", { name: "手动添加模型", exact: true }).click();
         await page.getByRole("button", { name: "保存并使用", exact: true }).click();
-        await page.getByText("请填写 Secret Key（SK）：这个请求协议要两个密钥，缺一个会签名失败", { exact: true }).waitFor();
+        await page.getByText("请填写 Secret Key（SK）：这个接口要两个密钥，缺一个会签名失败", { exact: true }).waitFor();
         expect((await savedOf(page)).length).toBe(0);
         // 截图要同时看到「必填的 Secret Key」和底下那条缺 SK 的提示。
         await page.locator('input[aria-label="Secret Key（SK）"]').scrollIntoViewIfNeeded();
@@ -238,7 +238,7 @@ test("switching a saved API-key connection to Jimeng still asks for the Secret K
         await page.locator('input[aria-label="Access Key（AK）"]').fill("refilled-ak");
         await page.getByRole("button", { name: "手动添加模型", exact: true }).click();
         await page.getByRole("button", { name: "保存并使用", exact: true }).click();
-        await page.getByText("请填写 Secret Key（SK）：这个请求协议要两个密钥，缺一个会签名失败", { exact: true }).waitFor();
+        await page.getByText("请填写 Secret Key（SK）：这个接口要两个密钥，缺一个会签名失败", { exact: true }).waitFor();
         expect((await savedOf(page)).length).toBe(0);
         // 补上 SK 之后才能保存，两个密钥一起提交。
         await page.locator('input[aria-label="Secret Key（SK）"]').fill("synthetic-sk");
@@ -292,7 +292,7 @@ test("reduced motion keeps manual and row type pickers selectable, and choosing 
         await page.locator(".model-service-type-select-popup:not(.ant-select-dropdown-hidden)").last().locator(".ant-select-item-option").filter({ hasText: "视频" }).click();
         expect(await miniRow.locator(".model-service-kind").textContent()).toBe("视频");
 
-        // 点「保存并使用」时若缺请求协议，自动弹出协议配置框；选一次协议即同步给同渠道未配置的同能力视频模型。
+        // 点「保存并使用」时若缺接口格式，自动弹出协议配置框；选一次协议即同步给同渠道未配置的同能力视频模型。
         await page.getByRole("button", { name: "保存并使用", exact: true }).click();
         await page.getByText("编辑模型使用配置").waitFor();
         await page.getByText("Volcengine Ark Seedance", { exact: true }).click();

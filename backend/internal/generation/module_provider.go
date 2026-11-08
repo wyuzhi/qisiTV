@@ -25,7 +25,7 @@ func runModuleProviderTask(ctx context.Context, input Input, provider protocol.M
 	// 插件的任务都在服务商那边跑，图片也可能跑几分钟，所以图片和视频用同一条重试规则。
 	policy.RetryTransient = true
 	policy.MaxNotFoundMisses = moduleQueryMisses
-	request := ProtocolRequestFromInput(input)
+	request := ProtocolRequestFor(input, provider)
 	taskID := ResumedProviderRequestID(ctx)
 	if taskID == "" {
 		key := SubmissionKeyFromContext(ctx)
@@ -81,7 +81,7 @@ func (e moduleQueryError) Unwrap() error { return e.Cause }
 
 // queryModuleProviderOnce 只查询一次已有任务，供人工核对失败任务使用。
 func queryModuleProviderOnce(ctx context.Context, input Input, provider protocol.ModuleProvider, taskID string) (map[string]interface{}, string, error) {
-	request := ProtocolRequestFromInput(input)
+	request := ProtocolRequestFor(input, provider)
 	var state protocol.PollResult
 	if err := callModuleProvider(WithRequestKind(ctx, "poll"), input, provider, "query", request, taskID, &state); err != nil {
 		return nil, "", err

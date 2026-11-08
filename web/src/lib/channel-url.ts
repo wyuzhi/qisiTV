@@ -5,7 +5,7 @@ export function buildApiUrl(baseUrl: string, path: string) {
     const requestPath = path.startsWith("/") ? path : `/${path}`;
     if (isSystemProxyBaseUrl(normalizedBaseUrl)) return `${normalizedBaseUrl}${requestPath}`;
 
-    const knownPrefixes = ["/api/plan/v3", "/api/v3", "/v1beta", "/v1", "/v2", "/v3"];
+    const knownPrefixes = ["/api/plan/v3", "/api/v3", "/v1beta", "/v1", "/v2", "/v3", "/v4"];
     const requestPrefixFor = (value: string) =>
         knownPrefixes.find((prefix) => {
             const lower = value.toLowerCase();

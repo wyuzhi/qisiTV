@@ -12,6 +12,8 @@ import (
 // so host-backed dispatch paths stay out of user-facing catalog consumers.
 type ProviderCatalogItem struct {
 	ID                string                      `json:"id"`
+	Aliases           []string                    `json:"aliases,omitempty"` // retired IDs saved profiles may still name
+	Presets           []protocol.ManifestPreset   `json:"presets,omitempty"`
 	Version           string                      `json:"version"`
 	Name              string                      `json:"name"`
 	Vendor            string                      `json:"vendor"`
@@ -50,7 +52,7 @@ func (s *Service) ProviderCatalog(scope, capability string, includeUnavailable b
 				continue
 			}
 			item := ProviderCatalogItem{
-				ID: provider.ID, Version: plugin.Manifest.Version, Name: provider.Label, Vendor: plugin.Manifest.Author,
+				ID: provider.ID, Aliases: provider.LegacyAliases, Presets: provider.Presets, Version: plugin.Manifest.Version, Name: provider.Label, Vendor: plugin.Manifest.Author,
 				Categories: provider.Capabilities, Scopes: provider.Scopes, BaseURL: provider.BaseURL,
 				AuthType: provider.Auth.Type,
 				Enabled:  plugin.Status == StatusEnabled, UnavailableReason: plugin.Error,

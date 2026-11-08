@@ -1,8 +1,8 @@
 {
-  "appLines": 9502,
+  "appLines": 9487,
   "largeFiles": {
     "backend/internal/handler/project.go": 1029,
-    "backend/internal/protocol/manifest.go": 1620,
+    "backend/internal/protocol/manifest.go": 1575,
     "backend/internal/repository/project_mutate.go": 1348,
     "backend/internal/repository/repository.go": 2293,
     "web/src/components/canvas/canvas-timeline-dialog.tsx": 1010,
@@ -11,15 +11,15 @@
     "web/src/lib/art-critique/pipeline.ts": 1171,
     "web/src/lib/canvas/canvas-drawing-storage.ts": 1027,
     "web/src/lib/canvas/libtv-original-layout.ts": 1026,
-    "web/src/pages/assets/index.tsx": 1756,
+    "web/src/pages/assets/index.tsx": 1717,
     "web/src/pages/canvas/project.tsx": 1985,
     "web/src/pages/canvas/use-canvas-upload.ts": 1077,
     "web/src/pages/create/index.tsx": 1242,
     "web/src/services/local-workspace-repository.ts": 1147,
     "web/src/styles/globals.css": 20819,
-    "web/src/styles/workspace-product.css": 1566
+    "web/src/styles/workspace-product.css": 1565
   },
-  "modelLiterals": 586,
+  "modelLiterals": 583,
   "handlersUsingAppService": 6,
-  "sourceTextTests": 141
+  "sourceTextTests": 140
 }

@@ -541,7 +541,7 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels }: Channel
                                             <section className="model-editor-section">
                                                 <div>
                                                     <h2>模型与能力</h2>
-                                                    <p className="mt-1 text-xs text-foreground/50">维护渠道模型，并在单个模型中配置调用协议、能力和定价。</p>
+                                                    <p className="mt-1 text-xs text-foreground/50">维护渠道模型，并在单个模型中配置能力、接口格式和定价。</p>
                                                 </div>
                                                 <Form.Item label="模型列表" htmlFor={`channel-${channel.id}-models`} className="mb-0">
                                                     <Select

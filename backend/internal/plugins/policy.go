@@ -81,7 +81,9 @@ func ManagementFromView(plugin View) ManagementView {
 			ActivationScope: ScopeSystem, ConfigurationScope: ConfigurationSystem,
 		}
 	}
-	return Management(plugin.Manifest.ID, plugin.Source)
+	view := Management(plugin.Manifest.ID, plugin.Source)
+	view.BuiltInInterface = view.Origin == OriginOfficial && view.Kind == KindProtocol && strings.TrimSpace(plugin.PackageDir) == ""
+	return view
 }
 
 func IsReservedApplication(pluginID string) bool {

@@ -136,3 +136,19 @@ func TestHTTP405And501ClassifyAsModelMissingAndSafeRouteRejection(t *testing.T) 
 		}
 	}
 }
+
+// Zhipu publishes its API under /api/paas/v4. An explicit version in either the
+// address or the path wins, so both the bare and the versioned address work.
+func TestAPIURLKeepsExplicitV4(t *testing.T) {
+	for _, c := range []struct{ base, path, want string }{
+		{"https://open.bigmodel.cn/api/paas", "/v4/images/generations", "https://open.bigmodel.cn/api/paas/v4/images/generations"},
+		{"https://open.bigmodel.cn/api/paas", "/v4/async-result/abc", "https://open.bigmodel.cn/api/paas/v4/async-result/abc"},
+		{"https://open.bigmodel.cn/api/paas/v4", "/chat/completions", "https://open.bigmodel.cn/api/paas/v4/chat/completions"},
+		{"https://open.bigmodel.cn/api/paas/v4", "/v4/videos/generations", "https://open.bigmodel.cn/api/paas/v4/videos/generations"},
+		{"https://api.deepseek.com", "/chat/completions", "https://api.deepseek.com/v1/chat/completions"},
+	} {
+		if got := APIURL(c.base, c.path); got != c.want {
+			t.Errorf("APIURL(%q, %q) = %q, want %q", c.base, c.path, got, c.want)
+		}
+	}
+}

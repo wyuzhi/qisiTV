@@ -21,6 +21,8 @@ export type PluginManagement = {
     kind: "protocol" | "application";
     activationScope: "system" | "user";
     configurationScope: "none" | "system" | "user";
+    /** 随应用发布的接口格式：在模型设置里选，不当作插件管理。 */
+    builtInInterface?: boolean;
 };
 
 export type PluginState = {

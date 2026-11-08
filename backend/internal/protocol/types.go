@@ -308,6 +308,8 @@ type ManifestProvider struct {
 	Variables               []ManifestVariable     `json:"variables,omitempty"`
 	ID                      string                 `json:"id"`
 	Label                   string                 `json:"label"`
+	LegacyAliases           []string               `json:"legacyAliases,omitempty"` // retired IDs saved config may still name; options under them still apply
+	Presets                 []ManifestPreset       `json:"presets,omitempty"`       // services that speak this interface; shown as one-click choices
 	Capabilities            []Capability           `json:"capabilities"`
 	Scopes                  []Surface              `json:"scopes"`
 	BaseURL                 string                 `json:"baseUrl,omitempty"`
@@ -325,6 +327,14 @@ type ManifestProvider struct {
 	AgentResponse           *ManifestAgentResponse `json:"agentResponse,omitempty"`
 	// Module 指向插件包内实现 submit/query 的 JS 文件；写了它就不写 create/poll。
 	Module string `json:"module,omitempty"`
+}
+
+// ManifestPreset is a named service that uses a provider unchanged: only the
+// display name and default address differ, so it is data, not another protocol.
+type ManifestPreset struct {
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	BaseURL string `json:"baseUrl"`
 }
 
 type ManifestAuth struct {

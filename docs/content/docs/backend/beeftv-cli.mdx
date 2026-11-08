@@ -5,7 +5,7 @@ description: 不经助手直接批量调用本地工作区的随包 CLI：连接
 
 `beeftv` 是随 BeefTV 安装包一起发布的命令行工具。它直接调用本机工作区已有的业务接口，不经过模型助手，也不需要启动 MCP 服务，适合用 shell 脚本批量读取和整理画布、素材与任务。
 
-除 `beeftv skills` 与 `beeftv diagnostics analyze` 外，所有命令都要求 BeefTV 正在运行。
+除 `beeftv skills`、`beeftv diagnostics analyze` 与 `beeftv plugin` 外，所有命令都要求 BeefTV 正在运行。
 
 本页只写已经实现并逐条核对过的用法。付费批量生成和自动重跑不在本页范围，原因见文末「现在还不提供」。
 
@@ -327,9 +327,11 @@ beeftv skills search 分镜 --target beeftv
 beeftv skills show <skillId> --release <releaseId>
 beeftv skills fetch <skillId> --release <releaseId> --output ./skills
 beeftv diagnostics analyze --file ./diagnostics.zip
+beeftv plugin validate ./my-interface
+beeftv plugin try ./my-interface --model my-model --base-url https://api.example.com/v1
 ```
 
-`skills` 的公共查询免登录；投稿要浏览器授权，上传私有草稿和公开发布分别确认，完整子命令见 `beeftv skills help`。`diagnostics analyze` 完全离线，只接受 schema 3 的诊断包，旧格式会明确拒绝，退出码 8：
+`plugin validate` 和 `plugin try` 用 BeefTV 安装插件时的同一套校验和请求构造，离线检查接口插件，不发请求也不需要 Key，用法见[接入生成服务](../plugins/plugin-generation.mdx#校验和试跑)。`skills` 的公共查询免登录；投稿要浏览器授权，上传私有草稿和公开发布分别确认，完整子命令见 `beeftv skills help`。`diagnostics analyze` 完全离线，只接受 schema 3 的诊断包，旧格式会明确拒绝，退出码 8：
 
 ```text
 beeftv: diagnostics_bundle_invalid: 诊断包损坏或格式不受支持，需要 schema 3 诊断包

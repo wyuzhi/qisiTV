@@ -149,7 +149,7 @@ export function prepareBackendToolGenerationTask(options: BackendToolGenerationO
     }
     const logicalModelId = logicalModelIDForConfig(options.config);
     const requestConfig = resolveModelRequestConfig(options.config, options.config.model);
-    if (!logicalModelId && !requestConfig.channelId && !requestConfig.interfaceType) throw new Error("当前模型未选择可用请求协议");
+    if (!logicalModelId && !requestConfig.channelId && !requestConfig.interfaceType) throw new Error("当前模型还没选接口格式，请在模型设置里选择");
     const task: CreateTaskInput = {
         type: "canvas_text",
         operation: "text",
@@ -225,7 +225,7 @@ export function isGenerationTaskCancelled(error: unknown, signal?: AbortSignal) 
 function assertBackendRuntimeConfigured(config: AiConfig) {
     if (logicalModelIDForConfig(config)) return;
     const requestConfig = resolveModelRequestConfig(config, config.model);
-    if (!requestConfig.channelId && !requestConfig.interfaceType) throw new Error("当前模型未选择可用请求协议，请先在模型设置中选择协议插件");
+    if (!requestConfig.channelId && !requestConfig.interfaceType) throw new Error("当前模型还没选接口格式，请在模型设置里选择");
 }
 
 function throwIfAborted(signal?: AbortSignal) {

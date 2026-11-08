@@ -7,15 +7,21 @@ description: 给改 BeefTV 代码的人：插件怎么安装、怎么加载，�
 
 这一页写给改 BeefTV 代码的人。要写插件，看[开发一个插件](./plugin-development.mdx)。
 
-仓库里三种扩展都叫过「插件」，位置和用途不同：
+仓库里有三种扩展，位置和用途不同：
 
-| 叫法 | 是什么 | 写在哪 | 谁在用 |
+| 叫法 | 是什么 | 写在哪 | 用户在哪看到 |
 | --- | --- | --- | --- |
-| 协议插件 | 用 `manifest.json` 描述各家模型接口的声明式包，打包成 `.beeftv-plugin`，不能带代码 | `plugin-packages/` 下 85 个目录 | 模型服务设置里的声明式协议；插件中心的文本、图片、视频、音频协议分类 |
-| 应用插件 | npm 包，用 `package.json` 的 `beeftv` 字段加画布节点、助手工具、技能或生成服务；`module` 形式的生成服务会出现在模型服务设置里 | `plugin-packages/` 下 8 个包 | 插件中心安装和管理；模型服务设置里标着「插件提供」的服务 |
+| 内置接口 | 用 `manifest.json` 描述各家模型服务的请求格式，打包成 `.beeftv-plugin` 随安装包发布，不能带代码 | `plugin-packages/` 下的 `manifest.json` 目录 | 模型服务设置：「选择服务商」和模型的「接口格式」。不在插件中心列出 |
+| 应用插件 | npm 包，用 `package.json` 的 `beeftv` 字段加画布节点、助手工具、技能或生成服务；`module` 形式的生成服务会出现在模型服务设置里 | `plugin-packages/beeftv-plugin-*` | 插件中心安装和管理；模型服务设置里标着「插件提供」的服务 |
 | BeefTV Skills 接入包 | Agent Plugins 包，提供画布工作方法、找技能和投稿三个 Skill | `plugins/beeftv-skills/` | Claude Code、Codex 等外部 Agent，不经过 BeefTV 插件中心 |
 
-下面说的「插件」指协议插件和应用插件。接入包的用法见包内 `README.md`。
+用户自己上传的 `.beeftv-plugin` 接口包是他们装的插件，插件中心里归在「接口插件」一组。接入包的用法见包内 `README.md`。
+
+### 内置接口怎么组织
+
+- 一种请求格式只写一份。各家 OpenAI 兼容服务（DeepSeek、Kimi、智谱、硅基流动、OpenRouter 等）都用 `openai-chat-completions` 这一个接口；服务商的名字和默认地址写在它的 `presets` 里，模型服务设置据此列出「更多服务商」。
+- 接口改名或合并时，旧 ID 写进 `legacyAliases`。已保存的模型和未完成的任务写着旧 ID 时照样能用，旧 ID 命名空间下的 `providerOptions` 也会生效；模型设置读到旧 ID 时显示为现在的接口，下次保存写回新 ID。
+- 字段说明见 `plugin-packages/interface-manifest.schema.json`；`beeftv plugin validate` 和 `beeftv plugin try` 用 BeefTV 自己的校验器离线检查，见[接入生成服务](./plugin-generation.mdx#校验和试跑)。
 
 一个应用插件就是一个 npm 包，一个 pi 包加上 `package.json` 的 `beeftv` 字段。下面这些内容都只有一份：
 
@@ -34,7 +40,7 @@ description: 给改 BeefTV 代码的人：插件怎么安装、怎么加载，�
 3. Go 校验清单，事务提交后才替换旧版本，失败时旧版本不受影响。
 4. 从本地目录安装时，BeefTV 复制这个目录，并记住原路径。「重新加载」就是重新复制一次。
 
-`.beeftv-plugin` 是模型协议插件的打包格式，根目录是 `manifest.json`，不能带代码。
+`.beeftv-plugin` 是接口包的打包格式，根目录是 `manifest.json`，不能带代码。内置接口和用户上传的接口包都用它。
 
 ## 加载
 

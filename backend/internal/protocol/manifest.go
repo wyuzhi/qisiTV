@@ -2,7 +2,6 @@ package protocol
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -275,6 +274,9 @@ func ValidateManifest(manifest Manifest) error {
 			return fmt.Errorf("duplicate provider contribution %q", provider.ID)
 		}
 		providerIDs[provider.ID] = struct{}{}
+		if err := validateProviderRenames(provider, providerIDs); err != nil {
+			return err
+		}
 		if err := validateProviderSurface(provider); err != nil {
 			return err
 		}
@@ -380,9 +382,7 @@ func normalizeManifestForProvider(manifest *Manifest, index int) error {
 	provider := manifest.Contributes.Providers[index]
 	// Released enterprise profiles used the package name as the protocol ID.
 	// Keep those profiles on this installed adapter, including its disabled state.
-	if manifest.Metadata.ID == "openai-videos" && provider.ID == "newapi" {
-		manifest.Metadata.LegacyAliases = []string{"openai-video", "openai-videos"}
-	}
+	manifest.Metadata.LegacyAliases = providerLegacyAliases(manifest.Metadata.ID, provider)
 	manifest.Metadata.ID = provider.ID
 	manifest.Metadata.Categories = provider.Capabilities
 	manifest.Metadata.Scopes = provider.Scopes
@@ -483,51 +483,6 @@ func (a manifestAdapter) BuildCreate(_ context.Context, c RequestContext) (Reque
 	}
 	applyManifestBodyFields(a.manifest.Metadata.ID, &spec, c.Request)
 	return spec, nil
-}
-func (a manifestAdapter) BuildAgent(_ context.Context, c AgentRequestContext) (RequestSpec, error) {
-	if a.manifest.Agent == nil {
-		return RequestSpec{}, fmt.Errorf("protocol %s has no agent operation", a.manifest.Metadata.ID)
-	}
-	request := GenerationRequest{Model: c.Model, Extra: map[string]any{"agent": c.Request}}
-	return a.buildOperation(*a.manifest.Agent, request, "")
-}
-func (a manifestAdapter) ParseAgent(_ context.Context, body []byte) (AgentResult, error) {
-	if a.manifest.AgentResponse == nil {
-		return AgentResult{}, fmt.Errorf("protocol %s has no agent response mapping", a.manifest.Metadata.ID)
-	}
-	payload, err := decodeObject(body)
-	if err != nil {
-		return AgentResult{}, err
-	}
-	response := a.manifest.AgentResponse
-	result := AgentResult{Text: firstPathValue(payload, response.TextPaths...), Reasoning: firstPathValue(payload, response.ReasoningPaths...)}
-	if response.ToolCallsPath == "" {
-		return result, nil
-	}
-	for index, item := range arrayValue(pathValue(payload, response.ToolCallsPath)) {
-		object, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		call := AgentToolCall{
-			ID:               firstPathValue(object, response.ToolCallIDPaths...),
-			Name:             firstPathValue(object, response.ToolCallNamePaths...),
-			Arguments:        firstPathJSONValue(object, response.ToolCallArgsPaths...),
-			ThoughtSignature: firstPathValue(object, response.ToolCallSignaturePaths...),
-		}
-		if strings.TrimSpace(call.Name) != "" {
-			if strings.TrimSpace(call.ID) == "" {
-				call.ID = syntheticAgentToolCallID(body, index)
-			}
-			result.ToolCalls = append(result.ToolCalls, call)
-		}
-	}
-	return result, nil
-}
-
-func syntheticAgentToolCallID(body []byte, index int) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s#%d", body, index)))
-	return fmt.Sprintf("call_%x", sum[:8])
 }
 func (a manifestAdapter) ParseCreate(_ context.Context, body []byte) (CreateResult, error) {
 	if a.manifest.Response.BinaryPayload {

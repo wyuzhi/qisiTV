@@ -63,7 +63,9 @@ description: 用 JSON 或 JS 把图片、视频、音频和文本服务接进 Be
 
 `create` 描述要发的请求，`response` 描述怎么读返回内容。`{ "$ref": "request.prompt" }` 表示取这次生成的提示词。
 
-用户这样用上它：在「模型配置」里点「添加模型服务」，选「第三方模型服务」，填地址和 Key，手动添加模型 ID 后，打开「高级模型设置与测试」，点这个模型的「配置使用」，把请求协议选成“我的生图服务”。
+用户这样用上它：在「模型配置」里点「添加模型服务」，选「第三方模型服务」，填地址和 Key，手动添加模型 ID 后，打开「高级模型设置与测试」，点这个模型的「配置使用」，把接口格式选成“我的生图服务”。
+
+服务是 OpenAI 兼容的话不用写插件：在 `openai-chat-completions` 的 `presets` 里加一条名字和地址，它就会出现在「更多服务商」里。
 
 ### 要查进度的服务
 
@@ -233,7 +235,25 @@ JSON 里任何一个值都可以写成表达式。能读到的数据：
 
 ### 更多例子
 
-`plugin-packages/` 下有 80 多个现成的协议，`zhipu-cogview` 是直接返回结果的例子，`bfl-flux` 是查进度的例子。它们是 BeefTV 自带的，用 `manifest.json` 打包成 `.beeftv-plugin`。写新插件时，把 `contributes.providers` 里的内容照搬进 `package.json` 的 `beeftv` 即可。
+`plugin-packages/` 下有 60 多个内置接口，`zhipu-cogview` 是直接返回结果的例子，`bfl-flux` 是查进度的例子。它们用 `manifest.json` 打包成 `.beeftv-plugin` 随安装包发布。写新插件时，把 `contributes.providers` 里的内容照搬进 `package.json` 的 `beeftv` 即可。
+
+### 校验和试跑
+
+在 `manifest.json` 开头加 `"$schema": "../interface-manifest.schema.json"`（或指向你本地的这份文件），编辑器就能提示字段和取值。
+
+装进 BeefTV 之前，先用命令行离线检查。两个命令都不发请求，也不需要 Key：
+
+```bash
+beeftv plugin validate ./beeftv-plugin-my-image
+```
+
+```bash
+beeftv plugin try ./beeftv-plugin-my-image --model my-model --prompt "一只猫" --base-url https://api.example.com/v1
+```
+
+`validate` 用的是 BeefTV 安装插件时同一个校验器，出错时会指出是哪个字段。`try` 按你的映射拼出将要发出的方法、完整地址和请求体，用来核对字段有没有放对位置。`--options` 可以传一段 JSON，作为这个接口命名空间下的 `providerOptions`。
+
+接口改名或合并时，把旧 ID 写进 provider 的 `legacyAliases`：已保存的模型和未完成的任务照样能用。
 
 ## 用 JS 接入
 

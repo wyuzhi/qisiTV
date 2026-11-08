@@ -19,6 +19,17 @@
 .model-service-provider:hover,.model-service-provider[aria-pressed=true] { background:var(--surface-active); border-color:var(--workspace-border); }
 .model-service-provider[aria-pressed=true] > svg:last-child { color:var(--workspace-accent); }
 .model-service-provider:focus-visible,.model-service-advanced:focus-visible { outline:2px solid var(--workspace-accent); outline-offset:3px; }
+.model-service-vendors { margin-top:6px; }
+.model-service-more { display:flex; align-items:center; gap:6px; width:100%; padding:10px 12px; border:0; background:transparent; color:var(--muted-foreground); font-size:12px; cursor:pointer; }
+.model-service-more[aria-expanded=true] > svg { transform:rotate(180deg); }
+.model-service-more:disabled { cursor:default; opacity:.6; }
+.model-service-vendor-list { display:grid; gap:2px; }
+.model-service-vendor { display:flex; align-items:center; gap:8px; width:100%; text-align:left; border:1px solid transparent; border-radius:8px; padding:8px 12px; cursor:pointer; background:transparent; color:var(--foreground); font-size:13px; }
+.model-service-vendor > span { flex:1; min-width:0; overflow-wrap:anywhere; }
+.model-service-vendor:hover,.model-service-vendor[aria-pressed=true] { background:var(--surface-active); border-color:var(--workspace-border); }
+.model-service-vendor[aria-pressed=true] > svg { color:var(--workspace-accent); }
+.model-service-vendor:disabled:not([aria-pressed=true]) { cursor:default; opacity:.55; }
+.model-service-more:focus-visible,.model-service-vendor:focus-visible { outline:2px solid var(--workspace-accent); outline-offset:2px; }
 .model-service-note { display:flex; align-items:flex-start; gap:8px; margin:25px 10px 0; color:var(--muted-foreground); }
 .model-service-note svg { flex-shrink:0; margin-top:3px; }
 .model-service-note p { margin:0; font-size:12px; line-height:1.8; }
@@ -66,6 +77,8 @@
  .model-service-provider { padding:10px 8px; gap:8px; margin:0; }
  .model-service-provider small,.model-service-provider > svg:last-child,.model-service-note { display:none; }
  .model-service-provider strong { font-size:12px; }
+ .model-service-vendors { grid-column:1/-1; margin:0; }
+ .model-service-vendor-list { grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px; }
  .model-service-provider[aria-pressed=true] { border-color:var(--workspace-accent); }
  .model-service-footer { padding:16px 20px; flex-wrap:wrap; gap:10px; }
  .model-service-footer > div { width:100%; }

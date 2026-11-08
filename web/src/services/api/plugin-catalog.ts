@@ -16,6 +16,8 @@ type PluginProviderCatalogItem = {
     baseUrl?: string;
     authType?: string;
     module?: boolean;
+    aliases?: string[];
+    presets?: Array<{ id: string; label: string; baseUrl: string }>;
     workflows?: Array<{
         id: string;
         label: string;
@@ -71,5 +73,7 @@ function toProviderDefinition(item: PluginProviderCatalogItem, capability: Proto
         authType: item.authType,
         workflows: item.workflows || [],
         module: item.module,
+        aliases: item.aliases,
+        presets: item.presets,
     };
 }

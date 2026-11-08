@@ -47,6 +47,10 @@ test("an unconfigured model displays, tests and saves its explicitly selected ch
         await page.getByRole("button", { name: "高级模型设置与测试", exact: true }).click();
         await page.getByText("POST /v1/video/generations", { exact: true }).waitFor();
         await page.getByRole("button", { name: "配置使用", exact: true }).click();
+        // 已经有接口格式时只显示一行摘要，点「更改」才展开选择列表。
+        await page.getByText("视频生成 JSON · ratio / duration", { exact: true }).waitFor();
+        expect(await page.locator(".choice-browser").count()).toBe(0);
+        await page.getByRole("button", { name: /^更\s*改$/ }).click();
         expect(await page.locator('input[type="radio"][value="video-generations-json"]').isChecked()).toBe(true);
         expect(await page.getByRole("button", { name: "生成测试", exact: true }).isEnabled()).toBe(true);
         expect(await page.getByTestId("saved-profile").textContent()).toBe("unsaved");
@@ -69,7 +73,7 @@ for (const [width, dark] of [[1280, false], [390, true]] as const) {
             await page.locator('.ant-select-item-option[title="视频"]').click();
             await page.getByRole("button", { name: /^添\s*加$/ }).click();
             await page.getByRole("button", { name: "保存并使用", exact: true }).click();
-            await page.getByText("seedance-2.5 还需要选择请求协议，请打开高级模型设置", { exact: true }).waitFor();
+            await page.getByText("seedance-2.5 还需要选择接口格式，请打开高级模型设置", { exact: true }).waitFor();
             expect(await page.getByTestId("saved-profile").textContent()).toBe("unsaved");
             // 保存时缺协议，会直接打开这个模型的协议设置，不需要再点「配置使用」。
             await page.locator(".choice-browser").waitFor();

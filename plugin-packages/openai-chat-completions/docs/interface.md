@@ -4,6 +4,8 @@
 
 - 插件 ID：`openai-chat-completions`。
 - Provider ID：`chat-completion`。
+- 服务商预设：DeepSeek（`https://api.deepseek.com`）、Kimi（月之暗面）（`https://api.moonshot.cn`）、智谱 GLM（`https://open.bigmodel.cn/api/paas/v4`）、硅基流动（`https://api.siliconflow.cn`）、百川（`https://api.baichuan-ai.com`）、零一万物（`https://api.lingyiwanwu.com`）、OpenRouter（`https://openrouter.ai/api`）、xAI（`https://api.x.ai`）、Mistral（`https://api.mistral.ai`）、Groq（`https://api.groq.com/openai`）、Together AI（`https://api.together.xyz`）、Fireworks（`https://api.fireworks.ai/inference`）、NVIDIA NIM（`https://integrate.api.nvidia.com`）、Atlas Cloud（`https://api.atlascloud.ai`）、LiteLLM（本机）（`http://127.0.0.1:4000`）、NewAPI（本机）（`http://127.0.0.1:3000`）、vLLM（本机）（`http://127.0.0.1:8000`）、LocalAI（本机）（`http://127.0.0.1:8080`）。
+- 旧 ID（仍可解析到本接口）：`xai-grok-chat`、`deepseek-chat`、`mistral-chat`、`kimi-chat`、`zhipu-glm-chat`、`baichuan-chat`、`yi-chat`、`siliconflow-chat`、`together-chat`、`groq-chat`、`fireworks-chat`、`nvidia-nim-chat`、`openrouter-chat`、`atlascloud-chat`、`litellm-proxy-chat`、`newapi-chat`、`vllm-chat`、`localai-chat`。
 - 能力：`text`。
 - 默认 Base URL：`https://api.openai.com`。
 - 鉴权驱动：`bearer`。
@@ -57,6 +59,9 @@
 | `create.body.logprobs` | `{"$omitEmpty":{"$ref":"request.providerOptions.chat-completion.logprobs"}}` |
 | `create.body.top_logprobs` | `{"$omitEmpty":{"$ref":"request.providerOptions.chat-completion.top_logprobs"}}` |
 | `create.body.user` | `{"$omitEmpty":{"$ref":"request.providerOptions.chat-completion.user"}}` |
+| `create.body.provider` | `{"$omitEmpty":{"$ref":"request.providerOptions.chat-completion.provider"}}` |
+| `create.body.transforms` | `{"$omitEmpty":{"$ref":"request.providerOptions.chat-completion.transforms"}}` |
+| `create.body.extra_body` | `{"$omitEmpty":{"$ref":"request.providerOptions.chat-completion.extra_body"}}` |
 | `agent.method` | `"POST"` |
 | `agent.path` | `"/chat/completions"` |
 | `agent.contentType` | `"application/json"` |
@@ -64,10 +69,12 @@
 
 ## Provider 扩展键
 
+- `providerOptions.chat-completion.extra_body`
 - `providerOptions.chat-completion.frequency_penalty`
 - `providerOptions.chat-completion.logprobs`
 - `providerOptions.chat-completion.max_tokens`
 - `providerOptions.chat-completion.presence_penalty`
+- `providerOptions.chat-completion.provider`
 - `providerOptions.chat-completion.response_format`
 - `providerOptions.chat-completion.seed`
 - `providerOptions.chat-completion.stop`
@@ -77,6 +84,7 @@
 - `providerOptions.chat-completion.tools`
 - `providerOptions.chat-completion.top_logprobs`
 - `providerOptions.chat-completion.top_p`
+- `providerOptions.chat-completion.transforms`
 - `providerOptions.chat-completion.user`
 
 动态模型或工作流允许使用文档声明的完整 `parameters/input/extra_body` 对象；该对象是协议本身的开放 schema，不会被宿主裁剪。
@@ -141,6 +149,118 @@
       {
         "id": "chat-completion",
         "label": "OpenAI Chat Completions",
+        "legacyAliases": [
+          "xai-grok-chat",
+          "deepseek-chat",
+          "mistral-chat",
+          "kimi-chat",
+          "zhipu-glm-chat",
+          "baichuan-chat",
+          "yi-chat",
+          "siliconflow-chat",
+          "together-chat",
+          "groq-chat",
+          "fireworks-chat",
+          "nvidia-nim-chat",
+          "openrouter-chat",
+          "atlascloud-chat",
+          "litellm-proxy-chat",
+          "newapi-chat",
+          "vllm-chat",
+          "localai-chat"
+        ],
+        "presets": [
+          {
+            "id": "deepseek",
+            "label": "DeepSeek",
+            "baseUrl": "https://api.deepseek.com"
+          },
+          {
+            "id": "moonshot",
+            "label": "Kimi（月之暗面）",
+            "baseUrl": "https://api.moonshot.cn"
+          },
+          {
+            "id": "zhipu",
+            "label": "智谱 GLM",
+            "baseUrl": "https://open.bigmodel.cn/api/paas/v4"
+          },
+          {
+            "id": "siliconflow",
+            "label": "硅基流动",
+            "baseUrl": "https://api.siliconflow.cn"
+          },
+          {
+            "id": "baichuan",
+            "label": "百川",
+            "baseUrl": "https://api.baichuan-ai.com"
+          },
+          {
+            "id": "lingyiwanwu",
+            "label": "零一万物",
+            "baseUrl": "https://api.lingyiwanwu.com"
+          },
+          {
+            "id": "openrouter",
+            "label": "OpenRouter",
+            "baseUrl": "https://openrouter.ai/api"
+          },
+          {
+            "id": "xai",
+            "label": "xAI",
+            "baseUrl": "https://api.x.ai"
+          },
+          {
+            "id": "mistral",
+            "label": "Mistral",
+            "baseUrl": "https://api.mistral.ai"
+          },
+          {
+            "id": "groq",
+            "label": "Groq",
+            "baseUrl": "https://api.groq.com/openai"
+          },
+          {
+            "id": "together",
+            "label": "Together AI",
+            "baseUrl": "https://api.together.xyz"
+          },
+          {
+            "id": "fireworks",
+            "label": "Fireworks",
+            "baseUrl": "https://api.fireworks.ai/inference"
+          },
+          {
+            "id": "nvidia-nim",
+            "label": "NVIDIA NIM",
+            "baseUrl": "https://integrate.api.nvidia.com"
+          },
+          {
+            "id": "atlascloud",
+            "label": "Atlas Cloud",
+            "baseUrl": "https://api.atlascloud.ai"
+          },
+          {
+            "id": "litellm",
+            "label": "LiteLLM（本机）",
+            "baseUrl": "http://127.0.0.1:4000"
+          },
+          {
+            "id": "newapi",
+            "label": "NewAPI（本机）",
+            "baseUrl": "http://127.0.0.1:3000"
+          },
+          {
+            "id": "vllm",
+            "label": "vLLM（本机）",
+            "baseUrl": "http://127.0.0.1:8000"
+          },
+          {
+            "id": "localai",
+            "label": "LocalAI（本机）",
+            "baseUrl": "http://127.0.0.1:8080"
+          }
+        ],
         "capabilities": [
           "text"
         ],
@@ -315,6 +435,21 @@
             "user": {
               "$omitEmpty": {
                 "$ref": "request.providerOptions.chat-completion.user"
+              }
+            },
+            "provider": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.chat-completion.provider"
+              }
+            },
+            "transforms": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.chat-completion.transforms"
+              }
+            },
+            "extra_body": {
+              "$omitEmpty": {
+                "$ref": "request.providerOptions.chat-completion.extra_body"
               }
             }
           }

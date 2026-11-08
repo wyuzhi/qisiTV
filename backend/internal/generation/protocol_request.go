@@ -21,6 +21,16 @@ import (
 	"infinite-canvas/backend/internal/protocol"
 )
 
+// ProtocolRequestFor builds the request for one resolved adapter. A model saved
+// with a retired interface ID keeps the options it saved under that ID.
+func ProtocolRequestFor(input Input, adapter protocol.Adapter) protocol.GenerationRequest {
+	request := ProtocolRequestFromInput(input)
+	if adapter == nil {
+		return request
+	}
+	return protocol.WithRequestedAliasOptions(request, input.Config.InterfaceType, adapter.Metadata())
+}
+
 func ProtocolRequestFromInput(input Input) protocol.GenerationRequest {
 	resolution := strings.TrimSpace(input.Config.VQuality)
 	if input.Mode == "video" {

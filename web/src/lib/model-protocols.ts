@@ -4,13 +4,24 @@ export type ModelProtocol = string;
 export type ProtocolCapability = "text" | "image" | "video" | "audio";
 export type ModelProtocolWorkflow = { id: string; label: string; providerId: string; capability: ProtocolCapability; parameters: Array<{ name: string; type: string; required?: boolean; description?: string; values?: string[]; mapping?: string }>; defaults?: Record<string, string | number | boolean> };
 // module：生成接口由插件 JS 实现，模型服务里单列成一个服务商，模型列表由插件提供。
-export type ModelProtocolDefinition = { value: ModelProtocol; label: string; vendor?: string; capability: ProtocolCapability; create: string; contentType: string; poll?: string; media: string; enabled?: boolean; baseUrl?: string; authType?: string; workflows?: ModelProtocolWorkflow[]; module?: boolean };
+// presets：说同一种接口的服务商（名字和默认地址），在「选择服务商」里一键带出。
+// aliases：旧版本里这个接口用过的 ID，已保存的模型可能还写着它们。
+export type ModelProtocolPreset = { id: string; label: string; baseUrl: string };
+export type ModelProtocolDefinition = { value: ModelProtocol; label: string; vendor?: string; capability: ProtocolCapability; create: string; contentType: string; poll?: string; media: string; enabled?: boolean; baseUrl?: string; authType?: string; workflows?: ModelProtocolWorkflow[]; module?: boolean; aliases?: string[]; presets?: ModelProtocolPreset[] };
 
 export function protocolGroups(protocols: ModelProtocolDefinition[]) {
     return (["text", "image", "video", "audio"] as ProtocolCapability[]).map((capability) => ({ label: { text: "文本", image: "图片", video: "视频", audio: "音频" }[capability], options: protocols.filter((item) => item.capability === capability && item.enabled !== false).map((item) => ({ label: `${item.label} · ${item.create.replace(/^POST /, "")}`, value: item.value })) }));
 }
-export function modelProtocolDefinition(value: string | undefined, definitions: ModelProtocolDefinition[] = []) { return definitions.find((item) => item.value === value); }
-export function modelProtocolLabel(value: string | undefined, definitions: ModelProtocolDefinition[] = []) { return modelProtocolDefinition(value, definitions)?.label || (value ? value : "未安装协议"); }
+export function modelProtocolDefinition(value: string | undefined, definitions: ModelProtocolDefinition[] = []) { return definitions.find((item) => item.value === value) || (value ? definitions.find((item) => item.aliases?.includes(value)) : undefined); }
+// 一个接口能做几种生成时（如 ComfyUI），目录里同一个 ID 会按能力各列一项，要连能力一起找。
+export function modelProtocolDefinitionFor(value: string | undefined, capability: ProtocolCapability | string | undefined, definitions: ModelProtocolDefinition[] = []) {
+    if (!value) return undefined;
+    const matches = (item: ModelProtocolDefinition) => item.capability === capability && item.enabled !== false;
+    return definitions.find((item) => item.value === value && matches(item)) || definitions.find((item) => Boolean(item.aliases?.includes(value)) && matches(item));
+}
+// 旧 ID 换成现在的 ID；不认识的 ID 原样保留，不替用户改掉自定义的接口。
+export function canonicalModelProtocol(value: string | undefined, definitions: ModelProtocolDefinition[] = []) { return modelProtocolDefinition(value, definitions)?.value || value; }
+export function modelProtocolLabel(value: string | undefined, definitions: ModelProtocolDefinition[] = []) { return modelProtocolDefinition(value, definitions)?.label || (value ? value : "还没选接口格式"); }
 // Protocol → capability for the protocols the host ships without a plugin
 // catalog. Runtime definitions win; unknown/custom ids stay unresolved so a
 // user's own contract is never silently rewritten.
@@ -74,7 +85,7 @@ export function protocolForBeefTVCatalog(endpointTypes: string[] = []): ModelPro
     ];
     return mappings.find(([, aliases]) => aliases.some((alias) => endpoints.includes(alias)))?.[0];
 }
-export function modelProtocolSummary(value: string | undefined, definitions: ModelProtocolDefinition[] = []) { const protocol = modelProtocolDefinition(value, definitions); return protocol ? [protocol.create, protocol.contentType, protocol.poll, protocol.media].filter(Boolean).join(" · ") : "当前协议未安装或尚未选择。"; }
+export function modelProtocolSummary(value: string | undefined, definitions: ModelProtocolDefinition[] = []) { const protocol = modelProtocolDefinition(value, definitions); return protocol ? [protocol.create, protocol.contentType, protocol.poll, protocol.media].filter(Boolean).join(" · ") : "还没选接口格式，或这个接口已不可用。"; }
 export function normalizeModelProtocol(value: unknown): ModelProtocol | undefined {
     const protocol = typeof value === "string" && value.trim() ? value.trim() : undefined;
     return protocol === "google-gemini-generate-content" ? "gemini-generate-content" : protocol;
