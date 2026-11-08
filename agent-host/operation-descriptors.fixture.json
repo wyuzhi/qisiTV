@@ -2129,7 +2129,7 @@
           "type": "string"
         },
         "note": {
-          "description": "告诉用户为什么运行",
+          "description": "告诉用户运行原因",
           "maxLength": 500,
           "type": "string"
         },
@@ -2149,8 +2149,8 @@
           "type": "string"
         },
         "timeoutSec": {
-          "description": "默认 120",
-          "maximum": 600,
+          "description": "默认 300",
+          "maximum": 1800,
           "minimum": 1,
           "type": "integer"
         },

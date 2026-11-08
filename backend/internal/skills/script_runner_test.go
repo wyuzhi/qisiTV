@@ -79,6 +79,39 @@ func TestSkillScriptInterpreterAndMissingInterpreterErrors(t *testing.T) {
 	}
 }
 
+func TestSkillScriptTimeoutDefaultsAndLimits(t *testing.T) {
+	if DefaultScriptTimeoutSec != 300 || MaxScriptTimeoutSec != 1800 {
+		t.Fatalf("unexpected script timeout limits: default=%d max=%d", DefaultScriptTimeoutSec, MaxScriptTimeoutSec)
+	}
+	s, _ := agentSkillFixture(t)
+	pin := installAgentSkill(t, s, map[string]string{
+		"SKILL.md":       "---\nname: 超时测试\ndescription: 验证默认与最大超时\n---\n运行 scripts/run.js",
+		"scripts/run.js": "console.log('ok')",
+	})
+
+	validated, err := s.ValidateScriptRun("owner", ScriptRunRequest{CanvasID: "canvas-1", Pin: pin, ScriptPath: "scripts/run.js"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if validated.TimeoutSec != DefaultScriptTimeoutSec {
+		t.Fatalf("expected default timeout %d, got %d", DefaultScriptTimeoutSec, validated.TimeoutSec)
+	}
+
+	validated, err = s.ValidateScriptRun("owner", ScriptRunRequest{CanvasID: "canvas-1", Pin: pin, ScriptPath: "scripts/run.js", TimeoutSec: MaxScriptTimeoutSec}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if validated.TimeoutSec != MaxScriptTimeoutSec {
+		t.Fatalf("expected max timeout %d to be accepted, got %d", MaxScriptTimeoutSec, validated.TimeoutSec)
+	}
+
+	_, err = s.ValidateScriptRun("owner", ScriptRunRequest{CanvasID: "canvas-1", Pin: pin, ScriptPath: "scripts/run.js", TimeoutSec: MaxScriptTimeoutSec + 1}, "")
+	var appErr *kernel.AppError
+	if !errors.As(err, &appErr) || appErr.Reason != "invalid_script_timeout" || !strings.Contains(appErr.Message, "1800") {
+		t.Fatalf("expected invalid_script_timeout naming the new maximum, got %+v", err)
+	}
+}
+
 func TestSkillScriptPathContainmentAndSymlinkRejection(t *testing.T) {
 	s, _ := agentSkillFixture(t)
 	pin := installAgentSkill(t, s, map[string]string{

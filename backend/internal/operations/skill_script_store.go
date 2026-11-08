@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	skillScriptProposalOpName = "skill.script.proposal"
-	skillScriptAllowOpName    = "skill.script.session_allow"
+	skillScriptProposalOpName    = "skill.script.proposal"
+	skillScriptAllowOpName       = "skill.script.session_allow"
+	skillScriptAutoRunSettingKey = "assistant_skill_script_auto_run"
 )
 
 type SkillScriptProposal struct {
@@ -216,6 +217,44 @@ func RevokeSessionScriptAllows(db *gorm.DB, userID, canvasID, sessionID string) 
 	return query.Delete(&model.AgentOpRecord{}).Error
 }
 
+// SkillScriptAutoRunEnabled reports the workspace setting that lets the
+// assistant run skill scripts without a per-script confirmation card.
+func SkillScriptAutoRunEnabled(db *gorm.DB) bool {
+	if db == nil {
+		return false
+	}
+	var setting model.SystemSetting
+	if err := db.Select("value_json").First(&setting, "key = ?", skillScriptAutoRunSettingKey).Error; err != nil {
+		return false
+	}
+	var enabled bool
+	if err := json.Unmarshal([]byte(setting.ValueJSON), &enabled); err != nil {
+		return false
+	}
+	return enabled
+}
+
+// SetSkillScriptAutoRun persists the workspace setting in the same
+// SystemSetting store used by other local workspace preferences.
+func SetSkillScriptAutoRun(db *gorm.DB, enabled bool) error {
+	if db == nil {
+		return errors.New("settings unavailable")
+	}
+	encoded, err := json.Marshal(enabled)
+	if err != nil {
+		return err
+	}
+	var existing model.SystemSetting
+	findErr := db.Select("key").First(&existing, "key = ?", skillScriptAutoRunSettingKey).Error
+	if errors.Is(findErr, gorm.ErrRecordNotFound) {
+		return db.Create(&model.SystemSetting{Key: skillScriptAutoRunSettingKey, ValueJSON: string(encoded)}).Error
+	}
+	if findErr != nil {
+		return findErr
+	}
+	return db.Model(&model.SystemSetting{}).Where("key = ?", skillScriptAutoRunSettingKey).Update("value_json", string(encoded)).Error
+}
+
 func lookupTurnSessionID(db *gorm.DB, userID, turnID string) string {
 	if db == nil || strings.TrimSpace(turnID) == "" {
 		return ""
@@ -280,7 +319,7 @@ func ProposeOrRunSkillScript(ctx context.Context, db *gorm.DB, skillSvc *skills.
 		CreatedAt:             now,
 		UpdatedAt:             now,
 	}
-	if sessionID != "" && IsSessionScriptAllowed(db, userID, req.CanvasID, sessionID, validated.Pin, validated.ScriptPath) {
+	if SkillScriptAutoRunEnabled(db) || (sessionID != "" && IsSessionScriptAllowed(db, userID, req.CanvasID, sessionID, validated.Pin, validated.ScriptPath)) {
 		proposal.Status = "running"
 		if err := UpsertSkillScriptProposal(db, userID, proposal); err != nil {
 			return nil, AsError(err)

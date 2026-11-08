@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -25,8 +26,8 @@ import (
 )
 
 const (
-	DefaultScriptTimeoutSec = 120
-	MaxScriptTimeoutSec     = 600
+	DefaultScriptTimeoutSec = 300
+	MaxScriptTimeoutSec     = 1800
 	MaxScriptArgs           = 64
 	MaxScriptArgBytes       = 4096
 	MaxScriptStdinBytes     = 64 * 1024
@@ -255,7 +256,7 @@ func (s *Service) ValidateScriptRun(userID string, req ScriptRunRequest, bundled
 		timeoutSec = DefaultScriptTimeoutSec
 	}
 	if timeoutSec > MaxScriptTimeoutSec {
-		return nil, &kernel.AppError{Status: 400, Code: 400, Reason: "invalid_script_timeout", Message: "脚本超时时间必须在 1 到 600 秒之间"}
+		return nil, &kernel.AppError{Status: 400, Code: 400, Reason: "invalid_script_timeout", Message: fmt.Sprintf("脚本超时时间必须在 1 到 %d 秒之间", MaxScriptTimeoutSec)}
 	}
 	lookPath := exec.LookPath
 	if s.scriptState != nil && s.scriptState.lookPath != nil {

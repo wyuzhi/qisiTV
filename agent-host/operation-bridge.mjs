@@ -27,6 +27,10 @@ const REBASABLE_WRITES = new Set([
   'canvas.script.row.remove',
 ]);
 
+// 服务端技能脚本上限是 1800 秒；请求超时另留启动、排队和回传结果的余量。
+const SKILL_SCRIPT_MAX_TIMEOUT_SEC = 1800;
+const SKILL_SCRIPT_REQUEST_TIMEOUT_MS = (SKILL_SCRIPT_MAX_TIMEOUT_SEC + 15) * 1000;
+
 const canvasMutation = descriptor => descriptor.id.startsWith('canvas.') &&
   (!descriptor.readOnly || descriptor.id === 'canvas.generation.propose');
 
@@ -65,7 +69,7 @@ export function createOperationBridge({
   const descriptors = new Map();
 
   async function opsRequest(method, apiPath, body, signal, turnId) {
-    const timeoutMs = apiPath === '/ops/skill.script.run' ? 615000 : apiPath.startsWith('/ops/media.') ? 95000 : 30000;
+    const timeoutMs = apiPath === '/ops/skill.script.run' ? SKILL_SCRIPT_REQUEST_TIMEOUT_MS : apiPath.startsWith('/ops/media.') ? 95000 : 30000;
     const response = await fetch(`${opsUrl}${apiPath}`, {
       method,
       headers: {

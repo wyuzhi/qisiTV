@@ -182,7 +182,9 @@ export type AssistantScriptProposal = {
     result?: AssistantScriptRunResult;
 };
 
-const SKILL_SCRIPT_CONFIRM_TIMEOUT_MS = 630_000;
+// 与服务端技能脚本最大超时一致，另留出排队和结果回传时间。
+const SKILL_SCRIPT_MAX_TIMEOUT_SEC = 1800;
+const SKILL_SCRIPT_CONFIRM_TIMEOUT_MS = (SKILL_SCRIPT_MAX_TIMEOUT_SEC + 30) * 1000;
 
 export async function confirmAssistantScriptProposal(
     canvasId: string,

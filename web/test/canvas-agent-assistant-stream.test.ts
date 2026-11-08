@@ -102,7 +102,7 @@ describe("创作助手回合流边界", () => {
         httpPostSpy.mockResolvedValueOnce({ runnable: true } as never);
         expect(await confirmAssistantProposalRunnable("current", "gp-current", "canvas")).toBeNull();
     });
-    test("确认运行技能脚本使用长超时（630s），不被 4 秒默认 JSON 超时中断", async () => {
+    test("确认运行技能脚本使用长超时（1830s），不被 4 秒默认 JSON 超时中断", async () => {
         sessionResponse = () => new Response(JSON.stringify({ data: { token: "ui-token", expiresAt: new Date(Date.now() + 1_800_000).toISOString() } }));
         await ensureAgentUiSession();
         let capturedUrl = "";
@@ -117,7 +117,7 @@ describe("创作助手回合流边界", () => {
         await confirmAssistantScriptProposal("canvas-1", "turn-1", "sp-1", true);
         expect(capturedUrl).toBe("/assistant/turns/turn-1/script-proposals/sp-1/run");
         expect(capturedBody).toEqual({ canvasId: "canvas-1", alwaysAllowSession: true });
-        expect(capturedConfig?.timeout).toBe(630_000);
+        expect(capturedConfig?.timeout).toBe(1_830_000);
         expect((capturedConfig?.headers as Record<string, string>)?.["X-Beeftv-Ui-Session"]).toBe("ui-token");
     });
     test("交接会话身份在 observer_error 和断流前交给界面，不能冒充回合完成", async () => {

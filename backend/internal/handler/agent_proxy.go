@@ -98,6 +98,9 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 		return true
 	}
 
+	// 助手行为设置改变脚本确认方式，写入必须与助手入口共用同一套身份与只读校验。
+	RegisterAssistantSettingsRoutes(r, svc, guard)
+
 	// hostOpsURL 用请求自身的 Host 推导操作层基址：桌面形态监听随机端口，猜端口会指向别处。
 	hostOpsURL := func(c *gin.Context) string { return "http://" + c.Request.Host + "/api" }
 	launchToken := func(c *gin.Context) string { return strings.TrimSpace(c.GetHeader(httptransport.LaunchTokenHeader)) }
