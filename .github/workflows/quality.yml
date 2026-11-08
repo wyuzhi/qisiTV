@@ -146,6 +146,8 @@ jobs:
         run: sh ../plugin-packages/build-packages.sh
       - name: Run Go tests
         run: go test ./...
+      - name: Check dead code budget
+        run: node ../scripts/deadcode-budget.mjs
       - name: Verify real production timing report
         working-directory: agent-host/eval
         run: python3 -m unittest report_production_test.py

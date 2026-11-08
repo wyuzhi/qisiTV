@@ -27,16 +27,6 @@ func extractJSONText(raw string) (string, error) {
 	return "", errors.New("模型返回的不是 JSON")
 }
 
-// ExtractJSONText 从模型正文中抽出第一个完整 JSON 值。
-func ExtractJSONText(raw string) (string, error) {
-	return extractJSONText(raw)
-}
-
-// ExtractPreferredJSONText 优先返回包含 preferKey 的顶层 JSON 对象。
-func ExtractPreferredJSONText(raw string, preferKey string) (string, error) {
-	return extractPreferredJSONText(raw, preferKey)
-}
-
 // extractPreferredJSONText 与 extractJSONText 一样逐个扫描完整的 JSON 值，但会优先返回顶层对象且
 // 包含 preferKey 的候选。模型常在给出契约对象前先用正文列举一遍内容（例如先写一段角色名数组），
 // 只取第一个可解析值会命中这些旁枝片段，导致后续校验拿到完全无关的结构。

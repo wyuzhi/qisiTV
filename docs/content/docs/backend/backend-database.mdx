@@ -33,7 +33,7 @@ v19 `assistant-continuation-intent-fence` 为 `assistant_turns` 追加 `continua
 
 v20 `assistant-production-authorization` 为 `assistant_turns` 追加文本列 `generation_authorization_json`。用户一次确认的有限素材计划固定原回合、方案、节点、模型、提示词、参数及参考节点；后续官方 Pi 接续轮继承同一授权，不能增加素材或改变已确认输入。授权与首批既有任务、画布绑定及接续回执在同一事务保存。每个素材沿用 `proposal:<proposalId>:<nodeId>` 的任务身份，未知响应或再次确认不会重复创建付费任务。停止、新需求或会话变化仍通过 v19 撤销，旧历史不自动获得授权。该字段不代表人民币金额封顶；实际费用由渠道结算。缺列阻止 Ready，重复迁移保留既有授权。
 
-v21 `skill-market-release-metadata` 为 `skill_versions` 追加 `market_release_json TEXT`，在旧库还没有版本表时先创建该表。已审核的发布身份、作者、来源、许可和完整清单属于具体本地版本，私有改编保留原来源，不改写原包内容摘要。迁移保留历史回合、未知字段和既有 ledger；与公开服务的发布状态分别验收。
+v21 `skill-market-release-metadata` 为 `skill_versions` 追加 `market_release_json TEXT`，在旧库还没有版本表时先创建该表。市场发布记录的发布身份、作者、来源、许可和完整清单属于具体本地版本，私有改编保留原来源，不改写原包内容摘要。迁移保留历史回合、未知字段和既有 ledger；与公开服务的发布状态分别验收。
 
 v22 `canvas-reusable-workflows` 增加 `canvas_workflows`、`canvas_workflow_runs` 与 `canvas_workflow_resources`。模板保存公开节点定义与加密执行配方；运行保存模板快照、输入、步骤任务回执和输出，删除模板不会删除既有运行。`(user_id, client_operation_id)` 唯一约束防止重复创建同次运行，步骤使用由运行与节点派生的稳定任务操作编号对账。模板固定资源、原配方的外部资源和运行输入输出加入资源删除引用检查。配方整体使用已有工作区密钥加密，接口不返回密文或凭据。
 

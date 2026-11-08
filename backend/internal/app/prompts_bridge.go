@@ -51,14 +51,6 @@ func validateStyleProfileJSON(value string) (string, error) {
 	return prompts.ValidateStyleProfileJSON(value)
 }
 
-func extractJSONText(raw string) (string, error) {
-	return prompts.ExtractJSONText(raw)
-}
-
-func extractPreferredJSONText(raw string, preferKey string) (string, error) {
-	return prompts.ExtractPreferredJSONText(raw, preferKey)
-}
-
 func promptDefinition(operation string) (PromptOperationDefinition, bool) {
 	return prompts.PromptDefinition(operation)
 }

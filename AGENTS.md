@@ -159,5 +159,5 @@ BeefTV（`glanderness/BeefTV`）是面向 AI 影视与短剧创作的工作台�
 - 测试测行为，不读源码文字做断言。
 - 修 bug 前先查这条规则写在几处；有多处就先合成一处再修。
 - 文件超过约 800 行且最近常改、常修时，在本次改动里按职责拆开；不为拆而拆。
-- `node scripts/structure-budget.mjs` 记录几项结构数字：`internal/app` 行数、超过 1000 行的文件（含 CSS）、源码里写死的模型和厂商名、直接依赖 `*app.Service` 的 handler、读源码文字的测试。CI 只允许它们变小；确需变大时在 PR 说明里写清理由，再运行 `--update`。
+- `node scripts/structure-budget.mjs` 记录几项结构数字：`internal/app` 行数、超过 1000 行的文件（含 CSS）、源码里写死的模型和厂商名、直接依赖 `*app.Service` 的 handler、读源码文字的测试。CI 只允许它们变小；确需变大时在 PR 说明里写清理由，再运行 `--update`。同一轮也运行 `node scripts/deadcode-budget.mjs`，死代码只许减少，确需增加时在 PR 说明理由，不能直接更新基线。
 - 每周花半小时铲屎：运行 `node scripts/structure-budget.mjs --hotspots 7` 看近 7 天修 bug 最集中的文件，挑一处拆开或合并规则，再运行 `--update` 收紧基线；发版前关掉已经过时的 PR。

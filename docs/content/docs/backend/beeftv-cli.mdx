@@ -327,7 +327,7 @@ beeftv skills fetch <skillId> --release <releaseId> --output ./skills
 beeftv diagnostics analyze --file ./diagnostics.zip
 ```
 
-`skills` 的公共查询免登录；投稿要浏览器授权，上传和送审分别确认，完整子命令见 `beeftv skills help`。`diagnostics analyze` 完全离线，只接受 schema 3 的诊断包，旧格式会明确拒绝，退出码 8：
+`skills` 的公共查询免登录；投稿要浏览器授权，上传私有草稿和公开发布分别确认，完整子命令见 `beeftv skills help`。`diagnostics analyze` 完全离线，只接受 schema 3 的诊断包，旧格式会明确拒绝，退出码 8：
 
 ```text
 beeftv: diagnostics_bundle_invalid: 诊断包损坏或格式不受支持，需要 schema 3 诊断包

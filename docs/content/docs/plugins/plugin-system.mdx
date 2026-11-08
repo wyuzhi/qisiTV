@@ -7,7 +7,17 @@ description: 给改 BeefTV 代码的人：插件怎么安装、怎么加载，�
 
 这一页写给改 BeefTV 代码的人。要写插件，看[开发一个插件](./plugin-development.mdx)。
 
-一个插件就是一个 npm 包，一个 pi 包加上 `package.json` 的 `beeftv` 字段。下面这些内容都只有一份：
+仓库里三种扩展都叫过「插件」，位置和用途不同：
+
+| 叫法 | 是什么 | 写在哪 | 谁在用 |
+| --- | --- | --- | --- |
+| 协议插件 | 用 `manifest.json` 描述各家模型接口的声明式包，打包成 `.beeftv-plugin`，不能带代码 | `plugin-packages/` 下 85 个目录 | 模型服务设置里的声明式协议；插件中心的文本、图片、视频、音频协议分类 |
+| 应用插件 | npm 包，用 `package.json` 的 `beeftv` 字段加画布节点、助手工具、技能或生成服务；`module` 形式的生成服务会出现在模型服务设置里 | `plugin-packages/` 下 8 个包 | 插件中心安装和管理；模型服务设置里标着「插件提供」的服务 |
+| BeefTV Skills 接入包 | Agent Plugins 包，提供找技能和投稿两个 Skill | `plugins/beeftv-skills/` | Claude Code、Codex 等外部 Agent，不经过 BeefTV 插件中心 |
+
+下面说的「插件」指协议插件和应用插件。接入包的用法见包内 `README.md`。
+
+一个应用插件就是一个 npm 包，一个 pi 包加上 `package.json` 的 `beeftv` 字段。下面这些内容都只有一份：
 
 | 内容 | 唯一来源 |
 | --- | --- |
@@ -24,7 +34,7 @@ description: 给改 BeefTV 代码的人：插件怎么安装、怎么加载，�
 3. Go 校验清单，事务提交后才替换旧版本，失败时旧版本不受影响。
 4. 从本地目录安装时，BeefTV 复制这个目录，并记住原路径。「重新加载」就是重新复制一次。
 
-`.beeftv-plugin` 是 BeefTV 自带模型协议的打包格式，根目录是 `manifest.json`，不能带代码。
+`.beeftv-plugin` 是模型协议插件的打包格式，根目录是 `manifest.json`，不能带代码。
 
 ## 加载
 
@@ -42,7 +52,7 @@ JS 生成服务不放进助手进程：助手进程要配好助手模型才启�
 
 ## 信任
 
-BeefTV 不做沙箱，也不审核插件。`client` 和 `pi.extensions` 和 BeefTV 有同样的本地权限，`module` 能拿到用户填给这个服务的 Key。保护用户的是确认框：用户每次安装和更新都显示来源、版本和风险。精选列表里的插件由 BeefTV 自动更新，不再询问，见下面的「更新」。
+BeefTV 不做沙箱，也不审核插件。`client` 和 `pi.extensions` 和 BeefTV 有同样的本地权限，`module` 能拿到用户填给这个服务的 Key。保护用户的是确认框：安装插件、以及手动更新应用插件时，会显示来源、版本和风险，需要勾选确认。精选列表里由 BeefTV 维护、安装时没有指定版本的插件会在后台自动更新，不弹确认；从本地目录「重新加载」自己的代码也不弹确认，见下面的「更新」。
 
 精选列表公开在 `Sunnyender-org/beeftv-plugins`。插件市场固定提示收录不代表担保。
 
@@ -52,7 +62,7 @@ BeefTV 不做沙箱，也不审核插件。`client` 和 `pi.extensions` 和 Beef
 - 精选列表 `plugins` 里带 `tarball` 和 `sha256` 的条目由 BeefTV 维护。后端启动一分钟后检查一次，之后每 6 小时检查一次，有新登记的版本就自动更新，并校验 `sha256`。用户安装时写明版本的（比如 `beeftv-plugin-example@1.0.0`）不自动更新；用户点更新时换成最新版，之后不再固定版本。
 - 精选列表 `packages` 里只写 npm 包名，卡片信息从 npm 读，由用户自己更新。
 
-## 自带的插件
+## 自带的应用插件
 
 | 插件 | 位置 | 说明 |
 | --- | --- | --- |

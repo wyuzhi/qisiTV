@@ -42,7 +42,7 @@ export function canInstallMarketRelease(options: {
         && options.unsupportedReasons.length === 0;
 }
 export function publicationStatus(status: string) {
-    return ({ draft: "草稿", validated: "等待确认发布", ready_to_submit: "等待确认发布", awaiting_upload_confirmation: "等待确认上传", uploading: "上传结果待核对", needs_preview: "需要刷新预览", awaiting_submit_confirmation: "等待确认发布", submitted: "等待审核", pending: "审核中", in_review: "审核中", approved: "已发布", published: "已发布", rejected: "需要修改", withdrawn: "已撤回" } as Record<string, string>)[status] || "状态待刷新";
+    return ({ draft: "草稿", ready_to_submit: "等待确认发布", awaiting_upload_confirmation: "等待确认上传", uploading: "上传结果待核对", needs_preview: "需要刷新预览", awaiting_submit_confirmation: "等待确认发布", rejected: "需要修改", withdrawn: "已撤回", published: "已发布" } as Record<string, string>)[status] || "状态待刷新";
 }
 export function canSubmitPublication(plan: { status: string; preview?: unknown }, confirmed: boolean) {
     return confirmed && plan.status === "awaiting_submit_confirmation" && Boolean(plan.preview);

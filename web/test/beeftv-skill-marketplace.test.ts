@@ -34,6 +34,8 @@ test("unknown capabilities and publication states never look accepted", () => {
     expect(publicationStatus("awaiting_submit_confirmation")).toBe("等待确认发布");
     expect(publicationStatus("published")).toBe("已发布");
     expect(publicationStatus("rejected")).toBe("需要修改");
+    expect(publicationStatus("submitted")).toBe("状态待刷新");
+    expect(publicationStatus("in_review")).toBe("状态待刷新");
 });
 
 test("third-party market skills always ask for risk confirmation while official built-in skills do not", () => {

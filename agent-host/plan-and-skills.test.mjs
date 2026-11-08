@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { PLAN_MAX_ITEMS, applyPlanUpdate, emptyPlan, planContinuation, publicPlan, renderPlanSection } from './plan.mjs';
-import { fitRestoredSkills, missingActiveSkills, pickActiveSkills, restoredSkillMessage, skillBlockVisible } from './active-skills.mjs';
+import { fitRestoredSkills, restoredSkillMessage, skillBlockVisible } from './active-skills.mjs';
 
 const item = (id, status, title = `步骤${id}`) => ({ id, title, status });
 
@@ -50,16 +50,11 @@ const rec = (skillId, extra = {}) => ({ skillId, versionId: `v-${skillId}`, cont
 const userMessage = (text) => ({ role: 'user', content: [{ type: 'text', text }] });
 
 describe('active skills', () => {
-  test('取最近 2 个、去重保留后出现的、跳过已放下的', () => {
-    const loaded = [rec('a'), rec('b'), rec('a'), rec('c', { released: true }), rec('d')];
-    expect(pickActiveSkills(loaded).map((r) => r.skillId)).toEqual(['a', 'd']);
-  });
-  test('正文还在消息里就不补；压缩掉了就补回', () => {
+  test('正文还在消息里就视为可见', () => {
     const a = rec('a');
     const block = `<skill name="n" versionId="${a.versionId}" contentHash="${a.contentHash}">…</skill>`;
     expect(skillBlockVisible([userMessage(block)], a)).toBe(true);
-    expect(missingActiveSkills([userMessage(block)], [a])).toEqual([]);
-    expect(missingActiveSkills([userMessage('压缩摘要：目标……')], [a])).toEqual([a]);
+    expect(skillBlockVisible([userMessage('压缩摘要：目标……')], a)).toBe(false);
   });
   test('补回消息使用官方技能块格式并说明原因', () => {
     const resource = { pin: { skillId: 'a', versionId: 'v-a', contentHash: 'a'.padEnd(64, '0') }, name: '短剧', version: '2', description: '', files: [], unsupportedCapabilities: [], instruction: '第一步……' };

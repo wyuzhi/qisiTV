@@ -13,7 +13,7 @@
       "interface": {
         "displayName": "BeefTV Skills",
         "shortDescription": "查找技能，分享创作方法",
-        "longDescription": "查询已审核技能的用途、版本、来源和能力要求；帮助作者准备投稿并查看审核状态。",
+        "longDescription": "查找、读取和安装 BeefTV 市场的技能；帮作者整理创作方法、准备草稿，确认预览后发布。",
         "developerName": "BeefTV",
         "category": "Productivity",
         "websiteURL": "https://beeftv.app",
