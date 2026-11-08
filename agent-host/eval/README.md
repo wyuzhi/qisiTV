@@ -131,3 +131,34 @@ BEEFTV_REAL_BASELINE_OUT=/tmp/baseline go test ./internal/handler -run TestAssis
 ```
 
 模型目录由测试写入的本地配置提供；目录为空时测试直接失败，避免得到失真的基线。
+
+---
+
+## 真实生成端到端（会真的出图、出视频）
+
+`eval/real-gen-driver.mjs` 加 `backend/internal/handler/assistant_real_gen_test.go`：真实宿主 + 真实 Go 后端 + 真实媒体任务，按三轮完成「分镜 → 首帧图 → 检查 → 视频 → 剪成片」，并把图片、视频和成片下载到输出目录。
+
+```bash
+cd backend
+# 默认：本地假 OpenAI 图片/视频上游（合法 PNG 与 5 秒 MP4），零付费，验证整条流程
+BEEFTV_REAL_GEN=1 BEEFTV_REAL_GEN_OUT=/tmp/real-gen go test ./internal/handler -run TestAssistantRealGenerationEndToEnd -count=1 -v -timeout 15m
+# 真实网关（费用自理；密钥只从环境变量进入进程，不写文件）
+BEEFTV_REAL_GEN_URL=https://<网关>/v1 BEEFTV_REAL_GEN_KEY=... \
+BEEFTV_REAL_GEN_OUT=/tmp/real-gen go test ./internal/handler -run TestAssistantRealGenerationEndToEnd -count=1 -v -timeout 60m
+```
+
+- `BEEFTV_REAL_GEN=1`：显式开启假模式本地验证；未设置且未提供 `BEEFTV_REAL_GEN_URL` 时测试默认跳过。
+- `BEEFTV_REAL_GEN_URL` / `BEEFTV_REAL_GEN_KEY`：生成与文本模型共用的 OpenAI 兼容网关；设置 URL 后自动走真实模式。
+- `BEEFTV_REAL_GEN_MODEL`：助手文本模型，默认 `deepseek-v4.1-flash`。
+- `BEEFTV_REAL_GEN_MAX_TASKS`：图片/视频任务总数上限，默认 `6`；超出后不再确认新方案，报告记录原因。
+- `BEEFTV_REAL_GEN_MAX_VIDEO_SECONDS`：单镜头视频秒数上限，默认 `5`；超长或秒数不明的视频方案不确认。
+- `BEEFTV_REAL_GEN_OUT`：输出目录；默认临时目录。报告为 `report.json` / `report.md`，产物在 `artifacts/`，另有 `canvas.json`。
+- 超时：图片任务默认 5 分钟、视频任务默认 15 分钟、单个回合默认 10 分钟，可用 `BEEFTV_REAL_GEN_IMAGE_TIMEOUT_MS`、`BEEFTV_REAL_GEN_VIDEO_TIMEOUT_MS`、`BEEFTV_REAL_GEN_TURN_TIMEOUT_MS` 调整。
+- 确认走真实的 `ApproveGenerationOrder`（界面「确认方案」的服务方法）；测试侧 `/__confirm` 只做入口和硬上限兜底。额度检查、预留和确认在同一把锁里串行执行，按完整 `Targets` 计划计数，音频等本测试范围外的类型直接拒绝。审片模型按 `ResolveMediaReviewProvider` 配置，`/__media-review` 会报告是否解析成功。
+- 上游返回的、指向上游基址（`BEEFTV_REAL_GEN_URL` 的 scheme+host）的绝对媒体地址会改写成指向本地测试代理，下载时由代理重新注入真实密钥；CDN 等其它域名保持原样。代理只在重定向目标的 scheme、hostname、port 与上游基址完全一致时保留 `Authorization`；跨域或子域名重定向会先删除鉴权再继续跟随，CDN 签名地址仍能正常下载。
+- 任一轮聊天失败、任务等待超时或任务失败都会立即停止后续确认与后续轮次。正常退出与 `SIGINT`/`SIGTERM` 共用同一套收尾：先调用 `/__shutdown` 停止新确认并与确认共用 gate 锁，再等本进程内进行中的确认结束，然后查询所有任务、能取消的取消、再查询、写报告后退出；收尾总时长有 10 秒硬上限，短于 Go 侧 20 秒 `WaitDelay`，重复信号不会重入。若预算内确认仍未结束，报告标记 `confirmationOutcomeUnknown: true` 和相关方案 ID，测试判失败。不能取消的任务在报告里列出任务 ID、上游任务号与「可能仍在运行」。
+- 无论假模式还是真实模式，报告必须证明 2 张首帧、2 段视频、1 个成片都成功保存并下载，否则测试失败并指出缺了哪一项。
+- 所有写盘文本（请求原文、报告、`canvas.json`）统一脱敏，覆盖上游密钥、`Bearer` 头和 `sk-` 形式密钥。
+- 第 3 轮的 `canvas.timeline.render` 是本地 ffmpeg 渲染任务（报告里显示 `timeline_render ffmpeg`），不调用付费上游，也不计入 `BEEFTV_REAL_GEN_MAX_TASKS`。收尾时先停宿主并等宿主进程退出，再查询、取消、再查询，避免宿主关闭后继续创建任务。
+- 已知限制：主模型图片检查走 `media.overview` / `media.inspect`，审片模型 `media.review` 只接受 MP4/WAV；真实网关若返回图片 URL，需保证该 URL 可被本地后端下载或被改写到代理。驱动不把密钥写入配置或报告。
+
