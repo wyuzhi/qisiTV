@@ -13,7 +13,7 @@ description: 给改 BeefTV 代码的人：插件怎么安装、怎么加载，�
 | --- | --- | --- | --- |
 | 协议插件 | 用 `manifest.json` 描述各家模型接口的声明式包，打包成 `.beeftv-plugin`，不能带代码 | `plugin-packages/` 下 85 个目录 | 模型服务设置里的声明式协议；插件中心的文本、图片、视频、音频协议分类 |
 | 应用插件 | npm 包，用 `package.json` 的 `beeftv` 字段加画布节点、助手工具、技能或生成服务；`module` 形式的生成服务会出现在模型服务设置里 | `plugin-packages/` 下 8 个包 | 插件中心安装和管理；模型服务设置里标着「插件提供」的服务 |
-| BeefTV Skills 接入包 | Agent Plugins 包，提供找技能和投稿两个 Skill | `plugins/beeftv-skills/` | Claude Code、Codex 等外部 Agent，不经过 BeefTV 插件中心 |
+| BeefTV Skills 接入包 | Agent Plugins 包，提供画布工作方法、找技能和投稿三个 Skill | `plugins/beeftv-skills/` | Claude Code、Codex 等外部 Agent，不经过 BeefTV 插件中心 |
 
 下面说的「插件」指协议插件和应用插件。接入包的用法见包内 `README.md`。
 

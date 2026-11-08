@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -155,7 +156,8 @@ func TestRegistryNeverStoresRawToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	// Windows 的文件权限不走权限位，这一项只在类 Unix 上有意义。
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("登记文件权限应为 0600，得到 %v", info.Mode().Perm())
 	}
 }

@@ -262,8 +262,8 @@ func TestTokenFileAndRecordArePersisted(t *testing.T) {
 	if strings.TrimSpace(string(raw)) != "secret-token" {
 		t.Fatalf("token file = %q", raw)
 	}
-	if info, err := os.Stat(path); err == nil && info.Mode().Perm() != 0o600 {
-		t.Fatalf("token permissions = %o", info.Mode().Perm())
+	if err := verifyTokenPermissions(path); err != nil {
+		t.Fatalf("token file is not owner-only: %v", err)
 	}
 
 	record := IntegrationRecord{Kind: string(agentops.ClientKindClaude), ClientID: "client-1", TokenFile: path, ConnectedAt: time.Now().UTC()}
@@ -523,13 +523,11 @@ func TestTokenPermissionsAreVerified(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := verifyTokenPermissions(path); err != nil {
-		t.Fatalf("0600 token should pass: %v", err)
+		t.Fatalf("owner-only token should pass: %v", err)
 	}
-	if err := os.Chmod(path, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	loosenTokenPermissions(t, path)
 	if err := verifyTokenPermissions(path); err == nil {
-		t.Fatal("0644 token must be rejected")
+		t.Fatal("token readable by others must be rejected")
 	}
 }
 

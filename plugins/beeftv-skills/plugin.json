@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "beeftv-skills",
   "version": "0.1.0",
-  "description": "查找适用的 BeefTV 技能、读取固定版本，并协助整理和投稿创作方法。",
+  "description": "配合 BeefTV 桌面版操作画布，查找适用的技能，并协助整理和投稿创作方法。",
   "author": { "name": "BeefTV", "url": "https://beeftv.app" },
   "homepage": "https://beeftv.app",
   "repository": "https://github.com/glanderness/BeefTV",
@@ -14,7 +14,7 @@
       "interface": {
         "displayName": "BeefTV Skills",
         "shortDescription": "查找技能，分享创作方法",
-        "longDescription": "查找、读取和安装 BeefTV 市场的技能；帮作者整理创作方法、准备草稿，确认预览后发布。",
+        "longDescription": "接入 BeefTV 桌面版后按它的工作方法读写画布；查找、读取和安装 BeefTV 市场的技能；帮作者整理创作方法、准备草稿，确认预览后发布。",
         "developerName": "BeefTV",
         "category": "Productivity",
         "websiteURL": "https://beeftv.app",
