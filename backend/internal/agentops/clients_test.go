@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"infinite-canvas/backend/internal/securefile"
 )
 
 // 已有安装的登记文件没有 kind / lastUsedAt / revokedAt：升级后必须照旧能用，
@@ -152,13 +153,30 @@ func TestRegistryNeverStoresRawToken(t *testing.T) {
 	if strings.Contains(string(raw), token) {
 		t.Fatal("登记文件里出现了原始 token")
 	}
-	info, err := os.Stat(registry.path)
-	if err != nil {
+	if err := securefile.Verify(registry.path); err != nil {
+		t.Fatalf("登记文件没有收紧到只有当前用户可读：%v", err)
+	}
+}
+
+// owner 与宿主凭据是原始 token：新写的、以及旧版本按默认权限写下的，都要只有当前用户可读。
+func TestAgentCredentialsAreRestrictedToTheCurrentUser(t *testing.T) {
+	dir := t.TempDir()
+	// 旧版本留下的宿主凭据：Unix 上是 0644，Windows 上继承目录权限。
+	if err := os.WriteFile(HostTokenPath(dir), []byte("legacy-host-token"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Windows 的文件权限不走权限位，这一项只在类 Unix 上有意义。
-	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
-		t.Fatalf("登记文件权限应为 0600，得到 %v", info.Mode().Perm())
+	if err := os.Chmod(HostTokenPath(dir), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	EnsureAgentCredentials(dir)
+	for _, path := range []string{OwnerTokenPath(dir), HostTokenPath(dir)} {
+		if err := securefile.Verify(path); err != nil {
+			t.Fatalf("%s: %v", filepath.Base(path), err)
+		}
+	}
+	raw, err := os.ReadFile(HostTokenPath(dir))
+	if err != nil || string(raw) != "legacy-host-token" {
+		t.Fatalf("已有宿主凭据被改写：%q %v", raw, err)
 	}
 }
 

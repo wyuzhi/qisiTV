@@ -61,10 +61,6 @@ func textChatContent(input canvasGenerationInput) (interface{}, error) {
 	return generation.TextChatContent(input)
 }
 
-func shouldFallbackTextToChat(err error) bool {
-	return generation.ShouldFallbackTextToChat(err)
-}
-
 func postStreamingText(ctx context.Context, config providerConfig, path string, body map[string]interface{}, protocol string, onDelta func(string)) (string, error) {
 	return generation.PostStreamingText(ctx, config, path, body, protocol, onDelta)
 }

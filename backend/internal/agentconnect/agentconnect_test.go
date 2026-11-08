@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"infinite-canvas/backend/internal/agentops"
+	"infinite-canvas/backend/internal/securefile"
 )
 
 type runCall struct {
@@ -262,7 +263,7 @@ func TestTokenFileAndRecordArePersisted(t *testing.T) {
 	if strings.TrimSpace(string(raw)) != "secret-token" {
 		t.Fatalf("token file = %q", raw)
 	}
-	if err := verifyTokenPermissions(path); err != nil {
+	if err := securefile.Verify(path); err != nil {
 		t.Fatalf("token file is not owner-only: %v", err)
 	}
 
@@ -522,11 +523,11 @@ func TestTokenPermissionsAreVerified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyTokenPermissions(path); err != nil {
+	if err := securefile.Verify(path); err != nil {
 		t.Fatalf("owner-only token should pass: %v", err)
 	}
 	loosenTokenPermissions(t, path)
-	if err := verifyTokenPermissions(path); err == nil {
+	if err := securefile.Verify(path); err == nil {
 		t.Fatal("token readable by others must be rejected")
 	}
 }

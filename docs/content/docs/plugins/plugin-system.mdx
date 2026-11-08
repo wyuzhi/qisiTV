@@ -21,6 +21,9 @@ description: 给改 BeefTV 代码的人：插件怎么安装、怎么加载，�
 
 - 一种请求格式只写一份。各家 OpenAI 兼容服务（DeepSeek、Kimi、智谱、硅基流动、OpenRouter 等）都用 `openai-chat-completions` 这一个接口；服务商的名字和默认地址写在它的 `presets` 里，模型服务设置据此列出「更多服务商」。
 - 接口改名或合并时，旧 ID 写进 `legacyAliases`。已保存的模型和未完成的任务写着旧 ID 时照样能用，旧 ID 命名空间下的 `providerOptions` 也会生效；模型设置读到旧 ID 时显示为现在的接口，下次保存写回新 ID。
+- 某一版不再附带的接口，如果已保存的模型或未完成的任务还在用，会保留下来照常执行，但不再出现在接口格式的选择里；没人用了就在下次启动时删除。
+- 文本任务只按选定的接口格式发一次请求。认不出的接口直接报「接口类型未安装」，不会改用别的格式重试。
+- 启动时会清掉数据目录 `plugin-packages/` 里没有任何插件登记引用的旧包文件，以及已经导入数据库的旧版 `plugin_registry.json`。
 - 字段说明见 `plugin-packages/interface-manifest.schema.json`；`beeftv plugin validate` 和 `beeftv plugin try` 用 BeefTV 自己的校验器离线检查，见[接入生成服务](./plugin-generation.mdx#校验和试跑)。
 
 一个应用插件就是一个 npm 包，一个 pi 包加上 `package.json` 的 `beeftv` 字段。下面这些内容都只有一份：

@@ -18,6 +18,8 @@ type PluginProviderCatalogItem = {
     module?: boolean;
     aliases?: string[];
     presets?: Array<{ id: string; label: string; baseUrl: string }>;
+    // 这一版已经不再附带、只为已保存的配置保留的接口：照常执行，但不再给新的选择。
+    retired?: boolean;
     workflows?: Array<{
         id: string;
         label: string;
@@ -31,6 +33,7 @@ type PluginProviderCatalogItem = {
 export async function fetchPluginProviderCatalog(scope: string, capability?: ProtocolCapability) {
     try {
         const result = await http.get<{ providers: PluginProviderCatalogItem[] }>("/plugins/catalog", { params: { scope, capability } });
+        // 退役接口留在列表里只为认出已保存的选择；enabled 为 false，选择器不会再列出它。
         return result.providers.filter((item) => item.enabled && !item.unavailableReason).flatMap((item) => toProviderDefinitions(item, capability));
     } catch (error) {
         // The local desktop profile can run without the optional plugin center.
@@ -68,7 +71,7 @@ function toProviderDefinition(item: PluginProviderCatalogItem, capability: Proto
         poll: item.poll,
         contentType: item.contentType || "application/json",
         media: `${item.vendor} · ${item.version}`,
-        enabled: item.enabled && !item.unavailableReason,
+        enabled: item.enabled && !item.unavailableReason && !item.retired,
         baseUrl: item.baseUrl,
         authType: item.authType,
         workflows: item.workflows || [],

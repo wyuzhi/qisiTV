@@ -5,7 +5,7 @@ import { applyFetchedChannelModelCatalog, modelConfigChannelStatusLabel } from "
 import { backendProviderConfig } from "../src/services/api/generation-task";
 import { configWithoutCachedSecrets, createModelChannel, defaultConfig, normalizeConfigSnapshot } from "../src/stores/use-config-store";
 import { defaultModelCapabilityConfig } from "../src/lib/model-capabilities";
-import type { ModelProtocolDefinition } from "../src/lib/model-protocols";
+import { defaultProtocolForCapability, modelProtocolDefinition, type ModelProtocolDefinition } from "../src/lib/model-protocols";
 import { serviceCredentialGuide } from "../src/lib/service-credentials";
 import { toProviderDefinitions } from "../src/services/api/plugin-catalog";
 import { currentModelConnectionReceipt, useModelConnectionTests } from "../src/stores/use-model-connection-tests";
@@ -377,4 +377,12 @@ test("legacy LL2 auto-hd profile upgrades expired testVideoUrl and removes unsup
     });
     const hydrated = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [nonLL2Channel] } }).config;
     expect(hydrated.channels[0].modelProfiles?.[0]?.capabilityConfig?.video?.resolutions).toEqual(["480p", "720p", "1080p"]);
+});
+
+test("a retired interface is not offered again but still names a saved choice", () => {
+    const item = { id: "old-video", version: "1.0.0", name: "旧视频接口", vendor: "Test", categories: ["video"], scopes: ["user.custom-channel"], enabled: true, retired: true, create: "POST /v1/old" };
+    const [definition] = toProviderDefinitions(item);
+    expect(definition.enabled).toBe(false);
+    expect(defaultProtocolForCapability("video", [definition])).not.toBe("old-video");
+    expect(modelProtocolDefinition("old-video", [definition])?.label).toBe("旧视频接口");
 });

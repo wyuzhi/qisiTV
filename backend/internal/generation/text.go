@@ -7,10 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 
 	"infinite-canvas/backend/internal/model"
+	"infinite-canvas/backend/internal/protocol"
+	"infinite-canvas/backend/internal/providerpreset"
 )
 
 func RunAgentToolTask(ctx context.Context, input Input) (map[string]interface{}, error) {
@@ -207,37 +208,36 @@ func RunTextTask(ctx context.Context, input Input) (map[string]interface{}, erro
 	if _, ok := DeclarativeProtocolAdapterForContext(ctx, input.Config.InterfaceType); ok {
 		return RunDeclarativeProtocolTask(ctx, input)
 	}
-	switch input.Config.InterfaceType {
-	case "chat-completion":
-		return RunChatCompletionsTextTask(ctx, input)
-	case "openai-response":
-		return RunResponsesTextTask(ctx, input)
-	case string(model.ChannelInterfaceClaudeAPI):
-		return RunClaudeTextTask(ctx, input)
-	}
-	return RunLegacyTextTask(ctx, input)
-}
-
-func RunLegacyTextTask(ctx context.Context, input Input) (map[string]interface{}, error) {
-	responseInput, err := TextResponseInput(input)
+	interfaceType, err := hostTextInterface(input.Config)
 	if err != nil {
 		return nil, err
 	}
-	body := map[string]interface{}{"model": input.Config.Model, "input": responseInput}
-	ApplyTextThinking(body, input, "responses")
-	ApplyTextOutputLimit(body, input.MaxOutputTokens, "max_output_tokens")
-	result, err := RequestTextProvider(ctx, input.Config, "/responses", body, "responses", input.StreamText, input.OnTextDelta)
-	if err != nil {
-		if !ShouldFallbackTextToChat(err) {
-			return nil, err
-		}
-		result, chatErr := RunChatCompletionsTextTask(ctx, input)
-		if chatErr == nil {
-			return result, nil
-		}
-		return nil, fmt.Errorf("文本接口请求失败：Responses API %v；Chat Completions %v", err, chatErr)
+	switch interfaceType {
+	case string(model.ChannelInterfaceOpenAIResponse):
+		return RunResponsesTextTask(ctx, input)
+	case string(model.ChannelInterfaceClaudeAPI):
+		return RunClaudeTextTask(ctx, input)
+	default:
+		return RunChatCompletionsTextTask(ctx, input)
 	}
-	return ProviderTextTaskResult(result), nil
+}
+
+// hostTextInterface 把文本请求落到宿主自带的三种格式之一。别名（如 anthropic-messages）
+// 按它指向的接口走；没写接口的旧配置按渠道格式取默认值；认不出的接口直接报错，
+// 不再拿 Responses 和 Chat Completions 轮流试，免得用户看到的是一条无关的上游报错。
+func hostTextInterface(config Config) (string, error) {
+	requested := strings.TrimSpace(config.InterfaceType)
+	if requested == "" {
+		if strings.TrimSpace(config.APIFormat) == "claude" {
+			return string(model.ChannelInterfaceClaudeAPI), nil
+		}
+		return providerpreset.LegacyDefaultProtocol("text"), nil
+	}
+	adapter, ok := protocol.Builtins().Resolve(requested)
+	if !ok || !ProtocolCapabilityMatches(adapter.Metadata(), protocol.Capability("text")) {
+		return "", fmt.Errorf("接口类型 %s 未安装", requested)
+	}
+	return adapter.Metadata().ID, nil
 }
 
 func RunResponsesTextTask(ctx context.Context, input Input) (map[string]interface{}, error) {
@@ -389,21 +389,6 @@ func TextChatContent(input Input) (interface{}, error) {
 		content = append(content, map[string]interface{}{"type": "video_url", "video_url": map[string]interface{}{"url": url}})
 	}
 	return content, nil
-}
-
-func ShouldFallbackTextToChat(err error) bool {
-	var httpErr HTTPError
-	if !errors.As(err, &httpErr) {
-		return false
-	}
-	// 只在上游明确说这个路径不存在/不允许时，才把 Responses 换成 Chat Completions。
-	// 502/503/504 是瞬时故障，换协议不会修好，还会把真正的上游故障伪装成“能力缺失后的第二次失败”。
-	switch httpErr.StatusCode {
-	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
-		return true
-	default:
-		return false
-	}
 }
 
 func RequestTextProvider(ctx context.Context, config Config, path string, body map[string]interface{}, protocol string, stream bool, onDelta func(string)) (ProviderTextResult, error) {

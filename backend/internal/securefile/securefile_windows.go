@@ -1,6 +1,6 @@
 //go:build windows
 
-package agentconnect
+package securefile
 
 import (
 	"fmt"
@@ -8,9 +8,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// secureTokenFile replaces the inherited DACL with one that grants the current
-// user (and SYSTEM, for backup/antivirus) full access and blocks inheritance.
-func secureTokenFile(path string) error {
+// Protect replaces the inherited DACL with one that grants the current user
+// (and SYSTEM, for backup/antivirus) full access and blocks inheritance.
+func Protect(path string) error {
 	current, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		return err
@@ -48,7 +48,9 @@ func secureTokenFile(path string) error {
 	)
 }
 
-func verifyTokenPermissions(path string) error {
+// Verify reports an error unless the file's DACL is protected from
+// inheritance, which is what Protect leaves behind.
+func Verify(path string) error {
 	descriptor, err := windows.GetNamedSecurityInfo(
 		path,
 		windows.SE_FILE_OBJECT,

@@ -45,7 +45,7 @@ Wails / local dev
 | HTTP | `backend/internal/handler` | 本地 `/api` 合同、输入限制和响应封装 |
 | 企业连接 | `backend/internal/beeftv` | 设备授权、本机密钥和连接状态 |
 | 本机 MCP | `backend/cmd/beeftv` | `beeftv mcp serve` 使用官方 MCP SDK，经 `/api/ops` 访问本机工作区；底层业务接口默认经 `business.list` / `business.call` 两个入口调用（`business.go`），媒体读取结果按 MCP 图片、音频内容返回（`mcp_content.go`） |
-| 外部 Agent 一键接入 | `backend/internal/agentconnect`、`backend/internal/handler/agent_integrations.go` | 桌面形态调用 Claude Code / Codex 官方命令行写入用户级 MCP 配置；token 存在数据目录的 `agent-clients/<kind>.token`（0600），仅把路径交给 CLI；凭据登记是界面状态唯一来源，接入记录只存 token 路径与时间，技能目录带归属标记 |
+| 外部 Agent 一键接入 | `backend/internal/agentconnect`、`backend/internal/handler/agent_integrations.go` | 桌面形态调用 Claude Code / Codex 官方命令行写入用户级 MCP 配置；token 存在数据目录的 `agent-clients/<kind>.token`，仅把路径交给 CLI；凭据文件（含 owner、宿主凭据和客户端登记）都经 `backend/internal/securefile` 收紧到只有当前用户可读；凭据登记是界面状态唯一来源，接入记录只存 token 路径与时间，技能目录带归属标记 |
 | 远程 Skill 市场 | `backend/internal/skillhub`、`skillhubcli` | `beeftv skills` 直接访问统一市场，不发现或连接本地运行时；共享版本清单、完整性校验与专用投稿授权 |
 | 内置 Skill 接入 | `backend/internal/skills/market*.go`、`operations/skill*.go`、`assistantturns/skill_context.go` | Go 管理本地安装、确切版本、活动上下文和投稿确认；模型只获得查询、草稿和准备操作 |
 | 桌面更新发布 | `backend/cmd/update-release` | 生成更新密钥、打包 zip、签署 `desktop-update.json` |

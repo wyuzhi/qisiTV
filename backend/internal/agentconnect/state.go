@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"infinite-canvas/backend/internal/agentops"
+	"infinite-canvas/backend/internal/securefile"
 )
 
 // stateMu serializes the read-modify-write of the shared integrations file.
@@ -109,10 +110,10 @@ func writeTokenFile(path, token string) error {
 	if err := tmp.Chmod(0o600); err != nil {
 		return fail(true, err)
 	}
-	if err := secureTokenFile(name); err != nil {
+	if err := securefile.Protect(name); err != nil {
 		return fail(true, err)
 	}
-	if err := verifyTokenPermissions(name); err != nil {
+	if err := securefile.Verify(name); err != nil {
 		return fail(true, err)
 	}
 	tokenWriteStage("secure", name)
@@ -129,7 +130,7 @@ func writeTokenFile(path, token string) error {
 	if err := os.Rename(name, path); err != nil {
 		return err
 	}
-	if err := verifyTokenPermissions(path); err != nil {
+	if err := securefile.Verify(path); err != nil {
 		_ = os.Remove(path)
 		return err
 	}

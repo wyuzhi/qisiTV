@@ -6,11 +6,14 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"infinite-canvas/backend/internal/securefile"
 )
 
 // ClientMode 是服务端授予客户端的能力模式。客户端只能出示身份，不能自己声明模式。
@@ -106,7 +109,12 @@ type ClientRegistry struct {
 }
 
 func NewClientRegistry(dataDir string) *ClientRegistry {
-	return &ClientRegistry{path: filepath.Join(dataDir, "agent_clients.json")}
+	return &ClientRegistry{path: ClientRegistryPath(dataDir)}
+}
+
+// ClientRegistryPath 存客户端登记（含凭据摘要），和凭据文件一样只许当前用户读写。
+func ClientRegistryPath(dataDir string) string {
+	return filepath.Join(dataDir, "agent_clients.json")
 }
 
 func hashToken(token string) string {
@@ -297,6 +305,9 @@ func (r *ClientRegistry) Revoke(clientID string) error {
 }
 
 // atomicWriteFile 先写临时文件再改名，避免并发登记时留下半截文件丢记录。
+// 写入前先把空文件收紧到只有当前用户可读（Windows 上不再继承数据目录的权限）。
+// 数据目录在不支持访问控制的磁盘上（如 exFAT）时照常写入并记一条日志：
+// 凭据写不出来会让本机鉴权整体失效，比权限没收紧更糟。
 func atomicWriteFile(path string, data []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".agent-clients-*")
 	if err != nil {
@@ -307,6 +318,9 @@ func atomicWriteFile(path string, data []byte) error {
 	if err := tmp.Chmod(0o600); err != nil {
 		tmp.Close()
 		return err
+	}
+	if err := restrictFile(name); err != nil {
+		log.Printf("凭据文件 %s 未能收紧为仅当前用户可读：%v", filepath.Base(path), err)
 	}
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
@@ -382,15 +396,37 @@ func HostTokenMatches(dataDir, presented string) bool {
 	return subtle.ConstantTimeCompare([]byte(expected), []byte(presented)) == 1
 }
 
+func restrictFile(path string) error {
+	if err := securefile.Protect(path); err != nil {
+		return err
+	}
+	return securefile.Verify(path)
+}
+
+// restrictExisting 收紧旧版本已经写好的凭据文件；文件不存在时什么都不做。
+func restrictExisting(path string) {
+	if _, err := os.Stat(path); err != nil {
+		return
+	}
+	_ = os.Chmod(path, 0o600)
+	if err := restrictFile(path); err != nil {
+		log.Printf("凭据文件 %s 未能收紧为仅当前用户可读：%v", filepath.Base(path), err)
+	}
+}
+
 // EnsureAgentCredentials 在组合根生成 owner 凭据与宿主凭据；DataDir 为空时明确报错，不写 CWD。
+// 已有的凭据文件和客户端登记也在这里收紧一次，旧版本在 Windows 上写的文件会继承数据目录权限。
 func EnsureAgentCredentials(dataDir string) {
 	if strings.TrimSpace(dataDir) == "" {
 		return
 	}
+	hostPath := HostTokenPath(dataDir)
+	for _, path := range []string{OwnerTokenPath(dataDir), hostPath, ClientRegistryPath(dataDir)} {
+		restrictExisting(path)
+	}
 	if _, err := EnsureOwnerToken(dataDir); err != nil {
 		return
 	}
-	hostPath := filepath.Join(dataDir, "agent_host_token")
 	if _, err := os.Stat(hostPath); err == nil {
 		return
 	}

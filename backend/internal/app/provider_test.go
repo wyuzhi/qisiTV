@@ -947,22 +947,6 @@ func TestProviderHTTPErrorExplainsPaymentRequired(t *testing.T) {
 	}
 }
 
-func TestShouldFallbackTextToChatOnlyForMissingCapability(t *testing.T) {
-	for _, status := range []int{http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented} {
-		if !shouldFallbackTextToChat(providerHTTPError{StatusCode: status}) {
-			t.Errorf("status %d should fallback to chat completions", status)
-		}
-	}
-	for _, status := range []int{http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, http.StatusInternalServerError, http.StatusTooManyRequests} {
-		if shouldFallbackTextToChat(providerHTTPError{StatusCode: status}) {
-			t.Errorf("status %d should not fallback to chat completions", status)
-		}
-	}
-	if shouldFallbackTextToChat(errors.New("network")) {
-		t.Fatal("non-http error should not fallback")
-	}
-}
-
 func TestProviderPayloadErrorMessageUsesSafeActionableCategories(t *testing.T) {
 	tests := []struct {
 		name string
