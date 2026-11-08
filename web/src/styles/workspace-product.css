@@ -1512,6 +1512,7 @@
 .agent-tool-row h2 { margin: 0; font-size: 14px; font-weight: 500; }
 .agent-tool-actions { display: flex; align-items: center; gap: 20px; flex-shrink: 0; }
 .agent-tool-status { font-size: 12px; color: var(--muted-foreground); }
+.agent-integration-note { margin: 0; padding: 0 20px 16px; font-size: 12px; line-height: 18px; color: var(--muted-foreground); }
 .agent-connect-panel, .agent-management { padding: 4px 20px 20px; }
 .agent-registration { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0; }
 .agent-registration-info { display: flex; align-items: center; flex-wrap: wrap; min-width: 0; gap: 8px 20px; }
@@ -1520,6 +1521,7 @@
 @media (max-width: 640px) {
     .agent-tool-row { padding: 14px 16px; gap: 12px; }
     .agent-tool-actions { gap: 12px; }
+    .agent-integration-note { padding: 0 16px 14px; }
     .agent-connect-panel, .agent-management { padding: 4px 16px 16px; }
     .agent-tool-row h2 { min-width: 0; }
 }

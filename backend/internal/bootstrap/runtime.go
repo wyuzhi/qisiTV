@@ -35,6 +35,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"infinite-canvas/backend/internal/agentconnect"
 	"infinite-canvas/backend/internal/agentops"
 )
 
@@ -48,7 +49,7 @@ type Runtime struct {
 	status           *systemStatus
 	launchToken      string
 	uiBootstrapToken string
-	beefTV          *beeftv.Service
+	beefTV           *beeftv.Service
 	assistantHost    *assistantruntime.Host
 	listener         net.Listener
 	httpServer       *http.Server
@@ -224,6 +225,11 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 	router.Use(canvasHandler.WorkspaceMiddleware(scope))
 	// 本机可信凭据在组合根生成：owner 凭据与宿主凭据只在本机数据目录，0600。
 	agentops.EnsureAgentCredentials(svc.DataDir())
+	// 上次断开没有确认吊销的凭据在启动时再试一次；失败就保留记录，界面
+	// 继续显示需要重试，绝不把仍有有效凭据的状态说成已断开。
+	if cfg.Profile == ProfileDesktop {
+		_ = agentconnect.RetryStaleOneClickCredentials(agentops.NewClientRegistry(svc.DataDir()), svc.DataDir())
+	}
 	assistantHost := assistantruntime.New(assistantruntime.OptionsFromService(svc))
 	svc.SetAssistantContinuationSubmitter(canvasHandler.AssistantContinuationSubmitter(svc, assistantHost))
 	api := router.Group("/api")
@@ -237,7 +243,7 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 		Projects:           localRoot.Projects,
 		Tasks:              localRoot.Tasks,
 		Generation:         localRoot.Generation,
-		BeefTV:            beefTVConnection,
+		BeefTV:             beefTVConnection,
 		AssistantHost:      assistantHost,
 		Conversations:      conversation.New(conversation.NewStore(repo)),
 		TextReplay:         svc.TextReplay(),
@@ -321,7 +327,7 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 		status:           status,
 		launchToken:      launchToken,
 		uiBootstrapToken: uiBootstrapToken,
-		beefTV:          beefTVConnection,
+		beefTV:           beefTVConnection,
 		assistantHost:    assistantHost,
 		serveErr:         make(chan error, 1),
 	}, nil

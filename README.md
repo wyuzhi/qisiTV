@@ -128,7 +128,7 @@
 - **先规划**：确定世界观、角色与分镜，写入镜头时长、画面、动作和声音要求。
 - **再执行**：创建节点与参考连线，确认后调用模型，生成角色图、场景图、镜头和旁白。
 - **可检查、可继续**：读取实际产物，核对设定图与分镜首帧，保留成功素材和失败状态，继续调整与编辑。
-- **支持外部 Agent / MCP 接入**：可在侧栏「BeefTV MCP」页一键生成连接配置，将 Codex、Claude Code、Claude Desktop、Cursor 等外部 Agent 接入本地工作区，详见[外部 Agent 接入](docs/content/docs/backend/external-agents.mdx)。
+- **支持外部 Agent / MCP 接入**：在侧栏「BeefTV MCP」页一键把 Claude Code、Codex 接入本地画布，并装好一份画布使用说明；Claude Desktop、Cursor 等客户端可生成连接配置接入。详见[外部 Agent 接入](docs/content/docs/backend/external-agents.mdx)。
 
 ## Skills
 

@@ -207,6 +207,7 @@ func TestBaseURLComesFromRuntimeDiscovery(t *testing.T) {
 	t.Setenv("BEEFTV_DESKTOP_TOKEN", "")
 	t.Setenv("BEEFTV_CLIENT_ID", "client-test")
 	t.Setenv("BEEFTV_CLIENT_TOKEN", "client-token-test")
+	t.Setenv("BEEFTV_CLIENT_TOKEN_FILE", "")
 
 	base, source := resolveBaseURL()
 	if base != server.URL {
@@ -332,6 +333,7 @@ func TestApproveOrdersAndClientApprovalFlag(t *testing.T) {
 	// 当处于外部 Agent 环境（带有 BEEFTV_CLIENT_ID）时，不得隐式读取本机 owner token 越权自批。
 	t.Setenv("BEEFTV_CLIENT_ID", "agent-1")
 	t.Setenv("BEEFTV_CLIENT_TOKEN", "agent-secret")
+	t.Setenv("BEEFTV_CLIENT_TOKEN_FILE", "")
 	if err := run([]string{"approve", "gp-123", "--json"}); err != nil {
 		t.Fatalf("approve with client token call: %v", err)
 	}

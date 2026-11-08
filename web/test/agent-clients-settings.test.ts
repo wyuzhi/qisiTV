@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import { assistantModelOptions, normalizeAssistantModel, resolveAssistantModel } from "@/lib/assistant-model";
-import { agentClientLastUsedLabel, agentClientModeLabel, agentClientModeSummary, agentClientSetupBlock } from "@/pages/agents/agent-client-presentation";
-import { createAgentClient, listAgentClients, revokeAgentClient } from "@/services/api/agent-clients";
+import { agentClientLastUsedLabel, agentClientModeLabel, agentClientModeSummary, agentClientSetupBlock, agentIntegrationAction, agentIntegrationHint, agentIntegrationStatusLabel } from "@/pages/agents/agent-client-presentation";
+import { connectAgentIntegration, createAgentClient, disconnectAgentIntegration, listAgentClients, revokeAgentClient, type AgentIntegration } from "@/services/api/agent-clients";
 import { ApiError, apiClient } from "@/services/api/request";
 import { createModelChannel, defaultConfig, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 
@@ -68,6 +68,32 @@ describe("外部 Agent 接入 API", () => {
             expect(thrown).toMatchObject({ status: 404, reason: "not_found" });
         });
     });
+
+    test("一键接入只提交类型，断开对类型做路径转义", async () => {
+        const integration = { kind: "claude", name: "Claude Code", detected: true, connected: true, skillInstalled: true, needsRetry: false } as const;
+        await withStubbedApi({ code: 0, data: { integration }, msg: "ok" }, 200, async (recorded) => {
+            await expect(connectAgentIntegration("claude")).resolves.toEqual({ integration });
+            await expect(disconnectAgentIntegration("codex")).resolves.toEqual({ integration });
+            expect(recorded[0]).toMatchObject({ method: "post", url: "/agent-clients/integrations", data: { kind: "claude" } });
+            expect(recorded[1]).toMatchObject({ method: "delete", url: "/agent-clients/integrations/codex" });
+        });
+    });
+
+    test("列表返回的一键接入状态原样解包", async () => {
+        const integrations = [{ kind: "codex", name: "Codex", detected: false, connected: false, skillInstalled: false, needsRetry: false }];
+        await withStubbedApi({ code: 0, data: { clients: [], cli: { path: "", available: false, installCommand: "" }, integrations }, msg: "ok" }, 200, async () => {
+            const result = await listAgentClients();
+            expect(result.integrations).toEqual(integrations);
+        });
+    });
+
+    test("断开成功后把无法自动移除的说明一并解包", async () => {
+        const integration = { kind: "codex", name: "Codex", detected: true, connected: false, skillInstalled: false, needsRetry: false } as const;
+        const warning = "BeefTV 已停止接受 Codex 的访问。Codex 里的 BeefTV 连接没能自动移除，可以在它的 MCP 设置里手动删除。";
+        await withStubbedApi({ code: 0, data: { integration, warning }, msg: "ok" }, 200, async () => {
+            await expect(disconnectAgentIntegration("codex")).resolves.toEqual({ integration, warning });
+        });
+    });
 });
 
 describe("接入内容按客户端类型选命令或配置", () => {
@@ -102,6 +128,49 @@ describe("接入内容按客户端类型选命令或配置", () => {
         expect(agentClientSetupBlock({ kind: "cursor", title: "T", command: "beeftv mcp add" })).toMatchObject({ format: "command" });
         expect(agentClientSetupBlock({ kind: "codex", title: "T" })).toBeNull();
         expect(agentClientSetupBlock(undefined)).toBeNull();
+    });
+});
+
+describe("一键接入的按钮状态", () => {
+    const base: AgentIntegration = { kind: "claude", name: "Claude Code", detected: true, connected: false, skillInstalled: false, needsRetry: false };
+
+    test("未检测到时只说明怎么出现，不显示可点的接入", () => {
+        const integration = { ...base, detected: false };
+        expect(agentIntegrationStatusLabel(integration)).toBe("未检测到");
+        expect(agentIntegrationAction(integration)).toBe("unavailable");
+        expect(agentIntegrationHint(integration)).toBe("没有检测到 Claude Code 的命令行。安装后打开一次，再回到这里。");
+    });
+
+    test("配置还在但这次没检测到 Agent 时，仍能断开 BeefTV 写入的配置", () => {
+        const integration = { ...base, detected: false, connected: true, skillInstalled: true };
+        expect(agentIntegrationStatusLabel(integration)).toBe("已接入");
+        expect(agentIntegrationAction(integration)).toBe("disconnect");
+        expect(agentIntegrationHint(integration)).toBe("已接入，但这次没有检测到 Claude Code。重新打开或重新安装 Claude Code 后就会生效。");
+    });
+
+    test("上一次没有清理完时显示需要重试，并给出断开这个动作", () => {
+        const integration = { ...base, connected: true, skillInstalled: true, needsRetry: true };
+        expect(agentIntegrationStatusLabel(integration)).toBe("需要重试");
+        expect(agentIntegrationAction(integration)).toBe("disconnect");
+        expect(agentIntegrationHint(integration)).toBe("上一次没有清理完连接。再点一次断开即可重试。");
+    });
+
+    test("检测到但未接入时说明会发生什么", () => {
+        expect(agentIntegrationStatusLabel(base)).toBe("未接入");
+        expect(agentIntegrationAction(base)).toBe("connect");
+        expect(agentIntegrationHint(base)).toBe("接入后会在 Claude Code 里添加 BeefTV，并装好一份画布使用说明。");
+    });
+
+    test("已接入时显示断开，并说明打开就能用", () => {
+        const integration = { ...base, connected: true, skillInstalled: true };
+        expect(agentIntegrationStatusLabel(integration)).toBe("已接入");
+        expect(agentIntegrationAction(integration)).toBe("disconnect");
+        expect(agentIntegrationHint(integration)).toBe("已接入。打开 Claude Code 就能使用 BeefTV 画布。");
+    });
+
+    test("配置写入了但使用说明缺失时如实提示，不假装完成", () => {
+        const integration = { ...base, kind: "codex" as const, name: "Codex", connected: true, skillInstalled: false };
+        expect(agentIntegrationHint(integration)).toBe("已接入，但使用说明没有写入。请检查对应技能目录里是否已有同名内容。");
     });
 });
 

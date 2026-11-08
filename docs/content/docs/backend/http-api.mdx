@@ -269,7 +269,7 @@ BeefTV 官方算力视频模型的控件与校验使用 `/v1/models` 下发的 `
 
 ### 外部客户端连接
 
-桌面设置的「外部 Agent」提供 Codex、Claude Code、Claude Desktop、Cursor 及其他 MCP 客户端的接入配置。Claude Desktop 使用开发者设置中的 `mcpServers` JSON；Claude Code 使用终端命令，Windows 命令需在 PowerShell 运行。保留其他 MCP 服务配置，连接时保持 BeefTV 开启。
+桌面设置的「外部 Agent」提供 Codex、Claude Code、Claude Desktop、Cursor 及其他 MCP 客户端的接入配置。桌面原生形态对 Claude Code 和 Codex 提供一键接入：`POST /agent-clients/integrations` 签发客户端凭据，把 token 写到 `<数据目录>/agent-clients/<kind>.token`（0600；Windows 放在当前用户数据目录并沿用其访问控制），再调用本机已安装的官方命令行（`claude mcp add ... --scope user`、`codex mcp add ...`）写入配置和 BeefTV 画布技能。传给对方的是 `BEEFTV_CLIENT_TOKEN_FILE`，token 不进入命令行参数。`DELETE /agent-clients/integrations/:kind` 先吊销凭据、删除 token 文件，再尝试移除对方条目；remove 失败时仍返回成功并附带 `warning`。后端不直接改写 Agent 配置文件；找不到可用命令行或预检不通过时返回明确的未检测/不可接入状态，手动配置仍可从页面取得。`GET /agent-clients` 在桌面形态额外返回 `integrations` 状态（含 `needsRetry`），状态以凭据登记里未吊销的 `origin = one-click:<kind>` 凭据为准；接入记录（`agent-clients/integrations.json`）只保存 token 路径和接入时间等辅助信息，读不出或与登记不符时显示需要重试，但不会让有效凭据从界面消失。这两个写路由只在桌面组合根注册，Web/服务端形态不提供。同一客户端的接入与断开串行执行；凭据来源记录在登记表的 `origin` 字段，显示名称不参与识别。Claude Desktop 使用开发者设置中的 `mcpServers` JSON；手动配置的 Claude Code 使用终端命令，Windows 命令需在 PowerShell 运行。保留其他 MCP 服务配置，连接时保持 BeefTV 开启。
 
 配置固定使用随包 CLI 的绝对路径和 `BEEFTV_DATA_DIR`，避免客户端继承的环境选错工作区。Windows CLI 为主程序旁的 `cli/beeftv.exe`，不要把桌面主程序 `BeefTV.exe` 用作 MCP 命令。安装文件不完整时，`POST /agent-clients` 返回 412 / `cli_unavailable`，不签发凭据；重新下载并完整解压后重试。
 

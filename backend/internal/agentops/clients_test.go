@@ -31,6 +31,9 @@ func TestLoadsPreExistingRegistrationsWithoutNewFields(t *testing.T) {
 	if found.Kind != ClientKindOther {
 		t.Fatalf("缺失的 kind 应补成 other，得到 %q", found.Kind)
 	}
+	if found.Origin != "" {
+		t.Fatalf("旧登记没有 origin 时应一律视为手动，得到 %q", found.Origin)
+	}
 	items := registry.List()
 	if len(items) != 1 || items[0].ID != "client-legacy" {
 		t.Fatalf("旧登记应出现在列表里：%+v", items)
@@ -40,6 +43,32 @@ func TestLoadsPreExistingRegistrationsWithoutNewFields(t *testing.T) {
 	}
 	if _, ok := registry.Lookup("client-legacy", "legacy-token"); ok {
 		t.Fatal("吊销后旧登记仍然有效")
+	}
+}
+
+func TestOriginDistinguishesOneClickFromManualConnections(t *testing.T) {
+	registry := NewClientRegistry(t.TempDir())
+	oneClick, _, err := registry.RegisterClientOrigin("claude", "Claude Code", "one-click:claude", ClientReadWrite, ClientApprovalCaller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manual, _, err := registry.RegisterClient("claude", "Claude Code", ClientReadWrite, ClientApprovalCaller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := registry.List()
+	if len(items) != 2 {
+		t.Fatalf("items = %+v", items)
+	}
+	origins := map[string]string{}
+	for _, item := range items {
+		origins[item.ID] = item.Origin
+	}
+	if origins[oneClick.ID] != "one-click:claude" {
+		t.Fatalf("one-click origin = %q", origins[oneClick.ID])
+	}
+	if origins[manual.ID] != "" {
+		t.Fatalf("manual origin = %q, want empty", origins[manual.ID])
 	}
 }
 
@@ -207,5 +236,21 @@ func TestNormalizeAndRegisterClientApprovalMode(t *testing.T) {
 		if !ok || lookedUp.ApprovalMode != mode {
 			t.Fatalf("lookup ApprovalMode = %+v, want %q", lookedUp, mode)
 		}
+	}
+}
+
+// 登记文件读不出时，ListLive 必须报错，不能把「读不出」当成「没有凭据」；
+// List 保持原来的宽松行为供只展示用的调用方使用。
+func TestListLiveReportsUnreadableRegistry(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "agent_clients.json"), []byte("{bad-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry := NewClientRegistry(dir)
+	if _, err := registry.ListLive(); err == nil {
+		t.Fatal("损坏的登记文件应让 ListLive 报错")
+	}
+	if items := registry.List(); len(items) != 0 {
+		t.Fatalf("List 应保持宽松返回空列表，得到 %d 项", len(items))
 	}
 }

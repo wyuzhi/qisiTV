@@ -18,6 +18,7 @@ func TestClientFollowsRuntimeForOperationsAndBusiness(t *testing.T) {
 	t.Setenv("BEEFTV_BASE_URL", "")
 	t.Setenv("BEEFTV_CLIENT_ID", "client")
 	t.Setenv("BEEFTV_CLIENT_TOKEN", "credential")
+	t.Setenv("BEEFTV_CLIENT_TOKEN_FILE", "")
 	c, err := newClient()
 	if err != nil {
 		t.Fatal(err)

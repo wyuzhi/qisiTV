@@ -112,6 +112,20 @@ func validateBaseURL(base string) error {
 	return nil
 }
 
+// resolveClientToken keeps one-click tokens out of process arguments. A token
+// file takes precedence over BEEFTV_CLIENT_TOKEN; when the file is missing or
+// empty the client is unauthenticated instead of falling back to the env var.
+func resolveClientToken() string {
+	if path := strings.TrimSpace(os.Getenv("BEEFTV_CLIENT_TOKEN_FILE")); path != "" {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(raw))
+	}
+	return strings.TrimSpace(os.Getenv("BEEFTV_CLIENT_TOKEN"))
+}
+
 func newClient() (*client, error) {
 	base, source := resolveBaseURL()
 	if err := validateBaseURL(base); err != nil {
@@ -121,7 +135,7 @@ func newClient() (*client, error) {
 		fixedBaseURL: source == "BEEFTV_BASE_URL",
 		baseURL:      strings.TrimRight(base, "/"),
 		clientID:     strings.TrimSpace(os.Getenv("BEEFTV_CLIENT_ID")),
-		token:        strings.TrimSpace(os.Getenv("BEEFTV_CLIENT_TOKEN")),
+		token:        resolveClientToken(),
 		ownerToken:   strings.TrimSpace(os.Getenv("BEEFTV_OWNER_TOKEN")),
 		// 桌面形态整个 API 由桌面启动令牌把关：CLI/MCP 要接同一个桌面工作区就必须出示它。
 		// 它只是通过守卫，不改变能力模式——能力仍由 owner/已登记客户端凭据决定。
@@ -430,7 +444,9 @@ BEEFTV_DATA_DIR 可以指向非默认数据目录。Windows 从用户目录下 .
 工作区的运行信息，其他平台读取数据目录里的 runtime.json。升级后请重新打开 BeefTV。
 
 凭据：在 BeefTV 的设置里新建一个客户端，把它给出的 BEEFTV_CLIENT_ID 与 BEEFTV_CLIENT_TOKEN
-填进环境变量即可，不需要桌面令牌。新连接默认开放全部业务工具，操作审批由外部 Agent 管理。
+填进环境变量即可，不需要桌面令牌。一键接入改用 BEEFTV_CLIENT_TOKEN_FILE 指向 BeefTV 数据目录里的
+凭据文件，令牌不会出现在进程参数里；两者都给时以文件为准，文件不存在或为空按未授权处理。
+新连接默认开放全部业务工具，操作审批由外部 Agent 管理。
 MCP 默认只列出画布、素材、媒体与技能操作，底层业务接口通过 business.list 查找、business.call 调用；
 需要把每个底层接口单独列成工具时加 --all-business-tools（或设 BEEFTV_MCP_ALL_BUSINESS_TOOLS=1）。
 历史只读凭据继续保持只读；CLI 仍支持显式签发只读凭据。
@@ -438,7 +454,7 @@ MCP 默认只列出画布、素材、媒体与技能操作，底层业务接口�
 写操作必须带幂等键（CLI 的 --op-id / --operation-id，MCP 工具参数里的 operationId）：重试同一操作要复用同一个值。
 business call 提交生成（会扣费）时 --operation-id 必填，并作为任务的 clientOperationId。
 
-环境变量：BEEFTV_BASE_URL、BEEFTV_DATA_DIR、BEEFTV_CLIENT_ID、BEEFTV_CLIENT_TOKEN、
+环境变量：BEEFTV_BASE_URL、BEEFTV_DATA_DIR、BEEFTV_CLIENT_ID、BEEFTV_CLIENT_TOKEN、BEEFTV_CLIENT_TOKEN_FILE、
 BEEFTV_OWNER_TOKEN（owner 可信通道）、BEEFTV_DESKTOP_TOKEN（桌面自身调用）
 退出码：0 成功；2 用法；3 未找到；4 冲突；5 前置条件；6 只读/未授权；7 不支持；8 参数；9 连接失败；1 内部
 `)

@@ -56,7 +56,7 @@ export BEEFTV_BASE_URL=http://127.0.0.1:8080/api
 
 ## 3. 凭据：生成一份连接配置
 
-凭据在侧栏的「BeefTV MCP」页生成：选一个工具（Codex、Claude Code、Claude Desktop、Cursor、其他 MCP 客户端），点「连接」→「生成连接配置」。生成的内容是一段可直接粘贴的接入命令或 MCP 配置，里面已经包含三个变量：
+凭据在侧栏的「BeefTV MCP」页生成。本机已安装 `claude` / `codex` 命令行时，Claude Code 和 Codex 可以直接点「接入」，BeefTV 会通过它们自己的命令行写入用户级配置，不需要手动复制；没有可用命令行时用「手动连接」。如果要把三个变量拿到终端或脚本里，在该行的「手动连接」→「新增连接」走手动流程；生成的内容是一段可直接粘贴的接入命令或 MCP 配置，里面已经包含三个变量：
 
 ```bash
 export BEEFTV_DATA_DIR=<工作区数据目录>
@@ -64,7 +64,9 @@ export BEEFTV_CLIENT_ID=client-xxxxxxxxxxxxxxxx
 export BEEFTV_CLIENT_TOKEN=<连接配置里给出的 token>
 ```
 
-把这三项从那段配置里抽出来放进 shell 就行。token 只显示这一次（服务端只保存哈希，之后取不回来），关掉面板就要重新生成；界面上不会单独展示 token。
+把这三项从那段手动配置里抽出来放进 shell 就行。手动配置的 token 只显示这一次（服务端只保存哈希，之后取不回来），关掉面板就要重新生成；界面上不会单独展示 token。一键接入的凭据由 BeefTV 保存在本机数据目录，只把文件路径交给对应 Agent，不经过页面展示。
+
+一键接入不把 token 放进命令行参数，而是保存到 BeefTV 数据目录里的 `agent-clients/<kind>.token`，只把路径作为 `BEEFTV_CLIENT_TOKEN_FILE` 传给 CLI。`BEEFTV_CLIENT_TOKEN_FILE` 与 `BEEFTV_CLIENT_TOKEN` 同时存在时以文件为准；文件不存在或为空按未授权处理，不回退到环境变量。
 
 **不需要启动 MCP**：这三个变量对 `beeftv` 的子命令同样有效，纯脚本批量跑不会拉起任何 MCP 服务。
 

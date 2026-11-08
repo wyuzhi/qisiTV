@@ -37,7 +37,7 @@ func TestExternalCLIAndMCPRealBusinessUpload(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatal(err, string(out))
 	}
-	env := append(os.Environ(), "BEEFTV_BASE_URL="+server.URL+"/api", "BEEFTV_CLIENT_ID="+reg.ID, "BEEFTV_CLIENT_TOKEN="+token, "BEEFTV_OWNER_TOKEN=", "BEEFTV_DESKTOP_TOKEN=")
+	env := append(os.Environ(), "BEEFTV_BASE_URL="+server.URL+"/api", "BEEFTV_CLIENT_ID="+reg.ID, "BEEFTV_CLIENT_TOKEN="+token, "BEEFTV_CLIENT_TOKEN_FILE=", "BEEFTV_OWNER_TOKEN=", "BEEFTV_DESKTOP_TOKEN=")
 	run := func(args ...string) []byte {
 		command := exec.CommandContext(ctx, bin, args...)
 		command.Env = env

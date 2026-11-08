@@ -1,13 +1,15 @@
 # BeefTV Skills 官方接入包
 
-提供两个通用 Skill，以及只读的市场 MCP 连接。公共查询不需要模型 Key、投稿凭据或运行中的 BeefTV。投稿通过独立的 CLI 浏览器授权进行；MCP 不提供上传、审批或公开发布工具。
+提供一个 BeefTV 画布工作 Skill、两个通用 Skill，以及只读的市场 MCP 连接。公共查询不需要模型 Key、投稿凭据或运行中的 BeefTV。投稿通过独立的 CLI 浏览器授权进行；MCP 不提供上传、审批或公开发布工具。
+
+`skills/beeftv-canvas` 是桌面版「一键接入 Claude Code / Codex」安装的同一份技能：桌面端接入时把它写入对应 Agent 的用户级技能目录，断开时移除。这里的文件是唯一可编辑来源，后端嵌入副本由 `scripts/sync-agent-skill.mjs` 同步。
 
 此目录是待审查的接入包源码，不代表公共目录已上架或生产服务已开放。生产地址在后端和官网完成部署、联调后才可对用户宣传。
 
 - `plugin.json`、`mcp.json`：Agent Plugins 1.0 格式，Codex 使用。
 - `.claude-plugin/plugin.json`、`mcp.claude.json`：Claude Code 适配，复用同一份 Skill。
 - 仓库 `.agents/plugins/marketplace.json` 与 `.claude-plugin/marketplace.json`：各宿主的仓库来源入口。
-- `skills/`：寻找技能、整理投稿的两个工作流，不打包整个社区目录。
+- `skills/`：BeefTV 画布工作方法、寻找技能、整理投稿的三个工作流，不打包整个社区目录。
 
 本地构建 CLI：在仓库根目录执行 `go -C backend build -o ../.local/bin/beeftv ./cmd/beeftv`，然后运行 `.local/bin/beeftv skills help`。只读 MCP 位于 `/api/beeftv/skillhub/v1/mcp`；默认远程 HTTPS，测试时可显式指定本机市场。安装包不运行 shell hook 或 npm 生命周期脚本。
 

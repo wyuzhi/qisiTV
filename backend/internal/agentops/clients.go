@@ -75,11 +75,16 @@ func NormalizeClientKind(kind string) ClientKind {
 }
 
 // ClientRegistration 记录一个被本机用户登记过的非交互客户端。
-// Kind/ApprovalMode/LastUsedAt/RevokedAt 是后加字段：历史文件里缺失时按零值解析，读出后统一补默认。
+// Kind/Origin/ApprovalMode/LastUsedAt/RevokedAt 是后加字段：历史文件里缺失时按零值解析，
+// 读出后统一补默认；缺失的 Origin 一律视为手动连接。
 type ClientRegistration struct {
-	ID           string             `json:"id"`
-	Label        string             `json:"label"`
-	Kind         ClientKind         `json:"kind,omitempty"`
+	ID    string     `json:"id"`
+	Label string     `json:"label"`
+	Kind  ClientKind `json:"kind,omitempty"`
+	// Origin records who created the credential. Empty means a manual
+	// connection; one-click integrations use a reserved origin value so their
+	// identity never depends on the display label.
+	Origin       string             `json:"origin,omitempty"`
 	Mode         ClientMode         `json:"mode"`
 	ApprovalMode ClientApprovalMode `json:"approvalMode,omitempty"`
 	TokenHash    string             `json:"tokenHash"`
@@ -145,6 +150,12 @@ func (r *ClientRegistry) RegisterKind(kind, label string, mode ClientMode) (Clie
 
 // RegisterClient 登记一个客户端凭据，记录来源分类、读写模式与付费生成审批档位。
 func (r *ClientRegistry) RegisterClient(kind, label string, mode ClientMode, approvalMode ClientApprovalMode) (ClientRegistration, string, error) {
+	return r.RegisterClientOrigin(kind, label, "", mode, approvalMode)
+}
+
+// RegisterClientOrigin 额外记录凭据来源；空 origin 表示手动连接。
+// 一键接入只凭这个字段识别自己签发的凭据，显示名称不参与判断。
+func (r *ClientRegistry) RegisterClientOrigin(kind, label, origin string, mode ClientMode, approvalMode ClientApprovalMode) (ClientRegistration, string, error) {
 	if mode == "" {
 		mode = ClientReadWrite
 	}
@@ -172,6 +183,7 @@ func (r *ClientRegistry) RegisterClient(kind, label string, mode ClientMode, app
 		ID:           "client-" + hex.EncodeToString(idBuf),
 		Label:        label,
 		Kind:         normalizedKind,
+		Origin:       strings.TrimSpace(origin),
 		Mode:         mode,
 		ApprovalMode: normalizedApproval,
 		TokenHash:    hashToken(token),
@@ -234,11 +246,19 @@ func (r *ClientRegistry) Lookup(clientID, token string) (ClientRegistration, boo
 
 // List 返回未吊销的登记信息（不含 token 本身）。
 func (r *ClientRegistry) List() []ClientRegistration {
+	live, _ := r.ListLive()
+	return live
+}
+
+// ListLive 与 List 相同，但登记文件读不出或解析失败时返回错误。
+// 需要据此做安全决定的调用方（例如断开前枚举要吊销的凭据）必须用它，
+// 不能把「读不出」当成「没有凭据」。
+func (r *ClientRegistry) ListLive() ([]ClientRegistration, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	items, err := r.load()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	live := make([]ClientRegistration, 0, len(items))
 	for _, item := range items {
@@ -246,7 +266,7 @@ func (r *ClientRegistry) List() []ClientRegistration {
 			live = append(live, item)
 		}
 	}
-	return live
+	return live, nil
 }
 
 // Revoke 吊销一个登记：保留记录（带吊销时间）而不是删行，这样凭据不会被后续登记复用，

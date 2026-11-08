@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"infinite-canvas/backend/internal/agentconnect"
 	"infinite-canvas/backend/internal/agentops"
 	"infinite-canvas/backend/internal/app"
 )
@@ -22,10 +23,20 @@ import (
 // Cursor，签发必须发生在受信任的桌面界面内，并把随包 CLI 的绝对路径连同客户端
 // 自己的凭据一起拼成可直接粘贴的接入命令。
 
+// agentClientRegistry is the narrow surface these routes need. The concrete
+// registry lives in agentops; tests inject a fake to exercise failure paths.
+type agentClientRegistry interface {
+	List() []agentops.ClientRegistration
+	ListLive() ([]agentops.ClientRegistration, error)
+	RegisterClient(kind, label string, mode agentops.ClientMode, approvalMode agentops.ClientApprovalMode) (agentops.ClientRegistration, string, error)
+	RegisterClientOrigin(kind, label, origin string, mode agentops.ClientMode, approvalMode agentops.ClientApprovalMode) (agentops.ClientRegistration, string, error)
+	Revoke(clientID string) error
+}
+
 // RegisterAgentClientRoutes 暴露 /agent-clients：列出、签发、吊销外部客户端凭据。
 // 信任判据与签发内置 UI 会话完全一致（本机同源 + owner 凭据 / 桌面壳 / 显式本地引导），
 // 外部客户端凭据一律不能进入这组路由。
-func RegisterAgentClientRoutes(r gin.IRouter, svc ownerCredentialDirs, clients *agentops.ClientRegistry, desktopTrust func(*http.Request) bool) {
+func RegisterAgentClientRoutes(r gin.IRouter, svc ownerCredentialDirs, clients agentClientRegistry, desktopTrust func(*http.Request) bool) {
 	r.GET("/agent-clients", func(c *gin.Context) {
 		if !requireDesktopUITrust(c, svc, desktopTrust) {
 			return
@@ -35,10 +46,16 @@ func RegisterAgentClientRoutes(r gin.IRouter, svc ownerCredentialDirs, clients *
 		if cliAvailable {
 			installCommand = cliInstallCommand(cliPath)
 		}
-		ok(c, gin.H{
+		payload := gin.H{
 			"clients": clientViews(clients.List()),
 			"cli":     gin.H{"path": cliPath, "available": cliAvailable, "installCommand": installCommand},
-		})
+		}
+		// One-click integration only exists on the desktop profile. The server
+		// profile has no desktop trust and never touches the user's home.
+		if desktopTrust != nil {
+			payload["integrations"] = integrationViews(newIntegrationManager(svc.DataDir()), clients, cliPath, svc.DataDir())
+		}
+		ok(c, payload)
 	})
 
 	r.POST("/agent-clients", func(c *gin.Context) {
@@ -86,6 +103,12 @@ func RegisterAgentClientRoutes(r gin.IRouter, svc ownerCredentialDirs, clients *
 		}
 		ok(c, gin.H{"revoked": true})
 	})
+
+	// One-click connect/disconnect is desktop-only. Server deployments do not
+	// expose these routes at all, so web clients cannot edit a host home.
+	if desktopTrust != nil {
+		registerAgentIntegrationRoutes(r, svc, clients, desktopTrust)
+	}
 }
 
 // failAgentOps 把操作层错误按统一失败信封返回（reason 机器可读）。
@@ -138,6 +161,9 @@ func clientView(item agentops.ClientRegistration) gin.H {
 		"createdAt":    item.CreatedAt.UTC().Format(time.RFC3339),
 		"lastUsedAt":   nil,
 	}
+	if agentconnect.IsIntegrationOrigin(item.Kind, item.Origin) {
+		view["desktopIntegration"] = true
+	}
 	if item.LastUsedAt != nil {
 		view["lastUsedAt"] = item.LastUsedAt.UTC().Format(time.RFC3339)
 	}
@@ -184,42 +210,40 @@ func cliInstallCommand(cliPath string) string {
 // clientSetup 生成可直接粘贴的接入配置。命令里带的是客户端自己的凭据，
 // 不含桌面启动令牌；CLI 按工作区路径通过共享运行实例发现逻辑读取地址。
 func clientSetup(kind agentops.ClientKind, cliPath, dataDir string, reg agentops.ClientRegistration, token string) gin.H {
-	serveArgs := []string{"mcp", "serve"}
-	if reg.Mode == agentops.ClientReadOnly {
-		serveArgs = append(serveArgs, "--read-only")
-	}
+	launch := agentconnect.ManualLaunch(cliPath, dataDir, reg.Mode, reg.ID, token)
+	serveArgs := strings.Join(launch.Args, " ")
 	switch kind {
 	case agentops.ClientKindCodex:
 		command := "codex mcp add beeftv" +
 			" --env BEEFTV_DATA_DIR=" + shellQuote(dataDir) +
 			" --env BEEFTV_CLIENT_ID=" + shellQuote(reg.ID) +
 			" --env BEEFTV_CLIENT_TOKEN=" + shellQuote(token) +
-			" -- " + shellQuote(cliPath) + " " + strings.Join(serveArgs, " ")
+			" -- " + shellQuote(launch.Command) + " " + serveArgs
 		return gin.H{"kind": string(kind), "title": "在 Codex 里加上 BeefTV", "command": command}
 	case agentops.ClientKindClaude:
-		command := "claude mcp add beeftv" +
+		command := "claude mcp add beeftv --scope user" +
 			" -e BEEFTV_DATA_DIR=" + shellQuote(dataDir) +
 			" -e BEEFTV_CLIENT_ID=" + shellQuote(reg.ID) +
 			" -e BEEFTV_CLIENT_TOKEN=" + shellQuote(token) +
-			" -- " + shellQuote(cliPath) + " " + strings.Join(serveArgs, " ")
+			" -- " + shellQuote(launch.Command) + " " + serveArgs
 		return gin.H{"kind": string(kind), "title": "在 Claude Code 里加上 BeefTV", "command": command}
 	case agentops.ClientKindClaudeDesktop:
 		return gin.H{"kind": string(kind), "title": "在 Claude Desktop 的开发者设置中编辑配置",
-			"json": mcpServersJSON(cliPath, dataDir, serveArgs, reg.ID, token)}
+			"json": mcpServersJSON(launch)}
 	case agentops.ClientKindCursor:
 		return gin.H{"kind": string(kind), "title": "把这段写进 ~/.cursor/mcp.json",
-			"json": mcpServersJSON(cliPath, dataDir, serveArgs, reg.ID, token)}
+			"json": mcpServersJSON(launch)}
 	default:
 		return gin.H{"kind": string(kind), "title": "把这段写进该客户端的 MCP 配置",
-			"json": mcpServersJSON(cliPath, dataDir, serveArgs, reg.ID, token)}
+			"json": mcpServersJSON(launch)}
 	}
 }
 
-func mcpServersJSON(cliPath, dataDir string, args []string, clientID, token string) string {
+func mcpServersJSON(launch agentconnect.LaunchSpec) string {
 	payload := map[string]any{"mcpServers": map[string]any{"beeftv": map[string]any{
-		"command": cliPath,
-		"args":    args,
-		"env":     map[string]string{"BEEFTV_DATA_DIR": dataDir, "BEEFTV_CLIENT_ID": clientID, "BEEFTV_CLIENT_TOKEN": token},
+		"command": launch.Command,
+		"args":    launch.Args,
+		"env":     launch.EnvMap(),
 	}}}
 	encoded, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {

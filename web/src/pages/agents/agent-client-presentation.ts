@@ -1,4 +1,4 @@
-import type { AgentClient, AgentClientKind, AgentClientMode, AgentClientSetup } from "@/services/api/agent-clients";
+import type { AgentClient, AgentClientKind, AgentClientMode, AgentClientSetup, AgentIntegration, AgentIntegrationKind } from "@/services/api/agent-clients";
 
 export const agentClientKinds: AgentClientKind[] = ["codex", "claude", "claude-desktop", "cursor", "other"];
 
@@ -95,4 +95,35 @@ export function agentClientLastUsedLabel(lastUsedAt: string | null | undefined, 
 
 export function agentClientDisplayLabel(client: AgentClient) {
     return client.label?.trim() || agentClientKindLabel(client.kind);
+}
+
+export function agentIntegrationKindLabel(kind: AgentIntegrationKind) {
+    return kind === "claude" ? kindLabels.claude : kindLabels.codex;
+}
+
+/** 状态只说明本机事实：没检测到、已接入或还没接入。 */
+export function agentIntegrationStatusLabel(integration: AgentIntegration) {
+    if (integration.needsRetry) return "需要重试";
+    if (integration.connected) return "已接入";
+    return integration.detected ? "未接入" : "未检测到";
+}
+
+export type AgentIntegrationAction = "connect" | "disconnect" | "unavailable";
+
+export function agentIntegrationAction(integration: AgentIntegration): AgentIntegrationAction {
+    // A connected config can outlive the agent installation; always let the
+    // user remove what BeefTV wrote. Retry also starts by cleaning up.
+    if (integration.needsRetry || integration.connected) return "disconnect";
+    return integration.detected ? "connect" : "unavailable";
+}
+
+/** 一行说清接入会发生什么、未检测到该怎么办、断开能恢复什么。 */
+export function agentIntegrationHint(integration: AgentIntegration) {
+    const name = integration.name || agentIntegrationKindLabel(integration.kind);
+    if (integration.needsRetry) return "上一次没有清理完连接。再点一次断开即可重试。";
+    if (integration.connected && !integration.detected) return `已接入，但这次没有检测到 ${name}。重新打开或重新安装 ${name} 后就会生效。`;
+    if (!integration.detected) return `没有检测到 ${name} 的命令行。安装后打开一次，再回到这里。`;
+    if (integration.connected && !integration.skillInstalled) return "已接入，但使用说明没有写入。请检查对应技能目录里是否已有同名内容。";
+    if (integration.connected) return `已接入。打开 ${name} 就能使用 BeefTV 画布。`;
+    return `接入后会在 ${name} 里添加 BeefTV，并装好一份画布使用说明。`;
 }

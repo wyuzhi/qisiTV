@@ -6,8 +6,6 @@ cmd/server.systemStatus.beginDrain
 cmd/server.systemStatus.markStarted
 cmd/server.systemStatus.snapshot
 internal/agentops.AssistantCaller
-internal/agentops.ClientRegistry.Register
-internal/agentops.ClientRegistry.RegisterKind
 internal/agentops.Conflict
 internal/agentops.ExternalCaller
 internal/agentops.ManualCaller
