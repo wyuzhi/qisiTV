@@ -13,6 +13,7 @@
 - `sim-go.mjs`：内存版 Go 业务权威模拟器（`createSimGo`）。加载真实的 `operation-descriptors.fixture.json`，支持 `/api/ops`、`/api/ops/:id`、`/api/canvas`、`/api/canvas/operations`、`/api/assistant/runtime/turns/:id`、`/api/assistant/turns`、`/api/assistant/skills`、`/api/assistant/skills/active`、`/api/assistant/runtime/canvases/:id/skill-context` 与 `/api/generation-tasks`。
 - `scenarios.mjs`（及 `scenarios/index.mjs`）：11 个固定评测场景定义、确定性检查项（`checks`）与本地 Fake OpenAI Chat Completions SSE 模型桩（`createFakeModelServer`）。S8–S11 的场景定义与检查项在 `scenarios/real-failures.mjs`，共用纯函数在 `scenarios/shared.mjs`。
 - `run-eval.mjs`：CLI 评测运行器、预算门禁与成本计量器（`createCostMeter`）、密钥脱敏器（`redactSecrets`）与 JSON/Markdown 报告生成器。
+- `run-external-eval.mjs`：外部 Agent 对照驱动，见下文「外部 Agent 对照」。
 - `sim-go.test.mjs`：针对 `sim-go`、CAS 冲突、分镜行产出连线绑定、生成提议与撤销、预算熔断及脱敏的单测与端到端套件。
 
 ---
@@ -114,6 +115,28 @@ S8–S11 的计分只使用结构化数据：画布节点、生成方案、`opLo
 - **S11 的受控错误**：模型工具参数 schema 会先拒绝缺少 `expectedVersion` 的 `media.inspect`（错误文本为 `Validation failed ... missing`），不会到达模拟器；直接调用操作层时模拟器按真实后端的 `media_version_required` 拒绝。场景另外用 `armNextMediaInspectError` 让本轮第一次针对目标图片的 `media.inspect` 返回可恢复的 `stale_media_version`，并提示重新读取 overview 取得当前版本；节点声明的 `asset-s11-seed` 与 `res-s11-seed` 都已注册，按 nodeId 或 assetId 读取都会进入同一条受控错误流程。只有随后带正确版本的 `media.inspect` 成功才算完成复查。评测同时统计模型侧与模拟器侧的同参数重试；回复原文只作诊断，不参与计分。
 - **S6 不测试压缩**：场景已从 `skill-after-compaction` 更名为 `skill-across-turns`。真实调用 Durable 压缩、故意使用有损摘要并验证技能重新注入的测试在 `../durable-skills-cases.mjs`，由 `bun test durable-skills.test.mjs` 运行；这份评测报告不继承其结论。
 - **新增场景**：在 `scenarios.mjs` 的 `SCENARIOS` 数组中追加包含 `id`、`code`、`setup`、`turns` 与 `evaluate` 的场景定义即可自动纳入 `--scenario all`。
+
+---
+
+## 外部 Agent 对照（Claude Code / Codex）
+
+`eval/run-external-eval.mjs` 用同一个模拟器和同一套场景判分，换成外部 Agent 来回答：每个用户回合启动一次 `claude -p` 或 `codex exec`（第二轮起接着上一轮会话），通过 `beeftv mcp serve` 读写模拟器，并装好 `plugins/beeftv-skills` 里的画布技能。外部 Agent 的配置目录是临时目录，不读写本机真实的 `~/.claude` 或 `~/.codex`；Claude Code 只开放技能加载和 BeefTV 工具。
+
+```bash
+cd backend && go build -o /tmp/beeftv ./cmd/beeftv && cd ../agent-host
+# Claude Code（Anthropic 兼容网关）
+BEEFTV_EVAL_AGENT=claude ANTHROPIC_BASE_URL=https://<网关> ANTHROPIC_API_KEY=... BEEFTV_EVAL_AGENT_MODEL=<模型> \
+BEEFTV_EVAL_PRICE_IN=0.2 BEEFTV_EVAL_PRICE_OUT=0.8 BEEFTV_CLI=/tmp/beeftv \
+bun eval/run-external-eval.mjs --scenario S1,S2,S3,S6,S7,S8,S9,S10,S11 --runs 2 --out /tmp/ext-eval
+# Codex（OpenAI Responses 兼容网关）
+BEEFTV_EVAL_AGENT=codex BEEFTV_EVAL_CODEX_BASE_URL=https://<网关>/v1 BEEFTV_EVAL_CODEX_API_KEY=... BEEFTV_EVAL_AGENT_MODEL=<模型> ...
+```
+
+- 模拟器前有一层转发，把当前回合写进 `x-beeftv-agent-turn`，按回合判分的检查照常可用；`/business/tools` 回空列表。
+- S4（中途插话）、S5（生成后自动唤醒）只有内置宿主支持，记为不适用；S6 的「每次请求都带着活动技能」只能从宿主请求体取证，不计入。技能 pin 改成在消息里告诉它技能版本，相当于用户说「我选了这个技能」。
+- `--with-digest`：每轮把内置助手同款的制作摘要放在消息前面，用来量摘要对外部 Agent 的作用。
+- 费用按 `BEEFTV_EVAL_PRICE_IN/OUT` 折算，口径和内置评测一致（输入含缓存）。Codex 不报模型请求次数，按「工具调用数 + 1」估。
+- 模拟器没有 `generation.estimate` 和 `media.review`，外部 Agent 调到时会报不支持；这是模拟器的缺口，正式后端有这两个操作。
 
 ---
 

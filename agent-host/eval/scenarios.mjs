@@ -1210,6 +1210,9 @@ export const SCENARIOS = [
       const danglingMediaNodes = mediaNodes.filter((n) => !connectedNodeIds.has(n.id));
 
       const turnErrors = (turnRecords || []).filter((t) => t.error);
+      // 只算这个场景画布上的冲突；计数器是整个模拟器共用的，别的场景恢复过的冲突不能记到这里。
+      const canvasConflicts = (snap.opLog || []).filter((op) =>
+        op.status === 'error' && op.reason === 'revision_conflict' && op.params?.canvasId === canvasId).length;
 
       const checks = [
         {
@@ -1239,8 +1242,8 @@ export const SCENARIOS = [
         },
         {
           name: 'no_unrecovered_errors',
-          passed: turnErrors.length === 0 && snap.counts.revisionConflicts === 0,
-          detail: `turnErrors=${turnErrors.length}, revisionConflicts=${snap.counts.revisionConflicts}`,
+          passed: turnErrors.length === 0 && canvasConflicts === 0,
+          detail: `turnErrors=${turnErrors.length}, revisionConflicts=${canvasConflicts}`,
         },
       ];
 
