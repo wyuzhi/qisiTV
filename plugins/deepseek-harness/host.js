@@ -94,7 +94,7 @@ export function apply(ctx) {
     } catch {
       // Runtime shutdown still proceeds if the desktop owner already exited.
     }
-    runtime.close()
+    await runtime.close()
   }
 
   async function connect(mode, reconnect = false) {
@@ -195,7 +195,12 @@ export function apply(ctx) {
           const origin = req.headers.origin
           if (origin && origin !== ctx.webServer.getOrigin()) return json(res, 403, { error: '不允许的来源' })
           const rawPath = url.pathname.slice(current.basePath.length) || '/'
-          const normalizedPath = new URL(decodeURIComponent(rawPath), 'http://localhost').pathname
+          let normalizedPath
+          try {
+            normalizedPath = new URL(decodeURIComponent(rawPath), 'http://localhost').pathname
+          } catch {
+            return json(res, 400, { error: '无效的工作区路径' })
+          }
           if (normalizedPath.startsWith('/api/assistant') || normalizedPath.startsWith('/api/ops/clients') || normalizedPath.startsWith('/api/agent-clients')) {
             return json(res, 403, { error: '该操作由 DeepSeek Harness 管理' })
           }

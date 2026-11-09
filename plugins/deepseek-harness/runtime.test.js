@@ -17,10 +17,11 @@ test('runtime readiness only accepts loopback bridges and complete credentials',
 })
 
 test('embedded document config carries no runtime credentials and escapes script delimiters', () => {
-  const html = embeddedDocument('<html><head></head><body></body></html>', '/beeftv/app/abc', '</script>')
+  const html = embeddedDocument('<html><head><base href="/" /></head><body></body></html>', '/beeftv/app/abc', '</script>')
   assert.ok(html.includes('"apiBase":"/beeftv/app/abc/api"'))
   assert.ok(!html.includes('"parentOrigin":"</script>"'))
   assert.ok(html.includes('<base href="/beeftv/app/abc/">'))
+  assert.ok(!html.includes('<base href="/" />'))
   assert.ok(html.includes('html .app-workspace-shell:has(.assets-library-page) .app-workspace-main-row{z-index:auto}'))
 })
 
@@ -124,6 +125,12 @@ test('Host rejects context from missing or previous connection IDs without chang
   assert.notEqual(restored.connectionId, second)
   assert.equal(nativeLaunches, 1)
   assert.equal(attachAttempts, 2)
+  const appPath = new URL(restored.appURL).pathname.replace(/\/$/, '')
+  assert.equal((await call('GET', `${appPath}/api/assistant/sessions`)).status, 403)
+  assert.equal((await call('GET', `${appPath}/api/%61ssistant/sessions`)).status, 403)
+  assert.equal((await call('GET', `${appPath}/api/ops/clients`)).status, 403)
+  assert.equal((await call('POST', `${appPath}/api/agent-clients`, {})).status, 403)
+  assert.equal((await call('POST', `${appPath}/api/health/../agent-clients`, {})).status, 403)
 })
 
 test('workspace handshake verifies the live build, database readiness and workspace identity', async context => {

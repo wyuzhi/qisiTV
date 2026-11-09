@@ -142,11 +142,18 @@ export async function startRuntime(dataDir, { attachOnly = false } = {}) {
     close() {
       lines.close()
       child.stdin.end()
-      if (record.owned) {
-        const timer = setTimeout(() => child.kill('SIGTERM'), 10_000)
+      if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve()
+      return new Promise(resolve => {
+        const timer = setTimeout(() => {
+          if (record.owned) child.kill('SIGTERM')
+          resolve()
+        }, record.owned ? 10_000 : 1_000)
         timer.unref()
-        child.once('exit', () => clearTimeout(timer))
-      }
+        child.once('exit', () => {
+          clearTimeout(timer)
+          resolve()
+        })
+      })
     },
   }
 }
