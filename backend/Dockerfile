@@ -28,9 +28,16 @@ RUN --mount=type=cache,target=/root/.cache/go-build set -eu; \
     ldflags="-s -w -X infinite-canvas/backend/internal/buildinfo.Version=${version} -X infinite-canvas/backend/internal/buildinfo.Commit=${BUILD_COMMIT} -X infinite-canvas/backend/internal/buildinfo.BuildTime=${BUILD_TIME}"; \
     CGO_ENABLED=1 GOOS=linux go build -trimpath -ldflags="$ldflags" -o /out/infinite-canvas-backend ./cmd/server
 
-FROM alpine:3.22
+FROM oven/bun:1.4.2-alpine AS assistant-build
 
-RUN apk add --no-cache ca-certificates tzdata wget \
+WORKDIR /src/agent-host
+COPY agent-host/package.json agent-host/bun.lock ./
+RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile
+COPY agent-host ./
+
+FROM node:24.22.1-alpine
+
+RUN apk add --no-cache ca-certificates tzdata wget ffmpeg fontconfig font-noto-cjk \
     && addgroup -S app \
     && adduser -S app -G app
 
@@ -45,6 +52,9 @@ ENV CANVAS_BACKEND_DATA_DIR=/data
 RUN mkdir -p /data && chown -R app:app /data
 COPY --from=backend-build /out/infinite-canvas-backend /usr/local/bin/infinite-canvas-backend
 COPY --from=protocol-package-build /src/plugin-packages /app/plugin-packages
+COPY --from=assistant-build /src/agent-host /usr/local/bin/agent-host
+RUN mkdir -p /usr/local/bin/agent-host/runtime/bin \
+    && ln -s /usr/local/bin/node /usr/local/bin/agent-host/runtime/bin/node
 
 USER app
 EXPOSE 8080

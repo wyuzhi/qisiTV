@@ -28,6 +28,7 @@ plugin-packages/*.beeftv-plugin
 web/.next
 web/dist
 web/node_modules
+agent-host/node_modules
 web/out
 *.log
 *.db

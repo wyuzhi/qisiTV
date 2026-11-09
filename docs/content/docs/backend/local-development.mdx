@@ -136,6 +136,17 @@ curl -s -X POST http://127.0.0.1:8082/inference \
 
 ## Docker 开发
 
+源码构建并运行本地工作区可分别执行：
+
+```bash
+./scripts/beeftv-docker.sh build
+./scripts/beeftv-docker.sh start
+```
+
+脚本使用 `docker-compose.local.yml`。`build` 只构建镜像，`start` 使用已有镜像启动并等待健康检查；另支持 `status`、`logs` 和 `stop`。不会自动读取机器私有覆盖文件或授予构建过程宿主机网络权限。
+
+后端镜像包含 Node.js、锁定依赖的 `agent-host`、FFmpeg、ffprobe 及用于中文字幕的 Noto CJK 字体。宿主通过与后端可执行文件相邻的 `agent-host/runtime/bin/node` 启动，使用 `/data` 保存工作区数据。浏览器信任及操作授权仍按现有 API 规则校验；包含宿主不代表自动获得写权限。
+
 需要容器化热更新时，在仓库根目录执行：
 
 ```bash
