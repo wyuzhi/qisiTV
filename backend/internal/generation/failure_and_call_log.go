@@ -897,6 +897,11 @@ func CaptureTaskFailureDiagnostics(task *model.Task, err error, source string) {
 	case errors.As(err, &httpErr):
 		d.Source, d.HTTPStatus, d.ProviderCode = "upstream_http", httpErr.StatusCode, failure.ProviderCode
 		d.RequestID = firstNonEmpty(failure.RequestID, httpErr.RequestID)
+		var recoveryErr ImageRecoveryError
+		if errors.As(err, &recoveryErr) {
+			upstream := ClassifyHTTP(httpErr.StatusCode, "", httpErr.Body)
+			d.Summary = firstNonEmpty(upstream.ProviderMessage, upstream.UserMessage())
+		}
 	case errors.As(err, &managedHTTP):
 		d.Source, d.HTTPStatus, d.ProviderCode = "upstream_http", managedHTTP.StatusCode, failure.ProviderCode
 		d.RequestID = firstNonEmpty(failure.RequestID, managedHTTP.RequestID)

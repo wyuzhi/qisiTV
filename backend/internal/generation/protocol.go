@@ -36,8 +36,11 @@ func DeclarativeProtocolPollPolicy(mode string) VideoPollPolicy {
 		return DefaultVideoPollPolicy()
 	}
 	return VideoPollPolicy{
+		// An accepted asynchronous task remains queryable after a transient HTTP failure.
+		RetryTransient:    true,
+		Notify:            NotifyPollEvent,
 		Interval:          2500 * time.Millisecond,
-		MaxNotFoundMisses: 1,
+		MaxNotFoundMisses: 3,
 		MaxDownloadTries:  3,
 		Sleep:             SleepContext,
 	}
@@ -141,6 +144,12 @@ func RunProtocolAdapterTaskWithPolicy(ctx context.Context, input Input, adapter 
 		}
 		body, err := ExecuteProtocolRequest(WithRequestKind(ctx, "poll"), input.Config, spec)
 		if err != nil {
+			var httpErr HTTPError
+			if errors.As(err, &httpErr) && httpErr.StatusCode == 404 {
+				// Losing an accepted task's query endpoint does not prove that
+				// its model is missing or that generation failed.
+				return VideoPollOutcome{}, StatePendingError{TaskID: taskID, Cause: err}
+			}
 			return VideoPollOutcome{}, err
 		}
 		state, err := adapter.ParsePoll(ctx, protocol.PollContext{BaseURL: input.Config.BaseURL, Model: request.Model, Request: request, TaskID: taskID}, body)

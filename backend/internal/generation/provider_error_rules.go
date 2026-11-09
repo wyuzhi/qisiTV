@@ -244,6 +244,12 @@ func specializeMediaConstraints(failure *Failure, fields extractedFields) {
 		return
 	}
 	message := promptEchoPattern.ReplaceAllString(fields.Message, "")
+	if strings.EqualFold(fields.Code, "reference_unavailable") {
+		failure.Category = CategoryInputInaccessible
+		failure.Reason = firstNonEmpty(sanitizeProviderText(message), "参考素材暂时无法读取")
+		failure.Action = "请稍后重试，或重新上传参考素材后再试"
+		return
+	}
 	if strings.EqualFold(fields.Code, "invalid_upscale_source") {
 		lower := strings.ToLower(message)
 		if strings.Contains(lower, "video") {

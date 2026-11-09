@@ -176,6 +176,7 @@ var providerCodeCategories = map[string]FailureCategory{
 	"image_reference_upload_failed":        CategoryProviderUnavailable,
 	"reference_media_upload_failed":        CategoryProviderUnavailable,
 	"reference_preupload_failed":           CategoryProviderUnavailable,
+	"reference_unavailable":                CategoryInputInaccessible,
 	"upscale_unavailable":                  CategoryProviderUnavailable,
 	"fal_billing_unavailable":              CategoryProviderUnavailable,
 	"invalid_upscale_source":               CategoryInvalidParams,
