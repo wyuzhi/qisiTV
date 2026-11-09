@@ -57,7 +57,7 @@ func runDesktopApp(app *DesktopApp, run func(*options.App) error) error {
 }
 
 func desktopAppOptions(app *DesktopApp) *options.App {
-	return &options.App{
+	opts := &options.App{
 		Title:            "BeefTV",
 		Width:            1440,
 		Height:           960,
@@ -97,6 +97,8 @@ func desktopAppOptions(app *DesktopApp) *options.App {
 		OnShutdown: app.shutdown,
 		Bind:       []interface{}{app},
 	}
+	configureStartupWindow(opts)
+	return opts
 }
 
 func prepareDesktopApp(app *DesktopApp) error {
