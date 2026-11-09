@@ -48,3 +48,12 @@ test("abandoned scope never replays, but can still discover the original receipt
     await expect(submitGenerationCommand({ prompt: "test" }, "canvas:op", async () => { posts++; throw new ApiError("network"); }, async () => undefined, () => false)).rejects.toBeInstanceOf(GenerationSubmissionUnknownError);
     expect(posts).toBe(1);
 });
+
+test("deterministic 4xx on replay surfaces the validation error when receipt lookup confirms no task was created", async () => {
+    let posts = 0;
+    await expect(submitGenerationCommand({ prompt: "test" }, "canvas:op", async () => {
+        if (++posts === 1) throw new ApiError("timeout", { status: 408 });
+        throw new ApiError("当前模型要求参考图片使用公网 HTTPS 链接", { status: 400, reason: "reference_media_requires_url" });
+    }, async () => undefined)).rejects.toMatchObject({ status: 400, reason: "reference_media_requires_url" });
+    expect(posts).toBe(2);
+});

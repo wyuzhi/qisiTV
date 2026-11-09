@@ -30,11 +30,14 @@ export async function submitGenerationCommand(input: CreateTaskInput, operationI
         try {
             return await submit(frozen);
         } catch (replayError) {
-            // Even a rejection of the replay cannot disprove acceptance of the first request.
             try {
                 const accepted = await find();
                 if (accepted) return accepted;
-            } catch { /* Keep the original identity when the receipt cannot be read. */ }
+                if (!submissionAcceptanceUnknown(replayError)) throw replayError;
+            } catch (receiptError) {
+                if (receiptError === replayError) throw replayError;
+                /* Keep the original identity when the receipt cannot be read. */
+            }
             throw new GenerationSubmissionUnknownError(operationId, replayError);
         }
     }
