@@ -11,15 +11,34 @@ import {
 const originalWindow = globalThis.window;
 const originalFetch = globalThis.fetch;
 const originalAdapter = apiClient.defaults.adapter;
+const originalEventSource = globalThis.EventSource;
 
 afterEach(() => {
     globalThis.window = originalWindow;
     globalThis.fetch = originalFetch;
     apiClient.defaults.adapter = originalAdapter;
+    globalThis.EventSource = originalEventSource;
     delete apiClient.defaults.headers.common["X-Desktop-Token"];
 });
 
 describe("桌面端实时画布 SSE 与外部改动记录", () => {
+    test("浏览器画布事件使用嵌入运行时的 API 前缀", () => {
+        configureApiRuntime("/beeftv/app/session-1/api");
+        globalThis.window = { location: { protocol: "http:" } } as Window & typeof globalThis;
+        let capturedUrl = "";
+        let closed = false;
+        globalThis.EventSource = class {
+            constructor(url: string) { capturedUrl = url; }
+            addEventListener() {}
+            removeEventListener() {}
+            close() { closed = true; }
+        } as unknown as typeof EventSource;
+        const unsubscribe = subscribeCanvasEventsStream("canvas-1", () => {});
+        expect(capturedUrl).toBe("/beeftv/app/session-1/api/canvas-projects/canvas-1/events");
+        unsubscribe();
+        expect(closed).toBe(true);
+    });
+
     test("Wails 协议或桌面端 Token 下通过流式 fetch 实时接收 canvas.updated", async () => {
         configureApiRuntime("http://127.0.0.1:18090/api", "desktop-secret-token");
         globalThis.window = {

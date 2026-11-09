@@ -7,6 +7,7 @@ import type { CanvasFaceBox } from "./canvas-emotion";
 type DetectFaceRequest = {
     id: number;
     image: ImageBitmap;
+    assetBase?: string;
 };
 
 type DetectFaceResponse = {
@@ -38,15 +39,15 @@ workerGlobal.import = async (url: string) => {
     }
 };
 
-function getDetector() {
+function getDetector(assetBase = "") {
     if (!detectorPromise) {
         detectorPromise = FaceDetector.createFromOptions(
             {
-                wasmLoaderPath: "/mediapipe/wasm/vision_wasm_module_internal.js",
-                wasmBinaryPath: "/mediapipe/wasm/vision_wasm_module_internal.wasm",
+                wasmLoaderPath: `${assetBase}/mediapipe/wasm/vision_wasm_module_internal.js`,
+                wasmBinaryPath: `${assetBase}/mediapipe/wasm/vision_wasm_module_internal.wasm`,
             },
             {
-                baseOptions: { modelAssetPath: "/canvas/models/blaze-face-full-range-sparse.tflite" },
+                baseOptions: { modelAssetPath: `${assetBase}/canvas/models/blaze-face-full-range-sparse.tflite` },
                 runningMode: "IMAGE",
                 minDetectionConfidence: 0.25,
                 minSuppressionThreshold: 0.3,
@@ -57,10 +58,10 @@ function getDetector() {
 }
 
 self.onmessage = async (event: MessageEvent<DetectFaceRequest>) => {
-    const { id, image } = event.data;
+    const { id, image, assetBase } = event.data;
     const response: DetectFaceResponse = { id, imageWidth: image.width, imageHeight: image.height };
     try {
-        const detector = await getDetector();
+        const detector = await getDetector(assetBase);
         response.faces = detector.detect(image).detections.flatMap((detection, index) => {
             const box = detection.boundingBox;
             if (!box) return [];

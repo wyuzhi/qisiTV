@@ -6,6 +6,7 @@ import { AppWorkspaceShell } from "@/components/layout/app-top-nav";
 import { FirstCreationGuide } from "@/components/onboarding/first-creation-guide";
 import { WorkspaceOperationProgress } from "@/components/layout/workspace-operation-progress";
 import { cn } from "@/lib/utils";
+import { publishEmbeddedContext } from "@/lib/embedded-runtime";
 import { isSpatialWorkbenchPath } from "@/lib/workspace-routes";
 import { getWorkspaceAntThemeConfig } from "@/lib/app-theme";
 import { useWorkspaceButtonFeedback } from "@/hooks/use-workspace-button-feedback";
@@ -19,6 +20,10 @@ export default function UserLayout({ children }: { children: ReactNode }) {
     const spatialWorkbench = isSpatialWorkbenchPath(pathname);
     const productWorkspace = !/^\/canvas\/[^/]+(?:\/|$)/.test(pathname);
     useWorkspaceButtonFeedback(productWorkspace);
+
+    useLayoutEffect(() => {
+        publishEmbeddedContext({ route: pathname, selectedNodeIds: [] });
+    }, [pathname]);
 
     useEffect(() => {
         // A failed read keeps the plugins remembered in this browser.

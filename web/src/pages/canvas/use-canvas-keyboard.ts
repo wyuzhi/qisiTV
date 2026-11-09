@@ -141,7 +141,7 @@ export function useCanvasKeyboard({
                 return;
             }
             // 助手开合在输入框里也要能用（面板自己的输入框就是输入框）。
-            if (isModifierShortcut && !event.altKey && !event.shiftKey && key === "j") {
+            if (onToggleAssistant && isModifierShortcut && !event.altKey && !event.shiftKey && key === "j") {
                 if (target?.closest(".ant-modal-wrap, .ant-dropdown, .ant-popover")) return;
                 event.preventDefault();
                 event.stopPropagation();

@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { FullScreenLoader } from "@/components/ui/aceternity/full-screen-loader";
 import { WorkspaceErrorState } from "@/components/layout/workspace-state";
 import { appPathname } from "@/lib/app-routing";
+import { isEmbeddedRuntime } from "@/lib/embedded-runtime";
 import { preloadWorkspaceRoute } from "@/lib/workspace-route-modules";
 import { applyUserSession, localWorkspaceConfig } from "@/lib/user-session";
 import { getWorkspaceBootstrap, type WorkspaceBootstrapPayload } from "@/services/api/workspace";
+import { hydrateLocalCanvasProjectsFromBackend } from "@/services/local-workspace-repository";
 import { commitModelConfig, flushModelConfig, hydrateModelConfig } from "@/services/model-config-repository";
 import { normalizeConfigSnapshot, useConfigStore } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -25,8 +27,14 @@ export function WorkspaceBootstrapHydrator({ children }: { children: ReactNode }
         };
         void initializeWorkspaceState({
             loadWorkspace,
-            createLocalWorkspace: createLocalWorkspacePayload,
-            applySession: applyUserSession,
+            createLocalWorkspace: () => {
+                if (isEmbeddedRuntime()) throw new Error("无法读取当前嵌入工作区");
+                return createLocalWorkspacePayload();
+            },
+            applySession: async (payload) => {
+                await applyUserSession(payload);
+                if (isEmbeddedRuntime()) await hydrateLocalCanvasProjectsFromBackend();
+            },
             restoreModelConfig: hydrateLocalModelConfig,
         })
             .then(() => {

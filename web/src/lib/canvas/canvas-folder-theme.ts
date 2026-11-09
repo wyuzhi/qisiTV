@@ -1,4 +1,5 @@
 import type { CanvasFolderTheme } from "@/types/canvas";
+import { resolveEmbeddedAssetUrl } from "@/lib/embedded-runtime";
 
 export const CANVAS_FOLDER_THEME_OPTIONS: ReadonlyArray<{
     key: CanvasFolderTheme;
@@ -17,7 +18,7 @@ export function resolveCanvasFolderTheme(value?: string): CanvasFolderTheme {
 
 export function resolveCanvasFolderThemeCover(theme?: string, customCover?: string) {
     const custom = customCover?.trim();
-    if (custom) return custom;
+    if (custom) return resolveEmbeddedAssetUrl(custom);
     const resolved = resolveCanvasFolderTheme(theme);
-    return CANVAS_FOLDER_THEME_OPTIONS.find((item) => item.key === resolved)!.cover;
+    return resolveEmbeddedAssetUrl(CANVAS_FOLDER_THEME_OPTIONS.find((item) => item.key === resolved)!.cover);
 }

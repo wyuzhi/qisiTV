@@ -1,5 +1,6 @@
 import { create } from "zustand";
 
+import { resolveEmbeddedAssetUrl } from "@/lib/embedded-runtime";
 import type { PublicAppearance } from "@/services/api/appearance";
 import { applySkinTheme, DEFAULT_CLASSIC_SKIN, normalizeSkinDefinition } from "@/lib/skin-themes";
 
@@ -153,7 +154,7 @@ function setMeta(targetDocument: Document, attribute: "name" | "property", key: 
 }
 
 export function appearanceLogoURL(appearance: PublicAppearance, theme: "light" | "dark") {
-    return theme === "dark" ? appearance.darkLogoUrl || appearance.logoUrl : appearance.logoUrl || appearance.darkLogoUrl;
+    return resolveEmbeddedAssetUrl(theme === "dark" ? appearance.darkLogoUrl || appearance.logoUrl : appearance.logoUrl || appearance.darkLogoUrl);
 }
 
 export function brandStudioLabel(appearance: PublicAppearance) {

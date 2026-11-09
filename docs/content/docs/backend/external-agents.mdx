@@ -61,6 +61,8 @@ beeftv mcp serve --all-business-tools
 
 ## 4. 写操作 `operationId` 与提交生成防重复扣费
 
+配置视频节点前，先从 `model.catalog` 读取该模型的画幅比例、分辨率与时长能力，再调用 `canvas.node.configure`。`patch.size` 表示视频画幅比例，例如 `16:9`，`patch.vquality` 表示视频分辨率，例如 `480p`，`patch.seconds` 以字符串表示输出秒数。配置后用 `canvas.get` 读回实际保存的字段，再调用 `canvas.generation.propose` 冻结生成单。提交前核对生成单的 `targets.parameters` 与 `estimate`，发现参数或报价与计划有差异时，先修正节点并重新提出生成单。
+
 MCP 写调用与命令行生成提交都要求提供幂等键，按调用路径区分如下：
 
 - **工作区业务写操作（`canvas.*` 等 `/ops` 工具）**：调用任何修改工作区的业务操作工具时，参数中必须提供非空 `operationId`（作为请求体的 `opId` 发送给 `/ops/:op`）。服务端操作表按 `opId` 记录并去重：结果未知需要重试同一操作时，复用原来的 `operationId`（画布写入同时保持原 `expectedRevision`），服务端会直接回放首次执行结果（`replayed: true`）；若拿同一个 `operationId` 发送不同的请求内容，服务端会以 `operation_id_reused_with_different_payload` 拒绝。

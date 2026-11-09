@@ -52,10 +52,11 @@ export let apiBaseURL = import.meta.env.VITE_CANVAS_BACKEND_URL || "/api";
 // 没有超时会让启动水合一直停留在 loading，Playwright 和用户都看不到页面。
 export const apiClient = axios.create({ baseURL: apiBaseURL, withCredentials: true, timeout: 4_000 });
 
-export function configureApiRuntime(baseURL: string, launchToken: string, uiBootstrapToken?: string) {
+export function configureApiRuntime(baseURL: string, launchToken?: string, uiBootstrapToken?: string) {
     apiBaseURL = baseURL;
     apiClient.defaults.baseURL = baseURL;
-    apiClient.defaults.headers.common["X-Desktop-Token"] = launchToken;
+    if (launchToken) apiClient.defaults.headers.common["X-Desktop-Token"] = launchToken;
+    else delete apiClient.defaults.headers.common["X-Desktop-Token"];
     if (uiBootstrapToken) apiClient.defaults.headers.common["X-Beeftv-UI-Bootstrap"] = uiBootstrapToken;
     else delete apiClient.defaults.headers.common["X-Beeftv-UI-Bootstrap"];
 }

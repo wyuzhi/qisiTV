@@ -1,6 +1,6 @@
 import { localForageStorage } from "@/lib/localforage-storage";
 import { normalizeLocalAsset, normalizeLocalCanvasProject } from "@/lib/local-workspace-migration";
-import { scopedLocalStorage, setActiveUserScope } from "@/lib/user-scope";
+import { scopedLocalStorage, setWorkspaceStorageScope } from "@/lib/user-scope";
 import { CANVAS_HISTORY_STORE_KEY, useCanvasHistoryStore } from "@/stores/canvas/use-canvas-history-store";
 import { CANVAS_STORE_KEY, flushCanvasStorePersistence, useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { ASSET_STORE_KEY, flushAssetStorePersistence, useAssetStore } from "@/stores/use-asset-store";
@@ -32,7 +32,7 @@ async function hydrateLocalWorkspace(payload: WorkspaceBootstrapPayload) {
 
     try {
         await Promise.all([flushCanvasStorePersistence(), flushAssetStorePersistence()]);
-        setActiveUserScope(payload.workspace.id);
+        setWorkspaceStorageScope(payload.workspace.id);
 
         const [persistedCanvas, persistedCanvasHistory, persistedAssets, persistedPlugins] = await Promise.all([
             localForageStorage.getItem(CANVAS_STORE_KEY),

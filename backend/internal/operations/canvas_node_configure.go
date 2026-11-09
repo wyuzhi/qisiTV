@@ -12,19 +12,36 @@ import (
 )
 
 func registerCanvasNodeConfigureOps(r *Registry) {
-	properties := map[string]any{
-		"model":         map[string]any{"type": "string"},
-		"prompt":        map[string]any{"type": "string"},
-		"size":          map[string]any{"type": "string"},
-		"seconds":       map[string]any{"type": "string"},
-		"vquality":      map[string]any{"type": "string", "description": "分辨率档位，取自模型目录"},
-		"generateAudio": map[string]any{"type": "string", "enum": []string{"true", "false"}},
-		"audioVoice":    map[string]any{"type": "string"},
+	properties := map[string]any{}
+	for _, kind := range []string{"image", "video", "audio"} {
+		descriptor, _ := capability.BuiltinRegistry().Resolve(kind)
+		for name, field := range descriptor.PatchFields {
+			if name == "title" || name == "content" {
+				continue
+			}
+			property := map[string]any{"type": "string", "description": field.Description}
+			switch name {
+			case "count":
+				property["type"] = "integer"
+				property["description"] = "图片生成数量"
+			case "generateAudio", "watermark", "transparentBackground":
+				property["enum"] = []string{"true", "false"}
+			case "model":
+				property["description"] = "从 model.catalog 选择的完整模型键 channelId::modelKey"
+			case "size":
+				property["description"] = "图片尺寸或视频画幅比例。视频从 model.catalog 的 capabilityConfig.video.ratios 选择，例如 16:9。视频分辨率使用 vquality"
+			case "vquality":
+				property["description"] = "视频输出分辨率。从 model.catalog 的 capabilityConfig.video.resolutions 选择，例如 480p、768p、1080p"
+			case "seconds":
+				property["description"] = "视频输出时长，单位秒。从 model.catalog 的 capabilityConfig.video.duration 选择，以字符串传入"
+			}
+			properties[name] = property
+		}
 	}
 	params, _ := json.Marshal(map[string]any{"type": "object", "additionalProperties": false,
 		"properties": map[string]any{"canvasId": map[string]any{"type": "string"}, "nodeId": map[string]any{"type": "string"},
 			"kind": map[string]any{"type": "string", "enum": []string{"image", "video", "audio"}}, "expectedRevision": map[string]any{"type": "integer", "minimum": 1},
-			"patch": map[string]any{"type": "object", "minProperties": 1, "properties": properties}},
+			"patch": map[string]any{"type": "object", "minProperties": 1, "additionalProperties": false, "properties": properties}},
 		"required": []string{"canvasId", "nodeId", "kind", "expectedRevision", "patch"}})
 	r.Register(Op{ReplaySafe: true, AssistantCanvas: true, ID: "canvas.node.configure", Summary: "设置媒体节点的提示词草稿与生成参数；不启动生成", Scope: ScopeCanvas, Params: params, Handler: opCanvasNodeConfigure})
 }

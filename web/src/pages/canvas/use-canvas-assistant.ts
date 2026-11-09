@@ -2,6 +2,7 @@ import { Grid } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { createClientId } from "@/lib/client-id";
+import { isEmbeddedRuntime } from "@/lib/embedded-runtime";
 import { emitPluginEvent } from "@/lib/plugins/plugin-events";
 import { ApiError } from "@/services/api/request";
 import { scopedLocalStorage } from "@/lib/user-scope";
@@ -199,7 +200,8 @@ function readStoredProposals(): Set<string> {
  * 切画布不会把回复落到别的画布上。已结束的回合来自服务端历史，刷新页面不丢。
  */
 export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
-    const [open, setOpenState] = useState(() => scopedLocalStorage.getItem(OPEN_STORAGE_KEY) !== "0");
+    const embedded = isEmbeddedRuntime();
+    const [open, setOpenState] = useState(() => !embedded && scopedLocalStorage.getItem(OPEN_STORAGE_KEY) !== "0");
     const [width, setWidthState] = useState(() => clampAssistantWidth(Number(scopedLocalStorage.getItem(WIDTH_STORAGE_KEY)) || ASSISTANT_DEFAULT_WIDTH));
     const [status, setStatus] = useState<AgentHostStatus | null>(null);
     const [statusBusy, setStatusBusy] = useState(false);
@@ -246,9 +248,10 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
     }, []);
 
     const setOpen = useCallback((next: boolean) => {
+        if (embedded) return;
         setOpenState(next);
         scopedLocalStorage.setItem(OPEN_STORAGE_KEY, next ? "1" : "0");
-    }, []);
+    }, [embedded]);
 
     const setWidth = useCallback((next: number) => {
         const clamped = clampAssistantWidth(next);

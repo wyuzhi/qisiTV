@@ -12,6 +12,7 @@ mock.module("@fontsource-variable/inter", () => ({}));
 mock.module("@fontsource-variable/jetbrains-mono", () => ({}));
 mock.module("@/services/diagnostics/browser-environment", () => ({ browserCapabilities: () => ({ secureRandom: true, structuredClone: true, indexedDB: true }) }));
 mock.module("@/services/desktop-runtime", () => ({ bootstrapDesktopRuntime: async () => { calls.push("runtime"); } }));
+mock.module("@/services/api/workspace", () => ({ getWorkspaceBootstrap: async () => { calls.push("workspace"); return { workspace: { id: "embedded-workspace" } }; } }));
 mock.module("@/stores/canvas/use-canvas-store", () => ({
     useCanvasStore: { persist: { rehydrate: async () => { calls.push("cache-start"); markCacheStarted(); await cacheReady; calls.push("cache-end"); } } },
 }));
@@ -26,4 +27,17 @@ test("startup finishes asynchronous browser cache hydration before backend proje
     releaseCache();
     await ready;
     expect(calls).toEqual(["runtime", "cache-start", "cache-end", "backend", "appearance", "application"]);
+});
+
+test("embedded startup defers backend projection until the workspace session selects its scope", async () => {
+    const originalWindow = globalThis.window;
+    globalThis.window = { __BEEFTV_HARNESS__: { embedded: true } } as Window & typeof globalThis;
+    try {
+        calls.length = 0;
+        const { startApplication } = await import("../src/bootstrap-workspace");
+        await startApplication();
+        expect(calls).toEqual(["runtime", "workspace", "cache-start", "cache-end", "appearance"]);
+    } finally {
+        globalThis.window = originalWindow;
+    }
 });

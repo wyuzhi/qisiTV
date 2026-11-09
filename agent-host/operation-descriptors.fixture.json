@@ -211,7 +211,7 @@
   },
   {
     "id": "canvas.generation.propose",
-    "summary": "登记付费生成单提议（不直接扣费）",
+    "summary": "按节点已保存参数冻结生成单与报价。核对返回的 targets.parameters 和 estimate 后再提交，参数或报价不一致时停止",
     "readOnly": true,
     "scope": "canvas",
     "params": {
@@ -416,12 +416,39 @@
           "type": "string"
         },
         "patch": {
+          "additionalProperties": false,
           "minProperties": 1,
           "properties": {
-            "audioVoice": {
+            "audioFormat": {
+              "description": "草稿参数",
               "type": "string"
             },
+            "audioInstructions": {
+              "description": "草稿参数",
+              "type": "string"
+            },
+            "audioPitch": {
+              "description": "草稿参数",
+              "type": "string"
+            },
+            "audioSpeed": {
+              "description": "草稿参数",
+              "type": "string"
+            },
+            "audioVoice": {
+              "description": "草稿参数",
+              "type": "string"
+            },
+            "audioVolume": {
+              "description": "草稿参数",
+              "type": "string"
+            },
+            "count": {
+              "description": "图片生成数量",
+              "type": "integer"
+            },
             "generateAudio": {
+              "description": "草稿参数",
               "enum": [
                 "true",
                 "false"
@@ -429,19 +456,47 @@
               "type": "string"
             },
             "model": {
+              "description": "从 model.catalog 选择的完整模型键 channelId::modelKey",
               "type": "string"
             },
             "prompt": {
+              "description": "下次生成提示词草稿，不覆盖现有成品",
+              "type": "string"
+            },
+            "quality": {
+              "description": "草稿参数",
               "type": "string"
             },
             "seconds": {
+              "description": "视频输出时长，单位秒。从 model.catalog 的 capabilityConfig.video.duration 选择，以字符串传入",
               "type": "string"
             },
             "size": {
+              "description": "图片尺寸或视频画幅比例。视频从 model.catalog 的 capabilityConfig.video.ratios 选择，例如 16:9。视频分辨率使用 vquality",
+              "type": "string"
+            },
+            "transparentBackground": {
+              "description": "草稿参数",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "type": "string"
+            },
+            "videoEditOperation": {
+              "description": "草稿参数",
               "type": "string"
             },
             "vquality": {
-              "description": "分辨率档位，取自模型目录",
+              "description": "视频输出分辨率。从 model.catalog 的 capabilityConfig.video.resolutions 选择，例如 480p、768p、1080p",
+              "type": "string"
+            },
+            "watermark": {
+              "description": "草稿参数",
+              "enum": [
+                "true",
+                "false"
+              ],
               "type": "string"
             }
           },

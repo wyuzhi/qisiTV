@@ -408,7 +408,9 @@ export function resolveResourceUrl(storageKey?: string, fallback = "") {
     const id = resourceIdFromStorageKey(storageKey);
     // 资源引用本身已经包含稳定 ID；恢复/展示阶段不需要再查一遍元数据。
     // 需要 publicUrl、mime 或尺寸时必须显式调用 getResource，避免隐式 N+1。
-    return id ? resourceFileUrl(id) : fallback;
+    if (id) return resourceFileUrl(id);
+    const legacyId = ownedResourceIdFromMediaRef(undefined, fallback);
+    return legacyId ? `${resourceFileUrl(legacyId)}${fallback.match(/[?#].*$/u)?.[0] || ""}` : fallback;
 }
 
 // playbackVariantUrl 返回浏览器兼容播放副本 URL（H.265→H.264 转码结果）。

@@ -1,4 +1,5 @@
 import { configureApiRuntime } from "@/services/api/request";
+import { getEmbeddedHarnessConfig } from "@/lib/embedded-runtime";
 
 export type DesktopRuntimeConfig = {
     baseURL: string;
@@ -109,6 +110,11 @@ export function configureDesktopRuntime(config: DesktopRuntimeConfig) {
 }
 
 export async function bootstrapDesktopRuntime() {
+    const embedded = getEmbeddedHarnessConfig();
+    if (embedded) {
+        configureApiRuntime(embedded.apiBase);
+        return true;
+    }
     const binding = window.go?.main?.DesktopApp;
     let config: DesktopRuntimeConfig | undefined;
     if (binding) {

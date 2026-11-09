@@ -105,6 +105,10 @@ func openDesktopRuntime(ctx context.Context, dataDir string) (*bootstrap.Runtime
 		_ = runtime.Close(context.Background())
 		return nil, err
 	}
+	if err := startDesktopHarness(runtime, dataDir); err != nil {
+		_ = runtime.Close(context.Background())
+		return nil, err
+	}
 	return runtime, nil
 }
 
@@ -121,7 +125,7 @@ func (a *DesktopApp) stop(ctx context.Context) error {
 	desktopRuntimeRegistryMu.Unlock()
 	a.clearUpdater()
 	a.mu.Unlock()
-	return runtime.Close(ctx)
+	return closeDesktopRuntime(ctx, runtime)
 }
 
 func (a *DesktopApp) RuntimeConfig() DesktopRuntimeConfig {

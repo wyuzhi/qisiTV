@@ -73,6 +73,7 @@ function licenseNoticesPlugin(): Plugin {
 }
 
 export default defineConfig({
+    base: "./",
     plugins: [react(), pruneOptionalMediaPlugin(), licenseNoticesPlugin()],
     define: {
         __APP_VERSION__: JSON.stringify(appVersion),

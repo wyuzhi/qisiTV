@@ -199,17 +199,17 @@ func (a *DesktopApp) MigrateStorage(target string) (desktopstorage.Usage, error)
 		return restore(fmt.Errorf("新目录无法打开，继续使用原目录: %w", err))
 	}
 	if err = ctx.Err(); err != nil {
-		_ = next.Close(context.Background())
+		_ = closeDesktopRuntime(context.Background(), next)
 		return restore(err)
 	}
 	if a.storageRoot == "" {
 		if err = configureDesktopTemp(target); err != nil {
-			_ = next.Close(context.Background())
+			_ = closeDesktopRuntime(context.Background(), next)
 			return restore(err)
 		}
 	}
 	if err := desktopstorage.SaveMigration(root, target, source, files); err != nil {
-		_ = next.Close(context.Background())
+		_ = closeDesktopRuntime(context.Background(), next)
 		if a.storageRoot == "" {
 			_ = configureDesktopTemp(source)
 		}

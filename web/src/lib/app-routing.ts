@@ -1,4 +1,5 @@
 import { createBrowserRouter, createHashRouter, type RouteObject } from "react-router";
+import { getEmbeddedHarnessConfig } from "@/lib/embedded-runtime";
 
 export type AppRoutingLocation = {
     protocol?: string;
@@ -14,6 +15,7 @@ export type AppRoutingLocation = {
 export type AppRoutingRuntime = {
     location: AppRoutingLocation;
     desktopApp?: unknown;
+    basePath?: string;
     history?: { replaceState: (data: unknown, unused: string, url: string) => void };
 };
 
@@ -27,11 +29,13 @@ export function defaultAppRoutingRuntime(): AppRoutingRuntime {
     return {
         location: window.location,
         desktopApp: window.go?.main?.DesktopApp,
+        basePath: getEmbeddedHarnessConfig()?.basePath,
         history: window.history,
     };
 }
 
 export function usesNativeHashRouting(runtime: AppRoutingRuntime = defaultAppRoutingRuntime()): boolean {
+    if (runtime.basePath) return false;
     const protocol = String(runtime.location.protocol || "");
     if (protocol === "wails:") return true;
     const host = String(runtime.location.hostname || runtime.location.host || "");
@@ -49,7 +53,7 @@ export function createWorkspaceRouter(routes: RouteObject[], runtime: AppRouting
         if (rewritten) runtime.history?.replaceState(null, "", rewritten);
         return createHashRouter(routes);
     }
-    return createBrowserRouter(routes);
+    return createBrowserRouter(routes, { basename: runtime.basePath || "/" });
 }
 
 export function appPathname(runtime: AppRoutingRuntime = defaultAppRoutingRuntime()): string {
@@ -58,7 +62,7 @@ export function appPathname(runtime: AppRoutingRuntime = defaultAppRoutingRuntim
         if (hash && hash !== "#") return parseHashLocation(hash).pathname;
         return documentPathname(runtime.location.pathname);
     }
-    return documentPathname(runtime.location.pathname);
+    return documentPathname(withoutAppBasename(runtime.location.pathname, runtime));
 }
 
 export function appSearch(runtime: AppRoutingRuntime = defaultAppRoutingRuntime()): string {
@@ -73,7 +77,7 @@ export function appSearch(runtime: AppRoutingRuntime = defaultAppRoutingRuntime(
 export function appHref(pathWithSearch: string, runtime: AppRoutingRuntime = defaultAppRoutingRuntime()): string {
     const { pathname, search } = splitAppPath(pathWithSearch);
     if (!usesNativeHashRouting(runtime)) {
-        return new URL(`${pathname}${search}`, `${runtimeOrigin(runtime)}/`).toString();
+        return new URL(`${runtime.basePath || ""}${pathname}${search}`, `${runtimeOrigin(runtime)}/`).toString();
     }
     return nativeDocumentUrl(`${pathname}${search}`, runtime);
 }
@@ -87,7 +91,7 @@ export function appPathnameFrom(value: string | undefined, runtime: AppRoutingRu
         if (parsed.hash.startsWith("#/") || (usesNativeHashRouting(runtime) && parsed.hash && parsed.hash !== "#")) {
             return parseHashLocation(parsed.hash).pathname;
         }
-        return documentPathname(parsed.pathname);
+        return documentPathname(withoutAppBasename(parsed.pathname, runtime));
     } catch {
         return raw.split(/[?#]/u, 1)[0] || "/";
     }
@@ -126,6 +130,13 @@ function runtimeOrigin(runtime: AppRoutingRuntime): string {
 function documentPathname(pathname: string | undefined): string {
     const value = pathname || "/";
     return value === "/index.html" ? "/" : value;
+}
+
+function withoutAppBasename(pathname: string | undefined, runtime: AppRoutingRuntime): string {
+    const value = pathname || "/";
+    const basePath = runtime.basePath;
+    if (basePath && (value === basePath || value.startsWith(`${basePath}/`))) return value.slice(basePath.length) || "/";
+    return value;
 }
 
 function splitAppPath(pathWithSearch: string): { pathname: string; search: string } {

@@ -1,3 +1,5 @@
+import { isEmbeddedRuntime } from "@/lib/embedded-runtime";
+
 const ACTIVE_USER_SCOPE_KEY = "infinite-canvas:active-user-scope";
 const GUEST_SCOPE = "guest";
 
@@ -48,6 +50,13 @@ export function setActiveUserScope(userId?: string | null) {
         try { listener(); }
         catch (error) { console.warn("本地存储命名空间切换后重读失败", error); }
     }
+}
+
+export function setWorkspaceStorageScope(workspaceId: string) {
+    if (!workspaceId) throw new Error("本地工作区标识缺失");
+    // Earlier embedded builds could mix cached documents before bootstrap.
+    // Leave those keys intact and isolate new caches by durable workspace ID.
+    setActiveUserScope(isEmbeddedRuntime() ? `embedded-workspace-v1:${workspaceId}` : workspaceId);
 }
 
 export function scopedStorageKey(name: string, scope = getActiveUserScope()) {

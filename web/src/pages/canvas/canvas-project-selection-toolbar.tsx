@@ -21,7 +21,7 @@ type CanvasProjectSelectionToolbarProps = {
     onPackToFolder?: () => void;
     onBatchConnect: () => void;
     onMergeVideos: () => void;
-    onAskAssistant: () => void;
+    onAskAssistant?: () => void;
     onSaveWorkflow?: () => void;
 };
 

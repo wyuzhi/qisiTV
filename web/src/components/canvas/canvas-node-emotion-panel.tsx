@@ -10,6 +10,7 @@ import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.j
 import { SpotlightSurface } from "@/components/ui/aceternity/spotlight-surface";
 import { aceternityMotion } from "@/lib/aceternity-motion";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { resolveEmbeddedAssetUrl } from "@/lib/embedded-runtime";
 import {
     canvasEmotionPresets,
     emotionBlendshapes,
@@ -210,8 +211,8 @@ function EmotionHeadPreview({ preset }: { preset: CanvasEmotionPreset }) {
 
 function EmotionFaceModel({ preset }: { preset: CanvasEmotionPreset }) {
     const renderer = useThree((state) => state.gl);
-    const gltf = useLoader(GLTFLoader, "/canvas/models/facecap.glb", (loader) => {
-        loader.setKTX2Loader(new KTX2Loader().setTranscoderPath("/three/basis/").detectSupport(renderer));
+    const gltf = useLoader(GLTFLoader, resolveEmbeddedAssetUrl("/canvas/models/facecap.glb"), (loader) => {
+        loader.setKTX2Loader(new KTX2Loader().setTranscoderPath(resolveEmbeddedAssetUrl("/three/basis/")).detectSupport(renderer));
         loader.setMeshoptDecoder(MeshoptDecoder);
     });
     const invalidate = useThree((state) => state.invalidate);

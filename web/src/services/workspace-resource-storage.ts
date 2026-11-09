@@ -1,18 +1,19 @@
 import { isLocalRuntimeMode, isNativeDesktopRuntime } from "@/lib/runtime-mode";
+import { isEmbeddedRuntime } from "@/lib/embedded-runtime";
 import { resourceIdFromStorageKey } from "@/services/api/resources";
 
 /**
  * Resource storage policy for the two local runtimes:
- * - native desktop: Go resource service is the durable local store;
+ * - native desktop and Harness: Go resource service is the durable local store;
  * - browser local: IndexedDB is the durable local store.
  * Hosted mode always attempts the remote resource API first.
  */
 export function usesBrowserLocalResourceStore() {
-    return isLocalRuntimeMode() && !isNativeDesktopRuntime();
+    return isLocalRuntimeMode() && !isNativeDesktopRuntime() && !isEmbeddedRuntime();
 }
 
 export function usesNativeLocalResourceStore() {
-    return isLocalRuntimeMode() && isNativeDesktopRuntime();
+    return isLocalRuntimeMode() && (isNativeDesktopRuntime() || isEmbeddedRuntime());
 }
 
 const WORKSPACE_MEDIA_KINDS = new Set(["image", "video", "audio", "model"]);

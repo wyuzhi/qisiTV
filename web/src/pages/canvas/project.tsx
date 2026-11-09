@@ -7,6 +7,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
+import { isEmbeddedRuntime } from "@/lib/embedded-runtime";
+import { useCanvasSelectionContext } from "./use-canvas-selection-context";
 import { queryGenerationTask, type GenerationTask } from "@/services/api/task-center";
 import { generationErrorMessage } from "@/lib/generation-error";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -357,6 +359,7 @@ function InfiniteCanvasPage() {
     });
 
     const versions = useCanvasVersionHistory(projectId, restoreCanvasProjectVersion, currentProject);
+    const internalAssistantEnabled = !isEmbeddedRuntime();
     // 画布右侧只有一个栏位：助手和版本记录互斥，谁被打开另一个就让位。
     const assistant = useCanvasAssistant({
         canvasId: projectId,
@@ -400,10 +403,7 @@ function InfiniteCanvasPage() {
     const linkedProjectId = shortDramaEnabled ? currentProject?.projectId || "" : "";
     // 助手只接受属于当前画布的选中项：切画布那一帧仍可能残留旧 id，这里做硬约束，
     // 不让跨画布的 id 进入请求（后端会按画布校验并拒绝整个回合）。
-    const assistantSelectedNodeIds = useMemo(() => {
-        const available = new Set(nodes.map((node) => node.id));
-        return Array.from(selectedNodeIds).filter((id) => available.has(id));
-    }, [nodes, selectedNodeIds]);
+    const assistantSelectedNodeIds = useCanvasSelectionContext(projectId, currentProject?.title, nodes, selectedNodeIds, projectLoaded);
     // 助手的 @ 菜单覆盖整张画布，而不是只覆盖能当生成输入的资源节点。
     const assistantMentionReferences = useMemo(() => buildCanvasAgentMentionReferences(nodes), [nodes]);
     // 扩展节点（对比/图表/调色）要读自己的上游才能渲染，经 Context 下发；
@@ -526,7 +526,7 @@ function InfiniteCanvasPage() {
         generateImageFromTextNode,
     } = generation;
 
-    const assistantContinuation = useCanvasAssistantContinuation(assistant, !readOnly);
+    const assistantContinuation = useCanvasAssistantContinuation(assistant, !readOnly && internalAssistantEnabled);
     const { runAssistantProposal, assistantProposalFeedback, runningProposalIds } = useCanvasAssistantProposal({
         projectId,
         addedSkills,
@@ -1064,7 +1064,7 @@ function InfiniteCanvasPage() {
         pageUi,
         projectId,
         enabled: projectLoaded && !versions.preview && !directorNodeId,
-        onToggleAssistant: focusMode ? undefined : toggleAssistant,
+        onToggleAssistant: focusMode || !internalAssistantEnabled ? undefined : toggleAssistant,
         nodesRef,
         selectedNodeIdsRef,
         selectedConnectionId,
@@ -1300,7 +1300,7 @@ function InfiniteCanvasPage() {
     });
     const emptyCanvasState =
         emptyStateKind === "freeform" ? (
-            <CanvasFreeformEmptyState commands={freeformCreateCommands} onOpenAssistant={openAssistant} />
+            <CanvasFreeformEmptyState commands={freeformCreateCommands} onOpenAssistant={internalAssistantEnabled ? openAssistant : undefined} />
         ) : emptyStateKind === "linked" ? (
             <CanvasLinkedProjectEmptyState
                 projectName={linkedProjectQuery.data?.project.name || workspaceProject?.title || "项目画布"}
@@ -1379,7 +1379,7 @@ function InfiniteCanvasPage() {
                                 onOpenWorkflows={readOnly ? undefined : () => workflowsRef.current?.toggleLibrary()}
                                 workflowsOpen={workflowLibraryOpen}
                                 assistantOpen={rightPanel === "assistant"}
-                                onToggleAssistant={toggleAssistant}
+                                onToggleAssistant={internalAssistantEnabled ? toggleAssistant : undefined}
                                 // LibTV 的画布工作区使用“未命名工作区”作为首屏默认标题；
                                 // 项目库仍保留“未命名项目”，因此只在画布顶栏做显示层映射。
                                 title={workspaceProject?.title === "未命名项目" || !workspaceProject?.title ? "未命名工作区" : workspaceProject.title}
@@ -1758,7 +1758,7 @@ function InfiniteCanvasPage() {
                                 onCreateReferenceGroup={createReferenceGroup}
                                 onBatchConnect={() => beginBatchConnectionMode(Array.from(selectedNodeIds))}
                                 onMergeVideos={() => void mergeSelectedVideos()}
-                                onAskAssistant={openAssistant}
+                                onAskAssistant={internalAssistantEnabled ? openAssistant : undefined}
                                 onSaveWorkflow={readOnly ? undefined : () => workflowsRef.current?.saveSelection()}
                             />
                         ) : null}

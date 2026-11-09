@@ -1,4 +1,5 @@
 import { ImageSizePicker } from "@/components/image-size-picker";
+import { resolveEmbeddedAssetUrl } from "@/lib/embedded-runtime";
 import { imageResolutionUsesQuality } from "@/lib/image-size-presets";
 import { createPortal } from "react-dom";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode, type RefObject } from "react";
@@ -784,7 +785,7 @@ export function CreationEmptyBanner() {
     const brandName = useAppearanceStore((state) => state.appearance.brandName);
     return <div className="creation-empty-art" aria-hidden="true">
         {creationEmptyBannerFrames.map((frame, index) => <figure key={frame.caption} className={`creation-empty-art-frame ${index === 1 ? "is-main" : index === 0 ? "is-back" : "is-front"}`}>
-            <img src={frame.src} alt="" />
+            <img src={resolveEmbeddedAssetUrl(frame.src)} alt="" />
             <span>{frame.caption}</span>
         </figure>)}
         <span className="creation-empty-art-caption"><span>{brandName}</span>把每一帧，交给镜头导演</span>
@@ -893,11 +894,11 @@ export function CreationFeaturedWorks({ onStartPrompt }: { onStartPrompt: (mode:
         </div>}
         <div className={`creation-featured-layout ${isSkill ? "creation-skill-grid" : ""}`}>
                 {isSkill ? visibleSkills.map((item) => <button key={item.title} type="button" className="product-collection-card creation-featured-card creation-skill-card" onClick={() => onStartPrompt("video", item.prompt)}>
-                    <span className="creation-featured-media"><img src={item.image} alt="" loading="lazy" /><span className="creation-skill-type">视频</span><span className="creation-skill-hover-use"><Sparkles />使用</span></span>
+                    <span className="creation-featured-media"><img src={resolveEmbeddedAssetUrl(item.image)} alt="" loading="lazy" /><span className="creation-skill-type">视频</span><span className="creation-skill-hover-use"><Sparkles />使用</span></span>
                     <span className="creation-featured-copy"><strong>{item.title}</strong><span>{item.description}</span><em><Sparkles />{item.author} · {item.uses}</em>
                     </span>
                 </button>) : filtered.slice(0, limit).map((item, index) => <button key={item.title} type="button" className={`product-collection-card creation-featured-card ${index === 0 ? "is-featured-hero" : ""}`} onClick={() => onStartPrompt(item.mode, item.prompt)}>
-                    <span className="creation-featured-media"><img src={item.image} alt="" loading="lazy" /><span className="creation-inspiration-overlay"><ArrowUp />使用这个创意</span></span>
+                    <span className="creation-featured-media"><img src={resolveEmbeddedAssetUrl(item.image)} alt="" loading="lazy" /><span className="creation-inspiration-overlay"><ArrowUp />使用这个创意</span></span>
                     <span className="creation-featured-copy"><strong>{item.title}</strong><span>{item.description}</span><em><Sparkles />{item.source ? "开源改编 · CC0" : "原创提示词"} · {modeLabels[item.mode]}</em></span>
                 </button>)}
         </div>
