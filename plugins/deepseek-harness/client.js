@@ -106,9 +106,20 @@ window.__ModuleLoader__.load({
       return renderSlot('conversation.session', { view: 'chat' })
     }
 
-    function NativeConversation({ sessionId, useSession, renderFactorySlot, connectionId, workspaceContext, agentMode, onError, onStaleConnection }) {
+    function NativeConversation({ sessionId, useSession, renderFactorySlot, connectionId, workspaceContext, agentMode, onError, onStaleConnection, onAgentActivity }) {
       const session = useSession(value => value)
       const settling = session === undefined || session.openState === 'loading'
+      const running = Boolean(session?.running)
+
+      React.useEffect(() => {
+        if (!running || !onAgentActivity) return
+        onAgentActivity()
+        const timer = window.setInterval(onAgentActivity, 1200)
+        return () => {
+          window.clearInterval(timer)
+          onAgentActivity()
+        }
+      }, [running, onAgentActivity])
 
       React.useEffect(() => {
         if (sessionId === undefined || !connectionId) return
@@ -139,12 +150,12 @@ window.__ModuleLoader__.load({
           h('h1', null, '在 DSH 中打开 BeefTV'),
           h('p', null, loading ? '正在读取本机连接状态…' : '选择工作区，BeefTV Agent 会持续协助当前创作。'),
           h('div', { className: 'beeftv-harness-options' },
-            h('button', { type: 'button', className: 'beeftv-harness-option', disabled: busy || loading, onClick: () => connect('standalone') },
-              h('strong', null, busy === 'standalone' ? '正在创建连接…' : '使用独立工作区'),
-              h('span', null, '为 DSH 使用独立的 BeefTV 本地工作区。')),
             h('button', { type: 'button', className: 'beeftv-harness-option', disabled: busy || loading, onClick: () => connect('local') },
               h('strong', null, busy === 'local' ? '正在连接…' : '连接本机 BeefTV'),
-              h('span', null, '打开本机 BeefTV 已有的项目、素材与配置。')))))
+              h('span', null, '与本机 /Applications/BeefTV.app 彻底互通，共享同一套画布、素材、配置与版本更新。')),
+            h('button', { type: 'button', className: 'beeftv-harness-option', disabled: busy || loading, onClick: () => connect('standalone') },
+              h('strong', null, busy === 'standalone' ? '正在创建连接…' : '使用独立工作区'),
+              h('span', null, '为 DSH 使用独立的 BeefTV 本地工作区。')))))
     }
 
     function Workbench({ renderSlot, returnToConversation, createCreativeSession }) {
@@ -165,6 +176,8 @@ window.__ModuleLoader__.load({
       const frame = React.useRef(null)
       const clearanceProbe = React.useRef(null)
       const connecting = React.useRef(false)
+      const autoConnectAttempted = React.useRef(false)
+      const lastActivity = React.useRef({ connectionId: undefined, seq: 0 })
       const statusRequest = React.useRef(null)
       const refreshStatus = React.useRef(null)
       const requestStatusRefresh = React.useCallback(() => refreshStatus.current?.(), [])
@@ -237,7 +250,7 @@ window.__ModuleLoader__.load({
           try {
             const next = await api('status', undefined, AbortSignal.any([controller.signal, timeout.signal]))
             if (!mounted || controller.signal.aborted || connecting.current) return
-            setStatus(current => ['connected', 'mode', 'appURL', 'version', 'error', 'connectionId'].every(key => current?.[key] === next[key]) && current?.workspace?.id === next.workspace?.id && current?.build?.commit === next.build?.commit ? current : next)
+            setStatus(current => ['connected', 'mode', 'appURL', 'version', 'error', 'connectionId'].every(key => current?.[key] === next[key]) && current?.workspace?.id === next.workspace?.id && current?.build?.commit === next.build?.commit && current?.activity?.seq === next.activity?.seq ? current : next)
             setStatusError('')
           } catch (failure) {
             if (!mounted || controller.signal.aborted) return
@@ -276,6 +289,30 @@ window.__ModuleLoader__.load({
         window.addEventListener('message', receiveContext)
         return () => window.removeEventListener('message', receiveContext)
       }, [source, connectionId])
+
+      React.useEffect(() => {
+        if (!connectionId) {
+          lastActivity.current = { connectionId: undefined, seq: 0 }
+          return
+        }
+        const nextSeq = status?.activity?.seq || 0
+        if (lastActivity.current.connectionId !== connectionId) {
+          lastActivity.current = { connectionId, seq: nextSeq }
+          return
+        }
+        if (nextSeq <= lastActivity.current.seq) return
+        lastActivity.current = { connectionId, seq: nextSeq }
+        if (!source || !frame.current?.contentWindow) return
+        frame.current.contentWindow.postMessage({ type: 'beeftv:workspace-sync', activity: status.activity }, new URL(source).origin)
+      }, [connectionId, source, status?.activity])
+
+      React.useEffect(() => {
+        if (autoConnectAttempted.current || choosingWorkspace || busy || connecting.current) return
+        if (status?.connected === false && status.mode === null && !status.switching && !status.error && !statusError) {
+          autoConnectAttempted.current = true
+          void connect('local')
+        }
+      }, [status, choosingWorkspace, busy, statusError])
 
       async function connect(mode) {
         connecting.current = true
@@ -331,7 +368,7 @@ window.__ModuleLoader__.load({
               h('div', { className: 'beeftv-harness-modes', 'aria-label': '协作方向' }, modes.map(mode =>
                 h('button', { key: mode.id, type: 'button', title: mode.detail, 'aria-pressed': agentMode === mode.id, onClick: () => setAgentMode(mode.id) }, mode.label))),
               workspaceContext?.canvasTitle && h('div', { className: 'beeftv-harness-context', title: workspaceContext.canvasTitle }, workspaceContext.canvasTitle)),
-            h('div', { className: 'beeftv-harness-conversation' }, renderSlot(conversationSlot, { connectionId, workspaceContext, agentMode, onError: reportError, onStaleConnection: requestStatusRefresh })))))
+            h('div', { className: 'beeftv-harness-conversation' }, renderSlot(conversationSlot, { connectionId, workspaceContext, agentMode, onError: reportError, onStaleConnection: requestStatusRefresh, onAgentActivity: requestStatusRefresh })))))
     }
 
     function Icon({ size = 18 }) {

@@ -2,14 +2,14 @@ import { afterAll, beforeAll, expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { embeddedDocument } from './runtime.js'
 import { fileURLToPath } from 'node:url'
-import { chromium, type Browser, type Page } from '../../web/node_modules/playwright'
+import { chromium, type Browser, type Page } from 'playwright'
 
 let browser: Browser
 let server: ReturnType<typeof Bun.serve>
 
 beforeAll(async () => {
   const clientPath = fileURLToPath(new URL('./client.js', import.meta.url))
-  const webDir = fileURLToPath(new URL('../../web', import.meta.url))
+  const webDir = fileURLToPath(new URL('.', import.meta.url))
   const build = await Bun.build({
     entrypoints: ['beeftv-client-harness'],
     target: 'browser',
@@ -63,7 +63,7 @@ beforeAll(async () => {
     return new Response('<html><style>html,body,#root{height:100%;margin:0}body{--dsw-font-family:system-ui;--dsw-alias-bg-base:#fff;--dsw-alias-label-primary:#171717;--dsw-alias-label-secondary:#555;--dsw-alias-label-tertiary:#777;--dsw-alias-border-l2:#ddd}</style><div id="root"></div><script type="module" src="/client.js"></script></html>', { headers: { 'content-type': 'text/html' } })
   } })
   const executablePath = [process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH, process.env.CHROME_PATH, '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(path => path && existsSync(path))
-  browser = await chromium.launch({ executablePath, headless: true })
+  browser = await chromium.launch({ ...(executablePath ? { executablePath } : {}), headless: true })
 }, 30_000)
 
 afterAll(async () => { await browser?.close(); server?.stop(true) })
@@ -96,7 +96,8 @@ async function refresh(page: Page) {
 }
 
 test('BeefTV Agent keeps the native conversation and sends the selected collaboration mode', async () => {
-  const { page, contexts } = await openWorkbench()
+  const state = await openWorkbench()
+  const { page, contexts } = state
   expect(await page.getByRole('heading', { name: 'BeefTV Agent' }).count()).toBe(1)
   expect(await page.getByText('当前会话', { exact: true }).count()).toBe(0)
   expect(await page.getByRole('complementary', { name: 'BeefTV Agent' }).evaluate(element => element.getBoundingClientRect().width)).toBe(432)
@@ -107,6 +108,14 @@ test('BeefTV Agent keeps the native conversation and sends the selected collabor
   expect(contexts.every(report => report.connectionId === 'connection-local')).toBe(true)
   expect(await page.evaluate(() => (window as any).nativeOptions)).toEqual({ variant: 'embedded', hero: false, phase: 'active' })
   expect(await page.evaluate(() => (window as any).nativeMounts)).toBe(1)
+  await page.frameLocator('iframe').locator('body').evaluate(element => {
+    element.ownerDocument.defaultView!.addEventListener('message', event => {
+      if (event.data?.type === 'beeftv:workspace-sync') (element.ownerDocument.defaultView as any).lastWorkspaceSync = event.data.activity
+    })
+  })
+  state.setStatus({ ...state.status(), activity: { seq: 1, kind: 'canvas-created', canvasId: 'canvas-new' } } as any)
+  await refresh(page)
+  expect(await page.frameLocator('iframe').locator('body').evaluate(element => (element.ownerDocument.defaultView as any).lastWorkspaceSync)).toEqual({ seq: 1, kind: 'canvas-created', canvasId: 'canvas-new' })
   await page.close()
 })
 

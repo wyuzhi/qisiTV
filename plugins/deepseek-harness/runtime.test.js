@@ -82,11 +82,12 @@ test('Host rejects context from missing or previous connection IDs without chang
     fetch: async () => ({ ok: true, json: async () => ({ code: 0, data: { tools: [] } }) }),
     AbortSignal, mcpClient: {}, publicContext, requiresGenerationApproval,
   })
+  const listeners = new Map()
   apply({
     tools: { schemas: () => [] }, connection: { requestRejection: () => null },
     webServer: { getOrigin: () => 'http://127.0.0.1:1234', register: options => { handler = options.handler } },
     plugin: () => Object.assign(Promise.resolve(), { dispose: async () => {} }),
-    effect: callback => callback(), on() {},
+    effect: callback => callback(), on: (event, listener) => { listeners.set(event, listener) },
     systemPrompt: { section() {}, context: options => { prompt = options.text } },
   })
   async function call(method, path, body) {
@@ -131,6 +132,13 @@ test('Host rejects context from missing or previous connection IDs without chang
   assert.equal((await call('GET', `${appPath}/api/ops/clients`)).status, 403)
   assert.equal((await call('POST', `${appPath}/api/agent-clients`, {})).status, 403)
   assert.equal((await call('POST', `${appPath}/api/health/../agent-clients`, {})).status, 403)
+  const onToolResult = listeners.get('tools/result')
+  onToolResult({ name: 'mcp__beeftv__canvas_get_ab092b275e46', arguments: { canvasId: 'read-only' } }, { content: [{ type: 'text', text: '{"result":{"canvasId":"read-only"}}' }] })
+  assert.equal((await call('GET', '/beeftv/status')).body.activity, null)
+  onToolResult({ name: 'mcp__beeftv__canvas_create_ab092b275e46', arguments: { title: 'New' } }, { content: [{ type: 'text', text: '{"result":{"canvasId":"created-canvas"}}' }] })
+  assert.deepEqual((await call('GET', '/beeftv/status')).body.activity, { seq: 1, kind: 'canvas-created', canvasId: 'created-canvas' })
+  onToolResult({ name: 'mcp__beeftv__canvas_script_prepare_ab092b275e46', arguments: { canvasId: 'created-canvas' } }, { content: [{ type: 'text', text: '{"result":{"canvasId":"created-canvas","revision":2}}' }] })
+  assert.deepEqual((await call('GET', '/beeftv/status')).body.activity, { seq: 2, kind: 'canvas-updated', canvasId: 'created-canvas' })
 })
 
 test('workspace handshake verifies the live build, database readiness and workspace identity', async context => {

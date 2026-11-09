@@ -31,10 +31,12 @@ export function createModelConfigRepository(dependencies: ModelConfigRepositoryD
     };
 
     const hydrate = async () => {
+        const pendingDirty = state.dirty;
         publish({ status: "hydrating", error: "" });
         try {
             const result = await dependencies.read();
-            state = { status: "idle", revision: result.revision, dirty: Boolean(latestConfig), error: "" };
+            if (!pendingDirty) latestConfig = null;
+            state = { status: "idle", revision: result.revision, dirty: pendingDirty && Boolean(latestConfig), error: "" };
             return result;
         } catch (error) {
             publish({ status: "error", error: error instanceof Error ? error.message : "读取模型配置失败" });
@@ -43,7 +45,7 @@ export function createModelConfigRepository(dependencies: ModelConfigRepositoryD
             hydrated = true;
             resolveHydration?.();
             resolveHydration = null;
-            if (latestConfig) void scheduleDrain();
+            if (state.dirty && latestConfig) void scheduleDrain();
         }
     };
 

@@ -62,11 +62,20 @@ export function publicContext(value) {
 }
 
 export async function bundledPaths() {
-  const contents = join(root, 'runtime', 'Contents')
-  const executable = join(contents, 'MacOS', 'BeefTV')
-  const cli = join(contents, 'MacOS', 'cli', 'beeftv')
-  await Promise.all([access(executable, constants.X_OK), access(cli, constants.X_OK)])
-  return { executable, cli }
+  const localApp = {
+    executable: '/Applications/BeefTV.app/Contents/MacOS/BeefTV',
+    cli: '/Applications/BeefTV.app/Contents/MacOS/cli/beeftv',
+  }
+  try {
+    await Promise.all([access(localApp.executable, constants.X_OK), access(localApp.cli, constants.X_OK)])
+    return localApp
+  } catch {
+    const contents = join(root, 'runtime', 'Contents')
+    const executable = join(contents, 'MacOS', 'BeefTV')
+    const cli = join(contents, 'MacOS', 'cli', 'beeftv')
+    await Promise.all([access(executable, constants.X_OK), access(cli, constants.X_OK)])
+    return { executable, cli }
+  }
 }
 
 export async function startLocalRuntime() {

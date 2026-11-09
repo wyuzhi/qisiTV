@@ -60,7 +60,7 @@ export function WorkspaceBootstrapHydrator({ children }: { children: ReactNode }
     useEffect(() => {
         let ready = false;
         const unsubscribe = useConfigStore.subscribe((state) => {
-            if (!shouldSaveLocalModelConfig({ subscriptionReady: ready, modelConfigReady: modelConfigReady.current, channelCount: state.config.channels.length })) return;
+            if (applyingHydratedModelConfig || !shouldSaveLocalModelConfig({ subscriptionReady: ready, modelConfigReady: modelConfigReady.current, channelCount: state.config.channels.length })) return;
             void commitModelConfig(state.config);
         });
         const flush = () => { void flushModelConfig(); };
@@ -110,10 +110,17 @@ export function shouldSaveLocalModelConfig({ subscriptionReady, modelConfigReady
     return subscriptionReady && modelConfigReady && channelCount > 0;
 }
 
-async function hydrateLocalModelConfig() {
+let applyingHydratedModelConfig = false;
+
+export async function hydrateLocalModelConfig() {
     const result = await hydrateModelConfig();
     const normalizedConfig = localWorkspaceConfig(normalizeConfigSnapshot({ config: result.config }).config);
-    useConfigStore.getState().replaceConfig(normalizedConfig);
+    applyingHydratedModelConfig = true;
+    try {
+        useConfigStore.getState().replaceConfig(normalizedConfig);
+    } finally {
+        applyingHydratedModelConfig = false;
+    }
     if (shouldPersistHydratedModelConfig(result.health)) await commitModelConfig(normalizedConfig);
 }
 
