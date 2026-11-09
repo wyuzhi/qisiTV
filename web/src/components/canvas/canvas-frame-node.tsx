@@ -278,6 +278,7 @@ export const CanvasFrameNode = React.memo(function CanvasFrameNode({
                         active={active}
                         isDropTarget={isDropTarget}
                         readOnly={readOnly || linkedFolder}
+                        canOpen={!readOnly}
                         onToggleCollapsed={onToggleCollapsed}
                         onTitleChange={onTitleChange}
                         onStyleChange={onFolderStyleChange}

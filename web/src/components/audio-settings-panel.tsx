@@ -115,7 +115,7 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     <SettingGroup title="声音指令" color={theme.node.muted}>
                         <textarea
                             value={config.audioInstructions || ""}
-                            placeholder="例如：自然、温暖、适合旁白。"
+                            placeholder={profile.kind === "seed-audio" ? "例如：温柔甜美少女音，或连接参考图/参考音频自动匹配音色。" : "例如：自然、温暖、适合旁白。"}
                             className="thin-scrollbar h-20 w-full resize-none rounded-xl border bg-transparent px-3 py-2 text-sm leading-5 outline-none"
                             style={{ borderColor: theme.node.stroke, color: theme.node.text }}
                             onChange={(event) => onConfigChange("audioInstructions", event.target.value)}

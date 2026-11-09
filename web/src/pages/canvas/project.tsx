@@ -746,7 +746,7 @@ function InfiniteCanvasPage() {
         deleteConnection,
         deleteNodes,
         duplicateNode, duplicateNodesByDelta,
-        hasCopiedNodes,
+        hasCopiedNodes, packSelectedIntoFolder,
         pasteCopiedNodes,
         restoreCopiedNodesFromText,
         releaseCopiedNodesPastePriority,
@@ -1450,7 +1450,7 @@ function InfiniteCanvasPage() {
                                             viewport={viewport}
                                             nodes={lodNodes}
                                             nodeStackOrder={nodeStackOrder}
-                                            selectedNodeIds={selectedNodeIds}
+                                            selectedNodeIds={selectedNodeIds} pinnedNodeIds={lodPinnedNodeIds}
                                             theme={theme}
                                             onNodePointerDown={handleLodNodePointerDown}
                                             onNodeContextMenu={handleLodNodeContextMenu}
@@ -1753,7 +1753,7 @@ function InfiniteCanvasPage() {
                                 selectedVideoCount={selectedVideoNodes.length}
                                 mergingVideos={Boolean(mergeVideoProgress)}
                                 onAlign={alignSelectedNodes}
-                                onArrange={arrangeSelectedNodes}
+                                onArrange={arrangeSelectedNodes} onPackToFolder={packSelectedIntoFolder}
                                 onCreateStoryboard={createStoryboardGroup}
                                 onCreateReferenceGroup={createReferenceGroup}
                                 onBatchConnect={() => beginBatchConnectionMode(Array.from(selectedNodeIds))}
@@ -1894,7 +1894,7 @@ function InfiniteCanvasPage() {
                             onUploadToArkPrivateAsset={confirmUploadNodeImageToArkPrivateAsset}
                             onSetAssetCategory={(nodeId, assetCategory) => handleConfigNodeChange(nodeId, { assetCategory })}
                             onToggleFrame={(node) => handleFrameToggle(node.id)}
-                            onSpreadSelection={spreadSelectedNodes}
+                            onSpreadSelection={spreadSelectedNodes} onPackSelectionToFolder={packSelectedIntoFolder}
                             onCopySelection={copySelectedNodes}
                             onDeleteSelection={() => deleteNodes(selectedNodeIds)}
                         />

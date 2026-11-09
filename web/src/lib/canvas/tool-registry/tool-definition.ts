@@ -69,6 +69,7 @@ export type ToolbarHandlers = {
     onArrange: (mode: "row" | "column" | "grid" | "flow") => void;
     onCreateStoryboard: () => void;
     onCreateReferenceGroup: () => void;
+    onPackToFolder?: () => void;
     onBatchConnect: () => void;
     onMergeVideos: () => void;
     /** 只有画布页的多选工具栏提供这个入口；主工具栏不装配它。 */

@@ -122,6 +122,37 @@ describe("enterprise MiniMax speech settings", () => {
         expect(audioSettingsSummary(config)).toBe("青涩青年 · MP3 · 1x");
     });
 
+    test("Seed-Audio defaults to auto omni-reference mode and normalizes stale MiniMax/OpenAI voices to auto", () => {
+        expect(audioSpeechProfile("beeftv::seed-audio-1.0").kind).toBe("seed-audio");
+        expect(audioSpeechProfile("beeftv::seed-audio-1.0").defaultVoice).toBe("auto");
+        expect(audioSpeechProfile("beeftv::seed-audio-1.0").formats.map((item) => item.value)).toEqual(["mp3"]);
+        expect(audioSpeechProfile("beeftv::seed-audio-1.0").showInstructions).toBe(true);
+        expect(normalizeAudioVoiceValue("male-qn-qingse", "beeftv::seed-audio-1.0")).toBe("auto");
+        expect(normalizeAudioVoiceValue("alloy", "beeftv::seed-audio-1.0")).toBe("auto");
+        expect(normalizeAudioVoiceValue("zh_female_cancan_uranus_bigtts", "beeftv::seed-audio-1.0")).toBe("zh_female_cancan_uranus_bigtts");
+        expect(normalizeAudioVoiceValue("auto", "beeftv::minimax-speech-2.8-hd")).toBe("male-qn-qingse");
+        expect(normalizeAudioVoiceValue("zh_female_cancan_uranus_bigtts", "beeftv::minimax-speech-2.8-hd")).toBe("male-qn-qingse");
+        expect(audioSettingsSummary({ model: "beeftv::seed-audio-1.0", audioVoice: "male-qn-qingse", audioFormat: "mp3", audioSpeed: "1" })).toBe("自动（全能参考） · MP3 · 1x");
+        expect(
+            buildAudioSpeechRequest(
+                {
+                    model: "seed-audio-1.0",
+                    audioVoice: "auto",
+                    audioFormat: "mp3",
+                    audioSpeed: "1",
+                    audioInstructions: "温柔甜美少女音",
+                },
+                "你好世界",
+            ),
+        ).toEqual({
+            model: "seed-audio-1.0",
+            input: "你好世界",
+            response_format: "mp3",
+            speed: 1,
+            instructions: "温柔甜美少女音",
+        });
+    });
+
     test("prompt panel no longer overlays a fake Seed Audio summary", () => {
         const source = readFileSync(new URL("../src/components/canvas/canvas-node-prompt-panel.tsx", import.meta.url), "utf8");
         expect(source).not.toContain("中文 · 24k · wav");

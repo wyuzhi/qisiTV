@@ -580,15 +580,6 @@ export async function hydrateNodeGenerationContext(context: NodeGenerationContex
         usedResourceIds.add(item.resourceId);
         return true;
     }).map((item) => ({ ...item, sourceNodeId: context.characterReferences[index]!.nodeId })));
-    const characterImages = [...selected, ...supplements.slice(0, Math.max(0, remainingBudget - selected.length))].map((representation, index) => ({
-        id: `character-reference-${index + 1}`,
-        sourceNodeId: representation.sourceNodeId,
-        name: `character-reference-${index + 1}.png`,
-        type: "image/png",
-        dataUrl: "",
-        storageKey: resourceStorageKey(representation.resourceId),
-    } satisfies ReferenceImage));
-    referenceImages = [...referenceImages, ...characterImages];
     const characterBlocks = details.map((detail) => compileCharacterReferencePrompt(detail.asset.title, detail.character.definition));
     const resolvedCharacterVersions = details.map((detail) => ({ assetId: detail.asset.id, versionId: detail.character.versionId }));
     const resolvedCharacterVoices = details.flatMap((detail): ResolvedCharacterVoice[] => {
@@ -612,6 +603,25 @@ export async function hydrateNodeGenerationContext(context: NodeGenerationContex
             instructions: [language && `语言与口音：${language}`, voiceAge && `声音年龄感：${voiceAge}`, timbre && `音色气质：${timbre}`, deliveryInstructions].filter(Boolean).join("；"),
         }];
     });
+    const shouldIncludeCharacterImages =
+        mode !== "audio" ||
+        (!resolvedCharacterVoices.some((voice) => Boolean(voice.voiceKey)) &&
+            context.referenceImages.length === 0 &&
+            context.referenceAudios.length === 0);
+    if (shouldIncludeCharacterImages) {
+        const maxCharacterImages = mode === "audio" ? 1 : selected.length + Math.max(0, remainingBudget - selected.length);
+        const characterImages = [...selected, ...supplements.slice(0, Math.max(0, remainingBudget - selected.length))]
+            .slice(0, maxCharacterImages)
+            .map((representation, index) => ({
+                id: `character-reference-${index + 1}`,
+                sourceNodeId: representation.sourceNodeId,
+                name: `character-reference-${index + 1}.png`,
+                type: "image/png",
+                dataUrl: "",
+                storageKey: resourceStorageKey(representation.resourceId),
+            } satisfies ReferenceImage));
+        referenceImages = [...referenceImages, ...characterImages];
+    }
     const usedAudioResourceIds = new Set(context.referenceAudios.map((audio) => resourceIdFromStorageKey(audio.storageKey)).filter(Boolean));
     const voiceSamples: ResolvedCharacterVoice[] = [];
     // 视频模型接收声音样本；独立配音任务仍通过 voiceKey 选音色，不能把两种协议混用。

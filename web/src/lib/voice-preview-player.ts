@@ -44,6 +44,10 @@ const PRESET_VOICE_PROFILES: Record<string, PresetVoiceProfile> = {
     audiobook_male_2: { label: "男有声书 2", pitch: 0.9, rate: 0.95, frequencyHz: 370 },
     audiobook_female_1: { label: "女有声书 1", pitch: 1.12, rate: 0.94, frequencyHz: 500 },
     audiobook_female_2: { label: "女有声书 2", pitch: 1.18, rate: 0.97, frequencyHz: 530 },
+    auto: { label: "自动（全能参考）", pitch: 1.04, rate: 1.0, frequencyHz: 480 },
+    zh_female_cancan_uranus_bigtts: { label: "灿灿女声", pitch: 1.08, rate: 1.0, frequencyHz: 512 },
+    zh_female_vv_uranus_bigtts: { label: "薇薇少女", pitch: 1.2, rate: 1.04, frequencyHz: 560 },
+    zh_male_m191_uranus_bigtts: { label: "云舟男声", pitch: 0.88, rate: 0.98, frequencyHz: 360 },
 };
 
 function hashVoiceKey(value: string): number {

@@ -28,12 +28,19 @@ type MediaDiscovery struct {
 	Models               map[string]MediaModelCapability `json:"-"`
 }
 
+type MediaTaskControl struct {
+	Type     string `json:"type,omitempty"`
+	Required bool   `json:"required,omitempty"`
+	MaxChars int    `json:"max_chars,omitempty"`
+}
+
 type MediaCapability struct {
-	Operations     []string `json:"operations"`
-	Options        []string `json:"options"`
-	ReferenceKinds []string `json:"reference_kinds"`
-	MaxOutputs     int      `json:"max_outputs"`
-	PromptMaxChars int      `json:"prompt_max_chars,omitempty"`
+	Operations     []string                    `json:"operations"`
+	Options        []string                    `json:"options"`
+	ReferenceKinds []string                    `json:"reference_kinds"`
+	MaxOutputs     int                         `json:"max_outputs"`
+	PromptMaxChars int                         `json:"prompt_max_chars,omitempty"`
+	Controls       map[string]MediaTaskControl `json:"controls,omitempty"`
 }
 
 type MediaModelCapability struct {

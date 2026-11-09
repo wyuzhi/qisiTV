@@ -18,17 +18,18 @@ type CanvasProjectSelectionToolbarProps = {
     onArrange: (mode: "row" | "column" | "grid" | "flow") => void;
     onCreateStoryboard: () => void;
     onCreateReferenceGroup: () => void;
+    onPackToFolder?: () => void;
     onBatchConnect: () => void;
     onMergeVideos: () => void;
     onAskAssistant: () => void;
     onSaveWorkflow?: () => void;
 };
 
-export function CanvasProjectSelectionToolbar({ anchorRef, containerRef, count, selectedVideoCount, mergingVideos, onAlign, onArrange, onCreateStoryboard, onCreateReferenceGroup, onBatchConnect, onMergeVideos, onAskAssistant, onSaveWorkflow }: CanvasProjectSelectionToolbarProps) {
+export function CanvasProjectSelectionToolbar({ anchorRef, containerRef, count, selectedVideoCount, mergingVideos, onAlign, onArrange, onCreateStoryboard, onCreateReferenceGroup, onPackToFolder, onBatchConnect, onMergeVideos, onAskAssistant, onSaveWorkflow }: CanvasProjectSelectionToolbarProps) {
     const theme = canvasThemes[useCanvasThemeStore((state) => state.theme)];
 
     const handlers = {
-        onAlign, onArrange, onCreateStoryboard, onCreateReferenceGroup, onBatchConnect, onMergeVideos, onAskAssistant, onSaveWorkflow,
+        onAlign, onArrange, onCreateStoryboard, onCreateReferenceGroup, onPackToFolder, onBatchConnect, onMergeVideos, onAskAssistant, onSaveWorkflow,
     } as Partial<ToolbarHandlers> as ToolbarHandlers;
 
     const ctx: ToolContext = {

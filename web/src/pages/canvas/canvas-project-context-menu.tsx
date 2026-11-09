@@ -49,6 +49,7 @@ type CanvasProjectContextMenuProps = {
     onSetAssetCategory: (nodeId: string, category: CanvasAssetCategory) => void;
     onToggleFrame: (node: CanvasNodeData) => void;
     onSpreadSelection: () => void;
+    onPackSelectionToFolder?: () => void;
     onCopySelection: () => void;
     onDeleteSelection: () => void;
     onBatchDownloadSelection?: () => void;
@@ -145,6 +146,7 @@ export function CanvasProjectContextMenu({ menu, node, screenToCanvas, ...props 
                 if (node && isFrameNode(node)) props.onToggleFrame(node);
             }}
             onSpreadSelection={props.onSpreadSelection}
+            onPackSelectionToFolder={props.onPackSelectionToFolder}
             onCopySelection={props.onCopySelection}
             onDeleteSelection={props.onDeleteSelection}
             onBatchDownloadSelection={handleBatchDownloadSelection}

@@ -67,11 +67,10 @@ export function buildCanvasFrameDropIndex(nodes: CanvasNodeData[]): CanvasFrameD
 /** Finds a drop target using the drag preview offset without rebuilding all node positions. */
 export function findFrameDropTargetFromIndex(index: CanvasFrameDropIndex, draggedNodes: CanvasNodeData[], draggedNodeIds: Set<string>, offset: Position) {
     if (!draggedNodes.length) return null;
-    const centers = draggedNodes.map((node) => ({ x: node.position.x + offset.x + node.width / 2, y: node.position.y + offset.y + node.height / 2 }));
-    const left = Math.min(...centers.map((center) => center.x)) - 0.01;
-    const top = Math.min(...centers.map((center) => center.y)) - 0.01;
-    const right = Math.max(...centers.map((center) => center.x)) + 0.01;
-    const bottom = Math.max(...centers.map((center) => center.y)) + 0.01;
+    const left = Math.min(...draggedNodes.map((node) => node.position.x + offset.x)) - 0.01;
+    const top = Math.min(...draggedNodes.map((node) => node.position.y + offset.y)) - 0.01;
+    const right = Math.max(...draggedNodes.map((node) => node.position.x + offset.x + node.width)) + 0.01;
+    const bottom = Math.max(...draggedNodes.map((node) => node.position.y + offset.y + node.height)) + 0.01;
     return [...index.query({ left, top, right, bottom })]
         .reverse()
         .find((frame) => isValidFrameDropTarget(frame, draggedNodes, draggedNodeIds, offset))?.id || null;
@@ -82,15 +81,46 @@ function isValidFrameDropTarget(frame: CanvasNodeData, dragged: CanvasNodeData[]
     if (!isFrameNode(frame) || (frame.metadata?.frame?.collapsed && !isCanvasFolderNode(frame)) || draggedNodeIds.has(frame.id)) return false;
     const canContain = frame.metadata?.folder?.assetFolderId ? canLinkedFolderArchive : isCanvasFolderNode(frame) ? canFolderContain : canFrameContain;
     if (!dragged.every(canContain)) return false;
+    const collapsedFolder = isCanvasFolderNode(frame) && Boolean(frame.metadata?.frame?.collapsed);
     const left = frame.position.x;
-    const top = frame.position.y + (isCanvasFolderNode(frame) && frame.metadata?.frame?.collapsed ? 0 : FRAME_HEADER_HEIGHT);
+    const top = frame.position.y + (collapsedFolder ? 0 : FRAME_HEADER_HEIGHT);
     const right = frame.position.x + frame.width;
     const bottom = frame.position.y + frame.height;
+    if (collapsedFolder) {
+        return dragged.some((node) => {
+            const nodeLeft = node.position.x + offset.x;
+            const nodeTop = node.position.y + offset.y;
+            const nodeRight = nodeLeft + node.width;
+            const nodeBottom = nodeTop + node.height;
+            const centerX = nodeLeft + node.width / 2;
+            const centerY = nodeTop + node.height / 2;
+            const overlapX = Math.max(0, Math.min(right, nodeRight) - Math.max(left, nodeLeft));
+            const overlapY = Math.max(0, Math.min(bottom, nodeBottom) - Math.max(top, nodeTop));
+            return (centerX >= left && centerX <= right && centerY >= top && centerY <= bottom)
+                || (overlapX >= Math.min(node.width, frame.width) * 0.35 && overlapY >= Math.min(node.height, frame.height) * 0.35);
+        });
+    }
     return dragged.every((node) => {
         const centerX = node.position.x + offset.x + node.width / 2;
         const centerY = node.position.y + offset.y + node.height / 2;
         return centerX >= left && centerX <= right && centerY >= top && centerY <= bottom;
     });
+}
+
+export function packNodesIntoCollapsedFolder(
+    nodes: CanvasNodeData[],
+    selectedNodeIds: ReadonlySet<string>,
+    createFolderNode: (position: Position, count: number) => CanvasNodeData,
+) {
+    const candidates = nodes
+        .filter((node) => selectedNodeIds.has(node.id) && !node.metadata?.locked && canFolderContain(node))
+        .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x);
+    if (candidates.length < 2) return null;
+    const left = Math.min(...candidates.map((node) => node.position.x));
+    const top = Math.min(...candidates.map((node) => node.position.y));
+    const folder = createFolderNode({ x: left, y: top }, candidates.length);
+    const nextNodes = applyFrameDrop([...nodes, folder], new Set(candidates.map((node) => node.id)), folder.id);
+    return { nodes: nextNodes, folderId: folder.id, count: candidates.length };
 }
 
 export function applyFrameDrop(nodes: CanvasNodeData[], draggedNodeIds: Set<string>, frameId: string | null) {

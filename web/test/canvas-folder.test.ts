@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { applyFrameDrop, buildCanvasFrameDropIndex, canFolderContain, canLinkedFolderArchive, findFrameDropTarget, findFrameDropTargetFromIndex, isCanvasFolderNode } from "@/lib/canvas/canvas-frame";
+import { applyFrameDrop, buildCanvasFrameDropIndex, canFolderContain, canLinkedFolderArchive, findFrameDropTarget, findFrameDropTargetFromIndex, isCanvasFolderNode, packNodesIntoCollapsedFolder } from "@/lib/canvas/canvas-frame";
 import { resolveCanvasFolderTheme, resolveCanvasFolderThemeCover } from "@/lib/canvas/canvas-folder-theme";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
@@ -95,5 +95,38 @@ describe("canvas folders", () => {
         const child = { ...image("image"), parentId: "folder" };
         const next = applyFrameDrop([folder("folder"), child], new Set([child.id]), null);
         expect(next.find((node) => node.id === child.id)?.parentId).toBeUndefined();
+    });
+
+    test("多选分散节点拖向折叠文件夹时只要有任一节点命中即可归入", () => {
+        const target = folder("folder");
+        const hitNode = { ...image("hit"), position: { x: 140, y: 140 } };
+        const farNode = { ...image("far"), position: { x: 920, y: 680 } };
+        const nodes = [target, hitNode, farNode];
+        const draggedIds = new Set([hitNode.id, farNode.id]);
+        const index = buildCanvasFrameDropIndex(nodes);
+
+        expect(findFrameDropTarget(nodes, draggedIds)).toBe(target.id);
+        expect(findFrameDropTargetFromIndex(index, [hitNode, farNode], draggedIds, { x: 0, y: 0 })).toBe(target.id);
+    });
+
+    test("一键将选中节点收纳进新建折叠文件夹", () => {
+        const first = { ...image("first"), position: { x: 200, y: 180 } };
+        const second = { ...image("second"), position: { x: 640, y: 420 } };
+        const packed = packNodesIntoCollapsedFolder([first, second], new Set([first.id, second.id]), (position) => ({
+            ...folder("packed-folder"),
+            position,
+        }));
+
+        expect(packed).not.toBeNull();
+        expect(packed?.folderId).toBe("packed-folder");
+        expect(packed?.count).toBe(2);
+        const packedChildren = packed!.nodes.filter((node) => node.parentId === "packed-folder");
+        expect(packedChildren).toHaveLength(2);
+
+        const singleWithContainer = packNodesIntoCollapsedFolder([first, folder("existing-folder")], new Set([first.id, "existing-folder"]), (position) => ({
+            ...folder("packed-folder-2"),
+            position,
+        }));
+        expect(singleWithContainer).toBeNull();
     });
 });

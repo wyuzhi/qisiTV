@@ -16,6 +16,7 @@ type CanvasLodLayerProps = {
     nodes: CanvasNodeData[];
     nodeStackOrder: CanvasNodeStackOrder;
     selectedNodeIds: ReadonlySet<string>;
+    pinnedNodeIds?: ReadonlySet<string>;
     theme: CanvasTheme;
     onNodePointerDown: (event: PointerEvent, nodeId: string) => void;
     onNodeContextMenu: (event: MouseEvent, nodeId: string) => void;
@@ -134,6 +135,9 @@ export function CanvasLodLayer(props: CanvasLodLayerProps) {
                 context.lineWidth = 2 * pixel;
                 strokeBox(context, { x: x - 2 * pixel, y: y - 2 * pixel, width: w + 4 * pixel, height: h + 4 * pixel }, radius);
             }
+            if (!propsRef.current.pinnedNodeIds?.has(node.id) && !node.metadata?.reusableWorkflow) {
+                drawNodeTitle(context, node.title, box, k, selectedNodeIds.has(node.id) ? theme.node.text : theme.node.label);
+            }
         }
     }, []);
 
@@ -219,7 +223,7 @@ export function CanvasLodLayer(props: CanvasLodLayerProps) {
             ensureCanvasBackingSize(canvas);
         }
         draw();
-    }, [draw, ensureCanvasBackingSize, orderedNodes, props.active, props.selectedNodeIds, props.theme, resolveContainer]);
+    }, [draw, ensureCanvasBackingSize, orderedNodes, props.active, props.pinnedNodeIds, props.selectedNodeIds, props.theme, resolveContainer]);
 
     useLayoutEffect(() => {
         const container = resolveContainer();
@@ -416,4 +420,22 @@ function drawTextHint(context: CanvasRenderingContext2D, box: { x: number; y: nu
         context.fillRect(box.x + inset, y, width, lineHeight * 0.6);
     }
     context.globalAlpha = 1;
+}
+
+function drawNodeTitle(context: CanvasRenderingContext2D, title: string, box: { x: number; y: number; width: number; height: number }, k: number, color: string) {
+    const trimmed = title?.trim();
+    if (!trimmed || box.width * k < 28 || typeof context.fillText !== "function") return;
+    const fontPx = 11 / k;
+    const maxWidth = Math.max(box.width, Math.min(180 / k, box.width * 1.35));
+    context.save();
+    context.font = `500 ${fontPx}px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif`;
+    context.fillStyle = color;
+    context.textBaseline = "bottom";
+    let label = trimmed;
+    if (typeof context.measureText === "function" && context.measureText(label).width > maxWidth) {
+        const approxChars = Math.max(4, Math.floor((maxWidth / Math.max(1, context.measureText(label).width)) * label.length) - 1);
+        label = `${label.slice(0, approxChars)}…`;
+    }
+    context.fillText(label, box.x, box.y - 5 / k, maxWidth);
+    context.restore();
 }

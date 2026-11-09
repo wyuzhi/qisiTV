@@ -76,6 +76,13 @@ export function CanvasProjectAssetModal({
         [items],
     );
     const pickerItems = useMemo<AssetLibraryPickerItem[]>(() => [...localPickerItems, ...externalAssetSources.items], [externalAssetSources.items, localPickerItems]);
+    const pickerFolders = useMemo(
+        () => [
+            ...(detail?.assetFolders || []).map((folder) => ({ id: folder.id, parentId: folder.parentId, name: folder.name })),
+            ...externalAssetSources.folders,
+        ],
+        [detail?.assetFolders, externalAssetSources.folders],
+    );
 
     return (
         <AssetLibraryPickerModal
@@ -86,7 +93,7 @@ export function CanvasProjectAssetModal({
             categoryLabels={{ ...categoryLabels, ...externalAssetSources.categoryLabels }}
             initialCategory={initialCategory}
             initialFolderId={initialFolderId}
-            folders={externalAssetSources.folders}
+            folders={pickerFolders}
             folderActionSource="local"
             title="项目资产"
             confirmLabel={(count) => `引入已选资产${count ? `（${count}）` : ""}`}

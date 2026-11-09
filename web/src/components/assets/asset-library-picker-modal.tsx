@@ -215,7 +215,14 @@ export function AssetLibraryPickerModal({
     }, [localItems, mediaKind, mergedRemoteItems, pluginItems, useRemoteItems, source]);
     const activeSourceItems = useMemo(() => sourceItems.filter((item) => !item.archived), [sourceItems]);
     const mediaKindOptions = useMemo(() => (remoteKind ? [] : Array.from(new Set(mediaKinds))), [mediaKinds, remoteKind]);
-    const sourceFolders = source === "plugin" ? folders : [];
+    const sourceFolders = useMemo(
+        () =>
+            folders.filter((folder) => {
+                const isExternal = folder.id.startsWith("external:") || folder.id.startsWith("external-folder:");
+                return source === "plugin" ? isExternal : !isExternal;
+            }),
+        [folders, source],
+    );
     const showCategories = source === "local" || !sourceFolders.length;
     const normalCategories = useMemo(() => useRemoteItems ? Object.keys(categoryLabels).filter((value) => value !== "archived" && !value.startsWith("external:")) : ["all", ...Array.from(new Set(activeSourceItems.map((item) => item.category || "other"))).filter((value) => value !== "all")], [activeSourceItems, categoryLabels, useRemoteItems]);
 

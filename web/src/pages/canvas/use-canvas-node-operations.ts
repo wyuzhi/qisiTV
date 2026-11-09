@@ -4,7 +4,7 @@ import copyToClipboard from "copy-to-clipboard";
 import { nanoid } from "nanoid";
 
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
-import { FOLDER_COLLAPSED_HEIGHT, FOLDER_COLLAPSED_WIDTH, FRAME_HEADER_HEIGHT, getFrameChildIds, getFrameChildren, isFrameNode } from "@/lib/canvas/canvas-frame";
+import { FOLDER_COLLAPSED_HEIGHT, FOLDER_COLLAPSED_WIDTH, FRAME_HEADER_HEIGHT, getFrameChildIds, getFrameChildren, isFrameNode, packNodesIntoCollapsedFolder } from "@/lib/canvas/canvas-frame";
 import { alignCanvasNodes, layoutCanvasAuto, layoutCanvasFlow, layoutCanvasNodes, nextCanvasVersionLabel, spreadCanvasNodes, type CanvasAlignmentMode } from "@/lib/canvas/canvas-layout";
 import { applyCanvasConnectionPromptSync } from "@/lib/canvas/canvas-resource-references";
 import { createCanvasNode, isHiddenBatchChild, removeCanvasNodes } from "@/lib/canvas/canvas-project-domain";
@@ -219,6 +219,30 @@ export function useCanvasNodeOperations({
         selectNodes(new Set([folder.id]));
         message.success(linked ? "素材文件夹已放到画布，打开可浏览其中内容" : "文件夹已创建，可拖入任意非容器节点");
     }, [commitNodes, getCanvasCenter, message, nodesRef, selectNodes]);
+
+    const packSelectedIntoFolder = useCallback(() => {
+        const packed = packNodesIntoCollapsedFolder(nodesRef.current, selectedNodeIdsRef.current, (position, count) => {
+            const folder = createCanvasNode(CanvasNodeType.Frame, position, {
+                frame: {
+                    collapsed: true,
+                    expandedWidth: NODE_DEFAULT_SIZE[CanvasNodeType.Frame].width,
+                    expandedHeight: NODE_DEFAULT_SIZE[CanvasNodeType.Frame].height,
+                },
+                folder: { style: "glass", theme: "aurora", createdAt: new Date().toISOString() },
+            });
+            folder.title = `我的文件 · ${count} 项`;
+            folder.width = FOLDER_COLLAPSED_WIDTH;
+            folder.height = FOLDER_COLLAPSED_HEIGHT;
+            return folder;
+        });
+        if (!packed) {
+            message.warning("请至少选择两个非容器节点");
+            return;
+        }
+        commitNodes(packed.nodes);
+        selectNodes(new Set([packed.folderId]));
+        message.success(`已将 ${packed.count} 个节点收纳到文件夹`);
+    }, [commitNodes, message, nodesRef, selectNodes, selectedNodeIdsRef]);
 
     const arrangeSelectedNodes = useCallback((mode: "row" | "column" | "grid" | "flow") => {
         const selected = nodesRef.current.filter((node) => selectedNodeIdsRef.current.has(node.id) && !node.metadata?.locked && !isFrameNode(node));
@@ -714,6 +738,7 @@ export function useCanvasNodeOperations({
         duplicateNode,
         duplicateNodesByDelta,
         hasCopiedNodes,
+        packSelectedIntoFolder,
         pasteCopiedNodes,
         restoreCopiedNodesFromText,
         releaseCopiedNodesPastePriority,

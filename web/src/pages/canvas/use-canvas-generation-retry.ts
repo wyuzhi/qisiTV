@@ -202,7 +202,7 @@ export function useCanvasGenerationRetry({
                 if (useStoredSource) rawContext = null;
                 else {
                     const baseContext = buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, retryContextPrompt, assets, promptOnly, { preserveMediaBindings: retryMode === "video" });
-                    rawContext = await hydrateNodeGenerationContext(baseContext, projectId, domainProjectId, retryMode, retryMode === "video" && supportsVideoReferenceAudio(generationConfig), !promptOnly);
+                    rawContext = await hydrateNodeGenerationContext(baseContext, projectId, domainProjectId, retryMode, retryMode === "video" && supportsVideoReferenceAudio(generationConfig), !promptOnly && retryMode !== "audio");
                 }
             } catch (error) {
                 const failure = generationFailureMetadata(error, retryPromptSource, sourceNodeReferenceImages(generationSourceNode));
@@ -261,13 +261,16 @@ export function useCanvasGenerationRetry({
                     return;
                 }
                 const voice = context.resolvedCharacterVoices[0];
-                if (!voice) {
+                const hasReferenceMedia = context.referenceImages.length > 0 || context.referenceAudios.length > 0;
+                if (!voice && !hasReferenceMedia) {
                     const reason = "角色尚未绑定可用声音，无法重试角色配音任务";
                     message?.error?.(reason);
                     surfaceRetryFailure(node.id, reason, setNodes);
                     return;
                 }
-                generationConfig = { ...generationConfig, audioVoice: voice.voiceKey, audioInstructions: [voice.instructions, generationConfig.audioInstructions].filter(Boolean).join("；") };
+                if (voice) {
+                    generationConfig = { ...generationConfig, audioVoice: voice.voiceKey, audioInstructions: [voice.instructions, generationConfig.audioInstructions].filter(Boolean).join("；") };
+                }
             }
             const isEmotionRetry = Boolean(node.metadata?.emotionEdit);
             if (isEmotionRetry && resolveModelRequestConfig(generationConfig, generationConfig.model).interfaceType !== "openai-image") {
@@ -431,6 +434,8 @@ export function useCanvasGenerationRetry({
                         mode: "audio",
                         prompt,
                         config: generationConfig,
+                        referenceImages: context?.referenceImages || [],
+                        referenceAudios: context?.referenceAudios || [],
                         signal: controller.signal,
                         metadata: { retry: true, sourceNodeId: sourceNode.id, resolvedCharacterVersions: context?.resolvedCharacterVersions || [], resolvedCharacterVoiceKey: context?.resolvedCharacterVoices[0]?.voiceKey },
                     });

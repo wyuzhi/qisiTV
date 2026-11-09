@@ -359,7 +359,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 node={data}
                 scale={scale}
                 dimensionLabel={null}
-                active={isSelected || isFocusRelated}
+                active={isSelected || isFocusRelated || hovered || Boolean(lodPinned)}
                 editable={!readOnly && !data.metadata?.locked && Boolean(onTitleChange)}
                 editing={isEditingTitle}
                 draft={titleDraft}
@@ -738,7 +738,7 @@ function NodeExternalHeader({ node, scale, dimensionLabel, active, editable, edi
             data-editing={editing ? "true" : undefined}
             style={{
                 "--canvas-node-width": `${node.width}px`,
-                "--canvas-node-header-width": `min(240px, calc(var(--canvas-node-width) * var(--canvas-live-scale, ${scale})))`,
+                "--canvas-node-header-width": `min(240px, max(112px, calc(var(--canvas-node-width) * var(--canvas-live-scale, ${scale}))))`,
                 borderRadius: "var(--r-sm)",
                 color: active ? theme.node.text : theme.node.label,
                 transform: `scale(var(--canvas-live-inverse-scale, ${inverseScale}))`,

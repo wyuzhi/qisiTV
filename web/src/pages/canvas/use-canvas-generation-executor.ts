@@ -291,7 +291,7 @@ export function useCanvasGenerationExecutor({
                             generationConfig = buildConfirmedGenerationConfig(inputConfig, sourceNode, mode, requirements, options?.confirmedModelKey);
                             selectedModel = generationConfig.model;
                             const referenceLimits = modelGroupReferenceLimits(inputConfig, generationConfig.model, mode, requirements);
-                            rawGenerationContext = await waitForCanvasPreparation(() => hydrateNodeGenerationContext(baseContext, projectId, domainProjectId, mode, mode === "video" && Boolean(referenceLimits?.maxAudios), !promptOnly, referenceLimits), controller.signal);
+                            rawGenerationContext = await waitForCanvasPreparation(() => hydrateNodeGenerationContext(baseContext, projectId, domainProjectId, mode, mode === "video" && Boolean(referenceLimits?.maxAudios), !promptOnly && mode !== "audio", referenceLimits), controller.signal);
                             const hydratedRequirements = generationModelRequirements(mode, rawGenerationContext, sourceNode, generationConfig);
                             if (hydratedRequirements?.input) {
                                 const { imageCount = 0, videoCount = 0, audioCount = 0, characterCount = 0 } = hydratedRequirements.input;
@@ -382,11 +382,14 @@ export function useCanvasGenerationExecutor({
                                 return;
                             }
                             const voice = generationContext.resolvedCharacterVoices[0];
-                            if (!voice) {
+                            const hasReferenceMedia = generationContext.referenceImages.length > 0 || generationContext.referenceAudios.length > 0;
+                            if (!voice && !hasReferenceMedia) {
                                 reportError(new Error("角色尚未绑定可用声音，无法创建角色配音任务"));
                                 return;
                             }
-                            generationConfig = { ...generationConfig, audioVoice: voice.voiceKey, audioInstructions: [voice.instructions, generationConfig.audioInstructions].filter(Boolean).join("；") };
+                            if (voice) {
+                                generationConfig = { ...generationConfig, audioVoice: voice.voiceKey || generationConfig.audioVoice, audioInstructions: [voice.instructions, generationConfig.audioInstructions].filter(Boolean).join("；") };
+                            }
                         }
                         if (!effectivePrompt && (mode === "text" || mode === "audio")) {
                             reportError(new Error("请输入生成内容"));

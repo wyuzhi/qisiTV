@@ -17,7 +17,8 @@ func RunAudioTask(ctx context.Context, input Input) (map[string]interface{}, err
 	}
 	if resolved, ok := input.Metadata["resolvedCharacterVersions"].([]interface{}); ok && len(resolved) > 0 {
 		voice := metadataString(input.Metadata, "resolvedCharacterVoiceKey")
-		if voice == "" || strings.TrimSpace(input.Config.AudioVoice) != voice {
+		hasOmniReference := len(input.ReferenceImages) > 0 || len(input.ReferenceAudios) > 0 || strings.TrimSpace(input.Config.AudioInstructions) != ""
+		if (voice == "" && !hasOmniReference) || (voice != "" && strings.TrimSpace(input.Config.AudioVoice) != voice) {
 			return nil, RequestPreparationError{Cause: errors.New("角色配音缺少已解析的声音绑定")}
 		}
 	}
