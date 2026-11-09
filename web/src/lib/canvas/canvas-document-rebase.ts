@@ -263,14 +263,16 @@ function mergeCanvasNodeItem(
 ): CanvasNodeData {
     let remoteNormalized = remoteItem;
     const taskId = nodeTaskId(localItem);
+    const baseMeta = (baseItem?.metadata || {}) as Record<string, unknown>;
+    const localMeta = (localItem.metadata || {}) as Record<string, unknown>;
     if (
+        TASK_LIFECYCLE_NON_MEDIA_KEYS.some(key => !equal(baseMeta[key], localMeta[key])) &&
         !remoteHasBoundGenerationResult(remoteItem) &&
         !hasTrueGenerationContentConflict(baseItem, localItem, remoteItem) &&
         (localItem.metadata?.status === "loading" || localItem.metadata?.status === "error") &&
         (remoteItem.metadata?.status === "loading" || remoteItem.metadata?.status === "error")
     ) {
         const alignedMeta: Record<string, unknown> = { ...(remoteItem.metadata || {}) };
-        const localMeta = (localItem.metadata || {}) as Record<string, unknown>;
         const keysToAlign =
             taskId &&
             nodeTaskId(remoteItem) === taskId &&

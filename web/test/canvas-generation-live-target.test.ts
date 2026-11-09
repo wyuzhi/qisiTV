@@ -1,7 +1,26 @@
 import { expect, test } from "bun:test";
 import { rebaseCanvasGenerationTarget } from "@/lib/canvas/canvas-generation-live-target";
-import { clearInPlaceMediaOutputMetadata, resetGenerationTaskMetadata } from "@/lib/canvas/canvas-project-generation";
+import { clearInPlaceMediaOutputMetadata, generationTaskMetadata, resetGenerationTaskMetadata } from "@/lib/canvas/canvas-project-generation";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+
+test("regeneration discards the previous timer and queued state before binding the new task", () => {
+    const oldCreatedAt = "2026-01-01T00:00:00Z";
+    const newCreatedAt = "2026-01-01T00:10:00Z";
+    const pending = resetGenerationTaskMetadata({
+        prompt: "镜头首帧", taskId: "previous", taskStatus: "queued", taskProgress: 70,
+        taskCreatedAt: oldCreatedAt, taskStartedAt: oldCreatedAt, taskCompletedAt: oldCreatedAt,
+        taskDurationMs: 600_000, taskStage: "排队中", status: "error",
+    }, "loading");
+    expect(pending.status).toBe("loading");
+    expect(pending.prompt).toBe("镜头首帧");
+    for (const key of ["taskId", "taskStatus", "taskProgress", "taskStage", "taskCreatedAt", "taskStartedAt", "taskCompletedAt", "taskDurationMs"]) {
+        expect(Object.hasOwn(pending, key)).toBe(false);
+    }
+    const accepted = { ...pending, ...generationTaskMetadata({ id: "current", type: "canvas_image", status: "queued", attempts: 1, createdAt: newCreatedAt }) };
+    expect(accepted.taskId).toBe("current");
+    expect(accepted.taskCreatedAt).toBe(newCreatedAt);
+    expect(Date.parse("2026-01-01T00:10:02Z") - Date.parse(accepted.taskCreatedAt!)).toBe(2000);
+});
 
 const captured: CanvasNodeData = {
     id: "source", type: CanvasNodeType.Image, title: "镜头一", width: 320, height: 180, position: { x: 10, y: 20 },

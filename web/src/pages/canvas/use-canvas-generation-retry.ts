@@ -16,6 +16,7 @@ import {
     isGenerationCanceled,
     resolveMetadataReferences,
     resolveStoredReferenceImages,
+    resetGenerationTaskMetadata,
     runBackendCanvasGenerationTask,
     runCanvasGenerationTaskToConsumer,
     sourceNodeReferenceImages,
@@ -348,11 +349,19 @@ export function useCanvasGenerationRetry({
                     : node.metadata?.taskClientOperationId && !node.metadata?.taskId
                       ? { clientOperationId: node.metadata.taskClientOperationId }
                       : { clientOperationId: createClientId() };
-                setNodes((current) => current.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined, generationErrorCode: undefined, generationErrorSummary: undefined, generationProviderCode: undefined, taskFailureDiagnostics: undefined, taskOutcome: undefined, taskOutcomeSource: undefined, generationFailure: undefined, failedPromptFingerprint: undefined, failedInputFingerprint: undefined } } : item)));
                 const targetIds = nativeRetryTargets.length ? nativeRetryTargets.map((item) => item.id) : [node.id];
+                const targetIdSet = new Set(targetIds);
+                setNodes((current) => current.map((item) => targetIdSet.has(item.id) ? {
+                    ...item,
+                    metadata: {
+                        ...resetGenerationTaskMetadata(item.metadata, NODE_STATUS_LOADING),
+                        taskClientOperationId: retryContext.clientOperationId,
+                    },
+                } : item));
                 await runCanvasGenerationTaskToConsumer(
                     { ...input, ...(nativeRetryTargets.length ? { config: { ...input.config, count: String(nativeOutputs) }, metadata: { ...input.metadata, outputNodeIds: targetIds } } : {}), ...retryContext },
                     {
+                        onSubmission: (metadata) => setNodes((current) => current.map((item) => targetIdSet.has(item.id) ? { ...item, metadata: { ...item.metadata, ...metadata } } : item)),
                         bindTask: (task) => targetIds.forEach((id) => bindGenerationTask(id, task)),
                         consumeTask: async (task) => { for (const id of targetIds) await applyGenerationTaskResult(id, task); },
                         isCurrent,
