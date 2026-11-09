@@ -454,7 +454,7 @@ func GenerationTargets(domain Domain, doc map[string]any, ids []string) ([]Gener
 			return nil, InvalidArg("missing_prompt", "制作素材缺少提示词或旁白文本")
 		}
 		parameters := map[string]string{}
-		for _, key := range []string{"size", "quality", "count", "transparentBackground", "seconds", "vquality", "generateAudio", "watermark", "audioVoice", "audioFormat", "audioSpeed", "audioInstructions", "videoStartFrameNodeId", "videoEndFrameNodeId", "videoMiddleFrameNodeId"} {
+		for _, key := range []string{"size", "quality", "count", "transparentBackground", "seconds", "vquality", "generateAudio", "watermark", "audioVoice", "audioFormat", "audioSpeed", "audioPitch", "audioVolume", "audioInstructions", "videoStartFrameNodeId", "videoEndFrameNodeId", "videoMiddleFrameNodeId"} {
 			if v, ok := meta[key]; ok && v != nil {
 				parameters[key] = fmt.Sprint(v)
 			}

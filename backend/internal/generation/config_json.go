@@ -18,7 +18,7 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
-	for _, key := range []string{"transparentBackground", "videoGenerateAudio", "videoWatermark", "videoDraft", "videoReturnLastFrame", "videoArkPrivateAssetUpload", "count", "videoSeconds", "audioSpeed"} {
+	for _, key := range []string{"transparentBackground", "videoGenerateAudio", "videoWatermark", "videoDraft", "videoReturnLastFrame", "videoArkPrivateAssetUpload", "count", "videoSeconds", "audioSpeed", "audioPitch", "audioVolume"} {
 		raw, ok := fields[key]
 		raw = bytes.TrimSpace(raw)
 		if !ok || string(raw) == "null" {
@@ -36,7 +36,7 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 				return fmt.Errorf("invalid scalar type for %s", key)
 			}
 		case float64:
-			if key != "count" && key != "videoSeconds" && key != "audioSpeed" {
+			if key != "count" && key != "videoSeconds" && key != "audioSpeed" && key != "audioPitch" && key != "audioVolume" {
 				return fmt.Errorf("invalid scalar type for %s", key)
 			}
 		default:

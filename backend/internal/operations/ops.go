@@ -187,7 +187,7 @@ func opCanvasGenerationPropose(ctx *Context, params json.RawMessage) (any, error
 			prompt = dependencyString(meta, "prompt")
 		}
 		paramsMap := map[string]string{}
-		for _, key := range []string{"size", "quality", "count", "transparentBackground", "seconds", "vquality", "generateAudio", "watermark", "audioVoice", "audioFormat", "audioSpeed", "audioInstructions", "videoStartFrameNodeId", "videoEndFrameNodeId", "videoMiddleFrameNodeId"} {
+		for _, key := range []string{"size", "quality", "count", "transparentBackground", "seconds", "vquality", "generateAudio", "watermark", "audioVoice", "audioFormat", "audioSpeed", "audioPitch", "audioVolume", "audioInstructions", "videoStartFrameNodeId", "videoEndFrameNodeId", "videoMiddleFrameNodeId"} {
 			if v, ok := meta[key]; ok && v != nil && fmt.Sprint(v) != "" {
 				paramsMap[key] = fmt.Sprint(v)
 			}
