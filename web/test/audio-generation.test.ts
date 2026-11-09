@@ -127,12 +127,16 @@ describe("enterprise MiniMax speech settings", () => {
         expect(audioSpeechProfile("beeftv::seed-audio-1.0").defaultVoice).toBe("auto");
         expect(audioSpeechProfile("beeftv::seed-audio-1.0").formats.map((item) => item.value)).toEqual(["mp3"]);
         expect(audioSpeechProfile("beeftv::seed-audio-1.0").showInstructions).toBe(true);
+        expect(audioSpeechProfile("beeftv::seed-audio-1.0").showPitch).toBe(true);
+        expect(audioSpeechProfile("beeftv::seed-audio-1.0").showVolume).toBe(true);
         expect(normalizeAudioVoiceValue("male-qn-qingse", "beeftv::seed-audio-1.0")).toBe("auto");
         expect(normalizeAudioVoiceValue("alloy", "beeftv::seed-audio-1.0")).toBe("auto");
         expect(normalizeAudioVoiceValue("zh_female_cancan_uranus_bigtts", "beeftv::seed-audio-1.0")).toBe("zh_female_cancan_uranus_bigtts");
+        expect(normalizeAudioVoiceValue("zh_male_taocheng_uranus_bigtts", "beeftv::seed-audio-1.0")).toBe("zh_male_taocheng_uranus_bigtts");
         expect(normalizeAudioVoiceValue("auto", "beeftv::minimax-speech-2.8-hd")).toBe("male-qn-qingse");
         expect(normalizeAudioVoiceValue("zh_female_cancan_uranus_bigtts", "beeftv::minimax-speech-2.8-hd")).toBe("male-qn-qingse");
         expect(audioSettingsSummary({ model: "beeftv::seed-audio-1.0", audioVoice: "male-qn-qingse", audioFormat: "mp3", audioSpeed: "1" })).toBe("自动（全能参考） · MP3 · 1x");
+        expect(audioSettingsSummary({ model: "beeftv::seed-audio-1.0", audioVoice: "zh_male_taocheng_uranus_bigtts", audioFormat: "mp3", audioSpeed: "1.25", audioPitch: "2", audioVolume: "1.3" })).toBe("阳光小天 · MP3 · 1.25x · 音调+2 · 音量130%");
         expect(
             buildAudioSpeechRequest(
                 {
@@ -140,6 +144,8 @@ describe("enterprise MiniMax speech settings", () => {
                     audioVoice: "auto",
                     audioFormat: "mp3",
                     audioSpeed: "1",
+                    audioPitch: "2",
+                    audioVolume: "1.3",
                     audioInstructions: "温柔甜美少女音",
                 },
                 "你好世界",
@@ -149,6 +155,8 @@ describe("enterprise MiniMax speech settings", () => {
             input: "你好世界",
             response_format: "mp3",
             speed: 1,
+            pitch: 2,
+            volume: 1.3,
             instructions: "温柔甜美少女音",
         });
     });

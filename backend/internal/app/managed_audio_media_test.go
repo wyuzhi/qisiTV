@@ -224,12 +224,14 @@ func TestManagedAudioSupportsOmniReferencesAndOptionalVoice(t *testing.T) {
 					"media_capabilities": map[string]any{
 						"audio": beeftv.MediaCapability{
 							Operations:     []string{"synthesize"},
-							Options:        []string{"voice", "speed", "instructions"},
+							Options:        []string{"voice", "speed", "pitch", "volume", "instructions"},
 							ReferenceKinds: []string{"image", "audio"},
 							MaxOutputs:     1,
 							Controls: map[string]beeftv.MediaTaskControl{
 								"voice":        {Type: "string", Required: false},
 								"speed":        {Type: "number"},
+								"pitch":        {Type: "number"},
+								"volume":       {Type: "number"},
 								"instructions": {Type: "string"},
 							},
 						},
@@ -254,8 +256,8 @@ func TestManagedAudioSupportsOmniReferencesAndOptionalVoice(t *testing.T) {
 			if _, hasVoice := request.Options["voice"]; hasVoice {
 				t.Errorf("expected auto voice to be omitted, got options=%#v", request.Options)
 			}
-			if request.Options["instructions"] != "温柔甜美少女音" {
-				t.Errorf("unexpected instructions=%#v", request.Options["instructions"])
+			if request.Options["instructions"] != "温柔甜美少女音" || request.Options["pitch"] != float64(2) || request.Options["volume"] != 1.3 {
+				t.Errorf("unexpected options=%#v", request.Options)
 			}
 			if len(request.Input.References) != 1 || (request.Input.References[0].Kind != "image" && request.Input.References[0].Kind != "audio") {
 				t.Errorf("unexpected references=%+v", request.Input.References)
@@ -289,21 +291,12 @@ func TestManagedAudioSupportsOmniReferencesAndOptionalVoice(t *testing.T) {
 		{id: "audio-omni-audio", audios: []generation.Media{{URL: server.URL + "/ref.mp3"}}},
 	} {
 		input := generation.Input{
-			Mode:   "audio",
-			Prompt: "@图片1 你好世界",
+			Mode: "audio", Prompt: "@图片1 你好世界", ReferenceImages: tc.images, ReferenceAudios: tc.audios,
 			Config: generation.Config{
-				CredentialRef:        beeftv.CredentialRef,
-				MediaProtocolVersion: beeftv.MediaProtocolVersion,
-				APIKey:               "fixture",
-				BaseURL:              server.URL,
-				Model:                "seed-audio-1.0",
-				AudioVoice:           "auto",
-				AudioSpeed:           "1",
-				AudioFormat:          "mp3",
-				AudioInstructions:    "温柔甜美少女音",
+				CredentialRef: beeftv.CredentialRef, MediaProtocolVersion: beeftv.MediaProtocolVersion,
+				APIKey: "fixture", BaseURL: server.URL, Model: "seed-audio-1.0",
+				AudioVoice: "auto", AudioSpeed: "1", AudioPitch: "2", AudioVolume: "1.3", AudioFormat: "mp3", AudioInstructions: "温柔甜美少女音",
 			},
-			ReferenceImages: tc.images,
-			ReferenceAudios: tc.audios,
 		}
 		raw, _ := json.Marshal(input)
 		expires := time.Now().Add(time.Hour)
@@ -317,8 +310,7 @@ func TestManagedAudioSupportsOmniReferencesAndOptionalVoice(t *testing.T) {
 		ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: server.URL})
 		ctx = svc.bindGenerationRuntime(ctx, generation.CallMeta{UserID: task.UserID, TaskID: task.ID, TaskType: task.Type})
 		ctx = context.WithValue(withProviderSubmissionKey(ctx, attempt), imageTaskContext{}, task)
-		result, err := generation.Execute(ctx, input)
-		if err != nil || result["mode"] != "audio" {
+		if result, err := generation.Execute(ctx, input); err != nil || result["mode"] != "audio" {
 			t.Fatalf("case=%s result=%#v err=%v", tc.id, result, err)
 		}
 	}

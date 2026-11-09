@@ -240,7 +240,7 @@ func validateDraftValue(name, value string) error {
 			return invalid()
 		}
 		if (name == "seconds" && (number <= 0 || number > 600)) || (name == "audioSpeed" && (number < 0.25 || number > 4)) ||
-			(name == "audioPitch" && (number < -12 || number > 12)) || (name == "audioVolume" && (number < 0 || number > 1)) {
+			(name == "audioPitch" && (number < -12 || number > 12)) || (name == "audioVolume" && (number < 0 || number > 2)) {
 			return invalid()
 		}
 	case "audioFormat":

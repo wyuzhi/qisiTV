@@ -50,7 +50,12 @@ export const seedAudioVoiceOptions = [
     { value: "auto", label: "自动（全能参考）" },
     { value: "zh_female_cancan_uranus_bigtts", label: "灿灿女声" },
     { value: "zh_female_vv_uranus_bigtts", label: "薇薇少女" },
+    { value: "zh_female_xiaohe_uranus_bigtts", label: "温柔小荷" },
+    { value: "zh_female_shuangkuaisisi_uranus_bigtts", label: "爽快思思" },
     { value: "zh_male_m191_uranus_bigtts", label: "云舟男声" },
+    { value: "zh_male_taocheng_uranus_bigtts", label: "阳光小天" },
+    { value: "zh_male_dayi_uranus_bigtts", label: "磁性大壹" },
+    { value: "zh_male_liufei_uranus_bigtts", label: "儒雅刘飞" },
 ];
 
 export type AudioSpeechKind = "openai" | "minimax-speech" | "minimax-music" | "seed-audio";
@@ -102,8 +107,8 @@ export function audioSpeechProfile(model = ""): AudioSpeechProfile {
             speedOptions: ["0.5", "0.75", "1", "1.25", "1.5", "2"],
             showVoice: true,
             showSpeed: true,
-            showPitch: false,
-            showVolume: false,
+            showPitch: true,
+            showVolume: true,
             showInstructions: true,
         };
     }
@@ -197,9 +202,10 @@ export function normalizeAudioPitchValue(value: string) {
 }
 
 export function normalizeAudioVolumeValue(value: string) {
+    if (!String(value ?? "").trim()) return "1";
     const volume = Number(value);
-    if (!Number.isFinite(volume)) return "1";
-    return String(Math.max(0, Math.min(1, Number(volume.toFixed(2)))));
+    if (!Number.isFinite(volume) || volume <= 0) return "1";
+    return String(Math.max(0.5, Math.min(2, Number(volume.toFixed(2)))));
 }
 
 export function audioVoiceLabel(value: string, model?: string) {
@@ -257,8 +263,8 @@ export function audioSettingsSummary(config: { model?: string; audioVoice?: stri
     parts.push(audioFormatLabel(config.audioFormat || "", model));
     if (profile.kind === "minimax-music") parts.push("256 kbps");
     if (profile.showSpeed) parts.push(audioSpeedLabel(config.audioSpeed || "", model));
-    if (profile.showPitch) parts.push(`音调${audioPitchLabel(config.audioPitch || "")}`);
-    if (profile.showVolume) parts.push(`音量${audioVolumeLabel(config.audioVolume || "")}`);
+    if (profile.showPitch && Number(normalizeAudioPitchValue(config.audioPitch || "")) !== 0) parts.push(`音调${audioPitchLabel(config.audioPitch || "")}`);
+    if (profile.showVolume && Number(normalizeAudioVolumeValue(config.audioVolume || "")) !== 1) parts.push(`音量${audioVolumeLabel(config.audioVolume || "")}`);
     return parts.join(" · ");
 }
 
@@ -268,6 +274,8 @@ export function buildAudioSpeechRequest(
         audioVoice?: string;
         audioFormat?: string;
         audioSpeed?: string;
+        audioPitch?: string;
+        audioVolume?: string;
         audioInstructions?: string;
     },
     prompt: string,
@@ -282,6 +290,8 @@ export function buildAudioSpeechRequest(
     };
     if (profile.showVoice && settings.audioVoice && settings.audioVoice !== "auto") payload.voice = settings.audioVoice;
     if (profile.showSpeed) payload.speed = Number(settings.audioSpeed);
+    if (profile.showPitch && Number(settings.audioPitch) !== 0) payload.pitch = Number(settings.audioPitch);
+    if (profile.showVolume && Number(settings.audioVolume) !== 1) payload.volume = Number(settings.audioVolume);
     if (profile.kind === "minimax-music") {
         payload.metadata = { audio_setting: { sample_rate: 44100, bitrate: 256000, format: "mp3" } };
     }

@@ -106,7 +106,7 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 {profile.showVolume ? (
                     <SettingGroup title="音量" color={theme.node.muted}>
                         <div className="flex items-center gap-2">
-                            <input aria-label="音量" type="range" min={0} max={1} step={0.05} className="min-w-0 flex-1 accent-current" value={volume} onChange={(event) => onConfigChange("audioVolume", event.target.value)} onMouseDown={(event) => event.stopPropagation()} />
+                            <input aria-label="音量" type="range" min={0.5} max={2} step={0.05} className="min-w-0 flex-1 accent-current" value={volume} onChange={(event) => onConfigChange("audioVolume", event.target.value)} onMouseDown={(event) => event.stopPropagation()} />
                             <span className="w-12 text-right text-xs tabular-nums">{audioVolumeLabel(volume)}</span>
                         </div>
                     </SettingGroup>
@@ -115,7 +115,7 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     <SettingGroup title="声音指令" color={theme.node.muted}>
                         <textarea
                             value={config.audioInstructions || ""}
-                            placeholder={profile.kind === "seed-audio" ? "例如：温柔甜美少女音，或连接参考图/参考音频自动匹配音色。" : "例如：自然、温暖、适合旁白。"}
+                            placeholder={profile.kind === "seed-audio" ? "可选：补充音色或情绪（如：温柔甜美少女音）。也可直接在节点提示词中写多人对话、@音频1~3、音效与配乐，或连接参考图生音色。" : "例如：自然、温暖、适合旁白。"}
                             className="thin-scrollbar h-20 w-full resize-none rounded-xl border bg-transparent px-3 py-2 text-sm leading-5 outline-none"
                             style={{ borderColor: theme.node.stroke, color: theme.node.text }}
                             onChange={(event) => onConfigChange("audioInstructions", event.target.value)}

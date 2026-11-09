@@ -47,7 +47,12 @@ const PRESET_VOICE_PROFILES: Record<string, PresetVoiceProfile> = {
     auto: { label: "自动（全能参考）", pitch: 1.04, rate: 1.0, frequencyHz: 480 },
     zh_female_cancan_uranus_bigtts: { label: "灿灿女声", pitch: 1.08, rate: 1.0, frequencyHz: 512 },
     zh_female_vv_uranus_bigtts: { label: "薇薇少女", pitch: 1.2, rate: 1.04, frequencyHz: 560 },
+    zh_female_xiaohe_uranus_bigtts: { label: "温柔小荷", pitch: 1.12, rate: 0.98, frequencyHz: 528 },
+    zh_female_shuangkuaisisi_uranus_bigtts: { label: "爽快思思", pitch: 1.14, rate: 1.05, frequencyHz: 540 },
     zh_male_m191_uranus_bigtts: { label: "云舟男声", pitch: 0.88, rate: 0.98, frequencyHz: 360 },
+    zh_male_taocheng_uranus_bigtts: { label: "阳光小天", pitch: 0.96, rate: 1.03, frequencyHz: 392 },
+    zh_male_dayi_uranus_bigtts: { label: "磁性大壹", pitch: 0.82, rate: 0.95, frequencyHz: 340 },
+    zh_male_liufei_uranus_bigtts: { label: "儒雅刘飞", pitch: 0.9, rate: 0.97, frequencyHz: 372 },
 };
 
 function hashVoiceKey(value: string): number {

@@ -98,6 +98,24 @@ func runManagedAudioTask(ctx context.Context, client *beeftv.MediaClient, input 
 			}
 			request.Options["speed"] = speed
 		}
+		if input.Config.AudioPitch != "" && slices.Contains(capability.Options, "pitch") {
+			pitch, err := strconv.ParseFloat(input.Config.AudioPitch, 64)
+			if err != nil {
+				return nil, RequestPreparationError{Cause: errors.New("声调无效")}
+			}
+			if pitch != 0 {
+				request.Options["pitch"] = pitch
+			}
+		}
+		if input.Config.AudioVolume != "" && slices.Contains(capability.Options, "volume") {
+			volume, err := strconv.ParseFloat(input.Config.AudioVolume, 64)
+			if err != nil {
+				return nil, RequestPreparationError{Cause: errors.New("音量无效")}
+			}
+			if volume != 1 {
+				request.Options["volume"] = volume
+			}
+		}
 	case "generate":
 		for _, field := range []struct{ input, output string }{{"audioLyrics", "lyrics"}, {"audioIsInstrumental", "is_instrumental"}, {"audioLyricsOptimizer", "lyrics_optimizer"}} {
 			if value, exists := input.Metadata[field.input]; exists {
