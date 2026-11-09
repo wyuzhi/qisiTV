@@ -1,4 +1,5 @@
 import { createClientId } from "@/lib/client-id";
+import { isCanvasNodeClipboardMarker, readCanvasClipboard } from "@/lib/canvas/canvas-clipboard";
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type Dispatch, type DragEvent, type SetStateAction } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { App } from "antd";
@@ -686,76 +687,38 @@ export function useCanvasUpload({
     }, [createFileNode, nodesRef, setNodes]);
 
     const pasteSystemClipboard = useCallback(async (position?: Position, clipboardEvent?: ClipboardEvent | null) => {
+        const selected = nodesRef.current.filter((node) => selectedNodeIdsRef.current.has(node.id));
+        const replaceId = selected.length === 1 && selected[0].type === CanvasNodeType.Image ? selected[0].id : null;
+        const pastePosition = position || getCanvasCenter();
         const guard = createOwnedCanvasUploadGuard({
             lifetime,
             canvasId,
             getLiveCanvasId: () => canvasIdRef.current,
             mounted: () => mountedRef.current,
         });
-        const isNodeMarker = (value: string) => {
-            const trimmed = value.trim();
-            return trimmed.startsWith("open-ai-canvas-nodes:") || trimmed.startsWith("open-ai-canvas-nodes-json:");
-        };
         const pasteImageFile = async (file: File) => {
             if (!guard.alive()) return false;
-            const selected = nodesRef.current.filter((node) => selectedNodeIdsRef.current.has(node.id));
-            if (selected.length === 1 && selected[0].type === CanvasNodeType.Image) {
-                if (await replaceNodeMedia(selected[0].id, file) && guard.alive()) message.success("已用剪切板图片替换，可撤销恢复");
-                return true;
+            if (replaceId) {
+                const replaced = await replaceNodeMedia(replaceId, file);
+                if (replaced && guard.alive()) message.success("已用剪切板图片替换，可撤销恢复");
+                return replaced;
             }
-            const inserted = await createFileNode(file, position || getCanvasCenter());
+            const inserted = await createFileNode(file, pastePosition);
             if (inserted && guard.alive()) message.success("已从剪切板添加图片");
             return Boolean(inserted);
         };
 
-        // 1) paste 事件里的图片文件（截图/资源管理器复制）优先。
-        const filesFromEvent = clipboardEvent
-            ? Array.from(clipboardEvent.clipboardData?.items || [])
-                .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
-                .map((item) => item.getAsFile())
-                .filter((file): file is File => Boolean(file))
-            : [];
-        if (filesFromEvent.length) return pasteImageFile(filesFromEvent[0]);
-
-        // 2) 若系统文本是节点标记，说明最近一次复制是画布节点，不要再读旧图片。
-        const eventText = clipboardEvent?.clipboardData?.getData("text/plain") || "";
-        if (isNodeMarker(eventText)) return false;
-
-        // 3) 异步读系统剪贴板：有图片才导入；若文本是节点标记则让位给节点粘贴。
-        if (navigator.clipboard?.read) {
-            try {
-                const items = await navigator.clipboard.read();
-                if (!guard.alive()) return false;
-                const textItem = items.find((item) => item.types.includes("text/plain"));
-                if (textItem) {
-                    const textBlob = await textItem.getType("text/plain");
-                    const text = await textBlob.text();
-                    if (!guard.alive()) return false;
-                    if (isNodeMarker(text)) return false;
-                }
-                const imageItem = items.find((item) => item.types.some((type) => type.startsWith("image/")));
-                if (imageItem) {
-                    const imageType = imageItem.types.find((type) => type.startsWith("image/"));
-                    if (!imageType) return false;
-                    const blob = await imageItem.getType(imageType);
-                    if (!guard.alive()) return false;
-                    return pasteImageFile(new File([blob], "clipboard-image.png", { type: imageType }));
-                }
-            } catch {
-                // 无权限时继续文本分支。
-            }
-        }
-
         try {
-            const text = eventText || (navigator.clipboard?.readText ? await navigator.clipboard.readText() : "");
+            const content = await readCanvasClipboard(clipboardEvent, navigator.clipboard);
             if (!guard.alive()) return false;
-            if (isNodeMarker(text)) return false;
-            if (createTextNodeFromClipboard(text, position)) {
+            if (typeof content !== "string") return await pasteImageFile(content);
+            if (isCanvasNodeClipboardMarker(content)) return false;
+            if (createTextNodeFromClipboard(content, pastePosition)) {
                 message.success("已从剪切板添加文本");
                 return true;
             }
         } catch {
-            // ignore
+            if (guard.alive()) message.warning("粘贴未完成，请重试");
         }
         return false;
     }, [canvasId, createFileNode, createTextNodeFromClipboard, getCanvasCenter, lifetime, message, mountedRef, nodesRef, replaceNodeMedia, selectedNodeIdsRef]);
