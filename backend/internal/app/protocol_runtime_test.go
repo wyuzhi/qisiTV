@@ -404,15 +404,17 @@ func TestDeclarativeProtocolRuntimeExecutesCreatePollAndDownload(t *testing.T) {
 	}
 }
 
-func TestDeclarativeProtocolPollingPolicyOnlyChangesVideoBehavior(t *testing.T) {
+func TestDeclarativeProtocolPollingPolicyDelaysOnlyVideo(t *testing.T) {
 	video := declarativeProtocolPollPolicy("video")
 	if video.InitialDelay != defaultVideoPollInterval || !video.RetryTransient {
 		t.Fatalf("video polling policy = %#v, want delayed resilient polling", video)
 	}
 
+	// Images poll at once, but an accepted task keeps its receipt through
+	// transient failures instead of failing and inviting a paid resubmit.
 	image := declarativeProtocolPollPolicy("image")
-	if image.InitialDelay != 0 || image.Interval != 2500*time.Millisecond || image.RetryTransient {
-		t.Fatalf("image polling policy = %#v, want legacy immediate fail-fast polling", image)
+	if image.InitialDelay != 0 || image.Interval != 2500*time.Millisecond || !image.RetryTransient || image.MaxNotFoundMisses != 3 {
+		t.Fatalf("image polling policy = %#v, want immediate polling that survives transient failures", image)
 	}
 }
 
