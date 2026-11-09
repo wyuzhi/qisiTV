@@ -4,7 +4,19 @@ import {
   getTimelinePxPerMs,
   getTimelineVisualEndMs,
   getTimelineTrackWidth,
+  getTimelineClipTitle,
 } from "../src/lib/timeline/timeline-view";
+import type { TimelineClip } from "../src/types/timeline";
+import type { CanvasNodeData } from "../src/types/canvas";
+
+it("unnamed saved clips show their canvas shot instead of an empty-video or track label", () => {
+  const clip: TimelineClip = { id: "clip", nodeId: "shot", kind: "video", trackId: "video-1", startMs: 0, durationMs: 5000 };
+  const nodes = [{ id: "shot", title: "镜头 1 · 视频" }] as CanvasNodeData[];
+  expect(getTimelineClipTitle(clip, nodes)).toBe("镜头 1 · 视频");
+  expect(getTimelineClipTitle({ ...clip, title: "裁剪版本" }, nodes)).toBe("裁剪版本");
+  expect(getTimelineClipTitle({ ...clip, nodeId: "", directMedia: { id: "upload", kind: "video", title: "上传视频" } }, nodes)).toBe("上传视频");
+  expect(getTimelineClipTitle(clip, [])).toBe("视频片段");
+});
 
 describe("timeline-view pxPerMs 独立性", () => {
   it("pxPerMs 仅由缩放级别决定，不随时长漂移", () => {

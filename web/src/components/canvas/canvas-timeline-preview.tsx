@@ -2,10 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Pause, Play } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
-import { resolveMediaUrl } from "@/services/file-storage";
-import { cacheResourceObjectUrl } from "@/services/resource-blob-cache";
-import { resourceIdFromStorageKey } from "@/services/api/resources";
-import { formatTimelineTime } from "@/lib/timeline/timeline-view";
+import { acquireCanvasVideoSource } from "@/services/canvas-video-source";
+import { formatTimelineTime, getTimelineClipTitle } from "@/lib/timeline/timeline-view";
 import { rasterizeTimelineSubtitle } from "@/lib/timeline/timeline-subtitle-image";
 import { useTimelinePreviewPlayback } from "@/hooks/use-timeline-preview-playback";
 import type { TimelineClip, TimelineProject, TimelineTrack } from "@/types/timeline";
@@ -72,28 +70,25 @@ export function CanvasTimelinePreview({ clips, tracks = EMPTY_TRACKS, output, no
     }, [subtitleText, subtitleKey, outputWidth, outputHeight]);
     const currentSubtitleImage = subtitleText && subtitleImage?.key === subtitleKey ? subtitleImage : null;
 
-    // 解析当前片段视频地址（与字幕弹窗同一套缓存/回退策略）。
+    // 与画布共用当前源及兼容副本，避免剪辑单独读取旧的持久化视频缓存。
     useEffect(() => {
         if (!storageKey && !fallback) return;
-        let cancelled = false;
-        // 直连媒体片段（directMedia，不落画布）与画布节点走同一套缓存/回退解析策略
-        const applyUrl = (url: string) => {
-            if (!cancelled) setResolvedVideo({ key: videoSourceKey, url });
-        };
-        void (async () => {
-            if (resourceIdFromStorageKey(storageKey)) {
-                const cached = await cacheResourceObjectUrl(storageKey).catch(() => undefined);
-                if (cached) return cached;
-            }
-            return resolveMediaUrl(storageKey, fallback);
-        })().then(applyUrl).catch(() => {
-            if (!cancelled) {
+        const controller = new AbortController();
+        let release: (() => void) | undefined;
+        setPlaybackError("");
+        void acquireCanvasVideoSource(storageKey, fallback, controller.signal).then(source => {
+            if (controller.signal.aborted) { source.release(); return; }
+            release = source.release;
+            setResolvedVideo({ key: videoSourceKey, url: source.url });
+        }).catch(() => {
+            if (!controller.signal.aborted) {
                 setPlaybackError("视频预览未能载入，请重新打开剪辑后重试。");
                 onRequestPause();
             }
         });
         return () => {
-            cancelled = true;
+            controller.abort();
+            release?.();
         };
     }, [storageKey, fallback, videoSourceKey]);
     const { syncVideoMetadata } = useTimelinePreviewPlayback({ clips, tracks, nodes, playheadMs, playing, videoRef,
@@ -115,7 +110,7 @@ export function CanvasTimelinePreview({ clips, tracks = EMPTY_TRACKS, output, no
             <div className="relative grid shrink-0 place-items-center overflow-hidden rounded-lg bg-black" style={{ width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT }} data-canvas-no-zoom>
                 {videoUrl && activeVideoClip ? (
                     <div className="relative bg-black" data-timeline-output-frame style={previewDisplay}>
-                        <video ref={videoRef} className="block h-full w-full object-contain" src={videoUrl} playsInline preload="auto" onLoadedMetadata={syncVideoMetadata} />
+                        <video key={videoSourceKey} ref={videoRef} className="block h-full w-full object-contain" src={videoUrl} playsInline preload="auto" onLoadedMetadata={syncVideoMetadata} />
                         {currentSubtitleImage?.url ? <img className="pointer-events-none absolute inset-0 h-full w-full" src={currentSubtitleImage.url} alt="" data-timeline-subtitle-preview /> : null}
                     </div>
                 ) : (
@@ -139,7 +134,7 @@ export function CanvasTimelinePreview({ clips, tracks = EMPTY_TRACKS, output, no
             <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 text-xs">
                     <span className="truncate font-semibold" style={{ color: theme.accent.primary }}>
-                        {activeVideoClip?.title || "无视频片段"}
+                        {activeVideoClip ? getTimelineClipTitle(activeVideoClip, nodes) : "无视频片段"}
                     </span>
                     <span className="opacity-45 tabular-nums">{activeVideoClip ? `${formatTimelineTime(activeVideoClip.startMs)} ~ ${formatTimelineTime(activeVideoClip.startMs + activeVideoClip.durationMs)}` : ""}</span>
                 </div>

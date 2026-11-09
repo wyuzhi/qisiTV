@@ -1,6 +1,15 @@
 // 时间线视图数学（移植自 lingji-cut 的 timeline-view.ts，按本项目类型精简）。
 // 提供缩放钳制、像素/毫秒换算、标尺刻度与时间格式化。
 
+import type { CanvasNodeData } from "@/types/canvas";
+import type { TimelineClip } from "@/types/timeline";
+
+export function getTimelineClipTitle(clip: TimelineClip, nodes: CanvasNodeData[]): string {
+    return clip.title?.trim() || clip.directMedia?.title?.trim()
+        || nodes.find(node => node.id === clip.nodeId)?.title?.trim()
+        || ({ video: "视频片段", audio: "音频片段", image: "图片片段", subtitle: "字幕", text: "文字" }[clip.kind]);
+}
+
 export const BASE_TIMELINE_PX_PER_SECOND = 96;
 const MIN_TIMELINE_TRACK_WIDTH = 960;
 const MIN_TIMELINE_ZOOM = 0.02;

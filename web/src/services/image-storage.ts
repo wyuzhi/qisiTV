@@ -1,4 +1,5 @@
 import { nanoid } from "nanoid";
+import { LocalImageUnavailableError } from "@/lib/local-image-unavailable";
 import { readImageMeta } from "@/lib/image-utils";
 import { IMAGE_FILES_STORE_NAME, localForageInstance } from "@/lib/localforage-storage";
 import { isLocalRuntimeMode } from "@/lib/runtime-mode";
@@ -119,7 +120,10 @@ export async function resolveImageUrl(storageKey?: string, fallback = "", option
     const cached = objectUrls.get(storageKey);
     if (cached) return cached;
     const blob = await store.getItem<Blob>(storageKey);
-    if (!blob) return fallback;
+    if (!blob) {
+        if (!fallback || fallback.startsWith("blob:")) throw new LocalImageUnavailableError(fallback);
+        return fallback;
+    }
     const url = URL.createObjectURL(blob);
     objectUrls.set(storageKey, url);
     return url;
@@ -147,7 +151,15 @@ export async function imageToDataUrl(image: { url?: string; dataUrl?: string; st
     if (!url) return url;
     if (url.startsWith("data:image/")) return url;
     if (url.startsWith("data:")) return blobToDataUrl(await normalizeImageBlob(await (await fetch(url)).blob(), image.name));
-    const blob = await (await fetch(url, { credentials: isResourceUrl(url) ? "include" : "same-origin" })).blob();
+    let response: Response;
+    try {
+        response = await fetch(url, { credentials: isResourceUrl(url) ? "include" : "same-origin" });
+    } catch (error) {
+        if (url.startsWith("blob:")) throw new LocalImageUnavailableError(url);
+        throw error;
+    }
+    if (!response.ok) throw new Error(`图片读取失败（HTTP ${response.status}）`);
+    const blob = await response.blob();
     return blobToDataUrl(await normalizeImageBlob(blob, image.name || url));
 }
 

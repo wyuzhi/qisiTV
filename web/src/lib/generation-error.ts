@@ -1,4 +1,5 @@
 import { isLocalRuntimeMode } from "@/lib/runtime-mode";
+import { LocalImageUnavailableError } from "@/lib/local-image-unavailable";
 import {
     allowlistedString,
     CATEGORY_COPY,
@@ -155,6 +156,7 @@ export function explainGenerationError(error: unknown, context: GenerationFailur
 }
 
 export function generationErrorMessage(error: unknown) {
+    if (error instanceof LocalImageUnavailableError) return error.message;
     return explainGenerationError(error).message;
 }
 
