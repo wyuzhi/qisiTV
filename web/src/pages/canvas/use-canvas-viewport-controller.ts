@@ -6,7 +6,7 @@ import { applyCanvasLiveViewport } from "@/lib/canvas/canvas-live-viewport";
 import { canOpenCanvasNodePromptPanel, isCanvasMediaResultNode } from "@/lib/canvas/canvas-node-semantics";
 import { getCanvasNodesBounds, viewportAtScale, viewportForBounds, type CanvasViewportSize } from "@/lib/canvas/canvas-viewport";
 import { sameCanvasViewport } from "@/lib/canvas/canvas-leafer-viewport";
-import { canvasGestureRenderPadding, CANVAS_VIRTUALIZATION_REFRESH_INTERVAL_MS, shouldCommitCanvasScaleDuringGesture, shouldRefreshCanvasVirtualization, type CanvasVirtualizationViewport } from "@/lib/canvas/canvas-viewport-render-sync";
+import { canvasGestureRenderPadding, CANVAS_VIRTUALIZATION_REFRESH_INTERVAL_MS, shouldRefreshCanvasVirtualization, type CanvasVirtualizationViewport } from "@/lib/canvas/canvas-viewport-render-sync";
 import { CanvasNodeType, type CanvasNodeData, type Position, type ViewportTransform } from "@/types/canvas";
 import { useCanvasViewportTransition } from "./use-canvas-viewport-transition";
 import type { CanvasPageUiStoreHook } from "@/stores/canvas/use-canvas-page-ui-store";
@@ -47,16 +47,12 @@ export function useCanvasViewportController({
     const lastVirtualizationRefreshAtRef = useRef(0);
     // Gesture refreshes so far; each one widens the pre-rendered margin a step.
     const gestureRefreshCountRef = useRef(0);
-    // Scale last handed to React. The `viewport` prop lags behind while a
-    // commit renders, and comparing against it would commit again per event.
-    const committedScaleRef = useRef(viewport.k);
     const committedViewportStateRef = useRef(viewport);
     // The page also sets the camera directly (canvas load restores the saved
     // viewport). That ends any preview, so the culled window is this viewport
     // with the base margin again; measure the next gesture's coverage from it.
     useLayoutEffect(() => {
         committedViewportStateRef.current = viewport;
-        committedScaleRef.current = viewport.k;
         if (sameCanvasViewport(renderedViewportRef.current, viewport)) return;
         renderedViewportRef.current = viewport;
         gestureRefreshCountRef.current = 0;
@@ -84,14 +80,12 @@ export function useCanvasViewportController({
         if (Math.abs(current.x - next.x) < 1e-6 && Math.abs(current.y - next.y) < 1e-6 && Math.abs(current.k - next.k) < 1e-6) {
             viewportRef.current = current;
             renderedViewportRef.current = current;
-            committedScaleRef.current = current.k;
             applyCanvasLiveViewport(containerRef.current, current);
             setViewport((prev) => prev);
             return;
         }
         viewportRef.current = next;
         renderedViewportRef.current = next;
-        committedScaleRef.current = next.k;
         committedViewportStateRef.current = next;
         setViewport(next);
     }, [containerRef, setViewport, viewportRef]);
@@ -207,10 +201,8 @@ export function useCanvasViewportController({
         // Re-render the page only when the camera nears the edge of the cards
         // the last refresh pre-rendered; the world transform covers the rest.
         if (!enteringLod && now - lastVirtualizationRefreshAtRef.current < CANVAS_VIRTUALIZATION_REFRESH_INTERVAL_MS) return;
-        const previousCommittedScale = committedScaleRef.current;
-        const commitScale = next.k > previousCommittedScale && shouldCommitCanvasScaleDuringGesture(next, { ...next, k: previousCommittedScale });
         const renderedPaddingPx = canvasGestureRenderPadding(gestureRefreshCountRef.current);
-        if (!enteringLod && !commitScale && !shouldRefreshCanvasVirtualization(renderedViewportRef.current, next, lastVirtualizationRefreshAtRef.current, now, size, renderedPaddingPx)) return;
+        if (!enteringLod && !shouldRefreshCanvasVirtualization(renderedViewportRef.current, next, lastVirtualizationRefreshAtRef.current, now, size, renderedPaddingPx)) return;
         renderedViewportRef.current = next;
         lastVirtualizationRefreshAtRef.current = now;
         if (scaleChanged) gestureRefreshCountRef.current = 0;
@@ -219,20 +211,12 @@ export function useCanvasViewportController({
             ...next,
             renderPaddingPx: scaleChanged ? 0 : canvasGestureRenderPadding(gestureRefreshCountRef.current),
         };
-        // Keep culling current without relaying every camera tick as a new
-        // scale prop to all mounted nodes. The Leafer layer rebases its own
-        // raster; DOM cards re-commit scale only for large zoom-in stretches,
-        // and the final camera commits on gesture end.
-        // setViewport also ends the virtualization preview; restore it so the
-        // render model still knows a gesture is in flight (LOD mode and
-        // mounted cards then stay put until the gesture-end commit).
-        if (commitScale) {
-            committedScaleRef.current = next.k;
-            committedViewportStateRef.current = next;
-            setViewport(next);
-        }
+        // Keep the DOM's raster scale stable for the whole gesture. Rebasing
+        // it mid-zoom rerenders media cards and rebuilds their paint surfaces.
+        // Culling still admits newly visible cards; commitViewport restores
+        // sharp rendering once the gesture ends.
         setVirtualizationViewport(culledWindow);
-    }, [cancelViewportTransition, lodEnterScaleRef, setViewport, setVirtualizationViewport, size, viewportRef, virtualizationPausedRef]);
+    }, [cancelViewportTransition, lodEnterScaleRef, setVirtualizationViewport, size, viewportRef, virtualizationPausedRef]);
 
     return {
         fitCanvasContent,

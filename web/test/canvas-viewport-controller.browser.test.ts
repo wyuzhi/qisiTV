@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { chromium } from "playwright";
 import { existsSync } from "node:fs";
 
-test("视口裁剪持续更新，倍率重排分段提交且手势结束保持准确几何", async () => {
+test("视口裁剪持续更新，倍率仅在手势结束提交且保持准确几何", async () => {
     const build = await Bun.build({
         entrypoints: [import.meta.dir + "/fixtures/canvas-viewport-controller-harness.tsx"], target: "browser",
         define: { "process.env.NODE_ENV": '"production"', "import.meta.env": '{"DEV":false,"PROD":true,"MODE":"production"}' },
@@ -60,8 +60,10 @@ test("视口裁剪持续更新，倍率重排分段提交且手势结束保持�
         expect(result.midZoom.live.k).toBeGreaterThan(1.25);
         expect(result.midZoom.viewport.k).toBe(1);
         expect(result.midZoom.nodeRenders).toBe(result.initial.nodeRenders);
-        expect(result.rebase.viewport.k).toBeGreaterThan(1.6);
-        // 中途提交倍率后仍处于手势中，裁剪窗口继续跟随实时视口。
+        expect(result.rebase.live.k).toBeGreaterThan(1.6);
+        expect(result.rebase.viewport.k).toBe(1);
+        expect(result.rebase.nodeRenders).toBe(result.initial.nodeRenders);
+        // 大幅放大也不提交 DOM 倍率；裁剪与最终提交继续正常工作。
         expect(result.rebase.virtualizationViewport).not.toBeNull();
         expect(result.ended.virtualizationViewport).toBeNull();
         expect(result.ended.viewport).toEqual(result.ended.live);

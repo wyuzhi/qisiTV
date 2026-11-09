@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -6,6 +6,7 @@ import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { STORYBOARD_HEADER_HEIGHT, STORYBOARD_ROW_HEIGHT, storyboardTableHeight } from "@/lib/canvas/canvas-storyboard-layout";
 import { batchReferenceHandleY } from "@/lib/canvas/canvas-batch-table";
 import type { CanvasConnection, CanvasNodeData, ConnectionHandle, Position } from "@/types/canvas";
+import "./canvas-connections.css";
 
 export const ConnectionPath = React.memo(function ConnectionPath({
     connection,
@@ -27,23 +28,33 @@ export const ConnectionPath = React.memo(function ConnectionPath({
     active: boolean;
     visualMode?: "full" | "hover-only";
     hideVisual?: boolean;
-    onSelect: () => void;
-    onContextMenu?: (event: ReactMouseEvent<SVGPathElement>) => void;
+    onSelect: (connectionId: string) => void;
+    onContextMenu?: (event: ReactMouseEvent<SVGPathElement>, connectionId: string) => void;
 }) {
     const theme = canvasThemes[useActiveTheme()];
-    const [hovered, setHovered] = useState(false);
-    const { pathD, startX, startY, endX, endY } = canvasConnectionPath(connection, from, to, fromScrollTop, toScrollTop);
-    const emphasized = active || hovered;
+    const { pathD, startX, startY, endX, endY } = useMemo(
+        () => canvasConnectionPath(connection, from, to, fromScrollTop, toScrollTop),
+        [connection, from, to, fromScrollTop, toScrollTop],
+    );
+    const emphasized = active;
     // The public read-only LibTV overview uses hairline, low-contrast graph
     // wires at 10% zoom. Keep the fixture's wires visually faithful without
     // changing the normal interactive connection treatment.
     const denseReadonlyWire = connection.id.startsWith("libtv-dense-");
-    const showVisual = shouldShowConnectionVisual({ visualMode, hovered, hideVisual });
+    // Hover-only paths stay mounted so crossing a wire never rebuilds SVG
+    // filters/gradients or invalidates the live-drag geometry.
+    const showVisual = !hideVisual;
     const showEmphasis = !hideVisual && emphasized && !denseReadonlyWire;
     const gradientId = `canvas-flow-${connection.id.replace(/[^a-zA-Z0-9_-]/g, "")}`;
 
     return (
-        <g data-canvas-connection-id={connection.id}>
+        <g
+            data-canvas-connection-id={connection.id}
+            data-connection-visual-mode={visualMode}
+            data-connection-active={active ? "true" : undefined}
+            data-connection-dense={denseReadonlyWire ? "true" : undefined}
+            style={{ "--connection-hover-color": theme.accent.primary } as React.CSSProperties}
+        >
             {showEmphasis ? <defs>
                 <linearGradient id={gradientId} gradientUnits="userSpaceOnUse" x1={startX} y1={startY} x2={endX} y2={endY}>
                     <stop offset="0%" stopColor={theme.node.muted} stopOpacity={0.18} />
@@ -57,9 +68,7 @@ export const ConnectionPath = React.memo(function ConnectionPath({
                     <stop offset="100%" stopColor={theme.accent.primary} stopOpacity={0} />
                 </linearGradient>
             </defs> : null}
-            {/* 光晕：只在强调态渲染。blur 是 filter，成本随线条数量线性上升，
-                常态几十条线全开会明显掉帧，所以刻意只给悬停/选中的那一条。
-                垫在底衬描边之下，不改动常态可读性那几层。 */}
+            {/* 光晕仅用于主动选中；悬停只调整已有主线，避免长连线的大面积模糊重绘。 */}
             {showEmphasis ? <path
                 d={pathD}
                 stroke={theme.accent.primary}
@@ -79,16 +88,14 @@ export const ConnectionPath = React.memo(function ConnectionPath({
                 vectorEffect="non-scaling-stroke"
                 fill="none"
                 style={{ cursor: "pointer", pointerEvents: "stroke" }}
-                onMouseEnter={() => setHovered(true)}
-                onMouseLeave={() => setHovered(false)}
                 onClick={(event) => {
                     event.stopPropagation();
-                    onSelect();
+                    onSelect(connection.id);
                 }}
                 onContextMenu={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    onContextMenu?.(event);
+                    onContextMenu?.(event, connection.id);
                 }}
             />
             {showVisual ? <path
@@ -149,7 +156,7 @@ export const ConnectionPath = React.memo(function ConnectionPath({
             /> : null}
         </g>
     );
-}, (previous, next) => previous.connection === next.connection && previous.from === next.from && previous.to === next.to && previous.active === next.active && previous.visualMode === next.visualMode && previous.hideVisual === next.hideVisual && previous.fromScrollTop === next.fromScrollTop && previous.toScrollTop === next.toScrollTop);
+});
 
 export function canvasConnectionPath(connection: CanvasConnection, from: CanvasNodeData, to: CanvasNodeData, fromScrollTop = 0, toScrollTop = 0) {
     if (connection.pathD) return { pathD: connection.pathD, startX: from.position.x + from.width, startY: from.position.y + from.height / 2, endX: to.position.x, endY: to.position.y + to.height / 2 };
@@ -160,10 +167,6 @@ export function canvasConnectionPath(connection: CanvasConnection, from: CanvasN
     const dx = Math.abs(endX - startX);
     const curvature = Math.max(dx * 0.5, 50);
     return { pathD: `M ${startX} ${startY} C ${startX + curvature} ${startY}, ${endX - curvature} ${endY}, ${endX} ${endY}`, startX, startY, endX, endY };
-}
-
-export function shouldShowConnectionVisual({ visualMode, hovered, hideVisual }: { visualMode: "full" | "hover-only"; hovered: boolean; hideVisual: boolean }) {
-    return !hideVisual && (visualMode === "full" || hovered);
 }
 
 export function activeConnectionPath(node: CanvasNodeData | undefined, handle: ConnectionHandle, mouseWorld: Position, target?: CanvasNodeData, nodeScrollTop = 0) {

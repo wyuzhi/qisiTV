@@ -49,16 +49,3 @@ export function shouldRefreshCanvasVirtualization(rendered: ViewportTransform, n
     const liveBottom = (size.height - next.y) / next.k;
     return liveLeft < coveredLeft || liveTop < coveredTop || liveRight > coveredRight || liveBottom > coveredBottom;
 }
-
-const GESTURE_DOM_REBASE_MIN_RATIO = 0.625;
-const GESTURE_DOM_REBASE_MAX_RATIO = 1.6;
-
-/**
- * Mid-gesture, DOM cards are scaled by the world-layer transform alone. Their
- * React scale props are re-committed only once that stretch is large enough to
- * soften text and controls visibly; the final camera commits on gesture end.
- */
-export function shouldCommitCanvasScaleDuringGesture(next: ViewportTransform, committed: ViewportTransform) {
-    const ratio = next.k / Math.max(committed.k, 0.05);
-    return ratio < GESTURE_DOM_REBASE_MIN_RATIO || ratio > GESTURE_DOM_REBASE_MAX_RATIO;
-}

@@ -1,0 +1,8 @@
+/* Freeze decorative motion while the camera moves, retaining animation phase. */
+[data-canvas-viewport-interacting="true"] [data-canvas-generation-progress] :is(.animate-spin, .canvas-node-progress-indeterminate) {
+    animation-play-state: paused;
+}
+
+[data-canvas-viewport-interacting="true"] [data-canvas-generation-progress] [role="progressbar"] > div {
+    transition: none;
+}

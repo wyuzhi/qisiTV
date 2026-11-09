@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { describe, expect, test } from "bun:test";
 
 import { canvasNodeRenderPadding, resolveActiveCanvasMediaNodeId } from "../src/lib/canvas/canvas-performance-mode";
-import { canvasGestureRenderPadding, shouldCommitCanvasScaleDuringGesture, shouldRefreshCanvasVirtualization } from "../src/lib/canvas/canvas-viewport-render-sync";
+import { canvasGestureRenderPadding, shouldRefreshCanvasVirtualization } from "../src/lib/canvas/canvas-viewport-render-sync";
 import { videoMetadata } from "../src/lib/canvas/canvas-generation-task-sync";
 import { canvasNodeVideoPreviewUrl, canvasVideoAssetPreviewUrl } from "../src/lib/canvas/canvas-media-preview";
 import { collectImageStorageKeys } from "../src/services/image-storage";
@@ -84,14 +84,6 @@ describe("large canvas media rendering", () => {
         expect(canvasGestureRenderPadding(2)).toBe(256);
         expect(canvasGestureRenderPadding(3)).toBe(320);
         expect(canvasGestureRenderPadding(10)).toBe(320);
-    });
-
-    test("re-commits node scale mid-gesture only for large zoom stretches", () => {
-        const committed = { x: 0, y: 0, k: 1 };
-        expect(shouldCommitCanvasScaleDuringGesture({ x: 0, y: 0, k: 1.5 }, committed)).toBe(false);
-        expect(shouldCommitCanvasScaleDuringGesture({ x: 0, y: 0, k: 0.7 }, committed)).toBe(false);
-        expect(shouldCommitCanvasScaleDuringGesture({ x: 0, y: 0, k: 1.7 }, committed)).toBe(true);
-        expect(shouldCommitCanvasScaleDuringGesture({ x: 0, y: 0, k: 0.6 }, committed)).toBe(true);
     });
 
     test("keeps rendered nodes mounted longer than newly entering nodes", () => {

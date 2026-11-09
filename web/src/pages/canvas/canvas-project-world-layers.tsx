@@ -169,7 +169,7 @@ export const CanvasProjectWorldLayers = memo(function CanvasProjectWorldLayers(p
             updatePreview(null);
         }
         const unsubscribe = subscribeCanvasNodeDragPreview(container, updatePreview);
-        // Hover mounts extra strokes inside a memoized connection. Keep newly
+        // Selection mounts extra strokes inside a memoized connection. Keep newly
         // mounted strokes aligned even while the pointer is paused mid-drag.
         const observer = new MutationObserver(() => {
             const live = connectionDragPreviewRef.current;
@@ -224,8 +224,8 @@ export const CanvasProjectWorldLayers = memo(function CanvasProjectWorldLayers(p
                         toScrollTop={props.scriptScrollTopById[to.id] || 0}
                         active={props.selectedConnectionId === connection.id || props.relatedConnectionIds.has(connection.id)}
                         visualMode="full"
-                        onSelect={() => props.onConnectionSelect(connection.id)}
-                        onContextMenu={(event) => props.onConnectionContextMenu(event, connection.id)}
+                        onSelect={props.onConnectionSelect}
+                        onContextMenu={props.onConnectionContextMenu}
                     />
                 ))}
             </svg> : null}

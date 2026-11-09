@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { AlertCircle, Clock3, FileText, Square } from "lucide-react";
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import { generationDeliveryProgressView, generationTaskFetchingResult } from "@/lib/generation-delivery-progress";
@@ -7,6 +7,7 @@ import { operationProgressView, type OperationProgress } from "@/lib/operation-p
 import type { GenerationTask } from "@/services/api/task-center";
 import { useGenerationDeliveryProgress } from "@/stores/use-generation-delivery-progress";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import "./canvas-node-generation-progress.css";
 
 type Props = {
     node: CanvasNodeData;
@@ -17,12 +18,13 @@ type Props = {
 };
 
 export function CanvasNodeGenerationProgress({ node, theme, operation, onOpenTaskDetails, onCancelTask }: Props) {
+    const rootRef = useRef<HTMLDivElement>(null);
     const taskId = node.metadata?.taskId;
     // Before task creation, old task controls must not act on a previous result.
     const hasTaskIdentity = operation ? Boolean(operation.target?.taskId) : Boolean(taskId) || node.metadata?.fixture === "libtv-generating";
     const canCancelLocalLoading = !operation && !taskId && Boolean(onCancelTask) && node.metadata?.status === "loading";
     const displayTask = { status: ((hasTaskIdentity ? node.metadata?.taskStatus : undefined) || "running") as GenerationTask["status"], stage: node.metadata?.taskStage };
-    const now = useSecondTick(hasTaskIdentity || Boolean(operation) || canCancelLocalLoading);
+    const now = useSecondTick(hasTaskIdentity || Boolean(operation) || canCancelLocalLoading, rootRef);
     const createdAt = operation?.startedAt ?? new Date(node.metadata?.taskCreatedAt || "").getTime();
     const elapsed = Number.isFinite(createdAt) ? `已用 ${formatGenerationElapsed(now - createdAt)}` : "刚刚开始";
     const progress = generationTaskShowsProgress(displayTask) && taskId && typeof node.metadata?.taskProgress === "number" ? Math.max(0, Math.min(100, Math.round(node.metadata.taskProgress))) : null;
@@ -42,7 +44,7 @@ export function CanvasNodeGenerationProgress({ node, theme, operation, onOpenTas
     const uncertain = !operation && Boolean(taskId) && isGenerationTaskSubmissionUncertain(displayTask);
     const controls = hasTaskIdentity && (!operation || displayTask.status !== "succeeded");
 
-    return <div role="status" aria-label={title} className="flex h-full w-full flex-col items-center justify-center gap-3 px-5 text-center" style={{ background: theme.node.fill, color: theme.node.activeStroke }}>
+    return <div ref={rootRef} data-canvas-generation-progress role="status" aria-label={title} className="flex h-full w-full flex-col items-center justify-center gap-3 px-5 text-center" style={{ background: theme.node.fill, color: theme.node.activeStroke }}>
         {uncertain ? <AlertCircle className="size-10" /> : <div className="size-10 animate-spin rounded-full border-2 motion-reduce:animate-none" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />}
         <span className="max-w-full text-xs font-semibold leading-5 break-words">{title}</span>
         {hasTaskIdentity || operation || canCancelLocalLoading ? <div className="flex w-full max-w-[260px] flex-col items-center gap-2">
@@ -64,13 +66,19 @@ export function CanvasNodeGenerationProgress({ node, theme, operation, onOpenTas
     </div>;
 }
 
-function useSecondTick(active: boolean) {
+function useSecondTick(active: boolean, rootRef: RefObject<HTMLDivElement | null>) {
     const [, setTick] = useState(0);
     useEffect(() => {
         if (!active) return;
-        const timer = window.setInterval(() => setTick(value => value + 1), 1000);
+        const viewport = rootRef.current?.closest<HTMLElement>("[data-canvas-viewport]");
+        // The camera already transforms the card. Avoid invalidating its text
+        // surface mid-gesture; the next tick uses wall time, so none is lost.
+        const timer = window.setInterval(() => {
+            if (viewport?.dataset.canvasViewportInteracting === "true") return;
+            setTick(value => value + 1);
+        }, 1000);
         return () => window.clearInterval(timer);
-    }, [active]);
+    }, [active, rootRef]);
     return Date.now();
 }
 
