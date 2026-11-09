@@ -63,6 +63,8 @@ describe('official Durable events projected to the panel stream', () => {
       ['stream idle timeout after 95000ms', 'timeout'], ['Request timed out.', 'timeout'],
       ['429 rate limit reached', 'rate_limited'], ['Too Many Requests', 'rate_limited'],
       ['503 Service Unavailable', 'provider_unavailable'], ['overloaded_error', 'provider_unavailable'], ['502 Bad Gateway', 'provider_unavailable'],
+      ['400 Service temporarily unavailable (busy: you can retry your request)', 'provider_unavailable'],
+      ['service_unavailable', 'provider_unavailable'], ['ServiceUnavailable', 'provider_unavailable'],
       ['fetch failed', 'network'], ['socket hang up', 'network'], ['terminated', 'network'], ['Connection error.', 'network'],
       ['unexpected provider wording', 'model_error'], [undefined, 'model_error'],
     ]) expect(durableRetryReason(message)).toBe(reason);

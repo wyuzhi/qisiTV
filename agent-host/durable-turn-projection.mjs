@@ -224,7 +224,7 @@ export function durableCompletion(settled, assistant, budgetFailure, stopped = f
 const RETRY_REASONS = [
   ['rate_limited', /rate.?limit|too many requests|\b429\b|resource.?exhausted/i],
   ['timeout', /timed? out|timeout/i],
-  ['provider_unavailable', /overloaded|server.?busy|currently busy|high demand|at capacity|\b5\d\d\b|service.?unavailable|server.?error|internal.?error|provider.?returned/i],
+  ['provider_unavailable', /overloaded|server.?busy|currently busy|\bbusy:\s*you can retry your request|high demand|at capacity|\b5\d\d\b|service(?:.?|\s+temporarily\s+)unavailable|server.?error|internal.?error|provider.?returned/i],
   ['network', /network|connection|other side closed|fetch failed|getaddrinfo|ENOTFOUND|EAI_AGAIN|upstream.?connect|reset before headers|socket|terminated|websocket|ended without|ended before|did not get a response|canceled/i],
 ];
 
