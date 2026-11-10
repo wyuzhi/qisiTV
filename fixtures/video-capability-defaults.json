@@ -1,0 +1,87 @@
+[
+  {
+    "protocol": "chat-completion",
+    "model": "",
+    "config": {
+      "references": {
+        "promptMaxChars": 0,
+        "minImages": 0,
+        "maxImages": 9,
+        "maxImageBytes": 31457280,
+        "maxVideos": 0,
+        "maxVideoBytes": 0,
+        "maxVideoDurationSeconds": 0,
+        "maxAudios": 0,
+        "maxAudioBytes": 0,
+        "maxAudioDurationSeconds": 0
+      },
+      "duration": { "selection": "range", "min": 1, "max": 15, "step": 1, "default": 6 },
+      "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
+      "defaultRatio": "16:9",
+      "resolutions": ["480p", "720p", "1080p", "1440p", "2160p"],
+      "defaultResolution": "720p",
+      "generateAudio": { "supported": false, "default": false },
+      "watermark": { "supported": false, "default": false },
+      "operations": ["text_to_video", "image_to_video"],
+      "defaultOperation": "text_to_video"
+    }
+  },
+  {
+    "protocol": "full-video",
+    "model": "sd-native-full-2.0",
+    "config": {
+      "references": {
+        "promptMaxChars": 0,
+        "minImages": 0,
+        "maxImages": 9,
+        "maxImageBytes": 31457280,
+        "maxVideos": 3,
+        "maxVideoBytes": 100000000,
+        "maxVideoDurationSeconds": 15,
+        "maxAudios": 3,
+        "maxAudioBytes": 100000000,
+        "maxAudioDurationSeconds": 15,
+        "minVideoDurationSeconds": 2,
+        "minAudioDurationSeconds": 2
+      },
+      "duration": { "selection": "range", "min": 4, "max": 15, "step": 1, "default": 5 },
+      "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
+      "defaultRatio": "16:9",
+      "resolutions": ["480p", "720p", "1080p"],
+      "defaultResolution": "480p",
+      "generateAudio": { "supported": false, "default": false },
+      "watermark": { "supported": false, "default": false },
+      "operations": ["text_to_video", "image_to_video", "reference_to_video"],
+      "defaultOperation": "text_to_video"
+    }
+  },
+  {
+    "protocol": "full-video",
+    "model": "sd-native-full-2.5",
+    "config": {
+      "references": {
+        "promptMaxChars": 0,
+        "minImages": 0,
+        "maxImages": 30,
+        "maxImageBytes": 31457280,
+        "maxVideos": 10,
+        "maxVideoBytes": 100000000,
+        "maxVideoDurationSeconds": 30,
+        "maxAudios": 10,
+        "maxAudioBytes": 100000000,
+        "maxAudioDurationSeconds": 30,
+        "minVideoDurationSeconds": 2,
+        "minAudioDurationSeconds": 2
+      },
+      "duration": { "selection": "range", "min": 4, "max": 30, "step": 1, "default": 5 },
+      "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
+      "defaultRatio": "16:9",
+      "resolutions": ["480p", "720p"],
+      "defaultResolution": "480p",
+      "generateAudio": { "supported": false, "default": false },
+      "watermark": { "supported": false, "default": false },
+      "operations": ["text_to_video", "image_to_video", "reference_to_video"],
+      "defaultOperation": "text_to_video"
+    }
+  }
+]
