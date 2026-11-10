@@ -10,6 +10,17 @@ export function getTimelineClipTitle(clip: TimelineClip, nodes: CanvasNodeData[]
         || ({ video: "视频片段", audio: "音频片段", image: "图片片段", subtitle: "字幕", text: "文字" }[clip.kind]);
 }
 
+/**
+ * 时间线预览的占位文案。片段存在但视频还在准备时不能显示「无视频片段」，
+ * 否则用户会以为播放头下方没有剪辑。
+ */
+export function getTimelinePreviewPlaceholder(input: { hasClip: boolean; hasSource: boolean; hasVideoUrl: boolean; failed: boolean }): string {
+    if (!input.hasClip) return "该位置无视频片段";
+    if (input.hasVideoUrl) return "";
+    if (input.failed || !input.hasSource) return "视频暂不可用";
+    return "正在准备视频";
+}
+
 export const BASE_TIMELINE_PX_PER_SECOND = 96;
 const MIN_TIMELINE_TRACK_WIDTH = 960;
 const MIN_TIMELINE_ZOOM = 0.02;

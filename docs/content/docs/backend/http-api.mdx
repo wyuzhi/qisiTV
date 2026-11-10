@@ -91,7 +91,7 @@ MiniMax speech 的 OpenAI 音频兼容目录通过 `audioOptions` 提供官方�
 
 `canvas.timeline.update` 替换传入的时间线内容，但省略 `output` 时沿用已保存的有效输出规格。显式 `output` 对象替换工程规格；显式 `output: null` 清除工程规格，后续未指定导出选项时使用默认值。
 
-局部重生成镜头、剪辑不变时，可用 `refreshNodeIds` 代替 `timeline`：只将已有片段的媒体引用更新为指定节点当前绑定的资源，保留其余字段，包括字幕正文和起止时间、旁白、裁剪、音量、轨道、输出规格及编辑器扩展字段。两个参数不能同时传入。节点未入轨、资源不属于当前画布、替换素材不足原裁剪长度或画布版本已变化时，整次操作拒绝，不自动缩短片段或重排字幕。助手的 `canvas_timeline_deliver` 同样接收 `refreshNodeIds`，沿用既有更新、渲染、绑定与工程导出回执。
+局部重生成镜头、剪辑不变时，可用 `refreshNodeIds` 代替 `timeline`：只将已有片段的媒体引用更新为指定节点当前绑定的资源，保留其余字段，包括字幕正文和起止时间、旁白、裁剪、音量、轨道、输出规格及编辑器扩展字段。两个参数不能同时传入。`canvas.timeline.update` 面向模型的参数结构不携带根级 `oneOf`，`timeline` 与 `refreshNodeIds` 的互斥由服务端校验。节点未入轨、资源不属于当前画布、替换素材不足原裁剪长度或画布版本已变化时，整次操作拒绝，不自动缩短片段或重排字幕。助手的 `canvas_timeline_deliver` 同样接收 `refreshNodeIds`，沿用既有更新、渲染、绑定与工程导出回执。
 
 操作 `canvas.project.export` 接收 `canvasId`、`expectedRevision` 和稳定 `operationId`，将已保存的画布与当前工作区已就绪资源导出为 `infinite-canvas` v4 工程 ZIP。返回 `resourceId`、`storageKey`、`fileName`、`mimeType`、`bytes` 和 `sourceRevision`，可通过既有资源下载接口读取；同一操作重试返回原资源。导出不调用付费模型，不创建渲染任务，仍计入本地文件保存额度。单画布导出不携带源文件夹。仅保存在浏览器中的画板和未保存素材须通过画布现有完整备份入口导出；服务端遇到这些引用会明确失败，不生成残缺工程包。
 

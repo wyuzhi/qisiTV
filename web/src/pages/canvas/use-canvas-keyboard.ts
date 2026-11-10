@@ -105,7 +105,8 @@ export function useCanvasKeyboard({
             if (target?.closest(".canvas-node-toolbar, .canvas-node-toolbar-menu")) return;
             const key = event.key.toLowerCase();
             const isModifierShortcut = event.metaKey || event.ctrlKey;
-            if (isModifierShortcut && (key === "c" || key === "v") && !ownsCanvasClipboard(event.target, document.activeElement)) return;
+            const isClipboardShortcut = isModifierShortcut && (key === "c" || key === "v");
+            if (isClipboardShortcut && !ownsCanvasClipboard(event.target, document.activeElement)) return;
             const isTextEditingTarget = isTextEditableTarget(event.target) || isTextEditableTarget(document.activeElement);
 
             if (isModifierShortcut && !event.altKey && (key === "+" || key === "=" || event.code === "NumpadAdd")) {
@@ -149,8 +150,9 @@ export function useCanvasKeyboard({
                 return;
             }
             if (isTextEditingTarget) return;
-            const isCanvasControlTarget = Boolean(target?.closest("[data-canvas-no-zoom]"));
-            if (isCanvasControlTarget && !(isModifierShortcut && !event.altKey && (key === "c" || key === "v"))) return;
+            // 画布控件上的普通快捷键交给控件自己；但复制/粘贴属于画布，不能因为
+            // 焦点停在控件按钮上就被吞掉。
+            if (!isClipboardShortcut && target?.closest("[data-canvas-no-zoom]")) return;
             if (event.altKey && event.shiftKey && !isModifierShortcut && key === "f") {
                 if (target?.closest(".ant-modal-wrap, .ant-dropdown, .ant-popover")) return;
                 event.preventDefault();

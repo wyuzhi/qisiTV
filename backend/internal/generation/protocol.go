@@ -35,7 +35,7 @@ func DeclarativeProtocolPollPolicy(mode string) VideoPollPolicy {
 	if mode == "video" {
 		return DefaultVideoPollPolicy()
 	}
-	return VideoPollPolicy{
+	policy := VideoPollPolicy{
 		// An accepted asynchronous task remains queryable after a transient HTTP failure.
 		RetryTransient:    true,
 		Notify:            NotifyPollEvent,
@@ -44,6 +44,12 @@ func DeclarativeProtocolPollPolicy(mode string) VideoPollPolicy {
 		MaxDownloadTries:  3,
 		Sleep:             SleepContext,
 	}
+	if mode == "image" {
+		// A channel that stays down must end the task with the real upstream
+		// error instead of polling until the image timeout.
+		policy.MaxTransientFailures = 6
+	}
+	return policy
 }
 
 func RunProtocolAdapterTaskWithPolicy(ctx context.Context, input Input, adapter protocol.Adapter, policy VideoPollPolicy) (map[string]interface{}, error) {
@@ -145,9 +151,10 @@ func RunProtocolAdapterTaskWithPolicy(ctx context.Context, input Input, adapter 
 		body, err := ExecuteProtocolRequest(WithRequestKind(ctx, "poll"), input.Config, spec)
 		if err != nil {
 			var httpErr HTTPError
-			if errors.As(err, &httpErr) && httpErr.StatusCode == 404 {
-				// Losing an accepted task's query endpoint does not prove that
-				// its model is missing or that generation failed.
+			if input.Mode == "image" && errors.As(err, &httpErr) && httpErr.StatusCode == 404 {
+				// Losing an accepted image task's query endpoint does not prove
+				// that its model is missing or that generation failed. Video and
+				// audio keep their previous outcome: a repeated 404 ends the task.
 				return VideoPollOutcome{}, StatePendingError{TaskID: taskID, Cause: err}
 			}
 			return VideoPollOutcome{}, err

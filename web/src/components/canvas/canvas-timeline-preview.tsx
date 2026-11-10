@@ -3,7 +3,7 @@ import { Pause, Play } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { acquireCanvasVideoSource } from "@/services/canvas-video-source";
-import { formatTimelineTime, getTimelineClipTitle } from "@/lib/timeline/timeline-view";
+import { formatTimelineTime, getTimelineClipTitle, getTimelinePreviewPlaceholder } from "@/lib/timeline/timeline-view";
 import { rasterizeTimelineSubtitle } from "@/lib/timeline/timeline-subtitle-image";
 import { useTimelinePreviewPlayback } from "@/hooks/use-timeline-preview-playback";
 import type { TimelineClip, TimelineProject, TimelineTrack } from "@/types/timeline";
@@ -69,6 +69,12 @@ export function CanvasTimelinePreview({ clips, tracks = EMPTY_TRACKS, output, no
         };
     }, [subtitleText, subtitleKey, outputWidth, outputHeight]);
     const currentSubtitleImage = subtitleText && subtitleImage?.key === subtitleKey ? subtitleImage : null;
+    const previewPlaceholder = getTimelinePreviewPlaceholder({
+        hasClip: Boolean(activeVideoClip),
+        hasSource: Boolean(storageKey || fallback),
+        hasVideoUrl: Boolean(videoUrl),
+        failed: Boolean(playbackError),
+    });
 
     // 与画布共用当前源及兼容副本，避免剪辑单独读取旧的持久化视频缓存。
     useEffect(() => {
@@ -114,7 +120,7 @@ export function CanvasTimelinePreview({ clips, tracks = EMPTY_TRACKS, output, no
                         {currentSubtitleImage?.url ? <img className="pointer-events-none absolute inset-0 h-full w-full" src={currentSubtitleImage.url} alt="" data-timeline-subtitle-preview /> : null}
                     </div>
                 ) : (
-                    <div className="px-4 text-center text-xs opacity-55">该位置无视频片段</div>
+                    <div className="px-4 text-center text-xs opacity-55">{previewPlaceholder}</div>
                 )}
                 <button
                     type="button"

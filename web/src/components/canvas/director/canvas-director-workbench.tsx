@@ -48,7 +48,7 @@ import { applyDirectorUniformScale, createDirectorActor, createDirectorBillboard
 import { resolveDirectorSceneSelection, searchDirectorSceneItems } from "@/lib/canvas/director/director-scene-search";
 import { describeDirectorSaveStatus, resolveDirectorCloseOutcome, shouldBlockDirectorUnload, shouldOfferDirectorDraftRecovery } from "@/lib/canvas/director/director-save-wiring";
 import { useDirectorSaveCoordinator } from "@/components/canvas/director/use-director-save-coordinator";
-import { imageToDataUrl, resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { imageToDataUrl, resolvePreviewImageUrl, uploadImage } from "@/services/image-storage";
 import { requestImageQuestion } from "@/services/api/image";
 import { useAssetStore, type ImageAsset, type ModelAsset } from "@/stores/use-asset-store";
 import { useEffectiveConfig } from "@/stores/use-config-store";
@@ -2166,7 +2166,7 @@ function PanoramaHistoryThumbnail({ storageKey, fallback }: { storageKey?: strin
     const [url, setUrl] = useState(fallback);
     useEffect(() => {
         let active = true;
-        void resolveImageUrl(storageKey, fallback, { cacheMiss: true }).then((resolved) => { if (active) setUrl(resolved); });
+        void resolvePreviewImageUrl(storageKey, fallback, { cacheMiss: true }).then((resolved) => { if (active) setUrl(resolved); });
         return () => { active = false; };
     }, [storageKey, fallback]);
     return <img src={url} alt="" className="aspect-video w-full object-cover" />;

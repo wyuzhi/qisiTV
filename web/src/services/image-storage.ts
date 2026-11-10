@@ -131,6 +131,18 @@ export async function resolveImageUrl(storageKey?: string, fallback = "", option
     return url;
 }
 
+/**
+ * 缩略图、全景背景这类「能显示就显示」的预览读取。
+ * 本地图片已被清理时回退到调用方给出的地址，而不是把错误抛给预览。
+ */
+export async function resolvePreviewImageUrl(storageKey?: string, fallback = "", options?: { cacheMiss?: boolean }) {
+    try {
+        return await resolveImageUrl(storageKey, fallback, options);
+    } catch {
+        return resolveEmbeddedAssetUrl(resolveResourceUrl(undefined, fallback));
+    }
+}
+
 export async function getImageBlob(storageKey: string) {
     if (resourceIdFromStorageKey(storageKey)) return getCachedResourceBlob(storageKey);
     return store.getItem<Blob>(storageKey);

@@ -1182,18 +1182,7 @@
     "readOnly": false,
     "scope": "canvas",
     "params": {
-      "oneOf": [
-        {
-          "required": [
-            "timeline"
-          ]
-        },
-        {
-          "required": [
-            "refreshNodeIds"
-          ]
-        }
-      ],
+      "description": "timeline 与 refreshNodeIds 必须且只能提供一个；服务端校验互斥条件。",
       "properties": {
         "canvasId": {
           "type": "string"

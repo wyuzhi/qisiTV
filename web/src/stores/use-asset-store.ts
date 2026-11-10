@@ -596,7 +596,20 @@ const assetStorage: PersistStorage<AssetStore> = {
         const document = recovery.document;
         // 持久化恢复只恢复结构化记录，不能为每个 resource: key 逐条读取资源元数据或 Blob。
         // 远程资源直接使用受鉴权的 file URL；本地 legacy key 仍恢复为 Blob URL，避免兼容性回归。
-        const assets = await Promise.all(document.state.assets.map((asset) => normalizePersistedAsset(asset)));
+        // 单张本地图片被系统清理时只影响该条记录，不能拒绝整个 getItem，
+        // 否则 zustand persist 恢复失败，用户会看到整个素材库消失。
+        const assets = await Promise.all(document.state.assets.map(async (asset) => {
+            try {
+                return await normalizePersistedAsset(asset);
+            } catch (error) {
+                console.warn("素材本地缓存中的媒体已不可用，已保留该记录", {
+                    scope,
+                    assetId: asset.id,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                return asset;
+            }
+        }));
         const hydratedDocument = { ...document, state: { assets } };
         assetMemoryStates.set(scope, { assets });
         recordAssetStorageDocument(scope, hydratedDocument);

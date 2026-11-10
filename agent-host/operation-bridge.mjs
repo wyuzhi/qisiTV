@@ -259,12 +259,6 @@ export function scopedSchema(params, allowReferencedCanvasRead = false, descript
   }
   if (Array.isArray(clone.required)) clone.required = clone.required.filter((name) => name !== 'canvasId' && name !== 'operationId');
   if (descriptorId === CANVAS_NODE_UPDATE) projectCanvasNodeUpdateSchema(clone);
-  if (descriptorId === 'canvas.timeline.update') {
-    // Some compatible tool endpoints reject this root oneOf before answering
-    // even a text-only turn. Go still enforces the mutually exclusive inputs.
-    delete clone.oneOf;
-    clone.description = [clone.description, 'timeline 与 refreshNodeIds 必须且只能提供一个；服务端校验互斥条件。'].filter(Boolean).join('\n');
-  }
   if (descriptorId === 'canvas.search') {
     clone.properties ||= {};
     clone.properties.projectId = { type: 'string', description: '可选项目 ID；省略搜索本账号全部画布。不是画布 ID。' };

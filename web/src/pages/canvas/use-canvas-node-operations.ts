@@ -8,6 +8,7 @@ import { FOLDER_COLLAPSED_HEIGHT, FOLDER_COLLAPSED_WIDTH, FRAME_HEADER_HEIGHT, g
 import { alignCanvasNodes, layoutCanvasAuto, layoutCanvasFlow, layoutCanvasNodes, nextCanvasVersionLabel, spreadCanvasNodes, type CanvasAlignmentMode } from "@/lib/canvas/canvas-layout";
 import { applyCanvasConnectionPromptSync } from "@/lib/canvas/canvas-resource-references";
 import { createCanvasNode, isHiddenBatchChild, removeCanvasNodes } from "@/lib/canvas/canvas-project-domain";
+import { CANVAS_NODES_CLIPBOARD_PREFIX, CANVAS_NODES_JSON_CLIPBOARD_PREFIX } from "@/lib/canvas/canvas-clipboard";
 import { isolateCopiedDirectorScenes, isolateCopiedNodeMetadata, nextCopiedNodeTitle } from "@/lib/canvas/canvas-node-copy";
 import { preferredMediaGeneratorMetadata } from "@/lib/canvas/canvas-generation-config";
 import { canOpenCanvasNodePromptPanel } from "@/lib/canvas/canvas-node-semantics";
@@ -32,8 +33,6 @@ type CanvasClipboard = {
     directorScenes?: DirectorScene[];
 };
 
-const CANVAS_NODES_CLIPBOARD_PREFIX = "open-ai-canvas-nodes:";
-const CANVAS_NODES_JSON_CLIPBOARD_PREFIX = "open-ai-canvas-nodes-json:";
 const CANVAS_NODES_CLIPBOARD_STORAGE_KEY = "open-ai-canvas:nodes-clipboard";
 
 type UseCanvasNodeOperationsOptions = {

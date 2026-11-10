@@ -701,7 +701,9 @@ export function useCanvasUpload({
             if (replaceId) {
                 const replaced = await replaceNodeMedia(replaceId, file);
                 if (replaced && guard.alive()) message.success("已用剪切板图片替换，可撤销恢复");
-                return replaced;
+                // 替换分支已经接住这次粘贴：即使替换失败（例如该节点正在上传）
+                // 也不能再回退成粘贴旧的复制节点。
+                return true;
             }
             const inserted = await createFileNode(file, pastePosition);
             if (inserted && guard.alive()) message.success("已从剪切板添加图片");

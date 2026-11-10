@@ -1,18 +1,23 @@
 import { isTextEditableTarget } from "../backspace-navigation-guard";
 
-const CLIPBOARD_CONTROL_SELECTOR = "[data-canvas-no-zoom], [data-director-workbench], .canvas-node-toolbar, .canvas-node-toolbar-menu, .ant-modal-wrap, .ant-drawer, .ant-popover, .ant-dropdown, .ant-select-dropdown, [role='dialog'], [role='menu']";
+// 只有真正的浮层才接管剪贴板。画布内的普通控件（缩放、工具栏按钮等）被点击后
+// 焦点会留在按钮上，但 Ctrl/Cmd+V 仍应把内容贴到画布。
+const CLIPBOARD_OVERLAY_SELECTOR = "[data-director-workbench], .ant-modal-wrap, .ant-drawer, .ant-popover, .ant-dropdown, .ant-select-dropdown, [role='dialog'], [role='menu']";
+
+export const CANVAS_NODES_CLIPBOARD_PREFIX = "open-ai-canvas-nodes:";
+export const CANVAS_NODES_JSON_CLIPBOARD_PREFIX = "open-ai-canvas-nodes-json:";
 
 export function ownsCanvasClipboard(target: unknown, activeElement: unknown): boolean {
     return ![target, activeElement].some(value => {
         if (isTextEditableTarget(value)) return true;
         const element = value as { closest?: (selector: string) => unknown } | null;
-        return Boolean(element?.closest?.(CLIPBOARD_CONTROL_SELECTOR));
+        return Boolean(element?.closest?.(CLIPBOARD_OVERLAY_SELECTOR));
     });
 }
 
 export function isCanvasNodeClipboardMarker(value: string): boolean {
     const text = value.trim();
-    return text.startsWith("open-ai-canvas-nodes:") || text.startsWith("open-ai-canvas-nodes-json:");
+    return text.startsWith(CANVAS_NODES_CLIPBOARD_PREFIX) || text.startsWith(CANVAS_NODES_JSON_CLIPBOARD_PREFIX);
 }
 
 /** A paste event is a complete snapshot; never mix it with a later system read. */

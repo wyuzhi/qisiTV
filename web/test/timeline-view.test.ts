@@ -5,6 +5,7 @@ import {
   getTimelineVisualEndMs,
   getTimelineTrackWidth,
   getTimelineClipTitle,
+  getTimelinePreviewPlaceholder,
 } from "../src/lib/timeline/timeline-view";
 import type { TimelineClip } from "../src/types/timeline";
 import type { CanvasNodeData } from "../src/types/canvas";
@@ -16,6 +17,14 @@ it("unnamed saved clips show their canvas shot instead of an empty-video or trac
   expect(getTimelineClipTitle({ ...clip, title: "裁剪版本" }, nodes)).toBe("裁剪版本");
   expect(getTimelineClipTitle({ ...clip, nodeId: "", directMedia: { id: "upload", kind: "video", title: "上传视频" } }, nodes)).toBe("上传视频");
   expect(getTimelineClipTitle(clip, [])).toBe("视频片段");
+});
+
+it("片段存在但视频仍在准备时，预览显示准备中而不是误报无视频片段", () => {
+  expect(getTimelinePreviewPlaceholder({ hasClip: false, hasSource: false, hasVideoUrl: false, failed: false })).toBe("该位置无视频片段");
+  expect(getTimelinePreviewPlaceholder({ hasClip: true, hasSource: true, hasVideoUrl: false, failed: false })).toBe("正在准备视频");
+  expect(getTimelinePreviewPlaceholder({ hasClip: true, hasSource: true, hasVideoUrl: true, failed: false })).toBe("");
+  expect(getTimelinePreviewPlaceholder({ hasClip: true, hasSource: false, hasVideoUrl: false, failed: false })).toBe("视频暂不可用");
+  expect(getTimelinePreviewPlaceholder({ hasClip: true, hasSource: true, hasVideoUrl: false, failed: true })).toBe("视频暂不可用");
 });
 
 describe("timeline-view pxPerMs 独立性", () => {

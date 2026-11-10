@@ -63,6 +63,7 @@ func TestTimelineRefreshRejectsInvalidEditsWithoutCommit(t *testing.T) {
 		duration           int64
 	}{
 		{"empty", `"refreshNodeIds":[]`, "owner", 5000},
+		{"neither", ``, "owner", 5000},
 		{"duplicate", `"refreshNodeIds":["node","node"]`, "owner", 5000},
 		{"unused", `"refreshNodeIds":["missing"]`, "owner", 5000},
 		{"mixed", `"refreshNodeIds":["node"],"timeline":{"version":2}`, "owner", 5000},
@@ -72,7 +73,12 @@ func TestTimelineRefreshRejectsInvalidEditsWithoutCommit(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := &refreshDomain{timelineDomain: timelineDomain{doc: json.RawMessage(refreshDocument)}, duration: tc.duration}
-			_, err := opCanvasTimelineUpdate(&Context{UserID: tc.user, Domain: d}, json.RawMessage(`{"canvasId":"canvas","expectedRevision":4,`+tc.fields+`}`))
+			body := `{"canvasId":"canvas","expectedRevision":4`
+			if tc.fields != "" {
+				body += "," + tc.fields
+			}
+			body += "}"
+			_, err := opCanvasTimelineUpdate(&Context{UserID: tc.user, Domain: d}, json.RawMessage(body))
 			if err == nil || d.commits != 0 || string(d.doc) != refreshDocument {
 				t.Fatalf("invalid edit changed project: %v", err)
 			}

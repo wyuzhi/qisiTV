@@ -104,14 +104,14 @@ func NotifyPollReceipt(ctx context.Context, repo *repository.Repository, logTask
 	if strings.TrimSpace(call.TaskID) == "" {
 		return
 	}
-	message := "上游视频查询暂时异常，将继续轮询原任务"
+	message := "上游任务查询暂时异常，正在继续查询原任务"
 	level := "warn"
 	payload := ""
 	if err != nil {
 		payload = err.Error()
 	}
 	if VideoPollEvent(event) == VideoPollEventRecovered {
-		message = "上游视频查询已恢复"
+		message = "上游任务查询已恢复"
 		level = "info"
 	}
 	_ = logTask(call.UserID, call.TaskID, level, message, payload)
