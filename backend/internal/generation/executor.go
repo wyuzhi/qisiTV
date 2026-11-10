@@ -86,6 +86,9 @@ func Execute(ctx context.Context, input Input) (map[string]any, error) {
 			return nil, err
 		}
 		if unified {
+			if err := resolveManagedVideoCapability(ctx, runtime, &input); err != nil {
+				return nil, err
+			}
 			return runManagedVideoTask(ctx, client, input)
 		}
 		if client != nil {
