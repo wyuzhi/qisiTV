@@ -10,7 +10,7 @@ import { mergeFetchedChannelModelProfiles } from "@/lib/channel-model-catalog";
 import { seedancePortraitModel } from "@/lib/seedance-portrait";
 import { ensureModelProfilesWithUiDefaults } from "@/lib/model-protocols";
 import { fetchChannelModels, type ChannelModelFetchResult } from "@/services/api/image";
-import { channelHasGenerationCredential, channelHasManagedBeefTVCredential, createModelChannel, defaultBaseUrlForApiFormat, filterModelsByCapability, isBuiltinBeefTVChannel, modelOptionsFromChannels, normalizeConfigSnapshot, useConfigStore, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { channelHasGenerationCredential, channelHasManagedBeefTVCredential, canonicalChannelModel, createModelChannel, defaultBaseUrlForApiFormat, filterModelsByCapability, isBuiltinBeefTVChannel, modelOptionsFromChannels, normalizeConfigSnapshot, useConfigStore, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { ChannelModelSettings } from "./channel-model-settings";
 import { ModelServiceEditor } from "./model-service-editor";
 import { currentModelConnectionReceipt, useModelConnectionTests } from "@/stores/use-model-connection-tests";
@@ -641,8 +641,10 @@ export function shouldRefreshBeefTVCatalog(previous: string | undefined, next: s
 
 export function mergeManagedBeefTVCatalog(current: AiConfig, server: AiConfig, adoptAuthorizedAssistant = false): AiConfig {
     const serverBeef = server.channels.find((channel) => channel.id === "beeftv");
+    const serverIds = new Set(server.channels.map((channel) => channel.id));
     let found = false;
-    const channels = current.channels.map((channel) => {
+    // 固定服务由后端维护：后端已经去掉的（比如重连后清掉的旧版官方服务），页面上也去掉。
+    const channels = current.channels.filter((channel) => !channel.pinned || serverIds.has(channel.id)).map((channel) => {
         if (channel.id !== "beeftv") return channel;
         found = true;
         if (!serverBeef) {
@@ -655,6 +657,7 @@ export function mergeManagedBeefTVCatalog(current: AiConfig, server: AiConfig, a
             apiKey: "",
             secretKey: "",
             credentialRef: serverBeef.credentialRef,
+            legacyIds: serverBeef.legacyIds,
             hasApiKey: serverBeef.hasApiKey,
             hasSecretKey: serverBeef.hasSecretKey,
             baseUrl: serverBeef.baseUrl || channel.baseUrl,
@@ -765,6 +768,9 @@ export function modelConfigChannelPresentation(channel: ModelChannel) {
 }
 
 export function withChannels(config: AiConfig, channels: ModelChannel[]): AiConfig {
+    // 已保存的选择按服务现在的 ID 比较：服务换过 ID 时（legacyIds），旧选择仍算这个服务的。
+    const canonical = (value: string) => canonicalChannelModel(value, channels);
+    config = { ...config, model: canonical(config.model), assistantModel: canonical(config.assistantModel), mediaReviewModel: canonical(config.mediaReviewModel), imageModel: canonical(config.imageModel), videoModel: canonical(config.videoModel), textModel: canonical(config.textModel), audioModel: canonical(config.audioModel) };
     const models = modelOptionsFromChannels(channels);
     const imageModels = filterModelsByCapability(models, "image", channels);
     const videoModels = filterModelsByCapability(models, "video", channels);

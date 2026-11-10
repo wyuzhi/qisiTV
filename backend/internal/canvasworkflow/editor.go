@@ -50,7 +50,7 @@ func EditorDefinition(d Definition, recipes RecipesByNode) Definition {
 		}
 		config, _ := recipe.Request.Input["config"].(map[string]any)
 		channel := recipe.ChannelID
-		if channel == "@beeftv" {
+		if IsOfficialWorkflowChannel(channel) {
 			channel = "beeftv"
 		}
 		if channel != "" && stringValue(config["model"]) != "" {

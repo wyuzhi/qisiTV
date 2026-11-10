@@ -114,6 +114,8 @@ let applyingHydratedModelConfig = false;
 
 export async function hydrateLocalModelConfig() {
     const result = await hydrateModelConfig();
+    // 还有没保存的设置修改：界面保留它，等它保存，不用读回的旧快照覆盖。
+    if (result.supersededByLocalEdit) return;
     const normalizedConfig = localWorkspaceConfig(normalizeConfigSnapshot({ config: result.config }).config);
     applyingHydratedModelConfig = true;
     try {

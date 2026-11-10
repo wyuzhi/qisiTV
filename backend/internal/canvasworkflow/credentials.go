@@ -129,7 +129,7 @@ func RefreshCredentials(host CompileHost, input map[string]any, channelID string
 	if config == nil {
 		return BadRequest("生成步骤的模型配置缺失")
 	}
-	if channelID == "@beeftv" {
+	if IsOfficialWorkflowChannel(channelID) {
 		key, base, e := host.ManagedCredential()
 		if e != nil {
 			return e

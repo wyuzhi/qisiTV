@@ -28,6 +28,10 @@ type ChannelPreset struct {
 	Pinned          bool           `json:"pinned"`
 	Models          []ModelProfile `json:"models"`
 	Metadata        map[string]any `json:"metadata,omitempty"`
+	// LegacyIDs are IDs this channel was saved under in earlier releases. The
+	// client reads saved "<id>::model" references to them as this channel, and
+	// reconnecting removes a stale saved channel that still uses one.
+	LegacyIDs []string `json:"legacyIds,omitempty"`
 }
 
 var builtins = mustLoadCatalog()

@@ -260,6 +260,9 @@ func presetChannelMap(preset providerpreset.ChannelPreset, local map[string]any)
 		"presetVersion": preset.PresetVersion, "models": models, "modelProfiles": profiles,
 		"apiKey": "", "secretKey": "", "headers": []any{}, "enabled": true,
 	}
+	if len(preset.LegacyIDs) > 0 {
+		result["legacyIds"] = append([]string(nil), preset.LegacyIDs...)
+	}
 	for _, key := range []string{"apiKey", "secretKey", "headers", "enabled"} {
 		if value, ok := local[key]; ok {
 			result[key] = value

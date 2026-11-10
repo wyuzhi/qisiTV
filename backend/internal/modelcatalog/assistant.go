@@ -1,6 +1,7 @@
 package modelcatalog
 
 import (
+	"slices"
 	"strings"
 
 	"infinite-canvas/backend/internal/assistant"
@@ -47,6 +48,9 @@ type AssistantChannel struct {
 	Models        []string                `json:"models"`
 	ModelAliases  map[string]string       `json:"modelAliases"`
 	ModelProfiles []AssistantModelProfile `json:"modelProfiles"`
+	// LegacyIDs are IDs this channel was saved under in earlier releases;
+	// saved "<legacy>::model" references resolve to this channel.
+	LegacyIDs []string `json:"legacyIds"`
 }
 
 type AssistantConfigSnapshot struct {
@@ -175,12 +179,7 @@ func resolveChannelModel(snapshot AssistantConfigSnapshot, modelKey string, look
 
 func FindAssistantChannel(channels []AssistantChannel, channelID, modelID string) (AssistantChannel, bool) {
 	if channelID != "" {
-		for _, channel := range channels {
-			if channel.ID == channelID && channel.Enabled {
-				return channel, true
-			}
-		}
-		return AssistantChannel{}, false
+		return findEnabledAssistantChannel(AssistantConfigSnapshot{Channels: channels}, channelID)
 	}
 	for _, channel := range channels {
 		if !channel.Enabled {
@@ -383,9 +382,16 @@ func assistantModelAlias(channel AssistantChannel, modelID string) string {
 	return strings.TrimSpace(modelID)
 }
 
+// findEnabledAssistantChannel matches the current ID first, then a channel that
+// lists the ID as legacy, the same order the web client uses.
 func findEnabledAssistantChannel(snapshot AssistantConfigSnapshot, channelID string) (AssistantChannel, bool) {
 	for _, channel := range snapshot.Channels {
 		if channel.Enabled && channel.ID == channelID {
+			return channel, true
+		}
+	}
+	for _, channel := range snapshot.Channels {
+		if channel.Enabled && channelID != "" && slices.Contains(channel.LegacyIDs, channelID) {
 			return channel, true
 		}
 	}

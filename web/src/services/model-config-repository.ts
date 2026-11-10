@@ -30,14 +30,20 @@ export function createModelConfigRepository(dependencies: ModelConfigRepositoryD
         listeners.forEach((listener) => listener(state));
     };
 
-    const hydrate = async () => {
+    const hydrate = async (): Promise<LocalModelConfigPayload & { supersededByLocalEdit: boolean }> => {
+        // 先等正在进行的保存结束，读取和保存不交错改写状态。
+        if (drainPromise) await drainPromise.catch(() => undefined);
         const pendingDirty = state.dirty;
+        const startGeneration = generation;
         publish({ status: "hydrating", error: "" });
         try {
             const result = await dependencies.read();
-            if (!pendingDirty) latestConfig = null;
-            state = { status: "idle", revision: result.revision, dirty: pendingDirty && Boolean(latestConfig), error: "" };
-            return result;
+            // 还有没保存的修改（刷新前保存失败的，或读取期间新改的）：保留并继续保存，读回的快照已经过时。
+            const editedDuringRead = generation !== startGeneration;
+            if (!pendingDirty && !editedDuringRead) latestConfig = null;
+            const unsaved = (pendingDirty || editedDuringRead) && Boolean(latestConfig);
+            state = { status: "idle", revision: result.revision, dirty: unsaved, error: "" };
+            return { ...result, supersededByLocalEdit: unsaved };
         } catch (error) {
             publish({ status: "error", error: error instanceof Error ? error.message : "读取模型配置失败" });
             throw error;

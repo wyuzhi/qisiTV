@@ -268,3 +268,114 @@ test("model config repository does not save browser state before canonical hydra
     await pending;
     expect(writes).toBe(1);
 });
+
+// 外部同步触发重新读取时，用户在读取和保存过程中又改了两次：两次修改都要落盘，
+// 最后保存的是第二次的内容，不能被读回的旧快照清掉。
+test("edits made while a refresh is reading are saved, not dropped", async () => {
+    let stored: AiConfig = { ...defaultConfig, channels: [] };
+    let revision = 1;
+    const saved: string[] = [];
+    let releaseRead: (() => void) | null = null;
+    let releaseWrite: (() => void) | null = null;
+    let holdNextRead = false;
+    let holdNextWrite = false;
+    const repository = createModelConfigRepository({
+        read: async () => {
+            if (holdNextRead) {
+                holdNextRead = false;
+                await new Promise<void>((resolve) => { releaseRead = resolve; });
+            }
+            return { config: structuredClone(stored), revision, health: "ready", source: "builtin+local" };
+        },
+        write: async (config) => {
+            if (holdNextWrite) {
+                holdNextWrite = false;
+                await new Promise<void>((resolve) => { releaseWrite = resolve; });
+            }
+            stored = structuredClone(config);
+            saved.push(config.channels[0]?.name || "");
+            return { saved: true, revision: ++revision };
+        },
+    });
+    await repository.hydrate();
+    const edit = (name: string) => ({ ...defaultConfig, channels: [createModelChannel({ id: "c", name, apiKey: "k", models: ["m"] })] });
+
+    holdNextWrite = true;
+    const firstSave = repository.commit(edit("edit-A"));
+    holdNextRead = true;
+    const refresh = repository.hydrate();
+    const secondSave = repository.commit(edit("edit-B"));
+    releaseWrite?.();
+    await firstSave;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    releaseRead?.();
+    const result = await refresh;
+    await secondSave;
+    await repository.flush();
+
+    expect(saved).toEqual(["edit-A", "edit-B"]);
+    expect(stored.channels[0]?.name).toBe("edit-B");
+    // 刷新等两次保存都完成后才读取，读到的就是 edit-B，没有遗留未保存的修改。
+    expect(result.config.channels[0]?.name).toBe("edit-B");
+    expect(repository.getState()).toMatchObject({ dirty: false, revision: 3 });
+});
+
+test("an edit made during the read itself is kept and the stale snapshot is not applied", async () => {
+    let stored: AiConfig = { ...defaultConfig, channels: [] };
+    let revision = 1;
+    let releaseRead: (() => void) | null = null;
+    let holdNextRead = false;
+    const repository = createModelConfigRepository({
+        read: async () => {
+            if (holdNextRead) {
+                holdNextRead = false;
+                await new Promise<void>((resolve) => { releaseRead = resolve; });
+            }
+            return { config: structuredClone(stored), revision, health: "ready", source: "builtin+local" };
+        },
+        write: async (config) => {
+            stored = structuredClone(config);
+            return { saved: true, revision: ++revision };
+        },
+    });
+    await repository.hydrate();
+    holdNextRead = true;
+    const refresh = repository.hydrate();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const save = repository.commit({ ...defaultConfig, channels: [createModelChannel({ id: "c", name: "during-read", apiKey: "k", models: ["m"] })] });
+    releaseRead?.();
+    const result = await refresh;
+    await save;
+    await repository.flush();
+    expect(result.supersededByLocalEdit).toBe(true);
+    expect(stored.channels[0]?.name).toBe("during-read");
+    expect(repository.getState()).toMatchObject({ dirty: false });
+});
+
+// 保存失败后外部同步触发刷新：那次没保存的修改不能被读回的旧配置覆盖，之后能补存。
+test("an edit whose save failed survives a refresh and is saved later", async () => {
+    let stored: AiConfig = { ...defaultConfig, channels: [createModelChannel({ id: "c", name: "old", apiKey: "k", models: ["m"] })] };
+    let revision = 1;
+    let failWrites = true;
+    const repository = createModelConfigRepository({
+        read: async () => ({ config: structuredClone(stored), revision, health: "ready", source: "builtin+local" }),
+        write: async (config) => {
+            if (failWrites) return { saved: false, revision };
+            stored = structuredClone(config);
+            return { saved: true, revision: ++revision };
+        },
+    });
+    await repository.hydrate();
+    await repository.commit({ ...defaultConfig, channels: [createModelChannel({ id: "c", name: "edit-A", apiKey: "k", models: ["m"] })] });
+    expect(repository.getState()).toMatchObject({ status: "error", dirty: true });
+    const refreshed = await repository.hydrate();
+    expect(refreshed.supersededByLocalEdit).toBe(true);
+    // 刷新结束会立刻重试一次（仍然失败）；故障恢复后再保存。
+    await repository.flush();
+    expect(stored.channels[0]?.name).toBe("old");
+    failWrites = false;
+    await repository.flush();
+    expect(stored.channels[0]?.name).toBe("edit-A");
+    expect(repository.getState()).toMatchObject({ dirty: false });
+});
+

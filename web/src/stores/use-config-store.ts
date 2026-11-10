@@ -42,6 +42,8 @@ export type ModelChannel = {
     scope?: "system" | "user";
     enabled?: boolean;
     pinned?: boolean;
+    // 这个服务以前用过的 ID，由后端给出。老画布和老设置里存的「旧ID::模型」按这个服务读。
+    legacyIds?: string[];
     presetVersion?: number;
     credentialRef?: string;
     hasApiKey?: boolean;
@@ -270,6 +272,10 @@ function channelLookup(channels: ModelChannel[]): ChannelLookup {
     for (const channel of channels) {
         if (!lookup.byId.has(channel.id)) lookup.byId.set(channel.id, channel);
         for (const model of channel.models) if (!lookup.byModel.has(model)) lookup.byModel.set(model, channel);
+    }
+    // 与 channelForId 同一规则：现有 ID 优先，旧 ID 只在没有同名服务时才指向声明它的服务。
+    for (const channel of channels) {
+        for (const id of channel.legacyIds || []) if (!lookup.byId.has(id)) lookup.byId.set(id, channel);
     }
     channelLookups.set(channels, lookup);
     return lookup;
@@ -646,6 +652,7 @@ export function createModelChannel(channel?: Partial<ModelChannel>): ModelChanne
         scope: channel?.scope === "system" ? "system" : "user",
         enabled: channel?.enabled !== false,
         pinned: channel?.pinned === true,
+        legacyIds: Array.isArray(channel?.legacyIds) ? channel.legacyIds.filter((id) => typeof id === "string" && id.trim()) : undefined,
         presetVersion: channel?.presetVersion,
         credentialRef: channel?.credentialRef,
         hasApiKey: channel?.hasApiKey,
@@ -666,6 +673,13 @@ export function decodeChannelModel(value: string) {
     const index = value.indexOf(CHANNEL_MODEL_SEPARATOR);
     if (index < 0) return null;
     return { channelId: value.slice(0, index), model: value.slice(index + CHANNEL_MODEL_SEPARATOR.length) };
+}
+
+// 「渠道::模型」换成服务现在的 ID：旧 ID 指向的服务删掉后，选择不会落到别的服务上。
+export function canonicalChannelModel(value: string, channels: ModelChannel[]) {
+    const decoded = value ? decodeChannelModel(value) : null;
+    const channel = decoded ? channelLookup(channels).byId.get(decoded.channelId) : undefined;
+    return decoded && channel ? encodeChannelModel(channel.id, decoded.model) : value;
 }
 
 export function modelOptionName(value: string) {
@@ -690,7 +704,7 @@ export function modelIcon(config: AiConfig, value: string) {
 export function modelOptionLabel(config: AiConfig, value: string) {
     const decoded = decodeChannelModel(value);
     if (!decoded) return modelDisplayName(config, value);
-    const channel = config.channels.find((item) => item.id === decoded.channelId);
+    const channel = channelLookup(config.channels).byId.get(decoded.channelId);
     const displayName = modelDisplayName(config, value);
     // 平台前台模型只展示公开名称；供应来源和内部目录适配器不属于创作端信息。
     if (!channel || channel.scope === "system") return displayName;
@@ -721,7 +735,7 @@ export function normalizeModelOptionValue(value: unknown, channels: ModelChannel
     if (!normalizeRawModelName(model)) return "";
     const decoded = decodeChannelModel(model);
     if (decoded) {
-        const channel = channels.find((item) => item.id === decoded.channelId);
+        const channel = channelLookup(channels).byId.get(decoded.channelId);
         const resolved = channel?.modelAliases?.[decoded.model] || decoded.model;
         return channel && seedancePortraitModel(decoded.model) === seedancePortraitModel(resolved) && channel.models.includes(resolved) ? encodeChannelModel(channel.id, resolved) : "";
     }

@@ -5,5 +5,6 @@
   "catalogProtocol": "openai",
   "presetVersion": 1,
   "pinned": true,
+  "legacyIds": ["beefapi"],
   "models": []
 }
