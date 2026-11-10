@@ -18,6 +18,13 @@ export const MODEL_SERVICE_PRESETS = [
 export type ModelServicePresetId = typeof MODEL_SERVICE_PRESETS[number]["id"];
 export const CAPABILITY_LABELS: Record<ModelCapability, string> = { text: "文本", image: "图片", video: "视频", audio: "音频" };
 
+/** 预设自带的模型数量；用于设置页说明文案，不再从渠道对象上读。 */
+export function presetModelCount(id: ModelServicePresetId): number {
+    if (id === LL2_CHANNEL_ID) return LL2_PRESET_MODELS.length;
+    if (id === YSDUI_CHANNEL_ID) return YSDUI_PRESET_MODELS.length;
+    return 0;
+}
+
 export function isBuiltinPresetService(id: ModelServicePresetId): id is typeof LL2_CHANNEL_ID | typeof YSDUI_CHANNEL_ID {
     return id === LL2_CHANNEL_ID || id === YSDUI_CHANNEL_ID;
 }
@@ -103,7 +110,8 @@ export function createServicePresetChannel(id: ModelServicePresetId, channelId: 
     if (isBuiltinPresetService(id)) {
         const built = id === LL2_CHANNEL_ID
             ? buildLL2ModelChannel({ apiKey: "", baseUrl: preset.baseUrl, selectedModels: undefined })
-            : buildYsduiModelChannel({ apiKey: "", baseUrl: preset.baseUrl, selectedModels: undefined });
+            // 新建预设渠道时还没有旧渠道；已有渠道的自定义模型由插件自己的同步流程合并。
+            : buildYsduiModelChannel({ apiKey: "", baseUrl: preset.baseUrl, selectedModels: undefined, existingChannel: undefined });
         return {
             ...createModelChannel({ id: channelId, apiFormat: preset.apiFormat }),
             name: preset.name,
