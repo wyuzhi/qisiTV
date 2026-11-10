@@ -180,8 +180,9 @@ export function mergeFetchedChannelModelProfiles(channel: ModelChannel, catalog:
             const protocol = inferredProtocol || existing.protocol;
             const capability = inferredCapability || existing.capability;
             const capabilityChanged = capability !== existing.capability;
-            const sourcedVideo = capability === "video" ? catalogVideo : null;
-            const keepSourced = capability === "video" && Boolean(versionedVideoCapability(existing.capabilityConfig?.video, existing.videoCapabilitiesVersion)) && !sourcedVideo;
+            const keepUserCapability = !managed && existing.capabilitySource === "user" && !capabilityChanged && Boolean(existing.capabilityConfig);
+            const sourcedVideo = capability === "video" && !keepUserCapability ? catalogVideo : null;
+            const keepSourced = keepUserCapability || (capability === "video" && Boolean(versionedVideoCapability(existing.capabilityConfig?.video, existing.videoCapabilitiesVersion)) && !sourcedVideo);
             const missingManagedVideo = managed && capability === "video" && !sourcedVideo && !keepSourced;
             const patchCapabilityConfig = !missingManagedVideo && !keepSourced && !sourcedVideo && hasCatalogCapabilityConfig(item) && (capability === "image" || capability === "video");
             const capabilityConfig = sourcedVideo

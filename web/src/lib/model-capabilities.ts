@@ -1,6 +1,6 @@
 import { beefTVImageContract } from "@/lib/beeftv-image-contracts";
 import { channelForId } from "@/lib/channel-identity";
-import type { ModelProtocol } from "@/lib/model-protocols";
+import { modelProtocolDefinition, modelProtocolDefinitionFor, type ModelProtocol, type ModelProtocolDefinition, type ModelProtocolWorkflow } from "@/lib/model-protocols";
 import {
     defaultImageCapabilityConfig,
     imageResponseFormatSelectable,
@@ -129,17 +129,59 @@ export function normalizeModelCapabilityConfig(config: ModelCapabilityConfig): M
     };
 }
 
-export function defaultModelCapabilityConfig(protocol?: ModelProtocol, model = ""): ModelCapabilityConfig {
+function applyProtocolWorkflowVideoCapability(video: VideoCapabilityConfig, workflow: ModelProtocolWorkflow) {
+    const findParam = (mapping: string) => workflow.parameters.find((item) => (item.mapping || item.name) === mapping || item.name === mapping);
+    const ratioParam = findParam("aspectRatio") || findParam("ratio") || findParam("size");
+    const resolutionParam = findParam("resolution");
+    const durationParam = findParam("duration");
+    if (ratioParam?.values?.length) {
+        video.ratios = normalizeCapabilityStrings(ratioParam.values);
+        const defRatio = normalizeCapabilityString(workflow.defaults?.[ratioParam.name] ?? workflow.defaults?.aspectRatio ?? workflow.defaults?.ratio);
+        video.defaultRatio = video.ratios.includes(defRatio) ? defRatio : video.ratios[0] || "";
+    } else if (resolutionParam?.values?.length) {
+        video.ratios = [];
+        video.defaultRatio = "";
+    }
+    if (resolutionParam?.values?.length) {
+        video.resolutions = normalizeCapabilityStrings(resolutionParam.values);
+        const defRes = normalizeCapabilityString(workflow.defaults?.[resolutionParam.name] ?? workflow.defaults?.resolution);
+        video.defaultResolution = video.resolutions.includes(defRes) ? defRes : video.resolutions[0] || "";
+    }
+    if (durationParam) {
+        const defDuration = Number(workflow.defaults?.[durationParam.name] ?? workflow.defaults?.duration);
+        const rangeMatch = durationParam.description?.match(/(\d+)\s*[~～-]\s*(\d+)/);
+        if (durationParam.values?.length) {
+            const values = durationParam.values.map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0);
+            if (values.length) {
+                video.duration = { selection: "enum", values, default: values.includes(defDuration) ? defDuration : values[0]! };
+            }
+        } else if (rangeMatch) {
+            const min = Number(rangeMatch[1]);
+            const max = Number(rangeMatch[2]);
+            const fallbackDefault = Number.isInteger(defDuration) && defDuration >= min && defDuration <= max ? defDuration : Math.min(max, Math.max(min, video.duration.default));
+            video.duration = { selection: "range", min, max, step: 1, default: fallbackDefault };
+        } else if (Number.isInteger(defDuration) && defDuration > 0) {
+            video.duration = { selection: "enum", values: [defDuration], default: defDuration };
+        }
+    }
+}
+
+export function defaultModelCapabilityConfig(protocol?: ModelProtocol, model = "", protocols?: ModelProtocolDefinition[]): ModelCapabilityConfig {
     const text: TextCapabilityConfig = {
         streaming: true,
         // 文本模型的视觉能力必须由管理员明确开启，不能根据模型名猜测。
         references: { promptMaxChars: 32000, maxImages: 0, maxImageBytes: 0, maxVideos: 0, maxVideoBytes: 0 },
     };
+    const video = defaultVideoCapabilityConfig(protocol, model);
+    const workflow = protocols?.length
+        ? (modelProtocolDefinitionFor(protocol, "video", protocols) || modelProtocolDefinition(protocol, protocols))?.workflows?.find((item) => item.id === model && item.capability === "video")
+        : undefined;
+    if (workflow) applyProtocolWorkflowVideoCapability(video, workflow);
     return {
         version: 1,
         text,
         image: defaultImageCapabilityConfig(protocol, model),
-        video: defaultVideoCapabilityConfig(protocol, model),
+        video,
     };
 }
 

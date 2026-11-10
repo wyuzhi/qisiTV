@@ -120,7 +120,7 @@ export function useCanvasBatchTable({pageUi,  projectId, nodesRef, connectionsRe
         const sourceNode = nodesRef.current.find((item) => item.id === nodeId);
         const table = sourceNode?.metadata?.batchTable;
         if (!sourceNode || !table) return;
-        const imageModel = effectiveConfig.imageModel || effectiveConfig.model;
+        const imageModel = buildGenerationConfig(effectiveConfig, undefined, "image").model;
         if (!isAiConfigReady(effectiveConfig, imageModel)) {
             navigateToSettings({ continueCreation: true });
             return;

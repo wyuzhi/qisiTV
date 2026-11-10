@@ -1930,17 +1930,11 @@
         transform: translateY(-1px) rotate(-8deg);
     }
 
-    /* 原版顶栏只保留一个轻量同步指示；详细错误、草稿下载和版本恢复仍在点击弹层内。 */
-    .canvas-topbar .canvas-sync-status-label {
-        display: none;
-    }
-
-    .canvas-topbar [aria-label^="画布保存状态"] {
-        width: 28px;
-        min-width: 28px;
-        padding-inline: 0;
-        opacity: 0.72;
-    }
+    /* 原版顶栏正常同步只显示轻量图标；保存失败或版本冲突时露出文字提示，方便用户按报错指引点击处理。 */
+    .canvas-topbar [aria-label^="画布保存状态"]:not(.ant-btn-dangerous) .canvas-sync-status-label,
+    .canvas-topbar [data-canvas-external-write-op] .canvas-sync-status-label { display: none; }
+    .canvas-topbar [aria-label^="画布保存状态"]:not(.ant-btn-dangerous) { width: 28px; min-width: 28px; padding-inline: 0; opacity: 0.72; }
+    .canvas-topbar [aria-label^="画布保存状态"].ant-btn-dangerous { width: auto; padding-inline: 8px; opacity: 1; }
 
     .canvas-topbar-project-cluster {
         width: max-content;

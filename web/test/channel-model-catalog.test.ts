@@ -8,7 +8,7 @@ import { CanvasVideoSettingsPopover } from "../src/components/canvas/canvas-vide
 import { VideoSettingsPanel } from "../src/components/video-settings-panel";
 import { canvasThemes } from "../src/lib/canvas-theme";
 import { mergeFetchedChannelModelProfiles, type ChannelModelCatalogItem } from "../src/lib/channel-model-catalog";
-import { defaultModelCapabilityConfig, modelCapabilityConfigFor } from "../src/lib/model-capabilities";
+import { defaultModelCapabilityConfig, modelCapabilityConfigFor, videoDurationOptions } from "../src/lib/model-capabilities";
 import { ChannelModelSettings } from "../src/pages/settings/channel-model-settings";
 import { applyFetchedChannelModelCatalog } from "../src/pages/settings/channel-settings-pane";
 import { fetchChannelModels } from "../src/services/api/image";
@@ -274,6 +274,59 @@ describe("public channel model catalog", () => {
             expect.objectContaining({ model: "custom-text-model", capability: "text", protocol: "openai-response" }),
         ]));
         expect(resolveModelRequestConfig(normalized, "beeftv::custom-text-model").interfaceType).toBe("openai-response");
+    });
+
+    test("projects Manifest video workflow parameters without inventing a size capability", () => {
+        const profile = defaultModelCapabilityConfig("autodl-comfyui", "minimax_h3_zm_u24", [
+            {
+                value: "autodl-comfyui",
+                label: "AutoDL ComfyUI 视频",
+                capability: "video",
+                create: "POST /api/v1/comfyui/comfyui_workflow/{{model}}",
+                contentType: "application/json",
+                media: "url",
+                workflows: [
+                    {
+                        id: "minimax_h3_zm_u24",
+                        label: "H3 ZM U24 多参考视频",
+                        providerId: "autodl-comfyui",
+                        capability: "video",
+                        parameters: [
+                            { name: "prompt", type: "string", required: true, mapping: "prompt" },
+                            { name: "duration", type: "integer", mapping: "duration", description: "视频时长 1~15 秒" },
+                            { name: "resolution", type: "string", mapping: "resolution", values: ["480p竖", "768p竖", "480p横", "768p横", "480p(1:1)", "768p(1:1)"] },
+                        ],
+                        defaults: { duration: 5, resolution: "768p竖" },
+                    },
+                ],
+            },
+        ]).video!;
+
+        expect(profile.ratios).toEqual([]);
+        expect(profile.defaultRatio).toBe("");
+        expect(profile.resolutions).toEqual(["480p竖", "768p竖", "480p横", "768p横", "480p(1:1)", "768p(1:1)"]);
+        expect(profile.defaultResolution).toBe("768p竖");
+        expect(profile.duration).toEqual({ selection: "range", min: 1, max: 15, step: 1, default: 5 });
+    });
+
+    test("preserves user-edited capability config across catalog merge and continuous duration max", () => {
+        const customCap = defaultModelCapabilityConfig("newapi", "wan3");
+        customCap.video!.duration = { selection: "range", min: 1, max: 30, step: 1, default: 5, continuous: true, fractionalMin: 1 };
+        const channel = createModelChannel({
+            id: "custom-compatible",
+            name: "Custom Compatible",
+            baseUrl: "https://provider.example/v1",
+            models: ["wan3"],
+            modelProfiles: [{ model: "wan3", capability: "video", protocol: "newapi", capabilitySource: "user", capabilityConfig: customCap }],
+        });
+
+        const merged = mergeFetchedChannelModelProfiles(channel, [
+            { id: "wan3", modelType: "video", supportedEndpointTypes: ["openai-video"], options: { durationSeconds: [{ value: "5" }, { value: "10" }, { value: "15" }] } },
+        ]);
+
+        expect(merged[0]?.capabilitySource).toBe("user");
+        expect(merged[0]?.capabilityConfig?.video?.duration.max).toBe(30);
+        expect(videoDurationOptions(merged[0]!.capabilityConfig!.video!)).toContain(30);
     });
 
     test("preserves six public capabilities without expanding compatibility IDs", async () => {

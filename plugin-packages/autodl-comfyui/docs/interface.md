@@ -65,7 +65,7 @@
 
 ```json
 {
-  "apiVersion": "beeftv.plugin/v2",
+  "apiVersion": "beeftv.plugin/v3",
   "id": "autodl-comfyui",
   "name": "AutoDL ComfyUI 视频与音频",
   "version": "2.1.0",
@@ -141,6 +141,183 @@
             "description": "按 order 生成 ref_audio_N，最多取工作流支持的前三项。"
           }
         ],
+        "variables": [
+          {
+            "name": "rawRes",
+            "value": {
+              "$lower": {
+                "$trim": {
+                  "$ref": "request.resolution"
+                }
+              }
+            }
+          },
+          {
+            "name": "rawRatio",
+            "value": {
+              "$lower": {
+                "$trim": {
+                  "$ref": "request.aspectRatio"
+                }
+              }
+            }
+          },
+          {
+            "name": "supportsSquare",
+            "value": {
+              "$in": [
+                {
+                  "$ref": "request.model"
+                },
+                [
+                  "minimax_h3_b99_001",
+                  "minimax_h3_b99_002",
+                  "minimax_h3_b99_003_12s",
+                  "minimax_h3_lightx2v_v5_15s",
+                  "minimax_h3_lightx2v_v5",
+                  "minimax_h3_zm_u24",
+                  "minimax_h3_zm_u08"
+                ]
+              ]
+            }
+          },
+          {
+            "name": "supports1080",
+            "value": {
+              "$in": [
+                {
+                  "$ref": "request.model"
+                },
+                [
+                  "minimax_h3_image_audio_to_video_v2",
+                  "minimax_h3_image_audio_to_video",
+                  "minimax_h3_lightx2v_v5"
+                ]
+              ]
+            }
+          },
+          {
+            "name": "isB99",
+            "value": {
+              "$in": [
+                {
+                  "$ref": "request.model"
+                },
+                [
+                  "minimax_h3_b99_001",
+                  "minimax_h3_b99_002",
+                  "minimax_h3_b99_003_12s"
+                ]
+              ]
+            }
+          },
+          {
+            "name": "orientation",
+            "value": {
+              "$switch": {
+                "cases": [
+                  {
+                    "when": {
+                      "$in": [
+                        {
+                          "$ref": "vars.rawRatio"
+                        },
+                        [
+                          "16:9",
+                          "4:3",
+                          "21:9",
+                          "3:2",
+                          "横",
+                          "landscape"
+                        ]
+                      ]
+                    },
+                    "then": "横"
+                  },
+                  {
+                    "when": {
+                      "$and": [
+                        {
+                          "$in": [
+                            {
+                              "$ref": "vars.rawRatio"
+                            },
+                            [
+                              "1:1",
+                              "square"
+                            ]
+                          ]
+                        },
+                        {
+                          "$ref": "vars.supportsSquare"
+                        }
+                      ]
+                    },
+                    "then": "(1:1)"
+                  }
+                ],
+                "default": "竖"
+              }
+            }
+          },
+          {
+            "name": "tier",
+            "value": {
+              "$switch": {
+                "cases": [
+                  {
+                    "when": {
+                      "$ref": "vars.isB99"
+                    },
+                    "then": "736p"
+                  },
+                  {
+                    "when": {
+                      "$in": [
+                        {
+                          "$ref": "vars.rawRes"
+                        },
+                        [
+                          "480",
+                          "480p"
+                        ]
+                      ]
+                    },
+                    "then": "480p"
+                  },
+                  {
+                    "when": {
+                      "$and": [
+                        {
+                          "$in": [
+                            {
+                              "$ref": "vars.rawRes"
+                            },
+                            [
+                              "1080",
+                              "1080p",
+                              "1440",
+                              "1440p",
+                              "2160",
+                              "2160p",
+                              "2k",
+                              "4k"
+                            ]
+                          ]
+                        },
+                        {
+                          "$ref": "vars.supports1080"
+                        }
+                      ]
+                    },
+                    "then": "1080p"
+                  }
+                ],
+                "default": "768p"
+              }
+            }
+          }
+        ],
         "create": {
           "method": "POST",
           "path": "/api/v1/comfyui/comfyui_workflow/{{model}}",
@@ -195,8 +372,56 @@
                 },
                 "resolution": {
                   "$omitEmpty": {
-                    "$lower": {
-                      "$ref": "request.resolution"
+                    "$switch": {
+                      "cases": [
+                        {
+                          "when": {
+                            "$eq": [
+                              {
+                                "$ref": "vars.rawRes"
+                              },
+                              ""
+                            ]
+                          },
+                          "then": ""
+                        },
+                        {
+                          "when": {
+                            "$in": [
+                              {
+                                "$ref": "vars.rawRes"
+                              },
+                              [
+                                "480p竖",
+                                "768p竖",
+                                "1080p竖",
+                                "736p竖",
+                                "480p横",
+                                "768p横",
+                                "1080p横",
+                                "736p横",
+                                "480p(1:1)",
+                                "768p(1:1)",
+                                "1080p(1:1)",
+                                "736p(1:1)"
+                              ]
+                            ]
+                          },
+                          "then": {
+                            "$ref": "vars.rawRes"
+                          }
+                        }
+                      ],
+                      "default": {
+                        "$concat": [
+                          {
+                            "$ref": "vars.tier"
+                          },
+                          {
+                            "$ref": "vars.orientation"
+                          }
+                        ]
+                      }
                     }
                   }
                 }

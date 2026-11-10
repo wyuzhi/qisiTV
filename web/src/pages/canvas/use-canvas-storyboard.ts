@@ -336,7 +336,7 @@ export function useCanvasStoryboard({
         if (!scriptNode || !rows.length) return;
         const missing = rows.filter((row) => !(row.imageGenerationPrompt || row.plotDescription).trim());
         if (missing.length) return message.warning(`有 ${missing.length} 个镜头缺少画面描述或图片提示词`);
-        const imageModel = effectiveConfig.imageModel || effectiveConfig.model;
+        const imageModel = buildGenerationConfig(effectiveConfig, undefined, "image").model;
         if (!isAiConfigReady(effectiveConfig, imageModel)) {
             navigateToSettings({ continueCreation: true });
             return;
@@ -405,7 +405,7 @@ export function useCanvasStoryboard({
     }, [connectionsRef, effectiveConfig, message, nodesRef, setConnections, setNodes]);
 
     const createAndGenerateScriptVideos = useCallback(async (nodeId: string, rowIds?: string[]) => {
-        const videoModel = effectiveConfig.videoModel || effectiveConfig.model;
+        const videoModel = buildGenerationConfig(effectiveConfig, undefined, "video").model;
         if (!isAiConfigReady(effectiveConfig, videoModel)) {
             navigateToSettings({ continueCreation: true });
             return;
@@ -456,7 +456,7 @@ export function useCanvasStoryboard({
         const scriptNode = nodesRef.current.find((node) => node.id === nodeId && node.type === CanvasNodeType.Script);
         const rows = scriptNode?.metadata?.storyboard?.rows || [];
         if (!scriptNode || !rows.length) return;
-        const imageModel = effectiveConfig.imageModel || effectiveConfig.model;
+        const imageModel = buildGenerationConfig(effectiveConfig, undefined, "image").model;
         if (!isAiConfigReady(effectiveConfig, imageModel)) {
             navigateToSettings({ continueCreation: true });
             return;
@@ -506,7 +506,7 @@ export function useCanvasStoryboard({
         const readyRows = rows.filter((row) => row.imageNodeId && nodesRef.current.some((node) => node.id === row.imageNodeId && node.type === CanvasNodeType.Image && node.metadata?.content));
         if (!readyRows.length) return message.warning("请先生成并检查选中镜头的首帧");
         if (readyRows.length !== rows.length) return message.warning(`${rows.length - readyRows.length} 个选中镜头还没有可用首帧，请全部生成并检查后再确认`);
-        const videoModel = effectiveConfig.videoModel || effectiveConfig.model;
+        const videoModel = buildGenerationConfig(effectiveConfig, undefined, "video").model;
         if (!isAiConfigReady(effectiveConfig, videoModel)) {
             navigateToSettings({ continueCreation: true });
             return;

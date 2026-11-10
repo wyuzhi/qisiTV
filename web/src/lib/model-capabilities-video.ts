@@ -606,7 +606,7 @@ export function videoDurationRequirement(duration: VideoCapabilityConfig["durati
 
 export function videoDurationOptions(profile: VideoCapabilityConfig) {
     if (profile.duration.selection === "enum") return profile.duration.values || [];
-    if (profile.duration.continuous) return [profile.duration.fractionalMin || profile.duration.min || .92,...Array.from({length:15},(_,i)=>i+1)];
+    if (profile.duration.continuous) return [profile.duration.fractionalMin || profile.duration.min || .92, ...Array.from({ length: Math.max(1, Math.floor(profile.duration.max || 15)) }, (_, i) => i + 1)];
     const min = profile.duration.min || 1;
     const max = profile.duration.max || min;
     const step = profile.duration.step || 1;

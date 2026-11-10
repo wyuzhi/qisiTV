@@ -182,6 +182,29 @@ func TestAutoDLPluginArtifact(t *testing.T) {
 		t.Fatalf("b99_003 must not send first_frame: %#v", bodyB99003)
 	}
 
+	createZMU24, err := adapter.BuildCreate(context.Background(), RequestContext{BaseURL: "https://autodl.art", Request: GenerationRequest{
+		Model: "minimax_h3_zm_u24", Prompt: "zm u24 bare resolution", Duration: 5, Resolution: "480p", AspectRatio: "16:9",
+		Images: []MediaReference{{URL: "https://cdn.example/img0.png"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bodyZMU24 := createZMU24.Body.(map[string]any)
+	if bodyZMU24["resolution"] != "480p横" || bodyZMU24["ref_image_0"] != "https://cdn.example/img0.png" {
+		t.Fatalf("zm_u24 body = %#v", bodyZMU24)
+	}
+
+	createZMU08Square, err := adapter.BuildCreate(context.Background(), RequestContext{BaseURL: "https://autodl.art", Request: GenerationRequest{
+		Model: "minimax_h3_zm_u08", Prompt: "zm u08 square", Duration: 5, Resolution: "720p", AspectRatio: "1:1",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bodyZMU08Square := createZMU08Square.Body.(map[string]any)
+	if bodyZMU08Square["resolution"] != "768p(1:1)" {
+		t.Fatalf("zm_u08 square body = %#v", bodyZMU08Square)
+	}
+
 	failed, err := adapter.ParseCreate(context.Background(), []byte(`{"code":"RequestParameterIsWrong","data":null,"msg":"参数: resolution 的值: 768P 不在 options 列表中"}`))
 	if err != nil || failed.Status != StatusFailed || failed.Message == "" {
 		t.Fatalf("failed = %#v, err = %v", failed, err)

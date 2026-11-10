@@ -150,8 +150,15 @@ export function serviceModelProfile(channel: ModelChannel, item: ChannelModelCat
     if (existing?.protocol && !explicitCapability) {
         const definition = modelProtocolDefinition(existing.protocol, protocols);
         const usable = definition && definition.enabled !== false ? definition : undefined;
+        const workflow = usable?.workflows?.find((w) => w.id === item.id && w.capability === "video");
+        const repairedCapabilityConfig =
+            workflow && existing.capabilitySource !== "user" && existing.capabilityConfig?.video?.ratios?.length
+                ? defaultModelCapabilityConfig(usable!.value, item.id, protocols)
+                : existing.capabilityConfig;
         // 旧 ID 落盘时换成现在的 ID，下次打开就是新 ID。
-        if (usable && (usable.value !== existing.protocol || usable.authType !== existing.authType)) return { ...existing, protocol: usable.value, authType: usable.authType };
+        if (usable && (usable.value !== existing.protocol || usable.authType !== existing.authType || repairedCapabilityConfig !== existing.capabilityConfig)) {
+            return { ...existing, protocol: usable.value, authType: usable.authType, capabilityConfig: repairedCapabilityConfig };
+        }
         if (usable || (!existing.protocol.startsWith("ll2-") && !existing.protocol.startsWith("ysdui-"))) return existing;
     }
     const builtinPreset = preset === LL2_CHANNEL_ID
@@ -195,7 +202,7 @@ export function serviceModelProfile(channel: ModelChannel, item: ChannelModelCat
     if (fullvideoFull && capability === "video" && !inherited) proposed = item.supportedEndpointTypes?.includes("full-video") ? "full-video" : undefined;
     const definition = protocols.find((p) => p.value === proposed && p.capability === capability && p.enabled !== false);
     const protocol = definition?.value;
-    return { ...existing, model: item.id, displayName: existing?.displayName || item.displayName, capability, protocol, authType: definition ? definition.authType : existing?.authType, capabilityConfig: existing?.capability === capability && existing.capabilityConfig ? existing.capabilityConfig : (capability === "image" || capability === "video") && protocol ? defaultModelCapabilityConfig(protocol, item.id) : undefined };
+    return { ...existing, model: item.id, displayName: existing?.displayName || item.displayName, capability, protocol, authType: definition ? definition.authType : existing?.authType, capabilityConfig: existing?.capability === capability && existing.capabilityConfig ? existing.capabilityConfig : (capability === "image" || capability === "video") && protocol ? defaultModelCapabilityConfig(protocol, item.id, protocols) : undefined };
 }
 
 export function channelAllowsEmptyAPIKey(channel: Pick<ModelChannel, "models" | "modelProfiles" | "interfaceType">, protocols?: ModelProtocolDefinition[]) {

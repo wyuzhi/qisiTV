@@ -156,15 +156,17 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         if (siblingProtocols.length !== 1) return profile;
         const definition = protocols.find((item) => item.value === siblingProtocols[0] && item.capability === profile.capability && item.enabled !== false);
         if (!definition) return profile;
+        const keepUserCapability = profile.capabilitySource === "user" && Boolean(profile.capabilityConfig);
         return {
             ...profile,
             protocol: definition.value,
             authType: definition.authType,
-            capabilitySource: undefined,
-            capabilityConfig:
-                profile.capability === "image" || profile.capability === "video"
-                    ? defaultModelCapabilityConfig(definition.value, profile.model)
-                    : profile.capabilityConfig,
+            capabilitySource: keepUserCapability ? "user" : undefined,
+            capabilityConfig: keepUserCapability
+                ? profile.capabilityConfig
+                : profile.capability === "image" || profile.capability === "video"
+                  ? defaultModelCapabilityConfig(definition.value, profile.model, protocols)
+                  : profile.capabilityConfig,
         };
     };
     const changeModelCapability = (id: string, capability: ModelCapability) => {
