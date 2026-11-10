@@ -111,6 +111,7 @@ type Service struct {
 	videoRecoveryAfterID     string
 	bindAfterID              string
 	bindCursorMu             sync.Mutex
+	canvasFailures           localtask.CanvasFailureScan
 }
 
 const taskWorkerConcurrency = 3

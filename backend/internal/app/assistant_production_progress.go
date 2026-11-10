@@ -7,6 +7,7 @@ import (
 
 	"gorm.io/gorm"
 	"infinite-canvas/backend/internal/assistantturns"
+	"infinite-canvas/backend/internal/canvas"
 	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/operations"
 )
@@ -112,9 +113,7 @@ func (s *Service) prepareAssistantProduction(tx *gorm.DB, receipt *model.Assista
 			failed = true
 			allSaved = false
 			if task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
-				if syncProductionNodeFailure(node, meta, task, key) {
-					changed = true
-				}
+				changed = syncProductionNodeFailure(meta, task, key, inspection.Projection.Outcome) || changed
 			}
 		case assistantturns.TargetBindingReady:
 			saved[target.NodeID] = true
@@ -162,28 +161,9 @@ func (s *Service) prepareAssistantProduction(tx *gorm.DB, receipt *model.Assista
 	return false, err
 }
 
-func syncProductionNodeFailure(node, meta map[string]any, task *model.Task, key string) bool {
-	if node == nil || task == nil {
-		return false
-	}
-	if meta == nil {
-		meta = map[string]any{}
-		node["metadata"] = meta
-	}
-	changed := false
-	for field, value := range map[string]any{
-		"taskId":                    task.ID,
-		"taskStatus":                string(task.Status),
-		"taskClientOperationId":     key,
-		"generationSubmissionState": "accepted",
-		"status":                    "error",
-		"error":                     task.Error,
-		"errorDetails":              task.Error,
-	} {
-		if meta[field] != value {
-			meta[field] = value
-			changed = true
-		}
-	}
-	return changed
+// Inspection only reports a failure for the node that still references the task.
+func syncProductionNodeFailure(meta map[string]any, task *model.Task, key string, outcome model.TaskOutcome) bool {
+	receiptChanged := meta["taskClientOperationId"] != key || meta["generationSubmissionState"] != "accepted"
+	meta["taskClientOperationId"], meta["generationSubmissionState"] = key, "accepted"
+	return canvas.ApplyTaskFailureMetadata(meta, canvas.TaskFailure{TaskID: task.ID, TaskStatus: string(task.Status), Message: task.Error, Outcome: outcome}) || receiptChanged
 }

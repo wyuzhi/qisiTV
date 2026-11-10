@@ -79,6 +79,12 @@ func ComputeOutcome(task model.Task, resultState string, facts OutcomeFacts) Out
 	return out("failed", regenerate, "task_failed")
 }
 
+// RegenerableFailure 是后端唯一的「失败后能在原节点重新生成」读法。
+// 进行中、可取回、正在核对扣费和已出结果的任务都继续占住节点。
+func RegenerableFailure(outcome Outcome) bool {
+	return outcome.Phase == "failed" && (outcome.Regenerate == "allowed" || outcome.Regenerate == "confirm")
+}
+
 // provablyNotSubmitted 只在持久证据能证明上游没有接到请求时成立。
 func provablyNotSubmitted(task model.Task, facts OutcomeFacts) bool {
 	if facts.ImageResponseAccepted || task.ProviderRequestID != "" {

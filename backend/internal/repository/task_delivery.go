@@ -79,6 +79,24 @@ func (r *Repository) SucceededTasksForDelivery(afterID string, limit int) ([]mod
 	return tasks, err
 }
 
+// FailedCanvasGenerationTasks returns one id-keyset page of failed or cancelled
+// canvas media generation tasks. Whether a node still shows them is decided by
+// the canvas write, not this query.
+func (r *Repository) FailedCanvasGenerationTasks(afterID string, limit int) ([]model.Task, error) {
+	if limit <= 0 {
+		limit = 64
+	}
+	query := r.db.Where("status IN ? AND type IN ? AND project_id <> ''",
+		[]model.TaskStatus{model.TaskStatusFailed, model.TaskStatusCancelled},
+		[]string{"canvas_image", "canvas_video", "canvas_audio"})
+	if afterID != "" {
+		query = query.Where("id > ?", afterID)
+	}
+	var tasks []model.Task
+	err := query.Order("id asc").Limit(limit).Find(&tasks).Error
+	return tasks, err
+}
+
 // UpdateCanvasBindRecovery stores or clears the background scanner's private
 // canvas bind marker on a succeeded task. recovery_outcome also holds media
 // recovery conclusions (no_result / unrecoverable), so this only replaces an

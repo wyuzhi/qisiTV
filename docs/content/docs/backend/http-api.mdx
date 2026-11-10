@@ -48,7 +48,7 @@ Wails 和浏览器开发模式共用同一套 `127.0.0.1` HTTP 合同。路由�
 
 `canvas.generation.propose` 是只读操作，返回的 `source` 包含 `canvasId`、`canvasRevision`、`modelConfigRevision`，`targets` 回显每个目标节点的实际草稿提示词、模型与生成参数；模型键与配置版本来自同一次配置读取。提案不创建生成任务。
 
-外部读写客户端的提议还返回 `nextAction`：由外部宿主审批后调用 `canvas.generation.submit`，提交 `canvasId`、1 至 8 个 `nodeIds`、`expectedRevision`、`expectedModelConfigRevision` 和稳定 `operationId`。两个版本分别来自提议的 `source.canvasRevision` 与 `source.modelConfigRevision`。此路径不依赖内置助手回合或确认卡，返回已受理的 `taskIds`、`nodeIds` 与画布新 `revision`；同键同参数回读原回执，过期版本、未就绪参考和已关联任务的目标拒绝。当前复用单节点单产物的制作准入；已有任务通过 `task.get` 和原任务恢复入口处理，不换键重复购买。历史只读凭据不能提交或回放写回执。
+外部读写客户端的提议还返回 `nextAction`：由外部宿主审批后调用 `canvas.generation.submit`，提交 `canvasId`、1 至 8 个 `nodeIds`、`expectedRevision`、`expectedModelConfigRevision` 和稳定 `operationId`。两个版本分别来自提议的 `source.canvasRevision` 与 `source.modelConfigRevision`。此路径不依赖内置助手回合或确认卡，返回已受理的 `taskIds`、`nodeIds` 与画布新 `revision`；同键同参数回读原回执，过期版本和未就绪参考拒绝。当前复用单节点单产物的制作准入。目标节点已关联任务时按该任务的 `outcome` 判断：只有 `phase=failed` 且 `regenerate` 为 `allowed` 或 `confirm` 时，清掉旧任务绑定，在原节点受理新任务（`confirm` 表示原任务可能已扣费，新任务另外计费）。原任务进行中、可取回、正在核对扣费或已出结果，以及节点上还有未落定的提交时，返回 `generation_task_exists`，`details.taskOutcome` 给出原任务结论；这些任务通过 `task.get` 和原任务恢复入口处理，不换键重复购买。历史只读凭据不能提交或回放写回执。
 
 整片提案可用 `productionNodeIds` 列出全部 1–24 项图片、视频和音频草稿，`nodeIds` 仅列首批依赖已就绪的同类素材。返回的 `production.targets` 固定节点、模型、提示词、参数、参考节点与数量。界面 `POST /assistant/turns/:turnId/proposals/:proposalId/production` 接收 `{ canvasId, kind, nodeIds, targets }`，在一个业务事务中校验当前方案、保存原回合授权、创建首批既有任务及自动接续回执；只允许可信界面调用。重复确认复用原素材任务，不会重新付费。
 
