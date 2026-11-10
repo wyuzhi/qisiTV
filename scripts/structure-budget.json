@@ -1,10 +1,12 @@
 {
-  "appLines": 9487,
+  "appLines": 9455,
   "largeFiles": {
     "backend/internal/handler/project.go": 1029,
-    "backend/internal/protocol/manifest.go": 1575,
+    "backend/internal/protocol/manifest.go": 1555,
     "backend/internal/repository/project_mutate.go": 1348,
     "backend/internal/repository/repository.go": 2293,
+    "plugin-packages/beeftv-plugin-character-replacement/client/index.js": 1701,
+    "plugin-packages/beeftv-plugin-ysdui/client/index.js": 1414,
     "web/src/components/canvas/canvas-timeline-dialog.tsx": 1010,
     "web/src/components/canvas/director/canvas-director-workbench.tsx": 2217,
     "web/src/components/canvas/director/director-viewport.tsx": 2102,
@@ -13,10 +15,10 @@
     "web/src/lib/canvas/libtv-original-layout.ts": 1026,
     "web/src/pages/assets/index.tsx": 1717,
     "web/src/pages/canvas/project.tsx": 1985,
-    "web/src/pages/canvas/use-canvas-upload.ts": 1077,
+    "web/src/pages/canvas/use-canvas-upload.ts": 1042,
     "web/src/pages/create/index.tsx": 1242,
     "web/src/services/local-workspace-repository.ts": 1163,
-    "web/src/styles/globals.css": 20819,
+    "web/src/styles/globals.css": 20814,
     "web/src/styles/workspace-product.css": 1565
   },
   "modelLiterals": 583,
