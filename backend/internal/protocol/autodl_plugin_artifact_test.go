@@ -205,6 +205,80 @@ func TestAutoDLPluginArtifact(t *testing.T) {
 		t.Fatalf("zm_u08 square body = %#v", bodyZMU08Square)
 	}
 
+	for _, workflow := range pkg.Manifest.Contributes.Workflows {
+		if workflow.Capability != CapabilityVideo {
+			continue
+		}
+		var allowed map[string]struct{}
+		var hasSquare, has1080, has736 bool
+		for _, param := range workflow.Parameters {
+			if param.Name == "resolution" && len(param.Values) > 0 {
+				allowed = make(map[string]struct{}, len(param.Values))
+				for _, val := range param.Values {
+					allowed[val] = struct{}{}
+					if len(val) >= 5 && val[len(val)-5:] == "(1:1)" {
+						hasSquare = true
+					}
+					if len(val) >= 5 && val[:5] == "1080p" {
+						has1080 = true
+					}
+					if len(val) >= 4 && val[:4] == "736p" {
+						has736 = true
+					}
+				}
+				break
+			}
+		}
+		if len(allowed) == 0 {
+			continue
+		}
+		for _, bareRes := range []string{"480p", "720p", "1080p", "1440p", "2160p", "2k", "4k"} {
+			for _, ratio := range []string{"16:9", "9:16", "1:1"} {
+				expectedDir := "竖"
+				if ratio == "16:9" {
+					expectedDir = "横"
+				} else if ratio == "1:1" && hasSquare {
+					expectedDir = "(1:1)"
+				}
+				expectedTier := "768p"
+				if has736 {
+					expectedTier = "736p"
+				} else if bareRes == "480p" {
+					expectedTier = "480p"
+				} else if bareRes != "720p" && has1080 {
+					expectedTier = "1080p"
+				}
+				expectedRes := expectedTier + expectedDir
+				if _, ok := allowed[expectedRes]; !ok {
+					t.Fatalf("workflow %s manifest values %v missing expected %q for (%s, %s)", workflow.ID, allowed, expectedRes, bareRes, ratio)
+				}
+				spec, err := adapter.BuildCreate(context.Background(), RequestContext{
+					BaseURL: "https://autodl.art",
+					Request: GenerationRequest{
+						Model:       workflow.ID,
+						Prompt:      "consistency check",
+						Duration:    5,
+						Resolution:  bareRes,
+						AspectRatio: ratio,
+						Images:      []MediaReference{{URL: "https://cdn.example/img0.png"}, {URL: "https://cdn.example/img1.png"}},
+						Audios:      []MediaReference{{URL: "https://cdn.example/aud0.mp3"}},
+					},
+				})
+				if err != nil {
+					t.Fatalf("workflow %s (%s, %s) BuildCreate error: %v", workflow.ID, bareRes, ratio, err)
+				}
+				bodyMap, ok := spec.Body.(map[string]any)
+				if !ok {
+					t.Fatalf("workflow %s body type = %T", workflow.ID, spec.Body)
+				}
+				gotRes, _ := bodyMap["resolution"].(string)
+				if gotRes != expectedRes {
+					t.Fatalf("workflow %s (%s, %s) resolved resolution = %q, want %q", workflow.ID, bareRes, ratio, gotRes, expectedRes)
+				}
+			}
+		}
+	}
+
 	failed, err := adapter.ParseCreate(context.Background(), []byte(`{"code":"RequestParameterIsWrong","data":null,"msg":"参数: resolution 的值: 768P 不在 options 列表中"}`))
 	if err != nil || failed.Status != StatusFailed || failed.Message == "" {
 		t.Fatalf("failed = %#v, err = %v", failed, err)

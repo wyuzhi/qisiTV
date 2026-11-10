@@ -174,7 +174,7 @@ export function mergeFetchedChannelModelProfiles(channel: ModelChannel, catalog:
                 continue;
             }
             if (sourcedImage) {
-                next.push({ ...existing, model: item.id, capability: "image", protocol: inferredProtocol || existing.protocol || "openai-image", ...(item.displayName ? { displayName: item.displayName } : {}), capabilityConfig: { version: 1, image: sourcedImage }, imageCapabilitiesVersion: item.imageCapabilitiesVersion });
+                next.push({ ...existing, model: item.id, capability: "image", protocol: inferredProtocol || existing.protocol || "openai-image", ...(item.displayName ? { displayName: item.displayName } : {}), capabilitySource: undefined, capabilityConfig: { version: 1, image: sourcedImage }, imageCapabilitiesVersion: item.imageCapabilitiesVersion });
                 continue;
             }
             const protocol = inferredProtocol || existing.protocol;
@@ -201,6 +201,7 @@ export function mergeFetchedChannelModelProfiles(channel: ModelChannel, catalog:
                 ...(item.displayName ? { displayName: item.displayName } : {}),
                 capability,
                 ...(protocol ? { protocol } : {}),
+                ...(capabilityChanged || sourcedVideo || missingManagedVideo ? { capabilitySource: undefined } : {}),
                 ...(patchCapabilityConfig || capabilityChanged || sourcedVideo || keepSourced || missingManagedVideo ? { capabilityConfig } : {}),
                 ...(missingManagedVideo ? { videoCapabilitiesVersion: undefined } : {}),
                 ...(sourcedVideo ? { videoCapabilitiesVersion: item.videoCapabilitiesVersion ?? "" } : {}),

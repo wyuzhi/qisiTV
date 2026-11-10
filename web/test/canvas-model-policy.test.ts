@@ -210,8 +210,8 @@ describe("逻辑模型选择", () => {
         const profile = defaultModelCapabilityConfig("autodl-comfyui", "minimax_h3_lightx2v_no_pic");
         profile.video!.ratios = [];
         profile.video!.defaultRatio = "";
-        profile.video!.resolutions = ["480p竖", "480p横"];
-        profile.video!.defaultResolution = "480p竖";
+        profile.video!.resolutions = ["480p竖", "768p竖", "480p横", "768p横"];
+        profile.video!.defaultResolution = "768p竖";
         const config: AiConfig = {
             ...defaultConfig,
             size: "16:9",
@@ -227,7 +227,19 @@ describe("逻辑模型选择", () => {
         const generationConfig = buildGenerationConfig(config, videoNode, "video");
 
         expect(generationConfig.size).toBe("");
-        expect(generationConfig.vquality).toBe("480p竖");
+        expect(generationConfig.vquality).toBe("768p竖");
+
+        const existing720Node = { ...node("video-720", CanvasNodeType.Video), metadata: { model, generationMode: "video" as const, size: "16:9", vquality: "720" } };
+        expect(buildGenerationConfig(config, existing720Node, "video")).toMatchObject({ size: "", vquality: "768p横" });
+
+        const existing480Node = { ...node("video-480", CanvasNodeType.Video), metadata: { model, generationMode: "video" as const, size: "16:9", vquality: "480" } };
+        expect(buildGenerationConfig(config, existing480Node, "video")).toMatchObject({ size: "", vquality: "480p横" });
+
+        profile.video!.resolutions = ["480p竖", "768p竖", "1080p竖", "480p横", "768p横", "1080p横"];
+        for (const highTier of ["1080", "1440", "2160", "2k", "4k"]) {
+            const highTierNode = { ...node(`video-${highTier}`, CanvasNodeType.Video), metadata: { model, generationMode: "video" as const, size: "16:9", vquality: highTier } };
+            expect(buildGenerationConfig(config, highTierNode, "video")).toMatchObject({ size: "", vquality: "1080p横" });
+        }
     });
 
     test("后台标注的视频模型不因内部标识缺少视频关键词而回退", () => {

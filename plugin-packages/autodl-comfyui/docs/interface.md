@@ -22,7 +22,7 @@
 | `model` | string | URL `{workflow_id}` | 必须是清单中工作流 ID。 |
 | `prompt` | string | `prompt` | `minimax_h3_image_audio_to_video` 工作流不发送。 |
 | `duration` | integer | `duration` / `audio_duration` | 单图音频同步工作流使用 `audio_duration`。 |
-| `resolution` | string | `resolution` | 转小写后发送。 |
+| `resolution` | string | `resolution` | 已带方向的枚举值转小写后发送；纯清晰度档位（`480p` / `720p` / `1080p`）按 `aspectRatio` 映射为工作流支持的方向枚举（如 `480p横`、`768p竖`、`736p(1:1)`）。 |
 | `images[role=first_frame]` | media | `first_frame` | 首帧工作流优先按 role 选择；旧无 role 请求才按 order 回退。 |
 | `images[role=last_frame]` | media | `last_frame` | 尾帧工作流优先按 role 选择；旧无 role 请求才按 order 回退。 |
 | 普通参考图 | media[] | `ref_image_0` … `ref_image_8` | 过滤 `reference_image/subject_reference/style_reference/edit_source` 后按 order 编号。 |

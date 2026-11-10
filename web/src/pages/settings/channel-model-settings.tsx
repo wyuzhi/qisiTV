@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, App, Button, Popconfirm, Segmented, Tag, Tooltip } from "antd";
 import { ReferenceMediaTransportFields } from "./reference-media-transport-fields";
 import { ChevronRight, FlaskConical, Settings2 } from "lucide-react";
@@ -45,6 +45,8 @@ export function ChannelModelSettings({
     const [availableProtocols, setAvailableProtocols] = useState<ModelProtocolDefinition[]>([]);
     const { receipts, record } = useModelConnectionTests();
     const testResult = activeModel ? currentModelConnectionReceipt(receipts, channel, activeModel) : undefined;
+    const channelRef = useRef(channel);
+    channelRef.current = channel;
 
     useEffect(() => {
         let active = true;
@@ -89,16 +91,17 @@ export function ChannelModelSettings({
     };
 
     const updateProfile = (model: string, patch: Partial<ModelProfile>, syncSameCapabilityUnconfigured = false) => {
-        const current = channel.modelProfiles?.find((item) => item.model === model) || buildDefaultProfile(model);
+        const liveChannel = channelRef.current;
+        const current = liveChannel.modelProfiles?.find((item) => item.model === model) || buildDefaultProfile(model);
         const nextProfile = { ...current, ...patch, model };
         // 协议或能力切换会重写为默认参数；只有编辑器里的手动修改才保留「用户声明」标记。
         if ("capabilityConfig" in patch && !("capabilitySource" in patch)) nextProfile.capabilitySource = undefined;
         const authType = "protocol" in patch ? modelProtocolDefinition(nextProfile.protocol, availableProtocols)?.authType : nextProfile.authType;
         if ("protocol" in patch) nextProfile.authType = authType;
-        const byModel = new Map((channel.modelProfiles || []).map((item) => [item.model, item]));
+        const byModel = new Map((liveChannel.modelProfiles || []).map((item) => [item.model, item]));
         byModel.set(model, nextProfile);
         if (syncSameCapabilityUnconfigured && nextProfile.protocol && nextProfile.capability) {
-            for (const rawModel of channel.models) {
+            for (const rawModel of liveChannel.models) {
                 const sibling = modelOptionName(rawModel);
                 if (sibling === model) continue;
                 const existing = byModel.get(sibling) || buildDefaultProfile(sibling);
@@ -118,8 +121,9 @@ export function ChannelModelSettings({
                 }
             }
         }
-        const next = [...byModel.values()];
-        onChange(next.filter((item) => channel.models.includes(item.model)));
+        const next = [...byModel.values()].filter((item) => liveChannel.models.includes(item.model));
+        channelRef.current = { ...liveChannel, modelProfiles: next };
+        onChange(next);
     };
 
     const refreshBackendCapability = (
@@ -139,8 +143,14 @@ export function ChannelModelSettings({
             capabilityConfig,
         })
             .then((normalized) => {
-                const latest = channel.modelProfiles?.find((item) => item.model === model);
-                if (latest?.capabilitySource === "user") return;
+                const latest = channelRef.current.modelProfiles?.find((item) => item.model === model);
+                if (
+                    latest?.capabilitySource === "user" ||
+                    (latest?.capability && latest.capability !== capability) ||
+                    (latest?.protocol && latest.protocol !== protocol)
+                ) {
+                    return;
+                }
                 const resolved = normalized.capabilityConfig || normalized;
                 if (resolved && typeof resolved.version === "number" && (resolved.video || resolved.image || resolved.text)) {
                     updateProfile(model, { protocol, capability, capabilityConfig: resolved });

@@ -547,7 +547,7 @@ export function normalizeVideoValue(profile: VideoCapabilityConfig, value: { sec
     const duration = profile.duration.selection === "enum" ? ((profile.duration.values || []).includes(Number(value.seconds)) ? Number(value.seconds) : profile.duration.default) : normalizeRangeDuration(profile, Number(value.seconds));
     const ratio = resolveVideoRatioValue(profile, value.ratio);
     // 前端状态历史上保存过 `720`，而能力配置和供应商通常使用 `720p`；统一按能力中的原始值返回，避免被误判为不支持。
-    const resolution = resolveVideoResolutionValue(profile, value.resolution);
+    const resolution = resolveVideoResolutionValue(profile, value.resolution, value.ratio);
     return { seconds: String(duration), ratio, resolution };
 }
 
@@ -555,26 +555,53 @@ export function resolveVideoRatioValue(profile: VideoCapabilityConfig, value: st
     return profile.ratios.includes(value || "") ? value! : profile.defaultRatio || profile.ratios[0] || "";
 }
 
-export function resolveVideoResolutionValue(profile: VideoCapabilityConfig, value: string | undefined) {
-    return videoResolutionRequest(profile, value) || profile.defaultResolution || profile.resolutions[0] || "";
+export function resolveVideoResolutionValue(profile: VideoCapabilityConfig, value: string | undefined, ratio?: string) {
+    return videoResolutionRequest(profile, value, ratio) || profile.defaultResolution || profile.resolutions[0] || "";
 }
 
-export function videoResolutionRequest(profile: VideoCapabilityConfig, value: string | undefined) {
+export function videoResolutionRequest(profile: VideoCapabilityConfig, value: string | undefined, ratio?: string) {
     const requested = String(value || "")
         .trim()
         .toLowerCase();
-    if (!requested || requested === "auto" || requested === "default" || requested === "medium" || requested === "high") return undefined;
-    const candidates = [requested];
-    if (/^\d+$/.test(requested)) candidates.push(`${requested}p`);
-    if (requested === "low") candidates.push("480p");
-    if (requested === "2k") candidates.push("1440p");
-    if (requested === "1440" || requested === "1440p") candidates.push("2k");
-    if (requested === "4k") candidates.push("2160p");
-    if (requested === "2160" || requested === "2160p") candidates.push("4k");
     const supported = new Map(profile.resolutions.map((resolution) => [resolution.trim().toLowerCase(), resolution.trim()]));
-    for (const candidate of candidates) {
-        const match = supported.get(candidate);
-        if (match) return match;
+    if (requested && requested !== "auto" && requested !== "default" && requested !== "medium" && requested !== "high") {
+        const candidates = [requested];
+        if (/^\d+$/.test(requested)) candidates.push(`${requested}p`);
+        if (requested === "low") candidates.push("480p");
+        if (requested === "2k") candidates.push("1440p");
+        if (requested === "1440" || requested === "1440p") candidates.push("2k");
+        if (requested === "4k") candidates.push("2160p");
+        if (requested === "2160" || requested === "2160p") candidates.push("4k");
+        for (const candidate of candidates) {
+            const match = supported.get(candidate);
+            if (match) return match;
+        }
+    }
+    if (!profile.ratios.length) {
+        const rawRatio = String(ratio || "").trim();
+        const tierMap: Record<string, string[]> = {
+            "480": ["480p"], "480p": ["480p"], low: ["480p"],
+            "720": ["720p", "768p", "736p"], "720p": ["720p", "768p", "736p"], medium: ["720p", "768p", "736p"],
+            "736": ["736p", "768p", "720p"], "736p": ["736p", "768p", "720p"],
+            "768": ["768p", "736p", "720p"], "768p": ["768p", "736p", "720p"],
+            "1080": ["1080p", "768p", "736p"], "1080p": ["1080p", "768p", "736p"], high: ["1080p", "768p", "736p"],
+            "1440": ["1080p", "768p", "736p"], "1440p": ["1080p", "768p", "736p"], "2k": ["1080p", "768p", "736p"],
+            "2160": ["1080p", "768p", "736p"], "2160p": ["1080p", "768p", "736p"], "4k": ["1080p", "768p", "736p"],
+        };
+        const defaultTierMatch = profile.defaultResolution.trim().toLowerCase().match(/^(\d+p)/);
+        const defaultTiers = defaultTierMatch ? (tierMap[defaultTierMatch[1]] || [defaultTierMatch[1]]) : ["768p", "736p", "1080p", "480p"];
+        const tiers = tierMap[requested] || (rawRatio ? defaultTiers : undefined);
+        if (tiers) {
+            const defaultDir = profile.defaultResolution.endsWith("横") ? "横" : profile.defaultResolution.endsWith("(1:1)") ? "(1:1)" : "竖";
+            const primaryDir = rawRatio === "16:9" || rawRatio === "4:3" || rawRatio === "21:9" || rawRatio === "3:2" ? "横" : rawRatio === "1:1" ? "(1:1)" : rawRatio ? "竖" : defaultDir;
+            const dirs = [primaryDir, ...["竖", "横", "(1:1)"].filter((dir) => dir !== primaryDir)];
+            for (const tier of [...tiers, ...defaultTiers, "768p", "736p", "1080p", "480p"]) {
+                for (const dir of dirs) {
+                    const match = supported.get(`${tier}${dir}`);
+                    if (match) return match;
+                }
+            }
+        }
     }
     return undefined;
 }

@@ -248,8 +248,8 @@ export default function CreatePage() {
         // 优先恢复用户上次选择；只有当前模型不支持该值时，normalizeVideoValue 才回退到模型默认值。
         const normalized = normalizeVideoValue(videoProfile, {
             seconds: saved?.seconds || String(videoProfile.duration.default),
-            ratio: saved?.ratio || videoProfile.defaultRatio,
-            resolution: saved?.videoQuality || videoProfile.defaultResolution,
+            ratio: saved?.ratio,
+            resolution: saved?.videoQuality,
         });
         setSeconds(normalized.seconds);
         setRatio(normalized.ratio);

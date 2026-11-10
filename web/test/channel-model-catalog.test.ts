@@ -321,12 +321,20 @@ describe("public channel model catalog", () => {
         });
 
         const merged = mergeFetchedChannelModelProfiles(channel, [
-            { id: "wan3", modelType: "video", supportedEndpointTypes: ["openai-video"], options: { durationSeconds: [{ value: "5" }, { value: "10" }, { value: "15" }] } },
+            { id: "wan3", displayName: "Wan 3.0 Video", modelType: "video", supportedEndpointTypes: ["openai-video"], options: { durationSeconds: [{ value: "5" }, { value: "10" }, { value: "15" }] } },
         ]);
 
+        expect(merged[0]?.displayName).toBe("Wan 3.0 Video");
         expect(merged[0]?.capabilitySource).toBe("user");
         expect(merged[0]?.capabilityConfig?.video?.duration.max).toBe(30);
         expect(videoDurationOptions(merged[0]!.capabilityConfig!.video!)).toContain(30);
+
+        const changedCapability = mergeFetchedChannelModelProfiles(channel, [
+            { id: "wan3", modelType: "text", supportedEndpointTypes: ["openai"] },
+        ]);
+        expect(changedCapability[0]?.capability).toBe("text");
+        expect(changedCapability[0]?.capabilitySource).toBeUndefined();
+        expect(changedCapability[0]?.capabilityConfig).toBeUndefined();
     });
 
     test("preserves six public capabilities without expanding compatibility IDs", async () => {
