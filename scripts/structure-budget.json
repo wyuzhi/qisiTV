@@ -1,5 +1,5 @@
 {
-  "appLines": 9455,
+  "appLines": 9460,
   "largeFiles": {
     "backend/internal/handler/project.go": 1029,
     "backend/internal/protocol/manifest.go": 1555,

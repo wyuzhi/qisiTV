@@ -26,6 +26,11 @@ func persistedFailureBlocksRetry(message string, stage string) bool {
 	return generation.PersistedFailureBlocksRetry(message, stage)
 }
 
+// ProviderFailureCategory exposes the server-side category for a provider response.
+func (s *Service) ProviderFailureCategory(status int, statusText string, body string) string {
+	return string(generation.ClassifyHTTP(status, statusText, body).Category)
+}
+
 func (s *Service) UserFacingProviderHTTPError(status int, statusText string, body string) string {
 	message := generation.ClassifyHTTP(status, statusText, body).UserMessage()
 	if s == nil {

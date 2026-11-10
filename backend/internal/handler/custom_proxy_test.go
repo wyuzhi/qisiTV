@@ -253,6 +253,57 @@ func TestCustomRelayRejectsOversizedDeclaredBodyBeforeConnecting(t *testing.T) {
 	}
 }
 
+func TestCustomRelayReportsProviderFailureCategory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"error":{"code":"billing_hard_limit_reached","message":"billing hard limit reached"}}`)
+	}))
+	defer upstream.Close()
+	useCustomRelayTestClient(t, upstream.Client())
+	t.Setenv("CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS", "127.0.0.1")
+
+	request := httptest.NewRequest(http.MethodPost, "/api/ai/custom", strings.NewReader(`{"model":"test"}`))
+	request.Header.Set("Authorization", "Bearer test-key")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Canvas-Upstream-URL", upstream.URL+"/v1/responses")
+	request.Header.Set("X-Canvas-Upstream-Format", "openai")
+	prepareRelayTestRequest(t, request)
+	response := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(response)
+	context.Request = request
+
+	proxyCustomRelayRequestWithService(context, defaultCustomRelayTestPolicy(), relayCategoryStub{})
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if category := response.Header().Get("X-Canvas-Failure-Category"); category != "quota_upstream" {
+		t.Fatalf("X-Canvas-Failure-Category = %q, body = %s", category, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), "billing_hard_limit_reached") {
+		t.Fatalf("upstream body should be forwarded, got %s", response.Body.String())
+	}
+}
+
+// relayCategoryStub supplies only the relay methods used by the proxy error path
+// and delegates classification to the real Service implementation.
+type relayCategoryStub struct {
+	customRelays
+}
+
+func (relayCategoryStub) ResolveCustomRelayAPIKey(_ string, incoming string) (string, error) {
+	return incoming, nil
+}
+
+func (relayCategoryStub) InterceptResponseText(raw string) string {
+	return raw
+}
+
+func (relayCategoryStub) ProviderFailureCategory(status int, statusText string, body string) string {
+	return (*app.Service)(nil).ProviderFailureCategory(status, statusText, body)
+}
+
 func useCustomRelayTestClient(t *testing.T, client *http.Client) {
 	t.Helper()
 	previous := customRelayClient

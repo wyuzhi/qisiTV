@@ -400,6 +400,14 @@ function classifyUnknown(error: unknown, context: GenerationFailureContext): Cla
     if (!error) return { category: "unknown", retryable: false };
     if (typeof error === "object" && error) {
         const record = error as Record<string, unknown>;
+        // The custom relay backend classifies upstream bodies itself; use that
+        // category instead of re-reading provider text with local rules.
+        if (record.name === "ChannelResponseError" && typeof record.category === "string") {
+            const category = record.category.trim();
+            if ((GENERATION_ERROR_CATEGORIES as readonly string[]).includes(category)) {
+                return { category: category as GenerationErrorCategory, status: numericStatus(record.status), fromCode: true, retryable: retryableCategory(category as GenerationErrorCategory) };
+            }
+        }
         if (record.reason === "local_credential_failed") return { category: "local_credential", status: numericStatus(record.status), fromCode: true, retryable: false };
         if (record.reason === "local_disk_full") return { category: "local_disk_full", status: numericStatus(record.status), fromCode: true, retryable: false };
         if (record.reason === "local_storage_failed") return { category: "local_storage", ...LOCAL_TASK_ADMISSION_FAILURE, fromCode: true, retryable: false };

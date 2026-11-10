@@ -550,7 +550,7 @@ func desktopCORSMiddleware() gin.HandlerFunc {
 			c.Header("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers")
 		}
 		c.Header("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Traceparent, X-Desktop-Token, X-Beeftv-UI-Bootstrap, X-Beeftv-Ui-Session, X-Canvas-Trace-ID, X-Idempotency-Key, X-Canvas-Scene, X-Canvas-Upstream-URL, X-Canvas-Upstream-Format, X-Canvas-Upstream-Base-URL, X-Canvas-Upstream-Headers")
-		c.Header("Access-Control-Expose-Headers", "X-Request-ID, X-Canvas-Trace-ID, X-Diagnostic-Bundle-ID, X-Diagnostic-Schema-Version")
+		c.Header("Access-Control-Expose-Headers", "X-Request-ID, X-Canvas-Trace-ID, X-Diagnostic-Bundle-ID, X-Diagnostic-Schema-Version, X-Canvas-Failure-Category")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)

@@ -14,16 +14,19 @@ export class ChannelResponseError extends Error {
     readonly code: string;
     readonly status?: number;
     readonly requestId?: string;
+    readonly category?: string;
     readonly data: { error: { code: string; message: string }; request_id?: string };
 
-    constructor(payload: unknown, status?: number) {
-        const explanation = explainGenerationError(status ? { status, data: payload } : payload);
+    constructor(payload: unknown, status?: number, category?: string) {
+        const headerCategory = category?.trim() || undefined;
+        const explanation = explainGenerationError(status || headerCategory ? { status, data: payload, category: headerCategory, name: "ChannelResponseError" } : payload);
         super(explanation.message);
         preserveGenerationFailure(this, explanation);
         this.name = "ChannelResponseError";
         this.code = explanation.providerCode || explanation.errorCode;
         this.status = status;
         this.requestId = explanation.requestId;
+        this.category = headerCategory;
         this.data = { error: { code: this.code, message: this.message }, request_id: this.requestId };
     }
 }
@@ -71,7 +74,8 @@ export async function normalizeChannelFailure(error: unknown): Promise<never> {
     if (!axios.isAxiosError(error)) throw error;
     const data = error.response?.data;
     const payload = data instanceof Blob ? await boundedBlobPayload(data) : (data ?? error.message);
-    throw new ChannelResponseError(payload, error.response?.status);
+    const category = error.response?.headers?.["x-canvas-failure-category"];
+    throw new ChannelResponseError(payload, error.response?.status, typeof category === "string" ? category : undefined);
 }
 
 async function channelResponse<T>(request: Promise<{ data: T; status: number }>, acceptEventStream = false): Promise<T> {

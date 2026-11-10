@@ -210,6 +210,8 @@ import {
     unchangedModeratedPrompt,
 } from "../src/lib/generation-error";
 import { readFetchError, readStatusError } from "../src/services/api/image-response";
+import { ChannelResponseError, normalizeChannelFailure } from "../src/services/api/channel-transport";
+import { AxiosError } from "axios";
 import gatewayCodes from "../../fixtures/generation-error-codes.json";
 
 describe("generation error classification", () => {
@@ -667,4 +669,21 @@ test("third-party gateway channel_excluded and generic invalid_request_error wra
     const authoritativeType = explainGenerationError(`{"error":{"message":"Your account quota is exhausted (request id: req_inner_123456)","type":"model_capability_not_supported","code":"invalid_request_error"}} (request id: req_outer_654321)`);
     expect(authoritativeType.category).toBe("invalid_params");
     expect(authoritativeType.requestId).toBe("req_outer_654321");
+});
+
+test("custom relay failure header overrides local provider-text classification", async () => {
+    const data = { error: { code: "content_policy_violation", message: "blocked by content safety policy" } };
+    const config = { headers: {} } as never;
+    const response = { config, data, status: 429, statusText: "Too Many Requests", headers: { "x-canvas-failure-category": "quota_upstream" } };
+    try {
+        await normalizeChannelFailure(new AxiosError("rejected", "ERR_BAD_RESPONSE", config, undefined, response));
+        throw new Error("normalized a rejected response");
+    } catch (error) {
+        expect(error).toBeInstanceOf(ChannelResponseError);
+        expect((error as ChannelResponseError).category).toBe("quota_upstream");
+        const explained = explainGenerationError(error);
+        expect(explained.category).toBe("quota_upstream");
+        expect(explained.reason).toContain("供应商");
+        expect(explained.reason).not.toContain("内容安全");
+    }
 });
