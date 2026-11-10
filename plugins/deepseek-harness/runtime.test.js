@@ -249,15 +249,19 @@ async function startHost(context, options = {}) {
     await fsPromises.rm(home, { recursive: true, force: true })
   })
   // Raw request targets reach the Host exactly as written, like a hand-built request would.
+  // Bodies always declare their length: Node sends a DELETE body without Content-Length,
+  // so the server would read it as the start of the next request on the kept-alive socket.
   function call(method, path, body) {
+    const payload = body === undefined ? undefined : JSON.stringify(body)
+    const headers = payload === undefined ? {} : { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) }
     return new Promise((resolve, reject) => {
-      const request = httpRequest({ host: '127.0.0.1', port: front.address().port, method, path, headers: body === undefined ? {} : { 'content-type': 'application/json' } }, response => {
+      const request = httpRequest({ host: '127.0.0.1', port: front.address().port, method, path, headers }, response => {
         const chunks = []
         response.on('data', chunk => chunks.push(chunk))
         response.on('end', () => resolve({ status: response.statusCode, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) }))
       })
       request.once('error', reject)
-      request.end(body === undefined ? undefined : JSON.stringify(body))
+      request.end(payload)
     })
   }
   return { call, calls, workspace, listeners, prompt: view => prompt(view) }
