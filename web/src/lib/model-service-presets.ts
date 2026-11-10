@@ -4,8 +4,9 @@ import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
 import { inferProtocolCapabilityFromModel, modelProtocolDefinition, modelProtocolDefinitionFor, type ModelProtocolDefinition } from "@/lib/model-protocols";
 import { catalogEndpointCapability, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
 import { serviceCredentialGuide } from "@/lib/service-credentials";
-import { DEFAULT_BASE_URL as LL2_DEFAULT_BASE_URL, LL2_CHANNEL_ID, LL2_CHANNEL_NAME, LL2_PRESET_MODELS, buildLL2ModelChannel, upgradeLL2ModelProfile } from "../../../plugin-packages/beeftv-plugin-ll2/client/index.js";
-import { DEFAULT_BASE_URL as YSDUI_DEFAULT_BASE_URL, YSDUI_CHANNEL_ID, YSDUI_CHANNEL_NAME, YSDUI_PRESET_MODELS, buildYsduiModelChannel, upgradeYsduiModelProfile } from "../../../plugin-packages/beeftv-plugin-ysdui/client/index.js";
+import { BUILTIN_PRESETS, COMPATIBLE_CANDIDATES, builtinPreset, builtinProtocolsAvailable, upgradeBuiltinModelProfile } from "@/lib/builtin-service-presets";
+import { DEFAULT_BASE_URL as LL2_DEFAULT_BASE_URL, LL2_CHANNEL_ID, LL2_CHANNEL_NAME } from "../../../plugin-packages/beeftv-plugin-ll2/client/index.js";
+import { DEFAULT_BASE_URL as YSDUI_DEFAULT_BASE_URL, YSDUI_CHANNEL_ID, YSDUI_CHANNEL_NAME } from "../../../plugin-packages/beeftv-plugin-ysdui/client/index.js";
 
 export const MODEL_SERVICE_PRESETS = [
     { id: "compatible", name: "第三方模型服务", subtitle: "OpenAI 兼容 API · 中转服务", icon: "OpenAI", baseUrl: "", apiFormat: "openai" },
@@ -20,13 +21,15 @@ export const CAPABILITY_LABELS: Record<ModelCapability, string> = { text: "文�
 
 /** 预设自带的模型数量；用于设置页说明文案，不再从渠道对象上读。 */
 export function presetModelCount(id: ModelServicePresetId): number {
-    if (id === LL2_CHANNEL_ID) return LL2_PRESET_MODELS.length;
-    if (id === YSDUI_CHANNEL_ID) return YSDUI_PRESET_MODELS.length;
-    return 0;
+    return builtinPreset(id)?.models.length ?? 0;
 }
 
-export function isBuiltinPresetService(id: ModelServicePresetId): id is typeof LL2_CHANNEL_ID | typeof YSDUI_CHANNEL_ID {
-    return id === LL2_CHANNEL_ID || id === YSDUI_CHANNEL_ID;
+export function builtinPresetDescription(id: ModelServicePresetId): string {
+    return builtinPreset(id)?.presetDescription ?? "";
+}
+
+export function isBuiltinPresetService(id: ModelServicePresetId): boolean {
+    return Boolean(builtinPreset(id));
 }
 
 export function isTopazUpscaleChannel(channel: Pick<ModelChannel, "id" | "models">): boolean {
@@ -34,14 +37,12 @@ export function isTopazUpscaleChannel(channel: Pick<ModelChannel, "id" | "models
 }
 
 export function servicePresetFor(channel: ModelChannel): ModelServicePresetId {
-    if (channel.id === LL2_CHANNEL_ID) return LL2_CHANNEL_ID;
-    if (channel.id === YSDUI_CHANNEL_ID) return YSDUI_CHANNEL_ID;
+    if (builtinPreset(channel.id)) return channel.id as ModelServicePresetId;
     try {
         const host = new URL(channel.baseUrl).hostname;
-        const ll2Host = new URL(LL2_DEFAULT_BASE_URL).hostname;
-        const ysduiHost = new URL(YSDUI_DEFAULT_BASE_URL).hostname;
-        if (host === ll2Host || host.endsWith(".ll2.cn")) return LL2_CHANNEL_ID;
-        if (host === ysduiHost || host === "ysdui.cn" || host.endsWith(".ysdui.cn")) return YSDUI_CHANNEL_ID;
+        for (const [id, plugin] of Object.entries(BUILTIN_PRESETS)) {
+            if (plugin.hosts.includes(host) || plugin.hostSuffixes.some((suffix) => host.endsWith(suffix))) return id as ModelServicePresetId;
+        }
         if (host === "api.openai.com") return "openai";
         if (host === "generativelanguage.googleapis.com") return "gemini";
         if (/^ark\.[a-z0-9-]+\.(?:volces|bytepluses)\.com$/.test(host)) return "ark";
@@ -50,8 +51,7 @@ export function servicePresetFor(channel: ModelChannel): ModelServicePresetId {
 }
 
 export function presetCatalogFor(id: ModelServicePresetId): ChannelModelCatalogItem[] {
-    const models = id === LL2_CHANNEL_ID ? LL2_PRESET_MODELS : id === YSDUI_CHANNEL_ID ? YSDUI_PRESET_MODELS : [];
-    return models.map((item) => ({
+    return (builtinPreset(id)?.models ?? []).map((item) => ({
         id: item.model,
         displayName: item.displayName,
         modelType: item.capability as ModelCapability,
@@ -94,24 +94,19 @@ export function createPluginServiceChannel(service: ModelProtocolDefinition, cha
 }
 
 export function ll2ProtocolsAvailable(protocols: ModelProtocolDefinition[]): boolean {
-    return LL2_PRESET_MODELS.every((item) =>
-        protocols.some((protocol) => protocol.value === item.protocol && protocol.capability === item.capability && protocol.enabled !== false),
-    );
+    return builtinProtocolsAvailable(LL2_CHANNEL_ID, protocols);
 }
 
 export function ysduiProtocolsAvailable(protocols: ModelProtocolDefinition[]): boolean {
-    return YSDUI_PRESET_MODELS.every((item) =>
-        protocols.some((protocol) => protocol.value === item.protocol && protocol.capability === item.capability && protocol.enabled !== false),
-    );
+    return builtinProtocolsAvailable(YSDUI_CHANNEL_ID, protocols);
 }
 
 export function createServicePresetChannel(id: ModelServicePresetId, channelId: string, protocols?: ModelProtocolDefinition[]): ModelChannel {
     const preset = MODEL_SERVICE_PRESETS.find((item) => item.id === id)!;
-    if (isBuiltinPresetService(id)) {
-        const built = id === LL2_CHANNEL_ID
-            ? buildLL2ModelChannel({ apiKey: "", baseUrl: preset.baseUrl, selectedModels: undefined })
-            // 新建预设渠道时还没有旧渠道；已有渠道的自定义模型由插件自己的同步流程合并。
-            : buildYsduiModelChannel({ apiKey: "", baseUrl: preset.baseUrl, selectedModels: undefined, existingChannel: undefined });
+    const plugin = builtinPreset(id);
+    if (plugin) {
+        // 新建预设渠道时还没有旧渠道；已有渠道的自定义模型由插件自己的同步流程合并。
+        const built = plugin.buildChannel({ apiKey: "", baseUrl: preset.baseUrl, selectedModels: undefined, existingChannel: undefined });
         return {
             ...createModelChannel({ id: channelId, apiFormat: preset.apiFormat }),
             name: preset.name,
@@ -139,14 +134,9 @@ export function createServicePresetChannel(id: ModelServicePresetId, channelId: 
 // Endpoint metadata is a hint, only resolve to protocols the host actually offers.
 export function serviceModelProfile(channel: ModelChannel, item: ChannelModelCatalogItem, protocols: ModelProtocolDefinition[], explicitCapability?: ModelCapability): NonNullable<ModelChannel["modelProfiles"]>[number] {
     const preset = channel.apiFormat === "gemini" ? "gemini" : servicePresetFor(channel);
+    const plugin = builtinPreset(preset);
     const rawExisting = channel.modelProfiles?.find((profile) => profile.model === item.id);
-    const existing = rawExisting
-        ? preset === LL2_CHANNEL_ID
-            ? (upgradeLL2ModelProfile(rawExisting) as typeof rawExisting)
-            : preset === YSDUI_CHANNEL_ID
-                ? (upgradeYsduiModelProfile(rawExisting) as typeof rawExisting)
-                : rawExisting
-        : rawExisting;
+    const existing = rawExisting ? upgradeBuiltinModelProfile(rawExisting) : rawExisting;
     if (existing?.protocol && !explicitCapability) {
         const definition = modelProtocolDefinition(existing.protocol, protocols);
         const usable = definition && definition.enabled !== false ? definition : undefined;
@@ -159,44 +149,39 @@ export function serviceModelProfile(channel: ModelChannel, item: ChannelModelCat
         if (usable && (usable.value !== existing.protocol || usable.authType !== existing.authType || repairedCapabilityConfig !== existing.capabilityConfig)) {
             return { ...existing, protocol: usable.value, authType: usable.authType, capabilityConfig: repairedCapabilityConfig };
         }
-        if (usable || (!existing.protocol.startsWith("ll2-") && !existing.protocol.startsWith("ysdui-"))) return existing;
+        const currentProtocol = existing.protocol;
+        const fromBuiltin = plugin?.protocolPrefixes.some((prefix) => currentProtocol.startsWith(prefix)) ?? false;
+        if (usable || !fromBuiltin) return existing;
     }
-    const builtinPreset = preset === LL2_CHANNEL_ID
-        ? LL2_PRESET_MODELS.find((presetItem) => presetItem.model === item.id)
-        : preset === YSDUI_CHANNEL_ID
-            ? YSDUI_PRESET_MODELS.find((presetItem) => presetItem.model === item.id)
-            : undefined;
-    if (builtinPreset && (!explicitCapability || explicitCapability === builtinPreset.capability)) {
-        const definition = protocols.find((protocol) => protocol.value === builtinPreset.protocol && protocol.capability === builtinPreset.capability && protocol.enabled !== false);
+    const presetModel = plugin?.models.find((presetItem) => presetItem.model === item.id);
+    if (presetModel && (!explicitCapability || explicitCapability === presetModel.capability)) {
+        const definition = protocols.find((protocol) => protocol.value === presetModel.protocol && protocol.capability === presetModel.capability && protocol.enabled !== false);
         return {
             ...existing,
-            model: builtinPreset.model,
-            displayName: existing?.displayName || builtinPreset.displayName,
-            capability: builtinPreset.capability as ModelCapability,
+            model: presetModel.model,
+            displayName: existing?.displayName || presetModel.displayName,
+            capability: presetModel.capability as ModelCapability,
             protocol: definition?.value,
             authType: definition ? definition.authType : existing?.authType,
-            ...("defaultOptions" in builtinPreset && builtinPreset.defaultOptions ? { defaultOptions: builtinPreset.defaultOptions } : {}),
-            capabilityConfig: existing?.capability === builtinPreset.capability && existing?.capabilityConfig
+            ...("defaultOptions" in presetModel && presetModel.defaultOptions ? { defaultOptions: presetModel.defaultOptions } : {}),
+            capabilityConfig: existing?.capability === presetModel.capability && existing?.capabilityConfig
                 ? existing.capabilityConfig
-                : builtinPreset.capabilityConfig as NonNullable<ModelChannel["modelProfiles"]>[number]["capabilityConfig"],
+                : presetModel.capabilityConfig as NonNullable<ModelChannel["modelProfiles"]>[number]["capabilityConfig"],
         };
     }
     const fullvideoFull = ["sd-native-full-2.0", "sd-native-full-2.5", "原生不卡人脸-全参2.0", "原生不卡人脸-全参2.5"].includes(item.id);
     const capability = explicitCapability || existing?.capability || item.modelType || catalogEndpointCapability(item) || (fullvideoFull ? "video" : inferProtocolCapabilityFromModel(item.id));
-    const textAudioCandidates: Partial<Record<ModelCapability, string>> = { text: "chat-completion", audio: "openai-audio" };
-    const compatibleCandidates: Partial<Record<ModelCapability, string>> = { ...textAudioCandidates, image: "openai-image" };
-    const candidates: Record<ModelServicePresetId, Partial<Record<ModelCapability, string>>> = {
-        compatible: compatibleCandidates,
-        ll2: compatibleCandidates,
-        ysdui: textAudioCandidates,
+    const baseCandidates: Partial<Record<ModelServicePresetId, Partial<Record<ModelCapability, string>>>> = {
+        compatible: COMPATIBLE_CANDIDATES,
         openai: { text: "openai-response", image: "openai-image", video: "newapi" },
         gemini: { text: "gemini-generate-content", image: "gemini-image", video: "gemini-veo" },
         ark: { text: "chat-completion", image: "volcengine-ark-image", video: "volcengine-ark-video" },
     };
+    const candidates = plugin?.candidates ?? baseCandidates[preset] ?? {};
     const endpoints: Record<string, string> = { "responses": "openai-response", "openai-responses": "openai-response", "chat.completions": "chat-completion", "chat-completions": "chat-completion", "images.generations": "openai-image", "image-generation": "openai-image", "audio.speech": "openai-audio", "openai-video": "newapi", "openai-videos": "newapi", "video-generations-json": "video-generations-json", "volcengine-ark-video": "volcengine-ark-video" };
     const endpoint = item.supportedEndpointTypes?.map((value) => endpoints[value.trim().toLowerCase()]).find((id) => protocols.some((p) => p.value === id && p.capability === capability && p.enabled !== false));
     const inherited = modelProtocolDefinitionFor(channel.interfaceType, capability, protocols)?.value;
-    let proposed = inherited || endpoint || candidates[preset][capability];
+    let proposed = inherited || endpoint || candidates[capability];
     // Model names identify a family, not a provider's wire protocol. Ask the
     // user to select its contract unless the catalog explicitly declares it.
     if (fullvideoFull && capability === "video" && !inherited) proposed = item.supportedEndpointTypes?.includes("full-video") ? "full-video" : undefined;
