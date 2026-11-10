@@ -180,18 +180,38 @@ export function applyFrameDrop(nodes: CanvasNodeData[], draggedNodeIds: Set<stri
     );
 }
 
+const FOLDER_GRID_GAP = 24;
+
+// 折叠和解散共用同一套网格：列数、格子大小和每个子节点的落点都从这里算，
+// 两处各写一份时改了一边就会让折叠预览和解散后的排布对不上。
+function folderGrid(children: CanvasNodeData[]) {
+    const columns = Math.min(8, Math.ceil(Math.sqrt(children.length)));
+    return {
+        columns,
+        rows: Math.ceil(children.length / columns),
+        cellWidth: Math.max(...children.map((node) => node.width)),
+        cellHeight: Math.max(...children.map((node) => node.height)),
+    };
+}
+
+function folderGridPosition(origin: { x: number; y: number }, grid: ReturnType<typeof folderGrid>, index: number, node: CanvasNodeData) {
+    const column = index % grid.columns;
+    const row = Math.floor(index / grid.columns);
+    return {
+        x: origin.x + column * (grid.cellWidth + FOLDER_GRID_GAP) + (grid.cellWidth - node.width) / 2,
+        y: origin.y + row * (grid.cellHeight + FOLDER_GRID_GAP) + (grid.cellHeight - node.height) / 2,
+    };
+}
+
 function layoutCollapsedFolderChildren(nodes: CanvasNodeData[], folder: CanvasNodeData) {
     const children = getFrameChildren(folder.id, nodes);
     if (!children.length) return nodes;
-    const gap = 24;
     const padding = FRAME_PADDING;
-    const columns = Math.min(8, Math.ceil(Math.sqrt(children.length)));
-    const rows = Math.ceil(children.length / columns);
-    const cellWidth = Math.max(...children.map((node) => node.width));
-    const cellHeight = Math.max(...children.map((node) => node.height));
-    const expandedWidth = padding * 2 + columns * cellWidth + Math.max(columns - 1, 0) * gap;
-    const expandedHeight = FRAME_HEADER_HEIGHT + padding * 2 + rows * cellHeight + Math.max(rows - 1, 0) * gap;
+    const grid = folderGrid(children);
+    const expandedWidth = padding * 2 + grid.columns * grid.cellWidth + Math.max(grid.columns - 1, 0) * FOLDER_GRID_GAP;
+    const expandedHeight = FRAME_HEADER_HEIGHT + padding * 2 + grid.rows * grid.cellHeight + Math.max(grid.rows - 1, 0) * FOLDER_GRID_GAP;
     const indexById = new Map(children.map((node, index) => [node.id, index]));
+    const origin = { x: folder.position.x + padding, y: folder.position.y + FRAME_HEADER_HEIGHT + padding };
 
     return nodes.map((node) => {
         if (node.id === folder.id) {
@@ -205,15 +225,7 @@ function layoutCollapsedFolderChildren(nodes: CanvasNodeData[], folder: CanvasNo
         }
         const index = indexById.get(node.id);
         if (index === undefined) return node;
-        const column = index % columns;
-        const row = Math.floor(index / columns);
-        return {
-            ...node,
-            position: {
-                x: folder.position.x + padding + column * (cellWidth + gap) + (cellWidth - node.width) / 2,
-                y: folder.position.y + FRAME_HEADER_HEIGHT + padding + row * (cellHeight + gap) + (cellHeight - node.height) / 2,
-            },
-        };
+        return { ...node, position: folderGridPosition(origin, grid, index, node) };
     });
 }
 
@@ -224,25 +236,17 @@ export function unpackCanvasFolder(nodes: CanvasNodeData[], folderId: string) {
     if (!children.length) {
         return { nodes: nodes.filter((node) => node.id !== folderId), unpackedIds: [] as string[] };
     }
-    const gap = 24;
-    const columns = Math.min(8, Math.ceil(Math.sqrt(children.length)));
-    const cellWidth = Math.max(...children.map((node) => node.width));
-    const cellHeight = Math.max(...children.map((node) => node.height));
+    const grid = folderGrid(children);
     const indexById = new Map(children.map((node, index) => [node.id, index]));
     const nextNodes = nodes
         .filter((node) => node.id !== folderId)
         .map((node) => {
             const index = indexById.get(node.id);
             if (index === undefined) return node;
-            const column = index % columns;
-            const row = Math.floor(index / columns);
             return {
                 ...node,
                 parentId: undefined,
-                position: {
-                    x: folder.position.x + column * (cellWidth + gap) + (cellWidth - node.width) / 2,
-                    y: folder.position.y + row * (cellHeight + gap) + (cellHeight - node.height) / 2,
-                },
+                position: folderGridPosition(folder.position, grid, index, node),
             };
         });
     return { nodes: nextNodes, unpackedIds: children.map((node) => node.id) };
