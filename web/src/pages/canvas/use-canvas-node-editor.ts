@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { App } from "antd";
 
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
-import { FOLDER_COLLAPSED_HEIGHT, FOLDER_COLLAPSED_WIDTH, FRAME_COLLAPSED_HEIGHT, FRAME_COLLAPSED_WIDTH, getFrameChildIds, isCanvasFolderNode, isFrameNode } from "@/lib/canvas/canvas-frame";
+import { extractNodeFromCanvasFolder, FOLDER_COLLAPSED_HEIGHT, FOLDER_COLLAPSED_WIDTH, FRAME_COLLAPSED_HEIGHT, FRAME_COLLAPSED_WIDTH, getFrameChildIds, isCanvasFolderNode, isFrameNode, unpackCanvasFolder } from "@/lib/canvas/canvas-frame";
 import { buildCanvasMediaDownloadFileName } from "@/lib/canvas/canvas-media-download";
 import { ownedResourceIdFromMediaRef } from "@/services/api/resources";
 import { downloadOwnedOrBrowserMedia, reportOwnedMediaSave } from "@/services/desktop-media-save";
@@ -45,7 +45,11 @@ export function useCanvasNodeEditor({
     const { lifetime, mountedRef } = useCanvasOwnerLifetime(canvasId);
     const [collapsingBatchIds, setCollapsingBatchIds] = useState<Set<string>>(new Set());
     const [openingBatchIds, setOpeningBatchIds] = useState<Set<string>>(new Set());
+    const [folderBrowserNodeId, setFolderBrowserNodeId] = useState<string | null>(null);
     const batchMotionTimers = useRef(new Map<string, number>());
+    useEffect(() => {
+        setFolderBrowserNodeId(null);
+    }, [canvasId]);
     useEffect(() => () => {
         batchMotionTimers.current.forEach((timer) => window.clearTimeout(timer));
     }, []);
@@ -97,8 +101,41 @@ export function useCanvasNodeEditor({
             openProjectAssets?.("all", node ? { x: node.position.x + node.width + 40, y: node.position.y } : undefined, "canvas", linkedFolderId);
             return;
         }
+        if (node && isCanvasFolderNode(node) && node.metadata?.frame?.collapsed) {
+            const ui = pageUi.getState();
+            ui.setSelectedNodeIds(new Set([nodeId]));
+            ui.setSelectedConnectionId(null);
+            ui.setDialogNodeId(null);
+            ui.setContextMenu(null);
+            ui.setToolbarNodeId(null);
+            ui.setHoveredNodeId(null);
+            setFolderBrowserNodeId(nodeId);
+            return;
+        }
         toggleFrameCollapsed(nodeId);
-    }, [nodesRef, openProjectAssets, toggleFrameCollapsed]);
+    }, [nodesRef, openProjectAssets, pageUi, toggleFrameCollapsed]);
+
+    const unpackFolder = useCallback((folderId: string) => {
+        const result = unpackCanvasFolder(nodesRef.current, folderId);
+        if (!result) return;
+        nodesRef.current = result.nodes;
+        setNodes(result.nodes);
+        setFolderBrowserNodeId((current) => (current === folderId ? null : current));
+        const ui = pageUi.getState();
+        ui.setSelectedNodeIds(new Set(result.unpackedIds));
+        ui.setSelectedConnectionId(null);
+        ui.setContextMenu(null);
+        ui.setToolbarNodeId(null);
+        message.success(result.unpackedIds.length ? `已解散文件夹，释放 ${result.unpackedIds.length} 个节点` : "已删除空文件夹");
+    }, [message, nodesRef, pageUi, setNodes]);
+
+    const removeNodeFromFolder = useCallback((nodeId: string) => {
+        const result = extractNodeFromCanvasFolder(nodesRef.current, nodeId);
+        if (!result) return;
+        nodesRef.current = result.nodes;
+        setNodes(result.nodes);
+        message.success("已移出文件夹");
+    }, [message, nodesRef, setNodes]);
 
     const handleNodeTitleChange = useCallback((nodeId: string, title: string) => {
         setNodes((current) => current.map((node) => (node.id === nodeId ? { ...node, title } : node)));
@@ -270,6 +307,8 @@ export function useCanvasNodeEditor({
     return {
         collapsingBatchIds,
         downloadNodeImage,
+        folderBrowserNodeId,
+        setFolderBrowserNodeId,
         handleConfigNodeChange,
         handleFolderStyleChange,
         handleFolderThemeChange,
@@ -279,11 +318,13 @@ export function useCanvasNodeEditor({
         handleNodeResize,
         handleNodeTitleChange,
         openingBatchIds,
+        removeNodeFromFolder,
         saveNodeAsset,
         setBatchPrimary,
         toggleBatchExpanded,
         toggleFrameCollapsed,
         handleFrameToggle,
         toggleNodeFreeResize,
+        unpackFolder,
     };
 }

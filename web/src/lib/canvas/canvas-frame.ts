@@ -126,11 +126,24 @@ export function packNodesIntoCollapsedFolder(
 export function applyFrameDrop(nodes: CanvasNodeData[], draggedNodeIds: Set<string>, frameId: string | null) {
     const target = frameId ? nodes.find((node) => node.id === frameId && isFrameNode(node)) : null;
     const canContain = target?.metadata?.folder?.assetFolderId ? canLinkedFolderArchive : target && isCanvasFolderNode(target) ? canFolderContain : canFrameContain;
-    const next = nodes.map((node) => {
-        if (!draggedNodeIds.has(node.id)) return node;
-        if (!frameId) return node.parentId ? { ...node, parentId: undefined } : node;
-        return target && canContain(node) ? { ...node, parentId: frameId } : node;
-    });
+    const droppedIntoFrame: CanvasNodeData[] = [];
+    const remaining: CanvasNodeData[] = [];
+    for (const node of nodes) {
+        if (!draggedNodeIds.has(node.id)) {
+            remaining.push(node);
+            continue;
+        }
+        if (!frameId) {
+            remaining.push(node.parentId ? { ...node, parentId: undefined } : node);
+            continue;
+        }
+        if (target && canContain(node)) {
+            droppedIntoFrame.push({ ...node, parentId: frameId });
+        } else {
+            remaining.push(node);
+        }
+    }
+    const next = [...remaining, ...droppedIntoFrame];
     if (!frameId) return next;
 
     const children = getFrameChildren(frameId, next);
@@ -172,7 +185,7 @@ function layoutCollapsedFolderChildren(nodes: CanvasNodeData[], folder: CanvasNo
     if (!children.length) return nodes;
     const gap = 24;
     const padding = FRAME_PADDING;
-    const columns = Math.min(3, Math.ceil(Math.sqrt(children.length)));
+    const columns = Math.min(8, Math.ceil(Math.sqrt(children.length)));
     const rows = Math.ceil(children.length / columns);
     const cellWidth = Math.max(...children.map((node) => node.width));
     const cellHeight = Math.max(...children.map((node) => node.height));
@@ -202,6 +215,53 @@ function layoutCollapsedFolderChildren(nodes: CanvasNodeData[], folder: CanvasNo
             },
         };
     });
+}
+
+export function unpackCanvasFolder(nodes: CanvasNodeData[], folderId: string) {
+    const folder = nodes.find((node) => node.id === folderId && isCanvasFolderNode(node));
+    if (!folder || folder.metadata?.folder?.assetFolderId) return null;
+    const children = getFrameChildren(folderId, nodes);
+    if (!children.length) {
+        return { nodes: nodes.filter((node) => node.id !== folderId), unpackedIds: [] as string[] };
+    }
+    const gap = 24;
+    const columns = Math.min(8, Math.ceil(Math.sqrt(children.length)));
+    const cellWidth = Math.max(...children.map((node) => node.width));
+    const cellHeight = Math.max(...children.map((node) => node.height));
+    const indexById = new Map(children.map((node, index) => [node.id, index]));
+    const nextNodes = nodes
+        .filter((node) => node.id !== folderId)
+        .map((node) => {
+            const index = indexById.get(node.id);
+            if (index === undefined) return node;
+            const column = index % columns;
+            const row = Math.floor(index / columns);
+            return {
+                ...node,
+                parentId: undefined,
+                position: {
+                    x: folder.position.x + column * (cellWidth + gap) + (cellWidth - node.width) / 2,
+                    y: folder.position.y + row * (cellHeight + gap) + (cellHeight - node.height) / 2,
+                },
+            };
+        });
+    return { nodes: nextNodes, unpackedIds: children.map((node) => node.id) };
+}
+
+export function extractNodeFromCanvasFolder(nodes: CanvasNodeData[], nodeId: string) {
+    const child = nodes.find((node) => node.id === nodeId);
+    const folder = child?.parentId ? nodes.find((node) => node.id === child.parentId && isCanvasFolderNode(node)) : null;
+    if (!child || !folder) return null;
+    const nextPosition = {
+        x: folder.position.x + folder.width + 36,
+        y: folder.position.y + Math.max(0, (folder.height - child.height) / 2),
+    };
+    const detached = nodes.map((node) => (node.id === nodeId ? { ...node, parentId: undefined, position: nextPosition } : node));
+    return {
+        nodes: layoutCollapsedFolderChildren(detached, folder),
+        folderId: folder.id,
+        nodeId: child.id,
+    };
 }
 
 export function resolveFrameConnection(connection: CanvasConnection, nodes: CanvasNodeData[]) {

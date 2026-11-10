@@ -80,6 +80,7 @@ type CanvasNodeContextMenuProps = {
     onUploadToArkPrivateAsset: () => void;
     onSetAssetCategory: (category: CanvasAssetCategory) => void;
     onToggleFrame: () => void;
+    onUnpackFolder?: () => void;
     onSpreadSelection?: () => void;
     onPackSelectionToFolder?: () => void;
     onCopySelection?: () => void;
@@ -123,6 +124,7 @@ export function CanvasNodeContextMenu({
     onUploadToArkPrivateAsset,
     onSetAssetCategory,
     onToggleFrame,
+    onUnpackFolder,
     onSpreadSelection,
     onPackSelectionToFolder,
     onCopySelection,
@@ -285,11 +287,21 @@ export function CanvasNodeContextMenu({
                                     <MenuHeader title={node?.title || nodeTypeLabel(node)} />
                                     <MenuSection label="节点操作" />
                                     {isFrame ? (
-                                        <MenuButton
-                                            icon={isFolder ? <FolderOpen /> : <PanelTop />}
-                                            label={node?.metadata?.frame?.collapsed ? `展开${isFolder ? "文件夹" : "背板"}` : `折叠${isFolder ? "文件夹" : "背板"}`}
-                                            onClick={() => runAction(onToggleFrame)}
-                                        />
+                                        <>
+                                            <MenuButton
+                                                icon={isFolder ? <FolderOpen /> : <PanelTop />}
+                                                label={node?.metadata?.frame?.collapsed ? (isFolder ? "打开文件夹" : "展开背板") : (isFolder ? "收起文件夹" : "折叠背板")}
+                                                onClick={() => runAction(onToggleFrame)}
+                                            />
+                                            {isFolder && !node?.metadata?.folder?.assetFolderId && onUnpackFolder ? (
+                                                <MenuButton
+                                                    icon={<Layers3 />}
+                                                    label="解散文件夹"
+                                                    detail="将内部节点释放回画布"
+                                                    onClick={() => runAction(onUnpackFolder)}
+                                                />
+                                            ) : null}
+                                        </>
                                     ) : (
                                         <MenuButton icon={<FolderPlus />} label="保存到我的素材" disabled={!canSaveAsset} onClick={() => runAction(onSaveAsset)} />
                                     )}

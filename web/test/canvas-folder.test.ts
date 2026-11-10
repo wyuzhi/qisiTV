@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { applyFrameDrop, buildCanvasFrameDropIndex, canFolderContain, canLinkedFolderArchive, findFrameDropTarget, findFrameDropTargetFromIndex, isCanvasFolderNode, packNodesIntoCollapsedFolder } from "@/lib/canvas/canvas-frame";
+import { applyFrameDrop, buildCanvasFrameDropIndex, canFolderContain, canLinkedFolderArchive, extractNodeFromCanvasFolder, findFrameDropTarget, findFrameDropTargetFromIndex, isCanvasFolderNode, packNodesIntoCollapsedFolder, unpackCanvasFolder } from "@/lib/canvas/canvas-frame";
 import { resolveCanvasFolderTheme, resolveCanvasFolderThemeCover } from "@/lib/canvas/canvas-folder-theme";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
@@ -128,5 +128,69 @@ describe("canvas folders", () => {
             position,
         }));
         expect(singleWithContainer).toBeNull();
+    });
+
+    test("解散文件夹会将内部节点按均衡多列网格排回画布并移除文件夹外壳", () => {
+        const target = folder("folder-16");
+        const children = Array.from({ length: 16 }, (_, index) => ({
+            ...image(`img-${index + 1}`),
+            parentId: target.id,
+            position: { x: 100 + index * 10, y: 100 + index * 10 },
+        }));
+        const unpacked = unpackCanvasFolder([target, ...children], target.id);
+        expect(unpacked).not.toBeNull();
+        expect(unpacked?.unpackedIds).toHaveLength(16);
+        expect(unpacked?.nodes.some((node) => node.id === target.id)).toBe(false);
+        expect(unpacked?.nodes.every((node) => node.parentId === undefined)).toBe(true);
+
+        const uniqueColumns = new Set(unpacked?.nodes.map((node) => node.position.x));
+        const uniqueRows = new Set(unpacked?.nodes.map((node) => node.position.y));
+        expect(uniqueColumns.size).toBe(4);
+        expect(uniqueRows.size).toBe(4);
+    });
+
+    test("从文件夹单独移出某个节点会放到文件夹右侧并保持其余节点收纳", () => {
+        const target = folder("folder-extract");
+        const first = { ...image("first"), parentId: target.id };
+        const second = { ...image("second"), parentId: target.id };
+        const extracted = extractNodeFromCanvasFolder([target, first, second], first.id);
+
+        expect(extracted).not.toBeNull();
+        const nextFirst = extracted!.nodes.find((node) => node.id === first.id)!;
+        const nextSecond = extracted!.nodes.find((node) => node.id === second.id)!;
+        expect(nextFirst.parentId).toBeUndefined();
+        expect(nextFirst.position.x).toBeGreaterThan(target.position.x + target.width);
+        expect(nextSecond.parentId).toBe(target.id);
+    });
+
+    test("将画布中较早创建的节点拖入文件夹时会追加到末尾，保证封面展示最新拖入项", () => {
+        const earlier = image("earlier");
+        const target = folder("folder-recency");
+        const existing1 = { ...image("existing-1"), parentId: target.id };
+        const existing2 = { ...image("existing-2"), parentId: target.id };
+        const existing3 = { ...image("existing-3"), parentId: target.id };
+
+        const next = applyFrameDrop([earlier, target, existing1, existing2, existing3], new Set([earlier.id]), target.id);
+        const children = next.filter((node) => node.parentId === target.id);
+        expect(children.map((node) => node.id)).toEqual(["existing-1", "existing-2", "existing-3", "earlier"]);
+        expect(children.slice(-3).map((node) => node.id)).toEqual(["existing-2", "existing-3", "earlier"]);
+    });
+
+    test("解散空文件夹或百项大文件夹时正确处理边界与最多 8 列上限", () => {
+        const emptyFolder = folder("empty-folder");
+        const emptyResult = unpackCanvasFolder([emptyFolder], emptyFolder.id);
+        expect(emptyResult?.unpackedIds).toEqual([]);
+        expect(emptyResult?.nodes).toEqual([]);
+
+        const bigFolder = folder("big-folder");
+        const manyChildren = Array.from({ length: 80 }, (_, index) => ({
+            ...image(`img-${index + 1}`),
+            parentId: bigFolder.id,
+        }));
+        const bigResult = unpackCanvasFolder([bigFolder, ...manyChildren], bigFolder.id);
+        const uniqueColumns = new Set(bigResult?.nodes.map((node) => node.position.x));
+        const uniqueRows = new Set(bigResult?.nodes.map((node) => node.position.y));
+        expect(uniqueColumns.size).toBe(8);
+        expect(uniqueRows.size).toBe(10);
     });
 });

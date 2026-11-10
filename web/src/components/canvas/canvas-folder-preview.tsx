@@ -43,7 +43,10 @@ export const CanvasFolderPreview = React.memo(function CanvasFolderPreview({
     const theme = resolveCanvasFolderTheme(data.metadata?.folder?.theme);
     const [editing, setEditing] = useState(false);
     const [title, setTitle] = useState(data.title);
-    const previewNodes = useMemo(() => childNodes.filter(canPreviewFolderNode).slice(0, 3), [childNodes]);
+    const previewNodes = useMemo(
+        () => childNodes.filter(canPreviewFolderNode).slice(-(style === "stacked" ? 2 : 3)),
+        [childNodes, style],
+    );
     const themeCover = resolveCanvasFolderThemeCover(theme, data.metadata?.folder?.themeCover);
     const showAdd = style === "glass" || childNodes.length === 0;
     const folderMenu = {
@@ -51,7 +54,7 @@ export const CanvasFolderPreview = React.memo(function CanvasFolderPreview({
         items: [
             {
                 key: "open",
-                label: data.metadata?.folder?.assetFolderId ? "打开素材文件夹" : "展开文件夹",
+                label: data.metadata?.folder?.assetFolderId ? "打开素材文件夹" : "打开文件夹",
             },
             {
                 key: "styles",
@@ -144,8 +147,8 @@ export const CanvasFolderPreview = React.memo(function CanvasFolderPreview({
                     <button
                         type="button"
                         className="canvas-folder-action canvas-folder-add"
-                        aria-label={readOnly ? "打开素材文件夹" : "展开文件夹并添加内容"}
-                        title={readOnly ? "打开素材文件夹" : "展开文件夹并添加内容"}
+                        aria-label={readOnly ? "打开素材文件夹" : "打开文件夹"}
+                        title={readOnly ? "打开素材文件夹" : "打开文件夹"}
                         onMouseDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
                             event.stopPropagation();
@@ -192,8 +195,8 @@ function FolderThemeMedia({ source }: { source: string }) {
 }
 
 function FolderNodeMedia({ node }: { node?: CanvasNodeData }) {
-    if (node?.type === CanvasNodeType.Image && node.metadata?.content) {
-        return <img src={node.metadata.content} alt="" loading="lazy" decoding="async" draggable={false} />;
+    if (node?.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.previewContent)) {
+        return <img src={node.metadata.content || node.metadata.previewContent} alt="" loading="lazy" decoding="async" draggable={false} />;
     }
     const videoPreview = node ? canvasNodeVideoPreviewUrl(node) : "";
     if (videoPreview) {

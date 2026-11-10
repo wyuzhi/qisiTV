@@ -48,6 +48,7 @@ type CanvasProjectContextMenuProps = {
     onUploadToArkPrivateAsset: (node: CanvasNodeData) => void;
     onSetAssetCategory: (nodeId: string, category: CanvasAssetCategory) => void;
     onToggleFrame: (node: CanvasNodeData) => void;
+    onUnpackFolder?: (nodeId: string) => void;
     onSpreadSelection: () => void;
     onPackSelectionToFolder?: () => void;
     onCopySelection: () => void;
@@ -145,6 +146,11 @@ export function CanvasProjectContextMenu({ menu, node, screenToCanvas, ...props 
             onToggleFrame={() => {
                 if (node && isFrameNode(node)) props.onToggleFrame(node);
             }}
+            onUnpackFolder={
+                props.onUnpackFolder && node
+                    ? () => props.onUnpackFolder?.(node.id)
+                    : undefined
+            }
             onSpreadSelection={props.onSpreadSelection}
             onPackSelectionToFolder={props.onPackSelectionToFolder}
             onCopySelection={props.onCopySelection}

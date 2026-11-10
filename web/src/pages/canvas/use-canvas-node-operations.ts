@@ -229,7 +229,7 @@ export function useCanvasNodeOperations({
                 },
                 folder: { style: "glass", theme: "aurora", createdAt: new Date().toISOString() },
             });
-            folder.title = `我的文件 · ${count} 项`;
+            folder.title = "我的文件";
             folder.width = FOLDER_COLLAPSED_WIDTH;
             folder.height = FOLDER_COLLAPSED_HEIGHT;
             return folder;

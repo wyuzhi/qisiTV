@@ -892,7 +892,7 @@ function InfiniteCanvasPage() {
         setBatchPrimary,
         toggleBatchExpanded,
         toggleFrameCollapsed,
-        handleFrameToggle,
+        handleFrameToggle, unpackFolder,
         toggleNodeFreeResize,
     } = nodeEditor;
 
@@ -1063,7 +1063,7 @@ function InfiniteCanvasPage() {
     useCanvasKeyboard({
         pageUi,
         projectId,
-        enabled: projectLoaded && !versions.preview && !directorNodeId,
+        enabled: projectLoaded && !versions.preview && !directorNodeId && !nodeEditor.folderBrowserNodeId,
         onToggleAssistant: focusMode || !internalAssistantEnabled ? undefined : toggleAssistant,
         nodesRef,
         selectedNodeIdsRef,
@@ -1252,8 +1252,9 @@ function InfiniteCanvasPage() {
         handleNodeContextMenu(event as unknown as ReactMouseEvent, nodeId);
     }, [handleNodeContextMenu]);
     const handleLodNodeDoubleClick = useCallback((node: CanvasNodeData) => {
-        if (node.type === CanvasNodeType.Image && node.metadata?.content) viewCanvasNodeImage(node);
-    }, [viewCanvasNodeImage]);
+        if (!readOnly && node.type === CanvasNodeType.Frame && node.metadata?.frame?.collapsed && node.metadata?.folder) handleFrameToggle(node.id);
+        else if (node.type === CanvasNodeType.Image && node.metadata?.content) viewCanvasNodeImage(node);
+    }, [handleFrameToggle, readOnly, viewCanvasNodeImage]);
     const locateProjectStyleNode = useCallback(() => {
         const styleNode = nodesRef.current.find((node) => node.type === CanvasNodeType.Text && node.metadata?.workflowKind === "styleboard");
         if (!styleNode) {
@@ -1491,7 +1492,7 @@ function InfiniteCanvasPage() {
                                             <CanvasProjectWorldLayers
                                                 containerRef={containerRef}
                                                 connectionApproach={connectionApproach}
-                                                projectId={projectId}
+                                                projectId={projectId} readOnly={readOnly}
                                                 viewportScale={viewport.k}
                                                 displayConnections={renderedConnections}
                                                 selectedConnectionId={selectedConnectionId}
@@ -1535,7 +1536,7 @@ function InfiniteCanvasPage() {
                                                 onNodeHoverEnd={handleCanvasNodeHoverEnd}
                                                 onConnectStart={handleConnectStart}
                                                 onNodeResize={handleNodeResize}
-                                                onToggleFrame={handleFrameToggle}
+                                                onToggleFrame={handleFrameToggle} onUnpackFolder={unpackFolder}
                                                 onFolderStyleChange={handleFolderStyleChange}
                                                 onFolderThemeChange={handleFolderThemeChange}
                                                 onNodeTitleChange={handleNodeTitleChange}
@@ -1893,7 +1894,7 @@ function InfiniteCanvasPage() {
                             onCopyMediaUrl={(node) => void copyNodeMediaUrlToClipboard(node)}
                             onUploadToArkPrivateAsset={confirmUploadNodeImageToArkPrivateAsset}
                             onSetAssetCategory={(nodeId, assetCategory) => handleConfigNodeChange(nodeId, { assetCategory })}
-                            onToggleFrame={(node) => handleFrameToggle(node.id)}
+                            onToggleFrame={(node) => handleFrameToggle(node.id)} onUnpackFolder={unpackFolder}
                             onSpreadSelection={spreadSelectedNodes} onPackSelectionToFolder={packSelectedIntoFolder}
                             onCopySelection={copySelectedNodes}
                             onDeleteSelection={() => deleteNodes(selectedNodeIds)}
@@ -1903,7 +1904,7 @@ function InfiniteCanvasPage() {
                         <input ref={imageInputRef} type="file" accept="image/*,video/*,.mp4,.mov,.m4v,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav,.txt,.md,.markdown" multiple className="hidden" onChange={handleImageInputChange} />
 
                         <CanvasProjectEditorDialogs
-                            projectId={projectId} theme={theme} config={effectiveConfig}
+                            projectId={projectId} readOnly={readOnly} theme={theme} config={effectiveConfig}
                             document={document} dialogs={dialogs} renderModel={renderModel}
                             generation={generation} nodeEditor={nodeEditor} mediaTools={mediaTools}
                             styles={styles} director={director}
@@ -1912,14 +1913,13 @@ function InfiniteCanvasPage() {
                             onSearchFocusNode={(nodeId) => {
                                 const target = nodeById.get(nodeId);
                                 const parent = target?.parentId ? nodeById.get(target.parentId) : null;
-                                if (parent?.metadata?.frame?.collapsed) toggleFrameCollapsed(parent.id);
+                                if (parent?.metadata?.frame?.collapsed) {
+                                    handleFrameToggle(parent.id); if (parent.metadata.folder) { focusCanvasNode(parent.id); return; }
+                                }
                                 const batchRoot = target?.metadata?.batchRootId ? nodeById.get(target.metadata.batchRootId) : null;
                                 if (batchRoot && !batchRoot.metadata?.imageBatchExpanded) toggleBatchExpanded(batchRoot.id);
                                 const selection = new Set([nodeId]);
-                                selectedNodeIdsRef.current = selection;
-                                setSelectedNodeIds(selection);
-                                setSelectedConnectionId(null);
-                                focusCanvasNode(nodeId);
+                                selectedNodeIdsRef.current = selection; setSelectedNodeIds(selection); setSelectedConnectionId(null); focusCanvasNode(nodeId);
                             }}
                             imports={{ onApplyLibTV: applyLibTVImport, onApplyTapNow: applyTapNowImport }}
                             timeline={{
