@@ -7,7 +7,7 @@ import { ChannelHeadersEditor, validateChannelHeaders } from "@/components/chann
 import { fetchChannelModels, type ChannelModelFetchResult } from "@/services/api/image-models";
 import { fetchPluginProviderCatalog } from "@/services/api/plugin-catalog";
 import { mergeFetchedChannelModelProfiles, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
-import { CAPABILITY_LABELS, MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, createVendorPresetChannel, isTopazUpscaleChannel, ll2ProtocolsAvailable, modelCatalogRequestURL, pluginServices, presetCatalogFor, serviceConnectionError, serviceModelProfile, servicePresetFor, vendorPresetFor, vendorPresets, type ModelServicePresetId, type VendorPreset } from "@/lib/model-service-presets";
+import { CAPABILITY_LABELS, MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, createVendorPresetChannel, isBuiltinPresetService, isTopazUpscaleChannel, ll2ProtocolsAvailable, modelCatalogRequestURL, pluginServices, presetCatalogFor, serviceConnectionError, serviceModelProfile, servicePresetFor, vendorPresetFor, vendorPresets, ysduiProtocolsAvailable, type ModelServicePresetId, type VendorPreset } from "@/lib/model-service-presets";
 import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
 import { serviceCredentialGuide } from "@/lib/service-credentials";
 import type { ModelProtocolDefinition } from "@/lib/model-protocols";
@@ -65,9 +65,12 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
                 if (!alive.current) return;
                 setProtocols(items);
                 if (!initial) {
-                    setDraft((current) => servicePresetFor(current) === "ll2"
-                        ? { ...current, modelProfiles: presetCatalogFor("ll2").map((item) => serviceModelProfile(current, item, items)) }
-                        : current);
+                    setDraft((current) => {
+                        const preset = servicePresetFor(current);
+                        return isBuiltinPresetService(preset)
+                            ? { ...current, modelProfiles: presetCatalogFor(preset).map((item) => serviceModelProfile(current, item, items)) }
+                            : current;
+                    });
                 }
             })
             .catch(() => { if (alive.current) setError("无法读取模型能力，请关闭后重试"); })
@@ -249,9 +252,13 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
     const vendor = !pluginService && presetId === "compatible" ? vendorPresetFor(draft, vendorList) : undefined;
     const vendorsOpen = moreVendors || Boolean(vendor);
     const ll2Ready = presetId !== "ll2" || ll2ProtocolsAvailable(protocols);
+    const ysduiReady = presetId !== "ysdui" || ysduiProtocolsAvailable(protocols);
+    const builtinReady = ll2Ready && ysduiReady;
     const ll2PluginWarning = presetId === "ll2" && !protocolLoading && !ll2Ready
         ? "请先在左侧「插件」中心启用 LL2 (DMC) 插件，再使用预置视频协议。"
-        : "";
+        : presetId === "ysdui" && !protocolLoading && !ysduiReady
+            ? "请先在左侧「插件」中心启用 银盛云枢壹算 插件，再使用预置图像与视频协议。"
+            : "";
 
     return <AppModal open centered width={1000} flush footer={null} title={null} closable={!saving} keyboard={!saving} mask={{ closable: false }} onCancel={() => { catalogRequest.current?.abort(); onClose(); }} rootClassName="model-service-modal">
         <div className="model-service-header">
@@ -295,7 +302,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
                     <div className="model-service-note"><ShieldCheck size={16} /><p>密钥保存在这台设备上。<br />生成费用由服务商结算。</p></div>
                 </aside>
                 <Form layout="vertical" requiredMark={false} className="model-service-fields" disabled={busy} onFinish={() => void fetchModels()}>
-                    <div className="model-service-form-title">{vendor ? <><ModelLogo size={28} /><div><h3>{vendor.label}</h3><p>填写 API Key 后读取模型。</p></div></> : pluginService ? <><ModelLogo size={28} /><div><h3>{pluginService.label}</h3><p>由插件接入。填好连接信息后，读取或手动添加这个服务能用的模型。</p></div></> : <><ModelLogo icon={selectedPreset.icon} size={28} /><div><h3>{selectedPreset.name}</h3>{presetId === "compatible" && <p>用户可以自行添加第三方模型服务，但是 BeefTV 无法确保所有第三方模型服务的兼容性</p>}{presetId === "ll2" && <p>已预置 9 款文本、视频与超分模型及协议，填写 API Key 后可直接「一键保存并启用」，或点「读取模型」拉取在线目录</p>}</div></>}</div>
+                    <div className="model-service-form-title">{vendor ? <><ModelLogo size={28} /><div><h3>{vendor.label}</h3><p>填写 API Key 后读取模型。</p></div></> : pluginService ? <><ModelLogo size={28} /><div><h3>{pluginService.label}</h3><p>由插件接入。填好连接信息后，读取或手动添加这个服务能用的模型。</p></div></> : <><ModelLogo icon={selectedPreset.icon} size={28} /><div><h3>{selectedPreset.name}</h3>{presetId === "compatible" && <p>用户可以自行添加第三方模型服务，但是 BeefTV 无法确保所有第三方模型服务的兼容性</p>}{presetId === "ll2" && <p>已预置 9 款文本、视频与超分模型及协议，填写 API Key 后可直接「一键保存并启用」，或点「读取模型」拉取在线目录</p>}{presetId === "ysdui" && <p>已预置 {selectedPreset.models?.length || 29} 款文本、图像与视频模型及协议，填写 API Key 后可直接「一键保存并启用」，或点「读取模型」拉取在线目录</p>}</div></>}</div>
                     <Form.Item label="连接名称"><Input aria-label="连接名称" placeholder="例如：我的创作账号" value={draft.name} onChange={(event) => patch({ name: event.target.value })} /></Form.Item>
                     <Form.Item label={credential.apiKeyLabel} help={credential.apiKeyHelp}><Input.Password prefix={<KeyRound size={15} />} aria-label={credential.apiKeyLabel} autoComplete="new-password" placeholder={credential.apiKeyPlaceholder} value={draft.apiKey} onChange={(event) => patch({ apiKey: event.target.value })} /></Form.Item>
                     <Form.Item label="服务地址"><Input aria-label="服务地址" inputMode="url" placeholder="https://api.example.com/v1" value={draft.baseUrl} onChange={(event) => patch({ baseUrl: event.target.value })} /></Form.Item>
@@ -332,7 +339,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
             {notice && <Alert type="info" showIcon title={notice} />}
         </div>}
         <div className="model-service-footer">{step === 1 && <span>保存后，可在创作页选择这些模型</span>}<div>
-            {step === 0 ? <><Button disabled={busy} onClick={() => { if (validateConnection(false)) { setNotice(""); setStep(1); } }}>{presetId === "ll2" ? `查看预置模型 (${draft.models.length})` : "手动添加模型"}</Button>{presetId === "ll2" && <Button disabled={busy || protocolLoading || !draft.models.length || !ll2Ready} icon={<Check size={15} />} onClick={() => void save()}>一键保存并启用</Button>}<Button type="primary" loading={busy} disabled={protocolLoading} onClick={() => void fetchModels()}>读取模型</Button></> : <><Button disabled={busy} icon={<ArrowLeft size={15} />} onClick={() => { setStep(0); setError(""); }}>连接信息</Button><Button type="primary" loading={busy} disabled={!draft.models.length || protocolLoading} icon={<Check size={15} />} onClick={() => void save()}>保存并使用</Button></>}
+            {step === 0 ? <><Button disabled={busy} onClick={() => { if (validateConnection(false)) { setNotice(""); setStep(1); } }}>{isBuiltinPresetService(presetId) ? `查看预置模型 (${draft.models.length})` : "手动添加模型"}</Button>{isBuiltinPresetService(presetId) && <Button disabled={busy || protocolLoading || !draft.models.length || !builtinReady} icon={<Check size={15} />} onClick={() => void save()}>一键保存并启用</Button>}<Button type="primary" loading={busy} disabled={protocolLoading} onClick={() => void fetchModels()}>读取模型</Button></> : <><Button disabled={busy} icon={<ArrowLeft size={15} />} onClick={() => { setStep(0); setError(""); }}>连接信息</Button><Button type="primary" loading={busy} disabled={!draft.models.length || protocolLoading} icon={<Check size={15} />} onClick={() => void save()}>保存并使用</Button></>}
         </div></div>
     </AppModal>;
 }

@@ -253,7 +253,7 @@ export function ChannelModelSettings({
                                     }}
                                 />
                             </section>
-                            {channel.scope !== "system" && activeCapability !== "text" && activeProtocol !== "full-video" && <ReferenceMediaTransportFields value={activeModelProfile?.referenceMediaTransport} onChange={(referenceMediaTransport) => updateProfile(activeModel, { referenceMediaTransport })} />}
+                            {channel.scope !== "system" && activeCapability !== "text" && activeProtocol !== "full-video" && !activeProtocol?.startsWith("ysdui-") && <ReferenceMediaTransportFields value={activeModelProfile?.referenceMediaTransport} onChange={(referenceMediaTransport) => updateProfile(activeModel, { referenceMediaTransport })} />}
                             <section className="space-y-2">
                                 {activeProtocol && !interfaceOpen ? (
                                     <div className="flex min-w-0 items-center justify-between gap-3">

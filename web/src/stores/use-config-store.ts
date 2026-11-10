@@ -14,6 +14,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import type { CapabilitySpec } from "@/services/api/logical-models";
 import { seedancePortraitLabel, seedancePortraitModel, type VideoPriceQuote } from "@/lib/seedance-portrait";
 import { upgradeLL2ModelProfile } from "../../../plugin-packages/beeftv-plugin-ll2/client/index.js";
+import { upgradeYsduiModelProfile } from "../../../plugin-packages/beeftv-plugin-ysdui/client/index.js";
 export { buildApiUrl, isSystemProxyBaseUrl, resolveBackendApiUrl, systemProxyChannelId } from "@/lib/channel-url";
 
 export type ApiCallFormat = "openai" | "gemini" | "claude";
@@ -493,7 +494,7 @@ function reconcileChannelModelProfiles(channel: ModelChannel): ModelChannel {
     if (!channel.modelProfiles?.length) return channel;
     let changed = false;
     const modelProfiles = channel.modelProfiles.map((raw) => {
-        const profile = (upgradeLL2ModelProfile(raw) as typeof raw) || raw, capability = modelProtocolCapability(profile.protocol);
+        const profile = (upgradeYsduiModelProfile(upgradeLL2ModelProfile(raw)) as typeof raw) || raw, capability = modelProtocolCapability(profile.protocol);
         if (profile !== raw) changed = true;
         return !capability || capability === profile.capability ? profile : ((changed = true), { ...profile, capability });
     });

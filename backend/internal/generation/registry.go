@@ -154,22 +154,24 @@ func LoadOfficialFallbackRegistry() *protocol.Registry {
 		if err != nil {
 			return
 		}
-		adapters := make([]protocol.Adapter, 0, len(entries)+1)
-		for _, ll2Dir := range officialBundledPluginDirCandidates(directory, "beeftv-plugin-ll2") {
-			info, statErr := os.Stat(ll2Dir)
-			if statErr != nil || !info.IsDir() {
-				continue
+		adapters := make([]protocol.Adapter, 0, len(entries)+2)
+		for _, builtinPluginName := range []string{"beeftv-plugin-ll2", "beeftv-plugin-ysdui"} {
+			for _, builtinDir := range officialBundledPluginDirCandidates(directory, builtinPluginName) {
+				info, statErr := os.Stat(builtinDir)
+				if statErr != nil || !info.IsDir() {
+					continue
+				}
+				pkg, parseErr := protocol.ParsePluginPackageDir(builtinDir)
+				if parseErr != nil {
+					return
+				}
+				providers, loadErr := protocol.LoadInstalledProviders(pkg.ManifestRaw)
+				if loadErr != nil {
+					return
+				}
+				adapters = append(adapters, providers...)
+				break
 			}
-			pkg, parseErr := protocol.ParsePluginPackageDir(ll2Dir)
-			if parseErr != nil {
-				return
-			}
-			providers, loadErr := protocol.LoadInstalledProviders(pkg.ManifestRaw)
-			if loadErr != nil {
-				return
-			}
-			adapters = append(adapters, providers...)
-			break
 		}
 		for _, entry := range entries {
 			if entry.IsDir() {

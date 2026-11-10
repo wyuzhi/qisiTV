@@ -3,6 +3,7 @@ import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
 import { channelHasGenerationCredential, defaultConfig, encodeChannelModel, isBuiltinBeefTVChannel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 import type { ModelProtocol } from "@/lib/model-protocols";
 import { upgradeLL2ModelProfile } from "../../../plugin-packages/beeftv-plugin-ll2/client/index.js";
+import { upgradeYsduiModelProfile } from "../../../plugin-packages/beeftv-plugin-ysdui/client/index.js";
 
 export async function testChannelModelConnection(channel: ModelChannel, model: string, capability: ModelCapability, protocol: ModelProtocol, runTask = runBackendGenerationTask) {
     if (!channel.baseUrl.trim()) throw new Error("请先填写 Base URL");
@@ -11,7 +12,7 @@ export async function testChannelModelConnection(channel: ModelChannel, model: s
     }
     const selectedModel = encodeChannelModel(channel.id, model);
     const rawProfile = channel.modelProfiles?.find((item) => item.model === model);
-    const modelProfile = rawProfile ? (upgradeLL2ModelProfile(rawProfile) as typeof rawProfile) : undefined;
+    const modelProfile = rawProfile ? (upgradeYsduiModelProfile(upgradeLL2ModelProfile(rawProfile)) as typeof rawProfile) : undefined;
     const limits = modelProfile?.capabilityConfig || defaultModelCapabilityConfig(protocol, model);
     const duration = limits?.video?.duration;
     const durations = duration?.values?.filter((value) => Number.isFinite(value) && value > 0) || [];

@@ -395,80 +395,138 @@ func TestBuiltinLL2PluginPreinstalledAndRegistersProviders(t *testing.T) {
 	defer capability.BuiltinRegistry().ResetPluginDescriptors()
 	svc := New(rt, nil)
 
-	view, ok := ByID(svc.List(), "beeftv-plugin-ll2")
-	if !ok {
-		t.Fatal("expected beeftv-plugin-ll2 to be pre-installed by default")
-	}
-	if view.Status != StatusEnabled || view.Source != OriginOfficial {
-		t.Fatalf("unexpected beeftv-plugin-ll2 view: status=%q source=%q", view.Status, view.Source)
-	}
-	if view.Management.ConfigurationScope != ConfigurationUser || view.Management.ActivationScope != ScopeSystem {
-		t.Fatalf("expected ScopeSystem/ConfigurationUser for beeftv-plugin-ll2, got activation=%q config=%q", view.Management.ActivationScope, view.Management.ConfigurationScope)
+	for _, builtinID := range []string{"beeftv-plugin-ll2", "beeftv-plugin-ysdui"} {
+		view, ok := ByID(svc.List(), builtinID)
+		if !ok {
+			t.Fatalf("expected %s to be pre-installed by default", builtinID)
+		}
+		if view.Status != StatusEnabled || view.Source != OriginOfficial {
+			t.Fatalf("unexpected %s view: status=%q source=%q", builtinID, view.Status, view.Source)
+		}
+		if view.Management.ConfigurationScope != ConfigurationUser || view.Management.ActivationScope != ScopeSystem {
+			t.Fatalf("expected ScopeSystem/ConfigurationUser for %s, got activation=%q config=%q", builtinID, view.Management.ActivationScope, view.Management.ConfigurationScope)
+		}
 	}
 
 	reg := svc.Registry()
+	syncImageAdapter, resolved := reg.Resolve("ysdui-image")
+	if !resolved {
+		t.Fatal("expected provider ysdui-image from beeftv-plugin-ysdui to be registered in protocol registry")
+	}
+	syncSpec, err := syncImageAdapter.BuildCreate(context.Background(), protocol.RequestContext{
+		BaseURL: "https://tokenhub.ysdui.cn",
+		Request: protocol.GenerationRequest{
+			Model:       "doubao-seedream-5-0-260128",
+			Prompt:      "a minimalist ink mountain",
+			AspectRatio: "16:9",
+			Quality:     "2k",
+			ImageCount:  1,
+		},
+	})
+	if err != nil || syncSpec.Path != "/v1/images/generations" {
+		t.Fatalf("BuildCreate(ysdui-image) path=%q err=%v", syncSpec.Path, err)
+	}
+	syncCreated, err := syncImageAdapter.ParseCreate(context.Background(), []byte(`{"created":1,"data":[{"url":"https://cdn.example.com/out.png"}]}`))
+	if err != nil || syncCreated.Status != protocol.StatusSucceeded || len(syncCreated.Result.Images) != 1 {
+		t.Fatalf("ParseCreate(ysdui-image) unexpected: status=%q images=%v err=%v", syncCreated.Status, syncCreated.Result, err)
+	}
+
 	cases := []struct {
 		providerID   string
+		baseURL      string
 		req          protocol.GenerationRequest
 		wantPath     string
 		wantPollPath string
 		createJSON   string
 		wantTaskID   string
 		pollJSON     string
+		wantKind     string
 	}{
 		{
 			providerID:   "ll2-seedance-video",
+			baseURL:      "https://api.ll2.cn",
 			req:          protocol.GenerationRequest{Model: "doubao-seedance-2-0-fast", Prompt: "hello", Duration: 4, AspectRatio: "16:9", Resolution: "720p"},
 			wantPath:     "/seedance/api/v3/contents/generations/tasks",
 			wantPollPath: "/seedance/api/v3/contents/generations/tasks/cgt-1",
 			createJSON:   `{"id":"cgt-1","status":"queued"}`,
 			wantTaskID:   "cgt-1",
 			pollJSON:     `{"id":"cgt-1","status":"succeeded","content":{"video_url":"https://cdn.example.com/a.mp4"}}`,
+			wantKind:     "video",
 		},
 		{
 			providerID:   "ll2-vidu-video",
+			baseURL:      "https://api.ll2.cn",
 			req:          protocol.GenerationRequest{Model: "viduq3-turbo", Prompt: "hello", Duration: 5, AspectRatio: "16:9", Resolution: "720p"},
 			wantPath:     "/vidu/ent/v2/text2video",
 			wantPollPath: "/vidu/ent/v2/tasks/vidu-1/creations",
 			createJSON:   `{"task_id":"vidu-1","state":"created"}`,
 			wantTaskID:   "vidu-1",
 			pollJSON:     `{"id":"vidu-1","state":"success","creations":[{"url":"https://cdn.example.com/b.mp4"}]}`,
+			wantKind:     "video",
 		},
 		{
 			providerID:   "ll2-minimax-video",
+			baseURL:      "https://api.ll2.cn",
 			req:          protocol.GenerationRequest{Model: "MiniMax-H3", Prompt: "hello", Duration: 5, AspectRatio: "16:9", Resolution: "720P"},
 			wantPath:     "/v2/video_generation",
 			wantPollPath: "/v2/query/video_generation/mm-1",
 			createJSON:   `{"task_id":"mm-1","base_resp":{"status_code":0,"status_msg":"success"}}`,
 			wantTaskID:   "mm-1",
 			pollJSON:     `{"task_id":"mm-1","status":"Success","video_url":"https://cdn.example.com/c.mp4"}`,
+			wantKind:     "video",
 		},
 		{
 			providerID:   "ll2-super-vega-video",
+			baseURL:      "https://api.ll2.cn",
 			req:          protocol.GenerationRequest{Model: "1.0-pro-mini", Prompt: "hello", Duration: 4, AspectRatio: "16:9", Resolution: "720P"},
 			wantPath:     "/super-vega/tasks",
 			wantPollPath: "/super-vega/tasks/sv-1",
 			createJSON:   `{"Response":{"TaskId":"sv-1","RequestId":"req-1"}}`,
 			wantTaskID:   "sv-1",
 			pollJSON:     `{"Response":{"Status":"FINISH","AigcVideoTask":{"TaskId":"sv-1","Output":{"FileInfos":[{"FileUrl":"https://cdn.example.com/d.mp4"}]}}}}`,
+			wantKind:     "video",
 		},
 		{
 			providerID:   "ll2-auto-hd-video",
+			baseURL:      "https://api.ll2.cn",
 			req:          protocol.GenerationRequest{Model: "auto-hd", Videos: []protocol.MediaReference{{URL: "https://cdn.example.com/src.mp4"}}, Resolution: "1080p"},
 			wantPath:     "/hd/tasks",
 			wantPollPath: "/hd/tasks/hd-1",
 			createJSON:   `{"task_id":"hd-1","status":"created"}`,
 			wantTaskID:   "hd-1",
 			pollJSON:     `{"task_id":"hd-1","status":"finished","url":"https://cdn.example.com/e.mp4"}`,
+			wantKind:     "video",
+		},
+		{
+			providerID:   "ysdui-image-task",
+			baseURL:      "https://tokenhub.ysdui.cn",
+			req:          protocol.GenerationRequest{Model: "wand-vega-image-flash", Prompt: "hello", AspectRatio: "1:1", Quality: "1k"},
+			wantPath:     "/v1/images/tasks",
+			wantPollPath: "/v1/images/tasks/task-img-1",
+			createJSON:   `{"code":"success","data":{"task_id":"task-img-1"}}`,
+			wantTaskID:   "task-img-1",
+			pollJSON:     `{"code":"success","data":{"task_id":"task-img-1","status":"SUCCESS","content":{"image_url":[{"url":"https://cdn.example.com/vega.png"}]}}}`,
+			wantKind:     "image",
+		},
+		{
+			providerID:   "ysdui-video",
+			baseURL:      "https://tokenhub.ysdui.cn",
+			req:          protocol.GenerationRequest{Model: "doubao-seedance-2-0-260128", Prompt: "hello", Duration: 5, AspectRatio: "16:9", Resolution: "720p"},
+			wantPath:     "/v1/video/generations",
+			wantPollPath: "/v1/video/generations/cgt-ys-1",
+			createJSON:   `{"code":"success","data":{"task_id":"cgt-ys-1"}}`,
+			wantTaskID:   "cgt-ys-1",
+			pollJSON:     `{"code":"success","data":{"task_id":"cgt-ys-1","status":"SUCCESS","data":{"id":"cgt-ys-1","status":"succeeded","content":{"video_url":"https://cdn.example.com/ys.mp4"}}}}`,
+			wantKind:     "video",
 		},
 	}
 	for _, tc := range cases {
 		adapter, resolved := reg.Resolve(tc.providerID)
 		if !resolved {
-			t.Fatalf("expected provider %q from beeftv-plugin-ll2 to be registered in protocol registry", tc.providerID)
+			t.Fatalf("expected provider %q to be registered in protocol registry", tc.providerID)
 		}
 		reqCtx := protocol.RequestContext{
-			BaseURL: "https://api.ll2.cn",
+			BaseURL: tc.baseURL,
 			Request: tc.req,
 		}
 		spec, err := adapter.BuildCreate(context.Background(), reqCtx)
@@ -489,7 +547,7 @@ func TestBuiltinLL2PluginPreinstalledAndRegistersProviders(t *testing.T) {
 			t.Fatalf("ParseCreate(%s) TaskID = %q, want %q", tc.providerID, created.TaskID, tc.wantTaskID)
 		}
 		pollCtx := protocol.PollContext{
-			BaseURL: "https://api.ll2.cn",
+			BaseURL: tc.baseURL,
 			Model:   tc.req.Model,
 			Request: tc.req,
 			TaskID:  created.TaskID,
@@ -508,8 +566,14 @@ func TestBuiltinLL2PluginPreinstalledAndRegistersProviders(t *testing.T) {
 		if polled.TaskID != tc.wantTaskID {
 			t.Fatalf("ParsePoll(%s) TaskID = %q, want %q", tc.providerID, polled.TaskID, tc.wantTaskID)
 		}
-		if polled.Status != protocol.StatusSucceeded || len(polled.Result.Videos) != 1 {
-			t.Fatalf("ParsePoll(%s) unexpected result: status=%q videos=%v", tc.providerID, polled.Status, polled.Result.Videos)
+		if polled.Status != protocol.StatusSucceeded {
+			t.Fatalf("ParsePoll(%s) unexpected status=%q", tc.providerID, polled.Status)
+		}
+		if tc.wantKind == "image" && len(polled.Result.Images) != 1 {
+			t.Fatalf("ParsePoll(%s) unexpected images=%v", tc.providerID, polled.Result.Images)
+		}
+		if tc.wantKind == "video" && len(polled.Result.Videos) != 1 {
+			t.Fatalf("ParsePoll(%s) unexpected videos=%v", tc.providerID, polled.Result.Videos)
 		}
 	}
 }
@@ -567,9 +631,10 @@ func TestBundledPluginDirsManifestAndDesktopAgentHostResolution(t *testing.T) {
 	wantNames := map[string]bool{
 		"beeftv-plugin-market": false,
 		"beeftv-plugin-ll2":    false,
+		"beeftv-plugin-ysdui":  false,
 	}
 	for _, name := range names {
-		if !wantNames[name] && name != "beeftv-plugin-market" && name != "beeftv-plugin-ll2" {
+		if _, ok := wantNames[name]; !ok {
 			t.Fatalf("bundled-plugin-dirs.txt must only contain built-in default plugins, got unexpected %q", name)
 		}
 		wantNames[name] = true
@@ -670,7 +735,7 @@ func TestBundledPluginDirsManifestAndDesktopAgentHostResolution(t *testing.T) {
 			svc := New(rt, nil)
 			svc.SetPackageFetcher(copyPackageFetcher)
 
-			for _, builtinID := range []string{"beeftv-plugin-market", "beeftv-plugin-ll2"} {
+			for _, builtinID := range []string{"beeftv-plugin-market", "beeftv-plugin-ll2", "beeftv-plugin-ysdui"} {
 				builtinView, found := ByID(svc.List(), builtinID)
 				if !found {
 					t.Fatalf("%s was not loaded from agent-host/bundled-plugins", builtinID)

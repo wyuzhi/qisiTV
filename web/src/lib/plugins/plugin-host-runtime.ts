@@ -200,16 +200,19 @@ export function createBeefTVPluginHost(pluginId: string, manifest?: PluginManife
                     throw new Error("渠道接口地址必须以 http:// 或 https:// 开头");
                 }
                 const buildNextConfig = async () => {
+                    const { servicePresetFor } = await import("@/lib/model-service-presets");
                     const latest = useConfigStore.getState().config;
-                    const existing = latest.channels.find((item) => item.id === targetId);
+                    const existing = latest.channels.find((item) => item.id === targetId)
+                        || latest.channels.find((item) => item.scope !== "system" && !item.pinned && !item.credentialRef && servicePresetFor(item) === allowedPrefix);
                     if (existing?.scope === "system" || existing?.pinned || existing?.credentialRef) {
                         throw new Error("不允许覆盖系统内置或受管凭证渠道");
                     }
+                    const effectiveId = existing?.id || targetId;
                     const nextApiKey = typeof incoming.apiKey === "string" && incoming.apiKey.trim()
                         ? incoming.apiKey.trim()
                         : existing?.apiKey ?? "";
                     const channel: ModelChannel = {
-                        id: targetId,
+                        id: effectiveId,
                         name: String(incoming.name || existing?.name || targetId).trim(),
                         baseUrl,
                         apiKey: nextApiKey,
@@ -225,7 +228,7 @@ export function createBeefTVPluginHost(pluginId: string, manifest?: PluginManife
                     };
                     const { withChannels } = await import("@/pages/settings/channel-settings-pane");
                     const nextChannels = existing
-                        ? latest.channels.map((item) => (item.id === targetId ? channel : item))
+                        ? latest.channels.map((item) => (item.id === existing.id ? channel : item))
                         : [...latest.channels, channel];
                     return { channel, nextConfig: withChannels(latest, nextChannels) };
                 };

@@ -286,12 +286,17 @@ func ValidateManifest(manifest Manifest) error {
 			}
 			continue
 		}
-		requiresV3 := len(provider.Variables) > 0 || provider.Response.Stream != nil || provider.Response.DetectImageMIME
+		requiresV3 := len(provider.Variables) > 0 || provider.Response.Stream != nil || provider.Response.DetectImageMIME || provider.MediaUpload != nil
 		for _, operation := range []*ManifestOperation{&provider.Create, provider.Poll, provider.Cancel, provider.Result, provider.Agent} {
 			requiresV3 = requiresV3 || (operation != nil && operation.DefaultPathPrefix != "")
 		}
 		if strings.TrimSpace(manifest.APIVersion) != "beeftv.plugin/v3" && requiresV3 {
 			return fmt.Errorf("provider %q requires beeftv.plugin/v3 for variables, defaultPathPrefix or image response extensions", provider.ID)
+		}
+		if provider.MediaUpload != nil {
+			if err := validateManifestMediaUpload(*provider.MediaUpload, provider.BaseURL); err != nil {
+				return fmt.Errorf("provider %q mediaUpload: %w", provider.ID, err)
+			}
 		}
 		var expressions []any
 		for _, operation := range []*ManifestOperation{&provider.Create, provider.Poll, provider.Cancel, provider.Result, provider.Agent} {
@@ -391,6 +396,7 @@ func normalizeManifestForProvider(manifest *Manifest, index int) error {
 	manifest.Metadata.Poll = operationSummaryPtr(provider.Poll)
 	manifest.Metadata.Cancel = operationSummaryPtr(provider.Cancel)
 	manifest.Metadata.ContentType = provider.Create.ContentType
+	manifest.Metadata.BaseURL = strings.TrimSpace(provider.BaseURL)
 	manifest.Metadata.RequiresPublicMediaURLs = provider.RequiresPublicMediaURLs
 	for kind, transport := range provider.MediaTransport {
 		if (kind != "image" && kind != "video" && kind != "audio") || (transport != "inline" && transport != "url") {
@@ -398,6 +404,7 @@ func normalizeManifestForProvider(manifest *Manifest, index int) error {
 		}
 	}
 	manifest.Metadata.MediaTransport = provider.MediaTransport
+	manifest.Metadata.MediaUpload = provider.MediaUpload
 	manifest.Metadata.Execution = manifest.Runtime.Backend
 	manifest.Create = provider.Create
 	manifest.Agent = provider.Agent
@@ -1546,30 +1553,3 @@ func reflectValueIsZero(value any) bool {
 	}
 }
 
-// firstPathJSONValue keeps scalar response fields string-like while allowing
-// providers to return tool arguments as an object instead of a JSON string.
-// The platform tool contract always stores arguments as JSON text.
-func firstPathJSONValue(payload map[string]any, paths ...string) string {
-	for _, path := range paths {
-		value := pathValue(payload, path)
-		switch typed := value.(type) {
-		case string:
-			if strings.TrimSpace(typed) != "" {
-				return strings.TrimSpace(typed)
-			}
-		case nil:
-			continue
-		default:
-			encoded, err := json.Marshal(typed)
-			if err == nil && len(encoded) > 0 {
-				return string(encoded)
-			}
-		}
-	}
-	return ""
-}
-
-func isRelativePath(path string) bool {
-	parsed, err := url.Parse(strings.TrimSpace(path))
-	return err == nil && parsed.Path != "" && strings.HasPrefix(parsed.Path, "/") && !strings.HasPrefix(parsed.Path, "//") && parsed.Host == "" && parsed.User == nil && parsed.Scheme == ""
-}

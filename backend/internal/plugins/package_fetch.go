@@ -687,6 +687,7 @@ const bundledPluginsSubdir = "bundled-plugins"
 var BundledBuiltinPluginNames = []string{
 	"beeftv-plugin-market",
 	"beeftv-plugin-ll2",
+	"beeftv-plugin-ysdui",
 }
 
 var (

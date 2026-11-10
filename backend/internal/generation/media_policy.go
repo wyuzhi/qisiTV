@@ -21,6 +21,9 @@ func MediaHydrationPolicyFor(ctx context.Context, input Input) MediaHydrationPol
 	if requiresBeefTVHTTPReferences(ctx, input.Config) {
 		return MediaHydrationPolicy{KeepLocal: true}
 	}
+	if adapter, ok := ProtocolAdapterForContext(EnsureOfficialProtocolAdapter(ctx, input.Config.InterfaceType), input.Config.InterfaceType); ok && adapter.Metadata().MediaUpload != nil {
+		return MediaHydrationPolicy{KeepLocal: true}
+	}
 	policy := MediaHydrationPolicy{PreferURL: PrefersMediaURLs(input.Config.InterfaceType, input)}
 	if model.IsVolcengineArkVideoProtocol(model.ChannelInterfaceType(input.Config.InterfaceType)) {
 		return MediaHydrationPolicy{PreferHTTPS: true}

@@ -130,6 +130,7 @@ type RequestFilePart struct {
 	Filename  string         `json:"filename,omitempty"`
 	MIMEType  string         `json:"mimeType,omitempty"`
 	Reference MediaReference `json:"reference"`
+	Data      []byte         `json:"-"`
 }
 
 type CreateResult struct {
@@ -181,10 +182,23 @@ type Metadata struct {
 	LegacyAliases           []string          `json:"-"`
 	Enabled                 bool              `json:"enabled"`
 	Installable             bool              `json:"installable"`
-	Execution               string            `json:"-"`
-	RequiresPublicMediaURLs bool              `json:"-"`
-	MediaTransport          map[string]string `json:"-"`
-	UnavailableReason       string            `json:"-"`
+	Execution               string               `json:"-"`
+	BaseURL                 string               `json:"-"`
+	RequiresPublicMediaURLs bool                 `json:"-"`
+	MediaTransport          map[string]string    `json:"-"`
+	MediaUpload             *ManifestMediaUpload `json:"-"`
+	UnavailableReason       string               `json:"-"`
+}
+
+type ManifestMediaUpload struct {
+	URL          string   `json:"url,omitempty"`
+	Path         string   `json:"path,omitempty"`
+	Field        string   `json:"field,omitempty"`
+	MaxBytes     int64    `json:"maxBytes,omitempty"`
+	URLPaths     []string `json:"urlPaths,omitempty"`
+	ErrorPaths   []string `json:"errorPaths,omitempty"`
+	SuccessCodes []any    `json:"successCodes,omitempty"`
+	MessagePaths []string `json:"messagePaths,omitempty"`
 }
 
 // Manifest is the single plugin contract. A plugin may contribute providers,
@@ -315,6 +329,7 @@ type ManifestProvider struct {
 	BaseURL                 string                 `json:"baseUrl,omitempty"`
 	RequiresPublicMediaURLs bool                   `json:"requiresPublicMediaUrls,omitempty"`
 	MediaTransport          map[string]string      `json:"mediaTransport,omitempty"`
+	MediaUpload             *ManifestMediaUpload   `json:"mediaUpload,omitempty"`
 	Auth                    ManifestAuth           `json:"auth,omitempty"`
 	Parameters              []Parameter            `json:"parameters,omitempty"`
 	Validations             []ManifestValidation   `json:"validations,omitempty"`

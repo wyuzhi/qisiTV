@@ -59,6 +59,12 @@ func RunProtocolAdapterTaskWithPolicy(ctx context.Context, input Input, adapter 
 	if provider, ok := adapter.(protocol.ModuleProvider); ok {
 		return runModuleProviderTask(ctx, input, provider, policy)
 	}
+	if ResumedProviderRequestID(ctx) == "" {
+		runtime, _ := RuntimeFromContext(ctx)
+		if err := prepareProtocolMediaUploads(ctx, strings.TrimSpace(runtime.Call.UserID), &input); err != nil {
+			return nil, err
+		}
+	}
 	// create、poll、download 是同一个外部任务的三个阶段：任一阶段失败都向上返回真实错误，
 	// 不把“已提交但结果未知”伪装成成功，也不把下载失败降级成空结果。
 	request := ProtocolRequestFor(input, adapter)

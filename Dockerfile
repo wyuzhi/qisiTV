@@ -19,6 +19,7 @@ COPY backend/internal/providerpreset/video_contracts.json /app/backend/internal/
 # The plugin center renders the developer guide straight from the docs site page.
 COPY docs/content/docs/plugins/plugin-development.mdx /app/docs/content/docs/plugins/plugin-development.mdx
 COPY plugin-packages/beeftv-plugin-ll2/client /app/plugin-packages/beeftv-plugin-ll2/client
+COPY plugin-packages/beeftv-plugin-ysdui/client /app/plugin-packages/beeftv-plugin-ysdui/client
 COPY web ./
 ARG BUILD_VERSION
 ENV CANVAS_BUILD_VERSION=${BUILD_VERSION}

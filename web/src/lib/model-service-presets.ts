@@ -5,10 +5,12 @@ import { inferProtocolCapabilityFromModel, modelProtocolDefinition, modelProtoco
 import { catalogEndpointCapability, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
 import { serviceCredentialGuide } from "@/lib/service-credentials";
 import { DEFAULT_BASE_URL as LL2_DEFAULT_BASE_URL, LL2_CHANNEL_ID, LL2_CHANNEL_NAME, LL2_PRESET_MODELS, buildLL2ModelChannel, upgradeLL2ModelProfile } from "../../../plugin-packages/beeftv-plugin-ll2/client/index.js";
+import { DEFAULT_BASE_URL as YSDUI_DEFAULT_BASE_URL, YSDUI_CHANNEL_ID, YSDUI_CHANNEL_NAME, YSDUI_PRESET_MODELS, buildYsduiModelChannel, upgradeYsduiModelProfile } from "../../../plugin-packages/beeftv-plugin-ysdui/client/index.js";
 
 export const MODEL_SERVICE_PRESETS = [
     { id: "compatible", name: "第三方模型服务", subtitle: "OpenAI 兼容 API · 中转服务", icon: "OpenAI", baseUrl: "", apiFormat: "openai" },
     { id: LL2_CHANNEL_ID, name: LL2_CHANNEL_NAME, subtitle: "文本 · 多款主流视频 · 视频超分", icon: "OpenAI", baseUrl: LL2_DEFAULT_BASE_URL, apiFormat: "openai" },
+    { id: YSDUI_CHANNEL_ID, name: YSDUI_CHANNEL_NAME, subtitle: "文本 · 多款主流图片 · 多款主流视频", icon: "OpenAI", baseUrl: YSDUI_DEFAULT_BASE_URL, apiFormat: "openai" },
     { id: "openai", name: "OpenAI", subtitle: "文本 · 图片（Sora 已停用）", icon: "OpenAI", baseUrl: "https://api.openai.com/v1", apiFormat: "openai" },
     { id: "gemini", name: "Google Gemini", subtitle: "文本 · 图片（Veo 已停用）", icon: "Gemini", baseUrl: "https://generativelanguage.googleapis.com", apiFormat: "gemini" },
     { id: "ark", name: "火山方舟", subtitle: "文本 · 即梦图片 · Seedance 视频", icon: "Volcengine", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", apiFormat: "openai" },
@@ -16,16 +18,23 @@ export const MODEL_SERVICE_PRESETS = [
 export type ModelServicePresetId = typeof MODEL_SERVICE_PRESETS[number]["id"];
 export const CAPABILITY_LABELS: Record<ModelCapability, string> = { text: "文本", image: "图片", video: "视频", audio: "音频" };
 
+export function isBuiltinPresetService(id: ModelServicePresetId): id is typeof LL2_CHANNEL_ID | typeof YSDUI_CHANNEL_ID {
+    return id === LL2_CHANNEL_ID || id === YSDUI_CHANNEL_ID;
+}
+
 export function isTopazUpscaleChannel(channel: Pick<ModelChannel, "id" | "models">): boolean {
     return channel.id === "fal-topaz-upscale" || channel.models.some(model => model.replace(/^\/+/, "").startsWith("topaz/upscale/"));
 }
 
 export function servicePresetFor(channel: ModelChannel): ModelServicePresetId {
     if (channel.id === LL2_CHANNEL_ID) return LL2_CHANNEL_ID;
+    if (channel.id === YSDUI_CHANNEL_ID) return YSDUI_CHANNEL_ID;
     try {
         const host = new URL(channel.baseUrl).hostname;
         const ll2Host = new URL(LL2_DEFAULT_BASE_URL).hostname;
+        const ysduiHost = new URL(YSDUI_DEFAULT_BASE_URL).hostname;
         if (host === ll2Host || host.endsWith(".ll2.cn")) return LL2_CHANNEL_ID;
+        if (host === ysduiHost || host === "ysdui.cn" || host.endsWith(".ysdui.cn")) return YSDUI_CHANNEL_ID;
         if (host === "api.openai.com") return "openai";
         if (host === "generativelanguage.googleapis.com") return "gemini";
         if (/^ark\.[a-z0-9-]+\.(?:volces|bytepluses)\.com$/.test(host)) return "ark";
@@ -34,8 +43,8 @@ export function servicePresetFor(channel: ModelChannel): ModelServicePresetId {
 }
 
 export function presetCatalogFor(id: ModelServicePresetId): ChannelModelCatalogItem[] {
-    if (id !== LL2_CHANNEL_ID) return [];
-    return LL2_PRESET_MODELS.map((item) => ({
+    const models = id === LL2_CHANNEL_ID ? LL2_PRESET_MODELS : id === YSDUI_CHANNEL_ID ? YSDUI_PRESET_MODELS : [];
+    return models.map((item) => ({
         id: item.model,
         displayName: item.displayName,
         modelType: item.capability as ModelCapability,
@@ -83,10 +92,18 @@ export function ll2ProtocolsAvailable(protocols: ModelProtocolDefinition[]): boo
     );
 }
 
+export function ysduiProtocolsAvailable(protocols: ModelProtocolDefinition[]): boolean {
+    return YSDUI_PRESET_MODELS.every((item) =>
+        protocols.some((protocol) => protocol.value === item.protocol && protocol.capability === item.capability && protocol.enabled !== false),
+    );
+}
+
 export function createServicePresetChannel(id: ModelServicePresetId, channelId: string, protocols?: ModelProtocolDefinition[]): ModelChannel {
     const preset = MODEL_SERVICE_PRESETS.find((item) => item.id === id)!;
-    if (id === LL2_CHANNEL_ID) {
-        const built = buildLL2ModelChannel({ apiKey: "", baseUrl: preset.baseUrl, selectedModels: undefined });
+    if (isBuiltinPresetService(id)) {
+        const built = id === LL2_CHANNEL_ID
+            ? buildLL2ModelChannel({ apiKey: "", baseUrl: preset.baseUrl, selectedModels: undefined })
+            : buildYsduiModelChannel({ apiKey: "", baseUrl: preset.baseUrl, selectedModels: undefined });
         return {
             ...createModelChannel({ id: channelId, apiFormat: preset.apiFormat }),
             name: preset.name,
@@ -115,36 +132,48 @@ export function createServicePresetChannel(id: ModelServicePresetId, channelId: 
 export function serviceModelProfile(channel: ModelChannel, item: ChannelModelCatalogItem, protocols: ModelProtocolDefinition[], explicitCapability?: ModelCapability): NonNullable<ModelChannel["modelProfiles"]>[number] {
     const preset = channel.apiFormat === "gemini" ? "gemini" : servicePresetFor(channel);
     const rawExisting = channel.modelProfiles?.find((profile) => profile.model === item.id);
-    const existing = rawExisting && preset === LL2_CHANNEL_ID ? (upgradeLL2ModelProfile(rawExisting) as typeof rawExisting) : rawExisting;
+    const existing = rawExisting
+        ? preset === LL2_CHANNEL_ID
+            ? (upgradeLL2ModelProfile(rawExisting) as typeof rawExisting)
+            : preset === YSDUI_CHANNEL_ID
+                ? (upgradeYsduiModelProfile(rawExisting) as typeof rawExisting)
+                : rawExisting
+        : rawExisting;
     if (existing?.protocol && !explicitCapability) {
         const definition = modelProtocolDefinition(existing.protocol, protocols);
         const usable = definition && definition.enabled !== false ? definition : undefined;
         // 旧 ID 落盘时换成现在的 ID，下次打开就是新 ID。
         if (usable && (usable.value !== existing.protocol || usable.authType !== existing.authType)) return { ...existing, protocol: usable.value, authType: usable.authType };
-        if (usable || !existing.protocol.startsWith("ll2-")) return existing;
+        if (usable || (!existing.protocol.startsWith("ll2-") && !existing.protocol.startsWith("ysdui-"))) return existing;
     }
-    const ll2Preset = preset === LL2_CHANNEL_ID ? LL2_PRESET_MODELS.find((presetItem) => presetItem.model === item.id) : undefined;
-    if (ll2Preset && (!explicitCapability || explicitCapability === ll2Preset.capability)) {
-        const definition = protocols.find((protocol) => protocol.value === ll2Preset.protocol && protocol.capability === ll2Preset.capability && protocol.enabled !== false);
+    const builtinPreset = preset === LL2_CHANNEL_ID
+        ? LL2_PRESET_MODELS.find((presetItem) => presetItem.model === item.id)
+        : preset === YSDUI_CHANNEL_ID
+            ? YSDUI_PRESET_MODELS.find((presetItem) => presetItem.model === item.id)
+            : undefined;
+    if (builtinPreset && (!explicitCapability || explicitCapability === builtinPreset.capability)) {
+        const definition = protocols.find((protocol) => protocol.value === builtinPreset.protocol && protocol.capability === builtinPreset.capability && protocol.enabled !== false);
         return {
             ...existing,
-            model: ll2Preset.model,
-            displayName: existing?.displayName || ll2Preset.displayName,
-            capability: ll2Preset.capability as ModelCapability,
+            model: builtinPreset.model,
+            displayName: existing?.displayName || builtinPreset.displayName,
+            capability: builtinPreset.capability as ModelCapability,
             protocol: definition?.value,
             authType: definition ? definition.authType : existing?.authType,
-            ...(ll2Preset.defaultOptions ? { defaultOptions: ll2Preset.defaultOptions } : {}),
-            capabilityConfig: existing?.capability === ll2Preset.capability && existing?.capabilityConfig
+            ...("defaultOptions" in builtinPreset && builtinPreset.defaultOptions ? { defaultOptions: builtinPreset.defaultOptions } : {}),
+            capabilityConfig: existing?.capability === builtinPreset.capability && existing?.capabilityConfig
                 ? existing.capabilityConfig
-                : ll2Preset.capabilityConfig as NonNullable<ModelChannel["modelProfiles"]>[number]["capabilityConfig"],
+                : builtinPreset.capabilityConfig as NonNullable<ModelChannel["modelProfiles"]>[number]["capabilityConfig"],
         };
     }
     const fullvideoFull = ["sd-native-full-2.0", "sd-native-full-2.5", "原生不卡人脸-全参2.0", "原生不卡人脸-全参2.5"].includes(item.id);
     const capability = explicitCapability || existing?.capability || item.modelType || catalogEndpointCapability(item) || (fullvideoFull ? "video" : inferProtocolCapabilityFromModel(item.id));
-    const compatibleCandidates: Partial<Record<ModelCapability, string>> = { text: "chat-completion", image: "openai-image", audio: "openai-audio" };
+    const textAudioCandidates: Partial<Record<ModelCapability, string>> = { text: "chat-completion", audio: "openai-audio" };
+    const compatibleCandidates: Partial<Record<ModelCapability, string>> = { ...textAudioCandidates, image: "openai-image" };
     const candidates: Record<ModelServicePresetId, Partial<Record<ModelCapability, string>>> = {
         compatible: compatibleCandidates,
         ll2: compatibleCandidates,
+        ysdui: textAudioCandidates,
         openai: { text: "openai-response", image: "openai-image", video: "newapi" },
         gemini: { text: "gemini-generate-content", image: "gemini-image", video: "gemini-veo" },
         ark: { text: "chat-completion", image: "volcengine-ark-image", video: "volcengine-ark-video" },
@@ -203,14 +232,15 @@ export function mergeSavedServiceChannel<T extends Pick<AiConfig, "channels" | "
     latest: T,
     channel: ModelChannel,
 ): { channels: ModelChannel[]; baseConfig: T; mergedChannel: ModelChannel } {
-    const isLL2 = servicePresetFor(channel) === LL2_CHANNEL_ID;
+    const preset = servicePresetFor(channel);
+    const isSinglePreset = isBuiltinPresetService(preset);
     const exact = latest.channels.find((item) => item.id === channel.id);
-    const existing = exact ?? (isLL2 ? latest.channels.find((item) => servicePresetFor(item) === LL2_CHANNEL_ID) : undefined);
+    const existing = exact ?? (isSinglePreset ? latest.channels.find((item) => servicePresetFor(item) === preset) : undefined);
     const mergedChannel = existing ? { ...channel, id: existing.id } : channel;
     const removedIds = new Set<string>();
-    if (existing && isLL2) {
+    if (existing && isSinglePreset) {
         for (const item of latest.channels) {
-            if (item.id !== existing.id && servicePresetFor(item) === LL2_CHANNEL_ID) {
+            if (item.id !== existing.id && servicePresetFor(item) === preset) {
                 removedIds.add(item.id);
             }
         }

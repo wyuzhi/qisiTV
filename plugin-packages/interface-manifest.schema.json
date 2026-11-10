@@ -91,6 +91,21 @@
         "baseUrl": { "type": "string", "description": "默认服务地址；用户可在连接里改。" },
         "requiresPublicMediaUrls": { "type": "boolean" },
         "mediaTransport": { "type": "object", "additionalProperties": { "type": "string" } },
+        "mediaUpload": {
+          "type": "object",
+          "description": "服务商自带的参考素材上传接口。配置后，本地或内联参考素材会先上传到此接口换取在线 URL 再提交生成请求。",
+          "properties": {
+            "url": { "type": "string" },
+            "path": { "type": "string" },
+            "field": { "type": "string" },
+            "maxBytes": { "type": "integer" },
+            "urlPaths": { "type": "array", "items": { "type": "string" } },
+            "errorPaths": { "type": "array", "items": { "type": "string" } },
+            "successCodes": { "type": "array" },
+            "messagePaths": { "type": "array", "items": { "type": "string" } }
+          },
+          "additionalProperties": false
+        },
         "auth": {
           "type": "object",
           "properties": {
