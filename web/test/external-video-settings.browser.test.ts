@@ -31,6 +31,8 @@ beforeAll(async () => {
         if (url.pathname === "/harness.js") return new Response(js, { headers: { "Content-Type": "application/javascript" } });
         if (url.pathname === "/harness.css") return new Response(css, { headers: { "Content-Type": "text/css" } });
         if (url.pathname === "/api/plugins/catalog") return Response.json({ code: 0, data: { providers }, msg: "ok" });
+        // 地址展示是只读查询，不算提交生成。
+        if (url.pathname === "/api/ai/request-urls") return Response.json({ code: 0, data: { catalog: "", text: {} }, msg: "ok" });
         if (url.pathname.startsWith("/api/")) { generationRequests++; return Response.json({ code: 0, data: {}, msg: "ok" }); }
         const dark = url.searchParams.get("theme") === "dark";
         return new Response(`<html class="${dark ? "dark" : ""}"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/harness.css"><body class="app-product-overlays"><div id="root" class="app-product-workspace"></div><script type="module" src="/harness.js"></script></body></html>`, { headers: { "Content-Type": "text/html" } });

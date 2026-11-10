@@ -38,7 +38,8 @@
 .model-service-fields .ant-form-item-explain { margin:4px 0 10px; line-height:1.7; }
 .model-service-form-title { display:flex; align-items:center; gap:12px; margin-bottom:24px; }
 .model-service-form-title h3,.model-service-catalog-header h3 { margin:0; font-size:16px; font-weight:600; }
-.model-service-url { display:grid; gap:5px; margin-top:-7px; font-size:11px; color:var(--muted-foreground); }
+.model-service-urls { display:grid; gap:12px; margin-top:-7px; }
+.model-service-url { display:grid; gap:5px; font-size:11px; color:var(--muted-foreground); }
 .model-service-url code { overflow-wrap:anywhere; font-size:11px; }
 .model-service-advanced { display:flex; gap:8px; align-items:center; margin-top:22px; padding:0; border:0; background:transparent; color:var(--muted-foreground); font-size:12px; cursor:pointer; }
 .model-service-advanced-fields { padding-top:18px; }

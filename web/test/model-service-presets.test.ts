@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, ll2ProtocolsAvailable, ysduiProtocolsAvailable, pluginServices, mergeSavedServiceChannel, presetCatalogFor, serviceConnectionError, serviceModelProfile, servicePresetFor, modelCatalogRequestURL } from "../src/lib/model-service-presets";
+import { MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, ll2ProtocolsAvailable, ysduiProtocolsAvailable, pluginServices, mergeSavedServiceChannel, presetCatalogFor, serviceConnectionError, serviceModelProfile, servicePresetFor } from "../src/lib/model-service-presets";
 import { modelConnectionResultDetail, testChannelModelConnection } from "../src/lib/model-connection-test";
 import { applyFetchedChannelModelCatalog, modelConfigChannelStatusLabel } from "../src/pages/settings/channel-settings-pane";
 import { backendProviderConfig } from "../src/services/api/generation-task";
@@ -142,7 +142,6 @@ test("a plugin interface that makes images and videos is one service, and both k
 test("connection validation rejects full endpoints and embedded credentials", () => {
     const channel = createModelChannel({ baseUrl: "https://api.example.com/v1", apiKey: "synthetic-key" });
     expect(serviceConnectionError(channel)).toBe("");
-    expect(modelCatalogRequestURL(channel)).toBe("https://api.example.com/v1/models");
     expect(serviceConnectionError({ ...channel, baseUrl: "https://api.example.com/v1/chat/completions" })).not.toBe("");
     expect(serviceConnectionError({ ...channel, baseUrl: "https://secret@api.example.com" })).not.toBe("");
     expect(serviceConnectionError({ ...channel, referenceAssetOrigin: "https://assets.example.com" })).toBe("");

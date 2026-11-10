@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Form, Input, Segmented, Select, Spin } from "antd";
 import { ArrowLeft, Check, ChevronDown, KeyRound, Search, Settings2, ShieldCheck } from "lucide-react";
 import { AppModal } from "@/components/ui/product/app-modal";
@@ -7,13 +7,14 @@ import { ChannelHeadersEditor, validateChannelHeaders } from "@/components/chann
 import { fetchChannelModels, type ChannelModelFetchResult } from "@/services/api/image-models";
 import { fetchPluginProviderCatalog } from "@/services/api/plugin-catalog";
 import { mergeFetchedChannelModelProfiles, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
-import { CAPABILITY_LABELS, MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, createVendorPresetChannel, isBuiltinPresetService, isTopazUpscaleChannel, ll2ProtocolsAvailable, modelCatalogRequestURL, pluginServices, presetCatalogFor, presetModelCount, serviceConnectionError, serviceModelProfile, servicePresetFor, vendorPresetFor, vendorPresets, ysduiProtocolsAvailable, type ModelServicePresetId, type VendorPreset } from "@/lib/model-service-presets";
+import { CAPABILITY_LABELS, MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, createVendorPresetChannel, isBuiltinPresetService, isTopazUpscaleChannel, ll2ProtocolsAvailable, pluginServices, presetCatalogFor, presetModelCount, serviceConnectionError, serviceModelProfile, servicePresetFor, vendorPresetFor, vendorPresets, ysduiProtocolsAvailable, type ModelServicePresetId, type VendorPreset } from "@/lib/model-service-presets";
 import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
 import { serviceCredentialGuide } from "@/lib/service-credentials";
 import type { ModelProtocolDefinition } from "@/lib/model-protocols";
 import { seedancePortraitLabel } from "@/lib/seedance-portrait";
 import { createModelChannel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 import { ChannelModelSettings } from "./channel-model-settings";
+import { ChannelRequestAddressBlocks } from "./channel-request-addresses";
 import { currentModelConnectionReceipt, useModelConnectionTests } from "@/stores/use-model-connection-tests";
 import "./model-service-editor.css";
 import { getTransportFailureKind } from "@/services/api/request";
@@ -306,7 +307,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
                     <Form.Item label="连接名称"><Input aria-label="连接名称" placeholder="例如：我的创作账号" value={draft.name} onChange={(event) => patch({ name: event.target.value })} /></Form.Item>
                     <Form.Item label={credential.apiKeyLabel} help={credential.apiKeyHelp}><Input.Password prefix={<KeyRound size={15} />} aria-label={credential.apiKeyLabel} autoComplete="new-password" placeholder={credential.apiKeyPlaceholder} value={draft.apiKey} onChange={(event) => patch({ apiKey: event.target.value })} /></Form.Item>
                     <Form.Item label="服务地址"><Input aria-label="服务地址" inputMode="url" placeholder="https://api.example.com/v1" value={draft.baseUrl} onChange={(event) => patch({ baseUrl: event.target.value })} /></Form.Item>
-                    {!pluginService && modelCatalogRequestURL(draft) && <div className="model-service-url"><span>模型目录地址</span><code>{modelCatalogRequestURL(draft).split("/").map((part, index) => <Fragment key={index}>{index > 0 && <>/<wbr /></>}{part}</Fragment>)}</code></div>}
+                    {!pluginService && <ChannelRequestAddressBlocks channel={draft} />}
                     <button type="button" className="model-service-advanced" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}><Settings2 size={15} />高级设置<ChevronDown size={14} /></button>
                     {advanced && <div className="model-service-advanced-fields">
                         <Form.Item label="素材服务地址（可选）" help="公网素材域名使用 HTTPS。本机、局域网或 CGNAT 可填写 HTTP，并可带端口。留空时只接受与 API 同主机的素材。"><Input aria-label="素材服务地址" inputMode="url" placeholder="https://assets.example.com" value={draft.referenceAssetOrigin || ""} onChange={(event) => patch({ referenceAssetOrigin: event.target.value })} /></Form.Item>

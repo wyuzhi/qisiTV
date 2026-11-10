@@ -41,6 +41,41 @@ func GeminiURL(baseURL string, path string) string {
 	return channelurl.Join(baseURL, path, "/v1beta")
 }
 
+// 文本接口格式在 Base URL 后拼的路径。文本任务、Agent 请求和设置页展示的地址都从这里取。
+const (
+	ChatCompletionsPath = "/chat/completions"
+	ResponsesPath       = "/responses"
+	MessagesPath        = "/messages"
+)
+
+// TextRequestURL 是文本任务按接口格式实际请求的地址；不是这三种文本接口格式时返回空串。
+func TextRequestURL(baseURL string, interfaceType model.ChannelInterfaceType) string {
+	path := ""
+	switch interfaceType {
+	case model.ChannelInterfaceChatCompletion:
+		path = ChatCompletionsPath
+	case model.ChannelInterfaceOpenAIResponse:
+		path = ResponsesPath
+	case model.ChannelInterfaceClaudeAPI:
+		path = MessagesPath
+	}
+	if path == "" || strings.TrimSpace(baseURL) == "" {
+		return ""
+	}
+	return APIURL(baseURL, path)
+}
+
+// ChannelCatalogURL 是读取渠道模型目录时请求的地址。
+func ChannelCatalogURL(baseURL, apiFormat string) string {
+	if apiFormat == "gemini" {
+		if !strings.HasSuffix(strings.ToLower(baseURL), "/v1beta") {
+			baseURL += "/v1beta"
+		}
+		return baseURL + "/models"
+	}
+	return APIURL(baseURL, "/models")
+}
+
 func ProviderDownloadURL(baseURL string, rawURL string) string {
 	base, baseErr := url.Parse(strings.TrimSpace(baseURL))
 	target, targetErr := url.Parse(strings.TrimSpace(rawURL))

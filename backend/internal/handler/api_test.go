@@ -70,6 +70,7 @@ func TestRegisterDesktopCanvasAPIExcludesHostedOnlyRoutes(t *testing.T) {
 		"POST /api/resources":                              false,
 		"POST /api/tasks":                                  false,
 		"POST /api/ai/models":                              false,
+		"POST /api/ai/request-urls":                        false,
 		"GET /api/beeftv/connection":                       false,
 		"POST /api/beeftv/connection/start":                false,
 		"GET /api/creation-conversations":                  false,

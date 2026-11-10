@@ -32,17 +32,17 @@ func RunAgentToolTask(ctx context.Context, input Input) (map[string]interface{},
 		return nil, errors.New("画布 Agent 工具请求缺少协议参数")
 	}
 	request := input.AgentRequests.ChatCompletion
-	path := "/chat/completions"
+	path := ChatCompletionsPath
 	protocol := "chat-completion"
 	if input.Config.InterfaceType == string(model.ChannelInterfaceOpenAIResponse) {
 		request = input.AgentRequests.Responses
-		path = "/responses"
+		path = ResponsesPath
 		protocol = "responses"
 	} else if input.Config.InterfaceType == string(model.ChannelInterfaceClaudeAPI) {
 		if input.AgentRequests.Claude != nil {
 			request = input.AgentRequests.Claude
 		}
-		path = "/messages"
+		path = MessagesPath
 		protocol = "claude-api"
 	}
 	if request == nil {
@@ -240,6 +240,16 @@ func hostTextInterface(config Config) (string, error) {
 	return adapter.Metadata().ID, nil
 }
 
+// TextRequestURLFor 是文本任务对这个接口格式实际请求的地址：别名和留空的接口格式按文本任务同一套规则
+// 落到宿主自带的格式上；插件或认不出的接口格式返回空串。
+func TextRequestURLFor(baseURL, apiFormat, interfaceType string) string {
+	resolved, err := hostTextInterface(Config{BaseURL: baseURL, APIFormat: apiFormat, InterfaceType: interfaceType})
+	if err != nil {
+		return ""
+	}
+	return TextRequestURL(baseURL, model.ChannelInterfaceType(resolved))
+}
+
 func RunResponsesTextTask(ctx context.Context, input Input) (map[string]interface{}, error) {
 	responseInput, err := TextResponseInput(input)
 	if err != nil {
@@ -248,7 +258,7 @@ func RunResponsesTextTask(ctx context.Context, input Input) (map[string]interfac
 	body := map[string]interface{}{"model": input.Config.Model, "input": responseInput}
 	ApplyTextThinking(body, input, "responses")
 	ApplyTextOutputLimit(body, input.MaxOutputTokens, "max_output_tokens")
-	result, err := RequestTextProvider(ctx, input.Config, "/responses", body, "responses", input.StreamText, input.OnTextDelta)
+	result, err := RequestTextProvider(ctx, input.Config, ResponsesPath, body, "responses", input.StreamText, input.OnTextDelta)
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +279,7 @@ func RunChatCompletionsTextTask(ctx context.Context, input Input) (map[string]in
 	body := map[string]interface{}{"model": input.Config.Model, "messages": messages}
 	ApplyTextThinking(body, input, "chat-completion")
 	ApplyTextOutputLimit(body, input.MaxOutputTokens, "max_tokens")
-	result, err := RequestTextProvider(ctx, input.Config, "/chat/completions", body, "chat-completion", input.StreamText, input.OnTextDelta)
+	result, err := RequestTextProvider(ctx, input.Config, ChatCompletionsPath, body, "chat-completion", input.StreamText, input.OnTextDelta)
 	if err != nil {
 		return nil, err
 	}

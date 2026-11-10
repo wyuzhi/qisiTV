@@ -13,10 +13,11 @@ import { fetchChannelModels, type ChannelModelFetchResult } from "@/services/api
 import { channelHasGenerationCredential, channelHasManagedBeefTVCredential, canonicalChannelModel, createModelChannel, defaultBaseUrlForApiFormat, filterModelsByCapability, isBuiltinBeefTVChannel, modelOptionsFromChannels, normalizeConfigSnapshot, useConfigStore, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { ChannelModelSettings } from "./channel-model-settings";
 import { ModelServiceEditor } from "./model-service-editor";
+import { ChannelRequestAddressLines } from "./channel-request-addresses";
 import { currentModelConnectionReceipt, useModelConnectionTests } from "@/stores/use-model-connection-tests";
 import { ModelLogo } from "@/components/model-logo";
 import beefTVAppIcon from "../../../../assets/app-icon.png";
-import { MODEL_SERVICE_PRESETS, isTopazUpscaleChannel, channelAllowsEmptyAPIKey, mergeSavedServiceChannel, modelCatalogRequestURL, pluginServices, servicePresetFor } from "@/lib/model-service-presets";
+import { MODEL_SERVICE_PRESETS, isTopazUpscaleChannel, channelAllowsEmptyAPIKey, mergeSavedServiceChannel, pluginServices, servicePresetFor } from "@/lib/model-service-presets";
 import { workspaceCapabilities } from "@/services/workspace-mode";
 import { localWorkspaceConfig } from "@/lib/user-session";
 import { getLocalModelConfig } from "@/services/api/workspace";
@@ -390,7 +391,7 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels }: Channel
                                             <ChannelStatus channel={channel} persistence={persistence} connection={builtinBeefTV ? beefConnection : null} />
                                         </div>
                                         {topazUpscale ? <p className="mt-1 text-xs text-foreground/55">从图片或视频节点上方的「AI超分」使用</p> : null}
-                                        {!builtinBeefTV && !topazUpscale && !pluginChannel && <p className="mt-1 break-all text-xs text-foreground/50">模型目录地址：{modelCatalogRequestURL(channel)}</p>}
+                                        {!builtinBeefTV && !topazUpscale && !pluginChannel && <ChannelRequestAddressLines channel={channel} />}
                                     </div>
                                     <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto sm:shrink-0">
                                         {builtinBeefTV && catalogSyncFailed ? <Button loading={beefBusy} onClick={() => void runBeefAction(getBeefTVConnection, "无法更新模型列表")}>重试更新模型列表</Button> : null}

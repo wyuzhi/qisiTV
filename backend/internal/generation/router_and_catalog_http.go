@@ -541,13 +541,7 @@ func FetchChannelModelCatalog(
 func FetchChannelModelCatalogBytes(ctx context.Context, baseURL, apiFormat, apiKey string, headers []modelcatalog.ChannelHeader) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
-	target := APIURL(baseURL, "/models")
-	if apiFormat == "gemini" {
-		if !strings.HasSuffix(strings.ToLower(baseURL), "/v1beta") {
-			baseURL += "/v1beta"
-		}
-		target = baseURL + "/models"
-	}
+	target := ChannelCatalogURL(baseURL, apiFormat)
 	if _, err := outbound.ValidateOutboundURL(target); err != nil {
 		return nil, CatalogError(http.StatusBadRequest, "catalog_address_invalid", err.Error(), err)
 	}

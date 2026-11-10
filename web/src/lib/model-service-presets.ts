@@ -1,5 +1,5 @@
 import type { AiConfig, ModelChannel, ModelCapability } from "@/stores/use-config-store";
-import { buildApiUrl, createModelChannel } from "@/stores/use-config-store";
+import { createModelChannel } from "@/stores/use-config-store";
 import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
 import { inferProtocolCapabilityFromModel, modelProtocolDefinition, modelProtocolDefinitionFor, type ModelProtocolDefinition } from "@/lib/model-protocols";
 import { catalogEndpointCapability, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
@@ -284,10 +284,3 @@ export function mergeSavedServiceChannel<T extends Pick<AiConfig, "channels" | "
     return { channels, baseConfig, mergedChannel };
 }
 
-export function modelCatalogRequestURL(channel: ModelChannel) {
-    if (!channel.baseUrl.trim()) return "";
-    try {
-        if (channel.apiFormat === "gemini") return `${channel.baseUrl.replace(/\/+$/, "").replace(/\/v1beta$/, "")}/v1beta/models`;
-        return buildApiUrl(channel.baseUrl, "/models");
-    } catch { return ""; }
-}
