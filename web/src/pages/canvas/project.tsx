@@ -81,7 +81,7 @@ import { useCanvasActiveTasks } from "./use-canvas-active-tasks";
 import { useCanvasStyleWorkflow } from "./use-canvas-style-workflow";
 import { useCanvasDirector } from "./use-canvas-director";
 import { useCanvasHistory } from "./use-canvas-history";
-import { useCanvasKeyboard } from "./use-canvas-keyboard";
+import { canvasKeyboardEnabled, useCanvasKeyboard } from "./use-canvas-keyboard";
 import { useCanvasMediaTools } from "./use-canvas-media-tools";
 import { useCanvasNodeEditor } from "./use-canvas-node-editor";
 import { useCanvasNodeOperations } from "./use-canvas-node-operations";
@@ -1063,7 +1063,7 @@ function InfiniteCanvasPage() {
     useCanvasKeyboard({
         pageUi,
         projectId,
-        enabled: projectLoaded && !versions.preview && !directorNodeId && !nodeEditor.folderBrowserNodeId,
+        enabled: canvasKeyboardEnabled({ projectLoaded, previewActive: Boolean(versions.preview), directorNodeId, folderBrowserNodeId: nodeEditor.folderBrowserNodeId }),
         onToggleAssistant: focusMode || !internalAssistantEnabled ? undefined : toggleAssistant,
         nodesRef,
         selectedNodeIdsRef,

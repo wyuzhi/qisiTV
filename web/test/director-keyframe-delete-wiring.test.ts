@@ -73,8 +73,9 @@ describe("workbench 快捷键接线", () => {
     test("每个动作都落到已存在的真实执行路径", () => {
         const runner = slice(workbench, "const runShortcut = (action: DirectorShortcutAction)", "const runShortcutRef");
         expect(runner).toContain("setTransformMode(action.mode);");
-        expect(runner).toContain("removeObject(selectedObject.id);");
-        expect(runner).toContain("removeLight(selectedLight.id);");
+        expect(runner).toContain("resolveDirectorDeleteDecision({ pathKeyframe: selectedPathKeyframe, camera: selectedCamera, object: selectedObject, light: selectedLight })");
+        expect(runner).toContain("removeObject(decision.id);");
+        expect(runner).toContain("removeLight(decision.id);");
         expect(runner).toContain("updateObject(selectedObject.id, { visible: !selectedObject.visible });");
         expect(runner).toContain("setPlaying(!playing);");
         expect(runner).toContain("undo();");

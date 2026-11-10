@@ -44,6 +44,7 @@ import { persistDirectorImageUpload, persistDirectorLibraryAsset, persistDirecto
 import { restoreDirectorPlaybackOnEnd, waitForDirectorCaptureCamera } from "@/lib/canvas/director/director-output-camera";
 import { bindDirectorCameraFollow, removeDirectorCameraBindingsForObject, replaceDirectorSceneObjects, unbindDirectorCameraFollow } from "@/lib/canvas/director/director-camera-binding";
 import { blocksDirectorShortcut, releaseDirectorFocusAfterPointer, resolveDirectorShortcut, type DirectorShortcutAction } from "@/lib/canvas/director/director-shortcuts";
+import { resolveDirectorDeleteDecision } from "@/lib/canvas/director/director-delete-target";
 import { applyDirectorUniformScale, createDirectorActor, createDirectorBillboard, createDirectorCamera, createDirectorLight, createDirectorModel, createDirectorObject, DIRECTOR_ACTOR_COLORS, DIRECTOR_KEYFRAME_EPSILON, directorBoneLabel, directorFocalLengthToFov, directorPoseBoneDeltas, directorPoseLabel, duplicateDirectorCamera, duplicateDirectorGroup, duplicateDirectorObject, groupDirectorObjects, interpolateDirectorTransform, removeDirectorSceneKeyframe, setDirectorSceneKeyframeEasing, toggleDirectorCameraLock, toggleDirectorCameraVisibility, toggleDirectorGroupCollapsed, toggleDirectorGroupLock, toggleDirectorGroupVisibility, toggleDirectorObjectLock, toggleDirectorObjectVisibility, touchDirectorScene, ungroupDirectorObjects, upsertDirectorBoneKeyframe } from "@/lib/canvas/director/director-scene";
 import { resolveDirectorSceneSelection, searchDirectorSceneItems } from "@/lib/canvas/director/director-scene-search";
 import { describeDirectorSaveStatus, resolveDirectorCloseOutcome, shouldBlockDirectorUnload, shouldOfferDirectorDraftRecovery } from "@/lib/canvas/director/director-save-wiring";
@@ -1056,32 +1057,31 @@ export function CanvasDirectorWorkbench({ open, scene, projectId, imageNodes, on
                 return true;
             case "nudge-selected":
                 return nudgeSelected(action.direction, action.fine);
-            case "delete-selected":
-                if (selectedPathKeyframe) {
-                    if (selectedPathKeyframe.kind === "actor") {
-                        updateActorPath(selectedPathKeyframe.id, removeDirectorActorPath);
-                    } else {
-                        commit((current) => ({ ...current, cameras: current.cameras.map((camera) => camera.id === selectedPathKeyframe.id && camera.drawnPath
+            case "delete-selected": {
+                const decision = resolveDirectorDeleteDecision({ pathKeyframe: selectedPathKeyframe, camera: selectedCamera, object: selectedObject, light: selectedLight });
+                if (decision.action === "consume") return true;
+                switch (decision.kind) {
+                    case "actor-path":
+                        updateActorPath(decision.id, removeDirectorActorPath);
+                        break;
+                    case "camera-path":
+                        commit((current) => ({ ...current, cameras: current.cameras.map((camera) => camera.id === decision.id && camera.drawnPath
                             ? { ...camera, keyframes: camera.drawnPath.originalKeyframes || [], drawnPath: undefined }
                             : camera) }));
-                    }
-                    setSelectedPathKeyframe(null);
-                    return true;
+                        break;
+                    case "camera":
+                        removeCamera(decision.id);
+                        break;
+                    case "object":
+                        removeObject(decision.id);
+                        break;
+                    case "light":
+                        removeLight(decision.id);
+                        break;
                 }
-                if (selectedCamera) {
-                    if (!selectedCamera.locked) removeCamera(selectedCamera.id);
-                    return true;
-                }
-                if (selectedObject) {
-                    if (selectedObject.locked) return true;
-                    removeObject(selectedObject.id);
-                    return true;
-                }
-                if (selectedLight) {
-                    removeLight(selectedLight.id);
-                    return true;
-                }
+                if (decision.kind === "actor-path" || decision.kind === "camera-path") setSelectedPathKeyframe(null);
                 return true;
+            }
             case "undo":
                 if (!history.length) return false;
                 undo();
