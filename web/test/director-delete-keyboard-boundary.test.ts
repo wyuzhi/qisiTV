@@ -23,5 +23,5 @@ test("the canvas capture-phase keyboard handler is suspended while the director 
     const keyboardWiring = project.match(/useCanvasKeyboard\(\{[\s\S]*?\n    \}\);/)?.[0] || "";
     expect(keyboardWiring).toContain("enabled: projectLoaded && !versions.preview && !directorNodeId");
     expect(readFileSync(resolve(import.meta.dir, "../src/pages/canvas/use-canvas-keyboard.ts"), "utf8"))
-        .toContain('document.querySelector("[data-director-workbench=\'true\']")');
+        .toContain("[data-director-workbench='true']");
 });

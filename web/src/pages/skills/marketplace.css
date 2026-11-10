@@ -1,4 +1,11 @@
 .skill-market-toggle { display: flex; align-items: center; gap: 8px; }
+.skill-script-autorun { display: inline-flex; align-items: center; gap: 10px; min-height: 28px; }
+.skill-script-autorun-toggle { display: inline-flex; align-items: center; gap: 8px; height: 28px; color: var(--user-ink-muted, var(--muted-foreground)); font-size: var(--fs-caption); line-height: 20px; white-space: nowrap; cursor: pointer; user-select: none; transition: color 150ms ease; }
+.skill-script-autorun-toggle:hover { color: var(--user-ink, var(--foreground)); }
+.skill-script-autorun-toggle:has(:disabled) { cursor: not-allowed; }
+.skill-script-autorun-error { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-caption); line-height: 20px; color: var(--destructive, var(--user-ink-muted)); white-space: nowrap; }
+.skill-script-autorun-retry { padding: 0; border: 0; background: transparent; color: var(--user-ink, var(--foreground)); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; font: inherit; }
+.skill-script-autorun-retry:focus-visible { outline: 2px solid var(--user-accent, var(--control-focus-ring)); outline-offset: 2px; border-radius: var(--r-sm); }
 .skill-package-heading { flex: 1; min-width: 0; }
 .skill-package-heading h1 { margin: 0; font-size: var(--fs-title); font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; color: var(--user-ink, var(--foreground)); }
 .skill-package-about { margin-top: 12px; font-size: var(--fs-body); line-height: 1.7; color: var(--user-ink-muted, var(--muted-foreground)); max-height: 24dvh; overflow: auto; scrollbar-width: none; }

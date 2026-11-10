@@ -6,6 +6,7 @@ import { CollectionHeader } from "@/components/layout/collection-header";
 import { AppModal } from "@/components/ui/product/app-modal";
 import { SegmentedControl } from "@/components/ui/base/segmented-control";
 import { addSkill, deleteSkill, getSkill, installGitHubSkill, likeSkill, listSkills, removeSkill, syncSkill, unlikeSkill, type Skill } from "@/services/api/skills";
+import { getAssistantSettings, isAssistantSettingsUnavailableError, updateAssistantSettings } from "@/services/api/assistant-settings";
 import { forkSkill, getInstalledVersions, getMarketRelease, getPublicSkillsAbout, installMarketRelease, rollbackSkill, searchPublicSkillMarket, searchSkillMarket, type InstalledVersion, type MarketItem, type MarketRelease, type PublicMarketSkill } from "@/services/api/skill-market";
 import { SkillEditorDrawer } from "./skill-editor-drawer";
 import { SkillInstallModal } from "./skill-install-modal";
@@ -53,8 +54,44 @@ export default function SkillMarketplace() {
     const [pendingInstall, setPendingInstall] = useState<{ request: SkillMarketInstallConfirmRequest; onRun: () => void } | null>(null);
     const [versions, setVersions] = useState<{ skill: Skill; items: InstalledVersion[] } | null>(null);
     const [versionId, setVersionId] = useState("");
+    const [scriptAutoRun, setScriptAutoRun] = useState(false);
+    const [scriptLoadState, setScriptLoadState] = useState<"loading" | "ready" | "error" | "unavailable">("loading");
+    const [scriptLoadError, setScriptLoadError] = useState("");
+    const [scriptReloadKey, setScriptReloadKey] = useState(0);
+    const [scriptSaving, setScriptSaving] = useState(false);
     const reload = useCallback(() => setRevision(n => n + 1), []);
     const changeTab = (next: string) => { setParams({ tab: next }); setPage(1); setQuery(""); };
+    useEffect(() => {
+        let cancelled = false;
+        setScriptLoadState("loading");
+        setScriptLoadError("");
+        getAssistantSettings()
+            .then((settings) => {
+                if (cancelled) return;
+                setScriptAutoRun(settings.skillScriptAutoRun);
+                setScriptLoadState("ready");
+            })
+            .catch((err) => {
+                if (cancelled) return;
+                if (isAssistantSettingsUnavailableError(err)) { setScriptLoadState("unavailable"); return; }
+                // 读取失败时不能沿用默认 OFF，否则会把实际已开启的设置显示成需要确认。
+                setScriptLoadState("error");
+                setScriptLoadError(err instanceof Error ? err.message : "读取技能脚本设置失败");
+            });
+        return () => { cancelled = true; };
+    }, [scriptReloadKey]);
+    const toggleScriptAutoRun = async (checked: boolean) => {
+        setScriptSaving(true);
+        try {
+            const settings = await updateAssistantSettings({ skillScriptAutoRun: checked });
+            setScriptAutoRun(settings.skillScriptAutoRun);
+            message.success(settings.skillScriptAutoRun ? "已开启自动运行技能脚本" : "已关闭自动运行技能脚本");
+        } catch (err) {
+            message.error(err instanceof Error ? err.message : "保存技能脚本设置失败");
+        } finally {
+            setScriptSaving(false);
+        }
+    };
     useEffect(() => {
         if (tab === "publish") return;
         let stale = false;
@@ -198,12 +235,39 @@ export default function SkillMarketplace() {
     const publicDetailInstalled = publicDetail ? isPublicMarketSkillInstalled(publicDetail, installed) : false;
     const visibleMarketItems = marketSource === "public" ? [] : items;
     const visiblePublicItems = marketSource === "beeftv" ? [] : publicItems;
+    const scriptAutoRunControl = scriptLoadState === "unavailable" ? undefined : (
+        <div className="skill-script-autorun" role="group" aria-label="技能脚本设置">
+            {scriptLoadState === "error" ? (
+                <Tooltip title={scriptLoadError || "读取技能脚本设置失败，暂时无法修改。"} placement="bottomRight">
+                    <span id="skill-script-autorun-error" role="status" className="skill-script-autorun-error">
+                        读取失败
+                        <button type="button" className="skill-script-autorun-retry" onClick={() => setScriptReloadKey((key) => key + 1)}>重试</button>
+                    </span>
+                </Tooltip>
+            ) : null}
+            <Tooltip title="打开后，助手运行技能里的脚本前不再询问。脚本在技能副本里运行，拿不到你的 API Key。" placement="bottomRight">
+                <label className="skill-script-autorun-toggle">
+                    <span>自动运行技能脚本</span>
+                    <Switch
+                        size="sm"
+                        checked={scriptAutoRun}
+                        loading={scriptLoadState === "loading" || scriptSaving}
+                        disabled={scriptLoadState !== "ready" || scriptSaving}
+                        aria-label="自动运行技能脚本"
+                        aria-describedby={scriptLoadState === "error" ? "skill-script-autorun-error" : undefined}
+                        onChange={(checked) => void toggleScriptAutoRun(checked)}
+                    />
+                </label>
+            </Tooltip>
+        </div>
+    );
     const headerProps = {
         title: "技能",
         navigationLabel: "技能分类",
         tabs: [{ value: "market", label: "技能市场" }, { value: "mine", label: "我的技能" }, { value: "publish", label: "我的投稿" }],
         value: tab,
         onChange: changeTab,
+        trailing: scriptAutoRunControl,
     };
     return <WorkspacePage className="skill-market-page collection-page" scroll={false}>
         {tab === "publish" ? <SkillPublishingPanel planId={params.get("planId") || undefined} renderHeader={controls => <CollectionHeader {...headerProps} {...controls} />} /> : <>

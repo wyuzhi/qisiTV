@@ -1,7 +1,7 @@
 import { App, Button } from "antd";
 import { ArrowLeft } from "lucide-react";
 import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { Navigate, useNavigate, useSearchParams } from "react-router";
 
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -9,16 +9,15 @@ import { ChannelSettingsPane, channelValidationError, focusInvalidChannelField, 
 import { ModelDefaultGrid } from "./model-default-grid";
 import DiagnosticsPanel from "./diagnostics-panel";
 import { StorageSettingsPane } from "./storage-settings-pane";
-import { AssistantSettingsPane } from "./assistant-settings-pane";
 import { DepthComponentsPanel } from "@/components/depth-components-panel";
 import { ReferenceStoragePane } from "./reference-storage-pane";
 import { getDesktopAppBinding } from "@/services/desktop-runtime";
 import { PageHeader } from "@/components/layout/workspace-page";
 
-type ConfigSectionKey = "channels" | "models" | "assistant" | "storage" | "diagnostics";
+type ConfigSectionKey = "channels" | "models" | "storage" | "diagnostics";
 
 export function isConfigSection(value: string | null): value is ConfigSectionKey {
-    return value === "channels" || value === "assistant" || value === "storage" || value === "diagnostics";
+    return value === "channels" || value === "storage" || value === "diagnostics";
 }
 
 export default function SettingsPage() {
@@ -82,12 +81,6 @@ export default function SettingsPage() {
                 </div>
             </SettingsPane>
         ),
-        assistant: (
-            <SettingsPane>
-                <PageHeader title="助手设置" />
-                <AssistantSettingsPane />
-            </SettingsPane>
-        ),
         storage: (
             <SettingsPane>
                 <PageHeader title="存储设置" />
@@ -117,6 +110,10 @@ export default function SettingsPage() {
             </SettingsPane>
         ),
     };
+
+    if (requestedSection === "assistant") {
+        return <Navigate to="/skills" replace />;
+    }
 
     return (
         <main className="settings-page app-workspace-page app-user-workspace app-section-page flex h-full min-h-0 flex-col text-foreground">
