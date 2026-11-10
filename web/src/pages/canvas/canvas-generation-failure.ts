@@ -132,7 +132,9 @@ export function canvasGenerationTaskNodes(nodes: CanvasNodeData[], targetNodeId:
         const hasCompletedContent = task.status === "succeeded" && !paused && hasCurrentVideoOutput && (!output || Boolean(output.materializedAssetId)) && Boolean(node.metadata?.content || node.metadata?.storageKey);
         const existingOutcome = readNodeTaskOutcome(node.metadata);
         const targetUnavailable = existingOutcome?.reason === "result_target_unavailable" || node.metadata?.generationErrorCode === "result_target_unavailable";
-        const retainRecovery = task.status === "succeeded" && !hasCompletedContent && (targetUnavailable || existingOutcome?.phase === "retrievable" || CLIENT_DELIVERY_FAILURE_CODES.has(node.metadata?.generationErrorCode || ""));
+        // 后端已经判死（outcome.phase=failed）时，前端不能再合成「继续取回」把它盖掉。
+        const backendTerminalFailure = task.outcome?.phase === "failed";
+        const retainRecovery = task.status === "succeeded" && !backendTerminalFailure && !hasCompletedContent && (targetUnavailable || existingOutcome?.phase === "retrievable" || CLIENT_DELIVERY_FAILURE_CODES.has(node.metadata?.generationErrorCode || ""));
         const failure = paused
             ? {
                   taskOutcome: task.outcome ?? ({ phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" } as const),
@@ -145,7 +147,7 @@ export function canvasGenerationTaskNodes(nodes: CanvasNodeData[], targetNodeId:
         const nextMetadata: CanvasNodeMetadata = {
             ...node.metadata,
             ...generationTaskMetadata(task),
-            status: failed || paused || retainRecovery ? "error" : hasCompletedContent ? "success" : "loading",
+            status: failed || paused || retainRecovery || backendTerminalFailure ? "error" : hasCompletedContent ? "success" : "loading",
             ...(failure || (retainRecovery
                 ? {
                       taskOutcome: targetUnavailable
@@ -158,7 +160,7 @@ export function canvasGenerationTaskNodes(nodes: CanvasNodeData[], targetNodeId:
                       ...(hasCompletedContent && (!task.outcome || task.outcome.phase === "running" || task.outcome.phase === "fetching")
                           ? { taskOutcome: { phase: "ready", regenerate: "allowed", reason: "result_ready" } as const }
                           : {}),
-                      errorDetails: undefined,
+                      errorDetails: backendTerminalFailure ? (task.error || "生成结果已不可取回") : undefined,
                       generationErrorCode: undefined,
                       generationErrorSummary: undefined,
                       generationProviderCode: undefined,
