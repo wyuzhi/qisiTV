@@ -15,6 +15,55 @@ export function requiresGenerationApproval(name, args, businessTools = []) {
   return !(tool?.readOnly === true && tool.submitsGeneration === false)
 }
 
+const proposeToolName = /^mcp__beeftv__canvas_generation_propose(?:_[a-f0-9]{12})?$/
+const generationUnits = { image: ['张', '图片'], video: ['段', '视频'], audio: ['段', '音频'] }
+
+// Keeps BeefTV's own quote for each proposal, so the approval card can say what the user pays for.
+export function rememberQuote(quotes, name, result) {
+  if (result?.isError || !proposeToolName.test(name)) return
+  const text = Array.isArray(result?.content) ? result.content.find(item => item?.type === 'text' && typeof item.text === 'string')?.text : undefined
+  let quote
+  try {
+    quote = JSON.parse(text)?.result
+  } catch {
+    return
+  }
+  if (typeof quote?.proposalId !== 'string' || !quote.proposalId) return
+  quotes.delete(quote.proposalId)
+  quotes.set(quote.proposalId, quote)
+  // Bounded so a long session does not keep every quote it ever saw.
+  while (quotes.size > 50) quotes.delete(quotes.keys().next().value)
+}
+
+// Text for the DSH approval card. It names only the nodes this submission sends: a proposal can be
+// submitted again for a subset, such as retrying failed nodes. Prices are BeefTV's per-node quotes.
+export function approvalReason(name, args, businessTools = [], quotes = new Map()) {
+  if (!/^mcp__beeftv__canvas_generation_submit(?:_[a-f0-9]{12})?$/.test(name)) {
+    const business = businessTools.find(tool => tool.id === args?.tool)
+    return business
+      ? `BeefTV 请求执行 ${business.method} ${business.path}${business.submitsGeneration ? '，将提交可能计费的生成任务' : '，将修改工作区'}。请核对本次操作。`
+      : 'BeefTV 将提交生成或未识别的业务操作，可能修改工作区或产生费用，请核对本次操作。'
+  }
+  const quote = quotes.get(args?.proposalId)
+  const submitted = Array.isArray(args?.nodeIds) ? args.nodeIds : []
+  const quoted = Array.isArray(quote?.targets) ? quote.targets : []
+  const targets = quoted.filter(target => submitted.includes(target?.nodeId))
+  if (!quote || !submitted.length || targets.length !== new Set(submitted).size) {
+    return 'BeefTV 将提交付费生成，但这次提交和已有报价对不上，无法显示费用。可以先拒绝，让 Agent 重新报价后再提交。'
+  }
+  const kinds = [...new Set(targets.map(target => target.kind))]
+  const [unit, label] = kinds.length === 1 ? generationUnits[kinds[0]] || ['项', '生成'] : ['项', '生成']
+  const amount = targets.reduce((sum, target) => sum + (target.kind === 'image' ? Number(target.parameters?.count) || 1 : 1), 0)
+  const models = [...new Set(targets.map(target => target.model).filter(model => typeof model === 'string' && model))]
+  const priced = targets.filter(target => Number.isFinite(target.estimate?.amount))
+  const cost = targets.length === quoted.length && typeof quote.estimate?.text === 'string' && quote.estimate.text
+    ? quote.estimate.text.replace(/[。.]+$/, '')
+    : priced.length === targets.length
+      ? `预计费用：¥${Number(priced.reduce((sum, target) => sum + target.estimate.amount, 0).toFixed(4))}`
+      : priced.length ? '部分费用按所选渠道实际计费' : '费用按所选渠道实际计费'
+  return `BeefTV 将生成 ${amount} ${unit}${label}${models.length ? `（${models.join('、')}）` : ''}。${cost}。`
+}
+
 export function runtimeRecord(value) {
   for (const key of ['bridgeURL', 'baseURL']) {
     const url = new URL(value?.[key])

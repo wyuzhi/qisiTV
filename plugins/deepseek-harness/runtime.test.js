@@ -10,7 +10,7 @@ import { PassThrough } from 'node:stream'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import * as runtime from './runtime.js'
-import { embeddedDocument, publicContext, requiresGenerationApproval, runtimeRecord } from './runtime.js'
+import { approvalReason, embeddedDocument, publicContext, rememberQuote, requiresGenerationApproval, runtimeRecord } from './runtime.js'
 
 // DSH supplies its MCP client package when it loads the plugin. The Host only hands it to
 // ctx.plugin, which the tests provide, so an inert module stands in for it.
@@ -64,6 +64,56 @@ test('only trusted catalog metadata exempts a read-only business call from addit
   assert.equal(requiresGenerationApproval(name, { tool: 'business_get_generation' }, catalog), true)
   assert.equal(requiresGenerationApproval(name, { tool: 'business_get_unknown', readOnly: true }, catalog), true)
   assert.equal(requiresGenerationApproval(name, { tool: 'business_get_assets', readOnly: true }), true)
+})
+
+// The shape canvas.generation.propose returns through the BeefTV MCP server.
+const imageTarget = (nodeId, count, amount) => ({
+  kind: 'image', model: 'dola-seedream-5-0-flash-260915', nodeId, parameters: { count, size: '2K' }, estimate: { amount, text: `预计 ¥${amount}` },
+})
+function proposeResult(proposalId, quote = {}) {
+  const result = {
+    proposalId, kind: 'image', model: 'dola-seedream-5-0-flash-260915',
+    estimate: { amount: 0.0122, text: '预计费用：¥0.0122' },
+    targets: [imageTarget('node-1', '1', 0.0122)],
+    ...quote,
+  }
+  return { content: [{ type: 'text', text: JSON.stringify({ op: 'canvas.generation.propose', result }) }] }
+}
+
+test('the approval card names the model, amount and price of the nodes this submission sends', () => {
+  const quotes = new Map()
+  const propose = 'mcp__beeftv__canvas_generation_propose_ab092b275e46'
+  rememberQuote(quotes, propose, proposeResult('gp-image', {
+    targets: [imageTarget('shot-1', '2', 0.0244), imageTarget('shot-2', undefined, 0.0122)],
+    estimate: { text: '预计费用：¥0.0366。' },
+  }))
+  rememberQuote(quotes, propose, proposeResult('gp-video', {
+    kind: 'video', estimate: {},
+    targets: [{ kind: 'video', model: 'seedance-2.0-fast', nodeId: 'clip-1' }, { kind: 'video', model: 'seedance-2.0-fast', nodeId: 'clip-2' }],
+  }))
+  const submit = 'mcp__beeftv__canvas_generation_submit_ab092b275e46'
+  const reason = args => approvalReason(submit, args, [], quotes)
+  assert.equal(reason({ proposalId: 'gp-image', nodeIds: ['shot-1', 'shot-2'] }), 'BeefTV 将生成 3 张图片（dola-seedream-5-0-flash-260915）。预计费用：¥0.0366。')
+  // Retrying one failed node shows that node's own quote, not the whole proposal's total.
+  assert.equal(reason({ proposalId: 'gp-image', nodeIds: ['shot-2'] }), 'BeefTV 将生成 1 张图片（dola-seedream-5-0-flash-260915）。预计费用：¥0.0122。')
+  assert.equal(reason({ proposalId: 'gp-video', nodeIds: ['clip-1', 'clip-2'] }), 'BeefTV 将生成 2 段视频（seedance-2.0-fast）。费用按所选渠道实际计费。')
+  for (const args of [{ proposalId: 'gp-unseen', nodeIds: ['shot-1'] }, { proposalId: 'gp-image', nodeIds: ['shot-1', 'other'] }, { proposalId: 'gp-image' }]) {
+    assert.match(reason(args), /和已有报价对不上，无法显示费用/)
+  }
+})
+
+test('only successful propose results are kept as quotes, and only the most recent ones', () => {
+  const quotes = new Map()
+  const propose = 'mcp__beeftv__canvas_generation_propose_ab092b275e46'
+  rememberQuote(quotes, propose, { ...proposeResult('gp-failed'), isError: true })
+  rememberQuote(quotes, 'mcp__beeftv__canvas_get_ab092b275e46', proposeResult('gp-read'))
+  rememberQuote(quotes, 'mcp__other__canvas_generation_propose_ab092b275e46', proposeResult('gp-foreign'))
+  rememberQuote(quotes, propose, { content: [{ type: 'text', text: 'not json' }] })
+  assert.equal(quotes.size, 0)
+  for (let index = 0; index < 60; index++) rememberQuote(quotes, propose, proposeResult(`gp-${index}`))
+  assert.equal(quotes.size, 50)
+  assert.equal(quotes.has('gp-0'), false)
+  assert.equal(quotes.has('gp-59'), true)
 })
 
 test('workspace handshake verifies the live build, database readiness and workspace identity', async context => {
@@ -237,6 +287,7 @@ async function startHost(context, options = {}) {
     plugin: () => Object.assign(Promise.resolve(), { dispose: async () => {} }),
     effect: callback => { const dispose = callback(); if (typeof dispose === 'function') disposers.push(dispose) },
     on: (event, listener) => { listeners.set(event, listener) },
+    get: name => options.services?.[name],
     systemPrompt: { section() {}, context: options => { prompt = options.text } },
   })
   const front = createServer((req, res) => handler(req, res))
@@ -322,6 +373,45 @@ test('Host refuses workspace paths that could reach Harness-managed routes', asy
   assert.equal(workspace.proxied[0].url, '/api/workspace/bootstrap?view=canvas%2Fmain')
   assert.equal(workspace.proxied[0].headers['x-beeftv-harness-page'], '1')
   assert.equal(workspace.proxied[0].headers['x-beeftv-harness-token'], 'test-bridge')
+})
+
+test('paid submissions ask with the quote unless the user chose the full-access preset', async context => {
+  // "custom" is a session whose approval policy alone was set to never: DSH's unattended mode, not full access.
+  const presets = new Map([['workspace-session', 'workspace-write'], ['full-access-session', 'danger-full-access'], ['unattended-session', 'custom']])
+  const permissionPresets = {
+    current: session => {
+      if (session.id === 'unready-session') throw new Error('permission: presets are not ready')
+      return presets.get(session.id)
+    },
+  }
+  const { call, listeners } = await startHost(context, { services: { permissionPresets } })
+  await call('POST', '/beeftv/connect', { mode: 'standalone' })
+  listeners.get('tools/result')({ name: 'mcp__beeftv__canvas_generation_propose_ab092b275e46', arguments: {} }, proposeResult('gp-1'))
+  const preExecute = listeners.get('tools/pre-execute')
+  const submit = session => ({
+    name: 'mcp__beeftv__canvas_generation_submit_ab092b275e46', arguments: { proposalId: 'gp-1', nodeIds: ['node-1'] }, agent: { session: { id: session } },
+  })
+  const allow = async () => ({ kind: 'allow' })
+  const asked = { kind: 'ask', reason: 'BeefTV 将生成 1 张图片（dola-seedream-5-0-flash-260915）。预计费用：¥0.0122。' }
+  assert.deepEqual(await preExecute(submit('workspace-session'), allow), asked)
+  assert.deepEqual(await preExecute(submit('full-access-session'), allow), { kind: 'allow' })
+  assert.deepEqual(await preExecute(submit('unattended-session'), allow), asked)
+  assert.deepEqual(await preExecute(submit('unready-session'), allow), asked)
+  // A call DSH already denies stays denied, and reads keep DSH's decision in every mode.
+  assert.deepEqual(await preExecute(submit('full-access-session'), async () => ({ kind: 'deny', reason: 'sandbox' })), { kind: 'deny', reason: 'sandbox' })
+  const read = { name: 'mcp__beeftv__canvas_get_ab092b275e46', arguments: {}, agent: { session: { id: 'workspace-session' } } }
+  assert.deepEqual(await preExecute(read, allow), { kind: 'allow' })
+})
+
+test('without the DSH permission presets, paid submissions still ask', async context => {
+  const { call, listeners } = await startHost(context)
+  await call('POST', '/beeftv/connect', { mode: 'standalone' })
+  const decision = await listeners.get('tools/pre-execute')(
+    { name: 'mcp__beeftv__canvas_generation_submit_ab092b275e46', arguments: { proposalId: 'gp-unseen', nodeIds: ['n'] }, agent: { session: { id: 's' } } },
+    async () => ({ kind: 'allow' }),
+  )
+  assert.equal(decision.kind, 'ask')
+  assert.match(decision.reason, /无法显示费用/)
 })
 
 test('workspace sync follows the catalog read-only flags instead of tool names', async context => {
