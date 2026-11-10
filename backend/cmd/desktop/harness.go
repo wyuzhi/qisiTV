@@ -27,6 +27,10 @@ import (
 
 const harnessTokenHeader = "X-Beeftv-Harness-Token"
 
+// The DSH Host marks every request it proxies for the embedded workspace page.
+// Its own calls carry no marker, because it registers its MCP client here.
+const harnessPageHeader = "X-Beeftv-Harness-Page"
+
 type harnessRuntimeConfig struct {
 	DesktopRuntimeConfig
 	BridgeURL   string `json:"bridgeURL"`
@@ -170,6 +174,13 @@ func closeDesktopRuntime(ctx context.Context, runtime *bootstrap.Runtime) error 
 	return errors.Join(bridgeErr, runtime.Close(ctx))
 }
 
+// harnessManagedPath reports routes DeepSeek Harness manages itself. Client
+// credentials are issued only to the Host, never to the embedded page.
+func harnessManagedPath(cleaned string, page bool) bool {
+	under := func(prefix string) bool { return cleaned == prefix || strings.HasPrefix(cleaned, prefix+"/") }
+	return under("/api/assistant") || under("/api/ops/clients") || page && under("/api/agent-clients")
+}
+
 func harnessHTTPHandler(config harnessRuntimeConfig, api http.Handler, frontend fs.FS) http.Handler {
 	files := http.FileServer(http.FS(frontend))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -189,8 +200,10 @@ func harnessHTTPHandler(config harnessRuntimeConfig, api http.Handler, frontend 
 		if strings.HasPrefix(cleaned, "/resources/") {
 			cleaned = "/api" + cleaned
 		}
+		// Routing reads only the cleaned path, so the checks below see exactly what the backend routes.
 		request.URL.Path = cleaned
-		if cleaned == "/api/assistant" || strings.HasPrefix(cleaned, "/api/assistant/") || cleaned == "/api/ops/clients" || strings.HasPrefix(cleaned, "/api/ops/clients/") {
+		request.URL.RawPath = ""
+		if harnessManagedPath(cleaned, request.Header.Get(harnessPageHeader) != "") {
 			http.Error(w, "managed by DeepSeek Harness", http.StatusForbidden)
 			return
 		}
@@ -199,7 +212,7 @@ func harnessHTTPHandler(config harnessRuntimeConfig, api http.Handler, frontend 
 			backendURL, _ := url.Parse(config.BaseURL)
 			request.Host = backendURL.Host
 			request.Header.Set("Origin", "wails://wails")
-			for _, header := range []string{harnessTokenHeader, "X-Beeftv-Client", "X-Beeftv-Owner", "X-Beeftv-Agent-Turn", "X-Beeftv-Agent-Token"} {
+			for _, header := range []string{harnessTokenHeader, harnessPageHeader, "X-Beeftv-Client", "X-Beeftv-Owner", "X-Beeftv-Agent-Turn", "X-Beeftv-Agent-Token"} {
 				request.Header.Del(header)
 			}
 			request.Header.Set("X-Desktop-Token", config.LaunchToken)

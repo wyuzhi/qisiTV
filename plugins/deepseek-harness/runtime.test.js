@@ -2,13 +2,25 @@ import assert from 'node:assert/strict'
 import childProcess from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import fsPromises from 'node:fs/promises'
-import { syncBuiltinESMExports } from 'node:module'
+import { createServer, request as httpRequest } from 'node:http'
+import { register, syncBuiltinESMExports } from 'node:module'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { test } from 'node:test'
-import { randomBytes, randomUUID } from 'node:crypto'
-import { Script } from 'node:vm'
+import { fileURLToPath } from 'node:url'
 import * as runtime from './runtime.js'
 import { embeddedDocument, publicContext, requiresGenerationApproval, runtimeRecord } from './runtime.js'
+
+// DSH supplies its MCP client package when it loads the plugin. The Host only hands it to
+// ctx.plugin, which the tests provide, so an inert module stands in for it.
+register(`data:text/javascript,${encodeURIComponent(`export async function resolve(specifier, context, next) {
+  if (specifier === '@deepseek-ai/dsh-mcp-client') return { url: 'data:text/javascript,export default {}', shortCircuit: true }
+  return next(specifier, context)
+}`)}`)
+const host = await import('./host.js')
+
+const bundledExecutable = fileURLToPath(new URL('./runtime/Contents/MacOS/BeefTV', import.meta.url))
 
 test('runtime readiness only accepts loopback bridges and complete credentials', () => {
   assert.throws(() => runtimeRecord({ bridgeURL: 'https://example.com', bridgeToken: 'x' }))
@@ -54,93 +66,6 @@ test('only trusted catalog metadata exempts a read-only business call from addit
   assert.equal(requiresGenerationApproval(name, { tool: 'business_get_assets', readOnly: true }), true)
 })
 
-test('Host rejects context from missing or previous connection IDs without changing the current view', async () => {
-  const source = await fsPromises.readFile(new URL('./host.js', import.meta.url), 'utf8')
-  let handler
-  let prompt
-  let available = true
-  let nativeLaunches = 0
-  let attachAttempts = 0
-  const apply = new Script(source.replace(/^import .+$/gm, '').replace(/^export /gm, '') + '\napply').runInNewContext({
-    randomBytes, randomUUID, URL, Buffer, process: { env: {} }, homedir: () => '/unused', join: (...parts) => parts.join('/'),
-    readFile: async () => { throw Object.assign(new Error('No saved connection'), { code: 'ENOENT' }) },
-    mkdir: async () => {}, writeFile: async () => {},
-    startLocalRuntime: async () => { nativeLaunches++; return { close() {} } },
-    startRuntime: async (_directory, options) => {
-      if (options?.attachOnly) attachAttempts++
-      if (!available) throw new Error('Desktop unavailable')
-      return { close() {} }
-    },
-    inspectWorkspace: async () => ({ workspace: { id: 'verified-workspace' }, build: { version: '2.1.6' } }),
-    workspaceJSON: async (_runtime, path) => {
-      if (path === '/api/health') {
-        if (!available) throw new Error('Desktop unavailable')
-        return { ready: true, schema: { ready: true } }
-      }
-      return path === '/api/agent-clients' ? { client: { id: 'test-client' }, token: 'test-token' } : {}
-    },
-    fetch: async () => ({ ok: true, json: async () => ({ code: 0, data: { tools: [] } }) }),
-    AbortSignal, mcpClient: {}, publicContext, requiresGenerationApproval,
-  })
-  const listeners = new Map()
-  apply({
-    tools: { schemas: () => [] }, connection: { requestRejection: () => null },
-    webServer: { getOrigin: () => 'http://127.0.0.1:1234', register: options => { handler = options.handler } },
-    plugin: () => Object.assign(Promise.resolve(), { dispose: async () => {} }),
-    effect: callback => callback(), on: (event, listener) => { listeners.set(event, listener) },
-    systemPrompt: { section() {}, context: options => { prompt = options.text } },
-  })
-  async function call(method, path, body) {
-    const req = new PassThrough()
-    Object.assign(req, { method, url: path, headers: { 'content-type': 'application/json' } })
-    req.end(body === undefined ? undefined : JSON.stringify(body))
-    let result
-    const res = { writeHead(status) { this.status = status }, end(text) { result = { status: this.status, body: JSON.parse(text) } } }
-    await handler(req, res)
-    return result
-  }
-  assert.equal((await call('GET', '/beeftv/status')).body.connectionId, null)
-  const first = (await call('POST', '/beeftv/connect', { mode: 'standalone' })).body.connectionId
-  assert.match(first, /^[a-f0-9-]{36}$/)
-  const context = { sessionId: 'session', connectionId: first, context: { route: '/canvas/old' } }
-  assert.equal((await call('POST', '/beeftv/context', context)).status, 200)
-  assert.match(prompt({ agent: { id: 'session' } }), /\/canvas\/old/)
-  const second = (await call('POST', '/beeftv/connect', { mode: 'local' })).body.connectionId
-  assert.notEqual(second, first)
-  assert.equal(prompt({ agent: { id: 'session' } }), '')
-  assert.equal((await call('POST', '/beeftv/context', context)).status, 409)
-  assert.equal((await call('POST', '/beeftv/context', { ...context, connectionId: undefined })).status, 409)
-  assert.equal(prompt({ agent: { id: 'session' } }), '')
-  assert.equal((await call('POST', '/beeftv/context', { ...context, connectionId: second, context: { route: '/canvas/new' } })).status, 200)
-  assert.match(prompt({ agent: { id: 'session' } }), /\/canvas\/new/)
-  assert.equal((await call('POST', '/beeftv/context', context)).status, 409)
-  assert.match(prompt({ agent: { id: 'session' } }), /\/canvas\/new/)
-  assert.equal((await call('POST', '/beeftv/connect', { mode: 'local' })).body.connectionId, second)
-  assert.equal((await call('GET', '/beeftv/status')).body.workspace.id, 'verified-workspace')
-  available = false
-  assert.equal((await call('GET', '/beeftv/status')).body.connected, false)
-  assert.equal(prompt({ agent: { id: 'session' } }), '')
-  available = true
-  const restored = (await call('GET', '/beeftv/status')).body
-  assert.equal(restored.connected, true)
-  assert.notEqual(restored.connectionId, second)
-  assert.equal(nativeLaunches, 1)
-  assert.equal(attachAttempts, 2)
-  const appPath = new URL(restored.appURL).pathname.replace(/\/$/, '')
-  assert.equal((await call('GET', `${appPath}/api/assistant/sessions`)).status, 403)
-  assert.equal((await call('GET', `${appPath}/api/%61ssistant/sessions`)).status, 403)
-  assert.equal((await call('GET', `${appPath}/api/ops/clients`)).status, 403)
-  assert.equal((await call('POST', `${appPath}/api/agent-clients`, {})).status, 403)
-  assert.equal((await call('POST', `${appPath}/api/health/../agent-clients`, {})).status, 403)
-  const onToolResult = listeners.get('tools/result')
-  onToolResult({ name: 'mcp__beeftv__canvas_get_ab092b275e46', arguments: { canvasId: 'read-only' } }, { content: [{ type: 'text', text: '{"result":{"canvasId":"read-only"}}' }] })
-  assert.equal((await call('GET', '/beeftv/status')).body.activity, null)
-  onToolResult({ name: 'mcp__beeftv__canvas_create_ab092b275e46', arguments: { title: 'New' } }, { content: [{ type: 'text', text: '{"result":{"canvasId":"created-canvas"}}' }] })
-  assert.deepEqual((await call('GET', '/beeftv/status')).body.activity, { seq: 1, kind: 'canvas-created', canvasId: 'created-canvas' })
-  onToolResult({ name: 'mcp__beeftv__canvas_script_prepare_ab092b275e46', arguments: { canvasId: 'created-canvas' } }, { content: [{ type: 'text', text: '{"result":{"canvasId":"created-canvas","revision":2}}' }] })
-  assert.deepEqual((await call('GET', '/beeftv/status')).body.activity, { seq: 2, kind: 'canvas-updated', canvasId: 'created-canvas' })
-})
-
 test('workspace handshake verifies the live build, database readiness and workspace identity', async context => {
   const connection = { bridgeURL: 'http://127.0.0.1:1234', bridgeToken: 'private', version: 'v2.1.6' }
   let health = { ready: true, schema: { ready: true }, build: { version: 'v2.1.6', commit: 'installed' } }
@@ -163,15 +88,23 @@ test('workspace handshake verifies the live build, database readiness and worksp
   await assert.rejects(() => runtime.inspectWorkspace(connection), /版本已变化/)
 })
 
-function mockRuntimeProcesses(context, { unavailableAttempts = 0, launchError } = {}) {
+// Replaces only the operating-system boundary: executable checks, Info.plist reads, App launches and runtime processes.
+function mockRuntimeProcesses(context, { unavailableAttempts = 0, available, launchError, appVersion = '2.2.0', installed = true, bundled = true, bridgeURL = 'http://127.0.0.1:1234' } = {}) {
   const calls = []
   let attempts = 0
   context.after(() => {
     context.mock.restoreAll()
     syncBuiltinESMExports()
   })
-  context.mock.method(fsPromises, 'access', async () => {})
+  context.mock.method(fsPromises, 'access', async path => {
+    const present = String(path).startsWith('/Applications/') ? installed : bundled
+    if (!present) throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' })
+  })
   context.mock.method(childProcess, 'execFile', (command, args, options, callback) => {
+    if (command === '/usr/libexec/PlistBuddy') {
+      queueMicrotask(() => appVersion ? callback(null, `${appVersion}\n`, '') : callback(new Error('Print: Entry Does Not Exist'), '', ''))
+      return
+    }
     calls.push({ command, args })
     queueMicrotask(() => callback(launchError, '', ''))
   })
@@ -182,12 +115,11 @@ function mockRuntimeProcesses(context, { unavailableAttempts = 0, launchError } 
     child.stdout = new PassThrough()
     child.stderr = new PassThrough()
     child.kill = () => child.emit('exit', 0)
-    const available = attempts++ >= unavailableAttempts
+    const ready = available ? available() : attempts++ >= unavailableAttempts
     queueMicrotask(() => {
-      if (!available) child.emit('exit', 1)
+      if (!ready) child.emit('exit', 1)
       else child.stdout.end(JSON.stringify({
-        bridgeURL: 'http://127.0.0.1:1234', baseURL: 'http://127.0.0.1:1235/api',
-        bridgeToken: 'test-bridge', owned: false, version: '2.1.6',
+        bridgeURL, baseURL: `${bridgeURL}/api`, bridgeToken: 'test-bridge', owned: false, version: appVersion || '2.2.0',
       }) + '\n')
     })
     return child
@@ -219,4 +151,202 @@ test('local connection reports an App launch failure without falling back to a h
   const calls = mockRuntimeProcesses(context, { launchError: new Error('launch failed') })
   await assert.rejects(() => runtime.startLocalRuntime(), /无法打开本机 BeefTV/)
   assert.equal(calls.length, 1)
+})
+
+test('a desktop App older than the first harness release is never opened or started', async context => {
+  const calls = mockRuntimeProcesses(context, { appVersion: '2.1.6' })
+  assert.deepEqual(await runtime.localAppStatus(), {
+    compatible: false, version: '2.1.6', message: '本机 BeefTV 版本为 2.1.6，需要 2.2.0 或更高版本。请升级后重新连接。',
+  })
+  await assert.rejects(() => runtime.startLocalRuntime(), /版本为 2\.1\.6，需要 2\.2\.0/)
+  await assert.rejects(() => runtime.attachLocalRuntime(), /版本为 2\.1\.6，需要 2\.2\.0/)
+  assert.deepEqual(calls, [])
+})
+
+test('the version gate accepts the first harness release and later versions only', async context => {
+  for (const [appVersion, compatible] of [['2.2.0', true], ['v2.2.1', true], ['2.10.0', true], ['3.0.0', true], ['2.1.99', false], ['1.9.9', false], ['2.2', false], [null, false]]) {
+    await context.test(String(appVersion), async subtest => {
+      mockRuntimeProcesses(subtest, { appVersion })
+      assert.equal((await runtime.localAppStatus()).compatible, compatible)
+    })
+  }
+  await context.test('missing App', async subtest => {
+    mockRuntimeProcesses(subtest, { installed: false })
+    assert.match((await runtime.localAppStatus()).message, /未找到本机 BeefTV/)
+  })
+})
+
+test('the standalone workspace only starts the runtime bundled with the plugin', async context => {
+  const calls = mockRuntimeProcesses(context, { appVersion: '2.1.6' })
+  const started = await runtime.startRuntime('/tmp/standalone-workspace')
+  assert.deepEqual(calls, [{ command: bundledExecutable, args: ['--harness-runtime', '--data-dir', '/tmp/standalone-workspace'] }])
+  started.close()
+})
+
+test('a missing bundled runtime is reported without falling back to the desktop App', async context => {
+  const calls = mockRuntimeProcesses(context, { bundled: false })
+  await assert.rejects(() => runtime.startRuntime('/tmp/standalone-workspace'), /插件缺少内置的 BeefTV 运行时/)
+  assert.deepEqual(calls, [])
+})
+
+// A loopback stand-in for both the harness bridge and the workspace API. Proxied page requests are recorded.
+async function workspaceServer(context) {
+  const state = { available: true, proxied: [] }
+  const server = createServer((req, res) => {
+    const send = (status, data) => {
+      res.writeHead(status, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(status === 200 ? { code: 0, data } : { code: status, msg: 'Workspace unavailable' }))
+    }
+    if (!state.available) return send(503)
+    const path = req.url.split('?', 1)[0]
+    if (req.headers['x-beeftv-harness-page']) {
+      state.proxied.push({ method: req.method, url: req.url, headers: req.headers })
+      return send(200, { proxied: true })
+    }
+    if (path === '/api/health') return send(200, { ready: true, schema: { ready: true }, build: { version: '2.2.0' } })
+    if (path === '/api/workspace/bootstrap') return send(200, { contractVersion: 1, workspace: { id: 'verified-workspace', name: 'Local', storage: 'sqlite' } })
+    if (path === '/api/agent-clients' && req.method === 'POST') return send(200, { client: { id: 'test-client' }, token: 'test-token' })
+    if (path.startsWith('/api/agent-clients/') && req.method === 'DELETE') return send(200, { revoked: true })
+    if (path === '/api/business/tools') return send(200, { tools: [{ id: 'business_get_assets', readOnly: true, submitsGeneration: false }] })
+    if (path === '/api/ops') return send(200, { ops: [
+      { id: 'canvas.get', readOnly: true }, { id: 'canvas.generation.propose', readOnly: true }, { id: 'media.review', readOnly: true },
+      { id: 'canvas.create', readOnly: false }, { id: 'canvas.script.prepare', readOnly: false },
+    ] })
+    send(404)
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  context.after(() => server.close())
+  state.url = `http://127.0.0.1:${server.address().port}`
+  return state
+}
+
+// Loads the real Host into a minimal DSH context and serves its handler on loopback.
+async function startHost(context, options = {}) {
+  const workspace = await workspaceServer(context)
+  const calls = mockRuntimeProcesses(context, { available: () => workspace.available, bridgeURL: workspace.url, ...options })
+  const home = await fsPromises.mkdtemp(join(tmpdir(), 'beeftv-dsh-'))
+  const previousHome = process.env.DSH_HOME
+  process.env.DSH_HOME = home
+  let handler
+  let prompt
+  const listeners = new Map()
+  const disposers = []
+  host.apply({
+    tools: { schemas: () => [] }, connection: { requestRejection: () => null },
+    webServer: { getOrigin: () => 'http://127.0.0.1:1', register: options => { handler = options.handler } },
+    plugin: () => Object.assign(Promise.resolve(), { dispose: async () => {} }),
+    effect: callback => { const dispose = callback(); if (typeof dispose === 'function') disposers.push(dispose) },
+    on: (event, listener) => { listeners.set(event, listener) },
+    systemPrompt: { section() {}, context: options => { prompt = options.text } },
+  })
+  const front = createServer((req, res) => handler(req, res))
+  await new Promise(resolve => front.listen(0, '127.0.0.1', resolve))
+  context.after(async () => {
+    for (const dispose of disposers) dispose()
+    front.close()
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+    await fsPromises.rm(home, { recursive: true, force: true })
+  })
+  // Raw request targets reach the Host exactly as written, like a hand-built request would.
+  function call(method, path, body) {
+    return new Promise((resolve, reject) => {
+      const request = httpRequest({ host: '127.0.0.1', port: front.address().port, method, path, headers: body === undefined ? {} : { 'content-type': 'application/json' } }, response => {
+        const chunks = []
+        response.on('data', chunk => chunks.push(chunk))
+        response.on('end', () => resolve({ status: response.statusCode, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) }))
+      })
+      request.once('error', reject)
+      request.end(body === undefined ? undefined : JSON.stringify(body))
+    })
+  }
+  return { call, calls, workspace, listeners, prompt: view => prompt(view) }
+}
+
+test('Host rejects context from missing or previous connection IDs and reattaches a returning App without reopening it', async context => {
+  const { call, calls, workspace, prompt } = await startHost(context)
+  const initial = (await call('GET', '/beeftv/status')).body
+  assert.equal(initial.connectionId, null)
+  assert.equal(initial.localApp.compatible, true)
+  const first = (await call('POST', '/beeftv/connect', { mode: 'standalone' })).body.connectionId
+  assert.match(first, /^[a-f0-9-]{36}$/)
+  const view = { sessionId: 'session', connectionId: first, context: { route: '/canvas/old' } }
+  assert.equal((await call('POST', '/beeftv/context', view)).status, 200)
+  assert.match(prompt({ agent: { id: 'session' } }), /\/canvas\/old/)
+  const second = (await call('POST', '/beeftv/connect', { mode: 'local' })).body.connectionId
+  assert.notEqual(second, first)
+  assert.equal(prompt({ agent: { id: 'session' } }), '')
+  assert.equal((await call('POST', '/beeftv/context', view)).status, 409)
+  assert.equal((await call('POST', '/beeftv/context', { ...view, connectionId: undefined })).status, 409)
+  assert.equal(prompt({ agent: { id: 'session' } }), '')
+  assert.equal((await call('POST', '/beeftv/context', { ...view, connectionId: second, context: { route: '/canvas/new' } })).status, 200)
+  assert.match(prompt({ agent: { id: 'session' } }), /\/canvas\/new/)
+  assert.equal((await call('POST', '/beeftv/context', view)).status, 409)
+  assert.match(prompt({ agent: { id: 'session' } }), /\/canvas\/new/)
+  assert.equal((await call('POST', '/beeftv/connect', { mode: 'local' })).body.connectionId, second)
+  assert.equal((await call('GET', '/beeftv/status')).body.workspace.id, 'verified-workspace')
+  workspace.available = false
+  assert.equal((await call('GET', '/beeftv/status')).body.connected, false)
+  assert.equal(prompt({ agent: { id: 'session' } }), '')
+  workspace.available = true
+  const restored = (await call('GET', '/beeftv/status')).body
+  assert.equal(restored.connected, true)
+  assert.notEqual(restored.connectionId, second)
+  assert.equal(calls.filter(call => call.command === '/usr/bin/open').length, 1)
+  assert.equal(calls.filter(call => call.args.includes('--harness-attach-only')).length, 3)
+})
+
+test('Host refuses workspace paths that could reach Harness-managed routes', async context => {
+  const { call, workspace } = await startHost(context)
+  const app = new URL((await call('POST', '/beeftv/connect', { mode: 'standalone' })).body.appURL).pathname.replace(/\/$/, '')
+  const managed = [
+    ['GET', '/api/assistant/sessions'], ['GET', '/api/%61ssistant/sessions'], ['GET', '/api/ops/clients'],
+    ['POST', '/api/agent-clients'], ['DELETE', '/api/agent-clients/test-client'], ['POST', '/api/agent-clients/integrations'],
+    ['POST', '/API/Agent-Clients'], ['POST', '/beeftv/app/api/agent-clients'],
+  ]
+  for (const [method, path] of managed) assert.equal((await call(method, `${app}${path}`, method === 'GET' ? undefined : {})).status, 403, path)
+  const ambiguous = [
+    '/%2fapi/agent-clients', '/%2Fapi%2Fagent-clients', '/api%2fagent-clients', '/api%5cagent-clients', '/api\\agent-clients',
+    '/%252fapi/agent-clients', '/api/%2561gent-clients', '/api/health/../agent-clients', '/api/health/%2e%2e/agent-clients',
+    '/api/./agent-clients', '//api/agent-clients', '/api//agent-clients', '/api/agent-clients#x', '/api/%E0%A4%A',
+  ]
+  for (const path of ambiguous) assert.equal((await call('POST', `${app}${path}`, {})).status, 400, path)
+  assert.deepEqual(workspace.proxied, [])
+  const forwarded = await call('GET', `${app}/api/workspace/bootstrap?view=canvas%2Fmain`)
+  assert.deepEqual(forwarded, { status: 200, body: { code: 0, data: { proxied: true } } })
+  assert.equal(workspace.proxied.length, 1)
+  assert.equal(workspace.proxied[0].url, '/api/workspace/bootstrap?view=canvas%2Fmain')
+  assert.equal(workspace.proxied[0].headers['x-beeftv-harness-page'], '1')
+  assert.equal(workspace.proxied[0].headers['x-beeftv-harness-token'], 'test-bridge')
+})
+
+test('workspace sync follows the catalog read-only flags instead of tool names', async context => {
+  const { call, listeners } = await startHost(context)
+  await call('POST', '/beeftv/connect', { mode: 'standalone' })
+  const onToolResult = listeners.get('tools/result')
+  const activity = async () => (await call('GET', '/beeftv/status')).body.activity
+  const result = canvasId => ({ content: [{ type: 'text', text: JSON.stringify({ result: { canvasId } }) }] })
+  onToolResult({ name: 'mcp__beeftv__canvas_get_ab092b275e46', arguments: { canvasId: 'read-only' } }, result('read-only'))
+  onToolResult({ name: 'mcp__beeftv__canvas_generation_propose_ab092b275e46', arguments: { canvasId: 'read-only' } }, result('read-only'))
+  onToolResult({ name: 'mcp__beeftv__media_review_ab092b275e46', arguments: { canvasId: 'read-only' } }, result('read-only'))
+  onToolResult({ name: 'mcp__beeftv__business_list_ab092b275e46', arguments: { query: 'business_get_assets' } }, result())
+  onToolResult({ name: 'mcp__beeftv__business_call_ab092b275e46', arguments: { tool: 'business_get_assets' } }, result())
+  assert.equal(await activity(), null)
+  onToolResult({ name: 'mcp__beeftv__canvas_create_ab092b275e46', arguments: { title: 'New' } }, result('created-canvas'))
+  assert.deepEqual(await activity(), { seq: 1, kind: 'canvas-created', canvasId: 'created-canvas' })
+  onToolResult({ name: 'mcp__beeftv__canvas_script_prepare_ab092b275e46', arguments: { canvasId: 'created-canvas' } }, { content: [{ type: 'text', text: '{"result":{"canvasId":"created-canvas","revision":2}}' }] })
+  assert.deepEqual(await activity(), { seq: 2, kind: 'canvas-updated', canvasId: 'created-canvas' })
+  onToolResult({ name: 'mcp__beeftv__canvas_unlisted_ab092b275e46', arguments: {} }, { content: [] })
+  assert.deepEqual(await activity(), { seq: 3, kind: 'workspace-updated', canvasId: null })
+})
+
+test('Host reports an outdated desktop App for upgrade without starting it', async context => {
+  const { call, calls } = await startHost(context, { appVersion: '2.1.6' })
+  const status = (await call('GET', '/beeftv/status')).body
+  assert.equal(status.connected, false)
+  assert.deepEqual(status.localApp, { compatible: false, version: '2.1.6', message: '本机 BeefTV 版本为 2.1.6，需要 2.2.0 或更高版本。请升级后重新连接。' })
+  const refused = await call('POST', '/beeftv/connect', { mode: 'local' })
+  assert.equal(refused.status, 503)
+  assert.equal(refused.body.error, status.localApp.message)
+  assert.deepEqual(calls, [])
 })

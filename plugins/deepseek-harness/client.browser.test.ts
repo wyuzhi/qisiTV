@@ -272,6 +272,29 @@ test('hidden mounts read status once and keep subsequent hidden polling idle', a
   await page.close()
 })
 
+test('an outdated local App shows its upgrade requirement and is connected only after it passes the check', async () => {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+  const upgrade = '本机 BeefTV 版本为 2.1.6，需要 2.2.0 或更高版本。请升级后重新连接。'
+  let status: Record<string, any> = { connected: false, mode: null, switching: false, error: null, connectionId: null, localApp: { compatible: false, version: '2.1.6', message: upgrade } }
+  const connects: Array<Record<string, any>> = []
+  await page.route('**/beeftv/status', route => route.fulfill({ json: status }))
+  await page.route('**/beeftv/connect', async route => {
+    connects.push(route.request().postDataJSON())
+    await route.fulfill({ json: { connected: true, connectionId: 'connection-local', mode: 'local', appURL: new URL('/workspace/local/', server.url).href } })
+  })
+  await page.route('**/beeftv/context', route => route.fulfill({ json: { ok: true } }))
+  await page.goto(server.url.href)
+  await page.getByRole('button', { name: /连接本机 BeefTV/ }).getByText(upgrade, { exact: true }).waitFor()
+  await refresh(page)
+  expect(connects).toEqual([])
+  expect(await page.getByRole('alert').count()).toBe(0)
+  status = { ...status, localApp: { compatible: true, version: '2.2.0', message: null } }
+  await refresh(page)
+  await page.frameLocator('iframe').getByText('Workspace', { exact: true }).waitFor()
+  expect(connects).toEqual([{ mode: 'local' }])
+  await page.close()
+})
+
 test('a timed-out status read reports failure and releases polling for a successful retry', async () => {
   const page = await browser.newPage()
   await page.addInitScript(() => {

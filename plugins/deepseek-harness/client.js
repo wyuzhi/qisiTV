@@ -144,7 +144,7 @@ window.__ModuleLoader__.load({
       }, { slots: { views: FixedChatView } })
     }
 
-    function Onboarding({ busy, connect, loading }) {
+    function Onboarding({ busy, connect, loading, localApp }) {
       return h('div', { className: 'beeftv-harness-onboarding' },
         h('div', { className: 'beeftv-harness-onboarding-content' },
           h('h1', null, '在 DSH 中打开 BeefTV'),
@@ -152,7 +152,7 @@ window.__ModuleLoader__.load({
           h('div', { className: 'beeftv-harness-options' },
             h('button', { type: 'button', className: 'beeftv-harness-option', disabled: busy || loading, onClick: () => connect('local') },
               h('strong', null, busy === 'local' ? '正在连接…' : '连接本机 BeefTV'),
-              h('span', null, '与本机 /Applications/BeefTV.app 彻底互通，共享同一套画布、素材、配置与版本更新。')),
+              h('span', null, localApp?.message || '与本机 /Applications/BeefTV.app 彻底互通，共享同一套画布、素材、配置与版本更新。')),
             h('button', { type: 'button', className: 'beeftv-harness-option', disabled: busy || loading, onClick: () => connect('standalone') },
               h('strong', null, busy === 'standalone' ? '正在创建连接…' : '使用独立工作区'),
               h('span', null, '为 DSH 使用独立的 BeefTV 本地工作区。')))))
@@ -250,7 +250,7 @@ window.__ModuleLoader__.load({
           try {
             const next = await api('status', undefined, AbortSignal.any([controller.signal, timeout.signal]))
             if (!mounted || controller.signal.aborted || connecting.current) return
-            setStatus(current => ['connected', 'mode', 'appURL', 'version', 'error', 'connectionId'].every(key => current?.[key] === next[key]) && current?.workspace?.id === next.workspace?.id && current?.build?.commit === next.build?.commit && current?.activity?.seq === next.activity?.seq ? current : next)
+            setStatus(current => ['connected', 'mode', 'appURL', 'version', 'error', 'connectionId'].every(key => current?.[key] === next[key]) && current?.workspace?.id === next.workspace?.id && current?.build?.commit === next.build?.commit && current?.activity?.seq === next.activity?.seq && current?.localApp?.message === next.localApp?.message && current?.localApp?.compatible === next.localApp?.compatible ? current : next)
             setStatusError('')
           } catch (failure) {
             if (!mounted || controller.signal.aborted) return
@@ -308,7 +308,8 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => {
         if (autoConnectAttempted.current || choosingWorkspace || busy || connecting.current) return
-        if (status?.connected === false && status.mode === null && !status.switching && !status.error && !statusError) {
+        // Only an installed App that passed the Host version check is connected without asking.
+        if (status?.connected === false && status.mode === null && status.localApp?.compatible === true && !status.switching && !status.error && !statusError) {
           autoConnectAttempted.current = true
           void connect('local')
         }
@@ -353,7 +354,7 @@ window.__ModuleLoader__.load({
         h('div', { ref: body, className: 'beeftv-harness-body', style: { '--beeftv-agent-width': `${agentWidth}px` } },
           h('div', { className: 'beeftv-harness-workspace' }, source
             ? h('iframe', { key: source, ref: frame, src: source, onLoad: publishFrameClearance, title: 'BeefTV 创作工作区', className: 'beeftv-harness-frame', referrerPolicy: 'no-referrer', allow: 'clipboard-read; clipboard-write' })
-            : h(Onboarding, { busy, connect, loading: status === undefined })),
+            : h(Onboarding, { busy, connect, loading: status === undefined, localApp: status?.localApp })),
           h('div', { className: 'beeftv-harness-divider', role: 'separator', tabIndex: 0, 'aria-label': '调整 BeefTV Agent 宽度', 'aria-orientation': 'vertical', 'aria-valuemin': 320, 'aria-valuemax': Math.max(320, availableWidth - 286), 'aria-valuenow': agentWidth, 'aria-controls': 'beeftv-agent-panel', onPointerDown: startResize, onPointerMove: moveResize, onPointerUp: endResize, onPointerCancel: endResize, onLostPointerCapture: endResize, onKeyDown: resizeWithKeyboard }),
           h('aside', { id: 'beeftv-agent-panel', className: 'beeftv-harness-agent', 'aria-label': 'BeefTV Agent' },
             h('div', { className: 'beeftv-harness-agent-header' },

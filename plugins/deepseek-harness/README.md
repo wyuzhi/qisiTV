@@ -4,8 +4,8 @@
 
 ## 初代运行方式
 
-- 独立工作区保存在 DSH home 的 `storages/beeftv/workspace`，可在工作台内连接 BeefTV 账号或配置自带 Key。
-- 连接本地 BeefTV 时，先打开 `/Applications/BeefTV.app`，等待其本机私有 IPC 就绪后接入，直接使用原账号连接、工程与素材。
+- 独立工作区保存在 DSH home 的 `storages/beeftv/workspace`，只使用插件内置的运行包，可在工作台内连接 BeefTV 账号或配置自带 Key。
+- 连接本地 BeefTV 需要 `/Applications/BeefTV.app` 为 2.2.0 或更高版本。插件先读取应用版本，版本较低时只提示升级，不启动应用；通过检查后打开应用，等待其本机私有 IPC 就绪后接入，直接使用原账号连接、工程与素材。
 - 生成复用 BeefTV 的提议与审批机制。模型推理使用 DSH 当前模型配置。
 - 首版支持 macOS Apple Silicon，DSH 0.2.2-rc.1。原生运行包来自当前源码构建并安装的 `/Applications/BeefTV.app`。
 

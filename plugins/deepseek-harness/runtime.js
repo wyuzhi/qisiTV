@@ -61,28 +61,89 @@ export function publicContext(value) {
   return context
 }
 
-export async function bundledPaths() {
-  const localApp = {
-    executable: '/Applications/BeefTV.app/Contents/MacOS/BeefTV',
-    cli: '/Applications/BeefTV.app/Contents/MacOS/cli/beeftv',
+// Paths DeepSeek Harness manages itself. The embedded workspace page never reaches them.
+const managedWorkspacePaths = ['/api/assistant', '/api/ops/clients', '/api/agent-clients']
+
+// Judges the raw request path. URL parsers resolve encoded separators and dot segments differently
+// from the Go bridge, so ambiguous spellings are refused instead of resolved. Returns 0, 400 or 403.
+export function embeddedPathRejection(rawPath) {
+  if (!rawPath.startsWith('/') || rawPath.startsWith('//') || /[\\#]|%(?:2f|5c|25)/i.test(rawPath)) return 400
+  let path
+  try {
+    path = decodeURIComponent(rawPath)
+  } catch {
+    return 400
   }
+  const segments = path.split('/').slice(1)
+  if (segments.some((segment, index) => segment === '.' || segment === '..' || (segment === '' && index < segments.length - 1))) return 400
+  // The bridge also serves the workspace under /beeftv/app, so that prefix is removed before matching.
+  const effective = (path.replace(/^\/beeftv\/app(?=\/|$)/i, '') || '/').toLowerCase()
+  return managedWorkspacePaths.some(managed => effective === managed || effective.startsWith(`${managed}/`)) ? 403 : 0
+}
+
+const localApp = {
+  bundle: '/Applications/BeefTV.app',
+  info: '/Applications/BeefTV.app/Contents/Info.plist',
+  executable: '/Applications/BeefTV.app/Contents/MacOS/BeefTV',
+  cli: '/Applications/BeefTV.app/Contents/MacOS/cli/beeftv',
+}
+// 2.2.0 is the first desktop release with the harness bridge. Older builds pass unknown flags to the
+// GUI, so starting them with harness flags would open the desktop window instead of attaching.
+const minimumLocalAppVersion = '2.2.0'
+
+function supportsHarness(version) {
+  const parts = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version || '')?.slice(1).map(Number)
+  if (!parts) return false
+  const minimum = minimumLocalAppVersion.split('.').map(Number)
+  const index = parts.findIndex((part, position) => part !== minimum[position])
+  return index === -1 || parts[index] > minimum[index]
+}
+
+function bundleVersion(plist) {
+  return new Promise(resolve => {
+    execFile('/usr/libexec/PlistBuddy', ['-c', 'Print CFBundleShortVersionString', plist], { timeout: 5_000 }, (error, stdout) => {
+      resolve(error ? null : String(stdout).trim() || null)
+    })
+  })
+}
+
+export async function localAppStatus() {
   try {
     await Promise.all([access(localApp.executable, constants.X_OK), access(localApp.cli, constants.X_OK)])
-    return localApp
   } catch {
-    const contents = join(root, 'runtime', 'Contents')
-    const executable = join(contents, 'MacOS', 'BeefTV')
-    const cli = join(contents, 'MacOS', 'cli', 'beeftv')
-    await Promise.all([access(executable, constants.X_OK), access(cli, constants.X_OK)])
-    return { executable, cli }
+    return { compatible: false, version: null, message: `未找到本机 BeefTV。请安装 ${minimumLocalAppVersion} 或更高版本后重新连接。` }
+  }
+  const version = await bundleVersion(localApp.info)
+  if (supportsHarness(version)) return { compatible: true, version, message: null }
+  return {
+    compatible: false, version,
+    message: version
+      ? `本机 BeefTV 版本为 ${version}，需要 ${minimumLocalAppVersion} 或更高版本。请升级后重新连接。`
+      : `无法读取本机 BeefTV 的版本。请重新安装 ${minimumLocalAppVersion} 或更高版本后重新连接。`,
   }
 }
 
-export async function startLocalRuntime() {
+async function requireLocalApp() {
+  const app = await localAppStatus()
+  if (!app.compatible) throw new Error(app.message)
+}
+
+async function bundledPaths() {
+  const contents = join(root, 'runtime', 'Contents')
+  const paths = { executable: join(contents, 'MacOS', 'BeefTV'), cli: join(contents, 'MacOS', 'cli', 'beeftv') }
   try {
-    await access('/Applications/BeefTV.app/Contents/MacOS/BeefTV', constants.X_OK)
+    await Promise.all(Object.values(paths).map(path => access(path, constants.X_OK)))
+  } catch (error) {
+    throw new Error('插件缺少内置的 BeefTV 运行时，请重新安装插件', { cause: error })
+  }
+  return paths
+}
+
+export async function startLocalRuntime() {
+  await requireLocalApp()
+  try {
     await new Promise((resolve, reject) => {
-      execFile('/usr/bin/open', ['-a', '/Applications/BeefTV.app'], { timeout: 10_000 }, error => {
+      execFile('/usr/bin/open', ['-a', localApp.bundle], { timeout: 10_000 }, error => {
         if (error) reject(error)
         else resolve()
       })
@@ -94,7 +155,7 @@ export async function startLocalRuntime() {
   let lastFailure
   while (Date.now() < deadline) {
     try {
-      return await startRuntime(undefined, { attachOnly: true })
+      return await launchRuntime(localApp, { attachOnly: true })
     } catch (error) {
       lastFailure = error
     }
@@ -103,12 +164,18 @@ export async function startLocalRuntime() {
   throw new Error('本机 BeefTV 尚未就绪，请检查桌面应用的启动提示后重新连接', { cause: lastFailure })
 }
 
-export async function startRuntime(dataDir, { attachOnly = false } = {}) {
-  const paths = attachOnly ? {
-    executable: '/Applications/BeefTV.app/Contents/MacOS/BeefTV',
-    cli: '/Applications/BeefTV.app/Contents/MacOS/cli/beeftv',
-  } : await bundledPaths()
-  if (attachOnly) await Promise.all(Object.values(paths).map(path => access(path, constants.X_OK)))
+// Reconnects to a running desktop App without opening it again.
+export async function attachLocalRuntime() {
+  await requireLocalApp()
+  return launchRuntime(localApp, { attachOnly: true })
+}
+
+// The standalone workspace only ever runs the runtime bundled with the plugin.
+export async function startRuntime(dataDir) {
+  return launchRuntime(await bundledPaths(), { dataDir })
+}
+
+async function launchRuntime(paths, { dataDir, attachOnly = false }) {
   const args = ['--harness-runtime']
   if (attachOnly) args.push('--harness-attach-only')
   if (dataDir) args.push('--data-dir', dataDir)
