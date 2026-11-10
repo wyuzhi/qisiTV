@@ -48,9 +48,15 @@ func resolveManagedVideoCapability(ctx context.Context, runtime Runtime, input *
 	if runtime.Config == nil || runtime.ManagedMedia == nil {
 		return nil
 	}
-	if sent, err := runtime.ManagedMedia.Sent(ctx); err != nil || sent {
+	sent, err := runtime.ManagedMedia.Sent(ctx)
+	if err != nil {
+		return err
+	}
+	if sent {
 		return nil
 	}
+	// Runtime capabilities are not persisted. Restore the account declaration before freezing a new request.
+	input.Mode = "video"
 	if err := runtime.Config.ApplyCapabilities(ctx, input); err != nil {
 		return RequestPreparationError{Cause: err}
 	}
@@ -58,13 +64,16 @@ func resolveManagedVideoCapability(ctx context.Context, runtime Runtime, input *
 }
 
 func runManagedVideoTask(ctx context.Context, client *beeftv.MediaClient, input Input) (map[string]any, error) {
+	runtime, _ := RuntimeFromContext(ctx)
+	if err := resolveManagedVideoCapability(ctx, runtime, &input); err != nil {
+		return nil, err
+	}
 	intent := managedLegacyVideoInput(input)
 	ordered, err := beeftv.VideoIntentReferences(intent)
 	if err != nil {
 		return nil, RequestPreparationError{Cause: err}
 	}
 	var sources []beeftv.LocalMediaReference
-	runtime, _ := RuntimeFromContext(ctx)
 	var localLimit int64
 	if runtime.Limits != nil {
 		localLimit, err = runtime.Limits.ResourceUploadBytes(ctx)

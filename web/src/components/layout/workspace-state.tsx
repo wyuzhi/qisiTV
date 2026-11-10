@@ -4,11 +4,11 @@ import type { ReactNode } from "react";
 import { WorkspaceSignalIcon, type WorkspaceSignalIconVariant } from "@/components/ui/aceternity/workspace-signal-icon";
 import { cn } from "@/lib/utils";
 
-export function WorkspaceState({ icon = "empty", title, description, action, compact = false, className }: { icon?: WorkspaceSignalIconVariant; title: string; description?: string; action?: ReactNode; compact?: boolean; className?: string }) {
+export function WorkspaceState({ icon = "empty", title, description, action, compact = false, className }: { icon?: WorkspaceSignalIconVariant | null; title: string; description?: string; action?: ReactNode; compact?: boolean; className?: string }) {
     return (
         <section className={cn("workspace-state flex flex-col items-center justify-center text-center", compact ? "min-h-44 py-8" : "min-h-[320px] py-12", className)}>
-            <WorkspaceSignalIcon variant={icon} size={compact ? "md" : "lg"} />
-            <h2 className="mt-4 text-[var(--fs-body-lg)] font-semibold leading-6 text-foreground">{title}</h2>
+            {icon ? <WorkspaceSignalIcon variant={icon} size={compact ? "md" : "lg"} /> : null}
+            <h2 className={cn("text-[var(--fs-body-lg)] font-semibold leading-6 text-foreground", icon && "mt-4")}>{title}</h2>
             {description ? <p className="mt-1.5 max-w-[42ch] text-xs leading-5 text-foreground/58">{description}</p> : null}
             {action ? <div className="mt-5">{action}</div> : null}
         </section>

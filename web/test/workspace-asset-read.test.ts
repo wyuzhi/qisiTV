@@ -14,6 +14,7 @@ import {
     isWorkspacePersonalLibraryAsset,
     loadWorkspaceAssetLibraryPage,
     loadWorkspaceAssetsForUse,
+    normalizeWorkspaceAssetPayload,
     preserveLegacyCacheOnlyAssetDrafts,
     resetWorkspaceAssetReadStateForTests,
     usesWorkspaceAssetLibraryApi,
@@ -27,6 +28,16 @@ import {
     workspaceAssetTraversalTotal,
 } from "@/services/workspace-asset-read";
 import { hydrateAssetStoreDrafts, peekAssetStoreDraft, recordAssetStoreDraft, resetAssetStoreDraftsForTests, useAssetStore, type Asset } from "@/stores/use-asset-store";
+
+test("durable image references rebuild omitted display URLs without accepting incomplete media", () => {
+    const record = sampleClientAsset("durable-url", "资源图片", {
+        data: { storageKey: "resource:res-1", width: 8, height: 8, bytes: 4, mimeType: "image/png" },
+    });
+    const asset = normalizeWorkspaceAssetPayload(record);
+    expect(asset.kind === "image" && asset.data.dataUrl).toBe(resourceFileUrl("res-1"));
+    expect(() => normalizeWorkspaceAssetPayload({ ...record, data: { ...record.data, width: 0 } })).toThrow();
+    expect(() => normalizeWorkspaceAssetPayload({ ...record, data: { ...record.data, storageKey: undefined } })).toThrow();
+});
 
 function switchScope(userId: string) {
     const previous = getActiveUserScope();

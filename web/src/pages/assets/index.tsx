@@ -990,7 +990,7 @@ export default function AssetsPage() {
                             ) : (
                                 <>
                                     {visibleAssets.length === 0 ? (
-                                        <WorkspaceState icon="assets" compact title="没有匹配的素材" description="调整关键词或左侧分类后再试。" />
+                                        <WorkspaceState icon={null} compact title="没有匹配的素材" description="调整关键词或左侧分类后再试。" />
                                     ) : (
                                         <CollectionGrid className={cn("library-grid", "assets-library-grid", assetViewMode === "list" && "is-list-view")}>
                                             {orderedVisibleAssets.map((asset) => (

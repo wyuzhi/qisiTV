@@ -367,6 +367,18 @@ function parseWorkspaceAssetPayloads(values: unknown): Asset[] {
 }
 
 export function normalizeWorkspaceAssetPayload(value: unknown): Asset {
+    // Durable resource rows can omit process-specific display URLs. Resolve
+    // their real locator before validating the complete media record.
+    if (isRecord(value) && isRecord(value.data) && typeof value.data.storageKey === "string") {
+        const resourceId = resourceIdFromStorageKey(value.data.storageKey);
+        const media = value.kind === "image" || value.kind === "video" || value.kind === "audio" || value.kind === "model";
+        if (resourceId && media) {
+            const field = value.kind === "image" ? "dataUrl" : "url";
+            if (value.data[field] === undefined) {
+                value = { ...value, data: { ...value.data, [field]: resourceFileUrl(resourceId) } };
+            }
+        }
+    }
     return applyResourceDisplayUrls(parseAssetRecord(value));
 }
 

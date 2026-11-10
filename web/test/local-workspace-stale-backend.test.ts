@@ -121,9 +121,19 @@ export class ApiError extends Error {}
 export let remoteProject: any;
 export let remoteProjects: any[] = [];
 let failurePath = "";
+let remotePages: any[][] | null = null;
 export const setRequestFailure = (path: string) => { failurePath=path; };
-export const setRemoteProject = (next: any) => { failurePath=""; remoteProject = next; remoteProjects = next ? [{ id: next.id }] : []; };
-export const http = { get: async (path: string) => { if(path===failurePath) throw new Error("read failed"); return path === "/canvas-projects" ? { projects: remoteProjects } : { project: remoteProject }; } };
+export const setRemoteProject = (next: any) => { remotePages=null; failurePath=""; remoteProject = next; remoteProjects = next ? [{ id: next.id }] : []; };
+export const setRemotePages = (pages: any[][]) => { remotePages = pages; };
+export const http = { get: async (path: string, options?: any) => {
+  if(path===failurePath) throw new Error("read failed");
+  if (remotePages) {
+    const page = options?.params?.page || 1;
+    if (path === "/canvas-projects") return { projects: remotePages[page - 1] || [], hasMore: page < remotePages.length };
+    return { project: remotePages.flat().find(project => path.endsWith("/" + project.id)) };
+  }
+  return path === "/canvas-projects" ? { projects: remoteProjects } : { project: remoteProject };
+} };
 `);
 const operationsPath = join(dir, "operations.ts");
 const journalPath = join(dir, "journal.ts");
@@ -216,6 +226,13 @@ beforeEach(() => {
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("local workspace stale backend protection", () => {
+    it("hydrates every backend page when the server clamps the requested page size", async () => {
+        const projects = Array.from({ length: 64 }, (_, index) => project({ id: `paged-${index}`, revision: 1 }));
+        request.setRemotePages([projects.slice(0, 50), projects.slice(50)]);
+        expect(await repository.hydrateLocalCanvasProjectsFromBackend()).toBe(true);
+        expect(store.projects).toHaveLength(64);
+        expect(store.projects.some(item => item.id === "paged-63")).toBe(true);
+    });
     it("reports failed list/detail reads and retains cached projects until retry", async () => {
         const health = await import("../src/services/canvas-hydration-health");
         const local = project({nodes:[{id:"keep"}]});

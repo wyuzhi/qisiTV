@@ -819,10 +819,19 @@ export async function hydrateLocalCanvasProjectsFromBackend() {
     const attempt=beginCanvasHydration();
     let failure="";
     try {
-        const response = await http.get<{ projects: Array<Pick<CanvasProject, "id">> }>("/canvas-projects", {
-            params: { page: 1, pageSize: 500, sort: "updated" },
-        });
-        const summaries = Array.isArray(response.projects) ? response.projects : [];
+        const summaries: Array<Pick<CanvasProject, "id">> = [];
+        let page = 1;
+        let hasMore = true;
+        while (hasMore) {
+            const response = await http.get<{ projects: Array<Pick<CanvasProject, "id">>; hasMore?: boolean }>("/canvas-projects", {
+                params: { page, pageSize: 50, sort: "updated" },
+            });
+            const batch = Array.isArray(response.projects) ? response.projects : [];
+            hasMore = response.hasMore === true;
+            if (hasMore && batch.length === 0) throw new Error("项目分页未返回内容，请重试");
+            summaries.push(...batch);
+            page += 1;
+        }
         if (summaries.length === 0) return false;
         const projects = (await Promise.all(summaries.map(async (summary) => {
             const detail = await http.get<{ project: CanvasProject }>(`/canvas-projects/${encodeURIComponent(summary.id)}`);
@@ -833,7 +842,13 @@ export async function hydrateLocalCanvasProjectsFromBackend() {
         const current = useCanvasStore.getState().projects;
         const byId = new Map(current.map((project) => [project.id, project]));
         const existedIds = new Set(current.map((project) => project.id));
-        for (const project of projects) {
+        for (const [index, project] of projects.entries()) {
+            // Warm journals can resolve entirely in microtasks. Give React a
+            // render turn between batches so large libraries cannot exhaust
+            // its nested-update limit while applying individual projections.
+            if (index > 0 && index % 16 === 0) {
+                await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            }
             try {
                 await loadCanvasOperationJournal(project.id, scope);
                 await replayPendingCanvasProjection(project.id, scope);
@@ -856,6 +871,7 @@ export async function hydrateLocalCanvasProjectsFromBackend() {
         await flushCanvasStorePersistence();
         return true;
     } catch (error) {
+        console.error("项目列表同步失败", error);
         failure="项目暂时无法读取，现有数据已保留。请重试或在设置中导出问题记录。";
         return false;
     } finally {

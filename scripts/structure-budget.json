@@ -15,7 +15,7 @@
     "web/src/pages/canvas/project.tsx": 1985,
     "web/src/pages/canvas/use-canvas-upload.ts": 1077,
     "web/src/pages/create/index.tsx": 1242,
-    "web/src/services/local-workspace-repository.ts": 1147,
+    "web/src/services/local-workspace-repository.ts": 1163,
     "web/src/styles/globals.css": 20819,
     "web/src/styles/workspace-product.css": 1565
   },
