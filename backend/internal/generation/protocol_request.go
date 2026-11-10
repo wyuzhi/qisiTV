@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"infinite-canvas/backend/internal/channelurl"
 	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/modelcatalog"
 	"infinite-canvas/backend/internal/outbound"
@@ -457,7 +458,7 @@ func SafeProtocolFilename(value string) string {
 func ProtocolRequestURL(baseURL string, spec protocol.RequestSpec) (string, error) {
 	if !spec.OriginPath {
 		if spec.DefaultPathPrefix != "" {
-			return AppendProtocolQuery(apiURLWithDefaultPrefix(baseURL, spec.Path, spec.DefaultPathPrefix), spec.Query)
+			return AppendProtocolQuery(channelurl.Join(baseURL, spec.Path, spec.DefaultPathPrefix), spec.Query)
 		}
 		return AppendProtocolQuery(APIURL(baseURL, spec.Path), spec.Query)
 	}

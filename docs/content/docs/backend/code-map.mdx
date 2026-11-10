@@ -34,6 +34,7 @@ Wails / local dev
 | Seedream 图片结果 | `backend/internal/generation/image_seedream.go` | 专用协议请求 URL，保留原来的组图、图层和透明 PNG 参数；BeefTV 官方算力可经 CF 转存到 COS。返回的 URL 下载成原始图片后交给本地资源保存，仍接受旧 Base64 响应。媒体下载只在同 origin 携带供应商请求头，跨 origin 重定向后清除且不恢复；Agent Plan 插件与通用图片协议不受此默认值影响 |
 | 视频结果取回 | `backend/internal/generation/video_delivery.go` | 所有视频入口共用下载重试、10 秒无进展检测和原任务结果刷新；BeefTV 官方算力取备用存储，自接供应商只查询自己的原任务。认证由所选协议提供，跨域媒体请求清除供应商凭据 |
 | 供应商适配 | `backend/internal/provider`, `protocol`, `outbound` | 外部模型 API、自定义渠道和插件协议 |
+| 渠道地址拼接 | `backend/internal/channelurl` | 渠道 Base URL 与接口路径的唯一拼接规则：识别已写明的版本前缀，没写时才补默认前缀。生成任务和内置助手共用，同一渠道在两处打到同一个地址 |
 | 费用估算 | `backend/internal/pricing`、`backend/internal/operations/generation_estimate.go` | 解析 BeefTV 官方算力公开价格目录的单行价格，按生成参数估算费用；只信任官方渠道写入的价格，算不出的项写明原因，不按 0 计入合计 |
 | 模型目录 | `backend/internal/modelcatalog` | 能力合同、渠道目录校验/解析/合并与 BeefTV 官方算力/WhatsToken overlay；出站 HTTP 仍走 outbound |
 | 插件注册与能力 | `backend/internal/plugins`、`agent-host/plugin-packages.mjs` | 唯一插件登记表（`plugin_registry`：含 `OriginPackage` `"package"`、`PackageDir`、`PackageSpec`）、安装/启停、静态文件隔离、随包插件目录解析（桌面包优先读 `agent-host/bundled-plugins/`，Docker 与开发回退 `plugin-packages/`）、provider 能力目录，以及把已启用插件的 `canvasNodes` 注入共享的 `capability.BuiltinRegistry()`；宿主侧经 `agent-host/plugin-packages.mjs` 复用 pi 官方 `DefaultPackageManager` 与 `discoverAndLoadExtensions` 加载插件工具 |

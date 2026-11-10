@@ -70,6 +70,7 @@ func TestResolveAssistantProviderPrefersExplicitEnv(t *testing.T) {
 
 // 协议决定宿主使用哪个 pi-ai 适配器，也决定接口地址要不要带 /v1：
 // OpenAI 兼容 SDK 在 baseURL 后直接拼路径，Anthropic SDK 自己拼 /v1/messages。
+// 渠道已写明的版本前缀（/api/v3、/v4 等）原样保留，和生成任务打到同一个地址。
 func TestAssistantHostEnvCarriesProtocolAndBaseURLShape(t *testing.T) {
 	dataDir := t.TempDir()
 	host := New(Options{DataDir: dataDir})
@@ -81,7 +82,11 @@ func TestAssistantHostEnvCarriesProtocolAndBaseURLShape(t *testing.T) {
 	}{
 		{"chat-completion", "https://beeftv.app", "openai-completions", "https://beeftv.app/v1"},
 		{"chat-completion", "https://beeftv.app/v1/", "openai-completions", "https://beeftv.app/v1"},
+		{"chat-completion", "https://gateway.example.com/api/v3", "openai-completions", "https://gateway.example.com/api/v3"},
+		{"chat-completion", "https://gateway.example.com/api/paas/v4/", "openai-completions", "https://gateway.example.com/api/paas/v4"},
+		{"chat-completion", "https://gateway.example.com/v1/chat/completions", "openai-completions", "https://gateway.example.com/v1"},
 		{"responses", "https://beeftv.app", "openai-responses", "https://beeftv.app/v1"},
+		{"responses", "https://gateway.example.com/api/v3", "openai-responses", "https://gateway.example.com/api/v3"},
 		{"claude-api", "https://beeftv.app/v1", "anthropic-messages", "https://beeftv.app"},
 		{"claude-api", "https://beeftv.app", "anthropic-messages", "https://beeftv.app"},
 	}
