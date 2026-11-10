@@ -67,4 +67,5 @@ test("unchanged and hovered connections reuse geometry while moved endpoints and
         await page.evaluate(() => (window as any).connectionProbe.appearance({ hideVisual: true }));
         expect(await line.count()).toBe(0);
     } finally { await browser.close(); }
-}, 30_000);
+    // CI 上两个浏览器用例并行时，构建加启动 Chromium 会顶到这个上限；本地只要 3 秒多。
+}, 60_000);

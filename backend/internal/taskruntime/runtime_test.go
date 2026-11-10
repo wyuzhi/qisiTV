@@ -340,6 +340,10 @@ func testRuntime(t *testing.T, deps Deps) *Runtime {
 	return New(deps)
 }
 
+// 这些等待只是等内存里的调度结果，不是超时断言；CI 机器忙时一秒会被吃掉，
+// 出现「调度还没跑完就判超时」的假红，所以给到五秒。
+const waitDeadline = 5 * time.Second
+
 func waitUntil(t *testing.T, timeout time.Duration, ok func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -368,7 +372,7 @@ func TestConcurrentClaimGivesSingleLeaseOwner(t *testing.T) {
 	go func() { defer wg.Done(); left.Dispatch(context.Background()) }()
 	go func() { defer wg.Done(); right.Dispatch(context.Background()) }()
 	wg.Wait()
-	waitUntil(t, time.Second, func() bool { return executes.Load() > 0 })
+	waitUntil(t, waitDeadline, func() bool { return executes.Load() > 0 })
 	time.Sleep(20 * time.Millisecond)
 	if executes.Load() != 1 {
 		t.Fatalf("executes=%d, want 1", executes.Load())
@@ -404,7 +408,7 @@ func TestCancelWhileWaitingAndExecuting(t *testing.T) {
 			t.Fatal("executor did not wait")
 		}
 		cancels.Cancel("wait")
-		waitUntil(t, time.Second, repo.isTerminal)
+		waitUntil(t, waitDeadline, repo.isTerminal)
 		if work.Load() != 0 {
 			t.Fatal("cancelled waiter still submitted upstream")
 		}
@@ -431,7 +435,7 @@ func TestCancelWhileWaitingAndExecuting(t *testing.T) {
 			t.Fatal("executor did not start")
 		}
 		cancels.Cancel("exec")
-		waitUntil(t, time.Second, repo.isTerminal)
+		waitUntil(t, waitDeadline, repo.isTerminal)
 		if submitted.Load() != 1 {
 			t.Fatalf("submits=%d", submitted.Load())
 		}
@@ -651,7 +655,7 @@ func TestClosedRunClaimedReleasesSlotOnce(t *testing.T) {
 	rt = testRuntime(t, Deps{Repository: claiming, Coordinator: coords, Executor: exec})
 	claiming.close = rt.Close
 	rt.Dispatch(context.Background())
-	waitUntil(t, time.Second, func() bool { return coords.releases.Load() > 0 || repo.releaseCount() > 0 })
+	waitUntil(t, waitDeadline, func() bool { return coords.releases.Load() > 0 || repo.releaseCount() > 0 })
 	time.Sleep(20 * time.Millisecond)
 	if coords.acquires.Load() != 1 {
 		t.Fatalf("acquires=%d", coords.acquires.Load())
@@ -773,7 +777,7 @@ func TestConcurrencyAboveMaxSlotsDoesNotBlockOrExceed(t *testing.T) {
 		defer close(done)
 		rt.Dispatch(context.Background())
 	}()
-	waitUntil(t, time.Second, func() bool { return executes.Load() >= 2 })
+	waitUntil(t, waitDeadline, func() bool { return executes.Load() >= 2 })
 	select {
 	case <-done:
 	case <-time.After(200 * time.Millisecond):
@@ -855,7 +859,7 @@ func TestDrainDoesNotCancelInFlightExecution(t *testing.T) {
 		t.Fatal("draining worker accepted a new task")
 	}
 	close(release)
-	waitUntil(t, time.Second, repo.isTerminal)
+	waitUntil(t, waitDeadline, repo.isTerminal)
 	if cancelled.Load() {
 		t.Fatal("drain cancelled in-flight execution")
 	}
@@ -882,7 +886,7 @@ func TestUnknownStateDoesNotResubmit(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("first execute did not run")
 	}
-	waitUntil(t, time.Second, repo.isTerminal)
+	waitUntil(t, waitDeadline, repo.isTerminal)
 	repo.expireLease()
 	rt.Dispatch(context.Background())
 	time.Sleep(30 * time.Millisecond)
@@ -906,10 +910,10 @@ func TestUnappliedUncertainIsNotFencedByRuntime(t *testing.T) {
 	})
 	rt := testRuntime(t, Deps{Repository: repo, Executor: exec})
 	rt.Dispatch(context.Background())
-	waitUntil(t, time.Second, func() bool { return submits.Load() == 1 })
+	waitUntil(t, waitDeadline, func() bool { return submits.Load() == 1 })
 	repo.expireLease()
 	rt.Dispatch(context.Background())
-	waitUntil(t, time.Second, func() bool { return submits.Load() >= 2 })
+	waitUntil(t, waitDeadline, func() bool { return submits.Load() >= 2 })
 	if repo.isTerminal() {
 		t.Fatal("runtime persisted uncertain without executor write")
 	}
@@ -1007,7 +1011,7 @@ func TestRenewLeaseRetriesTransientDeadlineExceededBeforeTTL(t *testing.T) {
 		repo := &transientDeadlineRepo{memoryRepo: base}
 		repo.transientFailures.Store(2)
 		exec := fnExec(func(session Session) Outcome {
-			waitUntil(t, time.Second, func() bool { return repo.attempts.Load() >= 3 })
+			waitUntil(t, waitDeadline, func() bool { return repo.attempts.Load() >= 3 })
 			if session.Lost() {
 				t.Fatalf("session marked lost despite recovery before TTL: %v", session.LostErr())
 			}
