@@ -37,104 +37,115 @@ var providerCodeCategories = map[string]FailureCategory{
 	"invalidparameter.voilationcontent": CategoryModerationInput,
 	"invalidparameter.violationcontent": CategoryModerationInput,
 
-	"local_disk_full":                  CategoryLocalDiskFull,
-	"local_credential_failed":          CategoryLocalCredential,
-	"local_storage_failed":             CategoryLocalStorage,
-	"contentsecuritydetectionerror":    CategoryProviderUnavailable,
-	"accountoverdueerror":              CategoryQuotaUpstream,
-	"operationdenied.serviceoverdue":   CategoryQuotaUpstream,
-	"setlimitexceeded":                 CategoryQuotaLimit,
-	"inflightbatchsizeexceeded":        CategoryConcurrency,
-	"modelnotopen":                     CategoryPermission,
-	"operationdenied.servicenotopen":   CategoryPermission,
-	"invalid_api_key":                  CategoryAuth,
-	"invalid_authentication":           CategoryAuth,
-	"authentication_error":             CategoryAuth,
-	"unauthenticated":                  CategoryAuth,
-	"unauthorized":                     CategoryAuth,
-	"invalid_api_key_error":            CategoryAuth,
-	"permission_denied":                CategoryPermission,
-	"forbidden":                        CategoryPermission,
-	"access_denied":                    CategoryPermission,
-	"model_permission":                 CategoryPermission,
-	"channel_excluded":                 CategoryPermission,
-	"insufficient_quota":               CategoryQuotaUnknown,
-	"insufficient_balance":             CategoryQuotaUnknown,
-	"billing_not_active":               CategoryQuotaUnknown,
-	"billing_hard_limit_reached":       CategoryQuotaUpstream,
-	"arrearage":                        CategoryQuotaUpstream,
-	"allocationquota":                  CategoryQuotaUnknown,
-	"quota_exceeded":                   CategoryQuotaUnknown,
-	"account_deactivated":              CategoryQuotaUpstream,
-	"sensitive_words_detected":         CategoryModerationInput,
-	"content_filter":                   CategoryModerationInput,
-	"content_filter_error":             CategoryModerationInput,
-	"content_policy_violation":         CategoryModerationInput,
-	"content_policy":                   CategoryModerationInput,
-	"datainspectionfailed":             CategoryModerationInput,
-	"prohibited_content":               CategoryModerationInput,
-	"safety":                           CategoryModerationInput,
-	"blocked_reason_safety":            CategoryModerationInput,
-	"invalid_request":                  CategoryInvalidParams,
-	"invalid_reference_video":          CategoryInvalidParams,
-	"invalid_request_error":            CategoryInvalidParams,
-	"invalid_parameter":                CategoryInvalidParams,
-	"invalidparameter":                 CategoryInvalidParams,
-	"invalid_argument":                 CategoryInvalidParams,
-	"requestparameteriswrong":          CategoryInvalidParams,
-	"model_capability_not_supported":   CategoryInvalidParams,
-	"invalid_model_selection":          CategoryInvalidParams,
-	"context_length_exceeded":          CategoryContextTooLong,
-	"context_length":                   CategoryContextTooLong,
-	"max_tokens":                       CategoryContextTooLong,
-	"string_above_max_length":          CategoryContextTooLong,
-	"contentlengthexceeded":            CategoryContextTooLong,
-	"url_error":                        CategoryInputInaccessible,
-	"invalid_image_url":                CategoryInputInaccessible,
-	"invalid_image":                    CategoryInputInaccessible,
-	"download_error":                   CategoryInputInaccessible,
-	"file_too_large":                   CategoryInputTooLarge,
-	"payload_too_large":                CategoryInputTooLarge,
-	"video_request_body_too_large":     CategoryInputTooLarge,
-	"model_not_found":                  CategoryModelMissing,
-	"model_not_exist":                  CategoryModelMissing,
-	"invalid_model":                    CategoryModelMissing,
-	"not_found":                        CategoryModelMissing,
-	"model_catalog_mismatch":           CategoryModelMissing,
-	"model_temporarily_unavailable":    CategoryProviderUnavailable,
-	"model_route_unavailable":          CategoryProviderUnavailable,
-	"rate_limit_exceeded":              CategoryThrottled,
-	"rate_limit_error":                 CategoryThrottled,
-	"throttling":                       CategoryThrottled,
-	"too_many_requests":                CategoryThrottled,
-	"resource_exhausted":               CategoryThrottled,
-	"channel_concurrency_wait_timeout": CategoryConcurrency,
-	"channel_concurrency_unavailable":  CategoryConcurrency,
-	"unavailable":                      CategoryProviderUnavailable,
-	"overloaded":                       CategoryProviderUnavailable,
-	"internal_error":                   CategoryProviderUnavailable,
-	"server_error":                     CategoryProviderUnavailable,
-	"provider_request_failed":          CategoryUnknown,
-	"upstream_timeout":                 CategoryTimeout,
-	"deadline_exceeded":                CategoryTimeout,
-	"request_timeout":                  CategoryTimeout,
-	"requesttimeout":                   CategoryTimeout,
-	"request_cancelled":                CategoryCancelled,
-	"task_failed":                      CategoryAsyncFailed,
-	"provider_query_failed":            CategoryAsyncFailed,
-	"provider_submission_unknown":      CategorySubmissionUncertain,
-	"video_submission_unknown":         CategorySubmissionUncertain,
-	"video_delivery_failed":            CategoryDeliveryFailed,
-	"image_result_unknown":             CategorySubmissionUncertain,
-	"image_submission_pending":         CategorySubmissionUncertain,
-	"image_result_expired":             CategorySubmissionUncertain,
-	"image_result_unavailable":         CategorySubmissionUncertain,
-	"idempotency_conflict":             CategorySubmissionUncertain,
-	"provider_reference_invalid":       CategoryInputInaccessible,
-	"rate_limited":                     CategoryThrottled,
-	"bad_gateway":                      CategoryProviderUnavailable,
-	"internal":                         CategoryProviderUnavailable,
-	"failed_precondition":              CategoryInvalidParams,
+	"local_disk_full":                    CategoryLocalDiskFull,
+	"local_credential_failed":            CategoryLocalCredential,
+	"local_storage_failed":               CategoryLocalStorage,
+	"contentsecuritydetectionerror":      CategoryProviderUnavailable,
+	"accountoverdueerror":                CategoryQuotaUpstream,
+	"operationdenied.serviceoverdue":     CategoryQuotaUpstream,
+	"setlimitexceeded":                   CategoryQuotaLimit,
+	"inflightbatchsizeexceeded":          CategoryConcurrency,
+	"modelnotopen":                       CategoryPermission,
+	"operationdenied.servicenotopen":     CategoryPermission,
+	"invalid_api_key":                    CategoryAuth,
+	"invalid_authentication":             CategoryAuth,
+	"authentication_error":               CategoryAuth,
+	"unauthenticated":                    CategoryAuth,
+	"unauthorized":                       CategoryAuth,
+	"invalid_api_key_error":              CategoryAuth,
+	"permission_denied":                  CategoryPermission,
+	"forbidden":                          CategoryPermission,
+	"access_denied":                      CategoryPermission,
+	"model_permission":                   CategoryPermission,
+	"channel_excluded":                   CategoryPermission,
+	"insufficient_quota":                 CategoryQuotaUnknown,
+	"insufficient_balance":               CategoryQuotaUnknown,
+	"billing_not_active":                 CategoryQuotaUnknown,
+	"billing_hard_limit_reached":         CategoryQuotaUpstream,
+	"arrearage":                          CategoryQuotaUpstream,
+	"allocationquota":                    CategoryQuotaUnknown,
+	"quota_exceeded":                     CategoryQuotaUnknown,
+	"account_deactivated":                CategoryQuotaUpstream,
+	"sensitive_words_detected":           CategoryModerationInput,
+	"content_filter":                     CategoryModerationInput,
+	"content_filter_error":               CategoryModerationInput,
+	"content_policy_violation":           CategoryModerationInput,
+	"content_policy":                     CategoryModerationInput,
+	"datainspectionfailed":               CategoryModerationInput,
+	"prohibited_content":                 CategoryModerationInput,
+	"safety":                             CategoryModerationInput,
+	"blocked_reason_safety":              CategoryModerationInput,
+	"invalid_request":                    CategoryInvalidParams,
+	"invalid_video_parameters":           CategoryInvalidParams,
+	"invalid_reference_image":            CategoryInvalidParams,
+	"invalid_reference_audio":            CategoryInvalidParams,
+	"invalid_reference_video":            CategoryInvalidParams,
+	"invalid_reference_url":              CategoryInputInaccessible,
+	"invalid_media_format":               CategoryInvalidParams,
+	"media_submission_rejected":          CategoryInvalidParams,
+	"video_reference_upload_invalid":     CategoryInvalidParams,
+	"video_reference_upload_mismatch":    CategoryInvalidParams,
+	"video_reference_upload_incomplete":  CategoryInvalidParams,
+	"video_reference_upload_expired":     CategoryInvalidParams,
+	"video_reference_upload_unavailable": CategoryProviderUnavailable,
+	"invalid_request_error":              CategoryInvalidParams,
+	"invalid_parameter":                  CategoryInvalidParams,
+	"invalidparameter":                   CategoryInvalidParams,
+	"invalid_argument":                   CategoryInvalidParams,
+	"requestparameteriswrong":            CategoryInvalidParams,
+	"model_capability_not_supported":     CategoryInvalidParams,
+	"invalid_model_selection":            CategoryInvalidParams,
+	"context_length_exceeded":            CategoryContextTooLong,
+	"context_length":                     CategoryContextTooLong,
+	"max_tokens":                         CategoryContextTooLong,
+	"string_above_max_length":            CategoryContextTooLong,
+	"contentlengthexceeded":              CategoryContextTooLong,
+	"url_error":                          CategoryInputInaccessible,
+	"invalid_image_url":                  CategoryInputInaccessible,
+	"invalid_image":                      CategoryInputInaccessible,
+	"download_error":                     CategoryInputInaccessible,
+	"file_too_large":                     CategoryInputTooLarge,
+	"payload_too_large":                  CategoryInputTooLarge,
+	"video_request_body_too_large":       CategoryInputTooLarge,
+	"model_not_found":                    CategoryModelMissing,
+	"model_not_exist":                    CategoryModelMissing,
+	"invalid_model":                      CategoryModelMissing,
+	"not_found":                          CategoryModelMissing,
+	"model_catalog_mismatch":             CategoryModelMissing,
+	"model_temporarily_unavailable":      CategoryProviderUnavailable,
+	"model_route_unavailable":            CategoryProviderUnavailable,
+	"rate_limit_exceeded":                CategoryThrottled,
+	"rate_limit_error":                   CategoryThrottled,
+	"throttling":                         CategoryThrottled,
+	"too_many_requests":                  CategoryThrottled,
+	"resource_exhausted":                 CategoryThrottled,
+	"channel_concurrency_wait_timeout":   CategoryConcurrency,
+	"channel_concurrency_unavailable":    CategoryConcurrency,
+	"unavailable":                        CategoryProviderUnavailable,
+	"overloaded":                         CategoryProviderUnavailable,
+	"internal_error":                     CategoryProviderUnavailable,
+	"server_error":                       CategoryProviderUnavailable,
+	"provider_request_failed":            CategoryUnknown,
+	"upstream_timeout":                   CategoryTimeout,
+	"deadline_exceeded":                  CategoryTimeout,
+	"request_timeout":                    CategoryTimeout,
+	"requesttimeout":                     CategoryTimeout,
+	"request_cancelled":                  CategoryCancelled,
+	"task_failed":                        CategoryAsyncFailed,
+	"provider_query_failed":              CategoryAsyncFailed,
+	"provider_submission_unknown":        CategorySubmissionUncertain,
+	"video_submission_unknown":           CategorySubmissionUncertain,
+	"video_delivery_failed":              CategoryDeliveryFailed,
+	"image_result_unknown":               CategorySubmissionUncertain,
+	"image_submission_pending":           CategorySubmissionUncertain,
+	"image_result_expired":               CategorySubmissionUncertain,
+	"image_result_unavailable":           CategorySubmissionUncertain,
+	"idempotency_conflict":               CategorySubmissionUncertain,
+	"provider_reference_invalid":         CategoryInputInaccessible,
+	"rate_limited":                       CategoryThrottled,
+	"bad_gateway":                        CategoryProviderUnavailable,
+	"internal":                           CategoryProviderUnavailable,
+	"failed_precondition":                CategoryInvalidParams,
 	// BeefTV stable codes: internal failures without a reliable caller action
 	// stay explicitly unknown instead of inheriting a misleading HTTP 400.
 	"violation_fee.grok.csam":              CategoryModerationInput,
@@ -202,6 +213,19 @@ func (f extractedFields) hasStructured() bool {
 	return f.ParsedJSON || f.Code != "" || f.Type != "" || f.Message != "" || f.Status != "" || f.RequestID != "" || f.TaskID != ""
 }
 
+var (
+	gatewayRequestIDSuffixPattern = regexp.MustCompile(`(?i)\s*\((?:request\s*id|请求编号|請求編號)\s*[:：]\s*([A-Za-z0-9._:-]{6,127})\)\s*$`)
+	embeddedRequestIDPattern      = regexp.MustCompile(`(?i)(?:\brequest\s*id|请求编号|請求編號)\s*[:：]\s*([A-Za-z0-9._:-]{6,127})\b`)
+)
+
+func stripGatewayRequestIDSuffix(raw string) (string, string) {
+	suffix := gatewayRequestIDSuffixPattern.FindStringSubmatchIndex(raw)
+	if suffix == nil {
+		return raw, ""
+	}
+	return strings.TrimSpace(raw[:suffix[0]]), sanitizeDebugID(raw[suffix[2]:suffix[3]])
+}
+
 func extractProviderFields(raw string) extractedFields {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || len(raw) > maxJSONExtractBytes {
@@ -209,12 +233,7 @@ func extractProviderFields(raw string) extractedFields {
 	}
 	// The gateway appends a public request ID outside its JSON error envelope.
 	// Strip only that exact suffix; arbitrary trailing text is not trusted JSON.
-	suffix := regexp.MustCompile(`(?i)\s*\(request id:\s*([A-Za-z0-9._:-]{6,127})\)\s*$`).FindStringSubmatchIndex(raw)
-	requestID := ""
-	if suffix != nil {
-		requestID = raw[suffix[2]:suffix[3]]
-		raw = strings.TrimSpace(raw[:suffix[0]])
-	}
+	raw, requestID := stripGatewayRequestIDSuffix(raw)
 	if fields, ok := fieldsFromJSON([]byte(raw)); ok {
 		if fields.RequestID == "" {
 			fields.RequestID = requestID
@@ -243,8 +262,6 @@ func extractProviderFields(raw string) extractedFields {
 	}
 	return extractedFields{}
 }
-
-var embeddedRequestIDPattern = regexp.MustCompile(`(?i)\brequest\s*id:\s*([A-Za-z0-9._:-]{6,127})\b`)
 
 func requestIDFromMessage(message string) string {
 	if m := embeddedRequestIDPattern.FindStringSubmatch(sanitizeProviderText(message)); len(m) == 2 {
@@ -427,6 +444,14 @@ func genericProviderCode(code string) bool {
 		return true
 	}
 	return regexp.MustCompile(`^\d{3}$`).MatchString(code)
+}
+
+func nonAuthoritativeInvalidParamsCode(code string) bool {
+	switch normalizeCode(code) {
+	case "", "badrequest", "invalid_request_error", "invalid_parameter", "invalidparameter", "invalid_argument":
+		return true
+	}
+	return regexp.MustCompile(`^\d{3}$`).MatchString(strings.TrimSpace(code))
 }
 
 func extractExplicitHTTPStatus(raw string) int {

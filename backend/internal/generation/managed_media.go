@@ -31,10 +31,28 @@ func legacyMediaError(err error) error {
 	return err
 }
 
+func withManagedUploadMeta(ctx context.Context, meta beeftv.UploadMeta) context.Context {
+	existing, _ := ReferenceUploadFromContext(ctx)
+	if existing.Kind == "" && meta.Kind != "" {
+		existing.Kind = meta.Kind
+	}
+	if existing.Index == 0 && meta.Index > 0 {
+		existing.Index = meta.Index
+	}
+	ctx = withReferenceUpload(ctx, existing)
+	if meta.Stage != "" {
+		ctx = referenceUploadStage(ctx, meta.Stage)
+	}
+	if meta.Attempt > 0 {
+		ctx = referenceUploadAttempt(ctx, meta.Attempt)
+	}
+	return ctx
+}
+
 func referenceMediaUploadError(ctx context.Context, err error) *ReferenceUploadError {
 	var upload *beeftv.UploadError
 	if errors.As(err, &upload) {
-		ctx = referenceUploadAttempt(referenceUploadStage(ctx, upload.Meta.Stage), upload.Meta.Attempt)
+		ctx = withManagedUploadMeta(ctx, upload.Meta)
 	}
 	result := referenceUploadError(ctx, legacyMediaError(err))
 	if upload != nil {
@@ -82,6 +100,10 @@ func executeManagedMedia(ctx context.Context, client *beeftv.MediaClient, reques
 				return nil, err
 			}
 			return nil, SubmissionUnknownError{Cause: err}
+		}
+		var upload *beeftv.UploadError
+		if errors.As(err, &upload) {
+			return nil, RequestPreparationError{Cause: referenceMediaUploadError(ctx, err)}
 		}
 		if beeftv.IsDefiniteMediaRejection(err) {
 			return nil, err
@@ -338,7 +360,7 @@ func managedMediaClient(ctx context.Context, config Config) *beeftv.MediaClient 
 			return
 		}
 		if meta := beeftv.UploadMetaFromContext(req.Context()); meta.Stage != "" {
-			req = req.WithContext(referenceUploadAttempt(referenceUploadStage(req.Context(), meta.Stage), meta.Attempt))
+			req = req.WithContext(withManagedUploadMeta(req.Context(), meta))
 		}
 		observation := TransportObservation{Request: req, Body: body, Err: legacyMediaError(err), StartedAt: time.Now(), Dispatched: true, ResponseLimitBytes: 4 << 20, ReceivedBytes: int64(len(body))}
 		if resp != nil {
@@ -353,11 +375,10 @@ func managedMediaClient(ctx context.Context, config Config) *beeftv.MediaClient 
 		if runtime.Receipts == nil {
 			return
 		}
-		req := observation.Request.WithContext(referenceUploadStage(observation.Request.Context(), "put"))
+		meta := beeftv.UploadMetaFromContext(observation.Request.Context())
+		meta.Stage = "put"
+		req := observation.Request.WithContext(withManagedUploadMeta(observation.Request.Context(), meta))
 		value := TransportObservation{Request: req, StartedAt: observation.StartedAt, Err: observation.Err, Dispatched: observation.Dispatched, TransportPhase: observation.Phase, TransportRoute: observation.Route, ReceivedBytes: observation.ReceivedBytes, ResponseLimitBytes: 1 << 20}
-		if meta := beeftv.UploadMetaFromContext(req.Context()); meta.Attempt > 0 {
-			value.Request = value.Request.WithContext(referenceUploadAttempt(value.Request.Context(), meta.Attempt))
-		}
 		if observation.Response != nil {
 			value.StatusCode = observation.Response.StatusCode
 			value.HTTPStatus = value.StatusCode

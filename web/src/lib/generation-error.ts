@@ -11,12 +11,14 @@ import {
     CONTENT_MODERATION_MESSAGE,
     debugIdLine,
     DEFAULT_GENERATION_ERROR_MESSAGE,
+    EMBEDDED_REQUEST_ID,
     emptyFields,
     explanationCopy,
     extractExplicitHttpStatus,
     extractProviderFields,
     GENERATION_ERROR_CATEGORIES,
     HTML_BODY,
+    isActionableParameterCopy,
     isCancelledText,
     isCanvasSaveConflictText,
     isDownloadText,
@@ -40,6 +42,7 @@ import {
     sanitizeProviderText,
     stringifyAllowlisted,
     trustProviderMessageStatus,
+    userFacingChineseCopy,
     type CategoryCopy,
     type Classified,
     type ExtractedFields,
@@ -384,7 +387,7 @@ function formatExecutionEvidence(evidence?: GenerationFailureDiagnostics): strin
 }
 
 function diagnosticToken(value?: string): string {
-    return value && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/.test(value) && !value.includes("://") && !/(?:bearer|api[_-]?key|secret|token|sk-|^[a-z]:[\\/]|\/(?:Users|home|private|tmp|var|Volumes|mnt|media|run|root|opt|srv|etc)\/)/i.test(value) ? value : "未记录";
+    return value && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/.test(value) && !value.includes("://") && !/(?:bearer|api[_-]?key|secret|token|sk-|^[a-z]:[\\/]|\/+(?:Users|home|private|tmp|var|Volumes|mnt|media|run|root|opt|srv|etc|data|app|workspace|usr|proc|sys|dev|lib|bin|sbin)\/)/i.test(value) ? value : "未记录";
 }
 
 export function isGenerationErrorCode(code: string) {
@@ -487,7 +490,13 @@ function classifyHttp(status: number | undefined, body: unknown): Classified {
     let classified = classifyText(text || (body && typeof body === "object" ? stringifyAllowlisted(body) : ""));
     if (body && typeof body === "object") {
         const fromObject = classifyText(stringifyAllowlisted(body));
-        if (fromObject.fromCode || (fromObject.category !== "unknown" && classified.category === "unknown")) classified = fromObject;
+        if (fromObject.fromCode || (fromObject.category !== "unknown" && classified.category === "unknown")) {
+            classified = fromObject;
+        } else {
+            classified.providerCode ||= fromObject.providerCode;
+            classified.requestId ||= fromObject.requestId;
+            classified.taskId ||= fromObject.taskId;
+        }
     }
     const fields = extractProviderFields(typeof body === "string" ? body : body && typeof body === "object" ? stringifyAllowlisted(body) : "");
     // Local API reasons are handled before this provider-response fallback.
@@ -569,23 +578,42 @@ function classifyText(raw: string): Classified {
     if (LOCAL_DATABASE_ERROR.test(databaseMessage)) return { category: "local_storage", fromCode: true, requestId: sanitizeDebugId(fields.requestId), taskId: sanitizeDebugId(fields.taskId), retryable: false };
     if (fields.code || fields.type || fields.message || fields.status) {
         const fromCode = categoryFromProviderCode(fields.code, fields.type, fields.status);
-        const codeOrStatusKnown = Boolean(categoryFromProviderCode(fields.code, fields.status));
+        const codeOrStatusAuthoritative =
+            (Boolean(categoryFromProviderCode(fields.code)) && !isNonAuthoritativeInvalidParamsCode(fields.code)) ||
+            (Boolean(categoryFromProviderCode(fields.status)) && !isNonAuthoritativeInvalidParamsCode(fields.status));
         if (fromCode) {
             const specialized = specialize(
                 {
                     category: fromCode,
-                    fromCode: codeOrStatusKnown || !isGenericProviderCode(fields.type),
+                    fromCode: codeOrStatusAuthoritative || !isGenericProviderCode(fields.type),
                     providerCode: sanitizeProviderCode(fields.code),
                     requestId: sanitizeDebugId(fields.requestId),
                     taskId: sanitizeDebugId(fields.taskId),
                 },
                 fields,
             );
-            if (specialized.category !== "invalid_params" || specialized.reason) specialized.fromCode = true;
+            if (specialized.category !== "invalid_params") specialized.fromCode = true;
+            if (!specialized.fromCode && specialized.category === "invalid_params" && !specialized.reason) {
+                const terminal = terminalMessageClassified(fields);
+                if (terminal) return terminal;
+            }
             return specialized;
         }
         const fromMessage = categoryFromProviderMessage(`${fields.message} ${fields.type} ${fields.status}`);
         if (fromMessage) return specialize({ category: fromMessage, providerCode: sanitizeProviderCode(fields.code), requestId: sanitizeDebugId(fields.requestId), taskId: sanitizeDebugId(fields.taskId) }, fields);
+        const terminal = terminalMessageClassified(fields);
+        if (terminal) return terminal;
+        const chineseCopy = userFacingChineseCopy(fields.message);
+        if (chineseCopy && isActionableParameterCopy(chineseCopy)) {
+            return {
+                category: "invalid_params",
+                ...chineseCopy,
+                providerCode: sanitizeProviderCode(fields.code),
+                requestId: sanitizeDebugId(fields.requestId) || sanitizeDebugId(fields.message.match(EMBEDDED_REQUEST_ID)?.[1]),
+                taskId: sanitizeDebugId(fields.taskId),
+                retryable: false,
+            };
+        }
     }
     if (/^[{[]/.test(text)) return { category: "unknown", providerCode: sanitizeProviderCode(fields.code), requestId: sanitizeDebugId(fields.requestId), taskId: sanitizeDebugId(fields.taskId), retryable: false };
     if (isMalformedText(text)) return { category: "malformed_response", retryable: false };
@@ -597,7 +625,22 @@ function classifyText(raw: string): Classified {
     if (isResultsMissingText(text)) return { category: "results_missing", retryable: false };
     const status = extractExplicitHttpStatus(text);
     if (status) return classifyHttp(status, "");
-    if (/[\u4e00-\u9fff]/.test(text) && !containsInfrastructureDetails(text)) return { category: "unknown", reason: sanitizeProviderText(text), action: "", retryable: false };
+    if (/[\u4e00-\u9fff]/.test(text) && !containsInfrastructureDetails(text)) {
+        const debugMatch = text.match(/。排查编号：([^。]+)。?$/);
+        const debug = debugMatch?.[1] || "";
+        const bodyWithoutDebug = debugMatch ? text.slice(0, debugMatch.index) : text;
+        const isReferenceItem = /^参考(?:图片|图|视频|音频|素材) \d+：/.test(bodyWithoutDebug);
+        const chineseCopy = userFacingChineseCopy(bodyWithoutDebug);
+        return {
+            category: isReferenceItem || (chineseCopy && isActionableParameterCopy(chineseCopy)) ? "invalid_params" : "unknown",
+            fromCode: isReferenceItem || undefined,
+            reason: chineseCopy?.reason || sanitizeProviderText(bodyWithoutDebug),
+            action: chineseCopy?.action || "",
+            requestId: sanitizeDebugId(debug.match(/(?:^| · )请求 ([A-Za-z0-9._:-]{6,127})$/)?.[1]),
+            taskId: sanitizeDebugId(debug.match(/^任务 ([A-Za-z0-9._:-]{6,127})(?: · |$)/)?.[1]),
+            retryable: false,
+        };
+    }
     return { category: "unknown", retryable: false };
 }
 
@@ -606,6 +649,19 @@ function isGenericProviderCode(code: string) {
         ["", "unknown", "failed", "badrequest", "api_error", "upstream_error", "upstream_rejected", "invalid_request", "invalid_request_error", "invalid_parameter", "invalidparameter", "invalid_argument"].includes(normalizeCode(code)) ||
         /^\d{3}$/.test(code.trim())
     );
+}
+
+function isNonAuthoritativeInvalidParamsCode(code: string) {
+    return ["", "badrequest", "invalid_request_error", "invalid_parameter", "invalidparameter", "invalid_argument"].includes(normalizeCode(code)) || /^\d{3}$/.test(code.trim());
+}
+
+function terminalMessageClassified(fields: ExtractedFields): Classified | undefined {
+    const ids = { providerCode: sanitizeProviderCode(fields.code), requestId: sanitizeDebugId(fields.requestId), taskId: sanitizeDebugId(fields.taskId) };
+    if (isNetworkText(fields.message)) return { category: "network", ...ids, retryable: true };
+    if (isDownloadText(fields.message)) return { category: "download_failed", uncertain: true, ...ids, retryable: false };
+    if (isCancelledText(fields.message)) return { category: "cancelled", ...ids, retryable: false };
+    if (isResultsMissingText(fields.message)) return { category: "results_missing", ...ids, retryable: false };
+    return undefined;
 }
 
 function hasAuthoritativeProviderCode(fields: ExtractedFields) {
@@ -617,8 +673,9 @@ function hasAuthoritativeProviderCode(fields: ExtractedFields) {
 }
 
 function specialize(classified: Classified, fields: ExtractedFields): Classified {
+    const rawMessage = fields.message;
     fields = { ...fields, message: sanitizeProviderText(fields.message) };
-    classified.requestId ||= sanitizeDebugId(fields.message.match(/\brequest\s*id:\s*([A-Za-z0-9._:-]{6,127})\b/i)?.[1]);
+    classified.requestId ||= sanitizeDebugId(fields.message.match(EMBEDDED_REQUEST_ID)?.[1]);
     // Only broad wrappers (or unrecognized codes paired with a generic type) may be refined by a more specific provider message.
     const genericCode = !hasAuthoritativeProviderCode(fields);
     if (genericCode && ["unknown", "invalid_params"].includes(classified.category)) {
@@ -688,6 +745,13 @@ function specialize(classified: Classified, fields: ExtractedFields): Classified
         classified.action = "请改用自动工具选择或更换非思考模式模型";
     }
     if (classified.reason) classified.fromCode = true;
+    if (classified.category === "invalid_params" && !classified.reason) {
+        const chineseCopy = userFacingChineseCopy(rawMessage);
+        if (chineseCopy) {
+            classified.reason = chineseCopy.reason;
+            classified.action = chineseCopy.action;
+        }
+    }
     classified.retryable = retryableCategory(classified.category);
     return classified;
 }

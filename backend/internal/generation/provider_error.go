@@ -327,10 +327,10 @@ func ClassifyError(err error) Failure {
 			if referenceUpload.HTTPStatus == 400 && referenceUpload.Meta.Index > 0 {
 				itemLabel := referenceMediaLabel(referenceUpload.Meta.Kind, referenceUpload.Meta.Index-1)
 				if itemLabel != "" {
-					if failure.Reason != "" && !strings.Contains(failure.Reason, itemLabel) && !strings.Contains(failure.Reason, "个参考") {
+					if failure.Reason != "" && !strings.Contains(failure.Reason, itemLabel) && !strings.Contains(failure.Reason, "个参考") && !strings.Contains(failure.Reason, "张参考") && !strings.Contains(failure.Reason, "段参考") {
 						failure.Reason = itemLabel + "：" + failure.Reason
 					}
-					if failure.ProviderMessage != "" && !strings.Contains(failure.ProviderMessage, itemLabel) && !strings.Contains(failure.ProviderMessage, "个参考") {
+					if failure.ProviderMessage != "" && !strings.Contains(failure.ProviderMessage, itemLabel) && !strings.Contains(failure.ProviderMessage, "个参考") && !strings.Contains(failure.ProviderMessage, "张参考") && !strings.Contains(failure.ProviderMessage, "段参考") {
 						failure.ProviderMessage = itemLabel + "：" + failure.ProviderMessage
 					}
 				}
@@ -501,8 +501,10 @@ func ClassifyText(raw string) Failure {
 		failure.TaskID = sanitizeDebugID(fields.TaskID)
 		if category, ok := categoryFromProviderCode(fields.Code, fields.Type, fields.Status); ok {
 			failure.Category = category
-			_, codeOrStatusKnown := categoryFromProviderCode(fields.Code, fields.Status)
-			failure.FromCode = codeOrStatusKnown || !genericProviderCode(fields.Type)
+			_, codeKnown := categoryFromProviderCode(fields.Code)
+			_, statusKnown := categoryFromProviderCode(fields.Status)
+			codeOrStatusAuthoritative := (codeKnown && !nonAuthoritativeInvalidParamsCode(fields.Code)) || (statusKnown && !nonAuthoritativeInvalidParamsCode(fields.Status))
+			failure.FromCode = codeOrStatusAuthoritative || !genericProviderCode(fields.Type)
 			refineInvalidParams(&failure, fields)
 			specializeModeration(&failure, fields)
 			specializeThinkingToolChoice(&failure, fields)
@@ -510,6 +512,10 @@ func ClassifyText(raw string) Failure {
 			specializeMediaConstraints(&failure, fields)
 			if failure.Category != CategoryInvalidParams || failure.Reason != "" {
 				failure.FromCode = true
+			} else if !failure.FromCode && applyTerminalMessageCategory(&failure, fields.Message) {
+				// Non-authoritative wrapper keeps FromCode=false so untrusted HTTP statuses (e.g. 503/403) still win.
+			} else if copy, ok := userFacingChineseCopy(fields.Message); ok {
+				failure.Reason, failure.Action = copy.Reason, copy.Action
 			}
 			return normalizeFailure(failure)
 		}
@@ -521,8 +527,18 @@ func ClassifyText(raw string) Failure {
 			specializeMediaConstraints(&failure, fields)
 			if failure.Reason != "" {
 				failure.FromCode = true
+			} else if failure.Category == CategoryInvalidParams {
+				if copy, ok := userFacingChineseCopy(fields.Message); ok {
+					failure.Reason, failure.Action = copy.Reason, copy.Action
+				}
 			}
 			return normalizeFailure(failure)
+		}
+		if !applyTerminalMessageCategory(&failure, fields.Message) {
+			if copy, ok := userFacingChineseCopy(fields.Message); ok && isActionableParameterCopy(copy) {
+				failure.Category = CategoryInvalidParams
+				failure.Reason, failure.Action = copy.Reason, copy.Action
+			}
 		}
 		// JSON request echoes and debug fields are never classification input.
 		return normalizeFailure(failure)
@@ -588,8 +604,23 @@ func ClassifyText(raw string) Failure {
 		return ClassifyHTTP(status, "", "")
 	}
 	if looksLikeUserFacingChinese(text) {
-		failure.Reason = sanitizeProviderText(text)
-		failure.Action = ""
+		reqID, taskID := persistedReferenceIDs(text)
+		failure.RequestID = firstNonEmpty(failure.RequestID, reqID)
+		failure.TaskID = firstNonEmpty(failure.TaskID, taskID)
+		bodyWithoutDebug := strings.SplitN(text, "。排查编号：", 2)[0]
+		if persistedReferenceItemPrefix.MatchString(bodyWithoutDebug) {
+			failure.Category = CategoryInvalidParams
+			failure.FromCode = true
+		}
+		if copy, ok := userFacingChineseCopy(bodyWithoutDebug); ok {
+			failure.Reason, failure.Action = copy.Reason, copy.Action
+			if failure.Category == CategoryUnknown && isActionableParameterCopy(copy) {
+				failure.Category = CategoryInvalidParams
+			}
+		} else {
+			failure.Reason = sanitizeProviderText(bodyWithoutDebug)
+			failure.Action = ""
+		}
 	}
 	return normalizeFailure(failure)
 }

@@ -49,6 +49,8 @@ type UploadObservation struct {
 
 type uploadContextKey struct{}
 type UploadMeta struct {
+	Kind    string
+	Index   int
 	Stage   string
 	Attempt int
 }
@@ -57,8 +59,17 @@ func UploadMetaFromContext(ctx context.Context) UploadMeta {
 	value, _ := ctx.Value(uploadContextKey{}).(UploadMeta)
 	return value
 }
+func WithUploadTarget(ctx context.Context, kind string, index int) context.Context {
+	meta := UploadMetaFromContext(ctx)
+	meta.Kind = kind
+	meta.Index = index
+	return context.WithValue(ctx, uploadContextKey{}, meta)
+}
 func withUploadMeta(ctx context.Context, stage string, attempt int) context.Context {
-	return context.WithValue(ctx, uploadContextKey{}, UploadMeta{Stage: stage, Attempt: attempt})
+	meta := UploadMetaFromContext(ctx)
+	meta.Stage = stage
+	meta.Attempt = attempt
+	return context.WithValue(ctx, uploadContextKey{}, meta)
 }
 
 type UploadError struct {

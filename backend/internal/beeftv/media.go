@@ -428,8 +428,10 @@ func (c *MediaClient) Execute(ctx context.Context, request MediaRequest, refs []
 			}
 		}
 	}
+	kindCounts := make(map[string]int, 3)
 	for _, ref := range refs {
-		link, err := c.UploadReference(ctx, ref)
+		kindCounts[ref.Kind]++
+		link, err := c.UploadReference(WithUploadTarget(ctx, ref.Kind, kindCounts[ref.Kind]), ref)
 		if err != nil {
 			return nil, err
 		}
