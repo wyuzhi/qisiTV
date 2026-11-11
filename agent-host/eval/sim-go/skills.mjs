@@ -1,16 +1,11 @@
 // 技能：载入内置短剧技能、skill.* 操作、按画布和会话记录的活动技能上下文。
 
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { clone, sha256Hex, invalidArg, notFound, conflict } from './common.mjs';
 import { ensureCanvas } from './canvas-store.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// 和拆分前的 eval/sim-go.mjs 解析到同一个位置；文件不存在时用下面的内置副本。
-const REPO_SKILL_PATH = path.resolve(__dirname, '../../../../skills/short-drama-storyboard/SKILL.md');
-
-const FALLBACK_SHORT_DRAMA_SKILL_MD = `---
+// 评测专用的短剧技能，产品里没有发布这个技能，评测只用这一份。不从仓库外读文件，
+// 否则评测输入会随检出位置变化。改正文会改变 S6、S8 的请求体，要附改动前后对照。
+const SHORT_DRAMA_SKILL_MD = `---
 name: 短剧分镜到首帧
 version: "2"
 description: 把一段短剧剧本或梗概，按「角色设定 → 分镜脚本 → 首帧图 → 视频」四步落到画布上。每一步做完都停下等确认，再进入下一步。适合竖屏短剧、漫剧的单集制作。
@@ -83,12 +78,8 @@ function parseSkillMarkdown(raw, skillId = 'short-drama-storyboard', versionId =
   };
 }
 
-// 载入官方短剧分镜技能
 export function loadBuiltinSkill() {
-  const skillRaw = fs.existsSync(REPO_SKILL_PATH)
-    ? fs.readFileSync(REPO_SKILL_PATH, 'utf8')
-    : FALLBACK_SHORT_DRAMA_SKILL_MD;
-  return parseSkillMarkdown(skillRaw, 'short-drama-storyboard', 'v2');
+  return parseSkillMarkdown(SHORT_DRAMA_SKILL_MD, 'short-drama-storyboard', 'v2');
 }
 
 export const SKILL_OPS = {

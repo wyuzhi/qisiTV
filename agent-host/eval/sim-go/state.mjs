@@ -55,7 +55,7 @@ export function createSimState(options = {}) {
     },
     models: createModelCatalog(),
   };
-  // 载入官方短剧分镜技能
+  // 载入评测用的短剧分镜技能
   const builtinSkill = loadBuiltinSkill();
   state.skills.set(builtinSkill.pin.skillId, builtinSkill);
   return state;
