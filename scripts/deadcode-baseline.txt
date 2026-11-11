@@ -378,8 +378,6 @@ internal/asset.HistoryReferenced
 internal/asset.StillReferenced
 internal/asset.writeLockRegistry.len
 internal/assistantruntime.ReadOwnerToken
-internal/assistantruntime.envHasKey
-internal/assistantruntime.envValue
 internal/beeftv.MediaClient.validURL
 internal/beeftv.NormalizeCatalogVideoCapability
 internal/beeftv.RetryUploadError

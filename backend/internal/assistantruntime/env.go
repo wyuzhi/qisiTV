@@ -116,27 +116,6 @@ func setEnvValue(env []string, key, value string) []string {
 	return append(kept, key+"="+value)
 }
 
-func envValue(env []string, key string) string {
-	prefix := key + "="
-	got := ""
-	for _, entry := range env {
-		if strings.HasPrefix(entry, prefix) {
-			got = strings.TrimPrefix(entry, prefix)
-		}
-	}
-	return got
-}
-
-func envHasKey(env []string, key string) bool {
-	prefix := key + "="
-	for _, entry := range env {
-		if strings.HasPrefix(entry, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
 // hostAPI 把渠道协议映射成 pi-ai 的 API 适配器名；宿主按它构造模型定义。
 func hostAPI(protocol string) string {
 	switch protocol {
