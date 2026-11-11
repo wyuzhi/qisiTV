@@ -83,22 +83,38 @@ func definiteVODImageParameterFailure(err error) bool {
 	return body.Error.Code == "vod_image_invalid_params" || body.Error.Code == "vod_image_invalid_media"
 }
 
+func DefiniteImageInputRejection(err error) bool {
+	return definiteImageInputRejection(err)
+}
+
 func definiteImageInputRejection(err error) bool {
 	var unknown SubmissionUnknownError
 	var pending StatePendingError
+	if isImageRecoveryError(err) || errors.As(err, &unknown) || errors.As(err, &pending) {
+		return false
+	}
 	var upstream HTTPError
-	if isImageRecoveryError(err) || errors.As(err, &unknown) || errors.As(err, &pending) || !errors.As(err, &upstream) || upstream.IdempotencyReplayed {
-		return false
+	if errors.As(err, &upstream) {
+		if upstream.IdempotencyReplayed || (upstream.StatusCode != http.StatusBadRequest && upstream.StatusCode != http.StatusUnprocessableEntity) {
+			return false
+		}
+		failure := ClassifyHTTP(upstream.StatusCode, upstream.Status, upstream.Body)
+		return definiteImagePayloadRejection(failure, upstream.Body)
 	}
-	if upstream.StatusCode != http.StatusBadRequest && upstream.StatusCode != http.StatusUnprocessableEntity {
-		return false
+	var payloadErr PayloadError
+	if errors.As(err, &payloadErr) && strings.TrimSpace(payloadErr.Raw()) != "" {
+		failure := ClassifyError(payloadErr)
+		return definiteImagePayloadRejection(failure, payloadErr.Raw())
 	}
-	failure := ClassifyHTTP(upstream.StatusCode, "", upstream.Body)
-	if failure.Uncertain || failure.TaskID != "" || strings.Contains(upstream.Body, "upstream_task_id:") {
+	return false
+}
+
+func definiteImagePayloadRejection(failure Failure, rawBody string) bool {
+	if failure.Uncertain || failure.TaskID != "" || strings.Contains(rawBody, "upstream_task_id:") {
 		return false
 	}
 	var body map[string]any
-	if json.Unmarshal([]byte(upstream.Body), &body) == nil && imageRejectionHasJob(body, 0) {
+	if json.Unmarshal([]byte(rawBody), &body) == nil && imageRejectionHasJob(body, 0) {
 		return false
 	}
 	switch failure.Category {

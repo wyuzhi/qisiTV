@@ -170,18 +170,20 @@ export async function runCanvasGenerationTaskToConsumer(
         } catch (error) {
             if ((error instanceof Error && error.name === "AbortError")) throw error;
             const cause = error instanceof CanvasGenerationDurableAckError || error instanceof CanvasGenerationMaterializationError ? error.cause : error;
+            const failureDiagnostics: CanvasNodeMetadata["taskFailureDiagnostics"] = {
+                ...taskForConsumer.failureDiagnostics,
+                source: "client_result",
+                executionResult: "completed",
+                stage: "画布应用结果",
+                summary: cause instanceof Error ? cause.message : "画布应用结果失败",
+                capturedAt: new Date().toISOString(),
+            };
             dependencies.bindTask({
                 ...taskForConsumer,
-                failureDiagnostics: {
-                    ...taskForConsumer.failureDiagnostics,
-                    source: "client_result",
-                    executionResult: "completed",
-                    stage: "画布应用结果",
-                    summary: cause instanceof Error ? cause.message : "画布应用结果失败",
-                    capturedAt: new Date().toISOString(),
-                },
+                failureDiagnostics,
             });
-            throw error instanceof CanvasGenerationDurableAckError || error instanceof CanvasGenerationMaterializationError ? error : new CanvasGenerationDurableAckError(error);
+            const wrapped = error instanceof CanvasGenerationDurableAckError || error instanceof CanvasGenerationMaterializationError ? error : new CanvasGenerationDurableAckError(error);
+            throw Object.assign(wrapped, { failureDiagnostics });
         }
         return result;
     });

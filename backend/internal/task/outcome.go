@@ -70,7 +70,8 @@ func ComputeOutcome(task model.Task, resultState string, facts OutcomeFacts) Out
 			return out("failed", regenerate, "no_result")
 		}
 	}
-	if task.Type == "canvas_image" && !task.IsUpscale() && (facts.HasImageReceipt || facts.ImageResponseAccepted || facts.SafeImageReplay || facts.DispatchState == "accepted" || facts.DispatchState == "submission_unknown" || task.Stage == "submission_unknown") {
+	pendingImageReceipt := facts.HasImageReceipt && facts.DispatchState != "rejected_no_job" && facts.DispatchState != "not_sent"
+	if task.Type == "canvas_image" && !task.IsUpscale() && (pendingImageReceipt || facts.ImageResponseAccepted || facts.SafeImageReplay || facts.DispatchState == "accepted" || facts.DispatchState == "submission_unknown" || task.Stage == "submission_unknown") {
 		return out("retrievable", "blocked", "image_recovery_pending")
 	}
 	if task.ProviderRequestID != "" || ((task.Type == "canvas_video" || task.Type == "canvas_audio" || strings.HasPrefix(task.Type, "video_") || task.IsUpscale()) && (facts.DispatchState == "submission_unknown" || task.Stage == "submission_unknown")) {

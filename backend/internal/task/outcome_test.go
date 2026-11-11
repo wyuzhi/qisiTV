@@ -38,6 +38,7 @@ func TestComputeOutcome(t *testing.T) {
 		{"未发出但上游已有任务号", with(func(t *model.Task) { t.ProviderRequestID = "upstream" }), "", OutcomeFacts{RequestNotSent: true}, want("retrievable", "blocked", "provider_result_pending")},
 		{"未发出阶段被接受证据推翻", failed, "", OutcomeFacts{RequestNotSent: true, DispatchState: "accepted"}, want("retrievable", "blocked", "image_recovery_pending")},
 		{"明确没建任务", with(func(t *model.Task) { t.RecoveryOutcome = &noResult }), "", OutcomeFacts{DispatchState: "rejected_no_job"}, want("failed", "allowed", "no_result")},
+		{"明确拒绝未建任务但已有POST调用日志", failed, "", OutcomeFacts{HasImageReceipt: true, DispatchState: "rejected_no_job"}, want("failed", "allowed", "task_failed")},
 		{"明确失败不代表退款", with(func(t *model.Task) { t.RecoveryOutcome = &noResult }), "", OutcomeFacts{DispatchState: "accepted"}, want("failed", "confirm", "no_result")},
 		{"旧回执没有路由", failed, "", OutcomeFacts{HasImageReceipt: true}, want("retrievable", "blocked", "image_recovery_pending")},
 		{"已接受", failed, "", OutcomeFacts{DispatchState: "accepted"}, want("retrievable", "blocked", "image_recovery_pending")},

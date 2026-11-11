@@ -313,8 +313,12 @@ func LogAPICall(
 			next := time.Now().Add(delay)
 			nextPollAt = &next
 		}
-		if err := repo.UpdateTaskProviderState(log.TaskID, log.ProviderRequestID, stage, nextPollAt); err != nil {
-			stdlog.Printf("provider task state update failed: task_id=%s provider_request_id=%s error=%v", log.TaskID, log.ProviderRequestID, err)
+		providerRequestID := log.ProviderRequestID
+		if (stage == "" || stage == "create") && log.Status == model.ApiCallStatusFailed {
+			providerRequestID = ""
+		}
+		if err := repo.UpdateTaskProviderState(log.TaskID, providerRequestID, stage, nextPollAt); err != nil {
+			stdlog.Printf("provider task state update failed: task_id=%s provider_request_id=%s error=%v", log.TaskID, providerRequestID, err)
 		}
 	}
 	if merged, err := MergeVideoAPICallLog(repo, log); err != nil {

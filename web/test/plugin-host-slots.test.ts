@@ -453,7 +453,7 @@ describe("plugin host slots, events, and lifecycle", () => {
         expect(builtYsduiChannel.models).toContain("custom-text-model");
         expect(builtYsduiChannel.modelProfiles).toHaveLength(4);
         const defaultYsduiChannel = ysduiMod.buildYsduiModelChannel({ apiKey: "sk-test-demo", baseUrl: "https://tokenhub.ysdui.cn" });
-        expect(defaultYsduiChannel.modelProfiles).toHaveLength(29);
+        expect(defaultYsduiChannel.modelProfiles).toHaveLength(32);
 
         // Untrusted plugins without settings.write cannot read or mutate channels
         const untrustedHost = createBeefTVPluginHost("untrusted-plugin", {

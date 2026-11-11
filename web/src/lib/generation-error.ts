@@ -175,13 +175,17 @@ export function generationErrorCode(error: unknown) {
 export function generationFailureMetadata(error: unknown, prompt: string, references: Array<string | { id?: string; storageKey?: string; url?: string }> = []): GenerationFailureMetadata {
     const explained = explainGenerationError(error);
     const inputFingerprint = generationInputFingerprint(prompt, references);
+    const taskFailureDiagnostics =
+        error && typeof error === "object" && "failureDiagnostics" in error && error.failureDiagnostics && typeof error.failureDiagnostics === "object"
+            ? (error.failureDiagnostics as GenerationFailureDiagnostics)
+            : undefined;
     if (!explained.moderation) {
         return {
             errorDetails: explained.message,
             generationErrorSummary: explained.summary,
             generationErrorCode: explained.category === "unknown" ? undefined : explained.errorCode,
             generationProviderCode: explained.providerCode,
-            taskFailureDiagnostics: undefined,
+            taskFailureDiagnostics,
         };
     }
     return {
@@ -189,7 +193,7 @@ export function generationFailureMetadata(error: unknown, prompt: string, refere
         generationErrorSummary: undefined,
         generationErrorCode: explained.errorCode,
         generationProviderCode: explained.providerCode,
-        taskFailureDiagnostics: undefined,
+        taskFailureDiagnostics,
         failedPromptFingerprint: generationPromptFingerprint(prompt),
         failedInputFingerprint: inputFingerprint,
     };

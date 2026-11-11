@@ -5,7 +5,7 @@ import { modelConnectionResultDetail, testChannelModelConnection } from "../src/
 import { modelConfigChannelStatusLabel } from "../src/pages/settings/channel-settings-pane";
 import { backendProviderConfig } from "../src/services/api/generation-task";
 import { configWithoutCachedSecrets, createModelChannel, defaultConfig, normalizeConfigSnapshot } from "../src/stores/use-config-store";
-import { defaultModelCapabilityConfig } from "../src/lib/model-capabilities";
+import { defaultModelCapabilityConfig, sanitizeServerImageCapability, sanitizeServerVideoCapability } from "../src/lib/model-capabilities";
 import { defaultProtocolForCapability, modelProtocolDefinition, type ModelProtocolDefinition } from "../src/lib/model-protocols";
 import { serviceCredentialGuide } from "../src/lib/service-credentials";
 import { toProviderDefinitions } from "../src/services/api/plugin-catalog";
@@ -246,8 +246,76 @@ test("Ysdui service preset resolves all 4 Ysdui protocols when plugin is enabled
     expect(servicePresetFor(channel)).toBe("ysdui");
     expect(channel.name).toBe("银盛云枢壹算");
     expect(channel.baseUrl).toBe("https://tokenhub.ysdui.cn");
-    expect(channel.models).toHaveLength(29);
-    expect(catalog).toHaveLength(29);
+    expect(channel.models).toHaveLength(32);
+    expect(catalog).toHaveLength(32);
+    expect(channel.models).toEqual(expect.arrayContaining(["hy3", "hy-role", "hy-mt2-pro"]));
+
+    for (const profile of channel.modelProfiles || []) {
+        if (profile.capability === "image") {
+            expect(sanitizeServerImageCapability(profile.capabilityConfig?.image)).not.toBeNull();
+        } else if (profile.capability === "video") {
+            expect(sanitizeServerVideoCapability(profile.capabilityConfig?.video)).not.toBeNull();
+        }
+    }
+    const seedreamPro = channel.modelProfiles?.find((item) => item.model === "doubao-seedream-5-0-pro-260628");
+    expect(seedreamPro?.capabilityConfig?.image?.sequentialGeneration?.supported).toBe(false);
+    expect(seedreamPro?.capabilityConfig?.image?.transparentBackground?.supported).toBe(true);
+    const seedreamLite = channel.modelProfiles?.find((item) => item.model === "doubao-seedream-5-0-260128");
+    expect(seedreamLite?.capabilityConfig?.image?.sequentialGeneration?.supported).toBe(true);
+
+    const legacyYsduiChannel = createModelChannel({
+        id: "ysdui",
+        baseUrl: "https://tokenhub.ysdui.cn",
+        models: ["doubao-seedream-5-0-pro-260628", "doubao-seedance-2-0-fast-260128", "wand-vega-video-1.0-lite"],
+        modelProfiles: [
+            {
+                model: "doubao-seedream-5-0-pro-260628",
+                capability: "image",
+                protocol: "ysdui-image" as ModelProtocolDefinition["value"],
+                capabilityConfig: {
+                    version: 1,
+                    image: {
+                        ...defaultModelCapabilityConfig("openai-image", "fixture").image!,
+                        transparentBackground: { supported: false, default: false },
+                        sequentialGeneration: { supported: true, default: false },
+                    },
+                },
+            },
+            {
+                model: "doubao-seedance-2-0-fast-260128",
+                capability: "video",
+                protocol: "ysdui-video" as ModelProtocolDefinition["value"],
+                capabilityConfig: {
+                    version: 1,
+                    video: {
+                        ...defaultModelCapabilityConfig("newapi", "fixture").video!,
+                        resolutions: ["480P", "720P", "1080P"],
+                        defaultResolution: "1080P",
+                    },
+                },
+            },
+            {
+                model: "wand-vega-video-1.0-lite",
+                capability: "video",
+                protocol: "ysdui-video" as ModelProtocolDefinition["value"],
+                capabilityConfig: {
+                    version: 1,
+                    video: {
+                        ...defaultModelCapabilityConfig("newapi", "fixture").video!,
+                        resolutions: ["720P", "1080P"],
+                        defaultResolution: "720P",
+                    },
+                },
+            },
+        ],
+    });
+    const hydratedYsdui = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [legacyYsduiChannel] } }).config.channels[0];
+    expect(hydratedYsdui.modelProfiles?.[0]?.capabilityConfig?.image?.sequentialGeneration?.supported).toBe(false);
+    expect(hydratedYsdui.modelProfiles?.[0]?.capabilityConfig?.image?.transparentBackground?.supported).toBe(true);
+    expect(hydratedYsdui.modelProfiles?.[1]?.capabilityConfig?.video?.resolutions).toEqual(["480P", "720P"]);
+    expect(hydratedYsdui.modelProfiles?.[1]?.capabilityConfig?.video?.defaultResolution).toBe("720P");
+    expect(hydratedYsdui.modelProfiles?.[2]?.capabilityConfig?.video?.resolutions).toEqual(["768P", "1080P"]);
+    expect(hydratedYsdui.modelProfiles?.[2]?.capabilityConfig?.video?.defaultResolution).toBe("768P");
 
     const resolvedProtocols = new Set(
         catalog.map((item) => serviceModelProfile(channel, item, ysduiProtocols).protocol),
@@ -424,4 +492,46 @@ test("a retired interface is not offered again but still names a saved choice", 
     expect(definition.enabled).toBe(false);
     expect(defaultProtocolForCapability("video", [definition])).not.toBe("old-video");
     expect(modelProtocolDefinition("old-video", [definition])?.label).toBe("旧视频接口");
+});
+
+test("upgradeYsduiModelProfile preserves server-versioned capabilities and keeps user defaultResolution valid", async () => {
+    const { upgradeYsduiModelProfile } = await import("../../plugin-packages/beeftv-plugin-ysdui/client/presets.js");
+    const serverProfile = {
+        model: "doubao-seedream-5-0-pro-260628",
+        capability: "image",
+        protocol: "ysdui-image",
+        imageCapabilitiesVersion: "server-v2",
+        capabilityConfig: {
+            version: 1,
+            image: {
+                size: { parameter: "size", values: ["1:1"], default: "1:1" },
+                sequentialGeneration: { supported: true, default: false },
+            },
+        },
+    };
+    expect(upgradeYsduiModelProfile(serverProfile)).toBe(serverProfile);
+
+    const userVideoProfile = {
+        model: "wand-vega-video-1.0-lite",
+        capability: "video",
+        protocol: "ysdui-video",
+        capabilitySource: "user",
+        capabilityConfig: {
+            version: 1,
+            video: {
+                duration: { selection: "range", min: 4, max: 15, step: 1, default: 5 },
+                ratios: ["16:9"],
+                defaultRatio: "16:9",
+                resolutions: ["720P", "1080P"],
+                defaultResolution: "720P",
+                generateAudio: { supported: false, default: false },
+                watermark: { supported: false, default: false },
+                operations: ["text_to_video"],
+                defaultOperation: "text_to_video",
+            },
+        },
+    };
+    const migrated = upgradeYsduiModelProfile(userVideoProfile);
+    expect(migrated.capabilityConfig.video.resolutions).toEqual(["1080P"]);
+    expect(migrated.capabilityConfig.video.defaultResolution).toBe("1080P");
 });

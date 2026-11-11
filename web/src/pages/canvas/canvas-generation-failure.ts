@@ -72,7 +72,7 @@ export function canvasTaskFailureMetadata(task: GenerationTask, metadata?: Canva
         failure.failedPromptFingerprint = metadata.failedPromptFingerprint;
     }
     const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
-    const diagnostics = task.status === "succeeded" ? { ...task.failureDiagnostics, source: "client_result" as const, executionResult: "completed" as const, summary: cause instanceof Error ? cause.message : failure.generationErrorSummary, stage: "画布应用结果", capturedAt: new Date().toISOString() } : task.failureDiagnostics;
+    const diagnostics = task.status === "succeeded" ? { ...task.failureDiagnostics, source: "client_result" as const, executionResult: "completed" as const, summary: cause instanceof Error ? cause.message : failure.generationErrorSummary, stage: "画布应用结果", capturedAt: new Date().toISOString() } : (task.failureDiagnostics ?? failure.taskFailureDiagnostics);
     const backendOutcome = readTaskOutcome(task);
     // 原任务成功但本机应用失败时结果仍可取回；后台已判定结果取不回（phase=failed）时，结论和提示都以后台为准。
     const resultLost = task.status === "succeeded" && backendOutcome?.phase === "failed";
