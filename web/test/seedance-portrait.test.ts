@@ -5,7 +5,7 @@ import { ModelPicker } from "../src/components/model-picker";
 import { ModelDefaultGrid } from "../src/pages/settings/model-default-grid";
 import { portraitPriceLines, portraitTaskRetryError, seedancePortraitLabel } from "../src/lib/seedance-portrait";
 import { initialWorkbenchModel, refreshedWorkbenchModel } from "../src/pages/projects/detail/workflow-model-selection";
-import { applyFetchedChannelModelCatalog } from "../src/pages/settings/channel-settings-pane";
+import { applyFetchedChannelModelCatalog } from "../src/lib/channel-model-catalog";
 import { compatibleModelInGroup, groupModelsByDisplayName, modelCompatibilityError, resolveCompatibleModel } from "../src/lib/model-selection";
 import { resolveCanvasGenerationModel } from "../src/lib/canvas/canvas-project-generation";
 import { defaultModelCapabilityConfig } from "../src/lib/model-capabilities";

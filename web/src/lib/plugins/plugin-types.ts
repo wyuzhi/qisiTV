@@ -54,6 +54,8 @@ export type PluginParameter = {
     required?: boolean;
     description?: string;
     values?: string[];
+    min?: number;
+    max?: number;
     mapping?: string;
 };
 export type PluginProviderOperation = {

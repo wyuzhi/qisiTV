@@ -39,7 +39,7 @@
       "type": "object",
       "properties": {
         "providers": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/provider" } },
-        "workflows": { "type": "array" }
+        "workflows": { "type": "array", "items": { "$ref": "#/$defs/workflow" } }
       }
     }
   },
@@ -123,18 +123,7 @@
         "parameters": {
           "type": "array",
           "description": "写给读插件的人看的参数说明，BeefTV 不读取。",
-          "items": {
-            "type": "object",
-            "required": ["name", "type"],
-            "properties": {
-              "name": { "type": "string" },
-              "type": { "type": "string" },
-              "required": { "type": "boolean" },
-              "description": { "type": "string" },
-              "values": { "type": "array", "items": { "type": "string" } },
-              "mapping": { "type": "string" }
-            }
-          }
+          "items": { "$ref": "#/$defs/parameter" }
         },
         "validations": {
           "type": "array",
@@ -149,6 +138,34 @@
         "response": { "type": "object", "description": "从上游响应里取任务号、状态、文本或媒体地址。" },
         "agentResponse": { "type": "object" },
         "module": { "type": "string", "description": "插件包里实现 submit/query 的 JS 文件；写了它就不写 create 和 poll。" }
+      },
+      "additionalProperties": false
+    },
+    "parameter": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "required": { "type": "boolean" },
+        "description": { "type": "string" },
+        "values": { "type": "array", "items": { "type": "string" } },
+        "min": { "type": "integer" },
+        "max": { "type": "integer" },
+        "mapping": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "workflow": {
+      "type": "object",
+      "required": ["id", "label", "providerId", "capability"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "providerId": { "$ref": "#/$defs/identifier" },
+        "capability": { "$ref": "#/$defs/capability" },
+        "parameters": { "type": "array", "items": { "$ref": "#/$defs/parameter" } },
+        "defaults": { "type": "object", "additionalProperties": { "type": ["string", "number", "boolean"] } }
       },
       "additionalProperties": false
     }

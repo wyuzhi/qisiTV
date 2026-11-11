@@ -6,10 +6,9 @@ import { ModelEditorModal } from "@/components/model-editor-modal";
 import { ChannelHeadersEditor, validateChannelHeaders } from "@/components/channel-headers-editor";
 import { WorkspaceState } from "@/components/layout/workspace-state";
 import { PageHeader } from "@/components/layout/workspace-page";
-import { mergeFetchedChannelModelProfiles } from "@/lib/channel-model-catalog";
-import { seedancePortraitModel } from "@/lib/seedance-portrait";
+import { applyFetchedChannelModelCatalog } from "@/lib/channel-model-catalog";
 import { ensureModelProfilesWithUiDefaults } from "@/lib/model-protocols";
-import { fetchChannelModels, type ChannelModelFetchResult } from "@/services/api/image";
+import { fetchChannelModels } from "@/services/api/image";
 import { channelHasGenerationCredential, channelHasManagedBeefTVCredential, canonicalChannelModel, createModelChannel, defaultBaseUrlForApiFormat, filterModelsByCapability, isBuiltinBeefTVChannel, modelOptionsFromChannels, normalizeConfigSnapshot, useConfigStore, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { ChannelModelSettings } from "./channel-model-settings";
 import { ModelServiceEditor } from "./model-service-editor";
@@ -581,24 +580,6 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels }: Channel
             {serviceEditor !== undefined && <ModelServiceEditor initial={serviceEditor || undefined} onClose={() => setServiceEditor(undefined)} onSave={saveService} />}
         </Form>
     );
-}
-
-export function applyFetchedChannelModelCatalog(channel: ModelChannel, result: ChannelModelFetchResult): ModelChannel {
-    const profiles = mergeFetchedChannelModelProfiles(channel, result.catalog);
-    if (channel.id === "beeftv") return { ...channel, models: uniqueModels(result.models), modelProfiles: profiles };
-    const existing = new Map((channel.modelProfiles || []).map((profile) => [profile.model, profile]));
-    // Refresh updates the catalog without silently enabling new models or removing manual ones.
-    return {
-        ...channel,
-        models: channel.models.length ? channel.models : uniqueModels(result.models),
-        modelProfiles: profiles.map((profile) => {
-            const previous = existing.get(profile.model);
-            if (!previous) return profile;
-            if (seedancePortraitModel(profile.model)) return { ...previous, videoPricing: profile.videoPricing ?? null };
-            return profile.videoPricing ? { ...previous, videoPricing: profile.videoPricing } : previous;
-        }).concat((channel.modelProfiles || []).filter((profile) => !profiles.some((item) => item.model === profile.model))
-            .map((profile) => seedancePortraitModel(profile.model) ? { ...profile, videoPricing: null } : profile)),
-    };
 }
 
 export function channelValidationError(channel: ModelChannel, connection?: BeefTVConnectionSummary | null) {

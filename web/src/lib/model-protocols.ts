@@ -2,7 +2,7 @@ import type { ModelChannel } from "@/stores/use-config-store";
 
 export type ModelProtocol = string;
 export type ProtocolCapability = "text" | "image" | "video" | "audio";
-export type ModelProtocolWorkflow = { id: string; label: string; providerId: string; capability: ProtocolCapability; parameters: Array<{ name: string; type: string; required?: boolean; description?: string; values?: string[]; mapping?: string }>; defaults?: Record<string, string | number | boolean> };
+export type ModelProtocolWorkflow = { id: string; label: string; providerId: string; capability: ProtocolCapability; parameters: Array<{ name: string; type: string; required?: boolean; description?: string; values?: string[]; min?: number; max?: number; mapping?: string }>; defaults?: Record<string, string | number | boolean> };
 // module：生成接口由插件 JS 实现，模型服务里单列成一个服务商，模型列表由插件提供。
 // presets：说同一种接口的服务商（名字和默认地址），在「选择服务商」里一键带出。
 // aliases：旧版本里这个接口用过的 ID，已保存的模型可能还写着它们。

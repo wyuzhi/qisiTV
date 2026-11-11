@@ -1,5 +1,5 @@
 import { http } from "@/services/api/request";
-import type { ModelProtocolDefinition, ProtocolCapability } from "@/lib/model-protocols";
+import type { ModelProtocolDefinition, ModelProtocolWorkflow, ProtocolCapability } from "@/lib/model-protocols";
 
 type PluginProviderCatalogItem = {
     id: string;
@@ -20,14 +20,7 @@ type PluginProviderCatalogItem = {
     presets?: Array<{ id: string; label: string; baseUrl: string }>;
     // 这一版已经不再附带、只为已保存的配置保留的接口：照常执行，但不再给新的选择。
     retired?: boolean;
-    workflows?: Array<{
-        id: string;
-        label: string;
-        providerId: string;
-        capability: ProtocolCapability;
-        parameters: Array<{ name: string; type: string; required?: boolean; description?: string; values?: string[]; mapping?: string }>;
-        defaults?: Record<string, string | number | boolean>;
-    }>;
+    workflows?: ModelProtocolWorkflow[];
 };
 
 export async function fetchPluginProviderCatalog(scope: string, capability?: ProtocolCapability) {

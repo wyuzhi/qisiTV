@@ -9,7 +9,7 @@ import { fetchPluginProviderCatalog } from "@/services/api/plugin-catalog";
 import { mergeFetchedChannelModelProfiles, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
 import { builtinProtocolsAvailable } from "@/lib/builtin-service-presets";
 import { CAPABILITY_LABELS, MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, createVendorPresetChannel, isBuiltinPresetService, isTopazUpscaleChannel, pluginServices, presetCatalogFor, presetModelCount, builtinPresetDescription, serviceConnectionError, serviceModelProfile, servicePresetFor, vendorPresetFor, vendorPresets, type ModelServicePresetId, type VendorPreset } from "@/lib/model-service-presets";
-import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
+import { capabilityForAssignedProtocol } from "@/lib/model-capabilities";
 import { serviceCredentialGuide } from "@/lib/service-credentials";
 import type { ModelProtocolDefinition } from "@/lib/model-protocols";
 import { seedancePortraitLabel } from "@/lib/seedance-portrait";
@@ -157,17 +157,11 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         if (siblingProtocols.length !== 1) return profile;
         const definition = protocols.find((item) => item.value === siblingProtocols[0] && item.capability === profile.capability && item.enabled !== false);
         if (!definition) return profile;
-        const keepUserCapability = profile.capabilitySource === "user" && Boolean(profile.capabilityConfig);
         return {
             ...profile,
             protocol: definition.value,
             authType: definition.authType,
-            capabilitySource: keepUserCapability ? "user" : undefined,
-            capabilityConfig: keepUserCapability
-                ? profile.capabilityConfig
-                : profile.capability === "image" || profile.capability === "video"
-                  ? defaultModelCapabilityConfig(definition.value, profile.model, protocols)
-                  : profile.capabilityConfig,
+            ...capabilityForAssignedProtocol(profile, definition.value, protocols, { keepNonMediaExisting: true }),
         };
     };
     const changeModelCapability = (id: string, capability: ModelCapability) => {

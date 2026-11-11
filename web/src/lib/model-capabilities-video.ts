@@ -578,32 +578,66 @@ export function videoResolutionRequest(profile: VideoCapabilityConfig, value: st
         }
     }
     if (!profile.ratios.length) {
-        const rawRatio = String(ratio || "").trim();
-        const tierMap: Record<string, string[]> = {
-            "480": ["480p"], "480p": ["480p"], low: ["480p"],
-            "720": ["720p", "768p", "736p"], "720p": ["720p", "768p", "736p"], medium: ["720p", "768p", "736p"],
-            "736": ["736p", "768p", "720p"], "736p": ["736p", "768p", "720p"],
-            "768": ["768p", "736p", "720p"], "768p": ["768p", "736p", "720p"],
-            "1080": ["1080p", "768p", "736p"], "1080p": ["1080p", "768p", "736p"], high: ["1080p", "768p", "736p"],
-            "1440": ["1080p", "768p", "736p"], "1440p": ["1080p", "768p", "736p"], "2k": ["1080p", "768p", "736p"],
-            "2160": ["1080p", "768p", "736p"], "2160p": ["1080p", "768p", "736p"], "4k": ["1080p", "768p", "736p"],
-        };
-        const defaultTierMatch = profile.defaultResolution.trim().toLowerCase().match(/^(\d+p)/);
-        const defaultTiers = defaultTierMatch ? (tierMap[defaultTierMatch[1]] || [defaultTierMatch[1]]) : ["768p", "736p", "1080p", "480p"];
-        const tiers = tierMap[requested] || (rawRatio ? defaultTiers : undefined);
-        if (tiers) {
-            const defaultDir = profile.defaultResolution.endsWith("横") ? "横" : profile.defaultResolution.endsWith("(1:1)") ? "(1:1)" : "竖";
-            const primaryDir = rawRatio === "16:9" || rawRatio === "4:3" || rawRatio === "21:9" || rawRatio === "3:2" ? "横" : rawRatio === "1:1" ? "(1:1)" : rawRatio ? "竖" : defaultDir;
-            const dirs = [primaryDir, ...["竖", "横", "(1:1)"].filter((dir) => dir !== primaryDir)];
-            for (const tier of [...tiers, ...defaultTiers, "768p", "736p", "1080p", "480p"]) {
-                for (const dir of dirs) {
-                    const match = supported.get(`${tier}${dir}`);
-                    if (match) return match;
+        const directional = profile.resolutions
+            .map((resolution) => {
+                const raw = resolution.trim();
+                const match = raw.match(/^(\d+)p(.+)$/i);
+                return match ? { raw, height: Number(match[1]), dir: match[2].trim().toLowerCase() } : null;
+            })
+            .filter((entry): entry is { raw: string; height: number; dir: string } => Boolean(entry && Number.isFinite(entry.height)));
+        if (directional.length) {
+            const requestedHeight = resolveRequestedVideoTierHeight(requested, directional);
+            const rawRatio = String(ratio || "").trim();
+            const ratioDir = parseVideoOrientationSuffix(rawRatio);
+            if (requestedHeight !== undefined || ratioDir) {
+                const defaultMatch = profile.defaultResolution.trim().match(/^(\d+)p(.+)$/i);
+                const targetHeight = requestedHeight ?? (defaultMatch ? Number(defaultMatch[1]) : directional[0]!.height);
+                const defaultDir = defaultMatch ? defaultMatch[2].trim().toLowerCase() : "竖";
+                const primaryDir = ratioDir || defaultDir;
+                const dirs = Array.from(new Set([primaryDir, defaultDir, "竖", "横", "(1:1)", ...directional.map((entry) => entry.dir)]));
+                const uniqueHeights = Array.from(new Set(directional.map((entry) => entry.height))).sort(
+                    (left, right) => Math.abs(left - targetHeight) - Math.abs(right - targetHeight) || right - left,
+                );
+                for (const height of uniqueHeights) {
+                    for (const dir of dirs) {
+                        const found = directional.find((entry) => entry.height === height && entry.dir === dir);
+                        if (found) return found.raw;
+                    }
                 }
             }
         }
     }
     return undefined;
+}
+
+function resolveRequestedVideoTierHeight(requested: string, directional: Array<{ height: number }>): number | undefined {
+    const namedHeights: Record<string, number> = {
+        low: 480, "480": 480, "480p": 480,
+        medium: 720, "720": 720, "720p": 720,
+        high: 1080, "1080": 1080, "1080p": 1080,
+        "1440": 1440, "1440p": 1440, "2k": 1440,
+        "2160": 2160, "2160p": 2160, "4k": 2160,
+    };
+    if (namedHeights[requested] !== undefined) return namedHeights[requested];
+    const bareMatch = requested.match(/^(\d+)p?$/);
+    if (!bareMatch) return undefined;
+    const height = Number(bareMatch[1]);
+    return directional.some((entry) => entry.height === height) ? height : undefined;
+}
+
+function parseVideoOrientationSuffix(rawRatio: string): string | undefined {
+    const normalized = rawRatio.trim().toLowerCase();
+    if (!normalized) return undefined;
+    if (normalized === "横" || normalized === "landscape") return "横";
+    if (normalized === "竖" || normalized === "portrait") return "竖";
+    if (normalized === "(1:1)" || normalized === "square") return "(1:1)";
+    const parts = normalized.match(/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/);
+    if (!parts) return "竖";
+    const width = Number(parts[1]);
+    const height = Number(parts[2]);
+    if (!(width > 0 && height > 0)) return undefined;
+    if (Math.abs(width - height) < 1e-6) return "(1:1)";
+    return width > height ? "横" : "竖";
 }
 
 function normalizeRangeDuration(profile: VideoCapabilityConfig, value: number) {

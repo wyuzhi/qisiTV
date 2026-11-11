@@ -8,6 +8,7 @@ import (
 
 	"infinite-canvas/backend/internal/kernel"
 	"infinite-canvas/backend/internal/model"
+	protocolPkg "infinite-canvas/backend/internal/protocol"
 	"infinite-canvas/backend/internal/providerpreset"
 )
 
@@ -137,17 +138,23 @@ func NormalizeModelCapabilityConfigForModel(capability string, protocol string, 
 	return value, nil
 }
 
-type CapabilityNormalizer struct{}
-
-func NewCapabilityNormalizer() CapabilityNormalizer {
-	return CapabilityNormalizer{}
+type CapabilityNormalizer struct {
+	workflow WorkflowLookup
 }
 
-func (CapabilityNormalizer) NormalizeModelCapabilityDraft(draft ModelCapabilityDraft) (*ModelCapabilityConfig, error) {
-	return NormalizeModelCapabilityDraft(draft)
+func NewCapabilityNormalizer(workflow WorkflowLookup) CapabilityNormalizer {
+	return CapabilityNormalizer{workflow: workflow}
 }
 
-func NormalizeModelCapabilityDraft(draft ModelCapabilityDraft) (*ModelCapabilityConfig, error) {
+func (n CapabilityNormalizer) NormalizeModelCapabilityDraft(draft ModelCapabilityDraft) (*ModelCapabilityConfig, error) {
+	return NormalizeModelCapabilityDraft(draft, n.workflow)
+}
+
+func NormalizeModelCapabilityDraft(draft ModelCapabilityDraft, workflow ...WorkflowLookup) (*ModelCapabilityConfig, error) {
+	var workflowLookup WorkflowLookup
+	if len(workflow) > 0 {
+		workflowLookup = workflow[0]
+	}
 	if draft.VideoCapabilitiesVersion != nil && strings.TrimSpace(*draft.VideoCapabilitiesVersion) != "" {
 		if draft.CapabilityConfig == nil || draft.CapabilityConfig.Video == nil {
 			return nil, kernel.BadAuthRequest("当前视频模型能力尚未加载，请在设置中刷新模型列表")
@@ -194,6 +201,11 @@ func NormalizeModelCapabilityDraft(draft ModelCapabilityDraft) (*ModelCapability
 	}
 
 	result := DefaultModelCapabilityConfigForModel(protocol, modelName)
+	if workflowLookup != nil && capability == "video" && result.Video != nil {
+		if workflow, ok := workflowLookup(protocol, protocolPkg.CapabilityVideo, modelName); ok {
+			applyProtocolWorkflowVideoCapability(result.Video, workflow)
+		}
+	}
 	localItem := LocalChannelModel{
 		ChannelID:                channelID,
 		BaseURL:                  baseURL,

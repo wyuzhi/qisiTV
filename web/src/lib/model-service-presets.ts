@@ -1,6 +1,6 @@
 import type { AiConfig, ModelChannel, ModelCapability } from "@/stores/use-config-store";
 import { createModelChannel } from "@/stores/use-config-store";
-import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
+import { defaultModelCapabilityConfig, hasUserModelCapability } from "@/lib/model-capabilities";
 import { inferProtocolCapabilityFromModel, modelProtocolDefinition, modelProtocolDefinitionFor, type ModelProtocolDefinition } from "@/lib/model-protocols";
 import { catalogEndpointCapability, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
 import { serviceCredentialGuide } from "@/lib/service-credentials";
@@ -142,7 +142,7 @@ export function serviceModelProfile(channel: ModelChannel, item: ChannelModelCat
         const usable = definition && definition.enabled !== false ? definition : undefined;
         const workflow = usable?.workflows?.find((w) => w.id === item.id && w.capability === "video");
         const repairedCapabilityConfig =
-            workflow && existing.capabilitySource !== "user" && existing.capabilityConfig?.video?.ratios?.length
+            workflow && !hasUserModelCapability(existing) && existing.capabilityConfig?.video?.ratios?.length
                 ? defaultModelCapabilityConfig(usable!.value, item.id, protocols)
                 : existing.capabilityConfig;
         // 旧 ID 落盘时换成现在的 ID，下次打开就是新 ID。

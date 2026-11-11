@@ -6,6 +6,7 @@ import (
 	"infinite-canvas/backend/internal/agentops"
 	"infinite-canvas/backend/internal/app"
 	"infinite-canvas/backend/internal/eagle"
+	"infinite-canvas/backend/internal/modelcatalog"
 
 	"github.com/gin-gonic/gin"
 )
@@ -32,6 +33,9 @@ func defaultRuntimeDependencies(svc *app.Service) RuntimeDependencies {
 	if svc != nil {
 		dependencies.Diagnostics = svc.DiagnosticsDomain()
 		dependencies.Appearance = svc.AppearanceDomain()
+		if pluginsDomain := svc.PluginDomain(); pluginsDomain != nil {
+			dependencies.ModelCapability = modelcatalog.NewCapabilityNormalizer(pluginsDomain.LookupWorkflow)
+		}
 	}
 	return dependencies
 }

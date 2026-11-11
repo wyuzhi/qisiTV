@@ -10,7 +10,7 @@ import { testChannelModelConnection } from "@/lib/model-connection-test";
 import { seedancePortraitLabel } from "@/lib/seedance-portrait";
 import { ModelCapabilityEditor } from "@/components/model-capability-editor";
 import { type ModelCapabilityChoice } from "@/components/model-protocol-picker";
-import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
+import { capabilityForAssignedProtocol, defaultModelCapabilityConfig, hasUserModelCapability } from "@/lib/model-capabilities";
 import { canonicalModelProtocol, modelProtocolDefinitionFor, defaultProtocolForCapability, defaultProtocolForModel, inferProtocolCapabilityFromModel, modelProtocolCapability, modelProtocolDefinition, type ModelProtocol, type ModelProtocolDefinition } from "@/lib/model-protocols";
 import { signatureCredentialHint } from "@/lib/service-credentials";
 import { fetchPluginProviderCatalog } from "@/services/api/plugin-catalog";
@@ -107,17 +107,11 @@ export function ChannelModelSettings({
                 if (sibling === model) continue;
                 const existing = byModel.get(sibling) || buildDefaultProfile(sibling);
                 if (existing.capability === nextProfile.capability && !existing.protocol) {
-                    const keepUserCapability = existing.capabilitySource === "user" && Boolean(existing.capabilityConfig);
                     byModel.set(sibling, {
                         ...existing,
                         protocol: nextProfile.protocol,
                         authType,
-                        capabilitySource: keepUserCapability ? "user" : undefined,
-                        capabilityConfig: keepUserCapability
-                            ? existing.capabilityConfig
-                            : existing.capability === "image" || existing.capability === "video"
-                              ? defaultModelCapabilityConfig(nextProfile.protocol, sibling, availableProtocols)
-                              : existing.capabilityConfig,
+                        ...capabilityForAssignedProtocol(existing, nextProfile.protocol, availableProtocols, { keepNonMediaExisting: true }),
                     });
                 }
             }
@@ -146,7 +140,7 @@ export function ChannelModelSettings({
             .then((normalized) => {
                 const latest = channelRef.current.modelProfiles?.find((item) => item.model === model);
                 if (
-                    latest?.capabilitySource === "user" ||
+                    hasUserModelCapability(latest) ||
                     (latest?.capability && latest.capability !== capability) ||
                     (latest?.protocol && latest.protocol !== protocol)
                 ) {
@@ -286,7 +280,7 @@ export function ChannelModelSettings({
                                             capability: nextCapability,
                                             capabilityConfig: nextCapabilityConfig,
                                         });
-                                        refreshBackendCapability(activeModel, nextCapability, nextProtocol, nextCapabilityConfig);
+                                        refreshBackendCapability(activeModel, nextCapability, nextProtocol);
                                     }}
                                 />
                             </section>
@@ -315,22 +309,21 @@ export function ChannelModelSettings({
                                             protocols={availableProtocols}
                                             onChange={(nextProtocol) => {
                                                 setInterfaceOpen(true);
-                                                const keepUserCapability = activeModelProfile?.capabilitySource === "user" && Boolean(activeModelProfile.capabilityConfig);
-                                                const nextCapabilityConfig = keepUserCapability
-                                                    ? activeModelProfile!.capabilityConfig
-                                                    : activeCapability === "image" || activeCapability === "video"
-                                                      ? defaultModelCapabilityConfig(nextProtocol, activeModel, availableProtocols)
-                                                      : undefined;
+                                                const keepUserCapability = hasUserModelCapability(activeModelProfile);
+                                                const assigned = capabilityForAssignedProtocol(
+                                                    activeModelProfile || { model: activeModel, capability: activeCapability },
+                                                    nextProtocol,
+                                                    availableProtocols,
+                                                );
                                                 updateProfile(
                                                     activeModel,
                                                     {
                                                         protocol: nextProtocol,
-                                                        capabilityConfig: nextCapabilityConfig,
-                                                        ...(keepUserCapability ? { capabilitySource: "user" as const } : {}),
+                                                        ...assigned,
                                                     },
                                                     true,
                                                 );
-                                                refreshBackendCapability(activeModel, activeCapability, nextProtocol, nextCapabilityConfig, keepUserCapability);
+                                                refreshBackendCapability(activeModel, activeCapability, nextProtocol, undefined, keepUserCapability);
                                             }}
                                         />
                                     </>

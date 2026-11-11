@@ -163,51 +163,121 @@
             }
           },
           {
+            "name": "allowedRes",
+            "value": {
+              "$map": {
+                "from": {
+                  "$ref": "workflow.values.resolution"
+                },
+                "as": "item",
+                "in": {
+                  "$lower": {
+                    "$trim": {
+                      "$ref": "item"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
             "name": "supportsSquare",
             "value": {
-              "$in": [
+              "$or": [
                 {
-                  "$ref": "request.model"
+                  "$in": [
+                    "480p(1:1)",
+                    {
+                      "$ref": "vars.allowedRes"
+                    }
+                  ]
                 },
-                [
-                  "minimax_h3_b99_001",
-                  "minimax_h3_b99_002",
-                  "minimax_h3_b99_003_12s",
-                  "minimax_h3_lightx2v_v5_15s",
-                  "minimax_h3_lightx2v_v5",
-                  "minimax_h3_zm_u24",
-                  "minimax_h3_zm_u08"
-                ]
+                {
+                  "$in": [
+                    "736p(1:1)",
+                    {
+                      "$ref": "vars.allowedRes"
+                    }
+                  ]
+                },
+                {
+                  "$in": [
+                    "768p(1:1)",
+                    {
+                      "$ref": "vars.allowedRes"
+                    }
+                  ]
+                },
+                {
+                  "$in": [
+                    "1080p(1:1)",
+                    {
+                      "$ref": "vars.allowedRes"
+                    }
+                  ]
+                }
               ]
             }
           },
           {
             "name": "supports1080",
             "value": {
-              "$in": [
+              "$or": [
                 {
-                  "$ref": "request.model"
+                  "$in": [
+                    "1080p竖",
+                    {
+                      "$ref": "vars.allowedRes"
+                    }
+                  ]
                 },
-                [
-                  "minimax_h3_image_audio_to_video_v2",
-                  "minimax_h3_image_audio_to_video",
-                  "minimax_h3_lightx2v_v5"
-                ]
+                {
+                  "$in": [
+                    "1080p横",
+                    {
+                      "$ref": "vars.allowedRes"
+                    }
+                  ]
+                },
+                {
+                  "$in": [
+                    "1080p(1:1)",
+                    {
+                      "$ref": "vars.allowedRes"
+                    }
+                  ]
+                }
               ]
             }
           },
           {
-            "name": "isB99",
+            "name": "is736",
             "value": {
-              "$in": [
+              "$or": [
                 {
-                  "$ref": "request.model"
+                  "$in": [
+                    "736p竖",
+                    {
+                      "$ref": "vars.allowedRes"
+                    }
+                  ]
                 },
-                [
-                  "minimax_h3_b99_001",
-                  "minimax_h3_b99_002",
-                  "minimax_h3_b99_003_12s"
-                ]
+                {
+                  "$in": [
+                    "736p横",
+                    {
+                      "$ref": "vars.allowedRes"
+                    }
+                  ]
+                },
+                {
+                  "$in": [
+                    "736p(1:1)",
+                    {
+                      "$ref": "vars.allowedRes"
+                    }
+                  ]
+                }
               ]
             }
           },
@@ -267,7 +337,7 @@
                 "cases": [
                   {
                     "when": {
-                      "$ref": "vars.isB99"
+                      "$ref": "vars.is736"
                     },
                     "then": "736p"
                   },
@@ -391,20 +461,46 @@
                               {
                                 "$ref": "vars.rawRes"
                               },
-                              [
-                                "480p竖",
-                                "768p竖",
-                                "1080p竖",
-                                "736p竖",
-                                "480p横",
-                                "768p横",
-                                "1080p横",
-                                "736p横",
-                                "480p(1:1)",
-                                "768p(1:1)",
-                                "1080p(1:1)",
-                                "736p(1:1)"
-                              ]
+                              {
+                                "$ref": "vars.allowedRes"
+                              }
+                            ]
+                          },
+                          "then": {
+                            "$ref": "vars.rawRes"
+                          }
+                        },
+                        {
+                          "when": {
+                            "$and": [
+                              {
+                                "$not": {
+                                  "$ref": "vars.allowedRes"
+                                }
+                              },
+                              {
+                                "$not": {
+                                  "$in": [
+                                    {
+                                      "$ref": "vars.rawRes"
+                                    },
+                                    [
+                                      "480",
+                                      "480p",
+                                      "720",
+                                      "720p",
+                                      "1080",
+                                      "1080p",
+                                      "1440",
+                                      "1440p",
+                                      "2160",
+                                      "2160p",
+                                      "2k",
+                                      "4k"
+                                    ]
+                                  ]
+                                }
+                              }
                             ]
                           },
                           "then": {
@@ -794,6 +890,8 @@
             "name": "duration",
             "type": "integer",
             "mapping": "duration",
+            "min": 1,
+            "max": 15,
             "description": "视频时长 1~15 秒"
           },
           {
@@ -828,6 +926,8 @@
             "name": "duration",
             "type": "integer",
             "mapping": "duration",
+            "min": 1,
+            "max": 15,
             "description": "视频时长 1~15 秒"
           },
           {
@@ -862,6 +962,8 @@
             "name": "duration",
             "type": "integer",
             "mapping": "duration",
+            "min": 1,
+            "max": 12,
             "description": "视频时长 1~12 秒"
           },
           {
@@ -896,6 +998,8 @@
             "name": "duration",
             "type": "integer",
             "mapping": "duration",
+            "min": 1,
+            "max": 15,
             "description": "视频时长 1~15 秒"
           },
           {
@@ -931,6 +1035,8 @@
             "name": "duration",
             "type": "integer",
             "mapping": "duration",
+            "min": 1,
+            "max": 15,
             "description": "视频时长 1~15 秒"
           },
           {
@@ -968,6 +1074,8 @@
             "name": "duration",
             "type": "integer",
             "mapping": "duration",
+            "min": 1,
+            "max": 10,
             "description": "视频时长 1~10 秒"
           },
           {
@@ -999,6 +1107,8 @@
             "name": "audio_duration",
             "type": "integer",
             "mapping": "duration",
+            "min": 1,
+            "max": 15,
             "description": "音频时长 1~15 秒"
           },
           {
@@ -1036,6 +1146,8 @@
             "name": "duration",
             "type": "integer",
             "mapping": "duration",
+            "min": 1,
+            "max": 10,
             "description": "视频时长 1~10 秒"
           },
           {
@@ -1076,6 +1188,8 @@
             "name": "duration",
             "type": "integer",
             "mapping": "duration",
+            "min": 1,
+            "max": 15,
             "description": "视频时长 1~15 秒"
           },
           {
@@ -1111,6 +1225,8 @@
             "name": "duration",
             "type": "integer",
             "mapping": "duration",
+            "min": 1,
+            "max": 15,
             "description": "视频时长 1~15 秒"
           },
           {
@@ -1161,6 +1277,8 @@
             "name": "duration",
             "type": "integer",
             "mapping": "duration",
+            "min": 1,
+            "max": 15,
             "description": "视频时长 1~15 秒"
           },
           {
@@ -1198,6 +1316,8 @@
             "name": "duration",
             "type": "integer",
             "mapping": "duration",
+            "min": 1,
+            "max": 15,
             "description": "视频时长 1~15 秒"
           },
           {

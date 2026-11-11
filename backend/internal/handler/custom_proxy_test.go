@@ -300,10 +300,6 @@ func (relayCategoryStub) InterceptResponseText(raw string) string {
 	return raw
 }
 
-func (relayCategoryStub) ProviderFailureCategory(status int, statusText string, body string) string {
-	return (*app.Service)(nil).ProviderFailureCategory(status, statusText, body)
-}
-
 func useCustomRelayTestClient(t *testing.T, client *http.Client) {
 	t.Helper()
 	previous := customRelayClient

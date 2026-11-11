@@ -165,7 +165,7 @@ func RegisterWorkspaceRoutes(r *gin.RouterGroup, bootstrap workspaceBootstrap) {
 			fail(c, http.StatusBadRequest, errors.New("模型能力草稿格式错误"))
 			return
 		}
-		normalized, err := requestModelCapability(c).NormalizeModelCapabilityDraft(draft)
+		normalized, err := requestModelCapability(c, bootstrap).NormalizeModelCapabilityDraft(draft)
 		if err != nil {
 			fail(c, http.StatusBadRequest, err)
 			return

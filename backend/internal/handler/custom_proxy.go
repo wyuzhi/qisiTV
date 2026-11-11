@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"infinite-canvas/backend/internal/app"
+	"infinite-canvas/backend/internal/generation"
 	"infinite-canvas/backend/internal/platform"
 
 	"github.com/gin-gonic/gin"
@@ -30,7 +31,6 @@ type customRelays interface {
 	AcquireCustomRelaySlot(ctx context.Context, userID string, limit int, ttl time.Duration) (func(), bool, error)
 	ResolveCustomRelayAPIKey(targetURL, incoming string) (string, error)
 	UserFacingProviderHTTPError(status int, statusText string, body string) string
-	ProviderFailureCategory(status int, statusText string, body string) string
 	UserFacingErrorMessage(err error) string
 	InterceptResponseText(raw string) string
 }
@@ -219,10 +219,8 @@ func writeCustomRelayError(c *gin.Context, relays customRelays, resp *http.Respo
 		return
 	}
 	if (mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")) && json.Valid(body) {
-		if relays != nil {
-			if category := relays.ProviderFailureCategory(resp.StatusCode, resp.Status, string(body)); category != "" {
-				c.Header("X-Canvas-Failure-Category", category)
-			}
+		if category := string(generation.ClassifyHTTP(resp.StatusCode, resp.Status, string(body)).Category); category != "" {
+			c.Header("X-Canvas-Failure-Category", category)
 		}
 		c.Data(resp.StatusCode, "application/json; charset=utf-8", body)
 		return

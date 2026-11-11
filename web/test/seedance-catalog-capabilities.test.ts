@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import axios from "axios";
 
-import { mergeFetchedChannelModelProfiles, sanitizeChannelModelCatalogItem } from "../src/lib/channel-model-catalog";
+import { applyFetchedChannelModelCatalog, mergeFetchedChannelModelProfiles, sanitizeChannelModelCatalogItem } from "../src/lib/channel-model-catalog";
 import { modelCapabilityConfigFor, sanitizeServerVideoCapability, type VideoCapabilityConfig } from "../src/lib/model-capabilities";
-import { applyFetchedChannelModelCatalog, mergeManagedBeefTVCatalog } from "../src/pages/settings/channel-settings-pane";
+import { mergeManagedBeefTVCatalog } from "../src/pages/settings/channel-settings-pane";
 import { modelCompatibilityError, portraitGenerationError } from "../src/lib/model-selection";
 import { fetchChannelModels } from "../src/services/api/image-models";
 import { createModelChannel, defaultConfig, normalizeConfigSnapshot } from "../src/stores/use-config-store";

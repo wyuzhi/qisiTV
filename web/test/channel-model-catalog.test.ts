@@ -7,10 +7,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CanvasVideoSettingsPopover } from "../src/components/canvas/canvas-video-settings-popover";
 import { VideoSettingsPanel } from "../src/components/video-settings-panel";
 import { canvasThemes } from "../src/lib/canvas-theme";
-import { mergeFetchedChannelModelProfiles, type ChannelModelCatalogItem } from "../src/lib/channel-model-catalog";
+import { applyFetchedChannelModelCatalog, mergeFetchedChannelModelProfiles, type ChannelModelCatalogItem } from "../src/lib/channel-model-catalog";
 import { defaultModelCapabilityConfig, modelCapabilityConfigFor, videoDurationOptions } from "../src/lib/model-capabilities";
+import { hasDeclaredModelCapability } from "../src/lib/model-selection";
 import { ChannelModelSettings } from "../src/pages/settings/channel-model-settings";
-import { applyFetchedChannelModelCatalog } from "../src/pages/settings/channel-settings-pane";
 import { fetchChannelModels } from "../src/services/api/image";
 import { disconnectBeefTVConnection } from "../src/services/api/beeftv-connection";
 import { apiClient } from "../src/services/api/request";
@@ -293,7 +293,7 @@ describe("public channel model catalog", () => {
                         capability: "video",
                         parameters: [
                             { name: "prompt", type: "string", required: true, mapping: "prompt" },
-                            { name: "duration", type: "integer", mapping: "duration", description: "视频时长 1~15 秒" },
+                            { name: "duration", type: "integer", mapping: "duration", min: 1, max: 15, description: "视频时长 1~15 秒" },
                             { name: "resolution", type: "string", mapping: "resolution", values: ["480p竖", "768p竖", "480p横", "768p横", "480p(1:1)", "768p(1:1)"] },
                         ],
                         defaults: { duration: 5, resolution: "768p竖" },
@@ -307,6 +307,36 @@ describe("public channel model catalog", () => {
         expect(profile.resolutions).toEqual(["480p竖", "768p竖", "480p横", "768p横", "480p(1:1)", "768p(1:1)"]);
         expect(profile.defaultResolution).toBe("768p竖");
         expect(profile.duration).toEqual({ selection: "range", min: 1, max: 15, step: 1, default: 5 });
+    });
+
+    test("applyFetchedChannelModelCatalog updates custom-gateway versioned capabilities unless user customized", () => {
+        const defaultCap = defaultModelCapabilityConfig("newapi", "wan3");
+        const userCap = defaultModelCapabilityConfig("newapi", "wan3-user");
+        userCap.video!.duration = { selection: "range", min: 1, max: 25, step: 1, default: 8 };
+        const channel = createModelChannel({
+            id: "custom-gateway",
+            name: "Custom Gateway",
+            baseUrl: "https://provider.example/v1",
+            models: ["wan3", "wan3-user"],
+            modelProfiles: [
+                { model: "wan3", capability: "video", protocol: "newapi", capabilityConfig: defaultCap },
+                { model: "wan3-user", capability: "video", protocol: "newapi", capabilitySource: "user", capabilityConfig: userCap },
+            ],
+        });
+
+        const refreshed = applyFetchedChannelModelCatalog(channel, {
+            models: ["wan3", "wan3-user"],
+            catalog: [
+                { id: "wan3", modelType: "video", options: { durationSeconds: [{ value: "5" }, { value: "10" }] } },
+                { id: "wan3-user", modelType: "video", options: { durationSeconds: [{ value: "5" }, { value: "10" }] } },
+            ],
+        });
+
+        const wan3 = refreshed.modelProfiles?.find((item) => item.model === "wan3");
+        const wan3User = refreshed.modelProfiles?.find((item) => item.model === "wan3-user");
+        expect(wan3?.capabilityConfig?.video?.duration).toEqual({ selection: "enum", values: [5, 10], default: 5 });
+        expect(wan3User?.capabilitySource).toBe("user");
+        expect(wan3User?.capabilityConfig?.video?.duration.max).toBe(25);
     });
 
     test("preserves user-edited capability config across catalog merge and continuous duration max", () => {
@@ -667,6 +697,24 @@ describe("public channel model catalog", () => {
         expect(profiles.find((p) => p.model === "custom-img-pro")?.imageCapabilitiesVersion).toBe("gw-img-v1");
         expect(profiles.find((p) => p.model === "custom-vid-pro")?.videoCapabilitiesVersion).toBe("gw-vid-v1");
         expect(profiles.find((p) => p.model === "custom-vid-pro")?.videoPricing).toEqual(pricing);
+    });
+
+    test("hasDeclaredModelCapability 仅把带真实 capabilityConfig 的 user 标记视为用户显式限制", () => {
+        const channel = createModelChannel({
+            id: "byok-custom",
+            baseUrl: "https://gateway.example.com/v1",
+            apiKey: "synthetic-test-key",
+            models: ["vid-default", "vid-user", "vid-empty-user"],
+            modelProfiles: [
+                { model: "vid-default", capability: "video", protocol: "newapi", capabilityConfig: defaultModelCapabilityConfig("newapi", "vid-default") },
+                { model: "vid-user", capability: "video", protocol: "newapi", capabilitySource: "user", capabilityConfig: defaultModelCapabilityConfig("newapi", "vid-user") },
+                { model: "vid-empty-user", capability: "video", protocol: "newapi", capabilitySource: "user" },
+            ],
+        });
+        const config: AiConfig = { ...defaultConfig, channels: [channel], models: channel.models.map((m) => `byok-custom::${m}`) };
+        expect(hasDeclaredModelCapability(config, "byok-custom::vid-default", "video")).toBe(false);
+        expect(hasDeclaredModelCapability(config, "byok-custom::vid-user", "video")).toBe(true);
+        expect(hasDeclaredModelCapability(config, "byok-custom::vid-empty-user", "video")).toBe(false);
     });
 
 });

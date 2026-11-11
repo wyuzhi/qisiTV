@@ -304,3 +304,32 @@ func TestAutoDLPluginArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestManifestModelIDAndWorkflowEnvCapabilityContract(t *testing.T) {
+	if got := manifestModelID(GenerationRequest{Model: "my-chan::MixedCase-Model-V2"}); got != "mixedcase-model-v2" {
+		t.Fatalf("manifestModelID = %q, want lowercased bare model for transform matching", got)
+	}
+	if got := applyManifestTransform("keep", "omit_unless_model_contains:model-v2", GenerationRequest{Model: "my-chan::MixedCase-Model-V2"}); got != "keep" {
+		t.Fatalf("omit_unless_model_contains failed on uppercase model ID: %#v", got)
+	}
+	manifest := Manifest{
+		Metadata: Metadata{ID: "demo-provider", Categories: []Capability{CapabilityVideo}},
+		Contributes: ManifestContributions{
+			Workflows: []ManifestWorkflow{
+				{ID: "shared_wf", ProviderID: "demo-provider", Capability: CapabilityAudio, Defaults: map[string]any{"mode": "audio"}},
+				{ID: "shared_wf", ProviderID: "demo-provider", Capability: CapabilityVideo, Defaults: map[string]any{"mode": "video"}},
+				{ID: "untyped_wf", ProviderID: "demo-provider", Capability: ""},
+			},
+		},
+	}
+	env := manifestWorkflowValues(manifest, GenerationRequest{Capability: CapabilityVideo, Model: "chan::shared_wf"})
+	if env == nil || env["capability"] != "video" {
+		t.Fatalf("manifestWorkflowValues picked wrong capability workflow: %#v", env)
+	}
+	if got := manifestWorkflowValues(manifest, GenerationRequest{Capability: CapabilityVideo, Model: "untyped_wf"}); got != nil {
+		t.Fatalf("manifestWorkflowValues accepted empty-capability workflow: %#v", got)
+	}
+	if got := manifestWorkflowValues(manifest, GenerationRequest{Capability: CapabilityVideo, Model: "SHARED_WF"}); got != nil {
+		t.Fatalf("manifestWorkflowValues accepted mismatched-case workflow ID: %#v", got)
+	}
+}

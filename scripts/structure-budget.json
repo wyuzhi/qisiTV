@@ -1,8 +1,8 @@
 {
-  "appLines": 9460,
+  "appLines": 9455,
   "largeFiles": {
     "backend/internal/handler/project.go": 1029,
-    "backend/internal/protocol/manifest.go": 1555,
+    "backend/internal/protocol/manifest.go": 1546,
     "backend/internal/repository/project_mutate.go": 1348,
     "backend/internal/repository/repository.go": 2293,
     "plugin-packages/beeftv-plugin-character-replacement/client/index.js": 1701,

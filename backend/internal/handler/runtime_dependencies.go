@@ -53,7 +53,7 @@ type RuntimeDependencies struct {
 	Conversations      *conversation.Service
 	// TextReplay is the archive owned by the runtime; legacy callers use its app facade.
 	TextReplay  textreplay.API
-	BeefTV     *beeftv.Service
+	BeefTV      *beeftv.Service
 	Eagle       *eagle.Client
 	Diagnostics *diagnostics.Service
 	Appearance  *appearance.Service
@@ -208,11 +208,14 @@ func (m modelConfigMethods) SaveLocalModelConfig(value []byte) error {
 	return m.save(value)
 }
 
-func requestModelCapability(c *gin.Context) localapp.ModelCapabilityPort {
+func requestModelCapability(c *gin.Context, fallback any) localapp.ModelCapabilityPort {
 	if dependencies, ok := runtimeDependencies(c); ok && dependencies.ModelCapability != nil {
 		return dependencies.ModelCapability
 	}
-	return modelcatalog.NewCapabilityNormalizer()
+	if center, ok := fallback.(pluginCenter); ok && center.PluginDomain() != nil {
+		return modelcatalog.NewCapabilityNormalizer(center.PluginDomain().LookupWorkflow)
+	}
+	return modelcatalog.NewCapabilityNormalizer(nil)
 }
 
 func requestTextReplay(c *gin.Context, fallback textReplayAPI) textReplayAPI {

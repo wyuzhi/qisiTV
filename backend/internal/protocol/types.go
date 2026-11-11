@@ -162,6 +162,8 @@ type Parameter struct {
 	Required    bool     `json:"required,omitempty"`
 	Description string   `json:"description,omitempty"`
 	Values      []string `json:"values,omitempty"`
+	Min         *int     `json:"min,omitempty"`
+	Max         *int     `json:"max,omitempty"`
 	Mapping     string   `json:"mapping,omitempty"`
 }
 

@@ -129,41 +129,124 @@ export function normalizeModelCapabilityConfig(config: ModelCapabilityConfig): M
     };
 }
 
-function applyProtocolWorkflowVideoCapability(video: VideoCapabilityConfig, workflow: ModelProtocolWorkflow) {
-    const findParam = (mapping: string) => workflow.parameters.find((item) => (item.mapping || item.name) === mapping || item.name === mapping);
-    const ratioParam = findParam("aspectRatio") || findParam("ratio") || findParam("size");
+function normalizeWorkflowStrings(values?: string[]): string[] {
+    const result: string[] = [];
+    for (const raw of values || []) {
+        const trimmed = String(raw ?? "").trim();
+        if (trimmed && !result.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+            result.push(trimmed);
+        }
+    }
+    return result;
+}
+
+function matchWorkflowString(options: string[], target: string): string {
+    const trimmed = target.trim();
+    if (!trimmed) return "";
+    return options.find((item) => item.trim().toLowerCase() === trimmed.toLowerCase()) || "";
+}
+
+function workflowDefaultString(defaults: Record<string, string | number | boolean> | undefined, ...keys: string[]): string {
+    if (!defaults) return "";
+    for (const key of keys) {
+        const trimmedKey = key.trim();
+        if (!trimmedKey) continue;
+        const value = defaults[trimmedKey];
+        const text = typeof value === "string" ? value : typeof value === "number" && Number.isFinite(value) ? String(value) : typeof value === "boolean" ? String(value) : "";
+        if (text.trim()) return text.trim();
+    }
+    return "";
+}
+
+function workflowDefaultInt(defaults: Record<string, string | number | boolean> | undefined, ...keys: string[]): number | undefined {
+    if (!defaults) return undefined;
+    for (const key of keys) {
+        const trimmedKey = key.trim();
+        if (!trimmedKey) continue;
+        const value = defaults[trimmedKey];
+        if (typeof value === "number" && Number.isFinite(value) && Number.isInteger(value)) return value;
+        if (typeof value === "string" && /^-?\d+$/.test(value.trim())) return Number.parseInt(value.trim(), 10);
+    }
+    return undefined;
+}
+
+export function applyProtocolWorkflowVideoCapability(video: VideoCapabilityConfig, workflow: ModelProtocolWorkflow) {
+    const findParam = (...names: string[]) => {
+        for (const target of names) {
+            const targetLower = target.toLowerCase();
+            const found = workflow.parameters.find((item) => {
+                const name = item.name.trim();
+                const mapped = (item.mapping?.trim() || name).toLowerCase();
+                return mapped === targetLower || name.toLowerCase() === targetLower;
+            });
+            if (found) return found;
+        }
+        return undefined;
+    };
+    const ratioParam = findParam("aspectRatio", "ratio", "size");
     const resolutionParam = findParam("resolution");
     const durationParam = findParam("duration");
-    if (ratioParam?.values?.length) {
-        video.ratios = normalizeCapabilityStrings(ratioParam.values);
-        const defRatio = normalizeCapabilityString(workflow.defaults?.[ratioParam.name] ?? workflow.defaults?.aspectRatio ?? workflow.defaults?.ratio);
-        video.defaultRatio = video.ratios.includes(defRatio) ? defRatio : video.ratios[0] || "";
-    } else if (resolutionParam?.values?.length) {
+    const ratios = normalizeWorkflowStrings(ratioParam?.values);
+    const resolutions = normalizeWorkflowStrings(resolutionParam?.values);
+    if (ratios.length) {
+        video.ratios = ratios;
+        const defRatio = workflowDefaultString(workflow.defaults, ratioParam!.name, "aspectRatio", "ratio");
+        video.defaultRatio = matchWorkflowString(video.ratios, defRatio) || video.ratios[0]!;
+    } else if (resolutions.length) {
         video.ratios = [];
         video.defaultRatio = "";
     }
-    if (resolutionParam?.values?.length) {
-        video.resolutions = normalizeCapabilityStrings(resolutionParam.values);
-        const defRes = normalizeCapabilityString(workflow.defaults?.[resolutionParam.name] ?? workflow.defaults?.resolution);
-        video.defaultResolution = video.resolutions.includes(defRes) ? defRes : video.resolutions[0] || "";
+    if (resolutions.length) {
+        video.resolutions = resolutions;
+        const defRes = workflowDefaultString(workflow.defaults, resolutionParam!.name, "resolution");
+        video.defaultResolution = matchWorkflowString(video.resolutions, defRes) || video.resolutions[0]!;
     }
     if (durationParam) {
-        const defDuration = Number(workflow.defaults?.[durationParam.name] ?? workflow.defaults?.duration);
-        const rangeMatch = durationParam.description?.match(/(\d+)\s*[~～-]\s*(\d+)/);
+        const defDuration = workflowDefaultInt(workflow.defaults, durationParam.name, "duration");
         if (durationParam.values?.length) {
-            const values = durationParam.values.map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0);
-            if (values.length) {
-                video.duration = { selection: "enum", values, default: values.includes(defDuration) ? defDuration : values[0]! };
+            const values: number[] = [];
+            for (const raw of durationParam.values) {
+                const trimmed = String(raw ?? "").trim();
+                if (!/^-?\d+$/.test(trimmed)) continue;
+                const parsed = Number.parseInt(trimmed, 10);
+                if (parsed > 0 && !values.includes(parsed)) values.push(parsed);
             }
-        } else if (rangeMatch) {
-            const min = Number(rangeMatch[1]);
-            const max = Number(rangeMatch[2]);
-            const fallbackDefault = Number.isInteger(defDuration) && defDuration >= min && defDuration <= max ? defDuration : Math.min(max, Math.max(min, video.duration.default));
+            if (values.length) {
+                video.duration = { selection: "enum", values, default: defDuration !== undefined && values.includes(defDuration) ? defDuration : values[0]! };
+            }
+        } else if (typeof durationParam.min === "number" && typeof durationParam.max === "number" && durationParam.min >= 1 && durationParam.max >= durationParam.min) {
+            const min = Math.trunc(durationParam.min);
+            const max = Math.trunc(durationParam.max);
+            const fallbackDefault = defDuration !== undefined && defDuration >= min && defDuration <= max ? defDuration : Math.min(max, Math.max(min, video.duration.default));
             video.duration = { selection: "range", min, max, step: 1, default: fallbackDefault };
-        } else if (Number.isInteger(defDuration) && defDuration > 0) {
+        } else if (defDuration !== undefined && defDuration > 0) {
             video.duration = { selection: "enum", values: [defDuration], default: defDuration };
         }
     }
+}
+
+export function hasUserModelCapability(
+    profile?: { capabilitySource?: "user"; capabilityConfig?: ModelCapabilityConfig } | null,
+): boolean {
+    return profile?.capabilitySource === "user" && Boolean(profile.capabilityConfig);
+}
+
+export function capabilityForAssignedProtocol(
+    profile: { model: string; capability?: string; capabilitySource?: "user"; capabilityConfig?: ModelCapabilityConfig },
+    protocol: ModelProtocol | undefined,
+    protocols?: ModelProtocolDefinition[],
+    options?: { keepNonMediaExisting?: boolean },
+): { capabilitySource?: "user"; capabilityConfig?: ModelCapabilityConfig } {
+    if (hasUserModelCapability(profile)) {
+        return { capabilitySource: "user", capabilityConfig: profile.capabilityConfig };
+    }
+    if ((profile.capability === "image" || profile.capability === "video") && protocol) {
+        return { capabilitySource: undefined, capabilityConfig: defaultModelCapabilityConfig(protocol, profile.model, protocols) };
+    }
+    return {
+        capabilitySource: undefined,
+        capabilityConfig: options?.keepNonMediaExisting ? profile.capabilityConfig : undefined,
+    };
 }
 
 export function defaultModelCapabilityConfig(protocol?: ModelProtocol, model = "", protocols?: ModelProtocolDefinition[]): ModelCapabilityConfig {
@@ -173,8 +256,10 @@ export function defaultModelCapabilityConfig(protocol?: ModelProtocol, model = "
         references: { promptMaxChars: 32000, maxImages: 0, maxImageBytes: 0, maxVideos: 0, maxVideoBytes: 0 },
     };
     const video = defaultVideoCapabilityConfig(protocol, model);
-    const workflow = protocols?.length
-        ? (modelProtocolDefinitionFor(protocol, "video", protocols) || modelProtocolDefinition(protocol, protocols))?.workflows?.find((item) => item.id === model && item.capability === "video")
+    const separator = model.lastIndexOf("::");
+    const wantModel = (separator >= 0 ? model.slice(separator + 2) : model).trim();
+    const workflow = protocols?.length && wantModel
+        ? (modelProtocolDefinitionFor(protocol, "video", protocols) || modelProtocolDefinition(protocol, protocols))?.workflows?.find((item) => item.id === wantModel && item.capability === "video")
         : undefined;
     if (workflow) applyProtocolWorkflowVideoCapability(video, workflow);
     return {

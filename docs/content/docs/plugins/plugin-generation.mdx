@@ -168,6 +168,7 @@ JSON 里任何一个值都可以写成表达式。能读到的数据：
 | 名字 | 内容 |
 | --- | --- |
 | `request.*` | 这次生成的内容：`model`、`prompt`、`messages`、`images`、`videos`、`audios`、`aspectRatio`、`resolution`、`duration`、`output`、`providerOptions`、`extra` 等 |
+| `workflow.*` | 当前 `request.model` 命中的 `contributes.workflows` 工作流声明：`id`、`label`、`providerId`、`capability`、`parameters`、`values`、`defaults`，在 `variables`、`validations` 和请求模板里可用 |
 | `vars.*` | 上面定义的变量 |
 | `response.*` | 返回内容，只在 `response` 里可用 |
 | `taskId` | 任务号，在 `poll`、`result` 和 `response` 里可用 |
@@ -232,6 +233,14 @@ JSON 里任何一个值都可以写成表达式。能读到的数据：
   ]
 }
 ```
+
+### 按模型声明参数（`contributes.workflows`）
+
+同一个协议下不同模型（工作流 ID）支持的分辨率枚举或时长范围不同时，在 `contributes.workflows` 按模型列出。设置页和后端能力归一化都会读取它，请求阶段的表达式也能直接读 `workflow.values.<name>` / `workflow.defaults.<name>`，不必把枚举表重复写进 `variables`：
+
+- `id`、`label`、`providerId`、`capability`：模型 ID、显示名、所属协议 ID（须与 `providers[].id` 一致）和能力（如 `video`）。
+- `parameters`：每项包含 `name`、`type`、可选的 `mapping`（对应 `aspectRatio`、`resolution`、`duration` 等标准字段）、离散枚举 `values` 或连续整数区间 `min` / `max`。连续视频时长由结构化 `min` 和 `max` 决定，不从 `description` 文案解析。
+- `defaults`：各参数默认值。
 
 ### 更多例子
 

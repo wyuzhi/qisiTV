@@ -8,9 +8,13 @@ import (
 	"testing"
 
 	"infinite-canvas/backend/internal/app"
+	"infinite-canvas/backend/internal/database"
+	"infinite-canvas/backend/internal/repository"
 	"infinite-canvas/backend/internal/workspace"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestWorkspaceModelConfigReturnsBuiltinBeefTVAndPersistenceMetadata(t *testing.T) {
@@ -219,5 +223,58 @@ func TestWorkspaceModelConfigCapabilityNormalizesDrafts(t *testing.T) {
 				tc.check(t, modelConfigResponseData(t, recorder))
 			}
 		})
+	}
+}
+
+func TestRegisterCanvasAPINormalizesInstalledPluginWorkflow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.MigrateLocalSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	svc := app.NewLocal(repository.New(db), dir)
+	t.Cleanup(func() { _ = svc.Close() })
+	if _, err := svc.LocalWorkspaceOwner(); err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	router.Use(WorkspaceMiddleware(workspace.Context{ID: "local", DataDir: dir}))
+	RegisterCanvasAPI(router.Group("/api"), svc)
+
+	raw, err := json.Marshal(map[string]any{
+		"category": "video",
+		"protocol": "autodl-comfyui",
+		"model":    "minimax_h3_b99_003_12s",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/workspace/model-config/capability", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	data := modelConfigResponseData(t, recorder)
+	video, ok := data["video"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing video capability: %#v", data)
+	}
+	ratios, _ := video["ratios"].([]any)
+	if len(ratios) != 0 || video["defaultRatio"] != "" {
+		t.Fatalf("ratios = %#v (default %#v), want empty", ratios, video["defaultRatio"])
+	}
+	resolutions, _ := video["resolutions"].([]any)
+	if len(resolutions) != 3 || video["defaultResolution"] != "736p竖" {
+		t.Fatalf("resolutions = %#v (default %#v), want 3 directional 736p tiers", resolutions, video["defaultResolution"])
+	}
+	duration, _ := video["duration"].(map[string]any)
+	if duration["selection"] != "range" || duration["min"] != float64(1) || duration["max"] != float64(12) || duration["default"] != float64(5) {
+		t.Fatalf("duration = %#v, want range 1..12 default 5", duration)
 	}
 }

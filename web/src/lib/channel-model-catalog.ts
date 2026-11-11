@@ -1,4 +1,4 @@
-import { defaultModelCapabilityConfig, sanitizeServerImageCapability, versionedVideoCapability, type ModelCapabilityConfig, type VideoCapabilityConfig, type ImageCapabilityConfig } from "@/lib/model-capabilities";
+import { defaultModelCapabilityConfig, hasUserModelCapability, sanitizeServerImageCapability, versionedVideoCapability, type ModelCapabilityConfig, type VideoCapabilityConfig, type ImageCapabilityConfig } from "@/lib/model-capabilities";
 import { modelProtocolCapability, protocolForModelCatalog, protocolForBeefTVCatalog, type ModelProtocol } from "@/lib/model-protocols";
 import type { ModelChannel } from "@/stores/use-config-store";
 import { isBeefTVEndpoint } from "@/lib/beeftv-video-contracts";
@@ -180,7 +180,7 @@ export function mergeFetchedChannelModelProfiles(channel: ModelChannel, catalog:
             const protocol = inferredProtocol || existing.protocol;
             const capability = inferredCapability || existing.capability;
             const capabilityChanged = capability !== existing.capability;
-            const keepUserCapability = !managed && existing.capabilitySource === "user" && !capabilityChanged && Boolean(existing.capabilityConfig);
+            const keepUserCapability = !managed && hasUserModelCapability(existing) && !capabilityChanged;
             const sourcedVideo = capability === "video" && !keepUserCapability ? catalogVideo : null;
             const keepSourced = keepUserCapability || (capability === "video" && Boolean(versionedVideoCapability(existing.capabilityConfig?.video, existing.videoCapabilitiesVersion)) && !sourcedVideo);
             const missingManagedVideo = managed && capability === "video" && !sourcedVideo && !keepSourced;
@@ -236,6 +236,36 @@ export function mergeFetchedChannelModelProfiles(channel: ModelChannel, catalog:
         const { mediaCapabilities: _oldCapabilities, mediaCapabilitiesVersion: _oldVersion, ...rest } = profile;
         return { ...rest, ...fields };
     });
+}
+
+export function applyFetchedChannelModelCatalog(
+    channel: ModelChannel,
+    result: { models: string[]; catalog: ChannelModelCatalogItem[] },
+): ModelChannel {
+    const unique = (models: string[]) => Array.from(new Set(models.map((model) => model.trim()).filter(Boolean)));
+    const profiles = mergeFetchedChannelModelProfiles(channel, result.catalog);
+    if (channel.id === "beeftv") return { ...channel, models: unique(result.models), modelProfiles: profiles };
+    const existing = new Map((channel.modelProfiles || []).map((profile) => [profile.model, profile]));
+    const catalogByModel = new Map(result.catalog.map((item) => [item.id, item]));
+    // Refresh updates the catalog without silently enabling new models or removing manual ones.
+    return {
+        ...channel,
+        models: channel.models.length ? channel.models : unique(result.models),
+        modelProfiles: profiles.map((profile) => {
+            const previous = existing.get(profile.model);
+            if (!previous) return profile;
+            const item = catalogByModel.get(profile.model);
+            const hasServerCapability =
+                Boolean(item && ((item.imageCapabilitiesVersion && sanitizeServerImageCapability(item.imageCapabilities)) || versionedVideoCapability(item.videoCapabilities, item.videoCapabilitiesVersion))) ||
+                Boolean(item && hasCatalogCapabilityConfig(item));
+            if (hasServerCapability && !hasUserModelCapability(previous)) {
+                return profile;
+            }
+            if (seedancePortraitModel(profile.model)) return { ...previous, videoPricing: profile.videoPricing ?? null };
+            return profile.videoPricing ? { ...previous, videoPricing: profile.videoPricing } : previous;
+        }).concat((channel.modelProfiles || []).filter((profile) => !profiles.some((item) => item.model === profile.model))
+            .map((profile) => seedancePortraitModel(profile.model) ? { ...profile, videoPricing: null } : profile)),
+    };
 }
 
 function protocolTemplateForNewCatalogModel(capability: ChannelModelProfile["capability"] | undefined, channelProtocol: ModelProtocol | undefined): ModelProtocol | undefined {

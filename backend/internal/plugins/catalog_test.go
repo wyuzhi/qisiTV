@@ -175,3 +175,38 @@ func TestOnlyShippedArchiveInterfacesAreMarkedBuiltIn(t *testing.T) {
 		t.Fatal("a bundled app plugin with its own settings stays in the plugin center")
 	}
 }
+
+func TestLookupWorkflowMatchesProviderCatalogContract(t *testing.T) {
+	runtime, err := NewRuntime(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(runtime, nil)
+	raw := []byte(`{"apiVersion":"beeftv.plugin/v1","id":"wf-contract-plugin","version":"1.0.0","name":"wf-contract-plugin","author":"Test","documentation":"# wf","contributes":{"providers":[{"id":"wf-provider","legacyAliases":["wf-provider-legacy"],"label":"WF Provider","capabilities":["video"],"scopes":["user.custom-channel","canvas"],"create":{"method":"POST","path":"/tasks","fields":{"prompt":"request.prompt"}},"response":{"statusPaths":["status"]}}],"workflows":[{"id":"exact_wf","label":"Exact","providerId":"wf-provider","capability":"video"},{"id":"orphan_wf","label":"Orphan","providerId":"","capability":"video"},{"id":"untyped_wf","label":"Untyped","providerId":"wf-provider","capability":""}]}}`)
+	if _, err := svc.Install(testPluginPackage(t, raw), "wf-contract-plugin.beeftv-plugin"); err != nil {
+		t.Fatal(err)
+	}
+
+	if wf, ok := svc.LookupWorkflow("wf-provider", protocol.CapabilityVideo, "my-chan::exact_wf"); !ok || wf.ID != "exact_wf" {
+		t.Fatalf("expected exact workflow match, got (%#v, %v)", wf, ok)
+	}
+	if wf, ok := svc.LookupWorkflow("wf-provider-legacy", protocol.CapabilityVideo, "exact_wf"); !ok || wf.ID != "exact_wf" {
+		t.Fatalf("expected legacy alias workflow match, got (%#v, %v)", wf, ok)
+	}
+	if _, ok := svc.LookupWorkflow("wf-provider", protocol.CapabilityVideo, "EXACT_WF"); ok {
+		t.Fatal("LookupWorkflow matched uppercase model ID that frontend catalog cannot select")
+	}
+	if _, ok := svc.LookupWorkflow("wf-provider", protocol.CapabilityVideo, "orphan_wf"); ok {
+		t.Fatal("LookupWorkflow matched empty-providerId workflow that ProviderCatalog never exposes")
+	}
+	if _, ok := svc.LookupWorkflow("wf-provider", protocol.CapabilityVideo, "untyped_wf"); ok {
+		t.Fatal("LookupWorkflow matched empty-capability workflow")
+	}
+	if _, ok := svc.LookupWorkflow("wf-provider", "", "exact_wf"); ok {
+		t.Fatal("LookupWorkflow matched empty requested capability")
+	}
+	item := findProvider(svc.ProviderCatalog(string(protocol.SurfaceCanvas), string(protocol.CapabilityVideo), false), "wf-provider")
+	if item == nil || len(item.Workflows) != 1 || item.Workflows[0].ID != "exact_wf" {
+		t.Fatalf("ProviderCatalog workflows = %#v, want only exact_wf", item)
+	}
+}

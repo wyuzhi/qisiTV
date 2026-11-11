@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"infinite-canvas/backend/internal/model"
+	"infinite-canvas/backend/internal/modelcatalog"
 	localproject "infinite-canvas/backend/internal/project"
 	localtask "infinite-canvas/backend/internal/task"
 )
@@ -43,14 +44,18 @@ func (fakePorts) RecoverTask(context.Context, string, string) (*model.Task, erro
 func (fakePorts) CreateTask(string, localtask.CreateRequest) (*model.Task, error) { return nil, nil }
 func (fakePorts) ReadLocalModelConfig() ([]byte, error)                           { return nil, nil }
 func (fakePorts) SaveLocalModelConfig([]byte) error                               { return nil }
-func (fakePorts) StartWorker()                                                    {}
-func (fakePorts) StopWorker(context.Context) error                                { return nil }
-func (fakePorts) Close() error                                                    { return nil }
+func (fakePorts) NormalizeModelCapabilityDraft(modelcatalog.ModelCapabilityDraft) (*modelcatalog.ModelCapabilityConfig, error) {
+	return nil, nil
+}
+func (fakePorts) StartWorker()                     {}
+func (fakePorts) StopWorker(context.Context) error { return nil }
+func (fakePorts) Close() error                     { return nil }
 
 var (
-	_ TaskPort       = fakePorts{}
-	_ GenerationPort = fakePorts{}
-	_ TaskPort       = (*localtask.Service)(nil)
+	_ TaskPort            = fakePorts{}
+	_ GenerationPort      = fakePorts{}
+	_ ModelCapabilityPort = fakePorts{}
+	_ TaskPort            = (*localtask.Service)(nil)
 )
 
 // 旧内置 Agent 的空端口已移除；这里锁定它不会以任何形式回到组合根。
@@ -71,7 +76,7 @@ func TestNewRequiresEveryLocalPort(t *testing.T) {
 	ports := fakePorts{}
 	valid := Options{
 		Workspace: ports, Projects: ports, Assets: ports, Tasks: ports,
-		Generation: ports, ProviderConfig: ports, Lifecycle: ports,
+		Generation: ports, ProviderConfig: ports, ModelCapability: ports, Lifecycle: ports,
 	}
 	app, err := New(valid)
 	if err != nil || app == nil {
@@ -88,6 +93,7 @@ func TestNewRequiresEveryLocalPort(t *testing.T) {
 		{"tasks", func(o *Options) { o.Tasks = nil }},
 		{"generation", func(o *Options) { o.Generation = nil }},
 		{"provider config", func(o *Options) { o.ProviderConfig = nil }},
+		{"model capability", func(o *Options) { o.ModelCapability = nil }},
 		{"lifecycle", func(o *Options) { o.Lifecycle = nil }},
 	}
 	for _, test := range tests {
