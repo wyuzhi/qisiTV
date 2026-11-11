@@ -10,7 +10,7 @@
 
 ## 1. 目录结构
 
-- `sim-go.mjs`：内存版 Go 业务权威模拟器（`createSimGo`）。加载真实的 `operation-descriptors.fixture.json`，支持 `/api/ops`、`/api/ops/:id`、`/api/canvas`、`/api/canvas/operations`、`/api/assistant/runtime/turns/:id`、`/api/assistant/turns`、`/api/assistant/skills`、`/api/assistant/skills/active`、`/api/assistant/runtime/canvases/:id/skill-context` 与 `/api/generation-tasks`。
+- `sim-go.mjs`：内存版 Go 业务权威模拟器（`createSimGo`）。加载真实的 `operation-descriptors.fixture.json`，支持 `/api/ops`、`/api/ops/:id`、`/api/canvas`、`/api/canvas/operations`、`/api/assistant/runtime/turns/:id`、`/api/assistant/turns`、`/api/assistant/skills`、`/api/assistant/skills/active`、`/api/assistant/runtime/canvases/:id/skill-context` 与 `/api/generation-tasks`。入口只组装对外接口，实现按职责放在 `sim-go/`，各模块显式接收同一份共享状态（`state.mjs`）：画布读写 `canvas-store.mjs` 与 `canvas-ops.mjs`、分镜 `storyboard.mjs`、生成提案与提交 `generation.mjs`、任务生命周期与耗时 `tasks.mjs`、媒体与素材 `media.mjs`、技能 `skills.mjs`、回合授权与撤销 `turns.mjs`、操作分发 `operations.mjs`、HTTP 路由 `http.mjs`。
 - `scenarios.mjs`（及 `scenarios/index.mjs`）：11 个固定评测场景定义、确定性检查项（`checks`）与本地 Fake OpenAI Chat Completions SSE 模型桩（`createFakeModelServer`）。S8–S11 的场景定义与检查项在 `scenarios/real-failures.mjs`，替代场景 R1/R3/R6/R7/L1 在 `scenarios/parity.mjs`，共用纯函数在 `scenarios/shared.mjs`。
 - `run-eval.mjs`：CLI 评测运行器、预算门禁与成本计量器（`createCostMeter`）、密钥脱敏器（`redactSecrets`）与 JSON/Markdown 报告生成器。
 - `run-external-eval.mjs`：外部 Agent 对照驱动，见下文「外部 Agent 对照」。
