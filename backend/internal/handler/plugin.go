@@ -120,6 +120,10 @@ func RegisterPluginRoutes(r *gin.RouterGroup, center pluginCenter, hosted ...boo
 		}
 		ok(c, gin.H{"items": items})
 	})
+	pluginRoutes.GET("/market/curated", func(c *gin.Context) {
+		items := center.PluginDomain().CuratedMarket(c.Request.Context(), c.Query("registry"), c.Query("cached") == "1")
+		ok(c, gin.H{"items": items})
+	})
 	pluginRoutes.GET("/updates", func(c *gin.Context) {
 		ok(c, center.PluginDomain().CheckUpdates(c.Request.Context(), c.Query("registry")))
 	})

@@ -14,9 +14,11 @@ let failSave = false;
 let release: (() => void) | undefined;
 let holdSave = false;
 let connectionState = "disconnected";
+let startCalls = 0;
 let disconnectCalls = 0;
 let catalogReadFailures = 0;
-beforeEach(() => { saved = structuredClone(initial); writes = 0; submitted = []; failSave = false; holdSave = false; release = undefined; });
+let failFirstStartCatalogRead = false;
+beforeEach(() => { saved = structuredClone(initial); writes = 0; submitted = []; failSave = false; holdSave = false; release = undefined; connectionState = "disconnected"; startCalls = 0; disconnectCalls = 0; catalogReadFailures = 0; failFirstStartCatalogRead = false; });
 beforeAll(async () => {
     const build = await Bun.build({ entrypoints: [import.meta.dir + "/fixtures/assistant-model-picker-harness.tsx"], target: "browser", define: { "import.meta.env.DEV": "false", "import.meta.env.PROD": "true", "import.meta.env.MODE": '"production"', "import.meta.env.VITE_CANVAS_LOCAL_MODE": '"true"', "import.meta.env.VITE_CANVAS_BACKEND_URL": '"/api"', "process.env.NODE_ENV": '"production"' }, plugins: [{ name: "source", setup(builder) {
         // Vite owns icon glob expansion; this Bun harness covers selection and persistence.
@@ -41,9 +43,9 @@ beforeAll(async () => {
             const body = await req.json(); saved = body.config;
             return ok({ saved: true, revision: writes });
         }
-        if (path.endsWith("/beeftv/connection/start")) { connectionState = "connected"; saved.assistantModel = "beeftv::gpt-6-astra"; catalogReadFailures = 1; return ok({ state: connectionState }); }
+        if (path.endsWith("/beeftv/connection/start")) { startCalls++; connectionState = "connected"; saved.assistantModel = "beeftv::gpt-6-astra"; if (failFirstStartCatalogRead) { failFirstStartCatalogRead = false; catalogReadFailures = 1; } return ok({ state: connectionState, hasCredential: true }); }
         if (path.endsWith("/beeftv/connection/disconnect")) { disconnectCalls++; connectionState = "disconnected"; return ok({ state: connectionState }); }
-        if (path.endsWith("/beeftv/connection")) return ok({ state: connectionState });
+        if (path.endsWith("/beeftv/connection")) return ok({ state: connectionState, hasCredential: connectionState === "connected" || connectionState === "connection_error", catalogFailed: connectionState === "connection_error" });
         if (path.endsWith("/assistant/ui-session")) return ok({ token: "synthetic-only", expiresAt: new Date(Date.now() + 1800000).toISOString() });
         if (path.endsWith("/assistant/status")) return ok({ available: true, model: { id: saved.assistantModel.split("::")[1], channelId: "beeftv" } });
         if (path.endsWith("/assistant/history")) return ok({ sessionId: "s1", turns: [] });
@@ -100,7 +102,7 @@ test("connected account can disconnect and expose the authorization action again
 }, 30000);
 
 test("settings retries failed connected catalog read and retains authorization default intent", async () => {
-    connectionState = "disconnected"; catalogReadFailures = 0;
+    connectionState = "disconnected"; catalogReadFailures = 0; failFirstStartCatalogRead = true;
     const page = await browser.newPage(); await page.goto(new URL("/settings", server.url).toString());
     await page.getByRole("button", { name: "连接 BeefTV", exact: true }).click();
     const retry = page.getByRole("button", { name: "重试更新模型列表" });
@@ -109,6 +111,21 @@ test("settings retries failed connected catalog read and retains authorization d
     await page.getByRole("combobox", { name: "助手模型" }).click();
     expect(await page.locator('.ant-select-item-option-selected').innerText()).toContain("gpt-6-astra");
     await page.close();
+}, 30000);
+
+test("settings channel retry button finalizes saved credential when connection_error has catalogFailed", async () => {
+    connectionState = "connection_error"; catalogReadFailures = 0;
+    const page = await browser.newPage();
+    try {
+        await page.goto(new URL("/settings", server.url).toString());
+        const retry = page.getByRole("button", { name: "重试更新模型列表" });
+        await retry.waitFor();
+        await retry.click();
+        await retry.waitFor({ state: "hidden" });
+        expect(startCalls).toBe(1);
+    } finally {
+        await page.close();
+    }
 }, 30000);
 
 test("picker keyboard selection persists, respects busy and fits both themes at 390px", async () => {

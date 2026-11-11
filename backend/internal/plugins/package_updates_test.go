@@ -144,6 +144,20 @@ func TestOneLineRegistryEntriesAreFilledFromNpm(t *testing.T) {
 	}
 }
 
+func TestCuratedMarketReturnsLocalEntriesBeforePackageMetadataRefresh(t *testing.T) {
+	npmFixture(t, map[string]string{"beeftv-plugin-community": "0.3.0"})
+	setCuratedRegistryForTest(`{"plugins":[{"id":"cached-plugin","name":"Cached plugin","version":"1.0.0","recommended":true}],"packages":["beeftv-plugin-community"]}`)
+	var svc *Service
+	cached := svc.CuratedMarket(context.Background(), NpmMirrorRegistry, true)
+	if len(cached) != 1 || cached[0].ID != "cached-plugin" {
+		t.Fatalf("local recommendations = %+v", cached)
+	}
+	refreshed := svc.CuratedMarket(context.Background(), NpmMirrorRegistry, false)
+	if len(refreshed) != 2 || refreshed[1].ID != "beeftv-plugin-community" {
+		t.Fatalf("refreshed recommendations = %+v", refreshed)
+	}
+}
+
 func TestVersionedInstallUpdatesToLatestByHandOnly(t *testing.T) {
 	npmFixture(t, map[string]string{"beeftv-plugin-held": "0.2.0"})
 	rt, err := NewRuntime(t.TempDir())

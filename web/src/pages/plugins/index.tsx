@@ -1,11 +1,15 @@
-import { CollectionToolbar } from "@/components/layout/collection-toolbar";
-import { App, Button, Input, Modal, Select, Typography } from "antd";
+import { CollectionHeader } from "@/components/layout/collection-header";
+import { WorkspacePage } from "@/components/layout/workspace-page";
+import { App, Button, Modal, Select, Typography } from "antd";
 import { Switch } from "@/components/ui/base/switch";
-import { Cable, CalendarDays, Clock3, Plus, PlugZap, RefreshCw, Search, Settings2, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Cable, PlugZap, RefreshCw, Settings2, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { EmptyState } from "@/components/ui/product/empty-state";
-import { PageHeader } from "@/components/layout/workspace-page";
+import { AppModal } from "@/components/ui/product/app-modal";
+import { PluginMarkdown } from "./plugin-markdown";
+import { PluginCard } from "./plugin-card";
+
 import { listRegisteredPlugins } from "@/lib/plugins/plugin-registry";
 import "@/lib/plugins/builtin";
 import { EAGLE_PLUGIN_ID } from "@/lib/plugins/builtin/eagle";
@@ -19,21 +23,18 @@ import { EaglePluginSettingsPanel } from "@/pages/plugins/eagle";
 import {
     fetchPluginUpdates,
     installPluginPackage,
-    setPluginPlatformEnabled,
-    setUserPluginEnabled,
     uninstallPlugin,
     updatePluginPackage,
     type BackendPlugin,
-    type PluginState,
     type PluginUpdateCheck,
 } from "@/services/api/plugins";
-import { syncPluginsFromBackend } from "@/services/plugin-sync";
+import { setPluginActivation, syncPluginsFromBackend } from "@/services/plugin-sync";
 import { usePluginStore } from "@/stores/use-plugin-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { isLocalRuntimeMode } from "@/lib/runtime-mode";
 import { workspaceCapabilities } from "@/services/workspace-mode";
 
-import { PLUGIN_PERMISSION_LABELS } from "./plugin-documentation";
+import { PLUGIN_PERMISSION_LABELS, PLUGIN_ORIGIN_LABELS, pluginOrigin } from "./plugin-documentation";
 import { PluginDetailsModal } from "./plugin-documentation-modals";
 import { isLocalFolderSource, PluginInstallConfirmModal, pluginUpdateRequest } from "./plugin-install-confirm-modal";
 import { PluginFieldsConfigForm } from "./plugin-fields-config-form";
@@ -55,9 +56,7 @@ const surfaceLabels: Record<string, string> = {
 
 const permissionLabels = PLUGIN_PERMISSION_LABELS;
 
-const pluginDateFormatter = new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "short", day: "numeric" });
-
-// 随应用发布的接口（各家模型的请求格式）是内置能力，在模型服务里选择，不在插件中心列出。
+// 随应用发布的接口（各家模型的请求格式）是内置能力，在模型服务里选择，不在插件列出。
 // 用户上传的接口包是他们装的插件；被停用的内置接口也放这里，免得停用后再也找不回来。
 const interfaceSectionMeta = [
     { key: "interface", label: "接口插件", description: "提供模型接口的插件", icon: Cable },
@@ -73,7 +72,6 @@ export default function PluginsPage() {
     const ensurePlugin = usePluginStore((state) => state.ensurePlugin);
     const setEnabled = usePluginStore((state) => state.setEnabled);
     const removePlugin = usePluginStore((state) => state.removePlugin);
-    const setPluginStates = usePluginStore((state) => state.setPluginStates);
     const pluginStates = usePluginStore((state) => state.pluginStates);
     const updateConfig = usePluginStore((state) => state.updateConfig);
     const builtinPlugins = useMemo(() => listRegisteredPlugins(), []);
@@ -92,7 +90,7 @@ export default function PluginsPage() {
     const [search, setSearch] = useState("");
     const [categoryFilter, setCategoryFilter] = useState("all");
     const [statusFilter, setStatusFilter] = useState<"all" | "enabled" | "disabled">("all");
-    const [trustFilter, setTrustFilter] = useState<"all" | "trusted">("all");
+    const [originFilter, setOriginFilter] = useState<"all" | keyof typeof PLUGIN_ORIGIN_LABELS>("all");
 
     useEffect(() => {
         for (const plugin of builtinPlugins) ensurePlugin(plugin.manifest);
@@ -119,7 +117,7 @@ export default function PluginsPage() {
         } catch (error) {
             // 读取失败不清空列表：同时发出的另一次读取可能已经成功。
             if (!localRuntime) {
-                message.error(error instanceof Error ? error.message : "读取插件中心失败");
+                message.error(error instanceof Error ? error.message : "读取插件失败");
             }
         } finally {
             setBackendPluginsLoading(false);
@@ -154,12 +152,12 @@ export default function PluginsPage() {
             const searchableText = [manifest.name, manifest.description, manifest.author, manifest.id, ...contributionKinds.map((kind) => categoryLabels[kind] || kind)].filter(Boolean).join(" ").toLocaleLowerCase();
             if (normalizedSearch && !searchableText.includes(normalizedSearch)) return false;
             if (categoryFilter !== "all" && !pluginMatchesCategory(manifest, categoryFilter)) return false;
-            if (trustFilter === "trusted" && !manifest.trusted) return false;
+            if (originFilter !== "all" && pluginOrigin(plugin) !== originFilter) return false;
             if (statusFilter === "enabled" && !enabled) return false;
             if (statusFilter === "disabled" && enabled) return false;
             return true;
         });
-    }, [backendPluginById, categoryFilter, features.systemPluginsVisibleToUsers, installations, localRuntime, pluginStates, registeredPlugins, search, statusFilter, trustFilter, user?.role]);
+    }, [backendPluginById, categoryFilter, features.systemPluginsVisibleToUsers, installations, localRuntime, pluginStates, registeredPlugins, search, statusFilter, originFilter, user?.role]);
 
     const pluginSections = useMemo(
         () =>
@@ -224,11 +222,7 @@ export default function PluginsPage() {
                 message.success(`${plugin.manifest.name}${enabled ? "已启用" : "已停用"}`);
                 return;
             }
-            const next = remote?.management.activationScope === "system"
-                ? await setPluginPlatformEnabled(plugin.manifest.id, enabled)
-                : await setUserPluginEnabled(plugin.manifest.id, enabled);
-            setEnabled(plugin.manifest.id, next.effectiveEnabled ?? enabled);
-            setPluginStates({ ...usePluginStore.getState().pluginStates, [next.pluginId]: next });
+            await setPluginActivation(plugin.manifest.id, enabled, remote?.management.activationScope);
             message.success(`${plugin.manifest.name}${enabled ? "已启用" : "已停用"}`);
         } catch (error) {
             if (localRuntime) {
@@ -323,117 +317,34 @@ export default function PluginsPage() {
         : undefined;
 
     return (
-        <main className="app-workspace-page plugins-page flex h-full min-h-0 flex-col text-foreground">
-            <div ref={scrollContainerRef} className="app-workspace-scroll min-h-0 flex-1 overflow-y-auto">
+        <WorkspacePage className="collection-page plugins-page" scroll={false}>
+            <div ref={scrollContainerRef} className="app-workspace-scroll h-full min-h-0 overflow-y-auto">
                 <div className="plugins-page-layout">
-                    <aside className="plugins-sidebar" aria-label="插件分类">
-                        <div className="plugins-sidebar-heading">
-                            <PageHeader title="插件中心" description="连接模型、素材与工作流，拓展你的创作工具。" />
-                        </div>
-                        <nav className="plugins-sidebar-nav">
-                            <button type="button" className={`plugins-sidebar-item${categoryFilter === "all" ? " is-active" : ""}`} aria-current={categoryFilter === "all" ? "page" : undefined} onClick={() => selectCategory("all")}>
-                                <span className="plugins-sidebar-item-label">
-                                    <PlugZap className="size-4" />
-                                    全部插件
-                                </span>
-                                <span>{categoryCounts.all}</span>
-                            </button>
-                            {visibleProtocolSectionMeta.filter((section) => (categoryCounts[section.key] || 0) > 0 || categoryFilter === section.key).map((section) => {
-                                const SectionIcon = section.icon;
-                                return (
-                                    <button
-                                        key={section.key}
-                                        type="button"
-                                        className={`plugins-sidebar-item${categoryFilter === section.key ? " is-active" : ""}`}
-                                        aria-current={categoryFilter === section.key ? "page" : undefined}
-                                        onClick={() => selectCategory(section.key)}
-                                    >
-                                        <span className="plugins-sidebar-item-label">
-                                            <SectionIcon className="size-4" />
-                                            {section.label}
-                                        </span>
-                                        <span>{categoryCounts[section.key] || 0}</span>
-                                    </button>
-                                );
-                            })}
-                            <button type="button" className={`plugins-sidebar-item${categoryFilter === "other" ? " is-active" : ""}`} aria-current={categoryFilter === "other" ? "page" : undefined} onClick={() => selectCategory("other")}>
-                                <span className="plugins-sidebar-item-label">
-                                    <PlugZap className="size-4" />
-                                    应用插件
-                                </span>
-                                <span>{categoryCounts.other}</span>
-                            </button>
-                            {pluginCenterSections.map((entry) => {
-                                const slotKey = `slot:${entry.pluginId}:${entry.payload.id}`;
-                                return (
-                                    <button
-                                        key={slotKey}
-                                        type="button"
-                                        data-testid={`plugins-sidebar-slot-${entry.pluginId}-${entry.payload.id}`}
-                                        className={`plugins-sidebar-item${categoryFilter === slotKey ? " is-active" : ""}`}
-                                        aria-current={categoryFilter === slotKey ? "page" : undefined}
-                                        onClick={() => selectCategory(slotKey)}
-                                    >
-                                        <span className="plugins-sidebar-item-label">
-                                            {entry.payload.icon ?? <PlugZap className="size-4" />}
-                                            {entry.payload.label}
-                                        </span>
-                                    </button>
-                                );
-                            })}
-                        </nav>
-                    </aside>
+                    <CollectionHeader title="插件" navigationLabel="插件分类" value={categoryFilter} onChange={selectCategory}
+                        tabs={[
+                            { value: "all", label: "全部", count: categoryCounts.all },
+                            ...visibleProtocolSectionMeta.filter(section => (categoryCounts[section.key] || 0) > 0 || categoryFilter === section.key).map(section => ({ value: section.key, label: section.label, count: categoryCounts[section.key] || 0 })),
+                            { value: "other", label: "应用插件", count: categoryCounts.other },
+                            ...pluginCenterSections.map(entry => ({ value: `slot:${entry.pluginId}:${entry.payload.id}`, label: entry.payload.label })),
+                        ]}
+                        search={activeCustomSection ? undefined : { value: search, onChange: setSearch, placeholder: "搜索插件名称、描述或作者" }}
+                        actions={<button type="button" className="assets-header-compact-button" aria-label="刷新插件" title="刷新插件" disabled={backendPluginsLoading} onClick={() => void reloadBackendPlugins()}><RefreshCw className={backendPluginsLoading ? "size-4 animate-spin" : "size-4"} /></button>}
+                        primaryAction={<button type="button" className="collection-header-create" onClick={() => { setInstallPendingRequest(null); setInstallModalOpen(true); }}>安装</button>}
+                        trailing={activeCustomSection ? null : <div className="plugins-header-filters">
+                            <Select value={statusFilter} options={[{ value: "all", label: "全部状态" }, { value: "enabled", label: "已启用" }, { value: "disabled", label: "已停用" }]} onChange={setStatusFilter} aria-label="按状态筛选" />
+                            <Select value={originFilter} options={[{ value: "all", label: "全部来源" }, ...Object.entries(PLUGIN_ORIGIN_LABELS).map(([value, label]) => ({ value, label }))]} onChange={setOriginFilter} aria-label="按来源筛选" />
+                        </div>}
+                    />
                     <div className="plugins-page-content">
-                        <CollectionToolbar label="插件筛选" trailing={<div className="plugins-toolbar-actions flex items-center gap-2">
-                                <Button
-                                    type="primary"
-                                    icon={<Plus className="size-4" />}
-                                    onClick={() => {
-                                        setInstallPendingRequest(null);
-                                        setInstallModalOpen(true);
-                                    }}
-                                >
-                                    安装插件
-                                </Button>
-                                <Button icon={<RefreshCw className="size-4" />} loading={backendPluginsLoading} onClick={() => void reloadBackendPlugins()}>
-                                    刷新插件
-                                </Button>
-                            </div>}>
-                            <Input
-                                className="plugins-search"
-                                prefix={<Search className="size-4 text-foreground/38" aria-hidden="true" />}
-                                value={search}
-                                allowClear
-                                placeholder="搜索插件名称、描述或作者"
-                                onChange={(event) => setSearch(event.target.value)}
-                            />
-                            <Select
-                                className="plugins-filter"
-                                value={statusFilter}
-                                options={[
-                                    { value: "all", label: "全部状态" },
-                                    { value: "enabled", label: "已启用" },
-                                    { value: "disabled", label: "已停用" },
-                                ]}
-                                onChange={(value) => setStatusFilter(value as "all" | "enabled" | "disabled")}
-                                aria-label="按状态筛选"
-                            />
-                            <Select
-                                className="plugins-filter"
-                                value={trustFilter}
-                                options={[
-                                    { value: "all", label: "全部来源" },
-                                    { value: "trusted", label: "可信插件" },
-                                ]}
-                                onChange={(value) => setTrustFilter(value as "all" | "trusted")}
-                                aria-label="按来源筛选"
-                            />
-                        </CollectionToolbar>
-
                         {activeCustomSection ? (
                             <section className="plugin-section">
                                 <activeCustomSection.payload.component
                                     pluginId={activeCustomSection.pluginId}
+                                    DetailsModal={AppModal}
+                                    Markdown={PluginMarkdown}
+                                    RegistrySelect={Select}
+                                    Card={PluginCard}
+                                    Button={Button}
                                     installedPlugins={registeredPlugins}
                                     pluginStates={pluginStates}
                                     reloadPlugins={reloadBackendPlugins}
@@ -446,7 +357,6 @@ export default function PluginsPage() {
                         ) : filteredPlugins.length ? (
                             <div className="plugins-sections">
                                 {pluginSections.map((section) => {
-                                    const SectionIcon = section.icon;
                                     return (
                                         <section
                                             key={section.key}
@@ -455,12 +365,8 @@ export default function PluginsPage() {
                                             data-category={section.key === "image" ? "creative" : section.key === "video" ? "drama" : section.key === "audio" ? "social" : undefined}
                                         >
                                             <header className="plugin-section-heading">
-                                                <span className="plugin-section-icon">
-                                                    <SectionIcon className="size-4" />
-                                                </span>
                                                 <div>
                                                     <h2>{section.label}</h2>
-                                                    <p>{section.description}</p>
                                                 </div>
                                                 <span className="plugin-section-count">{section.plugins.length}</span>
                                             </header>
@@ -470,89 +376,31 @@ export default function PluginsPage() {
                                                         const installation = installations.find((item) => item.manifest.id === plugin.manifest.id);
                                                         const remote = backendPluginById.get(plugin.manifest.id);
                                                         const enabled = isPluginEnabled(plugin, installation);
-                                                        const trusted = Boolean(plugin.manifest.trusted);
                                                         const state = pluginStates[plugin.manifest.id];
-                                                        const sourceLabel = pluginSourceLabel(plugin, state);
+                                                        const sourceLabel = PLUGIN_ORIGIN_LABELS[pluginOrigin(plugin)];
                                                         const canConfigure = canConfigurePlugin(plugin);
                                                         const canToggle = localRuntime || user?.role === "admin" ? true : Boolean(state?.canToggle);
                                                         const canUninstall = Boolean(remote && remote.source !== "bundled" && remote.source !== "system" && remote.source !== "official");
                                                         return (
-                                                            <section key={plugin.manifest.id} className={`product-collection-card plugin-card library-card-surface${trusted ? " is-trusted" : ""}`}>
-                                                                <button
-                                                                    type="button"
-                                                                    className="plugin-card-main"
-                                                                    aria-label={`查看${plugin.manifest.name}文档`}
-                                                                    onClick={(event) => {
+                                                            <PluginCard
+                                                                key={plugin.manifest.id}
+                                                                name={plugin.manifest.name}
+                                                                description={plugin.manifest.description}
+                                                                sourceLabel={sourceLabel}
+                                                                status={!state?.platformAvailable && state?.blockedReason ? state.blockedReason : enabled ? "已启用" : "已停用"}
+                                                                openLabel={`查看${plugin.manifest.name}文档`}
+                                                                onOpen={(event) => {
                                                                         const openedByKeyboard = event.detail === 0;
                                                                         setDetailsRestoreFocus(openedByKeyboard);
                                                                         setDetailsPluginId(plugin.manifest.id);
                                                                         if (!openedByKeyboard) event.currentTarget.blur();
-                                                                    }}
-                                                                >
-                                                                    <div className="plugin-card-heading">
-                                                                        <span className={`plugin-icon-tile${trusted ? " is-trusted" : ""}`} aria-hidden="true">
-                                                                            <SectionIcon className="size-5" />
-                                                                        </span>
-                                                                        <div className="min-w-0 flex-1">
-                                                                            <div className="plugin-card-title-row">
-                                                                                <h3>{plugin.manifest.name}</h3>
-                                                                                <span className="plugin-version">v{plugin.manifest.version}</span>
-                                                                            </div>
-                                                                            <div className="plugin-card-labels">
-                                                                                <span className={`plugin-source-label${sourceLabel === "系统插件" ? " is-system" : ""}`}>{sourceLabel}</span>
-                                                                                {trusted ? (
-                                                                                    <span className="plugin-trust-label">
-                                                                                        <ShieldCheck className="size-3.5" />
-                                                                                        可信插件
-                                                                                    </span>
-                                                                                ) : null}
-                                                                                {contributionKindsFor(plugin.manifest).length ? (
-                                                                                    <span className="plugin-category-label">
-                                                                                        {contributionKindsFor(plugin.manifest)
-                                                                                            .map((kind) => categoryLabels[kind] ?? kind)
-                                                                                            .join(" · ")}
-                                                                                    </span>
-                                                                                ) : null}
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-
-                                                                    <p className="plugin-card-description">{plugin.manifest.description}</p>
-
-                                                                    <div className="plugin-card-meta">
-                                                                        <span>
-                                                                            <CalendarDays className="size-3.5" />
-                                                                            发布 {formatPluginDate(plugin.manifest.publishedAt)}
-                                                                        </span>
-                                                                        <span>
-                                                                            <Clock3 className="size-3.5" />
-                                                                            更新 {formatPluginDate(plugin.manifest.updatedAt)}
-                                                                        </span>
-                                                                    </div>
-
-                                                                    <div className="plugin-card-tags">
-                                                                        {(plugin.manifest.surfaces || []).map((surface) => (
-                                                                            <span key={surface}>{surfaceLabels[surface] ?? surface}</span>
-                                                                        ))}
-                                                                        {providerCapabilitiesFor(plugin.manifest).map((capability) => (
-                                                                            <span key={capability}>{capabilityLabel(capability)}</span>
-                                                                        ))}
-                                                                        {plugin.manifest.contributes.providers?.some((provider) => provider.poll) ? <span>异步轮询</span> : null}
-                                                                        <span>{plugin.manifest.permissions.length} 项能力</span>
-                                                                    </div>
-                                                                </button>
-
-                                                                <div className="plugin-card-actions">
-                                                                    <span role="status" className={`settings-channel-status ${enabled ? "is-ready" : ""}`}>
-                                                                        <i aria-hidden="true" />
-                                                                        {!state?.platformAvailable && state?.blockedReason ? state.blockedReason : enabled ? "已启用" : "已停用"}
-                                                                    </span>
+                                                                }}
+                                                                actions={<>
                                                                     <Switch
-                                                                        className="plugin-state-switch"
                                                                         disabled={!canToggle}
                                                                         checked={enabled}
                                                                         aria-label={`${plugin.manifest.name}，当前${enabled ? "已启用，点击停用" : "已停用，点击启用"}`}
-                                                                        title={state?.blockedReason}
+                                                                        title={!canToggle ? state?.blockedReason : undefined}
                                                                         onChange={(checked) => void togglePlugin(plugin, checked)}
                                                                     />
                                                                     {remote?.source === "package" && remote.packageSpec ? (
@@ -585,14 +433,15 @@ export default function PluginsPage() {
                                                                             卸载
                                                                         </Button>
                                                                     ) : null}
-                                                                </div>
+                                                                </>}
+                                                            >
 
                                                                 {installation?.lastError || remote?.error ? (
                                                                     <Typography.Text type="danger" className="plugin-error" role="alert">
                                                                         {installation?.lastError || remote?.error}
                                                                     </Typography.Text>
                                                                 ) : null}
-                                                            </section>
+                                                            </PluginCard>
                                                         );
                                                     })}
                                                 </div>
@@ -617,7 +466,7 @@ export default function PluginsPage() {
                                             setSearch("");
                                             setCategoryFilter("all");
                                             setStatusFilter("all");
-                                            setTrustFilter("all");
+                                            setOriginFilter("all");
                                         }}
                                     >
                                         清除筛选
@@ -642,14 +491,7 @@ export default function PluginsPage() {
                                         <div>
                                             <p>只展示这个插件实际支持的配置项。</p>
                                         </div>
-                                        {settingsPlugin.manifest.trusted ? (
-                                            <span className="plugin-trust-label">
-                                                <ShieldCheck className="size-3.5" />
-                                                可信插件
-                                            </span>
-                                        ) : (
-                                            <span className="plugin-category-label">第三方插件</span>
-                                        )}
+                                        <span className="plugin-source-label">{PLUGIN_ORIGIN_LABELS[pluginOrigin(settingsPlugin)]}</span>
                                     </div>
 
                                     {matchedSettingsSlot ? (
@@ -712,7 +554,7 @@ export default function PluginsPage() {
                                 </div>
                             ) : null}
                         </Modal>
-                        <PluginDetailsModal plugin={detailsPlugin} restoreFocus={detailsRestoreFocus} onClose={() => setDetailsPluginId(null)} />
+                        <PluginDetailsModal plugin={detailsPlugin} management={detailsPluginId ? backendPluginById.get(detailsPluginId)?.management : undefined} restoreFocus={detailsRestoreFocus} onClose={() => setDetailsPluginId(null)} />
                         <PluginInstallConfirmModal
                             open={installModalOpen}
                             initialRequest={installPendingRequest}
@@ -726,25 +568,12 @@ export default function PluginsPage() {
                     </div>
                 </div>
             </div>
-        </main>
+        </WorkspacePage>
     );
-}
-
-function formatPluginDate(value?: string) {
-    if (!value) return "未记录";
-    const timestamp = Date.parse(value);
-    return Number.isFinite(timestamp) ? pluginDateFormatter.format(timestamp) : "未记录";
 }
 
 function toRegisteredPlugin(plugin: BackendPlugin): RegisteredPlugin {
     return { manifest: plugin.manifest, source: plugin.source };
-}
-
-function pluginSourceLabel(plugin: RegisteredPlugin, state?: PluginState) {
-    if (plugin.source === "uploaded") return "自定义插件";
-    if (plugin.source === "system") return "系统插件";
-    if (state?.canToggle || isOfficialApplicationPluginId(plugin.manifest.id)) return "官方插件";
-    return "系统插件";
 }
 
 function contributionKindsFor(manifest: PluginManifest | PluginManifestV2): string[] {
@@ -769,8 +598,4 @@ function pluginMatchesCategory(manifest: PluginManifest | PluginManifestV2, cate
     if (category === "other") return providerCapabilities.length === 0;
     if (category === "interface") return providerCapabilities.length > 0;
     return providerCapabilities.includes(category as "text" | "image" | "video" | "audio");
-}
-
-function capabilityLabel(value: string) {
-    return ({ text: "文本", image: "图片", video: "视频", audio: "音频" } as Record<string, string>)[value] || value;
 }

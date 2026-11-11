@@ -11,7 +11,8 @@ export type CollectionHeaderProps<Value extends string> = {
     className?: string;
     search?: { value: string; onChange: (value: string) => void; placeholder: string };
     actions?: ReactNode;
-    createItems: MenuProps["items"];
+    createItems?: MenuProps["items"];
+    primaryAction?: ReactNode;
     tabs: Array<{ value: Value; label: string; count?: number }>;
     value: Value;
     onChange: (value: Value) => void;
@@ -19,7 +20,7 @@ export type CollectionHeaderProps<Value extends string> = {
     trailing?: ReactNode;
 };
 
-export function CollectionHeader<Value extends string>({ title, className, search, actions, createItems, tabs, value, onChange, navigationLabel, trailing }: CollectionHeaderProps<Value>) {
+export function CollectionHeader<Value extends string>({ title, className, search, actions, createItems, primaryAction, tabs, value, onChange, navigationLabel, trailing }: CollectionHeaderProps<Value>) {
     return (
         <div className={cn("studio-band collection-header", className)}>
             <PageHeader title={title} actions={
@@ -29,9 +30,9 @@ export function CollectionHeader<Value extends string>({ title, className, searc
                             {search ? <ExpandableSearch {...search} /> : null}
                             {actions}
                         </div>
-                        <Dropdown trigger={["click"]} menu={{ items: createItems }}>
+                        {primaryAction ?? <Dropdown trigger={["click"]} menu={{ items: createItems }}>
                             <button type="button" className="collection-header-create"><Plus className="size-4" />新建</button>
-                        </Dropdown>
+                        </Dropdown>}
                     </div>
                 </div>
             } />

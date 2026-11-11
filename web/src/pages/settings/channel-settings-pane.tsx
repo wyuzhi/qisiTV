@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/layout/workspace-page";
 import { applyFetchedChannelModelCatalog } from "@/lib/channel-model-catalog";
 import { ensureModelProfilesWithUiDefaults } from "@/lib/model-protocols";
 import { fetchChannelModels } from "@/services/api/image";
-import { channelHasGenerationCredential, channelHasManagedBeefTVCredential, canonicalChannelModel, createModelChannel, defaultBaseUrlForApiFormat, filterModelsByCapability, isBuiltinBeefTVChannel, modelOptionsFromChannels, normalizeConfigSnapshot, useConfigStore, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { channelHasGenerationCredential, channelHasManagedBeefTVCredential, createModelChannel, defaultBaseUrlForApiFormat, isBuiltinBeefTVChannel, normalizeConfigSnapshot, useConfigStore, type ModelChannel } from "@/stores/use-config-store";
 import { ChannelModelSettings } from "./channel-model-settings";
 import { ModelServiceEditor } from "./model-service-editor";
 import { ChannelRequestAddressLines } from "./channel-request-addresses";
@@ -24,7 +24,12 @@ import { commitModelConfig, flushModelConfig, getModelConfigPersistenceState, su
 import { createChannelCatalogRequests } from "@/services/channel-catalog-requests";
 import { getTransportFailureKind } from "@/services/api/request";
 import { fetchPluginProviderCatalog } from "@/services/api/plugin-catalog";
-import { beefTVConnectionLabel, cancelBeefTVConnection, disconnectBeefTVConnection, getBeefTVConnection, openBeefTVWallet, startBeefTVConnection, type BeefTVConnectionSummary } from "@/services/api/beeftv-connection";
+import { beefTVConnectionLabel, type BeefTVConnectionSummary } from "@/services/api/beeftv-connection";
+import { useBeefTVConnection } from "@/components/layout/beeftv-connection-provider";
+import { BeefTVConnectionActions } from "@/components/beeftv-connection-actions";
+export { BeefTVConnectionActions } from "@/components/beeftv-connection-actions";
+import { mergeManagedBeefTVCatalog, withChannels } from "@/lib/managed-beeftv-catalog";
+export { mergeManagedBeefTVCatalog, shouldRefreshBeefTVCatalog, withChannels } from "@/lib/managed-beeftv-catalog";
 import { recordChannelDelete, recordChannelDeleteConfirmOpen } from "./model-settings-diagnostics";
 
 type UserChannelConnection = "openai" | "gemini";
@@ -44,11 +49,7 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels }: Channel
     const [newChannelId, setNewChannelId] = useState<string | null>(null);
     const [serviceEditor, setServiceEditor] = useState<ModelChannel | null | undefined>(undefined);
     const [pluginServiceIds, setPluginServiceIds] = useState<ReadonlySet<string>>(() => new Set());
-    const [beefConnection, setBeefConnection] = useState<BeefTVConnectionSummary | null>(null);
-    const [beefBusy, setBeefBusy] = useState(false);
-    const appliedConnectionState = useRef<string | undefined>(undefined);
-    const catalogSync = useRef<{ state: string; selection: string; adopt: boolean } | null>(null);
-    const [catalogSyncFailed, setCatalogSyncFailed] = useState(false);
+    const { connection: beefConnection, busy: beefBusy, catalogSyncFailed, connect, cancel, disconnect, retryCatalog, openAccount } = useBeefTVConnection();
     const requests = useRef(createChannelCatalogRequests());
     const deleting = useRef(new Set<string>());
     const [deleteFailures, setDeleteFailures] = useState<Record<string, string>>({});
@@ -58,85 +59,6 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels }: Channel
         setLoadingChannelIds((items) => items.filter((item) => item !== id));
     };
 
-    const applyBeefConnection = async (summary: BeefTVConnectionSummary, previousState = beefConnection?.state) => {
-        setBeefConnection(summary);
-        const retry = catalogSync.current?.state === summary.state ? catalogSync.current : null;
-        if (appliedConnectionState.current === summary.state && !retry) return;
-        appliedConnectionState.current = summary.state;
-        if (!retry && !shouldRefreshBeefTVCatalog(previousState, summary.state)) {
-            catalogSync.current = null;
-            setCatalogSyncFailed(false);
-            return;
-        }
-        const intent = retry || { state: summary.state, selection: useConfigStore.getState().config.assistantModel, adopt: summary.state === "connected" && Boolean(previousState && previousState !== "connected") };
-        catalogSync.current = intent;
-        try {
-            const result = await getLocalModelConfig();
-            if (catalogSync.current !== intent) return;
-            const current = useConfigStore.getState().config;
-            replaceConfig(localWorkspaceConfig(normalizeConfigSnapshot({
-                config: mergeManagedBeefTVCatalog(current, result.config, intent.adopt && current.assistantModel === intent.selection),
-            }).config));
-            catalogSync.current = null;
-            setCatalogSyncFailed(false);
-        } catch {
-            if (catalogSync.current === intent) setCatalogSyncFailed(true);
-            // Keep the connection status even if the catalog refresh fails.
-        }
-    };
-
-    useEffect(() => {
-        let cancelled = false;
-        void getBeefTVConnection()
-            .then((summary) => {
-                if (!cancelled) void applyBeefConnection(summary, undefined);
-            })
-            .catch(() => undefined);
-        return () => {
-            cancelled = true;
-        };
-    }, []);
-
-    useEffect(() => {
-        if (beefConnection?.state !== "pending" && beefConnection?.state !== "connecting") return;
-        let active = true;
-        const timer = window.setInterval(() => {
-            void getBeefTVConnection()
-                .then((summary) => { if (active) void applyBeefConnection(summary, beefConnection?.state); })
-                .catch(() => undefined);
-        }, 2000);
-        return () => { active = false; window.clearInterval(timer); };
-    }, [beefConnection?.state]);
-
-    const runBeefAction = async (action: () => Promise<BeefTVConnectionSummary>, fallback: string) => {
-        setBeefBusy(true);
-        const previousConnection = beefConnection;
-        const previousState = beefConnection?.state;
-        try {
-            const summary = await action();
-            await applyBeefConnection(summary, previousState);
-        } catch (error) {
-            try {
-                await applyBeefConnection(await getBeefTVConnection(), previousState);
-            } catch {
-                setBeefConnection(previousConnection);
-            }
-            message.error(error instanceof Error ? error.message : fallback);
-        } finally {
-            setBeefBusy(false);
-        }
-    };
-    const beginBeefConnection = () => {
-        setBeefConnection({ state: "connecting", hasCredential: beefConnection?.hasCredential || false });
-        return startBeefTVConnection();
-    };
-    const retryBeefConnection = async () => {
-        const state = beefConnection?.state;
-        if (state === "expired" || state === "revoked" || state === "rejected") {
-            await disconnectBeefTVConnection();
-        }
-        return beginBeefConnection();
-    };
     const userChannels = config.channels.filter((channel) => channel.scope !== "system");
     useEffect(() => {
         let cancelled = false;
@@ -393,18 +315,16 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels }: Channel
                                         {!builtinBeefTV && !topazUpscale && !pluginChannel && <ChannelRequestAddressLines channel={channel} />}
                                     </div>
                                     <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto sm:shrink-0">
-                                        {builtinBeefTV && catalogSyncFailed ? <Button loading={beefBusy} onClick={() => void runBeefAction(getBeefTVConnection, "无法更新模型列表")}>重试更新模型列表</Button> : null}
+                                        {builtinBeefTV && catalogSyncFailed ? <Button loading={beefBusy} onClick={() => void retryCatalog()}>重试更新模型列表</Button> : null}
                                         {builtinBeefTV ? (
                                             <BeefTVConnectionActions
                                                 connection={beefConnection}
                                                 busy={beefBusy}
-                                                onConnect={() => void runBeefAction(beginBeefConnection, "无法开始连接")}
-                                                onCancel={() => void runBeefAction(cancelBeefTVConnection, "无法取消连接")}
-                                                onRetry={() => void runBeefAction(retryBeefConnection, "无法重新连接")}
-                                                onDisconnect={() => void runBeefAction(disconnectBeefTVConnection, "无法断开连接")}
-                                                onWallet={() => {
-                                                    void openBeefTVWallet().catch((error) => message.error(error instanceof Error ? error.message : "无法打开 BeefTV 账户"));
-                                                }}
+                                                onConnect={() => void connect()}
+                                                onCancel={() => void cancel()}
+                                                onRetry={() => void connect()}
+                                                onDisconnect={() => void disconnect()}
+                                                onWallet={() => void openAccount()}
                                             />
                                         ) : null}
                                         {!topazUpscale ? (
@@ -616,46 +536,6 @@ function ChannelStatus({ channel, persistence, connection }: { channel: ModelCha
     );
 }
 
-export function shouldRefreshBeefTVCatalog(previous: string | undefined, next: string) {
-    if (next === "connected" && previous !== "connected") return true;
-    return next === "disconnected" && Boolean(previous) && previous !== "disconnected";
-}
-
-export function mergeManagedBeefTVCatalog(current: AiConfig, server: AiConfig, adoptAuthorizedAssistant = false): AiConfig {
-    const serverBeef = server.channels.find((channel) => channel.id === "beeftv");
-    const serverIds = new Set(server.channels.map((channel) => channel.id));
-    let found = false;
-    // 固定服务由后端维护：后端已经去掉的（比如重连后清掉的旧版官方服务），页面上也去掉。
-    const channels = current.channels.filter((channel) => !channel.pinned || serverIds.has(channel.id)).map((channel) => {
-        if (channel.id !== "beeftv") return channel;
-        found = true;
-        if (!serverBeef) {
-            return { ...channel, models: [], modelProfiles: [], apiKey: "", secretKey: "", credentialRef: undefined, hasApiKey: false, hasSecretKey: false };
-        }
-        return {
-            ...channel,
-            models: [...(serverBeef.models || [])],
-            modelProfiles: (serverBeef.modelProfiles || []).map((item) => ({ ...item })),
-            apiKey: "",
-            secretKey: "",
-            credentialRef: serverBeef.credentialRef,
-            legacyIds: serverBeef.legacyIds,
-            hasApiKey: serverBeef.hasApiKey,
-            hasSecretKey: serverBeef.hasSecretKey,
-            baseUrl: serverBeef.baseUrl || channel.baseUrl,
-        };
-    });
-    if (serverBeef && !found) {
-        channels.unshift({
-            ...serverBeef,
-            apiKey: "",
-            secretKey: "",
-            models: [...(serverBeef.models || [])],
-            modelProfiles: (serverBeef.modelProfiles || []).map((item) => ({ ...item })),
-        });
-    }
-    return withChannels(adoptAuthorizedAssistant ? { ...current, assistantModel: server.assistantModel } : current, channels);
-}
 
 export function modelConfigChannelStatusLabel(channel: ModelChannel, persistence: ModelConfigPersistenceState, connection?: BeefTVConnectionSummary | null) {
     if (isBuiltinBeefTVChannel(channel)) {
@@ -671,74 +551,6 @@ export function modelConfigChannelStatusLabel(channel: ModelChannel, persistence
     return "尚未测试";
 }
 
-export function BeefTVConnectionActions({
-    connection,
-    busy,
-    onConnect,
-    onCancel,
-    onRetry,
-    onDisconnect,
-    onWallet,
-}: {
-    connection: BeefTVConnectionSummary | null;
-    busy: boolean;
-    onConnect: () => void;
-    onCancel: () => void;
-    onRetry: () => void;
-    onDisconnect: () => void;
-    onWallet: () => void;
-}) {
-    const state = connection?.state || "disconnected";
-    const buttonClass = "h-10 sm:h-8";
-    if (state === "connecting") {
-        return <Button className={buttonClass} size="small" loading disabled>正在连接</Button>;
-    }
-    if (state === "pending") {
-        return (
-            <>
-                <Button className={buttonClass} size="small" loading={busy} onClick={onCancel}>
-                    取消
-                </Button>
-            </>
-        );
-    }
-    if (state === "connected") {
-        return (
-            <>
-                <Button className={buttonClass} size="small" onClick={onWallet}>
-                    打开 BeefTV 账户
-                </Button>
-                <Button className={buttonClass} size="small" loading={busy} onClick={onDisconnect}>
-                    断开连接
-                </Button>
-            </>
-        );
-    }
-    if (state === "catalog_failed") {
-        return (
-            <>
-                <Button className={buttonClass} size="small" type="primary" loading={busy} onClick={onRetry}>
-                    重新连接
-                </Button>
-                <Button className={buttonClass} size="small" loading={busy} onClick={onDisconnect}>
-                    断开连接
-                </Button>
-            </>
-        );
-    }
-    if (state === "expired" || state === "revoked" || state === "rejected" || state === "store_error" || state === "connection_error" || state === "cancelled") {
-        return (
-            <Button data-onboarding="official-connect" className={buttonClass} size="small" type="primary" loading={busy} onClick={onRetry}>
-                重新连接
-            </Button>
-        );
-    }
-    return (
-        <Button data-onboarding="official-connect" className={buttonClass} size="small" type="primary" loading={busy} onClick={onConnect}>
-            连接 BeefTV
-        </Button>
-    );
-}
 
 export function modelConfigChannelPresentation(channel: ModelChannel) {
     const builtin = isBuiltinBeefTVChannel(channel);
@@ -749,39 +561,6 @@ export function modelConfigChannelPresentation(channel: ModelChannel) {
     };
 }
 
-export function withChannels(config: AiConfig, channels: ModelChannel[]): AiConfig {
-    // 已保存的选择按服务现在的 ID 比较：服务换过 ID 时（legacyIds），旧选择仍算这个服务的。
-    const canonical = (value: string) => canonicalChannelModel(value, channels);
-    config = { ...config, model: canonical(config.model), assistantModel: canonical(config.assistantModel), mediaReviewModel: canonical(config.mediaReviewModel), imageModel: canonical(config.imageModel), videoModel: canonical(config.videoModel), textModel: canonical(config.textModel), audioModel: canonical(config.audioModel) };
-    const models = modelOptionsFromChannels(channels);
-    const imageModels = filterModelsByCapability(models, "image", channels);
-    const videoModels = filterModelsByCapability(models, "video", channels);
-    const textModels = filterModelsByCapability(models, "text", channels);
-    const audioModels = filterModelsByCapability(models, "audio", channels);
-    return {
-        ...config,
-        channels,
-        models,
-        model: normalizeDefaultModel(config.model, models),
-        assistantModel: config.channels.some((channel) => !channels.some((item) => item.id === channel.id) && config.assistantModel?.startsWith(`${channel.id}::`)) ? "" : config.assistantModel,
-        mediaReviewModel: config.channels.some((channel) => !channels.some((item) => item.id === channel.id) && config.mediaReviewModel?.startsWith(`${channel.id}::`)) ? "" : config.mediaReviewModel,
-        baseUrl: channels[0]?.baseUrl || config.baseUrl,
-        apiKey: channels[0]?.apiKey || config.apiKey,
-        apiFormat: channels[0]?.apiFormat || config.apiFormat,
-        imageModels,
-        videoModels,
-        textModels,
-        audioModels,
-        imageModel: normalizeDefaultModel(config.imageModel, imageModels),
-        videoModel: normalizeDefaultModel(config.videoModel, videoModels),
-        textModel: normalizeDefaultModel(config.textModel, textModels),
-        audioModel: normalizeDefaultModel(config.audioModel, audioModels),
-    };
-}
-
-function normalizeDefaultModel(value: string, options: string[]) {
-    return options.includes(value) ? value : options[0] || "";
-}
 
 function uniqueModels(models: string[]) {
     return Array.from(new Set(models.map((model) => model.trim()).filter(Boolean)));

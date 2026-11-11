@@ -30,9 +30,26 @@ import {
     runGenerationBeforeSubmitHooks,
 } from "../src/lib/plugins/slot-registry";
 import { installSourceLabel } from "../src/pages/plugins/plugin-install-confirm-modal";
+import { pluginOrigin } from "../src/pages/plugins/plugin-documentation";
+import type { RegisteredPlugin } from "../src/lib/plugins/plugin-types";
 import { usePluginStore } from "../src/stores/use-plugin-store";
 
 const DummyComponent = () => null;
+
+test("plugin origin follows installation source independently of trust and official IDs", () => {
+    const plugin = { manifest: { id: EAGLE_PLUGIN_ID, trusted: true } } as RegisteredPlugin;
+    expect(pluginOrigin(plugin)).toBe("official");
+    for (const source of ["bundled", "official", "system"]) {
+        expect(pluginOrigin({ ...plugin, source })).toBe("official");
+    }
+    for (const source of ["uploaded", "local"]) {
+        expect(pluginOrigin({ ...plugin, source })).toBe("custom");
+    }
+    for (const source of ["package", "unknown"]) {
+        expect(pluginOrigin({ ...plugin, source })).toBe("thirdParty");
+    }
+    expect(pluginOrigin({ manifest: { id: "external-plugin", trusted: true } } as RegisteredPlugin)).toBe("thirdParty");
+});
 
 const emptyMenuContext: AddNodeMenuContext = {
     handlers: {

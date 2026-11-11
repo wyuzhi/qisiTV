@@ -212,12 +212,15 @@ export default function (pi: ExtensionAPI) {
 ## 发布
 
 1. 确认 `keywords` 里有 `"beeftv-plugin"`，然后运行 `npm publish --access public`。用户在插件市场的「npm 社区搜索」里就能搜到并安装。
+
 2. 想进精选列表，向 [Sunnyender-org/beeftv-plugins](https://github.com/Sunnyender-org/beeftv-plugins) 提一个 Pull Request，在 `registry.json` 的 `packages` 里加一行包名。名称、说明、版本和作者都从 npm 读。
 3. 发新版本只要再运行一次 `npm publish`。用户的插件中心会显示「更新到 v新版本」，由用户自己决定要不要更新。
 
 收录进精选列表不代表 BeefTV 为插件担保。用户安装任何插件前，BeefTV 都会显示来源和风险，由用户确认。
 
 没有发布到 npm 也能分享：「npm 插件包」的输入框还可以填 `github:owner/repo` 或一个 `.tgz` 地址。
+
+精选推荐通过 `GET /api/plugins/market/curated?cached=1` 先读取本地推荐列表，再通过同一接口去掉 `cached=1` 后后台更新，补全只声明包名的条目。社区搜索使用 `GET /api/plugins/market/search?q=关键词`。两个接口都接受 `registry` 参数选择下载源。
 
 ## 接下来看什么
 

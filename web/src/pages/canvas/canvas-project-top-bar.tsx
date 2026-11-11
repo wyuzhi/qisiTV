@@ -208,7 +208,7 @@ export function CanvasTopBar({
                                     { type: "divider" },
                                     { key: "new", label: <Link to="/canvas?mode=new">创建新项目</Link> },
                                     ...(currentCanvasId ? [
-                                        { key: "export-project", label: "导出项目（全部画布）", onClick: () => void runExport(currentCanvasId, false) },
+                                        { key: "export-project", label: "导出全部画布", onClick: () => void runExport(currentCanvasId, false) },
                                         { key: "export-canvas", label: "导出当前画布", onClick: () => void runExport(currentCanvasId, true) },
                                     ] : []),
                                     { key: "delete", danger: true, label: "删除当前画布", onClick: onDeleteProject },

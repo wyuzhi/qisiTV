@@ -1,4 +1,4 @@
-import type { ComponentType, ReactNode } from "react";
+import type { ComponentType, MouseEventHandler, ReactNode } from "react";
 import type { Asset } from "@/stores/use-asset-store";
 import type { CanvasNodeData } from "@/types/canvas";
 
@@ -593,7 +593,24 @@ export type PluginProjectViewContribution = {
     component: ComponentType<PluginProjectViewProps>;
 };
 
+export type PluginCardProps = {
+    name: string;
+    description: string;
+    sourceLabel: string;
+    status: string;
+    onOpen: MouseEventHandler<HTMLButtonElement>;
+    openLabel?: string;
+    actions: ReactNode;
+    children?: ReactNode;
+    "data-testid"?: string;
+};
+
 export type PluginCenterSectionProps = {
+    Card: ComponentType<PluginCardProps>;
+    Button: typeof import("antd").Button;
+    DetailsModal: ComponentType<import("antd").ModalProps & { flush?: boolean; scrollBody?: boolean }>;
+    Markdown: ComponentType<{ source: string; className?: string }>;
+    RegistrySelect: typeof import("antd").Select;
     pluginId: string;
     installedPlugins?: RegisteredPlugin[];
     pluginStates?: Record<string, unknown>;

@@ -1,4 +1,15 @@
-import type { PluginManifest, PluginManifestV2 } from "@/lib/plugins/plugin-types";
+import type { PluginManifest, PluginManifestV2, RegisteredPlugin } from "@/lib/plugins/plugin-types";
+import { isOfficialApplicationPluginId } from "@/lib/plugins/official-applications";
+import { MEDIA_CONVERSION_PLUGIN_ID } from "@/lib/plugins/builtin/media-conversion";
+
+export const PLUGIN_ORIGIN_LABELS = { official: "官方", custom: "自定义", thirdParty: "第三方" };
+
+export function pluginOrigin(plugin: RegisteredPlugin): keyof typeof PLUGIN_ORIGIN_LABELS {
+    if (plugin.source === "uploaded" || plugin.source === "local") return "custom";
+    if (["bundled", "official", "system"].includes(plugin.source || "")) return "official";
+    if (!plugin.source && (isOfficialApplicationPluginId(plugin.manifest.id) || plugin.manifest.id === MEDIA_CONVERSION_PLUGIN_ID)) return "official";
+    return "thirdParty";
+}
 
 export const PLUGIN_PERMISSION_LABELS: Record<string, string> = {
     "canvas.read": "读取画布",
@@ -22,20 +33,7 @@ export const PLUGIN_PERMISSION_LABELS: Record<string, string> = {
 export function getPluginDocumentation(manifest: PluginManifest | PluginManifestV2) {
     if (manifest.documentation?.trim()) return manifest.documentation.trim();
 
-    const capabilities = manifest.permissions.map((permission) => PLUGIN_PERMISSION_LABELS[permission] || permission);
-    return [
-        `# ${manifest.name}`,
-        "",
-        manifest.description || "该插件没有提供简介。",
-        "",
-        "## 插件信息",
-        "",
-        `- 作者：${manifest.author || "未声明"}`,
-        `- 版本：${manifest.version}`,
-        `- 能力：${capabilities.join("、") || "未声明"}`,
-        "",
-        manifest.contributes.providers?.length
-            ? "> 此插件没有提供接入文档。请联系插件作者补充 `documentation`，不要仅凭清单字段推测上游接口。"
-            : "> 该插件当前没有单独的使用文档。",
-    ].join("\n");
+    return manifest.contributes.providers?.length
+        ? "此插件未提供接入说明，请联系插件作者获取。"
+        : "此插件未提供单独的使用说明。";
 }

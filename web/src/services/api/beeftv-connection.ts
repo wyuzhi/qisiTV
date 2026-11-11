@@ -64,6 +64,10 @@ export function openBeefTVWallet(signal?: AbortSignal) {
     return http.post<{ opened: boolean }>("/beeftv/connection/open-wallet", {}, { signal });
 }
 
+export function isBeefTVAuthenticated(summary: BeefTVConnectionSummary | null | undefined) {
+    return Boolean(summary && (summary.state === "connected" || (summary.state === "catalog_failed" && summary.hasCredential)));
+}
+
 export function beefTVConnectionLabel(summary: BeefTVConnectionSummary | null | undefined) {
     const state = summary?.state || "disconnected";
     switch (state) {

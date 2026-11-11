@@ -1,6 +1,7 @@
-import { AlertTriangle, CheckCircle2, FolderGit2, Package } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Button, Checkbox, Input, Modal, Radio, Tag } from "antd";
+import { Button, Checkbox, Input, Segmented } from "antd";
+import { AppModal } from "@/components/ui/product/app-modal";
 import type { PluginInstallConfirmRequest } from "@/lib/plugins/plugin-types";
 import type { BackendPlugin, PluginUpdateCheck } from "@/services/api/plugins";
 
@@ -50,52 +51,46 @@ export function PluginInstallConfirmModal({ open, initialRequest, loading = fals
     const canConfirm = Boolean(draftRequest && riskAccepted);
 
     return (
-        <Modal
-            className="workspace-modal workspace-modal-wide"
+        <AppModal
+            flush
+            scrollBody
+            className="plugin-details-modal plugin-install-modal"
+            wrapClassName="plugin-details-wrap"
+            width="min(560px, calc(100vw - 32px))"
             title={draftRequest ? (draftRequest.isUpdate ? "确认更新插件" : "确认安装插件") : "安装插件"}
             open={open}
             centered
-            footer={null}
+            footer={<div className="plugin-install-actions">
+                {draftRequest && !initialRequest ? <Button onClick={() => { setDraftRequest(null); setRiskAccepted(false); }} disabled={loading}>返回修改</Button> : null}
+                <Button onClick={onCancel} disabled={loading}>取消</Button>
+                {draftRequest ? (
+                    <Button data-testid="plugin-install-submit" type="primary" loading={loading} disabled={!canConfirm} onClick={() => void onConfirm(draftRequest)}>
+                        {draftRequest.isUpdate ? "确认更新" : "确认安装"}
+                    </Button>
+                ) : (
+                    <Button type="primary" disabled={!sourceInput.trim()} onClick={() => setDraftRequest({ source: sourceInput.trim() })}>下一步</Button>
+                )}
+            </div>}
             destroyOnHidden
             onCancel={onCancel}
         >
             {!draftRequest ? (
-                <div className="flex flex-col gap-4 py-2">
-                    <Radio.Group value={installMode} onChange={(e) => setInstallMode(e.target.value)} optionType="button" buttonStyle="solid">
-                        <Radio.Button value="npm">
-                            <span className="inline-flex items-center gap-1.5">
-                                <Package className="size-3.5" />
-                                npm 插件包
-                            </span>
-                        </Radio.Button>
-                        <Radio.Button value="local">
-                            <span className="inline-flex items-center gap-1.5">
-                                <FolderGit2 className="size-3.5" />
-                                本地插件目录
-                            </span>
-                        </Radio.Button>
-                    </Radio.Group>
-                    <div className="flex flex-col gap-1.5">
-                        <label className="text-xs font-medium text-foreground/80">
-                            {installMode === "npm" ? "npm 包名，可以带版本，如 beeftv-plugin-example 或 beeftv-plugin-example@1.0.0" : "本地插件目录的完整路径（目录里要有 package.json）"}
-                        </label>
+                <div className="plugin-install-content">
+                    <Segmented aria-label="安装来源" value={installMode} onChange={setInstallMode} options={[{ value: "npm", label: "npm 插件包" }, { value: "local", label: "本地目录" }]} />
+                    <div className="plugin-install-field">
+                        <span>{installMode === "npm" ? "插件包" : "目录路径"}</span>
                         <Input
                             value={sourceInput}
                             onChange={(e) => setSourceInput(e.target.value)}
                             placeholder={installMode === "npm" ? "beeftv-plugin-example" : "/path/to/my-plugin"}
                             aria-label={installMode === "npm" ? "npm 插件包名" : "本地插件目录路径"}
                         />
-                    </div>
-                    <div className="flex justify-end gap-2 pt-2">
-                        <Button onClick={onCancel}>取消</Button>
-                        <Button type="primary" disabled={!sourceInput.trim()} onClick={() => setDraftRequest({ source: sourceInput.trim() })}>
-                            下一步
-                        </Button>
+                        <p className="plugin-install-hint">{installMode === "npm" ? "支持包名、指定版本或仓库地址" : "填写包含 package.json 的目录完整路径"}</p>
                     </div>
                 </div>
             ) : (
-                <div className="flex flex-col gap-4 py-1" data-testid="plugin-install-confirm-body">
-                    <div className="rounded-lg border border-border/70 bg-muted/20 p-3.5">
+                <div className="plugin-install-content" data-testid="plugin-install-confirm-body">
+                    <div>
                         <div className="flex flex-wrap items-center justify-between gap-2">
                             <div>
                                 <div className="text-base font-semibold text-foreground">{draftRequest.name || draftRequest.source}</div>
@@ -105,7 +100,7 @@ export function PluginInstallConfirmModal({ open, initialRequest, loading = fals
                                     </div>
                                 ) : null}
                             </div>
-                            <Tag>{installSourceLabel(draftRequest)}</Tag>
+                            <span className="plugin-source-label">{installSourceLabel(draftRequest)}</span>
                         </div>
                         {draftRequest.description ? <p className="mt-2 text-xs leading-relaxed text-foreground/75">{draftRequest.description}</p> : null}
                     </div>
@@ -120,27 +115,14 @@ export function PluginInstallConfirmModal({ open, initialRequest, loading = fals
                         </p>
                     </div>
 
-                    <div className="rounded-lg border border-border/70 bg-muted/15 px-3 py-2.5">
+                    <div>
                         <Checkbox data-testid="plugin-install-confirm-checkbox" checked={riskAccepted} onChange={(e) => setRiskAccepted(e.target.checked)}>
                             <span className="text-xs font-medium text-foreground">我了解风险，确认{draftRequest.isUpdate ? "更新" : "安装"}</span>
                         </Checkbox>
                     </div>
 
-                    <div className="flex justify-end gap-2 pt-1">
-                        {!initialRequest ? (
-                            <Button onClick={() => setDraftRequest(null)} disabled={loading}>
-                                返回修改
-                            </Button>
-                        ) : null}
-                        <Button onClick={onCancel} disabled={loading}>
-                            取消
-                        </Button>
-                        <Button data-testid="plugin-install-submit" type="primary" icon={<CheckCircle2 className="size-4" />} loading={loading} disabled={!canConfirm} onClick={() => void onConfirm(draftRequest)}>
-                            {draftRequest.isUpdate ? "确认更新" : "确认安装"}
-                        </Button>
-                    </div>
                 </div>
             )}
-        </Modal>
+        </AppModal>
     );
 }
