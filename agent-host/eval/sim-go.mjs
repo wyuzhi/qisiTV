@@ -218,6 +218,36 @@ export function createSimGo(options = {}) {
   const defaultCanvasId = options.defaultCanvasId || 'canvas-1';
   const descriptors = loadOperationDescriptors();
   const descriptorMap = new Map(descriptors.map((d) => [d.id, d]));
+  // Go 侧的任务等待操作还在后续阶段。描述符默认不外露，避免改变 S1–S11 的
+  // 工具定义体积；替代场景 setup 调用 enableTaskWait() 后，外部 CLI 才能在 /api/ops 看到它。
+  const waitDescriptor = {
+    id: 'task.wait',
+    summary: '等待生成任务完成；超时返回 pending 和原 taskId，不返回错误',
+    readOnly: true,
+    scope: 'workspaceRead',
+    params: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: '单个任务 ID' },
+        taskIds: { type: 'array', items: { type: 'string' }, description: '最多 8 个任务 ID' },
+        canvasId: { type: 'string' },
+        nodeId: { type: 'string', description: '可选：同时回读产物是否已绑到这个节点' },
+        timeoutMs: { type: 'integer', minimum: 0, maximum: 25000 },
+      },
+    },
+    assistantModes: ['full-access', 'canvas'],
+    replay: 'safe',
+  };
+  // 未开启时描述符和操作都不存在：只从 /api/ops 藏起来不够，直接 HTTP 调用也要按未知操作拒绝。
+  let taskWaitExposed = false;
+
+  function enableTaskWait() {
+    if (taskWaitExposed) return false;
+    taskWaitExposed = true;
+    descriptorMap.set(waitDescriptor.id, waitDescriptor);
+    descriptors.push(waitDescriptor);
+    return true;
+  }
 
   let nodeSeq = 0;
   let edgeSeq = 0;
@@ -245,6 +275,10 @@ export function createSimGo(options = {}) {
   const nextTaskDefects = [];
   const nextMediaInspectErrors = [];
   const pendingTimers = new Set();
+  // 按画布模拟任务耗时（毫秒）；没有设置的画布保持原来的 5 毫秒即完成行为。
+  const taskTimings = new Map();
+  // 外部提交的任务只交付产物，不自动写回节点；绑定仍由 canvas.task.bind 完成。
+  const externalTaskIds = new Set();
 
   const counts = {
     ops: {},
@@ -794,7 +828,8 @@ export function createSimGo(options = {}) {
     return rec;
   }
 
-  function executeOp(opIdName, rawParams = {}, opKey = '', turnId = '') {
+  function executeOp(opIdName, rawParams = {}, opKey = '', turnId = '', context = {}) {
+    const hostCall = context.host === true;
     const descriptor = descriptorMap.get(opIdName);
     if (!descriptor) {
       throw notFound('unknown_operation', `未知操作: ${opIdName}`);
@@ -1605,6 +1640,7 @@ export function createSimGo(options = {}) {
         }
         const proposal = {
           proposalId,
+          callerKind: hostCall ? 'host' : 'caller',
           turnId: turnId || '',
           canvasId,
           kind,
@@ -1698,6 +1734,138 @@ export function createSimGo(options = {}) {
           storageKey: node.metadata.storageKey,
           assetId: node.metadata.assetId,
           ...(alsoChanged.length ? { alsoChanged } : {}),
+        };
+        break;
+      }
+      case 'canvas.generation.submit': {
+        // 外部调用方（owner token / 已登记客户端，approvalMode=caller）的路径：
+        // 先读 canvas.generation.propose 拿到画布版本和模型配置版本，再带稳定 operationId 提交。
+        // 内置宿主路径要求提案已经过用户确认；外部 caller 提交本身就是审批结果，成功后把提案记成已确认。
+        const canvasId = String(rawParams.canvasId || '').trim();
+        const nodeIds = (Array.isArray(rawParams.nodeIds) ? rawParams.nodeIds : []).map(String);
+        const kind = String(rawParams.kind || '').trim();
+        const expectedRevision = Number(rawParams.expectedRevision);
+        const expectedConfigRevision = rawParams.expectedModelConfigRevision === undefined
+          ? null
+          : Number(rawParams.expectedModelConfigRevision);
+        const proposalId = String(rawParams.proposalId || rawParams.orderId || '').trim();
+        if (!canvasId) throw invalidArg('invalid_params', 'canvasId 必填');
+        if (!opKey) throw invalidArg('generation_snapshot_required', '请提供稳定的 operationId，重试时复用同一个值');
+        if (nodeIds.length === 0 || nodeIds.length > 8) throw invalidArg('invalid_batch', 'nodeIds 必须是 1..8 项的数组');
+        if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || !Number.isSafeInteger(expectedConfigRevision) || expectedConfigRevision < 0) {
+          throw invalidArg('generation_snapshot_required', '请提交画布版本和模型配置版本');
+        }
+        const doc = ensureCanvas(canvasId);
+        if (doc.revision !== expectedRevision) {
+          counts.revisionConflicts += 1;
+          throw conflict('revision_conflict', '画布已变化，请重新读取并确认生成内容', { currentRevision: doc.revision });
+        }
+        if (expectedConfigRevision !== 1) {
+          throw conflict('generation_config_changed', '模型配置已变化，请重新读取生成提议', { currentModelConfigRevision: 1 });
+        }
+        let proposal = null;
+        if (proposalId) {
+          proposal = proposals.get(proposalId);
+          if (!proposal || proposal.canvasId !== canvasId) {
+            throw notFound('generation_order_not_found', '生成单不存在');
+          }
+          const missing = nodeIds.filter((id) => !proposal.nodeIds.includes(id));
+          if (missing.length > 0) {
+            throw conflict('generation_targets_changed', '画布上的生成参数已变化，请重新读取生成提议', { missingNodeIds: missing });
+          }
+        }
+        if (hostCall) {
+          // 内置宿主不能绕过面板确认：没有提案或提案未确认时，和真实后端一样拒绝付费生成。
+          if (!proposal) {
+            throw permissionDenied('generation_confirmation_required', '付费生成必须经过用户确认，请先提交生成提议');
+          }
+          if (!proposal.confirmed) {
+            counts.unconfirmedTasks += 1;
+            throw permissionDenied('generation_confirmation_required', '付费生成必须经过用户确认');
+          }
+          if (proposal.taskIds.length > 0) {
+            // 确认时已经建过任务：再提交只回读原任务，不重复计费。
+            const existing = proposal.taskIds.map((id) => tasks.get(id)).filter(Boolean);
+            result = {
+              canvasId,
+              taskIds: proposal.taskIds.slice(),
+              tasks: clone(existing),
+              proposalId,
+              orderId: proposalId,
+              approvalMode: 'host',
+              status: 'submitted',
+              replayed: true,
+            };
+            break;
+          }
+        } else {
+          // 真实后端在外部提交前先检查素材节点上的任务回执：未失败的任务直接拒绝，
+          // 既不回读旧任务，也不再新建。不同 operationId 会算出不同任务键，必须靠这一步拦住。
+          if (nodeHasLiveTask(doc, nodeIds)) {
+            throw preconditionFailed('generation_task_exists', '节点已关联生成任务，请先查询原任务；需要另做一份时请新建节点');
+          }
+        }
+        // 先整批校验，避免后面的节点失败时前面已经建出永远 running 的任务。
+        const targets = nodeIds.map((nodeId) => {
+          const node = (doc.nodes || []).find((n) => n.id === nodeId);
+          if (!node) throw invalidArg('node_not_in_canvas', `节点不属于当前画布: ${nodeId}`);
+          const nodeKind = String(node.type || '');
+          if (!['image', 'video', 'audio'].includes(nodeKind)) {
+            throw invalidArg('generation_kind_mismatch', `这个节点不能用来生成素材: ${nodeId}`);
+          }
+          if (kind && nodeKind !== kind) {
+            throw invalidArg('generation_kind_mismatch', '请按素材类型分批生成');
+          }
+          const choice = resolveGenerationModel(nodeKind, String(node.metadata?.model || ''));
+          if (!choice.modelKey) throw invalidArg('invalid_parameter', '请选择明确的生成模型');
+          return { nodeId, nodeKind, modelKey: choice.modelKey };
+        });
+        const created = [];
+        try {
+          for (const target of targets) {
+            const task = createGenerationTask({
+              canvasId,
+              nodeId: target.nodeId,
+              kind: target.nodeKind,
+              modelKey: target.modelKey,
+              proposalId,
+            });
+            externalTaskIds.add(task.id);
+            created.push(task);
+          }
+        } catch (error) {
+          for (const task of created) finishTask(task);
+          throw error;
+        }
+        // 没配任务耗时的画布也要完成；默认 5 毫秒，和确认路径的同步完成保持同一语义。
+        for (const task of created) scheduleTaskCompletionOrDefault(task);
+        if (proposal) {
+          proposal.confirmed = true;
+          proposal.taskIds.push(...created.map((task) => task.id));
+        }
+        result = {
+          canvasId,
+          taskIds: created.map((task) => task.id),
+          tasks: clone(created),
+          proposalId,
+          orderId: proposalId,
+          approvalMode: hostCall ? 'host' : 'caller',
+          status: 'submitted',
+        };
+        break;
+      }
+      case 'task.wait': {
+        // 真正等待发生在 HTTP 层（executeHttpOp）；这里只返回调用瞬间的快照，
+        // 方便直接调用 executeOp 的测试和工具清单。
+        const ids = taskWaitIds(rawParams);
+        if (ids.length === 0) throw invalidArg('invalid_params', 'taskId 或 taskIds 必填');
+        const current = ids.map((id) => tasks.get(id)).filter(Boolean);
+        const pending = current.some((task) => task.status === 'running');
+        result = {
+          tasks: current.map(taskView),
+          pending,
+          timedOut: false,
+          ...taskWaitNodeBinding(rawParams, current),
         };
         break;
       }
@@ -2010,156 +2178,171 @@ export function createSimGo(options = {}) {
     return nextTaskDefects.splice(idx, 1)[0];
   }
 
-  async function confirmProposals(proposalId = null, confirmOptions = {}) {
-    const delayMs = Number(confirmOptions.delayMs ?? options.taskDelayMs ?? 5);
-    const targets = proposalId
-      ? [proposals.get(proposalId)].filter(Boolean)
-      : [...proposals.values()].filter((p) => !p.confirmed);
+  // 测评按画布配置任务耗时；未配置的画布继续用原来的「确认后 5 毫秒完成」行为。
+  function normalizeTaskTiming(timing = {}) {
+    const out = {};
+    for (const key of ['imageMs', 'videoMs', 'audioMs', 'defaultMs']) {
+      if (timing[key] === undefined || timing[key] === null) continue;
+      const ms = Number(timing[key]);
+      if (!Number.isFinite(ms) || ms < 0) {
+        throw invalidArg('invalid_task_timing', `${key} 必须是非负毫秒数`);
+      }
+      out[key] = Math.floor(ms);
+    }
+    return out;
+  }
 
-    if (proposalId && targets.length === 0) {
-      throw notFound('proposal_not_found', `生成提议不存在: ${proposalId}`);
+  function setTaskTiming(canvasId, timing = {}) {
+    const id = String(canvasId || '').trim();
+    if (!id) throw invalidArg('invalid_params', 'canvasId 必填');
+    ensureCanvas(id);
+    const normalized = normalizeTaskTiming(timing);
+    taskTimings.set(id, normalized);
+    return clone(normalized);
+  }
+
+  // 返回 null 表示该画布没配耗时，调用方走原来的同步完成路径。
+  function resolveTaskDurationMs(task) {
+    const timing = taskTimings.get(task.canvasId);
+    if (!timing) return null;
+    const key = task.kind === 'video' ? 'videoMs' : task.kind === 'audio' ? 'audioMs' : 'imageMs';
+    const ms = timing[key] ?? timing.defaultMs ?? 5;
+    return Math.max(0, Number(ms) || 0);
+  }
+
+  // 节点上已有未失败任务时不能再生成；失败任务可重提。外部 submit 和外部提案确认共用这条判断。
+  function nodeHasLiveTask(doc, nodeIds) {
+    return nodeIds.some((nodeId) => {
+      const node = (doc.nodes || []).find((n) => n.id === nodeId);
+      const taskId = String(node?.metadata?.taskId || '');
+      if (!taskId) return false;
+      const existing = tasks.get(taskId);
+      return !existing || existing.status !== 'failed';
+    });
+  }
+
+  function createGenerationTask({ canvasId, nodeId, kind, modelKey = '', proposalId = '', confirmedByUser = true }) {
+    taskSeq += 1;
+    const taskId = `task-${taskSeq}`;
+    const task = {
+      id: taskId,
+      proposalId,
+      canvasId,
+      nodeId,
+      type: kind,
+      kind,
+      modelKey,
+      status: 'running',
+      progress: 10,
+      confirmedByUser,
+      outputs: [],
+      error: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    tasks.set(taskId, task);
+    const doc = ensureCanvas(canvasId);
+    const node = (doc.nodes || []).find((n) => n.id === nodeId);
+    if (node) {
+      node.metadata ||= {};
+      node.metadata.status = 'running';
+      node.metadata.taskId = taskId;
+      node.metadata.taskStatus = 'running';
+    }
+    return task;
+  }
+
+  // 任务收尾：产物入素材库并写任务结果。内置宿主路径沿用原来的「完成即写回节点」，
+  // 外部提交只交付产物，节点仍要调用 canvas.task.bind 才算绑定。
+  function finishTask(task) {
+    if (!task || task.status !== 'running') return;
+    const autoBind = !externalTaskIds.has(task.id);
+    const currentDoc = clone(ensureCanvas(task.canvasId));
+    const node = (currentDoc.nodes || []).find((n) => n.id === task.nodeId);
+    const queuedFail = takeQueuedFailure(task.nodeId);
+    if (queuedFail) {
+      task.status = 'failed';
+      task.progress = 100;
+      task.resultState = 'failed';
+      task.error = queuedFail.reason;
+      task.updatedAt = new Date().toISOString();
+      if (node) {
+        node.metadata ||= {};
+        node.metadata.status = 'failed';
+        node.metadata.taskId = task.id;
+        node.metadata.taskStatus = 'failed';
+        node.metadata.errorDetails = queuedFail.reason;
+        node.metadata.taskFailureDiagnostics = { reason: queuedFail.reason, message: queuedFail.reason };
+      }
+      saveCanvas(task.canvasId, currentDoc, currentDoc.revision, 'task.failed');
+      events.push({ type: 'generation.failed', taskId: task.id, canvasId: task.canvasId, nodeId: task.nodeId, reason: queuedFail.reason, at: new Date().toISOString() });
+      return;
     }
 
-    const createdTasks = [];
-    for (const proposal of targets) {
-      if (proposal.turnId) {
-        const turnRec = turns.get(proposal.turnId);
-        if (turnRec?.undone) {
-          throw conflict('turn_undone', '这一轮已撤销，不会生成。');
-        }
-      }
-      proposal.confirmed = true;
-      counts.userConfirmations += 1;
+    const queuedDefect = takeQueuedDefect(task.nodeId);
+    const promptText = node?.metadata?.composerContent || node?.metadata?.prompt || '';
+    const sizeStr = node?.metadata?.size || '9:16';
+    const dims = dimensionsForSize(sizeStr);
+    resourceSeq += 1;
+    assetSeq += 1;
+    const resourceId = `res-${resourceSeq}`;
+    const assetId = `asset-${assetSeq}`;
+    const mimeType = task.kind === 'video' ? 'video/mp4' : 'image/png';
+    const resource = {
+      id: resourceId,
+      assetId,
+      kind: task.kind,
+      mimeType,
+      size: DETERMINISTIC_PNG_BYTES.length,
+      width: dims.width,
+      height: dims.height,
+      durationMs: task.kind === 'video' ? Number(node?.metadata?.seconds || 6) * 1000 : 0,
+      version: `v1-${resourceId}`,
+      prompt: promptText,
+      reviewNote: queuedDefect?.defectNote || '',
+      sha256: DETERMINISTIC_PNG_SHA256,
+      dataBase64: DETERMINISTIC_PNG_BASE64,
+    };
+    resources.set(resourceId, resource);
+    const asset = {
+      id: assetId,
+      name: node?.title || `${task.kind}-${assetSeq}`,
+      kind: task.kind,
+      resourceId,
+      mimeType,
+      width: dims.width,
+      height: dims.height,
+      prompt: promptText,
+      reviewNote: queuedDefect?.defectNote || '',
+      generated: true,
+      payloadJson: JSON.stringify({
+        resourceId,
+        storageKey: `resource:${resourceId}`,
+        data: { storageKey: `resource:${resourceId}`, url: `/api/resources/${resourceId}/file`, mimeType, width: dims.width, height: dims.height },
+      }),
+      createdAt: new Date().toISOString(),
+    };
+    assets.set(assetId, asset);
 
-      const doc = ensureCanvas(proposal.canvasId);
-      for (const nodeId of proposal.nodeIds) {
-        const node = (doc.nodes || []).find((n) => n.id === nodeId);
-        taskSeq += 1;
-        const taskId = `task-${taskSeq}`;
-        const task = {
-          id: taskId,
-          proposalId: proposal.proposalId,
-          canvasId: proposal.canvasId,
-          nodeId,
-          type: proposal.kind,
-          kind: proposal.kind,
-          modelKey: proposal.modelKey,
-          status: 'running',
-          progress: 10,
-          confirmedByUser: true,
-          outputs: [],
-          error: null,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        tasks.set(taskId, task);
-        proposal.taskIds.push(taskId);
-        if (node) {
-          node.metadata ||= {};
-          node.metadata.status = 'running';
-          node.metadata.taskId = taskId;
-          node.metadata.taskStatus = 'running';
-        }
-        createdTasks.push(task);
-      }
-    }
-
-    if (delayMs > 0) {
-      await new Promise((resolve) => {
-        const timer = setTimeout(() => {
-          pendingTimers.delete(timer);
-          resolve();
-        }, delayMs);
-        pendingTimers.add(timer);
-      });
-    }
-
-    for (const task of createdTasks) {
-      const currentDoc = clone(ensureCanvas(task.canvasId));
-      const node = (currentDoc.nodes || []).find((n) => n.id === task.nodeId);
-      const queuedFail = takeQueuedFailure(task.nodeId);
-      if (queuedFail) {
-        task.status = 'failed';
-        task.progress = 100;
-        task.resultState = 'failed';
-        task.error = queuedFail.reason;
-        task.updatedAt = new Date().toISOString();
-        if (node) {
-          node.metadata ||= {};
-          node.metadata.status = 'failed';
-          node.metadata.taskId = task.id;
-          node.metadata.taskStatus = 'failed';
-          node.metadata.errorDetails = queuedFail.reason;
-          node.metadata.taskFailureDiagnostics = { reason: queuedFail.reason, message: queuedFail.reason };
-        }
-        saveCanvas(task.canvasId, currentDoc, currentDoc.revision, 'task.failed');
-        events.push({ type: 'generation.failed', taskId: task.id, canvasId: task.canvasId, nodeId: task.nodeId, reason: queuedFail.reason, at: new Date().toISOString() });
-        continue;
-      }
-
-      const queuedDefect = takeQueuedDefect(task.nodeId);
-      const promptText = node?.metadata?.composerContent || node?.metadata?.prompt || '';
-      const sizeStr = node?.metadata?.size || '9:16';
-      const dims = dimensionsForSize(sizeStr);
-      resourceSeq += 1;
-      assetSeq += 1;
-      const resourceId = `res-${resourceSeq}`;
-      const assetId = `asset-${assetSeq}`;
-      const mimeType = task.kind === 'video' ? 'video/mp4' : 'image/png';
-      const resource = {
-        id: resourceId,
+    task.status = 'succeeded';
+    task.progress = 100;
+    task.resultState = 'succeeded';
+    task.outputs = [
+      {
+        index: 0,
         assetId,
-        kind: task.kind,
-        mimeType,
-        size: DETERMINISTIC_PNG_BYTES.length,
-        width: dims.width,
-        height: dims.height,
-        durationMs: task.kind === 'video' ? Number(node?.metadata?.seconds || 6) * 1000 : 0,
-        version: `v1-${resourceId}`,
-        prompt: promptText,
-        reviewNote: queuedDefect?.defectNote || '',
-        sha256: DETERMINISTIC_PNG_SHA256,
-        dataBase64: DETERMINISTIC_PNG_BASE64,
-      };
-      resources.set(resourceId, resource);
-      const asset = {
-        id: assetId,
-        name: node?.title || `${task.kind}-${assetSeq}`,
-        kind: task.kind,
         resourceId,
         mimeType,
         width: dims.width,
         height: dims.height,
-        prompt: promptText,
-        reviewNote: queuedDefect?.defectNote || '',
-        generated: true,
-        payloadJson: JSON.stringify({
-          resourceId,
-          storageKey: `resource:${resourceId}`,
-          data: { storageKey: `resource:${resourceId}`, url: `/api/resources/${resourceId}/file`, mimeType, width: dims.width, height: dims.height },
-        }),
-        createdAt: new Date().toISOString(),
-      };
-      assets.set(assetId, asset);
+        storageKey: `resource:${resourceId}`,
+      },
+    ];
+    task.updatedAt = new Date().toISOString();
 
-      task.status = 'succeeded';
-      task.progress = 100;
-      task.resultState = 'succeeded';
-      task.outputs = [
-        {
-          index: 0,
-          assetId,
-          resourceId,
-          mimeType,
-          width: dims.width,
-          height: dims.height,
-          storageKey: `resource:${resourceId}`,
-        },
-      ];
-      task.updatedAt = new Date().toISOString();
-
-      if (node) {
-        node.metadata ||= {};
+    if (node) {
+      node.metadata ||= {};
+      if (autoBind) {
         Object.assign(node.metadata, {
           status: 'success',
           taskId: task.id,
@@ -2174,27 +2357,173 @@ export function createSimGo(options = {}) {
           height: dims.height,
           ...(queuedDefect ? { reviewNote: queuedDefect.defectNote } : {}),
         });
+      } else {
+        // 产物已交付，但还没绑定；画布上仍显示任务完成、等待写回。
+        Object.assign(node.metadata, {
+          taskId: task.id,
+          taskStatus: 'succeeded',
+          taskProgress: 100,
+          ...(queuedDefect ? { reviewNote: queuedDefect.defectNote } : {}),
+        });
       }
-      for (const n of currentDoc.nodes || []) {
-        if (n.type === 'script' && Array.isArray(n.metadata?.storyboard?.rows)) {
-          for (const row of n.metadata.storyboard.rows) {
-            if (row.imageNodeId === task.nodeId || row.videoNodeId === task.nodeId) {
-              row.status = 'success';
-            }
+    }
+    for (const n of currentDoc.nodes || []) {
+      if (n.type === 'script' && Array.isArray(n.metadata?.storyboard?.rows)) {
+        for (const row of n.metadata.storyboard.rows) {
+          if (row.imageNodeId === task.nodeId || row.videoNodeId === task.nodeId) {
+            row.status = 'success';
           }
         }
       }
-      saveCanvas(task.canvasId, currentDoc, currentDoc.revision, 'task.succeeded');
-      events.push({
-        type: 'generation.succeeded',
-        taskId: task.id,
-        canvasId: task.canvasId,
-        nodeId: task.nodeId,
-        assetId,
-        resourceId,
-        reviewNote: queuedDefect?.defectNote || null,
-        at: new Date().toISOString(),
-      });
+    }
+    saveCanvas(task.canvasId, currentDoc, currentDoc.revision, 'task.succeeded');
+    events.push({
+      type: 'generation.succeeded',
+      taskId: task.id,
+      canvasId: task.canvasId,
+      nodeId: task.nodeId,
+      assetId,
+      resourceId,
+      reviewNote: queuedDefect?.defectNote || null,
+      at: new Date().toISOString(),
+    });
+  }
+
+  // 配了耗时的画布走定时器；返回 false 表示调用方需要按原来的同步路径收尾。
+  function scheduleTaskCompletion(task) {
+    const durationMs = resolveTaskDurationMs(task);
+    if (durationMs === null) return false;
+    if (durationMs <= 0) {
+      finishTask(task);
+      return true;
+    }
+    const timer = setTimeout(() => {
+      pendingTimers.delete(timer);
+      finishTask(task);
+    }, durationMs);
+    pendingTimers.add(timer);
+    return true;
+  }
+
+  // 外部提交在没配耗时的画布上也要收尾；否则任务会永远停在 running，task.wait 只能等到超时。
+  function scheduleTaskCompletionOrDefault(task, defaultMs = 5) {
+    if (scheduleTaskCompletion(task)) return true;
+    const timer = setTimeout(() => {
+      pendingTimers.delete(timer);
+      finishTask(task);
+    }, Math.max(0, Number(defaultMs) || 0));
+    pendingTimers.add(timer);
+    return true;
+  }
+
+  function sleep(ms) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pendingTimers.delete(timer);
+        resolve();
+      }, ms);
+      pendingTimers.add(timer);
+    });
+  }
+
+  function taskView(task) {
+    return {
+      taskId: task.id,
+      type: task.type,
+      status: task.status,
+      progress: task.progress,
+      outputs: clone(task.outputs || []),
+      resultState: task.resultState || task.status,
+      error: task.error || null,
+      canvasId: task.canvasId,
+      nodeId: task.nodeId,
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+    };
+  }
+
+  function taskWaitIds(rawParams = {}) {
+    const single = String(rawParams.taskId || '').trim();
+    if (single) return [single];
+    return (Array.isArray(rawParams.taskIds) ? rawParams.taskIds : []).map(String).filter(Boolean).slice(0, 8);
+  }
+
+  function taskWaitNodeBinding(rawParams = {}, currentTasks = []) {
+    const canvasId = String(rawParams.canvasId || '').trim();
+    const nodeId = String(rawParams.nodeId || '').trim();
+    if (!canvasId || !nodeId) return {};
+    const doc = canvases.get(canvasId);
+    const node = (doc?.nodes || []).find((n) => n.id === nodeId);
+    const metadata = node?.metadata || {};
+    const taskIds = new Set(currentTasks.map((task) => task.id));
+    const bound = Boolean(metadata.taskId && metadata.resourceId && taskIds.has(metadata.taskId));
+    return { canvasId, nodeId, bound };
+  }
+
+  async function waitForTaskIds(ids, timeoutMs) {
+    const cap = Math.max(0, Math.min(25000, Number(timeoutMs ?? 25000) || 25000));
+    const deadline = Date.now() + cap;
+    while (true) {
+      const current = ids.map((id) => tasks.get(id)).filter(Boolean);
+      if (current.length === ids.length && current.every((task) => task.status !== 'running')) break;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      await sleep(Math.min(50, remaining));
+    }
+    return ids.map((id) => tasks.get(id)).filter(Boolean);
+  }
+
+  async function confirmProposals(proposalId = null, confirmOptions = {}) {
+    const delayMs = Number(confirmOptions.delayMs ?? options.taskDelayMs ?? 5);
+    const targets = proposalId
+      ? [proposals.get(proposalId)].filter(Boolean)
+      : [...proposals.values()].filter((p) => !p.confirmed && p.taskIds.length === 0);
+
+    if (proposalId && targets.length === 0) {
+      throw notFound('proposal_not_found', `生成提议不存在: ${proposalId}`);
+    }
+
+    const createdTasks = [];
+    for (const proposal of targets) {
+      if (proposal.turnId) {
+        const turnRec = turns.get(proposal.turnId);
+        if (turnRec?.undone) {
+          throw conflict('turn_undone', '这一轮已撤销，不会生成。');
+        }
+      }
+      // 已经确认或已经建过任务的提案直接跳过：确认接口必须幂等，不能多买一批付费任务。
+      if (proposal.confirmed || proposal.taskIds.length > 0) continue;
+      // 外部调用方创建的提案和外部 submit 走同一条节点任务检查：真实后端里外部生成单
+      // 经 owner 批准后也走 SubmitExternalGeneration，节点已有未失败任务时不能再生成。
+      // 内置宿主的提案是用户在面板上主动确认，保持原行为。
+      if (proposal.callerKind === 'caller' && nodeHasLiveTask(ensureCanvas(proposal.canvasId), proposal.nodeIds)) {
+        throw preconditionFailed('generation_task_exists', '节点已关联生成任务，请先查询原任务；需要另做一份时请新建节点');
+      }
+      proposal.confirmed = true;
+      counts.userConfirmations += 1;
+
+      for (const nodeId of proposal.nodeIds) {
+        const task = createGenerationTask({
+          canvasId: proposal.canvasId,
+          nodeId,
+          kind: proposal.kind,
+          modelKey: proposal.modelKey,
+          proposalId: proposal.proposalId,
+        });
+        proposal.taskIds.push(task.id);
+        createdTasks.push(task);
+      }
+    }
+
+    // 配了任务耗时的画布立即返回 running，按各自时长异步完成；
+    // 没配的画布保持原行为：等 delayMs 后同步完成，调用方拿到 succeeded。
+    const pendingSync = [];
+    for (const task of createdTasks) {
+      if (!scheduleTaskCompletion(task)) pendingSync.push(task);
+    }
+    if (pendingSync.length > 0) {
+      if (delayMs > 0) await sleep(delayMs);
+      for (const task of pendingSync) finishTask(task);
     }
 
     return clone(createdTasks);
@@ -2359,6 +2688,7 @@ export function createSimGo(options = {}) {
       events: clone(events),
       opLog: clone(opLog),
       counts: clone(counts),
+      taskTimings: Object.fromEntries([...taskTimings.entries()].map(([key, value]) => [key, clone(value)])),
     };
   }
 
@@ -2408,13 +2738,54 @@ export function createSimGo(options = {}) {
     });
   }
 
-  function executeHttpOp(opIdName, rawParams, opKey, turnId) {
+  // 带对 host token 的请求算内置宿主；外部 Agent 用 owner token，不会碰到这个值。
+  function requestIsHost(req) {
+    return Boolean(hostToken) && req.headers['x-beeftv-agent-token'] === hostToken;
+  }
+
+  // context.host：这次调用是不是内置宿主发的（带对 host token）。外部 Agent 走 caller 语义。
+  async function executeHttpOp(opIdName, rawParams, opKey, turnId, context = {}) {
     try {
-      return executeOp(opIdName, rawParams, opKey, turnId);
+      if (opIdName === 'task.wait') {
+        if (!taskWaitExposed) throw notFound('unknown_operation', '未知操作: task.wait');
+        return await executeTaskWaitOp(rawParams, opKey, turnId);
+      }
+      return executeOp(opIdName, rawParams, opKey, turnId, context);
     } catch (error) {
       logOpFailure(opIdName, rawParams, opKey, turnId, error);
       throw error;
     }
+  }
+
+  // task.wait 需要真正等待，HTTP 层单独走异步路径；其余操作仍由同步 executeOp 处理。
+  async function executeTaskWaitOp(rawParams, opKey, turnId) {
+    if (!taskWaitExposed) throw notFound('unknown_operation', '未知操作: task.wait');
+    const descriptor = descriptorMap.get('task.wait');
+    const turnRec = authorizeTurnForOp(turnId, descriptor, rawParams);
+    counts.ops['task.wait'] = (counts.ops['task.wait'] || 0) + 1;
+    counts.ReadOps += 1;
+    const ids = taskWaitIds(rawParams);
+    if (ids.length === 0) throw invalidArg('invalid_params', 'taskId 或 taskIds 必填');
+    const current = await waitForTaskIds(ids, rawParams.timeoutMs);
+    const pending = current.some((task) => task.status === 'running');
+    const data = {
+      tasks: current.map(taskView),
+      pending,
+      timedOut: pending,
+      ...taskWaitNodeBinding(rawParams, current),
+    };
+    opLog.push({
+      op: 'task.wait',
+      opId: opKey,
+      params: clone(rawParams),
+      turnId,
+      status: 'ok',
+      replayed: false,
+      result: clone(data),
+      at: new Date().toISOString(),
+    });
+    if (turnRec) turnRec.receipts.push({ op: 'task.wait', opId: opKey, result: clone(data) });
+    return data;
   }
 
   const server = http.createServer(async (req, res) => {
@@ -2442,7 +2813,7 @@ export function createSimGo(options = {}) {
         const turnId = String(req.headers['x-beeftv-agent-turn'] || body.turnId || '').trim();
         const opKey = String(body.opId || body.operationId || body.params?.operationId || '').trim();
         const params = body.params !== undefined ? body.params : body;
-        const data = executeHttpOp(opIdName, params, opKey, turnId);
+        const data = await executeHttpOp(opIdName, params, opKey, turnId, { host: requestIsHost(req) });
         sendOk(res, data);
         return;
       }
@@ -2453,7 +2824,7 @@ export function createSimGo(options = {}) {
         const turnId = String(req.headers['x-beeftv-agent-turn'] || body.turnId || '').trim();
         const opKey = String(body.opId || body.operationId || body.params?.operationId || '').trim();
         const params = body.params !== undefined ? body.params : body;
-        const data = executeHttpOp(opIdName, params, opKey, turnId);
+        const data = await executeHttpOp(opIdName, params, opKey, turnId, { host: requestIsHost(req) });
         sendOk(res, data);
         return;
       }
@@ -2697,6 +3068,15 @@ export function createSimGo(options = {}) {
     beginTurn,
     executeOp,
     confirmProposals,
+    setTaskTiming,
+    enableTaskWait,
+    async waitForTasks(taskIds, timeoutMs = 25000) {
+      const ids = (Array.isArray(taskIds) ? taskIds : [taskIds]).map(String).filter(Boolean).slice(0, 8);
+      if (ids.length === 0) throw invalidArg('invalid_params', 'taskIds 必填');
+      const current = await waitForTaskIds(ids, timeoutMs);
+      const pending = current.some((task) => task.status === 'running');
+      return { tasks: current.map(taskView), pending, timedOut: pending };
+    },
     failNextTask,
     flagNextTaskDefect,
     armNextMediaInspectError,

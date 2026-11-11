@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createSimGo } from './sim-go.mjs';
+import { confirmPendingProposals } from './run-external-eval.mjs';
 import { SCENARIOS, resolveScenarioList, buildS3SeedCanvas } from './scenarios.mjs';
 import {
   parseCliArgs,
@@ -13,6 +14,7 @@ import {
   createCostMeter,
   computeScenarioMetrics,
   buildEvalSummary,
+  renderMarkdownReport,
   runEval,
   requestSessionKey,
   elideDataUrls,
@@ -834,6 +836,54 @@ describe('预算门禁、密钥脱敏与评测配置校验测试', () => {
     expect(summaryWithUnexpectedGap.status).toBe('failed');
   });
 
+  test('全部场景不适用时整体不报 passed，明细显示 N/A 和原因', () => {
+    const reason = '这个场景只适用于外部 Agent（内置助手提交前必须等用户在界面确认）';
+    const run = {
+      runIndex: 1,
+      scenarioId: 'submit-wait-image',
+      scenarioCode: 'R1a',
+      expectedBaselinePass: true,
+      reason,
+      checks: [{ name: 'runner_applicability', passed: true, detail: '这个场景只适用于外部 Agent' }],
+      metrics: {
+        status: 'not_applicable',
+        scenarioId: 'submit-wait-image',
+        scenarioCode: 'R1a',
+        passed: false,
+        structuralCompletenessRate: 0,
+        passedChecks: 1,
+        totalChecks: 1,
+        turnCount: 0,
+        modelRequests: 0,
+        eliminableRequests: 0,
+        readOps: 0,
+        writeOps: 0,
+        inputTokens: 0,
+        cachedTokenRatio: 0,
+        outputTokens: 0,
+        costCny: 0,
+        durationMs: 0,
+        unconfirmedGenerationCount: 0,
+        duplicateNodeCount: 0,
+        duplicateProposalCount: 0,
+        revisionConflicts: 0,
+        unrecoveredConflicts: 0,
+      },
+    };
+    const report = buildEvalSummary(
+      [run],
+      { scenario: 'R1a', modelMode: 'fake', runs: 1, maxRequests: 20, budgetCny: 10 },
+      { totalRequests: 0, totalInputTokens: 0, totalOutputTokens: 0, totalTokens: 0, totalCostCny: 0, abortedBudget: false },
+    );
+    expect(report.status).toBe('not_applicable');
+    expect(report.summary.notApplicableRuns).toBe(1);
+    const markdown = renderMarkdownReport(report);
+    expect(markdown).toContain('| N/A |');
+    expect(markdown).toContain('不适用场景数 | 1');
+    expect(markdown).toContain('只适用于外部 Agent');
+    expect(markdown).not.toContain('| FAIL |');
+  });
+
   test('事件自动唤醒与用户复查分别计分，技能仅首轮激活后仍进入后续请求', async () => {
     const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'beeftv-eval-truth-'));
     try {
@@ -1016,5 +1066,343 @@ describe('模拟器分镜准备的标题模板与真实后端一致', () => {
       expect(() => prepare(simGo, canvasId, { image, video })).toThrow();
     }
     expect(simGo.ensureCanvas(canvasId).nodes.length).toBe(nodesBefore);
+  });
+});
+
+describe('模拟器任务耗时与外部提交（替代场景 R1 / R3 的前置能力）', () => {
+  const seedParityCanvas = (simGo, canvasId) => simGo.ensureCanvas(canvasId, {
+    id: canvasId,
+    title: '任务耗时测试',
+    revision: 1,
+    nodes: [
+      {
+        id: 'node-image', type: 'image', title: '镜 1 首帧', position: { x: 120, y: 160 }, width: 720, height: 405,
+        metadata: { content: '', prompt: '雨夜街头', composerContent: '雨夜街头', status: 'idle', size: '9:16', count: 1, model: 'seedream-3.0' },
+      },
+      {
+        id: 'node-video', type: 'video', title: '镜 1 视频', position: { x: 900, y: 160 }, width: 720, height: 405,
+        metadata: { content: '', prompt: '镜头缓推', composerContent: '镜头缓推', status: 'idle', size: '9:16', seconds: '6', model: 'seedance-1.0' },
+      },
+    ],
+    connections: [],
+    timeline: null,
+  });
+
+  test('setTaskTiming 让内置确认路径异步完成，完成后仍自动写回节点', async () => {
+    const simGo = createSimGo({});
+    const canvasId = 'canvas-timing';
+    seedParityCanvas(simGo, canvasId);
+    simGo.beginTurn({ turnId: 'turn-timing', canvasId, permissionMode: 'canvas' });
+    simGo.setTaskTiming(canvasId, { imageMs: 80, videoMs: 160 });
+    const proposal = simGo.executeOp('canvas.generation.propose', {
+      canvasId, kind: 'image', nodeIds: ['node-image'],
+    }, 'propose-timing', 'turn-timing').result;
+
+    const startedAt = Date.now();
+    const created = await simGo.confirmProposals(proposal.proposalId, { delayMs: 5 });
+    expect(Date.now() - startedAt).toBeLessThan(60);
+    expect(created[0].status).toBe('running');
+    expect(simGo.ensureCanvas(canvasId).nodes[0].metadata.taskStatus).toBe('running');
+
+    const early = await simGo.waitForTasks([created[0].id], 20);
+    expect(early.pending).toBe(true);
+
+    const settled = await simGo.waitForTasks([created[0].id], 1000);
+    expect(settled.pending).toBe(false);
+    expect(settled.tasks[0].status).toBe('succeeded');
+    expect(simGo.ensureCanvas(canvasId).nodes[0].metadata.resourceId).toBeTruthy();
+    await simGo.close();
+  });
+
+  test('外部调用方 propose + submit：立即返回 running，产物交付后要再 bind，重复 operationId 不重复计费', async () => {
+    const simGo = createSimGo({});
+    const canvasId = 'canvas-external';
+    seedParityCanvas(simGo, canvasId);
+    // 默认不外露 task.wait，避免改变 S1–S11 的工具定义体积；替代场景 setup 才打开。
+    expect(simGo.descriptors.some((descriptor) => descriptor.id === 'task.wait')).toBe(false);
+    simGo.enableTaskWait();
+    expect(simGo.descriptors.some((descriptor) => descriptor.id === 'task.wait')).toBe(true);
+    await simGo.listen(0);
+    simGo.beginTurn({ turnId: 'turn-external', canvasId, permissionMode: 'canvas' });
+    simGo.setTaskTiming(canvasId, { imageMs: 80 });
+    const proposal = simGo.executeOp('canvas.generation.propose', {
+      canvasId, kind: 'image', nodeIds: ['node-image'],
+    }, '', 'turn-external').result;
+
+    const submitted = simGo.executeOp('canvas.generation.submit', {
+      canvasId,
+      nodeIds: ['node-image'],
+      kind: 'image',
+      proposalId: proposal.proposalId,
+      expectedRevision: proposal.source.canvasRevision,
+      expectedModelConfigRevision: proposal.source.modelConfigRevision,
+    }, 'external-op-1', 'turn-external').result;
+    expect(submitted.status).toBe('submitted');
+    expect(submitted.approvalMode).toBe('caller');
+    expect(submitted.taskIds.length).toBe(1);
+
+    const early = await simGo.waitForTasks(submitted.taskIds, 20);
+    expect(early.pending).toBe(true);
+    const settled = await simGo.waitForTasks(submitted.taskIds, 1000);
+    expect(settled.tasks[0].status).toBe('succeeded');
+
+    // 外部任务只交付产物：没调用 canvas.task.bind 前节点没有媒体字段。
+    const unbound = simGo.ensureCanvas(canvasId).nodes[0];
+    expect(unbound.metadata.resourceId).toBeUndefined();
+    const bound = simGo.executeOp('canvas.task.bind', {
+      canvasId, taskId: submitted.taskIds[0], nodeId: 'node-image',
+    }, 'external-bind-1', 'turn-external').result;
+    expect(bound.bindingStatus).toBe('bound');
+    expect(simGo.ensureCanvas(canvasId).nodes[0].metadata.resourceId).toBeTruthy();
+
+    // 同一个 operationId 重试回读原任务，不新建第二个付费任务。
+    const replay = simGo.executeOp('canvas.generation.submit', {
+      canvasId,
+      nodeIds: ['node-image'],
+      kind: 'image',
+      proposalId: proposal.proposalId,
+      expectedRevision: proposal.source.canvasRevision,
+      expectedModelConfigRevision: proposal.source.modelConfigRevision,
+    }, 'external-op-1', 'turn-external');
+    expect(replay.replayed).toBe(true);
+    expect(replay.result.taskIds).toEqual(submitted.taskIds);
+    expect(simGo.snapshot().tasks.filter((task) => task.canvasId === canvasId).length).toBe(1);
+
+    // 换一个 operationId 再提交同一节点：真实后端按节点任务回执拒绝，不会回读也不会再买一份。
+    expect(() => simGo.executeOp('canvas.generation.submit', {
+      canvasId,
+      nodeIds: ['node-image'],
+      kind: 'image',
+      proposalId: proposal.proposalId,
+      expectedRevision: simGo.ensureCanvas(canvasId).revision,
+      expectedModelConfigRevision: proposal.source.modelConfigRevision,
+    }, 'external-op-2', 'turn-external')).toThrow(/已关联生成任务/);
+    expect(simGo.snapshot().tasks.filter((task) => task.canvasId === canvasId).length).toBe(1);
+
+    // task.wait 的 HTTP 入口会等任务结束，并回报节点是否已绑定。
+    const waitRes = await fetch(`${simGo.baseUrl}/ops/task.wait`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-beeftv-agent-turn': 'turn-external' },
+      body: JSON.stringify({ opId: 'wait-op-1', params: { taskId: submitted.taskIds[0], canvasId, nodeId: 'node-image', timeoutMs: 50 } }),
+    });
+    const waitBody = await waitRes.json();
+    expect(waitRes.status).toBe(200);
+    expect(waitBody.data.pending).toBe(false);
+    expect(waitBody.data.bound).toBe(true);
+    await simGo.close();
+  });
+
+  test('外部调用方：成功后同节点重提被拒，失败后可以重提', async () => {
+    const simGo = createSimGo({});
+    const canvasId = 'canvas-external-regen';
+    seedParityCanvas(simGo, canvasId);
+    simGo.beginTurn({ turnId: 'turn-external-regen', canvasId, permissionMode: 'canvas' });
+    const submit = (opId, nodeId, kind) => simGo.executeOp('canvas.generation.submit', {
+      canvasId,
+      nodeIds: [nodeId],
+      kind,
+      expectedRevision: simGo.ensureCanvas(canvasId).revision,
+      expectedModelConfigRevision: 1,
+    }, opId, 'turn-external-regen').result;
+
+    const first = submit('regen-op-1', 'node-image', 'image');
+    const firstSettled = await simGo.waitForTasks(first.taskIds, 500);
+    expect(firstSettled.tasks[0].status).toBe('succeeded');
+    // 已成功的节点不能由外部调用方原地重提，和真实后端一致；需要另做一份时新建节点。
+    expect(() => submit('regen-op-2', 'node-image', 'image')).toThrow(/已关联生成任务/);
+    expect(simGo.snapshot().tasks.filter((task) => task.canvasId === canvasId).length).toBe(1);
+
+    // 失败任务可以重提：同一节点换新的 operationId 会新建任务。
+    simGo.failNextTask('upstream_timeout', 'node-video');
+    const failed = submit('regen-video-1', 'node-video', 'video');
+    const failedSettled = await simGo.waitForTasks(failed.taskIds, 500);
+    expect(failedSettled.tasks[0].status).toBe('failed');
+    const retried = submit('regen-video-2', 'node-video', 'video');
+    const retriedSettled = await simGo.waitForTasks(retried.taskIds, 500);
+    expect(retriedSettled.tasks[0].status).toBe('succeeded');
+    expect(simGo.snapshot().tasks.filter((task) => task.canvasId === canvasId).length).toBe(3);
+    await simGo.close();
+  });
+
+  test('外部提案指向已有成功任务的节点时，确认不会新建任务', async () => {
+    const simGo = createSimGo({});
+    const canvasId = 'canvas-external-confirm-blocked';
+    seedParityCanvas(simGo, canvasId);
+    simGo.beginTurn({ turnId: 'turn-external-confirm-blocked', canvasId, permissionMode: 'canvas' });
+    const submitted = simGo.executeOp('canvas.generation.submit', {
+      canvasId,
+      nodeIds: ['node-image'],
+      kind: 'image',
+      expectedRevision: 1,
+      expectedModelConfigRevision: 1,
+    }, 'blocked-submit-1', 'turn-external-confirm-blocked').result;
+    await simGo.waitForTasks(submitted.taskIds, 500);
+
+    // 外部 Agent 在已成功的节点上再提议；提案记录调用方类型，确认时走和外部 submit 相同的检查。
+    const proposal = simGo.executeOp('canvas.generation.propose', {
+      canvasId, kind: 'image', nodeIds: ['node-image'],
+    }, '', 'turn-external-confirm-blocked').result;
+    expect(simGo.proposals.get(proposal.proposalId).callerKind).toBe('caller');
+    await expect(simGo.confirmProposals(proposal.proposalId, { delayMs: 1 })).rejects.toThrow(/已关联生成任务/);
+    expect(simGo.snapshot().tasks.filter((task) => task.canvasId === canvasId).length).toBe(1);
+
+    // 运行器自动确认同样不能绕过；被拒绝的提案保持未确认。
+    expect(await confirmPendingProposals(simGo, canvasId)).toBe(0);
+    expect(simGo.proposals.get(proposal.proposalId).confirmed).toBe(false);
+    expect(simGo.snapshot().tasks.filter((task) => task.canvasId === canvasId).length).toBe(1);
+    await simGo.close();
+  });
+
+  test('未配任务耗时的画布上外部提交也会完成，不会永远 running', async () => {
+    const simGo = createSimGo({});
+    const canvasId = 'canvas-no-timing';
+    seedParityCanvas(simGo, canvasId);
+    simGo.beginTurn({ turnId: 'turn-no-timing', canvasId, permissionMode: 'canvas' });
+    // 这张画布没有 setTaskTiming，走默认 5 毫秒完成路径。
+    const submitted = simGo.executeOp('canvas.generation.submit', {
+      canvasId,
+      nodeIds: ['node-image'],
+      kind: 'image',
+      expectedRevision: 1,
+      expectedModelConfigRevision: 1,
+    }, 'no-timing-submit', 'turn-no-timing').result;
+    const settled = await simGo.waitForTasks(submitted.taskIds, 500);
+    expect(settled.pending).toBe(false);
+    expect(settled.tasks[0].status).toBe('succeeded');
+    await simGo.close();
+  });
+
+  test('批量提交里后面的节点校验失败时，前面不会留下 running 任务', async () => {
+    const simGo = createSimGo({});
+    const canvasId = 'canvas-batch-fail';
+    seedParityCanvas(simGo, canvasId);
+    simGo.beginTurn({ turnId: 'turn-batch-fail', canvasId, permissionMode: 'canvas' });
+    expect(() => simGo.executeOp('canvas.generation.submit', {
+      canvasId,
+      nodeIds: ['node-image', 'node-video'],
+      kind: 'image',
+      expectedRevision: 1,
+      expectedModelConfigRevision: 1,
+    }, 'batch-submit', 'turn-batch-fail')).toThrow();
+    expect(simGo.snapshot().tasks.filter((task) => task.canvasId === canvasId).length).toBe(0);
+    await simGo.close();
+  });
+
+  test('外部 caller 提交后提案已确认并记下任务，运行器再确认不会产生第二个任务', async () => {
+    const simGo = createSimGo({});
+    const canvasId = 'canvas-caller-confirm';
+    seedParityCanvas(simGo, canvasId);
+    simGo.beginTurn({ turnId: 'turn-caller-confirm', canvasId, permissionMode: 'canvas' });
+    const proposal = simGo.executeOp('canvas.generation.propose', {
+      canvasId, kind: 'image', nodeIds: ['node-image'],
+    }, '', 'turn-caller-confirm').result;
+    const submitted = simGo.executeOp('canvas.generation.submit', {
+      canvasId,
+      nodeIds: ['node-image'],
+      kind: 'image',
+      proposalId: proposal.proposalId,
+      expectedRevision: proposal.source.canvasRevision,
+      expectedModelConfigRevision: proposal.source.modelConfigRevision,
+    }, 'caller-submit', 'turn-caller-confirm').result;
+    expect(submitted.taskIds.length).toBe(1);
+    expect(simGo.proposals.get(proposal.proposalId).confirmed).toBe(true);
+    expect(simGo.proposals.get(proposal.proposalId).taskIds).toEqual(submitted.taskIds);
+
+    // 直接调用确认接口也必须幂等：已确认/已有任务的提案不再建第二批付费任务。
+    expect(await simGo.confirmProposals(proposal.proposalId, { delayMs: 1 })).toEqual([]);
+
+    const confirmed = await confirmPendingProposals(simGo, canvasId);
+    expect(confirmed).toBe(0);
+    expect(simGo.snapshot().tasks.filter((task) => task.canvasId === canvasId).length).toBe(1);
+    await simGo.close();
+  });
+
+  test('内置宿主提交必须已有确认过的提案；确认后的重复提交只回读原任务', async () => {
+    const simGo = createSimGo({ hostToken: 'host-token' });
+    const canvasId = 'canvas-host-submit';
+    seedParityCanvas(simGo, canvasId);
+    await simGo.listen(0);
+    simGo.beginTurn({ turnId: 'turn-host-submit', canvasId, permissionMode: 'canvas' });
+    const proposal = simGo.executeOp('canvas.generation.propose', {
+      canvasId, kind: 'image', nodeIds: ['node-image'],
+    }, '', 'turn-host-submit').result;
+    const submitParams = {
+      canvasId,
+      nodeIds: ['node-image'],
+      kind: 'image',
+      proposalId: proposal.proposalId,
+      expectedRevision: proposal.source.canvasRevision,
+      expectedModelConfigRevision: proposal.source.modelConfigRevision,
+    };
+    const rejected = await fetch(`${simGo.baseUrl}/api/ops/canvas.generation.submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Beeftv-Agent-Token': 'host-token', 'x-beeftv-agent-turn': 'turn-host-submit' },
+      body: JSON.stringify({ opId: 'host-submit-1', params: submitParams }),
+    });
+    expect(rejected.status).toBe(403);
+    expect((await rejected.json()).reason).toBe('generation_confirmation_required');
+    expect(simGo.snapshot().tasks.filter((task) => task.canvasId === canvasId).length).toBe(0);
+
+    const tasks = await simGo.confirmProposals(proposal.proposalId, { delayMs: 1 });
+    // 确认后任务完成会写回节点并推进画布版本，重提时带当前版本。
+    const replay = await fetch(`${simGo.baseUrl}/api/ops/canvas.generation.submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Beeftv-Agent-Token': 'host-token', 'x-beeftv-agent-turn': 'turn-host-submit' },
+      body: JSON.stringify({ opId: 'host-submit-2', params: { ...submitParams, expectedRevision: simGo.ensureCanvas(canvasId).revision } }),
+    });
+    const replayBody = await replay.json();
+    expect(replay.status).toBe(200);
+    expect(replayBody.data.result.taskIds).toEqual(tasks.map((task) => task.id));
+    expect(simGo.snapshot().tasks.filter((task) => task.canvasId === canvasId).length).toBe(1);
+    await simGo.close();
+  });
+
+  test('task.wait 未开启时直接 HTTP 调用也按未知操作拒绝', async () => {
+    const simGo = createSimGo({});
+    const canvasId = 'canvas-wait-hidden';
+    seedParityCanvas(simGo, canvasId);
+    await simGo.listen(0);
+    simGo.beginTurn({ turnId: 'turn-wait-hidden', canvasId, permissionMode: 'canvas' });
+    const hidden = await fetch(`${simGo.baseUrl}/api/ops/task.wait`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-beeftv-agent-turn': 'turn-wait-hidden' },
+      body: JSON.stringify({ opId: 'wait-hidden', params: { taskId: 'task-1', timeoutMs: 1 } }),
+    });
+    expect(hidden.status).toBe(404);
+    expect((await hidden.json()).reason).toBe('unknown_operation');
+    simGo.enableTaskWait();
+    const exposed = await fetch(`${simGo.baseUrl}/api/ops/task.wait`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-beeftv-agent-turn': 'turn-wait-hidden' },
+      body: JSON.stringify({ opId: 'wait-exposed', params: { taskId: 'task-1', timeoutMs: 1 } }),
+    });
+    expect(exposed.status).toBe(200);
+    expect((await exposed.json()).data.tasks).toEqual([]);
+    await simGo.close();
+  });
+
+  test('canvas.script.prepare 单次最多 8 行，第 9 行起必须用 rows.append 追加', async () => {
+    const simGo = createSimGo({});
+    const canvasId = 'canvas-rows-limit';
+    simGo.ensureCanvas(canvasId);
+    simGo.beginTurn({ turnId: 'turn-rows', canvasId, permissionMode: 'canvas' });
+    const row = (n) => ({ plotDescription: `第 ${n} 镜`, imageGenerationPrompt: `第 ${n} 镜首帧`, videoMotionPrompt: `第 ${n} 镜运镜`, durationSeconds: 5 });
+    const prepare = (rows, key) => simGo.executeOp('canvas.script.prepare', {
+      canvasId,
+      expectedRevision: simGo.ensureCanvas(canvasId).revision,
+      script: { title: `分镜-${key}`, rows },
+    }, `prepare-${key}`, 'turn-rows').result;
+
+    expect(() => prepare(Array.from({ length: 9 }, (_, i) => row(i + 1)), 'nine')).toThrow(/1至8行|1\.\.8/);
+    const prepared = prepare(Array.from({ length: 8 }, (_, i) => row(i + 1)), 'eight');
+    expect(prepared.created.filter((item) => item.type === 'script').length).toBe(1);
+    const appended = simGo.executeOp('canvas.script.rows.append', {
+      canvasId,
+      nodeId: prepared.nodeId,
+      expectedRevision: simGo.ensureCanvas(canvasId).revision,
+      rows: [row(9), row(10)],
+    }, 'append-two', 'turn-rows').result;
+    expect(appended.rowCount).toBe(10);
+    await simGo.close();
   });
 });

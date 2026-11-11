@@ -7,6 +7,7 @@ import http from 'node:http';
 import { isTransientStudioTailMessage } from '../studio-digest.mjs';
 import { clone, isPortrait916 } from './scenarios/shared.mjs';
 import { REAL_FAILURE_SCENARIOS } from './scenarios/real-failures.mjs';
+import { PARITY_SCENARIOS } from './scenarios/parity.mjs';
 
 function extractMessageText(msg) {
   if (!msg) return '';
@@ -1702,15 +1703,19 @@ export const SCENARIOS = [
 
 export function resolveScenarioList(selector = 'all') {
   const norm = String(selector || 'all').trim();
-  if (!norm || norm.toLowerCase() === 'all') return SCENARIOS;
+  const lower = norm.toLowerCase();
+  // 'all' 仍然只指 S1–S11，替代场景要用 parity 或具体场景码单独选择。
+  if (!norm || lower === 'all') return SCENARIOS;
+  if (lower === 'parity') return PARITY_SCENARIOS;
   const parts = norm.split(',').map((s) => s.trim()).filter(Boolean);
+  const pool = [...SCENARIOS, ...PARITY_SCENARIOS];
   const matched = [];
   for (const part of parts) {
-    const found = SCENARIOS.find(
+    const found = pool.find(
       (s) => s.id.toLowerCase() === part.toLowerCase() || s.code.toLowerCase() === part.toLowerCase() || (s.aliases || []).some((a) => a.toLowerCase() === part.toLowerCase()),
     );
     if (!found) {
-      throw new Error(`未知评测场景: ${part}（可选: all, ${SCENARIOS.map((s) => `${s.code}/${s.id}`).join(', ')}）`);
+      throw new Error(`未知评测场景: ${part}（可选: all, parity, ${pool.map((s) => `${s.code}/${s.id}`).join(', ')}）`);
     }
     if (!matched.includes(found)) matched.push(found);
   }

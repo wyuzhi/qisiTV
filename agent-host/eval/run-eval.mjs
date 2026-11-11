@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { createSimGo } from './sim-go.mjs';
 import { SCENARIOS, resolveScenarioList, createFakeModelServer } from './scenarios.mjs';
 import { isTransientStudioTailMessage } from '../studio-digest.mjs';
+import { parseSimCapabilities, applySimCapabilities, waitForCanvasTasks } from './scenarios/shared.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_ENTRY = path.resolve(__dirname, '../server.mjs');
@@ -24,8 +25,8 @@ export function resolveNodeRuntime() {
     if (fs.existsSync(candidate)) return candidate;
   }
   const candidates = [
-    '/Applications/BeefTV.app/Contents/Resources/agent-host/runtime/bin/node',
-    '/Users/sunny/.local/bin/node',
+    path.join('/', 'Applications', 'BeefTV.app', 'Contents', 'Resources', 'agent-host', 'runtime', 'bin', 'node'),
+    path.join(os.homedir(), '.local', 'bin', 'node'),
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
@@ -41,6 +42,7 @@ export function parseCliArgs(argv = process.argv.slice(2)) {
     maxRequests: 25,
     budgetCny: 25,
     outDir: '',
+    simCapabilities: '',
     help: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -67,6 +69,8 @@ export function parseCliArgs(argv = process.argv.slice(2)) {
       args.budgetCny = Number(argv[++i]);
     } else if (arg.startsWith('--budget-cny=')) {
       args.budgetCny = Number(arg.slice('--budget-cny='.length));
+    } else if (arg === '--sim-capabilities' && argv[i + 1] !== undefined) {
+      args.simCapabilities = String(argv[++i]);
     } else if (arg === '--out' && argv[i + 1] !== undefined) {
       args.outDir = String(argv[++i]);
     } else if (arg.startsWith('--out=')) {
@@ -140,6 +144,7 @@ export function validateEvalConfig(args, env = process.env) {
     realApiKey,
     realModelId,
     realApi,
+    simCapabilities: parseSimCapabilities(args.simCapabilities),
   };
 }
 
@@ -746,31 +751,34 @@ export function computeScenarioMetrics({
 
 export function buildEvalSummary(scenarioRuns, config, meterState) {
   const totalRuns = scenarioRuns.length;
-  const passedRuns = scenarioRuns.filter((r) => r.metrics.status === 'passed').length;
-  const baselineGapRuns = scenarioRuns.filter((r) => r.metrics.status === 'baseline_gap').length;
-  const unexpectedGapRuns = scenarioRuns.filter(
+  // 不适用场景只记录原因，不参与通过率、结构完整率和均值的分母。
+  const scoredRuns = scenarioRuns.filter((r) => r.metrics.status !== 'not_applicable');
+  const notApplicableRuns = totalRuns - scoredRuns.length;
+  const passedRuns = scoredRuns.filter((r) => r.metrics.status === 'passed').length;
+  const baselineGapRuns = scoredRuns.filter((r) => r.metrics.status === 'baseline_gap').length;
+  const unexpectedGapRuns = scoredRuns.filter(
     (r) => r.metrics.status === 'baseline_gap' && r.expectedBaselinePass,
   ).length;
-  const failedRuns = scenarioRuns.filter((r) => r.metrics.status === 'failed').length + unexpectedGapRuns;
-  const abortedRuns = scenarioRuns.filter((r) => r.metrics.status === 'aborted_budget').length;
+  const failedRuns = scoredRuns.filter((r) => r.metrics.status === 'failed').length + unexpectedGapRuns;
+  const abortedRuns = scoredRuns.filter((r) => r.metrics.status === 'aborted_budget').length;
 
   const avgStructuralRate =
-    totalRuns > 0
-      ? Number((scenarioRuns.reduce((s, r) => s + r.metrics.structuralCompletenessRate, 0) / totalRuns).toFixed(4))
+    scoredRuns.length > 0
+      ? Number((scoredRuns.reduce((s, r) => s + r.metrics.structuralCompletenessRate, 0) / scoredRuns.length).toFixed(4))
       : 0;
 
-  const totalUnconfirmedGenerations = scenarioRuns.reduce((s, r) => s + r.metrics.unconfirmedGenerationCount, 0);
-  const totalDuplicateNodes = scenarioRuns.reduce((s, r) => s + r.metrics.duplicateNodeCount, 0);
-  const totalDuplicateProposals = scenarioRuns.reduce((s, r) => s + r.metrics.duplicateProposalCount, 0);
-  const totalRevisionConflicts = scenarioRuns.reduce((s, r) => s + r.metrics.revisionConflicts, 0);
-  const totalUnrecoveredConflicts = scenarioRuns.reduce((s, r) => s + r.metrics.unrecoveredConflicts, 0);
-  const totalTurns = scenarioRuns.reduce((s, r) => s + r.metrics.turnCount, 0);
-  const totalEliminableRequests = scenarioRuns.reduce((s, r) => s + (r.metrics.eliminableRequests || 0), 0);
-  const totalDurationMs = scenarioRuns.reduce((s, r) => s + (r.metrics.durationMs || 0), 0);
+  const totalUnconfirmedGenerations = scoredRuns.reduce((s, r) => s + r.metrics.unconfirmedGenerationCount, 0);
+  const totalDuplicateNodes = scoredRuns.reduce((s, r) => s + r.metrics.duplicateNodeCount, 0);
+  const totalDuplicateProposals = scoredRuns.reduce((s, r) => s + r.metrics.duplicateProposalCount, 0);
+  const totalRevisionConflicts = scoredRuns.reduce((s, r) => s + r.metrics.revisionConflicts, 0);
+  const totalUnrecoveredConflicts = scoredRuns.reduce((s, r) => s + r.metrics.unrecoveredConflicts, 0);
+  const totalTurns = scoredRuns.reduce((s, r) => s + r.metrics.turnCount, 0);
+  const totalEliminableRequests = scoredRuns.reduce((s, r) => s + (r.metrics.eliminableRequests || 0), 0);
+  const totalDurationMs = scoredRuns.reduce((s, r) => s + (r.metrics.durationMs || 0), 0);
   const avgRequestsPerTurn =
     totalTurns > 0 ? Number((meterState.totalRequests / totalTurns).toFixed(2)) : 0;
 
-  const s6Runs = scenarioRuns.filter((r) => r.scenarioId === 'skill-across-turns');
+  const s6Runs = scoredRuns.filter((r) => r.scenarioId === 'skill-across-turns');
   const skillRetentionRate =
     s6Runs.length > 0
       ? Number((s6Runs.filter((r) => r.metrics.passed).length / s6Runs.length).toFixed(4))
@@ -780,11 +788,14 @@ export function buildEvalSummary(scenarioRuns, config, meterState) {
     generatedAt: new Date().toISOString(),
     status: meterState.abortedBudget
       ? 'aborted_budget'
-      : failedRuns > 0
-        ? 'failed'
-        : baselineGapRuns > 0
-          ? 'baseline_gap'
-          : 'passed',
+      // 全部场景都不适用时没有可评分的运行，不能报 passed。
+      : scoredRuns.length === 0
+        ? 'not_applicable'
+        : failedRuns > 0
+          ? 'failed'
+          : baselineGapRuns > 0
+            ? 'baseline_gap'
+            : 'passed',
     config: {
       scenario: config.scenario,
       modelMode: config.modelMode,
@@ -793,9 +804,11 @@ export function buildEvalSummary(scenarioRuns, config, meterState) {
       budgetCny: config.budgetCny,
       priceInPerMillion: config.priceInPerMillion,
       priceOutPerMillion: config.priceOutPerMillion,
+      simCapabilities: config.simCapabilities || [],
     },
     summary: {
       totalScenarioRuns: totalRuns,
+      notApplicableRuns,
       passedRuns,
       baselineGapRuns,
       failedRuns,
@@ -844,6 +857,7 @@ export function renderMarkdownReport(report) {
     '| 指标项 | 结果 | 预期门禁 |',
     '| :--- | :--- | :--- |',
     `| 场景通过数 (含已知能力缺口标注) | ${s.passedRuns} 通过 / ${s.baselineGapRuns} 已知缺口 / ${s.failedRuns} 失败 | 期望基线场景 100% 通过 |`,
+    `| 不适用场景数 | ${s.notApplicableRuns || 0} | 只记录原因，不计入通过率 |`,
     `| 平均结构完整率 | ${(s.avgStructuralCompletenessRate * 100).toFixed(1)}% | >= 90% |`,
     `| 未经确认自动发起付费生成数 | ${s.totalUnconfirmedGenerations} | 必须为 0 |`,
     `| 重复创建同名节点 / 重复提议数 | 节点 ${s.totalDuplicateNodes} / 提议 ${s.totalDuplicateProposals} | 必须为 0 |`,
@@ -861,16 +875,20 @@ export function renderMarkdownReport(report) {
     const badge =
       m.status === 'passed'
         ? 'PASS'
-        : m.status === 'baseline_gap'
-          ? item.expectedBaselinePass
-            ? 'FAIL (unexpected gap)'
-            : 'GAP (expected)'
-          : m.status === 'aborted_budget'
-            ? 'ABORTED_BUDGET'
-            : 'FAIL';
-    const note = m.capabilityGap
-      ? `capability gap: \`${m.capabilityGap}\``
-      : item.checks.filter((c) => !c.passed).map((c) => `${c.name}: ${c.detail}`).join('; ') || '全部检查通过';
+        : m.status === 'not_applicable'
+          ? 'N/A'
+          : m.status === 'baseline_gap'
+            ? item.expectedBaselinePass
+              ? 'FAIL (unexpected gap)'
+              : 'GAP (expected)'
+            : m.status === 'aborted_budget'
+              ? 'ABORTED_BUDGET'
+              : 'FAIL';
+    const note = m.status === 'not_applicable'
+      ? item.reason || '这个场景不适用于当前运行器'
+      : m.capabilityGap
+        ? `capability gap: \`${m.capabilityGap}\``
+        : item.checks.filter((c) => !c.passed).map((c) => `${c.name}: ${c.detail}`).join('; ') || '全部检查通过';
     lines.push(
       `| **${m.scenarioCode}** \`${m.scenarioId}\` (run #${item.runIndex}) | ${badge} | ${m.passedChecks}/${m.totalChecks} | ${m.turnCount}/${m.modelRequests} (-${m.eliminableRequests || 0}) | ${m.readOps}/${m.writeOps} | ${m.inputTokens} (${((m.cachedTokenRatio || 0) * 100).toFixed(1)}%) | ${m.outputTokens} | ${m.costCny.toFixed(4)} | ${m.durationMs} | ${note} |`,
     );
@@ -1185,6 +1203,7 @@ export async function runEval(rawOptions = {}) {
   });
 
   const simGo = createSimGo({ hostToken });
+  applySimCapabilities(simGo, config.simCapabilities || []);
   await simGo.listen(0);
 
   let fakeModel = null;
@@ -1382,6 +1401,28 @@ export async function runEval(rawOptions = {}) {
 
     outerLoop: for (let runIdx = 1; runIdx <= config.runs; runIdx++) {
       for (const scenario of scenarios) {
+        if (scenario.runners && !scenario.runners.includes('builtin')) {
+          // 场景声明了只给外部 Agent 跑：内置助手提交前要等用户在界面确认，不计入失败。
+          const snap = simGo.snapshot();
+          const evalResult = {
+            passed: false,
+            status: 'not_applicable',
+            checks: [{ name: 'runner_applicability', passed: true, detail: '这个场景只适用于外部 Agent' }],
+          };
+          scenarioRuns.push({
+            runIndex: runIdx,
+            scenarioId: scenario.id,
+            scenarioCode: scenario.code,
+            scenarioName: scenario.name,
+            expectedBaselinePass: scenario.expectedBaselinePass,
+            capabilities: scenario.capabilities,
+            status: 'not_applicable',
+            reason: '这个场景只适用于外部 Agent（内置助手提交前必须等用户在界面确认）',
+            metrics: computeScenarioMetrics({ scenario, evalResult, beforeSnap: snap, afterSnap: snap, turnRecords: [], requestEntries: [], durationMs: 0 }),
+            checks: evalResult.checks,
+          });
+          continue;
+        }
         const scenarioStart = Date.now();
         const canvasId = `canvas-${scenario.code.toLowerCase()}-run${runIdx}`;
         meter.setContext({ runIndex: runIdx, scenarioId: scenario.id, turnId: '' });
@@ -1405,6 +1446,7 @@ export async function runEval(rawOptions = {}) {
           const turnId = `${turnSpec.id}-run${runIdx}`;
           meter.setContext({ runIndex: runIdx, scenarioId: scenario.id, turnId });
 
+          if (turnSpec.waitForTasksBeforeTurnMs) await waitForCanvasTasks(simGo, canvasId, turnSpec.waitForTasksBeforeTurnMs);
           const currentDoc = simGo.ensureCanvas(canvasId);
           simGo.beginTurn({
             turnId,
@@ -1574,6 +1616,10 @@ export async function runEval(rawOptions = {}) {
               };
             }
           }
+        }
+        // 只有内置运行器替场景等任务；外部 Agent 的场景不能靠这里补等待，否则会掩盖没等到结果。
+        if (scenario.waitForTasksBeforeEvaluateMs) {
+          await waitForCanvasTasks(simGo, canvasId, scenario.waitForTasksBeforeEvaluateMs);
         }
         // 场景收尾前等助手真正停下，迟到的动作算进本场景，也不会漏进下一个场景。
         const settle = meter.getState().abortedBudget
@@ -1755,6 +1801,7 @@ if (isMain) {
           '  --runs <N>               每个场景重复运行次数（默认 1）',
           '  --max-requests <N>       单回合最大模型请求数（默认 25）',
           '  --budget-cny <number>    整轮评测累计人民币预算上限（默认 25）',
+          '  --sim-capabilities <list> 打开模拟后端里尚未进入真实后端的能力（目前只有 task.wait），默认全关',
           '  --out <dir>              报告与 ledger.jsonl 输出目录',
         ].join('\n'),
       );

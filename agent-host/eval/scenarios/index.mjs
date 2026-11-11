@@ -5,3 +5,4 @@ export {
   buildS3SeedCanvas,
 } from '../scenarios.mjs';
 export { REAL_FAILURE_SCENARIOS } from './real-failures.mjs';
+export { PARITY_SCENARIOS } from './parity.mjs';
