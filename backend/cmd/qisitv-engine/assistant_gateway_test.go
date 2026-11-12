@@ -192,6 +192,27 @@ func TestPairedWebAssistantToolPersistsProjectFolder(t *testing.T) {
 	if status, raw := request("PUT", "/engine/api/canvas-projects/web-assistant", `{"project":{"id":"web-assistant","title":"Web assistant fixture","revision":0,"nodes":[],"connections":[]}}`); status != 200 {
 		t.Fatal("canvas creation failed", status, string(raw))
 	}
+	// The web composer checks status before dispatch. This also starts the host
+	// on demand when the engine's first attempt to warm it up timed out.
+	for attempt := 1; ; attempt++ {
+		status, raw := request("GET", "/engine/api/assistant/status", "")
+		var health struct {
+			Data struct {
+				Available bool   `json:"available"`
+				Reason    string `json:"reason"`
+			} `json:"data"`
+		}
+		if status != 200 || json.Unmarshal(raw, &health) != nil {
+			t.Fatal("assistant status failed", status, string(raw))
+		}
+		if health.Data.Available {
+			break
+		}
+		if health.Data.Reason != "host_starting" || attempt >= 20 {
+			t.Fatal("assistant did not become ready", health.Data.Reason)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 	status, stream := request("POST", "/engine/api/assistant/chat", `{"canvasId":"web-assistant","message":"Create one text draft on my canvas; no generation.","permissionMode":"canvas"}`)
 	if status != 200 {
 		t.Fatal("assistant admission failed", status, string(stream))
