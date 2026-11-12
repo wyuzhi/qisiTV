@@ -22,6 +22,7 @@ import {nativeSourceKey} from './native-history.mjs';
 import { createNativePartStore } from './native-part-store.mjs';
 import { fetchModelWithProgressIdle } from './model-stream-idle.mjs';
 import { createDispatchDiagnostics } from './dispatch-diagnostics.mjs';
+import { createPluginPackageController } from './plugin-packages.mjs';
 
 // SDK imports install npm undici's direct dispatcher. Restore Node's public env
 // proxy support after imports, before any SDK/ops request or fetch wrapper runs.
@@ -116,7 +117,7 @@ globalThis.fetch = async (input, options = {}) => {
     try {
     if (options.body) {
       const payload = JSON.parse(options.body);
-      const mediaOptions = {api:MODEL_API,modelId:MODEL_ID,nativePartStore};
+      const mediaOptions = {api:MODEL_API,modelId:MODEL_ID,nativePartStore,unpinnedSignatures:budget?.unpinnedSignatures};
       for (const source of trustedMediaSources(payload,mediaOptions)) {
         historicalKind=source.mediaKind;
         if (!budget?.turnId || !budget.canvasId) throw new Error('media_authorization_missing');
@@ -178,8 +179,22 @@ const ops = createOperationBridge({
 
 const legacy = createLegacyHistory({ sessionRoot: SESSION_ROOT, workspaceRoot: WORKSPACE_ROOT });
 
+const pluginController = createPluginPackageController({
+  getReservedToolNames: () => new Set([...ops.descriptors.keys(), 'plan_update', 'skill_load', 'canvas_timeline_deliver']),
+  fetchEnabledPackages: async () => {
+    const data = await ops.opsRequest('GET', '/plugins/packages/enabled');
+    return Array.isArray(data?.packages) ? data.packages : Array.isArray(data) ? data : [];
+  },
+  reportLoadError: async (pluginId, error) => {
+    await ops.opsRequest('POST', `/plugins/${encodeURIComponent(pluginId)}/load-error`, {
+      error: String(error?.message || error),
+    });
+  },
+});
+
 const durable = createDurableSessionStore({
   sessionRoot: SESSION_ROOT, workspaceRoot: WORKSPACE_ROOT, buildTools: ops.buildTools,
+  extensions: () => pluginController.getExtensions(),
   getModels: entry => {
     const models = createModels(); const provider = modelRuntime.getProvider(PROVIDER_ID);
     const budgeted = fn => (...args) => {
@@ -378,12 +393,35 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (req.method === 'GET' && url.pathname === '/tools') {
+    const synced = await pluginController.syncIfChanged().catch(() => ({ changed: false }));
+    if (synced.changed) {
+      await durable.reloadPluginExtensions(pluginController.getExtensions()).catch(() => {});
+    }
     const canvasId = url.searchParams.get('canvasId') || '';
     const entry = canvasId ? durable.sessions.get(canvasId) : null;
-    respond(res, 200, { canvasId, activeTools: entry?.toolNames || [], known: [...ops.descriptors.keys()] });
+    const pluginToolNames = pluginController.getToolNames();
+    respond(res, 200, {
+      canvasId,
+      activeTools: entry ? entry.toolNames : pluginToolNames,
+      known: [...new Set([...ops.descriptors.keys(), ...pluginToolNames])],
+    });
     return;
   }
   try {
+    if (req.method === 'GET' && url.pathname === '/plugins') {
+      respond(res, 200, {
+        packages: pluginController.listLoaded(),
+        errors: pluginController.getErrors(),
+      });
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/plugins/reload') {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      const reloaded = await pluginController.reload(Array.isArray(body.packages) ? body.packages : undefined);
+      await durable.reloadPluginExtensions(pluginController.getExtensions());
+      respond(res, 200, { ok: true, packages: reloaded.packages, errors: reloaded.errors });
+      return;
+    }
     if (url.pathname === '/skill-context' && ['GET','POST'].includes(req.method)) {
       const body=req.method==='POST'?JSON.parse((await readBody(req)) || '{}'):Object.fromEntries(url.searchParams);
       const canvasId=String(body.canvasId || '').trim();
@@ -435,6 +473,37 @@ const server = http.createServer(async (req, res) => {
       // 旧 JSONL 会话只切换当前指针用于读取展示；执行在下一次发消息时交接给新的 Durable 会话。
       legacy.writeCurrentSessionId(canvasId, sessionId);
       respond(res, 200, { sessionId });
+      return;
+    }
+    if (req.method === 'DELETE' && (url.pathname === '/sessions' || url.pathname.startsWith('/sessions/'))) {
+      const rawBody = await readBody(req);
+      const body = rawBody ? JSON.parse(rawBody) : {};
+      const pathSessionId = url.pathname.startsWith('/sessions/') ? decodeURIComponent(url.pathname.slice('/sessions/'.length)) : '';
+      const canvasId = String(body.canvasId || url.searchParams.get('canvasId') || '').trim();
+      const sessionId = String(body.sessionId || pathSessionId || url.searchParams.get('sessionId') || '').trim();
+      if (!canvasId || !sessionId) { respond(res, 400, { code: 400, reason: 'invalid_request' }); return; }
+      if (liveEntry(canvasId)?.busy) { respond(res, 409, { code: 409, reason: 'session_busy' }); return; }
+      if (isDurableSessionId(sessionId)) {
+        await durable.deleteSession(canvasId, sessionId);
+      } else {
+        legacy.deleteSession(canvasId, sessionId);
+      }
+      let nextActive = currentId(canvasId) || null;
+      if (!nextActive) {
+        const list = [...await legacy.listCanvasSessions(canvasId), ...await durable.listCanvasSessions(canvasId)]
+          .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+        if (list.length > 0) {
+          const nextId = list[0].sessionId;
+          if (isDurableSessionId(nextId)) {
+            const entry = await durable.activateSession(canvasId, nextId);
+            nextActive = entry.sessionId;
+          } else {
+            legacy.writeCurrentSessionId(canvasId, nextId);
+            nextActive = nextId;
+          }
+        }
+      }
+      respond(res, 200, { deleted: true, sessionId, currentSessionId: nextActive });
       return;
     }
     if (req.method === 'GET' && url.pathname === '/history') {
@@ -538,15 +607,16 @@ const server = http.createServer(async (req, res) => {
       const body = JSON.parse((await readBody(req)) || '{}');
       const canvasId = String(body.canvasId || '').trim();
       const message = String(body.message || '').trim();
-      if (!canvasId || !message || message.length > 8000) {
+      const cleanKind = String(body.kind || 'event').replace(/[^a-z0-9_-]/gi, '_');
+      const maxEventMessageLen = cleanKind === 'skill_script_completed' ? 48000 : 8000;
+      if (!canvasId || !message || message.length > maxEventMessageLen) {
         respond(res, 400, { code: 400, reason: 'invalid_request' }); return;
       }
       const requestedSessionId = String(body.sessionId || '').trim();
       const currentSessionId = currentId(canvasId);
       const targetSessionId = requestedSessionId || currentSessionId;
-      const cleanKind = String(body.kind || 'event').replace(/[^a-z0-9_-]/gi, '_');
       if (
-        cleanKind === 'task_completed' &&
+        (cleanKind === 'task_completed' || cleanKind === 'skill_script_completed') &&
         !providerReason &&
         !READ_ONLY_MODE &&
         currentSessionId &&
@@ -578,7 +648,7 @@ const server = http.createServer(async (req, res) => {
               turnId,
               requestId: `event:${requestId}`,
               content,
-              userText: message,
+              userText: String(body.userText || message).trim() || message,
               revisionBefore: Number(body.revisionBefore || 0),
               permissionMode: 'canvas',
             });
@@ -627,6 +697,12 @@ const server = http.createServer(async (req, res) => {
       const authority=await ops.opsRequest('GET',`/assistant/runtime/turns/${encodeURIComponent(turnId)}`);
       if(authority.canvasId!==canvasId || authority.open===false) throw Object.assign(new Error('turn_not_open'),{reason:'turn_not_open'});
       body.permissionMode=authority.permissionMode || 'canvas';
+      if (!body.continuationId) {
+        const synced = await pluginController.syncIfChanged().catch(() => ({ changed: false }));
+        if (synced.changed) {
+          await durable.reloadPluginExtensions(pluginController.getExtensions()).catch(() => {});
+        }
+      }
       // 只有 Durable 一套执行运行时：选中的是 Durable 会话就直接接上；否则（旧 JSONL 会话或尚无会话）
       // 新建一条 Durable 会话，并用旧会话文本作为交接说明开头。
       const entry = body.continuationId
@@ -701,6 +777,8 @@ await initializeModel();
 try {
   const count = await ops.loadDescriptors();
   console.error(`agent-host: 载入 ${count} 个操作（readOnly=${READ_ONLY_MODE}）`);
+  // Same sync every turn uses: a Go without plugin packages just leaves the list empty.
+  await pluginController.syncIfChanged();
 }
 catch (error) { console.error(`agent-host: 能力发现失败（稍后可重试）：${error?.message || error}`); }
 function onListen() {

@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, mkdirSync, rmSync, existsSync, chmodSync } from 'node:fs';
+import { cpSync, mkdtempSync, mkdirSync, rmSync, existsSync, chmodSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,9 +8,9 @@ export const NODE_VERSION = '24.22.1';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const targets = { 'darwin/arm64': ['darwin', 'arm64'], 'darwin/amd64': ['darwin', 'x64'], 'windows/amd64': ['win32', 'x64'], 'linux/amd64': ['linux', 'x64'] };
 const runtimeModules = ['session-identity.mjs', 'canvas-turn.mjs', 'request-budget.mjs', 'durable-request-budget.mjs',
-  'durable-session-owner.mjs', 'durable-turn-projection.mjs', 'durable-extensions.mjs', 'business-progress.mjs', 'durable-turn-budget.mjs', 'media-content.mjs', 'native-part-store.mjs', 'native-history.mjs', 'skill-resource.mjs', 'active-skills.mjs',
-  'operation-bridge.mjs', 'await-business-tasks.mjs', 'timeline-delivery.mjs', 'canvas-read-view.mjs', 'canvas-write-view.mjs', 'session-owner.mjs', 'system-prompt.mjs', 'model-stream-idle.mjs', 'model-transport-error.mjs', 'plan.mjs', 'studio-digest.mjs', 'dispatch-diagnostics.mjs'];
-const sourceFiles = ['server.mjs', ...runtimeModules, 'package.json', 'bun.lock'];
+  'durable-session-owner.mjs', 'durable-turn-projection.mjs', 'durable-extensions.mjs', 'durable-watch-observer.mjs', 'business-progress.mjs', 'durable-turn-budget.mjs', 'media-content.mjs', 'native-part-store.mjs', 'native-history.mjs', 'skill-resource.mjs', 'active-skills.mjs',
+  'operation-bridge.mjs', 'await-business-tasks.mjs', 'timeline-delivery.mjs', 'canvas-read-view.mjs', 'canvas-write-view.mjs', 'session-owner.mjs', 'system-prompt.mjs', 'model-stream-idle.mjs', 'model-transport-error.mjs', 'plan.mjs', 'studio-digest.mjs', 'dispatch-diagnostics.mjs', 'plugin-packages.mjs'];
+const sourceFiles = ['server.mjs', 'plugin-host.mjs', ...runtimeModules, 'package.json', 'bun.lock'];
 
 function run(command, args, cwd) {
   const result = spawnSync(command, args, { cwd, encoding: 'utf8', timeout: 180000 });
@@ -33,6 +33,51 @@ export function verifyRuntime(runtime, target) {
   return node;
 }
 
+export function bundleNpmRuntime({ runtime, node, target, stage }) {
+  const isWindows = target.startsWith('windows/');
+  const nodeDir = path.dirname(path.resolve(node));
+  const candidates = isWindows
+    ? [
+        path.resolve(runtime, 'node_modules', 'npm'),
+        path.resolve(nodeDir, 'node_modules', 'npm'),
+        path.resolve(runtime, 'lib', 'node_modules', 'npm'),
+      ]
+    : [
+        path.resolve(runtime, 'lib', 'node_modules', 'npm'),
+        path.resolve(nodeDir, '..', 'lib', 'node_modules', 'npm'),
+        path.resolve(runtime, 'node_modules', 'npm'),
+      ];
+  const srcNpmDir = candidates.find((candidate) => existsSync(path.join(candidate, 'bin', 'npm-cli.js')));
+  if (!srcNpmDir) return null;
+
+  const destNpmDir = isWindows
+    ? path.join(stage, 'runtime', 'node_modules', 'npm')
+    : path.join(stage, 'runtime', 'lib', 'node_modules', 'npm');
+  mkdirSync(path.dirname(destNpmDir), { recursive: true });
+  cpSync(srcNpmDir, destNpmDir, { recursive: true, dereference: true });
+  const destNpmCli = path.join(destNpmDir, 'bin', 'npm-cli.js');
+  if (!isWindows && existsSync(destNpmCli)) {
+    chmodSync(destNpmCli, 0o755);
+    const npmBinWrapper = path.join(stage, 'runtime', 'bin', 'npm');
+    mkdirSync(path.dirname(npmBinWrapper), { recursive: true });
+    writeFileSync(
+      npmBinWrapper,
+      '#!/bin/sh\nbasedir=$(dirname "$(echo "$0" | sed -e \'s,\\\\,/,g\')")\nexec "$basedir/node" "$basedir/../lib/node_modules/npm/bin/npm-cli.js" "$@"\n',
+      { mode: 0o755 },
+    );
+    chmodSync(npmBinWrapper, 0o755);
+  } else if (isWindows) {
+    const srcCmd = path.resolve(runtime, 'npm.cmd');
+    const destCmd = path.join(stage, 'runtime', 'npm.cmd');
+    if (existsSync(srcCmd)) {
+      cpSync(srcCmd, destCmd, { dereference: true });
+    } else {
+      writeFileSync(destCmd, '@ECHO OFF\r\n"%~dp0node.exe" "%~dp0node_modules\\npm\\bin\\npm-cli.js" %*\r\n');
+    }
+  }
+  return destNpmCli;
+}
+
 export function packageAgentHost({ runtime, target, destination, source = path.join(root, 'agent-host') }) {
   const node = verifyRuntime(runtime, target);
   if (!destination) throw new Error('agent-host destination is required');
@@ -43,12 +88,14 @@ export function packageAgentHost({ runtime, target, destination, source = path.j
   try {
     for (const name of sourceFiles) cpSync(path.join(source, name), path.join(stage, name));
     // Install from the committed lock into a clean tree, never from developer node_modules.
-    run(process.execPath, ['install', '--production', '--frozen-lockfile', '--backend', 'copyfile', '--os', targets[target][0], '--cpu', targets[target][1]], stage);
+    const bunBin = process.versions.bun ? process.execPath : (process.env.BUN_BIN || 'bun');
+    run(bunBin, ['install', '--production', '--frozen-lockfile', '--backend', 'copyfile', '--os', targets[target][0], '--cpu', targets[target][1]], stage);
     const nodeRelative = target.startsWith('windows/') ? 'runtime/node.exe' : 'runtime/bin/node';
     const bundledNode = path.join(stage, nodeRelative);
     mkdirSync(path.dirname(bundledNode), { recursive: true });
     cpSync(node, bundledNode, { dereference: true });
     chmodSync(bundledNode, 0o755);
+    bundleNpmRuntime({ runtime, node, target, stage });
     // Resolve precisely the host imports under the shipped Node and shipped dependency tree.
     const imports = ['@earendil-works/pi-coding-agent', '@earendil-works/pi-ai',
       '@earendil-works/pi-durable', '@earendil-works/pi-durable/storage/sqlite/node',
@@ -56,6 +103,7 @@ export function packageAgentHost({ runtime, target, destination, source = path.j
     run(bundledNode, ['--input-type=module', '-e',
       imports.map(name => `await import(${JSON.stringify(name)});`).join('\n')], stage);
     run(bundledNode, ['--check', 'server.mjs'], stage);
+    run(bundledNode, ['--check', 'plugin-host.mjs'], stage);
     if (existsSync(destination)) throw new Error(`Refusing to overwrite existing agent-host: ${destination}`);
     cpSync(stage, destination, { recursive: true, dereference: true });
     console.log(`Packaged agent-host with Node ${NODE_VERSION} for ${target}: ${destination}`);

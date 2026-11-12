@@ -887,7 +887,7 @@ func parseAsyncMediaPoll(c PollContext, payload map[string]any, capability Capab
 	if file := object(payload["file"]); file != nil {
 		payload = mergeMaps(file, payload)
 	}
-	// BeefAPI keeps the transport task in `in_progress` while its nested
+	// BeefTV keeps the transport task in `in_progress` while its nested
 	// generation has already completed and is saving the output.  The actual
 	// terminal state and media URL live under metadata; prefer that state and
 	// flatten the metadata so the normal result extraction can consume `url`.

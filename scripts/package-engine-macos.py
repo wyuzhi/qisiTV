@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+PI_VERSION = "1.5.0"
 PI_LICENSE_SHA256 = "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48"
 MINIMUM_MACOS = "13.5"
 
@@ -31,19 +32,19 @@ def prepare_licenses(runtime, node_source):
         shutil.copy2(node_source / "LICENSE", licenses / "node/LICENSE")
     if not (licenses / "node/LICENSE").is_file():
         raise RuntimeError("Node LICENSE missing; pass --node-source with the original Node distribution")
-    pi_license = ROOT / "licenses/pi-1.3.0-LICENSE.txt"
+    pi_license = ROOT / "licenses" / f"pi-{PI_VERSION}-LICENSE.txt"
     if digest(pi_license) != PI_LICENSE_SHA256:
-        raise RuntimeError("Pinned pi 1.3.0 license checksum mismatch")
+        raise RuntimeError(f"Pinned pi {PI_VERSION} license checksum mismatch")
     (licenses / "pi").mkdir(parents=True, exist_ok=True)
     shutil.copy2(pi_license, licenses / "pi/LICENSE")
     packages = []
     for folder in sorted((runtime / "agent-host/node_modules/@earendil-works").iterdir()):
         info = json.loads((folder / "package.json").read_text())
-        if info["version"] != "1.3.0" or info.get("license") != "MIT":
+        if info["version"] != PI_VERSION or info.get("license") != "MIT":
             raise RuntimeError("Update license coverage for " + info["name"])
         packages.append({"name": info["name"], "version": info["version"], "license": info["license"]})
     version = subprocess.check_output([str(runtime / "agent-host/runtime/bin/node"), "--version"], text=True).strip()
-    manifest = {"node": {"version": version, "licenseFile": "node/LICENSE", "sha256": digest(licenses / "node/LICENSE")}, "pi": {"version": "1.3.0", "sourceURL": "https://github.com/earendil-works/pi/blob/v1.3.0/LICENSE", "licenseFile": "pi/LICENSE", "sha256": PI_LICENSE_SHA256, "packages": packages}}
+    manifest = {"node": {"version": version, "licenseFile": "node/LICENSE", "sha256": digest(licenses / "node/LICENSE")}, "pi": {"version": PI_VERSION, "sourceURL": f"https://github.com/earendil-works/pi/blob/v{PI_VERSION}/LICENSE", "licenseFile": "pi/LICENSE", "sha256": PI_LICENSE_SHA256, "packages": packages}}
     (licenses / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
 
@@ -88,6 +89,32 @@ def run(*args):
     subprocess.run([str(arg) for arg in args], check=True)
 
 
+def copy_plugins(resources):
+    source = ROOT / "plugin-packages"
+    protocols = resources / "plugin-packages"
+    protocols.mkdir()
+    # Each protocol archive must have a source manifest in this release. Ignore
+    # obsolete archives left in the checkout by earlier packaging runs.
+    manifests = sorted(source.glob("*/manifest.json"))
+    if not manifests:
+        raise RuntimeError("No protocol manifests available")
+    for manifest in manifests:
+        archive = source / (manifest.parent.name + ".qisitv-plugin")
+        shutil.copy2(archive, protocols / archive.name)
+
+    plugins = resources / "agent-host/bundled-plugins"
+    plugins.mkdir()
+    for line in (source / "bundled-plugin-dirs.txt").read_text().splitlines():
+        name = line.partition("#")[0].strip()
+        if not name:
+            continue
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name) or not (source / name / "package.json").is_file():
+            raise RuntimeError(f"Invalid bundled plugin: {name}")
+        shutil.copytree(source / name, plugins / name, ignore=shutil.ignore_patterns("node_modules", ".DS_Store"))
+    if not any(plugins.iterdir()):
+        raise RuntimeError("No bundled plugins available")
+
+
 def package(runtime, output, version, signing_identity, make_dmg, node_source=None):
     if os.uname().sysname != "Darwin":
         raise RuntimeError("Build this package on macOS")
@@ -107,7 +134,7 @@ def package(runtime, output, version, signing_identity, make_dmg, node_source=No
     for name in ["qisitv-engine", "qisitv-connect", "qisitv"]:
         shutil.copy2(runtime / name, mac / name)
     shutil.copytree(runtime / "agent-host", resources / "agent-host", symlinks=False)
-    shutil.copytree(ROOT / "plugin-packages", resources / "plugin-packages")
+    copy_plugins(resources)
     for name in ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]:
         shutil.copy2(ROOT / name, resources / name)
     if (runtime / "build-receipt.json").is_file():

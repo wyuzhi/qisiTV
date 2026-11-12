@@ -66,6 +66,18 @@ describe("canvas node timestamps", () => {
 });
 
 describe("canvas node search", () => {
+    test("shows the one-based storyboard shot number without incrementing it", () => {
+        const shot = node("shot", { metadata: { chapterTitle: "第一集", shotIndex: 1 } });
+        expect(canvasNodeSearchContext(shot)).toBe("第一集 · 镜头 1");
+    });
+
+    test("searching a shot number does not include the preceding storyboard shot", () => {
+        const first = node("first-shot", { title: "雨夜街道", metadata: { shotIndex: 1, workflowTitle: "镜头 1 分镜图" } });
+        const second = node("second-shot", { title: "室内对话", metadata: { shotIndex: 2, workflowTitle: "镜头 2 分镜图" } });
+        expect(searchCanvasNodes([first, second], "镜头 2").map((item) => item.id)).toEqual(["second-shot"]);
+        expect(searchCanvasNodes([first, second], "镜头 1").map((item) => item.id)).toEqual(["first-shot"]);
+    });
+
     test("defaults to recently edited order and searches model or tags", () => {
         const older = node("older", { updatedAt: "2026-08-20T01:00:00.000Z", metadata: { model: "wan-video", assetTags: ["夜景"] } });
         const newer = node("newer", { updatedAt: "2026-08-28T01:00:00.000Z", metadata: { model: "seedance" } });

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"qisitv/backend/internal/assistantturns"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/operations"
 	localtask "qisitv/backend/internal/task"
@@ -62,6 +63,16 @@ func (s *Service) recoverPendingCanvasBindings(limit int) error {
 		return nil
 	}
 	return localtask.RecoverPendingCanvasBindings(s.repo, s.workspaceOperations() != nil, &s.bindCursorMu, &s.bindAfterID, limit, s.recoverCanvasTaskBindings)
+}
+
+func (s *Service) recoverPendingCanvasFailures(limit int) error {
+	if s == nil || s.repo == nil {
+		return nil
+	}
+	return s.canvasFailures.Run(localtask.CanvasFailureDeps{Repo: s.repo, Record: s.canvasDomain().RecordTaskFailures, Outcome: func(task model.Task) (localtask.Outcome, error) {
+		projection, _, _, err := assistantturns.ProjectTaskInTx(s.repo.DB(), task.UserID, task)
+		return projection.Outcome, err
+	}}, limit)
 }
 
 func (s *Service) executeMessageTaskAttach(registry *operations.Registry, task model.Task, conversationID, messageID string, outputIndex int) error {

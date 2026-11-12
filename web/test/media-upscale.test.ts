@@ -19,7 +19,7 @@ describe("Topaz upscale contract", () => {
         const baseURL = apiClient.defaults.baseURL;
         apiClient.defaults.baseURL = server.url.toString();
         try {
-            const quote = await estimateUpscale({ resourceId: "source", channelId: "beefapi", mode: "precision", model: "Proteus", scale: 2 });
+            const quote = await estimateUpscale({ resourceId: "source", channelId: "beeftv", mode: "precision", model: "Proteus", scale: 2 });
             expect(quote.reservation).toBe(1.25);
             expect(quote.generationSubmitted).toBe(false);
             expect(apiClient.defaults.timeout).toBe(4_000);
@@ -37,17 +37,17 @@ describe("Topaz upscale contract", () => {
         expect(canRecoverUpscaleNode({ ...node, metadata: { ...node.metadata, taskId: undefined } })).toBe(false);
         expect(canRecoverUpscaleNode({ ...node, metadata: { ...node.metadata, workflowOperation: undefined } })).toBe(false);
     });
-    test("recovery calls only the original task recovery endpoint", async () => {
+    test("recovery calls only the original task recovery endpoint", () => {
         const originalRequest = apiClient.request;
         const requests: Array<{ method?: string; url?: string; data?: unknown; timeout?: number }> = [];
         apiClient.request = (async request => {
             requests.push({ method: request.method, url: request.url, data: request.data, timeout: request.timeout });
             return { status: 200, data: { code: 0, data: task({ id: "original", status: "running" }) } };
         }) as typeof apiClient.request;
-        try {
-            expect((await recoverUpscaleTask("original")).id).toBe("original");
+        return recoverUpscaleTask("original").then(res => {
+            expect(res.id).toBe("original");
             expect(requests).toEqual([{ method: "post", url: "/media-upscale/tasks/original/recover", data: {}, timeout: UPSCALE_RECOVER_TIMEOUT_MS }]);
-        } finally { apiClient.request = originalRequest; }
+        }).finally(() => { apiClient.request = originalRequest; });
     });
     test("estimate and create override the 4s default client timeout for media preupload and probe", async () => {
         const originalRequest = apiClient.request;
@@ -64,9 +64,9 @@ describe("Topaz upscale contract", () => {
             return { status: 200, data: { code: 0, data: task({ id: "created", type: "canvas_video", model: "topaz-proteus", status: "queued" }) } };
         }) as typeof apiClient.request;
         try {
-            const quote = await estimateUpscale({ resourceId: "res-1", channelId: "beefapi", mode: "precision", model: "topaz-proteus", scale: 2 });
+            const quote = await estimateUpscale({ resourceId: "res-1", channelId: "beeftv", mode: "precision", model: "topaz-proteus", scale: 2 });
             expect(quote.reservation).toBe(70);
-            const created = await createUpscaleTask({ resourceId: "res-1", channelId: "beefapi", mode: "precision", model: "topaz-proteus", scale: 2, clientOperationId: "op-1", projectId: "proj-1", nodeId: "node-1" });
+            const created = await createUpscaleTask({ resourceId: "res-1", channelId: "beeftv", mode: "precision", model: "topaz-proteus", scale: 2, clientOperationId: "op-1", projectId: "proj-1", nodeId: "node-1" });
             expect(created.id).toBe("created");
             expect(timeouts).toEqual([
                 { url: "/media-upscale/estimate", timeout: UPSCALE_ESTIMATE_TIMEOUT_MS },

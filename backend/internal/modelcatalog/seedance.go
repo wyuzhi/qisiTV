@@ -69,6 +69,14 @@ func isSeedance25Model(modelName string) bool {
 	return base == "seedance-2.5" || strings.HasPrefix(base, "seedance-2.5-") || strings.HasPrefix(base, "doubao-seedance-2-5") || strings.HasPrefix(base, "doubao-seedance-2.5") || base == "dreamina-seedance-2-5" || strings.HasPrefix(base, "dreamina-seedance-2-5-") || base == "dreamina-seedance-2.5" || strings.HasPrefix(base, "dreamina-seedance-2.5-")
 }
 
+var seedance2FastOrMiniPattern = regexp.MustCompile(`^(?:(?:doubao|dreamina)-)?seedance-2[.-]0-(?:fast|mini)(?:-|$)`)
+
+func isSeedance2FastOrMiniModel(modelName string) bool {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(modelName)), "/")
+	base := parts[len(parts)-1]
+	return seedance2FastOrMiniPattern.MatchString(base)
+}
+
 const documentedSeedanceVideoMinPixels = 407696
 
 func applySeedanceDocumentedVideoPixelFloor(config TaskConfig, refs *VideoReferenceConfig) {
@@ -81,7 +89,7 @@ func applySeedanceDocumentedVideoPixelFloor(config TaskConfig, refs *VideoRefere
 	if !isSeedance2Family(config.InterfaceType, config.Model) {
 		return
 	}
-	if model.IsVolcengineArkVideoProtocol(model.ChannelInterfaceType(config.InterfaceType)) || seedanceMaterialLibraryHost(config.BaseURL) || strings.EqualFold(strings.TrimSpace(config.ChannelID), "beefapi") {
+	if model.IsVolcengineArkVideoProtocol(model.ChannelInterfaceType(config.InterfaceType)) || seedanceMaterialLibraryHost(config.BaseURL) || strings.EqualFold(strings.TrimSpace(config.ChannelID), "beeftv") {
 		refs.MinVideoPixels = documentedSeedanceVideoMinPixels
 	}
 }
@@ -92,7 +100,7 @@ func seedanceMaterialLibraryHost(baseURL string) bool {
 		return false
 	}
 	switch strings.ToLower(u.Hostname()) {
-	case "beeftv.app", "enterprise.beefapi.com", "beefapi.com", "www.whatstoken.ai", "whatstoken.ai":
+	case "beeftv.app", "www.whatstoken.ai", "whatstoken.ai":
 		return true
 	default:
 		return false

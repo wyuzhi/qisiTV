@@ -15,11 +15,16 @@ beforeAll(async () => {
     } }] });
     if (!build.success) throw new Error(build.logs.join("\n"));
     const script = await build.outputs.find(item => item.path.endsWith(".js"))!.text();
-    const preflightBuild = await Bun.build({ entrypoints: [import.meta.dir + "/../src/main.tsx"], target: "browser", plugins: [{ name: "bootstrap-boundary", setup(builder) {
+    const buildPreflight = () => Bun.build({ entrypoints: [import.meta.dir + "/../src/main.tsx"], target: "browser", plugins: [{ name: "bootstrap-boundary", setup(builder) {
         builder.onResolve({ filter: /bootstrap-workspace$/ }, () => ({ path: "workspace", namespace: "workspace-fixture" }));
         builder.onResolve({ filter: /^@\// }, args => ({ path: Bun.resolveSync("../src/" + args.path.slice(2), import.meta.dir) }));
         builder.onLoad({ filter: /.*/, namespace: "workspace-fixture" }, () => ({ loader: "js", contents: `export async function startApplication(){window.workspaceStarts=(window.workspaceStarts||0)+1;if(location.search.includes('fail'))throw Error('synthetic-private-path-and-secret');document.getElementById('root').textContent='工作区已打开';}` }));
     } }] });
+    // CI 上偶发一次 Bun.build 报入口文件找不到（文件就在仓库里，前后构建都正常），重试一次即可。
+    let preflightBuild = await buildPreflight();
+    if (!preflightBuild.success && preflightBuild.logs.some((log) => String(log).includes("ModuleNotFound"))) {
+        preflightBuild = await buildPreflight();
+    }
     if (!preflightBuild.success) throw new Error(preflightBuild.logs.join("\n"));
     const preflightScript = await preflightBuild.outputs.find(item => item.path.endsWith(".js"))!.text();
     const stylesheet = import.meta.dir + "/../src/styles/globals.css";

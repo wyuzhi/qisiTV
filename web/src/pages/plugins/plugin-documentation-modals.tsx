@@ -1,13 +1,17 @@
 import { Modal, Upload } from "antd";
-import { CloudUpload, FileText, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CloudUpload } from "lucide-react";
 import { useRef, useState } from "react";
 
 import type { RegisteredPlugin } from "@/lib/plugins/plugin-types";
+import type { PluginManagement } from "@/services/api/plugins";
+import { AppModal } from "@/components/ui/product/app-modal";
 
-import pluginDevelopmentGuideMarkdown from "./plugin-development-guide.md?raw";
-import { getPluginDocumentation } from "./plugin-documentation";
+import pluginDevelopmentPage from "../../../../docs/content/docs/plugins/plugin-development.mdx?raw";
+import { getPluginDocumentation, PLUGIN_PERMISSION_LABELS, PLUGIN_ORIGIN_LABELS, pluginOrigin } from "./plugin-documentation";
 import { PluginMarkdown } from "./plugin-markdown";
 import "./plugins.css";
+
+const pluginDevelopmentGuideMarkdown = pluginDevelopmentPage.replace(/^---[\s\S]*?---\s*/, "");
 
 type UploadPluginModalProps = {
     open: boolean;
@@ -60,7 +64,7 @@ export function UploadPluginModal({ open, onClose, onUpload }: UploadPluginModal
                         <span className="plugin-upload-panel-icon"><CloudUpload className="size-5" /></span>
                         <div>
                             <h2>安装插件包</h2>
-                            <p>选择统一站点插件包，安装后会立即进入插件中心。</p>
+                            <p>选择统一站点插件包，安装后会显示在插件列表中。</p>
                         </div>
                     </div>
                     <div
@@ -72,7 +76,7 @@ export function UploadPluginModal({ open, onClose, onUpload }: UploadPluginModal
                     >
                         <Upload.Dragger
                             className="plugin-upload-dropzone"
-                            accept=".qisitv-plugin,.beeftv-plugin,application/zip"
+                            accept=".qisitv-plugin,.beeftv-plugin,.tgz,application/zip,application/gzip"
                             maxCount={1}
                             showUploadList={false}
                             beforeUpload={(file) => {
@@ -82,12 +86,12 @@ export function UploadPluginModal({ open, onClose, onUpload }: UploadPluginModal
                         >
                             <CloudUpload className="plugin-upload-dropzone-icon" />
                             <p className="ant-upload-text">{isDraggingPlugin ? "释放文件以上传插件" : "点击选择插件文件，也可拖拽到此处"}</p>
-                            <p className="ant-upload-hint">支持 .qisitv-plugin 包 · 大小不超过 48 MiB</p>
+                            <p className="ant-upload-hint">支持 .qisitv-plugin、.beeftv-plugin 或 npm 打出的 .tgz 包 · 大小不超过 48 MiB</p>
                         </Upload.Dragger>
                     </div>
                     <div className="plugin-upload-notice">
-                        <ShieldCheck className="size-4" />
-                        <span>上传前请确认插件来源可信。Web 入口只能进入声明的隔离运行时，不会获得主页面权限；密钥也不会从清单读取。</span>
+                        <AlertTriangle className="size-4" />
+                        <span>插件会运行它自带的代码，能读取你在 qisiTV 里的数据和本机保存的 API Key。请只上传你信任的插件。</span>
                     </div>
                 </aside>
             </div>
@@ -97,30 +101,71 @@ export function UploadPluginModal({ open, onClose, onUpload }: UploadPluginModal
 
 type PluginDetailsModalProps = {
     plugin?: RegisteredPlugin;
+    management?: PluginManagement;
     restoreFocus: boolean;
     onClose: () => void;
 };
 
-export function PluginDetailsModal({ plugin, restoreFocus, onClose }: PluginDetailsModalProps) {
+export function PluginDetailsModal({ plugin, management, restoreFocus, onClose }: PluginDetailsModalProps) {
+    const contributions = plugin?.manifest.contributes;
+    const capabilities = [
+        contributions?.providers?.length ? "模型渠道" : "",
+        contributions?.canvasNodes?.length ? "画布节点" : "",
+        contributions?.workflows?.length ? "工作流" : "",
+        contributions && "editorSlots" in contributions && contributions.editorSlots?.length ? "编辑器扩展" : "",
+    ].filter(Boolean);
     return (
-        <Modal
-            className="workspace-modal workspace-modal-wide plugin-details-modal"
-            title={plugin ? (
-                <div className="plugin-details-title">
-                    <FileText className="size-4" />
-                    <span>{plugin.manifest.name}</span>
-                    <span className="plugin-version">v{plugin.manifest.version}</span>
-                </div>
-            ) : null}
+        <AppModal
+            flush
+            scrollBody
+            className="plugin-details-modal"
+            wrapClassName="plugin-details-wrap"
+            width="min(760px, calc(100vw - 32px))"
+            title={plugin?.manifest.name}
             open={Boolean(plugin)}
             centered
             footer={null}
             destroyOnHidden
             focusTriggerAfterClose={restoreFocus}
             onCancel={onClose}
-            styles={{ body: { maxHeight: "min(78vh, 820px)", overflowY: "auto", overscrollBehavior: "contain" } }}
         >
-            {plugin ? <PluginMarkdown className="plugin-details-document" source={getPluginDocumentation(plugin.manifest)} /> : null}
-        </Modal>
+            {plugin ? (
+                <article className="plugin-details-content" tabIndex={0} aria-label="插件详情内容">
+                    <div className="plugin-details-overview">
+                        <dl className="plugin-details-metadata">
+                            <div><dt>版本</dt><dd>{plugin.manifest.version}</dd></div>
+                            {plugin.manifest.author ? <div><dt>作者</dt><dd>{plugin.manifest.author}</dd></div> : null}
+                            <div><dt>来源</dt><dd>{PLUGIN_ORIGIN_LABELS[pluginOrigin(plugin)]}</dd></div>
+                        </dl>
+                        {plugin.manifest.description ? <p>{plugin.manifest.description}</p> : null}
+                    </div>
+                    <div className="plugin-details-sections">
+                    <details>
+                        <summary>使用说明</summary>
+                        <PluginMarkdown className="plugin-details-document" source={getPluginDocumentation(plugin.manifest)} />
+                    </details>
+                    <details>
+                        <summary>权限与能力</summary>
+                        <ul className="plugin-details-permissions">
+                            {plugin.manifest.permissions.length ? plugin.manifest.permissions.map(permission => (
+                                <li key={permission}>{PLUGIN_PERMISSION_LABELS[permission] || permission}</li>
+                            )) : <li>未声明额外权限</li>}
+                        </ul>
+                    </details>
+                    <details>
+                        <summary>插件与高级信息</summary>
+                        <dl>
+                            <div><dt>插件 ID</dt><dd>{plugin.manifest.id}</dd></div>
+                            <div><dt>功能类型</dt><dd>{capabilities.join("、") || "应用扩展"}</dd></div>
+                            {management ? <div><dt>启停范围</dt><dd>{management.activationScope === "user" ? "当前用户" : "整个工作区"}</dd></div> : null}
+                            <div><dt>信任依据</dt><dd>{plugin.manifest.trusted
+                                ? "运行时授予内置信任，依据随应用发布的来源配置。"
+                                : "由用户自行确认安装来源与所需权限。"}</dd></div>
+                        </dl>
+                    </details>
+                    </div>
+                </article>
+            ) : null}
+        </AppModal>
     );
 }

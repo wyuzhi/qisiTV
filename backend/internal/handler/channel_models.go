@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/modelcatalog"
 	"qisitv/backend/internal/platform"
@@ -49,4 +51,44 @@ func RegisterChannelModelRoutes(r *gin.RouterGroup, catalogs channelModelCatalog
 		}
 		ok(c, gin.H{"models": models})
 	})
+	// 设置页展示的请求地址由后端给出，和读取模型目录、文本任务实际请求的是同一个地址。
+	r.POST("/ai/request-urls", func(c *gin.Context) {
+		if _, err := currentUser(c, catalogs); err != nil {
+			failService(c, err)
+			return
+		}
+		var input struct {
+			BaseURL   string `json:"baseUrl"`
+			APIFormat string `json:"apiFormat"`
+			// 模型配置里写的文本接口格式，原样传来；留空表示按渠道格式取默认值。
+			Protocols []string `json:"protocols"`
+		}
+		if err := c.ShouldBindJSON(&input); err != nil || len(input.Protocols) > 32 {
+			fail(c, http.StatusBadRequest, errors.New("模型渠道参数格式错误"))
+			return
+		}
+		ok(c, channelRequestURLs(input.BaseURL, input.APIFormat, input.Protocols))
+	})
+}
+
+func channelRequestURLs(baseURL, apiFormat string, protocols []string) gin.H {
+	text := map[string]string{}
+	if strings.TrimSpace(baseURL) == "" {
+		return gin.H{"catalog": "", "text": text}
+	}
+	for _, protocol := range protocols {
+		// 没写接口格式的 Gemini 渠道不走这三种文本接口，不给地址。
+		if strings.TrimSpace(protocol) == "" && strings.EqualFold(strings.TrimSpace(apiFormat), "gemini") {
+			continue
+		}
+		if url := generation.TextRequestURLFor(baseURL, apiFormat, protocol); url != "" {
+			text[protocol] = url
+		}
+	}
+	catalog := ""
+	// 和真正读取目录一样先整理地址与格式；不支持读取目录的格式不给目录地址。
+	if format, err := modelcatalog.NormalizeCatalogAPIFormat(apiFormat); err == nil {
+		catalog = generation.ChannelCatalogURL(modelcatalog.CatalogBaseURL(baseURL), format)
+	}
+	return gin.H{"catalog": catalog, "text": text}
 }

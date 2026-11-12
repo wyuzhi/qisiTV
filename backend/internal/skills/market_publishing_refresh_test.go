@@ -60,7 +60,7 @@ func TestPublicationCloudEditRequiresFreshPreviewWithoutReupload(t *testing.T) {
 				json.NewEncoder(w).Encode(map[string]any{"success": false, "reason": "revision_conflict", "message": "changed"})
 				return
 			}
-			draft.Status = "submitted"
+			draft.Status = "published"
 			value = draft
 		}
 		json.NewEncoder(w).Encode(map[string]any{"success": true, "data": value})

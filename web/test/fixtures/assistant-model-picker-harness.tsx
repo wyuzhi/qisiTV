@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App, ConfigProvider, theme } from "antd";
+import { BeefTVConnectionProvider } from "@/components/layout/beeftv-connection-provider";
 import { CanvasAssistantModelPicker } from "@/pages/canvas/canvas-assistant-model-picker";
 import { useCanvasAssistant } from "@/pages/canvas/use-canvas-assistant";
 import { commitModelConfig, hydrateModelConfig } from "@/services/model-config-repository";
@@ -20,13 +21,13 @@ function Harness() {
     if (location.pathname === "/defaults") return <ConfigProvider theme={{ algorithm: theme.defaultAlgorithm }}><App>
         <ModelDefaultGrid config={config} onChange={(key, value) => useConfigStore.getState().updateConfig(key, value)} />
     </App></ConfigProvider>;
-    return <ConfigProvider theme={{ algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm }}><App>
+    return <ConfigProvider theme={{ algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm }}><App><BeefTVConnectionProvider>
         <main style={{ width: "100%", maxWidth: 380, background: dark ? "#141414" : "#fff" }}>
-            {location.pathname === "/settings" ? <ChannelSettingsPane onOpenModels={() => {}} onOpenRunningHub={() => {}} /> : null}
+            {location.pathname === "/settings" ? <ChannelSettingsPane onOpenModels={() => {}} /> : null}
             <div className="canvas-assistant-composer-footer"><CanvasAssistantModelPicker busy={busy || assistant.modelBusy} /><button onClick={() => void assistant.send("synthetic", [])}>发送测试消息</button></div>
             <button onClick={() => setBusy(!busy)}>切换忙碌</button><button onClick={() => setDark(!dark)}>切换主题</button>
             <output>{assistant.error || ""}</output>
         </main>
-    </App></ConfigProvider>;
+    </BeefTVConnectionProvider></App></ConfigProvider>;
 }
 createRoot(document.getElementById("root")!).render(<Harness />);

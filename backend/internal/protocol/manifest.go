@@ -2,7 +2,6 @@ package protocol
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -79,13 +78,8 @@ type ManifestAgentResponse struct {
 	ToolCallSignaturePaths []string `json:"toolCallThoughtSignaturePaths,omitempty"`
 }
 
-// AdapterResolver is used by the host to bind a shipped execution engine to a
-// manifest. Uploaded plugins must use the declarative path; host bindings are
-// reserved for manifests shipped with the application.
-type AdapterResolver func(string) (Adapter, bool)
-
-func LoadInstalledPlugin(data []byte, resolve AdapterResolver) (Adapter, error) {
-	adapters, err := LoadInstalledProviders(data, resolve)
+func LoadInstalledPlugin(data []byte) (Adapter, error) {
+	adapters, err := LoadInstalledProviders(data)
 	if err != nil {
 		return nil, err
 	}
@@ -98,30 +92,10 @@ func LoadInstalledPlugin(data []byte, resolve AdapterResolver) (Adapter, error) 
 // LoadInstalledProviders loads every provider contribution from one plugin
 // package. The package remains the lifecycle and permission unit; providers
 // are separate execution entries in the runtime index.
-func LoadInstalledProviders(data []byte, resolve AdapterResolver) ([]Adapter, error) {
+func LoadInstalledProviders(data []byte) ([]Adapter, error) {
 	manifest, err := decodeManifest(data)
 	if err != nil {
 		return nil, err
-	}
-	if strings.HasPrefix(strings.TrimSpace(manifest.Runtime.Backend), "host:") {
-		if len(manifest.Contributes.Providers) != 1 {
-			return nil, fmt.Errorf("host-backed plugin must declare exactly one provider")
-		}
-		if resolve == nil {
-			return nil, fmt.Errorf("plugin %q requires a host execution engine", manifest.Metadata.ID)
-		}
-		name := strings.TrimPrefix(strings.TrimSpace(manifest.Runtime.Backend), "host:")
-		adapter, ok := resolve(name)
-		if !ok {
-			return nil, fmt.Errorf("plugin host execution %q is unavailable", name)
-		}
-		if err := ValidateManifest(manifest); err != nil {
-			return nil, err
-		}
-		if err := normalizeManifest(&manifest); err != nil {
-			return nil, err
-		}
-		return []Adapter{metadataAdapter{metadata: manifest.Metadata, delegate: adapter}}, nil
 	}
 	if len(manifest.Contributes.Providers) == 0 {
 		adapter, err := loadDeclarativeManifest(manifest)
@@ -248,9 +222,17 @@ func loadDeclarativeManifest(manifest Manifest) (Adapter, error) {
 }
 
 func loadDeclarativeManifestProvider(manifest Manifest, index int) (Adapter, error) {
+	pluginID := manifest.Metadata.ID
+	module := strings.TrimSpace(manifest.Contributes.Providers[index].Module)
 	manifest.Runtime.Backend = "declarative"
+	if module != "" {
+		manifest.Runtime.Backend = ExecutionModule
+	}
 	if err := normalizeManifestForProvider(&manifest, index); err != nil {
 		return nil, err
+	}
+	if module != "" {
+		return ModuleProvider{Info: manifest.Metadata, Plugin: pluginID, Module: module, Auth: manifest.Auth}, nil
 	}
 	return manifestAdapter{manifest: manifest}, nil
 }
@@ -272,10 +254,13 @@ func ValidateManifest(manifest Manifest) error {
 	if len(manifest.Metadata.Name) > 160 || len(manifest.Metadata.Vendor) > 120 {
 		return fmt.Errorf("protocol manifest metadata name or vendor is too long")
 	}
-	if len(manifest.Contributes.Providers) == 0 && !hasNonProviderContribution(manifest.Contributes) {
+	if len(manifest.Contributes.Providers) == 0 && !hasNonProviderContribution(manifest.Contributes) && strings.TrimSpace(manifest.Client) == "" {
 		return fmt.Errorf("plugin must declare at least one contribution")
 	}
-	if backend := strings.TrimSpace(manifest.Runtime.Backend); backend != "" && backend != "declarative" && backend != "rpc" && backend != "wasm" && backend != "trusted-backend" && !strings.HasPrefix(backend, "host:") {
+	if err := validateManifestPackageExtensions(manifest); err != nil {
+		return err
+	}
+	if backend := strings.TrimSpace(manifest.Runtime.Backend); backend != "" && backend != "declarative" {
 		return fmt.Errorf("unsupported plugin backend %q", backend)
 	}
 	if len(manifest.Contributes.Providers) == 0 {
@@ -290,12 +275,29 @@ func ValidateManifest(manifest Manifest) error {
 			return fmt.Errorf("duplicate provider contribution %q", provider.ID)
 		}
 		providerIDs[provider.ID] = struct{}{}
-		requiresV3 := len(provider.Variables) > 0 || provider.Response.Stream != nil || provider.Response.DetectImageMIME
+		if err := validateProviderRenames(provider, providerIDs); err != nil {
+			return err
+		}
+		if err := validateProviderSurface(provider); err != nil {
+			return err
+		}
+		if strings.TrimSpace(provider.Module) != "" {
+			if err := validateModuleProvider(provider); err != nil {
+				return fmt.Errorf("provider %q: %w", provider.ID, err)
+			}
+			continue
+		}
+		requiresV3 := len(provider.Variables) > 0 || provider.Response.Stream != nil || provider.Response.DetectImageMIME || provider.MediaUpload != nil
 		for _, operation := range []*ManifestOperation{&provider.Create, provider.Poll, provider.Cancel, provider.Result, provider.Agent} {
 			requiresV3 = requiresV3 || (operation != nil && operation.DefaultPathPrefix != "")
 		}
 		if version := strings.TrimSpace(manifest.APIVersion); version != "beeftv.plugin/v3" && version != "qisitv.plugin/v3" && requiresV3 {
 			return fmt.Errorf("provider %q requires qisitv.plugin/v3 or beeftv.plugin/v3 for variables, defaultPathPrefix or image response extensions", provider.ID)
+		}
+		if provider.MediaUpload != nil {
+			if err := validateManifestMediaUpload(*provider.MediaUpload, provider.BaseURL); err != nil {
+				return fmt.Errorf("provider %q mediaUpload: %w", provider.ID, err)
+			}
 		}
 		var expressions []any
 		for _, operation := range []*ManifestOperation{&provider.Create, provider.Poll, provider.Cancel, provider.Result, provider.Agent} {
@@ -312,21 +314,6 @@ func ValidateManifest(manifest Manifest) error {
 		if stream := provider.Response.Stream; stream != nil {
 			if strings.TrimSpace(stream.TypePath) == "" || len(stream.ItemEvents) == 0 || stream.Images == nil || provider.Response.BinaryPayload {
 				return fmt.Errorf("provider %q image stream requires typePath, itemEvents and images, without binaryPayload", provider.ID)
-			}
-		}
-		if len(provider.Capabilities) == 0 || len(provider.Scopes) == 0 {
-			return fmt.Errorf("provider contribution %q requires capabilities and scopes", provider.ID)
-		}
-		for _, capability := range provider.Capabilities {
-			if capability != CapabilityText && capability != CapabilityImage && capability != CapabilityVideo && capability != CapabilityAudio {
-				return fmt.Errorf("unsupported protocol capability %q", capability)
-			}
-		}
-		for _, scope := range provider.Scopes {
-			switch scope {
-			case SurfaceAdminSystemChannel, SurfaceUserCustomChannel, SurfaceCanvas, SurfaceCreation, SurfaceAgent:
-			default:
-				return fmt.Errorf("unsupported protocol scope %q", scope)
 			}
 		}
 		if err := validateManifestOperation(provider.Create); err != nil {
@@ -364,6 +351,25 @@ func ValidateManifest(manifest Manifest) error {
 	return nil
 }
 
+func validateProviderSurface(provider ManifestProvider) error {
+	if len(provider.Capabilities) == 0 || len(provider.Scopes) == 0 {
+		return fmt.Errorf("provider contribution %q requires capabilities and scopes", provider.ID)
+	}
+	for _, capability := range provider.Capabilities {
+		if capability != CapabilityText && capability != CapabilityImage && capability != CapabilityVideo && capability != CapabilityAudio {
+			return fmt.Errorf("unsupported protocol capability %q", capability)
+		}
+	}
+	for _, scope := range provider.Scopes {
+		switch scope {
+		case SurfaceAdminSystemChannel, SurfaceUserCustomChannel, SurfaceCanvas, SurfaceCreation, SurfaceAgent:
+		default:
+			return fmt.Errorf("unsupported protocol scope %q", scope)
+		}
+	}
+	return nil
+}
+
 func normalizeManifest(manifest *Manifest) error {
 	if manifest == nil {
 		return fmt.Errorf("plugin manifest is missing")
@@ -382,9 +388,7 @@ func normalizeManifestForProvider(manifest *Manifest, index int) error {
 	provider := manifest.Contributes.Providers[index]
 	// Released enterprise profiles used the package name as the protocol ID.
 	// Keep those profiles on this installed adapter, including its disabled state.
-	if manifest.Metadata.ID == "openai-videos" && provider.ID == "newapi" {
-		manifest.Metadata.LegacyAliases = []string{"openai-video", "openai-videos"}
-	}
+	manifest.Metadata.LegacyAliases = providerLegacyAliases(manifest.Metadata.ID, provider)
 	manifest.Metadata.ID = provider.ID
 	manifest.Metadata.Categories = provider.Capabilities
 	manifest.Metadata.Scopes = provider.Scopes
@@ -393,6 +397,7 @@ func normalizeManifestForProvider(manifest *Manifest, index int) error {
 	manifest.Metadata.Poll = operationSummaryPtr(provider.Poll)
 	manifest.Metadata.Cancel = operationSummaryPtr(provider.Cancel)
 	manifest.Metadata.ContentType = provider.Create.ContentType
+	manifest.Metadata.BaseURL = strings.TrimSpace(provider.BaseURL)
 	manifest.Metadata.RequiresPublicMediaURLs = provider.RequiresPublicMediaURLs
 	for kind, transport := range provider.MediaTransport {
 		if (kind != "image" && kind != "video" && kind != "audio") || (transport != "inline" && transport != "url") {
@@ -400,6 +405,7 @@ func normalizeManifestForProvider(manifest *Manifest, index int) error {
 		}
 	}
 	manifest.Metadata.MediaTransport = provider.MediaTransport
+	manifest.Metadata.MediaUpload = provider.MediaUpload
 	manifest.Metadata.Execution = manifest.Runtime.Backend
 	manifest.Create = provider.Create
 	manifest.Agent = provider.Agent
@@ -415,7 +421,7 @@ func normalizeManifestForProvider(manifest *Manifest, index int) error {
 }
 
 func hasNonProviderContribution(contributes ManifestContributions) bool {
-	return len(contributes.Workflows) > 0 || len(contributes.CanvasNodes) > 0 || len(contributes.Transforms) > 0 || len(contributes.Commands) > 0 || len(contributes.AssetSources) > 0 || len(contributes.UsageObservers) > 0 || len(contributes.AICapabilities) > 0 || len(contributes.Agents) > 0 || len(contributes.ImportExport) > 0
+	return len(contributes.Workflows) > 0 || len(contributes.CanvasNodes) > 0 || len(contributes.Skills) > 0 || len(contributes.Extensions) > 0
 }
 
 func operationSummary(operation ManifestOperation) string {
@@ -472,64 +478,20 @@ func (a manifestAdapter) BuildCreate(_ context.Context, c RequestContext) (Reque
 	if len(a.manifest.Contributes.Providers) == 0 {
 		return RequestSpec{}, fmt.Errorf("plugin %s does not provide a provider", a.manifest.Metadata.ID)
 	}
-	variables, err := manifestRequestVariables(a.manifest.Variables, c.Request)
+	workflow := manifestWorkflowValues(a.manifest, c.Request)
+	variables, err := manifestRequestVariables(a.manifest.Variables, c.Request, workflow)
 	if err != nil {
 		return RequestSpec{}, err
 	}
-	if err := validateManifestRequest(a.manifest.Validations, c.Request, variables); err != nil {
+	if err := validateManifestRequest(a.manifest.Validations, c.Request, variables, workflow); err != nil {
 		return RequestSpec{}, err
 	}
-	spec, err := buildManifestOperation(a.manifest.Create, a.manifest.Auth, c.Request, "", variables)
+	spec, err := buildManifestOperation(a.manifest.Create, a.manifest.Auth, c.Request, "", variables, workflow)
 	if err != nil {
 		return RequestSpec{}, err
 	}
 	applyManifestBodyFields(a.manifest.Metadata.ID, &spec, c.Request)
 	return spec, nil
-}
-func (a manifestAdapter) BuildAgent(_ context.Context, c AgentRequestContext) (RequestSpec, error) {
-	if a.manifest.Agent == nil {
-		return RequestSpec{}, fmt.Errorf("protocol %s has no agent operation", a.manifest.Metadata.ID)
-	}
-	request := GenerationRequest{Model: c.Model, Extra: map[string]any{"agent": c.Request}}
-	return a.buildOperation(*a.manifest.Agent, request, "")
-}
-func (a manifestAdapter) ParseAgent(_ context.Context, body []byte) (AgentResult, error) {
-	if a.manifest.AgentResponse == nil {
-		return AgentResult{}, fmt.Errorf("protocol %s has no agent response mapping", a.manifest.Metadata.ID)
-	}
-	payload, err := decodeObject(body)
-	if err != nil {
-		return AgentResult{}, err
-	}
-	response := a.manifest.AgentResponse
-	result := AgentResult{Text: firstPathValue(payload, response.TextPaths...), Reasoning: firstPathValue(payload, response.ReasoningPaths...)}
-	if response.ToolCallsPath == "" {
-		return result, nil
-	}
-	for index, item := range arrayValue(pathValue(payload, response.ToolCallsPath)) {
-		object, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		call := AgentToolCall{
-			ID:               firstPathValue(object, response.ToolCallIDPaths...),
-			Name:             firstPathValue(object, response.ToolCallNamePaths...),
-			Arguments:        firstPathJSONValue(object, response.ToolCallArgsPaths...),
-			ThoughtSignature: firstPathValue(object, response.ToolCallSignaturePaths...),
-		}
-		if strings.TrimSpace(call.Name) != "" {
-			if strings.TrimSpace(call.ID) == "" {
-				call.ID = syntheticAgentToolCallID(body, index)
-			}
-			result.ToolCalls = append(result.ToolCalls, call)
-		}
-	}
-	return result, nil
-}
-
-func syntheticAgentToolCallID(body []byte, index int) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s#%d", body, index)))
-	return fmt.Sprintf("call_%x", sum[:8])
 }
 func (a manifestAdapter) ParseCreate(_ context.Context, body []byte) (CreateResult, error) {
 	if a.manifest.Response.BinaryPayload {
@@ -604,11 +566,12 @@ func (a manifestAdapter) BuildResult(_ context.Context, c PollContext) (RequestS
 }
 
 func (a manifestAdapter) buildOperation(operation ManifestOperation, request GenerationRequest, taskID string) (RequestSpec, error) {
-	variables, err := manifestRequestVariables(a.manifest.Variables, request)
+	workflow := manifestWorkflowValues(a.manifest, request)
+	variables, err := manifestRequestVariables(a.manifest.Variables, request, workflow)
 	if err != nil {
 		return RequestSpec{}, err
 	}
-	return buildManifestOperation(operation, a.manifest.Auth, request, taskID, variables)
+	return buildManifestOperation(operation, a.manifest.Auth, request, taskID, variables, workflow)
 }
 
 func (a manifestAdapter) parse(payload map[string]any, c PollContext) CreateResult {
@@ -739,9 +702,12 @@ func validateManifestVariables(bindings []ManifestVariable, expressions ...any) 
 	return nil
 }
 
-func manifestRequestVariables(bindings []ManifestVariable, request GenerationRequest) (map[string]any, error) {
+func manifestRequestVariables(bindings []ManifestVariable, request GenerationRequest, workflow ...map[string]any) (map[string]any, error) {
 	values := map[string]any{}
 	env := map[string]any{"request": manifestRequestValues(request), "vars": values}
+	if len(workflow) > 0 && workflow[0] != nil {
+		env["workflow"] = workflow[0]
+	}
 	for _, binding := range bindings {
 		if !manifestVariableName.MatchString(binding.Name) {
 			return nil, fmt.Errorf("provider variable requires a simple name")
@@ -758,13 +724,16 @@ func manifestRequestVariables(bindings []ManifestVariable, request GenerationReq
 	return values, nil
 }
 
-func validateManifestRequest(rules []ManifestValidation, request GenerationRequest, variables ...map[string]any) error {
+func validateManifestRequest(rules []ManifestValidation, request GenerationRequest, extras ...map[string]any) error {
 	if draftTaskID, ok := request.Extra["draft_task_id"].(string); len(rules) == 0 || (ok && strings.TrimSpace(draftTaskID) != "") {
 		return nil
 	}
 	env := map[string]any{"request": manifestRequestValues(request)}
-	if len(variables) > 0 {
-		env["vars"] = variables[0]
+	if len(extras) > 0 {
+		env["vars"] = extras[0]
+	}
+	if len(extras) > 1 && extras[1] != nil {
+		env["workflow"] = extras[1]
 	}
 	for _, rule := range rules {
 		value, err := evaluateManifestValue(rule.Assert, env)
@@ -953,11 +922,14 @@ func mediaPathValues(payload map[string]any, path string) []string {
 	return values
 }
 
-func buildManifestOperation(operation ManifestOperation, auth ManifestAuth, request GenerationRequest, taskID string, variables ...map[string]any) (RequestSpec, error) {
+func buildManifestOperation(operation ManifestOperation, auth ManifestAuth, request GenerationRequest, taskID string, extras ...map[string]any) (RequestSpec, error) {
 	requestValues := manifestRequestValues(request)
 	env := map[string]any{"request": requestValues, "taskId": taskID}
-	if len(variables) > 0 {
-		env["vars"] = variables[0]
+	if len(extras) > 0 {
+		env["vars"] = extras[0]
+	}
+	if len(extras) > 1 && extras[1] != nil {
+		env["workflow"] = extras[1]
 	}
 	var body any
 	if operation.Body != nil {
@@ -1257,26 +1229,6 @@ func hasSystemMessage(messages []Message) bool {
 		}
 	}
 	return false
-}
-
-func requestAsManifestValue(value any) (any, error) {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	var result any
-	if err := json.Unmarshal(encoded, &result); err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
-func manifestModelID(request GenerationRequest) string {
-	modelID := strings.TrimSpace(request.Model)
-	if separator := strings.LastIndex(modelID, "::"); separator >= 0 {
-		modelID = modelID[separator+2:]
-	}
-	return strings.ToLower(modelID)
 }
 
 func manifestMediaValues(values []MediaReference) []any {
@@ -1591,64 +1543,4 @@ func reflectValueIsZero(value any) bool {
 	default:
 		return false
 	}
-}
-
-// firstPathJSONValue keeps scalar response fields string-like while allowing
-// providers to return tool arguments as an object instead of a JSON string.
-// The platform tool contract always stores arguments as JSON text.
-func firstPathJSONValue(payload map[string]any, paths ...string) string {
-	for _, path := range paths {
-		value := pathValue(payload, path)
-		switch typed := value.(type) {
-		case string:
-			if strings.TrimSpace(typed) != "" {
-				return strings.TrimSpace(typed)
-			}
-		case nil:
-			continue
-		default:
-			encoded, err := json.Marshal(typed)
-			if err == nil && len(encoded) > 0 {
-				return string(encoded)
-			}
-		}
-	}
-	return ""
-}
-
-func setMapPath(target map[string]any, path string, value any) {
-	parts := strings.Split(strings.Trim(path, "."), ".")
-	current := target
-	for _, part := range parts[:len(parts)-1] {
-		next, ok := current[part].(map[string]any)
-		if !ok {
-			next = map[string]any{}
-			current[part] = next
-		}
-		current = next
-	}
-	if len(parts) > 0 {
-		current[parts[len(parts)-1]] = value
-	}
-}
-
-func isRelativePath(path string) bool {
-	parsed, err := url.Parse(strings.TrimSpace(path))
-	return err == nil && parsed.Path != "" && strings.HasPrefix(parsed.Path, "/") && !strings.HasPrefix(parsed.Path, "//") && parsed.Host == "" && parsed.User == nil && parsed.Scheme == ""
-}
-
-func validManifestIdentifier(value string) bool {
-	if len(value) == 0 || len(value) > 96 {
-		return false
-	}
-	for index, char := range value {
-		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '-' || char == '_' || char == '.' {
-			if index == 0 && (char == '-' || char == '_' || char == '.') {
-				return false
-			}
-			continue
-		}
-		return false
-	}
-	return true
 }

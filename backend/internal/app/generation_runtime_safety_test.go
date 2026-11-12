@@ -44,7 +44,7 @@ func TestGenerationDownloadCacheUsesOwningTaskAcrossRuntimeRebind(t *testing.T) 
 
 func TestBindGenerationRuntimeReplacesFullProviderMetadata(t *testing.T) {
 	svc := &Service{}
-	ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: "http://127.0.0.1:9"})
+	ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: "http://127.0.0.1:9"})
 	ctx = svc.bindGenerationRuntime(ctx, generation.CallMeta{
 		UserID: "user-1", TaskID: "task-1", TraceID: "trace-old", RequestID: "req-old",
 		Capability: "video", Operation: "generate", ChannelID: "channel-old", Model: "model-old",
@@ -69,7 +69,7 @@ func TestBindGenerationRuntimeReplacesFullProviderMetadata(t *testing.T) {
 	if runtime.Images == nil || runtime.Receipts == nil || runtime.Probe == nil || runtime.Limits == nil || runtime.Prompt == nil || runtime.Config == nil || runtime.Style == nil {
 		t.Fatalf("required ports missing after rebind: %#v", runtime)
 	}
-	if runtime.Endpoints.BeefAPIVideoBaseURL != "http://127.0.0.1:9" {
+	if runtime.Endpoints.BeefTVVideoBaseURL != "http://127.0.0.1:9" {
 		t.Fatalf("endpoint override lost after rebind: %#v", runtime.Endpoints)
 	}
 }
@@ -97,7 +97,7 @@ func TestBindGenerationRuntimeAlwaysBindsTypedPorts(t *testing.T) {
 	if !ok {
 		t.Fatal("runtime missing")
 	}
-	if runtime.Limits == nil || runtime.Prompt == nil || runtime.Config == nil || runtime.Style == nil || runtime.Images == nil || runtime.Receipts == nil || runtime.Workflow == nil || runtime.Probe == nil {
+	if runtime.Limits == nil || runtime.Prompt == nil || runtime.Config == nil || runtime.Style == nil || runtime.Images == nil || runtime.Receipts == nil || runtime.Probe == nil {
 		t.Fatalf("typed ports missing on empty Service: %#v", runtime)
 	}
 	if runtime.Call.ProjectID != "project-1" || runtime.Call.TaskType != "canvas_image" {

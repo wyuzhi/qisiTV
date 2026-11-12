@@ -2,11 +2,14 @@ package database
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strings"
+	"time"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 type Config struct {
@@ -29,7 +32,14 @@ func Open(config Config) (*gorm.DB, error) {
 			}
 			dsn = config.DataDir + "/open_ai_canvas.db?_busy_timeout=5000&_journal_mode=WAL&_foreign_keys=on&_synchronous=NORMAL"
 		}
-		return gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+		return gorm.Open(sqlite.Open(dsn), &gorm.Config{
+			Logger: logger.New(log.New(os.Stdout, "\r\n", log.LstdFlags), logger.Config{
+				SlowThreshold:             time.Second,
+				LogLevel:                  logger.Warn,
+				IgnoreRecordNotFoundError: true,
+				ParameterizedQueries:      true,
+			}),
+		})
 	default:
 		return nil, fmt.Errorf("不支持的数据库驱动：%s", driver)
 	}

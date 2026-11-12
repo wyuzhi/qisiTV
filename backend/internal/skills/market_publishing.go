@@ -125,8 +125,8 @@ func (s *Service) preparePublicationBundle(user, id, canvas string, meta skillhu
 		if e != nil {
 			return nil, e
 		}
-		if strings.HasPrefix(f.Path, "scripts/") || strings.HasPrefix(f.Path, ".") || strings.Contains(strings.ToLower(f.Path), "private_key") {
-			return nil, kernel.BadAuthRequest("请移除脚本或私有配置后再投稿")
+		if !skillhub.DataFilePath(f.Path) || skillhub.ContainsPrivateData(b) {
+			return nil, kernel.BadAuthRequest("请移除私有配置或密钥后再投稿")
 		}
 		files[f.Path] = b
 		h := sha256.Sum256(b)
@@ -137,7 +137,7 @@ func (s *Service) preparePublicationBundle(user, id, canvas string, meta skillhu
 		return nil, e
 	}
 	if len(data) > skillhub.MaxArchiveBytes {
-		return nil, kernel.BadAuthRequest("投稿包超过10MiB")
+		return nil, kernel.BadAuthRequest("投稿包超过100MiB")
 	}
 	if meta.Name == "" {
 		meta.Name = bundle.Name

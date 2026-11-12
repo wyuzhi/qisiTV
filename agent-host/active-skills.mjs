@@ -3,19 +3,6 @@
 // 最近使用的技能如果在当前可见消息里已经找不到正文，就在本次请求里补回一份（只对这次请求生效，不落盘）。
 import { formatSkillBlock } from './skill-resource.mjs';
 
-export const ACTIVE_SKILL_LIMIT = 2;
-
-// 最近读取/选择的技能（去重，保留后出现的），排除用户或模型已“放下”的。
-export function pickActiveSkills(loaded = [], limit = ACTIVE_SKILL_LIMIT) {
-  const latest = new Map();
-  for (const record of loaded) {
-    if (!record?.skillId || !record?.versionId) continue;
-    latest.delete(record.skillId);
-    latest.set(record.skillId, record);
-  }
-  return [...latest.values()].filter((record) => !record.released).slice(-limit);
-}
-
 function messageText(message) {
   if (typeof message?.content === 'string') return message.content;
   if (!Array.isArray(message?.content)) return '';
@@ -31,10 +18,6 @@ export function skillBlockVisible(messages, recordOrResource) {
       (message.role === 'user' || message.role === 'toolResult' || message.role === 'tool') &&
       messageText(message).includes(needle),
   );
-}
-
-export function missingActiveSkills(messages, loaded, limit = ACTIVE_SKILL_LIMIT) {
-  return pickActiveSkills(loaded, limit).filter((record) => !skillBlockVisible(messages, record));
 }
 
 export function missingSkillResources(messages, resources = [], contextWindow) {

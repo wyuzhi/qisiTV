@@ -47,7 +47,7 @@ func DefaultImageCapabilityConfig(protocol string, modelName string) *ImageCapab
 		}
 		return &ImageCapabilityConfig{References: ImageReferenceConfig{PromptMaxChars: 32000, MaxImages: refs, MaxImageBytes: 30 * 1024 * 1024}, Size: ImageSizeConfig{Parameter: "size", Values: sizes, Default: "2K", AllowCustom: true}, Quality: ImageQualityConfig{Default: "auto"}, TransparentBackground: VideoBooleanConfig{Supported: modern}, SequentialGeneration: VideoBooleanConfig{Supported: !modern}, ResponseFormat: ImageResponseFormat{Supported: true}, OutputFormat: ParameterSupport{Supported: modern || family == "lite"}, MaxOutputs: 15}
 	}
-	if contract, ok := providerpreset.BeefAPIImageContract(modelName); ok && protocol == "openai-image" {
+	if contract, ok := providerpreset.BeefTVImageContract(modelName); ok && protocol == "openai-image" {
 		values := make([]string, 0, len(contract.Sizes))
 		for ratio := range contract.Sizes {
 			values = append(values, ratio)
@@ -78,7 +78,7 @@ func DefaultImageCapabilityConfig(protocol string, modelName string) *ImageCapab
 		OutputFormat:          ParameterSupport{Supported: true},
 		MaxOutputs:            15,
 	}
-	if name := strings.ToLower(strings.TrimSpace(modelName)); protocol == "openai-image" && (name == "gpt-image-2.5-flare" || name == "gpt-image-2.5-sunburst") {
+	if isExtendedGPTImageModel(protocol, modelName) {
 		image.Quality.Values = []string{"auto", "low", "medium", "high", "xhigh", "max"}
 	}
 	if protocol == "openai-image" && strings.EqualFold(strings.TrimSpace(modelName), "gpt-image-2") {
@@ -260,8 +260,8 @@ func capabilityImageSizeFromConfig(size ImageSizeConfig) *CapabilityImageSize {
 }
 
 func validateImageCapabilityConfig(value *ImageCapabilityConfig) error {
-	if value.References.PromptMaxChars < 1 || value.References.PromptMaxChars > 1000000 {
-		return kernel.BadAuthRequest("提示词最大字符数必须在 1-1000000 之间")
+	if value.References.PromptMaxChars < 0 || value.References.PromptMaxChars > 1000000 {
+		return kernel.BadAuthRequest("提示词最大字符数必须在 0-1000000 之间，0 表示交由服务商校验")
 	}
 	if value.References.MaxImages < 0 || value.References.MaxImages > 100 || value.References.MaxImageBytes < 0 {
 		return kernel.BadAuthRequest("图片引用限制无效")
@@ -354,13 +354,22 @@ func validateImageCapabilityConfig(value *ImageCapabilityConfig) error {
 	return nil
 }
 
+func isExtendedGPTImageModel(protocol, modelName string) bool {
+	name := strings.ToLower(strings.TrimSpace(modelName))
+	if protocol != "openai-image" || !strings.HasPrefix(name, "gpt-image-") {
+		return false
+	}
+	suffix := strings.TrimPrefix(name, "gpt-image-")
+	return suffix == "2.5" || suffix == "2.5-flare" || suffix == "2.5-sunburst" || suffix == "2.6" || suffix == "2.6-flare" || suffix == "2.6-sunburst"
+}
+
 // Upgrade only the old built-in GPT image choices; keep other stored limits.
 func applyModelSpecificImageCapability(profile *ImageCapabilityConfig, protocol string, modelName string, _ string) *ImageCapabilityConfig {
 	if providerpreset.SeedreamFamily(modelName) != "" || isMossImageModel(modelName) {
 		return DefaultImageCapabilityConfig(protocol, modelName)
 	}
 	name := strings.ToLower(strings.TrimSpace(modelName))
-	if profile == nil || protocol != "openai-image" || (name != "gpt-image-2" && name != "gpt-image-2.5-flare" && name != "gpt-image-2.5-sunburst") {
+	if profile == nil || protocol != "openai-image" || (name != "gpt-image-2" && !isExtendedGPTImageModel(protocol, name)) {
 		return profile
 	}
 	result := *profile
@@ -391,8 +400,8 @@ func validateImageTask(profile *ImageCapabilityConfig, input TaskInput) error {
 	if !sourced {
 		profile = applyModelSpecificImageCapability(profile, input.Config.InterfaceType, input.Config.Model, input.Config.APIFormat)
 	}
-	if !sourced && providerpreset.IsBeefAPIEndpoint(input.Config.BaseURL) {
-		if contract, ok := providerpreset.BeefAPIImageContract(input.Config.Model); ok {
+	if !sourced && providerpreset.IsBeefTVEndpoint(input.Config.BaseURL) {
+		if contract, ok := providerpreset.BeefTVImageContract(input.Config.Model); ok {
 			profile = DefaultImageCapabilityConfig(contract.Protocol, input.Config.Model)
 			if _, err := contract.PixelSize(input.Config.Size); err != nil {
 				return kernel.BadAuthRequest(err.Error())

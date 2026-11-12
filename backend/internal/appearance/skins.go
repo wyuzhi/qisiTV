@@ -1,21 +1,8 @@
 package appearance
 
 import (
-	"fmt"
 	"reflect"
-	"regexp"
 	"strings"
-	"unicode"
-	"unicode/utf8"
-
-	"qisitv/backend/internal/kernel"
-)
-
-const maxAppearanceSkinThemes = 16
-
-var (
-	appearanceSkinIDPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`)
-	appearanceColorPattern  = regexp.MustCompile(`^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$`)
 )
 
 // AppearanceSkinModeTokens is deliberately an allowlist instead of arbitrary CSS.
@@ -285,106 +272,6 @@ func normalizeAppearanceSkinModeColors(mode *AppearanceSkinModeTokens) {
 		field := value.Field(index)
 		field.SetString(strings.ToLower(strings.TrimSpace(field.String())))
 	}
-}
-
-func validateAppearanceSkinThemes(themes []AppearanceSkinTheme, selectedID string) error {
-	if len(themes) == 0 || len(themes) > maxAppearanceSkinThemes {
-		return kernel.BadAuthRequest(fmt.Sprintf("皮肤主题数量必须为 1 到 %d 套", maxAppearanceSkinThemes))
-	}
-	seen := make(map[string]struct{}, len(themes))
-	foundSelected := false
-	foundClassic := false
-	classic := defaultClassicAppearanceSkin()
-	for _, skin := range themes {
-		if !appearanceSkinIDPattern.MatchString(skin.ID) {
-			return kernel.BadAuthRequest("皮肤主题 ID 无效")
-		}
-		if _, exists := seen[skin.ID]; exists {
-			return kernel.BadAuthRequest("皮肤主题 ID 不能重复")
-		}
-		seen[skin.ID] = struct{}{}
-		if skin.ID == selectedID {
-			foundSelected = true
-		}
-		if skin.ID == DefaultSkinID {
-			foundClassic = true
-			if skin.Name != classic.Name || skin.Description != classic.Description || !reflect.DeepEqual(skin.Tokens, classic.Tokens) {
-				return kernel.BadAuthRequest("经典黑白为系统默认主题，不能修改或删除")
-			}
-		}
-		if err := validateAppearanceSkinText(skin.Name, "皮肤主题名称", 40, true); err != nil {
-			return err
-		}
-		if err := validateAppearanceSkinText(skin.Description, "皮肤主题说明", 100, false); err != nil {
-			return err
-		}
-		if err := validateAppearanceSkinMode(skin.Tokens.Light); err != nil {
-			return err
-		}
-		if err := validateAppearanceSkinMode(skin.Tokens.Dark); err != nil {
-			return err
-		}
-		if err := validateAppearanceSkinComponents(skin.Tokens.Components); err != nil {
-			return err
-		}
-	}
-	if !foundClassic {
-		return kernel.BadAuthRequest("经典黑白为系统默认主题，不能修改或删除")
-	}
-	if !foundSelected {
-		return kernel.BadAuthRequest("当前启用的皮肤主题不存在")
-	}
-	return nil
-}
-
-func validateAppearanceSkinMode(mode AppearanceSkinModeTokens) error {
-	value := reflect.ValueOf(mode)
-	for index := 0; index < value.NumField(); index++ {
-		if !appearanceColorPattern.MatchString(value.Field(index).String()) {
-			return kernel.BadAuthRequest("皮肤颜色必须使用 6 或 8 位十六进制颜色")
-		}
-	}
-	return nil
-}
-
-func validateAppearanceSkinComponents(value AppearanceSkinComponentTokens) error {
-	for _, candidate := range []struct {
-		value, min, max int
-		label           string
-	}{
-		{value.ButtonRadius, 0, 32, "按钮圆角"}, {value.InputRadius, 0, 32, "输入框圆角"}, {value.CardRadius, 0, 40, "卡片圆角"}, {value.OverlayRadius, 0, 40, "弹层圆角"}, {value.MenuRadius, 0, 32, "菜单圆角"}, {value.CheckboxRadius, 0, 12, "勾选框圆角"},
-		{value.ControlHeight, 30, 48, "控件高度"}, {value.ControlHeightSmall, 24, 40, "小控件高度"}, {value.ControlHeightLarge, 36, 56, "大控件高度"}, {value.BorderWidth, 1, 3, "描边宽度"}, {value.FocusRingWidth, 1, 4, "焦点环宽度"},
-		{value.IconSize, 12, 24, "图标尺寸"}, {value.ButtonFontWeight, 400, 700, "按钮字重"}, {value.HoverLift, 0, 4, "悬停抬升"}, {value.MotionFast, 0, 400, "快速动效时长"}, {value.MotionNormal, 0, 800, "常规动效时长"},
-	} {
-		if candidate.value < candidate.min || candidate.value > candidate.max {
-			return kernel.BadAuthRequest(fmt.Sprintf("%s必须在 %d 到 %d 之间", candidate.label, candidate.min, candidate.max))
-		}
-	}
-	if value.ControlHeightSmall > value.ControlHeight || value.ControlHeight > value.ControlHeightLarge {
-		return kernel.BadAuthRequest("控件高度须满足小号不大于标准、标准不大于大号")
-	}
-	if value.MotionFast > value.MotionNormal {
-		return kernel.BadAuthRequest("快速动效时长不能大于常规动效时长")
-	}
-	if value.ShadowStyle != "none" && value.ShadowStyle != "soft" && value.ShadowStyle != "strong" {
-		return kernel.BadAuthRequest("阴影风格无效")
-	}
-	return nil
-}
-
-func validateAppearanceSkinText(value, label string, maxRunes int, required bool) error {
-	if required && value == "" {
-		return kernel.BadAuthRequest(label + "不能为空")
-	}
-	if utf8.RuneCountInString(value) > maxRunes {
-		return kernel.BadAuthRequest(fmt.Sprintf("%s不能超过 %d 个字符", label, maxRunes))
-	}
-	for _, char := range value {
-		if unicode.IsControl(char) {
-			return kernel.BadAuthRequest(label + "不能包含控制字符")
-		}
-	}
-	return nil
 }
 
 func activeAppearanceSkin(themes []AppearanceSkinTheme, id string) AppearanceSkinTheme {

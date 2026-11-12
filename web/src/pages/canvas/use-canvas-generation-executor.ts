@@ -35,6 +35,8 @@ import { executeTextGeneration } from "./canvas-text-generation-executor";
 import { canvasGenerationFailureMetadata, canvasImagePendingResultMessage } from "./canvas-generation-failure";
 import { canvasNodeHasPendingOutcomeResult, isNodeRegenerateBlocked, isNodeRegenerateConfirm, readNodeTaskOutcome, taskOutcomeCopy } from "@/lib/task-outcome";
 import { createReferenceLinkResolver } from "@/components/generation-reference-links";
+import { emitPluginEvent } from "@/lib/plugins/plugin-events";
+import { runGenerationBeforeSubmitHooks } from "@/lib/plugins/slot-registry";
 import { confirmCanvasGeneration, waitForCanvasPreparation } from "./canvas-generation-preflight";
 import { startOperation } from "@/stores/use-operation-progress";
 import type { CanvasPageUiStoreHook } from "@/stores/canvas/use-canvas-page-ui-store";
@@ -262,11 +264,8 @@ export function useCanvasGenerationExecutor({
                             ? { ...node, metadata: { ...node.metadata, generationPreflightError: undefined } }
                             : node));
                         diagnostic("generation_preflight_stage");
-                        // AutoDL/其他声明式视频协议需要结构化参考素材；只有普通
-                        // 模型视频接口才把提示词视为纯文本输入。
-                        const usesWorkflowProvider = Boolean(mode !== "text" && generationConfig.taskWorkflowProvider && generationConfig.taskWorkflowProvider !== "model");
-                        // 普通视频协议只保留输入框文本（显式 @文本 引用仍会展开为真实内容）；声明式工作流还要保留连接媒体。
-                        const promptOnly = mode === "video" && !usesWorkflowProvider;
+                        // 视频协议只保留输入框文本（显式 @文本 引用仍会展开为真实内容）。
+                        const promptOnly = mode === "video";
                         try {
                             // 素材库列表按需加载，显式引用不能仅凭是否出现在列表中判断失效。
                             const missingAssetIds = referencedAssetIdsInPrompt(generationPrompt).filter((id) => !inputAssets.some((asset) => asset.id === id));
@@ -291,8 +290,8 @@ export function useCanvasGenerationExecutor({
                             }
                             generationConfig = buildConfirmedGenerationConfig(inputConfig, sourceNode, mode, requirements, options?.confirmedModelKey);
                             selectedModel = generationConfig.model;
-                            const referenceLimits = usesWorkflowProvider ? undefined : modelGroupReferenceLimits(inputConfig, generationConfig.model, mode, requirements);
-                            rawGenerationContext = await waitForCanvasPreparation(() => hydrateNodeGenerationContext(baseContext, projectId, domainProjectId, mode, mode === "video" && Boolean(referenceLimits?.maxAudios), !promptOnly, referenceLimits), controller.signal);
+                            const referenceLimits = modelGroupReferenceLimits(inputConfig, generationConfig.model, mode, requirements);
+                            rawGenerationContext = await waitForCanvasPreparation(() => hydrateNodeGenerationContext(baseContext, projectId, domainProjectId, mode, mode === "video" && Boolean(referenceLimits?.maxAudios), !promptOnly && mode !== "audio", referenceLimits), controller.signal);
                             const hydratedRequirements = generationModelRequirements(mode, rawGenerationContext, sourceNode, generationConfig);
                             if (hydratedRequirements?.input) {
                                 const { imageCount = 0, videoCount = 0, audioCount = 0, characterCount = 0 } = hydratedRequirements.input;
@@ -326,7 +325,29 @@ export function useCanvasGenerationExecutor({
                             }
                         }
                         stage = "parameters";
-                        let styleMetadata = {};
+                        let styleMetadata: Record<string, unknown> = {};
+                        if (mode === "image" || mode === "video" || mode === "audio") {
+                            const hookResult = await runGenerationBeforeSubmitHooks({
+                                nodeId,
+                                nodeType: mode,
+                                prompt: effectivePrompt,
+                                model: generationConfig.model,
+                                params: { size: generationConfig.size, quality: generationConfig.quality },
+                                referenceImages: rawGenerationContext.referenceImages.map((item) => item.url || item.dataUrl || "").filter(Boolean),
+                                metadata: sourceNode?.metadata as Record<string, unknown> | undefined,
+                            });
+                            effectivePrompt = hookResult.prompt;
+                            if (hookResult.notifications.length > 0) {
+                                for (const note of hookResult.notifications) {
+                                    message.info(note);
+                                }
+                                styleMetadata = {
+                                    ...styleMetadata,
+                                    ...hookResult.metadata,
+                                    pluginAdjustedBy: hookResult.adjustedByPlugins.map((item) => item.pluginName),
+                                };
+                            }
+                        }
                         if (mode === "image") {
                             try {
                                 const styleRuntime = resolveCanvasStyleExecution(inputNodes, sourceNode, effectivePrompt, generationConfig, mode);
@@ -367,11 +388,14 @@ export function useCanvasGenerationExecutor({
                                 return;
                             }
                             const voice = generationContext.resolvedCharacterVoices[0];
-                            if (!voice) {
+                            const hasReferenceMedia = generationContext.referenceImages.length > 0 || generationContext.referenceAudios.length > 0;
+                            if (!voice && !hasReferenceMedia) {
                                 reportError(new Error("角色尚未绑定可用声音，无法创建角色配音任务"));
                                 return;
                             }
-                            generationConfig = { ...generationConfig, audioVoice: voice.voiceKey, audioInstructions: [voice.instructions, generationConfig.audioInstructions].filter(Boolean).join("；") };
+                            if (voice) {
+                                generationConfig = { ...generationConfig, audioVoice: voice.voiceKey || generationConfig.audioVoice, audioInstructions: [voice.instructions, generationConfig.audioInstructions].filter(Boolean).join("；") };
+                            }
                         }
                         if (!effectivePrompt && (mode === "text" || mode === "audio")) {
                             reportError(new Error("请输入生成内容"));
@@ -384,15 +408,6 @@ export function useCanvasGenerationExecutor({
                             prompt: effectivePrompt,
                             model: generationConfig.model,
                             options: modelRequestOptions(generationConfig, mode),
-                            workflow:
-                                generationConfig.taskWorkflowProvider && generationConfig.taskWorkflowProvider !== "model"
-                                    ? {
-                                          provider: generationConfig.taskWorkflowProvider,
-                                          workflowId: generationConfig.runningHub.workflowId,
-                                          workflowKind: generationConfig.runningHub.selectedKind,
-                                          parameters: sourceNode?.metadata?.workflowParameters,
-                                      }
-                                    : undefined,
                             operation: sourceNode?.metadata?.videoEditOperation,
                             audioInstructions: generationConfig.audioInstructions,
                             promptTemplateOperation: sourceNode?.metadata?.promptTemplateOperation,
@@ -410,7 +425,7 @@ export function useCanvasGenerationExecutor({
                             }
                         }
 
-                        const ratioWarning = mode === "video" && !usesWorkflowProvider ? seedanceReferenceRatioWarning({
+                        const ratioWarning = mode === "video" ? seedanceReferenceRatioWarning({
                             ...resolveModelRequestConfig(generationConfig, generationConfig.model),
                             videoCount: generationContext.referenceVideos.length,
                             ratio: generationConfig.size,
@@ -512,6 +527,7 @@ export function useCanvasGenerationExecutor({
                                 if (!boundTaskIds.has(task.id)) {
                                     boundTaskIds.add(task.id);
                                     recordDiagnosticEvent({ category: "task", level: "info", code: "generation_submission_bound", message: "画布提交已关联生成任务", requestId: attemptId, canvasId: projectId, taskId: task.id, canvasBinding: { source: "client", nodeId: targetNodeId, clientOperationId: task.clientOperationId } });
+                                    emitPluginEvent("generation.submitted", { nodeId: targetNodeId, nodeType: mode, model: generationConfig.model, prompt: effectivePrompt, taskId: task.id });
                                 }
                                 bindGenerationTask(targetNodeId, task);
                                 if (!sourceReleased && !controller.signal.aborted && canReleaseCanvasGenerationSource(nodeId, targetNodeId, task)) {
@@ -541,9 +557,11 @@ export function useCanvasGenerationExecutor({
                             else if (mode === "video") await executeVideoGeneration(execution);
                             else if (mode === "audio") await executeAudioGeneration(execution);
                             else await executeTextGeneration(execution);
+                            emitPluginEvent("generation.completed", { nodeId, nodeType: mode });
                         } catch (error) {
                             if (isGenerationCanceled(error)) return;
                             const failure = canvasGenerationFailureMetadata(error, { ...generationContext, mode });
+                            emitPluginEvent("generation.failed", { nodeId, nodeType: mode, error: failure.errorDetails });
                             if (options?.waitForTaskCapacity && isGenerationTaskCapacityError(error)) {
                                 setNodes((current) =>
                                     current.map((node) => {

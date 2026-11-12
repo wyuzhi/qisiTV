@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/platform"
 
 	"github.com/gin-gonic/gin"
@@ -218,6 +219,9 @@ func writeCustomRelayError(c *gin.Context, relays customRelays, resp *http.Respo
 		return
 	}
 	if (mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")) && json.Valid(body) {
+		if category := string(generation.ClassifyHTTP(resp.StatusCode, resp.Status, string(body)).Category); category != "" {
+			c.Header("X-Canvas-Failure-Category", category)
+		}
 		c.Data(resp.StatusCode, "application/json; charset=utf-8", body)
 		return
 	}

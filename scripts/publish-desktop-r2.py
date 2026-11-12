@@ -418,6 +418,7 @@ class Publisher:
                         raise PublishError(f"Local delta archive missing or size/hash mismatch: {d_name}")
                     delta_sources.append((f"{PREFIX}/{payload['version']}/{d_name}", d_source, delta))
         installers = self.installer_sources(payload, assets_dir) if with_installers else []
+        # One at a time: with four parallel uploads an aws command hung until its 10-minute limit.
         for key, source in sources + [(k, s) for k, s, _ in delta_sources] + installers:
             self.immutable_put(key, source)
         self.check_installers(payload, installers)

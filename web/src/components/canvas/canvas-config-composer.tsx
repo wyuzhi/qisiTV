@@ -4,7 +4,6 @@ import { Button, Image } from "antd";
 import { FileText, Image as ImageIcon, Music2, Pencil, Sparkles, Video, X } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
-import { isCanvasWorkflowProvider } from "@/lib/canvas/canvas-workflow";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { generationInputMentionLabel, type NodeGenerationInput } from "./canvas-node-generation";
@@ -12,7 +11,10 @@ import { CanvasVideoPromptTools } from "./canvas-video-prompt-tools";
 import { CanvasPresetPicker, type CanvasPromptPreset } from "./canvas-preset-picker";
 import type { CanvasGenerationMode, CanvasNodeMetadata, CanvasWorkspaceMode } from "@/types/canvas";
 import { CanvasH3ReferenceOrder } from "./canvas-h3-reference-order";
-import { isH3Style } from "@/lib/h3-video";
+import { h3VideoOperation, isH3MaxModel, isH3Model, isH3Style } from "@/lib/h3-video";
+import { resolveVideoOperation } from "@/lib/model-selection";
+import { findPromptFirstFrameNodeId, resolveVideoReferenceModeState, stripPromptFirstFrameClauses } from "@/lib/canvas/video-reference-mode";
+import { VideoReferenceModeSwitch } from "./canvas-node-reference-shelf";
 import { CanvasPromptFontControl } from "./canvas-prompt-font-control";
 import { DEFAULT_PROMPT_FONT_SIZE, useCreationPreferencesStore } from "@/stores/use-creation-preferences-store";
 
@@ -60,7 +62,6 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
     const [imagePreview, setImagePreview] = useState<string | null>(null);
     const [presetOpen, setPresetOpen] = useState(false);
     const simpleMode = workspaceMode === "simple";
-    const workflowVideoReferenceMode = generationMode === "video" && isCanvasWorkflowProvider(metadata);
     const tokens = useMemo(() => parseComposerTokens(value, inputs), [inputs, value]);
     const referenceById = useMemo(() => new Map(inputs.map((input) => [input.nodeId, input])), [inputs]);
     const videoFrameOptions = useMemo(
@@ -177,7 +178,7 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
             <div className="mb-3 flex items-center justify-between gap-3">
                 <div className="flex min-w-0 items-baseline gap-2">
                     <div className="shrink-0 text-xs font-semibold">{simpleMode ? "快速生成" : "组装提示词"}</div>
-                    <div className="truncate text-[var(--fs-label)] opacity-55">{simpleMode ? "已连接素材会自动带入" : workflowVideoReferenceMode ? "已连接媒体会按工作流字段顺序自动带入" : "@ 引用已连接素材或已激活技能，发送前自动组装"}</div>
+                    <div className="truncate text-[var(--fs-label)] opacity-55">{simpleMode ? "已连接素材会自动带入" : "@ 引用已连接素材或已激活技能，发送前自动组装"}</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                     <CanvasPromptFontControl />
@@ -185,13 +186,38 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
                 </div>
             </div>
             {generationMode === "video" && onMetadataChange && !simpleMode ? (
-                <div className="mb-3 rounded-lg px-2 py-2" style={{ background: theme.node.fill }}>
+                <div className="mb-3 space-y-2 rounded-lg px-2 py-2" style={{ background: theme.node.fill }}>
+                    {inputs.some((input) => input.type === "image" || input.type === "character" || input.type === "video") ? (
+                        <VideoReferenceModeSwitch
+                            state={resolveVideoReferenceModeState({
+                                metadata,
+                                references: inputs.map((input, index) => ({
+                                    nodeId: input.nodeId,
+                                    kind: input.type,
+                                    label: resourceLabel(input, inputs) || `素材${index + 1}`,
+                                    title: input.title,
+                                    active: true,
+                                })),
+                                endFrameSupported: !isH3Style(model),
+                                h3Model: isH3Model(model),
+                                h3Style: isH3Style(model),
+                                prompt: value,
+                            })}
+                            theme={theme}
+                            onSelectMode={(nextMode) => {
+                                if (nextMode === "frames" && findPromptFirstFrameNodeId(value, inputs.map((input, index) => ({ nodeId: input.nodeId, kind: input.type, label: resourceLabel(input, inputs) || `素材${index + 1}`, active: true })))) {
+                                    onChange(stripPromptFirstFrameClauses(value));
+                                }
+                            }}
+                            onChange={onMetadataChange}
+                        />
+                    ) : null}
                     <CanvasVideoPromptTools
                         metadata={metadata}
                         endFrameSupported={!isH3Style(model)}
-                        referenceLabel={workflowVideoReferenceMode?"工作流参考":"参考生成"}
+                        referenceLabel="参考生成"
                         frameOptions={videoFrameOptions}
-                        referenceMode={workflowVideoReferenceMode || model.split("::").at(-1)==="minimax-h3" && metadata?.videoEditOperation==="reference_to_video" ? "all" : "frames"}
+                        referenceMode={(!isH3MaxModel(model) && (isH3Model(model) ? h3VideoOperation(model, { imageCount: inputs.filter((input) => input.type === "image").length, characterCount: inputs.filter((input) => input.type === "character").length, videoCount: inputs.filter((input) => input.type === "video").length, audioCount: inputs.filter((input) => input.type === "audio").length }, metadata?.videoEditOperation) : resolveVideoOperation({ textCount: 0, imageCount: inputs.filter((input) => input.type === "image").length, characterCount: inputs.filter((input) => input.type === "character").length, videoCount: inputs.filter((input) => input.type === "video").length, audioCount: inputs.filter((input) => input.type === "audio").length }, metadata?.videoEditOperation)) === "reference_to_video") ? "all" : "frames"}
                         referenceSummary={{
                             imageCount: inputs.filter((input) => input.type === "image" || input.type === "character").length,
                             videoCount: inputs.filter((input) => input.type === "video").length,

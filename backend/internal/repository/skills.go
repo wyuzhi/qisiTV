@@ -31,7 +31,7 @@ func (r *Repository) Skills(filter SkillListFilter) ([]model.Skill, int64, error
 	switch filter.Scope {
 	case "mine":
 		query = query.Joins("LEFT JOIN user_skill_states ON user_skill_states.skill_id = skills.id AND user_skill_states.user_id = ?", filter.UserID).
-			Where("skills.owner_id = ? OR (user_skill_states.added = ? AND skills.is_private = ?)", filter.UserID, true, false)
+			Where("skills.owner_id = ? OR user_skill_states.added = ? OR COALESCE(user_skill_states.installed_version_id, '') <> ''", filter.UserID, true)
 	case "created":
 		query = query.Where("skills.owner_id = ?", filter.UserID)
 	case "favorites":
@@ -84,6 +84,25 @@ func (r *Repository) Skill(id string) (*model.Skill, error) {
 		return nil, err
 	}
 	return &skill, nil
+}
+
+// RetireExternalSkills deactivates imports from the retired shared-directory
+// source atomically, preserving BeefTV installations and historical packages.
+func (r *Repository) RetireExternalSkills() error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		externalIDs := tx.Model(&model.Skill{}).Select("id").Where("source_type = ?", "local")
+		if err := tx.Model(&model.UserSkillState{}).
+			Where("skill_id IN (?) AND (added = ? OR auto_update = ?)", externalIDs, true, true).
+			Updates(map[string]any{"added": false, "auto_update": false}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.Skill{}).
+			Where("source_type = ? AND (status <> ? OR auto_update = ?)", "local", 0, true).
+			Updates(map[string]any{"status": 0, "auto_update": false}).Error; err != nil {
+			return err
+		}
+		return tx.Where("key = ?", "local_skills_directory").Delete(&model.SystemSetting{}).Error
+	})
 }
 
 func (r *Repository) CreateSkill(skill *model.Skill, ownerState *model.UserSkillState) error {

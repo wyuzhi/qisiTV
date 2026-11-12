@@ -145,6 +145,29 @@ beforeEach(() => {
 });
 
 describe("外部撤销到达编辑器", () => {
+    test("重新生成遇到旧任务回执时不暂停保存，下一次提交使用新版本", async () => {
+        const failed: CanvasNodeData = { ...textNode("retry", "视频"), metadata: { status: "error", taskId: "old-task", taskStatus: "failed", errorDetails: "旧失败" } };
+        server.document = canvas(0, [failed]) as never;
+        server.revision = 0;
+        useCanvasStore.setState({ projects: [canvas(0, [failed])] });
+        await syncLocalCanvasProjectToBackend("c1");
+        const retry: CanvasNodeData = { ...failed, metadata: { status: "loading", taskClientOperationId: "retry-operation", generationSubmissionState: "submitting" } };
+        const editor = mountEditor([retry]);
+        server.document = canvas(2, [{ ...failed, metadata: { ...failed.metadata, taskUpdatedAt: "2026-01-02" } }]) as never;
+        server.revision = 2;
+
+        await refreshLocalCanvasProjectIfChanged("c1");
+
+        expect(editor.held).toBe(0);
+        expect(editor.nodes[0].metadata).toEqual(retry.metadata);
+        expect(canvasBackendSubmitPaused("c1", scope)).toBe(false);
+        expect(canvasExternalRevisionConflict(scope, "c1")).toBeUndefined();
+        useCanvasStore.getState().updateProject("c1", { nodes: editor.nodes });
+        await syncLocalCanvasProjectToBackend("c1");
+        expect(server.posts.at(-1)?.expectedRevision).toBe(2);
+        expect((server.document?.nodes as CanvasNodeData[])[0].metadata).toEqual(retry.metadata);
+    });
+
     test("编辑器副本只多了节点时间戳：删除照常落到编辑器，不暂停保存", async () => {
         await confirmedAssistantCanvas();
         const editor = mountEditor(assistantNodes.map(stamp));

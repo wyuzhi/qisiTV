@@ -11,6 +11,7 @@
 .DS_Store
 **/.DS_Store
 docs
+!docs/content/docs/plugins/plugin-development.mdx
 docs2
 data
 backend/data
@@ -28,6 +29,7 @@ plugin-packages/*.beeftv-plugin
 web/.next
 web/dist
 web/node_modules
+agent-host/node_modules
 web/out
 *.log
 *.db

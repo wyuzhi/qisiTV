@@ -97,14 +97,14 @@ func mergeBuiltinProviderPresets(config map[string]any) (map[string]any, error) 
 	mergedChannels := make([]any, 0, len(order))
 	for _, id := range order {
 		if channel := channels[id]; channel != nil {
-			mergedChannels = append(mergedChannels, overlayHostedBeefAPIMediaProfiles(channel))
+			mergedChannels = append(mergedChannels, overlayHostedBeefTVMediaProfiles(channel))
 		}
 	}
 	result["channels"] = appendPreferredMediaChannels(mergedChannels)
 	return result, nil
 }
 
-func overlayHostedBeefAPIMediaProfiles(channel map[string]any) map[string]any {
+func overlayHostedBeefTVMediaProfiles(channel map[string]any) map[string]any {
 	baseURL, _ := channel["baseUrl"].(string)
 	profiles, _ := channel["modelProfiles"].([]any)
 	seen := map[string]bool{}
@@ -124,7 +124,7 @@ func overlayHostedBeefAPIMediaProfiles(channel map[string]any) map[string]any {
 			next = append(next, profile)
 			continue
 		}
-		if capability, protocol, ok := hostedBeefAPIMediaProfile(baseURL, model); ok {
+		if capability, protocol, ok := hostedBeefTVMediaProfile(baseURL, model); ok {
 			overlaid := cloneProfileMap(profile)
 			overlaid["capability"] = capability
 			overlaid["protocol"] = protocol
@@ -137,7 +137,7 @@ func overlayHostedBeefAPIMediaProfiles(channel map[string]any) map[string]any {
 		if seen[model] {
 			continue
 		}
-		capability, protocol, ok := hostedBeefAPIMediaProfile(baseURL, model)
+		capability, protocol, ok := hostedBeefTVMediaProfile(baseURL, model)
 		if !ok {
 			continue
 		}
@@ -178,13 +178,13 @@ func declaredVideoProfile(profile map[string]any) bool {
 	return true
 }
 
-func hostedBeefAPIMediaProfile(baseURL, model string) (string, string, bool) {
-	if providerpreset.IsBeefAPIEndpoint(baseURL) {
-		if contract, ok := providerpreset.BeefAPIImageContract(model); ok {
+func hostedBeefTVMediaProfile(baseURL, model string) (string, string, bool) {
+	if providerpreset.IsBeefTVEndpoint(baseURL) {
+		if contract, ok := providerpreset.BeefTVImageContract(model); ok {
 			return "image", contract.Protocol, true
 		}
 	}
-	return providerpreset.HostedBeefAPIVideoProfile(baseURL, model)
+	return providerpreset.HostedBeefTVVideoProfile(baseURL, model)
 }
 
 func cloneProfileMap(profile map[string]any) map[string]any {
@@ -264,18 +264,20 @@ func presetChannelMap(preset providerpreset.ChannelPreset, local map[string]any)
 		"presetVersion": preset.PresetVersion, "models": models, "modelProfiles": profiles,
 		"apiKey": "", "secretKey": "", "headers": []any{}, "enabled": true,
 	}
+	if len(preset.LegacyIDs) > 0 {
+		result["legacyIds"] = append([]string(nil), preset.LegacyIDs...)
+	}
 	for _, key := range []string{"apiKey", "secretKey", "headers", "enabled"} {
 		if value, ok := local[key]; ok {
 			result[key] = value
 		}
 	}
-	if preset.ID == "beefapi" {
+	if preset.ID == "beeftv" {
 		base, _ := local["baseUrl"].(string)
-		if base == "https://enterprise.beefapi.com" || base == "https://beeftv.app" {
+		if base == "https://beeftv.app" {
 			result["baseUrl"] = base
 		} else if key, _ := local["apiKey"].(string); base == "" && key != "" {
-			// Pre-brand manual credentials without an origin were issued by BeefAPI.
-			result["baseUrl"] = "https://enterprise.beefapi.com"
+			result["baseUrl"] = "https://beeftv.app"
 		}
 	}
 	return result, nil

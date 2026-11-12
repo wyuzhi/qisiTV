@@ -9,7 +9,7 @@ import (
 )
 
 func TestPublicSeedanceParametersMatchFrontendFixture(t *testing.T) {
-	raw := `{"mode":"video","metadata":{"videoEditOperation":"reference_to_video"},"config":{"model":"seedance-2.5","size":"16:9","credentialRef":"beefapi-enterprise","apiKey":"secret-key","headers":{"Authorization":"secret-header"}},"referenceImages":[{"url":"secret-image"}],"referenceVideos":[{"url":"secret-video"}],"referenceAudios":[{"dataUrl":"secret-audio"}]}`
+	raw := `{"mode":"video","metadata":{"videoEditOperation":"reference_to_video"},"config":{"model":"seedance-2.5","size":"16:9","credentialRef":"beeftv","apiKey":"secret-key","headers":{"Authorization":"secret-header"}},"referenceImages":[{"url":"secret-image"}],"referenceVideos":[{"url":"secret-video"}],"referenceAudios":[{"dataUrl":"secret-audio"}]}`
 	expected, err := os.ReadFile("../../../web/test/fixtures/seedance-public-input.json")
 	if err != nil {
 		t.Fatal(err)

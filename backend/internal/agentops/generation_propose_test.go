@@ -16,7 +16,7 @@ import (
 // 并且只接受确实属于本画布的节点，否则模型可以借它把别处的对象写进提议。
 func writeGenerationModels(t *testing.T, dataDir string) {
 	t.Helper()
-	body := `{"schemaVersion":1,"revision":1,"config":{"imageModel":"beefapi::gpt-image-2","videoModel":"beefapi::wan3.0-video","channels":[{"id":"beefapi","name":"BeefAPI","enabled":true,"models":["gpt-image-2","gpt-image-2.5-flare","wan3.0-video"],"modelProfiles":[{"model":"gpt-image-2","capability":"image","protocol":"openai-image"},{"model":"gpt-image-2.5-flare","capability":"image","protocol":"openai-image"},{"model":"wan3.0-video","capability":"video","protocol":"newapi-channel-1"}]}]}}`
+	body := `{"schemaVersion":1,"revision":1,"config":{"imageModel":"beeftv::gpt-image-2","videoModel":"beeftv::wan3.0-video","channels":[{"id":"beeftv","name":"BeefTV","enabled":true,"models":["gpt-image-2","gpt-image-2.5-flare","wan3.0-video"],"modelProfiles":[{"model":"gpt-image-2","capability":"image","protocol":"openai-image"},{"model":"gpt-image-2.5-flare","capability":"image","protocol":"openai-image"},{"model":"wan3.0-video","capability":"video","protocol":"newapi-channel-1"}]}]}}`
 	if err := os.WriteFile(filepath.Join(dataDir, "local-model-config.json"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestGenerationProposeIsReadOnlyAndReportsCanvasDefaultModel(t *testing.T) {
 	if !isObject {
 		t.Fatalf("结果形状异常: %#v", result.Result)
 	}
-	if payload["model"] != "gpt-image-2" || payload["modelKey"] != "beefapi::gpt-image-2" {
+	if payload["model"] != "gpt-image-2" || payload["modelKey"] != "beeftv::gpt-image-2" {
 		t.Fatalf("应回画布默认图片模型: %#v", payload)
 	}
 	source := payload["source"].(map[string]any)
@@ -187,7 +187,7 @@ func TestGenerationProposeGlobalParameterChangeAdvancesSourceWithoutChangingMode
 		t.Fatal(err)
 	}
 	for _, count := range []string{"2", "4"} {
-		if err := config.SaveLocalModelConfig([]byte(`{"imageModel":"beefapi::gpt-image-2","canvasImageCount":"` + count + `"}`)); err != nil {
+		if err := config.SaveLocalModelConfig([]byte(`{"imageModel":"beeftv::gpt-image-2","canvasImageCount":"` + count + `"}`)); err != nil {
 			t.Fatal(err)
 		}
 		state, _, err := config.LoadEffectiveModelConfig()
@@ -200,7 +200,7 @@ func TestGenerationProposeGlobalParameterChangeAdvancesSourceWithoutChangingMode
 		}
 		payload := result.Result.(map[string]any)
 		source := payload["source"].(map[string]any)
-		if payload["modelKey"] != "beefapi::gpt-image-2" || source["modelConfigRevision"] != float64(state.Revision) || state.Revision <= 1 || source["canvasRevision"] != float64(h.revision) {
+		if payload["modelKey"] != "beeftv::gpt-image-2" || source["modelConfigRevision"] != float64(state.Revision) || state.Revision <= 1 || source["canvasRevision"] != float64(h.revision) {
 			t.Fatalf("参数修改应只推进配置版本: %#v", payload)
 		}
 	}
@@ -271,11 +271,11 @@ func TestGenerationProposeFailsWithoutCanvasDefaultModel(t *testing.T) {
 func TestGenerationProposeUsesNodeOverrideBeforeGlobalDefault(t *testing.T) {
 	h := newHarness(t)
 	writeGenerationModels(t, h.dataDir)
-	h.setNodeModel(t, "n1", "beefapi::gpt-image-2.5-flare")
+	h.setNodeModel(t, "n1", "beeftv::gpt-image-2.5-flare")
 
 	got := h.canvas(t)
 	metadata := got["nodes"].([]any)[0].(map[string]any)["metadata"].(map[string]any)
-	if metadata["model"] != "beefapi::gpt-image-2.5-flare" {
+	if metadata["model"] != "beeftv::gpt-image-2.5-flare" {
 		t.Fatalf("canvas.get 应看到节点覆盖模型: %#v", metadata)
 	}
 
@@ -285,7 +285,7 @@ func TestGenerationProposeUsesNodeOverrideBeforeGlobalDefault(t *testing.T) {
 		t.Fatalf("提议应成功: %v", err)
 	}
 	payload := result.Result.(map[string]any)
-	if payload["model"] != "gpt-image-2.5-flare" || payload["modelKey"] != "beefapi::gpt-image-2.5-flare" {
+	if payload["model"] != "gpt-image-2.5-flare" || payload["modelKey"] != "beeftv::gpt-image-2.5-flare" {
 		t.Fatalf("提议应使用节点覆盖模型而不是全局默认: %#v", payload)
 	}
 	source := payload["source"].(map[string]any)
@@ -305,7 +305,7 @@ func TestGenerationProposeNormalizesUnqualifiedNodeModel(t *testing.T) {
 		t.Fatalf("提议应成功: %v", err)
 	}
 	payload := result.Result.(map[string]any)
-	if payload["model"] != "gpt-image-2.5-flare" || payload["modelKey"] != "beefapi::gpt-image-2.5-flare" {
+	if payload["model"] != "gpt-image-2.5-flare" || payload["modelKey"] != "beeftv::gpt-image-2.5-flare" {
 		t.Fatalf("未带渠道前缀的节点模型应归一为渠道模型键: %#v", payload)
 	}
 }
@@ -320,7 +320,7 @@ func TestGenerationProposeFallsBackToDefaultWhenNodeHasNoModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload := result.Result.(map[string]any)
-	if payload["modelKey"] != "beefapi::gpt-image-2" || payload["model"] != "gpt-image-2" {
+	if payload["modelKey"] != "beeftv::gpt-image-2" || payload["model"] != "gpt-image-2" {
 		t.Fatalf("未设置节点模型时应回退全局默认: %#v", payload)
 	}
 }
@@ -328,8 +328,8 @@ func TestGenerationProposeFallsBackToDefaultWhenNodeHasNoModel(t *testing.T) {
 func TestGenerationProposeRejectsMixedNodeModels(t *testing.T) {
 	h := newHarness(t)
 	writeGenerationModels(t, h.dataDir)
-	h.setNodeModel(t, "n1", "beefapi::gpt-image-2.5-flare")
-	h.setNodeModel(t, "n2", "beefapi::gpt-image-2")
+	h.setNodeModel(t, "n1", "beeftv::gpt-image-2.5-flare")
+	h.setNodeModel(t, "n2", "beeftv::gpt-image-2")
 
 	_, err := h.run(t, "canvas.generation.propose", "", map[string]any{
 		"canvasId": h.canvasID, "nodeIds": []any{"n1", "n2"}, "kind": "image"}, false)
@@ -360,7 +360,7 @@ func TestGenerationProposeRejectsKindMismatch(t *testing.T) {
 	h.patchNode(t, "n1", func(node map[string]any) {
 		node["type"] = "image"
 	})
-	h.setNodeModel(t, "n1", "beefapi::wan3.0-video")
+	h.setNodeModel(t, "n1", "beeftv::wan3.0-video")
 	_, err = h.run(t, "canvas.generation.propose", "", map[string]any{
 		"canvasId": h.canvasID, "nodeIds": []any{"n1"}, "kind": "image"}, false)
 	if err == nil {

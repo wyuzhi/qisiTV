@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { Component, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ErrorInfo, type ReactNode, type RefObject } from "react";
 import { AlertCircle, BookOpenCheck, Download, Image as ImageIcon, LoaderCircle, Music2, Pencil, Play, RefreshCw, Video } from "lucide-react";
 
 import { VideoPlayer } from "@/components/video-player";
@@ -17,22 +17,23 @@ import { prewarmCanvasLodThumbnails } from "@/lib/canvas/canvas-lod-thumbnails";
 import { canvasNodeVideoPreviewUrl, inferVideoHasAudio } from "@/lib/canvas/canvas-media-preview";
 import { bindCanvasVideoHoverPreview } from "@/lib/canvas/canvas-video-hover-preview";
 import { canvasVideoPresentationState } from "@/lib/canvas/canvas-video-presentation";
-import { buildLibTVImagePreviewUrl, buildLibTVVideoSourceUrl } from "@/lib/canvas/libtv-import";
+import { buildLibTVVideoSourceUrl } from "@/lib/canvas/libtv-import";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { resourceIdFromStorageKey } from "@/services/api/resources";
-import { cacheResourceImagePreviewObjectUrl, cacheResourceObjectUrl, getCachedResourceObjectUrl, peekCachedResourceObjectUrl, scheduleResourceBlobCache } from "@/services/resource-blob-cache";
+import { scheduleResourceBlobCache } from "@/services/resource-blob-cache";
 import { canvasImagePreviewSize } from "@/lib/canvas/canvas-image-preview-blob";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { useResourceVideoPlayback } from "@/hooks/use-resource-video-playback";
-import { resolveImageUrl } from "@/services/image-storage";
-import { recordDiagnosticEvent } from "@/services/diagnostics/client-diagnostics";
 import { canvasNodeDiagnosticContext, recordCanvasVideoDiagnostic } from "@/services/diagnostics/canvas-media-diagnostics";
 import { acquireCanvasVideoPreview, canvasDerivedPreviewSourceKey, canvasVideoPreviewNeedsHydration } from "@/services/canvas-video-preview";
 import { acquireCanvasVideoSource } from "@/services/canvas-video-source";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
+import { getRegisteredPlugin } from "@/lib/plugins/plugin-registry";
+import { getPluginCanvasNodeOwner, getPluginCanvasNodeRenderer, usePluginSlot } from "@/lib/plugins/slot-registry";
+import { isPluginEffectivelyEnabled, usePluginStore } from "@/stores/use-plugin-store";
 import { ART_CRITIQUE_NODE_TYPE } from "@/lib/art-critique/contracts";
 import { createDefaultSubtitleStyle } from "@/types/timeline";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
@@ -40,6 +41,8 @@ import { CanvasAudioPlayer } from "./canvas-audio-player";
 import { useCanvasNodeActions } from "./canvas-node-action-context";
 import { CanvasSubtitleOverlay } from "./canvas-subtitle-overlay";
 import { CanvasFileUploadContent } from "./canvas-file-upload-content";
+import { useNodeResourceUrl } from "./use-node-resource-url";
+import { useNearViewport } from "./use-near-viewport";
 import { CanvasNodeGenerationProgress } from "./canvas-node-generation-progress";
 import { MarkdownNodeContent } from "./nodes/markdown-node";
 import { ChartNodeContent } from "./nodes/chart-node";
@@ -52,6 +55,30 @@ import { ArtCritiqueNodeContent } from "./nodes/ai-art-critique-node";
 import { MediaConversionNodeContent } from "./nodes/media-conversion-node";
 import { UpscaleNodeContent } from "./nodes/upscale-node";
 import { MEDIA_CONVERSION_NODE_TYPE } from "@/lib/media-conversion/contracts";
+
+class PluginCanvasNodeErrorBoundary extends Component<
+    { pluginId: string; children: ReactNode },
+    { error: string | null }
+> {
+    state = { error: null as string | null };
+    static getDerivedStateFromError(err: unknown) {
+        return { error: err instanceof Error ? err.message : String(err) };
+    }
+    componentDidCatch(err: unknown, _info: ErrorInfo) {
+        console.warn(`[canvas.node] Error rendering plugin node (${this.props.pluginId}):`, err);
+    }
+    render() {
+        if (this.state.error) {
+            return (
+                <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-4 text-center text-xs text-red-400">
+                    <span>插件节点渲染异常（{this.props.pluginId}）</span>
+                    <span className="opacity-70">{this.state.error}</span>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
 
 export type CanvasNodeContentProps = {
     node: CanvasNodeData;
@@ -82,30 +109,75 @@ export type CanvasNodeContentProps = {
 };
 
 export function CanvasNodeContent(props: CanvasNodeContentProps) {
+    usePluginSlot("canvas.node");
+    const { updateMetadata } = useCanvasNodeActions();
+    const pluginInstallations = usePluginStore((state) => state.installations);
+    const pluginStates = usePluginStore((state) => state.pluginStates);
+    const runtimeStatuses = usePluginStore((state) => state.runtimeStatuses);
     const operation = useOperationProgress(state => canvasNodeOperation(state.entries, props.projectId, props.node.id, props.node.metadata?.taskId));
     if (props.node.type === CanvasNodeType.Upscale) return <UpscaleNodeContent node={props.node} theme={props.theme} />;
     if (props.node.metadata?.fileUpload) return <CanvasFileUploadContent node={props.node} theme={props.theme} reduceMotion={props.reduceMediaEffects} />;
     if (operation) return <CanvasNodeGenerationProgress node={props.node} theme={props.theme} operation={operation} onOpenTaskDetails={props.onOpenTaskDetails} onCancelTask={props.onCancelTask} />;
     const hasCustomContent = usesCanvasCustomNodeContent(props.node, props.isEditingContent);
     if (hasCustomContent && props.renderNodeContent) return props.renderNodeContent(props.node);
+
+    const slotRenderer = getPluginCanvasNodeRenderer(props.node.type);
+    const pluginDefinition = getNodeDefinition(props.node.type)?.plugin;
+    const ownerPluginId =
+        slotRenderer?.pluginId ?? pluginDefinition?.pluginId ?? getPluginCanvasNodeOwner(props.node.type);
+    if (ownerPluginId) {
+        const inst = pluginInstallations.find((item) => item.manifest.id === ownerPluginId);
+        const explicitlyConfigured = Boolean(inst) || ownerPluginId in pluginStates || ownerPluginId in runtimeStatuses;
+        if (explicitlyConfigured && !isPluginEffectivelyEnabled(ownerPluginId, inst?.enabled)) {
+            const pluginName = inst?.manifest.name || getRegisteredPlugin(ownerPluginId)?.manifest.name || ownerPluginId;
+            return (
+                <div
+                    data-testid="canvas-disabled-plugin-node"
+                    className="flex h-full w-full items-center justify-center p-4 text-center text-xs"
+                    style={{ color: props.theme.node.placeholder }}
+                >
+                    需要启用 {pluginName} 插件
+                </div>
+            );
+        }
+        const CustomComp = slotRenderer?.contribution.component as ComponentType<Record<string, unknown>> | undefined;
+        if (CustomComp) {
+            const handleUpdatePluginData = (patch: Record<string, unknown>) => {
+                updateMetadata?.(props.node.id, {
+                    pluginData: { ...(props.node.metadata?.pluginData ?? {}), ...patch },
+                });
+            };
+            return (
+                <PluginCanvasNodeErrorBoundary pluginId={ownerPluginId}>
+                    <CustomComp
+                        node={props.node}
+                        nodeId={props.node.id}
+                        projectId={props.projectId}
+                        selected={false}
+                        theme={props.theme.canvas.background === "#f0f0f0" ? "light" : "dark"}
+                        data={props.node.metadata?.pluginData ?? {}}
+                        updateData={handleUpdatePluginData}
+                        updateNodeData={handleUpdatePluginData}
+                        onContentChange={props.onContentChange}
+                        updateContent={(next: string) => props.onContentChange(props.node.id, next)}
+                    />
+                </PluginCanvasNodeErrorBoundary>
+            );
+        }
+    }
+
     if (props.node.type === ART_CRITIQUE_NODE_TYPE) return <ArtCritiqueNodeContent node={props.node} />;
     if (props.node.type === MEDIA_CONVERSION_NODE_TYPE) return <MediaConversionNodeContent node={props.node} theme={props.theme} />;
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading") return <CanvasNodeGenerationProgress node={props.node} theme={props.theme} onOpenTaskDetails={props.onOpenTaskDetails} onCancelTask={props.onCancelTask} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} onReloadResource={props.onReloadResource} onOpenTaskDetails={props.onOpenTaskDetails} />;
 
-    const pluginDefinition = getNodeDefinition(props.node.type)?.plugin;
-    if (pluginDefinition) return <PluginCanvasNodeContent {...props} renderer={pluginDefinition.renderer} schema={pluginDefinition.schema} />;
+    if (pluginDefinition) return <PluginCanvasNodeContent {...props} schema={pluginDefinition.schema} />;
     const Renderer = nodeContentRenderers[props.node.type];
     return Renderer ? <Renderer {...props} /> : <UnknownNodeContent theme={props.theme} />;
 }
 
-function PluginCanvasNodeContent({ node, theme, renderer, schema }: CanvasNodeContentProps & { renderer: "declarative" | "sandbox"; schema: Record<string, unknown> }) {
-    if (renderer === "sandbox") {
-        return <div className="flex h-full w-full items-center justify-center p-4 text-center text-xs" style={{ color: theme.node.placeholder }}>
-            插件节点等待隔离运行时
-        </div>;
-    }
+function PluginCanvasNodeContent({ node, theme, schema }: CanvasNodeContentProps & { schema: Record<string, unknown> }) {
     const data = node.metadata?.pluginData || {};
     const fields = Object.keys(schema.properties && typeof schema.properties === "object" ? schema.properties as Record<string, unknown> : schema);
     return <div className="flex h-full w-full flex-col gap-3 overflow-auto p-4 pt-10 text-xs" style={{ color: theme.node.text }}>
@@ -397,7 +469,7 @@ function VideoNodeContent({ node, theme, mediaActive = false, onMediaPlayRequest
     useEffect(() => {
         setFirstFramePresented(false);
         setPlaybackError(false);
-    }, [mediaActive, url]);
+    }, [mediaActive, url, retryEpoch]);
 
     useEffect(() => {
         if (!mediaActive || !url) return;
@@ -419,8 +491,24 @@ function VideoNodeContent({ node, theme, mediaActive = false, onMediaPlayRequest
             if (video.videoWidth <= 0 || video.videoHeight <= 0) return;
             recordCanvasVideoDiagnostic(node, "metadata_loaded", video);
             setVideoSize({ width: video.videoWidth, height: video.videoHeight });
-            if (!compatible && (node.metadata?.naturalWidth !== video.videoWidth || node.metadata?.naturalHeight !== video.videoHeight)) {
-                updateMediaNode?.(node.id, (current) => ({ ...current, metadata: { ...current.metadata, naturalWidth: video.videoWidth, naturalHeight: video.videoHeight } }));
+            const actualDurationMs = Number.isFinite(video.duration) && video.duration > 0 ? Math.round(video.duration * 1000) : undefined;
+            const needsDurationUpdate = actualDurationMs !== undefined && (!node.metadata?.durationMs || Math.abs(node.metadata.durationMs - actualDurationMs) > 200);
+            const needsSizeUpdate = !compatible && fitImageNodeToDecodedSize(node, video.videoWidth, video.videoHeight) !== node;
+            if (needsSizeUpdate || needsDurationUpdate) {
+                updateMediaNode?.(node.id, (current) => {
+                    const next = !compatible ? fitImageNodeToDecodedSize(current, video.videoWidth, video.videoHeight) : current;
+                    const currentDuration = next.metadata?.durationMs;
+                    if (actualDurationMs === undefined || (currentDuration && Math.abs(currentDuration - actualDurationMs) <= 200)) {
+                        return next;
+                    }
+                    return {
+                        ...next,
+                        metadata: {
+                            ...next.metadata,
+                            durationMs: actualDurationMs,
+                        },
+                    };
+                });
             }
         };
         video.addEventListener("loadedmetadata", handleLoadedMetadata);
@@ -432,7 +520,7 @@ function VideoNodeContent({ node, theme, mediaActive = false, onMediaPlayRequest
             video.removeEventListener("timeupdate", handleTimeUpdate);
             video.removeEventListener("loadedmetadata", handleLoadedMetadata);
         };
-    }, [node.id, node.metadata?.naturalHeight, node.metadata?.naturalWidth, subtitleEntries.length, updateMediaNode, url, compatible]);
+    }, [node.id, node.width, node.height, node.metadata?.durationMs, node.metadata?.naturalHeight, node.metadata?.naturalWidth, subtitleEntries.length, updateMediaNode, url, compatible]);
 
     if (!node.metadata?.content) return <EmptyVideoContent theme={theme} />;
 
@@ -441,7 +529,8 @@ function VideoNodeContent({ node, theme, mediaActive = false, onMediaPlayRequest
     const fitWidth = Math.round(fitHeight * sourceRatio);
     const activeEntry = subtitleEntries.find((entry) => currentTimeMs >= entry.startMs && currentTimeMs < entry.endMs);
     const activeHighlight = activeEntry ? (node.metadata?.subtitleHighlights || []).find((item) => item.entryIndex === activeEntry.index) : undefined;
-    const presentation = canvasVideoPresentationState({ active: mediaActive, hasSource: Boolean(url), firstFramePresented });
+    const previewError = error || (playbackError ? "视频暂时无法播放预览，请重新加载。原文件仍可下载和使用。" : "");
+    const presentation = canvasVideoPresentationState({ active: mediaActive, hasSource: Boolean(url), firstFramePresented, failed: Boolean(previewError) });
 
     return (
         <div ref={playerBoxRef} className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-[var(--node-radius)] bg-black" onErrorCapture={(event) => {
@@ -453,8 +542,7 @@ function VideoNodeContent({ node, theme, mediaActive = false, onMediaPlayRequest
                 <InactiveVideoPreview node={node} theme={theme} onPlay={() => onMediaPlayRequest?.(node.id)} hoverEnabled={!mediaActive} showPlayButton={!mediaActive} />
             </div>
             {presentation.showLoading ? <div role="status" className="pointer-events-none absolute inset-0 z-[var(--node-z-overlay)] flex flex-col items-center justify-center gap-2 bg-black/15 text-white/75"><LoaderCircle className="size-5 animate-spin" /><span className="text-xs">{loading ? "正在准备视频预览" : "正在加载视频"}</span></div> : null}
-            {error ? <div role="status" className="absolute inset-0 z-[var(--node-z-overlay)] flex flex-col items-center justify-center gap-3 bg-black/80 px-4 text-center text-xs text-white/80"><span>{error}</span><button type="button" data-canvas-no-zoom className="rounded border px-3 py-1" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); retry(); }}>重新加载</button></div> : null}
-            {playbackError ? <div role="status" className="absolute inset-0 z-[var(--node-z-overlay)] grid place-items-center bg-black/80 px-4 text-center text-xs text-white/80">视频已导入，当前无法播放预览。原文件仍可下载和使用。</div> : null}
+            {previewError ? <div role="status" className="absolute inset-0 z-[var(--node-z-overlay)] flex flex-col items-center justify-center gap-3 bg-black/80 px-4 text-center text-xs text-white/80"><span>{previewError}</span><button type="button" data-canvas-no-zoom className="rounded border px-3 py-1 focus-visible:outline" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setPlaybackError(false); retry(); }}>重新加载</button></div> : null}
             {mediaActive && url ? (
                 <div className={`absolute ${presentation.showVideo ? "opacity-100" : "pointer-events-none opacity-0"}`} style={{ width: fitWidth, height: Math.round(fitHeight) }}>
                     <VideoPlayer key={retryEpoch} src={url} mimeType={compatible ? "video/mp4" : node.metadata?.mimeType} title={node.title || "视频"} hasAudio={inferVideoHasAudio(node.metadata)} autoPlay preload="metadata" brandColor={theme.accent.primary} className="h-full w-full rounded-[var(--node-radius)] bg-black" dataCanvasNoZoom compactControls onFirstFramePresented={() => { setFirstFramePresented(true); recordCanvasVideoDiagnostic(node, "first_frame", playerBoxRef.current?.querySelector("video")); }} onError={() => { recordCanvasVideoDiagnostic(node, "playback_failed", playerBoxRef.current?.querySelector("video")); if (!requestCompatible()) setPlaybackError(true); }} onPlay={() => scheduleResourceBlobCache(node.metadata?.storageKey || "")} />
@@ -659,150 +747,6 @@ function ImageContent({ node, theme, scale = 1, isBatchRoot, batchCount, batchPr
     );
 }
 
-function useNodeResourceUrl(node: CanvasNodeData, eager: boolean, previewSize?: number) {
-    const storageKey = node.metadata?.storageKey || "";
-    const rawContent = node.metadata?.content || "";
-    const content = node.type === CanvasNodeType.Video && node.metadata?.importSource?.provider === "libtv"
-        ? buildLibTVVideoSourceUrl(rawContent)
-        : rawContent;
-    // `previewContent` is intentionally passive-only.  When a media node is
-    // activated, VideoPlayer/Audio must receive the playable asset, never the
-    // LibTV OSS snapshot URL stored for the thumbnail.
-    const fallback = node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio
-        ? content
-        : node.metadata?.previewContent
-            || (node.type === CanvasNodeType.Image && node.metadata?.importSource?.provider === "libtv" ? buildLibTVImagePreviewUrl(content) : content);
-    const resourceId = resourceIdFromStorageKey(storageKey);
-    const isRemoteResource = Boolean(resourceId);
-    // 远程资源接口受登录/桌面令牌保护，原生 `<img>` 无法附带该令牌。
-    // 重登后只能先通过 cacheResourceObjectUrl() 走鉴权下载，再挂载 Blob URL。
-    const synchronousUrl = eager && isRemoteResource && node.type === CanvasNodeType.Image ? peekCachedResourceObjectUrl(storageKey, previewSize) : "";
-    // Inline data URLs are already local, but decoding thousands of them is
-    // still expensive. Images must wait for the same viewport gate as remote
-    // resources; otherwise DOM virtualization does not reduce image work.
-    const isLazyVisual = node.type === CanvasNodeType.Image;
-    const initialUrl = synchronousUrl || (isRemoteResource || isLazyVisual ? "" : fallback);
-    const [url, setUrl] = useState(() => initialUrl);
-    const [loading, setLoading] = useState(() => !initialUrl && isRemoteResource && eager);
-    const [error, setError] = useState(false);
-    const [attempt, setAttempt] = useState(0);
-    const reloadRequested = useRef(false);
-    const sourceIdentityRef = useRef(storageKey);
-    const reportImageEvent = useCallback((code: "CANVAS_IMAGE_READ_FAILED" | "CANVAS_IMAGE_DECODE_FAILED" | "CANVAS_IMAGE_RELOAD") => {
-        if (node.type !== CanvasNodeType.Image) return;
-        const safeNodeId = /^[A-Za-z0-9._:-]{1,96}$/.test(node.id) ? node.id : "unknown";
-        recordDiagnosticEvent({
-            level: code === "CANVAS_IMAGE_RELOAD" ? "info" : "error",
-            category: "runtime", code,
-            message: `${code === "CANVAS_IMAGE_DECODE_FAILED" ? "画布图片解码失败" : code === "CANVAS_IMAGE_READ_FAILED" ? "画布图片读取失败" : "重新读取画布图片"} node=${safeNodeId}`,
-            taskId: node.metadata?.taskId,
-            route: resourceId && /^[A-Za-z0-9_-]{1,96}$/.test(resourceId) ? `/resources/${resourceId}/file` : undefined,
-        });
-    }, [node.id, node.type, node.metadata?.taskId, resourceId]);
-    const fail = useCallback(() => { reportImageEvent("CANVAS_IMAGE_DECODE_FAILED"); setError(true); }, [reportImageEvent]);
-    const retry = useCallback(() => { reportImageEvent("CANVAS_IMAGE_RELOAD"); reloadRequested.current = true; setError(false); setAttempt((current) => current + 1); }, [reportImageEvent]);
-
-    useEffect(() => {
-        let cancelled = false;
-        const sourceIdentity = storageKey;
-        const sourceChanged = sourceIdentityRef.current !== sourceIdentity;
-        sourceIdentityRef.current = sourceIdentity;
-        if (sourceChanged) setUrl("");
-        setError(false);
-        if (!isRemoteResource && isLazyVisual && storageKey) {
-            if (!eager) {
-                setUrl("");
-                setLoading(false);
-                return;
-            }
-            setLoading(true);
-            void resolveImageUrl(storageKey, fallback)
-                .then((resolved) => {
-                    if (!cancelled) setUrl(resolved);
-                })
-                .catch(() => {
-                    if (!cancelled) { setUrl(""); setError(true); reportImageEvent("CANVAS_IMAGE_READ_FAILED"); }
-                })
-                .finally(() => {
-                    if (!cancelled) setLoading(false);
-                });
-            return () => { cancelled = true; };
-        }
-        if (!isRemoteResource) {
-            setUrl(isLazyVisual && !eager ? "" : fallback);
-            setLoading(false);
-            return;
-        }
-        const reload = reloadRequested.current;
-        reloadRequested.current = false;
-        const cachedSync = reload || !eager ? "" : peekCachedResourceObjectUrl(storageKey, previewSize);
-        if (cachedSync) {
-            setUrl(cachedSync);
-            setLoading(false);
-            return;
-        }
-        // Keep the current image while the next display tier is prepared.
-        if (!isLazyVisual || sourceChanged || reload) setUrl("");
-        setLoading(eager);
-        // 只有进入视口或被激活的节点才下载远程媒体；缓存层会复用已有 Blob URL 和 in-flight 请求。
-        const resolve = previewSize
-            ? eager ? cacheResourceImagePreviewObjectUrl(storageKey, previewSize, reload) : Promise.resolve("")
-            : eager ? cacheResourceObjectUrl(storageKey, reload) : getCachedResourceObjectUrl(storageKey);
-        void resolve.then((cached) => {
-            if (!cancelled && cached) { setUrl(cached); setError(false); }
-            if (!cancelled && eager && !cached) { setError(true); reportImageEvent("CANVAS_IMAGE_READ_FAILED"); }
-            // Never hand a protected resource URL to a native <img> after a
-            // cache miss. It cannot attach the auth header and would render
-            // as a broken image after relogin.
-        }).catch(() => {
-            if (!cancelled && eager) { setUrl(synchronousUrl); setError(true); reportImageEvent("CANVAS_IMAGE_READ_FAILED"); }
-        }).finally(() => {
-            if (!cancelled) setLoading(false);
-        });
-        return () => { cancelled = true; };
-    }, [eager, fallback, isLazyVisual, isRemoteResource, storageKey, attempt, reportImageEvent, previewSize]);
-
-    return { url, loading, error, retry, fail };
-}
-
-function useNearViewport(ref: RefObject<Element | null>) {
-    const [nearViewport, setNearViewport] = useState(false);
-    useEffect(() => {
-        const element = ref.current;
-        if (!element || typeof IntersectionObserver === "undefined") {
-            setNearViewport(true);
-            return;
-        }
-        let zoomWaitTimer: ReturnType<typeof setTimeout> | null = null;
-        const observer = new IntersectionObserver((entries) => {
-            if (!entries.some((entry) => entry.isIntersecting)) return;
-            if (element.closest('[data-canvas-viewport-zooming="true"]')) {
-                if (!zoomWaitTimer) {
-                    const retryWhenZoomIdle = () => {
-                        zoomWaitTimer = null;
-                        if (!element.isConnected) return;
-                        if (element.closest('[data-canvas-viewport-zooming="true"]')) {
-                            zoomWaitTimer = setTimeout(retryWhenZoomIdle, 80);
-                            return;
-                        }
-                        observer.unobserve(element);
-                        observer.observe(element);
-                    };
-                    zoomWaitTimer = setTimeout(retryWhenZoomIdle, 80);
-                }
-                return;
-            }
-            setNearViewport(true);
-            observer.disconnect();
-        }, { rootMargin: "600px" });
-        observer.observe(element);
-        return () => {
-            if (zoomWaitTimer) clearTimeout(zoomWaitTimer);
-            observer.disconnect();
-        };
-    }, [ref]);
-    return nearViewport;
-}
 
 export function CanvasNodeImageInfo({ node }: { node: CanvasNodeData }) {
     const width = Math.round(node.metadata?.naturalWidth || node.width);

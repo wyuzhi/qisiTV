@@ -90,7 +90,7 @@ func (r *Registry) Resolve(id string) (Adapter, bool) {
 }
 
 // ResolvableIDs lists every ID Registry.Resolve maps onto an adapter with this
-// metadata: its own ID, its legacy aliases and the old package name BeefAPI
+// metadata: its own ID, its legacy aliases and the old package name BeefTV
 // catalogs stored for Gemini. Callers that must agree with Resolve about which
 // saved IDs still reach a protocol (plugin retention, for example) use this
 // instead of re-deriving the rules.
@@ -109,7 +109,7 @@ func ResolvableIDs(metadata Metadata) []string {
 		ids = append(ids, id)
 	}
 	add(metadata.ID)
-	// Older BeefAPI catalogs stored the package name instead of its provider ID.
+	// Older BeefTV catalogs stored the package name instead of its provider ID.
 	if strings.TrimSpace(metadata.ID) == "gemini-generate-content" {
 		add("google-gemini-generate-content")
 	}

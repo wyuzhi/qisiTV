@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,7 +17,7 @@ import (
 
 	"qisitv/backend/internal/app"
 	"qisitv/backend/internal/assistantruntime"
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/buildinfo"
 	"qisitv/backend/internal/conversation"
 	"qisitv/backend/internal/database"
@@ -25,6 +26,8 @@ import (
 	canvasHandler "qisitv/backend/internal/handler"
 	"qisitv/backend/internal/localapp"
 	"qisitv/backend/internal/modelcatalog"
+	"qisitv/backend/internal/pluginhost"
+	"qisitv/backend/internal/plugins"
 	"qisitv/backend/internal/projectfolder"
 	"qisitv/backend/internal/repository"
 	"qisitv/backend/internal/runtimeinfo"
@@ -33,6 +36,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"qisitv/backend/internal/agentconnect"
 	"qisitv/backend/internal/agentops"
 )
 
@@ -48,7 +52,7 @@ type Runtime struct {
 	status           *systemStatus
 	launchToken      string
 	uiBootstrapToken string
-	beefAPI          *beefapi.Service
+	beefTV           *beeftv.Service
 	assistantHost    *assistantruntime.Host
 	listener         net.Listener
 	httpServer       *http.Server
@@ -126,25 +130,26 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 		cleanupService()
 		return nil, err
 	}
+	wirePluginPackages(svc)
 	providerConfig, configErr := workspace.NewProviderConfig(cfg.DataDir)
 	if configErr != nil {
 		cleanupService()
 		return nil, configErr
 	}
-	beefAPIConnection, beefAPIErr := beefapi.New(beefapi.Options{
+	beefTVConnection, beefTVErr := beeftv.New(beeftv.Options{
 		DataDir: cfg.DataDir, Provider: providerConfig, ClientVersion: buildinfo.Current().Version,
-		FetchCatalog: func(apiKey, baseURL string) ([]beefapi.CatalogModel, error) {
+		FetchCatalog: func(apiKey, baseURL string) ([]beeftv.CatalogModel, error) {
 			owner, ownerErr := svc.LocalWorkspaceOwner()
 			if ownerErr != nil {
 				return nil, ownerErr
 			}
 			items, catalogErr := svc.FetchChannelModelCatalog(context.Background(), owner, app.ChannelModelsRequest{
-				BaseURL: baseURL, APIKey: apiKey, APIFormat: "openai", ChannelID: beefapi.ChannelID, CredentialRef: beefapi.CredentialRef,
+				BaseURL: baseURL, APIKey: apiKey, APIFormat: "openai", ChannelID: beeftv.ChannelID, CredentialRef: beeftv.CredentialRef,
 			})
 			if catalogErr != nil {
 				return nil, catalogErr
 			}
-			models := make([]beefapi.CatalogModel, 0, len(items))
+			models := make([]beeftv.CatalogModel, 0, len(items))
 			for _, item := range items {
 				imageVersion := ""
 				if item.ImageCapabilitiesVersion != nil {
@@ -154,7 +159,7 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 				if item.VideoCapabilitiesVersion != nil {
 					version = *item.VideoCapabilitiesVersion
 				}
-				models = append(models, beefapi.CatalogModel{
+				models = append(models, beeftv.CatalogModel{
 					ID: item.ID, DisplayName: item.DisplayName, ModelType: item.ModelType, SupportedEndpointTypes: item.SupportedEndpointTypes,
 					ImageCapabilities: item.ImageCapabilities, ImageCapabilitiesVersion: imageVersion,
 					VideoCapabilities: item.VideoCapabilities, VideoCapabilitiesVersion: version,
@@ -164,18 +169,18 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 			return models, nil
 		},
 	})
-	if beefAPIErr != nil {
+	if beefTVErr != nil {
 		cleanupService()
-		return nil, beefAPIErr
+		return nil, beefTVErr
 	}
-	svc.SetBeefAPI(beefAPIConnection)
+	svc.SetBeefTV(beefTVConnection)
 	localKernel := app.NewLocalKernel(svc)
 	assetService := svc.ResourceService()
 	projectService := svc.ProjectService()
 	taskService := svc.TaskService()
 	localRoot, err := localapp.New(localapp.Options{
 		Workspace: workspace.NewService(repo), Projects: projectService, Assets: assetService, Tasks: taskService,
-		Generation: taskService, ProviderConfig: providerConfig, ModelCapability: modelcatalog.NewCapabilityNormalizer(), Lifecycle: localKernel,
+		Generation: taskService, ProviderConfig: providerConfig, ModelCapability: modelcatalog.NewCapabilityNormalizer(svc.PluginDomain().LookupWorkflow), Lifecycle: localKernel,
 	})
 	if err != nil {
 		cleanupService()
@@ -223,6 +228,11 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 	router.Use(canvasHandler.WorkspaceMiddleware(scope))
 	// 本机可信凭据在组合根生成：owner 凭据与宿主凭据只在本机数据目录，0600。
 	agentops.EnsureAgentCredentials(svc.DataDir())
+	// 上次断开没有确认吊销的凭据在启动时再试一次；失败就保留记录，界面
+	// 继续显示需要重试，绝不把仍有有效凭据的状态说成已断开。
+	if cfg.Profile == ProfileDesktop {
+		_ = agentconnect.RetryStaleOneClickCredentials(agentops.NewClientRegistry(svc.DataDir()), svc.DataDir())
+	}
 	assistantHost := assistantruntime.New(assistantruntime.OptionsFromService(svc))
 	svc.SetAssistantContinuationSubmitter(canvasHandler.AssistantContinuationSubmitter(svc, assistantHost))
 	api := router.Group("/api")
@@ -236,7 +246,7 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 		Projects:           localRoot.Projects,
 		Tasks:              localRoot.Tasks,
 		Generation:         localRoot.Generation,
-		BeefAPI:            beefAPIConnection,
+		BeefTV:             beefTVConnection,
 		AssistantHost:      assistantHost,
 		Conversations:      conversation.New(conversation.NewStore(repo)),
 		TextReplay:         svc.TextReplay(),
@@ -320,10 +330,19 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 		status:           status,
 		launchToken:      launchToken,
 		uiBootstrapToken: uiBootstrapToken,
-		beefAPI:          beefAPIConnection,
+		beefTV:           beefTVConnection,
 		assistantHost:    assistantHost,
 		serveErr:         make(chan error, 1),
 	}, nil
+}
+
+// wirePluginPackages connects installed plugin packages to the skill catalog
+// and installs them with the npm shipped in the desktop runtime.
+func wirePluginPackages(svc *app.Service) {
+	executable, _ := os.Executable()
+	domain := svc.PluginDomain()
+	domain.SetPackageFetcher(plugins.NpmPackageFetcher(assistantruntime.BundledNpmCommand(executable, goruntime.GOOS)))
+	domain.SetSkillSyncHook(svc.SkillsDomain().ApplyPluginSkills)
 }
 
 func initializeService(svc *app.Service) error {
@@ -334,6 +353,7 @@ func initializeService(svc *app.Service) error {
 		svc.EnsureDefaultPromptTemplates,
 		svc.EnsureBuiltinProjectWorkflowTemplate,
 		svc.EnsureBuiltinSkills,
+		svc.SkillsDomain().RetireExternalSkills,
 		svc.EnsureSkillPackages,
 	}
 	for _, initialize := range initializers {
@@ -375,6 +395,8 @@ func (r *Runtime) Start() error {
 		defer close(r.backgroundDone)
 		r.service.RecoverPlaybackTranscodes()
 	}()
+	// 精选插件跟着精选列表自动更新；HTTP 服务关闭时一起停下。
+	go r.service.PluginDomain().RunOfficialUpdates(httpContext)
 	// The assistant loads its operation catalog from this server before becoming
 	// healthy. Accept requests before synchronously waiting for child readiness.
 	go func() {
@@ -399,8 +421,8 @@ func (r *Runtime) Start() error {
 			}
 		}
 	}
-	if r.beefAPI != nil {
-		_ = r.beefAPI.Recover(context.Background())
+	if r.beefTV != nil {
+		_ = r.beefTV.Recover(context.Background())
 	}
 	r.status.markStarted()
 	return nil
@@ -456,8 +478,8 @@ func (r *Runtime) Close(ctx context.Context) error {
 				failures = append(failures, err)
 			}
 		}
-		if r.beefAPI != nil {
-			r.beefAPI.Close()
+		if r.beefTV != nil {
+			r.beefTV.Close()
 		}
 		if err := r.DepthComponents().CloseComponents(ctx); err != nil {
 			failures = append(failures, fmt.Errorf("暂停组件下载：%w", err))
@@ -498,6 +520,8 @@ func (r *Runtime) Close(ctx context.Context) error {
 				}
 			}
 		}
+		// 生成任务和 HTTP 请求都停了才关插件宿主：早关会杀掉还在提交的调用，后来的调用又会拉起新进程。
+		pluginhost.Close()
 		var serviceErr error
 		if r.localApp != nil {
 			serviceErr = r.localApp.Close()
@@ -529,7 +553,7 @@ func desktopCORSMiddleware() gin.HandlerFunc {
 			c.Header("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers")
 		}
 		c.Header("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Traceparent, X-Desktop-Token, X-Beeftv-UI-Bootstrap, X-Beeftv-Ui-Session, X-Canvas-Trace-ID, X-Idempotency-Key, X-Canvas-Scene, X-Canvas-Upstream-URL, X-Canvas-Upstream-Format, X-Canvas-Upstream-Base-URL, X-Canvas-Upstream-Headers")
-		c.Header("Access-Control-Expose-Headers", "X-Request-ID, X-Canvas-Trace-ID, X-Diagnostic-Bundle-ID, X-Diagnostic-Schema-Version")
+		c.Header("Access-Control-Expose-Headers", "X-Request-ID, X-Canvas-Trace-ID, X-Diagnostic-Bundle-ID, X-Diagnostic-Schema-Version, X-Canvas-Failure-Category")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)

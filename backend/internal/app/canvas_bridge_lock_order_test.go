@@ -326,3 +326,128 @@ func TestMapConversationAttachErrorUsesTypedReasons(t *testing.T) {
 		t.Fatalf("untyped text must pass through: %v", mapped)
 	}
 }
+
+func TestSingleConnectionDocumentCommitDoesNotDeadlockAgainstDocumentLimitReads(t *testing.T) {
+	fx := newLockOrderFixture(t)
+	if _, err := fx.service.CanvasService().UpdateCanvasDocumentLimitMB(128); err != nil {
+		t.Fatal(err)
+	}
+	canvasSvc := fx.service.CanvasService()
+	limitArmed := make(chan struct{})
+	limitAtQuery := make(chan struct{})
+	txHoldingConn := make(chan struct{})
+	var limitOnce sync.Once
+	var txOnce sync.Once
+	t.Cleanup(func() {
+		txOnce.Do(func() { close(txHoldingConn) })
+	})
+	err := fx.service.repo.DB().Callback().Query().Before("gorm:query").Register("test:commit-limit-before-query", func(tx *gorm.DB) {
+		if repoHoldsTransaction(repository.New(tx)) {
+			return
+		}
+		select {
+		case <-limitArmed:
+			limitOnce.Do(func() {
+				close(limitAtQuery)
+				select {
+				case <-txHoldingConn:
+				case <-time.After(4 * time.Second):
+				}
+			})
+		default:
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = fx.service.repo.DB().Callback().Query().After("gorm:query").Register("test:commit-limit-after-tx-query", func(tx *gorm.DB) {
+		if !repoHoldsTransaction(repository.New(tx)) {
+			return
+		}
+		txOnce.Do(func() {
+			close(txHoldingConn)
+			time.Sleep(20 * time.Millisecond)
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedRev := fx.revision()
+	close(limitArmed)
+	limitErr := make(chan error, 1)
+	go func() {
+		if got := canvasSvc.CanvasDocumentLimitMB(); got != 128 {
+			limitErr <- errors.New("unexpected canvas document limit")
+			return
+		}
+		if got := canvasSvc.RequestMaxBodyBytes(); got <= 0 {
+			limitErr <- errors.New("unexpected request max body bytes")
+			return
+		}
+		limitErr <- nil
+	}()
+
+	select {
+	case <-limitAtQuery:
+	case err := <-limitErr:
+		t.Fatalf("容量上限读取在进入查询回调前返回: %v", err)
+	case <-time.After(4 * time.Second):
+		t.Fatal("容量上限读取未进入查询回调")
+	}
+
+	commitErr := make(chan error, 1)
+	go func() {
+		params, marshalErr := json.Marshal(map[string]any{
+			"canvasId":         fx.canvasID,
+			"expectedRevision": expectedRev,
+			"operationId":      "lock-order-document-commit",
+			"document": map[string]any{
+				"title": "整份文档提交",
+				"nodes": []any{
+					map[string]any{
+						"id":       "n1",
+						"type":     "text",
+						"title":    "提交后节点",
+						"position": map[string]any{"x": 10, "y": 20},
+						"width":    320,
+						"height":   220,
+						"metadata": map[string]any{"content": "更新内容"},
+					},
+				},
+				"connections": []any{},
+			},
+		})
+		if marshalErr != nil {
+			commitErr <- marshalErr
+			return
+		}
+		_, execErr := fx.registry.Execute(operations.Request{
+			Op:     "canvas.document.commit",
+			OpID:   "lock-order-document-commit",
+			UserID: fx.userID,
+			Caller: operations.ManualCaller(false),
+			Params: params,
+		})
+		commitErr <- execErr
+	}()
+
+	deadline := time.After(4 * time.Second)
+	gotCommit, gotLimit := errPending, errPending
+	for gotCommit == errPending || gotLimit == errPending {
+		select {
+		case err := <-commitErr:
+			gotCommit = err
+		case err := <-limitErr:
+			gotLimit = err
+		case <-deadline:
+			t.Fatalf("document.commit 与容量上限读取在单连接下发生死锁 commit=%v limit=%v", pendingText(gotCommit), pendingText(gotLimit))
+		}
+	}
+	if gotCommit != nil {
+		t.Fatalf("document.commit 失败: %v", gotCommit)
+	}
+	if gotLimit != nil {
+		t.Fatalf("容量上限读取失败: %v", gotLimit)
+	}
+}

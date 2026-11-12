@@ -54,6 +54,7 @@ export function registerEditorSlot(input: RegisterEditorSlotInput): () => void {
         order: nextOrder++,
         render: input.render,
     });
+    emitChange();
     return () => {
         unregisterById(id);
         emitChange();

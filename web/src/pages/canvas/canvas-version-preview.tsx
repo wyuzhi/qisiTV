@@ -33,7 +33,7 @@ export function CanvasVersionPreview({ preview, busy = false, onReturn, onShowVe
     const project = preview.project;
     const wheelBehavior = useMemo(() => parseCanvasWheelBehavior(scopedLocalStorage.getItem("canvas:wheel-behavior")), []);
     useEffect(() => {
-        const node = project?.nodes.find((item) => item.id === selectedId);
+        const node = (project?.nodes || []).find((item) => item.id === selectedId);
         const key = node?.metadata?.storageKey;
         if (!node || !key || resourceIdFromStorageKey(key) || !["video", "audio"].includes(node.type)) return;
         let active = true;

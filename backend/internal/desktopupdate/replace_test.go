@@ -251,3 +251,176 @@ func TestUnicodeAndSpacesPathsRoundTrip(t *testing.T) {
 		t.Fatalf("installed = %q", got)
 	}
 }
+
+func readBundledPluginManifestDirs(t *testing.T) []string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "plugin-packages", "bundled-plugin-dirs.txt"))
+	if err != nil {
+		t.Fatalf("read bundled-plugin-dirs.txt: %v", err)
+	}
+	var names []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if idx := strings.IndexByte(line, '#'); idx >= 0 {
+			line = line[:idx]
+		}
+		line = strings.TrimSpace(line)
+		if line != "" {
+			names = append(names, line)
+		}
+	}
+	if len(names) == 0 {
+		t.Fatal("bundled-plugin-dirs.txt is empty")
+	}
+	return names
+}
+
+func writeBundledPluginFixtures(t *testing.T, bundledRoot string, names []string) {
+	t.Helper()
+	for _, name := range names {
+		pkgDir := filepath.Join(bundledRoot, name)
+		if err := os.MkdirAll(filepath.Join(pkgDir, "client"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(pkgDir, "package.json"), []byte(`{"name":"`+name+`"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(pkgDir, "client", "index.js"), []byte("export default {};\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestExtractedLayoutAcceptsBundledPluginsUnderAgentHostOnAllPlatforms(t *testing.T) {
+	names := readBundledPluginManifestDirs(t)
+
+	winOld := filepath.Join(t.TempDir(), "win-old")
+	winStaged := filepath.Join(t.TempDir(), "win-staged")
+	if err := WriteWindowsLayout(winOld, "OLD"); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteWindowsLayout(winStaged, "NEW"); err != nil {
+		t.Fatal(err)
+	}
+	writeBundledPluginFixtures(t, filepath.Join(winStaged, "agent-host", "bundled-plugins"), names)
+	if err := validateExtractedLayout(winStaged, "windows-amd64"); err != nil {
+		t.Fatalf("validateExtractedLayout windows-amd64 failed: %v", err)
+	}
+	req := HelperRequest{
+		Platform:   "windows-amd64",
+		TargetPath: filepath.Join(winOld, windowsExeName),
+		StagedPath: winStaged,
+		BackupPath: filepath.Join(t.TempDir(), "win-backup"),
+	}
+	if err := SwapInstall(req); err != nil {
+		t.Fatalf("Windows SwapInstall with bundled-plugins failed: %v", err)
+	}
+	for _, name := range names {
+		installedPkg := filepath.Join(winOld, "agent-host", "bundled-plugins", name, "package.json")
+		if !pathExists(installedPkg) {
+			t.Fatalf("missing %s after Windows SwapInstall", installedPkg)
+		}
+	}
+	if err := RestoreBackup(req); err != nil {
+		t.Fatalf("Windows RestoreBackup failed: %v", err)
+	}
+
+	linuxStaged := filepath.Join(t.TempDir(), "linux-staged")
+	linuxFixture(t, linuxStaged, "NEW")
+	writeBundledPluginFixtures(t, filepath.Join(linuxStaged, linuxBundleName, "agent-host", "bundled-plugins"), names)
+	if err := validateExtractedLayout(linuxStaged, "linux-amd64"); err != nil {
+		t.Fatalf("validateExtractedLayout linux-amd64 failed: %v", err)
+	}
+
+	darwinStaged := filepath.Join(t.TempDir(), "darwin-staged")
+	if err := WriteDarwinLayout(darwinStaged, "NEW"); err != nil {
+		t.Fatal(err)
+	}
+	writeBundledPluginFixtures(t, filepath.Join(darwinStaged, appBundleName, "Contents", "Resources", "agent-host", "bundled-plugins"), names)
+	if err := validateExtractedLayout(darwinStaged, "darwin-arm64"); err != nil {
+		t.Fatalf("validateExtractedLayout darwin-arm64 failed: %v", err)
+	}
+}
+
+func TestWindowsLayoutRejectsSubdirectoriesInsidePluginPackages(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "installed")
+	staged := filepath.Join(root, "staged")
+	if err := WriteWindowsLayout(target, "OLD"); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteWindowsLayout(staged, "NEW"); err != nil {
+		t.Fatal(err)
+	}
+	badDir := filepath.Join(staged, pluginDirName, "beeftv-plugin-market")
+	if err := os.MkdirAll(badDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(badDir, "package.json"), []byte(`{"name":"beeftv-plugin-market"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := validateExtractedLayout(staged, "windows-amd64")
+	if err == nil || !strings.Contains(err.Error(), "官方插件目录布局无效") {
+		t.Fatalf("expected validateExtractedLayout to reject subdirectory inside Windows plugin-packages, got %v", err)
+	}
+	req := HelperRequest{
+		Platform:   "windows-amd64",
+		TargetPath: filepath.Join(target, windowsExeName),
+		StagedPath: staged,
+		BackupPath: filepath.Join(root, "backup"),
+	}
+	if err := SwapInstall(req); err == nil || !strings.Contains(err.Error(), "官方插件目录布局无效") {
+		t.Fatalf("expected SwapInstall to reject subdirectory inside Windows plugin-packages, got %v", err)
+	}
+	if got, err := os.ReadFile(req.TargetPath); err != nil || string(got) != "MZ-OLD" {
+		t.Fatalf("existing install was modified after rejected layout: %q %v", got, err)
+	}
+}
+
+func TestWindowsRestoreExecutablePreservesTargetWithoutDeletingFirst(t *testing.T) {
+	root := t.TempDir()
+	targetDir := filepath.Join(root, "installed")
+	backupDir := filepath.Join(root, "backup")
+	if err := WriteWindowsLayout(targetDir, "NEW"); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteWindowsLayout(backupDir, "OLD"); err != nil {
+		t.Fatal(err)
+	}
+	targetExe := filepath.Join(targetDir, windowsExeName)
+	backupExe := filepath.Join(backupDir, windowsExeName)
+	if err := os.Remove(backupExe); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(backupExe, "corrupt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	req := HelperRequest{
+		Platform:   "windows-amd64",
+		TargetPath: targetExe,
+		BackupPath: backupDir,
+	}
+	if err := RestoreBackup(req); err == nil {
+		t.Fatal("expected RestoreBackup to fail when backup executable is a directory")
+	}
+	got, err := os.ReadFile(targetExe)
+	if err != nil || string(got) != "MZ-NEW" {
+		t.Fatalf("failed restore lost existing executable: got=%q err=%v", got, err)
+	}
+
+	if err := os.RemoveAll(backupExe); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(backupExe, []byte("MZ-OLD"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := RestoreBackup(req); err != nil {
+		t.Fatalf("RestoreBackup failed: %v", err)
+	}
+	got, err = os.ReadFile(targetExe)
+	if err != nil || string(got) != "MZ-OLD" {
+		t.Fatalf("restored exe = %q, err = %v", got, err)
+	}
+	if pathExists(targetExe + ".beeftv-failed") {
+		t.Fatal("stale .beeftv-failed file was not cleaned up")
+	}
+}

@@ -3,9 +3,13 @@ package operations
 import (
 	"encoding/json"
 	"strings"
+	"unicode/utf8"
 
 	"qisitv/backend/internal/canvas"
 )
+
+// storyboardTitleTemplateMaxRunes 与 schema 的 maxLength 一致；入口不执行 JSON Schema，长度在这里校验。
+const storyboardTitleTemplateMaxRunes = 40
 
 func registerStoryboardPreparation(r *Registry) {
 	properties := map[string]any{
@@ -17,12 +21,12 @@ func registerStoryboardPreparation(r *Registry) {
 			"rows":  map[string]any{"type": "array", "minItems": 1, "maxItems": 8, "items": map[string]any{"type": "object", "description": "行ID与镜号由服务端分配", "properties": storyboardRowFieldSchemas}},
 		}, "description": "新建分镜（省略 image/video 只建分镜）"},
 		"referenceNodeIds": map[string]any{"type": "array", "maxItems": 4, "items": map[string]any{"type": "string"}},
-		"image":            map[string]any{"type": "object", "properties": map[string]any{"model": map[string]any{"type": "string"}, "size": map[string]any{"type": "string"}}, "required": []string{"model"}},
-		"video":            map[string]any{"type": "object", "properties": map[string]any{"model": map[string]any{"type": "string"}, "size": map[string]any{"type": "string"}, "generateAudio": map[string]any{"type": "string", "enum": []string{"true", "false"}}}, "required": []string{"model", "generateAudio"}},
+		"image":            map[string]any{"type": "object", "properties": map[string]any{"model": map[string]any{"type": "string"}, "size": map[string]any{"type": "string"}, "title": map[string]any{"type": "string", "maxLength": storyboardTitleTemplateMaxRunes, "description": "标题模板，{n} 为镜号，如「镜 {n} 首帧」；省略默认「镜头 {n} · 首帧」"}}, "required": []string{"model"}},
+		"video":            map[string]any{"type": "object", "properties": map[string]any{"model": map[string]any{"type": "string"}, "size": map[string]any{"type": "string"}, "generateAudio": map[string]any{"type": "string", "enum": []string{"true", "false"}}, "title": map[string]any{"type": "string", "maxLength": storyboardTitleTemplateMaxRunes, "description": "标题模板，{n} 为镜号，如「镜 {n} 视频」；省略默认「镜头 {n} · 视频」"}}, "required": []string{"model", "generateAudio"}},
 	}
 	params, _ := json.Marshal(map[string]any{"type": "object", "additionalProperties": false, "properties": properties,
 		"required": []string{"canvasId", "expectedRevision"}})
-	r.Register(Op{ID: "canvas.script.prepare", Summary: "准备分镜脚本与可选首帧/视频草稿（传 script 或 nodeId/rowIds；不开始生成）", Scope: ScopeCanvas, ReplaySafe: true, AssistantCanvas: true, Params: params, Handler: opStoryboardPrepare})
+	r.Register(Op{ID: "canvas.script.prepare", Summary: "准备分镜脚本与可选首帧/视频草稿（不开始生成）", Scope: ScopeCanvas, ReplaySafe: true, AssistantCanvas: true, Params: params, Handler: opStoryboardPrepare})
 }
 
 func opStoryboardPrepare(ctx *Context, raw json.RawMessage) (any, error) {
@@ -50,7 +54,8 @@ func opStoryboardPrepare(ctx *Context, raw json.RawMessage) (any, error) {
 		kind   string
 		raw    map[string]json.RawMessage
 		target *map[string]any
-	}{{"image", args.Image, &input.Image}, {"video", args.Video, &input.Video}} {
+		title  *string
+	}{{"image", args.Image, &input.Image, &input.ImageTitle}, {"video", args.Video, &input.Video, &input.VideoTitle}} {
 		if item.raw == nil {
 			continue
 		}
@@ -71,6 +76,21 @@ func opStoryboardPrepare(ctx *Context, raw json.RawMessage) (any, error) {
 			if _, exists := item.raw["generateAudio"]; !exists {
 				return nil, InvalidArg("invalid_parameter", "请根据作品需要明确选择是否生成声音")
 			}
+		}
+		if rawTitle, exists := item.raw["title"]; exists {
+			var title string
+			if string(rawTitle) == "null" || json.Unmarshal(rawTitle, &title) != nil {
+				return nil, InvalidArg("invalid_parameter", "草稿标题必须是字符串")
+			}
+			title = strings.TrimSpace(title)
+			if title != "" && !strings.Contains(title, "{n}") {
+				return nil, InvalidArg("invalid_parameter", "草稿标题模板必须包含 {n} 以代表镜号，例如「镜 {n} 首帧」")
+			}
+			if utf8.RuneCountInString(title) > storyboardTitleTemplateMaxRunes {
+				return nil, InvalidArg("invalid_parameter", "草稿标题模板最多 40 个字")
+			}
+			*item.title = title
+			delete(item.raw, "title")
 		}
 		patch, err := resolveGenerationDraft(ctx, item.kind, item.raw, nil)
 		if err != nil {

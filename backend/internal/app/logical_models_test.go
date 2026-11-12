@@ -234,20 +234,6 @@ func TestValidateProductSpecWithinRoutesPreservesInputRangeCoverage(t *testing.T
 	}
 }
 
-func TestLogicalModelConfigurationErrorAfterRouteCoverageShrinks(t *testing.T) {
-	product := CapabilitySpec{Version: 1, Capability: "image", Inputs: map[string]InputConstraint{"image": {Min: 0, Max: 9}}}
-	complete := []CapabilitySpec{
-		{Version: 1, Capability: "image", Inputs: map[string]InputConstraint{"image": {Min: 0, Max: 4}}},
-		{Version: 1, Capability: "image", Inputs: map[string]InputConstraint{"image": {Min: 5, Max: 9}}},
-	}
-	if message := logicalModelConfigurationError(product, complete); message != "" {
-		t.Fatalf("complete route coverage reported an error: %s", message)
-	}
-	if message := logicalModelConfigurationError(product, complete[:1]); !strings.Contains(message, "无法完整覆盖") {
-		t.Fatalf("shrunk route coverage error = %q", message)
-	}
-}
-
 func TestChannelModelCapabilitySpecRequiresExplicitImageCapability(t *testing.T) {
 	channelModel := model.ChannelModel{Capability: "image", CapabilityConfigJSON: ""}
 

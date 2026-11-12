@@ -1,9 +1,9 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { App } from "antd";
 import { nanoid } from "nanoid";
 import { applyCanvasConnectionPromptSync, reorderCanvasResourceConnections, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { replaceCanvasNodeReference } from "@/lib/canvas/canvas-reference-replace";
-import { connectCanvasTextMention } from "@/lib/canvas/canvas-text-mention";
+import { connectAndAppendCanvasResourceMention, connectCanvasResourceMention, registerCanvasPickConnectHandler } from "@/lib/canvas/canvas-text-mention";
 import { CanvasNodeType } from "@/types/canvas";
 import type { CanvasPageUiStoreHook } from "@/stores/canvas/use-canvas-page-ui-store";
 import type { useCanvasDocumentState } from "./use-canvas-document-state";
@@ -68,11 +68,26 @@ export function useCanvasNodeReferences({ projectId, document, pageUi, uploads }
             if (!removedConnectionIds.size) return;
             const nextConnections = previousConnections.filter((connection) => !removedConnectionIds.has(connection.id));
             const promptSyncedNodes = applyCanvasConnectionPromptSync(previousNodes, previousConnections, previousNodes, nextConnections);
-            const targetNode = promptSyncedNodes.find((node) => node.id === targetNodeId);
-            const referenceAssetNodeIds = targetNode?.metadata?.referenceAssetNodeIds;
-            const nextNodes = targetNode?.metadata?.workflowKind === "shot" && referenceAssetNodeIds?.includes(referenceNodeId)
-                ? promptSyncedNodes.map((node) => node.id === targetNodeId ? { ...node, metadata: { ...node.metadata, referenceAssetNodeIds: referenceAssetNodeIds.filter((id) => id !== referenceNodeId) } } : node)
-                : promptSyncedNodes;
+            const nextNodes = promptSyncedNodes.map((node) => {
+                if (node.id !== targetNodeId && node.id !== configNodeId) return node;
+                const metadata = node.metadata;
+                if (!metadata) return node;
+                const clearShotAsset = node.id === targetNodeId && metadata.workflowKind === "shot" && metadata.referenceAssetNodeIds?.includes(referenceNodeId);
+                const clearStart = metadata.videoStartFrameNodeId === referenceNodeId;
+                const clearEnd = metadata.videoEndFrameNodeId === referenceNodeId;
+                const clearMiddle = metadata.videoMiddleFrameNodeId === referenceNodeId;
+                if (!clearShotAsset && !clearStart && !clearEnd && !clearMiddle) return node;
+                return {
+                    ...node,
+                    metadata: {
+                        ...metadata,
+                        ...(clearShotAsset ? { referenceAssetNodeIds: metadata.referenceAssetNodeIds?.filter((id) => id !== referenceNodeId) } : null),
+                        ...(clearStart ? { videoStartFrameNodeId: undefined } : null),
+                        ...(clearEnd ? { videoEndFrameNodeId: undefined } : null),
+                        ...(clearMiddle ? { videoMiddleFrameNodeId: undefined } : null),
+                    },
+                };
+            });
             if (nextNodes !== previousNodes) {
                 nodesRef.current = nextNodes;
                 setNodes(nextNodes);
@@ -103,18 +118,37 @@ export function useCanvasNodeReferences({ projectId, document, pageUi, uploads }
 
     const addTextReference = useCallback((nodeId: string, reference: CanvasResourceReference) => {
         if (reference.active || reference.assetId || reference.kind === "skill") return reference;
-        if (reference.kind !== "text" || !reference.nodeId || reference.nodeId === nodeId) return undefined;
+        if (!reference.nodeId || reference.nodeId === nodeId) return undefined;
         try {
-            const linked = connectCanvasTextMention(nodesRef.current, connectionsRef.current, nodeId, reference.nodeId, nanoid());
+            const linked = connectCanvasResourceMention(nodesRef.current, connectionsRef.current, nodeId, reference.nodeId, nanoid());
             nodesRef.current = linked.nodes;
             connectionsRef.current = linked.connections;
             setNodes(linked.nodes);
             setConnections(linked.connections);
             return linked.reference;
         } catch (cause) {
-            message.warning(cause instanceof Error ? cause.message : "文本引用失败");
+            message.warning(cause instanceof Error ? cause.message : "节点引用失败");
             return undefined;
         }
     }, [connectionsRef, message, nodesRef, setConnections, setNodes]);
-    return { handleReplaceNodeReference, handleReplaceNodeReferenceFiles, handleRemoveNodeReference, handleReorderNodeReferences, addTextReference };
+
+    const handlePickConnectNodeReference = useCallback((targetNodeId: string, sourceNodeId: string) => {
+        if (!targetNodeId || !sourceNodeId || targetNodeId === sourceNodeId) return undefined;
+        try {
+            const linked = connectAndAppendCanvasResourceMention(nodesRef.current, connectionsRef.current, targetNodeId, sourceNodeId, nanoid());
+            nodesRef.current = linked.nodes;
+            connectionsRef.current = linked.connections;
+            setNodes(linked.nodes);
+            setConnections(linked.connections);
+            return linked.reference;
+        } catch (cause) {
+            message.warning(cause instanceof Error ? cause.message : "点选连线引用失败");
+            return undefined;
+        }
+    }, [connectionsRef, message, nodesRef, setConnections, setNodes]);
+
+    registerCanvasPickConnectHandler(projectId, handlePickConnectNodeReference);
+    useEffect(() => registerCanvasPickConnectHandler(projectId, handlePickConnectNodeReference), [handlePickConnectNodeReference, projectId]);
+
+    return { handleReplaceNodeReference, handleReplaceNodeReferenceFiles, handleRemoveNodeReference, handleReorderNodeReferences, addTextReference, handlePickConnectNodeReference };
 }

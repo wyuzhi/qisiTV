@@ -2,6 +2,8 @@ import { Grid } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { createClientId } from "@/lib/client-id";
+import { isEmbeddedRuntime } from "@/lib/embedded-runtime";
+import { emitPluginEvent } from "@/lib/plugins/plugin-events";
 import { ApiError } from "@/services/api/request";
 import { scopedLocalStorage } from "@/lib/user-scope";
 import { flushModelConfig, getModelConfigPersistenceState } from "@/services/model-config-repository";
@@ -16,7 +18,9 @@ import {
     AgentChatNotAdmittedError,
     AgentStreamDetachedError,
     cancelAgentChat,
+    confirmAssistantScriptProposal,
     createAssistantSession,
+    deleteAssistantSession,
     getAgentHostStatus,
     getAssistantHistory,
     listAssistantSessions,
@@ -26,6 +30,7 @@ import {
     undoAssistantTurn,
     type AgentChatReference,
     type AssistantAttachment,
+    type AssistantScriptProposal,
     type AssistantSkillSelection,
     type AssistantPermissionMode,
     type AgentHostStatus,
@@ -196,7 +201,8 @@ function readStoredProposals(): Set<string> {
  * 切画布不会把回复落到别的画布上。已结束的回合来自服务端历史，刷新页面不丢。
  */
 export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
-    const [open, setOpenState] = useState(() => !isBrowserWorkspace() && scopedLocalStorage.getItem(OPEN_STORAGE_KEY) !== "0");
+    const embedded = isEmbeddedRuntime();
+    const [open, setOpenState] = useState(() => !isBrowserWorkspace() && !embedded && scopedLocalStorage.getItem(OPEN_STORAGE_KEY) !== "0");
     const [width, setWidthState] = useState(() => clampAssistantWidth(Number(scopedLocalStorage.getItem(WIDTH_STORAGE_KEY)) || ASSISTANT_DEFAULT_WIDTH));
     const [status, setStatus] = useState<AgentHostStatus | null>(null);
     const [statusBusy, setStatusBusy] = useState(false);
@@ -243,9 +249,10 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
     }, []);
 
     const setOpen = useCallback((next: boolean) => {
+        if (embedded) return;
         setOpenState(next);
         scopedLocalStorage.setItem(OPEN_STORAGE_KEY, next ? "1" : "0");
-    }, []);
+    }, [embedded]);
 
     const setWidth = useCallback((next: number) => {
         const clamped = clampAssistantWidth(next);
@@ -481,6 +488,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
                         reasoning: end.reasoning === undefined ? current.reasoning.map(segment => ({ ...segment, status: "done" as const })) : end.reasoning,
                         change: end.change ?? null,
                         proposals: end.proposals || [],
+                        scriptProposals: end.scriptProposals || [],
                         proposalsInvalidated: end.proposalsInvalidated,
                         outputs: end.outputs || [],
                         plan: end.plan ?? null,
@@ -498,6 +506,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
                     if (current.reasoningOpen[ASSISTANT_LIVE_TURN_KEY]) current.reasoningOpen[turnId] = true;
                     delete current.reasoningOpen[ASSISTANT_LIVE_TURN_KEY];
                     recordDiagnosticEvent({ category: "task", level: turn.error ? "warning" : "info", code: "assistant_turn_settled", reason: turn.errorReason || undefined, message: "助手执行回执已记录", requestId, canvasId: targetCanvas, assistantSessionId: end.sessionId || current.sessionId || undefined, assistantTurnId: turn.turnId });
+                    emitPluginEvent("assistant.turnCompleted", { canvasId: targetCanvas ?? undefined, sessionId: end.sessionId || current.sessionId || undefined, turnId: turn.turnId, status: turn.cancelled ? "cancelled" : turn.error ? "failed" : "completed" });
                     current.plan = end.plan ?? null;
                     current.recovery = null;
                     // 旧 JSONL 会话首次发消息会交接给新的 Durable 会话：后续回合都走它。
@@ -690,6 +699,47 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
         }
     }, [loadHistory, rerenderIfActive, runFor]);
 
+    const deleteSession = useCallback(async (sessionId: string) => {
+        const targetCanvas = activeCanvasRef.current;
+        const run = runFor(targetCanvas);
+        if (run.streaming || run.sessionBusy || !sessionId) return false;
+        run.sessionBusy = true;
+        ++run.historyRequest;
+        rerenderIfActive(targetCanvas);
+        try {
+            const result = await deleteAssistantSession(targetCanvas, sessionId);
+            run.sessions = run.sessions.filter((item) => item.sessionId !== sessionId);
+            if (run.sessionId === sessionId) {
+                const nextSessionId = result?.currentSessionId ?? run.sessions[0]?.sessionId ?? null;
+                run.sessionId = nextSessionId;
+                run.recovery = null;
+                run.turns = [];
+                run.reasoning = [];
+                run.reasoningOpen = {};
+                run.plan = null;
+                run.error = null;
+                run.pendingUserText = null;
+                run.pendingContinuationId = null;
+                run.lastSent = null;
+                run.turnStatus = {};
+                if (nextSessionId) {
+                    run.historyLoaded = false;
+                    await loadHistory(targetCanvas, nextSessionId);
+                } else {
+                    run.historyLoaded = true;
+                    run.historyError = null;
+                }
+            }
+            return true;
+        } catch {
+            run.error = "没能删除对话，当前对话仍然保留。请重试。";
+            return false;
+        } finally {
+            run.sessionBusy = false;
+            rerenderIfActive(targetCanvas);
+        }
+    }, [loadHistory, rerenderIfActive, runFor]);
+
     const undoTurn = useCallback(async (turnId: string) => {
         const targetCanvas = activeCanvasRef.current;
         const run = runFor(targetCanvas);
@@ -719,6 +769,9 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
         }
     }, []);
 
+    const [runningScriptProposalIds, setRunningScriptProposalIds] = useState<ReadonlySet<string>>(() => new Set());
+    const [scriptProposalFeedback, setScriptProposalFeedback] = useState<Record<string, string>>({});
+
     const rememberProposal = useCallback((key: string) => {
         setHandledProposals((current) => {
             if (current.has(key)) return current;
@@ -731,6 +784,47 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
     }, []);
     const markProposalHandled = useCallback((proposalId: string) => rememberProposal(proposalId), [rememberProposal]);
     const markProposalDismissed = useCallback((proposalId: string) => rememberProposal(dismissedProposalKey(proposalId)), [rememberProposal]);
+
+    const runScriptProposal = useCallback(async (proposal: AssistantScriptProposal, turnId: string, alwaysAllowSession = false) => {
+        const targetCanvas = activeCanvasRef.current;
+        setRunningScriptProposalIds((prev) => {
+            const next = new Set(prev);
+            next.add(proposal.proposalId);
+            return next;
+        });
+        setScriptProposalFeedback((prev) => {
+            if (!prev[proposal.proposalId]) return prev;
+            const next = { ...prev };
+            delete next[proposal.proposalId];
+            return next;
+        });
+        try {
+            const res = await confirmAssistantScriptProposal(targetCanvas, turnId, proposal.proposalId, alwaysAllowSession);
+            rememberProposal(proposal.proposalId);
+            const current = runFor(targetCanvas);
+            current.turns = current.turns.map((turn) =>
+                turn.turnId === turnId
+                    ? {
+                          ...turn,
+                          scriptProposals: (turn.scriptProposals || []).map((item) =>
+                              item.proposalId === proposal.proposalId ? res.proposal : item,
+                          ),
+                      }
+                    : turn,
+            );
+            rerenderIfActive(targetCanvas);
+            await loadHistory(targetCanvas, current.sessionId ?? undefined);
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : "脚本运行失败，请稍后重试。";
+            setScriptProposalFeedback((prev) => ({ ...prev, [proposal.proposalId]: msg }));
+        } finally {
+            setRunningScriptProposalIds((prev) => {
+                const next = new Set(prev);
+                next.delete(proposal.proposalId);
+                return next;
+            });
+        }
+    }, [loadHistory, rememberProposal, rerenderIfActive, runFor]);
 
     const run = runFor(canvasId);
 
@@ -775,12 +869,17 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
         handledProposals,
         markProposalHandled,
         markProposalDismissed,
+        runScriptProposal,
+        runningScriptProposalIds,
+        scriptProposalFeedback,
         send,
         stop,
         retryLast,
         dismissError,
         startNewSession,
         activateSession,
+        deleteSession,
+        handleDeleteSession: deleteSession,
         undoTurn,
         restartHost,
     };

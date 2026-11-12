@@ -20,7 +20,7 @@
 .workflow-details > summary::-webkit-details-marker { display: none; }
 .workflow-details[open] > summary { color: var(--foreground); }
 .workflow-details[open] > summary svg { transform: rotate(180deg); }
-.workflow-editor-layout { display: grid; min-height: 0; flex: 1; grid-template-columns: minmax(0, 1fr) 300px; }
+.workflow-editor-layout { display: grid; min-height: 0; grid-template-columns: minmax(0, 1fr) 300px; grid-template-rows: minmax(0, 1fr); }
 .workflow-editor-canvas { grid-column: 1; grid-row: 1; }
 .workflow-editor-properties { grid-column: 2; grid-row: 1; border-left: 1px solid var(--border); }
 .workflow-editor-library { position: absolute; z-index: 2; top: 12px; left: 12px; right: auto; width: min(260px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow-y: auto; border-radius: 12px; background: var(--background); }

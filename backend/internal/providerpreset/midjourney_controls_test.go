@@ -6,7 +6,7 @@ import (
 )
 
 func TestMidjourneyPromptControls(t *testing.T) {
-	c, ok := BeefAPIImageContract("midjourney-v8.2")
+	c, ok := BeefTVImageContract("midjourney-v8.2")
 	if !ok {
 		t.Fatal("missing contract")
 	}

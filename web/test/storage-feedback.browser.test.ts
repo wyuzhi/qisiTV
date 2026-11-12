@@ -96,12 +96,33 @@ beforeAll(async () => {
     const css = (await postcss([tailwindcss({ base: import.meta.dir + "/.." })]).process(await Bun.file(stylesheet).text(), { from: stylesheet })).css
         + (await Promise.all(["qisitv-local-overrides.css", "workspace-product.css"].map(file => Bun.file(import.meta.dir + "/../src/styles/" + file).text()))).join("\n")
         + (await Promise.all(build.outputs.filter(output => output.path.endsWith(".css")).map(output => output.text()))).join("\n");
+    let fixtureCanvasDocumentMB = 64;
+    let rejectNextCanvasLimitPatch = false;
     server = Bun.serve({
         port: 0,
-        fetch: (req) => {
-            const path = new URL(req.url).pathname;
+        fetch: async (req) => {
+            const url = new URL(req.url);
+            const path = url.pathname;
             if (path === "/app.js") return new Response(script, { headers: { "Content-Type": "text/javascript" } });
             if (path === "/style.css") return new Response(css, { headers: { "Content-Type": "text/css" } });
+            if (path === "/api/resources/storage-usage") {
+                if (req.method === "GET") {
+                    return Response.json({ code: 0, msg: "ok", data: { usage: { usedBytes: 0, totalBytes: 1024 ** 3 }, canvasDocumentMB: fixtureCanvasDocumentMB } });
+                }
+                if (req.method === "PATCH") {
+                    if (rejectNextCanvasLimitPatch) {
+                        rejectNextCanvasLimitPatch = false;
+                        return Response.json({ code: 500, msg: "容量配置写入失败" }, { status: 500 });
+                    }
+                    const body = (await req.json()) as { canvasDocumentMB?: number };
+                    fixtureCanvasDocumentMB = Number(body.canvasDocumentMB ?? 64);
+                    return Response.json({ code: 0, msg: "ok", data: { canvasDocumentMB: fixtureCanvasDocumentMB } });
+                }
+            }
+            if (url.searchParams.has("reject-canvas-limit")) {
+                rejectNextCanvasLimitPatch = true;
+                fixtureCanvasDocumentMB = 64;
+            }
             return new Response('<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css"><div id="root"></div><script type="module" src="/app.js"></script>', {
                 headers: { "Content-Type": "text/html" },
             });
@@ -201,5 +222,26 @@ test("enabled own storage supplies links and public-read failures allow manual H
         } finally {
             await page.close();
         }
+    }
+}, 30000);
+test("custom single-canvas capacity limit can be customized or set to unlimited", async () => {
+    const page = await browser.newPage();
+    try {
+        await page.goto(String(server.url) + "?reject-canvas-limit");
+        const input = page.getByRole("textbox", { name: "单画布容量上限（MB）" });
+        await input.waitFor({ state: "visible" });
+        expect(await input.inputValue()).toBe("64");
+        await input.fill("128");
+        await page.getByRole("button", { name: "保存容量设置", exact: true }).click();
+        await page.getByRole("alert").filter({ hasText: "容量配置写入失败" }).waitFor();
+        await page.getByText(/当前生效上限：64 MB/).waitFor();
+        await input.fill("256");
+        await page.getByRole("button", { name: "保存容量设置", exact: true }).click();
+        await page.getByText(/当前生效上限：256 MB/).waitFor();
+        await page.getByRole("button", { name: "不限制", exact: true }).click();
+        await page.getByText(/当前生效上限：不限制/).waitFor();
+        expect(await input.inputValue()).toBe("0");
+    } finally {
+        await page.close();
     }
 }, 30000);

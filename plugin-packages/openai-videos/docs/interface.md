@@ -51,7 +51,9 @@
 | `create.body.prompt` | `{"$ref":"request.prompt"}` |
 | `create.body.seconds` | `{"$toString":{"$ref":"request.duration"}}` |
 | `create.body.size` | `{"$omitEmpty":{"$ref":"request.aspectRatio"}}` |
+| `create.body.aspect_ratio` | `{"$ref":"request.extra.aspectRatio"}` |
 | `create.body.resolution_name` | `{"$omitEmpty":{"$ref":"request.resolution"}}` |
+| `create.body.generate_audio` | `{"$ref":"request.extra.generateAudio"}` |
 | `create.body.variants` | `{"$omitEmpty":{"$ref":"request.providerOptions.newapi.variants"}}` |
 | `create.files[0].name` | `"input_reference"` |
 | `create.files[0].source` | `{"$first":{"$filter":{"from":{"$sortByOrder":{"$ref":"request.images"}},"as":"media","where":{"$ne":[{"$ref":"media.role"},"mask"]}}}}` |
@@ -103,7 +105,7 @@
   "apiVersion": "qisitv.plugin/v2",
   "id": "openai-videos",
   "name": "OpenAI Videos / Sora",
-  "version": "2.0.1",
+  "version": "2.0.3",
   "author": "BeefTV Contributors",
   "description": "OpenAI Videos / Sora 独立请求协议插件。",
   "documentation": "<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>",
@@ -312,10 +314,16 @@
                 "$ref": "request.aspectRatio"
               }
             },
+            "aspect_ratio": {
+              "$ref": "request.extra.aspectRatio"
+            },
             "resolution_name": {
               "$omitEmpty": {
                 "$ref": "request.resolution"
               }
+            },
+            "generate_audio": {
+              "$ref": "request.extra.generateAudio"
             },
             "variants": {
               "$omitEmpty": {

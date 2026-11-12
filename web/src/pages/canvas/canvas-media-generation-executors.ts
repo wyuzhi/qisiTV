@@ -172,6 +172,7 @@ export async function executeVideoGeneration({
 }
 
 export async function executeAudioGeneration({
+    resolveReferenceLinks,
     nodeId,
     sourceNode,
     canvasNodes,
@@ -211,6 +212,7 @@ export async function executeAudioGeneration({
             ...(reuseSourceNode ? clearInPlaceMediaOutputMetadata(sourceNode?.metadata) : {}),
             ...canvasGenerationPromptMetadata(prompt, effectivePrompt),
             status: NODE_STATUS_LOADING,
+            references: generationReferenceUrls(generationContext),
             ...buildAudioGenerationMetadata(generationConfig),
             ...skillMetadata,
             generatedFromNodeId: nodeId,
@@ -246,8 +248,11 @@ export async function executeAudioGeneration({
                 ...retryContext,
                 ...(clientOperationId ? { clientOperationId } : {}),
                 mode: "audio",
+                resolveReferenceLinks,
                 prompt: effectivePrompt,
                 config: generationConfig,
+                referenceImages: generationContext.referenceImages,
+                referenceAudios: generationContext.referenceAudios,
                 signal: controller.signal,
                 metadata: { sourceNodeId: nodeId, ...taskContext, resolvedCharacterVersions: generationContext.resolvedCharacterVersions, resolvedCharacterVoiceKey: generationContext.resolvedCharacterVoices[0]?.voiceKey, ...skillMetadata },
             },

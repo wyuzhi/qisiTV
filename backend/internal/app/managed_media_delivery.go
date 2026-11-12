@@ -3,13 +3,13 @@ package app
 import (
 	"context"
 
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/model"
 	localtask "qisitv/backend/internal/task"
 )
 
 func (a generationDeliveryMediaAdapter) refreshManagedArtifactURL(ctx context.Context, userID, identity, kind string, cause error) (string, bool, error) {
-	return localtask.RefreshManagedArtifactURL(ctx, a.service.repo, func(c context.Context, task model.Task) (string, []beefapi.MediaOutput, bool, bool, error) {
+	return localtask.RefreshManagedArtifactURL(ctx, a.service.repo, func(c context.Context, task model.Task) (string, []beeftv.MediaOutput, bool, bool, error) {
 		query, managed, err := a.service.managedTaskRecoveryQuery(c, task)
 		if err != nil || !managed || query.Legacy {
 			return "", nil, managed, query.Legacy, err

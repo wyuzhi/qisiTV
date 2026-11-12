@@ -54,10 +54,6 @@ func swapWindows(req HelperRequest) error {
 	if err := os.MkdirAll(req.BackupPath, 0o755); err != nil {
 		return err
 	}
-	backupExe := filepath.Join(req.BackupPath, windowsExeName)
-	if err := retryIO(func() error { return renamePath(req.TargetPath, backupExe) }); err != nil {
-		return err
-	}
 	for _, name := range windowsSidecarEntries {
 		if name == "media-runtime" && !pathExists(filepath.Join(req.StagedPath, name)) {
 			continue
@@ -73,6 +69,10 @@ func swapWindows(req HelperRequest) error {
 				return errors.Join(err, restoreWindows(req))
 			}
 		}
+	}
+	backupExe := filepath.Join(req.BackupPath, windowsExeName)
+	if err := retryIO(func() error { return renamePath(req.TargetPath, backupExe) }); err != nil {
+		return errors.Join(err, restoreWindows(req))
 	}
 	if err := retryIO(func() error { return renamePath(stagedExe, req.TargetPath) }); err != nil {
 		return errors.Join(err, restoreWindows(req))
@@ -96,12 +96,7 @@ func restoreWindows(req HelperRequest) error {
 	backupExe := filepath.Join(req.BackupPath, windowsExeName)
 	var failures []error
 	if pathExists(backupExe) {
-		if err := retryIO(func() error {
-			if err := os.Remove(req.TargetPath); err != nil && !os.IsNotExist(err) {
-				return err
-			}
-			return renamePath(backupExe, req.TargetPath)
-		}); err != nil {
+		if err := restoreWindowsExecutable(req.TargetPath, backupExe); err != nil {
 			failures = append(failures, fmt.Errorf("还原程序失败: %w", err))
 		}
 	} else if !pathExists(req.TargetPath) {
@@ -126,6 +121,46 @@ func restoreWindows(req HelperRequest) error {
 		}
 	}
 	return errors.Join(failures...)
+}
+
+func restoreWindowsExecutable(targetExe, backupExe string) error {
+	failedExe := targetExe + ".beeftv-failed"
+	err := retryIO(func() error {
+		if pathExists(targetExe) {
+			_ = os.RemoveAll(failedExe)
+			if err := renamePath(targetExe, failedExe); err != nil {
+				return err
+			}
+		}
+		info, statErr := os.Stat(backupExe)
+		if statErr != nil {
+			if !pathExists(targetExe) && pathExists(failedExe) {
+				_ = renamePath(failedExe, targetExe)
+			}
+			return statErr
+		}
+		if info.IsDir() {
+			if !pathExists(targetExe) && pathExists(failedExe) {
+				_ = renamePath(failedExe, targetExe)
+			}
+			return fmt.Errorf("程序备份不是可执行文件")
+		}
+		if err := renamePath(backupExe, targetExe); err != nil {
+			if copyErr := copyFile(backupExe, targetExe); copyErr != nil {
+				if !pathExists(targetExe) && pathExists(failedExe) {
+					_ = renamePath(failedExe, targetExe)
+				}
+				return err
+			}
+			_ = os.Remove(backupExe)
+		}
+		_ = os.RemoveAll(failedExe)
+		return nil
+	})
+	if err != nil && !pathExists(targetExe) && pathExists(failedExe) {
+		_ = renamePath(failedExe, targetExe)
+	}
+	return err
 }
 
 func RestoreBackup(req HelperRequest) error {

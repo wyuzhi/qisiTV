@@ -72,7 +72,7 @@ export function ProtocolCardPicker({
 }) {
     const availableProtocols = protocols.filter((item) => item.capability === capability && item.enabled !== false);
     return (
-        <div className={cn("grid grid-cols-1 gap-2 sm:grid-cols-2", density === "compact" && "gap-1.5 xl:grid-cols-3")} role="radiogroup" aria-label="模型请求协议">
+        <div className={cn("grid grid-cols-1 gap-2 sm:grid-cols-2", density === "compact" && "gap-1.5 xl:grid-cols-3")} role="radiogroup" aria-label="模型接口格式">
             {availableProtocols.map((protocol) => {
                 const selected = value === protocol.value;
                 return (
@@ -153,7 +153,7 @@ export function ModelCapabilityProtocolModal({
                 </span>
             </Button>
             <Modal
-                title="配置模型能力与请求协议"
+                title="配置模型能力与接口格式"
                 open={open}
                 width="min(720px, calc(100vw - 24px))"
                 centered
@@ -172,7 +172,7 @@ export function ModelCapabilityProtocolModal({
                         <CapabilityCardPicker value={draft.capability} onChange={updateCapability} />
                     </section>
                     <section>
-                        <div className="mb-2 text-xs font-semibold text-foreground/65">请求协议</div>
+                        <div className="mb-2 text-xs font-semibold text-foreground/65">接口格式</div>
                         <ProtocolCardPicker capability={draft.capability} value={draft.protocol} protocols={protocols} onChange={(protocol) => setDraft((current) => ({ ...current, protocol }))} />
                     </section>
                 </div>

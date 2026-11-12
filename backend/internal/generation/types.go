@@ -6,7 +6,6 @@ import (
 
 	"qisitv/backend/internal/modelcatalog"
 	"qisitv/backend/internal/outbound"
-	"qisitv/backend/internal/provider/workflow"
 )
 
 // Capability JSON is owned by modelcatalog. generation aliases the same types
@@ -109,18 +108,13 @@ type Config struct {
 	AudioVoice               string                    `json:"audioVoice"`
 	AudioFormat              string                    `json:"audioFormat"`
 	AudioSpeed               string                    `json:"audioSpeed"`
+	AudioPitch               string                    `json:"audioPitch,omitempty"`
+	AudioVolume              string                    `json:"audioVolume,omitempty"`
 	AudioInstructions        string                    `json:"audioInstructions"`
 	SystemPrompt             string                    `json:"systemPrompt"`
 	CapabilityConfig         *ModelCapabilityConfig    `json:"capabilityConfig"`
 	ImageCapabilitiesVersion *string                   `json:"imageCapabilitiesVersion,omitempty"`
 	VideoCapabilitiesVersion *string                   `json:"videoCapabilitiesVersion,omitempty"`
-	WorkflowID               string                    `json:"workflowId"`
-	WebappID                 string                    `json:"webappId"`
-	WorkflowJSON             map[string]interface{}    `json:"workflowJson"`
-	WorkflowFields           []WorkflowField           `json:"workflowFields"`
-	RunningHubUseWallet      bool                      `json:"runningHubUseWallet"`
-	RunningHubWalletKey      string                    `json:"runningHubWalletApiKey"`
-	RunningHubUploadKey      string                    `json:"runningHubUploadApiKey"`
 }
 
 type Media struct {
@@ -136,9 +130,6 @@ type Media struct {
 	Height     int    `json:"height"`
 	DurationMs int64  `json:"durationMs"`
 }
-
-// WorkflowField 是云端工作流字段描述。实现位于 provider/workflow。
-type WorkflowField = workflow.Field
 
 type MediaHydrationPolicy struct {
 	ManualURL   bool

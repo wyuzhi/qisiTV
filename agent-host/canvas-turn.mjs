@@ -4,7 +4,23 @@
 // 供应商定义同样放在这里：协议决定用哪个 pi-ai 适配器，宿主不再假设一切都是
 // OpenAI 兼容接口，地址形状由后端按协议整理好后下发。
 
+import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all';
+
 export const SUPPORTED_APIS = ['openai-completions', 'openai-responses', 'anthropic-messages'];
+const CATALOG_PROVIDERS = ['opencode-go', 'opencode', 'deepseek', 'anthropic', 'openai', 'zai', 'google'];
+
+function findCatalogModel(modelId, api) {
+  if (!modelId) return null;
+  let fallback = null;
+  for (const provider of CATALOG_PROVIDERS) {
+    for (const candidate of getBuiltinModels(provider)) {
+      if (candidate.id !== modelId) continue;
+      if (candidate.api === api) return { model: candidate, sameApi: true };
+      if (!fallback) fallback = candidate;
+    }
+  }
+  return fallback ? { model: fallback, sameApi: false } : null;
+}
 
 // This compatibility route has returned concatenated arguments for distinct
 // calls, including when parallel_tool_calls=false. Never guess missing names
@@ -17,7 +33,7 @@ export function toolCallCapabilityContext({ api, modelId }) {
 
 export function newTurnAccumulator() {
   return { turnId: '', seq: 0, toolSeq: 0, revisionBefore: 0, revisionAfter: 0,
-    createdNodeIds: [], updatedNodeIds: [], createdEdgeIds: [], operationIds: [], proposals: [],
+    createdNodeIds: [], updatedNodeIds: [], createdEdgeIds: [], operationIds: [], proposals: [], scriptProposals: [],
     timelineUpdated: false, writeChains: [], writeRequests: [] };
 }
 
@@ -32,6 +48,7 @@ export function resetTurnAccumulator(turn, revisionBefore, turnId = '') {
   turn.createdEdgeIds.length = 0;
   turn.operationIds.length = 0;
   turn.proposals.length = 0;
+  turn.scriptProposals = [];
   turn.timelineUpdated = false;
   turn.deletedNodeIds=[];
   turn.deletedEdgeIds=[];
@@ -78,6 +95,19 @@ function asStringList(value) {
   return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : [];
 }
 
+// 统一回执里的连带节点：操作显式改了别的节点时，模型和撤销都必须知道。
+function alsoChangedNodeIds(result) {
+  return Array.isArray(result?.alsoChanged)
+    ? result.alsoChanged.map((item) => String(item?.nodeId || '')).filter(Boolean)
+    : [];
+}
+
+function pushUpdatedNodeIds(turn, ids) {
+  for (const id of ids) {
+    if (!turn.updatedNodeIds.includes(id)) turn.updatedNodeIds.push(id);
+  }
+}
+
 export function collectTurnEffects(turn, opID, result, operationId) {
   if (!turn || !result || typeof result !== 'object') return turn;
   if (opID==='canvas.timeline.render') return turn;
@@ -111,6 +141,7 @@ export function collectTurnEffects(turn, opID, result, operationId) {
     case 'canvas.node.move':
     case 'canvas.task.bind':
       if (result.nodeId) turn.updatedNodeIds.push(String(result.nodeId));
+      pushUpdatedNodeIds(turn, alsoChangedNodeIds(result));
       break;
     case 'canvas.node.delete':
     case 'canvas.edge.delete':
@@ -122,9 +153,9 @@ export function collectTurnEffects(turn, opID, result, operationId) {
     case 'canvas.script.row.remove':
       // 行绑定会改写产出连线；回执里的连线增删与 Go 撤销用的变更摘要保持一致。
       if (result.nodeId) turn.updatedNodeIds.push(String(result.nodeId));
-      for (const syncedId of asStringList(result.syncedNodeIds)) {
-        if (!turn.updatedNodeIds.includes(syncedId)) turn.updatedNodeIds.push(syncedId);
-      }
+      pushUpdatedNodeIds(turn, alsoChangedNodeIds(result));
+      // 旧回执兼容：syncedNodeIds 只给 ID；新回执 alsoChanged 带字段。
+      pushUpdatedNodeIds(turn, asStringList(result.syncedNodeIds));
       turn.createdEdgeIds.push(...asStringList(result.createdEdgeIds));
       turn.deletedEdgeIds=[...new Set([...(turn.deletedEdgeIds || []),...asStringList(result.deletedEdgeIds)])];
       break;
@@ -138,9 +169,19 @@ export function collectTurnEffects(turn, opID, result, operationId) {
         turn.proposals.push({ proposalId: String(result.proposalId), kind: String(result.kind || ''),
           nodeIds: asStringList(result.nodeIds), model: String(result.model || ''),
           modelKey: String(result.modelKey || ''), note: String(result.note || ''),
+          ...(Array.isArray(result.targets) ? { targets: result.targets } : {}),
+          ...(result.estimate ? { estimate: result.estimate } : {}),
           ...(result.production ? { production: result.production } : {}),
           ...(result.source ? { source: { canvasId: result.source.canvasId,
             canvasRevision: result.source.canvasRevision, modelConfigRevision: result.source.modelConfigRevision } } : {}) });
+      }
+      break;
+    case 'skill.script.run':
+      if (result.proposal?.proposalId) {
+        turn.scriptProposals ||= [];
+        const index = turn.scriptProposals.findIndex((item) => item?.proposalId === result.proposal.proposalId);
+        if (index >= 0) turn.scriptProposals[index] = result.proposal;
+        else turn.scriptProposals.push(result.proposal);
       }
       break;
     default:
@@ -198,15 +239,28 @@ export function turnContextPrefix({ canvasId, selectedNodeIds = [], references =
 
 // providerRegistration 构造要登记给 pi 的供应商：
 // 密钥以环境变量引用形式传入，宿主进程内解析，不写进 auth.json。
-// Anthropic 协议打开 reasoning，由会话的 thinkingLevel 决定思考预算（off 时显式关闭）。
-// OpenAI 兼容协议保持关闭：pi-ai 对 reasoning 模型会改发 developer 角色和 reasoning_effort，
-// 这些未在实际接入的兼容服务上验证过。
+// 从官方 pi-ai 模型目录继承 reasoning、thinkingLevelMap、compat 与 input，再用宿主环境变量覆盖。
+// OpenAI 兼容网关启用 prompt_cache_key 亲和性，由宿主在请求钩子里写入会话 ID。
 export function providerRegistration({ api, baseUrl, modelId, maxTokens, contextWindow }) {
+  const catalog = findCatalogModel(modelId, api);
+  const catalogModel = catalog?.model;
+  const catalogCompat = catalog?.sameApi && catalogModel?.compat ? catalogModel.compat : undefined;
+  const compat = api === 'openai-completions'
+    ? { ...catalogCompat, promptCacheKeyMode: 'enabled' }
+    : catalogCompat ? { ...catalogCompat } : undefined;
   return {
     name: 'qisiTV', baseUrl, apiKey: '$BEEFTV_AGENT_API_KEY', api,
-    models: [{ id: modelId, name: modelId, reasoning: api === 'anthropic-messages', input: ['text', 'image'],
+    models: [{
+      id: modelId,
+      name: modelId,
+      reasoning: catalogModel ? Boolean(catalogModel.reasoning) : api === 'anthropic-messages',
+      ...(catalogModel?.thinkingLevelMap ? { thinkingLevelMap: structuredClone(catalogModel.thinkingLevelMap) } : {}),
+      ...(compat ? { compat } : {}),
+      input: Array.isArray(catalogModel?.input) ? [...catalogModel.input] : ['text', 'image'],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow, maxTokens }],
+      contextWindow,
+      maxTokens,
+    }],
   };
 }
 

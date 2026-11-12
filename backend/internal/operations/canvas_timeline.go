@@ -21,10 +21,9 @@ func timelineUpdateSchema(raw json.RawMessage) json.RawMessage {
 		"description": "仅刷新指定节点素材引用（与 timeline 二选一）",
 	}
 	schema["required"] = []string{"canvasId", "expectedRevision"}
-	schema["oneOf"] = []any{
-		map[string]any{"required": []string{"timeline"}},
-		map[string]any{"required": []string{"refreshNodeIds"}},
-	}
+	// 根级 oneOf 会让部分严格校验的工具端点拒绝整份工具清单。互斥条件由服务端校验，
+	// 模型需要的约束放在参数描述里。
+	schema["description"] = "timeline 与 refreshNodeIds 必须且只能提供一个；服务端校验互斥条件。"
 	encoded, _ := json.Marshal(schema)
 	return encoded
 }

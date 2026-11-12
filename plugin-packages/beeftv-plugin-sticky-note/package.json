@@ -1,0 +1,75 @@
+{
+  "name": "beeftv-plugin-sticky-note",
+  "version": "0.1.1",
+  "description": "在画布上放置可换色、可编辑的便签卡片，并支持创作助手直接创建和修改便签。",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sunnyender-org/beeftv-plugins.git",
+    "directory": "plugins/beeftv-plugin-sticky-note"
+  },
+  "homepage": "https://github.com/Sunnyender-org/beeftv-plugins/tree/main/plugins/beeftv-plugin-sticky-note",
+  "keywords": [
+    "beeftv-plugin",
+    "sticky-note",
+    "canvas",
+    "template"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "beeftv": {
+    "name": "画布便签",
+    "client": "./client/index.js",
+    "surfaces": [
+      "node"
+    ],
+    "permissions": [
+      "canvas.read",
+      "canvas.write"
+    ],
+    "contributes": {
+      "canvasNodes": [
+        {
+          "id": "sticky-note",
+          "label": "画布便签",
+          "defaultTitle": "便签",
+          "defaultSize": {
+            "width": 240,
+            "height": 180
+          },
+          "schema": {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "color": {
+                "type": "string"
+              }
+            }
+          },
+          "renderer": "client",
+          "description": "可切换配色的画布便签卡片"
+        }
+      ]
+    }
+  },
+  "files": [
+    "extensions",
+    "skills",
+    "client",
+    "README.md"
+  ],
+  "author": "BeefTV"
+}

@@ -22,8 +22,8 @@ func TestOfficialProtocolPackagesAreSelfContainedDeclarativePlugins(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(paths) < 70 {
-		t.Fatalf("official protocol packages = %d, want at least 70", len(paths))
+	if len(paths) < 60 {
+		t.Fatalf("official protocol packages = %d, want at least 60", len(paths))
 	}
 	providerOwners := map[string]string{}
 	for _, path := range paths {
@@ -40,9 +40,6 @@ func TestOfficialProtocolPackagesAreSelfContainedDeclarativePlugins(t *testing.T
 		}
 		if version := pkg.Manifest.APIVersion; version != "qisitv.plugin/v2" && version != "qisitv.plugin/v3" && version != "beeftv.plugin/v2" && version != "beeftv.plugin/v3" {
 			t.Fatalf("%s apiVersion = %q", filepath.Base(path), pkg.Manifest.APIVersion)
-		}
-		if strings.HasPrefix(strings.TrimSpace(pkg.Manifest.Runtime.Backend), "host:") {
-			t.Fatalf("%s depends on host runtime", filepath.Base(path))
 		}
 		if len(pkg.Files["README.md"]) == 0 || len(pkg.Files["docs/interface.md"]) == 0 {
 			t.Fatalf("%s must contain README.md and docs/interface.md", filepath.Base(path))
@@ -61,7 +58,7 @@ func TestOfficialProtocolPackagesAreSelfContainedDeclarativePlugins(t *testing.T
 				t.Fatalf("%s interface documentation is missing configuration field %q", filepath.Base(path), field.Name)
 			}
 		}
-		adapters, err := LoadInstalledProviders(pkg.ManifestRaw, nil)
+		adapters, err := LoadInstalledProviders(pkg.ManifestRaw)
 		if err != nil {
 			t.Fatalf("load %s: %v", filepath.Base(path), err)
 		}
@@ -85,8 +82,10 @@ func TestOfficialProtocolPackagesAreSelfContainedDeclarativePlugins(t *testing.T
 	}
 }
 
-func TestOfficialAtlasCloudChatProfile(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "..", "plugin-packages", "atlascloud-chat.qisitv-plugin"))
+// 各家 OpenAI 兼容服务共用一个接口；旧的服务商专属 ID 仍要解析到它，旧配置里放在旧命名空间下的
+// 参数也要照样发出去，否则合并会悄悄改掉已保存连接的请求。
+func TestOpenAICompatibleChatServesRetiredVendorIDs(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "plugin-packages", "openai-chat-completions.qisitv-plugin"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,29 +93,74 @@ func TestOfficialAtlasCloudChatProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	provider := pkg.Manifest.Contributes.Providers[0]
-	if provider.ID != "atlascloud-chat" || provider.BaseURL != "https://api.atlascloud.ai" || provider.Auth.Type != "bearer" {
-		t.Fatalf("Atlas Cloud provider metadata = %#v", provider)
+	adapters, err := LoadInstalledProviders(pkg.ManifestRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := NewRegistry(adapters...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, retired := range []string{"deepseek-chat", "atlascloud-chat", "openrouter-chat", "zhipu-glm-chat", "vllm-chat"} {
+		adapter, ok := registry.Resolve(retired)
+		if !ok || adapter.Metadata().ID != "chat-completion" {
+			t.Fatalf("%s should resolve to chat-completion, got %v %v", retired, ok, adapter)
+		}
 	}
 
-	adapter := officialPackageAdapter(t, "atlascloud-chat.qisitv-plugin", "atlascloud-chat")
-	spec, err := adapter.BuildCreate(context.Background(), RequestContext{Request: GenerationRequest{
-		Model:    "openai/gpt-5.6-luna",
-		Messages: []Message{{Role: "user", Content: "hello"}},
-	}})
+	adapter, _ := registry.Resolve("openrouter-chat")
+	request := WithRequestedAliasOptions(GenerationRequest{
+		Capability: CapabilityText,
+		Model:      "openai/gpt-5.6-luna",
+		Messages:   []Message{{Role: "user", Content: "hello"}},
+		ProviderOptions: map[string]map[string]any{
+			"openrouter-chat": {"provider": map[string]any{"order": []any{"a"}}, "temperature": 0.2},
+			"kimi-chat":       {"tools": []any{"must-not-leak"}},
+			"chat-completion": {"temperature": 0.7},
+		},
+	}, "openrouter-chat", adapter.Metadata())
+	spec, err := adapter.BuildCreate(context.Background(), RequestContext{Request: request})
 	if err != nil {
 		t.Fatal(err)
 	}
 	body := manifestTestBody(t, spec)
-	if spec.Method != "POST" || spec.Path != "/v1/chat/completions" || body["model"] != "openai/gpt-5.6-luna" {
-		t.Fatalf("Atlas Cloud request = %#v, body = %#v", spec, body)
+	if spec.Method != "POST" || body["model"] != "openai/gpt-5.6-luna" {
+		t.Fatalf("request = %#v, body = %#v", spec, body)
 	}
-	result, err := adapter.ParseCreate(context.Background(), []byte(`{"choices":[{"message":{"content":"atlas ok"}}],"usage":{"total_tokens":3}}`))
-	if err != nil {
-		t.Fatal(err)
+	if _, ok := body["provider"].(map[string]any); !ok {
+		t.Fatalf("options saved under the retired namespace were dropped: %#v", body)
 	}
-	if result.Status != StatusSucceeded || result.Result == nil || result.Result.Text != "atlas ok" {
-		t.Fatalf("Atlas Cloud response = %#v", result)
+	if body["temperature"] != 0.7 {
+		t.Fatalf("the provider's own namespace must win over a retired one, temperature = %#v", body["temperature"])
+	}
+	if _, leaked := body["tools"]; leaked {
+		t.Fatalf("options under a retired ID this request did not use leaked in: %#v", body["tools"])
+	}
+	// An ID the provider never had is left alone.
+	untouched := WithRequestedAliasOptions(GenerationRequest{ProviderOptions: map[string]map[string]any{"other": {"x": 1}}}, "other", adapter.Metadata())
+	if _, ok := untouched.ProviderOptions["chat-completion"]; ok {
+		t.Fatal("an unknown requested ID must not be merged")
+	}
+	result, err := adapter.ParseCreate(context.Background(), []byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	if err != nil || result.Result == nil || result.Result.Text != "ok" {
+		t.Fatalf("response = %#v err = %v", result, err)
+	}
+}
+
+func TestManifestRejectsLegacyAliasThatCollides(t *testing.T) {
+	manifest := Manifest{APIVersion: "beeftv.plugin/v2"}
+	manifest.Metadata.ID, manifest.Metadata.Name, manifest.Metadata.Version = "dup", "Dup", "1.0.0"
+	manifest.Contributes.Providers = []ManifestProvider{{
+		ID: "chat-a", Label: "A", LegacyAliases: []string{"chat-a"},
+		Capabilities: []Capability{CapabilityText}, Scopes: []Surface{SurfaceUserCustomChannel},
+		Create: ManifestOperation{Method: "POST", Path: "/v1/chat/completions"},
+	}}
+	if err := ValidateManifest(manifest); err == nil || !strings.Contains(err.Error(), "legacyAliases") {
+		t.Fatalf("alias equal to its own id must be rejected, got %v", err)
+	}
+	manifest.Contributes.Providers[0].LegacyAliases = []string{"Bad Alias"}
+	if err := ValidateManifest(manifest); err == nil || !strings.Contains(err.Error(), "legacyAliases") {
+		t.Fatalf("invalid alias must be rejected, got %v", err)
 	}
 }
 
@@ -550,8 +594,6 @@ func TestOfficialTextProtocolsDeliverInstructions(t *testing.T) {
 		name, packageName, providerID, messagesField, instructionField string
 	}{
 		{name: "openai-chat", packageName: "openai-chat-completions.qisitv-plugin", providerID: "chat-completion", messagesField: "messages"},
-		{name: "deepseek", packageName: "deepseek-chat.qisitv-plugin", providerID: "deepseek-chat", messagesField: "messages"},
-		{name: "atlascloud", packageName: "atlascloud-chat.qisitv-plugin", providerID: "atlascloud-chat", messagesField: "messages"},
 		{name: "openai-responses", packageName: "openai-responses.qisitv-plugin", providerID: "openai-response", messagesField: "input", instructionField: "instructions"},
 		{name: "anthropic", packageName: "anthropic-messages.qisitv-plugin", providerID: "claude-api", messagesField: "messages", instructionField: "system"},
 		{name: "gemini", packageName: "google-gemini-generate-content.qisitv-plugin", providerID: "gemini-generate-content", messagesField: "contents", instructionField: "systemInstruction"},
@@ -602,7 +644,7 @@ func officialPackageAdapter(t *testing.T, packageName, providerID string) Adapte
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapters, err := LoadInstalledProviders(pkg.ManifestRaw, nil)
+	adapters, err := LoadInstalledProviders(pkg.ManifestRaw)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -23,7 +23,7 @@ func likeAIAdapter(t *testing.T, mode string) protocol.Adapter {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapters, err := protocol.LoadInstalledProviders(body, nil)
+	adapters, err := protocol.LoadInstalledProviders(body)
 	if err != nil {
 		t.Fatal(err)
 	}

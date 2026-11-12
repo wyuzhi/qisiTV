@@ -6,10 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/model"
-	"qisitv/backend/internal/provider/workflow"
 	localtask "qisitv/backend/internal/task"
 )
 
@@ -23,10 +22,6 @@ func (s *Service) QueryFailedVideoTask(ctx context.Context, userID string, taskI
 		return nil, err
 	}
 	return s.queryFailedVideoTask(ctx, task, strings.TrimSpace(userID))
-}
-
-func (s *Service) AdminQueryFailedVideoTask(ctx context.Context, actor *model.User, logID string) (*ProviderTaskQueryResult, error) {
-	return localtask.AdminQueryFailedVideoTask(ctx, s.repo, s.RequireAdmin, s.queryFailedVideoTask, s.appendAdminAudit, actor, logID)
 }
 
 func (s *Service) queryFailedVideoTask(ctx context.Context, task *model.Task, claimUserID string) (*ProviderTaskQueryResult, error) {
@@ -48,7 +43,7 @@ func (s *Service) queryFailedVideoTask(ctx context.Context, task *model.Task, cl
 			return true, mq.Kind, func(queryCtx context.Context) (map[string]interface{}, string, *ProviderTaskQueryResult, error) {
 				queryCtx = context.WithValue(queryCtx, imageTaskContext{}, *t)
 				projection, qErr := mq.Client.Query(queryCtx, mq.Key, mq.Kind)
-				if beefapi.IsMediaTaskNotFound(qErr) {
+				if beeftv.IsMediaTaskNotFound(qErr) {
 					outcome, resubmitted, resolveErr := s.mediaAttempts().ResolveMissingManagedSubmission(queryCtx, *t)
 					switch {
 					case outcome != "":
@@ -90,9 +85,6 @@ func (s *Service) queryFailedVideoTask(ctx context.Context, task *model.Task, cl
 				return res, projection.Status, nil, qErr
 			}, nil
 		},
-		QueryWorkflowVideo: func(c context.Context, cfg generation.Config, reqID string) (map[string]interface{}, string, error) {
-			return s.workflowClient(nil).QueryVideo(c, workflowConfigFromProvider(cfg), workflow.RootURL(cfg.BaseURL), reqID)
-		},
 		RecordMissing:         s.recordMissingVideoReceiptOutcome,
 		RecordUnrecoverable:   s.recordUnrecoverableVideoOutcome,
 		ClassifyOutcome:       classifyFailedVideoQueryOutcome,
@@ -107,12 +99,12 @@ func (s *Service) queryFailedVideoTask(ctx context.Context, task *model.Task, cl
 	}, task, claimUserID)
 }
 
-func queryBeefAPIVideoResult(ctx context.Context, input canvasGenerationInput, id string) (map[string]interface{}, string, error) {
-	result, status, _, err := queryBeefAPIVideoResultWithSettlement(ctx, input, id)
+func queryBeefTVVideoResult(ctx context.Context, input canvasGenerationInput, id string) (map[string]interface{}, string, error) {
+	result, status, _, err := queryBeefTVVideoResultWithSettlement(ctx, input, id)
 	return result, status, err
 }
 
-func queryBeefAPIVideoResultWithSettlement(ctx context.Context, input canvasGenerationInput, id string) (map[string]interface{}, string, generation.BeefAPIVideoSettlement, error) {
+func queryBeefTVVideoResultWithSettlement(ctx context.Context, input canvasGenerationInput, id string) (map[string]interface{}, string, generation.BeefTVVideoSettlement, error) {
 	return generation.QueryManagedLegacyVideo(ctx, input, id)
 }
 

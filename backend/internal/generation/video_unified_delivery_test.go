@@ -26,7 +26,7 @@ func unifiedVideoAdapter(t *testing.T, name string) protocol.Adapter {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapters, err := protocol.LoadInstalledProviders(raw, nil)
+	adapters, err := protocol.LoadInstalledProviders(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestEveryInstalledVideoProviderUsesUnifiedPublicURLDownload(t *testing.T) {
 	t.Setenv("CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS", "127.0.0.1")
 	payload := unifiedVideoPayload(t)
 	media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "" || r.Header.Get("x-goog-api-key") != "" || r.Header.Get("X-Private-Channel") != "" || r.Header.Get("Cookie") != "" || r.Header.Get(beefAPIVideoDeliveryHeader) != "" || r.URL.Query().Get("credential") != "" {
+		if r.Header.Get("Authorization") != "" || r.Header.Get("x-goog-api-key") != "" || r.Header.Get("X-Private-Channel") != "" || r.Header.Get("Cookie") != "" || r.Header.Get(beefTVVideoDeliveryHeader) != "" || r.URL.Query().Get("credential") != "" {
 			t.Error("external media received provider credentials")
 		}
 		if r.URL.Query().Get("signature") != "media-signature" {
@@ -96,7 +96,7 @@ func TestEveryInstalledVideoProviderUsesUnifiedPublicURLDownload(t *testing.T) {
 		if !hasVideo {
 			continue
 		}
-		adapters, err := protocol.LoadInstalledProviders(raw, nil)
+		adapters, err := protocol.LoadInstalledProviders(raw)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -125,7 +125,7 @@ func TestEveryInstalledVideoProviderUsesUnifiedPublicURLDownload(t *testing.T) {
 			})
 		}
 	}
-	if len(roster) != 32 {
+	if len(roster) != 31 {
 		t.Fatalf("shipped video roster changed: %d %v", len(roster), roster)
 	}
 	t.Logf("downloadRoster=%v; renewalParserRoster=openai-videos,google-gemini-veo,vertex-veo,volcengine-ark-seedance", roster)
@@ -139,7 +139,7 @@ func TestAllOfficialVideoURLsRenewOriginalThirdPartyTask(t *testing.T) {
 			polls, mediaReads, creates := 0, 0, 0
 			media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				mediaReads++
-				if r.Header.Get("Authorization") != "" || r.Header.Get("x-goog-api-key") != "" || r.Header.Get("X-Private-Channel") != "" || r.Header.Get(beefAPIVideoDeliveryHeader) != "" {
+				if r.Header.Get("Authorization") != "" || r.Header.Get("x-goog-api-key") != "" || r.Header.Get("X-Private-Channel") != "" || r.Header.Get(beefTVVideoDeliveryHeader) != "" {
 					t.Error("external media received provider credentials")
 				}
 				if r.URL.Query().Get("version") != "4" {
@@ -157,8 +157,8 @@ func TestAllOfficialVideoURLsRenewOriginalThirdPartyTask(t *testing.T) {
 					w.WriteHeader(http.StatusBadRequest)
 					return
 				}
-				if r.URL.Query().Get("delivery") != "" || r.Header.Get(beefAPIVideoDeliveryHeader) != "" {
-					t.Error("third-party request used BeefAPI delivery protocol")
+				if r.URL.Query().Get("delivery") != "" || r.Header.Get(beefTVVideoDeliveryHeader) != "" {
+					t.Error("third-party request used BeefTV delivery protocol")
 				}
 				if r.Header.Get("X-Private-Channel") != "private-fixture" {
 					t.Error("provider request lost channel header")
@@ -222,7 +222,7 @@ func TestVideoProtocolAuthSurvivesRelativeURLAndStopsAtRedirect(t *testing.T) {
 	polls, mediaLinks := 0, 0
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Query().Get("delivery") != "" {
-			t.Error("relative result recovery created work or requested BeefAPI backup")
+			t.Error("relative result recovery created work or requested BeefTV backup")
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -243,7 +243,7 @@ func TestVideoProtocolAuthSurvivesRelativeURLAndStopsAtRedirect(t *testing.T) {
 	}))
 	defer provider.Close()
 	manifest := []byte(`{"apiVersion":"beeftv.plugin/v2","id":"video-query-fixture","name":"Fixture","version":"1.0.0","contributes":{"providers":[{"id":"video-query-fixture","label":"Fixture","capabilities":["video"],"scopes":["canvas"],"auth":{"type":"query","field":"apiKey","query":"credential"},"create":{"method":"POST","path":"/v1/videos"},"poll":{"method":"GET","path":"/v1/task/{{taskId}}"},"response":{"status":{"$ref":"response.status"},"videos":{"$ref":"response.video_url"}}}]}}`)
-	adapter, err := protocol.LoadInstalledPlugin(manifest, nil)
+	adapter, err := protocol.LoadInstalledPlugin(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -501,7 +501,7 @@ func TestVideoBinaryResultPreservesMethodAuthAndOriginalTaskRenewal(t *testing.T
 	polls, reads := 0, 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Video-Api-Key") != "provider-key" || r.Header.Get("Authorization") != "" || r.URL.Query().Get("delivery") != "" {
-			t.Error("binary result changed provider auth or used BeefAPI backup")
+			t.Error("binary result changed provider auth or used BeefTV backup")
 		}
 		if r.Method == http.MethodGet && r.URL.Path == "/v1/tasks/original" {
 			polls++
@@ -522,7 +522,7 @@ func TestVideoBinaryResultPreservesMethodAuthAndOriginalTaskRenewal(t *testing.T
 	}))
 	defer server.Close()
 	manifest := []byte(`{"apiVersion":"beeftv.plugin/v2","id":"video-binary-fixture","name":"Fixture","version":"1.0.0","contributes":{"providers":[{"id":"video-binary-fixture","label":"Fixture","capabilities":["video"],"scopes":["canvas"],"auth":{"type":"header","field":"apiKey","header":"X-Video-Api-Key"},"create":{"method":"POST","path":"/v1/videos"},"poll":{"method":"GET","path":"/v1/tasks/{{taskId}}"},"result":{"method":"POST","path":"/v1/tasks/{{taskId}}/result","headers":{"X-Result-Mode":"binary"}},"response":{"status":{"$ref":"response.status"}}}]}}`)
-	adapter, err := protocol.LoadInstalledPlugin(manifest, nil)
+	adapter, err := protocol.LoadInstalledPlugin(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}

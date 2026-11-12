@@ -103,7 +103,7 @@ def verify_product_rows(db):
         raise RuntimeError('Existing product rows changed during upgrade or rollback')
 
 
-def exercise(source, candidate, version, directory, rollback=False):
+def exercise(source, candidate, version, directory, rollback=False, source_tree=None, candidate_tree=None):
     install, staged, data = directory/'install', directory/'payload', directory/'data'
     shutil.copytree(source, install)
     shutil.copytree(candidate, staged)
@@ -133,8 +133,10 @@ def exercise(source, candidate, version, directory, rollback=False):
         with closing(sqlite3.connect(db)) as connection, connection:
             connection.execute("INSERT INTO projects (id,user_id,name,description,status,revision) VALUES (?,?,?,?,?,?)", ('upgrade-audit-project','upgrade-audit','Upgrade acceptance project','Keep this project','draft',7))
             connection.execute('INSERT INTO system_settings (key,value_json) VALUES (?,?)', ('upgrade-audit-setting','{"preserve":true}'))
-        source_tree = install_tree(source)
-        candidate_tree = install_tree(candidate)
+        if source_tree is None:
+            source_tree = install_tree(source)
+        if not rollback and candidate_tree is None:
+            candidate_tree = install_tree(candidate)
         process = subprocess.Popen([str(helper), '--beeftv-update-helper', str(request)], env=env)
         wait_until(lambda: (directory/'prepared').exists() or process.poll() is not None, 30)
         if not (directory/'prepared').exists():
@@ -197,16 +199,20 @@ def main():
         candidate = root/'candidate'
         with zipfile.ZipFile(args.archive) as bundle:
             bundle.extractall(candidate)
+        candidate_tree = None
         for fixture in fixtures['currentLayout']:
             source = download_fixture(fixture, root)
             case = root/('case-'+fixture['version'])
             case.mkdir()
             try:
-                result = exercise(source, candidate, args.version, case)
+                if candidate_tree is None:
+                    candidate_tree = install_tree(candidate)
+                source_tree = install_tree(source)
+                result = exercise(source, candidate, args.version, case, source_tree=source_tree, candidate_tree=candidate_tree)
                 receipts.append(dict(source=fixture['version'], **result))
                 rollback_case = root/('rollback-'+fixture['version'])
                 rollback_case.mkdir()
-                result = exercise(source, candidate, args.version, rollback_case, rollback=True)
+                result = exercise(source, candidate, args.version, rollback_case, rollback=True, source_tree=source_tree, candidate_tree=candidate_tree)
                 receipts.append(dict(source=fixture['version'], **result))
             except Exception as error:
                 receipts.append(dict(source=fixture['version'], passed=False, error=str(error)))

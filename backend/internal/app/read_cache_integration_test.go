@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -78,11 +79,10 @@ func TestRuntimeConcurrencyCacheDoesNotCacheAuthoritativePolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.SystemSetting{}, &model.AdminAuditEvent{}); err != nil {
+	if err := db.AutoMigrate(&model.SystemSetting{}); err != nil {
 		t.Fatal(err)
 	}
 	svc := &Service{repo: repository.New(db)}
-	actor := &model.User{ID: "admin", Role: model.UserRoleAdmin}
 	var queries atomic.Int32
 	if err := db.Callback().Query().Before("gorm:query").Register("policy-count", func(*gorm.DB) { queries.Add(1) }); err != nil {
 		t.Fatal(err)
@@ -106,19 +106,16 @@ func TestRuntimeConcurrencyCacheDoesNotCacheAuthoritativePolicy(t *testing.T) {
 	}
 	policy := defaultRuntimePolicy()
 	policy.Task.WorkerConcurrency = 7
-	if _, err := svc.UpdateRuntimePolicySetting(actor, policy); err != nil {
+	encoded, err := json.Marshal(policy)
+	if err != nil {
 		t.Fatal(err)
 	}
-	setting, err := svc.runtimeConcurrencySetting()
-	if err != nil || setting.WorkerConcurrency != 7 {
-		t.Fatalf("save did not invalidate: %#v %v", setting, err)
-	}
-	if _, err := svc.ResetRuntimePolicySetting(actor); err != nil {
+	if err := svc.repo.SaveSystemSetting(&model.SystemSetting{Key: runtimePolicySettingKey, ValueJSON: string(encoded)}); err != nil {
 		t.Fatal(err)
 	}
-	setting, err = svc.runtimeConcurrencySetting()
-	if err != nil || setting.WorkerConcurrency != defaultRuntimePolicy().Task.WorkerConcurrency {
-		t.Fatalf("reset did not invalidate: %#v %v", setting, err)
+	authoritative, err := svc.RuntimePolicy()
+	if err != nil || authoritative.Task.WorkerConcurrency != 7 {
+		t.Fatalf("authoritative policy did not read saved setting: %#v %v", authoritative, err)
 	}
 }
 

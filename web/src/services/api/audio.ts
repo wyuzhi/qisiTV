@@ -1,9 +1,9 @@
 import { audioMimeType, audioSpeechKind, buildAudioSpeechRequest, normalizeAudioFormatValue } from "@/lib/audio-generation";
-import { isBeefAPIEndpoint } from "@/lib/beefapi-video-contracts";
+import { isBeefTVEndpoint } from "@/lib/beeftv-video-contracts";
 import { parseSpeechAudioEvents } from "@/lib/audio-speech-events";
 import { assertChannelBlob, ChannelResponseError, createChannelTransport, isChannelCancellation } from "@/services/api/channel-transport";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
-import { buildApiUrl, channelHasGenerationCredential, isBuiltinBeefAPIChannel, resolveModelChannel, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
+import { buildApiUrl, channelHasGenerationCredential, isBuiltinBeefTVChannel, resolveModelChannel, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 
 type RequestOptions = { signal?: AbortSignal };
 
@@ -27,7 +27,7 @@ export async function requestAudioGeneration(config: AiConfig, prompt: string, o
         if (requestConfig.interfaceType === "async-audio") {
             return await requestAsyncAudioGeneration(requestConfig, payload, format, options);
         }
-        const useSSE = audioSpeechKind(model) === "minimax-music" && isBeefAPIEndpoint(requestConfig.baseUrl);
+        const useSSE = audioSpeechKind(model) === "minimax-music" && isBeefTVEndpoint(requestConfig.baseUrl);
         if (useSSE) payload.stream_format = "sse";
         let blob = await audioTransport(requestConfig).postBlob(aiApiUrl(requestConfig, "/audio/speech"), payload, { signal: options?.signal, acceptEventStream: useSSE });
         if (useSSE && blob.type.startsWith("text/event-stream")) {
@@ -147,7 +147,7 @@ export function assertAudioConfig(config: AiConfig, selectedModel: string) {
     if (!config.baseUrl.trim()) throw new Error("请先配置 Base URL");
     const channel = resolveModelChannel(config, selectedModel || config.model);
     if (!channelHasGenerationCredential(channel, selectedModel || config.model)) {
-        throw new Error(isBuiltinBeefAPIChannel(channel) ? "请先连接 BeefTV" : "请先配置 API Key");
+        throw new Error(isBuiltinBeefTVChannel(channel) ? "请先连接 BeefTV" : "请先配置 API Key");
     }
     if (config.apiFormat === "gemini") throw new Error("Gemini 调用格式暂不支持音频生成，请使用 OpenAI 格式渠道");
 }

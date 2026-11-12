@@ -5,7 +5,7 @@
     {
       "name": "beeftv-skills",
       "source": "./plugins/beeftv-skills",
-      "description": "查找创作技能并协助作者准备投稿。",
+      "description": "在 BeefTV 画布上创作，查找创作技能并协助作者准备投稿。",
       "version": "0.1.0"
     }
   ]

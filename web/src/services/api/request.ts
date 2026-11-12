@@ -54,10 +54,11 @@ export let apiBaseURL = import.meta.env.VITE_CANVAS_BACKEND_URL || "/api";
 // 没有超时会让启动水合一直停留在 loading，Playwright 和用户都看不到页面。
 export const apiClient = axios.create({ baseURL: apiBaseURL, withCredentials: true, timeout: 4_000 });
 
-export function configureApiRuntime(baseURL: string, launchToken: string, uiBootstrapToken?: string) {
+export function configureApiRuntime(baseURL: string, launchToken?: string, uiBootstrapToken?: string) {
     apiBaseURL = baseURL;
     apiClient.defaults.baseURL = baseURL;
-    apiClient.defaults.headers.common["X-Desktop-Token"] = launchToken;
+    if (launchToken) apiClient.defaults.headers.common["X-Desktop-Token"] = launchToken;
+    else delete apiClient.defaults.headers.common["X-Desktop-Token"];
     if (uiBootstrapToken) apiClient.defaults.headers.common["X-Beeftv-UI-Bootstrap"] = uiBootstrapToken;
     else delete apiClient.defaults.headers.common["X-Beeftv-UI-Bootstrap"];
 }
@@ -190,9 +191,16 @@ apiClient.interceptors.request.use((config) => {
     return config;
 });
 
-async function send<T>(method: string, url: string, data?: unknown, config?: HttpRequestConfig) {
-    const result = await request<T>(apiClient.request<BackendEnvelope<T>>({ method, url, data, ...config }));
-    return result;
+const HEAVY_CANVAS_DOCUMENT_TIMEOUT_MS = 180_000;
+
+function isHeavyCanvasDocumentWrite(method: string, url: string) {
+    if (method === "get" || method === "delete") return false;
+    return url === "/ops/canvas.document.commit" || /^\/canvas-projects\/[^/?#]+$/.test(url);
+}
+
+function send<T>(method: string, url: string, data?: unknown, config?: HttpRequestConfig) {
+    const timeout = config?.timeout ?? (isHeavyCanvasDocumentWrite(method, url) ? HEAVY_CANVAS_DOCUMENT_TIMEOUT_MS : undefined);
+    return request<T>(apiClient.request<BackendEnvelope<T>>({ method, url, data, ...(timeout !== undefined ? { timeout } : {}), ...config }));
 }
 
 /**

@@ -5,8 +5,10 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -77,26 +79,25 @@ func TestVideoSubmissionExplicitModelRejectionIsNotUncertain(t *testing.T) {
 func TestVideoSubmissionAfterRequestOrRedirectRemainsUncertain(t *testing.T) {
 	t.Setenv("CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS", "127.0.0.1")
 	stalled, closeServer := stalledTLS(t)
-	defer closeServer()
+	closeOnce := sync.OnceFunc(closeServer)
+	defer closeOnce()
 	for _, redirect := range []bool{false, true} {
 		t.Run(map[bool]string{false: "response-lost", true: "redirect-tls-failure"}[redirect], func(t *testing.T) {
 			var hits atomic.Int32
-			done := make(chan struct{})
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				hits.Add(1)
 				if redirect {
 					http.Redirect(w, r, stalled+"/result", http.StatusFound)
 					return
 				}
-				select {
-				case <-r.Context().Done():
-				case <-done:
-				}
+				// Abort after receipt, without returning any response bytes.
+				panic(http.ErrAbortHandler)
 			}))
 			defer server.Close()
-			defer close(done)
-			ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
+			// Drop the redirected connection as its handshake begins.
+			ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{TLSHandshakeStart: closeOnce})
 			receipts := &recordingReceipts{}
 			ctx = WithRuntime(ctx, Runtime{Receipts: receipts})
 			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/videos", strings.NewReader(`{"model":"test"}`))

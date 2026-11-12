@@ -36,13 +36,13 @@ terms.
 
 ## Go runtime dependencies
 
-Versions are locked by `backend/go.sum`.
+Versions are locked by `backend/go.sum`. The engine includes esbuild v0.28.2 to package installed plugin clients for the web. Its complete MIT notice ships in `licenses/esbuild-LICENSE.md`.
 
 | License | Direct modules |
 | --- | --- |
 | Apache-2.0 | `github.com/volcengine/volc-sdk-golang` |
 | Apache-2.0 and MIT (see module LICENSE) | `github.com/modelcontextprotocol/go-sdk` |
-| MIT | `github.com/google/jsonschema-go` |
+| MIT | `github.com/evanw/esbuild`, `github.com/google/jsonschema-go` |
 | BSD-3-Clause | `golang.org/x/net`, `golang.org/x/sync`, `golang.org/x/sys` |
 | MIT | `github.com/gin-gonic/gin`, `github.com/google/uuid`, `github.com/wailsapp/wails/v2`, `gorm.io/driver/sqlite`, `gorm.io/gorm` |
 

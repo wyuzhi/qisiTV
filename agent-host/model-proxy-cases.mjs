@@ -9,7 +9,7 @@ import path from 'node:path';
 import {spawn, execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
-import {serveEmptySkillContext} from './test-support/skill-context-fixture.mjs';
+import {serveEmptyHostState} from './test-support/skill-context-fixture.mjs';
 
 // Generate a fresh loopback-only TLS fixture; never check a private key into Git.
 function createTLSIdentity(scratch) {
@@ -76,7 +76,7 @@ async function fixture(t,{secure=false,disabled=false,bypassAll=false,rejectProx
   const ops=http.createServer(async(req,res)=>{
     assert.equal(req.headers['x-beeftv-agent-token'],hostToken);
     opsPaths.push(req.url);res.setHeader('content-type','application/json');
-    if(serveEmptySkillContext(req,res))return;
+    if(serveEmptyHostState(req,res))return;
     if(req.url==='/api/ops/skill.catalog'){res.end(JSON.stringify({code:0,data:{op:'skill.catalog',result:{skills:[]}}}));return;}
     if(req.url==='/api/ops'){res.end(JSON.stringify({code:0,data:{ops:[{id:'canvas.get',assistantModes:['canvas','full-access','read-only'],replay:'safe',readOnly:true,scope:'canvas',summary:'Synthetic read',params:{type:'object',properties:{canvasId:{type:'string'}},required:['canvasId']}}]}}));return;}
     if(req.url.startsWith('/api/assistant/runtime/turns/')){res.end(JSON.stringify({code:0,data:{turnId:'aa11',canvasId:'canvas',permissionMode:'canvas',open:true}}));return;}

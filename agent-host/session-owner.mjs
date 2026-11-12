@@ -158,6 +158,17 @@ export function createLegacyHistory({ sessionRoot, workspaceRoot }) {
     return handoffNote(messages);
   }
 
+  function deleteSession(canvasId, sessionId) {
+    const opened = openLegacySession(canvasId, sessionId);
+    fs.rmSync(opened.file, { force: true });
+    try {
+      if (readCurrentSessionId(canvasId) === sessionId) {
+        fs.rmSync(currentSessionPointerPath(canvasId), { force: true });
+      }
+    } catch { /* ignore pointer cleanup errors */ }
+    return { deleted: true, sessionId };
+  }
+
   return {
     canvasWorkspace,
     canvasSessionDir,
@@ -168,5 +179,6 @@ export function createLegacyHistory({ sessionRoot, workspaceRoot }) {
     openLegacySession,
     listCanvasSessions,
     readHandoffNote,
+    deleteSession,
   };
 }

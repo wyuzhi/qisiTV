@@ -9,7 +9,7 @@ describe("qisiTV native assistant panel contract", () => {
         expect(panel).toContain('aria-label="qisiTV 创作助手"');
         expect(panel).toContain('aria-label="新对话" disabled={assistant.streaming || assistant.sessionBusy}');
         expect(panel).toContain('onClick={() => void assistant.startNewSession()}');
-        expect(panel).toContain('onClick: () => void assistant.activateSession(session.sessionId)');
+        expect(panel).toContain('onClick: () => void assistant.activateSession(item.sessionId)');
         expect(panel).toContain('selectedKeys: assistant.sessionId ? [assistant.sessionId] : []');
         expect(panel).toContain('onClick={() => assistant.setOpen(false)}');
         expect(panel).toContain('onClick={() => void assistant.reloadHistory()}');

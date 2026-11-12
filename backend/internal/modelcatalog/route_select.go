@@ -212,13 +212,6 @@ func LogicalModelCapabilityCovered(product CapabilitySpec, routeSpecs []Capabili
 	return len(routeSpecs) > 0 && validateProductSpecWithinRoutes(product, routeSpecs) == nil
 }
 
-func LogicalModelConfigurationError(product CapabilitySpec, routeSpecs []CapabilitySpec) string {
-	if len(routeSpecs) == 0 || LogicalModelCapabilityCovered(product, routeSpecs) {
-		return ""
-	}
-	return "供应线路已无法完整覆盖创作端能力，请调整线路或能力范围"
-}
-
 func ApplyRoutedProviderSelection(input map[string]any, routed *RoutedModel) map[string]any {
 	if routed == nil {
 		return input

@@ -1,4 +1,5 @@
 import type { CanvasFaceBox } from "./canvas-emotion";
+import { resolveEmbeddedAssetUrl } from "@/lib/embedded-runtime";
 
 type DetectFaceResponse = {
     id: number;
@@ -45,7 +46,7 @@ export async function detectCanvasFaces(dataUrl: string, signal?: AbortSignal): 
         const cleanup = () => signal?.removeEventListener("abort", abort);
         pendingRequests.set(id, { resolve, reject, cleanup });
         signal?.addEventListener("abort", abort, { once: true });
-        worker.postMessage({ id, image }, [image]);
+        worker.postMessage({ id, image, assetBase: resolveEmbeddedAssetUrl("/").replace(/\/$/u, "") }, [image]);
     });
 }
 

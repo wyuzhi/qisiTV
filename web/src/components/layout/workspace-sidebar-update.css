@@ -6,19 +6,28 @@
 }
 
 .app-workspace-sidebar-contact-row {
-    display: flex;
+    display: grid;
+    min-width: 0;
     min-height: 36px;
     align-items: center;
     margin-bottom: 4px;
 }
 
-.app-workspace-sidebar-contact-row:not(.is-collapsed),
 .app-workspace-sidebar-utility-row:not(.is-collapsed) {
     padding-inline: 2px 4px;
 }
 
-.app-workspace-sidebar-contact-row.is-collapsed {
-    justify-content: center;
+.app-workspace-sidebar-contact-row > * {
+    grid-area: 1 / 1;
+    min-width: 0;
+}
+
+.app-workspace-sidebar-contact-row > [inert] {
+    pointer-events: none;
+}
+
+.app-workspace-sidebar-nav.is-collapsed .app-workspace-sidebar-contact-row {
+    justify-items: center;
 }
 
 .app-workspace-sidebar-utility-row:not(.is-collapsed) {
@@ -34,7 +43,8 @@
     gap: 0;
 }
 
-.app-workspace-sidebar-utility-row:not(.is-collapsed) .app-workspace-update-version {
+.app-workspace-sidebar-utility-row:not(.is-collapsed) .app-workspace-update-version,
+.app-workspace-sidebar-utility-row:not(.is-collapsed) .app-workspace-official-account {
     grid-column: 1 / span 3;
     padding-left: 10px;
 }
@@ -57,12 +67,6 @@
     align-items: center;
 }
 
-.app-workspace-sidebar-contact-row.is-collapsed .app-workspace-social-links {
-    display: flex;
-    width: auto;
-    flex-direction: column;
-    gap: 8px;
-}
 
 .app-workspace-sidebar-utility-row:not(.is-collapsed) > .app-workspace-theme-action {
     grid-column: 5;
@@ -83,6 +87,13 @@
 
 .app-workspace-update.is-collapsed {
     flex: none;
+    width: 100%;
+    flex-direction: column;
+    flex-wrap: nowrap;
+}
+
+.app-workspace-update.is-collapsed .app-workspace-update-progress {
+    margin-left: 0;
 }
 
 .app-workspace-update-version {
@@ -181,12 +192,6 @@
     background: #fff;
 }
 
-.app-workspace-donation-popover .ant-popover-container {
-    padding: 12px;
-    border-radius: var(--r-lg);
-    background: var(--popover);
-    color: var(--foreground);
-}
 
 .app-workspace-wechat-popover .ant-popover-inner-content img {
     display: block;
@@ -194,26 +199,6 @@
     height: 180px;
 }
 
-.app-workspace-donation-content {
-    width: 328px;
-    max-width: calc(100vw - 40px);
-    text-align: center;
-}
-
-.app-workspace-donation-content p {
-    margin: 4px 0 12px;
-    color: var(--foreground);
-    font-size: 14px;
-    line-height: 22px;
-}
-
-.app-workspace-donation-content img {
-    display: block;
-    width: 220px;
-    max-width: 100%;
-    height: auto;
-    margin: 0 auto;
-}
 
 .app-workspace-update-action.has-update:not(.is-busy) {
     color: var(--user-accent, var(--primary));

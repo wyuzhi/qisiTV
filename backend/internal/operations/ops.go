@@ -12,6 +12,11 @@ import (
 	"qisitv/backend/internal/canvas/capability"
 )
 
+type CanvasProjectCreator interface {
+	UpsertUserCanvasProject(userID string, raw json.RawMessage) (canvas.UserDataSummary, error)
+	DeleteUserCanvasProject(userID string, id string) error
+}
+
 // RegisterDefaultOps 注册全部对外操作（手工 UI、CLI、MCP 与内置助手共用）。
 // 内置助手的付费生成先提议、由界面确认；外部客户端负责自身执行审批。
 // 未经参数与费用风险验收的能力明确不注册，而不是提供 stub 伪成功。
@@ -19,6 +24,7 @@ func RegisterDefaultOps(r *Registry) {
 	registerCanvasEditOps(r)
 	registerCanvasNodeBindAsset(r)
 	registerModelCatalogOp(r)
+	registerGenerationEstimateOp(r)
 	registerMediaOps(r)
 	registerSkillOps(r)
 	registerSkillMarketOps(r)
@@ -30,6 +36,9 @@ func RegisterDefaultOps(r *Registry) {
 	registerStoryboardPreparation(r)
 	registerGenerationSubmit(r)
 	registerCanvasProjectExportOps(r)
+	r.Register(Op{ExternalOnly: true, ReplaySafe: true, ID: "canvas.create", Summary: "创建新画布", Scope: ScopeCanvas,
+		Params:  json.RawMessage(`{"type":"object","properties":{"title":{"type":"string","description":"画布名称（默认：未命名画布）"},"canvasId":{"type":"string","description":"可选自定义画布 ID；省略时由服务端生成"},"projectId":{"type":"string","description":"可选关联项目 ID"},"folderId":{"type":"string","description":"可选画布文件夹 ID"}}}`),
+		Handler: opCanvasCreate})
 	r.Register(Op{AssistantCanvas: true, ID: "canvas.get", Summary: "读取画布内容（节点与连线）", ReadOnly: true, Scope: ScopeCanvas,
 		Params:  json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"}},"required":["canvasId"]}`),
 		Handler: opCanvasGet})
@@ -66,7 +75,7 @@ func RegisterDefaultOps(r *Registry) {
 		Params:  json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"expectedRevision":{"type":"integer"},"document":{"type":"object"}},"required":["canvasId","expectedRevision","document"]}`),
 		Handler: opCanvasDocumentCommit})
 	// 付费生成只提议不执行：这里校验目标并给出用户要确认的模型，真正的生成由界面在用户确认后发起。
-	r.Register(Op{AssistantProposal: true, AssistantCanvas: true, ID: "canvas.generation.propose", Summary: "登记付费生成单提议（不直接扣费）", ReadOnly: true, Scope: ScopeCanvas,
+	r.Register(Op{AssistantProposal: true, AssistantCanvas: true, ID: "canvas.generation.propose", Summary: "按节点已保存参数冻结生成单与报价。核对返回的 targets.parameters 和 estimate 后再提交，参数或报价不一致时停止", ReadOnly: true, Scope: ScopeCanvas,
 		Params:  json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"nodeIds":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":8},"kind":{"type":"string","enum":["image","video","audio"]},"productionNodeIds":{"type":"array","items":{"type":"string"},"maxItems":24,"description":"整片制作时列出全部计划生成的节点，nodeIds 只列当前参考已就绪的首批"},"note":{"type":"string"}},"required":["canvasId","nodeIds","kind"]}`),
 		Handler: opCanvasGenerationPropose})
 	r.Register(Op{ReplaySafe: true, AssistantCanvas: true, ID: "canvas.task.bind", Summary: "把已交付任务产物绑定到节点", Scope: ScopeCanvas,
@@ -178,7 +187,7 @@ func opCanvasGenerationPropose(ctx *Context, params json.RawMessage) (any, error
 			prompt = dependencyString(meta, "prompt")
 		}
 		paramsMap := map[string]string{}
-		for _, key := range []string{"size", "quality", "count", "transparentBackground", "seconds", "vquality", "generateAudio", "watermark", "audioVoice", "audioFormat", "audioSpeed", "audioInstructions", "videoStartFrameNodeId", "videoEndFrameNodeId", "videoMiddleFrameNodeId"} {
+		for _, key := range []string{"size", "quality", "count", "transparentBackground", "seconds", "vquality", "generateAudio", "watermark", "audioVoice", "audioFormat", "audioSpeed", "audioPitch", "audioVolume", "audioInstructions", "videoStartFrameNodeId", "videoEndFrameNodeId", "videoMiddleFrameNodeId"} {
 			if v, ok := meta[key]; ok && v != nil && fmt.Sprint(v) != "" {
 				paramsMap[key] = fmt.Sprint(v)
 			}
@@ -208,10 +217,15 @@ func opCanvasGenerationPropose(ctx *Context, params json.RawMessage) (any, error
 			ReferenceNodeIDs: refs,
 		})
 	}
+	orderEstimate := EstimateGenerationCost(ctx.Domain, estimateGenerationTargets(owned, fallbackTargets))
+	for i := range targetsSummary {
+		targetsSummary[i]["estimate"] = orderEstimate.Items[i]
+	}
 	approvalMode := ctx.Caller.EffectiveApprovalMode()
 	result := map[string]any{
 		"proposalId": proposalID, "orderId": proposalID, "kind": args.Kind, "nodeIds": nodeIDs,
 		"model": resolved.Display, "modelKey": resolved.ModelKey, "pricing": pricing,
+		"estimate":     orderEstimate.Summary,
 		"approvalMode": string(approvalMode), "status": string(GenerationOrderPending),
 		"note": strings.TrimSpace(args.Note), "targets": targetsSummary,
 		"source": map[string]any{"canvasId": args.CanvasID, "canvasRevision": doc["revision"], "modelConfigRevision": resolved.Revision},
@@ -232,7 +246,12 @@ func opCanvasGenerationPropose(ctx *Context, params json.RawMessage) (any, error
 			}
 		}
 		proposedTargets = targets
-		result["production"] = map[string]any{"targets": targets}
+		productionEstimate := EstimateGenerationCost(ctx.Domain, estimateGenerationTargets(owned, targets))
+		estimated := make([]estimatedGenerationTarget, len(targets))
+		for i, target := range targets {
+			estimated[i] = estimatedGenerationTarget{GenerationTarget: target, Estimate: productionEstimate.Items[i]}
+		}
+		result["production"] = map[string]any{"targets": estimated, "estimate": productionEstimate.Summary}
 	}
 	_, hasOrderRecorder := ctx.Domain.(GenerationOrderRecorder)
 	if len(proposedTargets) == 0 {
@@ -525,9 +544,10 @@ func opCanvasNodeUpdate(ctx *Context, params json.RawMessage) (any, error) {
 		NodeID           string `json:"nodeId"`
 		ExpectedRevision int64  `json:"expectedRevision"`
 		Patch            struct {
-			Title   *string `json:"title"`
-			Prompt  *string `json:"prompt"`
-			Content *string `json:"content"`
+			Title      *string        `json:"title"`
+			Prompt     *string        `json:"prompt"`
+			Content    *string        `json:"content"`
+			PluginData map[string]any `json:"pluginData"`
 		} `json:"patch"`
 	}
 	if err := decodeParams(params, &args); err != nil {
@@ -549,6 +569,9 @@ func opCanvasNodeUpdate(ctx *Context, params json.RawMessage) (any, error) {
 	if args.Patch.Content != nil {
 		patch["content"] = *args.Patch.Content
 	}
+	if args.Patch.PluginData != nil {
+		patch["pluginData"] = args.Patch.PluginData
+	}
 	if len(patch) == 0 {
 		return nil, InvalidArg("empty_patch", "patch 至少要有一个字段")
 	}
@@ -568,6 +591,9 @@ func opCanvasNodesCreate(ctx *Context, params json.RawMessage) (any, error) {
 			Title  string `json:"title"`
 			Type   string `json:"type"`
 			Prompt string `json:"prompt"`
+			// Plugin tools pass their node data here; it stays out of the
+			// model-facing schema so the assistant's tool definitions do not grow.
+			PluginData map[string]any `json:"pluginData"`
 		} `json:"nodes"`
 	}
 	if err := decodeParams(params, &args); err != nil {
@@ -581,7 +607,7 @@ func opCanvasNodesCreate(ctx *Context, params json.RawMessage) (any, error) {
 	}
 	drafts := make([]canvas.NodeDraft, 0, len(args.Nodes))
 	for _, node := range args.Nodes {
-		drafts = append(drafts, canvas.NodeDraft{Title: node.Title, Type: node.Type, Prompt: node.Prompt})
+		drafts = append(drafts, canvas.NodeDraft{Title: node.Title, Type: node.Type, Prompt: node.Prompt, PluginData: node.PluginData})
 	}
 	_, createdNodes, err := ctx.Domain.CreateUserCanvasNodes(ctx.UserID, args.CanvasID, drafts, args.ExpectedRevision)
 	if err != nil {
@@ -594,6 +620,60 @@ func opCanvasNodesCreate(ctx *Context, params json.RawMessage) (any, error) {
 		}
 		return map[string]any{"canvasId": args.CanvasID, "created": created}
 	})
+}
+
+func opCanvasCreate(ctx *Context, params json.RawMessage) (any, error) {
+	var args struct {
+		CanvasID  string `json:"canvasId"`
+		Title     string `json:"title"`
+		ProjectID string `json:"projectId"`
+		FolderID  string `json:"folderId"`
+	}
+	if err := decodeParams(params, &args); err != nil {
+		return nil, err
+	}
+	creator, ok := ctx.Domain.(CanvasProjectCreator)
+	if !ok {
+		return nil, Unsupported("canvas_create_unavailable", "当前工作区无法创建画布")
+	}
+	title := strings.TrimSpace(args.Title)
+	if title == "" {
+		title = "未命名画布"
+	}
+	doc := map[string]any{
+		"revision":    int64(0),
+		"title":       title,
+		"nodes":       []any{},
+		"connections": []any{},
+		"viewport":    map[string]any{"x": 0, "y": 0, "k": 1},
+	}
+	if id := strings.TrimSpace(args.CanvasID); id != "" {
+		if _, err := ctx.Domain.UserCanvasProject(ctx.UserID, id); err == nil {
+			return nil, Conflict("canvas_already_exists", "画布已存在", nil)
+		}
+		doc["id"] = id
+	}
+	if projectID := strings.TrimSpace(args.ProjectID); projectID != "" {
+		doc["projectId"] = projectID
+	}
+	if folderID := strings.TrimSpace(args.FolderID); folderID != "" {
+		doc["folderId"] = folderID
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return nil, AsError(err)
+	}
+	summary, err := creator.UpsertUserCanvasProject(ctx.UserID, raw)
+	if err != nil {
+		return nil, mapDomainError(err)
+	}
+	return map[string]any{
+		"canvasId":  summary.ID,
+		"title":     summary.Title,
+		"revision":  summary.Revision,
+		"createdAt": summary.CreatedAt,
+		"updatedAt": summary.UpdatedAt,
+	}, nil
 }
 
 func opCanvasDocumentCommit(ctx *Context, params json.RawMessage) (any, error) {

@@ -57,6 +57,9 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 		return nil, fmt.Errorf("读取官方插件目录失败：%w", err)
 	}
 	builtInIDs := make(map[string]struct{}, len(entries)+2)
+	// IDs the shipped packages resolve, aliases included. A removed package
+	// whose IDs all resolve here has been merged into a shipped one.
+	shippedResolvable := make(map[string]string, len(entries)*2)
 	// One inventory read serves every decision below: which shipped plugin may
 	// not be overwritten yet, and which removed plugin must be kept.
 	snapshot := c.snapshotReferences()
@@ -73,11 +76,11 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 		if err != nil {
 			return nil, fmt.Errorf("校验官方插件包 %s：%w", entry.Name(), err)
 		}
-		if strings.HasPrefix(strings.TrimSpace(pkg.Manifest.Runtime.Backend), "host:") {
-			return nil, fmt.Errorf("官方插件 %q 不能依赖 host 执行器", pkg.Manifest.Metadata.ID)
-		}
-		if _, err := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil); err != nil {
+		if _, err := protocol.LoadInstalledProviders(pkg.ManifestRaw); err != nil {
 			return nil, fmt.Errorf("加载官方插件 %q：%w", pkg.Manifest.Metadata.ID, err)
+		}
+		for resolvable := range resolvableProviderIDs(pkg.ManifestRaw) {
+			shippedResolvable[resolvable] = pkg.Manifest.Metadata.ID
 		}
 		id := pkg.Manifest.Metadata.ID
 		if _, duplicate := builtInIDs[id]; duplicate {
@@ -120,29 +123,47 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 		}
 		byID[id] = next
 	}
-	bundledManifests := BundledWorkflowManifests()
-	for _, bundled := range bundledManifests {
-		builtInIDs[bundled.Metadata.ID] = struct{}{}
-		data, err := json.Marshal(bundled)
-		if err != nil {
-			return nil, fmt.Errorf("encode built-in plugin %s: %w", bundled.Metadata.ID, err)
+	for _, builtinName := range BundledBuiltinPluginNames {
+		pkgRoot, ok := BundledSampleDir(builtinName)
+		if !ok {
+			continue
 		}
-		record := byID[bundled.Metadata.ID]
+		pkg, err := protocol.ParsePluginPackageDir(pkgRoot)
+		if err != nil {
+			return nil, fmt.Errorf("校验官方插件目录 %s：%w", builtinName, err)
+		}
+		if _, err := protocol.LoadInstalledProviders(pkg.ManifestRaw); err != nil {
+			return nil, fmt.Errorf("加载官方插件 %q：%w", pkg.Manifest.Metadata.ID, err)
+		}
+		id := pkg.Manifest.Metadata.ID
+		if _, duplicate := builtInIDs[id]; duplicate {
+			return nil, fmt.Errorf("官方插件 ID %q 重复", id)
+		}
+		builtInIDs[id] = struct{}{}
+		manifest := pkg.Manifest
+		record := byID[id]
 		if len(record.Raw) > 0 {
-			var installed protocol.Manifest
-			if err := json.Unmarshal(record.Raw, &installed); err != nil {
-				return nil, fmt.Errorf("decode built-in plugin %s: %w", bundled.Metadata.ID, err)
+			var previous protocol.Manifest
+			if err := json.Unmarshal(record.Raw, &previous); err == nil {
+				manifest.Metadata.Enabled = previous.Metadata.Enabled
 			}
-			bundled.Metadata.Enabled = installed.Metadata.Enabled
-			data, err = json.Marshal(bundled)
-			if err != nil {
-				return nil, fmt.Errorf("encode built-in plugin %s: %w", bundled.Metadata.ID, err)
-			}
+		}
+		manifestData, err := json.Marshal(manifest)
+		if err != nil {
+			return nil, fmt.Errorf("编码官方插件包 %q：%w", id, err)
 		}
 		now := time.Now().UTC()
 		next := RegistryRecord{
-			ID: bundled.Metadata.ID, Raw: data, Source: OriginOfficial,
-			InstalledAt: now, UpdatedAt: now,
+			ID:            id,
+			Raw:           manifestData,
+			Source:        OriginOfficial,
+			PackageDir:    pkg.RootDir,
+			PackageSpec:   pkg.PackageName,
+			PackageSHA256: pkg.SHA256,
+			SkillDirs:     pkg.SkillDirs,
+			LoadError:     record.LoadError,
+			InstalledAt:   now,
+			UpdatedAt:     now,
 		}
 		if !record.InstalledAt.IsZero() {
 			next.InstalledAt = record.InstalledAt
@@ -150,7 +171,7 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 		if !registryRecordContentChanged(record, next) {
 			next.UpdatedAt = record.UpdatedAt
 		}
-		byID[bundled.Metadata.ID] = next
+		byID[id] = next
 	}
 	missing := make([]RegistryRecord, 0, len(byID))
 	for _, record := range byID {
@@ -158,6 +179,15 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 			continue
 		}
 		if _, shipped := builtInIDs[record.ID]; !shipped {
+			if targets, merged := mergedIntoShipped(record, shippedResolvable); merged {
+				// Every ID it served now resolves to a shipped package through an
+				// alias, so keeping the old copy would shadow the merged one. Saved
+				// configuration that ran with an enabled copy must keep running.
+				if recordEnabled(record) {
+					enableMergeTargets(byID, targets)
+				}
+				continue
+			}
 			missing = append(missing, record)
 		}
 	}
@@ -185,4 +215,45 @@ func (c *Runtime) reconcileBuiltIns(stored []RegistryRecord) ([]RegistryRecord, 
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	c.retained = retained
 	return result, nil
+}
+
+// mergedIntoShipped reports whether every provider ID a removed record served
+// is resolvable by a package this release ships, and which packages those are.
+func mergedIntoShipped(record RegistryRecord, shipped map[string]string) ([]string, bool) {
+	var manifest protocol.Manifest
+	if err := json.Unmarshal(record.Raw, &manifest); err != nil || len(manifest.Contributes.Providers) == 0 {
+		return nil, false
+	}
+	targets := make([]string, 0, 1)
+	for _, provider := range manifest.Contributes.Providers {
+		target, ok := shipped[strings.TrimSpace(provider.ID)]
+		if !ok {
+			return nil, false
+		}
+		targets = append(targets, target)
+	}
+	return targets, true
+}
+
+func recordEnabled(record RegistryRecord) bool {
+	var manifest protocol.Manifest
+	return json.Unmarshal(record.Raw, &manifest) == nil && manifest.Metadata.Enabled
+}
+
+func enableMergeTargets(byID map[string]RegistryRecord, targets []string) {
+	for _, id := range targets {
+		record, ok := byID[id]
+		if !ok || recordEnabled(record) {
+			continue
+		}
+		var manifest protocol.Manifest
+		if json.Unmarshal(record.Raw, &manifest) != nil {
+			continue
+		}
+		manifest.Metadata.Enabled = true
+		if raw, err := json.Marshal(manifest); err == nil {
+			record.Raw = raw
+			byID[id] = record
+		}
+	}
 }

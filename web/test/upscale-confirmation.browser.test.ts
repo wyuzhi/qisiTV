@@ -61,7 +61,7 @@ test("confirmation submits one Topaz task and repeats only query the original", 
     await page.getByRole("dialog").getByRole("button", { name: "确认超分", exact: true }).click();
     await page.waitForFunction(() => JSON.parse(document.getElementById("snapshot")!.textContent!).observed === "original-task");
     expect(creates).toHaveLength(1);
-    expect(creates[0].channelId).toBe("beefapi");
+    expect(creates[0].channelId).toBe("beeftv");
     expect(creates[0].clientOperationId).toBeTruthy();
     await page.getByRole("button", { name: "继续 / 查询批次", exact: true }).click();
     await page.waitForFunction(() => !document.querySelector(".ant-btn-loading"));

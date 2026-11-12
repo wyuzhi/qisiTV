@@ -26,8 +26,9 @@ export function persistCanvasMediaPerformanceMode(mode: CanvasMediaPerformanceMo
 export function shouldReduceCanvasMediaEffects(mode: CanvasMediaPerformanceMode, nodes: CanvasNodeData[]) {
     if (mode === "performance") return true;
     if (mode === "quality") return false;
+    const videoCount = nodes.filter((node) => node.type === CanvasNodeType.Video).length;
     const mediaCount = nodes.filter((node) => node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio).length;
-    return nodes.length >= 80 || mediaCount >= 32;
+    return nodes.length >= 80 || mediaCount >= 32 || videoCount >= 8;
 }
 
 export function canvasNodeRenderPadding(reduceMediaEffects: boolean, previouslyRendered: boolean) {

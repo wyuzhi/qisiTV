@@ -73,8 +73,13 @@ func NormalizeCatalogAPIFormat(apiFormat string) (string, error) {
 	return normalized, nil
 }
 
+// CatalogBaseURL 是读取模型目录前对 Base URL 的整理；设置页展示目录地址也先过这一步。
+func CatalogBaseURL(baseURL string) string {
+	return strings.TrimRight(strings.TrimSpace(baseURL), "/")
+}
+
 func ValidateCatalogRequest(baseURL, apiKey, apiFormat string) (string, string, string, error) {
-	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	baseURL = CatalogBaseURL(baseURL)
 	apiKey = strings.TrimSpace(apiKey)
 	if baseURL == "" {
 		return "", "", "", kernel.BadAuthRequest("请填写 Base URL")

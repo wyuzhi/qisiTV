@@ -47,31 +47,6 @@ type RoutedModel struct {
 	Defaults     map[string]any
 }
 
-type LogicalModelRequest struct {
-	Code        string `json:"code"`
-	Name        string `json:"name"`
-	Icon        string `json:"icon"`
-	Description string `json:"description"`
-	Capability  string `json:"capability"`
-	Enabled     bool   `json:"enabled"`
-	SortOrder   int    `json:"sortOrder"`
-	// LegacyModelIDs 只用于将用户本地保存的旧目录选择迁移到当前模型家族，
-	// 不能用它重写任务或路由尝试中的不可变快照。
-	LegacyModelIDs []string              `json:"legacyModelIds"`
-	CapabilitySpec CapabilitySpec        `json:"capabilitySpec"`
-	DefaultOptions map[string]any        `json:"defaultOptions"`
-	Routes         []LogicalRouteRequest `json:"routes"`
-	// SourceChannelModelID 仅供系统渠道同步流程使用。
-	SourceChannelModelID string `json:"-"`
-}
-
-type LogicalRouteRequest struct {
-	ChannelModelID string `json:"channelModelId"`
-	Enabled        bool   `json:"enabled"`
-	Priority       int    `json:"priority"`
-	Weight         int    `json:"weight"`
-}
-
 type PublicLogicalModel struct {
 	ID             string         `json:"id"`
 	Code           string         `json:"code"`
@@ -86,30 +61,6 @@ type PublicLogicalModel struct {
 	CapabilityProfiles []CapabilitySpec `json:"capabilityProfiles"`
 	DefaultOptions     map[string]any   `json:"defaultOptions"`
 	Available          bool             `json:"available"`
-}
-
-type AdminLogicalRoute struct {
-	ID                    string         `json:"id"`
-	ChannelModelID        string         `json:"channelModelId"`
-	ChannelID             string         `json:"channelId"`
-	ChannelModelKey       string         `json:"channelModelKey"`
-	ChannelModelName      string         `json:"channelModelName"`
-	Enabled               bool           `json:"enabled"`
-	Priority              int            `json:"priority"`
-	Weight                int            `json:"weight"`
-	Available             bool           `json:"available"`
-	StructurallyAvailable bool           `json:"-"`
-	CapabilitySpec        CapabilitySpec `json:"capabilitySpec"`
-}
-
-type AdminLogicalModel struct {
-	PublicLogicalModel
-	Enabled            bool                `json:"enabled"`
-	ActiveRevisionID   string              `json:"activeRevisionId"`
-	RevisionVersion    int                 `json:"revisionVersion"`
-	ConfigurationError string              `json:"configurationError,omitempty"`
-	AvailabilityError  string              `json:"availabilityError,omitempty"`
-	Routes             []AdminLogicalRoute `json:"routes"`
 }
 
 type RouteSimulationCandidate struct {

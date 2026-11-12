@@ -16,7 +16,7 @@ func TestApplicationPluginUsesUserStateUnderPlatformAvailability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.SystemSetting{}, &model.PluginPlatformState{}, &model.UserPluginState{}, &model.AdminAuditEvent{}); err != nil {
+	if err := db.AutoMigrate(&model.SystemSetting{}, &model.PluginPlatformState{}, &model.UserPluginState{}); err != nil {
 		t.Fatal(err)
 	}
 	repo := repository.New(db)
@@ -32,36 +32,37 @@ func TestApplicationPluginUsesUserStateUnderPlatformAvailability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	initial := states[WorkflowPluginRunningHub]
+	initial := states[PluginAIArtCritique]
 	if !initial.PlatformAvailable || initial.UserEnabled || initial.EffectiveEnabled || !initial.CanToggle {
-		t.Fatalf("initial RunningHub state = %#v", initial)
+		t.Fatalf("initial application state = %#v", initial)
 	}
 
-	enabled, err := svc.SetUserPluginEnabled(user, WorkflowPluginRunningHub, true)
+	enabled, err := svc.SetUserPluginEnabled(user, PluginAIArtCritique, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !enabled.UserConfigured || !enabled.UserEnabled || !enabled.EffectiveEnabled {
-		t.Fatalf("enabled RunningHub state = %#v", enabled)
+		t.Fatalf("enabled application state = %#v", enabled)
 	}
-	if _, err := svc.SetPluginPlatformAvailability(user, WorkflowPluginRunningHub, false); err == nil {
+	if _, err := svc.SetPluginPlatformAvailability(user, PluginAIArtCritique, false); err == nil {
 		t.Fatal("ordinary user changed platform plugin availability")
 	}
-	disabled, err := svc.SetPluginPlatformAvailability(admin, WorkflowPluginRunningHub, false)
+	disabled, err := svc.SetPluginPlatformAvailability(admin, PluginAIArtCritique, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if disabled.PlatformAvailable || disabled.EffectiveEnabled || disabled.EnabledUserCount != 1 {
-		t.Fatalf("platform-disabled RunningHub state = %#v", disabled)
+		t.Fatalf("platform-disabled application state = %#v", disabled)
 	}
-	if err := svc.RequireWorkflowPluginForUser(user.ID, "runninghub-workflow-image"); err == nil {
-		t.Fatal("platform-disabled workflow was accepted for a new user request")
-	}
-	if _, err := svc.SetPluginPlatformAvailability(admin, WorkflowPluginRunningHub, true); err != nil {
+	if _, err := svc.SetPluginPlatformAvailability(admin, PluginAIArtCritique, true); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.RequireWorkflowPluginForUser(user.ID, "runninghub-workflow-video"); err != nil {
-		t.Fatalf("restored user workflow rejected: %v", err)
+	states, err = svc.PluginDomain().StatesForUser(user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !states[PluginAIArtCritique].EffectiveEnabled {
+		t.Fatalf("restored application lost the user's choice: %#v", states[PluginAIArtCritique])
 	}
 }
 
@@ -94,7 +95,7 @@ func TestEditorShellReportsPlatformAvailableWithoutPlatformState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.SystemSetting{}, &model.PluginPlatformState{}, &model.UserPluginState{}, &model.AdminAuditEvent{}); err != nil {
+	if err := db.AutoMigrate(&model.SystemSetting{}, &model.PluginPlatformState{}, &model.UserPluginState{}); err != nil {
 		t.Fatal(err)
 	}
 	repo := repository.New(db)

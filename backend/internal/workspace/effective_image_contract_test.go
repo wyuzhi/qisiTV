@@ -8,7 +8,7 @@ import (
 
 func TestEffectiveConfigRepairsHostedHyImageWithoutRewritingCustomContract(t *testing.T) {
 	dir := t.TempDir()
-	raw := []byte(`{"channels":[{"id":"beefapi","baseUrl":"https://beeftv.app/v1","models":["hy-image-v3"],"modelProfiles":[{"model":"hy-image-v3","capability":"text","protocol":"chat-completion"}]},{"id":"custom","baseUrl":"https://studio.example","models":["hy-image-v3"],"modelProfiles":[{"model":"hy-image-v3","capability":"text","protocol":"chat-completion"}]}]}`)
+	raw := []byte(`{"channels":[{"id":"beeftv","baseUrl":"https://beeftv.app/v1","models":["hy-image-v3"],"modelProfiles":[{"model":"hy-image-v3","capability":"text","protocol":"chat-completion"}]},{"id":"custom","baseUrl":"https://studio.example","models":["hy-image-v3"],"modelProfiles":[{"model":"hy-image-v3","capability":"text","protocol":"chat-completion"}]}]}`)
 	if err := os.WriteFile(filepath.Join(dir, LocalProviderConfigFile), raw, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -17,7 +17,7 @@ func TestEffectiveConfigRepairsHostedHyImageWithoutRewritingCustomContract(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile := requireEffectiveProfile(t, requireEffectiveChannel(t, config, "beefapi"), "hy-image-v3")
+	profile := requireEffectiveProfile(t, requireEffectiveChannel(t, config, "beeftv"), "hy-image-v3")
 	if profile["protocol"] != "openai-image" || profile["capability"] != "image" {
 		t.Fatalf("hosted profile: %#v", profile)
 	}

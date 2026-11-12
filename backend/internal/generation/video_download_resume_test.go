@@ -95,7 +95,7 @@ func TestVideoDownloadResumesAcrossWorkerAndSignedRedirect(t *testing.T) {
 	}))
 	defer gateway.Close()
 	config := Config{BaseURL: gateway.URL + "/v1", APIKey: "test-key"}
-	ctx := WithRuntime(context.Background(), Runtime{DownloadCache: videoTestCache(partial), Endpoints: Endpoints{BeefAPIVideoBaseURL: config.BaseURL}})
+	ctx := WithRuntime(context.Background(), Runtime{DownloadCache: videoTestCache(partial), Endpoints: Endpoints{BeefTVVideoBaseURL: config.BaseURL}})
 	policy := DefaultVideoPollPolicy()
 	policy.MaxDownloadTries = 1
 	policy.Sleep = func(context.Context, time.Duration) error { return nil }

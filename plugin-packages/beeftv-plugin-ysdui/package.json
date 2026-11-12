@@ -1,0 +1,2866 @@
+{
+  "name": "beeftv-plugin-ysdui",
+  "version": "1.0.1",
+  "description": "内置银盛云枢壹算 (OneAxis) 算力与多模态渠道插件，支持填写 API Key 一键同步 DeepSeek、Qwen、GLM、Kimi、MiniMax、混元、豆包 Seedream 5.0 / Seedance 2.0 & 2.5、Wan 3.0、MiniMax H3、混元 Image 3.0 与 WAND-Vega 图生/视频模型。",
+  "type": "module",
+  "main": "./client/index.js",
+  "license": "Apache-2.0",
+  "keywords": [
+    "beeftv-plugin",
+    "ysdui",
+    "oneaxis",
+    "image",
+    "video",
+    "seedream",
+    "seedance",
+    "wan",
+    "wand-vega"
+  ],
+  "beeftv": {
+    "name": "银盛云枢壹算算力与多模态渠道",
+    "client": "./client/index.js",
+    "permissions": [
+      "generation.run",
+      "media.read",
+      "ui.slot",
+      "settings.write"
+    ],
+    "configuration": {
+      "fields": [
+        {
+          "name": "apiKey",
+          "type": "secret",
+          "label": "银盛云枢壹算 API Key",
+          "required": true,
+          "description": "填写银盛云枢壹算 (https://www.ysdui.cn) 提供的 sk-... 密钥"
+        },
+        {
+          "name": "baseUrl",
+          "type": "string",
+          "label": "Base URL",
+          "required": false,
+          "default": "https://tokenhub.ysdui.cn",
+          "description": "银盛云枢壹算接口根地址，默认 https://tokenhub.ysdui.cn"
+        }
+      ]
+    },
+    "contributes": {
+      "providers": [
+        {
+          "id": "ysdui-image",
+          "label": "银盛云枢壹算同步图像生成 (Seedream / Qwen / 混元)",
+          "capabilities": [
+            "image"
+          ],
+          "scopes": [
+            "admin.system-channel",
+            "user.custom-channel",
+            "canvas",
+            "creation",
+            "agent"
+          ],
+          "baseUrl": "https://tokenhub.ysdui.cn",
+          "requiresPublicMediaUrls": true,
+          "mediaTransport": {
+            "image": "url"
+          },
+          "mediaUpload": {
+            "url": "https://ysdui.cn/api/file/v1/upload",
+            "path": "/api/file/v1/upload",
+            "field": "file",
+            "maxBytes": 20971520,
+            "urlPaths": [
+              "data",
+              "data.url",
+              "url"
+            ],
+            "errorPaths": [
+              "code",
+              "error.code"
+            ],
+            "successCodes": [
+              200,
+              "200",
+              0,
+              "0",
+              "success"
+            ],
+            "messagePaths": [
+              "message",
+              "error.message"
+            ]
+          },
+          "auth": {
+            "type": "bearer",
+            "field": "apiKey"
+          },
+          "parameters": [
+            {
+              "name": "model",
+              "type": "string",
+              "required": true,
+              "mapping": "model",
+              "description": "同步图像模型 ID（如 doubao-seedream-5-0-260128、doubao-seedream-5-0-pro-260628、qwen-image-3.0-pro、hy-image-v3.0）。"
+            },
+            {
+              "name": "prompt",
+              "type": "string",
+              "required": true,
+              "mapping": "prompt",
+              "description": "图像描述提示词。"
+            },
+            {
+              "name": "images",
+              "type": "media[]",
+              "required": false,
+              "mapping": "images",
+              "description": "参考图列表（URL 或 Base64 Data URL），用于单图编辑或多图融合。"
+            },
+            {
+              "name": "aspectRatio",
+              "type": "string",
+              "required": false,
+              "mapping": "size",
+              "description": "画幅比例或像素尺寸。"
+            },
+            {
+              "name": "quality",
+              "type": "string",
+              "required": false,
+              "mapping": "size",
+              "description": "清晰度档位（1k、2k）。"
+            },
+            {
+              "name": "imageCount",
+              "type": "integer",
+              "required": false,
+              "mapping": "n / sequential_image_generation_options.max_images",
+              "description": "生成张数（Qwen 使用 n，Seedream 5.0 Lite 组图使用 sequential_image_generation_options.max_images）。"
+            },
+            {
+              "name": "watermark",
+              "type": "boolean",
+              "required": false,
+              "mapping": "watermark",
+              "description": "是否添加水印。"
+            },
+            {
+              "name": "providerOptions",
+              "type": "object",
+              "required": false,
+              "mapping": "provider-specific fields",
+              "description": "模型个性化参数（background、output_format、layer_decomposition、optimize_prompt_options、negative_prompt、prompt_extend）。"
+            }
+          ],
+          "variables": [
+            {
+              "name": "cleanModel",
+              "value": {
+                "$lower": {
+                  "$trim": {
+                    "$ref": "request.model"
+                  }
+                }
+              }
+            },
+            {
+              "name": "isSeedreamLite",
+              "value": {
+                "$eq": [
+                  {
+                    "$ref": "vars.cleanModel"
+                  },
+                  "doubao-seedream-5-0-260128"
+                ]
+              }
+            },
+            {
+              "name": "isSeedreamPro",
+              "value": {
+                "$eq": [
+                  {
+                    "$ref": "vars.cleanModel"
+                  },
+                  "doubao-seedream-5-0-pro-260628"
+                ]
+              }
+            },
+            {
+              "name": "isSeedream",
+              "value": {
+                "$or": [
+                  {
+                    "$ref": "vars.isSeedreamLite"
+                  },
+                  {
+                    "$ref": "vars.isSeedreamPro"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "isQwenImage",
+              "value": {
+                "$eq": [
+                  {
+                    "$ref": "vars.cleanModel"
+                  },
+                  "qwen-image-3.0-pro"
+                ]
+              }
+            },
+            {
+              "name": "isHunyuanImage",
+              "value": {
+                "$eq": [
+                  {
+                    "$ref": "vars.cleanModel"
+                  },
+                  "hy-image-v3.0"
+                ]
+              }
+            },
+            {
+              "name": "rawRatio",
+              "value": {
+                "$trim": {
+                  "$coalesce": [
+                    {
+                      "$ref": "request.aspectRatio"
+                    },
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "isExplicitPixelSize",
+              "value": {
+                "$eq": [
+                  {
+                    "$len": {
+                      "$split": [
+                        {
+                          "$lower": {
+                            "$ref": "vars.rawRatio"
+                          }
+                        },
+                        "x"
+                      ]
+                    }
+                  },
+                  2
+                ]
+              }
+            },
+            {
+              "name": "isTransparent",
+              "value": {
+                "$and": [
+                  {
+                    "$ref": "vars.isSeedreamPro"
+                  },
+                  {
+                    "$or": [
+                      {
+                        "$eq": [
+                          {
+                            "$ref": "request.output.options.transparent"
+                          },
+                          "true"
+                        ]
+                      },
+                      {
+                        "$eq": [
+                          {
+                            "$ref": "request.extra.transparentBackground"
+                          },
+                          true
+                        ]
+                      },
+                      {
+                        "$eq": [
+                          {
+                            "$ref": "request.providerOptions.ysdui-image.background"
+                          },
+                          "transparent"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "isLayers",
+              "value": {
+                "$and": [
+                  {
+                    "$ref": "vars.isSeedreamPro"
+                  },
+                  {
+                    "$not": {
+                      "$ref": "vars.isTransparent"
+                    }
+                  },
+                  {
+                    "$or": [
+                      {
+                        "$eq": [
+                          {
+                            "$ref": "request.output.options.mode"
+                          },
+                          "layers"
+                        ]
+                      },
+                      {
+                        "$eq": [
+                          {
+                            "$ref": "request.providerOptions.ysdui-image.layer_decomposition"
+                          },
+                          true
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "seqMaxImages",
+              "value": {
+                "$max": [
+                  1,
+                  {
+                    "$min": [
+                      {
+                        "$max": [
+                          1,
+                          {
+                            "$add": [
+                              15,
+                              {
+                                "$multiply": [
+                                  -1,
+                                  {
+                                    "$len": {
+                                      "$ref": "request.images"
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "$toInt": {
+                          "$coalesce": [
+                            {
+                              "$ref": "request.extra.sequential_image_generation_max"
+                            },
+                            {
+                              "$omitEmpty": {
+                                "$ref": "request.output.options.maxImages"
+                              }
+                            },
+                            {
+                              "$ref": "request.providerOptions.ysdui-image.sequential_image_generation_options.max_images"
+                            },
+                            1
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "isSeedreamTier",
+              "value": {
+                "$and": [
+                  {
+                    "$ref": "vars.isSeedream"
+                  },
+                  {
+                    "$in": [
+                      {
+                        "$lower": {
+                          "$ref": "vars.rawRatio"
+                        }
+                      },
+                      [
+                        "1k",
+                        "1.5k",
+                        "2k",
+                        "3k",
+                        "4k"
+                      ]
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "use1k",
+              "value": {
+                "$or": [
+                  {
+                    "$and": [
+                      {
+                        "$ref": "vars.isQwenImage"
+                      },
+                      {
+                        "$ne": [
+                          {
+                            "$lower": {
+                              "$ref": "request.quality"
+                            }
+                          },
+                          "2k"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "$and": [
+                      {
+                        "$ref": "vars.isSeedreamPro"
+                      },
+                      {
+                        "$eq": [
+                          {
+                            "$lower": {
+                              "$ref": "request.quality"
+                            }
+                          },
+                          "1k"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "size",
+              "value": {
+                "$if": {
+                  "condition": {
+                    "$ref": "vars.isLayers"
+                  },
+                  "then": {
+                    "$if": {
+                      "condition": {
+                        "$eq": [
+                          {
+                            "$lower": {
+                              "$ref": "vars.rawRatio"
+                            }
+                          },
+                          "auto"
+                        ]
+                      },
+                      "then": "auto",
+                      "else": "2K"
+                    }
+                  },
+                  "else": {
+                    "$if": {
+                      "condition": {
+                        "$ref": "vars.isSeedreamTier"
+                      },
+                      "then": {
+                        "$upper": {
+                          "$ref": "vars.rawRatio"
+                        }
+                      },
+                      "else": {
+                        "$if": {
+                          "condition": {
+                            "$ref": "vars.isHunyuanImage"
+                          },
+                          "then": {
+                            "$switch": {
+                              "cases": [
+                                {
+                                  "when": {
+                                    "$in": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      [
+                                        "",
+                                        "auto",
+                                        "1:1",
+                                        "1024x1024",
+                                        "2048x2048"
+                                      ]
+                                    ]
+                                  },
+                                  "then": "1024x1024"
+                                },
+                                {
+                                  "when": {
+                                    "$in": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      [
+                                        "16:9",
+                                        "1792x1024",
+                                        "1280x720",
+                                        "2560x1440"
+                                      ]
+                                    ]
+                                  },
+                                  "then": "1280x720"
+                                },
+                                {
+                                  "when": {
+                                    "$in": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      [
+                                        "9:16",
+                                        "1024x1792",
+                                        "720x1280",
+                                        "1440x2560"
+                                      ]
+                                    ]
+                                  },
+                                  "then": "720x1280"
+                                },
+                                {
+                                  "when": {
+                                    "$in": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      [
+                                        "4:3",
+                                        "1024x768",
+                                        "1152x864",
+                                        "2304x1728"
+                                      ]
+                                    ]
+                                  },
+                                  "then": "1024x768"
+                                },
+                                {
+                                  "when": {
+                                    "$in": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      [
+                                        "3:4",
+                                        "768x1024",
+                                        "864x1152",
+                                        "1728x2304"
+                                      ]
+                                    ]
+                                  },
+                                  "then": "768x1024"
+                                },
+                                {
+                                  "when": {
+                                    "$in": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      [
+                                        "3:2",
+                                        "1152x768",
+                                        "1248x832",
+                                        "1536x1024",
+                                        "2496x1664"
+                                      ]
+                                    ]
+                                  },
+                                  "then": "1152x768"
+                                },
+                                {
+                                  "when": {
+                                    "$in": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      [
+                                        "2:3",
+                                        "768x1152",
+                                        "832x1248",
+                                        "1024x1536",
+                                        "1664x2496"
+                                      ]
+                                    ]
+                                  },
+                                  "then": "768x1152"
+                                },
+                                {
+                                  "when": {
+                                    "$in": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      [
+                                        "21:9",
+                                        "1344x576",
+                                        "1512x648",
+                                        "3024x1296"
+                                      ]
+                                    ]
+                                  },
+                                  "then": "1344x576"
+                                }
+                              ],
+                              "default": {
+                                "$coalesce": [
+                                  {
+                                    "$omitEmpty": {
+                                      "$ref": "vars.rawRatio"
+                                    }
+                                  },
+                                  "1024x1024"
+                                ]
+                              }
+                            }
+                          },
+                          "else": {
+                            "$if": {
+                              "condition": {
+                                "$ref": "vars.isExplicitPixelSize"
+                              },
+                              "then": {
+                                "$ref": "vars.rawRatio"
+                              },
+                              "else": {
+                                "$if": {
+                                  "condition": {
+                                    "$ref": "vars.use1k"
+                                  },
+                                  "then": {
+                                    "$switch": {
+                                      "cases": [
+                                        {
+                                          "when": {
+                                            "$in": [
+                                              {
+                                                "$ref": "vars.rawRatio"
+                                              },
+                                              [
+                                                "",
+                                                "auto",
+                                                "1:1",
+                                                "1024x1024"
+                                              ]
+                                            ]
+                                          },
+                                          "then": "1024x1024"
+                                        },
+                                        {
+                                          "when": {
+                                            "$in": [
+                                              {
+                                                "$ref": "vars.rawRatio"
+                                              },
+                                              [
+                                                "16:9",
+                                                "1792x1024",
+                                                "1280x720"
+                                              ]
+                                            ]
+                                          },
+                                          "then": "1280x720"
+                                        },
+                                        {
+                                          "when": {
+                                            "$in": [
+                                              {
+                                                "$ref": "vars.rawRatio"
+                                              },
+                                              [
+                                                "9:16",
+                                                "1024x1792",
+                                                "720x1280"
+                                              ]
+                                            ]
+                                          },
+                                          "then": "720x1280"
+                                        },
+                                        {
+                                          "when": {
+                                            "$in": [
+                                              {
+                                                "$ref": "vars.rawRatio"
+                                              },
+                                              [
+                                                "4:3",
+                                                "1152x864"
+                                              ]
+                                            ]
+                                          },
+                                          "then": "1152x864"
+                                        },
+                                        {
+                                          "when": {
+                                            "$in": [
+                                              {
+                                                "$ref": "vars.rawRatio"
+                                              },
+                                              [
+                                                "3:4",
+                                                "864x1152"
+                                              ]
+                                            ]
+                                          },
+                                          "then": "864x1152"
+                                        },
+                                        {
+                                          "when": {
+                                            "$in": [
+                                              {
+                                                "$ref": "vars.rawRatio"
+                                              },
+                                              [
+                                                "3:2",
+                                                "1536x1024",
+                                                "1248x832"
+                                              ]
+                                            ]
+                                          },
+                                          "then": "1248x832"
+                                        },
+                                        {
+                                          "when": {
+                                            "$in": [
+                                              {
+                                                "$ref": "vars.rawRatio"
+                                              },
+                                              [
+                                                "2:3",
+                                                "1024x1536",
+                                                "832x1248"
+                                              ]
+                                            ]
+                                          },
+                                          "then": "832x1248"
+                                        },
+                                        {
+                                          "when": {
+                                            "$in": [
+                                              {
+                                                "$ref": "vars.rawRatio"
+                                              },
+                                              [
+                                                "21:9",
+                                                "1512x648"
+                                              ]
+                                            ]
+                                          },
+                                          "then": "1512x648"
+                                        }
+                                      ],
+                                      "default": {
+                                        "$coalesce": [
+                                          {
+                                            "$omitEmpty": {
+                                              "$ref": "vars.rawRatio"
+                                            }
+                                          },
+                                          "1024x1024"
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  "else": {
+                                    "$switch": {
+                                      "cases": [
+                                        {
+                                          "when": {
+                                            "$in": [
+                                              {
+                                                "$ref": "vars.rawRatio"
+                                              },
+                                              [
+                                                "",
+                                                "auto",
+                                                "1:1",
+                                                "1024x1024",
+                                                "2048x2048"
+                                              ]
+                                            ]
+                                          },
+                                          "then": "2048x2048"
+                                        },
+                                        {
+                                          "when": {
+                                            "$in": [
+                                              {
+                                                "$ref": "vars.rawRatio"
+                                              },
+                                              [
+                                                "16:9",
+                                                "1792x1024",
+                                                "1280x720",
+                                                "2560x1440"
+                                              ]
+                                            ]
+                                          },
+                                          "then": "2560x1440"
+                                        },
+                                        {
+                                          "when": {
+                                            "$in": [
+                                              {
+                                                "$ref": "vars.rawRatio"
+                                              },
+                                              [
+                                                "9:16",
+                                                "1024x1792",
+                                                "720x1280",
+                                                "1440x2560"
+                                              ]
+                                            ]
+                                          },
+                                          "then": "1440x2560"
+                                        },
+                                        {
+                                          "when": {
+                                            "$in": [
+                                              {
+                                                "$ref": "vars.rawRatio"
+                                              },
+                                              [
+                                                "4:3",
+                                                "1152x864",
+                                                "2304x1728"
+                                              ]
+                                            ]
+                                          },
+                                          "then": "2304x1728"
+                                        },
+                                        {
+                                          "when": {
+                                            "$in": [
+                                              {
+                                                "$ref": "vars.rawRatio"
+                                              },
+                                              [
+                                                "3:4",
+                                                "864x1152",
+                                                "1728x2304"
+                                              ]
+                                            ]
+                                          },
+                                          "then": "1728x2304"
+                                        },
+                                        {
+                                          "when": {
+                                            "$in": [
+                                              {
+                                                "$ref": "vars.rawRatio"
+                                              },
+                                              [
+                                                "3:2",
+                                                "1536x1024",
+                                                "1248x832",
+                                                "2496x1664"
+                                              ]
+                                            ]
+                                          },
+                                          "then": "2496x1664"
+                                        },
+                                        {
+                                          "when": {
+                                            "$in": [
+                                              {
+                                                "$ref": "vars.rawRatio"
+                                              },
+                                              [
+                                                "2:3",
+                                                "1024x1536",
+                                                "832x1248",
+                                                "1664x2496"
+                                              ]
+                                            ]
+                                          },
+                                          "then": "1664x2496"
+                                        },
+                                        {
+                                          "when": {
+                                            "$in": [
+                                              {
+                                                "$ref": "vars.rawRatio"
+                                              },
+                                              [
+                                                "21:9",
+                                                "1512x648",
+                                                "3024x1296"
+                                              ]
+                                            ]
+                                          },
+                                          "then": "3024x1296"
+                                        }
+                                      ],
+                                      "default": {
+                                        "$coalesce": [
+                                          {
+                                            "$omitEmpty": {
+                                              "$ref": "vars.rawRatio"
+                                            }
+                                          },
+                                          "2048x2048"
+                                        ]
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "create": {
+            "method": "POST",
+            "path": "/v1/images/generations",
+            "originPath": true,
+            "contentType": "application/json",
+            "body": {
+              "model": {
+                "$ref": "request.model"
+              },
+              "prompt": {
+                "$if": {
+                  "condition": {
+                    "$ref": "request.instructions"
+                  },
+                  "then": {
+                    "$concat": [
+                      {
+                        "$ref": "request.instructions"
+                      },
+                      "\n\n",
+                      {
+                        "$ref": "request.prompt"
+                      }
+                    ]
+                  },
+                  "else": {
+                    "$ref": "request.prompt"
+                  }
+                }
+              },
+              "size": {
+                "$omitEmpty": {
+                  "$ref": "vars.size"
+                }
+              },
+              "images": {
+                "$omitEmpty": {
+                  "$map": {
+                    "from": {
+                      "$sortByOrder": {
+                        "$ref": "request.images"
+                      }
+                    },
+                    "as": "media",
+                    "in": {
+                      "$ref": "media.value"
+                    }
+                  }
+                }
+              },
+              "n": {
+                "$if": {
+                  "condition": {
+                    "$and": [
+                      {
+                        "$ref": "vars.isQwenImage"
+                      },
+                      {
+                        "$gt": [
+                          {
+                            "$ref": "request.imageCount"
+                          },
+                          1
+                        ]
+                      }
+                    ]
+                  },
+                  "then": {
+                    "$ref": "request.imageCount"
+                  }
+                }
+              },
+              "sequential_image_generation": {
+                "$if": {
+                  "condition": {
+                    "$and": [
+                      {
+                        "$ref": "vars.isSeedreamLite"
+                      },
+                      {
+                        "$gt": [
+                          {
+                            "$ref": "vars.seqMaxImages"
+                          },
+                          1
+                        ]
+                      }
+                    ]
+                  },
+                  "then": "auto"
+                }
+              },
+              "sequential_image_generation_options": {
+                "$if": {
+                  "condition": {
+                    "$and": [
+                      {
+                        "$ref": "vars.isSeedreamLite"
+                      },
+                      {
+                        "$gt": [
+                          {
+                            "$ref": "vars.seqMaxImages"
+                          },
+                          1
+                        ]
+                      }
+                    ]
+                  },
+                  "then": {
+                    "max_images": {
+                      "$ref": "vars.seqMaxImages"
+                    }
+                  }
+                }
+              },
+              "background": {
+                "$if": {
+                  "condition": {
+                    "$ref": "vars.isTransparent"
+                  },
+                  "then": "transparent",
+                  "else": {
+                    "$if": {
+                      "condition": {
+                        "$ref": "vars.isSeedreamPro"
+                      },
+                      "then": {
+                        "$omitEmpty": {
+                          "$ref": "request.providerOptions.ysdui-image.background"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "layer_decomposition": {
+                "$if": {
+                  "condition": {
+                    "$ref": "vars.isLayers"
+                  },
+                  "then": true
+                }
+              },
+              "output_format": {
+                "$if": {
+                  "condition": {
+                    "$ref": "vars.isSeedream"
+                  },
+                  "then": {
+                    "$if": {
+                      "condition": {
+                        "$ref": "vars.isTransparent"
+                      },
+                      "then": "png",
+                      "else": {
+                        "$omitEmpty": {
+                          "$coalesce": [
+                            {
+                              "$omitEmpty": {
+                                "$ref": "request.output.options.format"
+                              }
+                            },
+                            {
+                              "$ref": "request.providerOptions.ysdui-image.output_format"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "optimize_prompt_options": {
+                "$if": {
+                  "condition": {
+                    "$and": [
+                      {
+                        "$ref": "vars.isSeedream"
+                      },
+                      {
+                        "$or": [
+                          {
+                            "$ref": "request.output.options.optimize"
+                          },
+                          {
+                            "$ref": "request.providerOptions.ysdui-image.optimize_prompt_options.mode"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "then": {
+                    "mode": {
+                      "$coalesce": [
+                        {
+                          "$omitEmpty": {
+                            "$ref": "request.output.options.optimize"
+                          }
+                        },
+                        {
+                          "$ref": "request.providerOptions.ysdui-image.optimize_prompt_options.mode"
+                        }
+                      ]
+                    }
+                  }
+                }
+              },
+              "negative_prompt": {
+                "$if": {
+                  "condition": {
+                    "$ref": "vars.isQwenImage"
+                  },
+                  "then": {
+                    "$omitEmpty": {
+                      "$ref": "request.providerOptions.ysdui-image.negative_prompt"
+                    }
+                  }
+                }
+              },
+              "prompt_extend": {
+                "$if": {
+                  "condition": {
+                    "$and": [
+                      {
+                        "$ref": "vars.isQwenImage"
+                      },
+                      {
+                        "$ne": [
+                          {
+                            "$ref": "request.providerOptions.ysdui-image.prompt_extend"
+                          },
+                          null
+                        ]
+                      }
+                    ]
+                  },
+                  "then": {
+                    "$ref": "request.providerOptions.ysdui-image.prompt_extend"
+                  }
+                }
+              },
+              "watermark": {
+                "$if": {
+                  "condition": {
+                    "$or": [
+                      {
+                        "$ref": "vars.isSeedream"
+                      },
+                      {
+                        "$ref": "vars.isQwenImage"
+                      }
+                    ]
+                  },
+                  "then": {
+                    "$coalesce": [
+                      {
+                        "$if": {
+                          "condition": {
+                            "$ne": [
+                              {
+                                "$coalesce": [
+                                  {
+                                    "$ref": "request.output.options.watermark"
+                                  },
+                                  ""
+                                ]
+                              },
+                              ""
+                            ]
+                          },
+                          "then": {
+                            "$eq": [
+                              {
+                                "$lower": {
+                                  "$ref": "request.output.options.watermark"
+                                }
+                              },
+                              "true"
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "$ref": "request.providerOptions.ysdui-image.watermark"
+                      },
+                      {
+                        "$ref": "request.watermark"
+                      },
+                      false
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "response": {
+            "status": "succeeded",
+            "message": {
+              "$coalesce": [
+                {
+                  "$ref": "response.error.message"
+                },
+                {
+                  "$ref": "response.message"
+                }
+              ]
+            },
+            "images": {
+              "$map": {
+                "from": {
+                  "$ref": "response.data"
+                },
+                "as": "item",
+                "in": {
+                  "url": {
+                    "$ref": "item.url"
+                  },
+                  "dataUrl": {
+                    "$ref": "item.b64_json"
+                  },
+                  "output_format": {
+                    "$ref": "item.output_format"
+                  },
+                  "metadata": {
+                    "layer": {
+                      "$if": {
+                        "condition": {
+                          "$or": [
+                            {
+                              "$ne": [
+                                {
+                                  "$ref": "item.z_index"
+                                },
+                                null
+                              ]
+                            },
+                            {
+                              "$ne": [
+                                {
+                                  "$ref": "item.bounding_box"
+                                },
+                                null
+                              ]
+                            }
+                          ]
+                        },
+                        "then": {
+                          "z_index": {
+                            "$ref": "item.z_index"
+                          },
+                          "bounding_box": {
+                            "$ref": "item.bounding_box"
+                          },
+                          "name": {
+                            "$ref": "item.name"
+                          },
+                          "description": {
+                            "$ref": "item.description"
+                          },
+                          "size": {
+                            "$ref": "item.size"
+                          },
+                          "output_format": {
+                            "$ref": "item.output_format"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "usage": {
+              "$ref": "response.usage"
+            },
+            "errorPaths": [
+              "code",
+              "error.code",
+              "error.message"
+            ],
+            "successCodes": [
+              200,
+              "200",
+              0,
+              "0",
+              "success"
+            ],
+            "resultEphemeral": true,
+            "detectImageMime": true
+          }
+        },
+        {
+          "id": "ysdui-image-task",
+          "label": "银盛云枢壹算异步图像任务 (WAND-Vega Image)",
+          "capabilities": [
+            "image"
+          ],
+          "scopes": [
+            "admin.system-channel",
+            "user.custom-channel",
+            "canvas",
+            "creation",
+            "agent"
+          ],
+          "baseUrl": "https://tokenhub.ysdui.cn",
+          "requiresPublicMediaUrls": true,
+          "mediaTransport": {
+            "image": "url"
+          },
+          "mediaUpload": {
+            "url": "https://ysdui.cn/api/file/v1/upload",
+            "path": "/api/file/v1/upload",
+            "field": "file",
+            "maxBytes": 20971520,
+            "urlPaths": [
+              "data",
+              "data.url",
+              "url"
+            ],
+            "errorPaths": [
+              "code",
+              "error.code"
+            ],
+            "successCodes": [
+              200,
+              "200",
+              0,
+              "0",
+              "success"
+            ],
+            "messagePaths": [
+              "message",
+              "error.message"
+            ]
+          },
+          "auth": {
+            "type": "bearer",
+            "field": "apiKey"
+          },
+          "parameters": [
+            {
+              "name": "model",
+              "type": "string",
+              "required": true,
+              "mapping": "model",
+              "description": "WAND-Vega 异步图像模型 ID（如 wand-vega-image-pro、wand-vega-image-1.5-pro、wand-vega-image-flash）。"
+            },
+            {
+              "name": "prompt",
+              "type": "string",
+              "required": true,
+              "mapping": "prompt",
+              "description": "图像描述提示词。"
+            },
+            {
+              "name": "images",
+              "type": "media[]",
+              "required": false,
+              "mapping": "images",
+              "description": "参考图列表（URL 或 Base64 Data URL，最多 14 张）。"
+            },
+            {
+              "name": "aspectRatio",
+              "type": "string",
+              "required": false,
+              "mapping": "size",
+              "description": "画幅比例或像素尺寸。"
+            },
+            {
+              "name": "quality",
+              "type": "string",
+              "required": false,
+              "mapping": "size",
+              "description": "清晰度档位（1k、2k、4k）。"
+            }
+          ],
+          "variables": [
+            {
+              "name": "tier",
+              "value": {
+                "$lower": {
+                  "$coalesce": [
+                    {
+                      "$ref": "request.quality"
+                    },
+                    "1k"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "rawRatio",
+              "value": {
+                "$trim": {
+                  "$coalesce": [
+                    {
+                      "$ref": "request.aspectRatio"
+                    },
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "isExplicitPixelSize",
+              "value": {
+                "$eq": [
+                  {
+                    "$len": {
+                      "$split": [
+                        {
+                          "$lower": {
+                            "$ref": "vars.rawRatio"
+                          }
+                        },
+                        "x"
+                      ]
+                    }
+                  },
+                  2
+                ]
+              }
+            },
+            {
+              "name": "size",
+              "value": {
+                "$if": {
+                  "condition": {
+                    "$ref": "vars.isExplicitPixelSize"
+                  },
+                  "then": {
+                    "$ref": "vars.rawRatio"
+                  },
+                  "else": {
+                    "$if": {
+                      "condition": {
+                        "$eq": [
+                          {
+                            "$ref": "vars.tier"
+                          },
+                          "4k"
+                        ]
+                      },
+                      "then": {
+                        "$switch": {
+                          "cases": [
+                            {
+                              "when": {
+                                "$in": [
+                                  {
+                                    "$ref": "vars.rawRatio"
+                                  },
+                                  [
+                                    "",
+                                    "auto",
+                                    "1:1"
+                                  ]
+                                ]
+                              },
+                              "then": "4096x4096"
+                            },
+                            {
+                              "when": {
+                                "$eq": [
+                                  {
+                                    "$ref": "vars.rawRatio"
+                                  },
+                                  "16:9"
+                                ]
+                              },
+                              "then": "5472x3072"
+                            },
+                            {
+                              "when": {
+                                "$eq": [
+                                  {
+                                    "$ref": "vars.rawRatio"
+                                  },
+                                  "9:16"
+                                ]
+                              },
+                              "then": "3072x5472"
+                            },
+                            {
+                              "when": {
+                                "$eq": [
+                                  {
+                                    "$ref": "vars.rawRatio"
+                                  },
+                                  "4:3"
+                                ]
+                              },
+                              "then": "4800x3600"
+                            },
+                            {
+                              "when": {
+                                "$eq": [
+                                  {
+                                    "$ref": "vars.rawRatio"
+                                  },
+                                  "3:4"
+                                ]
+                              },
+                              "then": "3600x4800"
+                            },
+                            {
+                              "when": {
+                                "$eq": [
+                                  {
+                                    "$ref": "vars.rawRatio"
+                                  },
+                                  "3:2"
+                                ]
+                              },
+                              "then": "5472x3648"
+                            },
+                            {
+                              "when": {
+                                "$eq": [
+                                  {
+                                    "$ref": "vars.rawRatio"
+                                  },
+                                  "2:3"
+                                ]
+                              },
+                              "then": "3648x5472"
+                            },
+                            {
+                              "when": {
+                                "$eq": [
+                                  {
+                                    "$ref": "vars.rawRatio"
+                                  },
+                                  "21:9"
+                                ]
+                              },
+                              "then": "6720x2880"
+                            }
+                          ],
+                          "default": "4096x4096"
+                        }
+                      },
+                      "else": {
+                        "$if": {
+                          "condition": {
+                            "$eq": [
+                              {
+                                "$ref": "vars.tier"
+                              },
+                              "2k"
+                            ]
+                          },
+                          "then": {
+                            "$switch": {
+                              "cases": [
+                                {
+                                  "when": {
+                                    "$in": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      [
+                                        "",
+                                        "auto",
+                                        "1:1"
+                                      ]
+                                    ]
+                                  },
+                                  "then": "2048x2048"
+                                },
+                                {
+                                  "when": {
+                                    "$eq": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      "16:9"
+                                    ]
+                                  },
+                                  "then": "3648x2048"
+                                },
+                                {
+                                  "when": {
+                                    "$eq": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      "9:16"
+                                    ]
+                                  },
+                                  "then": "2048x3648"
+                                },
+                                {
+                                  "when": {
+                                    "$eq": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      "4:3"
+                                    ]
+                                  },
+                                  "then": "2720x2048"
+                                },
+                                {
+                                  "when": {
+                                    "$eq": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      "3:4"
+                                    ]
+                                  },
+                                  "then": "2048x2720"
+                                },
+                                {
+                                  "when": {
+                                    "$eq": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      "3:2"
+                                    ]
+                                  },
+                                  "then": "3072x2048"
+                                },
+                                {
+                                  "when": {
+                                    "$eq": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      "2:3"
+                                    ]
+                                  },
+                                  "then": "2048x3072"
+                                },
+                                {
+                                  "when": {
+                                    "$eq": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      "21:9"
+                                    ]
+                                  },
+                                  "then": "4704x2016"
+                                }
+                              ],
+                              "default": "2048x2048"
+                            }
+                          },
+                          "else": {
+                            "$switch": {
+                              "cases": [
+                                {
+                                  "when": {
+                                    "$in": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      [
+                                        "",
+                                        "auto",
+                                        "1:1"
+                                      ]
+                                    ]
+                                  },
+                                  "then": "1024x1024"
+                                },
+                                {
+                                  "when": {
+                                    "$eq": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      "16:9"
+                                    ]
+                                  },
+                                  "then": "1824x1024"
+                                },
+                                {
+                                  "when": {
+                                    "$eq": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      "9:16"
+                                    ]
+                                  },
+                                  "then": "1024x1824"
+                                },
+                                {
+                                  "when": {
+                                    "$eq": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      "4:3"
+                                    ]
+                                  },
+                                  "then": "1360x1024"
+                                },
+                                {
+                                  "when": {
+                                    "$eq": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      "3:4"
+                                    ]
+                                  },
+                                  "then": "1024x1360"
+                                },
+                                {
+                                  "when": {
+                                    "$eq": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      "3:2"
+                                    ]
+                                  },
+                                  "then": "1536x1024"
+                                },
+                                {
+                                  "when": {
+                                    "$eq": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      "2:3"
+                                    ]
+                                  },
+                                  "then": "1024x1536"
+                                },
+                                {
+                                  "when": {
+                                    "$eq": [
+                                      {
+                                        "$ref": "vars.rawRatio"
+                                      },
+                                      "21:9"
+                                    ]
+                                  },
+                                  "then": "2352x1008"
+                                }
+                              ],
+                              "default": "1024x1024"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "create": {
+            "method": "POST",
+            "path": "/v1/images/tasks",
+            "originPath": true,
+            "contentType": "application/json",
+            "body": {
+              "model": {
+                "$ref": "request.model"
+              },
+              "prompt": {
+                "$if": {
+                  "condition": {
+                    "$ref": "request.instructions"
+                  },
+                  "then": {
+                    "$concat": [
+                      {
+                        "$ref": "request.instructions"
+                      },
+                      "\n\n",
+                      {
+                        "$ref": "request.prompt"
+                      }
+                    ]
+                  },
+                  "else": {
+                    "$ref": "request.prompt"
+                  }
+                }
+              },
+              "images": {
+                "$omitEmpty": {
+                  "$map": {
+                    "from": {
+                      "$sortByOrder": {
+                        "$ref": "request.images"
+                      }
+                    },
+                    "as": "media",
+                    "in": {
+                      "$ref": "media.value"
+                    }
+                  }
+                }
+              },
+              "size": {
+                "$ref": "vars.size"
+              }
+            }
+          },
+          "poll": {
+            "method": "GET",
+            "path": "/v1/images/tasks/{{taskId}}",
+            "originPath": true
+          },
+          "response": {
+            "taskId": {
+              "$coalesce": [
+                {
+                  "$ref": "response.data.task_id"
+                },
+                {
+                  "$ref": "response.data.id"
+                },
+                {
+                  "$ref": "response.task_id"
+                },
+                {
+                  "$ref": "response.id"
+                },
+                {
+                  "$ref": "taskId"
+                }
+              ]
+            },
+            "status": {
+              "$coalesce": [
+                {
+                  "$ref": "response.data.status"
+                },
+                {
+                  "$ref": "response.status"
+                },
+                "pending"
+              ]
+            },
+            "message": {
+              "$coalesce": [
+                {
+                  "$ref": "response.data.fail_reason"
+                },
+                {
+                  "$ref": "response.error.message"
+                },
+                {
+                  "$ref": "response.message"
+                }
+              ]
+            },
+            "images": {
+              "$coalesce": [
+                {
+                  "$map": {
+                    "from": {
+                      "$ref": "response.data.content.image_url"
+                    },
+                    "as": "item",
+                    "in": {
+                      "url": {
+                        "$ref": "item.url"
+                      }
+                    }
+                  }
+                },
+                {
+                  "$ref": "response.data.image_url"
+                },
+                {
+                  "$ref": "response.image_url"
+                }
+              ]
+            },
+            "usage": {
+              "$coalesce": [
+                {
+                  "$ref": "response.data.usage"
+                },
+                {
+                  "$ref": "response.usage"
+                }
+              ]
+            },
+            "errorPaths": [
+              "code",
+              "error.code",
+              "data.fail_reason"
+            ],
+            "successCodes": [
+              200,
+              "200",
+              0,
+              "0",
+              "success"
+            ],
+            "resultEphemeral": true
+          }
+        },
+        {
+          "id": "ysdui-video",
+          "label": "银盛云枢壹算统一视频生成 (Seedance / Wan 3.0 / MiniMax H3 / WAND-Vega)",
+          "capabilities": [
+            "video"
+          ],
+          "scopes": [
+            "admin.system-channel",
+            "user.custom-channel",
+            "canvas",
+            "creation",
+            "agent"
+          ],
+          "baseUrl": "https://tokenhub.ysdui.cn",
+          "requiresPublicMediaUrls": true,
+          "mediaTransport": {
+            "image": "url",
+            "video": "url",
+            "audio": "url"
+          },
+          "mediaUpload": {
+            "url": "https://ysdui.cn/api/file/v1/upload",
+            "path": "/api/file/v1/upload",
+            "field": "file",
+            "maxBytes": 20971520,
+            "urlPaths": [
+              "data",
+              "data.url",
+              "url"
+            ],
+            "errorPaths": [
+              "code",
+              "error.code"
+            ],
+            "successCodes": [
+              200,
+              "200",
+              0,
+              "0",
+              "success"
+            ],
+            "messagePaths": [
+              "message",
+              "error.message"
+            ]
+          },
+          "auth": {
+            "type": "bearer",
+            "field": "apiKey"
+          },
+          "parameters": [
+            {
+              "name": "model",
+              "type": "string",
+              "required": true,
+              "mapping": "model",
+              "description": "视频模型 ID（如 doubao-seedance-2-0-260128、doubao-seedance-2-5-260628、wan3.0-video、minimax-h3、wand-vega-video-1.0-lite）。"
+            },
+            {
+              "name": "prompt",
+              "type": "string",
+              "required": true,
+              "mapping": "prompt",
+              "description": "视频提示词。"
+            },
+            {
+              "name": "images",
+              "type": "media[]",
+              "required": false,
+              "mapping": "content[type=image_url]",
+              "description": "首帧 (first_frame)、尾帧 (last_frame)、多模态参考图 (reference_image)。"
+            },
+            {
+              "name": "videos",
+              "type": "media[]",
+              "required": false,
+              "mapping": "content[type=video_url]",
+              "description": "参考视频 (reference_video)。"
+            },
+            {
+              "name": "audios",
+              "type": "media[]",
+              "required": false,
+              "mapping": "content[type=audio_url]",
+              "description": "参考音频 (reference_audio)。"
+            },
+            {
+              "name": "aspectRatio",
+              "type": "string",
+              "required": false,
+              "mapping": "ratio",
+              "description": "画幅比例（16:9、9:16、4:3、3:4、1:1、21:9、adaptive）。"
+            },
+            {
+              "name": "resolution",
+              "type": "string",
+              "required": false,
+              "mapping": "resolution",
+              "description": "输出分辨率档位（480P、720P、768P、1080P、2K、4K）。"
+            },
+            {
+              "name": "duration",
+              "type": "integer",
+              "required": false,
+              "mapping": "duration",
+              "description": "视频时长秒数（Wan 3.0 支持 2-30 秒，其余支持 4-15 秒，Seedance 支持 -1 自动时长）。"
+            },
+            {
+              "name": "generateAudio",
+              "type": "boolean",
+              "required": false,
+              "mapping": "generate_audio",
+              "description": "是否生成同步音频（仅支持音频开关的模型发送）。"
+            },
+            {
+              "name": "watermark",
+              "type": "boolean",
+              "required": false,
+              "mapping": "watermark",
+              "description": "是否包含水印（仅支持水印开关的模型发送）。"
+            },
+            {
+              "name": "providerOptions",
+              "type": "object",
+              "required": false,
+              "mapping": "provider-specific fields",
+              "description": "渠道个性化参数（Doubao: reference_mode / output_format / return_last_frame；Qwen: prompt_extend）。"
+            }
+          ],
+          "variables": [
+            {
+              "name": "cleanModel",
+              "value": {
+                "$lower": {
+                  "$trim": {
+                    "$ref": "request.model"
+                  }
+                }
+              }
+            },
+            {
+              "name": "isSeedance",
+              "value": {
+                "$in": [
+                  {
+                    "$ref": "vars.cleanModel"
+                  },
+                  [
+                    "doubao-seedance-2-0-260128",
+                    "doubao-seedance-2-0-fast-260128",
+                    "doubao-seedance-2-0-mini-260615",
+                    "doubao-seedance-2-5-260628"
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "isWanVideo",
+              "value": {
+                "$in": [
+                  {
+                    "$ref": "vars.cleanModel"
+                  },
+                  [
+                    "wan3.0-video",
+                    "wan3.0-video-prime"
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "isMinimaxH3",
+              "value": {
+                "$eq": [
+                  {
+                    "$ref": "vars.cleanModel"
+                  },
+                  "minimax-h3"
+                ]
+              }
+            },
+            {
+              "name": "isWandVegaVideo",
+              "value": {
+                "$eq": [
+                  {
+                    "$ref": "vars.cleanModel"
+                  },
+                  "wand-vega-video-1.0-lite"
+                ]
+              }
+            },
+            {
+              "name": "rawResolution",
+              "value": {
+                "$upper": {
+                  "$trim": {
+                    "$coalesce": [
+                      {
+                        "$ref": "request.resolution"
+                      },
+                      ""
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "name": "isEditOperation",
+              "value": {
+                "$in": [
+                  {
+                    "$ref": "request.operation"
+                  },
+                  [
+                    "inpaint",
+                    "replace_element",
+                    "style_transfer",
+                    "edit"
+                  ]
+                ]
+              }
+            }
+          ],
+          "create": {
+            "method": "POST",
+            "path": "/v1/video/generations",
+            "originPath": true,
+            "contentType": "application/json",
+            "body": {
+              "model": {
+                "$ref": "request.model"
+              },
+              "prompt": {
+                "$if": {
+                  "condition": {
+                    "$ref": "request.instructions"
+                  },
+                  "then": {
+                    "$concat": [
+                      {
+                        "$ref": "request.instructions"
+                      },
+                      "\n\n",
+                      {
+                        "$ref": "request.prompt"
+                      }
+                    ]
+                  },
+                  "else": {
+                    "$ref": "request.prompt"
+                  }
+                }
+              },
+              "content": {
+                "$omitEmpty": {
+                  "$concatArrays": [
+                    {
+                      "$map": {
+                        "from": {
+                          "$sortByOrder": {
+                            "$ref": "request.images"
+                          }
+                        },
+                        "as": "media",
+                        "in": {
+                          "type": "image_url",
+                          "image_url": {
+                            "url": {
+                              "$ref": "media.value"
+                            }
+                          },
+                          "role": {
+                            "$coalesce": [
+                              {
+                                "$omitEmpty": {
+                                  "$ref": "media.role"
+                                }
+                              },
+                              {
+                                "$if": {
+                                  "condition": {
+                                    "$and": [
+                                      {
+                                        "$in": [
+                                          {
+                                            "$ref": "request.operation"
+                                          },
+                                          [
+                                            "",
+                                            "image_to_video"
+                                          ]
+                                        ]
+                                      },
+                                      {
+                                        "$eq": [
+                                          {
+                                            "$len": {
+                                              "$ref": "request.videos"
+                                            }
+                                          },
+                                          0
+                                        ]
+                                      },
+                                      {
+                                        "$eq": [
+                                          {
+                                            "$len": {
+                                              "$ref": "request.audios"
+                                            }
+                                          },
+                                          0
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "then": {
+                                    "$if": {
+                                      "condition": {
+                                        "$and": [
+                                          {
+                                            "$eq": [
+                                              {
+                                                "$ref": "media.order"
+                                              },
+                                              0
+                                            ]
+                                          },
+                                          {
+                                            "$lte": [
+                                              {
+                                                "$len": {
+                                                  "$ref": "request.images"
+                                                }
+                                              },
+                                              2
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      "then": "first_frame",
+                                      "else": {
+                                        "$if": {
+                                          "condition": {
+                                            "$and": [
+                                              {
+                                                "$eq": [
+                                                  {
+                                                    "$ref": "media.order"
+                                                  },
+                                                  1
+                                                ]
+                                              },
+                                              {
+                                                "$eq": [
+                                                  {
+                                                    "$len": {
+                                                      "$ref": "request.images"
+                                                    }
+                                                  },
+                                                  2
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          "then": "last_frame",
+                                          "else": "reference_image"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "else": "reference_image"
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "$map": {
+                        "from": {
+                          "$sortByOrder": {
+                            "$ref": "request.videos"
+                          }
+                        },
+                        "as": "media",
+                        "in": {
+                          "type": "video_url",
+                          "video_url": {
+                            "url": {
+                              "$ref": "media.value"
+                            }
+                          },
+                          "role": {
+                            "$coalesce": [
+                              {
+                                "$omitEmpty": {
+                                  "$ref": "media.role"
+                                }
+                              },
+                              "reference_video"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "$map": {
+                        "from": {
+                          "$sortByOrder": {
+                            "$ref": "request.audios"
+                          }
+                        },
+                        "as": "media",
+                        "in": {
+                          "type": "audio_url",
+                          "audio_url": {
+                            "url": {
+                              "$ref": "media.value"
+                            }
+                          },
+                          "role": {
+                            "$coalesce": [
+                              {
+                                "$omitEmpty": {
+                                  "$ref": "media.role"
+                                }
+                              },
+                              "reference_audio"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              "reference_mode": {
+                "$if": {
+                  "condition": {
+                    "$ref": "vars.isSeedance"
+                  },
+                  "then": {
+                    "$coalesce": [
+                      {
+                        "$omitEmpty": {
+                          "$ref": "request.providerOptions.ysdui-video.reference_mode"
+                        }
+                      },
+                      {
+                        "$if": {
+                          "condition": {
+                            "$ref": "vars.isEditOperation"
+                          },
+                          "then": "edit",
+                          "else": {
+                            "$if": {
+                              "condition": {
+                                "$eq": [
+                                  {
+                                    "$ref": "request.operation"
+                                  },
+                                  "extend"
+                                ]
+                              },
+                              "then": "extend",
+                              "else": {
+                                "$if": {
+                                  "condition": {
+                                    "$or": [
+                                      {
+                                        "$eq": [
+                                          {
+                                            "$ref": "request.operation"
+                                          },
+                                          "reference_to_video"
+                                        ]
+                                      },
+                                      {
+                                        "$gt": [
+                                          {
+                                            "$len": {
+                                              "$ref": "request.videos"
+                                            }
+                                          },
+                                          0
+                                        ]
+                                      },
+                                      {
+                                        "$gt": [
+                                          {
+                                            "$len": {
+                                              "$ref": "request.audios"
+                                            }
+                                          },
+                                          0
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "then": "reference"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "resolution": {
+                "$if": {
+                  "condition": {
+                    "$ref": "vars.isMinimaxH3"
+                  },
+                  "then": {
+                    "$if": {
+                      "condition": {
+                        "$in": [
+                          {
+                            "$ref": "vars.rawResolution"
+                          },
+                          [
+                            "2K",
+                            "1440P"
+                          ]
+                        ]
+                      },
+                      "then": "2K",
+                      "else": "768P"
+                    }
+                  },
+                  "else": {
+                    "$if": {
+                      "condition": {
+                        "$ref": "vars.isWandVegaVideo"
+                      },
+                      "then": {
+                        "$if": {
+                          "condition": {
+                            "$eq": [
+                              {
+                                "$ref": "vars.rawResolution"
+                              },
+                              "1080P"
+                            ]
+                          },
+                          "then": "1080P",
+                          "else": "768P"
+                        }
+                      },
+                      "else": {
+                        "$coalesce": [
+                          {
+                            "$omitEmpty": {
+                              "$ref": "vars.rawResolution"
+                            }
+                          },
+                          "720P"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "ratio": {
+                "$if": {
+                  "condition": {
+                    "$and": [
+                      {
+                        "$or": [
+                          {
+                            "$ref": "vars.isSeedance"
+                          },
+                          {
+                            "$ref": "vars.isWanVideo"
+                          }
+                        ]
+                      },
+                      {
+                        "$or": [
+                          {
+                            "$ref": "vars.isEditOperation"
+                          },
+                          {
+                            "$eq": [
+                              {
+                                "$ref": "request.operation"
+                              },
+                              "extend"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "then": "adaptive",
+                  "else": {
+                    "$coalesce": [
+                      {
+                        "$omitEmpty": {
+                          "$ref": "request.aspectRatio"
+                        }
+                      },
+                      "16:9"
+                    ]
+                  }
+                }
+              },
+              "duration": {
+                "$if": {
+                  "condition": {
+                    "$and": [
+                      {
+                        "$or": [
+                          {
+                            "$ref": "vars.isSeedance"
+                          },
+                          {
+                            "$ref": "vars.isWanVideo"
+                          }
+                        ]
+                      },
+                      {
+                        "$or": [
+                          {
+                            "$ref": "vars.isEditOperation"
+                          },
+                          {
+                            "$eq": [
+                              {
+                                "$ref": "request.duration"
+                              },
+                              -1
+                            ]
+                          },
+                          {
+                            "$eq": [
+                              {
+                                "$trim": {
+                                  "$coalesce": [
+                                    {
+                                      "$ref": "request.extra.videoSeconds"
+                                    },
+                                    ""
+                                  ]
+                                }
+                              },
+                              "-1"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "then": -1,
+                  "else": {
+                    "$if": {
+                      "condition": {
+                        "$gt": [
+                          {
+                            "$ref": "request.duration"
+                          },
+                          0
+                        ]
+                      },
+                      "then": {
+                        "$ref": "request.duration"
+                      },
+                      "else": 5
+                    }
+                  }
+                }
+              },
+              "generate_audio": {
+                "$if": {
+                  "condition": {
+                    "$or": [
+                      {
+                        "$ref": "vars.isSeedance"
+                      },
+                      {
+                        "$ref": "vars.isWanVideo"
+                      }
+                    ]
+                  },
+                  "then": {
+                    "$coalesce": [
+                      {
+                        "$ref": "request.extra.generateAudio"
+                      },
+                      {
+                        "$ref": "request.providerOptions.ysdui-video.generate_audio"
+                      },
+                      {
+                        "$if": {
+                          "condition": {
+                            "$ref": "request.generateAudio"
+                          },
+                          "then": true
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "watermark": {
+                "$if": {
+                  "condition": {
+                    "$or": [
+                      {
+                        "$ref": "vars.isSeedance"
+                      },
+                      {
+                        "$ref": "vars.isWanVideo"
+                      }
+                    ]
+                  },
+                  "then": {
+                    "$ref": "request.watermark"
+                  }
+                }
+              },
+              "output_format": {
+                "$if": {
+                  "condition": {
+                    "$ref": "vars.isSeedance"
+                  },
+                  "then": {
+                    "$omitEmpty": {
+                      "$ref": "request.providerOptions.ysdui-video.output_format"
+                    }
+                  }
+                }
+              },
+              "return_last_frame": {
+                "$if": {
+                  "condition": {
+                    "$and": [
+                      {
+                        "$ref": "vars.isSeedance"
+                      },
+                      {
+                        "$or": [
+                          {
+                            "$eq": [
+                              {
+                                "$ref": "request.extra.return_last_frame"
+                              },
+                              true
+                            ]
+                          },
+                          {
+                            "$eq": [
+                              {
+                                "$ref": "request.providerOptions.ysdui-video.return_last_frame"
+                              },
+                              true
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "then": true
+                }
+              },
+              "prompt_extend": {
+                "$if": {
+                  "condition": {
+                    "$and": [
+                      {
+                        "$ref": "vars.isWanVideo"
+                      },
+                      {
+                        "$ne": [
+                          {
+                            "$ref": "request.providerOptions.ysdui-video.prompt_extend"
+                          },
+                          null
+                        ]
+                      }
+                    ]
+                  },
+                  "then": {
+                    "$ref": "request.providerOptions.ysdui-video.prompt_extend"
+                  }
+                }
+              }
+            }
+          },
+          "poll": {
+            "method": "GET",
+            "path": "/v1/video/generations/{{taskId}}",
+            "originPath": true
+          },
+          "response": {
+            "taskId": {
+              "$coalesce": [
+                {
+                  "$ref": "response.data.task_id"
+                },
+                {
+                  "$ref": "response.data.data.id"
+                },
+                {
+                  "$ref": "response.data.id"
+                },
+                {
+                  "$ref": "response.task_id"
+                },
+                {
+                  "$ref": "response.id"
+                },
+                {
+                  "$ref": "taskId"
+                }
+              ]
+            },
+            "status": {
+              "$coalesce": [
+                {
+                  "$ref": "response.data.status"
+                },
+                {
+                  "$ref": "response.data.data.status"
+                },
+                {
+                  "$ref": "response.status"
+                },
+                "pending"
+              ]
+            },
+            "message": {
+              "$coalesce": [
+                {
+                  "$ref": "response.data.fail_reason"
+                },
+                {
+                  "$ref": "response.data.data.error.message"
+                },
+                {
+                  "$ref": "response.data.error.message"
+                },
+                {
+                  "$ref": "response.error.message"
+                },
+                {
+                  "$ref": "response.message"
+                }
+              ]
+            },
+            "videos": [
+              {
+                "url": {
+                  "$coalesce": [
+                    {
+                      "$ref": "response.data.data.content.video_url"
+                    },
+                    {
+                      "$ref": "response.data.content.video_url"
+                    },
+                    {
+                      "$ref": "response.content.video_url"
+                    },
+                    {
+                      "$ref": "response.data.video_url"
+                    },
+                    {
+                      "$ref": "response.video_url"
+                    }
+                  ]
+                },
+                "metadata": {
+                  "last_frame_url": {
+                    "$omitEmpty": {
+                      "$coalesce": [
+                        {
+                          "$ref": "response.data.data.content.last_frame_url"
+                        },
+                        {
+                          "$ref": "response.data.content.last_frame_url"
+                        },
+                        {
+                          "$ref": "response.content.last_frame_url"
+                        },
+                        {
+                          "$ref": "response.last_frame_url"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
+            "usage": {
+              "$coalesce": [
+                {
+                  "$ref": "response.data.data.usage"
+                },
+                {
+                  "$ref": "response.data.usage"
+                },
+                {
+                  "$ref": "response.usage"
+                }
+              ]
+            },
+            "errorPaths": [
+              "code",
+              "error.code",
+              "data.fail_reason"
+            ],
+            "successCodes": [
+              200,
+              "200",
+              0,
+              "0",
+              "success"
+            ],
+            "resultEphemeral": true
+          }
+        }
+      ]
+    }
+  }
+}

@@ -6,7 +6,7 @@ import { createModelChannel, defaultConfig } from "@/stores/use-config-store";
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
 const ids = ["gpt-6-astra", "claude-opus-5-5", "deepseek-v4.1-flash", "glm-5.3", "qwen3.8-flash", "wand-vega-vl-1.0-flash"];
-const initial = { ...defaultConfig, assistantModel: "beefapi::claude-opus-5-5", channels: [createModelChannel({ id: "beefapi", pinned: true, enabled: true, models: ids, modelProfiles: ids.map(model => ({ model, capability: "text", protocol: "chat-completion" })) })] };
+const initial = { ...defaultConfig, assistantModel: "beeftv::claude-opus-5-5", channels: [createModelChannel({ id: "beeftv", pinned: true, enabled: true, models: ids, modelProfiles: ids.map(model => ({ model, capability: "text", protocol: "chat-completion" })) })] };
 let saved = structuredClone(initial);
 let writes = 0;
 let submitted: string[] = [];
@@ -14,9 +14,11 @@ let failSave = false;
 let release: (() => void) | undefined;
 let holdSave = false;
 let connectionState = "disconnected";
+let startCalls = 0;
 let disconnectCalls = 0;
 let catalogReadFailures = 0;
-beforeEach(() => { saved = structuredClone(initial); writes = 0; submitted = []; failSave = false; holdSave = false; release = undefined; });
+let failFirstStartCatalogRead = false;
+beforeEach(() => { saved = structuredClone(initial); writes = 0; submitted = []; failSave = false; holdSave = false; release = undefined; connectionState = "disconnected"; startCalls = 0; disconnectCalls = 0; catalogReadFailures = 0; failFirstStartCatalogRead = false; });
 beforeAll(async () => {
     const build = await Bun.build({ entrypoints: [import.meta.dir + "/fixtures/assistant-model-picker-harness.tsx"], target: "browser", define: { "import.meta.env.DEV": "false", "import.meta.env.PROD": "true", "import.meta.env.MODE": '"production"', "import.meta.env.VITE_CANVAS_LOCAL_MODE": '"true"', "import.meta.env.VITE_CANVAS_BACKEND_URL": '"/api"', "process.env.NODE_ENV": '"production"' }, plugins: [{ name: "source", setup(builder) {
         // Vite owns icon glob expansion; this Bun harness covers selection and persistence.
@@ -41,11 +43,11 @@ beforeAll(async () => {
             const body = await req.json(); saved = body.config;
             return ok({ saved: true, revision: writes });
         }
-        if (path.endsWith("/beefapi/connection/start")) { connectionState = "connected"; saved.assistantModel = "beefapi::gpt-6-astra"; catalogReadFailures = 1; return ok({ state: connectionState }); }
-        if (path.endsWith("/beefapi/connection/disconnect")) { disconnectCalls++; connectionState = "disconnected"; return ok({ state: connectionState }); }
-        if (path.endsWith("/beefapi/connection")) return ok({ state: connectionState });
+        if (path.endsWith("/beeftv/connection/start")) { startCalls++; connectionState = "connected"; saved.assistantModel = "beeftv::gpt-6-astra"; if (failFirstStartCatalogRead) { failFirstStartCatalogRead = false; catalogReadFailures = 1; } return ok({ state: connectionState, hasCredential: true }); }
+        if (path.endsWith("/beeftv/connection/disconnect")) { disconnectCalls++; connectionState = "disconnected"; return ok({ state: connectionState }); }
+        if (path.endsWith("/beeftv/connection")) return ok({ state: connectionState, hasCredential: connectionState === "connected" || connectionState === "connection_error", catalogFailed: connectionState === "connection_error" });
         if (path.endsWith("/assistant/ui-session")) return ok({ token: "synthetic-only", expiresAt: new Date(Date.now() + 1800000).toISOString() });
-        if (path.endsWith("/assistant/status")) return ok({ available: true, model: { id: saved.assistantModel.split("::")[1], channelId: "beefapi" } });
+        if (path.endsWith("/assistant/status")) return ok({ available: true, model: { id: saved.assistantModel.split("::")[1], channelId: "beeftv" } });
         if (path.endsWith("/assistant/history")) return ok({ sessionId: "s1", turns: [] });
         if (path.endsWith("/assistant/sessions")) return ok({ sessionId: "s1", sessions: [] });
         if (path.endsWith("/assistant/chat")) { submitted.push(saved.assistantModel); return new Response(JSON.stringify({ type: "turn_end", turnId: "t1", reply: "synthetic", toolCalls: [], proposals: [] }) + "\n"); }
@@ -69,8 +71,8 @@ test("default multimodal selection and explicit off persist without changing the
         await picker.click();
         await page.locator('.ant-select-item-option-content').filter({ hasText: /^wand-vega-vl-1.0-flash/ }).click();
         await page.waitForTimeout(100);
-        expect(saved.mediaReviewModel).toBe("beefapi::wand-vega-vl-1.0-flash");
-        expect(saved.assistantModel).toBe("beefapi::claude-opus-5-5");
+        expect(saved.mediaReviewModel).toBe("beeftv::wand-vega-vl-1.0-flash");
+        expect(saved.assistantModel).toBe("beeftv::claude-opus-5-5");
         await page.reload();
         expect(await row.innerText()).toContain("wand-vega-vl-1.0-flash");
         await picker.click();
@@ -99,8 +101,8 @@ test("connected account can disconnect and expose the authorization action again
     } finally { await page.close(); }
 }, 30000);
 
-test("explicit compute connection retries its catalog without replacing the independent assistant selection", async () => {
-    connectionState = "disconnected"; catalogReadFailures = 0;
+test("settings retries a failed compute catalog read without replacing the local assistant", async () => {
+    connectionState = "disconnected"; catalogReadFailures = 0; failFirstStartCatalogRead = true;
     const page = await browser.newPage(); await page.goto(new URL("/settings", server.url).toString());
     await page.getByRole("button", { name: "连接 Topaz 算力", exact: true }).click();
     const retry = page.getByRole("button", { name: "重试更新模型列表" });
@@ -110,8 +112,23 @@ test("explicit compute connection retries its catalog without replacing the inde
     // Even a remote catalog advertising another default must not replace the
     // user's independent LLM choice merely because compute was connected.
     expect(await page.locator('.ant-select-item-option-selected').innerText()).toContain("claude-opus-5-5");
-    expect(saved.assistantModel).toBe("beefapi::claude-opus-5-5");
+    expect(saved.assistantModel).toBe("beeftv::claude-opus-5-5");
     await page.close();
+}, 30000);
+
+test("settings channel retry button finalizes saved credential when connection_error has catalogFailed", async () => {
+    connectionState = "connection_error"; catalogReadFailures = 0;
+    const page = await browser.newPage();
+    try {
+        await page.goto(new URL("/settings", server.url).toString());
+        const retry = page.getByRole("button", { name: "重试更新模型列表" });
+        await retry.waitFor();
+        await retry.click();
+        await retry.waitFor({ state: "hidden" });
+        expect(startCalls).toBe(1);
+    } finally {
+        await page.close();
+    }
 }, 30000);
 
 test("picker keyboard selection persists, respects busy and fits both themes at 390px", async () => {
@@ -122,7 +139,7 @@ test("picker keyboard selection persists, respects busy and fits both themes at 
     expect(await page.locator('.ant-select-item-option-content').allTextContents()).toEqual(["gpt-6-astra", "claude-opus-5-5", "deepseek-v4.1-flash", "glm-5.3"]);
     await picker.press("ArrowUp"); await picker.press("Enter");
     await page.waitForTimeout(100);
-    expect(saved.assistantModel).toBe("beefapi::gpt-6-astra");
+    expect(saved.assistantModel).toBe("beeftv::gpt-6-astra");
     await page.reload(); await page.getByRole("button", { name: "切换忙碌" }).click();
     expect(await picker.isDisabled()).toBe(true);
     for (let i = 0; i < 2; i++) {
@@ -162,7 +179,7 @@ test("next turn waits for saved selection; failed save cannot dispatch", async (
     await page.waitForTimeout(100); expect(submitted).toEqual([]);
     expect(await page.getByRole("combobox", { name: "助手模型" }).isDisabled()).toBe(true);
     holdSave = false; release?.();
-    await page.waitForTimeout(500); expect({ submitted, error: await page.locator('output').textContent(), saved: saved.assistantModel }).toEqual({ submitted: ["beefapi::glm-5.3"], error: "", saved: "beefapi::glm-5.3" });
+    await page.waitForTimeout(500); expect({ submitted, error: await page.locator('output').textContent(), saved: saved.assistantModel }).toEqual({ submitted: ["beeftv::glm-5.3"], error: "", saved: "beeftv::glm-5.3" });
     failSave = true;
     await page.getByRole("combobox", { name: "助手模型" }).click();
     await page.locator('.ant-select-item-option-content').filter({ hasText: /^gpt-6-astra$/ }).click();

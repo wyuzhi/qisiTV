@@ -49,9 +49,9 @@ export function getAddNodeMenuCommands(): AddNodeMenuCommand[] {
  * 将已注册的插件画布节点转换为添加菜单命令。
  * 这部分按需生成，避免远程/延迟加载的插件必须在工具定义模块初始化前完成注册。
  */
-function getPluginNodeMenuCommands(): AddNodeMenuCommand[] {
+function getPluginNodeMenuCommands(suppressedNodeTypes?: ReadonlySet<string>): AddNodeMenuCommand[] {
     return listCreatableNodeDefinitions()
-        .filter((definition) => Boolean(definition.plugin))
+        .filter((definition) => Boolean(definition.plugin) && !suppressedNodeTypes?.has(definition.type))
         .map((definition, index) => {
             const pluginId = definition.plugin!.pluginId;
             const FallbackIcon = definition.type === ART_CRITIQUE_NODE_TYPE ? ScanSearch : Sparkles;
@@ -116,7 +116,35 @@ export function resolveNodeToolbarPlacement(tool: ToolDefinition, ctx: ToolConte
 
 /** 解析添加节点菜单命令——合并插件节点后按 applicable 过滤并排序。 */
 export function resolveAddNodeMenuCommands(ctx: AddNodeMenuContext): AddNodeMenuCommand[] {
-    return [...getAddNodeMenuCommands(), ...getPluginNodeMenuCommands()].filter((command) => !command.applicable || command.applicable(ctx)).sort((a, b) => a.defaultOrder - b.defaultOrder);
+    const explicitCommands = getAddNodeMenuCommands().filter((command) => !command.applicable || command.applicable(ctx));
+    const defsByPluginId = new Map<string, ReturnType<typeof listCreatableNodeDefinitions>>();
+    for (const def of listCreatableNodeDefinitions()) {
+        if (!def.plugin) continue;
+        const list = defsByPluginId.get(def.plugin.pluginId) ?? [];
+        list.push(def);
+        defsByPluginId.set(def.plugin.pluginId, list);
+    }
+    const suppressedNodeTypes = new Set<string>();
+    for (const command of explicitCommands) {
+        const match = /^plugin:([^:]+):addNodeMenu:(.+)$/.exec(command.id);
+        if (!match) continue;
+        const [, pluginId, menuEntryId] = match;
+        const pluginDefs = defsByPluginId.get(pluginId) ?? [];
+        const matched = pluginDefs.filter(
+            (def) =>
+                (command.targetNodeType && command.targetNodeType === def.type) ||
+                menuEntryId === def.type ||
+                menuEntryId === `${def.type}-add` ||
+                command.label === def.label,
+        );
+        if (matched.length > 0) {
+            for (const def of matched) suppressedNodeTypes.add(def.type);
+        } else if (pluginDefs.length === 1) {
+            suppressedNodeTypes.add(pluginDefs[0].type);
+        }
+    }
+    const autoPluginCommands = getPluginNodeMenuCommands(suppressedNodeTypes).filter((command) => !command.applicable || command.applicable(ctx));
+    return [...explicitCommands, ...autoPluginCommands].sort((a, b) => a.defaultOrder - b.defaultOrder);
 }
 
 /**

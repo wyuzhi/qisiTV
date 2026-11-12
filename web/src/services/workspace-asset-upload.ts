@@ -6,10 +6,26 @@ import { persistWorkspaceAssetChanges } from "@/services/workspace-asset-reposit
 import { useAssetStore } from "@/stores/use-asset-store";
 import { startOperation } from "@/stores/use-operation-progress";
 
+function isGenericFileType(type: string) {
+    return !type || type === "application/octet-stream";
+}
+
+function isImageAssetFile(file: File) {
+    return file.type.startsWith("image/") || (isGenericFileType(file.type) && /\.(png|jpe?g|webp|gif|bmp|svg|avif|heic|heif)$/i.test(file.name));
+}
+
+function isVideoAssetFile(file: File) {
+    return file.type.startsWith("video/") || (isGenericFileType(file.type) && /\.(mp4|mov|webm|m4v|mkv|avi)$/i.test(file.name));
+}
+
+export function isAudioAssetFile(file: File) {
+    return file.type.startsWith("audio/") || (isGenericFileType(file.type) && /\.(mp3|wav|m4a|aac|flac|ogg|opus)$/i.test(file.name));
+}
+
 /** A picker submission owns its batch until settlement, independently of React views. */
 export async function uploadWorkspaceAssetFiles(files: File[], folderId: string) {
-    const media = files.filter((file) => file.type.startsWith("image/") || file.type.startsWith("video/"));
-    if (!media.length) throw new Error("请选择图片或视频文件");
+    const media = files.filter((file) => isImageAssetFile(file) || isVideoAssetFile(file) || isAudioAssetFile(file));
+    if (!media.length) throw new Error("请选择图片、视频或音频文件");
     let cursor = 0;
     let completed = 0;
     let failed = 0;
@@ -19,9 +35,23 @@ export async function uploadWorkspaceAssetFiles(files: File[], folderId: string)
             const file = media[cursor++];
             try {
                 const common = { title: file.name.replace(/\.[^.]+$/, ""), category: folderId.startsWith("builtin:") ? normalizeAssetCategory(folderId.slice(8)) : "material" as const, folderId: folderId.startsWith("builtin:") ? undefined : folderId || undefined, tags: [], source: "批量上传", metadata: { source: "manual-batch" } };
-                if (file.type.startsWith("video/")) {
+                if (isVideoAssetFile(file)) {
                     const uploaded = await uploadMediaFile(file, "video");
                     useAssetStore.getState().addAsset({ ...common, kind: "video", coverUrl: uploaded.preview?.url || "", data: { url: uploaded.url, storageKey: uploaded.storageKey, width: uploaded.width || 0, height: uploaded.height || 0, durationMs: uploaded.durationMs, hasAudio: uploaded.hasAudio, bytes: uploaded.bytes, mimeType: uploaded.mimeType } });
+                } else if (isAudioAssetFile(file)) {
+                    const uploaded = await uploadMediaFile(file, "audio");
+                    useAssetStore.getState().addAsset({
+                        ...common,
+                        kind: "audio",
+                        coverUrl: "",
+                        data: {
+                            url: uploaded.url,
+                            storageKey: uploaded.storageKey,
+                            durationMs: uploaded.durationMs,
+                            bytes: uploaded.bytes,
+                            mimeType: uploaded.mimeType || file.type || "audio/mpeg",
+                        },
+                    });
                 } else {
                     const uploaded = await uploadImage(file);
                     const meta = await readImageMeta(uploaded.url).catch(() => ({ width: uploaded.width, height: uploaded.height }));

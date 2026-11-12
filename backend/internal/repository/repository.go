@@ -2245,20 +2245,6 @@ func (r *Repository) UpdateWorkflowProgress(step *model.WorkflowStepInstance, ne
 	})
 }
 
-func (r *Repository) PromptTemplates() ([]model.PromptTemplate, error) {
-	var templates []model.PromptTemplate
-	err := r.db.Order("operation asc, version desc").Find(&templates).Error
-	return templates, err
-}
-
-func (r *Repository) PromptTemplate(id string) (*model.PromptTemplate, error) {
-	var template model.PromptTemplate
-	if err := r.db.First(&template, "id = ?", id).Error; err != nil {
-		return nil, err
-	}
-	return &template, nil
-}
-
 func (r *Repository) ActivePromptTemplate(operation string) (*model.PromptTemplate, error) {
 	var template model.PromptTemplate
 	if err := r.db.Order("version desc").First(&template, "operation = ? AND enabled = ?", operation, true).Error; err != nil {
@@ -2273,12 +2259,6 @@ func (r *Repository) PromptTemplateCount(operation string) (int64, error) {
 	return count, err
 }
 
-func (r *Repository) NextPromptTemplateVersion(operation string) (int, error) {
-	var version int
-	err := r.db.Model(&model.PromptTemplate{}).Where("operation = ?", operation).Select("COALESCE(MAX(version), 0)").Scan(&version).Error
-	return version + 1, err
-}
-
 func (r *Repository) SavePromptTemplate(template *model.PromptTemplate) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if template.Enabled {
@@ -2288,10 +2268,6 @@ func (r *Repository) SavePromptTemplate(template *model.PromptTemplate) error {
 		}
 		return tx.Save(template).Error
 	})
-}
-
-func (r *Repository) DeletePromptTemplate(id string) error {
-	return r.db.Delete(&model.PromptTemplate{}, "id = ?", id).Error
 }
 
 func (r *Repository) UserPromptCustomizations(userID string) ([]model.UserPromptCustomization, error) {

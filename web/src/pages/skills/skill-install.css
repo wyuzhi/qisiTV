@@ -1,0 +1,15 @@
+/* Retain the import category's existing compact geometry; only this form opts in. */
+.skill-install-form .ant-form-item-control {
+    min-width: 0;
+    max-width: 100%;
+}
+.skill-install-form .ant-form-item-explain-error {
+    white-space: normal;
+}
+.skill-install-form .skill-install-category {
+    height: 32px;
+    border-radius: 6px;
+    background: var(--background);
+    border-color: var(--border);
+    padding-inline: 10px;
+}

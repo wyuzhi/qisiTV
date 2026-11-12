@@ -45,7 +45,7 @@ var imageContracts = func() []ImageContract {
 	return contracts
 }()
 
-func BeefAPIImageContract(model string) (ImageContract, bool) {
+func BeefTVImageContract(model string) (ImageContract, bool) {
 	for _, contract := range imageContracts {
 		if strings.EqualFold(strings.TrimSpace(model), contract.Model) {
 			return contract, true

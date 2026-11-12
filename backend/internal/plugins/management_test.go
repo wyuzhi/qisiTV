@@ -82,29 +82,35 @@ func TestApplicationPluginUsesUserStateUnderPlatformAvailability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	initial := states[WorkflowRunningHub]
+	initial := states[AIArtCritique]
 	if !initial.PlatformAvailable || initial.UserEnabled || initial.EffectiveEnabled || !initial.CanToggle {
-		t.Fatalf("initial RunningHub state = %#v", initial)
+		t.Fatalf("initial application state = %#v", initial)
 	}
 
-	enabled, err := svc.SetUserEnabled(user, WorkflowRunningHub, true)
+	enabled, err := svc.SetUserEnabled(user, AIArtCritique, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !enabled.UserConfigured || !enabled.UserEnabled || !enabled.EffectiveEnabled {
-		t.Fatalf("enabled RunningHub state = %#v", enabled)
+		t.Fatalf("enabled application state = %#v", enabled)
 	}
-	if _, _, err := svc.SetPlatformAvailability(admin, WorkflowRunningHub, false); err != nil {
+	if _, _, err := svc.SetPlatformAvailability(admin, AIArtCritique, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.RequireWorkflowForUser(user.ID, "runninghub-workflow-image"); err == nil {
-		t.Fatal("platform-disabled workflow was accepted for a new user request")
-	}
-	if _, _, err := svc.SetPlatformAvailability(admin, WorkflowRunningHub, true); err != nil {
+	if states, err = svc.StatesForUser(user); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.RequireWorkflowForUser(user.ID, "runninghub-workflow-video"); err != nil {
-		t.Fatalf("restored user workflow rejected: %v", err)
+	if states[AIArtCritique].EffectiveEnabled {
+		t.Fatalf("platform-disabled application stayed enabled: %#v", states[AIArtCritique])
+	}
+	if _, _, err := svc.SetPlatformAvailability(admin, AIArtCritique, true); err != nil {
+		t.Fatal(err)
+	}
+	if states, err = svc.StatesForUser(user); err != nil {
+		t.Fatal(err)
+	}
+	if !states[AIArtCritique].EffectiveEnabled {
+		t.Fatalf("restored application lost the user's choice: %#v", states[AIArtCritique])
 	}
 }
 
@@ -415,7 +421,7 @@ func TestUninstallUploadedSerializesSetUserEnabled(t *testing.T) {
 		t.Fatal("uninstall delete did not start")
 	}
 	go func() {
-		_, err := svcB.SetUserEnabled(user, WorkflowRunningHub, true)
+		_, err := svcB.SetUserEnabled(user, AIArtCritique, true)
 		errEnable <- err
 	}()
 	select {
@@ -423,7 +429,7 @@ func TestUninstallUploadedSerializesSetUserEnabled(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("SetUserEnabled did not enter mutation")
 	}
-	state, err := store.UserPluginState(user.ID, WorkflowRunningHub)
+	state, err := store.UserPluginState(user.ID, AIArtCritique)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +446,7 @@ func TestUninstallUploadedSerializesSetUserEnabled(t *testing.T) {
 	if _, ok := ByID(runtime.List(), "uninstall-serial"); ok {
 		t.Fatal("uninstalled plugin still listed")
 	}
-	enabled, err := store.UserPluginState(user.ID, WorkflowRunningHub)
+	enabled, err := store.UserPluginState(user.ID, AIArtCritique)
 	if err != nil || enabled == nil || !enabled.Enabled {
 		t.Fatalf("serialized user enable = %#v err=%v", enabled, err)
 	}

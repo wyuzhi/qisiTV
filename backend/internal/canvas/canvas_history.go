@@ -26,22 +26,44 @@ func SaveDocumentWithHistory(repo *repository.Repository, before *model.CanvasPr
 }
 
 func SaveDocumentWithHistoryAndAssets(repo *repository.Repository, before *model.CanvasProject, after *model.CanvasProject, items []model.Asset, reason string) error {
-	snapshot, resourceIDs, err := buildCanvasSnapshot(before, *after, reason)
-	if err != nil {
-		return err
+	cutoff := after.UpdatedAt.Add(-canvasHistoryInterval)
+	force := reason == "before_restore"
+	var snapshot *model.CanvasSnapshot
+	var resourceIDs []string
+	if before != nil {
+		capture, err := repo.ShouldCaptureCanvasSnapshot(after.ID, before.Revision, cutoff, force)
+		if err != nil {
+			return err
+		}
+		if capture {
+			snapshot, resourceIDs, err = buildCanvasSnapshot(before, *after, reason)
+			if err != nil {
+				return err
+			}
+			if !force && len(resourceIDs) > 0 {
+				resourceIDs, err = repo.ReadyResourceIDs(resourceIDs)
+				if err != nil {
+					return err
+				}
+			}
+		}
 	}
 	var restoredIDs []string
-	if reason == "before_restore" {
+	if force {
 		refs := map[string]struct{}{}
 		if err := assets.CollectOwnedDocumentReferences(after.PayloadJSON, refs); err != nil {
 			return err
 		}
 		restoredIDs = assets.SortedIDs(refs)
 	}
-	if len(items) > 0 {
-		return repo.SaveAssetsAndCanvasWithSnapshot(items, after, snapshot, resourceIDs, restoredIDs, after.UpdatedAt.Add(-canvasHistoryInterval), canvasHistoryLimit, reason == "before_restore")
+	historyLimit := canvasHistoryLimit
+	if before != nil && len(before.PayloadJSON) > (8<<20) {
+		historyLimit = max(1, min(canvasHistoryLimit, (128<<20)/len(before.PayloadJSON)))
 	}
-	return repo.SaveCanvasWithSnapshot(after, snapshot, resourceIDs, restoredIDs, after.UpdatedAt.Add(-canvasHistoryInterval), canvasHistoryLimit, reason == "before_restore")
+	if len(items) > 0 {
+		return repo.SaveAssetsAndCanvasWithSnapshot(items, after, snapshot, resourceIDs, restoredIDs, cutoff, historyLimit, force)
+	}
+	return repo.SaveCanvasWithSnapshot(after, snapshot, resourceIDs, restoredIDs, cutoff, historyLimit, force)
 }
 
 func canvasRevisionConflict() error {
@@ -82,7 +104,17 @@ func (s *Service) CanvasHistorySnapshot(userID string, canvasID, snapshotID stri
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, kernel.NewAppError(http.StatusNotFound, "历史版本不存在或已过期，请刷新历史列表")
 	}
-	return item, err
+	if err != nil || item == nil {
+		return item, err
+	}
+	var payload map[string]json.RawMessage
+	if json.Unmarshal([]byte(item.PayloadJSON), &payload) == nil && payload != nil {
+		ensureCanvasGraphArrays(payload)
+		if normalized, marshalErr := json.Marshal(payload); marshalErr == nil {
+			item.PayloadJSON = string(normalized)
+		}
+	}
+	return item, nil
 }
 
 func (s *Service) RestoreCanvasHistory(userID string, canvasID, snapshotID string, revision *int64) (UserDataSummary, error) {
@@ -193,6 +225,7 @@ func canvasProjectPayload(project model.CanvasProject) (json.RawMessage, error) 
 	if payload == nil {
 		return nil, kernel.BadAuthRequest("画布数据格式错误")
 	}
+	ensureCanvasGraphArrays(payload)
 	for key, value := range map[string]any{"id": project.ID, "title": project.Title, "projectId": project.ProjectID, "folderId": project.LibraryFolderID, "revision": project.Revision, "createdAt": project.CreatedAt, "updatedAt": project.UpdatedAt} {
 		encoded, err := json.Marshal(value)
 		if err != nil {

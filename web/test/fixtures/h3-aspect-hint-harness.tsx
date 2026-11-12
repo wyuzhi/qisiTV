@@ -19,11 +19,11 @@ const image: CanvasResourceReference = { id: "fixture-image", nodeId: "frame", k
 function Harness() {
     const [references, setReferences] = useState<CanvasResourceReference[]>([image]);
     const character: CanvasResourceReference = { ...image, id: "character", nodeId: "character", kind: "character", label: "角色1", title: "角色卡封面" };
-    const [node, setNode] = useState<CanvasNodeData>({ id: "video", type: CanvasNodeType.Video, title: "视频生成", position: { x: 0, y: 0 }, width: 360, height: 260, metadata: { model: "beefapi::minimax-h3-max-turbo", composerContent: "人物走向镜头", size: "9:16", vquality: "768p", seconds: "15" } });
+    const [node, setNode] = useState<CanvasNodeData>({ id: "video", type: CanvasNodeType.Video, title: "视频生成", position: { x: 0, y: 0 }, width: 360, height: 260, metadata: { model: "beeftv::minimax-h3-max-turbo", composerContent: "人物走向镜头", size: "9:16", vquality: "768p", seconds: "15" } });
     return <main style={{ padding: 16, maxWidth: 430, margin: "48px auto" }}>
         <nav aria-label="验证场景" style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-            {h3Models.map((model) => <button key={model} onClick={() => setNode((current) => ({ ...current, metadata: { ...current.metadata, model: `beefapi::${model}` } }))}>{model}</button>)}
-            <button onClick={() => setNode((current) => ({ ...current, metadata: { ...current.metadata, model: `beefapi::${h3StyleModels[0]}` } }))}>H3 手绘</button>
+            {h3Models.map((model) => <button key={model} onClick={() => setNode((current) => ({ ...current, metadata: { ...current.metadata, model: `beeftv::${model}` } }))}>{model}</button>)}
+            <button onClick={() => setNode((current) => ({ ...current, metadata: { ...current.metadata, model: `beeftv::${h3StyleModels[0]}` } }))}>H3 手绘</button>
             <button onClick={() => { setReferences(references.length ? [] : [image]); setNode((current) => ({ ...current, metadata: { ...current.metadata, videoStartFrameNodeId: undefined, videoEndFrameNodeId: undefined, videoEditOperation: undefined } })); }}>{references.length ? "断开图片" : "接入图片"}</button>
             <button onClick={() => setNode((current) => ({ ...current, metadata: { ...current.metadata, videoStartFrameNodeId: "frame", videoEndFrameNodeId: undefined } }))}>指定首帧</button>
             <button onClick={() => setNode((current) => ({ ...current, metadata: { ...current.metadata, videoStartFrameNodeId: undefined, videoEndFrameNodeId: "frame" } }))}>只用尾帧</button>

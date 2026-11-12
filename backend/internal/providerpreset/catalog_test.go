@@ -2,25 +2,25 @@ package providerpreset
 
 import "testing"
 
-func TestBeefAPIPresetIsPinnedWithoutFreezingRemoteModelCatalog(t *testing.T) {
-	preset := BeefAPI()
-	if preset.ID != "beefapi" {
+func TestBeefTVPresetIsPinnedWithoutFreezingRemoteModelCatalog(t *testing.T) {
+	preset := BeefTV()
+	if preset.ID != "beeftv" {
 		t.Fatalf("preset id = %q", preset.ID)
 	}
 	if preset.DisplayName != "BeefTV" || preset.BaseURL != "https://beeftv.app" {
-		t.Fatalf("unexpected BeefAPI identity: %#v", preset)
+		t.Fatalf("unexpected BeefTV identity: %#v", preset)
 	}
 	if !preset.Pinned || preset.PresetVersion < 1 {
 		t.Fatalf("preset must be pinned and versioned: %#v", preset)
 	}
 
 	if len(preset.Models) != 0 {
-		t.Fatalf("remote BeefAPI catalog must be fetched, got %d hard-coded models", len(preset.Models))
+		t.Fatalf("remote BeefTV catalog must be fetched, got %d hard-coded models", len(preset.Models))
 	}
 }
 
 func TestCatalogValidationRejectsUnsafeOrAmbiguousPresets(t *testing.T) {
-	valid := BeefAPI()
+	valid := BeefTV()
 	valid.Models = []ModelProfile{{Model: "test", Capability: "text", Protocol: "chat-completion", CapabilityConfig: []byte(`{"version":1,"text":{"streaming":true}}`)}}
 	tests := []struct {
 		name   string

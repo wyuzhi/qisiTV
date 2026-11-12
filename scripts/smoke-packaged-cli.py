@@ -91,8 +91,11 @@ def smoke(archive, platform):
                 threading.Thread(target=read_stdout, daemon=True).start()
 
                 def send(value):
-                    process.stdin.write(json.dumps({"jsonrpc": "2.0", **value}) + "\n")
-                    process.stdin.flush()
+                    try:
+                        process.stdin.write(json.dumps({"jsonrpc": "2.0", **value}) + "\n")
+                        process.stdin.flush()
+                    except BrokenPipeError:
+                        pass
 
                 def receive(request_id):
                     line = messages.get(timeout=20)
@@ -156,7 +159,10 @@ def smoke(archive, platform):
                 process.kill()
                 process.wait(timeout=10)
             if process is not None:
-                process.stdin.close()
+                try:
+                    process.stdin.close()
+                except BrokenPipeError:
+                    pass
                 process.stdout.close()
             server.shutdown()
             server.server_close()

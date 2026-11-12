@@ -7,22 +7,41 @@ import (
 	"strings"
 
 	"qisitv/backend/internal/canvas/capability"
+	"qisitv/backend/internal/modelcatalog"
 	"qisitv/backend/internal/providerpreset"
 )
 
 func registerCanvasNodeConfigureOps(r *Registry) {
-	properties := map[string]any{
-		"model":         map[string]any{"type": "string"},
-		"prompt":        map[string]any{"type": "string"},
-		"size":          map[string]any{"type": "string"},
-		"seconds":       map[string]any{"type": "string"},
-		"generateAudio": map[string]any{"type": "string", "enum": []string{"true", "false"}},
-		"audioVoice":    map[string]any{"type": "string"},
+	properties := map[string]any{}
+	for _, kind := range []string{"image", "video", "audio"} {
+		descriptor, _ := capability.BuiltinRegistry().Resolve(kind)
+		for name, field := range descriptor.PatchFields {
+			if name == "title" || name == "content" {
+				continue
+			}
+			property := map[string]any{"type": "string", "description": field.Description}
+			switch name {
+			case "count":
+				property["type"] = "integer"
+				property["description"] = "图片生成数量"
+			case "generateAudio", "watermark", "transparentBackground":
+				property["enum"] = []string{"true", "false"}
+			case "model":
+				property["description"] = "从 model.catalog 选择的完整模型键 channelId::modelKey"
+			case "size":
+				property["description"] = "图片尺寸或视频画幅比例。视频从 model.catalog 的 capabilityConfig.video.ratios 选择，例如 16:9。视频分辨率使用 vquality"
+			case "vquality":
+				property["description"] = "视频输出分辨率。从 model.catalog 的 capabilityConfig.video.resolutions 选择，例如 480p、768p、1080p"
+			case "seconds":
+				property["description"] = "视频输出时长，单位秒。从 model.catalog 的 capabilityConfig.video.duration 选择，以字符串传入"
+			}
+			properties[name] = property
+		}
 	}
 	params, _ := json.Marshal(map[string]any{"type": "object", "additionalProperties": false,
 		"properties": map[string]any{"canvasId": map[string]any{"type": "string"}, "nodeId": map[string]any{"type": "string"},
 			"kind": map[string]any{"type": "string", "enum": []string{"image", "video", "audio"}}, "expectedRevision": map[string]any{"type": "integer", "minimum": 1},
-			"patch": map[string]any{"type": "object", "minProperties": 1, "properties": properties}},
+			"patch": map[string]any{"type": "object", "minProperties": 1, "additionalProperties": false, "properties": properties}},
 		"required": []string{"canvasId", "nodeId", "kind", "expectedRevision", "patch"}})
 	r.Register(Op{ReplaySafe: true, AssistantCanvas: true, ID: "canvas.node.configure", Summary: "设置媒体节点的提示词草稿与生成参数；不启动生成", Scope: ScopeCanvas, Params: params, Handler: opCanvasNodeConfigure})
 }
@@ -71,7 +90,7 @@ func opCanvasNodeConfigure(ctx *Context, raw json.RawMessage) (any, error) {
 	if _, hasModel := patch["model"]; !hasModel {
 		// 只改尺寸这类参数时 patch 里没有 model，用节点当前模型补上再校验，
 		// 否则同一份规则只在换模型时才生效。
-		if err := validateModelGenerationParameters(args.Kind, nodeSelectedModel(node), mergeParameters(base, stringParameters(patch))); err != nil {
+		if err := validateModelGenerationParameters(ctx.Domain, args.Kind, nodeSelectedModel(node), mergeParameters(base, stringParameters(patch))); err != nil {
 			return nil, err
 		}
 	}
@@ -122,7 +141,7 @@ func resolveGenerationDraft(ctx *Context, kind string, raw map[string]json.RawMe
 			return nil, PreconditionFailed("generation_model_unavailable", "所选模型当前不可用", nil)
 		}
 		patch["model"] = choice.ModelKey
-		if err := validateModelGenerationParameters(kind, choice.ModelKey, mergeParameters(base, stringParameters(patch))); err != nil {
+		if err := validateModelGenerationParameters(ctx.Domain, kind, choice.ModelKey, mergeParameters(base, stringParameters(patch))); err != nil {
 			return nil, err
 		}
 	}
@@ -131,7 +150,10 @@ func resolveGenerationDraft(ctx *Context, kind string, raw map[string]json.RawMe
 
 // validateModelGenerationParameters 用与真实请求同一份型号族规则，在写草稿、
 // 准备分镜和提交整片之前拦住模型不接受的尺寸；等上游拒绝时请求已经发出去了。
-func validateModelGenerationParameters(kind, modelKey string, params map[string]string) error {
+func validateModelGenerationParameters(domain Domain, kind, modelKey string, params map[string]string) error {
+	if kind == "video" {
+		return validateVideoResolutionParameter(domain, modelKey, params["vquality"])
+	}
 	if kind != "image" {
 		return nil
 	}
@@ -147,6 +169,39 @@ func validateModelGenerationParameters(kind, modelKey string, params map[string]
 		return InvalidArg("invalid_parameter", err.Error())
 	}
 	return nil
+}
+
+// validateVideoResolutionParameter 的合法取值来自同一份模型目录，避免助手写入
+// 目录里不存在的档位，直到提交生成才被上游拒绝。
+func validateVideoResolutionParameter(domain Domain, modelKey, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	reader, ok := domain.(ModelCatalogReader)
+	if !ok || reader == nil {
+		return nil
+	}
+	catalog, err := reader.AgentModelCatalog()
+	if err != nil || catalog == nil {
+		return nil
+	}
+	_, model, found := findEstimateModel(catalog, modelKey)
+	if !found {
+		return nil
+	}
+	capability := estimateCapability(model.CapabilityConfig)
+	if capability == nil || capability.Video == nil || len(capability.Video.Resolutions) == 0 {
+		return nil
+	}
+	// auto/default/medium/high 是自动档位，不参与明确档位校验。
+	if modelcatalog.IsAutomaticVideoResolution(value) {
+		return nil
+	}
+	if modelcatalog.VideoResolutionNameRequest(capability.Video, value) != "" {
+		return nil
+	}
+	return InvalidArg("invalid_parameter", "当前模型不支持 "+value+" 分辨率，可选 "+strings.Join(capability.Video.Resolutions, "、"))
 }
 
 func stringParameters(values map[string]any) map[string]string {
@@ -185,11 +240,15 @@ func validateDraftValue(name, value string) error {
 			return invalid()
 		}
 		if (name == "seconds" && (number <= 0 || number > 600)) || (name == "audioSpeed" && (number < 0.25 || number > 4)) ||
-			(name == "audioPitch" && (number < -12 || number > 12)) || (name == "audioVolume" && (number < 0 || number > 1)) {
+			(name == "audioPitch" && (number < -12 || number > 12)) || (name == "audioVolume" && (number < 0 || number > 2)) {
 			return invalid()
 		}
 	case "audioFormat":
 		if !strings.Contains("|mp3|wav|pcm|flac|aac|opus|ogg|m4a|", "|"+value+"|") {
+			return invalid()
+		}
+	case "videoEditOperation":
+		if !strings.Contains("|text_to_video|image_to_video|reference_to_video|extend|inpaint|replace_element|camera_motion|style_transfer|audio_to_video|compare_versions|concat|draft_to_final|", "|"+value+"|") {
 			return invalid()
 		}
 	case "size", "quality", "vquality", "audioVoice":

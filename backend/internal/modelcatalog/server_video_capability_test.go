@@ -16,14 +16,14 @@ func TestServerVideoCapabilityDoesNotApplyModelOrHostLimits(t *testing.T) {
 			profile.Video.GenerateAudio = VideoBooleanConfig{Supported: false, Default: false}
 			profile.Video.Duration = VideoDurationConfig{Selection: "range", Min: 1, Max: 3, Step: 1, Default: 1}
 			profile.Video.Operations = []string{"text_to_video", "image_to_video", "reference_to_video", "audio_to_video"}
-			draft, err := NormalizeModelCapabilityDraft(ModelCapabilityDraft{ChannelID: "beefapi", BaseURL: "https://enterprise.beefapi.com", Protocol: "newapi", Model: name, Capability: "video", CapabilityConfig: profile, VideoCapabilitiesVersion: &version})
+			draft, err := NormalizeModelCapabilityDraft(ModelCapabilityDraft{ChannelID: "beeftv", BaseURL: "https://beeftv.app", Protocol: "newapi", Model: name, Capability: "video", CapabilityConfig: profile, VideoCapabilitiesVersion: &version})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if draft.Video.References != profile.Video.References || draft.Video.Duration.Min != 1 || draft.Video.GenerateAudio.Supported {
 				t.Fatal("server declaration was overwritten")
 			}
-			input := TaskInput{Config: TaskConfig{ChannelID: "beefapi", BaseURL: "https://enterprise.beefapi.com", InterfaceType: "newapi", Model: name, VideoCapabilitiesVersion: &version, VideoSeconds: "1"}, ReferenceImages: []MediaRef{{Width: 64, Height: 64, Bytes: 100 << 20}}}
+			input := TaskInput{Config: TaskConfig{ChannelID: "beeftv", BaseURL: "https://beeftv.app", InterfaceType: "newapi", Model: name, VideoCapabilitiesVersion: &version, VideoSeconds: "1"}, ReferenceImages: []MediaRef{{Width: 64, Height: 64, Bytes: 100 << 20}}}
 			if err := ValidateVideoTask(draft.Video, input); err != nil {
 				t.Fatalf("invented a size or duration restriction: %v", err)
 			}
@@ -54,7 +54,7 @@ func TestUnversionedBYOKVideoRetainsItsDocumentedLimits(t *testing.T) {
 }
 
 func TestServerVideoOperationReferencesUseExplicitOperation(t *testing.T) {
-	body, err := os.ReadFile("../beefapi/testdata/managed-video-catalog.json")
+	body, err := os.ReadFile("../beeftv/testdata/managed-video-catalog.json")
 	if err != nil {
 		t.Fatal(err)
 	}

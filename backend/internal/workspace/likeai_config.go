@@ -3,11 +3,6 @@ package workspace
 const LikeAIBaseURL = "https://task.likeai.pro/task-api"
 const QisiAPIBaseURL = "https://cheeser.link/api-service/likeai"
 
-// Selecting a preferred service does not filter independent assistant channels.
-func NewLikeAIProviderConfig(dataDir string) (*ProviderConfig, error) {
-	return NewProviderConfig(dataDir)
-}
-
 func appendPreferredMediaChannels(channels []any) []any {
 	for _, preset := range []struct{ id, name, base string }{{"qisi-api", "qisi API", QisiAPIBaseURL}, {"likeai", "LikeAI", LikeAIBaseURL}} {
 		found := false

@@ -1,7 +1,7 @@
 import { App, Button } from "antd";
 import { ArrowLeft } from "lucide-react";
 import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { Navigate, useNavigate, useSearchParams } from "react-router";
 
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -33,15 +33,15 @@ export default function SettingsPage() {
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const shouldPromptContinue = searchParams.get("continue") === "1";
     const userChannels = config.channels.filter((channel) => channel.scope !== "system");
-    const nativeStorage = Boolean(getDesktopAppBinding()?.StorageSettings);
+    const hasDepthComponents = Boolean(getDesktopAppBinding()?.DepthComponentStatus);
     useLayoutEffect(() => {
         document.body.classList.add("app-user-overlays");
         return () => document.body.classList.remove("app-user-overlays");
     }, []);
 
     useEffect(() => {
-        setActiveTab(isConfigSection(requestedSection) && (requestedSection !== "storage" || nativeStorage) ? requestedSection : "channels");
-    }, [requestedSection, nativeStorage]);
+        setActiveTab(isConfigSection(requestedSection) ? requestedSection : "channels");
+    }, [requestedSection]);
 
     const selectSection = (section: ConfigSectionKey) => {
         setActiveTab(section);
@@ -87,10 +87,12 @@ export default function SettingsPage() {
                 <div className="storage-settings-sections">
                     <StorageSettingsPane />
                     <ReferenceStoragePane />
-                    <section className="settings-section storage-settings-block space-y-4" aria-label="深度捕捉组件">
-                        <div className="settings-pane-header"><h2>深度捕捉组件</h2></div>
-                        <DepthComponentsPanel />
-                    </section>
+                    {hasDepthComponents ? (
+                        <section className="settings-section storage-settings-block space-y-4" aria-label="深度捕捉组件">
+                            <div className="settings-pane-header"><h2>深度捕捉组件</h2></div>
+                            <DepthComponentsPanel />
+                        </section>
+                    ) : null}
                 </div>
             </SettingsPane>
         ),
@@ -99,7 +101,7 @@ export default function SettingsPage() {
                 <div className="settings-pane-header">
                     <div className="min-w-0">
                         <h2>模型选择</h2>
-                        <p>按领域选择默认模型；模型能力与请求协议在渠道“模型与能力”中配置。</p>
+                        <p>按领域选择默认模型；模型能力和接口格式在渠道“模型与能力”中配置。</p>
                     </div>
                 </div>
                 <div className="settings-section">
@@ -108,6 +110,10 @@ export default function SettingsPage() {
             </SettingsPane>
         ),
     };
+
+    if (requestedSection === "assistant") {
+        return <Navigate to="/skills" replace />;
+    }
 
     return (
         <main className="settings-page app-workspace-page app-user-workspace app-section-page flex h-full min-h-0 flex-col text-foreground">

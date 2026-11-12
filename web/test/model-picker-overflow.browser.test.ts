@@ -28,7 +28,7 @@ test("model picker keeps a viewport-safe frame and scrolls long brand and model 
                     <div class="canvas-model-picker-two-pane">
                         <div class="canvas-model-picker-brand-rail">${brands}</div>
                         <section class="canvas-model-picker-group canvas-model-picker-model-pane">
-                            <div class="canvas-model-picker-secondary-head">BeefAPI</div>
+                            <div class="canvas-model-picker-secondary-head">BeefTV</div>
                             <div class="canvas-model-picker-options">${models}</div>
                         </section>
                     </div>

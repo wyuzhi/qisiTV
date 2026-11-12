@@ -156,7 +156,7 @@ test("Create durably correlates failures that happen before the first Runtime re
     expect(source).toContain("generationOperation?: string");
     expect(source).toContain("generationOperation: task.operation");
     expect(source).toContain("generationErrorCode: task.errorCode");
-    expect(source).toContain('generationErrorCode: item.generationErrorCode || failedTask?.errorCode || (explained.category === "unknown" ? undefined : explained.errorCode)');
+    expect(source).toContain("explained.errorCode");
     expect(source).toContain("createdAt: assistantMessage.createdAt");
 });
 

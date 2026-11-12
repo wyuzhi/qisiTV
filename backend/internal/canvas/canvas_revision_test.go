@@ -5,10 +5,14 @@ import (
 	"errors"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"qisitv/backend/internal/repository"
 	"testing"
+	"time"
 
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
@@ -143,7 +147,14 @@ func TestCanvasProjectPersistsTimelineRoundTrip(t *testing.T) {
 
 func newCanvasHistoryTestService(t *testing.T) *Service {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "canvas.db")), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "canvas.db")), &gorm.Config{
+		Logger: logger.New(log.New(os.Stdout, "\r\n", log.LstdFlags), logger.Config{
+			SlowThreshold:             time.Second,
+			LogLevel:                  logger.Warn,
+			IgnoreRecordNotFoundError: true,
+			ParameterizedQueries:      true,
+		}),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,6 +170,7 @@ func newCanvasHistoryTestService(t *testing.T) *Service {
 		&model.ProjectAssetCandidate{}, &model.ProjectAssetLink{},
 		&model.WorkflowInstance{}, &model.WorkflowStepInstance{},
 		&model.CharacterVoiceBinding{}, &model.ArkPrivateAssetBinding{},
+		&model.SystemSetting{},
 	); err != nil {
 		t.Fatal(err)
 	}

@@ -22,8 +22,8 @@ func (s *Service) constrainTask(userID string, repo *repository.Repository, req 
 	if req.LogicalModelID == "" && strings.TrimSpace(stringValue(config["channelId"])) == "" {
 		return kernel.BadAuthRequest("智能创作目前仅支持后端受管模型，请在原入口使用其他渠道")
 	}
-	if s.deps.Kinds != nil && (s.deps.Kinds.UsesWorkflow(req.Input) || s.deps.Kinds.UsesTextReplay(req.Input)) {
-		return kernel.BadAuthRequest("智能创作不支持本机、工作流或文本回放任务")
+	if s.deps.Kinds != nil && s.deps.Kinds.UsesTextReplay(req.Input) {
+		return kernel.BadAuthRequest("智能创作不支持本机或文本回放任务")
 	}
 	safeConfig := map[string]any{}
 	for _, key := range allowedConfigKeys {

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/pricing"
 )
 
 type LocalChannelModel struct {
@@ -19,6 +20,7 @@ type LocalChannelModel struct {
 	ImageCapabilitiesVersion *string
 	VideoCapabilitiesVersion *string
 	VideoPricing             json.RawMessage
+	Pricing                  json.RawMessage
 }
 
 func ParseLocalChannelModels(body []byte) []LocalChannelModel {
@@ -40,6 +42,7 @@ func ParseLocalChannelModels(body []byte) []LocalChannelModel {
 				ImageCapabilitiesVersion *string         `json:"imageCapabilitiesVersion"`
 				VideoCapabilitiesVersion *string         `json:"videoCapabilitiesVersion"`
 				VideoPricing             json.RawMessage `json:"videoPricing"`
+				Pricing                  json.RawMessage `json:"pricing"`
 			} `json:"modelProfiles"`
 		} `json:"channels"`
 	}
@@ -59,6 +62,7 @@ func ParseLocalChannelModels(body []byte) []LocalChannelModel {
 				Model: profile.Model, DisplayName: strings.TrimSpace(profile.DisplayName),
 				Capability: profile.Capability, Protocol: profile.Protocol,
 				VideoPricing:             profile.VideoPricing,
+				Pricing:                  profile.Pricing,
 				VideoCapabilitiesVersion: profile.VideoCapabilitiesVersion,
 				ImageCapabilitiesVersion: profile.ImageCapabilitiesVersion,
 			}
@@ -118,4 +122,19 @@ func localSnapshotChannelModel(item LocalChannelModel) model.ChannelModel {
 		}
 	}
 	return cm
+}
+
+// PublicPrices returns the validated quotes a public catalog may show: the
+// video quote, and the price row only on the managed channel that wrote it.
+// Arbitrary profile fields are never forwarded.
+func (item LocalChannelModel) PublicPrices() (map[string]any, *pricing.Table) {
+	var quote map[string]any
+	if item.Capability == "video" {
+		quote, _ = NormalizeCatalogVideoPricing(item.VideoPricing)
+	}
+	var table *pricing.Table
+	if item.ChannelID == managedChannelID {
+		table, _ = pricing.Normalize(item.Pricing)
+	}
+	return quote, table
 }

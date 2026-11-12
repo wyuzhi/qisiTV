@@ -20,7 +20,7 @@ func TestCLIAndMCPAgainstIsolatedIntegratedRuntime(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds CLI and starts isolated loopback service")
 	}
-	for _, key := range []string{"BEEFTV_CLIENT_ID", "BEEFTV_CLIENT_TOKEN", "BEEFTV_DESKTOP_TOKEN", "BEEFTV_AGENT_API_KEY", "BEEFTV_AGENT_HOST_TOKEN"} {
+	for _, key := range []string{"BEEFTV_CLIENT_ID", "BEEFTV_CLIENT_TOKEN", "BEEFTV_CLIENT_TOKEN_FILE", "BEEFTV_DESKTOP_TOKEN", "BEEFTV_AGENT_API_KEY", "BEEFTV_AGENT_HOST_TOKEN"} {
 		t.Setenv(key, "")
 	}
 	bin := filepath.Join(t.TempDir(), "beeftv")

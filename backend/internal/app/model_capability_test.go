@@ -13,7 +13,7 @@ func TestSourcedSeedanceGenerationKeepsServerLimitsAndAudio(t *testing.T) {
 	profile := DefaultModelCapabilityConfigForModel("newapi", "seedance-2.0")
 	profile.Video.References.MaxImages = 12
 	profile.Video.GenerateAudio.Supported = false
-	input := canvasGenerationInput{Mode: "video", Prompt: "test", Config: providerConfig{InterfaceType: "newapi", BaseURL: "https://enterprise.beefapi.com", Model: "seedance-2.0", VideoSeconds: "5", Size: "16:9", VQuality: "720p", CapabilityConfig: profile, VideoCapabilitiesVersion: &version}}
+	input := canvasGenerationInput{Mode: "video", Prompt: "test", Config: providerConfig{InterfaceType: "newapi", BaseURL: "https://beeftv.app", Model: "seedance-2.0", VideoSeconds: "5", Size: "16:9", VQuality: "720p", CapabilityConfig: profile, VideoCapabilitiesVersion: &version}}
 	for i := 0; i < 10; i++ {
 		input.ReferenceImages = append(input.ReferenceImages, providerMedia{URL: "asset://test", Width: 640, Height: 640, Bytes: 10})
 	}
@@ -24,7 +24,7 @@ func TestSourcedSeedanceGenerationKeepsServerLimitsAndAudio(t *testing.T) {
 		t.Fatal("catalog audio false was restored by legacy repair")
 	}
 	input.Config.VideoCapabilitiesVersion = nil
-	restoreBeefAPISeedanceAudioControl(context.Background(), input.Config, input.VideoCapability)
+	restoreBeefTVSeedanceAudioControl(context.Background(), input.Config, input.VideoCapability)
 	if !input.VideoCapability.GenerateAudio.Supported {
 		t.Fatal("legacy saved profiles should retain the audio repair")
 	}
@@ -342,7 +342,7 @@ func TestSeedanceDocumentedOutputDurationFloor(t *testing.T) {
 	profile := DefaultModelCapabilityConfigForModel("newapi", "seedance-2.0").Video
 	for _, seconds := range []string{"3", "4"} {
 		input := canvasGenerationInput{
-			Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://enterprise.beefapi.com", VideoSeconds: seconds},
+			Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://beeftv.app", VideoSeconds: seconds},
 			ReferenceImages: []providerMedia{{Width: 512, Height: 512, Bytes: 1000}},
 		}
 		err := validateVideoTask(profile, input)
@@ -362,7 +362,7 @@ func TestSeedanceReferenceAudioMessageNamesItemAndFix(t *testing.T) {
 	// 提示要说清哪一段、现在多少、要改到多少，用户才知道下一步做什么。
 	profile := DefaultModelCapabilityConfigForModel("newapi", "seedance-2.0").Video
 	input := canvasGenerationInput{
-		Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://enterprise.beefapi.com", VideoSeconds: "5"},
+		Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://beeftv.app", VideoSeconds: "5"},
 		ReferenceImages: []providerMedia{{Width: 512, Height: 512, Bytes: 1000}},
 		ReferenceAudios: []providerMedia{{DurationMs: 1900, Bytes: 1000}},
 	}
@@ -380,7 +380,7 @@ func TestSeedanceSavedEnumAndContinuousDurationsRespectDocumentedFloor(t *testin
 	for label, profile := range map[string]*VideoCapabilityConfig{"enum": enumProfile, "continuous": continuous} {
 		for seconds, wantRejected := range map[string]bool{"1": true, "3": true, "4": false, "5": false} {
 			input := canvasGenerationInput{
-				Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://enterprise.beefapi.com", VideoSeconds: seconds},
+				Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://beeftv.app", VideoSeconds: seconds},
 				ReferenceImages: []providerMedia{{Width: 512, Height: 512, Bytes: 1000}},
 			}
 			err := validateVideoTask(profile, input)
@@ -403,7 +403,7 @@ func TestSeedanceEnumWithoutLegalDurationRejectsSubmission(t *testing.T) {
 		profile.Duration = VideoDurationConfig{Selection: "enum", Values: slices.Clone(values), Default: 1}
 		for _, seconds := range []string{"1", "2", "3", "4"} {
 			input := canvasGenerationInput{
-				Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://enterprise.beefapi.com", VideoSeconds: seconds},
+				Prompt: "test", Config: providerConfig{InterfaceType: "newapi", Model: "seedance-2.0", BaseURL: "https://beeftv.app", VideoSeconds: seconds},
 				ReferenceImages: []providerMedia{{Width: 512, Height: 512, Bytes: 1000}},
 			}
 			if err := validateVideoTask(profile, input); err == nil {
@@ -493,25 +493,6 @@ func TestDefaultVideoPromptMaxCharsAllowsComposedCanvasPrompt(t *testing.T) {
 		if err := validateVideoTask(profile, composed); err != nil {
 			t.Fatalf("合成提示词 %d 字符被拒绝: %v", length, err)
 		}
-	}
-}
-
-func TestValidateTaskCapabilityRejectsWorkflowPromptAboveConfiguredLimit(t *testing.T) {
-	profile := DefaultModelCapabilityConfigForModel("runninghub-workflow-video", "workflow-video")
-	profile.Video.References.PromptMaxChars = 10_000
-	input := map[string]any{
-		"mode":   "video",
-		"prompt": strings.Repeat("镜", 10_001),
-		"config": map[string]any{
-			"interfaceType":    "runninghub-workflow-video",
-			"apiKey":           "rh-key",
-			"workflowId":       "wf-1",
-			"capabilityConfig": profile,
-		},
-	}
-
-	if err := (&Service{}).ValidateTaskCapability(input); err != nil {
-		t.Fatalf("ValidateTaskCapability() should delegate workflow prompt length to upstream, got error = %v", err)
 	}
 }
 
@@ -641,10 +622,10 @@ func TestValidateVolcengineArkFullModalReferenceRejectsTextAndAudioOnly(t *testi
 	}
 }
 
-func TestNormalizeBeefAPISeedanceFullModalReferenceCapability(t *testing.T) {
+func TestNormalizeBeefTVSeedanceFullModalReferenceCapability(t *testing.T) {
 	profile := DefaultModelCapabilityConfigForModel("newapi", "seedance-2.0-fast")
 	if profile == nil || profile.Video == nil {
-		t.Fatal("BeefAPI Seedance video profile = nil")
+		t.Fatal("BeefTV Seedance video profile = nil")
 	}
 
 	normalized, err := NormalizeModelCapabilityConfigForModel("video", "newapi", "seedance-2.0-fast", profile)
@@ -655,7 +636,7 @@ func TestNormalizeBeefAPISeedanceFullModalReferenceCapability(t *testing.T) {
 		t.Fatalf("max videos = %d, want at least 3", normalized.Video.References.MaxVideos)
 	}
 	if !normalized.Video.GenerateAudio.Supported {
-		t.Fatal("BeefAPI Seedance must expose the audio toggle")
+		t.Fatal("BeefTV Seedance must expose the audio toggle")
 	}
 	if !containsCapabilityString(normalized.Video.Operations, "reference_to_video") {
 		t.Fatalf("operations = %v, want reference_to_video", normalized.Video.Operations)

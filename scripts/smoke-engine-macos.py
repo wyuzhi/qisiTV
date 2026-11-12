@@ -156,6 +156,21 @@ def smoke(source):
 
         host = resources / "agent-host"
         run([host / "runtime/bin/node", "--input-type=module", "--eval", "await import('./durable-session-owner.mjs'); await import('./session-owner.mjs'); await import('@earendil-works/pi-tui'); console.log('bundled runtime imports ready')"], cwd=host)
+        assert run([host / "runtime/bin/npm", "--version"]).strip()
+        installed = {plugin["manifest"]["id"]: plugin for plugin in request("GET", "/engine/api/plugins")["plugins"]}
+        for name in ["beeftv-plugin-market", "beeftv-plugin-ll2", "beeftv-plugin-ysdui"]:
+            package_dir = host / "bundled-plugins" / name
+            info = json.loads((package_dir / "package.json").read_text())
+            client_path = info["beeftv"]["client"].removeprefix("./")
+            assert info["name"] == name and installed[name]["status"] == "enabled"
+            client_bytes = request("GET", f"/engine/api/plugins/{name}/files/{client_path}", raw=True)
+            assert client_bytes == (package_dir / client_path).read_bytes()
+        bundle = request("GET", "/engine/api/plugins/beeftv-plugin-ysdui/client-bundle", raw=True)
+        (work / "ysdui-client-bundle.mjs").write_bytes(bundle)
+        run([host / "runtime/bin/node", "--input-type=module", "--eval",
+             "const p=await import('./ysdui-client-bundle.mjs');"
+             "if (p.YSDUI_CHANNEL_ID!=='ysdui'||typeof p.activate!=='function') throw Error('incomplete plugin bundle')"])
+        report["checks"].append("bundled npm, three offline plugin clients and the paired engine's compiled ESM bundle")
         media = host / "media-runtime"
         run([media / "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=128x96:r=12:d=1", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-c:v", "libx264", "-c:a", "aac", "-shortest", work / "fixture.mp4"])
         streams = json.loads(run([media / "ffprobe", "-v", "error", "-show_streams", "-of", "json", work / "fixture.mp4"]))["streams"]

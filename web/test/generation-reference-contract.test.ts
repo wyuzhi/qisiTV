@@ -73,9 +73,7 @@ describe("bound canvas reference submission", () => {
             expect(output.prompt).toBe("@图片1 在右，@图片2 在左");
         }
         const raw = build("@[node:B] 在右，@[node:A] 在左");
-        for (const [current, operation] of [[channelConfig, "image_to_video"], [{ ...channelConfig, taskWorkflowProvider: "runninghub" }, "reference_to_video"]] as const) {
-            expect(compileNodeGenerationReferences(raw, current as AiConfig, operation).referenceImages.map((item) => item.id)).toEqual(["A", "B"]);
-        }
+        expect(compileNodeGenerationReferences(raw, channelConfig as AiConfig, "image_to_video").referenceImages.map((item) => item.id)).toEqual(["A", "B"]);
     });
 
     test("the selected file and final prompt stay identical across connection permutations", () => {
@@ -123,11 +121,10 @@ describe("bound canvas reference submission", () => {
         expect(() => compileNodeGenerationReferences(context, config, "reference_to_video")).toThrow("没有对应的素材");
     });
 
-    test("first/last frames, other models and fixed workflow slots preserve their ordering", () => {
+    test("first/last frames and other models preserve their ordering", () => {
         const raw = build("@[node:B] 在右，@[node:A] 在左");
         for (const [current, operation] of [
             [config, "image_to_video"],
-            [{ ...config, taskWorkflowProvider: "runninghub" }, "reference_to_video"],
             [{ ...config, model: "h3" }, "reference_to_video"],
         ] as const) {
             const output = compileNodeGenerationReferences(raw, current as AiConfig, operation);

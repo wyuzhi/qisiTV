@@ -269,7 +269,7 @@ func PublicTaskInputJSON(raw string) string {
 		if u != nil {
 			host = strings.ToLower(u.Hostname())
 		}
-		parameters["affectedChannel"] = config["credentialRef"] == "beefapi-enterprise" || host == "beeftv.app" || host == "beefapi.com" || host == "enterprise.beefapi.com" || host == "whatstoken.ai" || host == "www.whatstoken.ai"
+		parameters["affectedChannel"] = config["credentialRef"] == "beeftv" || host == "beeftv.app" || host == "whatstoken.ai" || host == "www.whatstoken.ai"
 		public["videoParameters"] = parameters
 	}
 	for _, key := range []string{"mode", "metadata", "workflowStepId", "domainProjectId", "assetVersionId", "resourceId", "mediaType", "role"} {

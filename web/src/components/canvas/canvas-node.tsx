@@ -359,7 +359,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 node={data}
                 scale={scale}
                 dimensionLabel={null}
-                active={isSelected || isFocusRelated}
+                active={isSelected || isFocusRelated || hovered || Boolean(lodPinned)}
                 editable={!readOnly && !data.metadata?.locked && Boolean(onTitleChange)}
                 editing={isEditingTitle}
                 draft={titleDraft}
@@ -738,7 +738,7 @@ function NodeExternalHeader({ node, scale, dimensionLabel, active, editable, edi
             data-editing={editing ? "true" : undefined}
             style={{
                 "--canvas-node-width": `${node.width}px`,
-                "--canvas-node-header-width": `min(240px, calc(var(--canvas-node-width) * var(--canvas-live-scale, ${scale})))`,
+                "--canvas-node-header-width": `min(240px, max(112px, calc(var(--canvas-node-width) * var(--canvas-live-scale, ${scale}))))`,
                 borderRadius: "var(--r-sm)",
                 color: active ? theme.node.text : theme.node.label,
                 transform: `scale(var(--canvas-live-inverse-scale, ${inverseScale}))`,
@@ -856,6 +856,7 @@ function ConnectionSideRail({ side, scale, theme, visible = false, onPointerDown
     // Keep the control responsive to zoom, but avoid sub-pixel circles and
     // strokes at far zoom levels where the plus sign appears visually off-center.
     const handleSize = Math.max(20, 8 * inverseScale);
+    const restingRailWidth = Math.max(28, Math.ceil(15 + handleSize / 2 + 3));
     // LibTV centers the visual quick-add icon in an approximately 80px
     // circular hit zone, then offsets it toward the node edge. Keep that
     // visual layer separate from the real centered connection anchor.
@@ -868,10 +869,11 @@ function ConnectionSideRail({ side, scale, theme, visible = false, onPointerDown
 
     const updateHandle = (event: React.PointerEvent<HTMLButtonElement>) => {
         const bounds = event.currentTarget.getBoundingClientRect();
-        const width = Math.max(bounds.width, 1);
         const height = Math.max(bounds.height, 1);
         const followLimit = 30;
-        const deltaX = event.clientX - (bounds.left + width / 2);
+        const railScreenWidth = railSize * scale;
+        const centerX = side === "left" ? bounds.right - railScreenWidth / 2 : bounds.left + railScreenWidth / 2;
+        const deltaX = event.clientX - centerX;
         const deltaY = event.clientY - (bounds.top + height / 2);
         const offsetScreenX = Math.max(-followLimit, Math.min(followLimit, deltaX));
         const offsetScreenY = Math.max(-followLimit, Math.min(followLimit, deltaY));
@@ -889,7 +891,7 @@ function ConnectionSideRail({ side, scale, theme, visible = false, onPointerDown
             type="button"
             data-canvas-connection-rail={side}
             className={`group pointer-events-auto absolute top-1/2 z-[var(--node-z-overlay)] flex -translate-y-1/2 items-center justify-center touch-none cursor-crosshair rounded-full outline-none transition-opacity duration-150 ${visible || railHovered ? "opacity-100" : "opacity-0"}`}
-            style={{ width: railSize, height: `min(100%, ${railSize}px)`, cursor: "crosshair", ...(side === "left" ? { right: "100%" } : { left: "100%" }) }}
+            style={{ width: railHovered ? railSize : restingRailWidth, height: `min(100%, ${railSize}px)`, cursor: "crosshair", ...(side === "left" ? { right: "100%" } : { left: "100%" }) }}
             onPointerEnter={(event) => {
                 setRailHovered(true);
                 updateHandle(event);
@@ -906,9 +908,10 @@ function ConnectionSideRail({ side, scale, theme, visible = false, onPointerDown
         >
             <span
                 ref={handleRef}
-                className="absolute left-1/2 top-1/2 block transition-transform duration-[80ms] ease-out group-hover:brightness-125 group-focus-visible:brightness-125"
+                className="absolute top-1/2 block transition-transform duration-[80ms] ease-out group-hover:brightness-125 group-focus-visible:brightness-125"
                 style={{
                     display: visible || railHovered ? undefined : "none",
+                    left: side === "left" ? `calc(100% - ${railSize / 2}px)` : railSize / 2,
                     width: handleSize,
                     height: handleSize,
                     marginLeft: -handleSize / 2,

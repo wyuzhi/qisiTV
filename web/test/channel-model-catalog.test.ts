@@ -7,12 +7,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CanvasVideoSettingsPopover } from "../src/components/canvas/canvas-video-settings-popover";
 import { VideoSettingsPanel } from "../src/components/video-settings-panel";
 import { canvasThemes } from "../src/lib/canvas-theme";
-import { mergeFetchedChannelModelProfiles, type ChannelModelCatalogItem } from "../src/lib/channel-model-catalog";
-import { defaultModelCapabilityConfig, modelCapabilityConfigFor, pluginWorkflowCapabilityConfig } from "../src/lib/model-capabilities";
+import { applyFetchedChannelModelCatalog, mergeFetchedChannelModelProfiles, type ChannelModelCatalogItem } from "../src/lib/channel-model-catalog";
+import { defaultModelCapabilityConfig, modelCapabilityConfigFor, videoDurationOptions } from "../src/lib/model-capabilities";
+import { hasDeclaredModelCapability } from "../src/lib/model-selection";
 import { ChannelModelSettings } from "../src/pages/settings/channel-model-settings";
-import { applyFetchedChannelModelCatalog } from "../src/pages/settings/channel-settings-pane";
 import { fetchChannelModels } from "../src/services/api/image";
-import { disconnectBeefAPIConnection } from "../src/services/api/beefapi-connection";
+import { disconnectBeefTVConnection } from "../src/services/api/beeftv-connection";
 import { apiClient } from "../src/services/api/request";
 import { createModelChannel, defaultConfig, modelDisplayName, normalizeConfigSnapshot, resolveModelRequestConfig, selectableModelsByCapability, type AiConfig } from "../src/stores/use-config-store";
 
@@ -21,7 +21,7 @@ const originalApiRequest = apiClient.request;
 
 test("陌生图片ID刷新服务端能力后可选，保留零文件上限和新增质量", () => {
     const model = "opaque-future-2030";
-    const channel = createModelChannel({ id: "beefapi", baseUrl: "https://beeftv.app", credentialRef: "beefapi-enterprise", models: [model] });
+    const channel = createModelChannel({ id: "beeftv", baseUrl: "https://beeftv.app", credentialRef: "beeftv", models: [model] });
     const image = defaultModelCapabilityConfig("openai-image", model).image!;
     image.references.maxImageBytes = 0;
     image.quality = { supported: true, values: ["ultra"], default: "ultra" };
@@ -29,9 +29,9 @@ test("陌生图片ID刷新服务端能力后可选，保留零文件上限和新
     image.fixedOutputs = 4;
     channel.modelProfiles = mergeFetchedChannelModelProfiles(channel, [{ id: model, supportedEndpointTypes: ["image-generation"], imageCapabilities: image, imageCapabilitiesVersion: "v1" }]);
     const config = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [channel] } }).config;
-    expect(selectableModelsByCapability(config, "image")).toContain(`beefapi::${model}`);
-    expect(resolveModelRequestConfig(config, `beefapi::${model}`).model).toBe(model);
-    expect(modelCapabilityConfigFor(config, `beefapi::${model}`).image).toEqual(image);
+    expect(selectableModelsByCapability(config, "image")).toContain(`beeftv::${model}`);
+    expect(resolveModelRequestConfig(config, `beeftv::${model}`).model).toBe(model);
+    expect(modelCapabilityConfigFor(config, `beeftv::${model}`).image).toEqual(image);
     const changed = structuredClone(image);
     changed.references.maxImages = 7;
     channel.modelProfiles = mergeFetchedChannelModelProfiles(channel, [{ id: model, supportedEndpointTypes: ["image-generation"], imageCapabilities: changed, imageCapabilitiesVersion: "v2" }]);
@@ -49,15 +49,15 @@ test("官方GPT图片旧默认配置升级质量和21:9尺寸，保留显式限�
     legacy.image!.size.values = ["2048x878"];
     legacy.image!.size.default = "2048x878";
     legacy.image!.size.presets = [{ tier: "1k", ratio: "21:9", size: "2048x878", width: 2048, height: 878 }];
-    const configFor = (baseUrl: string, capabilityConfig = legacy) => normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [createModelChannel({ id: "beefapi", baseUrl, models: [model], modelProfiles: [{ model, capability: "image", protocol: "openai-image", capabilityConfig }] })] } }).config;
-    const upgraded = configFor("https://enterprise.beefapi.com/v1").channels[0]!.modelProfiles![0]!.capabilityConfig!.image!;
+    const configFor = (baseUrl: string, capabilityConfig = legacy) => normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [createModelChannel({ id: "beeftv", baseUrl, models: [model], modelProfiles: [{ model, capability: "image", protocol: "openai-image", capabilityConfig }] })] } }).config;
+    const upgraded = configFor("https://beeftv.app/v1").channels[0]!.modelProfiles![0]!.capabilityConfig!.image!;
     expect(upgraded.quality.values).toEqual(["auto", "low", "medium", "high", "xhigh", "max"]);
     expect(upgraded.size.default).toBe("2048x880");
     expect(upgraded.size.presets![0]!.height).toBe(880);
     expect(legacy.image!.size.values).toEqual(["2048x878"]);
     const restricted = structuredClone(legacy);
     restricted.image!.quality = { supported: true, values: ["low"], default: "low" };
-    expect(configFor("https://enterprise.beefapi.com/v1", restricted).channels[0]!.modelProfiles![0]!.capabilityConfig!.image!.quality.values).toEqual(["low"]);
+    expect(configFor("https://beeftv.app/v1", restricted).channels[0]!.modelProfiles![0]!.capabilityConfig!.image!.quality.values).toEqual(["low"]);
     expect(configFor("https://custom.example.com/v1").channels[0]!.modelProfiles![0]!.capabilityConfig!.image!.quality.values).toEqual(["auto", "low", "medium", "high"]);
 });
 
@@ -122,14 +122,14 @@ describe("public channel model catalog", () => {
     test("managed catalog drops delayed results after the enterprise connection changes", async () => {
         let release!: () => void;
         apiClient.request = (async (request) => {
-            if (request.url === "/beefapi/connection/models") await new Promise<void>((resolve) => { release = resolve; });
+            if (request.url === "/beeftv/connection/models") await new Promise<void>((resolve) => { release = resolve; });
             return { status: 200, data: { code: 0, data: { models: [{ id: "seedance-2.0-portrait" }] }, msg: "" } };
         }) as typeof apiClient.request;
-        const pending = fetchChannelModels(createModelChannel({ id: "beefapi", credentialRef: "beefapi-enterprise" }), true);
+        const pending = fetchChannelModels(createModelChannel({ id: "beeftv", credentialRef: "beeftv" }), true);
         const outcome = pending.catch((error) => error);
-        await disconnectBeefAPIConnection();
+        await disconnectBeefTVConnection();
         release();
-        expect(await outcome).toMatchObject({ name: "BeefAPIConnectionChangedError" });
+        expect(await outcome).toMatchObject({ name: "BeefTVConnectionChangedError" });
     });
     test("managed catalog refresh persists through the trusted endpoint without accepting client credentials or prices", async () => {
         const requests: Array<{ url?: string; data?: unknown }> = [];
@@ -137,8 +137,8 @@ describe("public channel model catalog", () => {
             requests.push(request);
             return { status: 200, data: { code: 0, data: { models: [{ id: "seedance-2.0-portrait" }] }, msg: "" } };
         }) as typeof apiClient.request;
-        await fetchChannelModels(createModelChannel({ id: "beefapi", credentialRef: "beefapi-enterprise", apiKey: "synthetic-ignored", baseUrl: "https://ignored.example" }), true);
-        expect(requests[0]?.url).toBe("/beefapi/connection/models");
+        await fetchChannelModels(createModelChannel({ id: "beeftv", credentialRef: "beeftv", apiKey: "synthetic-ignored", baseUrl: "https://ignored.example" }), true);
+        expect(requests[0]?.url).toBe("/beeftv/connection/models");
         expect(requests[0]?.data).toEqual({});
         await fetchChannelModels(createModelChannel({ id: "manual", apiKey: "synthetic-local", baseUrl: "https://manual.example" }), true);
         expect(requests[1]?.url).toBe("/ai/models");
@@ -163,15 +163,15 @@ describe("public channel model catalog", () => {
             expect(JSON.parse(atob(headers["x-canvas-upstream-headers"]))).toEqual([{ name: "X-Project-Key", value: "synthetic-header" }]);
         }
     });
-    test("keeps the fetched BeefAPI catalog dynamic while normalizing discovered image profiles", () => {
+    test("keeps the fetched BeefTV catalog dynamic while normalizing discovered image profiles", () => {
         const channel = createModelChannel({
-            id: "beefapi",
-            name: "BeefAPI",
-            baseUrl: "https://enterprise.beefapi.com",
+            id: "beeftv",
+            name: "BeefTV",
+            baseUrl: "https://beeftv.app",
             apiKey: "synthetic-test-key",
             models: ["gpt-5.6-sol", "gpt-image-2", "hy-image-v3", "brand-new-upstream-model"],
         });
-        const normalized = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [channel], imageModel: "beefapi::gpt-image-2" } }).config;
+        const normalized = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [channel], imageModel: "beeftv::gpt-image-2" } }).config;
         const beef = normalized.channels[0]!;
 
         expect(beef.models).toEqual(["gpt-5.6-sol", "gpt-image-2", "hy-image-v3", "brand-new-upstream-model"]);
@@ -182,20 +182,20 @@ describe("public channel model catalog", () => {
             expect.objectContaining({ model: "brand-new-upstream-model", capability: "text", protocol: "chat-completion" }),
             expect.objectContaining({ model: "hy-image-v3", capability: "image", protocol: "openai-image" }),
         ]));
-        expect(resolveModelRequestConfig(normalized, "beefapi::gpt-image-2").interfaceType).toBe("openai-image");
-        expect(resolveModelRequestConfig(normalized, "beefapi::gpt-5.6-sol").interfaceType).toBe("chat-completion");
+        expect(resolveModelRequestConfig(normalized, "beeftv::gpt-image-2").interfaceType).toBe("openai-image");
+        expect(resolveModelRequestConfig(normalized, "beeftv::gpt-5.6-sol").interfaceType).toBe("chat-completion");
     });
 
-    test("repairs stale chat protocols on known BeefAPI image models without changing custom routes", () => {
+    test("repairs stale chat protocols on known BeefTV image models without changing custom routes", () => {
         const make = (baseUrl: string) => createModelChannel({ id: "test", baseUrl, apiKey: "synthetic-key", models: ["gpt-image-2"], modelProfiles: [{ model: "gpt-image-2", capability: "text", protocol: "chat-completion" }] });
-        const official = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [make("https://enterprise.beefapi.com")] } }).config;
+        const official = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [make("https://beeftv.app")] } }).config;
         expect(selectableModelsByCapability(official, "image")).toEqual(["test::gpt-image-2"]);
         expect(resolveModelRequestConfig(official, "test::gpt-image-2").interfaceType).toBe("openai-image");
         const custom = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [make("https://studio.example")] } }).config;
         expect(resolveModelRequestConfig(custom, "test::gpt-image-2").interfaceType).toBe("chat-completion");
     });
 
-    test("maps BeefAPI speech and music to audio without treating ASR as chat or TTS", () => {
+    test("maps BeefTV speech and music to audio without treating ASR as chat or TTS", () => {
         const catalog: ChannelModelCatalogItem[] = [
             { id: "gpt-5.6-sol", modelType: "text", supportedEndpointTypes: ["openai"] },
             { id: "gpt-image-2", modelType: "image", supportedEndpointTypes: ["image-generation"] },
@@ -206,10 +206,10 @@ describe("public channel model catalog", () => {
             { id: "hy-asr-3.0-preview", supportedEndpointTypes: ["openai"] },
         ];
         const channel = createModelChannel({
-            id: "beefapi",
-            name: "BeefAPI",
+            id: "beeftv",
+            name: "BeefTV",
             pinned: true,
-            baseUrl: "https://enterprise.beefapi.com",
+            baseUrl: "https://beeftv.app",
             models: catalog.map((item) => item.id),
             modelProfiles: [
                 { model: "minimax-speech-2.8-hd", capability: "text", protocol: "chat-completion" },
@@ -218,7 +218,7 @@ describe("public channel model catalog", () => {
         });
         const merged = { ...channel, modelProfiles: mergeFetchedChannelModelProfiles(channel, catalog) };
         const normalized = normalizeConfigSnapshot({
-            config: { ...defaultConfig, channels: [merged], imageModel: "beefapi::gpt-image-2", videoModel: "beefapi::seedance-2.0", textModel: "beefapi::gpt-5.6-sol" },
+            config: { ...defaultConfig, channels: [merged], imageModel: "beeftv::gpt-image-2", videoModel: "beeftv::seedance-2.0", textModel: "beeftv::gpt-5.6-sol" },
         }).config;
 
         expect(selectableModelsByCapability(normalized, "audio").map((model) => model.split("::").pop())).toEqual([
@@ -230,8 +230,8 @@ describe("public channel model catalog", () => {
         expect(selectableModelsByCapability(normalized, "image").map((model) => model.split("::").pop())).toEqual(["gpt-image-2"]);
         expect(selectableModelsByCapability(normalized, "video").some((model) => model.includes("seedance-2.0"))).toBe(true);
         expect(normalized.audioModel).toContain("minimax-speech-2.8-hd");
-        expect(resolveModelRequestConfig(normalized, "beefapi::minimax-speech-2.8-hd").interfaceType).toBe("openai-audio");
-        expect(resolveModelRequestConfig(normalized, "beefapi::minimax-music-v3.0").interfaceType).toBe("openai-audio");
+        expect(resolveModelRequestConfig(normalized, "beeftv::minimax-speech-2.8-hd").interfaceType).toBe("openai-audio");
+        expect(resolveModelRequestConfig(normalized, "beeftv::minimax-music-v3.0").interfaceType).toBe("openai-audio");
         expect(merged.modelProfiles?.find((item) => item.model === "hy-asr-3.0-preview")?.protocol).toBeUndefined();
         expect(merged.modelProfiles?.find((item) => item.model === "hy-asr-3.0-preview")?.capability).toBeUndefined();
     });
@@ -260,41 +260,111 @@ describe("public channel model catalog", () => {
         ]));
     });
 
-    test("preserves an explicitly configured BeefAPI text protocol", () => {
+    test("preserves an explicitly configured BeefTV text protocol", () => {
         const channel = createModelChannel({
-            id: "beefapi",
-            name: "BeefAPI",
-            baseUrl: "https://enterprise.beefapi.com",
+            id: "beeftv",
+            name: "BeefTV",
+            baseUrl: "https://beeftv.app",
             models: ["custom-text-model"],
             modelProfiles: [{ model: "custom-text-model", capability: "text", protocol: "openai-response" }],
         });
-        const normalized = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [channel], textModel: "beefapi::custom-text-model" } }).config;
+        const normalized = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [channel], textModel: "beeftv::custom-text-model" } }).config;
 
         expect(normalized.channels[0]?.modelProfiles).toEqual(expect.arrayContaining([
             expect.objectContaining({ model: "custom-text-model", capability: "text", protocol: "openai-response" }),
         ]));
-        expect(resolveModelRequestConfig(normalized, "beefapi::custom-text-model").interfaceType).toBe("openai-response");
+        expect(resolveModelRequestConfig(normalized, "beeftv::custom-text-model").interfaceType).toBe("openai-response");
     });
 
     test("projects Manifest video workflow parameters without inventing a size capability", () => {
-        const profile = pluginWorkflowCapabilityConfig("autodl-comfyui", {
-            id: "minimax_h3_lightx2v_no_pic",
-            label: "MiniMax H3 文生视频",
-            providerId: "autodl-comfyui",
-            capability: "video",
-            parameters: [
-                { name: "prompt", type: "string", required: true, mapping: "prompt" },
-                { name: "duration", type: "integer", mapping: "duration" },
-                { name: "resolution", type: "string", mapping: "resolution", values: ["480p竖", "480p横"] },
-            ],
-            defaults: { duration: 5, resolution: "480p竖" },
-        })!.video!;
+        const profile = defaultModelCapabilityConfig("autodl-comfyui", "minimax_h3_zm_u24", [
+            {
+                value: "autodl-comfyui",
+                label: "AutoDL ComfyUI 视频",
+                capability: "video",
+                create: "POST /api/v1/comfyui/comfyui_workflow/{{model}}",
+                contentType: "application/json",
+                media: "url",
+                workflows: [
+                    {
+                        id: "minimax_h3_zm_u24",
+                        label: "H3 ZM U24 多参考视频",
+                        providerId: "autodl-comfyui",
+                        capability: "video",
+                        parameters: [
+                            { name: "prompt", type: "string", required: true, mapping: "prompt" },
+                            { name: "duration", type: "integer", mapping: "duration", min: 1, max: 15, description: "视频时长 1~15 秒" },
+                            { name: "resolution", type: "string", mapping: "resolution", values: ["480p竖", "768p竖", "480p横", "768p横", "480p(1:1)", "768p(1:1)"] },
+                        ],
+                        defaults: { duration: 5, resolution: "768p竖" },
+                    },
+                ],
+            },
+        ]).video!;
 
         expect(profile.ratios).toEqual([]);
         expect(profile.defaultRatio).toBe("");
-        expect(profile.resolutions).toEqual(["480p竖", "480p横"]);
-        expect(profile.defaultResolution).toBe("480p竖");
-        expect(profile.duration).toEqual({ selection: "enum", values: [5], default: 5 });
+        expect(profile.resolutions).toEqual(["480p竖", "768p竖", "480p横", "768p横", "480p(1:1)", "768p(1:1)"]);
+        expect(profile.defaultResolution).toBe("768p竖");
+        expect(profile.duration).toEqual({ selection: "range", min: 1, max: 15, step: 1, default: 5 });
+    });
+
+    test("applyFetchedChannelModelCatalog updates custom-gateway versioned capabilities unless user customized", () => {
+        const defaultCap = defaultModelCapabilityConfig("newapi", "wan3");
+        const userCap = defaultModelCapabilityConfig("newapi", "wan3-user");
+        userCap.video!.duration = { selection: "range", min: 1, max: 25, step: 1, default: 8 };
+        const channel = createModelChannel({
+            id: "custom-gateway",
+            name: "Custom Gateway",
+            baseUrl: "https://provider.example/v1",
+            models: ["wan3", "wan3-user"],
+            modelProfiles: [
+                { model: "wan3", capability: "video", protocol: "newapi", capabilityConfig: defaultCap },
+                { model: "wan3-user", capability: "video", protocol: "newapi", capabilitySource: "user", capabilityConfig: userCap },
+            ],
+        });
+
+        const refreshed = applyFetchedChannelModelCatalog(channel, {
+            models: ["wan3", "wan3-user"],
+            catalog: [
+                { id: "wan3", modelType: "video", options: { durationSeconds: [{ value: "5" }, { value: "10" }] } },
+                { id: "wan3-user", modelType: "video", options: { durationSeconds: [{ value: "5" }, { value: "10" }] } },
+            ],
+        });
+
+        const wan3 = refreshed.modelProfiles?.find((item) => item.model === "wan3");
+        const wan3User = refreshed.modelProfiles?.find((item) => item.model === "wan3-user");
+        expect(wan3?.capabilityConfig?.video?.duration).toEqual({ selection: "enum", values: [5, 10], default: 5 });
+        expect(wan3User?.capabilitySource).toBe("user");
+        expect(wan3User?.capabilityConfig?.video?.duration.max).toBe(25);
+    });
+
+    test("preserves user-edited capability config across catalog merge and continuous duration max", () => {
+        const customCap = defaultModelCapabilityConfig("newapi", "wan3");
+        customCap.video!.duration = { selection: "range", min: 1, max: 30, step: 1, default: 5, continuous: true, fractionalMin: 1 };
+        const channel = createModelChannel({
+            id: "custom-compatible",
+            name: "Custom Compatible",
+            baseUrl: "https://provider.example/v1",
+            models: ["wan3"],
+            modelProfiles: [{ model: "wan3", capability: "video", protocol: "newapi", capabilitySource: "user", capabilityConfig: customCap }],
+        });
+
+        const merged = mergeFetchedChannelModelProfiles(channel, [
+            { id: "wan3", displayName: "Wan 3.0 Video", modelType: "video", supportedEndpointTypes: ["openai-video"], options: { durationSeconds: [{ value: "5" }, { value: "10" }, { value: "15" }] } },
+        ]);
+
+        expect(merged[0]?.displayName).toBe("Wan 3.0 Video");
+        expect(merged[0]?.capabilitySource).toBe("user");
+        expect(merged[0]?.capabilityConfig?.video?.duration.max).toBe(30);
+        expect(videoDurationOptions(merged[0]!.capabilityConfig!.video!)).toContain(30);
+
+        const changedCapability = mergeFetchedChannelModelProfiles(channel, [
+            { id: "wan3", modelType: "text", supportedEndpointTypes: ["openai"] },
+        ]);
+        expect(changedCapability[0]?.capability).toBe("text");
+        expect(changedCapability[0]?.capabilitySource).toBeUndefined();
+        expect(changedCapability[0]?.capabilityConfig).toBeUndefined();
     });
 
     test("preserves six public capabilities without expanding compatibility IDs", async () => {
@@ -345,7 +415,7 @@ describe("public channel model catalog", () => {
     });
 
     test("refresh application preserves discovered capabilities in the saved channel", () => {
-        const channel = createModelChannel({ id: "beefapi", name: "BeefAPI", baseUrl: "https://enterprise.beefapi.com", models: ["old-model"] });
+        const channel = createModelChannel({ id: "beeftv", name: "BeefTV", baseUrl: "https://beeftv.app", models: ["old-model"] });
         const next = applyFetchedChannelModelCatalog(channel, {
             models: ["seedance-2.5"],
             catalog: [{ id: "seedance-2.5", displayName: "Seedance 2.5", modelType: "video", supportedEndpointTypes: ["openai"] }],
@@ -627,6 +697,24 @@ describe("public channel model catalog", () => {
         expect(profiles.find((p) => p.model === "custom-img-pro")?.imageCapabilitiesVersion).toBe("gw-img-v1");
         expect(profiles.find((p) => p.model === "custom-vid-pro")?.videoCapabilitiesVersion).toBe("gw-vid-v1");
         expect(profiles.find((p) => p.model === "custom-vid-pro")?.videoPricing).toEqual(pricing);
+    });
+
+    test("hasDeclaredModelCapability 仅把带真实 capabilityConfig 的 user 标记视为用户显式限制", () => {
+        const channel = createModelChannel({
+            id: "byok-custom",
+            baseUrl: "https://gateway.example.com/v1",
+            apiKey: "synthetic-test-key",
+            models: ["vid-default", "vid-user", "vid-empty-user"],
+            modelProfiles: [
+                { model: "vid-default", capability: "video", protocol: "newapi", capabilityConfig: defaultModelCapabilityConfig("newapi", "vid-default") },
+                { model: "vid-user", capability: "video", protocol: "newapi", capabilitySource: "user", capabilityConfig: defaultModelCapabilityConfig("newapi", "vid-user") },
+                { model: "vid-empty-user", capability: "video", protocol: "newapi", capabilitySource: "user" },
+            ],
+        });
+        const config: AiConfig = { ...defaultConfig, channels: [channel], models: channel.models.map((m) => `byok-custom::${m}`) };
+        expect(hasDeclaredModelCapability(config, "byok-custom::vid-default", "video")).toBe(false);
+        expect(hasDeclaredModelCapability(config, "byok-custom::vid-user", "video")).toBe(true);
+        expect(hasDeclaredModelCapability(config, "byok-custom::vid-empty-user", "video")).toBe(false);
     });
 
 });

@@ -6,6 +6,7 @@ import (
 	"qisitv/backend/internal/agentops"
 	"qisitv/backend/internal/app"
 	"qisitv/backend/internal/eagle"
+	"qisitv/backend/internal/modelcatalog"
 
 	"github.com/gin-gonic/gin"
 )
@@ -32,6 +33,9 @@ func defaultRuntimeDependencies(svc *app.Service) RuntimeDependencies {
 	if svc != nil {
 		dependencies.Diagnostics = svc.DiagnosticsDomain()
 		dependencies.Appearance = svc.AppearanceDomain()
+		if pluginsDomain := svc.PluginDomain(); pluginsDomain != nil {
+			dependencies.ModelCapability = modelcatalog.NewCapabilityNormalizer(pluginsDomain.LookupWorkflow)
+		}
 	}
 	return dependencies
 }
@@ -51,7 +55,7 @@ func registerDesktopCanvasAPI(api *gin.RouterGroup, svc *app.Service, dependenci
 	api.Use(SupportTracingMiddleware(svc))
 	RegisterOpenAPIRoutes(api)
 	RegisterWorkspaceRoutes(api, svc)
-	RegisterBeefAPIConnectionRoutes(api, svc)
+	RegisterBeefTVConnectionRoutes(api, svc)
 	RegisterDesktopAppearanceRoutes(api, svc)
 	RegisterDesktopFeatureAvailabilityRoutes(api, svc)
 	// 旧内置 Agent 已从产品运行面退场：这里不再注册 /agent/*，运行、审批和记忆入口
@@ -62,7 +66,6 @@ func registerDesktopCanvasAPI(api *gin.RouterGroup, svc *app.Service, dependenci
 	RegisterChannelModelRoutes(api, svc)
 	RegisterCustomRelayRoutes(api, svc)
 	RegisterTaskRoutes(api, svc, false)
-	RegisterRunningHubRoutes(api, svc, false)
 	RegisterDesktopSkillRoutes(api, svc, svc.SkillsDomain())
 	RegisterDesktopUserDataRoutes(api, svc, svc.CanvasService(), svc.PromptService(), svc.AssetLibraryService(), svc.ResourceService(), svc.PlaybackService(), svc, svc, svc)
 	// 登记表在进程内单实例（避免每请求新建导致并发丢记录）。

@@ -105,6 +105,13 @@ func openDesktopRuntime(ctx context.Context, dataDir string) (*bootstrap.Runtime
 		_ = runtime.Close(context.Background())
 		return nil, err
 	}
+	// The DSH bridge is optional: it only lets DeepSeek Harness attach to this
+	// workspace. A failure (for example a stale or foreign control socket) must
+	// not stop the desktop from opening; the explicit --harness-runtime path
+	// still fails because it checks that the bridge exists.
+	if err := startDesktopHarness(runtime, dataDir); err != nil {
+		log.Printf("DSH 桥接未启动，不影响桌面使用：%v", err)
+	}
 	return runtime, nil
 }
 
@@ -121,7 +128,7 @@ func (a *DesktopApp) stop(ctx context.Context) error {
 	desktopRuntimeRegistryMu.Unlock()
 	a.clearUpdater()
 	a.mu.Unlock()
-	return runtime.Close(ctx)
+	return closeDesktopRuntime(ctx, runtime)
 }
 
 func (a *DesktopApp) RuntimeConfig() DesktopRuntimeConfig {

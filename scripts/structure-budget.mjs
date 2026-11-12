@@ -8,7 +8,7 @@ import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const LARGE_FILE_LINES = 1000;
-// BeefTV 不应按模型或厂商写规则（模型规则归 BeefAPI，第三方协议归插件）。这里统计源码里以模型系列名或厂商名开头的字符串字面量。
+// BeefTV 不应按模型或厂商写规则（模型规则归服务端 API，第三方协议归插件）。这里统计源码里以模型系列名或厂商名开头的字符串字面量。
 // 单独的通用接口格式名（如 "openai"）不算，带厂商前缀的协议名（如 "openai-videos"、"volcengine-jimeng-video"）算。
 // 系列名后面必须紧跟分隔符、数字或引号，避免 "Pikachu"、"h3-title"、"ray-trace" 这类普通字符串被误算。
 const MODEL_FAMILY = "seedance|seedream|kling|veo|sora|grok|jimeng|hailuo|vidu|topaz|minimax|wan\\d|wan|imagen|nano-banana|gemini|claude|qwen|deepseek|glm|cogvideox?|cogview|luma|runway|pika|pixverse|happyhorse|midjourney";
@@ -45,8 +45,10 @@ function walk(dir, keep) {
     }
     for (const entry of entries) {
         const path = `${dir}/${entry.name}`;
-        if (entry.isDirectory()) out.push(...walk(path, keep));
-        else if (keep(path)) out.push(path);
+        if (entry.isDirectory()) {
+            if (entry.name === "node_modules") continue;
+            out.push(...walk(path, keep));
+        } else if (keep(path)) out.push(path);
     }
     return out;
 }
@@ -54,19 +56,28 @@ function walk(dir, keep) {
 const read = (path) => readFileSync(join(root, path), "utf8");
 const lineCount = (text) => text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
 
+// 插件包和外部 Agent 宿主也是随产品发布的源码，之前不在任何统计里，
+// 长到一千四百多行也没人拦；只把它们计入超大文件，模型和厂商名按设计留在插件里。
+const isPluginSource = (path) => path.startsWith("plugin-packages/") || path.startsWith("plugins/") || path.startsWith("agent-host/");
+
 export function measure() {
     const goSources = walk("backend/internal", (path) => path.endsWith(".go") && !path.endsWith("_test.go") && !path.includes("/testdata/"));
     const webSources = walk("web/src", (path) => /\.(?:tsx?|css)$/.test(path) && !/\.test\.tsx?$/.test(path));
+    const pluginSources = [
+        ...walk("plugin-packages", (path) => /\.(?:js|mjs)$/.test(path) && !/\.test\./.test(path) && !/^plugin-packages\/[^/]+\.mjs$/.test(path)),
+        ...walk("plugins", (path) => /\.js$/.test(path) && !/\.test\./.test(path)),
+        ...walk("agent-host", (path) => /\.mjs$/.test(path) && !/\.test\./.test(path) && !path.startsWith("agent-host/eval/")),
+    ];
     const webTests = [...walk("web/test", (path) => /\.test\.tsx?$/.test(path)), ...walk("web/src", (path) => /\.test\.tsx?$/.test(path))];
     let appLines = 0;
     const largeFiles = {};
     const modelLiterals = {};
-    for (const path of [...goSources, ...webSources]) {
+    for (const path of [...goSources, ...webSources, ...pluginSources]) {
         const text = read(path);
         const lines = lineCount(text);
         if (path.startsWith("backend/internal/app/")) appLines += lines;
         if (lines > LARGE_FILE_LINES) largeFiles[path] = lines;
-        if (path.endsWith(".css")) continue;
+        if (path.endsWith(".css") || isPluginSource(path)) continue;
         if (!EXCLUDED_MODEL_FILES.some((pattern) => pattern.test(path))) {
             const count = countModelLiterals(text);
             if (count) modelLiterals[path] = count;

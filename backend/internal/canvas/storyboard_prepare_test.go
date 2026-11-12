@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"reflect"
+	"strconv"
 	"testing"
 )
 
@@ -60,6 +61,55 @@ func TestPrepareStoryboardAtomicGraphAndPreservation(t *testing.T) {
 	after, _ := svc.UserCanvasProject("owner", id)
 	if string(stable) != string(after) {
 		t.Fatal("rejected preparation changed canvas")
+	}
+}
+
+func TestPrepareStoryboardDraftTitlesFollowOptionalTemplate(t *testing.T) {
+	svc, id, revision, rows := preparationFixture(t)
+	_, result, err := svc.PrepareUserCanvasStoryboard("owner", id, "script", StoryboardPreparation{
+		RowIDs:     rows,
+		Image:      map[string]any{"model": "image-model"},
+		Video:      map[string]any{"model": "video-model", "generateAudio": "true"},
+		ImageTitle: "镜 {n} 首帧",
+		VideoTitle: "镜 {n} 视频",
+	}, revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, _ := svc.loadCanvasDoc("owner", id)
+	for i, shot := range result.Shots {
+		imageTitle := []string{"镜 1 首帧", "镜 2 首帧"}[i]
+		videoTitle := []string{"镜 1 视频", "镜 2 视频"}[i]
+		if got := findCanvasNode(doc, shot.ImageNodeID)["title"]; got != imageTitle {
+			t.Fatalf("image title = %v, want %s", got, imageTitle)
+		}
+		if got := findCanvasNode(doc, shot.VideoNodeID)["title"]; got != videoTitle {
+			t.Fatalf("video title = %v, want %s", got, videoTitle)
+		}
+	}
+}
+
+func TestPrepareStoryboardDraftTitlesKeepDefaultWhenOmitted(t *testing.T) {
+	svc, id, revision, rows := preparationFixture(t)
+	_, result, err := svc.PrepareUserCanvasStoryboard("owner", id, "script", StoryboardPreparation{
+		RowIDs: rows,
+		Image:  map[string]any{"model": "image-model"},
+		Video:  map[string]any{"model": "video-model", "generateAudio": "true"},
+	}, revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, _ := svc.loadCanvasDoc("owner", id)
+	for _, shot := range result.Shots {
+		image := findCanvasNode(doc, shot.ImageNodeID)
+		video := findCanvasNode(doc, shot.VideoNodeID)
+		shotNumber := int(findStoryboardRow(docStoryboardForTest(doc), shot.RowID)["shotNumber"].(float64))
+		if want := "镜头 " + strconv.Itoa(shotNumber) + " · 首帧"; image["title"] != want {
+			t.Fatalf("image title = %v, want %s", image["title"], want)
+		}
+		if want := "镜头 " + strconv.Itoa(shotNumber) + " · 视频"; video["title"] != want {
+			t.Fatalf("video title = %v, want %s", video["title"], want)
+		}
 	}
 }
 
@@ -255,5 +305,53 @@ func TestPrepareStoryboardMinimalEssentialFieldsBackfill(t *testing.T) {
 		Image: map[string]any{"model": "image-model", "size": "9:16"},
 	}, summary.Revision); err == nil {
 		t.Fatal("仅填 videoMotionPrompt 不应误作首帧画面提示词")
+	}
+}
+
+// 模板标题与普通建节点同一套重名规则：同批重复或撞上已有标题时整批拒绝，画布不变。
+func TestPrepareStoryboardTemplateTitlesRejectDuplicates(t *testing.T) {
+	svc, id, revision, rows := preparationFixture(t)
+	_, _, err := svc.PrepareUserCanvasStoryboard("owner", id, "script", StoryboardPreparation{
+		RowIDs: rows, Image: map[string]any{"model": "image-model"}, Video: map[string]any{"model": "video-model", "generateAudio": "true"},
+		ImageTitle: "镜 {n}", VideoTitle: "镜 {n}",
+	}, revision)
+	if err == nil {
+		t.Fatal("首帧与视频模板相同时应拒绝")
+	}
+	summary, _, err := svc.PrepareUserCanvasStoryboard("owner", id, "script", StoryboardPreparation{
+		RowIDs: rows, Image: map[string]any{"model": "image-model"}, ImageTitle: "镜 {n} 首帧",
+	}, revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := svc.loadCanvasDoc("owner", id)
+	_, _, err = svc.PrepareUserCanvasStoryboard("owner", id, "script", StoryboardPreparation{
+		RowIDs: rows, Video: map[string]any{"model": "video-model", "generateAudio": "true"}, VideoTitle: "镜 {n} 首帧",
+	}, summary.Revision)
+	if err == nil {
+		t.Fatal("模板标题撞上已有节点时应拒绝")
+	}
+	after, _ := svc.loadCanvasDoc("owner", id)
+	if len(canvasDocNodes(after)) != len(canvasDocNodes(before)) {
+		t.Fatal("拒绝后画布不应新增节点")
+	}
+}
+
+// 模板标题撞上同批的默认标题时同样拒绝，无论模板在首帧还是视频一侧。
+func TestPrepareStoryboardTemplateTitleRejectsBatchDefaultCollision(t *testing.T) {
+	for _, input := range []StoryboardPreparation{
+		{Image: map[string]any{"model": "image-model"}, Video: map[string]any{"model": "video-model", "generateAudio": "true"}, VideoTitle: "镜头 {n} · 首帧"},
+		{Image: map[string]any{"model": "image-model"}, Video: map[string]any{"model": "video-model", "generateAudio": "true"}, ImageTitle: "镜头 {n} · 视频"},
+	} {
+		svc, id, revision, rows := preparationFixture(t)
+		input.RowIDs = rows
+		before, _ := svc.loadCanvasDoc("owner", id)
+		if _, _, err := svc.PrepareUserCanvasStoryboard("owner", id, "script", input, revision); err == nil {
+			t.Fatalf("模板与同批默认标题重名应拒绝: %+v", input)
+		}
+		after, _ := svc.loadCanvasDoc("owner", id)
+		if len(canvasDocNodes(after)) != len(canvasDocNodes(before)) {
+			t.Fatal("拒绝后画布不应新增节点")
+		}
 	}
 }

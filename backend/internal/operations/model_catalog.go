@@ -40,23 +40,27 @@ func registerModelCatalogOp(r *Registry) {
 				return nil, Unsupported("model_catalog_unavailable", "当前工作区无法读取模型目录")
 			}
 			catalog, err := reader.AgentModelCatalog()
-			if err != nil || catalog == nil || len(wanted) == 0 {
+			if err != nil || catalog == nil {
 				return catalog, mapDomainError(err)
 			}
+			all := len(wanted) == 0
 			filtered := modelcatalog.NewCatalogResponse(catalog.Source, nil, nil)
 			for _, item := range catalog.Models {
-				if wanted[item.Capability] {
+				if all || wanted[item.Capability] {
 					filtered.Models = append(filtered.Models, item)
 				}
 			}
 			for _, channel := range catalog.Channels {
 				models := []modelcatalog.PublicChannelModel{}
 				for _, item := range channel.Models {
-					if wanted[item.Capability] {
+					if all || wanted[item.Capability] {
+						// Costs reach callers through generation.estimate and proposals;
+						// raw price rows would only enlarge every catalog read.
+						item.Pricing = nil
 						models = append(models, item)
 					}
 				}
-				if len(models) > 0 {
+				if all || len(models) > 0 {
 					channel.Models = models
 					filtered.Channels = append(filtered.Channels, channel)
 				}

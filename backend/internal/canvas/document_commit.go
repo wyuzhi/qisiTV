@@ -1,12 +1,14 @@
 package canvas
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 
 	"qisitv/backend/internal/kernel"
+	"qisitv/backend/internal/model"
 
 	"gorm.io/gorm"
 )
@@ -41,15 +43,26 @@ func (s *Service) CommitUserCanvasDocument(userID, canvasID string, expectedRevi
 	if err != nil {
 		return UserDataSummary{}, nil, err
 	}
-	summary, err := s.UpsertUserCanvasProject(userID, merged)
-	if err != nil {
-		return UserDataSummary{}, nil, err
+	merged = s.reconcileCanvasRawMediaAssetsIfNeeded(userID, existing, merged)
+	return s.upsertUserCanvasProjectAndPayload(userID, merged, nil, "automatic", true)
+}
+
+func (s *Service) reconcileCanvasRawMediaAssetsIfNeeded(userID string, existing *model.CanvasProject, raw json.RawMessage) json.RawMessage {
+	if s.validateCanvasMediaAssetsWithBaseline(userID, raw, existing, nil) == nil {
+		return raw
 	}
-	after, err := s.UserCanvasProject(userID, canvasID)
-	if err != nil {
-		return UserDataSummary{}, nil, err
+	var doc map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&doc); err != nil || doc == nil {
+		return raw
 	}
-	return summary, after, nil
+	s.reconcileBoundCanvasDocMediaAssets(userID, doc, "")
+	healed, err := json.Marshal(doc)
+	if err != nil {
+		return raw
+	}
+	return healed
 }
 
 func mergeCanvasDocumentOverlay(current, overlay json.RawMessage, canvasID string, expectedRevision int64) (json.RawMessage, error) {

@@ -12,7 +12,7 @@ import (
 )
 
 func TestWanLocalReferencesRemainOwnedForHTTPUpload(t *testing.T) {
-	input := canvasGenerationInput{Mode: "video", Config: providerConfig{BaseURL: "https://enterprise.beefapi.com", InterfaceType: "newapi-channel-2", Model: "wan3.0-video"}, ReferenceImages: []providerMedia{{DataURL: testGeminiReferenceImageDataURL}}}
+	input := canvasGenerationInput{Mode: "video", Config: providerConfig{BaseURL: "https://beeftv.app", InterfaceType: "newapi-channel-2", Model: "wan3.0-video"}, ReferenceImages: []providerMedia{{DataURL: testGeminiReferenceImageDataURL}}}
 	policy := providerMediaHydrationPolicyFor(context.Background(), input)
 	if policy.RequireURL || !policy.KeepLocal {
 		t.Fatalf("Wan local media blocked: %#v", policy)
@@ -57,7 +57,7 @@ func TestWanLocalReferencesRemainOwnedForHTTPUpload(t *testing.T) {
 		t.Fatal("new built-in model did not inherit the same upload protocol")
 	}
 	input.Config.Model = "wan3.0-video"
-	input.Config.BaseURL = "https://another.example/enterprise.beefapi.com"
+	input.Config.BaseURL = "https://another.example/beeftv.app"
 	if !providerMediaHydrationPolicyFor(context.Background(), input).RequireURL {
 		t.Fatal("untrusted endpoint inherited built-in upload support")
 	}
@@ -81,9 +81,9 @@ func TestInstalledMediaContractOverridesLegacyGuess(t *testing.T) {
 	}
 }
 
-func TestSavedBeefAPISeedanceAudioControl(t *testing.T) {
+func TestSavedBeefTVSeedanceAudioControl(t *testing.T) {
 	for _, channelID := range []string{"", "saved-channel"} {
-		for _, baseURL := range []string{"https://enterprise.beefapi.com", "https://custom.example"} {
+		for _, baseURL := range []string{"https://beeftv.app", "https://custom.example"} {
 			t.Run(channelID+baseURL, func(t *testing.T) {
 				svc, db, _, _ := creationTestService(t)
 				profile := DefaultModelCapabilityConfigForModel("newapi", "seedance-2.0-fast")
@@ -99,11 +99,11 @@ func TestSavedBeefAPISeedanceAudioControl(t *testing.T) {
 				if err := svc.validateResolvedVideoCapability(&input); err != nil {
 					t.Fatal(err)
 				}
-				if input.VideoCapability.GenerateAudio.Supported != isBeefAPIVideoConfig(context.Background(), input.Config) || input.VideoCapability.GenerateAudio.Default || input.VideoCapability.References.MaxImages != 2 {
+				if input.VideoCapability.GenerateAudio.Supported != isBeefTVVideoConfig(context.Background(), input.Config) || input.VideoCapability.GenerateAudio.Default || input.VideoCapability.References.MaxImages != 2 {
 					t.Fatalf("unexpected profile: %#v", input.VideoCapability)
 				}
-				if isBeefAPIVideoConfig(context.Background(), input.Config) {
-					body, err := beefAPIVideoRequestBody(input)
+				if isBeefTVVideoConfig(context.Background(), input.Config) {
+					body, err := beefTVVideoRequestBody(input)
 					if err != nil || body["metadata"].(map[string]any)["generate_audio"] != false {
 						t.Fatalf("explicit false lost: %#v, %v", body, err)
 					}

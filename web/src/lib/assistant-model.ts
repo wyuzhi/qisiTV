@@ -1,5 +1,5 @@
 import type { ModelProtocol } from "@/lib/model-protocols";
-import { decodeChannelModel, encodeChannelModel, isBuiltinBeefAPIChannel, normalizeModelOptionValue, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { decodeChannelModel, encodeChannelModel, isBuiltinBeefTVChannel, normalizeModelOptionValue, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 
 export const MANAGED_ASSISTANT_MODELS = ["gpt-6-astra", "claude-opus-5-5", "deepseek-v4.1-flash", "glm-5.3", "gemini-3.8-flash"] as const;
 
@@ -30,7 +30,7 @@ function channelAssistantModels(channel: ModelChannel, defaultTextModel: string)
         const protocol = channel.interfaceType || (channel.apiFormat === "claude" ? "claude-api" : channel.apiFormat === "openai" ? DEFAULT_TEXT_PROTOCOL : "unsupported");
         if (protocolSupported(protocol)) available.push(textSelection.model);
     }
-    const models = isBuiltinBeefAPIChannel(channel)
+    const models = isBuiltinBeefTVChannel(channel)
         ? MANAGED_ASSISTANT_MODELS.map((model) => channel.modelAliases?.[model] || model).filter((model) => available.includes(model))
         : available;
     return models.map((model) => encodeChannelModel(channel.id, model));

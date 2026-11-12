@@ -11,7 +11,7 @@ import (
 	"time"
 
 	localasset "qisitv/backend/internal/asset"
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/editing"
 	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/kernel"
@@ -337,7 +337,7 @@ func UpdateTimelineTaskProgress(repo *repository.Repository, task *model.Task, s
 func ProcessTimelineTranscription(
 	ctx context.Context,
 	repo *repository.Repository,
-	beef *beefapi.Service,
+	beef *beeftv.Service,
 	requireFeature func() error,
 	newExecutor func(userID, baseURL string) *transcription.Executor,
 	logInfo func(userID, taskID, msg, extra string),
@@ -397,7 +397,7 @@ func ProcessTimelineTranscription(
 	return nil
 }
 
-func BindTranscriptionModel(beef *beefapi.Service, modelID string) (string, error) {
+func BindTranscriptionModel(beef *beeftv.Service, modelID string) (string, error) {
 	if beef == nil {
 		return "", kernel.BadAuthRequest("请先连接 BeefTV")
 	}

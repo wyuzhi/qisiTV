@@ -14,7 +14,6 @@ const manifest: PluginManifest = {
     surfaces: ["node", "fullscreen"],
     permissions: ["canvas.read", "canvas.write", "media.read", "ai.text"],
     trusted: true,
-    runtime: { backend: "trusted-backend", web: "declarative" },
     contributes: {
         canvasNodes: [
             {
@@ -39,6 +38,17 @@ export const artCritiquePlugin: RegisteredPlugin = {
         const sources = snapshot.nodes.filter((item) => item.type === "image" && snapshot.connections.some((edge) => edge.fromNodeId === item.id && edge.toNodeId === node.id));
         const currentReport = state?.report && sources.length === 1 && state.report.sourceFingerprint === artCritiqueSourceFingerprint(sources[0]) ? state.report : undefined;
         return { status: state?.report && !currentReport ? "stale" : state?.status || "idle", stage: state?.analysisStage, stageTaskIds: state?.stageTaskIds, sourceNodeId: state?.sourceNodeId, summary: currentReport?.summary, strengths: currentReport?.strengths, issues: currentReport?.issues, options: currentReport?.options, error: state?.errorMessage, execution: "已有报告仅在输入指纹一致时返回；canvas_start_art_critique 准备分析，用户确认后执行。" };
+    },
+    setup(host) {
+        return host.contribute("canvas.node", {
+            type: ART_CRITIQUE_NODE_TYPE,
+            label: "AI 审美批改",
+            defaultTitle: "AI 审美批改",
+            defaultSize: { width: 560, height: 420 },
+            schema: { type: "object", properties: { artCritique: { type: "object" } } },
+            acceptsInputKind: "image",
+            showOutputConnection: false,
+        });
     },
 };
 

@@ -27,8 +27,17 @@ export function h3VideoOperation(model: string, input: { imageCount: number; cha
     return "text_to_video";
 }
 
+export function isH3MaxModel(model: string): boolean {
+    return model.split("::").at(-1) === "minimax-h3-max";
+}
+
+export function isH3MaxFamilyModel(model: string): boolean {
+    const name = model.split("::").at(-1) || "";
+    return name === "minimax-h3-max" || name === "minimax-h3-max-turbo";
+}
+
 export function isH3Model(model: string): boolean {
-    return isH3Style(model) || ["minimax-h3", "minimax-h3-max", "minimax-h3-max-turbo"].includes(model.split("::").at(-1) || "");
+    return isH3Style(model) || isH3MaxFamilyModel(model) || model.split("::").at(-1) === "minimax-h3";
 }
 
 export function h3GenerationControls(model: string, options?: H3VideoOptions): H3VideoOptions {
@@ -79,7 +88,7 @@ export function h3ReferenceMode(model: string, input: { imageCount: number; vide
 export function h3MediaPayload(model: string, media: H3Media[], options: H3FrameOptions = {}, seconds = 5, resolution = "768p") {
     const name = model.split("::").at(-1),
         base = name === "minimax-h3",
-        max = name === "minimax-h3-max",
+        max = isH3MaxModel(model),
         style = isH3Style(model);
     const selected = [options.videoStartFrameNodeId, options.videoEndFrameNodeId, options.videoMiddleFrameNodeId].filter(Boolean);
     const images = media.filter((m) => m.type === "image"),

@@ -2,7 +2,6 @@ package generation
 
 import (
 	"context"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -12,12 +11,12 @@ import (
 	"qisitv/backend/internal/providerpreset"
 )
 
-func beefAPITestBaseURL(ctx context.Context) string {
+func beefTVTestBaseURL(ctx context.Context) string {
 	runtime, ok := RuntimeFromContext(ctx)
 	if !ok {
 		return ""
 	}
-	return strings.TrimSpace(runtime.Endpoints.BeefAPIVideoBaseURL)
+	return strings.TrimSpace(runtime.Endpoints.BeefTVVideoBaseURL)
 }
 
 func IsPublicMediaURL(value string) bool {
@@ -38,31 +37,25 @@ func usesSeedanceTaskOptions(config Config) bool {
 		config.InterfaceType == "seedance-videos-compatible"
 }
 
-func IsBeefAPIVideoConfig(ctx context.Context, config Config) bool {
-	if testBase := beefAPITestBaseURL(ctx); testBase != "" {
+func IsBeefTVVideoConfig(ctx context.Context, config Config) bool {
+	if testBase := beefTVTestBaseURL(ctx); testBase != "" {
 		got := strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
 		want := strings.TrimRight(testBase, "/")
 		return got == want || strings.HasPrefix(got, want+"/")
 	}
-	if providerpreset.IsBeefAPIEndpoint(config.BaseURL) {
-		return true
-	}
-	// The domestic gateway uses the same video wire contract. This only selects
-	// the request format; hosted-account credential ownership stays unchanged.
-	u, err := url.Parse(strings.TrimSpace(config.BaseURL))
-	return err == nil && u.Scheme == "https" && strings.EqualFold(u.Hostname(), "beefapi.com") && u.User == nil && (u.Port() == "" || u.Port() == "443")
+	return providerpreset.IsBeefTVEndpoint(config.BaseURL)
 }
 
-func IsBeefAPISeedancePreuploadConfig(ctx context.Context, config Config) bool {
-	return IsBeefAPIVideoConfig(ctx, config) && IsSeedanceVideoConfig(config)
+func IsBeefTVSeedancePreuploadConfig(ctx context.Context, config Config) bool {
+	return IsBeefTVVideoConfig(ctx, config) && IsSeedanceVideoConfig(config)
 }
 
-func requiresBeefAPIHTTPReferences(ctx context.Context, config Config) bool {
+func requiresBeefTVHTTPReferences(ctx context.Context, config Config) bool {
 	if UpscaleMediaType(config.Model) != "" {
-		return IsBeefAPIVideoConfig(ctx, config)
+		return IsBeefTVVideoConfig(ctx, config)
 	}
-	contract, ok := providerpreset.BeefAPIVideoContract(config.Model)
-	return ok && contract.RequiresHTTPReferences && IsBeefAPIVideoConfig(ctx, config)
+	contract, ok := providerpreset.BeefTVVideoContract(config.Model)
+	return ok && contract.RequiresHTTPReferences && IsBeefTVVideoConfig(ctx, config)
 }
 
 func IsGrokVideoConfig(config Config) bool {
@@ -122,12 +115,17 @@ func ImageTransparentBackgroundSupported(profile *ImageCapabilityConfig) bool {
 }
 
 func sequentialMaxImagesForInput(input Input) int {
-	maxImages, err := strconv.Atoi(strings.TrimSpace(input.Config.SeedreamMaxImages))
+	return SequentialMaxImages(input.Config.SeedreamMaxImages, len(input.ReferenceImages))
+}
+
+// SequentialMaxImages 是组图请求的输出上限：参考图和输出合计不超过 15 张。
+func SequentialMaxImages(raw string, references int) int {
+	maxImages, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || maxImages <= 1 {
 		return 0
 	}
 	limit := 15
-	if remaining := limit - len(input.ReferenceImages); remaining < limit {
+	if remaining := limit - references; remaining < limit {
 		limit = remaining
 	}
 	if maxImages > limit {
@@ -227,6 +225,27 @@ func NormalizeVideoSize(value string) string {
 		return "720x1280"
 	}
 	return "1280x720"
+}
+
+// IsVideoAspectRatioLiteral reports W:H or adaptive, the forms that express a
+// frame ratio rather than exact pixels. Pixel sizes stay out of ratio-only
+// upstream fields.
+func IsVideoAspectRatioLiteral(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "adaptive" {
+		return true
+	}
+	parts := strings.Split(value, ":")
+	if len(parts) != 2 {
+		return false
+	}
+	for _, part := range parts {
+		number, err := strconv.ParseFloat(part, 64)
+		if err != nil || number <= 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func NormalizeVideoResolution(value string) string {

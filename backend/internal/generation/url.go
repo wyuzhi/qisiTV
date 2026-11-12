@@ -4,11 +4,12 @@ import (
 	"net/url"
 	"strings"
 
+	"qisitv/backend/internal/channelurl"
 	"qisitv/backend/internal/model"
 )
 
 func APIURL(baseURL string, path string) string {
-	return apiURLWithDefaultPrefix(baseURL, path, "/v1")
+	return channelurl.Join(baseURL, path, "/v1")
 }
 
 func ChannelAPIURL(baseURL string, path string) string {
@@ -33,122 +34,49 @@ func ChannelAPIURLForProtocol(baseURL string, path string, interfaceType model.C
 	if interfaceType == model.ChannelInterfaceGeminiVeo || interfaceType == model.ChannelInterfaceGeminiImage {
 		defaultPrefix = "/v1beta"
 	}
-	return apiURLWithDefaultPrefix(baseURL, path, defaultPrefix)
-}
-
-var channelAPIPrefixes = []string{"/api-service/likeai", "/task-api", "/api/plan/v3", "/api/v3", "/api/v1", "/v1beta", "/v1", "/v2", "/v3"}
-
-func apiURLWithDefaultPrefix(baseURL string, path string, defaultPrefix string) string {
-	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	requestPath := strings.TrimSpace(path)
-	if requestPath == "" {
-		return base
-	}
-	if !strings.HasPrefix(requestPath, "/") {
-		requestPath = "/" + requestPath
-	}
-
-	requestPrefix := requestAPIPathPrefix(requestPath)
-	basePrefix := baseAPIPathPrefix(base)
-	if requestPrefix != "" {
-		if basePrefix == requestPrefix {
-			return base + strings.TrimPrefix(requestPath, requestPrefix)
-		}
-		trimmedBase := strings.TrimSuffix(base, basePrefix)
-		if overlap := matchedRequestPathOverlap(trimmedBase, requestPath); overlap > 0 {
-			return trimmedBase[:len(trimmedBase)-overlap] + requestPath
-		}
-		return trimmedBase + requestPath
-	}
-	if basePrefix != "" {
-		if overlap := matchedRequestPathOverlap(base, requestPath); overlap > 0 {
-			return base[:len(base)-overlap] + requestPath
-		}
-		return base + requestPath
-	}
-	prefixedPath := defaultPrefix + requestPath
-	if overlap := matchedRequestPathOverlap(base, prefixedPath); overlap > 0 {
-		return base[:len(base)-overlap] + prefixedPath
-	}
-	if overlap := matchedRequestPathOverlap(base, requestPath); overlap > 0 {
-		return base[:len(base)-overlap] + requestPath
-	}
-	return base + prefixedPath
-}
-
-func matchedRequestPathOverlap(base string, fullRequestPath string) int {
-	pathOnly := fullRequestPath
-	if idx := strings.IndexAny(pathOnly, "?#"); idx >= 0 {
-		pathOnly = pathOnly[:idx]
-	}
-	pathOnly = strings.TrimRight(pathOnly, "/")
-	if pathOnly == "" || pathOnly == "/" {
-		return 0
-	}
-	lowerBase := strings.ToLower(base)
-	lowerPath := strings.ToLower(pathOnly)
-	if strings.HasSuffix(lowerBase, lowerPath) {
-		return len(pathOnly)
-	}
-	if prefix := requestAPIPathPrefix(lowerPath); prefix != "" && len(lowerPath) > len(prefix)+1 {
-		rest := lowerPath[len(prefix):]
-		for _, endpoint := range unversionedEndpointCandidates(rest) {
-			if strings.HasSuffix(lowerBase, prefix+endpoint) {
-				return len(prefix) + len(endpoint)
-			}
-			for _, verPrefix := range channelAPIPrefixes {
-				if strings.HasSuffix(lowerBase, verPrefix+endpoint) {
-					return len(verPrefix) + len(endpoint)
-				}
-			}
-			if strings.HasSuffix(lowerBase, endpoint) {
-				return len(endpoint)
-			}
-		}
-	}
-	return 0
-}
-
-func unversionedEndpointCandidates(rest string) []string {
-	candidates := make([]string, 0, 4)
-	addCandidate := func(path string) {
-		if path == "" || path == "/" {
-			return
-		}
-		candidates = append(candidates, path)
-		if slash := strings.IndexByte(path[1:], '/'); slash > 0 {
-			candidates = append(candidates, path[:1+slash])
-		}
-	}
-	addCandidate(rest)
-	if strings.HasPrefix(rest, "/query/") {
-		addCandidate(strings.TrimPrefix(rest, "/query"))
-	}
-	return candidates
-}
-
-func requestAPIPathPrefix(value string) string {
-	lower := strings.ToLower(value)
-	for _, prefix := range channelAPIPrefixes {
-		if lower == prefix || strings.HasPrefix(lower, prefix+"/") || strings.HasPrefix(lower, prefix+"?") || strings.HasPrefix(lower, prefix+"#") {
-			return prefix
-		}
-	}
-	return ""
-}
-
-func baseAPIPathPrefix(value string) string {
-	lower := strings.ToLower(strings.TrimRight(value, "/"))
-	for _, prefix := range channelAPIPrefixes {
-		if lower == prefix || strings.HasSuffix(lower, prefix) {
-			return prefix
-		}
-	}
-	return ""
+	return channelurl.Join(baseURL, path, defaultPrefix)
 }
 
 func GeminiURL(baseURL string, path string) string {
-	return apiURLWithDefaultPrefix(baseURL, path, "/v1beta")
+	return channelurl.Join(baseURL, path, "/v1beta")
+}
+
+// 文本接口格式在 Base URL 后拼的路径。文本任务、Agent 请求和设置页展示的地址都从这里取。
+const (
+	ChatCompletionsPath = "/chat/completions"
+	ResponsesPath       = "/responses"
+	MessagesPath        = "/messages"
+)
+
+// TextRequestURL 是文本任务按接口格式实际请求的地址；不是这三种文本接口格式时返回空串。
+func TextRequestURL(baseURL string, interfaceType model.ChannelInterfaceType) string {
+	path := ""
+	switch interfaceType {
+	case model.ChannelInterfaceChatCompletion:
+		path = ChatCompletionsPath
+	case model.ChannelInterfaceOpenAIResponse:
+		path = ResponsesPath
+	case model.ChannelInterfaceClaudeAPI:
+		path = MessagesPath
+	}
+	if path == "" || strings.TrimSpace(baseURL) == "" {
+		return ""
+	}
+	return APIURL(baseURL, path)
+}
+
+// ChannelCatalogURL 是读取渠道模型目录时请求的地址。
+func ChannelCatalogURL(baseURL, apiFormat string) string {
+	if apiFormat == "likeai" {
+		return APIURL(baseURL, likeAICatalogPath)
+	}
+	if apiFormat == "gemini" {
+		if !strings.HasSuffix(strings.ToLower(baseURL), "/v1beta") {
+			baseURL += "/v1beta"
+		}
+		return baseURL + "/models"
+	}
+	return APIURL(baseURL, "/models")
 }
 
 func ProviderDownloadURL(baseURL string, rawURL string) string {
@@ -163,7 +91,7 @@ func ProviderDownloadURL(baseURL string, rawURL string) string {
 	if baseErr != nil || targetErr != nil || !strings.EqualFold(base.Scheme, "https") || !strings.EqualFold(target.Scheme, "https") {
 		return rawURL
 	}
-	if isBeefAPIHost(base.Hostname()) && isBeefAPIHost(target.Hostname()) {
+	if isBeefTVHost(base.Hostname()) && isBeefTVHost(target.Hostname()) {
 		target.Scheme = base.Scheme
 		target.Host = base.Host
 		return target.String()
@@ -171,13 +99,13 @@ func ProviderDownloadURL(baseURL string, rawURL string) string {
 	return rawURL
 }
 
-func IsBeefAPIHost(host string) bool {
-	return isBeefAPIHost(host)
+func IsBeefTVHost(host string) bool {
+	return isBeefTVHost(host)
 }
 
-func isBeefAPIHost(host string) bool {
+func isBeefTVHost(host string) bool {
 	host = strings.ToLower(strings.TrimSpace(host))
-	return host == "beeftv.app" || host == "beefapi.com" || strings.HasSuffix(host, ".beefapi.com")
+	return host == "beeftv.app"
 }
 
 func SameProviderOrigin(baseURL string, rawURL string) bool {

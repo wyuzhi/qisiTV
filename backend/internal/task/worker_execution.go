@@ -516,11 +516,11 @@ func ShouldDeferVideoProviderTask(task model.Task, decryptedInput string, err er
 	if !deferSignal {
 		return false
 	}
-	if input.Config.ChannelID == "" && generation.IsBeefAPIVideoConfig(context.Background(), input.Config) {
+	if input.Config.ChannelID == "" && generation.IsBeefTVVideoConfig(context.Background(), input.Config) {
 		return true
 	}
 	resolved, resolveErr := resolveConfig(input.Config)
-	return resolveErr == nil && (resolved.InterfaceType == string(model.ChannelInterfaceNewAPIChannel2) || generation.IsBeefAPIVideoConfig(context.Background(), resolved))
+	return resolveErr == nil && (resolved.InterfaceType == string(model.ChannelInterfaceNewAPIChannel2) || generation.IsBeefTVVideoConfig(context.Background(), resolved))
 }
 
 func NewAPIChannel2TaskSyncExpired(task model.Task, err error, now time.Time) bool {

@@ -269,6 +269,7 @@ func (e *Engine) fetchRangeFromURL(ctx context.Context, artifact PlatformArtifac
 	remaining := artifact.Size - offset
 	body := io.LimitReader(resp.Body, remaining+1)
 	buf := make([]byte, 64*1024)
+	watch.startBody(cancel)
 	var readErr error
 	for {
 		n, err := body.Read(buf)
@@ -285,12 +286,12 @@ func (e *Engine) fetchRangeFromURL(ctx context.Context, artifact PlatformArtifac
 				e.setProgress(0)
 				return 0, ErrTampered
 			}
+			watch.recordBytes(int64(n))
 			if _, werr := file.Write(buf[:n]); werr != nil {
 				_ = file.Close()
 				return offset, werr
 			}
 			offset += int64(n)
-			watch.recordBytes(int64(n))
 			e.addDownloaded(int64(n))
 		}
 		if err != nil {
@@ -447,18 +448,32 @@ func watchTransfer(window time.Duration, minSpeed int64, slowWindow time.Duratio
 		w.mu.Unlock()
 		cancel()
 	})
-	if minSpeed > 0 && slowWindow > 0 {
-		w.checkpoints = []speedCheckpoint{{at: now, bytes: 0}}
-		w.stopSlow = make(chan struct{})
-		tick := slowWindow / 4
-		if tick < 10*time.Millisecond {
-			tick = 10 * time.Millisecond
-		} else if tick > 250*time.Millisecond {
-			tick = 250 * time.Millisecond
-		}
-		go w.runSlowCheck(tick, cancel)
-	}
 	return w
+}
+
+func (w *idleWatch) startBody(cancel context.CancelFunc) {
+	now := time.Now()
+	w.mu.Lock()
+	if w.didFire {
+		w.mu.Unlock()
+		return
+	}
+	w.lastReset = now
+	w.timer.Reset(w.window)
+	if w.minSpeed <= 0 || w.slowWindow <= 0 || w.stopSlow != nil {
+		w.mu.Unlock()
+		return
+	}
+	w.checkpoints = []speedCheckpoint{{at: now, bytes: w.totalBytes}}
+	w.stopSlow = make(chan struct{})
+	tick := w.slowWindow / 4
+	if tick < 10*time.Millisecond {
+		tick = 10 * time.Millisecond
+	} else if tick > 250*time.Millisecond {
+		tick = 250 * time.Millisecond
+	}
+	w.mu.Unlock()
+	go w.runSlowCheck(tick, cancel)
 }
 
 func (w *idleWatch) runSlowCheck(tick time.Duration, cancel context.CancelFunc) {
@@ -489,7 +504,7 @@ func (w *idleWatch) runSlowCheck(tick time.Duration, cancel context.CancelFunc) 
 			if pruneIdx > 0 {
 				w.checkpoints = w.checkpoints[pruneIdx:]
 			}
-			if ref != nil {
+			if ref != nil && len(w.checkpoints) >= 4 {
 				elapsed := now.Sub(ref.at).Seconds()
 				delta := w.totalBytes - ref.bytes
 				if elapsed >= w.slowWindow.Seconds() && float64(delta) < float64(w.minSpeed)*elapsed {

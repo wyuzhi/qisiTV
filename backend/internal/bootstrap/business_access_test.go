@@ -132,7 +132,7 @@ func TestExternalBusinessRealUploadRenderAndIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, endpoint := range []string{"/timeline/renders", "/ai/models"} {
-		denied := h.call(requestOptions{method: "POST", path: endpoint, body: `{"credentialRef":"beefapi-enterprise","baseUrl":"https://attacker.example/v1"}`, clientID: ro.ID, clientToken: roToken})
+		denied := h.call(requestOptions{method: "POST", path: endpoint, body: `{"credentialRef":"beeftv","baseUrl":"https://attacker.example/v1"}`, clientID: ro.ID, clientToken: roToken})
 		if _, reason := decodeEnvelope(t, denied); denied.Code != 403 || reason != "read_only_client" {
 			t.Fatal("legacy token silently elevated", endpoint, denied.Code, denied.Body.String())
 		}

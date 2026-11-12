@@ -76,14 +76,6 @@ type RuntimePolicySetting struct {
 	Request  RuntimeRequestPolicy  `json:"request"`
 }
 
-type PublicRuntimePolicySetting struct {
-	RuntimePolicySetting
-	Configured bool      `json:"configured"`
-	UpdatedBy  string    `json:"updatedBy"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
-}
-
 type PublicRuntimeLimits struct {
 	ActiveTaskLimit         int   `json:"activeTaskLimit"`
 	ResourceUploadMB        int64 `json:"resourceUploadMB"`
@@ -200,74 +192,6 @@ func (s *Service) PublicRuntimeLimits() (*PublicRuntimeLimits, error) {
 	}, nil
 }
 
-func (s *Service) AdminRuntimePolicySetting(actor *model.User) (*PublicRuntimePolicySetting, error) {
-	if err := s.requireAdmin(actor); err != nil {
-		return nil, err
-	}
-	setting, value, err := s.readRuntimePolicy()
-	if err != nil {
-		return nil, err
-	}
-	return publicRuntimePolicy(setting, value), nil
-}
-
-func (s *Service) AdminSelfUseRuntimePolicy(actor *model.User) (*PublicRuntimePolicySetting, error) {
-	if err := s.requireAdmin(actor); err != nil {
-		return nil, err
-	}
-	return publicRuntimePolicy(nil, selfUseRuntimePolicy()), nil
-}
-
-func (s *Service) UpdateRuntimePolicySetting(actor *model.User, value RuntimePolicySetting) (*PublicRuntimePolicySetting, error) {
-	if err := s.requireAdmin(actor); err != nil {
-		return nil, err
-	}
-	if err := validateRuntimePolicy(value); err != nil {
-		return nil, err
-	}
-	current, before, err := s.readRuntimePolicy()
-	if err != nil {
-		return nil, err
-	}
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	setting := model.SystemSetting{Key: runtimePolicySettingKey, ValueJSON: string(encoded), UpdatedBy: actor.ID}
-	if current != nil {
-		setting.CreatedAt = current.CreatedAt
-	}
-	if err := s.repo.SaveSystemSetting(&setting); err != nil {
-		return nil, err
-	}
-
-	s.concurrencyCache.Clear()
-	if err := s.appendAdminAudit(actor, "runtime_policy.update", "system_setting", runtimePolicySettingKey, "更新资源与请求策略", map[string]any{"before": before, "after": value}); err != nil {
-		return nil, err
-	}
-	return publicRuntimePolicy(&setting, value), nil
-}
-
-func (s *Service) ResetRuntimePolicySetting(actor *model.User) (*PublicRuntimePolicySetting, error) {
-	if err := s.requireAdmin(actor); err != nil {
-		return nil, err
-	}
-	_, before, err := s.readRuntimePolicy()
-	if err != nil {
-		return nil, err
-	}
-	if err := s.repo.DeleteSystemSetting(runtimePolicySettingKey); err != nil {
-		return nil, err
-	}
-
-	s.concurrencyCache.Clear()
-	after := DefaultRuntimePolicy()
-	if err := s.appendAdminAudit(actor, "runtime_policy.reset", "system_setting", runtimePolicySettingKey, "重置资源与请求策略", map[string]any{"before": before, "after": after}); err != nil {
-		return nil, err
-	}
-	return publicRuntimePolicy(nil, after), nil
-}
-
 func (s *Service) readRuntimePolicy() (*model.SystemSetting, RuntimePolicySetting, error) {
 	setting, err := s.repo.SystemSetting(runtimePolicySettingKey)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -374,16 +298,6 @@ func validateRuntimePolicy(value RuntimePolicySetting) error {
 }
 
 func ValidateRuntimePolicy(value RuntimePolicySetting) error { return validateRuntimePolicy(value) }
-
-func publicRuntimePolicy(setting *model.SystemSetting, value RuntimePolicySetting) *PublicRuntimePolicySetting {
-	result := &PublicRuntimePolicySetting{RuntimePolicySetting: value, Configured: setting != nil}
-	if setting != nil {
-		result.UpdatedBy = setting.UpdatedBy
-		result.CreatedAt = setting.CreatedAt
-		result.UpdatedAt = setting.UpdatedAt
-	}
-	return result
-}
 
 func megabytes(value int64) int64 { return kernel.Megabytes(value) }
 func gigabytes(value int64) int64 { return kernel.Gigabytes(value) }

@@ -27,6 +27,7 @@ func (r *Repository) SkillVersionsByIDs(ids []string) ([]model.SkillVersion, err
 	err := r.db.Where("id IN ?", ids).Find(&rows).Error
 	return rows, err
 }
+
 func (r *Repository) SwitchSkillVersion(userID, skillID, versionID, instruction, name, description, sourceURL string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var s model.Skill

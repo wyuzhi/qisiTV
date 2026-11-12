@@ -14,13 +14,14 @@ import (
 	"qisitv/backend/internal/agentops"
 	"qisitv/backend/internal/app"
 	"qisitv/backend/internal/assistantturns"
+	"qisitv/backend/internal/canvas"
 	"qisitv/backend/internal/operations"
 	"qisitv/backend/internal/skills"
 	httptransport "qisitv/backend/internal/transport/http"
 )
 
-// agentOpsMaxBody 与画布 PUT 上限对齐：文档提交会带上整份画布，1MB 不够。
-const agentOpsMaxBody = 5 << 20
+// agentOpsMaxBody 与画布默认 PUT 上限对齐：文档提交会带上整份画布，运行时若用户放宽单画布上限则自动跟随放大。
+const agentOpsMaxBody = 68 << 20
 
 type agentOpsService interface {
 	operations.DomainBinder
@@ -253,13 +254,14 @@ func RegisterAgentOpsRoutes(r gin.IRouter, svc agentOpsService, store *agentops.
 			failService(c, err)
 			return
 		}
-		body, err := io.ReadAll(io.LimitReader(c.Request.Body, agentOpsMaxBody+1))
+		maxBody := max(int64(agentOpsMaxBody), canvas.EffectiveRequestMaxBodyBytes())
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBody+1))
 		if err != nil {
 			fail(c, http.StatusBadRequest, app.BadAuthRequest("请求体读取失败"))
 			return
 		}
-		if int64(len(body)) > agentOpsMaxBody {
-			fail(c, http.StatusRequestEntityTooLarge, app.BadAuthRequest("请求体超过 5MB 限制"))
+		if int64(len(body)) > maxBody {
+			fail(c, http.StatusRequestEntityTooLarge, app.BadAuthRequest("请求体超过容量上限"))
 			return
 		}
 		// 只读能力只由客户端身份（登记模式）决定：请求体不接受 readOnly，

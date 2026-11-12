@@ -3,15 +3,7 @@
 .generation-history-page .assets-library-hero { min-height: 92px !important; }
 .generation-history-page .assets-library-hero .app-page-header { height: 64px !important; min-height: 64px !important; gap: 0; padding-bottom: 0 !important; }
 /* 个人资产库与生成历史共用同一套纵向页头节奏。 */
-.assets-library-page:not(.generation-history-page) .assets-library-hero { min-height: 92px !important; gap: 0 !important; }
-.assets-library-page:not(.generation-history-page) .assets-library-hero .app-page-header { height: 64px !important; min-height: 64px !important; gap: 0; padding-bottom: 0 !important; }
-.assets-library-page:not(.generation-history-page) .assets-kind-tabs { display: flex; gap: 8px; align-items: center; }
 .assets-library-page:not(.generation-history-page) .assets-secondary-controls { display: block; }
-.assets-kind-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 16px; }
-.assets-kind-actions { display: inline-flex; min-width: 0; align-items: center; gap: 12px; }
-.assets-library-page:not(.generation-history-page) .assets-kind-tab { height: 28px; padding: 0 10px; border: 0; border-radius: 6px; font-size: 13px; }
-.assets-library-page:not(.generation-history-page) .assets-kind-tab.is-active { border: 0; background: color-mix(in srgb, var(--foreground) 9%, transparent); color: var(--foreground); font-weight: 400; }
-.assets-library-page:not(.generation-history-page) .assets-kind-tab span { min-width: 16px; font-size: 11px; }
 .assets-history-rating {
     display: inline-flex;
     height: 36px;

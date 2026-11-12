@@ -50,6 +50,7 @@ func TestAssistantScopeAllowsOnlyVerifiedResources(t *testing.T) {
 		{"无关任务不可读", "task.get", `{"taskId":"task-2"}`, true},
 		{"工作区级列举不可用", "asset.list", `{}`, true},
 		{"整页文档提交不可用", "canvas.document.commit", `{"canvasId":"canvas-a"}`, true},
+		{"外部新建画布对内置助手不可用", "canvas.create", `{"title":"x"}`, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -79,10 +80,20 @@ func registeredScopeOp(t *testing.T, id string) *agentops.Op {
 		t.Fatalf("unregistered operation %s", id)
 	}
 	op := &agentops.Op{ID: id, ReadOnly: descriptor.ReadOnly, Scope: descriptor.Scope}
+	hasReadOnly := false
 	for _, mode := range descriptor.AssistantModes {
 		if mode == "canvas" {
 			op.AssistantCanvas = true
 		}
+		if mode == "read-only" {
+			hasReadOnly = true
+		}
+	}
+	if len(descriptor.AssistantModes) == 0 && descriptor.Scope != operations.ScopeConversation {
+		op.ExternalOnly = true
+	}
+	if descriptor.ReadOnly && !hasReadOnly {
+		op.AssistantProposal = true
 	}
 	return op
 }
@@ -109,7 +120,7 @@ func TestAssistantVisibleSetExcludesWorkspaceWideOps(t *testing.T) {
 			t.Fatalf("助手应能看到 %s: %v", id, visible)
 		}
 	}
-	for _, id := range []string{"asset.list", "canvas.search", "canvas.document.commit", "conversation.message.attach"} {
+	for _, id := range []string{"asset.list", "canvas.search", "canvas.create", "canvas.document.commit", "conversation.message.attach"} {
 		if visible[id] {
 			t.Fatalf("工作区级或整页写操作 %s 不应暴露给助手", id)
 		}
@@ -126,11 +137,11 @@ func TestNilAssistantScopeDoesNotFilterCatalog(t *testing.T) {
 	agentops.RegisterDefaultOps(registry)
 	var typedNil *agentops.AssistantScope
 	listed := registry.List(agentops.Caller{Kind: agentops.CallerManual, Scope: typedNil})
-	if len(listed) != 41 {
+	if len(listed) != 44 {
 		t.Fatalf("空指针范围不应收窄目录，得到 %d", len(listed))
 	}
 	empty := registry.List(agentops.AssistantCaller(&agentops.AssistantScope{}, false))
-	if len(empty) != 37 {
+	if len(empty) != 38 {
 		t.Fatalf("空助手范围应只露出助手集合，得到 %d", len(empty))
 	}
 	if got := registry.List(agentops.AssistantCaller(nil, false)); len(got) != 0 {
@@ -141,7 +152,7 @@ func TestNilAssistantScopeDoesNotFilterCatalog(t *testing.T) {
 func TestReferenceBindingCatalogPermissionModes(t *testing.T) {
 	registry := agentops.NewRegistry(nil, nil)
 	agentops.RegisterDefaultOps(registry)
-	for mode, want := range map[string]int{"read-only": 19, "canvas": 37, "full-access": 40} {
+	for mode, want := range map[string]int{"read-only": 20, "canvas": 38, "full-access": 42} {
 		descriptors := registry.List(agentops.AssistantCaller(&agentops.AssistantScope{PermissionMode: mode}, false))
 		if len(descriptors) != want {
 			t.Fatalf("%s catalog=%d want=%d", mode, len(descriptors), want)

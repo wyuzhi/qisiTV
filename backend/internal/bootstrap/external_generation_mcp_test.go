@@ -45,7 +45,7 @@ func TestExternalMCPGenerationApprovalAndReceipt(t *testing.T) {
 		t.Fatal(err, string(out))
 	}
 	command := exec.CommandContext(ctx, bin, "mcp", "serve")
-	command.Env = append(os.Environ(), "BEEFTV_BASE_URL="+server.URL+"/api", "BEEFTV_CLIENT_ID="+reg.ID, "BEEFTV_CLIENT_TOKEN="+token, "BEEFTV_OWNER_TOKEN=", "BEEFTV_DESKTOP_TOKEN=")
+	command.Env = append(os.Environ(), "BEEFTV_BASE_URL="+server.URL+"/api", "BEEFTV_CLIENT_ID="+reg.ID, "BEEFTV_CLIENT_TOKEN="+token, "BEEFTV_CLIENT_TOKEN_FILE=", "BEEFTV_OWNER_TOKEN=", "BEEFTV_DESKTOP_TOKEN=")
 	client := mcp.NewClient(&mcp.Implementation{Name: "generation-fixture", Version: "1"}, nil)
 	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: command}, nil)
 	if err != nil {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Button, Popover } from "antd";
 import { useReducedMotion } from "motion/react";
 import { Download, LoaderCircle, RotateCcw } from "lucide-react";
@@ -46,7 +46,7 @@ function statusLine(state: DesktopUpdateState, persistBusy: boolean, latest: str
     }
 }
 
-export function WorkspaceSidebarUpdate({ collapsed }: { collapsed: boolean }) {
+export function WorkspaceSidebarUpdate({ collapsed, leading }: { collapsed: boolean; leading?: ReactNode }) {
     const reducedMotion = useReducedMotion();
     const updater = useDesktopUpdate();
     const { state, persistBusy, actionBusy, runtime } = updater;
@@ -95,7 +95,7 @@ export function WorkspaceSidebarUpdate({ collapsed }: { collapsed: boolean }) {
 
     return (
         <div className={cn("app-workspace-update", collapsed && "is-collapsed")} data-desktop-update-status={state.status} data-desktop-update-runtime={runtime}>
-            <AppChangelogButton className="app-workspace-update-version" showIcon={false} showVersion version={installed} versionClassName="tabular-nums" ariaLabel={installed ? `当前版本 ${installed}，查看更新日志` : "查看更新日志"} />
+            {leading ?? <AppChangelogButton className="app-workspace-update-version" showIcon={false} showVersion version={installed} versionClassName="tabular-nums" ariaLabel={installed ? `当前版本 ${installed}，查看更新日志` : "查看更新日志"} />}
                 <Popover open={collapsed && Boolean(line)} content={collapsed ? statusContent : null} placement="rightBottom" arrow={false} rootClassName="app-workspace-update-popover">
                 <div className="app-workspace-update-progress" role="status" aria-live="polite">
                     {!line ? <span className="sr-only">{updateLabel}</span> : null}

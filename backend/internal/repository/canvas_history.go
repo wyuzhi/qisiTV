@@ -49,6 +49,34 @@ func (r *Repository) CanvasSnapshot(userID, canvasID, id string) (*model.CanvasS
 	return &item, err
 }
 
+func shouldCaptureSnapshot(last model.CanvasSnapshot, err error, beforeRevision int64, cutoff time.Time, force bool) bool {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return true
+	}
+	return err == nil && last.Revision != beforeRevision && (force || !last.CreatedAt.After(cutoff))
+}
+
+func (r *Repository) ShouldCaptureCanvasSnapshot(canvasID string, beforeRevision int64, cutoff time.Time, force bool) (bool, error) {
+	if force {
+		return true, nil
+	}
+	var last model.CanvasSnapshot
+	err := r.db.Select("id", "revision", "created_at").Where("canvas_id = ?", canvasID).Order("revision DESC").First(&last).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, err
+	}
+	return shouldCaptureSnapshot(last, err, beforeRevision, cutoff, force), nil
+}
+
+func (r *Repository) ReadyResourceIDs(ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var ready []string
+	err := r.db.Model(&model.Resource{}).Select("id").Where("id IN ? AND status = ?", ids, model.ResourceStatusReady).Order("id").Pluck("id", &ready).Error
+	return ready, err
+}
+
 // The successful CAS takes the canvas row lock before inspecting the history.
 // Snapshot creation, reference protection and retention commit with the content.
 func (r *Repository) SaveCanvasWithSnapshot(project *model.CanvasProject, snapshot *model.CanvasSnapshot, resourceIDs, restoredResourceIDs []string, cutoff time.Time, limit int, force bool) error {
@@ -68,7 +96,7 @@ func (r *Repository) SaveCanvasWithSnapshot(project *model.CanvasProject, snapsh
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-		capture := err != nil || (last.Revision != snapshot.Revision && (force || !last.CreatedAt.After(cutoff)))
+		capture := shouldCaptureSnapshot(last, err, snapshot.Revision, cutoff, force)
 		requiredIDs := append([]string{}, restoredResourceIDs...)
 		if capture {
 			requiredIDs = append(requiredIDs, resourceIDs...)

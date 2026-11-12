@@ -6,16 +6,18 @@ import (
 	"testing"
 
 	"qisitv/backend/internal/canvas"
+	"qisitv/backend/internal/writechange"
 )
 
 // storyboardProbe 记录 handler 转发给领域的参数，并返回可预测的写入结果。
 // revision 模拟真实领域：每次写入推进，写后重读拿到新值（canvasWriteResult 依赖这一点）。
 type storyboardProbe struct {
 	unusedDomain
-	revision int64
-	appended []canvas.StoryboardRowDraft
-	updated  []canvas.StoryboardRowPatch
-	removed  []string
+	revision    int64
+	appended    []canvas.StoryboardRowDraft
+	updated     []canvas.StoryboardRowPatch
+	removed     []string
+	alsoChanged []writechange.Node
 }
 
 func (p *storyboardProbe) UserCanvasProject(string, string) (json.RawMessage, error) {
@@ -34,7 +36,7 @@ func (p *storyboardProbe) UpdateUserCanvasStoryboardRows(_ string, _ string, _ s
 	p.updated = patches
 	p.revision = 7
 	return canvas.UserDataSummary{Revision: 7}, canvas.StoryboardRowUpdate{Updated: []canvas.StoryboardRowIdentity{{ID: "shot-1", ShotNumber: 1}},
-		CreatedEdgeIDs: []string{"edge-new"}, DeletedEdgeIDs: []string{"edge-old"}}, nil
+		CreatedEdgeIDs: []string{"edge-new"}, DeletedEdgeIDs: []string{"edge-old"}, AlsoChanged: p.alsoChanged}, nil
 }
 
 func (p *storyboardProbe) RemoveUserCanvasStoryboardRows(_ string, _ string, _ string, rowIDs []string, _ int64) (canvas.UserDataSummary, int, error) {
@@ -108,6 +110,28 @@ func TestOpStoryboardRowUpdateForwardsPatches(t *testing.T) {
 	payload := result.(map[string]any)
 	if payload["revision"] != int64(7) {
 		t.Fatalf("回执 revision = %#v", payload["revision"])
+	}
+	if _, present := payload["alsoChanged"]; present {
+		t.Fatalf("没有连带改动时不应出现 alsoChanged: %#v", payload)
+	}
+}
+
+// 领域报告的连带改动必须原样进入模型可见回执，且只列实际改到的节点和字段。
+func TestOpStoryboardRowUpdateForwardsAlsoChanged(t *testing.T) {
+	probe := &storyboardProbe{alsoChanged: []writechange.Node{
+		{NodeID: "img-1", Title: "镜1首帧", Fields: []string{"composerContent"}},
+		{NodeID: "vid-2", Title: "镜2视频", Fields: []string{"composerContent", "prompt"}},
+	}}
+	result, err := opStoryboardRowUpdate(&Context{UserID: "owner", Domain: probe},
+		json.RawMessage(`{"canvasId":"c1","nodeId":"script","expectedRevision":6,"patches":[
+			{"rowId":"shot-1","imageGenerationPrompt":"新首帧"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := result.(map[string]any)
+	changed, ok := payload["alsoChanged"].([]writechange.Node)
+	if !ok || len(changed) != 2 || changed[0].NodeID != "img-1" || changed[1].Fields[1] != "prompt" {
+		t.Fatalf("alsoChanged = %#v", payload["alsoChanged"])
 	}
 }
 

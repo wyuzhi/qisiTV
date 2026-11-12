@@ -7,6 +7,7 @@ import { Link } from "react-router";
 import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { getCanvasHistoryEntry, listCanvasHistory, type CanvasHistoryEntry } from "@/services/api/workspace-data";
 import { preserveCanvasSyncDraft, readCanvasSyncDrafts, type CanvasSyncDraft } from "@/services/canvas-sync-drafts";
+import { normalizeCanvasProjectGraph } from "@/lib/canvas/canvas-content";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
@@ -126,7 +127,7 @@ export function useCanvasVersionHistory(projectId: string, onRestore: (snapshotI
         setListOpen(false);
         void getCanvasHistoryEntry(projectId, entry.id, controller.signal)
             .then(({ project }) => {
-                if (!controller.signal.aborted && previewRequest.current === controller && isCurrentContext()) setPreview({ ...selection, project });
+                if (!controller.signal.aborted && previewRequest.current === controller && isCurrentContext()) setPreview({ ...selection, project: normalizeCanvasProjectGraph(project) });
             })
             .catch((cause) => {
                 if (!controller.signal.aborted && previewRequest.current === controller && isCurrentContext()) setPreview({ ...selection, error: cause instanceof Error ? cause.message : "预览读取失败，请重新选择版本" });
@@ -341,10 +342,10 @@ export function CanvasVersionHistory({ history }: { history: CanvasVersionHistor
                         <small>{new Date(preview.date).toLocaleString("zh-CN")}</small>
                         {preview.project ? (
                             <small>
-                                {preview.project.nodes.length} 个节点 · {preview.project.connections.length} 条连线
+                                {(preview.project.nodes || []).length} 个节点 · {(preview.project.connections || []).length} 条连线
                             </small>
                         ) : null}
-                        {preview.project?.nodes.some((node) => node.type === "drawing") ? <p className="canvas-version-hint">绘图仅保留已上传的预览，不含本机历史笔画。</p> : null}
+                        {(preview.project?.nodes || []).some((node) => node.type === "drawing") ? <p className="canvas-version-hint">绘图仅保留已上传的预览，不含本机历史笔画。</p> : null}
                         <div className="canvas-version-actions">
                             {preview.kind === "cloud" ? <Button block type="primary" loading={restoring} disabled={!preview.project || currentRevision === undefined || loading} onClick={history.restore}>
                                     恢复此版本

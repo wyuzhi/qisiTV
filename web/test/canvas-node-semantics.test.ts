@@ -47,6 +47,7 @@ describe("canvas media node semantics", () => {
             const node = mediaNode(type, { nodeRole: "result", resultOrigin: "generated", content: `blob:${type}`, prompt: "revise the result", generationType: "generation" });
             expect(canOpenCanvasNodePromptPanel(node)).toBe(true);
             expect(getNodeGenerationMode(node)).toBe(type === CanvasNodeType.Image ? "image" : type === CanvasNodeType.Video ? "video" : "audio");
+            expect(canOpenCanvasNodePromptPanel(mediaNode(type, { nodeRole: "result", resultOrigin: "generated", content: `blob:${type}`, prompt: "", composerContent: "" }))).toBe(true);
         }
     });
 

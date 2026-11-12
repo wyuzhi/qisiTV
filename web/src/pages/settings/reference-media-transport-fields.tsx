@@ -4,7 +4,7 @@ import type { ReferenceMediaTransport } from "@/stores/use-config-store";
 export function ReferenceMediaTransportFields({ value, onChange }: { value?: ReferenceMediaTransport; onChange: (value: ReferenceMediaTransport) => void }) {
     return <section className="space-y-3">
         <div className="text-xs font-medium">参考素材传输</div>
-        <p className="text-xs leading-5 text-foreground/58">默认按请求协议处理。第三方接口要求不同，可分别调整图片、视频和音频的传输方式。</p>
+        <p className="text-xs leading-5 text-foreground/58">默认按接口格式处理。第三方接口要求不同，可分别调整图片、视频和音频的传输方式。</p>
         {(["image", "video", "audio"] as const).map((kind) => <label key={kind} className="flex min-w-0 flex-wrap items-center gap-3 text-xs">
             <span className="w-12 shrink-0">{{ image: "图片", video: "视频", audio: "音频" }[kind]}</span>
             <Select

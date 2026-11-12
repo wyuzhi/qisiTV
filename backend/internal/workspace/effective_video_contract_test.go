@@ -45,11 +45,11 @@ func TestEffectiveConfigOverlaysStaleHostedSeedanceProfiles(t *testing.T) {
 	if !bytes.Equal(before, after) {
 		t.Fatal("effective overlay must not rewrite the on-disk snapshot")
 	}
-	if effective.Config["imageModel"] != "beefapi::gpt-image-2" || effective.Config["videoModel"] != "beefapi::wan3.0-video" {
+	if effective.Config["imageModel"] != "beeftv::gpt-image-2" || effective.Config["videoModel"] != "beeftv::wan3.0-video" {
 		t.Fatalf("user defaults changed: image=%#v video=%#v", effective.Config["imageModel"], effective.Config["videoModel"])
 	}
 
-	hosted := requireEffectiveChannel(t, effective, "beefapi")
+	hosted := requireEffectiveChannel(t, effective, "beeftv")
 	for _, model := range []string{"seedance-2.0", "seedance-2.0-fast", "seedance-2.0-mini", "seedance-2.5"} {
 		profile := requireEffectiveProfile(t, hosted, model)
 		if profile["capability"] != "video" || profile["protocol"] != "newapi" {
@@ -78,13 +78,13 @@ func TestEffectiveConfigOverlaysStaleHostedSeedanceProfiles(t *testing.T) {
 
 func staleHostedSeedanceConfig() []byte {
 	return []byte(`{
-		"imageModel":"beefapi::gpt-image-2",
-		"videoModel":"beefapi::wan3.0-video",
+		"imageModel":"beeftv::gpt-image-2",
+		"videoModel":"beeftv::wan3.0-video",
 		"channels":[
 			{
-				"id":"beefapi",
-				"name":"BeefAPI",
-				"baseUrl":"https://enterprise.beefapi.com",
+				"id":"beeftv",
+				"name":"BeefTV",
+				"baseUrl":"https://beeftv.app",
 				"enabled":true,
 				"pinned":true,
 				"models":["gpt-image-2","wan3.0-video","seedance-2.0","seedance-2.0-fast","seedance-2.0-mini","seedance-2.5"],

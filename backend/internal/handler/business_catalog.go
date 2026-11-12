@@ -43,13 +43,13 @@ func businessRouteAllowed(method, p string) bool {
 			return false
 		}
 		switch p {
-		case "/skills/market/search", "/skills/market/catalog", "/skills/market/releases/:skillId/:releaseId", "/skills/market/versions/:skillId":
+		case "/skills/market/search", "/skills/market/public", "/skills/market/catalog", "/skills/market/releases/:skillId/:releaseId", "/skills/market/versions/:skillId":
 			return true
 		default:
 			return false
 		}
 	}
-	for _, prefix := range []string{"/assets", "/asset-folders", "/resources", "/canvas-projects", "/canvas-folders", "/projects", "/project-folders", "/voice-profiles", "/style-profiles", "/tasks", "/timeline", "/depth-captures", "/creation-runs", "/creation-conversations", "/skills", "/plugins", "/runninghub", "/settings/prompt-templates"} {
+	for _, prefix := range []string{"/assets", "/asset-folders", "/resources", "/canvas-projects", "/canvas-folders", "/projects", "/project-folders", "/voice-profiles", "/style-profiles", "/tasks", "/timeline", "/depth-captures", "/creation-runs", "/creation-conversations", "/skills", "/plugins", "/settings/prompt-templates"} {
 		if p == prefix || strings.HasPrefix(p, prefix+"/") {
 			return true
 		}

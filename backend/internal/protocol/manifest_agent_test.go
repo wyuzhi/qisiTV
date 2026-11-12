@@ -92,7 +92,7 @@ func TestManifestUsesOnlyUnifiedTopLevelContract(t *testing.T) {
 		t.Fatalf("providerless unified plugin was rejected: %v", err)
 	}
 	multi := []byte(`{"apiVersion":"qisitv.plugin/v1","id":"multi-provider","name":"Multi Provider","version":"1.0.0","contributes":{"providers":[{"id":"multi-text","label":"Text","capabilities":["text"],"scopes":["canvas"],"create":{"method":"POST","path":"/text"},"response":{}},{"id":"multi-image","label":"Image","capabilities":["image"],"scopes":["canvas"],"create":{"method":"POST","path":"/image"},"response":{}}]}}`)
-	adapters, err := LoadInstalledProviders(multi, nil)
+	adapters, err := LoadInstalledProviders(multi)
 	if err != nil || len(adapters) != 2 || adapters[0].Metadata().ID != "multi-text" || adapters[1].Metadata().ID != "multi-image" {
 		t.Fatalf("multi-provider load = %#v, %v", adapters, err)
 	}

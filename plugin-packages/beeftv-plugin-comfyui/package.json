@@ -1,0 +1,55 @@
+{
+  "name": "beeftv-plugin-comfyui",
+  "version": "0.1.0",
+  "description": "把本机或局域网里的 ComfyUI 接进 BeefTV：在 ComfyUI 里保存的工作流就是模型，画布上直接用它出图、出视频、出音频。",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sunnyender-org/beeftv-plugins.git",
+    "directory": "plugins/beeftv-plugin-comfyui"
+  },
+  "homepage": "https://github.com/Sunnyender-org/beeftv-plugins/tree/main/plugins/beeftv-plugin-comfyui",
+  "keywords": [
+    "beeftv-plugin",
+    "comfyui",
+    "workflow",
+    "image",
+    "video",
+    "audio"
+  ],
+  "beeftv": {
+    "name": "ComfyUI",
+    "contributes": {
+      "providers": [
+        {
+          "id": "comfyui",
+          "label": "ComfyUI",
+          "module": "./provider.mjs",
+          "capabilities": [
+            "image",
+            "video",
+            "audio"
+          ],
+          "scopes": [
+            "user.custom-channel",
+            "canvas",
+            "creation",
+            "agent"
+          ],
+          "baseUrl": "http://127.0.0.1:8188",
+          "auth": {
+            "type": "none"
+          }
+        }
+      ]
+    }
+  },
+  "files": [
+    "provider.mjs",
+    "lib",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "author": "BeefTV"
+}

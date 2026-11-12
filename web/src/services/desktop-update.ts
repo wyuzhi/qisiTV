@@ -238,9 +238,9 @@ function readBuildVersion(): string {
 
 export async function persistWorkspaceBeforeDesktopInstall() {
     await prepareDesktopEditorsForUpdate();
-    const [{ flushCanvasStorePersistence }, { flushAssetStorePersistence }, { flushModelConfig, getModelConfigPersistenceState }] = await Promise.all([import("@/stores/canvas/use-canvas-store"), import("@/stores/use-asset-store"), import("@/services/model-config-repository")]);
+    const [{ flushCanvasStorePersistence }, { flushLocalCanvasBackendSaves }, { flushAssetStorePersistence }, { flushModelConfig, getModelConfigPersistenceState }] = await Promise.all([import("@/stores/canvas/use-canvas-store"), import("@/services/local-workspace-repository"), import("@/stores/use-asset-store"), import("@/services/model-config-repository")]);
     // A failed store must not offer restart while another store is still writing.
-    const results = await Promise.allSettled([flushCanvasStorePersistence(), flushAssetStorePersistence(), flushModelConfig()]);
+    const results = await Promise.allSettled([flushCanvasStorePersistence(), flushLocalCanvasBackendSaves(), flushAssetStorePersistence(), flushModelConfig()]);
     const failed = results.find(result => result.status === "rejected");
     if (failed?.status === "rejected") throw failed.reason;
     const modelConfig = getModelConfigPersistenceState();

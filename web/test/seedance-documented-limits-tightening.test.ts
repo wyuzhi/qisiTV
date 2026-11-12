@@ -6,7 +6,7 @@ import { normalizeModelCapabilityDraft } from "../src/services/api/workspace";
 const image = (id: string) => ({ id, name: id, type: "image/png", dataUrl: "", width: 512, height: 512 });
 const audio = (id: string) => ({ id, name: id, type: "audio/mpeg", url: `https://example.com/${id}.mp3`, durationMs: 3000 });
 
-function backendTightenedProfile(model: string, mutate: (config: ModelCapabilityConfig) => void, baseUrl = "https://enterprise.beefapi.com", protocol: "newapi" | "volcengine-ark-video" = "newapi") {
+function backendTightenedProfile(model: string, mutate: (config: ModelCapabilityConfig) => void, baseUrl = "https://beeftv.app", protocol: "newapi" | "volcengine-ark-video" = "newapi") {
     const capabilityConfig = defaultModelCapabilityConfig(protocol, model);
     capabilityConfig.video!.operations = ["text_to_video", "image_to_video", "reference_to_video"];
     capabilityConfig.video!.references.maxVideos = 3;
@@ -45,16 +45,16 @@ test("normalizeModelCapabilityDraft 请求后端能力规范化接口并返回�
 
     try {
         const result = await normalizeModelCapabilityDraft({
-            channelId: "beefapi",
-            baseUrl: "https://enterprise.beefapi.com",
+            channelId: "beeftv",
+            baseUrl: "https://beeftv.app",
             capability: "video",
             protocol: "newapi",
             model: "seedance-2.0",
         });
         expect(capturedUrl).toBe("/workspace/model-config/capability");
         expect(capturedBody).toEqual({
-            channelId: "beefapi",
-            baseUrl: "https://enterprise.beefapi.com",
+            channelId: "beeftv",
+            baseUrl: "https://beeftv.app",
             capability: "video",
             protocol: "newapi",
             model: "seedance-2.0",

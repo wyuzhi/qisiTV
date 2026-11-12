@@ -9,6 +9,7 @@ import { canvasPopoverLayer } from "@/lib/canvas/canvas-popover-layer";
 import { modelCapabilityConfigFor, resolveVideoRatioValue, resolveVideoResolutionValue } from "@/lib/model-capabilities";
 import { isVideoResolutionMatch } from "@/lib/video-generation-options";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
+import { useCreationPreferencesStore } from "@/stores/use-creation-preferences-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { VideoSettingsConstraints } from "@/lib/video-settings-constraints";
 
@@ -100,6 +101,7 @@ function VideoSettingsPortal({
     config: AiConfig;
     onConfigChange: (key: keyof AiConfig, value: string) => void;
 }) {
+    const resetVideoSettings = useCreationPreferencesStore((state) => state.resetVideoSettings);
     const gap = 8;
     const margin = 12;
     const width = Math.min(356, window.innerWidth - margin * 2);
@@ -137,6 +139,17 @@ function VideoSettingsPortal({
         >
             <VideoSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-3" taskConstraints={taskConstraints} />
             {children ? <div className="mt-3">{children}</div> : null}
+            <div className="mt-3 flex items-center justify-between gap-2 border-t pt-2 text-[var(--fs-micro)]" style={{ borderColor: theme.toolbar.border, color: theme.node.muted }}>
+                <span className="truncate">当前参数已自动设为默认</span>
+                <button
+                    type="button"
+                    className="shrink-0 cursor-pointer font-medium transition-opacity hover:opacity-80"
+                    style={{ color: theme.accent.primary }}
+                    onClick={() => resetVideoSettings()}
+                >
+                    恢复初始默认
+                </button>
+            </div>
         </div>,
         document.body,
     );

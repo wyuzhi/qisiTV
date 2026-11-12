@@ -148,7 +148,7 @@ func (s *Service) CreateTimelineTranscriptionTask(userID string, req TimelineTra
 		Language:       strings.TrimSpace(req.Language),
 	})
 	if req.Model != "" {
-		kind.Provider = "beefapi"
+		kind.Provider = "beeftv"
 		kind.Model = strings.TrimSpace(req.Model)
 	}
 	if err != nil {

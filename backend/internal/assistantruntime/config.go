@@ -99,3 +99,20 @@ func BundledConfig(executable, goos string) HostConfig {
 	}
 	return HostConfig{}
 }
+
+// BundledNpmCommand returns the bundled node with the npm CLI shipped next to
+// it, or nil when the layout carries no npm (developer runs use npm on PATH).
+func BundledNpmCommand(executable, goos string) []string {
+	node := BundledConfig(executable, goos).HostCommand
+	if node == "" {
+		return nil
+	}
+	cli := filepath.Join(filepath.Dir(node), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js")
+	if goos == "windows" {
+		cli = filepath.Join(filepath.Dir(node), "node_modules", "npm", "bin", "npm-cli.js")
+	}
+	if info, err := os.Stat(cli); err != nil || info.IsDir() {
+		return nil
+	}
+	return []string{node, cli}
+}

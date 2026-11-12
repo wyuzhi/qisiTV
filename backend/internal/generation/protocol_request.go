@@ -15,11 +15,22 @@ import (
 	"strings"
 	"time"
 
+	"qisitv/backend/internal/channelurl"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/modelcatalog"
 	"qisitv/backend/internal/outbound"
 	"qisitv/backend/internal/protocol"
 )
+
+// ProtocolRequestFor builds the request for one resolved adapter. A model saved
+// with a retired interface ID keeps the options it saved under that ID.
+func ProtocolRequestFor(input Input, adapter protocol.Adapter) protocol.GenerationRequest {
+	request := ProtocolRequestFromInput(input)
+	if adapter == nil {
+		return request
+	}
+	return protocol.WithRequestedAliasOptions(request, input.Config.InterfaceType, adapter.Metadata())
+}
 
 func ProtocolRequestFromInput(input Input) protocol.GenerationRequest {
 	resolution := strings.TrimSpace(input.Config.VQuality)
@@ -53,6 +64,15 @@ func ProtocolRequestFromInput(input Input) protocol.GenerationRequest {
 			"audioSpeed":   defaultString(input.Config.AudioSpeed, "1"),
 			"count":        input.Config.Count,
 		},
+	}
+	// 显式 false 与未设置必须区分：插件在未设置时省略声音开关，避免把上游默认值
+	// 当成用户的选择；设置过 true/false 时按原值发出。
+	if value, explicit := explicitVideoGenerateAudio(input); explicit {
+		request.Extra["generateAudio"] = value
+	}
+	// 比例写法额外暴露给只认 aspect_ratio 的上游；像素尺寸不进入比例字段。
+	if value := strings.TrimSpace(input.Config.Size); input.Mode == "video" && IsVideoAspectRatioLiteral(value) {
+		request.Extra["aspectRatio"] = value
 	}
 	for _, message := range input.TextHistory {
 		role := strings.ToLower(strings.TrimSpace(message.Role))
@@ -281,7 +301,7 @@ func ExecuteProtocolBinaryRequestWithConsumer(ctx context.Context, config Config
 	if err != nil {
 		return nil, "", RequestPreparationError{Cause: err}
 	}
-	if method == http.MethodPut && contentType == "application/octet-stream" && req.Body != nil {
+	if req.Body != nil && ((method == http.MethodPut && contentType == "application/octet-stream") || strings.HasPrefix(CanonicalCallMeta(ctx).RequestKind, "reference_")) {
 		req.Body = io.NopCloser(referenceUploadReader(ctx, req.Body))
 	}
 	if contentType != "" {
@@ -301,7 +321,7 @@ func ExecuteProtocolBinaryRequestWithConsumer(ctx context.Context, config Config
 			return nil, "", RequestPreparationError{Cause: err}
 		}
 	}
-	applyBeefAPIVideoDeliveryHeader(ctx, config, req)
+	applyBeefTVVideoDeliveryHeader(ctx, config, req)
 	if consume != nil {
 		req.Header.Set("Accept", "text/event-stream")
 		return DoBinaryWithConsumer(req, consume)
@@ -358,7 +378,15 @@ func ProtocolRequestBody(ctx context.Context, config Config, spec protocol.Reque
 			}
 		}
 		for _, file := range spec.Files {
-			data, detectedMIME, err := ProtocolMediaBytes(ctx, config, file.Reference)
+			var data []byte
+			var detectedMIME string
+			var err error
+			if len(file.Data) > 0 {
+				data = file.Data
+				detectedMIME = NormalizedMediaMIMEType(file.MIMEType, data)
+			} else {
+				data, detectedMIME, err = ProtocolMediaBytes(ctx, config, file.Reference)
+			}
 			if err != nil {
 				_ = writer.Close()
 				return nil, "", fmt.Errorf("读取 multipart 文件 %s 失败：%w", file.Name, err)
@@ -458,7 +486,7 @@ func SafeProtocolFilename(value string) string {
 func ProtocolRequestURL(baseURL string, spec protocol.RequestSpec) (string, error) {
 	if !spec.OriginPath {
 		if spec.DefaultPathPrefix != "" {
-			return AppendProtocolQuery(apiURLWithDefaultPrefix(baseURL, spec.Path, spec.DefaultPathPrefix), spec.Query)
+			return AppendProtocolQuery(channelurl.Join(baseURL, spec.Path, spec.DefaultPathPrefix), spec.Query)
 		}
 		return AppendProtocolQuery(APIURL(baseURL, spec.Path), spec.Query)
 	}

@@ -50,7 +50,7 @@ test("routine background polling requests never evict generation action or error
         code: "generation_submit_started",
         reason: "validation",
         canvasId: "canvas_1",
-        message: "画布生成提交：generation_submit_started (mode=video model=beefapi::kling-video-v3)",
+        message: "画布生成提交：generation_submit_started (mode=video model=beeftv::kling-video-v3)",
     });
     recordDiagnosticEvent({
         level: "error",
@@ -58,7 +58,7 @@ test("routine background polling requests never evict generation action or error
         code: "generation_preflight_failed",
         reason: "references",
         canvasId: "canvas_1",
-        message: "画布生成提交：generation_preflight_failed (mode=video model=beefapi::kling-video-v3 refs=i:2,v:1,a:0,c:0 当前模型无法支持这组输入和参数：最多支持 1 张参考图)",
+        message: "画布生成提交：generation_preflight_failed (mode=video model=beeftv::kling-video-v3 refs=i:2,v:1,a:0,c:0 当前模型无法支持这组输入和参数：最多支持 1 张参考图)",
     });
     for (let i = 0; i < 600; i++) {
         recordDiagnosticEvent({

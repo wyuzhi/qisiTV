@@ -1,5 +1,6 @@
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import type { CanvasConnection, CanvasNodeData } from "@/types/canvas";
+import { rebaseCanvasDocumentThreeWay, settleInFlightGenerationOverlay } from "./canvas-document-rebase";
 
 type Change<T> = { before: T | null; after: T | null };
 export type CanvasPatch = {
@@ -112,18 +113,15 @@ export function applyCanvasPatch(project: CanvasProject, patch: CanvasPatch): Ca
 }
 
 export function mergeCanvasRefreshPatch(previous: CanvasProject, incoming: CanvasProject, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
-    const changes = <T extends { id: string }>(before: T[], after: T[]): Change<T>[] => {
-        const byId = new Map(before.map((item) => [item.id, item]));
-        const afterIds = new Set(after.map((item) => item.id));
-        return [
-            ...after.filter((item) => !equal(item, byId.get(item.id))).map((item) => ({ before: byId.get(item.id) ?? null, after: item })),
-            ...before.filter((item) => !afterIds.has(item.id)).map((item) => ({ before: item, after: null })),
-        ];
+    // Refreshes include our own task overlays; they are not explicit Agent patches.
+    // Share the repository's task-aware merge so an old receipt cannot block a retry.
+    const local = settleInFlightGenerationOverlay({ base: previous, local: { ...previous, nodes, connections }, remote: incoming });
+    const merged = rebaseCanvasDocumentThreeWay({ base: previous, local, remote: { ...previous, nodes: incoming.nodes, connections: incoming.connections } });
+    if (merged.conflict) throw new Error("画布更新与本地内容冲突，已保留本地编辑");
+    const reuse = <T extends { id: string }>(before: T[], after: T[]): T[] => {
+        const byId = new Map(before.map(item => [item.id, item]));
+        const result = after.map(item => equal(item, byId.get(item.id)) ? byId.get(item.id)! : item);
+        return result.length === before.length && result.every((item, index) => item === before[index]) ? before : result;
     };
-    return applyCanvasPatch({ ...previous, nodes, connections }, {
-        canvasId: previous.id,
-        updatedAt: incoming.updatedAt,
-        nodes: changes(previous.nodes, incoming.nodes),
-        connections: changes(previous.connections, incoming.connections),
-    });
+    return { ...merged.project, nodes: reuse(nodes, merged.project.nodes), connections: reuse(connections, merged.project.connections), updatedAt: incoming.updatedAt };
 }

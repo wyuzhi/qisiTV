@@ -1,5 +1,6 @@
 // 内置创作助手：浏览器只与同源 Go 代理通信，宿主/owner/模型凭据都不进入页面。
 // 三个端点的真实路径都在 /api/assistant/* 下；写错路径会让面板永远拿不到回复。
+import type { CostEstimate, CostSummary } from "./cost-estimate";
 import { ApiError, apiBaseURL, http } from "./request";
 
 /** 后端给出的不可用原因（穷举，见契约 A1）；未知值一律走兜底文案。 */
@@ -88,6 +89,7 @@ export type GenerationOrderTargetView = {
     model?: string;
     modelKey: string;
     pricing?: unknown;
+    estimate?: CostEstimate;
     prompt: string;
     parameters: Record<string, string>;
     metadata?: Record<string, unknown>;
@@ -130,14 +132,78 @@ export type AssistantGenerationProposal = {
     model: string;
     modelKey: string;
     pricing?: unknown;
+    /** 后端按价格目录算出的合计，nodeIds 这一批的费用。 */
+    estimate?: CostSummary;
     approvalMode?: "ask" | "caller" | "auto";
     status?: "pending" | "approved" | "submitted" | "rejected";
     note?: string;
     targets?: GenerationOrderTargetView[];
     order?: GenerationOrder;
-    production?: { targets: { nodeId: string; title: string; kind: "image" | "video" | "audio"; modelKey: string; prompt: string; parameters: Record<string,string>; metadata?: Record<string, unknown>; referenceNodeIds: string[] }[] };
+    production?: { targets: { nodeId: string; title: string; kind: "image" | "video" | "audio"; modelKey: string; prompt: string; parameters: Record<string,string>; metadata?: Record<string, unknown>; referenceNodeIds: string[]; estimate?: CostEstimate }[]; estimate?: CostSummary };
     source?: { canvasId: string; canvasRevision: number; modelConfigRevision: number };
 };
+
+export type AssistantScriptOutputFile = {
+    path: string;
+    size: number;
+};
+
+export type AssistantScriptRunResult = {
+    exitCode: number;
+    timedOut: boolean;
+    cancelled: boolean;
+    durationMs: number;
+    stdout: string;
+    stderr: string;
+    stdoutTruncated?: boolean;
+    stderrTruncated?: boolean;
+    outputFiles?: AssistantScriptOutputFile[];
+};
+
+export type AssistantScriptProposal = {
+    proposalId: string;
+    turnId: string;
+    canvasId: string;
+    sessionId?: string;
+    skillId: string;
+    skillName: string;
+    versionId: string;
+    version: string;
+    contentHash: string;
+    scriptPath: string;
+    interpreter: "python3" | "bash" | "node";
+    args: string[];
+    stdinPreview?: string;
+    hasStdin?: boolean;
+    timeoutSec: number;
+    useWorkspaceOutputDir?: boolean;
+    note?: string;
+    status: "pending" | "running" | "completed" | "failed" | "cancelled" | "skipped";
+    result?: AssistantScriptRunResult;
+};
+
+// 与服务端技能脚本最大超时一致，另留出排队和结果回传时间。
+const SKILL_SCRIPT_MAX_TIMEOUT_SEC = 1800;
+const SKILL_SCRIPT_CONFIRM_TIMEOUT_MS = (SKILL_SCRIPT_MAX_TIMEOUT_SEC + 30) * 1000;
+
+export async function confirmAssistantScriptProposal(
+    canvasId: string,
+    turnId: string,
+    proposalId: string,
+    alwaysAllowSession = false,
+) {
+    const sessionConfig = await uiSessionConfig();
+    return http.post<{
+        proposal: AssistantScriptProposal;
+        result: AssistantScriptRunResult;
+        woken?: boolean;
+        continuationMessage?: string;
+    }>(
+        `/assistant/turns/${encodeURIComponent(turnId)}/script-proposals/${encodeURIComponent(proposalId)}/run`,
+        { canvasId, alwaysAllowSession },
+        { ...sessionConfig, timeout: SKILL_SCRIPT_CONFIRM_TIMEOUT_MS },
+    );
+}
 
 export async function confirmAssistantProduction(canvasId: string, turnId: string, proposal: AssistantGenerationProposal, continuePlan = false) {
     return http.post<{ taskIds: string[]; continuationId: string; orderId?: string; order?: GenerationOrder }>(`/assistant/turns/${encodeURIComponent(turnId)}/proposals/${encodeURIComponent(proposal.proposalId)}/production`, {
@@ -177,6 +243,7 @@ export type AgentTurnEnd = {
     reasoning?: AssistantReasoningSegment[];
     change?: AssistantTurnChange | null;
     proposals?: AssistantGenerationProposal[];
+    scriptProposals?: AssistantScriptProposal[];
     outputs?: AssistantTurnOutput[];
     plan?: AssistantPlan | null;
     error: string | null;
@@ -203,6 +270,7 @@ export type AssistantTurn = {
     reasoning?: AssistantReasoningSegment[];
     change: AssistantTurnChange | null;
     proposals: AssistantGenerationProposal[];
+    scriptProposals?: AssistantScriptProposal[];
     outputs?: AssistantTurnOutput[];
     plan?: AssistantPlan | null;
     error: string | null;
@@ -287,6 +355,8 @@ export function agentAssistantFailureText(reason: string | undefined, fallback =
             return "当前页面无法使用创作助手，请重新打开画布";
         case "session_busy":
             return "上一条消息还在处理中，请等它结束";
+        case "session_not_found":
+            return "没找到这条对话记录，可能已经被删除";
         case "session_not_current":
             return "你已经换到别的对话了，请重新发送这条消息";
         case "session_not_running":
@@ -327,6 +397,17 @@ export async function activateAssistantSession(canvasId: string, sessionId: stri
     const data = await http.post<{ sessionId: string }>("/assistant/sessions/activate", { canvasId, sessionId }, await uiSessionConfig());
     if (!data?.sessionId) throw new Error("没能切换对话，请重试");
     return data.sessionId;
+}
+
+export async function deleteAssistantSession(canvasIdOrSessionId: string, maybeSessionId?: string): Promise<{ deleted: boolean; sessionId: string; currentSessionId: string | null }> {
+    const hasCanvas = typeof maybeSessionId === "string";
+    const canvasId = hasCanvas ? canvasIdOrSessionId : "";
+    const sessionId = hasCanvas ? maybeSessionId : canvasIdOrSessionId;
+    const query = canvasId ? `?canvasId=${encodeURIComponent(canvasId)}` : "";
+    return http.delete<{ deleted: boolean; sessionId: string; currentSessionId: string | null }>(
+        `/assistant/sessions/${encodeURIComponent(sessionId)}${query}`,
+        await uiSessionConfig(),
+    );
 }
 
 export async function getAssistantHistory(canvasId: string, sessionId?: string): Promise<AssistantHistory> {

@@ -1,6 +1,6 @@
-import { ArrowLeft, ChevronDown, ChevronUp, Download, FileAudio, FileBox, FileImage, FileVideo, FolderOpen, FolderPlus, RefreshCw, Search, Settings2, Upload } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ChevronDown, ChevronUp, Download, ExternalLink, FileAudio, FileBox, FileImage, FileVideo, FolderOpen, FolderPlus, RefreshCw, Search, Settings2, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import { App, Button, Drawer, Input, Spin, Tag, Tree, Typography } from "antd";
+import { App, Button, Drawer, Input, Select, Spin, Switch, Tag, Tree, Typography } from "antd";
 import { IconButton } from "@/components/ui/base/buttons";
 import { EmptyState } from "@/components/ui/product/empty-state";
 import type { DataNode } from "antd/es/tree";
@@ -8,10 +8,11 @@ import { useNavigate } from "react-router";
 
 import "@/lib/plugins/builtin";
 import { createEagleAssetSource, EAGLE_DEFAULT_BASE_URL, eagleAssetPlugin } from "@/lib/plugins/builtin/eagle";
-import type { ExternalAssetFolder, ExternalAssetItem } from "@/lib/plugins/plugin-types";
+import type { ExternalAssetFolder, ExternalAssetItem, PluginAppSettingsProps } from "@/lib/plugins/plugin-types";
+import { getEagleLibrary, type EagleFolder } from "@/services/api/eagle";
 import type { Asset } from "@/stores/use-asset-store";
 import { useAppearanceStore } from "@/stores/use-appearance-store";
-import { usePluginStore } from "@/stores/use-plugin-store";
+import { isPluginEffectivelyEnabled, usePluginStore } from "@/stores/use-plugin-store";
 import { CollectionGrid, ListToolbar, PageHeader, PaginationBar, WorkspacePage } from "@/components/layout/workspace-page";
 import { AssetLibraryCard, AssetLibraryCardMedia } from "@/components/assets/asset-library-card";
 import { AuthenticatedDownload, AuthenticatedImage } from "@/components/assets/authenticated-media";
@@ -145,7 +146,7 @@ export default function EagleLibraryPage() {
                     <span className="grid size-14 place-items-center rounded-[var(--r-lg)] bg-[var(--workspace-accent-soft)] text-[var(--workspace-accent)]"><FolderOpen className="size-7" aria-hidden="true" /></span>
                     <h2 className="mt-4 text-base font-semibold">先启用 Eagle 素材来源</h2>
                     <p className="mt-2 max-w-md text-sm leading-6 text-foreground/55">启用后，这里会直接显示 Eagle 原本的文件夹和文件，不会把素材复制成{brandName}本地素材。</p>
-                    <Button type="primary" className="mt-5" icon={<Settings2 className="size-4" />} onClick={() => navigate("/plugins")}>去插件中心启用</Button>
+                    <Button type="primary" className="mt-5" icon={<Settings2 className="size-4" />} onClick={() => navigate("/plugins")}>去插件页启用</Button>
                 </section>
             </WorkspacePage>
         );
@@ -353,4 +354,117 @@ function externalFolderPath(folders: ExternalAssetFolder[], folderId: string) {
         current = current.parentId ? byId.get(current.parentId) : undefined;
     }
     return result;
+}
+
+function eagleFolderOptions(folders: EagleFolder[]) {
+    const byId = new Map(folders.map((folder) => [folder.id, folder]));
+    const pathFor = (folder: EagleFolder) => {
+        const path: string[] = [];
+        const seen = new Set<string>();
+        let current: EagleFolder | undefined = folder;
+        while (current && !seen.has(current.id)) {
+            seen.add(current.id);
+            path.unshift(current.name);
+            current = current.parentId ? byId.get(current.parentId) : undefined;
+        }
+        return path.join(" / ");
+    };
+    return folders.map((folder) => ({ value: folder.id, label: pathFor(folder) })).sort((left, right) => left.label.localeCompare(right.label, "zh-CN"));
+}
+
+export function EaglePluginSettingsPanel({ pluginId, config, updateConfig }: PluginAppSettingsProps) {
+    const navigate = useNavigate();
+    const { message } = App.useApp();
+    const brandName = useAppearanceStore((state) => state.appearance.brandName);
+    const settingsEnabled = isPluginEffectivelyEnabled(pluginId);
+    const [eagleBaseUrl, setEagleBaseUrl] = useState(
+        typeof config.baseUrl === "string" && config.baseUrl.trim() ? config.baseUrl : EAGLE_DEFAULT_BASE_URL,
+    );
+    const [eagleAutoUploadGenerated, setEagleAutoUploadGenerated] = useState(
+        config.autoUploadGenerated === undefined ? true : Boolean(config.autoUploadGenerated),
+    );
+    const [eagleGeneratedFolderId, setEagleGeneratedFolderId] = useState(
+        typeof config.generatedFolderId === "string" ? config.generatedFolderId : "",
+    );
+    const [eagleFolders, setEagleFolders] = useState<EagleFolder[]>([]);
+    const [eagleFoldersLoading, setEagleFoldersLoading] = useState(false);
+    const [eagleFoldersError, setEagleFoldersError] = useState("");
+
+    const loadEagleFolders = async (url = eagleBaseUrl) => {
+        setEagleFoldersLoading(true);
+        setEagleFoldersError("");
+        try {
+            const result = await getEagleLibrary(url.trim().replace(/\/$/, ""));
+            setEagleFolders(result.library.folders || []);
+        } catch (reason) {
+            setEagleFoldersError(reason instanceof Error ? reason.message : "读取 Eagle 文件夹失败");
+            setEagleFolders([]);
+        } finally {
+            setEagleFoldersLoading(false);
+        }
+    };
+
+    const saveEagleConfig = async () => {
+        const baseUrl = eagleBaseUrl.trim().replace(/\/$/, "");
+        if (!/^https?:\/\//i.test(baseUrl)) {
+            message.error("Eagle 地址必须以 http:// 或 https:// 开头");
+            return;
+        }
+        await updateConfig({
+            baseUrl,
+            autoUploadGenerated: eagleAutoUploadGenerated,
+            generatedFolderId: eagleGeneratedFolderId,
+        });
+        message.success("Eagle 插件配置已保存");
+    };
+
+    return (
+        <>
+            <div className="plugin-settings-fields">
+                <div className="min-w-0">
+                    <label htmlFor="eagle-base-url">Eagle 本地 API 地址</label>
+                    <Input id="eagle-base-url" aria-label="Eagle 本地 API 地址" value={eagleBaseUrl} onChange={(event) => setEagleBaseUrl(event.target.value)} placeholder="http://localhost:41595" />
+                    <p>Eagle 必须在本机运行；{brandName}通过插件直接读取和写入 Eagle 原始文件。</p>
+                </div>
+                <div className="min-w-0">
+                    <div className="plugin-setting-label-row">
+                        <label htmlFor="eagle-auto-upload-generated">自动归档生成结果</label>
+                        <Switch id="eagle-auto-upload-generated" checked={eagleAutoUploadGenerated} onChange={setEagleAutoUploadGenerated} aria-label="自动归档生成结果到 Eagle" />
+                    </div>
+                    <p>图片、视频和音频生成成功后，自动写入 Eagle；{brandName}本地素材仍会保留。</p>
+                </div>
+                <div className="min-w-0">
+                    <div className="plugin-setting-label-row">
+                        <label htmlFor="eagle-generated-folder">生成结果写入文件夹</label>
+                        <Button type="link" size="small" loading={eagleFoldersLoading} onClick={() => void loadEagleFolders()}>
+                            读取文件夹
+                        </Button>
+                    </div>
+                    <Select
+                        id="eagle-generated-folder"
+                        aria-label="生成结果写入文件夹"
+                        showSearch
+                        allowClear
+                        value={eagleGeneratedFolderId || undefined}
+                        placeholder="Eagle 根目录"
+                        optionFilterProp="label"
+                        options={[{ value: "__root__", label: "Eagle 根目录" }, ...eagleFolderOptions(eagleFolders)]}
+                        onChange={(value) => setEagleGeneratedFolderId(value === "__root__" || !value ? "" : value)}
+                    />
+                    <p>{eagleFoldersError || "默认写入 Eagle 根目录；选择文件夹后按 Eagle 原始目录归档。"}</p>
+                </div>
+            </div>
+            <div className="plugin-settings-actions">
+                <Button type="primary" icon={<CheckCircle2 className="size-4" />} onClick={() => void saveEagleConfig()}>
+                    保存配置
+                </Button>
+                <Button icon={<FolderOpen className="size-4" />} disabled={!settingsEnabled} onClick={() => navigate("/p/eagle-asset-connector")}>
+                    打开 Eagle 素材库
+                </Button>
+                <Button icon={<ExternalLink className="size-4" />} href="https://api.eagle.cool/" target="_blank">
+                    查看 API
+                </Button>
+            </div>
+        </>
+    );
 }

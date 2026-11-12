@@ -166,7 +166,7 @@ func deferralFor(stored, next RegistryRecord, snapshot referenceSnapshot) *Reten
 // provider IDs, their legacy aliases and the other names Resolve accepts.
 func resolvableProviderIDs(raw []byte) map[string]struct{} {
 	ids := make(map[string]struct{})
-	adapters, err := protocol.LoadInstalledProviders(raw, nil)
+	adapters, err := protocol.LoadInstalledProviders(raw)
 	if err != nil {
 		return ids
 	}

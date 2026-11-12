@@ -146,14 +146,19 @@ jobs:
         run: sh ../plugin-packages/build-packages.sh
       - name: Run Go tests
         run: go test ./... -p 2 -timeout=20m
+      - name: Check dead code budget
+        run: node ../scripts/deadcode-budget.mjs
       - name: Verify real production timing report
         working-directory: agent-host/eval
         run: python3 -m unittest report_production_test.py
       - name: Verify agent-host request efficiency gate
         working-directory: agent-host
         run: |
-          bun test studio-digest.test.mjs skill-resource.test.mjs plan-and-skills.test.mjs eval/request-efficiency-gate.test.mjs
+          bun test studio-digest.test.mjs skill-resource.test.mjs plan-and-skills.test.mjs eval/request-efficiency-gate.test.mjs timeline-tool-schema.test.mjs durable-stream-events.test.mjs
           bun eval/request-efficiency-gate.mjs
+      - name: Run DeepSeek Harness plugin tests
+        working-directory: plugins/deepseek-harness
+        run: node --test runtime.test.js
 
   web:
     name: Web checks
@@ -188,6 +193,13 @@ jobs:
         run: |
           bunx playwright install --with-deps chromium
           bun run test
+      - name: Run DeepSeek Harness plugin browser tests
+        # The plugin has no dependencies of its own; its browser test borrows
+        # React and Playwright (with the Chromium installed above) from web.
+        working-directory: plugins/deepseek-harness
+        run: |
+          ln -s ../../web/node_modules node_modules
+          bun test client.browser.test.ts
       - name: Preserve environment check screenshots
         if: always()
         uses: actions/upload-artifact@v4

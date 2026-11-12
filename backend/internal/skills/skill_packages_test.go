@@ -7,13 +7,18 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/outbound"
 	"qisitv/backend/internal/repository"
 
 	"gorm.io/driver/sqlite"
@@ -77,6 +82,140 @@ func TestParseGitHubSkillURL(t *testing.T) {
 	}
 	if _, err := parseGitHubSkillURL("https://github.com/example/qisitv-skills/blob/main/SKILL.md", "", ""); err == nil {
 		t.Fatal("expected blob URL to be rejected")
+	}
+}
+
+func TestFetchGitHubSkillArchiveMirrorFallbackAndCommitVerification(t *testing.T) {
+	wantSHA := strings.Repeat("a", 40)
+	wrongSHA := strings.Repeat("b", 40)
+	buildCommitZipWithBody := func(commitSHA string, includeComment bool, prefix string, body string) []byte {
+		var buf bytes.Buffer
+		w := zip.NewWriter(&buf)
+		if includeComment {
+			_ = w.SetComment(commitSHA)
+		}
+		entry, err := w.Create(prefix + "/skills/canvas-context/SKILL.md")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = entry.Write([]byte(body))
+		_ = w.Close()
+		return buf.Bytes()
+	}
+	validBody := "---\nname: canvas-context\ndescription: 画布上下文技能\n---\n# 画布上下文技能\n\n读取画布说明。\n"
+	buildCommitZip := func(commitSHA string) []byte {
+		return buildCommitZipWithBody(commitSHA, true, "beeftv-skills-"+commitSHA, validBody)
+	}
+
+	urls := outbound.ExpandGitHubMirrorURLs("https://codeload.github.com/example/beeftv-skills/zip/"+wantSHA, "", wantSHA, "")
+	if len(urls) < 3 || urls[0] != "https://codeload.github.com/example/beeftv-skills/zip/"+wantSHA || !strings.HasPrefix(urls[1], "https://gh-proxy.com/https://codeload.github.com/") {
+		t.Fatalf("expected codeload origin first and China GitHub proxies as fallback, got %v", urls)
+	}
+	if err := verifyGitHubCommitZip(buildCommitZip(wrongSHA), wantSHA); err == nil {
+		t.Fatal("expected tampered commit SHA zip to be rejected")
+	}
+	if err := verifyGitHubCommitZip(buildCommitZipWithBody(wantSHA, false, "beeftv-skills-"+wantSHA, validBody), wantSHA); err == nil {
+		t.Fatal("expected zip without commit comment to be rejected")
+	}
+	if err := verifyGitHubCommitZip(buildCommitZipWithBody(wantSHA, true, "beeftv-skills", validBody), wantSHA); err == nil {
+		t.Fatal("expected zip without -<40hex> directory suffix to be rejected")
+	}
+	validZip := buildCommitZip(wantSHA)
+	zr, err := zip.NewReader(bytes.NewReader(validZip), int64(len(validZip)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	treeSHA, err := computeGitZipTreeSHA(zr, "beeftv-skills-"+wantSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyGitHubCommitZip(validZip, wantSHA, treeSHA); err != nil {
+		t.Fatalf("expected matching commit+tree SHA zip to pass: %v", err)
+	}
+	tamperedBodyZip := buildCommitZipWithBody(wantSHA, true, "beeftv-skills-"+wantSHA, "---\nname: canvas-context\ndescription: tampered\n---\n# Tampered\n")
+	if err := verifyGitHubCommitZip(tamperedBodyZip, wantSHA, treeSHA); err == nil {
+		t.Fatal("expected zip with reused commitSHA suffix but tampered file content to fail tree SHA verification")
+	}
+
+	redirectTarget := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/example/beeftv-skills":
+			_ = json.NewEncoder(w).Encode(map[string]any{"default_branch": "main"})
+		case "/repos/example/beeftv-skills/commits/main":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"sha": wantSHA,
+				"commit": map[string]any{
+					"tree": map[string]any{"sha": treeSHA},
+				},
+			})
+		case "/example/beeftv-skills/zip/" + wantSHA:
+			if redirectTarget != "" {
+				http.Redirect(w, r, redirectTarget, http.StatusFound)
+				return
+			}
+			_, _ = w.Write(validZip)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	prevAPI, prevCodeload := githubAPIBaseURL, githubCodeloadBaseURL
+	githubAPIBaseURL, githubCodeloadBaseURL = server.URL, server.URL
+	t.Cleanup(func() {
+		githubAPIBaseURL, githubCodeloadBaseURL = prevAPI, prevCodeload
+	})
+
+	archive, commit, canonicalURL, resolvedRef, err := fetchGitHubSkillArchive(context.Background(), githubSkillSpec{
+		Owner:  "example",
+		Repo:   "beeftv-skills",
+		Subdir: "canvas-context",
+	})
+	if err != nil {
+		t.Fatalf("fetchGitHubSkillArchive failed: %v", err)
+	}
+	if commit != wantSHA || canonicalURL != "https://github.com/example/beeftv-skills" || resolvedRef != "main" || archive.Metadata.Name != "画布上下文技能" {
+		t.Fatalf("unexpected archive metadata: commit=%s url=%s ref=%s name=%s", commit, canonicalURL, resolvedRef, archive.Metadata.Name)
+	}
+
+	for _, badRedirect := range []string{"http://127.0.0.1/private", "http://169.254.169.254/latest/meta-data"} {
+		redirectTarget = badRedirect
+		if _, _, _, _, err := fetchGitHubSkillArchive(context.Background(), githubSkillSpec{
+			Owner:  "example",
+			Repo:   "beeftv-skills",
+			Subdir: "canvas-context",
+		}); err == nil {
+			t.Fatalf("expected redirect to %s to be rejected", badRedirect)
+		}
+	}
+}
+
+func TestArchiveFromZipSubdirMatchingRejectsWrongRootAndMatchesRootWithNestedSkills(t *testing.T) {
+	singleRootZip := skillZip(t, map[string]string{
+		"repo-main/SKILL.md": "---\nname: real-skill\ndescription: Real root skill\n---\n# Real Skill\n",
+	})
+	if _, err := archiveFromZip(singleRootZip, "nonexistent"); err == nil || !strings.Contains(err.Error(), "GitHub 子目录不存在或为空") {
+		t.Fatalf("expected nonexistent subdir on single-skill repo to fail, got %v", err)
+	}
+	if got, err := archiveFromZip(singleRootZip, "real-skill"); err != nil || got.Metadata.TechnicalName != "real-skill" {
+		t.Fatalf("expected matching root skill ID to succeed, got %+v err=%v", got, err)
+	}
+
+	mixedZip := skillZip(t, map[string]string{
+		"repo-main/SKILL.md":              "---\nname: root-skill\ndescription: Root skill\n---\n# Root Skill\n",
+		"repo-main/references/guide.md":   "# Root Guide\n",
+		"repo-main/examples/sub/SKILL.md": "---\nname: sub-skill\ndescription: Nested example\n---\n# Sub Skill\n",
+	})
+	rootArchive, err := archiveFromZip(mixedZip, "root-skill")
+	if err != nil {
+		t.Fatalf("expected root-skill subdir to match root SKILL.md even with nested skills, got %v", err)
+	}
+	if rootArchive.Metadata.TechnicalName != "root-skill" || string(rootArchive.Files["references/guide.md"]) != "# Root Guide\n" {
+		t.Fatalf("unexpected rootArchive: %+v", rootArchive)
+	}
+	if _, exists := rootArchive.Files["examples/sub/SKILL.md"]; exists {
+		t.Fatalf("expected nested skill to be excluded from root skill package: %+v", rootArchive.Files)
 	}
 }
 
@@ -326,7 +465,7 @@ func TestBuiltinSeedSkillsIncludeLuckyPlusOnePackagesAndAuxiliaryFiles(t *testin
 }
 
 func TestNormalizeBuiltinSkillFilesRejectsTotalSizeOverflow(t *testing.T) {
-	chunk := strings.Repeat("a", 7<<20)
+	chunk := strings.Repeat("a", 70<<20)
 	if _, err := normalizeBuiltinSkillFiles(map[string]string{
 		"references/one.md":   chunk,
 		"references/two.md":   chunk,
@@ -385,4 +524,49 @@ func skillZip(t *testing.T, files map[string]string) []byte {
 		t.Fatal(err)
 	}
 	return buffer.Bytes()
+}
+
+func TestSyncAndRemovePluginSkillsLifecycle(t *testing.T) {
+	svc, db := agentSkillFixture(t)
+	if err := db.AutoMigrate(&model.Workspace{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.Workspace{ID: "tester", Name: "测试工作区"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	pluginSkillsRoot := filepath.Join(t.TempDir(), "skills")
+	skillDir := filepath.Join(pluginSkillsRoot, "storyboard-grid")
+	if err := os.MkdirAll(filepath.Join(skillDir, "references"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: 分镜九宫格拆解\ndescription: 把剧本拆解为九宫格分镜\n---\n# 分镜九宫格拆解\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "references", "guide.md"), []byte("# Guide\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.SyncPluginSkills("storyboard-grid", "分镜九宫格", "1.0.0", []string{pluginSkillsRoot}); err != nil {
+		t.Fatalf("SyncPluginSkills failed: %v", err)
+	}
+
+	added, err := svc.AddedSkills("tester")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(added) != 1 || added[0].SourceType != "plugin" || added[0].SkillName != "分镜九宫格拆解" {
+		t.Fatalf("unexpected added skills: %#v", added)
+	}
+
+	if err := svc.RemovePluginSkills("storyboard-grid"); err != nil {
+		t.Fatalf("RemovePluginSkills failed: %v", err)
+	}
+	afterRemove, err := svc.AddedSkills("tester")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(afterRemove) != 0 {
+		t.Fatalf("expected 0 skills after RemovePluginSkills, got %#v", afterRemove)
+	}
 }

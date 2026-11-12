@@ -167,6 +167,30 @@ describe("trim 步骤输出 seek（-ss 在 -i 之后）", () => {
             expect(ssIndex).toBeGreaterThan(inputIndex);
         }
     });
+
+    test("trim 限制 apad 时长防止尾帧定格，且 concat 与 mix 复用已编码视频流避免冗余 libx264 重编码", () => {
+        const canonical = loadEditingPlan("six-second-mix.plan.json");
+        const plan = lowerCanonicalPlan(canonical, [source("v0"), source("v1"), source("v2"), source("voice"), source("bgm")], { width: 320, height: 180, fps: 30, outputName: "out.mp4" });
+        const trims = plan.steps.filter((step) => step.kind === "trim");
+        for (const trim of trims) {
+            const af = trim.args[trim.args.indexOf("-af") + 1] || "";
+            expect(af).toContain("apad=whole_dur=2");
+        }
+        const concatStep = plan.steps.find((step) => step.kind === "concat" && step.output === "timeline-video.mp4")!;
+        expect(concatStep.args).toEqual([
+            "-fflags", "+genpts", "-f", "concat", "-safe", "0", "-i", "concat.txt",
+            "-c", "copy", "-movflags", "+faststart", "timeline-video.mp4",
+        ]);
+        expect(concatStep.args).not.toContain("libx264");
+
+        const mixStep = plan.steps.find((step) => step.kind === "mix")!;
+        expect(mixStep.args.join(" ")).not.toContain("[0:v]null[v]");
+        expect(mixStep.args).toContain("0:v:0");
+        expect(mixStep.args).not.toContain("libx264");
+        expect(mixStep.args.slice(mixStep.args.indexOf("-c:v"))).toEqual([
+            "-c:v", "copy", "-c:a", "aac", "-ar", "44100", "-ac", "2", "-movflags", "+faststart", "timeline-mixed.mp4",
+        ]);
+    });
 });
 
 describe("formatSrtTimestamp", () => {

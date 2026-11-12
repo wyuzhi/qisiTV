@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -52,5 +53,14 @@ func TestFileChecksManifestDigestAndUTF8ChunkBoundaries(t *testing.T) {
 	chunk, err = c.File(context.Background(), "s", "r1", "SKILL.md", 0, 4)
 	if err != nil || chunk.Encoding != "base64" || chunk.Content != base64.StdEncoding.EncodeToString(data[:4]) {
 		t.Fatalf("binary chunk: %+v %v", chunk, err)
+	}
+	data = make([]byte, (2<<20)+128)
+	for i := range data {
+		data[i] = 'x'
+	}
+	file = File{Path: "scripts/tool.py", Size: int64(len(data)), SHA256: Digest(data)}
+	chunk, err = c.File(context.Background(), "s", "r1", "scripts/tool.py", 0, 16)
+	if err != nil || chunk.Content != strings.Repeat("x", 16) || chunk.EOF {
+		t.Fatalf(">2 MiB file chunk failed: %+v %v", chunk, err)
 	}
 }

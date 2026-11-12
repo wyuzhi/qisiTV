@@ -37,7 +37,7 @@ func TestRefactoredDomainsDoNotDependOnApplicationService(t *testing.T) {
 		"generation", "plugins", "modelcatalog", "operations", "asset", "canvas",
 		"creation", "taskruntime", "taskdelivery", "taskbinding", "agentops",
 		"assistantruntime", "assistantturns", "playback", "depthcapture", "transcription",
-		"workspace", "provider/workflow",
+		"workspace",
 	} {
 		t.Run(name, func(t *testing.T) {
 			assertDomainDoesNotImportApp(t, "./internal/"+name)

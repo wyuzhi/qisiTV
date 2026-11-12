@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"gorm.io/gorm"
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
@@ -24,7 +24,7 @@ const MaxSends = 12
 const RecoveryLifetime = 23 * time.Hour
 
 // FrozenRequestExpired 表示发出前冻结的完整原请求已不可用：已被清理，或超过 23 小时
-// 保存期（比 BeefAPI 24 小时回执保留期早一小时，留出余量）。之后既不能按原字节重发，也不能补交。
+// 保存期（比 BeefTV 24 小时回执保留期早一小时，留出余量）。之后既不能按原字节重发，也不能补交。
 func FrozenRequestExpired(row *model.ImageSubmission) bool {
 	return row == nil || row.RequestCipher == "" || time.Since(row.CreatedAt) >= RecoveryLifetime
 }
@@ -129,7 +129,7 @@ func IsImageRecoveryError(err error) bool {
 // Only a definite gateway rate-limit rejection can start a new paid attempt.
 // The executor caps the entire logical task to three attempts and backs off.
 func (s *Service) RetryRejectedImageAttempt(task *model.Task, previous *model.RouteAttempt, taskErr error) (*model.RouteAttempt, error) {
-	if config, ok := s.ResolveImageRecoveryConfig(*task); ok && config.CredentialRef == beefapi.CredentialRef {
+	if config, ok := s.ResolveImageRecoveryConfig(*task); ok && config.CredentialRef == beeftv.CredentialRef {
 		return nil, nil
 	}
 	if previous.DispatchState != "rejected_no_job" || !DefiniteImageThrottle(taskErr) {
@@ -188,7 +188,7 @@ func (s *Service) ShouldDeferImageRecovery(task model.Task, taskErr error, provi
 		return false
 	}
 	row, err := s.repo.ImageSubmission(attempt.ID, task.ID, task.UserID)
-	if err == nil && (ManagedTaskConnection(task) || attempt.ChannelID == beefapi.ChannelID || row.QueryCipher != "") {
+	if err == nil && s.isManagedImageSubmission(task, attempt, row) {
 		return true
 	}
 	if err != nil || FrozenRequestExpired(row) {
@@ -200,20 +200,20 @@ func (s *Service) ShouldDeferImageRecovery(task model.Task, taskErr error, provi
 	return row.SendCount < MaxSends && IsImageRecoveryError(taskErr) && errors.Is(taskErr, context.DeadlineExceeded)
 }
 
-// ImageTaskEnded 表示没有可继续取回的结果：BeefAPI 已给出终态失败、请求在发出前就失败，
+// ImageTaskEnded 表示没有可继续取回的结果：BeefTV 已给出终态失败、请求在发出前就失败，
 // 或提交被明确拒绝（4xx，超时、冲突和限流除外）。这些任务直接按失败结束，不进入恢复轮询。
 func ImageTaskEnded(err error) bool {
 	return imageTaskEnded(err)
 }
 
 func imageTaskEnded(err error) bool {
-	var media *beefapi.MediaTaskError
+	var media *beeftv.MediaTaskError
 	var preparation generation.RequestPreparationError
 	var notSent generation.RequestNotSentError
 	if errors.As(err, &media) {
 		return !media.Pending()
 	}
-	return errors.As(err, &preparation) || errors.As(err, &notSent) || beefapi.IsDefiniteMediaRejection(err)
+	return errors.As(err, &preparation) || errors.As(err, &notSent) || beeftv.IsDefiniteMediaRejection(err)
 }
 
 func (s *Service) DeferImageRecovery(task model.Task) error {
@@ -245,7 +245,7 @@ func RecoverableImageEndpoint(req *http.Request) bool {
 
 // PrepareImageSubmission runs before the first network write. The request is
 // encrypted with the existing workspace key, including credentials and media.
-// Recoverable BeefAPI canvas_image routes fail closed when the bound owner or
+// Recoverable BeefTV canvas_image routes fail closed when the bound owner or
 // attempt identity is missing; other hosts decline so the normal POST proceeds.
 func PrepareImageSubmission(s *Service, req *http.Request) (*model.ImageSubmission, bool, error) {
 	if req == nil || (!RecoverableImageEndpoint(req) && !isManagedMediaRequest(req)) {
@@ -297,15 +297,12 @@ func PrepareImageSubmission(s *Service, req *http.Request) (*model.ImageSubmissi
 	if original.ID != attemptID {
 		return nil, true, generation.ErrImageOwnerMissing
 	}
-	channelID := kernel.FirstNonEmpty(original.ChannelID, call.ChannelID)
-	if channelID == "" && beefapi.IsEnterpriseBaseURL(req.URL.String()) {
-		channelID = beefapi.ChannelID
-	}
+	channelID := s.resolveFrozenChannelID(task, original, call, req.URL.String(), header)
 	protocol := generation.ImageReplayProtocol
 	mediaType := ""
 	if isManagedMediaRequest(req) {
-		protocol = beefapi.MediaProtocolVersion
-		var envelope beefapi.MediaRequest
+		protocol = beeftv.MediaProtocolVersion
+		var envelope beeftv.MediaRequest
 		if json.Unmarshal(body, &envelope) != nil || envelope.TaskRef != key || (envelope.MediaType != "image" && envelope.MediaType != "video" && envelope.MediaType != "upscale" && envelope.MediaType != "audio") {
 			return nil, true, errors.New("媒体请求的持久化身份或类型无效")
 		}
@@ -444,7 +441,7 @@ func (s *Service) SendImageSubmissionWithMode(ctx context.Context, task model.Ta
 		})
 		if sendErr == nil {
 			if len(data) > 0 && s.repo != nil {
-				if jobID := generation.ExtractBeefAPIImageJobID(nil, data); jobID != "" {
+				if jobID := generation.ExtractBeefTVImageJobID(nil, data); jobID != "" {
 					_ = s.repo.UpdateTaskImageJobID(task.ID, jobID)
 				}
 			}
@@ -466,7 +463,7 @@ func (s *Service) SendImageSubmissionWithMode(ctx context.Context, task model.Ta
 		if s.repo != nil {
 			var httpErr generation.HTTPError
 			if errors.As(sendErr, &httpErr) && httpErr.Body != "" {
-				if jobID := generation.ExtractBeefAPIImageJobID(nil, []byte(httpErr.Body)); jobID != "" {
+				if jobID := generation.ExtractBeefTVImageJobID(nil, []byte(httpErr.Body)); jobID != "" {
 					_ = s.repo.UpdateTaskImageJobID(task.ID, jobID)
 				}
 			}

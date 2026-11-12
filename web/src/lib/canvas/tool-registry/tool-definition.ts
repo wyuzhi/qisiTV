@@ -69,6 +69,7 @@ export type ToolbarHandlers = {
     onArrange: (mode: "row" | "column" | "grid" | "flow") => void;
     onCreateStoryboard: () => void;
     onCreateReferenceGroup: () => void;
+    onPackToFolder?: () => void;
     onBatchConnect: () => void;
     onMergeVideos: () => void;
     /** 只有画布页的多选工具栏提供这个入口；主工具栏不装配它。 */
@@ -210,6 +211,8 @@ export type AddNodeMenuCommand = {
     label: string;
     icon: ReactNode;
     badge?: string;
+    /** 显式关联的插件画布节点类型（用于精确去重自动生成的同名插件节点项）。 */
+    targetNodeType?: string;
     /** 前端保留入口但暂时不可用时的说明；不会执行 run。 */
     disabledReason?: string;
     // extension：展示与加工类扩展节点。单独一区，避免挤散 node 区调好的四列网格。

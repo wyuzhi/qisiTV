@@ -6,10 +6,10 @@ import {
 } from './request-efficiency-gate.mjs';
 
 describe('请求效率门禁（Request Efficiency Gate）', () => {
-  test('S1–S7 假模型全量运行：完整覆盖 7 个场景、头部 system 逐字节不变、末尾瞬态上下文有效、相邻前缀 100% 覆盖且体积不超上限', async () => {
+  test('S1–S11 假模型全量运行：完整覆盖 11 个场景、头部 system 逐字节不变、末尾瞬态上下文有效、相邻前缀 100% 覆盖且体积不超上限', async () => {
     const report = await runRequestEfficiencyGate({ scenario: 'all' });
     expect(report.passed, report.violations.join('\n')).toBe(true);
-    expect(report.sessions.map((s) => s.scenarioCode)).toEqual(['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7']);
+    expect(report.sessions.map((s) => s.scenarioCode)).toEqual(['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11']);
     expect(report.overallPrefixHitRatio).toBeGreaterThanOrEqual(0.95);
     expect(report.fullPrefixHitPairs).toBe(report.totalAdjacentPairs);
     for (const session of report.sessions) {

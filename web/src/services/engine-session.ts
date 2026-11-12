@@ -92,10 +92,28 @@ export async function pairEngine(code: string) {
 export function installEngineFetch() {
     if (nativeFetch) return;
     nativeFetch = globalThis.fetch.bind(globalThis);
-    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const site = globalThis.location;
+        const source = input instanceof Request ? input.url : String(input);
+        if (!site && !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(source)) return nativeFetch!(input, init);
+        const url = new URL(source, site?.href);
+        const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+        // Installed plugin UIs use the original desktop API paths. Only their
+        // known operations belong to the local engine on the hosted website.
+        if (site && url.origin === site.origin && (
+            (method === "GET" && /^\/api\/plugins\/(?:market\/(?:curated|search|readme)|[^/]+\/files\/README\.md)$/.test(url.pathname))
+            || (method === "POST" && url.pathname === "/api/ai/models")
+        )) {
+            const target = new URL("/engine" + url.pathname + url.search, ENGINE_ORIGIN);
+            if (input instanceof Request) {
+                const original = new Request(input, init);
+                const body = method === "POST" ? await original.arrayBuffer() : undefined;
+                return globalThis.fetch(target, { method, headers: original.headers, body, signal: original.signal });
+            }
+            return globalThis.fetch(target, init);
+        }
+        if (url.origin !== ENGINE_ORIGIN || !url.pathname.startsWith("/engine/api/")) return nativeFetch!(input, init);
         const request = new Request(input, init);
-        const url = new URL(request.url);
-        if (url.origin !== ENGINE_ORIGIN || !url.pathname.startsWith("/engine/api/")) return nativeFetch!(request);
         const session = getEngineSession();
         if (!session) return Promise.reject(new Error("本机授权已结束，草稿仍保留，请重新连接"));
         const headers = new Headers(request.headers);

@@ -101,17 +101,17 @@ func TestProviderMediaHydrationPolicyPrefersObjectURLs(t *testing.T) {
 	}
 }
 
-func TestProviderDownloadURLNormalizesBeefAPIResultToConfiguredOrigin(t *testing.T) {
+func TestProviderDownloadURLNormalizesBeefTVResultToConfiguredOrigin(t *testing.T) {
 	tests := []struct {
 		name, baseURL, resultURL string
 		want                     string
 	}{
 		{name: "same origin", baseURL: "https://provider.example", resultURL: "https://provider.example/files/video.mp4", want: "https://provider.example/files/video.mp4"},
-		{name: "beef enterprise uses configured origin", baseURL: "https://enterprise.beefapi.com", resultURL: "https://beefapi.com/v1/videos/task-1/content", want: "https://enterprise.beefapi.com/v1/videos/task-1/content"},
-		{name: "beef subdomain uses configured origin", baseURL: "https://api.beefapi.com", resultURL: "https://cdn.beefapi.com/video.mp4?token=result", want: "https://api.beefapi.com/video.mp4?token=result"},
-		{name: "lookalike host stays external", baseURL: "https://enterprise.beefapi.com", resultURL: "https://beefapi.com.attacker.example/video.mp4", want: "https://beefapi.com.attacker.example/video.mp4"},
-		{name: "custom provider does not rewrite beef", baseURL: "https://provider.example", resultURL: "https://beefapi.com/video.mp4", want: "https://beefapi.com/video.mp4"},
-		{name: "insecure cross origin stays external", baseURL: "https://enterprise.beefapi.com", resultURL: "http://beefapi.com/video.mp4", want: "http://beefapi.com/video.mp4"},
+		{name: "official origin normalizes relative path", baseURL: "https://beeftv.app/v1", resultURL: "/v1/videos/task-1/content", want: "https://beeftv.app/v1/videos/task-1/content"},
+		{name: "official origin normalizes same host", baseURL: "https://beeftv.app/v1", resultURL: "https://beeftv.app:443/v1/videos/task-1/content?token=result", want: "https://beeftv.app/v1/videos/task-1/content?token=result"},
+		{name: "lookalike host stays external", baseURL: "https://beeftv.app", resultURL: "https://beeftv.app.attacker.example/video.mp4", want: "https://beeftv.app.attacker.example/video.mp4"},
+		{name: "custom provider does not rewrite official host", baseURL: "https://provider.example", resultURL: "https://beeftv.app/video.mp4", want: "https://beeftv.app/video.mp4"},
+		{name: "insecure cross origin stays external", baseURL: "https://beeftv.app", resultURL: "http://beeftv.app/video.mp4", want: "http://beeftv.app/video.mp4"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -947,22 +947,6 @@ func TestProviderHTTPErrorExplainsPaymentRequired(t *testing.T) {
 	}
 }
 
-func TestShouldFallbackTextToChatOnlyForMissingCapability(t *testing.T) {
-	for _, status := range []int{http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented} {
-		if !shouldFallbackTextToChat(providerHTTPError{StatusCode: status}) {
-			t.Errorf("status %d should fallback to chat completions", status)
-		}
-	}
-	for _, status := range []int{http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, http.StatusInternalServerError, http.StatusTooManyRequests} {
-		if shouldFallbackTextToChat(providerHTTPError{StatusCode: status}) {
-			t.Errorf("status %d should not fallback to chat completions", status)
-		}
-	}
-	if shouldFallbackTextToChat(errors.New("network")) {
-		t.Fatal("non-http error should not fallback")
-	}
-}
-
 func TestProviderPayloadErrorMessageUsesSafeActionableCategories(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1612,16 +1596,16 @@ func TestSeedance25AudioOnlyRequestBodyOmitsRequiredImage(t *testing.T) {
 	}
 }
 
-func TestBeefAPIAudioURLAcceptsDataAssetAndHTTPS(t *testing.T) {
-	data, err := beefAPIAudioURL(providerMedia{DataURL: "data:audio/mpeg;base64,AAAA"})
+func TestBeefTVAudioURLAcceptsDataAssetAndHTTPS(t *testing.T) {
+	data, err := beefTVAudioURL(providerMedia{DataURL: "data:audio/mpeg;base64,AAAA"})
 	if err != nil || data != "data:audio/mpeg;base64,AAAA" {
 		t.Fatalf("data audio = %q, %v", data, err)
 	}
-	asset, err := beefAPIAudioURL(providerMedia{URL: "asset://voice"})
+	asset, err := beefTVAudioURL(providerMedia{URL: "asset://voice"})
 	if err != nil || asset != "asset://voice" {
 		t.Fatalf("asset audio = %q, %v", asset, err)
 	}
-	url, err := beefAPIAudioURL(providerMedia{URL: "https://cdn.example.com/a.mp3"})
+	url, err := beefTVAudioURL(providerMedia{URL: "https://cdn.example.com/a.mp3"})
 	if err != nil || url != "https://cdn.example.com/a.mp3" {
 		t.Fatalf("https audio = %q, %v", url, err)
 	}
@@ -1698,16 +1682,16 @@ func TestSeedanceVideosBodyUsesVideosEndpointFields(t *testing.T) {
 	}
 }
 
-func TestSeedancePollStatusUsesBeefAPINestedGenerationState(t *testing.T) {
+func TestSeedancePollStatusUsesBeefTVNestedGenerationState(t *testing.T) {
 	status, videoURL := seedancePollStatusAndURL(map[string]interface{}{
 		"status": "in_progress",
 		"metadata": map[string]interface{}{
 			"generation_status": "completed",
 			"stage":             "saving",
-			"url":               "https://beefapi.com/v1/videos/task/content",
+			"url":               "https://beeftv.app/v1/videos/task/content",
 		},
 	})
-	if status != "completed" || videoURL != "https://beefapi.com/v1/videos/task/content" {
+	if status != "completed" || videoURL != "https://beeftv.app/v1/videos/task/content" {
 		t.Fatalf("status/url = %q/%q", status, videoURL)
 	}
 }
@@ -2541,7 +2525,7 @@ func TestOfficialAudioPluginMapsMiniMaxSpeechControls(t *testing.T) {
 	kept := officialPluginCreateBody(t, canvasGenerationInput{
 		Mode: "audio",
 		Config: providerConfig{InterfaceType: "openai-audio",
-			Model:       "beefapi::minimax-speech-2.8-hd",
+			Model:       "beeftv::minimax-speech-2.8-hd",
 			AudioVoice:  "male-qn-jingying",
 			AudioFormat: "wav",
 			AudioSpeed:  "0.8",
@@ -2812,7 +2796,7 @@ func TestProcessResumedSeedanceVideoDoesNotRevalidateDeletedReferences(t *testin
 	defer server.Close()
 	input := canvasGenerationInput{Mode: "video", Prompt: "test", Config: providerConfig{BaseURL: server.URL, APIKey: "key", Model: "seedance-2.5", InterfaceType: "newapi-channel-2"}, ReferenceAudios: []providerMedia{{StorageKey: "resource:deleted-voice"}}}
 	raw, _ := json.Marshal(input)
-	service, task := workflowPaidTaskFixture(t)
+	service, task := runningVideoTaskFixture(t)
 	task.ProviderRequestID = "existing-provider-task"
 	ctx := withProviderAnalytics(context.Background(), service, task)
 	result, err := service.processCanvasGenerationTask(ctx, task.UserID, "", "canvas_video", "", string(raw))

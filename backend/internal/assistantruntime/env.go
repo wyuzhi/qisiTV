@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"qisitv/backend/internal/assistant"
+	"qisitv/backend/internal/channelurl"
 	"qisitv/backend/internal/desktopnet"
 )
 
@@ -115,27 +116,6 @@ func setEnvValue(env []string, key, value string) []string {
 	return append(kept, key+"="+value)
 }
 
-func envValue(env []string, key string) string {
-	prefix := key + "="
-	got := ""
-	for _, entry := range env {
-		if strings.HasPrefix(entry, prefix) {
-			got = strings.TrimPrefix(entry, prefix)
-		}
-	}
-	return got
-}
-
-func envHasKey(env []string, key string) bool {
-	prefix := key + "="
-	for _, entry := range env {
-		if strings.HasPrefix(entry, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
 // hostAPI 把渠道协议映射成 pi-ai 的 API 适配器名；宿主按它构造模型定义。
 func hostAPI(protocol string) string {
 	switch protocol {
@@ -149,24 +129,22 @@ func hostAPI(protocol string) string {
 }
 
 // hostBaseURL 按适配器约定整理接口地址：
-// OpenAI 兼容 SDK 会在 baseURL 后直接拼 /chat/completions 或 /responses，所以要带 /v1；
-// Anthropic SDK 自己拼 /v1/messages，所以要去掉 /v1。渠道配置里两种写法都可能出现。
+// OpenAI 兼容 SDK 会在 baseURL 后直接拼 /chat/completions 或 /responses，所以 baseURL 要带好版本前缀；
+// 版本前缀与生成任务共用 channelurl 的判断（/v1、/api/v3、/v4 等原样保留，没写版本才补 /v1），
+// 助手和生成任务对同一渠道打到同一个地址。Anthropic SDK 自己拼 /v1/messages，所以要去掉 /v1。
 func hostBaseURL(baseURL, protocol string) string {
 	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if trimmed == "" {
 		return ""
 	}
-	hasV1 := strings.HasSuffix(trimmed, "/v1")
 	if hostAPI(protocol) == "anthropic-messages" {
-		if hasV1 {
-			return strings.TrimSuffix(trimmed, "/v1")
-		}
-		return trimmed
+		return strings.TrimSuffix(trimmed, "/v1")
 	}
-	if hasV1 {
-		return trimmed
+	endpoint := "/chat/completions"
+	if protocol == "responses" {
+		endpoint = "/responses"
 	}
-	return trimmed + "/v1"
+	return strings.TrimSuffix(channelurl.Join(trimmed, endpoint, "/v1"), endpoint)
 }
 
 // opsBaseURL 规范化操作层基址：显式传入的（真实监听地址/请求地址）优先，

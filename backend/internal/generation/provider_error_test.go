@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/generation"
 )
 
@@ -340,7 +341,7 @@ func TestThinkingModeToolChoice(t *testing.T) {
 	}
 }
 
-func TestBeefAPIErrorCodeInventory(t *testing.T) {
+func TestBeefTVErrorCodeInventory(t *testing.T) {
 	data, err := os.ReadFile("../../../fixtures/generation-error-codes.json")
 	if err != nil {
 		t.Fatal(err)
@@ -350,7 +351,7 @@ func TestBeefAPIErrorCodeInventory(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(inventory) != 53 {
-		t.Fatalf("BeefAPI error code inventory has %d entries, want 53", len(inventory))
+		t.Fatalf("BeefTV error code inventory has %d entries, want 53", len(inventory))
 	}
 	for code, category := range inventory {
 		t.Run(code, func(t *testing.T) {
@@ -612,5 +613,48 @@ func TestThirdPartyGatewayChannelExcludedAndWrapperParity(t *testing.T) {
 	authoritativeType := generation.ClassifyHTTP(http.StatusBadRequest, "", `{"error":{"message":"Your account quota is exhausted (request id: req_inner_123456)","type":"model_capability_not_supported","code":"invalid_request_error"}} (request id: req_outer_654321)`)
 	if authoritativeType.Category != generation.CategoryInvalidParams || !authoritativeType.FromCode || authoritativeType.RequestID != "req_outer_654321" {
 		t.Fatalf("authoritative type or outer request ID overwritten: %+v", authoritativeType)
+	}
+}
+
+func TestClassifyManagedMediaTaskErrorRefinesSanitizedMessage(t *testing.T) {
+	modErr := &beeftv.MediaTaskError{
+		TaskID:  "med_mod_123456",
+		Code:    "media_generation_failed",
+		Message: "OutputVideoSensitiveContentDetected: The output video may contain sensitive information.",
+	}
+	modFailure := generation.ClassifyError(modErr)
+	if modFailure.Category != generation.CategoryModerationOutput || modFailure.TaskID != "med_mod_123456" {
+		t.Fatalf("moderation media task error misclassified: %+v", modFailure)
+	}
+
+	heightErr := &beeftv.MediaTaskError{
+		TaskID:  "med_height_123456",
+		Code:    "media_submission_rejected",
+		Message: "Height must be between 300px and 6000px",
+	}
+	heightFailure := generation.ClassifyError(heightErr)
+	if heightFailure.Category != generation.CategoryInvalidParams || !strings.Contains(heightFailure.Action, "300–6000 像素") || heightFailure.TaskID != "med_height_123456" {
+		t.Fatalf("height media task error lost range guidance: %+v", heightFailure)
+	}
+
+	chineseErr := &beeftv.MediaTaskError{
+		TaskID:  "med_cn_123456",
+		Code:    "media_submission_rejected",
+		Message: "第 1 张参考图高度为 200 像素，需要 300–6000 像素；请调整尺寸或更换后再提交",
+	}
+	chineseFailure := generation.ClassifyError(chineseErr)
+	if chineseFailure.Category != generation.CategoryInvalidParams || !strings.Contains(chineseFailure.Reason, "第 1 张参考图") || chineseFailure.TaskID != "med_cn_123456" {
+		t.Fatalf("chinese media task error lost message: %+v", chineseFailure)
+	}
+
+	fallbackErr := &beeftv.MediaTaskError{
+		TaskID:   "med_fallback_123456",
+		Code:     "media_task_failed",
+		Category: "unknown",
+		Message:  "OutputVideoSensitiveContentDetected: The output video may contain sensitive information.",
+	}
+	fallbackFailure := generation.ClassifyError(fallbackErr)
+	if fallbackFailure.Category != generation.CategoryModerationOutput || fallbackFailure.Uncertain || fallbackFailure.TaskID != "med_fallback_123456" {
+		t.Fatalf("non-pending unknown category fallback misclassified as uncertain: %+v", fallbackFailure)
 	}
 }

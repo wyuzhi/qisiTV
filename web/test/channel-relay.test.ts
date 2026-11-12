@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 
 import { channelRequest } from "../src/services/api/custom-channel-relay";
-import { MANAGED_BEEFAPI_CREDENTIAL_REF } from "../src/stores/use-config-store";
+import { MANAGED_BEEFTV_CREDENTIAL_REF } from "../src/stores/use-config-store";
 
 const originalWindow = globalThis.window;
 
@@ -27,10 +27,10 @@ const ordinaryChannel = {
 };
 
 const managedEnterprise = {
-    baseUrl: "https://enterprise.beefapi.com",
+    baseUrl: "https://beeftv.app",
     apiKey: "",
     apiFormat: "openai" as const,
-    credentialRef: MANAGED_BEEFAPI_CREDENTIAL_REF,
+    credentialRef: MANAGED_BEEFTV_CREDENTIAL_REF,
 };
 
 function expectBackendRelay(request: ReturnType<typeof channelRequest>, upstreamUrl: string, baseUrl: string) {
@@ -52,15 +52,17 @@ test("Mac Wails ordinary custom channels call the configured upstream directly",
 
 test("Mac Wails managed enterprise is backend-relayed without a WebView secret", () => {
     stubLocation({ protocol: "wails:" });
-    const request = channelRequest(managedEnterprise, "https://enterprise.beefapi.com/v1/models");
-    expectBackendRelay(request, "https://enterprise.beefapi.com/v1/models", "https://enterprise.beefapi.com");
+    const request = channelRequest(managedEnterprise, "https://beeftv.app/v1/models");
+    expectBackendRelay(request, "https://beeftv.app/v1/models", "https://beeftv.app");
     expect(request.headers.authorization).toBe("Bearer");
 });
 
-test("Mac Wails enterprise host without credentialRef is still backend-relayed", () => {
+test("Mac Wails custom channel on beeftv.app without credentialRef is not misidentified as managed", () => {
     stubLocation({ protocol: "wails:" });
-    const request = channelRequest({ baseUrl: "https://enterprise.beefapi.com", apiKey: "", apiFormat: "openai" }, "https://enterprise.beefapi.com/v1/models");
-    expectBackendRelay(request, "https://enterprise.beefapi.com/v1/models", "https://enterprise.beefapi.com");
+    const request = channelRequest({ baseUrl: "https://beeftv.app", apiKey: "user-key", apiFormat: "openai" }, "https://beeftv.app/v1/models");
+    expect(request.url).toBe("https://beeftv.app/v1/models");
+    expect(request.credentials).toBe("omit");
+    expect(request.headers.authorization).toBe("Bearer user-key");
 });
 
 test("Windows Wails ordinary custom channels are backend-relayed for CORS", () => {
@@ -74,8 +76,8 @@ test("Windows Wails ordinary custom channels are backend-relayed for CORS", () =
 
 test("Windows Wails managed enterprise is backend-relayed without a WebView secret", () => {
     stubLocation({ protocol: "http:", hostname: "wails.localhost" });
-    const request = channelRequest(managedEnterprise, "https://enterprise.beefapi.com/v1/models");
-    expectBackendRelay(request, "https://enterprise.beefapi.com/v1/models", "https://enterprise.beefapi.com");
+    const request = channelRequest(managedEnterprise, "https://beeftv.app/v1/models");
+    expectBackendRelay(request, "https://beeftv.app/v1/models", "https://beeftv.app");
     expect(request.headers.authorization).toBe("Bearer");
 });
 
@@ -83,13 +85,13 @@ test("lookalike enterprise hosts are not treated as the managed origin", () => {
     stubLocation({ protocol: "wails:" });
     const request = channelRequest(
         {
-            baseUrl: "https://enterprise.beefapi.com.attacker.example",
+            baseUrl: "https://beeftv.app.attacker.example",
             apiKey: "user-key",
             apiFormat: "openai",
         },
-        "https://enterprise.beefapi.com.attacker.example/v1/models",
+        "https://beeftv.app.attacker.example/v1/models",
     );
-    expect(request.url).toBe("https://enterprise.beefapi.com.attacker.example/v1/models");
+    expect(request.url).toBe("https://beeftv.app.attacker.example/v1/models");
     expect(request.credentials).toBe("omit");
     expect(request.headers["x-canvas-upstream-url"]).toBeUndefined();
     expect(request.headers.authorization).toBe("Bearer user-key");

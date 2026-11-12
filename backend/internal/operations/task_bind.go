@@ -124,6 +124,9 @@ func projectCanvasTaskBindOutcome(ctx *Context, canvasID, nodeID string, stored 
 		"historical":    historical,
 		"bindingStatus": "deleted",
 	}
+	if changed, ok := stored["alsoChanged"].([]any); ok && len(changed) > 0 {
+		projected["alsoChanged"] = changed
+	}
 	if ctx == nil || ctx.Domain == nil {
 		return projected, nil
 	}
@@ -266,7 +269,7 @@ func (p *bindPorts) BindExistingNode(userID string, patch taskbinding.NodePatch)
 	if err != nil {
 		return taskbinding.NodeBindResult{}, err
 	}
-	return taskbinding.NodeBindResult{Revision: result.Revision, Node: result.Node}, nil
+	return taskbinding.NodeBindResult{Revision: result.Revision, Node: result.Node, AlsoChanged: result.AlsoChanged}, nil
 }
 
 func bindEffectKey(params json.RawMessage) string {

@@ -2,7 +2,7 @@
    LibTV geometry and does not depend on the mutable global shell. */
 .app-workspace-shell:has(.assets-library-page) { position: relative; padding-top: 0 !important; }
 .app-workspace-shell:has(.assets-library-page)::before { display: none !important; }
-.app-workspace-shell:has(.assets-library-page) .app-workspace-main-row { position: relative; z-index: 1; }
+.app-workspace-shell:has(.assets-library-page) .app-workspace-main-row { position: relative; }
 .app-workspace-shell:has(.assets-library-page) .app-workspace-stage,
 .app-workspace-shell:has(.assets-library-page) .app-user-content { background: var(--user-page-bg) !important; }
 .app-workspace-shell:has(.assets-library-page) .assets-library-source-rail { background: var(--user-page-bg) !important; border-left-color: var(--user-border) !important; }

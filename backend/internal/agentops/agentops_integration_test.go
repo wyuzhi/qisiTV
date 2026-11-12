@@ -234,9 +234,12 @@ func TestReadOnlyClientCannotWriteAndCapabilityListIsFiltered(t *testing.T) {
 		if !descriptor.ReadOnly {
 			t.Fatalf("只读能力列表混入写操作: %s", descriptor.ID)
 		}
+		if descriptor.ID == "skill.script.run" {
+			t.Fatal("只读能力列表不应包含 skill.script.run")
+		}
 	}
-	if len(readOnly) != 20 {
-		t.Fatalf("只读操作应为 20 个，得到 %d", len(readOnly))
+	if len(readOnly) != 21 {
+		t.Fatalf("只读操作应为 21 个，得到 %d", len(readOnly))
 	}
 	if _, err := h.run(t, "canvas.get", "", map[string]any{"canvasId": h.canvasID}, true); err != nil {
 		t.Fatalf("只读客户端读操作应可用: %v", err)

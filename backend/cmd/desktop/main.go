@@ -27,6 +27,12 @@ func main() {
 		}
 		return
 	}
+	if done, err := handleHarnessCommand(os.Args[1:]); done {
+		if err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if err := validateDesktopArgs(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -57,7 +63,7 @@ func runDesktopApp(app *DesktopApp, run func(*options.App) error) error {
 }
 
 func desktopAppOptions(app *DesktopApp) *options.App {
-	return &options.App{
+	opts := &options.App{
 		Title:            "BeefTV",
 		Width:            1440,
 		Height:           960,
@@ -97,6 +103,8 @@ func desktopAppOptions(app *DesktopApp) *options.App {
 		OnShutdown: app.shutdown,
 		Bind:       []interface{}{app},
 	}
+	configureStartupWindow(opts)
+	return opts
 }
 
 func prepareDesktopApp(app *DesktopApp) error {
@@ -111,14 +119,16 @@ func prepareDesktopApp(app *DesktopApp) error {
 }
 
 func defaultDataDir() (string, error) {
-	for _, arg := range os.Args[1:] {
-		if strings.HasPrefix(arg, "--data-dir=") {
-			dir := strings.TrimSpace(strings.TrimPrefix(arg, "--data-dir="))
-			clean := filepath.Clean(dir)
-			if !filepath.IsAbs(dir) || filepath.Dir(clean) == clean {
+	for i := 1; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		if arg == "--data-dir" {
+			if i+1 == len(os.Args) {
 				return "", fmt.Errorf("--data-dir 需要明确的绝对目录")
 			}
-			return clean, nil
+			return explicitDesktopDataDir(os.Args[i+1])
+		}
+		if strings.HasPrefix(arg, "--data-dir=") {
+			return explicitDesktopDataDir(strings.TrimPrefix(arg, "--data-dir="))
 		}
 	}
 	if override := strings.TrimSpace(os.Getenv("CANVAS_DESKTOP_DATA_DIR")); override != "" {
@@ -129,6 +139,15 @@ func defaultDataDir() (string, error) {
 		return "", fmt.Errorf("定位用户应用数据目录: %w", err)
 	}
 	return desktopstorage.Resolve(root)
+}
+
+func explicitDesktopDataDir(dir string) (string, error) {
+	dir = strings.TrimSpace(dir)
+	clean := filepath.Clean(dir)
+	if !filepath.IsAbs(dir) || filepath.Dir(clean) == clean {
+		return "", fmt.Errorf("--data-dir 需要明确的绝对目录")
+	}
+	return clean, nil
 }
 
 func configureDesktopTemp(dataDir string) error {

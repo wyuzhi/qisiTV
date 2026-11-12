@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { ChevronDown, ChevronRight, Video } from "lucide-react";
+import { App } from "antd";
+import { ChevronDown, ChevronRight, Download, FolderOpen, Layers3, Video } from "lucide-react";
 
 import { CometCard } from "@/components/ui/aceternity/comet-card";
 import { CanvasFolderPreview } from "@/components/canvas/canvas-folder-preview";
+import { batchDownloadCanvasMediaNodes, collectDownloadableMediaNodes } from "@/lib/canvas/canvas-batch-download";
 import { FRAME_HEADER_HEIGHT, FRAME_PADDING, isCanvasFolderNode } from "@/lib/canvas/canvas-frame";
 import { canvasNodeVideoPreviewUrl } from "@/lib/canvas/canvas-media-preview";
 import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
@@ -22,6 +24,7 @@ export const CanvasFrameNode = React.memo(function CanvasFrameNode({
     onMouseDown,
     onResize,
     onToggleCollapsed,
+    onUnpackFolder,
     onFolderStyleChange,
     onFolderThemeChange = () => undefined,
     onTitleChange,
@@ -39,6 +42,7 @@ export const CanvasFrameNode = React.memo(function CanvasFrameNode({
     onMouseDown: (event: ReactMouseEvent, nodeId: string) => void;
     onResize: (nodeId: string, width: number, height: number, position?: Position) => void;
     onToggleCollapsed: (nodeId: string) => void;
+    onUnpackFolder?: (nodeId: string) => void;
     onFolderStyleChange: (nodeId: string, style: CanvasFolderStyle) => void;
     onFolderThemeChange?: (nodeId: string, theme: CanvasFolderTheme) => void;
     onTitleChange: (nodeId: string, title: string) => void;
@@ -47,6 +51,7 @@ export const CanvasFrameNode = React.memo(function CanvasFrameNode({
     onHoverStart?: (nodeId: string) => void;
     onHoverEnd?: (nodeId: string) => void;
 }) {
+    const { message } = App.useApp();
     const theme = canvasThemes[useActiveTheme()];
     const collapsed = Boolean(data.metadata?.frame?.collapsed);
     const folder = isCanvasFolderNode(data);
@@ -151,6 +156,11 @@ export const CanvasFrameNode = React.memo(function CanvasFrameNode({
     const workflowLabel = frameWorkflowLabel(data.metadata?.workflowKind);
     const workflow = data.type === CanvasNodeType.Workflow;
     const headerInverseScale = workflow || scale < 0.5 ? 1 / Math.max(scale, 0.05) : 1;
+    const folderInverseScale = 1 / Math.max(scale, 0.05);
+    const downloadableFolderNodes = useMemo(
+        () => (folder && collapsed && !linkedFolder ? collectDownloadableMediaNodes(childNodes, childNodes.map((node) => node.id)) : []),
+        [childNodes, collapsed, folder, linkedFolder],
+    );
     const compactFrameTitle = scale < 0.5 && (data.metadata?.fixture === "libtv-storyboard" || workflowLabel === "分镜")
         ? data.title.split("｜", 1)[0]
         : data.title;
@@ -240,13 +250,13 @@ export const CanvasFrameNode = React.memo(function CanvasFrameNode({
             style={{ transform: `translate(${data.position.x + (dragOffset?.x || 0)}px, ${data.position.y + (dragOffset?.y || 0)}px)`, width: data.width, height: data.height, contain: "layout style" }}
             onMouseDown={(event) => onMouseDown(event, data.id)}
             onDoubleClick={(event) => {
-                if (!collapsed || (event.target instanceof Element && event.target.closest("button,input"))) return;
+                if (readOnly || !collapsed || (event.target instanceof Element && event.target.closest("button,input"))) return;
                 event.stopPropagation();
                 onToggleCollapsed(data.id);
             }}
             onContextMenu={(event) => onContextMenu(event, data.id)}
             onKeyDown={(event) => {
-                if (!folder || !collapsed || (event.target instanceof Element && event.target.closest("button,input"))) return;
+                if (readOnly || !folder || !collapsed || (event.target instanceof Element && event.target.closest("button,input"))) return;
                 if (event.key !== "Enter" && event.key !== " ") return;
                 event.preventDefault();
                 onToggleCollapsed(data.id);
@@ -255,6 +265,74 @@ export const CanvasFrameNode = React.memo(function CanvasFrameNode({
             onMouseLeave={() => onHoverEnd?.(data.id)}
         >
             {workflow && header}
+            {folder && collapsed && scale < 0.55 ? (
+                <div
+                    data-canvas-folder-low-zoom-title
+                    className="pointer-events-none absolute bottom-full left-0 z-10 mb-1.5 flex items-center gap-1 whitespace-nowrap text-xs font-medium"
+                    style={{
+                        color: isSelected ? theme.node.text : theme.node.label,
+                        transform: `scale(${folderInverseScale})`,
+                        transformOrigin: "left bottom",
+                    }}
+                >
+                    <span className="max-w-[180px] truncate">{data.title}</span>
+                    <span className="opacity-65">({childNodes.length})</span>
+                </div>
+            ) : null}
+            {folder && collapsed && isSelected && !readOnly && !dragOffset ? (
+                <div
+                    data-canvas-folder-toolbar
+                    data-canvas-no-zoom
+                    className="pointer-events-auto absolute bottom-full left-1/2 z-30 mb-8 flex items-center gap-1 rounded-full border px-2 py-1 shadow-xl backdrop-blur-xl"
+                    style={{
+                        background: theme.spatial.elevated,
+                        borderColor: theme.toolbar.border,
+                        color: theme.node.text,
+                        transform: `translateX(-50%) scale(${folderInverseScale})`,
+                        transformOrigin: "center bottom",
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                >
+                    <button
+                        type="button"
+                        className="flex h-7 items-center gap-1 rounded-full px-2.5 text-xs font-medium transition hover:bg-white/10"
+                        title="打开文件夹浏览内容"
+                        onClick={() => onToggleCollapsed(data.id)}
+                    >
+                        <FolderOpen className="size-3.5" />
+                        <span>打开</span>
+                    </button>
+                    {!linkedFolder && childNodes.length > 0 && onUnpackFolder ? (
+                        <button
+                            type="button"
+                            className="flex h-7 items-center gap-1 rounded-full px-2.5 text-xs font-medium transition hover:bg-white/10"
+                            title="解散文件夹并将内部节点排回画布"
+                            onClick={() => onUnpackFolder(data.id)}
+                        >
+                            <Layers3 className="size-3.5" />
+                            <span>解散</span>
+                        </button>
+                    ) : null}
+                    {!linkedFolder && downloadableFolderNodes.length > 0 ? (
+                        <button
+                            type="button"
+                            className="flex h-7 items-center gap-1 rounded-full px-2.5 text-xs font-medium transition hover:bg-white/10"
+                            title="批量下载文件夹内媒体素材"
+                            onClick={() => {
+                                void batchDownloadCanvasMediaNodes(downloadableFolderNodes).then(({ downloaded, failed }) => {
+                                    if (failed === 0) message.success(`已批量下载 ${downloaded} 个素材`);
+                                    else if (downloaded > 0) message.warning(`已下载 ${downloaded} 个素材，${failed} 个下载失败`);
+                                    else message.warning("素材下载失败，请稍后重试");
+                                });
+                            }}
+                        >
+                            <Download className="size-3.5" />
+                            <span>下载</span>
+                        </button>
+                    ) : null}
+                </div>
+            ) : null}
             {/* 帧节点同样禁用指针跟随 3D 位移，hover 使用 CSS 静态抬升 */}
             <CometCard
                 containerClassName="h-full w-full"
@@ -278,6 +356,7 @@ export const CanvasFrameNode = React.memo(function CanvasFrameNode({
                         active={active}
                         isDropTarget={isDropTarget}
                         readOnly={readOnly || linkedFolder}
+                        canOpen={!readOnly}
                         onToggleCollapsed={onToggleCollapsed}
                         onTitleChange={onTitleChange}
                         onStyleChange={onFolderStyleChange}

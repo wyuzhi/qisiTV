@@ -22,6 +22,7 @@ type NodeBounds = { left: number; top: number; width: number; height: number; co
 type CanvasProjectWorldLayersProps = {
     containerRef: RefObject<HTMLDivElement | null>;
     projectId: string;
+    readOnly?: boolean;
     viewportScale: number;
     displayConnections: CanvasDisplayConnection[];
     selectedConnectionId: string | null;
@@ -68,6 +69,7 @@ type CanvasProjectWorldLayersProps = {
     onConnectStart: (event: ReactPointerEvent, nodeId: string, handleType: "source" | "target", handleId?: string, anchorRatio?: number) => void;
     onNodeResize: (nodeId: string, width: number, height: number, position?: Position) => void;
     onToggleFrame: (nodeId: string) => void;
+    onUnpackFolder?: (nodeId: string) => void;
     onFolderStyleChange: (nodeId: string, style: CanvasFolderStyle) => void;
     onFolderThemeChange: (nodeId: string, theme: CanvasFolderTheme) => void;
     onNodeTitleChange: (nodeId: string, title: string) => void;
@@ -169,7 +171,7 @@ export const CanvasProjectWorldLayers = memo(function CanvasProjectWorldLayers(p
             updatePreview(null);
         }
         const unsubscribe = subscribeCanvasNodeDragPreview(container, updatePreview);
-        // Hover mounts extra strokes inside a memoized connection. Keep newly
+        // Selection mounts extra strokes inside a memoized connection. Keep newly
         // mounted strokes aligned even while the pointer is paused mid-drag.
         const observer = new MutationObserver(() => {
             const live = connectionDragPreviewRef.current;
@@ -224,8 +226,8 @@ export const CanvasProjectWorldLayers = memo(function CanvasProjectWorldLayers(p
                         toScrollTop={props.scriptScrollTopById[to.id] || 0}
                         active={props.selectedConnectionId === connection.id || props.relatedConnectionIds.has(connection.id)}
                         visualMode="full"
-                        onSelect={() => props.onConnectionSelect(connection.id)}
-                        onContextMenu={(event) => props.onConnectionContextMenu(event, connection.id)}
+                        onSelect={props.onConnectionSelect}
+                        onContextMenu={props.onConnectionContextMenu}
                     />
                 ))}
             </svg> : null}
@@ -235,6 +237,7 @@ export const CanvasProjectWorldLayers = memo(function CanvasProjectWorldLayers(p
                     <CanvasFrameNode
                         key={node.id}
                         data={node}
+                        readOnly={props.readOnly}
                         dragOffset={props.dragPreview?.nodeIds.has(node.id) ? props.dragPreview : undefined}
                         childNodes={framePreviewNodes(node)}
                         scale={viewportScale}
@@ -243,6 +246,7 @@ export const CanvasProjectWorldLayers = memo(function CanvasProjectWorldLayers(p
                         onMouseDown={props.onNodeMouseDown}
                         onResize={props.onNodeResize}
                         onToggleCollapsed={props.onToggleFrame}
+                        onUnpackFolder={props.onUnpackFolder}
                         onFolderStyleChange={props.onFolderStyleChange}
                         onFolderThemeChange={props.onFolderThemeChange}
                         onTitleChange={props.onNodeTitleChange}

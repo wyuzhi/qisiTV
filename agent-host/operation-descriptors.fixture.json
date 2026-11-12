@@ -66,6 +66,42 @@
     "replay": "safe"
   },
   {
+    "id": "canvas.create",
+    "summary": "创建新画布",
+    "readOnly": false,
+    "scope": "canvas",
+    "params": {
+      "properties": {
+        "canvasId": {
+          "description": "可选自定义画布 ID；省略时由服务端生成",
+          "type": "string"
+        },
+        "folderId": {
+          "description": "可选画布文件夹 ID",
+          "type": "string"
+        },
+        "operationId": {
+          "description": "调用方生成的稳定幂等键；重试同一操作必须复用同一个值，服务端据此回读原结果",
+          "type": "string"
+        },
+        "projectId": {
+          "description": "可选关联项目 ID",
+          "type": "string"
+        },
+        "title": {
+          "description": "画布名称（默认：未命名画布）",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operationId"
+      ],
+      "type": "object"
+    },
+    "assistantModes": [],
+    "replay": "safe"
+  },
+  {
     "id": "canvas.document.commit",
     "summary": "按 revision 提交整份画布文档",
     "readOnly": false,
@@ -175,7 +211,7 @@
   },
   {
     "id": "canvas.generation.propose",
-    "summary": "登记付费生成单提议（不直接扣费）",
+    "summary": "按节点已保存参数冻结生成单与报价。核对返回的 targets.parameters 和 estimate 后再提交，参数或报价不一致时停止",
     "readOnly": true,
     "scope": "canvas",
     "params": {
@@ -226,7 +262,7 @@
   },
   {
     "id": "canvas.generation.submit",
-    "summary": "凭已批准生成单执行画布素材生成并按渠道计费（ask 需人工批准、caller 核对版本后自批、auto 自动批准）",
+    "summary": "凭已批准生成单执行画布生成并计费",
     "readOnly": false,
     "scope": "canvas",
     "params": {
@@ -380,12 +416,39 @@
           "type": "string"
         },
         "patch": {
+          "additionalProperties": false,
           "minProperties": 1,
           "properties": {
-            "audioVoice": {
+            "audioFormat": {
+              "description": "草稿参数",
               "type": "string"
             },
+            "audioInstructions": {
+              "description": "草稿参数",
+              "type": "string"
+            },
+            "audioPitch": {
+              "description": "草稿参数",
+              "type": "string"
+            },
+            "audioSpeed": {
+              "description": "草稿参数",
+              "type": "string"
+            },
+            "audioVoice": {
+              "description": "草稿参数",
+              "type": "string"
+            },
+            "audioVolume": {
+              "description": "草稿参数",
+              "type": "string"
+            },
+            "count": {
+              "description": "图片生成数量",
+              "type": "integer"
+            },
             "generateAudio": {
+              "description": "草稿参数",
               "enum": [
                 "true",
                 "false"
@@ -393,15 +456,47 @@
               "type": "string"
             },
             "model": {
+              "description": "从 model.catalog 选择的完整模型键 channelId::modelKey",
               "type": "string"
             },
             "prompt": {
+              "description": "下次生成提示词草稿，不覆盖现有成品",
+              "type": "string"
+            },
+            "quality": {
+              "description": "草稿参数",
               "type": "string"
             },
             "seconds": {
+              "description": "视频输出时长，单位秒。从 model.catalog 的 capabilityConfig.video.duration 选择，以字符串传入",
               "type": "string"
             },
             "size": {
+              "description": "图片尺寸或视频画幅比例。视频从 model.catalog 的 capabilityConfig.video.ratios 选择，例如 16:9。视频分辨率使用 vquality",
+              "type": "string"
+            },
+            "transparentBackground": {
+              "description": "草稿参数",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "type": "string"
+            },
+            "videoEditOperation": {
+              "description": "草稿参数",
+              "type": "string"
+            },
+            "vquality": {
+              "description": "视频输出分辨率。从 model.catalog 的 capabilityConfig.video.resolutions 选择，例如 480p、768p、1080p",
+              "type": "string"
+            },
+            "watermark": {
+              "description": "草稿参数",
+              "enum": [
+                "true",
+                "false"
+              ],
               "type": "string"
             }
           },
@@ -649,7 +744,7 @@
   },
   {
     "id": "canvas.script.prepare",
-    "summary": "准备分镜脚本与可选首帧/视频草稿（传 script 或 nodeId/rowIds；不开始生成）",
+    "summary": "准备分镜脚本与可选首帧/视频草稿（不开始生成）",
     "readOnly": false,
     "scope": "canvas",
     "params": {
@@ -668,6 +763,11 @@
               "type": "string"
             },
             "size": {
+              "type": "string"
+            },
+            "title": {
+              "description": "标题模板，{n} 为镜号，如「镜 {n} 首帧」；省略默认「镜头 {n} · 首帧」",
+              "maxLength": 40,
               "type": "string"
             }
           },
@@ -752,6 +852,11 @@
               "type": "string"
             },
             "size": {
+              "type": "string"
+            },
+            "title": {
+              "description": "标题模板，{n} 为镜号，如「镜 {n} 视频」；省略默认「镜头 {n} · 视频」",
+              "maxLength": 40,
               "type": "string"
             }
           },
@@ -1077,18 +1182,7 @@
     "readOnly": false,
     "scope": "canvas",
     "params": {
-      "oneOf": [
-        {
-          "required": [
-            "timeline"
-          ]
-        },
-        {
-          "required": [
-            "refreshNodeIds"
-          ]
-        }
-      ],
+      "description": "timeline 与 refreshNodeIds 必须且只能提供一个；服务端校验互斥条件。",
       "properties": {
         "canvasId": {
           "type": "string"
@@ -1281,6 +1375,69 @@
     },
     "assistantModes": [],
     "replay": "unsafe"
+  },
+  {
+    "id": "generation.estimate",
+    "summary": "按已保存的价格目录估算一组生成的费用；不联网、不写入、不建任务，没有价格的项目会写明原因",
+    "readOnly": true,
+    "scope": "workspace_read",
+    "params": {
+      "type": "object",
+      "properties": {
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "properties": {
+              "modelKey": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "image",
+                  "video",
+                  "audio"
+                ]
+              },
+              "parameters": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "与节点相同的生成参数，如 size、quality、count、vquality、seconds"
+              },
+              "referenceImages": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "referenceVideos": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "text": {
+                "type": "string",
+                "description": "配音台词"
+              }
+            },
+            "required": [
+              "modelKey",
+              "kind"
+            ]
+          }
+        }
+      },
+      "required": [
+        "targets"
+      ]
+    },
+    "assistantModes": [
+      "full-access",
+      "read-only"
+    ],
+    "replay": "safe"
   },
   {
     "id": "media.check",
@@ -1989,6 +2146,78 @@
     "assistantModes": [
       "full-access",
       "read-only",
+      "canvas"
+    ],
+    "replay": "safe"
+  },
+  {
+    "id": "skill.script.run",
+    "summary": "运行已选用技能的脚本（用户确认后执行）",
+    "readOnly": false,
+    "scope": "canvas",
+    "params": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "items": {
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "canvasId": {
+          "type": "string"
+        },
+        "contentHash": {
+          "type": "string"
+        },
+        "note": {
+          "description": "告诉用户运行原因",
+          "maxLength": 500,
+          "type": "string"
+        },
+        "operationId": {
+          "description": "调用方生成的稳定幂等键；重试同一操作必须复用同一个值，服务端据此回读原结果",
+          "type": "string"
+        },
+        "scriptPath": {
+          "description": "scripts/ 或 script/ 下的相对路径",
+          "type": "string"
+        },
+        "skillId": {
+          "type": "string"
+        },
+        "stdin": {
+          "maxLength": 65536,
+          "type": "string"
+        },
+        "timeoutSec": {
+          "description": "默认 300",
+          "maximum": 1800,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "useWorkspaceOutputDir": {
+          "description": "输出目录经 BEEFTV_OUTPUT_DIR 传入",
+          "type": "boolean"
+        },
+        "versionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "canvasId",
+        "skillId",
+        "versionId",
+        "contentHash",
+        "scriptPath",
+        "operationId"
+      ],
+      "type": "object"
+    },
+    "assistantModes": [
+      "full-access",
       "canvas"
     ],
     "replay": "safe"

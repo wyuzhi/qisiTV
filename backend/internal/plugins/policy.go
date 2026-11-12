@@ -3,10 +3,6 @@ package plugins
 import "strings"
 
 var officialApplicationPolicies = map[string]ManagementView{
-	WorkflowRunningHub: {
-		Origin: OriginOfficial, Kind: KindApplication,
-		ActivationScope: ScopeUser, ConfigurationScope: ConfigurationUser,
-	},
 	EagleAssetConnector: {
 		Origin: OriginOfficial, Kind: KindApplication,
 		ActivationScope: ScopeUser, ConfigurationScope: ConfigurationUser,
@@ -34,9 +30,16 @@ var officialApplicationPolicies = map[string]ManagementView{
 }
 
 func Management(pluginID string, source string) ManagementView {
-	if strings.TrimSpace(source) == OriginUploaded {
+	trimmedSource := strings.TrimSpace(source)
+	if trimmedSource == OriginUploaded {
 		return ManagementView{
 			Origin: OriginUploaded, Kind: KindProtocol,
+			ActivationScope: ScopeSystem, ConfigurationScope: ConfigurationSystem,
+		}
+	}
+	if trimmedSource == OriginPackage {
+		return ManagementView{
+			Origin: OriginPackage, Kind: KindApplication,
 			ActivationScope: ScopeSystem, ConfigurationScope: ConfigurationSystem,
 		}
 	}
@@ -50,7 +53,37 @@ func Management(pluginID string, source string) ManagementView {
 }
 
 func ManagementFromView(plugin View) ManagementView {
-	return Management(plugin.Manifest.ID, plugin.Source)
+	if strings.TrimSpace(plugin.Source) == OriginPackage {
+		kind := KindApplication
+		if len(plugin.Manifest.Contributes.Providers) > 0 {
+			kind = KindProtocol
+		}
+		return ManagementView{
+			Origin: OriginPackage, Kind: kind,
+			ActivationScope: ScopeSystem, ConfigurationScope: ConfigurationSystem,
+		}
+	}
+	if strings.TrimSpace(plugin.PackageDir) != "" && strings.TrimSpace(plugin.Manifest.Client) != "" && len(plugin.Manifest.Configuration.Fields) > 0 {
+		kind := KindApplication
+		activationScope := ScopeUser
+		if len(plugin.Manifest.Contributes.Providers) > 0 {
+			kind = KindProtocol
+			activationScope = ScopeSystem
+		}
+		return ManagementView{
+			Origin: OriginOfficial, Kind: kind,
+			ActivationScope: activationScope, ConfigurationScope: ConfigurationUser,
+		}
+	}
+	if strings.TrimSpace(plugin.PackageDir) != "" && len(plugin.Manifest.Contributes.Providers) == 0 {
+		return ManagementView{
+			Origin: OriginOfficial, Kind: KindApplication,
+			ActivationScope: ScopeSystem, ConfigurationScope: ConfigurationSystem,
+		}
+	}
+	view := Management(plugin.Manifest.ID, plugin.Source)
+	view.BuiltInInterface = view.Origin == OriginOfficial && view.Kind == KindProtocol && strings.TrimSpace(plugin.PackageDir) == ""
+	return view
 }
 
 func IsReservedApplication(pluginID string) bool {

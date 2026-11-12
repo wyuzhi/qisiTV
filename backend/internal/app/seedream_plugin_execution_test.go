@@ -96,3 +96,98 @@ func TestSeedreamPluginUsedByAdminModelTest(t *testing.T) {
 		t.Fatalf("posts=%d err=%v", posts.Load(), err)
 	}
 }
+
+func TestYsduiPluginCreateRejectionWithTraceRequestIDKeepsRegenerateAllowed(t *testing.T) {
+	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "true")
+	for _, tc := range []struct {
+		name       string
+		httpStatus int
+		respBody   string
+	}{
+		{
+			name:       "http-400-with-trace-request-id",
+			httpStatus: http.StatusBadRequest,
+			respBody:   `{"error":{"code":"InvalidParameter","message":"The parameter size specified in the request is not valid."},"request_id":"req-trace-synthetic-400"}`,
+		},
+		{
+			name:       "http-200-payload-rejection-with-trace-request-id",
+			httpStatus: http.StatusOK,
+			respBody:   `{"code":400,"message":"invalid parameter: size","request_id":"req-trace-payload-400"}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, db, _, _ := creationTestService(t)
+			svc.coordinator = platform.NewLocalCoordinator()
+			var seenBody map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&seenBody)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.httpStatus)
+				_, _ = w.Write([]byte(tc.respBody))
+			}))
+			t.Cleanup(server.Close)
+
+			input, _ := json.Marshal(map[string]any{
+				"mode":   "image",
+				"prompt": "fixture",
+				"config": map[string]any{
+					"baseUrl":       server.URL,
+					"apiKey":        "synthetic",
+					"model":         "doubao-seedream-5-0-pro-260628",
+					"interfaceType": "ysdui-image",
+					"size":          "16:9",
+					"count":         "1",
+				},
+			})
+			expires := time.Now().Add(time.Hour)
+			task := model.Task{
+				ID:             "ysdui-pro-reject-" + tc.name,
+				UserID:         "user",
+				Type:           "canvas_image",
+				Status:         model.TaskStatusRunning,
+				Attempts:       1,
+				InputJSON:      string(input),
+				LeaseOwner:     "owner",
+				LeaseExpiresAt: &expires,
+			}
+			if err := db.Create(&task).Error; err != nil {
+				t.Fatal(err)
+			}
+			attempt, err := svc.beginTaskRouteAttempt(&task)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := svc.routeExecutor().execute(context.Background(), &task, attempt)
+			if err != nil || result.err == nil {
+				t.Fatalf("expected generation error, got result=%#v err=%v", result, err)
+			}
+			if _, exists := seenBody["sequential_image_generation"]; exists {
+				t.Fatalf("Seedream 5.0 Pro must not send sequential_image_generation: %#v", seenBody)
+			}
+			_ = svc.terminalCoordinator().HandleExecutionFailure(&task, result.err, false, false)
+
+			stored, err := svc.repo.Task(task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			latestID, _ := svc.repo.LatestProviderRequestIDForTask(task.ID)
+			if stored.ProviderRequestID != "" || latestID != "" {
+				t.Fatalf("failed create polluted provider_request_id: task=%q latest=%q", stored.ProviderRequestID, latestID)
+			}
+			storedAttempt, err := svc.repo.LatestRouteAttempt(task.ID)
+			if err != nil || storedAttempt.DispatchState != "rejected_no_job" {
+				t.Fatalf("dispatch_state = %+v, want rejected_no_job (err=%v)", storedAttempt, err)
+			}
+			out, err := svc.Task("user", task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.Outcome == nil || out.Outcome.Phase != "failed" || out.Outcome.Regenerate == "blocked" {
+				t.Fatalf("outcome locked node into retrievable/blocked: %+v", out.Outcome)
+			}
+			if out.FailureDiagnostics == nil || out.FailureDiagnostics.Source == "" || out.FailureDiagnostics.Source == "unknown" {
+				t.Fatalf("expected recorded failureDiagnostics source, got %+v", out.FailureDiagnostics)
+			}
+		})
+	}
+}

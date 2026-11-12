@@ -38,6 +38,7 @@ func TestComputeOutcome(t *testing.T) {
 		{"未发出但上游已有任务号", with(func(t *model.Task) { t.ProviderRequestID = "upstream" }), "", OutcomeFacts{RequestNotSent: true}, want("retrievable", "blocked", "provider_result_pending")},
 		{"未发出阶段被接受证据推翻", failed, "", OutcomeFacts{RequestNotSent: true, DispatchState: "accepted"}, want("retrievable", "blocked", "image_recovery_pending")},
 		{"明确没建任务", with(func(t *model.Task) { t.RecoveryOutcome = &noResult }), "", OutcomeFacts{DispatchState: "rejected_no_job"}, want("failed", "allowed", "no_result")},
+		{"明确拒绝未建任务但已有POST调用日志", failed, "", OutcomeFacts{HasImageReceipt: true, DispatchState: "rejected_no_job"}, want("failed", "allowed", "task_failed")},
 		{"明确失败不代表退款", with(func(t *model.Task) { t.RecoveryOutcome = &noResult }), "", OutcomeFacts{DispatchState: "accepted"}, want("failed", "confirm", "no_result")},
 		{"旧回执没有路由", failed, "", OutcomeFacts{HasImageReceipt: true}, want("retrievable", "blocked", "image_recovery_pending")},
 		{"已接受", failed, "", OutcomeFacts{DispatchState: "accepted"}, want("retrievable", "blocked", "image_recovery_pending")},
@@ -82,14 +83,14 @@ func TestComputeOutcome(t *testing.T) {
 			t.ProviderRequestID = "upscale-req-1"
 			t.RecoveryOutcome = &unrecoverable
 		}), "", OutcomeFacts{}, want("failed", "confirm", "result_unrecoverable")},
-		{"BeefAPI视频已结算失败允许直接重生成", with(func(t *model.Task) {
+		{"BeefTV视频已结算失败允许直接重生成", with(func(t *model.Task) {
 			u := "failed"
 			t.Type = "canvas_video"
 			t.ProviderRequestID = "vid-failed"
 			t.RecoveryOutcome = &noResult
 			t.BeefUsageState = &u
 		}), "", OutcomeFacts{}, want("failed", "allowed", "no_result")},
-		{"BeefAPI视频待结算阻塞重生成并透传截止时间", with(func(t *model.Task) {
+		{"BeefTV视频待结算阻塞重生成并透传截止时间", with(func(t *model.Task) {
 			u := "pending"
 			dl := "2026-04-20T12:00:00Z"
 			t.Type = "canvas_video"
@@ -98,37 +99,37 @@ func TestComputeOutcome(t *testing.T) {
 			t.BeefUsageState = &u
 			t.BeefReconcileDeadline = &dl
 		}), "", OutcomeFacts{}, Outcome{Phase: "failed", Regenerate: "blocked", Reason: "settlement_pending", ReconcileDeadline: "2026-04-20T12:00:00Z"}},
-		{"BeefAPI视频已扣费可取回阶段阻塞重生成", with(func(t *model.Task) {
+		{"BeefTV视频已扣费可取回阶段阻塞重生成", with(func(t *model.Task) {
 			u := "completed"
 			t.Type = "canvas_video"
 			t.ProviderRequestID = "vid-completed"
 			t.BeefUsageState = &u
 		}), "", OutcomeFacts{}, want("retrievable", "blocked", "provider_result_pending")},
-		{"BeefAPI视频已扣费但结果无法取回需确认重生成", with(func(t *model.Task) {
+		{"BeefTV视频已扣费但结果无法取回需确认重生成", with(func(t *model.Task) {
 			u := "completed"
 			t.Type = "canvas_video"
 			t.ProviderRequestID = "vid-completed"
 			t.RecoveryOutcome = &unrecoverable
 			t.BeefUsageState = &u
 		}), "", OutcomeFacts{}, want("failed", "confirm", "charged_result_unrecoverable")},
-		{"BeefAPI图片已退款允许直接重生成", with(func(t *model.Task) {
+		{"BeefTV图片已退款允许直接重生成", with(func(t *model.Task) {
 			b := "refunded"
 			t.ImageJobID = "img-job-1"
 			t.RecoveryOutcome = &noResult
 			t.BeefBillingState = &b
 		}), "", OutcomeFacts{DispatchState: "accepted"}, want("failed", "allowed", "no_result")},
-		{"BeefAPI图片已扣费可取回阶段阻塞重生成", with(func(t *model.Task) {
+		{"BeefTV图片已扣费可取回阶段阻塞重生成", with(func(t *model.Task) {
 			b := "settled"
 			t.ImageJobID = "img-job-2"
 			t.BeefBillingState = &b
 		}), "", OutcomeFacts{DispatchState: "accepted"}, want("retrievable", "blocked", "image_recovery_pending")},
-		{"BeefAPI图片已扣费但结果无法取回需确认重生成", with(func(t *model.Task) {
+		{"BeefTV图片已扣费但结果无法取回需确认重生成", with(func(t *model.Task) {
 			b := "settled"
 			t.ImageJobID = "img-job-2"
 			t.RecoveryOutcome = &noResult
 			t.BeefBillingState = &b
 		}), "", OutcomeFacts{DispatchState: "accepted"}, want("failed", "confirm", "charged_result_unrecoverable")},
-		{"BeefAPI图片待结算空串阻塞重生成并透传截止时间", with(func(t *model.Task) {
+		{"BeefTV图片待结算空串阻塞重生成并透传截止时间", with(func(t *model.Task) {
 			b := ""
 			dl := "2026-04-20T12:30:00Z"
 			t.ImageJobID = "img-job-3"
@@ -136,12 +137,12 @@ func TestComputeOutcome(t *testing.T) {
 			t.BeefBillingState = &b
 			t.BeefReconcileDeadline = &dl
 		}), "", OutcomeFacts{DispatchState: "accepted"}, Outcome{Phase: "failed", Regenerate: "blocked", Reason: "settlement_pending", ReconcileDeadline: "2026-04-20T12:30:00Z"}},
-		{"BeefAPI图片缺失billing_state键按第三方兜底需确认", with(func(t *model.Task) {
+		{"BeefTV图片缺失billing_state键按第三方兜底需确认", with(func(t *model.Task) {
 			t.ImageJobID = "img-job-no-billing-key"
 			t.RecoveryOutcome = &unrecoverable
 			t.BeefBillingState = nil
 		}), "", OutcomeFacts{DispatchState: "accepted"}, want("failed", "confirm", "result_unrecoverable")},
-		{"BeefAPI图片无job_id且未发出按第三方兜底允许重生成", with(func(t *model.Task) {
+		{"BeefTV图片无job_id且未发出按第三方兜底允许重生成", with(func(t *model.Task) {
 			t.BeefBillingState = nil
 		}), "", OutcomeFacts{DispatchState: "not_sent"}, want("failed", "allowed", "task_failed")},
 	}

@@ -11,7 +11,7 @@ import (
 type MediaUpscaleRequest = topaz.Request
 
 func (s *Service) upscaleConfig(name string) (generation.Config, error) {
-	return generation.UpscaleConfig(name, s.lookupBeefAPICredential)
+	return generation.UpscaleConfig(name, s.lookupBeefTVCredential)
 }
 
 func (s *Service) likeAIUpscaleConfig(channelID, name string) (generation.Config, error) {
@@ -23,15 +23,15 @@ func (s *Service) MediaUpscaleCapabilities() map[string]any {
 }
 
 func (s *Service) EstimateMediaUpscale(ctx context.Context, user string, request topaz.Request) (map[string]any, error) {
-	return generation.EstimateMediaUpscale(ctx, user, request, s.EnsureResourceMediaMetadata, s.lookupBeefAPICredential, s.bindGenerationRuntime, s.likeAIUpscaleConfig)
+	return generation.EstimateMediaUpscale(ctx, user, request, s.EnsureResourceMediaMetadata, s.lookupBeefTVCredential, s.bindGenerationRuntime, s.likeAIUpscaleConfig)
 }
 
 func (s *Service) CreateMediaUpscale(ctx context.Context, user string, request topaz.Request) (*model.Task, error) {
-	input, payload, err := generation.BuildMediaUpscaleTaskPayload(ctx, user, request, s.EnsureResourceMediaMetadata, s.lookupBeefAPICredential, s.likeAIUpscaleConfig)
+	input, payload, err := generation.BuildMediaUpscaleTaskPayload(ctx, user, request, s.EnsureResourceMediaMetadata, s.lookupBeefTVCredential, s.likeAIUpscaleConfig)
 	if err != nil {
 		return nil, err
 	}
-	provider, operation := "beefapi", "media.upscale.topaz"
+	provider, operation := "beeftv", "media.upscale.topaz"
 	if generation.IsLikeAIUpscaleModel(input.Config.Model) {
 		provider, operation = "likeai", "media.upscale.likeai"
 	}

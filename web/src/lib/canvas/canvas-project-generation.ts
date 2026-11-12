@@ -6,7 +6,7 @@ import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { resourceIdFromStorageKey } from "@/services/api/resources";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
-import { isH3Model, h3VideoOperation, h3ResolvedReferenceOrder } from "@/lib/h3-video";
+import { isH3MaxModel, isH3Model, h3VideoOperation, h3ResolvedReferenceOrder } from "@/lib/h3-video";
 import { isSeedanceVideoConfig } from "@/lib/seedance-video";
 import { modelCapabilityConfigFor } from "@/lib/model-capabilities";
 import { resolveVideoOperation } from "@/lib/model-selection";
@@ -15,7 +15,6 @@ import { ensureMediaNodeMinimumSize } from "@/lib/canvas/canvas-node-size";
 import { repairOverlappingImageBatches } from "@/lib/canvas/canvas-generation-layout";
 import { interruptFileUpload } from "@/lib/canvas/canvas-file-upload";
 import { canvasNodeFailureView } from "@/lib/canvas/canvas-node-failure-view";
-import { isCanvasWorkflowProvider } from "@/lib/canvas/canvas-workflow";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import { CanvasNodeType, type CanvasAssistantSession, type CanvasConnection, type CanvasImageGenerationType, type CanvasNodeData, type CanvasNodeMetadata, type CanvasVideoEditOperation } from "@/types/canvas";
 import type { ReferenceImage } from "@/types/image";
@@ -171,18 +170,20 @@ export async function runCanvasGenerationTaskToConsumer(
         } catch (error) {
             if ((error instanceof Error && error.name === "AbortError")) throw error;
             const cause = error instanceof CanvasGenerationDurableAckError || error instanceof CanvasGenerationMaterializationError ? error.cause : error;
+            const failureDiagnostics: CanvasNodeMetadata["taskFailureDiagnostics"] = {
+                ...taskForConsumer.failureDiagnostics,
+                source: "client_result",
+                executionResult: "completed",
+                stage: "画布应用结果",
+                summary: cause instanceof Error ? cause.message : "画布应用结果失败",
+                capturedAt: new Date().toISOString(),
+            };
             dependencies.bindTask({
                 ...taskForConsumer,
-                failureDiagnostics: {
-                    ...taskForConsumer.failureDiagnostics,
-                    source: "client_result",
-                    executionResult: "completed",
-                    stage: "画布应用结果",
-                    summary: cause instanceof Error ? cause.message : "画布应用结果失败",
-                    capturedAt: new Date().toISOString(),
-                },
+                failureDiagnostics,
             });
-            throw error instanceof CanvasGenerationDurableAckError || error instanceof CanvasGenerationMaterializationError ? error : new CanvasGenerationDurableAckError(error);
+            const wrapped = error instanceof CanvasGenerationDurableAckError || error instanceof CanvasGenerationMaterializationError ? error : new CanvasGenerationDurableAckError(error);
+            throw Object.assign(wrapped, { failureDiagnostics });
         }
         return result;
     });
@@ -270,6 +271,9 @@ export function resetGenerationTaskMetadata(metadata: CanvasNodeMetadata | undef
     delete next.taskReceiptRecorded;
     delete next.taskCreatedAt;
     delete next.taskUpdatedAt;
+    delete next.generationFailure;
+    delete next.taskOutcomeSource;
+    delete next.processingLabel;
     return next;
 }
 
@@ -314,7 +318,7 @@ export function audioExtension(mimeType?: string) {
 
 export function buildImageGenerationMetadata(type: CanvasImageGenerationType, config: AiConfig, count: number, references: ReferenceImage[]): CanvasNodeMetadata {
     return {
-        ...generationWorkflowMetadata(config),
+        workflowProvider: "model",
         generationType: type,
         model: config.model,
         size: config.size,
@@ -356,7 +360,7 @@ export function nodeReferenceImage(node: CanvasNodeData): ReferenceImage | null 
 
 export function buildAudioGenerationMetadata(config: AiConfig): CanvasNodeMetadata {
     return {
-        ...generationWorkflowMetadata(config),
+        workflowProvider: "model",
         model: config.model,
         audioVoice: config.audioVoice,
         audioFormat: config.audioFormat,
@@ -438,27 +442,59 @@ export function buildVideoGenerationMetadata(
 ): CanvasNodeMetadata {
     const metadata = node?.metadata;
     const referenceImageIds = new Set((context?.referenceImages || []).map((image) => image.id));
-    // 工作流视频把已连接媒体交给字段映射处理，不再把历史首尾帧选择当成硬约束。
-    // 工作流视频把已连接媒体交给字段映射处理，不再把历史首尾帧选择当成硬约束。
-    const workflowVideo = node?.type === CanvasNodeType.Config && (config?.taskWorkflowProvider === "runninghub" || isCanvasWorkflowProvider(metadata));
-    const startFrame = workflowVideo ? undefined : requireConnectedVideoFrame(metadata?.videoStartFrameNodeId, "首帧", referenceImageIds);
-    const endFrame = workflowVideo ? undefined : requireConnectedVideoFrame(metadata?.videoEndFrameNodeId, "尾帧", referenceImageIds);
     const draftTaskId = metadata?.videoDraftTaskId?.trim() || undefined;
+    const effectiveModel = config?.model || metadata?.model || "";
+    const videoEditOperation = draftTaskId
+        ? "draft_to_final"
+        : effectiveModel && isH3Model(effectiveModel)
+          ? h3VideoOperation(effectiveModel, { imageCount: context?.referenceImages.length || 0, videoCount: context?.referenceVideos.length || 0, audioCount: context?.referenceAudios.length || 0 }, metadata?.videoEditOperation)
+          : resolveVideoEditOperation(node, context);
+    // 非 H3 Max 的全模态参考生成不消费首尾帧/中间帧槽位，不再把历史帧选择当成硬约束或透传给后端。
+    const h3Max = isH3MaxModel(effectiveModel);
+    const ignoreFrameSelection = videoEditOperation === "draft_to_final" || (videoEditOperation === "reference_to_video" && !h3Max);
+    const connectedImages = context?.referenceImages || [];
+    const h3 = isH3Model(effectiveModel);
+    const storedStartFrame = !h3 && metadata?.videoStartFrameNodeId && !referenceImageIds.has(metadata.videoStartFrameNodeId)
+        ? undefined
+        : metadata?.videoStartFrameNodeId;
+    const storedEndFrame = !h3 && metadata?.videoEndFrameNodeId && !referenceImageIds.has(metadata.videoEndFrameNodeId)
+        ? undefined
+        : metadata?.videoEndFrameNodeId;
+    const allDirectImageNodes =
+        connectedImages.length > 0 &&
+        connectedImages.length <= 2 &&
+        connectedImages.every((image) => !image.sourceNodeId && !image.id.startsWith("character-reference-") && !image.id.startsWith("asset:"));
+    const defaultFrames =
+        !ignoreFrameSelection &&
+        !h3 &&
+        videoEditOperation === "image_to_video" &&
+        !storedStartFrame &&
+        !storedEndFrame &&
+        (context?.referenceVideos.length || 0) === 0 &&
+        (context?.referenceAudios.length || 0) === 0 &&
+        allDirectImageNodes;
+    const startFrame = ignoreFrameSelection
+        ? undefined
+        : defaultFrames
+          ? connectedImages[0]?.id
+          : requireConnectedVideoFrame(storedStartFrame, "首帧", referenceImageIds);
+    const endFrame = ignoreFrameSelection
+        ? undefined
+        : defaultFrames && connectedImages.length === 2
+          ? connectedImages[1]?.id
+          : requireConnectedVideoFrame(storedEndFrame, "尾帧", referenceImageIds);
+    const middleFrame = ignoreFrameSelection || !metadata?.videoMiddleFrameNodeId ? undefined : requireConnectedVideoFrame(metadata.videoMiddleFrameNodeId, "中间帧", referenceImageIds);
     return {
-        ...(config ? generationWorkflowMetadata(config) : {}),
-        videoEditOperation: draftTaskId
-            ? "draft_to_final"
-            : config && isH3Model(config.model)
-              ? h3VideoOperation(config.model, { imageCount: context?.referenceImages.length || 0, videoCount: context?.referenceVideos.length || 0, audioCount: context?.referenceAudios.length || 0 }, metadata?.videoEditOperation)
-              : resolveVideoEditOperation(node, context),
+        ...(config ? { workflowProvider: "model" as const } : {}),
+        videoEditOperation,
         videoDraftTaskId: draftTaskId,
         returnLastFrame: metadata?.returnLastFrame ?? config?.videoReturnLastFrame,
         videoCameraMoveId: metadata?.videoCameraMoveId,
         videoCameraMovePrompt: metadata?.videoCameraMovePrompt,
         videoStartFrameNodeId: startFrame,
         videoEndFrameNodeId: endFrame,
-        videoMiddleFrameNodeId: metadata?.videoMiddleFrameNodeId ? requireConnectedVideoFrame(metadata.videoMiddleFrameNodeId, "中间帧", referenceImageIds) : undefined,
-        videoMiddleFrameTime: metadata?.videoMiddleFrameTime,
+        videoMiddleFrameNodeId: middleFrame,
+        videoMiddleFrameTime: ignoreFrameSelection ? undefined : metadata?.videoMiddleFrameTime,
         videoH3Options: metadata?.videoH3Options,
         videoReferenceOrder: config && isH3Model(config.model) ? h3ResolvedReferenceOrder(metadata?.videoReferenceOrder, [...(context?.referenceImages || []), ...(context?.referenceVideos || []), ...(context?.referenceAudios || [])]) : metadata?.videoReferenceOrder,
     };
@@ -518,15 +554,6 @@ export async function hydrateAssistantImages(sessions: CanvasAssistantSession[])
 
 export function getGenerationCount(count: string) {
     return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(count)) || 1)));
-}
-
-export function generationWorkflowMetadata(config: AiConfig): Pick<CanvasNodeMetadata, "workflowProvider" | "runningHubWorkflowId" | "runningHubWorkflowKind"> {
-    const provider = config.taskWorkflowProvider || "model";
-    return {
-        workflowProvider: provider,
-        runningHubWorkflowId: provider === "runninghub" ? config.runningHub.workflowId : undefined,
-        runningHubWorkflowKind: provider === "runninghub" ? config.runningHub.selectedKind : undefined,
-    };
 }
 
 export { buildGenerationConfig, resolveCanvasGenerationModel } from "./canvas-generation-config";
@@ -591,11 +618,12 @@ function markGenerationRecoveryRestore(node: CanvasNodeData): CanvasNodeData {
     return { ...node, metadata };
 }
 
-export function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
+export function resetInterruptedGeneration(nodes: CanvasNodeData[] = []) {
+    const sourceNodes = Array.isArray(nodes) ? nodes : [];
     const configWidth = NODE_DEFAULT_SIZE[CanvasNodeType.Config].width;
     const configHeight = NODE_DEFAULT_SIZE[CanvasNodeType.Config].height;
     let changed = false;
-    const reset = nodes.map((node) => {
+    const reset = sourceNodes.map((node) => {
         const mediaNode = ensureMediaNodeMinimumSize(interruptFileUpload(node));
         const resizedNode =
             mediaNode.type === CanvasNodeType.Config && (mediaNode.width < configWidth || mediaNode.height < configHeight)
@@ -607,7 +635,7 @@ export function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
         if (restoredNode !== node) changed = true;
         return restoredNode;
     });
-    return repairOverlappingImageBatches(changed ? reset : nodes);
+    return repairOverlappingImageBatches(changed ? reset : sourceNodes);
 }
 
 export function isGenerationCanceled(error: unknown) {
@@ -634,5 +662,5 @@ export function sourceNodeReferenceImages(node: CanvasNodeData | null) {
 }
 
 export function isAudioFile(file: File) {
-    return file.type.startsWith("audio/") || /\.(mp3|wav)$/i.test(file.name);
+    return file.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|flac|ogg|opus)$/i.test(file.name);
 }

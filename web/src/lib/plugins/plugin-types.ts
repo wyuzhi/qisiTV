@@ -1,4 +1,6 @@
+import type { ComponentType, MouseEventHandler, ReactNode } from "react";
 import type { Asset } from "@/stores/use-asset-store";
+import type { CanvasNodeData } from "@/types/canvas";
 
 export const PLUGIN_API_VERSION = "qisitv.plugin/v1" as const;
 export const PLUGIN_API_VERSION_V2 = "qisitv.plugin/v2" as const;
@@ -33,11 +35,10 @@ export type PluginManifestV2 = Omit<PluginManifest, "apiVersion" | "contributes"
     contributes: PluginContributionsV2;
 };
 
-export type PluginContributionKind = "provider" | "workflow" | "canvas-node" | "transform" | "command" | "asset-source" | "usage-observer" | "ai-capability" | "agent" | "import-export";
+export type PluginContributionKind = "provider" | "workflow" | "canvas-node";
 export type PluginSurface = "node" | "fullscreen" | "hybrid" | "asset-source" | "settings";
 export type ProtocolCapability = "text" | "image" | "video" | "audio";
 export type ProtocolScope = "admin.system-channel" | "user.custom-channel" | "canvas" | "creation" | "agent" | string;
-export type PluginRuntime = "declarative" | "sandbox" | "worker" | "trusted-backend";
 export type PluginField = {
     name: string;
     type: "string" | "number" | "boolean" | "secret" | "url" | "select" | "json";
@@ -53,6 +54,8 @@ export type PluginParameter = {
     required?: boolean;
     description?: string;
     values?: string[];
+    min?: number;
+    max?: number;
     mapping?: string;
 };
 export type PluginProviderOperation = {
@@ -99,7 +102,7 @@ export type PluginCanvasNodeContribution = {
     defaultTitle: string;
     defaultSize: { width: number; height: number };
     schema: Record<string, unknown>;
-    renderer: "declarative" | "sandbox";
+    renderer?: "declarative" | "client";
     /** Optional input contract for nodes that consume one or more media kinds. */
     acceptsInputKind?: "image" | "video" | "audio" | "text" | Array<"image" | "video" | "audio" | "text">;
     /** Optional maximum number of direct inputs. */
@@ -107,23 +110,10 @@ export type PluginCanvasNodeContribution = {
     /** Analysis/sink nodes can hide the right-side output connection. */
     showOutputConnection?: boolean;
 };
-export type PluginTransformContribution = {
-    id: string;
-    input: "media" | "generation";
-    output: "provider-request" | "media";
-    runtime: PluginRuntime;
-};
 export type PluginContributions = {
     providers?: PluginProviderContribution[];
     workflows?: PluginWorkflowContribution[];
     canvasNodes?: PluginCanvasNodeContribution[];
-    transforms?: PluginTransformContribution[];
-    commands?: Array<{ id: string; label: string }>;
-    assetSources?: string[];
-    usageObservers?: string[];
-    aiCapabilities?: string[];
-    agents?: string[];
-    importExport?: string[];
 };
 export type PluginPermission =
     | "canvas.read"
@@ -136,7 +126,9 @@ export type PluginPermission =
     | "ai.text"
     | "media.read"
     | "usage.read"
-    | "external.open";
+    | "external.open"
+    | "ui.slot"
+    | "settings.write";
 
 export type PluginManifest = {
     apiVersion: typeof PLUGIN_API_VERSION;
@@ -148,12 +140,13 @@ export type PluginManifest = {
     description: string;
     documentation?: string;
     author?: string;
-    entry?: string;
+    client?: string;
     surfaces?: PluginSurface[];
     permissions: PluginPermission[];
     trusted?: boolean;
+    /** npm 插件安装内容的指纹，由后端给出；同版本重新安装后也会变。 */
+    revision?: string;
     configuration?: { fields: PluginField[] };
-    runtime?: { backend?: PluginRuntime; web?: PluginRuntime };
     contributes: PluginContributions;
 };
 
@@ -326,6 +319,7 @@ export type RegisteredPlugin = {
     source?: "bundled" | "uploaded" | string;
     activate?: (context: PluginHostContext) => Promise<void> | void;
     deactivate?: (context: PluginHostContext) => Promise<void> | void;
+    setup?: (host: BeefTVPluginHost) => Promise<(() => void) | void> | (() => void) | void;
     createAssetSource?: (context: PluginHostContext) => AssetSourceProvider;
     createPromptOptimizer?: (context: PluginHostContext) => PromptOptimizerProvider;
     /** v2 插件由注册器从 manifest 提取的编辑器插槽声明（v1 插件无此字段）。 */
@@ -340,4 +334,402 @@ export type PluginInstallation = {
     installedAt: string;
     updatedAt: string;
     lastError?: string;
+};
+
+// ── Section 5.2: 27 Frontend UI Extension Slots ──────────────────────────────
+
+export type PluginCanvasNodeProps = {
+    node: CanvasNodeData;
+    nodeId: string;
+    selected: boolean;
+    theme: "light" | "dark";
+    data: Record<string, unknown>;
+    updateData: (patch: Record<string, unknown>) => void;
+    updateContent: (content: string) => void;
+};
+
+export type PluginCanvasNodeSlotContribution = {
+    type: string;
+    label: string;
+    defaultTitle?: string;
+    icon?: ReactNode;
+    defaultSize?: { width: number; height: number };
+    ports?: { inputs?: string[]; outputs?: string[] };
+    component?: ComponentType<PluginCanvasNodeProps>;
+    schema?: Record<string, unknown>;
+    category?: "creation" | "source" | "annotation" | "plugin";
+    allowCreateFromMenu?: boolean;
+    acceptsInputKind?: "image" | "video" | "audio" | "text" | Array<"image" | "video" | "audio" | "text">;
+    maxInputCount?: number;
+    showOutputConnection?: boolean;
+};
+
+export type PluginCanvasAddNodeMenuContext = {
+    projectId?: string;
+    canvasId?: string;
+    position: { x: number; y: number };
+    createNode: (input: {
+        type: string;
+        position?: { x: number; y: number };
+        size?: { width: number; height: number };
+        content?: string;
+        metadata?: Record<string, unknown>;
+    }) => Promise<string | null> | string | null;
+};
+
+export type PluginCanvasAddNodeMenuContribution = {
+    id: string;
+    label: string;
+    description?: string;
+    icon?: ReactNode;
+    group?: string;
+    keywords?: string[];
+    order?: number;
+    onSelect: (ctx: PluginCanvasAddNodeMenuContext) => void | Promise<void>;
+};
+
+export type CanvasToolContext = {
+    projectId?: string;
+    canvasId?: string;
+    selectedNodeIds: string[];
+    selectedNodes: CanvasNodeData[];
+    hoveredNode?: CanvasNodeData | null;
+};
+
+export type CanvasToolDescriptor = {
+    id: string;
+    label: string;
+    icon?: ReactNode;
+    order?: number;
+    shortcut?: string;
+    when?: (ctx: CanvasToolContext) => boolean;
+    onClick?: (ctx: CanvasToolContext) => void | Promise<void>;
+    render?: ComponentType<CanvasToolContext>;
+};
+
+export type PluginCanvasContextMenuContext = {
+    projectId?: string;
+    canvasId?: string;
+    target: "canvas" | "node" | "selection";
+    node?: CanvasNodeData | null;
+    selectedNodeIds: string[];
+    selectedNodes: CanvasNodeData[];
+    position: { x: number; y: number };
+};
+
+export type PluginCanvasContextMenuContribution = {
+    id: string;
+    label: string;
+    icon?: ReactNode;
+    shortcut?: string;
+    order?: number;
+    when?: (ctx: PluginCanvasContextMenuContext) => boolean;
+    onSelect: (ctx: PluginCanvasContextMenuContext) => void | Promise<void>;
+};
+
+export type PluginCanvasNodePanelProps = {
+    node: CanvasNodeData;
+    updateNode: (patch: Partial<CanvasNodeData>) => void;
+    updateMetadata: (patch: Record<string, unknown>) => void;
+};
+
+export type PluginCanvasNodePanelContribution = {
+    id: string;
+    title: string;
+    nodeTypes?: string[];
+    order?: number;
+    component: ComponentType<PluginCanvasNodePanelProps>;
+};
+
+export type PluginCanvasSidePanelProps = {
+    projectId?: string;
+    canvasId?: string;
+    selectedNodeIds: string[];
+};
+
+export type PluginCanvasSidePanelContribution = {
+    id: string;
+    title: string;
+    icon?: ReactNode;
+    order?: number;
+    component: ComponentType<PluginCanvasSidePanelProps>;
+};
+
+export type PluginPromptActionProps = {
+    nodeId: string;
+    nodeType: "image" | "video" | "audio" | "text";
+    prompt: string;
+    setPrompt: (nextPrompt: string) => void;
+    model?: string;
+    aspectRatio?: string;
+    referenceImages?: string[];
+    disabled?: boolean;
+};
+
+export type PluginPromptActionContribution = {
+    id: string;
+    label: string;
+    icon?: ReactNode;
+    order?: number;
+    nodeTypes?: Array<"image" | "video" | "audio" | "text">;
+    onClick?: (ctx: PluginPromptActionProps) => void | Promise<void>;
+    component?: ComponentType<PluginPromptActionProps>;
+};
+
+export type GenerationSubmitContext = {
+    nodeId: string;
+    nodeType: "image" | "video" | "audio";
+    prompt: string;
+    model?: string;
+    params: Record<string, unknown>;
+    referenceImages?: string[];
+    metadata?: Record<string, unknown>;
+};
+
+/** A plugin may rewrite the prompt and attach metadata; model parameters stay as the user set them. */
+export type GenerationSubmitPatch = {
+    prompt?: string;
+    metadata?: Record<string, unknown>;
+};
+
+export type PluginGenerationBeforeSubmitContribution = {
+    id: string;
+    order?: number;
+    nodeTypes?: Array<"image" | "video" | "audio">;
+    transform: (ctx: GenerationSubmitContext) => Promise<GenerationSubmitPatch | void> | GenerationSubmitPatch | void;
+};
+
+export type PluginAssistantToolCardProps = {
+    toolName: string;
+    status: string;
+    input?: Record<string, unknown>;
+    output?: unknown;
+    error?: string;
+};
+
+export type PluginAssistantToolCardContribution = {
+    toolName: string;
+    component: ComponentType<PluginAssistantToolCardProps>;
+};
+
+export type PluginAssetSourceContribution = {
+    id: string;
+    name: string;
+    description?: string;
+    provider: AssetSourceProvider;
+};
+
+export type PluginAssetItemActionContext = {
+    asset: Asset;
+};
+
+export type PluginAssetItemActionContribution = {
+    id: string;
+    label: string;
+    icon?: ReactNode;
+    order?: number;
+    when?: (ctx: PluginAssetItemActionContext) => boolean;
+    onSelect: (ctx: PluginAssetItemActionContext) => void | Promise<void>;
+};
+
+export type PluginEditorSlotContribution = {
+    id: string;
+    title: string;
+    order?: number;
+    render: (context: { projectId: string; currentTimeMs: number }) => ReactNode;
+};
+
+export type PluginAppPageProps = {
+    pluginId: string;
+    subpath: string;
+};
+
+export type PluginAppPageContribution = {
+    path?: string;
+    title: string;
+    icon?: ReactNode;
+    component: ComponentType<PluginAppPageProps>;
+};
+
+export type PluginAppSidebarContribution = {
+    id: string;
+    label: string;
+    path: string;
+    icon?: ReactNode;
+    badge?: string;
+    order?: number;
+};
+
+export type PluginAppCommandContribution = {
+    id: string;
+    title: string;
+    subtitle?: string;
+    keywords?: string[];
+    shortcut?: string;
+    icon?: ReactNode;
+    handler: () => void | Promise<void>;
+};
+
+export type PluginAppSettingsProps = {
+    pluginId: string;
+    config: Record<string, string | number | boolean>;
+    updateConfig: (patch: Record<string, string | number | boolean>) => Promise<void>;
+};
+
+export type PluginAppSettingsContribution = {
+    title?: string;
+    component: ComponentType<PluginAppSettingsProps>;
+};
+
+export type PluginProjectViewProps = {
+    projectId: string;
+};
+
+export type PluginProjectViewContribution = {
+    id: string;
+    label: string;
+    icon?: ReactNode;
+    order?: number;
+    component: ComponentType<PluginProjectViewProps>;
+};
+
+export type PluginCardProps = {
+    name: string;
+    description: string;
+    sourceLabel: string;
+    status: string;
+    onOpen: MouseEventHandler<HTMLButtonElement>;
+    openLabel?: string;
+    actions: ReactNode;
+    children?: ReactNode;
+    "data-testid"?: string;
+};
+
+export type PluginCenterSectionProps = {
+    Card: ComponentType<PluginCardProps>;
+    Button: typeof import("antd").Button;
+    DetailsModal: ComponentType<import("antd").ModalProps & { flush?: boolean; scrollBody?: boolean }>;
+    Markdown: ComponentType<{ source: string; className?: string }>;
+    RegistrySelect: typeof import("antd").Select;
+    pluginId: string;
+    installedPlugins?: RegisteredPlugin[];
+    pluginStates?: Record<string, unknown>;
+    reloadPlugins?: () => Promise<void> | void;
+    requestInstallPlugin?: (req: PluginInstallConfirmRequest) => void;
+};
+
+export type PluginCenterSectionContribution = {
+    id: string;
+    label: string;
+    description?: string;
+    icon?: ReactNode;
+    order?: number;
+    component: ComponentType<PluginCenterSectionProps>;
+    render?: ComponentType<PluginCenterSectionProps>;
+};
+
+export type PluginSlotMap = {
+    "canvas.node": PluginCanvasNodeSlotContribution;
+    "canvas.addNodeMenu": PluginCanvasAddNodeMenuContribution;
+    "canvas.toolbar.main": CanvasToolDescriptor;
+    "canvas.toolbar.selection": CanvasToolDescriptor;
+    "canvas.toolbar.nodeHover": CanvasToolDescriptor;
+    "canvas.contextMenu": PluginCanvasContextMenuContribution;
+    "canvas.nodePanel": PluginCanvasNodePanelContribution;
+    "canvas.sidePanel": PluginCanvasSidePanelContribution;
+    "canvas.promptActions": PluginPromptActionContribution;
+    "generation.beforeSubmit": PluginGenerationBeforeSubmitContribution;
+    "assistant.toolCard": PluginAssistantToolCardContribution;
+    "assets.source": PluginAssetSourceContribution;
+    "assets.itemActions": PluginAssetItemActionContribution;
+    "editor.leftSidebar.panels": PluginEditorSlotContribution;
+    "editor.rightInspector.sections": PluginEditorSlotContribution;
+    "editor.bottomDock.tabs": PluginEditorSlotContribution;
+    "editor.previewOverlay": PluginEditorSlotContribution;
+    "editor.timeline.trackHeaders": PluginEditorSlotContribution;
+    "editor.timeline.clipOverlays": PluginEditorSlotContribution;
+    "editor.toolbar.actions": PluginEditorSlotContribution;
+    "editor.contextMenu.items": PluginEditorSlotContribution;
+    "editor.timeline-panel": PluginEditorSlotContribution;
+    "editor.preview-renderer": PluginEditorSlotContribution;
+    "editor.inspector": PluginEditorSlotContribution;
+    "editor.asset-ingest": PluginEditorSlotContribution;
+    "editor.subtitle-tool": PluginEditorSlotContribution;
+    "editor.transcription-provider": PluginEditorSlotContribution;
+    "editor.export-renderer": PluginEditorSlotContribution;
+    "editor.ai-assistant": PluginEditorSlotContribution;
+    "app.page": PluginAppPageContribution;
+    "app.sidebar": PluginAppSidebarContribution;
+    "app.command": PluginAppCommandContribution;
+    "app.settings": PluginAppSettingsContribution;
+    "project.view": PluginProjectViewContribution;
+    "pluginCenter.section": PluginCenterSectionContribution;
+};
+
+export type PluginSlotName = keyof PluginSlotMap;
+
+// ── Section 5.3: 5 Frontend Plugin Events ────────────────────────────────────
+
+export type PluginEventMap = {
+    "generation.submitted": { nodeId: string; nodeType: string; model?: string; prompt: string; taskId?: string };
+    "generation.completed": { nodeId: string; nodeType: string };
+    "generation.failed": { nodeId: string; nodeType: string; error: string; taskId?: string };
+    "assets.imported": { assets: Array<{ id: string; name: string; type: string; url: string }> };
+    "assistant.turnCompleted": { canvasId?: string; sessionId?: string; turnId?: string; status: "completed" | "failed" | "cancelled" };
+};
+
+export type PluginEventName = keyof PluginEventMap;
+
+// ── Section 5.1 / 2.3: Host SDK & Install Confirmation Types ─────────────────
+
+/** What the host install confirmation needs; Go reads the real package before committing. */
+export type PluginInstallConfirmRequest = {
+    /** npm spec, local package directory, or the name of a sample shipped with BeefTV. */
+    source: string;
+    name?: string;
+    version?: string;
+    description?: string;
+    author?: string;
+    /** npm registry chosen in the market: npmmirror or npmjs. */
+    registry?: string;
+    isUpdate?: boolean;
+};
+
+export type BeefTVPluginHost = {
+    pluginId: string;
+    manifest: PluginManifest | PluginManifestV2;
+    React: typeof import("react");
+    contribute: <K extends PluginSlotName>(slot: K, payload: PluginSlotMap[K]) => () => void;
+    events: {
+        on: <E extends PluginEventName>(event: E, handler: (payload: PluginEventMap[E]) => void) => () => void;
+        emit: <E extends PluginEventName>(event: E, payload: PluginEventMap[E]) => void;
+    };
+    storage: PluginStorage;
+    config: {
+        getAll: () => Record<string, string | number | boolean>;
+        get: <T extends string | number | boolean = string>(key: string, fallback?: T) => T | undefined;
+        set: (patch: Record<string, string | number | boolean>) => Promise<void>;
+    };
+    ui: {
+        notify: (message: string, level?: "info" | "success" | "warning" | "error") => void;
+        navigate: (path: string) => void;
+        /** Opens the host install confirmation; nothing installs without the user's confirmation. */
+        requestInstallPlugin: (request: PluginInstallConfirmRequest) => void;
+    };
+    /** Business operations, the same set the CLI, MCP and assistant use. Writes go through here only. */
+    ops: {
+        call: <T = unknown>(op: string, params?: Record<string, unknown>) => Promise<T>;
+    };
+    context: {
+        /** Canvas currently open in the workspace, from the route. */
+        getCanvasId: () => string | undefined;
+    };
+    assets: {
+        list: () => Asset[];
+    };
+    channels?: {
+        list: () => Array<Record<string, unknown>>;
+        upsert: (channel: Record<string, unknown>) => Promise<Record<string, unknown>>;
+        fetchCatalog?: (params: { baseUrl: string; apiKey: string; apiFormat?: string }) => Promise<{ models: string[] }>;
+    };
 };

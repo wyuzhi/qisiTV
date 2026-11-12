@@ -17,7 +17,7 @@ import (
 	"time"
 
 	localasset "qisitv/backend/internal/asset"
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
@@ -195,13 +195,7 @@ func DecodeGenerationArtifact(deps DeliveryMediaDeps, userID, identity, mediaTyp
 }
 
 func isManagedTaskConnection(task model.Task) bool {
-	var input struct {
-		Config struct {
-			CredentialRef string `json:"credentialRef"`
-			ChannelID     string `json:"channelId"`
-		} `json:"config"`
-	}
-	return json.Unmarshal([]byte(task.InputJSON), &input) == nil && (input.Config.CredentialRef == beefapi.CredentialRef || input.Config.ChannelID == beefapi.ChannelID)
+	return beeftv.IsManagedTaskInput(task.InputJSON)
 }
 
 func ImageDownloadHeaders(
@@ -252,7 +246,7 @@ func ImageDownloadHeaders(
 			return nil, err
 		}
 	}
-	if input.Config.CredentialRef == beefapi.CredentialRef || input.Config.ChannelID == beefapi.ChannelID {
+	if input.Config.CredentialRef == beeftv.CredentialRef || input.Config.ChannelID == beeftv.ChannelID {
 		return nil, nil
 	}
 	if input.Config.BaseURL == "" && input.Config.ChannelID == "" {
@@ -320,12 +314,15 @@ func ManagedDeliveryArtifact(repo *repository.Repository, decryptSetting func(st
 		if err := json.Unmarshal([]byte(plain), &config); err != nil {
 			return false, err
 		}
-		if config.CredentialRef == beefapi.CredentialRef || config.ChannelID == beefapi.ChannelID {
+		if config.CredentialRef == beeftv.CredentialRef || config.ChannelID == beeftv.ChannelID {
 			return true, nil
+		}
+		if strings.TrimSpace(config.BaseURL) != "" || strings.TrimSpace(config.APIKey) != "" || strings.TrimSpace(config.ChannelID) != "" {
+			return false, nil
 		}
 	}
 	if attempt, err := repo.LatestRouteAttempt(task.ID); err == nil && attempt != nil {
-		if attempt.ChannelID == beefapi.ChannelID {
+		if attempt.ChannelID == beeftv.ChannelID {
 			return true, nil
 		}
 		if row, err := repo.ImageSubmission(attempt.ID, task.ID, task.UserID); err == nil && row.QueryCipher != "" {
@@ -343,7 +340,7 @@ func ArtifactDownloadPartialPath(dataDir, userID, identity string) string {
 func RefreshManagedArtifactURL(
 	ctx context.Context,
 	repo *repository.Repository,
-	queryManaged func(ctx context.Context, task model.Task) (status string, outputs []beefapi.MediaOutput, managed, legacy bool, err error),
+	queryManaged func(ctx context.Context, task model.Task) (status string, outputs []beeftv.MediaOutput, managed, legacy bool, err error),
 	userID, identity, kind string,
 	cause error,
 ) (string, bool, error) {

@@ -301,13 +301,29 @@
     gap: 10px;
     margin-top: 8px;
 }
+.canvas-assistant-proposal-lines,
+.canvas-assistant-proposal-note,
+.canvas-assistant-proposal-target {
+    overflow-wrap: anywhere;
+}
 .canvas-assistant-proposal-target {
     font-size: 12px;
     line-height: 1.65;
-    white-space: pre-line;
-    overflow-wrap: anywhere;
     padding-left: 8px;
     border-left: 2px solid var(--border);
+}
+/* 每行单独均衡折行，超过 6 行的长提示词改用 pretty 防孤字，确保末行不会只剩一两个字。 */
+.canvas-assistant-proposal-lines > div,
+.canvas-assistant-proposal-note > div,
+.canvas-assistant-proposal-target > div,
+.canvas-assistant-card > .canvas-assistant-meta,
+.canvas-assistant-plan p,
+.canvas-assistant-plan li > .canvas-assistant-plan-note {
+    text-wrap: balance;
+    overflow-wrap: anywhere;
+}
+.canvas-assistant-card .canvas-assistant-pretty-line {
+    text-wrap: pretty;
 }
 .canvas-assistant-plan { display: block; overflow-wrap: anywhere; }
 .canvas-assistant-plan summary { cursor: pointer; font-weight: 500; }

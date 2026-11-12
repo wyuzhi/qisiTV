@@ -6,11 +6,14 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"qisitv/backend/internal/securefile"
 )
 
 // ClientMode 是服务端授予客户端的能力模式。客户端只能出示身份，不能自己声明模式。
@@ -82,11 +85,16 @@ func NormalizeClientKind(kind string) ClientKind {
 }
 
 // ClientRegistration 记录一个被本机用户登记过的非交互客户端。
-// Kind/ApprovalMode/LastUsedAt/RevokedAt 是后加字段：历史文件里缺失时按零值解析，读出后统一补默认。
+// Kind/Origin/ApprovalMode/LastUsedAt/RevokedAt 是后加字段：历史文件里缺失时按零值解析，
+// 读出后统一补默认；缺失的 Origin 一律视为手动连接。
 type ClientRegistration struct {
-	ID           string             `json:"id"`
-	Label        string             `json:"label"`
-	Kind         ClientKind         `json:"kind,omitempty"`
+	ID    string     `json:"id"`
+	Label string     `json:"label"`
+	Kind  ClientKind `json:"kind,omitempty"`
+	// Origin records who created the credential. Empty means a manual
+	// connection; one-click integrations use a reserved origin value so their
+	// identity never depends on the display label.
+	Origin       string             `json:"origin,omitempty"`
 	Mode         ClientMode         `json:"mode"`
 	ApprovalMode ClientApprovalMode `json:"approvalMode,omitempty"`
 	TokenHash    string             `json:"tokenHash"`
@@ -108,7 +116,12 @@ type ClientRegistry struct {
 }
 
 func NewClientRegistry(dataDir string) *ClientRegistry {
-	return &ClientRegistry{path: filepath.Join(dataDir, "agent_clients.json")}
+	return &ClientRegistry{path: ClientRegistryPath(dataDir)}
+}
+
+// ClientRegistryPath 存客户端登记（含凭据摘要），和凭据文件一样只许当前用户读写。
+func ClientRegistryPath(dataDir string) string {
+	return filepath.Join(dataDir, "agent_clients.json")
 }
 
 func hashToken(token string) string {
@@ -152,6 +165,12 @@ func (r *ClientRegistry) RegisterKind(kind, label string, mode ClientMode) (Clie
 
 // RegisterClient 登记一个客户端凭据，记录来源分类、读写模式与付费生成审批档位。
 func (r *ClientRegistry) RegisterClient(kind, label string, mode ClientMode, approvalMode ClientApprovalMode) (ClientRegistration, string, error) {
+	return r.RegisterClientOrigin(kind, label, "", mode, approvalMode)
+}
+
+// RegisterClientOrigin 额外记录凭据来源；空 origin 表示手动连接。
+// 一键接入只凭这个字段识别自己签发的凭据，显示名称不参与判断。
+func (r *ClientRegistry) RegisterClientOrigin(kind, label, origin string, mode ClientMode, approvalMode ClientApprovalMode) (ClientRegistration, string, error) {
 	if mode == "" {
 		mode = ClientReadWrite
 	}
@@ -179,6 +198,7 @@ func (r *ClientRegistry) RegisterClient(kind, label string, mode ClientMode, app
 		ID:           "client-" + hex.EncodeToString(idBuf),
 		Label:        label,
 		Kind:         normalizedKind,
+		Origin:       strings.TrimSpace(origin),
 		Mode:         mode,
 		ApprovalMode: normalizedApproval,
 		TokenHash:    hashToken(token),
@@ -241,11 +261,19 @@ func (r *ClientRegistry) Lookup(clientID, token string) (ClientRegistration, boo
 
 // List 返回未吊销的登记信息（不含 token 本身）。
 func (r *ClientRegistry) List() []ClientRegistration {
+	live, _ := r.ListLive()
+	return live
+}
+
+// ListLive 与 List 相同，但登记文件读不出或解析失败时返回错误。
+// 需要据此做安全决定的调用方（例如断开前枚举要吊销的凭据）必须用它，
+// 不能把「读不出」当成「没有凭据」。
+func (r *ClientRegistry) ListLive() ([]ClientRegistration, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	items, err := r.load()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	live := make([]ClientRegistration, 0, len(items))
 	for _, item := range items {
@@ -253,7 +281,7 @@ func (r *ClientRegistry) List() []ClientRegistration {
 			live = append(live, item)
 		}
 	}
-	return live
+	return live, nil
 }
 
 // Revoke 吊销一个登记：保留记录（带吊销时间）而不是删行，这样凭据不会被后续登记复用，
@@ -284,6 +312,9 @@ func (r *ClientRegistry) Revoke(clientID string) error {
 }
 
 // atomicWriteFile 先写临时文件再改名，避免并发登记时留下半截文件丢记录。
+// 写入前先把空文件收紧到只有当前用户可读（Windows 上不再继承数据目录的权限）。
+// 数据目录在不支持访问控制的磁盘上（如 exFAT）时照常写入并记一条日志：
+// 凭据写不出来会让本机鉴权整体失效，比权限没收紧更糟。
 func atomicWriteFile(path string, data []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".agent-clients-*")
 	if err != nil {
@@ -294,6 +325,9 @@ func atomicWriteFile(path string, data []byte) error {
 	if err := tmp.Chmod(0o600); err != nil {
 		tmp.Close()
 		return err
+	}
+	if err := restrictFile(name); err != nil {
+		log.Printf("凭据文件 %s 未能收紧为仅当前用户可读：%v", filepath.Base(path), err)
 	}
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
@@ -369,15 +403,37 @@ func HostTokenMatches(dataDir, presented string) bool {
 	return subtle.ConstantTimeCompare([]byte(expected), []byte(presented)) == 1
 }
 
+func restrictFile(path string) error {
+	if err := securefile.Protect(path); err != nil {
+		return err
+	}
+	return securefile.Verify(path)
+}
+
+// restrictExisting 收紧旧版本已经写好的凭据文件；文件不存在时什么都不做。
+func restrictExisting(path string) {
+	if _, err := os.Stat(path); err != nil {
+		return
+	}
+	_ = os.Chmod(path, 0o600)
+	if err := restrictFile(path); err != nil {
+		log.Printf("凭据文件 %s 未能收紧为仅当前用户可读：%v", filepath.Base(path), err)
+	}
+}
+
 // EnsureAgentCredentials 在组合根生成 owner 凭据与宿主凭据；DataDir 为空时明确报错，不写 CWD。
+// 已有的凭据文件和客户端登记也在这里收紧一次，旧版本在 Windows 上写的文件会继承数据目录权限。
 func EnsureAgentCredentials(dataDir string) {
 	if strings.TrimSpace(dataDir) == "" {
 		return
 	}
+	hostPath := HostTokenPath(dataDir)
+	for _, path := range []string{OwnerTokenPath(dataDir), hostPath, ClientRegistryPath(dataDir)} {
+		restrictExisting(path)
+	}
 	if _, err := EnsureOwnerToken(dataDir); err != nil {
 		return
 	}
-	hostPath := filepath.Join(dataDir, "agent_host_token")
 	if _, err := os.Stat(hostPath); err == nil {
 		return
 	}

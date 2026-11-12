@@ -6,6 +6,7 @@ import { AppModal } from "@/components/ui/product/app-modal";
 import { FileImage, FileText, Film, Music2, UploadCloud, X } from "lucide-react";
 
 import { isAudioFile } from "@/lib/canvas/canvas-project-generation";
+import { isScriptDocumentFile } from "@/lib/canvas/script-document-import";
 
 import { CANVAS_UPLOAD_ACCEPT, isTextUploadFile, uploadNodeType } from "@/lib/canvas/canvas-file-upload";
 
@@ -84,7 +85,7 @@ export function CanvasUploadModal({ open, onClose, onUpload, onImportUrl }: Canv
                         fileList={fileList}
                         beforeUpload={(file) => {
                             if (isCanvasUploadFile(file)) return false;
-                            message.warning(`“${file.name}”不是支持的图片、视频、音频或 TXT / Markdown 文件`);
+                            message.warning(`“${file.name}”不是支持的图片、视频、音频或文档文件 (.docx / .txt / .md)`);
                             return Upload.LIST_IGNORE;
                         }}
                         onChange={({ fileList: nextFileList }) => setFileList(nextFileList)}
@@ -104,7 +105,7 @@ export function CanvasUploadModal({ open, onClose, onUpload, onImportUrl }: Canv
                                 <span className="inline-flex items-center gap-1"><FileImage className="size-3.5" aria-hidden="true" />图片</span>
                                 <span className="inline-flex items-center gap-1"><Film className="size-3.5" aria-hidden="true" />视频</span>
                                 <span className="inline-flex items-center gap-1"><Music2 className="size-3.5" aria-hidden="true" />音频</span>
-                                <span className="inline-flex items-center gap-1"><FileText className="size-3.5" aria-hidden="true" />TXT / Markdown</span>
+                                <span className="inline-flex items-center gap-1"><FileText className="size-3.5" aria-hidden="true" />TXT / Markdown / Word</span>
                             </div>
                         </div>
                     </Upload.Dragger>
@@ -175,11 +176,11 @@ function CanvasUploadFilePreview({ file }: { file: UploadFile }) {
     }
     return (
         <div className="grid size-full place-items-center text-foreground/45">
-            {source && isTextUploadFile(source) ? <FileText className="size-7" aria-hidden="true" /> : source && (source.type.startsWith("audio/") || isAudioFile(source)) ? <Music2 className="size-7" aria-hidden="true" /> : <FileImage className="size-7" aria-hidden="true" />}
+            {source && (isTextUploadFile(source) || isScriptDocumentFile(source)) ? <FileText className="size-7" aria-hidden="true" /> : source && (source.type.startsWith("audio/") || isAudioFile(source)) ? <Music2 className="size-7" aria-hidden="true" /> : <FileImage className="size-7" aria-hidden="true" />}
         </div>
     );
 }
 
 function isCanvasUploadFile(file: File) {
-    return Boolean(uploadNodeType(file));
+    return Boolean(uploadNodeType(file)) || isScriptDocumentFile(file);
 }

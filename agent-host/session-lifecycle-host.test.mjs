@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { canvasKey } from './session-owner.mjs';
-import { serveEmptySkillContext } from './test-support/skill-context-fixture.mjs';
+import { serveEmptyHostState } from './test-support/skill-context-fixture.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const UPSTREAM_SECRET = 'sk-synthetic-upstream-secret';
@@ -116,7 +116,7 @@ async function withHost(run, envExtra = {}, options = {}) {
     res.setHeader('content-type', 'application/json');
     if (req.headers['x-beeftv-agent-token'] !== hostToken) { res.writeHead(403).end('{}'); return; }
     opsRequests.push(`${req.method} ${req.url}`);
-    if (serveEmptySkillContext(req, res)) return;
+    if (serveEmptyHostState(req, res)) return;
     if (req.url === '/api/ops') {
       res.end(JSON.stringify({ code: 0, data: { ops: [{ id: 'canvas.get', summary: 'Read', readOnly: true, scope: 'canvas', assistantModes: ['full-access', 'read-only', 'canvas'], params: { type: 'object', properties: { canvasId: { type: 'string' } }, required: ['canvasId'] } }] } }));
       return;

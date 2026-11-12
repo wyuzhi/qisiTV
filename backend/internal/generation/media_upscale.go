@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	localasset "qisitv/backend/internal/asset"
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/topaz"
 	"strings"
@@ -48,7 +48,7 @@ func UpscaleConfig(name string, lookupCred func() (string, string, string, strin
 	if key == "" {
 		return Config{}, BadAuthRequest("请先连接官方算力账号")
 	}
-	return Config{BaseURL: base, APIKey: key, CredentialRef: beefapi.CredentialRef, Model: name, InterfaceType: "newapi"}, nil
+	return Config{BaseURL: base, APIKey: key, CredentialRef: beeftv.CredentialRef, Model: name, InterfaceType: "newapi"}, nil
 }
 
 func UpscaleCapabilities() map[string]any {
@@ -148,7 +148,7 @@ func BuildMediaUpscaleTaskPayload(ctx context.Context, user string, request topa
 	if IsLikeAIUpscaleModel(input.Config.Model) {
 		operation = "media.upscale.likeai"
 	} else {
-		config["credentialRef"] = beefapi.CredentialRef
+		config["credentialRef"] = beeftv.CredentialRef
 	}
 	payload["metadata"] = map[string]any{"clientOperationId": request.ClientOperationID, "nodeId": request.NodeID, "source": "canvas", "operation": operation, "upscaleChannelId": request.ChannelID, "acceptProviderBilling": request.AcceptProviderBilling}
 	return input, payload, nil

@@ -11,7 +11,7 @@ import { prepareBackendGenerationTask } from "../src/services/api/generation-tas
 import { creationReferenceLimitsFor, reconcileCreationAttachmentLimit } from "../src/pages/create/creation-references";
 import { createModelChannel, defaultConfig, normalizeConfigSnapshot, type ModelChannel } from "../src/stores/use-config-store";
 
-const catalog = ["managed-video-catalog.json", "managed-video-catalog-live.json"].flatMap((name) => JSON.parse(readFileSync(new URL(`../../backend/internal/beefapi/testdata/${name}`, import.meta.url), "utf8")).data) as Array<{ id: string; video_capabilities: unknown; video_capabilities_version?: string }>;
+const catalog = ["managed-video-catalog.json", "managed-video-catalog-live.json"].flatMap((name) => JSON.parse(readFileSync(new URL(`../../backend/internal/beeftv/testdata/${name}`, import.meta.url), "utf8")).data) as Array<{ id: string; video_capabilities: unknown; video_capabilities_version?: string }>;
 const supplied = catalog.filter((item) => item.video_capabilities_version && item.video_capabilities);
 
 function configured(channel: ModelChannel, model: string) {
@@ -22,11 +22,11 @@ test("real API video declarations survive catalog merge, hydration and control l
     expect(supplied.length).toBeGreaterThan(5);
     for (const item of supplied) {
         for (const model of [item.id, `unknown-${item.id.length}`]) {
-            const channel = createModelChannel({ id: "beefapi", pinned: true, credentialRef: "beefapi-enterprise", baseUrl: "https://beeftv.app", models: [model] });
+            const channel = createModelChannel({ id: "beeftv", pinned: true, credentialRef: "beeftv", baseUrl: "https://beeftv.app", models: [model] });
             const video = sanitizeServerVideoCapability(item.video_capabilities)!;
             channel.modelProfiles = mergeFetchedChannelModelProfiles(channel, [{ id: model, supportedEndpointTypes: ["openai-video"], videoCapabilities: video, videoCapabilitiesVersion: item.video_capabilities_version }]);
             const config = normalizeConfigSnapshot({ config: configured(channel, model) }).config;
-            expect(modelCapabilityConfigFor(config, `beefapi::${model}`).video).toEqual(video);
+            expect(modelCapabilityConfigFor(config, `beeftv::${model}`).video).toEqual(video);
         }
     }
 });
@@ -38,7 +38,7 @@ test("explicit server zero and false values cannot be repaired from the model na
     video.duration = { selection: "range", min: 1, max: 3, step: 1, default: 1 };
     video.generateAudio = { supported: false, default: false };
     video.taskTypeConstraints = false;
-    const channel = createModelChannel({ id: "beefapi", pinned: true, baseUrl: "https://enterprise.beefapi.com", models: [model], modelProfiles: [{ model, capability: "video", protocol: "openai-videos", videoCapabilitiesVersion: "server-v2", capabilityConfig: { version: 1, video } }] });
+    const channel = createModelChannel({ id: "beeftv", pinned: true, baseUrl: "https://beeftv.app", models: [model], modelProfiles: [{ model, capability: "video", protocol: "openai-videos", videoCapabilitiesVersion: "server-v2", capabilityConfig: { version: 1, video } }] });
     const config = normalizeConfigSnapshot({ config: configured(channel, model) }).config;
     expect(modelCapabilityConfigFor(config, config.model).video).toEqual(video);
     const html = renderToStaticMarkup(<VideoSettingsPanel config={config} theme={canvasThemes.dark} onConfigChange={() => {}} />);
@@ -56,7 +56,7 @@ test("explicit server zero and false values cannot be repaired from the model na
 test("a missing or invalid directory keeps a previous version but never invents a first declaration", async () => {
     const model = "seedance-2.0";
     const video = sanitizeServerVideoCapability(supplied[0].video_capabilities)!;
-    const channel = createModelChannel({ id: "beefapi", pinned: true, baseUrl: "https://beeftv.app", models: [model], modelProfiles: [{ model, capability: "video", protocol: "openai-videos", videoCapabilitiesVersion: "keep", capabilityConfig: { version: 1, video } }] });
+    const channel = createModelChannel({ id: "beeftv", pinned: true, baseUrl: "https://beeftv.app", models: [model], modelProfiles: [{ model, capability: "video", protocol: "openai-videos", videoCapabilitiesVersion: "keep", capabilityConfig: { version: 1, video } }] });
     for (const fields of [{}, { videoCapabilities: video, videoCapabilitiesVersion: " " }, { videoCapabilities: {} as typeof video, videoCapabilitiesVersion: "bad" }]) {
         for (const supportedEndpointTypes of [["openai-video"], ["openai"], []]) {
             const next = mergeFetchedChannelModelProfiles(channel, [{ id: model, supportedEndpointTypes, ...fields }]);
@@ -102,7 +102,7 @@ test("operation-specific counts preserve attachments and reject an incompatible 
     const video = item.videoCapabilities!;
     expect(video.references.maxImages).toBe(10);
     expect(video.operationReferences?.image_to_video).toMatchObject({ maxImages: 2, maxVideos: 0, maxAudios: 0 });
-    const channel = createModelChannel({ id: "beefapi", models: [item.id], credentialRef: "beefapi-enterprise", baseUrl: "https://beeftv.app" });
+    const channel = createModelChannel({ id: "beeftv", models: [item.id], credentialRef: "beeftv", baseUrl: "https://beeftv.app" });
     channel.modelProfiles = mergeFetchedChannelModelProfiles(channel, [item]);
     const config = { ...configured(channel, item.id), videoSeconds: "5" };
     const images = Array.from({ length: 3 }, (_, i) => ({ id: `ref-${i}`, name: `ref-${i}`, type: "image/png", dataUrl: "", storageKey: `resource:ref-${i}` }));
@@ -119,19 +119,19 @@ test("operation-specific counts preserve attachments and reject an incompatible 
 });
 
 test("a managed model without any profile falls back to default video controls without blocking", () => {
-    const channel = createModelChannel({ id: "beefapi", models: ["seedance-2.5", "hy-image-v3"], baseUrl: "https://beeftv.app" });
+    const channel = createModelChannel({ id: "beeftv", models: ["seedance-2.5", "hy-image-v3"], baseUrl: "https://beeftv.app" });
     const config = configured(channel, "seedance-2.5");
-    const capability = modelCapabilityConfigFor(config, "beefapi::seedance-2.5");
+    const capability = modelCapabilityConfigFor(config, "beeftv::seedance-2.5");
     expect(capability.videoCapabilitiesUnavailable).toBeUndefined();
     expect(capability.video!.resolutions.length).toBeGreaterThan(0);
-    expect(hasDeclaredModelCapability(config, "beefapi::hy-image-v3", "image")).toBe(false);
-    expect(modelCompatibilityError(config, "beefapi::hy-image-v3", { capability: "image", input: { textCount: 1, imageCount: 6, videoCount: 0, audioCount: 0, characterCount: 0 } })).toBe("");
+    expect(hasDeclaredModelCapability(config, "beeftv::hy-image-v3", "image")).toBe(false);
+    expect(modelCompatibilityError(config, "beeftv::hy-image-v3", { capability: "image", input: { textCount: 1, imageCount: 6, videoCount: 0, audioCount: 0, characterCount: 0 } })).toBe("");
 });
 
 test("Seedance 2.5 exposes 480P draft preview switch and task payload carries videoDraft", async () => {
-    const channel = createModelChannel({ id: "beefapi", pinned: true, interfaceType: "newapi", models: ["seedance-2.5"], baseUrl: "https://beeftv.app" });
+    const channel = createModelChannel({ id: "beeftv", pinned: true, interfaceType: "newapi", models: ["seedance-2.5"], baseUrl: "https://beeftv.app" });
     const config = { ...configured(channel, "seedance-2.5"), videoDraft: "true" };
-    const capability = modelCapabilityConfigFor(config, "beefapi::seedance-2.5");
+    const capability = modelCapabilityConfigFor(config, "beeftv::seedance-2.5");
     expect(capability.video?.draft).toEqual({ supported: true, default: false });
     expect(capability.video?.resolutions).toContain("480p");
     const html = renderToStaticMarkup(<VideoSettingsPanel config={config} theme={canvasThemes.dark} onConfigChange={() => {}} />);

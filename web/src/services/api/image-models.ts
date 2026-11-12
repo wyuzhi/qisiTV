@@ -4,7 +4,7 @@ import { fetchBrowserLikeAIModels } from "@/services/browser-likeai-client";
 import { createChannelTransport } from "@/services/api/channel-transport";
 import { readAxiosError, validateGeminiPayload } from "@/services/api/image-response";
 import { geminiApiUrl, geminiHeaders } from "@/services/api/image-transport";
-import { BeefAPIConnectionChangedError, getBeefAPIConnectionEpoch } from "@/services/api/beefapi-connection";
+import { BeefTVConnectionChangedError, getBeefTVConnectionEpoch } from "@/services/api/beeftv-connection";
 import { ApiError, http } from "@/services/api/request";
 import { buildApiUrl, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 
@@ -81,8 +81,8 @@ export async function fetchChannelModels(channel: ModelChannel, viaBackend = fal
         if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
         return result;
     }
-    const managed = channel.id === "beefapi" && (channel.pinned || Boolean(channel.credentialRef));
-    const connectionEpoch = getBeefAPIConnectionEpoch();
+    const managed = channel.id === "beeftv" && (channel.pinned || Boolean(channel.credentialRef));
+    const connectionEpoch = getBeefTVConnectionEpoch();
     if (managed || channel.apiFormat === "likeai") {
         viaBackend = true;
     }
@@ -96,15 +96,17 @@ export async function fetchChannelModels(channel: ModelChannel, viaBackend = fal
     }
     try {
         // 登录态由同源后端代取模型目录，避免每个 OpenAI 兼容服务分别维护浏览器 CORS 白名单。
-        const result = await http.post<{ models?: Array<string | ChannelModelCatalogItem> }>(managed ? "/beefapi/connection/models" : "/ai/models", managed ? {} : {
+        const result = await http.post<{ models?: Array<string | ChannelModelCatalogItem> }>(managed ? "/beeftv/connection/models" : "/ai/models", managed ? {} : {
             baseUrl: channel.baseUrl,
             apiKey: managed ? "" : channel.apiKey,
             apiFormat: channel.apiFormat,
             headers: channel.headers,
             channelId: managed ? channel.id : undefined,
-            credentialRef: managed ? "beefapi-enterprise" : undefined,
+            credentialRef: managed ? "beeftv" : undefined,
+            // 渠道用插件 JS 接口时，后端改由插件列出模型。
+            protocol: channel.interfaceType || undefined,
         }, { timeout: 30_000, signal });
-        if (managed && connectionEpoch !== getBeefAPIConnectionEpoch()) throw new BeefAPIConnectionChangedError();
+        if (managed && connectionEpoch !== getBeefTVConnectionEpoch()) throw new BeefTVConnectionChangedError();
         const catalog = new Map<string, ChannelModelCatalogItem>();
         for (const item of result.models || []) {
             const entry = typeof item === "string" ? sanitizeChannelModelCatalogItem({ id: item }) : sanitizeChannelModelCatalogItem(item);
@@ -119,7 +121,7 @@ export async function fetchChannelModels(channel: ModelChannel, viaBackend = fal
         // The backend has already classified and sanitized catalogue errors.
         // Running generation-error classification again turns a precise 502
         // auth/unsupported-catalog message into a generic unavailable message.
-        if (error instanceof ApiError || error instanceof BeefAPIConnectionChangedError || (error instanceof DOMException && error.name === "AbortError")) throw error;
+        if (error instanceof ApiError || error instanceof BeefTVConnectionChangedError || (error instanceof DOMException && error.name === "AbortError")) throw error;
         throw new Error(readAxiosError(error, "读取模型失败"));
     }
 }

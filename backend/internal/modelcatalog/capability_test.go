@@ -11,7 +11,7 @@ import (
 func TestServerImageCapabilitiesOwnFileLimitWithoutModelOrHostExceptions(t *testing.T) {
 	for _, name := range []string{"opaque-future-2030", "gpt-image-2", "gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"} {
 		profile := DefaultImageCapabilityConfig("openai-image", name)
-		for _, base := range []string{"https://beeftv.app", "https://enterprise.beefapi.com/v1", "https://beefapi.com", "https://third-party.example", "http://beeftv.app", "https://beeftv.app.evil.example"} {
+		for _, base := range []string{"https://beeftv.app", "https://legacy-enterprise.example.com/v1", "https://legacy.example.com", "https://third-party.example", "http://beeftv.app", "https://beeftv.app.evil.example"} {
 			input := TaskInput{Mode: "image", Prompt: "edit", Config: TaskConfig{BaseURL: base, InterfaceType: "openai-image", Model: name, Size: "1024x1024"}, ReferenceImages: []MediaRef{{Bytes: 48 << 20}}}
 			if err := validateImageTask(profile, input); err == nil {
 				t.Fatal("hostname silently removed local limits")
@@ -58,7 +58,7 @@ func TestGPTImageQualityTiersValidateAll39Selections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"} {
+	for _, name := range []string{"gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2.6", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst"} {
 		profile := DefaultImageCapabilityConfig("openai-image", name)
 		for _, quality := range profile.Quality.Values {
 			if quality == "auto" {
@@ -69,7 +69,7 @@ func TestGPTImageQualityTiersValidateAll39Selections(t *testing.T) {
 				if err := validateImageTask(profile, input); err != nil {
 					t.Fatalf("%s/%s/%s: %v", name, quality, size, err)
 				}
-				input.Mode, input.Config.ChannelID = "image", "beefapi"
+				input.Mode, input.Config.ChannelID = "image", "beeftv"
 				_, err := ValidateConfiguredTask(input, func(_, _ string) (*model.ChannelModel, error) {
 					return &model.ChannelModel{ModelKey: name, Protocol: "openai-image", CapabilityConfigJSON: string(legacyJSON)}, nil
 				})
@@ -80,8 +80,8 @@ func TestGPTImageQualityTiersValidateAll39Selections(t *testing.T) {
 			}
 		}
 	}
-	if count != 39 {
-		t.Fatalf("expected 39 quality/size combinations, got %d", count)
+	if count != 84 {
+		t.Fatalf("expected 84 quality/size combinations, got %d", count)
 	}
 	if containsCapabilityString(DefaultImageCapabilityConfig("openai-image", "gpt-image-2").Quality.Values, "max") || containsCapabilityString(DefaultImageCapabilityConfig("openai-image", "custom-doodle").Quality.Values, "xhigh") {
 		t.Fatal("unverified models must not inherit the 2.5 quality tiers")

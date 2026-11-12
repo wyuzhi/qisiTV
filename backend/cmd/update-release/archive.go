@@ -379,8 +379,16 @@ func validateArchive(platform, zipPath string) error {
 			}
 		case name == windowsExecutable:
 			hasWinExec = true
-		case strings.HasPrefix(name, pluginDirName+"/") && strings.HasSuffix(name, pluginSuffix) && file.Mode().IsRegular():
-			pluginCount++
+		case strings.HasPrefix(name, pluginDirName+"/"):
+			rel := strings.TrimPrefix(name, pluginDirName+"/")
+			if rel != "" {
+				if platform == platformWindowsAMD64 && (file.FileInfo().IsDir() || strings.Contains(rel, "/") || !strings.HasSuffix(strings.ToLower(rel), pluginSuffix)) {
+					return fmt.Errorf("Windows archive %s must contain only flat *%s files: %s", pluginDirName, pluginSuffix, name)
+				}
+				if strings.HasSuffix(name, pluginSuffix) && file.Mode().IsRegular() {
+					pluginCount++
+				}
+			}
 		case strings.HasPrefix(name, "qisiTV.app/Contents/Resources/"+pluginDirName+"/") && strings.HasSuffix(name, pluginSuffix) && file.Mode().IsRegular():
 			pluginCount++
 		}
@@ -490,7 +498,7 @@ func isExcludedName(pathName string) bool {
 	switch {
 	case base == ".env" || strings.HasPrefix(base, ".env."):
 		return true
-	case base == ".settings-key" || base == "beefapi-connection.json":
+	case base == ".settings-key" || base == "beeftv-connection.json" || strings.HasPrefix(base, ".beeftv-connection-"):
 		return true
 	case base == ".DS_Store" || base == "Thumbs.db" || strings.HasPrefix(base, "._"):
 		return true

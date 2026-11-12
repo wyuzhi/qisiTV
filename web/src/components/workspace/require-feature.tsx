@@ -12,7 +12,7 @@ const featureNames: Record<FeatureKey, string> = {
     shortDramaEnabled: "短剧创作",
     taskCenterEnabled: "任务中心",
     frontendModelsEnabled: "前台模型",
-    pluginCenterEnabled: "插件中心",
+    pluginCenterEnabled: "插件",
 };
 
 export function RequireFeature({ feature, children }: { feature: FeatureKey; children: ReactNode }) {

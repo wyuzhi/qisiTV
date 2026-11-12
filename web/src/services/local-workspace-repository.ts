@@ -9,21 +9,19 @@ import { canvasBackendSubmitPaused, CanvasBackendSubmitPausedError, clearCanvasB
 import { CanvasJournalError, clearCanvasOperationJournal, clearCanvasPendingProjection, loadCanvasOperationJournal, newCanvasCommitOperationId, peekCanvasOperationJournal, recordConfirmedCanvasCommit, updateCanvasOperationJournal } from "@/services/canvas-operation-journal";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import { getActiveUserScope } from "@/lib/user-scope";
-import { sameCanvasDocument } from "@/lib/canvas/canvas-content";
-import { canvasUnconfirmedReason, canvasUnconfirmedDiagnostic, type CanvasUnconfirmedState } from "@/lib/canvas/canvas-unconfirmed-edits";
+import { normalizeCanvasProjectGraph, sameCanvasDocument } from "@/lib/canvas/canvas-content";
+import { canvasUnconfirmedReason, canvasUnconfirmedDiagnostic, revertUnchangedCanvasDocumentPatch, type CanvasDocumentPersistPatch, type CanvasUnconfirmedState } from "@/lib/canvas/canvas-unconfirmed-edits";
 import { rebaseCanvasDocumentThreeWay, settleInFlightGenerationOverlay } from "@/lib/canvas/canvas-document-rebase";
 import { traceCanvasGraph } from "@/lib/canvas/canvas-graph-trace";
 import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { browserCanvasSavePending, deleteBrowserCanvases, hydrateBrowserCanvases, persistBrowserCanvas, readBrowserCanvas } from "@/services/browser-canvas-repository";
 import { CanvasProjectionError, incompleteCanvasProjection } from "@/services/canvas-projection-error";
 
-
 export { CanvasBackendSubmitPausedError } from "@/services/canvas-revision-conflict";
 export { CanvasProjectionError } from "@/services/canvas-projection-error";
 
 type LocalCanvasContent = Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId">>;
 type CanvasSaveSummary = Pick<CanvasProject, "id" | "title" | "createdAt" | "updatedAt" | "revision">;
-type CanvasDocumentPersistPatch = Partial<Pick<CanvasProject, "nodes" | "connections" | "timeline" | "chatSessions" | "activeChatId" | "appearance" | "backgroundMode" | "showImageInfo" | "title" | "folderId" | "directorScenes">>;
 
 const backendSaveTails = new Map<string, Promise<void>>();
 const backendSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -432,6 +430,11 @@ function syncLocalCanvasProject(id: string): Promise<void> {
     if (isBrowserWorkspace()) return persistBrowserCanvas(id);
     const scope = getActiveUserScope();
     const key = saveKey(scope, id);
+    const existingTimer = backendSaveTimers.get(key);
+    if (existingTimer) {
+        clearTimeout(existingTimer);
+        backendSaveTimers.delete(key);
+    }
     const previous = backendSaveTails.get(key) || Promise.resolve();
     const next = previous.catch(() => undefined).then(async () => {
         if (canvasDeleting.has(key)) throw new CanvasBackendSubmitPausedError("画布正在删除，未提交");
@@ -642,53 +645,6 @@ export function syncLocalCanvasProjectToBackend(id: string): Promise<void> {
     return syncLocalCanvasProject(id);
 }
 
-function sameDocumentValue(left: unknown, right: unknown) {
-    return left === right || JSON.stringify(left) === JSON.stringify(right);
-}
-
-function revertUnchangedCanvasNodes(
-    previous: CanvasProject["nodes"],
-    attempted: CanvasProject["nodes"],
-    live: CanvasProject["nodes"],
-): CanvasProject["nodes"] {
-    if (sameDocumentValue(live, attempted)) return previous;
-    const previousById = new Map(previous.map((node) => [node.id, node]));
-    const attemptedById = new Map(attempted.map((node) => [node.id, node]));
-    const reverted: CanvasProject["nodes"] = [];
-    for (const node of live) {
-        const before = previousById.get(node.id);
-        const optimistic = attemptedById.get(node.id);
-        if (!before && optimistic) {
-            if (sameDocumentValue(node, optimistic)) continue;
-            reverted.push(node);
-            continue;
-        }
-        if (before && optimistic) {
-            reverted.push(sameDocumentValue(node, optimistic) ? before : node);
-            continue;
-        }
-        reverted.push(node);
-    }
-    return reverted;
-}
-
-function revertUnchangedCanvasDocumentPatch(current: CanvasProject, previous: CanvasProject, patch: CanvasDocumentPersistPatch): CanvasProject {
-    const next: CanvasProject = { ...current };
-    (Object.keys(patch) as Array<keyof CanvasDocumentPersistPatch>).forEach((key) => {
-        if (key === "nodes") {
-            if (!patch.nodes) return;
-            next.nodes = revertUnchangedCanvasNodes(previous.nodes, patch.nodes, current.nodes);
-            return;
-        }
-        const attempted = patch[key];
-        if (attempted === undefined) return;
-        if (sameDocumentValue(current[key], attempted)) {
-            (next as Record<string, unknown>)[key] = previous[key];
-        }
-    });
-    return next;
-}
-
 /**
  * Persist a canvas document patch before the caller reports success.
  * Local desktop hydrates from SQLite, so ongoing saves commit through the
@@ -745,8 +701,8 @@ export async function persistCanvasTimeline(id: string, timeline: NonNullable<Ca
  * 当前 live：本地删除与未冲突编辑保留，未改动的服务端字段（含生成媒体）采纳。
  * 这里只更新 store/journal；编辑器节点由 bind 调用方在 isCurrent 时 setNodes(adopted.nodes)，不 notifyCanvasRefresh。
  */
-export async function adoptServerConfirmedGenerationPatch(project: CanvasProject): Promise<CanvasProject | undefined> {
-    const journalScope = getActiveUserScope();
+export async function adoptServerConfirmedGenerationPatch(rawProject: CanvasProject): Promise<CanvasProject | undefined> {
+    const project = normalizeCanvasProjectGraph(rawProject), journalScope = getActiveUserScope();
     return withCanvasProjection(journalScope, project.id, async () => {
         const incomingRevision = typeof project.revision === "number" && Number.isInteger(project.revision) && project.revision >= 0
             ? project.revision
@@ -853,21 +809,36 @@ export async function hydrateLocalCanvasProjectsFromBackend() {
     let failure="";
     try {
         if (isBrowserWorkspace()) return await hydrateBrowserCanvases();
-        const response = await http.get<{ projects: Array<Pick<CanvasProject, "id">> }>("/canvas-projects", {
-            params: { page: 1, pageSize: 500, sort: "updated" },
-        });
-        const summaries = Array.isArray(response.projects) ? response.projects : [];
+        const summaries: Array<Pick<CanvasProject, "id">> = [];
+        let page = 1;
+        let hasMore = true;
+        while (hasMore) {
+            const response = await http.get<{ projects: Array<Pick<CanvasProject, "id">>; hasMore?: boolean }>("/canvas-projects", {
+                params: { page, pageSize: 50, sort: "updated" },
+            });
+            const batch = Array.isArray(response.projects) ? response.projects : [];
+            hasMore = response.hasMore === true;
+            if (hasMore && batch.length === 0) throw new Error("项目分页未返回内容，请重试");
+            summaries.push(...batch);
+            page += 1;
+        }
         if (summaries.length === 0) return false;
         const projects = (await Promise.all(summaries.map(async (summary) => {
             const detail = await http.get<{ project: CanvasProject }>(`/canvas-projects/${encodeURIComponent(summary.id)}`);
             if (!detail.project) throw new Error("项目内容未返回");
-            return detail.project;
+            return normalizeCanvasProjectGraph(detail.project);
         }))).filter((project): project is CanvasProject => Boolean(project));
         if (projects.length === 0) return false;
         const current = useCanvasStore.getState().projects;
         const byId = new Map(current.map((project) => [project.id, project]));
         const existedIds = new Set(current.map((project) => project.id));
-        for (const project of projects) {
+        for (const [index, project] of projects.entries()) {
+            // Warm journals can resolve entirely in microtasks. Give React a
+            // render turn between batches so large libraries cannot exhaust
+            // its nested-update limit while applying individual projections.
+            if (index > 0 && index % 16 === 0) {
+                await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            }
             try {
                 await loadCanvasOperationJournal(project.id, scope);
                 await replayPendingCanvasProjection(project.id, scope);
@@ -890,6 +861,7 @@ export async function hydrateLocalCanvasProjectsFromBackend() {
         await flushCanvasStorePersistence();
         return true;
     } catch (error) {
+        console.error("项目列表同步失败", error);
         failure="项目暂时无法读取，现有数据已保留。请重试或在设置中导出问题记录。";
         return false;
     } finally {
@@ -906,7 +878,7 @@ export async function readLocalCanvasProjectFromBackend(id: string): Promise<Can
     }
     const response = await http.get<{ project: CanvasProject }>(`/canvas-projects/${encodeURIComponent(id)}`);
     if (!response.project) throw new Error("画布读取失败，请重试");
-    return response.project;
+    return normalizeCanvasProjectGraph(response.project);
 }
 
 export async function openLocalCanvasProjectFromBackend(id: string) {
@@ -1033,8 +1005,8 @@ export async function refreshLocalCanvasProjectIfChanged(id: string) {
             return undefined;
         }
         const response = await http.get<{ project: CanvasProject }>(`/canvas-projects/${encodeURIComponent(id)}`);
-        const remote = response.project;
-        if (!remote) return undefined;
+        if (!response.project) return undefined;
+        const remote = normalizeCanvasProjectGraph(response.project);
         if (existed && !openLocalCanvasProject(id)) return undefined;
         return withCanvasProjection(scope, id, async () => {
             if (existed && !openLocalCanvasProject(id)) return undefined;
@@ -1104,6 +1076,32 @@ export function pendingExternalCanvasRevision(id: string) {
 
 export async function flushLocalWorkspace() {
     await flushCanvasStorePersistence();
+}
+
+export async function flushLocalCanvasBackendSaves(): Promise<void> {
+    const scope = getActiveUserScope();
+    const prefix = `${scope}\0`;
+    for (const [key, timer] of [...backendSaveTimers.entries()]) {
+        if (!key.startsWith(prefix)) continue;
+        clearTimeout(timer);
+        backendSaveTimers.delete(key);
+        const id = key.slice(prefix.length);
+        if (canvasDeleting.has(key)) {
+            publishCanvasSaveProgress(id, scope, true);
+            continue;
+        }
+        void syncLocalCanvasProject(id).catch(() => undefined);
+    }
+    const tails = [...backendSaveTails.entries()]
+        .filter(([key]) => key.startsWith(prefix))
+        .map(([, tail]) => tail);
+    if (tails.length > 0) {
+        const results = await Promise.allSettled(tails);
+        const failed = results.find((result) => result.status === "rejected");
+        if (failed?.status === "rejected" && !isCanvasSubmitControlError(failed.reason)) {
+            throw failed.reason;
+        }
+    }
 }
 
 async function waitForCanvasBackendIdle(id: string, scope: string) {

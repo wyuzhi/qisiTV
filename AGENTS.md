@@ -124,6 +124,12 @@ qisiTV 是基于上游 `glanderness/BeefTV` 二次开发的 AI 影视与短剧�
 
 ## 7. 本地开发、部署和数据目录
 
+### 技能列表展示硬约束
+
+- 技能市场、我的技能和我的投稿的列表名称区只展示技能名称。描述、作者、版本、文件数量与脚本文件、兼容性说明、使用条件和其他详情统一放在对应的详情视图中，禁止在列表恢复副标题、摘要或“含脚本”等说明文字。
+- 右侧仅保留用户认可的简短灰色来源标识及必要的操作、启用状态和投稿进度。来源标识使用“官方”“我的”“市场”“插件”等短文案，具体来源和权限说明放在提示或详情中，禁止扩展成第二行说明。
+- 新增技能信息时先接入详情视图。交付前检查三个子页面的列表，确认名称区没有附加说明，且详情入口能够读取完整信息。
+
 - 先阅读 `.env.example` 和对应 Compose 文件。宿主机后端开发必须使用 Git 忽略的 `.local/project-workbench-debug`，通过 `CANVAS_BACKEND_DATA_DIR` 显式指定；不要把 `backend/data` 当作开发账号数据库。
 - 本地缓存放 `.local/cache`；不要提交数据库、上传文件、`.env`、真实密钥、构建产物或编辑器配置。
 - 宿主机开发：`backend/` 运行 `CANVAS_BACKEND_DATA_DIR=../.local/project-workbench-debug go run ./cmd/server`，`web/` 使用 Bun 和 Vite；不要用 pnpm/npm 覆盖同一套 `node_modules`，也不要提交 `pnpm-lock.yaml` 或 `package-lock.json`。Docker 热更新使用 `docker-compose.dev.yml`；本地构建运行使用 `docker-compose.local.yml`。
@@ -154,11 +160,11 @@ qisiTV 是基于上游 `glanderness/BeefTV` 二次开发的 AI 影视与短剧�
 - Git 提交说明使用 `<type>(<scope>): <业务模块> - <变更摘要>`，`type` 为 `feat|fix|refactor|perf|docs|test|build|ci|chore|revert`。
 - 团队协作流程（交叉 review、付费授权、预算与合并/发版审批）另见团队私有工作约定，不在公开仓库维护。AI 代理默认不直接合并 PR 或发版。
 
-交付前至少检查：改动是否聚焦、调用方和类型是否同步、错误/权限/数据归属是否完整、必要文档是否同步、验证是否如实说明、是否留下密钥或本地数据。
+交付前至少检查：改动是否聚焦、调用方和类型是否同步、错误/权限/数据归属是否完整、必要文档是否同步、验证是否如实说明、是否留下密钥或本地数据，并**主动逐条复核第 10 节「防止屎山」且运行 `node scripts/structure-budget.mjs`**（无需用户提醒）。
 
 ## 10. 防止屎山
 
-重构后的结构靠下面几条守住，修 bug 和加功能时同样适用。
+重构后的结构靠下面几条守住，修 bug 和加功能时同样适用；每次改动提交或交付前必须主动自检，不等用户追问：
 
 - 同一个结论只在一处计算。任务能否重试、能否取回只读后端 `task.outcome`，前端不另行推断或补写；模型能力、协议、扣费结论和错误归类以对应模型服务的实际合同为准。
 - 不新增按模型名猜测的规则。服务端已提供的能力目录由服务端维护；自带 Key 的第三方渠道写成协议插件（`plugin-packages/`），保留 qisi API / LikeAI 的既有适配。
@@ -167,5 +173,5 @@ qisiTV 是基于上游 `glanderness/BeefTV` 二次开发的 AI 影视与短剧�
 - 测试测行为，不读源码文字做断言。
 - 修 bug 前先查这条规则写在几处；有多处就先合成一处再修。
 - 文件超过约 800 行且最近常改、常修时，在本次改动里按职责拆开；不为拆而拆。
-- `node scripts/structure-budget.mjs` 记录几项结构数字：`internal/app` 行数、超过 1000 行的文件（含 CSS）、源码里写死的模型和厂商名、直接依赖 `*app.Service` 的 handler、读源码文字的测试。CI 只允许它们变小；确需变大时在 PR 说明里写清理由，再运行 `--update`。
+- `node scripts/structure-budget.mjs` 记录几项结构数字：`internal/app` 行数、超过 1000 行的文件（含 CSS）、源码里写死的模型和厂商名、直接依赖 `*app.Service` 的 handler、读源码文字的测试。CI 只允许它们变小；确需变大时在 PR 说明里写清理由，再运行 `--update`。同一轮也运行 `node scripts/deadcode-budget.mjs`，死代码只许减少，确需增加时在 PR 说明理由，不能直接更新基线。
 - 每周花半小时铲屎：运行 `node scripts/structure-budget.mjs --hotspots 7` 看近 7 天修 bug 最集中的文件，挑一处拆开或合并规则，再运行 `--update` 收紧基线；发版前关掉已经过时的 PR。

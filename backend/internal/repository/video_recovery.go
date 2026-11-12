@@ -9,7 +9,7 @@ import (
 
 // FailedVideosForRecovery returns failed video and upscale tasks that still have
 // an upstream task receipt (or uncertain submission stage) and have not yet
-// converged to no_result or unrecoverable, or whose BeefAPI usage_state is still pending.
+// converged to no_result or unrecoverable, or whose BeefTV usage_state is still pending.
 func (r *Repository) FailedVideosForRecovery(afterID string, limit int) ([]model.Task, error) {
 	var tasks []model.Task
 	err := r.db.Where("tasks.id > ? AND tasks.status = ?", afterID, model.TaskStatusFailed).

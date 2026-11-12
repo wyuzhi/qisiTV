@@ -7,7 +7,7 @@ import (
 	"qisitv/backend/internal/appearance"
 	localasset "qisitv/backend/internal/asset"
 	"qisitv/backend/internal/assistantturns"
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/canvas"
 	"qisitv/backend/internal/depthcapture"
 	"qisitv/backend/internal/diagnostics"
@@ -90,7 +90,7 @@ type Service struct {
 	playbackOnce             sync.Once
 	depthCapture             *depthcapture.Service
 	depthCaptureOnce         sync.Once
-	beefAPI                  *beefapi.Service
+	beefTV                  *beeftv.Service
 	generationDeliveryMedia  taskdelivery.Media
 	generationDelivery       *taskdelivery.Deliverer
 	deliveryMu               sync.Mutex
@@ -111,6 +111,7 @@ type Service struct {
 	videoRecoveryAfterID     string
 	bindAfterID              string
 	bindCursorMu             sync.Mutex
+	canvasFailures           localtask.CanvasFailureScan
 }
 
 const taskWorkerConcurrency = 3
@@ -178,7 +179,7 @@ func newService(repo *repository.Repository, dataDir string, options serviceOpti
 	service.taskWorkerCoordinator = newTaskWorkerCoordinator(service)
 	service.taskLifecycleCoordinator = newTaskLifecycleCoordinator(service)
 	service.skills = skills.New(service.repo, service.dataDir, service.runWorkerLoop)
-	service.prompts = prompts.New(service.repo, newPromptAdminGate(service))
+	service.prompts = prompts.New(service.repo)
 	service.projects = localproject.New(repo, localproject.Dependencies{})
 	service.canvas = canvas.New(service.repo, newCanvasHost(service))
 	service.assistantTurns = assistantturns.New(assistantturns.NewStore(service.repo), assistantCanvasFactory{service}, filepath.Join(dataDir, "assistant-turns"))

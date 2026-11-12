@@ -21,7 +21,7 @@ func (p *proposeProbe) ResolveAssistantGenerationModel(kind, selected string) (A
 	if p.resolve != nil {
 		return p.resolve(kind, selected)
 	}
-	return AssistantGenerationModel{Display: "gpt-image-2", ModelKey: "beefapi::gpt-image-2", Revision: 1}, nil
+	return AssistantGenerationModel{Display: "gpt-image-2", ModelKey: "beeftv::gpt-image-2", Revision: 1}, nil
 }
 
 func proposeCanvas(t *testing.T, nodes []map[string]any) json.RawMessage {
@@ -43,10 +43,10 @@ func imageNode(id, model string) map[string]any {
 
 func TestOpGenerationProposeUsesNodeOverrideBeforeDefault(t *testing.T) {
 	probe := &proposeProbe{doc: proposeCanvas(t, []map[string]any{
-		imageNode("n1", "beefapi::gpt-image-2.5-flare"),
+		imageNode("n1", "beeftv::gpt-image-2.5-flare"),
 	})}
 	probe.resolve = func(kind, selected string) (AssistantGenerationModel, error) {
-		if kind != "image" || selected != "beefapi::gpt-image-2.5-flare" {
+		if kind != "image" || selected != "beeftv::gpt-image-2.5-flare" {
 			t.Fatalf("expected node selection, got kind=%s selected=%s", kind, selected)
 		}
 		return AssistantGenerationModel{Display: "gpt-image-2.5-flare", ModelKey: selected, Revision: 9}, nil
@@ -56,7 +56,7 @@ func TestOpGenerationProposeUsesNodeOverrideBeforeDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload := result.(map[string]any)
-	if payload["model"] != "gpt-image-2.5-flare" || payload["modelKey"] != "beefapi::gpt-image-2.5-flare" {
+	if payload["model"] != "gpt-image-2.5-flare" || payload["modelKey"] != "beeftv::gpt-image-2.5-flare" {
 		t.Fatalf("proposal should use node override: %#v", payload)
 	}
 	source := payload["source"].(map[string]any)
@@ -64,7 +64,7 @@ func TestOpGenerationProposeUsesNodeOverrideBeforeDefault(t *testing.T) {
 		t.Fatalf("source binding: %#v", source)
 	}
 	targets, ok := payload["targets"].([]map[string]any)
-	if !ok || len(targets) != 1 || targets[0]["nodeId"] != "n1" || targets[0]["modelKey"] != "beefapi::gpt-image-2.5-flare" || targets[0]["prompt"] != "n1" {
+	if !ok || len(targets) != 1 || targets[0]["nodeId"] != "n1" || targets[0]["modelKey"] != "beeftv::gpt-image-2.5-flare" || targets[0]["prompt"] != "n1" {
 		t.Fatalf("propose should echo targets with effective prompt and model: %#v", payload["targets"])
 	}
 }
@@ -76,7 +76,7 @@ func TestOpGenerationProposeFallsBackToDefaultWithoutNodeModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload := result.(map[string]any)
-	if payload["modelKey"] != "beefapi::gpt-image-2" {
+	if payload["modelKey"] != "beeftv::gpt-image-2" {
 		t.Fatalf("empty node model should use default: %#v", payload)
 	}
 	if len(probe.calls) != 2 || probe.calls[0][1] != "" || probe.calls[1][1] != "" {
@@ -97,14 +97,14 @@ func TestOpGenerationProposeRejectsUnavailableExplicitModel(t *testing.T) {
 
 func TestOpGenerationProposeRejectsMixedNodeModels(t *testing.T) {
 	probe := &proposeProbe{doc: proposeCanvas(t, []map[string]any{
-		imageNode("n1", "beefapi::gpt-image-2.5-flare"),
+		imageNode("n1", "beeftv::gpt-image-2.5-flare"),
 		imageNode("n2", ""),
 	})}
 	probe.resolve = func(kind, selected string) (AssistantGenerationModel, error) {
-		if selected == "beefapi::gpt-image-2.5-flare" {
+		if selected == "beeftv::gpt-image-2.5-flare" {
 			return AssistantGenerationModel{Display: "gpt-image-2.5-flare", ModelKey: selected, Revision: 1}, nil
 		}
-		return AssistantGenerationModel{Display: "gpt-image-2", ModelKey: "beefapi::gpt-image-2", Revision: 1}, nil
+		return AssistantGenerationModel{Display: "gpt-image-2", ModelKey: "beeftv::gpt-image-2", Revision: 1}, nil
 	}
 	_, err := opCanvasGenerationPropose(&Context{UserID: "owner", Domain: probe}, json.RawMessage(`{"canvasId":"c1","nodeIds":["n1","n2"],"kind":"image"}`))
 	if err == nil {
@@ -118,13 +118,13 @@ func TestOpGenerationProposeRejectsMixedNodeModels(t *testing.T) {
 
 func TestOpGenerationProposeRejectsConfigRevisionDrift(t *testing.T) {
 	probe := &proposeProbe{doc: proposeCanvas(t, []map[string]any{
-		imageNode("n1", "beefapi::gpt-image-2"),
-		imageNode("n2", "beefapi::gpt-image-2"),
+		imageNode("n1", "beeftv::gpt-image-2"),
+		imageNode("n2", "beeftv::gpt-image-2"),
 	})}
 	probe.resolve = func(string, string) (AssistantGenerationModel, error) {
 		return AssistantGenerationModel{
 			Display:  "gpt-image-2",
-			ModelKey: "beefapi::gpt-image-2",
+			ModelKey: "beeftv::gpt-image-2",
 			Revision: int64(len(probe.calls)),
 		}, nil
 	}
@@ -142,7 +142,7 @@ func TestOpGenerationProposeRejectsConfigRevisionDrift(t *testing.T) {
 }
 
 func TestOpGenerationProposeRejectsKindMismatch(t *testing.T) {
-	videoNode := imageNode("n1", "beefapi::wan3.0-video")
+	videoNode := imageNode("n1", "beeftv::wan3.0-video")
 	videoNode["type"] = "video"
 	probe := &proposeProbe{doc: proposeCanvas(t, []map[string]any{videoNode})}
 	_, err := opCanvasGenerationPropose(&Context{UserID: "owner", Domain: probe}, json.RawMessage(`{"canvasId":"c1","nodeIds":["n1"],"kind":"image"}`))
@@ -153,7 +153,7 @@ func TestOpGenerationProposeRejectsKindMismatch(t *testing.T) {
 		t.Fatalf("node kind reason: %v", err)
 	}
 
-	probe = &proposeProbe{doc: proposeCanvas(t, []map[string]any{imageNode("n1", "beefapi::wan3.0-video")})}
+	probe = &proposeProbe{doc: proposeCanvas(t, []map[string]any{imageNode("n1", "beeftv::wan3.0-video")})}
 	probe.resolve = func(string, string) (AssistantGenerationModel, error) {
 		return AssistantGenerationModel{KindMismatch: true}, nil
 	}

@@ -59,6 +59,7 @@ func TestMCPClientLoop(t *testing.T) {
 		"conversation.message.attach": true,
 		"skill.publish.prepare":       true,
 		"skill.publish.status":        true,
+		"skill.script.run":            true,
 	}
 	var expected []operations.Descriptor
 	for _, op := range registry.List(operations.ManualCaller(false)) {
@@ -66,8 +67,8 @@ func TestMCPClientLoop(t *testing.T) {
 			expected = append(expected, op)
 		}
 	}
-	if len(expected) != 38 {
-		t.Fatalf("expected 38 default MCP operations, got %d", len(expected))
+	if len(expected) != 40 {
+		t.Fatalf("expected 40 default MCP operations, got %d", len(expected))
 	}
 	for _, tool := range tools.Tools {
 		if excluded[tool.Name] {

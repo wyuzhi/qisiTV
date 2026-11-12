@@ -99,7 +99,7 @@ func TestSeedanceSingleUploadRecovery(t *testing.T) {
 						_ = conn.Close()
 						return
 					}
-					_ = json.NewEncoder(w).Encode(BeefAPISeedanceUploadComplete{URL: "https://example.com/completed.png", Bytes: int64(len(data))})
+					_ = json.NewEncoder(w).Encode(BeefTVSeedanceUploadComplete{URL: "https://example.com/completed.png", Bytes: int64(len(data))})
 				default:
 					other++
 					w.WriteHeader(500)
@@ -107,9 +107,9 @@ func TestSeedanceSingleUploadRecovery(t *testing.T) {
 			}))
 			defer server.Close()
 			receipts := &recordingReceipts{}
-			ctx := WithRuntime(context.Background(), Runtime{Receipts: receipts, Endpoints: Endpoints{BeefAPIVideoBaseURL: server.URL}})
+			ctx := WithRuntime(context.Background(), Runtime{Receipts: receipts, Endpoints: Endpoints{BeefTVVideoBaseURL: server.URL}})
 			ctx = withReferenceUpload(ctx, ReferenceUploadMeta{Kind: "image", Index: 1})
-			_, err := CompleteBeefAPISeedanceUpload(ctx, Config{BaseURL: server.URL + "/v1", APIKey: "gateway-secret"}, BeefAPISeedanceUploadSession{Ticket: "same-owned-ticket", UploadURL: server.URL + "/storage?X-Amz-Signature=PRIVATE"}, data)
+			_, err := CompleteBeefTVSeedanceUpload(ctx, Config{BaseURL: server.URL + "/v1", APIKey: "gateway-secret"}, BeefTVSeedanceUploadSession{Ticket: "same-owned-ticket", UploadURL: server.URL + "/storage?X-Amz-Signature=PRIVATE"}, data)
 			mu.Lock()
 			defer mu.Unlock()
 			if (err != nil) != scenario.fails || puts != scenario.puts || confirms != scenario.confirms || other != 0 {
@@ -142,7 +142,7 @@ func TestSeedanceUploadCertificateAndCancellationAreNotRetried(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	started := time.Now()
-	_, err := CompleteBeefAPISeedanceUpload(ctx, Config{}, BeefAPISeedanceUploadSession{Ticket: "owned"}, []byte("owned"))
+	_, err := CompleteBeefTVSeedanceUpload(ctx, Config{}, BeefTVSeedanceUploadSession{Ticket: "owned"}, []byte("owned"))
 	if !errors.Is(err, context.Canceled) || time.Since(started) > time.Second {
 		t.Fatalf("cancel delayed: %v", err)
 	}
@@ -195,9 +195,9 @@ func TestSeedanceUploadDNSValidationHonorsDeadline(t *testing.T) {
 			var err error
 			switch operation {
 			case "validation":
-				err = ValidateBeefAPISeedanceSecureURL(ctx, "https://owned-slow-dns.invalid/upload")
+				err = ValidateBeefTVSeedanceSecureURL(ctx, "https://owned-slow-dns.invalid/upload")
 			case "put":
-				err = PutBeefAPISeedanceBytes(ctx, BeefAPISeedanceUploadSession{UploadURL: "https://owned-slow-dns.invalid/upload"}, []byte("owned"))
+				err = PutBeefTVSeedanceBytes(ctx, BeefTVSeedanceUploadSession{UploadURL: "https://owned-slow-dns.invalid/upload"}, []byte("owned"))
 			case "confirmation":
 				req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://owned-slow-dns.invalid/complete", nil)
 				_, _, err = DoBinary(req)

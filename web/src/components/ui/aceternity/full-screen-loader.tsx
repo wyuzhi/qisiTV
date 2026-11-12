@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { resolveEmbeddedAssetUrl } from "@/lib/embedded-runtime";
 import { cn } from "@/lib/utils";
 
 type FullScreenLoaderProps = {
@@ -8,7 +9,7 @@ type FullScreenLoaderProps = {
     className?: string;
 };
 
-export function FullScreenLoader({ label = "正在恢复工作区", detail = "同步账号、模型和项目数据", className }: FullScreenLoaderProps) {
+export function FullScreenLoader({ label = "正在恢复工作区", detail = "正在读取本机工作区", className }: FullScreenLoaderProps) {
     return (
         <div
             data-full-screen-loader
@@ -17,7 +18,7 @@ export function FullScreenLoader({ label = "正在恢复工作区", detail = "�
             aria-label={`${label}，${detail}`}
             className={cn("full-screen-loader", className)}
         >
-            <span className="beeftv-loading-logo" aria-hidden="true" />
+            <img alt="" src={resolveEmbeddedAssetUrl("/qisitv-logo.jpg")} className="qisitv-loading-logo" aria-hidden="true" />
         </div>
     );
 }
@@ -33,7 +34,7 @@ export function WorkspaceRouteLoader({ label = "正在打开页面" }: { label?:
     return (
         <section data-workspace-route-loader className={cn("workspace-route-loader", visible && "is-visible")} role="status" aria-live="polite" aria-label={label}>
             <div className="workspace-route-loader-content">
-                <span className="beeftv-loading-logo is-compact" aria-hidden="true" />
+                <img alt="" src={resolveEmbeddedAssetUrl("/qisitv-logo.jpg")} className="qisitv-loading-logo is-compact" aria-hidden="true" />
                 <span>{label}</span>
             </div>
         </section>

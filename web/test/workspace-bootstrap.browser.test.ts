@@ -8,8 +8,9 @@ beforeAll(async () => {
     const stubs: Record<string, string> = {
         "@/stores/use-user-store": 'import { create } from "zustand"; export const useUserStore = create(set => ({ hydrated: false, setHydrated: hydrated => set({ hydrated }) }));',
         "@/stores/use-config-store": 'import { create } from "zustand"; export const useConfigStore = create(set => ({ config: { channels: [] }, replaceConfig: config => set({config}) })); export const normalizeConfigSnapshot = value => value;',
-        "@/lib/user-session": 'import { useUserStore } from "@/stores/use-user-store"; export const localWorkspaceConfig = value => value; export async function applyUserSession() { useUserStore.getState().setHydrated(true); window.sessionReady = true; }',
-        "@/services/api/workspace": 'export async function getWorkspaceBootstrap() { return {}; }',
+        "@/lib/user-session": 'import { useUserStore } from "@/stores/use-user-store"; export const localWorkspaceConfig = value => value; export async function applyUserSession(payload) { window.activeScope = payload.workspace.id; window.canvasProjects = []; useUserStore.getState().setHydrated(true); window.sessionReady = true; }',
+        "@/services/api/workspace": 'export async function getWorkspaceBootstrap() { if (new URL(location.href).searchParams.has("fail-bootstrap")) throw new Error("unavailable"); return {workspace:{id:"canonical-workspace"}}; }',
+        "@/services/local-workspace-repository": 'export async function hydrateLocalCanvasProjectsFromBackend() { window.projectionScope = window.activeScope; await new Promise(resolve => { window.finishProjection = () => { window.canvasProjects = ["server-canvas"]; resolve(); }; }); }',
         "@/services/model-config-repository": 'export const commitModelConfig = async () => { window.writes = (window.writes || 0) + 1; }; export const flushModelConfig = async () => {}; export const hydrateModelConfig = () => new Promise((resolve, reject) => { window.finishRestore = () => resolve({config:{channels:[{id:"fixture",apiKey:"restored"}]},health:"ready"}); window.failRestore = () => reject(new Error("read failed")); });',
         "@/lib/app-routing": 'export const appPathname = () => "/";',
         "@/lib/workspace-route-modules": 'export const preloadWorkspaceRoute = () => {};',
@@ -55,5 +56,33 @@ test("failed canonical restore shows retry without exposing blank-credential gen
     expect(await page.getByRole("button", { name: "开始创作" }).count()).toBe(0);
     expect(await page.getByRole("button", { name: "重新加载" }).count()).toBe(1);
     expect(await page.evaluate(() => (window as any).writes || 0)).toBe(0);
+    await page.close();
+});
+
+test("fresh embedded scope hydrates canonical canvases after session selection and before exposing the workspace", async () => {
+    const page = await browser.newPage();
+    await page.addInitScript(() => { (window as any).__BEEFTV_HARNESS__ = { embedded: true }; });
+    await page.goto(server.url.toString());
+    await page.waitForFunction(() => (window as any).sessionReady && (window as any).finishProjection);
+    expect(await page.evaluate(() => (window as any).projectionScope)).toBe("canonical-workspace");
+    expect(await page.getByRole("button", { name: "开始创作" }).count()).toBe(0);
+    await page.evaluate(() => (window as any).finishProjection());
+    await page.waitForFunction(() => Boolean((window as any).finishRestore));
+    await page.evaluate(() => (window as any).finishRestore());
+    await page.getByRole("button", { name: "开始创作" }).waitFor();
+    expect(await page.evaluate(() => (window as any).canvasProjects)).toEqual(["server-canvas"]);
+    await page.close();
+});
+
+test("embedded bootstrap failure cannot fall back to the shared local namespace", async () => {
+    const page = await browser.newPage();
+    await page.addInitScript(() => { (window as any).__BEEFTV_HARNESS__ = { embedded: true }; });
+    await page.goto(`${server.url}?fail-bootstrap`);
+    await page.waitForFunction(() => Boolean((window as any).finishRestore));
+    await page.evaluate(() => (window as any).finishRestore());
+    await page.getByRole("alert").waitFor();
+    expect(await page.evaluate(() => (window as any).sessionReady)).toBeUndefined();
+    expect(await page.evaluate(() => (window as any).projectionScope)).toBeUndefined();
+    expect(await page.getByRole("button", { name: "开始创作" }).count()).toBe(0);
     await page.close();
 });

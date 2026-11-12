@@ -4,8 +4,8 @@ import { Crosshair, Undo2 } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { ASSISTANT_PROPOSAL_INVALIDATED_TEXT, ASSISTANT_PROPOSAL_UNDONE_TEXT, agentAssistantFailureText, type AgentToolCall, type AssistantGenerationProposal, type AssistantTurn } from "@/services/api/agent-assistant";
-import { ASSISTANT_UNDONE_INCOMPLETE_TEXT, assistantChangeSummary, assistantSkillLabel, assistantChangedNodeIds, assistantOrderTargetLines, assistantProductionProposalParts, assistantProposalText, assistantProposalProgress, assistantTurnCanContinue, assistantUnresolvedFailures, assistantUndoFailureText, assistantVisibleReply } from "./canvas-assistant-copy";
+import { ASSISTANT_PROPOSAL_INVALIDATED_TEXT, ASSISTANT_PROPOSAL_UNDONE_TEXT, agentAssistantFailureText, type AgentToolCall, type AssistantGenerationProposal, type AssistantScriptProposal, type AssistantTurn } from "@/services/api/agent-assistant";
+import { ASSISTANT_UNDONE_INCOMPLETE_TEXT, assistantChangeSummary, assistantSkillLabel, assistantChangedNodeIds, assistantOrderTargetLines, assistantProductionProposalParts, assistantProposalText, assistantProposalProgress, assistantScriptProposalLines, assistantScriptResultStatusText, assistantTurnCanContinue, assistantUnresolvedFailures, assistantUndoFailureText, assistantVisibleReply } from "./canvas-assistant-copy";
 import type { CanvasNodeData } from "@/types/canvas";
 import { dismissedProposalKey, type AssistantTurnStatus } from "./use-canvas-assistant";
 import { modelOptionName, resolveModelChannel, useEffectiveConfig } from "@/stores/use-config-store";
@@ -15,6 +15,7 @@ import { CanvasAssistantAttachments } from "./canvas-assistant-attachments";
 import { CanvasAssistantOutputs } from "./canvas-assistant-outputs";
 import { CanvasAssistantMediaFacts } from "./canvas-assistant-media-facts";
 import { AssistantReasoning } from "@/components/ai/message-reasoning";
+import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { formatAssistantDiagnostics } from "@/services/diagnostics/assistant-diagnostics";
 
 type Props = {
@@ -30,6 +31,9 @@ type Props = {
     onLocate: (nodeIds: string[]) => void;
     onUndo: (turnId: string) => void;
     onRunProposal: (proposal: AssistantGenerationProposal, turnId: string) => void;
+    onRunScriptProposal?: (proposal: AssistantScriptProposal, turnId: string, alwaysAllowSession: boolean) => void;
+    runningScriptProposalIds?: ReadonlySet<string>;
+    scriptProposalFeedback?: Record<string, string>;
     onDismissProposal: (proposalId: string) => void;
     onContinue?: () => void;
     nodes?: CanvasNodeData[];
@@ -68,9 +72,10 @@ export function CanvasAssistantUserMessage({ text, selectedCount, continuationId
     );
 }
 
-export function CanvasAssistantTurnView({ turn, canvasId, sessionId, status, handledProposals, proposalFeedback, runningProposalIds, generationDisabled, onLocate, onUndo, onRunProposal, onDismissProposal, onContinue, nodes, onCheckResults, reasoningOpen, onReasoningOpenChange }: Props) {
+export function CanvasAssistantTurnView({ turn, canvasId, sessionId, status, handledProposals, proposalFeedback, runningProposalIds, generationDisabled, onLocate, onUndo, onRunProposal, onRunScriptProposal, runningScriptProposalIds, scriptProposalFeedback, onDismissProposal, onContinue, nodes, onCheckResults, reasoningOpen, onReasoningOpenChange }: Props) {
     const { message } = App.useApp();
     const config = useEffectiveConfig();
+    const toolCardEntries = usePluginSlot("assistant.toolCard");
     const summary = assistantChangeSummary(turn.change);
     const changedNodeIds = assistantChangedNodeIds(turn.change);
     const changedCanvasCount = new Set(turn.change?.canvasChanges?.map(item => item.canvasId) || []).size;
@@ -99,6 +104,24 @@ export function CanvasAssistantTurnView({ turn, canvasId, sessionId, status, han
                 {(input.skills || []).map(skill => <span className="canvas-assistant-chip" key={skill.skillId}>{assistantSkillLabel(skill)}</span>)}
             </div>) : (turn.supplements || []).map((text, index) => <div key={`supplement:${index}`} className="canvas-assistant-supplement"><CanvasAssistantUserMessage text={text} selectedCount={0} /></div>)}
             <CanvasAssistantMediaFacts calls={turn.toolCalls || []} nodes={nodes} />
+            {(turn.toolCalls || []).map((call: AgentToolCall, idx: number) => {
+                const match = toolCardEntries.find((entry) => entry.payload.toolName === call.tool);
+                if (!match) return null;
+                const CardComp = match.payload.component as React.ComponentType<Record<string, unknown>>;
+                return (
+                    <div key={`${call.toolCallId || call.tool}:${idx}`} className="canvas-assistant-card">
+                        <CardComp
+                            toolName={call.tool}
+                            status={call.isError ? "failed" : "completed"}
+                            input={call.args}
+                            args={call.args}
+                            output={call.mediaFacts}
+                            result={call.mediaFacts ?? call.error}
+                            error={call.error}
+                        />
+                    </div>
+                );
+            })}
             {turn.outputs?.length ? <CanvasAssistantOutputs outputs={turn.outputs} /> : null}
             {turn.cancelled && stoppedWithChanges ? (
                 <div className="canvas-assistant-incomplete" role="status">
@@ -170,39 +193,51 @@ export function CanvasAssistantTurnView({ turn, canvasId, sessionId, status, han
                 const running = Boolean(runningProposalIds?.has(proposal.proposalId));
                 const progress = started && nodes ? assistantProposalProgress(proposal, nodes) : null;
                 const awaitingConfirmation = !started && !skipped && !undone && !turn.proposalsInvalidated;
-                const productionParts = assistantProductionProposalParts(proposal, awaitingConfirmation, config);
-                const orderTargetLines = assistantOrderTargetLines(proposal);
+                const productionParts = assistantProductionProposalParts(proposal, awaitingConfirmation);
+                const orderTargetLines = assistantOrderTargetLines(proposal, awaitingConfirmation);
                 const legacyProposalNote = !assistantVisibleReply(turn.reply || "") && proposal.note?.trim() ? proposal.note.trim() : "";
                 return (
                     <div key={proposal.proposalId} className="canvas-assistant-card">
-                        {legacyProposalNote ? <span className="canvas-assistant-proposal-note" style={{ whiteSpace: "pre-line", overflowWrap: "anywhere" }}>{legacyProposalNote}</span> : null}
+                        {legacyProposalNote ? (
+                            <div className="canvas-assistant-proposal-note">
+                                {legacyProposalNote.split("\n").map((part, partIndex) => <div key={partIndex} className={part.length > 80 ? "canvas-assistant-pretty-line" : undefined}>{part}</div>)}
+                            </div>
+                        ) : null}
                         {productionParts ? (
                             <>
-                                <span style={{ whiteSpace: "pre-line", overflowWrap: "anywhere" }}>{productionParts.header}</span>
+                                <div className="canvas-assistant-proposal-lines">
+                                    {productionParts.header.split("\n").map((part, partIndex) => <div key={partIndex} className={part.length > 80 ? "canvas-assistant-pretty-line" : undefined}>{part}</div>)}
+                                </div>
                                 {productionParts.targetLines.length > 0 ? (
                                     <details className="canvas-assistant-proposal-details">
                                         <summary>查看 {productionParts.targetLines.length} 项镜头与提示词明细</summary>
                                         <div className="canvas-assistant-proposal-targets">
                                             {productionParts.targetLines.map((line, index) => (
                                                 <div key={proposal.production?.targets[index]?.nodeId || index} className="canvas-assistant-proposal-target">
-                                                    {line}
+                                                    {line.split("\n").map((part, partIndex) => <div key={partIndex} className={part.length > 80 ? "canvas-assistant-pretty-line" : undefined}>{part}</div>)}
                                                 </div>
                                             ))}
                                         </div>
                                     </details>
                                 ) : null}
-                                {productionParts.footer ? <span className="canvas-assistant-meta" style={{ whiteSpace: "pre-line", overflowWrap: "anywhere" }}>{productionParts.footer}</span> : null}
+                                {productionParts.footer ? (
+                                    <div className="canvas-assistant-meta canvas-assistant-proposal-lines">
+                                        {productionParts.footer.split("\n").map((part, partIndex) => <div key={partIndex} className={part.length > 80 ? "canvas-assistant-pretty-line" : undefined}>{part}</div>)}
+                                    </div>
+                                ) : null}
                             </>
                         ) : (
                             <>
-                                <span style={{ whiteSpace: "pre-line", overflowWrap: "anywhere" }}>{assistantProposalText(proposal, portraitPriceLines(profile?.videoPricing), awaitingConfirmation, config)}</span>
+                                <div className="canvas-assistant-proposal-lines">
+                                    {assistantProposalText(proposal, portraitPriceLines(profile?.videoPricing), awaitingConfirmation).split("\n").map((part, partIndex) => <div key={partIndex} className={part.length > 80 ? "canvas-assistant-pretty-line" : undefined}>{part}</div>)}
+                                </div>
                                 {orderTargetLines.length > 0 ? (
                                     <details className="canvas-assistant-proposal-details">
                                         <summary>查看 {orderTargetLines.length} 项生成单明细</summary>
                                         <div className="canvas-assistant-proposal-targets">
                                             {orderTargetLines.map((line, index) => (
                                                 <div key={proposal.targets?.[index]?.nodeId || index} className="canvas-assistant-proposal-target">
-                                                    {line}
+                                                    {line.split("\n").map((part, partIndex) => <div key={partIndex} className={part.length > 80 ? "canvas-assistant-pretty-line" : undefined}>{part}</div>)}
                                                 </div>
                                             ))}
                                         </div>
@@ -230,6 +265,70 @@ export function CanvasAssistantTurnView({ turn, canvasId, sessionId, status, han
                             <div className="canvas-assistant-card-actions">
                                 <Button size="small" type="primary" autoInsertSpace={false} loading={running} disabled={generationDisabled || Boolean(priceError)} onClick={() => onRunProposal(proposal, turn.turnId)}>
                                     {proposal.production ? "确认并制作整片" : "生成"}
+                                </Button>
+                                <Button size="small" disabled={running} onClick={() => onDismissProposal(proposal.proposalId)}>
+                                    先不用
+                                </Button>
+                            </div>
+                        )}
+                    </div>
+                );
+            })}
+
+            {(turn.scriptProposals || []).map((proposal) => {
+                const running = Boolean(runningScriptProposalIds?.has(proposal.proposalId)) || proposal.status === "running";
+                const finished = proposal.status === "completed" || proposal.status === "failed" || proposal.status === "cancelled" || Boolean(proposal.result);
+                const skipped = handledProposals.has(dismissedProposalKey(proposal.proposalId)) || proposal.status === "skipped";
+                const awaitingConfirmation = !finished && !running && !skipped && !undone && !turn.proposalsInvalidated;
+                const lines = assistantScriptProposalLines(proposal, awaitingConfirmation);
+                const feedback = scriptProposalFeedback?.[proposal.proposalId] || proposalFeedback?.[proposal.proposalId];
+                const hasOutput = Boolean(proposal.result && (proposal.result.stdout || proposal.result.stderr));
+                return (
+                    <div key={proposal.proposalId} className="canvas-assistant-card">
+                        <div className="canvas-assistant-proposal-lines">
+                            {lines.map((line, index) => (
+                                <div key={index} className={line.length > 80 ? "canvas-assistant-pretty-line" : undefined}>{line}</div>
+                            ))}
+                        </div>
+                        {feedback ? <span className="canvas-assistant-meta" role="status" style={{ overflowWrap: "anywhere" }}>{feedback}</span> : null}
+                        {finished ? (
+                            <>
+                                <span className="canvas-assistant-meta" role="status">{assistantScriptResultStatusText(proposal)}</span>
+                                {hasOutput ? (
+                                    <details className="canvas-assistant-proposal-details">
+                                        <summary>查看脚本输出</summary>
+                                        <div className="canvas-assistant-proposal-targets">
+                                            {proposal.result?.stdout ? (
+                                                <div className="canvas-assistant-proposal-target">
+                                                    <div className="canvas-assistant-meta">标准输出：</div>
+                                                    <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", margin: 0 }}>{proposal.result.stdout}</pre>
+                                                </div>
+                                            ) : null}
+                                            {proposal.result?.stderr ? (
+                                                <div className="canvas-assistant-proposal-target">
+                                                    <div className="canvas-assistant-meta">错误输出：</div>
+                                                    <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", margin: 0 }}>{proposal.result.stderr}</pre>
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    </details>
+                                ) : null}
+                            </>
+                        ) : running ? (
+                            <span className="canvas-assistant-meta" role="status">正在运行脚本…</span>
+                        ) : undone ? (
+                            <span className="canvas-assistant-meta">这一轮已撤销，不会运行脚本。</span>
+                        ) : skipped ? (
+                            <span className="canvas-assistant-meta">这次没有运行脚本</span>
+                        ) : turn.proposalsInvalidated ? (
+                            <span className="canvas-assistant-meta" role="status">已失效，请让助手重新提出脚本运行请求。</span>
+                        ) : (
+                            <div className="canvas-assistant-card-actions">
+                                <Button size="small" type="primary" autoInsertSpace={false} loading={running} disabled={generationDisabled} onClick={() => onRunScriptProposal?.(proposal, turn.turnId, false)}>
+                                    运行脚本
+                                </Button>
+                                <Button size="small" disabled={generationDisabled || running} onClick={() => onRunScriptProposal?.(proposal, turn.turnId, true)}>
+                                    本对话始终允许
                                 </Button>
                                 <Button size="small" disabled={running} onClick={() => onDismissProposal(proposal.proposalId)}>
                                     先不用

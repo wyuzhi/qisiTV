@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 
-	"qisitv/backend/internal/beefapi"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/modelcatalog"
 	"qisitv/backend/internal/providerpreset"
@@ -43,7 +42,7 @@ func (s *operationSession) AgentModelCatalog() (*modelcatalog.CatalogResponse, e
 		}
 		cm := model.ChannelModel{ID: item.Model, ModelKey: item.Model, DisplayName: item.DisplayName, Capability: item.Capability, Protocol: model.ChannelInterfaceType(item.Protocol), Enabled: true}
 		if item.Capability == "video" {
-			if _, protocol, ok := providerpreset.HostedBeefAPIVideoProfile(item.BaseURL, item.Model); ok {
+			if _, protocol, ok := providerpreset.HostedBeefTVVideoProfile(item.BaseURL, item.Model); ok {
 				cm.Protocol = model.ChannelInterfaceType(protocol)
 			}
 		}
@@ -72,10 +71,7 @@ func (s *operationSession) AgentModelCatalog() (*modelcatalog.CatalogResponse, e
 		if err != nil {
 			continue
 		}
-		if item.Capability == "video" {
-			// Only the saved, validated quote is public; never forward arbitrary profile fields.
-			public.VideoPricing, _ = beefapi.NormalizeCatalogVideoPricing(item.VideoPricing)
-		}
+		public.VideoPricing, public.Pricing = item.PublicPrices()
 		index, exists := indexes[item.ChannelID]
 		if !exists {
 			index = len(channels)
