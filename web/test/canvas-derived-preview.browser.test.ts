@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { chromium, type Browser, type Page } from "playwright";
@@ -20,7 +20,7 @@ beforeAll(async () => {
     } }], define: { "import.meta.env.DEV": "false", "import.meta.env.PROD": "true", "import.meta.env.MODE": '"production"', "import.meta.env.VITE_CANVAS_LOCAL_MODE": '"false"', "import.meta.env.VITE_CANVAS_BACKEND_URL": '""', "process.env.NODE_ENV": '"production"' } });
     if (!build.success) throw new Error(build.logs.join("\n"));
     const script = await build.outputs[0].text();
-    server = Bun.serve({ port: 0, async fetch(request) {
+    server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
         const path = new URL(request.url).pathname;
         if (request.method !== "GET") writes += 1;
         if (path.endsWith(".mp4")) { videoReads += 1; if (path === "/retry.mp4" && ++retryReads === 1) return new Response("unavailable", { status: 404 }); if (path === "/slow.mp4") await slow; return new Response(Bun.file(`${dir}/${path === "/blue.mp4" ? "blue" : "red"}.mp4`), { headers: { "Content-Type": "video/mp4" } }); }
@@ -32,8 +32,24 @@ beforeAll(async () => {
     const executablePath = [process.env.CHROME_PATH, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((p): p is string => Boolean(p && existsSync(p)));
     browser = await chromium.launch({ executablePath, headless: true });
 }, 60000);
-beforeEach(async () => { await page?.close(); writes = videoReads = retryReads = 0; slow = new Promise((resolve) => { releaseSlow = resolve; }); page = await browser.newPage(); await page.goto(server.url.toString()); await page.waitForFunction(() => Boolean((window as any).previewHarness)); });
-afterAll(async () => { releaseSlow?.(); await browser?.close(); server?.stop(true); rmSync(dir, { recursive: true, force: true }); });
+beforeEach(async () => {
+    writes = videoReads = retryReads = 0;
+    slow = new Promise((resolve) => { releaseSlow = resolve; });
+    page = await browser.newPage();
+    await page.goto(server.url.toString(), { waitUntil: "commit" });
+    await page.waitForFunction(() => Boolean((window as any).previewHarness));
+}, 30_000);
+
+afterEach(async () => {
+    releaseSlow?.();
+    await page?.close();
+}, 30_000);
+
+afterAll(async () => {
+    await browser?.close();
+    server?.stop(true);
+    if (dir) rmSync(dir, { recursive: true, force: true });
+}, 30_000);
 async function enter() { await page.evaluate(() => window.scrollTo(0, 3000)); }
 test("failed first decode retries for the next consumer; old release cannot erase success", async () => {
     expect(await page.evaluate(() => (window as any).previewHarness.retry())).toEqual({ failed: null, succeeded: true, sameAfterOldRelease: true });
