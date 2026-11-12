@@ -132,3 +132,83 @@ func TestDocumentCommitRequiresExpectedRevision(t *testing.T) {
 		t.Fatalf("缺少 expectedRevision 应被拒: %v", err)
 	}
 }
+
+func TestCanvasCreateOperationAndReplay(t *testing.T) {
+	h := newHarness(t)
+	if _, err := h.execute(t, operations.AssistantCaller(&agentops.AssistantScope{CanvasID: h.canvasID, PermissionMode: "full-access"}, false), "canvas.create", "create-op-assistant", map[string]any{
+		"title": "内置助手不应能创建画布",
+	}); err == nil {
+		t.Fatal("expected assistant caller to be denied canvas.create")
+	}
+	created, err := h.execute(t, operations.ExternalCaller(false), "canvas.create", "create-op-1", map[string]any{
+		"title": "外部创建画布",
+	})
+	if err != nil {
+		t.Fatalf("canvas.create: %v", err)
+	}
+	res, _ := created.Result.(map[string]any)
+	canvasID, _ := res["canvasId"].(string)
+	if canvasID == "" || res["title"] != "外部创建画布" || created.Revision != 1 {
+		t.Fatalf("unexpected canvas.create result: %#v", created)
+	}
+	replay, err := h.execute(t, operations.ExternalCaller(false), "canvas.create", "create-op-1", map[string]any{
+		"title": "外部创建画布",
+	})
+	if err != nil || !replay.Replayed {
+		t.Fatalf("expected replay of canvas.create, got %#v (err=%v)", replay, err)
+	}
+	raw, err := h.service.UserCanvasProject(h.userID, canvasID)
+	if err != nil {
+		t.Fatalf("UserCanvasProject(%s): %v", canvasID, err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := doc["nodes"].([]any); !ok {
+		t.Fatalf("expected nodes array on created canvas: %s", raw)
+	}
+	if _, ok := doc["connections"].([]any); !ok {
+		t.Fatalf("expected connections array on created canvas: %s", raw)
+	}
+	if _, err := h.execute(t, operations.ExternalCaller(false), "canvas.create", "create-op-dup", map[string]any{
+		"canvasId": canvasID,
+		"title":    "重复ID画布",
+	}); err == nil {
+		t.Fatal("expected canvas.create with existing canvasId to fail with conflict")
+	}
+	store := operations.NewStore(h.service.Database())
+	writes, err := store.ListExternalCanvasWrites(h.userID, canvasID)
+	if err != nil || len(writes) != 1 || writes[0].Op != "canvas.create" {
+		t.Fatalf("expected external write record for canvas.create, got %+v (err=%v)", writes, err)
+	}
+	undone, err := store.UndoExternalCanvasWrite(t.Context(), h.service, h.userID, canvasID, "create-op-1")
+	if err != nil || !undone.Undone {
+		t.Fatalf("UndoExternalCanvasWrite(canvas.create): %+v (err=%v)", undone, err)
+	}
+	if _, err := h.service.UserCanvasProject(h.userID, canvasID); err == nil {
+		t.Fatal("expected created canvas to be deleted after undo")
+	}
+	// 删除后若用相同 canvasId 重建新画布，旧 canvas.create 记录不得误删新建实例
+	if _, err := h.execute(t, operations.ExternalCaller(false), "canvas.create", "create-op-2", map[string]any{
+		"canvasId": "canvas-recreated",
+		"title":    "第一版",
+	}); err != nil {
+		t.Fatalf("canvas.create first instance: %v", err)
+	}
+	if err := h.service.BindDomain(nil).(operations.CanvasProjectCreator).DeleteUserCanvasProject(h.userID, "canvas-recreated"); err != nil {
+		t.Fatalf("DeleteUserCanvasProject: %v", err)
+	}
+	if _, err := h.execute(t, operations.ExternalCaller(false), "canvas.create", "create-op-3", map[string]any{
+		"canvasId": "canvas-recreated",
+		"title":    "重建版",
+	}); err != nil {
+		t.Fatalf("canvas.create second instance: %v", err)
+	}
+	if _, err := store.UndoExternalCanvasWrite(t.Context(), h.service, h.userID, "canvas-recreated", "create-op-2"); err == nil {
+		t.Fatal("expected undo of superseded canvas.create to fail with conflict")
+	}
+	if _, err := h.service.UserCanvasProject(h.userID, "canvas-recreated"); err != nil {
+		t.Fatalf("expected recreated canvas to remain intact: %v", err)
+	}
+}

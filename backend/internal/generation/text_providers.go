@@ -231,7 +231,7 @@ func RunClaudeTextTask(ctx context.Context, input Input) (map[string]interface{}
 	if systemPrompt := strings.TrimSpace(input.Config.SystemPrompt); systemPrompt != "" {
 		body["system"] = systemPrompt
 	}
-	result, err := RequestTextProvider(ctx, input.Config, "/messages", body, "claude-api", input.StreamText, input.OnTextDelta)
+	result, err := RequestTextProvider(ctx, input.Config, MessagesPath, body, "claude-api", input.StreamText, input.OnTextDelta)
 	if err != nil {
 		return nil, err
 	}

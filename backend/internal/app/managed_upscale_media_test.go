@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/mediatools"
 	"qisitv/backend/internal/model"
@@ -37,11 +37,11 @@ func TestManagedUpscaleOpaqueModelOwnsSingleTicketAndSavedResult(t *testing.T) {
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/models":
-			w.Header().Set(beefapi.MediaProtocolHeader, beefapi.MediaProtocolVersion)
-			_ = json.NewEncoder(w).Encode(map[string]any{"media_protocol": beefapi.MediaDiscovery{Version: beefapi.MediaProtocolVersion, SupportedMediaTypes: []string{"upscale"}, TaskSubmitURL: "/v1/media/tasks", TaskQueryURLTemplate: "/v1/media/tasks/{task_ref}", UploadsURL: "/v1/media/uploads"}, "data": []any{map[string]any{"id": "opaque-upscale-2030", "media_capabilities_version": "fixture-v1", "media_capabilities": map[string]any{"upscale": beefapi.MediaCapability{Operations: []string{"upscale"}, Options: []string{"upscale_factor", "output_format", "face_enhancement"}, ReferenceKinds: []string{"image"}, MaxOutputs: 1}}}}})
+			w.Header().Set(beeftv.MediaProtocolHeader, beeftv.MediaProtocolVersion)
+			_ = json.NewEncoder(w).Encode(map[string]any{"media_protocol": beeftv.MediaDiscovery{Version: beeftv.MediaProtocolVersion, SupportedMediaTypes: []string{"upscale"}, TaskSubmitURL: "/v1/media/tasks", TaskQueryURLTemplate: "/v1/media/tasks/{task_ref}", UploadsURL: "/v1/media/uploads"}, "data": []any{map[string]any{"id": "opaque-upscale-2030", "media_capabilities_version": "fixture-v1", "media_capabilities": map[string]any{"upscale": beeftv.MediaCapability{Operations: []string{"upscale"}, Options: []string{"upscale_factor", "output_format", "face_enhancement"}, ReferenceKinds: []string{"image"}, MaxOutputs: 1}}}}})
 		case "/v1/media/uploads":
 			uploads.Add(1)
-			_ = json.NewEncoder(w).Encode(beefapi.UploadSession{Ticket: "original", UploadURL: server.URL + "/put", UploadMethod: "PUT"})
+			_ = json.NewEncoder(w).Encode(beeftv.UploadSession{Ticket: "original", UploadURL: server.URL + "/put", UploadMethod: "PUT"})
 		case "/put":
 			puts.Add(1)
 			actual, _ := io.ReadAll(r.Body)
@@ -49,15 +49,15 @@ func TestManagedUpscaleOpaqueModelOwnsSingleTicketAndSavedResult(t *testing.T) {
 				t.Error("source changed or credential leaked")
 			}
 		case "/v1/media/uploads/complete":
-			_ = json.NewEncoder(w).Encode(beefapi.UploadedMedia{URL: server.URL + "/source", Kind: "image", Mime: "image/png", Bytes: int64(len(data)), SHA256: hex.EncodeToString(sum[:])})
+			_ = json.NewEncoder(w).Encode(beeftv.UploadedMedia{URL: server.URL + "/source", Kind: "image", Mime: "image/png", Bytes: int64(len(data)), SHA256: hex.EncodeToString(sum[:])})
 		case "/v1/media/tasks":
 			posts.Add(1)
-			var request beefapi.MediaRequest
+			var request beeftv.MediaRequest
 			_ = json.NewDecoder(r.Body).Decode(&request)
 			if request.MediaType != "upscale" || request.Model != "opaque-upscale-2030" || request.Operation != "upscale" || request.Input.Prompt != "" || len(request.Input.References) != 1 || request.Input.References[0].Role != "source" || request.Input.References[0].URL != server.URL+"/source" || request.Options["upscale_factor"] != float64(2) {
 				t.Errorf("request=%+v", request)
 			}
-			_ = json.NewEncoder(w).Encode(beefapi.MediaTask{TaskRef: request.TaskRef, MediaType: "upscale", Status: "completed", Outputs: []beefapi.MediaOutput{{Kind: "image", URL: server.URL + "/result.png"}}})
+			_ = json.NewEncoder(w).Encode(beeftv.MediaTask{TaskRef: request.TaskRef, MediaType: "upscale", Status: "completed", Outputs: []beeftv.MediaOutput{{Kind: "image", URL: server.URL + "/result.png"}}})
 		case "/result.png":
 			downloads.Add(1)
 			if r.Header.Get("Authorization") != "" {
@@ -74,17 +74,17 @@ func TestManagedUpscaleOpaqueModelOwnsSingleTicketAndSavedResult(t *testing.T) {
 	svc, db := newManagedImageDirectService(t, filepath.Join(t.TempDir(), "workspace.db"), dir)
 	defer closeDB(t, db)
 	source := seedManagedImageLocalResource(t, svc, "source", data)
-	input := generation.Input{Mode: "image", Prompt: "AI 超分", Upscale: &generation.UpscaleOptions{Factor: 2}, ReferenceImages: []generation.Media{source}, Config: generation.Config{CredentialRef: beefapi.CredentialRef, MediaProtocolVersion: beefapi.MediaProtocolVersion, BaseURL: server.URL, APIKey: "private", Model: "opaque-upscale-2030"}}
+	input := generation.Input{Mode: "image", Prompt: "AI 超分", Upscale: &generation.UpscaleOptions{Factor: 2}, ReferenceImages: []generation.Media{source}, Config: generation.Config{CredentialRef: beeftv.CredentialRef, MediaProtocolVersion: beeftv.MediaProtocolVersion, BaseURL: server.URL, APIKey: "private", Model: "opaque-upscale-2030"}}
 	raw, _ := json.Marshal(input)
 	expires := time.Now().Add(time.Hour)
 	task := model.Task{ID: "original-upscale", UserID: "user-1", Type: "canvas_image", Operation: "media.upscale.topaz", Status: model.TaskStatusRunning, InputJSON: string(raw), LeaseOwner: "worker", LeaseExpiresAt: &expires}
-	attempt := &model.RouteAttempt{ID: "upscale-attempt", TaskID: task.ID, ChannelID: beefapi.ChannelID, DispatchState: "submission_unknown", StartedAt: time.Now()}
+	attempt := &model.RouteAttempt{ID: "upscale-attempt", TaskID: task.ID, ChannelID: beeftv.ChannelID, DispatchState: "submission_unknown", StartedAt: time.Now()}
 	for _, row := range []any{&task, attempt} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
-	ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: server.URL})
+	ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: server.URL})
 	ctx = svc.bindGenerationRuntime(ctx, generation.CallMeta{UserID: task.UserID, TaskID: task.ID, TaskType: task.Type})
 	ctx = context.WithValue(withProviderSubmissionKey(ctx, attempt), imageTaskContext{}, task)
 	result, err := generation.Execute(ctx, input)
@@ -147,7 +147,7 @@ func TestManagedUpscaleDeliveryRestoresOriginalOwnedVideoAudio(t *testing.T) {
 	if err := svc.repo.CreateResource(&resource); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(generation.Input{Mode: "video", Config: generation.Config{CredentialRef: beefapi.CredentialRef, Model: "opaque-upscale"}, Upscale: &generation.UpscaleOptions{Factor: 2}, ReferenceVideos: []generation.Media{{StorageKey: "resource:source"}}})
+	raw, _ := json.Marshal(generation.Input{Mode: "video", Config: generation.Config{CredentialRef: beeftv.CredentialRef, Model: "opaque-upscale"}, Upscale: &generation.UpscaleOptions{Factor: 2}, ReferenceVideos: []generation.Media{{StorageKey: "resource:source"}}})
 	task := model.Task{ID: "video-upscale", UserID: "user-1", Type: "canvas_video", Operation: "media.upscale.topaz", Status: model.TaskStatusSucceeded, InputJSON: string(raw)}
 	if err := db.Create(&task).Error; err != nil {
 		t.Fatal(err)

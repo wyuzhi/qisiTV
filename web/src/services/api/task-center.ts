@@ -466,9 +466,14 @@ export async function waitForGenerationTask(id: string, options?: WaitForGenerat
             }
             if (task.status === "failed" || task.status === "cancelled") {
                 const message = task.error ? generationErrorMessage(task.errorCode ? { code: task.errorCode, message: task.error } : task.error) : `任务${task.status === "cancelled" ? "已取消" : "失败"}`;
-                const error = new Error(message) as Error & { code?: string; taskOutcome?: import("@/lib/task-outcome").TaskOutcome };
+                const error = new Error(message) as Error & {
+                    code?: string;
+                    taskOutcome?: import("@/lib/task-outcome").TaskOutcome;
+                    failureDiagnostics?: import("@/lib/generation-error").GenerationFailureDiagnostics;
+                };
                 if (task.errorCode) error.code = task.errorCode;
                 if (task.outcome) error.taskOutcome = task.outcome;
+                if (task.failureDiagnostics) error.failureDiagnostics = task.failureDiagnostics;
                 throw error;
             }
             const retrieving = Boolean(task.delivery) || task.stage === GENERATION_RESULT_FETCH_STAGE;
@@ -573,7 +578,7 @@ async function waitForGenerationTaskTextEvents(id: string, options: WaitForGener
                 if (completed.status === "succeeded") return completed;
                 if (completed.status === "failed" || completed.status === "cancelled") {
                     const message = completed.error ? generationErrorMessage(completed.errorCode ? { code: completed.errorCode, message: completed.error } : completed.error) : `任务${completed.status === "cancelled" ? "已取消" : "失败"}`;
-                    throw new TaskTextStreamFatalError(message, completed.errorCode);
+                    throw new TaskTextStreamFatalError(message, completed.errorCode, completed.outcome, completed.failureDiagnostics);
                 }
             }
             lastStreamError = new Error("任务文本流连接提前结束");
@@ -601,10 +606,19 @@ function isTaskStatus(value: unknown): value is TaskStatus {
 
 class TaskTextStreamFatalError extends Error {
     code?: string;
-    constructor(message: string, code?: string) {
+    taskOutcome?: import("@/lib/task-outcome").TaskOutcome;
+    failureDiagnostics?: import("@/lib/generation-error").GenerationFailureDiagnostics;
+    constructor(
+        message: string,
+        code?: string,
+        taskOutcome?: import("@/lib/task-outcome").TaskOutcome,
+        failureDiagnostics?: import("@/lib/generation-error").GenerationFailureDiagnostics,
+    ) {
         super(message);
         this.name = "TaskTextStreamFatalError";
         if (code) this.code = code;
+        if (taskOutcome) this.taskOutcome = taskOutcome;
+        if (failureDiagnostics) this.failureDiagnostics = failureDiagnostics;
     }
 }
 

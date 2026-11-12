@@ -82,7 +82,7 @@ func newStyleProfileTestService(t *testing.T) *Service {
 	if err := db.AutoMigrate(&model.StyleProfile{}); err != nil {
 		t.Fatal(err)
 	}
-	return New(repository.New(db), nil)
+	return New(repository.New(db))
 }
 
 func styleProfileTestRequest(t *testing.T, title string, revision int) StyleProfileRequest {

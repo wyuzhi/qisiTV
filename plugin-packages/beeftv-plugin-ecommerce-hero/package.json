@@ -1,0 +1,83 @@
+{
+  "name": "beeftv-plugin-ecommerce-hero",
+  "version": "0.1.1",
+  "description": "上传商品图并选择需要生成的场景图张数，一键创建电商主图生成节点或由创作助手自动编排。",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sunnyender-org/beeftv-plugins.git",
+    "directory": "plugins/beeftv-plugin-ecommerce-hero"
+  },
+  "homepage": "https://github.com/Sunnyender-org/beeftv-plugins/tree/main/plugins/beeftv-plugin-ecommerce-hero",
+  "keywords": [
+    "beeftv-plugin",
+    "ecommerce",
+    "hero-image"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "beeftv": {
+    "name": "一键商品主图",
+    "client": "./client/index.js",
+    "surfaces": [
+      "node",
+      "hybrid"
+    ],
+    "permissions": [
+      "canvas.read",
+      "canvas.write",
+      "generation.run"
+    ],
+    "contributes": {
+      "canvasNodes": [
+        {
+          "id": "ecommerce-hero",
+          "label": "一键商品主图",
+          "defaultTitle": "商品主图",
+          "defaultSize": {
+            "width": 320,
+            "height": 280
+          },
+          "schema": {
+            "type": "object",
+            "properties": {
+              "productTitle": {
+                "type": "string"
+              },
+              "imageUrl": {
+                "type": "string"
+              },
+              "sceneStyle": {
+                "type": "string"
+              },
+              "sceneCount": {
+                "type": "number"
+              }
+            }
+          },
+          "renderer": "client",
+          "description": "上传商品白底图/实拍图，选择场景张数并生成电商主图",
+          "acceptsInputKind": "image"
+        }
+      ]
+    }
+  },
+  "files": [
+    "extensions",
+    "skills",
+    "client",
+    "README.md"
+  ],
+  "author": "BeefTV"
+}

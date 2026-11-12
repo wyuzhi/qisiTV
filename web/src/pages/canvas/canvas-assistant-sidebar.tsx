@@ -1,6 +1,6 @@
 import { createClientId } from "@/lib/client-id";
 import { Button, Dropdown, Tooltip } from "antd";
-import { History, MessageSquarePlus, X, ArrowUpRight } from "lucide-react";
+import { History, MessageSquarePlus, Trash2, X, ArrowUpRight } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { AppDrawer } from "@/components/ui/product/app-drawer";
@@ -21,6 +21,7 @@ import { ASSISTANT_CONTINUE_PROMPT, ASSISTANT_CHECK_RESULTS_PROMPT, ASSISTANT_ST
 import { CanvasAssistantComposer } from "./canvas-assistant-composer";
 import { CanvasAssistantReply, CanvasAssistantTurnView, CanvasAssistantUserMessage } from "./canvas-assistant-turn";
 import { AssistantReasoning } from "@/components/ai/message-reasoning";
+import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { ASSISTANT_LIVE_TURN_KEY, ASSISTANT_MAX_WIDTH, ASSISTANT_MIN_WIDTH, type CanvasAssistantController } from "./use-canvas-assistant";
 import "./canvas-assistant-sidebar.css";
 
@@ -151,6 +152,17 @@ function ConnectedCanvasAssistantSidebar(props: Props) {
         setSelectionAttached(true);
     }, [selectedNodeIds.join(",")]);
 
+    const [slowStreamingHint, setSlowStreamingHint] = useState(false);
+    useEffect(() => {
+        if (!assistant.streaming || Boolean(assistant.streamed)) {
+            setSlowStreamingHint(false);
+            return;
+        }
+        setSlowStreamingHint(false);
+        const timer = setTimeout(() => setSlowStreamingHint(true), 12_000);
+        return () => clearTimeout(timer);
+    }, [assistant.streaming, assistant.streamed]);
+
     const turnCount = assistant.turns.length;
     useLayoutEffect(() => {
         const node = logRef.current;
@@ -196,12 +208,38 @@ function ConnectedCanvasAssistantSidebar(props: Props) {
     }, [assistant]);
 
     const sessionItems = assistant.sessions.length
-        ? assistant.sessions.map((session) => ({
-              key: session.sessionId,
-              label: session.title || "还没有内容的对话",
-              onClick: () => void assistant.activateSession(session.sessionId),
-          }))
+        ? assistant.sessions.map((item) => {
+              const displayTitle = item.title || "还没有内容的对话";
+              const deleteTitle = item.title || "新对话";
+              return {
+                  key: item.sessionId,
+                  label: (
+                      <div className="flex items-center justify-between gap-2">
+                          <span className="min-w-0 flex-1 truncate">{displayTitle}</span>
+                          <button
+                              type="button"
+                              className="inline-flex size-6 shrink-0 items-center justify-center rounded text-[var(--muted-foreground)] transition hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
+                              aria-label={`删除会话 ${deleteTitle}`}
+                              title="删除对话"
+                              onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  void assistant.deleteSession(item.sessionId);
+                              }}
+                          >
+                              <Trash2 className="size-3.5" aria-hidden="true" />
+                          </button>
+                      </div>
+                  ),
+                  onClick: () => void assistant.activateSession(item.sessionId),
+              };
+          })
         : [{ key: "empty", label: "还没有别的对话", disabled: true }];
+
+    const sidePanelEntries = usePluginSlot("canvas.sidePanel");
+    const [activeSidePanelId, setActiveSidePanelId] = useState<string>("assistant");
+    const activePluginPanel = sidePanelEntries.find((entry) => entry.payload.id === activeSidePanelId);
+    const ActivePluginPanelComp = activePluginPanel?.payload.component;
 
     const content = (
         <div className="canvas-assistant-panel" data-canvas-no-zoom>
@@ -227,6 +265,35 @@ function ConnectedCanvasAssistantSidebar(props: Props) {
                 </Tooltip>
             </header>
 
+            {sidePanelEntries.length > 0 ? (
+                <div className="flex items-center gap-1 border-b border-[var(--border)] px-3 py-1.5 text-xs">
+                    <button
+                        type="button"
+                        className={`rounded-md px-2 py-1 font-medium ${!activePluginPanel ? "bg-[var(--muted)] text-[var(--foreground)]" : "text-[var(--muted-foreground)]"}`}
+                        onClick={() => setActiveSidePanelId("assistant")}
+                    >
+                        创作助手
+                    </button>
+                    {sidePanelEntries.map((entry) => (
+                        <button
+                            key={entry.entryId}
+                            type="button"
+                            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 font-medium ${activePluginPanel?.entryId === entry.entryId ? "bg-[var(--muted)] text-[var(--foreground)]" : "text-[var(--muted-foreground)]"}`}
+                            onClick={() => setActiveSidePanelId(entry.payload.id)}
+                        >
+                            {entry.payload.icon}
+                            <span>{entry.payload.title}</span>
+                        </button>
+                    ))}
+                </div>
+            ) : null}
+
+            {ActivePluginPanelComp ? (
+                <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                    <ActivePluginPanelComp canvasId={assistant.canvasId ?? undefined} selectedNodeIds={selectedNodeIds} />
+                </div>
+            ) : (
+                <>
             {notice ? (
                 <div className="canvas-assistant-notice" role="status">
                     <span>{notice.text}</span>
@@ -265,6 +332,9 @@ function ConnectedCanvasAssistantSidebar(props: Props) {
                         onLocate={onLocateNodes}
                         onUndo={(turnId) => void assistant.undoTurn(turnId)}
                         onRunProposal={onRunProposal}
+                        onRunScriptProposal={(proposal, turnId, alwaysAllow) => void assistant.runScriptProposal(proposal, turnId, alwaysAllow)}
+                        runningScriptProposalIds={assistant.runningScriptProposalIds}
+                        scriptProposalFeedback={assistant.scriptProposalFeedback}
                         onDismissProposal={assistant.markProposalDismissed}
                         nodes={props.nodes}
                         onCheckResults={!readOnly && inputReady && !assistant.streaming && !assistant.sessionBusy ? prepareResultCheck : undefined}
@@ -299,14 +369,17 @@ function ConnectedCanvasAssistantSidebar(props: Props) {
                             <p className="canvas-assistant-meta" role="status">{item.status === "accepted" ? "助手已收到补充要求。" : item.status === "sending" ? "正在发送补充要求…" : "未能确认收到补充要求。请查看最新回复后再决定是否发送。"}</p>
                         </div>)}
                         {assistant.streaming ? (
-                            <div className="canvas-assistant-working" role="status" aria-live="polite">
-                                <span className="canvas-assistant-working-dots" aria-hidden="true">
-                                    <span />
-                                    <span />
-                                    <span />
-                                </span>
-                                <span className="canvas-assistant-working-text">{assistant.lifecycleNotice || "助手正在处理…"}</span>
-                            </div>
+                            <>
+                                <div className="canvas-assistant-working" role="status" aria-live="polite">
+                                    <span className="canvas-assistant-working-dots" aria-hidden="true">
+                                        <span />
+                                        <span />
+                                        <span />
+                                    </span>
+                                    <span className="canvas-assistant-working-text">{assistant.lifecycleNotice || "助手正在处理…"}</span>
+                                </div>
+                                {slowStreamingHint ? <p className="canvas-assistant-meta" role="status">思考耗时较长，若开启了系统代理或 VPN 请检查网络连通性，也可点击下方停止后重试。</p> : null}
+                            </>
                         ) : null}
                     </div>
                 ) : null}
@@ -374,6 +447,8 @@ function ConnectedCanvasAssistantSidebar(props: Props) {
                 setSkillsOpen(true);
                 void loadSkills();
             }} />
+                </>
+            )}
         </div>
     );
 

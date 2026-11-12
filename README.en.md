@@ -19,7 +19,7 @@ See the [feature list](docs/content/docs/overview/features.mdx) and [feature par
 
 ## Web interface, local execution
 
-The current source uses a hosted web interface backed by the qisiTV engine on the user's computer. Install the engine, open the website, confirm pairing and choose a project root. Each project has a real local folder containing its canvas and media. Browser cache is not the final storage. Engine database/cache storage and independent project folders are managed separately.
+Open the website to create a canvas. Until you choose a project folder, drafts are saved in this browser. After folder access is granted, each project stores its canvas and media in its own folder. Connect the optional local engine for the creative assistant, workflows or native media tools.
 
 The engine reuses the upstream workspace, task queue, assistant host and media APIs. Old browser projects require explicit folder migration and authority transfer; two workspaces are never silently merged. Platform installers, model execution and release behavior still require their respective acceptance checks. See the [Web engine contract and validation boundaries](docs/design/web-engine-contract.md).
 

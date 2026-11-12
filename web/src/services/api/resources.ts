@@ -85,9 +85,65 @@ export function resourceStorageKey(id: string) {
     return `resource:${id}`;
 }
 
+export const DEFAULT_CANVAS_DOCUMENT_LIMIT_MB = 64;
+export const MAX_CANVAS_DOCUMENT_LIMIT_MB = 512;
+const CANVAS_DOCUMENT_LIMIT_STORAGE_KEY = "beeftv-canvas-document-limit-mb";
+
+export function readLocalCanvasDocumentLimitMB(): number {
+    try {
+        const raw = typeof localStorage !== "undefined" ? localStorage.getItem(CANVAS_DOCUMENT_LIMIT_STORAGE_KEY) : null;
+        if (raw !== null && raw.trim() !== "") {
+            const parsed = Number(raw);
+            if (Number.isInteger(parsed) && parsed >= 0 && parsed <= MAX_CANVAS_DOCUMENT_LIMIT_MB) return parsed;
+        }
+    } catch {
+        // Ignore storage read failures.
+    }
+    return DEFAULT_CANVAS_DOCUMENT_LIMIT_MB;
+}
+
 export async function getAccountFileStorageUsage() {
-    const data = await http.get<{ usage: AccountFileStorageUsage }>("/resources/storage-usage");
+    const data = await http.get<{ usage: AccountFileStorageUsage; canvasDocumentMB?: number }>("/resources/storage-usage");
+    if (typeof data.canvasDocumentMB === "number" && Number.isInteger(data.canvasDocumentMB) && data.canvasDocumentMB >= 0) {
+        try {
+            localStorage.setItem(CANVAS_DOCUMENT_LIMIT_STORAGE_KEY, String(data.canvasDocumentMB));
+        } catch {
+            // Ignore storage write failures.
+        }
+    }
     return data.usage;
+}
+
+export async function getCanvasDocumentLimitMB(): Promise<number> {
+    try {
+        const data = await http.get<{ usage?: AccountFileStorageUsage; canvasDocumentMB?: number }>("/resources/storage-usage");
+        if (typeof data?.canvasDocumentMB === "number" && Number.isInteger(data.canvasDocumentMB) && data.canvasDocumentMB >= 0) {
+            try {
+                localStorage.setItem(CANVAS_DOCUMENT_LIMIT_STORAGE_KEY, String(data.canvasDocumentMB));
+            } catch {
+                // Ignore storage write failures.
+            }
+            return data.canvasDocumentMB;
+        }
+    } catch {
+        // Offline or fixture harness without /api/resources/storage-usage: fall back to last confirmed local value.
+    }
+    return readLocalCanvasDocumentLimitMB();
+}
+
+export async function updateCanvasDocumentLimitMB(canvasDocumentMB: number): Promise<number> {
+    const normalized = Math.trunc(canvasDocumentMB);
+    if (!Number.isFinite(normalized) || normalized < 0 || normalized > MAX_CANVAS_DOCUMENT_LIMIT_MB) {
+        throw new Error(`单画布容量上限请填写 0（不限制）或 1–${MAX_CANVAS_DOCUMENT_LIMIT_MB} 之间的整数（MB）`);
+    }
+    const data = await http.patch<{ canvasDocumentMB?: number }>("/resources/storage-usage", { canvasDocumentMB: normalized });
+    const persisted = typeof data?.canvasDocumentMB === "number" ? data.canvasDocumentMB : normalized;
+    try {
+        localStorage.setItem(CANVAS_DOCUMENT_LIMIT_STORAGE_KEY, String(persisted));
+    } catch {
+        // Ignore storage write failures.
+    }
+    return persisted;
 }
 
 export async function syncResourceToArkPrivateAsset(id: string) {
@@ -352,7 +408,9 @@ export function resolveResourceUrl(storageKey?: string, fallback = "") {
     const id = resourceIdFromStorageKey(storageKey);
     // 资源引用本身已经包含稳定 ID；恢复/展示阶段不需要再查一遍元数据。
     // 需要 publicUrl、mime 或尺寸时必须显式调用 getResource，避免隐式 N+1。
-    return id ? resourceFileUrl(id) : fallback;
+    if (id) return resourceFileUrl(id);
+    const legacyId = ownedResourceIdFromMediaRef(undefined, fallback);
+    return legacyId ? `${resourceFileUrl(legacyId)}${fallback.match(/[?#].*$/u)?.[0] || ""}` : fallback;
 }
 
 // playbackVariantUrl 返回浏览器兼容播放副本 URL（H.265→H.264 转码结果）。

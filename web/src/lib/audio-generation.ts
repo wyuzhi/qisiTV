@@ -27,7 +27,7 @@ export const audioFormatOptions = [
 // TokenHub will forward it, but MiniMax does not declare a content type for it.
 export const minimaxAudioFormatOptions = audioFormatOptions.filter((item) => item.value !== "opus");
 
-// BeefAPI MiniMax speech: voice is a MiniMax system/cloned ID, not OpenAI alloy.
+// BeefTV MiniMax speech: voice is a MiniMax system/cloned ID, not OpenAI alloy.
 // Documented example is male-qn-qingse; these are the T2A 系统音色.
 export const minimaxSpeechVoiceOptions = [
     { value: "male-qn-qingse", label: "青涩青年" },
@@ -46,7 +46,19 @@ export const minimaxSpeechVoiceOptions = [
     { value: "audiobook_female_2", label: "女有声书 2" },
 ];
 
-export type AudioSpeechKind = "openai" | "minimax-speech" | "minimax-music";
+export const seedAudioVoiceOptions = [
+    { value: "auto", label: "自动（全能参考）" },
+    { value: "zh_female_cancan_uranus_bigtts", label: "灿灿女声" },
+    { value: "zh_female_vv_uranus_bigtts", label: "薇薇少女" },
+    { value: "zh_female_xiaohe_uranus_bigtts", label: "温柔小荷" },
+    { value: "zh_female_shuangkuaisisi_uranus_bigtts", label: "爽快思思" },
+    { value: "zh_male_m191_uranus_bigtts", label: "云舟男声" },
+    { value: "zh_male_taocheng_uranus_bigtts", label: "阳光小天" },
+    { value: "zh_male_dayi_uranus_bigtts", label: "磁性大壹" },
+    { value: "zh_male_liufei_uranus_bigtts", label: "儒雅刘飞" },
+];
+
+export type AudioSpeechKind = "openai" | "minimax-speech" | "minimax-music" | "seed-audio";
 
 export type AudioSpeechProfile = {
     kind: AudioSpeechKind;
@@ -65,6 +77,7 @@ export type AudioSpeechProfile = {
 };
 
 const OPENAI_SPEECH_VOICES = new Set(audioVoiceOptions.map((item) => item.value));
+const MINIMAX_SPEECH_VOICES = new Set(minimaxSpeechVoiceOptions.map((item) => item.value));
 
 export function audioModelId(model: string) {
     const trimmed = model.trim();
@@ -74,6 +87,7 @@ export function audioModelId(model: string) {
 
 export function audioSpeechKind(model: string): AudioSpeechKind {
     const id = audioModelId(model);
+    if (id.includes("seed-audio") || id.includes("custom-model-sa")) return "seed-audio";
     if (id.includes("minimax-speech")) return "minimax-speech";
     if (id.includes("minimax-music")) return "minimax-music";
     return "openai";
@@ -81,6 +95,23 @@ export function audioSpeechKind(model: string): AudioSpeechKind {
 
 export function audioSpeechProfile(model = ""): AudioSpeechProfile {
     const kind = audioSpeechKind(model);
+    if (kind === "seed-audio") {
+        return {
+            kind,
+            voices: seedAudioVoiceOptions,
+            formats: audioFormatOptions.filter((item) => item.value === "mp3"),
+            defaultVoice: "auto",
+            defaultFormat: "mp3",
+            speedMin: 0.5,
+            speedMax: 2,
+            speedOptions: ["0.5", "0.75", "1", "1.25", "1.5", "2"],
+            showVoice: true,
+            showSpeed: true,
+            showPitch: true,
+            showVolume: true,
+            showInstructions: true,
+        };
+    }
     if (kind === "minimax-speech") {
         return {
             kind,
@@ -137,8 +168,12 @@ export function normalizeAudioVoiceValue(value: string, model?: string) {
     if (!profile.showVoice) return "";
     const trimmed = String(value || "").trim();
     if (profile.voices.some((item) => item.value === trimmed)) return trimmed;
+    if (profile.kind === "seed-audio") {
+        if (!trimmed || OPENAI_SPEECH_VOICES.has(trimmed) || MINIMAX_SPEECH_VOICES.has(trimmed) || trimmed === "中文") return profile.defaultVoice;
+        return trimmed;
+    }
     if (profile.kind === "minimax-speech") {
-        if (!trimmed || OPENAI_SPEECH_VOICES.has(trimmed) || trimmed === "中文") return profile.defaultVoice;
+        if (!trimmed || trimmed === "auto" || trimmed.endsWith("_bigtts") || trimmed.startsWith("ICL_") || OPENAI_SPEECH_VOICES.has(trimmed) || trimmed === "中文") return profile.defaultVoice;
         return trimmed;
     }
     return OPENAI_SPEECH_VOICES.has(trimmed) ? trimmed : profile.defaultVoice;
@@ -167,9 +202,10 @@ export function normalizeAudioPitchValue(value: string) {
 }
 
 export function normalizeAudioVolumeValue(value: string) {
+    if (!String(value ?? "").trim()) return "1";
     const volume = Number(value);
-    if (!Number.isFinite(volume)) return "1";
-    return String(Math.max(0, Math.min(1, Number(volume.toFixed(2)))));
+    if (!Number.isFinite(volume) || volume <= 0) return "1";
+    return String(Math.max(0.5, Math.min(2, Number(volume.toFixed(2)))));
 }
 
 export function audioVoiceLabel(value: string, model?: string) {
@@ -227,8 +263,8 @@ export function audioSettingsSummary(config: { model?: string; audioVoice?: stri
     parts.push(audioFormatLabel(config.audioFormat || "", model));
     if (profile.kind === "minimax-music") parts.push("256 kbps");
     if (profile.showSpeed) parts.push(audioSpeedLabel(config.audioSpeed || "", model));
-    if (profile.showPitch) parts.push(`音调${audioPitchLabel(config.audioPitch || "")}`);
-    if (profile.showVolume) parts.push(`音量${audioVolumeLabel(config.audioVolume || "")}`);
+    if (profile.showPitch && Number(normalizeAudioPitchValue(config.audioPitch || "")) !== 0) parts.push(`音调${audioPitchLabel(config.audioPitch || "")}`);
+    if (profile.showVolume && Number(normalizeAudioVolumeValue(config.audioVolume || "")) !== 1) parts.push(`音量${audioVolumeLabel(config.audioVolume || "")}`);
     return parts.join(" · ");
 }
 
@@ -238,6 +274,8 @@ export function buildAudioSpeechRequest(
         audioVoice?: string;
         audioFormat?: string;
         audioSpeed?: string;
+        audioPitch?: string;
+        audioVolume?: string;
         audioInstructions?: string;
     },
     prompt: string,
@@ -250,8 +288,10 @@ export function buildAudioSpeechRequest(
         input: prompt,
         response_format: settings.audioFormat,
     };
-    if (profile.showVoice) payload.voice = settings.audioVoice;
+    if (profile.showVoice && settings.audioVoice && settings.audioVoice !== "auto") payload.voice = settings.audioVoice;
     if (profile.showSpeed) payload.speed = Number(settings.audioSpeed);
+    if (profile.showPitch && Number(settings.audioPitch) !== 0) payload.pitch = Number(settings.audioPitch);
+    if (profile.showVolume && Number(settings.audioVolume) !== 1) payload.volume = Number(settings.audioVolume);
     if (profile.kind === "minimax-music") {
         payload.metadata = { audio_setting: { sample_rate: 44100, bitrate: 256000, format: "mp3" } };
     }

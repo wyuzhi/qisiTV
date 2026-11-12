@@ -19,7 +19,7 @@ describe("Seedream model capabilities", () => {
         expect(p.transparentBackground.supported).toBe(false);
     });
     test("国内 doubao 前缀的 Pro / Flash 不会被当成 Lite", () => {
-        const pro = seedreamImageCapability("beefapi::doubao-seedream-5-0-pro-260628")!;
+        const pro = seedreamImageCapability("beeftv::doubao-seedream-5-0-pro-260628")!;
         expect(pro.size.values).toEqual(["1K", "1.5K", "2K"]);
         expect(pro.references.maxImages).toBe(10);
         expect(pro.transparentBackground.supported).toBe(true);
@@ -36,5 +36,9 @@ describe("Seedream model capabilities", () => {
         expect(wire.seedreamMode).toBe("layers");
         expect(wire.seedreamOutputFormat).toBe("png");
         expect(wire.seedreamWatermark).toBe("false");
+        expect(backendProviderConfig({ ...defaultConfig, model: "dola-seedream-5-0-pro-260628", seedreamWatermark: undefined }).seedreamWatermark).toBe("false");
+        expect(backendProviderConfig({ ...defaultConfig, model: "dola-seedream-5-0-pro-260628", seedreamWatermark: "true" }).seedreamWatermark).toBe("true");
+        expect(backendProviderConfig({ ...defaultConfig, model: "gpt-image-2" }).seedreamWatermark).toBeUndefined();
+        expect(backendProviderConfig({ ...defaultConfig, model: "gpt-image-2", seedreamWatermark: "true" }).seedreamWatermark).toBeUndefined();
     });
 });

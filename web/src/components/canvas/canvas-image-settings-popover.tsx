@@ -8,6 +8,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { canvasPopoverLayer } from "@/lib/canvas/canvas-popover-layer";
 import { modelCapabilityConfigFor, normalizeImageValue } from "@/lib/model-capabilities";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
+import { useCreationPreferencesStore } from "@/stores/use-creation-preferences-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import { seedreamFamily } from "@/lib/seedream-image";
 
@@ -106,6 +107,7 @@ function ImageSettingsPortal({
     showCount: boolean;
     onConfigChange: (key: keyof AiConfig, value: string) => void;
 }) {
+    const resetImageSettings = useCreationPreferencesStore((state) => state.resetImageSettings);
     const gap = 8;
     const margin = 12;
     const width = Math.min(420, window.innerWidth - margin * 2);
@@ -138,6 +140,17 @@ function ImageSettingsPortal({
             onClick={(event) => event.stopPropagation()}
         >
             <ImageSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} showCount={showCount} quickCount={3} className="space-y-3" />
+            <div className="mt-3 flex items-center justify-between gap-2 border-t pt-2 text-[var(--fs-micro)]" style={{ borderColor: theme.toolbar.border, color: theme.node.muted }}>
+                <span className="truncate">当前参数已自动设为默认</span>
+                <button
+                    type="button"
+                    className="shrink-0 cursor-pointer font-medium transition-opacity hover:opacity-80"
+                    style={{ color: theme.accent.primary }}
+                    onClick={() => resetImageSettings()}
+                >
+                    恢复初始默认
+                </button>
+            </div>
         </div>,
         document.body,
     );

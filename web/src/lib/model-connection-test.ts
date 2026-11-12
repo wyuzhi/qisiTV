@@ -1,15 +1,17 @@
 import { runBackendGenerationTask, type BackendGenerationResult } from "@/services/api/generation-task";
 import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
-import { channelHasGenerationCredential, defaultConfig, encodeChannelModel, isBuiltinBeefAPIChannel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { channelHasGenerationCredential, defaultConfig, encodeChannelModel, isBuiltinBeefTVChannel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 import type { ModelProtocol } from "@/lib/model-protocols";
+import { upgradeBuiltinModelProfile } from "@/lib/builtin-service-presets";
 
 export async function testChannelModelConnection(channel: ModelChannel, model: string, capability: ModelCapability, protocol: ModelProtocol, runTask = runBackendGenerationTask) {
     if (!channel.baseUrl.trim()) throw new Error("请先填写 Base URL");
     if (!channelHasGenerationCredential(channel, model)) {
-        throw new Error(isBuiltinBeefAPIChannel(channel) ? "请先连接 BeefTV" : "请先填写 API Key");
+        throw new Error(isBuiltinBeefTVChannel(channel) ? "请先连接 BeefTV" : "请先填写 API Key");
     }
     const selectedModel = encodeChannelModel(channel.id, model);
-    const modelProfile = channel.modelProfiles?.find((item) => item.model === model);
+    const rawProfile = channel.modelProfiles?.find((item) => item.model === model);
+    const modelProfile = rawProfile ? (upgradeBuiltinModelProfile(rawProfile) as typeof rawProfile) : undefined;
     const limits = modelProfile?.capabilityConfig || defaultModelCapabilityConfig(protocol, model);
     const duration = limits?.video?.duration;
     const durations = duration?.values?.filter((value) => Number.isFinite(value) && value > 0) || [];
@@ -26,6 +28,7 @@ export async function testChannelModelConnection(channel: ModelChannel, model: s
                 capability,
                 protocol: testProtocol,
                 authType: modelProfile?.authType,
+                defaultOptions: modelProfile?.defaultOptions,
                 capabilityConfig: modelProfile?.capabilityConfig,
             },
             ...(channel.modelProfiles || []).filter((item) => item.model !== model),
@@ -56,8 +59,23 @@ export async function testChannelModelConnection(channel: ModelChannel, model: s
         videoGenerateAudio: "false",
     };
 
+    const videoOps = limits?.video?.operations || [];
+    const needsReferenceVideo =
+        capability === "video" &&
+        !videoOps.includes("text_to_video") &&
+        videoOps.includes("reference_to_video") &&
+        (limits?.video?.references?.maxVideos ?? 0) > 0;
+    const customTestVideoUrl =
+        typeof modelProfile?.defaultOptions?.testVideoUrl === "string" ? modelProfile.defaultOptions.testVideoUrl.trim() : "";
+    if (needsReferenceVideo && !customTestVideoUrl) {
+        throw new Error("该参考视频模型需要先在模型配置中提供测试参考视频地址（defaultOptions.testVideoUrl）");
+    }
+    const referenceVideos = needsReferenceVideo
+        ? [{ id: "connection-test-video", name: "test.mp4", type: "video/mp4", url: customTestVideoUrl, durationMs: 4000, width: 1280, height: 720 }]
+        : undefined;
+
     const prompt = capability === "text" ? "Reply with OK." : capability === "audio" ? "Model test." : "A static gray circle on a white background.";
-    const result = await runTask({ mode: capability, config, prompt, streamText: false, metadata: { source: "model-connection-test" } });
+    const result = await runTask({ mode: capability, config, prompt, ...(referenceVideos ? { referenceVideos } : {}), streamText: false, metadata: { source: "model-connection-test" } });
     return modelConnectionResultDetail(result, capability);
 }
 

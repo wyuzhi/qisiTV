@@ -195,7 +195,7 @@ test("confirmed generation preserves the channel's explicit reference asset orig
     const config = modelConfig();
     config.channels![0].referenceAssetOrigin = "https://assets.example.com";
     const confirmed = buildConfirmedGenerationConfig(config, node, "image", undefined, config.imageModel);
-    expect(backendProviderConfig(confirmed, "image").referenceAssetOrigin).toBe("https://assets.example.com");
+    expect(backendProviderConfig(confirmed).referenceAssetOrigin).toBe("https://assets.example.com");
 });
 
 test("F02: changed defaults or node model stop before the paid execution boundary", async () => {
@@ -237,11 +237,9 @@ test("F02: reference-driven compatibility fallback is rejected after re-resoluti
     expect(buildConfirmedGenerationConfig(config, videoNode, "video", requirements).model).toBe(models[1]);
 });
 
-test("F02: workflow substitution and blank confirmation keys fail closed", () => {
+test("F02: blank confirmation keys fail closed", () => {
     const config = modelConfig();
     expect(() => buildConfirmedGenerationConfig(config, node, "image", undefined, "")).toThrow();
-    const workflow = { ...node, type: CanvasNodeType.Config, metadata: { workflowProvider: "runninghub" as const } };
-    expect(() => buildConfirmedGenerationConfig(config, workflow, "image", undefined, config.imageModel)).toThrow();
 });
 
 test("a round the server reports as undone never reads or submits the proposal", async () => {

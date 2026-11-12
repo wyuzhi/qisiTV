@@ -245,3 +245,80 @@ test("an unrecoverable result keeps the backend conclusion when applying it fail
     const retained = canvasTaskFailureMetadata({ ...task, outcome: undefined }, undefined, new Error("下载结果失败"));
     expect(retained.taskOutcome).toEqual({ phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" });
 });
+
+test("live waitForGenerationTask failure preserves backend failureDiagnostics and allows retry after parameter rejection", async () => {
+    const { waitForGenerationTask } = await import("../src/services/api/task-center");
+    const { apiClient } = await import("../src/services/api/request");
+    const origAdapter = apiClient.defaults.adapter;
+    apiClient.defaults.adapter = async (config) => ({
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        config,
+        data: {
+            code: 0,
+            msg: "ok",
+            data: {
+                id: "task-live-reject",
+                type: "canvas_image",
+                status: "failed",
+                stage: "任务失败",
+                errorCode: "invalid_params",
+                error: "当前模型不支持该参数组合，请调整参数后重试。排查编号：请求 req-synthetic-400。",
+                outcome: { phase: "failed", regenerate: "confirm", reason: "input_rejected" },
+                failureDiagnostics: {
+                    source: "upstream_http",
+                    executionResult: "failed",
+                    stage: "生成图片",
+                    httpStatus: 400,
+                    providerCode: "InvalidParameter",
+                    requestId: "req-synthetic-400",
+                    summary: "The parameter specified in the request is not valid.",
+                },
+                attempts: 1,
+                createdAt: "2026-10-01T00:00:00Z",
+                updatedAt: "2026-10-01T00:00:01Z",
+            },
+        },
+    });
+
+    try {
+        let caught: unknown;
+        try {
+            await waitForGenerationTask("task-live-reject", { intervalMs: 5, timeoutMs: 200 });
+        } catch (error) {
+            caught = error;
+        }
+        expect(caught).toBeDefined();
+        const failure = canvasGenerationFailureMetadata(caught, { prompt: "portrait", mode: "image" });
+        expect(isNodeRegenerateBlocked(failure)).toBe(false);
+        expect(isNodeRegenerateConfirm(failure)).toBe(true);
+        expect(unchangedModeratedPrompt(failure, "updated portrait")).toBe(false);
+
+        const copied = formatGenerationDiagnostics(explainGenerationError(failure.errorDetails), {
+            taskId: "task-live-reject",
+            failureDiagnostics: failure.taskFailureDiagnostics,
+        });
+        expect(copied).toContain("错误来源：上游 HTTP 响应");
+        expect(copied).not.toContain("错误来源：未记录");
+        expect(copied).toContain("HTTP 状态：400");
+        expect(copied).toContain("req-synthetic-400");
+
+        const staleTaskWithoutDiagnostics = {
+            id: "task-live-reject",
+            type: "canvas_image" as const,
+            status: "failed" as const,
+            prompt: "portrait",
+            errorCode: "invalid_params",
+            error: "当前模型不支持该参数组合",
+            attempts: 1,
+            createdAt: "2026-10-01T00:00:00Z",
+            updatedAt: "2026-10-01T00:00:01Z",
+        };
+        const recovered = canvasTaskFailureMetadata(staleTaskWithoutDiagnostics, undefined, caught);
+        expect(recovered.taskFailureDiagnostics?.source).toBe("upstream_http");
+        expect(recovered.taskFailureDiagnostics?.httpStatus).toBe(400);
+    } finally {
+        apiClient.defaults.adapter = origAdapter;
+    }
+});

@@ -252,7 +252,11 @@ func (s *Service) SetSkillAdded(userID string, id string, added bool) (*SkillIte
 		return nil, err
 	}
 	state.Added = added
-	state.InstalledVersionID = skill.CurrentVersionID
+	if strings.TrimSpace(skill.CurrentVersionID) != "" {
+		state.InstalledVersionID = skill.CurrentVersionID
+	} else if strings.TrimSpace(state.InstalledVersionID) == "" {
+		state.InstalledVersionID = skill.ID
+	}
 	state.AutoUpdate = skill.AutoUpdate
 	if err := s.repo.SetUserSkillAdded(state); err != nil {
 		return nil, err
@@ -350,6 +354,9 @@ func (s *Service) visibleSkill(userID string, id string) (*model.Skill, error) {
 	if id == "" {
 		return nil, kernel.BadAuthRequest("技能 ID 不能为空")
 	}
+	if s == nil || s.repo == nil {
+		return nil, kernel.BadAuthRequest("技能不存在或已删除")
+	}
 	skill, err := s.repo.Skill(id)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, kernel.BadAuthRequest("技能不存在或已删除")
@@ -358,7 +365,9 @@ func (s *Service) visibleSkill(userID string, id string) (*model.Skill, error) {
 		return nil, err
 	}
 	if skill.IsPrivate && skill.OwnerID != userID {
-		return nil, kernel.Forbidden("该技能未公开")
+		if state, err := s.repo.UserSkillState(userID, id); err != nil || state == nil || (!state.Added && strings.TrimSpace(state.InstalledVersionID) == "") {
+			return nil, kernel.Forbidden("该技能未公开")
+		}
 	}
 	return skill, nil
 }
@@ -426,7 +435,7 @@ func normalizeSkillMutationRequest(req SkillMutationRequest, requireInstruction 
 		return req, "", kernel.BadAuthRequest("技能名称必须为 1-80 个字符")
 	}
 	if req.Description == "" || utf8.RuneCountInString(req.Description) > maxSkillDescriptionRunes {
-		return req, "", kernel.BadAuthRequest("技能简介必须为 1-500 个字符")
+		return req, "", kernel.BadAuthRequest("技能简介必须为 1-1024 个字符")
 	}
 	if (requireInstruction && req.Instruction == "") || utf8.RuneCountInString(req.Instruction) > 100000 {
 		return req, "", kernel.BadAuthRequest("技能指令必须为 1-100000 个字符")

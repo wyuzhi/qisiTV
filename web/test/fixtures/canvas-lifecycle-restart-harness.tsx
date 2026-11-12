@@ -152,7 +152,7 @@ function Harness() {
     (harness as any).refresh = () => refreshLocalCanvasProjectIfChanged(projectId);
     harness.save = async () => { await flushCanvasStorePersistence(); await syncLocalCanvasProjectToBackend("c1"); };
     return <>
-        <button onClick={() => setNodes(current => current.map(node => node.id === "n0" ? { ...node, metadata: { ...node.metadata, model: "beefapi::seedance-2.0-mini" } } : node))}>Switch video model</button>
+        <button onClick={() => setNodes(current => current.map(node => node.id === "n0" ? { ...node, metadata: { ...node.metadata, model: "beeftv::seedance-2.0-mini" } } : node))}>Switch video model</button>
         <div data-testid="graph">{`${projectLoaded}:${nodes.length}:${connections.length}`}</div>
         {(scenario === "late-recovery" || scenario === "late-same-node-recovery") && <Recovery projectId={projectId} projectLoaded={projectLoaded} nodes={nodes} nodesRef={nodesRef} setNodes={setNodes} />}
     </>;

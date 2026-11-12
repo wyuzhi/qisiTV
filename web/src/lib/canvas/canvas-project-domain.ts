@@ -403,8 +403,40 @@ export function sameStringSet(left: Set<string>, right: Set<string>) {
     return true;
 }
 
+const NON_SEMANTIC_METADATA_KEYS = new Set([
+    "taskProgress",
+    "taskStage",
+    "taskUpdatedAt",
+    "taskDurationMs",
+    "taskStartedAt",
+    "taskProviderRequestId",
+    "taskOfficialStatus",
+    "taskReceiptRecorded",
+]);
+
+function sameSemanticMetadata(left: CanvasNodeData["metadata"], right: CanvasNodeData["metadata"]) {
+    if (left === right) return true;
+    if (!left || !right) return false;
+    const leftRecord = left as Record<string, unknown>;
+    const rightRecord = right as Record<string, unknown>;
+    const keys = new Set([...Object.keys(leftRecord), ...Object.keys(rightRecord)]);
+    for (const key of keys) {
+        if (NON_SEMANTIC_METADATA_KEYS.has(key)) continue;
+        if (!Object.is(leftRecord[key], rightRecord[key])) return false;
+    }
+    return true;
+}
+
 export function sameNodeSemanticData(left: CanvasNodeData, right: CanvasNodeData) {
-    return left.id === right.id && left.type === right.type && left.title === right.title && left.parentId === right.parentId && left.width === right.width && left.height === right.height && left.metadata === right.metadata;
+    return (
+        left.id === right.id &&
+        left.type === right.type &&
+        left.title === right.title &&
+        left.parentId === right.parentId &&
+        left.width === right.width &&
+        left.height === right.height &&
+        sameSemanticMetadata(left.metadata, right.metadata)
+    );
 }
 
 export function applyBatchPrimaryImage(root: CanvasNodeData, primary: CanvasNodeData): CanvasNodeData {

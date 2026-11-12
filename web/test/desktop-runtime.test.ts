@@ -4,9 +4,30 @@ import { apiBaseURL, apiClient } from "@/services/api/request";
 import { bootstrapDesktopRuntime, configureDesktopRuntime } from "@/services/desktop-runtime";
 
 const originalFetch = globalThis.fetch;
+const originalWindow = globalThis.window;
 
 afterEach(() => {
     globalThis.fetch = originalFetch;
+    globalThis.window = originalWindow;
+});
+
+test("embedded bootstrap uses the same-origin Host API without desktop credentials", async () => {
+    let bindingRead = false;
+    Object.assign(globalThis, {
+        window: {
+            location: { origin: "http://127.0.0.1:3901" },
+            __BEEFTV_HARNESS__: { embedded: true, basePath: "/beeftv/app/session-1", apiBase: "/beeftv/app/session-1/api" },
+            go: { main: { DesktopApp: { RuntimeConfig: async () => { bindingRead = true; throw new Error("unexpected desktop bootstrap"); } } } },
+        },
+    });
+    apiClient.defaults.headers.common["X-Desktop-Token"] = "old-desktop-token";
+    apiClient.defaults.headers.common["X-Beeftv-UI-Bootstrap"] = "old-bootstrap-token";
+
+    expect(await bootstrapDesktopRuntime()).toBe(true);
+    expect(bindingRead).toBe(false);
+    expect(apiBaseURL).toBe("/beeftv/app/session-1/api");
+    expect(apiClient.defaults.headers.common["X-Desktop-Token"]).toBeUndefined();
+    expect(apiClient.defaults.headers.common["X-Beeftv-UI-Bootstrap"]).toBeUndefined();
 });
 
 test("desktop runtime configures axios and same-runtime fetches without persisting the token", async () => {

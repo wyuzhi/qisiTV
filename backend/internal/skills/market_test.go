@@ -119,7 +119,7 @@ func TestPublicationRequiresTwoSpecificUserConfirmations(t *testing.T) {
 			return
 		case strings.HasSuffix(r.URL.Path, "/submit"):
 			submits++
-			data = skillhub.Draft{SubmissionID: "submission-one", Revision: revision, Status: "submitted"}
+			data = skillhub.Draft{SubmissionID: "submission-one", Revision: revision, Status: "published"}
 		}
 		json.NewEncoder(w).Encode(map[string]any{"success": true, "data": data})
 	}))
@@ -155,11 +155,27 @@ func TestPublicationRequiresTwoSpecificUserConfirmations(t *testing.T) {
 		t.Fatal("submit accepted changed preview")
 	}
 	done, e := s.PublishSubmit(context.Background(), "owner", plan.ID, revision, "preview-one")
-	if e != nil || done.Status != "submitted" || submits != 1 {
+	if e != nil || done.Status != "published" || submits != 1 {
 		t.Fatal("confirmed submit failed", e)
 	}
 	if _, e = s.PublishPlan("other-owner", plan.ID); e == nil {
 		t.Fatal("leaked another author's private plan")
+	}
+	scriptPin := installAgentSkill(t, s, map[string]string{
+		"SKILL.md":        "---\nname: Script skill\ndescription: Includes scripts and large asset\n---\nUse scripts/run.py.",
+		"scripts/run.py":  "print('ok')",
+		"assets/large.md": strings.Repeat("a", (2<<20)+1024),
+	})
+	scriptPlan, e := s.PublishPrepare("owner", scriptPin.SkillID, skillhub.Metadata{License: "MIT"}, PublicationTarget{Kind: "new"})
+	if e != nil || !skillhub.HasScripts(scriptPlan.Files) {
+		t.Fatalf("expected publication preparation to accept scripts/ and >2 MiB file: plan=%+v err=%v", scriptPlan, e)
+	}
+	secretPin := installAgentSkill(t, s, map[string]string{
+		"SKILL.md":         "---\nname: Secret skill\ndescription: Has credentials\n---\nBody",
+		"credentials.json": `{"secret":"1"}`,
+	})
+	if _, e = s.PublishPrepare("owner", secretPin.SkillID, skillhub.Metadata{License: "MIT"}, PublicationTarget{Kind: "new"}); e == nil {
+		t.Fatal("expected publication preparation to reject credentials.json")
 	}
 }
 
@@ -171,6 +187,11 @@ func TestMarketMinimumClientVersion(t *testing.T) {
 		if got := marketClientCompatible(c.current, c.minimum); got != c.want {
 			t.Fatalf("%+v got %v", c, got)
 		}
+	}
+	rel := skillhub.Release{Metadata: skillhub.Metadata{SkillID: "test-market", MinClientVersion: "99.0.0", Requirements: []string{"custom.tool"}}}
+	populateReleaseCompatibility(&rel)
+	if rel.Compatibility == nil || rel.Compatibility.Status != "unsupported" || len(rel.Compatibility.Reasons) != 2 {
+		t.Fatalf("expected unsupported release compatibility reasons, got %+v", rel.Compatibility)
 	}
 }
 func TestPrivateForkKeepsReferencesWhenEdited(t *testing.T) {

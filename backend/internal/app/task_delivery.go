@@ -28,6 +28,9 @@ func (s *Service) RecoverIncompleteGenerationDeliveries(limit int) error {
 	if bindErr := s.recoverPendingCanvasBindings(limit); bindErr != nil {
 		log.Printf("generation canvas bind recovery paused: worker_id=%s error=%v", s.workerID, bindErr)
 	}
+	if failErr := s.recoverPendingCanvasFailures(limit); failErr != nil {
+		log.Printf("generation canvas failure writeback paused: worker_id=%s error=%v", s.workerID, failErr)
+	}
 	return err
 }
 

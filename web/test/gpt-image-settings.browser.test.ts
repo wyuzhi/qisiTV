@@ -50,7 +50,7 @@ test("GPT Image 39档在设置面板均能点击并原值提交，明暗主题�
                 await page.screenshot({ path: `${process.env.GPT_IMAGE_SETTINGS_SCREENSHOTS}/image2-default-${theme}-${width}.png`, fullPage: true });
             }
             for (const model of ["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]) {
-                await page.getByRole("combobox", { name: "模型" }).selectOption(`beefapi::${model}`);
+                await page.getByRole("combobox", { name: "模型" }).selectOption(`beeftv::${model}`);
                 const qualities = model === "gpt-image-2" ? ["low", "medium", "high"] : ["low", "medium", "high", "xhigh", "max"];
                 expect(await page.getByRole("button", { name: "最高", exact: true }).count()).toBe(model === "gpt-image-2" ? 0 : 1);
                 for (const quality of qualities) {

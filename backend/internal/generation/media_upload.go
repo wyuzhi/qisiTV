@@ -12,73 +12,73 @@ import (
 	"strings"
 	"time"
 
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/playback"
 )
 
 const (
-	beefAPISeedanceJSONOverheadBytes = int64(64 << 10)
-	beefAPISeedanceImageMaxBytes     = int64(30 << 20)
-	beefAPISeedanceVideoMaxBytes     = int64(200 << 20)
-	beefAPISeedanceAudioMaxBytes     = int64(15 << 20)
-	beefAPISeedanceUploadTimeout     = 15 * time.Minute
+	beefTVSeedanceJSONOverheadBytes = int64(64 << 10)
+	beefTVSeedanceImageMaxBytes     = int64(30 << 20)
+	beefTVSeedanceVideoMaxBytes     = int64(200 << 20)
+	beefTVSeedanceAudioMaxBytes     = int64(15 << 20)
+	beefTVSeedanceUploadTimeout     = 15 * time.Minute
 )
 
 var (
-	errBeefAPISeedanceUploadRedirect    = beefapi.ErrUploadRedirect
-	errBeefAPISeedanceUploadUnavailable = errors.New("暂时无法接收参考素材")
-	errBeefAPISeedanceUploadIncomplete  = beefapi.ErrUploadIncomplete
-	errBeefAPISeedanceUploadFormat      = errors.New("无法识别文件。图片用 PNG、JPEG、WebP、GIF、BMP 或 TIFF。视频用 MP4 或 MOV。音频用 MP3 或 WAV。")
-	errBeefAPISeedanceUploadEmpty       = errors.New("参考素材为空，请重新导入")
+	errBeefTVSeedanceUploadRedirect    = beeftv.ErrUploadRedirect
+	errBeefTVSeedanceUploadUnavailable = errors.New("暂时无法接收参考素材")
+	errBeefTVSeedanceUploadIncomplete  = beeftv.ErrUploadIncomplete
+	errBeefTVSeedanceUploadFormat      = errors.New("无法识别文件。图片用 PNG、JPEG、WebP、GIF、BMP 或 TIFF。视频用 MP4 或 MOV。音频用 MP3 或 WAV。")
+	errBeefTVSeedanceUploadEmpty       = errors.New("参考素材为空，请重新导入")
 )
 
 const (
-	BeefAPISeedanceImageMaxBytes = beefAPISeedanceImageMaxBytes
-	BeefAPISeedanceVideoMaxBytes = beefAPISeedanceVideoMaxBytes
-	BeefAPISeedanceUploadTimeout = beefAPISeedanceUploadTimeout
+	BeefTVSeedanceImageMaxBytes = beefTVSeedanceImageMaxBytes
+	BeefTVSeedanceVideoMaxBytes = beefTVSeedanceVideoMaxBytes
+	BeefTVSeedanceUploadTimeout = beefTVSeedanceUploadTimeout
 )
 
 var (
-	ErrBeefAPISeedanceUploadUnavailable = errBeefAPISeedanceUploadUnavailable
-	ErrBeefAPISeedanceUploadIncomplete  = errBeefAPISeedanceUploadIncomplete
+	ErrBeefTVSeedanceUploadUnavailable = errBeefTVSeedanceUploadUnavailable
+	ErrBeefTVSeedanceUploadIncomplete  = errBeefTVSeedanceUploadIncomplete
 )
 
-type BeefAPISeedanceMediaReader func(kind string, media Media) (data []byte, mime string, skip bool, err error)
+type BeefTVSeedanceMediaReader func(kind string, media Media) (data []byte, mime string, skip bool, err error)
 
-type BeefAPISeedanceUploadSession = beefapi.UploadSession
-type BeefAPISeedanceUploadComplete = beefapi.UploadedMedia
-type BeefAPISeedanceUploadRequest = beefapi.UploadRequest
-type BeefAPISeedanceMultipartPlan = beefapi.UploadPlan
-type BeefAPISeedanceUploadPart = beefapi.UploadPart
+type BeefTVSeedanceUploadSession = beeftv.UploadSession
+type BeefTVSeedanceUploadComplete = beeftv.UploadedMedia
+type BeefTVSeedanceUploadRequest = beeftv.UploadRequest
+type BeefTVSeedanceMultipartPlan = beeftv.UploadPlan
+type BeefTVSeedanceUploadPart = beeftv.UploadPart
 
-// PrepareBeefAPIVideoReferences uploads built-in BeefAPI local/inline
+// PrepareBeefTVVideoReferences uploads built-in BeefTV local/inline
 // references through the same generation key, then rewrites each item to the
 // completed HTTPS URL. PUT uses only the returned headers and known length.
 // Managed uploads must finish before dispatch. Storage failures never send the
 // same large bytes back through the gateway as an inline generation request.
-func PrepareBeefAPIVideoReferences(ctx context.Context, config Config, input *Input, read BeefAPISeedanceMediaReader) error {
-	if input == nil || (!managedConnection(config) && !IsBeefAPIVideoConfig(ctx, config)) {
+func PrepareBeefTVVideoReferences(ctx context.Context, config Config, input *Input, read BeefTVSeedanceMediaReader) error {
+	if input == nil || (input.Mode != "" && input.Mode != "video" && input.Upscale == nil) || (!managedConnection(config) && !IsBeefTVVideoConfig(ctx, config)) {
 		return nil
 	}
 	runtime, _ := RuntimeFromContext(ctx)
 	if read == nil {
-		read = ReadBeefAPISeedanceInlineMedia
+		read = ReadBeefTVSeedanceInlineMedia
 	}
-	for _, group := range BeefAPISeedanceMediaGroups(input) {
+	for _, group := range BeefTVSeedanceMediaGroups(input) {
 		for index := range group.items {
 			media := &group.items[index]
 			if strings.HasPrefix(media.URL, "asset://") {
-				if managedConnection(config) || requiresBeefAPIHTTPReferences(ctx, config) {
+				if managedConnection(config) || requiresBeefTVHTTPReferences(ctx, config) {
 					return RequestPreparationError{Cause: errors.New("当前模型需要可访问的参考素材链接，请重新导入。本次尚未开始生成")}
 				}
 				continue
 			}
 			uploadCtx := withReferenceUpload(ctx, ReferenceUploadMeta{Kind: group.kind, Index: index + 1})
 			client := managedMediaClient(uploadCtx, config)
-			client.ReferenceUploaded = func(_ beefapi.LocalMediaReference, uploaded beefapi.UploadedMedia) {
+			client.ReferenceUploaded = func(_ beeftv.LocalMediaReference, uploaded beeftv.UploadedMedia) {
 				media.Bytes, media.MimeType = uploaded.Bytes, uploaded.Mime
 			}
-			client.InspectReference = func(_ context.Context, ref beefapi.LocalMediaReference, source io.ReaderAt, size int64, _ string) error {
+			client.InspectReference = func(_ context.Context, ref beeftv.LocalMediaReference, source io.ReaderAt, size int64, _ string) error {
 				media.Bytes = size
 				if group.kind == "image" && (media.Width <= 0 || media.Height <= 0) {
 					if w, h, err := imageHeaderDimensions(io.NewSectionReader(source, 0, size)); err == nil {
@@ -108,7 +108,7 @@ func PrepareBeefAPIVideoReferences(ctx context.Context, config Config, input *In
 					return io.NopCloser(bytes.NewReader(data)), mime, int64(len(data)), nil
 				}
 			}
-			ref := beefapi.LocalMediaReference{MediaReference: beefapi.MediaReference{Kind: group.kind, Role: referenceMediaLabel(group.kind, index), URL: media.URL}, StorageKey: media.StorageKey, DataURL: media.DataURL, MIME: media.MimeType, Bytes: media.Bytes}
+			ref := beeftv.LocalMediaReference{MediaReference: beeftv.MediaReference{Kind: group.kind, Role: referenceMediaLabel(group.kind, index), URL: media.URL}, StorageKey: media.StorageKey, DataURL: media.DataURL, MIME: media.MimeType, Bytes: media.Bytes}
 			if runtime.Resources == nil && read != nil && !IsPublicMediaURL(ref.URL) && !strings.HasPrefix(firstNonEmpty(ref.DataURL, ref.URL), "data:") {
 				ref.StorageKey = "legacy-reader"
 			}
@@ -131,7 +131,7 @@ func PrepareBeefAPIVideoReferences(ctx context.Context, config Config, input *In
 			link, err := client.UploadReference(uploadCtx, ref)
 			if err != nil {
 				upload := referenceMediaUploadError(uploadCtx, err)
-				if BeefAPISeedancePreuploadUnavailable(upload) {
+				if BeefTVSeedancePreuploadUnavailable(upload) {
 					upload.Detail = "参考素材上传暂不可用，本次尚未开始生成。请稍后重试或使用可访问的图片链接"
 				}
 				return RequestPreparationError{Cause: upload}
@@ -144,20 +144,20 @@ func PrepareBeefAPIVideoReferences(ctx context.Context, config Config, input *In
 	return nil
 }
 
-type BeefAPISeedanceMediaGroup struct {
+type BeefTVSeedanceMediaGroup struct {
 	kind  string
 	items []Media
 }
 
-func BeefAPISeedanceMediaGroups(input *Input) []BeefAPISeedanceMediaGroup {
-	return []BeefAPISeedanceMediaGroup{
+func BeefTVSeedanceMediaGroups(input *Input) []BeefTVSeedanceMediaGroup {
+	return []BeefTVSeedanceMediaGroup{
 		{"image", input.ReferenceImages},
 		{"video", input.ReferenceVideos},
 		{"audio", input.ReferenceAudios},
 	}
 }
 
-func SkipBeefAPISeedanceMedia(media Media) bool {
+func SkipBeefTVSeedanceMedia(media Media) bool {
 	value := strings.TrimSpace(media.URL)
 	if strings.HasPrefix(value, "asset://") {
 		return true
@@ -165,8 +165,8 @@ func SkipBeefAPISeedanceMedia(media Media) bool {
 	return IsPublicMediaURL(value)
 }
 
-func ReadBeefAPISeedanceInlineMedia(_ string, media Media) ([]byte, string, bool, error) {
-	if SkipBeefAPISeedanceMedia(media) {
+func ReadBeefTVSeedanceInlineMedia(_ string, media Media) ([]byte, string, bool, error) {
+	if SkipBeefTVSeedanceMedia(media) {
 		return nil, "", true, nil
 	}
 	if raw := firstNonEmpty(media.DataURL, media.URL); strings.HasPrefix(strings.TrimSpace(raw), "data:") {
@@ -182,19 +182,19 @@ func ReadBeefAPISeedanceInlineMedia(_ string, media Media) ([]byte, string, bool
 	return nil, "", true, nil
 }
 
-func ownedSeedanceMediaReader(ctx context.Context, userID string) BeefAPISeedanceMediaReader {
+func ownedSeedanceMediaReader(ctx context.Context, userID string) BeefTVSeedanceMediaReader {
 	return func(kind string, media Media) ([]byte, string, bool, error) {
-		if SkipBeefAPISeedanceMedia(media) {
+		if SkipBeefTVSeedanceMedia(media) {
 			return nil, "", true, nil
 		}
 		if raw := firstNonEmpty(media.DataURL, media.URL); strings.HasPrefix(strings.TrimSpace(raw), "data:") {
-			return ReadBeefAPISeedanceInlineMedia(kind, media)
+			return ReadBeefTVSeedanceInlineMedia(kind, media)
 		}
 		if !strings.HasPrefix(media.StorageKey, "resource:") {
 			return nil, "", true, nil
 		}
 		if media.Bytes > 0 {
-			if err := ValidateBeefAPISeedanceMediaSize(kind, media.Bytes); err != nil {
+			if err := ValidateBeefTVSeedanceMediaSize(kind, media.Bytes); err != nil {
 				return nil, "", false, err
 			}
 		}
@@ -208,7 +208,7 @@ func ownedSeedanceMediaReader(ctx context.Context, userID string) BeefAPISeedanc
 			return nil, "", false, fmt.Errorf("读取任务参考资源失败：%w", err)
 		}
 		defer body.Close()
-		max := BeefAPISeedanceKindMaxBytes(kind)
+		max := BeefTVSeedanceKindMaxBytes(kind)
 		data, err := io.ReadAll(io.LimitReader(body, max+1))
 		if err != nil {
 			return nil, "", false, fmt.Errorf("读取任务参考资源失败：%w", err)
@@ -232,7 +232,7 @@ func validateSeedanceReferenceCapability(input *Input, kind string, index int, m
 	return nil
 }
 
-func CreateBeefAPISeedanceUpload(ctx context.Context, config Config, request BeefAPISeedanceUploadRequest) (BeefAPISeedanceUploadSession, error) {
+func CreateBeefTVSeedanceUpload(ctx context.Context, config Config, request BeefTVSeedanceUploadRequest) (BeefTVSeedanceUploadSession, error) {
 	session, err := managedMediaClient(ctx, config).CreateUpload(referenceUploadStage(ctx, "create"), request)
 	if err != nil {
 		return session, referenceMediaUploadError(referenceUploadStage(ctx, "create"), err)
@@ -240,7 +240,7 @@ func CreateBeefAPISeedanceUpload(ctx context.Context, config Config, request Bee
 	return session, nil
 }
 
-func CompleteBeefAPISeedanceUpload(ctx context.Context, config Config, session BeefAPISeedanceUploadSession, data []byte) (BeefAPISeedanceUploadComplete, error) {
+func CompleteBeefTVSeedanceUpload(ctx context.Context, config Config, session BeefTVSeedanceUploadSession, data []byte) (BeefTVSeedanceUploadComplete, error) {
 	uploaded, err := managedMediaClient(ctx, config).CompleteUpload(ctx, session, data, "参考素材")
 	if err != nil {
 		return uploaded, referenceMediaUploadError(ctx, err)
@@ -248,8 +248,8 @@ func CompleteBeefAPISeedanceUpload(ctx context.Context, config Config, session B
 	return uploaded, nil
 }
 
-func BeefAPISeedancePutTimeout(ctx context.Context) time.Duration {
-	timeout := beefAPISeedanceUploadTimeout
+func BeefTVSeedancePutTimeout(ctx context.Context) time.Duration {
+	timeout := beefTVSeedanceUploadTimeout
 	if deadline, ok := ctx.Deadline(); ok {
 		if remaining := time.Until(deadline); remaining > 0 && remaining < timeout {
 			return remaining
@@ -258,12 +258,12 @@ func BeefAPISeedancePutTimeout(ctx context.Context) time.Duration {
 	return timeout
 }
 
-func PutBeefAPISeedanceBytes(ctx context.Context, session BeefAPISeedanceUploadSession, data []byte) error {
+func PutBeefTVSeedanceBytes(ctx context.Context, session BeefTVSeedanceUploadSession, data []byte) error {
 	client := managedMediaClient(ctx, Config{})
 	var dispatched bool
 	var phase string
 	observe := client.StorageObserve
-	client.StorageObserve = func(value beefapi.UploadObservation) {
+	client.StorageObserve = func(value beeftv.UploadObservation) {
 		dispatched, phase = value.Dispatched, value.Phase
 		if observe != nil {
 			observe(value)
@@ -278,21 +278,21 @@ func PutBeefAPISeedanceBytes(ctx context.Context, session BeefAPISeedanceUploadS
 	return nil
 }
 
-func ValidateBeefAPISeedanceSession(ctx context.Context, session BeefAPISeedanceUploadSession) error {
+func ValidateBeefTVSeedanceSession(ctx context.Context, session BeefTVSeedanceUploadSession) error {
 	runtime, _ := RuntimeFromContext(ctx)
-	return (&beefapi.MediaClient{AllowHTTPTest: runtime.Endpoints.BeefAPIVideoBaseURL != ""}).ValidateUploadSession(ctx, session, 0)
+	return (&beeftv.MediaClient{AllowHTTPTest: runtime.Endpoints.BeefTVVideoBaseURL != ""}).ValidateUploadSession(ctx, session, 0)
 }
 
-func ValidateBeefAPISeedanceSecureURL(ctx context.Context, raw string) error {
+func ValidateBeefTVSeedanceSecureURL(ctx context.Context, raw string) error {
 	runtime, _ := RuntimeFromContext(ctx)
-	return (&beefapi.MediaClient{AllowHTTPTest: runtime.Endpoints.BeefAPIVideoBaseURL != ""}).ValidateUploadURL(ctx, raw)
+	return (&beeftv.MediaClient{AllowHTTPTest: runtime.Endpoints.BeefTVVideoBaseURL != ""}).ValidateUploadURL(ctx, raw)
 }
 
-func BeefAPISeedanceAllowInsecureTestURL(ctx context.Context, parsed *url.URL) bool {
-	return parsed != nil && parsed.Scheme == "http" && beefAPITestBaseURL(ctx) != ""
+func BeefTVSeedanceAllowInsecureTestURL(ctx context.Context, parsed *url.URL) bool {
+	return parsed != nil && parsed.Scheme == "http" && beefTVTestBaseURL(ctx) != ""
 }
 
-func SkipBeefAPISeedancePutHeader(name string) bool {
+func SkipBeefTVSeedancePutHeader(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "authorization", "proxy-authorization", "cookie", "set-cookie", "host", "content-length", "connection", "transfer-encoding", "te", "trailer", "upgrade", "x-api-key", "x-goog-api-key":
 		return true
@@ -301,7 +301,7 @@ func SkipBeefAPISeedancePutHeader(name string) bool {
 	}
 }
 
-func BeefAPISeedancePreuploadUnavailable(err error) bool {
+func BeefTVSeedancePreuploadUnavailable(err error) bool {
 	var httpErr HTTPError
 	if !errors.As(err, &httpErr) {
 		return false
@@ -309,7 +309,7 @@ func BeefAPISeedancePreuploadUnavailable(err error) bool {
 	return httpErr.StatusCode == http.StatusNotFound || httpErr.StatusCode == http.StatusNotImplemented
 }
 
-func MapBeefAPISeedanceUploadError(err error, completing bool) error {
+func MapBeefTVSeedanceUploadError(err error, completing bool) error {
 	if err == nil {
 		return nil
 	}
@@ -320,8 +320,8 @@ func MapBeefAPISeedanceUploadError(err error, completing bool) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	if errors.Is(err, errBeefAPISeedanceUploadRedirect) {
-		return errBeefAPISeedanceUploadUnavailable
+	if errors.Is(err, errBeefTVSeedanceUploadRedirect) {
+		return errBeefTVSeedanceUploadUnavailable
 	}
 	var httpErr HTTPError
 	if errors.As(err, &httpErr) {
@@ -329,24 +329,24 @@ func MapBeefAPISeedanceUploadError(err error, completing bool) error {
 		case http.StatusUnauthorized, http.StatusForbidden:
 			return err
 		case http.StatusServiceUnavailable, http.StatusBadGateway, http.StatusGatewayTimeout:
-			return errBeefAPISeedanceUploadUnavailable
+			return errBeefTVSeedanceUploadUnavailable
 		case http.StatusBadRequest:
-			if message := BeefAPISeedanceUserErrorMessage(httpErr.Body); message != "" {
+			if message := BeefTVSeedanceUserErrorMessage(httpErr.Body); message != "" {
 				return errors.New(message)
 			}
 			if completing {
-				return errBeefAPISeedanceUploadIncomplete
+				return errBeefTVSeedanceUploadIncomplete
 			}
 			return errors.New("请检查文件类型、大小后再提交")
 		}
 	}
 	if completing {
-		return errBeefAPISeedanceUploadIncomplete
+		return errBeefTVSeedanceUploadIncomplete
 	}
-	return errBeefAPISeedanceUploadUnavailable
+	return errBeefTVSeedanceUploadUnavailable
 }
 
-func BeefAPISeedanceUserErrorMessage(body string) string {
+func BeefTVSeedanceUserErrorMessage(body string) string {
 	var payload struct {
 		Error struct {
 			Message string `json:"message"`
@@ -366,26 +366,26 @@ func BeefAPISeedanceUserErrorMessage(body string) string {
 	return message
 }
 
-func BeefAPISeedanceKindMaxBytes(kind string) int64 {
+func BeefTVSeedanceKindMaxBytes(kind string) int64 {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "image":
-		return beefAPISeedanceImageMaxBytes
+		return beefTVSeedanceImageMaxBytes
 	case "video":
-		return beefAPISeedanceVideoMaxBytes
+		return beefTVSeedanceVideoMaxBytes
 	case "audio":
-		return beefAPISeedanceAudioMaxBytes
+		return beefTVSeedanceAudioMaxBytes
 	default:
 		return 0
 	}
 }
 
-func ValidateBeefAPISeedanceMediaSize(kind string, size int64) error {
+func ValidateBeefTVSeedanceMediaSize(kind string, size int64) error {
 	if size <= 0 {
-		return errBeefAPISeedanceUploadEmpty
+		return errBeefTVSeedanceUploadEmpty
 	}
-	max := BeefAPISeedanceKindMaxBytes(kind)
+	max := BeefTVSeedanceKindMaxBytes(kind)
 	if max <= 0 {
-		return errBeefAPISeedanceUploadFormat
+		return errBeefTVSeedanceUploadFormat
 	}
 	if size > max {
 		switch kind {
@@ -396,23 +396,23 @@ func ValidateBeefAPISeedanceMediaSize(kind string, size int64) error {
 		case "audio":
 			return errors.New("参考音频不能超过 15MB")
 		default:
-			return errBeefAPISeedanceUploadFormat
+			return errBeefTVSeedanceUploadFormat
 		}
 	}
 	return nil
 }
 
-func CanonicalBeefAPISeedanceMime(kind string, declared string, data []byte) (string, error) {
+func CanonicalBeefTVSeedanceMime(kind string, declared string, data []byte) (string, error) {
 	detected := detectSeedanceMediaContentType(data)
-	if mime, ok := CanonicalBeefAPISeedanceDeclaredMime(kind, detected); ok {
+	if mime, ok := CanonicalBeefTVSeedanceDeclaredMime(kind, detected); ok {
 		return mime, nil
 	}
 	if detected != "image/avif" && detected != "image/heic" {
-		if mime, ok := CanonicalBeefAPISeedanceDeclaredMime(kind, declared); ok {
+		if mime, ok := CanonicalBeefTVSeedanceDeclaredMime(kind, declared); ok {
 			return mime, nil
 		}
 	}
-	return "", errBeefAPISeedanceUploadFormat
+	return "", errBeefTVSeedanceUploadFormat
 }
 
 func detectSeedanceMediaContentType(data []byte) string {
@@ -432,7 +432,7 @@ func detectSeedanceMediaContentType(data []byte) string {
 	return strings.ToLower(strings.TrimSpace(strings.Split(http.DetectContentType(data), ";")[0]))
 }
 
-func CanonicalBeefAPISeedanceDeclaredMime(kind, raw string) (string, bool) {
+func CanonicalBeefTVSeedanceDeclaredMime(kind, raw string) (string, bool) {
 	mime := strings.ToLower(strings.TrimSpace(raw))
 	if slash := strings.IndexByte(mime, ';'); slash >= 0 {
 		mime = strings.TrimSpace(mime[:slash])

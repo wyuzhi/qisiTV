@@ -1,6 +1,5 @@
-import { Button, Input, Skeleton, Tree } from "antd";
+import { Button, Input, Skeleton, Tree, Tooltip } from "antd";
 import { AppModal } from "@/components/ui/product/app-modal";
-import { Tooltip } from "@/components/ui/base/tooltip";
 
 import { SegmentedControl } from "@/components/ui/base/segmented-control";
 import type { DataNode } from "antd/es/tree";
@@ -8,6 +7,8 @@ import { Check, ChevronRight, Code2, ExternalLink, File, FileArchive, FileCode2,
 import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { skillMarkdownBody } from "./skill-document";
+import { skillFailureMessage } from "./skill-feedback";
 
 import { formatSkillCount, formatSkillDate, skillCategoryLabel } from "@/pages/skills/skill-catalog";
 import { isLocalRuntimeMode } from "@/lib/runtime-mode";
@@ -26,7 +27,6 @@ export function SkillDetailModal({ skill, loading, mutating, categories, onClose
     const [contentError, setContentError] = useState("");
     const [previewMode, setPreviewMode] = useState<PreviewMode>("preview");
     const [pathFilter, setPathFilter] = useState("");
-    const localRuntime = isLocalRuntimeMode();
 
     useEffect(() => {
         if (!skill) {
@@ -48,7 +48,7 @@ export function SkillDetailModal({ skill, loading, mutating, categories, onClose
             .catch((error) => {
                 if (cancelled) return;
                 setFiles([]);
-                setFilesError(error instanceof Error ? error.message : "技能文件加载失败");
+                setFilesError(skillFailureMessage(error, "技能文件加载失败", "请关闭详情后重新打开。"));
             })
             .finally(() => {
                 if (!cancelled) setFilesLoading(false);
@@ -69,7 +69,7 @@ export function SkillDetailModal({ skill, loading, mutating, categories, onClose
             .catch((error) => {
                 if (cancelled) return;
                 setContent(null);
-                setContentError(error instanceof Error ? error.message : "文件读取失败");
+                setContentError(skillFailureMessage(error, "文件读取失败", "请重新选择文件，或关闭详情后重试。"));
             })
             .finally(() => { if (!cancelled) setContentLoading(false); });
         return () => { cancelled = true; };
@@ -101,18 +101,15 @@ export function SkillDetailModal({ skill, loading, mutating, categories, onClose
             {skill ? (
                 <div className="skill-package-shell">
                     <header className="skill-package-header">
-                        <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2 text-[var(--fs-label)] text-foreground/45">
-                                <span>{skillCategoryLabel(skill.tag, categories)}</span><span aria-hidden="true">/</span><span>{sourceLabel(skill.sourceType)}</span><span aria-hidden="true">/</span><span>v{skill.version || "1"}</span>{skill.effectiveUser?.name ? <><span aria-hidden="true">/</span><span>作者：{skill.effectiveUser.name}</span></> : null}<span aria-hidden="true">/</span><span>更新于 {formatSkillDate(skill.updatedAt)}</span>
-                            </div>
-                            <h1 className="mt-1 truncate text-[var(--fs-heading-lg)] font-semibold text-foreground">{skill.skillName}</h1>
-                            <p className="mt-1 line-clamp-2 max-w-4xl text-sm leading-5 text-foreground/58">{skill.description}</p>
+                        <div className="skill-package-heading">
+                            <h1>{skill.skillName}</h1>
+                            <SkillPackageAbout skill={skill} categories={categories} />
                         </div>
                         {!fileOnly ? <div className="skill-package-actions">
-                            {!localRuntime && skill.sourceType === "github" && skill.isOwner ? <Tooltip title={skill.syncError || "从 GitHub 检查并同步最新提交"}><Button loading={mutating} icon={<RefreshCw className="size-4" />} onClick={() => onSync(skill)}>同步</Button></Tooltip> : null}
+                            {skill.sourceType === "github" && skill.isOwner ? <Tooltip title={skill.syncError || "从 GitHub 检查并同步最新提交"}><Button loading={mutating} icon={<RefreshCw className="size-4" />} onClick={() => onSync(skill)}>同步</Button></Tooltip> : null}
                             {skill.isOwner ? <Button icon={<Pencil className="size-4" />} onClick={() => onEdit(skill)}>编辑</Button> : null}
                             <Button loading={mutating} icon={<Heart className={`size-4 ${skill.isLike ? "fill-current text-rose-500" : ""}`} />} onClick={() => onLike(skill)}>{skill.isLike ? "已收藏" : "收藏"}</Button>
-                            <Button type={skill.isAdded ? "default" : "primary"} loading={mutating} disabled={skill.isOwner} icon={skill.isAdded ? <Check className="size-4" /> : <Plus className="size-4" />} onClick={() => onAdd(skill)}>{skill.isOwner ? "我的技能" : skill.isAdded ? "已加入" : "加入技能"}</Button>
+                            <Button type={skill.isAdded ? "default" : "primary"} loading={mutating} icon={skill.isAdded ? <Check className="size-4" /> : <Plus className="size-4" />} onClick={() => onAdd(skill)}>{skill.isAdded ? "已启用" : "启用技能"}</Button>
                         </div> : null}
                     </header>
 
@@ -138,10 +135,10 @@ export function SkillDetailModal({ skill, loading, mutating, categories, onClose
                                     />
                                 ) : <div className="skill-package-empty">没有匹配文件</div>}
                             </div>
-                            <div className="skill-package-sidebar-footer">
+                            {!fileOnly ? <div className="skill-package-sidebar-footer">
                                 <span className="inline-flex items-center gap-1"><Users className="size-3.5" />{formatSkillCount(skill.addedCount)} 人加入</span>
                                 <span>{skill.isPrivate ? "仅自己可见" : "公开"}</span>
-                            </div>
+                            </div> : null}
                         </aside>
 
                         <main className="skill-package-preview">
@@ -219,7 +216,7 @@ function SkillMarkdown({ source, currentPath, filePaths, onNavigate }: { source:
                         return <span className="skill-package-inline-missing">{alt || src || "图片"}</span>;
                     },
                 }}
-            >{source}</ReactMarkdown>
+            >{skillMarkdownBody(source)}</ReactMarkdown>
         </article>
     );
 }
@@ -289,10 +286,28 @@ function isExternalURL(value?: string) {
     return Boolean(value && /^(https?:|mailto:|data:)/i.test(value));
 }
 
-function sourceLabel(source: string) {
+export function SkillPackageAbout({ skill, categories }: { skill: Pick<Skill, "description" | "version" | "effectiveUser" | "sourceType" | "tag" | "updatedAt">; categories: SkillCategory[] }) {
+    return (
+        <details className="skill-package-about">
+            <summary>技能介绍</summary>
+            {skill.description ? <p>{skill.description}</p> : null}
+            <dl>
+                <div><dt>版本</dt><dd>{skill.version || "1.0.0"}</dd></div>
+                {skill.effectiveUser?.name ? <div><dt>作者</dt><dd>{skill.effectiveUser.name}</dd></div> : null}
+                <div><dt>来源</dt><dd>{sourceLabel(skill.sourceType)}</dd></div>
+                <div><dt>分类</dt><dd>{skillCategoryLabel(skill.tag, categories)}</dd></div>
+                <div><dt>更新于</dt><dd>{formatSkillDate(skill.updatedAt)}</dd></div>
+            </dl>
+        </details>
+    );
+}
+
+export function sourceLabel(source: string) {
+    if (source === "market") return "技能市场";
     if (source === "github") return "GitHub";
     if (source === "zip") return "ZIP 技能包";
     if (source === "builtin") return "内置技能";
+    if (source === "plugin") return "插件";
     return "Markdown";
 }
 

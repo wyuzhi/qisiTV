@@ -22,7 +22,7 @@ func TestStoryboardPreparationReplayScopeAndUndo(t *testing.T) {
 	if _, err := h.service.BeginAssistantTurn(h.userID, h.canvasID, turn, app.AssistantTurnInput{}); err != nil {
 		t.Fatal(err)
 	}
-	params := map[string]any{"canvasId": h.canvasID, "nodeId": "n1", "expectedRevision": before["revision"], "rowIds": []string{"r1", "r2"}, "referenceNodeIds": []string{"n2"}, "image": map[string]any{"model": "beefapi::gpt-image-2", "size": "9:16"}, "video": map[string]any{"model": "beefapi::wan3.0-video", "generateAudio": "true"}}
+	params := map[string]any{"canvasId": h.canvasID, "nodeId": "n1", "expectedRevision": before["revision"], "rowIds": []string{"r1", "r2"}, "referenceNodeIds": []string{"n2"}, "image": map[string]any{"model": "beeftv::gpt-image-2", "size": "9:16"}, "video": map[string]any{"model": "beeftv::wan3.0-video", "generateAudio": "true"}}
 	for i := 0; i < 2; i++ {
 		result, err := accessWrite(t, h, turn, "canvas", "canvas.script.prepare", "prepare", params)
 		if err != nil {

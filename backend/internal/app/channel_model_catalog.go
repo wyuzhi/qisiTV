@@ -25,7 +25,7 @@ func (s *Service) FetchChannelModelCatalog(ctx context.Context, actor *model.Use
 			return err
 		}
 		return s.requireActiveCatalogProvider(input)
-	}, s.fetchChannelModelCatalogBytes, s.catalogExtraSource())
+	}, s.fetchChannelModelCatalogBytes, s.catalogExtraSource(), s.protocolRegistry().Resolve)
 }
 
 func (s *Service) fetchChannelModelCatalogBytes(ctx context.Context, baseURL, apiFormat, apiKey string, headers []modelcatalog.ChannelHeader) ([]byte, error) {

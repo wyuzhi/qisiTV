@@ -217,8 +217,11 @@ func TestSeedanceReferenceMinimumsAndRouteIdentification(t *testing.T) {
 		if got := pixels("volcengine-ark-video", ""); got != documentedSeedanceVideoMinPixels {
 			t.Errorf("ark = %d", got)
 		}
-		if got := pixels("newapi-channel-2", "https://beefapi.com/v1"); got != documentedSeedanceVideoMinPixels {
+		if got := pixels("newapi-channel-2", "https://beeftv.app/v1"); got != documentedSeedanceVideoMinPixels {
 			t.Errorf("material host = %d", got)
+		}
+		if got := pixels("newapi-channel-2", "https://legacy.example.com/v1"); got != OfficialSeedanceVideoMinPixels {
+			t.Errorf("legacy beeftv host = %d", got)
 		}
 		if got := pixels("newapi-channel-2", "https://relay.example.com/v1"); got != OfficialSeedanceVideoMinPixels {
 			t.Errorf("custom host = %d", got)
@@ -287,6 +290,34 @@ func TestSeedanceProFlashResolutionAndReferenceRolesTable(t *testing.T) {
 			wantTaskTypeConst: false,
 		},
 		{
+			name:              "2.0 Fast resolutions cap at 720p on newapi",
+			protocol:          "newapi",
+			model:             "seedance-2.0-fast",
+			wantResolutions:   []string{"480p", "720p"},
+			wantDefaultRes:    "720p",
+			wantMinDuration:   4,
+			wantMinAudioDur:   2,
+			wantMinVideoPixel: OfficialSeedanceVideoMinPixels,
+			wantMaxImages:     9,
+			wantMaxVideos:     3,
+			wantMaxAudios:     3,
+			wantTaskTypeConst: false,
+		},
+		{
+			name:              "2.0 Mini resolutions cap at 720p on openai-videos",
+			protocol:          "openai-videos",
+			model:             "seedance-2.0-mini",
+			wantResolutions:   []string{"480p", "720p"},
+			wantDefaultRes:    "720p",
+			wantMinDuration:   4,
+			wantMinAudioDur:   2,
+			wantMinVideoPixel: OfficialSeedanceVideoMinPixels,
+			wantMaxImages:     9,
+			wantMaxVideos:     3,
+			wantMaxAudios:     3,
+			wantTaskTypeConst: false,
+		},
+		{
 			name:              "2.5 Flash on custom host keeps official pixel floor and sets taskTypeConstraints",
 			protocol:          "newapi-channel-2",
 			model:             "bytedance/dreamina-seedance-2-5-flash",
@@ -339,10 +370,10 @@ func TestSeedanceProFlashResolutionAndReferenceRolesTable(t *testing.T) {
 			wantTaskTypeConst: false,
 		},
 		{
-			name:      "legacy zero-reference BeefAPI profile repairs omni reference slots",
+			name:      "legacy zero-reference BeefTV profile repairs omni reference slots",
 			protocol:  "newapi-channel-2",
 			model:     "doubao-seedance-2-0-260128",
-			channelID: "beefapi",
+			channelID: "beeftv",
 			saved: &ModelCapabilityConfig{
 				Version: 1,
 				Video: &VideoCapabilityConfig{
@@ -492,7 +523,7 @@ func TestSeedance25DraftAndDraftToFinalCapabilityAndValidation(t *testing.T) {
 		Capability:       "video",
 		Protocol:         "newapi",
 		Model:            "seedance-2.5",
-		ChannelID:        "beefapi",
+		ChannelID:        "beeftv",
 		CapabilityConfig: legacy25,
 	})
 	if err != nil {
@@ -513,7 +544,7 @@ func TestSeedance25DraftAndDraftToFinalCapabilityAndValidation(t *testing.T) {
 		Capability:       "video",
 		Protocol:         "newapi",
 		Model:            "seedance-2.5",
-		ChannelID:        "beefapi",
+		ChannelID:        "beeftv",
 		CapabilityConfig: &nonZeroRefs,
 	})
 	if err != nil {

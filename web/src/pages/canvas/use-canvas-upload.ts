@@ -1,4 +1,5 @@
 import { createClientId } from "@/lib/client-id";
+import { isCanvasNodeClipboardMarker, readCanvasClipboard } from "@/lib/canvas/canvas-clipboard";
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type Dispatch, type DragEvent, type SetStateAction } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { App } from "antd";
@@ -16,6 +17,7 @@ import { mediaResultMetadata } from "@/lib/canvas/canvas-node-semantics";
 import { isAudioFile } from "@/lib/canvas/canvas-project-generation";
 import { fitNodeSize, VIDEO_NODE_MAX_SIZE } from "@/lib/canvas/canvas-node-size";
 import { CANVAS_UPLOAD_ACCEPT, createFileUploadPlaceholder, uploadNodeType, uploadPercent } from "@/lib/canvas/canvas-file-upload";
+import { createScriptDocumentUploadPlaceholder, extractScriptDocumentText, isScriptDocumentFile, resolveScriptOrUploadNodeType, SCRIPT_DOCUMENT_ACCEPT } from "@/lib/canvas/script-document-import";
 import { canvasNodesMissingResourceAssetBinding } from "@/lib/canvas/canvas-node-asset";
 import { resourceIdFromStorageKey } from "@/services/api/resources";
 import { isReferenceHTTPSLink } from "@/services/api/reference-link-replacement";
@@ -223,7 +225,7 @@ export function useCanvasUpload({
         activeUploadsRef.current.add(id);
         const progress = startUploadStatus(replaceId ? "替换文件" : "上传文件", "读取文件信息", domainProjectId ? 4 : 3);
         try {
-            const placeholder = await createFileUploadPlaceholder(id, file, position);
+            const placeholder = await createScriptDocumentUploadPlaceholder(id, file, position, () => createFileUploadPlaceholder(id, file, position));
             if (!guard.alive()) return null;
             const uploadPlaceholder = placeholder.type === CanvasNodeType.Image || placeholder.type === CanvasNodeType.Video || placeholder.type === CanvasNodeType.Audio
                 ? { ...placeholder, metadata: mediaResultMetadata("upload", placeholder.metadata) }
@@ -250,8 +252,9 @@ export function useCanvasUpload({
             if (placeholder.type === CanvasNodeType.Image) {
                 metadata = imageMetadata(await uploadImage(file, onProgress));
             } else if (placeholder.type === CanvasNodeType.Text) {
-                const content = await file.text();
+                const { title: docTitle, content } = await extractScriptDocumentText(file);
                 if (!guard.alive()) return null;
+                if (docTitle) placeholder.title = docTitle;
                 const uploaded = await uploadMediaFile(file, "file", onProgress);
                 metadata = { content, prompt: content, storageKey: uploaded.storageKey, mimeType: uploaded.mimeType || file.type || "text/plain", bytes: uploaded.bytes, status: "success" };
             } else {
@@ -269,7 +272,7 @@ export function useCanvasUpload({
                 ? fitNodeSize(metadata.naturalWidth, metadata.naturalHeight)
                 : null;
             const node: CanvasNodeData = {
-                ...currentNode, type: placeholder.type,
+                ...currentNode, type: placeholder.type, title: placeholder.type === CanvasNodeType.Text && placeholder.title ? placeholder.title : currentNode.title,
                 ...(videoSize ? { ...videoSize, position: {
                     x: currentNode.position.x + (currentNode.width - videoSize.width) / 2,
                     y: currentNode.position.y + (currentNode.height - videoSize.height) / 2,
@@ -290,7 +293,7 @@ export function useCanvasUpload({
                     } : {}),
                 }),
             };
-            const applyUploadedNode = (current: CanvasNodeData[]) => current.map((item) => item.id === id ? { ...item, type: node.type, width: node.width, height: node.height, position: node.position, metadata: node.metadata } : item);
+            const applyUploadedNode = (current: CanvasNodeData[]) => current.map((item) => item.id === id ? { ...item, title: node.title, type: node.type, width: node.width, height: node.height, position: node.position, metadata: node.metadata } : item);
             nodesRef.current = applyUploadedNode(nodesRef.current);
             setNodes(applyUploadedNode);
             if (domainProjectId) progress.update("写入项目资产", 4);
@@ -452,13 +455,10 @@ export function useCanvasUpload({
         uploadTargetRef.current = { nodeId, position };
         const target = nodeId ? nodesRef.current.find((node) => node.id === nodeId) : null;
         if (imageInputRef.current) {
-            imageInputRef.current.accept = target?.type === CanvasNodeType.Image
-                ? "image/*"
-                : target?.type === CanvasNodeType.Video
-                  ? "video/*"
-                  : target?.type === CanvasNodeType.Audio
-                    ? "audio/*,.mp3,.wav"
-                    : target?.type === CanvasNodeType.Text ? "text/plain,text/markdown,.txt,.md,.markdown" : CANVAS_UPLOAD_ACCEPT;
+            imageInputRef.current.accept = target?.type === CanvasNodeType.Image ? "image/*"
+                : target?.type === CanvasNodeType.Video ? "video/*"
+                : target?.type === CanvasNodeType.Audio ? "audio/*,.mp3,.wav"
+                : target?.type === CanvasNodeType.Text || target?.type === CanvasNodeType.Script ? SCRIPT_DOCUMENT_ACCEPT : `${CANVAS_UPLOAD_ACCEPT},.docx`;
             imageInputRef.current.multiple = !nodeId;
         }
         if(nodeId) imageInputRef.current?.click();
@@ -485,9 +485,9 @@ export function useCanvasUpload({
         const uploadTarget = uploadTargetRef.current;
         const supportedFiles = files.filter((file) => uploadTarget?.referenceToNodeId
             ? uploadNodeType(file) === CanvasNodeType.Image
-            : Boolean(uploadNodeType(file)));
+            : Boolean(resolveScriptOrUploadNodeType(file, uploadNodeType(file))));
         if (!supportedFiles.length) {
-            message.warning(uploadTarget?.referenceToNodeId ? "请选择图片作为导演台参考素材" : "请选择图片、视频、音频或 TXT / Markdown 文件");
+            message.warning(uploadTarget?.referenceToNodeId ? "请选择图片作为导演台参考素材" : "请选择图片、视频、音频或剧本/文档文件 (.docx/.txt/.md)");
             return false;
         }
         const center = uploadTarget?.position || getCanvasCenter();
@@ -674,83 +674,53 @@ export function useCanvasUpload({
 
     const replaceNodeMedia = useCallback(async (nodeId: string, file: File) => {
         const currentNode = nodesRef.current.find((node) => node.id === nodeId);
-        if (!currentNode || !uploadNodeType(file)) return false;
+        const fileNodeType = resolveScriptOrUploadNodeType(file, uploadNodeType(file));
+        if (!currentNode || !fileNodeType) return false;
+        if (currentNode.type === CanvasNodeType.Script && isScriptDocumentFile(file)) {
+            const { title, content } = await extractScriptDocumentText(file);
+            setNodes((current) => current.map((item) => item.id === nodeId ? { ...item, title: title || item.title, metadata: { ...item.metadata, composerContent: content, prompt: content } } : item));
+            return true;
+        }
         const typedNode = [CanvasNodeType.Image, CanvasNodeType.Video, CanvasNodeType.Audio, CanvasNodeType.Text].includes(currentNode.type as CanvasNodeType);
-        if (typedNode && uploadNodeType(file) !== currentNode.type) return false;
+        if (typedNode && fileNodeType !== currentNode.type) return false;
         return Boolean(await createFileNode(file, currentNode.position, nodeId));
-    }, [createFileNode, nodesRef]);
+    }, [createFileNode, nodesRef, setNodes]);
 
     const pasteSystemClipboard = useCallback(async (position?: Position, clipboardEvent?: ClipboardEvent | null) => {
+        const selected = nodesRef.current.filter((node) => selectedNodeIdsRef.current.has(node.id));
+        const replaceId = selected.length === 1 && selected[0].type === CanvasNodeType.Image ? selected[0].id : null;
+        const pastePosition = position || getCanvasCenter();
         const guard = createOwnedCanvasUploadGuard({
             lifetime,
             canvasId,
             getLiveCanvasId: () => canvasIdRef.current,
             mounted: () => mountedRef.current,
         });
-        const isNodeMarker = (value: string) => {
-            const trimmed = value.trim();
-            return trimmed.startsWith("open-ai-canvas-nodes:") || trimmed.startsWith("open-ai-canvas-nodes-json:");
-        };
         const pasteImageFile = async (file: File) => {
             if (!guard.alive()) return false;
-            const selected = nodesRef.current.filter((node) => selectedNodeIdsRef.current.has(node.id));
-            if (selected.length === 1 && selected[0].type === CanvasNodeType.Image) {
-                if (await replaceNodeMedia(selected[0].id, file) && guard.alive()) message.success("已用剪切板图片替换，可撤销恢复");
+            if (replaceId) {
+                const replaced = await replaceNodeMedia(replaceId, file);
+                if (replaced && guard.alive()) message.success("已用剪切板图片替换，可撤销恢复");
+                // 替换分支已经接住这次粘贴：即使替换失败（例如该节点正在上传）
+                // 也不能再回退成粘贴旧的复制节点。
                 return true;
             }
-            const inserted = await createFileNode(file, position || getCanvasCenter());
+            const inserted = await createFileNode(file, pastePosition);
             if (inserted && guard.alive()) message.success("已从剪切板添加图片");
             return Boolean(inserted);
         };
 
-        // 1) paste 事件里的图片文件（截图/资源管理器复制）优先。
-        const filesFromEvent = clipboardEvent
-            ? Array.from(clipboardEvent.clipboardData?.items || [])
-                .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
-                .map((item) => item.getAsFile())
-                .filter((file): file is File => Boolean(file))
-            : [];
-        if (filesFromEvent.length) return pasteImageFile(filesFromEvent[0]);
-
-        // 2) 若系统文本是节点标记，说明最近一次复制是画布节点，不要再读旧图片。
-        const eventText = clipboardEvent?.clipboardData?.getData("text/plain") || "";
-        if (isNodeMarker(eventText)) return false;
-
-        // 3) 异步读系统剪贴板：有图片才导入；若文本是节点标记则让位给节点粘贴。
-        if (navigator.clipboard?.read) {
-            try {
-                const items = await navigator.clipboard.read();
-                if (!guard.alive()) return false;
-                const textItem = items.find((item) => item.types.includes("text/plain"));
-                if (textItem) {
-                    const textBlob = await textItem.getType("text/plain");
-                    const text = await textBlob.text();
-                    if (!guard.alive()) return false;
-                    if (isNodeMarker(text)) return false;
-                }
-                const imageItem = items.find((item) => item.types.some((type) => type.startsWith("image/")));
-                if (imageItem) {
-                    const imageType = imageItem.types.find((type) => type.startsWith("image/"));
-                    if (!imageType) return false;
-                    const blob = await imageItem.getType(imageType);
-                    if (!guard.alive()) return false;
-                    return pasteImageFile(new File([blob], "clipboard-image.png", { type: imageType }));
-                }
-            } catch {
-                // 无权限时继续文本分支。
-            }
-        }
-
         try {
-            const text = eventText || (navigator.clipboard?.readText ? await navigator.clipboard.readText() : "");
+            const content = await readCanvasClipboard(clipboardEvent, navigator.clipboard);
             if (!guard.alive()) return false;
-            if (isNodeMarker(text)) return false;
-            if (createTextNodeFromClipboard(text, position)) {
+            if (typeof content !== "string") return await pasteImageFile(content);
+            if (isCanvasNodeClipboardMarker(content)) return false;
+            if (createTextNodeFromClipboard(content, pastePosition)) {
                 message.success("已从剪切板添加文本");
                 return true;
             }
         } catch {
-            // ignore
+            if (guard.alive()) message.warning("粘贴未完成，请重试");
         }
         return false;
     }, [canvasId, createFileNode, createTextNodeFromClipboard, getCanvasCenter, lifetime, message, mountedRef, nodesRef, replaceNodeMedia, selectedNodeIdsRef]);
@@ -760,10 +730,11 @@ export function useCanvasUpload({
         const file = files[0];
         const target = uploadTargetRef.current;
         try {
-            if (!file || !uploadNodeType(file)) return;
+            const fileNodeType = file ? resolveScriptOrUploadNodeType(file, uploadNodeType(file)) : null;
+            if (!file || !fileNodeType) return;
             if (target?.nodeId) {
                 const targetNode = nodesRef.current.find((node) => node.id === target.nodeId);
-                const compatible = targetNode && (targetNode.type === uploadNodeType(file)
+                const compatible = targetNode && (targetNode.type === fileNodeType || (targetNode.type === CanvasNodeType.Script && isScriptDocumentFile(file))
                     || ![CanvasNodeType.Image, CanvasNodeType.Video, CanvasNodeType.Audio, CanvasNodeType.Text].includes(targetNode.type as CanvasNodeType));
                 if (!compatible) {
                     message.warning("请选择与当前节点相同类型的媒体文件");
@@ -804,16 +775,17 @@ export function useCanvasUpload({
             void createImageAssetNode(asset, screenToCanvas(event.clientX, event.clientY));
             return;
         }
-        const files = Array.from(event.dataTransfer.files).filter((item) => uploadNodeType(item));
+        const files = Array.from(event.dataTransfer.files).filter((item) => resolveScriptOrUploadNodeType(item, uploadNodeType(item)));
         if (!files.length) return;
         if (files.length > 1) {
             void handleUploadFiles(files);
             return;
         }
         const file = files[0];
+        const fileNodeType = resolveScriptOrUploadNodeType(file, uploadNodeType(file));
         const position = screenToCanvas(event.clientX, event.clientY);
         const target = [...nodesRef.current].reverse().find((node) => {
-            const compatible = node.type === uploadNodeType(file);
+            const compatible = node.type === fileNodeType || (node.type === CanvasNodeType.Script && isScriptDocumentFile(file));
             return compatible && position.x >= node.position.x && position.x <= node.position.x + node.width && position.y >= node.position.y && position.y <= node.position.y + node.height;
         });
         if (target) {
@@ -880,33 +852,16 @@ export function useCanvasUpload({
 
     const createAssetPayloadNode = useCallback(async (payload: InsertAssetPayload, center: Position) => {
         if (payload.kind === "character") {
-            const width = 320;
-            const height = 260;
+            const width = 320, height = 260;
             return {
                 id: `character-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-                type: CanvasNodeType.Text,
-                title: payload.title,
-                position: { x: center.x - width / 2, y: center.y - height / 2 },
-                width,
-                height,
+                type: CanvasNodeType.Text, title: payload.title, position: { x: center.x - width / 2, y: center.y - height / 2 }, width, height,
                 metadata: {
-                    workflowKind: "character",
-                    characterAssetId: payload.assetId,
-                    characterVersionId: payload.versionId,
-                    characterVersionPolicy: "current",
-                    characterName: payload.title,
-                    characterPrompt: payload.prompt,
-                    characterAliases: payload.aliases,
-                    characterDefinition: payload.definition,
-                    characterCoverUrl: payload.coverUrl,
-                    characterVisualStatus: payload.visualStatus,
-                    characterVoiceStatus: payload.voiceStatus,
-                    characterVoiceName: payload.voiceName,
-                    characterVoiceProfile: payload.voiceProfile,
-                    characterVoiceInstructions: payload.voiceInstructions,
-                    assetId: payload.assetId,
-                    status: NODE_STATUS_SUCCESS,
-                    fontSize: 14,
+                    workflowKind: "character", characterAssetId: payload.assetId, characterVersionId: payload.versionId, characterVersionPolicy: "current",
+                    characterName: payload.title, characterPrompt: payload.prompt, characterAliases: payload.aliases, characterDefinition: payload.definition,
+                    characterCoverUrl: payload.coverUrl, characterVisualStatus: payload.visualStatus, characterVoiceStatus: payload.voiceStatus,
+                    characterVoiceName: payload.voiceName, characterVoiceProfile: payload.voiceProfile, characterVoiceInstructions: payload.voiceInstructions,
+                    assetId: payload.assetId, status: NODE_STATUS_SUCCESS, fontSize: 14,
                 },
             } satisfies CanvasNodeData;
         }

@@ -123,26 +123,40 @@ export function InfiniteCanvas({ interactive = true, containerRef, viewport, app
         [containerRef],
     );
 
-    const syncViewport = useCallback(() => { if (interactive) onViewportChange(viewportRef.current); }, [interactive, onViewportChange]);
+    const flushViewportPreview = useCallback((now: number, forceNotify = false) => {
+        if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+        const pending = nextViewportRef.current;
+        nextViewportRef.current = null;
+        if (!pending) return;
+        const notify = forceNotify || now - lastPreviewNotifyRef.current >= 32;
+        // Paint the latest camera once, then refresh culling. High-frequency
+        // pointer input must not schedule page work before its frame is drawn.
+        applyCanvasLiveViewport(containerRef.current, pending, notify);
+        onViewportPreviewChange?.(pending);
+        if (notify) lastPreviewNotifyRef.current = now;
+    }, [containerRef, onViewportPreviewChange]);
+
+    const syncViewport = useCallback(() => {
+        flushViewportPreview(performance.now(), true);
+        if (interactive) onViewportChange(viewportRef.current);
+    }, [flushViewportPreview, interactive, onViewportChange]);
+
+    const cancelIdleCommit = () => {
+        if (syncTimerRef.current !== null) clearTimeout(syncTimerRef.current);
+        syncTimerRef.current = null;
+    };
 
     const scheduleViewportChange = useCallback(
         (next: ViewportTransform, commitAfterIdle = false) => {
             const scaleChanged = Math.abs(next.k - scaleRef.current) > 1e-6;
             viewportRef.current = next;
             scaleRef.current = next.k;
-            onViewportPreviewChange?.(next);
             const container = containerRef.current;
             if (container && container.dataset.canvasViewportInteracting !== "true") container.dataset.canvasViewportInteracting = "true";
             if (container && scaleChanged && container.dataset.canvasViewportZooming !== "true") container.dataset.canvasViewportZooming = "true";
             nextViewportRef.current = next;
-            if (!frameRef.current) frameRef.current = requestAnimationFrame((now) => {
-                frameRef.current = null;
-                const pending = nextViewportRef.current;
-                if (!pending) return;
-                const notify = now - lastPreviewNotifyRef.current >= 32;
-                applyCanvasLiveViewport(containerRef.current, pending, notify);
-                if (notify) lastPreviewNotifyRef.current = now;
-            });
+            if (frameRef.current === null) frameRef.current = requestAnimationFrame(flushViewportPreview);
             if (!commitAfterIdle) return;
             if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
             const finishIdleGesture = () => {
@@ -158,7 +172,7 @@ export function InfiniteCanvas({ interactive = true, containerRef, viewport, app
             };
             syncTimerRef.current = setTimeout(finishIdleGesture, 120);
         },
-        [containerRef, onViewportPreviewChange, syncViewport],
+        [containerRef, flushViewportPreview, syncViewport],
     );
 
     useEffect(() => {
@@ -291,6 +305,7 @@ export function InfiniteCanvas({ interactive = true, containerRef, viewport, app
                     worldY: (centerY - current.y) / current.k,
                     initialScale: current.k,
                 };
+                cancelIdleCommit();
                 panState.current.isPanning = false;
                 interactingRef.current = true;
                 return;
@@ -301,6 +316,7 @@ export function InfiniteCanvas({ interactive = true, containerRef, viewport, app
             event.currentTarget.setPointerCapture(event.pointerId);
             if (!event.isPrimary) return;
             const current = viewportRef.current;
+            cancelIdleCommit();
             interactingRef.current = true;
             panState.current = {
                 isPanning: true,
@@ -317,6 +333,7 @@ export function InfiniteCanvas({ interactive = true, containerRef, viewport, app
 
         if (pointerIntent === "pan") {
             const current = viewportRef.current;
+            cancelIdleCommit();
             event.preventDefault();
             event.currentTarget.setPointerCapture(event.pointerId);
             interactingRef.current = true;

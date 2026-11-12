@@ -367,6 +367,18 @@ function parseWorkspaceAssetPayloads(values: unknown): Asset[] {
 }
 
 export function normalizeWorkspaceAssetPayload(value: unknown): Asset {
+    // Durable resource rows can omit process-specific display URLs. Resolve
+    // their real locator before validating the complete media record.
+    if (isRecord(value) && isRecord(value.data) && typeof value.data.storageKey === "string") {
+        const resourceId = resourceIdFromStorageKey(value.data.storageKey);
+        const media = value.kind === "image" || value.kind === "video" || value.kind === "audio" || value.kind === "model";
+        if (resourceId && media) {
+            const field = value.kind === "image" ? "dataUrl" : "url";
+            if (value.data[field] === undefined) {
+                value = { ...value, data: { ...value.data, [field]: resourceFileUrl(resourceId) } };
+            }
+        }
+    }
     return applyResourceDisplayUrls(parseAssetRecord(value));
 }
 
@@ -532,6 +544,16 @@ function matchesExtraClientFilters(asset: Asset, options: WorkspaceAssetLibraryP
 export function isWorkspaceGeneratedHistoryAsset(asset: Pick<Asset, "kind" | "source" | "metadata">) {
     if (asset.kind !== "image" && asset.kind !== "video" && asset.kind !== "audio") return false;
     return asset.source === "生成任务" || typeof asset.metadata?.generationEffectKey === "string";
+}
+
+export function isWorkspacePersonalLibraryAsset(asset: Pick<Asset, "kind" | "source" | "folderId" | "metadata">): boolean {
+    if (!isWorkspaceGeneratedHistoryAsset(asset)) return true;
+    return Boolean(
+        asset.metadata?.savedToLibrary === true ||
+        asset.metadata?.source === "canvas-manual" ||
+        asset.folderId ||
+        asset.metadata?.favorite === true,
+    );
 }
 
 export function workspaceAssetProjectLabel(asset: Pick<Asset, "metadata">) {

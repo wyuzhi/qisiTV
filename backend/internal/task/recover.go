@@ -32,8 +32,8 @@ func ManualRecovery(ctx context.Context) bool {
 // replay, or upstream video/upscale/audio status query) after resetting any poll
 // backoff. It never creates a new task. When the caller marks the context with
 // WithManualRecovery (only the user's 继续取回, POST /api/tasks/:id/recover),
-// a managed submission BeefAPI never received may be resubmitted once with its
-// original key, reference and body; BeefAPI deduplicates it, so the original
+// a managed submission BeefTV never received may be resubmitted once with its
+// original key, reference and body; BeefTV deduplicates it, so the original
 // generation is charged at most once. Structurally, it never references Store.Retry, Store.CreateWithLimit,
 // Persistence.CreateAdmitted, or Service.Retry.
 func (s *Service) RecoverTask(ctx context.Context, userID, id string) (*model.Task, error) {

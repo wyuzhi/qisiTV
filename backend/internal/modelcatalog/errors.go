@@ -2,10 +2,6 @@ package modelcatalog
 
 import "qisitv/backend/internal/kernel"
 
-func badAuth(message string) error {
-	return kernel.BadAuthRequest(message)
-}
-
 // ModelErrorCode 是模型选择/路由/供应商失败的稳定机器可读码。
 type ModelErrorCode string
 

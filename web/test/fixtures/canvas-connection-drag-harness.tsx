@@ -51,6 +51,9 @@ export function mountConnectionDragHarness(element: HTMLElement) {
         refresh() {
             root.render(<CanvasProjectWorldLayers {...props} scriptScrollTopById={{ script: 20 }} />);
         },
+        highlight() {
+            root.render(<CanvasProjectWorldLayers {...props} selectedConnectionId="main" />);
+        },
         switchProject() {
             root.render(<CanvasProjectWorldLayers {...props} projectId="other-project" />);
         },

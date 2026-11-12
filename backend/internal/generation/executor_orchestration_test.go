@@ -10,19 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-
-	"qisitv/backend/internal/model"
 )
-
-type stubWorkflowPort struct{ calls atomic.Int32 }
-
-func (s *stubWorkflowPort) Execute(ctx context.Context, input Input) (map[string]interface{}, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	s.calls.Add(1)
-	return map[string]interface{}{"mode": input.Mode, "workflow": true}, nil
-}
 
 type countingPrompt struct{ compiles atomic.Int32 }
 
@@ -75,20 +63,6 @@ func TestExecuteTextImageAudioAndWorkflow(t *testing.T) {
 	images, _ := image["images"].([]map[string]string)
 	if len(images) != 1 {
 		t.Fatalf("image Execute payload = %#v", image)
-	}
-
-	workflowPort := &stubWorkflowPort{}
-	workflow, err := Execute(WithRuntime(context.Background(), taskRuntime(func(runtime *Runtime) {
-		runtime.Workflow = workflowPort
-	})), Input{
-		Mode: "image", Prompt: "draw",
-		Config: Config{
-			BaseURL: "https://www.runninghub.cn", APIKey: "key", Model: "wf",
-			InterfaceType: string(model.ChannelInterfaceRunningHubImage), WorkflowID: "wf-1",
-		},
-	})
-	if err != nil || workflow["workflow"] != true || workflowPort.calls.Load() != 1 {
-		t.Fatalf("workflow Execute: %#v err=%v calls=%d", workflow, err, workflowPort.calls.Load())
 	}
 
 	agent, err := Execute(WithRuntime(context.Background(), taskRuntime()), Input{
@@ -146,7 +120,6 @@ func (p *countingResolvePort) Resolve(config Config) (Config, error) {
 	return out, nil
 }
 func (p *countingResolvePort) ApplyCapabilities(context.Context, *Input) error { return nil }
-func (p *countingResolvePort) RequireWorkflow(string) error                    { return nil }
 func (p *countingResolvePort) SyncArkPrivateAssets(context.Context, string, *Input) error {
 	return nil
 }
@@ -251,5 +224,40 @@ func TestExecuteAllowsEmptyPromptForVideoDraftToFinal(t *testing.T) {
 	})
 	if err == nil || strings.Contains(err.Error(), "prompt is required") {
 		t.Fatalf("expected empty prompt draft_to_final on canvas_video to pass prompt check, got %v", err)
+	}
+}
+
+// A model still saved with a retired vendor ID runs the merged OpenAI-compatible
+// interface end to end: same request path, options from the old namespace, and
+// streaming like any chat-completion model.
+func TestExecuteTextWithRetiredVendorIDUsesMergedInterface(t *testing.T) {
+	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "true")
+	var path string
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"好\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	t.Cleanup(server.Close)
+	var streamed strings.Builder
+	ctx := WithProtocolRegistry(WithRuntime(context.Background(), taskRuntime(func(runtime *Runtime) {
+		runtime.Call.TaskType = "canvas_text"
+	})), LoadOfficialFallbackRegistry())
+	result, err := Execute(ctx, Input{
+		Mode: "text", Prompt: "hello",
+		Metadata:    map[string]any{"providerOptions": map[string]any{"deepseek-chat": map[string]any{"temperature": 0.2}}},
+		OnTextDelta: func(delta string) { streamed.WriteString(delta) },
+		Config:      Config{BaseURL: server.URL, APIKey: "key", Model: "deepseek-v4-flash", InterfaceType: "deepseek-chat"},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if path != "/v1/chat/completions" || body["temperature"] != 0.2 || body["stream"] != true {
+		t.Fatalf("path = %q body = %#v", path, body)
+	}
+	if result["text"] != "好" || streamed.String() != "好" {
+		t.Fatalf("result = %#v streamed = %q", result, streamed.String())
 	}
 }

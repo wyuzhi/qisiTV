@@ -2,13 +2,14 @@ type CanvasVideoPresentationInput = {
     active: boolean;
     hasSource: boolean;
     firstFramePresented: boolean;
+    failed?: boolean;
 };
 
-export function canvasVideoPresentationState({ active, hasSource, firstFramePresented }: CanvasVideoPresentationInput) {
-    const showVideo = active && hasSource && firstFramePresented;
+export function canvasVideoPresentationState({ active, hasSource, firstFramePresented, failed = false }: CanvasVideoPresentationInput) {
+    const showVideo = !failed && active && hasSource && firstFramePresented;
     return {
-        showPoster: !showVideo,
+        showPoster: !failed && !showVideo,
         showVideo,
-        showLoading: active && !hasSource,
+        showLoading: !failed && active && !hasSource,
     };
 }

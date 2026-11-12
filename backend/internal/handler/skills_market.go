@@ -48,6 +48,20 @@ func registerSkillMarketRoutes(r *gin.RouterGroup, owners workspaceOwners, domai
 		value, err := domain.MarketSearch(c.Request.Context(), c.Query("q"), page, size)
 		marketReply(c, value, err)
 	})
+	m.GET("/public", func(c *gin.Context) {
+		value, err := domain.MarketPublicSearch(c.Request.Context(), c.Query("q"))
+		marketReply(c, value, err)
+	})
+	m.POST("/public/about", func(c *gin.Context) {
+		var a struct {
+			IDs []string `json:"ids"`
+		}
+		if e := c.ShouldBindJSON(&a); e != nil {
+			marketReply(c, nil, kernel.BadAuthRequest("请提供技能标识列表"))
+			return
+		}
+		marketReply(c, gin.H{"about": domain.MarketPublicAbout(c.Request.Context(), a.IDs)}, nil)
+	})
 	m.GET("/catalog", func(c *gin.Context) {
 		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 		size, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))

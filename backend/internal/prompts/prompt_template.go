@@ -41,13 +41,6 @@ type PromptOperationDefinition struct {
 	DefaultContent string                   `json:"-"`
 }
 
-type PromptTemplateRequest struct {
-	Operation string `json:"operation"`
-	Name      string `json:"name"`
-	Content   string `json:"content"`
-	Enabled   *bool  `json:"enabled"`
-}
-
 type UserPromptCustomizationRequest struct {
 	Mode    string `json:"mode"`
 	Content string `json:"content"`
@@ -112,99 +105,6 @@ func (s *Service) EnsureDefaultPromptTemplates() error {
 		}
 	}
 	return nil
-}
-
-func (s *Service) AdminPromptTemplates(actor *model.User) ([]model.PromptTemplate, []PromptOperationDefinition, error) {
-	if err := s.requireAdmin(actor); err != nil {
-		return nil, nil, err
-	}
-	templates, err := s.repo.PromptTemplates()
-	if err != nil {
-		return nil, nil, err
-	}
-	return templates, promptDefinitions(), nil
-}
-
-func (s *Service) CreatePromptTemplate(actor *model.User, req PromptTemplateRequest) (*model.PromptTemplate, error) {
-	if err := s.requireAdmin(actor); err != nil {
-		return nil, err
-	}
-	definition, ok := PromptDefinition(strings.TrimSpace(req.Operation))
-	if !ok {
-		return nil, kernel.BadAuthRequest("不支持的提示词模板类型")
-	}
-	name, content, err := validatePromptTemplateContent(definition, req.Name, req.Content)
-	if err != nil {
-		return nil, err
-	}
-	version, err := s.repo.NextPromptTemplateVersion(definition.Operation)
-	if err != nil {
-		return nil, err
-	}
-	template := &model.PromptTemplate{
-		ID: kernel.NewID(), Operation: definition.Operation, Name: name, Version: version, Content: content,
-		OutputType: definition.OutputType, Enabled: req.Enabled != nil && *req.Enabled, CreatedBy: actor.ID,
-	}
-	if err := s.repo.SavePromptTemplate(template); err != nil {
-		return nil, err
-	}
-	if err := s.appendAdminAudit(actor, "prompt_template.create", "prompt_template", template.ID, "创建提示词模板版本", map[string]any{"operation": template.Operation, "version": template.Version, "enabled": template.Enabled}); err != nil {
-		return nil, err
-	}
-	return template, nil
-}
-
-func (s *Service) UpdatePromptTemplate(actor *model.User, id string, req PromptTemplateRequest) (*model.PromptTemplate, error) {
-	if err := s.requireAdmin(actor); err != nil {
-		return nil, err
-	}
-	template, err := s.repo.PromptTemplate(id)
-	if err != nil {
-		return nil, err
-	}
-	definition, ok := PromptDefinition(template.Operation)
-	if !ok {
-		return nil, kernel.BadAuthRequest("提示词模板类型已经失效")
-	}
-	if template.Enabled && (strings.TrimSpace(req.Content) != strings.TrimSpace(template.Content) || strings.TrimSpace(req.Name) != template.Name) {
-		return nil, kernel.BadAuthRequest("启用中的版本不可直接修改，请基于它新建版本")
-	}
-	if req.Enabled != nil && !*req.Enabled && template.Enabled {
-		return nil, kernel.BadAuthRequest("启用中的版本不能直接停用，请先启用同类型的其他版本")
-	}
-	name, content, err := validatePromptTemplateContent(definition, req.Name, req.Content)
-	if err != nil {
-		return nil, err
-	}
-	template.Name = name
-	template.Content = content
-	if req.Enabled != nil {
-		template.Enabled = *req.Enabled
-	}
-	if err := s.repo.SavePromptTemplate(template); err != nil {
-		return nil, err
-	}
-	if err := s.appendAdminAudit(actor, "prompt_template.update", "prompt_template", template.ID, "更新提示词模板版本", map[string]any{"operation": template.Operation, "version": template.Version, "enabled": template.Enabled}); err != nil {
-		return nil, err
-	}
-	return template, nil
-}
-
-func (s *Service) DeletePromptTemplate(actor *model.User, id string) error {
-	if err := s.requireAdmin(actor); err != nil {
-		return err
-	}
-	template, err := s.repo.PromptTemplate(id)
-	if err != nil {
-		return err
-	}
-	if template.Enabled {
-		return kernel.BadAuthRequest("启用中的版本不能删除，请先启用同类型的其他版本")
-	}
-	if err := s.repo.DeletePromptTemplate(id); err != nil {
-		return err
-	}
-	return s.appendAdminAudit(actor, "prompt_template.delete", "prompt_template", template.ID, "删除提示词模板版本", map[string]any{"operation": template.Operation, "version": template.Version})
 }
 
 func (s *Service) UserPromptPreferences(user *model.User) ([]UserPromptPreference, error) {
@@ -324,24 +224,6 @@ func (s *Service) CompilePrompt(userID string, operation string, values map[stri
 	}
 	compiled.Content = strings.Join(parts, "\n\n")
 	return compiled, nil
-}
-
-func validatePromptTemplateContent(definition PromptOperationDefinition, name string, content string) (string, string, error) {
-	name = strings.TrimSpace(name)
-	content = strings.TrimSpace(content)
-	if name == "" {
-		return "", "", kernel.BadAuthRequest("请填写版本名称")
-	}
-	if content == "" {
-		return "", "", kernel.BadAuthRequest("请填写提示词模板")
-	}
-	if len([]rune(content)) > 30_000 {
-		return "", "", kernel.BadAuthRequest("提示词模板最多 30000 个字符")
-	}
-	if err := validatePromptPlaceholders(definition, content); err != nil {
-		return "", "", err
-	}
-	return name, content, nil
 }
 
 func validatePromptPlaceholders(definition PromptOperationDefinition, content string) error {

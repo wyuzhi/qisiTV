@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"gorm.io/gorm"
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
@@ -82,9 +82,9 @@ func ImageRecoveryNeedsPolling(task model.Task) bool {
 	return task.RecoveryOutcome == nil || *task.RecoveryOutcome == "" || imageSettlementNeedsPolling(task)
 }
 
-// 托管任务的「无法取回」会定期向 BeefAPI 复查：早期客户端曾只凭本地请求时长下这个结论；
+// 托管任务的「无法取回」会定期向 BeefTV 复查：早期客户端曾只凭本地请求时长下这个结论；
 // 现在本地只在「原 Key 查不到原编号、冻结原请求也已过期」时下（ResolveMissingManagedSubmission），
-// BeefAPI 之后能查到这次提交时，复查会按它的结论纠正。
+// BeefTV 之后能查到这次提交时，复查会按它的结论纠正。
 func (s *Service) ManagedImageNeedsRecheck(task model.Task) bool {
 	if task.RecoveryOutcome == nil || *task.RecoveryOutcome != localtask.RecoveryUnrecoverable {
 		return false
@@ -96,11 +96,8 @@ func (s *Service) ManagedImageNeedsRecheck(task model.Task) bool {
 	if err != nil || attempt == nil || attempt.RouteRun != task.RouteRun {
 		return false
 	}
-	if attempt.ChannelID == beefapi.ChannelID {
-		return true
-	}
-	row, err := s.repo.ImageSubmission(attempt.ID, task.ID, task.UserID)
-	return err == nil && row.QueryCipher != ""
+	row, _ := s.repo.ImageSubmission(attempt.ID, task.ID, task.UserID)
+	return s.isManagedImageSubmission(task, attempt, row)
 }
 
 func (s *Service) RecoverFailedImage(ctx context.Context, candidate model.Task) error {
@@ -164,7 +161,7 @@ func (s *Service) RecoverFailedImage(ctx context.Context, candidate model.Task) 
 		at := time.Now().Add(delay)
 		next = &at
 	} else if concluded := *task; outcome == localtask.RecoveryUnrecoverable {
-		// 托管图片的「无法取回」仍会定期向 BeefAPI 复查（ManagedImageNeedsRecheck），
+		// 托管图片的「无法取回」仍会定期向 BeefTV 复查（ManagedImageNeedsRecheck），
 		// 留出间隔，避免每轮扫描都查一次。
 		concluded.RecoveryOutcome = &outcome
 		if s.ManagedImageNeedsRecheck(concluded) {
@@ -241,7 +238,7 @@ func (s *Service) SyncFailedImageBeefSettlement(ctx context.Context, task *model
 	}
 	if strings.TrimSpace(task.ImageJobID) == "" {
 		if receipt, err := s.repo.ImageCreateReceipt(task.UserID, task.ID); err == nil && receipt != nil {
-			if jobID := generation.ExtractBeefAPIImageJobID(nil, []byte(receipt.ResponseBody)); jobID != "" {
+			if jobID := generation.ExtractBeefTVImageJobID(nil, []byte(receipt.ResponseBody)); jobID != "" {
 				task.ImageJobID = jobID
 				_ = s.repo.UpdateTaskImageJobID(task.ID, jobID)
 			}
@@ -259,7 +256,7 @@ func (s *Service) SyncFailedImageBeefSettlement(ctx context.Context, task *model
 		queryCtx = s.runtime.ForTask(queryCtx, *task)
 	}
 	queryCtx = s.runtime.Receipts(queryCtx)
-	settlement, _, err := generation.QueryBeefAPIImageJob(queryCtx, config, task.ImageJobID)
+	settlement, _, err := generation.QueryBeefTVImageJob(queryCtx, config, task.ImageJobID)
 	if err != nil {
 		return err
 	}
@@ -296,7 +293,7 @@ func (s *Service) FailedImageResultWith(ctx context.Context, task model.Task, se
 	}
 	evidence := all[task.ID]
 	attempt, submission := evidence.Attempt, evidence.Submission
-	if (ManagedTaskConnection(task) || (attempt != nil && attempt.ChannelID == beefapi.ChannelID)) && (attempt == nil || submission == nil || attempt.RouteRun != task.RouteRun) {
+	if (ManagedTaskConnection(task) || (attempt != nil && attempt.ChannelID == beeftv.ChannelID)) && (attempt == nil || submission == nil || attempt.RouteRun != task.RouteRun) {
 		return nil, "", imageRecoveryError{errors.New("原任务查询信息暂不可用，尚未确认结果")}
 	}
 	if attempt != nil && submission != nil && attempt.RouteRun == task.RouteRun {
@@ -310,7 +307,7 @@ func (s *Service) FailedImageResultWith(ctx context.Context, task model.Task, se
 		defer cancelQuery()
 		if recovered, managed, collectErr := s.RecoverManagedImage(queryCtx, task, row); managed {
 			if collectErr != nil {
-				if beefapi.IsMediaTaskNotFound(collectErr) {
+				if beeftv.IsMediaTaskNotFound(collectErr) {
 					outcome, resubmitted, resolveErr := s.ResolveMissingManagedSubmission(queryCtx, task)
 					switch {
 					case outcome != "":
@@ -322,7 +319,7 @@ func (s *Service) FailedImageResultWith(ctx context.Context, task model.Task, se
 					}
 					return nil, "", imageRecoveryError{collectErr}
 				}
-				if beefapi.IsTerminalMediaTaskError(collectErr) {
+				if beeftv.IsTerminalMediaTaskError(collectErr) {
 					return nil, localtask.RecoveryNoResult, nil
 				}
 				return nil, "", collectErr

@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/protocol"
 )
 
@@ -32,7 +32,7 @@ func grokPluginRegistry(t *testing.T, packaged bool) *protocol.Registry {
 		}
 		raw = pkg.ManifestRaw
 	}
-	adapters, err := protocol.LoadInstalledProviders(raw, nil)
+	adapters, err := protocol.LoadInstalledProviders(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestGrokImagePluginFailuresRemainFailures(t *testing.T) {
 func TestGrokImageManagedConnectionRetainsPriority(t *testing.T) {
 	registry, _ := protocol.NewRegistry()
 	ctx := WithProtocolRegistry(context.Background(), registry)
-	_, err := RunImageTask(ctx, Input{Mode: "image", Config: Config{CredentialRef: beefapi.CredentialRef, InterfaceType: "grok-image", Model: "grok-imagine-image"}})
+	_, err := RunImageTask(ctx, Input{Mode: "image", Config: Config{CredentialRef: beeftv.CredentialRef, InterfaceType: "grok-image", Model: "grok-imagine-image"}})
 	if err == nil || !strings.Contains(err.Error(), "持久化提交标识") {
 		t.Fatalf("managed image must reach its own persistence guard before Grok routing: %v", err)
 	}

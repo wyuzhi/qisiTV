@@ -1,0 +1,10 @@
+/* Keep hover paint on the existing stroke, without SVG filters or animation. */
+g[data-canvas-connection-id]:not([data-connection-dense="true"]):hover > .canvas-connection-line {
+    stroke: var(--connection-hover-color);
+    stroke-width: 2.8;
+    stroke-opacity: 0.95;
+}
+
+g[data-canvas-connection-id][data-connection-visual-mode="hover-only"]:not([data-connection-active="true"]):not(:hover) > :not([data-connection-id], defs) {
+    visibility: hidden;
+}

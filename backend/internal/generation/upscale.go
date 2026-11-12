@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 
 	_ "golang.org/x/image/webp"
 )
@@ -72,7 +72,7 @@ func PrepareUpscale(ctx context.Context, input Input) (Input, error) {
 		return input, err
 	}
 	runtime, _ := RuntimeFromContext(ctx)
-	if err := PrepareBeefAPIVideoReferences(ctx, input.Config, &input, ownedSeedanceMediaReader(ctx, runtime.Call.UserID)); err != nil {
+	if err := PrepareBeefTVVideoReferences(ctx, input.Config, &input, ownedSeedanceMediaReader(ctx, runtime.Call.UserID)); err != nil {
 		return input, err
 	}
 	return input, nil
@@ -84,7 +84,7 @@ func prepareOwnedUpscaleSource(ctx context.Context, input Input) (Input, error) 
 	if err := ValidateUpscaleInput(input); err != nil {
 		return input, err
 	}
-	if !managedConnection(input.Config) && !IsBeefAPIVideoConfig(ctx, input.Config) {
+	if !managedConnection(input.Config) && !IsBeefTVVideoConfig(ctx, input.Config) {
 		return input, errors.New("AI 超分需要连接官方算力账号")
 	}
 	runtime, _ := RuntimeFromContext(ctx)
@@ -146,8 +146,8 @@ func upscaleImageConfig(data []byte) (image.Config, error) {
 	return meta, nil
 }
 
-func legacyUpscaleInput(input Input) beefapi.LegacyUpscaleInput {
-	request := beefapi.LegacyUpscaleInput{Model: input.Config.Model, MediaType: input.Mode, Factor: input.Upscale.Factor, OutputFormat: input.Upscale.OutputFormat}
+func legacyUpscaleInput(input Input) beeftv.LegacyUpscaleInput {
+	request := beeftv.LegacyUpscaleInput{Model: input.Config.Model, MediaType: input.Mode, Factor: input.Upscale.Factor, OutputFormat: input.Upscale.OutputFormat}
 	if input.Mode == "image" && len(input.ReferenceImages) > 0 {
 		request.SourceURL = input.ReferenceImages[0].URL
 	}
@@ -157,10 +157,10 @@ func legacyUpscaleInput(input Input) beefapi.LegacyUpscaleInput {
 	return request
 }
 func upscaleBody(input Input) map[string]any {
-	return beefapi.LegacyUpscaleBody(legacyUpscaleInput(input))
+	return beeftv.LegacyUpscaleBody(legacyUpscaleInput(input))
 }
 
-type UpscaleEstimate = beefapi.UpscaleEstimate
+type UpscaleEstimate = beeftv.UpscaleEstimate
 
 func EstimateUpscale(ctx context.Context, input Input) (UpscaleEstimate, error) {
 	var estimate UpscaleEstimate
@@ -172,7 +172,7 @@ func EstimateUpscale(ctx context.Context, input Input) (UpscaleEstimate, error) 
 	return managedMediaClient(queryCtx, prepared.Config).EstimateLegacyUpscale(queryCtx, legacyUpscaleInput(prepared))
 }
 
-func upscaleTaskPath(id string) (string, error) { return beefapi.LegacyUpscaleTaskPath(id) }
+func upscaleTaskPath(id string) (string, error) { return beeftv.LegacyUpscaleTaskPath(id) }
 
 func RunUpscaleTask(ctx context.Context, input Input) (map[string]any, error) {
 	if IsLikeAIUpscaleModel(input.Config.Model) {
@@ -181,7 +181,7 @@ func RunUpscaleTask(ctx context.Context, input Input) (map[string]any, error) {
 	if err := ValidateUpscaleInput(input); err != nil {
 		return nil, RequestPreparationError{Cause: err}
 	}
-	if !managedConnection(input.Config) && !IsBeefAPIVideoConfig(ctx, input.Config) {
+	if !managedConnection(input.Config) && !IsBeefTVVideoConfig(ctx, input.Config) {
 		return nil, RequestPreparationError{Cause: errors.New("AI 超分需要连接官方算力账号")}
 	}
 	client, unified, err := useManagedMediaEnvelope(ctx, input.Config, "upscale")
@@ -219,7 +219,7 @@ func RunUpscaleTask(ctx context.Context, input Input) (map[string]any, error) {
 	})
 }
 
-func runManagedUpscaleTask(ctx context.Context, client *beefapi.MediaClient, input Input) (map[string]any, error) {
+func runManagedUpscaleTask(ctx context.Context, client *beeftv.MediaClient, input Input) (map[string]any, error) {
 	runtime, _ := RuntimeFromContext(ctx)
 	if runtime.ManagedMedia == nil {
 		return nil, RequestPreparationError{Cause: errors.New("超分请求缺少持久化提交标识")}
@@ -251,12 +251,12 @@ func runManagedUpscaleTask(ctx context.Context, client *beefapi.MediaClient, inp
 	} else {
 		options["H264_output"] = true
 	}
-	request := beefapi.MediaRequest{TaskRef: SubmissionKeyFromContext(ctx), MediaType: "upscale", Model: input.Config.Model, Operation: "upscale", Options: options}
+	request := beeftv.MediaRequest{TaskRef: SubmissionKeyFromContext(ctx), MediaType: "upscale", Model: input.Config.Model, Operation: "upscale", Options: options}
 	client.ExpectedOutputKind = input.Mode
-	return executeManagedMedia(ctx, client, request, []beefapi.LocalMediaReference{ref})
+	return executeManagedMedia(ctx, client, request, []beeftv.LocalMediaReference{ref})
 }
 
-// BeefAPI owns provider recovery. Client recovery only queries the original task.
+// BeefTV owns provider recovery. Client recovery only queries the original task.
 func RecoverUpscaleResult(ctx context.Context, input Input, id string) (map[string]any, string, error) {
 	if IsLikeAIUpscaleModel(input.Config.Model) {
 		adapter, ok := DeclarativeProtocolAdapterForContext(ctx, input.Config.InterfaceType)

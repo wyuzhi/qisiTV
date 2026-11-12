@@ -5,13 +5,15 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
 import { scopedLocalStorage } from "@/lib/user-scope";
-import { beefAPIVideoContract, isBeefAPIEndpoint } from "@/lib/beefapi-video-contracts";
-import { beefAPIImageContract } from "@/lib/beefapi-image-contracts";
+import { beefTVVideoContract, isBeefTVEndpoint } from "@/lib/beeftv-video-contracts";
+import { beefTVImageContract } from "@/lib/beeftv-image-contracts";
 import { defaultProtocolForCapability, defaultProtocolForModel, inferProtocolCapabilityFromModel, modelProtocolCapability, normalizeModelProtocol, usesOpenAICompatibleProtocolDefault, type ModelProtocol } from "@/lib/model-protocols";
 import { normalizeVideoBoolean, normalizeVideoDuration, normalizeVideoResolution } from "@/lib/video-generation-options";
-import { defaultModelCapabilityConfig, upgradeGPTImageCapability, workflowFieldRole, workflowFieldSafeToOverride, workflowVideoFieldsFromJson, type ModelCapabilityConfig } from "@/lib/model-capabilities";
+import { defaultModelCapabilityConfig, upgradeGPTImageCapability, type ModelCapabilityConfig } from "@/lib/model-capabilities";
+import { useUserStore } from "@/stores/use-user-store";
 import type { CapabilitySpec } from "@/services/api/logical-models";
 import { seedancePortraitLabel, seedancePortraitModel, type VideoPriceQuote } from "@/lib/seedance-portrait";
+import { upgradeBuiltinModelProfile } from "@/lib/builtin-service-presets";
 import { isQisiAPI, isQisiModel, QISI_API_BASE_URL, OFFICIAL_LIKEAI_BASE_URL, modelCapabilityDefaultsForService } from "@/lib/likeai-service";
 export { buildApiUrl, isSystemProxyBaseUrl, resolveBackendApiUrl, systemProxyChannelId } from "@/lib/channel-url";
 
@@ -19,332 +21,6 @@ export type ApiCallFormat = "openai" | "gemini" | "claude" | "likeai";
 export type ChannelInterfaceType = ModelProtocol;
 export type ChannelHeader = { name: string; value: string };
 export type ReferenceMediaTransport = Partial<Record<"image" | "video" | "audio", "auto" | "inline" | "url" | "link">>;
-export type RunningHubCapability = "image" | "video" | "audio";
-export type RunningHubWorkflowKind = "workflow" | "app";
-
-export type WorkflowFieldMapping = {
-    id?: string;
-    nodeId: string;
-    classType?: string;
-    fieldName: string;
-    fieldValue?: unknown;
-    value?: unknown;
-    default?: unknown;
-    defaultValue?: unknown;
-    fieldType?: string;
-    label?: string;
-    role?: string;
-    safeToOverride?: boolean;
-    optionsSource?: "workflow" | "manual" | "preset";
-    options?: unknown[];
-    min?: unknown;
-    max?: unknown;
-    step?: unknown;
-    enabled?: boolean;
-    source?: string;
-    sourceIndex?: number;
-    imageOrder?: number;
-    required?: boolean;
-    randomEnabled?: boolean;
-    bindPrompt?: boolean;
-    sourceFromUpstream?: boolean;
-    sourceAutomatic?: boolean;
-};
-
-export function normalizeRunningHubCapability(value: unknown, fallback: RunningHubCapability = "image"): RunningHubCapability {
-    return value === "image" || value === "video" || value === "audio" ? value : fallback;
-}
-
-export function normalizeRunningHubWorkflowKind(value: unknown): RunningHubWorkflowKind {
-    return value === "app" ? "app" : "workflow";
-}
-
-function normalizeWorkflowFieldSourceName(value: unknown, capability?: RunningHubCapability) {
-    const source = String(value || "").trim();
-    const normalized = source.toLowerCase().replace(/[\s_-]/g, "");
-    const aliases: Record<string, string> = {
-        text: "prompt",
-        positive: "prompt",
-        positiveprompt: "prompt",
-        image: "referenceImage",
-        referenceimage: "referenceImage",
-        referenceimages: "referenceImage",
-        video: "referenceVideo",
-        referencevideo: "referenceVideo",
-        referencevideos: "referenceVideo",
-        audio: "referenceAudio",
-        referenceaudio: "referenceAudio",
-        referenceaudios: "referenceAudio",
-        sizewidth: "width",
-        imagewidth: "width",
-        videowidth: "width",
-        sizeheight: "height",
-        imageheight: "height",
-        videoheight: "height",
-        ratio: "aspectRatio",
-        aspectratio: "aspectRatio",
-        imageaspectratio: "aspectRatio",
-        imageratio: "aspectRatio",
-        videoaspectratio: "aspectRatio",
-        videoratio: "aspectRatio",
-        videoresolution: "vquality",
-        batch: "count",
-        batchsize: "count",
-        duration: "videoSeconds",
-        videoseconds: "videoSeconds",
-        videoquality: "vquality",
-        generateaudio: "videoGenerateAudio",
-        videogenerateaudio: "videoGenerateAudio",
-        watermark: "videoWatermark",
-        videowatermark: "videoWatermark",
-        voice: "audioVoice",
-        systemprompt: "systemPrompt",
-        transparentbackground: "transparentBackground",
-        audiovoice: "audioVoice",
-        audioformat: "audioFormat",
-        audiospeed: "audioSpeed",
-        audioinstructions: "audioInstructions",
-    };
-    if (normalized === "resolution") return capability === "video" ? "vquality" : "size";
-    // 工作流的 quality 可能是连续数值（例如 0.1-3），不能按视频分辨率处理。
-    if (normalized === "quality") return "quality";
-    return aliases[normalized] || source;
-}
-
-const workflowDimensionPrefixes = ["", "image", "video", "size", "output", "target", "latent", "frame", "canvas", "source", "resolution", "final"];
-
-function workflowDimensionSource(key: string) {
-    if (workflowDimensionPrefixes.some((prefix) => key === `${prefix}width`) || key === "pixelwidth" || key === "widthpixels") return "width";
-    if (workflowDimensionPrefixes.some((prefix) => key === `${prefix}height`) || key === "pixelheight" || key === "heightpixels") return "height";
-    return "";
-}
-
-function inferWorkflowFieldSource(fieldName: string, fieldType: string, capability?: RunningHubCapability) {
-    const key = fieldName.toLowerCase().replace(/[\s_-]/g, "");
-    const normalizedFieldType = fieldType.trim().toLowerCase();
-    if (["text", "prompt", "positive", "positiveprompt"].includes(key)) return "prompt";
-    if (key.includes("mask")) return "mask";
-    const dimensionSource = workflowDimensionSource(key);
-    if (dimensionSource) return dimensionSource;
-    if (["ratio", "aspectratio", "imageaspectratio", "imageratio", "videoaspectratio", "videoratio"].includes(key)) return "aspectRatio";
-    if (["videoresolution", "videoquality", "vquality"].includes(key)) return "vquality";
-    if (["size", "imagesize", "imageresolution"].includes(key)) return "size";
-    if (key === "resolution") return capability === "video" ? "vquality" : capability === "image" ? "size" : "";
-    if (["batch", "batchsize", "count", "numimages", "numberofimages", "imagecount", "imagescount"].includes(key)) return "count";
-    if (key === "quality") return "quality";
-    if (["duration", "seconds", "durationseconds", "videoseconds", "videoduration", "videodurationseconds", "videolength", "clipduration"].includes(key)) return "videoSeconds";
-    if (["generateaudio", "videogenerateaudio"].includes(key)) return "videoGenerateAudio";
-    if (["watermark", "videowatermark"].includes(key)) return "videoWatermark";
-    if (key === "audioformat" || (key === "format" && normalizedFieldType === "audio")) return "audioFormat";
-    if (["voice", "audiovoice"].includes(key)) return "audioVoice";
-    if ((key === "speed" && normalizedFieldType === "audio") || key === "audiospeed") return "audioSpeed";
-    if ((key === "pitch" && normalizedFieldType === "audio") || key === "audiopitch") return "audioPitch";
-    if ((key === "volume" && normalizedFieldType === "audio") || key === "audiovolume") return "audioVolume";
-    if ((key === "instructions" && normalizedFieldType === "audio") || key === "audioinstructions") return "audioInstructions";
-    if (["transparentbackground", "transparent"].includes(key)) return "transparentBackground";
-    if (normalizedFieldType === "image") return "referenceImage";
-    if (normalizedFieldType === "video") return "referenceVideo";
-    if (normalizedFieldType === "audio") return "referenceAudio";
-    return "";
-}
-
-function shouldRepairLegacyWorkflowSource(fieldName: string, source: string, inferredSource: string, capability?: RunningHubCapability) {
-    if (!source || !inferredSource || source === inferredSource) return false;
-    const key = fieldName.toLowerCase().replace(/[\s_-]/g, "");
-    const wasMistakenForMedia = ["referenceImage", "referenceVideo", "referenceAudio"].includes(source);
-    if (wasMistakenForMedia && (workflowDimensionSource(key) || inferredSource === "aspectRatio" || inferredSource === "vquality")) return true;
-    // 旧版把通用 resolution 固定识别为图片尺寸；视频条目必须恢复为视频清晰度。
-    if (key === "resolution" && capability === "video" && source === "size") return true;
-    if (key === "resolution" && capability === "image" && source === "vquality") return true;
-    if (key === "quality" && source === "vquality") return true;
-    return false;
-}
-
-export function normalizeWorkflowFieldMappings(value: unknown, capability?: RunningHubCapability): WorkflowFieldMapping[] {
-    if (!Array.isArray(value)) return [];
-    const fields = value.flatMap((item) => {
-        if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-        const raw = item as Record<string, unknown>;
-        const nodeId = String(raw.nodeId || raw.node || raw.node_id || "").trim();
-        const fieldName = String(raw.fieldName || raw.input || raw.inputName || raw.input_name || "").trim();
-        if (!nodeId || !fieldName) return [];
-        // source 明确存在但为空，表示用户要求保留工作流默认值；只有旧数据完全缺少来源字段时才自动补绑定。
-        const sourceKey = ["source", "bind", "from"].find((key) => Object.prototype.hasOwnProperty.call(raw, key));
-        const sourceConfigured = Boolean(sourceKey);
-        const configuredSource = sourceKey ? raw[sourceKey] : raw.bindPrompt === true || raw.bind_prompt === true ? "prompt" : "";
-        let source = normalizeWorkflowFieldSourceName(configuredSource, capability);
-        const rawSourceAutomatic = raw.sourceAutomatic ?? raw.source_automatic;
-        let sourceAutomatic = typeof rawSourceAutomatic === "boolean" ? rawSourceAutomatic : !sourceConfigured && Boolean(source);
-        const upstreamAllowed = raw.sourceFromUpstream !== false && raw.source_from_upstream !== false;
-        const upstreamExplicit = raw.sourceFromUpstream === true || raw.source_from_upstream === true;
-        const fieldType = String(raw.fieldType || raw.type || "").trim();
-        const inferredSource = inferWorkflowFieldSource(fieldName, fieldType, capability);
-        if (!source && !sourceConfigured && upstreamAllowed) {
-            source = inferredSource;
-            sourceAutomatic = Boolean(source);
-            if (!source && upstreamExplicit && ["text", "prompt", "positiveprompt", "positive"].includes(fieldName.toLowerCase().replace(/[\s_-]/g, ""))) {
-                source = "prompt";
-                sourceAutomatic = true;
-            }
-        } else if (shouldRepairLegacyWorkflowSource(fieldName, source, inferredSource, capability)) {
-            source = inferredSource;
-        }
-        // 比例、清晰度、时长等标量必须按 nodeId + fieldName 独立配置。
-        // 旧版自动来源会把两个同类字段折叠到同一个全局参数，重新归一化为直接字段值。
-        if (sourceAutomatic && !["prompt", "referenceImage", "referenceVideo", "referenceAudio", "mask"].includes(source)) {
-            source = "";
-            sourceAutomatic = false;
-        }
-        const fieldValue = raw.fieldValue ?? raw.defaultValue ?? raw.default_value ?? raw.default ?? raw.value;
-        const rawOptions = raw.options ?? raw.values ?? raw.choices ?? raw.enum ?? raw.fieldOptions ?? raw.field_options;
-        const options = Array.isArray(rawOptions)
-            ? rawOptions
-            : rawOptions && typeof rawOptions === "object"
-              ? ((rawOptions as Record<string, unknown>).choices ?? (rawOptions as Record<string, unknown>).options ?? (rawOptions as Record<string, unknown>).values)
-              : undefined;
-        const range = workflowFieldRange(rawOptions);
-        const min = raw.min ?? raw.minValue ?? raw.min_value ?? range.min;
-        const max = raw.max ?? raw.maxValue ?? raw.max_value ?? range.max;
-        const step = raw.step ?? raw.stepValue ?? raw.step_value ?? range.step;
-        const required = raw.required ?? raw.isRequired ?? raw.is_required;
-        const randomEnabled = raw.randomEnabled ?? raw.random_enabled;
-        const sourceIndex = Number(raw.sourceIndex ?? raw.source_index ?? raw.index);
-        const imageOrder = Number(raw.imageOrder ?? raw.image_order);
-        const candidate: WorkflowFieldMapping = {
-            ...raw,
-            nodeId,
-            classType: String(raw.classType || raw.class_type || "").trim() || undefined,
-            fieldName,
-            id: String(raw.id || `${nodeId}::${fieldName}`),
-            source,
-            ...(fieldValue !== undefined ? { fieldValue } : {}),
-            ...(Array.isArray(options) ? { options } : {}),
-            ...(min !== undefined ? { min } : {}),
-            ...(max !== undefined ? { max } : {}),
-            ...(step !== undefined ? { step } : {}),
-            ...(typeof required === "boolean" ? { required } : {}),
-            ...(typeof randomEnabled === "boolean" ? { randomEnabled } : {}),
-            sourceAutomatic,
-            ...(Number.isFinite(sourceIndex) ? { sourceIndex } : {}),
-            ...(Number.isFinite(imageOrder) ? { imageOrder } : {}),
-        } as WorkflowFieldMapping;
-        const safeToOverride = raw.safeToOverride !== false && raw.safe_to_override !== false && workflowFieldSafeToOverride(candidate);
-        const role = workflowFieldRole({ ...candidate, role: String(raw.role || "") });
-        const configuredEnabled = typeof raw.enabled === "boolean" ? raw.enabled : role !== "internal";
-        const optionsSource = ["workflow", "manual", "preset"].includes(String(raw.optionsSource || raw.options_source || ""))
-            ? (String(raw.optionsSource || raw.options_source) as WorkflowFieldMapping["optionsSource"])
-            : Array.isArray(options)
-              ? "workflow"
-              : undefined;
-        return [{ ...candidate, role, safeToOverride, enabled: safeToOverride && configuredEnabled, ...(optionsSource ? { optionsSource } : {}) }];
-    });
-    let imageOrder = 0;
-    let videoOrder = 0;
-    let audioOrder = 0;
-    return fields.map((field) => {
-        if (field.source === "referenceImage") {
-            const configuredOrder = Number(field.imageOrder);
-            const nextOrder = Number.isInteger(configuredOrder) && configuredOrder > 0 ? configuredOrder : imageOrder + 1;
-            imageOrder = Math.max(imageOrder, nextOrder);
-            return { ...field, imageOrder: nextOrder, sourceIndex: nextOrder - 1, required: field.required ?? nextOrder === 1 };
-        }
-        if (field.source === "referenceVideo") {
-            const configuredIndex = Number(field.sourceIndex);
-            const nextIndex = Number.isInteger(configuredIndex) && configuredIndex >= 0 ? configuredIndex : videoOrder;
-            videoOrder = Math.max(videoOrder, nextIndex + 1);
-            return { ...field, sourceIndex: nextIndex, required: field.required ?? nextIndex === 0 };
-        }
-        if (field.source === "referenceAudio") {
-            const configuredIndex = Number(field.sourceIndex);
-            const nextIndex = Number.isInteger(configuredIndex) && configuredIndex >= 0 ? configuredIndex : audioOrder;
-            audioOrder = Math.max(audioOrder, nextIndex + 1);
-            return { ...field, sourceIndex: nextIndex, required: field.required ?? nextIndex === 0 };
-        }
-        if (field.source === "prompt") return { ...field, required: field.required ?? true };
-        return field;
-    });
-}
-
-export function mergeWorkflowFieldMappings(current: unknown, incoming: unknown, capability?: RunningHubCapability) {
-    const previousFields = normalizeWorkflowFieldMappings(current, capability);
-    const nextFields = normalizeWorkflowFieldMappings(incoming, capability);
-    const previousByKey = new Map(previousFields.map((field) => [`${field.nodeId}::${field.fieldName}`, field]));
-    const policyKeys: Array<keyof WorkflowFieldMapping> = ["label", "enabled", "randomEnabled", "source", "sourceAutomatic", "sourceFromUpstream", "sourceIndex", "imageOrder", "required", "bindPrompt"];
-    return nextFields.map((field) => {
-        const previous = previousByKey.get(`${field.nodeId}::${field.fieldName}`);
-        if (!previous) return field;
-        const merged = { ...field } as WorkflowFieldMapping;
-        const target = merged as unknown as Record<string, unknown>;
-        const source = previous as unknown as Record<string, unknown>;
-        policyKeys.forEach((key) => {
-            if (Object.prototype.hasOwnProperty.call(source, key)) target[key] = source[key];
-        });
-        // 字段类型、枚举和数值范围属于上游协议。只有本次拉取未返回时，才沿用本地补充配置。
-        if (!field.fieldType && previous.fieldType) merged.fieldType = previous.fieldType;
-        if (!field.options?.length && previous.options?.length) {
-            merged.options = previous.options;
-            merged.optionsSource = previous.optionsSource;
-        }
-        if (field.min === undefined && previous.min !== undefined) merged.min = previous.min;
-        if (field.max === undefined && previous.max !== undefined) merged.max = previous.max;
-        if (field.step === undefined && previous.step !== undefined) merged.step = previous.step;
-        // 首次获得角色信息时采用服务端的内部参数默认值；之后才保留用户明确的启用选择。
-        if (field.role === "internal" && previous.role !== "internal") merged.enabled = field.enabled;
-        if (field.safeToOverride === false) merged.enabled = false;
-        return merged;
-    });
-}
-
-function normalizeSavedWorkflowFields(workflow: { fields?: unknown; workflowJson?: Record<string, unknown> }, capability: RunningHubCapability) {
-    const schemaFields = workflowVideoFieldsFromJson(workflow.workflowJson);
-    return schemaFields.length ? mergeWorkflowFieldMappings(workflow.fields, schemaFields, capability) : normalizeWorkflowFieldMappings(workflow.fields, capability);
-}
-
-function workflowFieldRange(value: unknown) {
-    const candidates: Record<string, unknown>[] = [];
-    const add = (item: unknown) => {
-        if (!item || typeof item !== "object" || Array.isArray(item)) return;
-        const record = item as Record<string, unknown>;
-        candidates.push(record);
-        add(record.range);
-    };
-    add(value);
-    if (Array.isArray(value)) value.forEach(add);
-    const read = (keys: string[]) => candidates.map((item) => keys.map((key) => item[key]).find((candidate) => candidate !== undefined)).find((candidate) => candidate !== undefined);
-    return { min: read(["min", "minValue", "min_value"]), max: read(["max", "maxValue", "max_value"]), step: read(["step", "stepValue", "step_value"]) };
-}
-
-export type RunningHubWorkflow = {
-    kind?: RunningHubWorkflowKind;
-    capability?: RunningHubCapability;
-    workflowId: string;
-    webappId?: string;
-    title?: string;
-    description?: string;
-    fields?: WorkflowFieldMapping[];
-    workflowJson?: Record<string, unknown>;
-    optionalImageMode?: string;
-    raw?: Record<string, unknown>;
-};
-
-export type RunningHubConfig = {
-    enabled: boolean;
-    baseUrl: string;
-    apiKey: string;
-    walletApiKey: string;
-    /** 仅用于 RunningHub 参考素材上传，通常填写企业级 API Key。 */
-    uploadApiKey?: string;
-    useWallet: boolean;
-    capability: RunningHubCapability;
-    selectedKind: RunningHubWorkflowKind;
-    workflowId: string;
-    workflows: RunningHubWorkflow[];
-};
-
-export type WorkflowGraphPreview = {
-    nodes: Array<{ id: string; title?: string; classType?: string }>;
-    edges: Array<{ from: string; to: string }>;
-};
 
 // 兼容仍在使用旧目录标识的会话恢复和模型选择器。
 export const PUBLIC_MODEL_CATALOG_ID = "managed";
@@ -367,6 +43,8 @@ export type ModelChannel = {
     scope?: "system" | "user";
     enabled?: boolean;
     pinned?: boolean;
+    // 这个服务以前用过的 ID，由后端给出。老画布和老设置里存的「旧ID::模型」按这个服务读。
+    legacyIds?: string[];
     presetVersion?: number;
     credentialRef?: string;
     hasApiKey?: boolean;
@@ -402,9 +80,6 @@ export type AiConfig = {
     apiKey: string;
     apiFormat: ApiCallFormat;
     channels: ModelChannel[];
-    runningHub: RunningHubConfig;
-    /** 仅用于单次生成任务路由，不属于全局渠道启用状态。 */
-    taskWorkflowProvider?: "model" | "runninghub";
     model: string;
     imageModel: string;
     videoModel: string;
@@ -458,8 +133,6 @@ export const defaultConfig: AiConfig = {
     apiFormat: "openai",
     // 创作端模型目录只能来自后台公开逻辑模型和用户自定义渠道，不能内置供应商模型。
     channels: [],
-    runningHub: { enabled: false, baseUrl: "https://www.runninghub.cn", apiKey: "", walletApiKey: "", uploadApiKey: "", useWallet: false, capability: "image", selectedKind: "workflow", workflowId: "", workflows: [] },
-    taskWorkflowProvider: "model",
     model: "",
     imageModel: "",
     videoModel: "",
@@ -487,6 +160,7 @@ export const defaultConfig: AiConfig = {
     quality: "auto",
     size: "1:1",
     transparentBackground: "false",
+    seedreamWatermark: "false",
     count: "1",
     canvasImageCount: "1",
 };
@@ -601,6 +275,10 @@ function channelLookup(channels: ModelChannel[]): ChannelLookup {
         if (!lookup.byId.has(channel.id)) lookup.byId.set(channel.id, channel);
         for (const model of channel.models) if (!lookup.byModel.has(model)) lookup.byModel.set(model, channel);
     }
+    // 与 channelForId 同一规则：现有 ID 优先，旧 ID 只在没有同名服务时才指向声明它的服务。
+    for (const channel of channels) {
+        for (const id of channel.legacyIds || []) if (!lookup.byId.has(id)) lookup.byId.set(id, channel);
+    }
     channelLookups.set(channels, lookup);
     return lookup;
 }
@@ -653,27 +331,23 @@ export function configuredModelMatchesCapability(config: AiConfig, model: string
     return selectableModelsByCapability(config, capability).includes(normalized);
 }
 
-export const MANAGED_BEEFAPI_CREDENTIAL_REF = "beefapi-enterprise";
+export const MANAGED_BEEFTV_CREDENTIAL_REF = "beeftv";
 
-export function isBuiltinBeefAPIChannel(channel: Pick<ModelChannel, "id" | "pinned">) {
-    return channel.id === "beefapi" && channel.pinned === true;
+export function isBuiltinBeefTVChannel(channel: Pick<ModelChannel, "id" | "pinned">) {
+    return channel.id === "beeftv" && channel.pinned === true;
 }
 
-export function channelHasManagedBeefAPICredential(channel: Pick<ModelChannel, "id" | "pinned" | "credentialRef" | "hasApiKey">) {
-    if (!isBuiltinBeefAPIChannel(channel)) return false;
-    return channel.credentialRef === MANAGED_BEEFAPI_CREDENTIAL_REF || channel.hasApiKey === true;
+export function channelHasManagedBeefTVCredential(channel: Pick<ModelChannel, "id" | "pinned" | "credentialRef" | "hasApiKey">) {
+    if (!isBuiltinBeefTVChannel(channel)) return false;
+    return channel.credentialRef === MANAGED_BEEFTV_CREDENTIAL_REF || channel.hasApiKey === true;
 }
 
 export function channelHasGenerationCredential(channel: Pick<ModelChannel, "id" | "pinned" | "credentialRef" | "hasApiKey" | "apiKey" | "modelProfiles">, model = "") {
     if (model && channel.modelProfiles?.some((item) => item.model === modelOptionName(model) && item.authType === "none")) return true;
-    return channelHasManagedBeefAPICredential(channel) || Boolean(channel.apiKey?.trim());
+    return channelHasManagedBeefTVCredential(channel) || Boolean(channel.apiKey?.trim());
 }
 
 function isAiConfigReady(config: AiConfig, model: string) {
-    if (config.taskWorkflowProvider === "runninghub") {
-        const key = config.runningHub.apiKey;
-        return Boolean(config.runningHub.enabled && config.runningHub.baseUrl.trim() && key.trim() && config.runningHub.workflowId.trim());
-    }
     const channel = resolveModelChannel(config, model);
     return Boolean(model.trim() && channel.baseUrl.trim() && channelHasGenerationCredential(channel, model));
 }
@@ -725,56 +399,33 @@ export const useConfigStore = create<ConfigStore>()(
 // storage only caches presentation/preferences, never an extra plaintext copy.
 export function configWithoutCachedSecrets(config: AiConfig): AiConfig {
     return {
-        ...config,
+        ...withoutRemovedSettings(config),
         apiKey: "",
         channels: config.channels.map((channel) => ({ ...channel, apiKey: "", secretKey: "", headers: [] })),
-        runningHub: { ...config.runningHub, apiKey: "", walletApiKey: "", uploadApiKey: "" },
     };
+}
+
+// 旧版把 RunningHub 的 Key 存在 config.runningHub。这个能力搬进插件后没有代码再读它，
+// 但对象展开会把它带回本地缓存和工作区配置，所以读写时都去掉。
+function withoutRemovedSettings<T extends Partial<AiConfig>>(config: T): T {
+    const { runningHub: _removed, ...rest } = config as T & { runningHub?: unknown };
+    return rest as T;
 }
 
 export function normalizeConfigSnapshot(snapshot: ConfigStoreSnapshot | undefined = {}) {
     // 坏存储/旧版本快照可能是 undefined 或缺 config，兜底为 defaultConfig，保证渲染不崩溃
-    const persistedConfig = (snapshot?.config || {}) as Partial<AiConfig>;
-    const persistedRunningHub = persistedConfig.runningHub;
-    const runningHubCapability = normalizeRunningHubCapability(persistedRunningHub?.capability, defaultConfig.runningHub.capability);
-    const runningHubWorkflows = Array.isArray(persistedRunningHub?.workflows)
-        ? persistedRunningHub.workflows
-              .filter((item): item is RunningHubWorkflow => Boolean(item && typeof item === "object" && String(item.workflowId || "").trim()))
-              .map((item) => {
-                  const capability = normalizeRunningHubCapability(item.capability, runningHubCapability);
-                  return {
-                      ...item,
-                      kind: normalizeRunningHubWorkflowKind(item.kind),
-                      workflowId: String(item.workflowId || "").trim(),
-                      capability,
-                      fields: normalizeSavedWorkflowFields(item, capability),
-                  };
-              })
-        : [];
-    const runningHubWorkflowID = String(persistedRunningHub?.workflowId || "").trim();
-    const runningHubSelectedKind = persistedRunningHub?.selectedKind ? normalizeRunningHubWorkflowKind(persistedRunningHub.selectedKind) : normalizeRunningHubWorkflowKind(runningHubWorkflows.find((item) => item.workflowId === runningHubWorkflowID)?.kind);
+    const persistedConfig = withoutRemovedSettings((snapshot?.config || {}) as Partial<AiConfig>);
     const config = {
         ...defaultConfig,
         ...persistedConfig,
-        taskWorkflowProvider: "model" as const,
         // Older desktop snapshots may contain explicitly stored `undefined`
         // values. Keep all fields consumed by `.trim()` callers as strings.
         baseUrl: typeof persistedConfig.baseUrl === "string" ? persistedConfig.baseUrl : defaultConfig.baseUrl,
         apiKey: typeof persistedConfig.apiKey === "string" ? persistedConfig.apiKey : "",
-        runningHub: {
-            ...defaultConfig.runningHub,
-            ...(persistedRunningHub || {}),
-            baseUrl: typeof persistedRunningHub?.baseUrl === "string" ? persistedRunningHub.baseUrl : "",
-            apiKey: typeof persistedRunningHub?.apiKey === "string" ? persistedRunningHub.apiKey : "",
-            capability: runningHubCapability,
-            selectedKind: runningHubSelectedKind,
-            workflowId: runningHubWorkflowID,
-            workflows: runningHubWorkflows,
-        },
     };
     const hasPersistedChannels = Array.isArray(persistedConfig.channels);
     if (!hasPersistedChannels) config.channels = [];
-    const channels = normalizeChannels(config, !hasPersistedChannels).map(enrichBeefApiMediaChannel).map(reconcileChannelModelProfiles);
+    const channels = normalizeChannels(config, !hasPersistedChannels).map(enrichBeefTVMediaChannel).map(reconcileChannelModelProfiles);
     const models = modelOptionsFromChannels(channels);
     const imageModels = filterModelsByCapability(models, "image", channels);
     const videoModels = filterModelsByCapability(models, "video", channels);
@@ -820,11 +471,11 @@ export function normalizeConfigSnapshot(snapshot: ConfigStoreSnapshot | undefine
     };
 }
 
-function beefApiVideoProtocol(model: string, current?: ModelProtocol): ModelProtocol {
-    const contract = beefAPIVideoContract(model)?.protocol as ModelProtocol | undefined;
+function beefTVVideoProtocol(model: string, current?: ModelProtocol): ModelProtocol {
+    const contract = beefTVVideoContract(model)?.protocol as ModelProtocol | undefined;
     if (contract) return contract;
     // A video profile must not keep a protocol that runs a different
-    // capability. BeefAPI often tags video models with a chat/text endpoint;
+    // capability. Official gateways may tag video models with a chat/text endpoint;
     // that stale protocol would make the backend reject the task outright
     // ("接口类型 chat-completion 不支持video生成"). Unknown/custom protocols
     // stay untouched.
@@ -836,26 +487,25 @@ function protocolAllowsCapability(protocol: ModelProtocol | undefined, capabilit
     return !resolved || resolved === capability;
 }
 
-// Enforce capability ↔ protocol consistency for every channel. BeefAPI media
+// Enforce capability ↔ protocol consistency for every channel. BeefTV media
 // profiles are already repaired from the shared contracts above; for other
 // channels the request protocol is what the user configured, so the
 // capability follows it instead of inventing a different wire protocol.
 function reconcileChannelModelProfiles(channel: ModelChannel): ModelChannel {
     if (!channel.modelProfiles?.length) return channel;
     let changed = false;
-    const modelProfiles = channel.modelProfiles.map((profile) => {
-        const capability = modelProtocolCapability(profile.protocol);
-        if (!capability || capability === profile.capability) return profile;
-        changed = true;
-        return { ...profile, capability };
+    const modelProfiles = channel.modelProfiles.map((raw) => {
+        const profile = (upgradeBuiltinModelProfile(raw) as typeof raw) || raw, capability = modelProtocolCapability(profile.protocol);
+        if (profile !== raw) changed = true;
+        return !capability || capability === profile.capability ? profile : ((changed = true), { ...profile, capability });
     });
     return changed ? { ...channel, modelProfiles } : channel;
 }
 
-function beefApiVideoCapabilityConfig(model: string, protocol: ModelProtocol, current?: ModelCapabilityConfig, sourced = false): ModelCapabilityConfig | undefined {
-    const profile = beefApiSeedanceCapabilityConfig(model, current, sourced);
+function beefTVVideoCapabilityConfig(model: string, protocol: ModelProtocol, current?: ModelCapabilityConfig, sourced = false): ModelCapabilityConfig | undefined {
+    const profile = beefTVSeedanceCapabilityConfig(model, current, sourced);
     if (sourced) return profile;
-    const contract = beefAPIVideoContract(model);
+    const contract = beefTVVideoContract(model);
     const limits = contract?.maxReferences;
     if (!limits) return profile;
     const resolved = profile || defaultModelCapabilityConfig(protocol, model);
@@ -873,7 +523,7 @@ function beefApiVideoCapabilityConfig(model: string, protocol: ModelProtocol, cu
     } };
 }
 
-function beefApiSeedanceCapabilityConfig(model: string, current?: ModelCapabilityConfig, sourced = false): ModelCapabilityConfig | undefined {
+function beefTVSeedanceCapabilityConfig(model: string, current?: ModelCapabilityConfig, sourced = false): ModelCapabilityConfig | undefined {
     if (sourced) return current;
     if (!/^seedance-2\.(?:0|5)(?:-|$)/i.test(model)) return current;
     const video = current?.video;
@@ -886,7 +536,7 @@ function beefApiSeedanceCapabilityConfig(model: string, current?: ModelCapabilit
         refs.maxVideoDurationSeconds === 0 && refs.maxAudioDurationSeconds === 0;
     const defaults = defaultModelCapabilityConfig("newapi", model);
     if (!current || !video) return defaults;
-    // The built-in BeefAPI Seedance contract supports the audio switch even
+    // The built-in BeefTV Seedance contract supports the audio switch even
     // when an older saved profile advertised no control. Keep its default.
     const generateAudio = { ...video!.generateAudio, supported: true }, draftSupported = Boolean(video!.draft?.supported ?? defaults.video?.draft?.supported);
     const baseRes = Array.isArray(video!.resolutions) ? video!.resolutions : defaults.video?.resolutions ?? [], baseOps = Array.isArray(video!.operations) ? video!.operations : defaults.video?.operations ?? [];
@@ -898,16 +548,16 @@ function beefApiSeedanceCapabilityConfig(model: string, current?: ModelCapabilit
     return { ...current, video: { ...video!, generateAudio, ...flags, operations: next.operations, references: { ...refs!, maxImages: next.references.maxImages, maxVideos: next.references.maxVideos, maxAudios: next.references.maxAudios, maxVideoDurationSeconds: next.references.maxVideoDurationSeconds, maxAudioDurationSeconds: next.references.maxAudioDurationSeconds } } };
 }
 
-function enrichBeefApiMediaChannel(channel: ModelChannel): ModelChannel {
-    if (!isBeefAPIEndpoint(channel.baseUrl)) return channel;
+function enrichBeefTVMediaChannel(channel: ModelChannel): ModelChannel {
+    if (!isBeefTVEndpoint(channel.baseUrl)) return channel;
     const models = channel.models;
     const existing = new Map((channel.modelProfiles || []).map((item) => [item.model, item]));
     for (const model of models.filter(isImageModelName)) {
         const current = existing.get(model);
         if (current?.imageCapabilitiesVersion && current.capabilityConfig?.image) continue;
-        // These BeefAPI models use Images, even when an older generic catalog
+        // These BeefTV models use Images, even when an older generic catalog
         // saved a text protocol. Do not rewrite arbitrary custom model routes.
-        const contract = beefAPIImageContract(model);
+        const contract = beefTVImageContract(model);
         const staleTextProtocol = (/^(gpt-image(?:-|$)|dall-e(?:-|$))/i.test(model) || Boolean(contract)) && modelProtocolCapability(current?.protocol) === "text";
         const protocol = contract?.protocol || (staleTextProtocol ? "openai-image" : current?.protocol || "openai-image");
         const capabilityConfig = contract ? defaultModelCapabilityConfig(contract.protocol, model) : current?.capabilityConfig || defaultModelCapabilityConfig(protocol, model);
@@ -946,19 +596,19 @@ function enrichBeefApiMediaChannel(channel: ModelChannel): ModelChannel {
         if (current.capability === "image" || current.capability === "video") continue;
         existing.delete(model);
     }
-    for (const model of models.filter((model) => isVideoModelName(model) || Boolean(beefAPIVideoContract(model)))) {
-        if (channel.id === "beefapi" || channel.credentialRef === MANAGED_BEEFAPI_CREDENTIAL_REF) continue;
+    for (const model of models.filter((model) => isVideoModelName(model) || Boolean(beefTVVideoContract(model)))) {
+        if (channel.id === "beeftv" || channel.credentialRef === MANAGED_BEEFTV_CREDENTIAL_REF) continue;
         const current = existing.get(model);
         if (current?.videoCapabilitiesVersion?.trim() && current.capabilityConfig?.video) continue;
         // Repair known routes using the shared contract; preserve catalog and
         // custom protocols for models whose wire contract is not declared here.
-        const protocol = beefApiVideoProtocol(model, current?.protocol);
+        const protocol = beefTVVideoProtocol(model, current?.protocol);
         existing.set(model, {
             ...(current || {}),
             model,
             capability: "video",
             protocol,
-            capabilityConfig: beefApiVideoCapabilityConfig(model, protocol, current?.capabilityConfig, current?.videoCapabilitiesVersion !== undefined),
+            capabilityConfig: beefTVVideoCapabilityConfig(model, protocol, current?.capabilityConfig, current?.videoCapabilitiesVersion !== undefined),
         });
     }
     return { ...channel, models, modelProfiles: Array.from(existing.values()) };
@@ -1028,6 +678,7 @@ export function createModelChannel(channel?: Partial<ModelChannel>): ModelChanne
         scope: channel?.scope === "system" ? "system" : "user",
         enabled: channel?.enabled !== false,
         pinned: channel?.pinned === true,
+        legacyIds: Array.isArray(channel?.legacyIds) ? channel.legacyIds.filter((id) => typeof id === "string" && id.trim()) : undefined,
         presetVersion: channel?.presetVersion,
         credentialRef: channel?.credentialRef,
         hasApiKey: channel?.hasApiKey,
@@ -1048,6 +699,13 @@ export function decodeChannelModel(value: string) {
     const index = value.indexOf(CHANNEL_MODEL_SEPARATOR);
     if (index < 0) return null;
     return { channelId: value.slice(0, index), model: value.slice(index + CHANNEL_MODEL_SEPARATOR.length) };
+}
+
+// 「渠道::模型」换成服务现在的 ID：旧 ID 指向的服务删掉后，选择不会落到别的服务上。
+export function canonicalChannelModel(value: string, channels: ModelChannel[]) {
+    const decoded = value ? decodeChannelModel(value) : null;
+    const channel = decoded ? channelLookup(channels).byId.get(decoded.channelId) : undefined;
+    return decoded && channel ? encodeChannelModel(channel.id, decoded.model) : value;
 }
 
 export function modelOptionName(value: string) {
@@ -1072,7 +730,7 @@ export function modelIcon(config: AiConfig, value: string) {
 export function modelOptionLabel(config: AiConfig, value: string) {
     const decoded = decodeChannelModel(value);
     if (!decoded) return modelDisplayName(config, value);
-    const channel = config.channels.find((item) => item.id === decoded.channelId);
+    const channel = channelLookup(config.channels).byId.get(decoded.channelId);
     const displayName = modelDisplayName(config, value);
     // 平台前台模型只展示公开名称；供应来源和内部目录适配器不属于创作端信息。
     if (!channel || channel.scope === "system") return displayName;
@@ -1103,7 +761,7 @@ export function normalizeModelOptionValue(value: unknown, channels: ModelChannel
     if (!normalizeRawModelName(model)) return "";
     const decoded = decodeChannelModel(model);
     if (decoded) {
-        const channel = channels.find((item) => item.id === decoded.channelId);
+        const channel = channelLookup(channels).byId.get(decoded.channelId);
         const resolved = channel?.modelAliases?.[decoded.model] || decoded.model;
         return channel && seedancePortraitModel(decoded.model) === seedancePortraitModel(resolved) && channel.models.includes(resolved) ? encodeChannelModel(channel.id, resolved) : "";
     }
@@ -1152,7 +810,7 @@ export function resolveModelRequestConfig(config: AiConfig, value: string) {
         apiFormat: interfaceType ? (interfaceType.startsWith("likeai-") ? ("likeai" as const) : interfaceType === "gemini-veo" || interfaceType === "gemini-image" || interfaceType === "gemini-generate-content" ? ("gemini" as const) : interfaceType === "claude-api" ? ("claude" as const) : ("openai" as const)) : channel.apiFormat,
         interfaceType,
         channelId: channel.scope === "system" ? channel.id : "",
-        credentialRef: channel.credentialRef || (isBuiltinBeefAPIChannel(channel) ? MANAGED_BEEFAPI_CREDENTIAL_REF : undefined),
+        credentialRef: channel.credentialRef || (isBuiltinBeefTVChannel(channel) ? MANAGED_BEEFTV_CREDENTIAL_REF : undefined),
     };
 }
 

@@ -12,6 +12,7 @@ import (
 
 const LikeAIBaseURL = "https://task.likeai.pro/task-api"
 const QisiAPIBaseURL = "https://cheeser.link/api-service/likeai"
+const likeAICatalogPath = "/task/models"
 
 func IsLikeAIProtocol(id string) bool {
 	return id == "likeai-image" || id == "likeai-video" || id == "likeai-text" || id == "likeai-audio"

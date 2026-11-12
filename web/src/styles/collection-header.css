@@ -1,0 +1,115 @@
+.collection-header {
+    flex-shrink: 0;
+    min-height: 92px;
+    padding-bottom: 0;
+}
+
+.collection-header-create {
+    display: inline-flex;
+    height: 36px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 14px;
+    border: 1px solid #fff;
+    border-radius: 8px;
+    background: #fff;
+    color: #171717;
+    font-size: 13px;
+    font-weight: 550;
+    line-height: 20px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.collection-header-create:hover {
+    border-color: #f1f1f1;
+    background: #f1f1f1;
+    color: #111;
+}
+
+.collection-header-create:focus-visible {
+    outline: 2px solid var(--control-focus-ring);
+    outline-offset: 2px;
+}
+
+.app-product-workspace .app-section-page .collection-header > .app-section-page-header {
+    height: 64px;
+    min-height: 64px;
+    align-items: center;
+    gap: 0;
+    padding: 0;
+}
+
+.collection-header .assets-kind-tabs {
+    gap: 8px;
+}
+
+.collection-header .assets-kind-row {
+    display: flex;
+    min-width: 0;
+    min-height: 36px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.collection-header .assets-kind-actions {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    gap: 12px;
+}
+
+.collection-header .assets-kind-tab {
+    height: 28px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+.collection-header .assets-kind-tab.is-active {
+    border: 0;
+    background: color-mix(in srgb, var(--foreground) 9%, transparent);
+    color: var(--foreground);
+    font-weight: 400;
+}
+
+.collection-header .assets-kind-tab span {
+    min-width: 16px;
+    font-size: 11px;
+}
+
+.collection-header .assets-kind-tab:focus-visible {
+    outline: 2px solid var(--control-focus-ring);
+    outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+    .app-product-workspace .collection-page > .app-section-page-content {
+        padding-inline: 16px;
+    }
+
+    .app-product-workspace .app-section-page .collection-header > .app-section-page-header {
+        height: auto;
+        min-height: 64px;
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 8px 16px;
+        padding-block: 10px;
+    }
+
+    .collection-header .app-page-header-main {
+        padding-inline-start: 32px;
+    }
+
+    .collection-header .assets-header-action-buttons {
+        height: auto;
+    }
+
+    .collection-header .assets-kind-row {
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+}

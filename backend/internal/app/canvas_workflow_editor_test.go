@@ -308,11 +308,10 @@ func TestCanvasWorkflowPromptEditValidatesCapability(t *testing.T) {
 	json.Unmarshal([]byte(task.InputJSON), &input)
 	config := input["config"].(map[string]any)
 	delete(config, "channelId")
-	profile := DefaultModelCapabilityConfigForModel("runninghub-workflow-video", "workflow-video")
+	profile := DefaultModelCapabilityConfigForModel("volcengine-ark-video", "seedance-2.5")
 	profile.Video.References.PromptMaxChars = 30
-	config["interfaceType"] = "runninghub-workflow-video"
+	config["interfaceType"] = "volcengine-ark-video"
 	config["capabilityConfig"] = profile
-	config["workflowId"] = "wf-1"
 	raw, _ := json.Marshal(input)
 	db.Model(&task).Update("input_json", string(raw))
 	created, e := s.workflowTemplates().Create("owner", cw.CreateRequest{Name: "Limit", Definition: d})

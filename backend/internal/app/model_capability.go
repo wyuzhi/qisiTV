@@ -7,12 +7,7 @@ import (
 )
 
 func (s *Service) ValidateTaskCapability(input map[string]any) error {
-	return generation.ValidateTaskCapability(input, s.resolveVideoCapability, func(mode string, config providerConfig) (bool, error) {
-		if isWorkflowProviderInterface(config.InterfaceType) {
-			return true, validateWorkflowProviderConfig(mode, config)
-		}
-		return false, nil
-	}, s.channelModelLookup())
+	return generation.ValidateTaskCapability(input, s.resolveVideoCapability, s.channelModelLookup())
 }
 
 func (s *Service) channelModelLookup() modelcatalog.ChannelModelLookup {

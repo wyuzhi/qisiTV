@@ -61,3 +61,61 @@ export function canvasUnconfirmedDiagnostic(state: CanvasUnconfirmedState) {
     }
     return { reason, fields, nodeFields: changedNodes, metadataFields: changedMetadata };
 }
+
+export type CanvasDocumentPersistPatch = Partial<
+    Pick<
+        CanvasProject,
+        "nodes" | "connections" | "timeline" | "chatSessions" | "activeChatId" | "appearance" | "backgroundMode" | "showImageInfo" | "title" | "folderId" | "directorScenes"
+    >
+>;
+
+function sameDocumentValue(left: unknown, right: unknown) {
+    return left === right || JSON.stringify(left) === JSON.stringify(right);
+}
+
+function revertUnchangedCanvasNodes(
+    previous: CanvasProject["nodes"],
+    attempted: CanvasProject["nodes"],
+    live: CanvasProject["nodes"],
+): CanvasProject["nodes"] {
+    if (sameDocumentValue(live, attempted)) return previous;
+    const previousById = new Map(previous.map((node) => [node.id, node]));
+    const attemptedById = new Map(attempted.map((node) => [node.id, node]));
+    const reverted: CanvasProject["nodes"] = [];
+    for (const node of live) {
+        const before = previousById.get(node.id);
+        const optimistic = attemptedById.get(node.id);
+        if (!before && optimistic) {
+            if (sameDocumentValue(node, optimistic)) continue;
+            reverted.push(node);
+            continue;
+        }
+        if (before && optimistic) {
+            reverted.push(sameDocumentValue(node, optimistic) ? before : node);
+            continue;
+        }
+        reverted.push(node);
+    }
+    return reverted;
+}
+
+export function revertUnchangedCanvasDocumentPatch(
+    current: CanvasProject,
+    previous: CanvasProject,
+    patch: CanvasDocumentPersistPatch,
+): CanvasProject {
+    const next: CanvasProject = { ...current };
+    (Object.keys(patch) as Array<keyof CanvasDocumentPersistPatch>).forEach((key) => {
+        if (key === "nodes") {
+            if (!patch.nodes) return;
+            next.nodes = revertUnchangedCanvasNodes(previous.nodes, patch.nodes, current.nodes);
+            return;
+        }
+        const attempted = patch[key];
+        if (attempted === undefined) return;
+        if (sameDocumentValue(current[key], attempted)) {
+            (next as Record<string, unknown>)[key] = previous[key];
+        }
+    });
+    return next;
+}

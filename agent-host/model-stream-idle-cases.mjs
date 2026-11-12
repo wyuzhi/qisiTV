@@ -129,7 +129,7 @@ test('official Durable retries idle body with partial retained, one completed to
   const next=await store.submit(reopened,{turnId:'idle-turn-2',permissionMode:'canvas',content:'summarize the preserved result',userText:'summarize the preserved result',revisionBefore:1});
   assert.equal((await store.wait(reopened,next)).error,null);assert.equal(calls,4);assert.equal(toolIds.length,1);
 });
-test('Anthropic SSE normalizes synthetic 9x cache_read_input_tokens proxy inflation while preserving genuine cache counts',async t=>{
+test('Anthropic SSE forwards cache usage unchanged now that channel affinity is pinned',async t=>{
   const f=await fixture(t,res=>{
     res.write(event({type:'message_start',message:{id:'msg_1',usage:{input_tokens:24,cache_creation_input_tokens:21896,cache_read_input_tokens:197066,output_tokens:1}}}));
     res.write(event({type:'content_block_delta',delta:{type:'text_delta',text:'ok'}}));
@@ -139,6 +139,5 @@ test('Anthropic SSE normalizes synthetic 9x cache_read_input_tokens proxy inflat
   const result=await read(await fetchModelWithProgressIdle(f.url+'/messages',request('/messages',{stream:true,messages:[]}).options,{timeoutMs:500}));
   assert(!result.error);
   assert(result.text.includes('"cache_creation_input_tokens":21896'));
-  assert(result.text.includes('"cache_read_input_tokens":0'));
-  assert(!result.text.includes('197066'));
+  assert(result.text.includes('"cache_read_input_tokens":197066'));
 });

@@ -12,7 +12,7 @@ const { insertCanvasGenerationHistoryTask } = await import("@/pages/canvas/canva
 const { useAssetStore } = await import("@/stores/use-asset-store");
 const assets: any[] = Array.from({ length: 4 }, (_, index) => ({ id: `asset-${index}`, kind: "image", title: "MJ", tags: [], createdAt: "2026-10-17", updatedAt: "2026-10-17", coverUrl: `/api/resources/local-${index}/file`, data: { storageKey: `resource:local-${index}`, dataUrl: "", width: 1024, height: 1024, bytes: 100, mimeType: "image/png" } }));
 useAssetStore.setState({ assets });
-const task: any = { id: "paid-mj", type: "canvas_image", model: "beefapi::midjourney-v8.2", status: "succeeded", prompt: "red cube", resultJson: JSON.stringify({ images: assets.map(() => ({ url: "https://expired-provider.example/image.png" })) }), outputs: assets.map((asset, outputIndex) => ({ outputIndex, mediaType: "image", materializedAssetId: asset.id })) };
+const task: any = { id: "paid-mj", type: "canvas_image", model: "beeftv::midjourney-v8.2", status: "succeeded", prompt: "red cube", resultJson: JSON.stringify({ images: assets.map(() => ({ url: "https://expired-provider.example/image.png" })) }), outputs: assets.map((asset, outputIndex) => ({ outputIndex, mediaType: "image", materializedAssetId: asset.id })) };
 let persisted: any[] = [];
 const result = await insertCanvasGenerationHistoryTask({ task, projectId: "canvas", center: { x: 0, y: 0 }, nodes: [], assets,
     readLiveNodes: () => [], persist: async (nodes) => { persisted = nodes; },

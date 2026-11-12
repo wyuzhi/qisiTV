@@ -435,6 +435,54 @@ func TestAssistantSessionsAndHistoryAreProxiedWithScopeCheck(t *testing.T) {
 	}
 }
 
+func TestAssistantDeleteSessionProxiesWithScopeCheckAndRejectsBusy(t *testing.T) {
+	busy := false
+	env := newAssistantTestEnv(t, func(env *assistantTestEnv) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			env.hostHits[r.URL.Path]++
+			w.Header().Set("Content-Type", "application/json")
+			if r.URL.Path == "/sessions" && r.Method == http.MethodDelete {
+				var body struct {
+					CanvasID  string `json:"canvasId"`
+					SessionID string `json:"sessionId"`
+				}
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				if body.CanvasID != env.canvasID || body.SessionID != "durable:11111111-1111-1111-1111-111111111111" {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				if busy {
+					w.WriteHeader(http.StatusConflict)
+					_, _ = w.Write([]byte(`{"code":409,"reason":"session_busy"}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"deleted":true,"sessionId":"` + body.SessionID + `","currentSessionId":null}`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		})
+	})
+
+	data := decodeEnvelope(t, env.call(t, http.MethodDelete, "/assistant/sessions/durable:11111111-1111-1111-1111-111111111111?canvasId="+url.QueryEscape(env.canvasID), ""))
+	if data["deleted"] != true {
+		t.Fatalf("删除会话应返回 deleted=true: %#v", data)
+	}
+
+	busy = true
+	busyResp := env.call(t, http.MethodDelete, "/assistant/sessions/durable:11111111-1111-1111-1111-111111111111?canvasId="+url.QueryEscape(env.canvasID), "")
+	if busyResp.Code != http.StatusConflict {
+		t.Fatalf("运行中会话删除应返回 409，得到 %d %s", busyResp.Code, busyResp.Body.String())
+	}
+	if reason := decodeEnvelope(t, busyResp)["__reason"]; reason != "session_busy" {
+		t.Fatalf("reason 应为 session_busy，得到 %v", reason)
+	}
+
+	foreign := env.call(t, http.MethodDelete, "/assistant/sessions/durable:11111111-1111-1111-1111-111111111111?canvasId=not-mine", "")
+	if foreign.Code != http.StatusNotFound {
+		t.Fatalf("外部画布删除会话应返回 404，得到 %d", foreign.Code)
+	}
+}
+
 func TestAssistantStatusBusyOldModelAfterProviderChange(t *testing.T) {
 	running := assistant.Provider{
 		ChannelID: "env", Model: "old-model", BaseURL: "https://relay.example.com/v1",

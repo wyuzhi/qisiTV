@@ -58,7 +58,3 @@ func taskInputUsesCustomChannel(input map[string]any) bool {
 func taskInputUsesSystemChannel(input map[string]any) bool {
 	return modelcatalog.TaskInputUsesSystemChannel(input)
 }
-
-func taskInputUsesWorkflowProvider(input map[string]any) bool {
-	return modelcatalog.TaskInputUsesWorkflowProvider(input)
-}

@@ -1,14 +1,12 @@
 package app
 
 import (
-	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/prompts"
 )
 
 type (
 	PromptTemplateVariable         = prompts.PromptTemplateVariable
 	PromptOperationDefinition      = prompts.PromptOperationDefinition
-	PromptTemplateRequest          = prompts.PromptTemplateRequest
 	UserPromptCustomizationRequest = prompts.UserPromptCustomizationRequest
 	UserPromptPreference           = prompts.UserPromptPreference
 	CompiledPrompt                 = prompts.CompiledPrompt
@@ -28,63 +26,21 @@ const (
 	promptOperationSkillDraft           = prompts.OperationSkillDraft
 )
 
-type promptAdminGate struct {
-	requireAdmin func(*model.User) error
-	appendAudit  func(*model.User, string, string, string, string, any) error
-}
-
-func (g promptAdminGate) RequireAdmin(user *model.User) error {
-	if g.requireAdmin == nil {
-		return nil
-	}
-	return g.requireAdmin(user)
-}
-
-func (g promptAdminGate) AppendAudit(actor *model.User, action, targetType, targetID, summary string, metadata any) error {
-	if g.appendAudit == nil {
-		return nil
-	}
-	return g.appendAudit(actor, action, targetType, targetID, summary, metadata)
-}
-
-func newPromptAdminGate(service *Service) promptAdminGate {
-	if service == nil {
-		return promptAdminGate{}
-	}
-	return promptAdminGate{requireAdmin: service.RequireAdmin, appendAudit: service.appendAdminAudit}
-}
-
 // PromptService exposes the domain service to the HTTP composition layer.
 func (s *Service) PromptService() *prompts.Service { return s.promptDomain() }
 
 func (s *Service) promptDomain() *prompts.Service {
 	if s == nil {
-		return prompts.New(nil, nil)
+		return prompts.New(nil)
 	}
 	if s.prompts != nil {
 		return s.prompts
 	}
-	return prompts.New(s.repo, newPromptAdminGate(s))
+	return prompts.New(s.repo)
 }
 
 func (s *Service) EnsureDefaultPromptTemplates() error {
 	return s.promptDomain().EnsureDefaultPromptTemplates()
-}
-
-func (s *Service) AdminPromptTemplates(actor *model.User) ([]model.PromptTemplate, []PromptOperationDefinition, error) {
-	return s.promptDomain().AdminPromptTemplates(actor)
-}
-
-func (s *Service) CreatePromptTemplate(actor *model.User, req PromptTemplateRequest) (*model.PromptTemplate, error) {
-	return s.promptDomain().CreatePromptTemplate(actor, req)
-}
-
-func (s *Service) UpdatePromptTemplate(actor *model.User, id string, req PromptTemplateRequest) (*model.PromptTemplate, error) {
-	return s.promptDomain().UpdatePromptTemplate(actor, id, req)
-}
-
-func (s *Service) DeletePromptTemplate(actor *model.User, id string) error {
-	return s.promptDomain().DeletePromptTemplate(actor, id)
 }
 
 func (s *Service) compilePrompt(userID string, operation string, values map[string]string) (CompiledPrompt, error) {
@@ -93,14 +49,6 @@ func (s *Service) compilePrompt(userID string, operation string, values map[stri
 
 func validateStyleProfileJSON(value string) (string, error) {
 	return prompts.ValidateStyleProfileJSON(value)
-}
-
-func extractJSONText(raw string) (string, error) {
-	return prompts.ExtractJSONText(raw)
-}
-
-func extractPreferredJSONText(raw string, preferKey string) (string, error) {
-	return prompts.ExtractPreferredJSONText(raw, preferKey)
 }
 
 func promptDefinition(operation string) (PromptOperationDefinition, bool) {

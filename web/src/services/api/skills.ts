@@ -26,7 +26,7 @@ export type Skill = {
     contentHash: string;
     fileCount: number;
     totalBytes: number;
-    sourceType: "builtin" | "markdown" | "zip" | "github" | string;
+    sourceType: "builtin" | "markdown" | "zip" | "github" | "plugin" | "market" | string;
     sourceUrl: string;
     sourceRef: string;
     sourceSubdir: string;

@@ -2,8 +2,10 @@
 // 与模型请求前后的钩子装配进官方 Durable Registry。
 import crypto from 'node:crypto';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
+import { createModels } from '@earendil-works/pi-ai/models';
 import { defineExtension, defineTool, GenerationTask, hook } from '@earendil-works/pi-durable';
 import { officialNativeHistory } from './native-history.mjs';
+import { downgradeUnpinnedAssistantMessages } from './media-content.mjs';
 import { SYSTEM_PROMPT } from './system-prompt.mjs';
 import { SKILL_LOAD_PARAMETERS, createSkillCatalogSection, expandSkillContent, loadPinnedSkills, loadedSkillRecord,
   normalizeSkillCatalog, sameSkillPin, skillsToLoad, activeSkillProjection, guardSkillModelRequests } from './skill-resource.mjs';
@@ -234,9 +236,16 @@ export async function installDurableExtensions({
     return items;
   }
 
-  const tools = [...buildTools(canvasId, entry.log, entry.generation, entry.turn, sessionId), ...hostTools()].map((tool) => defineTool({
+  const baseHostTools = [...buildTools(canvasId, entry.log, entry.generation, entry.turn, sessionId), ...hostTools()];
+  entry.readOnlyToolNames = new Set(
+    baseHostTools.filter((tool) => tool.readOnly === true && tool.label !== 'canvas.generation.propose' && tool.label !== 'skill.script.run').map((tool) => tool.name),
+  );
+  const tools = baseHostTools.map((tool) => defineTool({
     name: tool.name, description: tool.description + (tool.label === 'canvas.generation.propose'
-      ? '。成功提案会结束本轮；plan_update 与本调用同一次响应发出。' : ''), parameters: tool.parameters,
+      ? '。成功提案会结束本轮；plan_update 与本调用同一次响应发出。'
+      : tool.label === 'skill.script.run'
+        ? '。首次运行需用户确认并结束本轮；plan_update 可与本调用同一次响应发出。'
+        : ''), parameters: tool.parameters,
     replay: durableToolReplay(tool), executionMode: 'sequential',
     ...(['media.overview', 'media.inspect', 'media.check', 'media.review'].includes(tool.label) ? { outputLimits: { maxBytes: 64 * 1024 * 1024, maxLines: 100000 } } : {}),
     execute: async (args, api, context) => {
@@ -246,6 +255,7 @@ export async function installDurableExtensions({
       await authorization(entry, entry.turn.turnId);
       try {
         const proposalCount = entry.turn.proposals.length;
+        const pendingScriptProposalCount = (entry.turn.scriptProposals || []).filter((item) => item?.status === 'pending').length;
         // Bridge tools return {content}; Durable's ToolExecutionResult names it output.
         const { content, ...result } = await runWithBudget(entry, () => tool.execute(String(api.taskId), args, context.abortSignal,
           { executeTool: (name, params, options) => api.executeTool(name, params, context, options),
@@ -258,12 +268,102 @@ export async function installDurableExtensions({
         // termination. Mixed/failed rounds keep their normal model continuation.
         // 提方案失败时它自己不请求结束，整轮仍按官方规则继续，所以同批计划更新请求结束是安全的。
         const proposed = tool.label === 'canvas.generation.propose' && result.isError !== true && entry.turn.proposals.length > proposalCount;
+        const scriptProposed = tool.label === 'skill.script.run' && result.isError !== true &&
+          (entry.turn.scriptProposals || []).filter((item) => item?.status === 'pending').length > pendingScriptProposalCount;
         const planWithProposal = tool.label === 'plan.update' && result.isError !== true && (await state(entry))?.roundProposes === true;
-        return { ...result, output: content, ...(proposed || planWithProposal ? { control: { ...result.control, terminate: true } } : {}) };
+        return { ...result, output: content, ...(proposed || scriptProposed || planWithProposal ? { control: { ...result.control, terminate: true } } : {}) };
       } finally { await persistEffects(entry); }
     },
   }));
+  let selectedHostTools = tools;
+  entry.pluginExtensions = [];
+  entry.pluginTools = [];
   entry.toolNames = tools.map((tool) => tool.name);
+
+  function wrapPluginExtensionForEntry(rawExtension) {
+    if (!rawExtension || typeof rawExtension !== 'object') return null;
+    if (!Array.isArray(rawExtension.tools) || rawExtension.tools.length === 0) {
+      return rawExtension;
+    }
+    const wrappedTools = rawExtension.tools.map((pluginTool) => defineTool({
+      ...pluginTool,
+      name: pluginTool.name,
+      description: pluginTool.description || pluginTool.name,
+      parameters: pluginTool.parameters || { type: 'object', properties: {} },
+      replay: durableToolReplay(pluginTool),
+      executionMode: pluginTool.executionMode || 'sequential',
+      execute: async (args, api, context) => {
+        if (entry.generation.aborted) throw fail('aborted');
+        if (entry.generation.pendingInputError) throw fail(entry.generation.pendingInputError.reason);
+        if (entry.generation.pendingInput?.state === 'pending') throw fail('supplement_preparation_pending');
+        if (entry.turn?.turnId) await authorization(entry, entry.turn.turnId);
+        const started = Date.now();
+        // Plugin tools reach business operations only through this nested call,
+        // so the turn's permission mode is enforced here, once, for every plugin.
+        const wrappedApi = {
+          ...api,
+          executeTool: async (toolName, toolParams, callContext = context, options = {}) => {
+            const currentMode = entry.permissionMode || entry.generation?.permissionMode || 'canvas';
+            if (currentMode === 'read-only' && !entry.readOnlyToolNames?.has(toolName)) {
+              const err = new Error(`scope_denied: 本轮助手只能读取（禁止调用 ${toolName}）`);
+              err.reason = 'scope_denied';
+              throw err;
+            }
+            return api.executeTool(toolName, toolParams, callContext, options);
+          },
+        };
+        try {
+          const rawResult = await runWithBudget(entry, () => pluginTool.execute(args, wrappedApi, context));
+          entry.generation.toolCalledSinceYield = true;
+          const output = rawResult?.output ?? rawResult?.content ?? [];
+          const isError = rawResult?.isError === true;
+          entry.log.push({
+            toolCallId: String(api?.callId || api?.taskId || '') || null,
+            tool: pluginTool.name,
+            label: pluginTool.label || pluginTool.name,
+            args: args || {},
+            isError,
+            ms: Date.now() - started,
+          });
+          return { ...rawResult, output };
+        } catch (error) {
+          entry.log.push({
+            toolCallId: String(api?.callId || api?.taskId || '') || null,
+            tool: pluginTool.name,
+            label: pluginTool.label || pluginTool.name,
+            args: args || {},
+            isError: true,
+            error: error.message,
+            ms: Date.now() - started,
+          });
+          throw error;
+        } finally {
+          await persistEffects(entry);
+        }
+      },
+    }));
+    return defineExtension({
+      ...rawExtension,
+      tools: wrappedTools,
+    });
+  }
+
+  function applyPluginExtensionsToRegistry(rawExtensions) {
+    const nextWrapped = (Array.isArray(rawExtensions) ? rawExtensions : [])
+      .map((ext) => wrapPluginExtensionForEntry(ext))
+      .filter(Boolean);
+    for (const prev of entry.pluginExtensions) {
+      if (!nextWrapped.some((next) => next.name === prev.name)) {
+        registry.uninstall(prev);
+      }
+    }
+    for (const ext of nextWrapped) {
+      registry.install(ext);
+    }
+    entry.pluginExtensions = nextWrapped;
+    entry.pluginTools = nextWrapped.flatMap((ext) => ext.tools || []);
+    entry.toolNames = [...selectedHostTools, ...entry.pluginTools].map((tool) => tool.name);
+  }
 
   const operationExtension = defineExtension({
     name: 'beeftv.operations.v1',
@@ -275,7 +375,7 @@ export async function installDurableExtensions({
         // 「不是所有调用都请求结束」而多发一轮只为总结的请求。写进 Durable 文档而不是内存，
         // 重启后从工具阶段接着跑时（不会再触发本钩子）仍然生效；每次响应都会重新写。
         const proposes = Array.isArray(message?.content)
-          && message.content.some((part) => part?.type === 'toolCall' && part.name === 'canvas_generation_propose');
+          && message.content.some((part) => part?.type === 'toolCall' && (part.name === 'canvas_generation_propose' || part.name === 'skill_script_run'));
         if (((await state(entry))?.roundProposes === true) !== proposes) await update(entry, (doc) => { doc.roundProposes = proposes; });
       },
       beforeRequest: async (request, _runtime, context) => {
@@ -303,6 +403,31 @@ export async function installDurableExtensions({
           // inputs through the official request hook; the queue still owns their
           // transcript placement. This prevents replaying a stale prepared intent.
           let baseMessages = request.messages;
+          // 新会话的条目从固定渠道亲和性之后开始，签名与 cache_control 可以原样复用；
+          // 升级前未固定的旧条目签名来自随机上游节点，继续重发会触发 Invalid signature。
+          const affinityMinEntryId = typeof nativeDoc?.affinityMinEntryId === 'number' ? nativeDoc.affinityMinEntryId : Infinity;
+          if (affinityMinEntryId > 1) {
+            const contextView = await _runtime.context(_runtime.conversationId, context);
+            const unpinnedAssistants = new Set();
+            const unpinnedSignatures = new Set();
+            for (let index = 0; index < contextView.entries.length; index += 1) {
+              const item = contextView.entries[index];
+              if (item.id >= affinityMinEntryId) continue;
+              for (const msg of contextView.contributions?.[index] || item.model || []) {
+                if (msg?.role !== 'assistant') continue;
+                unpinnedAssistants.add(msg);
+                for (const block of msg.content || []) {
+                  if (block?.type === 'thinking' && typeof block.thinkingSignature === 'string' && block.thinkingSignature) {
+                    unpinnedSignatures.add(block.thinkingSignature);
+                  }
+                }
+              }
+            }
+            if (entry.budget) entry.budget.unpinnedSignatures = unpinnedSignatures;
+            baseMessages = downgradeUnpinnedAssistantMessages(baseMessages, unpinnedAssistants);
+          } else if (entry.budget) {
+            entry.budget.unpinnedSignatures = undefined;
+          }
           for (const input of active?.supplementContents || []) {
             if (!JSON.stringify(baseMessages).includes(supplementMarker(input.requestId))) {
               baseMessages = [...baseMessages, { role: 'user', content: supplementContent(input.requestId, input.content), timestamp: Date.now() }];
@@ -351,7 +476,7 @@ export async function installDurableExtensions({
       },
       onYield: async () => {
         if (entry.generation.aborted || entry.generation.pendingInput?.state === 'pending' || entry.generation.pendingInputError) return;
-        if (entry.turn.proposals?.length) return;
+        if (entry.turn.proposals?.length || (entry.turn.scriptProposals || []).some((item) => item?.status === 'pending')) return;
         const doc = await state(entry);
         if (doc?.active?.stopped || (doc?.active?.supplementIds?.length || 0) > 0) return;
         if (!entry.generation.unboundReminderSent && entry.turn.createdNodeIds?.length > 0 && typeof readCanvas === 'function') {
@@ -416,12 +541,28 @@ export async function installDurableExtensions({
     entry.generation.permissionMode = mode;
     const projected = [...buildTools(canvasId, entry.log, entry.generation, entry.turn, sessionId), ...hostTools()];
     const byName = new Map(projected.map((t) => [t.name, t]));
-    const selected = tools.filter((t) => byName.has(t.name)).map((t) => ({ ...t, parameters: byName.get(t.name).parameters }));
-    entry.toolNames = selected.map((tool) => tool.name);
-    registry.install(defineExtension({ ...operationExtension, tools: selected }));
+    selectedHostTools = tools.filter((t) => byName.has(t.name)).map((t) => ({ ...t, parameters: byName.get(t.name).parameters }));
+    const activeTools = [...selectedHostTools, ...entry.pluginTools];
+    entry.toolNames = activeTools.map((tool) => tool.name);
+    registry.install(defineExtension({ ...operationExtension, tools: selectedHostTools }));
     if (entry.root) {
       await entry.root.configure({
-        tools: selected,
+        tools: activeTools,
+        instructions: SYSTEM_PROMPT,
+      }, CTX);
+    }
+  };
+  entry.reloadPluginExtensions = async (newExtensions) => {
+    if (entry.busy) {
+      entry.pendingPluginExtensions = Array.isArray(newExtensions) ? [...newExtensions] : [];
+      return;
+    }
+    entry.pendingPluginExtensions = null;
+    applyPluginExtensionsToRegistry(newExtensions);
+    const activeTools = [...selectedHostTools, ...entry.pluginTools];
+    if (entry.root) {
+      await entry.root.configure({
+        tools: activeTools,
         instructions: SYSTEM_PROMPT,
       }, CTX);
     }
@@ -435,9 +576,41 @@ export async function installDurableExtensions({
       ],
     }));
   }
-  for (const extension of await extensions(entry)) registry.install(extension);
+  applyPluginExtensionsToRegistry(await extensions(entry));
 
   let models = await getModels(entry);
+  // 渠道缓存亲和性：把 Durable 会话 ID 作为上游缓存路由键。
+  // Anthropic 走 metadata.user_id；OpenAI 兼容网关走 prompt_cache_key（仅在模型 compat 开启时）。
+  if (models && typeof models.getProviders === 'function') {
+    const bound = createModels();
+    for (const provider of models.getProviders()) {
+      const wrap = (fn) => (model, context, options) => {
+        const callerOnPayload = options?.onPayload;
+        const nextOptions = {
+          ...options,
+          sessionId: entry.sessionId,
+          ...(model?.api === 'anthropic-messages' ? { metadata: { ...options?.metadata, user_id: entry.sessionId } } : {}),
+          onPayload: async (payload, currentModel) => {
+            let next = callerOnPayload ? (await callerOnPayload(payload, currentModel)) ?? payload : payload;
+            if (
+              (currentModel || model)?.api === 'openai-completions' &&
+              (currentModel || model)?.compat?.promptCacheKeyMode === 'enabled' &&
+              options?.cacheRetention !== 'none' &&
+              next &&
+              typeof next === 'object' &&
+              !next.prompt_cache_key
+            ) {
+              next = { ...next, prompt_cache_key: entry.sessionId };
+            }
+            return next;
+          },
+        };
+        return fn.call(provider, model, context, nextOptions);
+      };
+      bound.setProvider({ ...provider, stream: wrap(provider.stream), streamSimple: wrap(provider.streamSimple) });
+    }
+    models = bound;
+  }
   if (skills) {
     models = guardSkillModelRequests(models, async (model, request, signal) => {
       await authorization(entry, entry.turn.turnId);
@@ -452,5 +625,5 @@ export async function installDurableExtensions({
     });
   }
 
-  return { tools, models };
+  return { tools: [...selectedHostTools, ...entry.pluginTools], models };
 }

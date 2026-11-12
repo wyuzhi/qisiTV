@@ -24,24 +24,11 @@ func TestRuntimeLoadsOfficialPackagesAndBundledWorkflow(t *testing.T) {
 	if len(items) == 0 {
 		t.Fatal("runtime loaded no plugins; build plugin-packages first")
 	}
-	foundWorkflow := false
 	foundOfficial := false
 	for _, item := range items {
-		if item.Manifest.ID == WorkflowRunningHub {
-			foundWorkflow = true
-			if item.Source != OriginOfficial {
-				t.Fatalf("workflow source = %q", item.Source)
-			}
-			if item.Status != StatusDisabled {
-				t.Fatalf("bundled workflow default status = %q", item.Status)
-			}
-		}
 		if item.Source == OriginOfficial && strings.HasSuffix(item.FileName, protocol.PluginPackageExtension) {
 			foundOfficial = true
 		}
-	}
-	if !foundWorkflow {
-		t.Fatal("bundled RunningHub workflow missing")
 	}
 	if !foundOfficial {
 		t.Fatal("no official packaged plugin loaded; run plugin-packages/build-packages.sh")

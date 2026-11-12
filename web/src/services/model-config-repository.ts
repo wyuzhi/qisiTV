@@ -32,12 +32,20 @@ export function createModelConfigRepository(dependencies: ModelConfigRepositoryD
         listeners.forEach((listener) => listener(state));
     };
 
-    const hydrate = async () => {
+    const hydrate = async (): Promise<LocalModelConfigPayload & { supersededByLocalEdit: boolean }> => {
+        // 先等正在进行的保存结束，读取和保存不交错改写状态。
+        if (drainPromise) await drainPromise.catch(() => undefined);
+        const pendingDirty = state.dirty;
+        const startGeneration = generation;
         publish({ status: "hydrating", error: "" });
         try {
             const result = await dependencies.read();
-            state = { status: "idle", revision: result.revision, dirty: Boolean(latestConfig), error: "" };
-            return result;
+            // 还有没保存的修改（刷新前保存失败的，或读取期间新改的）：保留并继续保存，读回的快照已经过时。
+            const editedDuringRead = generation !== startGeneration;
+            if (!pendingDirty && !editedDuringRead) latestConfig = null;
+            const unsaved = (pendingDirty || editedDuringRead) && Boolean(latestConfig);
+            state = { status: "idle", revision: result.revision, dirty: unsaved, error: "" };
+            return { ...result, supersededByLocalEdit: unsaved };
         } catch (error) {
             publish({ status: "error", error: error instanceof Error ? error.message : "读取模型配置失败" });
             throw error;
@@ -45,7 +53,7 @@ export function createModelConfigRepository(dependencies: ModelConfigRepositoryD
             hydrated = true;
             resolveHydration?.();
             resolveHydration = null;
-            if (latestConfig) void scheduleDrain();
+            if (state.dirty && latestConfig) void scheduleDrain();
         }
     };
 
@@ -118,11 +126,11 @@ function isRevisionConflict(error: unknown) {
     return candidate.status === 409 || candidate.response?.status === 409;
 }
 
-function omitManagedBeefAPISecrets(config: AiConfig): AiConfig {
+function omitManagedBeefTVSecrets(config: AiConfig): AiConfig {
     return {
         ...config,
         channels: config.channels.map((channel) => {
-            if (channel.id !== "beefapi" || !channel.pinned) return channel;
+            if (channel.id !== "beeftv" || !channel.pinned) return channel;
             return { ...channel, apiKey: "", secretKey: "" };
         }),
     };
@@ -133,7 +141,7 @@ const repository = createModelConfigRepository({
     read: () => isBrowserWorkspace() ? browserStorage.read() : getLocalModelConfig(),
     write: (config, expectedRevision) => isBrowserWorkspace()
         ? browserStorage.write(config, expectedRevision)
-        : saveLocalModelConfig(omitManagedBeefAPISecrets(config), expectedRevision),
+        : saveLocalModelConfig(omitManagedBeefTVSecrets(config), expectedRevision),
 });
 
 export const hydrateModelConfig = repository.hydrate;

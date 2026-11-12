@@ -91,12 +91,12 @@ type SourceRevisions = Pick<ProposalSourceState, "canvasId" | "canvasRevision" |
 
 function comparableConfig(config: AiConfig) {
     // Managed credentials and backend-owned catalog ordering/profiles on the
-    // pinned beefapi channel are supplied by the backend, never by the proposal.
+    // pinned beeftv channel are supplied by the backend, never by the proposal.
     const { models: _m, imageModels: _im, videoModels: _vm, textModels: _tm, audioModels: _am, ...rest } = config;
     return canonicalize({
         ...rest,
         channels: config.channels.map((channel) => {
-            if (channel.id !== "beefapi" || !channel.pinned) return channel;
+            if (channel.id !== "beeftv" || !channel.pinned) return channel;
             const { models: _cm, modelProfiles: _cp, apiKey: _ak, secretKey: _sk, credentialRef: _cr, hasApiKey: _hak, hasSecretKey: _hsk, baseUrl: _bu, ...channelRest } = channel;
             const portraitQuotes = Object.fromEntries(
                 (channel.modelProfiles || [])

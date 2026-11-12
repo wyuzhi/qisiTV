@@ -6,7 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"net/http"
 	"strings"
 )
@@ -17,7 +17,8 @@ func RunAudioTask(ctx context.Context, input Input) (map[string]interface{}, err
 	}
 	if resolved, ok := input.Metadata["resolvedCharacterVersions"].([]interface{}); ok && len(resolved) > 0 {
 		voice := metadataString(input.Metadata, "resolvedCharacterVoiceKey")
-		if voice == "" || strings.TrimSpace(input.Config.AudioVoice) != voice {
+		hasOmniReference := len(input.ReferenceImages) > 0 || len(input.ReferenceAudios) > 0 || strings.TrimSpace(input.Config.AudioInstructions) != ""
+		if (voice == "" && !hasOmniReference) || (voice != "" && strings.TrimSpace(input.Config.AudioVoice) != voice) {
 			return nil, RequestPreparationError{Cause: errors.New("角色配音缺少已解析的声音绑定")}
 		}
 	}
@@ -41,7 +42,7 @@ func RunAudioTask(ctx context.Context, input Input) (map[string]interface{}, err
 
 // Frozen managed tasks retain their old speech wire; new admissions use media-v1.
 func runLegacyManagedAudio(ctx context.Context, input Input) (map[string]interface{}, error) {
-	body, format := beefapi.LegacySpeechPayload(beefapi.LegacySpeechOptions{Model: input.Config.Model, Prompt: input.Prompt, Voice: input.Config.AudioVoice, Format: input.Config.AudioFormat, Speed: input.Config.AudioSpeed, Instructions: input.Config.AudioInstructions})
+	body, format := beeftv.LegacySpeechPayload(beeftv.LegacySpeechOptions{Model: input.Config.Model, Prompt: input.Prompt, Voice: input.Config.AudioVoice, Format: input.Config.AudioFormat, Speed: input.Config.AudioSpeed, Instructions: input.Config.AudioInstructions})
 	data, mimeType, err := managedMediaClient(ctx, input.Config).LegacySpeech(ctx, body)
 	if err != nil {
 		return nil, err
@@ -59,12 +60,13 @@ func runLegacyManagedAudio(ctx context.Context, input Input) (map[string]interfa
 	return map[string]interface{}{"mode": "audio", "audio": map[string]interface{}{"dataUrl": DataURL(mimeType, data), "mimeType": mimeType, "format": format}}, nil
 }
 
-func isBeefAPIHostFromURL(raw string) bool {
-	if beefapi.IsEnterpriseBaseURL(raw) {
+func isBeefTVHostFromURL(raw string) bool {
+	trimmed := strings.TrimSuffix(strings.TrimRight(raw, "/"), "/v1")
+	if trimmed == beeftv.ProductionOrigin {
 		return true
 	}
-	origin, err := beefapi.CanonicalOrigin("")
-	return err == nil && strings.TrimSuffix(strings.TrimRight(raw, "/"), "/v1") == origin
+	origin, err := beeftv.CanonicalOrigin("")
+	return err == nil && trimmed == origin
 }
 
 func DecodeProviderDataURL(value string) (string, []byte, error) {

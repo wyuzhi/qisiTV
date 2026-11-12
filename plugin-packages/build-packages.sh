@@ -13,7 +13,7 @@ package_plugin() {
   rm -f "$temporary_file"
   (
     cd "$package_dir"
-    find manifest.json README.md docs assets web backend LICENSE -type f 2>/dev/null | LC_ALL=C sort | zip -X -q "$temporary_file" -@
+    find manifest.json README.md docs assets LICENSE -type f 2>/dev/null | LC_ALL=C sort | zip -X -q "$temporary_file" -@
   )
   mv "$temporary_file" "$output_file"
 }

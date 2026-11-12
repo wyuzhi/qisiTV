@@ -1,4 +1,5 @@
 import { CANVAS_SHORTCUTS } from "@/lib/canvas/canvas-shortcuts";
+import { isEmbeddedRuntime } from "@/lib/embedded-runtime";
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import "./canvas-shortcuts-popover.css";
 
@@ -13,7 +14,7 @@ export function CanvasShortcutsPopover({ x, theme }: { x: number; theme: CanvasT
             onWheel={(event) => event.stopPropagation()}
         >
             <div className="canvas-shortcuts-scroll" tabIndex={0} aria-label="12 个常用快捷键，向下滚动查看全部">
-                {CANVAS_SHORTCUTS.map((shortcut) => (
+                {CANVAS_SHORTCUTS.filter((shortcut) => shortcut.id !== "assistant" || !isEmbeddedRuntime()).map((shortcut) => (
                     <div className="canvas-shortcut-entry" key={shortcut.id}>
                         <span>{shortcut.title}</span>
                         <kbd>{shortcut.keys.map((keys) => keys.map((key) => key === "⌘" ? modifier : key).join(" + ")).join(" / ")}</kbd>

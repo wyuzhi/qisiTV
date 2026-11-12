@@ -1,7 +1,7 @@
 // Package desktopupdate implements qisiTV's signed desktop auto-update engine.
 //
 // 更新只替换当前应用包或可执行文件，以及随包分发的官方 plugin-packages 和 agent-host。
-// 用户数据目录（项目、素材、设置、BeefAPI 登录态、用户上传的插件）不在更新包内，
+// 用户数据目录（项目、素材、设置、BeefTV 登录态、用户上传的插件）不在更新包内，
 // 也不会被递归替换。保持应用包路径和可执行文件路径不变，以便 WebView IndexedDB 继续可用。
 //
 // 安装与健康检查的限制：

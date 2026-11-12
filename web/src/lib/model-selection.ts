@@ -1,4 +1,4 @@
-import { defaultImageCapabilityConfig, modelCapabilityConfigFor, normalizeImageValue, normalizeVideoValue, STANDARD_IMAGE_SIZE_VALUES, videoDurationAllowed, videoReferencesForOperation, type ImageCapabilityConfig } from "@/lib/model-capabilities";
+import { defaultImageCapabilityConfig, hasUserModelCapability, modelCapabilityConfigFor, normalizeImageValue, normalizeVideoValue, STANDARD_IMAGE_SIZE_VALUES, videoDurationAllowed, videoReferencesForOperation, type ImageCapabilityConfig } from "@/lib/model-capabilities";
 import { normalizeVideoBoolean, normalizeVideoResolutionValue, videoResolutionComparisonKey } from "@/lib/video-generation-options";
 import { imageSizePresets } from "@/lib/image-size-presets";
 import { sanitizeVideoPriceQuote, seedancePortraitLabel, seedancePortraitModel } from "@/lib/seedance-portrait";
@@ -81,7 +81,7 @@ export function hasDeclaredModelCapability(config: AiConfig, model: string, capa
     const profile = channelModelProfile(channel, modelOptionName(model));
     if (!profile?.capabilityConfig?.[capability]) return false;
     const version = capability === "image" ? profile.imageCapabilitiesVersion : profile.videoCapabilitiesVersion;
-    return Boolean(version?.trim()) || channel.scope === "system" || profile.capabilitySource === "user";
+    return Boolean(version?.trim()) || channel.scope === "system" || hasUserModelCapability(profile);
 }
 
 export function modelCompatibilityError(config: AiConfig, model: string, requirements?: ModelRequirements) {

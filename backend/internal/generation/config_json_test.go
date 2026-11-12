@@ -8,7 +8,7 @@ import (
 func TestPersistedScalarConfigCanBeRetried(t *testing.T) {
 	for _, flag := range []string{"true", "false", `"true"`, `"false"`} {
 		var input Input
-		raw := `{"mode":"video","config":{"model":"seedance-2.0-mini","interfaceType":"newapi","videoGenerateAudio":` + flag + `,"videoWatermark":false,"videoSeconds":6,"count":1,"audioSpeed":1.25,"runningHubUseWallet":true}}`
+		raw := `{"mode":"video","config":{"model":"seedance-2.0-mini","interfaceType":"newapi","videoGenerateAudio":` + flag + `,"videoWatermark":false,"videoSeconds":6,"count":1,"audioSpeed":1.25}}`
 		if err := json.Unmarshal([]byte(raw), &input); err != nil {
 			t.Fatal(err)
 		}
@@ -16,7 +16,7 @@ func TestPersistedScalarConfigCanBeRetried(t *testing.T) {
 		if flag[0] == '"' {
 			want = flag[1 : len(flag)-1]
 		}
-		if input.Config.VideoGenerateAudio != want || input.Config.VideoWatermark != "false" || input.Config.VideoSeconds != "6" || input.Config.Count != "1" || input.Config.AudioSpeed != "1.25" || !input.Config.RunningHubUseWallet {
+		if input.Config.VideoGenerateAudio != want || input.Config.VideoWatermark != "false" || input.Config.VideoSeconds != "6" || input.Config.Count != "1" || input.Config.AudioSpeed != "1.25" {
 			t.Fatalf("lost options: %#v", input.Config)
 		}
 		encoded, err := json.Marshal(input)

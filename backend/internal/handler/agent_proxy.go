@@ -21,6 +21,7 @@ import (
 	"qisitv/backend/internal/app"
 	"qisitv/backend/internal/assistantruntime"
 	"qisitv/backend/internal/assistantturns"
+	"qisitv/backend/internal/operations"
 	"qisitv/backend/internal/skills"
 	httptransport "qisitv/backend/internal/transport/http"
 )
@@ -96,6 +97,9 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 		}
 		return true
 	}
+
+	// 助手行为设置改变脚本确认方式，写入必须与助手入口共用同一套身份与只读校验。
+	RegisterAssistantSettingsRoutes(r, svc, guard)
 
 	// hostOpsURL 用请求自身的 Host 推导操作层基址：桌面形态监听随机端口，猜端口会指向别处。
 	hostOpsURL := func(c *gin.Context) string { return "http://" + c.Request.Host + "/api" }
@@ -254,6 +258,9 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 							turn["permissionMode"] = state.PermissionMode
 							pins = state.SkillPins
 						}
+						if scriptProposals, spErr := operations.ListTurnSkillScriptProposals(svc.Database(), c.GetString("agentUserId"), strings.TrimSpace(c.Query("canvasId")), turnID); spErr == nil && len(scriptProposals) > 0 {
+							turn["scriptProposals"] = scriptProposals
+						}
 						labelAssistantSkills(turn, pins, installed)
 					}
 				}
@@ -291,6 +298,7 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 
 	registerAssistantSkillContextRoutes(r, svc, guard, hostJSON)
 	registerAssistantContinuationRoutes(r, svc, guard)
+	registerAssistantSkillScriptRoutes(r, svc, host, guard, requireOwnedCanvas)
 	r.GET("/assistant/sessions", func(c *gin.Context) {
 		if !guard(c, false) {
 			return
@@ -341,6 +349,37 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 		hostJSON(c, http.MethodPost, "/sessions/activate", body)
 	})
 
+	r.DELETE("/assistant/sessions/:sessionId", func(c *gin.Context) {
+		if !guard(c, true) {
+			return
+		}
+		canvasID := strings.TrimSpace(c.Query("canvasId"))
+		sessionID := strings.TrimSpace(c.Param("sessionId"))
+		if canvasID == "" {
+			_, payload, valid := readAssistantBody(c, struct {
+				CanvasID string `json:"canvasId"`
+			}{})
+			if !valid {
+				return
+			}
+			canvasID = strings.TrimSpace(payload.CanvasID)
+		}
+		if !assistantSessionIDPattern.MatchString(sessionID) {
+			fail(c, http.StatusBadRequest, app.BadAuthRequest("sessionId 无效"))
+			return
+		}
+		if _, allowed := requireOwnedCanvas(c, canvasID); !allowed {
+			return
+		}
+		if !stopAssistantContinuationsForIntent(c, svc, host, canvasID, sessionID) {
+			return
+		}
+		_ = operations.RevokeSessionScriptAllows(svc.Database(), c.GetString("agentUserId"), canvasID, sessionID)
+		svc.SkillsDomain().CancelScriptRuns(canvasID, sessionID, "")
+		body, _ := json.Marshal(map[string]string{"canvasId": canvasID, "sessionId": sessionID})
+		hostJSON(c, http.MethodDelete, "/sessions", body)
+	})
+
 	r.GET("/assistant/history", func(c *gin.Context) {
 		if !guard(c, false) {
 			return
@@ -383,6 +422,7 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 			failService(c, err)
 			return
 		}
+		svc.SkillsDomain().CancelScriptRuns(payload.CanvasID, "", c.Param("turnId"))
 		ok(c, gin.H{"revision": revision})
 	})
 
@@ -726,6 +766,7 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 			target["sessionId"] = *payload.SessionID
 			target["requestId"] = *payload.RequestID
 		}
+		svc.SkillsDomain().CancelScriptRuns(payload.CanvasID, cancelSession, "")
 		if err := svc.AssistantTurns().CancelContinuations(c.GetString("agentUserId"), payload.CanvasID, cancelSession, false); err != nil {
 			failService(c, err)
 			return

@@ -31,5 +31,5 @@ export function ModelProtocolBrowser({
             ],
         }));
 
-    return <ChoiceBrowser key={capability || "all"} {...props} label="调用协议" placeholder="搜索协议名称、厂商或请求路径" options={options} />;
+    return <ChoiceBrowser key={capability || "all"} {...props} label="接口格式" placeholder="搜索接口名称、厂商或请求路径" options={options} />;
 }

@@ -1,13 +1,26 @@
+import { useEffect } from "react";
 import { Button } from "antd";
 import { Home, RefreshCw } from "lucide-react";
 import { useNavigate, useRouteError } from "react-router";
 
 import { WorkspaceSignalIcon } from "@/components/ui/aceternity/workspace-signal-icon";
+import { recordDiagnosticEvent } from "@/services/diagnostics/client-diagnostics";
 
 export default function RouteErrorPage() {
     const error = useRouteError();
     const navigate = useNavigate();
     const message = error instanceof Error ? error.message : "页面暂时无法显示";
+
+    useEffect(() => {
+        recordDiagnosticEvent({
+            level: "error",
+            category: "runtime",
+            reason: "route_error_boundary",
+            message,
+            route: typeof window !== "undefined" ? window.location.pathname : undefined,
+            stack: error instanceof Error ? error.stack : undefined,
+        });
+    }, [error, message]);
 
     return (
         <main className="app-workspace-page grid h-dvh place-items-center px-6 text-foreground">

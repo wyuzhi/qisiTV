@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"qisitv/backend/internal/brand"
 )
 
 const locationFile = "storage-location.json"
@@ -22,7 +24,7 @@ func DefaultRoot() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, "BeefTV"), nil
+	return brand.DesktopDataDir(root)
 }
 
 // The pointer stays in the system profile, independent of the selected data volume.

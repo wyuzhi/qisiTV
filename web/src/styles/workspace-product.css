@@ -378,9 +378,6 @@
 .assets-header-compact-button:hover,
 .assets-header-compact-button.is-active { background: var(--user-surface-muted); color: var(--user-ink); }
 .assets-header-action-buttons { height: 36px; transform: translateY(0); }
-.assets-new-button.ant-btn { height: 36px !important; border-color: #fff !important; border-radius: 8px !important; background: #fff !important; color: #171717 !important; }
-.assets-new-button.ant-btn:hover,
-.assets-new-button.ant-btn:focus { border-color: #f1f1f1 !important; background: #f1f1f1 !important; color: #111 !important; }
 .workspace-expandable-search { flex: 0 0 auto; }
 .workspace-expandable-search-button { display: grid; width: 36px; height: 36px; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--user-ink-muted); cursor: pointer; }
 .workspace-expandable-search-button:hover,
@@ -1419,7 +1416,7 @@
     line-height: 18px;
 }
 
-.app-product-workspace .app-section-page .app-section-page-content .assets-library-hero > .app-section-page-header {
+.app-product-workspace .generation-history-page .app-section-page-content .assets-library-hero > .app-section-page-header {
     min-height: 64px;
     height: 64px;
     padding: 0;
@@ -1477,7 +1474,7 @@
         margin-left: 0;
     }
 
-    .app-product-workspace .app-section-page .app-section-page-content .assets-library-hero > .app-section-page-header {
+    .app-product-workspace .generation-history-page .app-section-page-content .assets-library-hero > .app-section-page-header {
         height: auto;
         min-height: 64px;
     }
@@ -1515,6 +1512,7 @@
 .agent-tool-row h2 { margin: 0; font-size: 14px; font-weight: 500; }
 .agent-tool-actions { display: flex; align-items: center; gap: 20px; flex-shrink: 0; }
 .agent-tool-status { font-size: 12px; color: var(--muted-foreground); }
+.agent-integration-note { margin: 0; padding: 0 20px 16px; font-size: 12px; line-height: 18px; color: var(--muted-foreground); }
 .agent-connect-panel, .agent-management { padding: 4px 20px 20px; }
 .agent-registration { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0; }
 .agent-registration-info { display: flex; align-items: center; flex-wrap: wrap; min-width: 0; gap: 8px 20px; }
@@ -1523,6 +1521,7 @@
 @media (max-width: 640px) {
     .agent-tool-row { padding: 14px 16px; gap: 12px; }
     .agent-tool-actions { gap: 12px; }
+    .agent-integration-note { padding: 0 16px 14px; }
     .agent-connect-panel, .agent-management { padding: 4px 16px 16px; }
     .agent-tool-row h2 { min-width: 0; }
 }

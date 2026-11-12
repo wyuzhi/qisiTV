@@ -338,7 +338,7 @@ func seedreamTestAdapter(t *testing.T) protocol.Adapter {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapters, err := protocol.LoadInstalledProviders(data, nil)
+	adapters, err := protocol.LoadInstalledProviders(data)
 	if err != nil {
 		t.Fatal(err)
 	}

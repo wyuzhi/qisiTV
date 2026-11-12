@@ -8,8 +8,7 @@ import { DEFAULT_CANVAS_BACKGROUND_MODE, normalizeCanvasAppearance, readCanvasAp
 import { decideExternalCanvasRevision } from "@/lib/canvas/canvas-external-revision";
 import { parseCanvasStorageDocument, rebaseCanvasProjects, serializeCanvasStorageDocument, type CanvasStorageDocument } from "@/lib/canvas/canvas-storage-revision";
 import { localForageStorageForScope } from "@/lib/localforage-storage";
-import { scopedLocalStorage } from "@/lib/user-scope";
-import { getActiveUserScope } from "@/lib/user-scope";
+import { getActiveUserScope, scopedLocalStorage } from "@/lib/user-scope";
 import { usesBrowserLocalResourceStore } from "@/services/workspace-resource-storage";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasStarterMode } from "@/lib/canvas/canvas-starter";
@@ -114,7 +113,11 @@ function writeCanvasFolders(folders: CanvasFolder[]) {
             ...folder,
             coverDataUrl: folder.coverDataUrl?.startsWith("data:") ? undefined : folder.coverDataUrl,
         }));
-    scopedLocalStorage.setItem(CANVAS_FOLDERS_KEY, JSON.stringify(persistable));
+    try {
+        scopedLocalStorage.setItem(CANVAS_FOLDERS_KEY, JSON.stringify(persistable));
+    } catch {
+        // Pending folder intents and covers live in IndexedDB (canvas_folder_pending).
+    }
 }
 
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
@@ -835,8 +838,8 @@ export const useCanvasStore = create<CanvasStore>()(
             }),
             deleteProjects: (ids) =>
                 set((state) => {
-                    const projects = state.projects.filter((project) => !ids.includes(project.id));
-                    return { projects };
+                    ids.forEach((id) => { void localForageStorageForScope().removeItem(`beeftv-project-cover:${id}`); try { window.localStorage.removeItem(`beeftv-project-cover:${id}`); } catch { /* ignore */ } });
+                    return { projects: state.projects.filter((project) => !ids.includes(project.id)) };
                 }),
             restoreProject: (project) => set((state) => {
                 if (state.projects.some((item) => item.id === project.id)) return state;

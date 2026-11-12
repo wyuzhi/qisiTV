@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/modelcatalog"
 	"qisitv/backend/internal/operations"
 	"qisitv/backend/internal/providerpreset"
@@ -39,7 +39,7 @@ func (s *Service) assistantGenerationConfig(target operations.GenerationTarget) 
 			if channel.CredentialRef != "" {
 				config["credentialRef"] = channel.CredentialRef
 			}
-			if channel.ID == beefapi.ChannelID {
+			if channel.ID == beeftv.ChannelID {
 				config["channelId"] = channel.ID
 			}
 			break
@@ -58,7 +58,7 @@ func (s *Service) assistantGenerationConfig(target operations.GenerationTarget) 
 				config["capabilityConfig"] = profile.CapabilityConfig
 			}
 			if target.Kind == "video" {
-				if _, protocol, ok := providerpreset.HostedBeefAPIVideoProfile(profile.BaseURL, modelID); ok {
+				if _, protocol, ok := providerpreset.HostedBeefTVVideoProfile(profile.BaseURL, modelID); ok {
 					config["interfaceType"] = protocol
 				}
 			}

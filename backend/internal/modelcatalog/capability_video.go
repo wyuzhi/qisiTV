@@ -122,7 +122,7 @@ func defaultVideoCapabilityConfig(protocol string, modelName string) *VideoCapab
 	}
 	if protocol == string(model.ChannelInterfaceNewAPIChannel2) {
 		video.Watermark = VideoBooleanConfig{Supported: true, Default: false}
-		if contract, ok := providerpreset.BeefAPIVideoContract(modelName); ok && contract.Protocol == protocol && contract.RequiresHTTPReferences && len(contract.Operations) > 0 {
+		if contract, ok := providerpreset.BeefTVVideoContract(modelName); ok && contract.Protocol == protocol && contract.RequiresHTTPReferences && len(contract.Operations) > 0 {
 			video.Operations = append([]string(nil), contract.Operations...)
 			for kind, limit := range contract.MaxReferences {
 				switch kind {
@@ -152,6 +152,26 @@ func defaultVideoCapabilityConfig(protocol string, modelName string) *VideoCapab
 		}
 		video.Operations = appendUniqueString(video.Operations, "reference_to_video")
 		video.ReturnLastFrame = VideoBooleanConfig{Supported: true, Default: false}
+		if isSeedance2FastOrMiniModel(modelName) {
+			filtered := make([]string, 0, len(video.Resolutions))
+			for _, value := range video.Resolutions {
+				norm := strings.ToLower(strings.TrimSpace(value))
+				if norm == "480p" || norm == "720p" {
+					filtered = append(filtered, value)
+				}
+			}
+			if len(filtered) == 0 {
+				filtered = []string{"480p", "720p"}
+			}
+			video.Resolutions = filtered
+			if !containsCapabilityString(video.Resolutions, video.DefaultResolution) {
+				if containsCapabilityString(video.Resolutions, "720p") {
+					video.DefaultResolution = "720p"
+				} else {
+					video.DefaultResolution = video.Resolutions[0]
+				}
+			}
+		}
 		if isSeedance25Model(modelName) {
 			video.TaskTypeConstraints = true
 			if containsCapabilityString(video.Resolutions, "480p") {

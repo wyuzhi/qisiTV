@@ -6,20 +6,18 @@ import (
 	"time"
 
 	"qisitv/backend/internal/kernel"
-	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/platform"
 	"qisitv/backend/internal/repository"
 )
 
 type (
-	RuntimeResourcePolicy      = platform.RuntimeResourcePolicy
-	RuntimeTaskPolicy          = platform.RuntimeTaskPolicy
-	RuntimeRequestPolicy       = platform.RuntimeRequestPolicy
-	RuntimePolicySetting       = platform.RuntimePolicySetting
-	PublicRuntimePolicySetting = platform.PublicRuntimePolicySetting
-	PublicRuntimeLimits        = platform.PublicRuntimeLimits
-	FeatureAvailability        = platform.FeatureAvailability
-	PublicFeatureAvailability  = platform.PublicFeatureAvailability
+	RuntimeResourcePolicy     = platform.RuntimeResourcePolicy
+	RuntimeTaskPolicy         = platform.RuntimeTaskPolicy
+	RuntimeRequestPolicy      = platform.RuntimeRequestPolicy
+	RuntimePolicySetting      = platform.RuntimePolicySetting
+	PublicRuntimeLimits       = platform.PublicRuntimeLimits
+	FeatureAvailability       = platform.FeatureAvailability
+	PublicFeatureAvailability = platform.PublicFeatureAvailability
 )
 
 const (
@@ -40,7 +38,7 @@ func newPlatformHost(s *Service) platform.Host {
 	if s == nil {
 		return platform.NewHost(platform.HostConfig{})
 	}
-	return platform.NewHost(platform.HostConfig{Repo: s.repo, RequireAdmin: s.RequireAdmin, AppendAudit: s.appendAdminAudit})
+	return platform.NewHost(platform.HostConfig{Repo: s.repo})
 }
 func (s *Service) platformDomain() *platform.Service {
 	if s == nil {
@@ -53,19 +51,27 @@ func (s *Service) platformDomain() *platform.Service {
 	})
 	return s.platform
 }
-func (s *Service) RuntimePolicy() (RuntimePolicySetting, error)                                                   { return s.platformDomain().RuntimePolicy() }
-func (s *Service) runtimePolicyWithRepo(repo *repository.Repository) (RuntimePolicySetting, error)                { return platform.RuntimePolicyWithRepo(repo, s.IsLocalMode()) }
-func (s *Service) runtimeConcurrencySetting() (RuntimeTaskPolicy, error)                                          { return s.platformDomain().RuntimeConcurrencySetting() }
-func (s *Service) PublicRuntimeLimits() (*PublicRuntimeLimits, error)                                             { return s.platformDomain().PublicRuntimeLimits() }
-func (s *Service) AdminRuntimePolicySetting(actor *model.User) (*PublicRuntimePolicySetting, error)               { return s.platformDomain().AdminRuntimePolicySetting(actor) }
-func (s *Service) AdminSelfUseRuntimePolicy(actor *model.User) (*PublicRuntimePolicySetting, error)               { return s.platformDomain().AdminSelfUseRuntimePolicy(actor) }
-func (s *Service) UpdateRuntimePolicySetting(actor *model.User, v RuntimePolicySetting) (*PublicRuntimePolicySetting, error) { return s.platformDomain().UpdateRuntimePolicySetting(actor, v) }
-func (s *Service) ResetRuntimePolicySetting(actor *model.User) (*PublicRuntimePolicySetting, error)               { return s.platformDomain().ResetRuntimePolicySetting(actor) }
-func (s *Service) FeatureAvailability() (*PublicFeatureAvailability, error)                                       { return s.platformDomain().FeatureAvailability() }
-func (s *Service) AdminFeatureAvailability(actor *model.User) (*PublicFeatureAvailability, error)                 { return s.platformDomain().AdminFeatureAvailability(actor) }
-func (s *Service) UpdateFeatureAvailability(actor *model.User, v FeatureAvailability) (*PublicFeatureAvailability, error) { return s.platformDomain().UpdateFeatureAvailability(actor, v) }
-func (s *Service) FeatureEnabled(feature string) (bool, error)                                                    { return s.platformDomain().FeatureEnabled(feature) }
-func (s *Service) RequireFeature(feature string) error                                                            { return s.platformDomain().RequireFeature(feature) }
+func (s *Service) RuntimePolicy() (RuntimePolicySetting, error) {
+	return s.platformDomain().RuntimePolicy()
+}
+func (s *Service) runtimePolicyWithRepo(repo *repository.Repository) (RuntimePolicySetting, error) {
+	return platform.RuntimePolicyWithRepo(repo, s.IsLocalMode())
+}
+func (s *Service) runtimeConcurrencySetting() (RuntimeTaskPolicy, error) {
+	return s.platformDomain().RuntimeConcurrencySetting()
+}
+func (s *Service) PublicRuntimeLimits() (*PublicRuntimeLimits, error) {
+	return s.platformDomain().PublicRuntimeLimits()
+}
+func (s *Service) FeatureAvailability() (*PublicFeatureAvailability, error) {
+	return s.platformDomain().FeatureAvailability()
+}
+func (s *Service) FeatureEnabled(feature string) (bool, error) {
+	return s.platformDomain().FeatureEnabled(feature)
+}
+func (s *Service) RequireFeature(feature string) error {
+	return s.platformDomain().RequireFeature(feature)
+}
 func (s *Service) AcquireChannelSlot(ctx context.Context, cid, scope string, ttl time.Duration) (func(), int, error) { return s.platformDomain().AcquireChannelSlot(ctx, cid, scope, ttl) }
 func (s *Service) AllowRequest(ctx context.Context, key string, limit int, win time.Duration) (bool, error)       { return s.platformDomain().AllowRequest(ctx, key, limit, win) }
 func (s *Service) RequestRetryAfter(ctx context.Context, key string, win time.Duration) time.Duration             { return s.platformDomain().RequestRetryAfter(ctx, key, win) }

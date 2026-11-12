@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { serveEmptySkillContext } from './skill-context-fixture.mjs';
+import { serveEmptyHostState } from './skill-context-fixture.mjs';
 const root = path.resolve(process.argv[2] || '.');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'beeftv-budget-'));
 const token = 'synthetic-budget-token';
@@ -28,7 +28,7 @@ const provider = createServer(async (req, res) => {
 });
 const ops = createServer((req, res) => {
   res.setHeader('content-type', 'application/json');
-  if(serveEmptySkillContext(req,res))return;
+  if(serveEmptyHostState(req,res))return;
   if (req.url.startsWith('/api/assistant/runtime/turns/')) {
     const turnId = decodeURIComponent(req.url.split('/')[5] || '');
     res.end(JSON.stringify({ code: 0, data: { turnId, canvasId: turnCanvas.get(turnId) || 'test', permissionMode: 'canvas', open: true } }));

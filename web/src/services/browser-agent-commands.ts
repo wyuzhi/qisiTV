@@ -391,7 +391,7 @@ export function createBrowserAgentCommandExecutor(deps: Dependencies = defaults)
             if (ref.type === "audio") referenceAudios.push(common);
         }
         const rawOptions = Object.fromEntries(Object.entries(options).filter(([field]) => field !== "providerOptions").map(([field, value]) => [field, String(value)]));
-        const taskConfig: AiConfig = { ...config, ...rawOptions, count: "1", model: encodeChannelModel(channel.id, model), taskWorkflowProvider: "model" };
+        const taskConfig: AiConfig = { ...config, ...rawOptions, count: "1", model: encodeChannelModel(channel.id, model) };
         const intentFingerprint = await fingerprint({ nodeId, mode, model, channelId: channel.id, prompt, options, referenceNodeIds: refIds, references: refs.map((ref) => ({ id: ref.id, storageKey: ref.metadata?.storageKey, content: ref.metadata?.storageKey ? undefined : ref.metadata?.content })), consent });
         const receiptKey = await fingerprint(key), operationId = `agent:${project.id}:${receiptKey}`;
         const previousReceipt = project.agentTaskReceipts?.[receiptKey];

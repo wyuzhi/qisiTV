@@ -38,7 +38,15 @@ const provider = createServer(async (req, res) => {
     if (!results.length) return send(res, request.model, 'skill_file', { ...config.pin, path: config.path });
     assert(results[0].content.includes(config.reference), 'auxiliary file missing from tool result');
     if (config.script) {
-      assert(user.includes('script_execution'));
+      if (results.length === 1) {
+        return send(res, request.model, 'skill_script_run', {
+          ...config.pin,
+          scriptPath: config.path,
+          args: ['--probe'],
+          note: '运行技能脚本验证输出',
+        });
+      }
+      assert(JSON.stringify(results).includes('requires_confirmation') || user.includes('<skill_script_result>'));
       return send(res, request.model);
     }
     if (results.length === 1) return send(res, request.model, 'canvas_nodes_create', {
@@ -87,7 +95,10 @@ try {
   assert.equal(history.turns[0].error, null, JSON.stringify(history));
   assert.equal((await backend('/assistant/runtime/turns/' + config.turnId)).value.data.open, false);
   const initialCalls=config.script?2:3;assert.equal(modelCalls,initialCalls);
-  if (config.script) assert(JSON.stringify(history).includes('尚未执行'), 'unsupported script must not claim completion');
+  if (config.script) {
+    assert.equal(history.turns[0].scriptProposals?.length, 1, 'expected scriptProposal on turn: ' + JSON.stringify(history.turns[0]));
+    assert.equal(history.turns[0].scriptProposals[0].scriptPath, config.path);
+  }
   const firstPid=child.pid;await kill('SIGKILL');await start();assert.notEqual(child.pid,firstPid);
   async function extra(turnId,message,skills=[]) {
     const response=await api('/chat',{canvasId:config.canvasId,turnId,message,revisionBefore:1,skills});

@@ -1,6 +1,7 @@
 package modelcatalog
 
 import (
+	"slices"
 	"strings"
 
 	"qisitv/backend/internal/assistant"
@@ -22,7 +23,7 @@ var assistantProtocols = map[string]string{
 	"openai-response": "responses",
 }
 
-// managedAssistantModels 是 BeefAPI 托管渠道允许的助手模型。名单必须显式列出：
+// managedAssistantModels 是 BeefTV 托管渠道允许的助手模型。名单必须显式列出：
 // gpt-6-astra 已经不是默认值，但已选它的老用户仍要能继续使用，所以不能随手删掉
 // 旧默认值；换默认值只改 DefaultManagedAssistantModel，不动这份名单。
 var managedAssistantModels = []string{"deepseek-v4.1-flash", "gpt-6-astra", "claude-opus-5-5", "glm-5.3", "gemini-3.8-flash"}
@@ -47,6 +48,9 @@ type AssistantChannel struct {
 	Models        []string                `json:"models"`
 	ModelAliases  map[string]string       `json:"modelAliases"`
 	ModelProfiles []AssistantModelProfile `json:"modelProfiles"`
+	// LegacyIDs are IDs this channel was saved under in earlier releases;
+	// saved "<legacy>::model" references resolve to this channel.
+	LegacyIDs []string `json:"legacyIds"`
 }
 
 type AssistantConfigSnapshot struct {
@@ -63,7 +67,7 @@ type AssistantConfigSnapshot struct {
 
 // ManagedCredentialLookup fills hosted-channel secrets that are not stored in
 // the local snapshot. The lookup is supplied by app; this domain never imports
-// beefapi.
+// beeftv.
 type ManagedCredentialLookup func(channelID, credentialRef, baseURL string) (apiKey, resolvedBaseURL string, ok bool)
 
 func SplitModelKey(value string) (channelID, modelID string) {
@@ -124,7 +128,7 @@ func resolveChannelModel(snapshot AssistantConfigSnapshot, modelKey string, look
 	if !assistantChannelHasModel(channel, modelID) {
 		return assistant.Provider{}, AssistantReasonModelNotConfigured
 	}
-	if channel.ID == "beefapi" && (channel.Pinned || channel.CredentialRef == "beefapi-enterprise") {
+	if channel.ID == "beeftv" && (channel.Pinned || channel.CredentialRef == "beeftv") {
 		allowed := false
 		for _, candidate := range managedModels {
 			if assistantModelAlias(channel, candidate) == modelID {
@@ -175,12 +179,7 @@ func resolveChannelModel(snapshot AssistantConfigSnapshot, modelKey string, look
 
 func FindAssistantChannel(channels []AssistantChannel, channelID, modelID string) (AssistantChannel, bool) {
 	if channelID != "" {
-		for _, channel := range channels {
-			if channel.ID == channelID && channel.Enabled {
-				return channel, true
-			}
-		}
-		return AssistantChannel{}, false
+		return findEnabledAssistantChannel(AssistantConfigSnapshot{Channels: channels}, channelID)
 	}
 	for _, channel := range channels {
 		if !channel.Enabled {
@@ -383,9 +382,16 @@ func assistantModelAlias(channel AssistantChannel, modelID string) string {
 	return strings.TrimSpace(modelID)
 }
 
+// findEnabledAssistantChannel matches the current ID first, then a channel that
+// lists the ID as legacy, the same order the web client uses.
 func findEnabledAssistantChannel(snapshot AssistantConfigSnapshot, channelID string) (AssistantChannel, bool) {
 	for _, channel := range snapshot.Channels {
 		if channel.Enabled && channel.ID == channelID {
+			return channel, true
+		}
+	}
+	for _, channel := range snapshot.Channels {
+		if channel.Enabled && channelID != "" && slices.Contains(channel.LegacyIDs, channelID) {
 			return channel, true
 		}
 	}

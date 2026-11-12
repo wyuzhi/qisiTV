@@ -50,7 +50,7 @@ func TestSeedanceDispatchUsesGatewayDeliveryFallback(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			ctx := WithEndpoints(context.Background(), Endpoints{BeefAPIVideoBaseURL: server.URL})
+			ctx := WithEndpoints(context.Background(), Endpoints{BeefTVVideoBaseURL: server.URL})
 			ctx = WithSubmissionKey(ctx, "stable-video-attempt")
 			policy := DefaultVideoPollPolicy()
 			policy.Sleep = func(context.Context, time.Duration) error { return nil }
@@ -136,7 +136,7 @@ func TestVideoDeliveryFallbackReadsSameTaskWithoutGeneration(t *testing.T) {
 				_, _ = w.Write([]byte("original video"))
 			}))
 			defer server.Close()
-			ctx := WithEndpoints(context.Background(), Endpoints{BeefAPIVideoBaseURL: server.URL})
+			ctx := WithEndpoints(context.Background(), Endpoints{BeefTVVideoBaseURL: server.URL})
 			data, _, err := videoResultDownloader(Config{BaseURL: server.URL, APIKey: "test-key"}, server.URL+"/v1/videos/original/content", "original")(ctx)
 			if directStatus == 401 {
 				if err == nil || proxy != 0 {
@@ -178,7 +178,7 @@ func TestVideoDeliveryFallbackFollowsBackupWithoutCredentials(t *testing.T) {
 		w.WriteHeader(503)
 	}))
 	defer server.Close()
-	ctx := WithEndpoints(context.Background(), Endpoints{BeefAPIVideoBaseURL: server.URL})
+	ctx := WithEndpoints(context.Background(), Endpoints{BeefTVVideoBaseURL: server.URL})
 	config := Config{BaseURL: server.URL, APIKey: "test-key", Headers: []outbound.OutboundHeader{{Name: "X-Gateway-Secret", Value: "private-value"}}}
 	data, _, err := videoResultDownloader(config, server.URL+"/v1/videos/original/content", "original")(ctx)
 	if err != nil || redirected != 1 || string(data) != "original video" {

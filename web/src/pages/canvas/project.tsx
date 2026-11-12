@@ -7,6 +7,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
+import { isEmbeddedRuntime } from "@/lib/embedded-runtime";
+import { useCanvasSelectionContext } from "./use-canvas-selection-context";
 import { queryGenerationTask, type GenerationTask } from "@/services/api/task-center";
 import { generationErrorMessage } from "@/lib/generation-error";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -80,7 +82,7 @@ import { useCanvasActiveTasks } from "./use-canvas-active-tasks";
 import { useCanvasStyleWorkflow } from "./use-canvas-style-workflow";
 import { useCanvasDirector } from "./use-canvas-director";
 import { useCanvasHistory } from "./use-canvas-history";
-import { useCanvasKeyboard } from "./use-canvas-keyboard";
+import { canvasKeyboardEnabled, useCanvasKeyboard } from "./use-canvas-keyboard";
 import { useCanvasMediaTools } from "./use-canvas-media-tools";
 import { useCanvasNodeEditor } from "./use-canvas-node-editor";
 import { useCanvasNodeOperations } from "./use-canvas-node-operations";
@@ -358,6 +360,7 @@ function InfiniteCanvasPage() {
     });
 
     const versions = useCanvasVersionHistory(projectId, restoreCanvasProjectVersion, currentProject);
+    const internalAssistantEnabled = !isEmbeddedRuntime();
     // 画布右侧只有一个栏位：助手和版本记录互斥，谁被打开另一个就让位。
     const assistant = useCanvasAssistant({
         canvasId: projectId,
@@ -401,10 +404,7 @@ function InfiniteCanvasPage() {
     const linkedProjectId = shortDramaEnabled ? currentProject?.projectId || "" : "";
     // 助手只接受属于当前画布的选中项：切画布那一帧仍可能残留旧 id，这里做硬约束，
     // 不让跨画布的 id 进入请求（后端会按画布校验并拒绝整个回合）。
-    const assistantSelectedNodeIds = useMemo(() => {
-        const available = new Set(nodes.map((node) => node.id));
-        return Array.from(selectedNodeIds).filter((id) => available.has(id));
-    }, [nodes, selectedNodeIds]);
+    const assistantSelectedNodeIds = useCanvasSelectionContext(projectId, currentProject?.title, nodes, selectedNodeIds, projectLoaded);
     // 助手的 @ 菜单覆盖整张画布，而不是只覆盖能当生成输入的资源节点。
     const assistantMentionReferences = useMemo(() => buildCanvasAgentMentionReferences(nodes), [nodes]);
     // 扩展节点（对比/图表/调色）要读自己的上游才能渲染，经 Context 下发；
@@ -527,7 +527,7 @@ function InfiniteCanvasPage() {
         generateImageFromTextNode,
     } = generation;
 
-    const assistantContinuation = useCanvasAssistantContinuation(assistant, !readOnly);
+    const assistantContinuation = useCanvasAssistantContinuation(assistant, !readOnly && internalAssistantEnabled);
     const { runAssistantProposal, assistantProposalFeedback, runningProposalIds } = useCanvasAssistantProposal({
         projectId,
         addedSkills,
@@ -746,8 +746,8 @@ function InfiniteCanvasPage() {
         createStoryboardGroup,
         deleteConnection,
         deleteNodes,
-        duplicateNode,
-        hasCopiedNodes,
+        duplicateNode, duplicateNodesByDelta,
+        hasCopiedNodes, packSelectedIntoFolder,
         pasteCopiedNodes,
         restoreCopiedNodesFromText,
         releaseCopiedNodesPastePriority,
@@ -845,7 +845,7 @@ function InfiniteCanvasPage() {
         onNodeInteractionStart: handleNodeInteractionStart,
         onNodeBringToFront: handleNodeBringToFront,
         onNodeClick: handleSelectedNodeClick,
-        onNodeDragEnd: handleNodeDragEnd,
+        onNodeDragEnd: handleNodeDragEnd, onAltDragDuplicate: duplicateNodesByDelta,
         onBatchConnectionTarget: handleBatchConnectionTargetClick,
         onLinkedFolderDrop: archiveNodesToLinkedFolder,
         onNodeDrop: workflowInstances.drop,
@@ -893,7 +893,7 @@ function InfiniteCanvasPage() {
         setBatchPrimary,
         toggleBatchExpanded,
         toggleFrameCollapsed,
-        handleFrameToggle,
+        handleFrameToggle, unpackFolder,
         toggleNodeFreeResize,
     } = nodeEditor;
 
@@ -1064,8 +1064,8 @@ function InfiniteCanvasPage() {
     useCanvasKeyboard({
         pageUi,
         projectId,
-        enabled: projectLoaded && !versions.preview && !directorNodeId,
-        onToggleAssistant: focusMode ? undefined : toggleAssistant,
+        enabled: canvasKeyboardEnabled({ projectLoaded, previewActive: Boolean(versions.preview), directorNodeId, folderBrowserNodeId: nodeEditor.folderBrowserNodeId }),
+        onToggleAssistant: focusMode || !internalAssistantEnabled ? undefined : toggleAssistant,
         nodesRef,
         selectedNodeIdsRef,
         selectedConnectionId,
@@ -1232,7 +1232,7 @@ function InfiniteCanvasPage() {
     const handleCancelNodeTask = useCallback(
         async (node: CanvasNodeData) => {
             const taskId = node.metadata?.taskId;
-            if (!taskId) return;
+            if (!taskId) { const c = startGenerationRequest(node.id, node.id); c.abort(); finishGenerationRequest(node.id, c); setRunningNodeId((id) => (id === node.id ? null : id)); setNodes((list) => list.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: item.metadata?.content || item.metadata?.storageKey ? "success" : "idle", taskStage: undefined } } : item))); return; }
             try {
                 const task = activeTasksRef.current.find((item) => item.id === taskId) ?? (await queryGenerationTask(taskId));
                 cancelCanvasTask(task);
@@ -1240,7 +1240,7 @@ function InfiniteCanvasPage() {
                 message.error(error instanceof Error ? error.message : "读取任务失败");
             }
         },
-        [cancelCanvasTask, message],
+        [cancelCanvasTask, finishGenerationRequest, message, setNodes, setRunningNodeId, startGenerationRequest],
     );
     const openCanvasNodeVersions = useCallback((node: CanvasNodeData) => setVersionCompareRootId(node.metadata?.versionOfNodeId || node.id), []);
     const viewCanvasNodeImage = useCallback((node: CanvasNodeData) => setPreviewNodeId(node.id), []);
@@ -1253,8 +1253,9 @@ function InfiniteCanvasPage() {
         handleNodeContextMenu(event as unknown as ReactMouseEvent, nodeId);
     }, [handleNodeContextMenu]);
     const handleLodNodeDoubleClick = useCallback((node: CanvasNodeData) => {
-        if (node.type === CanvasNodeType.Image && node.metadata?.content) viewCanvasNodeImage(node);
-    }, [viewCanvasNodeImage]);
+        if (!readOnly && node.type === CanvasNodeType.Frame && node.metadata?.frame?.collapsed && node.metadata?.folder) handleFrameToggle(node.id);
+        else if (node.type === CanvasNodeType.Image && node.metadata?.content) viewCanvasNodeImage(node);
+    }, [handleFrameToggle, readOnly, viewCanvasNodeImage]);
     const locateProjectStyleNode = useCallback(() => {
         const styleNode = nodesRef.current.find((node) => node.type === CanvasNodeType.Text && node.metadata?.workflowKind === "styleboard");
         if (!styleNode) {
@@ -1301,7 +1302,7 @@ function InfiniteCanvasPage() {
     });
     const emptyCanvasState =
         emptyStateKind === "freeform" ? (
-            <CanvasFreeformEmptyState commands={freeformCreateCommands} onOpenAssistant={openAssistant} />
+            <CanvasFreeformEmptyState commands={freeformCreateCommands} onOpenAssistant={internalAssistantEnabled ? openAssistant : undefined} />
         ) : emptyStateKind === "linked" ? (
             <CanvasLinkedProjectEmptyState
                 projectName={linkedProjectQuery.data?.project.name || workspaceProject?.title || "项目画布"}
@@ -1381,7 +1382,7 @@ function InfiniteCanvasPage() {
                                 onOpenWorkflows={readOnly ? undefined : () => workflowsRef.current?.toggleLibrary()}
                                 workflowsOpen={workflowLibraryOpen}
                                 assistantOpen={rightPanel === "assistant"}
-                                onToggleAssistant={toggleAssistant}
+                                onToggleAssistant={internalAssistantEnabled ? toggleAssistant : undefined}
                                 // LibTV 的画布工作区使用“未命名工作区”作为首屏默认标题；
                                 // 项目库仍保留“未命名项目”，因此只在画布顶栏做显示层映射。
                                 title={workspaceProject?.title === "未命名项目" || !workspaceProject?.title ? "未命名工作区" : workspaceProject.title}
@@ -1452,7 +1453,7 @@ function InfiniteCanvasPage() {
                                             viewport={viewport}
                                             nodes={lodNodes}
                                             nodeStackOrder={nodeStackOrder}
-                                            selectedNodeIds={selectedNodeIds}
+                                            selectedNodeIds={selectedNodeIds} pinnedNodeIds={lodPinnedNodeIds}
                                             theme={theme}
                                             onNodePointerDown={handleLodNodePointerDown}
                                             onNodeContextMenu={handleLodNodeContextMenu}
@@ -1493,7 +1494,7 @@ function InfiniteCanvasPage() {
                                             <CanvasProjectWorldLayers
                                                 containerRef={containerRef}
                                                 connectionApproach={connectionApproach}
-                                                projectId={projectId}
+                                                projectId={projectId} readOnly={readOnly}
                                                 viewportScale={viewport.k}
                                                 displayConnections={renderedConnections}
                                                 selectedConnectionId={selectedConnectionId}
@@ -1537,7 +1538,7 @@ function InfiniteCanvasPage() {
                                                 onNodeHoverEnd={handleCanvasNodeHoverEnd}
                                                 onConnectStart={handleConnectStart}
                                                 onNodeResize={handleNodeResize}
-                                                onToggleFrame={handleFrameToggle}
+                                                onToggleFrame={handleFrameToggle} onUnpackFolder={unpackFolder}
                                                 onFolderStyleChange={handleFolderStyleChange}
                                                 onFolderThemeChange={handleFolderThemeChange}
                                                 onNodeTitleChange={handleNodeTitleChange}
@@ -1755,12 +1756,12 @@ function InfiniteCanvasPage() {
                                 selectedVideoCount={selectedVideoNodes.length}
                                 mergingVideos={Boolean(mergeVideoProgress)}
                                 onAlign={alignSelectedNodes}
-                                onArrange={arrangeSelectedNodes}
+                                onArrange={arrangeSelectedNodes} onPackToFolder={packSelectedIntoFolder}
                                 onCreateStoryboard={createStoryboardGroup}
                                 onCreateReferenceGroup={createReferenceGroup}
                                 onBatchConnect={() => beginBatchConnectionMode(Array.from(selectedNodeIds))}
                                 onMergeVideos={() => void mergeSelectedVideos()}
-                                onAskAssistant={openAssistant}
+                                onAskAssistant={internalAssistantEnabled ? openAssistant : undefined}
                                 onSaveWorkflow={readOnly ? undefined : () => workflowsRef.current?.saveSelection()}
                             />
                         ) : null}
@@ -1867,7 +1868,7 @@ function InfiniteCanvasPage() {
                             canUndo={historyState.canUndo}
                             canRedo={historyState.canRedo}
                             canPaste={hasCopiedNodes || Boolean(navigator.clipboard)}
-                            selectedCount={selectedNodeIds.size}
+                            selectedCount={selectedNodeIds.size} nodes={nodes} selectedNodeIds={selectedNodeIds}
                             screenToCanvas={screenToCanvas}
                             onClose={() => setContextMenu(null)}
                             onAddNode={(type, position) => createNode(type, position)}
@@ -1895,8 +1896,8 @@ function InfiniteCanvasPage() {
                             onCopyMediaUrl={(node) => void copyNodeMediaUrlToClipboard(node)}
                             onUploadToArkPrivateAsset={confirmUploadNodeImageToArkPrivateAsset}
                             onSetAssetCategory={(nodeId, assetCategory) => handleConfigNodeChange(nodeId, { assetCategory })}
-                            onToggleFrame={(node) => handleFrameToggle(node.id)}
-                            onSpreadSelection={spreadSelectedNodes}
+                            onToggleFrame={(node) => handleFrameToggle(node.id)} onUnpackFolder={unpackFolder}
+                            onSpreadSelection={spreadSelectedNodes} onPackSelectionToFolder={packSelectedIntoFolder}
                             onCopySelection={copySelectedNodes}
                             onDeleteSelection={() => deleteNodes(selectedNodeIds)}
                         />
@@ -1905,7 +1906,7 @@ function InfiniteCanvasPage() {
                         <input ref={imageInputRef} type="file" accept="image/*,video/*,.mp4,.mov,.m4v,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav,.txt,.md,.markdown" multiple className="hidden" onChange={handleImageInputChange} />
 
                         <CanvasProjectEditorDialogs
-                            projectId={projectId} theme={theme} config={effectiveConfig}
+                            projectId={projectId} readOnly={readOnly} theme={theme} config={effectiveConfig}
                             document={document} dialogs={dialogs} renderModel={renderModel}
                             generation={generation} nodeEditor={nodeEditor} mediaTools={mediaTools}
                             styles={styles} director={director}
@@ -1914,14 +1915,13 @@ function InfiniteCanvasPage() {
                             onSearchFocusNode={(nodeId) => {
                                 const target = nodeById.get(nodeId);
                                 const parent = target?.parentId ? nodeById.get(target.parentId) : null;
-                                if (parent?.metadata?.frame?.collapsed) toggleFrameCollapsed(parent.id);
+                                if (parent?.metadata?.frame?.collapsed) {
+                                    handleFrameToggle(parent.id); if (parent.metadata.folder) { focusCanvasNode(parent.id); return; }
+                                }
                                 const batchRoot = target?.metadata?.batchRootId ? nodeById.get(target.metadata.batchRootId) : null;
                                 if (batchRoot && !batchRoot.metadata?.imageBatchExpanded) toggleBatchExpanded(batchRoot.id);
                                 const selection = new Set([nodeId]);
-                                selectedNodeIdsRef.current = selection;
-                                setSelectedNodeIds(selection);
-                                setSelectedConnectionId(null);
-                                focusCanvasNode(nodeId);
+                                selectedNodeIdsRef.current = selection; setSelectedNodeIds(selection); setSelectedConnectionId(null); focusCanvasNode(nodeId);
                             }}
                             imports={{ onApplyLibTV: applyLibTVImport, onApplyTapNow: applyTapNowImport }}
                             timeline={{

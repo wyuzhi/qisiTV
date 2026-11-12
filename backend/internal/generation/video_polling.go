@@ -17,7 +17,7 @@ import (
 
 const DefaultVideoPollInterval = 30 * time.Second
 
-const beefAPIVideoPollInterval = 5 * time.Second
+const beefTVVideoPollInterval = 5 * time.Second
 
 type VideoPollPolicy struct {
 	QueryStage            string
@@ -25,10 +25,12 @@ type VideoPollPolicy struct {
 	Interval              time.Duration
 	MaxNotFoundMisses     int
 	MaxMalformedResponses int
-	MaxDownloadTries      int
-	RetryTransient        bool
-	Sleep                 func(context.Context, time.Duration) error
-	Notify                func(context.Context, string, VideoPollEvent, error)
+	// MaxTransientFailures 限制连续的可重试瞬时失败（5xx、网络中断）。0 表示只受轮询总时限约束。
+	MaxTransientFailures int
+	MaxDownloadTries     int
+	RetryTransient       bool
+	Sleep                func(context.Context, time.Duration) error
+	Notify               func(context.Context, string, VideoPollEvent, error)
 }
 
 type VideoPollEvent string
@@ -71,12 +73,12 @@ func DefaultVideoPollPolicy() VideoPollPolicy {
 }
 
 func videoPollPolicyForConfig(ctx context.Context, config Config, policy VideoPollPolicy) VideoPollPolicy {
-	if IsBeefAPIVideoConfig(ctx, config) {
+	if IsBeefTVVideoConfig(ctx, config) {
 		if policy.InitialDelay == DefaultVideoPollInterval {
-			policy.InitialDelay = beefAPIVideoPollInterval
+			policy.InitialDelay = beefTVVideoPollInterval
 		}
 		if policy.Interval == DefaultVideoPollInterval {
-			policy.Interval = beefAPIVideoPollInterval
+			policy.Interval = beefTVVideoPollInterval
 		}
 	}
 	return policy
@@ -95,6 +97,7 @@ func RunVideoPollLoop(ctx context.Context, taskID string, policy VideoPollPolicy
 	nextDelay := policy.InitialDelay
 	notFoundMisses := 0
 	malformedResponses := 0
+	transientFailures := 0
 	retrying := false
 	for time.Now().Before(deadline) {
 		if nextDelay > 0 {
@@ -115,18 +118,26 @@ func RunVideoPollLoop(ctx context.Context, taskID string, policy VideoPollPolicy
 			if malformed {
 				malformedResponses++
 				notFoundMisses = 0
+				transientFailures = 0
 				if malformedResponses >= policy.MaxMalformedResponses {
 					return nil, err
 				}
 			} else if notFound {
 				malformedResponses = 0
 				notFoundMisses++
+				transientFailures = 0
 				if notFoundMisses >= policy.MaxNotFoundMisses {
 					return nil, err
 				}
 			} else {
 				malformedResponses = 0
 				notFoundMisses = 0
+				transientFailures++
+				// Return the upstream error, not a timeout: a channel that is
+				// fully down must not keep an image task retrying for minutes.
+				if policy.MaxTransientFailures > 0 && transientFailures >= policy.MaxTransientFailures {
+					return nil, err
+				}
 			}
 			if !retrying {
 				retrying = true
@@ -137,6 +148,7 @@ func RunVideoPollLoop(ctx context.Context, taskID string, policy VideoPollPolicy
 		}
 		notFoundMisses = 0
 		malformedResponses = 0
+		transientFailures = 0
 		nextDelay = policy.Interval
 		if retrying {
 			retrying = false
@@ -243,6 +255,10 @@ func videoResultPending(err error) bool {
 func RetryableVideoPollError(ctx context.Context, err error) (retry bool, notFound bool) {
 	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) {
 		return false, false
+	}
+	var moduleQuery moduleQueryError
+	if errors.As(err, &moduleQuery) {
+		return true, true
 	}
 	var preparation RequestPreparationError
 	if errors.As(err, &preparation) {

@@ -112,6 +112,20 @@ func validateBaseURL(base string) error {
 	return nil
 }
 
+// resolveClientToken keeps one-click tokens out of process arguments. A token
+// file takes precedence over BEEFTV_CLIENT_TOKEN; when the file is missing or
+// empty the client is unauthenticated instead of falling back to the env var.
+func resolveClientToken() string {
+	if path := strings.TrimSpace(os.Getenv("BEEFTV_CLIENT_TOKEN_FILE")); path != "" {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(raw))
+	}
+	return strings.TrimSpace(os.Getenv("BEEFTV_CLIENT_TOKEN"))
+}
+
 func newClient() (*client, error) {
 	base, source := resolveBaseURL()
 	if err := validateBaseURL(base); err != nil {
@@ -121,7 +135,7 @@ func newClient() (*client, error) {
 		fixedBaseURL: source == "BEEFTV_BASE_URL",
 		baseURL:      strings.TrimRight(base, "/"),
 		clientID:     strings.TrimSpace(os.Getenv("BEEFTV_CLIENT_ID")),
-		token:        strings.TrimSpace(os.Getenv("BEEFTV_CLIENT_TOKEN")),
+		token:        resolveClientToken(),
 		ownerToken:   strings.TrimSpace(os.Getenv("BEEFTV_OWNER_TOKEN")),
 		// 桌面形态整个 API 由桌面启动令牌把关：CLI/MCP 要接同一个桌面工作区就必须出示它。
 		// 它只是通过守卫，不改变能力模式——能力仍由 owner/已登记客户端凭据决定。
@@ -303,7 +317,7 @@ func main() {
 				fmt.Println(string(encoded))
 			}
 		}
-		fmt.Fprintf(os.Stderr, "beeftv: %v\n", err)
+		fmt.Fprintf(os.Stderr, "qisitv: %v\n", err)
 		os.Exit(code)
 	}
 	os.Exit(exitOK)
@@ -342,6 +356,9 @@ func run(args []string) error {
 	}
 	if args[0] == "diagnostics" {
 		return runDiagnostics(args[1:])
+	}
+	if args[0] == "plugin" {
+		return runPlugin(args[1:])
 	}
 	c, err := newClient()
 	if err != nil {
@@ -400,36 +417,40 @@ func run(args []string) error {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `beeftv — BeefTV 业务操作命令行（连接正在运行的本地工作区）
+	fmt.Fprint(os.Stderr, `qisitv — qisiTV 业务操作命令行（连接正在运行的本地工作区）
 
-  beeftv skills help  （远程技能市场，无需运行桌面应用）
-  beeftv diagnostics analyze --file <diagnostics.zip>  （离线分析，无需运行桌面应用）
-  beeftv ops [--read-only] [--json]
-  beeftv ops call <operation> --params '<json>' [--operation-id <id>] [--json]
-  beeftv business discover
-  beeftv business call --tool <id> --params '<path/query/body json>' [--operation-id <id>]
-  beeftv business upload --file <path> [--target resource|skill|plugin] [--params '<json>'] [--operation-id <id>]
-  beeftv canvas get --canvas <id> [--json]
-  beeftv canvas search [--query <q>] [--page N] [--page-size N] [--json]
-  beeftv canvas node update --canvas <id> --node <id> --expected-revision N [--title T] [--prompt P] [--content C] --op-id <id>
-  beeftv canvas nodes create --canvas <id> --expected-revision N --node <title:type[:prompt]>... --op-id <id>
-  beeftv canvas edge create --canvas <id> --from <nodeId> --to <nodeId> --expected-revision N --op-id <id>
-  beeftv asset list [--query <q>] [--kind <kind>] [--favorite] [--recent] [--project <name>] [--generated] [--json]
-  beeftv asset get --asset <id> [--json]
-  beeftv task get --task <id> [--json]
-  beeftv orders [--canvas <id>] [--json]
-  beeftv approve <proposalId> [--json]
-  beeftv writes [--canvas <id>] [--json]
-  beeftv undo <opId|latest> [--canvas <id>] [--json]
-  beeftv client register --label <label> [--kind codex|claude|cursor|other] [--mode read-only|read-write] [--approval ask|caller|auto]
-  beeftv mcp serve [--read-only] [--all-business-tools]
+  qisitv skills help  （远程技能市场，无需运行桌面应用）
+  qisitv diagnostics analyze --file <diagnostics.zip>  （离线分析，无需运行桌面应用）
+  qisitv plugin validate|try <插件目录>  （离线检查接口插件、预览将发出的请求，无需运行桌面应用）
+  qisitv ops [--read-only] [--json]
+  qisitv ops call <operation> --params '<json>' [--operation-id <id>] [--json]
+  qisitv business discover
+  qisitv business call --tool <id> --params '<path/query/body json>' [--operation-id <id>]
+  qisitv business upload --file <path> [--target resource|skill|plugin] [--params '<json>'] [--operation-id <id>]
+  qisitv canvas create [--title <title>] [--canvas <id>] [--project <projectId>] [--folder <folderId>] --op-id <id> [--json]
+  qisitv canvas get --canvas <id> [--json]
+  qisitv canvas search [--query <q>] [--page N] [--page-size N] [--json]
+  qisitv canvas node update --canvas <id> --node <id> --expected-revision N [--title T] [--prompt P] [--content C] --op-id <id>
+  qisitv canvas nodes create --canvas <id> --expected-revision N --node <title:type[:prompt]>... --op-id <id>
+  qisitv canvas edge create --canvas <id> --from <nodeId> --to <nodeId> --expected-revision N --op-id <id>
+  qisitv asset list [--query <q>] [--kind <kind>] [--favorite] [--recent] [--project <name>] [--generated] [--json]
+  qisitv asset get --asset <id> [--json]
+  qisitv task get --task <id> [--json]
+  qisitv orders [--canvas <id>] [--json]
+  qisitv approve <proposalId> [--json]
+  qisitv writes [--canvas <id>] [--json]
+  qisitv undo <opId|latest> [--canvas <id>] [--json]
+  qisitv client register --label <label> [--kind codex|workbuddy|claude|cursor|other] [--mode read-only|read-write] [--approval ask|caller|auto]
+  qisitv mcp serve [--read-only] [--all-business-tools]
 
-连接哪个工作区：不设 BEEFTV_BASE_URL 时自动连正在运行的 BeefTV 桌面应用，端口是动态的。
+连接哪个工作区：不设 BEEFTV_BASE_URL 时自动连正在运行的 qisiTV 本机引擎，端口是动态的。
 BEEFTV_DATA_DIR 可以指向非默认数据目录。Windows 从用户目录下 .beeftv/runtime 读取对应
-工作区的运行信息，其他平台读取数据目录里的 runtime.json。升级后请重新打开 BeefTV。
+工作区的运行信息，其他平台读取数据目录里的 runtime.json。升级后请重新打开 qisiTV。
 
-凭据：在 BeefTV 的设置里新建一个客户端，把它给出的 BEEFTV_CLIENT_ID 与 BEEFTV_CLIENT_TOKEN
-填进环境变量即可，不需要桌面令牌。新连接默认开放全部业务工具，操作审批由外部 Agent 管理。
+凭据：在 qisiTV 的设置里新建一个客户端，把它给出的 BEEFTV_CLIENT_ID 与 BEEFTV_CLIENT_TOKEN
+填进环境变量即可，不需要桌面令牌。一键接入改用 BEEFTV_CLIENT_TOKEN_FILE 指向 qisiTV 数据目录里的
+凭据文件，令牌不会出现在进程参数里；两者都给时以文件为准，文件不存在或为空按未授权处理。
+新连接默认开放全部业务工具，操作审批由外部 Agent 管理。
 MCP 默认只列出画布、素材、媒体与技能操作，底层业务接口通过 business.list 查找、business.call 调用；
 需要把每个底层接口单独列成工具时加 --all-business-tools（或设 BEEFTV_MCP_ALL_BUSINESS_TOOLS=1）。
 历史只读凭据继续保持只读；CLI 仍支持显式签发只读凭据。
@@ -437,7 +458,7 @@ MCP 默认只列出画布、素材、媒体与技能操作，底层业务接口�
 写操作必须带幂等键（CLI 的 --op-id / --operation-id，MCP 工具参数里的 operationId）：重试同一操作要复用同一个值。
 business call 提交生成（会扣费）时 --operation-id 必填，并作为任务的 clientOperationId。
 
-环境变量：BEEFTV_BASE_URL、BEEFTV_DATA_DIR、BEEFTV_CLIENT_ID、BEEFTV_CLIENT_TOKEN、
+环境变量：BEEFTV_BASE_URL、BEEFTV_DATA_DIR、BEEFTV_CLIENT_ID、BEEFTV_CLIENT_TOKEN、BEEFTV_CLIENT_TOKEN_FILE、
 BEEFTV_OWNER_TOKEN（owner 可信通道）、BEEFTV_DESKTOP_TOKEN（桌面自身调用）
 退出码：0 成功；2 用法；3 未找到；4 冲突；5 前置条件；6 只读/未授权；7 不支持；8 参数；9 连接失败；1 内部
 `)
@@ -454,9 +475,11 @@ func emitJSON(value any) error {
 
 func runCanvas(c *client, args []string) error {
 	if len(args) == 0 {
-		return &cliError{code: exitUsage, reason: "missing_subcommand", msg: "canvas 需要 get|search|node|nodes|edge"}
+		return &cliError{code: exitUsage, reason: "missing_subcommand", msg: "canvas 需要 create|get|search|node|nodes|edge"}
 	}
 	switch args[0] {
+	case "create":
+		return runCanvasCreate(c, args[1:])
 	case "get":
 		fs := flag.NewFlagSet("canvas get", flag.ContinueOnError)
 		canvasID := fs.String("canvas", "", "画布 ID")
@@ -526,6 +549,40 @@ func flagError(err error) error {
 		return nil
 	}
 	return &cliError{code: exitUsage, reason: "bad_flags", msg: err.Error()}
+}
+
+func runCanvasCreate(c *client, args []string) error {
+	fs := flag.NewFlagSet("canvas create", flag.ContinueOnError)
+	canvasID := fs.String("canvas", "", "可选自定义画布 ID")
+	title := fs.String("title", "", "画布标题（默认：未命名画布）")
+	projectID := fs.String("project", "", "可选关联项目 ID")
+	folderID := fs.String("folder", "", "可选画布文件夹 ID")
+	opID := fs.String("op-id", "", "幂等键（必填）")
+	jsonOut := fs.Bool("json", false, "输出 JSON")
+	if err := fs.Parse(args); err != nil {
+		return flagError(err)
+	}
+	if *opID == "" {
+		return &cliError{code: exitUsage, reason: "missing_flag", msg: "--op-id 必填"}
+	}
+	params := map[string]any{}
+	if *canvasID != "" {
+		params["canvasId"] = *canvasID
+	}
+	if *title != "" {
+		params["title"] = *title
+	}
+	if *projectID != "" {
+		params["projectId"] = *projectID
+	}
+	if *folderID != "" {
+		params["folderId"] = *folderID
+	}
+	raw, err := c.callOp("canvas.create", *opID, mustJSON(params))
+	if err != nil {
+		return err
+	}
+	return printResult(raw, *jsonOut)
 }
 
 func runCanvasNodeUpdate(c *client, args []string) error {
@@ -884,7 +941,7 @@ func runMCP(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	server := mcp.NewServer(&mcp.Implementation{Name: "beeftv", Version: "1.0.0"}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: "qisitv", Version: "1.0.0"}, nil)
 	filteredOps := make([]opDescriptor, 0, len(ops))
 	for _, op := range ops {
 		if isDefaultMCPOperation(op.ID) {
@@ -953,7 +1010,7 @@ func runMCP(c *client, args []string) error {
 }
 
 func isDefaultMCPOperation(id string) bool {
-	return !strings.HasPrefix(id, "conversation.") && !strings.HasPrefix(id, "skill.publish.")
+	return !strings.HasPrefix(id, "conversation.") && !strings.HasPrefix(id, "skill.publish.") && id != "skill.script.run"
 }
 
 func orNone(value string) string {

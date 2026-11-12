@@ -13,7 +13,7 @@ test("opaque model keeps versioned media controls through catalog import and sav
     expect(item.mediaCapabilities?.audio?.promptMaxChars).toBe(5000);
     expect(item.mediaCapabilities?.upscale?.referenceKinds).toEqual(["image", "video"]);
     expect(catalogModelMapping(item)).toEqual({ capability: "audio", protocol: "openai-audio" });
-    const channel = { id: "beefapi", interfaceType: "openai-image", models: [] } as unknown as ModelChannel;
+    const channel = { id: "beeftv", interfaceType: "openai-image", models: [] } as unknown as ModelChannel;
     const [profile] = mergeFetchedChannelModelProfiles(channel, [item]);
     expect(profile.capability).toBe("audio");
     expect(profile.mediaCapabilities).toEqual(item.mediaCapabilities);
@@ -24,7 +24,7 @@ test("opaque model keeps versioned media controls through catalog import and sav
 
 test("missing current advertisement removes cached media authority", () => {
     const item = sanitizeChannelModelCatalogItem({ id: "opaque-fixture", modelType: "audio", mediaCapabilities: fields, mediaCapabilitiesVersion: "old" })!;
-    const base = { id: "beefapi", interfaceType: "openai-audio", models: [item.id] } as unknown as ModelChannel;
+    const base = { id: "beeftv", interfaceType: "openai-audio", models: [item.id] } as unknown as ModelChannel;
     const profiles = mergeFetchedChannelModelProfiles(base, [item]);
     const [next] = mergeFetchedChannelModelProfiles({ ...base, modelProfiles: profiles }, [{ id: item.id, modelType: "audio" }]);
     expect(next.mediaCapabilities).toBeUndefined();

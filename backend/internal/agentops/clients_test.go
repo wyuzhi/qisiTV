@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"qisitv/backend/internal/securefile"
 )
 
 // 已有安装的登记文件没有 kind / lastUsedAt / revokedAt：升级后必须照旧能用，
@@ -31,6 +33,9 @@ func TestLoadsPreExistingRegistrationsWithoutNewFields(t *testing.T) {
 	if found.Kind != ClientKindOther {
 		t.Fatalf("缺失的 kind 应补成 other，得到 %q", found.Kind)
 	}
+	if found.Origin != "" {
+		t.Fatalf("旧登记没有 origin 时应一律视为手动，得到 %q", found.Origin)
+	}
 	items := registry.List()
 	if len(items) != 1 || items[0].ID != "client-legacy" {
 		t.Fatalf("旧登记应出现在列表里：%+v", items)
@@ -40,6 +45,32 @@ func TestLoadsPreExistingRegistrationsWithoutNewFields(t *testing.T) {
 	}
 	if _, ok := registry.Lookup("client-legacy", "legacy-token"); ok {
 		t.Fatal("吊销后旧登记仍然有效")
+	}
+}
+
+func TestOriginDistinguishesOneClickFromManualConnections(t *testing.T) {
+	registry := NewClientRegistry(t.TempDir())
+	oneClick, _, err := registry.RegisterClientOrigin("claude", "Claude Code", "one-click:claude", ClientReadWrite, ClientApprovalCaller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manual, _, err := registry.RegisterClient("claude", "Claude Code", ClientReadWrite, ClientApprovalCaller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := registry.List()
+	if len(items) != 2 {
+		t.Fatalf("items = %+v", items)
+	}
+	origins := map[string]string{}
+	for _, item := range items {
+		origins[item.ID] = item.Origin
+	}
+	if origins[oneClick.ID] != "one-click:claude" {
+		t.Fatalf("one-click origin = %q", origins[oneClick.ID])
+	}
+	if origins[manual.ID] != "" {
+		t.Fatalf("manual origin = %q, want empty", origins[manual.ID])
 	}
 }
 
@@ -122,12 +153,30 @@ func TestRegistryNeverStoresRawToken(t *testing.T) {
 	if strings.Contains(string(raw), token) {
 		t.Fatal("登记文件里出现了原始 token")
 	}
-	info, err := os.Stat(registry.path)
-	if err != nil {
+	if err := securefile.Verify(registry.path); err != nil {
+		t.Fatalf("登记文件没有收紧到只有当前用户可读：%v", err)
+	}
+}
+
+// owner 与宿主凭据是原始 token：新写的、以及旧版本按默认权限写下的，都要只有当前用户可读。
+func TestAgentCredentialsAreRestrictedToTheCurrentUser(t *testing.T) {
+	dir := t.TempDir()
+	// 旧版本留下的宿主凭据：Unix 上是 0644，Windows 上继承目录权限。
+	if err := os.WriteFile(HostTokenPath(dir), []byte("legacy-host-token"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("登记文件权限应为 0600，得到 %v", info.Mode().Perm())
+	if err := os.Chmod(HostTokenPath(dir), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	EnsureAgentCredentials(dir)
+	for _, path := range []string{OwnerTokenPath(dir), HostTokenPath(dir)} {
+		if err := securefile.Verify(path); err != nil {
+			t.Fatalf("%s: %v", filepath.Base(path), err)
+		}
+	}
+	raw, err := os.ReadFile(HostTokenPath(dir))
+	if err != nil || string(raw) != "legacy-host-token" {
+		t.Fatalf("已有宿主凭据被改写：%q %v", raw, err)
 	}
 }
 
@@ -207,5 +256,21 @@ func TestNormalizeAndRegisterClientApprovalMode(t *testing.T) {
 		if !ok || lookedUp.ApprovalMode != mode {
 			t.Fatalf("lookup ApprovalMode = %+v, want %q", lookedUp, mode)
 		}
+	}
+}
+
+// 登记文件读不出时，ListLive 必须报错，不能把「读不出」当成「没有凭据」；
+// List 保持原来的宽松行为供只展示用的调用方使用。
+func TestListLiveReportsUnreadableRegistry(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "agent_clients.json"), []byte("{bad-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry := NewClientRegistry(dir)
+	if _, err := registry.ListLive(); err == nil {
+		t.Fatal("损坏的登记文件应让 ListLive 报错")
+	}
+	if items := registry.List(); len(items) != 0 {
+		t.Fatalf("List 应保持宽松返回空列表，得到 %d 项", len(items))
 	}
 }

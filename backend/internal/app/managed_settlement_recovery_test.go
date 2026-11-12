@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/model"
 	localtask "qisitv/backend/internal/task"
@@ -21,7 +21,7 @@ func TestManagedFailedImagePendingBillingKeepsQueryingUntilRefunded(t *testing.T
 			svc, db, task, row, _ := imageSubmissionFixture(t, false)
 			noResult := localtask.RecoveryNoResult
 			task.Status, task.RecoveryOutcome, task.BeefBillingState = model.TaskStatusFailed, &noResult, &pending
-			task.InputJSON = `{"mode":"image","config":{"credentialRef":"beefapi-enterprise"}}`
+			task.InputJSON = `{"mode":"image","config":{"credentialRef":"beeftv"}}`
 			if err := db.Save(&task).Error; err != nil {
 				t.Fatal(err)
 			}
@@ -42,13 +42,13 @@ func TestManagedFailedImagePendingBillingKeepsQueryingUntilRefunded(t *testing.T
 			}))
 			defer server.Close()
 			wire, _ := svc.imageSubmissionWire(row)
-			wire.URL, wire.ReplayProtocol, wire.MediaType, wire.ChannelID = server.URL+"/v1/media/tasks", beefapi.MediaProtocolVersion, "image", beefapi.ChannelID
+			wire.URL, wire.ReplayProtocol, wire.MediaType, wire.ChannelID = server.URL+"/v1/media/tasks", beeftv.MediaProtocolVersion, "image", beeftv.ChannelID
 			row.QueryCipher, _ = svc.managedImageQueryCipher(task, wire)
 			row.SendCount = 1
 			if err := db.Save(row).Error; err != nil {
 				t.Fatal(err)
 			}
-			ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: server.URL})
+			ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: server.URL})
 			candidates, err := svc.repo.FailedImagesForRecovery("", 8)
 			if err != nil || len(candidates) != 1 {
 				t.Fatalf("pending task omitted: %d %v", len(candidates), err)

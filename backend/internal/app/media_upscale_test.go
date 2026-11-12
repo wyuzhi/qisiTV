@@ -72,16 +72,16 @@ func TestLikeAIUpscalePreflightAndAdmissionPreserveBillingAndTaskIdentity(t *tes
 
 func TestUpscaleAdmissionPinsOfficialCredentialAndPayload(t *testing.T) {
 	s, _, _, _ := creationTestService(t)
-	if err := s.SaveLocalModelConfig([]byte(`{"channels":[{"id":"beefapi","baseUrl":"https://enterprise.beefapi.com","apiKey":"synthetic-disk-key","enabled":true}]}`)); err != nil {
+	if err := s.SaveLocalModelConfig([]byte(`{"channels":[{"id":"beeftv","baseUrl":"https://beeftv.app","apiKey":"synthetic-disk-key","enabled":true}]}`)); err != nil {
 		t.Fatal(err)
 	}
-	input := map[string]any{"mode": "image", "prompt": "AI 超分", "config": map[string]any{"credentialRef": "beefapi-enterprise", "apiKey": "forged-client-key", "baseUrl": "https://untrusted.invalid", "model": "topaz-standard-v2", "interfaceType": "newapi"}, "upscale": map[string]any{"factor": 2}, "referenceImages": []any{map[string]any{"storageKey": "resource:owned-source"}}}
-	resolved, err := s.resolveManagedBeefAPISecrets(input)
+	input := map[string]any{"mode": "image", "prompt": "AI 超分", "config": map[string]any{"credentialRef": "beeftv", "apiKey": "forged-client-key", "baseUrl": "https://untrusted.invalid", "model": "topaz-standard-v2", "interfaceType": "newapi"}, "upscale": map[string]any{"factor": 2}, "referenceImages": []any{map[string]any{"storageKey": "resource:owned-source"}}}
+	resolved, err := s.resolveManagedBeefTVSecrets(input)
 	if err != nil {
 		t.Fatal(err)
 	}
 	config := resolved["config"].(map[string]any)
-	if config["apiKey"] != "synthetic-disk-key" || config["baseUrl"] != "https://enterprise.beefapi.com" {
+	if config["apiKey"] != "synthetic-disk-key" || config["baseUrl"] != "https://beeftv.app" {
 		t.Fatal("client overrode managed credential origin")
 	}
 	if err := (taskCatalogAdapter{s}).ValidateCapability(resolved); err != nil {
@@ -183,7 +183,7 @@ func TestUpscaleFourModelsAdmitAndReplayThroughTaskDomain(t *testing.T) {
 	for _, name := range []string{"topaz-standard-v2", "topaz-wonder-3.5", "topaz-proteus", "topaz-starlight-fast-2"} {
 		t.Run(name, func(t *testing.T) {
 			s, db, _, _ := creationTestService(t)
-			if err := s.SaveLocalModelConfig([]byte(`{"channels":[{"id":"beefapi","baseUrl":"https://enterprise.beefapi.com","apiKey":"synthetic-admission-key","enabled":true}]}`)); err != nil {
+			if err := s.SaveLocalModelConfig([]byte(`{"channels":[{"id":"beeftv","baseUrl":"https://beeftv.app","apiKey":"synthetic-admission-key","enabled":true}]}`)); err != nil {
 				t.Fatal(err)
 			}
 			kind := generation.UpscaleMediaType(name)
@@ -198,7 +198,7 @@ func TestUpscaleFourModelsAdmitAndReplayThroughTaskDomain(t *testing.T) {
 			if kind == "video" {
 				field = "referenceVideos"
 			}
-			input := map[string]any{"mode": kind, "prompt": "AI 超分", "config": map[string]any{"credentialRef": "beefapi-enterprise", "model": name, "interfaceType": "newapi"}, "upscale": map[string]any{"factor": 2}, field: []any{map[string]any{"storageKey": "resource:owned-source"}}, "metadata": map[string]any{"clientOperationId": "stable-upscale-operation"}}
+			input := map[string]any{"mode": kind, "prompt": "AI 超分", "config": map[string]any{"credentialRef": "beeftv", "model": name, "interfaceType": "newapi"}, "upscale": map[string]any{"factor": 2}, field: []any{map[string]any{"storageKey": "resource:owned-source"}}, "metadata": map[string]any{"clientOperationId": "stable-upscale-operation"}}
 			request := CreateTaskRequest{Type: "canvas_" + kind, Operation: kind, Model: name, Prompt: "AI 超分", Input: input}
 			first, err := s.CreateTask("user", request)
 			if err != nil {

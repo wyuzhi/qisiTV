@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { App, Button, ConfigProvider } from "antd";
+import { BeefTVConnectionProvider } from "@/components/layout/beeftv-connection-provider";
 import { getAntThemeConfig } from "@/lib/app-theme";
 import { applySkinTheme, DEFAULT_CLASSIC_SKIN } from "@/lib/skin-themes";
 import { useState } from "react";
@@ -47,7 +48,7 @@ function Harness() {
     const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
     const dark = new URLSearchParams(location.search).get("theme") === "dark";
     applySkinTheme(DEFAULT_CLASSIC_SKIN, dark ? "dark" : "light");
-    return <ConfigProvider theme={getAntThemeConfig(dark, DEFAULT_CLASSIC_SKIN)}><App>
+    return <ConfigProvider theme={getAntThemeConfig(dark, DEFAULT_CLASSIC_SKIN)}><App><BeefTVConnectionProvider>
         <main style={{ padding: 20, maxWidth: 900 }}>
             <ChannelSettingsPane onOpenModels={() => {}} />
             <output data-testid="channel-count">{live.channels.length}</output>
@@ -67,6 +68,6 @@ function Harness() {
                 <Button onClick={() => setModalOpen(false)}>关闭验证弹窗</Button>
             </AppModal>
         </main>
-    </App></ConfigProvider>;
+    </BeefTVConnectionProvider></App></ConfigProvider>;
 }
 void hydrateModelConfig().then(() => createRoot(document.getElementById("root")!).render(<Harness />));

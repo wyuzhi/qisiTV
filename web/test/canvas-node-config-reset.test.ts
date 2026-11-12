@@ -98,7 +98,7 @@ describe("applyNodeConfigPatch 模型切换清理生成参数", () => {
             id: "BeefTV",
             name: "BeefTV",
             scope: "system",
-            baseUrl: "https://enterprise.beefapi.com/v1",
+            baseUrl: "https://beeftv.app/v1",
             models: ["seedance-2.5"],
             modelProfiles: [
                 {

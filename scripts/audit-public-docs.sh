@@ -170,6 +170,12 @@ for (const file of files) {
 
   if (!/\.(?:md|mdx)$/i.test(file)) continue;
   const prose = source.replace(/```[\s\S]*?```/g, "").replace(/`[^`\r\n]*`/g, "");
+  const legacyUpstreamBrandRegex = new RegExp(`\\b${"Beef" + "API"}\\b`, "i");
+  if (file.startsWith("docs/content/docs/")) prose.split(/\r?\n/).forEach((line, idx) => {
+    if (legacyUpstreamBrandRegex.test(line)) {
+      patternFailures.push(`${file}:${idx + 1}: [upstream brand name (use BeefTV 官方算力)] ${line.trim()}`);
+    }
+  });
   const targets = [
     ...Array.from(prose.matchAll(/\[[^\]]*\]\(([^)]+)\)/g), (m) => m[1]),
     ...Array.from(prose.matchAll(/\b(?:src|href)\s*=\s*["']([^"']+)["']/gi), (m) => m[1]),

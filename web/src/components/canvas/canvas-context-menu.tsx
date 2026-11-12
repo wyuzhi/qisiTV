@@ -8,6 +8,7 @@ import {
     Clipboard,
     CloudUpload,
     Copy,
+    Download,
     FolderOpen,
     FolderPlus,
     Image as ImageIcon,
@@ -34,6 +35,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { canvasNodeAssetCategory } from "@/lib/canvas/canvas-node-asset";
 import { isCanvasFolderNode, isFrameNode } from "@/lib/canvas/canvas-frame";
 import { resolveAddNodeMenuCommands, type AddNodeMenuContext } from "@/lib/canvas/tool-registry";
+import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { usePluginStore } from "@/stores/use-plugin-store";
 import { cn } from "@/lib/utils";
@@ -78,9 +80,13 @@ type CanvasNodeContextMenuProps = {
     onUploadToArkPrivateAsset: () => void;
     onSetAssetCategory: (category: CanvasAssetCategory) => void;
     onToggleFrame: () => void;
+    onUnpackFolder?: () => void;
     onSpreadSelection?: () => void;
+    onPackSelectionToFolder?: () => void;
     onCopySelection?: () => void;
     onDeleteSelection?: () => void;
+    downloadableSelectionCount?: number;
+    onBatchDownloadSelection?: () => void;
 };
 
 export function CanvasNodeContextMenu({
@@ -118,9 +124,13 @@ export function CanvasNodeContextMenu({
     onUploadToArkPrivateAsset,
     onSetAssetCategory,
     onToggleFrame,
+    onUnpackFolder,
     onSpreadSelection,
+    onPackSelectionToFolder,
     onCopySelection,
     onDeleteSelection,
+    downloadableSelectionCount = 0,
+    onBatchDownloadSelection,
 }: CanvasNodeContextMenuProps) {
     const theme = canvasThemes[useActiveTheme()];
     const [addOpen, setAddOpen] = useState(false);
@@ -172,6 +182,18 @@ export function CanvasNodeContextMenu({
     const assetCategory = node ? canvasNodeAssetCategory(node) : "other";
     const hasMultiSelection = selectedCount >= 2;
     const position = getContextMenuPosition(menu, hasMultiSelection);
+    const pluginContextMenuEntries = usePluginSlot("canvas.contextMenu");
+    const pluginContextTarget = menu.type === "canvas" ? "canvas" : hasMultiSelection ? "selection" : "node";
+    const pluginContextMenuCtx = {
+        target: pluginContextTarget as "canvas" | "node" | "selection",
+        node: node ?? null,
+        selectedNodeIds: node ? [node.id] : [],
+        selectedNodes: node ? [node] : [],
+        position: { x: menu.x, y: menu.y },
+    };
+    const visiblePluginMenuItems = pluginContextMenuEntries.filter((entry) =>
+        entry.payload.when ? entry.payload.when(pluginContextMenuCtx) : true,
+    );
 
     return (
         <>
@@ -204,7 +226,9 @@ export function CanvasNodeContextMenu({
                             <MenuHeader title="画布命令" />
                             {hasMultiSelection ? (
                                 <>
+                                    <MenuButton icon={<FolderPlus className="size-4" />} label="收纳到文件夹" detail="合并进新建画布文件夹" disabled={!onPackSelectionToFolder} onClick={() => onPackSelectionToFolder && runAction(onPackSelectionToFolder)} />
                                     <MenuButton icon={<LayoutTemplate className="size-4" />} label="自适应整理画布" detail="保持相对布局并加大边距" disabled={!onSpreadSelection} onClick={() => onSpreadSelection && runAction(onSpreadSelection)} />
+                                    <MenuButton icon={<Download className="size-4" />} label={downloadableSelectionCount ? `批量下载素材 (${downloadableSelectionCount})` : "批量下载素材"} disabled={!downloadableSelectionCount || !onBatchDownloadSelection} onClick={() => onBatchDownloadSelection && runAction(onBatchDownloadSelection)} />
                                     <MenuDivider />
                                 </>
                             ) : null}
@@ -221,7 +245,9 @@ export function CanvasNodeContextMenu({
                         <>
                             <MenuHeader title={`已选 ${selectedCount} 个节点`} />
                             <MenuSection label="选区" />
+                            <MenuButton icon={<FolderPlus />} label="收纳到文件夹" detail="合并进新建画布文件夹" disabled={!onPackSelectionToFolder} onClick={() => onPackSelectionToFolder && runAction(onPackSelectionToFolder)} />
                             <MenuButton icon={<LayoutTemplate />} label="自适应整理画布" detail="保持相对布局并加大边距" disabled={!onSpreadSelection} onClick={() => onSpreadSelection && runAction(onSpreadSelection)} />
+                            <MenuButton icon={<Download />} label={downloadableSelectionCount ? `批量下载素材 (${downloadableSelectionCount})` : "批量下载素材"} disabled={!downloadableSelectionCount || !onBatchDownloadSelection} onClick={() => onBatchDownloadSelection && runAction(onBatchDownloadSelection)} />
                             <MenuDivider />
                             <MenuButton icon={<Copy />} label={`复制 ${selectedCount} 个节点`} shortcut="⌘C" disabled={!onCopySelection} onClick={() => onCopySelection && runAction(onCopySelection)} />
                             <MenuButton icon={<Trash2 />} label={`删除 ${selectedCount} 个节点`} danger disabled={!onDeleteSelection} onClick={() => onDeleteSelection && runAction(onDeleteSelection)} />
@@ -261,11 +287,21 @@ export function CanvasNodeContextMenu({
                                     <MenuHeader title={node?.title || nodeTypeLabel(node)} />
                                     <MenuSection label="节点操作" />
                                     {isFrame ? (
-                                        <MenuButton
-                                            icon={isFolder ? <FolderOpen /> : <PanelTop />}
-                                            label={node?.metadata?.frame?.collapsed ? `展开${isFolder ? "文件夹" : "背板"}` : `折叠${isFolder ? "文件夹" : "背板"}`}
-                                            onClick={() => runAction(onToggleFrame)}
-                                        />
+                                        <>
+                                            <MenuButton
+                                                icon={isFolder ? <FolderOpen /> : <PanelTop />}
+                                                label={node?.metadata?.frame?.collapsed ? (isFolder ? "打开文件夹" : "展开背板") : (isFolder ? "收起文件夹" : "折叠背板")}
+                                                onClick={() => runAction(onToggleFrame)}
+                                            />
+                                            {isFolder && !node?.metadata?.folder?.assetFolderId && onUnpackFolder ? (
+                                                <MenuButton
+                                                    icon={<Layers3 />}
+                                                    label="解散文件夹"
+                                                    detail="将内部节点释放回画布"
+                                                    onClick={() => runAction(onUnpackFolder)}
+                                                />
+                                            ) : null}
+                                        </>
                                     ) : (
                                         <MenuButton icon={<FolderPlus />} label="保存到我的素材" disabled={!canSaveAsset} onClick={() => runAction(onSaveAsset)} />
                                     )}
@@ -288,6 +324,21 @@ export function CanvasNodeContextMenu({
                             <MenuButton icon={<Trash2 className="size-4" />} label="删除连接" danger onClick={() => runAction(onDelete)} />
                         </>
                     )}
+                    {!categoryOpen && visiblePluginMenuItems.length > 0 ? (
+                        <>
+                            <MenuDivider />
+                            <MenuSection label="插件扩展" />
+                            {visiblePluginMenuItems.map((entry) => (
+                                <MenuButton
+                                    key={entry.entryId}
+                                    icon={entry.payload.icon ?? <Plus className="size-4" />}
+                                    label={entry.payload.label}
+                                    shortcut={entry.payload.shortcut}
+                                    onClick={() => runAction(() => void entry.payload.onSelect(pluginContextMenuCtx))}
+                                />
+                            ))}
+                        </>
+                    ) : null}
                 </div>
             </SpotlightSurface>
 
@@ -485,7 +536,7 @@ function MenuDivider() {
 }
 
 function getContextMenuPosition(menu: ContextMenuState, hasMultiSelection = false) {
-    if (typeof window === "undefined") return { left: menu.x, top: menu.y };
+    if (typeof window === "undefined" || typeof document === "undefined") return { left: menu.x, top: menu.y };
     const width = 224;
     // Text/media node menus contain several action groups. Reserve enough
     // vertical space before clamping so the destructive action stays inside

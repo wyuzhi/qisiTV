@@ -12,6 +12,7 @@ on:
       - 'scripts/assert-windows-dwarf5-cgo.ps1'
       - 'licenses/**'
       - 'VERSION'
+      - 'ENGINE_VERSION'
       - '.github/workflows/desktop-installers.yml'
   workflow_dispatch:
 
@@ -72,7 +73,7 @@ jobs:
           update: false
           release: true
           path-type: inherit
-          install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-binutils
+          install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-binutils zip
       - name: Select supported Windows compiler
         if: runner.os == 'Windows'
         env:
@@ -86,6 +87,13 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Verify bundled Agent runtime
         run: bun test scripts/package-agent-host.test.mjs
+      - name: Build protocol packages for native CLI validation
+        if: runner.os != 'Windows'
+        run: sh plugin-packages/build-packages.sh
+      - name: Build protocol packages with MSYS2 zip
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: sh plugin-packages/build-packages.sh
       - name: Test native authority, folder persistence, and CLI
         working-directory: backend
         env:
@@ -118,8 +126,7 @@ jobs:
           set -euo pipefail
           xcrun swiftc -parse-as-library scripts/engine/EngineLaunchRequest.swift scripts/engine/EngineLaunchRequestTests.swift -o "$RUNNER_TEMP/launcher-tests"
           "$RUNNER_TEMP/launcher-tests"
-          sh plugin-packages/build-packages.sh
-          version="$(tr -d '[:space:]' < VERSION)"
+          version="$(tr -d '[:space:]' < ENGINE_VERSION)"
           python scripts/package-engine-macos.py --runtime "$RUNNER_TEMP/engine-runtime" --node-source "$BEEFTV_NODE_RUNTIME" --output dist/engine-ci --version "${version#v}" --dmg
           TMPDIR="$RUNNER_TEMP" python scripts/smoke-engine-macos.py --app 'dist/engine-ci/qisiTV Engine.app' | tee "$RUNNER_TEMP/engine-package-smoke.log"
       - name: Preserve verified Mac beta installer

@@ -90,8 +90,7 @@ test("compact preview updates paths and endpoint circles using the existing geom
 
 test("highlight paths added after mount follow the drag and cancellation leaves identical pixels", async () => {
     await mount();
-    const hit = page.locator('g[data-canvas-connection-id="main"] path[data-connection-id]');
-    await hit.dispatchEvent("mouseover");
+    await page.evaluate(() => (window as any).connectionDrag.highlight());
     const group = page.locator('g[data-canvas-connection-id="main"]');
     await group.locator("linearGradient[gradientUnits]").waitFor({ state: "attached" });
     const baseline = await page.screenshot();
@@ -119,7 +118,7 @@ test("highlighting added while a drag pauses uses the live path before the next 
     await mount();
     await move(["from"], 20, 10);
     const group = page.locator('g[data-canvas-connection-id="main"]');
-    await group.locator("path[data-connection-id]").dispatchEvent("mouseover");
+    await page.evaluate(() => (window as any).connectionDrag.highlight());
     await group.locator("linearGradient[gradientUnits]").waitFor({ state: "attached" });
     expect(await paths("main")).toEqual(Array(6).fill("M 120 50 C 210 50, 210 40, 300 40"));
     expect(await group.locator("linearGradient[gradientUnits]").evaluate(element => ["x1", "y1", "x2", "y2"].map(name => element.getAttribute(name)))).toEqual(["120", "50", "300", "40"]);

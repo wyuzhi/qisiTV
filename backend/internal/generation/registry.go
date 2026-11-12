@@ -119,9 +119,10 @@ func OfficialDeclarativeAudioInterface(interfaceType string) (string, bool) {
 	}
 }
 
+// DeclarativeProtocolAdapterForContext 返回插件清单声明的生成接口：JSON 描述的，或插件 JS 实现的。
 func DeclarativeProtocolAdapterForContext(ctx context.Context, id string) (protocol.Adapter, bool) {
 	adapter, ok := ProtocolAdapterForContext(ctx, id)
-	if !ok || adapter.Metadata().Execution != "declarative" {
+	if !ok || (adapter.Metadata().Execution != "declarative" && adapter.Metadata().Execution != protocol.ExecutionModule) {
 		return nil, false
 	}
 	return adapter, true
@@ -159,7 +160,25 @@ func LoadOfficialFallbackRegistry() *protocol.Registry {
 		if err != nil {
 			return
 		}
-		adapters := make([]protocol.Adapter, 0, len(entries))
+		adapters := make([]protocol.Adapter, 0, len(entries)+2)
+		for _, builtinPluginName := range []string{"beeftv-plugin-ll2", "beeftv-plugin-ysdui"} {
+			for _, builtinDir := range officialBundledPluginDirCandidates(directory, builtinPluginName) {
+				info, statErr := os.Stat(builtinDir)
+				if statErr != nil || !info.IsDir() {
+					continue
+				}
+				pkg, parseErr := protocol.ParsePluginPackageDir(builtinDir)
+				if parseErr != nil {
+					return
+				}
+				providers, loadErr := protocol.LoadInstalledProviders(pkg.ManifestRaw)
+				if loadErr != nil {
+					return
+				}
+				adapters = append(adapters, providers...)
+				break
+			}
+		}
 		for _, entry := range entries {
 			if entry.IsDir() || !protocol.IsPluginPackageName(entry.Name()) {
 				continue
@@ -172,7 +191,7 @@ func LoadOfficialFallbackRegistry() *protocol.Registry {
 			if err != nil {
 				return
 			}
-			providers, err := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil)
+			providers, err := protocol.LoadInstalledProviders(pkg.ManifestRaw)
 			if err != nil {
 				return
 			}
@@ -242,6 +261,39 @@ func resolveOfficialPluginPackageDir(candidates []string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("未找到官方插件目录 plugin-packages；请设置 CANVAS_OFFICIAL_PLUGIN_DIR")
+}
+
+func officialBundledPluginDirCandidates(officialPackageDir, pluginName string) []string {
+	candidates := []string{
+		filepath.Join(officialPackageDir, "..", "agent-host", "bundled-plugins", pluginName),
+		filepath.Join(officialPackageDir, pluginName),
+		filepath.Join("/app/agent-host/bundled-plugins", pluginName),
+	}
+	if executable, err := os.Executable(); err == nil && strings.TrimSpace(executable) != "" {
+		execDir := filepath.Dir(executable)
+		candidates = append(candidates,
+			filepath.Join(execDir, "agent-host", "bundled-plugins", pluginName),
+			filepath.Join(execDir, "..", "Resources", "agent-host", "bundled-plugins", pluginName),
+		)
+	}
+	if workingDir, err := os.Getwd(); err == nil {
+		current := workingDir
+		for range 8 {
+			if current == "" {
+				break
+			}
+			candidates = append(candidates,
+				filepath.Join(current, "agent-host", "bundled-plugins", pluginName),
+				filepath.Join(current, "plugin-packages", pluginName),
+			)
+			parent := filepath.Dir(current)
+			if parent == current {
+				break
+			}
+			current = parent
+		}
+	}
+	return candidates
 }
 
 // 兼容包内未导出旧名（service 薄包装与未改调用点）。

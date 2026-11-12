@@ -9,6 +9,16 @@ const project: CanvasProject = { id: "canvas", title: "画布", nodes: [node], c
 const failed: CanvasNodeData = { ...node, metadata: { ...node.metadata, status: "error", taskStatus: "failed", errorDetails: "上游拒绝" } };
 const patch: CanvasPatch = { canvasId: project.id, updatedAt: "2026-09-13T12:00:00Z", nodes: [{ before: node, after: failed }], connections: [] };
 
+test("refresh during regeneration keeps the new submission and merges unrelated edits", () => {
+    const previous = { ...project, nodes: [failed] };
+    const retry: CanvasNodeData = { ...failed, metadata: { status: "loading", prompt: "新的提示词", taskClientOperationId: "retry-operation", generationSubmissionState: "submitting" } };
+    const late = { ...failed, title: "更新的标题", metadata: { ...failed.metadata, taskUpdatedAt: "2026-09-14", taskProgress: 100 } };
+    const merged = mergeCanvasRefreshPatch(previous, { ...previous, nodes: [late] }, [retry], []);
+    expect(merged.nodes[0].title).toBe(late.title);
+    expect(merged.nodes[0].metadata).toEqual(retry.metadata);
+    expect(() => mergeCanvasRefreshPatch(previous, { ...previous, nodes: [{ ...late, metadata: { ...late.metadata, prompt: "另一处修改" } }] }, [retry], [])).toThrow("冲突");
+});
+
 test("failed Agent task patches only its node and unlocks generation", () => {
     expect(isCanvasNodeGenerating(node)).toBe(true);
     const result = applyCanvasPatch(project, patch);

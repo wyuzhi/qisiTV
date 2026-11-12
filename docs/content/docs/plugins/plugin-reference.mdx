@@ -1,0 +1,217 @@
+---
+title: 插件参考
+description: 插件的 package.json 字段、权限、界面挂点、宿主事件、host 接口和业务操作。
+---
+
+# 插件参考
+
+第一次写插件，先看[开发一个插件](./plugin-development.mdx)。
+
+## package.json
+
+这些字段直接用 npm 的写法：
+
+| 字段 | 用途 |
+| --- | --- |
+| `name` | 插件 ID，全小写加连字符。约定以 `beeftv-plugin-` 开头 |
+| `version` | 版本号。BeefTV 只比较 `x.y.z` 三段数字，写成别的形式不会提示更新 |
+| `description`、`author` | 显示在插件中心 |
+| `keywords` | 写上 `"beeftv-plugin"`，才能被插件市场的 npm 搜索发现 |
+| `dependencies` | BeefTV 安装插件时用自带的 npm 一起装好 |
+| `pi.extensions` | 创作助手工具的入口文件 |
+| `pi.skills` | 技能所在的目录 |
+
+`beeftv` 里只能写下面这些键。写了别的键（比如 `beeftv.id`、`beeftv.apiVersion`、顶层的 `canvasNodes`），BeefTV 会拒绝安装，并逐条说明该怎么改。
+
+| 字段 | 用途 |
+| --- | --- |
+| `name` | 显示名，不写时用 `package.json` 的 `name` |
+| `client` | 浏览器入口文件，要导出 `activate(host)` |
+| `permissions` | 向用户说明插件会做什么，见[权限](#权限) |
+| `surfaces` | 向用户说明插件出现在哪里，见[使用位置](#使用位置) |
+| `configuration.fields` | 插件设置窗口里的字段 |
+| `contributes.canvasNodes` | 画布节点 |
+| `contributes.providers` | 生成服务，见[接入生成服务](./plugin-generation.mdx) |
+
+### 设置字段
+
+`configuration.fields` 的每一项：
+
+| 键 | 用途 |
+| --- | --- |
+| `name` | 字段名，用 `host.config.get(name)` 读取 |
+| `type` | `string`、`number`、`boolean`、`secret`、`url`、`select`、`json` |
+| `label`、`description` | 显示给用户的名字和说明 |
+| `default` | 默认值 |
+| `required` | 是否必填 |
+| `values` | `select` 的选项 |
+
+### 画布节点字段
+
+`contributes.canvasNodes` 的每一项：
+
+| 键 | 用途 |
+| --- | --- |
+| `id` | 节点类型，在插件内唯一 |
+| `label` | 「添加节点」菜单里的名字 |
+| `defaultTitle` | 新节点的标题 |
+| `renderer` | `client` 表示由 `canvas.node` 挂点来画；`declarative` 表示按 `fields` 生成表单 |
+| `defaultSize` | 默认宽高，`{ "width": 240, "height": 180 }` |
+| `description` | 节点说明 |
+| `schema` | `metadata.pluginData` 的 JSON Schema |
+| `fields` | `declarative` 节点的表单字段，格式同设置字段 |
+| `acceptsInputKind` | 能接哪种上游：`image`、`video`、`audio`、`text`，可写数组 |
+| `maxInputCount` | 最多接几条上游连线 |
+| `showOutputConnection` | 是否显示输出连接点 |
+
+## 权限
+
+BeefTV 不做沙箱。`permissions` 用来告诉用户插件会做什么，显示在插件设置里，不会限制插件代码。插件和 BeefTV 运行在同一个页面和同一台电脑上，所以用户只应该安装信任的插件。
+
+唯一的例外是剪辑工作台和模型渠道写入：缺少下表里的权限时，对应剪辑挂点不会显示，插件也不能通过 `host.channels` 读写模型渠道。
+
+| 权限 | 含义 |
+| --- | --- |
+| `canvas.read` | 读取画布 |
+| `canvas.write` | 修改画布 |
+| `asset.read` | 读取素材 |
+| `asset.search` | 搜索素材 |
+| `asset.import` | 导入素材 |
+| `asset.upload` | 上传素材 |
+| `generation.run` | 调用生成 |
+| `ai.text` | 调用已配置的文本或视觉理解模型 |
+| `media.read` | 读取输入媒体 |
+| `usage.read` | 读取用量 |
+| `external.open` | 打开外部详情 |
+| `ui.slot` | 挂载界面扩展位 |
+| `settings.write` | 读写插件自身命名空间下的模型渠道设置（仅可信内置插件生效） |
+| `timeline.read` | 读取时间线（`editor.preview-renderer`、`editor.ai-assistant` 需要） |
+| `timeline.command` | 修改时间线（`editor.timeline-panel`、`editor.inspector`、`editor.asset-ingest`、`editor.subtitle-tool`、`editor.transcription-provider` 需要） |
+| `export.run` | 导出（`editor.export-renderer` 需要） |
+
+## 使用位置
+
+`surfaces` 同样只用于显示，不决定插件能出现在哪里。真正决定位置的是 `host.contribute` 写了哪些挂点。
+
+| 值 | 显示给用户的文字 |
+| --- | --- |
+| `node` | 画布节点 |
+| `fullscreen` | 全屏工作台 |
+| `hybrid` | 混合接入 |
+| `asset-source` | 素材库 |
+
+## 界面挂点
+
+用 `host.contribute(挂点, 内容)` 往 BeefTV 的界面加东西。它返回一个撤销函数；插件停用或卸载时，BeefTV 会自动撤掉这个插件加的所有内容。
+
+点击回调的名字：工具栏按钮和提示词按钮用 `onClick`，其余用 `onSelect`。
+
+| 区域 | 挂点 | 关键字段 | 加什么 |
+| --- | --- | --- | --- |
+| 画布 | `canvas.node` | `id`、`type`、`title`、`defaultSize`、`render` | 节点的画法 |
+| 画布 | `canvas.addNodeMenu` | `id`、`label`、`nodeType`、`onSelect` | 「添加节点」菜单的条目 |
+| 画布 | `canvas.toolbar.main` | `id`、`label`、`icon`、`onClick` | 底部主工具栏按钮 |
+| 画布 | `canvas.toolbar.selection` | `id`、`label`、`icon`、`onClick` | 多选节点时的工具栏按钮 |
+| 画布 | `canvas.toolbar.nodeHover` | `id`、`label`、`icon`、`onClick` | 节点悬停工具栏按钮 |
+| 画布 | `canvas.contextMenu` | `id`、`label`、`target`、`onSelect` | 右键菜单项，`target` 是 `canvas`、`node` 或 `both` |
+| 画布 | `canvas.nodePanel` | `id`、`title`、`nodeTypes`、`render` | 节点配置面板里的区域 |
+| 画布 | `canvas.promptActions` | `id`、`label`、`onClick` 或 `render` | 提示词输入框旁的按钮 |
+| 画布 | `canvas.sidePanel` | `id`、`label`、`render` | 画布右侧面板，和创作助手并列 |
+| 生成 | `generation.beforeSubmit` | `id`、`label`、`transform` | 提交生成前改写提示词。BeefTV 会告诉用户是哪个插件改的，模型参数保持用户的设置 |
+| 剪辑 | `editor.timeline-panel` | `render` | 时间线面板 |
+| 剪辑 | `editor.preview-renderer` | `render` | 预览渲染 |
+| 剪辑 | `editor.inspector` | `render` | 属性面板 |
+| 剪辑 | `editor.asset-ingest` | `render` | 素材导入 |
+| 剪辑 | `editor.subtitle-tool` | `render` | 字幕工具 |
+| 剪辑 | `editor.transcription-provider` | `render` | 语音转写 |
+| 剪辑 | `editor.export-renderer` | `render` | 导出 |
+| 剪辑 | `editor.ai-assistant` | `render` | AI 助手面板 |
+| 素材 | `assets.source` | `id`、`label`、`listFolders`、`list`、`importAsset`、`render` | 外部素材库 |
+| 素材 | `assets.itemActions` | `id`、`label`、`applicable`、`onSelect` | 素材卡片和详情上的操作 |
+| 全局 | `app.page` | `id`、`path`、`title`、`render` | 独立页面，地址是 `/p/<插件 ID>/...` |
+| 全局 | `app.sidebar` | `id`、`label`、`path`、`icon` | 工作区左侧导航 |
+| 全局 | `app.command` | `id`、`label`、`shortcut`、`keywords`、`onSelect` | 命令面板（`Cmd/Ctrl+K`）的命令 |
+| 全局 | `app.settings` | `id`、`title`、`render` | 插件中心里这个插件的设置内容 |
+| 全局 | `pluginCenter.section` | `id`、`label`、`render` | 插件中心左侧栏目，插件市场就挂在这里 |
+| 项目 | `project.view` | `id`、`label`、`render` | 项目详情页的分页 |
+| 助手 | `assistant.toolCard` | `toolName`、`label`、`render` | 助手对话里这个工具结果的卡片 |
+
+字段的完整类型见 `@beeftv/plugin-sdk` 的 `BeefTVSlotMap`。
+
+## 宿主事件
+
+用 `host.events.on(事件, 回调)` 订阅，返回取消订阅的函数。
+
+| 事件 | 什么时候触发 | 回调参数 |
+| --- | --- | --- |
+| `generation.submitted` | 画布节点的生成任务已提交 | `{ nodeId, nodeType, model?, prompt, taskId? }` |
+| `generation.completed` | 生成任务完成 | `{ nodeId, nodeType }` |
+| `generation.failed` | 生成任务失败 | `{ nodeId, nodeType, error, taskId? }` |
+| `assets.imported` | 素材导入完成 | `{ assets: [{ id, name, type, url }] }` |
+| `assistant.turnCompleted` | 创作助手一轮对话结束 | `{ canvasId?, sessionId?, turnId?, status }` |
+
+画布打开、画布内容变化和选中变化目前没有事件。
+
+## host 接口
+
+`activate(host)` 拿到的 `host`：
+
+| 接口 | 用途 |
+| --- | --- |
+| `host.pluginId`、`host.manifest` | 这个插件自己的 ID 和清单 |
+| `host.React` | BeefTV 的 React，不要再带一份 |
+| `host.contribute(slot, payload)` | 往挂点加内容 |
+| `host.events.on(event, callback)` | 订阅事件 |
+| `host.ops.call(op, params)` | 调用业务操作 |
+| `host.context.getCanvasId()` | 当前打开的画布 ID |
+| `host.assets.list()` | 当前已加载的素材 |
+| `host.storage.get/set/remove` | 插件自己的键值存储 |
+| `host.config.get/getAll/set` | 用户在插件设置里填的值 |
+| `host.ui.notify(message, level)` | 弹出提示，`level` 是 `info`、`success`、`warning`、`error` |
+| `host.ui.navigate(path)` | 跳转页面 |
+| `host.ui.requestInstallPlugin({ source, registry? })` | 打开安装确认框，用户确认后才会安装 |
+
+## 业务操作
+
+`host.ops.call(操作, 参数)` 调用的操作，和创作助手、命令行、MCP 用的是同一套。权限模式、付费确认和整组撤销都由后端统一处理。
+
+写画布前先用 `canvas.get` 读出 `revision`，再作为 `expectedRevision` 传给写操作。画布已被别人改过时，写操作会失败，不会覆盖别人的修改。
+
+| 操作 | 作用 | 只读 |
+| --- | --- | --- |
+| `canvas.create` | 创建新画布 | |
+| `canvas.get` | 读取画布的节点和连线 | 是 |
+| `canvas.search` | 搜索工作区里的画布 | 是 |
+| `canvas.nodes.create` | 批量创建节点 | |
+| `canvas.node.update` | 局部修改节点 | |
+| `canvas.node.move` | 移动节点 | |
+| `canvas.node.delete` | 删除节点及其连线 | |
+| `canvas.node.configure` | 设置媒体节点的提示词草稿和生成参数，不启动生成 | |
+| `canvas.node.bind_asset` | 把素材绑定到同类型节点 | |
+| `canvas.edge.create` | 连接两个节点 | |
+| `canvas.edge.delete` | 删除连线 | |
+| `canvas.document.commit` | 提交整份画布文档 | |
+| `canvas.task.bind` | 把已完成任务的结果绑定到节点 | |
+| `canvas.script.prepare` | 准备分镜脚本和首帧、视频草稿，不开始生成 | |
+| `canvas.script.rows.append`、`canvas.script.row.update`、`canvas.script.row.remove` | 增改删分镜行 | |
+| `canvas.timeline.update`、`canvas.timeline.render` | 修改时间线，免费本地渲染 | |
+| `canvas.project.export` | 免费导出可编辑工程 ZIP | |
+| `canvas.generation.propose` | 登记付费生成单，不直接扣费 | 是 |
+| `canvas.generation.submit` | 凭已批准的生成单执行生成 | |
+| `generation.estimate` | 估算一组生成的费用 | 是 |
+| `model.catalog` | 查询可用模型、参考能力和报价 | 是 |
+| `task.get` | 查询任务状态和结果 | 是 |
+| `asset.list`、`asset.get` | 读取素材 | 是 |
+| `media.overview`、`media.inspect`、`media.check` | 读取媒体概览和片段，测量黑屏与音量 | 是 |
+| `media.review` | 用多模态模型检查片段，可能收费 | 是 |
+| `project.media.search`、`project.canvas.search` | 在当前项目里找媒体或画布 | 是 |
+| `skill.catalog`、`skill.get`、`skill.file` | 读取已安装的技能 | 是 |
+| `skill.market.search`、`skill.market.get`、`skill.market.file` | 读取公共技能市场 | 是 |
+| `conversation.message.attach` | 把任务结果绑定到对话消息 | |
+
+这张表只列插件常用的操作。完整清单和每个操作的参数用命令行查看：
+
+```bash
+beeftv ops          # 操作清单
+beeftv ops --json   # 含每个操作的 JSON 参数结构
+```

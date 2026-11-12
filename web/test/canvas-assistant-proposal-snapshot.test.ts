@@ -259,15 +259,15 @@ test("unsaved generation settings fail at once without waiting", async () => {
     expect(slept).toBe(0);
 });
 
-test("managed beefapi catalog ordering and profile synthesis differences do not false-positive settings_changed", async () => {
+test("managed beeftv catalog ordering and profile synthesis differences do not false-positive settings_changed", async () => {
     const live = fixture();
     const persisted = fixture();
     live.config.channels = [{
-        id: "beefapi",
-        name: "BeefAPI",
+        id: "beeftv",
+        name: "BeefTV",
         pinned: true,
         apiFormat: "openai",
-        baseUrl: "https://enterprise.beefapi.com",
+        baseUrl: "https://beeftv.app",
         apiKey: "",
         models: ["doubao-seed-2-0-lite", "minimax-h3-max-turbo", "gpt-5.4"],
         modelProfiles: [
@@ -275,25 +275,25 @@ test("managed beefapi catalog ordering and profile synthesis differences do not 
             { model: "gpt-5.4", capability: "text", protocol: "chat-completion" },
         ],
     }];
-    live.config.models = ["beefapi::doubao-seed-2-0-lite", "beefapi::minimax-h3-max-turbo", "beefapi::gpt-5.4"];
-    live.config.videoModels = ["beefapi::minimax-h3-max-turbo"];
+    live.config.models = ["beeftv::doubao-seed-2-0-lite", "beeftv::minimax-h3-max-turbo", "beeftv::gpt-5.4"];
+    live.config.videoModels = ["beeftv::minimax-h3-max-turbo"];
 
     persisted.config.channels = [{
-        id: "beefapi",
-        name: "BeefAPI",
+        id: "beeftv",
+        name: "BeefTV",
         pinned: true,
         apiFormat: "openai",
-        baseUrl: "https://beefapi.com",
+        baseUrl: "https://beeftv.app/v1",
         apiKey: "",
-        credentialRef: "beefapi-enterprise",
+        credentialRef: "beeftv",
         hasApiKey: true,
         models: ["gpt-5.4", "minimax-h3-max-turbo", "doubao-seed-2-0-lite"],
         modelProfiles: [
             { model: "minimax-h3-max-turbo", capability: "video", protocol: "newapi", videoPricing: { currency: "CNY", mode: "seconds", rates: { "1080p": { output: 0.43, reference_video: 0 } } } },
         ],
     }];
-    persisted.config.models = ["beefapi::gpt-5.4", "beefapi::minimax-h3-max-turbo", "beefapi::doubao-seed-2-0-lite"];
-    persisted.config.videoModels = ["beefapi::minimax-h3-max-turbo"];
+    persisted.config.models = ["beeftv::gpt-5.4", "beeftv::minimax-h3-max-turbo", "beeftv::doubao-seed-2-0-lite"];
+    persisted.config.videoModels = ["beeftv::minimax-h3-max-turbo"];
 
     expect(await blockedReason(prepareAssistantProposalSnapshot(proposal, () => live, async () => persisted, noWait))).toBe("passed");
 });

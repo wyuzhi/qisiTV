@@ -12,7 +12,7 @@ type timelineTranscriptionInput = localtask.TimelineTranscriptionInput
 
 func (w *taskWorkerCoordinator) processTimelineTranscription(task *model.Task, ctx context.Context) error {
 	s := w.service
-	return localtask.ProcessTimelineTranscription(ctx, s.repo, s.beefAPI, func() error {
+	return localtask.ProcessTimelineTranscription(ctx, s.repo, s.beefTV, func() error {
 		return s.RequireFeature(FeatureTimelineTranscription)
 	}, s.transcriptionExecutor, s.logInfo, task)
 }
@@ -36,7 +36,7 @@ func (s *Service) CreateTimelineTranscriptionTask(userID string, req TimelineTra
 }
 
 func (s *Service) bindTranscriptionModel(modelID string) (string, error) {
-	return localtask.BindTranscriptionModel(s.beefAPI, modelID)
+	return localtask.BindTranscriptionModel(s.beefTV, modelID)
 }
 
 type TimelineRenderCreateRequest = localtask.TimelineRenderCreateRequest

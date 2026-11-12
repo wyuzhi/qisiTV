@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
 import { ProjectPreview } from "@/components/canvas/canvas-project-card";
 import { LibraryCardShell } from "@/components/canvas/library-card-shell";
+import { localForageStorageForScope } from "@/lib/localforage-storage";
 import { flushCanvasStorePersistence, useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import type { CanvasLibrarySummary } from "@/services/api/workspace-data";
 import { hasRemoteUserDataSyncSession, loadCanvasProjectForEditing, saveRemoteUserDataNow } from "@/services/local-workspace-sync";
@@ -42,7 +43,42 @@ export function CanvasFolderCard({ project, projectName, folders = [], onMoveToF
     const [coverUrl, setCoverUrl] = useState<string>();
 
     useEffect(() => {
-        try { setCoverUrl(readProjectCover(localStorage, project.id)); } catch { /* private browsing */ }
+        let active = true;
+        const coverKey = `qisitv-project-cover:${project.id}`;
+        const storage = localForageStorageForScope();
+        void Promise.resolve(storage.getItem(coverKey))
+            .then((indexedCover) => {
+                if (indexedCover) {
+                    if (active) setCoverUrl(indexedCover);
+                    return;
+                }
+                let legacyCover: string | null = null;
+                try {
+                    legacyCover = readProjectCover(localStorage, project.id) ?? null;
+                } catch {
+                    /* private browsing */
+                }
+                if (legacyCover) {
+                    if (active) setCoverUrl(legacyCover);
+                    void Promise.resolve(storage.setItem(coverKey, legacyCover))
+                        .then(() => {
+                            try { localStorage.removeItem(coverKey); } catch { /* ignore */ }
+                        })
+                        .catch(() => { /* ignore */ });
+                } else if (active) {
+                    setCoverUrl(undefined);
+                }
+            })
+            .catch(() => {
+                try {
+                    if (active) setCoverUrl(readProjectCover(localStorage, project.id));
+                } catch {
+                    /* private browsing */
+                }
+            });
+        return () => {
+            active = false;
+        };
     }, [project.id]);
 
     const changeCover = (event: ChangeEvent<HTMLInputElement>) => {
@@ -61,8 +97,15 @@ export function CanvasFolderCard({ project, projectName, folders = [], onMoveToF
                 canvas.height = Math.max(1, Math.round(image.height * scale));
                 canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
                 const dataUrl = canvas.toDataURL("image/jpeg", 0.84);
+                const coverKey = `qisitv-project-cover:${project.id}`;
                 setCoverUrl(dataUrl);
-                try { localStorage.setItem(`qisitv-project-cover:${project.id}`, dataUrl); } catch { /* quota */ }
+                void Promise.resolve(localForageStorageForScope().setItem(coverKey, dataUrl))
+                    .then(() => {
+                        try { localStorage.removeItem(coverKey); } catch { /* ignore */ }
+                    })
+                    .catch(() => {
+                        try { localStorage.setItem(coverKey, dataUrl); } catch { /* quota */ }
+                    });
                 message.success("项目封面已更新");
             };
             image.src = String(reader.result);

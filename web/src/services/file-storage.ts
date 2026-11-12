@@ -2,8 +2,8 @@ import { nanoid } from "nanoid";
 
 import { getActiveUserScope } from "@/lib/user-scope";
 import { captureVideoPoster, detectVideoAudioTrackFromBlob } from "@/lib/video-poster";
-import { resourceFileUrl, resourceIdFromStorageKey, resourceStorageKey, ResourceUploadError, uploadResourceFile } from "@/services/api/resources";
-import { apiBaseURL } from "@/services/api/request";
+import { resourceFileUrl, resourceIdFromStorageKey, resourceStorageKey, resolveResourceUrl, ResourceUploadError, uploadResourceFile } from "@/services/api/resources";
+import { resolveEmbeddedAssetUrl } from "@/lib/embedded-runtime";
 import { uploadImage, type UploadedImage } from "@/services/image-storage";
 import { createChannelTransport } from "@/services/api/channel-transport";
 import { useConfigStore } from "@/stores/use-config-store";
@@ -66,7 +66,7 @@ export async function uploadMediaFile(input: Blob, prefix = "file", onProgress?:
         let meta: { width?: number; height?: number; durationMs?: number; hasAudio?: boolean };
         if (captured) {
             meta = { width: captured.poster ? captured.width : undefined, height: captured.poster ? captured.height : undefined, durationMs: captured.durationMs, hasAudio: resolvedHasAudio };
-        } else if (blob.type.startsWith("audio/")) {
+        } else if (prefix === "audio" || blob.type.startsWith("audio/")) {
             try {
                 meta = await readAudioMeta(previewUrl);
             } catch (error) {
@@ -145,17 +145,9 @@ export async function uploadMediaFile(input: Blob, prefix = "file", onProgress?:
 }
 
 export async function resolveMediaUrl(storageKey?: string, fallback = "") {
-    // Older canvas snapshots stored resource paths without the `/api` prefix.
-    // In desktop mode those paths are interpreted by Wails as asset-server
-    // paths and return its plain-text 404 page. Normalize them before handing
-    // the URL to a native media element.
+    // Historical resource URLs and bundled model paths must follow the current runtime.
     if (!storageKey) {
-        const legacyResource = fallback.match(/^\/resources\/([^/?#]+)\/file(?:[?#].*)?$/u);
-        if (legacyResource) {
-            const suffix = fallback.slice(legacyResource[0].indexOf("/file") + "/file".length);
-            return `${String(apiBaseURL).replace(/\/+$/u, "")}/resources/${encodeURIComponent(legacyResource[1])}/file${suffix}`;
-        }
-        return await materializeExternalMedia(fallback);
+        return await materializeExternalMedia(resolveEmbeddedAssetUrl(resolveResourceUrl(undefined, fallback)));
     }
     const resourceId = resourceIdFromStorageKey(storageKey);
     if (resourceId) {
@@ -167,7 +159,7 @@ export async function resolveMediaUrl(storageKey?: string, fallback = "") {
         const hydrated = await cacheResourceObjectUrl(storageKey).catch(() => "");
         return hydrated || resourceFileUrl(resourceId);
     }
-    return resolveLocalMediaUrl(storageKey, fallback);
+    return resolveLocalMediaUrl(storageKey, resolveEmbeddedAssetUrl(resolveResourceUrl(undefined, fallback)));
 }
 
 // MCP-created generation nodes may contain a provider URL instead of a local
@@ -176,7 +168,7 @@ export async function resolveMediaUrl(storageKey?: string, fallback = "") {
 // resulting local/blob resource. This also makes old canvases self-healing.
 const externalMediaInflight = new Map<string, Promise<string>>();
 async function materializeExternalMedia(url: string) {
-    if (!/^https?:\/\//i.test(url) || !/enterprise\.beefapi\.com/i.test(url)) return url;
+    if (!/^https?:\/\//i.test(url) || !/beeftv\.app/i.test(url)) return url;
     const existing = externalMediaInflight.get(url);
     if (existing) return existing;
     const pending = (async () => {
@@ -188,7 +180,7 @@ async function materializeExternalMedia(url: string) {
                 } catch {
                     return false;
                 }
-            }) || config.channels.find((item) => /beefapi/i.test(`${item.id} ${item.name} ${item.baseUrl}`));
+            }) || config.channels.find((item) => /beeftv/i.test(`${item.id} ${item.name} ${item.baseUrl}`));
         if (!channel) return url;
         const blob = await createChannelTransport(
             {
@@ -196,7 +188,7 @@ async function materializeExternalMedia(url: string) {
                 apiKey: channel.credentialRef ? "" : channel.apiKey,
                 apiFormat: channel.apiFormat,
                 headers: channel.headers,
-                credentialRef: channel.credentialRef || (channel.id === "beefapi" ? "beefapi-enterprise" : undefined),
+                credentialRef: channel.credentialRef || (channel.id === "beeftv" ? "beeftv" : undefined),
             },
             "video",
         ).getBlob(url);
@@ -252,9 +244,27 @@ export function collectMediaStorageKeys(value: unknown, keys = new Set<string>()
 function readAudioMeta(url: string) {
     return new Promise<{ durationMs?: number }>((resolve) => {
         const audio = document.createElement("audio");
-        const done = () => resolve({ durationMs: Number.isFinite(audio.duration) ? Math.round(audio.duration * 1000) : undefined });
+        audio.preload = "metadata";
+        audio.muted = true;
+        let settled = false;
+        const finish = (durationMs?: number) => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            audio.onloadedmetadata = null;
+            audio.onerror = null;
+            try {
+                audio.removeAttribute("src");
+                audio.load();
+            } catch {
+                // Ignore cleanup errors on mocked or detached elements.
+            }
+            resolve({ durationMs });
+        };
+        const done = () => finish(Number.isFinite(audio.duration) && audio.duration > 0 ? Math.round(audio.duration * 1000) : undefined);
+        const timer = window.setTimeout(() => finish(undefined), 5000);
         audio.onloadedmetadata = done;
-        audio.onerror = done;
+        audio.onerror = () => finish(undefined);
         audio.src = url;
     });
 }

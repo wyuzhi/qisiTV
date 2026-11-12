@@ -87,7 +87,7 @@ func TestReferenceVideoEncodingTracksAndTiming(t *testing.T) {
 }
 
 func TestReferenceVideoFrameRateScope(t *testing.T) {
-	for _, host := range []string{"https://whatstoken.ai", "https://www.whatstoken.ai/v1", "https://enterprise.beefapi.com", "https://ark.cn-beijing.volces.com/api/v3"} {
+	for _, host := range []string{"https://whatstoken.ai", "https://www.whatstoken.ai/v1", "https://beeftv.app", "https://ark.cn-beijing.volces.com/api/v3"} {
 		for _, fps := range []float64{0, 23.976, 24, 30, 59.94, 60, 120} {
 			err := referenceVideoFrameRateError(providerConfig{BaseURL: host}, 0, fps)
 			want := (host == "https://whatstoken.ai" || host == "https://www.whatstoken.ai/v1") && (fps < 24 || fps > 60)

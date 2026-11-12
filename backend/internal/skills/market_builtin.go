@@ -81,23 +81,6 @@ func (s *Service) builtinMarketReleases() ([]skillhub.Release, map[string]*model
 			ArchiveBytes:  int64(len(archiveBytes)),
 			Files:         files,
 			PublishedAt:   publishedAt,
-			Review: &skillhub.ReviewSummary{
-				ReviewedAt:    publishedAt,
-				Revision:      1,
-				ContentHash:   version.ContentHash,
-				ArchiveSHA256: archiveSHA256,
-				PreviewDigest: version.ContentHash,
-				Trials: []skillhub.ReviewTrial{
-					{
-						Scenario:       "漫剧小说拆解、参考图设定与分镜视频提示词画布全链路",
-						Target:         "beeftv",
-						RuntimeVersion: "v2.1.1",
-						Model:          "beeftv-agent",
-						Conclusion:     "已通过内置助手画布实测验收",
-						TestedAt:       publishedAt,
-					},
-				},
-			},
 		}
 		releases = append(releases, rel)
 		versions[rel.SkillID] = version
@@ -170,7 +153,7 @@ func (s *Service) readBuiltinMarketFile(rel *skillhub.Release, ver *model.SkillV
 	if file == nil {
 		return nil, &skillhub.Error{Status: 404, Reason: "not_found", Message: "文件不在此发布版本清单中"}
 	}
-	if file.Size < 0 || file.Size > 2<<20 {
+	if file.Size < 0 || file.Size > maxSkillPackageBytes {
 		return nil, &skillhub.Error{Status: 502, Reason: "file_integrity", Message: "文件大小无效"}
 	}
 	data, err := s.readSkillArchiveEntry(ver, name)
@@ -208,6 +191,6 @@ func builtinReleaseToSearchItem(rel skillhub.Release) skillhub.SearchItem {
 		SourceURL:     rel.SourceURL,
 		Requirements:  rel.Requirements,
 		Compatibility: skillhub.Compatibility{Status: "supported", Reasons: []string{}},
-		Verification:  "tested",
+		Verification:  "unverified",
 	}
 }

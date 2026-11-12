@@ -1,9 +1,11 @@
 import { nanoid } from "nanoid";
+import { LocalImageUnavailableError } from "@/lib/local-image-unavailable";
 import { readImageMeta } from "@/lib/image-utils";
 import { IMAGE_FILES_STORE_NAME, localForageInstance } from "@/lib/localforage-storage";
 import { isLocalRuntimeMode } from "@/lib/runtime-mode";
 import { getActiveUserScope } from "@/lib/user-scope";
-import { importResourceFromUrl, isResourceUrl, resourceFileUrl, resourceIdFromStorageKey, resourceStorageKey, ResourceUploadError, uploadResourceFile } from "@/services/api/resources";
+import { importResourceFromUrl, isResourceUrl, resourceFileUrl, resourceIdFromStorageKey, resourceStorageKey, resolveResourceUrl, ResourceUploadError, uploadResourceFile } from "@/services/api/resources";
+import { resolveEmbeddedAssetUrl } from "@/lib/embedded-runtime";
 import { cacheResourceObjectUrl, getCachedResourceBlob, getCachedResourceObjectUrl, primeResourceBlobCache } from "@/services/resource-blob-cache";
 import { usesBrowserLocalResourceStore } from "@/services/workspace-resource-storage";
 import { startOperation } from "@/stores/use-operation-progress";
@@ -107,7 +109,8 @@ function shouldImportRemoteImage(input: string) {
 }
 
 export async function resolveImageUrl(storageKey?: string, fallback = "", options?: { cacheMiss?: boolean }) {
-    if (!storageKey) return fallback;
+    const fallbackUrl = resolveEmbeddedAssetUrl(resolveResourceUrl(undefined, fallback));
+    if (!storageKey) return fallbackUrl;
     const resourceId = resourceIdFromStorageKey(storageKey);
     if (resourceId) {
         const cached = await getCachedResourceObjectUrl(storageKey).catch(() => "");
@@ -121,10 +124,25 @@ export async function resolveImageUrl(storageKey?: string, fallback = "", option
     const cached = objectUrls.get(storageKey);
     if (cached) return cached;
     const blob = await store.getItem<Blob>(storageKey);
-    if (!blob) return fallback;
+    if (!blob) {
+        if (!fallbackUrl || fallbackUrl.startsWith("blob:")) throw new LocalImageUnavailableError(fallbackUrl);
+        return fallbackUrl;
+    }
     const url = URL.createObjectURL(blob);
     objectUrls.set(storageKey, url);
     return url;
+}
+
+/**
+ * 缩略图、全景背景这类「能显示就显示」的预览读取。
+ * 本地图片已被清理时回退到调用方给出的地址，而不是把错误抛给预览。
+ */
+export async function resolvePreviewImageUrl(storageKey?: string, fallback = "", options?: { cacheMiss?: boolean }) {
+    try {
+        return await resolveImageUrl(storageKey, fallback, options);
+    } catch {
+        return resolveEmbeddedAssetUrl(resolveResourceUrl(undefined, fallback));
+    }
 }
 
 export async function getImageBlob(storageKey: string) {
@@ -149,7 +167,15 @@ export async function imageToDataUrl(image: { url?: string; dataUrl?: string; st
     if (!url) return url;
     if (url.startsWith("data:image/")) return url;
     if (url.startsWith("data:")) return blobToDataUrl(await normalizeImageBlob(await (await fetch(url)).blob(), image.name));
-    const blob = await (await fetch(url, { credentials: isResourceUrl(url) ? "include" : "same-origin" })).blob();
+    let response: Response;
+    try {
+        response = await fetch(url, { credentials: isResourceUrl(url) ? "include" : "same-origin" });
+    } catch (error) {
+        if (url.startsWith("blob:")) throw new LocalImageUnavailableError(url);
+        throw error;
+    }
+    if (!response.ok) throw new Error(`图片读取失败（HTTP ${response.status}）`);
+    const blob = await response.blob();
     return blobToDataUrl(await normalizeImageBlob(blob, image.name || url));
 }
 

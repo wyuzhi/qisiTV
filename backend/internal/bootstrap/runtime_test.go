@@ -189,7 +189,7 @@ func TestRuntimeOpenStartClose(t *testing.T) {
 		"/finance/account",
 		"/resources/import",
 		"/resources/demo/oss-url",
-		"/beefapi/connection/open-wallet",
+		"/beeftv/connection/open-wallet",
 	} {
 		hostedRequest, err := http.NewRequest(http.MethodGet, runtime.BaseURL()+hostedPath, nil)
 		if err != nil {
@@ -205,7 +205,7 @@ func TestRuntimeOpenStartClose(t *testing.T) {
 			t.Fatalf("desktop hosted route %s status = %d, want %d", hostedPath, hostedResponse.StatusCode, http.StatusNotFound)
 		}
 	}
-	optionalConnection, err := http.NewRequest(http.MethodGet, runtime.BaseURL()+"/beefapi/connection", nil)
+	optionalConnection, err := http.NewRequest(http.MethodGet, runtime.BaseURL()+"/beeftv/connection", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,6 +252,9 @@ func TestRuntimeOpenStartClose(t *testing.T) {
 		t.Fatalf("desktop unknown proxy path status = %d, want %d", unknownProxyResponse.StatusCode, http.StatusNotFound)
 	}
 
+	// 客户端可能多拨了一条从没发过请求的连接放在空闲池里；服务端要等它满 5 秒才算空闲，
+	// 正好撞上 5 秒的关闭时限。先关掉客户端的空闲连接，只检查运行时自己的关闭。
+	http.DefaultClient.CloseIdleConnections()
 	if err := runtime.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}

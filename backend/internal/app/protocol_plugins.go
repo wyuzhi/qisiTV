@@ -117,7 +117,3 @@ func mapPluginAccessError(err error) error {
 	}
 	return err
 }
-
-func bundledWorkflowPluginManifests() []protocol.Manifest {
-	return plugins.BundledWorkflowManifests()
-}

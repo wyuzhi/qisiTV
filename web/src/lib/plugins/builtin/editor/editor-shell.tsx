@@ -22,7 +22,6 @@ const manifest: PluginManifestV2 = {
     surfaces: ["fullscreen"],
     permissions: ["timeline.read", "timeline.command", "export.run"],
     trusted: true,
-    runtime: { backend: "trusted-backend", web: "declarative" },
     contributes: {
         editorSlots: [
             { slot: "timeline-panel", priority: 0 },

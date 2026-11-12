@@ -8,12 +8,11 @@ import (
 	"fmt"
 	"strings"
 
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/modelcatalog"
 	"qisitv/backend/internal/outbound"
 	"qisitv/backend/internal/prompts"
-	"qisitv/backend/internal/provider/workflow"
 	"qisitv/backend/internal/repository"
 
 	"gorm.io/gorm"
@@ -214,13 +213,13 @@ func ValidateResolvedImageCapability(repo *repository.Repository, readLocalConfi
 }
 
 func ResolveImageCapability(repo *repository.Repository, readLocalConfig func() ([]byte, error), input *Input) error {
-	if input.Config.CredentialRef == beefapi.CredentialRef {
+	if input.Config.CredentialRef == beeftv.CredentialRef {
 		body, err := readLocalConfig()
 		if err != nil {
 			return err
 		}
 		for _, item := range modelcatalog.ParseLocalChannelModels(body) {
-			if item.ChannelID != "beefapi" || item.Model != input.Config.Model || item.ImageCapabilitiesVersion == nil || strings.TrimSpace(*item.ImageCapabilitiesVersion) == "" {
+			if item.ChannelID != "beeftv" || item.Model != input.Config.Model || item.ImageCapabilitiesVersion == nil || strings.TrimSpace(*item.ImageCapabilitiesVersion) == "" {
 				continue
 			}
 			raw, err := json.Marshal(item.CapabilityConfig)
@@ -298,7 +297,7 @@ func ValidateResolvedVideoCapabilityContext(ctx context.Context, repo *repositor
 }
 
 func ResolveVideoCapability(ctx context.Context, repo *repository.Repository, readLocalConfig func() ([]byte, error), input *Input) error {
-	if input.Config.CredentialRef == beefapi.CredentialRef {
+	if input.Config.CredentialRef == beeftv.CredentialRef {
 		body, err := readLocalConfig()
 		if err != nil {
 			return err
@@ -306,12 +305,12 @@ func ResolveVideoCapability(ctx context.Context, repo *repository.Repository, re
 		input.Config.VideoCapabilitiesVersion = nil
 		input.Config.CapabilityConfig = nil
 		for _, item := range modelcatalog.ParseLocalChannelModels(body) {
-			if item.ChannelID != "beefapi" || !item.Enabled || item.Model != input.Config.Model || item.VideoCapabilitiesVersion == nil || strings.TrimSpace(*item.VideoCapabilitiesVersion) == "" {
+			if item.ChannelID != "beeftv" || !item.Enabled || item.Model != input.Config.Model || item.VideoCapabilitiesVersion == nil || strings.TrimSpace(*item.VideoCapabilitiesVersion) == "" {
 				continue
 			}
 			config, _ := item.CapabilityConfig.(map[string]any)
 			rawVideo, _ := json.Marshal(config["video"])
-			video, valid := beefapi.NormalizeVersionedVideoCapability(rawVideo, *item.VideoCapabilitiesVersion)
+			video, valid := beeftv.NormalizeVersionedVideoCapability(rawVideo, *item.VideoCapabilitiesVersion)
 			if !valid {
 				continue
 			}
@@ -355,7 +354,7 @@ func ResolveVideoCapability(ctx context.Context, repo *repository.Repository, re
 			return nil
 		}
 		input.Config.CapabilityConfig = normalized
-		RestoreBeefAPISeedanceAudioControl(ctx, input.Config, normalized.Video)
+		RestoreBeefTVSeedanceAudioControl(ctx, input.Config, normalized.Video)
 		input.VideoCapability = normalized.Video
 		applyFixedVideoResolution(input, normalized.Video)
 		return nil
@@ -373,7 +372,7 @@ func ResolveVideoCapability(ctx context.Context, repo *repository.Repository, re
 		return errors.New("当前视频模型能力参数无效")
 	}
 	input.VideoCapability = normalized.Video
-	RestoreBeefAPISeedanceAudioControl(ctx, input.Config, normalized.Video)
+	RestoreBeefTVSeedanceAudioControl(ctx, input.Config, normalized.Video)
 	applyFixedVideoResolution(input, normalized.Video)
 	return nil
 }
@@ -386,9 +385,6 @@ func ResolveProviderConfig(repo *repository.Repository, localMode bool, systemCh
 	config.Headers = headers
 	if localMode && strings.TrimSpace(config.ChannelID) != "" {
 		return Config{}, errors.New("本地工作区不支持系统渠道配置")
-	}
-	if workflow.IsRunningHubInterface(config.InterfaceType) && strings.TrimSpace(config.BaseURL) == "" {
-		config.BaseURL = "https://www.runninghub.cn"
 	}
 	channelID := strings.TrimSpace(config.ChannelID)
 	if channelID == "" {

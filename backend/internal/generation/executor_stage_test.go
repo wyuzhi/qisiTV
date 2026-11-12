@@ -43,7 +43,6 @@ func (p stageResources) LocalMode() bool { return true }
 
 func (p stageConfig) Resolve(c Config) (Config, error)                { return c, nil }
 func (p stageConfig) ApplyCapabilities(context.Context, *Input) error { return nil }
-func (p stageConfig) RequireWorkflow(string) error                    { return nil }
 func (p stageConfig) SyncArkPrivateAssets(context.Context, string, *Input) error {
 	*p.events = append(*p.events, "hydrate/upload")
 	if p.cancel != nil {

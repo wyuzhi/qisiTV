@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/modelcatalog"
 )
 
@@ -51,8 +51,8 @@ func DescribeRequest(host CompileHost, n Node, resource, operation string) (Reci
 		config := map[string]any{"model": candidate.Model, "interfaceType": candidate.Protocol, "baseUrl": candidate.BaseURL, "capabilityConfig": candidate.CapabilityConfig}
 		input := map[string]any{"mode": "text", "config": config}
 		channelID := candidate.ChannelID
-		if beefapi.IsManagedChannel(candidate.ChannelID, "", candidate.BaseURL) {
-			channelID = "@beefapi"
+		if beeftv.IsManagedChannel(candidate.ChannelID, "", candidate.BaseURL) {
+			channelID = "@beeftv"
 		}
 		if err := RefreshCredentials(host, input, channelID); err != nil {
 			return RecipeRequest{}, err

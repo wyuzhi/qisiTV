@@ -13,19 +13,27 @@ import (
 	"time"
 )
 
-func TestManagedPublicHTTPSIgnoresBYOKLANPolicy(t *testing.T) {
+func TestManagedPublicHTTPSRespectsLocalAndFakeIPPolicy(t *testing.T) {
 	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "true")
-	t.Setenv("CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS", "localhost,10.0.0.1")
-	for _, target := range []string{"https://127.0.0.1/a", "https://10.0.0.1/a", "https://[::1]/a", "https://100.64.0.1/a", "https://169.254.169.254/a", "https://192.0.2.1/a", "http://8.8.8.8/a"} {
-		if _, err := ValidatePublicHTTPSURLContext(context.Background(), target); err == nil {
-			t.Fatalf("accepted %s", target)
+	for _, target := range []string{"https://127.0.0.1/a", "http://127.0.0.1/a", "https://10.0.0.1/a", "http://10.0.0.1/a", "https://[::1]/a", "https://100.64.0.1/a", "http://100.64.0.1/a", "https://198.18.0.1/a", "http://198.18.0.1/a", "http://8.8.8.8/a"} {
+		if _, err := ValidatePublicHTTPSURLContext(context.Background(), target); err != nil {
+			t.Fatalf("rejected %s: %v", target, err)
 		}
 	}
-	if _, err := ValidateOutboundURL("http://127.0.0.1/a"); err != nil {
-		t.Fatalf("changed BYOK: %v", err)
+	for _, blocked := range []string{"https://169.254.169.254/a", "http://169.254.169.254/a"} {
+		if _, err := ValidatePublicHTTPSURLContext(context.Background(), blocked); err == nil {
+			t.Fatalf("accepted %s", blocked)
+		}
+	}
+	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "false")
+	t.Setenv("CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS", "")
+	for _, target := range []string{"https://127.0.0.1/a", "https://10.0.0.1/a", "https://[::1]/a", "https://100.64.0.1/a", "https://169.254.169.254/a", "https://192.0.2.1/a", "https://198.18.0.1/a", "http://127.0.0.1/a", "http://8.8.8.8/a"} {
+		if _, err := ValidatePublicHTTPSURLContext(context.Background(), target); err == nil {
+			t.Fatalf("accepted %s when private upstreams disabled", target)
+		}
 	}
 	if _, err := publicHTTPSTransport.DialContext(context.Background(), "tcp", "10.0.0.1:443"); err == nil {
-		t.Fatal("direct dial accepted private target")
+		t.Fatal("direct dial accepted private target when private upstreams disabled")
 	}
 }
 
@@ -44,6 +52,7 @@ func TestManagedPublicHTTPSAllowsStorageVendorsWithoutDomainList(t *testing.T) {
 }
 
 func TestManagedPublicHTTPSRetainsConfiguredProxyAndRejectsPrivateTarget(t *testing.T) {
+	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "false")
 	connects := 0
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) { connects++; w.WriteHeader(http.StatusBadGateway) }))
 	defer proxy.Close()
@@ -73,6 +82,7 @@ func (f publicHTTPSRedirectTransport) RoundTrip(req *http.Request) (*http.Respon
 }
 
 func TestManagedPublicHTTPSRejectsPrivateRedirect(t *testing.T) {
+	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "false")
 	requests := 0
 	client := OutboundHTTPClient(0)
 	client.Transport = publicHTTPSRedirectTransport(func(req *http.Request) (*http.Response, error) {
@@ -86,6 +96,7 @@ func TestManagedPublicHTTPSRejectsPrivateRedirect(t *testing.T) {
 }
 
 func TestManagedPublicHTTPSBlocksDNSRebindingAtDirectDial(t *testing.T) {
+	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "false")
 	listener, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

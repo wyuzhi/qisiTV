@@ -28,7 +28,7 @@ try {
         const path = new URL(route.request().url()).pathname;
         if (!path.startsWith("/api/")) return route.continue();
         const envelope = data => route.fulfill({ json: { code: 0, data, msg: "ok" } });
-        if (path === "/api/beefapi/connection/models") { await new Promise(resolve => setTimeout(resolve, 4500)); return envelope({ models: [
+        if (path === "/api/beeftv/connection/models") { await new Promise(resolve => setTimeout(resolve, 4500)); return envelope({ models: [
             { id: "hy-asr-3.0-preview", supportedEndpointTypes: ["audio.transcriptions"] },
             { id: "minimax-speech-2.8-hd", supportedEndpointTypes: ["audio.speech"] },
         ] }); }

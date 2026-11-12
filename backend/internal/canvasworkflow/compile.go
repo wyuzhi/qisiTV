@@ -67,16 +67,13 @@ type CompileHost interface {
 	// ProviderConfig is the effective local model configuration.
 	ProviderConfig() (map[string]any, error)
 	LocalMode() bool
-	// ManagedCredential is the current BeefAPI key and base URL.
+	// ManagedCredential is the current BeefTV key and base URL.
 	ManagedCredential() (apiKey, baseURL string, err error)
 	ManagedCredentialRef() string
 	// UpscaleAvailable reports whether the named upscale model can run.
 	// An empty name only checks that the official channel is connected.
 	UpscaleAvailable(model string) error
-	// ValidateProviderCapability checks a fixed provider-workflow recipe and
-	// returns the same error text the task validator would.
-	ValidateProviderCapability(input map[string]any) error
-	// ValidateTaskShape checks a non-workflow recipe. It sets DeferReferenceMetadata
+	// ValidateTaskShape checks a recipe. It sets DeferReferenceMetadata
 	// itself. vquality is the validated clarity, with ok false when the recipe
 	// has no config map to write it into.
 	ValidateTaskShape(input map[string]any) (vquality string, ok bool, err error)
@@ -425,25 +422,16 @@ func Compile(host CompileHost, user string, d Definition, existing *model.Canvas
 			if err != nil || json.Unmarshal(encoded, &taskInput) != nil {
 				return CompileResult{}, BadRequest("生成配方的素材配置无效")
 			}
-			if modelcatalog.IsWorkflowInterfaceType(taskInput.Config.InterfaceType) {
-				if referencesEdited {
-					return CompileResult{}, BadRequest("「" + n.Title + "」使用固定的渠道工作流，请先在画布添加素材并成功运行后重新导入")
-				}
-				if err := host.ValidateProviderCapability(input); err != nil {
-					return CompileResult{}, BadRequest("「" + n.Title + "」的模型参数无效：" + err.Error())
-				}
-			} else {
-				if referencesEdited && (taskInput.Mode != "image" && taskInput.Mode != "video" || taskInput.Mode == "image" && (len(taskInput.ReferenceVideos) > 0 || len(taskInput.ReferenceAudios) > 0)) {
-					return CompileResult{}, BadRequest("「" + n.Title + "」不支持新增这类参考素材，请使用对应的生成步骤")
-				}
-				vquality, ok, err := host.ValidateTaskShape(input)
-				if err != nil {
-					return CompileResult{}, BadRequest("「" + n.Title + "」的模型或素材配置无效：" + err.Error())
-				}
-				if ok {
-					if config, yes := input["config"].(map[string]any); yes {
-						config["vquality"] = vquality
-					}
+			if referencesEdited && (taskInput.Mode != "image" && taskInput.Mode != "video" || taskInput.Mode == "image" && (len(taskInput.ReferenceVideos) > 0 || len(taskInput.ReferenceAudios) > 0)) {
+				return CompileResult{}, BadRequest("「" + n.Title + "」不支持新增这类参考素材，请使用对应的生成步骤")
+			}
+			vquality, ok, err := host.ValidateTaskShape(input)
+			if err != nil {
+				return CompileResult{}, BadRequest("「" + n.Title + "」的模型或素材配置无效：" + err.Error())
+			}
+			if ok {
+				if config, yes := input["config"].(map[string]any); yes {
+					config["vquality"] = vquality
 				}
 			}
 		}

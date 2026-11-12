@@ -22,6 +22,7 @@ export const CanvasFolderPreview = React.memo(function CanvasFolderPreview({
     active,
     isDropTarget,
     readOnly,
+    canOpen = !readOnly,
     onToggleCollapsed,
     onTitleChange,
     onStyleChange,
@@ -32,6 +33,7 @@ export const CanvasFolderPreview = React.memo(function CanvasFolderPreview({
     active: boolean;
     isDropTarget: boolean;
     readOnly: boolean;
+    canOpen?: boolean;
     onToggleCollapsed: (nodeId: string) => void;
     onTitleChange: (nodeId: string, title: string) => void;
     onStyleChange: (nodeId: string, style: CanvasFolderStyle) => void;
@@ -41,12 +43,19 @@ export const CanvasFolderPreview = React.memo(function CanvasFolderPreview({
     const theme = resolveCanvasFolderTheme(data.metadata?.folder?.theme);
     const [editing, setEditing] = useState(false);
     const [title, setTitle] = useState(data.title);
-    const previewNodes = useMemo(() => childNodes.filter(canPreviewFolderNode).slice(0, 3), [childNodes]);
+    const previewNodes = useMemo(
+        () => childNodes.filter(canPreviewFolderNode).slice(-(style === "stacked" ? 2 : 3)),
+        [childNodes, style],
+    );
     const themeCover = resolveCanvasFolderThemeCover(theme, data.metadata?.folder?.themeCover);
     const showAdd = style === "glass" || childNodes.length === 0;
     const folderMenu = {
         selectedKeys: [`style:${style}`, `theme:${theme}`],
         items: [
+            {
+                key: "open",
+                label: data.metadata?.folder?.assetFolderId ? "打开素材文件夹" : "打开文件夹",
+            },
             {
                 key: "styles",
                 label: "文件夹样式",
@@ -59,6 +68,7 @@ export const CanvasFolderPreview = React.memo(function CanvasFolderPreview({
             },
         ],
         onClick: ({ key }: { key: string }) => {
+            if (key === "open") onToggleCollapsed(data.id);
             if (key.startsWith("style:")) onStyleChange(data.id, key.slice(6) as CanvasFolderStyle);
             if (key.startsWith("theme:")) onThemeChange(data.id, key.slice(6) as CanvasFolderTheme);
         },
@@ -133,35 +143,33 @@ export const CanvasFolderPreview = React.memo(function CanvasFolderPreview({
                     <span className="canvas-folder-meta">{style === "midnight" ? formatFolderDate(data.metadata?.folder?.createdAt) : `${childNodes.length} 项内容`}</span>
                 </div>
 
-                {!readOnly ? (
-                    showAdd ? (
+                {canOpen && (showAdd || readOnly) ? (
+                    <button
+                        type="button"
+                        className="canvas-folder-action canvas-folder-add"
+                        aria-label={readOnly ? "打开素材文件夹" : "打开文件夹"}
+                        title={readOnly ? "打开素材文件夹" : "打开文件夹"}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onToggleCollapsed(data.id);
+                        }}
+                    >
+                        <Plus />
+                    </button>
+                ) : !readOnly ? (
+                    <Dropdown trigger={["click"]} menu={folderMenu}>
                         <button
                             type="button"
-                            className="canvas-folder-action canvas-folder-add"
-                            aria-label="展开文件夹并添加内容"
-                            title="展开文件夹并添加内容"
+                            className="canvas-folder-action canvas-folder-options"
+                            aria-label={`文件夹选项，当前 ${childNodes.length} 项`}
+                            title="切换文件夹样式与主题"
                             onMouseDown={(event) => event.stopPropagation()}
-                            onClick={(event) => {
-                                event.stopPropagation();
-                                onToggleCollapsed(data.id);
-                            }}
+                            onClick={(event) => event.stopPropagation()}
                         >
-                            <Plus />
+                            <MoreHorizontal />
                         </button>
-                    ) : (
-                        <Dropdown trigger={["click"]} menu={folderMenu}>
-                            <button
-                                type="button"
-                                className="canvas-folder-action canvas-folder-options"
-                                aria-label={`文件夹选项，当前 ${childNodes.length} 项`}
-                                title="切换文件夹样式与主题"
-                                onMouseDown={(event) => event.stopPropagation()}
-                                onClick={(event) => event.stopPropagation()}
-                            >
-                                <MoreHorizontal />
-                            </button>
-                        </Dropdown>
-                    )
+                    </Dropdown>
                 ) : null}
 
                 {!readOnly && showAdd ? (
@@ -172,7 +180,7 @@ export const CanvasFolderPreview = React.memo(function CanvasFolderPreview({
                     </Dropdown>
                 ) : null}
 
-                {readOnly && childNodes.length > 0 ? <span className="canvas-folder-count">{childNodes.length}</span> : null}
+                {readOnly && !canOpen && childNodes.length > 0 ? <span className="canvas-folder-count">{childNodes.length}</span> : null}
             </div>
         </div>
     );
@@ -187,8 +195,8 @@ function FolderThemeMedia({ source }: { source: string }) {
 }
 
 function FolderNodeMedia({ node }: { node?: CanvasNodeData }) {
-    if (node?.type === CanvasNodeType.Image && node.metadata?.content) {
-        return <img src={node.metadata.content} alt="" loading="lazy" decoding="async" draggable={false} />;
+    if (node?.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.previewContent)) {
+        return <img src={node.metadata.content || node.metadata.previewContent} alt="" loading="lazy" decoding="async" draggable={false} />;
     }
     const videoPreview = node ? canvasNodeVideoPreviewUrl(node) : "";
     if (videoPreview) {

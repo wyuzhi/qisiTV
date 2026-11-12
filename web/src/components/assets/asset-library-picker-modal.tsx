@@ -82,7 +82,7 @@ type Props = {
         };
     };
     onClose: () => void;
-    onConfirm: (ids: string[]) => Promise<void> | void;
+    onConfirm: (ids: string[], selectedItems: AssetLibraryPickerItem[]) => Promise<void> | void;
     onFolderAction?: (folderId: string) => Promise<void> | void;
 };
 
@@ -121,6 +121,7 @@ export function AssetLibraryPickerModal({
     const [keyword, setKeyword] = useState("");
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [uploadedItems, setUploadedItems] = useState<AssetLibraryPickerItem[]>([]);
+    const [uploadedLocalIds, setUploadedLocalIds] = useState<Set<string>>(new Set());
     const [working, setWorking] = useState(false);
     const [uploadingCount, setUploadingCount] = useState(0);
     const [error, setError] = useState("");
@@ -168,6 +169,7 @@ export function AssetLibraryPickerModal({
     const uploadInputRef = useRef<HTMLInputElement>(null);
     const initialSelectedIdsRef = useRef(initialSelectedIds);
     const itemsRef = useRef(items);
+    const knownItemsRef = useRef<Map<string, AssetLibraryPickerItem>>(new Map());
     initialSelectedIdsRef.current = initialSelectedIds;
     const allItems = useMemo(() => {
         const known = new Set(items.map((item) => item.id));
@@ -175,6 +177,24 @@ export function AssetLibraryPickerModal({
     }, [items, uploadedItems]);
     itemsRef.current = allItems;
     const localItems = useMemo(() => allItems.filter((item) => !item.external), [allItems]);
+    const mergedRemoteItems = useMemo(() => {
+        const remoteIdSet = new Set(remoteItems.map((item) => item.id));
+        const pendingLocal = localItems.filter(
+            (item) =>
+                !remoteIdSet.has(item.id) &&
+                (!remoteKind || pickerItemMediaKind(item) === remoteKind) &&
+                (uploadedLocalIds.has(item.id) || selected.has(item.id) || Boolean(item.asset && isUnsavedWorkspaceAsset(item.asset))),
+        );
+        return pendingLocal.length ? [...pendingLocal, ...remoteItems] : remoteItems;
+    }, [localItems, remoteItems, remoteKind, selected, uploadedLocalIds]);
+    useEffect(() => {
+        if (!open) {
+            knownItemsRef.current.clear();
+            return;
+        }
+        allItems.forEach((item) => knownItemsRef.current.set(item.id, item));
+        mergedRemoteItems.forEach((item) => knownItemsRef.current.set(item.id, item));
+    }, [allItems, mergedRemoteItems, open]);
     const remoteTotal = remoteQuery.data?.total ?? 0;
     const remoteReady = remoteEnabled && remoteQuery.isSuccess;
     const useRemoteItems = Boolean(remoteReady);
@@ -189,13 +209,20 @@ export function AssetLibraryPickerModal({
     const hasPluginSource = useMemo(() => Object.keys(categoryLabels).some((value) => value.startsWith("external:")) || pluginItems.some((item) => item.category.startsWith("external:")), [categoryLabels, pluginItems]);
     // 媒体类型在分类之前收窄数据源，让左侧分类计数、网格和分页始终描述同一批素材。
     const sourceItems = useMemo(() => {
-        const base = source === "plugin" ? pluginItems : useRemoteItems ? remoteItems : localItems;
+        const base = source === "plugin" ? pluginItems : useRemoteItems ? mergedRemoteItems : localItems;
         if (mediaKind === "all") return base;
         return base.filter((item) => pickerItemMediaKind(item) === mediaKind);
-    }, [localItems, mediaKind, pluginItems, useRemoteItems, remoteItems, source]);
+    }, [localItems, mediaKind, mergedRemoteItems, pluginItems, useRemoteItems, source]);
     const activeSourceItems = useMemo(() => sourceItems.filter((item) => !item.archived), [sourceItems]);
     const mediaKindOptions = useMemo(() => (remoteKind ? [] : Array.from(new Set(mediaKinds))), [mediaKinds, remoteKind]);
-    const sourceFolders = source === "plugin" ? folders : [];
+    const sourceFolders = useMemo(
+        () =>
+            folders.filter((folder) => {
+                const isExternal = folder.id.startsWith("external:") || folder.id.startsWith("external-folder:");
+                return source === "plugin" ? isExternal : !isExternal;
+            }),
+        [folders, source],
+    );
     const showCategories = source === "local" || !sourceFolders.length;
     const normalCategories = useMemo(() => useRemoteItems ? Object.keys(categoryLabels).filter((value) => value !== "archived" && !value.startsWith("external:")) : ["all", ...Array.from(new Set(activeSourceItems.map((item) => item.category || "other"))).filter((value) => value !== "all")], [activeSourceItems, categoryLabels, useRemoteItems]);
 
@@ -207,14 +234,15 @@ export function AssetLibraryPickerModal({
             return useRemoteItems || !query || [item.title, item.searchText || "", item.description || ""].join(" ").toLowerCase().includes(query);
         });
     }, [category, folderId, keyword, sourceItems, useRemoteItems]);
-    const selectedIds = useMemo(
+    const selectedItems = useMemo(
         () =>
-            Array.from(selected).filter((id) => {
-                const item = resolvePickerCatalogItem(id, allItems, useRemoteItems ? remoteItems : []);
-                return item ? !item.disabledReason : false;
+            Array.from(selected).flatMap((id) => {
+                const item = resolvePickerCatalogItem(id, allItems, useRemoteItems ? mergedRemoteItems : [], knownItemsRef.current);
+                return item && !item.disabledReason ? [item] : [];
             }),
-        [allItems, remoteItems, selected, useRemoteItems],
+        [allItems, mergedRemoteItems, selected, useRemoteItems],
     );
+    const selectedIds = useMemo(() => selectedItems.map((item) => item.id), [selectedItems]);
 
     useEffect(() => {
         if (!open) return;
@@ -225,6 +253,7 @@ export function AssetLibraryPickerModal({
         setSource("local");
         setKeyword("");
         setUploadedItems([]);
+        setUploadedLocalIds(new Set());
         const selectableIds = new Set(itemsRef.current.filter((item) => !item.disabledReason).map((item) => item.id));
         setSelected(new Set(Array.from(initialSelectedIdsRef.current || []).filter((id) => selectableIds.has(id))));
         setWorking(false);
@@ -272,7 +301,7 @@ export function AssetLibraryPickerModal({
         setWorking(true);
         setError("");
         try {
-            await onConfirm(selectedIds);
+            await onConfirm(selectedIds, selectedItems);
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : "素材操作失败，请重试");
         } finally {
@@ -293,7 +322,11 @@ export function AssetLibraryPickerModal({
                 if (ids.length) setSelected((current) => new Set(multiple ? [...current, ...ids] : ids.slice(-1)));
             } else {
                 const ids = await upload!.onUpload(files);
-                if (ids.length) setSelected((current) => new Set(multiple ? [...current, ...ids] : ids.slice(-1)));
+                if (ids.length) {
+                    setUploadedLocalIds((current) => new Set([...current, ...ids]));
+                    setSelected((current) => new Set(multiple ? [...current, ...ids] : ids.slice(-1)));
+                    if (remoteEnabled) void remoteQuery.refetch();
+                }
             }
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : "素材上传失败，请重试");
@@ -528,8 +561,8 @@ export function workspaceAssetPickerDisabledReason(
     return undefined;
 }
 
-function resolvePickerCatalogItem(id: string, localItems: AssetLibraryPickerItem[], remoteItems: AssetLibraryPickerItem[]) {
-    return remoteItems.find((item) => item.id === id) || localItems.find((item) => item.id === id);
+function resolvePickerCatalogItem(id: string, localItems: AssetLibraryPickerItem[], remoteItems: AssetLibraryPickerItem[], knownItems?: ReadonlyMap<string, AssetLibraryPickerItem>) {
+    return remoteItems.find((item) => item.id === id) || localItems.find((item) => item.id === id) || knownItems?.get(id);
 }
 
 function PickerCard({ item, selected, onToggle }: { item: AssetLibraryPickerItem; selected: boolean; onToggle: () => void }) {

@@ -4,7 +4,7 @@ import { chromium, type Browser, type BrowserContext } from "playwright";
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
 let script = "";
-let engineVersion = "2.1.2-web-beta.1";
+let engineVersion = "2.2.1-web-beta.1";
 let failBootstrap = false;
 const requests: string[] = [];
 const session = { token: "optional-engine-fixture-token-not-a-real-secret", sessionId: "optional-engine-fixture", expiresAt: new Date(Date.now() + 600_000).toISOString() };
@@ -20,7 +20,7 @@ beforeAll(async () => {
         return new Response('<div id="root"></div><script type="module" src="/harness.js"></script>', { headers: { "content-type": "text/html" } });
     } });
     const built = await Bun.build({ entrypoints: [import.meta.dir + "/fixtures/optional-engine-startup.ts"], target: "browser", format: "esm", define: {
-        "import.meta.env": JSON.stringify({ VITE_QISITV_ENGINE: "1", VITE_QISITV_BROWSER_ONLY: "0", VITE_QISITV_ENGINE_PORT: String(server.port), BASE_URL: "/", VITE_APP_VERSION: "2.1.2-web-beta.1" }),
+        "import.meta.env": JSON.stringify({ VITE_QISITV_ENGINE: "1", VITE_QISITV_BROWSER_ONLY: "0", VITE_QISITV_ENGINE_PORT: String(server.port), BASE_URL: "/", VITE_APP_VERSION: "2.2.1-web-beta.1" }),
     }, plugins: [{ name: "minimal-application", setup(builder) {
         builder.onResolve({ filter: /^@fontsource-variable\// }, () => ({ path: "font", namespace: "empty-font" }));
         builder.onLoad({ filter: /.*/, namespace: "empty-font" }, () => ({ contents: "export {};", loader: "js" }));

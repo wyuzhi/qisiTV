@@ -53,13 +53,15 @@ type Props = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "onChange" | "val
     selectedAssetReferences?: CanvasResourceReference[];
     referenceAction?: CanvasReferenceAction | null;
     onReferenceActionHandled?: () => void;
+    onSelectionRangeChange?: (range: { start: number; end: number }) => void;
+    caretRequest?: { offset: number; key: number } | null;
 };
 
 const EMPTY_ISSUES: CanvasReferenceIssue[] = [];
 const EMPTY_REFERENCES: CanvasResourceReference[] = [];
 
 export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Props>(function CanvasResourceMentionTextarea(
-    { value, references, onSelectReference, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, mentionMenuWidth = 320, sendOnEnter = true, onContentSizeChange, includeAssetLibrary = false, activeDropReferenceId, onReferenceFilesDrop, autoLinkEnabled = false, nodeSectionLabel = "画布节点", referenceIssues = EMPTY_ISSUES, selectedAssetReferences = EMPTY_REFERENCES, referenceAction, onReferenceActionHandled, ...props },
+    { value, references, onSelectReference, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, mentionMenuWidth = 320, sendOnEnter = true, onContentSizeChange, includeAssetLibrary = false, activeDropReferenceId, onReferenceFilesDrop, autoLinkEnabled = false, nodeSectionLabel = "画布节点", referenceIssues = EMPTY_ISSUES, selectedAssetReferences = EMPTY_REFERENCES, referenceAction, onReferenceActionHandled, onSelectionRangeChange, caretRequest, ...props },
     forwardedRef,
 ) {
     const rawTheme = useActiveTheme();
@@ -74,6 +76,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
     const lastRenderedValueRef = useRef("");
     const lastIssueKeyRef = useRef("");
     const handledActionRef = useRef<CanvasReferenceAction | null>(null);
+    const handledCaretKeyRef = useRef<number | null>(null);
     const replacingTokenRef = useRef<string | null>(null);
     const issueKey = JSON.stringify(referenceIssues);
     const interactingWithMenuRef = useRef(false);
@@ -168,12 +171,13 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
             pendingSelectionRef.current = null;
             return;
         }
+        const hasPendingSelection = pendingSelectionRef.current !== null;
         const selection = pendingSelectionRef.current ?? (isFocused ? getEditableSelection(editor)?.start ?? null : null);
         const scrollTop = pendingScrollTopRef.current;
         renderEditableContent(editor, value, activeReferences, referenceIssues);
         lastIssueKeyRef.current = issueKey;
         lastRenderedValueRef.current = value;
-        if (isFocused && selection !== null) setEditableSelection(editor, selection);
+        if ((isFocused || hasPendingSelection) && selection !== null) setEditableSelection(editor, selection);
         pendingSelectionRef.current = null;
         reportContentSize(editor);
         if (scrollTop !== null) editor.scrollTop = scrollTop;
@@ -237,12 +241,23 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
     };
 
     const updateValue = (next: string, selectionStart?: number) => {
-        if (typeof selectionStart === "number") pendingSelectionRef.current = selectionStart;
+        if (typeof selectionStart === "number") {
+            pendingSelectionRef.current = selectionStart;
+            onSelectionRangeChange?.({ start: selectionStart, end: selectionStart });
+        }
         const editor = editorRef.current ?? textareaRef.current;
         pendingScrollTopRef.current = editor?.scrollTop ?? null;
         onChange(next);
         if (typeof selectionStart === "number") focusEditor(selectionStart);
     };
+
+    useLayoutEffect(() => {
+        if (!caretRequest || handledCaretKeyRef.current === caretRequest.key) return;
+        handledCaretKeyRef.current = caretRequest.key;
+        pendingSelectionRef.current = caretRequest.offset;
+        onSelectionRangeChange?.({ start: caretRequest.offset, end: caretRequest.offset });
+        focusEditor(caretRequest.offset);
+    }, [caretRequest, onSelectionRangeChange]);
 
     const closeMention = () => {
         setMention(null);
@@ -341,7 +356,9 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
         const editor = editorRef.current;
         if (!editor) return;
         const next = serializeEditableValue(editor);
-        const cursor = getEditableSelection(editor)?.start ?? next.length;
+        const selection = getEditableSelection(editor);
+        const cursor = selection?.start ?? next.length;
+        onSelectionRangeChange?.(selection ?? { start: cursor, end: cursor });
         pendingSelectionRef.current = cursor;
         lastRenderedValueRef.current = next;
         onChange(next);
@@ -353,6 +370,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
         const editor = editorRef.current;
         if (!editor) return;
         const selection = getEditableSelection(editor);
+        if (selection) onSelectionRangeChange?.(selection);
         if (!selection || selection.start !== selection.end) {
             setAutoLinkCursor(null);
             return;
@@ -591,6 +609,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                 onContextMenu={preserveNativeTextContextMenu}
                 onChange={(event) => {
                     const next = event.target.value;
+                    onSelectionRangeChange?.({ start: event.target.selectionStart, end: event.target.selectionEnd });
                     onChange(next);
                     syncMention(next, event.target.selectionStart);
                     reportContentSize(event.currentTarget);
@@ -606,6 +625,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                 }}
                 onSelect={(event) => {
                     const textarea = event.currentTarget;
+                    onSelectionRangeChange?.({ start: textarea.selectionStart, end: textarea.selectionEnd });
                     setAutoLinkCursor(textarea.selectionStart === textarea.selectionEnd ? textarea.selectionStart : null);
                     props.onSelect?.(event);
                 }}

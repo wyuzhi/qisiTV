@@ -686,7 +686,7 @@ function DirectorSceneContent({ scene, selectedObjectId, selectedObjectIds = [],
                     threeScene.add(backdrop);
                     invalidate();
                 });
-            });
+            }).catch(() => { /* 本地全景图已被清理时跳过加载，保留场景纯色背景。 */ });
         }
         return () => {
             cancelled = true;

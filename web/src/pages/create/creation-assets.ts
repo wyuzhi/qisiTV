@@ -21,6 +21,8 @@ export type CreationMode = "text" | "image" | "video";
 export type CreationAttachmentKind = "image" | "video" | "audio" | "file";
 
 const textDocumentExtensions = [".pdf", ".txt", ".md", ".csv", ".json", ".html", ".xml", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"];
+const videoExtensions = [".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi"];
+const audioExtensions = [".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus"];
 
 export type CreationAssetIdentity = {
     taskId?: string;
@@ -28,18 +30,30 @@ export type CreationAssetIdentity = {
     resultIndex?: number;
 };
 
+export function isCreationVideoFile(file: Pick<File, "type" | "name">) {
+    if (file.type.startsWith("video/")) return true;
+    const name = file.name.toLowerCase();
+    return (!file.type || file.type === "application/octet-stream") && videoExtensions.some((ext) => name.endsWith(ext));
+}
+
+export function isCreationAudioFile(file: Pick<File, "type" | "name">) {
+    if (file.type.startsWith("audio/")) return true;
+    const name = file.name.toLowerCase();
+    return (!file.type || file.type === "application/octet-stream") && audioExtensions.some((ext) => name.endsWith(ext));
+}
+
 export function creationUploadAccept(mode: CreationMode) {
-    if (mode === "video") return "image/*,video/*,audio/*";
-    if (mode === "text") return `image/*,video/*,audio/*,${textDocumentExtensions.join(",")}`;
+    if (mode === "video") return `image/*,video/*,${videoExtensions.join(",")},audio/*,${audioExtensions.join(",")}`;
+    if (mode === "text") return `image/*,video/*,${videoExtensions.join(",")},audio/*,${audioExtensions.join(",")},${textDocumentExtensions.join(",")}`;
     return "image/*";
 }
 
 export function creationFileAccepted(mode: CreationMode, file: Pick<File, "type" | "name">) {
     if (file.type.startsWith("image/")) return true;
-    if (mode === "video") return file.type.startsWith("video/") || file.type.startsWith("audio/");
+    if (mode === "video") return isCreationVideoFile(file) || isCreationAudioFile(file);
     if (mode !== "text") return false;
     const name = file.name.toLowerCase();
-    return file.type.startsWith("video/") || file.type.startsWith("audio/") || file.type.startsWith("text/") || textDocumentExtensions.some((extension) => name.endsWith(extension));
+    return isCreationVideoFile(file) || isCreationAudioFile(file) || file.type.startsWith("text/") || textDocumentExtensions.some((extension) => name.endsWith(extension));
 }
 
 export function creationAttachmentKind(attachment: Pick<CreationAttachment, "type">): CreationAttachmentKind {

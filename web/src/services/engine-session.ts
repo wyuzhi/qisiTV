@@ -93,8 +93,17 @@ export function installEngineFetch() {
     if (nativeFetch) return;
     nativeFetch = globalThis.fetch.bind(globalThis);
     globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-        const request = new Request(input, init);
-        const url = new URL(request.url);
+        let request = new Request(input, init);
+        let url = new URL(request.url);
+        // Installed plugin UIs use the original desktop API paths. Only their
+        // known operations belong to the local engine on the hosted website.
+        if (url.origin === location.origin && (
+            (request.method === "GET" && /^\/api\/plugins\/(?:market\/(?:curated|search|readme)|[^/]+\/files\/README\.md)$/.test(url.pathname))
+            || (request.method === "POST" && url.pathname === "/api/ai/models")
+        )) {
+            url = new URL("/engine" + url.pathname + url.search, ENGINE_ORIGIN);
+            request = new Request(url, request);
+        }
         if (url.origin !== ENGINE_ORIGIN || !url.pathname.startsWith("/engine/api/")) return nativeFetch!(request);
         const session = getEngineSession();
         if (!session) return Promise.reject(new Error("本机授权已结束，草稿仍保留，请重新连接"));

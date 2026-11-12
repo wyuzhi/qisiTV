@@ -1,14 +1,12 @@
-import { configuredModelMatchesCapability, defaultConfig, normalizeModelOptionValue, normalizeRunningHubCapability, type AiConfig, type WorkflowFieldMapping } from "@/stores/use-config-store";
+import { configuredModelMatchesCapability, defaultConfig, normalizeModelOptionValue, type AiConfig } from "@/stores/use-config-store";
 import { resolveAudioSpeechSettings } from "@/lib/audio-generation";
 import { normalizeVideoDuration, normalizeVideoResolution } from "@/lib/video-generation-options";
 import { isH3Model, h3VideoOperation } from "@/lib/h3-video";
 import { seedancePortraitModel } from "@/lib/seedance-portrait";
-import { workflowFieldCurrentValue, workflowFieldHasStoredValue, workflowFieldKey, workflowFieldRandomKey, workflowFieldSubmissionValue, workflowOutputSizeValue, workflowVideoFieldsFromJson } from "@/lib/model-capabilities";
 import { modelRequestOptions, resolveCompatibleModel, resolveModelGenerationDefaults, resolveModelVideoBooleanOptions, type ModelGenerationDefaults, type ModelInputSummary, type ModelRequirements } from "@/lib/model-selection";
 import { mediaGeneratorMetadata } from "@/lib/canvas/canvas-node-semantics";
-import { resolveCanvasWorkflowProvider } from "@/lib/canvas/canvas-workflow";
 import { useCreationPreferencesStore } from "@/stores/use-creation-preferences-store";
-import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
+import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 
 // Preview counts may reserve character images; resolved counts contain the actual
 // representations. Callers choose their input summary for each validation stage.
@@ -40,48 +38,30 @@ export function resolvedCanvasGenerationRequirements(config: AiConfig, node: Can
         input,
         videoOperation: node?.metadata?.videoEditOperation,
         videoSeconds: mode === "video" ? config.videoSeconds : undefined,
-        options: config.taskWorkflowProvider === "runninghub" ? undefined : modelRequestOptions(config, mode),
+        options: modelRequestOptions(config, mode),
     };
 }
 
 export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasGenerationMode, requirements?: ModelRequirements): AiConfig {
-    // 只有独立 Config 节点读取工作流元数据；普通图片/视频/音频节点始终按基础模型生成。
-    const workflowProvider = mode !== "text" && node?.type === CanvasNodeType.Config && resolveCanvasWorkflowProvider(node.metadata) === "runninghub" ? "runninghub" : "model";
     const defaultModel = mode === "image" ? config.imageModel : mode === "video" ? config.videoModel : mode === "audio" ? config.audioModel : config.textModel;
     const fallbackModel = mode === "image" ? defaultConfig.imageModel : mode === "video" ? defaultConfig.videoModel : mode === "audio" ? defaultConfig.audioModel : defaultConfig.textModel;
     const storedModel = resolveCanvasGenerationModel(config, node?.metadata?.model, mode);
     const preferredModel = storedModel || resolveCanvasGenerationModel(config, defaultModel, mode) || fallbackModel;
     // 先合并节点上的实时选择，再做兼容性匹配。否则路由只看到全局默认值，节点改过的时长、分辨率或布尔能力无法参与分流。
-    const workflowParameters = node?.metadata?.workflowParameters || {};
-    const runningHubWorkflowId = node?.metadata?.runningHubWorkflowId?.trim() || config.runningHub.workflowId.trim();
-    const selectedRunningHubWorkflow =
-        workflowProvider === "runninghub"
-            ? config.runningHub.workflows.find((item) => item.workflowId.trim() === runningHubWorkflowId && (!node?.metadata?.runningHubWorkflowKind || (item.kind === "app" ? "app" : "workflow") === node.metadata.runningHubWorkflowKind))
-            : undefined;
-    const selectedWorkflowFields = workflowProvider === "runninghub" ? (selectedRunningHubWorkflow?.fields?.length ? selectedRunningHubWorkflow.fields : workflowVideoFieldsFromJson(selectedRunningHubWorkflow?.workflowJson)) : [];
-    const workflowOutputSize = workflowProvider === "model" ? "" : workflowOutputSizeValue(selectedWorkflowFields, workflowParameters);
-    const workflowParameterValue = (source: string) => {
-        const value = workflowParameters[`source:${source}`];
-        return value === undefined || value === null ? undefined : String(value);
-    };
     const requestedConfig: AiConfig = {
         ...config,
-        quality: node?.metadata?.quality ?? workflowParameterValue("quality") ?? config.quality ?? defaultConfig.quality,
-        size: workflowProvider === "model" ? (node?.metadata?.size ?? config.size ?? defaultConfig.size) : workflowOutputSize || node?.metadata?.size || config.size || defaultConfig.size,
+        quality: node?.metadata?.quality ?? config.quality ?? defaultConfig.quality,
+        size: node?.metadata?.size ?? config.size ?? defaultConfig.size,
         transparentBackground: node?.metadata?.transparentBackground ?? config.transparentBackground ?? defaultConfig.transparentBackground,
         seedreamMode: node?.metadata?.seedreamMode ?? config.seedreamMode,
         seedreamMaxImages: node?.metadata?.seedreamMaxImages ?? config.seedreamMaxImages,
         seedreamOutputFormat: node?.metadata?.seedreamOutputFormat ?? config.seedreamOutputFormat,
         seedreamOptimize: node?.metadata?.seedreamOptimize ?? config.seedreamOptimize,
-        seedreamWatermark: node?.metadata?.seedreamWatermark ?? config.seedreamWatermark,
-        videoSeconds:
-            workflowProvider === "model" && !isH3Model(preferredModel)
-                ? normalizeVideoDuration(node?.metadata?.seconds ?? workflowParameterValue("videoSeconds") ?? config.videoSeconds ?? defaultConfig.videoSeconds)
-                : String(node?.metadata?.seconds ?? workflowParameterValue("videoSeconds") ?? config.videoSeconds ?? defaultConfig.videoSeconds),
-        vquality:
-            workflowProvider === "model"
-                ? normalizeVideoResolution(node?.metadata?.vquality ?? workflowParameterValue("vquality") ?? config.vquality ?? defaultConfig.vquality)
-                : String(node?.metadata?.vquality ?? workflowParameterValue("vquality") ?? config.vquality ?? defaultConfig.vquality),
+        seedreamWatermark: node?.metadata?.seedreamWatermark ?? config.seedreamWatermark ?? defaultConfig.seedreamWatermark,
+        videoSeconds: !isH3Model(preferredModel)
+            ? normalizeVideoDuration(node?.metadata?.seconds ?? config.videoSeconds ?? defaultConfig.videoSeconds)
+            : String(node?.metadata?.seconds ?? config.videoSeconds ?? defaultConfig.videoSeconds),
+        vquality: normalizeVideoResolution(node?.metadata?.vquality ?? config.vquality ?? defaultConfig.vquality),
         videoGenerateAudio: node?.metadata?.generateAudio ?? config.videoGenerateAudio ?? defaultConfig.videoGenerateAudio,
         videoWatermark: node?.metadata?.watermark ?? config.videoWatermark ?? defaultConfig.videoWatermark,
         videoDraft: node?.metadata?.draft ?? config.videoDraft ?? defaultConfig.videoDraft,
@@ -103,61 +83,39 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
     const liveOptions = modelRequestOptions(requestedConfig, mode);
     const baseRequirements = requirements?.capability ? { ...requirements, options: { ...liveOptions, ...(requirements.options || {}) } } : { capability: mode, options: liveOptions };
     if (mode === "video" && isH3Model(preferredModel) && requirements?.input) baseRequirements.videoOperation = h3VideoOperation(preferredModel, requirements.input, node?.metadata?.videoEditOperation);
-    const model = workflowProvider === "model" ? resolveCompatibleModel(config, preferredModel, imageSize ? { ...baseRequirements, imageSize } : baseRequirements) || preferredModel : preferredModel;
-    const generationDefaults: Partial<ModelGenerationDefaults> =
-        workflowProvider === "model"
-            ? resolveModelGenerationDefaults(
-                  config,
-                  model,
-                  mode === "image" ? "image" : mode === "video" ? "video" : undefined,
-                  mode === "image"
-                      ? {
-                            size: node?.metadata?.size,
-                            quality: node?.metadata?.quality,
-                            transparentBackground: node?.metadata?.transparentBackground,
-                            count: requestedConfig.count,
-                        }
-                      : {
-                            size: node?.metadata?.size,
-                            videoSeconds: node?.metadata?.seconds,
-                            vquality: node?.metadata?.vquality,
-                            videoGenerateAudio: node?.metadata?.generateAudio,
-                            videoWatermark: node?.metadata?.watermark,
-                        },
-                  {
-                      size: requestedConfig.size,
-                      quality: requestedConfig.quality,
-                      transparentBackground: requestedConfig.transparentBackground,
-                      count: requestedConfig.count,
-                      videoSeconds: requestedConfig.videoSeconds,
-                      vquality: requestedConfig.vquality,
-                      videoGenerateAudio: requestedConfig.videoGenerateAudio,
-                      videoWatermark: requestedConfig.videoWatermark,
-                  },
-              )
-            : {};
-    const modeCapability = mode === "video" || mode === "audio" ? mode : "image";
-    const runningHubCapability = normalizeRunningHubCapability(selectedRunningHubWorkflow?.capability, normalizeRunningHubCapability(config.runningHub.capability));
-    const runningHub = {
-        ...config.runningHub,
-        enabled: workflowProvider === "runninghub" && config.runningHub.enabled,
-        selectedKind: selectedRunningHubWorkflow?.kind === "app" ? ("app" as const) : ("workflow" as const),
-        workflowId: runningHubWorkflowId,
-        capability: runningHubCapability,
-        workflows:
-            workflowProvider === "runninghub"
-                ? config.runningHub.workflows.map((item) =>
-                      item.workflowId.trim() === runningHubWorkflowId && (!node?.metadata?.runningHubWorkflowKind || (item.kind === "app" ? "app" : "workflow") === node.metadata.runningHubWorkflowKind)
-                          ? { ...item, fields: applyWorkflowParameterValues(item.fields?.length ? item.fields : (workflowVideoFieldsFromJson(item.workflowJson) as WorkflowFieldMapping[]), workflowParameters) }
-                          : item,
-                  )
-                : config.runningHub.workflows,
-    };
+    const model = resolveCompatibleModel(config, preferredModel, imageSize ? { ...baseRequirements, imageSize } : baseRequirements) || preferredModel;
+    const generationDefaults: Partial<ModelGenerationDefaults> = resolveModelGenerationDefaults(
+        config,
+        model,
+        mode === "image" ? "image" : mode === "video" ? "video" : undefined,
+        mode === "image"
+            ? {
+                  size: node?.metadata?.size,
+                  quality: node?.metadata?.quality,
+                  transparentBackground: node?.metadata?.transparentBackground,
+                  count: requestedConfig.count,
+              }
+            : {
+                  size: node?.metadata?.size,
+                  videoSeconds: node?.metadata?.seconds,
+                  vquality: node?.metadata?.vquality,
+                  videoGenerateAudio: node?.metadata?.generateAudio,
+                  videoWatermark: node?.metadata?.watermark,
+              },
+        {
+            size: requestedConfig.size,
+            quality: requestedConfig.quality,
+            transparentBackground: requestedConfig.transparentBackground,
+            count: requestedConfig.count,
+            videoSeconds: requestedConfig.videoSeconds,
+            vquality: requestedConfig.vquality,
+            videoGenerateAudio: requestedConfig.videoGenerateAudio,
+            videoWatermark: requestedConfig.videoWatermark,
+        },
+    );
     const resolvedVquality = generationDefaults.vquality ?? requestedConfig.vquality;
     return {
         ...requestedConfig,
-        taskWorkflowProvider: workflowProvider,
-        runningHub,
         model,
         quality: generationDefaults.quality || requestedConfig.quality,
         size: generationDefaults.size ?? requestedConfig.size,
@@ -251,26 +209,4 @@ export function preferredMediaGeneratorMetadata(
         });
     }
     return mediaGeneratorMetadata({ generationMode: mode, ...overrides });
-}
-
-function applyWorkflowParameterValues(fields: WorkflowFieldMapping[] | undefined, values: Record<string, unknown>) {
-    if (!fields?.length || !Object.keys(values).length) return fields;
-    return fields.map((field) => {
-        const key = workflowFieldKey(field);
-        const randomKey = workflowFieldRandomKey(field);
-        const hasValue = workflowFieldHasStoredValue(field, values);
-        const hasRandom = Object.prototype.hasOwnProperty.call(values, randomKey);
-        if (!hasValue && !hasRandom) return field;
-        const value = workflowFieldSubmissionValue(field, workflowFieldCurrentValue(field, values));
-        // 画布动态参数按具体字段覆盖，不能继续走 aspectRatio/quality 等全局来源，
-        // 否则同一工作流中的两个同类参数会被折叠成同一个值。
-        return {
-            ...field,
-            ...(hasValue ? { fieldValue: value, value } : {}),
-            source: "",
-            sourceAutomatic: false,
-            sourceFromUpstream: false,
-            randomEnabled: hasRandom ? values[randomKey] === true : hasValue ? false : field.randomEnabled,
-        };
-    });
 }

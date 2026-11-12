@@ -59,7 +59,7 @@ type Task struct {
 	// before public completion projections remove media and provider settings.
 	WorkflowSourceCipher string `json:"-" gorm:"type:text"`
 
-	// BeefAPI 扣费与异步结算原值，仅内部持久化与 Outcome 投影读取。
+	// BeefTV 扣费与异步结算原值，仅内部持久化与 Outcome 投影读取。
 	BeefUsageState        *string `json:"-" gorm:"column:beef_usage_state;size:64"`
 	BeefBillingState      *string `json:"-" gorm:"column:beef_billing_state;size:64"`
 	BeefReconcileDeadline *string `json:"-" gorm:"column:beef_reconcile_deadline;size:128"`

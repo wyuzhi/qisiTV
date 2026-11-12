@@ -21,9 +21,9 @@ function audioNode(patch: Partial<CanvasNodeData> = {}): CanvasNodeData {
 
 function enterpriseConfig(): AiConfig {
     const channel = createModelChannel({
-        id: "beefapi",
-        name: "BeefAPI",
-        baseUrl: "https://enterprise.beefapi.com",
+        id: "beeftv",
+        name: "BeefTV",
+        baseUrl: "https://beeftv.app",
         interfaceType: "openai-audio",
         models: ["minimax-speech-2.8-hd", "minimax-music-v3.0", "gpt-4o-mini-tts"],
         modelProfiles: [
@@ -35,7 +35,7 @@ function enterpriseConfig(): AiConfig {
     return {
         ...defaultConfig,
         channels: [channel],
-        audioModel: "beefapi::minimax-speech-2.8-hd",
+        audioModel: "beeftv::minimax-speech-2.8-hd",
         audioVoice: "alloy",
         audioFormat: "mp3",
         audioSpeed: "1",
@@ -61,7 +61,7 @@ describe("enterprise MiniMax speech settings", () => {
     });
 
     test("does not coerce MiniMax voices onto OpenAI alloy", () => {
-        expect(normalizeAudioVoiceValue("alloy", "beefapi::minimax-speech-2.8-hd")).toBe("male-qn-qingse");
+        expect(normalizeAudioVoiceValue("alloy", "beeftv::minimax-speech-2.8-hd")).toBe("male-qn-qingse");
         expect(normalizeAudioVoiceValue("中文", "minimax-speech-2.8-hd")).toBe("male-qn-qingse");
         expect(normalizeAudioVoiceValue("male-qn-jingying", "minimax-speech-2.8-hd")).toBe("male-qn-jingying");
         expect(normalizeAudioVoiceValue("cloned-voice-abc", "minimax-speech-2.8-hd")).toBe("cloned-voice-abc");
@@ -69,14 +69,14 @@ describe("enterprise MiniMax speech settings", () => {
     });
 
     test("summary and payload follow the speech contract instead of 中文 · 24k · wav", () => {
-        const settings = resolveAudioSpeechSettings("beefapi::minimax-speech-2.8-hd", {
+        const settings = resolveAudioSpeechSettings("beeftv::minimax-speech-2.8-hd", {
             audioVoice: "alloy",
             audioFormat: "mp3",
             audioSpeed: "1",
         });
-        expect(audioSettingsSummary({ model: "beefapi::minimax-speech-2.8-hd", ...settings })).toBe("青涩青年 · MP3 · 1x");
-        expect(audioSettingsSummary({ model: "beefapi::minimax-speech-2.8-hd", ...settings })).not.toContain("24k");
-        expect(audioSettingsSummary({ model: "beefapi::minimax-speech-2.8-hd", ...settings })).not.toContain("中文");
+        expect(audioSettingsSummary({ model: "beeftv::minimax-speech-2.8-hd", ...settings })).toBe("青涩青年 · MP3 · 1x");
+        expect(audioSettingsSummary({ model: "beeftv::minimax-speech-2.8-hd", ...settings })).not.toContain("24k");
+        expect(audioSettingsSummary({ model: "beeftv::minimax-speech-2.8-hd", ...settings })).not.toContain("中文");
         expect(buildAudioSpeechRequest({ model: "minimax-speech-2.8-hd", ...settings }, "大家好")).toEqual({
             model: "minimax-speech-2.8-hd",
             input: "大家好",
@@ -120,6 +120,45 @@ describe("enterprise MiniMax speech settings", () => {
         expect(config.audioVoice).toBe("male-qn-qingse");
         expect(config.audioFormat).toBe("mp3");
         expect(audioSettingsSummary(config)).toBe("青涩青年 · MP3 · 1x");
+    });
+
+    test("Seed-Audio defaults to auto omni-reference mode and normalizes stale MiniMax/OpenAI voices to auto", () => {
+        expect(audioSpeechProfile("beeftv::seed-audio-1.0").kind).toBe("seed-audio");
+        expect(audioSpeechProfile("beeftv::seed-audio-1.0").defaultVoice).toBe("auto");
+        expect(audioSpeechProfile("beeftv::seed-audio-1.0").formats.map((item) => item.value)).toEqual(["mp3"]);
+        expect(audioSpeechProfile("beeftv::seed-audio-1.0").showInstructions).toBe(true);
+        expect(audioSpeechProfile("beeftv::seed-audio-1.0").showPitch).toBe(true);
+        expect(audioSpeechProfile("beeftv::seed-audio-1.0").showVolume).toBe(true);
+        expect(normalizeAudioVoiceValue("male-qn-qingse", "beeftv::seed-audio-1.0")).toBe("auto");
+        expect(normalizeAudioVoiceValue("alloy", "beeftv::seed-audio-1.0")).toBe("auto");
+        expect(normalizeAudioVoiceValue("zh_female_cancan_uranus_bigtts", "beeftv::seed-audio-1.0")).toBe("zh_female_cancan_uranus_bigtts");
+        expect(normalizeAudioVoiceValue("zh_male_taocheng_uranus_bigtts", "beeftv::seed-audio-1.0")).toBe("zh_male_taocheng_uranus_bigtts");
+        expect(normalizeAudioVoiceValue("auto", "beeftv::minimax-speech-2.8-hd")).toBe("male-qn-qingse");
+        expect(normalizeAudioVoiceValue("zh_female_cancan_uranus_bigtts", "beeftv::minimax-speech-2.8-hd")).toBe("male-qn-qingse");
+        expect(audioSettingsSummary({ model: "beeftv::seed-audio-1.0", audioVoice: "male-qn-qingse", audioFormat: "mp3", audioSpeed: "1" })).toBe("自动（全能参考） · MP3 · 1x");
+        expect(audioSettingsSummary({ model: "beeftv::seed-audio-1.0", audioVoice: "zh_male_taocheng_uranus_bigtts", audioFormat: "mp3", audioSpeed: "1.25", audioPitch: "2", audioVolume: "1.3" })).toBe("阳光小天 · MP3 · 1.25x · 音调+2 · 音量130%");
+        expect(
+            buildAudioSpeechRequest(
+                {
+                    model: "seed-audio-1.0",
+                    audioVoice: "auto",
+                    audioFormat: "mp3",
+                    audioSpeed: "1",
+                    audioPitch: "2",
+                    audioVolume: "1.3",
+                    audioInstructions: "温柔甜美少女音",
+                },
+                "你好世界",
+            ),
+        ).toEqual({
+            model: "seed-audio-1.0",
+            input: "你好世界",
+            response_format: "mp3",
+            speed: 1,
+            pitch: 2,
+            volume: 1.3,
+            instructions: "温柔甜美少女音",
+        });
     });
 
     test("prompt panel no longer overlays a fake Seed Audio summary", () => {

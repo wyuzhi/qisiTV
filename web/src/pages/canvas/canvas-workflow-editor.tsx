@@ -82,7 +82,7 @@ export function CanvasWorkflowEditor({ initial, operations, canvasNodes, canvasC
         const operation = operations.find(item => item.id === `generate.${mediaType}`);
         if (!operation) return;
         const options = operation.fields.find(field => field.key === "modelOption")?.options || [];
-        const chosen = options.find(option => mediaType === "video" && option.value === "beefapi::seedance-2.0-fast") || options[0];
+        const chosen = options.find(option => mediaType === "video" && option.value === "beeftv::seedance-2.0-fast") || options[0];
         const video = chosen?.capabilities?.video;
         addNode({title:`生成${mediaLabels[mediaType]}`,role:"operation",mediaType,operationId:operation.id,operationVersion:operation.version,config:{prompt:"",...(chosen ? {modelOption:chosen.value} : {}),...(mediaType === "video" ? {size:video?.defaultRatio || "16:9",vquality:video?.defaultResolution || "480p",videoSeconds:5} : mediaType === "image" ? {size:"1:1"} : {})}});
     };

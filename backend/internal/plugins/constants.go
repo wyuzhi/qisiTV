@@ -7,11 +7,11 @@ const (
 	AIArtCritique       = "ai-art-critique"
 	MediaConversion     = "media-conversion"
 	EditorShell         = "editor-shell"
-	WorkflowRunningHub  = "runninghub-workflow-provider"
 
 	OriginOfficial = "official"
 	OriginSystem   = "system"
 	OriginUploaded = "uploaded"
+	OriginPackage  = "package"
 
 	KindProtocol    = "protocol"
 	KindApplication = "application"

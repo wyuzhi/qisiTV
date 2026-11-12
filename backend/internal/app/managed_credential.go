@@ -1,47 +1,47 @@
 package app
 
 import (
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/generation"
 )
 
-const managedBeefAPIRef = beefapi.CredentialRef
+const managedBeefTVRef = beeftv.CredentialRef
 
-func (s *Service) SetBeefAPI(connection *beefapi.Service) {
+func (s *Service) SetBeefTV(connection *beeftv.Service) {
 	if s != nil {
-		s.beefAPI = connection
+		s.beefTV = connection
 	}
 }
 
-func (s *Service) BeefAPI() *beefapi.Service {
+func (s *Service) BeefTV() *beeftv.Service {
 	if s == nil {
 		return nil
 	}
-	return s.beefAPI
+	return s.beefTV
 }
 
-func (s *Service) resolveManagedBeefAPISecrets(input map[string]any) (map[string]any, error) {
-	return generation.ResolveManagedBeefAPISecrets(input, s.beefAPI, s.ReadLocalModelConfig)
+func (s *Service) resolveManagedBeefTVSecrets(input map[string]any) (map[string]any, error) {
+	return generation.ResolveManagedBeefTVSecrets(input, s.beefTV, s.ReadLocalModelConfig)
 }
 
-func (s *Service) lookupBeefAPICredential() (apiKey, baseURL, accountID, tokenID string, err error) {
-	return generation.LookupBeefAPICredential(s.beefAPI, s.ReadLocalModelConfig)
+func (s *Service) lookupBeefTVCredential() (apiKey, baseURL, accountID, tokenID string, err error) {
+	return generation.LookupBeefTVCredential(s.beefTV, s.ReadLocalModelConfig)
 }
 
 func (s *Service) resolveChannelModelsRequest(input *ChannelModelsRequest) error {
-	return generation.ResolveChannelModelsRequest(input, s.beefAPI, s.ReadLocalModelConfig)
+	return generation.ResolveChannelModelsRequest(input, s.beefTV, s.ReadLocalModelConfig)
 }
 
 func (s *Service) ResolveCustomRelayAPIKey(targetURL, incoming string) (string, error) {
-	return generation.ResolveCustomRelayKey(targetURL, incoming, s.beefAPI, s.ReadLocalModelConfig)
+	return generation.ResolveCustomRelayKey(targetURL, incoming, s.beefTV, s.ReadLocalModelConfig)
 }
 
 func (s *Service) resolveCustomRelayKey(targetURL, incoming string) (string, error) {
-	return generation.ResolveCustomRelayKey(targetURL, incoming, s.beefAPI, s.ReadLocalModelConfig)
+	return generation.ResolveCustomRelayKey(targetURL, incoming, s.beefTV, s.ReadLocalModelConfig)
 }
 
-func (s *Service) noteBeefAPIProviderError(message string) {
+func (s *Service) noteBeefTVProviderError(message string) {
 	if s != nil {
-		generation.NoteBeefAPIProviderError(s.beefAPI, message)
+		generation.NoteBeefTVProviderError(s.beefTV, message)
 	}
 }

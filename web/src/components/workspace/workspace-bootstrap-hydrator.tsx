@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { FullScreenLoader } from "@/components/ui/aceternity/full-screen-loader";
 import { WorkspaceErrorState } from "@/components/layout/workspace-state";
 import { appPathname } from "@/lib/app-routing";
+import { isEmbeddedRuntime } from "@/lib/embedded-runtime";
 import { preloadWorkspaceRoute } from "@/lib/workspace-route-modules";
 import { applyUserSession, localWorkspaceConfig } from "@/lib/user-session";
 import { getWorkspaceBootstrap, type WorkspaceBootstrapPayload } from "@/services/api/workspace";
+import { hydrateLocalCanvasProjectsFromBackend } from "@/services/local-workspace-repository";
 import { commitModelConfig, flushModelConfig, hydrateModelConfig } from "@/services/model-config-repository";
 import { normalizeConfigSnapshot, useConfigStore } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -26,8 +28,14 @@ export function WorkspaceBootstrapHydrator({ children }: { children: ReactNode }
         };
         void initializeWorkspaceState({
             loadWorkspace,
-            createLocalWorkspace: createLocalWorkspacePayload,
-            applySession: applyUserSession,
+            createLocalWorkspace: () => {
+                if (isEmbeddedRuntime()) throw new Error("无法读取当前嵌入工作区");
+                return createLocalWorkspacePayload();
+            },
+            applySession: async (payload) => {
+                await applyUserSession(payload);
+                if (isEmbeddedRuntime()) await hydrateLocalCanvasProjectsFromBackend();
+            },
             restoreModelConfig: hydrateLocalModelConfig,
             allowLocalFallback: !isEngineWebsite(),
         })
@@ -54,7 +62,7 @@ export function WorkspaceBootstrapHydrator({ children }: { children: ReactNode }
     useEffect(() => {
         let ready = false;
         const unsubscribe = useConfigStore.subscribe((state) => {
-            if (!shouldSaveLocalModelConfig({ subscriptionReady: ready, modelConfigReady: modelConfigReady.current, channelCount: state.config.channels.length })) return;
+            if (applyingHydratedModelConfig || !shouldSaveLocalModelConfig({ subscriptionReady: ready, modelConfigReady: modelConfigReady.current, channelCount: state.config.channels.length })) return;
             void commitModelConfig(state.config);
         });
         const flush = () => { void flushModelConfig(); };
@@ -107,10 +115,19 @@ export function shouldSaveLocalModelConfig({ subscriptionReady, modelConfigReady
     return subscriptionReady && modelConfigReady && channelCount > 0;
 }
 
-async function hydrateLocalModelConfig() {
+let applyingHydratedModelConfig = false;
+
+export async function hydrateLocalModelConfig() {
     const result = await hydrateModelConfig();
+    // 还有没保存的设置修改：界面保留它，等它保存，不用读回的旧快照覆盖。
+    if (result.supersededByLocalEdit) return;
     const normalizedConfig = localWorkspaceConfig(normalizeConfigSnapshot({ config: result.config }).config);
-    useConfigStore.getState().replaceConfig(normalizedConfig);
+    applyingHydratedModelConfig = true;
+    try {
+        useConfigStore.getState().replaceConfig(normalizedConfig);
+    } finally {
+        applyingHydratedModelConfig = false;
+    }
     if (shouldPersistHydratedModelConfig(result.health)) await commitModelConfig(normalizedConfig);
 }
 

@@ -63,13 +63,15 @@ describe('node write receipts keep their identity within official tool output li
   test('task binding keeps current identity/status and omits the large canvas without mutating Go receipts', () => {
     const data = { replayed: true, result: { canvasId: 'canvas', revision: 99, nodeId: 'film', taskId: 'render',
       bindingStatus: 'replaced', assetId: 'asset', resourceId: 'resource', storageKey: 'resource:resource',
+      alsoChanged: [{ nodeId: 'batch-root', fields: ['assetId'] }],
       canvas: { nodes: [{ metadata: { prompt: longPrompt.repeat(10) } }] }, node: { metadata: { prompt: longPrompt } },
       historical: { revision: 3, node: { metadata: { prompt: longPrompt } } } } };
     const original = JSON.stringify(data);
     const view = canvasWriteView(data, 'canvas.task.bind');
     const projected = retainedJSON({ content: [{ type: 'text', text: JSON.stringify(view) }] });
     expect(projected.result).toMatchObject({ canvasId: 'canvas', revision: 99, nodeId: 'film', taskId: 'render', bindingStatus: 'replaced',
-      assetId: 'asset', resourceId: 'resource', storageKey: 'resource:resource' });
+      assetId: 'asset', resourceId: 'resource', storageKey: 'resource:resource',
+      alsoChanged: [{ nodeId: 'batch-root', fields: ['assetId'] }] });
     expect(projected.result.canvas).toBeUndefined();
     expect(projected.result.historical).toBeUndefined();
     expect(JSON.stringify(data)).toBe(original);
@@ -86,6 +88,46 @@ describe('node write receipts keep their identity within official tool output li
     expect(canvasWriteView(data, 'canvas.task.bind')).toBe(data);
     const missingNode = { result: { nodeId: 'text', revision: 7 } };
     expect(canvasWriteView(missingNode, 'canvas.node.update')).toBe(missingNode);
+  });
+
+  test('model catalog and generation propose omit raw pricing tables so the assistant only reports proposal estimates', () => {
+    const catalogData = {
+      result: {
+        source: 'local',
+        channels: [{
+          id: 'beeftv',
+          models: [{
+            id: 'seedance-2.0',
+            modelKey: 'seedance-2.0',
+            capability: 'video',
+            videoPricing: { currency: 'CNY', mode: 'tokens', rates: { '720p': { output: 28 }, '1080p': { output: 31.104 } } },
+          }],
+        }],
+      },
+    };
+    const projectedCatalog = canvasWriteView(catalogData, 'model.catalog');
+    expect(projectedCatalog.result.channels[0].models[0].videoPricing).toBeUndefined();
+    expect(catalogData.result.channels[0].models[0].videoPricing).toBeDefined();
+
+    const proposeData = {
+      result: {
+        proposalId: 'gp-1',
+        modelKey: 'beeftv::seedance-2.0',
+        pricing: { currency: 'CNY', mode: 'tokens', rates: { '720p': { output: 28 } } },
+        estimate: { amount: 4.968, approx: true, text: '预计费用：约 ¥4.97' },
+        targets: [{
+          nodeId: 'v1',
+          pricing: { currency: 'CNY', mode: 'tokens', rates: { '720p': { output: 28 } } },
+          estimate: { amount: 4.968, approx: true, text: '约 ¥4.97' },
+        }],
+      },
+    };
+    const projectedPropose = canvasWriteView(proposeData, 'canvas.generation.propose');
+    expect(projectedPropose.result.pricing).toBeUndefined();
+    expect(projectedPropose.result.targets[0].pricing).toBeUndefined();
+    expect(projectedPropose.result.estimate).toEqual(proposeData.result.estimate);
+    expect(projectedPropose.result.targets[0].estimate).toEqual(proposeData.result.targets[0].estimate);
+    expect(proposeData.result.pricing).toBeDefined();
   });
 
   test.each(['canvas.node.configure', 'canvas.node.update', 'canvas.node.bind_asset'])('%s omits unrelated node data without changing the write, effects or replay', async operation => {

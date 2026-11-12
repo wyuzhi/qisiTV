@@ -12,7 +12,7 @@ python3 scripts/build-engine-runtime.py --target darwin/arm64 \
   --output .local/engine-package
 ```
 
-The builder embeds VERSION, the Git revision (including a dirty marker), and
+The builder embeds ENGINE_VERSION, the Git revision (including a dirty marker), and
 build time. Its receipt records each binary's SHA-256 and source package. The
 native `qisitv` CLI is built from `cmd/beeftv`; `cmd/qisitv` is a retired legacy
 entry and cannot control the engine. A dirty checkout must be labelled as a
@@ -27,18 +27,20 @@ files. Never remove its `sources/` and `licenses/` directories from distribution
 From the repository root:
 
 ```sh
+sh plugin-packages/build-packages.sh
+engine_version="$(cat ENGINE_VERSION)"
 python3 scripts/package-engine-macos.py \
   --runtime .local/engine-package \
   --node-source .local/engine-runtime/node-v24.22.1-darwin-arm64 \
-  --output .local/engine-release-beta2 \
-  --version 2.0.3-web-beta.2 --dmg
+  --output .local/engine-release \
+  --version "${engine_version#v}" --dmg
 python3 scripts/smoke-engine-macos.py \
-  --app '.local/engine-release-beta2/qisiTV Engine.app'
+  --app '.local/engine-release/qisiTV Engine.app'
 ```
 
 The Node source directory must contain the exact staged `bin/node` and its full
-`LICENSE`. Pi 1.3.0's npm packages omit their license file; the packager supplies
-the pinned official monorepo MIT notice for all nine shipped Pi packages.
+`LICENSE`. Pi 1.5.0's npm packages omit their license file; the packager supplies
+the pinned official monorepo MIT notice for the shipped Pi packages.
 Other npm package notices remain beside their installed package files.
 
 The packager never overwrites an existing App or DMG. Ad-hoc signing is the
@@ -56,19 +58,13 @@ encoding and graceful shutdown. It does not contact a paid model or install the
 App into `/Applications`. Its report prints only test paths and check names,
 never pairing or client credentials.
 
-The website install gate and engine download link use the same-origin package
-`downloads/engine/qisiTV-Engine-<VERSION without v>-darwin-arm64.dmg`. Before
-building, `scripts/export-qisitv-website.sh` requires that exact filename and its
-`.sha256` companion in `dist/engine/`, or at the path set by `QISITV_ENGINE_DMG`.
-It checks the release version and SHA-256, pins the frontend to the same
-`VERSION`, then configures two exact 307 redirects to
-`https://github.com/wyuzhi/qisiTV/releases/download/v<VERSION without v>/`
-for that DMG and checksum. The default `github-release` delivery mode verifies
-`dist/qisiTV-v<VERSION without v>-ffmpeg-wasm-sources.tar.gz` against its locked
-sources and the installed WASM core before building. The build requires that
-source packet and emits its matching release URL in `licenses/sources.json`.
-Missing or mismatched packages stop the export before build. Publish all three
-verified assets to that release before promoting the website.
+The optional engine download uses `ENGINE_VERSION`. Before building,
+`scripts/export-qisitv-website.sh` verifies the matching DMG and SHA-256 file
+in `dist/engine/` or at `QISITV_ENGINE_DMG`. It configures two same-origin
+download redirects to the corresponding qisiTV GitHub release. The separate
+`VERSION` file sets the web build and its FFmpeg WASM source archive version.
+The exporter checks the archive against the source lock and the installed core.
+Publish the verified files to their respective releases before website promotion.
 
 The exported website does not contain the large engine installer: build-time
 `downloads/` files are excluded, and previously copied engine DMG/checksum files

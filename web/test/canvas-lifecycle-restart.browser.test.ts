@@ -473,11 +473,11 @@ for (const scenario of ["startup-stamp", "missing-chat-sessions"]) test(`already
     if (scenario === "missing-chat-sessions") {
         await page.getByRole("button", { name: "Switch video model" }).click();
         await page.evaluate(() => (window as any).__lifecycle.pulse());
-        expect((backend.nodes[0].metadata as any).model).toBe("beefapi::seedance-2.0-mini");
+        expect((backend.nodes[0].metadata as any).model).toBe("beeftv::seedance-2.0-mini");
         expect((backend.nodes[0].metadata as any).generationEffectKeys).toEqual(["attach-node:completed-task-receipt:n0:0"]);
         await page.goto(`${server.url}?scenario=reopen-stamp`);
         await page.waitForFunction(() => document.querySelector('[data-testid="graph"]')?.textContent === "true:10:6");
-        expect((backend.nodes[0].metadata as any).model).toBe("beefapi::seedance-2.0-mini");
+        expect((backend.nodes[0].metadata as any).model).toBe("beeftv::seedance-2.0-mini");
     }
     expect(errors).toEqual([]);
     await page.close();

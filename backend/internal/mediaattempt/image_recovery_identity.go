@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"gorm.io/gorm"
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
@@ -14,6 +14,60 @@ import (
 )
 
 var ErrIdentityUnavailable = errors.New("原图片渠道或凭据身份已不可用")
+
+type localConfiguredChannel struct {
+	ID      string                    `json:"id"`
+	Enabled *bool                     `json:"enabled"`
+	BaseURL string                    `json:"baseUrl"`
+	APIKey  string                    `json:"apiKey"`
+	Headers []outbound.OutboundHeader `json:"headers"`
+}
+
+func (s *Service) readLocalConfiguredChannels() ([]localConfiguredChannel, error) {
+	if s == nil || s.connections == nil {
+		return nil, nil
+	}
+	body, err := s.connections.ReadLocalModelConfig()
+	if err != nil || len(body) == 0 {
+		return nil, err
+	}
+	var config struct {
+		Channels []localConfiguredChannel `json:"channels"`
+	}
+	if err := json.Unmarshal(body, &config); err != nil {
+		return nil, err
+	}
+	return config.Channels, nil
+}
+
+func (s *Service) resolveFrozenChannelID(task model.Task, attempt *model.RouteAttempt, call generation.CallMeta, rawURL string, header http.Header) string {
+	if attempt != nil {
+		if id := strings.TrimSpace(attempt.ChannelID); id != "" {
+			return id
+		}
+	}
+	if id := strings.TrimSpace(call.ChannelID); id != "" {
+		return id
+	}
+	if ManagedTaskConnection(task) {
+		return beeftv.ChannelID
+	}
+	channels, err := s.readLocalConfiguredChannels()
+	if err != nil {
+		return ""
+	}
+	probe := WireRequest{URL: rawURL, Header: header}
+	for _, channel := range channels {
+		id := strings.TrimSpace(channel.ID)
+		if id == "" || id == beeftv.ChannelID || (channel.Enabled != nil && !*channel.Enabled) {
+			continue
+		}
+		if sameFrozenImageIdentity(probe, channel.BaseURL, channel.APIKey, channel.Headers) {
+			return id
+		}
+	}
+	return ""
+}
 
 // 幂等键的范围还包括上游账号和 token。这里只核对原渠道是否仍可用，
 // 绝不把当前渠道的地址或凭据填回冻结请求，更不解析同模型的备用路由。
@@ -40,11 +94,8 @@ func (s *Service) ImageRecoveryChannelAvailable(attempt *model.RouteAttempt, wir
 	}
 
 	channelID := wire.ChannelID
-	// 历史直连记录没有 channel ID；只对可明确识别的托管源核对原 Bearer 身份。
-	if channelID == "" && beefapi.IsEnterpriseBaseURL(wire.URL) {
-		channelID = beefapi.ChannelID
-	}
-	if channelID == beefapi.ChannelID && s.connections.HasManagedCredential() {
+	// 只对可明确识别的托管渠道核对原 Bearer 身份。
+	if channelID == beeftv.ChannelID && s.connections.HasManagedCredential() {
 		key, base, _, _, err := s.connections.LookupManagedCredential()
 		if err != nil {
 			var appErr *kernel.AppError
@@ -53,35 +104,33 @@ func (s *Service) ImageRecoveryChannelAvailable(attempt *model.RouteAttempt, wir
 			}
 			return false, err
 		}
-		return sameFrozenImageIdentity(wire, base, key, nil), nil
+		if sameFrozenImageIdentity(wire, base, key, nil) {
+			return true, nil
+		}
+		if channelID == beeftv.ChannelID {
+			return false, nil
+		}
 	}
-	if channelID == "" {
-		return false, nil
-	}
-	body, err := s.connections.ReadLocalModelConfig()
+	channels, err := s.readLocalConfiguredChannels()
 	if err != nil {
 		return false, err
 	}
-	var config struct {
-		Channels []struct {
-			ID      string                    `json:"id"`
-			Enabled *bool                     `json:"enabled"`
-			BaseURL string                    `json:"baseUrl"`
-			APIKey  string                    `json:"apiKey"`
-			Headers []outbound.OutboundHeader `json:"headers"`
-		} `json:"channels"`
-	}
-	if err := json.Unmarshal(body, &config); err != nil {
-		return false, err
-	}
-	for _, channel := range config.Channels {
-		if channel.ID != channelID {
+	for _, channel := range channels {
+		if channelID != "" && channel.ID != channelID {
 			continue
 		}
 		if channel.Enabled != nil && !*channel.Enabled {
+			if channelID != "" {
+				return false, nil
+			}
+			continue
+		}
+		if sameFrozenImageIdentity(wire, channel.BaseURL, channel.APIKey, channel.Headers) {
+			return true, nil
+		}
+		if channelID != "" {
 			return false, nil
 		}
-		return sameFrozenImageIdentity(wire, channel.BaseURL, channel.APIKey, channel.Headers), nil
 	}
 	return false, nil
 }

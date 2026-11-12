@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/modelcatalog"
@@ -26,6 +26,8 @@ type ChannelModelsRequest struct {
 	Headers       []outbound.OutboundHeader `json:"headers"`
 	ChannelID     string                    `json:"channelId"`
 	CredentialRef string                    `json:"credentialRef"`
+	// Protocol 是渠道默认的生成接口。它由插件 JS 实现时，模型列表交给插件，不请求 /models。
+	Protocol string `json:"protocol,omitempty"`
 }
 
 func isImageRecoveryError(err error) bool {
@@ -81,22 +83,38 @@ func definiteVODImageParameterFailure(err error) bool {
 	return body.Error.Code == "vod_image_invalid_params" || body.Error.Code == "vod_image_invalid_media"
 }
 
+func DefiniteImageInputRejection(err error) bool {
+	return definiteImageInputRejection(err)
+}
+
 func definiteImageInputRejection(err error) bool {
 	var unknown SubmissionUnknownError
 	var pending StatePendingError
+	if isImageRecoveryError(err) || errors.As(err, &unknown) || errors.As(err, &pending) {
+		return false
+	}
 	var upstream HTTPError
-	if isImageRecoveryError(err) || errors.As(err, &unknown) || errors.As(err, &pending) || !errors.As(err, &upstream) || upstream.IdempotencyReplayed {
-		return false
+	if errors.As(err, &upstream) {
+		if upstream.IdempotencyReplayed || (upstream.StatusCode != http.StatusBadRequest && upstream.StatusCode != http.StatusUnprocessableEntity) {
+			return false
+		}
+		failure := ClassifyHTTP(upstream.StatusCode, upstream.Status, upstream.Body)
+		return definiteImagePayloadRejection(failure, upstream.Body)
 	}
-	if upstream.StatusCode != http.StatusBadRequest && upstream.StatusCode != http.StatusUnprocessableEntity {
-		return false
+	var payloadErr PayloadError
+	if errors.As(err, &payloadErr) && strings.TrimSpace(payloadErr.Raw()) != "" {
+		failure := ClassifyError(payloadErr)
+		return definiteImagePayloadRejection(failure, payloadErr.Raw())
 	}
-	failure := ClassifyHTTP(upstream.StatusCode, "", upstream.Body)
-	if failure.Uncertain || failure.TaskID != "" || strings.Contains(upstream.Body, "upstream_task_id:") {
+	return false
+}
+
+func definiteImagePayloadRejection(failure Failure, rawBody string) bool {
+	if failure.Uncertain || failure.TaskID != "" || strings.Contains(rawBody, "upstream_task_id:") {
 		return false
 	}
 	var body map[string]any
-	if json.Unmarshal([]byte(upstream.Body), &body) == nil && imageRejectionHasJob(body, 0) {
+	if json.Unmarshal([]byte(rawBody), &body) == nil && imageRejectionHasJob(body, 0) {
 		return false
 	}
 	switch failure.Category {
@@ -128,12 +146,12 @@ func imageRejectionHasJob(body map[string]any, depth int) bool {
 }
 
 func managedFailureInfo(err error) (statusCode int, explicitRejection, terminalFailure bool) {
-	var managedHTTP *beefapi.MediaHTTPError
+	var managedHTTP *beeftv.MediaHTTPError
 	if errors.As(err, &managedHTTP) {
 		statusCode = managedHTTP.StatusCode
-		explicitRejection = beefapi.IsDefiniteMediaRejection(err)
+		explicitRejection = beeftv.IsDefiniteMediaRejection(err)
 	}
-	var managedTask *beefapi.MediaTaskError
+	var managedTask *beeftv.MediaTaskError
 	if errors.As(err, &managedTask) && !managedTask.Pending() {
 		if managedTask.Code == "media_submission_rejected" && strings.TrimSpace(managedTask.TaskID) == "" {
 			explicitRejection = true
@@ -213,13 +231,7 @@ func CreateDirectTaskAttempt(repo *repository.Repository, task *model.Task) (*mo
 }
 
 func managedTaskConnection(task model.Task) bool {
-	var input struct {
-		Config struct {
-			CredentialRef string `json:"credentialRef"`
-			ChannelID     string `json:"channelId"`
-		} `json:"config"`
-	}
-	return json.Unmarshal([]byte(task.InputJSON), &input) == nil && (input.Config.CredentialRef == beefapi.CredentialRef || input.Config.ChannelID == beefapi.ChannelID)
+	return beeftv.IsManagedTaskInput(task.InputJSON)
 }
 
 func BeginTaskRouteAttempt(
@@ -241,7 +253,7 @@ func BeginTaskRouteAttempt(
 	image := modelcatalog.ImageSubmissionView{}
 	if len(attempts) > 0 {
 		existing := &attempts[len(attempts)-1]
-		if managedTaskConnection(*task) || existing.ChannelID == beefapi.ChannelID {
+		if managedTaskConnection(*task) || existing.ChannelID == beeftv.ChannelID {
 			managedReceipt := false
 			if task.Type != "canvas_image" && existing.DispatchState != "not_sent" {
 				if row, err := repo.ImageSubmission(existing.ID, task.ID, task.UserID); err == nil && hasManagedReceipt != nil {
@@ -327,7 +339,7 @@ func NextRouteAttemptAfterFailure(
 	taskErr error,
 ) (*model.RouteAttempt, error) {
 	if task != nil && resolveImageRecoveryConfig != nil {
-		if config, ok := resolveImageRecoveryConfig(*task); ok && config.CredentialRef == beefapi.CredentialRef {
+		if config, ok := resolveImageRecoveryConfig(*task); ok && config.CredentialRef == beeftv.CredentialRef {
 			return nil, nil
 		}
 	}
@@ -514,6 +526,7 @@ func FetchChannelModelCatalog(
 	resolveReq func(*ChannelModelsRequest) error,
 	fetchBytes func(context.Context, string, string, string, []modelcatalog.ChannelHeader) ([]byte, error),
 	extra modelcatalog.CatalogExtraSource,
+	resolveProtocol func(string) (protocol.Adapter, bool),
 ) ([]modelcatalog.ChannelModelCatalogItem, error) {
 	if actor == nil || strings.TrimSpace(actor.ID) == "" {
 		return nil, kernel.Unauthorized("请先登录")
@@ -521,6 +534,13 @@ func FetchChannelModelCatalog(
 	if resolveReq != nil {
 		if err := resolveReq(&input); err != nil {
 			return nil, err
+		}
+	}
+	if id := strings.TrimSpace(input.Protocol); id != "" && resolveProtocol != nil {
+		if adapter, ok := resolveProtocol(id); ok {
+			if provider, ok := adapter.(protocol.ModuleProvider); ok {
+				return ListModuleProviderModels(ctx, provider, strings.TrimSpace(input.BaseURL), strings.TrimSpace(input.APIKey))
+			}
 		}
 	}
 	headers, err := outbound.NormalizeOutboundHeaders(input.Headers)
@@ -538,7 +558,7 @@ func FetchChannelModelCatalogBytes(ctx context.Context, baseURL, apiFormat, apiK
 	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
 	if apiFormat == "likeai" {
-		body, err := ExecuteProtocolRequest(ctx, Config{BaseURL: baseURL, APIKey: apiKey, Headers: headers, InterfaceType: "likeai-image"}, protocol.RequestSpec{Method: http.MethodGet, Path: "/task/models"})
+		body, err := ExecuteProtocolRequest(ctx, Config{BaseURL: baseURL, APIKey: apiKey, Headers: headers, InterfaceType: "likeai-image"}, protocol.RequestSpec{Method: http.MethodGet, Path: likeAICatalogPath})
 		if err != nil {
 			var httpErr HTTPError
 			if errors.As(err, &httpErr) {
@@ -548,13 +568,7 @@ func FetchChannelModelCatalogBytes(ctx context.Context, baseURL, apiFormat, apiK
 		}
 		return body, nil
 	}
-	target := APIURL(baseURL, "/models")
-	if apiFormat == "gemini" {
-		if !strings.HasSuffix(strings.ToLower(baseURL), "/v1beta") {
-			baseURL += "/v1beta"
-		}
-		target = baseURL + "/models"
-	}
+	target := ChannelCatalogURL(baseURL, apiFormat)
 	if _, err := outbound.ValidateOutboundURL(target); err != nil {
 		return nil, CatalogError(http.StatusBadRequest, "catalog_address_invalid", err.Error(), err)
 	}
@@ -634,7 +648,6 @@ func CatalogError(status int, reason kernel.ErrorReason, message string, cause e
 func ValidateTaskCapability(
 	input map[string]any,
 	resolveVideoCapability func(context.Context, *Input) error,
-	validateWorkflow func(mode string, config Config) (bool, error),
 	lookup modelcatalog.ChannelModelLookup,
 ) error {
 	encoded, err := json.Marshal(input)
@@ -648,12 +661,12 @@ func ValidateTaskCapability(
 	if taskInput.Mode != "image" && taskInput.Mode != "video" && taskInput.Mode != "audio" {
 		return nil
 	}
-	if taskInput.Config.CredentialRef == beefapi.CredentialRef {
+	if taskInput.Config.CredentialRef == beeftv.CredentialRef {
 		if config, ok := input["config"].(map[string]any); ok {
-			config["mediaProtocolVersion"] = beefapi.MediaProtocolVersion
+			config["mediaProtocolVersion"] = beeftv.MediaProtocolVersion
 		}
 	}
-	if taskInput.Mode == "video" && taskInput.Config.CredentialRef == beefapi.CredentialRef {
+	if taskInput.Mode == "video" && taskInput.Config.CredentialRef == beeftv.CredentialRef {
 		if resolveVideoCapability != nil {
 			if err := resolveVideoCapability(context.Background(), &taskInput); err != nil {
 				return err
@@ -662,11 +675,6 @@ func ValidateTaskCapability(
 		if config, ok := input["config"].(map[string]any); ok {
 			config["capabilityConfig"] = taskInput.Config.CapabilityConfig
 			config["videoCapabilitiesVersion"] = taskInput.Config.VideoCapabilitiesVersion
-		}
-	}
-	if validateWorkflow != nil {
-		if handled, err := validateWorkflow(taskInput.Mode, taskInput.Config); handled {
-			return err
 		}
 	}
 	validated, err := modelcatalog.ValidateConfiguredTask(TaskInputFromCanvas(taskInput), lookup)

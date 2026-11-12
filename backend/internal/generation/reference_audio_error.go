@@ -66,7 +66,7 @@ func referenceAudioCopy(text string, invalidAudio bool) (categoryCopy, bool) {
 	}
 	actions := map[string]string{
 		"无法下载":       "请重新上传音频，确认素材链接可公开访问后再提交",
-		"的格式或时长无法读取": "请将音频重新导出为 MP3、WAV 或 M4A，确认文件完整且含有音轨后再上传",
+		"的格式或时长无法读取": "请将音频重新导出为 MP3 或 WAV，确认文件完整且含有音轨后再上传",
 		"文件过大":       "请压缩或更换音频，确保文件不超过模型的大小限制后再提交",
 		"不符合模型要求":    "请检查参考音频的时长、格式和大小，调整后再提交",
 	}

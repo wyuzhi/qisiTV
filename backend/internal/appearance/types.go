@@ -79,15 +79,6 @@ type PublicSetting struct {
 	UpdatedAt                 time.Time           `json:"updatedAt,omitempty"`
 }
 
-type AdminSetting struct {
-	Setting
-	Public     PublicSetting `json:"public"`
-	Configured bool          `json:"configured"`
-	UpdatedBy  string        `json:"updatedBy,omitempty"`
-	CreatedAt  time.Time     `json:"createdAt,omitempty"`
-	UpdatedAt  time.Time     `json:"updatedAt,omitempty"`
-}
-
 func DefaultSetting() Setting {
 	return Setting{
 		SchemaVersion:     SchemaVersion,

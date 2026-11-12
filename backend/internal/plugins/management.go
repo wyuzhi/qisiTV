@@ -123,6 +123,18 @@ func (s *Service) SetEnabled(id string, enabled bool) (View, error) {
 	return plugin, nil
 }
 
+func (s *Service) SetLoadError(id string, errText string) (View, error) {
+	if s == nil || s.runtime == nil {
+		return View{}, fmt.Errorf("插件运行时未初始化")
+	}
+	plugin, err := s.runtime.SetLoadError(id, errText)
+	if err != nil {
+		return View{}, err
+	}
+	plugin.Management = ManagementFromView(plugin)
+	return plugin, nil
+}
+
 func (s *Service) Uninstall(id string) error {
 	if s == nil || s.runtime == nil {
 		return fmt.Errorf("插件运行时未初始化")
@@ -169,6 +181,9 @@ func (s *Service) stateForUser(actor *model.User, pluginID string, items []View)
 		return StateView{}, fmt.Errorf("插件 %q 不存在", pluginID)
 	}
 	policy := Management(pluginID, source)
+	if hasRuntime {
+		policy = ManagementFromView(runtimePlugin)
+	}
 	platformAvailable := policy.Kind == KindApplication
 	store := s.durableStore()
 	if hasRuntime && (policy.ActivationScope == ScopeSystem || store == nil) {
@@ -196,13 +211,12 @@ func (s *Service) stateForUser(actor *model.User, pluginID string, items []View)
 				userEnabled, userConfigured = userState.Enabled, true
 			}
 		}
-		// Preserve the old globally-enabled workflow behavior until each user
-		// explicitly saves a personal choice. Other official applications were
-		// already controlled by each user's local installation state.
+		// Official applications follow the local installation state until each
+		// user explicitly saves a personal choice.
 		if !userConfigured {
 			if pluginID == MediaConversion {
 				userEnabled = true
-			} else if hasRuntime && pluginID == WorkflowRunningHub {
+			} else if hasRuntime && strings.TrimSpace(runtimePlugin.PackageDir) != "" {
 				userEnabled = runtimePlugin.Status == StatusEnabled
 			}
 		}
@@ -244,7 +258,11 @@ func (s *Service) SetUserEnabled(actor *model.User, pluginID string, enabled boo
 	if hasRuntime {
 		source = runtimePlugin.Source
 	}
-	if Management(pluginID, source).ActivationScope != ScopeUser {
+	policy := Management(pluginID, source)
+	if hasRuntime {
+		policy = ManagementFromView(runtimePlugin)
+	}
+	if policy.ActivationScope != ScopeUser {
 		return StateView{}, Forbidden("系统插件只能由管理员统一管理")
 	}
 	if !current.PlatformAvailable {
@@ -306,6 +324,9 @@ func (s *Service) SetPlatformAvailability(actor *model.User, pluginID string, av
 		return AdminStateView{}, ManagementView{}, fmt.Errorf("插件 %q 不存在", pluginID)
 	}
 	policy := Management(pluginID, source)
+	if hasRuntime {
+		policy = ManagementFromView(runtimePlugin)
+	}
 	now := time.Now()
 	platformState := &model.PluginPlatformState{PluginID: pluginID, Available: available, UpdatedBy: actor.ID, CreatedAt: now, UpdatedAt: now}
 	if policy.ActivationScope == ScopeSystem {
@@ -351,66 +372,6 @@ func (s *Service) RequireForUser(userID string, pluginID string) error {
 			return Forbidden(state.BlockedReason)
 		}
 		return Forbidden("插件未启用")
-	}
-	return nil
-}
-
-func (s *Service) WorkflowStatuses() map[string]string {
-	statuses := make(map[string]string, 1)
-	for _, pluginID := range []string{WorkflowRunningHub} {
-		state, err := s.stateForUser(nil, pluginID, s.List())
-		if err == nil && state.PlatformAvailable {
-			statuses[pluginID] = StatusEnabled
-		} else {
-			statuses[pluginID] = StatusDisabled
-		}
-	}
-	return statuses
-}
-
-func (s *Service) WorkflowStatusesForUser(userID string) (map[string]string, error) {
-	statuses := make(map[string]string, 1)
-	actor := &model.User{ID: strings.TrimSpace(userID)}
-	items := s.List()
-	for _, pluginID := range []string{WorkflowRunningHub} {
-		state, err := s.stateForUser(actor, pluginID, items)
-		if err != nil {
-			return nil, err
-		}
-		if state.EffectiveEnabled {
-			statuses[pluginID] = StatusEnabled
-		} else {
-			statuses[pluginID] = StatusDisabled
-		}
-	}
-	return statuses, nil
-}
-
-func (s *Service) RequireWorkflowForInterface(interfaceType string) error {
-	pluginID, ok := WorkflowIDForInterface(interfaceType)
-	if !ok {
-		return Forbidden("未知工作流插件")
-	}
-	status, exists := s.WorkflowStatuses()[pluginID]
-	if !exists || status != StatusEnabled {
-		if pluginID == WorkflowRunningHub {
-			return Forbidden("RunningHub 工作流插件未启用")
-		}
-		return Forbidden("工作流插件未启用")
-	}
-	return nil
-}
-
-func (s *Service) RequireWorkflowForUser(userID string, interfaceType string) error {
-	pluginID, ok := WorkflowIDForInterface(interfaceType)
-	if !ok {
-		return Forbidden("未知工作流插件")
-	}
-	if err := s.RequireForUser(userID, pluginID); err != nil {
-		if pluginID == WorkflowRunningHub {
-			return Forbidden("RunningHub 工作流插件未启用")
-		}
-		return Forbidden("工作流插件未启用")
 	}
 	return nil
 }

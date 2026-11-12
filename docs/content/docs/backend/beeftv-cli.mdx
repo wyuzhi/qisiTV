@@ -5,7 +5,7 @@ description: 不经助手直接批量调用本地工作区的随包 CLI：连接
 
 `beeftv` 是随 BeefTV 安装包一起发布的命令行工具。它直接调用本机工作区已有的业务接口，不经过模型助手，也不需要启动 MCP 服务，适合用 shell 脚本批量读取和整理画布、素材与任务。
 
-除 `beeftv skills` 与 `beeftv diagnostics analyze` 外，所有命令都要求 BeefTV 正在运行。
+除 `beeftv skills`、`beeftv diagnostics analyze` 与 `beeftv plugin` 外，所有命令都要求 BeefTV 正在运行。
 
 本页只写已经实现并逐条核对过的用法。付费批量生成和自动重跑不在本页范围，原因见文末「现在还不提供」。
 
@@ -56,7 +56,7 @@ export BEEFTV_BASE_URL=http://127.0.0.1:8080/api
 
 ## 3. 凭据：生成一份连接配置
 
-凭据在侧栏的「BeefTV MCP」页生成：选一个工具（Codex、Claude Code、Claude Desktop、Cursor、其他 MCP 客户端），点「连接」→「生成连接配置」。生成的内容是一段可直接粘贴的接入命令或 MCP 配置，里面已经包含三个变量：
+凭据在侧栏的「BeefTV MCP」页生成。本机已安装 `claude` / `codex` 命令行时，Claude Code 和 Codex 可以直接点「接入」，BeefTV 会通过它们自己的命令行写入用户级配置，不需要手动复制；没有可用命令行时用「手动连接」。如果要把三个变量拿到终端或脚本里，在该行的「手动连接」→「新增连接」走手动流程；生成的内容是一段可直接粘贴的接入命令或 MCP 配置，里面已经包含三个变量：
 
 ```bash
 export BEEFTV_DATA_DIR=<工作区数据目录>
@@ -64,7 +64,9 @@ export BEEFTV_CLIENT_ID=client-xxxxxxxxxxxxxxxx
 export BEEFTV_CLIENT_TOKEN=<连接配置里给出的 token>
 ```
 
-把这三项从那段配置里抽出来放进 shell 就行。token 只显示这一次（服务端只保存哈希，之后取不回来），关掉面板就要重新生成；界面上不会单独展示 token。
+把这三项从那段手动配置里抽出来放进 shell 就行。手动配置的 token 只显示这一次（服务端只保存哈希，之后取不回来），关掉面板就要重新生成；界面上不会单独展示 token。一键接入的凭据由 BeefTV 保存在本机数据目录，只把文件路径交给对应 Agent，不经过页面展示。
+
+一键接入不把 token 放进命令行参数，而是保存到 BeefTV 数据目录里的 `agent-clients/<kind>.token`，只把路径作为 `BEEFTV_CLIENT_TOKEN_FILE` 传给 CLI。`BEEFTV_CLIENT_TOKEN_FILE` 与 `BEEFTV_CLIENT_TOKEN` 同时存在时以文件为准；文件不存在或为空按未授权处理，不回退到环境变量。
 
 **不需要启动 MCP**：这三个变量对 `beeftv` 的子命令同样有效，纯脚本批量跑不会拉起任何 MCP 服务。
 
@@ -94,11 +96,12 @@ beeftv business discover   # 已挂载的业务 REST 接口清单，含 path/que
 
 `ops` 是助手、MCP 与脚本共用的操作面；`business` 是底层业务接口面。数量随版本变化，以实际输出为准。
 
-## 5. 读取画布与素材
+## 5. 读取与新建画布、读取素材
 
 默认输出是缩进 JSON，方便人看；`--json` 输出单行紧凑 JSON，方便管道处理。业务结果走 stdout，诊断信息走 stderr。
 
 ```bash
+beeftv canvas create --title "第1集分镜" --op-id new-canvas-1 --json
 beeftv canvas search --query "末日" --page 1 --page-size 10
 beeftv canvas get --canvas <canvasId> --json
 beeftv asset list --kind image --page-size 20 --json
@@ -106,7 +109,7 @@ beeftv asset get --asset <assetId> --json
 beeftv task get --task <taskId> --json
 ```
 
-读取结果的形状（`canvas search`）：
+`canvas create` 会创建一张带完整空白画布图结构（`nodes: []`、`connections: []`、`revision: 1`）的新画布，支持可选的 `--canvas <id>`、`--project <projectId>` 和 `--folder <folderId>`。读取结果的形状（`canvas search`）：
 
 ```json
 {"op":"canvas.search","replayed":false,"result":{"projects":[{"id":"cli-doc-canvas","title":"CLI 文档验证画布","revision":1,"nodeCount":0}],"page":1,"pageSize":5,"total":1,"hasMore":false},"caller":"external"}
@@ -257,6 +260,17 @@ beeftv business upload --file ./ref.png --target resource
 
 CLI 自己读取本地文件再提交资源接口，服务端不接受任意宿主路径；单个文件上限 64 MiB，更大的文件走分片上传（见 `beeftv business discover` 里的 `business_post_resources_uploads`）。`--target` 还支持 `skill` 和 `plugin`，用来安装本地技能包或插件包，文件类型不符时由服务端拒绝。
 
+### 6.6 查看与回滚外部写入、批准生成单
+
+本机用户（无需外部客户端凭据，CLI 会自动读取本机数据目录下的 `agent_owner_token`）可以直接查看外部 Agent 的画布写入记录、回滚某次外部写入，或查看并批准待执行的生成单：
+
+```bash
+beeftv writes --canvas <canvasId>            # 查看外部写入记录
+beeftv undo latest --canvas <canvasId>       # 回滚该画布最近一次外部写入（也可指定具体 opId）
+beeftv orders --canvas <canvasId>            # 查看生成单（含费用估算与审批状态）
+beeftv approve <proposalId>                  # 批准指定生成单
+```
+
 ## 7. 脚本化约定
 
 - stdout 只放业务结果，诊断和错误在 stderr，可以分开重定向。
@@ -298,7 +312,7 @@ beeftv mcp serve --all-business-tools  # 把每个底层业务接口单独列成
 启动时 stderr 会打印工具数量和连接的工作区，例如：
 
 ```text
-beeftv mcp serve: 40 个工具，base=http://127.0.0.1:<动态端口>/api（运行中的桌面工作区），client=client-xxxxxxxx
+beeftv mcp serve: 42 个工具，base=http://127.0.0.1:<动态端口>/api（运行中的桌面工作区），client=client-xxxxxxxx
 ```
 
 `media.overview`、`media.inspect` 读到的图片会作为 MCP 图片内容返回，音频作为音频内容返回，客户端可以直接看图；文字部分只保留时长、来源和校验值。MCP 没有视频内容类型，视频片段不随结果附带：看画面用 `mode=frames`，看连续动作或听声音用 `media.review`。
@@ -313,9 +327,11 @@ beeftv skills search 分镜 --target beeftv
 beeftv skills show <skillId> --release <releaseId>
 beeftv skills fetch <skillId> --release <releaseId> --output ./skills
 beeftv diagnostics analyze --file ./diagnostics.zip
+beeftv plugin validate ./my-interface
+beeftv plugin try ./my-interface --model my-model --base-url https://api.example.com/v1
 ```
 
-`skills` 的公共查询免登录；投稿要浏览器授权，上传和送审分别确认，完整子命令见 `beeftv skills help`。`diagnostics analyze` 完全离线，只接受 schema 3 的诊断包，旧格式会明确拒绝，退出码 8：
+`plugin validate` 和 `plugin try` 用 BeefTV 安装插件时的同一套校验和请求构造，离线检查接口插件，不发请求也不需要 Key，用法见[接入生成服务](../plugins/plugin-generation.mdx#校验和试跑)。`skills` 的公共查询免登录；投稿要浏览器授权，上传私有草稿和公开发布分别确认，完整子命令见 `beeftv skills help`。`diagnostics analyze` 完全离线，只接受 schema 3 的诊断包，旧格式会明确拒绝，退出码 8：
 
 ```text
 beeftv: diagnostics_bundle_invalid: 诊断包损坏或格式不受支持，需要 schema 3 诊断包

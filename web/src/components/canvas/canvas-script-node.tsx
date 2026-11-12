@@ -1,16 +1,17 @@
-import { Button, Dropdown, Input, InputNumber, Modal, Segmented, Select, Table } from "antd";
+import { App, Button, Dropdown, Input, InputNumber, Modal, Segmented, Select, Table } from "antd";
 import { Tooltip } from "@/components/ui/base/tooltip";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
 import { CheckboxGroup } from "@/components/ui/base/checkbox";
 import type { MenuProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { ChevronDown, ChevronUp, Clapperboard, Copy, Expand, Film, Grid3X3, Image as ImageIcon, ListTree, Merge, MoreHorizontal, Plus, RefreshCw, Send, Square, Trash2, Video } from "lucide-react";
+import { ChevronDown, ChevronUp, Clapperboard, Copy, Expand, Film, Grid3X3, Image as ImageIcon, ListTree, Merge, MoreHorizontal, Plus, RefreshCw, Send, Square, Trash2, Upload, Video } from "lucide-react";
 
 import { CanvasResourceMentionTextarea } from "@/components/canvas/canvas-resource-mention-textarea";
 import { StoryboardAssetsCell } from "@/components/canvas/storyboard-assets-cell";
 import { ModelPicker } from "@/components/model-picker";
 import { buildGenerationConfig } from "@/lib/canvas/canvas-project-generation";
+import { extractScriptDocumentText, SCRIPT_DOCUMENT_ACCEPT } from "@/lib/canvas/script-document-import";
 import { resolveStoryboardVisibleColumns, storyboardContentColumn, STORYBOARD_CONTENT_COLUMNS, type StoryboardContentColumn } from "@/lib/canvas/canvas-storyboard-columns";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { pipelineStatusLabel, type CanvasStoryboardPipelineProgress, type StoryboardPipelineStage } from "@/lib/canvas/canvas-storyboard-progress";
@@ -170,12 +171,31 @@ export function CanvasScriptNodeContent({
               : "";
     const [batchDetailsOpen, setBatchDetailsOpen] = useState(false);
     const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+    const { message } = App.useApp();
+    const scriptFileInputRef = useRef<HTMLInputElement>(null);
+    useEffect(() => {
+        if (typeof node.metadata?.composerContent === "string") setPrompt(node.metadata.composerContent);
+    }, [node.metadata?.composerContent]);
+    const openScriptFilePicker = () => scriptFileInputRef.current?.click();
+    const handleScriptFileChange = async (file?: File | null) => {
+        if (!file) return;
+        try {
+            const result = await extractScriptDocumentText(file);
+            setPrompt(result.content);
+            onPromptChange(result.content);
+            message?.success?.(`已导入剧本「${result.title}」`);
+        } catch (error) {
+            message?.error?.(error instanceof Error ? error.message : "导入剧本文件失败");
+        }
+    };
     const pipelineDisabled = !rows.length || node.metadata?.status === "loading" || hasActiveBatchItems;
     const missingImages = Math.max(0, pipeline.images.total - pipeline.images.created);
     const missingVideos = Math.max(0, pipeline.videos.total - pipeline.videos.created);
     const canMerge = pipeline.successfulVideoNodeIds.length >= 2 && pipeline.final.success === 0;
     const allRowIds = pipeline.rows.map((item) => item.row.id);
     const moreMenuItems: MenuProps["items"] = [
+        { key: "import-script-doc", icon: <Upload className="size-3.5" />, label: "导入剧本文件 (.docx/.txt/.md)", onClick: openScriptFilePicker },
+        { type: "divider" },
         { key: "generate-images", icon: <ImageIcon className="size-3.5" />, label: "生成未完成分镜图", disabled: pipelineDisabled || pipeline.images.incomplete === 0, onClick: () => onGenerateImages(allRowIds) },
         { key: "generate-videos", icon: <Video className="size-3.5" />, label: "生成未完成视频", disabled: pipelineDisabled || pipeline.videos.incomplete === 0, onClick: () => onGenerateVideos(allRowIds) },
         {
@@ -246,6 +266,20 @@ export function CanvasScriptNodeContent({
                 <span className="text-[var(--fs-caption)] font-semibold tabular-nums" style={{ color: theme.node.muted }}>
                     {rows.length} 镜 · {totalDuration}s
                 </span>
+                <input ref={scriptFileInputRef} type="file" accept={SCRIPT_DOCUMENT_ACCEPT} className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ""; void handleScriptFileChange(file); }} />
+                <Tooltip title="导入剧本 (.docx/.txt/.md)">
+                    <button
+                        type="button"
+                        className="grid size-7 place-items-center rounded outline-none transition hover:bg-black/5 focus-visible:ring-2 dark:hover:bg-white/10"
+                        style={{ "--tw-ring-color": theme.node.muted } as CSSProperties}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => { event.stopPropagation(); openScriptFilePicker(); }}
+                        aria-label="导入剧本"
+                    >
+                        <Upload className="size-3.5" />
+                    </button>
+                </Tooltip>
                 <Tooltip title="全屏编辑">
                     <button
                         type="button"
@@ -369,6 +403,17 @@ export function CanvasScriptNodeContent({
                             <span className="text-sm font-bold">＋ 添加第一个镜头</span>
                             <span className="text-[var(--fs-label)] font-medium" style={{ color: theme.node.faint }}>
                                 可先连接「故事梗概 / 项目画风」节点，或在下方输入提示词一键生成分镜表
+                            </span>
+                            <span
+                                role="button"
+                                tabIndex={0}
+                                className="text-[var(--fs-label)] font-medium underline underline-offset-2 opacity-80 transition hover:opacity-100"
+                                style={{ color: theme.accent.primary }}
+                                onMouseDown={(event) => event.stopPropagation()}
+                                onClick={(event) => { event.stopPropagation(); openScriptFilePicker(); }}
+                                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); openScriptFilePicker(); } }}
+                            >
+                                或点击导入 .docx / .txt 剧本文件
                             </span>
                         </span>
                     </button>

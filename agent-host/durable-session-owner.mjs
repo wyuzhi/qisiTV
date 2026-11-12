@@ -3,11 +3,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
-import { Harness, createRegistry, defineDoc, watchEvents } from '@earendil-works/pi-durable';
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
+import { Harness, ProviderDoc, createRegistry, defineDoc } from '@earendil-works/pi-durable';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { canvasKey } from './session-owner.mjs';
-import { newTurnAccumulator, resetTurnAccumulator, turnChange, sessionTitle } from './canvas-turn.mjs';
+import { newTurnAccumulator, resetTurnAccumulator, sessionTitle } from './canvas-turn.mjs';
 import { SYSTEM_PROMPT } from './system-prompt.mjs';
 import { skillsToLoad } from './skill-resource.mjs';
 import { emptyPlan, publicPlan } from './plan.mjs';
@@ -15,12 +15,11 @@ import { buildStudioDigest, describeChangesSince } from './studio-digest.mjs';
 import {
   durableCompletion,
   durableLifecycleState,
-  durableReasoningSegments,
   durableRetryReason,
   durableStreamEvents,
-  durableTurnReplyText,
   publicDurableTurn,
 } from './durable-turn-projection.mjs';
+import { createDurableTurnLifecycle } from './durable-watch-observer.mjs';
 import {
   createDurableSkillController,
   durableToolReplay,
@@ -41,8 +40,10 @@ export {
 // On-disk format tag written into manifests and host state since 1.0.4; not the
 // package version. Changing it rejects every existing session as mismatched.
 export const DURABLE_VERSION = '1.0.4';
+export const HOST_STATE_CHECKPOINT_DELTAS = 32;
 const STATE = defineDoc({ kind: 'beeftv.host', version: 1, scope: 'session',
-  initial: () => ({ version: DURABLE_VERSION, canvasId: '', sessionId: '', active: null, turns: [], loadedSkills: [], plan: emptyPlan(), studioDigestText: '', lastStudioSnapshot: null, lastStudioSnapshotRevision: null }) });
+  initial: () => ({ version: DURABLE_VERSION, canvasId: '', sessionId: '', active: null, turns: [], loadedSkills: [], plan: emptyPlan(), studioDigestText: '', lastStudioSnapshot: null, lastStudioSnapshotRevision: null }),
+  checkpointWhen: (value, _ops, { deltasSinceBase }) => value.active === null || deltasSinceBase >= HOST_STATE_CHECKPOINT_DELTAS });
 export const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high'];
 // The root agent's reasoning level; budgets follow pi-ai's DEFAULT_THINKING_BUDGETS.
 export function agentThinkingLevel(env = process.env) {
@@ -180,6 +181,11 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
     if (active) {
       if (agent.model?.provider !== modelRef.provider || agent.model?.modelId !== modelRef.modelId) throw fail('turn_model_frozen');
     } else {
+      if (entry.pendingPluginExtensions && typeof entry.reloadPluginExtensions === 'function') {
+        const pending = entry.pendingPluginExtensions;
+        entry.pendingPluginExtensions = null;
+        await entry.reloadPluginExtensions(pending);
+      }
       // Existing conversations pick up the host's current reasoning level on
       // their next new round, as they pick up the model.
       await entry.root.configure({ model: modelRef, thinkingLevel }, CTX);
@@ -189,7 +195,9 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
   function hydrate(entry, active) {
     entry.busy = Boolean(active);
     if (!active) return;
-    Object.assign(entry.turn, active.effects);
+    // 官方快照与会话状态可能共享同一份嵌套数组。直接展开会让工具执行在原地改写
+    // 「已提交」的文档值，persistEffects 比较不出差异，重启后本轮写入与提案就丢了。
+    Object.assign(entry.turn, active.effects ? JSON.parse(JSON.stringify(active.effects)) : {});
     entry.turn.turnId = active.turnId;
     entry.input = active;
     entry.generation.permissionMode=active.permissionMode || 'canvas';
@@ -264,15 +272,27 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
     entry.harness = await Harness.open(await openNodeSqliteStorage(path.join(dir, `${uuid}.sqlite`)), {
       models, registry,
       // Do not repeat a failed model request: the upstream may already have billed it.
+      // pi 1.5 counts a request cut off by a host restart as a failed attempt too, so that
+      // turn ends interrupted instead of resending; landed changes stay.
       settings: { stream: { timeoutMs: 180000, maxRetries: 0 }, retry: { maxRetries: 0 },
-        toolExecution: 'sequential', steeringMode: 'all', ...settings },
+        afterFailedRun: 'continue', toolExecution: 'sequential', steeringMode: 'all', ...settings },
     }, CTX);
     try {
-      entry.root = await entry.harness.root(CTX, { agent: { model: await getModelRef(entry), tools,
-        instructions: SYSTEM_PROMPT, thinkingLevel, cwd } });
+      entry.root = await entry.harness.root(CTX, {
+        agent: { model: await getModelRef(entry), tools, instructions: SYSTEM_PROMPT, thinkingLevel, cwd },
+        // 固定官方 provider 身份为 Durable 会话 ID，使缓存亲和性跨重启保持稳定。
+        init: async (tx, id) => { (await tx.doc(ProviderDoc, id)).sessionId = sessionId; },
+      });
       let hostState = await state(entry);
       if (!hostState) {
-        await update(entry, (doc) => { doc.canvasId = canvasId; doc.sessionId = sessionId; });
+        await update(entry, (doc) => { doc.canvasId = canvasId; doc.sessionId = sessionId; doc.affinityMinEntryId = 1; });
+        hostState = await state(entry);
+      } else if (typeof hostState.affinityMinEntryId !== 'number') {
+        // 升级前的会话没有固定过渠道亲和性：从下一条条目开始视为已固定，
+        // 旧条目的 thinking 签名在恢复时降级，避免重发到不同上游节点。
+        const latest = await entry.root.entries({ order: 'descending' }, 1, undefined, CTX);
+        const affinityMinEntryId = (latest.items[0]?.id ?? 0) + 1;
+        await update(entry, (doc) => { doc.affinityMinEntryId = affinityMinEntryId; });
         hostState = await state(entry);
       }
       if (hostState.canvasId !== canvasId || hostState.sessionId !== sessionId || hostState.version !== DURABLE_VERSION) throw fail('durable_version_mismatch');
@@ -461,21 +481,12 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
     const admitted = await entry.harness.commit((tx) => tx.submissionByRequest(entry.root.id, requestId), CTX);
     return admitted ? entry.harness.submission(admitted.id, CTX) : null;
   }
-  // A stopped admitted request: if the official queue already has it (e.g. just before a
-  // crash), it is fenced and aborted and its settlement records it; otherwise nothing ran.
-  async function stoppedRequest(entry, active) {
-    const submission = await officialSubmission(entry, active.requestId);
-    if (!submission) return stopBeforeSubmit(entry, active);
-    await fenceStop(entry);
-    await entry.root.abort(CTX);
-    return submission;
-  }
   // Never submitted: no model request, tool or canvas write. Recorded as stopped so
   // history (and a waiting panel) shows it; skills it would have loaded are not kept.
   async function stopBeforeSubmit(entry, active) {
     await undoUnsubmittedSkills(entry, active);
     const record = { ...publicDurableTurn(active), reply: '', cancelled: true, error: null, errorReason: null,
-      toolCalls: [], change: null, proposals: [], status: 'unanswered', sessionId: entry.sessionId };
+      toolCalls: [], change: null, proposals: [], scriptProposals: [], status: 'unanswered', sessionId: entry.sessionId };
     let pending = null;
     // Use the same acknowledgement ordering as a submitted turn. A crash or failed
     // Go completion leaves active.result available to recovery, even without a submission.
@@ -493,6 +504,21 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
     }
     return null;
   }
+  const { stoppedRequest, settleLocal, recover, wait, fenceStop, stop } = createDurableTurnLifecycle({
+    stateDoc: STATE,
+    state,
+    update,
+    lock,
+    hydrate,
+    authorization,
+    turnModel,
+    submit: (entry, active) => submit(entry, active),
+    officialSubmission,
+    stopBeforeSubmit,
+    stopIntended,
+    forgetStop,
+    completeTurn,
+  });
   // One commit: a settled request reports finished; otherwise the intent is journaled so a
   // later /chat, a resend or recovery after a restart records it stopped instead of running it.
   async function recordStopIntent(entry, requestId) {
@@ -533,54 +559,6 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
       });
     if (finished) { forgetStop(canvasId, target, requestId); return { state: 'finished' }; }
     return { state: 'pending' };
-  }
-  async function recover(entry) {
-    // A live official wait already owns the turn: a read must not hydrate over its
-    // in-memory effects, re-authorize, or re-submit. Concurrent reads share one recovery.
-    if (entry.waiters > 0) return null;
-    if (!entry.recovering) entry.recovering = recoverOnce(entry).finally(() => { entry.recovering = null; });
-    return entry.recovering;
-  }
-  async function recoverOnce(entry) {
-    const doc = await state(entry);
-    const active = doc.active;
-    if (!active) return null;
-    hydrate(entry, active);
-    // Opening/reading never schedules pending work. Only validated recovery does.
-    let auth;
-    try { auth = await authorization(entry, active.turnId, true); }
-    catch (error) {
-      if (active.continuationId && continuationRevoked(error)) return stoppedRequest(entry, active);
-      throw error;
-    }
-    if (entry.waiters > 0) return null;
-    // Completion is already committed: only acknowledge it, never re-run or rebuild it.
-    // Pre-submit stops have no official submission, including after Go has already closed.
-    if (active.result) {
-      if (auth?.open !== false) await completeTurn({ canvasId: entry.canvasId, turnId: active.turnId, sessionId: entry.sessionId, record: active.result });
-      await settleLocal(entry, active, active.result);
-      return active.submissionId == null ? null : entry.harness.submission(active.submissionId, CTX);
-    }
-    // A stopped request is settled as stopped, never (re)submitted.
-    if (stopIntended(entry, doc, active.requestId)) { await stop(entry, active.requestId); return null; }
-    if (auth?.open === false) {
-      const admitted = await entry.harness.commit((tx) => tx.submissionByRequest(entry.root.id, active.requestId), CTX);
-      const submission = admitted ? await entry.harness.submission(admitted.id, CTX) : null;
-      const settled = submission && await submission.status(CTX);
-      if (!settled || !['done', 'unanswered'].includes(settled.status)) throw fail('turn_not_open');
-      // No submit/resume: a closed turn may only reconstruct committed history.
-      const record = active.result || await completionRecord(entry, active, settled);
-      await settleLocal(entry, active, record);
-      return submission;
-    }
-    await turnModel(entry, active);
-    // Re-admit persisted supplements by stable request ID before scheduling the
-    // original submission. The official queue deduplicates already placed ones.
-    for (const input of active.supplementContents || []) {
-      await entry.root.submit({ type: 'input', requestId: `supplement:${input.requestId}`,
-        content: supplementContent(input.requestId, input.content), whenBusy: 'steer' }, CTX);
-    }
-    return submit(entry, active);
   }
   async function supplement(entry, { requestId, content, input = {} }) {
     if (entry.completing || entry.generation.aborted) throw fail('session_not_running');
@@ -654,148 +632,6 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
         void entry.root.abort(CTX).catch(() => {});
       },
     };
-  }
-  async function wait(entry, submission, options = {}) {
-    // Counted before the first await so a recovery read in the same tick sees the live owner.
-    entry.waiters += 1;
-    try { return await observe(entry, submission, options); }
-    finally { entry.waiters -= 1; }
-  }
-  async function observe(entry, submission, { onEvent = () => {}, signal } = {}) {
-    const context = signal ? withAbortSignal(signal, CTX) : CTX;
-    const stream = await watchEvents(entry.harness, entry.root.id, context);
-    let planWatch;
-    try {
-      const initial = await submission.status(context);
-      const afterEntry = initial.entry ?? stream.snapshot.entries.reduce((last, item) => Math.max(last, item.id), 0);
-      await onEvent({ ...stream.snapshot, afterEntry, sessionId: entry.sessionId });
-      planWatch = await entry.harness.watchDoc(STATE, context);
-      let previousPlan;
-      const emitPlan = async (doc) => {
-        if (doc?.active?.requestId !== initial.requestId) return;
-        const plan = publicPlan(doc.plan);
-        const serialized = JSON.stringify(plan);
-        if (serialized === previousPlan) return;
-        previousPlan = serialized;
-        await onEvent({ type: 'plan', plan });
-      };
-      if (planWatch) { await emitPlan(planWatch.value); planWatch.start(emitPlan); }
-      stream.start(async (events) => { for (const event of events) await onEvent(event); });
-      const original = await submission.wait(context);
-      for (;;) {
-        // Never hold the canvas admission lock while waiting for image prep or
-        // official generations: supplement() needs that lock to admit inputs.
-        const pending = entry.generation.pendingInput;
-        if (pending?.state === 'pending') await pending.promise.catch(() => {});
-        const snapshot = await state(entry);
-        if (snapshot.active?.requestId !== original.requestId) return snapshot.turns.find((turn) => turn.submissionId === submission.id) || null;
-        const ids = [...(snapshot.active.supplementIds || [])];
-        let settled = original;
-        for (const id of ids) {
-          const admitted = await entry.harness.commit((tx) => tx.submissionByRequest(entry.root.id, `supplement:${id}`), CTX);
-          if (!admitted) {
-            // The host persists supplemental metadata before official admission.
-            // A stop in that exact gap must not admit it during cancellation or
-            // recovery. The fenced turn can settle using existing official work.
-            if (snapshot.active.stopped || entry.generation.aborted) continue;
-            throw fail('supplement_submission_missing');
-          }
-          const supplemental = await entry.harness.submission(admitted.id, CTX);
-          settled = await supplemental.wait(context);
-        }
-        const result = await lock(entry.canvasId, async () => {
-          const current = await state(entry);
-          if (current.active?.requestId !== original.requestId) return { done: true, record: current.turns.find((turn) => turn.submissionId === submission.id) || null };
-          if (entry.generation.pendingInput?.state === 'pending' || JSON.stringify(current.active.supplementIds || []) !== JSON.stringify(ids)) return { done: false };
-          entry.completing = true;
-          try {
-            const active = current.active;
-            const record = active.result || await completionRecord(entry, active, settled);
-            await update(entry, (doc) => { if (doc.active?.requestId === active.requestId) doc.active.result = record; });
-            // Retain active.result until Go acknowledges. Recovery can retry
-            // that completion without scheduling any more model work.
-            await completeTurn({ canvasId: entry.canvasId, turnId: active.turnId, sessionId: entry.sessionId, record });
-            await settleLocal(entry, active, record);
-            return { done: true, record };
-          } finally { entry.completing = false; }
-        });
-        if (result.done) return result.record;
-      }
-    } finally { await planWatch?.stop(); await stream.stop(); }
-  }
-  async function completionRecord(entry, active, settled) {
-    // The official settlement points at its exact answer entry. Never take the
-    // last assistant in transcript: it may belong to a previous successful turn.
-    const answer = settled.answer ? await entry.harness.commit((tx) => tx.entry(settled.answer), CTX) : null;
-    let assistant = answer?.model?.find((message) => message.role === 'assistant');
-    // 本轮范围由原提交、补充输入与确切结束条目限定：工具调用前后的助手条目都算这一轮，
-    // 终态与实时流、重开历史用同一份投影，所以片段身份与顺序一致。
-    const original = active.submissionId ? await entry.harness.submission(active.submissionId, CTX) : null;
-    const originalStatus = original ? await original.status(CTX) : null;
-    const lowerBound = originalStatus?.entry ?? settled.entry;
-    const view = lowerBound === undefined ? null : await entry.root.context(CTX);
-    const turnEntries = view ? view.entries.filter((item) => item.id > lowerBound
-      && (settled.answer === undefined || item.id <= settled.answer)) : (answer ? [answer] : []);
-    if (active.stopped || settled.reason === 'aborted') {
-      // Official abort converts its committed partial into an assistant entry.
-      const partial = turnEntries.flatMap((item) => item.model || [])
-        .filter((message) => message.role === 'assistant' && message.stopReason === 'aborted').at(-1);
-      if (partial) assistant = partial;
-    }
-    const scopedEntries = turnEntries.length ? turnEntries : (answer ? [{ id: settled.answer ?? 0, ...answer }] : []);
-    const replyText = durableTurnReplyText(scopedEntries)
-      || ((active.stopped || settled.reason === 'aborted' || entry.generation.pendingInputError || entry.generation.skillContextFailure) && assistant
-        ? durableTurnReplyText([{ id: settled.answer ?? 0, model: [assistant] }])
-        : '');
-    const preparationError = entry.generation.pendingInputError || entry.generation.skillContextFailure;
-    const completion = preparationError ? { reply: replyText, cancelled: false, error: preparationError.message, errorReason: preparationError.reason } : durableCompletion(settled, assistant, entry.budget?.failure, active.stopped, replyText);
-    const planView = entry.turn.plan || active.plan || null;
-    // 思考是权威值：即使为空也要写进终态和历史，界面才能区分「没有思考」与「字段缺失」并清掉旧内容。
-    const reasoning = durableReasoningSegments(turnEntries);
-    return { ...publicDurableTurn(active), ...completion, reasoning,
-      toolCalls: [...entry.log], change: turnChange(entry.turn), proposals: [...entry.turn.proposals],
-      ...(planView ? { plan: planView } : {}),
-      status: settled.status, sessionId: entry.sessionId };
-  }
-  async function settleLocal(entry, active, record) {
-    await update(entry, (doc) => {
-      if (doc.active?.requestId === active.requestId) { doc.turns = [...doc.turns, record]; doc.active = null; }
-      if (doc.stopRequests?.includes(active.requestId)) doc.stopRequests = doc.stopRequests.filter((id) => id !== active.requestId);
-    });
-    forgetStop(entry.canvasId, entry.sessionId, active.requestId);
-    entry.busy = false;
-  }
-  async function fenceStop(entry, requestId = entry.input?.requestId) {
-    if (!requestId) return null;
-    // Fence only the captured request, before awaiting storage. A later request may
-    // reuse this entry while a caller waits for the Go completion response.
-    if (entry.busy && entry.input?.requestId === requestId) {
-      entry.generation.aborted = true;
-      entry.generation.pendingInput?.cancel?.();
-    }
-    let turnId = null;
-    await update(entry, (doc) => {
-      if (doc.active?.requestId === requestId) {
-        doc.active.stopped = true;
-        turnId = doc.active.turnId;
-      }
-    });
-    return turnId;
-  }
-  async function stop(entry, requestId = entry.input?.requestId) {
-    if (!requestId || !await fenceStop(entry, requestId)) return;
-    // Official abort is conversation-wide. Keep admission locked until it finishes
-    // so it cannot abort a newer request, then observe only this exact submission.
-    const submission = await lock(entry.canvasId, async () => {
-      if (!await fenceStop(entry, requestId)) return null;
-      await entry.root.abort(CTX);
-      const active = (await state(entry)).active;
-      if (active?.requestId !== requestId) return null;
-      const official = active.submissionId != null ? await entry.harness.submission(active.submissionId, CTX)
-        : await officialSubmission(entry, requestId);
-      return official || stopBeforeSubmit(entry, active);
-    });
-    if (submission) return wait(entry, submission);
   }
   async function history(canvasId, sessionId) {
     const cached = sessions.get(canvasId);
@@ -876,6 +712,42 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
     }
     return out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
+  async function deleteSession(canvasId, sessionId) {
+    return lock(canvasId, async () => {
+      if (!isDurableSessionId(sessionId) || !hasSession(canvasId, sessionId)) throw fail('session_not_found');
+      const current = sessions.get(canvasId);
+      if (current?.busy) throw fail('session_busy');
+      const uuid = idPattern.exec(sessionId)[1];
+      const dir = durableDirectory(canvasId);
+      if (current?.sessionId === sessionId) {
+        sessions.delete(canvasId);
+        await current.harness.close(CTX);
+      }
+      for (const suffix of ['.json', '.sqlite', '.sqlite-wal', '.sqlite-shm', '.budget']) {
+        fs.rmSync(path.join(dir, `${uuid}${suffix}`), { recursive: true, force: true });
+      }
+      let currentPointer = '';
+      try { currentPointer = JSON.parse(fs.readFileSync(currentPath(canvasId), 'utf8')).sessionId || ''; }
+      catch { currentPointer = ''; }
+      if (currentPointer === sessionId) {
+        const remaining = await listCanvasSessions(canvasId);
+        if (remaining.length > 0) {
+          const next = await open(canvasId, remaining[0].sessionId);
+          await install(next);
+        } else {
+          fs.rmSync(currentPath(canvasId), { force: true });
+        }
+      }
+      return { deleted: true, sessionId };
+    });
+  }
+  async function reloadPluginExtensions(newExtensions) {
+    for (const entry of sessions.values()) {
+      if (typeof entry.reloadPluginExtensions === 'function') {
+        await entry.reloadPluginExtensions(newExtensions);
+      }
+    }
+  }
   async function disposeAll() {
     closed = true;
     await Promise.allSettled([...locks.values()]);
@@ -883,6 +755,6 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
     for (const entry of entries) await entry.harness.close(CTX);
     return entries.length;
   }
-  return { sessions, createSession, handoffSession, activateSession, ensureSession, ensureCurrentSession, submit, recover, supplement, beginPendingInput, fenceStop, wait,
-    stop, cancelRequest, hasSession, history, status, recordEvent, listCanvasSessions, disposeAll, skillContext, changeSkillContext };
+  return { sessions, createSession, handoffSession, activateSession, ensureSession, ensureCurrentSession, deleteSession, submit, recover, supplement, beginPendingInput, fenceStop, wait,
+    stop, cancelRequest, hasSession, history, status, recordEvent, listCanvasSessions, reloadPluginExtensions, disposeAll, skillContext, changeSkillContext };
 }

@@ -22,6 +22,7 @@ const {
     assistantUndoFailure,
     cancelAgentChat,
     confirmAssistantProposalRunnable,
+    confirmAssistantScriptProposal,
     steerAgentChat,
     ensureAgentUiSession,
     resetAgentUiSession,
@@ -100,6 +101,24 @@ describe("创作助手回合流边界", () => {
         expect(await confirmAssistantProposalRunnable("old", "gp-old", "canvas")).toBe("已失效，请让助手重新提出生成方案。");
         httpPostSpy.mockResolvedValueOnce({ runnable: true } as never);
         expect(await confirmAssistantProposalRunnable("current", "gp-current", "canvas")).toBeNull();
+    });
+    test("确认运行技能脚本使用长超时（1830s），不被 4 秒默认 JSON 超时中断", async () => {
+        sessionResponse = () => new Response(JSON.stringify({ data: { token: "ui-token", expiresAt: new Date(Date.now() + 1_800_000).toISOString() } }));
+        await ensureAgentUiSession();
+        let capturedUrl = "";
+        let capturedBody: unknown = null;
+        let capturedConfig: Record<string, unknown> | undefined;
+        httpPostSpy.mockImplementationOnce((async (url: string, body: unknown, config?: Record<string, unknown>) => {
+            capturedUrl = url;
+            capturedBody = body;
+            capturedConfig = config;
+            return { proposal: { proposalId: "sp-1", status: "completed" }, result: { exitCode: 0 } };
+        }) as never);
+        await confirmAssistantScriptProposal("canvas-1", "turn-1", "sp-1", true);
+        expect(capturedUrl).toBe("/assistant/turns/turn-1/script-proposals/sp-1/run");
+        expect(capturedBody).toEqual({ canvasId: "canvas-1", alwaysAllowSession: true });
+        expect(capturedConfig?.timeout).toBe(1_830_000);
+        expect((capturedConfig?.headers as Record<string, string>)?.["X-Beeftv-Ui-Session"]).toBe("ui-token");
     });
     test("交接会话身份在 observer_error 和断流前交给界面，不能冒充回合完成", async () => {
         let sessionId = "legacy-session";

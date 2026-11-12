@@ -3,7 +3,7 @@ package workspace
 import "testing"
 
 func TestPreferredMediaConfigSeedsWithoutWallet(t *testing.T) {
-	store, err := NewLikeAIProviderConfig(t.TempDir())
+	store, err := NewProviderConfig(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func TestPreferredMediaConfigSeedsWithoutWallet(t *testing.T) {
 }
 
 func TestPreferredMediaConfigPreservesAssistantSelectionAndCredential(t *testing.T) {
-	store, _ := NewLikeAIProviderConfig(t.TempDir())
+	store, _ := NewProviderConfig(t.TempDir())
 	_, err := store.SaveLocalModelConfigRevision([]byte(`{"channels":[{"id":"assistant","name":"My LLM","baseUrl":"https://example.com/v1","apiFormat":"openai","apiKey":"test-secret","models":["text-model"]}],"textModel":"assistant::text-model","assistantModel":"assistant::text-model"}`), 0)
 	if err != nil {
 		t.Fatal(err)

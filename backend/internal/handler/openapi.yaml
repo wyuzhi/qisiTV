@@ -23,7 +23,7 @@ tags:
   - name: tasks
   - name: assets
   - name: admin
-  - name: beefapi
+  - name: beeftv
   - name: agent-ops
   - name: assistant
   - name: creation-conversations
@@ -135,46 +135,46 @@ paths:
       responses:
         "200":
           description: 墓碑已写入
-  /beefapi/connection:
+  /beeftv/connection:
     get:
-      tags: [beefapi]
+      tags: [beeftv]
       summary: 读取内置 BeefTV 连接状态
       description: 只返回账号和状态，不含密钥或 device_code。
       responses:
         "200":
           description: 信封 data 为连接摘要
-  /beefapi/connection/start:
+  /beeftv/connection/start:
     post:
-      tags: [beefapi]
+      tags: [beeftv]
       summary: 开始企业授权并打开系统浏览器确认页
       responses:
         "200":
           description: 进入 pending 或返回已连接状态
-  /beefapi/connection/models:
+  /beeftv/connection/models:
     post:
-      tags: [beefapi]
+      tags: [beeftv]
       summary: 使用当前企业连接刷新并保存模型目录
       description: 不接受客户端密钥或价格；读取上游目录并保存可信能力和报价。连接改变或读取失败时返回错误。
       responses:
         "200":
           description: 信封 data.models 为已保存的上游目录项
-  /beefapi/connection/cancel:
+  /beeftv/connection/cancel:
     post:
-      tags: [beefapi]
+      tags: [beeftv]
       summary: 取消尚未完成的授权
       responses:
         "200":
           description: 当前连接摘要
-  /beefapi/connection/disconnect:
+  /beeftv/connection/disconnect:
     post:
-      tags: [beefapi]
+      tags: [beeftv]
       summary: 断开当前连接并吊销本机这把密钥
       responses:
         "200":
           description: 当前连接摘要
-  /beefapi/connection/open-wallet:
+  /beeftv/connection/open-wallet:
     post:
-      tags: [beefapi]
+      tags: [beeftv]
       summary: 在系统浏览器打开企业充值页 /console/topup
       responses:
         "200":
@@ -663,6 +663,33 @@ paths:
         "401":
           $ref: "#/components/responses/Error"
         "404":
+          $ref: "#/components/responses/Error"
+  /resources/storage-usage:
+    get:
+      tags: [resources]
+      summary: 查询账号已用字节、配额总容量与单画布容量上限（MB，0 表示不限制）
+      responses:
+        "200":
+          $ref: "#/components/responses/Envelope"
+    patch:
+      tags: [resources]
+      summary: 更新单画布文档容量上限（0 表示不限制，范围 0-512 MB）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [canvasDocumentMB]
+              properties:
+                canvasDocumentMB:
+                  type: integer
+                  minimum: 0
+                  maximum: 512
+      responses:
+        "200":
+          $ref: "#/components/responses/Envelope"
+        "400":
           $ref: "#/components/responses/Error"
   /resources/playback-cache:
     delete:

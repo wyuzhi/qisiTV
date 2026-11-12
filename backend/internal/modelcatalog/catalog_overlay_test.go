@@ -19,7 +19,7 @@ func officialCatalogVideo(t *testing.T) json.RawMessage {
 	}`)
 }
 
-func TestOverlayCatalogVideoCapabilitiesMatchesOfficialBeefAPIContract(t *testing.T) {
+func TestOverlayCatalogVideoCapabilitiesMatchesOfficialBeefTVContract(t *testing.T) {
 	raw := officialCatalogVideo(t)
 	version := " 1 "
 	items := OverlayCatalogVideoCapabilities([]ChannelModelCatalogItem{{
@@ -69,9 +69,9 @@ func TestMergeCatalogExtrasEnrichesAndAppends(t *testing.T) {
 	}
 }
 
-func TestLoadChannelModelCatalogCustomGeminiAndBeefAPI(t *testing.T) {
+func TestLoadChannelModelCatalogCustomGeminiAndBeefTV(t *testing.T) {
 	raw := officialCatalogVideo(t)
-	beefAPIBody, err := json.Marshal(map[string]any{
+	beefTVBody, err := json.Marshal(map[string]any{
 		"data": []map[string]any{{
 			"id": "doubao-seedance-2-0", "display_name": "Seedance 2.0", "model_type": "video",
 			"video_capabilities": json.RawMessage(raw), "video_capabilities_version": "gateway-1",
@@ -110,21 +110,21 @@ func TestLoadChannelModelCatalogCustomGeminiAndBeefAPI(t *testing.T) {
 	}
 
 	beef, err := LoadChannelModelCatalog(context.Background(), func(context.Context, string, string, string, []ChannelHeader) ([]byte, error) {
-		return beefAPIBody, nil
-	}, "https://enterprise.beefapi.com/v1", "openai", "k", nil, nil)
+		return beefTVBody, nil
+	}, "https://beeftv.app/v1", "openai", "k", nil, nil)
 	if err != nil || len(beef) != 1 || beef[0].ID != "doubao-seedance-2-0" || beef[0].VideoCapabilitiesVersion == nil || *beef[0].VideoCapabilitiesVersion != "gateway-1" {
-		t.Fatalf("beefapi catalog = %#v %v", beef, err)
+		t.Fatalf("beeftv catalog = %#v %v", beef, err)
 	}
 	want, ok := NormalizeCatalogVideoCapability(raw)
 	if !ok {
-		t.Fatal("official contract rejected BeefAPI fixture")
+		t.Fatal("official contract rejected BeefTV fixture")
 	}
 	wantRaw, err := json.Marshal(want)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(beef[0].VideoCapabilities, wantRaw) {
-		t.Fatalf("BeefAPI/WhatsToken overlay drifted: got %s", beef[0].VideoCapabilities)
+		t.Fatalf("BeefTV/WhatsToken overlay drifted: got %s", beef[0].VideoCapabilities)
 	}
 }
 

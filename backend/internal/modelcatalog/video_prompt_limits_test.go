@@ -37,7 +37,6 @@ func TestVideoPromptDefaultsDoNotInventLocalCeilings(t *testing.T) {
 		{"volcengine-ark-video", "seedance-2.5"},
 		{"gemini-veo", "veo-3"},
 		{"newapi", "minimax-h3"},
-		{"runninghub-workflow-video", "wan2.1-t2v"},
 	} {
 		t.Run(tc.protocol+"/"+tc.name, func(t *testing.T) {
 			refs := DefaultModelCapabilityConfigForModel(tc.protocol, tc.name).Video.References

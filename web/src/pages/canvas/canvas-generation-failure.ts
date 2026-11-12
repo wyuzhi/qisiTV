@@ -72,7 +72,7 @@ export function canvasTaskFailureMetadata(task: GenerationTask, metadata?: Canva
         failure.failedPromptFingerprint = metadata.failedPromptFingerprint;
     }
     const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
-    const diagnostics = task.status === "succeeded" ? { ...task.failureDiagnostics, source: "client_result" as const, executionResult: "completed" as const, summary: cause instanceof Error ? cause.message : failure.generationErrorSummary, stage: "画布应用结果", capturedAt: new Date().toISOString() } : task.failureDiagnostics;
+    const diagnostics = task.status === "succeeded" ? { ...task.failureDiagnostics, source: "client_result" as const, executionResult: "completed" as const, summary: cause instanceof Error ? cause.message : failure.generationErrorSummary, stage: "画布应用结果", capturedAt: new Date().toISOString() } : (task.failureDiagnostics ?? failure.taskFailureDiagnostics);
     const backendOutcome = readTaskOutcome(task);
     // 原任务成功但本机应用失败时结果仍可取回；后台已判定结果取不回（phase=failed）时，结论和提示都以后台为准。
     const resultLost = task.status === "succeeded" && backendOutcome?.phase === "failed";
@@ -94,8 +94,31 @@ export function canvasImagePendingResultMessage(node: CanvasNodeData | undefined
     return missing?.metadata?.errorDetails || node?.metadata?.errorDetails || "生成结果已保留，请点击「继续取回」";
 }
 
+const TRANSIENT_POLL_TIMESTAMP_KEYS = new Set(["taskUpdatedAt", "taskDurationMs"]);
+
+function isSameGenerationTaskNodeMetadata(prev: CanvasNodeMetadata | undefined, next: CanvasNodeMetadata): boolean {
+    if (!prev) return false;
+    const inFlightSameStatus =
+        prev.taskId === next.taskId &&
+        prev.taskStatus === next.taskStatus &&
+        (next.taskStatus === "queued" || next.taskStatus === "running" || next.taskStatus === "submitting");
+    const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
+    for (const key of keys) {
+        if (inFlightSameStatus && TRANSIENT_POLL_TIMESTAMP_KEYS.has(key)) continue;
+        const a = prev[key as keyof CanvasNodeMetadata];
+        const b = next[key as keyof CanvasNodeMetadata];
+        if (a === b) continue;
+        if (a !== undefined && b !== undefined && typeof a === "object" && typeof b === "object" && JSON.stringify(a) === JSON.stringify(b)) {
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+
 export function canvasGenerationTaskNodes(nodes: CanvasNodeData[], targetNodeId: string, task: GenerationTask): CanvasNodeData[] {
-    return nodes.map((node) => {
+    let changed = false;
+    const mapped = nodes.map((node) => {
         const failed = task.status === "failed" || task.status === "cancelled";
         if (node.id !== targetNodeId && !(failed && node.metadata?.taskId === task.id)) return node;
         const outputIndex = node.metadata?.taskOutputIndex ?? 0;
@@ -109,7 +132,9 @@ export function canvasGenerationTaskNodes(nodes: CanvasNodeData[], targetNodeId:
         const hasCompletedContent = task.status === "succeeded" && !paused && hasCurrentVideoOutput && (!output || Boolean(output.materializedAssetId)) && Boolean(node.metadata?.content || node.metadata?.storageKey);
         const existingOutcome = readNodeTaskOutcome(node.metadata);
         const targetUnavailable = existingOutcome?.reason === "result_target_unavailable" || node.metadata?.generationErrorCode === "result_target_unavailable";
-        const retainRecovery = task.status === "succeeded" && !hasCompletedContent && (targetUnavailable || existingOutcome?.phase === "retrievable" || CLIENT_DELIVERY_FAILURE_CODES.has(node.metadata?.generationErrorCode || ""));
+        // 后端已经判死（outcome.phase=failed）时，前端不能再合成「继续取回」把它盖掉。
+        const backendTerminalFailure = task.outcome?.phase === "failed";
+        const retainRecovery = task.status === "succeeded" && !backendTerminalFailure && !hasCompletedContent && (targetUnavailable || existingOutcome?.phase === "retrievable" || CLIENT_DELIVERY_FAILURE_CODES.has(node.metadata?.generationErrorCode || ""));
         const failure = paused
             ? {
                   taskOutcome: task.outcome ?? ({ phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" } as const),
@@ -119,32 +144,36 @@ export function canvasGenerationTaskNodes(nodes: CanvasNodeData[], targetNodeId:
             : failed
               ? canvasTaskFailureMetadata(task, node.metadata)
               : undefined;
+        const nextMetadata: CanvasNodeMetadata = {
+            ...node.metadata,
+            ...generationTaskMetadata(task),
+            status: failed || paused || retainRecovery || backendTerminalFailure ? "error" : hasCompletedContent ? "success" : "loading",
+            ...(failure || (retainRecovery
+                ? {
+                      taskOutcome: targetUnavailable
+                          ? ({ phase: "failed", regenerate: "blocked", reason: "result_target_unavailable" } as const)
+                          : ({ phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" } as const),
+                      generationErrorCode: node.metadata?.generationErrorCode,
+                      errorDetails: node.metadata?.errorDetails || (targetUnavailable ? explainGenerationError({ code: "result_target_unavailable" }).message : "生成结果已保留，请点击「继续取回」"),
+                  }
+                : {
+                      ...(hasCompletedContent && (!task.outcome || task.outcome.phase === "running" || task.outcome.phase === "fetching")
+                          ? { taskOutcome: { phase: "ready", regenerate: "allowed", reason: "result_ready" } as const }
+                          : {}),
+                      errorDetails: backendTerminalFailure ? (task.error || "生成结果已不可取回") : undefined,
+                      generationErrorCode: undefined,
+                      generationErrorSummary: undefined,
+                      generationProviderCode: undefined,
+                      failedPromptFingerprint: undefined,
+                      failedInputFingerprint: undefined,
+                  })),
+        };
+        if (isSameGenerationTaskNodeMetadata(node.metadata, nextMetadata)) return node;
+        changed = true;
         return {
             ...node,
-            metadata: {
-                ...node.metadata,
-                ...generationTaskMetadata(task),
-                status: failed || paused || retainRecovery ? "error" : hasCompletedContent ? "success" : "loading",
-                ...(failure || (retainRecovery
-                    ? {
-                          taskOutcome: targetUnavailable
-                              ? ({ phase: "failed", regenerate: "blocked", reason: "result_target_unavailable" } as const)
-                              : ({ phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" } as const),
-                          generationErrorCode: node.metadata?.generationErrorCode,
-                          errorDetails: node.metadata?.errorDetails || (targetUnavailable ? explainGenerationError({ code: "result_target_unavailable" }).message : "生成结果已保留，请点击「继续取回」"),
-                      }
-                    : {
-                          ...(hasCompletedContent && (!task.outcome || task.outcome.phase === "running" || task.outcome.phase === "fetching")
-                              ? { taskOutcome: { phase: "ready", regenerate: "allowed", reason: "result_ready" } as const }
-                              : {}),
-                          errorDetails: undefined,
-                          generationErrorCode: undefined,
-                          generationErrorSummary: undefined,
-                          generationProviderCode: undefined,
-                          failedPromptFingerprint: undefined,
-                          failedInputFingerprint: undefined,
-                      })),
-            },
+            metadata: nextMetadata,
         };
     });
+    return changed ? mapped : nodes;
 }

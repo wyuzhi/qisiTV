@@ -12,22 +12,25 @@ func MediaHydrationPolicyFor(ctx context.Context, input Input) MediaHydrationPol
 	if managedConnection(input.Config) && (input.Mode == "image" || input.Mode == "video") {
 		return MediaHydrationPolicy{KeepLocal: true}
 	}
-	if input.Mode == "video" && IsBeefAPIVideoConfig(ctx, input.Config) {
+	if input.Mode == "video" && IsBeefTVVideoConfig(ctx, input.Config) {
 		return MediaHydrationPolicy{KeepLocal: true}
 	}
 	if input.Config.InterfaceType == "full-video" {
 		return MediaHydrationPolicy{KeepLocal: true}
 	}
-	if requiresBeefAPIHTTPReferences(ctx, input.Config) {
+	if requiresBeefTVHTTPReferences(ctx, input.Config) {
+		return MediaHydrationPolicy{KeepLocal: true}
+	}
+	if adapter, ok := ProtocolAdapterForContext(EnsureOfficialProtocolAdapter(ctx, input.Config.InterfaceType), input.Config.InterfaceType); ok && adapter.Metadata().MediaUpload != nil {
 		return MediaHydrationPolicy{KeepLocal: true}
 	}
 	policy := MediaHydrationPolicy{PreferURL: PrefersMediaURLs(input.Config.InterfaceType, input)}
 	if model.IsVolcengineArkVideoProtocol(model.ChannelInterfaceType(input.Config.InterfaceType)) {
 		return MediaHydrationPolicy{PreferHTTPS: true}
 	}
-	if IsBeefAPIVideoConfig(ctx, input.Config) {
-		if contract, ok := providerpreset.BeefAPIVideoContract(input.Config.Model); ok && contract.InlineMedia && (contract.Protocol == input.Config.InterfaceType || IsSeedanceVideoConfig(input.Config)) {
-			return MediaHydrationPolicy{PreferHTTPS: true, KeepLocal: IsBeefAPISeedancePreuploadConfig(ctx, input.Config)}
+	if IsBeefTVVideoConfig(ctx, input.Config) {
+		if contract, ok := providerpreset.BeefTVVideoContract(input.Config.Model); ok && contract.InlineMedia && (contract.Protocol == input.Config.InterfaceType || IsSeedanceVideoConfig(input.Config)) {
+			return MediaHydrationPolicy{PreferHTTPS: true, KeepLocal: IsBeefTVSeedancePreuploadConfig(ctx, input.Config)}
 		}
 	}
 	if strings.TrimSpace(input.Config.InterfaceType) == string(model.ChannelInterfaceNewAPIChannel1) {

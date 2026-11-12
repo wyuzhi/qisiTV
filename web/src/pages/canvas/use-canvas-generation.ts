@@ -4,6 +4,7 @@ import { App } from "antd";
 import { startOperation } from "@/stores/use-operation-progress";
 
 import { generationTaskNodeId } from "@/lib/canvas/canvas-generation-task-sync";
+import { triggerAutoDownloadForCompletedTask } from "@/lib/auto-download-preference";
 import { canRecoverTaskOutcome, readTaskOutcome } from "@/lib/task-outcome";
 import { canvasNodeResourceId } from "@/lib/canvas/canvas-resource-id";
 import { bindBackendCanvasGenerationResult, CanvasGenerationDurableAckError, CanvasGenerationMaterializationError, CanvasGenerationOutputMissingError } from "@/services/canvas-generation-consumer";
@@ -245,6 +246,7 @@ export function useCanvasGeneration({ projectId, domainProjectId, projectLoaded,
                 ? nodesRef.current
                 : useCanvasStore.getState().openProject(projectId)?.nodes ?? nodesRef.current;
             const next = canvasGenerationTaskNodes(current, targetNodeId, task);
+            if (next === current) return;
             // 成功终态可能在同一轮到达；消费结果前就要让保存器看见 taskId。
             useCanvasStore.getState().updateProject(projectId, { nodes: next });
             nodesRef.current = next;
@@ -299,6 +301,20 @@ export function useCanvasGeneration({ projectId, domainProjectId, projectLoaded,
                     } : undefined,
                 });
                 if (!isCurrentCanvas()) throw new DOMException("The canvas operation was abandoned", "AbortError");
+                const boundNode = nodesRef.current.find((node) => node.id === nodeId);
+                if (boundNode && (boundNode.type === CanvasNodeType.Image || boundNode.type === CanvasNodeType.Video || boundNode.type === CanvasNodeType.Audio) && boundNode.metadata?.content) {
+                    const outputIdx = boundNode.metadata?.taskOutputIndex;
+                    const downloadTaskId = typeof outputIdx === "number" && outputIdx > 0 ? `${task.id}:${outputIdx}` : task.id;
+                    const mediaType = boundNode.type === CanvasNodeType.Video ? "video" : boundNode.type === CanvasNodeType.Audio ? "audio" : "image";
+                    void triggerAutoDownloadForCompletedTask({
+                        taskId: downloadTaskId,
+                        url: boundNode.metadata.content,
+                        storageKey: boundNode.metadata.storageKey,
+                        title: boundNode.title,
+                        mediaType,
+                        mimeType: boundNode.metadata.mimeType,
+                    });
+                }
             } catch (error) {
                 if (error instanceof Error && error.name === "AbortError") throw error;
                 throw error instanceof CanvasGenerationDurableAckError || error instanceof CanvasGenerationMaterializationError || error instanceof CanvasGenerationOutputMissingError ? error : new CanvasGenerationDurableAckError(error);

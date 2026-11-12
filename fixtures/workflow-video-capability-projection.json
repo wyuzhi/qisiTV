@@ -1,0 +1,163 @@
+[
+  {
+    "name": "带方向分辨率与结构化时长区间",
+    "workflow": {
+      "id": "wf-directional-range",
+      "label": "Directional Range",
+      "providerId": "demo-workflow-video",
+      "capability": "video",
+      "parameters": [
+        {
+          "name": "resolution",
+          "type": "string",
+          "values": ["736p竖", "736p横", "736p(1:1)"],
+          "mapping": "resolution"
+        },
+        {
+          "name": "duration",
+          "type": "number",
+          "min": 1,
+          "max": 12,
+          "mapping": "duration"
+        }
+      ],
+      "defaults": {
+        "resolution": "736P竖",
+        "duration": 5
+      }
+    },
+    "expected": {
+      "ratios": [],
+      "defaultRatio": "",
+      "resolutions": ["736p竖", "736p横", "736p(1:1)"],
+      "defaultResolution": "736p竖",
+      "duration": {
+        "selection": "range",
+        "min": 1,
+        "max": 12,
+        "step": 1,
+        "default": 5
+      }
+    }
+  },
+  {
+    "name": "大小写混合 mapping、空白与重复项去重、离散时长枚举",
+    "workflow": {
+      "id": "wf-mixed-mapping-enum",
+      "label": "Mixed Mapping Enum",
+      "providerId": "demo-workflow-video",
+      "capability": "video",
+      "parameters": [
+        {
+          "name": "aspect_code",
+          "type": "string",
+          "values": [" 16:9 ", "", "16:9", "9:16 "],
+          "mapping": " AspectRatio "
+        },
+        {
+          "name": "res_code",
+          "type": "string",
+          "values": [" 720p ", "720P", "1080p", "   "],
+          "mapping": "Resolution"
+        },
+        {
+          "name": "clip_seconds",
+          "type": "string",
+          "values": [" 5 ", "10", "5", "0", "abc"],
+          "mapping": "Duration"
+        }
+      ],
+      "defaults": {
+        "aspect_code": "9:16",
+        "res_code": "720P",
+        "clip_seconds": 10
+      }
+    },
+    "expected": {
+      "ratios": ["16:9", "9:16"],
+      "defaultRatio": "9:16",
+      "resolutions": ["720p", "1080p"],
+      "defaultResolution": "720p",
+      "duration": {
+        "selection": "enum",
+        "values": [5, 10],
+        "default": 10
+      }
+    }
+  },
+  {
+    "name": "数字默认值转型与单值默认时长",
+    "workflow": {
+      "id": "wf-numeric-defaults",
+      "label": "Numeric Defaults",
+      "providerId": "demo-workflow-video",
+      "capability": "video",
+      "parameters": [
+        {
+          "name": "res_tier",
+          "type": "string",
+          "values": ["480", "720", "1080"],
+          "mapping": "resolution"
+        },
+        {
+          "name": "clip_sec",
+          "type": "number",
+          "mapping": "duration"
+        }
+      ],
+      "defaults": {
+        "res_tier": 720,
+        "clip_sec": "8"
+      }
+    },
+    "expected": {
+      "ratios": [],
+      "defaultRatio": "",
+      "resolutions": ["480", "720", "1080"],
+      "defaultResolution": "720",
+      "duration": {
+        "selection": "enum",
+        "values": [8],
+        "default": 8
+      }
+    }
+  },
+  {
+    "name": "带正号数字字符串在枚举与默认值中均被拒绝",
+    "workflow": {
+      "id": "wf-reject-leading-plus",
+      "label": "Reject Leading Plus",
+      "providerId": "demo-workflow-video",
+      "capability": "video",
+      "parameters": [
+        {
+          "name": "resolution",
+          "type": "string",
+          "values": ["768p竖", "768p横"],
+          "mapping": "resolution"
+        },
+        {
+          "name": "duration",
+          "type": "string",
+          "values": ["+6", "12", "8"],
+          "mapping": "duration"
+        }
+      ],
+      "defaults": {
+        "resolution": "768p竖",
+        "duration": "+8"
+      }
+    },
+    "expected": {
+      "ratios": [],
+      "defaultRatio": "",
+      "resolutions": ["768p竖", "768p横"],
+      "defaultResolution": "768p竖",
+      "duration": {
+        "selection": "enum",
+        "values": [12, 8],
+        "default": 12
+      }
+    }
+  }
+]

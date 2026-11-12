@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"qisitv/backend/internal/outbound"
+	"io"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 )
 
-// ErrImageOwnerMissing is returned when a recoverable BeefAPI image POST has
+// ErrImageOwnerMissing is returned when a recoverable BeefTV image POST has
 // no Images port or the port declined to take ownership. Callers must not
 // open a new upstream request.
 var ErrImageOwnerMissing = errors.New("图片请求缺少恢复所有者")
@@ -45,7 +46,7 @@ func negotiateImageReplay(req *http.Request, configured *http.Client) (*http.Req
 		// Only metadata GETs have run. Retrying a transient probe never sends
 		// the paid image POST; cancellation and permanent failures stop here.
 		var network net.Error
-		if req == nil || req.Context().Err() != nil || !(errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &network) && (network.Timeout() || network.Temporary()))) {
+		if req == nil || req.Context().Err() != nil || !(errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || (errors.As(err, &network) && (network.Timeout() || network.Temporary()))) {
 			break
 		}
 	}

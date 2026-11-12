@@ -1509,7 +1509,6 @@
     }
 
 
-
     /* 工作区保留滚轮与触控板滚动，只隐藏会形成额外竖向分割的浏览器轨道。 */
     .app-spatial-workspace .app-workspace-scroll {
         scrollbar-width: none;
@@ -1931,10 +1930,12 @@
         transform: translateY(-1px) rotate(-8deg);
     }
 
-    /* 原版顶栏只保留一个轻量同步指示；详细错误、草稿下载和版本恢复仍在点击弹层内。 */
-    .canvas-topbar .canvas-sync-status-label {
-        display: none;
-    }
+    /* 原版顶栏正常同步只显示轻量图标；保存失败或版本冲突时露出文字提示，方便用户按报错指引点击处理。 */
+    .canvas-topbar [aria-label^="画布保存状态"]:not(.ant-btn-dangerous) .canvas-sync-status-label,
+    .canvas-topbar .canvas-sync-external-notice .canvas-sync-status-label,
+    .canvas-topbar [data-canvas-external-write-op] .canvas-sync-status-label { display: none; }
+    .canvas-topbar [aria-label^="画布保存状态"]:not(.ant-btn-dangerous) { width: 28px; min-width: 28px; padding-inline: 0; opacity: 0.72; }
+    .canvas-topbar [aria-label^="画布保存状态"].ant-btn-dangerous { width: auto; padding-inline: 8px; opacity: 1; }
 
     .canvas-topbar .canvas-engine-folder-status .canvas-sync-status-label {
         display: inline;
@@ -1950,12 +1951,6 @@
         .canvas-folder-save-label { display: none; }
     }
 
-    .canvas-topbar [aria-label^="画布保存状态"] {
-        width: 28px;
-        min-width: 28px;
-        padding-inline: 0;
-        opacity: 0.72;
-    }
 
     .canvas-topbar .canvas-engine-folder-status[aria-label^="画布保存状态"] {
         width: auto;
@@ -1981,8 +1976,8 @@
     /* LibTV's project menu is intentionally sparse: four text-only rows at
        the same scale as the compact 32px top bar, with one structural divider. */
     .canvas-project-primary-menu.ant-dropdown .ant-dropdown-menu {
-        width: 144px;
-        min-width: 144px;
+        width: max-content;
+        min-width: 176px;
         padding: 4px !important;
         border: 1px solid rgba(255, 255, 255, .12) !important;
         border-radius: 15px !important;
@@ -1999,6 +1994,7 @@
         font-size: var(--fs-body) !important;
         font-weight: 400;
         line-height: 40px !important;
+        white-space: nowrap;
     }
 
     .canvas-project-primary-menu.ant-dropdown .ant-dropdown-menu-item:hover {
@@ -2127,7 +2123,7 @@
 
     .canvas-topbar-canvas-menu-add:hover,
     .canvas-topbar-canvas-menu-more:hover {
-        background: color-mix(in srgb, currentColor 10%, transparent);
+        background: rgba(128, 128, 128, 0.14);
     }
 
     .canvas-topbar-canvas-menu-list {
@@ -2152,7 +2148,7 @@
 
     .canvas-topbar-canvas-menu-row:hover,
     .canvas-topbar-canvas-menu-row.is-actions-open {
-        background: color-mix(in srgb, currentColor 10%, transparent);
+        background: rgba(128, 128, 128, 0.14);
     }
 
     .canvas-topbar-canvas-menu-select {
@@ -2177,7 +2173,7 @@
         border-radius: 7px;
         padding: 0 7px;
         color: inherit;
-        background: color-mix(in srgb, currentColor 7%, transparent);
+        background: rgba(128, 128, 128, 0.1);
         font: inherit;
         outline: none;
     }
@@ -3004,29 +3000,18 @@
 
     .full-screen-loader::before { display: none; }
 
-    .beeftv-loading-logo {
+    .qisitv-loading-logo {
         display: block;
-        width: min(240px, 42vw);
-        aspect-ratio: 17 / 10;
-        background: linear-gradient(105deg, #c9c9c9 0%, #e4e4e4 43%, #fff 49%, #fff 52%, #e4e4e4 58%, #c9c9c9 100%);
-        background-size: 240% 100%;
-        background-position: 100% 0;
-        -webkit-mask: url('/beef-logo.png') center / contain no-repeat;
-        mask: url('/beef-logo.png') center / contain no-repeat;
-        animation: appearance-bootstrap-shimmer 2.6s ease-in-out infinite;
+        width: min(104px, 28vw);
+        aspect-ratio: 1;
+        border-radius: 50%;
+        object-fit: cover;
     }
 
-    .beeftv-loading-logo.is-compact { width: 48px; }
+    .qisitv-loading-logo.is-compact { width: 48px; }
 
     .workspace-route-loader { background: #090909; color: #fff; }
     .workspace-route-loader-content { gap: var(--space-2); color: inherit; }
-
-    @media (prefers-reduced-motion: reduce) {
-        .beeftv-loading-logo {
-            animation: none;
-            background: #f2f2f2;
-        }
-    }
 
     :where(.ant-btn) {
         letter-spacing: 0;
@@ -5329,655 +5314,6 @@ html:not(.dark) .creation-studio-control:hover,
         line-height: 1.6;
     }
 
-    .workflow-workspace-tabs {
-        display: flex;
-        justify-content: center;
-        padding: var(--space-2) 0;
-    }
-
-    .workflow-workspace-tabs .ant-segmented {
-        min-width: 260px;
-    }
-
-    .workflow-graph-editor {
-        display: grid;
-        min-width: 0;
-        min-height: 620px;
-        grid-template-columns: minmax(300px, 36%) minmax(0, 1fr);
-        overflow: hidden;
-        border-radius: var(--r-xl);
-        background: var(--library-surface);
-    }
-
-    .workflow-graph-sidebar {
-        min-width: 0;
-        max-height: 720px;
-        overflow: auto;
-        padding: var(--space-4);
-        background: color-mix(in srgb, var(--foreground) 2.5%, transparent);
-    }
-
-    .workflow-graph-summary {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: var(--space-2);
-    }
-
-    .workflow-graph-summary > span {
-        display: grid;
-        min-width: 0;
-        gap: var(--space-1);
-        border-radius: var(--r-lg);
-        background: color-mix(in srgb, var(--foreground) 5%, transparent);
-        padding: var(--space-3);
-    }
-
-    .workflow-graph-summary small,
-    .workflow-graph-selected-heading span,
-    .workflow-graph-node-select > span {
-        color: color-mix(in srgb, var(--foreground) 48%, transparent);
-        font-size: var(--fs-tiny);
-    }
-
-    .workflow-graph-summary strong {
-        font-size: var(--fs-body-lg);
-        font-variant-numeric: tabular-nums;
-    }
-
-    .workflow-graph-node-select {
-        display: grid;
-        gap: var(--space-1-half);
-        margin-top: var(--space-4);
-    }
-
-    .workflow-graph-selected-heading {
-        display: grid;
-        gap: var(--space-1);
-        margin: var(--space-4) 0 var(--space-3);
-    }
-
-    .workflow-graph-selected-heading strong {
-        overflow: hidden;
-        font-size: var(--fs-body);
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .workflow-graph-sidebar .workflow-field-mapping-editor > p {
-        display: none;
-    }
-
-    .workflow-graph-stage {
-        position: relative;
-        min-width: 0;
-        min-height: 620px;
-        overflow: hidden;
-        background-color: color-mix(in srgb, var(--background) 88%, var(--foreground));
-        background-image: radial-gradient(circle, color-mix(in srgb, var(--foreground) 12%, transparent) 1px, transparent 1px);
-        background-size: 20px 20px;
-    }
-
-    .workflow-graph-controls {
-        position: absolute;
-        z-index: var(--node-z-overlay);
-        top: var(--space-3);
-        right: var(--space-3);
-        display: flex;
-        min-height: 34px;
-        align-items: center;
-        gap: var(--space-1);
-        border-radius: var(--r-lg);
-        background: color-mix(in srgb, var(--workspace-surface-strong) 92%, transparent);
-        padding: var(--space-1);
-    }
-
-    .workflow-graph-controls span {
-        min-width: 48px;
-        color: color-mix(in srgb, var(--foreground) 62%, transparent);
-        font-size: var(--fs-tiny);
-        font-variant-numeric: tabular-nums;
-        text-align: center;
-    }
-
-    .workflow-graph-controls svg {
-        width: var(--space-4);
-        height: var(--space-4);
-    }
-
-    .workflow-graph-viewport {
-        width: 100%;
-        height: 620px;
-        overflow: auto;
-        overscroll-behavior: contain;
-        cursor: grab;
-        touch-action: none;
-    }
-
-    .workflow-graph-viewport:active {
-        cursor: grabbing;
-    }
-
-    .workflow-graph-viewport > .ant-empty {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-    }
-
-    .workflow-graph-svg {
-        display: block;
-        color: var(--foreground);
-    }
-
-    .workflow-graph-edge {
-        fill: none;
-        stroke: color-mix(in srgb, var(--foreground) 20%, transparent);
-        stroke-linecap: round;
-        stroke-width: 1.5;
-    }
-
-    .workflow-graph-node {
-        cursor: pointer;
-        outline: none;
-    }
-
-    .workflow-graph-node rect {
-        fill: color-mix(in srgb, var(--workspace-surface-strong) 96%, var(--background));
-        stroke: color-mix(in srgb, var(--foreground) 34%, transparent);
-        stroke-width: 1.5;
-        transition: fill var(--motion-state) ease-out, stroke var(--motion-state) ease-out;
-    }
-
-    .workflow-graph-node:hover rect,
-    .workflow-graph-node:focus-visible rect {
-        fill: var(--library-surface-hover);
-        stroke: color-mix(in srgb, var(--foreground) 62%, transparent);
-    }
-
-    .workflow-graph-node.has-fields rect {
-        stroke: color-mix(in srgb, var(--workspace-accent) 72%, transparent);
-    }
-
-    .workflow-graph-node.is-selected rect {
-        fill: var(--workspace-accent-soft);
-        stroke: var(--workspace-accent);
-        stroke-width: 2.5;
-    }
-
-    .workflow-graph-node.is-loader rect { stroke: color-mix(in srgb, var(--palette-status-warning) 76%, transparent); }
-    .workflow-graph-node.is-output rect { stroke: color-mix(in srgb, var(--palette-status-success) 72%, transparent); }
-    .workflow-graph-node.is-video rect { stroke: color-mix(in srgb, var(--color-node-video) 76%, transparent); }
-    .workflow-graph-node.is-sampler rect { stroke: color-mix(in srgb, var(--workspace-accent) 62%, transparent); }
-
-    .workflow-graph-node text {
-        pointer-events: none;
-    }
-
-    .workflow-graph-node-title {
-        fill: var(--foreground);
-        font-size: var(--fs-caption);
-        font-weight: 620;
-    }
-
-    .workflow-graph-node-type,
-    .workflow-graph-node-id {
-        fill: color-mix(in srgb, var(--foreground) 46%, transparent);
-        font-size: var(--fs-micro);
-    }
-
-    .workflow-graph-node-count {
-        fill: var(--workspace-accent);
-        font-size: var(--fs-micro);
-        font-weight: 700;
-    }
-
-    .workflow-json-details {
-        border-radius: var(--r-lg);
-        background: var(--library-surface);
-        padding: var(--space-3) var(--space-4);
-    }
-
-    .workflow-json-details > summary {
-        cursor: pointer;
-        color: color-mix(in srgb, var(--foreground) 68%, transparent);
-        font-size: var(--fs-caption);
-        font-weight: 560;
-    }
-
-    .canvas-workflow-group-label {
-        display: flex;
-        width: 100%;
-        min-width: 0;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-2);
-        color: color-mix(in srgb, var(--foreground) 46%, transparent);
-        font-size: var(--fs-micro);
-        font-weight: 620;
-        letter-spacing: 0.04em;
-    }
-
-    .canvas-workflow-group-label b {
-        font-size: var(--fs-micro);
-        font-variant-numeric: tabular-nums;
-    }
-
-    .canvas-workflow-option {
-        display: flex;
-        min-width: 0;
-        min-height: 34px;
-        align-items: center;
-        gap: var(--space-2);
-        color: var(--foreground);
-    }
-
-    .canvas-workflow-option > svg {
-        width: var(--space-4);
-        height: var(--space-4);
-        flex: 0 0 auto;
-        color: color-mix(in srgb, var(--foreground) 52%, transparent);
-    }
-
-    .canvas-workflow-option > span {
-        min-width: 0;
-        overflow: hidden;
-        flex: 1;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .canvas-workflow-option > i {
-        width: var(--space-1-half);
-        height: var(--space-1-half);
-        flex: 0 0 auto;
-        border-radius: var(--r-full);
-        background: color-mix(in srgb, var(--foreground) 68%, transparent);
-    }
-
-    .canvas-workflow-selected-label {
-        display: flex;
-        min-width: 0;
-        align-items: center;
-        gap: var(--space-1-half);
-    }
-
-    .canvas-workflow-selected-label > svg {
-        width: var(--space-4);
-        height: var(--space-4);
-        flex: 0 0 auto;
-        color: color-mix(in srgb, currentColor 62%, transparent);
-    }
-
-    .canvas-workflow-selected-label > span {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    @media (max-width: 1023px) {
-        .workflow-graph-editor {
-            grid-template-columns: 1fr;
-        }
-
-        .workflow-graph-sidebar {
-            max-height: none;
-        }
-
-        .workflow-graph-stage,
-        .workflow-graph-viewport {
-            min-height: 520px;
-            height: 520px;
-        }
-    }
-
-    .workflow-test-workbench {
-        min-width: 0;
-        overflow: hidden;
-        border-radius: var(--r-xl);
-        background: var(--library-surface);
-    }
-
-    .workflow-test-toolbar {
-        display: flex;
-        min-width: 0;
-        width: 100%;
-        box-sizing: border-box;
-        min-height: 60px;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-        background: color-mix(in srgb, var(--foreground) 2.5%, transparent);
-    }
-
-    .workflow-test-toolbar > div:first-child {
-        display: grid;
-        min-width: 0;
-        flex: 1 1 auto;
-        gap: var(--space-1);
-    }
-
-    .workflow-test-toolbar strong {
-        overflow: hidden;
-        font-size: var(--fs-body);
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .workflow-test-toolbar span,
-    .workflow-test-notice {
-        color: color-mix(in srgb, var(--foreground) 54%, transparent);
-        font-size: var(--fs-tiny);
-    }
-
-    .workflow-test-toolbar-actions {
-        display: flex;
-        flex: 0 0 auto;
-        min-width: 0;
-        align-items: center;
-        gap: var(--space-2);
-    }
-
-    .workflow-test-toolbar-actions .ant-btn {
-        display: inline-flex;
-        min-width: 96px;
-        align-items: center;
-        justify-content: center;
-        white-space: nowrap;
-    }
-
-    .workflow-test-toolbar-actions .ant-btn-primary {
-        border: 1px solid var(--btn-outline-border) !important;
-        background: transparent !important;
-        color: var(--foreground) !important;
-        box-shadow: none !important;
-        font-weight: 560;
-    }
-
-    .workflow-test-toolbar-actions .ant-btn-primary:not(:disabled):hover {
-        border-color: var(--btn-outline-hover-border) !important;
-        background: var(--btn-outline-hover-bg) !important;
-        color: var(--foreground) !important;
-    }
-
-    .workflow-test-toolbar-actions .ant-btn-primary:not(:disabled):active {
-        background: var(--btn-outline-active-bg) !important;
-        color: var(--foreground) !important;
-    }
-
-    .workflow-test-toolbar-actions .ant-btn-primary > span,
-    .workflow-test-toolbar-actions .ant-btn-primary .ant-btn-icon {
-        color: inherit !important;
-    }
-
-    .workflow-test-toolbar-actions .ant-btn:disabled {
-        cursor: not-allowed;
-        opacity: 1;
-    }
-
-    .workflow-test-toolbar-actions .ant-btn-primary:disabled {
-        border-color: color-mix(in srgb, var(--foreground) 12%, transparent) !important;
-        background: var(--control-disabled-bg) !important;
-        color: var(--control-disabled-fg) !important;
-    }
-
-    .workflow-test-toolbar-actions .ant-btn-primary:disabled > span,
-    .workflow-test-toolbar-actions .ant-btn-primary:disabled .ant-btn-icon {
-        color: var(--control-disabled-fg) !important;
-    }
-
-    .workflow-test-notice {
-        min-width: 0;
-        padding: var(--space-2) var(--space-4);
-        background: color-mix(in srgb, var(--palette-status-warning) 9%, transparent);
-        color: color-mix(in srgb, var(--palette-status-warning) 78%, var(--foreground));
-    }
-
-    .workflow-test-canvas-scroll {
-        min-width: 0;
-        max-width: 100%;
-        overflow: auto;
-        overscroll-behavior: contain;
-    }
-
-    .workflow-test-canvas {
-        position: relative;
-        width: 100%;
-        min-width: 1040px;
-        height: 760px;
-        overflow: hidden;
-        background-color: color-mix(in srgb, var(--background) 88%, var(--foreground));
-        background-image: radial-gradient(circle, color-mix(in srgb, var(--foreground) 13%, transparent) 1px, transparent 1px);
-        background-size: 20px 20px;
-        user-select: none;
-    }
-
-    .workflow-test-lines {
-        position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-        overflow: visible;
-        pointer-events: none;
-    }
-
-    .workflow-test-lines path {
-        fill: none;
-        stroke: color-mix(in srgb, var(--workspace-accent) 72%, transparent);
-        stroke-linecap: round;
-        stroke-width: 2;
-    }
-
-    .workflow-test-node {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 284px;
-        overflow: visible;
-        border-radius: var(--node-radius);
-        background: color-mix(in srgb, var(--library-surface) 94%, var(--background));
-        color: var(--foreground);
-        box-shadow: var(--card-elevation);
-    }
-
-    .workflow-test-node.is-wide {
-        width: 324px;
-    }
-
-    .workflow-test-node-header {
-        display: flex;
-        min-width: 0;
-        min-height: 42px;
-        cursor: grab;
-        touch-action: none;
-        align-items: center;
-        gap: var(--space-2);
-        padding: 0 var(--space-3);
-        border-radius: var(--node-radius) var(--node-radius) 0 0;
-        background: color-mix(in srgb, var(--foreground) 5%, transparent);
-    }
-
-    .workflow-test-node-header:active {
-        cursor: grabbing;
-    }
-
-    .workflow-test-node-header > span,
-    .workflow-test-node-header > span svg {
-        width: var(--space-4);
-        height: var(--space-4);
-        flex: 0 0 auto;
-        color: var(--workspace-accent);
-    }
-
-    .workflow-test-node-header strong {
-        min-width: 0;
-        overflow: hidden;
-        flex: 1;
-        font-size: var(--fs-caption);
-        font-weight: 620;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .workflow-test-node-header .workflow-test-node-grip {
-        width: var(--space-4);
-        height: var(--space-4);
-        color: color-mix(in srgb, var(--foreground) 28%, transparent);
-    }
-
-    .workflow-test-node-body {
-        max-height: 430px;
-        overflow: auto;
-        padding: var(--space-3);
-    }
-
-    .workflow-test-port {
-        position: absolute;
-        top: 66px;
-        width: 12px;
-        height: 12px;
-        border: 3px solid color-mix(in srgb, var(--background) 84%, transparent);
-        border-radius: var(--r-full);
-        background: var(--workspace-accent);
-    }
-
-    .workflow-test-port.is-input { left: -6px; }
-    .workflow-test-port.is-output { right: -6px; }
-
-    .workflow-test-upload {
-        display: grid;
-        min-height: 76px;
-        cursor: pointer;
-        place-items: center;
-        border-radius: var(--r-lg);
-        background: color-mix(in srgb, var(--foreground) 4%, transparent);
-        color: color-mix(in srgb, var(--foreground) 58%, transparent);
-        font-size: var(--fs-tiny);
-        transition: background-color var(--motion-state) ease-out, color var(--motion-state) ease-out;
-    }
-
-    .workflow-test-upload:hover {
-        background: color-mix(in srgb, var(--foreground) 7%, transparent);
-        color: var(--foreground);
-    }
-
-    .workflow-test-upload > span {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-    }
-
-    .workflow-test-upload svg {
-        width: var(--space-4);
-        height: var(--space-4);
-    }
-
-    .workflow-test-file-list {
-        display: grid;
-        width: 100%;
-        gap: var(--space-2);
-    }
-
-    .workflow-test-file-list > span {
-        display: grid;
-        min-width: 0;
-        grid-template-columns: 34px auto minmax(0, 1fr);
-        align-items: center;
-        gap: var(--space-2);
-        padding: var(--space-1-half) var(--space-2);
-    }
-
-    .workflow-test-file-list img,
-    .workflow-test-file-list svg {
-        width: 34px;
-        height: 34px;
-        border-radius: var(--r-md);
-        object-fit: cover;
-    }
-
-    .workflow-test-file-list b {
-        color: var(--workspace-accent);
-        font-size: var(--fs-micro);
-        font-style: normal;
-    }
-
-    .workflow-test-file-list em {
-        overflow: hidden;
-        font-size: var(--fs-tiny);
-        font-style: normal;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .workflow-test-parameters {
-        display: grid;
-        gap: var(--space-3);
-    }
-
-    .workflow-test-parameters > label {
-        display: grid;
-        min-width: 0;
-        gap: var(--space-1-half);
-    }
-
-    .workflow-test-parameters > label > span {
-        display: flex;
-        min-width: 0;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-2);
-        color: color-mix(in srgb, var(--foreground) 72%, transparent);
-        font-size: var(--fs-tiny);
-    }
-
-    .workflow-test-parameters small {
-        overflow: hidden;
-        color: color-mix(in srgb, var(--foreground) 38%, transparent);
-        font-size: var(--fs-micro);
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .workflow-test-empty-text {
-        color: color-mix(in srgb, var(--foreground) 48%, transparent);
-        font-size: var(--fs-tiny);
-    }
-
-    .workflow-test-output {
-        display: grid;
-        min-height: 150px;
-        place-items: center;
-        overflow: hidden;
-        border-radius: var(--r-lg);
-        background: color-mix(in srgb, var(--foreground) 4%, transparent);
-    }
-
-    .workflow-test-output img,
-    .workflow-test-output video {
-        display: block;
-        width: 100%;
-        max-height: 280px;
-        object-fit: contain;
-    }
-
-    .workflow-test-image-results {
-        display: grid;
-        width: 100%;
-        gap: var(--space-2);
-    }
-
-    .workflow-test-output audio {
-        width: calc(100% - var(--space-4));
-    }
-
-    .workflow-test-output .ant-empty {
-        margin-block: var(--space-3);
-    }
-
-    .workflow-test-node .ant-progress {
-        margin-top: var(--space-2);
-    }
 
     .settings-pane-header {
         display: flex;
@@ -6049,22 +5385,6 @@ html:not(.dark) .creation-studio-control:hover,
 
     .settings-page .ant-btn {
         border-radius: var(--r-md);
-    }
-
-    .workflow-entry-actions-field .ant-form-item-control-input {
-        min-height: 34px;
-    }
-
-    .workflow-entry-actions {
-        display: flex;
-        min-width: 0;
-        min-height: 34px;
-        align-items: center;
-        gap: var(--space-2);
-    }
-
-    .workflow-entry-actions .ant-btn {
-        white-space: nowrap;
     }
 
     .settings-page .ant-form-item-explain-error,
@@ -7636,7 +6956,7 @@ html:not(.dark) .creation-studio-control:hover,
     }
 
     .aceternity-dock-separator {
-        background: color-mix(in srgb, currentColor 13%, transparent);
+        background: rgba(128, 128, 128, 0.2);
     }
 
     .aceternity-dock-switch-track {
@@ -7762,7 +7082,7 @@ html:not(.dark) .creation-studio-control:hover,
     .aceternity-zoom-range {
         appearance: none;
         border-radius: 999px;
-        background: color-mix(in srgb, currentColor 12%, transparent);
+        background: rgba(128, 128, 128, 0.18);
         cursor: ew-resize;
         outline: none;
     }
@@ -7808,8 +7128,8 @@ html:not(.dark) .creation-studio-control:hover,
 
     .aceternity-drop-grid {
         background-image:
-            linear-gradient(color-mix(in srgb, currentColor 14%, transparent) 1px, transparent 1px),
-            linear-gradient(90deg, color-mix(in srgb, currentColor 14%, transparent) 1px, transparent 1px);
+            linear-gradient(rgba(128, 128, 128, 0.18) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(128, 128, 128, 0.18) 1px, transparent 1px);
         background-position: center;
         background-size: 34px 34px;
         mask-image: radial-gradient(circle at center, black 12%, transparent 72%);
@@ -10763,7 +10083,7 @@ html:not(.dark) .creation-studio-control:hover,
     .canvas-node-composer-prompt-tools { display: flex; justify-content: flex-end; align-items: center; gap: var(--space-1); margin-bottom: var(--space-1); }
     .canvas-prompt-font-control { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 2px; color: inherit; font-size: var(--fs-tiny); }
     .canvas-prompt-font-control button { display: grid; place-items: center; width: 24px; height: 24px; border: 0; padding: 0; border-radius: var(--r-sm); background: transparent; color: inherit; }
-    .canvas-prompt-font-control button:hover:not(:disabled) { background: color-mix(in srgb, currentColor 8%, transparent); }
+    .canvas-prompt-font-control button:hover:not(:disabled) { background: rgba(128, 128, 128, 0.12); }
     .canvas-prompt-font-control button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
     .canvas-prompt-font-control button:disabled { opacity: .35; cursor: default; }
     .canvas-prompt-font-control output { min-width: 20px; text-align: center; font-size: var(--fs-tiny); line-height: 1; font-variant-numeric: tabular-nums; }
@@ -10848,7 +10168,7 @@ html:not(.dark) .creation-studio-control:hover,
 
     .canvas-node-camera-apply:hover,
     .canvas-node-camera-apply:focus-visible {
-        background: color-mix(in srgb, currentColor 10%, transparent) !important;
+        background: rgba(128, 128, 128, 0.14) !important;
     }
 
     .canvas-reference-autolink-switch:hover,
@@ -10864,7 +10184,7 @@ html:not(.dark) .creation-studio-control:hover,
 
     .canvas-reference-tools-mention-button:hover,
     .canvas-reference-tools-mention-button:focus-visible {
-        background: color-mix(in srgb, currentColor 9%, transparent) !important;
+        background: rgba(128, 128, 128, 0.12) !important;
     }
 
     @media (max-width: 640px) {
@@ -11292,7 +10612,7 @@ html:not(.dark) .creation-studio-control:hover,
     .canvas-resource-inline-preview.is-fallback {
         display: grid;
         place-items: center;
-        background: color-mix(in srgb, currentColor 10%, transparent);
+        background: rgba(128, 128, 128, 0.14);
     }
 
     .canvas-resource-mention-menu {
@@ -11665,7 +10985,7 @@ html:not(.dark) .creation-studio-control:hover,
     }
 
     /* 流光：一小段高亮沿连线跑。周期与上面的虚线流动刻意错开，两者同频会锁成
-       一条整体平移的虚线、看不出「有光在走」。只在悬停/选中态渲染（见 canvas-connections.tsx）。 */
+       一条整体平移的虚线、看不出「有光在走」。只在选中/关联态渲染（见 canvas-connections.tsx）。 */
     .canvas-connection-comet {
         animation: canvas-connection-comet 2.1s var(--motion-ease-linear) infinite;
     }
@@ -11731,19 +11051,19 @@ html:not(.dark) .creation-studio-control:hover,
     .canvas-node-inspector-section-heading { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
     .canvas-node-inspector-section-heading span, .canvas-node-inspector-subheading { font-size: var(--fs-label); font-weight: 650; }
     .canvas-node-inspector-section-heading p { margin-top: 3px; color: color-mix(in srgb, currentColor 43%, transparent); font-size: var(--fs-micro); font-weight: 400; }
-    .canvas-node-inspector-section-heading em { flex-shrink: 0; border-radius: var(--r-full); background: color-mix(in srgb, currentColor 7%, transparent); padding: 3px 8px; color: color-mix(in srgb, currentColor 48%, transparent); font-size: var(--fs-micro); font-style: normal; font-weight: 560; }
+    .canvas-node-inspector-section-heading em { flex-shrink: 0; border-radius: var(--r-full); background: rgba(128, 128, 128, 0.1); padding: 3px 8px; color: color-mix(in srgb, currentColor 48%, transparent); font-size: var(--fs-micro); font-style: normal; font-weight: 560; }
     .canvas-node-inspector-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; }
     .canvas-node-inspector-fact { min-width: 0; padding: 6px 0; }
     .canvas-node-inspector-fact > div { margin-bottom: 4px; color: color-mix(in srgb, currentColor 42%, transparent); font-size: var(--fs-micro); }
     .canvas-node-inspector-fact strong { display: block; min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-body); font-weight: 580; line-height: 1.45; }
     .canvas-node-inspector-options { display: flex; flex-wrap: wrap; gap: 6px; }
-    .canvas-node-inspector-options button { height: 30px; border: 0; border-radius: var(--r-sm); background: color-mix(in srgb, currentColor 6%, transparent); padding: 0 10px; color: color-mix(in srgb, currentColor 56%, transparent); font-size: var(--fs-label); font-weight: 560; transition: background-color var(--motion-state) ease, color var(--motion-state) ease; }
-    .canvas-node-inspector-options button:hover:not(:disabled) { background: color-mix(in srgb, currentColor 10%, transparent); color: currentColor; }
+    .canvas-node-inspector-options button { height: 30px; border: 0; border-radius: var(--r-sm); background: rgba(128, 128, 128, 0.09); padding: 0 10px; color: color-mix(in srgb, currentColor 56%, transparent); font-size: var(--fs-label); font-weight: 560; transition: background-color var(--motion-state) ease, color var(--motion-state) ease; }
+    .canvas-node-inspector-options button:hover:not(:disabled) { background: rgba(128, 128, 128, 0.14); color: currentColor; }
     .canvas-node-inspector-options button.is-active { background: var(--control-selected-bg); color: var(--control-selected-fg); }
     .canvas-node-inspector-options button:disabled:not(.is-active) { cursor: not-allowed; background: var(--control-disabled-bg); color: var(--control-disabled-fg); opacity: 1; }
     .canvas-node-inspector-options button.is-active:disabled { cursor: not-allowed; opacity: 1; }
     .canvas-node-inspector-help { margin-top: 8px; color: color-mix(in srgb, currentColor 43%, transparent); font-size: var(--fs-micro); line-height: 1.55; }
-    .canvas-node-inspector-copy, .canvas-node-inspector-json, .canvas-node-inspector-notice { border: 0; border-radius: var(--r-md); background: color-mix(in srgb, currentColor 4%, transparent); }
+    .canvas-node-inspector-copy, .canvas-node-inspector-json, .canvas-node-inspector-notice { border: 0; border-radius: var(--r-md); background: rgba(128, 128, 128, 0.07); }
     .canvas-node-inspector-copy { padding: 12px 14px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
     .canvas-node-info-modal { width: min(920px, calc(100vw - 32px)) !important; }
     .canvas-node-inspector-prompt { height: min(220px, 32vh); min-height: 120px; overflow: auto; }
@@ -11758,8 +11078,8 @@ html:not(.dark) .creation-studio-control:hover,
     .generation-failure-reason, .generation-failure-action, .generation-failure-upstream { margin: 0; overflow-wrap: anywhere; font-size: var(--fs-tiny); line-height: 1.55; }
     .generation-failure-action { color: color-mix(in srgb, currentColor 72%, transparent); } .generation-failure-upstream { color: color-mix(in srgb, currentColor 62%, transparent); font-size: var(--fs-label); }
     .generation-failure-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
-    .generation-failure-button { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; border: 0; border-radius: var(--r-md); background: color-mix(in srgb, currentColor 8%, transparent); padding: 0 10px; color: inherit; font-size: var(--fs-label); line-height: 1.3; }
-    .generation-failure-button:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+    .generation-failure-button { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; border: 0; border-radius: var(--r-md); background: rgba(255, 115, 115, 0.12); padding: 0 10px; color: inherit; font-size: var(--fs-label); line-height: 1.3; }
+    .generation-failure-button:hover:not(:disabled) { background: rgba(255, 115, 115, 0.2); }
     .canvas-node-error-content .generation-failure-reason,
     .canvas-node-error-content .generation-failure-action { font-size: 13px; }
     .canvas-node-error-content .generation-failure-upstream, .canvas-node-error-content .generation-failure-button { font-size: 12px; }
@@ -15550,11 +14870,11 @@ button.ant-btn-primary:not(.ant-btn-dangerous):not(.ant-btn-background-ghost):no
 .skill-install-modal .ant-upload-wrapper .ant-upload-drag:hover { border-color: color-mix(in srgb, var(--foreground) 28%, transparent); }
 .skill-install-modal .skill-install-form { margin-top: 16px; }
 
-.skill-package-modal .ant-modal-container { border: 1px solid color-mix(in srgb, var(--foreground) 11%, transparent); border-radius: var(--r-xl); background: var(--popover); box-shadow: var(--elevation-panel); }
+.skill-package-modal .ant-modal-container { border: 1px solid color-mix(in srgb, var(--foreground) 11%, transparent); border-radius: var(--r-xl); background: var(--user-surface, var(--popover)); box-shadow: var(--elevation-panel); }
 .skill-package-modal .ant-modal-close { top: 17px; inset-inline-end: 18px; z-index: 3; border-radius: var(--r-full); color: color-mix(in srgb, var(--foreground) 45%, transparent); }
 .skill-package-modal .ant-modal-close:hover { background: color-mix(in srgb, var(--foreground) 7%, transparent); color: var(--foreground); }
 .skill-package-shell { display: flex; height: 100%; min-height: 0; flex-direction: column; }
-.skill-package-header { display: flex; flex: 0 0 auto; align-items: center; gap: 24px; min-height: 112px; border-bottom: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent); padding: 18px 68px 18px 24px; }
+.skill-package-header { display: flex; flex: 0 0 auto; align-items: flex-start; gap: 24px; border-bottom: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent); padding: 24px 68px 24px 28px; }
 .skill-package-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .skill-package-workspace { display: grid; min-height: 0; flex: 1 1 auto; grid-template-columns: minmax(220px, 26%) minmax(0, 1fr); }
 .skill-package-sidebar { display: flex; min-width: 0; min-height: 0; flex-direction: column; gap: 10px; border-right: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent); background: color-mix(in srgb, var(--foreground) 2%, transparent); padding: 14px 12px 10px; }
@@ -16827,7 +16147,7 @@ button.ant-btn-primary:not(.ant-btn-dangerous):not(.ant-btn-background-ghost):no
 .ai-message-markdown-code {
     padding: 0.12em 0.34em;
     border-radius: var(--r-sm);
-    background: color-mix(in srgb, currentColor 9%, transparent);
+    background: rgba(128, 128, 128, 0.12);
     color: inherit;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.88em;
@@ -16875,7 +16195,7 @@ button.ant-btn-primary:not(.ant-btn-dangerous):not(.ant-btn-background-ghost):no
     transition: background-color 150ms ease, color 150ms ease;
 }
 .ai-message-codeblock-copy svg { width: 13px; height: 13px; }
-.ai-message-codeblock-copy:hover { background: color-mix(in srgb, currentColor 10%, transparent); color: inherit; }
+.ai-message-codeblock-copy:hover { background: rgba(128, 128, 128, 0.14); color: inherit; }
 .ai-message-codeblock-copy:focus-visible { outline: 2px solid color-mix(in srgb, var(--primary) 60%, transparent); outline-offset: -1px; }
 .ai-message-codeblock-pre {
     margin: 0;
@@ -16937,7 +16257,7 @@ html.dark .ai-message-codeblock-pre .shiki span { color: var(--shiki-dark) !impo
 .ai-message-markdown-table-header {
     color: color-mix(in srgb, currentColor 82%, transparent);
     font-weight: 620;
-    background: color-mix(in srgb, currentColor 5%, transparent);
+    background: rgba(128, 128, 128, 0.08);
 }
 .ai-message-markdown-task {
     width: 0.9em;

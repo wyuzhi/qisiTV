@@ -12,13 +12,13 @@ import (
 func TestResolveAssistantGenerationModelUsesEffectiveHostedVideoOverlay(t *testing.T) {
 	dir := t.TempDir()
 	legacy := []byte(`{
-		"imageModel":"beefapi::gpt-image-2",
-		"videoModel":"beefapi::wan3.0-video",
+		"imageModel":"beeftv::gpt-image-2",
+		"videoModel":"beeftv::wan3.0-video",
 		"channels":[
 			{
-				"id":"beefapi",
-				"name":"BeefAPI",
-				"baseUrl":"https://enterprise.beefapi.com",
+				"id":"beeftv",
+				"name":"BeefTV",
+				"baseUrl":"https://beeftv.app",
 				"enabled":true,
 				"pinned":true,
 				"models":["gpt-image-2","wan3.0-video","seedance-2.0-fast"],
@@ -62,16 +62,16 @@ func TestResolveAssistantGenerationModelUsesEffectiveHostedVideoOverlay(t *testi
 	}
 	snapshot.Revision = effective.Revision
 
-	fastVideo := ResolveAssistantGenerationModel(snapshot, "video", "beefapi::seedance-2.0-fast")
-	if fastVideo.KindMismatch || !fastVideo.FromNode || fastVideo.ModelKey != "beefapi::seedance-2.0-fast" {
+	fastVideo := ResolveAssistantGenerationModel(snapshot, "video", "beeftv::seedance-2.0-fast")
+	if fastVideo.KindMismatch || !fastVideo.FromNode || fastVideo.ModelKey != "beeftv::seedance-2.0-fast" {
 		t.Fatalf("hosted Fast must propose video: %#v", fastVideo)
 	}
 
-	imageOnVideo := ResolveAssistantGenerationModel(snapshot, "video", "beefapi::gpt-image-2")
+	imageOnVideo := ResolveAssistantGenerationModel(snapshot, "video", "beeftv::gpt-image-2")
 	if !imageOnVideo.KindMismatch || imageOnVideo.ModelKey != "" {
 		t.Fatalf("hosted image on video propose: %#v", imageOnVideo)
 	}
-	fastOnImage := ResolveAssistantGenerationModel(snapshot, "image", "beefapi::seedance-2.0-fast")
+	fastOnImage := ResolveAssistantGenerationModel(snapshot, "image", "beeftv::seedance-2.0-fast")
 	if !fastOnImage.KindMismatch || fastOnImage.ModelKey != "" {
 		t.Fatalf("hosted Fast on image propose: %#v", fastOnImage)
 	}
@@ -83,12 +83,12 @@ func TestResolveAssistantGenerationModelUsesEffectiveHostedVideoOverlay(t *testi
 	if !customImageVideo.KindMismatch || customImageVideo.ModelKey != "" {
 		t.Fatalf("custom image-as-video mislabel must still be rejected: %#v", customImageVideo)
 	}
-	unknown := ResolveAssistantGenerationModel(snapshot, "video", "beefapi::missing-video")
+	unknown := ResolveAssistantGenerationModel(snapshot, "video", "beeftv::missing-video")
 	if unknown.FromNode || unknown.KindMismatch || unknown.ModelKey != "" {
 		t.Fatalf("unknown explicit selection must not fall back: %#v", unknown)
 	}
 	fallback := ResolveAssistantGenerationModel(snapshot, "video", "")
-	if fallback.FromNode || fallback.KindMismatch || fallback.ModelKey != "beefapi::wan3.0-video" {
+	if fallback.FromNode || fallback.KindMismatch || fallback.ModelKey != "beeftv::wan3.0-video" {
 		t.Fatalf("empty selection should keep the user video default: %#v", fallback)
 	}
 }

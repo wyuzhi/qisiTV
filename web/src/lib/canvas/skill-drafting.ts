@@ -11,7 +11,7 @@ export type SkillDraft = {
 };
 
 const MAX_NAME_LENGTH = 80;
-const MAX_DESCRIPTION_LENGTH = 500;
+const MAX_DESCRIPTION_LENGTH = 1024;
 
 export function parseSkillDraft(text: string): Partial<SkillDraft> {
     const trimmed = (text || "").trim();

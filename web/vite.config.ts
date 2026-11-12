@@ -3,7 +3,7 @@ import { readFileSync, readdirSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import react from "@vitejs/plugin-react";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, type Plugin, searchForWorkspaceRoot } from "vite";
 
 import { resolveHeavyMediaEnabled } from "./media-build-mode";
 import { distributionNotices } from "../scripts/distribution-notices.mjs";
@@ -18,6 +18,12 @@ const buildCommit = (() => {
 })();
 const apiProxyTarget = process.env.VITE_API_PROXY_TARGET?.trim() || "http://127.0.0.1:8080";
 const desktopLaunchToken = process.env.VITE_DESKTOP_LAUNCH_TOKEN?.trim();
+const ownerToken = process.env.VITE_OWNER_TOKEN?.trim();
+const apiProxyHeaders = desktopLaunchToken ? { "X-Desktop-Token": desktopLaunchToken } : {};
+const opsProxyHeaders = {
+    ...apiProxyHeaders,
+    ...(ownerToken ? { "X-Beeftv-Owner": ownerToken } : {}),
+};
 const heavyMediaEnabled = resolveHeavyMediaEnabled(process.env.QISITV_FULL_MEDIA_RESOURCES ?? process.env.BEEFTV_FULL_MEDIA_RESOURCES);
 
 function pruneOptionalMediaPlugin() {
@@ -76,12 +82,20 @@ export default defineConfig({
         "import.meta.env.VITE_BUILD_COMMIT": JSON.stringify(buildCommit),
     },
     server: {
+        // The in-app plugin guide renders the docs site page, the single source.
+        fs: { allow: [searchForWorkspaceRoot(webDir), resolve(webDir, "../docs/content/docs/plugins"), resolve(webDir, "../plugin-packages")] },
         proxy: {
+            "/api/ops": {
+                target: apiProxyTarget,
+                changeOrigin: true,
+                xfwd: true,
+                ...(Object.keys(opsProxyHeaders).length > 0 ? { headers: opsProxyHeaders } : {}),
+            },
             "/api": {
                 target: apiProxyTarget,
                 changeOrigin: true,
                 xfwd: true,
-                ...(desktopLaunchToken ? { headers: { "X-Desktop-Token": desktopLaunchToken } } : {}),
+                ...(Object.keys(apiProxyHeaders).length > 0 ? { headers: apiProxyHeaders } : {}),
             },
         },
     },

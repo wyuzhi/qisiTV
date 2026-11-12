@@ -220,12 +220,13 @@ export function useCanvasImageTools({
                 position: positions[index] || { x: node.position.x + node.width + 96, y: node.position.y }, width: size.width, height: size.height,
                 metadata: mediaResultMetadata("derived", { ...imageMetadata(image), prompt: node.metadata?.prompt, manualSize: true, generatedFromNodeId: node.id }),
             } satisfies CanvasNodeData));
+            const connections = childNodes.map((child) => ({ id: nanoid(), fromNodeId: node.id, toNodeId: child.id }));
             setNodes((current) => [...current, ...childNodes]);
-            setConnections((current) => [...current, ...childNodes.map((child) => ({ id: nanoid(), fromNodeId: node.id, toNodeId: child.id }))]);
+            setConnections((current) => [...current, ...connections]);
             pageUi.getState().setSelectedNodeIds(new Set(childNodes.map((child) => child.id)));
             pageUi.getState().setSelectedConnectionId(null);
             pageUi.getState().setDialogNodeId(null);
-            await operation.wait(persistMediaNodes(childNodes, [], {}));
+            await operation.wait(persistMediaNodes(childNodes, connections, {}));
             message.success(`已切分为 ${childNodes.length} 个子节点`);
         } catch (error) {
             if (operation.isCurrent()) throw error;

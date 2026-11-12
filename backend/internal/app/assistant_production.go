@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/gorm"
 	"qisitv/backend/internal/assistantturns"
+	"qisitv/backend/internal/canvas"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/operations"
 	localtask "qisitv/backend/internal/task"
@@ -269,14 +270,7 @@ func (s *operationSession) admitProductionTargets(userID, canvasID string, plan 
 				}
 			}
 			if existing.Status == model.TaskStatusCancelled || (existing.Status == model.TaskStatusFailed && proj.Outcome.Phase == "failed") {
-				if meta["status"] != "error" {
-					meta["status"] = "error"
-					changed = true
-				}
-				if meta["error"] != existing.Error {
-					meta["error"] = existing.Error
-					changed = true
-				}
+				changed = canvas.ApplyTaskFailureMetadata(meta, canvas.TaskFailure{TaskID: existing.ID, TaskStatus: string(existing.Status), Message: existing.Error, Outcome: proj.Outcome}) || changed
 			} else if storage, _ := meta["storageKey"].(string); storage == "" && meta["status"] != "loading" {
 				meta["status"] = "loading"
 				changed = true
@@ -303,6 +297,7 @@ func (s *operationSession) admitProductionTargets(userID, canvasID string, plan 
 		if err != nil {
 			return nil, err
 		}
+		canvas.ClearGenerationAttemptMetadata(meta)
 		meta["taskId"], meta["taskStatus"], meta["status"] = task.ID, string(task.Status), "loading"
 		meta["taskClientOperationId"], meta["generationSubmissionState"] = key, "accepted"
 		changed = true

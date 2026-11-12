@@ -86,7 +86,7 @@ export function subscribeCanvasEventsStream(projectId: string, onUpdate: () => v
     const hasDesktopToken = typeof desktopToken === "string" && desktopToken.trim().length > 0;
 
     if (window.location.protocol === "http:" && !hasDesktopToken && typeof EventSource !== "undefined") {
-        const source = new EventSource(`/api/canvas-projects/${encodeURIComponent(projectId)}/events`);
+        const source = new EventSource(`${apiBaseURL.replace(/\/+$/u, "")}/canvas-projects/${encodeURIComponent(projectId)}/events`, { withCredentials: true });
         source.addEventListener("canvas.updated", onUpdate);
         return () => {
             source.removeEventListener("canvas.updated", onUpdate);
@@ -114,6 +114,7 @@ export function subscribeCanvasEventsStream(projectId: string, onUpdate: () => v
                 method: "GET",
                 headers,
                 signal: controller.signal,
+                credentials: "include",
             });
             if (response.status === 401 || response.status === 403) {
                 return;

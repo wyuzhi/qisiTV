@@ -39,7 +39,7 @@ export const navigationTools = [
     },
     {
         slug: "plugins",
-        label: "插件中心",
+        label: "插件",
         icon: Blocks,
         section: "工作台管理",
     },

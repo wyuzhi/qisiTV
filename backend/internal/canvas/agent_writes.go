@@ -19,9 +19,10 @@ import (
 
 // NodeDraft 是创建节点所需的最小输入；尺寸与 metadata 由 capability 描述符决定。
 type NodeDraft struct {
-	Title  string
-	Type   string
-	Prompt string
+	Title      string
+	Type       string
+	Prompt     string
+	PluginData map[string]any
 }
 
 // CreatedNode 是创建成功后由领域返回的节点身份。
@@ -180,6 +181,7 @@ func createCanvasNodes(doc map[string]any, drafts []NodeDraft) ([]CreatedNode, e
 	}
 	// 从既有节点最右边缘开始，再按本批节点的累计宽度推进。
 	created := make([]CreatedNode, 0, len(drafts))
+	now := time.Now().UTC().Format(time.RFC3339)
 	for _, draft := range drafts {
 		descriptor, _ := canvasCapabilityRegistry.Resolve(draft.Type)
 		width, height := descriptor.DefaultWidth, descriptor.DefaultHeight
@@ -193,11 +195,19 @@ func createCanvasNodes(doc map[string]any, drafts []NodeDraft) ([]CreatedNode, e
 		if strings.TrimSpace(draft.Prompt) != "" {
 			metadata["prompt"] = draft.Prompt
 		}
+		if len(draft.PluginData) > 0 {
+			pluginData := make(map[string]any, len(draft.PluginData))
+			for key, value := range draft.PluginData {
+				pluginData[key] = value
+			}
+			metadata["pluginData"] = pluginData
+		}
 		nodeID := newCanvasNodeID()
 		nodes = append(nodes, map[string]any{
 			"id": nodeID, "type": draft.Type, "title": draft.Title,
 			"position": map[string]any{"x": cursorX, "y": 160},
 			"width":    width, "height": height, "metadata": metadata,
+			"createdAt": now, "updatedAt": now,
 		})
 		created = append(created, CreatedNode{ID: nodeID, Title: draft.Title, Type: draft.Type})
 		cursorX += width + nodePlacementGap
@@ -262,6 +272,21 @@ func (s *Service) UpdateUserCanvasNodeFields(userID, canvasID, nodeID string, pa
 		switch key {
 		case "title":
 			continue // 已按通用字段处理
+		case "pluginData":
+			dataMap, isObject := value.(map[string]any)
+			if !isObject {
+				return UserDataSummary{}, kernel.NewAppError(http.StatusBadRequest, "pluginData 必须是对象")
+			}
+			existingPluginData, _ := metadata["pluginData"].(map[string]any)
+			merged := make(map[string]any, len(existingPluginData)+len(dataMap))
+			for k, v := range existingPluginData {
+				merged[k] = v
+			}
+			for k, v := range dataMap {
+				merged[k] = v
+			}
+			metadata["pluginData"] = merged
+			continue
 		case "content":
 			if hasDescriptor {
 				if _, ok := descriptor.PatchFields[key]; ok {
@@ -301,6 +326,7 @@ func (s *Service) UpdateUserCanvasNodeFields(userID, canvasID, nodeID string, pa
 		// 这里把同一个 map 回写一次，保证节点上挂的就是刚改过的那个。
 		node["metadata"] = metadata
 	}
+	node["updatedAt"] = time.Now().UTC().Format(time.RFC3339)
 	return s.saveCanvasDocWithRevision(userID, canvasID, doc, expectedRevision)
 }
 

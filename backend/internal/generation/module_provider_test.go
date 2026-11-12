@@ -1,0 +1,241 @@
+package generation
+
+import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"qisitv/backend/internal/kernel"
+	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/modelcatalog"
+	"qisitv/backend/internal/pluginhost"
+	"qisitv/backend/internal/protocol"
+)
+
+const testModuleProvider = `
+let submits = 0;
+let flakyQueries = 0;
+export async function submit(request, ctx) {
+  if (request.prompt === 'flaky' || request.prompt === 'broken') return { taskId: request.prompt, status: 'processing' };
+  submits++;
+  if (request.prompt === 'boom') throw new Error('connection reset');
+  if (request.prompt === 'refused') return { status: 'failed', message: '工作流不接收图片' };
+  if (ctx.config.apiKey !== 'fixture' && request.model !== 'keyless') return { status: 'failed', message: 'missing key' };
+  return { taskId: 'task-' + submits, status: 'processing' };
+}
+export async function query(taskId, request, ctx) {
+  if (taskId === 'flaky' && ++flakyQueries < 3) throw new Error('fetch failed');
+  if (!['task-1', 'resumed-1', 'flaky'].includes(taskId)) throw new Error('unknown task ' + taskId);
+  return { status: 'succeeded', result: { images: [{ dataUrl: 'data:image/png;base64,iVBORw0KGgo=' }] } };
+}
+export async function models(ctx) {
+  if (ctx.config.baseUrl !== 'http://127.0.0.1:8188') throw new Error('wrong address ' + ctx.config.baseUrl);
+  return [{ id: 'portrait.app.json', displayName: '人像' }, { id: ' ' }, { id: 'portrait.app.json' }, { id: 'clip.app.json', capability: 'video' }];
+}
+`
+
+func moduleProviderRegistry(t *testing.T) *protocol.Registry {
+	t.Helper()
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	script, err := filepath.Abs(filepath.Join("..", "..", "..", "agent-host", "plugin-host.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pluginhost.UseCommandForTesting(node, script))
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "provider.mjs"), []byte(testModuleProvider), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"apiVersion":"beeftv.plugin/v2","id":"module-fixture","name":"Fixture","version":"1.0.0","contributes":{"providers":[{"id":"module-image","label":"Module Image","module":"./provider.mjs","capabilities":["image"],"scopes":["canvas"]},{"id":"module-keyless","label":"Module Keyless","module":"./provider.mjs","capabilities":["image"],"scopes":["canvas"],"auth":{"type":"none"}}]}}`
+	adapters, err := protocol.LoadInstalledProviders([]byte(manifest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := protocol.NewRegistry(protocol.BindModuleProviders(adapters, dir, "rev-1")...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return registry
+}
+
+func runModuleFixture(t *testing.T, registry *protocol.Registry, prompt, resumed string) (map[string]any, *recordingReceipts, error) {
+	receipts := &recordingReceipts{}
+	runtime := taskRuntime(func(r *Runtime) {
+		r.Receipts = receipts
+		r.Call.ProviderRequestID = resumed
+	})
+	ctx := WithProtocolRegistry(WithRuntime(context.Background(), runtime), registry)
+	input := Input{Mode: "image", Prompt: prompt, Config: Config{InterfaceType: "module-image", Model: "any", BaseURL: "http://127.0.0.1:8188", APIKey: "fixture"}}
+	result, err := Execute(ctx, input)
+	return result, receipts, err
+}
+
+func TestModuleProviderSubmitsQueriesAndRecordsTheTask(t *testing.T) {
+	registry := moduleProviderRegistry(t)
+	result, receipts, err := runModuleFixture(t, registry, "draw", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	images, _ := result["images"].([]any)
+	if len(images) != 1 || images[0].(map[string]any)["dataUrl"] != "data:image/png;base64,iVBORw0KGgo=" {
+		t.Fatalf("result = %#v", result)
+	}
+	observations := receipts.snapshot()
+	if len(observations) != 2 {
+		t.Fatalf("observations = %d", len(observations))
+	}
+	created, polled := observations[0], observations[1]
+	if created.Request.URL.String() != "plugin://module-fixture/tasks" || !strings.Contains(string(created.Body), `"task_id":"task-1"`) {
+		t.Fatalf("create receipt = %s %s", created.Request.URL, created.Body)
+	}
+	if polled.Request.URL.Path != "/tasks/task-1" || ProviderRequestIDFromPath(polled.Request.URL.Path) != "task-1" {
+		t.Fatalf("poll receipt = %s", polled.Request.URL)
+	}
+	// The call log is the receipt: a successful create with a provider ID marks the task accepted.
+	var logged []model.ApiCallLog
+	capture := func(entry model.ApiCallLog) error { logged = append(logged, entry); return nil }
+	RecordProviderRequest(nil, capture, created.Request, created.StartedAt, created.StatusCode, created.Body, created.Err)
+	if len(logged) != 1 || logged[0].RequestKind != "create" || logged[0].Status != model.ApiCallStatusSucceeded || logged[0].ProviderRequestID != "task-1" {
+		t.Fatalf("call log = %#v", logged)
+	}
+}
+
+func TestModuleProviderFailureWithoutTaskIsNotSubmissionUnknown(t *testing.T) {
+	registry := moduleProviderRegistry(t)
+	_, _, err := runModuleFixture(t, registry, "refused", "")
+	var rejected SubmissionRejectedError
+	if !errors.As(err, &rejected) {
+		t.Fatalf("a plugin that says it created nothing must read as rejected, got %#v", err)
+	}
+	if !SafeCatalogRouteRejection(err) {
+		t.Fatalf("no job exists, so the attempt must not stay unknown: %v", err)
+	}
+	if failure := ClassifyError(err); failure.Uncertain {
+		t.Fatalf("must not be reported as uncertain: %#v", failure)
+	}
+}
+
+func TestModuleProviderDeclaredKeylessRunsWithoutAKey(t *testing.T) {
+	registry := moduleProviderRegistry(t)
+	ctx := WithProtocolRegistry(WithRuntime(context.Background(), taskRuntime(func(*Runtime) {})), registry)
+	input := Input{Mode: "image", Prompt: "draw", Config: Config{InterfaceType: "module-keyless", Model: "keyless", BaseURL: "http://127.0.0.1:8188"}}
+	if _, err := Execute(ctx, input); err != nil {
+		t.Fatalf("a provider that declares no auth must run without a key: %v", err)
+	}
+	input.Config.InterfaceType = "module-image"
+	if _, err := Execute(ctx, input); err == nil || !strings.Contains(err.Error(), "API Key") {
+		t.Fatalf("a provider that needs a key must still be stopped before submit, got %v", err)
+	}
+}
+
+func TestModuleProviderResumeOnlyQueries(t *testing.T) {
+	registry := moduleProviderRegistry(t)
+	// "boom" makes submit throw, so success proves the resumed task was never submitted again.
+	result, receipts, err := runModuleFixture(t, registry, "boom", "resumed-1")
+	if err != nil || result["mode"] != "image" {
+		t.Fatalf("result = %#v err = %v", result, err)
+	}
+	for _, observation := range receipts.snapshot() {
+		if observation.Request.Method != "GET" {
+			t.Fatalf("resume sent %s %s", observation.Request.Method, observation.Request.URL)
+		}
+	}
+}
+
+func TestModuleProviderSubmitErrorIsUnknownNotRetried(t *testing.T) {
+	registry := moduleProviderRegistry(t)
+	_, receipts, err := runModuleFixture(t, registry, "boom", "")
+	var unknown SubmissionUnknownError
+	if !errors.As(err, &unknown) || !strings.Contains(err.Error(), "connection reset") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(receipts.snapshot()) != 1 {
+		t.Fatalf("submit was called %d times", len(receipts.snapshot()))
+	}
+}
+
+func TestModuleProviderKeepsQueryingThroughThrownErrors(t *testing.T) {
+	registry := moduleProviderRegistry(t)
+	adapter, ok := registry.Resolve("module-image")
+	if !ok {
+		t.Fatal("module-image is not registered")
+	}
+	queries := 0
+	// 图片任务的查询规则最严：声明式协议在这里一出错就失败。
+	policy := DeclarativeProtocolPollPolicy("image")
+	policy.Sleep = func(context.Context, time.Duration) error { return nil }
+	policy.Notify = func(_ context.Context, _ string, event VideoPollEvent, _ error) {
+		if event == VideoPollEventRetrying {
+			queries++
+		}
+	}
+	run := func(prompt string) (map[string]any, error) {
+		ctx := WithProtocolRegistry(WithRuntime(context.Background(), taskRuntime(func(*Runtime) {})), registry)
+		input := Input{Mode: "image", Prompt: prompt, Config: Config{InterfaceType: "module-image", Model: "any", BaseURL: "http://127.0.0.1:8188", APIKey: "fixture"}}
+		return runModuleProviderTask(ctx, input, adapter.(protocol.ModuleProvider), policy)
+	}
+	result, err := run("flaky")
+	if err != nil || result["mode"] != "image" {
+		t.Fatalf("a running task must survive a failed query: result = %#v err = %v", result, err)
+	}
+	if queries != 1 {
+		t.Fatalf("retrying notices = %d", queries)
+	}
+	if _, err := run("broken"); err == nil || !strings.Contains(err.Error(), "unknown task broken") {
+		t.Fatalf("a query that keeps failing must end the task with the plugin's message, got %v", err)
+	}
+}
+
+func TestReadingModelsOfAPluginChannelAsksThePlugin(t *testing.T) {
+	registry := moduleProviderRegistry(t)
+	actor := &model.User{ID: "user-1"}
+	fetched := false
+	fetch := func(context.Context, string, string, string, []modelcatalog.ChannelHeader) ([]byte, error) {
+		fetched = true
+		return nil, errors.New("plugin channels must not request /models")
+	}
+	items, err := FetchChannelModelCatalog(context.Background(), actor, ChannelModelsRequest{BaseURL: "http://127.0.0.1:8188", Protocol: "module-image"}, nil, fetch, nil, registry.Resolve)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fetched {
+		t.Fatal("plugin channel requested /models")
+	}
+	got := make([]string, 0, len(items))
+	for _, item := range items {
+		got = append(got, item.ID+"|"+item.DisplayName+"|"+item.ModelType)
+	}
+	if strings.Join(got, ",") != "portrait.app.json|人像|image,clip.app.json||video" {
+		t.Fatalf("items = %v", got)
+	}
+
+	_, err = FetchChannelModelCatalog(context.Background(), actor, ChannelModelsRequest{BaseURL: "http://other:8188", Protocol: "module-image"}, nil, fetch, nil, registry.Resolve)
+	var appErr *kernel.AppError
+	if !errors.As(err, &appErr) || appErr.Reason != "catalog_upstream_failed" || !strings.Contains(appErr.Message, "wrong address http://other:8188") {
+		t.Fatalf("plugin failure = %#v", err)
+	}
+}
+
+func TestPluginWithoutModelListAsksForManualModels(t *testing.T) {
+	registry := moduleProviderRegistry(t)
+	adapter, _ := registry.Resolve("module-image")
+	provider := adapter.(protocol.ModuleProvider)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "provider.mjs"), []byte("export async function submit() {}\nexport async function query() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider.Module, provider.Revision = filepath.Join(dir, "provider.mjs"), "no-models"
+	_, err := ListModuleProviderModels(context.Background(), provider, "http://127.0.0.1:8188", "")
+	var appErr *kernel.AppError
+	if !errors.As(err, &appErr) || appErr.Reason != "catalog_unsupported" {
+		t.Fatalf("missing models() = %#v", err)
+	}
+}

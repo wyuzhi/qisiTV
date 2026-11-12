@@ -340,6 +340,10 @@ func testRuntime(t *testing.T, deps Deps) *Runtime {
 	return New(deps)
 }
 
+// 这些等待只是等内存里的调度结果，不是超时断言；CI 机器忙时一秒会被吃掉，
+// 出现「调度还没跑完就判超时」的假红，所以给到五秒。
+const waitDeadline = 5 * time.Second
+
 func waitUntil(t *testing.T, timeout time.Duration, ok func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -368,7 +372,7 @@ func TestConcurrentClaimGivesSingleLeaseOwner(t *testing.T) {
 	go func() { defer wg.Done(); left.Dispatch(context.Background()) }()
 	go func() { defer wg.Done(); right.Dispatch(context.Background()) }()
 	wg.Wait()
-	waitUntil(t, time.Second, func() bool { return executes.Load() > 0 })
+	waitUntil(t, waitDeadline, func() bool { return executes.Load() > 0 })
 	time.Sleep(20 * time.Millisecond)
 	if executes.Load() != 1 {
 		t.Fatalf("executes=%d, want 1", executes.Load())
@@ -404,7 +408,7 @@ func TestCancelWhileWaitingAndExecuting(t *testing.T) {
 			t.Fatal("executor did not wait")
 		}
 		cancels.Cancel("wait")
-		waitUntil(t, time.Second, repo.isTerminal)
+		waitUntil(t, waitDeadline, repo.isTerminal)
 		if work.Load() != 0 {
 			t.Fatal("cancelled waiter still submitted upstream")
 		}
@@ -431,7 +435,7 @@ func TestCancelWhileWaitingAndExecuting(t *testing.T) {
 			t.Fatal("executor did not start")
 		}
 		cancels.Cancel("exec")
-		waitUntil(t, time.Second, repo.isTerminal)
+		waitUntil(t, waitDeadline, repo.isTerminal)
 		if submitted.Load() != 1 {
 			t.Fatalf("submits=%d", submitted.Load())
 		}
@@ -651,7 +655,7 @@ func TestClosedRunClaimedReleasesSlotOnce(t *testing.T) {
 	rt = testRuntime(t, Deps{Repository: claiming, Coordinator: coords, Executor: exec})
 	claiming.close = rt.Close
 	rt.Dispatch(context.Background())
-	waitUntil(t, time.Second, func() bool { return coords.releases.Load() > 0 || repo.releaseCount() > 0 })
+	waitUntil(t, waitDeadline, func() bool { return coords.releases.Load() > 0 || repo.releaseCount() > 0 })
 	time.Sleep(20 * time.Millisecond)
 	if coords.acquires.Load() != 1 {
 		t.Fatalf("acquires=%d", coords.acquires.Load())
@@ -773,7 +777,7 @@ func TestConcurrencyAboveMaxSlotsDoesNotBlockOrExceed(t *testing.T) {
 		defer close(done)
 		rt.Dispatch(context.Background())
 	}()
-	waitUntil(t, time.Second, func() bool { return executes.Load() >= 2 })
+	waitUntil(t, waitDeadline, func() bool { return executes.Load() >= 2 })
 	select {
 	case <-done:
 	case <-time.After(200 * time.Millisecond):
@@ -855,7 +859,7 @@ func TestDrainDoesNotCancelInFlightExecution(t *testing.T) {
 		t.Fatal("draining worker accepted a new task")
 	}
 	close(release)
-	waitUntil(t, time.Second, repo.isTerminal)
+	waitUntil(t, waitDeadline, repo.isTerminal)
 	if cancelled.Load() {
 		t.Fatal("drain cancelled in-flight execution")
 	}
@@ -882,7 +886,7 @@ func TestUnknownStateDoesNotResubmit(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("first execute did not run")
 	}
-	waitUntil(t, time.Second, repo.isTerminal)
+	waitUntil(t, waitDeadline, repo.isTerminal)
 	repo.expireLease()
 	rt.Dispatch(context.Background())
 	time.Sleep(30 * time.Millisecond)
@@ -906,10 +910,10 @@ func TestUnappliedUncertainIsNotFencedByRuntime(t *testing.T) {
 	})
 	rt := testRuntime(t, Deps{Repository: repo, Executor: exec})
 	rt.Dispatch(context.Background())
-	waitUntil(t, time.Second, func() bool { return submits.Load() == 1 })
+	waitUntil(t, waitDeadline, func() bool { return submits.Load() == 1 })
 	repo.expireLease()
 	rt.Dispatch(context.Background())
-	waitUntil(t, time.Second, func() bool { return submits.Load() >= 2 })
+	waitUntil(t, waitDeadline, func() bool { return submits.Load() >= 2 })
 	if repo.isTerminal() {
 		t.Fatal("runtime persisted uncertain without executor write")
 	}
@@ -979,4 +983,79 @@ func TestProcessOnePreservesOwnerAndDoesNotNeedSlot(t *testing.T) {
 	if owner != "worker-a:attempt-1" {
 		t.Fatalf("owner=%q", owner)
 	}
+}
+
+type transientDeadlineRepo struct {
+	*memoryRepo
+	transientFailures atomic.Int32
+	attempts          atomic.Int32
+}
+
+func (r *transientDeadlineRepo) RenewLease(ctx context.Context, taskID, owner string, ttl time.Duration) error {
+	r.attempts.Add(1)
+	for {
+		remaining := r.transientFailures.Load()
+		if remaining <= 0 {
+			break
+		}
+		if r.transientFailures.CompareAndSwap(remaining, remaining-1) {
+			return context.DeadlineExceeded
+		}
+	}
+	return r.memoryRepo.RenewLease(ctx, taskID, owner, ttl)
+}
+
+func TestRenewLeaseRetriesTransientDeadlineExceededBeforeTTL(t *testing.T) {
+	t.Run("transient timeout recovers before lease TTL expires", func(t *testing.T) {
+		base := &memoryRepo{task: queuedTask("transient-renew")}
+		repo := &transientDeadlineRepo{memoryRepo: base}
+		repo.transientFailures.Store(2)
+		exec := fnExec(func(session Session) Outcome {
+			waitUntil(t, waitDeadline, func() bool { return repo.attempts.Load() >= 3 })
+			if session.Lost() {
+				t.Fatalf("session marked lost despite recovery before TTL: %v", session.LostErr())
+			}
+			return persist(base, session, Outcome{Kind: KindCompleted, ProviderAccepted: true})
+		})
+		rt := testRuntime(t, Deps{
+			Repository: repo,
+			Executor:   exec,
+			Config: Config{
+				TaskLeaseTTL:  250 * time.Millisecond,
+				RenewInterval: 10 * time.Millisecond,
+			},
+		})
+		outcome := rt.ProcessOne(context.Background())
+		if outcome.Kind != KindCompleted || !outcome.Applied {
+			t.Fatalf("expected task to complete after transient renewal timeout, got %+v", outcome)
+		}
+	})
+
+	t.Run("sustained timeout past lease TTL aborts execution", func(t *testing.T) {
+		base := &memoryRepo{task: queuedTask("expired-renew")}
+		repo := &transientDeadlineRepo{memoryRepo: base}
+		repo.transientFailures.Store(1000)
+		exec := fnExec(func(session Session) Outcome {
+			<-session.Context().Done()
+			if session.Lost() {
+				return Outcome{Kind: KindLeaseLost, Err: session.LostErr(), ProviderAccepted: true}
+			}
+			return persist(base, session, Outcome{Kind: KindCompleted, ProviderAccepted: true})
+		})
+		rt := testRuntime(t, Deps{
+			Repository: repo,
+			Executor:   exec,
+			Config: Config{
+				TaskLeaseTTL:  40 * time.Millisecond,
+				RenewInterval: 10 * time.Millisecond,
+			},
+		})
+		outcome := rt.ProcessOne(context.Background())
+		if outcome.Kind != KindLeaseLost {
+			t.Fatalf("expected KindLeaseLost after TTL expiry, got %+v", outcome)
+		}
+		if !errors.Is(outcome.Err, ErrLeaseLost) {
+			t.Fatalf("expected ErrLeaseLost, got %v", outcome.Err)
+		}
+	})
 }

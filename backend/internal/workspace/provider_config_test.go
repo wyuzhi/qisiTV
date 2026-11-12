@@ -25,11 +25,11 @@ func TestPreRenameRedactedConfigPreservesConfiguredSecret(t *testing.T) {
 	}
 }
 
-func TestProviderConfigMigratesLegacyBeefAPIStateWithoutLosingLocalChoices(t *testing.T) {
+func TestProviderConfigMigratesLegacyBeefTVStateWithoutLosingLocalChoices(t *testing.T) {
 	dir := t.TempDir()
 	legacy := `{
-        "channels":[{"id":"beefapi","name":"BeefAPI old","baseUrl":"https://old.invalid","apiKey":"local-secret","headers":[{"name":"X-Site","value":"desktop"}],"enabled":false,"models":["legacy-model"],"modelProfiles":[{"model":"seedance-2.0-fast","protocol":"newapi-channel-1","capability":"video"}]}],
-        "imageModel":"beefapi::gpt-image-2","videoModel":"beefapi::seedance-2.0-fast","textModel":"beefapi::gpt-5.6-sol","audioModel":"beefapi::minimax-music-v3.0"
+        "channels":[{"id":"beeftv","name":"BeefTV old","baseUrl":"https://old.invalid","apiKey":"local-secret","headers":[{"name":"X-Site","value":"desktop"}],"enabled":false,"models":["legacy-model"],"modelProfiles":[{"model":"seedance-2.0-fast","protocol":"newapi-channel-1","capability":"video"}]}],
+        "imageModel":"beeftv::gpt-image-2","videoModel":"beeftv::seedance-2.0-fast","textModel":"beeftv::gpt-5.6-sol","audioModel":"beeftv::minimax-music-v3.0"
     }`
 	if err := os.WriteFile(filepath.Join(dir, LocalProviderConfigFile), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
@@ -46,7 +46,7 @@ func TestProviderConfigMigratesLegacyBeefAPIStateWithoutLosingLocalChoices(t *te
 	if health != ConfigHealthMigrated {
 		t.Fatalf("health = %q", health)
 	}
-	channel := requireEffectiveChannel(t, effective, "beefapi")
+	channel := requireEffectiveChannel(t, effective, "beeftv")
 	if channel["name"] != "BeefTV" || channel["baseUrl"] != "https://beeftv.app" {
 		t.Fatal("preset-owned identity was not repaired")
 	}
@@ -66,8 +66,8 @@ func TestProviderConfigMigratesLegacyBeefAPIStateWithoutLosingLocalChoices(t *te
 		t.Fatalf("fetched model catalog was not preserved: %#v", models)
 	}
 	for key, want := range map[string]string{
-		"imageModel": "beefapi::gpt-image-2", "videoModel": "beefapi::seedance-2.0-fast",
-		"textModel": "beefapi::gpt-5.6-sol", "audioModel": "beefapi::minimax-music-v3.0",
+		"imageModel": "beeftv::gpt-image-2", "videoModel": "beeftv::seedance-2.0-fast",
+		"textModel": "beeftv::gpt-5.6-sol", "audioModel": "beeftv::minimax-music-v3.0",
 	} {
 		if effective.Config[key] != want {
 			t.Fatalf("%s = %#v", key, effective.Config[key])
@@ -99,10 +99,10 @@ func TestProviderConfigRecoversLastValidBackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SaveLocalModelConfig([]byte(`{"channels":[{"id":"beefapi","apiKey":"first-secret","enabled":true}]}`)); err != nil {
+	if err := store.SaveLocalModelConfig([]byte(`{"channels":[{"id":"beeftv","apiKey":"first-secret","enabled":true}]}`)); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SaveLocalModelConfig([]byte(`{"channels":[{"id":"beefapi","apiKey":"second-secret","enabled":true}]}`)); err != nil {
+	if err := store.SaveLocalModelConfig([]byte(`{"channels":[{"id":"beeftv","apiKey":"second-secret","enabled":true}]}`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, LocalProviderConfigFile), []byte(`{"schemaVersion":`), 0o600); err != nil {
@@ -116,7 +116,7 @@ func TestProviderConfigRecoversLastValidBackup(t *testing.T) {
 	if health != ConfigHealthRecovered {
 		t.Fatalf("health = %q", health)
 	}
-	if got := requireEffectiveChannel(t, effective, "beefapi")["apiKey"]; got != "first-secret" {
+	if got := requireEffectiveChannel(t, effective, "beeftv")["apiKey"]; got != "first-secret" {
 		t.Fatal("recovered credential does not match the last valid backup")
 	}
 }
@@ -126,7 +126,7 @@ func TestProviderConfigCommittedRevisionOnlyAdvancesAfterValidWrite(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SaveLocalModelConfig([]byte(`{"channels":[{"id":"beefapi","apiKey":"secret","enabled":true}]}`)); err != nil {
+	if err := store.SaveLocalModelConfig([]byte(`{"channels":[{"id":"beeftv","apiKey":"secret","enabled":true}]}`)); err != nil {
 		t.Fatal(err)
 	}
 	first, _, err := store.LoadEffectiveModelConfig()
@@ -747,38 +747,38 @@ func TestSaveCatalogPreservingAssistantKeepsMissingSelection(t *testing.T) {
 	}{
 		{
 			name:     "saved model still listed",
-			saved:    "beefapi::claude-opus-5-5",
-			channels: `[{"id":"beefapi","models":["deepseek-v4.1-flash","claude-opus-5-5"]}]`,
-			want:     "beefapi::claude-opus-5-5",
+			saved:    "beeftv::claude-opus-5-5",
+			channels: `[{"id":"beeftv","models":["deepseek-v4.1-flash","claude-opus-5-5"]}]`,
+			want:     "beeftv::claude-opus-5-5",
 		},
 		{
 			name:     "saved model only through alias",
-			saved:    "beefapi::upstream-flash",
-			channels: `[{"id":"beefapi","models":["deepseek-v4.1-flash"],"modelAliases":{"deepseek-v4.1-flash":"upstream-flash"}}]`,
-			want:     "beefapi::upstream-flash",
+			saved:    "beeftv::upstream-flash",
+			channels: `[{"id":"beeftv","models":["deepseek-v4.1-flash"],"modelAliases":{"deepseek-v4.1-flash":"upstream-flash"}}]`,
+			want:     "beeftv::upstream-flash",
 		},
 		{
 			name:     "saved custom channel model",
 			saved:    "custom::chat-x",
-			channels: `[{"id":"beefapi","models":["deepseek-v4.1-flash"]},{"id":"custom","models":["chat-x"]}]`,
+			channels: `[{"id":"beeftv","models":["deepseek-v4.1-flash"]},{"id":"custom","models":["chat-x"]}]`,
 			want:     "custom::chat-x",
 		},
 		{
 			name:     "saved model gone from catalog",
-			saved:    "beefapi::claude-opus-5-5",
-			channels: `[{"id":"beefapi","models":["deepseek-v4.1-flash"]}]`,
-			want:     "beefapi::claude-opus-5-5",
+			saved:    "beeftv::claude-opus-5-5",
+			channels: `[{"id":"beeftv","models":["deepseek-v4.1-flash"]}]`,
+			want:     "beeftv::claude-opus-5-5",
 		},
 		{
 			name:     "saved model gone and no default available",
-			saved:    "beefapi::claude-opus-5-5",
-			channels: `[{"id":"beefapi","models":[]}]`,
-			want:     "beefapi::claude-opus-5-5",
+			saved:    "beeftv::claude-opus-5-5",
+			channels: `[{"id":"beeftv","models":[]}]`,
+			want:     "beeftv::claude-opus-5-5",
 		},
 		{
 			name:     "no saved choice",
 			saved:    "",
-			channels: `[{"id":"beefapi","models":["deepseek-v4.1-flash"]}]`,
+			channels: `[{"id":"beeftv","models":["deepseek-v4.1-flash"]}]`,
 			want:     "",
 		},
 	} {
@@ -787,7 +787,7 @@ func TestSaveCatalogPreservingAssistantKeepsMissingSelection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			seed := `{"assistantModel":` + strconv.Quote(tc.saved) + `,"channels":[{"id":"beefapi","models":["gpt-6-astra"]}]}`
+			seed := `{"assistantModel":` + strconv.Quote(tc.saved) + `,"channels":[{"id":"beeftv","models":["gpt-6-astra"]}]}`
 			if err := store.SaveLocalModelConfig([]byte(seed)); err != nil {
 				t.Fatal(err)
 			}
@@ -820,11 +820,11 @@ func TestProviderConfigSaveIgnoresNonRedactedWorkflowArraysWithNumericIDs(t *tes
 	}
 	seed := `{
 		"channels":[
-			{"id":"beefapi","apiKey":"real-secret"},
+			{"id":"beeftv","apiKey":"real-secret"},
 			{"id":"header-only","headers":[{"name":"Authorization","value":"Bearer header-secret"}]}
 		],
-		"runningHub":{
-			"apiKey":"rh-secret",
+		"extension":{
+			"apiKey":"extension-secret",
 			"workflows":[
 				{
 					"id":"wf-1",
@@ -839,10 +839,10 @@ func TestProviderConfigSaveIgnoresNonRedactedWorkflowArraysWithNumericIDs(t *tes
 	}
 	update := `{
 		"channels":[
-			{"id":"beefapi","apiKey":"real-secret"},
+			{"id":"beeftv","apiKey":"real-secret"},
 			{"id":"header-only","headers":[{"name":"Authorization","value":"` + RedactedSecret + `"}]}
 		],
-		"runningHub":{
+		"extension":{
 			"apiKey":"` + RedactedSecret + `",
 			"workflows":[
 				{
@@ -860,7 +860,7 @@ func TestProviderConfigSaveIgnoresNonRedactedWorkflowArraysWithNumericIDs(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	channel := requireEffectiveChannel(t, effective, "beefapi")
+	channel := requireEffectiveChannel(t, effective, "beeftv")
 	if channel["apiKey"] != "real-secret" {
 		t.Fatalf("channel apiKey = %v, want real-secret", channel["apiKey"])
 	}
@@ -870,8 +870,8 @@ func TestProviderConfigSaveIgnoresNonRedactedWorkflowArraysWithNumericIDs(t *tes
 	if firstHeader["value"] != "Bearer header-secret" {
 		t.Fatalf("header-only Authorization = %v, want Bearer header-secret", firstHeader["value"])
 	}
-	rh, _ := effective.Config["runningHub"].(map[string]any)
-	if rh["apiKey"] != "rh-secret" {
-		t.Fatalf("runningHub apiKey = %v, want rh-secret", rh["apiKey"])
+	extension, _ := effective.Config["extension"].(map[string]any)
+	if extension["apiKey"] != "extension-secret" {
+		t.Fatalf("extension apiKey = %v, want extension-secret", extension["apiKey"])
 	}
 }

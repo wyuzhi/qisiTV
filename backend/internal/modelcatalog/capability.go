@@ -8,6 +8,7 @@ import (
 
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
+	protocolPkg "qisitv/backend/internal/protocol"
 	"qisitv/backend/internal/providerpreset"
 )
 
@@ -137,17 +138,23 @@ func NormalizeModelCapabilityConfigForModel(capability string, protocol string, 
 	return value, nil
 }
 
-type CapabilityNormalizer struct{}
-
-func NewCapabilityNormalizer() CapabilityNormalizer {
-	return CapabilityNormalizer{}
+type CapabilityNormalizer struct {
+	workflow WorkflowLookup
 }
 
-func (CapabilityNormalizer) NormalizeModelCapabilityDraft(draft ModelCapabilityDraft) (*ModelCapabilityConfig, error) {
-	return NormalizeModelCapabilityDraft(draft)
+func NewCapabilityNormalizer(workflow WorkflowLookup) CapabilityNormalizer {
+	return CapabilityNormalizer{workflow: workflow}
 }
 
-func NormalizeModelCapabilityDraft(draft ModelCapabilityDraft) (*ModelCapabilityConfig, error) {
+func (n CapabilityNormalizer) NormalizeModelCapabilityDraft(draft ModelCapabilityDraft) (*ModelCapabilityConfig, error) {
+	return NormalizeModelCapabilityDraft(draft, n.workflow)
+}
+
+func NormalizeModelCapabilityDraft(draft ModelCapabilityDraft, workflow ...WorkflowLookup) (*ModelCapabilityConfig, error) {
+	var workflowLookup WorkflowLookup
+	if len(workflow) > 0 {
+		workflowLookup = workflow[0]
+	}
 	if draft.VideoCapabilitiesVersion != nil && strings.TrimSpace(*draft.VideoCapabilitiesVersion) != "" {
 		if draft.CapabilityConfig == nil || draft.CapabilityConfig.Video == nil {
 			return nil, kernel.BadAuthRequest("当前视频模型能力尚未加载，请在设置中刷新模型列表")
@@ -167,9 +174,9 @@ func NormalizeModelCapabilityDraft(draft ModelCapabilityDraft) (*ModelCapability
 	baseURL := strings.TrimSpace(draft.BaseURL)
 	channelID := strings.TrimSpace(draft.ChannelID)
 
-	isBeefRoute := providerpreset.IsBeefAPIEndpoint(baseURL) || (baseURL == "" && strings.EqualFold(channelID, "beefapi"))
+	isBeefRoute := providerpreset.IsBeefTVEndpoint(baseURL) || (baseURL == "" && strings.EqualFold(channelID, "beeftv"))
 	if isBeefRoute {
-		if contract, ok := providerpreset.BeefAPIVideoContract(modelName); ok {
+		if contract, ok := providerpreset.BeefTVVideoContract(modelName); ok {
 			protocol = contract.Protocol
 			capability = "video"
 		} else if isSeedance2Family("newapi", modelName) && (protocol == "" || protocol == "openai" || protocol == "openai-response" || protocol == "chat-completion" || protocol == "openai-videos" || protocol == "newapi-channel-1" || protocol == "newapi-channel-2") {
@@ -194,6 +201,11 @@ func NormalizeModelCapabilityDraft(draft ModelCapabilityDraft) (*ModelCapability
 	}
 
 	result := DefaultModelCapabilityConfigForModel(protocol, modelName)
+	if workflowLookup != nil && capability == "video" && result.Video != nil {
+		if workflow, ok := workflowLookup(protocol, protocolPkg.CapabilityVideo, modelName); ok {
+			applyProtocolWorkflowVideoCapability(result.Video, workflow)
+		}
+	}
 	localItem := LocalChannelModel{
 		ChannelID:                channelID,
 		BaseURL:                  baseURL,
@@ -225,7 +237,7 @@ func NormalizeModelCapabilityDraft(draft ModelCapabilityDraft) (*ModelCapability
 		if input.Image != nil {
 			fixedBeefImage := false
 			if strings.EqualFold(protocol, "openai-image") && isBeefRoute {
-				if contract, ok := providerpreset.BeefAPIImageContract(modelName); ok && contract.FixedOutputs > 0 {
+				if contract, ok := providerpreset.BeefTVImageContract(modelName); ok && contract.FixedOutputs > 0 {
 					fixedBeefImage = true
 				}
 			}

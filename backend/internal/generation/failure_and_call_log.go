@@ -1,8 +1,6 @@
 package generation
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,7 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/buildinfo"
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
@@ -323,191 +321,6 @@ func normalizeProviderProgressKey(value string) string {
 	return strings.NewReplacer("_", "", "-", "", ".", "", " ", "").Replace(strings.ToLower(strings.TrimSpace(value)))
 }
 
-func EnrichAPICallLog(logEntry *model.ApiCallLog, responseBody []byte) {
-	if logEntry == nil {
-		return
-	}
-	if logEntry.ProviderRequestID == "" {
-		logEntry.ProviderRequestID = ProviderRequestIDFromPath(logEntry.Path)
-	}
-	for _, payload := range ProviderResponsePayloads(responseBody) {
-		enrichAPICallLogPayload(logEntry, payload)
-	}
-	enrichAPICallLogFailureSummary(logEntry, responseBody)
-}
-
-func enrichAPICallLogFailureSummary(logEntry *model.ApiCallLog, responseBody []byte) {
-	if logEntry.Status != model.ApiCallStatusFailed {
-		return
-	}
-	failure := ClassifyHTTP(logEntry.StatusCode, "", string(responseBody))
-	logEntry.ErrorCode = firstNonEmpty(failure.ProviderCode, failure.ErrorCode())
-	logEntry.Error = failure.UserMessage()
-}
-
-func enrichAPICallLogPayload(logEntry *model.ApiCallLog, payload map[string]any) {
-	nestedTaskID := ""
-	if data, ok := payload["data"].(map[string]any); ok {
-		if logEntry.Capability == "video" && strings.Contains(logEntry.Path, "/v1/video/generations") {
-			if extracted, err := firstJSONString(data, "task_id", "taskId"); err == nil {
-				nestedTaskID = extracted
-			}
-		}
-		for key, value := range data {
-			if _, exists := payload[key]; !exists {
-				payload[key] = value
-			}
-		}
-	}
-	if response, ok := payload["response"].(map[string]any); ok {
-		for key, value := range response {
-			if _, exists := payload[key]; !exists {
-				payload[key] = value
-			}
-		}
-	}
-	if logEntry.Status == model.ApiCallStatusFailed {
-		errorCode, errorMessage := FailureDetails(payload)
-		logEntry.ErrorCode = errorCode
-		if errorMessage != "" {
-			logEntry.Error = errorMessage
-		}
-	}
-	if usage, ok := payload["usage"].(map[string]any); ok {
-		inputTokens, inputAvailable := firstInt64Value(usage, "input_tokens", "prompt_tokens")
-		outputTokens, outputAvailable := firstInt64Value(usage, "output_tokens", "completion_tokens")
-		if inputAvailable {
-			logEntry.InputTokens = inputTokens
-		}
-		if outputAvailable {
-			logEntry.OutputTokens = outputTokens
-		}
-		if inputAvailable || outputAvailable {
-			logEntry.UsageAvailable = true
-		}
-		if logEntry.Capability == "video" && strings.Contains(logEntry.Path, "/contents/generations/tasks") {
-			if logEntry.OutputTokens == 0 {
-				logEntry.OutputTokens = firstInt64(usage, "total_tokens")
-			}
-			logEntry.UsageAvailable = logEntry.OutputTokens > 0
-		}
-		if details, ok := usage["input_tokens_details"].(map[string]any); ok {
-			logEntry.CachedTokens = firstInt64(details, "cached_tokens", "cache_read_input_tokens")
-		}
-		if details, ok := usage["prompt_tokens_details"].(map[string]any); ok && logEntry.CachedTokens == 0 {
-			logEntry.CachedTokens = firstInt64(details, "cached_tokens", "cache_read_input_tokens")
-		}
-		if logEntry.CachedTokens == 0 {
-			logEntry.CachedTokens = firstInt64(usage, "cached_tokens", "cache_read_input_tokens", "prompt_cache_hit_tokens")
-		}
-	}
-	if usage, ok := payload["usageMetadata"].(map[string]any); ok {
-		inputTokens, inputAvailable := firstInt64Value(usage, "promptTokenCount")
-		outputTokens, outputAvailable := firstInt64Value(usage, "candidatesTokenCount")
-		if inputAvailable {
-			logEntry.InputTokens = inputTokens
-		}
-		if outputAvailable {
-			logEntry.OutputTokens = outputTokens
-		}
-		if inputAvailable || outputAvailable {
-			logEntry.UsageAvailable = true
-		}
-		logEntry.CachedTokens = firstInt64(usage, "cachedContentTokenCount")
-	}
-	if extracted, err := firstJSONString(payload, "task_id", "id", "request_id", "name"); err == nil {
-		logEntry.ProviderRequestID = firstNonEmpty(nestedTaskID, extracted, logEntry.ProviderRequestID)
-	} else {
-		logEntry.ProviderRequestID = firstNonEmpty(nestedTaskID, logEntry.ProviderRequestID)
-	}
-	logEntry.ProviderStatus = strings.ToLower(firstNonEmpty(stringField(payload, "status"), logEntry.ProviderStatus))
-	if logEntry.ProviderStatus == "failed" || logEntry.ProviderStatus == "cancelled" || logEntry.ProviderStatus == "expired" {
-		logEntry.Status = model.ApiCallStatusFailed
-		errorCode, errorMessage := FailureDetails(payload)
-		logEntry.ErrorCode = firstNonEmpty(errorCode, logEntry.ErrorCode)
-		logEntry.Error = firstNonEmpty(errorMessage, logEntry.Error)
-	}
-	if logEntry.Capability == "image" {
-		if data, ok := payload["data"].([]any); ok {
-			logEntry.MediaCount = len(data)
-		} else if images, ok := payload["images"].([]any); ok {
-			logEntry.MediaCount = len(images)
-		}
-	}
-}
-
-func ProviderResponsePayloads(responseBody []byte) []map[string]any {
-	if len(responseBody) == 0 {
-		return nil
-	}
-	var payload map[string]any
-	if json.Unmarshal(responseBody, &payload) == nil {
-		return []map[string]any{payload}
-	}
-	result := make([]map[string]any, 0)
-	scanner := bufio.NewScanner(bytes.NewReader(responseBody))
-	scanner.Buffer(make([]byte, 64<<10), max(len(responseBody)+1, 64<<10))
-	dataLines := make([]string, 0, 1)
-	flush := func() {
-		raw := strings.TrimSpace(strings.Join(dataLines, "\n"))
-		dataLines = dataLines[:0]
-		if raw == "" || raw == "[DONE]" {
-			return
-		}
-		var event map[string]any
-		if json.Unmarshal([]byte(raw), &event) == nil {
-			result = append(result, event)
-		}
-	}
-	for scanner.Scan() {
-		line := strings.TrimSuffix(scanner.Text(), "\r")
-		if line == "" {
-			flush()
-			continue
-		}
-		if strings.HasPrefix(line, "data:") {
-			dataLines = append(dataLines, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
-		}
-	}
-	flush()
-	return result
-}
-
-func ProviderRequestIDFromPath(path string) string {
-	parts := strings.Split(strings.Trim(strings.TrimSpace(path), "/"), "/")
-	for index := len(parts) - 1; index >= 0; index-- {
-		part := strings.TrimSpace(parts[index])
-		if part == "" || part == "content" || part == "download" {
-			continue
-		}
-		if index > 0 && (parts[index-1] == "videos" || parts[index-1] == "tasks") {
-			return part
-		}
-		break
-	}
-	return ""
-}
-
-func firstInt64(values map[string]any, keys ...string) int64 {
-	value, _ := firstInt64Value(values, keys...)
-	return value
-}
-
-func firstInt64Value(values map[string]any, keys ...string) (int64, bool) {
-	for _, key := range keys {
-		switch value := values[key].(type) {
-		case float64:
-			return int64(value), true
-		case int64:
-			return value, true
-		case json.Number:
-			parsed, err := value.Int64()
-			return parsed, err == nil
-		}
-	}
-	return 0, false
-}
-
 func WriteMediaPart(writer *multipart.Writer, field string, media Media) error {
 	return writeMediaPart(writer, field, media)
 }
@@ -536,7 +349,7 @@ func RecordProviderRequest(repo *repository.Repository, logCall func(model.ApiCa
 		SyncProviderTaskProgress(repo, call.TaskID, responseBody)
 	}
 	if call.TaskID != "" && call.Capability == "video" && (requestKind == "create" || requestKind == "poll") && repo != nil {
-		settlement := ExtractBeefAPIVideoSettlementBytes(responseBody)
+		settlement := ExtractBeefTVVideoSettlementBytes(responseBody)
 		if settlement.UsageState != nil || settlement.ReconcileDeadline != nil {
 			_ = repo.UpdateTaskBeefVideoSettlement(call.TaskID, settlement.UsageState, settlement.ReconcileDeadline)
 		}
@@ -624,17 +437,17 @@ func EnsureChatCompletionStreamUsageRequest(data []byte) ([]byte, error) {
 	return json.Marshal(payload)
 }
 
-func PrepareBeefAPISeedanceReferencesForUser(ctx context.Context, userID string, input *Input, openResource func(userID, resourceID string) (*model.Resource, io.ReadCloser, error)) error {
-	if input == nil || input.Mode != "video" || !IsBeefAPISeedancePreuploadConfig(ctx, input.Config) {
+func PrepareBeefTVSeedanceReferencesForUser(ctx context.Context, userID string, input *Input, openResource func(userID, resourceID string) (*model.Resource, io.ReadCloser, error)) error {
+	if input == nil || input.Mode != "video" || !IsBeefTVSeedancePreuploadConfig(ctx, input.Config) {
 		return nil
 	}
-	return PrepareBeefAPIVideoReferences(ctx, input.Config, input, func(kind string, media Media) ([]byte, string, bool, error) {
-		return ReadBeefAPISeedanceMedia(userID, kind, media, openResource)
+	return PrepareBeefTVVideoReferences(ctx, input.Config, input, func(kind string, media Media) ([]byte, string, bool, error) {
+		return ReadBeefTVSeedanceMedia(userID, kind, media, openResource)
 	})
 }
 
-func ReadBeefAPISeedanceMedia(userID string, kind string, media Media, openResource func(userID, resourceID string) (*model.Resource, io.ReadCloser, error)) ([]byte, string, bool, error) {
-	if SkipBeefAPISeedanceMedia(media) {
+func ReadBeefTVSeedanceMedia(userID string, kind string, media Media, openResource func(userID, resourceID string) (*model.Resource, io.ReadCloser, error)) ([]byte, string, bool, error) {
+	if SkipBeefTVSeedanceMedia(media) {
 		return nil, "", true, nil
 	}
 	if raw := firstNonEmpty(media.DataURL, media.URL); strings.HasPrefix(strings.TrimSpace(raw), "data:") {
@@ -648,7 +461,7 @@ func ReadBeefAPISeedanceMedia(userID string, kind string, media Media, openResou
 		return nil, "", true, nil
 	}
 	if media.Bytes > 0 {
-		if err := ValidateBeefAPISeedanceMediaSize(kind, media.Bytes); err != nil {
+		if err := ValidateBeefTVSeedanceMediaSize(kind, media.Bytes); err != nil {
 			return nil, "", false, err
 		}
 	}
@@ -658,7 +471,7 @@ func ReadBeefAPISeedanceMedia(userID string, kind string, media Media, openResou
 		return nil, "", false, fmt.Errorf("读取任务参考资源失败：%w", err)
 	}
 	defer body.Close()
-	limit := BeefAPISeedanceKindMaxBytes(kind)
+	limit := BeefTVSeedanceKindMaxBytes(kind)
 	data, err := io.ReadAll(io.LimitReader(body, limit+1))
 	if err != nil {
 		return nil, "", false, fmt.Errorf("读取任务参考资源失败：%w", err)
@@ -756,7 +569,11 @@ func RecordTaskDiagnosticInput(ctx context.Context, input Input) {
 	if r == nil {
 		return
 	}
-	d := &model.TaskDiagnosticInput{Protocol: input.Config.InterfaceType, Model: input.Config.Model, Size: input.Config.Size, Quality: input.Config.Quality, Count: input.Config.Count,
+	quality := input.Config.Quality
+	if input.Mode == "video" {
+		quality = firstNonEmpty(input.Config.Quality, input.Config.VQuality)
+	}
+	d := &model.TaskDiagnosticInput{Protocol: input.Config.InterfaceType, Model: input.Config.Model, Size: input.Config.Size, Quality: quality, Count: input.Config.Count,
 		PromptChars: utf8.RuneCountInString(input.Prompt), ImageCount: len(input.ReferenceImages), VideoCount: len(input.ReferenceVideos), AudioCount: len(input.ReferenceAudios)}
 	for i, media := range input.ReferenceImages {
 		if i == 16 {
@@ -870,8 +687,8 @@ func CaptureTaskFailureDiagnostics(task *model.Task, err error, source string) {
 		d.Source, d.Stage, d.RequestID, d.HTTPStatus = "local_response", "本地响应大小校验", last.RequestID, last.HTTPStatus
 	}
 	var httpErr HTTPError
-	var managedHTTP *beefapi.MediaHTTPError
-	var managedTask *beefapi.MediaTaskError
+	var managedHTTP *beeftv.MediaHTTPError
+	var managedTask *beeftv.MediaTaskError
 	var payload PayloadError
 	var appErr *kernel.AppError
 	var upload *ReferenceUploadError
@@ -893,6 +710,11 @@ func CaptureTaskFailureDiagnostics(task *model.Task, err error, source string) {
 	case errors.As(err, &httpErr):
 		d.Source, d.HTTPStatus, d.ProviderCode = "upstream_http", httpErr.StatusCode, failure.ProviderCode
 		d.RequestID = firstNonEmpty(failure.RequestID, httpErr.RequestID)
+		var recoveryErr ImageRecoveryError
+		if errors.As(err, &recoveryErr) {
+			upstream := ClassifyHTTP(httpErr.StatusCode, "", httpErr.Body)
+			d.Summary = firstNonEmpty(upstream.ProviderMessage, upstream.UserMessage())
+		}
 	case errors.As(err, &managedHTTP):
 		d.Source, d.HTTPStatus, d.ProviderCode = "upstream_http", managedHTTP.StatusCode, failure.ProviderCode
 		d.RequestID = firstNonEmpty(failure.RequestID, managedHTTP.RequestID)

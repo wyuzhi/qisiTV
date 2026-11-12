@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 )
 
 func TestManagedUnknownVideoSendsCatalogResolutionAndExplicitBusinessSwitches(t *testing.T) {
@@ -47,8 +47,8 @@ func TestManagedUnknownVideoSendsCatalogResolutionAndExplicitBusinessSwitches(t 
 				_ = json.NewEncoder(w).Encode(map[string]string{"id": "same-task"})
 			}))
 			defer server.Close()
-			input := Input{Mode: "video", Prompt: "free wire fixture", Config: Config{CredentialRef: beefapi.CredentialRef, Model: "unseen-catalog-video", BaseURL: server.URL, APIKey: "fixture", VQuality: tc.quality}, VideoCapability: tc.profile, Metadata: map[string]any{"videoH3Options": map[string]any{"seed": float64(0), "enable_safety_checker": true, "sync_mode": index%2 == 0}}}
-			ctx := WithSubmissionKey(WithEndpoints(context.Background(), Endpoints{BeefAPIVideoBaseURL: server.URL}), "same-attempt")
+			input := Input{Mode: "video", Prompt: "free wire fixture", Config: Config{CredentialRef: beeftv.CredentialRef, Model: "unseen-catalog-video", BaseURL: server.URL, APIKey: "fixture", VQuality: tc.quality}, VideoCapability: tc.profile, Metadata: map[string]any{"videoH3Options": map[string]any{"seed": float64(0), "enable_safety_checker": true, "sync_mode": index%2 == 0}}}
+			ctx := WithSubmissionKey(WithEndpoints(context.Background(), Endpoints{BeefTVVideoBaseURL: server.URL}), "same-attempt")
 			policy := DefaultVideoPollPolicy()
 			policy.Sleep = func(context.Context, time.Duration) error { return context.Canceled }
 			if _, err := RunVideoTaskWithPolicy(ctx, input, policy); !errors.Is(err, context.Canceled) || creates != 1 {
@@ -61,7 +61,7 @@ func TestManagedUnknownVideoSendsCatalogResolutionAndExplicitBusinessSwitches(t 
 func TestManagedVideoCanonicalIntentHasNoModelTransportRules(t *testing.T) {
 	for _, id := range []string{"opaque-future-video", "minimax-h3-max", "seedance-2.5", "grok-imagine-video-1.5", "kling-video-v3"} {
 		input := Input{Prompt: "scene", Config: Config{Model: id, Size: "9:16", VideoSeconds: "0.925", VQuality: "768", VideoGenerateAudio: "false", VideoWatermark: "false"}, ReferenceImages: []Media{{ID: "first", URL: "https://example.com/first.png"}, {ID: "middle", URL: "https://example.com/middle.png"}, {ID: "last", URL: "https://example.com/last.png"}}, ReferenceVideos: []Media{{ID: "video", URL: "https://example.com/video.mp4"}}, ReferenceAudios: []Media{{ID: "audio", URL: "https://example.com/audio.wav"}}, Metadata: map[string]any{"videoEditOperation": "reference_to_video", "videoStartFrameNodeId": "first", "videoMiddleFrameNodeId": "middle", "videoEndFrameNodeId": "last", "videoMiddleFrameTime": 2.5, "videoReferenceOrder": []string{"audio", "first", "video", "middle", "last"}, "videoH3Options": map[string]any{"seed": float64(0), "prompt_expansion_mode": "quality", "damage_level": "heavy", "sync_mode": true, "enable_safety_checker": false}}}
-		body, err := BeefAPIVideoRequestBody(input)
+		body, err := BeefTVVideoRequestBody(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -134,10 +134,10 @@ func TestManagedUnknownVideoCreatesOnceAndResumesOnlyGET(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	ctx := WithSubmissionKey(WithEndpoints(context.Background(), Endpoints{BeefAPIVideoBaseURL: server.URL}), "stable-attempt")
+	ctx := WithSubmissionKey(WithEndpoints(context.Background(), Endpoints{BeefTVVideoBaseURL: server.URL}), "stable-attempt")
 	policy := DefaultVideoPollPolicy()
 	policy.Sleep = func(context.Context, time.Duration) error { return nil }
-	input := Input{Mode: "video", Prompt: "scene", Config: Config{CredentialRef: beefapi.CredentialRef, BaseURL: server.URL, APIKey: "fixture", Model: "opaque-future-video", InterfaceType: "stale-unknown-plugin", VQuality: "768", VideoSeconds: "5"}}
+	input := Input{Mode: "video", Prompt: "scene", Config: Config{CredentialRef: beeftv.CredentialRef, BaseURL: server.URL, APIKey: "fixture", Model: "opaque-future-video", InterfaceType: "stale-unknown-plugin", VQuality: "768", VideoSeconds: "5"}}
 	for _, call := range []context.Context{ctx, EnrichCallMeta(ctx, CallMeta{ProviderRequestID: "original"})} {
 		result, err := RunVideoTaskWithPolicy(call, input, policy)
 		if err != nil || result["mode"] != "video" {
@@ -152,7 +152,7 @@ func TestManagedUnknownVideoCreatesOnceAndResumesOnlyGET(t *testing.T) {
 func TestManagedUnknownVideoKeepsSameImageFirstAndLastAndRejectsMissingSelection(t *testing.T) {
 	input := Input{Config: Config{Model: "opaque-future"}, ReferenceImages: []Media{{ID: "same", URL: "https://example.com/same.png"}}, Metadata: map[string]any{"videoStartFrameNodeId": "same", "videoEndFrameNodeId": "same"}}
 	for i := 0; i < 5; i++ {
-		body, err := BeefAPIVideoRequestBody(input)
+		body, err := BeefTVVideoRequestBody(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -162,14 +162,14 @@ func TestManagedUnknownVideoKeepsSameImageFirstAndLastAndRejectsMissingSelection
 		}
 	}
 	input.Metadata["videoEndFrameNodeId"] = "missing"
-	if _, err := BeefAPIVideoRequestBody(input); err == nil {
+	if _, err := BeefTVVideoRequestBody(input); err == nil {
 		t.Fatal("missing selection ignored")
 	}
 	posts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { posts++; w.WriteHeader(500) }))
 	defer server.Close()
-	input.Config.BaseURL, input.Config.CredentialRef = server.URL, beefapi.CredentialRef
-	ctx := WithSubmissionKey(WithEndpoints(context.Background(), Endpoints{BeefAPIVideoBaseURL: server.URL}), "stable-invalid-frame")
+	input.Config.BaseURL, input.Config.CredentialRef = server.URL, beeftv.CredentialRef
+	ctx := WithSubmissionKey(WithEndpoints(context.Background(), Endpoints{BeefTVVideoBaseURL: server.URL}), "stable-invalid-frame")
 	if _, err := RunVideoTaskWithPolicy(ctx, input, DefaultVideoPollPolicy()); err == nil || posts != 0 {
 		t.Fatalf("invalid frame reached create: %v posts=%d", err, posts)
 	}

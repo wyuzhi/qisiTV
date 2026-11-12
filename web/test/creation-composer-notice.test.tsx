@@ -7,15 +7,15 @@ import { createModelChannel, defaultConfig } from "../src/stores/use-config-stor
 
 const model = "seedance-2.0";
 const capabilityConfig = defaultModelCapabilityConfig("newapi", model);
-const channel = createModelChannel({ id: "beefapi", name: "BeefAPI", scope: "user", interfaceType: "newapi", baseUrl: "https://enterprise.beefapi.com", models: [model] });
+const channel = createModelChannel({ id: "beeftv", name: "BeefTV", scope: "user", interfaceType: "newapi", baseUrl: "https://beeftv.app", models: [model] });
 channel.modelProfiles = [{ model, displayName: model, capability: "video", protocol: "newapi", capabilityConfig, videoCapabilitiesVersion: "fixture-v1" }];
-const config = { ...defaultConfig, channels: [channel], model: `beefapi::${model}`, videoModel: `beefapi::${model}` };
-const videoProfile = modelCapabilityConfigFor(config, `beefapi::${model}`).video!;
+const config = { ...defaultConfig, channels: [channel], model: `beeftv::${model}`, videoModel: `beeftv::${model}` };
+const videoProfile = modelCapabilityConfigFor(config, `beeftv::${model}`).video!;
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
 function render(notice?: string, currentConfig = config) {
-    const currentCapabilities = modelCapabilityConfigFor(currentConfig, `beefapi::${model}`);
+    const currentCapabilities = modelCapabilityConfigFor(currentConfig, `beeftv::${model}`);
     return renderToStaticMarkup(
         <QueryClientProvider client={queryClient}>
         <CreationComposer
@@ -37,7 +37,7 @@ function render(notice?: string, currentConfig = config) {
             onReplaceReferenceFiles={() => {}}
             onOpenLibrary={() => {}}
             onModeChange={() => {}}
-            model={`beefapi::${model}`}
+            model={`beeftv::${model}`}
             modelRequirements={{}}
             videoProfile={currentCapabilities.video!}
             imageProfile={currentCapabilities.image!}

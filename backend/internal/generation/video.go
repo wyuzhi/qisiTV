@@ -15,14 +15,14 @@ import (
 	"qisitv/backend/internal/providerpreset"
 )
 
-func RestoreBeefAPISeedanceAudioControl(ctx context.Context, config Config, video *VideoCapabilityConfig) {
+func RestoreBeefTVSeedanceAudioControl(ctx context.Context, config Config, video *VideoCapabilityConfig) {
 	if config.VideoCapabilitiesVersion != nil {
 		return
 	}
 	// Saved built-in profiles predate the supported audio switch. This is a
-	// BeefAPI contract correction, not an override of custom provider settings.
-	contract, known := providerpreset.BeefAPIVideoContract(config.Model)
-	if IsBeefAPIVideoConfig(ctx, config) && known && contract.Protocol == "newapi" && modelcatalog.IsSeedance2Family("newapi", config.Model) {
+	// BeefTV contract correction, not an override of custom provider settings.
+	contract, known := providerpreset.BeefTVVideoContract(config.Model)
+	if IsBeefTVVideoConfig(ctx, config) && known && contract.Protocol == "newapi" && modelcatalog.IsSeedance2Family("newapi", config.Model) {
 		video.GenerateAudio.Supported = true
 	}
 }
@@ -33,10 +33,10 @@ func RunVideoTask(ctx context.Context, input Input) (map[string]interface{}, err
 
 func RunVideoTaskWithPolicy(ctx context.Context, input Input, pollPolicy VideoPollPolicy) (map[string]interface{}, error) {
 	pollPolicy = videoPollPolicyForConfig(ctx, input.Config, pollPolicy)
-	// BeefAPI exposes its flat /v1/videos contract. Route it before
+	// BeefTV exposes its flat /v1/videos contract. Route it before
 	// protocol adapters so stale persisted channel metadata cannot select an
 	// incompatible legacy multipart or flat request shape.
-	if managedConnection(input.Config) || IsBeefAPIVideoConfig(ctx, input.Config) {
+	if managedConnection(input.Config) || IsBeefTVVideoConfig(ctx, input.Config) {
 		client, unified, err := useManagedMediaEnvelope(ctx, input.Config, "video")
 		if err != nil {
 			return nil, err
@@ -258,6 +258,19 @@ func ShouldSendNewAPIVideoImages(input Input) bool {
 // 本地测试 helper 没有能力配置时保留历史协议字段；真实系统任务会携带已解析的模型能力。
 func VideoCapabilitySupportsAudio(input Input) bool {
 	return input.VideoCapability == nil || input.VideoCapability.GenerateAudio.Supported
+}
+
+// explicitVideoGenerateAudio 只接受节点上真正设置过的 true/false。
+// 能力目录不可靠时也不能省略用户明确关掉的声音，否则上游会按默认值重新打开。
+func explicitVideoGenerateAudio(input Input) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(input.Config.VideoGenerateAudio)) {
+	case "true":
+		return true, true
+	case "false":
+		return false, true
+	default:
+		return false, false
+	}
 }
 
 func VideoCapabilitySupportsWatermark(input Input) bool {

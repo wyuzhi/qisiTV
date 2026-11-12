@@ -244,6 +244,12 @@ func specializeMediaConstraints(failure *Failure, fields extractedFields) {
 		return
 	}
 	message := promptEchoPattern.ReplaceAllString(fields.Message, "")
+	if strings.EqualFold(fields.Code, "reference_unavailable") {
+		failure.Category = CategoryInputInaccessible
+		failure.Reason = firstNonEmpty(sanitizeProviderText(message), "参考素材暂时无法读取")
+		failure.Action = "请稍后重试，或重新上传参考素材后再试"
+		return
+	}
 	if strings.EqualFold(fields.Code, "invalid_upscale_source") {
 		lower := strings.ToLower(message)
 		if strings.Contains(lower, "video") {
@@ -324,6 +330,8 @@ func specializeMediaConstraints(failure *Failure, fields extractedFields) {
 }
 
 func referenceMediaConstraintCopy(text string) (categoryCopy, bool) {
+	text = strings.SplitN(strings.TrimSpace(text), "。排查编号：", 2)[0]
+	text, _ = stripGatewayRequestIDSuffix(text)
 	if strings.HasPrefix(text, "当前渠道需要在线素材链接：") {
 		reason, action, _ := strings.Cut(text, "。")
 		return categoryCopy{Reason: reason, Action: action}, true
@@ -334,10 +342,9 @@ func referenceMediaConstraintCopy(text string) (categoryCopy, bool) {
 	if strings.HasPrefix(text, "当前渠道暂不支持直接使用本地素材") {
 		return categoryCopy{Reason: "当前渠道暂不支持直接使用本地素材", Action: "请使用可访问的 HTTPS 素材链接，或选择支持本地素材的渠道"}, true
 	}
-	if m := regexp.MustCompile(`^(当前模型(?:暂不支持参考(?:图片|视频|音频)|最多支持 \d+ 个参考(?:图片|视频|音频)))[，。](请[^\n]+)`).FindStringSubmatch(text); len(m) == 3 {
+	if m := regexp.MustCompile(`^(当前模型(?:暂不支持参考(?:图片|图|视频|音频)|(?:最多支持|至少需要) \d+ (?:张|个|段)?参考(?:图片|图|视频|音频)|不支持仅使用参考音频))[，。](请[^\n]+?)[。.]?$`).FindStringSubmatch(text); len(m) == 3 {
 		return categoryCopy{Reason: m[1], Action: m[2]}, true
 	}
-	text = strings.SplitN(text, "。排查编号：", 2)[0]
 	if m := regexp.MustCompile(`^(第 \d+ 个参考视频帧率无法读取)`).FindStringSubmatch(text); len(m) == 2 {
 		return categoryCopy{Reason: m[1], Action: "请重新导出 MP4/MOV 视频后上传，确保文件完整且包含有效的视频轨"}, true
 	}
@@ -486,6 +493,26 @@ func isResultsMissingText(value string) bool {
 	return strings.Contains(value, "没有返回图片") || strings.Contains(value, "没有返回视频") || strings.Contains(value, "没有可用结果") || strings.Contains(value, "接口没有返回")
 }
 
+func applyTerminalMessageCategory(failure *Failure, message string) bool {
+	switch {
+	case isNetworkText(message):
+		failure.Category = CategoryNetwork
+		return true
+	case isDownloadText(message):
+		failure.Category = CategoryDownloadFailed
+		failure.Uncertain = true
+		return true
+	case isCancelledText(message):
+		failure.Category = CategoryCancelled
+		return true
+	case isResultsMissingText(message):
+		failure.Category = CategoryResultsMissing
+		return true
+	default:
+		return false
+	}
+}
+
 func matchPersistedCategory(text string) FailureCategory {
 	if strings.HasPrefix(text, "当前账号额度不足") {
 		return CategoryQuotaUser
@@ -514,6 +541,100 @@ func matchPersistedCategory(text string) FailureCategory {
 		return CategoryTimeout
 	}
 	return CategoryUnknown
+}
+
+var (
+	infrastructureTextPattern    = regexp.MustCompile(`(?i)(?:接口请求失败|Request failed with status code|status(?:[_\s]+code)?\s*[:=]|Bad Gateway|Service Unavailable|Gateway Timeout|upstream_error|素材转换失败:|无可用渠道|暂无可用渠道)`)
+	persistedReferenceItemPrefix = regexp.MustCompile(`^参考(?:图片|图|视频|音频|素材) \d+：`)
+)
+
+func userFacingChineseCopy(raw string) (categoryCopy, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || htmlBodyPattern.MatchString(trimmed) || strings.ContainsAny(trimmed, "{}<>") {
+		return categoryCopy{}, false
+	}
+	if urlPattern.MatchString(trimmed) || signedQueryPattern.MatchString(trimmed) || credentialHeaderPattern.MatchString(trimmed) || secretPattern.MatchString(trimmed) || promptEchoPattern.MatchString(trimmed) || diagnosticLocalPath.MatchString(trimmed) {
+		return categoryCopy{}, false
+	}
+	if localDatabaseErrorPattern.MatchString(trimmed) || isLocalDiskFullMessage(trimmed) || infrastructureTextPattern.MatchString(trimmed) {
+		return categoryCopy{}, false
+	}
+	if _, policy := outboundPolicyCopy(trimmed); policy {
+		return categoryCopy{}, false
+	}
+	trimmed = strings.SplitN(trimmed, "。排查编号：", 2)[0]
+	trimmed, _ = stripGatewayRequestIDSuffix(trimmed)
+	clean := sanitizeProviderText(trimmed)
+	if clean == "" || strings.Contains(clean, "[已隐藏]") || strings.Contains(clean, "[路径已隐藏]") || !looksLikeUserFacingChinese(clean) {
+		return categoryCopy{}, false
+	}
+	clean = strings.TrimSpace(strings.TrimRight(clean, "。"))
+	switch clean {
+	case "", "请求失败", "操作失败", "生成失败", "任务失败", "已停止", "调用失败", "未知错误", "参数错误", "请求参数错误", "参数无效", "无效参数", "模型服务请求失败":
+		return categoryCopy{}, false
+	}
+	if clean == categoryCopies[CategoryUnknown].Reason+"。"+categoryCopies[CategoryUnknown].Action {
+		return categoryCopy{}, false
+	}
+	if isNetworkText(clean) || isDownloadText(clean) || isCancelledText(clean) || isResultsMissingText(clean) {
+		return categoryCopy{}, false
+	}
+	hanCount := 0
+	for _, r := range clean {
+		if unicode.Is(unicode.Han, r) {
+			hanCount++
+		}
+	}
+	if hanCount < 6 && !strings.ContainsAny(clean, "。，；：") {
+		return categoryCopy{}, false
+	}
+	if reason, action, ok := strings.Cut(clean, "。"); ok && strings.TrimSpace(action) != "" {
+		return categoryCopy{Reason: strings.TrimSpace(reason), Action: strings.TrimSpace(action)}, true
+	}
+	for _, sep := range []string{"，请", "；请"} {
+		if left, right, ok := strings.Cut(clean, sep); ok && strings.TrimSpace(left) != "" {
+			return categoryCopy{Reason: strings.TrimSpace(left), Action: "请" + strings.TrimSpace(right)}, true
+		}
+	}
+	return categoryCopy{Reason: clean}, true
+}
+
+func isActionableParameterCopy(copy categoryCopy) bool {
+	reason := strings.TrimSpace(copy.Reason)
+	action := strings.TrimSpace(copy.Action)
+	for _, prefix := range []string{"请稍后", "请查看", "请先查询", "请联系支持", "请重试", "点击「"} {
+		if strings.HasPrefix(action, prefix) {
+			return false
+		}
+	}
+	for _, generic := range []string{"生成失败", "请求失败", "操作失败", "任务失败", "调用失败", "模型服务请求失败", "暂时不可用", "服务繁忙", "系统繁忙", "频率", "频繁", "限流", "并发"} {
+		if strings.Contains(reason, generic) {
+			return false
+		}
+	}
+	hasSubject := false
+	for _, subj := range []string{"模型", "参考", "素材", "图片", "视频", "音频", "首帧", "尾帧", "首尾帧", "文件", "参数", "尺寸", "分辨率", "比例", "时长", "帧率", "编码", "格式", "提示词", "无法识别"} {
+		if strings.Contains(reason, subj) {
+			hasSubject = true
+			break
+		}
+	}
+	if !hasSubject {
+		return false
+	}
+	for _, verb := range []string{"调整", "减少", "更换", "裁剪", "重新导出", "上传", "移除", "修改", "缩短", "压缩", "图片用", "视频用", "音频用"} {
+		if strings.Contains(action, verb) {
+			return true
+		}
+	}
+	if action == "" {
+		for _, kw := range []string{"不支持", "仅支持", "只支持", "最多支持", "至少需要", "无法识别文件"} {
+			if strings.Contains(reason, kw) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func looksLikeUserFacingChinese(value string) bool {

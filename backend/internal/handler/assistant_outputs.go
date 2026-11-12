@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/operations"
 	"qisitv/backend/internal/skills"
 )
 
@@ -24,6 +25,9 @@ func assistantOutputsLine(line []byte, svc *app.Service, userID, canvasID, turnI
 		if state, err := svc.ReadAssistantTurnHistoryState(userID, canvasID, turnID); err == nil && state != nil {
 			event["proposalsInvalidated"] = state.ContinuationInvalidated
 			pins = state.SkillPins
+		}
+		if scriptProposals, err := operations.ListTurnSkillScriptProposals(svc.Database(), userID, canvasID, turnID); err == nil && len(scriptProposals) > 0 {
+			event["scriptProposals"] = scriptProposals
 		}
 	}
 	event["outputs"] = outputs

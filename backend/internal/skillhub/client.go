@@ -14,7 +14,25 @@ import (
 )
 
 const DefaultURL = "https://beeftv.app/api/beeftv/skillhub/v1"
-const MaxArchiveBytes = 10 << 20
+const MaxArchiveBytes = 100 << 20
+const MaxPackageBytes = 200 << 20
+const MaxNameRunes = 80
+const MaxDescriptionRunes = 1024
+const ScriptsPrefix = "scripts/"
+const AltScriptsPrefix = "script/"
+
+func IsScriptPath(filePath string) bool {
+	return strings.HasPrefix(filePath, ScriptsPrefix) || strings.HasPrefix(filePath, AltScriptsPrefix)
+}
+
+func HasScripts(files []File) bool {
+	for _, file := range files {
+		if IsScriptPath(file.Path) {
+			return true
+		}
+	}
+	return false
+}
 
 type File struct {
 	Path     string `json:"path"`
@@ -54,6 +72,7 @@ type Release struct {
 	PublishedAt   string         `json:"publishedAt"`
 	Signature     string         `json:"signature,omitempty"`
 	Attestation   *Attestation   `json:"attestation,omitempty"`
+	Compatibility *Compatibility `json:"compatibility,omitempty"`
 }
 type ReviewSummary struct {
 	ReviewedAt    string        `json:"reviewedAt"`
@@ -273,7 +292,7 @@ func (c *Client) ArchiveWithToken(ctx context.Context, route, token string) ([]b
 		return nil, err
 	}
 	if len(data) > MaxArchiveBytes {
-		return nil, fmt.Errorf("技能下载包超过10MiB")
+		return nil, fmt.Errorf("技能下载包超过100MiB")
 	}
 	return data, nil
 }

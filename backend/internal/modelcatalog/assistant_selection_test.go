@@ -51,13 +51,13 @@ func TestModelsOnlyDefaultTextSelectionBoundaries(t *testing.T) {
 }
 
 func TestManagedGeminiAssistantUsesCatalogAndPreservesExplicitSelection(t *testing.T) {
-	c := AssistantChannel{ID: "beefapi", Pinned: true, Enabled: true, APIKey: "synthetic", BaseURL: "https://example.test", Models: []string{"gemini-3.8-flash", "claude-opus-5-5"}, ModelProfiles: []AssistantModelProfile{{Model: "gemini-3.8-flash", Capability: "text", Protocol: "chat-completion"}, {Model: "claude-opus-5-5", Capability: "text"}}}
-	s := AssistantConfigSnapshot{TextModel: "beefapi::gemini-3.8-flash", Channels: []AssistantChannel{c}}
+	c := AssistantChannel{ID: "beeftv", Pinned: true, Enabled: true, APIKey: "synthetic", BaseURL: "https://example.test", Models: []string{"gemini-3.8-flash", "claude-opus-5-5"}, ModelProfiles: []AssistantModelProfile{{Model: "gemini-3.8-flash", Capability: "text", Protocol: "chat-completion"}, {Model: "claude-opus-5-5", Capability: "text"}}}
+	s := AssistantConfigSnapshot{TextModel: "beeftv::gemini-3.8-flash", Channels: []AssistantChannel{c}}
 	got, err := ResolveAssistantProvider(s, nil)
 	if err != nil || got.Model != "gemini-3.8-flash" || got.Protocol != "chat-completion" {
 		t.Fatalf("Gemini default unavailable: %v %#v", err, got)
 	}
-	s.AssistantModel = "beefapi::claude-opus-5-5"
+	s.AssistantModel = "beeftv::claude-opus-5-5"
 	got, err = ResolveAssistantProvider(s, nil)
 	if err != nil || got.Model != "claude-opus-5-5" {
 		t.Fatalf("explicit selection replaced: %v %#v", err, got)
@@ -70,24 +70,24 @@ func TestManagedGeminiAssistantUsesCatalogAndPreservesExplicitSelection(t *testi
 }
 
 func TestManagedAssistantSelectionDoesNotBypassCuratedModels(t *testing.T) {
-	c := AssistantChannel{ID: "beefapi", Pinned: true, Enabled: true, APIKey: "synthetic", BaseURL: "https://example.test", Models: []string{"qwen", "claude-opus-5-5"}, ModelProfiles: []AssistantModelProfile{{Model: "qwen", Capability: "text"}, {Model: "claude-opus-5-5", Capability: "text"}}}
-	s := AssistantConfigSnapshot{TextModel: "beefapi::qwen", Channels: []AssistantChannel{c}}
+	c := AssistantChannel{ID: "beeftv", Pinned: true, Enabled: true, APIKey: "synthetic", BaseURL: "https://example.test", Models: []string{"qwen", "claude-opus-5-5"}, ModelProfiles: []AssistantModelProfile{{Model: "qwen", Capability: "text"}, {Model: "claude-opus-5-5", Capability: "text"}}}
+	s := AssistantConfigSnapshot{TextModel: "beeftv::qwen", Channels: []AssistantChannel{c}}
 	if _, err := ResolveAssistantProvider(s, nil); err == nil {
 		t.Fatal("text fallback bypassed curated models")
 	}
-	s.TextModel = "beefapi::claude-opus-5-5"
-	s.AssistantModel = "beefapi::missing"
+	s.TextModel = "beeftv::claude-opus-5-5"
+	s.AssistantModel = "beeftv::missing"
 	if _, err := ResolveAssistantProvider(s, nil); err == nil {
 		t.Fatal("explicit unavailable model silently fell back")
 	}
-	s.AssistantModel = "beefapi::claude-opus-5-5"
+	s.AssistantModel = "beeftv::claude-opus-5-5"
 	got, err := ResolveAssistantProvider(s, nil)
 	if err != nil || got.Model != "claude-opus-5-5" {
 		t.Fatalf("selection not effective: %v %#v", err, got)
 	}
 	s.Channels[0].Models = append(s.Channels[0].Models, "gpt-6.1-sol")
 	s.Channels[0].ModelProfiles = append(s.Channels[0].ModelProfiles, AssistantModelProfile{Model: "gpt-6.1-sol", Capability: "text"})
-	s.AssistantModel = "beefapi::gpt-6.1-sol"
+	s.AssistantModel = "beeftv::gpt-6.1-sol"
 	if _, err := ResolveAssistantProvider(s, nil); err == nil {
 		t.Fatal("deferred model became available merely through catalog membership")
 	}
@@ -99,8 +99,8 @@ func TestManagedAssistantSelectionDoesNotBypassCuratedModels(t *testing.T) {
 }
 
 func TestManagedAssistantResolvesOnlyDeclaredAvailableAliases(t *testing.T) {
-	c := AssistantChannel{ID: "beefapi", Pinned: true, Enabled: true, APIKey: "synthetic", BaseURL: "https://example.test", Models: []string{"opus-live"}, ModelAliases: map[string]string{"claude-opus-5-5": "opus-live"}, ModelProfiles: []AssistantModelProfile{{Model: "opus-live", Capability: "text", Protocol: "claude-api"}}}
-	s := AssistantConfigSnapshot{AssistantModel: "beefapi::claude-opus-5-5", Channels: []AssistantChannel{c}}
+	c := AssistantChannel{ID: "beeftv", Pinned: true, Enabled: true, APIKey: "synthetic", BaseURL: "https://example.test", Models: []string{"opus-live"}, ModelAliases: map[string]string{"claude-opus-5-5": "opus-live"}, ModelProfiles: []AssistantModelProfile{{Model: "opus-live", Capability: "text", Protocol: "claude-api"}}}
+	s := AssistantConfigSnapshot{AssistantModel: "beeftv::claude-opus-5-5", Channels: []AssistantChannel{c}}
 	got, err := ResolveAssistantProvider(s, nil)
 	if err != nil || got.Model != "opus-live" {
 		t.Fatalf("alias not resolved: %v %#v", err, got)

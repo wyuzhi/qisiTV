@@ -81,7 +81,7 @@ describe('creative producer durable host', () => {
     const fixture = await createProducerFixture({ canvasState, withSkills: true });
     try {
       const entry = await fixture.store.ensureSession('canvas-1');
-      const state = defineDoc({ kind: 'beeftv.host', version: 1, scope: 'session', initial: () => ({}) });
+      const state = defineDoc({ kind: 'beeftv.host', version: 1, scope: 'session', initial: () => ({}), checkpointWhen: () => true });
       expect((await entry.harness.snapshot(state, BACKGROUND_CONTEXT)).lastStudioSnapshotRevision).toBeNull();
       await entry.harness.commit(async tx => {
         const doc = await tx.doc(state);

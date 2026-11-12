@@ -422,6 +422,13 @@ export function defaultVideoCapabilityConfig(protocol?: ModelProtocol, model = "
         video.returnLastFrame = { supported: true, default: false };
         video.references = overlayOfficialSeedance2References(video.references, isSeedance25Model(model));
         video.operations = Array.from(new Set([...video.operations, "reference_to_video", ...(isSeedance25Model(model) ? (["audio_to_video", "inpaint", "extend"] as const) : [])]));
+        if (isSeedance2FastOrMiniModel(model)) {
+            const filtered = video.resolutions.filter((value) => ["480p", "720p"].includes(value.trim().toLowerCase()));
+            video.resolutions = filtered.length ? filtered : ["480p", "720p"];
+            if (!video.resolutions.some((value) => value.trim().toLowerCase() === video.defaultResolution.trim().toLowerCase())) {
+                video.defaultResolution = video.resolutions.find((value) => value.trim().toLowerCase() === "720p") || video.resolutions[0] || "720p";
+            }
+        }
         if (isSeedance25Model(model)) {
             if (!video.ratios.includes("adaptive")) video.ratios = [...video.ratios, "adaptive"];
             if (video.resolutions.some((value) => value.toLowerCase() === "480p")) {
@@ -486,7 +493,7 @@ export function alignDocumentedVideoRouteLimits(video: VideoCapabilityConfig | u
     if (!isSeedance2Family(protocol, modelName)) return;
     let host = "";
     try { host = new URL(channel?.baseUrl || "").hostname.toLowerCase(); } catch { /* no public URL */ }
-    const materialHost = ["beeftv.app", "enterprise.beefapi.com", "beefapi.com", "whatstoken.ai", "www.whatstoken.ai"].includes(host) || channel?.id === "beefapi";
+    const materialHost = ["beeftv.app", "whatstoken.ai", "www.whatstoken.ai"].includes(host) || channel?.id === "beeftv";
     if ((isVolcengineArkVideoProtocol(protocol) || materialHost) && video.references.minVideoPixels === 409600 && video.references.maxVideoPixels === 8295044) video.references.minVideoPixels = 407696;
     // 输出时长下限官方 4 秒：区间、连续（fractionalMin）和枚举三种配置都要收紧，枚举里的 -1（自动）保留。
     video.duration = tightenDocumentedOutputDuration(video.duration);
@@ -500,6 +507,11 @@ export function isSeedance2Family(protocol: ModelProtocol | undefined, modelName
 export function isSeedance25Model(modelName: string) {
     const base = String(modelName).trim().toLowerCase().split("/").pop() || "";
     return /^seedance-2\.5(?:-|$)/.test(base) || /^(?:doubao|dreamina)-seedance-2[.-]5(?:-|$)/.test(base);
+}
+
+export function isSeedance2FastOrMiniModel(modelName: string) {
+    const base = String(modelName).trim().toLowerCase().split("/").pop() || "";
+    return /^(?:(?:doubao|dreamina)-)?seedance-2[.-]0-(?:fast|mini)(?:-|$)/.test(base);
 }
 
 // 输出时长下限官方 4 秒：区间、连续（fractionalMin）和枚举三种已保存配置都要收紧，
@@ -556,7 +568,7 @@ export function normalizeVideoValue(profile: VideoCapabilityConfig, value: { sec
     const duration = profile.duration.selection === "enum" ? ((profile.duration.values || []).includes(Number(value.seconds)) ? Number(value.seconds) : profile.duration.default) : normalizeRangeDuration(profile, Number(value.seconds));
     const ratio = resolveVideoRatioValue(profile, value.ratio);
     // 前端状态历史上保存过 `720`，而能力配置和供应商通常使用 `720p`；统一按能力中的原始值返回，避免被误判为不支持。
-    const resolution = resolveVideoResolutionValue(profile, value.resolution);
+    const resolution = resolveVideoResolutionValue(profile, value.resolution, value.ratio);
     return { seconds: String(duration), ratio, resolution };
 }
 
@@ -564,28 +576,89 @@ export function resolveVideoRatioValue(profile: VideoCapabilityConfig, value: st
     return profile.ratios.includes(value || "") ? value! : profile.defaultRatio || profile.ratios[0] || "";
 }
 
-export function resolveVideoResolutionValue(profile: VideoCapabilityConfig, value: string | undefined) {
-    return videoResolutionRequest(profile, value) || profile.defaultResolution || profile.resolutions[0] || "";
+export function resolveVideoResolutionValue(profile: VideoCapabilityConfig, value: string | undefined, ratio?: string) {
+    return videoResolutionRequest(profile, value, ratio) || profile.defaultResolution || profile.resolutions[0] || "";
 }
 
-export function videoResolutionRequest(profile: VideoCapabilityConfig, value: string | undefined) {
+export function videoResolutionRequest(profile: VideoCapabilityConfig, value: string | undefined, ratio?: string) {
     const requested = String(value || "")
         .trim()
         .toLowerCase();
-    if (!requested || requested === "auto" || requested === "default" || requested === "medium" || requested === "high") return undefined;
-    const candidates = [requested];
-    if (/^\d+$/.test(requested)) candidates.push(`${requested}p`);
-    if (requested === "low") candidates.push("480p");
-    if (requested === "2k") candidates.push("1440p");
-    if (requested === "1440" || requested === "1440p") candidates.push("2k");
-    if (requested === "4k") candidates.push("2160p");
-    if (requested === "2160" || requested === "2160p") candidates.push("4k");
     const supported = new Map(profile.resolutions.map((resolution) => [resolution.trim().toLowerCase(), resolution.trim()]));
-    for (const candidate of candidates) {
-        const match = supported.get(candidate);
-        if (match) return match;
+    if (requested && requested !== "auto" && requested !== "default" && requested !== "medium" && requested !== "high") {
+        const candidates = [requested];
+        if (/^\d+$/.test(requested)) candidates.push(`${requested}p`);
+        if (requested === "low") candidates.push("480p");
+        if (requested === "2k") candidates.push("1440p");
+        if (requested === "1440" || requested === "1440p") candidates.push("2k");
+        if (requested === "4k") candidates.push("2160p");
+        if (requested === "2160" || requested === "2160p") candidates.push("4k");
+        for (const candidate of candidates) {
+            const match = supported.get(candidate);
+            if (match) return match;
+        }
+    }
+    if (!profile.ratios.length) {
+        const directional = profile.resolutions
+            .map((resolution) => {
+                const raw = resolution.trim();
+                const match = raw.match(/^(\d+)p(.+)$/i);
+                return match ? { raw, height: Number(match[1]), dir: match[2].trim().toLowerCase() } : null;
+            })
+            .filter((entry): entry is { raw: string; height: number; dir: string } => Boolean(entry && Number.isFinite(entry.height)));
+        if (directional.length) {
+            const requestedHeight = resolveRequestedVideoTierHeight(requested, directional);
+            const rawRatio = String(ratio || "").trim();
+            const ratioDir = parseVideoOrientationSuffix(rawRatio);
+            if (requestedHeight !== undefined || ratioDir) {
+                const defaultMatch = profile.defaultResolution.trim().match(/^(\d+)p(.+)$/i);
+                const targetHeight = requestedHeight ?? (defaultMatch ? Number(defaultMatch[1]) : directional[0]!.height);
+                const defaultDir = defaultMatch ? defaultMatch[2].trim().toLowerCase() : "竖";
+                const primaryDir = ratioDir || defaultDir;
+                const dirs = Array.from(new Set([primaryDir, defaultDir, "竖", "横", "(1:1)", ...directional.map((entry) => entry.dir)]));
+                const uniqueHeights = Array.from(new Set(directional.map((entry) => entry.height))).sort(
+                    (left, right) => Math.abs(left - targetHeight) - Math.abs(right - targetHeight) || right - left,
+                );
+                for (const height of uniqueHeights) {
+                    for (const dir of dirs) {
+                        const found = directional.find((entry) => entry.height === height && entry.dir === dir);
+                        if (found) return found.raw;
+                    }
+                }
+            }
+        }
     }
     return undefined;
+}
+
+function resolveRequestedVideoTierHeight(requested: string, directional: Array<{ height: number }>): number | undefined {
+    const namedHeights: Record<string, number> = {
+        low: 480, "480": 480, "480p": 480,
+        medium: 720, "720": 720, "720p": 720,
+        high: 1080, "1080": 1080, "1080p": 1080,
+        "1440": 1440, "1440p": 1440, "2k": 1440,
+        "2160": 2160, "2160p": 2160, "4k": 2160,
+    };
+    if (namedHeights[requested] !== undefined) return namedHeights[requested];
+    const bareMatch = requested.match(/^(\d+)p?$/);
+    if (!bareMatch) return undefined;
+    const height = Number(bareMatch[1]);
+    return directional.some((entry) => entry.height === height) ? height : undefined;
+}
+
+function parseVideoOrientationSuffix(rawRatio: string): string | undefined {
+    const normalized = rawRatio.trim().toLowerCase();
+    if (!normalized) return undefined;
+    if (normalized === "横" || normalized === "landscape") return "横";
+    if (normalized === "竖" || normalized === "portrait") return "竖";
+    if (normalized === "(1:1)" || normalized === "square") return "(1:1)";
+    const parts = normalized.match(/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/);
+    if (!parts) return "竖";
+    const width = Number(parts[1]);
+    const height = Number(parts[2]);
+    if (!(width > 0 && height > 0)) return undefined;
+    if (Math.abs(width - height) < 1e-6) return "(1:1)";
+    return width > height ? "横" : "竖";
 }
 
 function normalizeRangeDuration(profile: VideoCapabilityConfig, value: number) {
@@ -615,7 +688,7 @@ export function videoDurationRequirement(duration: VideoCapabilityConfig["durati
 
 export function videoDurationOptions(profile: VideoCapabilityConfig) {
     if (profile.duration.selection === "enum") return profile.duration.values || [];
-    if (profile.duration.continuous) return [profile.duration.fractionalMin || profile.duration.min || .92,...Array.from({length:15},(_,i)=>i+1)];
+    if (profile.duration.continuous) return [profile.duration.fractionalMin || profile.duration.min || .92, ...Array.from({ length: Math.max(1, Math.floor(profile.duration.max || 15)) }, (_, i) => i + 1)];
     const min = profile.duration.min || 1;
     const max = profile.duration.max || min;
     const step = profile.duration.step || 1;

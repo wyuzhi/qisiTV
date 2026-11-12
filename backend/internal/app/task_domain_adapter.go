@@ -59,7 +59,7 @@ func toTaskCreateRequest(req CreateTaskRequest) localtask.CreateRequest {
 type taskCatalogAdapter struct{ s *Service }
 
 func (a taskCatalogAdapter) Select(userID string, req localtask.SelectRequest) (localtask.SelectResult, error) {
-	return localtask.SelectCatalogTask(userID, req, a.s.upscaleConfig, a.s.RequireWorkflowPluginForUser, func() (bool, error) {
+	return localtask.SelectCatalogTask(userID, req, a.s.upscaleConfig, func() (bool, error) {
 		return a.s.FeatureEnabled(FeatureFrontendModels)
 	}, a.s.taskSelectLookup(), a.s.likeAIUpscaleConfig)
 }
@@ -86,7 +86,7 @@ func (taskCatalogAdapter) HasExecutableVideoConfig(input map[string]any) bool {
 type taskSecretsAdapter struct{ s *Service }
 
 func (a taskSecretsAdapter) ResolveManaged(input map[string]any) (map[string]any, error) {
-	return a.s.resolveManagedBeefAPISecrets(input)
+	return a.s.resolveManagedBeefTVSecrets(input)
 }
 func (a taskSecretsAdapter) Protect(input map[string]any) error { return a.s.protectTaskSecrets(input) }
 func (a taskSecretsAdapter) DecryptInputJSON(raw string) (string, error) {
@@ -96,7 +96,7 @@ func (a taskSecretsAdapter) DecryptInputJSON(raw string) (string, error) {
 type taskMediaAdapter struct{ s *Service }
 
 func (a taskMediaAdapter) ValidateTransport(userID string, input map[string]any) error {
-	return localtask.ValidateTaskMediaTransport(userID, input, isWorkflowProviderInterface, a.s.resolveProviderConfig, a.s.bindGenerationRuntime, a.s.protocolRegistry())
+	return localtask.ValidateTaskMediaTransport(userID, input, a.s.resolveProviderConfig, a.s.bindGenerationRuntime, a.s.protocolRegistry())
 }
 func (taskMediaAdapter) ContainsInlineData(input map[string]any) bool {
 	return containsInlineMediaDataURL(input)

@@ -18,10 +18,10 @@ type (
 func (s *Service) compileHost() cw.CompileHost {
 	return cw.NewCompileHost(cw.CompileHostConfig{
 		EnsureResourceMetadata: s.EnsureResourceMediaMetadata,
-		Repo:                   s.repo, DataDir: s.dataDir, LocalMode: s.IsLocalMode(), ManagedCredRef: managedBeefAPIRef,
+		Repo:                   s.repo, DataDir: s.dataDir, LocalMode: s.IsLocalMode(), ManagedCredRef: managedBeefTVRef,
 		DecryptSetting: s.decryptSettingSecret, EncryptSetting: s.encryptSettingSecret,
 		DecryptTaskInput: s.decryptTaskInputJSON, ProtectTaskSecrets: s.protectTaskSecrets,
-		ManagedCredential:  func() (string, string, error) { k, b, _, _, err := s.lookupBeefAPICredential(); return k, b, err },
+		ManagedCredential:  func() (string, string, error) { k, b, _, _, err := s.lookupBeefTVCredential(); return k, b, err },
 		UpscaleAvailable:   func(name string) error { _, err := s.upscaleConfig(name); return err },
 		ValidateCapability: s.ValidateTaskCapability, ModelLookup: s.channelModelLookup(),
 		DecodeShape: func(raw []byte) (modelcatalog.TaskInput, error) {

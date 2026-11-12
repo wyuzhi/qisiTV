@@ -11,7 +11,7 @@ import (
 )
 
 func testProvider() assistant.Provider {
-	return assistant.Provider{Model: "gpt-5.5", BaseURL: "https://beefapi.com/v1", APIKey: "test-key", Protocol: "chat-completion"}
+	return assistant.Provider{Model: "gpt-5.5", BaseURL: "https://beeftv.app/v1", APIKey: "test-key", Protocol: "chat-completion"}
 }
 
 func testPin(opsURL, desktop string) childPin {
@@ -70,6 +70,7 @@ func TestResolveAssistantProviderPrefersExplicitEnv(t *testing.T) {
 
 // 协议决定宿主使用哪个 pi-ai 适配器，也决定接口地址要不要带 /v1：
 // OpenAI 兼容 SDK 在 baseURL 后直接拼路径，Anthropic SDK 自己拼 /v1/messages。
+// 渠道已写明的版本前缀（/api/v3、/v4 等）原样保留，和生成任务打到同一个地址。
 func TestAssistantHostEnvCarriesProtocolAndBaseURLShape(t *testing.T) {
 	dataDir := t.TempDir()
 	host := New(Options{DataDir: dataDir})
@@ -79,11 +80,15 @@ func TestAssistantHostEnvCarriesProtocolAndBaseURLShape(t *testing.T) {
 		wantAPI  string
 		wantBase string
 	}{
-		{"chat-completion", "https://enterprise.beefapi.com", "openai-completions", "https://enterprise.beefapi.com/v1"},
-		{"chat-completion", "https://enterprise.beefapi.com/v1/", "openai-completions", "https://enterprise.beefapi.com/v1"},
-		{"responses", "https://enterprise.beefapi.com", "openai-responses", "https://enterprise.beefapi.com/v1"},
-		{"claude-api", "https://enterprise.beefapi.com/v1", "anthropic-messages", "https://enterprise.beefapi.com"},
-		{"claude-api", "https://enterprise.beefapi.com", "anthropic-messages", "https://enterprise.beefapi.com"},
+		{"chat-completion", "https://beeftv.app", "openai-completions", "https://beeftv.app/v1"},
+		{"chat-completion", "https://beeftv.app/v1/", "openai-completions", "https://beeftv.app/v1"},
+		{"chat-completion", "https://gateway.example.com/api/v3", "openai-completions", "https://gateway.example.com/api/v3"},
+		{"chat-completion", "https://gateway.example.com/api/paas/v4/", "openai-completions", "https://gateway.example.com/api/paas/v4"},
+		{"chat-completion", "https://gateway.example.com/v1/chat/completions", "openai-completions", "https://gateway.example.com/v1"},
+		{"responses", "https://beeftv.app", "openai-responses", "https://beeftv.app/v1"},
+		{"responses", "https://gateway.example.com/api/v3", "openai-responses", "https://gateway.example.com/api/v3"},
+		{"claude-api", "https://beeftv.app/v1", "anthropic-messages", "https://beeftv.app"},
+		{"claude-api", "https://beeftv.app", "anthropic-messages", "https://beeftv.app"},
 	}
 	for _, item := range cases {
 		env := host.buildEnv(assistant.Provider{Model: "m", BaseURL: item.baseURL, APIKey: "k", Protocol: item.protocol},
@@ -145,6 +150,46 @@ func TestBundledAgentHostCommandFollowsAppLayout(t *testing.T) {
 			}
 			if got := BundledConfig(executable, goos); got.HostCommand != "" {
 				t.Fatalf("missing runtime must not fall back to PATH: %#v", got)
+			}
+		})
+	}
+}
+
+// 插件安装用随包 npm：路径与 scripts/package-agent-host.mjs 的 bundleNpmRuntime 一致。
+func TestBundledNpmCommandUsesNpmShippedNextToNode(t *testing.T) {
+	for _, goos := range []string{"darwin", "windows"} {
+		t.Run(goos, func(t *testing.T) {
+			root := t.TempDir()
+			executable := filepath.Join(root, "Contents", "MacOS", "BeefTV")
+			hostDir := filepath.Join(root, "Contents", "Resources", "agent-host")
+			node := filepath.Join(hostDir, "runtime", "bin", "node")
+			cli := filepath.Join(hostDir, "runtime", "lib", "node_modules", "npm", "bin", "npm-cli.js")
+			if goos == "windows" {
+				executable = filepath.Join(root, "BeefTV.exe")
+				hostDir = filepath.Join(root, "agent-host")
+				node = filepath.Join(hostDir, "runtime", "node.exe")
+				cli = filepath.Join(hostDir, "runtime", "node_modules", "npm", "bin", "npm-cli.js")
+			}
+			for _, file := range []string{node, filepath.Join(hostDir, "server.mjs")} {
+				if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(file, []byte("fixture"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := BundledNpmCommand(executable, goos); got != nil {
+				t.Fatalf("a runtime without npm must not invent one: %#v", got)
+			}
+			if err := os.MkdirAll(filepath.Dir(cli), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(cli, []byte("fixture"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			got := BundledNpmCommand(executable, goos)
+			if len(got) != 2 || got[0] != node || filepath.Clean(got[1]) != cli {
+				t.Fatalf("unexpected bundled npm command: %#v", got)
 			}
 		})
 	}

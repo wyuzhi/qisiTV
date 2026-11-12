@@ -3,8 +3,6 @@ package localapp
 import (
 	"context"
 	"fmt"
-
-	"qisitv/backend/internal/modelcatalog"
 )
 
 type Options struct {
@@ -47,20 +45,18 @@ func New(options Options) (*App, error) {
 		missing = "generation"
 	case options.ProviderConfig == nil:
 		missing = "provider config"
+	case options.ModelCapability == nil:
+		missing = "model capability"
 	case options.Lifecycle == nil:
 		missing = "lifecycle"
 	}
 	if missing != "" {
 		return nil, fmt.Errorf("local app requires %s port", missing)
 	}
-	modelCapability := options.ModelCapability
-	if modelCapability == nil {
-		modelCapability = modelcatalog.NewCapabilityNormalizer()
-	}
 	return &App{
 		Workspace: options.Workspace, Projects: options.Projects, Assets: options.Assets,
 		Tasks: options.Tasks, Generation: options.Generation, ProviderConfig: options.ProviderConfig,
-		ModelCapability: modelCapability,
+		ModelCapability: options.ModelCapability,
 		lifecycle:       options.Lifecycle,
 	}, nil
 }

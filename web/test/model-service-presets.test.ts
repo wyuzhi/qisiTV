@@ -1,11 +1,14 @@
 import { expect, test } from "bun:test";
-import { MODEL_SERVICE_PRESETS, serviceConnectionError, serviceModelProfile, modelCatalogRequestURL } from "../src/lib/model-service-presets";
+import { applyFetchedChannelModelCatalog } from "../src/lib/channel-model-catalog";
+import { MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, ll2ProtocolsAvailable, ysduiProtocolsAvailable, pluginServices, mergeSavedServiceChannel, presetCatalogFor, serviceConnectionError, serviceModelProfile, servicePresetFor } from "../src/lib/model-service-presets";
 import { modelConnectionResultDetail, testChannelModelConnection } from "../src/lib/model-connection-test";
-import { applyFetchedChannelModelCatalog, modelConfigChannelStatusLabel } from "../src/pages/settings/channel-settings-pane";
+import { modelConfigChannelStatusLabel } from "../src/pages/settings/channel-settings-pane";
 import { backendProviderConfig } from "../src/services/api/generation-task";
-import { configWithoutCachedSecrets, createModelChannel, defaultConfig } from "../src/stores/use-config-store";
-import { defaultModelCapabilityConfig } from "../src/lib/model-capabilities";
-import type { ModelProtocolDefinition } from "../src/lib/model-protocols";
+import { configWithoutCachedSecrets, createModelChannel, defaultConfig, normalizeConfigSnapshot } from "../src/stores/use-config-store";
+import { defaultModelCapabilityConfig, sanitizeServerImageCapability, sanitizeServerVideoCapability } from "../src/lib/model-capabilities";
+import { defaultProtocolForCapability, modelProtocolDefinition, type ModelProtocolDefinition } from "../src/lib/model-protocols";
+import { serviceCredentialGuide } from "../src/lib/service-credentials";
+import { toProviderDefinitions } from "../src/services/api/plugin-catalog";
 import { currentModelConnectionReceipt, useModelConnectionTests } from "../src/stores/use-model-connection-tests";
 
 const protocols = [
@@ -28,7 +31,7 @@ test("persisted boolean video options are normalized without turning false back 
     const channel = createModelChannel({ id: "custom", models: ["seedance-2.0-mini"], modelProfiles: [{ model: "seedance-2.0-mini", capability: "video", protocol: "newapi" }] });
     for (const enabled of [true, false]) {
         const persisted = JSON.parse(JSON.stringify({ ...defaultConfig, channels: [channel], model: "custom::seedance-2.0-mini", videoGenerateAudio: enabled, videoWatermark: false, videoArkPrivateAssetUpload: true }));
-        expect(backendProviderConfig(persisted, "video")).toMatchObject({ videoGenerateAudio: String(enabled), videoWatermark: "false", videoArkPrivateAssetUpload: "true" });
+        expect(backendProviderConfig(persisted)).toMatchObject({ videoGenerateAudio: String(enabled), videoWatermark: "false", videoArkPrivateAssetUpload: "true" });
     }
 });
 
@@ -108,10 +111,38 @@ test("refresh keeps selected/manual models and user capability limits", () => {
     expect(next.modelProfiles?.find((p) => p.model === "video-manual")).toEqual(channel.modelProfiles![0]);
 });
 
+test("a plugin service becomes one provider choice whose listed models use the plugin interface", () => {
+    const comfy = { value: "comfyui-app", label: "ComfyUI", capability: "image", enabled: true, module: true, authType: "none", baseUrl: "http://127.0.0.1:8188" } as ModelProtocolDefinition;
+    const services = pluginServices([...protocols, comfy, { ...comfy }, { ...comfy, value: "off", enabled: false }]);
+    expect(services.map((item) => item.value)).toEqual(["comfyui-app"]);
+
+    const channel = createPluginServiceChannel(comfy, "comfy");
+    expect(channel).toMatchObject({ id: "comfy", name: "ComfyUI", baseUrl: "http://127.0.0.1:8188", interfaceType: "comfyui-app" });
+    // 本机 ComfyUI 不要密钥：还没选模型时也能直接读取模型。
+    expect(serviceConnectionError(channel, { protocols: [comfy] })).toBe("");
+    expect(serviceCredentialGuide(channel, [comfy]).apiKeyHelp).toBe("这个服务不用密钥，可以留空。");
+    expect(serviceConnectionError(createPluginServiceChannel({ ...comfy, authType: "bearer" }, "keyed"), { protocols: [{ ...comfy, authType: "bearer" }] })).toBe("请填写 API Key");
+
+    expect(serviceModelProfile(channel, { id: "portrait.app.json", modelType: "image" }, [...protocols, comfy])).toMatchObject({ capability: "image", protocol: "comfyui-app" });
+});
+
+test("a plugin interface that makes images and videos is one service, and both kinds of model use it", () => {
+    const item = { id: "comfyui", version: "0.1.0", name: "ComfyUI", vendor: "ComfyUI", categories: ["image", "video"], scopes: ["user.custom-channel"], enabled: true, module: true, authType: "none", baseUrl: "http://127.0.0.1:8188" };
+    expect(toProviderDefinitions(item).map((definition) => `${definition.value}:${definition.capability}`)).toEqual(["comfyui:image", "comfyui:video"]);
+    expect(toProviderDefinitions(item, "video").map((definition) => definition.capability)).toEqual(["video"]);
+    expect(toProviderDefinitions(item, "audio")).toEqual([]);
+
+    const available = [...protocols, ...toProviderDefinitions(item)];
+    const services = pluginServices(available);
+    expect(services.map((service) => service.value)).toEqual(["comfyui"]);
+    const channel = createPluginServiceChannel(services[0], "comfy");
+    expect(serviceModelProfile(channel, { id: "invert.app.json", modelType: "image" }, available)).toMatchObject({ capability: "image", protocol: "comfyui" });
+    expect(serviceModelProfile(channel, { id: "clip.json", modelType: "video" }, available)).toMatchObject({ capability: "video", protocol: "comfyui" });
+});
+
 test("connection validation rejects full endpoints and embedded credentials", () => {
     const channel = createModelChannel({ baseUrl: "https://api.example.com/v1", apiKey: "synthetic-key" });
     expect(serviceConnectionError(channel)).toBe("");
-    expect(modelCatalogRequestURL(channel)).toBe("https://api.example.com/v1/models");
     expect(serviceConnectionError({ ...channel, baseUrl: "https://api.example.com/v1/chat/completions" })).not.toBe("");
     expect(serviceConnectionError({ ...channel, baseUrl: "https://secret@api.example.com" })).not.toBe("");
     expect(serviceConnectionError({ ...channel, referenceAssetOrigin: "https://assets.example.com" })).toBe("");
@@ -141,7 +172,7 @@ test("explicit asset origin survives channel creation and generation request ass
     const channel = createModelChannel({ id: "custom", baseUrl: "https://api.example.com/v1", referenceAssetOrigin: " https://assets.example.com ", models: ["sd-native-full-2.5"], modelProfiles: [{ model: "sd-native-full-2.5", capability: "video", protocol: "full-video" }] });
     const config = { ...defaultConfig, channels: [channel], model: "custom::sd-native-full-2.5" };
     expect(channel.referenceAssetOrigin).toBe("https://assets.example.com");
-    expect(backendProviderConfig(config, "video")).toMatchObject({ referenceAssetOrigin: channel.referenceAssetOrigin, interfaceType: "full-video" });
+    expect(backendProviderConfig(config)).toMatchObject({ referenceAssetOrigin: channel.referenceAssetOrigin, interfaceType: "full-video" });
 });
 
 test("saved credentials do not imply tested generation and browser cache omits all credential copies", () => {
@@ -163,7 +194,7 @@ test("generation test uses production config including headers and waits for a f
     const testResult = testChannelModelConnection(channel, "test-video", "video", "newapi", async (options) => {
         expect(options.config.videoSeconds).toBe("4");
         expect(options.config.vquality).toBe("720");
-        const request = backendProviderConfig(options.config, "video");
+        const request = backendProviderConfig(options.config);
         expect(request).toMatchObject({ headers: channel.headers, model: "test-video", apiKey: "synthetic-key", interfaceType: "newapi" });
         return completion;
     }).then((value) => { done = true; return value; });
@@ -195,5 +226,312 @@ test("official OpenAI and Gemini presets stop advertising discontinued video API
         expect(subtitle).not.toMatch(/·\s*(Veo\s*)?视频\s*$/);
     }
     expect(presets.get("compatible")).toContain("中转");
+    expect(presets.get("ll2")).toContain("视频");
+    expect(presets.get("ysdui")).toContain("视频");
     expect(presets.get("ark")).toContain("Seedance 视频");
+});
+
+test("Ysdui service preset resolves all 4 Ysdui protocols when plugin is enabled and fails closed when disabled", () => {
+    const ysduiProtocols = [
+        ...protocols,
+        { value: "ysdui-image", capability: "image", authType: "bearer", enabled: true } as ModelProtocolDefinition,
+        { value: "ysdui-image-task", capability: "image", authType: "bearer", enabled: true } as ModelProtocolDefinition,
+        { value: "ysdui-video", capability: "video", authType: "bearer", enabled: true } as ModelProtocolDefinition,
+    ];
+    expect(ysduiProtocolsAvailable(ysduiProtocols)).toBe(true);
+    expect(ysduiProtocolsAvailable(protocols)).toBe(false);
+
+    const channel = createServicePresetChannel("ysdui", "ysdui-test", ysduiProtocols);
+    const catalog = presetCatalogFor("ysdui");
+    expect(servicePresetFor(channel)).toBe("ysdui");
+    expect(channel.name).toBe("银盛云枢壹算");
+    expect(channel.baseUrl).toBe("https://tokenhub.ysdui.cn");
+    expect(channel.models).toHaveLength(32);
+    expect(catalog).toHaveLength(32);
+    expect(channel.models).toEqual(expect.arrayContaining(["hy3", "hy-role", "hy-mt2-pro"]));
+
+    for (const profile of channel.modelProfiles || []) {
+        if (profile.capability === "image") {
+            expect(sanitizeServerImageCapability(profile.capabilityConfig?.image)).not.toBeNull();
+        } else if (profile.capability === "video") {
+            expect(sanitizeServerVideoCapability(profile.capabilityConfig?.video)).not.toBeNull();
+        }
+    }
+    const seedreamPro = channel.modelProfiles?.find((item) => item.model === "doubao-seedream-5-0-pro-260628");
+    expect(seedreamPro?.capabilityConfig?.image?.sequentialGeneration?.supported).toBe(false);
+    expect(seedreamPro?.capabilityConfig?.image?.transparentBackground?.supported).toBe(true);
+    const seedreamLite = channel.modelProfiles?.find((item) => item.model === "doubao-seedream-5-0-260128");
+    expect(seedreamLite?.capabilityConfig?.image?.sequentialGeneration?.supported).toBe(true);
+
+    const legacyYsduiChannel = createModelChannel({
+        id: "ysdui",
+        baseUrl: "https://tokenhub.ysdui.cn",
+        models: ["doubao-seedream-5-0-pro-260628", "doubao-seedance-2-0-fast-260128", "wand-vega-video-1.0-lite"],
+        modelProfiles: [
+            {
+                model: "doubao-seedream-5-0-pro-260628",
+                capability: "image",
+                protocol: "ysdui-image" as ModelProtocolDefinition["value"],
+                capabilityConfig: {
+                    version: 1,
+                    image: {
+                        ...defaultModelCapabilityConfig("openai-image", "fixture").image!,
+                        transparentBackground: { supported: false, default: false },
+                        sequentialGeneration: { supported: true, default: false },
+                    },
+                },
+            },
+            {
+                model: "doubao-seedance-2-0-fast-260128",
+                capability: "video",
+                protocol: "ysdui-video" as ModelProtocolDefinition["value"],
+                capabilityConfig: {
+                    version: 1,
+                    video: {
+                        ...defaultModelCapabilityConfig("newapi", "fixture").video!,
+                        resolutions: ["480P", "720P", "1080P"],
+                        defaultResolution: "1080P",
+                    },
+                },
+            },
+            {
+                model: "wand-vega-video-1.0-lite",
+                capability: "video",
+                protocol: "ysdui-video" as ModelProtocolDefinition["value"],
+                capabilityConfig: {
+                    version: 1,
+                    video: {
+                        ...defaultModelCapabilityConfig("newapi", "fixture").video!,
+                        resolutions: ["720P", "1080P"],
+                        defaultResolution: "720P",
+                    },
+                },
+            },
+        ],
+    });
+    const hydratedYsdui = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [legacyYsduiChannel] } }).config.channels[0];
+    expect(hydratedYsdui.modelProfiles?.[0]?.capabilityConfig?.image?.sequentialGeneration?.supported).toBe(false);
+    expect(hydratedYsdui.modelProfiles?.[0]?.capabilityConfig?.image?.transparentBackground?.supported).toBe(true);
+    expect(hydratedYsdui.modelProfiles?.[1]?.capabilityConfig?.video?.resolutions).toEqual(["480P", "720P"]);
+    expect(hydratedYsdui.modelProfiles?.[1]?.capabilityConfig?.video?.defaultResolution).toBe("720P");
+    expect(hydratedYsdui.modelProfiles?.[2]?.capabilityConfig?.video?.resolutions).toEqual(["768P", "1080P"]);
+    expect(hydratedYsdui.modelProfiles?.[2]?.capabilityConfig?.video?.defaultResolution).toBe("768P");
+
+    const resolvedProtocols = new Set(
+        catalog.map((item) => serviceModelProfile(channel, item, ysduiProtocols).protocol),
+    );
+    expect([...resolvedProtocols].sort()).toEqual([
+        "chat-completion",
+        "ysdui-image",
+        "ysdui-image-task",
+        "ysdui-video",
+    ]);
+
+    const unknownImage = serviceModelProfile(channel, { id: "custom-ysdui-image-model", modelType: "image" }, ysduiProtocols);
+    expect(unknownImage.protocol).toBeUndefined();
+
+    const withoutPlugin = catalog.map((item) => serviceModelProfile(channel, item, protocols));
+    expect(withoutPlugin.find((profile) => profile.capability === "text")?.protocol).toBe("chat-completion");
+    for (const mediaProfile of withoutPlugin.filter((profile) => profile.capability !== "text")) {
+        expect(mediaProfile.protocol).toBeUndefined();
+    }
+});
+
+test("LL2 service preset resolves all 6 LL2 protocols when plugin is enabled and fails closed when disabled", () => {
+    const ll2Protocols = [
+        ...protocols,
+        ...["ll2-seedance-video", "ll2-vidu-video", "ll2-minimax-video", "ll2-super-vega-video", "ll2-auto-hd-video"].map(
+            (value) => ({ value, capability: "video", authType: "bearer", enabled: true } as ModelProtocolDefinition),
+        ),
+    ];
+    expect(ll2ProtocolsAvailable(ll2Protocols)).toBe(true);
+    expect(ll2ProtocolsAvailable(protocols)).toBe(false);
+
+    const channel = createServicePresetChannel("ll2", "ll2-test", ll2Protocols);
+    const catalog = presetCatalogFor("ll2");
+    expect(servicePresetFor(channel)).toBe("ll2");
+    expect(channel.name).toBe("LL2 (DMC)");
+    expect(channel.baseUrl).toBe("https://api.ll2.cn");
+    expect(channel.models).toHaveLength(9);
+    expect(catalog).toHaveLength(9);
+
+    const resolvedProtocols = new Set(
+        catalog.map((item) => serviceModelProfile(channel, item, ll2Protocols).protocol),
+    );
+    expect([...resolvedProtocols].sort()).toEqual([
+        "chat-completion",
+        "ll2-auto-hd-video",
+        "ll2-minimax-video",
+        "ll2-seedance-video",
+        "ll2-super-vega-video",
+        "ll2-vidu-video",
+    ]);
+
+    // When the LL2 plugin is disabled/missing, video models must not resolve to unavailable ll2-* protocols.
+    const withoutPlugin = catalog.map((item) => serviceModelProfile(channel, item, protocols));
+    expect(withoutPlugin.find((profile) => profile.capability === "text")?.protocol).toBe("chat-completion");
+    for (const videoProfile of withoutPlugin.filter((profile) => profile.capability === "video")) {
+        expect(videoProfile.protocol).toBeUndefined();
+    }
+
+    // Switching back to another preset clears LL2 preset models.
+    const switched = createServicePresetChannel("compatible", "ll2-test", ll2Protocols);
+    expect(switched.models).toEqual([]);
+    expect(presetCatalogFor("compatible")).toEqual([]);
+});
+
+test("mergeSavedServiceChannel prioritizes exact channel id, collapses duplicate LL2 channels, and remaps model selections", () => {
+    const ch1 = createModelChannel({ id: "ll2-first", name: "LL2 (DMC)", baseUrl: "https://api.ll2.cn", apiKey: "k1", models: ["deepseek-v4.1-flash"] });
+    const ch2 = createModelChannel({ id: "ll2-second", name: "LL2 (DMC) #2", baseUrl: "https://api.ll2.cn", apiKey: "k2", models: ["viduq3-pro"] });
+    const latest = {
+        ...defaultConfig,
+        channels: [ch1, ch2],
+        model: "ll2-first::deepseek-v4.1-flash",
+        videoModel: "ll2-second::viduq3-pro",
+        assistantModel: "ll2-first::deepseek-v4.1-flash",
+        mediaReviewModel: "ll2-second::viduq3-pro",
+    };
+
+    // Editing ch2 (exact match on id="ll2-second") keeps "ll2-second", collapses "ll2-first",
+    // remaps models supported by ch2, and clears selections not offered by ch2
+    const editedCh2 = { ...ch2, models: ["deepseek-v4.1-flash", "viduq3-pro"], apiKey: "k2-updated" };
+    const mergedFromEdit = mergeSavedServiceChannel(latest, editedCh2);
+    expect(mergedFromEdit.channels).toHaveLength(1);
+    expect(mergedFromEdit.channels[0].id).toBe("ll2-second");
+    expect(mergedFromEdit.channels[0].apiKey).toBe("k2-updated");
+    expect(mergedFromEdit.baseConfig.model).toBe("ll2-second::deepseek-v4.1-flash");
+    expect(mergedFromEdit.baseConfig.assistantModel).toBe("ll2-second::deepseek-v4.1-flash");
+    expect(mergedFromEdit.baseConfig.videoModel).toBe("ll2-second::viduq3-pro");
+
+    // When the surviving channel does NOT offer the removed channel's model, remapModel clears it instead of pointing to a missing model
+    const mergedNarrow = mergeSavedServiceChannel(latest, { ...ch2, models: ["viduq3-pro"] });
+    expect(mergedNarrow.baseConfig.assistantModel).toBe("");
+    expect(mergedNarrow.baseConfig.videoModel).toBe("ll2-second::viduq3-pro");
+
+    // Adding a brand new LL2 channel (no exact id match) collapses into existing "ll2-first"
+    const brandNew = createModelChannel({ id: "ll2-brand-new", name: "LL2 (DMC)", baseUrl: "https://api.ll2.cn", apiKey: "k3", models: ["MiniMax-H3"] });
+    const mergedFromNew = mergeSavedServiceChannel({ ...latest, channels: [ch1] }, brandNew);
+    expect(mergedFromNew.channels).toHaveLength(1);
+    expect(mergedFromNew.channels[0].id).toBe("ll2-first");
+    expect(mergedFromNew.channels[0].apiKey).toBe("k3");
+});
+
+test("legacy LL2 auto-hd profile upgrades expired testVideoUrl and removes unsupported 720p resolution", () => {
+    const ll2Protocols = [
+        ...protocols,
+        { value: "ll2-auto-hd-video", capability: "video", authType: "bearer", enabled: true } as ModelProtocolDefinition,
+    ];
+    const legacyChannel = createModelChannel({
+        id: "ll2",
+        baseUrl: "https://api.ll2.cn",
+        models: ["auto-hd"],
+        modelProfiles: [
+            {
+                model: "auto-hd",
+                capability: "video",
+                protocol: "ll2-auto-hd-video",
+                defaultOptions: {
+                    testVideoUrl: "https://h3-gz-public-1483601991.cos.ap-guangzhou.myqcloud.com/outputs/expired.mp4",
+                },
+                capabilityConfig: {
+                    version: 1,
+                    video: {
+                        duration: { selection: "enum", values: [5], default: 5 },
+                        ratios: [],
+                        defaultRatio: "",
+                        resolutions: ["720p", "1080p", "2k", "4k"],
+                        defaultResolution: "720p",
+                        generateAudio: { supported: false, default: false },
+                        watermark: { supported: false, default: false },
+                        operations: ["reference_to_video"],
+                        defaultOperation: "reference_to_video",
+                    },
+                },
+            },
+        ],
+    });
+    const upgraded = serviceModelProfile(legacyChannel, { id: "auto-hd", modelType: "video" }, ll2Protocols);
+    expect(upgraded.defaultOptions?.testVideoUrl).toContain("help-static-aliyun-doc.aliyuncs.com");
+    expect(upgraded.capabilityConfig?.video?.resolutions).toEqual(["1080p", "2k", "4k"]);
+    expect(upgraded.capabilityConfig?.video?.defaultResolution).toBe("1080p");
+
+    // Non-LL2 channel sharing a model name must not have its resolutions rewritten on config hydration
+    const nonLL2Channel = createModelChannel({
+        id: "ark-custom",
+        baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+        models: ["doubao-seedance-2-0"],
+        modelProfiles: [
+            {
+                model: "doubao-seedance-2-0",
+                capability: "video",
+                protocol: "volcengine-ark-video",
+                capabilityConfig: {
+                    version: 1,
+                    video: {
+                        duration: { selection: "range", min: 4, max: 15, step: 1, default: 5 },
+                        ratios: ["16:9"],
+                        defaultRatio: "16:9",
+                        resolutions: ["480p", "720p", "1080p"],
+                        defaultResolution: "1080p",
+                        generateAudio: { supported: true, default: true },
+                        watermark: { supported: true, default: false },
+                        operations: ["text_to_video"],
+                        defaultOperation: "text_to_video",
+                    },
+                },
+            },
+        ],
+    });
+    const hydrated = normalizeConfigSnapshot({ config: { ...defaultConfig, channels: [nonLL2Channel] } }).config;
+    expect(hydrated.channels[0].modelProfiles?.[0]?.capabilityConfig?.video?.resolutions).toEqual(["480p", "720p", "1080p"]);
+});
+
+test("a retired interface is not offered again but still names a saved choice", () => {
+    const item = { id: "old-video", version: "1.0.0", name: "旧视频接口", vendor: "Test", categories: ["video"], scopes: ["user.custom-channel"], enabled: true, retired: true, create: "POST /v1/old" };
+    const [definition] = toProviderDefinitions(item);
+    expect(definition.enabled).toBe(false);
+    expect(defaultProtocolForCapability("video", [definition])).not.toBe("old-video");
+    expect(modelProtocolDefinition("old-video", [definition])?.label).toBe("旧视频接口");
+});
+
+test("upgradeYsduiModelProfile preserves server-versioned capabilities and keeps user defaultResolution valid", async () => {
+    const { upgradeYsduiModelProfile } = await import("../../plugin-packages/beeftv-plugin-ysdui/client/presets.js");
+    const serverProfile = {
+        model: "doubao-seedream-5-0-pro-260628",
+        capability: "image",
+        protocol: "ysdui-image",
+        imageCapabilitiesVersion: "server-v2",
+        capabilityConfig: {
+            version: 1,
+            image: {
+                size: { parameter: "size", values: ["1:1"], default: "1:1" },
+                sequentialGeneration: { supported: true, default: false },
+            },
+        },
+    };
+    expect(upgradeYsduiModelProfile(serverProfile)).toBe(serverProfile);
+
+    const userVideoProfile = {
+        model: "wand-vega-video-1.0-lite",
+        capability: "video",
+        protocol: "ysdui-video",
+        capabilitySource: "user",
+        capabilityConfig: {
+            version: 1,
+            video: {
+                duration: { selection: "range", min: 4, max: 15, step: 1, default: 5 },
+                ratios: ["16:9"],
+                defaultRatio: "16:9",
+                resolutions: ["720P", "1080P"],
+                defaultResolution: "720P",
+                generateAudio: { supported: false, default: false },
+                watermark: { supported: false, default: false },
+                operations: ["text_to_video"],
+                defaultOperation: "text_to_video",
+            },
+        },
+    };
+    const migrated = upgradeYsduiModelProfile(userVideoProfile);
+    expect(migrated.capabilityConfig.video.resolutions).toEqual(["1080P"]);
+    expect(migrated.capabilityConfig.video.defaultResolution).toBe("1080P");
 });

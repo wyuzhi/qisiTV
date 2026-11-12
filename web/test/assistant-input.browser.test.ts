@@ -190,7 +190,9 @@ test("real Sidebar handles file, paste, drop, attachment-only, purpose/range, dr
     expect(chats).toHaveLength(2);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: "/tmp/beeftv-assistant-input-ui.png" }); await page.close();
-}, 30000);
+    // 这条用例串了文件、粘贴、拖放和草稿恢复；机器繁忙时 30 秒会不够，超时会被 bun 杀掉
+    // 共享浏览器，连累同文件其余用例，所以和其他重用例一样给 60 秒。
+}, 60000);
 
 test("asset registration failure remains unsent; explicit upload retry keeps its idempotency key and invalid range blocks send", async () => {
     const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
@@ -323,6 +325,12 @@ test("permission choices persist; trusted active mode locks the turn and supplem
     await page.reload();
     await page.waitForFunction(() => !document.querySelector<HTMLInputElement>('input[aria-label="助手权限"]')?.disabled);
     expect(await selectedText()).toBe("完全访问");
+    // 助手侧栏有 220ms 的进场位移动画，动画期间页面会短暂比视口宽；这里等它出现并停稳，
+    // 断言的是稳定后的布局，不会因为恰好取到动画中间一帧而失败。
+    await page.waitForFunction(() => {
+        const sidebars = [...document.querySelectorAll(".canvas-assistant-sidebar")];
+        return sidebars.length > 0 && sidebars.every(el => el.getAnimations().every(animation => animation.playState !== "running"));
+    }, { timeout: 5000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: "/tmp/beeftv-assistant-permissions-390.png" });
     await page.close();

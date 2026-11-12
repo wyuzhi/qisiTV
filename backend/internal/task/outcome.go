@@ -70,13 +70,20 @@ func ComputeOutcome(task model.Task, resultState string, facts OutcomeFacts) Out
 			return out("failed", regenerate, "no_result")
 		}
 	}
-	if task.Type == "canvas_image" && !task.IsUpscale() && (facts.HasImageReceipt || facts.ImageResponseAccepted || facts.SafeImageReplay || facts.DispatchState == "accepted" || facts.DispatchState == "submission_unknown" || task.Stage == "submission_unknown") {
+	pendingImageReceipt := facts.HasImageReceipt && facts.DispatchState != "rejected_no_job" && facts.DispatchState != "not_sent"
+	if task.Type == "canvas_image" && !task.IsUpscale() && (pendingImageReceipt || facts.ImageResponseAccepted || facts.SafeImageReplay || facts.DispatchState == "accepted" || facts.DispatchState == "submission_unknown" || task.Stage == "submission_unknown") {
 		return out("retrievable", "blocked", "image_recovery_pending")
 	}
 	if task.ProviderRequestID != "" || ((task.Type == "canvas_video" || task.Type == "canvas_audio" || strings.HasPrefix(task.Type, "video_") || task.IsUpscale()) && (facts.DispatchState == "submission_unknown" || task.Stage == "submission_unknown")) {
 		return out("retrievable", "blocked", "provider_result_pending")
 	}
 	return out("failed", regenerate, "task_failed")
+}
+
+// RegenerableFailure 是后端唯一的「失败后能在原节点重新生成」读法。
+// 进行中、可取回、正在核对扣费和已出结果的任务都继续占住节点。
+func RegenerableFailure(outcome Outcome) bool {
+	return outcome.Phase == "failed" && (outcome.Regenerate == "allowed" || outcome.Regenerate == "confirm")
 }
 
 // provablyNotSubmitted 只在持久证据能证明上游没有接到请求时成立。

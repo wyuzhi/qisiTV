@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Form, Input, Segmented, Select, Spin } from "antd";
 import { ArrowLeft, Check, ChevronDown, KeyRound, Search, Settings2, ShieldCheck } from "lucide-react";
 import { AppModal } from "@/components/ui/product/app-modal";
@@ -7,23 +7,33 @@ import { ChannelHeadersEditor, validateChannelHeaders } from "@/components/chann
 import { fetchChannelModels, type ChannelModelFetchResult } from "@/services/api/image-models";
 import { fetchPluginProviderCatalog } from "@/services/api/plugin-catalog";
 import { mergeFetchedChannelModelProfiles, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
-import { CAPABILITY_LABELS, MODEL_SERVICE_PRESETS, isTopazUpscaleChannel, modelCatalogRequestURL, serviceConnectionError, serviceModelProfile, servicePresetFor, type ModelServicePresetId } from "@/lib/model-service-presets";
-import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
+import { builtinProtocolsAvailable } from "@/lib/builtin-service-presets";
+import { CAPABILITY_LABELS, MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, createVendorPresetChannel, isBuiltinPresetService, isTopazUpscaleChannel, pluginServices, presetCatalogFor, presetModelCount, builtinPresetDescription, serviceConnectionError, serviceModelProfile, servicePresetFor, vendorPresetFor, vendorPresets, type ModelServicePresetId, type VendorPreset } from "@/lib/model-service-presets";
+import { capabilityForAssignedProtocol } from "@/lib/model-capabilities";
 import { serviceCredentialGuide } from "@/lib/service-credentials";
 import type { ModelProtocolDefinition } from "@/lib/model-protocols";
 import { seedancePortraitLabel } from "@/lib/seedance-portrait";
 import { createModelChannel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 import { ChannelModelSettings } from "./channel-model-settings";
+import { ChannelRequestAddressBlocks } from "./channel-request-addresses";
 import { currentModelConnectionReceipt, useModelConnectionTests } from "@/stores/use-model-connection-tests";
 import "./model-service-editor.css";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { getTransportFailureKind } from "@/services/api/request";
 
 export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: ModelChannel; onClose: () => void; onSave: (channel: ModelChannel) => Promise<void> }) {
-    const [draft, setDraft] = useState<ModelChannel>(() => initial ? structuredClone(initial) : { ...createModelChannel(), name: "", baseUrl: "" });
-    const [presetId, setPresetId] = useState<ModelServicePresetId>(() => initial ? servicePresetFor(initial) : "compatible");
+    const browser = isBrowserWorkspace();
+    const [draft, setDraft] = useState<ModelChannel>(() => initial ? structuredClone(initial) : browser ? createServicePresetChannel("qisi-api", createModelChannel().id) : { ...createModelChannel(), name: "", baseUrl: "" });
+    const [presetId, setPresetId] = useState<ModelServicePresetId>(() => initial ? servicePresetFor(initial) : browser ? "qisi-api" : "compatible");
     const [step, setStep] = useState(initial ? 1 : 0);
     const [advanced, setAdvanced] = useState(false);
-    const [catalog, setCatalog] = useState<ChannelModelCatalogItem[]>(() => (initial?.models || []).map((id) => ({ id })));
+    const [moreVendors, setMoreVendors] = useState(false);
+    const [catalog, setCatalog] = useState<ChannelModelCatalogItem[]>(() => {
+        const presetItems = initial ? presetCatalogFor(servicePresetFor(initial)) : [];
+        const byId = new Map(presetItems.map((item) => [item.id, item]));
+        for (const id of initial?.models || []) if (!byId.has(id)) byId.set(id, { id });
+        return [...byId.values()];
+    });
     const [catalogRead, setCatalogRead] = useState(false);
     const [protocols, setProtocols] = useState<ModelProtocolDefinition[]>([]);
     const [protocolLoading, setProtocolLoading] = useState(true);
@@ -55,7 +65,18 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
             return () => { alive.current = false; };
         }
         void fetchPluginProviderCatalog("user.custom-channel")
-            .then((items) => { if (alive.current) setProtocols(items); })
+            .then((items) => {
+                if (!alive.current) return;
+                setProtocols(items);
+                if (!initial) {
+                    setDraft((current) => {
+                        const preset = servicePresetFor(current);
+                        return isBuiltinPresetService(preset)
+                            ? { ...current, modelProfiles: presetCatalogFor(preset).map((item) => serviceModelProfile(current, item, items)) }
+                            : current;
+                    });
+                }
+            })
             .catch(() => { if (alive.current) setError("无法读取模型能力，请关闭后重试"); })
             .finally(() => { if (alive.current) setProtocolLoading(false); });
         return () => { alive.current = false; catalogRequest.current?.abort(); };
@@ -70,16 +91,18 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         setError("");
         setCatalogRead(false);
     };
-    const choosePreset = (id: ModelServicePresetId) => {
-        const preset = MODEL_SERVICE_PRESETS.find((item) => item.id === id)!;
+    const startService = (id: ModelServicePresetId, channel: ModelChannel) => {
         setPresetId(id);
-        setDraft({ ...createModelChannel({ id: draft.id, apiFormat: preset.apiFormat }), name: id === "compatible" ? "" : preset.name, baseUrl: preset.baseUrl });
-        setCatalog([]);
+        setDraft(channel);
+        setCatalog(presetCatalogFor(id));
         setCatalogRead(false);
         setAdvanced(false);
         setError("");
         setNotice("");
     };
+    const choosePreset = (id: ModelServicePresetId) => startService(id, createServicePresetChannel(id, draft.id, protocols));
+    const choosePluginService = (service: ModelProtocolDefinition) => startService("compatible", createPluginServiceChannel(service, draft.id));
+    const chooseVendor = (preset: VendorPreset) => startService("compatible", createVendorPresetChannel(preset, draft.id));
     const validateConnection = (requireCredential = true, channel: ModelChannel = draft) => {
         const problem = serviceConnectionError(channel, { protocols, requireCredential }) || validateChannelHeaders(channel.headers);
         if (problem) setError(problem);
@@ -121,7 +144,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
                 // 第二步没有「手动添加模型」按钮，只有下方的模型 ID 输入框；提示要跟着当前步骤走。
                 setNotice(servicePresetFor(draft) === "ark"
                     ? `火山方舟不提供 OpenAI 格式的模型目录，${step === 0 ? "点「手动添加模型」" : "在下面填写模型 ID"}手动填写。`
-                    : `读不到模型目录时仍可手动添加模型 ID，${step === 0 ? "点「手动添加模型」" : "在下面填写"}继续；生成仍需要正确的服务地址、凭证和请求协议。`);
+                    : `读不到模型目录时仍可手动添加模型 ID，${step === 0 ? "点「手动添加模型」" : "在下面填写"}继续；生成仍需要正确的服务地址、凭证和接口格式。`);
             }
         } finally { if (alive.current) setBusy(false); }
     };
@@ -140,11 +163,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
             ...profile,
             protocol: definition.value,
             authType: definition.authType,
-            capabilitySource: undefined,
-            capabilityConfig:
-                profile.capability === "image" || profile.capability === "video"
-                    ? defaultModelCapabilityConfig(definition.value, profile.model)
-                    : profile.capabilityConfig,
+            ...capabilityForAssignedProtocol(profile, definition.value, protocols, { keepNonMediaExisting: true }),
         };
     };
     const changeModelCapability = (id: string, capability: ModelCapability) => {
@@ -154,7 +173,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         setCatalog((current) => current.some((item) => item.id === id) ? current.map((item) => item.id === id ? nextItem : item) : [...current, nextItem]);
         setDraft((current) => ({ ...current, modelProfiles: [...(current.modelProfiles || []).filter((p) => p.model !== id), profile] }));
         if (draft.models.includes(id) && !profile.protocol) {
-            setNotice("请在高级模型设置中，为这个模型选择服务商要求的请求协议。");
+            setNotice("请在高级模型设置中，为这个模型选择服务商要求的接口格式。");
             setEditingCapabilities(true);
         }
         setError("");
@@ -164,7 +183,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         const profile = withSiblingProtocol(draft, serviceModelProfile(draft, item, protocols));
         setDraft((current) => ({ ...current, models: enabled ? [...new Set([...current.models, id])] : current.models.filter((model) => model !== id), modelProfiles: [...(current.modelProfiles || []).filter((p) => p.model !== id), profile] }));
         if (enabled && !profile.protocol) {
-            setNotice("请在高级模型设置中，按服务商文档选择请求协议。视频接口的地址和格式可能不同。");
+            setNotice("请在高级模型设置中，按服务商文档选择接口格式。视频接口的地址和格式可能不同。");
             setEditingCapabilities(true);
         }
         setError("");
@@ -179,7 +198,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         const nextItem: ChannelModelCatalogItem = { ...(existingItem || { id }), modelType: manualCapability };
         const profile = withSiblingProtocol(draft, serviceModelProfile(draft, nextItem, protocols, manualCapability));
         if (!profile.protocol) {
-            setNotice("请在高级模型设置中，为这个模型选择服务商要求的请求协议。");
+            setNotice("请在高级模型设置中，为这个模型选择服务商要求的接口格式。");
             setEditingCapabilities(true);
         }
         setCatalog((current) => current.some((item) => item.id === id) ? current.map((item) => item.id === id ? nextItem : item) : [...current, nextItem]);
@@ -194,7 +213,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         const profiles = isTopazUpscaleChannel(draft) ? draft.modelProfiles || [] : draft.models.map((id) => withSiblingProtocol(draft, serviceModelProfile(draft, catalog.find((item) => item.id === id) || { id }, protocols)));
         const missing = profiles.find((profile) => !profile.protocol);
         if (missing) {
-            setError(`${missing.model} 还需要选择请求协议，请打开高级模型设置`);
+            setError(`${missing.model} 还需要选择接口格式，请打开高级模型设置`);
             setEditingCapabilities(true);
             setFocusModel((current) => ({ model: missing.model, token: (current?.token || 0) + 1 }));
             return;
@@ -227,6 +246,15 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         </Form>
     </AppModal>;
     const selectedPreset = MODEL_SERVICE_PRESETS.find((item) => item.id === presetId)!;
+    const pluginServiceList = pluginServices(protocols);
+    const pluginService = pluginServiceList.find((item) => item.value === draft.interfaceType);
+    const vendorList = vendorPresets(protocols);
+    const vendor = !pluginService && presetId === "compatible" ? vendorPresetFor(draft, vendorList) : undefined;
+    const vendorsOpen = moreVendors || Boolean(vendor);
+    const builtinReady = !isBuiltinPresetService(presetId) || builtinProtocolsAvailable(presetId, protocols);
+    const builtinPluginWarning = isBuiltinPresetService(presetId) && !protocolLoading && !builtinReady
+        ? `请先在左侧「插件」中心启用 ${selectedPreset.name} 插件，再使用预置模型与协议。`
+        : "";
 
     return <AppModal open centered width={1000} flush footer={null} title={null} closable={!saving} keyboard={!saving} mask={{ closable: false }} onCancel={() => { catalogRequest.current?.abort(); onClose(); }} rootClassName="model-service-modal">
         <div className="model-service-header">
@@ -240,23 +268,45 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
             {step === 0 ? <div className="model-service-connection">
                 <aside className="model-service-providers" aria-label="选择服务商">
                     <p className="model-service-label">选择服务商</p>
-                    {MODEL_SERVICE_PRESETS.map((preset) => <button key={preset.id} type="button" disabled={busy || Boolean(initial)} aria-pressed={presetId === preset.id} className="model-service-provider" onClick={() => choosePreset(preset.id)}>
-                        <ModelLogo icon={preset.icon} size={24} />
-                        <span><strong>{preset.name}</strong><small>{preset.subtitle}</small></span>
-                        {presetId === preset.id && <Check size={15} />}
-                    </button>)}
+                    {MODEL_SERVICE_PRESETS.filter(preset => !browser || preset.apiFormat === "likeai").map((preset) => {
+                        const selected = !pluginService && !vendor && presetId === preset.id;
+                        return <button key={preset.id} type="button" disabled={busy || Boolean(initial)} aria-pressed={selected} className="model-service-provider" onClick={() => choosePreset(preset.id)}>
+                            <ModelLogo icon={preset.icon} size={24} />
+                            <span><strong>{preset.name}</strong><small>{preset.subtitle}</small></span>
+                            {selected && <Check size={15} />}
+                        </button>;
+                    })}
+                    {pluginServiceList.map((service) => {
+                        const selected = pluginService?.value === service.value;
+                        return <button key={service.value} type="button" disabled={busy || Boolean(initial)} aria-pressed={selected} className="model-service-provider" onClick={() => choosePluginService(service)}>
+                            <ModelLogo size={24} />
+                            <span><strong>{service.label}</strong><small>插件提供</small></span>
+                            {selected && <Check size={15} />}
+                        </button>;
+                    })}
+                    {vendorList.length > 0 && <div className="model-service-vendors">
+                        <button type="button" className="model-service-more" aria-expanded={vendorsOpen} disabled={Boolean(initial) && !vendor} onClick={() => setMoreVendors(!vendorsOpen)}>更多服务商<ChevronDown size={14} /></button>
+                        {vendorsOpen && <div className="model-service-vendor-list">
+                            {vendorList.map((preset) => {
+                                const selected = vendor?.id === preset.id;
+                                return <button key={preset.id} type="button" disabled={busy || Boolean(initial)} aria-pressed={selected} className="model-service-vendor" onClick={() => chooseVendor(preset)}>
+                                    <span>{preset.label}</span>{selected && <Check size={14} />}
+                                </button>;
+                            })}
+                        </div>}
+                    </div>}
                     <div className="model-service-note"><ShieldCheck size={16} /><p>密钥保存在这台设备上。<br />生成费用由服务商结算。</p></div>
                 </aside>
                 <Form layout="vertical" requiredMark={false} className="model-service-fields" disabled={busy} onFinish={() => void fetchModels()}>
-                    <div className="model-service-form-title"><ModelLogo icon={selectedPreset.icon} size={28} /><div><h3>{selectedPreset.name}</h3>{presetId === "compatible" && <p>可添加独立的文本助手与媒体服务，请选择该服务实际支持的协议。</p>}</div></div>
+                    <div className="model-service-form-title">{vendor ? <><ModelLogo size={28} /><div><h3>{vendor.label}</h3><p>填写 API Key 后读取模型。</p></div></> : pluginService ? <><ModelLogo size={28} /><div><h3>{pluginService.label}</h3><p>由插件接入。填好连接信息后，读取或手动添加这个服务能用的模型。</p></div></> : <><ModelLogo icon={selectedPreset.icon} size={28} /><div><h3>{selectedPreset.name}</h3>{presetId === "compatible" && <p>用户可以自行添加第三方模型服务，请选择该服务实际支持的接口格式</p>}{isBuiltinPresetService(presetId) && <p>已预置 {presetModelCount(presetId)} 款{builtinPresetDescription(presetId)}模型及协议，填写 API Key 后可直接「一键保存并启用」，或点「读取模型」拉取在线目录</p>}</div></>}</div>
                     <Form.Item label="连接名称"><Input aria-label="连接名称" placeholder="例如：我的创作账号" value={draft.name} onChange={(event) => patch({ name: event.target.value })} /></Form.Item>
                     <Form.Item label={credential.apiKeyLabel} help={credential.apiKeyHelp}><Input.Password prefix={<KeyRound size={15} />} aria-label={credential.apiKeyLabel} autoComplete="new-password" placeholder={credential.apiKeyPlaceholder} value={draft.apiKey} onChange={(event) => patch({ apiKey: event.target.value })} /></Form.Item>
                     <Form.Item label="服务地址"><Input aria-label="服务地址" inputMode="url" placeholder="https://api.example.com/v1" value={draft.baseUrl} onChange={(event) => patch({ baseUrl: event.target.value })} /></Form.Item>
-                    {modelCatalogRequestURL(draft) && <div className="model-service-url"><span>模型目录地址</span><code>{modelCatalogRequestURL(draft).split("/").map((part, index) => <Fragment key={index}>{index > 0 && <>/<wbr /></>}{part}</Fragment>)}</code></div>}
+                    {!pluginService && <ChannelRequestAddressBlocks channel={draft} />}
                     <button type="button" className="model-service-advanced" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}><Settings2 size={15} />高级设置<ChevronDown size={14} /></button>
                     {advanced && <div className="model-service-advanced-fields">
                         <Form.Item label="素材服务地址（可选）" help="公网素材域名使用 HTTPS。本机、局域网或 CGNAT 可填写 HTTP，并可带端口。留空时只接受与 API 同主机的素材。"><Input aria-label="素材服务地址" inputMode="url" placeholder="https://assets.example.com" value={draft.referenceAssetOrigin || ""} onChange={(event) => patch({ referenceAssetOrigin: event.target.value })} /></Form.Item>
-                        <Form.Item label="目录接口格式"><Select aria-label="目录接口格式" value={draft.apiFormat} options={[{ value: "likeai", label: "qisi API / LikeAI" }, { value: "openai", label: "OpenAI 兼容" }, { value: "gemini", label: "Gemini 原生" }]} onChange={(apiFormat) => patch({ apiFormat })} /></Form.Item>
+                        {!browser && !pluginService && <Form.Item label="目录接口格式"><Select aria-label="目录接口格式" value={draft.apiFormat} options={[{ value: "likeai", label: "qisi API / LikeAI" }, { value: "openai", label: "OpenAI 兼容" }, { value: "gemini", label: "Gemini 原生" }]} onChange={(apiFormat) => patch({ apiFormat })} /></Form.Item>}
                         <Form.Item label={credential.secretKeyRequired ? `${credential.secretKeyLabel} · 必填` : "Secret Key（按需填写）"} help={credential.secretKeyHelp}><Input.Password aria-label={credential.secretKeyLabel} autoComplete="new-password" placeholder={credential.secretKeyRequired ? "粘贴 Secret Key" : ""} value={draft.secretKey} onChange={(event) => patch({ secretKey: event.target.value })} /></Form.Item>
                         <ChannelHeadersEditor value={draft.headers} onChange={(headers) => patch({ headers })} />
                     </div>}
@@ -278,13 +328,14 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
             </div>}
         </div>
         {/* 提示放在滚动区外面：表单长的时候，滚到底部才看到的错误等于没提示。 */}
-        {(error || notice || credential.conflict) && <div className="model-service-feedback">
+        {(error || notice || credential.conflict || builtinPluginWarning) && <div className="model-service-feedback">
             {/* 凭证混用不等到点按钮才说：选完模型就应该看到要拆连接。 */}
             {(error || credential.conflict) && <Alert type="error" showIcon title={error || credential.conflict} />}
+            {builtinPluginWarning && <Alert type="warning" showIcon title={builtinPluginWarning} />}
             {notice && <Alert type="info" showIcon title={notice} />}
         </div>}
         <div className="model-service-footer">{step === 1 && <span>保存后，可在创作页选择这些模型</span>}<div>
-            {step === 0 ? <><Button disabled={busy} onClick={() => { if (validateConnection(false)) { setNotice(""); setStep(1); } }}>手动添加模型</Button><Button type="primary" loading={busy} disabled={protocolLoading} onClick={() => void fetchModels()}>读取模型</Button></> : <><Button disabled={busy} icon={<ArrowLeft size={15} />} onClick={() => { setStep(0); setError(""); }}>连接信息</Button><Button type="primary" loading={busy} disabled={!draft.models.length || protocolLoading} icon={<Check size={15} />} onClick={() => void save()}>保存并使用</Button></>}
+            {step === 0 ? <><Button disabled={busy} onClick={() => { if (validateConnection(false)) { setNotice(""); setStep(1); } }}>{isBuiltinPresetService(presetId) ? `查看预置模型 (${draft.models.length})` : "手动添加模型"}</Button>{isBuiltinPresetService(presetId) && <Button disabled={busy || protocolLoading || !draft.models.length || !builtinReady} icon={<Check size={15} />} onClick={() => void save()}>一键保存并启用</Button>}<Button type="primary" loading={busy} disabled={protocolLoading} onClick={() => void fetchModels()}>读取模型</Button></> : <><Button disabled={busy} icon={<ArrowLeft size={15} />} onClick={() => { setStep(0); setError(""); }}>连接信息</Button><Button type="primary" loading={busy} disabled={!draft.models.length || protocolLoading} icon={<Check size={15} />} onClick={() => void save()}>保存并使用</Button></>}
         </div></div>
     </AppModal>;
 }

@@ -63,6 +63,7 @@ export function isolateCopiedNodeMetadata(node: CanvasNodeData, idMap: ReadonlyM
     delete metadata.imageBatchExpanded;
     delete metadata.batchUsesReferenceImages;
     delete metadata.versionOfNodeId;
+    delete metadata.generatedFromNodeId;
     delete metadata.versionLabel;
     delete metadata.versionPrimary;
     delete metadata.upscaleBatch;

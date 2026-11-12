@@ -17,7 +17,7 @@ func (s *Service) PrepareSeedreamOutputs(userID, canvasID, rootID, taskID string
 		if !prepareSeedreamOutputs(doc, rootID, taskID, outputs, layers) {
 			return nil
 		}
-		s.reconcileBoundCanvasDocMediaAssets(userID, doc)
+		s.reconcileBoundCanvasDocMediaAssets(userID, doc, "")
 		expected := canvasRevisionValue(doc)
 		if expected <= 0 {
 			expected = 1

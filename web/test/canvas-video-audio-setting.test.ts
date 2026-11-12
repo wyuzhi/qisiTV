@@ -98,8 +98,8 @@ describe("video audio setting at JSON boundaries", () => {
                 config: {
                     ...defaultConfig,
                     channels: [{
-                        id: "beefapi",
-                        name: "BeefAPI",
+                        id: "beeftv",
+                        name: "BeefTV",
                         baseUrl: "https://api.beeftv.ai/v1",
                         apiKey: "sk-test",
                         apiFormat: "openai",

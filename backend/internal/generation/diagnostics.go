@@ -10,7 +10,7 @@ import (
 
 // PathError separates the path and cause with a colon; spaces are legal in paths.
 // Without a reliable delimiter, conservatively hide the remaining suffix too.
-var diagnosticLocalPath = regexp.MustCompile(`(?i)(?:[a-z]:[\\/]|\\\\|/(?:Users|home|private|tmp|var|Volumes|mnt|media|run|root|opt|srv|etc)/)[^\r\n:"'<>]+`)
+var diagnosticLocalPath = regexp.MustCompile(`(?i)(?:\b[a-z]:[\\/]|\\\\|/+(?:Users|home|private|tmp|var|Volumes|mnt|media|run|root|opt|srv|etc|data|app|workspace|usr|proc|sys|dev|lib|bin|sbin)/)[^\r\n:"'<>]+`)
 var diagnosticTokenPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$`)
 
 func diagnosticToken(value string) string {
@@ -25,7 +25,7 @@ func DiagnosticSummary(message string) string {
 	if strings.HasPrefix(strings.TrimSpace(message), "[") {
 		return ""
 	}
-	return sanitizeProviderText(diagnosticLocalPath.ReplaceAllString(message, "[路径已隐藏]"))
+	return sanitizeProviderText(message)
 }
 
 func SanitizeTaskDiagnostics(input *model.TaskFailureDiagnostics) *model.TaskFailureDiagnostics {

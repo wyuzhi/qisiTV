@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { lazy, Suspense, useLayoutEffect } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { App, ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
@@ -13,6 +13,8 @@ import { appQueryClient } from "@/lib/query-client";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { applyAppearanceMetadata, useAppearanceStore } from "@/stores/use-appearance-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { watchSystemTheme } from "@/stores/use-theme-store";
+import { BeefTVConnectionProvider } from "@/components/layout/beeftv-connection-provider";
 
 const ClientRootInit = lazy(() => import("@/components/layout/client-root-init").then((module) => ({ default: module.ClientRootInit })));
 
@@ -26,6 +28,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
     const theme = useActiveTheme();
     const dark = theme === "dark";
     const appearance = useAppearanceStore((state) => state.appearance);
+    useEffect(() => watchSystemTheme(), []);
 
     useLayoutEffect(() => {
         document.documentElement.classList.toggle("dark", dark);
@@ -47,7 +50,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
                         children
                     ) : (
                         <WorkspaceBootstrapHydrator>
-                            <ClientRootBoundary>{children}</ClientRootBoundary>
+                            <ClientRootBoundary><BeefTVConnectionProvider>{children}</BeefTVConnectionProvider></ClientRootBoundary>
                         </WorkspaceBootstrapHydrator>
                     )}
                 </QueryClientProvider>

@@ -98,7 +98,18 @@ const PROVIDER_CODE_CATEGORIES: Record<string, GenerationErrorCategory> = {
     modelnotopen: "permission",
     "operationdenied.servicenotopen": "permission",
     contentsecuritydetectionerror: "provider_unavailable",
+    invalid_video_parameters: "invalid_params",
+    invalid_reference_image: "invalid_params",
     invalid_reference_audio: "invalid_params",
+    invalid_reference_video: "invalid_params",
+    invalid_reference_url: "input_inaccessible",
+    invalid_media_format: "invalid_params",
+    media_submission_rejected: "invalid_params",
+    video_reference_upload_invalid: "invalid_params",
+    video_reference_upload_mismatch: "invalid_params",
+    video_reference_upload_incomplete: "invalid_params",
+    video_reference_upload_expired: "invalid_params",
+    video_reference_upload_unavailable: "provider_unavailable",
     insufficient_user_quota: "quota_user",
     model_temporarily_unavailable: "provider_unavailable",
     no_available_channel: "provider_unavailable",
@@ -290,24 +301,33 @@ export function referenceAudioCopy(text: string, invalidAudio = false): Category
     if (!issue) return;
     const actions: Record<string, string> = {
         无法下载: "请重新上传音频，确认素材链接可公开访问后再提交",
-        的格式或时长无法读取: "请将音频重新导出为 MP3、WAV 或 M4A，确认文件完整且含有音轨后再上传",
+        的格式或时长无法读取: "请将音频重新导出为 MP3 或 WAV，确认文件完整且含有音轨后再上传",
         文件过大: "请压缩或更换音频，确保文件不超过模型的大小限制后再提交",
         不符合模型要求: "请检查参考音频的时长、格式和大小，调整后再提交",
     };
     return { reason: `${label}${issue}`, action: actions[issue] };
 }
 
+const GATEWAY_REQUEST_ID_SUFFIX = /\s*\((?:request\s*id|请求编号|請求編號)\s*[:：]\s*([A-Za-z0-9._:-]{6,127})\)\s*$/i;
+export const EMBEDDED_REQUEST_ID = /(?:\brequest\s*id|请求编号|請求編號)\s*[:：]\s*([A-Za-z0-9._:-]{6,127})\b/i;
+
+export function stripGatewayRequestIdSuffix(raw: string): { text: string; requestId: string } {
+    const suffix = raw.match(GATEWAY_REQUEST_ID_SUFFIX);
+    if (!suffix || suffix.index === undefined) return { text: raw, requestId: "" };
+    return { text: raw.slice(0, suffix.index).trim(), requestId: sanitizeDebugId(suffix[1]) };
+}
+
 export function extractProviderFields(raw: string): ExtractedFields {
     const fields = emptyFields();
     if (raw.length > 16384) return fields;
-    const suffix = raw.match(/\s*\(request id:\s*([A-Za-z0-9._:-]{6,127})\)\s*$/i);
-    if (suffix) raw = raw.slice(0, suffix.index);
+    const stripped = stripGatewayRequestIdSuffix(raw);
+    raw = stripped.text;
     const tryParse = (value: string) => {
         try {
             const parsed = JSON.parse(value) as unknown;
             if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
                 Object.assign(fields, walkProviderFields(parsed as Record<string, unknown>, 0));
-                fields.requestId ||= sanitizeDebugId(suffix?.[1]);
+                fields.requestId ||= stripped.requestId;
             }
         } catch {
             return;
@@ -383,11 +403,13 @@ export function categoryFromProviderCode(...values: string[]): GenerationErrorCa
 }
 
 export function referenceMediaConstraintCopy(text: string): CategoryCopy | undefined {
-    text = text.split("。排查编号：", 1)[0];
+    text = stripGatewayRequestIdSuffix(text.split("。排查编号：", 1)[0].trim()).text;
     if (text.startsWith("当前渠道需要在线素材链接：")) {
         const [reason, ...action] = text.split("。");
         return { reason, action: action.join("。") };
     }
+    const modelReferenceLimit = text.match(/^(当前模型(?:暂不支持参考(?:图片|图|视频|音频)|(?:最多支持|至少需要) \d+ (?:张|个|段)?参考(?:图片|图|视频|音频)|不支持仅使用参考音频))[，。](请[^\n]+?)[。.]?$/);
+    if (modelReferenceLimit) return { reason: modelReferenceLimit[1], action: modelReferenceLimit[2] };
     const unreadableFps = text.match(/^(第 \d+ 个参考视频帧率无法读取)/);
     if (unreadableFps) return {reason:unreadableFps[1],action:"请重新导出 MP4/MOV 视频后上传，确保文件完整且包含有效的视频轨"};
     const measuredFps = text.match(/^(第 \d+ 个参考视频平均帧率为 \d+(?:\.\d+)? FPS)[，。](?:需要 |请将参考视频重新导出为 )(\d+)–(\d+) FPS/);
@@ -534,12 +556,13 @@ export function sanitizeProviderCode(value: string) {
 
 export function sanitizeProviderText(value: string) {
     let text = value.trim();
-    text = text.replace(/(?:file:\/\/[^\r\n"'<>]+|(?<![a-z])[a-z]:[\\/][^\r\n:"'<>]+|\\\\[^\r\n:"'<>]+|(?<![A-Za-z0-9._-])\/+(?:Users|home|private|tmp|var|Volumes|mnt|media|run|root|opt|srv|etc|data|app|workspace|usr|proc|sys|dev|lib|bin|sbin)\/[^\r\n:"'<>]+)/gi, "[路径已隐藏]");
     if (!text || HTML_BODY.test(text) || /<\/?[a-z!][^>]*>/i.test(text)) return "";
+    text = text.replace(URL_PATTERN, "");
     // Unstructured messages may echo whole headers or prompts; discard the suffix,
     // since a whitespace-based token matcher cannot know where a secret ends.
     text = text.replace(CREDENTIAL_TAIL, "").replace(UNSTRUCTURED_PROMPT_TAIL, "[已隐藏]");
-    text = text.replace(URL_PATTERN, "").replace(SIGNED_QUERY, "").replace(SECRET_PATTERN, "").replace(PROMPT_ECHO, "$1[已隐藏]");
+    text = text.replace(/(?:file:\/\/[^\r\n"'<>]+|(?<![a-z])[a-z]:[\\/][^\r\n:"'<>]+|\\\\[^\r\n:"'<>]+|(?<![A-Za-z0-9._-])\/+(?:Users|home|private|tmp|var|Volumes|mnt|media|run|root|opt|srv|etc|data|app|workspace|usr|proc|sys|dev|lib|bin|sbin)\/[^\r\n:"'<>]+)/gi, "[路径已隐藏]");
+    text = text.replace(SIGNED_QUERY, "").replace(SECRET_PATTERN, "").replace(PROMPT_ECHO, "$1[已隐藏]");
     text = text.replace(/\s+/g, " ").trim();
     if (text.startsWith("{") || text.startsWith("[") || text.startsWith("<")) return "";
     return text.slice(0, 240);
@@ -613,6 +636,70 @@ export function isCanvasSaveConflictText(text: string) {
         text.includes("画布有未处理的外部改动") ||
         text.startsWith(CATEGORY_COPY.canvas_conflict.reason)
     );
+}
+
+const LOCAL_PATH_PATTERN = /(?:file:\/\/[^\r\n"'<>]+|(?<![a-z])[a-z]:[\\/][^\r\n:"'<>]+|\\\\[^\r\n:"'<>]+|(?<![A-Za-z0-9._-])\/+(?:Users|home|private|tmp|var|Volumes|mnt|media|run|root|opt|srv|etc|data|app|workspace|usr|proc|sys|dev|lib|bin|sbin)\/[^\r\n:"'<>]+)/i;
+const GENERIC_CHINESE_WRAPPERS = new Set([
+    "",
+    "请求失败",
+    "操作失败",
+    "生成失败",
+    "任务失败",
+    "已停止",
+    "调用失败",
+    "未知错误",
+    "参数错误",
+    "请求参数错误",
+    "参数无效",
+    "无效参数",
+    "模型服务请求失败",
+    `${CATEGORY_COPY.unknown.reason}。${CATEGORY_COPY.unknown.action}`,
+]);
+
+export function isActionableParameterCopy(copy: CategoryCopy): boolean {
+    const reason = copy.reason.trim();
+    const action = copy.action.trim();
+    if (/^(?:请稍后|请查看|请先查询|请联系支持|请重试|点击「)/.test(action)) return false;
+    if (/(?:生成失败|请求失败|操作失败|任务失败|调用失败|模型服务请求失败|暂时不可用|服务繁忙|系统繁忙|频率|频繁|限流|并发)/.test(reason)) return false;
+    if (!/(?:模型|参考|素材|图片|视频|音频|首帧|尾帧|首尾帧|文件|参数|尺寸|分辨率|比例|时长|帧率|编码|格式|提示词|无法识别)/.test(reason)) return false;
+    if (/(?:调整|减少|更换|裁剪|重新导出|上传|移除|修改|缩短|压缩|图片用|视频用|音频用)/.test(action)) return true;
+    return !action && /(?:不支持|仅支持|只支持|最多支持|至少需要|无法识别文件)/.test(reason);
+}
+
+export function userFacingChineseCopy(raw: string): CategoryCopy | undefined {
+    let trimmed = raw.trim();
+    if (!trimmed || HTML_BODY.test(trimmed) || /[{}<>]/.test(trimmed)) return undefined;
+    if (
+        /(?:https?:\/\/|file:\/\/|data:[a-z0-9.+-]+\/[^;]+;base64,)/i.test(trimmed) ||
+        /(?:[?&](?:signature|x-amz-signature|x-oss-signature|token|key)=)/i.test(trimmed) ||
+        CREDENTIAL_TAIL.test(trimmed) ||
+        UNSTRUCTURED_PROMPT_TAIL.test(trimmed) ||
+        /(?:[a-z0-9_-]*(?:api[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?key|client[_-]?secret|private[_-]?key|api[_-]?secret|access[_-]?token|refresh[_-]?token)|authorization|bearer|sk-[A-Za-z0-9_-]{8,}|eyJ[A-Za-z0-9_-]{20,})/i.test(trimmed) ||
+        new RegExp(String.raw`["']?${PROMPT_KEY}["']?\s*[=:：]`, "i").test(trimmed) ||
+        LOCAL_PATH_PATTERN.test(trimmed) ||
+        LOCAL_DATABASE_ERROR.test(trimmed) ||
+        containsInfrastructureDetails(trimmed) ||
+        /(?:status(?:[_\s]+code)?\s*[:=]|素材转换失败:|无可用渠道|暂无可用渠道)/i.test(trimmed)
+    ) {
+        return undefined;
+    }
+    trimmed = stripGatewayRequestIdSuffix(trimmed.split("。排查编号：", 1)[0].trim()).text;
+    let clean = sanitizeProviderText(trimmed);
+    if (!clean || clean.includes("[已隐藏]") || clean.includes("[路径已隐藏]") || !/[\u4e00-\u9fff]/.test(clean)) return undefined;
+    clean = clean.replace(/。+$/u, "").trim();
+    if (GENERIC_CHINESE_WRAPPERS.has(clean)) return undefined;
+    if (isNetworkText(clean) || isDownloadText(clean) || isCancelledText(clean) || isResultsMissingText(clean)) return undefined;
+    const hanCount = (clean.match(/[\u4e00-\u9fff]/g) || []).length;
+    if (hanCount < 6 && !/[。，；：]/.test(clean)) return undefined;
+    const sentenceIdx = clean.indexOf("。");
+    if (sentenceIdx > 0 && clean.slice(sentenceIdx + 1).trim()) {
+        return { reason: clean.slice(0, sentenceIdx).trim(), action: clean.slice(sentenceIdx + 1).trim() };
+    }
+    for (const sep of ["，请", "；请"] as const) {
+        const idx = clean.indexOf(sep);
+        if (idx > 0) return { reason: clean.slice(0, idx).trim(), action: `请${clean.slice(idx + sep.length).trim()}` };
+    }
+    return { reason: clean, action: "" };
 }
 
 export function containsInfrastructureDetails(value: string) {

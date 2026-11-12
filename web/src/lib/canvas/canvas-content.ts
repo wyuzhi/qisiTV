@@ -7,6 +7,23 @@ export function canvasContentSnapshot(project: CanvasProject) {
     return { ...content, projectId: content.projectId || undefined };
 }
 
+export function normalizeCanvasProjectGraph(project: CanvasProject): CanvasProject {
+    const nodes = Array.isArray(project.nodes) ? project.nodes : [];
+    const connections = Array.isArray(project.connections) ? project.connections : [];
+    const rawViewport = project.viewport;
+    const validViewport = Boolean(
+        rawViewport &&
+        typeof rawViewport === "object" &&
+        typeof rawViewport.x === "number" && Number.isFinite(rawViewport.x) &&
+        typeof rawViewport.y === "number" && Number.isFinite(rawViewport.y) &&
+        typeof rawViewport.k === "number" && Number.isFinite(rawViewport.k) && rawViewport.k > 0,
+    );
+    const viewport = validViewport ? rawViewport : { x: 0, y: 0, k: 1 };
+    return nodes !== project.nodes || connections !== project.connections || viewport !== project.viewport
+        ? { ...project, nodes, connections, viewport }
+        : project;
+}
+
 export function sameCanvasContent(left: CanvasProject | undefined, right: CanvasProject | undefined) {
     if (left === right) return true;
     if (!left || !right) return false;

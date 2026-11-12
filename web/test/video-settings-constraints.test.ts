@@ -37,7 +37,7 @@ test("switching to Seedance preserves its existing settings constraints", () => 
             },
         ],
     };
-    const config = { ...base, channels: [channel], model: "beefapi::seedance-2.5" };
+    const config = { ...base, channels: [channel], model: "beeftv::seedance-2.5" };
     expect(videoSettingsConstraints(config, { imageCount: 1 }).ratioLabel).toBe("随首帧");
     expect(videoSettingsConstraints(config, { videoCount: 1 }, { videoEditOperation: "inpaint" })).toEqual({ ratioLabel: "随原视频", durationLocked: true });
     expect(videoSettingsConstraints(config, { characterCount: 1 }).ratioLabel).toBeUndefined();

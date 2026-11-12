@@ -17,7 +17,7 @@ func TestAutoDLPluginArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapters, err := LoadInstalledProviders(pkg.ManifestRaw, nil)
+	adapters, err := LoadInstalledProviders(pkg.ManifestRaw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,6 +182,103 @@ func TestAutoDLPluginArtifact(t *testing.T) {
 		t.Fatalf("b99_003 must not send first_frame: %#v", bodyB99003)
 	}
 
+	createZMU24, err := adapter.BuildCreate(context.Background(), RequestContext{BaseURL: "https://autodl.art", Request: GenerationRequest{
+		Model: "minimax_h3_zm_u24", Prompt: "zm u24 bare resolution", Duration: 5, Resolution: "480p", AspectRatio: "16:9",
+		Images: []MediaReference{{URL: "https://cdn.example/img0.png"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bodyZMU24 := createZMU24.Body.(map[string]any)
+	if bodyZMU24["resolution"] != "480p横" || bodyZMU24["ref_image_0"] != "https://cdn.example/img0.png" {
+		t.Fatalf("zm_u24 body = %#v", bodyZMU24)
+	}
+
+	createZMU08Square, err := adapter.BuildCreate(context.Background(), RequestContext{BaseURL: "https://autodl.art", Request: GenerationRequest{
+		Model: "minimax_h3_zm_u08", Prompt: "zm u08 square", Duration: 5, Resolution: "720p", AspectRatio: "1:1",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bodyZMU08Square := createZMU08Square.Body.(map[string]any)
+	if bodyZMU08Square["resolution"] != "768p(1:1)" {
+		t.Fatalf("zm_u08 square body = %#v", bodyZMU08Square)
+	}
+
+	for _, workflow := range pkg.Manifest.Contributes.Workflows {
+		if workflow.Capability != CapabilityVideo {
+			continue
+		}
+		var allowed map[string]struct{}
+		var hasSquare, has1080, has736 bool
+		for _, param := range workflow.Parameters {
+			if param.Name == "resolution" && len(param.Values) > 0 {
+				allowed = make(map[string]struct{}, len(param.Values))
+				for _, val := range param.Values {
+					allowed[val] = struct{}{}
+					if len(val) >= 5 && val[len(val)-5:] == "(1:1)" {
+						hasSquare = true
+					}
+					if len(val) >= 5 && val[:5] == "1080p" {
+						has1080 = true
+					}
+					if len(val) >= 4 && val[:4] == "736p" {
+						has736 = true
+					}
+				}
+				break
+			}
+		}
+		if len(allowed) == 0 {
+			continue
+		}
+		for _, bareRes := range []string{"480p", "720p", "1080p", "1440p", "2160p", "2k", "4k"} {
+			for _, ratio := range []string{"16:9", "9:16", "1:1"} {
+				expectedDir := "竖"
+				if ratio == "16:9" {
+					expectedDir = "横"
+				} else if ratio == "1:1" && hasSquare {
+					expectedDir = "(1:1)"
+				}
+				expectedTier := "768p"
+				if has736 {
+					expectedTier = "736p"
+				} else if bareRes == "480p" {
+					expectedTier = "480p"
+				} else if bareRes != "720p" && has1080 {
+					expectedTier = "1080p"
+				}
+				expectedRes := expectedTier + expectedDir
+				if _, ok := allowed[expectedRes]; !ok {
+					t.Fatalf("workflow %s manifest values %v missing expected %q for (%s, %s)", workflow.ID, allowed, expectedRes, bareRes, ratio)
+				}
+				spec, err := adapter.BuildCreate(context.Background(), RequestContext{
+					BaseURL: "https://autodl.art",
+					Request: GenerationRequest{
+						Model:       workflow.ID,
+						Prompt:      "consistency check",
+						Duration:    5,
+						Resolution:  bareRes,
+						AspectRatio: ratio,
+						Images:      []MediaReference{{URL: "https://cdn.example/img0.png"}, {URL: "https://cdn.example/img1.png"}},
+						Audios:      []MediaReference{{URL: "https://cdn.example/aud0.mp3"}},
+					},
+				})
+				if err != nil {
+					t.Fatalf("workflow %s (%s, %s) BuildCreate error: %v", workflow.ID, bareRes, ratio, err)
+				}
+				bodyMap, ok := spec.Body.(map[string]any)
+				if !ok {
+					t.Fatalf("workflow %s body type = %T", workflow.ID, spec.Body)
+				}
+				gotRes, _ := bodyMap["resolution"].(string)
+				if gotRes != expectedRes {
+					t.Fatalf("workflow %s (%s, %s) resolved resolution = %q, want %q", workflow.ID, bareRes, ratio, gotRes, expectedRes)
+				}
+			}
+		}
+	}
+
 	failed, err := adapter.ParseCreate(context.Background(), []byte(`{"code":"RequestParameterIsWrong","data":null,"msg":"参数: resolution 的值: 768P 不在 options 列表中"}`))
 	if err != nil || failed.Status != StatusFailed || failed.Message == "" {
 		t.Fatalf("failed = %#v, err = %v", failed, err)
@@ -205,5 +302,34 @@ func TestAutoDLPluginArtifact(t *testing.T) {
 	}
 	if _, err := json.Marshal(completed); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManifestModelIDAndWorkflowEnvCapabilityContract(t *testing.T) {
+	if got := manifestModelID(GenerationRequest{Model: "my-chan::MixedCase-Model-V2"}); got != "mixedcase-model-v2" {
+		t.Fatalf("manifestModelID = %q, want lowercased bare model for transform matching", got)
+	}
+	if got := applyManifestTransform("keep", "omit_unless_model_contains:model-v2", GenerationRequest{Model: "my-chan::MixedCase-Model-V2"}); got != "keep" {
+		t.Fatalf("omit_unless_model_contains failed on uppercase model ID: %#v", got)
+	}
+	manifest := Manifest{
+		Metadata: Metadata{ID: "demo-provider", Categories: []Capability{CapabilityVideo}},
+		Contributes: ManifestContributions{
+			Workflows: []ManifestWorkflow{
+				{ID: "shared_wf", ProviderID: "demo-provider", Capability: CapabilityAudio, Defaults: map[string]any{"mode": "audio"}},
+				{ID: "shared_wf", ProviderID: "demo-provider", Capability: CapabilityVideo, Defaults: map[string]any{"mode": "video"}},
+				{ID: "untyped_wf", ProviderID: "demo-provider", Capability: ""},
+			},
+		},
+	}
+	env := manifestWorkflowValues(manifest, GenerationRequest{Capability: CapabilityVideo, Model: "chan::shared_wf"})
+	if env == nil || env["capability"] != "video" {
+		t.Fatalf("manifestWorkflowValues picked wrong capability workflow: %#v", env)
+	}
+	if got := manifestWorkflowValues(manifest, GenerationRequest{Capability: CapabilityVideo, Model: "untyped_wf"}); got != nil {
+		t.Fatalf("manifestWorkflowValues accepted empty-capability workflow: %#v", got)
+	}
+	if got := manifestWorkflowValues(manifest, GenerationRequest{Capability: CapabilityVideo, Model: "SHARED_WF"}); got != nil {
+		t.Fatalf("manifestWorkflowValues accepted mismatched-case workflow ID: %#v", got)
 	}
 }

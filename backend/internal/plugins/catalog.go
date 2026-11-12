@@ -12,6 +12,8 @@ import (
 // so host-backed dispatch paths stay out of user-facing catalog consumers.
 type ProviderCatalogItem struct {
 	ID                string                      `json:"id"`
+	Aliases           []string                    `json:"aliases,omitempty"` // retired IDs saved profiles may still name
+	Presets           []protocol.ManifestPreset   `json:"presets,omitempty"`
 	Version           string                      `json:"version"`
 	Name              string                      `json:"name"`
 	Vendor            string                      `json:"vendor"`
@@ -33,6 +35,8 @@ type ProviderCatalogItem struct {
 	// deferred, which stays selectable because the release still ships it.
 	Retired       bool   `json:"retired,omitempty"`
 	RetiredReason string `json:"retiredReason,omitempty"`
+	// Module 表示生成接口由插件 JS 实现：模型服务里把它列成一个服务商，「读取模型」交给插件。
+	Module bool `json:"module,omitempty"`
 }
 
 // ProviderCatalog projects provider and workflow contributions from this
@@ -48,11 +52,11 @@ func (s *Service) ProviderCatalog(scope, capability string, includeUnavailable b
 				continue
 			}
 			item := ProviderCatalogItem{
-				ID: provider.ID, Version: plugin.Manifest.Version, Name: provider.Label, Vendor: plugin.Manifest.Author,
+				ID: provider.ID, Aliases: provider.LegacyAliases, Presets: provider.Presets, Version: plugin.Manifest.Version, Name: provider.Label, Vendor: plugin.Manifest.Author,
 				Categories: provider.Capabilities, Scopes: provider.Scopes, BaseURL: provider.BaseURL,
 				AuthType: provider.Auth.Type,
 				Enabled:  plugin.Status == StatusEnabled, UnavailableReason: plugin.Error,
-				Workflows:     workflowsForProvider(plugin.Manifest.Contributes.Workflows, provider.ID),
+				Workflows:     workflowsForProvider(plugin.Manifest.Contributes.Workflows, provider.ID, provider.Capabilities, wantCapability),
 				Retired:       plugin.Retention != nil && plugin.Retention.Retired,
 				RetiredReason: retentionReason(plugin.Retention),
 			}
@@ -61,6 +65,7 @@ func (s *Service) ProviderCatalog(scope, capability string, includeUnavailable b
 				if adapter, ok := registry.Resolve(provider.ID); ok {
 					metadata := adapter.Metadata()
 					item.Create, item.Poll, item.ContentType = metadata.Create, metadata.Poll, metadata.ContentType
+					_, item.Module = adapter.(protocol.ModuleProvider)
 				}
 			}
 			if includeUnavailable || item.Enabled {
@@ -69,6 +74,46 @@ func (s *Service) ProviderCatalog(scope, capability string, includeUnavailable b
 		}
 	}
 	return items
+}
+
+// LookupWorkflow resolves an enabled plugin workflow matching provider ID (or legacy alias), capability, and model ID.
+func (s *Service) LookupWorkflow(providerID string, capability protocol.Capability, modelID string) (protocol.ManifestWorkflow, bool) {
+	wantProvider := strings.TrimSpace(providerID)
+	wantModel := strings.TrimSpace(modelID)
+	if separator := strings.LastIndex(wantModel, "::"); separator >= 0 {
+		wantModel = strings.TrimSpace(wantModel[separator+2:])
+	}
+	if wantProvider == "" || capability == "" || wantModel == "" {
+		return protocol.ManifestWorkflow{}, false
+	}
+	for _, plugin := range s.List() {
+		if plugin.Status != StatusEnabled {
+			continue
+		}
+		for _, provider := range plugin.Manifest.Contributes.Providers {
+			if !matchesProviderIdentifier(provider, wantProvider) || !containsPluginCapability(provider.Capabilities, capability) {
+				continue
+			}
+			for _, workflow := range workflowsForProvider(plugin.Manifest.Contributes.Workflows, provider.ID, provider.Capabilities, capability) {
+				if workflow.ID == wantModel {
+					return workflow, true
+				}
+			}
+		}
+	}
+	return protocol.ManifestWorkflow{}, false
+}
+
+func matchesProviderIdentifier(provider protocol.ManifestProvider, target string) bool {
+	if strings.EqualFold(strings.TrimSpace(provider.ID), target) {
+		return true
+	}
+	for _, alias := range provider.LegacyAliases {
+		if strings.EqualFold(strings.TrimSpace(alias), target) {
+			return true
+		}
+	}
+	return false
 }
 
 // ForUser filters the plugin center list. Administrators always see every
@@ -84,7 +129,7 @@ func (s *Service) ForUser(actor *model.User, systemPluginsVisible bool) []View {
 	}
 	filtered := make([]View, 0, len(items))
 	for _, item := range items {
-		if item.Management.ActivationScope == ScopeUser {
+		if item.Management.ActivationScope == ScopeUser || item.Source == OriginPackage || item.PackageDir != "" {
 			filtered = append(filtered, item)
 		}
 	}
@@ -109,12 +154,19 @@ func containsPluginCapability(items []protocol.Capability, want protocol.Capabil
 	return false
 }
 
-func workflowsForProvider(items []protocol.ManifestWorkflow, providerID string) []protocol.ManifestWorkflow {
+func workflowsForProvider(items []protocol.ManifestWorkflow, providerID string, providerCapabilities []protocol.Capability, wantCapability protocol.Capability) []protocol.ManifestWorkflow {
 	result := make([]protocol.ManifestWorkflow, 0)
 	for _, item := range items {
-		if item.ProviderID == providerID {
-			result = append(result, item)
+		if item.ProviderID != providerID || item.Capability == "" {
+			continue
 		}
+		if len(providerCapabilities) > 0 && !containsPluginCapability(providerCapabilities, item.Capability) {
+			continue
+		}
+		if wantCapability != "" && item.Capability != wantCapability {
+			continue
+		}
+		result = append(result, item)
 	}
 	return result
 }

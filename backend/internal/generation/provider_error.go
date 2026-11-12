@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/outbound"
 )
 
@@ -263,7 +263,7 @@ func ClassifyError(err error) Failure {
 	if errors.As(err, &unknown) {
 		return normalizeFailure(Failure{Category: CategorySubmissionUncertain, Uncertain: true, Retryable: false})
 	}
-	var managed *beefapi.MediaTaskError
+	var managed *beeftv.MediaTaskError
 	if errors.As(err, &managed) {
 		category := FailureCategory(managed.Category)
 		switch strings.ToLower(strings.TrimSpace(managed.Category)) {
@@ -274,15 +274,39 @@ func ClassifyError(err error) Failure {
 		case "upstream":
 			category = CategoryAsyncFailed
 		case "unknown":
-			category = CategorySubmissionUncertain
+			if managed.Pending() {
+				category = CategorySubmissionUncertain
+			} else {
+				category = CategoryAsyncFailed
+			}
 		}
 		if _, supported := categoryCopies[category]; !supported {
 			category = CategoryUnknown
 		}
 		uncertain := category == CategorySubmissionUncertain || managed.Pending()
-		return normalizeFailure(Failure{Category: category, Uncertain: uncertain, TaskID: sanitizeDebugID(managed.TaskID), ProviderCode: sanitizeProviderCode(managed.Code), ProviderMessage: DiagnosticSummary(managed.Message), Structured: true, FromCode: true})
+		failure := normalizeFailure(Failure{Category: category, Uncertain: uncertain, TaskID: sanitizeDebugID(managed.TaskID), ProviderCode: sanitizeProviderCode(managed.Code), ProviderMessage: DiagnosticSummary(managed.Message), Structured: true, FromCode: true})
+		if !uncertain && strings.TrimSpace(managed.Message) != "" && managed.Message != "原视频任务未成功，请查询原任务结果与扣费" {
+			textFailure := ClassifyText(managed.Message)
+			if textFailure.Category != CategoryUnknown && (category == CategoryAsyncFailed || category == CategoryInvalidParams || category == CategoryUnknown) {
+				failure.Category = textFailure.Category
+				if textFailure.Reason != "" {
+					failure.Reason = textFailure.Reason
+				}
+				if textFailure.Action != "" {
+					failure.Action = textFailure.Action
+				}
+				failure = normalizeFailure(failure)
+			} else if textFailure.Reason != "" && textFailure.Reason != categoryCopies[textFailure.Category].Reason {
+				failure.Reason = textFailure.Reason
+				if textFailure.Action != "" {
+					failure.Action = textFailure.Action
+				}
+				failure = normalizeFailure(failure)
+			}
+		}
+		return failure
 	}
-	var managedHTTP *beefapi.MediaHTTPError
+	var managedHTTP *beeftv.MediaHTTPError
 	if errors.As(err, &managedHTTP) {
 		failure := classifyHTTPErrorCause(legacyMediaError(err))
 		failure.RequestID = firstNonEmpty(sanitizeDebugID(managedHTTP.RequestID), failure.RequestID)
@@ -303,10 +327,10 @@ func ClassifyError(err error) Failure {
 			if referenceUpload.HTTPStatus == 400 && referenceUpload.Meta.Index > 0 {
 				itemLabel := referenceMediaLabel(referenceUpload.Meta.Kind, referenceUpload.Meta.Index-1)
 				if itemLabel != "" {
-					if failure.Reason != "" && !strings.Contains(failure.Reason, itemLabel) && !strings.Contains(failure.Reason, "个参考") {
+					if failure.Reason != "" && !strings.Contains(failure.Reason, itemLabel) && !strings.Contains(failure.Reason, "个参考") && !strings.Contains(failure.Reason, "张参考") && !strings.Contains(failure.Reason, "段参考") {
 						failure.Reason = itemLabel + "：" + failure.Reason
 					}
-					if failure.ProviderMessage != "" && !strings.Contains(failure.ProviderMessage, itemLabel) && !strings.Contains(failure.ProviderMessage, "个参考") {
+					if failure.ProviderMessage != "" && !strings.Contains(failure.ProviderMessage, itemLabel) && !strings.Contains(failure.ProviderMessage, "个参考") && !strings.Contains(failure.ProviderMessage, "张参考") && !strings.Contains(failure.ProviderMessage, "段参考") {
 						failure.ProviderMessage = itemLabel + "：" + failure.ProviderMessage
 					}
 				}
@@ -320,7 +344,7 @@ func ClassifyError(err error) Failure {
 		return failure
 	}
 	var notSent RequestNotSentError
-	if errors.As(err, &notSent) {
+	if errors.As(err, &notSent) || beeftv.IsDiscoveryTransportError(err) {
 		return normalizeFailure(Failure{Category: CategoryRequestNotSent})
 	}
 	var preparation RequestPreparationError
@@ -477,8 +501,10 @@ func ClassifyText(raw string) Failure {
 		failure.TaskID = sanitizeDebugID(fields.TaskID)
 		if category, ok := categoryFromProviderCode(fields.Code, fields.Type, fields.Status); ok {
 			failure.Category = category
-			_, codeOrStatusKnown := categoryFromProviderCode(fields.Code, fields.Status)
-			failure.FromCode = codeOrStatusKnown || !genericProviderCode(fields.Type)
+			_, codeKnown := categoryFromProviderCode(fields.Code)
+			_, statusKnown := categoryFromProviderCode(fields.Status)
+			codeOrStatusAuthoritative := (codeKnown && !nonAuthoritativeInvalidParamsCode(fields.Code)) || (statusKnown && !nonAuthoritativeInvalidParamsCode(fields.Status))
+			failure.FromCode = codeOrStatusAuthoritative || !genericProviderCode(fields.Type)
 			refineInvalidParams(&failure, fields)
 			specializeModeration(&failure, fields)
 			specializeThinkingToolChoice(&failure, fields)
@@ -486,6 +512,10 @@ func ClassifyText(raw string) Failure {
 			specializeMediaConstraints(&failure, fields)
 			if failure.Category != CategoryInvalidParams || failure.Reason != "" {
 				failure.FromCode = true
+			} else if !failure.FromCode && applyTerminalMessageCategory(&failure, fields.Message) {
+				// Non-authoritative wrapper keeps FromCode=false so untrusted HTTP statuses (e.g. 503/403) still win.
+			} else if copy, ok := userFacingChineseCopy(fields.Message); ok {
+				failure.Reason, failure.Action = copy.Reason, copy.Action
 			}
 			return normalizeFailure(failure)
 		}
@@ -497,8 +527,18 @@ func ClassifyText(raw string) Failure {
 			specializeMediaConstraints(&failure, fields)
 			if failure.Reason != "" {
 				failure.FromCode = true
+			} else if failure.Category == CategoryInvalidParams {
+				if copy, ok := userFacingChineseCopy(fields.Message); ok {
+					failure.Reason, failure.Action = copy.Reason, copy.Action
+				}
 			}
 			return normalizeFailure(failure)
+		}
+		if !applyTerminalMessageCategory(&failure, fields.Message) {
+			if copy, ok := userFacingChineseCopy(fields.Message); ok && isActionableParameterCopy(copy) {
+				failure.Category = CategoryInvalidParams
+				failure.Reason, failure.Action = copy.Reason, copy.Action
+			}
 		}
 		// JSON request echoes and debug fields are never classification input.
 		return normalizeFailure(failure)
@@ -564,8 +604,23 @@ func ClassifyText(raw string) Failure {
 		return ClassifyHTTP(status, "", "")
 	}
 	if looksLikeUserFacingChinese(text) {
-		failure.Reason = sanitizeProviderText(text)
-		failure.Action = ""
+		reqID, taskID := persistedReferenceIDs(text)
+		failure.RequestID = firstNonEmpty(failure.RequestID, reqID)
+		failure.TaskID = firstNonEmpty(failure.TaskID, taskID)
+		bodyWithoutDebug := strings.SplitN(text, "。排查编号：", 2)[0]
+		if persistedReferenceItemPrefix.MatchString(bodyWithoutDebug) {
+			failure.Category = CategoryInvalidParams
+			failure.FromCode = true
+		}
+		if copy, ok := userFacingChineseCopy(bodyWithoutDebug); ok {
+			failure.Reason, failure.Action = copy.Reason, copy.Action
+			if failure.Category == CategoryUnknown && isActionableParameterCopy(copy) {
+				failure.Category = CategoryInvalidParams
+			}
+		} else {
+			failure.Reason = sanitizeProviderText(bodyWithoutDebug)
+			failure.Action = ""
+		}
 	}
 	return normalizeFailure(failure)
 }

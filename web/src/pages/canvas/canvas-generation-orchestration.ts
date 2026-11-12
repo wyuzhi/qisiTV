@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import { nanoid } from "nanoid";
-import { beefAPIImageContract } from "@/lib/beefapi-image-contracts";
+import { beefTVImageContract } from "@/lib/beeftv-image-contracts";
 
 import { getNodeSpec } from "@/constant/canvas";
 import { applyGenerationTaskResultToNodes, applyMaterializedGenerationTaskResultToNodes, generationTaskMode } from "@/lib/canvas/canvas-generation-task-sync";
@@ -166,7 +166,7 @@ export async function insertCanvasGenerationHistoryTask(input: {
     const mode = generationTaskMode(input.task);
     const nodeType = mode === "video" ? CanvasNodeType.Video : mode === "audio" ? CanvasNodeType.Audio : CanvasNodeType.Image;
     const declaredOutputs = input.task.outputs?.length ? Math.max(...input.task.outputs.map((item) => (item.outputIndex ?? 0) + 1), input.task.outputs.length) : 0;
-    const count = mode === "image" ? (beefAPIImageContract(input.task.model || "")?.fixedOutputs || declaredOutputs || 1) : 1;
+    const count = mode === "image" ? (beefTVImageContract(input.task.model || "")?.fixedOutputs || declaredOutputs || 1) : 1;
     const insertedNodes: CanvasNodeData[] = [];
     for (let index = 0; index < count; index++) {
         const node = createCanvasNode(nodeType, { x: input.center.x + (index % 2) * 400, y: input.center.y + Math.floor(index / 2) * 400 }, {

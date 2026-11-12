@@ -14,13 +14,13 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"qisitv/backend/internal/beefapi"
+	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/model"
 	localtask "qisitv/backend/internal/task"
 )
 
-// 记录假 BeefAPI 收到的提交，用来核对补交是否和原请求一字不差。
+// 记录假 BeefTV 收到的提交，用来核对补交是否和原请求一字不差。
 type managedSubmitLog struct {
 	mu      sync.Mutex
 	headers []http.Header
@@ -47,22 +47,22 @@ func managedNotFound(w http.ResponseWriter) {
 	_, _ = w.Write([]byte(`{"error":{"code":"media_task_not_found","category":"unknown","message":"This query did not establish the original attempt."}}`))
 }
 
-// 托管图片：原请求发出后回复丢失，BeefAPI 查不到原编号。
+// 托管图片：原请求发出后回复丢失，BeefTV 查不到原编号。
 func managedMissingImageFixture(t *testing.T, serverURL string) (*Service, *gorm.DB, model.Task, []byte) {
 	t.Helper()
 	svc, db, task, row, _ := imageSubmissionFixture(t, false)
 	task.Status, task.Stage, task.LeaseOwner, task.LeaseExpiresAt = model.TaskStatusFailed, "submission_unknown", "", nil
-	task.InputJSON = `{"mode":"image","config":{"channelId":"beefapi"}}`
+	task.InputJSON = `{"mode":"image","config":{"channelId":"beeftv"}}`
 	if err := db.Save(&task).Error; err != nil {
 		t.Fatal(err)
 	}
 	attempt, _ := svc.repo.LatestRouteAttempt(task.ID)
-	attempt.ChannelID = beefapi.ChannelID
+	attempt.ChannelID = beeftv.ChannelID
 	if err := svc.repo.SaveRouteAttempt(attempt); err != nil {
 		t.Fatal(err)
 	}
 	wire, _ := svc.imageSubmissionWire(row)
-	wire.URL, wire.ChannelID, wire.ReplayProtocol, wire.MediaType = serverURL+"/v1/media/tasks", beefapi.ChannelID, beefapi.MediaProtocolVersion, "image"
+	wire.URL, wire.ChannelID, wire.ReplayProtocol, wire.MediaType = serverURL+"/v1/media/tasks", beeftv.ChannelID, beeftv.MediaProtocolVersion, "image"
 	wire.Header.Set("Idempotency-Key", "original-ref-0001")
 	raw, _ := json.Marshal(wire)
 	row.RequestCipher, _ = svc.encryptSettingSecret(string(raw))
@@ -97,7 +97,7 @@ func TestManagedImageMissingSubmissionResubmitsOnlyOnManualRecovery(t *testing.T
 	}))
 	defer server.Close()
 	svc, _, task, originalBody := managedMissingImageFixture(t, server.URL)
-	base := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: server.URL})
+	base := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: server.URL})
 
 	// 后台恢复只查询：不补交，也不下结论。
 	background, cancel := context.WithTimeout(base, time.Second)
@@ -133,7 +133,7 @@ func TestManagedImageMissingSubmissionResubmitsOnlyOnManualRecovery(t *testing.T
 		t.Fatalf("resubmitted task not polled soon: %+v", latest)
 	}
 
-	// BeefAPI 已有这个编号：再点也只查询，不会再补交。
+	// BeefTV 已有这个编号：再点也只查询，不会再补交。
 	if _, err := svc.RecoverTask(manual, task.UserID, task.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestManagedImageResubmissionResponseDecidesOutcome(t *testing.T) {
 			}))
 			defer server.Close()
 			svc, _, task, _ := managedMissingImageFixture(t, server.URL)
-			ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: server.URL})
+			ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: server.URL})
 			if _, err := svc.RecoverTask(localtask.WithManualRecovery(ctx), task.UserID, task.ID); err != nil {
 				t.Fatal(err)
 			}
@@ -203,7 +203,7 @@ func TestManagedImageResubmissionResponseDecidesOutcome(t *testing.T) {
 	}
 }
 
-func TestManagedImageMissingSubmissionWaitsWhenBeefAPIRecordedSettlement(t *testing.T) {
+func TestManagedImageMissingSubmissionWaitsWhenBeefTVRecordedSettlement(t *testing.T) {
 	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "true")
 	var submits managedSubmitLog
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -221,11 +221,11 @@ func TestManagedImageMissingSubmissionWaitsWhenBeefAPIRecordedSettlement(t *test
 	if err := db.Save(&task).Error; err != nil {
 		t.Fatal(err)
 	}
-	ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: server.URL})
+	ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: server.URL})
 	_, _ = svc.RecoverTask(localtask.WithManualRecovery(ctx), task.UserID, task.ID)
 	latest, _ := svc.repo.Task(task.ID)
 	if submits.count() != 0 || latest.RecoveryOutcome != nil {
-		t.Fatalf("submission known to BeefAPI was resubmitted or concluded: submits=%d task=%+v", submits.count(), latest)
+		t.Fatalf("submission known to BeefTV was resubmitted or concluded: submits=%d task=%+v", submits.count(), latest)
 	}
 	// 若已有「无法取回」且存在已结算记录，后台复查遇到 404 时仍保持「无法取回」并投影为 charged_result_unrecoverable。
 	unrec := localtask.RecoveryUnrecoverable
@@ -244,7 +244,7 @@ func TestManagedImageMissingSubmissionWaitsWhenBeefAPIRecordedSettlement(t *test
 	}
 }
 
-// managedLostVideo 模拟托管视频「原请求发出后回复丢失，BeefAPI 也没留下记录」。
+// managedLostVideo 模拟托管视频「原请求发出后回复丢失，BeefTV 也没留下记录」。
 // resubmit 决定之后的补交怎么回应：nil 表示正常受理。
 type managedLostVideo struct {
 	svc     *Service
@@ -264,14 +264,14 @@ func newManagedLostVideo(t *testing.T, resubmit func(http.ResponseWriter) bool) 
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/v1/models":
-			w.Header().Set(beefapi.MediaProtocolHeader, beefapi.MediaProtocolVersion)
-			_ = json.NewEncoder(w).Encode(map[string]any{"media_protocol": beefapi.MediaDiscovery{Version: beefapi.MediaProtocolVersion, SupportedMediaTypes: []string{"video"}, TaskSubmitURL: "/v1/media/tasks", TaskQueryURLTemplate: "/v1/media/tasks/{task_ref}", UploadsURL: "/v1/media/uploads"}, "data": []any{map[string]any{"id": "opaque-video-2030"}}})
+			w.Header().Set(beeftv.MediaProtocolHeader, beeftv.MediaProtocolVersion)
+			_ = json.NewEncoder(w).Encode(map[string]any{"media_protocol": beeftv.MediaDiscovery{Version: beeftv.MediaProtocolVersion, SupportedMediaTypes: []string{"video"}, TaskSubmitURL: "/v1/media/tasks", TaskQueryURLTemplate: "/v1/media/tasks/{task_ref}", UploadsURL: "/v1/media/uploads"}, "data": []any{map[string]any{"id": "opaque-video-2030"}}})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/media/tasks":
 			submits.add(r)
 			first := false
 			lost.Do(func() { first = true })
 			if first {
-				// 原请求的回复丢失，BeefAPI 也没有留下这次提交的记录。
+				// 原请求的回复丢失，BeefTV 也没有留下这次提交的记录。
 				conn, _, _ := w.(http.Hijacker).Hijack()
 				_ = conn.Close()
 				return
@@ -298,11 +298,11 @@ func newManagedLostVideo(t *testing.T, resubmit func(http.ResponseWriter) bool) 
 	path, dir := filepath.Join(t.TempDir(), "workspace.db"), t.TempDir()
 	svc, db := newManagedImageDirectService(t, path, dir)
 	t.Cleanup(func() { closeDB(t, db) })
-	input := generation.Input{Mode: "video", Prompt: "fixture", Config: generation.Config{CredentialRef: beefapi.CredentialRef, MediaProtocolVersion: beefapi.MediaProtocolVersion, APIKey: "fixture", BaseURL: server.URL, Model: "opaque-video-2030", VideoSeconds: "4", VideoGenerateAudio: "false"}}
+	input := generation.Input{Mode: "video", Prompt: "fixture", Config: generation.Config{CredentialRef: beeftv.CredentialRef, MediaProtocolVersion: beeftv.MediaProtocolVersion, APIKey: "fixture", BaseURL: server.URL, Model: "opaque-video-2030", VideoSeconds: "4", VideoGenerateAudio: "false"}}
 	raw, _ := json.Marshal(input)
 	expires := time.Now().Add(time.Hour)
 	task := model.Task{ID: "video-lost", UserID: "user-1", Type: "canvas_video", Status: model.TaskStatusRunning, InputJSON: string(raw), LeaseOwner: "worker", LeaseExpiresAt: &expires}
-	attempt := &model.RouteAttempt{ID: "video-lost-attempt", TaskID: task.ID, ChannelID: beefapi.ChannelID, Status: "dispatching", DispatchState: "submission_unknown", StartedAt: time.Now()}
+	attempt := &model.RouteAttempt{ID: "video-lost-attempt", TaskID: task.ID, ChannelID: beeftv.ChannelID, Status: "dispatching", DispatchState: "submission_unknown", StartedAt: time.Now()}
 	for _, row := range []any{&task, attempt} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
@@ -310,7 +310,7 @@ func newManagedLostVideo(t *testing.T, resubmit func(http.ResponseWriter) bool) 
 	}
 	firstCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	ctx := generation.WithEndpoints(firstCtx, generation.Endpoints{BeefAPIVideoBaseURL: server.URL})
+	ctx := generation.WithEndpoints(firstCtx, generation.Endpoints{BeefTVVideoBaseURL: server.URL})
 	ctx = svc.bindGenerationRuntime(ctx, generation.CallMeta{UserID: task.UserID, TaskID: task.ID, TaskType: task.Type})
 	ctx = context.WithValue(withProviderSubmissionKey(ctx, attempt), imageTaskContext{}, task)
 	if _, err := generation.Execute(ctx, input); err == nil || submits.count() != 1 {
@@ -320,7 +320,7 @@ func newManagedLostVideo(t *testing.T, resubmit func(http.ResponseWriter) bool) 
 	if err := db.Save(&task).Error; err != nil {
 		t.Fatal(err)
 	}
-	return managedLostVideo{svc: svc, db: db, task: task, base: generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: server.URL}), submits: submits}
+	return managedLostVideo{svc: svc, db: db, task: task, base: generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: server.URL}), submits: submits}
 }
 
 func (v managedLostVideo) outcome(t *testing.T) string {
@@ -441,7 +441,7 @@ func TestManagedImageGenerationResumeKeepsWaitingWhenSubmissionMissing(t *testin
 	defer server.Close()
 	svc, _, task, _ := managedMissingImageFixture(t, server.URL)
 	attempt, _ := svc.repo.LatestRouteAttempt(task.ID)
-	ctx, cancel := context.WithTimeout(generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: server.URL}), 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: server.URL}), 300*time.Millisecond)
 	defer cancel()
 	ctx = context.WithValue(ctx, imageAttemptContext{}, attempt.ID)
 	_, handled, err := svc.recoverImageSubmission(ctx, task)

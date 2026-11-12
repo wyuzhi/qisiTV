@@ -221,7 +221,7 @@ function linkedFileCandidates(entry: string, files: SkillPackageFile[], prompt: 
 }
 
 function isLinkedContextTextFile(path: string, file: SkillPackageFile) {
-    if (!path || path.startsWith("scripts/") || path.startsWith("assets/")) return false;
+    if (!path || path.startsWith("scripts/") || path.startsWith("script/") || path.startsWith("assets/")) return false;
     if (file.kind === "image" || file.kind === "video" || file.kind === "audio" || file.kind === "binary") return false;
     const dot = path.lastIndexOf(".");
     return dot >= 0 && TEXT_FILE_EXTENSIONS.has(path.slice(dot).toLocaleLowerCase());

@@ -45,6 +45,7 @@ type Op struct {
 	ProjectReplay     ReplayProjection
 	AssistantCanvas   bool
 	AssistantProposal bool
+	ExternalOnly      bool
 	ReplaySafe        bool
 	ReplayUnsafe      bool // A read can still incur an external model charge.
 }
@@ -123,6 +124,9 @@ func (op *Op) Descriptor() Descriptor {
 }
 
 func (op *Op) assistantModes() []string {
+	if op.ExternalOnly {
+		return []string{}
+	}
 	modes := []string{}
 	if op.Scope != ScopeConversation {
 		modes = append(modes, "full-access")
@@ -194,6 +198,9 @@ func (r *Registry) Execute(req Request) (Result, error) {
 	}
 	if caller.assistantWithoutScope() {
 		return Result{}, PermissionDenied("missing_assistant_scope", "内置助手缺少可信范围，不能执行操作")
+	}
+	if op.ExternalOnly && caller.Kind == CallerAssistant {
+		return Result{}, PermissionDenied("scope_denied", "本轮助手权限不允许该操作")
 	}
 	if caller.ReadOnly && !op.ReadOnly {
 		return Result{}, newError(CodeReadOnly, "read_only_client", "该客户端为只读模式，不能执行写操作: "+op.ID, nil)
@@ -313,7 +320,8 @@ func (r *Registry) Execute(req Request) (Result, error) {
 	}
 	outcome, err := r.store.RunDomain(runCtx, runReq, r.binder, func(domain Domain) ([]byte, error) {
 		activeDomain = domain
-		if !op.ReadOnly && strings.TrimSpace(target.CanvasID) != "" {
+		trackCanvasWrite := !op.ReadOnly && op.ID != "skill.script.run" && strings.TrimSpace(target.CanvasID) != ""
+		if trackCanvasWrite {
 			beforeCanvasRaw, _ = domain.UserCanvasProject(req.UserID, target.CanvasID)
 		}
 		execCtx := &Context{Context: runCtx, UserID: req.UserID, Caller: caller, Domain: domain, OperationID: opID, TurnID: req.TurnID}
@@ -321,7 +329,17 @@ func (r *Registry) Execute(req Request) (Result, error) {
 		if runErr != nil {
 			return nil, AsError(runErr)
 		}
-		if !op.ReadOnly && strings.TrimSpace(target.CanvasID) != "" && len(beforeCanvasRaw) > 0 {
+		if op.ID == "canvas.create" {
+			if resMap, ok := value.(map[string]any); ok {
+				if createdID, _ := resMap["canvasId"].(string); strings.TrimSpace(createdID) != "" {
+					if afterCanvasRaw, afterErr := domain.UserCanvasProject(req.UserID, createdID); afterErr == nil {
+						if write, changed := BuildCanvasCreateWriteRecord(opID, createdID, req.TurnID, caller, afterCanvasRaw); changed {
+							pendingWrite = write
+						}
+					}
+				}
+			}
+		} else if trackCanvasWrite && len(beforeCanvasRaw) > 0 {
 			if afterCanvasRaw, afterErr := domain.UserCanvasProject(req.UserID, target.CanvasID); afterErr == nil {
 				if write, changed := BuildCanvasWriteRecord(opID, op.ID, target.CanvasID, req.TurnID, caller, beforeCanvasRaw, afterCanvasRaw); changed {
 					pendingWrite = write

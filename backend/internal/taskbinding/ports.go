@@ -3,6 +3,7 @@ package taskbinding
 import (
 	"qisitv/backend/internal/model"
 	localtask "qisitv/backend/internal/task"
+	"qisitv/backend/internal/writechange"
 )
 
 // Ports is the TX-bound workspace the bind algorithm may read and patch.
@@ -60,26 +61,28 @@ type NodePatch struct {
 
 // NodeBindResult is the canvas write outcome used to build the op receipt.
 type NodeBindResult struct {
-	Revision int64
-	Node     map[string]any
+	Revision    int64
+	Node        map[string]any
+	AlsoChanged []writechange.Node
 }
 
 // Receipt is stored on AgentOpRecord in the same TX as the canvas patch.
 type Receipt struct {
-	Applied      bool           `json:"applied"`
-	CanvasID     string         `json:"canvasId"`
-	NodeID       string         `json:"nodeId"`
-	TaskID       string         `json:"taskId"`
-	OutputIndex  int            `json:"outputIndex"`
-	EffectKey    string         `json:"effectKey"`
-	MediaType    string         `json:"mediaType,omitempty"`
-	AssetID      string         `json:"assetId,omitempty"`
-	ResourceID   string         `json:"resourceId,omitempty"`
-	StorageKey   string         `json:"storageKey,omitempty"`
-	Content      string         `json:"content,omitempty"`
-	Revision     int64          `json:"revision"`
-	AlreadyBound bool           `json:"alreadyBound,omitempty"`
-	Node         map[string]any `json:"node,omitempty"`
+	Applied      bool               `json:"applied"`
+	CanvasID     string             `json:"canvasId"`
+	NodeID       string             `json:"nodeId"`
+	TaskID       string             `json:"taskId"`
+	OutputIndex  int                `json:"outputIndex"`
+	EffectKey    string             `json:"effectKey"`
+	MediaType    string             `json:"mediaType,omitempty"`
+	AssetID      string             `json:"assetId,omitempty"`
+	ResourceID   string             `json:"resourceId,omitempty"`
+	StorageKey   string             `json:"storageKey,omitempty"`
+	Content      string             `json:"content,omitempty"`
+	Revision     int64              `json:"revision"`
+	AlreadyBound bool               `json:"alreadyBound,omitempty"`
+	Node         map[string]any     `json:"node,omitempty"`
+	AlsoChanged  []writechange.Node `json:"alsoChanged,omitempty"`
 }
 
 // MessageRequest is the authenticated message attach identity. Client result

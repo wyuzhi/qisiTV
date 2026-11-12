@@ -58,6 +58,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--target", choices=["darwin/arm64", "darwin/amd64", "linux/amd64", "windows/amd64"], required=True)
-    parser.add_argument("--version", default=(ROOT / "VERSION").read_text().strip())
+    parser.add_argument("--version", default=(ROOT / "ENGINE_VERSION").read_text().strip())
     args = parser.parse_args()
     build(args.output, args.target, args.version)

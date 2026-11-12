@@ -37,7 +37,7 @@ func (s *Service) validateRetryCredentialRefresh(task *model.Task, refresh retry
 			return kernel.BadAuthRequest("原任务缺少渠道配置")
 		}
 		connection := map[string]any{}
-		for _, key := range []string{"apiKey", "secretKey", "headers", "baseUrl", "credentialRef", "referenceAssetOrigin", "runningHubUploadApiKey"} {
+		for _, key := range []string{"apiKey", "secretKey", "headers", "baseUrl", "credentialRef", "referenceAssetOrigin"} {
 			if value, ok := config[key]; ok {
 				connection[key] = value
 			}

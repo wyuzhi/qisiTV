@@ -4,12 +4,12 @@ import { Button } from "antd";
 import { AppModal } from "@/components/ui/product/app-modal";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, GripVertical, HelpCircle, X } from "lucide-react";
 import { useOnboardingStore, onboardingSteps } from "@/stores/use-onboarding-store";
-import { channelHasGenerationCredential, filterModelsByCapability, isBuiltinBeefAPIChannel, modelOptionsFromChannels, useConfigStore } from "@/stores/use-config-store";
+import { channelHasGenerationCredential, filterModelsByCapability, modelOptionsFromChannels, useConfigStore } from "@/stores/use-config-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import "./first-creation-guide.css";
 
 const lessons = [
-    { title: "连接算力", description: "点击连接，在浏览器确认授权。" },
+    { title: "连接算力", description: "在模型配置中为 qisi API 或 LikeAI 填入密钥，然后读取图片模型。" },
     { title: "新建项目", description: "点击侧栏「新建项目」，打开一张新画布。" },
     { title: "添加图片", description: "点击添加按钮，选择「图片」。" },
     { title: "生成图片", description: "选中图片节点，输入描述并生成。" },
@@ -46,8 +46,8 @@ export function FirstCreationGuide() {
     const project = projects.find((item) => item.id === guide.projectId);
     const node = project?.nodes.find((item) => item.id === guide.nodeId);
     const result = project?.nodes.find((item) => item.type === "image" && item.metadata?.content && (item.id === guide.nodeId || item.metadata?.generatedFromNodeId === guide.nodeId) && (item.metadata?.resultOrigin === "generated" || Boolean(item.metadata?.taskId)));
-    const official = config.channels.find(isBuiltinBeefAPIChannel);
-    const connected = Boolean(official && channelHasGenerationCredential(official) && filterModelsByCapability(modelOptionsFromChannels([official]), "image", [official]).length);
+    const imageChannels = config.channels.filter(channel => channel.enabled !== false && channelHasGenerationCredential(channel));
+    const connected = filterModelsByCapability(modelOptionsFromChannels(imageChannels), "image", imageChannels).length > 0;
     const ready = step === "official" ? connected : step === "project" ? Boolean(project) : step === "node" ? Boolean(node) : step === "generate" ? Boolean(result) : step === "assets" ? pathname === "/assets" && new URLSearchParams(search).get("tab") === "history" && Boolean(result) : guide.visitedLibrary && Boolean(project) && pathname === `/canvas/${project?.id}`;
 
     useEffect(() => {
@@ -110,7 +110,7 @@ export function FirstCreationGuide() {
         const update = () => {
             timer = null;
             let target: HTMLElement | null = null;
-            if (step === "official" && pathname === "/settings") target = connected ? visible('[aria-label="默认生图模型"]') || visible(".model-default-section") : visible('[data-onboarding="official-connect"]') || visible('[data-onboarding="official-channel"]');
+            if (step === "official" && pathname === "/settings") target = connected ? visible('[aria-label="默认生图模型"]') || visible(".model-default-section") : visible('[data-onboarding="image-channel"]');
             if (step === "project") target = visible('[title="点击修改画布名称"]') || visible('[aria-label="画布名称"]') || visible('[data-nav-id="new"]') || visible('[aria-label="新建画布创作"]');
             if (step === "node" && !ready) target = visible('[data-onboarding="image-option"]') || visible('[aria-label="添加节点"]') || visible('[data-onboarding="canvas-tools"]') || visible('[data-nav-id="new"]');
             if (step === "generate") {
@@ -170,7 +170,7 @@ export function FirstCreationGuide() {
         bottom: Math.min(window.innerHeight, highlightRect.bottom + 8),
     };
     return <>
-        <AppModal open={finished} transitionName="" maskTransitionName="" title="引导已结束" onCancel={() => setFinished(false)} footer={<Button type="primary" onClick={() => setFinished(false)}>继续使用 BeefTV</Button>} width={420}>
+        <AppModal open={finished} transitionName="" maskTransitionName="" title="引导已结束" onCancel={() => setFinished(false)} footer={<Button type="primary" onClick={() => setFinished(false)}>继续使用 qisiTV</Button>} width={420}>
             <p className="first-creation-intro">随时从侧栏重新打开引导。</p>
         </AppModal>
         <AppModal open={welcome} transitionName="" maskTransitionName="" title="完成第一次创作" onCancel={dismiss} footer={null} width={420} destroyOnHidden>

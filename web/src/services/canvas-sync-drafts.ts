@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import { localForageStorageForScope } from "@/lib/localforage-storage";
 import { getActiveUserScope } from "@/lib/user-scope";
-import { sameCanvasContent } from "@/lib/canvas/canvas-content";
+import { normalizeCanvasProjectGraph, sameCanvasContent } from "@/lib/canvas/canvas-content";
 import { withCanvasStorePersistenceLock, type CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { withGenerationArtifactCommitLock } from "@/services/generation-asset-repository";
 
@@ -17,7 +17,11 @@ export async function readAllCanvasSyncDrafts(scope = getActiveUserScope()) {
 
 export async function readCanvasSyncDrafts(projectId: string, scope = getActiveUserScope()): Promise<CanvasSyncDraft[]> {
     const raw = await localForageStorageForScope(scope).getItem(draftKey(projectId));
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+        .filter((item): item is CanvasSyncDraft => Boolean(item && typeof item === "object" && item.project && typeof item.project === "object"))
+        .map((item) => ({ ...item, project: normalizeCanvasProjectGraph(item.project) }));
 }
 
 export async function preserveCanvasSyncDraft(project: CanvasProject, scope = getActiveUserScope()) {

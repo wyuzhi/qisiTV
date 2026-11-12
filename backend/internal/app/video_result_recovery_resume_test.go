@@ -80,7 +80,7 @@ func TestFailedVideoManualRecoveryResumesProviderDownloadCache(t *testing.T) {
 	if err := db.Create(&task).Error; err != nil {
 		t.Fatal(err)
 	}
-	ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefAPIVideoBaseURL: gateway.URL})
+	ctx := generation.WithEndpoints(context.Background(), generation.Endpoints{BeefTVVideoBaseURL: gateway.URL})
 	_, _, err = generation.RunVideoDownload(withProviderAnalytics(ctx, svc, task), "original", generation.VideoPollPolicy{
 		Interval: time.Millisecond, MaxDownloadTries: 1, Sleep: generation.SleepContext,
 	}, func(ctx context.Context) ([]byte, string, error) {

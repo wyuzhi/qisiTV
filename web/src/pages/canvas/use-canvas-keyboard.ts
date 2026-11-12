@@ -1,6 +1,7 @@
 import { useEffect, type Dispatch, type SetStateAction } from "react";
 
 import { isTextEditableTarget } from "@/lib/backspace-navigation-guard";
+import { ownsCanvasClipboard } from "@/lib/canvas/canvas-clipboard";
 import type { CanvasNodeData } from "@/types/canvas";
 import type { CanvasPageUiStoreHook } from "@/stores/canvas/use-canvas-page-ui-store";
 
@@ -52,6 +53,26 @@ export function hasCanvasTextSelection(selection: TextSelectionLike | null | und
     return Boolean(selection && !selection.isCollapsed && selection.rangeCount > 0 && selection.toString());
 }
 
+/**
+ * 画布只在项目已加载、不在版本预览、且没有其他键盘宿主时接管快捷键。
+ * React 状态决定监听是否注册；DOM 宿主检查是运行时兜底，防止状态还没回落时
+ * 画布继续接管 Delete、Backspace 和粘贴。
+ */
+export function canvasKeyboardEnabled({ projectLoaded, previewActive, directorNodeId, folderBrowserNodeId }: {
+    projectLoaded: boolean;
+    previewActive: boolean;
+    directorNodeId?: string | null;
+    folderBrowserNodeId?: string | null;
+}) {
+    return projectLoaded && !previewActive && !directorNodeId && !folderBrowserNodeId;
+}
+
+const CANVAS_KEYBOARD_HOST_SELECTOR = "[data-director-workbench='true'], [data-canvas-folder-browser]";
+
+function canvasKeyboardHostMounted(root: { querySelector: (selector: string) => unknown }) {
+    return Boolean(root.querySelector(CANVAS_KEYBOARD_HOST_SELECTOR));
+}
+
 export function useCanvasKeyboard({
     pageUi,
     projectId,
@@ -98,12 +119,15 @@ export function useCanvasKeyboard({
             // propagation so their own handlers still receive the key.
             if ((event.key === "Delete" || event.key === "Backspace") && !isTextEditableTarget(event.target)) event.preventDefault();
             // Runtime guard complements the React `enabled` flag: the workbench
-            // owns keyboard input whenever mounted, regardless of stale canvas selection.
-            if (document.querySelector("[data-director-workbench='true']")) return;
+            // and fullscreen folder browser own keyboard input whenever mounted,
+            // regardless of stale canvas selection.
+            if (canvasKeyboardHostMounted(document)) return;
             const target = event.target instanceof Element ? event.target : null;
             if (target?.closest(".canvas-node-toolbar, .canvas-node-toolbar-menu")) return;
             const key = event.key.toLowerCase();
             const isModifierShortcut = event.metaKey || event.ctrlKey;
+            const isClipboardShortcut = isModifierShortcut && (key === "c" || key === "v");
+            if (isClipboardShortcut && !ownsCanvasClipboard(event.target, document.activeElement)) return;
             const isTextEditingTarget = isTextEditableTarget(event.target) || isTextEditableTarget(document.activeElement);
 
             if (isModifierShortcut && !event.altKey && (key === "+" || key === "=" || event.code === "NumpadAdd")) {
@@ -139,7 +163,7 @@ export function useCanvasKeyboard({
                 return;
             }
             // 助手开合在输入框里也要能用（面板自己的输入框就是输入框）。
-            if (isModifierShortcut && !event.altKey && !event.shiftKey && key === "j") {
+            if (onToggleAssistant && isModifierShortcut && !event.altKey && !event.shiftKey && key === "j") {
                 if (target?.closest(".ant-modal-wrap, .ant-dropdown, .ant-popover")) return;
                 event.preventDefault();
                 event.stopPropagation();
@@ -147,8 +171,9 @@ export function useCanvasKeyboard({
                 return;
             }
             if (isTextEditingTarget) return;
-            const isCanvasControlTarget = Boolean(target?.closest("[data-canvas-no-zoom]"));
-            if (isCanvasControlTarget && !(isModifierShortcut && !event.altKey && (key === "c" || key === "v"))) return;
+            // 画布控件上的普通快捷键交给控件自己；但复制/粘贴属于画布，不能因为
+            // 焦点停在控件按钮上就被吞掉。
+            if (!isClipboardShortcut && target?.closest("[data-canvas-no-zoom]")) return;
             if (event.altKey && event.shiftKey && !isModifierShortcut && key === "f") {
                 if (target?.closest(".ant-modal-wrap, .ant-dropdown, .ant-popover")) return;
                 event.preventDefault();
@@ -198,6 +223,7 @@ export function useCanvasKeyboard({
                 return;
             }
             if (isModifierShortcut && !event.altKey && key === "v") {
+                if (event.repeat) { event.preventDefault(); return; }
                 // 有些浏览器/焦点状态不会继续派发 paste 事件；内部节点复制必须有 keydown 兜底。
                 if (shouldPreferCopiedNodes()) {
                     event.preventDefault();
@@ -240,8 +266,7 @@ export function useCanvasKeyboard({
         };
 
         const handlePaste = (event: ClipboardEvent) => {
-            const target = event.target instanceof Element ? event.target : null;
-            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || target?.closest("[contenteditable='true']")) return;
+            if (event.defaultPrevented || canvasKeyboardHostMounted(document) || !ownsCanvasClipboard(event.target, document.activeElement)) return;
             // 节点标记写入失败或仍在写入时避开旧系统图片，其余情况保持系统内容优先。
             event.preventDefault();
             const text = event.clipboardData?.getData("text/plain") || "";
