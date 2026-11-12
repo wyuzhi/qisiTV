@@ -22,6 +22,7 @@ import (
 	"qisitv/backend/internal/app"
 	"qisitv/backend/internal/modelcatalog"
 	"qisitv/backend/internal/operations"
+	"qisitv/backend/internal/protocol"
 )
 
 func e2eModelConfig(baseURL string) []byte {
@@ -112,7 +113,7 @@ func buildE2EProtocolPackages(t *testing.T) string {
 		if err := writer.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, id+".beeftv-plugin"), archive.Bytes(), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, id+protocol.PluginPackageExtension), archive.Bytes(), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
