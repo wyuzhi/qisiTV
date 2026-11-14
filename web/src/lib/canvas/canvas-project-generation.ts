@@ -22,6 +22,7 @@ import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { CanvasGenerationDurableAckError, CanvasGenerationMaterializationError } from "@/services/canvas-generation-errors";
 import type { persistCanvasGenerationTarget } from "@/services/canvas-generation-target";
 import { GenerationSubmissionUnknownError } from "@/services/api/generation-submission";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 
 export async function runBackendCanvasGenerationTask(
@@ -128,6 +129,11 @@ export async function runCanvasGenerationTaskToConsumer(
         const isCurrent = () => !input.signal?.aborted && (dependencies.isCurrent ? dependencies.isCurrent() : true);
         const submission = (state: NonNullable<CanvasNodeMetadata["generationSubmissionState"]>) => {
             if (!isCurrent()) return;
+            if (state !== "submitting" && isBrowserWorkspace()) {
+                const live = useCanvasStore.getState().openProject(input.projectId);
+                const operation = live?.nodes.find(node => node.id === input.nodeId)?.metadata?.taskClientOperationId;
+                if (operation !== input.clientOperationId) return;
+            }
             const metadata = { taskClientOperationId: input.clientOperationId, generationSubmissionState: state, taskStage: state === "submitting" ? "正在提交生成任务" : state === "unknown" ? "提交结果待确认，请查询原任务" : undefined };
             // Editor and store are one writer here. Advance the editor's live
             // refs before publishing the store change can trigger persistence.

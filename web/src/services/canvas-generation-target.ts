@@ -7,6 +7,7 @@ import { useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-s
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import type { TimelineDirectMedia } from "@/types/timeline";
 import { CanvasGenerationTargetSaveError } from "./canvas-generation-errors";
+import { isBrowserWorkspace } from "./browser-workspace";
 
 export function isCanvasMediaAssetGuardError(error: unknown) {
     const message = error instanceof Error ? error.message : error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string" ? (error as { message: string }).message : "";
@@ -335,9 +336,13 @@ export async function persistCanvasGenerationTarget(input: {
     }
     assertCurrent();
     const current = useCanvasStore.getState().openProject(input.projectId);
-    if (!current?.nodes.some((node) => node.id === input.nodeId)) {
+    const savedTarget = current?.nodes.find((node) => node.id === input.nodeId);
+    if (!savedTarget) {
         // 保存期间的删除也必须提交；旧快照的回执不能让节点在下次打开时重现。
         if (current) await persist(input.projectId, { nodes: current.nodes, connections: current.connections });
         throw new CanvasGenerationTargetSaveError(undefined, "生成节点已不存在，未开始生成");
+    }
+    if (isBrowserWorkspace() && input.clientOperationId && savedTarget.metadata?.taskClientOperationId !== input.clientOperationId) {
+        throw new CanvasGenerationTargetSaveError(undefined, "保存期间生成节点已被其他操作修改，本次未开始生成");
     }
 }

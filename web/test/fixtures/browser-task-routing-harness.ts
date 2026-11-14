@@ -13,12 +13,52 @@ import { syncGenerationTaskToCanvasStore } from "@/lib/canvas/canvas-generation-
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { http, ApiError } from "@/services/api/request";
+import { runCanvasGenerationTaskToConsumer } from "@/lib/canvas/canvas-project-generation";
+import { selectBrowserProjectRoot } from "@/services/browser-folder-workspace";
+import { getProjectFolderState } from "@/services/browser-project-folder";
+import { projectSyncProgress, useSyncProgressStore } from "@/stores/use-sync-progress-store";
 
 let cancelledTask: Promise<string> | undefined;
 let cancellation: AbortController | undefined;
 let cancelledProjectId: string | undefined;
 
 Object.assign(window, {
+    videoSavePreflight: async () => {
+        const root = await (await navigator.storage.getDirectory()).getDirectoryHandle("video-fixture", { create: true });
+        Object.defineProperty(window, "showDirectoryPicker", { configurable: true, value: async () => root });
+        await selectBrowserProjectRoot();
+        const { id, saved } = beginLocalCanvasProject("预检");
+        await saved;
+        const node: CanvasNodeData = { id: "video-target", type: CanvasNodeType.Video, title: "视频", position: { x: 0, y: 0 }, width: 320, height: 180, metadata: { status: "loading" } };
+        useCanvasStore.getState().updateProject(id, { nodes: [node] });
+        const folder = await root.getDirectoryHandle(getProjectFolderState().projectDirectories[id]);
+        let submissions = 0;
+        let savedOperation: string | undefined;
+        const run = (op: string) => runCanvasGenerationTaskToConsumer({
+            mode: "video", config: useConfigStore.getState().config, prompt: "保存预检", nodeId: node.id, projectId: id, clientOperationId: op,
+        }, {
+            bindTask: () => {}, consumeTask: async () => {},
+            runTask: async () => {
+                submissions++;
+                const file = await (await folder.getFileHandle("project.qisitv.json")).getFile();
+                savedOperation = JSON.parse(await file.text()).project.nodes.find((n: CanvasNodeData) => n.id === node.id).metadata.taskClientOperationId;
+                throw new Error("fixture stops before model submission");
+            },
+        }).catch((error: Error) => ({ name: error.name, message: error.message, cause: error.cause instanceof Error ? error.cause.message : undefined }));
+        await run("video-first");
+        const unsubscribe = useSyncProgressStore.subscribe(() => {
+            if (projectSyncProgress(id)?.phase !== "done") return;
+            useCanvasStore.getState().updateProject(id, { nodes: [{ ...node, metadata: { ...node.metadata, taskClientOperationId: "newer-attempt" } }] });
+        });
+        const displaced = await run("video-displaced").finally(unsubscribe);
+        const preservedOperation = useCanvasStore.getState().openProject(id)?.nodes[0].metadata?.taskClientOperationId;
+        const descriptor = Object.getOwnPropertyDescriptor(FileSystemHandle.prototype, "queryPermission")!;
+        try {
+            Object.defineProperty(FileSystemHandle.prototype, "queryPermission", { configurable: true, value: async () => "denied" });
+            const failure = await run("video-denied");
+            return { savedOperation, submissions, failure, displaced, preservedOperation };
+        } finally { Object.defineProperty(FileSystemHandle.prototype, "queryPermission", descriptor); }
+    },
     startCancelledBrowserTask: async () => {
         const { id, saved } = beginLocalCanvasProject("Cancelled browser task");
         await saved;

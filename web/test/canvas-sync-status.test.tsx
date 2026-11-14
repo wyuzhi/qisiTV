@@ -13,6 +13,8 @@ test("浏览器暂存与项目目录落盘分别确认，不把目录选择或�
     expect(browserFolderSyncView(view, { phase: "done", storageTarget: "project-folder" }, unselected, "canvas").label).not.toBe("已写入项目文件夹");
     expect(browserFolderSyncView(view, undefined, folder, "canvas").label).not.toBe("已写入项目文件夹");
     expect(browserFolderSyncView(canvasSyncStatusView(true, { phase: "error" }), { phase: "error", storageTarget: "browser-cache" }, folder, "canvas").tone).toBe("failed");
+    const denied = { phase: "error" as const, message: "项目文件夹权限已失效，请点击重新授权后再保存" };
+    expect(browserFolderSyncView(canvasSyncStatusView(true, denied), denied, folder, "canvas")).toMatchObject({ tone: "failed", detail: denied.message, action: "retry-save" });
 });
 
 test("引擎已保存不等于项目目录已落盘，错误与待写状态必须持续可见", () => {

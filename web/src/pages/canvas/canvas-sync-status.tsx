@@ -72,6 +72,7 @@ export function engineFolderSyncView(view: CanvasSyncStatusView, folder?: Engine
 }
 
 export function browserFolderSyncView(view: CanvasSyncStatusView, progress: Pick<SyncProjectProgress, "phase" | "message" | "storageTarget"> | undefined, folder: ProjectFolderState, projectId: string): CanvasSyncStatusView {
+    if (progress?.phase === "error" && progress.message) return { ...view, detail: progress.message };
     if (view.tone === "failed" || view.tone === "saving") return view;
     if (folder.ready && folder.projectDirectories[projectId] && progress?.phase === "done" && progress.storageTarget === "project-folder") {
         return { label: "已写入项目文件夹", tone: "saved", detail: `${folder.rootName}/${folder.projectDirectories[projectId]}`, note: "项目与素材已保存到你授权的本机文件夹。" };

@@ -14,7 +14,7 @@ test("网页模型目录、参考素材和任务恢复使用中转；不连接�
     const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
         const url = new URL(request.url);
         if (url.pathname === "/fixture.js") return new Response(script, { headers: { "Content-Type": "text/javascript" } });
-        if (url.pathname === "/") return new Response('<script type="module" src="/fixture.js"></script>', { headers: { "Content-Type": "text/html" } });
+        if (url.pathname === "/") return new Response('<link rel="icon" href="data:,"><script type="module" src="/fixture.js"></script>', { headers: { "Content-Type": "text/html" } });
         if (!url.pathname.startsWith("/api/qisitv/likeai/current/")) { rejected.push(url.pathname); return new Response("unexpected backend", { status: 500 }); }
         calls.push(request.method + " " + url.pathname);
         expect(request.headers.get("X-API-Key")).toBe("test-only-not-a-real-key");
@@ -72,6 +72,20 @@ test("网页模型目录、参考素材和任务恢复使用中转；不连接�
         });
         expect(calls.filter(call => call.endsWith("/task/create_task"))).toHaveLength(1);
         expect(bodies[0]?.image_urls).toEqual(["https://media.example/reference.png"]);
+        const beforeVideo = calls.length;
+        const videoPage = await browser.newPage();
+        await videoPage.goto(server.url.toString());
+        const video = await videoPage.evaluate(() => (window as unknown as { videoSavePreflight(): Promise<{
+            savedOperation: string; submissions: number; failure: { name: string; message: string; cause: string }; displaced: { name: string }; preservedOperation: string;
+        }> }).videoSavePreflight());
+        expect(video.savedOperation).toBe("video-first");
+        expect(video.submissions).toBe(1);
+        expect(video.failure.name).toBe("CanvasGenerationTargetSaveError");
+        expect(video.failure.cause).toContain("文件夹权限");
+        expect(video.failure.message).toContain(video.failure.cause);
+        expect(video.displaced.name).toBe("CanvasGenerationTargetSaveError");
+        expect(video.preservedOperation).toBe("newer-attempt");
+        expect(calls).toHaveLength(beforeVideo);
         expect(rejected).toEqual([]);
         expect(errors).toEqual([]);
     } finally { await browser?.close(); server.stop(true); }
