@@ -4,6 +4,7 @@ import { Image as ImageIcon, Video, LoaderCircle } from "lucide-react";
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import { createDefaultUpscaleSettings, deriveUpscaleBatchState, upscaleParamsForNode, type CanvasUpscaleSettings } from "@/lib/canvas/canvas-upscale";
 import { canRecoverUpscaleNode } from "@/lib/canvas/canvas-ai-upscale-task";
+import { isOfficialLikeAI } from "@/lib/likeai-service";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { channelHasGenerationCredential, isBuiltinBeefTVChannel, useEffectiveConfig } from "@/stores/use-config-store";
 import { ownedResourceIdFromMediaRef } from "@/services/api/resources";
@@ -22,7 +23,7 @@ export function UpscaleNodeContent({ node, theme }: { node: CanvasNodeData; them
     const imageCount = inputs.filter(item => item.type === CanvasNodeType.Image).length;
     const videoCount = inputs.length - imageCount;
     const config = useEffectiveConfig();
-    const channels = config.channels.filter(channel => channel.enabled !== false && (isBuiltinBeefTVChannel(channel) || channel.apiFormat === "likeai" && channel.baseUrl.replace(/\/+$/, "") === "https://task.likeai.pro/task-api") && channelHasGenerationCredential(channel));
+    const channels = config.channels.filter(channel => channel.enabled !== false && (isBuiltinBeefTVChannel(channel) || channel.apiFormat === "likeai" && isOfficialLikeAI(channel.baseUrl)) && channelHasGenerationCredential(channel));
     const savedSettings = node.metadata?.upscale || createDefaultUpscaleSettings();
     const channel = channels.find(channel => channel.id === savedSettings.channelId) || channels[0];
     const channelId = channel?.id || "";

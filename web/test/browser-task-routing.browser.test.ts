@@ -15,7 +15,7 @@ test("网页模型目录、参考素材和任务恢复使用中转；不连接�
         const url = new URL(request.url);
         if (url.pathname === "/fixture.js") return new Response(script, { headers: { "Content-Type": "text/javascript" } });
         if (url.pathname === "/") return new Response('<script type="module" src="/fixture.js"></script>', { headers: { "Content-Type": "text/html" } });
-        if (!url.pathname.startsWith("/api/qisitv/likeai/")) { rejected.push(url.pathname); return new Response("unexpected backend", { status: 500 }); }
+        if (!url.pathname.startsWith("/api/qisitv/likeai/current/")) { rejected.push(url.pathname); return new Response("unexpected backend", { status: 500 }); }
         calls.push(request.method + " " + url.pathname);
         expect(request.headers.get("X-API-Key")).toBe("test-only-not-a-real-key");
         if (url.pathname.endsWith("/task/models")) return Response.json({ code: 200, data: { models: [{ api_name: "doubao_seedream_4_5", type: "image" }] } });

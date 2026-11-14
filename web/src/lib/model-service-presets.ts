@@ -2,7 +2,7 @@ import type { AiConfig, ModelChannel, ModelCapability } from "@/stores/use-confi
 import { buildApiUrl, createModelChannel } from "@/stores/use-config-store";
 import { defaultModelCapabilityConfig, hasUserModelCapability } from "@/lib/model-capabilities";
 import { inferProtocolCapabilityFromModel, modelProtocolDefinition, modelProtocolDefinitionFor, type ModelProtocolDefinition } from "@/lib/model-protocols";
-import { modelCapabilityDefaultsForService, isQisiAPI, QISI_API_BASE_URL, OFFICIAL_LIKEAI_BASE_URL } from "@/lib/likeai-service";
+import { modelCapabilityDefaultsForService, isOfficialLikeAI, isQisiAPI, likeAIEndpointError, normalizeServiceBaseUrl, QISI_API_BASE_URL, OFFICIAL_LIKEAI_BASE_URL } from "@/lib/likeai-service";
 import { catalogEndpointCapability, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
 import { serviceCredentialGuide } from "@/lib/service-credentials";
 import { BUILTIN_PRESETS, COMPATIBLE_CANDIDATES, builtinPreset, builtinProtocolsAvailable, upgradeBuiltinModelProfile } from "@/lib/builtin-service-presets";
@@ -39,9 +39,19 @@ export function isTopazUpscaleChannel(channel: Pick<ModelChannel, "id" | "models
     return channel.id === "fal-topaz-upscale" || channel.models.some(model => model.replace(/^\/+/, "").startsWith("topaz/upscale/"));
 }
 
+/** Editing an endpoint must never re-use a saved credential across the HTTP LikeAI boundary. */
+export function patchModelServiceConnection(channel: ModelChannel, patch: Partial<ModelChannel>): ModelChannel {
+    const next = { ...channel, ...patch };
+    if (patch.baseUrl === undefined) return next;
+    const previousUrl = normalizeServiceBaseUrl(channel.baseUrl);
+    const nextUrl = normalizeServiceBaseUrl(next.baseUrl);
+    if (previousUrl === nextUrl || (previousUrl !== OFFICIAL_LIKEAI_BASE_URL && nextUrl !== OFFICIAL_LIKEAI_BASE_URL)) return next;
+    return { ...next, apiKey: "", secretKey: "", headers: [], credentialRef: undefined, hasApiKey: false, hasSecretKey: false };
+}
+
 export function servicePresetFor(channel: ModelChannel): ModelServicePresetId {
     if (isQisiAPI(channel.baseUrl)) return "qisi-api";
-    if (channel.baseUrl.replace(/\/+$/, "") === OFFICIAL_LIKEAI_BASE_URL) return "likeai";
+    if (isOfficialLikeAI(channel.baseUrl)) return "likeai";
     if (builtinPreset(channel.id)) return channel.id as ModelServicePresetId;
     try {
         const host = new URL(channel.baseUrl).hostname;
@@ -212,7 +222,8 @@ export function channelAllowsEmptyAPIKey(channel: Pick<ModelChannel, "models" | 
 }
 
 export function serviceConnectionError(channel: ModelChannel, options?: { protocols?: ModelProtocolDefinition[]; requireCredential?: boolean }): string {
-    if (channel.apiFormat === "likeai" && !isQisiAPI(channel.baseUrl) && channel.baseUrl.replace(/\/+$/, "") !== OFFICIAL_LIKEAI_BASE_URL) return "LikeAI 协议请选择 qisi API 或官方 LikeAI 地址";
+    const endpointError = channel.apiFormat === "likeai" && likeAIEndpointError(channel.baseUrl);
+    if (endpointError) return endpointError;
     if (channel.referenceAssetOrigin?.trim()) {
         try {
             const origin = new URL(channel.referenceAssetOrigin.trim());

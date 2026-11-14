@@ -3,7 +3,7 @@ import { getActiveUserScope } from "@/lib/user-scope";
 import type { BackendGenerationResult } from "@/services/api/generation-task";
 import type { CreateTaskInput, GenerationTask, GenerationTaskOutput } from "@/services/api/task-center";
 import { browserLikeAIRequest, buildLikeAICreateBody, likeAIInput, LikeAIRequestError, objectRecord, parseLikeAIResponse, validateLikeAIReferences, type LikeAIMode, type LikeAIReference } from "@/services/browser-likeai-client";
-import { isQisiAPI, likeAIService, OFFICIAL_LIKEAI_BASE_URL } from "@/lib/likeai-service";
+import { isQisiAPI, likeAIService, normalizeServiceBaseUrl, LEGACY_LIKEAI_BASE_URL, OFFICIAL_LIKEAI_BASE_URL } from "@/lib/likeai-service";
 import { isBrowserWorkspace } from "@/services/browser-workspace";
 
 export type BrowserLikeAITaskRecord = { task: GenerationTask; channelId: string; serviceBaseUrl?: string; mode: LikeAIMode; remoteResult?: BackendGenerationResult; downloaded: boolean };
@@ -18,7 +18,7 @@ type Dependencies = {
     lock<T>(name: string, action: () => Promise<T>): Promise<T>;
     withProjectWriteLock?<T>(projectId: string, action: () => Promise<T>): Promise<T>;
     request: typeof browserLikeAIRequest;
-    credential(channelId: string, baseUrl?: string): Promise<string>;
+    credential(channelId: string, baseUrl: string): Promise<string>;
     reference(ref: LikeAIReference, kind: "image" | "video" | "audio", apiKey: string, baseUrl?: string, signal?: AbortSignal): Promise<LikeAIReference>;
     download(result: BackendGenerationResult, taskId: string, providerId: string, apiKey: string, signal?: AbortSignal, baseUrl?: string): Promise<BackendGenerationResult>;
     now?: () => string;
@@ -79,7 +79,7 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
     const download = async (record: BrowserLikeAITaskRecord, apiKey: string, signal?: AbortSignal) => {
         if (record.downloaded || record.task.status !== "succeeded" || !record.remoteResult || !record.task.providerRequestId) return record.task;
         try {
-            const result = await deps.download(record.remoteResult, record.task.id, record.task.providerRequestId, apiKey, signal, record.serviceBaseUrl);
+            const result = await deps.download(record.remoteResult, record.task.id, record.task.providerRequestId, apiKey, signal, record.serviceBaseUrl ?? LEGACY_LIKEAI_BASE_URL);
             record.task.resultJson = JSON.stringify(result);
             record.task.outputs = resultOutputs(result);
             record.task.stage = "completed";
@@ -110,7 +110,7 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
             task.error = `上次提交中断，尚未取得任务编号；请先在 ${isQisiAPI(record.serviceBaseUrl) ? "qisi API 账户" : "LikeAI 后台"}核对，系统不会自动重新提交。`;
             return save(record);
         }
-        const baseUrl = record.serviceBaseUrl || OFFICIAL_LIKEAI_BASE_URL;
+        const baseUrl = record.serviceBaseUrl ?? LEGACY_LIKEAI_BASE_URL;
         const apiKey = await deps.credential(record.channelId, baseUrl);
         if (!record.remoteResult || force) await recordResponse(record, await deps.request(`/task/query_task/${task.providerRequestId}`, apiKey, { signal }, undefined, baseUrl));
         return download(record, apiKey, signal);
@@ -123,9 +123,7 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
             validateLikeAIReferences(input);
             const channelId = String(input.config.channelId || "");
             if (!channelId) throw new Error("LikeAI 渠道未配置");
-            const baseUrl = String(input.config.baseUrl);
-            const apiKey = String(input.config.apiKey || "").trim() || await deps.credential(channelId, baseUrl);
-            if (!apiKey) throw new Error("请先填写 LikeAI API Key");
+            const baseUrl = normalizeServiceBaseUrl(input.config.baseUrl);
             const metadata = objectRecord(input.metadata);
             const operationId = typeof metadata.clientOperationId === "string" && metadata.clientOperationId ? metadata.clientOperationId : id();
             return deps.lock(`create:${operationId}`, async () => {
@@ -133,6 +131,9 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
                 const previous = (await deps.store.all()).find((record) => record.task.clientOperationId === operationId);
                 assertActive(signal);
                 if (previous) return previous.task;
+                // A queued request may still contain an old key. Use only the current credential bound to this channel and endpoint.
+                const apiKey = await deps.credential(channelId, baseUrl);
+                if (!apiKey) throw new Error("请先填写 LikeAI API Key");
                 const taskId = `browser-${id()}`;
                 return deps.lock(`task:${taskId}`, async () => {
                     assertActive(signal);
@@ -286,11 +287,11 @@ export function browserLikeAITasks() {
                 });
             },
             request: (...args) => { assertOwner(); return browserLikeAIRequest(...args); },
-            credential: async (channelId, baseUrl = OFFICIAL_LIKEAI_BASE_URL) => {
+            credential: async (channelId, baseUrl) => {
                 const { useConfigStore } = await import("@/stores/use-config-store");
                 assertOwner();
                 const channel = useConfigStore.getState().config.channels.find((candidate) => candidate.id === channelId && candidate.apiFormat === "likeai");
-                if (channel?.baseUrl !== baseUrl) throw new Error("任务使用的模型服务已改变，请恢复原渠道配置后查询");
+                if (!channel || normalizeServiceBaseUrl(channel.baseUrl) !== normalizeServiceBaseUrl(baseUrl)) throw new Error("任务使用的模型服务已改变，请恢复原渠道配置后查询");
                 if (!channel?.apiKey.trim()) throw new Error("请在模型配置中恢复该任务使用的 API Key");
                 return channel.apiKey.trim();
             },

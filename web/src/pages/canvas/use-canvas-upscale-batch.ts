@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } fr
 import { nanoid } from "nanoid";
 import { App } from "antd";
 import { channelHasGenerationCredential, isBuiltinBeefTVChannel, useConfigStore } from "@/stores/use-config-store";
+import { isOfficialLikeAI } from "@/lib/likeai-service";
 import { CanvasNodeType, type CanvasNodeData, type CanvasConnection } from "@/types/canvas";
 import { createDefaultUpscaleSettings, deriveUpscaleBatchState, getUpscaleInputNodes, getUpscaleOutputPosition, upscaleParamsForNode, type CanvasUpscaleBatchItem } from "@/lib/canvas/canvas-upscale";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
@@ -135,7 +136,7 @@ export function useCanvasUpscaleBatch({pageUi,  projectId, nodesRef, connections
                     video: { ...defaults.video, ...stored?.video, ...passed?.video },
                 });
                 if (!settings.channelId) throw new Error("请选择超分渠道");
-                if (!useConfigStore.getState().config.channels.some(channel => channel.id === settings.channelId && channel.enabled !== false && (isBuiltinBeefTVChannel(channel) || channel.apiFormat === "likeai" && channel.baseUrl.replace(/\/+$/, "") === "https://task.likeai.pro/task-api") && channelHasGenerationCredential(channel))) throw new Error("请先配置所选超清服务的凭据");
+                if (!useConfigStore.getState().config.channels.some(channel => channel.id === settings.channelId && channel.enabled !== false && (isBuiltinBeefTVChannel(channel) || channel.apiFormat === "likeai" && isOfficialLikeAI(channel.baseUrl)) && channelHasGenerationCredential(channel))) throw new Error("请先配置所选超清服务的凭据");
                 const items: CanvasUpscaleBatchItem[] = [];
                 // Complete all resource and estimate checks before any paid request.
                 for (const source of inputs) {

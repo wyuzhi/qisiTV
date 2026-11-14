@@ -31,7 +31,7 @@ Object.assign(window, {
     },
     runBrowserTaskSmoke: async () => {
         setActiveUserScope("local");
-        const channel = createModelChannel({ id: "browser-likeai", apiFormat: "likeai", interfaceType: "likeai-image", baseUrl: "https://task.likeai.pro/task-api", apiKey: "test-only-not-a-real-key", models: ["doubao_seedream_4_5"], modelProfiles: [{ model: "doubao_seedream_4_5", capability: "image", protocol: "likeai-image" }] });
+        const channel = createModelChannel({ id: "browser-likeai", apiFormat: "likeai", interfaceType: "likeai-image", baseUrl: "http://119.91.105.101:18282/api", apiKey: "test-only-not-a-real-key", models: ["doubao_seedream_4_5"], modelProfiles: [{ model: "doubao_seedream_4_5", capability: "image", protocol: "likeai-image" }] });
         const model = encodeChannelModel(channel.id, "doubao_seedream_4_5");
         const config = { ...structuredClone(defaultConfig), channels: [channel], model, imageModel: model, models: [model], imageModels: [model], size: "1:1", quality: "1080p", count: "1" };
         useConfigStore.getState().replaceConfig(config);

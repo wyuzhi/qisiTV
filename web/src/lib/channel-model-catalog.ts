@@ -4,7 +4,7 @@ import type { ModelChannel } from "@/stores/use-config-store";
 import { isBeefTVEndpoint } from "@/lib/beeftv-video-contracts";
 import { beefTVImageContract } from "@/lib/beeftv-image-contracts";
 import { sanitizeVideoPriceQuote, seedancePortraitModel, type VideoPriceQuote } from "@/lib/seedance-portrait";
-import { OFFICIAL_LIKEAI_BASE_URL, QISI_API_BASE_URL, modelCapabilityDefaultsForService } from "@/lib/likeai-service";
+import { isOfficialLikeAI, isQisiAPI, modelCapabilityDefaultsForService } from "@/lib/likeai-service";
 import { sanitizeMediaCapabilities, type MediaCapabilities } from "@/lib/media-capabilities";
 
 export type ChannelModelCatalogOption = { value: string; label?: string };
@@ -155,7 +155,7 @@ export function mergeFetchedChannelModelProfiles(channel: ModelChannel, catalog:
         const existing = existingByModel.get(item.id);
         const managed = channel.id === "beeftv" || channel.credentialRef === "beeftv";
         const mapped = catalogModelMapping(item, { providerNameFallback: isBeefTVCatalogChannel(channel) });
-        const fixedLikeAI = channel.apiFormat === "likeai" && [OFFICIAL_LIKEAI_BASE_URL, QISI_API_BASE_URL].includes(channel.baseUrl.replace(/\/+$/, ""));
+        const fixedLikeAI = channel.apiFormat === "likeai" && (isOfficialLikeAI(channel.baseUrl) || isQisiAPI(channel.baseUrl));
         const likeAIProtocol = fixedLikeAI && item.modelType ? `likeai-${item.modelType}` : undefined;
         const catalogVideo = versionedVideoCapability(item.videoCapabilities, item.videoCapabilitiesVersion);
         const catalogImage = item.imageCapabilitiesVersion ? sanitizeServerImageCapability(item.imageCapabilities) : null;

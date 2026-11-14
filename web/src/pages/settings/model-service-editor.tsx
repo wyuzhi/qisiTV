@@ -8,7 +8,7 @@ import { fetchChannelModels, type ChannelModelFetchResult } from "@/services/api
 import { fetchPluginProviderCatalog } from "@/services/api/plugin-catalog";
 import { mergeFetchedChannelModelProfiles, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
 import { builtinProtocolsAvailable } from "@/lib/builtin-service-presets";
-import { CAPABILITY_LABELS, MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, createVendorPresetChannel, isBuiltinPresetService, isTopazUpscaleChannel, pluginServices, presetCatalogFor, presetModelCount, builtinPresetDescription, serviceConnectionError, serviceModelProfile, servicePresetFor, vendorPresetFor, vendorPresets, type ModelServicePresetId, type VendorPreset } from "@/lib/model-service-presets";
+import { CAPABILITY_LABELS, MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, createVendorPresetChannel, isBuiltinPresetService, isTopazUpscaleChannel, pluginServices, presetCatalogFor, presetModelCount, builtinPresetDescription, patchModelServiceConnection, serviceConnectionError, serviceModelProfile, servicePresetFor, vendorPresetFor, vendorPresets, type ModelServicePresetId, type VendorPreset } from "@/lib/model-service-presets";
 import { capabilityForAssignedProtocol } from "@/lib/model-capabilities";
 import { serviceCredentialGuide } from "@/lib/service-credentials";
 import type { ModelProtocolDefinition } from "@/lib/model-protocols";
@@ -18,7 +18,8 @@ import { ChannelModelSettings } from "./channel-model-settings";
 import { ChannelRequestAddressBlocks } from "./channel-request-addresses";
 import { currentModelConnectionReceipt, useModelConnectionTests } from "@/stores/use-model-connection-tests";
 import "./model-service-editor.css";
-import { isBrowserWorkspace } from "@/services/browser-workspace";
+import { isBrowserWorkspace, isEngineWebsite } from "@/services/browser-workspace";
+import { likeAITransportHelp } from "@/lib/likeai-service";
 import { getTransportFailureKind } from "@/services/api/request";
 
 export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: ModelChannel; onClose: () => void; onSave: (channel: ModelChannel) => Promise<void> }) {
@@ -87,7 +88,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
     }, [credential.secretKeyRequired]);
 
     const patch = (value: Partial<ModelChannel>) => {
-        setDraft((current) => ({ ...current, ...value }));
+        setDraft((current) => patchModelServiceConnection(current, value));
         setError("");
         setCatalogRead(false);
     };
@@ -300,7 +301,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
                 <Form layout="vertical" requiredMark={false} className="model-service-fields" disabled={busy} onFinish={() => void fetchModels()}>
                     <div className="model-service-form-title">{vendor ? <><ModelLogo size={28} /><div><h3>{vendor.label}</h3><p>填写 API Key 后读取模型。</p></div></> : pluginService ? <><ModelLogo size={28} /><div><h3>{pluginService.label}</h3><p>由插件接入。填好连接信息后，读取或手动添加这个服务能用的模型。</p></div></> : <><ModelLogo icon={selectedPreset.icon} size={28} /><div><h3>{selectedPreset.name}</h3>{presetId === "compatible" && <p>用户可以自行添加第三方模型服务，请选择该服务实际支持的接口格式</p>}{isBuiltinPresetService(presetId) && <p>已预置 {presetModelCount(presetId)} 款{builtinPresetDescription(presetId)}模型及协议，填写 API Key 后可直接「一键保存并启用」，或点「读取模型」拉取在线目录</p>}</div></>}</div>
                     <Form.Item label="连接名称"><Input aria-label="连接名称" placeholder="例如：我的创作账号" value={draft.name} onChange={(event) => patch({ name: event.target.value })} /></Form.Item>
-                    <Form.Item label={credential.apiKeyLabel} help={credential.apiKeyHelp}><Input.Password prefix={<KeyRound size={15} />} aria-label={credential.apiKeyLabel} autoComplete="new-password" placeholder={credential.apiKeyPlaceholder} value={draft.apiKey} onChange={(event) => patch({ apiKey: event.target.value })} /></Form.Item>
+                    <Form.Item label={credential.apiKeyLabel} help={likeAITransportHelp(draft.baseUrl, isEngineWebsite()) || credential.apiKeyHelp}><Input.Password prefix={<KeyRound size={15} />} aria-label={credential.apiKeyLabel} autoComplete="new-password" placeholder={credential.apiKeyPlaceholder} value={draft.apiKey} onChange={(event) => patch({ apiKey: event.target.value })} /></Form.Item>
                     <Form.Item label="服务地址"><Input aria-label="服务地址" inputMode="url" placeholder="https://api.example.com/v1" value={draft.baseUrl} onChange={(event) => patch({ baseUrl: event.target.value })} /></Form.Item>
                     {!pluginService && <ChannelRequestAddressBlocks channel={draft} />}
                     <button type="button" className="model-service-advanced" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}><Settings2 size={15} />高级设置<ChevronDown size={14} /></button>

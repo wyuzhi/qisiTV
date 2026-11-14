@@ -23,7 +23,7 @@ test("preferred media channels preserve the assistant protocol and independent c
 
 test("LikeAI catalog and documented model defaults use their own protocol", () => {
     const channel=createModelChannel({apiFormat:"likeai",models:[]});
-    expect(modelCatalogRequestURL(channel)).toBe("https://task.likeai.pro/task-api/task/models");
+    expect(modelCatalogRequestURL(channel)).toBe("http://119.91.105.101:18282/api/task/models");
     expect(serviceModelProfile(channel,{id:"wan_video_3_prime",modelType:"video"},[{value:"likeai-video",capability:"video",enabled:true} as ModelProtocolDefinition])).toMatchObject({protocol:"likeai-video"});
     const prime=defaultModelCapabilityConfig("likeai-video","wan_video_3_prime").video!;
     expect(prime.duration.values).toContain(-1);
