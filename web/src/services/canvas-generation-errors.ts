@@ -1,5 +1,6 @@
 import { CanvasBackendSubmitPausedError, isCanvasRevisionConflict } from "@/services/canvas-revision-conflict";
 import { explainGenerationError } from "@/lib/generation-error";
+import { isBrowserWorkspace } from "./browser-workspace";
 
 export class CanvasGenerationDurableAckError extends Error {
     readonly code: "canvas_conflict" | "result_apply_failed" | "result_target_unavailable";
@@ -31,7 +32,8 @@ export class CanvasGenerationTargetSaveError extends Error {
         const detail = isCanvasRevisionConflict(cause) || cause instanceof CanvasBackendSubmitPausedError
             ? "画布保存已暂停，本次未开始生成。请点击画布顶部的保存状态，按提示处理后再试。"
             : "画布尚未保存，未开始生成。请先处理画布保存提示后重试。";
-        super(message ?? detail, { cause });
+        const localCause = isBrowserWorkspace() && cause instanceof Error ? cause.message.trim() : "";
+        super(message ?? (localCause ? `画布尚未保存，未开始生成。${localCause}` : detail), { cause });
         this.name = "CanvasGenerationTargetSaveError";
     }
 }

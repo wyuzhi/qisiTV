@@ -35,6 +35,9 @@ beforeAll(async () => {
                 }));
                 builder.onLoad({ filter: /src\/services\/project-asset-sync\.ts$/ }, () => ({
                     contents: `
+                        export function materializeGenerationTaskAssets() {
+                            throw new Error("Editing an existing canvas node must not materialize a generation task");
+                        }
                         export async function ensureCanvasNodeAsset(options) {
                             const harness = window.__editorHarness;
                             harness && harness.ensureCalls.push({

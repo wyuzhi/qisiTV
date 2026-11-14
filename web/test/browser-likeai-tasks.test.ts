@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { browserLikeAIRequest, buildLikeAICreateBody, likeAIInput, parseLikeAIResponse } from "../src/services/browser-likeai-client";
 import { createBrowserLikeAITaskService, fetchBrowserLikeAIArtifact, type BrowserLikeAITaskRecord, type BrowserLikeAITaskStore } from "../src/services/browser-likeai-tasks";
+import { BROWSER_REFERENCE_UPLOAD_LIMIT, inspectBrowserLikeAIReferences } from "../src/services/browser-likeai-references";
 import type { CreateTaskInput } from "../src/services/api/task-center";
 import { prepareBackendGenerationTask, backendProviderConfig } from "../src/services/api/generation-task";
 import { createModelChannel, defaultConfig, encodeChannelModel } from "../src/stores/use-config-store";
@@ -19,6 +20,7 @@ function fixture(options: { request?: (path: string, init?: RequestInit) => Prom
     const requests: Array<{ path: string; method?: string; body?: Record<string, unknown> }> = [];
     let sequence = 0;
     let downloadFails = options.downloadFails || false;
+    let artifactPresent = false;
     const store: BrowserLikeAITaskStore = {
         get: async (id) => structuredClone(records.get(id) || null),
         all: async () => structuredClone([...records.values()]),
@@ -36,6 +38,7 @@ function fixture(options: { request?: (path: string, init?: RequestInit) => Prom
         id: () => `id-${++sequence}`,
         now: () => "2026-09-28T00:00:00.000Z",
         credential: async () => "current-api-key",
+        hasArtifact: async () => artifactPresent,
         reference: options.reference || (async (ref: Record<string, unknown>) => ({ ...ref, url: "https://media.example/reference.png" })),
         request: async (path: string, _apiKey: string, init?: RequestInit) => {
             calls.push(path);
@@ -48,14 +51,45 @@ function fixture(options: { request?: (path: string, init?: RequestInit) => Prom
         download: async (result: { mode?: string; video?: { dataUrl: string } }) => {
             calls.push("download");
             if (downloadFails) throw new Error("CORS / quota");
+            artifactPresent = true;
             return { ...result, video: { ...result.video!, storageKey: "video:local:result", mimeType: "video/mp4", bytes: 100 } } as never;
         },
     };
     const service = createBrowserLikeAITaskService(dependencies);
-    return { records, calls, requests, store, service, reopen: () => createBrowserLikeAITaskService(dependencies), allowDownloads: () => { downloadFails = false; } };
+    return { records, calls, requests, store, service, reopen: () => createBrowserLikeAITaskService(dependencies), allowDownloads: () => { downloadFails = false; }, evictArtifact: () => { artifactPresent = false; } };
 }
 
 describe("LikeAI browser protocol", () => {
+    test("preflights all local media kinds, including the exact byte boundary, and skips online links", async () => {
+        const limit = BROWSER_REFERENCE_UPLOAD_LIMIT;
+        const blob = new Blob([new Uint8Array(limit + 1)]);
+        const files = { large: blob, atLimit: blob.slice(0, limit) };
+        const online = { url: "https://fixture.example/remote", storageKey: "do-not-read" };
+        const local = { storageKey: "large" };
+        const atLimit = { storageKey: "atLimit" };
+        const input = likeAIInput(request({
+            referenceImages: [online, atLimit, local], referenceVideos: [local, online], referenceAudios: [online, local],
+        }).input);
+        const read = async (ref: { storageKey?: string }) => {
+            expect(ref.storageKey).not.toBe("do-not-read");
+            return files[ref.storageKey as keyof typeof files];
+        };
+        await expect(inspectBrowserLikeAIReferences(input, undefined, read)).rejects.toMatchObject({
+            status: 400, reason: "reference_media_requires_url", details: { maxUploadBytes: limit, requiredReferences: [
+                { kind: "image", index: 2, bytes: limit + 1 }, { kind: "video", index: 0, bytes: limit + 1 }, { kind: "audio", index: 1, bytes: limit + 1 },
+            ] },
+        });
+        const admitted = await inspectBrowserLikeAIReferences({ ...input, referenceImages: [online, atLimit], referenceVideos: [], referenceAudios: [] }, undefined, read);
+        expect(admitted.size).toBe(1);
+        expect(admitted.get(atLimit)).toBe(files.atLimit);
+    });
+
+    test("an unreadable local reference is a definite pre-submission rejection", async () => {
+        const input = likeAIInput(request({ referenceVideos: [{ storageKey: "missing" }] }).input);
+        await expect(inspectBrowserLikeAIReferences(input, undefined, async () => { throw new TypeError("blob unavailable"); }))
+            .rejects.toMatchObject({ status: 400, retryable: false });
+    });
+
     test("keeps the selected model and explicit frame roles, and maps model-specific audio options", () => {
         const input = likeAIInput(request({ referenceImages: [{ id: "first", url: "https://media.example/first.png" }, { id: "ref", url: "https://media.example/ref.png" }], metadata: { videoStartFrameNodeId: "first", providerOptions: { "likeai-video": { body: { api_name: "wrong" }, duration: -1, kwargs: { off_peak: true } } } } }).input);
         const body = buildLikeAICreateBody(input);
@@ -233,7 +267,10 @@ describe("browser persisted LikeAI lifecycle", () => {
         const stored = f.records.get(pending.id)!;
         stored.task.resultState = "READY";
         stored.task.outputs![0].materializedAssetId = "asset-1";
-        const refreshed = await f.reopen().query(pending.id, undefined, true);
+        const offline = await f.reopen().query(pending.id, undefined, "recover");
+        expect(offline.resultJson).toBe(completed.resultJson);
+        expect(f.calls).toHaveLength(3);
+        const refreshed = await f.reopen().query(pending.id, undefined, "refresh");
         expect(refreshed.resultJson).toBe(completed.resultJson);
         expect(JSON.parse(refreshed.resultJson!).video.storageKey).toBe("video:local:result");
         expect(refreshed.resultState).toBe("READY");
@@ -254,6 +291,37 @@ describe("browser persisted LikeAI lifecycle", () => {
         expect(f.calls).toEqual(["/task/create_task"]);
     });
 
+    test("acknowledges only matching local artifacts and keeps concurrent indexed outputs", async () => {
+        const f = fixture();
+        const accepted = await f.service.create(request());
+        await f.service.query(accepted.id);
+        const outputs = [0, 1].map((outputIndex) => ({ outputIndex, mediaType: "image" as const, providerArtifactRef: `image:local:${outputIndex}` }));
+        f.records.get(accepted.id)!.task.outputs = structuredClone(outputs);
+        const confirmed = outputs.map((item) => ({ ...item, materializedAssetId: `asset-${item.outputIndex}` }));
+        const ack = (items: typeof confirmed) => f.service.confirmMaterializedOutputs(accepted.id, items);
+        await expect(ack([confirmed[0], { ...confirmed[1], providerArtifactRef: "stale-key" }])).rejects.toThrow();
+        expect((await f.service.query(accepted.id)).outputs).toEqual(outputs);
+        const [first, second] = await Promise.all(confirmed.map((item) => ack([item])));
+        expect(first.resultState).toBe("PENDING_MATERIALIZATION");
+        expect(second.resultState).toBe("READY");
+        expect((await f.reopen().query(accepted.id)).outputs).toEqual(confirmed);
+        await expect(ack([{ ...confirmed[0], materializedAssetId: "different" }])).rejects.toThrow();
+        expect((await ack(confirmed)).outputs).toEqual(confirmed);
+        expect(f.calls).toHaveLength(3);
+    });
+
+    test("reuses stored blobs and repairs evicted originals just once during concurrent recovery", async () => {
+        const f = fixture();
+        const accepted = await f.service.create(request());
+        await f.service.query(accepted.id);
+        await f.service.ensureDownloaded(accepted.id);
+        expect(f.calls).toHaveLength(3);
+        f.evictArtifact();
+        const recovered = await Promise.all([f.reopen().ensureDownloaded(accepted.id), f.service.ensureDownloaded(accepted.id)]);
+        expect(recovered.map(task => task.stage)).toEqual(["completed", "completed"]);
+        expect(f.calls).toEqual(["/task/create_task", "/task/query_task/provider-1", "download", "download"]);
+    });
+
     test("does not make a paid request when persistence is unavailable", async () => {
         const f = fixture({ storeFails: true });
         await expect(f.service.create(request())).rejects.toThrow("storage unavailable");
@@ -269,22 +337,27 @@ describe("browser persisted LikeAI lifecycle", () => {
         expect(cancelled.error).toContain("计费");
         await f.reopen().query(pending.id);
         expect(f.calls).toEqual(["/task/create_task"]);
-        const recovered = await f.reopen().query(pending.id, undefined, true);
+        const recovered = await f.reopen().query(pending.id, undefined, "recover");
         expect(recovered.status).toBe("succeeded");
         expect(f.calls.filter((path) => path === "/task/create_task")).toHaveLength(1);
     });
 
-    test("retains completed provider results on download failure and retries only downloading", async () => {
+    test("pauses failed downloads across background reads and retrieves the original on request", async () => {
         const f = fixture({ downloadFails: true });
         const pending = await f.service.create(request());
         const failedDownload = await f.service.query(pending.id);
         expect(failedDownload.status).toBe("succeeded");
         expect(failedDownload.resultState).toBe("FAILED_RETRYABLE");
+        expect(failedDownload.outcome).toMatchObject({ phase: "retrievable", regenerate: "blocked" });
         expect(failedDownload.previewUrl).toBe("https://media.example/result.mp4");
         f.allowDownloads();
-        const recovered = await f.reopen().query(pending.id);
+        await f.reopen().list(20);
+        await f.reopen().query(pending.id);
+        expect(f.calls).toHaveLength(3);
+        const recovered = await f.reopen().query(pending.id, undefined, "recover");
         expect(recovered.stage).toBe("completed");
-        expect(f.calls).toEqual(["/task/create_task", "/task/query_task/provider-1", "download", "download"]);
+        expect(recovered.outcome?.phase).not.toBe("retrievable");
+        expect(f.calls).toEqual(["/task/create_task", "/task/query_task/provider-1", "download", "/task/query_task/provider-1", "download"]);
     });
 
     test("removing visible history preserves the operation receipt against duplicate charges", async () => {

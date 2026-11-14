@@ -4,7 +4,11 @@ import type { BackendGenerationResult } from "@/services/api/generation-task";
 import type { CreateTaskInput, GenerationTask, GenerationTaskOutput } from "@/services/api/task-center";
 import { browserLikeAIRequest, buildLikeAICreateBody, likeAIInput, LikeAIRequestError, objectRecord, parseLikeAIResponse, validateLikeAIReferences, type LikeAIMode, type LikeAIReference } from "@/services/browser-likeai-client";
 import { isQisiAPI, likeAIService, normalizeServiceBaseUrl, LEGACY_LIKEAI_BASE_URL, OFFICIAL_LIKEAI_BASE_URL } from "@/lib/likeai-service";
+import { withGenerationArtifactCommitLock } from "@/services/generation-asset-repository";
+import { inspectBrowserLikeAIReferences, prepareBrowserLikeAIReference } from "@/services/browser-likeai-references";
 import { isBrowserWorkspace } from "@/services/browser-workspace";
+
+export { prepareBrowserLikeAIReference } from "@/services/browser-likeai-references";
 
 export type BrowserLikeAITaskRecord = { task: GenerationTask; channelId: string; serviceBaseUrl?: string; mode: LikeAIMode; remoteResult?: BackendGenerationResult; downloaded: boolean };
 export type BrowserLikeAITaskStore = {
@@ -19,7 +23,9 @@ type Dependencies = {
     withProjectWriteLock?<T>(projectId: string, action: () => Promise<T>): Promise<T>;
     request: typeof browserLikeAIRequest;
     credential(channelId: string, baseUrl: string): Promise<string>;
-    reference(ref: LikeAIReference, kind: "image" | "video" | "audio", apiKey: string, baseUrl?: string, signal?: AbortSignal): Promise<LikeAIReference>;
+    hasArtifact(output: GenerationTaskOutput): Promise<boolean>;
+    inspectReferences?: typeof inspectBrowserLikeAIReferences;
+    reference(ref: LikeAIReference, kind: "image" | "video" | "audio", apiKey: string, baseUrl?: string, signal?: AbortSignal, inspected?: Blob): Promise<LikeAIReference>;
     download(result: BackendGenerationResult, taskId: string, providerId: string, apiKey: string, signal?: AbortSignal, baseUrl?: string): Promise<BackendGenerationResult>;
     now?: () => string;
     id?: () => string;
@@ -57,6 +63,7 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
             return save(record);
         }
         task.status = parsed.status;
+        task.outcome = undefined;
         if (parsed.status === "succeeded") {
             record.remoteResult = parsed.result;
             task.resultJson = JSON.stringify(parsed.result);
@@ -76,6 +83,15 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
         }
         return save(record);
     };
+    const pauseDownload = (record: BrowserLikeAITaskRecord) => {
+        record.downloaded = false;
+        record.task.stage = "download_pending";
+        record.task.resultState = "FAILED_RETRYABLE";
+        record.task.outcome = { phase: "retrievable", reason: "delivery_pending", regenerate: "blocked" };
+        record.task.errorCode = "result_download_failed";
+        record.task.error = "生成已完成，本机未保存完整结果。点击「继续取回」可下载原结果。";
+        return save(record);
+    };
     const download = async (record: BrowserLikeAITaskRecord, apiKey: string, signal?: AbortSignal) => {
         if (record.downloaded || record.task.status !== "succeeded" || !record.remoteResult || !record.task.providerRequestId) return record.task;
         try {
@@ -83,26 +99,24 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
             record.task.resultJson = JSON.stringify(result);
             record.task.outputs = resultOutputs(result);
             record.task.stage = "completed";
-            record.task.resultState = resultOutputs(result).length ? "PENDING_MATERIALIZATION" : "READY";
+            record.task.resultState = record.task.outputs.length ? "PENDING_MATERIALIZATION" : "READY";
+            record.task.outcome = undefined;
             record.task.error = undefined;
             record.task.errorCode = undefined;
             record.downloaded = true;
-            return await save(record);
         } catch (error) {
-            record.task.stage = "download_pending";
-            record.task.resultState = "FAILED_RETRYABLE";
-            record.task.errorCode = "result_download_failed";
-            record.task.error = "生成已完成，本地保存未成功。可从任务预览下载原结果，稍后重新读取任务；不会再次生成或扣费。";
-            await save(record);
+            await pauseDownload(record);
             if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) throw error;
             return record.task;
         }
+        return save(record);
     };
-    const query = (taskId: string, signal?: AbortSignal, force = false): Promise<GenerationTask> => deps.lock(`task:${taskId}`, async () => {
+    const query = (taskId: string, signal?: AbortSignal, mode: "observe" | "recover" | "refresh" = "observe"): Promise<GenerationTask> => deps.lock(`task:${taskId}`, async () => {
         if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const record = await requireRecord(taskId);
         const task = record.task;
-        if (!force && (record.downloaded || task.status === "failed" || task.status === "cancelled")) return task;
+        if (mode !== "refresh" && record.downloaded) return task;
+        if (mode === "observe" && (task.stage === "download_pending" || task.status === "failed" || task.status === "cancelled")) return task;
         if (!task.providerRequestId) {
             task.status = "failed";
             task.stage = "submission_uncertain";
@@ -112,7 +126,7 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
         }
         const baseUrl = record.serviceBaseUrl ?? LEGACY_LIKEAI_BASE_URL;
         const apiKey = await deps.credential(record.channelId, baseUrl);
-        if (!record.remoteResult || force) await recordResponse(record, await deps.request(`/task/query_task/${task.providerRequestId}`, apiKey, { signal }, undefined, baseUrl));
+        if (!record.remoteResult || mode !== "observe") await recordResponse(record, await deps.request(`/task/query_task/${task.providerRequestId}`, apiKey, { signal }, undefined, baseUrl));
         return download(record, apiKey, signal);
     });
     return {
@@ -134,6 +148,7 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
                 // A queued request may still contain an old key. Use only the current credential bound to this channel and endpoint.
                 const apiKey = await deps.credential(channelId, baseUrl);
                 if (!apiKey) throw new Error("请先填写 LikeAI API Key");
+                const files = await deps.inspectReferences?.(input, signal);
                 const taskId = `browser-${id()}`;
                 return deps.lock(`task:${taskId}`, async () => {
                     assertActive(signal);
@@ -152,11 +167,11 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
                     let submitted = false;
                     try {
                         assertActive(signal);
-                        const referenceImages = await Promise.all((input.referenceImages || []).map((ref) => deps.reference(ref, "image", apiKey, baseUrl, signal)));
+                        const referenceImages = await Promise.all((input.referenceImages || []).map((ref) => deps.reference(ref, "image", apiKey, baseUrl, signal, files?.get(ref))));
                         assertActive(signal);
-                        const referenceVideos = await Promise.all((input.referenceVideos || []).map((ref) => deps.reference(ref, "video", apiKey, baseUrl, signal)));
+                        const referenceVideos = await Promise.all((input.referenceVideos || []).map((ref) => deps.reference(ref, "video", apiKey, baseUrl, signal, files?.get(ref))));
                         assertActive(signal);
-                        const referenceAudios = await Promise.all((input.referenceAudios || []).map((ref) => deps.reference(ref, "audio", apiKey, baseUrl, signal)));
+                        const referenceAudios = await Promise.all((input.referenceAudios || []).map((ref) => deps.reference(ref, "audio", apiKey, baseUrl, signal, files?.get(ref))));
                         assertActive(signal);
                         const body = buildLikeAICreateBody({ ...input, referenceImages, referenceVideos, referenceAudios });
                         record.task.stage = "submitting";
@@ -174,6 +189,7 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
                         assertActive(signal);
                         return download(record, apiKey, signal);
                     } catch (error) {
+                        if (record.remoteResult && record.task.providerRequestId) throw error;
                         const rejected = submitted && error instanceof LikeAIRequestError && error.rejected && !record.task.providerRequestId;
                         record.task.status = record.task.providerRequestId ? "running" : "failed";
                         record.task.stage = rejected ? "submission_rejected" : submitted ? "submission_uncertain" : "preparation_failed";
@@ -189,6 +205,38 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
             return deps.withProjectWriteLock ? deps.withProjectWriteLock(request.projectId || "", execute) : execute();
         },
         query,
+        ensureDownloaded: (taskId: string, signal?: AbortSignal) => deps.lock(`task:${taskId}`, async () => {
+            assertActive(signal);
+            const record = await requireRecord(taskId);
+            const outputs = record.task.outputs || [];
+            if (!record.downloaded || !outputs.length) return record.task;
+            if ((await Promise.all(outputs.map(deps.hasArtifact))).every(Boolean)) return record.task;
+            assertActive(signal);
+            // Older versions could evict unbound blobs during startup. Restore the original
+            // provider receipt and reuse any surviving files in a multi-output task.
+            await pauseDownload(record);
+            const apiKey = await deps.credential(record.channelId, record.serviceBaseUrl ?? LEGACY_LIKEAI_BASE_URL);
+            assertActive(signal);
+            return download(record, apiKey, signal);
+        }),
+        confirmMaterializedOutputs: (taskId: string, outputs: GenerationTaskOutput[]) => deps.lock(`task:${taskId}`, async () => {
+            assertActive();
+            const record = await requireRecord(taskId);
+            const stored = record.task.outputs || [];
+            if (!record.downloaded || !stored.length || !outputs.length) throw new Error("生成结果尚未保存到本机");
+            for (const output of outputs) {
+                const target = stored.find((item) => item.outputIndex === output.outputIndex);
+                if (!target || !output.materializedAssetId || target.mediaType !== output.mediaType
+                    || !target.providerArtifactRef || target.providerArtifactRef !== output.providerArtifactRef
+                    || (target.materializedAssetId && target.materializedAssetId !== output.materializedAssetId)) {
+                    throw new Error("本地素材与原任务回执不一致");
+                }
+                target.materializedAssetId = output.materializedAssetId;
+            }
+            record.task.resultState = stored.every((item) => item.materializedAssetId) ? "READY" : "PENDING_MATERIALIZATION";
+            assertActive();
+            return save(record);
+        }),
         async find(operationId: string, projectId: string) {
             return (await deps.store.all()).find((record) => record.task.clientOperationId === operationId && record.task.projectId === projectId)?.task;
         },
@@ -261,6 +309,26 @@ function taskStore(scope: string): BrowserLikeAITaskStore {
     return repository;
 }
 
+/** Archived task receipts are kept for idempotency only. Visible receipts also own their cached output files. */
+export async function browserTaskMediaReferences(scope: string) {
+    const refs: { storageKey: string }[] = [];
+    for (const { task, remoteResult } of await taskStore(scope).all()) {
+        if (task.stage === "hidden") continue;
+        for (const item of task.outputs || []) {
+            if (item.providerArtifactRef) refs.push({ storageKey: item.providerArtifactRef });
+        }
+        // The remote result is persisted before the first blob write. Reserve its deterministic keys even if the page closes mid-download.
+        for (const [index] of (remoteResult?.images || []).entries()) refs.push({ storageKey: browserTaskMediaKey("image", scope, task.id, index) });
+        if (remoteResult?.video) refs.push({ storageKey: browserTaskMediaKey("video", scope, task.id, 0) });
+        if (remoteResult?.audio) refs.push({ storageKey: browserTaskMediaKey("audio", scope, task.id, 0) });
+    }
+    return refs;
+}
+
+function browserTaskMediaKey(kind: "image" | "video" | "audio", scope: string, taskId: string, index: number) {
+    return `${kind}:${scope}:likeai:${taskId}:${index}`;
+}
+
 const services = new Map<string, ReturnType<typeof createBrowserLikeAITaskService>>();
 export function browserLikeAITasks() {
     const scope = getActiveUserScope();
@@ -272,6 +340,13 @@ export function browserLikeAITasks() {
         service = createBrowserLikeAITaskService({
             assertOwner,
             store: taskStore(scope),
+            hasArtifact: async ({ mediaType, providerArtifactRef }) => {
+                if (!providerArtifactRef) return false;
+                const blob = mediaType === "image"
+                    ? await (await import("@/services/image-storage")).getImageBlob(providerArtifactRef)
+                    : await (await import("@/services/file-storage")).getMediaBlob(providerArtifactRef);
+                return Boolean(blob?.size);
+            },
             lock: (name, action) => {
                 if (!globalThis.navigator?.locks) throw new Error("当前浏览器不支持安全的生成任务互斥，请使用最新 Chrome、Edge 或 Safari");
                 return navigator.locks.request(`qisitv:${scope}:${name}`, action);
@@ -295,6 +370,7 @@ export function browserLikeAITasks() {
                 if (!channel?.apiKey.trim()) throw new Error("请在模型配置中恢复该任务使用的 API Key");
                 return channel.apiKey.trim();
             },
+            inspectReferences: inspectBrowserLikeAIReferences,
             reference: (...args) => { assertOwner(); return prepareBrowserLikeAIReference(...args); },
             download: (result, taskId, providerId, apiKey, signal, baseUrl) => downloadBrowserLikeAIResult(result, scope, taskId, providerId, apiKey, signal, baseUrl, assertOwner),
         });
@@ -303,43 +379,22 @@ export function browserLikeAITasks() {
     return service;
 }
 
-export async function prepareBrowserLikeAIReference(ref: LikeAIReference, kind: "image" | "video" | "audio", apiKey: string, baseUrl = OFFICIAL_LIKEAI_BASE_URL, signal?: AbortSignal): Promise<LikeAIReference> {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    if (/^https:\/\//i.test(ref.url || ref.dataUrl || "")) return { ...ref, url: ref.url || ref.dataUrl };
-    let blob: Blob | null = null;
-    if (ref.storageKey) {
-        blob = kind === "image" ? await (await import("@/services/image-storage")).getImageBlob(ref.storageKey) : await (await import("@/services/file-storage")).getMediaBlob(ref.storageKey);
-    }
-    const localUrl = ref.url || ref.dataUrl || "";
-    if (!blob && /^(blob:|data:)/.test(localUrl)) {
-        const response = await fetch(localUrl, { signal });
-        if (!response.ok) throw new Error("本地素材读取失败");
-        blob = await response.blob();
-    }
-    if (!blob) throw new Error("参考素材尚未保存在本机，请重新导入");
-    if (blob.size > 4_000_000) throw new Error("网页参考素材暂限 4 MB；较大文件请使用公网素材地址，或在本地版中生成。");
-    const form = new FormData();
-    form.append("file", blob, ref.name || `${kind}.bin`);
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    const response = await browserLikeAIRequest("/files", apiKey, { method: "POST", body: form, signal }, undefined, baseUrl);
-    const url = response.url || response.file_url || objectRecord(response.data).url || objectRecord(response.data).file_url;
-    if (typeof url !== "string" || !/^https:\/\//i.test(url)) throw new Error("LikeAI 参考素材上传未返回有效地址");
-    return { ...ref, url, dataUrl: undefined };
-}
-
 async function downloadBrowserLikeAIResult(result: BackendGenerationResult, scope: string, taskId: string, providerId: string, apiKey: string, signal?: AbortSignal, baseUrl = OFFICIAL_LIKEAI_BASE_URL, assertOwner = () => {}): Promise<BackendGenerationResult> {
     const next = structuredClone(result);
     const save = async (item: { dataUrl: string; url?: string; storageKey?: string; bytes?: number; mimeType?: string }, kind: "image" | "video" | "audio", index: number) => {
-        const storageKey = `${kind}:${scope}:likeai:${taskId}:${index}`;
+        const storageKey = browserTaskMediaKey(kind, scope, taskId, index);
         const imageStore = kind === "image" ? await import("@/services/image-storage") : null;
         const mediaStore = kind !== "image" ? await import("@/services/file-storage") : null;
         assertOwner();
         let blob = imageStore ? await imageStore.getImageBlob(storageKey) : await mediaStore!.getMediaBlob(storageKey);
         if (!blob) {
-            blob = await fetchBrowserLikeAIArtifact({ url: item.url || item.dataUrl, providerId, kind, index, apiKey, signal, baseUrl });
-            assertOwner();
-            if (imageStore) await imageStore.setImageBlob(storageKey, blob);
-            else await mediaStore!.setMediaBlob(storageKey, blob);
+            const downloaded = await fetchBrowserLikeAIArtifact({ url: item.url || item.dataUrl, providerId, kind, index, apiKey, signal, baseUrl });
+            await withGenerationArtifactCommitLock(scope, async () => {
+                assertOwner();
+                if (imageStore) await imageStore.setImageBlob(storageKey, downloaded);
+                else await mediaStore!.setMediaBlob(storageKey, downloaded);
+            });
+            blob = downloaded;
         }
         item.storageKey = storageKey;
         item.bytes = blob.size;

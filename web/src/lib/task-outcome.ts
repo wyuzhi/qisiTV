@@ -135,7 +135,7 @@ export function readTaskOutcome(source?: TaskOutcome | TaskOutcomeSource | null)
         const outputs = Array.isArray(record.outputs) ? record.outputs : [];
         const allMaterialized = outputs.length > 0 && outputs.every((item) => Boolean(item?.materializedAssetId?.trim()));
         const pausedOutput = outputs.some((item) => item?.materializationErrorCode === "delivery_paused" || item?.materializationErrorCode === "delivery_timed_out");
-        if (!allMaterialized && (stage === "delivery_paused" || stage === "delivery_timed_out" || pausedOutput)) {
+        if (!allMaterialized && (stage === "delivery_paused" || stage === "delivery_timed_out" || stage === "download_pending" || pausedOutput)) {
             return { phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" };
         }
         return { phase: "ready", regenerate: "allowed", reason: "result_ready" };

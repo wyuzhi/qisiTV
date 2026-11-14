@@ -335,12 +335,12 @@ export function queryTaskTextReplay(id: string, after = 0) {
 export function retryGenerationTask(id: string, options?: { signal?: AbortSignal }) {
     // Browser recovery only re-reads the existing receipt; it never submits a
     // replacement paid request. A fresh generation remains a canvas action.
-    if (isBrowserWorkspace()) return browserLikeAITasks().query(id, options?.signal, true);
+    if (isBrowserWorkspace()) return browserLikeAITasks().query(id, options?.signal, "recover");
     return http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/retry`, undefined, options);
 }
 
 export function recoverTask(id: string, options?: { signal?: AbortSignal }) {
-    if (isBrowserWorkspace()) return browserLikeAITasks().query(id, options?.signal, true);
+    if (isBrowserWorkspace()) return browserLikeAITasks().query(id, options?.signal, "recover");
     return http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/recover`, undefined, options);
 }
 
@@ -352,7 +352,7 @@ export function cancelGenerationTask(id: string) {
 }
 
 export function refreshGenerationTaskStatus(id: string, options?: { signal?: AbortSignal }) {
-    if (isBrowserWorkspace()) return browserLikeAITasks().query(id, options?.signal, true);
+    if (isBrowserWorkspace()) return browserLikeAITasks().query(id, options?.signal, "refresh");
     return http.get<GenerationTask>(`/tasks/${encodeURIComponent(id)}`, { signal: options?.signal });
 }
 

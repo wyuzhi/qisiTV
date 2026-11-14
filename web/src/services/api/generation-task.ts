@@ -289,12 +289,18 @@ async function createBackendGenerationTask(options: BackendGenerationTaskOptions
         const references: ReferenceLinkRequest[] = [];
         const transport = resolveModelRequestConfig(options.config, options.config.model).referenceMediaTransport;
         const required = error.details?.requiredReferences;
-        const needsURL = (kind: string, index: number, mask = false) => !Array.isArray(required) || required.some((item) => item && typeof item === "object" && item.kind === kind && item.index === index && Boolean(item.mask) === mask);
-        groups.forEach((group, kind) => prepared[group].forEach((media, index) => {
-            const mediaKind = (["image", "video", "audio"] as const)[kind];
-            if (needsURL(mediaKind, index) && (media.storageKey || !isReferenceHTTPSLink(media.url || ""))) references.push({ key: `${group}:${index}`, label: `${labels[kind]} ${index + 1}`, name: media.name, resourceID: resourceIdFromStorageKey(media.storageKey) || undefined, upload: transport?.[mediaKind] !== "link" });
-        }));
-        if (prepared.mask && needsURL("image", 0, true) && (prepared.mask.storageKey || !isReferenceHTTPSLink(prepared.mask.url || ""))) references.push({ key: "mask:0", label: "遮罩", name: prepared.mask.name, resourceID: resourceIdFromStorageKey(prepared.mask.storageKey) || undefined, upload: transport?.image !== "link" });
+        const maxUploadBytes = error.details?.maxUploadBytes;
+        const addReference = (kind: "image" | "video" | "audio", index: number, media: ReferenceImage | ReferenceVideo | ReferenceAudio, key: string, label: string, mask = false) => {
+            const requirement = Array.isArray(required) ? required.find((item) => item?.kind === kind && item.index === index && Boolean(item.mask) === mask) : undefined;
+            if (Array.isArray(required) && !requirement) return;
+            if (!media.storageKey && isReferenceHTTPSLink(media.url || "")) return;
+            const oversize = typeof maxUploadBytes === "number" && typeof requirement?.bytes === "number"
+                ? { bytes: requirement.bytes, maxBytes: maxUploadBytes } : undefined;
+            references.push({ key, label, name: media.name, resourceID: resourceIdFromStorageKey(media.storageKey) || undefined, upload: !oversize && transport?.[kind] !== "link", oversize });
+        };
+        groups.forEach((group, kind) => prepared[group].forEach((media, index) =>
+            addReference((["image", "video", "audio"] as const)[kind], index, media, `${group}:${index}`, `${labels[kind]} ${index + 1}`)));
+        if (prepared.mask) addReference("image", 0, prepared.mask, "mask:0", "遮罩", true);
         if (!references.length) throw error;
         const nodeId = options.metadata?.nodeId;
         const target = options.projectId && typeof nodeId === "string" && nodeId ? { projectId: options.projectId, nodeId } : undefined;
@@ -302,15 +308,17 @@ async function createBackendGenerationTask(options: BackendGenerationTaskOptions
             ? await options.resolveReferenceLinks(references, options.signal, target)
             : await uploadReferenceLinks(references, options.signal, target);
         throwIfAborted(options.signal);
+        if (!links && references.some((ref) => ref.oversize)) throw new DOMException("已取消本次生成", "AbortError");
         if (!links || references.some((reference) => !links[reference.key])) throw error;
         for (const reference of references) {
             if (!isReferenceHTTPSLink(links[reference.key] || "")) throw new Error(`${reference.label}需要有效的 HTTPS 链接`);
         }
+        const confirmed = new Map(references.map(({ key }) => [key, links[key].trim()]));
         const replace = <T extends { id?: string; name?: string; url?: string }>(items: T[], group: string): T[] =>
             items.map((media, index) => {
-                const url = links[`${group}:${index}`];
+                const url = confirmed.get(`${group}:${index}`);
                 // The dialog requests an online address for the same reference asset.
-                return url ? { ...media, storageKey: undefined, dataUrl: "", url: url.trim() } : media;
+                return url ? { ...media, storageKey: undefined, dataUrl: "", url } : media;
             });
         prepared.referenceImages = replace(prepared.referenceImages, "referenceImages");
         prepared.referenceVideos = replace(prepared.referenceVideos, "referenceVideos");
