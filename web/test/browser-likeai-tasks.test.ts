@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { browserLikeAIRequest, buildLikeAICreateBody, likeAIInput, parseLikeAIResponse } from "../src/services/browser-likeai-client";
 import { createBrowserLikeAITaskService, fetchBrowserLikeAIArtifact, type BrowserLikeAITaskRecord, type BrowserLikeAITaskStore } from "../src/services/browser-likeai-tasks";
+import { BROWSER_REFERENCE_UPLOAD_LIMIT, inspectBrowserLikeAIReferences } from "../src/services/browser-likeai-references";
 import type { CreateTaskInput } from "../src/services/api/task-center";
 import { prepareBackendGenerationTask, backendProviderConfig } from "../src/services/api/generation-task";
 import { createModelChannel, defaultConfig, encodeChannelModel } from "../src/stores/use-config-store";
@@ -59,6 +60,36 @@ function fixture(options: { request?: (path: string, init?: RequestInit) => Prom
 }
 
 describe("LikeAI browser protocol", () => {
+    test("preflights all local media kinds, including the exact byte boundary, and skips online links", async () => {
+        const limit = BROWSER_REFERENCE_UPLOAD_LIMIT;
+        const blob = new Blob([new Uint8Array(limit + 1)]);
+        const files = { large: blob, atLimit: blob.slice(0, limit) };
+        const online = { url: "https://fixture.example/remote", storageKey: "do-not-read" };
+        const local = { storageKey: "large" };
+        const atLimit = { storageKey: "atLimit" };
+        const input = likeAIInput(request({
+            referenceImages: [online, atLimit, local], referenceVideos: [local, online], referenceAudios: [online, local],
+        }).input);
+        const read = async (ref: { storageKey?: string }) => {
+            expect(ref.storageKey).not.toBe("do-not-read");
+            return files[ref.storageKey as keyof typeof files];
+        };
+        await expect(inspectBrowserLikeAIReferences(input, undefined, read)).rejects.toMatchObject({
+            status: 400, reason: "reference_media_requires_url", details: { maxUploadBytes: limit, requiredReferences: [
+                { kind: "image", index: 2, bytes: limit + 1 }, { kind: "video", index: 0, bytes: limit + 1 }, { kind: "audio", index: 1, bytes: limit + 1 },
+            ] },
+        });
+        const admitted = await inspectBrowserLikeAIReferences({ ...input, referenceImages: [online, atLimit], referenceVideos: [], referenceAudios: [] }, undefined, read);
+        expect(admitted.size).toBe(1);
+        expect(admitted.get(atLimit)).toBe(files.atLimit);
+    });
+
+    test("an unreadable local reference is a definite pre-submission rejection", async () => {
+        const input = likeAIInput(request({ referenceVideos: [{ storageKey: "missing" }] }).input);
+        await expect(inspectBrowserLikeAIReferences(input, undefined, async () => { throw new TypeError("blob unavailable"); }))
+            .rejects.toMatchObject({ status: 400, retryable: false });
+    });
+
     test("keeps the selected model and explicit frame roles, and maps model-specific audio options", () => {
         const input = likeAIInput(request({ referenceImages: [{ id: "first", url: "https://media.example/first.png" }, { id: "ref", url: "https://media.example/ref.png" }], metadata: { videoStartFrameNodeId: "first", providerOptions: { "likeai-video": { body: { api_name: "wrong" }, duration: -1, kwargs: { off_peak: true } } } } }).input);
         const body = buildLikeAICreateBody(input);

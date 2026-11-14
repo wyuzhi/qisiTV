@@ -2,7 +2,7 @@ import { getDesktopAppBinding } from "@/services/desktop-runtime";
 import { startOperation } from "@/stores/use-operation-progress";
 import type { CanvasOperationTarget } from "@/lib/operation-progress";
 
-export type ReferenceLinkRequest = { key: string; label: string; name?: string; resourceID?: string; upload?: boolean };
+export type ReferenceLinkRequest = { key: string; label: string; name?: string; resourceID?: string; upload?: boolean; oversize?: { bytes: number; maxBytes: number } };
 export type ResolveReferenceLinks = (references: ReferenceLinkRequest[], signal?: AbortSignal, target?: CanvasOperationTarget) => Promise<Record<string, string> | null>;
 
 // The native uploader exposes one live status; only its active caller polls it.

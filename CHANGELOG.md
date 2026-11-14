@@ -7,6 +7,8 @@ Changes to qisiTV and its inherited release history are documented in this file.
 ## v2.2.1-web-beta.3
 
 - 修复网页画布取回图片时，图片已下载到本机、节点仍一直显示正在取回的问题。画布可从原任务恢复已保存的图片。
+- 网页生成前保存失败时，节点与顶部保存状态显示具体原因。
+- 网页会在上传前检查全部参考素材。单份超过 4 MB 时，可为该素材填写本次生成使用的 HTTPS 直链。
 
 ## v2.2.1-web-beta.2
 

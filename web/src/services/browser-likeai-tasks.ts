@@ -5,7 +5,10 @@ import type { CreateTaskInput, GenerationTask, GenerationTaskOutput } from "@/se
 import { browserLikeAIRequest, buildLikeAICreateBody, likeAIInput, LikeAIRequestError, objectRecord, parseLikeAIResponse, validateLikeAIReferences, type LikeAIMode, type LikeAIReference } from "@/services/browser-likeai-client";
 import { isQisiAPI, likeAIService, normalizeServiceBaseUrl, LEGACY_LIKEAI_BASE_URL, OFFICIAL_LIKEAI_BASE_URL } from "@/lib/likeai-service";
 import { withGenerationArtifactCommitLock } from "@/services/generation-asset-repository";
+import { inspectBrowserLikeAIReferences, prepareBrowserLikeAIReference } from "@/services/browser-likeai-references";
 import { isBrowserWorkspace } from "@/services/browser-workspace";
+
+export { prepareBrowserLikeAIReference } from "@/services/browser-likeai-references";
 
 export type BrowserLikeAITaskRecord = { task: GenerationTask; channelId: string; serviceBaseUrl?: string; mode: LikeAIMode; remoteResult?: BackendGenerationResult; downloaded: boolean };
 export type BrowserLikeAITaskStore = {
@@ -21,7 +24,8 @@ type Dependencies = {
     request: typeof browserLikeAIRequest;
     credential(channelId: string, baseUrl: string): Promise<string>;
     hasArtifact(output: GenerationTaskOutput): Promise<boolean>;
-    reference(ref: LikeAIReference, kind: "image" | "video" | "audio", apiKey: string, baseUrl?: string, signal?: AbortSignal): Promise<LikeAIReference>;
+    inspectReferences?: typeof inspectBrowserLikeAIReferences;
+    reference(ref: LikeAIReference, kind: "image" | "video" | "audio", apiKey: string, baseUrl?: string, signal?: AbortSignal, inspected?: Blob): Promise<LikeAIReference>;
     download(result: BackendGenerationResult, taskId: string, providerId: string, apiKey: string, signal?: AbortSignal, baseUrl?: string): Promise<BackendGenerationResult>;
     now?: () => string;
     id?: () => string;
@@ -144,6 +148,7 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
                 // A queued request may still contain an old key. Use only the current credential bound to this channel and endpoint.
                 const apiKey = await deps.credential(channelId, baseUrl);
                 if (!apiKey) throw new Error("请先填写 LikeAI API Key");
+                const files = await deps.inspectReferences?.(input, signal);
                 const taskId = `browser-${id()}`;
                 return deps.lock(`task:${taskId}`, async () => {
                     assertActive(signal);
@@ -162,11 +167,11 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
                     let submitted = false;
                     try {
                         assertActive(signal);
-                        const referenceImages = await Promise.all((input.referenceImages || []).map((ref) => deps.reference(ref, "image", apiKey, baseUrl, signal)));
+                        const referenceImages = await Promise.all((input.referenceImages || []).map((ref) => deps.reference(ref, "image", apiKey, baseUrl, signal, files?.get(ref))));
                         assertActive(signal);
-                        const referenceVideos = await Promise.all((input.referenceVideos || []).map((ref) => deps.reference(ref, "video", apiKey, baseUrl, signal)));
+                        const referenceVideos = await Promise.all((input.referenceVideos || []).map((ref) => deps.reference(ref, "video", apiKey, baseUrl, signal, files?.get(ref))));
                         assertActive(signal);
-                        const referenceAudios = await Promise.all((input.referenceAudios || []).map((ref) => deps.reference(ref, "audio", apiKey, baseUrl, signal)));
+                        const referenceAudios = await Promise.all((input.referenceAudios || []).map((ref) => deps.reference(ref, "audio", apiKey, baseUrl, signal, files?.get(ref))));
                         assertActive(signal);
                         const body = buildLikeAICreateBody({ ...input, referenceImages, referenceVideos, referenceAudios });
                         record.task.stage = "submitting";
@@ -365,36 +370,13 @@ export function browserLikeAITasks() {
                 if (!channel?.apiKey.trim()) throw new Error("请在模型配置中恢复该任务使用的 API Key");
                 return channel.apiKey.trim();
             },
+            inspectReferences: inspectBrowserLikeAIReferences,
             reference: (...args) => { assertOwner(); return prepareBrowserLikeAIReference(...args); },
             download: (result, taskId, providerId, apiKey, signal, baseUrl) => downloadBrowserLikeAIResult(result, scope, taskId, providerId, apiKey, signal, baseUrl, assertOwner),
         });
         services.set(scope, service);
     }
     return service;
-}
-
-export async function prepareBrowserLikeAIReference(ref: LikeAIReference, kind: "image" | "video" | "audio", apiKey: string, baseUrl = OFFICIAL_LIKEAI_BASE_URL, signal?: AbortSignal): Promise<LikeAIReference> {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    if (/^https:\/\//i.test(ref.url || ref.dataUrl || "")) return { ...ref, url: ref.url || ref.dataUrl };
-    let blob: Blob | null = null;
-    if (ref.storageKey) {
-        blob = kind === "image" ? await (await import("@/services/image-storage")).getImageBlob(ref.storageKey) : await (await import("@/services/file-storage")).getMediaBlob(ref.storageKey);
-    }
-    const localUrl = ref.url || ref.dataUrl || "";
-    if (!blob && /^(blob:|data:)/.test(localUrl)) {
-        const response = await fetch(localUrl, { signal });
-        if (!response.ok) throw new Error("本地素材读取失败");
-        blob = await response.blob();
-    }
-    if (!blob) throw new Error("参考素材尚未保存在本机，请重新导入");
-    if (blob.size > 4_000_000) throw new Error("网页参考素材暂限 4 MB；较大文件请使用公网素材地址，或在本地版中生成。");
-    const form = new FormData();
-    form.append("file", blob, ref.name || `${kind}.bin`);
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    const response = await browserLikeAIRequest("/files", apiKey, { method: "POST", body: form, signal }, undefined, baseUrl);
-    const url = response.url || response.file_url || objectRecord(response.data).url || objectRecord(response.data).file_url;
-    if (typeof url !== "string" || !/^https:\/\//i.test(url)) throw new Error("LikeAI 参考素材上传未返回有效地址");
-    return { ...ref, url, dataUrl: undefined };
 }
 
 async function downloadBrowserLikeAIResult(result: BackendGenerationResult, scope: string, taskId: string, providerId: string, apiKey: string, signal?: AbortSignal, baseUrl = OFFICIAL_LIKEAI_BASE_URL, assertOwner = () => {}): Promise<BackendGenerationResult> {
