@@ -16,7 +16,7 @@ function request(path, init = {}) {
 const completed = (url) => ({ code: 200, data: { status: 'completed', result: { videos: [url] } } });
 
 test('explicit current connection uses its fixed upstream for every API call and its task receipts', async () => {
-  const current = 'http://119.91.105.101:18182';
+  const current = 'http://119.91.105.101:18282/api';
   const calls = [];
   const handler = createHandler(async (url, options) => {
     calls.push([url, options.headers]);

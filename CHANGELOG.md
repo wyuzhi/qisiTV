@@ -6,7 +6,7 @@ Changes to qisiTV and its inherited release history are documented in this file.
 
 ## v2.2.1-web-beta.2
 
-- 更新模型服务中的 LikeAI 地址为 `http://119.91.105.101:18182`。网页使用同源转发，本机引擎可直接访问该地址。模型目录、素材上传和任务查询使用各自连接的地址，旧连接与已有任务继续使用原服务。
+- 更新模型服务中的 LikeAI 测试服地址为 `http://119.91.105.101:18282/api`。网页使用同源转发，本机引擎可直接访问该地址。模型目录、素材上传和任务查询使用各自连接的地址，旧连接与已有任务继续使用原服务。
 
 ## v2.2.1-web-beta.1
 

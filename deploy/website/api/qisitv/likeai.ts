@@ -7,7 +7,7 @@ import { Readable } from 'node:stream';
 export const config = { maxDuration: 180, supportsResponseStreaming: true };
 export const LIMITS = { upload: 4_200_000, json: 2_000_000, artifact: 128 * 1024 * 1024, timeoutMs: 120_000 };
 const PREFIX = '/api/qisitv/likeai';
-const CURRENT_UPSTREAM = 'http://119.91.105.101:18182';
+const CURRENT_UPSTREAM = 'http://119.91.105.101:18282/api';
 const LEGACY_UPSTREAM = 'https://task.likeai.pro/task-api';
 const TASK_ID = '[A-Za-z0-9_-]{1,160}';
 const HEADERS = {
@@ -69,7 +69,7 @@ type Transport = (url: string, options: OutboundOptions) => Promise<UpstreamResp
 const sendRequest: Transport = async (raw, options) => {
   const url = new URL(raw);
   // Only a credentialed API call constructed by likeAIJSON may use the fixed HTTP origin.
-  const currentAPI = url.origin === CURRENT_UPSTREAM && Boolean(options.headers?.['X-API-Key']);
+  const currentAPI = raw.startsWith(CURRENT_UPSTREAM + '/') && Boolean(options.headers?.['X-API-Key']);
   const target = currentAPI ? { url, address: url.hostname, family: 4 } : await resolvePublicTarget(raw);
   const send = currentAPI ? httpRequest : httpsRequest;
   return new Promise((resolve, reject) => {
