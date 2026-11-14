@@ -5,6 +5,10 @@ import { fetchChannelModels } from "@/services/api/image-models";
 import { prepareBackendGenerationTask, runBackendGenerationTask } from "@/services/api/generation-task";
 import { createGenerationTask, findGenerationTaskByOperation, recoverTask, waitForGenerationTask } from "@/services/api/task-center";
 import { getImageBlob } from "@/services/image-storage";
+import { bindBackendCanvasGenerationResult } from "@/services/canvas-generation-consumer";
+import { syncGenerationTaskToCanvasStore } from "@/lib/canvas/canvas-generation-task-sync";
+import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { http, ApiError } from "@/services/api/request";
 
 let cancelledTask: Promise<string> | undefined;
@@ -38,7 +42,7 @@ Object.assign(window, {
         const { id, saved } = beginLocalCanvasProject("Browser routing fixture");
         await saved;
         const catalog = await fetchChannelModels(channel);
-        const input = await prepareBackendGenerationTask({ projectId: id, mode: "image", prompt: "Synthetic routing fixture", config, clientOperationId: "browser-routing-operation", referenceImages: [{ id: "reference", name: "reference.png", dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR1kAAAAASUVORK5CYII=" }] });
+        const input = await prepareBackendGenerationTask({ projectId: id, mode: "image", prompt: "Synthetic routing fixture", config, clientOperationId: "browser-routing-operation", metadata: { nodeId: "image-output" }, referenceImages: [{ id: "reference", name: "reference.png", dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR1kAAAAASUVORK5CYII=" }] });
         const first = await createGenerationTask(input);
         const repeated = await createGenerationTask(input);
         const found = await findGenerationTaskByOperation("browser-routing-operation", id);
@@ -46,9 +50,21 @@ Object.assign(window, {
         const recovered = await recoverTask(first.id);
         const result = JSON.parse(completed.resultJson || "{}");
         const bytes = [...new Uint8Array(await (await getImageBlob(result.images[0].storageKey))!.arrayBuffer())];
+        const node: CanvasNodeData = { id: "image-output", title: "生成图片", position: { x: 0, y: 0 }, width: 280, height: 160, type: CanvasNodeType.Image, metadata: { taskId: first.id, status: "loading" } };
+        const nodesRef = { current: [node] };
+        useCanvasStore.getState().updateProject(id, { nodes: nodesRef.current });
+        await bindBackendCanvasGenerationResult({
+            canvasId: id, nodeId: node.id, task: recovered, nodesRef, isCurrent: () => true,
+            setNodes: update => { nodesRef.current = typeof update === "function" ? update(nodesRef.current) : update; },
+        });
+        const receipt = await recoverTask(first.id);
+        const bound = useCanvasStore.getState().openProject(id)?.nodes[0];
+        const binding = { status: bound?.metadata?.status, keyMatches: bound?.metadata?.storageKey === result.images[0].storageKey,
+            assetMatches: Boolean(bound?.metadata?.assetId && bound.metadata.assetId === receipt.outputs?.[0]?.materializedAssetId), resultState: receipt.resultState };
+        await syncGenerationTaskToCanvasStore(receipt);
         let engineRequired = false;
         try { await http.get("/assistant/hosts"); }
         catch (error) { engineRequired = error instanceof ApiError && error.reason === "engine_required"; }
-        return { models: catalog.models, sameReceipt: first.id === repeated.id && found?.id === first.id && recovered.id === first.id, status: completed.status, bytes, engineRequired };
+        return { models: catalog.models, sameReceipt: first.id === repeated.id && found?.id === first.id && recovered.id === first.id, status: completed.status, bytes, binding, engineRequired };
     },
 });

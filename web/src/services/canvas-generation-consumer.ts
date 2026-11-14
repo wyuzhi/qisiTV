@@ -7,6 +7,7 @@ import { ApiError } from "@/services/api/request";
 import { queryGenerationTask, type GenerationTask, type GenerationTaskDeliveryProgress, type GenerationTaskOutput } from "@/services/api/task-center";
 import { CanvasBackendSubmitPausedError, isCanvasRevisionConflict } from "@/services/canvas-revision-conflict";
 import { generationEffectApplied } from "@/services/generation-consumer-dedupe";
+import { isBrowserWorkspace } from "./browser-workspace";
 import { attachNodeEffectKey } from "@/services/generation-task-materializer";
 import { persistCanvasDocument } from "@/services/local-workspace-repository";
 import { hydrateBackendGeneratedOutputs, type ensureCanvasNodeAsset } from "@/services/project-asset-sync";
@@ -216,6 +217,18 @@ export async function bindBackendCanvasGenerationResult(input: {
     onPhaseChange?: (phase: "fetching" | "saving") => void;
 }) {
     if (input.task.status !== "succeeded") throw new Error("只有成功的任务才能绑定到画布");
+    if (isBrowserWorkspace() && input.task.id.startsWith("browser-")) {
+        const { bindBrowserCanvasGenerationResult } = await import("./browser-canvas-generation-consumer");
+        input.onPhaseChange?.("saving");
+        return bindBrowserCanvasGenerationResult({
+            ...input,
+            readNodes: () => input.nodesRef.current,
+            setNodes: nodes => {
+                input.setNodes(nodes);
+                useCanvasStore.getState().updateProject(input.canvasId, { nodes: input.nodesRef.current });
+            },
+        });
+    }
     const runtime = input.runtime ?? {};
     const capturedCanvasId = input.canvasId;
     const outputIndex = input.outputIndex ?? 0;

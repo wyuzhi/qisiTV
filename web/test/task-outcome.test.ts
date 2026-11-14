@@ -26,6 +26,12 @@ import {
 } from "@/lib/task-outcome";
 
 describe("task-outcome", () => {
+    it("recovers previously saved browser download failures from the same task", () => {
+        expect(readTaskOutcome({ status: "succeeded", stage: "download_pending" })).toEqual({
+            phase: "retrievable", regenerate: "blocked", reason: "delivery_pending",
+        });
+    });
+
     it("recognizes all 5 phase values and 3 regenerate values", () => {
         const phases: TaskOutcomePhase[] = ["running", "fetching", "ready", "retrievable", "failed"];
         const regenerates: TaskOutcomeRegenerate[] = ["allowed", "confirm", "blocked"];

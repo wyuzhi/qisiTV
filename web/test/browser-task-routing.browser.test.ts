@@ -47,11 +47,12 @@ test("网页模型目录、参考素材和任务恢复使用中转；不连接�
         page.on("pageerror", error => errors.push(error.message));
         await page.route("https://media.example/result.png", route => route.fulfill({ body: png, contentType: "image/png", headers: { "Access-Control-Allow-Origin": "*" } }));
         await page.goto(server.url.toString());
-        const result = await page.evaluate(async () => await (window as unknown as { runBrowserTaskSmoke: () => Promise<{ models: string[]; sameReceipt: boolean; status: string; bytes: number[]; engineRequired: boolean }> }).runBrowserTaskSmoke());
+        const result = await page.evaluate(async () => await (window as unknown as { runBrowserTaskSmoke: () => Promise<{ models: string[]; sameReceipt: boolean; status: string; bytes: number[]; binding: object; engineRequired: boolean }> }).runBrowserTaskSmoke());
         expect(result.models).toEqual(["doubao_seedream_4_5"]);
         expect(result.sameReceipt).toBe(true);
         expect(result.status).toBe("succeeded");
         expect(Buffer.from(result.bytes)).toEqual(png);
+        expect(result.binding).toEqual({ status: "success", keyMatches: true, assetMatches: true, resultState: "READY" });
         expect(result.engineRequired).toBe(true);
         holdUpload = true;
         await page.evaluate(() => (window as unknown as { startCancelledBrowserTask(): Promise<void> }).startCancelledBrowserTask());

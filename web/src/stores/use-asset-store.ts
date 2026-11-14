@@ -1,3 +1,4 @@
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { create } from "zustand";
 import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
 
@@ -777,6 +778,7 @@ export const useAssetStore = create<AssetStore>()(
                     window.setTimeout(() =>
                         withGenerationArtifactCommitLock(scope, async () => {
                             const syncDrafts = await readAllCanvasSyncDrafts(scope);
+                            const taskMedia = isBrowserWorkspace() ? await (await import("@/services/browser-likeai-tasks")).browserTaskMediaReferences(scope) : [];
                             // 固定锁序：artifact -> Canvas（释放）-> Asset，避免跨 store 锁重入。
                             const canvasProjects = await withCanvasStorePersistenceLock(scope, async () => {
                                 await commitPendingCanvasStorePersistenceLocked(scope);
@@ -786,7 +788,7 @@ export const useAssetStore = create<AssetStore>()(
                             await withGenerationAssetStorageLock(scope, async () => {
                                 await commitPendingAssetStorePersistenceLocked(scope);
                                 const durableAssets = (await readPersistedAssetDocumentForScope(scope)).state.assets;
-                                const references = { projects: canvasProjects, assets: durableAssets, syncDrafts };
+                                const references = { projects: canvasProjects, assets: durableAssets, syncDrafts, taskMedia };
                                 const imageKeys = new Set([...frozenExtraImageKeys, ...collectImageStorageKeys(references)]);
                                 const mediaKeys = new Set([...frozenExtraMediaKeys, ...collectMediaStorageKeys(references)]);
                                 await cleanupUnusedImages(

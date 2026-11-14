@@ -16,6 +16,7 @@ import { attachNodeEffectKey } from "@/services/generation-task-materializer";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 import { mediaResultMetadata } from "@/lib/canvas/canvas-node-semantics";
 import { readNodeTaskOutcome } from "@/lib/task-outcome";
+import { isBrowserWorkspace } from "@/services/browser-workspace";
 import { generationTaskInput, generationTaskNodeId } from "@/lib/canvas/canvas-generation-task-identity";
 export { generationTaskInput, generationTaskNodeId } from "@/lib/canvas/canvas-generation-task-identity";
 
@@ -326,6 +327,26 @@ export async function syncGenerationTaskToCanvasStore(task: GenerationTask) {
     if (!project) return false;
     const target = findGenerationTaskNode(project.nodes, task);
     const candidates = project.nodes.filter((node) => node.metadata?.taskId === task.id || node.id === target?.id);
+    if (isBrowserWorkspace() && task.id.startsWith("browser-")) {
+        const { bindBrowserCanvasGenerationResult } = await import("@/services/browser-canvas-generation-consumer");
+        const { readBrowserCanvas } = await import("@/services/browser-canvas-repository");
+        const { notifyCanvasRefresh } = await import("@/services/local-workspace-sync");
+        const canvasId = project.id;
+        for (const node of candidates) {
+            await bindBrowserCanvasGenerationResult({
+                canvasId, nodeId: node.id, task, outputIndex: node.metadata?.taskOutputIndex ?? 0,
+                readNodes: () => readBrowserCanvas(canvasId)?.nodes ?? [],
+                isCurrent: () => Boolean(readBrowserCanvas(canvasId)),
+                setNodes: nodes => {
+                    const previous = readBrowserCanvas(canvasId);
+                    useCanvasStore.getState().updateProject(canvasId, { nodes });
+                    const saved = readBrowserCanvas(canvasId);
+                    if (saved) notifyCanvasRefresh(saved, previous ?? undefined);
+                },
+            });
+        }
+        return candidates.length > 0;
+    }
     let changed = false;
     for (const node of candidates) {
         const hasBoundMedia = Boolean(
