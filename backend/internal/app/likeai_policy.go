@@ -26,8 +26,6 @@ func (s *Service) requireActiveCatalogProvider(input *ChannelModelsRequest) erro
 	if input.BaseURL != "" {
 		return s.requireActiveProvider("likeai-image", input.BaseURL)
 	}
-	// Previously a missing address meant the original HTTPS service. A credential
-	// must name the new HTTP destination explicitly.
 	input.BaseURL = channelurl.LegacyLikeAIBaseURL
 	return nil
 }
