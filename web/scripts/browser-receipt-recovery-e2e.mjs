@@ -1,5 +1,6 @@
 // Run against an exported qisiTV website, e.g. node web/scripts/browser-receipt-recovery-e2e.mjs web/dist
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { extname, resolve, sep } from "node:path";
@@ -137,7 +138,9 @@ async function checkReceipts(expected) {
 
 let browser;
 try {
-    browser = await chromium.launch(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {});
+    const macChrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+    const executablePath = process.env.CHROME_PATH || (process.platform === "darwin" && existsSync(macChrome) ? macChrome : undefined);
+    browser = await chromium.launch({ executablePath });
     const context = await browser.newContext({ viewport: { width: 1360, height: 860 }, serviceWorkers: "block" });
     const unexpected = [];
     await context.route(/^https?:/, async route => {
@@ -177,7 +180,8 @@ try {
         }
         console.log("PASS: two downloaded receipts recover on the canvas; the original PNGs survive reload; zero generation or remote requests.");
     } catch (error) {
-        console.error("Fixture UI:", (await page.locator("body").innerText()).slice(0, 1200), "Errors:", diagnostics, "Requests:", unexpected);
+        const body = await page.locator("body").innerText().catch(() => "(page closed)");
+        console.error("Fixture UI:", body.slice(0, 1200), "Errors:", diagnostics, "Requests:", unexpected);
         throw error;
     }
 } finally {
