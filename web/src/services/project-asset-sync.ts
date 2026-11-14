@@ -9,17 +9,17 @@ import { getWorkspaceAsset } from "@/services/api/workspace-data";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import type { GenerationTask, GenerationTaskOutput } from "@/services/api/task-center";
 import { getMediaBlob, resolveMediaUrl, setMediaBlob } from "@/services/file-storage";
-import { createGenerationTaskMaterializer, createIdempotentMaterializeOutput, type MaterializeGenerationTaskOutput } from "@/services/generation-task-materializer";
+import { createGenerationTaskMaterializer, createIdempotentMaterializeOutput, materializeEffectKey, type MaterializeGenerationTaskOutput } from "@/services/generation-task-materializer";
 import { withGenerationArtifactCommitLock } from "@/services/generation-asset-repository";
 import { uploadGeneratedAssetToConfiguredSources } from "@/services/external-asset-sources";
 import { getImageBlob, resolveImageUrl, setImageBlob } from "@/services/image-storage";
 import { generationArtifactStorageKey, loadOrStoreGenerationArtifact } from "@/services/generation-artifact-sink";
 import { createProviderNeutralGenerationTaskEffectStore } from "@/services/provider-neutral-generation-effects";
 import { getActiveUserScope } from "@/lib/user-scope";
-import { isEngineWebsite } from "@/services/browser-workspace";
+import { isBrowserWorkspace, isEngineWebsite } from "@/services/browser-workspace";
 import { captureEngineSessionGuard } from "@/services/engine-session";
 import { runGenerationConsumer } from "@/services/generation-consumer-lifecycle";
-import { flushAssetStorePersistence, useAssetStore, type Asset, type AssetCategory, type NewAsset } from "@/stores/use-asset-store";
+import { flushAssetStorePersistence, restoreBrowserTaskAsset, useAssetStore, type Asset, type AssetCategory, type NewAsset } from "@/stores/use-asset-store";
 import type { CanvasNodeData } from "@/types/canvas";
 import { persistWorkspaceAssetLink } from "@/services/workspace-asset-repository";
 import { usesBrowserLocalResourceStore, workspaceAssetHasCanonicalMediaPersist } from "@/services/workspace-resource-storage";
@@ -570,12 +570,21 @@ function generationTaskMaterializer(task: GenerationTask) {
 }
 
 export async function materializeGenerationTaskAssets(task: GenerationTask, signal?: AbortSignal): Promise<GenerationTask> {
-    if (hasBackendDeliveredGenerationOutputs(task)) {
+    const browserReceipt = isBrowserWorkspace() && task.id.startsWith("browser-");
+    if (!browserReceipt && hasBackendDeliveredGenerationOutputs(task)) {
         await hydrateBackendGeneratedOutputs(task, signal);
         throwIfAborted(signal);
         return task;
     }
     const materialized = await generationTaskMaterializer(task).materialize(projectGenerationTaskResult(task), signal);
+    if (browserReceipt) {
+        // Another tab may have committed the asset without publishing it into this tab's memory.
+        for (const output of materialized.outputs || []) {
+            if (useAssetStore.getState().assets.some(asset => asset.id === output.materializedAssetId)) continue;
+            if (!output.materializedAssetId || !output.providerArtifactRef) throw new Error("生成回执缺少本地素材");
+            await restoreBrowserTaskAsset(output.materializedAssetId, materializeEffectKey(task.id, output.outputIndex), output.providerArtifactRef, signal);
+        }
+    }
     await registerMaterializedTaskAssets(materialized, useAssetStore.getState().assets);
     throwIfAborted(signal);
     return materialized;

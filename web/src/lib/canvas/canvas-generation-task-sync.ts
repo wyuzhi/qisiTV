@@ -265,10 +265,20 @@ export async function applyRecoveredGenerationTaskResultToNodes(nodes: CanvasNod
     return { ...applied, nodes: recoveredNodes, node: recoveredNodes.find((node) => node.id === applied.nodeId)!, effectKey };
 }
 
+export function canvasGenerationOutputIsBound(node: CanvasNodeData | undefined, taskId: string, effectKey: string, output?: GenerationTaskOutput) {
+    const metadata = node?.metadata;
+    if (metadata?.taskId !== taskId || metadata.status !== "success" || !generationEffectApplied(metadata, effectKey)) return false;
+    if (!output) return node?.type === CanvasNodeType.Text && Boolean(metadata.content);
+    // Project documents omit transient blob URLs. The saved storage key identifies the actual media.
+    return Boolean(node?.type === output.mediaType && output.materializedAssetId && metadata.assetId === output.materializedAssetId
+        && (metadata.taskOutputIndex ?? 0) === output.outputIndex && metadata.storageKey
+        && (metadata.emotionEdit || !output.providerArtifactRef || metadata.storageKey === output.providerArtifactRef));
+}
+
 export async function applyMaterializedGenerationTaskResultToNodes(nodes: CanvasNodeData[], task: GenerationTask, output: GenerationTaskOutput, effectKey: string, targetNodeId?: string) {
     const node = findGenerationTaskNode(nodes, task, targetNodeId);
     if (!node) return { nodes, updated: false, nodeId: "", node: null };
-    if (generationEffectApplied(node.metadata || {}, effectKey)) {
+    if (canvasGenerationOutputIsBound(node, task.id, effectKey, output)) {
         return { nodes, updated: true, nodeId: node.id, node };
     }
     const asset = useAssetStore.getState().assets.find((candidate) => candidate.id === output.materializedAssetId);
@@ -292,7 +302,11 @@ export async function applyMaterializedGenerationTaskResultToNodes(nodes: Canvas
     } else {
         throw new Error("生成任务输出素材类型不支持画布节点");
     }
-    const indexedNode = { ...node, metadata: { ...node.metadata, taskOutputIndex: output.outputIndex } };
+    // A stale stamp alone must not acknowledge a partially saved or overwritten result.
+    const indexedNode = { ...node, metadata: {
+        ...node.metadata, taskOutputIndex: output.outputIndex,
+        generationEffectKeys: node.metadata?.generationEffectKeys?.filter(key => key !== effectKey),
+    } };
     const updatedNode = await buildGenerationTaskNodeResult(indexedNode, { ...task, resultJson: JSON.stringify(result) }, nodes);
     const durableNode = {
         ...updatedNode,

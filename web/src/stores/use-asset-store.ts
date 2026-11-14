@@ -481,6 +481,24 @@ async function readPersistedAssetDocumentForScope(scope: string) {
     return recovery.document;
 }
 
+/** A completed browser receipt can be visible to a tab before its local asset cache catches up. */
+export async function restoreBrowserTaskAsset(assetId: string, effectKey: string, storageKey: string, signal?: AbortSignal) {
+    const scope = getActiveUserScope();
+    await withGenerationAssetStorageLock(scope, async () => {
+        await commitPendingAssetStorePersistenceLocked(scope);
+        const document = await readPersistedAssetDocumentForScope(scope);
+        const asset = document.state.assets.find(item => item.id === assetId);
+        if (!asset || document.tombstones.assets[assetId] || asset.metadata?.generationEffectKey !== effectKey
+            || !("storageKey" in asset.data) || asset.data.storageKey !== storageKey) {
+            throw new Error("生成回执对应的本地素材已删除或发生变化");
+        }
+        const restored = await normalizePersistedAsset(asset);
+        if (signal?.aborted || getActiveUserScope() !== scope) throw new DOMException("素材工作区已切换", "AbortError");
+        withAssetStorePersistenceSuppressed(() => useAssetStore.setState(state =>
+            state.assets.some(item => item.id === assetId) ? state : { assets: [restored, ...state.assets] }));
+    });
+}
+
 /**
  * 登记一个素材写操作，供登出、切换账号和页面卸载前统一冲刷。
  *

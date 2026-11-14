@@ -52,7 +52,8 @@ test("网页模型目录、参考素材和任务恢复使用中转；不连接�
         expect(result.sameReceipt).toBe(true);
         expect(result.status).toBe("succeeded");
         expect(Buffer.from(result.bytes)).toEqual(png);
-        expect(result.binding).toEqual({ status: "success", keyMatches: true, assetMatches: true, resultState: "READY" });
+        expect(result.binding).toEqual({ status: "success", keyMatches: true, assetMatches: true, resultState: "READY",
+            pendingAfterConflict: true, repairedStamped: true, preservedUpload: true });
         expect(result.engineRequired).toBe(true);
         holdUpload = true;
         await page.evaluate(() => (window as unknown as { startCancelledBrowserTask(): Promise<void> }).startCancelledBrowserTask());

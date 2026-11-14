@@ -6,6 +6,9 @@ import { prepareBackendGenerationTask, runBackendGenerationTask } from "@/servic
 import { createGenerationTask, findGenerationTaskByOperation, recoverTask, waitForGenerationTask } from "@/services/api/task-center";
 import { getImageBlob } from "@/services/image-storage";
 import { bindBackendCanvasGenerationResult } from "@/services/canvas-generation-consumer";
+import { bindBrowserCanvasGenerationResult } from "@/services/browser-canvas-generation-consumer";
+import { attachNodeEffectKey } from "@/services/generation-task-materializer";
+import { useAssetStore } from "@/stores/use-asset-store";
 import { syncGenerationTaskToCanvasStore } from "@/lib/canvas/canvas-generation-task-sync";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
@@ -50,9 +53,15 @@ Object.assign(window, {
         const recovered = await recoverTask(first.id);
         const result = JSON.parse(completed.resultJson || "{}");
         const bytes = [...new Uint8Array(await (await getImageBlob(result.images[0].storageKey))!.arrayBuffer())];
-        const node: CanvasNodeData = { id: "image-output", title: "生成图片", position: { x: 0, y: 0 }, width: 280, height: 160, type: CanvasNodeType.Image, metadata: { taskId: first.id, status: "loading" } };
+        const node: CanvasNodeData = { id: "image-output", title: "生成图片", position: { x: 0, y: 0 }, width: 280, height: 160, type: CanvasNodeType.Image, metadata: { taskId: first.id, status: "loading", generationEffectKeys: [attachNodeEffectKey(first.id, "image-output", 0)] } };
         const nodesRef = { current: [node] };
         useCanvasStore.getState().updateProject(id, { nodes: nodesRef.current });
+        let interrupted = false;
+        try {
+            await bindBrowserCanvasGenerationResult({ canvasId: id, nodeId: node.id, task: recovered, isCurrent: () => true,
+                readNodes: () => nodesRef.current, setNodes: () => { /* Concurrent editor did not adopt the projection. */ } });
+        } catch { interrupted = true; }
+        const pendingAfterConflict = interrupted && (await recoverTask(first.id)).resultState === "PENDING_MATERIALIZATION";
         await bindBackendCanvasGenerationResult({
             canvasId: id, nodeId: node.id, task: recovered, nodesRef, isCurrent: () => true,
             setNodes: update => { nodesRef.current = typeof update === "function" ? update(nodesRef.current) : update; },
@@ -61,10 +70,25 @@ Object.assign(window, {
         const bound = useCanvasStore.getState().openProject(id)?.nodes[0];
         const binding = { status: bound?.metadata?.status, keyMatches: bound?.metadata?.storageKey === result.images[0].storageKey,
             assetMatches: Boolean(bound?.metadata?.assetId && bound.metadata.assetId === receipt.outputs?.[0]?.materializedAssetId), resultState: receipt.resultState };
+        const originalId = bound!.metadata!.assetId;
+        const changeNode = (metadata: CanvasNodeData["metadata"]) => useCanvasStore.getState().updateProject(id, { nodes: [{ ...bound!, metadata }] });
+        const readNode = () => useCanvasStore.getState().openProject(id)!.nodes[0];
+        // A second tab has the completed receipt but not this asset in its live asset list.
+        // Do not request an actual persisted deletion; only this tab's live snapshot is stale.
+        useAssetStore.getState().assets = [];
+        changeNode({ ...bound!.metadata, assetId: "stale-asset", storageKey: "stale-key" });
         await syncGenerationTaskToCanvasStore(receipt);
+        const repaired = readNode();
+        const repairedStamped = repaired.metadata?.assetId === originalId && repaired.metadata?.storageKey === result.images[0].storageKey;
+        changeNode({ ...repaired.metadata, taskId: undefined, taskClientOperationId: receipt.clientOperationId,
+            resultOrigin: "upload", content: "blob:manual", storageKey: "manual-upload" });
+        let rejectedManual = false;
+        try { await syncGenerationTaskToCanvasStore(receipt); } catch { rejectedManual = true; }
+        const preservedUpload = rejectedManual && readNode().metadata?.storageKey === "manual-upload";
         let engineRequired = false;
         try { await http.get("/assistant/hosts"); }
         catch (error) { engineRequired = error instanceof ApiError && error.reason === "engine_required"; }
-        return { models: catalog.models, sameReceipt: first.id === repeated.id && found?.id === first.id && recovered.id === first.id, status: completed.status, bytes, binding, engineRequired };
+        return { models: catalog.models, sameReceipt: first.id === repeated.id && found?.id === first.id && recovered.id === first.id, status: completed.status, bytes,
+            binding: { ...binding, pendingAfterConflict, repairedStamped, preservedUpload }, engineRequired };
     },
 });

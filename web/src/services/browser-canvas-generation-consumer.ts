@@ -1,7 +1,6 @@
 import { getActiveUserScope } from "@/lib/user-scope";
-import { applyMaterializedGenerationTaskResultToNodes, applyRecoveredGenerationTaskResultToNodes } from "@/lib/canvas/canvas-generation-task-sync";
+import { applyMaterializedGenerationTaskResultToNodes, applyRecoveredGenerationTaskResultToNodes, canvasGenerationOutputIsBound } from "@/lib/canvas/canvas-generation-task-sync";
 import { rebaseCanvasDocumentThreeWay } from "@/lib/canvas/canvas-document-rebase";
-import { generationEffectApplied } from "./generation-consumer-dedupe";
 import { attachNodeEffectKey } from "./generation-task-materializer";
 import { materializeGenerationTaskAssets } from "./project-asset-sync";
 import { readBrowserCanvas, persistBrowserCanvas } from "./browser-canvas-repository";
@@ -31,10 +30,16 @@ export async function bindBrowserCanvasGenerationResult(input: {
             throw new DOMException("画布已切换，结果仍保存在原任务中", "AbortError");
         }
         const target = readNodes().find(node => node.id === nodeId);
+        const meta = target?.metadata;
+        // Replacing an image keeps the node ID and can keep the old operation ID. Only a
+        // pending placeholder may adopt a task by operation ID before its task ID arrives.
+        const pendingOperation = !meta?.taskId && meta?.status === "loading"
+            && Boolean(task.clientOperationId && meta.taskClientOperationId === task.clientOperationId)
+            && !meta.content && !meta.storageKey && !meta.assetId;
         if (!readBrowserCanvas(canvasId) || task.projectId !== canvasId || !target
-            || (target.metadata?.taskId && target.metadata.taskId !== task.id)
-            || (target.metadata?.taskClientOperationId && task.clientOperationId && target.metadata.taskClientOperationId !== task.clientOperationId)
-            || (target.metadata?.taskOutputIndex ?? 0) !== outputIndex) {
+            || (meta?.taskId !== task.id && !pendingOperation)
+            || (meta?.taskClientOperationId && task.clientOperationId && meta.taskClientOperationId !== task.clientOperationId)
+            || (meta?.taskOutputIndex ?? 0) !== outputIndex) {
             throw Object.assign(new Error("原任务的目标节点已改变，结果保留在生成历史中"), { code: "result_target_unavailable" });
         }
         return target;
@@ -51,16 +56,18 @@ export async function bindBrowserCanvasGenerationResult(input: {
     }
     // The browser owns these stored media keys. It also creates the asset IDs, which the engine would otherwise deliver.
     const materialized = isText ? localTask : await materializeGenerationTaskAssets(localTask, signal);
-    const output = materialized.outputs?.find(item => item.outputIndex === outputIndex);
+    const output = isText ? undefined : materialized.outputs?.find(item => item.outputIndex === outputIndex);
+    if (!isText && !output?.materializedAssetId) throw new CanvasGenerationOutputMissingError(outputIndex);
     const target = assertTarget();
-    if (!generationEffectApplied(target.metadata || {}, effectKey) || target.metadata?.status !== "success") {
+    const isBound = (node: CanvasNodeData | undefined) => canvasGenerationOutputIsBound(node, task.id, effectKey, output);
+    if (!isBound(target)) {
         const base = { ...readBrowserCanvas(canvasId)!, nodes: readNodes() };
         const projected = isText
             ? await applyRecoveredGenerationTaskResultToNodes(base.nodes, task, nodeId)
             : await applyMaterializedGenerationTaskResultToNodes(base.nodes, materialized, output!, effectKey, nodeId);
         if (!projected.updated) throw new CanvasGenerationOutputMissingError(outputIndex);
         const latest = assertTarget();
-        if (!generationEffectApplied(latest.metadata || {}, effectKey) || latest.metadata?.status !== "success") {
+        if (!isBound(latest)) {
             // Resolving a stored image/audio/video URL can yield while another output lands or the user moves a node.
             const currentNodes = readNodes();
             const nodes = currentNodes === base.nodes ? projected.nodes : rebaseCanvasDocumentThreeWay({
@@ -69,8 +76,14 @@ export async function bindBrowserCanvasGenerationResult(input: {
             input.setNodes(nodes);
         }
     }
-    // Replayed binds must also await a previously failed folder write before acknowledging the receipt.
+    const assertBound = () => {
+        if (!isBound(assertTarget()) || !isBound(readBrowserCanvas(canvasId)?.nodes.find(node => node.id === nodeId))) {
+            throw new Error("画布尚未保存原任务的素材，请继续取回");
+        }
+    };
+    // A rebase or concurrent edit can displace the output while saving.
+    assertBound();
     await persistBrowserCanvas(canvasId);
-    assertTarget();
-    if (!isText) await service.confirmMaterializedOutputs(task.id, materialized.outputs || []);
+    assertBound();
+    if (output) await service.confirmMaterializedOutputs(task.id, [output]);
 }
